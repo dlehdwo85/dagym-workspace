@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { -webkit-text-size-adjust: 100%; }
+body { background: #f8fafc; color: #0f172a; }
+input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
+@media (min-width: 640px) { input, select, textarea { font-size: 14px; } }
+.fc { font-size: 13px; }
+.fc .fc-toolbar-title { font-size: 1.05rem; font-weight: 700; }
+.fc .fc-button { padding: 0.25rem 0.6rem; font-size: 0.8rem; background: #fff; color: #334155; border-color: #cbd5e1; }
+.fc .fc-button-primary:not(:disabled).fc-button-active, .fc .fc-button-primary:not(:disabled):active { background: #1f3a5f; border-color: #1f3a5f; color: #fff; }
+.fc .fc-daygrid-event { cursor: pointer; }
+.fc-event.task-due { border-style: dashed !important; }
+@media (max-width: 640px) { .fc .fc-toolbar { flex-direction: column; gap: 0.4rem; } }

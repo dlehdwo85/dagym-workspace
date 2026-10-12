@@ -30,7 +30,17 @@ function floatingToWall(d: Date, zone = TZ): DateTime {
   );
 }
 
-function build(rule: string, dtstart: Date) {
+/**
+ * UNTIL=...Z 는 실제 UTC 시각(iCalendar 표준, Google 과 동일)으로 저장하고,
+ * 계산할 때만 floating 으로 바꿔 쓴다.
+ */
+function build(rule: string, dtstart: Date, zone = TZ) {
+  const m = /UNTIL=(\d{8}T\d{6}Z)/i.exec(rule);
+  if (m) {
+    const real = DateTime.fromFormat(m[1].toUpperCase(), "yyyyMMdd'T'HHmmss'Z'", { zone: 'UTC' });
+    const fl = wallToFloating(real.setZone(zone)).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    rule = rule.replace(m[0], `UNTIL=${fl}`);
+  }
   return rrulestr(`RRULE:${rule}`, { dtstart }) as RRule;
 }
 
@@ -61,10 +71,8 @@ export function occurrences(rule: string, start: Date, from: Date, to: Date, zon
 }
 
 /** "이후 일정" 분할용: 해당 발생 직전까지로 UNTIL 을 넣은 규칙 */
-export function ruleUntilBefore(rule: string, occurrenceStart: Date, zone = TZ): string {
-  const prev = DateTime.fromJSDate(occurrenceStart).setZone(zone).minus({ seconds: 1 });
-  const fl = wallToFloating(prev);
-  const until = fl.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+export function ruleUntilBefore(rule: string, occurrenceStart: Date, _zone = TZ): string {
+  const until = new Date(occurrenceStart.getTime() - 1000).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const parts = rule.split(';').filter((p) => !/^(UNTIL|COUNT)=/i.test(p));
   parts.push(`UNTIL=${until}`);
   return parts.join(';');
@@ -97,4 +105,13 @@ export function describeRule(rule: string | null): string {
   if (p.count) s += ` (${p.count}회)`;
   if (p.until) s += ` (~${p.until.toISOString().slice(0, 10)})`;
   return s;
+}
+
+/** COUNT 가 있는 규칙을 occurrenceStart 부터 나머지 횟수로 바꾼 규칙 (이후 일정 분할용) */
+export function ruleRemainingFrom(rule: string, start: Date, occurrenceStart: Date, zone = TZ): string {
+  const parts = rule.split(';');
+  if (!parts.some((p) => /^COUNT=/i.test(p))) return rule;
+  const all = occurrences(rule, start, start, new Date(start.getTime() + 1000 * 86400 * 365 * 30), zone, 5000);
+  const remaining = all.filter((d) => d >= occurrenceStart).length;
+  return parts.map((p) => (/^COUNT=/i.test(p) ? `COUNT=${Math.max(1, remaining)}` : p)).join(';');
 }

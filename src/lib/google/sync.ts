@@ -391,7 +391,12 @@ export async function stopWatch(sql: Sql, link: Link) {
 export async function syncLink(linkId: string, reason = 'manual') {
   const sql = db();
   const name = `gsync:${linkId}`;
-  const holder = await lock(sql, name);
+  let holder = await lock(sql, name);
+  // 사용자가 누른 동기화는 진행 중인 동기화가 끝날 때까지 잠시 기다린다
+  for (let i = 0; !holder && reason === 'manual' && i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    holder = await lock(sql, name);
+  }
   if (!holder) return { skipped: 'locked' };
   try {
     const [link] = await sql<Link[]>`select * from google_calendar_links where id = ${linkId}`;

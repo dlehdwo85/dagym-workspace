@@ -4,7 +4,7 @@ import { accessibleUnitIds, calendarPerms, type CalendarRow } from './access';
 import { badRequest, conflict, forbidden, notFound } from './errors';
 import { activity } from './log';
 import { notify } from './notifications';
-import { hasOccurrenceFrom, normalizeRule, occurrences, ruleUntilBefore } from './recurrence';
+import { hasOccurrenceFrom, normalizeRule, occurrences, ruleRemainingFrom, ruleUntilBefore } from './recurrence';
 import type { SessionUser } from './types';
 import { zUuid } from './api';
 
@@ -65,6 +65,7 @@ async function eventPerms(u: SessionUser, e: EventRow, sql: Sql) {
 }
 
 export async function loadEvent(u: SessionUser, id: string, sql: Sql = db()) {
+  if (!zUuid.safeParse(id).success) throw notFound('일정을 찾을 수 없습니다');
   const [e] = await sql<EventRow[]>`select * from events where id = ${id} and deleted_at is null`;
   if (!e) throw notFound('일정을 찾을 수 없습니다');
   const perms = await eventPerms(u, e, sql);
@@ -273,7 +274,7 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
       const occ = new Date(scope.occurrenceStart);
       const dur = master.end_at.getTime() - master.start_at.getTime();
       const times = i.start && i.end ? validateTimes({ start: i.start, end: i.end }) : { s: occ, e: new Date(occ.getTime() + dur) };
-      const newRule = i.rrule !== undefined ? normalizeRule(i.rrule) : (master.rrule!.split(';').filter((p) => !/^COUNT=/i.test(p)).join(';'));
+      const newRule = i.rrule !== undefined ? normalizeRule(i.rrule) : ruleRemainingFrom(master.rrule!, master.start_at, occ);
       const cutRule = ruleUntilBefore(master.rrule!, occ);
       await tx`update events set rrule = ${cutRule}, version = version + 1, updated_at = now() where id = ${master.id}`;
       const [n] = await tx<{ id: string }[]>`

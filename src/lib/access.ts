@@ -65,7 +65,11 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
   };
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isUuid = (s: string) => UUID_RE.test(s);
+
 export async function loadTaskForUser(u: SessionUser, taskId: string, sql: Sql = db()) {
+  if (!isUuid(taskId)) throw notFound('업무를 찾을 수 없습니다');
   const rows = await sql<TaskAccessRow[]>`
     select id, org_unit_id, assignee_id, created_by, project_id from tasks where id = ${taskId} and deleted_at is null`;
   const t = rows[0];
