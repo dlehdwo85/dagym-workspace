@@ -28,6 +28,8 @@ export const taskInput = z.object({
   recurrenceRule: z.string().max(300).nullable().optional(),
   checklist: z.array(z.string().trim().min(1).max(300)).max(100).optional(),
   dependsOn: z.array(zUuid).max(30).optional(),
+  sectionId: zUuid.nullable().optional(),
+  sortOrder: z.number().optional(),
   version: z.number().int().optional(),
   reviewNote: z.string().max(2000).optional(),
 });
@@ -37,7 +39,7 @@ const TASK_COLS = (sql: Sql) => sql`
   t.id, t.title, t.description, t.status, t.priority, t.project_id, t.parent_id, t.org_unit_id, t.brand_id,
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
-  t.version, t.created_by, t.created_at, t.updated_at, t.sort_order,
+  t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at,
   au.name as assignee_name, p.name as project_name, p.color as project_color, o.name as org_unit_name,
   (select count(*)::int from tasks s where s.parent_id = t.id and s.deleted_at is null) as subtask_count,
   (select count(*)::int from tasks s where s.parent_id = t.id and s.deleted_at is null and s.status = 'done') as subtask_done,
@@ -193,16 +195,18 @@ export async function createTask(u: SessionUser, i: TaskInput) {
   await validateRefs(sql, u, i, orgUnitId);
   const rule = normalizeRule(i.recurrenceRule);
   if (rule && !i.dueDate) throw badRequest('반복 업무는 마감일이 필요합니다');
+  const sectionId = i.sectionId ? await checkSection(sql, i.sectionId, i.projectId ?? null) : null;
   const status = i.status ?? 'todo';
   if (status === 'done') throw badRequest('새 업무를 완료 상태로 만들 수 없습니다');
 
   return sql.begin(async (tx) => {
     const [t] = await tx<{ id: string }[]>`
       insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
-        start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order)
+        start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
-        ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()))
+        ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
+        ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null})
       returning id`;
     for (const c of new Set(i.collaboratorIds ?? [])) {
       await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
@@ -262,7 +266,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const fields: [keyof TaskInput, string][] = [
       ['title', 'title'], ['description', 'description'], ['projectId', 'project_id'], ['brandId', 'brand_id'],
       ['assigneeId', 'assignee_id'], ['priority', 'priority'], ['startDate', 'start_date'], ['dueDate', 'due_date'],
-      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'],
+      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'],
     ];
     for (const [k, col] of fields) {
       if (i[k] === undefined) continue;
@@ -287,6 +291,12 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       }
     }
     if (set.org_unit_id) await assertUnitAccess(u, set.org_unit_id as string, tx);
+    // 섹션은 같은 프로젝트의 것만. 프로젝트를 옮기면 섹션은 비운다
+    if ('project_id' in set && !('section_id' in set) && cur.section_id) { set.section_id = null; }
+    if (set.section_id) await checkSection(tx, set.section_id as string, ('project_id' in set ? set.project_id : cur.project_id) as string | null);
+    delete changes.sortOrder; // 순서 변경은 이력에 남기지 않는다
+    // 담당자가 바뀌면 새 담당자의 '확인' 전 상태로 (본인에게 배정하면 확인 처리)
+    if ('assignee_id' in set) set.assignee_ack_at = set.assignee_id === u.id ? new Date() : null;
     if ('approval_required' in set && !perms.approve) throw forbidden('검토 필요 여부는 관리자만 바꿀 수 있습니다');
     const start = (set.start_date ?? cur.start_date) as string | null;
     const due = (set.due_date ?? cur.due_date) as string | null;
@@ -493,4 +503,19 @@ export async function mentionableUsers(u: SessionUser, taskId: string) {
     if (p.view) out.push({ id: cand.id, name: cand.name, title: cand.title });
   }
   return out;
+}
+
+async function checkSection(sql: Sql, sectionId: string, projectId: string | null) {
+  const [s] = await sql<{ project_id: string }[]>`select project_id from project_sections where id = ${sectionId}`;
+  if (!s || s.project_id !== projectId) throw badRequest('이 프로젝트의 섹션이 아닙니다');
+  return sectionId;
+}
+
+/** B-2 담당자 확인: 새로 배정됨 묶음에서 빼낸다 (담당자 본인만) */
+export async function ackTask(u: SessionUser, id: string) {
+  const sql = db();
+  const { task } = await loadTaskForUser(u, id, sql);
+  if (task.assignee_id !== u.id) throw forbidden('담당자만 확인할 수 있습니다');
+  await sql`update tasks set assignee_ack_at = coalesce(assignee_ack_at, now()) where id = ${id}`;
+  return { ok: true };
 }

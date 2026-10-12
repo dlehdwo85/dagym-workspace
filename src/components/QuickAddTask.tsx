@@ -6,7 +6,7 @@ import { Button, Field, Modal, inputCls, toast, todayStr } from './ui';
 import { UnitSelect, UserSelect, BrandSelect, RecurSelect } from './pickers';
 import { useSession } from './session';
 
-export interface QuickDefaults { projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string }
+export interface QuickDefaults { projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string }
 
 export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boolean; onClose: () => void; defaults?: QuickDefaults; onCreated?: (id: string) => void }) {
   const { user, dir } = useSession();
@@ -42,7 +42,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           queueOffline: `업무 등록: ${f.title}`,
           body: {
             title: f.title, description: f.description, priority: f.priority, assigneeId: f.assigneeId, orgUnitId: f.orgUnitId,
-            projectId: f.projectId || null, parentId: defaults?.parentId, dueDate: f.dueDate || null, dueTime: f.dueTime || null,
+            projectId: f.projectId || null, parentId: defaults?.parentId, sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null, dueDate: f.dueDate || null, dueTime: f.dueTime || null,
             startDate: f.startDate || null, approvalRequired: f.approvalRequired, recurrenceRule: f.recurrenceRule, brandId: f.brandId,
             tags: f.tags ? f.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : [],
           },

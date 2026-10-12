@@ -8,6 +8,7 @@ import { Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
 import { initNative } from './native';
 import { QuickAddTask } from './QuickAddTask';
+import { CommandPalette } from './CommandPalette';
 
 const NAV = [
   { href: '/', label: '홈', icon: '⌂' },
@@ -26,6 +27,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const [online, setOnline] = useState(true);
   const [more, setMore] = useState(false);
   const [quick, setQuick] = useState(false);
+  const [palette, setPalette] = useState(false);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(true); } };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
   const pending = useOutboxCount();
   const admin = isAdminRole(session.user.role);
 
@@ -77,6 +84,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
             <div className="text-sm font-bold text-brand-700">업무·일정 관리</div>
             <div className="text-xs text-slate-500">다짐 · 하이링크 · BODY LAB</div>
           </div>
+          <button onClick={() => setPalette(true)} className="mx-2 mt-2 flex items-center justify-between rounded-md border px-3 py-1.5 text-left text-sm text-slate-500 hover:bg-slate-50" data-testid="open-palette">
+            <span>검색·명령</span><kbd className="rounded border bg-slate-50 px-1 text-[10px]">Ctrl K</kbd>
+          </button>
           <nav className="flex-1 space-y-0.5 overflow-y-auto p-2" aria-label="주 메뉴">
             {NAV.map((n) => (
               <Link key={n.href} href={n.href} className={cx('flex items-center justify-between rounded-md px-3 py-2 text-sm', active(n.href) ? 'bg-brand-50 font-semibold text-brand-700' : 'text-slate-700 hover:bg-slate-100')}>
@@ -110,7 +120,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
           )}
           <header className="sticky top-0 z-30 flex items-center justify-between border-b bg-white/95 px-4 py-2.5 backdrop-blur sm:hidden">
             <span className="text-sm font-bold text-brand-700">업무·일정</span>
-            <button onClick={() => setMore(true)} className="text-sm text-slate-600" aria-label="메뉴 더보기">{session.user.name} ▾</button>
+            <span className="flex items-center gap-3">
+              <button onClick={() => setPalette(true)} className="text-lg text-slate-600" aria-label="검색">🔍</button>
+              <button onClick={() => setMore(true)} className="text-sm text-slate-600" aria-label="메뉴 더보기">{session.user.name} ▾</button>
+            </span>
           </header>
           <main className="mx-auto max-w-7xl p-3 sm:p-6">{children}</main>
         </div>
@@ -140,6 +153,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           </div>
         )}
         <QuickAddTask open={quick} onClose={() => setQuick(false)} />
+        <CommandPalette open={palette} onClose={() => setPalette(false)} onQuickAdd={() => setQuick(true)} />
         <Toaster />
       </div>
     </SessionCtx.Provider>

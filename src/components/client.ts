@@ -96,15 +96,21 @@ export function useApi<T = any>(url: string | null, deps: unknown[] = []) {
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(!!url);
   const seq = useRef(0);
+  const hasData = useRef(false);
+  const loadedUrl = useRef<string | null>(null);
   const load = useCallback(async () => {
     if (!url) return;
     const my = ++seq.current;
     setLoading(true);
     try {
       const d = await api<T>(url);
-      if (my === seq.current) { setData(d); setError(null); }
+      if (my === seq.current) { setData(d); setError(null); hasData.current = true; loadedUrl.current = url; }
     } catch (e) {
-      if (my === seq.current) setError(e as ApiError);
+      // 같은 화면을 다시 불러오다 실패(오프라인·일시 장애)하면 이미 보이는 내용과 입력 중인 내용을 지우지 않는다.
+      // 권한이 사라진 경우(403/404)와 처음 불러오기 실패만 오류 화면으로 바꾼다.
+      const err = e as ApiError;
+      const keep = hasData.current && loadedUrl.current === url && !(err.status === 403 || err.status === 404);
+      if (my === seq.current && !keep) setError(err);
     } finally {
       if (my === seq.current) setLoading(false);
     }

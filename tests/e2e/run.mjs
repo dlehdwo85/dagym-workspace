@@ -8,11 +8,16 @@ import { startFakeGoogle } from '../fake-google.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
+mkdirSync('test-results', { recursive: true });
 const results = [];
 async function step(name, fn) {
   const t0 = Date.now();
   try { await fn(); results.push({ name, ok: true, ms: Date.now() - t0 }); console.log('✔', name); }
-  catch (e) { results.push({ name, ok: false, error: e.message.split('\n')[0] }); console.log('✖', name, '\n   ', e.message.split('\n').slice(0, 3).join('\n    ')); }
+  catch (e) {
+    results.push({ name, ok: false, error: e.message.split('\n')[0] }); console.log('✖', name, '\n   ', e.message.split('\n').slice(0, 3).join('\n    '));
+    // 실패 순간 화면을 남긴다 (원인 분석용, 저장소에는 올리지 않음)
+    for (const [k, pg] of Object.entries(globalThis.__pages ?? {})) await pg.screenshot({ path: `test-results/fail-${results.length}-${k}.png`, fullPage: true }).catch(() => {});
+  }
 }
 
 await resetDb();
@@ -36,6 +41,7 @@ async function login(context, email, password) {
 
 const desk = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
 const owner = await login(desk, 'ceo@dagym.test', 'owner-pass-1234');
+globalThis.__pages = { owner };
 let taskId;
 
 await step('외부 계정 없이 동작: Google 동기화 기능 꺼짐 상태에서 메뉴 숨김·API 404', async () => {
@@ -102,6 +108,7 @@ await step('② 대표가 + 버튼으로 업무 등록·담당자 배정', async
 
 const mob = await browser.newContext({ ...devices['iPhone 13'], locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
 const staff = await login(mob, ctx.staffA.email, ctx.staffA.password);
+globalThis.__pages.staff = staff;
 
 await step('② 직원(모바일) 알림 수신 → 알림 눌러 업무로 이동', async () => {
   await staff.goto(BASE + '/notifications');
@@ -200,6 +207,73 @@ await step('③ 업무 캘린더에서 끌어서 마감일 이동 → 원본 반
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t3}`)).task.due_date, target);
 });
 
+// Asana 이상 P0
+await step('B-1 목록에서 업무를 오른쪽 패널로 열기 → URL /tasks/:id → 수정 → Esc 로 닫으면 목록·필터 유지', async () => {
+  await owner.goto(BASE + '/tasks?mode=list');
+  await owner.getByRole('button', { name: '이번 주' }).click().catch(() => {});
+  await owner.getByRole('button', { name: '전체', exact: true }).click();
+  await owner.getByLabel('업무 검색').fill('보기 전환');
+  const link = owner.locator(`[data-task-id="${t3}"] a[data-open-task]`).first();
+  await link.waitFor();
+  await link.click();
+  await owner.getByTestId('task-panel').waitFor();
+  assert.ok(owner.url().endsWith(`/tasks/${t3}`), 'URL 이 업무 주소로 바뀜: ' + owner.url());
+  await owner.getByTestId('task-panel').getByLabel('우선순위').selectOption('high');
+  await owner.waitForTimeout(600);
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t3}`)).task.priority, 'high');
+  await owner.screenshot({ path: `${SHOTS}/30-task-panel.png` });
+  await owner.keyboard.press('Escape');
+  await owner.getByTestId('task-panel').waitFor({ state: 'detached' });
+  assert.ok(owner.url().includes('/tasks?'), '목록 주소로 돌아옴: ' + owner.url());
+  assert.equal(await owner.getByLabel('업무 검색').inputValue(), '보기 전환', '검색 필터 유지');
+  // 새로고침해도 같은 업무가 열림 (공유 가능)
+  await owner.goto(`${BASE}/tasks/${t3}`);
+  await owner.getByTestId('task-page').waitFor();
+});
+
+await step('B-3 프로젝트 섹션: 추가 → 업무를 끌어 다른 섹션으로 → 보드 열=섹션', async () => {
+  const pid = (await ctx.owner.ok('POST', '/api/projects', { name: 'GX 리뉴얼', orgUnitId: ctx.siteA })).id;
+  const tk = (await ctx.owner.ok('POST', '/api/tasks', { title: '강사 섭외', projectId: pid })).id;
+  await owner.goto(`${BASE}/projects/${pid}?mode=list`);
+  for (const n of ['준비', '진행']) {
+    await owner.getByLabel('새 섹션 이름').fill(n);
+    await owner.getByRole('button', { name: '+ 섹션 추가' }).click();
+    await owner.locator('[data-testid="sectioned-list"] h2', { hasText: n }).waitFor();
+  }
+  const handle = owner.getByLabel('강사 섭외 끌어서 이동');
+  const target = owner.locator('section[data-section]', { hasText: '진행' }).first();
+  const a = await handle.boundingBox(); const b = await target.boundingBox();
+  await owner.mouse.move(a.x + 4, a.y + 4); await owner.mouse.down();
+  await owner.mouse.move(a.x + 20, a.y + 20, { steps: 5 });
+  await owner.mouse.move(b.x + 60, b.y + 30, { steps: 15 }); await owner.mouse.up();
+  await owner.waitForTimeout(800);
+  const secs = (await ctx.owner.ok('GET', `/api/projects/${pid}/sections`)).sections;
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${tk}`)).task.section_id, secs.find((x) => x.name === '진행').id, '끌어 옮긴 섹션 저장');
+  await owner.screenshot({ path: `${SHOTS}/31-project-sections.png`, fullPage: true });
+  await owner.getByRole('tab', { name: '보드' }).click();
+  await owner.getByLabel('보드 열 기준').selectOption('section');
+  await owner.getByTestId('section-board').locator(`[data-column="section:${secs.find((x) => x.name === '진행').id}"]`).getByText('강사 섭외').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/32-section-board.png` });
+});
+
+await step('B-4 Ctrl+K 검색 → Enter 로 업무 열기, 권한 밖 결과 없음', async () => {
+  await owner.goto(BASE + '/');
+  await owner.getByRole('heading', { name: '전체 현황' }).waitFor(); // 화면 준비 후 단축키
+  await owner.keyboard.press('Control+K');
+  await owner.getByTestId('palette-input').fill('소방 점검');
+  await owner.getByTestId('palette-results').getByText('강남점 소방 점검 대응').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/33-command-palette.png` });
+  await owner.keyboard.press('Enter');
+  await owner.waitForURL(`${BASE}/tasks/${taskId}`);
+  const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR' });
+  const p = await login(c, ctx.staffB.email, ctx.staffB.password);
+  await p.getByText('님의 업무 현황').waitFor();
+  await p.keyboard.press('Control+K');
+  await p.getByTestId('palette-input').fill('소방 점검');
+  await p.getByText('검색 결과가 없습니다').waitFor();
+  await c.close();
+});
+
 // ④ 캘린더 반복 일정 (화면)
 await step('④ 캘린더 화면에서 매주 반복 일정 등록 → 주 보기에서 끌어 이동 → "이번 일정만"', async () => {
   await owner.goto(BASE + '/calendar');
@@ -286,13 +360,16 @@ await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 �
   assert.equal(await owner.getByTestId('detail-due').inputValue(), nd);
 });
 
-await step('내 업무 자동 묶음 (최근 배정·기한 지남·오늘·이번 주·나중)', async () => {
+await step('B-2 내 업무 자동 묶음 (새로 배정됨→확인·기한 지남·오늘·이번 주·나중)', async () => {
   await ctx.owner.ok('POST', '/api/tasks', { title: '방금 배정된 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 20) });
   await ctx.staffA.client.ok('POST', '/api/tasks', { title: '내가 만든 지난 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, -2) });
   await staff.goto(BASE + '/tasks?view=my&mode=list');
   const groups = staff.getByTestId('my-groups');
   await groups.locator('[data-group="new"]').getByText('방금 배정된 업무').waitFor();
   await groups.locator('[data-group="over"]').getByText('내가 만든 지난 업무').waitFor();
+  await groups.locator('[data-group="new"]').getByRole('button', { name: '방금 배정된 업무 확인' }).click();
+  await staff.waitForTimeout(800);
+  assert.equal(await groups.locator('[data-group="new"]').getByText('방금 배정된 업무').count(), 0, '확인하면 새로 배정됨에서 빠짐');
   await staff.screenshot({ path: `${SHOTS}/29-mobile-my-groups.png`, fullPage: true });
 });
 

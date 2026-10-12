@@ -320,6 +320,59 @@ describe('로컬 검수 요청 반영 (R-3·R-6·R-7)', () => {
   });
 });
 
+describe('Asana 이상 P0 (B-2·B-3·B-4)', () => {
+  let proj, proj2, secA, secB;
+  before(async () => {
+    proj = (await ctx.managerA.client.ok('POST', '/api/projects', { name: '강남점 리뉴얼', orgUnitId: ctx.siteA })).id;
+    proj2 = (await ctx.owner.ok('POST', '/api/projects', { name: '판교 개강', orgUnitId: ctx.siteB })).id;
+  });
+  test('B-3 섹션 생성·순서·이름·업무 이동, 권한 검사', async () => {
+    secA = (await ctx.managerA.client.ok('POST', `/api/projects/${proj}/sections`, { name: '준비' })).id;
+    secB = (await ctx.managerA.client.ok('POST', `/api/projects/${proj}/sections`, { name: '시공' })).id;
+    const list = (await ctx.staffA.client.ok('GET', `/api/projects/${proj}/sections`)).sections;
+    assert.deepEqual(list.map((x) => x.name), ['준비', '시공'], '직원은 조회 가능, 추가 순서대로');
+    assert.equal((await ctx.staffA.client.post(`/api/projects/${proj}/sections`, { name: 'x' })).status, 403, '직원은 섹션 편집 불가');
+    assert.equal((await ctx.staffB.client.get(`/api/projects/${proj}/sections`)).status, 404, '다른 현장은 프로젝트 자체가 보이지 않음');
+    await ctx.managerA.client.ok('PATCH', `/api/sections/${secB}`, { sort: 0, name: '시공(1차)' });
+    const l2 = (await ctx.managerA.client.ok('GET', `/api/projects/${proj}/sections`)).sections;
+    assert.deepEqual(l2.map((x) => x.name), ['시공(1차)', '준비']);
+    const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '자재 발주', projectId: proj, sectionId: secA })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { sectionId: secB });
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.section_id, secB);
+    const sec2 = (await ctx.owner.ok('POST', `/api/projects/${proj2}/sections`, { name: '판교 섹션' })).id;
+    assert.equal((await ctx.staffA.client.patch(`/api/tasks/${t}`, { sectionId: sec2 })).status, 400, '다른 프로젝트 섹션 지정 불가');
+    await ctx.managerA.client.ok('DELETE', `/api/sections/${secB}`);
+    const after = (await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task;
+    assert.equal(after.section_id, null, '섹션 삭제 시 업무는 남고 섹션 없음으로');
+  });
+  test('B-2 새로 배정된 업무는 담당자 확인 전까지 표시, 재배정 시 다시 확인 필요', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '확인 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id })).id;
+    const mine = async () => (await ctx.staffA.client.ok('GET', '/api/tasks?view=my')).tasks.find((x) => x.id === t);
+    assert.equal((await mine()).assignee_ack_at, null);
+    assert.equal((await ctx.managerA.client.post(`/api/tasks/${t}/ack`, {})).status, 403, '담당자만 확인');
+    await ctx.staffA.client.ok('POST', `/api/tasks/${t}/ack`, {});
+    assert.ok((await mine()).assignee_ack_at);
+    await ctx.owner.ok('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.managerA.id });
+    await ctx.owner.ok('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.staffA.id });
+    assert.equal((await mine()).assignee_ack_at, null, '다시 배정되면 확인 전');
+    const self = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '내가 나에게', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id })).id;
+    assert.ok((await ctx.staffA.client.ok('GET', `/api/tasks/${self}`)).task.assignee_ack_at, '본인 배정은 자동 확인');
+  });
+  test('B-4 빠른 검색은 권한 범위 안에서만', async () => {
+    await ctx.owner.ok('POST', '/api/tasks', { title: '검색키워드 강남', orgUnitId: ctx.siteA });
+    await ctx.owner.ok('POST', '/api/tasks', { title: '검색키워드 판교', orgUnitId: ctx.siteB });
+    const own = await ctx.owner.ok('GET', '/api/search?q=' + encodeURIComponent('검색키워드'));
+    assert.equal(own.tasks.length, 2);
+    const a = await ctx.staffA.client.ok('GET', '/api/search?q=' + encodeURIComponent('검색키워드'));
+    assert.deepEqual(a.tasks.map((x) => x.title), ['검색키워드 강남']);
+    const pr = await ctx.staffA.client.ok('GET', '/api/search?q=' + encodeURIComponent('판교 개강'));
+    assert.equal(pr.projects.length, 0, '다른 현장 프로젝트 제외');
+    const people = await ctx.staffA.client.ok('GET', '/api/search?q=' + encodeURIComponent('박직원'));
+    assert.equal(people.people.length, 0, '다른 현장 직원 제외');
+    assert.equal((await new Client().get('/api/search?q=a')).status, 401);
+  });
+});
+
 describe('네트워크 재시도 중복 방지 (Idempotency-Key)', () => {
   test('같은 키로 두 번 보내도 업무는 하나', async () => {
     const h = { 'idempotency-key': 'retry-key-1' };
