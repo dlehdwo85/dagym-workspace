@@ -6,4 +6,4 @@
 | 서비스 | 로그인 | 검수 상태 |
 |---|---|---|
 | Google Calendar | ✅ (이미 로그인) | ✅ 읽기 전용 검수 완료 — 결과 [../handoff/LOCAL_REVIEW.md](../handoff/LOCAL_REVIEW.md) 4절 |
-| Asana | ✅ (2026-10-13 대표 로그인) | 🟡 부분 — 샘플 작업 공간, 체험 종료 모달이 화면을 막음. 결과 [../handoff/LOCAL_REVIEW.md](../handoff/LOCAL_REVIEW.md) 5절 |
+| Asana | ✅ 새 시험 계정(Advanced 체험) | ✅ 완료 — 참고만, 연동 안 함. [../handoff/BEYOND_ASANA_PLAN.md](../handoff/BEYOND_ASANA_PLAN.md) |

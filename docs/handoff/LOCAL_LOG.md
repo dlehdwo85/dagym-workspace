@@ -7,6 +7,7 @@
 - (예) 2026-10-14 · DESKTOP-HQKVDIC · local/ops-setup · L-1 Vercel Import 완료 · 운영 주소 https://… · L-2 진행 예정
 - 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · 로컬 도구 점검, Windows 에서 운영 빌드 실행·화면 검수, Google Calendar 로그인 화면 검수(읽기 전용) · 결과 [LOCAL_REVIEW.md](LOCAL_REVIEW.md), 캡처 `local-screens/` · 다음: Asana 로그인 후 L-11 마무리, 이어서 L-1(Vercel) 시작은 대표 결정·결제 필요
 - 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · Asana 로그인(대표) 후 검수 · 샘플 작업 공간 + 체험 종료 모달로 부분 검수만 가능(LOCAL_REVIEW 5절) · 다음: 실제 업무용 Asana 계정·작업 공간 확인 필요
+- 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · 새 Asana 시험 계정으로 L-11 완료, 대표 지시(Asana 참고만·더 높은 수준) 반영해 개발 과제 작성 · [BEYOND_ASANA_PLAN.md](BEYOND_ASANA_PLAN.md) · 다음: 클라우드 구현분 로컬 재검수
 
 ## 클라우드 요청 (로컬이 적고 클라우드가 처리)
 근거와 재현은 [LOCAL_REVIEW.md](LOCAL_REVIEW.md) 3·4절.
@@ -17,6 +18,7 @@
 - [R-5 낮음] 체크리스트 "추가" 버튼이 두 줄로 깨짐 → `whitespace-nowrap`
 - [R-6 제안] 일정별 알림(기본값은 사용자 설정, 일정마다 덮어쓰기·여러 개) — Google Calendar 는 일정마다 여러 알림
 - [R-7 제안] 반복 일정 종료 조건(종료일·횟수)과 "매월 N번째 ○요일" — API 는 RRULE 을 받으므로 화면만 추가
+- [R-9 대표 지시, 2026-10-13] **Asana 는 참고만, 연동하지 않음. Asana 보다 높은 수준으로 개발** → 과제 목록 [BEYOND_ASANA_PLAN.md](BEYOND_ASANA_PLAN.md) (P0: 업무 상세 패널·내 업무 자동 묶음·섹션·Ctrl+K·R-1~R-7 / P1: 사진 증빙 완료·현장 QR 신고·다단계 결재·자동화 규칙·사용자 지정 필드(올바른 집계)·업무 유형 / P2: 현장 비교 대시보드·주간 보고 자동 생성·업무량)
 - [R-8 참고] 자동 시험이 Linux 전용 경로(`/tmp/claude-0`, `node_modules/.bin/next`, openssl)를 써서 Windows 에서 못 돎. 필수 아님 — 원하면 `os.tmpdir()`·`process.execPath`+`next/dist/bin/next` 로 바꾸면 로컬에서도 회귀 시험 가능
 
 ## 클라우드 회신 (클라우드는 이 파일 대신 NEXT_ACTION.md 의 "로컬 요청 처리" 절에 답합니다)
