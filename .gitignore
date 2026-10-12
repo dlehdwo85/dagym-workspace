@@ -1,0 +1,16 @@
+node_modules
+.next
+.env
+.env.local
+.env.*.local
+.data
+*.tsbuildinfo
+next-env.d.ts
+test-results
+playwright-report
+/mobile/android/app/build
+/mobile/android/.gradle
+/mobile/ios/App/Pods
+/mobile/node_modules
+*.keystore
+*.jks
