@@ -2,7 +2,8 @@
 
 최종 실행: 2026-10-12 (UTC) · 클라우드 개발 환경 (Node 22, PostgreSQL 16, Chromium 141)
 요약 (2026-10-13 재실행): **API 통합 시험 50/50 통과 · 실제 브라우저 E2E 19/19 통과 · 백업→복원 일치 · Android APK 빌드 성공**
-GitHub Actions: 1차 CI 는 E2E 2건 실패(체크박스 접근성 이름 중복 → 화면 수정). 2차 CI run 38283356589 **API 49/49 · E2E 18/18 통과**, mobile run 38283356596 **Android 빌드 · iOS 시뮬레이터 BUILD SUCCEEDED**.
+GitHub Actions 최신(커밋 1bd09fb): ci run 38284889665 **API 50/50 · E2E 19/19**, mobile run 38284889671 **Android·iOS 빌드 성공**.
+이전 기록: 1차 CI 는 E2E 2건 실패(체크박스 접근성 이름 중복 → 화면 수정). 2차 CI run 38283356589 **API 49/49 · E2E 18/18 통과**, mobile run 38283356596 **Android 빌드 · iOS 시뮬레이터 BUILD SUCCEEDED**.
 
 ## 재현 방법
 ```bash

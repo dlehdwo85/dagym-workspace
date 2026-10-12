@@ -83,6 +83,6 @@ Claude Code 데스크톱 앱에서는 "폴더 열기"로 `C:\Users\User\Document
 
 ## 7. 현재 완료 / 미완료 요약
 - **완료**: 핵심 웹 기능 전체(권한·조직·업무·검토/승인·반복·4가지 보기·캘린더·반복 일정·충돌·알림·대시보드·템플릿·첨부·감사 기록), 정기 실행·백업·복원 코드, Android APK·iOS 시뮬레이터 빌드, 문서
-- **시험**: API 50/50, 브라우저 E2E 19/19 (2026-10-13, 클라우드). GitHub Actions CI·mobile 모두 성공 이력 있음 (run 38283356589, 38283356596)
+- **시험**: API 50/50, 브라우저 E2E 19/19 — 클라우드와 GitHub Actions 모두 통과 (ci run 38284889665, mobile run 38284889671, 커밋 1bd09fb)
 - **미완료**: 운영 배포(L-1~L-4), 앱 푸시 실기기(L-5·L-7), 스토어 배포(L-8~L-10), 로그인 후 참고 검수(L-11)
 - **필요한 계정·도구**: Vercel(Pro), Neon(무료~), Cloudflare R2, GitHub 저장소 관리자, Firebase, Apple Developer(조직), Google Play Console(조직), D-U-N-S, Android 휴대폰(+adb), JDK(keytool), Git, Node 22

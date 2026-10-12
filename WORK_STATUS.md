@@ -45,8 +45,8 @@
 | iOS | ✅ 시뮬레이터 빌드(서명 없음) | ⛔ L-5·L-8·L-9 | ⛔ | ⛔ | ⛔ |
 
 ## CI
-- `ci` ✅ run 38283356589 (API 49·E2E 18 시절), 이번 커밋으로 다시 실행됩니다 → 결과는 다음 갱신 때 기록
-- `mobile` ✅ run 38283356596 (Android·iOS)
+- `ci` ✅ run 38284889665 (커밋 1bd09fb): API 50/50 · E2E 19/19
+- `mobile` ✅ run 38284889671 (커밋 1bd09fb): Android BUILD SUCCESSFUL · iOS 시뮬레이터 BUILD SUCCEEDED
 
 ## 주의
 - 가짜 서버로 통과한 시험을 실제 연동·실기기 검증 완료로 보고하지 않습니다.
