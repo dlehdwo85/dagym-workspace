@@ -91,6 +91,7 @@ export async function runTick(trigger: string) {
   await step('due', dueNotifications);
   await step('eventReminders', () => eventReminders());
   await step('automations', async () => (await import('./automation')).dueSoonAutomations());
+  await step('weeklyReport', async () => (await import('./insights')).weeklyReportJob());
   await step('push', () => dispatchPending(200));
   if (googleConfigured()) await step('google', () => syncAllDue());
   await step('cleanup', cleanup);

@@ -536,6 +536,67 @@ describe('UI/UX 검수 버그 (U-0a·U-0b) · 개인정보 파기', () => {
   });
 });
 
+describe('Asana 이상 P2 (B-14~B-17)', () => {
+  test('B-14 현장 비교: 기한 준수율·평균 처리·지연·점검 수행률, 직원 403, 다른 현장 관리자 범위', async () => {
+    const mk = async (title, extra) => (await ctx.managerA.client.ok('POST', '/api/tasks', { title, orgUnitId: ctx.siteA, approvalRequired: false, ...extra })).id;
+    const a = await mk('준수 업무', { dueDate: addDays(today, 2) });
+    const b = await mk('늦은 업무', { dueDate: addDays(today, -3) });
+    const c = await mk('점검 업무', { taskType: 'inspection', photoRequired: 0, dueDate: today });
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${a}`, { status: 'done' });
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${b}`, { status: 'done' }); // 마감 3일 지나 완료
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${c}`, { status: 'done' });
+    await mk('아직 지연', { dueDate: addDays(today, -1) });
+    const r = await ctx.managerA.client.ok('GET', '/api/insights/sites?weeks=4');
+    const s = r.sites.find((x) => x.id === ctx.siteA);
+    assert.ok(s.onTimeRate > 0 && s.onTimeRate < 100, `준수율 ${s.onTimeRate}`);
+    assert.ok(s.overdue >= 1); assert.ok(s.done >= 3); assert.equal(typeof s.avgDays, 'number');
+    assert.ok(s.inspection.total >= 1 && s.inspection.done >= 1);
+    assert.equal(s.trend.length, 4);
+    assert.ok(!r.sites.some((x) => x.id === ctx.siteB), '권한 밖 현장 제외');
+    assert.equal((await ctx.staffA.client.get('/api/insights/sites')).status, 403);
+    assert.ok((await ctx.owner.ok('GET', '/api/insights/sites')).sites.some((x) => x.id === ctx.siteB));
+  });
+  test('B-16 업무량: 마감 업무·일정 시간·휴가 반영, 직원은 자기 것만', async () => {
+    const base = await ctx.staffA.client.ok('GET', '/api/insights/workload');
+    const mon = base.weekStart, h0 = base.people[0].eventHours, a0 = base.people[0].awayDays;
+    const fri = addDays(mon, 4);
+    for (let i = 0; i < 3; i++) await ctx.managerA.client.ok('POST', '/api/tasks', { title: `업무량 ${i}`, orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: fri });
+    const cal = (await ctx.staffA.client.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '외부 미팅', start: `${addDays(mon, 1)}T10:00:00+09:00`, end: `${addDays(mon, 1)}T13:00:00+09:00` });
+    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '연차', kind: 'vacation', allDay: true, start: `${addDays(mon, 2)}T00:00:00+09:00`, end: `${addDays(mon, 3)}T00:00:00+09:00` });
+    const mine = await ctx.staffA.client.ok('GET', '/api/insights/workload');
+    assert.equal(mine.people.length, 1, '직원은 자기 것만');
+    const me = mine.people[0];
+    assert.ok(me.dueThisWeek >= 3); assert.equal(me.eventHours, h0 + 3, '3시간 미팅 합산'); assert.equal(me.awayDays, a0 + 1, '연차 1일');
+    const team = await ctx.managerA.client.ok('GET', '/api/insights/workload');
+    const p = team.people.find((x) => x.id === ctx.staffA.id);
+    assert.equal(p.eventHours, me.eventHours, '관리자도 같은 시간 합계 (제목 없이)');
+    assert.ok(!JSON.stringify(team).includes('외부 미팅'), '다른 사람 일정 제목은 노출하지 않음');
+    assert.ok(!team.people.some((x) => x.id === ctx.staffB.id), '다른 현장 사람 제외');
+  });
+  test('B-15 주간 보고: 정기 실행이 주 1회만 만들고 관리자에게 알림, 관리자만 열람', async () => {
+    await tick(); await tick();
+    const { reports } = await ctx.owner.ok('GET', '/api/reports');
+    assert.equal(reports.length, 1, '여러 번 실행해도 1건');
+    const rep = (await ctx.owner.ok('GET', `/api/reports/${reports[0].id}`)).report;
+    assert.ok(rep.data.weekStart && Array.isArray(rep.data.sites) && Array.isArray(rep.data.issues));
+    assert.equal((await notifs(ctx.owner)).filter((n) => n.title.startsWith('주간 보고')).length, 1);
+    assert.equal((await ctx.managerA.client.get('/api/reports')).status, 403);
+    assert.equal((await ctx.managerA.client.get(`/api/reports/${reports[0].id}`)).status, 403);
+    const again = await ctx.owner.ok('POST', '/api/reports', {});
+    assert.equal(again.existed, true);
+  });
+  test('B-17 공휴일: 기본 목록, 관리자만 추가·삭제', async () => {
+    const h = (await ctx.staffA.client.ok('GET', '/api/holidays?from=2026-01-01&to=2027-12-31')).holidays;
+    assert.ok(h.some((x) => x.date === '2026-10-09' && x.name === '한글날'));
+    assert.equal((await ctx.staffA.client.req('PUT', '/api/holidays/2026-11-20', { name: '임시' })).status, 403);
+    await ctx.owner.ok('PUT', '/api/holidays/2026-11-20', { name: '임시공휴일' });
+    assert.ok((await ctx.staffA.client.ok('GET', '/api/holidays?from=2026-11-01&to=2026-11-30')).holidays.some((x) => x.name === '임시공휴일'));
+    await ctx.owner.ok('DELETE', '/api/holidays/2026-11-20');
+    assert.ok(!(await ctx.staffA.client.ok('GET', '/api/holidays?from=2026-11-01&to=2026-11-30')).holidays.length);
+  });
+});
+
 describe('네트워크 재시도 중복 방지 (Idempotency-Key)', () => {
   test('같은 키로 두 번 보내도 업무는 하나', async () => {
     const h = { 'idempotency-key': 'retry-key-1' };

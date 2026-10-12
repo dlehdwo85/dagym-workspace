@@ -22,6 +22,7 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 .fc .fc-toolbar-title { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.01em; }
 .fc .fc-button { padding: 0.3rem 0.7rem; font-size: 0.8rem; background: #fff; color: #374151; border-color: #e5e7eb; border-radius: 8px; box-shadow: none !important; }
 .fc .fc-button:hover { background: #f3f4f6; color: #111827; }
+.fc .fc-button:disabled, .fc .fc-button-primary:disabled { background: #fff; color: #9ca3af; border-color: #e5e7eb; opacity: 1; }
 .fc .fc-button-primary:not(:disabled).fc-button-active, .fc .fc-button-primary:not(:disabled):active { background: #1f3a5f; border-color: #1f3a5f; color: #fff; }
 .fc .fc-col-header-cell-cushion { font-weight: 600; color: #4b5563; padding: 6px 4px; }
 .fc .fc-daygrid-day-number { color: #4b5563; font-variant-numeric: tabular-nums; padding: 6px 8px; }
@@ -29,6 +30,8 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 .fc .fc-daygrid-event, .fc .fc-timegrid-event { cursor: pointer; border-radius: 6px; padding: 1px 4px; font-weight: 500; }
 .fc-event.task-due { border-style: dashed !important; border-width: 1.5px !important; background: #fff !important; }
 .fc-event.task-due .fc-event-title, .fc-event.task-due .fc-event-time { color: #374151 !important; }
+.fc .is-holiday .fc-daygrid-day-number, .fc .is-holiday .fc-col-header-cell-cushion, .fc .fc-day-sun .fc-daygrid-day-number, .fc .fc-day-sun .fc-col-header-cell-cushion { color: #dc2626; }
+.fc .fc-event.holiday { cursor: default; font-weight: 600; }
 @media (max-width: 640px) { .fc .fc-toolbar { flex-direction: column; gap: 0.4rem; } }
 
 /* QR 인쇄: 인쇄 영역만 출력 */

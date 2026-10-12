@@ -54,6 +54,17 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       api(`/api/tasks/${id}/ack`, { body: {} }).then(() => broadcastRefresh()).catch(() => {});
     }
   }, [data?.task?.id, data?.task?.assignee_ack_at]); // eslint-disable-line react-hooks/exhaustive-deps
+  // B-17 단축키: S 하위 업무 추가, C 댓글 쓰기
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable || document.querySelector('[role=dialog]')) return;
+      if (e.key === 's' || e.key === 'S') { e.preventDefault(); setSub(true); }
+      else if (e.key === 'c' || e.key === 'C') { e.preventDefault(); const c = document.querySelector<HTMLTextAreaElement>('[data-testid="comment-input"]'); c?.focus(); c?.scrollIntoView({ block: 'center' }); }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
   const sections = useApi<{ sections: { id: string; name: string }[] }>(data?.task?.project_id ? `/api/projects/${data.task.project_id}/sections` : null);
 
   useEffect(() => {

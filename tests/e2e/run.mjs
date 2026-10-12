@@ -503,7 +503,8 @@ await step('B-11 프로젝트 필드: 퍼센트 필드 추가 → 업무 상세�
   const tasks = (await ctx.owner.ok('GET', `/api/tasks?projectId=${pid}`)).tasks;
   for (const [i, v] of [[0, '80'], [1, '90']]) {
     await owner.goto(`${BASE}/tasks/${tasks[i].id}`);
-    const input = owner.getByLabel('달성률');
+    await owner.getByTestId('task-title').waitFor();
+    const input = owner.locator('section[aria-label="업무 속성"]').getByLabel('달성률');
     await input.fill(v); await input.blur();
     await owner.waitForTimeout(500);
   }
@@ -512,6 +513,39 @@ await step('B-11 프로젝트 필드: 퍼센트 필드 추가 → 업무 상세�
   await owner.getByTestId('field-summary').getByText('85%').first().waitFor();
   await owner.screenshot({ path: `${SHOTS}/39-project-fields.png` });
 });
+await step('B-14·B-15·B-16·B-17 현장 비교·주간 보고·업무량·공휴일 화면', async () => {
+  await owner.goto(BASE + '/insights');
+  await owner.getByTestId('site-compare').getByText('다짐 강남점').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/45-site-compare.png` });
+  await owner.goto(BASE + '/workload');
+  await owner.getByTestId('workload').locator('[data-person="이직원"]').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/46-workload.png` });
+  await owner.goto(BASE + '/reports');
+  await owner.getByRole('button', { name: '지난주 보고 지금 만들기' }).click();
+  await owner.getByTestId('weekly-report').getByText('주간 보고 ·').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/47-weekly-report.png`, fullPage: true });
+  await owner.goto(BASE + '/calendar');
+  await owner.getByTestId('calendar').waitFor();
+  await owner.keyboard.press('m');
+  await owner.locator('.fc-event.holiday').first().waitFor();
+  await owner.screenshot({ path: `${SHOTS}/48-calendar-holidays.png` });
+});
+await step('모바일 목록 행을 오른쪽으로 밀어 완료 → 되돌리기', async () => {
+  const id = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '밀어서 완료 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+  await staff.goto(BASE + '/tasks?mode=list');
+  await staff.getByLabel('업무 검색').fill('밀어서');
+  const row = staff.locator(`[data-row="${id}"]`);
+  await row.waitFor();
+  const b = await row.boundingBox();
+  const y = b.y + b.height / 2;
+  await row.dispatchEvent('touchstart', { touches: [{ identifier: 1, clientX: b.x + 20, clientY: y }] });
+  for (const x of [40, 80, 120, 150]) await row.dispatchEvent('touchmove', { touches: [{ identifier: 1, clientX: b.x + 20 + x, clientY: y }] });
+  await row.dispatchEvent('touchend', { touches: [] });
+  await staff.getByText('완료했습니다').waitFor();
+  await staff.waitForTimeout(500);
+  assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
+});
+
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
   const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');

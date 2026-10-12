@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Activity, Bell, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
+  Activity, BarChart3, Bell, CalendarHeart, FileBarChart, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
   ListTodo, LogOut, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
 } from 'lucide-react';
@@ -26,12 +26,16 @@ const NAV: NavItem[] = [
   { href: '/templates', label: '템플릿', icon: LayoutTemplate, desktopOnly: true },
 ];
 const MANAGE_NAV: NavItem[] = [
+  { href: '/insights', label: '현장 비교', icon: BarChart3 },
+  { href: '/workload', label: '업무량', icon: Gauge },
   { href: '/forms', label: '현장 신고 QR', icon: QrCode },
   { href: '/automations', label: '자동화', icon: Workflow },
 ];
 const ADMIN_NAV: NavItem[] = [
   { href: '/admin/users', label: '사용자·권한', icon: Users },
+  { href: '/reports', label: '주간 보고', icon: FileBarChart },
   { href: '/admin/approvals', label: '결재선', icon: Stamp },
+  { href: '/admin/holidays', label: '공휴일', icon: CalendarHeart },
   { href: '/admin/org', label: '조직 구성', icon: Network },
   { href: '/admin/audit', label: '감사 기록', icon: ScrollText },
   { href: '/admin/ops', label: '운영 상태', icon: Activity },
@@ -39,6 +43,7 @@ const ADMIN_NAV: NavItem[] = [
 const SHORTCUTS: [string, string][] = [
   ['Ctrl K', '검색·명령 열기'], ['N', '새 업무 만들기'], ['?', '단축키 도움말'], ['Esc', '패널·창 닫기'],
   ['G 다음 H', '홈'], ['G 다음 M', '내 업무'], ['G 다음 C', '캘린더'],
+  ['S', '(업무 상세) 하위 업무 추가'], ['C', '(업무 상세) 댓글 쓰기'], ['D · W · M · A', '(캘린더) 일 · 주 · 월 · 일정목록'], ['T', '(캘린더) 오늘로'],
 ];
 
 function readPref(k: string) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -292,7 +297,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         )}
         <Modal open={help} onClose={() => setHelp(false)} title="단축키">
           <ul className="divide-y divide-line text-sm">
-            {SHORTCUTS.map(([k, l]) => <li key={k} className="flex items-center justify-between py-2"><span>{l}</span><span className="flex gap-1">{k.split(' ').filter((x) => x !== '다음').map((x) => <Kbd key={x}>{x}</Kbd>)}</span></li>)}
+            {SHORTCUTS.map(([k, l]) => <li key={k} className="flex items-center justify-between py-2"><span>{l}</span><span className="flex gap-1">{k.split(' ').filter((x) => x !== '다음' && x !== '·').map((x) => <Kbd key={x}>{x}</Kbd>)}</span></li>)}
           </ul>
           <p className="mt-3 text-xs text-ink-2">업무 목록에서는 ↑↓ 로 이동하고 Enter 로 엽니다.</p>
         </Modal>
