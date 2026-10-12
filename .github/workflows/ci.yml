@@ -1,0 +1,36 @@
+# 모든 푸시·PR: 타입검사 → 빌드 → API 통합 시험 → 실제 브라우저 E2E
+name: ci
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: workos, POSTGRES_PASSWORD: workos, POSTGRES_DB: workos_test }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U workos" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://workos:workos@localhost:5432/workos_test
+      DATABASE_URL: postgres://workos:workos@localhost:5432/workos_test
+      APP_SECRET: ci-secret-ci-secret-ci-secret-ci-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: e2e-screens, path: docs/screens, retention-days: 7 }

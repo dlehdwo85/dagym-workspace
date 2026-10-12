@@ -256,10 +256,11 @@ export default function TaskDetail({ params }: { params: Promise<{ id: string }>
           {data.history.map((h: any) => (
             <li key={h.id}>
               <span className="text-slate-400">{fmtDateTime(h.created_at)}</span> · <b>{h.actor_name ?? '시스템'}</b> · {ACTION_LABEL[h.action] ?? h.action}
-              {h.action !== 'created' && Object.entries(h.changes ?? {}).filter(([k]) => FIELD_LABEL[k]).map(([k, v]: any) => (
+              {h.action !== 'created' && Object.entries(h.changes ?? {}).filter(([k, v]: any) => FIELD_LABEL[k] && v && typeof v === 'object' && 'to' in v).map(([k, v]: any) => (
                 <span key={k} className="ml-1">[{FIELD_LABEL[k]}: {fmtVal(k, v?.from, userName)} → {fmtVal(k, v?.to, userName)}]</span>
               ))}
               {h.changes?.note && <span className="ml-1">“{h.changes.note}”</span>}
+              {['file_attached', 'link_attached', 'attachment_removed', 'checklist_added', 'checklist_done', 'checklist_undone', 'checklist_removed'].includes(h.action) && <span className="ml-1">{h.changes?.name ?? h.changes?.title ?? h.changes?.text}</span>}
             </li>
           ))}
         </ul>

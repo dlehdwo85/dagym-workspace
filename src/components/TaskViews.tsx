@@ -92,7 +92,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           ))}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2 rounded-lg border bg-white p-2 sm:grid-cols-7">
+      <div className="grid grid-cols-2 gap-2 rounded-lg border bg-white p-2 sm:grid-cols-4 xl:grid-cols-8">
         <input className={cx(inputCls, 'col-span-2')} placeholder="검색 (제목·설명·태그)" value={q} onChange={(e) => setQ(e.target.value)} aria-label="업무 검색" />
         <select className={inputCls} value={filters.brandId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, brandId: e.target.value }))} aria-label="브랜드">
           <option value="">모든 브랜드</option>{dir.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -104,7 +104,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         <select className={inputCls} value={filters.status ?? ''} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))} aria-label="상태">
           <option value="">모든 상태</option>{STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
         </select>
-        <div className="col-span-2 flex items-center gap-1 sm:col-span-1">
+        <div className="col-span-2 flex min-w-0 items-center gap-1">
           <input type="date" className={cx(inputCls, 'px-1 text-xs')} value={filters.from ?? ''} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} aria-label="기간 시작" />
           <input type="date" className={cx(inputCls, 'px-1 text-xs')} value={filters.to ?? ''} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} aria-label="기간 끝" />
         </div>

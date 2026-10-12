@@ -14,3 +14,4 @@ playwright-report
 /mobile/node_modules
 *.keystore
 *.jks
+test-results-e2e.json

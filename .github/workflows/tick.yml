@@ -1,0 +1,35 @@
+# 서버 정기 실행(마감 임박·기한 초과 알림, 반복 업무 생성, 푸시 재시도, Google 재동기화)을 10분마다 호출.
+# 비밀값 없음: GitHub OIDC 토큰(audience company-work-os-tick)을 서버가 검증하고 이 저장소에서 온 요청만 받는다.
+# 저장소 변수(Settings → Variables) APP_URL 에 운영 주소를 넣으면 동작한다. 실패하면 GitHub 가 실패 메일을 보낸다.
+name: tick
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+    - cron: '17 3 1 * *'
+  workflow_dispatch: {}
+permissions:
+  id-token: write
+  contents: write
+jobs:
+  tick:
+    if: ${{ vars.APP_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Server tick
+        run: |
+          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=company-work-os-tick" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          curl -sS --fail-with-body -m 90 -X POST -H "Authorization: Bearer $TOKEN" "${{ vars.APP_URL }}/api/cron/tick?reason=scheduler"
+      - name: Health check
+        run: |
+          curl -sS --fail-with-body -m 30 "${{ vars.APP_URL }}/api/health" | tee health.json
+          python3 -c 'import json;h=json.load(open("health.json"));assert h["ok"] and h["db"]=="ok", h'
+  keepalive:
+    # 60일간 커밋이 없으면 GitHub 가 예약 실행을 멈추므로 매월 1회 빈 파일 갱신
+    if: github.event.schedule == '17 3 1 * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          date -u > .github/keepalive && git config user.name tick-bot && git config user.email tick-bot@users.noreply.github.com
+          git add .github/keepalive && git commit -m "keepalive" && git push
