@@ -24,6 +24,7 @@
 - [R-10 대표 지시, 2026-10-13] **디자인·UI/UX 수준 향상** + 대표 계정 로그인 오류 → [UIUX_REVIEW.md](UIUX_REVIEW.md). 먼저 버그 U-0a(`/tasks?view=board` 같은 모르는 값이면 업무 화면 전체 오류), U-0b(오류 문구 "입력값을 확인해 주세요"만 표시), U-0c(연결 실패 시 영어 문구), U-0d(**Pretendard 글꼴 미로딩 → Windows 맑은 고딕**). 이어서 디자인 시스템(글꼴·색 토큰·lucide 아이콘·아바타·DueChip·토스트·스켈레톤) → 상단 바·목록·보드·상세 패널·대시보드·캘린더·모바일·로그인 순서
 - [R-11 대표 지시, 2026-10-13] **일정 × 업무 통합 + 기업용 업무관리 수준 이상** → [TASK_SCHEDULE_INTEGRATION.md](TASK_SCHEDULE_INTEGRATION.md). 현재는 업무→일정 한 방향만 연결. S-P0: 일정–업무 N:M 연결, 회의 메모→후속 업무, 업무 시간 블록 개선(담당자 캘린더 기본·미리보기에 업무 링크·완료·제목 접두어 중복 버그), 시간 표기 통일 / S-P1: 통합 오늘·이번 주 화면(업무를 시간표로 끌어 놓기), 예상 소요 시간·마감 위험, 가용 시간 기반 업무량, 일정 준비 업무 자동, 반복 회의↔반복 업무
 - [R-12, 2026-10-13] 휴대폰 "서버 오류" = Vercel 운영 `dagym-workspace.vercel.app` 에 DATABASE_URL 없음(health 503). DB 미설정이면 로그인 화면에 원인 안내 요청. 운영 설정(L-1·L-2)은 로컬이 대표 승인 후 진행
+- [R-13 대표 지시, 2026-10-13] **본사 3명용 운영 도구로 단순화** — 사이드바 4개(홈·내 업무·프로젝트·캘린더), QR·자동화 등 숨김, 업무 등록 Asana 식 한 줄 추가, 캘린더 Google 식 빠른 입력·업무 표기 → [HQ_SIMPLIFY.md](HQ_SIMPLIFY.md)
 - [R-8 참고] 자동 시험이 Linux 전용 경로(`/tmp/claude-0`, `node_modules/.bin/next`, openssl)를 써서 Windows 에서 못 돎. 필수 아님 — 원하면 `os.tmpdir()`·`process.execPath`+`next/dist/bin/next` 로 바꾸면 로컬에서도 회귀 시험 가능
 
 ## 클라우드 회신 (클라우드는 이 파일 대신 NEXT_ACTION.md 의 "로컬 요청 처리" 절에 답합니다)
