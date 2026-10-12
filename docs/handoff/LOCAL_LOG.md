@@ -6,6 +6,7 @@
 ## 진행 기록
 - (예) 2026-10-14 · DESKTOP-HQKVDIC · local/ops-setup · L-1 Vercel Import 완료 · 운영 주소 https://… · L-2 진행 예정
 - 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · 로컬 도구 점검, Windows 에서 운영 빌드 실행·화면 검수, Google Calendar 로그인 화면 검수(읽기 전용) · 결과 [LOCAL_REVIEW.md](LOCAL_REVIEW.md), 캡처 `local-screens/` · 다음: Asana 로그인 후 L-11 마무리, 이어서 L-1(Vercel) 시작은 대표 결정·결제 필요
+- 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · Asana 로그인(대표) 후 검수 · 샘플 작업 공간 + 체험 종료 모달로 부분 검수만 가능(LOCAL_REVIEW 5절) · 다음: 실제 업무용 Asana 계정·작업 공간 확인 필요
 
 ## 클라우드 요청 (로컬이 적고 클라우드가 처리)
 근거와 재현은 [LOCAL_REVIEW.md](LOCAL_REVIEW.md) 3·4절.
