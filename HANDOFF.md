@@ -10,7 +10,7 @@
 | 저장소 URL | https://github.com/dlehdwo85/dagym-workspace |
 | clone 주소 | `https://github.com/dlehdwo85/dagym-workspace.git` |
 | 공개 여부 | public (비밀값은 들어 있지 않음) |
-| 브랜치 | `claude/cool-pascal-h2e787` — 현재 **유일한 브랜치이자 GitHub 기본 브랜치**입니다. `main`은 아직 없습니다 |
+| 브랜치 | **`main`** — 2026-10-13 대표 지시로 생성, 검증 완료 기준 브랜치(운영 배포 대상). `claude/cool-pascal-h2e787` — 클라우드 작업 브랜치. GitHub **기본 브랜치는 아직 `claude/cool-pascal-h2e787`** 이며 대표가 Settings 에서 `main` 으로 바꿔야 함 (이 환경은 저장소 설정 변경 권한이 없음) |
 | 클라우드 작업 폴더 | `/home/user/dagym-workspace` — 클라우드 컨테이너 안에 저장소 이름과 같은 이름으로 clone 한 폴더입니다. 로컬 PC에는 없습니다 |
 | 커밋·푸시 | 클라우드 작업은 모두 커밋·푸시합니다. 최신 커밋은 `git log -1 origin/claude/cool-pascal-h2e787`로 확인하세요 |
 
@@ -34,7 +34,8 @@ winget install --id OpenJS.NodeJS.LTS -e      # Node 22 이상
 cd C:\Users\User\Documents\DAGYM-DEV           # 폴더가 없으면: mkdir C:\Users\User\Documents\DAGYM-DEV
 git clone https://github.com/dlehdwo85/dagym-workspace.git
 cd dagym-workspace
-git branch --show-current                      # claude/cool-pascal-h2e787 이면 정상 (기본 브랜치)
+git switch main                                # 기본 브랜치가 아직 claude/* 이면 main 으로 전환
+git pull --ff-only
 
 # 로컬 전용 작업 브랜치 만들기 (4번 규칙)
 git switch -c local/ops-setup
@@ -55,7 +56,8 @@ Claude Code 데스크톱 앱에서는 "폴더 열기"로 `C:\Users\User\Document
 | 상대 영역 수정이 필요하면 | `docs/handoff/LOCAL_LOG.md`의 요청란을 읽고 반영 | 직접 고치지 말고 `docs/handoff/LOCAL_LOG.md`의 "클라우드 요청"란에 적고 푸시 |
 | 합치기 | 클라우드가 `git fetch` 후 `local/*`를 자기 브랜치에 merge (merge 커밋, 강제 푸시 없음) | 클라우드 브랜치를 `git pull`로 받아 자기 브랜치에 merge |
 - 비밀값(토큰, `.env.local`, `google-services.json`, keystore, `.p8`/`.p12`)은 **어느 쪽도 커밋하지 않습니다**. 값은 Vercel 환경 변수와 GitHub Secrets에만 넣습니다.
-- `main` 브랜치가 생기면 두 쪽 모두 PR로 `main`에 합칩니다(대표 승인 후 생성).
+- **`main` = 검증된 기준 브랜치 (운영 배포 대상)**. 클라우드는 `claude/cool-pascal-h2e787` 에서 개발·시험 후 `main` 에 merge 하고, 로컬은 `main` 에서 `local/*` 를 만들어 작업 후 PR 로 `main` 에 합친다. `main` 에는 CI(API·E2E) 통과한 커밋만 올린다.
+- 새 작업을 시작할 때는 항상 `git fetch origin` 후 최신 `main` 을 자기 브랜치에 merge 하고 시작한다.
 
 ## 5. 로컬(PC 브라우저 로그인·기기·로컬 도구)이 필요한 작업 — 로컬 Claude Code 담당
 | ID | 작업 | 필요한 것 | 결과를 남길 곳 |

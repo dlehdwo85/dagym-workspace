@@ -18,7 +18,7 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 4. 클라우드: 심사용 계정 준비 문구, 스토어 설명 확정, Unlisted(iOS) 신청 문안
 
 ## 대표 결정이 필요한 것
-- `main` 브랜치 생성과 병합 승인 (지금은 `claude/cool-pascal-h2e787`이 기본 브랜치입니다)
+- ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
 - 저장소 공개 유지 여부 (비공개로 바꾸면 10분 정기 실행이 Actions 무료 한도를 넘음 → OPERATIONS 7번)
 - 개인정보 보호책임자 이름·연락처
 

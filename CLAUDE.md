@@ -4,8 +4,9 @@
 세션 종료 전에는 자기 담당 기록을 갱신하고 커밋·푸시한다.
 
 ## 클라우드·로컬 동시 수정 방지 (HANDOFF.md 4번)
+- `main` = 검증 완료 기준 브랜치(운영 배포 대상, CI 통과 커밋만). 각자 브랜치에서 작업 후 `main` 에 merge/PR.
 - 클라우드 세션: `claude/cool-pascal-h2e787` 브랜치, `src/ db/ tests/ scripts/ public/ .github/workflows/` 와 루트 문서 담당.
-- 로컬 Claude Code: `local/*` 브랜치, `docs/handoff/LOCAL_LOG.md`·`docs/handoff/*`, 필요 시 `mobile/android`·`mobile/ios` 네이티브 설정 담당. 상대 영역은 직접 고치지 말고 LOCAL_LOG 의 "클라우드 요청"에 적는다.
+- 로컬 Claude Code: `main` 에서 만든 `local/*` 브랜치, `docs/handoff/LOCAL_LOG.md`·`docs/handoff/*`, 필요 시 `mobile/android`·`mobile/ios` 네이티브 설정 담당. 상대 영역은 직접 고치지 말고 LOCAL_LOG 의 "클라우드 요청"에 적는다.
 - 강제 푸시·rebase 금지, merge 로 합친다. 비밀값(.env*, google-services.json, keystore, .p8)은 커밋하지 않는다.
 
 ## 프로젝트 원칙
