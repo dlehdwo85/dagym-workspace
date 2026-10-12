@@ -10,8 +10,9 @@ import luxonPlugin from '@fullcalendar/luxon3';
 import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { CalendarPlus, CircleCheck } from 'lucide-react';
-import { Button, ErrorBox, Field, Modal, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { CalendarPlus, CircleCheck, ClipboardList, ExternalLink, MapPin, Timer, Users } from 'lucide-react';
+import { Avatar, AvatarStack, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
+import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
 import { EVENT_KIND_LABEL } from '@/lib/types';
@@ -104,7 +105,8 @@ export default function CalendarPage() {
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId)).map((e) => ({
-      id: `${e.id}|${e.originalStart ?? ''}`, title: `${e.kind !== 'normal' ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${e.title}`,
+      id: `${e.id}|${e.originalStart ?? ''}`, title: `${e.kind === 'vacation' || e.kind === 'business_trip' ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}`,
+      classNames: e.kind === 'task_block' ? ['task-block'] : [],
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
       backgroundColor: e.kind === 'vacation' ? '#a855f7' : e.kind === 'business_trip' ? '#0891b2' : e.color, borderColor: 'transparent',
       extendedProps: { type: 'event', ev: e }, editable: true,
@@ -154,7 +156,7 @@ export default function CalendarPage() {
     if (p.type === 'task') { router.push(`/tasks/${p.task.id}`); return; }
     // 일정은 먼저 작은 미리보기 → 편집
     const r = (i.el as HTMLElement).getBoundingClientRect();
-    setPreview({ ev: p.ev, x: Math.min(window.innerWidth - 336, Math.max(16, r.left)), y: Math.min(window.innerHeight - 220, r.bottom + 6) });
+    setPreview({ ev: p.ev, x: Math.min(window.innerWidth - 376, Math.max(16, r.left)), y: Math.min(window.innerHeight - 380, r.bottom + 6) });
   }
 
   return (
@@ -180,6 +182,7 @@ export default function CalendarPage() {
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
           timeZone="Asia/Seoul" locale="ko" firstDay={1} height="auto" nowIndicator
           initialView={mobile ? 'listWeek' : 'timeGridWeek'}
+          initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
           headerToolbar={mobile ? { left: 'prev,next', center: 'title', right: 'today' } : { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' }}
           footerToolbar={mobile ? { center: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' } : undefined}
           buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
@@ -188,6 +191,9 @@ export default function CalendarPage() {
           events={fcEvents}
           datesSet={(a: DatesSetArg) => setRange({ from: a.start.toISOString(), to: a.end.toISOString() })}
           eventClick={onClick}
+          eventContent={(arg) => arg.event.classNames.includes('task-block') ? (
+            <div className="flex min-w-0 items-center gap-1 overflow-hidden px-0.5 text-[12px]"><Timer className="size-3 shrink-0" aria-label="업무 시간" />{arg.timeText && <span className="shrink-0 opacity-80">{arg.timeText}</span>}<span className="truncate font-medium">{arg.event.title}</span></div>
+          ) : true}
           dayCellClassNames={(a) => { const d = seoulDate(a.date); return holidaySet.has(d) ? ['is-holiday'] : []; }}
           dayHeaderClassNames={(a) => (a.view.type !== 'dayGridMonth' && holidaySet.has(seoulDate(a.date)) ? ['is-holiday'] : [])}
           eventDrop={moveEvent}
@@ -197,26 +203,8 @@ export default function CalendarPage() {
       </div>
       <p className="text-xs text-ink-2">점선 항목은 업무 마감일(날짜 기준)이고, 색이 채워진 항목은 시간이 정해진 일정입니다. 끌어서 옮기면 원본 업무·일정에 바로 반영됩니다.</p>
       <ScopeDialog />
-      {preview && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setPreview(null)} />
-          <div role="dialog" aria-label="일정 미리보기" className="fixed z-50 w-80 animate-fade-up rounded-card border border-line bg-white p-4 shadow-pop" style={{ left: preview.x, top: preview.y }}>
-            <div className="flex items-start gap-2.5">
-              <span className="mt-1 size-3 shrink-0 rounded" style={{ background: preview.ev.color }} />
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold leading-snug">{preview.ev.title}</p>
-                <p className="mt-1 text-sm text-ink-2">{preview.ev.allDay ? `${seoulDate(preview.ev.start)} 종일` : `${fmtDateTime(preview.ev.start)} ~ ${seoulTime(preview.ev.end)}`}</p>
-                {preview.ev.location && <p className="mt-0.5 text-sm text-ink-2">{preview.ev.location}</p>}
-                <p className="mt-1 text-xs text-ink-3">{cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}{preview.ev.recurring ? ' · 반복 일정' : ''}</p>
-              </div>
-            </div>
-            <div className="mt-3 flex justify-end gap-1.5">
-              <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>닫기</Button>
-              <Button size="sm" onClick={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }}>자세히·편집</Button>
-            </div>
-          </div>
-        </>
-      )}
+      {preview && <EventPreview ev={preview.ev} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}
+        onClose={() => setPreview(null)} onEdit={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }} onChanged={() => { load(); broadcastRefresh(); }} />}
       {editor && <EventEditor {...editor} calendars={cals.data?.calendars ?? []} onClose={() => { setEditor(null); if (sp.get('event')) router.replace('/calendar'); }} onSaved={() => { load(); broadcastRefresh(); }} dirUsers={dir.users} />}
     </div>
   );
@@ -330,13 +318,12 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           {conf.length > 0 && (
             <div className="rounded bg-amber-50 p-2 text-xs text-amber-900" role="alert" data-testid="conflicts">
               <b>일정 충돌 안내</b>
-              <ul className="mt-1 list-disc pl-4">{conf.map((c, i) => <li key={i}>{c.who.join(', ')}: {c.title} ({fmtDateTime(c.start)}~{seoulTime(c.end)})</li>)}</ul>
+              <ul className="mt-1 list-disc pl-4">{conf.map((c, i) => <li key={i}>{c.who.join(', ')}: {c.title} ({fmtTimeRange(c.start, c.end)})</li>)}</ul>
             </div>
           )}
           <Field label="장소"><input className={inputCls} value={f.location} onChange={(e) => set('location')(e.target.value)} /></Field>
           <Field label="설명"><textarea className={inputCls} rows={3} value={f.description} onChange={(e) => set('description')(e.target.value)} /></Field>
         </fieldset>
-        {d?.task && <p className="text-sm">연결된 업무: <a className="text-brand-700 underline" href={`/tasks/${d.task.id}`}>{d.task.title}</a></p>}
         {myAtt && (
           <div className="flex items-center gap-2 text-sm">참석 여부:
             {[['accepted', '참석'], ['tentative', '미정'], ['declined', '불참']].map(([v, l]) => (
@@ -345,6 +332,10 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           </div>
         )}
         {d?.attendees?.length > 0 && <p className="text-xs text-slate-500">응답: {d.attendees.map((a: any) => `${a.name}(${({ accepted: '참석', declined: '불참', tentative: '미정', needsAction: '미응답' } as any)[a.response]})`).join(', ')}</p>}
+        {id && d && (
+          <EventWork eventId={d.event.id} occurrenceStart={d.event.rrule && !d.event.recurring_event_id ? occurrenceStart : undefined} eventDate={f.date}
+            recurring={!!(d.event.rrule || d.event.recurring_event_id)} attendees={d.attendees} canEdit={!!d.perms.edit} canWork={!!(d.perms.edit || d.perms.attendee)} />
+        )}
         {id && d && (
           <div>
             <div className="mb-1 text-xs font-medium text-slate-600">첨부 자료</div>
@@ -360,5 +351,72 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** 업무 시간 블록 제목의 옛 접두어 정리 ("[업무] …") — 화면에서는 아이콘으로 구분 */
+function cleanTitle(t: string) { return t.replace(/^(\[(업무|업무 시간)\]\s*)+/, ''); }
+
+/** 일정 미리보기: 시간·장소·참석자·연결 업무, 업무 시간 블록이면 그 업무의 상태·완료 */
+function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged }: { ev: any; x: number; y: number; calendarName?: string; onClose: () => void; onEdit: () => void; onChanged: () => void }) {
+  const occ = ev.recurring && !ev.exception && ev.originalStart ? `?occurrenceStart=${encodeURIComponent(new Date(ev.originalStart).toISOString())}` : '';
+  const linked = useApi<{ tasks: any[] }>(`/api/events/${ev.id}/tasks${occ}`);
+  const tasks = linked.data?.tasks ?? [];
+  const block = ev.kind === 'task_block' ? tasks.find((t) => t.link_role === 'block') ?? tasks[0] : null;
+  const going = (ev.attendees ?? []).filter((a: any) => a.response !== 'declined');
+  async function complete(t: any) {
+    const to = t.status === 'review' ? 'done' : t.approval_line_id || t.approval_required ? 'review' : 'done';
+    try {
+      await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: to, version: t.version } });
+      toast.ok(to === 'review' ? '검토를 요청했습니다' : '업무를 완료했습니다'); linked.reload(); onChanged();
+    } catch (e: any) {
+      if (e.status === 403 && to === 'done') {
+        try { await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: 'review', version: t.version } }); toast.ok('검토를 요청했습니다'); linked.reload(); onChanged(); return; } catch (e2: any) { toast.error(e2.message); return; }
+      }
+      toast.error(e.message);
+    }
+  }
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div role="dialog" aria-label="일정 미리보기" className="fixed z-50 w-[360px] max-w-[calc(100vw-32px)] animate-fade-up rounded-card border border-line bg-white p-4 shadow-pop" style={{ left: x, top: Math.max(16, y) }} data-testid="event-preview">
+        <div className="flex items-start gap-2.5">
+          <span className="mt-1 size-3 shrink-0 rounded" style={{ background: ev.color }} />
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 font-semibold leading-snug">{ev.kind === 'task_block' && <Timer className="size-4 shrink-0 text-ink-2" aria-label="업무 시간" />}{cleanTitle(ev.title)}</p>
+            <p className="mt-1 text-sm text-ink-2" data-testid="preview-time">{fmtTimeRange(ev.start, ev.end, { allDay: ev.allDay })}</p>
+            {ev.location && <p className="mt-0.5 flex items-center gap-1 text-sm text-ink-2"><MapPin className="size-3.5" />{ev.location}</p>}
+            <p className="mt-1 text-xs text-ink-3">{calendarName}{ev.recurring ? ' · 반복 일정' : ''}</p>
+          </div>
+        </div>
+        {going.length > 0 && (
+          <div className="mt-3 flex items-center gap-2 text-sm text-ink-2"><Users className="size-4 text-ink-3" /><AvatarStack people={going.map((a: any) => ({ id: a.user_id, name: a.name }))} max={5} /><span className="truncate">{going.map((a: any) => a.name).join(', ')}</span></div>
+        )}
+        {ev.description && <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm text-ink-2">{ev.description}</p>}
+        {block ? (
+          <div className="mt-3 rounded-input border border-line p-2.5" data-testid="block-task">
+            <div className="flex items-center gap-2 text-sm">
+              <StatusBadge status={block.status} />
+              <a href={`/tasks/${block.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{block.title}</a>
+              <DueChip due={block.due_date} status={block.status} />
+            </div>
+            <div className="mt-2 flex items-center gap-1.5">
+              <Avatar id={block.assignee_id} name={block.assignee_name} size={20} /><span className="flex-1 text-xs text-ink-2">{block.assignee_name ?? '담당자 없음'}</span>
+              <a href={`/tasks/${block.id}`}><Button type="button" size="sm" variant="ghost"><ExternalLink />업무 열기</Button></a>
+              {block.status !== 'done' && <Button type="button" size="sm" onClick={() => complete(block)}><CircleCheck />{block.status === 'review' ? '최종 완료' : '완료'}</Button>}
+            </div>
+          </div>
+        ) : tasks.length > 0 && (
+          <div className="mt-3">
+            <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-ink-2"><ClipboardList className="size-3.5" />연결 업무 {tasks.length}건{tasks.some((t) => t.status !== 'done' && t.due_date && t.due_date < new Date().toISOString().slice(0, 10)) ? ' · 지연 있음' : ''}</p>
+            <LinkedTaskList tasks={tasks.slice(0, 4)} compact />
+          </div>
+        )}
+        <div className="mt-3 flex justify-end gap-1.5">
+          <Button size="sm" variant="ghost" onClick={onClose}>닫기</Button>
+          <Button size="sm" onClick={onEdit}>{ev.kind === 'task_block' ? '시간 편집' : '자세히·회의 메모'}</Button>
+        </div>
+      </div>
+    </>
   );
 }

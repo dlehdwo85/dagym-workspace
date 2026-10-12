@@ -4,9 +4,9 @@
 세션 종료 전에는 자기 담당 기록을 갱신하고 커밋·푸시한다.
 
 ## 클라우드·로컬 동시 수정 방지 (HANDOFF.md 4번)
-- `main` = 검증 완료 기준 브랜치(운영 배포 대상, CI 통과 커밋만). 각자 브랜치에서 작업 후 `main` 에 merge/PR.
-- 클라우드 세션: `claude/cool-pascal-h2e787` 브랜치, `src/ db/ tests/ scripts/ public/ .github/workflows/` 와 루트 문서 담당.
-- 로컬 Claude Code: `main` 에서 만든 `local/*` 브랜치, `docs/handoff/LOCAL_LOG.md`·`docs/handoff/*`, 필요 시 `mobile/android`·`mobile/ios` 네이티브 설정 담당. 상대 영역은 직접 고치지 말고 LOCAL_LOG 의 "클라우드 요청"에 적는다.
+- `main` = 운영 배포 브랜치(Vercel Production, https://dagym-workspace.vercel.app). **2026-10-13 대표 지시: 작업이 끝나면 바로 `main` 에 푸시한다** (PR·승인 대기 없음). 푸시 전에 `git fetch` → `origin/main` merge → 할 수 있는 시험(typecheck·build·API·E2E)을 돌리고, 문제가 생기면 운영 화면에서 확인한 뒤 후속 커밋으로 바로 고친다.
+- 클라우드 세션: `claude/cool-pascal-h2e787` 에서 작업하고 같은 커밋을 `main` 에도 푸시, `src/ db/ tests/ scripts/ public/ .github/workflows/` 와 루트 문서 담당.
+- 로컬 Claude Code: `main` 기준으로 작업(필요하면 `local/*`)하고 `main` 에 바로 푸시, `docs/handoff/LOCAL_LOG.md`·`docs/handoff/*`, 필요 시 `mobile/android`·`mobile/ios` 네이티브 설정 담당. 상대 영역은 직접 고치지 말고 LOCAL_LOG 의 "클라우드 요청"에 적는다.
 - 강제 푸시·rebase 금지, merge 로 합친다. 비밀값(.env*, google-services.json, keystore, .p8)은 커밋하지 않는다.
 
 ## 프로젝트 원칙

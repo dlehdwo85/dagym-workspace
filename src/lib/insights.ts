@@ -1,7 +1,6 @@
 import { db } from './db';
 import { accessibleUnitIds, atLeast, isAdmin } from './access';
 import { forbidden, notFound } from './errors';
-import { listEvents } from './events';
 import { notify } from './notifications';
 import { addDays, seoulMidnight, todaySeoul, weekRangeSeoul } from './time';
 import type { SessionUser } from './types';
@@ -89,30 +88,26 @@ export async function workload(u: SessionUser, weekStart?: string) {
       count(*) filter (where t.due_date < ${todaySeoul()})::int as overdue,
       count(*) filter (where t.priority in ('urgent','high') and t.due_date between ${start} and ${end})::int as hot
     from tasks t where t.deleted_at is null and t.status <> 'done' and t.assignee_id = any(${ids}::uuid[]) group by t.assignee_id` : [];
-  const from = seoulMidnight(start), to = seoulMidnight(addDays(end, 1));
-  const workdays = 5 - holidays.filter((h) => { const d = DateTime.fromISO(h.date).weekday; return d <= 5; }).length;
+  const { dayLoads } = await import('./availability');
   const out = [];
   for (const p of people) {
-    const evs = await listEvents({ ...p, timezone: TZ, sessionId: '' } as SessionUser, from, to);
-    let minutes = 0;
-    const away = new Set<string>();
-    for (const e of evs) {
-      const mine = e.attendees.some((a: any) => a.user_id === p.id && a.response !== 'declined') || (e.calendarType === 'personal') || ((e.kind === 'vacation' || e.kind === 'business_trip') && e.createdBy === p.id);
-      if (!mine) continue;
-      const s = new Date(Math.max(new Date(e.start).getTime(), from.getTime()));
-      const en = new Date(Math.min(new Date(e.end).getTime(), to.getTime()));
-      if (e.kind === 'vacation' || e.kind === 'business_trip') {
-        for (let d = DateTime.fromJSDate(s).setZone(TZ).startOf('day'); d.toJSDate() < en; d = d.plus({ days: 1 })) if (d.weekday <= 5) away.add(d.toISODate()!);
-        continue;
-      }
-      if (!e.allDay && en > s) minutes += (en.getTime() - s.getTime()) / 60000;
-    }
+    // S-7 가용 시간: 근무 시간(하루 8시간) - 회의 - 업무 시간 블록, 공휴일·휴가·출장 반영
+    const days = await dayLoads(p.id, start, end, {}, sql);
     const t = tasks.find((x) => x.assignee_id === p.id) ?? { due_week: 0, overdue: 0, hot: 0 };
-    const availableDays = Math.max(0, workdays - away.size);
-    const eventHours = r1(minutes / 60) ?? 0;
-    // 과부하: 마감 업무가 가용 근무일×2 를 넘거나, 일정이 가용 시간(일 8시간)의 70% 이상, 또는 지연 3건 이상
-    const overloaded = t.due_week > Math.max(2, availableDays * 2) || eventHours > availableDays * 8 * 0.7 || t.overdue >= 3;
-    out.push({ id: p.id, name: p.name, title: p.title, dueThisWeek: t.due_week, overdue: t.overdue, hot: t.hot, eventHours, awayDays: away.size, availableDays, overloaded });
+    const weekdays = days.filter((d) => DateTime.fromISO(d.date).weekday <= 5);
+    const awayDays = weekdays.filter((d) => d.away).length;
+    const availableDays = weekdays.filter((d) => d.workday).length;
+    const meetingMin = days.reduce((a, d) => a + d.meetingMinutes, 0);
+    const blockMin = days.reduce((a, d) => a + d.blockMinutes, 0);
+    const capacity = days.reduce((a, d) => a + d.capacity, 0);
+    const free = days.reduce((a, d) => a + d.freeMinutes, 0);
+    const eventHours = r1((meetingMin + blockMin) / 60) ?? 0;
+    // 과부하: 마감 업무가 가용 근무일×2 를 넘거나, 회의·업무 블록이 근무 시간의 70% 초과, 또는 지연 3건 이상
+    const overloaded = t.due_week > Math.max(2, availableDays * 2) || (capacity > 0 && (meetingMin + blockMin) / capacity > 0.7) || t.overdue >= 3;
+    out.push({ id: p.id, name: p.name, title: p.title, dueThisWeek: t.due_week, overdue: t.overdue, hot: t.hot, eventHours,
+      meetingHours: r1(meetingMin / 60) ?? 0, blockHours: r1(blockMin / 60) ?? 0, freeHours: r1(free / 60) ?? 0, capacityHours: r1(capacity / 60) ?? 0,
+      awayDays, availableDays, overloaded,
+      days: days.map((d) => ({ date: d.date, workday: d.workday, away: d.away, holiday: d.holiday, busy: d.meetingMinutes + d.blockMinutes, capacity: d.capacity })) });
   }
   return { weekStart: start, weekEnd: end, holidays, people: out };
 }

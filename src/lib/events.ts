@@ -197,6 +197,7 @@ export async function createEvent(u: SessionUser, i: EventInput) {
       values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
         ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)})
       returning id`;
+    if (i.taskId) await tx`insert into event_tasks (event_id, task_id, role, created_by) values (${ev.id}, ${i.taskId}, 'block', ${u.id}) on conflict do nothing`;
     if (i.attendeeIds?.length) {
       await setAttendees(tx, ev.id, i.attendeeIds);
       await tx`update event_attendees set response = 'accepted' where event_id = ${ev.id} and user_id = ${u.id}`;
@@ -253,6 +254,11 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
       if (Object.keys(set).length) {
         set.updated_at = new Date();
         await tx`update events set ${tx(set as never, ...(Object.keys(set) as never[]))}, version = version + 1 where id = ${id}`;
+      }
+      // S-8 준비 업무 마감을 일정 날짜에 맞춰 이동
+      if (times && !isSeries && times.s.getTime() !== e.start_at.getTime()) {
+        const { shiftPrepTasks } = await import('./eventtasks');
+        result.prepMoved = await shiftPrepTasks(tx, id, times.s, u.id);
       }
     } else if (scope.scope === 'this') {
       if (!scope.occurrenceStart) throw badRequest('반복 일정의 어느 회차인지(occurrenceStart) 필요합니다');

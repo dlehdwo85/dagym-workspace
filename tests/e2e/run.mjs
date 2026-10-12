@@ -547,6 +547,101 @@ await step('모바일 목록 행을 오른쪽으로 밀어 완료 → 되돌리�
   assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
 });
 
+// 일정 × 업무 통합 (TASK_SCHEDULE_INTEGRATION)
+await step('DB 미설정이면 로그인 화면에 원인 안내', async () => {
+  const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR' });
+  const p = await c.newPage();
+  await p.route('**/api/health', (r) => r.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, db: 'error', error: 'DATABASE_URL 이 설정되지 않았습니다' }) }));
+  await p.goto(BASE + '/login');
+  await p.getByTestId('server-not-ready').getByText('운영 설정이 아직 끝나지 않았습니다').waitFor();
+  await p.screenshot({ path: `${SHOTS}/49-login-not-configured.png` });
+  await c.close();
+});
+await step('S-2 회의 메모 2줄 → 후속 업무 2건(담당=참석자) 자동 연결 + 미리보기 시간 표기·참석자·연결 업무', async () => {
+  const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.org_unit_id === ctx.siteA).id;
+  const d = addDays(today, 1);
+  const ev = (await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '강남점 운영 회의', start: `${d}T14:00:00+09:00`, end: `${d}T15:00:00+09:00`, attendeeIds: [ctx.staffA.id, ctx.managerA.id], location: '2층 회의실' })).id;
+  await owner.goto(`${BASE}/calendar?event=${ev}`);
+  const dlg = owner.getByRole('dialog', { name: '일정 수정' });
+  await dlg.getByTestId('meeting-notes').fill('- 런닝머신 벨트 교체 업체 섭외 (이직원)\n- 다음 달 GX 시간표 초안 (최매니저)');
+  for (const line of ['런닝머신 벨트 교체 업체 섭외 (이직원)', '다음 달 GX 시간표 초안 (최매니저)']) {
+    await dlg.getByRole('button', { name: `${line} 업무로 만들기` }).click();
+    const m = owner.getByRole('dialog', { name: '회의 후속 업무' });
+    await m.getByRole('button', { name: '만들기' }).click();
+    await owner.getByText('후속 업무를 만들고 연결했습니다').first().waitFor();
+    await m.waitFor({ state: 'detached' });
+  }
+  await dlg.getByTestId('note-lines').getByText('업무로 만듦').nth(1).waitFor();
+  await owner.screenshot({ path: `${SHOTS}/50-meeting-notes-followups.png`, fullPage: true });
+  const linked = (await ctx.owner.ok('GET', `/api/events/${ev}/tasks`)).tasks;
+  assert.equal(linked.filter((t) => t.link_role === 'followup').length, 2);
+  assert.equal(linked.find((t) => t.title.startsWith('런닝머신')).assignee_id, ctx.staffA.id, '메모의 이름으로 담당자 자동 선택');
+  assert.equal(linked.find((t) => t.title.startsWith('다음 달 GX')).assignee_id, ctx.managerA.id);
+  await owner.keyboard.press('Escape');
+  // 미리보기: 시간 표기 통일, 참석자, 연결 업무
+  await owner.goto(`${BASE}/calendar?date=${d}`);
+  await owner.getByTestId('calendar').waitFor();
+  await owner.locator('.fc-timegrid-event', { hasText: '강남점 운영 회의' }).first().click();
+  const pv = owner.getByTestId('event-preview');
+  await pv.getByTestId('preview-time').getByText(/오후 2:00~3:00/).waitFor();
+  await pv.getByText('이직원, 최매니저').waitFor();
+  await pv.getByText('연결 업무 2건').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/51-meeting-preview.png` });
+});
+await step('S-3 업무 시간 배정: 담당자 조직 캘린더 + 담당자 참석, 블록 미리보기에서 업무 완료', async () => {
+  const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '소화기 위치 표지 교체', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 2), approvalRequired: false, estimateMinutes: 120 })).id;
+  await owner.goto(`${BASE}/tasks/${t}`);
+  await owner.getByTestId('linked-events').getByRole('button', { name: '실행 시간 배정' }).click();
+  const dlg = owner.getByRole('dialog', { name: '업무 실행 시간 배정' });
+  await dlg.getByText('이직원님을 참석자로 넣어').waitFor();
+  assert.equal(await dlg.getByLabel('캘린더').locator('option:checked').textContent(), '다짐 강남점 일정');
+  await dlg.getByTestId('block-availability').waitFor();
+  await dlg.getByRole('button', { name: '배정' }).click();
+  await owner.getByText('이직원님의 실행 시간을 배정했습니다').waitFor();
+  await owner.getByTestId('linked-events').getByText('소화기 위치 표지 교체').waitFor();
+  await owner.getByTestId('estimate-progress').getByText('2시간 배정').waitFor();
+  const blk = (await ctx.staffA.client.ok('GET', `/api/tasks/${t}/events`)).events[0];
+  assert.equal(blk.role, 'block');
+  // 직원 캘린더에서 블록 미리보기 → 완료
+  const c = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const p = await login(c, ctx.staffA.email, ctx.staffA.password);
+  await p.goto(`${BASE}/calendar?date=${addDays(today, 2)}`);
+  await p.getByTestId('calendar').waitFor();
+  await p.locator('.fc-timegrid-event.task-block', { hasText: '소화기 위치 표지 교체' }).first().click();
+  const pv = p.getByTestId('event-preview');
+  await pv.getByTestId('block-task').getByText('소화기 위치 표지 교체').waitFor();
+  assert.equal(await pv.getByText('[업무]').count(), 0, '제목 접두어 중복 없음');
+  await p.screenshot({ path: `${SHOTS}/52-block-preview.png` });
+  await pv.getByRole('button', { name: '완료' }).click();
+  await p.getByText('업무를 완료했습니다').waitFor();
+  assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done');
+  await c.close();
+});
+await step('S-5 오늘·이번 주: 업무를 시간표로 끌어 놓아 실행 시간 배정 · S-7 업무량 히트맵', async () => {
+  const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '회원 상담 기록 정리', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 5), estimateMinutes: 90 })).id;
+  await staff.setViewportSize({ width: 1366, height: 900 });
+  await staff.goto(`${BASE}/plan`);
+  const card = staff.locator(`[data-plan-task="${t}"]`);
+  await card.waitFor();
+  await staff.locator('.fc-timegrid-slot').first().waitFor();
+  const slot = staff.locator('td.fc-timegrid-slot-lane[data-time="15:00:00"]').first();
+  const b = await card.boundingBox(); const sb = await slot.boundingBox();
+  const col = await staff.locator('.fc-timegrid-col.fc-day-today').boundingBox().catch(() => null) ?? await staff.locator('.fc-timegrid-col').nth(2).boundingBox();
+  await staff.mouse.move(b.x + 30, b.y + 15); await staff.mouse.down();
+  await staff.mouse.move(b.x + 60, b.y + 30, { steps: 5 });
+  await staff.mouse.move(col.x + col.width / 2, sb.y + 5, { steps: 20 });
+  await staff.mouse.up();
+  await staff.getByText('실행 시간을 배정했습니다').waitFor();
+  const evs = (await ctx.staffA.client.ok('GET', `/api/tasks/${t}/events`)).events;
+  assert.equal(evs.length, 1); assert.equal(evs[0].kind, 'task_block');
+  assert.equal(Math.round((new Date(evs[0].end_at) - new Date(evs[0].start_at)) / 60000), 90, '남은 예상 시간만큼');
+  await staff.screenshot({ path: `${SHOTS}/53-plan-week.png` });
+  await staff.setViewportSize(devices['iPhone 13'].viewport);
+  await owner.goto(BASE + '/workload');
+  await owner.getByTestId('workload-heatmap').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/54-workload-heatmap.png`, fullPage: true });
+});
+
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
   const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');

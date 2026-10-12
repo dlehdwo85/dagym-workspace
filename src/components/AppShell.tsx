@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Activity, BarChart3, Bell, CalendarHeart, FileBarChart, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
+  Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
   ListTodo, LogOut, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
 } from 'lucide-react';
@@ -19,6 +19,7 @@ type NavItem = { href: string; label: string; icon: LucideIcon; desktopOnly?: bo
 const NAV: NavItem[] = [
   { href: '/', label: '홈', icon: House },
   { href: '/tasks?view=my', label: '내 업무', icon: CircleCheck },
+  { href: '/plan', label: '오늘·이번 주', icon: CalendarClock, desktopOnly: true },
   { href: '/tasks', label: '전체 업무', icon: ListTodo, desktopOnly: true },
   { href: '/projects', label: '프로젝트', icon: FolderKanban, desktopOnly: true },
   { href: '/calendar', label: '캘린더', icon: CalendarDays },
@@ -42,7 +43,7 @@ const ADMIN_NAV: NavItem[] = [
 ];
 const SHORTCUTS: [string, string][] = [
   ['Ctrl K', '검색·명령 열기'], ['N', '새 업무 만들기'], ['?', '단축키 도움말'], ['Esc', '패널·창 닫기'],
-  ['G 다음 H', '홈'], ['G 다음 M', '내 업무'], ['G 다음 C', '캘린더'],
+  ['G 다음 H', '홈'], ['G 다음 M', '내 업무'], ['G 다음 C', '캘린더'], ['G 다음 P', '오늘·이번 주'],
   ['S', '(업무 상세) 하위 업무 추가'], ['C', '(업무 상세) 댓글 쓰기'], ['D · W · M · A', '(캘린더) 일 · 주 · 월 · 일정목록'], ['T', '(캘린더) 오늘로'],
 ];
 
@@ -80,7 +81,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setQuick(true); return; }
       if (e.key === 'g') { gPressed.current = Date.now(); return; }
       if (Date.now() - gPressed.current < 1200) {
-        const to = { h: '/', m: '/tasks?view=my', c: '/calendar' }[e.key];
+        const to = { h: '/', m: '/tasks?view=my', c: '/calendar', p: '/plan' }[e.key];
         if (to) { e.preventDefault(); router.push(to); }
         gPressed.current = 0;
       }
@@ -285,7 +286,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <button onClick={() => setMore(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button>
               </div>
               <div className="my-1 border-t border-line" />
-              {([['/tasks', '전체 업무', ListTodo], ['/projects', '프로젝트', FolderKanban], ['/templates', '템플릿', LayoutTemplate], ['/settings', '설정·알림', Settings],
+              {([['/plan', '오늘·이번 주', CalendarClock], ['/tasks', '전체 업무', ListTodo], ['/projects', '프로젝트', FolderKanban], ['/templates', '템플릿', LayoutTemplate], ['/settings', '설정·알림', Settings],
                 ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)', CalendarDays]] : []),
                 ...(canManage(session.user.role) ? MANAGE_NAV.map((n) => [n.href, n.label, n.icon]) : []),
                 ...(admin ? ADMIN_NAV.map((n) => [n.href, n.label, n.icon]) : [])] as [string, string, LucideIcon][]).map(([h, l, I]) => (

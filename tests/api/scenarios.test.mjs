@@ -21,6 +21,7 @@ after(async () => {
   await sql?.end();
 });
 
+function weekMonday() { const d = new Date(today + 'T00:00:00Z'); const dow = (d.getUTCDay() + 6) % 7; return addDays(today, -dow); }
 const notifs = async (c) => (await c.ok('GET', '/api/notifications')).items;
 
 describe('① 초대 → 로그인 → 허용된 현장만 조회', () => {
@@ -594,6 +595,107 @@ describe('Asana 이상 P2 (B-14~B-17)', () => {
     assert.ok((await ctx.staffA.client.ok('GET', '/api/holidays?from=2026-11-01&to=2026-11-30')).holidays.some((x) => x.name === '임시공휴일'));
     await ctx.owner.ok('DELETE', '/api/holidays/2026-11-20');
     assert.ok(!(await ctx.staffA.client.ok('GET', '/api/holidays?from=2026-11-01&to=2026-11-30')).holidays.length);
+  });
+});
+
+describe('일정 × 업무 통합 (S-1~S-10)', () => {
+  const at = (date, hm) => `${date}T${hm}:00+09:00`;
+  const siteCal = async (c) => (await c.ok('GET', '/api/calendars')).calendars.find((x) => x.org_unit_id === ctx.siteA).id;
+  test('S-1 일정–업무 N:M: 참석자가 연결, 업무 쪽에서도 보임, 권한 밖 업무는 숨김, 다른 현장은 404', async () => {
+    const cal = await siteCal(ctx.managerA.client);
+    const d = addDays(today, 2);
+    const ev = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '주간 운영 점검 회의', start: at(d, '10:00'), end: at(d, '11:00'), attendeeIds: [ctx.staffA.id] })).id;
+    const t1 = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '회의 자료 준비', orgUnitId: ctx.siteA })).id;
+    await ctx.staffA.client.ok('POST', `/api/events/${ev}/tasks`, { taskId: t1 });
+    const hidden = (await ctx.owner.ok('POST', '/api/tasks', { title: '본사 내부 검토', orgUnitId: ctx.hq })).id;
+    await ctx.owner.ok('POST', `/api/events/${ev}/tasks`, { taskId: hidden });
+    const seen = (await ctx.staffA.client.ok('GET', `/api/events/${ev}/tasks`)).tasks.map((t) => t.id);
+    assert.ok(seen.includes(t1)); assert.ok(!seen.includes(hidden), '권한 밖 업무는 목록에 없음');
+    assert.equal((await ctx.owner.ok('GET', `/api/events/${ev}/tasks`)).tasks.length, 2);
+    assert.ok((await ctx.staffA.client.ok('GET', `/api/tasks/${t1}/events`)).events.some((e) => e.id === ev), '업무에서 연결 일정 보임');
+    assert.equal((await ctx.staffB.client.get(`/api/events/${ev}/tasks`)).status, 404);
+    assert.equal((await ctx.staffA.client.post(`/api/events/${ev}/tasks`, { taskId: hidden })).status, 404, '볼 수 없는 업무 연결 불가');
+    await ctx.staffA.client.ok('DELETE', `/api/events/${ev}/tasks/${t1}`);
+    assert.ok(!(await ctx.staffA.client.ok('GET', `/api/events/${ev}/tasks`)).tasks.some((t) => t.id === t1));
+  });
+  test('S-2 회의 메모 저장 → 메모 줄로 후속 업무(담당=참석자, 마감 회의+3일) 자동 연결·알림', async () => {
+    const cal = await siteCal(ctx.managerA.client);
+    const d = addDays(today, 1);
+    const ev = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '시설 개선 회의', start: at(d, '14:00'), end: at(d, '15:00'), attendeeIds: [ctx.staffA.id] })).id;
+    await ctx.staffA.client.ok('PUT', `/api/events/${ev}/notes`, { body: '- 샤워실 배수구 교체 견적\n- 락커 번호판 재부착' });
+    assert.match((await ctx.managerA.client.ok('GET', `/api/events/${ev}/notes`)).body, /배수구/);
+    assert.equal((await ctx.staffB.client.req('PUT', `/api/events/${ev}/notes`, { body: 'x' })).status, 404);
+    const r = await ctx.managerA.client.ok('POST', `/api/events/${ev}/tasks`, { title: '샤워실 배수구 교체 견적', assigneeId: ctx.staffA.id, noteLine: '샤워실 배수구 교체 견적' });
+    const t = (await ctx.staffA.client.ok('GET', `/api/tasks/${r.id}`)).task;
+    assert.equal(t.due_date, addDays(d, 3)); assert.equal(t.org_unit_id, ctx.siteA); assert.equal(t.assignee_id, ctx.staffA.id);
+    const lk = (await ctx.staffA.client.ok('GET', `/api/events/${ev}/tasks`)).tasks.find((x) => x.id === r.id);
+    assert.equal(lk.link_role, 'followup'); assert.equal(lk.note_line, '샤워실 배수구 교체 견적');
+    assert.ok((await notifs(ctx.staffA.client)).some((n) => n.title.includes('샤워실 배수구')));
+  });
+  test('S-3·S-6 업무 시간 블록은 N:M 연결·배정 시간 합산, 예상 시간 대비 마감 위험', async () => {
+    const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '월말 정산 보고서', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 1), estimateMinutes: 3000 })).id;
+    const cal = (await ctx.staffA.client.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    const d = addDays(today, 1);
+    const b = (await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '월말 정산 보고서', start: at(d, '09:00'), end: at(d, '11:00'), taskId: t, kind: 'task_block' })).id;
+    const det = await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
+    assert.equal(det.task.scheduled_minutes, 120); assert.equal(det.task.estimate_minutes, 3000);
+    assert.equal(det.risk.risk, true, '50시간 예상, 마감 내일 → 위험');
+    assert.ok((await ctx.staffA.client.ok('GET', `/api/tasks/${t}/events`)).events.some((e) => e.id === b && e.role === 'block'));
+    assert.ok((await ctx.staffA.client.ok('GET', '/api/tasks?view=risk')).tasks.some((x) => x.id === t));
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { estimateMinutes: 60 });
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).risk.risk, false, '배정 시간이 예상보다 많으면 위험 아님');
+  });
+  test('S-7 가용 시간: 회의·업무 블록 반영, 본인·관리자만', async () => {
+    const d = addDays(weekMonday(), 7 + 2); // 다음 주 수요일
+    const cal = (await ctx.staffA.client.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '외부 교육', start: at(d, '09:00'), end: at(d, '12:00') });
+    const me = (await ctx.staffA.client.ok('GET', `/api/availability?date=${d}`)).days[0];
+    assert.equal(me.meetingMinutes, 180); assert.equal(me.capacity, 480); assert.equal(me.freeMinutes, 300);
+    assert.equal((await ctx.managerA.client.ok('GET', `/api/availability?userId=${ctx.staffA.id}&date=${d}`)).days[0].freeMinutes, 300);
+    assert.equal((await ctx.staffB.client.get(`/api/availability?userId=${ctx.staffA.id}&date=${d}`)).status, 403);
+  });
+  test('S-8 준비 업무: 묶음으로 D-n 업무 생성, 일정 날짜를 옮기면 미완료 준비 업무 마감도 이동', async () => {
+    const cal = await siteCal(ctx.managerA.client);
+    const d = addDays(today, 20);
+    const ev = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '봄 GX 개강', start: at(d, '10:00'), end: at(d, '11:00') })).id;
+    const { ids } = await ctx.managerA.client.ok('POST', `/api/events/${ev}/prep`, { preset: 'gx_open', assigneeId: ctx.staffA.id });
+    assert.equal(ids.length, 3);
+    const dues = await Promise.all(ids.map(async (id) => (await ctx.managerA.client.ok('GET', `/api/tasks/${id}`)).task));
+    assert.deepEqual(dues.map((t) => t.due_date).sort(), [addDays(d, -7), addDays(d, -5), addDays(d, -1)].sort());
+    const doneId = dues.find((t) => t.due_date === addDays(d, -1)).id;
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${doneId}`, { status: 'done' });
+    const nd = addDays(d, 3);
+    await ctx.managerA.client.ok('PATCH', `/api/events/${ev}`, { start: at(nd, '10:00'), end: at(nd, '11:00'), scope: 'all' });
+    const after = await Promise.all(ids.map(async (id) => (await ctx.managerA.client.ok('GET', `/api/tasks/${id}`)).task));
+    assert.ok(after.some((t) => t.due_date === addDays(nd, -7)) && after.some((t) => t.due_date === addDays(nd, -5)), '미완료 준비 업무 이동');
+    assert.equal(after.find((t) => t.id === doneId).due_date, addDays(d, -1), '완료한 준비 업무는 그대로');
+  });
+  test('S-9 반복 회의 회차마다 업무 1건(중복 없음), 회차 취소 시 그 업무 정리', async () => {
+    const cal = await siteCal(ctx.managerA.client);
+    const first = addDays(today, 1);
+    const ev = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '주간 매니저 회의', start: at(first, '09:00'), end: at(first, '10:00'), rrule: 'FREQ=WEEKLY;COUNT=6', attendeeIds: [ctx.staffA.id] })).id;
+    await ctx.managerA.client.ok('POST', `/api/events/${ev}/series`, { title: '주간 보고 작성', daysBefore: 1, assigneeId: ctx.staffA.id });
+    await tick(); await tick();
+    const mk = async () => (await sql`select et.task_id, et.occurrence_start, t.deleted_at, t.due_date from event_tasks et join tasks t on t.id = et.task_id where et.event_id = ${ev} and et.role = 'series' order by et.occurrence_start`);
+    let rows = await mk();
+    assert.equal(rows.length, 2, '14일 안 회차 2건 (중복 없음)');
+    assert.equal(new Date(rows[0].due_date).toISOString().slice(0, 10) <= first, true);
+    const second = rows[1].occurrence_start.toISOString();
+    await ctx.managerA.client.ok('DELETE', `/api/events/${ev}?scope=this&occurrenceStart=${encodeURIComponent(second)}`);
+    await tick();
+    rows = await mk();
+    assert.ok(rows.find((r) => r.occurrence_start.toISOString() === second).deleted_at, '취소한 회차 업무 정리');
+    assert.equal(rows.filter((r) => !r.deleted_at).length, 1);
+  });
+  test('S-10 일정 알림에 연결 업무 맥락 (건수만)', async () => {
+    const cal = (await ctx.staffA.client.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    const s = new Date(Date.now() + 20 * 60000), e = new Date(Date.now() + 80 * 60000);
+    const ev = (await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '협력사 미팅', start: s.toISOString(), end: e.toISOString(), reminderMinutes: [30] })).id;
+    const late = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '견적서 회신', orgUnitId: ctx.siteA, dueDate: addDays(today, -1) })).id;
+    await ctx.staffA.client.ok('POST', `/api/events/${ev}/tasks`, { taskId: late });
+    await tick();
+    const n = (await notifs(ctx.staffA.client)).find((x) => x.title.includes('협력사 미팅'));
+    assert.ok(n, '알림 생성'); assert.match(n.body, /연결 업무 1건 중 미완료 1건\(지연 1건\)/);
   });
 });
 
