@@ -9,6 +9,7 @@
 - 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · Asana 로그인(대표) 후 검수 · 샘플 작업 공간 + 체험 종료 모달로 부분 검수만 가능(LOCAL_REVIEW 5절) · 다음: 실제 업무용 Asana 계정·작업 공간 확인 필요
 - 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · 새 Asana 시험 계정으로 L-11 완료, 대표 지시(Asana 참고만·더 높은 수준) 반영해 개발 과제 작성 · [BEYOND_ASANA_PLAN.md](BEYOND_ASANA_PLAN.md) · 다음: 클라우드 구현분 로컬 재검수
 - 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · 클라우드 5bbbbec merge, Windows 에서 `npm run db:migrate` 정상(R-1 확인), 대표 계정 로그인 재현(이 PC 정상), 디자인·UI/UX 검수 · [UIUX_REVIEW.md](UIUX_REVIEW.md) · 다음: 클라우드 디자인 개선분 재검수
+- 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · 클라우드 01b7f21 merge·빌드(UI/UX 개선 확인), 휴대폰 오류 원인 확인(Vercel 운영 DB 미설정), 일정×업무 통합 검수 · [TASK_SCHEDULE_INTEGRATION.md](TASK_SCHEDULE_INTEGRATION.md) · 다음: 대표 승인 시 L-1·L-2 운영 설정
 
 ## 클라우드 요청 (로컬이 적고 클라우드가 처리)
 근거와 재현은 [LOCAL_REVIEW.md](LOCAL_REVIEW.md) 3·4절.
@@ -21,6 +22,8 @@
 - [R-7 제안] 반복 일정 종료 조건(종료일·횟수)과 "매월 N번째 ○요일" — API 는 RRULE 을 받으므로 화면만 추가
 - [R-9 대표 지시, 2026-10-13] **Asana 는 참고만, 연동하지 않음. Asana 보다 높은 수준으로 개발** → 과제 목록 [BEYOND_ASANA_PLAN.md](BEYOND_ASANA_PLAN.md) (P0: 업무 상세 패널·내 업무 자동 묶음·섹션·Ctrl+K·R-1~R-7 / P1: 사진 증빙 완료·현장 QR 신고·다단계 결재·자동화 규칙·사용자 지정 필드(올바른 집계)·업무 유형 / P2: 현장 비교 대시보드·주간 보고 자동 생성·업무량)
 - [R-10 대표 지시, 2026-10-13] **디자인·UI/UX 수준 향상** + 대표 계정 로그인 오류 → [UIUX_REVIEW.md](UIUX_REVIEW.md). 먼저 버그 U-0a(`/tasks?view=board` 같은 모르는 값이면 업무 화면 전체 오류), U-0b(오류 문구 "입력값을 확인해 주세요"만 표시), U-0c(연결 실패 시 영어 문구), U-0d(**Pretendard 글꼴 미로딩 → Windows 맑은 고딕**). 이어서 디자인 시스템(글꼴·색 토큰·lucide 아이콘·아바타·DueChip·토스트·스켈레톤) → 상단 바·목록·보드·상세 패널·대시보드·캘린더·모바일·로그인 순서
+- [R-11 대표 지시, 2026-10-13] **일정 × 업무 통합 + 기업용 업무관리 수준 이상** → [TASK_SCHEDULE_INTEGRATION.md](TASK_SCHEDULE_INTEGRATION.md). 현재는 업무→일정 한 방향만 연결. S-P0: 일정–업무 N:M 연결, 회의 메모→후속 업무, 업무 시간 블록 개선(담당자 캘린더 기본·미리보기에 업무 링크·완료·제목 접두어 중복 버그), 시간 표기 통일 / S-P1: 통합 오늘·이번 주 화면(업무를 시간표로 끌어 놓기), 예상 소요 시간·마감 위험, 가용 시간 기반 업무량, 일정 준비 업무 자동, 반복 회의↔반복 업무
+- [R-12, 2026-10-13] 휴대폰 "서버 오류" = Vercel 운영 `dagym-workspace.vercel.app` 에 DATABASE_URL 없음(health 503). DB 미설정이면 로그인 화면에 원인 안내 요청. 운영 설정(L-1·L-2)은 로컬이 대표 승인 후 진행
 - [R-8 참고] 자동 시험이 Linux 전용 경로(`/tmp/claude-0`, `node_modules/.bin/next`, openssl)를 써서 Windows 에서 못 돎. 필수 아님 — 원하면 `os.tmpdir()`·`process.execPath`+`next/dist/bin/next` 로 바꾸면 로컬에서도 회귀 시험 가능
 
 ## 클라우드 회신 (클라우드는 이 파일 대신 NEXT_ACTION.md 의 "로컬 요청 처리" 절에 답합니다)
