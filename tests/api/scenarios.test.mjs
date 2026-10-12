@@ -505,6 +505,37 @@ describe('Asana 이상 P1 (B-7~B-13)', () => {
   });
 });
 
+describe('UI/UX 검수 버그 (U-0a·U-0b) · 개인정보 파기', () => {
+  test('U-0a 목록 조회는 모르는 보기·옵션 값을 무시하고 200', async () => {
+    for (const qs of ['view=board', 'view=xyz', 'includeDone=yes', 'from=not-a-date&to=2026-13-99', 'limit=abc']) {
+      const r = await ctx.staffA.client.get(`/api/tasks?${qs}`);
+      assert.equal(r.status, 200, qs);
+    }
+    assert.equal((await ctx.staffA.client.get('/api/tasks?projectId=not-a-uuid')).status, 400, '식별자 오류는 그대로 400');
+  });
+  test('U-0b 검증 오류 문구에 항목 이름과 한국어 이유', async () => {
+    const r = await ctx.staffA.client.post('/api/tasks', { title: '', orgUnitId: ctx.siteA, priority: 'zzz' });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error.message, /제목: 제목을 입력하세요/);
+    assert.match(r.body.error.message, /우선순위: 허용되지 않는 값/);
+    assert.ok(r.body.error.detail.fields.some((f) => f.label === '제목'));
+    const l = await new Client('x').req('POST', '/api/auth/login', { email: 'not-an-email', password: '' });
+    assert.match(l.body.error.message, /이메일/);
+  });
+  test('현장 신고자 이름·연락처는 처리 완료 1년 뒤 정기 실행에서 파기', async () => {
+    const fid = (await ctx.managerA.client.ok('POST', '/api/forms', { orgUnitId: ctx.siteA, kind: 'complaint' })).id;
+    const tok = (await ctx.managerA.client.ok('GET', '/api/forms')).forms.find((x) => x.id === fid).token;
+    await new Client('anon2').ok('POST', `/api/public/forms/${tok}`, { content: '락커 열쇠가 고장났어요', name: '김회원', phone: '010-9999-0000', agree: true }, { 'x-forwarded-for': '10.7.7.7' });
+    const [s1] = await sql`select s.id, s.task_id from form_submissions s where s.form_id = ${fid}`;
+    await sql`update tasks set status = 'done', completed_at = now() - interval '400 days' where id = ${s1.task_id}`;
+    await tick();
+    const [s2] = await sql`select reporter_name, reporter_phone, purged_at from form_submissions where id = ${s1.id}`;
+    assert.equal(s2.reporter_name, null); assert.equal(s2.reporter_phone, null); assert.ok(s2.purged_at);
+    const [t] = await sql`select description from tasks where id = ${s1.task_id}`;
+    assert.ok(!t.description.includes('010-9999-0000') && t.description.includes('보관 기간 경과로 삭제'));
+  });
+});
+
 describe('네트워크 재시도 중복 방지 (Idempotency-Key)', () => {
   test('같은 키로 두 번 보내도 업무는 하나', async () => {
     const h = { 'idempotency-key': 'retry-key-1' };

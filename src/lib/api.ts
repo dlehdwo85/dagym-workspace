@@ -4,6 +4,7 @@ import { currentUser } from './auth';
 import { db } from './db';
 import { HttpError, unauthorized, badRequest, forbidden } from './errors';
 import { logError } from './log';
+import { describeZod } from './zod-ko';
 import type { SessionUser } from './types';
 
 type Ctx<P> = { req: NextRequest; user: SessionUser; params: P };
@@ -36,8 +37,9 @@ export function errorResponse(e: unknown, req?: NextRequest) {
     return NextResponse.json({ error: { code: e.code, message: e.message, detail: e.detail } }, { status: e.status });
   }
   if (e instanceof ZodError) {
+    const d = describeZod(e);
     return NextResponse.json(
-      { error: { code: 'validation', message: '입력값을 확인해 주세요', detail: e.flatten() } },
+      { error: { code: 'validation', message: d.message, detail: { ...e.flatten(), fields: d.fields } } },
       { status: 400 },
     );
   }
@@ -113,5 +115,7 @@ export function clientIp(req: NextRequest) {
 }
 
 export const zUuid = z.string().uuid();
-export const zDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 형식');
-export const zTime = z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'HH:MM 형식');
+/** 실제 있는 날짜만 (2026-13-99 같은 값은 DB 오류 대신 400) */
+export const zDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '날짜는 YYYY-MM-DD 형식이어야 합니다')
+  .refine((s) => { const d = new Date(s + 'T00:00:00Z'); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; }, '없는 날짜입니다');
+export const zTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, '시각은 HH:MM 형식이어야 합니다');

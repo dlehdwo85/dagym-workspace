@@ -1,7 +1,10 @@
 'use client';
 import { useRef, useState } from 'react';
 import { api, broadcastRefresh } from './client';
-import { Button, Field, Modal, inputCls, toast, fmtDate } from './ui';
+import { Camera, FileText, Image as ImageIcon, Link2, Loader2, Paperclip, Trash2 } from 'lucide-react';
+import { Button, Field, Modal, inputCls, toast, fmtDate, fmtDateTime } from './ui';
+
+const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '');
 
 const SOURCE_LABEL: Record<string, string> = { upload: '업로드', google_drive: 'Google Drive', chatgpt: 'ChatGPT 결과물', notion: 'Notion', web: '웹 링크', other: '기타' };
 
@@ -17,7 +20,9 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
     for (const file of Array.from(files)) {
       setBusy(`${file.name} 올리는 중…`);
       try {
-        const r = await api('/api/attachments', { body: { taskId, eventId, kind: 'file', fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size } });
+        // B-7 촬영(파일 수정) 시각을 함께 기록 — 사진 증빙의 시점 확인용
+        const capturedAt = file.lastModified ? new Date(file.lastModified).toISOString() : undefined;
+        const r = await api('/api/attachments', { body: { taskId, eventId, kind: 'file', fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, capturedAt } });
         const up = await fetch(r.upload.url, { method: 'PUT', headers: r.upload.headers, body: file });
         if (!up.ok) throw new Error(`파일 전송 실패 (${up.status})`);
         await api(`/api/attachments/${r.id}/complete`, { body: {} });
@@ -44,36 +49,49 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
 
   return (
     <div>
+      {items.some(isImage) && (
+        <div className="mb-2 grid grid-cols-3 gap-2 sm:grid-cols-4" data-testid="photo-grid">
+          {items.filter(isImage).map((a) => (
+            <a key={a.id} href={`/api/attachments/${a.id}/download?inline=1`} target="_blank" rel="noopener noreferrer" className="group relative block aspect-square overflow-hidden rounded-input border border-line bg-slate-100" title={a.file_name}>
+              <img src={`/api/attachments/${a.id}/download?inline=1`} alt={a.file_name} loading="lazy" className="size-full object-cover transition-transform group-hover:scale-105" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+              <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/60 to-transparent px-1.5 pb-1 pt-4 text-[10px] text-white">{a.captured_at ? fmtDateTime(a.captured_at) : a.file_name}</span>
+            </a>
+          ))}
+        </div>
+      )}
       <ul className="space-y-1.5" data-testid="attachments">
         {items.map((a) => (
-          <li key={a.id} className="flex items-start gap-2 rounded-md border px-2.5 py-2 text-sm">
-            <span aria-hidden>{a.kind === 'link' ? '🔗' : /^image\//.test(a.mime_type ?? '') ? '🖼' : '📄'}</span>
+          <li key={a.id} className="flex items-center gap-2.5 rounded-input border border-line px-2.5 py-2 text-sm">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-ink-2" aria-hidden>
+              {a.kind === 'link' ? <Link2 className="size-4" /> : isImage(a) ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}
+            </span>
             <div className="min-w-0 flex-1">
-              <a href={`/api/attachments/${a.id}/download${a.kind === 'file' ? '?inline=1' : ''}`} target="_blank" rel="noopener noreferrer" className="block truncate font-medium text-brand-700 hover:underline">
+              <a href={`/api/attachments/${a.id}/download${a.kind === 'file' ? '?inline=1' : ''}`} target="_blank" rel="noopener noreferrer" className="block truncate font-medium text-accent-700 hover:underline">
                 {a.doc_title || a.file_name || a.url}
               </a>
-              <div className="flex flex-wrap gap-x-2 text-xs text-slate-500">
+              <div className="flex flex-wrap gap-x-2 text-xs text-ink-2">
                 <span>{SOURCE_LABEL[a.source] ?? a.source}</span>
                 {a.doc_version && <span>버전 {a.doc_version}</span>}
                 {a.doc_base_date && <span>기준일 {fmtDate(a.doc_base_date)}</span>}
                 {a.doc_owner && <span>문서 담당 {a.doc_owner}</span>}
                 {a.size_bytes ? <span>{fmtSize(Number(a.size_bytes))}</span> : null}
+                {a.captured_at && <span>촬영 {fmtDateTime(a.captured_at)}</span>}
                 <span>{a.created_by_name}</span>
                 {a.kind === 'link' && <span className="truncate">원본: {(() => { try { return new URL(a.url).hostname; } catch { return ''; } })()}</span>}
               </div>
             </div>
-            {(a.created_by === meId || canEdit) && <button onClick={() => remove(a.id)} className="text-xs text-slate-400 hover:text-red-600" aria-label="첨부 삭제">삭제</button>}
+            {(a.created_by === meId || canEdit) && <button onClick={() => remove(a.id)} className="rounded p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" aria-label="첨부 삭제"><Trash2 className="size-4" /></button>}
           </li>
         ))}
-        {!items.length && <li className="text-xs text-slate-400">첨부된 자료가 없습니다</li>}
+        {!items.length && <li className="text-xs text-ink-3">첨부된 자료가 없습니다</li>}
       </ul>
       <div className="mt-2 flex flex-wrap gap-1.5">
         <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="file-input" />
         <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => upload(e.target.files)} />
-        <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={!!busy}>파일 첨부</Button>
-        <Button size="sm" variant="secondary" onClick={() => camRef.current?.click()} disabled={!!busy}>사진 촬영</Button>
-        <Button size="sm" variant="secondary" onClick={() => setLinkOpen(true)}>문서 링크 연결</Button>
-        {busy && <span className="text-xs text-slate-500">{busy}</span>}
+        <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={!!busy}><Paperclip />파일 첨부</Button>
+        <Button size="sm" variant="secondary" onClick={() => camRef.current?.click()} disabled={!!busy}><Camera />사진 촬영</Button>
+        <Button size="sm" variant="secondary" onClick={() => setLinkOpen(true)}><Link2 />문서 링크 연결</Button>
+        {busy && <span className="inline-flex items-center gap-1.5 text-xs text-ink-2"><Loader2 className="size-3.5 animate-spin" />{busy}</span>}
       </div>
       <Modal open={linkOpen} onClose={() => setLinkOpen(false)} title="문서 링크 연결">
         <form onSubmit={addLink} className="space-y-3">

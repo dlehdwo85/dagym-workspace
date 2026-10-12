@@ -10,6 +10,7 @@ import luxonPlugin from '@fullcalendar/luxon3';
 import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
+import { CalendarPlus, CircleCheck } from 'lucide-react';
 import { Button, ErrorBox, Field, Modal, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { MultiUserSelect, RecurSelect, ReminderEditor } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
@@ -64,7 +65,11 @@ export default function CalendarPage() {
   const mobile = typeof window !== 'undefined' && window.innerWidth < 640;
 
   useEffect(() => { try { localStorage.setItem('wos_cal_hidden', JSON.stringify(hidden)); } catch {} }, [hidden]);
-  useEffect(() => { const id = sp.get('event'); if (id) setEditor({ id }); }, [sp]);
+  useEffect(() => {
+    const id = sp.get('event'); if (id) setEditor({ id });
+    if (sp.get('new') === '1') { setEditor({ draft: { date: seoulDate(new Date()) } }); router.replace('/calendar'); }
+  }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [preview, setPreview] = useState<{ ev: any; x: number; y: number } | null>(null);
 
   async function load() {
     if (!range) return;
@@ -87,7 +92,7 @@ export default function CalendarPage() {
       extendedProps: { type: 'event', ev: e }, editable: true,
     })),
     ...(showTasks ? tasks.filter((t) => t.due_date).map((t) => ({
-      id: `task|${t.id}`, title: `☑ ${t.title}${t.due_time ? ` (${t.due_time} 마감)` : ''}`, start: t.due_date, allDay: true,
+      id: `task|${t.id}`, title: `${t.title}${t.due_time ? ` (${t.due_time} 마감)` : ''}`, start: t.due_date, allDay: true,
       backgroundColor: '#ffffff', textColor: t.due_date < seoulDate(new Date()) ? '#dc2626' : '#1f3a5f', borderColor: '#1f3a5f',
       classNames: ['task-due'], extendedProps: { type: 'task', task: t }, durationEditable: false,
     })) : []),
@@ -128,31 +133,34 @@ export default function CalendarPage() {
     i.jsEvent.preventDefault();
     const p = i.event.extendedProps;
     if (p.type === 'task') { router.push(`/tasks/${p.task.id}`); return; }
-    setEditor({ id: p.ev.id, occurrenceStart: p.ev.originalStart ?? undefined });
+    // 일정은 먼저 작은 미리보기 → 편집
+    const r = (i.el as HTMLElement).getBoundingClientRect();
+    setPreview({ ev: p.ev, x: Math.min(window.innerWidth - 336, Math.max(16, r.left)), y: Math.min(window.innerHeight - 220, r.bottom + 6) });
   }
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-lg font-bold">캘린더</h1>
-        <Button onClick={() => setEditor({ draft: { date: seoulDate(new Date()) } })}>+ 일정 등록</Button>
+        <h1 className="text-xl font-bold tracking-tight">캘린더</h1>
+        <Button onClick={() => setEditor({ draft: { date: seoulDate(new Date()) } })}><CalendarPlus />일정 등록</Button>
       </div>
       <div className="flex flex-wrap gap-1.5 text-xs" aria-label="표시할 캘린더">
         {cals.data?.calendars.map((c) => (
           <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])}
-            className={cx('flex items-center gap-1 rounded-full border px-2 py-0.5', hidden.includes(c.id) ? 'bg-white text-slate-400' : 'bg-white text-slate-700')}>
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : c.color }} />{c.name}
+            aria-pressed={!hidden.includes(c.id)}
+            className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition-colors', hidden.includes(c.id) ? 'border-line bg-white text-ink-3 line-through' : 'border-line bg-white text-ink shadow-card hover:border-slate-300')}>
+            <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : c.color }} />{c.name}
           </button>
         ))}
-        <button onClick={() => setShowTasks(!showTasks)} className={cx('rounded-full border border-dashed px-2 py-0.5', showTasks ? 'border-brand-600 text-brand-700' : 'text-slate-400')}>☑ 업무 마감일</button>
+        <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border border-dashed px-2.5 py-1 font-medium', showTasks ? 'border-brand-500 bg-white text-brand-700' : 'border-slate-300 text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무 마감일</button>
       </div>
       <ErrorBox error={err} retry={load} />
-      <div className="rounded-lg border bg-white p-2" data-testid="calendar">
+      <div className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="calendar">
         <FullCalendar
           ref={calRef}
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
           timeZone="Asia/Seoul" locale="ko" firstDay={1} height="auto" nowIndicator
-          initialView={mobile ? 'listWeek' : 'dayGridMonth'}
+          initialView={mobile ? 'listWeek' : 'timeGridWeek'}
           headerToolbar={mobile ? { left: 'prev,next', center: 'title', right: 'today' } : { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' }}
           footerToolbar={mobile ? { center: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' } : undefined}
           buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
@@ -166,8 +174,28 @@ export default function CalendarPage() {
           select={(s) => setEditor({ draft: { date: seoulDate(s.start), allDay: s.allDay, start: s.allDay ? '09:00' : seoulTime(s.start), end: s.allDay ? '10:00' : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) } })}
         />
       </div>
-      <p className="text-xs text-slate-500">☑ 점선 항목은 업무 마감일(날짜 기준)이고, 색이 채워진 항목은 시간이 정해진 일정입니다. 끌어서 옮기면 원본 업무·일정에 바로 반영됩니다.</p>
+      <p className="text-xs text-ink-2">점선 항목은 업무 마감일(날짜 기준)이고, 색이 채워진 항목은 시간이 정해진 일정입니다. 끌어서 옮기면 원본 업무·일정에 바로 반영됩니다.</p>
       <ScopeDialog />
+      {preview && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPreview(null)} />
+          <div role="dialog" aria-label="일정 미리보기" className="fixed z-50 w-80 animate-fade-up rounded-card border border-line bg-white p-4 shadow-pop" style={{ left: preview.x, top: preview.y }}>
+            <div className="flex items-start gap-2.5">
+              <span className="mt-1 size-3 shrink-0 rounded" style={{ background: preview.ev.color }} />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold leading-snug">{preview.ev.title}</p>
+                <p className="mt-1 text-sm text-ink-2">{preview.ev.allDay ? `${seoulDate(preview.ev.start)} 종일` : `${fmtDateTime(preview.ev.start)} ~ ${seoulTime(preview.ev.end)}`}</p>
+                {preview.ev.location && <p className="mt-0.5 text-sm text-ink-2">{preview.ev.location}</p>}
+                <p className="mt-1 text-xs text-ink-3">{cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}{preview.ev.recurring ? ' · 반복 일정' : ''}</p>
+              </div>
+            </div>
+            <div className="mt-3 flex justify-end gap-1.5">
+              <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>닫기</Button>
+              <Button size="sm" onClick={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }}>자세히·편집</Button>
+            </div>
+          </div>
+        </>
+      )}
       {editor && <EventEditor {...editor} calendars={cals.data?.calendars ?? []} onClose={() => { setEditor(null); if (sp.get('event')) router.replace('/calendar'); }} onSaved={() => { load(); broadcastRefresh(); }} dirUsers={dir.users} />}
     </div>
   );

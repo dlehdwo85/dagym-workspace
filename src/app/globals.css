@@ -2,14 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --canvas: #f7f8fa; --surface: #ffffff; --line: #e5e7eb;
+  --ink: #111827; --ink-2: #4b5563; --ink-3: #9ca3af;
+}
 html { -webkit-text-size-adjust: 100%; }
-body { background: #f8fafc; color: #0f172a; }
+body { background: var(--canvas); color: var(--ink); font-feature-settings: 'ss06'; letter-spacing: -0.005em; }
+.tabular, time, .num { font-variant-numeric: tabular-nums; }
 input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 @media (min-width: 640px) { input, select, textarea { font-size: 14px; } }
-.fc { font-size: 13px; }
-.fc .fc-toolbar-title { font-size: 1.05rem; font-weight: 700; }
-.fc .fc-button { padding: 0.25rem 0.6rem; font-size: 0.8rem; background: #fff; color: #334155; border-color: #cbd5e1; }
+:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.skeleton { background: linear-gradient(90deg, #eef0f3 0, #f6f7f9 40px, #eef0f3 80px); background-size: 800px 100%; animation: shimmer 1.3s linear infinite; }
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 8px; }
+
+/* FullCalendar */
+.fc { font-size: 13px; --fc-border-color: #eceef1; --fc-today-bg-color: #eff6ff; --fc-page-bg-color: #fff; }
+.fc .fc-toolbar-title { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.01em; }
+.fc .fc-button { padding: 0.3rem 0.7rem; font-size: 0.8rem; background: #fff; color: #374151; border-color: #e5e7eb; border-radius: 8px; box-shadow: none !important; }
+.fc .fc-button:hover { background: #f3f4f6; color: #111827; }
 .fc .fc-button-primary:not(:disabled).fc-button-active, .fc .fc-button-primary:not(:disabled):active { background: #1f3a5f; border-color: #1f3a5f; color: #fff; }
-.fc .fc-daygrid-event { cursor: pointer; }
-.fc-event.task-due { border-style: dashed !important; }
+.fc .fc-col-header-cell-cushion { font-weight: 600; color: #4b5563; padding: 6px 4px; }
+.fc .fc-daygrid-day-number { color: #4b5563; font-variant-numeric: tabular-nums; padding: 6px 8px; }
+.fc .fc-day-today .fc-daygrid-day-number { background: #2563eb; color: #fff; border-radius: 9999px; min-width: 24px; text-align: center; margin: 3px; padding: 2px 6px; }
+.fc .fc-daygrid-event, .fc .fc-timegrid-event { cursor: pointer; border-radius: 6px; padding: 1px 4px; font-weight: 500; }
+.fc-event.task-due { border-style: dashed !important; border-width: 1.5px !important; background: #fff !important; }
+.fc-event.task-due .fc-event-title, .fc-event.task-due .fc-event-time { color: #374151 !important; }
 @media (max-width: 640px) { .fc .fc-toolbar { flex-direction: column; gap: 0.4rem; } }
+
+/* QR 인쇄: 인쇄 영역만 출력 */
+@media print {
+  body * { visibility: hidden !important; }
+  .print-area, .print-area * { visibility: visible !important; }
+  .print-area { position: fixed; left: 50%; top: 20mm; transform: translateX(-50%); border: none !important; width: 150mm; max-width: none; }
+}

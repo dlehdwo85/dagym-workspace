@@ -60,7 +60,15 @@ async function cleanup() {
   const c = await sql`delete from google_oauth_states where created_at < now() - interval '1 hour'`;
   const d = await sql`update attachments set deleted_at = now() where upload_status = 'pending' and created_at < now() - interval '1 day' and deleted_at is null`;
   const e = await sql`delete from job_runs where started_at < now() - interval '60 days'`;
-  return { idempotency: a.count, sessions: b.count, oauthStates: c.count, staleUploads: d.count, jobRuns: e.count };
+  // B-8 현장 신고자 이름·연락처: 처리 완료 1년 뒤 파기 (신고 양식 동의 문구와 개인정보처리방침에 적은 기준)
+  const expired = await sql<{ task_id: string }[]>`update form_submissions s set reporter_name = null, reporter_phone = null, purged_at = now()
+    from tasks t where t.id = s.task_id and s.purged_at is null and (s.reporter_name is not null or s.reporter_phone is not null)
+      and t.status = 'done' and t.completed_at < now() - interval '1 year' returning s.task_id`;
+  if (expired.length) {
+    await sql`update tasks set description = regexp_replace(description, E'\n신고자: [^\n]*', E'\n신고자: (보관 기간 경과로 삭제)')
+      where id = any(${expired.map((r) => r.task_id)}::uuid[])`;
+  }
+  return { idempotency: a.count, sessions: b.count, oauthStates: c.count, staleUploads: d.count, jobRuns: e.count, reporterPurged: expired.length };
 }
 
 /** 서버 정기 실행 (GitHub Actions 스케줄러가 5~15분마다 호출). 대표 PC 와 무관하게 동작 */

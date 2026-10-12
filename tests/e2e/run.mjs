@@ -14,7 +14,7 @@ async function step(name, fn) {
   const t0 = Date.now();
   try { await fn(); results.push({ name, ok: true, ms: Date.now() - t0 }); console.log('✔', name); }
   catch (e) {
-    results.push({ name, ok: false, error: e.message.split('\n')[0] }); console.log('✖', name, '\n   ', e.message.split('\n').slice(0, 3).join('\n    '));
+    results.push({ name, ok: false, error: e.message.split('\n')[0] }); console.log('✖', name, '\n   ', e.message.split('\n').slice(0, 14).join('\n    '));
     // 실패 순간 화면을 남긴다 (원인 분석용, 저장소에는 올리지 않음)
     for (const [k, pg] of Object.entries(globalThis.__pages ?? {})) await pg.screenshot({ path: `test-results/fail-${results.length}-${k}.png`, fullPage: true }).catch(() => {});
   }
@@ -85,6 +85,7 @@ await step('① 직원이 초대 링크로 가입·로그인 → 허용된 현�
   await p.getByRole('button', { name: '가입하고 시작하기' }).click();
   await p.waitForURL(BASE + '/');
   await p.goto(BASE + '/tasks');
+  await p.getByTestId('filter-toggle').click();
   const options = await p.locator('select').filter({ hasText: '모든 현장·부서' }).locator('option').allTextContents();
   assert.deepEqual(options.map((o) => o.trim()), ['모든 현장·부서', '다짐 강남점 (지점)']);
   await p.screenshot({ path: `${SHOTS}/03-staff-tasks-scope.png` });
@@ -93,7 +94,8 @@ await step('① 직원이 초대 링크로 가입·로그인 → 허용된 현�
 
 await step('② 대표가 + 버튼으로 업무 등록·담당자 배정', async () => {
   await owner.goto(BASE + '/tasks');
-  await owner.getByRole('button', { name: '업무 등록' }).click();
+  await owner.getByTestId('create-menu').click(); // 상단 바 "+ 만들기" → 업무
+  await owner.getByRole('menuitem', { name: /^업무/ }).click();
   const dlg = owner.getByRole('dialog', { name: '업무 등록' });
   await dlg.getByLabel('제목').fill('강남점 소방 점검 대응');
   await dlg.getByLabel('담당자').selectOption({ label: '이직원' });
@@ -277,7 +279,7 @@ await step('B-4 Ctrl+K 검색 → Enter 로 업무 열기, 권한 밖 결과 없
 // ④ 캘린더 반복 일정 (화면)
 await step('④ 캘린더 화면에서 매주 반복 일정 등록 → 주 보기에서 끌어 이동 → "이번 일정만"', async () => {
   await owner.goto(BASE + '/calendar');
-  await owner.getByRole('button', { name: '+ 일정 등록' }).click();
+  await owner.getByRole('button', { name: '일정 등록' }).click();
   const dlg = owner.getByRole('dialog', { name: '일정 등록' });
   await dlg.getByLabel('제목').fill('주간 운영 회의');
   await dlg.getByLabel('캘린더').selectOption({ label: '회사 일정' });
@@ -384,6 +386,155 @@ await step('모바일 대시보드·캘린더·하단 메뉴 화면', async () =
   await staff.getByRole('button', { name: '업무 등록' }).click();
   await staff.getByRole('dialog', { name: '업무 등록' }).waitFor();
   await staff.screenshot({ path: `${SHOTS}/19-mobile-quick-add.png` });
+});
+
+// UI/UX 개선 (UIUX_REVIEW) + Asana 이상 P1 화면
+await step('U-0a 알 수 없는 주소 값(/tasks?view=board·?view=xyz)에도 화면 정상 + 보드로 해석', async () => {
+  await owner.goto(BASE + '/tasks?view=board');
+  await owner.getByTestId('board').waitFor();
+  assert.equal(await owner.getByText('불러오지 못했습니다').count(), 0);
+  await owner.goto(BASE + '/tasks?view=xyz&from=not-a-date');
+  await owner.getByTestId('task-list').waitFor();
+  assert.equal(await owner.getByText('불러오지 못했습니다').count(), 0);
+});
+await step('U-0b·U-0c 검증 오류는 항목 이름과 한국어로, 연결 실패는 한국어 안내', async () => {
+  const r = await ctx.owner.post('/api/tasks', { title: '', orgUnitId: ctx.siteA });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error.message, /제목: 제목을 입력하세요/);
+  const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR' });
+  const p = await c.newPage();
+  await p.goto(BASE + '/login');
+  await p.route('**/api/auth/login', (route) => route.abort('connectionrefused'));
+  await p.getByLabel('회사 이메일').fill('ceo@dagym.test');
+  await p.getByLabel('비밀번호').fill('x');
+  await p.getByRole('button', { name: '로그인' }).click();
+  await p.getByText('서버에 연결할 수 없습니다').waitFor({ timeout: 15000 });
+  assert.equal(await p.getByText('Failed to fetch').count(), 0);
+  await p.getByRole('button', { name: '다시 시도' }).waitFor();
+  await p.screenshot({ path: `${SHOTS}/34-login-network-error.png` });
+  // 글꼴: Pretendard 가 실제로 내려받아져 적용됨
+  const fam = await p.evaluate(async () => { await document.fonts.ready; return [getComputedStyle(document.body).fontFamily, document.fonts.check('16px "Pretendard Variable"', '업무')]; });
+  assert.match(fam[0], /Pretendard Variable/); assert.equal(fam[1], true, 'Pretendard 글꼴 로드');
+  await c.close();
+});
+await step('목록: 원형 체크로 완료 → 되돌리기, 필터 칩 표시·해제, 상단 검색(Ctrl K 버튼)', async () => {
+  const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '원형 체크 시험', orgUnitId: ctx.siteA, approvalRequired: false })).id;
+  await owner.goto(BASE + '/tasks?mode=list');
+  await owner.getByLabel('업무 검색').fill('원형 체크');
+  const row = owner.locator(`[data-task-id="${id}"]`);
+  await row.getByTestId('check-circle').click();
+  await owner.getByText('완료했습니다').waitFor();
+  await owner.waitForTimeout(500);
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
+  await owner.getByRole('button', { name: '되돌리기' }).click();
+  await owner.waitForTimeout(800);
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'todo');
+  await owner.getByTestId('filter-toggle').click();
+  await owner.getByTestId('filter-panel').getByLabel('상태').selectOption('todo');
+  await owner.getByTestId('filter-chip').filter({ hasText: '상태: 예정' }).waitFor();
+  await owner.screenshot({ path: `${SHOTS}/35-task-list-filters.png` });
+  await owner.getByRole('button', { name: '상태: 예정 필터 해제' }).click();
+  assert.equal(await owner.getByTestId('filter-chip').count(), 0);
+  await owner.getByTestId('open-palette').click();
+  await owner.getByTestId('palette-input').waitFor();
+  await owner.keyboard.press('Escape');
+});
+await step('B-8 현장 QR: 관리자가 양식 만들고 QR 표시 → 비로그인 휴대폰으로 신고 → 현장 업무 생성', async () => {
+  await owner.goto(BASE + '/forms');
+  await owner.getByRole('button', { name: '양식 만들기' }).first().click();
+  const dlg = owner.getByRole('dialog', { name: '신고 양식 만들기' });
+  await dlg.locator('select').first().selectOption({ label: '　다짐 강남점 (지점)' });
+  await dlg.getByRole('button', { name: '만들기' }).click();
+  await owner.getByTestId('forms').getByText('다짐 강남점 · 시설 고장').waitFor();
+  await owner.getByRole('button', { name: 'QR 보기·인쇄' }).first().click();
+  await owner.getByTestId('qr-sheet').locator('img').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/36-site-qr.png` });
+  const url = await owner.getByTestId('qr-sheet').locator('p.break-all').textContent();
+  await owner.keyboard.press('Escape');
+  const pc = await browser.newContext({ ...devices['iPhone 13'], locale: 'ko-KR' });
+  const p = await pc.newPage();
+  await p.goto(url.trim());
+  await p.getByText('다짐 강남점 시설 고장 신고').waitFor();
+  await p.getByLabel('고장 내용').fill('2층 런닝머신 3번 벨트가 미끄러집니다');
+  await p.getByLabel('위치 (선택)').fill('2층 유산소존');
+  await p.getByRole('button', { name: '신고 보내기' }).click();
+  await p.getByTestId('report-done').waitFor();
+  await p.screenshot({ path: `${SHOTS}/37-public-report-done.png` });
+  await pc.close();
+  const [t] = await sql`select id, assignee_id from tasks where title like '[시설 고장] 2층 런닝머신%'`;
+  assert.equal(t.assignee_id, ctx.managerA.id);
+});
+await step('B-9 결재선 화면에서 2단계 결재선 만들기 → 업무에 지정 → 현장 관리자·대표 순서로 화면에서 승인', async () => {
+  await owner.goto(BASE + '/admin/approvals');
+  await owner.getByRole('button', { name: '결재선 만들기' }).first().click();
+  const dlg = owner.getByRole('dialog', { name: '결재선 만들기' });
+  await dlg.getByLabel('이름', { exact: true }).fill('계약 결재');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await owner.getByTestId('approval-lines').getByText('계약 결재').waitFor();
+  const id = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'PT 강사 계약서 검토', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, taskType: 'approval' })).id;
+  await owner.goto(`${BASE}/tasks/${id}`);
+  await owner.getByLabel('결재선').selectOption({ label: '계약 결재 (2단계)' });
+  await owner.waitForTimeout(600);
+  await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
+  const c = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const m = await login(c, ctx.managerA.email, ctx.managerA.password);
+  await m.goto(`${BASE}/tasks/${id}`);
+  await m.getByTestId('approval-steps').getByRole('button', { name: '승인' }).click();
+  await m.getByText('승인했습니다').waitFor();
+  await c.close();
+  await owner.goto(`${BASE}/tasks/${id}`);
+  await owner.getByTestId('approval-steps').getByText('승인 · 최매니저').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/38-approval-steps.png` });
+  await owner.getByTestId('approval-steps').getByRole('button', { name: '승인' }).click();
+  await owner.getByText('최종 승인으로 완료되었습니다').waitFor();
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
+});
+await step('B-11 프로젝트 필드: 퍼센트 필드 추가 → 업무 상세에서 값 입력 → 평균 집계', async () => {
+  const pid = (await ctx.owner.ok('POST', '/api/projects', { name: '필드 화면 시험', orgUnitId: ctx.siteA })).id;
+  for (const [title, v] of [['필드 A', 80], ['필드 B', 90]]) await ctx.owner.ok('POST', '/api/tasks', { title, projectId: pid });
+  await owner.goto(`${BASE}/projects/${pid}`);
+  await owner.getByRole('tab', { name: '사용자 지정 필드' }).click();
+  await owner.getByRole('button', { name: '필드 추가' }).click();
+  const dlg = owner.getByRole('dialog', { name: '필드 추가' });
+  await dlg.getByLabel('이름').fill('달성률');
+  await dlg.getByLabel('형식').selectOption('percent');
+  await dlg.getByRole('button', { name: '추가' }).click();
+  await owner.getByTestId('fields-manager').getByText('달성률').first().waitFor();
+  const tasks = (await ctx.owner.ok('GET', `/api/tasks?projectId=${pid}`)).tasks;
+  for (const [i, v] of [[0, '80'], [1, '90']]) {
+    await owner.goto(`${BASE}/tasks/${tasks[i].id}`);
+    const input = owner.getByLabel('달성률');
+    await input.fill(v); await input.blur();
+    await owner.waitForTimeout(500);
+  }
+  await owner.goto(`${BASE}/projects/${pid}`);
+  await owner.getByRole('tab', { name: '사용자 지정 필드' }).click();
+  await owner.getByTestId('field-summary').getByText('85%').first().waitFor();
+  await owner.screenshot({ path: `${SHOTS}/39-project-fields.png` });
+});
+await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
+  const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');
+  await p.getByRole('heading', { name: '전체 현황' }).waitFor();
+  await p.waitForTimeout(400);
+  await p.screenshot({ path: `${SHOTS}/40-dashboard-1440.png`, fullPage: true });
+  await p.goto(BASE + '/tasks?mode=list');
+  await p.getByTestId('task-list').waitFor();
+  await p.screenshot({ path: `${SHOTS}/41-task-list-1440.png` });
+  await p.goto(BASE + '/tasks?mode=board');
+  await p.getByTestId('board').waitFor();
+  await p.screenshot({ path: `${SHOTS}/42-board-1440.png` });
+  await p.goto(`${BASE}/tasks/${taskId}`);
+  await p.getByTestId('task-title').waitFor();
+  await p.screenshot({ path: `${SHOTS}/43-task-detail-1440.png`, fullPage: true });
+  await p.goto(BASE + '/login');
+  await c.close();
+  const c2 = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR' });
+  const p2 = await c2.newPage();
+  await p2.goto(BASE + '/login');
+  await p2.getByLabel('회사 이메일').waitFor();
+  await p2.screenshot({ path: `${SHOTS}/44-login-1440.png` });
+  await c2.close();
 });
 
 await step('⑨ 서버 재시작 중 오류 안내 → 재시작 후 데이터 유지·정상 동작', async () => {

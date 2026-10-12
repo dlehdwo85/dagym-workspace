@@ -13,6 +13,7 @@ export const GET = handler(async ({ user, req }) => {
   const projects = await sql`
     select p.id, p.name, p.description, p.org_unit_id, p.brand_id, p.owner_id, p.color, p.archived, p.updated_at,
       o.name as org_unit_name, u.name as owner_name,
+      exists (select 1 from project_favorites f where f.project_id = p.id and f.user_id = ${user.id}) as favorite,
       (select count(*)::int from tasks t where t.project_id = p.id and t.deleted_at is null and t.parent_id is null) as task_count,
       (select count(*)::int from tasks t where t.project_id = p.id and t.deleted_at is null and t.parent_id is null and t.status = 'done') as done_count
     from projects p join org_units o on o.id = p.org_unit_id left join users u on u.id = p.owner_id

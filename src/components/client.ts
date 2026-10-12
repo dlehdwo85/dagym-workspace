@@ -30,7 +30,7 @@ async function raw(url: string, method: string, body?: unknown, key?: string) {
     if (res.status === 401 && typeof window !== 'undefined' && !location.pathname.startsWith('/login')) {
       location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
     }
-    throw new ApiError(res.status, j?.error?.code ?? 'error', j?.error?.message ?? `요청 실패 (${res.status})`, j?.error?.detail);
+    throw new ApiError(res.status, j?.error?.code ?? 'error', j?.error?.message ?? (res.status >= 500 ? `서버가 잠시 응답하지 않습니다 (${res.status}). 잠시 후 다시 시도하세요.` : `요청을 처리하지 못했습니다 (${res.status})`), j?.error?.detail);
   }
   return j;
 }
@@ -59,7 +59,7 @@ export async function api<T = any>(url: string, opts: { method?: string; body?: 
     throw new ApiError(0, 'queued', '오프라인 상태입니다. 연결되면 자동으로 전송합니다.');
   }
   if (lastErr instanceof ApiError) throw lastErr;
-  throw new ApiError(0, 'network', '네트워크에 연결할 수 없습니다. 연결을 확인한 뒤 다시 시도하세요.');
+  throw new ApiError(0, 'network', '서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도하세요.');
 }
 
 export async function flushOutbox(): Promise<number> {

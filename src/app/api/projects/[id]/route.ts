@@ -6,7 +6,11 @@ import { getProjectOrThrow } from '@/lib/tasks';
 import { activity } from '@/lib/log';
 import { projectInput } from '@/lib/projects';
 
-export const GET = handler<{ id: string }>(async ({ user, params }) => ({ project: await getProjectOrThrow(user, params.id) }));
+export const GET = handler<{ id: string }>(async ({ user, params }) => {
+  const project = await getProjectOrThrow(user, params.id);
+  const [f] = await db()`select 1 from project_favorites where user_id = ${user.id} and project_id = ${params.id}`;
+  return { project: { ...project, favorite: !!f } };
+});
 
 export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {
   const p = await getProjectOrThrow(user, params.id);

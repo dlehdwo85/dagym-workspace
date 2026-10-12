@@ -64,19 +64,20 @@ const TASK_FROM = (sql: Sql) => sql`
   left join org_units o on o.id = t.org_unit_id`;
 
 export const listQuery = z.object({
-  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review']).default('all'),
+  // U-0a 주소창 값은 사람이 고칠 수 있다 — 모르는 보기·옵션 값은 오류 대신 기본값으로
+  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review']).catch('all'),
   projectId: zUuid.optional(),
   orgUnitId: zUuid.optional(),
   brandId: z.string().optional(),
   assigneeId: zUuid.optional(),
   status: z.string().optional(), // 콤마 구분
   q: z.string().max(100).optional(),
-  from: zDate.optional(),
-  to: zDate.optional(),
+  from: zDate.optional().catch(undefined),
+  to: zDate.optional().catch(undefined),
   parentId: zUuid.optional(),
-  includeSubtasks: z.enum(['0', '1']).optional(),
-  includeDone: z.enum(['0', '1']).optional(),
-  limit: z.coerce.number().int().min(1).max(1000).default(500),
+  includeSubtasks: z.enum(['0', '1']).optional().catch(undefined),
+  includeDone: z.enum(['0', '1']).optional().catch(undefined),
+  limit: z.coerce.number().int().min(1).max(1000).catch(500),
 });
 
 export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
@@ -157,9 +158,12 @@ export async function getTaskDetail(u: SessionUser, id: string) {
         where a.entity_type = 'task' and a.entity_id = ${id} order by a.created_at desc limit 100`,
     sql`select id, start_at, end_at, title from events where task_id = ${id} and deleted_at is null order by start_at`,
   ]);
-  const { openRound } = await import('./approvals');
+  const { openRound, stepApprovers } = await import('./approvals');
   const approvals = await openRound(sql, id);
-  return { task: t, perms, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals };
+  const pending = t.status === 'review' ? approvals.find((a) => a.status === 'pending' && a.round === approvals[0]?.round) : null;
+  const canDecide = pending ? (await stepApprovers(sql, t.org_unit_id, pending)).includes(u.id) : false;
+  const fields = t.project_id ? await sql`select id, name, type, options, aggregate from project_fields where project_id = ${t.project_id} order by sort, created_at` : [];
+  return { task: t, perms: { ...perms, decide: canDecide }, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {

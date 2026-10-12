@@ -4,7 +4,7 @@ import { useSession } from './session';
 import { inputCls } from './ui';
 import { UNIT_TYPE_LABEL } from '@/lib/types';
 
-export function UnitSelect({ value, onChange, allowEmpty, id }: { value: string | null | undefined; onChange: (v: string) => void; allowEmpty?: string; id?: string }) {
+export function UnitSelect({ value, onChange, allowEmpty, id, className }: { value: string | null | undefined; onChange: (v: string) => void; allowEmpty?: string; id?: string; className?: string }) {
   const { dir } = useSession();
   const tree = useMemo(() => {
     const out: { id: string; label: string }[] = [];
@@ -23,17 +23,17 @@ export function UnitSelect({ value, onChange, allowEmpty, id }: { value: string 
     return out;
   }, [dir.orgUnits]);
   return (
-    <select id={id} className={inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
+    <select id={id} className={className ?? inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       {allowEmpty !== undefined && <option value="">{allowEmpty}</option>}
       {tree.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
     </select>
   );
 }
 
-export function UserSelect({ value, onChange, placeholder = '담당자 없음', id }: { value: string | null | undefined; onChange: (v: string | null) => void; placeholder?: string; id?: string }) {
+export function UserSelect({ value, onChange, placeholder = '담당자 없음', id, className }: { value: string | null | undefined; onChange: (v: string | null) => void; placeholder?: string; id?: string; className?: string }) {
   const { dir } = useSession();
   return (
-    <select id={id} className={inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+    <select id={id} className={className ?? inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
       <option value="">{placeholder}</option>
       {dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
     </select>
@@ -61,10 +61,10 @@ export function MultiUserSelect({ value, onChange }: { value: string[]; onChange
   );
 }
 
-export function BrandSelect({ value, onChange }: { value: string | null | undefined; onChange: (v: string | null) => void }) {
+export function BrandSelect({ value, onChange, className }: { value: string | null | undefined; onChange: (v: string | null) => void; className?: string }) {
   const { dir } = useSession();
   return (
-    <select className={inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+    <select className={className ?? inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
       <option value="">브랜드 공통</option>
       {dir.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
     </select>

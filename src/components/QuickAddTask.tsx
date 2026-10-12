@@ -43,7 +43,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           body: {
             title: f.title, description: f.description, priority: f.priority, assigneeId: f.assigneeId, orgUnitId: f.orgUnitId,
             projectId: f.projectId || null, parentId: defaults?.parentId, sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null, dueDate: f.dueDate || null, dueTime: f.dueTime || null,
-            startDate: f.startDate || null, approvalRequired: f.approvalRequired, recurrenceRule: f.recurrenceRule, brandId: f.brandId,
+            startDate: f.taskType === 'milestone' ? null : f.startDate || null, approvalRequired: f.approvalRequired, taskType: f.taskType ?? 'normal', recurrenceRule: f.recurrenceRule, brandId: f.brandId,
             tags: f.tags ? f.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : [],
           },
         });
@@ -72,13 +72,21 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
             </select>
           </Field>
         )}
+        {!tpl && (
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="업무 유형">
+            {([['normal', '일반'], ['milestone', '마일스톤'], ['approval', '결재'], ['inspection', '점검(사진 증빙)']] as const).map(([k, l]) => (
+              <button type="button" key={k} role="radio" aria-checked={(f.taskType ?? 'normal') === k} onClick={() => set('taskType')(k)}
+                className={(f.taskType ?? 'normal') === k ? 'rounded-full border border-brand-600 bg-brand-600 px-3 py-1 text-xs font-medium text-white' : 'rounded-full border border-line bg-white px-3 py-1 text-xs font-medium text-ink-2 hover:border-slate-300'}>{l}</button>
+            ))}
+          </div>
+        )}
         <Field label="제목"><input autoFocus className={inputCls} value={f.title ?? ''} onChange={(e) => set('title')(e.target.value)} placeholder="무엇을 해야 하나요?" maxLength={200} /></Field>
         {!tpl && <Field label="설명"><textarea className={inputCls} rows={3} value={f.description ?? ''} onChange={(e) => set('description')(e.target.value)} /></Field>}
         <div className="grid grid-cols-2 gap-3">
           <Field label="담당자"><UserSelect value={f.assigneeId} onChange={set('assigneeId')} /></Field>
           <Field label="마감일"><input type="date" className={inputCls} value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} /></Field>
           {!tpl && <Field label="마감 시각 (선택)"><input type="time" className={inputCls} value={f.dueTime ?? ''} onChange={(e) => set('dueTime')(e.target.value)} /></Field>}
-          {!tpl && <Field label="시작일 (선택)"><input type="date" className={inputCls} value={f.startDate ?? ''} onChange={(e) => set('startDate')(e.target.value)} /></Field>}
+          {!tpl && f.taskType !== 'milestone' && <Field label="시작일 (선택)"><input type="date" className={inputCls} value={f.startDate ?? ''} onChange={(e) => set('startDate')(e.target.value)} /></Field>}
           {!tpl && (
             <Field label="우선순위">
               <select className={inputCls} value={f.priority} onChange={(e) => set('priority')(e.target.value)}>
@@ -101,7 +109,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
         )}
         {!tpl && (
           <div className="grid grid-cols-2 gap-3">
-            <div><div className="mb-1 text-xs font-medium text-slate-600">반복 (마감일 기준)</div><RecurSelect value={f.recurrenceRule} onChange={set('recurrenceRule')} anchorDate={f.dueDate} /></div>
+            <div><div className="mb-1 text-xs font-medium text-ink-2">반복 (마감일 기준)</div><RecurSelect value={f.recurrenceRule} onChange={set('recurrenceRule')} anchorDate={f.dueDate} /></div>
             <Field label="태그 (쉼표 구분)"><input className={inputCls} value={f.tags ?? ''} onChange={(e) => set('tags')(e.target.value)} /></Field>
           </div>
         )}

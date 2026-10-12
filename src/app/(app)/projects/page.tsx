@@ -1,9 +1,11 @@
 'use client';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Archive, FolderKanban, FolderPlus, Star } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession, canManage } from '@/components/session';
-import { BrandDot, Button, Empty, ErrorBox, Field, Loading, Modal, inputCls, toast } from '@/components/ui';
+import { Avatar, BrandDot, Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { BrandSelect, UnitSelect, UserSelect } from '@/components/pickers';
 
 export default function Projects() {
@@ -12,28 +14,45 @@ export default function Projects() {
   const { data, error, loading, reload } = useApi<{ projects: any[] }>(`/api/projects${archived ? '?archived=1' : ''}`);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<any>({});
+  const sp = useSearchParams();
+  const router = useRouter();
+  useEffect(() => { if (sp.get('new') === '1' && canManage(user.role)) { setF({ ownerId: user.id }); setOpen(true); router.replace('/projects'); } }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function toggleFav(e: React.MouseEvent, p: any) {
+    e.preventDefault(); e.stopPropagation();
+    try { await api(`/api/projects/${p.id}/favorite`, { method: p.favorite ? 'DELETE' : 'PUT' }); reload(); window.dispatchEvent(new Event('wos-favorites')); } catch (er: any) { toast.error(er.message); }
+  }
   async function create(e: React.FormEvent) {
     e.preventDefault();
     try { const r = await api('/api/projects', { body: { ...f, orgUnitId: f.orgUnitId ?? dir.orgUnits[0]?.id } }); setOpen(false); location.href = `/projects/${r.id}`; } catch (er: any) { toast.error(er.message); }
   }
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold">프로젝트</h1>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={() => setArchived(!archived)}>{archived ? '진행 중 보기' : '보관함'}</Button>
-          {canManage(user.role) && <Button size="sm" onClick={() => { setF({ ownerId: user.id }); setOpen(true); }}>+ 프로젝트</Button>}
-        </div>
-      </div>
-      {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !data?.projects.length ? <Empty title="프로젝트가 없습니다">{canManage(user.role) ? '+ 프로젝트로 시작하세요.' : '관리자가 만든 프로젝트가 여기에 표시됩니다.'}</Empty> : (
+    <div className="space-y-4">
+      <PageHeader title={archived ? '보관된 프로젝트' : '프로젝트'} actions={<>
+        <Button variant="secondary" onClick={() => setArchived(!archived)}><Archive />{archived ? '진행 중 보기' : '보관함'}</Button>
+        {canManage(user.role) && <Button onClick={() => { setF({ ownerId: user.id }); setOpen(true); }}><FolderPlus />프로젝트</Button>}
+      </>} />
+      {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={4} /> : !data?.projects.length ? <Empty title="프로젝트가 없습니다" icon={FolderKanban}>{canManage(user.role) ? '오픈 준비·캠페인처럼 여러 업무를 묶을 때 프로젝트를 만드세요.' : '관리자가 만든 프로젝트가 여기에 표시됩니다.'}</Empty> : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {data.projects.map((p) => (
-            <Link key={p.id} href={`/projects/${p.id}`} className="rounded-lg border bg-white p-4 hover:border-brand-500">
-              <div className="flex items-center gap-2"><span className="h-3 w-3 rounded" style={{ background: p.color }} /><span className="font-semibold">{p.name}</span></div>
-              <p className="mt-1 line-clamp-2 text-xs text-slate-500">{p.description}</p>
-              <div className="mt-2 flex items-center gap-2 text-xs text-slate-500"><span>{p.org_unit_name}</span><BrandDot brand={p.brand_id} /><span>담당 {p.owner_name ?? '-'}</span></div>
-              <div className="mt-2 h-1.5 rounded bg-slate-100"><div className="h-1.5 rounded bg-emerald-500" style={{ width: `${p.task_count ? (p.done_count / p.task_count) * 100 : 0}%` }} /></div>
-              <div className="mt-1 text-right text-xs text-slate-500">{p.done_count}/{p.task_count} 완료</div>
+            <Link key={p.id} href={`/projects/${p.id}`} className="group relative overflow-hidden rounded-card border border-line bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-pop">
+              <span className="absolute inset-x-0 top-0 h-1" style={{ background: p.color }} />
+              <div className="flex items-start gap-2.5">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-input text-white" style={{ background: p.color }}><FolderKanban className="size-5" /></span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-semibold">{p.name}</div>
+                  <div className="mt-0.5 flex items-center gap-2 text-xs text-ink-2"><span className="truncate">{p.org_unit_name}</span><BrandDot brand={p.brand_id} /></div>
+                </div>
+                <button onClick={(e) => toggleFav(e, p)} aria-label={p.favorite ? `${p.name} 즐겨찾기 해제` : `${p.name} 즐겨찾기`} aria-pressed={p.favorite}
+                  className={cx('rounded-md p-1 transition-colors hover:bg-slate-100', p.favorite ? 'text-amber-400' : 'text-slate-300 group-hover:text-slate-400')}>
+                  <Star className="size-[18px]" fill={p.favorite ? 'currentColor' : 'none'} />
+                </button>
+              </div>
+              <p className="mt-2 line-clamp-2 min-h-[2.5em] text-sm text-ink-2">{p.description || <span className="text-ink-3">설명 없음</span>}</p>
+              <div className="mt-3 flex items-center gap-2">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${p.task_count ? (p.done_count / p.task_count) * 100 : 0}%` }} /></div>
+                <span className="text-xs font-medium text-ink-2 tabular-nums">{p.done_count}/{p.task_count}</span>
+              </div>
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-ink-2"><Avatar id={p.owner_id} name={p.owner_name} size={20} />{p.owner_name ?? '담당 없음'}</div>
             </Link>
           ))}
         </div>

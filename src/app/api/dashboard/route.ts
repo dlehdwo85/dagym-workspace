@@ -41,7 +41,13 @@ export const GET = handler(async ({ user, req }) => {
   const [totals] = await sql`select count(*) filter (where t.status <> 'done')::int as open,
       count(*) filter (where t.status = 'done' and t.completed_at > now() - interval '30 days')::int as done_30d,
       count(*) filter (where t.status <> 'done' and t.due_date < ${today})::int as overdue,
-      count(*) filter (where t.status = 'review')::int as review ${base}`;
+      count(*) filter (where t.status = 'review')::int as review,
+      count(*) filter (where t.status = 'done' and t.completed_at > now() - interval '7 days')::int as done_7d,
+      count(*) filter (where t.status = 'done' and t.completed_at between now() - interval '14 days' and now() - interval '7 days')::int as done_prev7d,
+      count(*) filter (where t.created_at > now() - interval '7 days')::int as created_7d,
+      count(*) filter (where t.created_at between now() - interval '14 days' and now() - interval '7 days')::int as created_prev7d,
+      count(*) filter (where t.status = 'todo')::int as s_todo, count(*) filter (where t.status = 'in_progress')::int as s_in_progress,
+      count(*) filter (where t.status = 'on_hold')::int as s_on_hold ${base}`;
   return {
     scope: units === null ? 'company' : 'units', canApprove: atLeast(user, 'site_manager'), today, week,
     totals, important, overdue, review, bySite, workload, completion,
