@@ -327,19 +327,19 @@ function MyGroupedList({ tasks, onPatch, onAcked }: { tasks: Task[]; onPatch: (t
   }
   return (
     <div className="space-y-3" data-testid="my-groups">
-      {groups.filter((x) => x.items.length).map((x) => (
+      {groups.filter((x) => x.items.length).map((x, gi) => (
         <section key={x.key} data-group={x.key}>
           <h2 className={cx('mb-1.5 flex items-center gap-2 px-1 text-sm font-semibold', x.key === 'over' ? 'text-red-600' : 'text-ink')}>
             {x.label}<span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums">{x.items.length}</span>
           </h2>
-          <ListView tasks={x.items} onPatch={onPatch} onAck={x.key === 'new' ? async (t) => { try { await api(`/api/tasks/${t.id}/ack`, { body: {} }); onAcked(); } catch (e: any) { toast.error(e.message); } } : undefined} />
+          <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} onAck={x.key === 'new' ? async (t) => { try { await api(`/api/tasks/${t.id}/ack`, { body: {} }); onAcked(); } catch (e: any) { toast.error(e.message); } } : undefined} />
         </section>
       ))}
     </div>
   );
 }
 
-function ListView({ tasks, onPatch, onAck, empty }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode }) {
+function ListView({ tasks, onPatch, onAck, empty, hint = true }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean }) {
   const openTask = useContext(OpenTaskCtx);
   if (!tasks.length) return <>{empty ?? <Empty title="조건에 맞는 업무가 없습니다" icon={Search}>필터를 바꾸거나 <b>만들기</b>(단축키 N)로 업무를 등록하세요.</Empty>}</>;
   // ↑↓ 로 행 이동, Enter 로 열기
@@ -354,24 +354,58 @@ function ListView({ tasks, onPatch, onAck, empty }: { tasks: Task[]; onPatch: (t
   };
   return (
     <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list" onKeyDown={onKey}>
-      {tasks.map((t) => (
-        <div key={t.id} tabIndex={0} data-row={t.id} data-task-id={t.id}
-          className="group flex min-h-[44px] items-center gap-3 border-b border-line px-3 py-2 last:border-b-0 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none">
-          <CheckCircle t={t} onPatch={onPatch} />
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
-            <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
-              <TypeIcon t={t} />
-              <TaskLink id={t.id} className={cx('truncate text-sm font-medium text-ink hover:text-accent-600 hover:underline', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
-            </span>
-            <Meta t={t} />
-          </div>
-          {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
-          <span className="hidden w-[60px] justify-end sm:flex"><PriorityTag p={t.priority} /></span>
-          <span className="hidden sm:inline-flex"><StatusSelect t={t} onPatch={onPatch} /></span>
-          <DueEdit t={t} onPatch={onPatch} />
-          <Avatar id={t.assignee_id} name={t.assignee_name} size={24} />
+      {hint && <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">행을 오른쪽으로 밀면 완료, 왼쪽으로 밀면 보류</p>}
+      {tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} />)}
+    </div>
+  );
+}
+
+/** 목록 행. 모바일에서는 오른쪽으로 밀면 완료(또는 검토 요청), 왼쪽으로 밀면 보류 */
+function ListRow({ t, onPatch, onAck }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void }) {
+  const { user } = useSession();
+  const start = useRef<{ x: number; y: number; lock: 'x' | 'y' | null } | null>(null);
+  const [dx, setDx] = useState(0);
+  const TH = 80;
+  const right = nextStatusOnCheck(t, user.role);
+  const swipe = async (to: TaskStatus) => {
+    const before = t.status;
+    if (await onPatch(t, { status: to }) !== false) toast.ok(to === 'on_hold' ? '보류로 바꿨습니다' : to === 'review' ? '검토를 요청했습니다' : to === 'done' ? '완료했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: to, version: t.version + 1 }, { status: before }) });
+  };
+  return (
+    <div className="relative overflow-hidden border-b border-line last:border-b-0">
+      {dx !== 0 && (
+        <div className={cx('absolute inset-0 flex items-center px-5 text-sm font-semibold text-white', dx > 0 ? 'justify-start bg-emerald-500' : 'justify-end bg-zinc-500')} aria-hidden>
+          {dx > 0 ? (right === 'review' ? '검토 요청' : right === 'done' ? '완료' : '다시 진행') : '보류'}
         </div>
-      ))}
+      )}
+      <div tabIndex={0} data-row={t.id} data-task-id={t.id}
+        style={dx ? { transform: `translateX(${dx}px)` } : undefined}
+        onTouchStart={(e) => { start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, lock: null }; }}
+        onTouchMove={(e) => {
+          const st = start.current; if (!st) return;
+          const mx = e.touches[0].clientX - st.x, my = e.touches[0].clientY - st.y;
+          if (!st.lock && (Math.abs(mx) > 10 || Math.abs(my) > 10)) st.lock = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+          if (st.lock === 'x') setDx(Math.max(-140, Math.min(140, mx)));
+        }}
+        onTouchEnd={() => {
+          const d = dx; start.current = null; setDx(0);
+          if (d > TH) swipe(right); else if (d < -TH && t.status !== 'on_hold' && t.status !== 'done') swipe('on_hold');
+        }}
+        className={cx('group relative flex min-h-[44px] items-center gap-3 bg-white px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', !dx && 'transition-transform')}>
+        <CheckCircle t={t} onPatch={onPatch} />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+          <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
+            <TypeIcon t={t} />
+            <TaskLink id={t.id} className={cx('truncate text-sm font-medium text-ink hover:text-accent-600 hover:underline', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
+          </span>
+          <Meta t={t} />
+        </div>
+        {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
+        <span className="hidden w-[60px] justify-end sm:flex"><PriorityTag p={t.priority} /></span>
+        <span className="hidden sm:inline-flex"><StatusSelect t={t} onPatch={onPatch} /></span>
+        <DueEdit t={t} onPatch={onPatch} />
+        <Avatar id={t.assignee_id} name={t.assignee_name} size={24} />
+      </div>
     </div>
   );
 }

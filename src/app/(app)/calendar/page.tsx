@@ -65,6 +65,22 @@ export default function CalendarPage() {
   const mobile = typeof window !== 'undefined' && window.innerWidth < 640;
 
   useEffect(() => { try { localStorage.setItem('wos_cal_hidden', JSON.stringify(hidden)); } catch {} }, [hidden]);
+  // B-17 공휴일(관리자 관리 표) + 캘린더 단축키 D·W·M·A·T
+  const hol = useApi<{ holidays: { date: string; name: string }[] }>('/api/holidays');
+  const holidaySet = useMemo(() => new Map((hol.data?.holidays ?? []).map((h) => [h.date, h.name])), [hol.data]);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || document.querySelector('[role=dialog]')) return;
+      const api = calRef.current?.getApi();
+      if (!api) return;
+      const view = ({ d: 'timeGridDay', w: 'timeGridWeek', m: 'dayGridMonth', a: 'listWeek' } as Record<string, string>)[e.key.toLowerCase()];
+      if (view) { e.preventDefault(); api.changeView(view); }
+      else if (e.key.toLowerCase() === 't') { e.preventDefault(); api.today(); }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
   useEffect(() => {
     const id = sp.get('event'); if (id) setEditor({ id });
     if (sp.get('new') === '1') { setEditor({ draft: { date: seoulDate(new Date()) } }); router.replace('/calendar'); }
@@ -85,6 +101,8 @@ export default function CalendarPage() {
   useEffect(() => { const h = () => load(); window.addEventListener('wos-refresh', h); return () => window.removeEventListener('wos-refresh', h); });
 
   const fcEvents = useMemo(() => [
+    ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
+      backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId)).map((e) => ({
       id: `${e.id}|${e.originalStart ?? ''}`, title: `${e.kind !== 'normal' ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${e.title}`,
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
@@ -96,7 +114,7 @@ export default function CalendarPage() {
       backgroundColor: '#ffffff', textColor: t.due_date < seoulDate(new Date()) ? '#dc2626' : '#1f3a5f', borderColor: '#1f3a5f',
       classNames: ['task-due'], extendedProps: { type: 'task', task: t }, durationEditable: false,
     })) : []),
-  ], [events, tasks, hidden, showTasks]);
+  ], [events, tasks, hidden, showTasks, hol.data]);
 
   async function moveEvent(info: EventDropArg | any) {
     const p = info.event.extendedProps;
@@ -132,6 +150,7 @@ export default function CalendarPage() {
   function onClick(i: EventClickArg) {
     i.jsEvent.preventDefault();
     const p = i.event.extendedProps;
+    if (p.type === 'holiday') return;
     if (p.type === 'task') { router.push(`/tasks/${p.task.id}`); return; }
     // 일정은 먼저 작은 미리보기 → 편집
     const r = (i.el as HTMLElement).getBoundingClientRect();
@@ -169,6 +188,8 @@ export default function CalendarPage() {
           events={fcEvents}
           datesSet={(a: DatesSetArg) => setRange({ from: a.start.toISOString(), to: a.end.toISOString() })}
           eventClick={onClick}
+          dayCellClassNames={(a) => { const d = seoulDate(a.date); return holidaySet.has(d) ? ['is-holiday'] : []; }}
+          dayHeaderClassNames={(a) => (a.view.type !== 'dayGridMonth' && holidaySet.has(seoulDate(a.date)) ? ['is-holiday'] : [])}
           eventDrop={moveEvent}
           eventResize={moveEvent}
           select={(s) => setEditor({ draft: { date: seoulDate(s.start), allDay: s.allDay, start: s.allDay ? '09:00' : seoulTime(s.start), end: s.allDay ? '10:00' : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) } })}
