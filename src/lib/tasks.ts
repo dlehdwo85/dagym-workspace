@@ -46,7 +46,9 @@ const TASK_COLS = (sql: Sql) => sql`
   (select count(*)::int from comments cm where cm.task_id = t.id and cm.deleted_at is null) as comment_count,
   (select count(*)::int from attachments at where at.task_id = t.id and at.deleted_at is null) as attachment_count,
   (select count(*)::int from task_dependencies d join tasks dt on dt.id = d.depends_on_id
-     where d.task_id = t.id and dt.status <> 'done' and dt.deleted_at is null) as blocked_by_count`;
+     where d.task_id = t.id and dt.status <> 'done' and dt.deleted_at is null) as blocked_by_count,
+  (select max(a.created_at) from activities a where a.entity_type = 'task' and a.entity_id = t.id
+     and (a.action = 'created' or a.changes ? 'assigneeId')) as assigned_at`;
 
 const TASK_FROM = (sql: Sql) => sql`
   from tasks t

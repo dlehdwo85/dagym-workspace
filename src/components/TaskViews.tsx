@@ -114,7 +114,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       )}
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : (
         <>
-          {mode === 'list' && <ListView tasks={tasks} onPatch={patch} />}
+          {mode === 'list' && ((fixed?.view ?? filters.view) === 'my' ? <MyGroupedList tasks={tasks} onPatch={patch} /> : <ListView tasks={tasks} onPatch={patch} />)}
           {mode === 'board' && <BoardView tasks={tasks} onPatch={patch} />}
           {mode === 'calendar' && <CalendarView tasks={tasks} onPatch={patch} />}
           {mode === 'timeline' && <TimelineView tasks={tasks} onPatch={patch} />}
@@ -142,6 +142,40 @@ function Meta({ t }: { t: Task }) {
       {t.recurrence_rule && <span title="반복 업무">↻</span>}
       {t.blocked_by_count > 0 && <span className="text-amber-700">선행 대기 {t.blocked_by_count}</span>}
     </span>
+  );
+}
+
+/** 내 업무: 최근 배정 → 기한 지남 → 오늘 → 이번 주 → 나중 → 날짜 없음 (Asana '내 작업' 참고) */
+function MyGroupedList({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => void }) {
+  const { user } = useSession();
+  if (!tasks.length) return <Empty title="내 업무가 없습니다">오른쪽 아래 + 버튼으로 업무를 등록하세요.</Empty>;
+  const today = todayStr();
+  const d = new Date(today + 'T00:00:00Z');
+  const weekEnd = new Date(d.getTime() + ((7 - ((d.getUTCDay() + 6) % 7)) - 1) * 86400000).toISOString().slice(0, 10); // 이번 주 일요일
+  const recentCut = Date.now() - 48 * 3600e3;
+  const groups: { key: string; label: string; items: Task[] }[] = [
+    { key: 'new', label: '최근 배정됨 (48시간)', items: [] }, { key: 'over', label: '기한 지남', items: [] }, { key: 'today', label: '오늘', items: [] },
+    { key: 'week', label: '이번 주', items: [] }, { key: 'later', label: '나중', items: [] }, { key: 'none', label: '마감일 없음', items: [] },
+  ];
+  const g = (k: string) => groups.find((x) => x.key === k)!.items;
+  for (const t of tasks) {
+    const anyT = t as any;
+    if (t.status === 'todo' && t.assignee_id === user.id && anyT.created_by !== user.id && new Date(anyT.assigned_at ?? anyT.created_at).getTime() > recentCut) g('new').push(t);
+    else if (!t.due_date) g('none').push(t);
+    else if (t.due_date < today) g('over').push(t);
+    else if (t.due_date === today) g('today').push(t);
+    else if (t.due_date <= weekEnd) g('week').push(t);
+    else g('later').push(t);
+  }
+  return (
+    <div className="space-y-3" data-testid="my-groups">
+      {groups.filter((x) => x.items.length).map((x) => (
+        <section key={x.key} data-group={x.key}>
+          <h2 className={cx('mb-1 px-1 text-xs font-semibold', x.key === 'over' ? 'text-red-600' : 'text-slate-500')}>{x.label} <span className="font-normal">{x.items.length}</span></h2>
+          <ListView tasks={x.items} onPatch={onPatch} />
+        </section>
+      ))}
+    </div>
   );
 }
 

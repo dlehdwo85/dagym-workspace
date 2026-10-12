@@ -286,6 +286,16 @@ await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 �
   assert.equal(await owner.getByTestId('detail-due').inputValue(), nd);
 });
 
+await step('내 업무 자동 묶음 (최근 배정·기한 지남·오늘·이번 주·나중)', async () => {
+  await ctx.owner.ok('POST', '/api/tasks', { title: '방금 배정된 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 20) });
+  await ctx.staffA.client.ok('POST', '/api/tasks', { title: '내가 만든 지난 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, -2) });
+  await staff.goto(BASE + '/tasks?view=my&mode=list');
+  const groups = staff.getByTestId('my-groups');
+  await groups.locator('[data-group="new"]').getByText('방금 배정된 업무').waitFor();
+  await groups.locator('[data-group="over"]').getByText('내가 만든 지난 업무').waitFor();
+  await staff.screenshot({ path: `${SHOTS}/29-mobile-my-groups.png`, fullPage: true });
+});
+
 await step('모바일 대시보드·캘린더·하단 메뉴 화면', async () => {
   await staff.goto(BASE + '/');
   await staff.getByText('님의 업무 현황').waitFor();
