@@ -98,7 +98,12 @@ export function describeRule(rule: string | null): string {
         .map((w: any) => days[typeof w === 'number' ? w : w.weekday]).join('·');
       s = `${iv > 1 ? iv + '주마다' : '매주'}${by ? ' ' + by + '요일' : ''}`; break;
     }
-    case RRule.MONTHLY: s = `${iv > 1 ? iv + '개월마다' : '매월'}${p.bymonthday ? ' ' + p.bymonthday + '일' : ''}`; break;
+    case RRule.MONTHLY: {
+      const wd = (Array.isArray(p.byweekday) ? p.byweekday : p.byweekday ? [p.byweekday] : []) as any[];
+      const nth = wd.length && typeof wd[0] !== 'number' && wd[0].n ? `${wd[0].n === -1 ? ' 마지막' : ` ${wd[0].n}번째`} ${days[wd[0].weekday]}요일` : '';
+      s = `${iv > 1 ? iv + '개월마다' : '매월'}${p.bymonthday ? ' ' + p.bymonthday + '일' : ''}${nth}`;
+      break;
+    }
     case RRule.YEARLY: s = iv > 1 ? `${iv}년마다` : '매년'; break;
     default: s = '반복';
   }

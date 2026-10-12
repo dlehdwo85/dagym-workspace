@@ -19,6 +19,8 @@ export const eventInput = z.object({
   end: z.string().datetime({ offset: true }),
   rrule: z.string().max(300).nullable().optional(),
   attendeeIds: z.array(zUuid).max(100).optional(),
+  /** 일정별 알림(분). null = 사용자 기본 설정. 시리즈(반복 전체) 단위로 저장 */
+  reminderMinutes: z.array(z.number().int().min(0).max(40320)).max(5).nullable().optional(),
   taskId: zUuid.nullable().optional(),
   version: z.number().int().optional(),
 });
@@ -191,9 +193,9 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   }
   return sql.begin(async (tx) => {
     const [ev] = await tx<{ id: string }[]>`
-      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by)
+      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes)
       values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
-        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id})
+        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)})
       returning id`;
     if (i.attendeeIds?.length) {
       await setAttendees(tx, ev.id, i.attendeeIds);
@@ -278,10 +280,10 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
       const cutRule = ruleUntilBefore(master.rrule!, occ);
       await tx`update events set rrule = ${cutRule}, version = version + 1, updated_at = now() where id = ${master.id}`;
       const [n] = await tx<{ id: string }[]>`
-        insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by)
+        insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes)
         values (${i.calendarId ?? master.calendar_id}, ${i.title ?? master.title}, ${i.description ?? master.description},
           ${i.location ?? master.location}, ${i.kind ?? master.kind}, ${i.allDay ?? master.all_day}, ${times.s}, ${times.e},
-          ${newRule}, ${master.task_id}, ${u.id})
+          ${newRule}, ${master.task_id}, ${u.id}, ${(master as any).reminder_minutes ?? null})
         returning id`;
       await tx`insert into event_attendees (event_id, user_id, response) select ${n.id}, user_id, response from event_attendees where event_id = ${master.id}`;
       // 분할 지점 이후 예외 행은 새 시리즈로 이동
@@ -326,6 +328,10 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
           body: `${u.name}님이 일정에 초대했습니다`, link: `/calendar?event=${attTarget}`, entityType: 'event', entityId: attTarget,
           actorId: u.id, dedupeKey: `evinv:${attTarget}:${Date.now()}` });
       }
+    }
+    if (i.reminderMinutes !== undefined) {
+      const seriesId = (result.newSeriesId as string | undefined) ?? master.id;
+      await tx`update events set reminder_minutes = ${normReminders(i.reminderMinutes)}, updated_at = now() where id = ${seriesId}`;
     }
     const [after] = await tx<{ version: number }[]>`select version from events where id = ${target}`;
     const attendeeIds = (await tx<{ user_id: string }[]>`select user_id from event_attendees where event_id = ${master.id}`).map((r) => r.user_id);
@@ -377,4 +383,10 @@ export async function respondEvent(u: SessionUser, id: string, response: 'accept
   if (!r.length) throw forbidden('참석자로 초대된 일정만 응답할 수 있습니다');
   await sql`update events set version = version + 1, updated_at = now() where id = ${masterId}`;
   return { ok: true };
+}
+
+/** 알림 분 목록 정리: 중복 제거·오름차순, 빈 배열은 '알림 없음'([]), null 은 기본값 */
+function normReminders(v: number[] | null | undefined): number[] | null {
+  if (v === undefined || v === null) return null;
+  return [...new Set(v)].sort((a, b) => a - b);
 }

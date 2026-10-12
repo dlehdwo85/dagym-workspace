@@ -477,3 +477,18 @@ export async function getProjectOrThrow(u: SessionUser, projectId: string) {
   }
   return { ...p, limited: false };
 }
+
+/** 멘션 대상: 요청자가 볼 수 있는 사용자 중 이 업무를 볼 수 있는 사람만 (서버 권한 기준) */
+export async function mentionableUsers(u: SessionUser, taskId: string) {
+  const sql = db();
+  const { task } = await loadTaskForUser(u, taskId, sql);
+  const { directory } = await import('./admin');
+  const { taskPerms } = await import('./access');
+  const dir = await directory(u, sql);
+  const out: { id: string; name: string; title: string | null }[] = [];
+  for (const cand of dir.users as any[]) {
+    const p = await taskPerms({ id: cand.id, email: cand.email, name: cand.name, role: cand.role, status: 'active', timezone: 'Asia/Seoul', sessionId: '' }, task, sql);
+    if (p.view) out.push({ id: cand.id, name: cand.name, title: cand.title });
+  }
+  return out;
+}

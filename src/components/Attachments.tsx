@@ -57,7 +57,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
                 {a.doc_version && <span>버전 {a.doc_version}</span>}
                 {a.doc_base_date && <span>기준일 {fmtDate(a.doc_base_date)}</span>}
                 {a.doc_owner && <span>문서 담당 {a.doc_owner}</span>}
-                {a.size_bytes && <span>{(a.size_bytes / 1024 / 1024).toFixed(1)}MB</span>}
+                {a.size_bytes ? <span>{fmtSize(Number(a.size_bytes))}</span> : null}
                 <span>{a.created_by_name}</span>
                 {a.kind === 'link' && <span className="truncate">원본: {(() => { try { return new URL(a.url).hostname; } catch { return ''; } })()}</span>}
               </div>
@@ -96,4 +96,11 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       </Modal>
     </div>
   );
+}
+
+/** 1MB 미만은 KB, 1KB 미만은 바이트 */
+export function fmtSize(b: number) {
+  if (b < 1024) return `${b}B`;
+  if (b < 1024 * 1024) return `${Math.max(1, Math.round(b / 1024))}KB`;
+  return `${(b / 1024 / 1024).toFixed(1)}MB`;
 }

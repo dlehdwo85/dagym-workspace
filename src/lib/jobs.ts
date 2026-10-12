@@ -96,7 +96,7 @@ export async function runTick(trigger: string) {
  */
 export async function eventReminders(now = new Date()) {
   const sql = db();
-  const MAX_LEAD_MIN = 1440;
+  const MAX_LEAD_MIN = 40320; // 최대 4주 전 알림
   const until = new Date(now.getTime() + (MAX_LEAD_MIN + 15) * 60000);
   const masters = await sql<any[]>`
     select e.*, c.type as cal_type, c.owner_user_id from events e join calendars c on c.id = e.calendar_id
@@ -118,16 +118,26 @@ export async function eventReminders(now = new Date()) {
     const leads = await sql<{ id: string; lead: number }[]>`
       select u.id, coalesce(s.event_reminder_minutes, 30) as lead from users u left join user_settings s on s.user_id = u.id
       where u.id = any(${people}::uuid[]) and u.status = 'active'`;
+    const custom: number[] | null = m.reminder_minutes ?? null; // 일정별 알림이 있으면 사용자 기본값 대신 적용
     for (const o of occ) {
       for (const p of leads) {
-        if (!p.lead) continue;
-        if (o.start.getTime() - p.lead * 60000 > now.getTime()) continue; // 아직 이르다
+        // 아직 시각이 안 된 알림은 건너뛰고, 지난 알림 중 가장 가까운 것 하나만 보낸다(정기 실행 지연 시 몰아서 여러 번 보내지 않음)
+        const all = custom ?? (p.lead ? [p.lead] : []);
+        const due = all.filter((l) => o.start.getTime() - l * 60000 <= now.getTime());
+        if (!due.length) continue;
+        const lead = Math.min(...due);
         const hm = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }).format(o.start);
         const mins = Math.max(1, Math.round((o.start.getTime() - now.getTime()) / 60000));
-        sent += (await notify(sql, { userIds: [p.id], type: 'event_reminder', title: `일정 ${mins}분 전: ${o.title}`, body: `${hm} 시작${m.location ? ` · ${m.location}` : ''}`,
-          link: `/calendar?event=${o.id}`, entityType: 'event', entityId: o.id, dedupeKey: `evrem:${m.id}:${o.start.toISOString()}` })).length;
+        sent += (await notify(sql, { userIds: [p.id], type: 'event_reminder', title: `일정 ${fmtLeft(mins)} 전: ${o.title}`, body: `${hm} 시작${m.location ? ` · ${m.location}` : ''}`,
+          link: `/calendar?event=${o.id}`, entityType: 'event', entityId: o.id, dedupeKey: `evrem:${m.id}:${o.start.toISOString()}:${lead}` })).length;
       }
     }
   }
   return { candidates: masters.length, created: sent };
+}
+
+function fmtLeft(mins: number) {
+  if (mins >= 1440) return `${Math.round(mins / 1440)}일`;
+  if (mins >= 60) return `${Math.round(mins / 60)}시간`;
+  return `${mins}분`;
 }

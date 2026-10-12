@@ -2,11 +2,13 @@
 import postgres from 'postgres';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const url = process.env.DATABASE_URL;
 if (!url) { console.error('DATABASE_URL 이 없습니다'); process.exit(1); }
 const sql = postgres(url, { max: 1, prepare: false, onnotice: () => {} });
-const dir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'db', 'migrations');
+// Windows 에서도 동작하도록 fileURLToPath 사용 (URL.pathname 은 /C:/... 를 돌려줌)
+const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
 
 try {
   await sql`create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())`;

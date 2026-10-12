@@ -71,34 +71,125 @@ export function BrandSelect({ value, onChange }: { value: string | null | undefi
   );
 }
 
-export const RECUR_PRESETS: { label: string; rule: string | null }[] = [
-  { label: '반복 안 함', rule: null },
-  { label: '매일', rule: 'FREQ=DAILY' },
-  { label: '평일(월~금)', rule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' },
-  { label: '매주', rule: 'FREQ=WEEKLY' },
-  { label: '2주마다', rule: 'FREQ=WEEKLY;INTERVAL=2' },
-  { label: '매월', rule: 'FREQ=MONTHLY' },
-  { label: '매년', rule: 'FREQ=YEARLY' },
-];
+const DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+const DAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
 
-/** 반복 규칙 선택 (요일 지정이 필요한 주간 규칙은 시작일 요일을 쓴다) */
+/** 시작(기준)일로부터 반복 프리셋 규칙을 만든다 */
+export function recurPresets(anchorDate?: string | null): { label: string; rule: string | null }[] {
+  const d = anchorDate ? new Date(anchorDate + 'T00:00:00Z') : null;
+  const dow = d ? d.getUTCDay() : 1;
+  const dom = d ? d.getUTCDate() : 1;
+  const nth = Math.ceil(dom / 7);
+  const last = d ? new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate() - dom < 7 : false;
+  const list: { label: string; rule: string | null }[] = [
+    { label: '반복 안 함', rule: null },
+    { label: '매일', rule: 'FREQ=DAILY' },
+    { label: '평일(월~금)', rule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' },
+    { label: `매주 ${DAY_KO[dow]}요일`, rule: `FREQ=WEEKLY;BYDAY=${DAY_CODES[dow]}` },
+    { label: `2주마다 ${DAY_KO[dow]}요일`, rule: `FREQ=WEEKLY;INTERVAL=2;BYDAY=${DAY_CODES[dow]}` },
+    { label: `매월 ${dom}일`, rule: `FREQ=MONTHLY;BYMONTHDAY=${dom}` },
+  ];
+  if (nth <= 4) list.push({ label: `매월 ${nth}번째 ${DAY_KO[dow]}요일`, rule: `FREQ=MONTHLY;BYDAY=${nth}${DAY_CODES[dow]}` });
+  if (last) list.push({ label: `매월 마지막 ${DAY_KO[dow]}요일`, rule: `FREQ=MONTHLY;BYDAY=-1${DAY_CODES[dow]}` });
+  list.push({ label: '매년', rule: 'FREQ=YEARLY' });
+  return list;
+}
+
+/** 규칙을 (기본 규칙, 종료 조건)으로 나눈다. UNTIL 은 서울 날짜로 바꾼다 */
+export function splitRule(rule: string | null): { base: string | null; until: string | null; count: number | null } {
+  if (!rule) return { base: null, until: null, count: null };
+  let until: string | null = null, count: number | null = null;
+  const parts = rule.split(';').filter((p) => {
+    const m = /^UNTIL=(\d{8})(T(\d{6})Z?)?$/i.exec(p);
+    if (m) {
+      const iso = m[2] ? `${m[1].slice(0, 4)}-${m[1].slice(4, 6)}-${m[1].slice(6, 8)}T${m[3].slice(0, 2)}:${m[3].slice(2, 4)}:${m[3].slice(4, 6)}Z` : `${m[1].slice(0, 4)}-${m[1].slice(4, 6)}-${m[1].slice(6, 8)}T00:00:00+09:00`;
+      until = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso));
+      return false;
+    }
+    const c = /^COUNT=(\d+)$/i.exec(p);
+    if (c) { count = Number(c[1]); return false; }
+    return true;
+  });
+  return { base: parts.join(';'), until, count };
+}
+
+/** 종료일(서울 날짜)은 그날 23:59:59 KST = 14:59:59Z 의 UTC UNTIL 로 저장 */
+export function joinRule(base: string | null, end: { until?: string | null; count?: number | null }) {
+  if (!base) return null;
+  if (end.until) return `${base};UNTIL=${end.until.replace(/-/g, '')}T145959Z`;
+  if (end.count) return `${base};COUNT=${end.count}`;
+  return base;
+}
+
+/** 반복 편집기: 프리셋 + 종료 조건(계속·날짜까지·횟수) */
 export function RecurSelect({ value, onChange, anchorDate }: { value: string | null; onChange: (v: string | null) => void; anchorDate?: string | null }) {
-  const days = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-  const withDay = (rule: string | null) => {
-    if (!rule || !anchorDate) return rule;
-    const d = new Date(anchorDate + 'T00:00:00Z').getUTCDay();
-    if (rule === 'FREQ=WEEKLY' || rule === 'FREQ=WEEKLY;INTERVAL=2') return `${rule};BYDAY=${days[d]}`;
-    if (rule === 'FREQ=MONTHLY') return `${rule};BYMONTHDAY=${Number(anchorDate.slice(8, 10))}`;
-    return rule;
-  };
-  const known = RECUR_PRESETS.find((p) => withDay(p.rule) === value || p.rule === value);
+  const presets = recurPresets(anchorDate);
+  const { base, until, count } = splitRule(value);
+  const known = presets.find((p) => p.rule === base);
+  const endKind = until ? 'until' : count ? 'count' : 'none';
+  const setBase = (b: string | null) => onChange(joinRule(b, { until, count }));
   return (
-    <select className={inputCls} value={known ? known.label : '__custom'} onChange={(e) => {
-      const p = RECUR_PRESETS.find((x) => x.label === e.target.value);
-      if (p) onChange(withDay(p.rule));
-    }}>
-      {RECUR_PRESETS.map((p) => <option key={p.label} value={p.label}>{p.label}</option>)}
-      {!known && <option value="__custom">사용자 지정: {value}</option>}
-    </select>
+    <div className="space-y-1.5" data-testid="recur-editor">
+      <select className={inputCls} value={known ? known.label : '__custom'} aria-label="반복 규칙" onChange={(e) => {
+        const p = presets.find((x) => x.label === e.target.value);
+        if (p) setBase(p.rule);
+      }}>
+        {presets.map((p) => <option key={p.label} value={p.label}>{p.label}</option>)}
+        {!known && <option value="__custom">사용자 지정: {base}</option>}
+      </select>
+      {base && (
+        <div className="flex items-center gap-1.5 text-sm">
+          <select className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" value={endKind} aria-label="반복 종료" onChange={(e) => {
+            const k = e.target.value;
+            if (k === 'none') onChange(joinRule(base, {}));
+            else if (k === 'until') onChange(joinRule(base, { until: anchorDate ? addMonths(anchorDate, 3) : null }));
+            else onChange(joinRule(base, { count: 10 }));
+          }}>
+            <option value="none">계속 반복</option><option value="until">종료일까지</option><option value="count">횟수 지정</option>
+          </select>
+          {endKind === 'until' && <input type="date" className="rounded-md border border-slate-300 px-2 py-1 text-sm" aria-label="반복 종료일" min={anchorDate ?? undefined} value={until ?? ''} onChange={(e) => onChange(joinRule(base, { until: e.target.value || null }))} />}
+          {endKind === 'count' && <><input type="number" min={1} max={500} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm" aria-label="반복 횟수" value={count ?? 10} onChange={(e) => onChange(joinRule(base, { count: Math.max(1, Number(e.target.value) || 1) }))} /><span>회</span></>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function addMonths(d: string, n: number) {
+  const t = new Date(d + 'T00:00:00Z');
+  t.setUTCMonth(t.getUTCMonth() + n);
+  return t.toISOString().slice(0, 10);
+}
+
+const REMINDER_CHOICES = [0, 5, 10, 15, 30, 60, 120, 1440, 2880, 10080];
+export function fmtReminder(m: number) {
+  if (m === 0) return '시작 시각';
+  if (m % 1440 === 0) return `${m / 1440}일 전`;
+  if (m % 60 === 0) return `${m / 60}시간 전`;
+  return `${m}분 전`;
+}
+
+/** 일정별 알림: null = 각자 기본 설정, 배열 = 이 일정만의 알림(최대 5개, 빈 배열 = 알림 없음) */
+export function ReminderEditor({ value, onChange }: { value: number[] | null; onChange: (v: number[] | null) => void }) {
+  return (
+    <div className="space-y-1.5 text-sm" data-testid="reminder-editor">
+      <label className="flex items-center gap-2"><input type="checkbox" checked={value === null} onChange={(e) => onChange(e.target.checked ? null : [30])} />각자 기본 알림 설정 따르기</label>
+      {value !== null && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {value.map((m) => (
+            <span key={m} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs">
+              {fmtReminder(m)}<button type="button" aria-label={`${fmtReminder(m)} 알림 삭제`} onClick={() => onChange(value.filter((x) => x !== m))}>✕</button>
+            </span>
+          ))}
+          {value.length < 5 && (
+            <select className="rounded-md border border-slate-300 px-2 py-0.5 text-xs" value="" aria-label="알림 추가" onChange={(e) => e.target.value !== '' && onChange([...value, Number(e.target.value)].sort((a, b) => a - b))}>
+              <option value="">+ 알림 추가</option>
+              {REMINDER_CHOICES.filter((c) => !value.includes(c)).map((c) => <option key={c} value={c}>{fmtReminder(c)}</option>)}
+            </select>
+          )}
+          {value.length === 0 && <span className="text-xs text-slate-500">이 일정은 알림을 보내지 않습니다</span>}
+        </div>
+      )}
+    </div>
   );
 }

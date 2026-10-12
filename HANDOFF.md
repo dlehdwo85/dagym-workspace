@@ -46,7 +46,7 @@ claude
 Claude Code 데스크톱 앱에서는 "폴더 열기"로 `C:\Users\User\Documents\DAGYM-DEV\dagym-workspace`를 선택합니다. 한 번 열면 최근 폴더 목록에 나타납니다.
 
 로컬에서 웹을 직접 실행하는 것은 **선택**입니다. 로컬 전용 작업(5번)은 대부분 브라우저와 기기 작업이라 실행이 필요 없습니다. 실행하려면 PostgreSQL 16이 필요합니다(`winget install PostgreSQL.PostgreSQL.16`). `copy .env.example .env.local`로 값을 채운 뒤 `npm ci && npm run db:migrate && npm run dev`를 실행합니다.
-자동 시험(`npm test`, `npm run test:e2e`)은 Linux 경로와 openssl을 쓰므로 **GitHub Actions(ci.yml)나 WSL**에서 돌립니다. 푸시하면 CI가 자동으로 실행됩니다.
+자동 시험은 2026-10-13부터 Windows 에서도 돌 수 있게 바꿨습니다(R-8): PostgreSQL 실행 + `$env:TEST_DATABASE_URL="postgres://…/workos_test"` (시험 때마다 초기화되는 **전용 DB**), `npm run build`, `npm test`, E2E 는 `npx playwright install chromium` 1회 후 `npm run test:e2e`. 푸시하면 GitHub Actions 에서도 자동으로 돕니다.
 
 ## 4. 동시 수정 방지 규칙 (작업 범위 구분)
 | | 클라우드 세션 (이 대화) | 로컬 Claude Code |

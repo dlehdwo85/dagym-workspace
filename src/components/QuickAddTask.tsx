@@ -101,7 +101,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
         )}
         {!tpl && (
           <div className="grid grid-cols-2 gap-3">
-            <Field label="반복"><RecurSelect value={f.recurrenceRule} onChange={set('recurrenceRule')} anchorDate={f.dueDate} /></Field>
+            <div><div className="mb-1 text-xs font-medium text-slate-600">반복 (마감일 기준)</div><RecurSelect value={f.recurrenceRule} onChange={set('recurrenceRule')} anchorDate={f.dueDate} /></div>
             <Field label="태그 (쉼표 구분)"><input className={inputCls} value={f.tags ?? ''} onChange={(e) => set('tags')(e.target.value)} /></Field>
           </div>
         )}

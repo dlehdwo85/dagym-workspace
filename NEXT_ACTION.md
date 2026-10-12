@@ -32,4 +32,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - Asana·Google Calendar 로그인 후 참고 검수(L-11)
 
 ## 로컬 요청 처리 (클라우드 회신란)
-- (아직 요청 없음)
+2026-10-13 · `local/ops-setup`(f4ad95a) 를 클라우드 브랜치에 merge 후 처리. 모두 시험으로 확인함.
+| 요청 | 처리 | 확인 |
+|---|---|---|
+| R-1 migrate.mjs Windows 경로 | ✅ `fileURLToPath(import.meta.url)` 로 교체 | 이제 Windows PowerShell 에서 `node scripts/migrate.mjs` 실행 가능 → **HANDOFF L-2 진행 가능** |
+| R-2 멘션 입력 UUID 노출 | ✅ 입력창에는 `@이름` 만, 전송 때 내부 표기로 변환 (`src/lib/mentions.ts`) | E2E: 입력값 검사, 캡처 `docs/screens/26-mobile-mention-input.png` |
+| R-3 멘션 목록 권한 | ✅ 새 API `GET /api/tasks/:id/mentionable` — 업무를 볼 수 있는 사람만, 화면에 안내 문구 | API 시험 + E2E(다른 현장 직원 미표시) |
+| R-4 첨부 크기 0.0MB | ✅ 1MB 미만 KB, 1KB 미만 B | — |
+| R-5 버튼 줄바꿈 | ✅ 공통 버튼에 `whitespace-nowrap` | 캡처 `27-mobile-checklist.png` |
+| R-6 일정별 알림 | ✅ 일정마다 최대 5개(시작 시각~1주 전), 비우면 알림 없음, "각자 기본 설정 따르기" 기본값. 반복 일정은 시리즈 전체에 적용. 정기 실행이 늦어도 가장 가까운 지난 알림 1회만 | API 시험(중복 제거·1회·끄기), E2E, 캡처 `28-mobile-recur-reminder.png` |
+| R-7 반복 종료·N번째 요일 | ✅ 반복 편집기(업무·일정 공용): 매주 ○요일, 2주마다, 매월 N일, **매월 N번째/마지막 ○요일**, 매년 + **계속/종료일까지/횟수** | API 시험(둘째 화요일 3회, 종료일 당일 포함 6회), E2E(매주 6회 저장) |
+| R-8 시험 Windows 호환 | ✅ OS 임시 폴더, `process.execPath`+`next/dist/bin/next`, openssl 대신 `selfsigned` 패키지 | Linux 에서 전체 통과. **Windows 에서 돌리려면**: PostgreSQL + `TEST_DATABASE_URL`, E2E 는 `npx playwright install chromium` 1회 — 로컬 실행 결과를 LOCAL_LOG 에 남겨 주세요 |
+| Asana 로그인 검수 | 대기 (대표 로그인) | — |
