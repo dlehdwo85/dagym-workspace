@@ -152,7 +152,7 @@ export default function TaskDetail({ params }: { params: Promise<{ id: string }>
           </Field>
         </div>
         <div className="mt-3">
-          <Field label="협업자"><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Field>
+          <div><div className="mb-1 text-xs font-medium text-slate-600">협업자</div><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></div>
         </div>
         <label className="mt-3 flex items-center gap-2 text-sm">
           <input type="checkbox" checked={t.approval_required} disabled={!perms.approve} onChange={(e) => patch({ approvalRequired: e.target.checked })} />

@@ -276,7 +276,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
             {!f.allDay && <Field label="종료 시각"><input type="time" className={inputCls} value={f.end} onChange={(e) => set('end')(e.target.value)} required /></Field>}
           </div>
           {(!d?.event?.recurring_event_id) && <Field label="반복"><RecurSelect value={f.rrule} onChange={set('rrule')} anchorDate={f.date} /></Field>}
-          <Field label="참석자"><MultiUserSelect value={f.attendeeIds} onChange={set('attendeeIds')} /></Field>
+          <div><div className="mb-1 text-xs font-medium text-slate-600">참석자</div><MultiUserSelect value={f.attendeeIds} onChange={set('attendeeIds')} /></div>
           {conf.length > 0 && (
             <div className="rounded bg-amber-50 p-2 text-xs text-amber-900" role="alert" data-testid="conflicts">
               <b>일정 충돌 안내</b>

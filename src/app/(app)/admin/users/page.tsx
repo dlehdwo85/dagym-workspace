@@ -78,7 +78,8 @@ export default function Users() {
             <Field label="권한"><select className={inputCls} value={inv.role} onChange={(e) => setInv({ ...inv, role: e.target.value })}>{roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></Field>
             <Field label="직책 (선택)"><input className={inputCls} value={inv.title ?? ''} onChange={(e) => setInv({ ...inv, title: e.target.value })} /></Field>
           </div>
-          <Field label="소속 (접근 가능한 조직)" hint="선택한 조직과 그 하위 조직의 업무·일정만 볼 수 있습니다. 대표·본사 관리자는 전체를 봅니다."><UnitChecks value={inv.orgUnitIds} onChange={(v) => setInv({ ...inv, orgUnitIds: v })} /></Field>
+          <fieldset><legend className="mb-1 text-xs font-medium text-slate-600">소속 (접근 가능한 조직)</legend><UnitChecks value={inv.orgUnitIds} onChange={(v) => setInv({ ...inv, orgUnitIds: v })} />
+            <p className="mt-1 text-xs text-slate-500">선택한 조직과 그 하위 조직의 업무·일정만 볼 수 있습니다. 대표·본사 관리자는 전체를 봅니다.</p></fieldset>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setInv(null)}>취소</Button><Button type="submit">초대 링크 만들기</Button></div>
         </form>}
       </Modal>
@@ -96,7 +97,7 @@ export default function Users() {
             <Field label="상태"><select className={inputCls} value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })} disabled={edit.status === 'invited'}>
               {edit.status === 'invited' && <option value="invited">초대됨</option>}<option value="active">사용 중</option><option value="disabled">사용 중지</option><option value="left">퇴사</option></select></Field>
           </div>
-          <Field label="소속"><UnitChecks value={edit.org_unit_ids} onChange={(v) => setEdit({ ...edit, org_unit_ids: v })} /></Field>
+          <fieldset><legend className="mb-1 text-xs font-medium text-slate-600">소속</legend><UnitChecks value={edit.org_unit_ids} onChange={(v) => setEdit({ ...edit, org_unit_ids: v })} /></fieldset>
           <p className="text-xs text-slate-500">사용 중지·퇴사로 바꾸면 모든 기기에서 즉시 로그아웃되고 푸시·Google 동기화도 멈춥니다. 작성한 업무 기록은 남습니다.</p>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEdit(null)}>취소</Button><Button type="submit">저장</Button></div>
         </form>}
