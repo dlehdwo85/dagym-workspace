@@ -32,17 +32,23 @@ export const taskInput = z.object({
   taskType: z.enum(['normal', 'milestone', 'approval', 'inspection']).optional(),
   photoRequired: z.number().int().min(0).max(20).optional(),
   approvalLineId: zUuid.nullable().optional(),
+  /** S-6 예상 소요 시간(분) */
+  estimateMinutes: z.number().int().min(0).max(100000).nullable().optional(),
   sortOrder: z.number().optional(),
   version: z.number().int().optional(),
   reviewNote: z.string().max(2000).optional(),
 });
 export type TaskInput = z.infer<typeof taskInput>;
 
-const TASK_COLS = (sql: Sql) => sql`
+export const TASK_COLS = (sql: Sql) => sql`
   t.id, t.title, t.description, t.status, t.priority, t.project_id, t.parent_id, t.org_unit_id, t.brand_id,
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id,
+  t.estimate_minutes,
+  (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
+    where be.deleted_at is null and be.kind = 'task_block' and (be.task_id = t.id or be.id in (select event_id from event_tasks where task_id = t.id and role = 'block'))) as scheduled_minutes,
+  (select count(*)::int from event_tasks lk where lk.task_id = t.id) as event_count,
   (select count(*)::int from attachments ph where ph.task_id = t.id and ph.deleted_at is null and ph.upload_status = 'ready' and ph.kind = 'file' and ph.mime_type like 'image/%') as photo_count,
   (select coalesce(jsonb_object_agg(fv.field_id, fv.value), '{}'::jsonb) from task_field_values fv where fv.task_id = t.id) as fields,
   au.name as assignee_name, p.name as project_name, p.color as project_color, o.name as org_unit_name,
@@ -57,7 +63,7 @@ const TASK_COLS = (sql: Sql) => sql`
   (select max(a.created_at) from activities a where a.entity_type = 'task' and a.entity_id = t.id
      and (a.action = 'created' or a.changes ? 'assigneeId')) as assigned_at`;
 
-const TASK_FROM = (sql: Sql) => sql`
+export const TASK_FROM = (sql: Sql) => sql`
   from tasks t
   left join users au on au.id = t.assignee_id
   left join projects p on p.id = t.project_id
@@ -65,7 +71,7 @@ const TASK_FROM = (sql: Sql) => sql`
 
 export const listQuery = z.object({
   // U-0a 주소창 값은 사람이 고칠 수 있다 — 모르는 보기·옵션 값은 오류 대신 기본값으로
-  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review']).catch('all'),
+  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review', 'risk']).catch('all'),
   projectId: zUuid.optional(),
   orgUnitId: zUuid.optional(),
   brandId: z.string().optional(),
@@ -125,11 +131,22 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
       if (units !== null) conds.push(sql`t.org_unit_id = any(${units}::uuid[])`);
       if (!atLeast(u, 'site_manager')) conds.push(sql`false`);
       break;
+    case 'risk': // S-6 마감 위험 후보: 예상 시간이 있고 2주 안에 마감인 미완료 업무 → 아래에서 가용 시간으로 거른다
+      conds.push(sql`t.status <> 'done' and t.estimate_minutes > 0 and t.assignee_id is not null and t.due_date <= ${addDays(today, 14)}`);
+      break;
   }
   const where = conds.reduce((a, c) => sql`${a} and ${c}`);
-  return sql`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where ${where}
+  const rows = await sql<any[]>`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where ${where}
     order by t.due_date asc nulls last, t.priority = 'urgent' desc, t.priority = 'high' desc, t.sort_order, t.created_at
     limit ${q.limit}`;
+  if (q.view !== 'risk') return rows;
+  const { deadlineRisk } = await import('./availability');
+  const out = [];
+  for (const r of rows) {
+    const risk = await deadlineRisk(r);
+    if (risk?.risk) out.push({ ...r, risk });
+  }
+  return out;
 }
 
 export async function getTaskDetail(u: SessionUser, id: string) {
@@ -163,7 +180,9 @@ export async function getTaskDetail(u: SessionUser, id: string) {
   const pending = t.status === 'review' ? approvals.find((a) => a.status === 'pending' && a.round === approvals[0]?.round) : null;
   const canDecide = pending ? (await stepApprovers(sql, t.org_unit_id, pending)).includes(u.id) : false;
   const fields = t.project_id ? await sql`select id, name, type, options, aggregate from project_fields where project_id = ${t.project_id} order by sort, created_at` : [];
-  return { task: t, perms: { ...perms, decide: canDecide }, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields };
+  const { deadlineRisk } = await import('./availability');
+  const risk = await deadlineRisk(t as never).catch(() => null);
+  return { task: t, perms: { ...perms, decide: canDecide }, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -216,12 +235,12 @@ export async function createTask(u: SessionUser, i: TaskInput) {
     const [t] = await tx<{ id: string }[]>`
       insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
         start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at,
-        task_type, photo_required, approval_line_id)
+        task_type, photo_required, approval_line_id, estimate_minutes)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
         ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
         ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null},
-        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null})
+        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null})
       returning id`;
     for (const c of new Set(i.collaboratorIds ?? [])) {
       await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
@@ -283,7 +302,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const fields: [keyof TaskInput, string][] = [
       ['title', 'title'], ['description', 'description'], ['projectId', 'project_id'], ['brandId', 'brand_id'],
       ['assigneeId', 'assignee_id'], ['priority', 'priority'], ['startDate', 'start_date'], ['dueDate', 'due_date'],
-      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'],
+      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'], ['estimateMinutes', 'estimate_minutes'],
     ];
     for (const [k, col] of fields) {
       if (i[k] === undefined) continue;
@@ -586,7 +605,7 @@ export async function duplicateTask(u: SessionUser, id: string, withSubtasks = t
   const collab = (await sql<{ user_id: string }[]>`select user_id from task_collaborators where task_id = ${id}`).map((r) => r.user_id);
   const r = await createTask(u, { title: `${t.title} (복제)`, description: t.description, projectId: t.project_id, sectionId: t.section_id, orgUnitId: t.org_unit_id,
     brandId: t.brand_id, assigneeId: t.assignee_id, priority: t.priority, startDate: t.start_date, dueDate: t.due_date, dueTime: t.due_time_s, tags: t.tags,
-    approvalRequired: t.approval_required, taskType: t.task_type, photoRequired: t.photo_required, approvalLineId: t.approval_line_id,
+    approvalRequired: t.approval_required, taskType: t.task_type, photoRequired: t.photo_required, approvalLineId: t.approval_line_id, estimateMinutes: t.estimate_minutes,
     collaboratorIds: collab, checklist: cl.map((c) => c.text) });
   if (withSubtasks) {
     const subs = await sql<{ title: string; assignee_id: string | null; due_date: string | null }[]>`select title, assignee_id, due_date from tasks where parent_id = ${id} and deleted_at is null order by sort_order`;

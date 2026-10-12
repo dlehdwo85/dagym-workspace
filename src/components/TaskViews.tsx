@@ -42,7 +42,7 @@ type Section = { id: string; name: string; sort: number };
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 const VIEW_MODES: ViewMode[] = ['list', 'board', 'calendar', 'timeline'];
-const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review'];
+const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review', 'risk'];
 const cleanView = (v: string | null) => (v && LIST_VIEWS.includes(v) ? v : '');
 
 export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Record<string, string>; title?: string; defaultMode?: ViewMode }) {
@@ -132,7 +132,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const sections = sectionsApi.data?.sections ?? [];
   const [boardBy, setBoardBy] = useState<'status' | 'section'>('status');
 
-  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['today', '오늘 할 일'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기']];
+  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['today', '오늘 할 일'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['risk', '마감 위험']];
   const [filterOpen, setFilterOpen] = useState(false);
   const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
   const chips: [string, string][] = [

@@ -43,7 +43,15 @@ export function errorResponse(e: unknown, req?: NextRequest) {
       { status: 400 },
     );
   }
-  const err = e as Error;
+  const err = e as Error & { code?: string };
+  // 운영 DB 미설정·연결 불가는 일반 500 대신 원인을 알려 준다 (로그인 화면이 그대로 보여 줌)
+  if (/DATABASE_URL/.test(err?.message ?? '')) {
+    return NextResponse.json({ error: { code: 'not_configured', message: '운영 설정이 아직 끝나지 않았습니다: 데이터베이스가 연결되지 않았습니다. 관리자에게 문의하세요.' } }, { status: 503 });
+  }
+  if (['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'CONNECT_TIMEOUT', '28P01', '3D000', '57P01'].includes(err?.code ?? '')) {
+    void logError('api', err, { path: req?.nextUrl.pathname, method: req?.method });
+    return NextResponse.json({ error: { code: 'db_unavailable', message: '데이터베이스에 연결할 수 없습니다. 잠시 후 다시 시도하고, 계속되면 관리자에게 알려 주세요.' } }, { status: 503 });
+  }
   void logError('api', err, { path: req?.nextUrl.pathname, method: req?.method });
   return NextResponse.json({ error: { code: 'internal', message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' } }, { status: 500 });
 }

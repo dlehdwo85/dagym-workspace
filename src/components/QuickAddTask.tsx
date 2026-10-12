@@ -2,7 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, broadcastRefresh, useApi } from './client';
-import { Button, Field, Modal, inputCls, toast, todayStr } from './ui';
+import { Button, Field, Modal, fmtMinutes, inputCls, toast, todayStr } from './ui';
 import { UnitSelect, UserSelect, BrandSelect, RecurSelect } from './pickers';
 import { useSession } from './session';
 
@@ -28,6 +28,10 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   }, [open, defaults, user.id, dir]);
 
   const set = (k: string) => (v: any) => setF((x: any) => ({ ...x, [k]: v }));
+  // S-7 배정 경고: 담당자의 마감일 회의·남은 가용 시간
+  const avail = useApi<{ days: any[] }>(open && f.assigneeId && f.dueDate ? `/api/availability?userId=${f.assigneeId}&date=${f.dueDate}` : null, [f.assigneeId, f.dueDate]);
+  const day = avail.data?.days?.[0];
+  const who = dir.users.find((x) => x.id === f.assigneeId)?.name;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,6 +47,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           body: {
             title: f.title, description: f.description, priority: f.priority, assigneeId: f.assigneeId, orgUnitId: f.orgUnitId,
             projectId: f.projectId || null, parentId: defaults?.parentId, sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null, dueDate: f.dueDate || null, dueTime: f.dueTime || null,
+            estimateMinutes: f.estimateMinutes ? Number(f.estimateMinutes) : null,
             startDate: f.taskType === 'milestone' ? null : f.startDate || null, approvalRequired: f.approvalRequired, taskType: f.taskType ?? 'normal', recurrenceRule: f.recurrenceRule, brandId: f.brandId,
             tags: f.tags ? f.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : [],
           },
@@ -95,7 +100,20 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
             </Field>
           )}
           <Field label="브랜드"><BrandSelect value={f.brandId} onChange={set('brandId')} /></Field>
+          {!tpl && (
+            <Field label="예상 소요 (선택)">
+              <select className={inputCls} value={f.estimateMinutes ?? ''} onChange={(e) => set('estimateMinutes')(e.target.value)}>
+                <option value="">미정</option>{[15, 30, 60, 90, 120, 180, 240, 360, 480, 960].map((m) => <option key={m} value={m}>{fmtMinutes(m)}</option>)}
+              </select>
+            </Field>
+          )}
         </div>
+        {day && (
+          <p className={day.freeMinutes < 60 || day.away || day.holiday ? 'rounded-input bg-amber-50 p-2 text-xs text-amber-900' : 'rounded-input bg-slate-50 p-2 text-xs text-ink-2'} data-testid="assign-availability">
+            {who ?? '담당자'} · {f.dueDate} {day.holiday ? `공휴일(${day.holiday})` : day.away ? '휴가·출장' : !day.workday ? '쉬는 날' : `회의 ${fmtMinutes(day.meetingMinutes) || '없음'}, 남은 가용 ${fmtMinutes(day.freeMinutes) || '0분'}`}
+            {(day.freeMinutes < 60 && day.workday) || day.away || day.holiday ? ' — 마감일이나 담당자를 다시 확인하세요' : ''}
+          </p>
+        )}
         {!defaults?.parentId && (
           <div className="grid grid-cols-2 gap-3">
             <Field label="소속 (현장·부서)"><UnitSelect value={f.orgUnitId} onChange={set('orgUnitId')} /></Field>

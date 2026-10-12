@@ -91,6 +91,8 @@ export async function runTick(trigger: string) {
   await step('due', dueNotifications);
   await step('eventReminders', () => eventReminders());
   await step('automations', async () => (await import('./automation')).dueSoonAutomations());
+  await step('seriesTasks', async () => (await import('./eventtasks')).seriesTasksJob());
+  await step('deadlineRisk', async () => (await import('./availability')).riskNotifyJob());
   await step('weeklyReport', async () => (await import('./insights')).weeklyReportJob());
   await step('push', () => dispatchPending(200));
   if (googleConfigured()) await step('google', () => syncAllDue());
@@ -129,16 +131,25 @@ export async function eventReminders(now = new Date()) {
       select u.id, coalesce(s.event_reminder_minutes, 30) as lead from users u left join user_settings s on s.user_id = u.id
       where u.id = any(${people}::uuid[]) and u.status = 'active'`;
     const custom: number[] | null = m.reminder_minutes ?? null; // 일정별 알림이 있으면 사용자 기본값 대신 적용
+    // S-10 연결 업무 맥락 (제목 없이 건수만)
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(now);
+    const linked = await sql<{ status: string; due_date: string | null; occurrence_start: Date | null }[]>`
+      select t.status, to_char(t.due_date, 'YYYY-MM-DD') as due_date, et.occurrence_start from event_tasks et join tasks t on t.id = et.task_id
+      where et.event_id = ${m.id} and t.deleted_at is null`;
     for (const o of occ) {
+      const mine = linked.filter((l) => !l.occurrence_start || l.occurrence_start.getTime() === o.start.getTime());
+      const late = mine.filter((l) => l.status !== 'done' && l.due_date && l.due_date < today).length;
+      const open = mine.filter((l) => l.status !== 'done').length;
+      const ctx = mine.length ? ` · 연결 업무 ${mine.length}건${open ? ` 중 미완료 ${open}건` : ' 모두 완료'}${late ? `(지연 ${late}건)` : ''}` : '';
       for (const p of leads) {
         // 아직 시각이 안 된 알림은 건너뛰고, 지난 알림 중 가장 가까운 것 하나만 보낸다(정기 실행 지연 시 몰아서 여러 번 보내지 않음)
         const all = custom ?? (p.lead ? [p.lead] : []);
         const due = all.filter((l) => o.start.getTime() - l * 60000 <= now.getTime());
         if (!due.length) continue;
         const lead = Math.min(...due);
-        const hm = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }).format(o.start);
+        const hm = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' }).format(o.start);
         const mins = Math.max(1, Math.round((o.start.getTime() - now.getTime()) / 60000));
-        sent += (await notify(sql, { userIds: [p.id], type: 'event_reminder', title: `일정 ${fmtLeft(mins)} 전: ${o.title}`, body: `${hm} 시작${m.location ? ` · ${m.location}` : ''}`,
+        sent += (await notify(sql, { userIds: [p.id], type: 'event_reminder', title: `일정 ${fmtLeft(mins)} 전: ${o.title}`, body: `${hm} 시작${m.location ? ` · ${m.location}` : ''}${ctx}`,
           link: `/calendar?event=${o.id}`, entityType: 'event', entityId: o.id, dedupeKey: `evrem:${m.id}:${o.start.toISOString()}:${lead}` })).length;
       }
     }

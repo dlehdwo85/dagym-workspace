@@ -1,7 +1,7 @@
 'use client';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { AlertCircle, ArrowRight, Loader2, WifiOff } from 'lucide-react';
+import { AlertCircle, ArrowRight, Loader2, ServerCrash, WifiOff } from 'lucide-react';
 import { AuthCard, PasswordInput } from '@/components/AuthCard';
 import { Button, Field, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
@@ -13,6 +13,16 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [err, setErr] = useState<{ text: string; network: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [down, setDown] = useState<string | null>(null);
+  // 서버·DB 상태를 먼저 확인해 운영 설정 미완료면 원인을 바로 보여 준다
+  useEffect(() => {
+    fetch('/api/health', { cache: 'no-store' }).then(async (r) => {
+      if (r.ok) return;
+      const j = await r.json().catch(() => ({}));
+      setDown(/DATABASE_URL/.test(j?.error ?? '') ? '운영 설정이 아직 끝나지 않았습니다: 데이터베이스가 연결되지 않아 로그인할 수 없습니다. 관리자에게 문의하세요.'
+        : '데이터베이스에 연결할 수 없어 지금은 로그인할 수 없습니다. 잠시 후 다시 시도하고, 계속되면 관리자에게 알려 주세요.');
+    }).catch(() => {});
+  }, []);
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     setBusy(true); setErr(null);
@@ -23,12 +33,17 @@ function LoginForm() {
       location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
     } catch (e) {
       // U-0c 연결 실패는 영어 원문 대신 한국어 안내 + 다시 시도
-      const network = !(e instanceof ApiError) || e.status === 0 || e.status >= 500;
+      const network = !(e instanceof ApiError) || e.status === 0 || (e.status >= 500 && e.code !== 'not_configured');
       setErr({ text: e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도하세요.', network });
     } finally { setBusy(false); }
   }
   return (
     <form onSubmit={submit} className="space-y-4" noValidate={false}>
+      {down && (
+        <div className="flex gap-2.5 rounded-input border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert" data-testid="server-not-ready">
+          <ServerCrash className="mt-0.5 size-4 shrink-0" /><p>{down}</p>
+        </div>
+      )}
       <Field label="회사 이메일"><input className={inputCls + ' h-11'} type="email" inputMode="email" autoComplete="username" placeholder="name@company.co.kr" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></Field>
       <Field label="비밀번호"><PasswordInput value={password} onChange={setPassword} /></Field>
       {err && (

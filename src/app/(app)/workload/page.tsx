@@ -49,7 +49,28 @@ export default function WorkloadPage() {
           {!data.people.length && <p className="px-4 py-10 text-center text-sm text-ink-3">표시할 사람이 없습니다</p>}
         </div>
       )}
-      <p className="text-xs text-ink-2">과부하 기준: 이번 주 마감 업무가 가용 근무일×2건 초과, 일정이 가용 시간(하루 8시간)의 70% 초과, 또는 지연 3건 이상. 가용 근무일은 공휴일·휴가·출장을 뺀 날입니다. 다른 사람의 개인 일정은 제목 없이 시간만 합산합니다.</p>
+      {data?.people?.length > 0 && (
+        <section className="overflow-x-auto rounded-card border border-line bg-white p-4 shadow-card" data-testid="workload-heatmap">
+          <h2 className="mb-3 text-sm font-semibold">요일별 바쁜 정도 <span className="text-xs font-normal text-ink-2">회의 + 업무 시간 ÷ 근무 8시간</span></h2>
+          <table className="w-full min-w-[560px] text-xs">
+            <thead><tr className="text-ink-2"><th className="w-32 pb-2 text-left font-medium">사람</th>{data.people[0].days.map((d: any) => <th key={d.date} className="pb-2 font-medium">{'일월화수목금토'[new Date(d.date + 'T00:00:00Z').getUTCDay()]} {Number(d.date.slice(8))}</th>)}<th className="pb-2 text-right font-medium">이번 주</th></tr></thead>
+            <tbody>
+              {data.people.map((p: any) => (
+                <tr key={p.id}>
+                  <td className="truncate py-1 pr-2 font-medium">{p.name}</td>
+                  {p.days.map((d: any) => {
+                    const ratio = d.capacity ? d.busy / d.capacity : 0;
+                    const tone = !d.workday ? 'bg-slate-100 text-ink-3' : ratio >= 0.9 ? 'bg-red-500 text-white' : ratio >= 0.7 ? 'bg-orange-400 text-white' : ratio >= 0.4 ? 'bg-amber-200 text-amber-900' : ratio > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-50 text-ink-3';
+                    return <td key={d.date} className="p-0.5"><div className={cx('flex h-8 items-center justify-center rounded-md tabular-nums', tone)} title={`${d.date} ${d.holiday ?? (d.away ? '휴가·출장' : `바쁨 ${Math.round(d.busy / 6) / 10}시간`)}`}>{d.holiday ? '휴일' : d.away ? '휴가' : !d.workday ? '' : `${Math.round(ratio * 100)}%`}</div></td>;
+                  })}
+                  <td className="py-1 pl-2 text-right tabular-nums text-ink-2">회의 {p.meetingHours}h · 업무 {p.blockHours}h · 가용 {p.freeHours}h</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+      <p className="text-xs text-ink-2">과부하 기준: 이번 주 마감 업무가 가용 근무일×2건 초과, 회의·업무 시간 블록이 근무 시간(하루 8시간, 점심 제외)의 70% 초과, 또는 지연 3건 이상. 가용 근무일은 공휴일·휴가·출장을 뺀 날입니다. 다른 사람의 개인 일정은 제목 없이 시간만 합산합니다.</p>
     </div>
   );
 }

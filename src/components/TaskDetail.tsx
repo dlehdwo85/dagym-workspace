@@ -7,9 +7,9 @@ import { useSession } from '@/components/session';
 import {
   BadgeCheck, Building2, CalendarClock, CalendarDays, Camera, Check, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash,
   Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Pause, Percent, Play, Plus, Repeat, RotateCcw, Rows3, Shapes, ShieldCheck,
-  Stamp, Tag, Trash2, Type, UserRound, Users, X, type LucideIcon,
+  Stamp, Tag, Timer, Trash2, Type, UserRound, Users, X, CalendarRange, AlertTriangle, type LucideIcon,
 } from 'lucide-react';
-import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, StatusBadge, cx, fmtDateTime, inputCls, toast, todayStr } from '@/components/ui';
+import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
 import { QuickAddTask } from '@/components/QuickAddTask';
@@ -46,6 +46,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [menu, setMenu] = useState(false);
   const [tab, setTab] = useState<'comments' | 'history'>('comments');
   const lines = useApi<{ lines: any[] }>('/api/approval-lines');
+  const events = useApi<{ events: any[] }>(`/api/tasks/${id}/events`);
 
   // B-2: 담당자가 업무를 열면 '확인'으로 처리 → 내 업무의 '새로 배정됨'에서 빠진다
   useEffect(() => {
@@ -257,6 +258,16 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </Prop>
+          <Prop icon={Timer} label="예상 소요">
+            <span className="flex w-full flex-wrap items-center gap-2">
+              <select className={cx(ghostCls, '!w-[120px]')} value={t.estimate_minutes ?? ''} onChange={(e) => patch({ estimateMinutes: e.target.value === '' ? null : Number(e.target.value) })}>
+                <option value="">미정</option>{[15, 30, 60, 90, 120, 180, 240, 360, 480, 960, 1440].map((m) => <option key={m} value={m}>{fmtMinutes(m)}</option>)}
+                {t.estimate_minutes && ![15, 30, 60, 90, 120, 180, 240, 360, 480, 960, 1440].includes(t.estimate_minutes) && <option value={t.estimate_minutes}>{fmtMinutes(t.estimate_minutes)}</option>}
+              </select>
+              {t.estimate_minutes > 0 && <span className="text-xs text-ink-2 tabular-nums" data-testid="estimate-progress">{fmtMinutes(t.scheduled_minutes ?? 0) || '0분'} 배정</span>}
+              {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700" data-testid="risk-badge" title={`남은 예상 ${fmtMinutes(data.risk.remaining)} · 마감까지 가용 ${fmtMinutes(data.risk.available ?? 0) || '0분'}`}><AlertTriangle className="size-3.5" />마감 위험</span>}
+            </span>
+          </Prop>
           <Prop icon={Shapes} label="업무 유형">
             <select className={ghostCls} value={t.task_type ?? 'normal'} onChange={(e) => patch({ taskType: e.target.value })}>
               {Object.entries(TASK_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -357,17 +368,28 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </ul>
         </section>
 
+        <section data-testid="linked-events">
+          <div className="mb-1.5 flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-sm font-semibold"><CalendarRange className="size-4 text-ink-3" />연결 일정 {(events.data?.events.length ?? 0) > 0 && <span className="text-xs font-medium text-ink-2">{events.data!.events.length}</span>}</h2>
+            <Button size="sm" variant="ghost" onClick={() => setBlockOpen(true)}><Timer />실행 시간 배정</Button></div>
+          <ul className="space-y-1">
+            {events.data?.events.map((e: any) => (
+              <li key={e.id}>
+                <Link href={`/calendar?event=${e.id}`} className="flex items-center gap-2.5 rounded-input border border-line px-3 py-2 text-sm hover:bg-slate-50">
+                  <span className="h-6 w-1 shrink-0 rounded-full" style={{ background: e.color }} />
+                  {e.kind === 'task_block' ? <Timer className="size-4 shrink-0 text-ink-2" aria-label="업무 시간" /> : <CalendarDays className="size-4 shrink-0 text-ink-2" />}
+                  <span className="min-w-0 flex-1 truncate font-medium">{e.title.replace(/^(\[(업무|업무 시간)\]\s*)+/, '')}</span>
+                  <span className="shrink-0 text-xs text-ink-2 tabular-nums">{fmtTimeRange(e.occurrence_start ?? e.start_at, e.occurrence_start ? new Date(new Date(e.occurrence_start).getTime() + (new Date(e.end_at).getTime() - new Date(e.start_at).getTime())) : e.end_at, { allDay: e.all_day })}{e.rrule && !e.occurrence_start ? ' · 반복' : ''}</span>
+                </Link>
+              </li>
+            ))}
+            {!events.data?.events.length && <li className="text-xs text-ink-3">연결된 일정이 없습니다 — 일정(회의)에서 이 업무를 연결하거나 실행 시간을 배정하세요</li>}
+          </ul>
+        </section>
+
         <section>
           <h2 className="mb-2 text-sm font-semibold">자료·첨부</h2>
           <Attachments items={data.attachments} taskId={id} canEdit={perms.approve} onChange={reload} meId={user.id} />
         </section>
-
-        {data.timeBlocks.length > 0 && (
-          <section>
-            <h2 className="mb-2 text-sm font-semibold">배정된 실행 시간</h2>
-            <ul className="text-sm">{data.timeBlocks.map((b: any) => <li key={b.id}><Link className="text-accent-600 hover:underline" href={`/calendar?event=${b.id}`}>{fmtDateTime(b.start_at)} ~ {fmtDateTime(b.end_at)}</Link></li>)}</ul>
-          </section>
-        )}
 
         <section id="comments" className="border-t border-line pt-5">
           <div className="mb-3 flex items-center gap-4 text-sm font-semibold" role="tablist">
@@ -423,7 +445,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       </div>
 
       <QuickAddTask open={sub} onClose={() => setSub(false)} defaults={{ parentId: id, dueDate: t.due_date ?? undefined, assigneeId: t.assignee_id ?? undefined }} onCreated={() => reload()} />
-      <TimeBlockModal open={blockOpen} onClose={() => setBlockOpen(false)} task={t} onDone={reload} />
+      <TimeBlockModal open={blockOpen} onClose={() => setBlockOpen(false)} task={t} onDone={() => { reload(); events.reload(); }} />
       <DepsModal open={depOpen} onClose={() => setDepOpen(false)} taskId={id} current={data.dependencies.map((d: any) => d.id)} onSave={(ids) => { patch({ dependsOn: ids }); setDepOpen(false); }} />
       <MergeModal open={mergeOpen} onClose={() => setMergeOpen(false)} taskId={id} title={t.title} onMerged={(into) => { broadcastRefresh(); if (onClose && inPanel) onClose(); router.push(`/tasks/${into}`); }} />
     </div>
@@ -530,39 +552,62 @@ function renderMentions(body: string) {
   });
 }
 
+/**
+ * 업무 실행 시간 배정 (S-3). 기본 캘린더: 담당자가 나면 내 개인 일정, 아니면 업무 소속 조직 캘린더(편집 가능할 때)에
+ * 담당자를 참석자로 넣는다. 길이는 남은 예상 시간 기준, 그날 담당자의 회의·남은 가용 시간을 함께 보여 준다.
+ */
 function TimeBlockModal({ open, onClose, task, onDone }: { open: boolean; onClose: () => void; task: any; onDone: () => void }) {
+  const { user } = useSession();
   const cals = useApi<{ calendars: any[] }>(open ? '/api/calendars' : null);
+  const remaining = task.estimate_minutes ? Math.max(30, task.estimate_minutes - (task.scheduled_minutes ?? 0)) : 60;
+  const endOf = (start: string, mins: number) => { const [h, m] = start.split(':').map(Number); const t = Math.min(23 * 60 + 59, h * 60 + m + mins); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
   const [f, setF] = useState({ date: '', start: '09:00', end: '10:00', calendarId: '' });
   const [conf, setConf] = useState<any[]>([]);
-  useEffect(() => { if (open) setF({ date: task.due_date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), start: '09:00', end: '10:00', calendarId: '' }); }, [open, task.due_date]);
-  const personal = cals.data?.calendars.find((c) => c.type === 'personal');
+  const assignee = task.assignee_id as string | null;
+  const forOther = !!assignee && assignee !== user.id;
+  const editable = (cals.data?.calendars ?? []).filter((c) => c.perms.edit);
+  const personal = editable.find((c) => c.type === 'personal');
+  const unitCal = editable.find((c) => c.type === 'org_unit' && c.org_unit_id === task.org_unit_id);
+  const defaultCal = forOther ? unitCal ?? personal : personal;
+  const avail = useApi<{ days: any[] }>(open && f.date && assignee ? `/api/availability?userId=${assignee}&date=${f.date}` : null, [f.date]);
+  useEffect(() => { if (open) { const d = task.due_date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()); setF({ date: d, start: '09:00', end: endOf('09:00', Math.min(remaining, 240)), calendarId: '' }); } }, [open, task.due_date]); // eslint-disable-line react-hooks/exhaustive-deps
+  const calId = f.calendarId || defaultCal?.id || '';
+  const chosen = editable.find((c) => c.id === calId);
+  const addAttendee = forOther && !(chosen?.type === 'personal' && chosen?.owner_user_id === assignee);
   const iso = (d: string, t: string) => `${d}T${t}:00+09:00`;
   useEffect(() => {
     if (!open || !f.date) return;
-    api(`/api/events/conflicts?start=${encodeURIComponent(iso(f.date, f.start))}&end=${encodeURIComponent(iso(f.date, f.end))}`).then((r) => setConf(r.conflicts)).catch(() => {});
-  }, [open, f.date, f.start, f.end]);
+    api(`/api/events/conflicts?start=${encodeURIComponent(iso(f.date, f.start))}&end=${encodeURIComponent(iso(f.date, f.end))}${assignee ? `&userIds=${assignee}` : ''}`).then((r) => setConf(r.conflicts)).catch(() => {});
+  }, [open, f.date, f.start, f.end, assignee]);
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (f.end <= f.start) return toast.error('종료 시각이 시작보다 빨라요');
     try {
-      await api('/api/events', { body: { calendarId: f.calendarId || personal?.id, title: `[업무] ${task.title}`, start: iso(f.date, f.start), end: iso(f.date, f.end), taskId: task.id, kind: 'task_block' } });
-      toast.ok('캘린더에 실행 시간을 배정했습니다'); onClose(); onDone(); broadcastRefresh();
+      await api('/api/events', { body: { calendarId: calId, title: task.title, start: iso(f.date, f.start), end: iso(f.date, f.end), taskId: task.id, kind: 'task_block', ...(addAttendee ? { attendeeIds: [assignee] } : {}) } });
+      toast.ok(forOther ? `${task.assignee_name}님의 실행 시간을 배정했습니다` : '캘린더에 실행 시간을 배정했습니다'); onClose(); onDone(); broadcastRefresh();
     } catch (er: any) { toast.error(er.message); }
   }
+  const day = avail.data?.days?.[0];
   return (
     <Modal open={open} onClose={onClose} title="업무 실행 시간 배정">
       <form onSubmit={save} className="space-y-3">
-        <p className="text-xs text-slate-500">업무 마감일과 별도로, 실제로 일할 시간을 캘린더에 잡아 둡니다.</p>
+        <p className="text-xs text-ink-2">마감일과 별도로 실제로 일할 시간을 캘린더에 잡습니다.{task.estimate_minutes ? ` 예상 ${fmtMinutes(task.estimate_minutes)} 중 ${fmtMinutes(task.scheduled_minutes ?? 0)} 배정됨.` : ''}</p>
         <div className="grid grid-cols-3 gap-2">
           <Field label="날짜"><input type="date" className={inputCls} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} required /></Field>
-          <Field label="시작"><input type="time" className={inputCls} value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} required /></Field>
+          <Field label="시작"><input type="time" className={inputCls} value={f.start} onChange={(e) => setF({ ...f, start: e.target.value, end: endOf(e.target.value, Math.max(30, (() => { const [a, b] = f.start.split(':').map(Number); const [c, d] = f.end.split(':').map(Number); return c * 60 + d - (a * 60 + b); })())) })} required /></Field>
           <Field label="종료"><input type="time" className={inputCls} value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} required /></Field>
         </div>
-        <Field label="캘린더">
-          <select className={inputCls} value={f.calendarId || personal?.id || ''} onChange={(e) => setF({ ...f, calendarId: e.target.value })}>
-            {cals.data?.calendars.filter((c) => c.perms.edit).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        <Field label="캘린더" hint={addAttendee ? `${task.assignee_name}님을 참석자로 넣어 그 사람 캘린더·업무량에도 보입니다` : undefined}>
+          <select className={inputCls} value={calId} onChange={(e) => setF({ ...f, calendarId: e.target.value })}>
+            {editable.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
-        {conf.length > 0 && <p className="rounded bg-amber-50 p-2 text-xs text-amber-800">겹치는 일정: {conf.map((c) => `${c.title}(${fmtDateTime(c.start)})`).join(', ')}</p>}
+        {day && (
+          <p className={cx('rounded-input p-2 text-xs', day.freeMinutes < 60 ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-ink-2')} data-testid="block-availability">
+            {task.assignee_name ?? '담당자'} · {day.holiday ? `공휴일(${day.holiday}) · ` : ''}{day.away ? '휴가·출장 · ' : ''}이날 회의 {fmtMinutes(day.meetingMinutes) || '없음'}, 업무 시간 {fmtMinutes(day.blockMinutes) || '없음'}, 남은 가용 {fmtMinutes(day.freeMinutes) || '0분'}
+          </p>
+        )}
+        {conf.length > 0 && <p className="rounded-input bg-amber-50 p-2 text-xs text-amber-800">겹치는 일정: {conf.map((c) => `${c.title}(${fmtTimeRange(c.start, c.end)})`).join(', ')}</p>}
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit">배정</Button></div>
       </form>
     </Modal>

@@ -262,6 +262,25 @@ export function fmtDate(d: string | null | undefined) {
 export function fmtDateTime(iso: string | Date) {
   return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 }
+/** S-4 시간 표기 통일: "10. 14. (수) 오후 2:00~3:00", 오전/오후가 바뀌면 "오전 11:00~오후 1:00", 날짜가 바뀌면 날짜도 */
+export function fmtTime(d: Date | string) {
+  return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' }).format(new Date(d));
+}
+export function fmtTimeRange(start: Date | string, end: Date | string, opts: { allDay?: boolean; withDate?: boolean } = {}) {
+  const sd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(start));
+  const edRaw = new Date(new Date(end).getTime() - (opts.allDay ? 1 : 0));
+  const ed = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(edRaw);
+  if (opts.allDay) return sd === ed ? `${fmtDate(sd)} 종일` : `${fmtDate(sd)} ~ ${fmtDate(ed)} 종일`;
+  const a = fmtTime(start), b = fmtTime(end);
+  const sameMer = a.slice(0, 2) === b.slice(0, 2);
+  const range = sd === ed ? `${a}~${sameMer ? b.slice(3) : b}` : `${a} ~ ${fmtDate(ed)} ${b}`;
+  return opts.withDate === false ? range : `${fmtDate(sd)} ${range}`;
+}
+export function fmtMinutes(m: number | null | undefined) {
+  if (m === null || m === undefined) return '';
+  const h = Math.floor(m / 60), mm = m % 60;
+  return h ? `${h}시간${mm ? ` ${mm}분` : ''}` : `${mm}분`;
+}
 export function fmtShort(d: string) {
   const [y, m, day] = d.split('-').map(Number);
   return new Date().getFullYear() === y ? `${m}월 ${day}일` : `${String(y).slice(2)}.${m}.${day}`;
