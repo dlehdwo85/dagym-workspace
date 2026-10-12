@@ -11,7 +11,7 @@ import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/cor
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, Field, Modal, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
-import { MultiUserSelect, RecurSelect } from '@/components/pickers';
+import { MultiUserSelect, RecurSelect, ReminderEditor } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
 import { EVENT_KIND_LABEL } from '@/lib/types';
 
@@ -191,11 +191,11 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const en = new Date(s.getTime() + dur);
       setF({ title: e.title, calendarId: e.calendar_id, allDay: e.all_day, date: seoulDate(s), start: seoulTime(s),
         endDate: e.all_day ? addDays(seoulDate(en), -1) : seoulDate(en), end: seoulTime(en), rrule: e.rrule, location: e.location,
-        description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version });
+        description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version, reminders: e.reminder_minutes ?? null });
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
       setF({ title: '', calendarId: personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
-        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: null, location: '', description: '', kind: 'normal', attendeeIds: [] });
+        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -223,7 +223,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     if (t.end < t.start) return toast.error('종료가 시작보다 빠릅니다');
     setBusy(true);
     try {
-      const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds };
+      const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders };
       if (!id) {
         await api('/api/events', { body });
       } else {
@@ -275,7 +275,8 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
             <Field label="종료일"><input type="date" className={inputCls} value={f.endDate ?? ''} min={f.date} onChange={(e) => set('endDate')(e.target.value)} required /></Field>
             {!f.allDay && <Field label="종료 시각"><input type="time" className={inputCls} value={f.end} onChange={(e) => set('end')(e.target.value)} required /></Field>}
           </div>
-          {(!d?.event?.recurring_event_id) && <Field label="반복"><RecurSelect value={f.rrule} onChange={set('rrule')} anchorDate={f.date} /></Field>}
+          {(!d?.event?.recurring_event_id) && <div><div className="mb-1 text-xs font-medium text-slate-600">반복</div><RecurSelect value={f.rrule} onChange={set('rrule')} anchorDate={f.date} /></div>}
+          <div><div className="mb-1 text-xs font-medium text-slate-600">알림 {isRecurring && <span className="font-normal text-slate-400">(반복 일정 전체에 적용)</span>}</div><ReminderEditor value={f.reminders} onChange={set('reminders')} /></div>
           <div><div className="mb-1 text-xs font-medium text-slate-600">참석자</div><MultiUserSelect value={f.attendeeIds} onChange={set('attendeeIds')} /></div>
           {conf.length > 0 && (
             <div className="rounded bg-amber-50 p-2 text-xs text-amber-900" role="alert" data-testid="conflicts">

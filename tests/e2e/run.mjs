@@ -16,7 +16,7 @@ async function step(name, fn) {
 }
 
 await resetDb();
-ensureTls();
+await ensureTls();
 const fake = await startFakeGoogle();
 let srv = await startServer();
 const sql = testDb();
@@ -115,6 +115,10 @@ await step('② 직원(모바일) 알림 수신 → 알림 눌러 업무로 이�
 await step('② 직원(모바일) 댓글·멘션·사진 첨부·문서 링크 → 검토 요청', async () => {
   await staff.getByTestId('comment-input').fill('점검 완료 사진 올립니다');
   await staff.getByLabel('멘션할 사람').selectOption({ label: '최매니저' });
+  const typed = await staff.getByTestId('comment-input').inputValue();
+  assert.ok(typed.endsWith('@최매니저 ') && !typed.includes(']('), `입력창에는 이름만 보여야 함: ${typed}`);
+  const opts = await staff.getByLabel('멘션할 사람').locator('option').allTextContents();
+  assert.ok(!opts.some((o) => o.includes('박직원')), '다른 현장 직원은 멘션 목록에 없음');
   await staff.getByRole('button', { name: '등록', exact: true }).click();
   await staff.getByTestId('comments').getByText('@최매니저').waitFor();
   await staff.getByTestId('file-input').setInputFiles({ name: '소화기.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]) });
@@ -208,7 +212,12 @@ await step('④ 캘린더 화면에서 매주 반복 일정 등록 → 주 보�
   await dlg.getByLabel('종료일').fill(d);
   await dlg.getByLabel('시작 시각').fill('10:00');
   await dlg.getByLabel('종료 시각').fill('11:00');
-  await dlg.getByLabel('반복').selectOption({ label: '매주' });
+  const dow = '일월화수목금토'[new Date(d + 'T00:00:00Z').getUTCDay()];
+  await dlg.getByLabel('반복 규칙').selectOption({ label: `매주 ${dow}요일` });
+  await dlg.getByLabel('반복 종료').selectOption('count');
+  await dlg.getByLabel('반복 횟수').fill('6');
+  await dlg.getByText('각자 기본 알림 설정 따르기').click();
+  await dlg.getByLabel('알림 추가').selectOption({ label: '1일 전' });
   await dlg.getByRole('button', { name: '저장' }).click();
   await owner.getByText('저장했습니다').waitFor();
   await owner.getByRole('button', { name: '주', exact: true }).click();
@@ -226,6 +235,9 @@ await step('④ 캘린더 화면에서 매주 반복 일정 등록 → 주 보�
   await sd.getByLabel('이번 일정만').check();
   await sd.getByRole('button', { name: '확인' }).click();
   await owner.getByText('일정을 이동했습니다').waitFor();
+  const [mst] = await sql`select rrule, reminder_minutes from events where title = '주간 운영 회의' and recurring_event_id is null`;
+  assert.ok(/COUNT=6/.test(mst.rrule), `반복 6회 저장: ${mst.rrule}`);
+  assert.deepEqual(mst.reminder_minutes, [30, 1440], '일정별 알림 30분 전(기본 추가분)+하루 전 저장');
   const ex = await sql`select count(*)::int c from events e join events m on m.id = e.recurring_event_id where m.title = '주간 운영 회의' and e.deleted_at is null`;
   assert.equal(ex[0].c, 1, '예외 회차 1건 생성');
 });
@@ -272,6 +284,16 @@ await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 �
   await staff.waitForTimeout(800);
   await owner.goto(`${BASE}/tasks/${t3}`);
   assert.equal(await owner.getByTestId('detail-due').inputValue(), nd);
+});
+
+await step('내 업무 자동 묶음 (최근 배정·기한 지남·오늘·이번 주·나중)', async () => {
+  await ctx.owner.ok('POST', '/api/tasks', { title: '방금 배정된 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 20) });
+  await ctx.staffA.client.ok('POST', '/api/tasks', { title: '내가 만든 지난 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, -2) });
+  await staff.goto(BASE + '/tasks?view=my&mode=list');
+  const groups = staff.getByTestId('my-groups');
+  await groups.locator('[data-group="new"]').getByText('방금 배정된 업무').waitFor();
+  await groups.locator('[data-group="over"]').getByText('내가 만든 지난 업무').waitFor();
+  await staff.screenshot({ path: `${SHOTS}/29-mobile-my-groups.png`, fullPage: true });
 });
 
 await step('모바일 대시보드·캘린더·하단 메뉴 화면', async () => {

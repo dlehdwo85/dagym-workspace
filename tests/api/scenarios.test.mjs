@@ -9,7 +9,7 @@ const today = seoulToday();
 
 before(async () => {
   await resetDb();
-  ensureTls();
+  await ensureTls();
   fake = await startFakeGoogle();
   srv = await startServer({ FEATURE_GOOGLE_SYNC: '1' }); // 선택 모듈(Google 동기화)도 함께 시험
   sql = testDb();
@@ -278,6 +278,45 @@ describe('④ 반복 업무·반복 일정 생성·수정·취소', () => {
       // 개인 일정은 남이 못 본다
       assert.equal((await ctx.managerA.client.get(`/api/events/${id}`)).status, 404);
     });
+  });
+});
+
+describe('로컬 검수 요청 반영 (R-3·R-6·R-7)', () => {
+  test('R-3 멘션 대상 목록은 업무를 볼 수 있는 사람만', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '멘션 목록 시험', orgUnitId: ctx.siteA })).id;
+    const r = await ctx.owner.ok('GET', `/api/tasks/${t}/mentionable`);
+    const ids = r.users.map((u) => u.id);
+    assert.ok(ids.includes(ctx.staffA.id) && ids.includes(ctx.managerA.id), '같은 현장 직원·관리자 포함');
+    assert.ok(!ids.includes(ctx.staffB.id), '다른 현장 직원 제외');
+    assert.equal((await ctx.staffB.client.get(`/api/tasks/${t}/mentionable`)).status, 404, '볼 수 없는 업무는 목록도 404');
+  });
+  test('R-7 매월 N번째 요일 + 횟수 / 종료일 반복', async () => {
+    const cal = (await ctx.managerA.client.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'org_unit').id;
+    // 2026-11-10 은 둘째 화요일
+    const id = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '월간 운영 회의', start: '2026-11-10T10:00:00+09:00', end: '2026-11-10T11:00:00+09:00', rrule: 'FREQ=MONTHLY;BYDAY=2TU;COUNT=3' })).id;
+    const ev = (await ctx.managerA.client.ok('GET', '/api/events?from=2026-11-01T00:00:00%2B09:00&to=2027-04-01T00:00:00%2B09:00')).events.filter((e) => e.id === id);
+    const days = ev.map((e) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(e.start)));
+    assert.deepEqual(days, ['2026-11-10', '2026-12-08', '2027-01-12']);
+    // 종료일 2026-12-15 (23:59:59 KST = 14:59:59Z) 까지 매주 화요일 → 11/10·17·24, 12/1·8·15 = 6회
+    const id2 = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '주간 점검', start: '2026-11-10T09:00:00+09:00', end: '2026-11-10T09:30:00+09:00', rrule: 'FREQ=WEEKLY;BYDAY=TU;UNTIL=20261215T145959Z' })).id;
+    const ev2 = (await ctx.managerA.client.ok('GET', '/api/events?from=2026-11-01T00:00:00%2B09:00&to=2027-02-01T00:00:00%2B09:00')).events.filter((e) => e.id === id2);
+    assert.equal(ev2.length, 6);
+    assert.equal(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(ev2.at(-1).start)), '2026-12-15', '종료일 당일 포함');
+  });
+  test('R-6 일정별 알림: 여러 개, 지난 알림 중 가장 가까운 것 1회, 기본 설정 덮어씀', async () => {
+    const cal = (await ctx.managerA.client.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'org_unit').id;
+    const start = new Date(Date.now() + 50 * 60000);
+    // 120분·60분·10분 전 알림 → 지금(50분 전)은 60분 알림이 "가장 가까운 지난 알림"
+    const id = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '일정별 알림 시험', start: start.toISOString(), end: new Date(start.getTime() + 3600e3).toISOString(), attendeeIds: [ctx.staffA.id], reminderMinutes: [10, 120, 60, 60] })).id;
+    const [row] = await sql`select reminder_minutes from events where id = ${id}`;
+    assert.deepEqual(row.reminder_minutes, [10, 60, 120], '중복 제거·정렬');
+    await tick(); await tick();
+    const n = await sql`select user_id, dedupe_key from notifications where type = 'event_reminder' and entity_id = ${id} order by user_id`;
+    assert.equal(n.length, 2, '작성자·참석자 각 1회');
+    assert.ok(n.every((x) => x.dedupe_key.endsWith(':60')));
+    // 알림 없음([]) 으로 바꾸면 더 이상 생성되지 않음
+    await ctx.managerA.client.ok('PATCH', `/api/events/${id}`, { reminderMinutes: [] });
+    assert.deepEqual((await ctx.managerA.client.ok('GET', `/api/events/${id}`)).event.reminder_minutes, []);
   });
 });
 

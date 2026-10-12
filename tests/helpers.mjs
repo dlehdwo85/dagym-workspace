@@ -3,6 +3,13 @@ import postgres from 'postgres';
 import webpush from 'web-push';
 import { generateKeyPairSync } from 'node:crypto';
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+// Windows·Linux 공통: 임시 폴더는 OS 기본값, Node·Next 는 경로 대신 실행 파일로 직접 호출
+const TMP = path.join(tmpdir(), 'workos-test');
+const NEXT_BIN = createRequire(import.meta.url).resolve('next/dist/bin/next');
 
 export const PORT = Number(process.env.TEST_PORT ?? 3101);
 export const BASE = `http://localhost:${PORT}`;
@@ -13,7 +20,7 @@ export async function resetDb() {
   const sql = postgres(DB_URL, { max: 1, onnotice: () => {} });
   await sql.unsafe('drop schema public cascade; create schema public;');
   await sql.end();
-  execFileSync('node', ['scripts/migrate.mjs'], { env: { ...process.env, DATABASE_URL: DB_URL }, stdio: 'pipe' });
+  execFileSync(process.execPath, ['scripts/migrate.mjs'], { env: { ...process.env, DATABASE_URL: DB_URL }, stdio: 'pipe' });
 }
 
 export function testDb() {
@@ -40,16 +47,20 @@ export function serverEnv() {
     VAPID_SUBJECT: 'mailto:test@example.com',
     FCM_API_BASE: FAKE,
     FCM_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: 'fake-proj', client_email: 'svc@fake.iam', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }), token_uri: `${FAKE}/token` }),
-    LOCAL_UPLOAD_DIR: '/tmp/claude-0/workos-test-uploads',
+    LOCAL_UPLOAD_DIR: path.join(TMP, 'uploads'),
   };
 }
 
-export const TLS_DIR = '/tmp/claude-0/workos-test-tls';
+export const TLS_DIR = path.join(TMP, 'tls');
 /** 가짜 웹 푸시용 자체 서명 인증서 (테스트 서버 프로세스만 신뢰) */
-export function ensureTls() {
+export async function ensureTls() {
   mkdirSync(TLS_DIR, { recursive: true });
   if (!existsSync(`${TLS_DIR}/cert.pem`)) {
-    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', `${TLS_DIR}/key.pem`, '-out', `${TLS_DIR}/cert.pem`, '-days', '30', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost'], { stdio: 'pipe' });
+    // openssl 없이(Windows 포함) 자체 서명 인증서 생성
+    const { generate } = await import('selfsigned');
+    const pems = await generate([{ name: 'commonName', value: 'localhost' }], { days: 30, keySize: 2048, extensions: [{ name: 'subjectAltName', altNames: [{ type: 2, value: 'localhost' }] }] });
+    writeFileSync(`${TLS_DIR}/key.pem`, pems.private);
+    writeFileSync(`${TLS_DIR}/cert.pem`, pems.cert);
   }
   const bundle = `${TLS_DIR}/bundle.pem`;
   writeFileSync(bundle, (process.env.NODE_EXTRA_CA_CERTS && existsSync(process.env.NODE_EXTRA_CA_CERTS) ? readFileSync(process.env.NODE_EXTRA_CA_CERTS, 'utf8') + '\n' : '') + readFileSync(`${TLS_DIR}/cert.pem`, 'utf8'));
@@ -60,8 +71,8 @@ export function ensureTls() {
 export const FAKE_TLS = 'https://localhost:3200';
 
 export async function startServer(extraEnv = {}) {
-  const env = { ...process.env, ...serverEnv(), ...extraEnv, NODE_ENV: 'production', PORT: String(PORT), NODE_EXTRA_CA_CERTS: ensureTls() };
-  const proc = spawn('node_modules/.bin/next', ['start', '-p', String(PORT)], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const env = { ...process.env, ...serverEnv(), ...extraEnv, NODE_ENV: 'production', PORT: String(PORT), NODE_EXTRA_CA_CERTS: await ensureTls() };
+  const proc = spawn(process.execPath, [NEXT_BIN, 'start', '-p', String(PORT)], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   proc.stdout.on('data', (d) => (log += d));
   proc.stderr.on('data', (d) => (log += d));

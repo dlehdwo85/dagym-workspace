@@ -18,7 +18,7 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 4. 클라우드: 심사용 계정 준비 문구, 스토어 설명 확정, Unlisted(iOS) 신청 문안
 
 ## 대표 결정이 필요한 것
-- `main` 브랜치 생성과 병합 승인 (지금은 `claude/cool-pascal-h2e787`이 기본 브랜치입니다)
+- ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
 - 저장소 공개 유지 여부 (비공개로 바꾸면 10분 정기 실행이 Actions 무료 한도를 넘음 → OPERATIONS 7번)
 - 개인정보 보호책임자 이름·연락처
 
@@ -32,4 +32,16 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - Asana·Google Calendar 로그인 후 참고 검수(L-11)
 
 ## 로컬 요청 처리 (클라우드 회신란)
-- (아직 요청 없음)
+2026-10-13 · `local/ops-setup`(f4ad95a) 를 클라우드 브랜치에 merge 후 처리. 모두 시험으로 확인함.
+| 요청 | 처리 | 확인 |
+|---|---|---|
+| R-1 migrate.mjs Windows 경로 | ✅ `fileURLToPath(import.meta.url)` 로 교체 | 이제 Windows PowerShell 에서 `node scripts/migrate.mjs` 실행 가능 → **HANDOFF L-2 진행 가능** |
+| R-2 멘션 입력 UUID 노출 | ✅ 입력창에는 `@이름` 만, 전송 때 내부 표기로 변환 (`src/lib/mentions.ts`) | E2E: 입력값 검사, 캡처 `docs/screens/26-mobile-mention-input.png` |
+| R-3 멘션 목록 권한 | ✅ 새 API `GET /api/tasks/:id/mentionable` — 업무를 볼 수 있는 사람만, 화면에 안내 문구 | API 시험 + E2E(다른 현장 직원 미표시) |
+| R-4 첨부 크기 0.0MB | ✅ 1MB 미만 KB, 1KB 미만 B | — |
+| R-5 버튼 줄바꿈 | ✅ 공통 버튼에 `whitespace-nowrap` | 캡처 `27-mobile-checklist.png` |
+| R-6 일정별 알림 | ✅ 일정마다 최대 5개(시작 시각~1주 전), 비우면 알림 없음, "각자 기본 설정 따르기" 기본값. 반복 일정은 시리즈 전체에 적용. 정기 실행이 늦어도 가장 가까운 지난 알림 1회만 | API 시험(중복 제거·1회·끄기), E2E, 캡처 `28-mobile-recur-reminder.png` |
+| R-7 반복 종료·N번째 요일 | ✅ 반복 편집기(업무·일정 공용): 매주 ○요일, 2주마다, 매월 N일, **매월 N번째/마지막 ○요일**, 매년 + **계속/종료일까지/횟수** | API 시험(둘째 화요일 3회, 종료일 당일 포함 6회), E2E(매주 6회 저장) |
+| R-8 시험 Windows 호환 | ✅ OS 임시 폴더, `process.execPath`+`next/dist/bin/next`, openssl 대신 `selfsigned` 패키지 | Linux 에서 전체 통과. **Windows 에서 돌리려면**: PostgreSQL + `TEST_DATABASE_URL`, E2E 는 `npx playwright install chromium` 1회 — 로컬 실행 결과를 LOCAL_LOG 에 남겨 주세요 |
+| Asana 로그인 검수(f949ec4, 부분) | ✅ 제안 중 "내 업무 자동 묶음" 반영: 최근 배정됨(48시간, 실제 배정 시각 기준)·기한 지남·오늘·이번 주·나중·마감일 없음. 프로젝트 개요·파일 모아보기·Ctrl+K 검색은 선택 후보로 보류 | E2E(20번째 단계), 캡처 `docs/screens/29-mobile-my-groups.png` |
+| Asana 실제 업무 공간 검수 | 로컬 대기 — 체험 종료 모달의 결제 화면은 누르지 않는 판단에 동의. 실제 업무용 계정·공간 확인은 대표 결정 | — |

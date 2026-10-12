@@ -9,6 +9,7 @@ import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } fro
 import { Attachments } from '@/components/Attachments';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { PRIORITY_LABEL, STATUS_LABEL, STATUSES } from '@/lib/types';
+import { encodeMentions } from '@/lib/mentions';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
@@ -28,6 +29,8 @@ export default function TaskDetail({ params }: { params: Promise<{ id: string }>
   const { data, error, loading, reload } = useApi<any>(`/api/tasks/${id}`);
   const projects = useApi<{ projects: any[] }>('/api/projects');
   const [comment, setComment] = useState('');
+  const [picked, setPicked] = useState<{ id: string; name: string }[]>([]); // 입력창에는 @이름만, 전송 때 내부 표기로 변환
+  const mentionable = useApi<{ users: { id: string; name: string; title: string | null }[] }>(`/api/tasks/${id}/mentionable`);
   const [sub, setSub] = useState(false);
   const [desc, setDesc] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(null);
@@ -59,10 +62,11 @@ export default function TaskDetail({ params }: { params: Promise<{ id: string }>
   async function sendComment(e: React.FormEvent) {
     e.preventDefault();
     if (!comment.trim()) return;
+    const body = encodeMentions(comment, picked);
     try {
-      await api(`/api/tasks/${id}/comments`, { body: { body: comment }, queueOffline: '댓글' });
-      setComment(''); reload();
-    } catch (e: any) { if (e.code === 'queued') { toast.info(e.message); setComment(''); } else toast.error(e.message); }
+      await api(`/api/tasks/${id}/comments`, { body: { body }, queueOffline: '댓글' });
+      setComment(''); setPicked([]); reload();
+    } catch (e: any) { if (e.code === 'queued') { toast.info(e.message); setComment(''); setPicked([]); } else toast.error(e.message); }
   }
   async function reject() {
     const note = prompt('보완 요청 내용을 입력하세요');
@@ -146,7 +150,7 @@ export default function TaskDetail({ params }: { params: Promise<{ id: string }>
               <option value="">없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </Field>
-          <Field label="반복"><RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /></Field>
+          <div><div className="mb-1 text-xs font-medium text-slate-600">반복 (마감일 기준)</div><RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /></div>
           <Field label="태그 (쉼표)">
             <input className={inputCls} defaultValue={t.tags.join(', ')} onBlur={(e) => { const v = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); if (v.join() !== t.tags.join()) patch({ tags: v }); }} />
           </Field>
@@ -241,9 +245,15 @@ export default function TaskDetail({ params }: { params: Promise<{ id: string }>
         <form onSubmit={sendComment} className="mt-3 space-y-1.5">
           <textarea className={inputCls} rows={2} placeholder="댓글 입력 (사람을 언급하려면 아래 '멘션' 선택)" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input" />
           <div className="flex items-center gap-2">
-            <select className="rounded-md border px-2 py-1 text-xs" value="" onChange={(e) => { const u = dir.users.find((x) => x.id === e.target.value); if (u) setComment((c) => `${c}${c && !c.endsWith(' ') ? ' ' : ''}@[${u.name}](${u.id}) `); }} aria-label="멘션할 사람">
-              <option value="">@ 멘션</option>{dir.users.filter((u) => u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            <select className="rounded-md border px-2 py-1 text-xs" value="" onChange={(e) => {
+              const u = mentionable.data?.users.find((x) => x.id === e.target.value);
+              if (!u) return;
+              setComment((c) => `${c}${c && !c.endsWith(' ') ? ' ' : ''}@${u.name} `);
+              setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }]));
+            }} aria-label="멘션할 사람">
+              <option value="">@ 멘션</option>{mentionable.data?.users.filter((u) => u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
             </select>
+            <span className="text-[11px] text-slate-400">이 업무를 볼 수 있는 사람만 표시됩니다</span>
             <span className="flex-1" />
             <Button size="sm" type="submit">등록</Button>
           </div>

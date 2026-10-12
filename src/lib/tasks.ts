@@ -46,7 +46,9 @@ const TASK_COLS = (sql: Sql) => sql`
   (select count(*)::int from comments cm where cm.task_id = t.id and cm.deleted_at is null) as comment_count,
   (select count(*)::int from attachments at where at.task_id = t.id and at.deleted_at is null) as attachment_count,
   (select count(*)::int from task_dependencies d join tasks dt on dt.id = d.depends_on_id
-     where d.task_id = t.id and dt.status <> 'done' and dt.deleted_at is null) as blocked_by_count`;
+     where d.task_id = t.id and dt.status <> 'done' and dt.deleted_at is null) as blocked_by_count,
+  (select max(a.created_at) from activities a where a.entity_type = 'task' and a.entity_id = t.id
+     and (a.action = 'created' or a.changes ? 'assigneeId')) as assigned_at`;
 
 const TASK_FROM = (sql: Sql) => sql`
   from tasks t
@@ -476,4 +478,19 @@ export async function getProjectOrThrow(u: SessionUser, projectId: string) {
     return { ...p, limited: true };
   }
   return { ...p, limited: false };
+}
+
+/** 멘션 대상: 요청자가 볼 수 있는 사용자 중 이 업무를 볼 수 있는 사람만 (서버 권한 기준) */
+export async function mentionableUsers(u: SessionUser, taskId: string) {
+  const sql = db();
+  const { task } = await loadTaskForUser(u, taskId, sql);
+  const { directory } = await import('./admin');
+  const { taskPerms } = await import('./access');
+  const dir = await directory(u, sql);
+  const out: { id: string; name: string; title: string | null }[] = [];
+  for (const cand of dir.users as any[]) {
+    const p = await taskPerms({ id: cand.id, email: cand.email, name: cand.name, role: cand.role, status: 'active', timezone: 'Asia/Seoul', sessionId: '' }, task, sql);
+    if (p.view) out.push({ id: cand.id, name: cand.name, title: cand.title });
+  }
+  return out;
 }
