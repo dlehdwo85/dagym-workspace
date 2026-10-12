@@ -6,4 +6,4 @@
 | 서비스 | 로그인 | 검수 상태 |
 |---|---|---|
 | Google Calendar | ✅ (이미 로그인) | ✅ 읽기 전용 검수 완료 — 결과 [../handoff/LOCAL_REVIEW.md](../handoff/LOCAL_REVIEW.md) 4절 |
-| Asana | ⛔ 미로그인 | 대기 — 대표 로그인 후 진행 |
+| Asana | ✅ (2026-10-13 대표 로그인) | 🟡 부분 — 샘플 작업 공간, 체험 종료 모달이 화면을 막음. 결과 [../handoff/LOCAL_REVIEW.md](../handoff/LOCAL_REVIEW.md) 5절 |
