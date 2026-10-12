@@ -37,3 +37,13 @@
 - ⛔ `APP_SECRET`(32자 이상)·`SETUP_SECRET` — 비밀값이라 대표가 직접 입력 대기
 - ⛔ 운영 DB 마이그레이션 — 방법 결정 대기(빌드 때 `node scripts/migrate.mjs` 실행하도록 vercel.json buildCommand 변경안은 자동 권한에서 차단됨 → 대표 승인 필요)
 - ⛔ Vercel Hobby 배포 횟수 제한: main 2c48976·84dfe02 "Deployment rate limited — retry in 24 hours". 운영 주소는 아직 995c4ac. 해제 후 main 재배포 필요(또는 Pro $20/월)
+
+## 운영·앱 등록 진행 (2026-10-13 계속)
+- ✅ 운영 DB 마이그레이션: 대표가 vercel.json buildCommand(`node scripts/migrate.mjs && next build`) 커밋(751b57a) → 배포 성공, `/api/health` ok, migration 011
+- ✅ 대표 계정: 대표가 `/setup` 에서 직접 생성·로그인 확인
+- ✅ Google Play: 조직 계정 "주식회사 다짐"에 앱 **다짐 업무일정** (`kr.co.dagym.workos`, 무료, 기본 언어 ko-KR) 생성
+- ✅ 업로드 키: 로컬 생성(`C:\Users\User\Claude-Operations\secrets\dagym-workos-upload.jks`, 비밀번호는 같은 폴더 properties — 저장소 밖, 대표 백업 필요). 업로드 인증서 SHA-256 `1E:EA:73:BF:B5:40:C1:5D:A6:D9:67:02:B8:FC:3C:8C:15:5A:A1:D3:82:AA:97:BC:1B:C4:7A:62:B2:99:12:75`
+- ✅ mobile 워크플로 run 38316733710 (751b57a) 서명 없는 AAB → 로컬 jarsigner 서명 → Play 내부 테스트 1 (1.0) **내부 테스터에게 제공됨** (테스터 목록 "본사 테스터" 1명). 참여 링크 https://play.google.com/apps/internaltest/4701311500260795594
+- 상태 구분: Android 빌드 ✅ / 내부 테스트 배포 ✅ / 스토어 제출 ⛔(스토어 등록정보·앱 콘텐츠 설문 미작성) / 심사 ⛔ / 실기기 설치 확인 ⛔(대표 휴대폰 확인 대기)
+- ⛔ 푸시: Firebase(google-services.json) 미설정 → 앱 푸시 없음. 앱 링크용 ANDROID_CERT_SHA256 은 Play 앱 서명 키 지문(Play Console → 앱 무결성)으로 등록 필요
+- ⛔ iOS: App Store Connect 미로그인, Apple Developer 멤버십 여부 확인 필요($99/년, 대표 결제)
