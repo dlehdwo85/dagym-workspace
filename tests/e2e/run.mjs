@@ -525,10 +525,15 @@ await step('B-14·B-15·B-16·B-17 현장 비교·주간 보고·업무량·공�
   await owner.getByRole('button', { name: '지난주 보고 지금 만들기' }).click();
   await owner.getByTestId('weekly-report').getByText('주간 보고 ·').waitFor();
   await owner.screenshot({ path: `${SHOTS}/47-weekly-report.png`, fullPage: true });
-  await owner.goto(BASE + '/calendar');
-  await owner.getByTestId('calendar').waitFor();
+  await owner.goto(BASE + '/calendar?date=2026-10-01');
+  // 달력이 그려진 뒤(단축키 처리기도 붙은 뒤) 조작 — 그리기 전에 키를 누르면 무시되어 시험이 흔들렸음
+  await owner.locator('.fc-toolbar-title').waitFor();
+  await owner.getByRole('button', { name: '월', exact: true }).click();
+  await owner.locator('.fc-event.holiday', { hasText: '한글날' }).first().waitFor();
+  await owner.keyboard.press('w');
+  await owner.locator('.fc-timeGridWeek-view').waitFor();
   await owner.keyboard.press('m');
-  await owner.locator('.fc-event.holiday').first().waitFor();
+  await owner.locator('.fc-dayGridMonth-view').waitFor();
   await owner.screenshot({ path: `${SHOTS}/48-calendar-holidays.png` });
 });
 await step('모바일 목록 행을 오른쪽으로 밀어 완료 → 되돌리기', async () => {
