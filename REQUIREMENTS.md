@@ -49,7 +49,7 @@
 ## 8. 웹·Android·iOS
 | 단계 | Android | iOS |
 |---|---|---|
-| 앱 빌드 | ✅ 디버그 APK 생성 (이 환경) | 🟡 GitHub Actions macOS 시뮬레이터 빌드 구성 |
+| 앱 빌드 | ✅ APK/AAB (이 환경 + CI) | ✅ CI macOS 시뮬레이터 빌드 성공 (서명 전) |
 | 내부 테스트 배포 | ⛔ Play Console 조직 계정 필요 | ⛔ Apple Developer 조직 계정 필요 |
 | 스토어 제출 / 심사 통과 / 실제 설치 가능 | ⛔ | ⛔ |
 배포 방식 비교와 선택 근거: [docs/APP_RELEASE.md](docs/APP_RELEASE.md)

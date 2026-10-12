@@ -217,3 +217,13 @@
 | **합계(최소 구성: Vercel 1좌석 + Neon)** | **US$25** | **약 US$99/년 + US$20/월 + DB 사용량 ≈ 연 US$350~400** |
 | 선택: Google Workspace(Managed Play, Internal OAuth) | — | 사용자당 별도 요금(이번 조사 범위 밖, 미확인 ❓) |
 | 해당 없음: Apple Enterprise | — | (US$299/년, 자격 미달) |
+
+## 부록: 실제 Google Calendar API 응답 형식 확인 (2026-10-12, 읽기 전용)
+대표 계정의 Google Calendar 커넥터로 일정 10건과 캘린더 목록을 **읽기만** 해서 형식을 확인했습니다. 수정·생성·저장은 하지 않았고, 일정 내용은 기록하지 않습니다.
+| 항목 | 실제 응답 | 동기화 엔진(src/lib/google/sync.ts) 처리 |
+|---|---|---|
+| 반복 회차 id | `<마스터id>_20261013T060000Z` (UTC 기본형) | `instanceId()` 형식과 일치 ✅ |
+| 반복 회차 필드 | `recurringEventId`, `originalStartTime.dateTime` 에 +09:00 오프셋 | `parseGTime()` 이 오프셋 포함 ISO 를 처리 ✅ |
+| 시간 일정 | `start.dateTime` +09:00 과 `timeZone: Asia/Seoul` | ✅ |
+| 캘린더 목록 | 기본 캘린더, 공휴일 구독 캘린더, **Asana 에서 가져온 ICS 캘린더(UTC)** | 구독·가져오기 캘린더는 accessRole 이 reader 라서 양방향 연결이 거부되고 "가져오기만" 가능 ✅ |
+참고: 대표는 이미 Asana 업무를 Google Calendar 로 가져와 쓰고 있습니다. 새 서비스로 옮긴 뒤에는 그 가져오기 캘린더를 정리할지 결정해야 합니다.

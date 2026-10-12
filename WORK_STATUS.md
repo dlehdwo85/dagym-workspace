@@ -37,13 +37,16 @@
 | 정기 실행(10분, OIDC)·헬스체크·운영 상태 화면 | ✅ 코드 | 🟡 운영 주소 연결 후 가동 |
 | 백업(암호화)·복원·복원 훈련 워크플로 | ✅ | 로컬 실제 복원 |
 | Android 앱(Capacitor) | ✅ 디버그 APK | ⛔ 실제 기기 |
-| iOS 앱(Capacitor, SPM) | ✅ 프로젝트 | 🟡 CI macOS 빌드 결과 대기 |
+| iOS 앱(Capacitor, SPM) | ✅ 프로젝트 | ✅ GitHub Actions macOS 시뮬레이터 빌드 성공 (run 38283356596) / ⛔ 서명·실제 기기 |
 
 ## 앱 출시 단계 (구분 기록)
 | | 빌드 | 내부 테스트 배포 | 스토어 제출 | 심사 통과 | 실제 설치 가능 |
 |---|---|---|---|---|---|
-| Android | ✅ 디버그 APK | ⛔ | ⛔ | ⛔ | ⛔ |
-| iOS | 🟡 | ⛔ | ⛔ | ⛔ | ⛔ |
+| Android | ✅ 디버그·릴리스(미서명) APK/AAB — CI 산출물 `android-build` | ⛔ | ⛔ | ⛔ | ⛔ |
+| iOS | ✅ 시뮬레이터 빌드(서명 없음) | ⛔ | ⛔ | ⛔ | ⛔ |
+
+## CI
+- GitHub Actions `ci` ✅ (run 38283356589: 타입검사·빌드·API 49/49·E2E 18/18), `mobile` ✅ (Android·iOS)
 
 ## 차단 사항 (대표 결정·계정 필요)
 1. Vercel 프로젝트 + PostgreSQL + R2 → 운영 배포 (NEXT_ACTION 1)

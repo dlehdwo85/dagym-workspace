@@ -2,7 +2,7 @@
 
 최종 실행: 2026-10-12 (UTC) · 클라우드 개발 환경 (Node 22, PostgreSQL 16, Chromium 141)
 요약: **API 통합 시험 49/49 통과 · 실제 브라우저 E2E 18/18 통과 · 백업→복원 일치 · Android APK 빌드 성공**
-GitHub Actions CI: 1차 실행 때 API 49건은 통과했고, E2E 1건이 실패했습니다(체크박스 이름 중복 — 화면을 고쳐 해결). 수정본으로 다시 실행한 결과는 WORK_STATUS 에 기록합니다.
+GitHub Actions: 1차 CI 는 E2E 2건 실패(체크박스 접근성 이름 중복 → 화면 수정). 2차 CI run 38283356589 **API 49/49 · E2E 18/18 통과**, mobile run 38283356596 **Android 빌드 · iOS 시뮬레이터 BUILD SUCCEEDED**.
 
 ## 재현 방법
 ```bash
@@ -50,5 +50,5 @@ restore → workos_restore
 - Asana·Google Calendar **로그인 후** 실제 화면 (docs/research 의 "미검증" 목록)
 - 실제 Google Calendar 계정과의 동기화 (가짜 API 로만 검증)
 - 실제 기기의 앱 설치·로그인·앱이 닫힌 상태 푸시 수신·알림 탭 이동·카메라 첨부
-- iOS 빌드 (CI macOS 작업 결과 대기)
+- iOS 서명 빌드·TestFlight (Apple 계정 필요; 서명 없는 시뮬레이터 빌드는 성공)
 - 운영 URL 직접 접속, 운영 백업 워크플로 실행
