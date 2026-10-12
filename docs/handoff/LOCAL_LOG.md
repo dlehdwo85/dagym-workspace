@@ -8,6 +8,7 @@
 - 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · 로컬 도구 점검, Windows 에서 운영 빌드 실행·화면 검수, Google Calendar 로그인 화면 검수(읽기 전용) · 결과 [LOCAL_REVIEW.md](LOCAL_REVIEW.md), 캡처 `local-screens/` · 다음: Asana 로그인 후 L-11 마무리, 이어서 L-1(Vercel) 시작은 대표 결정·결제 필요
 - 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · Asana 로그인(대표) 후 검수 · 샘플 작업 공간 + 체험 종료 모달로 부분 검수만 가능(LOCAL_REVIEW 5절) · 다음: 실제 업무용 Asana 계정·작업 공간 확인 필요
 - 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · 새 Asana 시험 계정으로 L-11 완료, 대표 지시(Asana 참고만·더 높은 수준) 반영해 개발 과제 작성 · [BEYOND_ASANA_PLAN.md](BEYOND_ASANA_PLAN.md) · 다음: 클라우드 구현분 로컬 재검수
+- 2026-10-13 · BOOK-29S4OTOLT7 · local/ops-setup · 클라우드 5bbbbec merge, Windows 에서 `npm run db:migrate` 정상(R-1 확인), 대표 계정 로그인 재현(이 PC 정상), 디자인·UI/UX 검수 · [UIUX_REVIEW.md](UIUX_REVIEW.md) · 다음: 클라우드 디자인 개선분 재검수
 
 ## 클라우드 요청 (로컬이 적고 클라우드가 처리)
 근거와 재현은 [LOCAL_REVIEW.md](LOCAL_REVIEW.md) 3·4절.
@@ -19,6 +20,7 @@
 - [R-6 제안] 일정별 알림(기본값은 사용자 설정, 일정마다 덮어쓰기·여러 개) — Google Calendar 는 일정마다 여러 알림
 - [R-7 제안] 반복 일정 종료 조건(종료일·횟수)과 "매월 N번째 ○요일" — API 는 RRULE 을 받으므로 화면만 추가
 - [R-9 대표 지시, 2026-10-13] **Asana 는 참고만, 연동하지 않음. Asana 보다 높은 수준으로 개발** → 과제 목록 [BEYOND_ASANA_PLAN.md](BEYOND_ASANA_PLAN.md) (P0: 업무 상세 패널·내 업무 자동 묶음·섹션·Ctrl+K·R-1~R-7 / P1: 사진 증빙 완료·현장 QR 신고·다단계 결재·자동화 규칙·사용자 지정 필드(올바른 집계)·업무 유형 / P2: 현장 비교 대시보드·주간 보고 자동 생성·업무량)
+- [R-10 대표 지시, 2026-10-13] **디자인·UI/UX 수준 향상** + 대표 계정 로그인 오류 → [UIUX_REVIEW.md](UIUX_REVIEW.md). 먼저 버그 U-0a(`/tasks?view=board` 같은 모르는 값이면 업무 화면 전체 오류), U-0b(오류 문구 "입력값을 확인해 주세요"만 표시), U-0c(연결 실패 시 영어 문구), U-0d(**Pretendard 글꼴 미로딩 → Windows 맑은 고딕**). 이어서 디자인 시스템(글꼴·색 토큰·lucide 아이콘·아바타·DueChip·토스트·스켈레톤) → 상단 바·목록·보드·상세 패널·대시보드·캘린더·모바일·로그인 순서
 - [R-8 참고] 자동 시험이 Linux 전용 경로(`/tmp/claude-0`, `node_modules/.bin/next`, openssl)를 써서 Windows 에서 못 돎. 필수 아님 — 원하면 `os.tmpdir()`·`process.execPath`+`next/dist/bin/next` 로 바꾸면 로컬에서도 회귀 시험 가능
 
 ## 클라우드 회신 (클라우드는 이 파일 대신 NEXT_ACTION.md 의 "로컬 요청 처리" 절에 답합니다)
