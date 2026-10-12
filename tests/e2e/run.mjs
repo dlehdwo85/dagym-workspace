@@ -29,6 +29,13 @@ const ctx = await bootstrap();
 const today = seoulToday();
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }).catch(() => chromium.launch());
 
+/** 업무 상세의 "필드 더보기" 펼치기 (이미 펼쳐져 있으면 그대로) */
+async function openMoreFields(scope) {
+  const btn = scope.getByTestId('more-fields').first();
+  await btn.waitFor();
+  if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click();
+}
+
 async function login(context, email, password) {
   const page = await context.newPage();
   await page.goto(BASE + '/login');
@@ -100,10 +107,14 @@ await step('② 대표가 + 버튼으로 업무 등록·담당자 배정', async
   await dlg.getByLabel('제목').fill('강남점 소방 점검 대응');
   await dlg.getByLabel('담당자').selectOption({ label: '이직원' });
   await dlg.getByLabel('마감일').fill(addDays(today, 3));
-  await dlg.getByLabel('소속 (현장·부서)').selectOption({ label: '　다짐 강남점 (지점)' });
+  assert.equal(await dlg.getByLabel('소속 (현장·부서)').count(), 0, '등록 창은 제목·담당자·마감일·프로젝트 4칸');
   await dlg.getByRole('button', { name: '등록' }).click();
   await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
   taskId = owner.url().split('/').pop();
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${taskId}`)).task.approval_required, false, '관리자 최종 확인 기본 꺼짐');
+  // 이 시나리오(현장 관리자 최종 확인)는 확인 필요·현장 소속으로 바꿔 진행
+  await ctx.owner.ok('PATCH', `/api/tasks/${taskId}`, { approvalRequired: true, orgUnitId: ctx.siteA });
+  await owner.reload();
   await owner.getByTestId('task-title').waitFor();
   await owner.screenshot({ path: `${SHOTS}/04-task-detail-owner.png`, fullPage: true });
 });
@@ -166,7 +177,8 @@ await step('③ 목록에서 마감일 변경 → 보드·캘린더·타임라�
   const nd = addDays(today, 4);
   await owner.goto(BASE + '/tasks?mode=list');
   const row = owner.locator(`[data-task-id="${t3}"]`);
-  await row.getByTestId('due-input').fill(nd);
+  await row.getByTestId('due-picker').click();
+  await owner.getByLabel('보기 전환 시험 업무 마감일 날짜 선택').fill(nd);
   await owner.waitForTimeout(800);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t3}`)).task.due_date, nd);
   await owner.getByRole('tab', { name: '보드' }).click();
@@ -220,6 +232,7 @@ await step('B-1 목록에서 업무를 오른쪽 패널로 열기 → URL /tasks
   await link.click();
   await owner.getByTestId('task-panel').waitFor();
   assert.ok(owner.url().endsWith(`/tasks/${t3}`), 'URL 이 업무 주소로 바뀜: ' + owner.url());
+  await openMoreFields(owner.getByTestId('task-panel'));
   await owner.getByTestId('task-panel').getByLabel('우선순위').selectOption('high');
   await owner.waitForTimeout(600);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t3}`)).task.priority, 'high');
@@ -473,6 +486,7 @@ await step('B-9 결재선 화면에서 2단계 결재선 만들기 → 업무에
   await owner.getByTestId('approval-lines').getByText('계약 결재').waitFor();
   const id = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'PT 강사 계약서 검토', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, taskType: 'approval' })).id;
   await owner.goto(`${BASE}/tasks/${id}`);
+  await openMoreFields(owner);
   await owner.getByLabel('결재선').selectOption({ label: '계약 결재 (2단계)' });
   await owner.waitForTimeout(600);
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
@@ -505,7 +519,9 @@ await step('B-11 프로젝트 필드: 퍼센트 필드 추가 → 업무 상세�
   for (const [i, v] of [[0, '80'], [1, '90']]) {
     await owner.goto(`${BASE}/tasks/${tasks[i].id}`);
     await owner.getByTestId('task-title').waitFor();
-    const input = owner.locator('section[aria-label="업무 속성"]').getByLabel('달성률');
+    await owner.getByTestId('task-title').waitFor();
+    await openMoreFields(owner);
+    const input = owner.locator('section[aria-label="추가 필드"]').getByLabel('달성률');
     await input.fill(v); await input.blur();
     await owner.waitForTimeout(500);
   }
@@ -625,7 +641,8 @@ await step('S-3 업무 시간 배정: 담당자 조직 캘린더 + 담당자 참
 await step('S-5 오늘·이번 주: 업무를 시간표로 끌어 놓아 실행 시간 배정 · S-7 업무량 히트맵', async () => {
   const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '회원 상담 기록 정리', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 5), estimateMinutes: 90 })).id;
   await staff.setViewportSize({ width: 1366, height: 900 });
-  await staff.goto(`${BASE}/plan`);
+  await staff.goto(`${BASE}/calendar`);
+  if (!(await staff.getByTestId('unscheduled').count())) await staff.getByRole('button', { name: '미배정 업무' }).click();
   const card = staff.locator(`[data-plan-task="${t}"]`);
   await card.waitFor();
   await staff.locator('.fc-timegrid-slot').first().waitFor();
@@ -636,7 +653,7 @@ await step('S-5 오늘·이번 주: 업무를 시간표로 끌어 놓아 실행 
   await staff.mouse.move(b.x + 60, b.y + 30, { steps: 5 });
   await staff.mouse.move(col.x + col.width / 2, sb.y + 5, { steps: 20 });
   await staff.mouse.up();
-  await staff.getByText('실행 시간을 배정했습니다').waitFor();
+  await staff.getByText('업무 시간을 잡았습니다').waitFor();
   const evs = (await ctx.staffA.client.ok('GET', `/api/tasks/${t}/events`)).events;
   assert.equal(evs.length, 1); assert.equal(evs[0].kind, 'task_block');
   assert.equal(Math.round((new Date(evs[0].end_at) - new Date(evs[0].start_at)) / 60000), 90, '남은 예상 시간만큼');
@@ -645,6 +662,84 @@ await step('S-5 오늘·이번 주: 업무를 시간표로 끌어 놓아 실행 
   await owner.goto(BASE + '/workload');
   await owner.getByTestId('workload-heatmap').waitFor();
   await owner.screenshot({ path: `${SHOTS}/54-workload-heatmap.png`, fullPage: true });
+});
+
+// 본사 운영 도구 단순화 (HQ_SIMPLIFY)
+await step('HQ-1 사이드바 4개(홈·내 업무·프로젝트·캘린더), 관리 메뉴는 계정 메뉴 안', async () => {
+  await owner.goto(BASE + '/');
+  const nav = owner.getByRole('navigation', { name: '주 메뉴' });
+  await nav.getByRole('link', { name: '캘린더' }).waitFor();
+  const labels = (await nav.getByRole('link').allTextContents()).map((x) => x.trim()).filter(Boolean);
+  for (const l of ['홈', '내 업무', '프로젝트', '캘린더']) assert.ok(labels.includes(l), `${l} 있음`);
+  for (const l of ['현장 신고 QR', '자동화', '현장 비교', '업무량', '결재선', '전체 업무', '오늘·이번 주', '템플릿']) assert.ok(!labels.includes(l), `${l} 숨김`);
+  await owner.getByRole('button', { name: '내 계정 메뉴' }).click();
+  for (const l of ['설정·알림', '사용자 관리', '주간 보고', '운영 상태']) await owner.getByRole('menuitem', { name: l }).waitFor();
+  await owner.keyboard.press('Escape');
+  await owner.screenshot({ path: `${SHOTS}/55-hq-sidebar.png` });
+});
+await step('HQ-2 내 업무 목록에서 제목 입력 → Enter 로 즉시 생성(담당=나), 줄에서 마감 빠른 선택·담당자 지정', async () => {
+  await owner.goto(BASE + '/tasks?view=my');
+  const add = owner.getByTestId('inline-add').first().getByLabel('업무 추가 제목');
+  await add.fill('주간 매출 보고 정리');
+  const t0 = Date.now();
+  await add.press('Enter');
+  await owner.getByTestId('my-groups').getByText('주간 매출 보고 정리').waitFor();
+  assert.ok(Date.now() - t0 < 5000, '빠르게 생성');
+  await add.fill('본부장 회의 자료');
+  await add.press('Enter');
+  await owner.getByTestId('my-groups').getByText('본부장 회의 자료').waitFor();
+  const [t] = await sql`select id, assignee_id, approval_required from tasks where title = '주간 매출 보고 정리'`;
+  assert.equal(t.assignee_id, ctx.ownerId); assert.equal(t.approval_required, false);
+  const row = owner.locator(`[data-row="${t.id}"]`);
+  await row.getByTestId('due-picker').click();
+  await owner.getByRole('button', { name: /^내일/ }).click();
+  await row.getByTestId('assignee-picker').click();
+  await owner.getByRole('button', { name: /^최매니저/ }).click();
+  await owner.waitForTimeout(800);
+  const [u] = await sql`select assignee_id, to_char(due_date, 'YYYY-MM-DD') as due from tasks where id = ${t.id}`;
+  assert.equal(u.assignee_id, ctx.managerA.id); assert.equal(u.due, addDays(today, 1));
+  await owner.screenshot({ path: `${SHOTS}/56-inline-add.png` });
+});
+await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 → 업무가 체크로 표시 → 체크로 완료, 미니 달력·업무 캘린더', async () => {
+  const d = addDays(today, 2);
+  await owner.goto(`${BASE}/calendar?date=${d}`);
+  await owner.locator('.fc-toolbar-title').waitFor();
+  await owner.getByTestId('mini-month').waitFor();
+  await owner.getByTestId('calendar-list').getByLabel('업무 캘린더 표시').waitFor();
+  const col = await owner.locator(`.fc-timegrid-col[data-date="${d}"]`).boundingBox();
+  const slot = await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().boundingBox();
+  await owner.mouse.click(col.x + col.width / 2, slot.y + 4);
+  const q = owner.getByTestId('quick-create');
+  await q.getByRole('tab', { name: '업무' }).click();
+  await q.getByLabel('빠른 입력 제목').fill('계약서 최종본 확인');
+  await q.getByRole('button', { name: '저장' }).click();
+  await owner.getByText('업무를 만들었습니다').waitFor();
+  const item = owner.locator('.fc-event.task-item', { hasText: '계약서 최종본 확인' }).first();
+  await item.waitFor();
+  const [t] = await sql`select id, to_char(due_date, 'YYYY-MM-DD') as due, to_char(due_time, 'HH24:MI') as tm from tasks where title = '계약서 최종본 확인'`;
+  assert.equal(t.due, d); assert.equal(t.tm, '11:00');
+  await owner.screenshot({ path: `${SHOTS}/57-calendar-google.png` });
+  await item.getByRole('button', { name: '계약서 최종본 확인 완료' }).click();
+  await owner.getByText('완료했습니다').waitFor();
+  await owner.waitForTimeout(500);
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t.id}`)).task.status, 'done');
+  // 일정 탭 빠른 입력
+  const slot2 = await owner.locator('td.fc-timegrid-slot-lane[data-time="15:00:00"]').first().boundingBox();
+  await owner.mouse.click(col.x + col.width / 2, slot2.y + 4);
+  await owner.getByTestId('quick-create').getByLabel('빠른 입력 제목').fill('투자사 미팅');
+  await owner.getByTestId('quick-create').getByRole('button', { name: '저장' }).click();
+  await owner.getByText('일정을 저장했습니다').waitFor();
+  await owner.locator('.fc-timegrid-event', { hasText: '투자사 미팅' }).first().click();
+  const pv = owner.getByTestId('event-preview');
+  await pv.getByRole('button', { name: '일정 삭제' }).waitFor();
+  await pv.getByRole('button', { name: '미리보기 닫기' }).click();
+  // "캘린더에 표시" 끄면 사라짐
+  const id2 = (await ctx.owner.ok('POST', '/api/tasks', { title: '캘린더 숨김 시험', dueDate: d, approvalRequired: false })).id;
+  await ctx.owner.ok('PATCH', `/api/tasks/${id2}`, { showOnCalendar: false });
+  await owner.reload();
+  await owner.locator('.fc-toolbar-title').waitFor();
+  await owner.waitForTimeout(800);
+  assert.equal(await owner.locator('.fc-event.task-item', { hasText: '캘린더 숨김 시험' }).count(), 0);
 });
 
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {

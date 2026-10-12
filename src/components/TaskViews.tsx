@@ -16,6 +16,7 @@ import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, PriorityTag, STATUS
 import { STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
+import { AssigneePicker, DuePicker, InlineAddTask } from './TaskQuick';
 import { QuickAddTask } from './QuickAddTask';
 
 export type Task = {
@@ -208,7 +209,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         <>
           {mode === 'list' && ((fixed?.view ?? filters.view) === 'my' ? <MyGroupedList tasks={tasks} onPatch={patch} onAcked={reload} />
             : projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
-            : <ListView tasks={tasks} onPatch={patch} />)}
+            : <ListView tasks={tasks} onPatch={patch} add={<InlineAddTask />} />)}
           {mode === 'board' && projectId && (
             <div className="flex items-center gap-2 text-sm text-ink-2">열 기준
               <select className="h-8 rounded-input border border-line bg-white px-2 text-sm" value={boardBy} onChange={(e) => setBoardBy(e.target.value as any)} aria-label="보드 열 기준">
@@ -294,20 +295,14 @@ function StatusSelect({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => v
 }
 /** 마감일 칩 + 그 위의 투명 날짜 입력 (눌러서 바로 변경) */
 function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }) {
-  return (
-    <span className="relative inline-flex w-[92px] justify-end">
-      {t.due_date ? <DueChip due={t.due_date} status={t.status} /> : <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-ink-3"><CalIcon className="size-3.5" />마감일</span>}
-      <input type="date" value={t.due_date ?? ''} onChange={(e) => onPatch(t, { dueDate: e.target.value || null })}
-        onClick={(e) => { try { (e.currentTarget as any).showPicker?.(); } catch {} }}
-        className="absolute inset-0 cursor-pointer opacity-0" aria-label={`${t.title} 마감일`} data-testid="due-input" />
-    </span>
-  );
+  return <span className="inline-flex w-[92px] justify-end"><DuePicker value={t.due_date} status={t.status} onChange={(v) => onPatch(t, { dueDate: v })} label={`${t.title} 마감일`} /></span>;
 }
 
 /** 내 업무: 최근 배정 → 기한 지남 → 오늘 → 이번 주 → 나중 → 날짜 없음 (Asana '내 작업' 참고) */
 function MyGroupedList({ tasks, onPatch, onAcked }: { tasks: Task[]; onPatch: (t: Task, b: any) => void; onAcked: () => void }) {
   const { user } = useSession();
-  if (!tasks.length) return <Empty title="내 업무가 없습니다" icon={CircleCheck}>맡은 업무가 모두 끝났습니다. 새 업무는 <b>만들기</b>(단축키 N)로 등록하세요.</Empty>;
+  const add = <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask /></div>;
+  if (!tasks.length) return <div className="space-y-3" data-testid="my-groups">{add}<Empty title="내 업무가 없습니다" icon={CircleCheck}>맡은 업무가 모두 끝났습니다. 위 줄에 제목을 입력하고 Enter 로 바로 추가하세요.</Empty></div>;
   const today = todayStr();
   const d = new Date(today + 'T00:00:00Z');
   const weekEnd = new Date(d.getTime() + ((7 - ((d.getUTCDay() + 6) % 7)) - 1) * 86400000).toISOString().slice(0, 10); // 이번 주 일요일
@@ -327,6 +322,7 @@ function MyGroupedList({ tasks, onPatch, onAcked }: { tasks: Task[]; onPatch: (t
   }
   return (
     <div className="space-y-3" data-testid="my-groups">
+      {add}
       {groups.filter((x) => x.items.length).map((x, gi) => (
         <section key={x.key} data-group={x.key}>
           <h2 className={cx('mb-1.5 flex items-center gap-2 px-1 text-sm font-semibold', x.key === 'over' ? 'text-red-600' : 'text-ink')}>
@@ -339,8 +335,9 @@ function MyGroupedList({ tasks, onPatch, onAcked }: { tasks: Task[]; onPatch: (t
   );
 }
 
-function ListView({ tasks, onPatch, onAck, empty, hint = true }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean }) {
+function ListView({ tasks, onPatch, onAck, empty, hint = true, add }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean; add?: React.ReactNode }) {
   const openTask = useContext(OpenTaskCtx);
+  if (!tasks.length && add) return <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list">{add}<p className="px-4 py-6 text-center text-sm text-ink-3">조건에 맞는 업무가 없습니다</p></div>;
   if (!tasks.length) return <>{empty ?? <Empty title="조건에 맞는 업무가 없습니다" icon={Search}>필터를 바꾸거나 <b>만들기</b>(단축키 N)로 업무를 등록하세요.</Empty>}</>;
   // ↑↓ 로 행 이동, Enter 로 열기
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -354,6 +351,7 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true }: { tasks: Task[]
   };
   return (
     <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list" onKeyDown={onKey}>
+      {add}
       {hint && <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">행을 오른쪽으로 밀면 완료, 왼쪽으로 밀면 보류</p>}
       {tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} />)}
     </div>
@@ -404,7 +402,7 @@ function ListRow({ t, onPatch, onAck }: { t: Task; onPatch: (t: Task, b: any) =>
         <span className="hidden w-[60px] justify-end sm:flex"><PriorityTag p={t.priority} /></span>
         <span className="hidden sm:inline-flex"><StatusSelect t={t} onPatch={onPatch} /></span>
         <DueEdit t={t} onPatch={onPatch} />
-        <Avatar id={t.assignee_id} name={t.assignee_name} size={24} />
+        <AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} />
       </div>
     </div>
   );
@@ -622,7 +620,8 @@ function SectionedList({ projectId, sections, tasks, onPatch, reloadSections, re
               } : undefined}
               onAdd={() => setAdding(g.id)}>
               {items.map((t) => <DraggableRow key={t.id} t={t} onPatch={onPatch} />)}
-              {!items.length && <div className="px-4 py-4 text-center text-xs text-ink-3">업무를 여기로 끌어 오거나 + 업무 추가</div>}
+              {!items.length && <div className="px-4 py-3 text-center text-xs text-ink-3">업무를 여기로 끌어 오거나 아래에 바로 추가하세요</div>}
+              <InlineAddTask projectId={projectId} sectionId={g.id} placeholder={`${g.name}에 업무 추가 — 제목 입력 후 Enter`} />
             </SectionGroup>
           );
         })}
@@ -679,7 +678,7 @@ function DraggableRow({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => v
       <span className="hidden w-[60px] justify-end sm:flex"><PriorityTag p={t.priority} /></span>
       <StatusSelect t={t} onPatch={onPatch} />
       <span className="hidden sm:inline-flex"><DueEdit t={t} onPatch={onPatch} /></span>
-      <Avatar id={t.assignee_id} name={t.assignee_name} size={24} />
+      <AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} />
     </div>
   );
 }

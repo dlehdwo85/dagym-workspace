@@ -11,6 +11,11 @@ export default function Ops() {
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-bold">운영 상태</h1>
+      <nav className="flex flex-wrap gap-1.5 text-sm" aria-label="운영 관리">
+        {[['/admin/audit', '감사 기록'], ['/admin/org', '조직 구성'], ['/admin/holidays', '공휴일'], ['/admin/approvals', '결재선']].map(([h, l]) => (
+          <a key={h} href={h} className="rounded-full border border-line bg-white px-3 py-1 font-medium text-ink-2 hover:border-slate-300 hover:text-ink">{l}</a>
+        ))}
+      </nav>
       {h && (
         <div className="grid gap-2 sm:grid-cols-5">
           {[['DB', h.db === 'ok' ? `정상 (${h.dbLatencyMs}ms)` : '오류', h.db === 'ok'], ['스케줄러', h.scheduler.lastTick ? `${h.scheduler.ageMinutes}분 전 실행` : '실행 기록 없음', h.scheduler.healthy],

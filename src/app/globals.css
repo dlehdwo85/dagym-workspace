@@ -32,6 +32,10 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 .fc-event.task-due .fc-event-title, .fc-event.task-due .fc-event-time { color: #374151 !important; }
 .fc .is-holiday .fc-daygrid-day-number, .fc .is-holiday .fc-col-header-cell-cushion, .fc .fc-day-sun .fc-daygrid-day-number, .fc .fc-day-sun .fc-col-header-cell-cushion { color: #dc2626; }
 .fc .fc-event.holiday { cursor: default; font-weight: 600; }
+.fc .fc-event.task-item { border-style: solid; border-width: 1px; border-radius: 6px; }
+.fc .fc-event.task-item.is-done { opacity: 0.6; }
+.fc .fc-toolbar.fc-header-toolbar { margin-bottom: 0.75rem; }
+.fc .fc-toolbar-chunk { display: flex; align-items: center; gap: 0.4rem; }
 @media (max-width: 640px) { .fc .fc-toolbar { flex-direction: column; gap: 0.4rem; } }
 
 /* QR 인쇄: 인쇄 영역만 출력 */

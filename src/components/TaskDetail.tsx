@@ -7,11 +7,12 @@ import { useSession } from '@/components/session';
 import {
   BadgeCheck, Building2, CalendarClock, CalendarDays, Camera, Check, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash,
   Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Pause, Percent, Play, Plus, Repeat, RotateCcw, Rows3, Shapes, ShieldCheck,
-  Stamp, Tag, Timer, Trash2, Type, UserRound, Users, X, CalendarRange, AlertTriangle, type LucideIcon,
+  Stamp, Tag, Timer, CalendarCheck, Trash2, Type, UserRound, Users, X, CalendarRange, AlertTriangle, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
+import { DuePicker } from '@/components/TaskQuick';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { PRIORITY_LABEL, STATUS_LABEL, STATUSES } from '@/lib/types';
 import { encodeMentions } from '@/lib/mentions';
@@ -45,6 +46,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [mergeOpen, setMergeOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [tab, setTab] = useState<'comments' | 'history'>('comments');
+  const [moreFields, setMoreFields] = useState(false);
+  useEffect(() => { try { setMoreFields(localStorage.getItem('wos_task_more') === '1'); } catch {} }, []);
   const lines = useApi<{ lines: any[] }>('/api/approval-lines');
   const events = useApi<{ events: any[] }>(`/api/tasks/${id}/events`);
 
@@ -115,6 +118,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     try { await api('/api/templates', { body: { name, fromTaskId: id, orgUnitId: t.org_unit_id } }); toast.ok('템플릿으로 저장했습니다'); } catch (e: any) { toast.error(e.message); }
   }
 
+  // "필드 더보기" 안에 값이 들어 있는 항목 수
+  const moreSet = [t.start_date, t.priority !== 'normal', t.estimate_minutes, t.task_type && t.task_type !== 'normal', t.recurrence_rule, t.tags?.length, t.approval_line_id,
+    Number(t.photo_required ?? 0) > 0, t.approval_required, data.collaborators?.length, data.dependencies?.length].filter(Boolean).length;
   const photoNeed = Number(t.photo_required ?? 0);
   const photoHave = Number(t.photo_count ?? 0);
   const photoShort = photoNeed > 0 && photoHave < photoNeed;
@@ -242,7 +248,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         )}
 
         {/* 속성 */}
-        <section className={cx('grid grid-cols-1 gap-x-6 gap-y-0.5', !inPanel && 'lg:grid-cols-2')} aria-label="업무 속성">
+        <section className="grid grid-cols-1 gap-y-0.5" aria-label="업무 속성">
           <Prop icon={UserRound} label="담당자">
             <span className="flex items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} /><UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => patch({ assigneeId: v })} /></span>
           </Prop>
@@ -250,8 +256,37 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <span className="flex flex-wrap items-center gap-1">
               <input type="date" className={cx(ghostCls, '!w-[140px]', t.status !== 'done' && t.due_date && t.due_date < todayStr() && 'font-semibold text-red-600')} value={t.due_date ?? ''} onChange={(e) => patch({ dueDate: e.target.value || null })} data-testid="detail-due" />
               <input type="time" className={cx(ghostCls, '!w-[104px]')} value={t.due_time ?? ''} onChange={(e) => patch({ dueTime: e.target.value || null })} aria-label="마감 시각" />
+              <DuePicker value={null} compact label="마감 빠른 선택" onChange={(v) => patch({ dueDate: v })} />
+              {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle className="size-3.5" />마감 위험</span>}
             </span>
           </Prop>
+          <Prop icon={FolderKanban} label="프로젝트">
+            <select className={ghostCls} value={t.project_id ?? ''} onChange={(e) => patch({ projectId: e.target.value || null })}>
+              <option value="">없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </Prop>
+          {t.project_id && (sections.data?.sections.length ?? 0) > 0 && (
+            <Prop icon={Rows3} label="섹션">
+              <select className={ghostCls} value={t.section_id ?? ''} onChange={(e) => patch({ sectionId: e.target.value || null })}>
+                <option value="">섹션 없음</option>{sections.data!.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </Prop>
+          )}
+          <Prop icon={CalendarCheck} label="캘린더에 표시" asDiv>
+            <label className="flex h-8 items-center gap-2 px-2 text-sm">
+              <input type="checkbox" role="switch" className="size-4 accent-brand-600" checked={t.show_on_calendar !== false} onChange={(e) => patch({ showOnCalendar: e.target.checked })} aria-label="캘린더에 표시" />
+              <span className="text-ink-2">{t.due_date ? (t.show_on_calendar !== false ? `${t.due_time ? '마감 시각' : '마감일'} 칸에 체크로 표시` : '캘린더에 안 보임') : '마감일을 정하면 캘린더에 표시됩니다'}</span>
+            </label>
+          </Prop>
+        </section>
+        <div>
+          <button type="button" onClick={() => setMoreFields((v) => { try { localStorage.setItem('wos_task_more', v ? '0' : '1'); } catch {} return !v; })}
+            className="inline-flex items-center gap-1 rounded-input px-1.5 py-1 text-sm font-medium text-ink-2 hover:bg-slate-100 hover:text-ink" aria-expanded={moreFields} data-testid="more-fields">
+            <ChevronRight className={cx('size-4 transition-transform', moreFields && 'rotate-90')} />필드 더보기
+            {moreSet > 0 && <span className="rounded-full bg-slate-100 px-1.5 text-xs text-ink-2">{moreSet}개 설정됨</span>}
+          </button>
+          {moreFields && (
+            <section className={cx('mt-1 grid grid-cols-1 gap-x-6 gap-y-0.5 border-l-2 border-line pl-3', !inPanel && 'lg:grid-cols-2')} aria-label="추가 필드">
           {t.task_type !== 'milestone' && <Prop icon={CalendarClock} label="시작일"><input type="date" className={cx(ghostCls, '!w-[140px]')} value={t.start_date ?? ''} onChange={(e) => patch({ startDate: e.target.value || null })} /></Prop>}
           <Prop icon={Flag} label="우선순위">
             <select className={ghostCls} value={t.priority} onChange={(e) => patch({ priority: e.target.value })}>
@@ -275,18 +310,6 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </Prop>
           <Prop icon={Building2} label="소속 (현장·부서)"><UnitSelect className={ghostCls} value={t.org_unit_id} onChange={(v) => patch({ orgUnitId: v })} /></Prop>
           <Prop icon={Tag} label="브랜드"><BrandSelect className={ghostCls} value={t.brand_id} onChange={(v) => patch({ brandId: v })} /></Prop>
-          <Prop icon={FolderKanban} label="프로젝트">
-            <select className={ghostCls} value={t.project_id ?? ''} onChange={(e) => patch({ projectId: e.target.value || null })}>
-              <option value="">없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </Prop>
-          {t.project_id && (sections.data?.sections.length ?? 0) > 0 && (
-            <Prop icon={Rows3} label="섹션">
-              <select className={ghostCls} value={t.section_id ?? ''} onChange={(e) => patch({ sectionId: e.target.value || null })}>
-                <option value="">섹션 없음</option>{sections.data!.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </Prop>
-          )}
           <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:h-8 [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line"><RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /></div></Prop>
           <Prop icon={Hash} label="태그">
             <input className={ghostCls} placeholder="쉼표로 구분" defaultValue={t.tags.join(', ')} onBlur={(e) => { const v = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); if (v.join() !== t.tags.join()) patch({ tags: v }); }} />
@@ -312,7 +335,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </Prop>
           {(data.fields ?? []).map((f: any) => <CustomField key={f.id} f={f} value={t.fields?.[f.id]} onSave={(v) => setField(f.id, v)} />)}
           <Prop icon={Users} label="협업자" asDiv className="lg:col-span-2"><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
-        </section>
+            </section>
+          )}
+        </div>
 
         <section>
           <h2 className="mb-1.5 text-sm font-semibold">설명</h2>
@@ -328,7 +353,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           )}
         </section>
 
-        <section>
+        {(data.checklist.length > 0 || moreFields) && <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">체크리스트 {data.checklist.length > 0 && <span className="text-xs font-medium text-ink-2 tabular-nums">{checkDone}/{data.checklist.length}</span>}</h2>
           {data.checklist.length > 0 && <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${(checkDone / data.checklist.length) * 100}%` }} /></div>}
           <ul className="space-y-0.5" data-testid="checklist">
@@ -344,7 +369,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <input className={cx(inputCls, 'h-8')} placeholder="+ 항목 추가" value={newItem} onChange={(e) => setNewItem(e.target.value)} aria-label="체크리스트 항목 추가" />
             <Button size="sm" variant="secondary">추가</Button>
           </form>
-        </section>
+        </section>}
 
         <section>
           <div className="mb-1.5 flex items-center justify-between"><h2 className="text-sm font-semibold">하위 업무 {data.subtasks.length > 0 && <span className="text-xs font-medium text-ink-2">{data.subtasks.filter((s: any) => s.status === 'done').length}/{data.subtasks.length}</span>}</h2><Button size="sm" variant="ghost" onClick={() => setSub(true)}><Plus />추가</Button></div>
@@ -359,6 +384,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             ))}
             {!data.subtasks.length && <li className="px-3 py-2.5 text-xs text-ink-3">하위 업무가 없습니다</li>}
           </ul>
+          {(moreFields || data.dependencies.length > 0) && <>
           <div className="mt-4 mb-1.5 flex items-center justify-between"><h2 className="text-sm font-semibold">선행 업무</h2><Button size="sm" variant="ghost" onClick={() => setDepOpen(true)}>편집</Button></div>
           <ul className="space-y-1 text-sm">
             {data.dependencies.map((d: any) => (
@@ -366,6 +392,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             ))}
             {!data.dependencies.length && <li className="text-xs text-ink-3">없음 — 선행 업무가 끝나야 완료할 수 있게 하려면 추가하세요</li>}
           </ul>
+          </>}
         </section>
 
         <section data-testid="linked-events">

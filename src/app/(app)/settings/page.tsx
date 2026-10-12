@@ -33,6 +33,7 @@ export default function Settings() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <h1 className="text-lg font-bold">설정</h1>
+      {(user.role === 'owner' || user.role === 'admin') && <p className="text-sm text-ink-2">관리: <a href="/admin/holidays" className="font-medium text-accent-600 underline">공휴일</a> · <a href="/admin/users" className="font-medium text-accent-600 underline">사용자 관리</a></p>}
       <section className="rounded-lg border bg-white p-4 text-sm">
         <div className="font-semibold">{user.name}</div>
         <div className="text-slate-500">{user.email} · {ROLE_LABEL[user.role]}</div>

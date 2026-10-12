@@ -1,34 +1,38 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { LayoutTemplate } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from './client';
-import { Button, Field, Modal, fmtMinutes, inputCls, toast, todayStr } from './ui';
-import { UnitSelect, UserSelect, BrandSelect, RecurSelect } from './pickers';
+import { Button, Field, Modal, cx, fmtMinutes, inputCls, toast, todayStr } from './ui';
+import { UserSelect } from './pickers';
+import { quickDues } from './TaskQuick';
 import { useSession } from './session';
 
 export interface QuickDefaults { projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string }
 
+/**
+ * 업무 만들기 (HQ_SIMPLIFY): 제목 · 담당자 · 마감일 · 프로젝트 4칸.
+ * 관리자 최종 확인은 기본 꺼짐, 소속·브랜드는 프로젝트/내 소속(본사)으로 자동. 자세한 항목은 만든 뒤 상세 패널에서.
+ */
 export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boolean; onClose: () => void; defaults?: QuickDefaults; onCreated?: (id: string) => void }) {
   const { user, dir } = useSession();
   const router = useRouter();
-  const templates = useApi<{ templates: any[] }>(open ? '/api/templates' : null);
   const projects = useApi<{ projects: any[] }>(open ? '/api/projects' : null);
+  const [showTpl, setShowTpl] = useState(false);
+  const templates = useApi<{ templates: any[] }>(open && showTpl ? '/api/templates' : null);
   const [f, setF] = useState<any>({});
   const [busy, setBusy] = useState(false);
   const [tpl, setTpl] = useState('');
 
   useEffect(() => {
     if (open) {
-      const mine = dir.users.find((u) => u.id === user.id)?.org_unit_ids?.[0];
-      setF({ title: '', description: '', priority: 'normal', assigneeId: defaults?.assigneeId ?? user.id, dueDate: defaults?.dueDate ?? '', dueTime: '',
-        startDate: '', orgUnitId: defaults?.orgUnitId ?? mine ?? dir.orgUnits[0]?.id, projectId: defaults?.projectId ?? '', brandId: undefined,
-        approvalRequired: true, recurrenceRule: null, tags: '' });
-      setTpl('');
+      setF({ title: '', assigneeId: defaults?.assigneeId ?? user.id, dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? '' });
+      setTpl(''); setShowTpl(false);
     }
-  }, [open, defaults, user.id, dir]);
+  }, [open, defaults, user.id]);
 
   const set = (k: string) => (v: any) => setF((x: any) => ({ ...x, [k]: v }));
-  // S-7 배정 경고: 담당자의 마감일 회의·남은 가용 시간
+  // 배정 경고: 담당자의 마감일 회의·남은 가용 시간
   const avail = useApi<{ days: any[] }>(open && f.assigneeId && f.dueDate ? `/api/availability?userId=${f.assigneeId}&date=${f.dueDate}` : null, [f.assigneeId, f.dueDate]);
   const day = avail.data?.days?.[0];
   const who = dir.users.find((x) => x.id === f.assigneeId)?.name;
@@ -40,22 +44,23 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
     try {
       let r: { id: string };
       if (tpl) {
-        r = await api(`/api/templates/${tpl}/apply`, { body: { title: f.title, orgUnitId: f.orgUnitId, projectId: f.projectId || null, assigneeId: f.assigneeId, dueDate: f.dueDate || undefined, brandId: f.brandId } });
+        const unit = defaults?.orgUnitId ?? dir.users.find((u) => u.id === user.id)?.org_unit_ids?.[0] ?? dir.orgUnits[0]?.id;
+        r = await api(`/api/templates/${tpl}/apply`, { body: { title: f.title, orgUnitId: unit, projectId: f.projectId || null, assigneeId: f.assigneeId, dueDate: f.dueDate || undefined } });
       } else {
         r = await api('/api/tasks', {
           queueOffline: `업무 등록: ${f.title}`,
           body: {
-            title: f.title, description: f.description, priority: f.priority, assigneeId: f.assigneeId, orgUnitId: f.orgUnitId,
-            projectId: f.projectId || null, parentId: defaults?.parentId, sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null, dueDate: f.dueDate || null, dueTime: f.dueTime || null,
-            estimateMinutes: f.estimateMinutes ? Number(f.estimateMinutes) : null,
-            startDate: f.taskType === 'milestone' ? null : f.startDate || null, approvalRequired: f.approvalRequired, taskType: f.taskType ?? 'normal', recurrenceRule: f.recurrenceRule, brandId: f.brandId,
-            tags: f.tags ? f.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : [],
+            title: f.title, assigneeId: f.assigneeId || null, dueDate: f.dueDate || null, projectId: f.projectId || null,
+            parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
+            sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null,
+            approvalRequired: false,
           },
         });
       }
       toast.ok('업무를 등록했습니다');
       broadcastRefresh();
       onClose();
+      // 자세한 항목은 만든 뒤 상세에서 — 목록 안(onCreated)이 아니면 상세로 이동
       if (onCreated) onCreated(r.id); else router.push(`/tasks/${r.id}`);
     } catch (err: any) {
       if (err.code === 'queued') { toast.info(err.message); onClose(); } else toast.error(err.message);
@@ -65,81 +70,49 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   return (
     <Modal open={open} onClose={onClose} title={defaults?.parentId ? '하위 업무 추가' : '업무 등록'}>
       <form onSubmit={submit} className="space-y-3">
+        <Field label="제목"><input autoFocus className={cx(inputCls, 'h-11 text-base')} value={f.title ?? ''} onChange={(e) => set('title')(e.target.value)} placeholder="무엇을 해야 하나요?" maxLength={200} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="담당자"><UserSelect value={f.assigneeId} onChange={set('assigneeId')} /></Field>
+          <Field label="마감일"><input type="date" className={inputCls} value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} /></Field>
+        </div>
+        <div className="flex flex-wrap gap-1.5" aria-label="마감 빠른 선택">
+          {quickDues().map(([l, d]) => (
+            <button key={l} type="button" onClick={() => set('dueDate')(d)}
+              className={cx('rounded-full border px-2.5 py-1 text-xs font-medium', f.dueDate === d ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:border-slate-300')}>{l}</button>
+          ))}
+          {f.dueDate && <button type="button" onClick={() => set('dueDate')('')} className="rounded-full px-2 py-1 text-xs text-ink-3 hover:text-ink-2">지우기</button>}
+        </div>
         {!defaults?.parentId && (
+          <Field label="프로젝트">
+            <select className={inputCls} value={f.projectId ?? ''} onChange={(e) => set('projectId')(e.target.value)}>
+              <option value="">없음</option>
+              {projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </Field>
+        )}
+        {day && f.assigneeId !== user.id && (
+          <p className={day.freeMinutes < 60 || day.away || day.holiday ? 'rounded-input bg-amber-50 p-2 text-xs text-amber-900' : 'rounded-input bg-slate-50 p-2 text-xs text-ink-2'} data-testid="assign-availability">
+            {who ?? '담당자'} · {f.dueDate} {day.holiday ? `공휴일(${day.holiday})` : day.away ? '휴가·출장' : !day.workday ? '쉬는 날' : `회의 ${fmtMinutes(day.meetingMinutes) || '없음'}, 남은 가용 ${fmtMinutes(day.freeMinutes) || '0분'}`}
+          </p>
+        )}
+        {!defaults?.parentId && (showTpl ? (
           <Field label="템플릿에서 시작 (선택)">
             <select className={inputCls} value={tpl} onChange={(e) => {
               setTpl(e.target.value);
               const t = templates.data?.templates.find((x) => x.id === e.target.value);
-              if (t) setF((x: any) => ({ ...x, title: t.payload.title ?? x.title, priority: t.payload.priority ?? x.priority, dueDate: x.dueDate || (t.payload.dueInDays !== undefined ? addDaysStr(todayStr(), t.payload.dueInDays) : '') }));
+              if (t) setF((x: any) => ({ ...x, title: x.title || t.payload.title || '', dueDate: x.dueDate || (t.payload.dueInDays !== undefined ? addDaysStr(todayStr(), t.payload.dueInDays) : '') }));
             }}>
               <option value="">빈 업무</option>
               {templates.data?.templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </Field>
-        )}
-        {!tpl && (
-          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="업무 유형">
-            {([['normal', '일반'], ['milestone', '마일스톤'], ['approval', '결재'], ['inspection', '점검(사진 증빙)']] as const).map(([k, l]) => (
-              <button type="button" key={k} role="radio" aria-checked={(f.taskType ?? 'normal') === k} onClick={() => set('taskType')(k)}
-                className={(f.taskType ?? 'normal') === k ? 'rounded-full border border-brand-600 bg-brand-600 px-3 py-1 text-xs font-medium text-white' : 'rounded-full border border-line bg-white px-3 py-1 text-xs font-medium text-ink-2 hover:border-slate-300'}>{l}</button>
-            ))}
+        ) : <button type="button" onClick={() => setShowTpl(true)} className="inline-flex items-center gap-1 text-xs font-medium text-ink-2 hover:text-ink"><LayoutTemplate className="size-3.5" />템플릿에서 시작</button>)}
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <span className="text-xs text-ink-3">설명·하위 업무·첨부는 만든 뒤 상세에서</span>
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>취소</Button>
+            <Button type="submit" disabled={busy}>{busy ? '등록 중…' : '등록'}</Button>
           </div>
-        )}
-        <Field label="제목"><input autoFocus className={inputCls} value={f.title ?? ''} onChange={(e) => set('title')(e.target.value)} placeholder="무엇을 해야 하나요?" maxLength={200} /></Field>
-        {!tpl && <Field label="설명"><textarea className={inputCls} rows={3} value={f.description ?? ''} onChange={(e) => set('description')(e.target.value)} /></Field>}
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="담당자"><UserSelect value={f.assigneeId} onChange={set('assigneeId')} /></Field>
-          <Field label="마감일"><input type="date" className={inputCls} value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} /></Field>
-          {!tpl && <Field label="마감 시각 (선택)"><input type="time" className={inputCls} value={f.dueTime ?? ''} onChange={(e) => set('dueTime')(e.target.value)} /></Field>}
-          {!tpl && f.taskType !== 'milestone' && <Field label="시작일 (선택)"><input type="date" className={inputCls} value={f.startDate ?? ''} onChange={(e) => set('startDate')(e.target.value)} /></Field>}
-          {!tpl && (
-            <Field label="우선순위">
-              <select className={inputCls} value={f.priority} onChange={(e) => set('priority')(e.target.value)}>
-                <option value="low">낮음</option><option value="normal">보통</option><option value="high">높음</option><option value="urgent">긴급</option>
-              </select>
-            </Field>
-          )}
-          <Field label="브랜드"><BrandSelect value={f.brandId} onChange={set('brandId')} /></Field>
-          {!tpl && (
-            <Field label="예상 소요 (선택)">
-              <select className={inputCls} value={f.estimateMinutes ?? ''} onChange={(e) => set('estimateMinutes')(e.target.value)}>
-                <option value="">미정</option>{[15, 30, 60, 90, 120, 180, 240, 360, 480, 960].map((m) => <option key={m} value={m}>{fmtMinutes(m)}</option>)}
-              </select>
-            </Field>
-          )}
-        </div>
-        {day && (
-          <p className={day.freeMinutes < 60 || day.away || day.holiday ? 'rounded-input bg-amber-50 p-2 text-xs text-amber-900' : 'rounded-input bg-slate-50 p-2 text-xs text-ink-2'} data-testid="assign-availability">
-            {who ?? '담당자'} · {f.dueDate} {day.holiday ? `공휴일(${day.holiday})` : day.away ? '휴가·출장' : !day.workday ? '쉬는 날' : `회의 ${fmtMinutes(day.meetingMinutes) || '없음'}, 남은 가용 ${fmtMinutes(day.freeMinutes) || '0분'}`}
-            {(day.freeMinutes < 60 && day.workday) || day.away || day.holiday ? ' — 마감일이나 담당자를 다시 확인하세요' : ''}
-          </p>
-        )}
-        {!defaults?.parentId && (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="소속 (현장·부서)"><UnitSelect value={f.orgUnitId} onChange={set('orgUnitId')} /></Field>
-            <Field label="프로젝트">
-              <select className={inputCls} value={f.projectId ?? ''} onChange={(e) => set('projectId')(e.target.value)}>
-                <option value="">없음</option>
-                {projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </Field>
-          </div>
-        )}
-        {!tpl && (
-          <div className="grid grid-cols-2 gap-3">
-            <div><div className="mb-1 text-xs font-medium text-ink-2">반복 (마감일 기준)</div><RecurSelect value={f.recurrenceRule} onChange={set('recurrenceRule')} anchorDate={f.dueDate} /></div>
-            <Field label="태그 (쉼표 구분)"><input className={inputCls} value={f.tags ?? ''} onChange={(e) => set('tags')(e.target.value)} /></Field>
-          </div>
-        )}
-        {!tpl && (
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={f.approvalRequired ?? true} onChange={(e) => set('approvalRequired')(e.target.checked)} />
-            완료 시 관리자 최종 확인 필요 (검토 요청 → 확인)
-          </label>
-        )}
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="secondary" onClick={onClose}>취소</Button>
-          <Button type="submit" disabled={busy}>{busy ? '등록 중…' : '등록'}</Button>
         </div>
       </form>
     </Modal>

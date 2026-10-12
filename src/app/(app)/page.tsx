@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, CheckCircle2, CircleDot, Hourglass, MapPin, Plus, Sparkles, Users } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { Avatar, Button, Card, DueChip, Empty, ErrorBox, PriorityTag, STATUS_TONE, Skeleton, cx, fmtDate, fmtDateTime, toast } from '@/components/ui';
+import { Avatar, Button, Card, DueChip, Empty, ErrorBox, PriorityTag, STATUS_TONE, Skeleton, cx, fmtDate, fmtDateTime, fmtTimeRange, toast } from '@/components/ui';
+import { InlineAddTask } from '@/components/TaskQuick';
 import { STATUS_LABEL, UNIT_TYPE_LABEL, type TaskStatus } from '@/lib/types';
 
 function Section({ title, count, children, href, icon: Icon, className }: { title: string; count?: number; children: React.ReactNode; href?: string; icon?: typeof Users; className?: string }) {
@@ -90,6 +91,8 @@ export default function Dashboard() {
   const { user, dir } = useSession();
   const [brand, setBrand] = useState('');
   const { data, error, loading, reload } = useApi<any>(`/api/dashboard${brand ? `?brand=${brand}` : ''}`);
+  const today = useApi<{ tasks: any[] }>('/api/tasks?view=today&limit=50');
+  const mineToday = today.data?.tasks ?? [];
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (loading && !data) return <div className="space-y-4"><div className="skeleton h-8 w-60 rounded" /><div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-24 rounded-card" />)}</div><Skeleton rows={5} /></div>;
   if (!data) return null;
@@ -132,125 +135,36 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm text-ink-2">{fmtDate(data.today)} · {greet}, {user.name}님</p>
-          <h1 className="mt-0.5 text-2xl font-bold tracking-tight">{company ? '전체 현황' : `${user.name}님의 업무 현황`}</h1>
-          <p className="mt-0.5 text-xs text-ink-3">{company ? '전 브랜드·전 현장' : '내가 접근할 수 있는 조직 범위'}</p>
-        </div>
-        <div className="flex rounded-input border border-line bg-white p-0.5 text-sm shadow-card" role="group" aria-label="브랜드 선택">
-          {[{ id: '', name: '전체' }, ...dir.brands].map((b) => (
-            <button key={b.id} onClick={() => setBrand(b.id)} aria-pressed={brand === b.id}
-              className={cx('rounded-md px-3 py-1.5 font-medium', brand === b.id ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{b.name}</button>
-          ))}
-        </div>
+      <div>
+        <p className="text-sm text-ink-2">{fmtDate(data.today)} · {greet}, {user.name}님</p>
+        <h1 className="mt-0.5 text-2xl font-bold tracking-tight">{company ? '전체 현황' : `${user.name}님의 업무 현황`}</h1>
       </div>
-
-      {empty && (
-        <Empty title="아직 등록된 업무가 없습니다" icon={Sparkles} action={<Link href="/tasks?view=my"><Button><Plus />첫 업무 만들기</Button></Link>}>
-          상단 <b>만들기</b> 또는 단축키 <b>N</b> 으로 업무를 등록하면 여기에서 현장별 진행 상황을 한눈에 볼 수 있습니다.
-        </Empty>
-      )}
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {kpis.map((k) => (
-          <Link key={k.label} href={k.href} className="group rounded-card border border-line bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-pop">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-ink-2">{k.label}</span>
-              <span className={cx('flex size-8 items-center justify-center rounded-input', k.tone)}><k.icon className="size-4" /></span>
-            </div>
-            <div className="mt-2 text-[30px] font-bold leading-none tracking-tight tabular-nums">{k.value}</div>
-            <div className="mt-2 min-h-4">{k.sub}</div>
-          </Link>
-        ))}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Section title="오늘의 중요 업무" count={data.important.length} href="/tasks?view=today" className="lg:col-span-2"><TaskRows items={data.important} empty="오늘 급한 업무가 없습니다" /></Section>
-        <Section title="진행 중 업무 상태">
-          <Donut parts={[{ key: 'todo', n: tot.s_todo }, { key: 'in_progress', n: tot.s_in_progress }, { key: 'review', n: tot.review }, { key: 'on_hold', n: tot.s_on_hold }]} />
-        </Section>
-      </div>
-
+      {/* HQ_SIMPLIFY: 홈 위젯 4개 — 오늘 할 일 · 이번 주 일정 · 검토 대기 · 기한 초과 */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Section title="검토 대기 (완료 확인 필요)" count={data.review.length} href="/tasks?view=review">
-          <TaskRows items={data.review.slice(0, 10)} approve={data.canApprove ? approve : undefined} empty="확인할 업무가 없습니다" />
+        <Section title="오늘 할 일" count={mineToday.length} href="/tasks?view=today" icon={CheckCircle2}>
+          <TaskRows items={mineToday} empty="오늘 마감인 내 업무가 없습니다" />
+          <div className="border-t border-line px-1 pt-1"><InlineAddTask defaultDue={data.today} placeholder="오늘 할 일 추가 — 제목 입력 후 Enter" /></div>
         </Section>
-        <Section title="기한 초과" count={data.overdue.length} href="/tasks?view=overdue"><TaskRows items={data.overdue.slice(0, 10)} empty="지연된 업무가 없습니다" /></Section>
-      </div>
-
-      <Section title="현장·부서별 현황" icon={MapPin}>
-        {!data.bySite.length ? <p className="px-2 py-8 text-center text-sm text-ink-3">업무가 등록된 조직이 없습니다</p> : (
-          <div className="grid gap-2.5 p-2 sm:grid-cols-2 xl:grid-cols-3">
-            {data.bySite.map((s: any) => {
-              const alert = s.overdue > 0;
-              return (
-                <Link key={s.id} href={`/tasks?orgUnitId=${s.id}`} className={cx('rounded-input border p-3 transition hover:shadow-card', alert ? 'border-red-200 bg-red-50/40' : 'border-line hover:border-slate-300')}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate font-semibold">{s.name}</span>
-                    <span className="shrink-0 text-xs text-ink-3">{UNIT_TYPE_LABEL[s.type as keyof typeof UNIT_TYPE_LABEL]}</span>
-                  </div>
-                  <div className="mt-2 grid grid-cols-4 gap-1 text-center">
-                    {[['진행', s.open, ''], ['초과', s.overdue, s.overdue ? 'text-red-600' : ''], ['검토', s.review, s.review ? 'text-amber-600' : ''], ['긴급', s.urgent, s.urgent ? 'text-red-600' : '']].map(([l, v, c]) => (
-                      <div key={l as string}><div className={cx('text-lg font-bold tabular-nums', c as string)}>{v as number}</div><div className="text-[11px] text-ink-3">{l as string}</div></div>
-                    ))}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </Section>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Section title="완료 추이 (최근 4주)" icon={CheckCircle2}>
-          <div className="px-2 pt-2">
-            <div className="relative flex h-36 items-end gap-[3px] border-b border-line" aria-label="일별 완료 건수">
-              {days.map((d) => {
-                const wknd = [0, 6].includes(new Date(d.day + 'T00:00:00Z').getUTCDay());
-                return (
-                  <div key={d.day} className="group relative flex h-full flex-1 items-end" title={`${fmtDate(d.day)}: ${d.done}건`}>
-                    <div className={cx('w-full rounded-t-[3px] transition-colors', d.done ? 'bg-emerald-500 group-hover:bg-emerald-600' : wknd ? 'bg-slate-100' : 'bg-slate-200')} style={{ height: d.done ? `${Math.max(6, (d.done / maxDone) * 100)}%` : 3 }} />
-                  </div>
-                );
-              })}
-            </div>
-            <div className="flex justify-between py-1.5 text-[11px] text-ink-3 tabular-nums"><span>{fmtDate(days[0].day)}</span><span>오늘</span></div>
-          </div>
-          <p className="px-2 pb-1 text-right text-xs text-ink-2">합계 <b className="text-ink">{days.reduce((a, d) => a + d.done, 0)}</b>건</p>
-        </Section>
-        <Section title="담당자별 업무량" icon={Users}>
-          {!data.workload.length ? <p className="px-2 py-8 text-center text-sm text-ink-3">배정된 업무가 없습니다</p> : (
-            <ul className="space-y-2.5 p-2">{data.workload.slice(0, 10).map((w: any) => {
-              const heavy = w.open > Math.max(5, avgLoad * 1.5) || w.overdue > 2;
-              return (
-                <li key={w.id} className="flex items-center gap-2.5 text-xs">
-                  <Avatar id={w.id} name={w.name} size={26} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex justify-between gap-2"><Link href={`/tasks?assigneeId=${w.id}`} className="truncate text-sm font-medium hover:underline">{w.name}</Link>
-                      <span className="shrink-0 text-ink-2 tabular-nums">진행 {w.open} · 이번 주 {w.this_week}{w.overdue ? <b className="text-red-600"> · 초과 {w.overdue}</b> : ''}</span></div>
-                    <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100"><div className={cx('h-full rounded-full', heavy ? 'bg-red-500' : 'bg-accent-500')} style={{ width: `${(w.open / maxLoad) * 100}%` }} /></div>
-                  </div>
-                </li>
-              );
-            })}</ul>
+        <Section title="이번 주 일정" count={data.events.length} href="/calendar" icon={CalendarDays}>
+          {!data.events.length ? <p className="px-2 py-8 text-center text-sm text-ink-3">이번 주 일정이 없습니다</p> : (
+            <ul>{data.events.slice(0, 8).map((e: any) => (
+              <li key={e.id + e.start} className="flex items-center gap-2.5 rounded-input px-2 py-2 text-sm hover:bg-slate-50">
+                <span className="h-8 w-1 shrink-0 rounded-full" style={{ background: e.color }} />
+                <div className="min-w-0">
+                  <Link href={`/calendar?event=${e.id}`} className="block truncate font-medium hover:underline">{e.title.replace(/^(\[(업무|업무 시간)\]\s*)+/, '')}</Link>
+                  <span className="text-xs text-ink-2">{fmtTimeRange(e.start, e.end, { allDay: e.allDay })}</span>
+                </div>
+              </li>))}
+            </ul>
           )}
         </Section>
+        <Section title="검토 대기 (완료 확인 필요)" count={data.review.length} href="/tasks?view=review" icon={Hourglass}>
+          <TaskRows items={data.review.slice(0, 8)} approve={data.canApprove ? approve : undefined} empty="확인할 업무가 없습니다" />
+        </Section>
+        <Section title="기한 초과" count={data.overdue.length} href="/tasks?view=overdue" icon={AlertTriangle}>
+          <TaskRows items={data.overdue.slice(0, 8)} empty="지연된 업무가 없습니다" />
+        </Section>
       </div>
-
-      <Section title="이번 주 일정" count={data.events.length} href="/calendar" icon={CalendarDays}>
-        {!data.events.length ? <p className="px-2 py-8 text-center text-sm text-ink-3">이번 주 일정이 없습니다</p> : (
-          <ul className="grid gap-x-4 sm:grid-cols-2">{data.events.slice(0, 12).map((e: any) => (
-            <li key={e.id + e.start} className="flex items-center gap-2.5 rounded-input px-2 py-2 text-sm hover:bg-slate-50">
-              <span className="h-8 w-1 shrink-0 rounded-full" style={{ background: e.color }} />
-              <div className="min-w-0">
-                <Link href={`/calendar?event=${e.id}`} className="block truncate font-medium hover:underline">{e.title}</Link>
-                <span className="text-xs text-ink-2">{e.allDay ? fmtDate(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(e.start))) + ' 종일' : fmtDateTime(e.start)}</span>
-              </div>
-            </li>))}
-          </ul>
-        )}
-      </Section>
     </div>
   );
 }

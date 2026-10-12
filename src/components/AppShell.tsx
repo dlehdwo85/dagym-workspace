@@ -15,36 +15,25 @@ import { initNative } from './native';
 import { QuickAddTask } from './QuickAddTask';
 import { CommandPalette } from './CommandPalette';
 
-type NavItem = { href: string; label: string; icon: LucideIcon; desktopOnly?: boolean };
+type NavItem = { href: string; label: string; icon: LucideIcon };
+/** 본사 운영 도구로 단순화(HQ_SIMPLIFY): 사이드바 4개. 숨긴 화면(현장 신고 QR·자동화·현장 비교 등)은 코드·주소는 남겨 둔다 */
 const NAV: NavItem[] = [
   { href: '/', label: '홈', icon: House },
   { href: '/tasks?view=my', label: '내 업무', icon: CircleCheck },
-  { href: '/plan', label: '오늘·이번 주', icon: CalendarClock, desktopOnly: true },
-  { href: '/tasks', label: '전체 업무', icon: ListTodo, desktopOnly: true },
-  { href: '/projects', label: '프로젝트', icon: FolderKanban, desktopOnly: true },
+  { href: '/projects', label: '프로젝트', icon: FolderKanban },
   { href: '/calendar', label: '캘린더', icon: CalendarDays },
-  { href: '/notifications', label: '알림', icon: Bell },
-  { href: '/templates', label: '템플릿', icon: LayoutTemplate, desktopOnly: true },
 ];
-const MANAGE_NAV: NavItem[] = [
-  { href: '/insights', label: '현장 비교', icon: BarChart3 },
-  { href: '/workload', label: '업무량', icon: Gauge },
-  { href: '/forms', label: '현장 신고 QR', icon: QrCode },
-  { href: '/automations', label: '자동화', icon: Workflow },
-];
-const ADMIN_NAV: NavItem[] = [
-  { href: '/admin/users', label: '사용자·권한', icon: Users },
+const MOBILE_TABS: NavItem[] = [NAV[0], NAV[1], NAV[3], { href: '/notifications', label: '알림', icon: Bell }];
+/** 계정 메뉴 안 관리 항목 (대표·본사 관리자) */
+const ADMIN_MENU: NavItem[] = [
+  { href: '/admin/users', label: '사용자 관리', icon: Users },
   { href: '/reports', label: '주간 보고', icon: FileBarChart },
-  { href: '/admin/approvals', label: '결재선', icon: Stamp },
-  { href: '/admin/holidays', label: '공휴일', icon: CalendarHeart },
-  { href: '/admin/org', label: '조직 구성', icon: Network },
-  { href: '/admin/audit', label: '감사 기록', icon: ScrollText },
   { href: '/admin/ops', label: '운영 상태', icon: Activity },
 ];
 const SHORTCUTS: [string, string][] = [
   ['Ctrl K', '검색·명령 열기'], ['N', '새 업무 만들기'], ['?', '단축키 도움말'], ['Esc', '패널·창 닫기'],
-  ['G 다음 H', '홈'], ['G 다음 M', '내 업무'], ['G 다음 C', '캘린더'], ['G 다음 P', '오늘·이번 주'],
-  ['S', '(업무 상세) 하위 업무 추가'], ['C', '(업무 상세) 댓글 쓰기'], ['D · W · M · A', '(캘린더) 일 · 주 · 월 · 일정목록'], ['T', '(캘린더) 오늘로'],
+  ['G 다음 H', '홈'], ['G 다음 M', '내 업무'], ['G 다음 C', '캘린더'],
+  ['S', '(업무 상세) 하위 업무 추가'], ['D · W · M · A', '(캘린더) 일 · 주 · 월 · 일정목록'], ['T', '(캘린더) 오늘로'], ['C', '(캘린더) 새 일정'],
 ];
 
 function readPref(k: string) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -81,7 +70,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setQuick(true); return; }
       if (e.key === 'g') { gPressed.current = Date.now(); return; }
       if (Date.now() - gPressed.current < 1200) {
-        const to = { h: '/', m: '/tasks?view=my', c: '/calendar', p: '/plan' }[e.key];
+        const to = { h: '/', m: '/tasks?view=my', c: '/calendar' }[e.key];
         if (to) { e.preventDefault(); router.push(to); }
         gPressed.current = 0;
       }
@@ -161,34 +150,21 @@ export function AppShell({ session, children }: { session: Sess; children: React
             {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold">업무·일정</div><div className="truncate text-[11px] text-slate-400">다짐 · 하이링크 · BODY LAB</div></div>}
           </div>
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
-            {NAV.map((n) => navLink(n, n.href === '/notifications' ? unread : undefined))}
-            {!collapsed && (
-              <div className="pt-5">
-                <div className="flex items-center gap-1.5 px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400"><Star className="size-3" />즐겨찾는 프로젝트</div>
-                {favorites.length ? favorites.map((p) => (
-                  <Link key={p.id} href={`/projects/${p.id}`} className={cx('flex h-8 items-center gap-2.5 rounded-input px-2.5 text-sm', path === `/projects/${p.id}` ? 'bg-white/10 font-semibold text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white')}>
-                    <span className="size-2.5 shrink-0 rounded-[3px]" style={{ background: p.color }} /><span className="truncate">{p.name}</span>
-                  </Link>
-                )) : <p className="px-2.5 py-1 text-xs text-slate-500">프로젝트 화면에서 ☆ 를 누르면 여기에 고정됩니다</p>}
-              </div>
-            )}
-            {canManage(session.user.role) && (
-              <div className="pt-5">
-                {!collapsed && <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">현장 운영</div>}
-                {MANAGE_NAV.map((n) => navLink(n))}
-              </div>
-            )}
-            {admin && (
-              <div className="pt-5">
-                {!collapsed && (
-                  <button onClick={() => setAdminOpen((o) => { writePref('wos_nav_admin', o ? '0' : '1'); return !o; })}
-                    className="flex w-full items-center gap-1 px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-200" aria-expanded={adminOpen}>
-                    관리자<ChevronDown className={cx('size-3 transition-transform', !adminOpen && '-rotate-90')} />
-                  </button>
+            {NAV.map((n) => (
+              <div key={n.href}>
+                {navLink(n)}
+                {/* 즐겨찾는 프로젝트는 "프로젝트" 바로 아래 */}
+                {n.href === '/projects' && !collapsed && favorites.length > 0 && (
+                  <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l border-white/10 pl-2">
+                    {favorites.map((p) => (
+                      <Link key={p.id} href={`/projects/${p.id}`} className={cx('flex h-7 items-center gap-2 rounded-input px-2 text-[13px]', path === `/projects/${p.id}` ? 'bg-white/10 font-semibold text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white')}>
+                        <span className="size-2 shrink-0 rounded-[3px]" style={{ background: p.color }} /><span className="truncate">{p.name}</span>
+                      </Link>
+                    ))}
+                  </div>
                 )}
-                {(adminOpen || collapsed) && ADMIN_NAV.map((n) => navLink(n))}
               </div>
-            )}
+            ))}
           </nav>
           <div className={cx('border-t border-white/10 p-2', collapsed && 'flex justify-center')}>
             <button onClick={toggleCollapsed} className={cx('flex h-8 items-center gap-2 rounded-input px-2.5 text-xs text-slate-400 hover:bg-white/5 hover:text-white', !collapsed && 'w-full')} aria-label={collapsed ? '사이드바 펼치기' : '사이드바 접기'}>
@@ -213,8 +189,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setCreateMenu(false)} />
                   <div role="menu" className="absolute right-0 z-50 mt-1.5 w-52 animate-fade-up rounded-card border border-line bg-white p-1 shadow-pop">
-                    {([['task', '업무', SquarePen, 'N'], ['event', '일정', CalendarPlus, ''], ['project', '프로젝트', FolderPlus, '']] as const).map(([k, l, I, key]) => (
-                      (k !== 'project' || session.user.role !== 'staff') && (
+                    {([['task', '업무', SquarePen, 'N'], ['event', '일정', CalendarPlus, '']] as const).map(([k, l, I, key]) => (
+                      (
                         <button key={k} role="menuitem" onClick={() => create(k)} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50">
                           <I className="size-4 text-ink-2" /><span className="flex-1 text-left">{l}</span>{key && <Kbd>{key}</Kbd>}
                         </button>
@@ -241,6 +217,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
                     </div>
                     <div className="my-1 border-t border-line" />
                     <Link role="menuitem" href="/settings" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Settings className="size-4 text-ink-2" />설정·알림</Link>
+                    {admin && ADMIN_MENU.map((n) => (
+                      <Link key={n.href} role="menuitem" href={n.href} className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><n.icon className="size-4 text-ink-2" />{n.label}</Link>
+                    ))}
                     <button role="menuitem" onClick={() => { setUserMenu(false); setHelp(true); }} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Keyboard className="size-4 text-ink-2" /><span className="flex-1 text-left">단축키</span><Kbd>?</Kbd></button>
                     <button role="menuitem" onClick={logout} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm text-red-600 hover:bg-red-50"><LogOut className="size-4" />로그아웃</button>
                   </div>
@@ -267,13 +246,13 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
         {/* 하단 탭 (모바일): 홈 · 내 업무 · [+] · 캘린더 · 알림 */}
         <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
-          {NAV.filter((n) => !n.desktopOnly).slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}
+          {MOBILE_TABS.slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}
           <div className="flex items-center justify-center">
             <button onClick={() => setQuick(true)} aria-label="업무 등록" className="-mt-5 flex size-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-pop ring-4 ring-white active:scale-95">
               <Plus className="size-7" />
             </button>
           </div>
-          {NAV.filter((n) => !n.desktopOnly).slice(2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.href === '/notifications' ? unread : 0} />)}
+          {MOBILE_TABS.slice(2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.href === '/notifications' ? unread : 0} />)}
         </nav>
 
         {more && (
@@ -286,10 +265,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <button onClick={() => setMore(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button>
               </div>
               <div className="my-1 border-t border-line" />
-              {([['/plan', '오늘·이번 주', CalendarClock], ['/tasks', '전체 업무', ListTodo], ['/projects', '프로젝트', FolderKanban], ['/templates', '템플릿', LayoutTemplate], ['/settings', '설정·알림', Settings],
+              {([['/projects', '프로젝트', FolderKanban], ['/settings', '설정·알림', Settings],
                 ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)', CalendarDays]] : []),
-                ...(canManage(session.user.role) ? MANAGE_NAV.map((n) => [n.href, n.label, n.icon]) : []),
-                ...(admin ? ADMIN_NAV.map((n) => [n.href, n.label, n.icon]) : [])] as [string, string, LucideIcon][]).map(([h, l, I]) => (
+                ...(admin ? ADMIN_MENU.map((n) => [n.href, n.label, n.icon]) : [])] as [string, string, LucideIcon][]).map(([h, l, I]) => (
                 <Link key={h} href={h} onClick={() => setMore(false)} className="flex items-center gap-3 rounded-input px-3 py-3 text-sm active:bg-slate-100"><I className="size-5 text-ink-2" />{l}</Link>
               ))}
               <button onClick={logout} className="flex w-full items-center gap-3 rounded-input px-3 py-3 text-left text-sm text-red-600 active:bg-red-50"><LogOut className="size-5" />로그아웃</button>

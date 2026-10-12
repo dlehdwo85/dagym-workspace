@@ -34,6 +34,8 @@ export const taskInput = z.object({
   approvalLineId: zUuid.nullable().optional(),
   /** S-6 예상 소요 시간(분) */
   estimateMinutes: z.number().int().min(0).max(100000).nullable().optional(),
+  /** 캘린더에 표시 (기본 켜짐) */
+  showOnCalendar: z.boolean().optional(),
   sortOrder: z.number().optional(),
   version: z.number().int().optional(),
   reviewNote: z.string().max(2000).optional(),
@@ -45,7 +47,7 @@ export const TASK_COLS = (sql: Sql) => sql`
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id,
-  t.estimate_minutes,
+  t.estimate_minutes, t.show_on_calendar,
   (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
     where be.deleted_at is null and be.kind = 'task_block' and (be.task_id = t.id or be.id in (select event_id from event_tasks where task_id = t.id and role = 'block'))) as scheduled_minutes,
   (select count(*)::int from event_tasks lk where lk.task_id = t.id) as event_count,
@@ -302,7 +304,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const fields: [keyof TaskInput, string][] = [
       ['title', 'title'], ['description', 'description'], ['projectId', 'project_id'], ['brandId', 'brand_id'],
       ['assigneeId', 'assignee_id'], ['priority', 'priority'], ['startDate', 'start_date'], ['dueDate', 'due_date'],
-      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'], ['estimateMinutes', 'estimate_minutes'],
+      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'], ['estimateMinutes', 'estimate_minutes'], ['showOnCalendar', 'show_on_calendar'],
     ];
     for (const [k, col] of fields) {
       if (i[k] === undefined) continue;

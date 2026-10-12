@@ -5,13 +5,14 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
-import interactionPlugin from '@fullcalendar/interaction';
+import interactionPlugin, { Draggable } from '@fullcalendar/interaction';
 import luxonPlugin from '@fullcalendar/luxon3';
 import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { CalendarPlus, CircleCheck, ClipboardList, ExternalLink, MapPin, Timer, Users } from 'lucide-react';
-import { Avatar, AvatarStack, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
+import { CalendarPlus, Check, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Timer, Trash2, Users, X } from 'lucide-react';
+import { Avatar, AvatarStack, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
+import { TaskDetail } from '@/components/TaskDetail';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
@@ -51,22 +52,25 @@ function ScopeDialog() {
 }
 
 export default function CalendarPage() {
-  const { dir } = useSession();
+  const { dir, user } = useSession();
   const sp = useSearchParams();
   const router = useRouter();
   const cals = useApi<{ calendars: any[] }>('/api/calendars');
   const [hidden, setHidden] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('wos_cal_hidden') ?? '[]'); } catch { return []; } });
-  const [showTasks, setShowTasks] = useState(true);
-  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  const [showTasks, setShowTasks] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_tasks') !== '0'; } catch { return true; } });
+  const [sidePanel, setSidePanel] = useState<boolean>(() => { try { const v = localStorage.getItem('wos_cal_unscheduled'); return v === null ? typeof window !== 'undefined' && window.innerWidth >= 1440 : v === '1'; } catch { return false; } });
+  const [range, setRange] = useState<{ from: string; to: string; start: Date; view: string } | null>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [err, setErr] = useState<any>(null);
   const [editor, setEditor] = useState<{ id?: string; occurrenceStart?: string; draft?: any } | null>(null);
+  const [quick, setQuick] = useState<{ x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean } | null>(null);
+  const [openTask, setOpenTask] = useState<string | null>(null);
   const calRef = useRef<FullCalendar>(null);
   const mobile = typeof window !== 'undefined' && window.innerWidth < 640;
 
-  useEffect(() => { try { localStorage.setItem('wos_cal_hidden', JSON.stringify(hidden)); } catch {} }, [hidden]);
-  // B-17 공휴일(관리자 관리 표) + 캘린더 단축키 D·W·M·A·T
+  useEffect(() => { try { localStorage.setItem('wos_cal_hidden', JSON.stringify(hidden)); localStorage.setItem('wos_cal_tasks', showTasks ? '1' : '0'); localStorage.setItem('wos_cal_unscheduled', sidePanel ? '1' : '0'); } catch {} }, [hidden, showTasks, sidePanel]);
+  // B-17 공휴일 + Google Calendar 와 같은 단축키 D·W·M·A·T·C
   const hol = useApi<{ holidays: { date: string; name: string }[] }>('/api/holidays');
   const holidaySet = useMemo(() => new Map((hol.data?.holidays ?? []).map((h) => [h.date, h.name])), [hol.data]);
   useEffect(() => {
@@ -75,9 +79,11 @@ export default function CalendarPage() {
       if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || document.querySelector('[role=dialog]')) return;
       const api = calRef.current?.getApi();
       if (!api) return;
-      const view = ({ d: 'timeGridDay', w: 'timeGridWeek', m: 'dayGridMonth', a: 'listWeek' } as Record<string, string>)[e.key.toLowerCase()];
+      const k = e.key.toLowerCase();
+      const view = ({ d: 'timeGridDay', w: 'timeGridWeek', m: 'dayGridMonth', a: 'listWeek' } as Record<string, string>)[k];
       if (view) { e.preventDefault(); api.changeView(view); }
-      else if (e.key.toLowerCase() === 't') { e.preventDefault(); api.today(); }
+      else if (k === 't') { e.preventDefault(); api.today(); }
+      else if (k === 'c') { e.preventDefault(); setEditor({ draft: { date: seoulDate(new Date()) } }); }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
@@ -93,12 +99,12 @@ export default function CalendarPage() {
     try {
       const [ev, tk] = await Promise.all([
         api(`/api/events?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`),
-        api(`/api/tasks?view=all&includeDone=0&from=${seoulDate(range.from)}&to=${seoulDate(range.to)}&limit=500`),
+        api(`/api/tasks?view=all&includeDone=1&from=${seoulDate(range.from)}&to=${seoulDate(range.to)}&limit=500`),
       ]);
       setEvents(ev.events); setTasks(tk.tasks); setErr(null);
     } catch (e) { setErr(e); }
   }
-  useEffect(() => { load(); }, [range]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [range?.from, range?.to]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const h = () => load(); window.addEventListener('wos-refresh', h); return () => window.removeEventListener('wos-refresh', h); });
 
   const fcEvents = useMemo(() => [
@@ -111,22 +117,35 @@ export default function CalendarPage() {
       backgroundColor: e.kind === 'vacation' ? '#a855f7' : e.kind === 'business_trip' ? '#0891b2' : e.color, borderColor: 'transparent',
       extendedProps: { type: 'event', ev: e }, editable: true,
     })),
-    ...(showTasks ? tasks.filter((t) => t.due_date).map((t) => ({
-      id: `task|${t.id}`, title: `${t.title}${t.due_time ? ` (${t.due_time} 마감)` : ''}`, start: t.due_date, allDay: true,
-      backgroundColor: '#ffffff', textColor: t.due_date < seoulDate(new Date()) ? '#dc2626' : '#1f3a5f', borderColor: '#1f3a5f',
-      classNames: ['task-due'], extendedProps: { type: 'task', task: t }, durationEditable: false,
+    // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로
+    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false).map((t) => ({
+      id: `task|${t.id}`, title: t.title,
+      start: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : t.due_date, end: t.due_time ? new Date(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() + 30 * 60000).toISOString() : undefined,
+      allDay: !t.due_time, backgroundColor: '#ffffff', borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#fca5a5' : '#c7d2fe',
+      textColor: t.status === 'done' ? '#9ca3af' : '#1e3a8a', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t }, durationEditable: false,
     })) : []),
   ], [events, tasks, hidden, showTasks, hol.data]);
 
+  async function completeTask(t: any) {
+    const to = t.status === 'done' ? 'in_progress' : t.status === 'review' ? 'done' : t.approval_line_id || (t.approval_required && user.role === 'staff') ? 'review' : 'done';
+    setTasks((xs) => xs.map((x) => (x.id === t.id ? { ...x, status: to } : x)));
+    try {
+      await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: to, version: t.version } });
+      toast.ok(to === 'done' ? '완료했습니다' : to === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다'); broadcastRefresh();
+    } catch (e: any) { toast.error(e.message); }
+    load();
+  }
+
   async function moveEvent(info: EventDropArg | any) {
     const p = info.event.extendedProps;
+    if (p.type === 'holiday') { info.revert(); return; }
     if (p.type === 'task') {
       const t = p.task;
       const nd = seoulDate(info.event.start);
       try {
         const shift = Math.round((Date.parse(nd) - Date.parse(t.due_date)) / 86400000);
-        await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { dueDate: nd, ...(t.start_date ? { startDate: addDays(t.start_date, shift) } : {}), version: t.version } });
-        toast.ok('업무 마감일을 변경했습니다'); broadcastRefresh();
+        await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { dueDate: nd, ...(!info.event.allDay ? { dueTime: seoulTime(info.event.start) } : t.due_time ? { dueTime: null } : {}), ...(t.start_date ? { startDate: addDays(t.start_date, shift) } : {}), version: t.version } });
+        toast.ok('업무 마감을 옮겼습니다'); broadcastRefresh();
       } catch (e: any) { toast.error(e.message); info.revert(); }
       load();
       return;
@@ -153,62 +172,271 @@ export default function CalendarPage() {
     i.jsEvent.preventDefault();
     const p = i.event.extendedProps;
     if (p.type === 'holiday') return;
-    if (p.type === 'task') { router.push(`/tasks/${p.task.id}`); return; }
-    // 일정은 먼저 작은 미리보기 → 편집
+    if (p.type === 'task') {
+      if ((i.jsEvent.target as HTMLElement).closest('[data-task-check]')) return;
+      setOpenTask(p.task.id); return;
+    }
     const r = (i.el as HTMLElement).getBoundingClientRect();
     setPreview({ ev: p.ev, x: Math.min(window.innerWidth - 376, Math.max(16, r.left)), y: Math.min(window.innerHeight - 380, r.bottom + 6) });
   }
+
+  // 미배정 업무를 시간 칸으로 끌어 놓기 → 업무 시간 블록 (기존 /plan 기능)
+  const personal = cals.data?.calendars.find((c) => c.type === 'personal');
+  async function receive(info: any) {
+    const taskId = info.event.extendedProps.taskId as string;
+    const start = info.event.start as Date, end = (info.event.end as Date | null) ?? new Date(start.getTime() + 3600000);
+    const title = info.event.title as string;
+    info.event.remove();
+    if (!personal) return toast.error('개인 캘린더가 없습니다');
+    try {
+      await api('/api/events', { body: { calendarId: personal.id, title, start: start.toISOString(), end: end.toISOString(), taskId, kind: 'task_block' } });
+      toast.ok(`${fmtTimeRange(start, end)} 업무 시간을 잡았습니다`); load(); broadcastRefresh();
+    } catch (e: any) { toast.error(e.message); }
+  }
+
+  const goto = (d: string) => calRef.current?.getApi().gotoDate(d);
+  const visibleStart = range ? seoulDate(range.start) : seoulDate(new Date());
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-bold tracking-tight">캘린더</h1>
-        <Button onClick={() => setEditor({ draft: { date: seoulDate(new Date()) } })}><CalendarPlus />일정 등록</Button>
-      </div>
-      <div className="flex flex-wrap gap-1.5 text-xs" aria-label="표시할 캘린더">
-        {cals.data?.calendars.map((c) => (
-          <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])}
-            aria-pressed={!hidden.includes(c.id)}
-            className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition-colors', hidden.includes(c.id) ? 'border-line bg-white text-ink-3 line-through' : 'border-line bg-white text-ink shadow-card hover:border-slate-300')}>
-            <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : c.color }} />{c.name}
-          </button>
-        ))}
-        <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border border-dashed px-2.5 py-1 font-medium', showTasks ? 'border-brand-500 bg-white text-brand-700' : 'border-slate-300 text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무 마감일</button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" className="hidden lg:inline-flex" onClick={() => setSidePanel(!sidePanel)} aria-pressed={sidePanel}><ListChecks />미배정 업무</Button>
+          <Button onClick={() => setEditor({ draft: { date: seoulDate(new Date()) } })}><CalendarPlus />일정 등록</Button>
+        </div>
       </div>
       <ErrorBox error={err} retry={load} />
-      <div className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="calendar">
-        <FullCalendar
-          ref={calRef}
-          plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
-          timeZone="Asia/Seoul" locale="ko" firstDay={1} height="auto" nowIndicator
-          initialView={mobile ? 'listWeek' : 'timeGridWeek'}
-          initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
-          headerToolbar={mobile ? { left: 'prev,next', center: 'title', right: 'today' } : { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' }}
-          footerToolbar={mobile ? { center: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' } : undefined}
-          buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
-          allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime="06:00:00" scrollTime="08:00:00"
-          editable selectable selectMirror longPressDelay={350}
-          events={fcEvents}
-          datesSet={(a: DatesSetArg) => setRange({ from: a.start.toISOString(), to: a.end.toISOString() })}
-          eventClick={onClick}
-          eventContent={(arg) => arg.event.classNames.includes('task-block') ? (
-            <div className="flex min-w-0 items-center gap-1 overflow-hidden px-0.5 text-[12px]"><Timer className="size-3 shrink-0" aria-label="업무 시간" />{arg.timeText && <span className="shrink-0 opacity-80">{arg.timeText}</span>}<span className="truncate font-medium">{arg.event.title}</span></div>
-          ) : true}
-          dayCellClassNames={(a) => { const d = seoulDate(a.date); return holidaySet.has(d) ? ['is-holiday'] : []; }}
-          dayHeaderClassNames={(a) => (a.view.type !== 'dayGridMonth' && holidaySet.has(seoulDate(a.date)) ? ['is-holiday'] : [])}
-          eventDrop={moveEvent}
-          eventResize={moveEvent}
-          select={(s) => setEditor({ draft: { date: seoulDate(s.start), allDay: s.allDay, start: s.allDay ? '09:00' : seoulTime(s.start), end: s.allDay ? '10:00' : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) } })}
-        />
+      <div className="flex items-start gap-4">
+        {/* 왼쪽: 미니 달력 + 캘린더 목록 (Google Calendar 형태) */}
+        <aside className="hidden w-56 shrink-0 space-y-4 lg:block" aria-label="캘린더 목록">
+          <MiniMonth anchor={visibleStart} holidays={holidaySet} onPick={goto} />
+          <div>
+            <p className="mb-1.5 px-1 text-xs font-semibold text-ink-2">내 캘린더</p>
+            <ul className="space-y-0.5" data-testid="calendar-list">
+              {cals.data?.calendars.map((c) => (
+                <li key={c.id}>
+                  <label className="flex cursor-pointer items-center gap-2 rounded-input px-1.5 py-1 text-sm hover:bg-slate-100">
+                    <input type="checkbox" className="size-4 rounded" style={{ accentColor: c.color }} checked={!hidden.includes(c.id)} onChange={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} />
+                    <span className="truncate">{c.type === 'personal' ? '내 일정' : c.name}</span>
+                  </label>
+                </li>
+              ))}
+              <li>
+                <label className="flex cursor-pointer items-center gap-2 rounded-input px-1.5 py-1 text-sm hover:bg-slate-100">
+                  <input type="checkbox" className="size-4 rounded accent-indigo-600" checked={showTasks} onChange={() => setShowTasks(!showTasks)} aria-label="업무 캘린더 표시" />
+                  <span className="flex items-center gap-1"><CircleCheck className="size-3.5 text-indigo-600" />업무</span>
+                </label>
+              </li>
+            </ul>
+          </div>
+        </aside>
+        <div className="min-w-0 flex-1 rounded-card border border-line bg-white p-3 shadow-card" data-testid="calendar">
+          <div className="mb-2 flex flex-wrap gap-1.5 text-xs lg:hidden" aria-label="표시할 캘린더">
+            {cals.data?.calendars.map((c) => (
+              <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} aria-pressed={!hidden.includes(c.id)}
+                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(c.id) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
+                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : c.color }} />{c.type === 'personal' ? '내 일정' : c.name}
+              </button>
+            ))}
+            <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-indigo-300 text-indigo-700' : 'border-line text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무</button>
+          </div>
+          <FullCalendar
+            ref={calRef}
+            plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
+            timeZone="Asia/Seoul" locale="ko" firstDay={1} height="auto" nowIndicator
+            initialView={mobile ? 'listWeek' : 'timeGridWeek'}
+            initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
+            headerToolbar={mobile ? { left: 'prev,next', center: 'title', right: 'today' } : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
+            footerToolbar={mobile ? { center: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' } : undefined}
+            buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
+            allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime="06:00:00" scrollTime="08:00:00"
+            editable selectable selectMirror droppable longPressDelay={350}
+            events={fcEvents}
+            datesSet={(a: DatesSetArg) => setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type })}
+            eventClick={onClick}
+            eventReceive={receive}
+            eventContent={(arg) => {
+              const p = arg.event.extendedProps;
+              if (p.type === 'task') {
+                const t = p.task;
+                return (
+                  <div className="flex min-w-0 items-center gap-1 overflow-hidden px-0.5 text-[12px]" data-task-item={t.id}>
+                    <button type="button" data-task-check onClick={(e) => { e.stopPropagation(); completeTask(t); }} aria-label={`${t.title} ${t.status === 'done' ? '완료 취소' : '완료'}`}
+                      className={cx('flex size-3.5 shrink-0 items-center justify-center rounded-full border', t.status === 'done' ? 'border-indigo-500 bg-indigo-500 text-white' : 'border-indigo-400 bg-white hover:bg-indigo-50')}>
+                      {t.status === 'done' && <Check className="size-2.5" strokeWidth={3} />}
+                    </button>
+                    {arg.timeText && <span className="shrink-0 opacity-70">{arg.timeText}</span>}
+                    <span className={cx('truncate font-medium', t.status === 'done' && 'line-through')}>{arg.event.title}</span>
+                  </div>
+                );
+              }
+              if (arg.event.classNames.includes('task-block')) return <div className="flex min-w-0 items-center gap-1 overflow-hidden px-0.5 text-[12px]"><Timer className="size-3 shrink-0" aria-label="업무 시간" />{arg.timeText && <span className="shrink-0 opacity-80">{arg.timeText}</span>}<span className="truncate font-medium">{arg.event.title}</span></div>;
+              return true;
+            }}
+            dayCellClassNames={(a) => { const d = seoulDate(a.date); return holidaySet.has(d) ? ['is-holiday'] : []; }}
+            dayHeaderClassNames={(a) => (a.view.type !== 'dayGridMonth' && holidaySet.has(seoulDate(a.date)) ? ['is-holiday'] : [])}
+            eventDrop={moveEvent}
+            eventResize={moveEvent}
+            select={(s) => {
+              const js = (s.jsEvent as MouseEvent | undefined);
+              const x = js?.clientX ?? window.innerWidth / 2, y = js?.clientY ?? 200;
+              setQuick({ x: Math.min(window.innerWidth - 336, Math.max(16, x - 160)), y: Math.min(window.innerHeight - 330, Math.max(16, y + 8)), date: seoulDate(s.start), allDay: s.allDay,
+                start: s.allDay ? undefined : seoulTime(s.start), end: s.allDay ? undefined : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) });
+            }}
+          />
+        </div>
+        {sidePanel && <UnscheduledPanel onClose={() => setSidePanel(false)} onOpen={setOpenTask} />}
       </div>
-      <p className="text-xs text-ink-2">점선 항목은 업무 마감일(날짜 기준)이고, 색이 채워진 항목은 시간이 정해진 일정입니다. 끌어서 옮기면 원본 업무·일정에 바로 반영됩니다.</p>
+      <p className="text-xs text-ink-2">빈 칸을 누르거나 끌면 빠른 입력, 업무는 체크로 완료합니다. 오른쪽 “미배정 업무”를 시간 칸으로 끌어 놓으면 업무 시간이 잡힙니다. 단축키 D·W·M·A·T·C</p>
       <ScopeDialog />
+      {quick && <QuickCreate {...quick} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
+        onMore={(draft) => { setQuick(null); setEditor({ draft }); }} onSaved={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }} />}
       {preview && <EventPreview ev={preview.ev} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}
-        onClose={() => setPreview(null)} onEdit={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }} onChanged={() => { load(); broadcastRefresh(); }} />}
+        onClose={() => setPreview(null)} onEdit={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }} onChanged={() => { setPreview(null); load(); broadcastRefresh(); }} />}
       {editor && <EventEditor {...editor} calendars={cals.data?.calendars ?? []} onClose={() => { setEditor(null); if (sp.get('event')) router.replace('/calendar'); }} onSaved={() => { load(); broadcastRefresh(); }} dirUsers={dir.users} />}
+      {openTask && (
+        <aside className="fixed inset-0 z-40 animate-slide-in overflow-y-auto bg-white shadow-pop sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(640px,100vw-240px)] sm:border-l sm:border-line" data-testid="task-panel" aria-label="업무 상세 패널">
+          <TaskDetail key={openTask} id={openTask} inPanel onClose={() => { setOpenTask(null); load(); }} />
+        </aside>
+      )}
     </div>
   );
 }
+
+/** Google 형 미니 달력: 날짜를 누르면 그 날짜로 이동 */
+function MiniMonth({ anchor, holidays, onPick }: { anchor: string; holidays: Map<string, string>; onPick: (d: string) => void }) {
+  const [month, setMonth] = useState(anchor.slice(0, 7));
+  useEffect(() => { setMonth(anchor.slice(0, 7)); }, [anchor]);
+  const first = new Date(`${month}-01T00:00:00Z`);
+  const startDow = (first.getUTCDay() + 6) % 7; // 월요일 시작
+  const cells = Array.from({ length: 42 }, (_, i) => addDays(`${month}-01`, i - startDow));
+  const today = seoulDate(new Date());
+  const shift = (n: number) => { const d = new Date(`${month}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); setMonth(d.toISOString().slice(0, 7)); };
+  return (
+    <div className="rounded-card border border-line bg-white p-2.5 shadow-card" data-testid="mini-month">
+      <div className="mb-1 flex items-center justify-between px-1">
+        <span className="text-sm font-semibold tabular-nums">{Number(month.slice(0, 4))}년 {Number(month.slice(5))}월</span>
+        <span className="flex">
+          <button type="button" onClick={() => shift(-1)} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label="이전 달"><ChevronLeft className="size-4" /></button>
+          <button type="button" onClick={() => shift(1)} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label="다음 달"><ChevronRight className="size-4" /></button>
+        </span>
+      </div>
+      <div className="grid grid-cols-7 text-center text-[11px]">
+        {'월화수목금토일'.split('').map((d, i) => <span key={d} className={cx('py-0.5 font-medium text-ink-3', i === 6 && 'text-red-400')}>{d}</span>)}
+        {cells.map((d) => {
+          const inMonth = d.slice(0, 7) === month;
+          const sun = new Date(d + 'T00:00:00Z').getUTCDay() === 0;
+          return (
+            <button key={d} type="button" onClick={() => onPick(d)} title={holidays.get(d)} aria-label={`${d}로 이동`}
+              className={cx('mx-auto flex size-7 items-center justify-center rounded-full tabular-nums hover:bg-slate-100', !inMonth && 'text-ink-3/60',
+                inMonth && (sun || holidays.has(d)) && 'text-red-500', d === today && '!bg-accent-600 font-bold !text-white')}>{Number(d.slice(8))}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 오른쪽 "미배정 업무" 패널: 업무를 시간 칸으로 끌어 놓으면 업무 시간 블록 */
+function UnscheduledPanel({ onClose, onOpen }: { onClose: () => void; onOpen: (id: string) => void }) {
+  const { user } = useSession();
+  const tasks = useApi<{ tasks: any[] }>('/api/tasks?view=my&limit=200');
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const d = new Draggable(ref.current, {
+      itemSelector: '[data-plan-task]',
+      eventData: (el) => ({ title: el.getAttribute('data-title') ?? '', duration: { minutes: Math.min(Math.max(30, Number(el.getAttribute('data-remaining')) || 60), 240) }, create: true, extendedProps: { taskId: el.getAttribute('data-plan-task') } }),
+    });
+    return () => d.destroy();
+  }, [tasks.data]);
+  const list = (tasks.data?.tasks ?? []).filter((t) => t.assignee_id === user.id && (!t.estimate_minutes || (t.scheduled_minutes ?? 0) < t.estimate_minutes))
+    .sort((a, b) => ((a.due_date ?? '9999') < (b.due_date ?? '9999') ? -1 : 1));
+  return (
+    <aside className="hidden w-64 shrink-0 rounded-card border border-line bg-white shadow-card lg:block" aria-label="미배정 업무" data-testid="unscheduled">
+      <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
+        <span className="text-sm font-semibold">미배정 업무 <span className="text-xs font-normal text-ink-2">{list.length}</span></span>
+        <button type="button" onClick={onClose} className="rounded p-1 text-ink-3 hover:bg-slate-100" aria-label="미배정 업무 닫기"><X className="size-4" /></button>
+      </div>
+      <p className="px-3 pt-2 text-[11px] text-ink-3">시간 칸으로 끌어 놓으면 그 시간에 업무를 합니다</p>
+      <div ref={ref} className="max-h-[70vh] space-y-1.5 overflow-y-auto p-2" data-testid="plan-tasks">
+        {list.map((t) => {
+          const remaining = t.estimate_minutes ? Math.max(0, t.estimate_minutes - (t.scheduled_minutes ?? 0)) : null;
+          return (
+            <div key={t.id} data-plan-task={t.id} data-title={t.title} data-remaining={remaining ?? 60}
+              className="group cursor-grab rounded-input border border-line bg-white px-2.5 py-2 text-sm hover:border-accent-500 hover:shadow-card active:cursor-grabbing">
+              <button type="button" className="line-clamp-2 text-left font-medium hover:underline" onMouseDown={(e) => e.stopPropagation()} onClick={() => onOpen(t.id)}>{t.title}</button>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-2">
+                <DueChip due={t.due_date} status={t.status} />
+                {remaining ? <span className="inline-flex items-center gap-0.5"><Timer className="size-3.5" />{fmtMinutesShort(remaining)}</span> : null}
+              </div>
+            </div>
+          );
+        })}
+        {!list.length && <p className="px-2 py-6 text-center text-xs text-ink-3">시간을 잡을 업무가 없습니다</p>}
+      </div>
+    </aside>
+  );
+}
+const fmtMinutesShort = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ''}` : `${m}분`);
+
+/** 빈 칸 클릭·끌기 → 작은 빠른 입력 창 (일정 / 업무 탭) */
+function QuickCreate({ x, y, date, start, end, endDate, allDay, calendars, onClose, onMore, onSaved }: {
+  x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean; calendars: any[]; onClose: () => void; onMore: (draft: any) => void; onSaved: () => void;
+}) {
+  const { user } = useSession();
+  const [tab, setTab] = useState<'event' | 'task'>('event');
+  const [title, setTitle] = useState('');
+  const editable = calendars.filter((c) => c.perms?.edit);
+  const [calendarId, setCalendarId] = useState(editable.find((c) => c.type === 'personal')?.id ?? editable[0]?.id ?? '');
+  const [busy, setBusy] = useState(false);
+  const when = allDay ? (endDate && endDate !== date ? `${fmtDateK(date)} ~ ${fmtDateK(endDate)} 종일` : `${fmtDateK(date)} 종일`) : fmtTimeRange(`${date}T${start}:00+09:00`, `${endDate ?? date}T${end}:00+09:00`);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) return;
+    setBusy(true);
+    try {
+      if (tab === 'event') {
+        const s = allDay ? `${date}T00:00:00+09:00` : `${date}T${start}:00+09:00`;
+        const en = allDay ? `${addDays(endDate ?? date, 1)}T00:00:00+09:00` : `${endDate ?? date}T${end}:00+09:00`;
+        await api('/api/events', { body: { calendarId, title: title.trim(), start: s, end: en, allDay } });
+        toast.ok('일정을 저장했습니다');
+      } else {
+        await api('/api/tasks', { body: { title: title.trim(), assigneeId: user.id, dueDate: date, dueTime: allDay ? null : start, approvalRequired: false } });
+        toast.ok('업무를 만들었습니다 — 캘린더에 체크로 표시됩니다');
+      }
+      onSaved();
+    } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+  }
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <form role="dialog" aria-label="빠른 입력" onSubmit={save} className="fixed z-50 w-80 animate-fade-up rounded-card border border-line bg-white p-4 shadow-pop" style={{ left: x, top: y }} data-testid="quick-create"
+        onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tab === 'event' ? '제목 추가' : '할 일 제목'} aria-label="빠른 입력 제목"
+          className="w-full border-b-2 border-line pb-1.5 text-lg font-medium placeholder:text-ink-3 focus:border-accent-500 focus:outline-none" />
+        <div className="mt-3 flex gap-1" role="tablist">
+          {([['event', '일정'], ['task', '업무']] as const).map(([k, l]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className={cx('rounded-md px-3 py-1 text-sm font-medium', tab === k ? 'bg-accent-50 text-accent-700' : 'text-ink-2 hover:bg-slate-100')}>{l}</button>
+          ))}
+        </div>
+        <p className="mt-3 flex items-center gap-2 text-sm text-ink-2"><Clock className="size-4" />{tab === 'task' ? `마감 ${allDay ? fmtDateK(date) : `${fmtDateK(date)} ${fmtTime(`${date}T${start}:00+09:00`)}`}` : when}</p>
+        {tab === 'event' ? (
+          <select className={cx(inputCls, 'mt-2 h-9')} value={calendarId} onChange={(e) => setCalendarId(e.target.value)} aria-label="캘린더">
+            {editable.map((c) => <option key={c.id} value={c.id}>{c.type === 'personal' ? '내 일정' : c.name}</option>)}
+          </select>
+        ) : <p className="mt-2 text-xs text-ink-3">담당: 나 · 관리자 확인 없음 — 업무 캘린더에 체크로 표시됩니다</p>}
+        <div className="mt-4 flex items-center justify-between">
+          {tab === 'event' ? <button type="button" className="text-sm font-medium text-ink-2 hover:text-ink" onClick={() => onMore({ date, allDay, start: start ?? '09:00', end: end ?? '10:00', endDate: endDate ?? date, title, calendarId })}>옵션 더보기</button> : <span />}
+          <Button type="submit" disabled={busy || !title.trim()}>저장</Button>
+        </div>
+      </form>
+    </>
+  );
+}
+const fmtDateK = (d: string) => { const dt = new Date(d + 'T00:00:00Z'); return `${dt.getUTCMonth() + 1}월 ${dt.getUTCDate()}일 (${'일월화수목금토'[dt.getUTCDay()]})`; };
 
 function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }: { id?: string; occurrenceStart?: string; draft?: any; calendars: any[]; onClose: () => void; onSaved: () => void; dirUsers: any[] }) {
   const { user } = useSession();
@@ -231,7 +459,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
         description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version, reminders: e.reminder_minutes ?? null });
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
-      setF({ title: '', calendarId: personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
+      setF({ title: draft?.title ?? '', calendarId: draft?.calendarId ?? personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
         endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -364,6 +592,16 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged }: { 
   const tasks = linked.data?.tasks ?? [];
   const block = ev.kind === 'task_block' ? tasks.find((t) => t.link_role === 'block') ?? tasks[0] : null;
   const going = (ev.attendees ?? []).filter((a: any) => a.response !== 'declined');
+  async function remove() {
+    let scope: Scope = 'all';
+    if (ev.exception) scope = 'this';
+    else if (ev.recurring) { const sc = await askScope(); if (!sc) return; scope = sc; }
+    else if (!confirm('일정을 삭제할까요?')) return;
+    try {
+      await api(`/api/events/${ev.id}?scope=${scope}${ev.originalStart ? `&occurrenceStart=${encodeURIComponent(new Date(ev.originalStart).toISOString())}` : ''}`, { method: 'DELETE' });
+      toast.ok('삭제했습니다'); onChanged();
+    } catch (e: any) { toast.error(e.message); }
+  }
   async function complete(t: any) {
     const to = t.status === 'review' ? 'done' : t.approval_line_id || t.approval_required ? 'review' : 'done';
     try {
@@ -379,7 +617,12 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged }: { 
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div role="dialog" aria-label="일정 미리보기" className="fixed z-50 w-[360px] max-w-[calc(100vw-32px)] animate-fade-up rounded-card border border-line bg-white p-4 shadow-pop" style={{ left: x, top: Math.max(16, y) }} data-testid="event-preview">
+      <div role="dialog" aria-label="일정 미리보기" className="fixed z-50 w-[360px] max-w-[calc(100vw-32px)] animate-fade-up rounded-card border border-line bg-white p-4 pt-2 shadow-pop" style={{ left: x, top: Math.max(16, y) }} data-testid="event-preview">
+        <div className="-mr-2 mb-1 flex justify-end gap-0.5">
+          <button type="button" onClick={onEdit} className="rounded-full p-2 text-ink-2 hover:bg-slate-100" aria-label="일정 편집" title="편집"><Pencil className="size-4" /></button>
+          <button type="button" onClick={remove} className="rounded-full p-2 text-ink-2 hover:bg-red-50 hover:text-red-600" aria-label="일정 삭제" title="삭제"><Trash2 className="size-4" /></button>
+          <button type="button" onClick={onClose} className="rounded-full p-2 text-ink-2 hover:bg-slate-100" aria-label="미리보기 닫기" title="닫기"><X className="size-4" /></button>
+        </div>
         <div className="flex items-start gap-2.5">
           <span className="mt-1 size-3 shrink-0 rounded" style={{ background: ev.color }} />
           <div className="min-w-0 flex-1">
@@ -412,9 +655,8 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged }: { 
             <LinkedTaskList tasks={tasks.slice(0, 4)} compact />
           </div>
         )}
-        <div className="mt-3 flex justify-end gap-1.5">
-          <Button size="sm" variant="ghost" onClick={onClose}>닫기</Button>
-          <Button size="sm" onClick={onEdit}>{ev.kind === 'task_block' ? '시간 편집' : '자세히·회의 메모'}</Button>
+        <div className="mt-3 flex justify-end">
+          <Button size="sm" variant="secondary" onClick={onEdit}>{ev.kind === 'task_block' ? '시간 편집' : '회의 메모·연결 업무'}</Button>
         </div>
       </div>
     </>
