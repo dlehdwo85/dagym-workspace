@@ -68,3 +68,10 @@ export async function downloadUrl(key: string, fileName: string, inline: boolean
   const exp = Date.now() + 120_000;
   return `/api/files/local?key=${encodeURIComponent(key)}&exp=${exp}&sig=${hmac(`get:${key}:${exp}`)}&name=${encodeURIComponent(fileName)}&inline=${inline ? 1 : 0}`;
 }
+
+/** 서버가 직접 파일을 저장 (공개 신고 양식 사진처럼 서명 URL 을 줄 수 없는 경우) */
+export async function putObject(key: string, data: Buffer, mime: string) {
+  if (s3Configured()) {
+    await s3().send(new PutObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key, Body: data, ContentType: mime }));
+  } else await writeLocal(key, data);
+}

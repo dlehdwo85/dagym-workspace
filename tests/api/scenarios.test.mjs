@@ -373,6 +373,138 @@ describe('Asana 이상 P0 (B-2·B-3·B-4)', () => {
   });
 });
 
+describe('Asana 이상 P1 (B-7~B-13)', () => {
+  const upPhoto = async (c, taskId, name = 'p.jpg') => {
+    const init = await c.ok('POST', '/api/attachments', { taskId, kind: 'file', fileName: name, mimeType: 'image/jpeg', size: 4, capturedAt: new Date().toISOString() });
+    await fetch(BASE + init.upload.url, { method: 'PUT', headers: init.upload.headers, body: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+    await c.ok('POST', `/api/attachments/${init.id}/complete`, {});
+  };
+  test('B-7 사진 증빙 2장 필수: 모자라면 검토 요청 거부, 채우면 통과', async () => {
+    const id = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: '현장 점검 사진', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, taskType: 'inspection', photoRequired: 2 })).id;
+    const r1 = await ctx.staffA.client.patch(`/api/tasks/${id}`, { status: 'review' });
+    assert.equal(r1.status, 409);
+    assert.match(r1.body.error.message, /사진 2장/);
+    assert.equal((await ctx.staffA.client.patch(`/api/tasks/${id}`, { photoRequired: 0 })).status, 403, '직원은 사진 조건을 못 바꿈');
+    await upPhoto(ctx.staffA.client, id); await upPhoto(ctx.staffA.client, id, 'p2.jpg');
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
+    const d = await ctx.staffA.client.ok('GET', `/api/tasks/${id}`);
+    assert.equal(d.task.photo_count, 2);
+    assert.ok(d.attachments.every((a) => a.captured_at), '촬영 시각 기록');
+  });
+  test('B-12 마일스톤은 시작일 없이 저장', async () => {
+    const id = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '개강일', orgUnitId: ctx.siteA, taskType: 'milestone', startDate: addDays(today, 1), dueDate: addDays(today, 5) })).id;
+    const t = (await ctx.staffA.client.ok('GET', `/api/tasks/${id}`)).task;
+    assert.equal(t.task_type, 'milestone'); assert.equal(t.start_date, null);
+  });
+  test('B-9 2단계 결재: 현장 관리자 → 대표, 반려 사유 필수, 결재자 아니면 거부, 최종 승인 시 완료', async () => {
+    const line = (await ctx.owner.ok('POST', '/api/approval-lines', { name: '현장→대표', steps: [{ label: '현장 관리자', type: 'role', role: 'site_manager' }, { label: '대표', type: 'role', role: 'owner' }] })).id;
+    assert.equal((await ctx.managerA.client.post('/api/approval-lines', { name: 'x', steps: [{ label: 'a', type: 'role', role: 'owner' }] })).status, 403);
+    const id = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'GX 강사 계약', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, taskType: 'approval', approvalLineId: line })).id;
+    assert.equal((await ctx.managerA.client.patch(`/api/tasks/${id}`, { status: 'done' })).status, 403, '결재선 업무는 바로 완료 불가');
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
+    assert.ok((await notifs(ctx.managerA.client)).some((n) => n.title.includes('결재 요청 (현장 관리자)')));
+    assert.equal((await ctx.owner.post(`/api/tasks/${id}/approval`, { decision: 'approve' })).status, 403, '1단계는 현장 관리자만');
+    assert.equal((await ctx.managerA.client.post(`/api/tasks/${id}/approval`, { decision: 'reject' })).status, 400, '반려 사유 필수');
+    await ctx.managerA.client.ok('POST', `/api/tasks/${id}/approval`, { decision: 'reject', comment: '계약 기간 확인 필요' });
+    let d = await ctx.staffA.client.ok('GET', `/api/tasks/${id}`);
+    assert.equal(d.task.status, 'in_progress');
+    assert.ok(d.comments.some((c) => c.body.includes('계약 기간 확인 필요')));
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
+    assert.deepEqual((await ctx.managerA.client.ok('POST', `/api/tasks/${id}/approval`, { decision: 'approve' })).status, 'next');
+    assert.equal((await ctx.managerA.client.post(`/api/tasks/${id}/approval`, { decision: 'approve' })).status, 403, '2단계는 대표');
+    assert.equal((await ctx.owner.ok('POST', `/api/tasks/${id}/approval`, { decision: 'approve' })).status, 'done');
+    d = await ctx.staffA.client.ok('GET', `/api/tasks/${id}`);
+    assert.equal(d.task.status, 'done'); assert.equal(d.task.approved_by, ctx.ownerId);
+    assert.deepEqual(d.approvals.filter((a) => a.round === 2).map((a) => a.status), ['approved', 'approved']);
+    assert.equal(d.approvals.find((a) => a.round === 1).status, 'rejected');
+    const audit = await ctx.owner.ok('GET', '/api/admin/audit');
+    assert.ok(audit.logs.filter((l) => l.action === 'approval.decide' && l.target_id === id).length >= 3, '결재 이력 감사 기록');
+  });
+  test('B-11 사용자 지정 필드: 퍼센트는 평균, 숫자는 합계, 형식·권한 검사', async () => {
+    const pid = (await ctx.managerA.client.ok('POST', '/api/projects', { name: '필드 시험', orgUnitId: ctx.siteA })).id;
+    const pct = (await ctx.managerA.client.ok('POST', `/api/projects/${pid}/fields`, { name: '달성률', type: 'percent' })).id;
+    const num = (await ctx.managerA.client.ok('POST', `/api/projects/${pid}/fields`, { name: '비용', type: 'number' })).id;
+    const sel = (await ctx.managerA.client.ok('POST', `/api/projects/${pid}/fields`, { name: '단계', type: 'select', options: [{ id: 'a', label: '계획', color: '#2563eb' }] })).id;
+    assert.equal((await ctx.staffA.client.post(`/api/projects/${pid}/fields`, { name: 'x', type: 'text' })).status, 403);
+    const vals = [[80, 100000], [90, 250000]];
+    for (const [p, c] of vals) {
+      const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: `필드 업무 ${p}`, projectId: pid })).id;
+      await ctx.staffA.client.ok('PUT', `/api/tasks/${t}/fields/${pct}`, { value: p });
+      await ctx.staffA.client.ok('PUT', `/api/tasks/${t}/fields/${num}`, { value: c });
+      if (p === 80) {
+        assert.equal((await ctx.staffA.client.req('PUT', `/api/tasks/${t}/fields/${pct}`, { value: 170 })).status, 400, '퍼센트 100 초과 거부');
+        assert.equal((await ctx.staffA.client.req('PUT', `/api/tasks/${t}/fields/${sel}`, { value: 'zz' })).status, 400, '없는 선택지 거부');
+        await ctx.staffA.client.ok('PUT', `/api/tasks/${t}/fields/${sel}`, { value: 'a' });
+      }
+    }
+    const sum = (await ctx.staffA.client.ok('GET', `/api/projects/${pid}/field-summary`)).summary;
+    assert.equal(sum.find((x) => x.name === '달성률').total, 85, '퍼센트는 평균 85% (합계 170% 아님)');
+    assert.equal(sum.find((x) => x.name === '비용').total, 350000);
+    const list = (await ctx.staffA.client.ok('GET', `/api/tasks?projectId=${pid}`)).tasks;
+    assert.ok(list.some((t) => t.fields[sel] === 'a'));
+  });
+  test('B-10 자동화: 검토 요청 → 현장 관리자 알림 + 완료 → 후속 업무 생성, 규칙당 1회·재귀 없음', async () => {
+    const pid = (await ctx.managerA.client.ok('POST', '/api/projects', { name: '자동화 시험', orgUnitId: ctx.siteA })).id;
+    await ctx.managerA.client.ok('POST', '/api/automations', { name: '검토 알림', projectId: pid, trigger: 'status_changed', conditions: { toStatus: 'review' }, actions: [{ type: 'notify', to: 'unit_managers', message: '검토 필요' }] });
+    await ctx.managerA.client.ok('POST', '/api/automations', { name: '완료 후 정산', projectId: pid, trigger: 'task_completed', actions: [{ type: 'create_follow_up', title: '비용 정산', dueInDays: 3, assignTo: 'creator' }, { type: 'set_priority', priority: 'high' }] });
+    assert.equal((await ctx.staffA.client.post('/api/automations', { name: 'x', projectId: pid, trigger: 'task_created', actions: [{ type: 'set_priority', priority: 'high' }] })).status, 403);
+    assert.equal((await ctx.managerA.client.post('/api/automations', { name: 'x', trigger: 'task_created', actions: [{ type: 'set_priority', priority: 'high' }] })).status, 403, '전사 규칙은 관리자만');
+    const id = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '자동화 대상', projectId: pid, approvalRequired: false })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
+    assert.ok((await notifs(ctx.managerA.client)).some((n) => n.title.includes('[자동화] 검토 필요')));
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'done' });
+    const follow = await sql`select t.id, t.title, t.assignee_id, d.depends_on_id from tasks t join task_dependencies d on d.task_id = t.id where d.depends_on_id = ${id}`;
+    assert.equal(follow.length, 1); assert.equal(follow[0].title, '비용 정산'); assert.equal(follow[0].assignee_id, ctx.staffA.id);
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${id}`)).task.priority, 'high');
+    const { runs } = await ctx.managerA.client.ok('GET', '/api/automations');
+    assert.ok(runs.filter((r) => r.task_id === id).every((r) => r.status === 'ok'));
+    // 후속 업무 생성이 task_created 규칙을 부르지 않음 (재귀 없음) — 규칙 실행 기록은 원 업무 2건뿐
+    assert.equal(runs.filter((r) => r.task_id === id).length, 2);
+  });
+  test('B-13 후속 업무 · 복제 · 중복 통합', async () => {
+    const a = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '원 업무', orgUnitId: ctx.siteA, checklist: ['하나'] })).id;
+    const f = (await ctx.staffA.client.ok('POST', `/api/tasks/${a}/follow-up`, {})).id;
+    assert.deepEqual((await ctx.staffA.client.ok('GET', `/api/tasks/${f}`)).dependencies.map((x) => x.id), [a]);
+    const dup = (await ctx.staffA.client.ok('POST', `/api/tasks/${a}/duplicate`, {})).id;
+    const dd = await ctx.staffA.client.ok('GET', `/api/tasks/${dup}`);
+    assert.equal(dd.task.title, '원 업무 (복제)'); assert.equal(dd.checklist.length, 1);
+    await ctx.staffA.client.ok('POST', `/api/tasks/${dup}/comments`, { body: '복제 쪽 댓글' });
+    await ctx.staffA.client.ok('POST', `/api/tasks/${dup}/merge`, { intoId: a });
+    assert.equal((await ctx.staffA.client.get(`/api/tasks/${dup}`)).status, 404, '통합된 원본은 사라짐');
+    const da = await ctx.staffA.client.ok('GET', `/api/tasks/${a}`);
+    assert.ok(da.comments.some((c) => c.body === '복제 쪽 댓글')); assert.ok(da.comments.some((c) => c.body.includes('[중복 통합]')));
+  });
+  test('B-8 현장 QR 신고: 비로그인 접수 → 현장 업무 자동 생성·관리자 배정, 동의·민원 연락처, 미끼 필드, 속도 제한', async () => {
+    const fid = (await ctx.managerA.client.ok('POST', '/api/forms', { orgUnitId: ctx.siteA, kind: 'facility' })).id;
+    const cid = (await ctx.managerA.client.ok('POST', '/api/forms', { orgUnitId: ctx.siteA, kind: 'complaint' })).id;
+    assert.equal((await ctx.staffA.client.post('/api/forms', { orgUnitId: ctx.siteA, kind: 'supply' })).status, 403);
+    const forms = (await ctx.managerA.client.ok('GET', '/api/forms')).forms;
+    const ftok = forms.find((x) => x.id === fid).token, ctok = forms.find((x) => x.id === cid).token;
+    const anon = new Client('anon');
+    const info = await anon.ok('GET', `/api/public/forms/${ftok}`);
+    assert.equal(info.place, '다짐 강남점');
+    const png = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]).toString('base64');
+    const r = await anon.ok('POST', `/api/public/forms/${ftok}`, { content: '런닝머신 3번 벨트가 끊어졌어요', location: '2층 유산소존', photo: png }, { 'x-forwarded-for': '10.1.1.1' });
+    assert.ok(r.receipt);
+    const [t] = await sql`select id, title, assignee_id, task_type, photo_required, priority from tasks where title like '[시설 고장] 런닝머신%'`;
+    assert.equal(t.assignee_id, ctx.managerA.id, '현장 관리자 자동 배정'); assert.equal(t.task_type, 'inspection');
+    const att = await sql`select mime_type from attachments where task_id = ${t.id}`;
+    assert.equal(att[0].mime_type, 'image/png', '신고 사진 첨부');
+    assert.ok((await notifs(ctx.managerA.client)).some((n) => n.title.includes('현장 신고 접수')));
+    assert.equal((await anon.req('POST', `/api/public/forms/${ctok}`, { content: '샤워실 온수가 안 나와요' }, { 'x-forwarded-for': '10.1.1.2' })).status, 400, '민원은 연락처 필요');
+    assert.equal((await anon.req('POST', `/api/public/forms/${ctok}`, { content: '샤워실 온수가 안 나와요', name: '홍길동', phone: '010-1234-5678' }, { 'x-forwarded-for': '10.1.1.2' })).status, 400, '개인정보 동의 필요');
+    await anon.ok('POST', `/api/public/forms/${ctok}`, { content: '샤워실 온수가 안 나와요', name: '홍길동', phone: '010-1234-5678', agree: true }, { 'x-forwarded-for': '10.1.1.2' });
+    assert.equal((await anon.req('POST', `/api/public/forms/${ftok}`, { content: '봇입니다 봇', website: 'http://spam' }, { 'x-forwarded-for': '10.1.1.3' })).status, 400, '미끼 필드');
+    for (let i = 0; i < 4; i++) await anon.ok('POST', `/api/public/forms/${ftok}`, { content: `반복 신고 ${i} 입니다` }, { 'x-forwarded-for': '10.9.9.9' });
+    await anon.ok('POST', `/api/public/forms/${ftok}`, { content: '다섯 번째 신고' }, { 'x-forwarded-for': '10.9.9.9' });
+    assert.equal((await anon.req('POST', `/api/public/forms/${ftok}`, { content: '여섯 번째 신고' }, { 'x-forwarded-for': '10.9.9.9' })).status, 429, '10분 5건 제한');
+    // 다른 현장 직원은 양식 목록에서 보이지 않음, 끈 양식은 접수 불가
+    assert.ok(!(await ctx.staffB.client.ok('GET', '/api/forms')).forms.some((x) => x.id === fid));
+    await ctx.managerA.client.ok('PATCH', `/api/forms/${fid}`, { orgUnitId: ctx.siteA, kind: 'facility', enabled: false });
+    assert.equal((await anon.get(`/api/public/forms/${ftok}`)).status, 404);
+  });
+});
+
 describe('네트워크 재시도 중복 방지 (Idempotency-Key)', () => {
   test('같은 키로 두 번 보내도 업무는 하나', async () => {
     const h = { 'idempotency-key': 'retry-key-1' };

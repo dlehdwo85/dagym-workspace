@@ -29,6 +29,9 @@ export const taskInput = z.object({
   checklist: z.array(z.string().trim().min(1).max(300)).max(100).optional(),
   dependsOn: z.array(zUuid).max(30).optional(),
   sectionId: zUuid.nullable().optional(),
+  taskType: z.enum(['normal', 'milestone', 'approval', 'inspection']).optional(),
+  photoRequired: z.number().int().min(0).max(20).optional(),
+  approvalLineId: zUuid.nullable().optional(),
   sortOrder: z.number().optional(),
   version: z.number().int().optional(),
   reviewNote: z.string().max(2000).optional(),
@@ -39,7 +42,9 @@ const TASK_COLS = (sql: Sql) => sql`
   t.id, t.title, t.description, t.status, t.priority, t.project_id, t.parent_id, t.org_unit_id, t.brand_id,
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
-  t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at,
+  t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id,
+  (select count(*)::int from attachments ph where ph.task_id = t.id and ph.deleted_at is null and ph.upload_status = 'ready' and ph.kind = 'file' and ph.mime_type like 'image/%') as photo_count,
+  (select coalesce(jsonb_object_agg(fv.field_id, fv.value), '{}'::jsonb) from task_field_values fv where fv.task_id = t.id) as fields,
   au.name as assignee_name, p.name as project_name, p.color as project_color, o.name as org_unit_name,
   (select count(*)::int from tasks s where s.parent_id = t.id and s.deleted_at is null) as subtask_count,
   (select count(*)::int from tasks s where s.parent_id = t.id and s.deleted_at is null and s.status = 'done') as subtask_done,
@@ -152,7 +157,9 @@ export async function getTaskDetail(u: SessionUser, id: string) {
         where a.entity_type = 'task' and a.entity_id = ${id} order by a.created_at desc limit 100`,
     sql`select id, start_at, end_at, title from events where task_id = ${id} and deleted_at is null order by start_at`,
   ]);
-  return { task: t, perms, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks };
+  const { openRound } = await import('./approvals');
+  const approvals = await openRound(sql, id);
+  return { task: t, perms, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -196,17 +203,21 @@ export async function createTask(u: SessionUser, i: TaskInput) {
   const rule = normalizeRule(i.recurrenceRule);
   if (rule && !i.dueDate) throw badRequest('반복 업무는 마감일이 필요합니다');
   const sectionId = i.sectionId ? await checkSection(sql, i.sectionId, i.projectId ?? null) : null;
+  if (i.taskType === 'milestone') i.startDate = null; // 마일스톤은 기간 없이 하루
+  if (i.approvalLineId) await checkLine(sql, i.approvalLineId);
   const status = i.status ?? 'todo';
   if (status === 'done') throw badRequest('새 업무를 완료 상태로 만들 수 없습니다');
 
   return sql.begin(async (tx) => {
     const [t] = await tx<{ id: string }[]>`
       insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
-        start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at)
+        start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at,
+        task_type, photo_required, approval_line_id)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
         ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
-        ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null})
+        ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null},
+        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null})
       returning id`;
     for (const c of new Set(i.collaboratorIds ?? [])) {
       await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
@@ -232,6 +243,8 @@ export async function createTask(u: SessionUser, i: TaskInput) {
         link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, actorId: u.id, dedupeKey: `collab:${t.id}`,
       });
     }
+    const { runAutomations } = await import('./automation');
+    await runAutomations(tx, { trigger: 'task_created', taskId: t.id, actorId: u.id });
     return { id: t.id };
   });
 }
@@ -266,7 +279,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const fields: [keyof TaskInput, string][] = [
       ['title', 'title'], ['description', 'description'], ['projectId', 'project_id'], ['brandId', 'brand_id'],
       ['assigneeId', 'assignee_id'], ['priority', 'priority'], ['startDate', 'start_date'], ['dueDate', 'due_date'],
-      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'],
+      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'],
     ];
     for (const [k, col] of fields) {
       if (i[k] === undefined) continue;
@@ -302,11 +315,24 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const due = (set.due_date ?? cur.due_date) as string | null;
     if (start && due && start > due) throw badRequest('시작일이 마감일보다 늦습니다');
     if (set.assignee_id) await validateRefs(tx, u, { assigneeId: set.assignee_id as string } as TaskInput, cur.org_unit_id);
+    if (('photo_required' in set || 'approval_line_id' in set) && !perms.approve) throw forbidden('사진 증빙·결재선은 관리자가 정합니다');
+    if (set.approval_line_id) await checkLine(tx, set.approval_line_id as string);
+    if (cur.status === 'review' && 'approval_line_id' in set) throw conflict('결재 진행 중에는 결재선을 바꿀 수 없습니다');
+    if ((set.task_type ?? cur.task_type) === 'milestone' && (set.start_date ?? cur.start_date)) set.start_date = null;
+    const lineId = ('approval_line_id' in set ? set.approval_line_id : cur.approval_line_id) as string | null;
 
     // 상태 변경
     let statusEvent: string | null = null;
     if (i.status && i.status !== cur.status) {
       const to = i.status as TaskStatus;
+      // B-7 사진 증빙: 검토 요청·완료 전에 필요한 사진 수 확인
+      const needPhotos = Number(set.photo_required ?? cur.photo_required ?? 0);
+      if ((to === 'done' || to === 'review') && needPhotos > 0) {
+        const [{ n }] = await tx<{ n: number }[]>`select count(*)::int n from attachments where task_id = ${id} and deleted_at is null
+          and upload_status = 'ready' and kind = 'file' and mime_type like 'image/%'`;
+        if (n < needPhotos) throw conflict(`완료 증빙 사진 ${needPhotos}장이 필요합니다 (현재 ${n}장). 사진 촬영으로 첨부해 주세요.`);
+      }
+      if (to === 'done' && lineId) throw forbidden('결재선이 지정된 업무입니다. "검토 요청"으로 결재를 올려 주세요.');
       if (to === 'done') {
         if (cur.approval_required && !perms.approve) {
           throw forbidden('이 업무는 관리자 확인이 필요합니다. "검토 요청"으로 바꿔 주세요.');
@@ -322,6 +348,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         set.review_requested_by = u.id;
         statusEvent = 'review_requested';
       } else {
+        if (cur.status === 'review' && lineId) {
+          const { cancelOpenRound } = await import('./approvals');
+          await cancelOpenRound(tx, id);
+        }
         if (cur.status === 'review' && perms.approve && cur.review_requested_by !== u.id) statusEvent = 'review_rejected';
         if (cur.status === 'done') { set.completed_at = null; set.approved_at = null; set.approved_by = null; statusEvent = 'reopened'; }
       }
@@ -374,7 +404,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         body: `${cur.due_date ?? '없음'} → ${set.due_date ?? cur.due_date ?? '없음'}`, link: `/tasks/${id}`, entityType: 'task',
         entityId: id, actorId: u.id, dedupeKey: `due:${id}:${upd.version}` });
     }
-    if (statusEvent === 'review_requested') {
+    if (statusEvent === 'review_requested' && lineId) {
+      const { startApprovalRound } = await import('./approvals');
+      await startApprovalRound(tx, id, lineId, cur.org_unit_id, u.id, title);
+    } else if (statusEvent === 'review_requested') {
       await notify(tx, { userIds: await approverIds(tx, cur.org_unit_id, cur.project_id), type: 'review_requested',
         title: `검토 요청: ${title}`, body: `${u.name}님이 완료 검토를 요청했습니다`, link: `/tasks/${id}`,
         entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `review:${id}:${upd.version}` });
@@ -387,6 +420,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     }
     let spawned: string | null = null;
     if (set.status === 'done') spawned = await spawnNextRecurrence(tx, id, u.id);
+    // B-10 자동화 (사람이 한 변경에만 반응, 규칙이 한 변경은 다시 부르지 않음)
+    const { runAutomations } = await import('./automation');
+    if (set.status) await runAutomations(tx, { trigger: set.status === 'done' ? 'task_completed' : 'status_changed', taskId: id, actorId: u.id, fromStatus: cur.status });
+    if ('section_id' in set && set.section_id) await runAutomations(tx, { trigger: 'section_moved', taskId: id, actorId: u.id });
     return { id, version: upd.version, changed: true, spawned };
   });
 }
@@ -518,4 +555,61 @@ export async function ackTask(u: SessionUser, id: string) {
   if (task.assignee_id !== u.id) throw forbidden('담당자만 확인할 수 있습니다');
   await sql`update tasks set assignee_ack_at = coalesce(assignee_ack_at, now()) where id = ${id}`;
   return { ok: true };
+}
+
+async function checkLine(sql: Sql, lineId: string) {
+  const [l] = await sql<{ active: boolean }[]>`select active from approval_lines where id = ${lineId}`;
+  if (!l || !l.active) throw badRequest('사용할 수 없는 결재선입니다');
+}
+
+// ---- B-13 후속 업무 · 복제 · 중복 통합 ----
+export async function followUpTask(u: SessionUser, id: string, title?: string) {
+  const sql = db();
+  const { perms } = await loadTaskForUser(u, id, sql);
+  if (!perms.edit) throw forbidden();
+  const [t] = await sql`select project_id, section_id, org_unit_id, brand_id, title, assignee_id, priority from tasks where id = ${id}`;
+  const r = await createTask(u, { title: title?.trim() || `[후속] ${t.title}`, projectId: t.project_id, sectionId: t.section_id, orgUnitId: t.org_unit_id,
+    brandId: t.brand_id, assigneeId: t.assignee_id, priority: t.priority, dependsOn: [id], description: `후속 업무 — 원 업무: ${t.title}` });
+  await activity(sql, 'task', id, u.id, 'follow_up_created', { followUp: r.id });
+  return r;
+}
+
+export async function duplicateTask(u: SessionUser, id: string, withSubtasks = true) {
+  const sql = db();
+  await loadTaskForUser(u, id, sql);
+  const [t] = await sql`select *, to_char(due_time,'HH24:MI') as due_time_s from tasks where id = ${id}`;
+  const cl = await sql<{ text: string }[]>`select text from task_checklist_items where task_id = ${id} order by sort`;
+  const collab = (await sql<{ user_id: string }[]>`select user_id from task_collaborators where task_id = ${id}`).map((r) => r.user_id);
+  const r = await createTask(u, { title: `${t.title} (복제)`, description: t.description, projectId: t.project_id, sectionId: t.section_id, orgUnitId: t.org_unit_id,
+    brandId: t.brand_id, assigneeId: t.assignee_id, priority: t.priority, startDate: t.start_date, dueDate: t.due_date, dueTime: t.due_time_s, tags: t.tags,
+    approvalRequired: t.approval_required, taskType: t.task_type, photoRequired: t.photo_required, approvalLineId: t.approval_line_id,
+    collaboratorIds: collab, checklist: cl.map((c) => c.text) });
+  if (withSubtasks) {
+    const subs = await sql<{ title: string; assignee_id: string | null; due_date: string | null }[]>`select title, assignee_id, due_date from tasks where parent_id = ${id} and deleted_at is null order by sort_order`;
+    for (const s of subs) await createTask(u, { title: s.title, parentId: r.id, assigneeId: s.assignee_id, dueDate: s.due_date, approvalRequired: false });
+  }
+  await sql`insert into task_field_values (task_id, field_id, value) select ${r.id}, field_id, value from task_field_values where task_id = ${id}`;
+  return r;
+}
+
+/** 중복 업무 통합: 원본(id)의 댓글·첨부·협업자·하위 업무를 대상(intoId)으로 옮기고 원본은 삭제 처리 */
+export async function mergeTask(u: SessionUser, id: string, intoId: string) {
+  if (id === intoId) throw badRequest('같은 업무로는 통합할 수 없습니다');
+  const sql = db();
+  return sql.begin(async (tx) => {
+    const a = await loadTaskForUser(u, id, tx);
+    const b = await loadTaskForUser(u, intoId, tx);
+    if (!a.perms.delete || !b.perms.edit) throw forbidden('통합하려면 원본 삭제 권한과 대상 수정 권한이 필요합니다');
+    const [src] = await tx`select title from tasks where id = ${id}`;
+    const [dst] = await tx`select title from tasks where id = ${intoId}`;
+    await tx`update comments set task_id = ${intoId} where task_id = ${id}`;
+    await tx`update attachments set task_id = ${intoId} where task_id = ${id}`;
+    await tx`update tasks set parent_id = ${intoId} where parent_id = ${id} and deleted_at is null`;
+    await tx`insert into task_collaborators (task_id, user_id) select ${intoId}, user_id from task_collaborators where task_id = ${id} on conflict do nothing`;
+    await tx`insert into comments (task_id, author_id, body) values (${intoId}, ${u.id}, ${`[중복 통합] '${src.title}' 업무를 이 업무로 통합했습니다`})`;
+    await tx`update tasks set deleted_at = now(), version = version + 1, updated_at = now() where id = ${id}`;
+    await activity(tx, 'task', id, u.id, 'merged_into', { into: intoId, title: dst.title });
+    await activity(tx, 'task', intoId, u.id, 'merged_from', { from: id, title: src.title });
+    return { id: intoId };
+  });
 }

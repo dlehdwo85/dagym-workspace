@@ -21,6 +21,7 @@ export const attachmentInput = z.object({
   docBaseDate: zDate.optional(),
   docOwner: z.string().max(100).optional(),
   source: z.enum(['upload', 'google_drive', 'chatgpt', 'notion', 'web', 'other']).optional(),
+  capturedAt: z.string().datetime({ offset: true }).optional(),
 });
 
 const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|ps1|vbs|jar|apk|ipa|dll|sh)$/i;
@@ -63,9 +64,9 @@ export async function createAttachment(u: SessionUser, i: z.infer<typeof attachm
   const safe = i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120);
   const mime = i.mimeType || 'application/octet-stream';
   const [a] = await sql<{ id: string }[]>`insert into attachments (task_id, event_id, kind, file_name, mime_type, size_bytes, upload_status,
-      doc_title, doc_version, doc_base_date, doc_owner, source, created_by)
+      doc_title, doc_version, doc_base_date, doc_owner, source, created_by, captured_at)
     values (${i.taskId ?? null}, ${i.eventId ?? null}, 'file', ${i.fileName}, ${mime}, ${i.size}, 'pending',
-      ${i.docTitle ?? i.fileName}, ${i.docVersion ?? null}, ${i.docBaseDate ?? null}, ${i.docOwner ?? null}, ${i.source ?? 'upload'}, ${u.id})
+      ${i.docTitle ?? i.fileName}, ${i.docVersion ?? null}, ${i.docBaseDate ?? null}, ${i.docOwner ?? null}, ${i.source ?? 'upload'}, ${u.id}, ${i.capturedAt ?? null})
     returning id`;
   const key = `att/${new Date().toISOString().slice(0, 7)}/${a.id}/${safe}`;
   await sql`update attachments set storage_key = ${key} where id = ${a.id}`;
