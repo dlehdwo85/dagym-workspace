@@ -27,3 +27,12 @@
 - [R-8 참고] 자동 시험이 Linux 전용 경로(`/tmp/claude-0`, `node_modules/.bin/next`, openssl)를 써서 Windows 에서 못 돎. 필수 아님 — 원하면 `os.tmpdir()`·`process.execPath`+`next/dist/bin/next` 로 바꾸면 로컬에서도 회귀 시험 가능
 
 ## 클라우드 회신 (클라우드는 이 파일 대신 NEXT_ACTION.md 의 "로컬 요청 처리" 절에 답합니다)
+
+## 운영 설정 진행 (2026-10-13, 대표 승인 "진행하라")
+- Vercel 프로젝트 `dlehdwo85s-projects/dagym-workspace` (Hobby). 운영 주소 https://dagym-workspace.vercel.app
+- ✅ Neon Postgres(Free, 싱가포르 sin1, Neon Auth 끔) `dagym-workspace-db` 생성 → 프로젝트 연결(Production·Preview). `DATABASE_URL` 등 자동 등록 (값은 읽지 않음)
+- ✅ `APP_URL=https://dagym-workspace.vercel.app` (Production, 구성 변수)
+- ✅ `vercel.json` main 만 배포(claude/** · local/** 프리뷰 끔) — main 84dfe02
+- ⛔ `APP_SECRET`(32자 이상)·`SETUP_SECRET` — 비밀값이라 대표가 직접 입력 대기
+- ⛔ 운영 DB 마이그레이션 — 방법 결정 대기(빌드 때 `node scripts/migrate.mjs` 실행하도록 vercel.json buildCommand 변경안은 자동 권한에서 차단됨 → 대표 승인 필요)
+- ⛔ Vercel Hobby 배포 횟수 제한: main 2c48976·84dfe02 "Deployment rate limited — retry in 24 hours". 운영 주소는 아직 995c4ac. 해제 후 main 재배포 필요(또는 Pro $20/월)
