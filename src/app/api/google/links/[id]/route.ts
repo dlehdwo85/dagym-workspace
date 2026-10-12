@@ -1,3 +1,4 @@
+import { featureGate } from '@/lib/google/gate';
 import { handler } from '@/lib/api';
 import { db } from '@/lib/db';
 import { notFound } from '@/lib/errors';
@@ -5,6 +6,7 @@ import { stopWatch } from '@/lib/google/sync';
 
 /** 연결 해제: Google·회사 양쪽 일정은 그대로 두고 연결만 끊는다 */
 export const DELETE = handler<{ id: string }>(async ({ user, params }) => {
+  featureGate();
   const sql = db();
   const [l] = await sql`select * from google_calendar_links where id = ${params.id} and user_id = ${user.id}`;
   if (!l) throw notFound();

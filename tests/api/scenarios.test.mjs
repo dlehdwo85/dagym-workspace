@@ -11,7 +11,7 @@ before(async () => {
   await resetDb();
   ensureTls();
   fake = await startFakeGoogle();
-  srv = await startServer();
+  srv = await startServer({ FEATURE_GOOGLE_SYNC: '1' }); // 선택 모듈(Google 동기화)도 함께 시험
   sql = testDb();
   ctx = await bootstrap();
 });
@@ -341,6 +341,22 @@ describe('알림: 서버 정기 실행·중복 방지·푸시 발송·실패 기
     const st2 = await fetch(`${FAKE}/__state`).then((r) => r.json());
     assert.equal(st2.fcm.filter((m) => m.data.link === `/tasks/${t}`).length, 1, '중복 발송 없음');
   });
+  test('일정 시작 전 알림: 설정 시간 안에 1회, 불참·끔 사용자는 제외', async () => {
+    const cal = (await ctx.managerA.client.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'org_unit').id;
+    const start = new Date(Date.now() + 20 * 60000), end = new Date(start.getTime() + 3600e3);
+    // staffA: 기본 30분 → 대상, owner: 끔(0) → 제외
+    await ctx.owner.ok('PUT', '/api/notifications/prefs', { settings: { dueSoonHours: 24, eventReminderMinutes: 0, quietStart: null, quietEnd: null } });
+    const id = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '현장 안전 회의', start: start.toISOString(), end: end.toISOString(), attendeeIds: [ctx.staffA.id, ctx.ownerId] })).id;
+    await tick(); await tick();
+    const rows = await sql`select user_id from notifications where type = 'event_reminder' and entity_id = ${id}`;
+    const users = rows.map((r) => r.user_id).sort();
+    assert.deepEqual(users, [ctx.managerA.id, ctx.staffA.id].sort(), '작성자·참석자에게 1회씩, 끈 사용자 제외');
+    // 먼 일정은 아직 보내지 않음
+    const far = new Date(Date.now() + 5 * 3600e3);
+    const id2 = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '먼 회의', start: far.toISOString(), end: new Date(far.getTime() + 3600e3).toISOString(), attendeeIds: [ctx.staffA.id] })).id;
+    await tick();
+    assert.equal((await sql`select 1 from notifications where type = 'event_reminder' and entity_id = ${id2}`).length, 0);
+  });
   test('알림 설정에서 끈 종류는 생성되지 않는다', async () => {
     await ctx.staffB.client.ok('PUT', '/api/notifications/prefs', { types: [{ type: 'task_assigned', inApp: false, push: false }] });
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '알림 끔 시험', orgUnitId: ctx.siteB, assigneeId: ctx.staffB.id })).id;
@@ -349,7 +365,7 @@ describe('알림: 서버 정기 실행·중복 방지·푸시 발송·실패 기
   });
 });
 
-describe('⑤ Google Calendar 양방향 동기화 (가짜 Google API)', () => {
+describe('[선택 기능] Google Calendar 양방향 동기화 (가짜 Google API) — 필수 완료 기준 아님', () => {
   let c, linkId, personal;
   const fctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.json());
   const fstate = () => fetch(`${FAKE}/__state`).then((r) => r.json());

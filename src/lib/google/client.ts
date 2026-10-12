@@ -12,9 +12,14 @@ const tokenUrl = () => (process.env.GOOGLE_OAUTH_BASE || 'https://oauth2.googlea
 const revokeUrl = () => (process.env.GOOGLE_OAUTH_BASE || 'https://oauth2.googleapis.com') + '/revoke';
 const authBase = () => process.env.GOOGLE_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth';
 
+/**
+ * Google Calendar 동기화는 **선택 기능**이다(핵심 업무·일정 기능은 자체 DB 로만 동작).
+ * FEATURE_GOOGLE_SYNC=1 과 OAuth 클라이언트가 모두 있을 때만 켜진다. 기본값은 꺼짐.
+ */
 export function googleConfigured() {
-  return !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  return process.env.FEATURE_GOOGLE_SYNC === '1' && !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 }
+export const googleSyncEnabled = googleConfigured;
 export function redirectUri() {
   return `${process.env.APP_URL}/api/google/callback`;
 }

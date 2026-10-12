@@ -34,5 +34,6 @@ export const NOTIFICATION_TYPES = {
   recurring_created: '반복 업무 생성',
   comment: '업무 댓글',
   sync_error: '동기화 오류',
+  event_reminder: '일정 시작 전',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

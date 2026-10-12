@@ -38,7 +38,18 @@ const desk = await browser.newContext({ viewport: { width: 1366, height: 900 }, 
 const owner = await login(desk, 'ceo@dagym.test', 'owner-pass-1234');
 let taskId;
 
+await step('외부 계정 없이 동작: Google 동기화 기능 꺼짐 상태에서 메뉴 숨김·API 404', async () => {
+  const h = await (await fetch(BASE + '/api/health')).json();
+  assert.equal(h.config.googleCalendar, false);
+  const r = await ctx.owner.get('/api/google/connect?mode=both');
+  assert.equal(r.status, 404);
+  await owner.goto(BASE + '/settings');
+  await owner.getByText('알림 종류별 수신').waitFor();
+  assert.equal(await owner.getByText('Google Calendar 연동').count(), 0);
+});
+
 await step('① 대표 로그인 → 대시보드 표시', async () => {
+  await owner.goto(BASE + '/');
   await owner.getByRole('heading', { name: '전체 현황' }).waitFor();
   await owner.screenshot({ path: `${SHOTS}/01-dashboard-owner.png`, fullPage: true });
 });
@@ -289,7 +300,7 @@ await step('⑨ 서버 재시작 중 오류 안내 → 재시작 후 데이터 �
 });
 
 await step('설정·Google 연동·관리자 화면', async () => {
-  for (const [path, f, text] of [['/settings', '20-settings', '알림 종류별 수신'], ['/settings/google', '21-google', 'Google Calendar 연동'], ['/admin/org', '22-admin-org', '조직 구성'], ['/admin/ops', '23-admin-ops', '운영 상태'], ['/admin/audit', '24-admin-audit', '감사 기록'], ['/templates', '25-templates', '업무 템플릿']]) {
+  for (const [path, f, text] of [['/settings', '20-settings', '알림 종류별 수신'], ['/admin/org', '22-admin-org', '조직 구성'], ['/admin/ops', '23-admin-ops', '운영 상태'], ['/admin/audit', '24-admin-audit', '감사 기록'], ['/templates', '25-templates', '업무 템플릿']]) {
     await owner.goto(BASE + path);
     await owner.getByText(text).first().waitFor();
     await owner.waitForTimeout(300);

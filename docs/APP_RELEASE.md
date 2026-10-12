@@ -1,5 +1,7 @@
 # 앱 기술 선택과 배포 방식
 
+앱은 우리 서비스 계정으로만 로그인하며 Google·Asana 계정이 필요 없습니다.
+
 ## 1. 기술 선택: Capacitor (운영 사이트를 여는 네이티브 앱 + 네이티브 기능)
 
 | 기준 | Capacitor (선택) | React Native/Expo | Flutter | PWA만 |

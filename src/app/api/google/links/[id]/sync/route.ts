@@ -1,3 +1,4 @@
+import { featureGate } from '@/lib/google/gate';
 import { z } from 'zod';
 import { handler } from '@/lib/api';
 import { db } from '@/lib/db';
@@ -6,6 +7,7 @@ import { syncLink } from '@/lib/google/sync';
 
 /** 지금 동기화. full=1 이면 동기화 토큰을 지우고 전체 재동기화 */
 export const POST = handler<{ id: string }>(async ({ req, user, params }) => {
+  featureGate();
   const sql = db();
   const [l] = await sql`select id from google_calendar_links where id = ${params.id} and user_id = ${user.id}`;
   if (!l) throw notFound();

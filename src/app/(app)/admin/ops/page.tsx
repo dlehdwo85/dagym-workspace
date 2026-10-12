@@ -12,10 +12,11 @@ export default function Ops() {
     <div className="space-y-4">
       <h1 className="text-lg font-bold">운영 상태</h1>
       {h && (
-        <div className="grid gap-2 sm:grid-cols-4">
+        <div className="grid gap-2 sm:grid-cols-5">
           {[['DB', h.db === 'ok' ? `정상 (${h.dbLatencyMs}ms)` : '오류', h.db === 'ok'], ['스케줄러', h.scheduler.lastTick ? `${h.scheduler.ageMinutes}분 전 실행` : '실행 기록 없음', h.scheduler.healthy],
             ['파일 저장소', h.config.fileStorage === 's3' ? 'S3 호환 저장소' : '로컬 디스크(운영 불가)', h.config.fileStorage === 's3'],
-            ['푸시', `웹 ${h.config.webPush ? '설정됨' : '미설정'} · 앱 ${h.config.appPush ? '설정됨' : '미설정'}`, h.config.webPush && h.config.appPush]].map(([l, v, ok]) => (
+            ['푸시', `웹 ${h.config.webPush ? '설정됨' : '미설정'} · 앱 ${h.config.appPush ? '설정됨' : '미설정'}`, h.config.webPush && h.config.appPush],
+            ['Google 동기화(선택)', h.config.googleCalendar ? '켜짐' : '꺼짐 — 핵심 기능과 무관', true]].map(([l, v, ok]) => (
             <div key={l as string} className={cx('rounded-lg border p-3', ok ? 'bg-white' : 'border-amber-300 bg-amber-50')}><div className="text-xs text-slate-500">{l}</div><div className="text-sm font-medium">{v}</div></div>
           ))}
         </div>

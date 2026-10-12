@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { s3Configured } from '@/lib/storage';
 import { webPushConfigured, fcmConfigured } from '@/lib/push';
+import { googleSyncEnabled } from '@/lib/google/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,8 @@ export async function GET() {
         fileStorage: s3Configured() ? 's3' : 'local-disk',
         webPush: webPushConfigured(),
         appPush: fcmConfigured(),
-        googleCalendar: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+        googleCalendar: googleSyncEnabled(), // 선택 기능
+
       },
       env: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
       commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,

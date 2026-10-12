@@ -38,7 +38,8 @@ export default function GoogleSettings() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <h1 className="text-lg font-bold">Google Calendar 연동</h1>
-      {!d.configured && <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm">관리자가 아직 Google OAuth 설정(클라이언트 ID)을 등록하지 않아 연결할 수 없습니다. 회사 캘린더는 그대로 사용할 수 있습니다.</div>}
+      {!d.configured && <div className="rounded-lg border bg-slate-50 p-4 text-sm">Google Calendar 동기화는 <b>선택 기능</b>이며 현재 꺼져 있습니다. 업무·일정·알림 등 모든 핵심 기능은 회사 계정만으로 사용할 수 있습니다.</div>}
+      {!d.configured && !d.account ? null : <>
       <section className="rounded-lg border bg-white p-4 text-sm">
         {!d.account ? (
           <>
@@ -122,6 +123,7 @@ export default function GoogleSettings() {
           {!d.logs.length && <li className="text-slate-400">기록 없음</li>}
         </ul>
       </section>
+      </>}
     </div>
   );
 }

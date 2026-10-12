@@ -1,7 +1,8 @@
 # 업무·일정 관리 (COMPANY-WORK-OS)
 
-주식회사 다짐 · 하이링크 · BODY LAB 임직원 전용 업무·일정 관리 서비스. 웹(PC·모바일)과 Android·iOS 앱이 같은 계정·데이터를 씁니다.
+주식회사 다짐 · 하이링크 · BODY LAB 임직원 전용 **자체** 업무·일정 관리 서비스 (Asana·Google Calendar 는 참고 대상, 외부 계정 불필요). 웹(PC·모바일)과 Android·iOS 앱이 같은 계정·데이터를 씁니다.
 
+- **로컬·클라우드 인계(저장소 정보, Windows 설치, 작업 구분): [HANDOFF.md](HANDOFF.md)**
 - 요구사항·완료 기준: [REQUIREMENTS.md](REQUIREMENTS.md)
 - 현재 상태: [WORK_STATUS.md](WORK_STATUS.md) · 다음 작업: [NEXT_ACTION.md](NEXT_ACTION.md) · 시험: [TEST_REPORT.md](TEST_REPORT.md)
 - 운영(배포·비용·백업): [docs/OPERATIONS.md](docs/OPERATIONS.md) · 앱 배포: [docs/APP_RELEASE.md](docs/APP_RELEASE.md)

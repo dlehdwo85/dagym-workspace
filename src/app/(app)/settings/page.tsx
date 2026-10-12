@@ -8,7 +8,7 @@ import { isNativeApp, subscribeWebPush } from '@/components/native';
 import { ROLE_LABEL } from '@/lib/types';
 
 export default function Settings() {
-  const { user } = useSession();
+  const { user, features } = useSession();
   const { data, error, loading, reload } = useApi<any>('/api/notifications/prefs');
   const [types, setTypes] = useState<any[]>([]);
   const [s, setS] = useState<any>(null);
@@ -36,7 +36,7 @@ export default function Settings() {
       <section className="rounded-lg border bg-white p-4 text-sm">
         <div className="font-semibold">{user.name}</div>
         <div className="text-slate-500">{user.email} · {ROLE_LABEL[user.role]}</div>
-        <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 →</Link>
+        {features.googleSync && <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 (선택 기능) →</Link>}
       </section>
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 종류별 수신</h2>
@@ -48,7 +48,12 @@ export default function Settings() {
               <td className="text-center"><input type="checkbox" aria-label={`${t.label} 푸시`} checked={t.push} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, push: e.target.checked } : x)))} /></td></tr>
           ))}</tbody>
         </table>
-        <div className="mt-3 grid grid-cols-3 gap-3">
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Field label="일정 시작 전 알림">
+            <select className={inputCls} value={s.eventReminderMinutes ?? 30} onChange={(e) => setS({ ...s, eventReminderMinutes: Number(e.target.value) })}>
+              {[[0, '받지 않음'], [10, '10분 전'], [30, '30분 전'], [60, '1시간 전'], [120, '2시간 전'], [1440, '하루 전']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </Field>
           <Field label="마감 임박 알림 (시간 전)"><input type="number" min={1} max={168} className={inputCls} value={s.dueSoonHours} onChange={(e) => setS({ ...s, dueSoonHours: Number(e.target.value) })} /></Field>
           <Field label="푸시 받지 않는 시간 시작"><input type="time" className={inputCls} value={s.quietStart ?? ''} onChange={(e) => setS({ ...s, quietStart: e.target.value || null })} /></Field>
           <Field label="끝"><input type="time" className={inputCls} value={s.quietEnd ?? ''} onChange={(e) => setS({ ...s, quietEnd: e.target.value || null })} /></Field>

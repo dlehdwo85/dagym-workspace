@@ -3,7 +3,7 @@ import { db } from './db';
 import { notify } from './notifications';
 import { dispatchPending } from './push';
 import { spawnNextRecurrence } from './tasks';
-import { nextDate } from './recurrence';
+import { nextDate, occurrences } from './recurrence';
 import { addDays, todaySeoul } from './time';
 import { logError } from './log';
 import { googleConfigured } from './google/client';
@@ -81,10 +81,53 @@ export async function runTick(trigger: string) {
   };
   await step('recurring', recurringTasks);
   await step('due', dueNotifications);
+  await step('eventReminders', () => eventReminders());
   await step('push', () => dispatchPending(200));
   if (googleConfigured()) await step('google', () => syncAllDue());
   await step('cleanup', cleanup);
   await sql`update job_runs set finished_at = now(), status = ${failed ? 'error' : 'ok'}, detail = ${sql.json(detail as never)} where id = ${run.id}`;
   await sql`delete from job_locks where name = 'tick' and holder = ${holder}`;
   return { ok: !failed, detail };
+}
+
+/**
+ * 일정 시작 전 알림: 참석자·개인 캘린더 주인·작성자에게 사용자별 설정 시간(기본 30분) 전에 1회.
+ * 정기 실행이 10분 주기라 최대 10분 이르게 도착할 수 있다. 반복 일정은 회차마다 따로 보낸다.
+ */
+export async function eventReminders(now = new Date()) {
+  const sql = db();
+  const MAX_LEAD_MIN = 1440;
+  const until = new Date(now.getTime() + (MAX_LEAD_MIN + 15) * 60000);
+  const masters = await sql<any[]>`
+    select e.*, c.type as cal_type, c.owner_user_id from events e join calendars c on c.id = e.calendar_id
+    where e.deleted_at is null and e.recurring_event_id is null and not e.all_day and not e.cancelled
+      and (e.rrule is not null or (e.start_at > ${now} and e.start_at < ${until}))`;
+  let sent = 0;
+  for (const m of masters) {
+    const dur = m.end_at.getTime() - m.start_at.getTime();
+    const exs = await sql<any[]>`select * from events where recurring_event_id = ${m.id} and deleted_at is null`;
+    const skip = new Set([...(m.exdates ?? []).map((d: Date) => new Date(d).getTime()), ...exs.map((x) => x.original_start.getTime())]);
+    const occ: { id: string; start: Date; title: string }[] = [];
+    const starts = m.rrule ? occurrences(m.rrule, m.start_at, now, until) : [m.start_at];
+    for (const s of starts) if (!skip.has(s.getTime()) && s > now) occ.push({ id: m.id, start: s, title: m.title });
+    for (const x of exs) if (!x.cancelled && x.start_at > now && x.start_at < until) occ.push({ id: x.id, start: x.start_at, title: x.title });
+    if (!occ.length) continue;
+    const att = (await sql<{ user_id: string; response: string }[]>`select user_id, response from event_attendees where event_id = ${m.id}`)
+      .filter((a) => a.response !== 'declined').map((a) => a.user_id);
+    const people = [...new Set([...att, m.created_by, ...(m.cal_type === 'personal' && m.owner_user_id ? [m.owner_user_id] : [])])];
+    const leads = await sql<{ id: string; lead: number }[]>`
+      select u.id, coalesce(s.event_reminder_minutes, 30) as lead from users u left join user_settings s on s.user_id = u.id
+      where u.id = any(${people}::uuid[]) and u.status = 'active'`;
+    for (const o of occ) {
+      for (const p of leads) {
+        if (!p.lead) continue;
+        if (o.start.getTime() - p.lead * 60000 > now.getTime()) continue; // 아직 이르다
+        const hm = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }).format(o.start);
+        const mins = Math.max(1, Math.round((o.start.getTime() - now.getTime()) / 60000));
+        sent += (await notify(sql, { userIds: [p.id], type: 'event_reminder', title: `일정 ${mins}분 전: ${o.title}`, body: `${hm} 시작${m.location ? ` · ${m.location}` : ''}`,
+          link: `/calendar?event=${o.id}`, entityType: 'event', entityId: o.id, dedupeKey: `evrem:${m.id}:${o.start.toISOString()}` })).length;
+      }
+    }
+  }
+  return { candidates: masters.length, created: sent };
 }

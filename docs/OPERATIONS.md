@@ -21,14 +21,14 @@
 |---|---|---|
 | DATABASE_URL | ✅ | PostgreSQL 연결 문자열 (풀러 주소 권장) |
 | APP_URL | ✅ | 운영 주소, 예: https://dagym-workspace.vercel.app |
-| APP_SECRET | ✅ | 32자 이상 임의 문자열 (토큰 서명·암호화). **바꾸면 Google 연결을 모두 다시 해야 합니다** |
+| APP_SECRET | ✅ | 32자 이상 임의 문자열 (토큰 서명·암호화). (선택 기능 Google 동기화를 켠 경우, 바꾸면 Google 연결을 다시 해야 합니다) |
 | SETUP_SECRET | 최초 1회 | `/setup`에서 대표 계정을 만들 때 쓰고, 만든 뒤에는 지웁니다 |
 | CRON_SECRET | ✅ | Vercel Cron 인증용 (Vercel이 자동으로 Bearer 헤더에 넣어 보냅니다) |
 | SCHEDULER_REPO | — | 기본값 `dlehdwo85/dagym-workspace` (OIDC 토큰 검증) |
 | S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY | ✅ 운영 | 파일 저장소. 버킷 CORS에 운영 주소의 PUT을 허용해야 합니다 |
 | VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT | 권장 | `npx web-push generate-vapid-keys` |
 | FCM_SERVICE_ACCOUNT_JSON | 앱 푸시 | Firebase 서비스 계정 JSON 한 줄 |
-| GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET | Google 연동 | 승인된 리디렉션 URI: `{APP_URL}/api/google/callback` |
+| FEATURE_GOOGLE_SYNC, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET | ❌ 선택 기능 | 기본 꺼짐. 켤 때만 `1` + OAuth 클라이언트(리디렉션 URI `{APP_URL}/api/google/callback`) |
 | ANDROID_CERT_SHA256, APPLE_TEAM_ID | 앱 링크 | 앱 서명 후 |
 | PRIVACY_CONTACT, COMPANY_NAME | 권장 | 개인정보처리방침 표시 |
 
@@ -54,7 +54,7 @@ DB 스키마는 `npm run db:migrate`(=`node scripts/migrate.mjs`)로 적용하�
 | 정기 실행 지연 | 관리자 → 운영 상태의 "스케줄러 N분 전 실행", `/api/health`의 `scheduler.healthy` | Actions 탭에서 `tick`을 수동 실행합니다 |
 | 오류 | 관리자 → 운영 상태의 오류 기록(`error_logs`) | |
 | 푸시 실패 | 운영 상태의 푸시 발송 통계. 실패분은 2·4·8·16분 간격으로 최대 5회 다시 보내고, 무효 토큰은 자동으로 비활성화합니다 | |
-| Google 동기화 | 3회 연속 실패하면 사용자에게 알림을 보냅니다. 운영 상태와 사용자 설정 화면에 이력이 남습니다 | 사용자가 "지금 동기화" 또는 "다시 연결"을 누릅니다 |
+| (선택) Google 동기화 | 3회 연속 실패하면 사용자에게 알림을 보냅니다. 운영 상태와 사용자 설정 화면에 이력이 남습니다 | 사용자가 "지금 동기화" 또는 "다시 연결"을 누릅니다 |
 | 서버 재시작·네트워크 장애 | 정기 작업은 잠금(job_locks)으로 중복 실행을 막고, 모든 생성 요청은 Idempotency-Key로 중복을 막습니다 | 조치 불필요 (E2E ⑨ 검증) |
 
 ## 7. 월 운영비 예상 (2026-10 기준, 세부 근거는 docs/research/PLATFORM_REQUIREMENTS.md)
@@ -76,3 +76,7 @@ DB 스키마는 `npm run db:migrate`(=`node scripts/migrate.mjs`)로 적용하�
 - 세션 쿠키는 httpOnly·SameSite=Lax·Secure이고, 변경 요청은 Origin을 검사해 CSRF를 막습니다.
 - 권한은 모든 API·첨부 다운로드·검색·알림 생성에서 서버가 확인합니다. 다른 현장 데이터는 존재 여부도 숨깁니다(404).
 - 저장소가 **공개(public)** 상태입니다. 비밀값은 들어 있지 않지만 회사 코드가 공개되어 있으니 비공개 전환 여부를 정해 주세요(7번의 Actions 비용 메모 참고).
+
+## 9. 배포 직후 점검과 앱 업로드
+- 점검: `node scripts/verify-prod.mjs https://<운영주소>`를 실행합니다(헬스·정기 실행·S3·보안 헤더·권한 차단·개인정보처리방침·앱 링크). 점검 계정으로 로그인까지 확인하려면 `SMOKE_EMAIL`·`SMOKE_PASSWORD`를 함께 줍니다.
+- 앱 업로드: GitHub Actions → `release` → 버전을 입력하고 실행합니다. Secrets가 없으면 "설정 대기" 경고를 남기고 끝납니다. 필요한 Secrets 목록은 `.github/workflows/release.yml` 맨 위에 있습니다.

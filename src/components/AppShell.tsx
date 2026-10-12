@@ -131,7 +131,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {more && (
           <div className="fixed inset-0 z-50 bg-black/40 sm:hidden" onClick={() => setMore(false)}>
             <div className="absolute bottom-0 left-0 right-0 rounded-t-xl bg-white p-3 pb-8" onClick={(e) => e.stopPropagation()}>
-              {[['/tasks', '전체 업무'], ['/projects', '프로젝트'], ['/templates', '템플릿'], ['/settings', '설정·알림'], ['/settings/google', 'Google Calendar 연동'],
+              {[['/tasks', '전체 업무'], ['/projects', '프로젝트'], ['/templates', '템플릿'], ['/settings', '설정·알림'], ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)']] : []),
                 ...(admin ? [['/admin/users', '사용자·권한'], ['/admin/org', '조직 구성'], ['/admin/audit', '감사 기록'], ['/admin/ops', '운영 상태']] : [])].map(([h, l]) => (
                 <Link key={h} href={h} onClick={() => setMore(false)} className="block rounded-md px-3 py-3 text-sm hover:bg-slate-100">{l}</Link>
               ))}

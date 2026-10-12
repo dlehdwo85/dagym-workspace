@@ -1,3 +1,4 @@
+import { featureGateOk } from '@/lib/google/gate';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { currentUser } from '@/lib/auth';
@@ -5,6 +6,7 @@ import { exchangeCode, saveTokens } from '@/lib/google/client';
 import { logError } from '@/lib/log';
 
 export async function GET(req: NextRequest) {
+  if (!featureGateOk()) return new NextResponse(null, { status: 404 });
   const p = req.nextUrl.searchParams;
   const base = process.env.APP_URL ?? req.nextUrl.origin;
   const back = (q: string) => NextResponse.redirect(`${base}/settings/google?${q}`, 302);

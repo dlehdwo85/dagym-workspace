@@ -7,7 +7,7 @@ import { HttpError } from '@/lib/errors';
 
 /** 연결 범위 선택: mode=both(읽기·쓰기 양방향) | import(읽기 전용 가져오기) */
 export const GET = handler(async ({ req, user }) => {
-  if (!googleConfigured()) throw new HttpError(503, 'not_configured', 'Google 연동이 아직 설정되지 않았습니다 (관리자 설정 필요)');
+  if (!googleConfigured()) throw new HttpError(404, 'feature_disabled', 'Google Calendar 동기화는 선택 기능이며 현재 꺼져 있습니다');
   const mode = req.nextUrl.searchParams.get('mode') === 'import' ? 'import' : 'both';
   const state = newToken(24);
   await db()`insert into google_oauth_states (state, user_id, mode) values (${state}, ${user.id}, ${mode})`;

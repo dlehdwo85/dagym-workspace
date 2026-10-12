@@ -1,3 +1,4 @@
+import { featureGate } from '@/lib/google/gate';
 import { after } from 'next/server';
 import { z } from 'zod';
 import { handler, body, zUuid } from '@/lib/api';
@@ -9,6 +10,7 @@ import { syncLink } from '@/lib/google/sync';
 
 /** 사용자가 고른 Google 캘린더 1개를 회사 캘린더 1개와 연결 */
 export const POST = handler(async ({ req, user }) => {
+  featureGate();
   const i = await body(req, z.object({ googleCalendarId: z.string().min(1), localCalendarId: zUuid, direction: z.enum(['both', 'import']) }));
   const sql = db();
   const [cal] = await sql<CalendarRow[]>`select id, type, org_unit_id, owner_user_id from calendars where id = ${i.localCalendarId}`;

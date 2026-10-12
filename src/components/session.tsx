@@ -11,6 +11,8 @@ export interface Dir {
 export interface Sess {
   user: { id: string; name: string; email: string; role: Role };
   dir: Dir;
+  /** 선택 기능 스위치 (핵심 기능은 항상 켜짐) */
+  features: { googleSync: boolean };
 }
 export const SessionCtx = createContext<Sess | null>(null);
 export function useSession() {
