@@ -499,7 +499,8 @@ await step('B-11 프로젝트 필드: 퍼센트 필드 추가 → 업무 상세�
   await dlg.getByLabel('이름').fill('달성률');
   await dlg.getByLabel('형식').selectOption('percent');
   await dlg.getByRole('button', { name: '추가' }).click();
-  await owner.getByTestId('fields-manager').getByText('달성률').first().waitFor();
+  // 빈 화면 안내 문구에도 '달성률' 이 들어 있으므로 표의 칸을 정확히 기다린다 (생성 요청이 끝나기 전에 이동하지 않도록)
+  await owner.getByTestId('fields-manager').getByRole('cell', { name: '달성률', exact: true }).waitFor();
   const tasks = (await ctx.owner.ok('GET', `/api/tasks?projectId=${pid}`)).tasks;
   for (const [i, v] of [[0, '80'], [1, '90']]) {
     await owner.goto(`${BASE}/tasks/${tasks[i].id}`);
