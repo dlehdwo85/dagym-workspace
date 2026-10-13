@@ -8,6 +8,8 @@ if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
   git fetch --quiet --depth=50 origin "$base" 2>/dev/null || true
 fi
 if ! git cat-file -e "$base^{commit}" 2>/dev/null; then echo "기준 커밋 없음 → 빌드"; exit 1; fi
+# 같은 커밋 재배포(환경변수만 바꾼 Redeploy 등)는 비교할 변경이 없으므로 항상 빌드
+if [ "$(git rev-parse "$base^{commit}")" = "$(git rev-parse HEAD)" ]; then echo "같은 커밋 재배포 → 빌드"; exit 1; fi
 if git diff --quiet "$base" HEAD -- . ':(exclude)docs' ':(exclude)*.md'; then
   echo "문서만 변경 ($base..HEAD) → 빌드 건너뜀"; exit 0
 fi
