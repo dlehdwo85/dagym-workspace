@@ -58,6 +58,7 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   denyDemo(u);
   if (i.size > MAX_UPLOAD_BYTES) throw badRequest(`파일은 ${MAX_UPLOAD_BYTES / 1024 / 1024}MB 까지 올릴 수 있습니다`);
   if (BLOCKED_EXT.test(i.fileName)) throw badRequest('실행 파일은 올릴 수 없습니다');
+  await (await import('./plans')).assertStorage(u, i.size); // V10 회사 저장공간 한도
   const sql = db();
   const mime = i.mimeType || 'application/octet-stream';
   const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, tags, description, created_by)
@@ -70,6 +71,7 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
 
 /** 서버가 만든 파일(AI 보고서 등)을 자료실에 바로 저장 */
 export async function saveGeneratedFile(u: SessionUser, p: { fileName: string; mime: string; data: Buffer; title: string; folder: string; tags?: string[]; description?: string; source?: string }) {
+  await (await import('./plans')).assertStorage(u, p.data.length);
   const sql = db();
   const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, tags, description, source, created_by, upload_status)
     values (${tenantOf(u)}, ${cleanFolder(p.folder)}, ${p.title}, ${p.fileName}, ${p.mime}, ${p.data.length}, ${p.tags ?? []}, ${p.description ?? null}, ${p.source ?? 'ai'}, ${u.id}, 'pending') returning id`;

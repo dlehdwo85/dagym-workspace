@@ -32,8 +32,9 @@ export const POST = handler(async ({ req }) => {
     await tx`lock table users in exclusive mode`;
     const c = await tx`select 1 from users limit 1`;
     if (c.length) throw conflict('이미 초기 설정이 완료되었습니다');
-    const [u] = await tx<{ id: string }[]>`insert into users (email, name, role, status, password_hash)
-      values (${i.email}, ${i.name}, 'owner', 'active', ${await hashPassword(i.password)}) returning id`;
+    // 첫 대표 = 플랫폼 운영자(V10 /platform)
+    const [u] = await tx<{ id: string }[]>`insert into users (email, name, role, status, password_hash, platform_admin)
+      values (${i.email}, ${i.name}, 'owner', 'active', ${await hashPassword(i.password)}, true) returning id`;
     await tx`insert into memberships (user_id, org_unit_id) values (${u.id}, '00000000-0000-0000-0000-000000000001')`;
     await ensurePersonalCalendar(u.id, i.name, tx);
     await audit(tx, u.id, 'setup.owner_created', 'user', u.id, { email: i.email }, clientIp(req));

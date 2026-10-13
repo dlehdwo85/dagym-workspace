@@ -30,6 +30,12 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
   if (existing[0] && existing[0].status === 'active') throw conflict('이미 활성 사용자입니다');
   const units = i.orgUnitIds.length ? await sql`select id from org_units where id = any(${i.orgUnitIds}::uuid[])` : [];
   if (units.length !== i.orgUnitIds.length) throw badRequest('없는 조직이 포함되어 있습니다');
+  // V10 요금제 사용자 수 (이미 초대 중인 사람을 다시 초대하는 건 셈하지 않음)
+  if (existing[0]?.status !== 'invited') {
+    const demoOnly = i.role !== 'owner' && i.role !== 'admin' && i.orgUnitIds.length > 0
+      && (await sql`select 1 from org_units where id = any(${i.orgUnitIds}::uuid[]) and not is_demo`).length === 0;
+    await (await import('./plans')).assertSeat(demoOnly ? 'demo' : 'default', sql);
+  }
   const token = newToken();
   return sql.begin(async (tx) => {
     let userId = existing[0]?.id;

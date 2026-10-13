@@ -1388,6 +1388,30 @@ await step('V9: 자료실 올리기·검색 → 홈 "AI에게 요청" → 비서
   await mc.close();
 });
 
+await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 파일·요금제 표·변경 요청) → /platform 요청 반영·요금제 숫자 변경, 직원은 /platform 없음', async () => {
+  await owner.goto(BASE + '/admin/usage');
+  await owner.getByTestId('current-plan').getByText('내부(무제한)').waitFor();
+  await owner.getByTestId('meter-storage').getByText('무제한').first().waitFor();
+  await owner.getByTestId('top-files').locator('li').first().waitFor();
+  await owner.getByTestId('plan-request').click();
+  await owner.getByLabel('요청할 요금제').selectOption('standard');
+  await owner.getByRole('button', { name: '요청 보내기' }).click();
+  await owner.getByText(/요청을 보냈습니다/).waitFor();
+  await owner.screenshot({ path: `${SHOTS}/78-usage-plan.png`, fullPage: true });
+  await owner.goto(BASE + '/platform');
+  await owner.getByTestId('platform-requests').getByRole('button', { name: '반려' }).first().click();
+  await owner.getByText('반려했습니다').waitFor();
+  await owner.getByLabel('business 월 요금').fill('80000');
+  await owner.getByTestId('platform-plans').locator('tr', { hasText: 'business' }).getByRole('button', { name: '저장' }).click();
+  await owner.getByText('저장했습니다').first().waitFor();
+  assert.equal((await sql`select monthly_krw from plans where code = 'business'`)[0].monthly_krw, 80000);
+  await sql`update plans set monthly_krw = 79000 where code = 'business'`;
+  assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = 'default'`)[0].plan_code, 'internal', '반려하면 그대로');
+  await owner.screenshot({ path: `${SHOTS}/79-platform.png`, fullPage: true });
+  const r = await ctx.staffA.client.req('GET', '/api/platform');
+  assert.equal(r.status, 404);
+});
+
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
   const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');

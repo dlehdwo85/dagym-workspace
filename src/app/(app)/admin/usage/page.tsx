@@ -1,0 +1,110 @@
+'use client';
+import { useState } from 'react';
+import Link from 'next/link';
+import { Gauge, HardDrive, Sparkles, Users } from 'lucide-react';
+import { api, useApi } from '@/components/client';
+import { Meter, fmtBytes, won } from '@/components/usage';
+import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
+
+const GB = 1024 ** 3;
+const lim = (v: number | null, unit: string) => (v === null ? '무제한' : `${v.toLocaleString('ko-KR')}${unit}`);
+
+/** V10 관리 → 사용량·요금제 (대표·본사 관리자) */
+export default function UsagePage() {
+  const { data, error, loading, reload } = useApi<any>('/api/usage');
+  const [req, setReq] = useState<{ planCode: string; addons: Record<string, number>; note: string } | null>(null);
+  async function send(e: React.FormEvent) {
+    e.preventDefault(); if (!req) return;
+    try {
+      await api('/api/usage/request', { body: { planCode: req.planCode || undefined, addons: Object.values(req.addons).some((v) => v > 0) ? req.addons : undefined, note: req.note || undefined } });
+      setReq(null); reload(); toast.ok('요청을 보냈습니다. 운영자가 확인 후 반영합니다');
+    } catch (e: any) { toast.error(e.message); }
+  }
+  if (error) return <ErrorBox error={error} retry={reload} />;
+  if (loading && !data) return <Skeleton rows={6} />;
+  const { subscription: s, limits, usage, plans, addons, topFiles, requests } = data;
+  return (
+    <div className="mx-auto max-w-5xl space-y-4">
+      <PageHeader title="사용량·요금제" icon={Gauge} sub="회사 전체 저장공간·AI 요청·사용자 수. 한도를 넘어도 업무·일정은 그대로 쓰고, 새 파일 올리기·AI·초대만 멈춥니다."
+        actions={<Button onClick={() => setReq({ planCode: '', addons: {}, note: '' })} data-testid="plan-request">요금제 변경 요청</Button>} />
+      <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="current-plan">
+        <div className="text-sm text-ink-2">현재 요금제</div>
+        <div className="text-xl font-bold">{s.planName} <span className="text-base font-normal text-ink-2">{s.monthlyKrw === null ? '별도 협의' : `월 ${won(s.monthlyKrw)}`}</span></div>
+        <div className="mt-1 text-xs text-ink-3">
+          {Object.entries(s.addons ?? {}).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${addons.find((a: any) => a.code === k)?.name ?? k} ×${v}`).join(' · ') || '추가 옵션 없음'}
+          {s.periodEnd && ` · 다음 갱신일 ${fmtDate(s.periodEnd)}`}{s.status !== 'active' && ` · ${s.status === 'trial' ? '체험 중' : '일시 중지'}`}
+        </div>
+      </section>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Meter label="저장공간" icon={HardDrive} used={usage.storageBytes / GB} limit={limits.storageGb} usedLabel={fmtBytes(usage.storageBytes)} limitLabel={lim(limits.storageGb, 'GB')} testid="meter-storage" />
+        <Meter label="이번 달 AI 요청" icon={Sparkles} used={usage.aiRequests} limit={limits.aiRequests} usedLabel={`${usage.aiRequests.toLocaleString('ko-KR')}회`} limitLabel={lim(limits.aiRequests, '회')} testid="meter-ai" />
+        <Meter label="사용자" icon={Users} used={usage.users} limit={limits.users} usedLabel={`${usage.users}명${usage.invited ? ` (+초대 중 ${usage.invited})` : ''}`} limitLabel={lim(limits.users, '명')} testid="meter-users" />
+      </div>
+      <section className="rounded-card border border-line bg-white p-4 shadow-card">
+        <h2 className="text-sm font-semibold">파일 종류별</h2>
+        <div className="mt-2 flex h-3 overflow-hidden rounded-full bg-slate-100">
+          {(['photo', 'doc', 'other'] as const).map((k, i) => <div key={k} className={['bg-sky-500', 'bg-emerald-500', 'bg-slate-400'][i]} style={{ width: `${usage.storageBytes ? (usage.byKind[k] / usage.storageBytes) * 100 : 0}%` }} />)}
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-ink-2">
+          <span><i className="mr-1 inline-block size-2 rounded-full bg-sky-500" />사진 {fmtBytes(usage.byKind.photo)}</span>
+          <span><i className="mr-1 inline-block size-2 rounded-full bg-emerald-500" />문서 {fmtBytes(usage.byKind.doc)}</span>
+          <span><i className="mr-1 inline-block size-2 rounded-full bg-slate-400" />기타 {fmtBytes(usage.byKind.other)}</span>
+        </div>
+        <h2 className="mt-4 text-sm font-semibold">큰 파일 TOP 20 <span className="font-normal text-ink-3">— 눌러서 정리</span></h2>
+        <ul className="mt-1 divide-y divide-line text-sm" data-testid="top-files">
+          {topFiles.map((f: any) => (
+            <li key={f.kind + f.id} className="flex items-center gap-2 py-1.5">
+              <Link href={f.kind === 'library' ? `/library?file=${f.id}` : f.task_id ? `/tasks/${f.task_id}` : `/calendar?event=${f.event_id}`} className="min-w-0 flex-1 truncate hover:underline">{f.title}</Link>
+              {f.deleted_at && <span className="rounded bg-slate-100 px-1.5 text-[11px] text-ink-3">삭제됨(공간 차지)</span>}
+              <span className="text-xs text-ink-3">{f.kind === 'library' ? '자료실' : '첨부'}</span>
+              <span className="w-16 text-right text-xs tabular-nums">{fmtBytes(f.size)}</span>
+            </li>
+          ))}
+          {!topFiles.length && <li className="py-2 text-ink-3">아직 파일이 없습니다</li>}
+        </ul>
+      </section>
+      <section className="rounded-card border border-line bg-white p-4 shadow-card">
+        <h2 className="text-sm font-semibold">요금제 (VAT 별도, 회사당 월)</h2>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full min-w-[480px] text-sm">
+            <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">요금제</th><th>월 요금</th><th>사용자</th><th>저장공간</th><th>AI 요청/월</th></tr></thead>
+            <tbody>
+              {plans.map((p: any) => (
+                <tr key={p.code} className={cx('border-t border-line', p.code === s.planCode && 'bg-brand-50 font-semibold')}>
+                  <td className="py-1.5">{p.name}{p.description && <div className="text-[11px] font-normal text-ink-3">{p.description}</div>}</td>
+                  <td>{won(p.monthly_krw)}</td><td>{lim(p.limits.users, '명')}</td><td>{lim(p.limits.storageGb, 'GB')}</td><td>{lim(p.limits.aiRequests, '회')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-ink-2">추가 옵션: {addons.map((a: any) => `${a.name} 월 ${won(a.monthly_krw)}`).join(' · ')}</p>
+        <p className="mt-1 text-xs text-ink-3">결제는 아직 연결되지 않았습니다 — 변경 요청을 보내면 운영자가 확인해 반영합니다.</p>
+        {!!requests.length && (
+          <ul className="mt-3 space-y-1 text-xs text-ink-2">
+            {requests.map((r: any) => <li key={r.id}>{fmtDateTime(r.created_at)} · {r.requested_by_name} · {r.plan_code ? plans.find((p: any) => p.code === r.plan_code)?.name ?? r.plan_code : '추가 옵션'} · <b>{{ pending: '검토 중', approved: '반영됨', rejected: '반려' }[r.status as 'pending']}</b></li>)}
+          </ul>
+        )}
+      </section>
+      <Modal open={!!req} onClose={() => setReq(null)} title="요금제 변경 요청">
+        {req && (
+          <form onSubmit={send} className="space-y-3">
+            <Field label="요금제">
+              <select className={inputCls} value={req.planCode} onChange={(e) => setReq({ ...req, planCode: e.target.value })} aria-label="요청할 요금제">
+                <option value="">그대로 (옵션만)</option>
+                {plans.map((p: any) => <option key={p.code} value={p.code}>{p.name} · {won(p.monthly_krw)}</option>)}
+              </select>
+            </Field>
+            {addons.map((a: any) => (
+              <Field key={a.code} label={`${a.name} (월 ${won(a.monthly_krw)})`}>
+                <input type="number" min={0} max={100} className={inputCls} value={req.addons[a.code] ?? 0} onChange={(e) => setReq({ ...req, addons: { ...req.addons, [a.code]: Number(e.target.value) } })} aria-label={`${a.name} 개수`} />
+              </Field>
+            ))}
+            <Field label="메모"><textarea className={inputCls} value={req.note} onChange={(e) => setReq({ ...req, note: e.target.value })} /></Field>
+            <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setReq(null)}>취소</Button><Button type="submit">요청 보내기</Button></div>
+          </form>
+        )}
+      </Modal>
+    </div>
+  );
+}

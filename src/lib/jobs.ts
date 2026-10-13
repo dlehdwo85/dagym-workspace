@@ -125,6 +125,7 @@ export async function runTick(trigger: string) {
   await step('weeklyReport', async () => (await import('./insights')).weeklyReportJob());
   await step('briefing', async () => (await import('./briefing')).briefingJob());
   await step('personalReport', async () => (await import('./briefing')).personalReportJob());
+  await step('usage', async () => (await import('./plans')).usageJob());
   await step('push', () => dispatchPending(200));
   if (googleConfigured()) await step('google', () => syncAllDue());
   await step('cleanup', cleanup);

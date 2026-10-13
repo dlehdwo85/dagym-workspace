@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, FileText, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
-  ListTodo, Library, LogOut, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
+  Building2, ListTodo, Library, LogOut, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
 } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
@@ -32,6 +32,7 @@ const ADMIN_MENU: NavItem[] = [
   { href: '/revenue', label: '매출', icon: BarChart3 },
   { href: '/admin/users', label: '사용자 관리', icon: Users },
   { href: '/admin/ops', label: '운영 상태', icon: Activity },
+  { href: '/admin/usage', label: '사용량·요금제', icon: Gauge },
 ];
 const SHORTCUTS: [string, string][] = [
   ['Ctrl K', '검색·명령 열기'], ['N', '새 업무 만들기'], ['?', '단축키 도움말'], ['Esc', '패널·창 닫기'],
@@ -180,7 +181,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <div className="my-2 border-t border-white/10" />
                 {!collapsed && <button onClick={() => setAdminOpen((v) => { writePref('wos_nav_admin', v ? '0' : '1'); return !v; })} aria-expanded={adminOpen}
                   className="flex w-full items-center gap-1 px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-200">관리<ChevronDown className={cx('size-3 transition-transform', !adminOpen && '-rotate-90')} /></button>}
-                {(adminOpen || collapsed) && ADMIN_MENU.map((n) => navLink(n))}
+                {(adminOpen || collapsed) && [...ADMIN_MENU, ...(session.user.platformAdmin ? [{ href: '/platform', label: '플랫폼 운영', icon: Building2 }] : [])].map((n) => navLink(n))}
               </div>
             )}
           </nav>
@@ -298,7 +299,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               <div className="my-1 border-t border-line" />
               {([['/projects', '프로젝트', FolderKanban], ...nav.filter((n) => n.href === '/library' || n.href === '/assistant').map((n) => [n.href, n.label, n.icon]), ['/settings', '설정·알림', Settings],
                 ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)', CalendarDays]] : []),
-                ...(admin ? ADMIN_MENU.map((n) => [n.href, n.label, n.icon]) : [])] as [string, string, LucideIcon][]).map(([h, l, I]) => (
+                ...(admin ? ADMIN_MENU.map((n) => [n.href, n.label, n.icon]) : []), ...(session.user.platformAdmin ? [['/platform', '플랫폼 운영', Building2]] : [])] as [string, string, LucideIcon][]).map(([h, l, I]) => (
                 <Link key={h} href={h} onClick={() => setMore(false)} className="flex items-center gap-3 rounded-input px-3 py-3 text-sm active:bg-slate-100"><I className="size-5 text-ink-2" />{l}</Link>
               ))}
               <button onClick={logout} className="flex w-full items-center gap-3 rounded-input px-3 py-3 text-left text-sm text-red-600 active:bg-red-50"><LogOut className="size-5" />로그아웃</button>

@@ -35,9 +35,9 @@ export async function userFromToken(token: string | undefined | null): Promise<S
   const sql = db();
   const id = sha256(token);
   const rows = await sql<
-    { id: string; email: string; name: string; role: Role; status: string; timezone: string; last_seen_at: Date; is_demo: boolean }[]
+    { id: string; email: string; name: string; role: Role; status: string; timezone: string; last_seen_at: Date; is_demo: boolean; platform_admin: boolean }[]
   >`
-    select u.id, u.email, u.name, u.role, u.status, u.timezone, s.last_seen_at, u.is_demo
+    select u.id, u.email, u.name, u.role, u.status, u.timezone, s.last_seen_at, u.is_demo, u.platform_admin
     from sessions s join users u on u.id = s.user_id
     where s.id = ${id} and s.revoked_at is null and s.expires_at > now() and u.status = 'active'`;
   const r = rows[0];
@@ -46,7 +46,7 @@ export async function userFromToken(token: string | undefined | null): Promise<S
   if (Date.now() - new Date(r.last_seen_at).getTime() > 86400_000) {
     await sql`update sessions set last_seen_at = now(), expires_at = now() + ${SESSION_DAYS + ' days'}::interval where id = ${id}`;
   }
-  return { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: id, isDemo: r.is_demo };
+  return { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: id, isDemo: r.is_demo, platformAdmin: r.platform_admin };
 }
 
 /** 서버 컴포넌트·라우트 핸들러에서 현재 사용자 */

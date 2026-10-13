@@ -29,6 +29,8 @@ export interface SessionUser {
   sessionId: string;
   /** 앱 심사용 체험 계정: 데모 조직 밖은 하나도 보이지 않고 설정·초대·첨부 등은 막힌다 */
   isDemo?: boolean;
+  /** V10 플랫폼 운영자(워크인 운영사): 모든 회사 사용량·요금제 */
+  platformAdmin?: boolean;
 }
 
 export const NOTIFICATION_TYPES = {
@@ -46,5 +48,6 @@ export const NOTIFICATION_TYPES = {
   weekly_report: '주간 보고',
   task_done_for_requester: '지시한 업무 상태 변경(시작·보류·검토 요청·완료)',
   briefing: '아침 브리핑(오늘 할 일·일정)',
+  usage_alert: '사용량 한도(저장공간·AI·사용자) 80%·100%',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

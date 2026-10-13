@@ -9,7 +9,7 @@ export interface Dir {
   isAdmin: boolean;
 }
 export interface Sess {
-  user: { id: string; name: string; email: string; role: Role };
+  user: { id: string; name: string; email: string; role: Role; /** V10 플랫폼 운영자 */ platformAdmin?: boolean };
   dir: Dir;
   /** 선택 기능 스위치 (핵심 기능은 항상 켜짐) */
   features: { googleSync: boolean; /** V9 AI 비서 (플랫폼 API 키가 있을 때만) */ ai: boolean; /** V9 자료실 (체험 계정 제외) */ library: boolean };

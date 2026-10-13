@@ -40,7 +40,12 @@ export async function aiStatus(u: SessionUser) {
   const enabled = aiEnabled() && !u.isDemo;
   if (!enabled) return { enabled: false };
   const usage = await usageThisMonth(tenantOf(u));
-  return { enabled: true, model: process.env.AI_MODEL || 'claude-opus-5-5', usage: isAdmin(u) ? usage : { ...usage, costUsd: undefined, tokens: undefined }, overLimit: usage.costUsd >= usage.limitUsd, canSetLimit: u.role === 'owner' };
+  // V10 요금제 월 AI 요청 수
+  const { effectiveLimits, currentUsage } = await import('../plans');
+  const [{ limits }, cu] = await Promise.all([effectiveLimits(tenantOf(u)), currentUsage(tenantOf(u))]);
+  const quota = { used: cu.aiRequests, limit: limits.aiRequests };
+  return { enabled: true, model: process.env.AI_MODEL || 'claude-opus-5-5', usage: isAdmin(u) ? usage : { ...usage, costUsd: undefined, tokens: undefined }, quota,
+    overLimit: usage.costUsd >= usage.limitUsd || (quota.limit !== null && quota.used >= quota.limit), canSetLimit: u.role === 'owner' };
 }
 export async function setLimit(u: SessionUser, monthlyUsd: number) {
   if (u.role !== 'owner') throw new HttpError(403, 'forbidden', '대표만 바꿀 수 있습니다');
@@ -203,6 +208,8 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   const usage = await usageThisMonth(tenant);
   if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다. 대표에게 한도 조정을 요청하세요.`);
   if (i.messages[i.messages.length - 1].role !== 'user') throw badRequest('마지막은 질문이어야 합니다');
+  await (await import('../plans')).assertAiRequest(u); // V10 요금제 월 AI 요청 수
+  const requestId = crypto.randomUUID();
 
   let context = '';
   if (i.taskId) {
@@ -220,8 +227,8 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
       throw new HttpError(502, 'ai_unavailable', `AI 서버 응답 오류${e?.status ? ` (${e.status})` : ''}. 잠시 후 다시 시도하세요.`);
     });
     const used = r.usage;
-    await sql`insert into ai_usage (tenant, user_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
-      values (${tenant}, ${u.id}, ${provider.name}, ${r.model ?? provider.model}, ${used.input_tokens}, ${used.output_tokens}, ${used.cache_read_input_tokens ?? 0},
+    await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
+      values (${tenant}, ${u.id}, ${requestId}, ${provider.name}, ${r.model ?? provider.model}, ${used.input_tokens}, ${used.output_tokens}, ${used.cache_read_input_tokens ?? 0},
         ${used.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, used)})`;
     const text = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('\n').trim();
     if (r.stop_reason === 'refusal') { reply = '이 요청은 처리할 수 없습니다. 다르게 요청해 주세요.'; break; }

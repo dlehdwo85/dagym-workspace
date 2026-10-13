@@ -1686,3 +1686,75 @@ describe('WORKIN_V9 회사 자료실 · AI 비서 (가짜 Anthropic 서버)', ()
     assert.equal((await ctx.staffA.client.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '안녕' }] })).reply, '테스트 응답입니다.');
   });
 });
+
+describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', () => {
+  const setPlan = (planCode, addons = {}) => ctx.owner.ok('PUT', '/api/platform/tenants/default', { planCode, addons });
+  test('우리 회사 = 내부(무제한), 사용량 화면은 대표·관리자만, /platform 은 플랫폼 운영자만(그 외 404)', async () => {
+    const u = await ctx.owner.ok('GET', '/api/usage');
+    assert.equal(u.subscription.planCode, 'internal');
+    assert.deepEqual(u.limits, { users: null, storageGb: null, aiRequests: null });
+    assert.ok(u.usage.storageBytes > 0 && u.usage.users >= 4 && u.usage.aiRequests >= 1, '첨부·자료실·사람·AI 요청 셈');
+    assert.ok(u.topFiles.length > 0 && u.topFiles[0].size >= u.topFiles.at(-1).size, '큰 파일 순');
+    assert.ok(u.plans.some((p) => p.code === 'standard' && p.monthly_krw === 29000) && !u.plans.some((p) => p.code === 'internal'), '내부 요금제는 목록에 없음');
+    assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 403);
+    const pf = await ctx.owner.ok('GET', '/api/platform');
+    assert.deepEqual(pf.tenants.map((t) => t.id).sort(), ['default', 'demo']);
+    assert.equal(pf.tenants.find((t) => t.id === 'default').overLimit, false);
+    assert.equal((await ctx.managerA.client.req('GET', '/api/platform')).status, 404);
+    assert.equal((await ctx.managerA.client.req('PUT', '/api/platform/tenants/default', { planCode: 'free' })).status, 404);
+  });
+
+  test('요금제 숫자는 배포 없이 변경, 추가 옵션은 한도에 더해짐', async () => {
+    await ctx.owner.ok('PUT', '/api/platform/plans/standard', { name: '스탠다드', monthlyKrw: 30000, limits: { users: 20, storageGb: 50, aiRequests: 500 } });
+    assert.equal((await ctx.owner.ok('GET', '/api/usage')).plans.find((p) => p.code === 'standard').monthly_krw, 30000);
+    await ctx.owner.ok('PUT', '/api/platform/plans/standard', { name: '스탠다드', monthlyKrw: 29000, limits: { users: 20, storageGb: 50, aiRequests: 500 } });
+    await setPlan('free', { users10: 1, storage50: 2 });
+    const u = await ctx.owner.ok('GET', '/api/usage');
+    assert.deepEqual(u.limits, { users: 15, storageGb: 102, aiRequests: 30 });
+    assert.equal((await ctx.owner.req('PUT', '/api/platform/tenants/default', { planCode: 'free', addons: { nope: 1 } })).status, 400);
+    await setPlan('internal');
+  });
+
+  test('한도를 넘으면 올리기·AI·초대만 막고 업무·일정은 그대로, 정기 실행이 80%/100% 알림', async () => {
+    await ctx.owner.ok('PUT', '/api/platform/plans/tiny-test', { name: '시험용 초소형', monthlyKrw: 0, limits: { users: 2, storageGb: 0.000001, aiRequests: 0 }, public: false });
+    await setPlan('tiny-test');
+    const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '한도 초과 중 업무', orgUnitId: ctx.siteA, approvalRequired: false })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done' });
+    const cal = (await ctx.managerA.client.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'org_unit').id;
+    await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '한도 초과 중 일정', start: `${addDays(today, 2)}T10:00:00+09:00`, end: `${addDays(today, 2)}T11:00:00+09:00` });
+    const att = await ctx.staffA.client.req('POST', '/api/attachments', { taskId: t, kind: 'file', fileName: 'a.pdf', mimeType: 'application/pdf', size: 2000 });
+    assert.equal(att.status, 409); assert.match(att.body.error.message, /저장공간/);
+    assert.equal((await ctx.staffA.client.req('POST', '/api/library', { fileName: 'b.txt', size: 10 })).status, 409);
+    assert.ok((await ctx.staffA.client.ok('GET', '/api/library')).files.length > 0, '기존 자료 보기는 계속');
+    const ai = await ctx.staffA.client.req('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '안녕' }] });
+    assert.equal(ai.status, 429); assert.match(ai.body.error.message, /AI 요청/);
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/ai/status')).overLimit, true);
+    const inv = await ctx.owner.req('POST', '/api/admin/users', { email: 'seat@dagym.test', name: '초과', role: 'staff', orgUnitIds: [ctx.siteA] });
+    assert.equal(inv.status, 409); assert.match(inv.body.error.message, /사용자 수/);
+    await tick();
+    const n = await sql`select title from notifications where type = 'usage_alert' and user_id = ${ctx.ownerId}`;
+    assert.ok(n.some((x) => /저장공간 한도/.test(x.title)) && n.some((x) => /사용자 한도/.test(x.title)), '관리자에게 100% 알림');
+    await tick();
+    assert.equal((await sql`select count(*)::int c from notifications where type = 'usage_alert' and user_id = ${ctx.ownerId} and title like '저장공간%'`)[0].c, 1, '같은 달 같은 단계는 1번');
+    assert.ok((await sql`select storage_bytes from tenant_usage where tenant = 'default'`)[0].storage_bytes > 0, '월별 기록');
+    const pf = await ctx.owner.ok('GET', '/api/platform');
+    assert.equal(pf.tenants.find((x) => x.id === 'default').overLimit, true, '운영 화면 한도 초과 표시');
+    await setPlan('internal');
+    assert.equal((await ctx.staffA.client.req('POST', '/api/library', { fileName: 'b.txt', size: 10 })).status, 200, '내부 요금제로 돌리면 다시 올리기 가능');
+  });
+
+  test('요금제 변경 요청 → 운영자 승인하면 반영·요청자 알림, 반려도 가능', async () => {
+    const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'business', note: '지점 늘어남' });
+    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'business' })).status, 403);
+    assert.equal((await ctx.owner.req('POST', '/api/usage/request', { planCode: 'internal' })).status, 400, '공개 안 된 요금제는 요청 불가');
+    const pf = await ctx.owner.ok('GET', '/api/platform');
+    assert.equal(pf.requests.find((x) => x.id === r.id).status, 'pending');
+    await ctx.owner.ok('POST', `/api/platform/requests/${r.id}`, { approve: true });
+    assert.equal((await ctx.owner.ok('GET', '/api/usage')).subscription.planCode, 'business');
+    assert.equal((await ctx.owner.req('POST', `/api/platform/requests/${r.id}`, { approve: true })).status, 400);
+    const r2 = await ctx.owner.ok('POST', '/api/usage/request', { addons: { ai500: 1 } });
+    await ctx.owner.ok('POST', `/api/platform/requests/${r2.id}`, { approve: false });
+    assert.equal((await ctx.owner.ok('GET', '/api/usage')).limits.aiRequests, 1500, '반려는 반영 안 됨');
+    await setPlan('internal');
+  });
+});

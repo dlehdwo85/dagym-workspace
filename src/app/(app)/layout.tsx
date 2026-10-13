@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect('/login');
   const dir = await directory(user);
   const session = {
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, platformAdmin: !!user.platformAdmin },
     dir: JSON.parse(JSON.stringify(dir)),
     features: { googleSync: googleSyncEnabled(), ai: aiEnabled() && !user.isDemo, library: !user.isDemo },
   };
