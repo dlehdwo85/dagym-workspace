@@ -54,3 +54,9 @@
 - 2026-10-13 대표 승인(앱 알림·AI 매출): Firebase 전용 프로젝트 **workin-9c116** 생성(Spark 무료, 애널리틱스·Gemini 끔), Android·iOS 앱 등록, GitHub Secrets GOOGLE_SERVICES_JSON·GOOGLE_SERVICE_INFO_PLIST 등록(번들·패키지 kr.co.dagym.workos 확인). TestFlight 외부 그룹 "직원 공개 링크" 생성, 베타 앱 정보(설명·피드백 이메일·개인정보 처리방침 URL) 저장 — 심사 연락처 전화번호·로그인 정보 미저장. 대표 지시 "할 일 최소화"에 따라 비밀번호 없는 심사용 "체험하기"(DEMO_LOGIN, 격리 조직) 클라우드 요청. 남은 것: APNs 키 생성(Apple 재로그인 필요)→Firebase 업로드, FCM 서비스 계정 키→Vercel FCM_SERVICE_ACCOUNT_JSON(대표), 7a9f382 운영 배포(Vercel 한도 대기)
 - 2026-10-13 TestFlight 테스트 정보: 심사 연락처(성명·전화·이메일) 저장 완료(번호는 저장소에 기록하지 않음), 심사 메모를 "로그인 화면 체험하기 버튼 사용"으로 갱신. APNs 인증 키 생성(Key ID AM65J2522J, Sandbox & Production, 팀 범위) — 파일은 로컬 artifacts 보관, Firebase(workin-9c116) 클라우드 메시징 업로드 창에 키 ID·팀 ID 입력 완료, 파일 선택·업로드는 대표
 - 2026-10-13 운영 반영 확인: 1b9e730(7a9f382 포함) 배포 — 제목 "워크인 | 다짐 · 하이링크", 로컬 동일 코드로 375px 주요 7화면 좌우 스크롤 없음, 업무 화면 "+ 업무 추가" Enter 연속 등록 확인. Vercel FCM_SERVICE_ACCOUNT_JSON 등록(대표) — 다음 배포부터 적용. 앱 새 빌드: iOS 1.0.1 TestFlight 업로드(release run 38349952821, aps-environment 검사 통과), Android 버전코드 8 서명·Play 내부 테스트 "내부 테스터에게 제공됨"(mobile.yml versionCode=run_number, main 4080a08). 대표 운영 캡처로 업무 0건 담당자 묶음 버그 발견 → 3차 명세 WORKIN_V3_TASKS.md(b9f3d51). PC 디스크 0MB 사건 → 대표 승인으로 npm 캐시 정리(약 2.8GB 확보)
+
+## 2026-10-13 14:50 — 업무 화면 재확인(대표 캡처)
+- 운영 "전체"에 이동재 묶음만, 업무 0건. 원인 코드: `src/components/TaskViews.tsx:365-367` (나 + 업무 있는 담당자만 묶음). WORKIN_V3_TASKS 5번에 추가 요청.
+- "1건 만든 뒤 추가 불가": 로컬 최신 빌드에서 상단 추가·묶음 끝 줄 각 2건 연속 저장 확인(재현 안 됨). 운영 계정 로그인 없이 운영 재현 불가 → 한글 IME Enter·배정 후 사라짐 가설로 클라우드 확인 요청.
+- 대표 지시: 상단 직원 이름 칩은 필터.
+- TestFlight 공개 링크: main 에 DEMO_LOGIN 반영 감시 중(2분 간격).
