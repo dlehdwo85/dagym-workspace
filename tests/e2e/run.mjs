@@ -187,7 +187,7 @@ await step('② 현장 관리자가 대시보드에서 최종 완료 확인', as
 // ③ 보기 전환 / 마감일 변경 일치
 let t3;
 await step('③ 목록에서 마감일 변경 → 보드·캘린더·타임라인 동일 반영', async () => {
-  t3 = (await ctx.owner.ok('POST', '/api/tasks', { title: '보기 전환 시험 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 2) })).id;
+  t3 = (await ctx.owner.ok('POST', '/api/tasks', { title: '보기 전환 시험 업무', orgUnitId: ctx.siteA, assigneeId: ctx.ownerId, dueDate: addDays(today, 2) })).id; // V12: 보드로 상태를 바꾸는 사람 = 담당자
   const nd = addDays(today, 4);
   await owner.goto(BASE + '/tasks?mode=list');
   const row = owner.locator(`[data-task-id="${t3}"]`);
@@ -1418,7 +1418,7 @@ await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 �
   const m = await mc.newPage();
   await m.goto(BASE + '/tasks');
   const row = m.locator(`[data-row="${t}"]`);
-  await row.getByTestId('row-status-chip').getByText('진행 전').waitFor();
+  await row.getByTestId('row-status-chip').getByText('확인 완료').waitFor();
   await row.getByTestId('row-status-chip').tap();
   const sheet = m.locator('[data-sheet]');
   await sheet.getByRole('button', { name: '진행 중' }).tap();
@@ -1470,6 +1470,50 @@ await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 �
   const [vt] = await sql`select assignee_id, priority, due_date from tasks where title = '쌍용점 덤벨 수량 파악'`;
   assert.equal(vt.assignee_id, ctx.managerA.id); assert.equal(vt.priority, 'high'); assert.ok(vt.due_date);
   await mc.close();
+});
+
+await step('V12: PC 상세 패널 — 다른 업무 클릭 시 교체·바깥/Esc 닫힘, 한 줄 추가 여러 담당 "n명에게 각각 만들기", 남의 업무 상태 칩 비활성·검토 알림에서 승인', async () => {
+  const a = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 패널 A', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, approvalRequired: false })).id;
+  const b = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 패널 B', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, approvalRequired: false })).id;
+  await owner.setViewportSize({ width: 1440, height: 900 });
+  await owner.goto(BASE + '/tasks?mode=list');
+  await owner.locator(`[data-row="${a}"]`).getByText('V12 패널 A').click();
+  const panel = owner.getByTestId('task-panel');
+  await panel.getByText('V12 패널 A').first().waitFor();
+  await owner.locator(`[data-row="${b}"]`).getByText('V12 패널 B').click();
+  await panel.getByText('V12 패널 B').first().waitFor();
+  assert.ok(owner.url().endsWith(`/tasks/${b}`), '패널 교체');
+  await owner.getByRole('heading', { level: 1, name: '업무' }).click(); // 목록 빈 곳
+  await panel.waitFor({ state: 'detached' });
+  assert.ok(!/\/tasks\/[0-9a-f-]{36}$/.test(owner.url()), '닫히면 목록 주소');
+  await owner.locator(`[data-row="${a}"]`).getByText('V12 패널 A').click();
+  await panel.waitFor();
+  await owner.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
+  // 한 줄 추가 여러 담당
+  await owner.getByTestId('add-task-top').click();
+  const add = owner.getByTestId('task-groups').getByTestId('inline-add').first();
+  await add.getByLabel('업무 추가 제목').fill('V12 각자 제출');
+  await add.getByTestId('assignee-picker').click();
+  const dlg = owner.getByRole('dialog', { name: '담당자 선택 (여러 명 가능)' });
+  await dlg.getByRole('menuitemcheckbox', { name: /최매니저/ }).click();
+  await dlg.getByRole('menuitemcheckbox', { name: /이직원/ }).click();
+  await owner.locator('div.fixed.inset-0.z-\\[70\\]').click();
+  await add.getByRole('button', { name: '3명에게 각각 만들기' }).click();
+  await owner.getByText(/3명 각각에게 추가됨: V12 각자 제출/).first().waitFor();
+  assert.equal((await sql`select count(distinct batch_id)::int b, count(*)::int n from tasks where title = 'V12 각자 제출'`)[0].n, 3);
+  await owner.keyboard.press('Escape');
+  // 남의 업무: 원형 체크 비활성, 검토 요청 알림에서 승인
+  const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 검토 승인 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+  await owner.goto(BASE + '/tasks?mode=list');
+  assert.equal(await owner.locator(`[data-row="${t}"]`).getByTestId('check-circle').isDisabled(), true, '담당자만 완료');
+  await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+  await owner.goto(BASE + '/notifications');
+  const li = owner.getByTestId('notifications').locator('li', { hasText: '검토 요청: V12 검토 승인 업무' });
+  await li.getByTestId('review-actions').getByRole('button', { name: '승인' }).click();
+  await owner.getByText('승인했습니다 (완료)').waitFor();
+  assert.equal((await sql`select status from tasks where id = ${t}`)[0].status, 'done');
+  await owner.setViewportSize({ width: 1366, height: 900 });
 });
 
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {

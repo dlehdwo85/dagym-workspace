@@ -1,6 +1,6 @@
 import { after } from 'next/server';
 import { handler, body } from '@/lib/api';
-import { deleteTask, getTaskDetail, taskInput, updateTask } from '@/lib/tasks';
+import { deleteTask, getTaskDetail, markAcked, taskInput, updateTask } from '@/lib/tasks';
 import { dispatchPending } from '@/lib/push';
 import { syncTaskBlocksSoon } from '@/lib/google/hooks';
 import { remindersChanged } from '@/lib/push';
@@ -9,7 +9,15 @@ import { db } from '@/lib/db';
 import { deleteEvent } from '@/lib/events';
 import { syncedEventIds } from '@/lib/eventtasks';
 
-export const GET = handler<{ id: string }>(async ({ user, params }) => getTaskDetail(user, params.id));
+export const GET = handler<{ id: string }>(async ({ user, params }) => {
+  const d = await getTaskDetail(user, params.id);
+  // V12 6번: 담당자가 업무를 열면 자동으로 "확인 완료" + 지시자 알림
+  if ((d.task as any).assignee_id === user.id && !(d.task as any).assignee_ack_at && await markAcked(user, params.id)) {
+    (d.task as any).assignee_ack_at = new Date().toISOString();
+    after(() => dispatchPending().catch(() => {}));
+  }
+  return d;
+});
 
 export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {
   const before = await affectedByTask(params.id).catch(() => []);

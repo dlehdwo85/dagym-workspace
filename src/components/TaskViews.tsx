@@ -151,7 +151,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const listUrl = useRef<string | null>(null);
   const openTask = useCallback((id: string) => {
     if (!listUrl.current) listUrl.current = location.pathname + location.search;
-    window.history.pushState({ wosPanel: id }, '', `/tasks/${id}`);
+    // V12 4번: 패널이 열린 채 다른 업무를 누르면 닫지 않고 그 업무로 교체(기록은 한 칸만 — 닫으면 바로 목록)
+    if (window.history.state?.wosPanel) window.history.replaceState({ wosPanel: id }, '', `/tasks/${id}`);
+    else window.history.pushState({ wosPanel: id }, '', `/tasks/${id}`);
     setPanelId(id);
   }, []);
   const closePanel = useCallback(() => {
@@ -165,9 +167,17 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       if (!m) listUrl.current = null;
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && panelId && !document.querySelector('[role=dialog]')) closePanel(); };
+    // V12 4번(PC): 패널 바깥(목록 빈 곳·사이드바 등)을 누르면 닫힘 — 업무 행·선택 창·대화상자·알림 띠는 제외. 입력 중이던 칸은 초점이 빠지며 자동 저장
+    const onDown = (e: PointerEvent) => {
+      if (!panelId || window.innerWidth < 640) return;
+      const el = e.target as HTMLElement | null;
+      if (!el?.closest || el.closest('[data-testid="task-panel"],[data-row],[data-open-task],[data-task-id],[role=dialog],[data-sheet],[role=status],[role=alert],.fixed.inset-0')) return;
+      closePanel();
+    };
     window.addEventListener('popstate', onPop);
     window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('popstate', onPop); window.removeEventListener('keydown', onKey); };
+    document.addEventListener('pointerdown', onDown);
+    return () => { window.removeEventListener('popstate', onPop); window.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onDown); };
   }, [panelId, closePanel]);
 
   // B-3 프로젝트 섹션
@@ -201,7 +211,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
 
   return (
     <OpenTaskCtx.Provider value={openTask}>
-    <div className="space-y-3">
+    {/* V12 4번: 넓은 화면에서는 패널만큼 목록을 좁혀 칩·마감 열이 가려지지 않게 */}
+    <div className={cx('space-y-3', panelId && 'xl:pr-[560px]')}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold tracking-tight">{title ?? '업무'}</h1>
         <div className="flex rounded-input border border-line bg-white p-0.5 text-sm shadow-card" role="tablist" aria-label="보기 방식">
@@ -337,7 +348,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     {exportOpen && <ExportTasks qs={qs} onClose={() => setExportOpen(false)} />}
     <QuickAddTask open={quickOpen} onClose={() => setQuickOpen(false)} defaults={{ projectId, assigneeId: filters.assigneeId || undefined }} onCreated={() => { setQuickOpen(false); reload(); }} />
     {panelId && (
-      <aside className="fixed inset-0 z-40 animate-slide-in overflow-y-auto bg-white shadow-pop sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(680px,100vw-240px)] sm:border-l sm:border-line" data-testid="task-panel" aria-label="업무 상세 패널">
+      <aside className="fixed inset-0 z-40 animate-slide-in overflow-y-auto bg-white shadow-pop sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(560px,100vw-240px)] sm:border-l sm:border-line" data-testid="task-panel" aria-label="업무 상세 패널">
         <TaskDetail key={panelId} id={panelId} inPanel onClose={closePanel} />
       </aside>
     )}
@@ -373,6 +384,17 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
   );
 }
 
+/** V12 6번: 진행 상태는 담당자만 — 지시자·관리자는 검토 업무 승인·반려, 보류(·해제)만 (서버와 같은 규칙) */
+export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
+  if (to === t.status || !t.assignee_id || t.assignee_id === uid) return true;
+  return (t.status === 'review' && (to === 'done' || to === 'in_progress')) || to === 'on_hold' || (t.status === 'on_hold' && (to === 'todo' || to === 'in_progress'));
+}
+const NOT_MINE = '진행 상태는 담당자만 바꿀 수 있습니다 (지시자·관리자는 검토 승인·반려·보류만)';
+/** 진행 전 업무는 담당자 확인 여부로 "확인 전"·"확인 완료" */
+export function statusText(t: Task) {
+  if (t.status === 'todo' && t.assignee_id) return t.assignee_ack_at ? '확인 완료' : '확인 전';
+  return STATUS_LABEL[t.status];
+}
 /** 원형 완료 체크: 결재선·관리자 확인 업무는 "검토 요청", 아니면 완료. 완료 상태에서 누르면 다시 진행 중 */
 function nextStatusOnCheck(t: Task, role: string): TaskStatus {
   if (t.status === 'done') return 'in_progress';
@@ -384,14 +406,15 @@ function nextStatusOnCheck(t: Task, role: string): TaskStatus {
 function CheckCircle({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => Promise<boolean> | void }) {
   const { user } = useSession();
   const to = nextStatusOnCheck(t, user.role);
-  const label = t.status === 'done' ? `${t.title} 완료 취소` : to === 'review' ? `${t.title} 검토 요청` : `${t.title} 완료`;
+  const allowed = canSetStatus(t, user.id, to);
+  const label = !allowed ? `${t.title} — 담당자만 완료할 수 있습니다` : t.status === 'done' ? `${t.title} 완료 취소` : to === 'review' ? `${t.title} 검토 요청` : t.status === 'review' && t.assignee_id !== user.id ? `${t.title} 승인(완료)` : `${t.title} 완료`;
   return (
-    <button onClick={async () => {
+    <button disabled={!allowed} onClick={async () => {
       const before = t.status;
       const ok = await onPatch(t, { status: to });
       if (ok !== false) toast.ok(to === 'done' ? '완료했습니다' : to === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: to, version: t.version + 1 }, { status: before }) });
     }} aria-label={label} title={label} data-testid="check-circle"
-      className={cx('group flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors',
+      className={cx('group flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-40',
         t.status === 'done' ? 'border-emerald-500 bg-emerald-500 text-white' : t.status === 'review' ? 'border-amber-400 bg-amber-50 text-amber-500' : 'border-slate-300 text-transparent hover:border-emerald-500 hover:text-emerald-500')}>
       {t.status === 'review' ? <Stamp className="size-3" /> : <CircleCheck className="size-[22px] stroke-[1.8]" style={{ margin: -1.5 }} />}
     </button>
@@ -405,27 +428,31 @@ function TypeIcon({ t }: { t: Task }) {
 }
 /** 상태 선택: 배지처럼 보이는 select */
 function StatusSelect({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }) {
+  const { user } = useSession();
+  const mine = !t.assignee_id || t.assignee_id === user.id;
   return (
-    <select value={t.status} onChange={(e) => onPatch(t, { status: e.target.value })} aria-label={`${t.title} 상태`}
+    <select value={t.status} onChange={(e) => onPatch(t, { status: e.target.value })} aria-label={`${t.title} 상태`} title={mine ? undefined : NOT_MINE}
       className={cx('h-6 cursor-pointer appearance-none rounded-full border-0 bg-none py-0 pl-2.5 pr-2.5 text-xs font-medium focus:ring-2 focus:ring-accent-500', STATUS_TONE[t.status].badge)}>
-      {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+      {STATUSES.map((s) => <option key={s} value={s} disabled={!canSetStatus(t, user.id, s)}>{s === t.status ? statusText(t) : STATUS_LABEL[s]}</option>)}
     </select>
   );
 }
 /** V11 1번: 상태 칩(진행 전·진행 중·검토 요청·보류·완료) — 누르면 상태 메뉴 */
 function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any }) {
+  const { user } = useSession();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(true); }} onPointerDown={(e) => e.stopPropagation()} aria-haspopup="dialog" aria-label={`${t.title} 상태: ${STATUS_LABEL[t.status]}`} data-testid="row-status-chip"
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(true); }} onPointerDown={(e) => e.stopPropagation()} aria-haspopup="dialog" aria-label={`${t.title} 상태: ${statusText(t)}`} data-testid="row-status-chip"
         className={cx('inline-flex h-6 items-center gap-1 rounded-full px-2 text-[11px] font-medium', STATUS_TONE[t.status].badge)}>
-        <span className={cx('size-1.5 rounded-full', STATUS_TONE[t.status].dot)} aria-hidden />{STATUS_LABEL[t.status]}
+        <span className={cx('size-1.5 rounded-full', statusText(t) === '확인 전' ? 'bg-red-500' : STATUS_TONE[t.status].dot)} aria-hidden />{statusText(t)}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={170}>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={190}>
+        {t.assignee_id && t.assignee_id !== user.id && <p className="px-2.5 pb-1 text-[11px] text-ink-3">{NOT_MINE}</p>}
         {STATUSES.map((s) => (
-          <button key={s} type="button" onClick={() => { setOpen(false); if (s !== t.status) onPatch(t, { status: s }); }} aria-pressed={s === t.status}
-            className="flex w-full items-center gap-2 rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
+          <button key={s} type="button" disabled={!canSetStatus(t, user.id, s)} onClick={() => { setOpen(false); if (s !== t.status) onPatch(t, { status: s }); }} aria-pressed={s === t.status}
+            className="flex w-full items-center gap-2 rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50 disabled:opacity-40">
             <span className={cx('size-2 rounded-full', STATUS_TONE[s].dot)} />{STATUS_LABEL[s]}{s === t.status && <Check className="ml-auto size-3.5 text-accent-600" />}
           </button>
         ))}

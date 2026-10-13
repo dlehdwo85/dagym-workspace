@@ -145,6 +145,38 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
   );
 }
 
+/** V12 5번: 담당자 여러 명(체크) — 2명 이상이면 각자 1건씩 만든다. 빈 배열 = 담당자 없음 */
+export function MultiAssigneePicker({ values, onChange }: { values: string[]; onChange: (ids: string[]) => void }) {
+  const { dir, user } = useSession();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef<HTMLButtonElement>(null);
+  const people = [...dir.users].sort((a, b) => (a.id === user.id ? -1 : b.id === user.id ? 1 : a.name.localeCompare(b.name, 'ko')));
+  const shown = people.filter((u) => !q || u.name.includes(q));
+  const names = values.map((id) => dir.users.find((u) => u.id === id)?.name ?? '').filter(Boolean);
+  const label = !values.length ? '없음' : values.length === 1 ? names[0] : `${names[0]} 외 ${values.length - 1}명`;
+  return (
+    <span className="relative inline-flex">
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); setQ(''); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`담당자: ${label}`} aria-haspopup="dialog" aria-expanded={open}
+        className="inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100" data-testid="assignee-picker">
+        <Avatar id={values[0] ?? null} name={names[0] ?? null} size={20} /><span className="truncate">{label}</span>
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="담당자 선택 (여러 명 가능)">
+        <p className="px-2 pb-1 text-[11px] text-ink-3">여러 명 선택 — 2명 이상이면 각자 1건씩 만들어집니다</p>
+        <input autoFocus={typeof window !== 'undefined' && window.innerWidth >= 640} className="mb-1 w-full rounded-input border border-line px-2 py-1 text-sm" placeholder="이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="담당자 검색" />
+        <div className="max-h-60 overflow-y-auto">
+          {shown.map((u) => { const on = values.includes(u.id); return (
+            <button key={u.id} type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => onChange(on ? values.filter((x) => x !== u.id) : [...values, u.id])} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm hover:bg-slate-50">
+              <span className={cx('flex size-4 items-center justify-center rounded border', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300')}>{on && <Check className="size-3" />}</span>
+              <Avatar id={u.id} name={u.name} size={22} /><span className="flex-1">{u.name}{u.id === user.id ? ' (나)' : ''}</span>
+            </button>); })}
+        </div>
+        {values.length > 0 && <button type="button" onClick={() => onChange([])} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><UserRound className="size-4" />담당자 없음</button>}
+      </Popover>
+    </span>
+  );
+}
+
 /** V5 반복 칩: 안 함·매일·평일·매주·매월… (반복은 마감일 기준 — 마감이 없으면 오늘을 마감으로) */
 /** V8 4번 음성 받아쓰기: 지원 안 되면(일부 앱 WebView) 키보드의 마이크로 말하도록 안내 — 날짜·담당자 인식은 입력한 문장에도 적용됨 */
 export function voiceInput(setListening: (v: boolean) => void, onText: (t: string) => void) {
@@ -228,7 +260,9 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const [title, setTitle] = useState('');
   // 묶음 끝 줄은 그 묶음 값(담당자·마감·프로젝트)이 자동으로 들어간다. 지정이 없으면 담당 = 나
   const initAssignee = defaultAssignee === undefined ? user.id : defaultAssignee;
-  const [assignee, setAssignee] = useState<string | null>(initAssignee);
+  const [assignees, setAssignees] = useState<string[]>(initAssignee ? [initAssignee] : []);
+  const assignee = assignees[0] ?? null;
+  const setAssignee = (v: string | null) => setAssignees(v ? [v] : []);
   const [due, setDue] = useState<string | null>(defaultDue ?? null);
   const initRequester = defaultRequester ?? user.id;
   const [requester, setRequester] = useState<string | null>(initRequester);
@@ -251,9 +285,10 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     const keepRrule = rrule;
     setTitle(''); setRrule(null);
     try {
-      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
+      const multi = assignees.length > 1;
+      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, ...(multi ? { assigneeIds: assignees } : {}), requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
       markNew(r.id); setRemind(null);
-      const who = assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
+      const who = multi ? `${assignees.length}명 각각` : assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
       toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? ' — 담당자에게 알림을 보냈습니다' : assignee ? ' — 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       broadcastRefresh(); onCreated?.(r.id);
       if (assignee && assignee !== user.id && due) warnAway(assignee, due, dir.users.find((u) => u.id === assignee)?.name ?? '담당자');
@@ -263,7 +298,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
       setErr(e.message ?? '저장하지 못했습니다');
     } finally { busyRef.current = false; setBusy(false); if (refocus) input.current?.focus(); }
   }
-  const showChips = !!(title || due || rrule || assignee !== initAssignee || requester !== initRequester || autoFocus);
+  const showChips = !!(title || due || rrule || assignees.join() !== (initAssignee ?? '') || requester !== initRequester || autoFocus);
   // 업무 "생성"은 저장 버튼·Enter 로만 (WORKIN_SAVE_AND_SPEED, 대표 지시). 바깥을 눌러도 저장하지 않고 입력한 초안은 남긴다.
   // 칩(마감·담당·지시·반복)을 고른 뒤에는 입력칸으로 돌아온다
   const back = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setTimeout(() => input.current?.focus(), 0); };
@@ -298,7 +333,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
         {/* V11 4번: 음성은 입력칸 오른쪽 큰 마이크 버튼 */}
         <button type="button" onClick={voice} aria-label="음성으로 업무 추가" aria-pressed={listening} data-testid="voice-btn"
           className={cx('flex size-11 shrink-0 items-center justify-center rounded-full sm:size-9', listening ? 'animate-pulse bg-red-500 text-white' : 'bg-accent-50 text-accent-700 hover:bg-accent-100')}><Mic className="size-5" /></button>
-        {title.trim() && <button type="submit" className="h-11 shrink-0 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white shadow-card active:scale-95 sm:h-8 sm:px-3" data-testid="inline-save">저장</button>}
+        {title.trim() && <button type="submit" className="h-11 shrink-0 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white shadow-card active:scale-95 sm:h-8 sm:px-3" data-testid="inline-save">{assignees.length > 1 ? `${assignees.length}명에게 각각 만들기` : '저장'}</button>}
         {busy && <span className="shrink-0 text-xs text-ink-3" data-testid="inline-saving">저장 중…</span>}
       </div>
       {showChips && (
@@ -306,7 +341,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 pl-12" data-testid="inline-chips">
           <span className="inline-flex items-center gap-1" title="지시자(업무를 부여한 사람)"><span className="text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={back((v: string | null) => setRequester(v ?? user.id))} size={20} withName /></span>
           <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" time={dueTime} onTime={setDueTime} emptyText="마감 없음" />
-          <span className="inline-flex items-center gap-1"><span className="text-[11px] text-ink-3">담당</span><AssigneePicker value={assignee} onChange={back(setAssignee)} size={20} withName /></span>
+          <span className="inline-flex items-center gap-1"><span className="text-[11px] text-ink-3">담당</span><MultiAssigneePicker values={assignees} onChange={setAssignees} /></span>
           <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
           <BellChip value={remind} onChange={setRemind} />
         </div>

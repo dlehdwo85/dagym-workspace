@@ -404,6 +404,12 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if ((set.task_type ?? cur.task_type) === 'milestone' && (set.start_date ?? cur.start_date)) set.start_date = null;
     const lineId = ('approval_line_id' in set ? set.approval_line_id : cur.approval_line_id) as string | null;
 
+    // V12 6번: 진행 상태는 담당자만. 지시자·관리자는 검토 요청 업무의 승인(완료)·반려(진행 중)와 보류(·보류 해제)만
+    if (i.status && i.status !== cur.status && cur.assignee_id && cur.assignee_id !== u.id) {
+      const ok = (cur.status === 'review' && (i.status === 'done' || i.status === 'in_progress')) || i.status === 'on_hold'
+        || (cur.status === 'on_hold' && (i.status === 'todo' || i.status === 'in_progress'));
+      if (!ok) throw forbidden('진행 상태는 담당자만 바꿀 수 있습니다. 지시자·관리자는 검토 요청 업무의 승인·반려와 보류만 할 수 있습니다.');
+    }
     // 상태 변경
     let statusEvent: string | null = null;
     if (i.status && i.status !== cur.status) {
@@ -494,8 +500,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       const { startApprovalRound } = await import('./approvals');
       await startApprovalRound(tx, id, lineId, cur.org_unit_id, u.id, title);
     } else if (statusEvent === 'review_requested') {
-      await notify(tx, { userIds: await approverIds(tx, cur.org_unit_id, cur.project_id), type: 'review_requested',
-        title: `검토 요청: ${title}`, body: `${u.name}님이 완료 검토를 요청했습니다`, link: `/tasks/${id}`,
+      // V12 7번: 지시자(없으면 만든 사람)에게도 즉시 — 알림에서 바로 승인·반려
+      const reqr = (set.requested_by ?? cur.requested_by ?? cur.created_by) as string | null;
+      await notify(tx, { userIds: [...(await approverIds(tx, cur.org_unit_id, cur.project_id)), reqr], type: 'review_requested',
+        title: `검토 요청: ${title}`, body: `${u.name}님이 검토를 요청했습니다 — 승인 또는 반려해 주세요`, link: `/tasks/${id}`,
         entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `review:${id}:${upd.version}` });
     }
     if (statusEvent === 'approved' || statusEvent === 'review_rejected') {
@@ -507,7 +515,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     // WORKIN_V3 지시자에게: 담당자가 완료하거나 검토를 요청하면 알림 (지시자 본인이 한 변경은 제외)
     const requester = (set.requested_by ?? cur.requested_by) as string | null;
     // V6 15번: 진행 중·검토 요청·보류·완료·다시 진행 등 상태가 바뀔 때마다
-    if (requester && requester !== u.id && set.status && set.status !== cur.status) {
+    if (requester && requester !== u.id && set.status && set.status !== cur.status && statusEvent !== 'review_requested') {
       const verb = set.status === 'done' ? '완료했습니다' : statusEvent === 'review_requested' ? '완료하고 검토를 요청했습니다'
         : set.status === 'in_progress' ? (cur.status === 'todo' ? '시작했습니다' : '다시 진행합니다') : set.status === 'on_hold' ? '보류했습니다' : '할 일로 되돌렸습니다';
       const head = set.status === 'done' ? '완료' : statusEvent === 'review_requested' ? '검토 요청' : STATUS_LABEL[set.status as keyof typeof STATUS_LABEL] ?? '상태 변경';
@@ -677,8 +685,21 @@ export async function ackTask(u: SessionUser, id: string) {
   const sql = db();
   const { task } = await loadTaskForUser(u, id, sql);
   if (task.assignee_id !== u.id) throw forbidden('담당자만 확인할 수 있습니다');
-  await sql`update tasks set assignee_ack_at = coalesce(assignee_ack_at, now()) where id = ${id}`;
+  await markAcked(u, id);
   return { ok: true };
+}
+/** V12 6번 "확인 완료": 담당자가 업무를 열거나 [확인]을 누르면 한 번만 기록하고 지시자(없으면 만든 사람)에게 알림 */
+export async function markAcked(u: SessionUser, id: string) {
+  const sql = db();
+  const [t] = await sql<{ title: string; requested_by: string | null; created_by: string }[]>`update tasks set assignee_ack_at = now()
+    where id = ${id} and assignee_id = ${u.id} and assignee_ack_at is null and deleted_at is null returning title, requested_by, created_by`;
+  if (!t) return false;
+  const to = t.requested_by ?? t.created_by;
+  if (to && to !== u.id) {
+    await notify(sql, { userIds: [to], type: 'task_done_for_requester', title: `확인 완료: ${t.title}`, body: `${u.name}님이 업무를 확인했습니다`,
+      link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `ack:${id}:${u.id}` });
+  }
+  return true;
 }
 
 async function checkLine(sql: Sql, lineId: string) {

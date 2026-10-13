@@ -206,7 +206,7 @@ describe('④ 반복 업무·반복 일정 생성·수정·취소', () => {
     assert.ok((await notifs(ctx.staffA.client)).some((x) => x.type === 'recurring_created'));
     // 반복 중지
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.spawned}`, { recurrenceRule: null });
-    const r3 = await ctx.managerA.client.ok('PATCH', `/api/tasks/${r.spawned}`, { status: 'done' });
+    const r3 = await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.spawned}`, { status: 'done' }); // V12: 진행 상태는 담당자만
     assert.equal(r3.spawned, null);
   });
   test('반복 업무: 서버 스케줄러가 기한 7일 전 다음 회차를 미리 만든다', async () => {
@@ -665,7 +665,7 @@ describe('일정 × 업무 통합 (S-1~S-10)', () => {
     const dues = await Promise.all(ids.map(async (id) => (await ctx.managerA.client.ok('GET', `/api/tasks/${id}`)).task));
     assert.deepEqual(dues.map((t) => t.due_date).sort(), [addDays(d, -7), addDays(d, -5), addDays(d, -1)].sort());
     const doneId = dues.find((t) => t.due_date === addDays(d, -1)).id;
-    await ctx.managerA.client.ok('PATCH', `/api/tasks/${doneId}`, { status: 'done' });
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${doneId}`, { status: 'done' }); // V12: 담당자가 완료
     const nd = addDays(d, 3);
     await ctx.managerA.client.ok('PATCH', `/api/events/${ev}`, { start: at(nd, '10:00'), end: at(nd, '11:00'), scope: 'all' });
     const after = await Promise.all(ids.map(async (id) => (await ctx.managerA.client.ok('GET', `/api/tasks/${id}`)).task));
@@ -1156,7 +1156,7 @@ describe('WORKIN_V3 서로 배정 · 지시자 · 직접 순서', () => {
     assert.ok((await ctx.owner.ok('GET', `/api/tasks?requestedById=${ctx.ownerId}&limit=500`)).tasks.some((x) => x.id === t));
     await hq2.ok('PATCH', `/api/tasks/${t}`, { status: 'review', version: d1.task.version }); // 관리자 확인 업무 → 검토 요청
     const n = (await ctx.owner.ok('GET', '/api/notifications')).items;
-    assert.ok(n.some((x) => x.type === 'task_done_for_requester' && x.link === `/tasks/${t}`), '지시자에게 완료 알림');
+    assert.ok(n.some((x) => x.type === 'review_requested' && x.link === `/tasks/${t}` && /승인 또는 반려/.test(x.body)), '지시자에게 검토 요청 알림(V12 7번)');
   });
   test('직접 순서: 보이는 순서대로 저장, 권한 밖 업무는 건너뜀', async () => {
     const ids = [];
@@ -1312,7 +1312,7 @@ describe('WORKIN_V6 상태 알림 · 일괄 생성 · 삭제/휴지통 · 오늘
     for (const st of ['in_progress', 'on_hold', 'done']) {
       v = (await a.ok('PATCH', `/api/tasks/${t}`, { status: st, version: v })).version;
     }
-    const ns = await sql`select title, body from notifications where user_id = ${ctx.ownerId} and entity_id = ${t} and type = 'task_done_for_requester' order by created_at`;
+    const ns = await sql`select title, body from notifications where user_id = ${ctx.ownerId} and entity_id = ${t} and type = 'task_done_for_requester' and title not like '확인 완료%' order by created_at`;
     assert.equal(ns.length, 3, '상태 변경 3번 = 알림 3건');
     assert.match(ns[0].body, /육가람님이 'V6 상태 알림'을\(를\) 시작했습니다/);
     assert.match(ns[1].body, /보류했습니다/); assert.match(ns[2].body, /완료했습니다/);
@@ -1756,5 +1756,38 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
     await ctx.owner.ok('POST', `/api/platform/requests/${r2.id}`, { approve: false });
     assert.equal((await ctx.owner.ok('GET', '/api/usage')).limits.aiRequests, 1500, '반려는 반영 안 됨');
     await setPlan('internal');
+  });
+});
+
+describe('WORKIN_V12 상태 권한 · 확인 완료 · 검토 요청 알림', () => {
+  test('진행 상태는 담당자만, 지시자는 검토 승인·반려·보류만, 담당자가 열면 확인 완료 + 지시자 알림, 검토 요청은 지시자에게 즉시', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 권한 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, approvalRequired: false })).id;
+    assert.equal((await ctx.managerA.client.ok('GET', `/api/tasks/${t}`)).task.assignee_ack_at, null, '지시자가 열어도 확인 아님');
+    const d = await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
+    assert.ok(d.task.assignee_ack_at, '담당자가 열면 확인 완료');
+    const ackN = await sql`select title, body from notifications where user_id = ${ctx.managerA.id} and entity_id = ${t} and title like '확인 완료%'`;
+    assert.equal(ackN.length, 1); assert.match(ackN[0].body, /이직원님이 업무를 확인했습니다/);
+    await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
+    assert.equal((await sql`select count(*)::int c from notifications where entity_id = ${t} and title like '확인 완료%'`)[0].c, 1, '한 번만');
+    const deny = await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
+    assert.equal(deny.status, 403); assert.match(deny.body.error.message, /담당자만/);
+    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t}`, { status: 'done' })).status, 403, '대표도 남의 업무 완료 불가');
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    const rv = await sql`select body from notifications where user_id = ${ctx.managerA.id} and entity_id = ${t} and type = 'review_requested'`;
+    assert.equal(rv.length, 1, '지시자에게 검토 요청 알림'); assert.match(rv[0].body, /승인 또는 반려/);
+    const pending = await sql`select count(*)::int c from notification_deliveries d join notifications n on n.id = d.notification_id where n.entity_id = ${t} and n.type = 'review_requested'`;
+    assert.ok(pending[0].c >= 0);
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress', reviewNote: '사진 추가' }); // 반려
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done' }); // 승인
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done');
+    // 보류는 지시자도
+    const t2 = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 보류 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+    await ctx.owner.ok('PATCH', `/api/tasks/${t2}`, { status: 'on_hold' });
+    await ctx.owner.ok('PATCH', `/api/tasks/${t2}`, { status: 'in_progress' });
+    // 담당자 없는 업무는 누구나
+    const t3 = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 담당 없음', orgUnitId: ctx.hq, assigneeId: null, approvalRequired: false })).id;
+    await ctx.owner.ok('PATCH', `/api/tasks/${t3}`, { status: 'done' });
   });
 });
