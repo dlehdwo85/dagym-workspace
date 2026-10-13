@@ -87,3 +87,6 @@
 - 20:20 한도 풀림 → Vercel API 운영 배포 aea0232 READY (f1065a1 상세 정리·행 클릭·칩 순서 + aea0232 V5 캘린더 Google 형·홈 일정·업무 연동·반복).
 
 - 2026-10-14 2b2f667 자동 배포 확인: 함수 sin1(X-Vercel-Id icn1::sin1), DB 왕복 75ms → 2ms, health 0.21s. 저장 버튼 복원·상세 쿼리 병렬·router.push 반영.
+
+- 2026-10-14 V6 배포 확인: 789adfb(1차), 4328984(2차, migration 019) 자동 배포 성공, scheduler healthy.
+- C 드라이브 0MB → 대표 승인 후 로컬 .next(351MB)·android-run 폴더 삭제, 중단된 merge 잔여물은 git stash 로 보관 후 fast-forward. 여유 ~340MB(근본 원인: Claude VM 번들 등).
