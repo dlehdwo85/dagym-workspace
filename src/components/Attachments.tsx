@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { api, broadcastRefresh } from './client';
 import { Camera, FileText, Image as ImageIcon, Link2, Loader2, Paperclip, Trash2 } from 'lucide-react';
 import { Button, Field, Modal, inputCls, toast, fmtDate, fmtDateTime } from './ui';
+import { DropZone, UploadProgress, putFile } from './upload';
 
 /** V8 5번: 사진은 올리기 전에 긴 변 1600px·JPEG 85% 로 줄인다(휴대폰 원본 5~10MB → 수백 KB). GIF·작은 사진·실패 시 원본 */
 export async function shrinkImage(file: File): Promise<File> {
@@ -20,6 +21,28 @@ export async function shrinkImage(file: File): Promise<File> {
   } catch { return file; }
 }
 
+/** V12 9번: 업무·일정 첨부 올리기(여러 개·진행률·알기 쉬운 실패 원인) — 첨부 칸·댓글 칸 끌어 놓기 공용 */
+export async function uploadTaskFiles(list: File[], target: { taskId?: string; eventId?: string }, setProg: (f: (x: { name: string; pct: number; error?: string }[]) => { name: string; pct: number; error?: string }[]) => void) {
+  const start = list.map((f) => ({ name: f.name, pct: 0 }));
+  setProg(() => start);
+  const upd = (i: number, patch: Partial<{ pct: number; error: string }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
+  let ok = 0;
+  for (const [n, raw] of list.entries()) {
+    try {
+      const file = await shrinkImage(raw);
+      // B-7 촬영(파일 수정) 시각을 함께 기록 — 사진 증빙의 시점 확인용
+      const capturedAt = raw.lastModified ? new Date(raw.lastModified).toISOString() : undefined;
+      const r = await api('/api/attachments', { body: { ...target, kind: 'file', fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, capturedAt } });
+      await putFile(r.upload, file, (pct) => upd(n, { pct }));
+      await api(`/api/attachments/${r.id}/complete`, { body: {} });
+      upd(n, { pct: 100 }); ok++;
+    } catch (e: any) { upd(n, { error: e.message }); toast.error(`${raw.name}: ${e.message}`); }
+  }
+  if (ok) toast.ok(`${ok}개 첨부 완료`);
+  if (ok === list.length) setTimeout(() => setProg(() => []), 1500);
+  return ok;
+}
+
 const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '');
 
 const SOURCE_LABEL: Record<string, string> = { upload: '업로드', google_drive: 'Google Drive', chatgpt: 'ChatGPT 결과물', notion: 'Notion', web: '웹 링크', other: '기타' };
@@ -34,25 +57,15 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   const photos = items.filter(isImage);
   const albumRef = useRef<HTMLInputElement>(null);
 
+  const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
   async function upload(files: FileList | null) {
     if (!files?.length) return;
-    const list = Array.from(files);
-    for (const [n, raw] of list.entries()) {
-      setBusy(`${list.length > 1 ? `${n + 1}/${list.length} ` : ''}${raw.name} 올리는 중…`);
-      const file = await shrinkImage(raw);
-      try {
-        // B-7 촬영(파일 수정) 시각을 함께 기록 — 사진 증빙의 시점 확인용
-        const capturedAt = raw.lastModified ? new Date(raw.lastModified).toISOString() : undefined;
-        const r = await api('/api/attachments', { body: { taskId, eventId, kind: 'file', fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, capturedAt } });
-        const up = await fetch(r.upload.url, { method: 'PUT', headers: r.upload.headers, body: file });
-        if (!up.ok) throw new Error(`파일 전송 실패 (${up.status})`);
-        await api(`/api/attachments/${r.id}/complete`, { body: {} });
-        toast.ok(`${file.name} 첨부 완료`);
-      } catch (e: any) { toast.error(`${file.name}: ${e.message}`); }
-    }
+    setBusy('올리는 중…');
+    await uploadTaskFiles(Array.from(files), { taskId, eventId }, setProg);
     setBusy('');
     if (fileRef.current) fileRef.current.value = '';
     if (camRef.current) camRef.current.value = '';
+    if (albumRef.current) albumRef.current.value = '';
     onChange(); broadcastRefresh();
   }
   async function addLink(e: React.FormEvent) {
@@ -69,7 +82,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   }
 
   return (
-    <div>
+    <DropZone onFiles={(f) => upload(f)} disabled={!canEdit || !!busy} label="여기에 놓으면 첨부됩니다 (여러 개 가능)" testid="attach-drop">
       {items.some(isImage) && (
         <div className="mb-2 grid grid-cols-3 gap-2 sm:grid-cols-4" data-testid="photo-grid">
           {items.filter(isImage).map((a) => (
@@ -152,7 +165,8 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setLinkOpen(false)}>취소</Button><Button type="submit">연결</Button></div>
         </form>
       </Modal>
-    </div>
+      <UploadProgress items={prog} />
+    </DropZone>
   );
 }
 

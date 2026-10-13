@@ -1536,6 +1536,7 @@ await step('V12-8: 업무 등록 "📎 자료로 채우기" → 제목·설명·
   assert.equal((await sql`select count(*)::int n from attachments where task_id = ${t.id} and deleted_at is null`)[0].n, 1, '자료 첨부');
   // AI 비서에 사진 첨부 → 일괄 제안 미리보기
   await owner.goto(BASE + '/assistant');
+  await owner.getByText('이렇게 말해 보세요').waitFor(); // 화면 준비(상태 불러옴) 뒤에 파일 선택
   await owner.getByTestId('ai-file-input').setInputFiles([{ name: 'E2E 표.png', mimeType: 'image/png', buffer: png }]);
   await owner.getByTestId('ai-files').getByText('E2E 표.png').waitFor();
   await q([{ content: [{ type: 'tool_use', id: 'e8', name: 'propose_create_tasks', input: { title: 'E2E 지점 자료', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: addDays(today, 5), checklist: ['가', '나'] } }], stop_reason: 'tool_use' },
@@ -1548,6 +1549,27 @@ await step('V12-8: 업무 등록 "📎 자료로 채우기" → 제목·설명·
   await owner.getByTestId('ai-proposal').getByRole('button', { name: '확인' }).click();
   await owner.getByTestId('ai-proposal').getByText('✓ 반영됨').waitFor();
   assert.equal((await sql`select count(*)::int n from tasks where title = 'E2E 지점 자료'`)[0].n, 2);
+});
+
+await step('V12-9: 첨부 칸·자료실에 파일 끌어 놓기(여러 개·진행률), 저장소 연결 실패 시 알기 쉬운 원인 표시', async () => {
+  const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 끌어 놓기 업무', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, approvalRequired: false })).id;
+  await owner.goto(`${BASE}/tasks/${t}`);
+  const drop = async (testid, files) => owner.getByTestId(testid).first().evaluate((el, fs) => {
+    const dt = new DataTransfer();
+    for (const f of fs) dt.items.add(new File([f.body], f.name, { type: f.type }));
+    for (const type of ['dragenter', 'dragover', 'drop']) el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
+  }, files);
+  await drop('attach-drop', [{ name: '끌기1.txt', type: 'text/plain', body: 'a' }, { name: '끌기2.txt', type: 'text/plain', body: 'b' }]);
+  await owner.getByText('2개 첨부 완료').waitFor();
+  assert.equal((await sql`select count(*)::int n from attachments where task_id = ${t} and deleted_at is null`)[0].n, 2);
+  // 저장소 연결 실패(CORS·네트워크) → 원인 안내
+  await owner.route('**/api/files/local**', (r) => (r.request().method() === 'PUT' ? r.abort('failed') : r.continue()));
+  await drop('comment-drop', [{ name: '실패.txt', type: 'text/plain', body: 'x' }]);
+  await owner.getByTestId('upload-progress').getByText(/파일 저장소에 연결하지 못했습니다/).first().waitFor();
+  await owner.unroute('**/api/files/local**');
+  await owner.goto(BASE + '/library');
+  await drop('library-drop', [{ name: '끌기 자료.txt', type: 'text/plain', body: '끌어 놓은 자료' }]);
+  await owner.getByTestId('library-list').getByText('끌기 자료').waitFor();
 });
 
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {

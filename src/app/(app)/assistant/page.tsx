@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Check, Loader2, Mic, Paperclip, Send, Sparkles, X } from 'lucide-react';
 import { AI_ACCEPT, uploadToLibrary } from '@/components/libraryUpload';
+import { DropZone } from '@/components/upload';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
@@ -36,7 +37,7 @@ export default function AssistantPage() {
     if (!list?.length) return;
     for (const f of Array.from(list).slice(0, 5 - files.length)) {
       setUploading(`${f.name} 올리는 중…`);
-      try { const r = await uploadToLibrary(f); setFiles((x) => [...x, r]); } catch (e: any) { toast.error(`${f.name}: ${e.message}`); }
+      try { const r = await uploadToLibrary(f, undefined, (pct) => setUploading(`${f.name} 올리는 중… ${pct}%`)); setFiles((x) => [...x, r]); } catch (e: any) { toast.error(`${f.name}: ${e.message}`); }
     }
     setUploading(''); if (fileRef.current) fileRef.current.value = '';
   }
@@ -86,6 +87,7 @@ export default function AssistantPage() {
         sub={<>자료실·업무·일정{user.role === 'owner' || user.role === 'admin' ? '·매출' : ''}을 내 권한 안에서 찾아 답합니다. 업무 만들기·첨부·댓글은 <b>[확인]</b>을 눌러야 반영됩니다.
           {u?.costUsd !== undefined && <span className="ml-1 text-xs text-ink-3">이번 달 ${u.costUsd.toFixed(2)} / 한도 ${u.limitUsd}{status.data?.canSetLimit && <button onClick={editLimit} className="ml-1 text-brand-600 underline">한도 바꾸기</button>}</span>}</>} />
       {taskId && task.data && <div className="mb-2 rounded-input bg-brand-50 px-3 py-1.5 text-sm text-brand-800">이 업무 기준: <Link href={`/tasks/${taskId}`} className="font-semibold underline">{task.data.task.title}</Link></div>}
+      <DropZone onFiles={(f) => attach(f)} disabled={files.length >= 5 || !!uploading} label="여기에 놓으면 AI 요청에 첨부됩니다 (최대 5개)" className="flex min-h-0 flex-1 flex-col" testid="ai-drop">
       <div className="scrollbar-thin flex-1 space-y-3 overflow-y-auto rounded-card border border-line bg-white p-3 shadow-card" data-testid="ai-chat">
         {!msgs.length && (
           <div className="space-y-2 p-2">
@@ -128,6 +130,7 @@ export default function AssistantPage() {
         {busy && <div className="flex items-center gap-2 text-sm text-ink-3"><Loader2 className="size-4 animate-spin" />찾아보는 중…</div>}
         <div ref={end} />
       </div>
+      </DropZone>
       {(files.length > 0 || uploading) && (
         <div className="mt-2 flex flex-wrap gap-1.5 text-xs" data-testid="ai-files">
           {files.map((f) => <span key={f.id} className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-amber-800">📎 {f.name}<button type="button" onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))} aria-label={`${f.name} 빼기`}><X className="size-3" /></button></span>)}

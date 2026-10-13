@@ -1,15 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { readLocal, verifyLocalSig, writeLocal, s3Configured, MAX_UPLOAD_BYTES } from '@/lib/storage';
+import { readLocal, verifyLocalSig, writeLocal, s3Configured, putObject, MAX_UPLOAD_BYTES, FALLBACK_MAX } from '@/lib/storage';
 
 // 로컬 디스크 저장소 (개발·검수 환경). 운영은 S3 호환 저장소를 사용한다.
+// PUT 은 운영(S3·R2)에서도 "서버 경유 업로드"(브라우저 → 저장소 직접 전송이 실패할 때, 4MB 이하)로 쓴다 — 서명은 같은 HMAC(10분)
 export async function PUT(req: NextRequest) {
-  if (s3Configured()) return NextResponse.json({ error: 'disabled' }, { status: 404 });
   const p = req.nextUrl.searchParams;
   const key = p.get('key') ?? '';
   if (!verifyLocalSig('put', key, p.get('exp') ?? '', p.get('sig') ?? '')) return NextResponse.json({ error: 'bad signature' }, { status: 403 });
   const buf = Buffer.from(await req.arrayBuffer());
-  if (buf.length > MAX_UPLOAD_BYTES) return NextResponse.json({ error: 'too large' }, { status: 413 });
-  await writeLocal(key, buf);
+  if (buf.length > (s3Configured() ? FALLBACK_MAX : MAX_UPLOAD_BYTES)) return NextResponse.json({ error: 'too large' }, { status: 413 });
+  if (s3Configured()) {
+    try { await putObject(key, buf, req.headers.get('content-type') || 'application/octet-stream'); } catch (e) { return NextResponse.json({ error: `storage: ${(e as Error).message}` }, { status: 502 }); }
+  } else await writeLocal(key, buf);
   return NextResponse.json({ ok: true });
 }
 

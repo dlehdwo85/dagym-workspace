@@ -14,7 +14,8 @@ import {
 } from 'lucide-react';
 import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
-import { Attachments } from '@/components/Attachments';
+import { Attachments, uploadTaskFiles } from '@/components/Attachments';
+import { DropZone, UploadProgress } from '@/components/upload';
 import { BellChip, DuePicker, warnAway } from '@/components/TaskQuick';
 import { TIMES, timeLabel } from '@/components/DateTimePickers';
 import { QuickAddTask } from '@/components/QuickAddTask';
@@ -37,6 +38,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const router = useRouter();
   const { user, dir, features } = useSession();
   const { data, error, loading, reload } = useApi<any>(`/api/tasks/${id}`);
+  const [cprog, setCprog] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const projects = useApi<{ projects: any[] }>('/api/projects');
   const [comment, setComment] = useState('');
   const [picked, setPicked] = useState<{ id: string; name: string }[]>([]); // 입력창에는 @이름만, 전송 때 내부 표기로 변환
@@ -528,6 +530,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             ))}
             <li className="pt-1 text-ink-3">작성: {t.created_by_name} · {fmtDateTime(t.created_at)}</li>
           </ul>
+          {/* V12 9번: 댓글 칸에 파일을 끌어 놓으면 이 업무에 첨부 */}
+          <DropZone onFiles={async (f) => { await uploadTaskFiles(Array.from(f), { taskId: id }, setCprog); reload(); broadcastRefresh(); }} label="여기에 놓으면 이 업무에 첨부됩니다" testid="comment-drop">
           <form onSubmit={sendComment} className="relative mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20">
             {/* V8 7번: "@" 를 치면 이 업무를 볼 수 있는 사람 자동완성 */}
             {(() => {
@@ -561,6 +565,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <Button size="sm" type="submit" disabled={!comment.trim()}>등록</Button>
             </div>
           </form>
+          <UploadProgress items={cprog} />
+          </DropZone>
         </section>
       </div>
 

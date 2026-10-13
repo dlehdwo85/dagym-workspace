@@ -207,6 +207,13 @@ S-P2(ICS 구독·회의실 예약·휴가 결재·내보내기/휴지통/2단계
 - 운영 DB 확인(오늘 done/on_hold 로 바뀐 업무·변경자)은 클라우드에 접속 정보가 없어 못 함 — 로컬에서 `select a.created_at, u.name, t.title, a.changes from activities a join users u on u.id=a.actor_id join tasks t on t.id=a.entity_id where a.entity_type='task' and a.changes ? 'status' and a.created_at::date = current_date order by 1` 로 확인 부탁.
 - 시험: E2E 밀기 단계 교체(기본 꺼짐·30px·세로 무시·45% 완료·되돌리기), 47/47.
 
+### 2026-10-14 · V12 9번 + 업로드 긴급 수정 (R2 "Failed to fetch") — 1커밋
+- ✅ **R2 업로드 실패 원인 수정**: `@aws-sdk/client-s3` 기본 체크섬(x-amz-checksum-crc32·x-amz-sdk-checksum-algorithm)이 presigned PUT 에 붙어 R2 가 거절 → `requestChecksumCalculation/responseChecksumValidation: 'WHEN_REQUIRED'`
+- ✅ **서버 경유 대체 업로드**: 저장소로 바로 보내기가 실패하면(CORS·네트워크·서명) 4MB 이하 파일은 같은 서명(10분)으로 `/api/files/local`(운영에서는 서버가 R2 에 저장)로 자동 재시도
+- ✅ 실패 문구: 인터넷 끊김 / 저장소 연결 실패(접근 설정·네트워크) / 허가 만료 403 / 너무 큼 413 / 저장소 일시 오류 5xx + **상태 코드·응답 본문 앞부분** 함께 표시, 파일별 진행률 줄에 빨간 글씨
+- ✅ **끌어 놓기 업로드(여러 개·진행률)**: 업무·일정 첨부 칸, 댓글 칸(→ 그 업무에 첨부), 자료실 목록, AI 비서 대화 칸, 업무 등록 "자료로 채우기"
+- 시험: API 122/122, E2E 60/60(+첨부 칸 2개 끌어 놓기, 저장소 연결 실패 안내, 자료실 끌어 놓기). R2 실제 업로드는 운영에서 로컬 확인 필요(테스트는 로컬 디스크 저장소)
+
 ### 2026-10-14 · WORKIN_V12 8번 자료로 업무 일괄 생성
 - ✅ AI 비서에 **📎 자료 첨부**(사진·PDF·엑셀·워드·PPT·글, 최대 5개) → 회사 자료실 "AI 요청 첨부" 폴더에 저장(R2 적용 후 R2) → **사진은 Claude 비전 입력(긴 변 1600px로 줄여 base64)**, PDF 는 문서 입력, 엑셀·워드·PPT·CSV 는 추출한 글자로 전달
 - ✅ 도구 `propose_create_tasks`: 같은 업무를 **담당자별 1건씩** + 체크리스트·설명(메모)·마감 날짜·시각·우선순위·지시자·**첨부 자료** → 제안 카드에 담당자·마감·체크리스트·메모 미리보기 → [확인] 후 생성, 만든 업무마다 원본 자료 첨부. 모르는 담당자 id·다른 회사 자료는 거절

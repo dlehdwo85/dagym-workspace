@@ -9,6 +9,7 @@ import { parseTaskText } from '@/lib/nlparse';
 import { PRIORITY_LABEL } from '@/lib/types';
 import { Loader2, Mic, Paperclip, Sparkles } from 'lucide-react';
 import { AI_ACCEPT, uploadToLibrary } from './libraryUpload';
+import { DropZone } from './upload';
 import { TIMES, timeLabel } from './DateTimePickers';
 import { useSession } from './session';
 
@@ -45,7 +46,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
     if (!files?.length) return;
     try {
       const ups: { id: string; name: string }[] = [];
-      for (const fl of Array.from(files).slice(0, 5)) { setFilling(`${fl.name} 올리는 중…`); ups.push(await uploadToLibrary(fl)); }
+      for (const fl of Array.from(files).slice(0, 5)) { setFilling(`${fl.name} 올리는 중…`); ups.push(await uploadToLibrary(fl, undefined, (pct) => setFilling(`${fl.name} 올리는 중… ${pct}%`))); }
       setFilling('AI 가 자료를 읽는 중…');
       const r = await api('/api/ai/fill', { body: { fileIds: ups.map((u) => u.id), hint: f.title || undefined } });
       setF((x: any) => ({ ...x, title: r.title || x.title, description: r.description, checklist: r.checklist, ...(r.dueDate ? { dueDate: r.dueDate } : {}), ...(r.dueTime ? { dueTime: r.dueTime } : {}),
@@ -123,9 +124,11 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
       )}
       {!defaults?.parentId && features.ai && (
         <>
+          <DropZone onFiles={(fl) => fillFrom(fl)} disabled={!!filling} label="여기에 놓으면 자료로 채웁니다">
           <button type="button" onClick={() => fillRef.current?.click()} disabled={!!filling} className="mb-3 flex w-full items-center justify-center gap-2 rounded-input border border-amber-300 bg-amber-50 py-2.5 text-sm font-semibold text-amber-800 disabled:opacity-60" data-testid="quick-fill">
             {filling ? <><Loader2 className="size-4 animate-spin" />{filling}</> : <><Paperclip className="size-4" />📎 자료로 채우기 (사진·PDF·엑셀)</>}
           </button>
+          </DropZone>
           <input ref={fillRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => fillFrom(e.target.files)} data-testid="quick-fill-input" />
         </>
       )}

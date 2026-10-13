@@ -4,6 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { Download, FileSpreadsheet, FileText, Folder, Image as ImageIcon, Library, Loader2, Pencil, Search, Trash2, Upload } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
+import { DropZone, UploadProgress, putFile } from '@/components/upload';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 type F = { id: string; folder: string; title: string; file_name: string; mime_type: string; size_bytes: number; tags: string[]; description: string | null;
@@ -30,21 +31,28 @@ export default function LibraryPage() {
   useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 300); return () => clearTimeout(t); }, [q]);
   useEffect(() => { setUpFolder(folder ?? ''); }, [folder]);
 
+  // V12 9번: 여러 개·진행률·알기 쉬운 실패 원인 (자료실은 원본 그대로 — 로고 화질 유지)
+  const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
   async function upload(files: FileList | null) {
     if (!files?.length) return;
     const list = Array.from(files);
     const tags = upTags.split(/[,\s]+/).map((t) => t.replace(/^#/, '').trim()).filter(Boolean).slice(0, 20);
+    setProg(list.map((f) => ({ name: f.name, pct: 0 })));
+    const upd = (i: number, patch: Partial<{ pct: number; error: string }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
+    let ok = 0;
     for (const [n, file] of list.entries()) {
       setBusy(`${list.length > 1 ? `${n + 1}/${list.length} ` : ''}${file.name} 올리는 중…`);
       try {
         const r = await api('/api/library', { body: { fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, folder: upFolder, tags } });
-        const up = await fetch(r.upload.url, { method: 'PUT', headers: r.upload.headers, body: file });
-        if (!up.ok) throw new Error(`파일 전송 실패 (${up.status})`);
+        await putFile(r.upload, file, (pct) => upd(n, { pct }));
         await api(`/api/library/${r.id}/complete`, { body: {} });
-      } catch (e: any) { toast.error(`${file.name}: ${e.message}`); }
+        upd(n, { pct: 100 }); ok++;
+      } catch (e: any) { upd(n, { error: e.message }); toast.error(`${file.name}: ${e.message}`); }
     }
     setBusy(''); if (fileRef.current) fileRef.current.value = '';
-    toast.ok(`${list.length}개 올렸습니다`); reload();
+    if (ok) toast.ok(`${ok}개 올렸습니다`);
+    if (ok === list.length) setTimeout(() => setProg([]), 1500);
+    reload();
   }
   async function save(e: React.FormEvent) {
     e.preventDefault(); if (!edit) return;
@@ -85,6 +93,8 @@ export default function LibraryPage() {
           </button>
         ))}
       </div>
+      <UploadProgress items={prog} />
+      <DropZone onFiles={(f) => upload(f)} disabled={!!busy} label="여기에 놓으면 자료실에 올라갑니다 (여러 개 가능)" testid="library-drop" className="min-h-[120px]">
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={5} /> : !data!.files.length ? (
         <Empty title={query ? '찾는 자료가 없습니다' : '아직 자료가 없습니다'} icon={Library}>{query ? '다른 말로 찾아 보세요' : '로고·소개서·단가표를 올려 두면 업무에 바로 첨부하고 AI 비서가 찾아 씁니다.'}</Empty>
       ) : (
@@ -113,6 +123,7 @@ export default function LibraryPage() {
           ))}
         </ul>
       )}
+      </DropZone>
       <Modal open={!!edit} onClose={() => setEdit(null)} title="자료 고치기">
         {edit && (
           <form onSubmit={save} className="space-y-3">

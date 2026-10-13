@@ -5,6 +5,8 @@ import path from 'node:path';
 import { hmac } from './crypto';
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+/** 서버 경유 업로드 최대 크기 (Vercel 함수 요청 본문 한도 4.5MB 아래) */
+export const FALLBACK_MAX = 4 * 1024 * 1024;
 const LOCAL_DIR = process.env.LOCAL_UPLOAD_DIR ?? path.join(process.cwd(), '.data', 'uploads');
 
 export function s3Configured() {
@@ -17,6 +19,10 @@ function s3() {
     region: process.env.S3_REGION || 'auto',
     endpoint: process.env.S3_ENDPOINT || undefined,
     forcePathStyle: !!process.env.S3_ENDPOINT,
+    // R2 는 SDK 기본 체크섬(x-amz-checksum-crc32·x-amz-sdk-checksum-algorithm)을 presigned PUT 에서 받아 주지 않아
+    // 브라우저 업로드가 CORS 헤더 없는 오류("Failed to fetch")가 된다 → 필요할 때만 계산
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
     credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID!, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY! },
   });
   return client;
@@ -24,13 +30,15 @@ function s3() {
 
 /** 업로드 대상: S3 면 presigned PUT, 로컬이면 서명된 내부 업로드 URL */
 export async function uploadTarget(key: string, mime: string) {
-  if (s3Configured()) {
-    const url = await getSignedUrl(s3(), new PutObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key, ContentType: mime }), { expiresIn: 600 });
-    return { method: 'PUT' as const, url, headers: { 'content-type': mime } };
-  }
   const exp = Date.now() + 600_000;
   const sig = hmac(`put:${key}:${exp}`);
-  return { method: 'PUT' as const, url: `/api/files/local?key=${encodeURIComponent(key)}&exp=${exp}&sig=${sig}`, headers: { 'content-type': mime } };
+  const viaServer = `/api/files/local?key=${encodeURIComponent(key)}&exp=${exp}&sig=${sig}`;
+  if (s3Configured()) {
+    const url = await getSignedUrl(s3(), new PutObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key, ContentType: mime }), { expiresIn: 600 });
+    // fallback: 저장소로 바로 보내기가 실패하면(브라우저·CORS·네트워크) 작은 파일은 서버를 거쳐 저장 (Vercel 요청 크기 한도 4MB)
+    return { method: 'PUT' as const, url, headers: { 'content-type': mime }, fallback: viaServer, fallbackMax: FALLBACK_MAX };
+  }
+  return { method: 'PUT' as const, url: viaServer, headers: { 'content-type': mime } };
 }
 
 export function verifyLocalSig(kind: 'put' | 'get', key: string, exp: string, sig: string) {
