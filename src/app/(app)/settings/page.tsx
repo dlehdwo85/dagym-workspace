@@ -40,6 +40,8 @@ export default function Settings() {
         {features.googleSync && <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 (선택 기능) →</Link>}
       </section>
       <SwipeToggle />
+      <CalendarFeed />
+      <TwoFactor />
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 종류별 수신</h2>
         <table className="w-full text-sm" data-testid="prefs">
@@ -107,6 +109,86 @@ function SwipeToggle() {
           onChange={(e) => { setOn(e.target.checked); try { localStorage.setItem('wos_swipe_done', e.target.checked ? '1' : '0'); } catch {} toast.ok(e.target.checked ? '켰습니다' : '껐습니다'); }} />
         <span><b className="font-semibold">밀어서 완료 (휴대폰, 이 기기)</b><span className="block text-xs text-ink-2">켜면 업무 목록에서 행을 오른쪽 끝까지(절반 가까이) 밀었다 놓을 때 완료됩니다. 실수로 완료되지 않도록 기본은 꺼져 있습니다. 완료한 업무는 목록 위 &ldquo;방금 완료한 업무&rdquo;에서 되돌릴 수 있습니다.</span></span>
       </label>
+    </section>
+  );
+}
+
+/** V12 3번: 캘린더 구독 주소(ICS) — 구글·아웃룩·애플 캘린더에 "URL로 추가" (읽기 전용, 연결 없이 링크만) */
+function CalendarFeed() {
+  const { data, reload } = useApi<{ exists: boolean; createdAt: string | null; lastUsedAt: string | null }>('/api/calendar-feed');
+  const [url, setUrl] = useState('');
+  async function make() {
+    if (data?.exists && !confirm('새 주소를 만들면 이전 주소는 더 이상 동작하지 않습니다. 계속할까요?')) return;
+    try { const r = await api('/api/calendar-feed', { body: {} }); setUrl(r.url); reload(); } catch (e: any) { toast.error(e.message); }
+  }
+  async function remove() {
+    if (!confirm('구독 주소를 끌까요? 캘린더 앱에서 워크인 일정이 더 이상 갱신되지 않습니다.')) return;
+    await api('/api/calendar-feed', { method: 'DELETE' }); setUrl(''); reload();
+  }
+  return (
+    <section className="rounded-lg border bg-white p-4 text-sm" data-testid="calendar-feed">
+      <h2 className="font-semibold">캘린더 구독 주소 (구글·아웃룩·애플)</h2>
+      <p className="mt-1 text-xs text-ink-2">내 일정·참석 일정·내 업무 마감을 다른 캘린더 앱에서 볼 수 있습니다(읽기 전용, 한 시간쯤마다 갱신). 주소를 아는 사람은 누구나 볼 수 있으니 공유하지 마세요.</p>
+      {url ? (
+        <div className="mt-2 space-y-1.5">
+          <input readOnly className={cx(inputCls, 'font-mono text-xs')} value={url} onFocus={(e) => e.currentTarget.select()} aria-label="캘린더 구독 주소" />
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => navigator.clipboard?.writeText(url).then(() => toast.ok('복사했습니다'))}>주소 복사</Button>
+            <a className="inline-flex h-8 items-center rounded-input border border-line px-3 text-xs" href={url.replace(/^https?:/, 'webcal:')}>애플·아웃룩에서 열기</a>
+          </div>
+          <p className="text-xs text-ink-3">구글 캘린더: 다른 캘린더 + → URL로 추가 → 위 주소 붙여넣기. 이 주소는 지금 한 번만 보입니다.</p>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={make} data-testid="feed-make">{data?.exists ? '새 주소 만들기' : '구독 주소 만들기'}</Button>
+          {data?.exists && <><span className="text-xs text-ink-2">사용 중 · 마지막 갱신 {data.lastUsedAt ? fmtDateTime(data.lastUsedAt) : '아직 없음'}</span><Button size="sm" variant="secondary" onClick={remove}>끄기</Button></>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** V12 3번: 2단계 인증(OTP 앱) · 로그인한 기기 · 다른 기기 로그아웃 */
+function TwoFactor() {
+  const st = useApi<{ enabled: boolean; enabledAt: string | null }>('/api/auth/2fa');
+  const ss = useApi<{ sessions: any[] }>('/api/auth/sessions');
+  const [setup, setSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null);
+  const [code, setCode] = useState('');
+  async function start() { try { setSetup(await api('/api/auth/2fa', { body: {} })); setCode(''); } catch (e: any) { toast.error(e.message); } }
+  async function enable() { try { await api('/api/auth/2fa', { method: 'PUT', body: { code } }); setSetup(null); st.reload(); toast.ok('2단계 인증을 켰습니다 — 다음 로그인부터 코드를 묻습니다'); } catch (e: any) { toast.error(e.message); } }
+  async function disable() {
+    const c = prompt('끄려면 OTP 앱의 6자리를 입력하세요'); if (!c) return;
+    try { await api('/api/auth/2fa', { method: 'DELETE', body: { code: c } }); st.reload(); toast.ok('2단계 인증을 껐습니다'); } catch (e: any) { toast.error(e.message); }
+  }
+  async function logoutOthers() {
+    if (!confirm('이 기기를 빼고 모든 기기에서 로그아웃할까요?')) return;
+    const r = await api('/api/auth/sessions', { method: 'DELETE' }); ss.reload(); toast.ok(`${r.revoked}개 기기에서 로그아웃했습니다`);
+  }
+  return (
+    <section className="rounded-lg border bg-white p-4 text-sm" data-testid="security">
+      <h2 className="font-semibold">보안</h2>
+      <div className="mt-2">
+        <b className="font-medium">2단계 인증 (OTP 앱)</b>{' '}
+        {st.data?.enabled ? <span className="text-emerald-700">켜짐 · {fmtDateTime(st.data.enabledAt!)}</span> : <span className="text-ink-2">꺼짐</span>}
+        <p className="text-xs text-ink-2">켜면 로그인할 때 비밀번호 다음에 휴대폰 OTP 앱(구글·마이크로소프트 Authenticator 등)의 6자리 코드를 입력합니다.</p>
+        {st.data?.enabled ? <Button size="sm" variant="secondary" className="mt-1" onClick={disable}>끄기</Button> : !setup ? <Button size="sm" className="mt-1" onClick={start} data-testid="2fa-start">2단계 인증 설정</Button> : (
+          <div className="mt-2 space-y-2 rounded-input bg-slate-50 p-3">
+            <p className="text-xs">① OTP 앱에서 &ldquo;설정 키 입력&rdquo;을 고르고 아래 키를 입력하세요 (계정: 워크인).</p>
+            <input readOnly className={cx(inputCls, 'font-mono')} value={setup.secret.replace(/(.{4})/g, '$1 ').trim()} aria-label="2단계 인증 설정 키" data-testid="2fa-secret" onFocus={(e) => e.currentTarget.select()} />
+            <a className="text-xs text-brand-600 underline" href={setup.otpauthUrl}>이 휴대폰의 OTP 앱으로 바로 열기</a>
+            <p className="text-xs">② 앱에 보이는 6자리를 입력하세요.</p>
+            <div className="flex gap-2"><input className={cx(inputCls, 'w-32 font-mono')} inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} aria-label="OTP 코드" /><Button size="sm" onClick={enable} disabled={code.length < 6}>켜기</Button></div>
+          </div>
+        )}
+      </div>
+      <div className="mt-4">
+        <div className="flex items-center justify-between"><b className="font-medium">로그인한 기기</b><Button size="sm" variant="secondary" onClick={logoutOthers}>다른 기기 모두 로그아웃</Button></div>
+        <ul className="mt-1 divide-y divide-line text-xs" data-testid="sessions">
+          {ss.data?.sessions.map((x) => (
+            <li key={x.id} className="flex justify-between gap-2 py-1.5"><span className="min-w-0 truncate">{x.client === 'web' ? '웹' : x.client === 'android' ? 'Android 앱' : 'iPhone 앱'} · {(x.user_agent ?? '').replace(/\(.*?\)/g, '').slice(0, 40)}{x.ip ? ` · ${x.ip}` : ''}{x.current && <b className="ml-1 text-emerald-700">지금 이 기기</b>}</span><span className="shrink-0 text-ink-3">{fmtDateTime(x.last_seen_at)}</span></li>
+          ))}
+        </ul>
+      </div>
     </section>
   );
 }

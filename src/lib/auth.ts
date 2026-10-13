@@ -6,13 +6,13 @@ import type { Role, SessionUser } from './types';
 export const SESSION_COOKIE = 'wos_session';
 const SESSION_DAYS = 30;
 
-export async function createSession(userId: string, client: string, userAgent: string | null) {
+export async function createSession(userId: string, client: string, userAgent: string | null, opts: { ip?: string | null; mfaPending?: boolean } = {}) {
   const token = newToken();
   const sql = db();
   await sql`
-    insert into sessions (id, user_id, client, user_agent, expires_at)
-    values (${sha256(token)}, ${userId}, ${client}, ${userAgent?.slice(0, 300) ?? null}, now() + ${SESSION_DAYS + ' days'}::interval)`;
-  await sql`update users set last_login_at = now() where id = ${userId}`;
+    insert into sessions (id, user_id, client, user_agent, expires_at, ip, mfa_pending)
+    values (${sha256(token)}, ${userId}, ${client}, ${userAgent?.slice(0, 300) ?? null}, ${opts.mfaPending ? sql`now() + interval '10 minutes'` : sql`now() + ${SESSION_DAYS + ' days'}::interval`}, ${opts.ip ?? null}, ${!!opts.mfaPending})`;
+  if (!opts.mfaPending) await sql`update users set last_login_at = now() where id = ${userId}`;
   return { token, maxAge: SESSION_DAYS * 86400 };
 }
 
@@ -39,7 +39,7 @@ export async function userFromToken(token: string | undefined | null): Promise<S
   >`
     select u.id, u.email, u.name, u.role, u.status, u.timezone, s.last_seen_at, u.is_demo, u.platform_admin
     from sessions s join users u on u.id = s.user_id
-    where s.id = ${id} and s.revoked_at is null and s.expires_at > now() and u.status = 'active'`;
+    where s.id = ${id} and s.revoked_at is null and s.expires_at > now() and u.status = 'active' and not s.mfa_pending`;
   const r = rows[0];
   if (!r) return null;
   // 슬라이딩 만료: 하루 한 번만 갱신

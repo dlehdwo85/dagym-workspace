@@ -1695,7 +1695,7 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
     assert.deepEqual(u.limits, { users: null, storageGb: null, aiRequests: null });
     assert.ok(u.usage.storageBytes > 0 && u.usage.users >= 4 && u.usage.aiRequests >= 1, '첨부·자료실·사람·AI 요청 셈');
     assert.ok(u.topFiles.length > 0 && u.topFiles[0].size >= u.topFiles.at(-1).size, '큰 파일 순');
-    assert.ok(u.plans.some((p) => p.code === 'standard' && p.monthly_krw === 29000) && !u.plans.some((p) => p.code === 'internal'), '내부 요금제는 목록에 없음');
+    assert.ok(u.plans.some((p) => p.code === 'basic' && p.per_user_krw === 1500) && u.plans.some((p) => p.code === 'free' && p.limits.users === 20) && !u.plans.some((p) => p.code === 'internal' || p.code === 'standard'), '2안: 무료·베이직(1인 1,500원), 내부·1안은 목록에 없음');
     assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 403);
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.deepEqual(pf.tenants.map((t) => t.id).sort(), ['default', 'demo']);
@@ -1706,11 +1706,16 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
 
   test('요금제 숫자는 배포 없이 변경, 추가 옵션은 한도에 더해짐', async () => {
     await ctx.owner.ok('PUT', '/api/platform/plans/standard', { name: '스탠다드', monthlyKrw: 30000, limits: { users: 20, storageGb: 50, aiRequests: 500 } });
-    assert.equal((await ctx.owner.ok('GET', '/api/usage')).plans.find((p) => p.code === 'standard').monthly_krw, 30000);
+    assert.equal((await ctx.owner.ok('GET', '/api/platform')).plans.find((p) => p.code === 'standard').monthly_krw, 30000);
     await ctx.owner.ok('PUT', '/api/platform/plans/standard', { name: '스탠다드', monthlyKrw: 29000, limits: { users: 20, storageGb: 50, aiRequests: 500 } });
-    await setPlan('free', { users10: 1, storage50: 2 });
+    await setPlan('free', { storage20: 2, ai100: 1 });
     const u = await ctx.owner.ok('GET', '/api/usage');
-    assert.deepEqual(u.limits, { users: 15, storageGb: 102, aiRequests: 30 });
+    assert.deepEqual(u.limits, { users: 20, storageGb: 41, aiRequests: 110 }, '무료(20명·1GB·AI 10) + 저장 20GB 팩 2개 + AI 100회 팩');
+    // 베이직: 1인 1GB·AI 20회 × 활성 사용자 수
+    await setPlan('basic');
+    const b = await ctx.owner.ok('GET', '/api/usage');
+    assert.equal(b.limits.users, null); assert.equal(b.limits.storageGb, b.usage.users); assert.equal(b.limits.aiRequests, 20 * b.usage.users);
+    assert.equal(b.subscription.perUserKrw, 1500); assert.equal(b.subscription.monthlyKrw, 1500 * b.usage.users);
     assert.equal((await ctx.owner.req('PUT', '/api/platform/tenants/default', { planCode: 'free', addons: { nope: 1 } })).status, 400);
     await setPlan('internal');
   });
@@ -1744,17 +1749,18 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
   });
 
   test('요금제 변경 요청 → 운영자 승인하면 반영·요청자 알림, 반려도 가능', async () => {
-    const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'business', note: '지점 늘어남' });
-    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'business' })).status, 403);
+    const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'basic', note: '지점 늘어남' });
+    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'basic' })).status, 403);
     assert.equal((await ctx.owner.req('POST', '/api/usage/request', { planCode: 'internal' })).status, 400, '공개 안 된 요금제는 요청 불가');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.equal(pf.requests.find((x) => x.id === r.id).status, 'pending');
     await ctx.owner.ok('POST', `/api/platform/requests/${r.id}`, { approve: true });
-    assert.equal((await ctx.owner.ok('GET', '/api/usage')).subscription.planCode, 'business');
+    assert.equal((await ctx.owner.ok('GET', '/api/usage')).subscription.planCode, 'basic');
     assert.equal((await ctx.owner.req('POST', `/api/platform/requests/${r.id}`, { approve: true })).status, 400);
+    const before = (await ctx.owner.ok('GET', '/api/usage')).limits.aiRequests;
     const r2 = await ctx.owner.ok('POST', '/api/usage/request', { addons: { ai500: 1 } });
     await ctx.owner.ok('POST', `/api/platform/requests/${r2.id}`, { approve: false });
-    assert.equal((await ctx.owner.ok('GET', '/api/usage')).limits.aiRequests, 1500, '반려는 반영 안 됨');
+    assert.equal((await ctx.owner.ok('GET', '/api/usage')).limits.aiRequests, before, '반려는 반영 안 됨');
     await setPlan('internal');
   });
 });
@@ -1849,5 +1855,69 @@ describe('WORKIN_V12 8번 자료로 업무 일괄 생성 (가짜 Anthropic)', ()
     const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '자료 첨부 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
     await ctx.staffA.client.ok('POST', `/api/library/${csv}/attach`, { taskId: t });
     assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).attachments.length, 1);
+  });
+});
+
+const { createHmac } = await import('node:crypto');
+describe('WORKIN_V12 3번 ICS 구독 · 2단계 인증 · 도움말 문의 · 로그인 기기', () => {
+  const b32 = (s) => { const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = ''; for (const c of s) bits += A.indexOf(c).toString(2).padStart(5, '0'); const out = []; for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2)); return Buffer.from(out); };
+  const totp = (secret, at = Date.now()) => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(Math.floor(at / 30000))); const h = createHmac('sha1', b32(secret)).update(b).digest(); const o = h[h.length - 1] & 15;
+    return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, '0'); };
+  test('ICS: 비밀 주소로 내 일정·내 업무 마감만, 새 주소면 이전 주소 404, 끄면 404', async () => {
+    const c = ctx.managerA.client;
+    const t = (await c.ok('POST', '/api/tasks', { title: 'ICS 마감 업무', orgUnitId: ctx.siteA, assigneeId: ctx.managerA.id, dueDate: addDays(today, 2), dueTime: '15:00', approvalRequired: false })).id;
+    const other = (await ctx.owner.ok('POST', '/api/tasks', { title: 'ICS 남의 업무', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, dueDate: addDays(today, 2), approvalRequired: false })).id;
+    const f = await c.ok('POST', '/api/calendar-feed', {});
+    assert.match(f.url, /\/api\/ics\/[A-Za-z0-9_-]+\.ics$/);
+    const path = new URL(f.url).pathname;
+    const r = await fetch(BASE + path); assert.equal(r.status, 200); assert.match(r.headers.get('content-type'), /text\/calendar/);
+    const ics = await r.text();
+    assert.ok(ics.startsWith('BEGIN:VCALENDAR') && ics.includes('SUMMARY:마감: ICS 마감 업무') && ics.includes(`UID:task-${t}@workin`), '내 업무 마감');
+    assert.ok(!ics.includes('ICS 남의 업무'), '남의 업무 없음');
+    assert.ok((await c.ok('GET', '/api/calendar-feed')).lastUsedAt, '마지막 사용 기록');
+    const f2 = await c.ok('POST', '/api/calendar-feed', {});
+    assert.equal((await fetch(BASE + path)).status, 404, '새 주소 → 이전 주소 무효');
+    await c.ok('DELETE', '/api/calendar-feed');
+    assert.equal((await fetch(BASE + new URL(f2.url).pathname)).status, 404);
+    void other;
+  });
+  test('2단계 인증: 설정 → 코드로 켜기 → 로그인 시 코드 요구(코드 전에는 401) → 코드 확인 후 로그인, 틀리면 거절, 끄기', async () => {
+    const em = 'mfa@dagym.test', pw = 'mfa-pass-1234';
+    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: em, name: '두단계', role: 'staff', orgUnitIds: [ctx.siteA] });
+    const u = new Client('mfa'); await u.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: pw });
+    const { secret } = await u.ok('POST', '/api/auth/2fa', {});
+    assert.equal((await u.req('PUT', '/api/auth/2fa', { code: '000000' })).status, 400);
+    await u.ok('PUT', '/api/auth/2fa', { code: totp(secret) });
+    assert.equal((await u.ok('GET', '/api/auth/2fa')).enabled, true);
+    const l = new Client('mfa2');
+    const r1 = await l.ok('POST', '/api/auth/login', { email: em, password: pw });
+    assert.equal(r1.mfaRequired, true);
+    assert.equal((await l.req('GET', '/api/auth/me')).status, 401, '코드 전에는 로그인 아님');
+    assert.equal((await l.req('POST', '/api/auth/2fa/verify', { code: '123456' })).status, 400);
+    const ok = await l.ok('POST', '/api/auth/2fa/verify', { code: totp(secret) });
+    assert.equal(ok.user.name, '두단계');
+    assert.equal((await l.ok('GET', '/api/auth/me')).user.name, '두단계');
+    // 로그인 기기 목록·다른 기기 로그아웃
+    const ss = await l.ok('GET', '/api/auth/sessions');
+    assert.ok(ss.sessions.length >= 2 && ss.sessions.some((x) => x.current));
+    const out = await l.ok('DELETE', '/api/auth/sessions');
+    assert.ok(out.revoked >= 1);
+    assert.equal((await u.req('GET', '/api/auth/me')).status, 401, '다른 기기는 로그아웃됨');
+    await l.ok('DELETE', '/api/auth/2fa', { code: totp(secret) });
+    const r2 = await new Client('mfa3').ok('POST', '/api/auth/login', { email: em, password: pw });
+    assert.ok(r2.user && !r2.mfaRequired, '끄면 코드 없이 로그인');
+  });
+  test('도움말 문의 → 플랫폼 운영자 접수함·알림 → 답변하면 문의한 사람에게 알림, 다른 사람은 접수함 404', async () => {
+    const c = ctx.staffA.client;
+    const t = await c.ok('POST', '/api/support', { category: 'bug', subject: '사진 업로드 실패', body: '파일 저장소에 연결하지 못했습니다 문구가 나옵니다' });
+    assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title = '새 문의: 사진 업로드 실패'`).length, '운영자 알림');
+    assert.equal((await c.req('GET', '/api/support/admin')).status, 404);
+    assert.ok((await ctx.owner.ok('GET', '/api/support/admin')).tickets.some((x) => x.id === t.id));
+    assert.equal((await c.req('POST', `/api/support/${t.id}`, { answer: 'x' })).status, 404);
+    await ctx.owner.ok('POST', `/api/support/${t.id}`, { answer: '저장소 설정을 고쳤습니다. 다시 올려 주세요.' });
+    const mine = (await c.ok('GET', '/api/support')).tickets.find((x) => x.id === t.id);
+    assert.equal(mine.status, 'answered'); assert.match(mine.answer, /다시 올려/);
+    assert.ok((await sql`select 1 from notifications where user_id = ${ctx.staffA.id} and title = '문의 답변: 사진 업로드 실패'`).length);
+    assert.equal((await fetch(BASE + '/status')).status, 200, '공개 상태 페이지');
   });
 });

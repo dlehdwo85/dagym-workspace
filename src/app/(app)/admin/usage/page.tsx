@@ -29,7 +29,7 @@ export default function UsagePage() {
         actions={<Button onClick={() => setReq({ planCode: '', addons: {}, note: '' })} data-testid="plan-request">요금제 변경 요청</Button>} />
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="current-plan">
         <div className="text-sm text-ink-2">현재 요금제</div>
-        <div className="text-xl font-bold">{s.planName} <span className="text-base font-normal text-ink-2">{s.monthlyKrw === null ? '별도 협의' : `월 ${won(s.monthlyKrw)}`}</span></div>
+        <div className="text-xl font-bold">{s.planName} <span className="text-base font-normal text-ink-2">{s.monthlyKrw === null ? '별도 협의' : s.perUserKrw ? `1인 월 ${won(s.perUserKrw)} · 이번 달 약 ${won(s.monthlyKrw)}` : `월 ${won(s.monthlyKrw)}`}</span></div>
         <div className="mt-1 text-xs text-ink-3">
           {Object.entries(s.addons ?? {}).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${addons.find((a: any) => a.code === k)?.name ?? k} ×${v}`).join(' · ') || '추가 옵션 없음'}
           {s.periodEnd && ` · 다음 갱신일 ${fmtDate(s.periodEnd)}`}{s.status !== 'active' && ` · ${s.status === 'trial' ? '체험 중' : '일시 중지'}`}
@@ -40,6 +40,20 @@ export default function UsagePage() {
         <Meter label="이번 달 AI 요청" icon={Sparkles} used={usage.aiRequests} limit={limits.aiRequests} usedLabel={`${usage.aiRequests.toLocaleString('ko-KR')}회`} limitLabel={lim(limits.aiRequests, '회')} testid="meter-ai" />
         <Meter label="사용자" icon={Users} used={usage.users} limit={limits.users} usedLabel={`${usage.users}명${usage.invited ? ` (+초대 중 ${usage.invited})` : ''}`} limitLabel={lim(limits.users, '명')} testid="meter-users" />
       </div>
+      {/* V12 1번: 한도에 가까우면 해당 팩 바로 안내 */}
+      {(() => {
+        const near = (u: number, l: number | null) => l !== null && l > 0 && u / l >= 0.8;
+        const packs = [...(near(usage.storageBytes / GB, limits.storageGb) ? addons.filter((a: any) => a.adds.storageGb) : []), ...(near(usage.aiRequests, limits.aiRequests) ? addons.filter((a: any) => a.adds.aiRequests) : [])];
+        if (!packs.length) return null;
+        return (
+          <section className="rounded-card border border-amber-200 bg-amber-50 p-3" data-testid="pack-suggest">
+            <p className="text-sm font-semibold text-amber-900">한도에 가까워졌습니다 — 팩을 더하면 바로 늘어납니다</p>
+            <div className="mt-2 flex flex-wrap gap-2">{packs.map((a: any) => (
+              <Button key={a.code} size="sm" variant="secondary" onClick={() => setReq({ planCode: '', addons: { [a.code]: 1 }, note: `${a.name} 구매 요청` })}>{a.name} · 월 {won(a.monthly_krw)}</Button>
+            ))}</div>
+          </section>
+        );
+      })()}
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
         <h2 className="text-sm font-semibold">파일 종류별</h2>
         <div className="mt-2 flex h-3 overflow-hidden rounded-full bg-slate-100">
@@ -72,13 +86,14 @@ export default function UsagePage() {
               {plans.map((p: any) => (
                 <tr key={p.code} className={cx('border-t border-line', p.code === s.planCode && 'bg-brand-50 font-semibold')}>
                   <td className="py-1.5">{p.name}{p.description && <div className="text-[11px] font-normal text-ink-3">{p.description}</div>}</td>
-                  <td>{won(p.monthly_krw)}</td><td>{lim(p.limits.users, '명')}</td><td>{lim(p.limits.storageGb, 'GB')}</td><td>{lim(p.limits.aiRequests, '회')}</td>
+                  <td>{p.per_user_krw ? `1인 ${won(p.per_user_krw)}` : won(p.monthly_krw)}</td><td>{lim(p.limits.users, '명')}</td>
+                  <td>{p.limits.perUserStorageGb ? `1인 ${p.limits.perUserStorageGb}GB(합산)` : lim(p.limits.storageGb, 'GB')}</td><td>{p.limits.perUserAi ? `1인 ${p.limits.perUserAi}회` : lim(p.limits.aiRequests, '회')}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="mt-2 text-xs text-ink-2">추가 옵션: {addons.map((a: any) => `${a.name} 월 ${won(a.monthly_krw)}`).join(' · ')}</p>
+        <p className="mt-2 text-xs text-ink-2">팩(여러 개 구매 가능): {addons.map((a: any) => `${a.name} 월 ${won(a.monthly_krw)}`).join(' · ')}</p>
         <p className="mt-1 text-xs text-ink-3">결제는 아직 연결되지 않았습니다 — 변경 요청을 보내면 운영자가 확인해 반영합니다.</p>
         {!!requests.length && (
           <ul className="mt-3 space-y-1 text-xs text-ink-2">
@@ -92,7 +107,7 @@ export default function UsagePage() {
             <Field label="요금제">
               <select className={inputCls} value={req.planCode} onChange={(e) => setReq({ ...req, planCode: e.target.value })} aria-label="요청할 요금제">
                 <option value="">그대로 (옵션만)</option>
-                {plans.map((p: any) => <option key={p.code} value={p.code}>{p.name} · {won(p.monthly_krw)}</option>)}
+                {plans.map((p: any) => <option key={p.code} value={p.code}>{p.name} · {p.per_user_krw ? `1인 ${won(p.per_user_krw)}` : won(p.monthly_krw)}</option>)}
               </select>
             </Field>
             {addons.map((a: any) => (

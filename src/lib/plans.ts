@@ -19,19 +19,26 @@ export const tenantOfUser = (u: { isDemo?: boolean | null }) => (u.isDemo ? 'dem
 const monthStart = () => DateTime.now().setZone(TZ).startOf('month');
 
 export async function subscription(tenant: string, sql: Sql = db()) {
-  const [s] = await sql<any[]>`select s.*, p.name as plan_name, p.monthly_krw, p.limits, p.public
+  const [s] = await sql<any[]>`select s.*, p.name as plan_name, p.monthly_krw, p.per_user_krw, p.limits, p.public
     from tenant_subscriptions s join plans p on p.code = s.plan_code where s.tenant = ${tenant}`;
   if (s) return s;
   // 구독이 없는 회사는 무료 요금제로 본다
-  const [p] = await sql<any[]>`select code as plan_code, name as plan_name, monthly_krw, limits, public from plans where code = 'free'`;
+  const [p] = await sql<any[]>`select code as plan_code, name as plan_name, monthly_krw, per_user_krw, limits, public from plans where code = 'free'`;
   return { tenant, addons: {}, period_start: null, period_end: null, status: 'active', ...p };
 }
 
 /** 요금제 + 추가 옵션 = 실제 한도 (null = 무제한) */
 export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<{ limits: Limits; sub: any }> {
   const sub = await subscription(tenant, sql);
-  const base = sub.limits as Limits;
+  const base = sub.limits as Limits & { perUserStorageGb?: number; perUserAi?: number };
   const limits: Limits = { users: base.users ?? null, storageGb: base.storageGb ?? null, aiRequests: base.aiRequests ?? null };
+  // V12 1번 베이직: 1인 한도 × 활성 사용자 수(회사 합산, 최소 1명)
+  if (base.perUserStorageGb || base.perUserAi) {
+    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from users where status = 'active' and is_demo = ${tenant === 'demo'}`;
+    const people = Math.max(1, n);
+    if (base.perUserStorageGb) limits.storageGb = base.perUserStorageGb * people;
+    if (base.perUserAi) limits.aiRequests = base.perUserAi * people;
+  }
   const counts = (sub.addons ?? {}) as Record<string, number>;
   const codes = Object.keys(counts).filter((k) => counts[k] > 0);
   if (codes.length) {
@@ -76,7 +83,7 @@ export async function assertStorage(u: SessionUser, addBytes: number) {
   if (limits.storageGb === null) return;
   const usage = await currentUsage(tenant);
   if (usage.storageBytes + addBytes > limits.storageGb * GB) {
-    throw new HttpError(409, 'storage_full', `회사 저장공간(${limits.storageGb}GB)이 가득 찼습니다. 기존 파일 보기·내려받기는 계속 됩니다. 관리 → 사용량·요금제에서 정리하거나 용량을 늘려 주세요.`);
+    throw new HttpError(409, 'storage_full', `회사 저장공간(${limits.storageGb}GB)이 가득 찼습니다. 기존 파일 보기·내려받기는 계속 됩니다. 관리 → 사용량·요금제에서 정리하거나 저장 팩(+20GB 월 3,000원·+100GB 월 9,900원)을 요청해 주세요.`);
   }
 }
 export async function assertAiRequest(u: SessionUser) {
@@ -84,7 +91,7 @@ export async function assertAiRequest(u: SessionUser) {
   const { limits } = await effectiveLimits(tenant);
   if (limits.aiRequests === null) return;
   const usage = await currentUsage(tenant);
-  if (usage.aiRequests >= limits.aiRequests) throw new HttpError(429, 'ai_quota', `이번 달 AI 요청 ${limits.aiRequests}회를 모두 썼습니다. 다음 달 1일에 다시 쓸 수 있습니다(관리자가 추가 옵션으로 늘릴 수 있음).`);
+  if (usage.aiRequests >= limits.aiRequests) throw new HttpError(429, 'ai_quota', `이번 달 AI 요청 ${limits.aiRequests}회를 모두 썼습니다. 다음 달 1일에 다시 쓸 수 있습니다 — 관리자가 AI 팩(100회 월 3,000원부터)을 요청하면 바로 늘어납니다.`);
 }
 export async function assertSeat(tenant: string, sql: Sql = db()) {
   const { limits } = await effectiveLimits(tenant, sql);
@@ -103,7 +110,7 @@ export async function usageOverview(u: SessionUser) {
   const sql = db();
   const [{ limits, sub }, usage, plans, addons, top, requests] = await Promise.all([
     effectiveLimits(tenant, sql), currentUsage(tenant, sql),
-    sql`select code, name, monthly_krw, limits, description from plans where public and active order by sort`,
+    sql`select code, name, monthly_krw, per_user_krw, limits, description from plans where public and active order by sort`,
     sql`select code, name, monthly_krw, adds from plan_addons where active order by sort`,
     sql`(select 'attachment' as kind, a.id, coalesce(a.doc_title, a.file_name) as title, a.file_name, a.size_bytes::float8 size, a.mime_type, a.task_id, a.event_id, a.deleted_at, a.created_at
         from attachments a join users u2 on u2.id = a.created_by where a.kind = 'file' and a.storage_key is not null and u2.is_demo = false
@@ -113,7 +120,7 @@ export async function usageOverview(u: SessionUser) {
     sql`select r.id, r.plan_code, r.addons, r.note, r.status, r.created_at, u2.name as requested_by_name from plan_requests r join users u2 on u2.id = r.requested_by
       where r.tenant = ${tenant} order by r.created_at desc limit 10`,
   ]);
-  return { tenant, subscription: { planCode: sub.plan_code, planName: sub.plan_name, monthlyKrw: sub.monthly_krw, addons: sub.addons, periodStart: sub.period_start, periodEnd: sub.period_end, status: sub.status },
+  return { tenant, subscription: { planCode: sub.plan_code, planName: sub.plan_name, monthlyKrw: sub.per_user_krw ? sub.per_user_krw * Math.max(1, usage.users) : sub.monthly_krw, perUserKrw: sub.per_user_krw ?? null, addons: sub.addons, periodStart: sub.period_start, periodEnd: sub.period_end, status: sub.status },
     limits, usage, plans, addons, topFiles: top, requests, demo: tenant === 'demo' };
 }
 
@@ -148,7 +155,7 @@ export async function platformOverview(u: SessionUser) {
       limits, usage, pct: p, overLimit: Object.values(p).some((x) => x !== null && x >= 100) };
   }));
   const [plans, addons, requests] = await Promise.all([
-    sql`select code, name, monthly_krw, limits, description, public, sort, active from plans order by sort`,
+    sql`select code, name, monthly_krw, per_user_krw, limits, description, public, sort, active from plans order by sort`,
     sql`select code, name, monthly_krw, adds, sort, active from plan_addons order by sort`,
     sql`select r.*, u2.name as requested_by_name, t.name as tenant_name from plan_requests r join users u2 on u2.id = r.requested_by join tenants t on t.id = r.tenant
       order by (r.status = 'pending') desc, r.created_at desc limit 50`,
@@ -177,7 +184,9 @@ export async function setSubscription(u: SessionUser, tenant: string, i: z.infer
 
 export const planInput = z.object({
   name: z.string().trim().min(1).max(50), monthlyKrw: z.number().int().min(0).max(100_000_000).nullable(),
-  limits: z.object({ users: z.number().int().min(0).nullable(), storageGb: z.number().min(0).nullable(), aiRequests: z.number().int().min(0).nullable() }),
+  limits: z.object({ users: z.number().int().min(0).nullable(), storageGb: z.number().min(0).nullable(), aiRequests: z.number().int().min(0).nullable(),
+    perUserStorageGb: z.number().min(0).optional(), perUserAi: z.number().int().min(0).optional() }),
+  perUserKrw: z.number().int().min(0).max(1_000_000).nullable().optional(),
   description: z.string().max(200).nullable().optional(), public: z.boolean().optional(), active: z.boolean().optional(), sort: z.number().int().optional(),
 });
 /** 요금제 숫자 바꾸기(배포 없이) — 없는 코드면 새 요금제 */
@@ -185,9 +194,9 @@ export async function upsertPlan(u: SessionUser, code: string, i: z.infer<typeof
   requirePlatform(u);
   if (!/^[a-z0-9_-]{2,40}$/.test(code)) throw badRequest('코드는 영문 소문자·숫자 2~40자');
   const sql = db();
-  await sql`insert into plans (code, name, monthly_krw, limits, description, public, active, sort)
-    values (${code}, ${i.name}, ${i.monthlyKrw}, ${sql.json(i.limits)}, ${i.description ?? null}, ${i.public ?? true}, ${i.active ?? true}, ${i.sort ?? 50})
-    on conflict (code) do update set name = excluded.name, monthly_krw = excluded.monthly_krw, limits = excluded.limits, description = coalesce(excluded.description, plans.description),
+  await sql`insert into plans (code, name, monthly_krw, per_user_krw, limits, description, public, active, sort)
+    values (${code}, ${i.name}, ${i.monthlyKrw}, ${i.perUserKrw ?? null}, ${sql.json(i.limits)}, ${i.description ?? null}, ${i.public ?? true}, ${i.active ?? true}, ${i.sort ?? 50})
+    on conflict (code) do update set name = excluded.name, monthly_krw = excluded.monthly_krw, per_user_krw = ${i.perUserKrw === undefined ? sql`plans.per_user_krw` : sql`${i.perUserKrw}::int`}, limits = excluded.limits, description = coalesce(excluded.description, plans.description),
       public = coalesce(${i.public ?? null}::boolean, plans.public), active = coalesce(${i.active ?? null}::boolean, plans.active),
       sort = coalesce(${i.sort ?? null}::int, plans.sort), updated_at = now()`;
   await audit(sql, u.id, 'platform.plan', null, null, { code, ...i }, null);

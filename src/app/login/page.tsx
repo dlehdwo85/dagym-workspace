@@ -23,12 +23,19 @@ function LoginForm() {
         : '데이터베이스에 연결할 수 없어 지금은 로그인할 수 없습니다. 잠시 후 다시 시도하고, 계속되면 관리자에게 알려 주세요.');
     }).catch(() => {});
   }, []);
+  const [mfa, setMfa] = useState(false);
+  const [otp, setOtp] = useState('');
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     setBusy(true); setErr(null);
     try {
       const client = Capacitor.isNativePlatform() ? Capacitor.getPlatform() : 'web';
-      await api('/api/auth/login', { body: { email, password, client } });
+      if (mfa) await api('/api/auth/2fa/verify', { body: { code: otp } });
+      else {
+        const r = await api('/api/auth/login', { body: { email, password, client } });
+        // V12 3번: 2단계 인증을 켠 계정은 OTP 6자리 한 번 더
+        if (r?.mfaRequired) { setMfa(true); setOtp(''); return; }
+      }
       const next = sp.get('next');
       location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
     } catch (e) {
@@ -44,8 +51,12 @@ function LoginForm() {
           <ServerCrash className="mt-0.5 size-4 shrink-0" /><p>{down}</p>
         </div>
       )}
+      {mfa ? (
+        <Field label="2단계 인증 코드 (OTP 앱의 6자리)"><input className={inputCls + ' h-11 font-mono text-lg tracking-widest'} inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} autoFocus aria-label="OTP 코드" data-testid="otp-input" /></Field>
+      ) : <>
       <Field label="회사 이메일"><input className={inputCls + ' h-11'} type="email" inputMode="email" autoComplete="username" placeholder="name@company.co.kr" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></Field>
       <Field label="비밀번호"><PasswordInput value={password} onChange={setPassword} /></Field>
+      </>}
       {err && (
         <div className={err.network ? 'flex gap-2.5 rounded-input border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900' : 'flex gap-2.5 rounded-input border border-red-200 bg-red-50 p-3 text-sm text-red-800'} role="alert">
           {err.network ? <WifiOff className="mt-0.5 size-4 shrink-0" /> : <AlertCircle className="mt-0.5 size-4 shrink-0" />}
@@ -55,7 +66,7 @@ function LoginForm() {
           </div>
         </div>
       )}
-      <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy}>{busy ? <><Loader2 className="animate-spin" />확인 중…</> : <>로그인<ArrowRight /></>}</Button>
+      <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy}>{busy ? <><Loader2 className="animate-spin" />확인 중…</> : <>{mfa ? '확인' : '로그인'}<ArrowRight /></>}</Button>
       <p className="text-center text-xs leading-relaxed text-ink-2">계정은 관리자 초대로만 만들 수 있습니다.<br />비밀번호를 잊었다면 관리자에게 재설정 링크를 요청하세요.</p>
     </form>
   );

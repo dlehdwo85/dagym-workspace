@@ -714,7 +714,7 @@ await step('W-1 이름 워크인·부제 다짐 · 하이링크, 사이드바(�
   for (const l of ['내 업무', '현장 신고 QR', '자동화', '현장 비교', '업무량', '결재선', '전체 업무', '오늘·이번 주', '템플릿']) assert.ok(!labels.includes(l), `${l} 숨김`);
   await owner.getByRole('button', { name: '내 계정 메뉴' }).click();
   const items = (await owner.getByRole('menuitem').allTextContents()).map((x) => x.replace(/\?$/, '').trim());
-  assert.deepEqual(items, ['설정·알림', '단축키', '로그아웃']);
+  assert.deepEqual(items, ['설정·알림', '도움말·문의', '단축키', '로그아웃']);
   await owner.keyboard.press('Escape');
   await owner.screenshot({ path: `${SHOTS}/55-hq-sidebar.png` });
 });
@@ -1394,7 +1394,7 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await owner.getByTestId('meter-storage').getByText('무제한').first().waitFor();
   await owner.getByTestId('top-files').locator('li').first().waitFor();
   await owner.getByTestId('plan-request').click();
-  await owner.getByLabel('요청할 요금제').selectOption('standard');
+  await owner.getByLabel('요청할 요금제').selectOption('basic');
   await owner.getByRole('button', { name: '요청 보내기' }).click();
   await owner.getByText(/요청을 보냈습니다/).waitFor();
   await owner.screenshot({ path: `${SHOTS}/78-usage-plan.png`, fullPage: true });

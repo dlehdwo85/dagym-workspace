@@ -14,6 +14,7 @@ export default function PlatformPage() {
   const { data, error, loading, reload } = useApi<any>('/api/platform');
   const [subs, setSubs] = useState<Record<string, any>>({});
   const [plans, setPlans] = useState<Record<string, any>>({});
+  const tickets = useApi<{ tickets: any[] }>('/api/support/admin');
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (loading && !data) return <Skeleton rows={6} />;
   const save = async (url: string, body: unknown, done: () => void) => {
@@ -38,6 +39,25 @@ export default function PlatformPage() {
           ))}
         </section>
       )}
+      {/* V12 3번: 문의 접수함 */}
+      <section id="support" className="rounded-card border border-line bg-white shadow-card" data-testid="support-inbox">
+        <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">문의 접수함 {tickets.data && <span className="text-xs font-normal text-ink-3">미답변 {tickets.data.tickets.filter((t) => t.status === 'open').length}건</span>}</h2>
+        <ul className="divide-y divide-line text-sm">
+          {tickets.data?.tickets.slice(0, 30).map((t) => (
+            <li key={t.id} className="p-3">
+              <div className="flex justify-between gap-2"><b className="font-medium">[{({ question: '사용', bug: '오류', billing: '요금', idea: '제안' } as Record<string, string>)[t.category]}] {t.subject}</b><span className="text-xs text-ink-3">{t.user_name} · {t.tenant} · {fmtDateTime(t.created_at)}</span></div>
+              <p className="mt-1 whitespace-pre-wrap text-ink-2">{t.body}</p>
+              {t.answer ? <p className="mt-1 rounded bg-emerald-50 p-2 text-xs">답변: {t.answer}</p> : (
+                <form className="mt-2 flex gap-2" onSubmit={async (e) => { e.preventDefault(); const a = (e.currentTarget.elements.namedItem('a') as HTMLInputElement).value;
+                  try { await api(`/api/support/${t.id}`, { body: { answer: a } }); tickets.reload(); toast.ok('답변했습니다'); } catch (er: any) { toast.error(er.message); } }}>
+                  <input name="a" className={small} placeholder="답변 (문의한 사람에게 알림)" aria-label={`${t.subject} 답변`} /><Button size="sm" type="submit">답변</Button>
+                </form>
+              )}
+            </li>
+          ))}
+          {!tickets.data?.tickets.length && <li className="p-3 text-ink-3">문의가 없습니다</li>}
+        </ul>
+      </section>
       <section className="rounded-card border border-line bg-white shadow-card">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">회사별 사용량</h2>
         <div className="overflow-x-auto">
@@ -82,21 +102,24 @@ export default function PlatformPage() {
       <section className="rounded-card border border-line bg-white shadow-card">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">요금제 (비우면 무제한·별도 협의)</h2>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm" data-testid="platform-plans">
-            <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>코드</th><th className={cell}>이름</th><th className={cell}>월 요금(원)</th><th className={cell}>사용자</th><th className={cell}>저장(GB)</th><th className={cell}>AI 요청/월</th><th className={cell}>공개</th><th /></tr></thead>
+          <table className="w-full min-w-[900px] text-sm" data-testid="platform-plans">
+            <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>코드</th><th className={cell}>이름</th><th className={cell}>월 요금(원)</th><th className={cell}>1인 요금</th><th className={cell}>사용자</th><th className={cell}>저장(GB)</th><th className={cell}>AI 요청/월</th><th className={cell}>1인 저장·AI</th><th className={cell}>공개</th><th /></tr></thead>
             <tbody>
               {data.plans.map((p: any) => {
-                const e = plans[p.code] ?? { name: p.name, monthlyKrw: p.monthly_krw ?? '', users: p.limits.users ?? '', storageGb: p.limits.storageGb ?? '', aiRequests: p.limits.aiRequests ?? '', public: p.public };
+                const e = plans[p.code] ?? { name: p.name, monthlyKrw: p.monthly_krw ?? '', perUserKrw: p.per_user_krw ?? '', puStorage: p.limits.perUserStorageGb ?? '', puAi: p.limits.perUserAi ?? '', users: p.limits.users ?? '', storageGb: p.limits.storageGb ?? '', aiRequests: p.limits.aiRequests ?? '', public: p.public };
                 const set = (patch: any) => setPlans({ ...plans, [p.code]: { ...e, ...patch } });
                 return (
                   <tr key={p.code} className="border-t border-line">
                     <td className={cx(cell, 'text-xs text-ink-3')}>{p.code}</td>
                     <td className={cell}><input className={small} value={e.name} onChange={(x) => set({ name: x.target.value })} aria-label={`${p.code} 이름`} /></td>
                     <td className={cell}><input className={small} inputMode="numeric" value={e.monthlyKrw} onChange={(x) => set({ monthlyKrw: x.target.value })} aria-label={`${p.code} 월 요금`} /></td>
+                    <td className={cell}><input className={small} inputMode="numeric" value={e.perUserKrw} onChange={(x) => set({ perUserKrw: x.target.value })} aria-label={`${p.code} 1인 요금`} /></td>
                     {(['users', 'storageGb', 'aiRequests'] as const).map((k) => <td key={k} className={cell}><input className={small} inputMode="numeric" value={e[k]} onChange={(x) => set({ [k]: x.target.value })} aria-label={`${p.code} ${k}`} /></td>)}
+                    <td className={cell}><span className="flex gap-1"><input className={cx(small, 'w-12')} inputMode="numeric" value={e.puStorage} onChange={(x) => set({ puStorage: x.target.value })} aria-label={`${p.code} 1인 저장GB`} /><input className={cx(small, 'w-12')} inputMode="numeric" value={e.puAi} onChange={(x) => set({ puAi: x.target.value })} aria-label={`${p.code} 1인 AI`} /></span></td>
                     <td className={cell}><input type="checkbox" checked={e.public} onChange={(x) => set({ public: x.target.checked })} aria-label={`${p.code} 공개`} /></td>
-                    <td className={cell}><Button size="sm" variant="secondary" onClick={() => save(`/api/platform/plans/${p.code}`, { name: e.name, monthlyKrw: num(String(e.monthlyKrw)), public: e.public,
-                      limits: { users: num(String(e.users)), storageGb: num(String(e.storageGb)), aiRequests: num(String(e.aiRequests)) } }, () => setPlans((s) => { const n = { ...s }; delete n[p.code]; return n; }))}>저장</Button></td>
+                    <td className={cell}><Button size="sm" variant="secondary" onClick={() => save(`/api/platform/plans/${p.code}`, { name: e.name, monthlyKrw: num(String(e.monthlyKrw)), perUserKrw: num(String(e.perUserKrw)), public: e.public,
+                      limits: { users: num(String(e.users)), storageGb: num(String(e.storageGb)), aiRequests: num(String(e.aiRequests)),
+                        ...(num(String(e.puStorage)) ? { perUserStorageGb: num(String(e.puStorage))! } : {}), ...(num(String(e.puAi)) ? { perUserAi: num(String(e.puAi))! } : {}) } }, () => setPlans((s) => { const n = { ...s }; delete n[p.code]; return n; }))}>저장</Button></td>
                   </tr>
                 );
               })}
