@@ -33,7 +33,7 @@ export function DateField({ value, onChange, label, min }: { value: string; onCh
   const today = todayStr();
   return (
     <>
-      <button ref={ref} type="button" onClick={() => setOpen(!open)} aria-label={`${label}: ${value}`} aria-haspopup="dialog" data-testid="date-field"
+      <button ref={ref} type="button" onClick={() => setOpen(!open)} aria-label={`${label}: ${value}`} aria-haspopup="dialog" aria-expanded={open} data-testid="date-field"
         className="inline-flex h-10 items-center gap-1.5 rounded-input border border-line bg-white px-2.5 text-sm hover:border-slate-300">
         <CalendarDays className="size-4 text-ink-3" />{fmtDateLabel(value)}
       </button>

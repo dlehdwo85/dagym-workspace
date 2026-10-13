@@ -383,10 +383,12 @@ await step('⑥ 다른 현장 직원은 화면에서도 접근 불가 안내', a
 await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 조회)', async () => {
   await staff.goto(`${BASE}/tasks/${t3}`);
   const nd = addDays(today, 8);
-  await staff.getByTestId('detail-due').fill(nd);
-  await staff.waitForTimeout(800);
+  await staff.getByTestId('detail-due').getByTestId('due-picker').click(); // 마감일 칩 → 빠른 선택·달력
+  await staff.getByLabel('마감일 날짜 선택').fill(nd);
+  await staff.locator(`[data-testid="detail-due"][data-value="${nd}"]`).waitFor();
   await owner.goto(`${BASE}/tasks/${t3}`);
-  assert.equal(await owner.getByTestId('detail-due').inputValue(), nd);
+  assert.equal(await owner.getByTestId('detail-due').getAttribute('data-value'), nd);
+  assert.equal(await owner.getByTestId('status-chip').count(), 1, '상태 표시는 칩 하나');
 });
 
 await step('B-2 내 업무 자동 묶음 (새로 배정됨→확인·기한 지남·오늘·이번 주·나중)', async () => {
@@ -1032,6 +1034,43 @@ await step('AUTOSAVE 저장 버튼 없음: 한 줄 추가는 칩 누르는 중�
   let saved = '';
   for (let i = 0; i < 20 && saved !== '이동해도 남아야 하는 설명'; i++) { await owner.waitForTimeout(250); saved = (await ctx.owner.ok('GET', `/api/tasks/${t.id}`)).task.description; }
   assert.equal(saved, '이동해도 남아야 하는 설명', '설명 자동 저장');
+});
+
+await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 → 상세 안 열리고 선택 창, 홈 줄 탭 → 상세', async () => {
+  const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  const m = await mc.newPage();
+  await m.goto(BASE + '/tasks');
+  const row = m.locator('[data-row]').first();
+  await row.waitFor();
+  const id = await row.getAttribute('data-row');
+  const box = await row.boundingBox();
+  await m.touchscreen.tap(box.x + 60, box.y + box.height - 4); // 제목 글자가 아닌 행 아래쪽 여백
+  await m.getByTestId('task-panel').waitFor();
+  assert.ok(m.url().endsWith(`/tasks/${id}`), '행 빈 곳 탭 → 그 업무 상세');
+  await m.getByTestId('status-chip').waitFor();
+  await m.screenshot({ path: `${SHOTS}/65-mobile-task-detail-390.png` });
+  assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '상세 가로 넘침 없음(390)');
+  await m.setViewportSize({ width: 360, height: 780 });
+  await m.screenshot({ path: `${SHOTS}/66-mobile-task-detail-360.png` });
+  assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '상세 가로 넘침 없음(360)');
+  await m.setViewportSize({ width: 390, height: 844 });
+  await m.goBack();
+  await m.getByTestId('task-panel').waitFor({ state: 'detached' });
+  const chip = row.locator('[aria-haspopup][aria-label^="담당자"]').first(); // 담당자 칩
+  await chip.tap();
+  await m.waitForTimeout(400);
+  assert.equal(await m.getByTestId('task-panel').count(), 0, '칩 탭은 상세를 열지 않음');
+  assert.equal(await chip.getAttribute('aria-expanded'), 'true', '칩 선택 창 열림');
+  await m.keyboard.press('Escape');
+  // 홈 목록
+  await m.goto(BASE + '/');
+  const hrow = m.locator('[data-home-task]').first();
+  await hrow.waitFor();
+  const hid = await hrow.getAttribute('data-home-task');
+  const hb = await hrow.boundingBox();
+  await m.touchscreen.tap(hb.x + hb.width * 0.5, hb.y + hb.height - 3);
+  await m.waitForURL(`**/tasks/${hid}`);
+  await mc.close();
 });
 
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {

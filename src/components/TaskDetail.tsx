@@ -6,16 +6,18 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import {
   BadgeCheck, Building2, CalendarClock, CalendarDays, Camera, Check, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash,
-  Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Pause, Percent, Play, Plus, Repeat, RotateCcw, Rows3, Shapes, ShieldCheck,
+  Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Percent, Plus, Repeat, RotateCcw, Rows3, Shapes, ShieldCheck,
   Stamp, Tag, Timer, CalendarCheck, Trash2, Type, UserRound, Users, X, CalendarRange, AlertTriangle, type LucideIcon,
   Megaphone,
+  ChevronDown,
 } from 'lucide-react';
-import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
+import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
 import { DuePicker } from '@/components/TaskQuick';
+import { TIMES, timeLabel } from '@/components/DateTimePickers';
 import { QuickAddTask } from '@/components/QuickAddTask';
-import { PRIORITY_LABEL, STATUS_LABEL, STATUSES } from '@/lib/types';
+import { PRIORITY_LABEL, STATUS_LABEL, STATUSES, type TaskStatus } from '@/lib/types';
 import { encodeMentions } from '@/lib/mentions';
 
 const ACTION_LABEL: Record<string, string> = {
@@ -177,9 +179,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
 
   return (
-    <div className={cx(!inPanel && 'mx-auto max-w-4xl')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
+    <div className={cx(!inPanel && 'mx-auto max-w-4xl', 'pb-[calc(6rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
       {/* 상단 도구 막대 */}
-      <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border')}>
+      <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
         {primary && (
           <Button size="sm" variant={t.status === 'review' ? 'primary' : 'secondary'} onClick={primary.run} disabled={photoShort && primary.label !== '최종 완료 확인'}
             title={photoShort ? `증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)` : undefined}
@@ -228,17 +230,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </form>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-1.5" data-testid="task-actions">
-            <StatusBadge status={t.status} />
+            <StatusChip status={t.status} onChange={(v) => patch({ status: v })} />
             {t.status !== 'done' && t.status !== 'review' && t.approval_required && !perms.approve && !t.approval_line_id && primary?.label !== '완료 → 검토 요청' && (
               <Button size="sm" onClick={() => patch({ status: 'review' }, '검토를 요청했습니다')}>완료 → 검토 요청</Button>
             )}
             {t.status === 'review' && perms.approve && !t.approval_line_id && <Button size="sm" variant="secondary" onClick={reject}>보완 요청</Button>}
-            {t.status === 'todo' && <Button size="sm" variant="ghost" onClick={() => patch({ status: 'in_progress' })}><Play />시작</Button>}
-            {t.status !== 'on_hold' && t.status !== 'done' && <Button size="sm" variant="ghost" onClick={() => patch({ status: 'on_hold' })}><Pause />보류</Button>}
-            {(t.status === 'on_hold' || t.status === 'done') && <Button size="sm" variant="ghost" onClick={() => patch({ status: 'in_progress' })}><RotateCcw />다시 진행</Button>}
-            <select className="h-8 rounded-input border border-line bg-white px-2 text-sm text-ink-2" value={t.status} onChange={(e) => patch({ status: e.target.value })} aria-label="상태 직접 변경">
-              {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-            </select>
+            {t.status === 'done' && <Button size="sm" variant="ghost" onClick={() => patch({ status: 'in_progress' })}><RotateCcw />다시 진행</Button>}
           </div>
           {t.status === 'review' && !roundSteps.length && <p className="mt-3 flex items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900"><Hourglass className="size-4 shrink-0" />검토 요청 중 — {fmtDateTime(t.review_requested_at)} · 관리자의 최종 확인을 기다립니다.</p>}
           {t.status === 'done' && t.approved_by_name && <p className="mt-3 flex items-center gap-2 rounded-input bg-emerald-50 px-3 py-2 text-sm text-emerald-800"><BadgeCheck className="size-4 shrink-0" />{t.approved_by_name}님이 {fmtDateTime(t.approved_at)}에 최종 완료를 확인했습니다.</p>}
@@ -272,18 +269,23 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         )}
 
         {/* 속성 */}
-        <section className="grid grid-cols-1 gap-y-0.5" aria-label="업무 속성">
+        <section className="grid grid-cols-1 border-y border-line" aria-label="업무 속성">
           <Prop icon={UserRound} label="담당자">
-            <span className="flex items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} /><UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => patch({ assigneeId: v })} /></span>
+            <span className="flex pl-2 items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} /><UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => patch({ assigneeId: v })} /></span>
           </Prop>
           <Prop icon={Megaphone} label="지시자">
-            <span className="flex items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
+            <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
           </Prop>
           <Prop icon={CalendarDays} label="마감일">
-            <span className="flex flex-wrap items-center gap-1">
-              <input type="date" className={cx(ghostCls, '!w-[140px]', t.status !== 'done' && t.due_date && t.due_date < todayStr() && 'font-semibold text-red-600')} value={t.due_date ?? ''} onChange={(e) => patch({ dueDate: e.target.value || null })} data-testid="detail-due" />
-              <input type="time" className={cx(ghostCls, '!w-[104px]')} value={t.due_time ?? ''} onChange={(e) => patch({ dueTime: e.target.value || null })} aria-label="마감 시각" />
-              <DuePicker value={null} compact label="마감 빠른 선택" onChange={(v) => patch({ dueDate: v })} />
+            {/* 값이 없으면 "마감일 없음" 칩 하나, 누르면 빠른 선택·달력. 시각은 날짜를 정한 뒤에만 */}
+            <span className="flex pl-2 flex-wrap items-center gap-1.5" data-testid="detail-due" data-value={t.due_date ?? ''}>
+              <DuePicker value={t.due_date} status={t.status} label="마감일" emptyText="마감일 없음" onChange={(v) => patch({ dueDate: v, ...(v ? {} : { dueTime: null }) })} />
+              {t.due_date && (
+                <select className="h-8 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={t.due_time?.slice(0, 5) ?? ''} onChange={(e) => patch({ dueTime: e.target.value || null })} aria-label="마감 시각">
+                  <option value="">시각 없음</option>
+                  {(TIMES.includes(t.due_time?.slice(0, 5) ?? '') || !t.due_time ? TIMES : [...TIMES, t.due_time.slice(0, 5)].sort()).map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
+                </select>
+              )}
               {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle className="size-3.5" />마감 위험</span>}
             </span>
           </Prop>
@@ -299,10 +301,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               </select>
             </Prop>
           )}
-          <Prop icon={CalendarCheck} label="캘린더에 표시" asDiv>
-            <label className="flex h-8 items-center gap-2 px-2 text-sm">
-              <input type="checkbox" role="switch" className="size-4 accent-brand-600" checked={t.show_on_calendar !== false} onChange={(e) => patch({ showOnCalendar: e.target.checked })} aria-label="캘린더에 표시" />
-              <span className="text-ink-2">{t.due_date ? (t.show_on_calendar !== false ? `${t.due_time ? '마감 시각' : '마감일'} 칸에 체크로 표시` : '캘린더에 안 보임') : '마감일을 정하면 캘린더에 표시됩니다'}</span>
+          <Prop icon={CalendarCheck} label="캘린더 표시" asDiv>
+            <label className="flex min-h-8 cursor-pointer items-center gap-2.5 px-2 text-sm">
+              <input type="checkbox" role="switch" className="peer sr-only" checked={t.show_on_calendar !== false} onChange={(e) => patch({ showOnCalendar: e.target.checked })} aria-label="캘린더에 표시" />
+              <span aria-hidden className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:bg-accent-600 peer-checked:after:translate-x-4 peer-focus-visible:ring-2 peer-focus-visible:ring-accent-500/40" />
+              <span className="text-xs text-ink-2">{t.due_date ? (t.show_on_calendar !== false ? `${t.due_time ? '마감 시각' : '마감일'} 칸에 체크로 표시` : '캘린더에 안 보임') : '마감일을 정하면 캘린더에 표시됩니다'}</span>
             </label>
           </Prop>
         </section>
@@ -515,13 +518,26 @@ const ghostCls = 'h-8 w-full min-w-0 rounded-input border border-transparent bg-
 function Prop({ icon: Icon, label, children, asDiv, className }: { icon: LucideIcon; label: string; children: React.ReactNode; asDiv?: boolean; className?: string }) {
   const inner = (
     <>
-      <span className="flex h-8 w-[92px] shrink-0 items-center gap-1.5 text-sm text-ink-2 sm:w-[120px] sm:gap-2"><Icon className="size-4 text-ink-3" />{label}</span>
-      <span className="flex min-w-0 flex-1 items-center">{children}</span>
+      <span className="flex min-h-8 w-24 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-2 sm:w-[120px] sm:gap-2"><Icon className="size-4 shrink-0 text-ink-3" />{label}</span>
+      <span className="flex min-h-8 min-w-0 flex-1 items-center">{children}</span>
     </>
   );
   return asDiv
-    ? <div className={cx('flex items-start gap-2 py-0.5', className)} role="group" aria-label={label}>{inner}</div>
-    : <label className={cx('flex items-center gap-2 py-0.5', className)}>{inner}</label>;
+    ? <div className={cx('flex min-h-12 items-center gap-2 border-b border-line py-1.5 last:border-b-0', className)} role="group" aria-label={label}>{inner}</div>
+    : <label className={cx('flex min-h-12 items-center gap-2 border-b border-line py-1.5 last:border-b-0', className)}>{inner}</label>;
+}
+/** 상태 칩 하나: 누르면 할 일·진행 중·검토·보류·완료 중 선택 (배지·버튼·select 중복 정리) */
+function StatusChip({ status, onChange }: { status: TaskStatus; onChange: (v: TaskStatus) => void }) {
+  const tone = STATUS_TONE[status];
+  return (
+    <label className={cx('relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full pl-2.5 pr-7 text-sm font-medium', tone.badge)} data-testid="status-chip">
+      <span className={cx('size-2 rounded-full', tone.dot)} aria-hidden />{STATUS_LABEL[status]}
+      <ChevronDown className="pointer-events-none absolute right-2 size-3.5 opacity-70" aria-hidden />
+      <select className="absolute inset-0 cursor-pointer opacity-0" value={status} onChange={(e) => onChange(e.target.value as TaskStatus)} aria-label="상태">
+        {STATUSES.map((x) => <option key={x} value={x}>{STATUS_LABEL[x]}</option>)}
+      </select>
+    </label>
+  );
 }
 function MenuItem({ icon: Icon, children, onClick, danger }: { icon: LucideIcon; children: React.ReactNode; onClick: () => void; danger?: boolean }) {
   return (

@@ -1,6 +1,7 @@
 'use client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useRowOpen } from './rowOpen';
 import { DndContext, MouseSensor, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import FullCalendar from '@fullcalendar/react';
@@ -159,7 +160,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const curView = fixed?.view ?? filters.view ?? '';
   const group: GroupBy = groupPick || (curView === 'my' ? 'due' : 'assignee');
   const pickGroup = (g: GroupBy) => { setGroupPick(g); try { localStorage.setItem('wos_task_group', g); } catch {} };
-  // 상단 칩: 전체 · 내 업무 · 사람별 · 지연 · 이번 주 · 검토 대기. 사람 칩은 본사 사람(없으면 앞쪽 5명)
+  // 상단 칩: 전체 · 내 업무 · 사람별 · 내가 지시한 업무 · 지연 · 이번 주 · 검토 대기. 사람 칩은 본사 사람(없으면 앞쪽 5명)
   const hqIds = new Set(dir.orgUnits.filter((o) => o.type === 'hq').map((o) => o.id));
   const people = (() => {
     const hq = dir.users.filter((u) => u.org_unit_ids?.some((id) => hqIds.has(id)));
@@ -195,13 +196,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       </div>
       {!fixed?.view && (
         <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 text-sm sm:mx-0 sm:px-0">
-          {views.slice(0, 3).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
+          {views.slice(0, 2).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
           {people.map((u) => (
             <ViewChip key={u.id} on={filters.assigneeId === u.id} onClick={() => setFilters((f) => ({ ...f, view: '', assigneeId: f.assigneeId === u.id ? '' : u.id }))} label={`${u.name} 업무`}>
               <Avatar id={u.id} name={u.name} size={18} />{u.name}
             </ViewChip>
           ))}
-          {views.slice(3).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
+          {views.slice(2).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
           {!views.some(([v]) => v === (filters.view ?? '')) && <ViewChip on onClick={() => setView('')}>{({ today: '오늘 할 일', risk: '마감 위험' } as Record<string, string>)[filters.view ?? ''] ?? filters.view}</ViewChip>}
         </div>
       )}
@@ -636,6 +637,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: 
   const [dx, setDx] = useState(0);
   // 밀어서 완료: 기본 꺼짐(설정에서 켬). 켜도 오른쪽으로 행 너비 45% 이상 밀고 손을 뗄 때만, 세로 스크롤 중엔 무시. 보류 밀기는 없앰(실수로 업무가 사라지던 원인)
   const swipeOn = useSwipeSetting();
+  const rowOpen = useRowOpen(t.id, useContext(OpenTaskCtx));
   const right = nextStatusOnCheck(t, user.role);
   const swipe = async (to: TaskStatus) => {
     const before = t.status;
@@ -648,7 +650,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: 
           {right === 'review' ? '검토 요청' : right === 'done' ? '완료' : '다시 진행'}
         </div>
       )}
-      <div tabIndex={0} data-row={t.id} data-task-id={t.id}
+      <div tabIndex={0} data-row={t.id} data-task-id={t.id} {...rowOpen}
         style={dx ? { transform: `translateX(${dx}px)` } : undefined}
         onTouchStart={(e) => { if (!swipeOn) return; start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, lock: null, w: (e.currentTarget as HTMLElement).offsetWidth }; }}
         onTouchMove={(e) => {
@@ -663,7 +665,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: 
         }}
         onTouchCancel={() => { start.current = null; setDx(0); }}
         data-fresh={fresh ? '1' : undefined}
-        className={cx('group relative flex min-h-[44px] items-center gap-3 px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
+        className={cx('group relative flex min-h-[44px] cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
         {handle}
         <CheckCircle t={t} onPatch={onPatch} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
@@ -687,9 +689,10 @@ function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: 
 
 function BoardCard({ t }: { t: Task }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: t.id, data: t });
+  const cardOpen = useRowOpen(t.id, useContext(OpenTaskCtx));
   const stripe = t.priority === 'urgent' ? 'before:bg-red-500' : t.priority === 'high' ? 'before:bg-orange-400' : 'before:bg-transparent';
   return (
-    <div ref={setNodeRef} {...listeners} {...attributes} data-task-id={t.id}
+    <div ref={setNodeRef} {...listeners} {...attributes} {...cardOpen} data-task-id={t.id}
       style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined}
       className={cx('relative cursor-grab touch-none overflow-hidden rounded-input border border-line bg-white p-3 shadow-card transition-shadow before:absolute before:inset-y-0 before:left-0 before:w-[3px] hover:border-slate-300 hover:shadow-pop',
         stripe, isDragging && 'z-50 rotate-1 cursor-grabbing opacity-90 shadow-pop ring-2 ring-accent-500/40')}>

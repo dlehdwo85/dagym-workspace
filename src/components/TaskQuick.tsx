@@ -41,14 +41,14 @@ function Popover({ open, onClose, anchor, children, width = 224 }: { open: boole
 }
 
 /** 마감일 칩: 누르면 빠른 선택 + 날짜 선택 */
-export function DuePicker({ value, onChange, status, label = '마감일', compact }: { value: string | null | undefined; onChange: (v: string | null) => void; status?: string; label?: string; compact?: boolean }) {
+export function DuePicker({ value, onChange, status, label = '마감일', compact, emptyText }: { value: string | null | undefined; onChange: (v: string | null) => void; status?: string; label?: string; compact?: boolean; emptyText?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <span className="relative inline-flex">
-      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={label} aria-haspopup="dialog" data-testid="due-picker"
-        className={cx('inline-flex items-center rounded-md hover:bg-slate-100', !value && 'gap-1 px-1.5 py-0.5 text-xs text-ink-3')}>
-        {value ? <DueChip due={value} status={status} /> : <><CalendarDays className="size-3.5" />{compact ? '' : '마감일'}</>}
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={label} aria-haspopup="dialog" aria-expanded={open} data-testid="due-picker"
+        className={cx('inline-flex items-center rounded-md hover:bg-slate-100', !value && 'gap-1 px-1.5 py-0.5 text-xs text-ink-3', !value && emptyText && 'h-8 rounded-input border border-line bg-white px-2.5 text-sm')}>
+        {value ? <DueChip due={value} status={status} /> : <><CalendarDays className="size-3.5" />{compact ? '' : emptyText ?? '마감일'}</>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref}>
         {quickDues().map(([l, d]) => (
@@ -76,7 +76,7 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <span className="relative inline-flex">
-      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); setQ(''); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${role}: ${cur?.name ?? name ?? '없음'}`} aria-haspopup="dialog"
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); setQ(''); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${role}: ${cur?.name ?? name ?? '없음'}`} aria-haspopup="dialog" aria-expanded={open}
         className={withName ? 'inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100' : 'rounded-full hover:ring-2 hover:ring-accent-500/30'} data-testid={role === '지시자' ? 'requester-picker' : 'assignee-picker'}>
         <Avatar id={value} name={cur?.name ?? name ?? null} size={size} />{withName && <span className="truncate">{cur?.name ?? name ?? '없음'}</span>}
       </button>
@@ -193,7 +193,7 @@ export function PriorityPicker({ value, onChange, label = '우선순위' }: { va
   const cur = PRI.find((p) => p[0] === (value ?? 'normal')) ?? PRI[2];
   return (
     <span className="relative inline-flex">
-      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${label}: ${cur[1]}`} aria-haspopup="dialog" data-testid="priority-picker"
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${label}: ${cur[1]}`} aria-haspopup="dialog" aria-expanded={open} data-testid="priority-picker"
         className={cx('inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1 ring-inset', cur[0] === 'normal' ? 'bg-transparent text-ink-3 ring-transparent hover:bg-slate-100' : cur[2])}>
         {cur[0] === 'normal' ? '보통' : cur[1]}
       </button>
@@ -214,7 +214,7 @@ export function OrderMenu({ title, onMove }: { title: string; onMove: (to: 'top'
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <span className="relative inline-flex sm:hidden">
-      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onTouchStart={(e) => e.stopPropagation()} aria-label={`${title} 순서 바꾸기`} aria-haspopup="dialog" data-testid="order-menu"
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onTouchStart={(e) => e.stopPropagation()} aria-label={`${title} 순서 바꾸기`} aria-haspopup="dialog" aria-expanded={open} data-testid="order-menu"
         className="inline-flex size-9 items-center justify-center rounded-full text-ink-3 active:bg-slate-100"><ArrowUpDown className="size-4" /></button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} width={150}>
         {([['top', '맨 위로'], ['up', '위로'], ['down', '아래로'], ['bottom', '맨 아래로']] as const).map(([k, l]) => (

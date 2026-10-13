@@ -61,7 +61,7 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-[1px] sm:items-center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal="true" aria-label={title}
-        className={clsx('max-h-[92vh] w-full animate-fade-up overflow-y-auto rounded-t-2xl bg-white shadow-pop sm:rounded-card', wide ? 'sm:max-w-3xl' : 'sm:max-w-lg')}>
+        className={clsx('max-h-[calc(100dvh-var(--sat)-12px)] sm:max-h-[92vh] w-full animate-fade-up overflow-y-auto rounded-t-2xl bg-white shadow-pop sm:rounded-card', wide ? 'sm:max-w-3xl' : 'sm:max-w-lg')}>
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden />
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-white px-5 py-3">
           <h2 className="text-base font-semibold">{title}</h2>

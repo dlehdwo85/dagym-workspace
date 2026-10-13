@@ -6,6 +6,8 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
 import { InlineAddTask } from '@/components/TaskQuick';
+import { useRowOpen } from '@/components/rowOpen';
+import { useRouter } from 'next/navigation';
 
 const seoulDay = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
@@ -42,8 +44,10 @@ function Section({ title, count, children, href, icon: Icon, className, actions,
 function TodayRow({ t, onDone }: { t: any; onDone: (t: any) => void }) {
   const { user } = useSession();
   const toReview = !!t.approval_line_id || (t.approval_required && user.role === 'staff');
+  const router = useRouter();
+  const rowOpen = useRowOpen(t.id, (id) => router.push(`/tasks/${id}`)); // 줄 아무 곳이나 눌러 상세
   return (
-    <li className="flex min-w-0 items-center gap-2.5 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50">
+    <li {...rowOpen} className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50" data-home-task={t.id}>
       <button onClick={() => onDone(t)} aria-label={`${t.title} ${toReview ? '검토 요청' : '완료'}`} title={toReview ? '검토 요청' : '완료'}
         className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-slate-300 text-transparent hover:border-emerald-500 hover:text-emerald-500">
         <CircleCheck className="size-[22px] stroke-[1.8]" style={{ margin: -1.5 }} />
