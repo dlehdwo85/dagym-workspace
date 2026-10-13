@@ -48,3 +48,4 @@
 - ⛔ 푸시: Firebase(google-services.json) 미설정 → 앱 푸시 없음. 앱 링크용 ANDROID_CERT_SHA256 은 Play 앱 서명 키 지문(Play Console → 앱 무결성)으로 등록 필요
 - ⛔ iOS: App Store Connect 미로그인, Apple Developer 멤버십 여부 확인 필요($99/년, 대표 결제)
 - 2026-10-13 iOS: App Store Connect 로그인(대표) 확인 — 조직 "Da Gym Co., Ltd."(다짐 주식회사), 팀 ID 88SSK23ZVB. ⛔ 최신 Apple Developer Program License Agreement 미동의로 인증서·식별자·API 키 화면 차단 → 대표(계정 소유자) 동의 대기. GitHub 변수 등록: APPLE_TEAM_ID, APP_URL(=https://dagym-workspace.vercel.app, tick·backup·release 워크플로가 사용). 남은 것: 번들 ID 등록·ASC 앱 생성(로컬), ASC API 키 .p8 → Secrets ASC_KEY_P8·ASC_KEY_ID·ASC_ISSUER_ID(대표), release.yml iOS 실행 → TestFlight 내부 테스터
+- 2026-10-13 iOS: 대표 라이선스 계약 동의 후 ✅ App ID `kr.co.dagym.workos`(DAGYM WorkOS, Push Notifications 켬) 등록, ✅ App Store Connect 앱 "다짐 업무일정" 생성(앱 ID 6822120675, 한국어, SKU dagym-workos). ⛔ App Store Connect API 미활성("액세스 요청" 필요, 계정 소유자) → 키(관리자 역할) 발급 → Secrets ASC_KEY_P8·ASC_KEY_ID·ASC_ISSUER_ID 등록(대표) → release.yml(ios) 실행 → TestFlight 내부 테스터
