@@ -2,7 +2,8 @@ import { after } from 'next/server';
 import { handler, body } from '@/lib/api';
 import { badRequest } from '@/lib/errors';
 import { createEvent, eventInput, listEvents } from '@/lib/events';
-import { dispatchPending } from '@/lib/push';
+import { dispatchPending, remindersChanged } from '@/lib/push';
+import { affectedByEvent } from '@/lib/reminders';
 import { syncCalendarSoon } from '@/lib/google/hooks';
 
 export const GET = handler(async ({ req, user }) => {
@@ -19,5 +20,6 @@ export const POST = handler(async ({ req, user }) => {
   const out = await createEvent(user, i);
   after(() => dispatchPending().catch(() => {}));
   after(() => syncCalendarSoon(i.calendarId).catch(() => {}));
+  after(async () => { const id = (out as { id?: string }).id; if (id) await remindersChanged(await affectedByEvent(id)).catch(() => {}); });
   return out;
 }, { idempotent: true });

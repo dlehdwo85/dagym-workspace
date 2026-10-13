@@ -207,6 +207,17 @@ S-P2(ICS 구독·회의실 예약·휴가 결재·내보내기/휴지통/2단계
 - 운영 DB 확인(오늘 done/on_hold 로 바뀐 업무·변경자)은 클라우드에 접속 정보가 없어 못 함 — 로컬에서 `select a.created_at, u.name, t.title, a.changes from activities a join users u on u.id=a.actor_id join tasks t on t.id=a.entity_id where a.entity_type='task' and a.changes ? 'status' and a.created_at::date = current_date order by 1` 로 확인 부탁.
 - 시험: E2E 밀기 단계 교체(기본 꺼짐·30px·세로 무시·45% 완료·되돌리기), 47/47.
 
+### 2026-10-14 · 휴대폰 예약 알림 (WORKIN_LOCAL_REMINDERS, 클라우드 부분)
+서버 정기 실행이 늦어도 **기기가 정시에 울리도록** 미리 알림을 휴대폰에 예약합니다. 대표 승인한 "분 단위 알림" 대안(cron-job.org 가입 불필요).
+- ✅ `mobile/package.json` 에 `@capacitor/local-notifications@^8.3.1` (lock 갱신, **`cap sync` 는 로컬**)
+- ✅ `GET /api/reminders/upcoming?days=7` — 앞으로 7일(1~14) 내가 받을 미리 알림, 가까운 순 최대 64개: 일정(일정별 알림 또는 내 기본값, 불참 제외, 반복 회차·예외 반영, 종일은 09시 기준) · 업무(업무별 🔔 또는 시간 있는 업무 기본값, 당일 09시 "오늘 마감", "마감 임박") · 아침 브리핑(설정 시각, 주말·공휴일 설정 반영 — 미리 예약하므로 건수 대신 "오늘 할 일과 일정을 확인하세요"). 알림 id 는 같은 알림이면 늘 같은 값(FNV 해시)
+- ✅ 앱(`src/components/native.ts`): 시작·앱 복귀·화면 변경(`wos-refresh`, 1.5초 모아서)·서버의 조용한 메시지 때 **기존 예약 모두 취소 → 다시 예약**(최대 64), Android 채널 `reminders`(중요도 높음), `allowWhileIdle`. 알림 탭 → 해당 화면. 로그아웃하면 예약 삭제. 플러그인이 없는 예전 앱은 아무것도 안 함
+- ✅ 서버: 앱이 `localReminders: true` 로 토큰을 등록한 기기(플러그인 있음 + 알림 권한 허용)에는 `event_reminder`·`due_soon`·`briefing` 푸시를 보내지 않음(알림 목록 기록은 남음). 다른 알림(배정·댓글·멘션 등)은 그대로. 예전 앱이 다시 등록하면 플래그가 꺼져 서버 알림 복귀. 마이그레이션 023(추가형)
+- ✅ 업무·일정 생성·수정·삭제 시 관련된 사람(담당·참석자·개인 캘린더 주인, 변경 전·후)의 예약 기기에 **조용한 FCM**(`data.type=reminders-changed`, 화면 표시 없음, Android HIGH / iOS background) → 앱이 다시 예약
+- ⚠ 한계(정직하게): 앱을 한 번도 열지 않았거나 7일 넘게 안 열면 그 뒤 알림은 예약이 없음(조용한 메시지가 오면 갱신). iOS 는 앱을 강제 종료한 상태에서 조용한 메시지가 안 올 수 있음 → 다음 실행 때 갱신. 예약 목록 계산은 서버 규칙과 같지만 "기한 지남"·담당 배정 같은 사건 알림은 계속 서버 푸시
+- ⛔ **로컬 할 일** (네이티브는 로컬 담당): ① `cd mobile && npm i && npx cap sync` ② Android `AndroidManifest.xml` 에 `SCHEDULE_EXACT_ALARM`(또는 `USE_EXACT_ALARM` — Play 정책상 캘린더·알람 앱만; 워크인은 `SCHEDULE_EXACT_ALARM` 권장, 사용자가 허용 안 하면 플러그인이 비정확 예약으로 동작)·`RECEIVE_BOOT_COMPLETED`(재부팅 후 예약 복원) ③ 알림 작은 아이콘: 기본 앱 아이콘 사용 — 흰색 단색 아이콘 `res/drawable/ic_stat_*` 를 넣으면 `capacitor.config` 의 `LocalNotifications.smallIcon` 로 지정 ④ 빌드·내부 테스트 업로드 ⑤ 실기기: 일정 15분 뒤로 만들고 **비행기 모드**로 바꿔 정시에 울리는지, 탭하면 그 일정으로 가는지, 다른 PC 에서 일정 시간을 바꾸면 휴대폰 예약이 바뀌는지(조용한 메시지), 같은 알림이 서버·기기 두 번 오지 않는지 → `docs/handoff/DEVICE_TEST.md`
+- 시험: API 110/110(+예약 목록: 업무별 30분 전 서울 시각·오늘 마감·일정 15분 전·삭제/불참 제외·id 중복 없음·가까운 순·남의 목록에 없음 / 예약 기기: 조용한 FCM 수신·배정 알림은 옴·마감 미리 알림은 이 기기로 안 감·기록은 남음·예전 앱 재등록 시 복귀). **실기기 미검증 — 완료 보고 아님.**
+
 ### 2026-10-14 · WORKIN_V8 (1~9번) — 2커밋
 **⚠ 대표 결정 필요 ① 첨부 파일 저장소** — 운영 `/api/health` 가 `fileStorage: local-disk`. Vercel 함수의 디스크는 요청마다 바뀌는 임시 공간이라 **올린 사진·파일이 사라지거나 올리기가 실패**합니다(코드는 S3 호환 저장소를 이미 지원 — 환경변수만 넣으면 됨, 코드 수정 없음).
 | 선택지 | 비용 | 필요한 일 |

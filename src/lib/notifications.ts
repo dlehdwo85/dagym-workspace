@@ -18,6 +18,9 @@ export interface NotifyInput {
  * 알림 생성 + 푸시 발송 대기열 등록. 실제 발송은 dispatchPending() (요청 직후 + 서버 스케줄러 재시도).
  * 반환: 새로 만들어진 알림 id 목록
  */
+/** 기기 로컬 알림이 대신하는 종류 (일정 시작 전·마감 미리 알림·아침 브리핑) */
+export const LOCAL_TYPES: string[] = ['event_reminder', 'due_soon', 'briefing'];
+
 export async function notify(sql: Sql, n: NotifyInput): Promise<string[]> {
   const targets = [...new Set(n.userIds.filter((x): x is string => !!x && x !== n.actorId))];
   if (targets.length === 0) return [];
@@ -55,6 +58,8 @@ export async function notify(sql: Sql, n: NotifyInput): Promise<string[]> {
         insert into notification_deliveries (notification_id, subscription_id, channel, status, next_attempt_at)
         select ${rows[0].id}, p.id, p.kind, 'pending', coalesce(${at}::timestamptz, now())
         from push_subscriptions p where p.user_id = ${userId} and p.disabled_at is null
+          -- 미리 알림을 기기에서 직접 예약하는 앱에는 같은 알림을 다시 보내지 않음(중복 방지)
+          and not (p.local_reminders and ${LOCAL_TYPES.includes(n.type)})
         on conflict do nothing`;
     }
   }

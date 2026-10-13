@@ -11,7 +11,7 @@ import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
-import { enableNativePush, initNative } from './native';
+import { clearReminders, enableNativePush, initNative } from './native';
 import { QuickAddTask } from './QuickAddTask';
 import { CommandPalette } from './CommandPalette';
 
@@ -123,6 +123,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   async function logout() {
     let pushEndpoint: string | undefined;
     try { pushEndpoint = localStorage.getItem('wos_push_endpoint') ?? undefined; } catch {}
+    await clearReminders().catch(() => {});
     await api('/api/auth/logout', { body: { pushEndpoint } }).catch(() => {});
     location.href = '/login';
   }

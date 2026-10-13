@@ -1511,3 +1511,56 @@ describe('WORKIN_V8 템플릿 · 미리 알림', () => {
     assert.equal(n.filter((x) => /1일 뒤/.test(x.title)).length, 1, '하루 전 알림도(이미 지났지만 마감 전) 1번');
   });
 });
+
+describe('WORKIN 휴대폰 예약 알림', () => {
+  test('앞으로 7일 예약 목록: 업무별 알림·오늘 마감·일정 알림, 삭제·불참 제외, 64개 이하', async () => {
+    const c = ctx.staffA.client;
+    const tom = addDays(today, 1);
+    const t1 = (await c.ok('POST', '/api/tasks', { title: '예약 알림 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: tom, dueTime: '15:00', reminderMinutes: [30], approvalRequired: false })).id;
+    const t2 = (await c.ok('POST', '/api/tasks', { title: '예약 삭제될 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: tom, approvalRequired: false })).id;
+    await c.ok('DELETE', `/api/tasks/${t2}`);
+    const cal = (await ctx.managerA.client.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'org_unit').id;
+    const start = new Date(Date.now() + 3 * 3600e3), end = new Date(start.getTime() + 3600e3);
+    const ev = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '예약 알림 회의', start: start.toISOString(), end: end.toISOString(), attendeeIds: [ctx.staffA.id, ctx.staffB.id], reminderMinutes: [15] })).id;
+    const ev2 = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '예약 불참 회의', start: start.toISOString(), end: end.toISOString(), attendeeIds: [ctx.staffA.id], reminderMinutes: [15] })).id;
+    await c.ok('POST', `/api/events/${ev2}/respond`, { response: 'declined' });
+    const { reminders } = await c.ok('GET', '/api/reminders/upcoming');
+    assert.ok(reminders.length <= 64);
+    const r30 = reminders.find((r) => r.link === `/tasks/${t1}` && /30분 뒤 마감/.test(r.title));
+    assert.ok(r30, '업무별 30분 전');
+    assert.equal(new Date(r30.fireAt).toISOString(), new Date(`${tom}T14:30:00+09:00`).toISOString(), '서울 기준 14:30');
+    assert.ok(reminders.some((r) => r.link === `/tasks/${t1}` && /^오늘 마감/.test(r.title)), '당일 09시 오늘 마감');
+    assert.ok(!reminders.some((r) => r.link === `/tasks/${t2}`), '삭제한 업무 제외');
+    const er = reminders.find((r) => r.link === `/calendar?event=${ev}`);
+    assert.ok(er && /15분 뒤 일정/.test(er.title), '일정 15분 전');
+    assert.equal(new Date(er.fireAt).getTime(), start.getTime() - 15 * 60000);
+    assert.ok(!reminders.some((r) => r.link === `/calendar?event=${ev2}`), '불참 일정 제외');
+    assert.equal(new Set(reminders.map((r) => r.id)).size, reminders.length, 'id 중복 없음');
+    assert.ok(reminders.every((r, i) => i === 0 || reminders[i - 1].fireAt <= r.fireAt), '가까운 순');
+    // 다른 사람 목록에는 내 업무가 없음
+    assert.ok(!(await ctx.managerA.client.ok('GET', '/api/reminders/upcoming')).reminders.some((r) => r.link === `/tasks/${t1}`));
+  });
+  test('예약 알림 기기: 바뀌면 조용한 FCM, 서버는 미리 알림(마감·일정·브리핑)을 이 기기에 보내지 않음', async () => {
+    const c = ctx.staffA.client;
+    await c.ok('POST', '/api/push/subscribe', { kind: 'fcm', endpoint: 'fcm-local-a', platform: 'android', localReminders: true });
+    const at = new Date(Date.now() + 25 * 60000);
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(at);
+    const hm = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(at);
+    const t = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: '예약 기기 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: day, dueTime: hm, reminderMinutes: [30], approvalRequired: false })).id;
+    await new Promise((r) => setTimeout(r, 1500));
+    await tick(); await tick();
+    const st = await fetch(`${FAKE}/__state`).then((r) => r.json());
+    const mine = st.fcm.filter((m) => m.token === 'fcm-local-a');
+    assert.ok(mine.some((m) => m.data?.type === 'reminders-changed' && !m.notification), '조용한 재예약 메시지');
+    assert.ok(mine.some((m) => m.data?.link === `/tasks/${t}` && m.notification), '배정 알림은 그대로 옴');
+    assert.ok(!mine.some((m) => m.data?.link === `/tasks/${t}` && /마감/.test(m.notification?.title ?? '')), '마감 미리 알림은 기기 예약이 담당');
+    const n = await sql`select count(*)::int c from notifications where entity_id = ${t} and type = 'due_soon'`;
+    assert.ok(n[0].c >= 1, '알림 기록(앱 안 목록)은 남음');
+    const del = await sql`select count(*)::int c from notification_deliveries d join notifications n on n.id = d.notification_id join push_subscriptions p on p.id = d.subscription_id
+      where p.endpoint = 'fcm-local-a' and n.type = 'due_soon'`;
+    assert.equal(del[0].c, 0);
+    // 예전 앱(플래그 없음) 다시 등록하면 서버 알림 복귀
+    await c.ok('POST', '/api/push/subscribe', { kind: 'fcm', endpoint: 'fcm-local-a', platform: 'android' });
+    assert.equal((await sql`select local_reminders from push_subscriptions where endpoint = 'fcm-local-a'`)[0].local_reminders, false);
+  });
+});

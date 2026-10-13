@@ -127,3 +127,28 @@ export async function dispatchPending(limit = 50) {
   }
   return { claimed: claimed.length, sent, failed };
 }
+
+/**
+ * 휴대폰 예약 알림: 일정·업무가 바뀌면 영향받는 사람의 앱(로컬 알림 사용 기기)에 조용한 데이터 메시지 → 앱이 7일치를 다시 예약.
+ * 못 받아도 다음에 앱을 열 때 다시 예약된다. 화면에 알림을 띄우지 않음, 실패는 무시.
+ */
+export async function remindersChanged(userIds: (string | null | undefined)[]) {
+  const ids = [...new Set(userIds.filter((x): x is string => !!x))];
+  if (!ids.length || !fcmConfigured()) return 0;
+  const sql = db();
+  const subs = await sql<{ endpoint: string }[]>`select endpoint from push_subscriptions where kind = 'fcm' and local_reminders and disabled_at is null and user_id = any(${ids}::uuid[])`;
+  if (!subs.length) return 0;
+  const sa = JSON.parse(process.env.FCM_SERVICE_ACCOUNT_JSON!);
+  const access = await fcmAccessToken(sa);
+  const base = process.env.FCM_API_BASE ?? 'https://fcm.googleapis.com';
+  let n = 0;
+  for (const s of subs) {
+    const r = await fetch(`${base}/v1/projects/${sa.project_id}/messages:send`, {
+      method: 'POST', headers: { authorization: `Bearer ${access}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ message: { token: s.endpoint, data: { type: 'reminders-changed' }, android: { priority: 'HIGH' },
+        apns: { headers: { 'apns-push-type': 'background', 'apns-priority': '5' }, payload: { aps: { 'content-available': 1 } } } } }),
+    }).catch(() => null);
+    if (r?.ok) n++;
+  }
+  return n;
+}

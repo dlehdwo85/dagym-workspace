@@ -1,0 +1,103 @@
+import { DateTime } from 'luxon';
+import { db } from './db';
+import { occurrences } from './recurrence';
+import { todaySeoul, addDays } from './time';
+import type { SessionUser } from './types';
+
+const TZ = 'Asia/Seoul';
+export type Upcoming = { id: number; key: string; fireAt: string; title: string; body: string; link: string };
+
+/** 알림 키 → 기기 로컬 알림 id(양의 32비트 정수, 같은 알림은 늘 같은 id) */
+export function reminderId(key: string) {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 1) || 1;
+}
+const kst = (d: string, t: string) => DateTime.fromISO(`${d}T${t}`, { zone: TZ });
+const leftLabel = (m: number) => (m >= 1440 ? `${Math.round(m / 1440)}일 뒤` : m >= 60 ? `${Math.round(m / 60)}시간 뒤` : m > 0 ? `${m}분 뒤` : '지금');
+
+/**
+ * 휴대폰 예약 알림용: 앞으로 N일(기본 7) 동안 내가 받을 미리 알림. 서버 정기 실행이 보내는 것과 같은 규칙.
+ * - 일정: 일정별 알림(분) 또는 내 기본값(기본 10분 전), 0 = 끔, 불참 응답한 일정 제외
+ * - 시간 있는 업무: 업무별 🔔 또는 내 기본값(60분 전) / 날짜만 있는 업무: 업무별 🔔(09시 기준) + 당일 09시 "오늘 마감"
+ * - 마감 임박(설정한 시간 전, 기본 24시간) / 아침 브리핑(켜져 있으면 평일 설정 시각)
+ * 가까운 순 최대 `limit`(Android·iOS 예약 한도 고려 64)
+ */
+export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): Promise<Upcoming[]> {
+  const sql = db();
+  const now = DateTime.now().setZone(TZ);
+  const until = now.plus({ days });
+  const today = todaySeoul();
+  const [s] = await sql<{ ev: number; task: number; soon: number; btime: string; bon: boolean; bweekend: boolean }[]>`
+    select coalesce(event_reminder_minutes, 10) ev, coalesce(task_reminder_minutes, 60) task, coalesce(due_soon_hours, 24) soon,
+      to_char(coalesce(briefing_time, time '08:30'), 'HH24:MI') btime, coalesce(briefing_enabled, true) bon, coalesce(briefing_weekend, false) bweekend
+    from user_settings where user_id = ${u.id}`;
+  const st = s ?? { ev: 10, task: 60, soon: 24, btime: '08:30', bon: true, bweekend: false };
+  const out: Upcoming[] = [];
+  const push = (key: string, at: DateTime, title: string, body: string, link: string) => {
+    if (at <= now || at > until) return;
+    out.push({ id: reminderId(key), key, fireAt: at.toUTC().toISO()!, title, body, link });
+  };
+
+  // 일정 (내 개인 캘린더 + 참석, 불참 제외)
+  const evs = await sql<{ id: string; title: string; start_at: Date; all_day: boolean; rrule: string | null; exdates: Date[]; reminder_minutes: number[] | null }[]>`
+    select e.id, e.title, e.start_at, e.all_day, e.rrule, e.exdates, e.reminder_minutes from events e join calendars c on c.id = e.calendar_id
+    where e.deleted_at is null and e.recurring_event_id is null and e.kind <> 'task_block'
+      and (e.rrule is not null or (e.start_at > ${now.toJSDate()} and e.start_at < ${until.plus({ days: 1 }).toJSDate()}))
+      and ((c.type = 'personal' and c.owner_user_id = ${u.id})
+        or exists (select 1 from event_attendees a where a.event_id = e.id and a.user_id = ${u.id} and a.response <> 'declined'))`;
+  const exceptions = evs.length ? await sql<{ recurring_event_id: string; original_start: Date; start_at: Date; title: string; cancelled: boolean }[]>`
+    select recurring_event_id, original_start, start_at, title, cancelled from events where recurring_event_id = any(${evs.map((e) => e.id)}::uuid[]) and deleted_at is null` : [];
+  for (const e of evs) {
+    // 일정별 알림이 있으면 그대로(0 = 시작 시각), 없으면 내 기본값(0 = 끔)
+    const leads = e.reminder_minutes ?? (st.ev > 0 ? [st.ev] : []);
+    if (!leads.length) continue;
+    const starts: { s: Date; title: string }[] = [];
+    if (!e.rrule) starts.push({ s: e.start_at, title: e.title });
+    else {
+      const skip = new Set([...(e.exdates ?? []).map((d) => new Date(d).getTime()), ...exceptions.filter((x) => x.recurring_event_id === e.id).map((x) => x.original_start.getTime())]);
+      for (const o of occurrences(e.rrule, e.start_at, now.toJSDate(), until.plus({ days: 1 }).toJSDate())) if (!skip.has(o.getTime())) starts.push({ s: o, title: e.title });
+      for (const x of exceptions.filter((x) => x.recurring_event_id === e.id && !x.cancelled)) starts.push({ s: x.start_at, title: x.title });
+    }
+    for (const o of starts) {
+      const at0 = DateTime.fromJSDate(o.s).setZone(TZ);
+      for (const m of leads) push(`ev:${e.id}:${o.s.toISOString()}:${m}`, e.all_day ? at0.set({ hour: 9 }).minus({ minutes: m }) : at0.minus({ minutes: m }),
+        `${m ? `${leftLabel(m)} 일정` : '지금 일정'}: ${o.title}`, e.all_day ? '종일' : at0.toFormat('HH:mm'), `/calendar?event=${e.id}`);
+    }
+  }
+
+  // 업무 (내가 담당, 미완료·보류 아님, 삭제 제외)
+  const tasks = await sql<{ id: string; title: string; due_date: string; due_time: string | null; reminder_minutes: number[] | null }[]>`
+    select id, title, to_char(due_date,'YYYY-MM-DD') due_date, to_char(due_time,'HH24:MI') due_time, reminder_minutes from tasks
+    where deleted_at is null and assignee_id = ${u.id} and status not in ('done','on_hold') and due_date between ${today} and ${addDays(today, days + 1)}`;
+  for (const t of tasks) {
+    const due = kst(t.due_date, t.due_time ?? '09:00');
+    const ms = t.reminder_minutes ?? (t.due_time ? [st.task] : []);
+    for (const m of ms) push(`task:${t.id}:${t.due_date}:${t.due_time ?? ''}:${m}`, due.minus({ minutes: m }), `${leftLabel(m)} 마감: ${t.title}`,
+      `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), `/tasks/${t.id}`);
+    push(`today:${t.id}:${t.due_date}`, kst(t.due_date, '09:00'), `오늘 마감: ${t.title}`, t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', `/tasks/${t.id}`);
+    if (st.soon > 0) push(`soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, kst(t.due_date, t.due_time ?? '23:59').minus({ hours: st.soon }), `마감 임박: ${t.title}`, `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, `/tasks/${t.id}`);
+  }
+
+  // 아침 브리핑 (내용은 열어서 확인 — 미리 예약하므로 숫자 대신 안내)
+  if (st.bon) {
+    const hol = new Set((await sql<{ d: string }[]>`select to_char(date,'YYYY-MM-DD') d from holidays where date between ${today} and ${addDays(today, days)}`).map((h) => h.d));
+    for (let i = 0; i <= days; i++) {
+      const d = addDays(today, i), at = kst(d, st.btime);
+      if (!st.bweekend && (at.weekday >= 6 || hol.has(d))) continue;
+      push(`brief:${d}`, at, `좋은 아침입니다 · ${d.slice(5).replace('-', '/')} 브리핑`, '오늘 할 일과 일정을 확인하세요', '/');
+    }
+  }
+  const seen = new Set<number>();
+  return out.sort((a, b) => a.fireAt.localeCompare(b.fireAt)).filter((x) => (seen.has(x.id) ? false : (seen.add(x.id), true))).slice(0, limit);
+}
+
+/** 바뀐 일정·업무의 미리 알림을 받는 사람 (조용한 재예약 메시지 대상) */
+export async function affectedByTask(taskId: string) {
+  return (await db()<{ id: string }[]>`select assignee_id as id from tasks where id = ${taskId} and assignee_id is not null`).map((r) => r.id);
+}
+export async function affectedByEvent(eventId: string) {
+  return (await db()<{ id: string }[]>`
+    select a.user_id as id from events e join event_attendees a on a.event_id = coalesce(e.recurring_event_id, e.id) where e.id = ${eventId}
+    union select c.owner_user_id from events e join calendars c on c.id = e.calendar_id where e.id = ${eventId} and c.owner_user_id is not null`).map((r) => r.id);
+}
