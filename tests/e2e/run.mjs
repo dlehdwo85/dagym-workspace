@@ -836,6 +836,38 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   await owner.waitForTimeout(600);
   assert.equal(await groups.getByText('신규 회원 이벤트 기획').count(), 0, '지시자를 최매니저로 바꿨으니 빠짐');
 });
+await step('V3-6 휴대폰: 다른 사람 묶음에서 "저장" 버튼으로 추가 → 안내·강조·그 묶음에 표시, 순서 메뉴로 위로, 홈 기한 지남 경고 띠', async () => {
+  const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  const m = await mc.newPage();
+  await m.goto(BASE + '/tasks');
+  const [minsu] = await sql`select id from users where email = 'minsu@dagym.test'`;
+  const g = m.getByTestId('task-groups').locator(`[data-group="${minsu.id}"]`);
+  const add = g.getByPlaceholder('김민수님에게 업무 추가');
+  await add.fill('두정점 원판 수량 파악');
+  await g.getByTestId('inline-save').click();
+  await m.getByText('김민수님에게 추가됨: 두정점 원판 수량 파악').waitFor();
+  await g.getByText('두정점 원판 수량 파악').waitFor();
+  await g.locator('[data-fresh="1"]').first().waitFor();
+  assert.equal(await add.inputValue(), '', '저장 후 입력 비움');
+  const [t] = await sql`select assignee_id from tasks where title = '두정점 원판 수량 파악'`;
+  assert.equal(t.assignee_id, minsu.id);
+  // 순서 메뉴: 김민수 묶음 마지막 업무를 맨 위로
+  const titles = async () => (await g.locator('[data-row] a[data-open-task]').allTextContents()).map((x) => x.trim());
+  const before = await titles();
+  assert.ok(before.length >= 2);
+  const last = before.at(-1);
+  await g.getByRole('button', { name: `${last} 순서 바꾸기` }).click();
+  await m.getByRole('dialog').getByRole('button', { name: '맨 위로' }).click();
+  await m.waitForTimeout(800);
+  await m.reload();
+  await g.locator('[data-row]').first().waitFor();
+  assert.equal((await titles())[0], last, '새로고침 후에도 맨 위');
+  await m.screenshot({ path: `${SHOTS}/62-mobile-add-other.png` });
+  // 홈: 기한 지난 업무 경고 띠
+  await m.goto(BASE + '/');
+  await m.getByTestId('overdue-banner').getByText(/기한 지난 업무 \d+건/).waitFor();
+  await mc.close();
+});
 await step('W-0 휴대폰 360·375·390·430px 모든 주요 화면 좌우 넘침 없음 (안전장치 끄고 측정)', async () => {
   const { checkWidths } = await import('./widths.mjs');
   const bad = await checkWidths(browser, await desk.storageState());

@@ -174,6 +174,11 @@ export default function Dashboard() {
         <p className="text-sm text-ink-2">{fmtDate(data.today)} · {greet}, {user.name}님</p>
         <h1 className="mt-0.5 text-2xl font-bold tracking-tight">{company ? '전체 현황' : `${user.name}님의 업무 현황`}</h1>
       </div>
+      {tot.overdue > 0 && (
+        <Link href="/tasks?view=overdue" className="flex items-center gap-2 rounded-card border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 hover:bg-red-100" data-testid="overdue-banner">
+          <AlertTriangle className="size-5 shrink-0" />기한 지난 업무 {tot.overdue}건<span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium">확인하기<ArrowRight className="size-3.5" /></span>
+        </Link>
+      )}
       {/* WORKIN_V2 홈: 오늘 할 일 · 이번 주 일정 · 이달의 일정 · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동 (모바일은 위에서부터 이 순서) */}
       <div className="grid min-w-0 gap-4 lg:grid-flow-dense lg:grid-cols-3">
         <Section title="오늘 할 일" count={todayTasks.length} href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} icon={CheckCircle2} className="lg:col-span-2" testid="home-today"

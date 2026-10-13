@@ -184,11 +184,11 @@ export function DueChip({ due, status, time, className }: { due: string | null |
   const days = Math.round((Date.parse(due) - Date.parse(t)) / 86400000);
   const done = status === 'done';
   const tone = done ? 'text-slate-400' : days < 0 ? 'bg-red-50 text-red-700' : days === 0 ? 'bg-blue-50 text-blue-700' : days <= 3 ? 'bg-orange-50 text-orange-700' : 'text-ink-2';
-  const label = days === 0 ? '오늘' : days === 1 ? '내일' : days === -1 ? '어제' : fmtShort(due);
+  const label = days === 0 ? '오늘' : days === 1 ? '내일' : fmtShort(due);
   return (
     <span className={clsx('inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums', tone, className)}
       title={`마감 ${fmtDate(due)}${!done && days < 0 ? ` · ${-days}일 지남` : ''}`}>
-      <CalendarDays className="size-3.5 opacity-70" aria-hidden />{label}{time ? ` ${time.slice(0, 5)}` : ''}{!done && days < -1 && <span className="font-semibold">·{-days}일</span>}
+      <CalendarDays className="size-3.5 opacity-70" aria-hidden />{label}{time ? ` ${time.slice(0, 5)}` : ''}{!done && days < 0 && <span className="font-semibold"> · {-days}일 지남</span>}
     </span>
   );
 }

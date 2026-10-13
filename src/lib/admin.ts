@@ -47,6 +47,7 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
       returning id`;
     await tx`delete from memberships where user_id = ${userId}`;
     for (const o of i.orgUnitIds) await tx`insert into memberships (user_id, org_unit_id) values (${userId}, ${o})`;
+    await syncDemoFlag(tx, [userId]);
     await audit(tx, actor.id, 'user.invite', 'user', userId, { email: i.email, role: i.role, orgUnitIds: i.orgUnitIds }, ip);
     return { invitationId: inv.id, userId, token, path: `/invite/${token}` };
   });
@@ -117,6 +118,7 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
       await tx`delete from memberships where user_id = ${id}`;
       for (const o of new Set(p.orgUnitIds)) await tx`insert into memberships (user_id, org_unit_id) values (${id}, ${o})`;
     }
+    if (p.orgUnitIds || p.role) await syncDemoFlag(tx, [id]);
     // 비활성·퇴사·권한 변경 시 기존 세션 즉시 차단
     if ((p.status && p.status !== 'active') || p.role || p.orgUnitIds) {
       if (p.status && p.status !== 'active') {
@@ -164,14 +166,17 @@ export const orgUnitInput = z.object({
   brandId: z.enum(['dagym', 'hilink', 'bodylab']).nullable().optional(),
   active: z.boolean().optional(),
   sort: z.number().int().optional(),
+  /** 앱 심사용 격리 조직: 최상위만. 소속 직원은 이 조직 밖을 전혀 볼 수 없고, 대표·본사 화면에도 섞이지 않는다 */
+  isDemo: z.boolean().optional(),
 });
 
 export async function createOrgUnit(actor: SessionUser, i: z.infer<typeof orgUnitInput>, ip: string | null) {
   requireAdmin(actor);
   const sql = db();
+  if (i.isDemo && i.parentId) throw badRequest('앱 심사용 격리 조직은 최상위(상위 조직 없음)로만 만들 수 있습니다');
   return sql.begin(async (tx) => {
     const [o] = await tx<{ id: string }[]>`
-      insert into org_units (parent_id, brand_id, type, name, sort) values (${i.parentId ?? null}, ${i.brandId ?? null}, ${i.type}, ${i.name}, ${i.sort ?? 0})
+      insert into org_units (parent_id, brand_id, type, name, sort, is_demo) values (${i.parentId ?? null}, ${i.brandId ?? null}, ${i.type}, ${i.name}, ${i.sort ?? 0}, ${!!i.isDemo})
       returning id`;
     await tx`insert into calendars (type, org_unit_id, name, color) values ('org_unit', ${o.id}, ${i.name + ' 일정'},
       ${i.brandId === 'dagym' ? '#ea580c' : i.brandId === 'hilink' ? '#2563eb' : i.brandId === 'bodylab' ? '#059669' : '#475569'})`;
@@ -196,8 +201,16 @@ export async function updateOrgUnit(actor: SessionUser, id: string, i: Partial<z
   if (i.brandId !== undefined) set.brand_id = i.brandId;
   if (i.active !== undefined) set.active = i.active;
   if (i.sort !== undefined) set.sort = i.sort;
+  if (i.isDemo !== undefined) {
+    const [cur] = await sql<{ parent_id: string | null }[]>`select parent_id from org_units where id = ${id}`;
+    const parent = i.parentId !== undefined ? i.parentId : cur?.parent_id;
+    if (i.isDemo && parent) throw badRequest('앱 심사용 격리 조직은 최상위(상위 조직 없음)로만 지정할 수 있습니다');
+    if (i.isDemo) { const kids = await sql`select 1 from org_units where parent_id = ${id} limit 1`; if (kids.length) throw badRequest('하위 조직이 있는 조직은 격리 조직으로 바꿀 수 없습니다'); }
+    set.is_demo = i.isDemo;
+  }
   if (!Object.keys(set).length) return { ok: true };
   await sql.begin(async (tx) => {
+    if (set.is_demo !== undefined) { await tx`update org_units set is_demo = ${set.is_demo as boolean} where id = ${id}`; delete set.is_demo; await syncDemoFlag(tx, (await tx<{ user_id: string }[]>`select user_id from memberships where org_unit_id = ${id}`).map((r) => r.user_id)); if (!Object.keys(set).length) { await audit(tx, actor.id, 'org.update', 'org_unit', id, i, ip); return; } }
     await tx`update org_units set ${tx(set as never, ...(Object.keys(set) as never[]))} where id = ${id}`;
     if (i.name) await tx`update calendars set name = ${i.name + ' 일정'} where org_unit_id = ${id}`;
     await audit(tx, actor.id, 'org.update', 'org_unit', id, i, ip);
@@ -219,4 +232,13 @@ export async function directory(u: SessionUser, sql: Sql = db()) {
     group by u.id order by u.name`;
   const brands = await sql`select id, name, color from brands order by sort`;
   return { brands, orgUnits, users, accessibleUnitIds: units, isAdmin: isAdmin(u) };
+}
+
+/** 체험(격리) 계정 표시: 대표·본사 관리자가 아니고, 소속이 모두 격리 조직이면 is_demo — 화면·API 에서 그 조직 밖이 전혀 안 보인다 */
+export async function syncDemoFlag(tx: Sql, userIds: string[]) {
+  if (!userIds.length) return;
+  await tx`update users u set is_demo = (u.role not in ('owner','admin')
+      and exists (select 1 from memberships m join org_units o on o.id = m.org_unit_id where m.user_id = u.id and o.is_demo)
+      and not exists (select 1 from memberships m join org_units o on o.id = m.org_unit_id where m.user_id = u.id and not o.is_demo))
+    where u.id = any(${userIds}::uuid[])`;
 }

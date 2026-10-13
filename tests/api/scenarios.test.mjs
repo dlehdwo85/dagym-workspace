@@ -728,6 +728,12 @@ describe('알림: 서버 정기 실행·중복 방지·푸시 발송·실패 기
     await tick(); await tick();
     const [{ c }] = await sql`select count(*)::int c from notifications where entity_id = ${id} and type = 'overdue' and user_id = ${ctx.staffA.id}`;
     assert.equal(c, 1);
+    const [{ r }] = await sql`select count(*)::int r from notifications where entity_id = ${id} and type = 'overdue' and user_id = ${ctx.ownerId}`;
+    assert.equal(r, 1, '지시자(만든 사람)에게도 하루 1번');
+    const todayTask = (await ctx.owner.ok('POST', '/api/tasks', { title: '오늘 마감 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today })).id;
+    await tick(); await tick();
+    const [{ dt }] = await sql`select count(*)::int dt from notifications where entity_id = ${todayTask} and title like '오늘 마감:%'`;
+    assert.equal(dt, 1, '오늘 마감 알림 하루 1번');
     const [{ s }] = await sql`select count(*)::int s from notifications where entity_id = ${soon} and type = 'due_soon'`;
     assert.equal(s, 1);
     const [run] = await sql`select status, trigger from job_runs where job = 'tick' order by id desc limit 1`;
@@ -1086,12 +1092,13 @@ describe('매출 2·3단계 (대표 승인): 표준 CSV · GPT Action 토큰 · 
 
 describe('데모(체험) 계정 격리 — is_demo 조직·계정은 밖을 못 보고, 대표 화면에도 섞이지 않음', () => {
   test('체험 계정: 회사 일정·관리자 명단·전사 템플릿·검색 사람 안 보임, 대표 목록에 데모 업무 없음', async () => {
-    const unit = (await ctx.owner.ok('POST', '/api/admin/org-units', { name: '격리 시험 지점', type: 'branch', parentId: null })).id;
+    assert.equal((await ctx.owner.req('POST', '/api/admin/org-units', { name: 'x', type: 'branch', parentId: ctx.hq, isDemo: true })).status, 400, '격리 조직은 최상위만');
+    const unit = (await ctx.owner.ok('POST', '/api/admin/org-units', { name: '격리 시험 지점', type: 'branch', parentId: null, isDemo: true })).id;
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'iso@dagym.test', name: '격리직원', role: 'staff', orgUnitIds: [unit] });
     const c = new Client('iso');
     await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'iso-pass-1234' });
-    await sql`update org_units set is_demo = true where id = ${unit}`;
-    await sql`update users set is_demo = true where email = 'iso@dagym.test'`;
+    const [iso] = await sql`select is_demo from users where email = 'iso@dagym.test'`;
+    assert.equal(iso.is_demo, true, '격리 조직에만 소속된 직원은 체험(격리) 계정이 됨 — 사용자 관리 화면 초대만으로');
     const compCal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'company');
     const ev = (await ctx.owner.ok('POST', '/api/events', { calendarId: compCal.id, title: '전사 비공개 회의', start: `${today}T15:00:00+09:00`, end: `${today}T16:00:00+09:00` })).id;
     await ctx.owner.ok('POST', '/api/templates', { name: '전사 템플릿 비공개', payload: { title: '전사' } }).catch(() => {});

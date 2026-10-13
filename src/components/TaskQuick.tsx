@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CalendarDays, Check, Plus, UserRound, X } from 'lucide-react';
+import { ArrowUpDown, CalendarDays, Check, Plus, UserRound, X } from 'lucide-react';
 import { api, broadcastRefresh } from './client';
 import { useSession } from './session';
 import { Avatar, DueChip, cx, toast, todayStr } from './ui';
@@ -112,39 +112,64 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const initRequester = defaultRequester ?? user.id;
   const [requester, setRequester] = useState<string | null>(initRequester);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [err, setErr] = useState<string | null>(null);
+  const { dir } = useSession();
   const input = useRef<HTMLInputElement>(null);
   // 한글 입력: 조합 중 Enter 는 글자만 확정되고 다시 Enter 가 오지 않는 브라우저(Chrome)가 있어, 조합이 끝나면 대신 저장
   const enterWhileComposing = useRef(false);
   async function submit(raw?: string) {
-    const t = (raw ?? title).trim();
-    if (!t || busy) return;
-    setBusy(true);
+    const t = (raw ?? input.current?.value ?? title).trim();
+    if (!t || busyRef.current) return;
+    busyRef.current = true; setBusy(true); setErr(null);
     try {
-      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: due, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false }, queueOffline: `업무 등록: ${t}` });
-      setTitle(''); broadcastRefresh(); onCreated?.(r.id);
-    } catch (e: any) { if (e.code === 'queued') { toast.info(e.message); setTitle(''); } else toast.error(e.message); }
-    finally { setBusy(false); input.current?.focus(); }
+      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: due, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
+      setTitle('');
+      markNew(r.id);
+      const who = assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
+      toast.ok(`${who}에게 추가됨: ${t}`, { label: '보기', run: () => { window.location.href = `/tasks/${r.id}`; } });
+      broadcastRefresh(); onCreated?.(r.id);
+    } catch (e: any) {
+      // 저장 실패: 입력값은 그대로 두고 이유를 줄 아래에 표시 (조용히 사라지지 않게)
+      setErr(e.message ?? '저장하지 못했습니다');
+    } finally { busyRef.current = false; setBusy(false); input.current?.focus(); }
   }
+  const showChips = !!(title || due || assignee !== initAssignee || requester !== initRequester || autoFocus);
   return (
-    <div className={cx('flex min-h-[44px] items-center gap-3 border-b border-line px-3 py-1.5 last:border-b-0 focus-within:bg-accent-50/40', muted ? 'bg-transparent' : 'bg-white')} data-testid="inline-add">
-      <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-dashed border-slate-300 text-slate-400"><Plus className="size-3.5" /></span>
-      <input ref={input} autoFocus={autoFocus} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={placeholder} aria-label="업무 추가 제목" maxLength={200}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') { e.preventDefault(); if (e.nativeEvent.isComposing) enterWhileComposing.current = true; else submit(); }
-          if (e.key === 'Escape') { e.stopPropagation(); setTitle(''); onEscape?.(); }
-        }}
-        onCompositionEnd={() => { if (enterWhileComposing.current) { enterWhileComposing.current = false; setTimeout(() => submit(input.current?.value), 0); } }}
-        className="min-w-0 flex-1 bg-transparent py-1 text-sm placeholder:text-ink-3 focus:outline-none" />
-      {(title || due || assignee !== initAssignee || requester !== initRequester || autoFocus) && (
-        <>
-          <span className="hidden sm:inline-flex" title="지시자(업무를 부여한 사람)"><span className="self-center text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={(v) => setRequester(v ?? user.id)} size={20} withName /></span>
-          <DuePicker value={due} onChange={setDue} label="새 업무 마감일" />
-          <AssigneePicker value={assignee} onChange={setAssignee} />
-        </>
-      )}
-    </div>
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }} className={cx('border-b border-line last:border-b-0 focus-within:bg-accent-50/40', muted ? 'bg-transparent' : 'bg-white')} data-testid="inline-add">
+      <div className="flex min-h-[44px] items-center gap-2 px-3 py-1.5 sm:gap-3">
+        <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-dashed border-slate-300 text-slate-400"><Plus className="size-3.5" /></span>
+        {/* 휴대폰 키보드의 "완료/이동" 은 form 제출로 확실히 저장 (Enter 가 keyCode 229 로 오는 키보드 대비) */}
+        <input ref={input} autoFocus={autoFocus} value={title} onChange={(e) => { setTitle(e.target.value); if (err) setErr(null); }} placeholder={placeholder} aria-label="업무 추가 제목" maxLength={200}
+          enterKeyHint="done" autoComplete="off"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.nativeEvent.isComposing) { e.preventDefault(); enterWhileComposing.current = true; }
+            if (e.key === 'Escape') { e.stopPropagation(); setTitle(''); setErr(null); onEscape?.(); }
+          }}
+          onCompositionEnd={() => { if (enterWhileComposing.current) { enterWhileComposing.current = false; setTimeout(() => submit(input.current?.value), 0); } }}
+          className="min-w-0 flex-1 bg-transparent py-1 text-sm placeholder:text-ink-3 focus:outline-none" />
+        {showChips && (
+          <>
+            <span className="hidden sm:inline-flex" title="지시자(업무를 부여한 사람)"><span className="self-center text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={(v) => setRequester(v ?? user.id)} size={20} withName /></span>
+            <DuePicker value={due} onChange={setDue} label="새 업무 마감일" />
+            <AssigneePicker value={assignee} onChange={setAssignee} />
+          </>
+        )}
+        {title.trim() && (
+          <button type="submit" disabled={busy} className="inline-flex h-9 min-w-[44px] shrink-0 items-center justify-center rounded-input bg-brand-600 px-3 text-sm font-semibold text-white disabled:opacity-60" data-testid="inline-save">
+            {busy ? '저장 중' : '저장'}
+          </button>
+        )}
+      </div>
+      {err && <p className="px-3 pb-2 pl-12 text-xs font-medium text-red-600" role="alert">{err} — 입력한 내용은 그대로 있습니다. 다시 저장을 눌러 주세요.</p>}
+    </form>
   );
 }
+
+/** 방금 추가한 업무: 목록에 나타날 때 2초 강조 */
+const freshIds = new Map<string, number>();
+export function markNew(id: string) { freshIds.set(id, Date.now()); }
+export function isFresh(id: string) { const t = freshIds.get(id); return !!t && Date.now() - t < 4000; }
 
 const PRI: [string, string, string][] = [['urgent', '긴급', 'bg-red-50 text-red-700 ring-red-200'], ['high', '높음', 'bg-orange-50 text-orange-700 ring-orange-200'], ['normal', '보통', 'bg-slate-50 text-ink-2 ring-slate-200'], ['low', '낮음', 'bg-sky-50 text-sky-700 ring-sky-200']];
 /** 우선순위 칩: 눌러서 긴급·높음·보통·낮음 */
@@ -163,6 +188,23 @@ export function PriorityPicker({ value, onChange, label = '우선순위' }: { va
           <button key={k} type="button" onClick={() => { onChange(k); setOpen(false); }} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
             <span className={cx('rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset', c)}>{l}</span>{k === (value ?? 'normal') && <Check className="size-4 text-accent-600" />}
           </button>
+        ))}
+      </Popover>
+    </span>
+  );
+}
+
+/** 휴대폰 순서 메뉴: 맨 위로 · 위로 · 아래로 · 맨 아래로 (손잡이 끌기가 어려운 화면용) */
+export function OrderMenu({ title, onMove }: { title: string; onMove: (to: 'top' | 'up' | 'down' | 'bottom') => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  return (
+    <span className="relative inline-flex sm:hidden">
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onTouchStart={(e) => e.stopPropagation()} aria-label={`${title} 순서 바꾸기`} aria-haspopup="dialog" data-testid="order-menu"
+        className="inline-flex size-9 items-center justify-center rounded-full text-ink-3 active:bg-slate-100"><ArrowUpDown className="size-4" /></button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} width={150}>
+        {([['top', '맨 위로'], ['up', '위로'], ['down', '아래로'], ['bottom', '맨 아래로']] as const).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => { onMove(k); setOpen(false); }} className="flex w-full items-center rounded-input px-3 py-2.5 text-left text-sm hover:bg-slate-50">{l}</button>
         ))}
       </Popover>
     </span>

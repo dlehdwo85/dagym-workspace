@@ -25,17 +25,31 @@ async function dueNotifications() {
       body: `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
       dedupeKey: `due_soon:${t.id}:${t.due_date}:${t.due_time ?? ''}` })).length;
   }
-  // 기한 초과: 담당자 + 작성자에게 한 번
-  const over = await sql<{ id: string; title: string; assignee_id: string | null; created_by: string; due_date: string }[]>`
-    select t.id, t.title, t.assignee_id, t.created_by, t.due_date from tasks t
-    where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_date is not null
-      and ((t.due_date + coalesce(t.due_time, time '23:59:59')) at time zone 'Asia/Seoul') < now()`;
-  for (const t of over) {
-    n += (await notify(sql, { userIds: [t.assignee_id, t.created_by], type: 'overdue', title: `기한 초과: ${t.title}`,
-      body: `마감일 ${t.due_date} 이 지났습니다`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
-      dedupeKey: `overdue:${t.id}:${t.due_date}` })).length;
+  // 매일 오전 9시(서울) 이후 첫 실행에서 하루 1회: 기한 지남 → 담당자·지시자, 오늘 마감 → 담당자 (완료·보류되면 멈춤)
+  const now = new Date();
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(now));
+  const today = todaySeoul(now);
+  let over: { id: string; title: string; assignee_id: string | null; requested_by: string | null; created_by: string; due_date: string; days: number }[] = [];
+  let dueToday: { id: string; title: string; assignee_id: string; due_time: string | null }[] = [];
+  if (hour >= Number(process.env.DUE_DIGEST_HOUR ?? 9)) {
+    over = await sql`
+      select t.id, t.title, t.assignee_id, t.requested_by, t.created_by, t.due_date, (${today}::date - t.due_date)::int as days from tasks t
+      where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_date is not null and t.due_date < ${today}::date`;
+    for (const t of over) {
+      n += (await notify(sql, { userIds: [t.assignee_id, t.requested_by ?? t.created_by], type: 'overdue', title: `기한 지남: ${t.title}`,
+        body: `마감일 ${t.due_date} · ${t.days}일 지났습니다`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
+        dedupeKey: `overdue:${t.id}:${today}` })).length;
+    }
+    dueToday = await sql`
+      select t.id, t.title, t.assignee_id, to_char(t.due_time,'HH24:MI') due_time from tasks t join users u on u.id = t.assignee_id
+      where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_date = ${today}::date and u.status = 'active'`;
+    for (const t of dueToday) {
+      n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `오늘 마감: ${t.title}`,
+        body: t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
+        dedupeKey: `due_today:${t.id}:${today}` })).length;
+    }
   }
-  return { dueSoon: soon.length, overdue: over.length, created: n };
+  return { dueSoon: soon.length, overdue: over.length, dueToday: dueToday.length, created: n };
 }
 
 async function recurringTasks() {

@@ -8,12 +8,14 @@ import { ROLE_LABEL, type Role } from '@/lib/types';
 const STATUS: Record<string, string> = { invited: '초대됨', active: '사용 중', disabled: '사용 중지', left: '퇴사' };
 
 function UnitChecks({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
-  const { dir } = useSession();
+  // 관리자 화면: 앱 심사용 격리 조직도 포함한 전체 조직
+  const all = useApi<{ units: any[] }>('/api/admin/org-units');
   return (
     <div className="max-h-48 space-y-1 overflow-y-auto rounded border p-2">
-      {dir.orgUnits.map((o) => (
+      {(all.data?.units ?? []).filter((o) => o.active).map((o) => (
         <label key={o.id} className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={value.includes(o.id)} onChange={(e) => onChange(e.target.checked ? [...value, o.id] : value.filter((x) => x !== o.id))} />{o.name}
+          {o.is_demo && <span className="rounded bg-amber-100 px-1 text-[11px] text-amber-800">앱 심사용 격리</span>}
         </label>
       ))}
     </div>

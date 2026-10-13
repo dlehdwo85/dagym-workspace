@@ -17,7 +17,7 @@ import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, PriorityTag, STATUS
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
-import { AssigneePicker, DuePicker, InlineAddTask, PriorityPicker, quickDues } from './TaskQuick';
+import { AssigneePicker, DuePicker, InlineAddTask, OrderMenu, PriorityPicker, isFresh, quickDues } from './TaskQuick';
 import { QuickAddTask } from './QuickAddTask';
 
 export type Task = {
@@ -506,7 +506,11 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
                   {!x.items.length && <span className="text-xs font-normal text-ink-3">업무 없음</span>}
                 </button>
               )}
-              {!isFolded && <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={addRow} sortable={draggable} />}
+              {!isFolded && <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={addRow} sortable={draggable} onMove={draggable ? (t, to) => {
+                const ids = x.items.map((i) => i.id); const from = ids.indexOf(t.id);
+                const at = to === 'top' ? 0 : to === 'bottom' ? ids.length - 1 : Math.max(0, Math.min(ids.length - 1, from + (to === 'up' ? -1 : 1)));
+                if (at !== from) onReorder(arrayMove(ids, from, at));
+              } : undefined} />}
             </GroupDrop>
           );
         })}
@@ -519,11 +523,11 @@ function GroupDrop({ id, groupKey, children }: { id: string; groupKey: string; c
   return <section ref={setNodeRef} data-group={groupKey} className={cx('rounded-card', isOver && 'ring-2 ring-accent-500/30')}>{children}</section>;
 }
 /** 끌어서 순서 바꾸는 행 (손잡이는 PC 에서만 — 휴대폰은 밀기 동작과 겹치지 않게) */
-function SortableRow({ t, onPatch, onAck }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void }) {
+function SortableRow({ t, onPatch, onAck, onMove }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   return (
     <div ref={setNodeRef} style={{ transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined, transition }} className={cx(isDragging && 'relative z-50 opacity-90 shadow-pop')}>
-      <ListRow t={t} onPatch={onPatch} onAck={onAck} handle={
+      <ListRow t={t} onPatch={onPatch} onAck={onAck} onMove={onMove} handle={
         <button type="button" {...attributes} {...listeners} className="hidden w-4 shrink-0 cursor-grab touch-none text-slate-300 hover:text-slate-500 sm:inline-flex" aria-label={`${t.title} 끌어서 순서 바꾸기`} data-testid="drag-handle"><GripVertical className="size-4" /></button>
       } />
     </div>
@@ -568,7 +572,7 @@ function MyGroupedList({ tasks, onPatch, onAcked, top }: { tasks: Task[]; onPatc
   );
 }
 
-function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortable }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean; add?: React.ReactNode; tail?: React.ReactNode; sortable?: boolean }) {
+function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortable, onMove }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean; add?: React.ReactNode; tail?: React.ReactNode; sortable?: boolean; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void }) {
   const openTask = useContext(OpenTaskCtx);
   if (!tasks.length && tail) return <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list">{add}{tail}</div>;
   if (!tasks.length && add) return <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list">{add}<p className="px-4 py-6 text-center text-sm text-ink-3">조건에 맞는 업무가 없습니다</p></div>;
@@ -589,7 +593,7 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortab
       {hint && <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">행을 오른쪽으로 밀면 완료, 왼쪽으로 밀면 보류</p>}
       {sortable ? (
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-          {tasks.map((t) => <SortableRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} />)}
+          {tasks.map((t) => <SortableRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} onMove={onMove} />)}
         </SortableContext>
       ) : tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} handle={<span className="hidden w-4 shrink-0 sm:inline-flex" />} />)}
       {tail}
@@ -598,7 +602,10 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortab
 }
 
 /** 목록 행. 모바일에서는 오른쪽으로 밀면 완료(또는 검토 요청), 왼쪽으로 밀면 보류 */
-function ListRow({ t, onPatch, onAck, handle }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; handle?: React.ReactNode }) {
+function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; handle?: React.ReactNode; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void }) {
+  // 방금 추가한 업무는 2초 강조
+  const [fresh, setFresh] = useState(() => isFresh(t.id));
+  useEffect(() => { if (!fresh) return; const h = setTimeout(() => setFresh(false), 2000); return () => clearTimeout(h); }, [fresh]);
   const { user } = useSession();
   const start = useRef<{ x: number; y: number; lock: 'x' | 'y' | null } | null>(null);
   const [dx, setDx] = useState(0);
@@ -628,7 +635,8 @@ function ListRow({ t, onPatch, onAck, handle }: { t: Task; onPatch: (t: Task, b:
           const d = dx; start.current = null; setDx(0);
           if (d > TH) swipe(right); else if (d < -TH && t.status !== 'on_hold' && t.status !== 'done') swipe('on_hold');
         }}
-        className={cx('group relative flex min-h-[44px] items-center gap-3 bg-white px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', !dx && 'transition-transform')}>
+        data-fresh={fresh ? '1' : undefined}
+        className={cx('group relative flex min-h-[44px] items-center gap-3 px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
         {handle}
         <CheckCircle t={t} onPatch={onPatch} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
@@ -644,6 +652,7 @@ function ListRow({ t, onPatch, onAck, handle }: { t: Task; onPatch: (t: Task, b:
         <span className="hidden w-[84px] sm:inline-flex"><StatusSelect t={t} onPatch={onPatch} /></span>
         <DueEdit t={t} onPatch={onPatch} />
         <AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} />
+        {onMove && <OrderMenu title={t.title} onMove={(to) => onMove(t, to)} />}
       </div>
     </div>
   );
