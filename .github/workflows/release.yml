@@ -81,6 +81,15 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.cfg.outputs.ready == 'true'
         with: { node-version: 22 }
+      - name: Xcode 26 선택 (App Store 업로드는 iOS 26 SDK 이상 필요)
+        if: steps.cfg.outputs.ready == 'true'
+        working-directory: .
+        run: |
+          ls -d /Applications/Xcode*.app
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$X" ]; then echo "::error::이 러너에 Xcode 26 이 없습니다 — runs-on 을 macos-26 으로 바꾸세요"; exit 1; fi
+          sudo xcode-select -s "$X/Contents/Developer"
+          xcodebuild -version
       - if: steps.cfg.outputs.ready == 'true'
         env: { P8: '${{ secrets.ASC_KEY_P8 }}', GSI: '${{ secrets.GOOGLE_SERVICE_INFO_PLIST }}' }
         run: |
