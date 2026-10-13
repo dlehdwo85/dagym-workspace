@@ -65,8 +65,8 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
   );
 }
 
-/** 담당자 칩: 아바타를 누르면 사람 선택 */
-export function AssigneePicker({ value, name, onChange, size = 24 }: { value: string | null | undefined; name?: string | null; onChange: (id: string | null) => void; size?: number }) {
+/** 담당자 칩: 아바타를 누르면 사람 선택. role="지시자"면 지시자(업무를 부여한 사람) 선택 — 이름이 함께 보이는 작은 칩 */
+export function AssigneePicker({ value, name, onChange, size = 24, role = '담당자', withName }: { value: string | null | undefined; name?: string | null; onChange: (id: string | null) => void; size?: number; role?: '담당자' | '지시자'; withName?: boolean }) {
   const { dir, user } = useSession();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -76,8 +76,9 @@ export function AssigneePicker({ value, name, onChange, size = 24 }: { value: st
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <span className="relative inline-flex">
-      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); setQ(''); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`담당자: ${cur?.name ?? name ?? '없음'}`} aria-haspopup="dialog" className="rounded-full hover:ring-2 hover:ring-accent-500/30" data-testid="assignee-picker">
-        <Avatar id={value} name={cur?.name ?? name ?? null} size={size} />
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); setQ(''); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${role}: ${cur?.name ?? name ?? '없음'}`} aria-haspopup="dialog"
+        className={withName ? 'inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100' : 'rounded-full hover:ring-2 hover:ring-accent-500/30'} data-testid={role === '지시자' ? 'requester-picker' : 'assignee-picker'}>
+        <Avatar id={value} name={cur?.name ?? name ?? null} size={size} />{withName && <span className="truncate">{cur?.name ?? name ?? '없음'}</span>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref}>
         <input autoFocus className="mb-1 w-full rounded-input border border-line px-2 py-1 text-sm" placeholder="이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="담당자 검색" />
@@ -88,7 +89,7 @@ export function AssigneePicker({ value, name, onChange, size = 24 }: { value: st
             </button>
           ))}
         </div>
-        {value && <button type="button" onClick={() => { onChange(null); setOpen(false); }} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><UserRound className="size-4" />담당자 없음</button>}
+        {value && role === '담당자' && <button type="button" onClick={() => { onChange(null); setOpen(false); }} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><UserRound className="size-4" />담당자 없음</button>}
       </Popover>
     </span>
   );
@@ -98,8 +99,8 @@ export function AssigneePicker({ value, name, onChange, size = 24 }: { value: st
  * Asana 형 한 줄 업무 추가: 제목 입력 → Enter 로 즉시 생성(담당 = 나), 연속 입력.
  * 같은 줄의 담당자·마감일 칩으로 바로 지정. 관리자 최종 확인은 기본 꺼짐, 소속은 프로젝트/내 소속(본사)으로 자동.
  */
-export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssignee, onCreated, onEscape, autoFocus, muted, placeholder = '업무 추가 — 제목 입력 후 Enter' }: {
-  projectId?: string | null; sectionId?: string | null; defaultDue?: string | null; defaultAssignee?: string | null; onCreated?: (id: string) => void;
+export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssignee, defaultRequester, onCreated, onEscape, autoFocus, muted, placeholder = '업무 추가 — 제목 입력 후 Enter' }: {
+  projectId?: string | null; sectionId?: string | null; defaultDue?: string | null; defaultAssignee?: string | null; defaultRequester?: string | null; onCreated?: (id: string) => void;
   onEscape?: () => void; autoFocus?: boolean; muted?: boolean; placeholder?: string;
 }) {
   const { user } = useSession();
@@ -108,14 +109,18 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const initAssignee = defaultAssignee === undefined ? user.id : defaultAssignee;
   const [assignee, setAssignee] = useState<string | null>(initAssignee);
   const [due, setDue] = useState<string | null>(defaultDue ?? null);
+  const initRequester = defaultRequester ?? user.id;
+  const [requester, setRequester] = useState<string | null>(initRequester);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  async function submit() {
-    const t = title.trim();
+  // 한글 입력: 조합 중 Enter 는 글자만 확정되고 다시 Enter 가 오지 않는 브라우저(Chrome)가 있어, 조합이 끝나면 대신 저장
+  const enterWhileComposing = useRef(false);
+  async function submit(raw?: string) {
+    const t = (raw ?? title).trim();
     if (!t || busy) return;
     setBusy(true);
     try {
-      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, dueDate: due, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false }, queueOffline: `업무 등록: ${t}` });
+      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: due, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false }, queueOffline: `업무 등록: ${t}` });
       setTitle(''); broadcastRefresh(); onCreated?.(r.id);
     } catch (e: any) { if (e.code === 'queued') { toast.info(e.message); setTitle(''); } else toast.error(e.message); }
     finally { setBusy(false); input.current?.focus(); }
@@ -124,14 +129,42 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     <div className={cx('flex min-h-[44px] items-center gap-3 border-b border-line px-3 py-1.5 last:border-b-0 focus-within:bg-accent-50/40', muted ? 'bg-transparent' : 'bg-white')} data-testid="inline-add">
       <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-dashed border-slate-300 text-slate-400"><Plus className="size-3.5" /></span>
       <input ref={input} autoFocus={autoFocus} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={placeholder} aria-label="업무 추가 제목" maxLength={200}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } if (e.key === 'Escape') { e.stopPropagation(); setTitle(''); onEscape?.(); } }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); if (e.nativeEvent.isComposing) enterWhileComposing.current = true; else submit(); }
+          if (e.key === 'Escape') { e.stopPropagation(); setTitle(''); onEscape?.(); }
+        }}
+        onCompositionEnd={() => { if (enterWhileComposing.current) { enterWhileComposing.current = false; setTimeout(() => submit(input.current?.value), 0); } }}
         className="min-w-0 flex-1 bg-transparent py-1 text-sm placeholder:text-ink-3 focus:outline-none" />
-      {(title || due || assignee !== initAssignee || autoFocus) && (
+      {(title || due || assignee !== initAssignee || requester !== initRequester || autoFocus) && (
         <>
+          <span className="hidden sm:inline-flex" title="지시자(업무를 부여한 사람)"><span className="self-center text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={(v) => setRequester(v ?? user.id)} size={20} withName /></span>
           <DuePicker value={due} onChange={setDue} label="새 업무 마감일" />
           <AssigneePicker value={assignee} onChange={setAssignee} />
         </>
       )}
     </div>
+  );
+}
+
+const PRI: [string, string, string][] = [['urgent', '긴급', 'bg-red-50 text-red-700 ring-red-200'], ['high', '높음', 'bg-orange-50 text-orange-700 ring-orange-200'], ['normal', '보통', 'bg-slate-50 text-ink-2 ring-slate-200'], ['low', '낮음', 'bg-sky-50 text-sky-700 ring-sky-200']];
+/** 우선순위 칩: 눌러서 긴급·높음·보통·낮음 */
+export function PriorityPicker({ value, onChange, label = '우선순위' }: { value: string | null | undefined; onChange: (v: string) => void; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const cur = PRI.find((p) => p[0] === (value ?? 'normal')) ?? PRI[2];
+  return (
+    <span className="relative inline-flex">
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${label}: ${cur[1]}`} aria-haspopup="dialog" data-testid="priority-picker"
+        className={cx('inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1 ring-inset', cur[0] === 'normal' ? 'bg-transparent text-ink-3 ring-transparent hover:bg-slate-100' : cur[2])}>
+        {cur[0] === 'normal' ? '보통' : cur[1]}
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} width={140}>
+        {PRI.map(([k, l, c]) => (
+          <button key={k} type="button" onClick={() => { onChange(k); setOpen(false); }} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
+            <span className={cx('rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset', c)}>{l}</span>{k === (value ?? 'normal') && <Check className="size-4 text-accent-600" />}
+          </button>
+        ))}
+      </Popover>
+    </span>
   );
 }

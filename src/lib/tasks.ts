@@ -17,6 +17,8 @@ export const taskInput = z.object({
   orgUnitId: zUuid.optional(),
   brandId: z.enum(['dagym', 'hilink', 'bodylab']).nullable().optional(),
   assigneeId: zUuid.nullable().optional(),
+  /** WORKIN_V3 지시자(업무를 부여한 사람). 기본 = 만든 사람 */
+  requestedById: zUuid.nullable().optional(),
   collaboratorIds: z.array(zUuid).max(30).optional(),
   status: z.enum(['todo', 'in_progress', 'review', 'on_hold', 'done']).optional(),
   priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
@@ -47,7 +49,7 @@ export const TASK_COLS = (sql: Sql) => sql`
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id,
-  t.estimate_minutes, t.show_on_calendar,
+  t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name,
   (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
     where be.deleted_at is null and be.kind = 'task_block' and (be.task_id = t.id or be.id in (select event_id from event_tasks where task_id = t.id and role = 'block'))) as scheduled_minutes,
   (select count(*)::int from event_tasks lk where lk.task_id = t.id) as event_count,
@@ -68,16 +70,18 @@ export const TASK_COLS = (sql: Sql) => sql`
 export const TASK_FROM = (sql: Sql) => sql`
   from tasks t
   left join users au on au.id = t.assignee_id
+  left join users rq on rq.id = t.requested_by
   left join projects p on p.id = t.project_id
   left join org_units o on o.id = t.org_unit_id`;
 
 export const listQuery = z.object({
   // U-0a 주소창 값은 사람이 고칠 수 있다 — 모르는 보기·옵션 값은 오류 대신 기본값으로
-  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review', 'risk']).catch('all'),
+  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested']).catch('all'),
   projectId: zUuid.optional(),
   orgUnitId: zUuid.optional(),
   brandId: z.string().optional(),
   assigneeId: zUuid.optional(),
+  requestedById: zUuid.optional(),
   status: z.string().optional(), // 콤마 구분
   q: z.string().max(100).optional(),
   from: zDate.optional().catch(undefined),
@@ -102,6 +106,7 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
   }
   if (q.brandId) conds.push(sql`t.brand_id = ${q.brandId}`);
   if (q.assigneeId) conds.push(sql`t.assignee_id = ${q.assigneeId}`);
+  if (q.requestedById) conds.push(sql`t.requested_by = ${q.requestedById}`);
   if (q.status) {
     const st = q.status.split(',').filter((s) => s in STATUS_LABEL);
     if (st.length) conds.push(sql`t.status = any(${st})`);
@@ -116,6 +121,9 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
     case 'my':
       conds.push(sql`(t.assignee_id = ${u.id} or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id}))`);
       conds.push(sql`t.status <> 'done'`);
+      break;
+    case 'requested': // 내가 지시한 업무 (Asana "내가 배정한 작업")
+      conds.push(sql`t.requested_by = ${u.id}`);
       break;
     case 'today':
       conds.push(sql`t.assignee_id = ${u.id} and t.status <> 'done' and (t.due_date <= ${today} or t.start_date <= ${today})`);
@@ -194,7 +202,7 @@ async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: s
     if (!p[0]) throw badRequest('프로젝트가 없습니다');
     if (u.isDemo) await assertUnitAccess(u, p[0].org_unit_id, sql); // 체험 계정은 데모 조직 프로젝트만
   }
-  const ids = [i.assigneeId, ...(i.collaboratorIds ?? [])].filter(Boolean) as string[];
+  const ids = [i.assigneeId, i.requestedById, ...(i.collaboratorIds ?? [])].filter(Boolean) as string[];
   if (ids.length) {
     const ok = await sql`select id from users where id = any(${ids}::uuid[]) and status = 'active' and (is_demo or ${!u.isDemo})`;
     if (ok.length !== new Set(ids).size) throw badRequest('비활성 사용자이거나 없는 사용자입니다');
@@ -242,12 +250,12 @@ export async function createTask(u: SessionUser, i: TaskInput) {
     const [t] = await tx<{ id: string }[]>`
       insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
         start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at,
-        task_type, photo_required, approval_line_id, estimate_minutes)
+        task_type, photo_required, approval_line_id, estimate_minutes, requested_by)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
         ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
         ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null},
-        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null})
+        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id})
       returning id`;
     for (const c of new Set(i.collaboratorIds ?? [])) {
       await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
@@ -309,7 +317,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const fields: [keyof TaskInput, string][] = [
       ['title', 'title'], ['description', 'description'], ['projectId', 'project_id'], ['brandId', 'brand_id'],
       ['assigneeId', 'assignee_id'], ['priority', 'priority'], ['startDate', 'start_date'], ['dueDate', 'due_date'],
-      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'], ['estimateMinutes', 'estimate_minutes'], ['showOnCalendar', 'show_on_calendar'],
+      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'], ['estimateMinutes', 'estimate_minutes'], ['showOnCalendar', 'show_on_calendar'], ['requestedById', 'requested_by'],
     ];
     for (const [k, col] of fields) {
       if (i[k] === undefined) continue;
@@ -345,6 +353,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const due = (set.due_date ?? cur.due_date) as string | null;
     if (start && due && start > due) throw badRequest('시작일이 마감일보다 늦습니다');
     if (set.assignee_id) await validateRefs(tx, u, { assigneeId: set.assignee_id as string } as TaskInput, cur.org_unit_id);
+    if (set.requested_by) await validateRefs(tx, u, { requestedById: set.requested_by as string } as TaskInput, cur.org_unit_id);
     if (u.isDemo) await validateRefs(tx, u, { projectId: (set.project_id as string) ?? undefined, collaboratorIds: i.collaboratorIds, dependsOn: i.dependsOn } as TaskInput, (set.org_unit_id as string) ?? cur.org_unit_id);
     if (('photo_required' in set || 'approval_line_id' in set) && !perms.approve) throw forbidden('사진 증빙·결재선은 관리자가 정합니다');
     if (set.approval_line_id) await checkLine(tx, set.approval_line_id as string);
@@ -448,6 +457,13 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         title: `${statusEvent === 'approved' ? '최종 완료 확인' : '보완 요청'}: ${title}`,
         body: statusEvent === 'approved' ? `${u.name}님이 완료를 확인했습니다` : `${u.name}님이 보완을 요청했습니다${i.reviewNote ? `: ${i.reviewNote}` : ''}`,
         link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reviewres:${id}:${upd.version}` });
+    }
+    // WORKIN_V3 지시자에게: 담당자가 완료하거나 검토를 요청하면 알림 (지시자 본인이 한 변경은 제외)
+    const requester = (set.requested_by ?? cur.requested_by) as string | null;
+    if (requester && requester !== u.id && (set.status === 'done' || statusEvent === 'review_requested')) {
+      await notify(tx, { userIds: [requester], type: 'task_done_for_requester',
+        title: `${set.status === 'done' ? '완료' : '검토 요청'}: ${title}`, body: `${u.name}님이 지시하신 업무를 ${set.status === 'done' ? '완료했습니다' : '완료하고 검토를 요청했습니다'}`,
+        link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reqdone:${id}:${upd.version}` });
     }
     let spawned: string | null = null;
     if (set.status === 'done') spawned = await spawnNextRecurrence(tx, id, u.id);
@@ -643,4 +659,21 @@ export async function mergeTask(u: SessionUser, id: string, intoId: string) {
     await activity(tx, 'task', intoId, u.id, 'merged_from', { from: id, title: src.title });
     return { id: intoId };
   });
+}
+
+/**
+ * WORKIN_V3 직접 순서: 화면에 보이는 순서대로 id 목록을 받아 sort_order 를 다시 매긴다(모든 화면 공통 순서).
+ * 볼 수 있고 수정할 수 있는 업무만 바꾼다(나머지는 조용히 건너뜀).
+ */
+export async function reorderTasks(u: SessionUser, ids: string[]) {
+  const sql = db();
+  const units = await accessibleUnitIds(u, sql);
+  const ok = await sql<{ id: string }[]>`select t.id from tasks t where t.id = any(${ids}::uuid[]) and t.deleted_at is null and ${taskVisibleSql(sql, u, units)}`;
+  const allowed = new Set<string>();
+  for (const r of ok) { const { perms } = await loadTaskForUser(u, r.id, sql).catch(() => ({ perms: { edit: false } as any })); if (perms.edit) allowed.add(r.id); }
+  const rows = ids.map((id, i) => ({ id, i })).filter((x) => allowed.has(x.id));
+  if (rows.length) {
+    await sql`update tasks t set sort_order = v.ord from (select unnest(${rows.map((r) => r.id)}::uuid[]) as id, unnest(${rows.map((r) => r.i)}::float8[]) as ord) v where t.id = v.id`;
+  }
+  return { updated: rows.length };
 }

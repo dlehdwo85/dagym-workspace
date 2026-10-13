@@ -1117,3 +1117,48 @@ describe('데모(체험) 계정 격리 — is_demo 조직·계정은 밖을 못 
     assert.ok(!(await ctx.owner.ok('GET', '/api/revenue')).units.some((u) => u.id === unit));
   });
 });
+
+describe('WORKIN_V3 서로 배정 · 지시자 · 직접 순서', () => {
+  let hq2;
+  test('본사 직원끼리 서로 배정 → 배정받은 사람이 보고, 본사 직원은 본사 아래 전체를 본다', async () => {
+    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'hq2@dagym.test', name: '김민수', role: 'staff', orgUnitIds: [ctx.hq] });
+    hq2 = new Client('hq2');
+    await hq2.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'hq2-pass-1234' });
+    const me = (await hq2.ok('GET', '/api/auth/me')).user;
+    hq2.id = me.id;
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '본사 서로 배정', orgUnitId: ctx.hq, assigneeId: me.id })).id;
+    assert.equal((await hq2.ok('GET', `/api/tasks/${t}`)).task.assignee_id, me.id);
+    const back = (await hq2.ok('POST', '/api/tasks', { title: '대표님께 요청', orgUnitId: ctx.hq, assigneeId: ctx.ownerId })).id;
+    assert.equal((await ctx.owner.ok('GET', `/api/tasks/${back}`)).task.requested_by, me.id, '지시자 기본 = 만든 사람');
+    const list = await hq2.ok('GET', '/api/tasks?limit=500');
+    assert.ok(list.tasks.some((x) => x.org_unit_id === ctx.siteA), '본사 직원은 현장 업무도 열람');
+    assert.ok((await hq2.ok('GET', '/api/org')).users.some((u) => u.id === ctx.ownerId), '담당자 목록에 대표');
+  });
+  test('지시자: 직접 지정·변경 이력·"내가 지시한 업무"·지시자 필터, 완료·검토 요청 시 지시자 알림', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '지시자 시험', orgUnitId: ctx.hq, assigneeId: hq2.id, requestedById: ctx.managerA.id })).id;
+    assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t}`)).task.requested_by_name, '최매니저');
+    assert.equal((await ctx.owner.req('POST', '/api/tasks', { title: 'x', orgUnitId: ctx.hq, requestedById: '00000000-0000-0000-0000-00000000dead' })).status, 400);
+    const d0 = await ctx.owner.ok('GET', `/api/tasks/${t}`);
+    await ctx.owner.ok('PATCH', `/api/tasks/${t}`, { requestedById: ctx.ownerId, version: d0.task.version });
+    const d1 = await ctx.owner.ok('GET', `/api/tasks/${t}`);
+    assert.ok(d1.history.some((h) => h.changes?.requestedById?.to === ctx.ownerId), '변경 이력');
+    const mine = await ctx.owner.ok('GET', '/api/tasks?view=requested&limit=500');
+    assert.ok(mine.tasks.every((x) => x.requested_by === ctx.ownerId) && mine.tasks.some((x) => x.id === t));
+    assert.ok((await ctx.owner.ok('GET', `/api/tasks?requestedById=${ctx.ownerId}&limit=500`)).tasks.some((x) => x.id === t));
+    await hq2.ok('PATCH', `/api/tasks/${t}`, { status: 'review', version: d1.task.version }); // 관리자 확인 업무 → 검토 요청
+    const n = (await ctx.owner.ok('GET', '/api/notifications')).items;
+    assert.ok(n.some((x) => x.type === 'task_done_for_requester' && x.link === `/tasks/${t}`), '지시자에게 완료 알림');
+  });
+  test('직접 순서: 보이는 순서대로 저장, 권한 밖 업무는 건너뜀', async () => {
+    const ids = [];
+    for (const n of ['순서 A', '순서 B', '순서 C']) ids.push((await ctx.owner.ok('POST', '/api/tasks', { title: n, orgUnitId: ctx.hq, assigneeId: ctx.ownerId })).id);
+    const other = (await ctx.staffB.client.req('GET', '/api/tasks?limit=1')).status; // staffB 는 판교 소속
+    const r = await ctx.owner.ok('POST', '/api/tasks/reorder', { ids: [ids[2], ids[0], ids[1]] });
+    assert.equal(r.updated, 3);
+    const rows = await sql`select id, sort_order from tasks where id = any(${ids}::uuid[]) order by sort_order`;
+    assert.deepEqual(rows.map((x) => x.id), [ids[2], ids[0], ids[1]]);
+    const s = await ctx.staffA.client.ok('POST', '/api/tasks/reorder', { ids: [ids[1], ids[0]] });
+    assert.equal(s.updated, 0, '다른 조직 직원은 본사 업무 순서를 못 바꿈');
+    assert.ok(other >= 200);
+  });
+});

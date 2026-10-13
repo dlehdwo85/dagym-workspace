@@ -42,5 +42,6 @@ export const NOTIFICATION_TYPES = {
   sync_error: '동기화 오류',
   event_reminder: '일정 시작 전',
   weekly_report: '주간 보고',
+  task_done_for_requester: '지시한 업무 완료·검토 요청',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

@@ -8,6 +8,7 @@ import {
   BadgeCheck, Building2, CalendarClock, CalendarDays, Camera, Check, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash,
   Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Pause, Percent, Play, Plus, Repeat, RotateCcw, Rows3, Shapes, ShieldCheck,
   Stamp, Tag, Timer, CalendarCheck, Trash2, Type, UserRound, Users, X, CalendarRange, AlertTriangle, type LucideIcon,
+  Megaphone,
 } from 'lucide-react';
 import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
@@ -24,7 +25,7 @@ const ACTION_LABEL: Record<string, string> = {
   file_attached: '파일 첨부', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
 const FIELD_LABEL: Record<string, string> = {
-  title: '제목', description: '설명', assigneeId: '담당자', priority: '우선순위', startDate: '시작일', dueDate: '마감일', dueTime: '마감 시각', status: '상태',
+  title: '제목', description: '설명', assigneeId: '담당자', requestedById: '지시자', priority: '우선순위', startDate: '시작일', dueDate: '마감일', dueTime: '마감 시각', status: '상태',
   tags: '태그', projectId: '프로젝트', sectionId: '섹션', brandId: '브랜드', orgUnitId: '소속', collaborators: '협업자', approvalRequired: '검토 필요', recurrenceRule: '반복', dependsOn: '선행 업무',
 };
 
@@ -251,6 +252,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         <section className="grid grid-cols-1 gap-y-0.5" aria-label="업무 속성">
           <Prop icon={UserRound} label="담당자">
             <span className="flex items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} /><UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => patch({ assigneeId: v })} /></span>
+          </Prop>
+          <Prop icon={Megaphone} label="지시자">
+            <span className="flex items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
           </Prop>
           <Prop icon={CalendarDays} label="마감일">
             <span className="flex flex-wrap items-center gap-1">
@@ -563,7 +567,7 @@ function MergeModal({ open, onClose, taskId, title, onMerged }: { open: boolean;
 
 function fmtVal(k: string, v: any, userName: (id: string | null) => string) {
   if (v === null || v === undefined || v === '') return '없음';
-  if (k === 'assigneeId') return userName(v) || '알 수 없음';
+  if (k === 'assigneeId' || k === 'requestedById') return userName(v) || '알 수 없음';
   if (k === 'status') return STATUS_LABEL[v as keyof typeof STATUS_LABEL] ?? v;
   if (k === 'priority') return PRIORITY_LABEL[v as keyof typeof PRIORITY_LABEL] ?? v;
   if (Array.isArray(v)) return k === 'collaborators' ? v.map(userName).join(', ') || '없음' : v.join(', ');

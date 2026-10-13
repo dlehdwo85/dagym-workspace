@@ -105,7 +105,7 @@ await step('② 대표가 + 버튼으로 업무 등록·담당자 배정', async
   await owner.getByRole('menuitem', { name: /^업무/ }).click();
   const dlg = owner.getByRole('dialog', { name: '업무 등록' });
   await dlg.getByLabel('제목').fill('강남점 소방 점검 대응');
-  await dlg.getByLabel('담당자').selectOption({ label: '이직원' });
+  await dlg.getByLabel('담당자', { exact: true }).selectOption({ label: '이직원' });
   await dlg.getByLabel('마감일').fill(addDays(today, 3));
   assert.equal(await dlg.getByLabel('소속 (현장·부서)').count(), 0, '등록 창은 제목·담당자·마감일·프로젝트 4칸');
   await dlg.getByRole('button', { name: '등록' }).click();
@@ -784,6 +784,57 @@ await step('W-5 매출 AI 분석(AI 제안 표시·근거 숫자로 이동) · G
   await owner.reload();
   await owner.getByTestId('revenue-tokens').getByText('GPT 자료 운영체계').waitFor();
   assert.equal(await owner.getByTestId('fresh-token').count(), 0, '새로 고침하면 원문 다시 안 보임');
+});
+await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 행에서 지시자·우선순위 변경, 손잡이로 끌어 순서 → 새로고침해도 유지, 정렬·내가 지시한 업무', async () => {
+  const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'minsu@dagym.test', name: '김민수', role: 'staff', orgUnitIds: [ctx.hq] });
+  const c = new Client('minsu');
+  await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'minsu-pass-1234' });
+  const minsu = (await c.ok('GET', '/api/auth/me')).user.id;
+  for (const n of ['순서 시험 1', '순서 시험 2']) await ctx.owner.ok('POST', '/api/tasks', { title: n, orgUnitId: ctx.hq, assigneeId: ctx.ownerId });
+  await owner.evaluate(() => { localStorage.removeItem('wos_task_sort'); localStorage.removeItem('wos_task_group'); });
+  await owner.goto(BASE + '/tasks');
+  const groups = owner.getByTestId('task-groups');
+  const g = groups.locator(`[data-group="${minsu}"]`);
+  await g.getByText('업무 없음').waitFor();
+  const add = g.getByPlaceholder('김민수님에게 업무 추가');
+  await add.fill('신규 회원 이벤트 기획');
+  await add.press('Enter');
+  await g.getByText('신규 회원 이벤트 기획').waitFor();
+  const [t] = await sql`select id, assignee_id, requested_by from tasks where title = '신규 회원 이벤트 기획'`;
+  assert.equal(t.assignee_id, minsu); assert.equal(t.requested_by, ctx.ownerId, '지시자 = 나(만든 사람)');
+  // 행에서 지시자·우선순위
+  const row = owner.locator(`[data-row="${t.id}"]`);
+  await row.getByTestId('requester-picker').click();
+  await owner.getByRole('dialog').getByRole('button', { name: /^최매니저/ }).click();
+  await row.getByTestId('priority-picker').click();
+  await owner.getByRole('dialog').getByRole('button', { name: /긴급/ }).click();
+  await owner.waitForTimeout(800);
+  const [u] = await sql`select requested_by, priority from tasks where id = ${t.id}`;
+  assert.equal(u.requested_by, ctx.managerA.id); assert.equal(u.priority, 'urgent');
+  // 손잡이로 끌어 순서 (내 묶음 안: 마지막 행을 맨 위로)
+  const mine = groups.locator(`[data-group="${ctx.ownerId}"]`);
+  const handles = mine.getByTestId('drag-handle');
+  const n = await handles.count();
+  assert.ok(n >= 2, '내 묶음에 업무 2건 이상');
+  const lastTitle = (await mine.locator('[data-row] a[data-open-task]').nth(n - 1).textContent()).trim();
+  const from = await handles.nth(n - 1).boundingBox(), to = await handles.nth(0).boundingBox();
+  await owner.mouse.move(from.x + 8, from.y + 8); await owner.mouse.down();
+  for (let i = 1; i <= 12; i++) await owner.mouse.move(from.x + 8, from.y + 8 + ((to.y - from.y - 6) * i) / 12);
+  await owner.mouse.up();
+  await owner.waitForTimeout(1000);
+  await owner.reload();
+  await mine.locator('[data-row] a[data-open-task]').first().waitFor();
+  assert.equal((await mine.locator('[data-row] a[data-open-task]').first().textContent()).trim(), lastTitle, '새로고침 후에도 끌어 놓은 순서');
+  await owner.screenshot({ path: `${SHOTS}/61-tasks-v3.png` });
+  // 정렬·열 머리·내가 지시한 업무
+  await owner.getByTestId('sort-by').selectOption('due');
+  assert.equal(await mine.getByTestId('drag-handle').count(), 0, '직접 순서가 아니면 손잡이 없음');
+  await owner.getByTestId('list-header').getByRole('button', { name: /우선순위/ }).click();
+  assert.equal(await owner.getByTestId('sort-by').inputValue(), 'priority');
+  await owner.getByTestId('sort-by').selectOption('manual');
+  await owner.getByRole('button', { name: '내가 지시한 업무' }).click();
+  await owner.waitForTimeout(600);
+  assert.equal(await groups.getByText('신규 회원 이벤트 기획').count(), 0, '지시자를 최매니저로 바꿨으니 빠짐');
 });
 await step('W-0 휴대폰 360·375·390·430px 모든 주요 화면 좌우 넘침 없음 (안전장치 끄고 측정)', async () => {
   const { checkWidths } = await import('./widths.mjs');

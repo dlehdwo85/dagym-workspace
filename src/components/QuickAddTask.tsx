@@ -30,7 +30,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
 
   useEffect(() => {
     if (open) {
-      setF({ title: '', assigneeId: defaults?.assigneeId ?? user.id, dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? '' });
+      setF({ title: '', assigneeId: defaults?.assigneeId ?? user.id, requestedById: user.id, dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? '' });
       setTpl(''); setShowTpl(false);
     }
   }, [open, defaults, user.id]);
@@ -54,7 +54,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
         r = await api('/api/tasks', {
           queueOffline: `업무 등록: ${f.title}`,
           body: {
-            title: f.title, assigneeId: f.assigneeId || null, dueDate: f.dueDate || null, projectId: f.projectId || null,
+            title: f.title, assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || null, projectId: f.projectId || null,
             parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
             sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null,
             approvalRequired: false,
@@ -77,7 +77,8 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
       <form onSubmit={submit} className="space-y-3">
         <Field label="제목"><input ref={titleRef} autoFocus className={cx(inputCls, 'h-11 text-base')} value={f.title ?? ''} onChange={(e) => set('title')(e.target.value)} placeholder="무엇을 해야 하나요?" maxLength={200} /></Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="담당자"><UserSelect value={f.assigneeId} onChange={set('assigneeId')} /></Field>
+          <Field label="담당자"><UserSelect ariaLabel="담당자" value={f.assigneeId} onChange={set('assigneeId')} /></Field>
+          <Field label="지시자 (업무를 부여한 사람)"><UserSelect ariaLabel="지시자" placeholder="지시자 선택" value={f.requestedById} onChange={set('requestedById')} /></Field>
           <Field label="마감일"><input type="date" className={inputCls} value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} /></Field>
         </div>
         <div className="flex flex-wrap gap-1.5" aria-label="마감 빠른 선택">

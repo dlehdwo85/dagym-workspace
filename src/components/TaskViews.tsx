@@ -2,6 +2,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { DndContext, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
@@ -16,7 +17,7 @@ import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, PriorityTag, STATUS
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
-import { AssigneePicker, DuePicker, InlineAddTask, quickDues } from './TaskQuick';
+import { AssigneePicker, DuePicker, InlineAddTask, PriorityPicker, quickDues } from './TaskQuick';
 import { QuickAddTask } from './QuickAddTask';
 
 export type Task = {
@@ -28,6 +29,7 @@ export type Task = {
   section_id?: string | null; assignee_ack_at?: string | null; created_by?: string; sort_order?: number;
   task_type?: 'normal' | 'milestone' | 'approval' | 'inspection'; approval_line_id?: string | null; photo_required?: number; photo_count?: number;
   fields?: Record<string, unknown>;
+  requested_by?: string | null; requested_by_name?: string | null; created_at?: string;
 };
 
 /** B-1 업무를 목록 옆 오른쪽 패널로 연다. URL 은 /tasks/:id 로 바꿔 새로고침·공유가 가능하다. 새 탭(Ctrl/⌘/가운데 클릭)은 그대로 전체 화면 */
@@ -69,6 +71,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     try { const v = localStorage.getItem('wos_task_group'); return GROUPS.includes(v as GroupBy) ? (v as GroupBy) : ''; } catch { return ''; }
   });
   const [adding, setAdding] = useState(false);
+  // 정렬: 직접 순서(기본)·마감일·우선순위·최근 생성 … 사용자별(이 기기) 기억
+  const [sortBy, setSortBy] = useState<SortKey>(() => { try { const v = localStorage.getItem('wos_task_sort'); return SORTS.includes(v as SortKey) ? (v as SortKey) : 'manual'; } catch { return 'manual'; } });
+  const pickSort = (k: SortKey) => { setSortBy(k); try { localStorage.setItem('wos_task_sort', k); } catch {} };
   const [quickOpen, setQuickOpen] = useState(false);
   useEffect(() => { // URL 변경(메뉴 이동) 반영 — 패널로 /tasks/:id 가 된 동안에는 목록 필터를 그대로 둔다
     if (/^\/tasks\/[0-9a-f-]{36}$/.test(location.pathname)) return;
@@ -83,7 +88,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     return p.toString();
   }, [filters, fixed, q, showDone, mode]);
   const { data, error, loading, reload, setData } = useApi<{ tasks: Task[] }>(`/api/tasks?${qs}`);
-  const tasks = data?.tasks ?? [];
+  const tasks = useMemo(() => sortTasks(data?.tasks ?? [], sortBy), [data, sortBy]);
 
   useEffect(() => {
     const p = new URLSearchParams(sp.toString());
@@ -108,6 +113,12 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       if (e.status === 409 || e.status === 403) reload();
       return false;
     }
+  }
+
+  /** 직접 순서 저장 (끌어 놓기). 화면에 바로 반영하고 서버에 보이는 순서대로 보낸다 */
+  async function reorder(ids: string[]) {
+    setData((d) => d && { tasks: d.tasks.map((x) => { const i = ids.indexOf(x.id); return i >= 0 ? { ...x, sort_order: i } : x; }) });
+    try { await api('/api/tasks/reorder', { body: { ids } }); broadcastRefresh(); } catch (e: any) { toast.error(e.message); reload(); }
   }
 
   // 오른쪽 패널
@@ -149,7 +160,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     const hq = dir.users.filter((u) => u.org_unit_ids?.some((id) => hqIds.has(id)));
     return (hq.length ? hq : dir.users).slice(0, 5);
   })();
-  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기']];
+  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 지시한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기']];
   const setView = (v: string) => setFilters((f) => ({ ...f, view: v, assigneeId: '' }));
   const [filterOpen, setFilterOpen] = useState(false);
   const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
@@ -179,13 +190,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       </div>
       {!fixed?.view && (
         <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 text-sm sm:mx-0 sm:px-0">
-          {views.slice(0, 2).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
+          {views.slice(0, 3).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
           {people.map((u) => (
             <ViewChip key={u.id} on={filters.assigneeId === u.id} onClick={() => setFilters((f) => ({ ...f, view: '', assigneeId: f.assigneeId === u.id ? '' : u.id }))} label={`${u.name} 업무`}>
               <Avatar id={u.id} name={u.name} size={18} />{u.name}
             </ViewChip>
           ))}
-          {views.slice(2).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
+          {views.slice(3).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
           {!views.some(([v]) => v === (filters.view ?? '')) && <ViewChip on onClick={() => setView('')}>{({ today: '오늘 할 일', risk: '마감 위험' } as Record<string, string>)[filters.view ?? ''] ?? filters.view}</ViewChip>}
         </div>
       )}
@@ -202,7 +213,14 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         {mode === 'list' && !projectId && (
           <label className="inline-flex h-9 items-center gap-1.5 text-sm text-ink-2">묶기
             <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={group} onChange={(e) => pickGroup(e.target.value as GroupBy)} aria-label="묶기 기준" data-testid="group-by">
-              <option value="assignee">담당자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="none">묶지 않음</option>
+              <option value="assignee">담당자별</option><option value="requester">지시자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="none">묶지 않음</option>
+            </select>
+          </label>
+        )}
+        {mode === 'list' && (
+          <label className="inline-flex h-9 items-center gap-1.5 text-sm text-ink-2">정렬
+            <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={sortBy} onChange={(e) => pickSort(e.target.value as SortKey)} aria-label="정렬" data-testid="sort-by">
+              {SORTS.map((k) => <option key={k} value={k}>{SORT_LABEL[k]}</option>)}
             </select>
           </label>
         )}
@@ -239,6 +257,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           {mode === 'list' && projectId && adding && <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask autoFocus projectId={projectId} onEscape={() => setAdding(false)} /></div>}
           {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
             : <GroupedTasks tasks={tasks} group={group} view={curView} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
+                people={people} sortBy={sortBy} onSort={pickSort} onReorder={reorder}
                 top={adding ? <InlineAddTask autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
           {mode === 'board' && projectId && (
             <div className="flex items-center gap-2 text-sm text-ink-2">열 기준
@@ -272,6 +291,7 @@ function Meta({ t, compact }: { t: Task; compact?: boolean }) {
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2">
       {t.project_name && <span className="inline-flex min-w-0 items-center gap-1"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
+      {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate md:hidden" title="지시자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
       {!compact && <span className="truncate">{t.org_unit_name}</span>}
       {!compact && <BrandDot brand={t.brand_id} />}
       {t.subtask_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
@@ -329,8 +349,46 @@ function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }
   return <span className="inline-flex w-[92px] justify-end"><DuePicker value={t.due_date} status={t.status} onChange={(v) => onPatch(t, { dueDate: v })} label={`${t.title} 마감일`} /></span>;
 }
 
-type GroupBy = 'assignee' | 'due' | 'project' | 'none';
-const GROUPS: GroupBy[] = ['assignee', 'due', 'project', 'none'];
+type GroupBy = 'assignee' | 'requester' | 'due' | 'project' | 'none';
+const GROUPS: GroupBy[] = ['assignee', 'requester', 'due', 'project', 'none'];
+type SortKey = 'manual' | 'due' | 'priority' | 'created' | 'title' | 'assignee' | 'requester' | 'status';
+const SORTS: SortKey[] = ['manual', 'due', 'priority', 'created', 'title', 'assignee', 'requester', 'status'];
+const SORT_LABEL: Record<SortKey, string> = { manual: '직접 순서', due: '마감일순', priority: '우선순위순', created: '최근 생성순', title: '이름순', assignee: '담당자순', requester: '지시자순', status: '상태순' };
+const PRI_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+const ko = (a?: string | null, b?: string | null) => (a ?? '\uffff').localeCompare(b ?? '\uffff', 'ko');
+const byDue = (x: Task, y: Task) => (x.due_date ?? '9999-12-31').localeCompare(y.due_date ?? '9999-12-31');
+function sortTasks(ts: Task[], k: SortKey) {
+  const cmp: Record<SortKey, (x: Task, y: Task) => number> = {
+    manual: (x, y) => (x.sort_order ?? 0) - (y.sort_order ?? 0) || ko(x.created_at, y.created_at),
+    due: (x, y) => byDue(x, y) || PRI_RANK[x.priority] - PRI_RANK[y.priority],
+    priority: (x, y) => PRI_RANK[x.priority] - PRI_RANK[y.priority] || byDue(x, y),
+    created: (x, y) => (y.created_at ?? '').localeCompare(x.created_at ?? ''),
+    title: (x, y) => ko(x.title, y.title),
+    assignee: (x, y) => ko(x.assignee_name, y.assignee_name) || byDue(x, y),
+    requester: (x, y) => ko(x.requested_by_name, y.requested_by_name) || byDue(x, y),
+    status: (x, y) => STATUSES.indexOf(x.status) - STATUSES.indexOf(y.status) || byDue(x, y),
+  };
+  return [...ts].sort(cmp[k]);
+}
+
+/** PC 열 머리: 누르면 그 기준으로 정렬 */
+function ListHeader({ sortBy, onSort }: { sortBy: SortKey; onSort: (k: SortKey) => void }) {
+  const H = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => (
+    <button type="button" onClick={() => onSort(sortBy === k ? 'manual' : k)} aria-pressed={sortBy === k}
+      className={cx('truncate text-left hover:text-ink', sortBy === k ? 'font-semibold text-accent-600' : '', className)}>{children}{sortBy === k ? ' ↓' : ''}</button>
+  );
+  return (
+    <div className="hidden items-center gap-3 px-3 pb-1 text-xs text-ink-3 sm:flex" data-testid="list-header">
+      <span className="w-4" /><span className="w-[22px]" />
+      <H k="title" className="flex-1">업무 이름</H>
+      <H k="requester" className="hidden w-[104px] md:block">지시자</H>
+      <H k="priority" className="w-[60px] text-right">우선순위</H>
+      <H k="status" className="w-[84px]">상태</H>
+      <H k="due" className="w-[92px] text-right">마감일</H>
+      <H k="assignee" className="w-12 text-right">담당자</H>
+    </div>
+  );
+}
 /** 마감 묶음 끝 "업무 추가" 줄의 기본 마감일 */
 const DUE_DEFAULT: Record<string, () => string | null> = {
   over: () => todayStr(), today: () => todayStr(), week: () => quickDues()[2][1], later: () => quickDues()[3][1], none: () => null, new: () => null,
@@ -343,28 +401,37 @@ function ViewChip({ on, onClick, children, label }: { on: boolean; onClick: () =
 }
 
 /**
- * 업무 화면 목록 (Asana "팀 작업"): 담당자별(기본)·마감일·프로젝트로 묶고, 묶음마다 끝에 "업무 추가" 줄 — 그 묶음 값이 자동으로 들어간다.
- * 맨 위 줄(top)은 "+ 업무 추가" 버튼으로 열리며 Enter = 저장 후 다음 줄, Esc = 끝내기.
+ * 업무 화면 목록 (Asana "팀 작업"): 담당자별(기본)·지시자별·마감일·프로젝트로 묶고, 묶음마다 끝에 "업무 추가" 줄 — 그 묶음 값이 자동으로 들어간다.
+ * 담당자별은 본사 사람 전원을 업무 0건이어도 묶음으로 보여 준다(바로 그 사람에게 배정).
+ * 직접 순서일 때는 손잡이로 끌어 순서를 바꾸고, 다른 묶음으로 끌면 그 묶음 값(담당자·지시자·마감·프로젝트)으로 바뀐다.
  */
-function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, top }: {
+function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, top, people, sortBy, onSort, onReorder }: {
   tasks: Task[]; group: GroupBy; view: string; assigneeFilter: string | null; onPatch: (t: Task, b: any) => any; onAcked: () => void; top: React.ReactNode;
+  people: { id: string; name: string }[]; sortBy: SortKey; onSort: (k: SortKey) => void; onReorder: (ids: string[]) => void;
 }) {
   const { user, dir } = useSession();
   const [folded, setFolded] = useState<Record<string, boolean>>({});
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   if (group === 'due' && view === 'my') return <MyGroupedList tasks={tasks} onPatch={onPatch} onAcked={onAcked} top={top} />;
   const today = todayStr();
-  type G = { key: string; label: string; head?: React.ReactNode; items: Task[]; add: { defaultAssignee?: string | null; defaultDue?: string | null; projectId?: string | null }; tone?: string };
+  const nameOf = (id: string) => dir.users.find((u) => u.id === id)?.name ?? null;
+  type G = { key: string; label: string; head?: React.ReactNode; items: Task[]; add: { defaultAssignee?: string | null; defaultRequester?: string | null; defaultDue?: string | null; projectId?: string | null }; tone?: string };
   let groups: G[] = [];
-  if (group === 'assignee') {
+  if (group === 'assignee' || group === 'requester') {
+    const isReq = group === 'requester';
     const m = new Map<string, G>();
     const ensure = (id: string | null, name: string | null) => {
       const k = id ?? 'none';
-      if (!m.has(k)) m.set(k, { key: k, label: id ? (name ?? dir.users.find((u) => u.id === id)?.name ?? '알 수 없음') : '담당자 없음', head: <Avatar id={id} name={id ? name ?? dir.users.find((u) => u.id === id)?.name ?? null : null} size={24} />, items: [], add: { defaultAssignee: id } });
+      if (!m.has(k)) {
+        const nm = id ? (name ?? nameOf(id) ?? '알 수 없음') : isReq ? '지시자 없음' : '담당자 없음';
+        m.set(k, { key: k, label: nm, head: <Avatar id={id} name={id ? nm : null} size={24} />, items: [], add: isReq ? { defaultRequester: id } : { defaultAssignee: id } });
+      }
       return m.get(k)!;
     };
-    if (!assigneeFilter || assigneeFilter === user.id) ensure(user.id, user.name);
-    if (assigneeFilter) ensure(assigneeFilter, null);
-    for (const t of tasks) ensure(t.assignee_id, t.assignee_name).items.push(t);
+    // 본사 사람 전원(업무 0건이어도) → 나 먼저. 사람 필터가 있으면 그 사람만
+    if (!isReq && assigneeFilter) ensure(assigneeFilter, null);
+    else { ensure(user.id, user.name); for (const p of people) ensure(p.id, p.name); }
+    for (const t of tasks) (isReq ? ensure(t.requested_by ?? null, t.requested_by_name ?? null) : ensure(t.assignee_id, t.assignee_name)).items.push(t);
     groups = [...m.values()].sort((a, b) => (a.key === user.id ? -1 : b.key === user.id ? 1 : a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.label.localeCompare(b.label, 'ko')));
   } else if (group === 'due') {
     const d = new Date(today + 'T00:00:00Z');
@@ -385,30 +452,80 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     if (!groups.length) groups = [{ key: 'none', label: '프로젝트 없음', items: [], add: {} }];
   } else groups = [{ key: 'all', label: '', items: tasks, add: {} }];
 
+  const draggable = sortBy === 'manual';
+  // 다른 묶음으로 옮길 때 바뀌는 값
+  const moveBody = (g: G): Record<string, unknown> | null => {
+    if (group === 'assignee') return { assigneeId: g.add.defaultAssignee ?? null };
+    if (group === 'requester') return g.add.defaultRequester ? { requestedById: g.add.defaultRequester } : null;
+    if (group === 'due') return { dueDate: g.add.defaultDue ?? null };
+    if (group === 'project') return { projectId: g.add.projectId ?? null };
+    return null;
+  };
+  const end = (e: DragEndEvent) => {
+    const a = String(e.active.id), o = e.over ? String(e.over.id) : null;
+    if (!o || a === o) return;
+    const src = groups.find((g) => g.items.some((t) => t.id === a));
+    const dst = o.startsWith('group:') ? groups.find((g) => `group:${g.key}` === o) : groups.find((g) => g.items.some((t) => t.id === o));
+    if (!src || !dst) return;
+    let order: string[];
+    if (src === dst) {
+      const ids = src.items.map((t) => t.id);
+      order = arrayMove(ids, ids.indexOf(a), o.startsWith('group:') ? ids.length - 1 : ids.indexOf(o));
+    } else {
+      order = dst.items.map((t) => t.id);
+      const at = o.startsWith('group:') ? order.length : order.indexOf(o);
+      order.splice(at < 0 ? order.length : at, 0, a);
+      const body = moveBody(dst);
+      const t = src.items.find((x) => x.id === a)!;
+      if (body) onPatch(t, body);
+    }
+    onReorder(order);
+  };
+
   return (
-    <div className="space-y-4" data-testid="task-groups" data-group-by={group}>
-      {top && <div className="overflow-hidden rounded-card border border-accent-500/40 bg-white shadow-card ring-2 ring-accent-500/10">{top}</div>}
-      {groups.map((x, gi) => {
-        const open = x.items.filter((t) => t.status !== 'done').length;
-        const late = x.items.filter((t) => t.status !== 'done' && t.due_date && t.due_date < today).length;
-        const isFolded = folded[x.key];
-        const addRow = <InlineAddTask key={x.key} muted defaultAssignee={x.add.defaultAssignee} defaultDue={x.add.defaultDue} projectId={x.add.projectId}
-          placeholder={group === 'assignee' ? `${x.label === '담당자 없음' ? '담당자 없이' : x.label + '님에게'} 업무 추가` : x.label ? `${x.label}에 업무 추가` : '업무 추가'} />;
-        return (
-          <section key={x.key} data-group={x.key}>
-            {x.label && (
-              <button onClick={() => setFolded((f) => ({ ...f, [x.key]: !f[x.key] }))} aria-expanded={!isFolded}
-                className={cx('mb-1.5 flex w-full items-center gap-2 px-1 text-left text-sm font-semibold', x.tone ?? 'text-ink')}>
-                <ChevronDown className={cx('size-4 text-ink-3 transition-transform', isFolded && '-rotate-90')} />
-                {x.head}{x.label}
-                <span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums" title="진행 중">{open}</span>
-                {late > 0 && <span className="rounded-full bg-red-50 px-1.5 text-xs font-medium text-red-600 tabular-nums">지연 {late}</span>}
-              </button>
-            )}
-            {!isFolded && <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={addRow} />}
-          </section>
-        );
-      })}
+    <DndContext sensors={sensors} onDragEnd={draggable ? end : undefined}>
+      <div className="space-y-4" data-testid="task-groups" data-group-by={group}>
+        {top && <div className="overflow-hidden rounded-card border border-accent-500/40 bg-white shadow-card ring-2 ring-accent-500/10">{top}</div>}
+        <ListHeader sortBy={sortBy} onSort={onSort} />
+        {groups.map((x, gi) => {
+          const open = x.items.filter((t) => t.status !== 'done').length;
+          const late = x.items.filter((t) => t.status !== 'done' && t.due_date && t.due_date < today).length;
+          const isFolded = folded[x.key];
+          const who = x.label === '담당자 없음' ? '담당자 없이' : `${x.label}님에게`;
+          const addRow = <InlineAddTask key={x.key} muted defaultAssignee={x.add.defaultAssignee} defaultRequester={x.add.defaultRequester} defaultDue={x.add.defaultDue} projectId={x.add.projectId}
+            placeholder={group === 'assignee' ? `${who} 업무 추가` : group === 'requester' ? `${x.label} 지시로 업무 추가` : x.label ? `${x.label}에 업무 추가` : '업무 추가'} />;
+          return (
+            <GroupDrop key={x.key} id={`group:${x.key}`} groupKey={x.key}>
+              {x.label && (
+                <button onClick={() => setFolded((f) => ({ ...f, [x.key]: !f[x.key] }))} aria-expanded={!isFolded}
+                  className={cx('mb-1.5 flex w-full items-center gap-2 px-1 text-left text-sm font-semibold', x.tone ?? 'text-ink')}>
+                  <ChevronDown className={cx('size-4 text-ink-3 transition-transform', isFolded && '-rotate-90')} />
+                  {x.head}{x.label}
+                  <span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums" title="진행 중">{open}</span>
+                  {late > 0 && <span className="rounded-full bg-red-50 px-1.5 text-xs font-medium text-red-600 tabular-nums">지연 {late}</span>}
+                  {!x.items.length && <span className="text-xs font-normal text-ink-3">업무 없음</span>}
+                </button>
+              )}
+              {!isFolded && <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={addRow} sortable={draggable} />}
+            </GroupDrop>
+          );
+        })}
+      </div>
+    </DndContext>
+  );
+}
+function GroupDrop({ id, groupKey, children }: { id: string; groupKey: string; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return <section ref={setNodeRef} data-group={groupKey} className={cx('rounded-card', isOver && 'ring-2 ring-accent-500/30')}>{children}</section>;
+}
+/** 끌어서 순서 바꾸는 행 (손잡이는 PC 에서만 — 휴대폰은 밀기 동작과 겹치지 않게) */
+function SortableRow({ t, onPatch, onAck }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
+  return (
+    <div ref={setNodeRef} style={{ transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined, transition }} className={cx(isDragging && 'relative z-50 opacity-90 shadow-pop')}>
+      <ListRow t={t} onPatch={onPatch} onAck={onAck} handle={
+        <button type="button" {...attributes} {...listeners} className="hidden w-4 shrink-0 cursor-grab touch-none text-slate-300 hover:text-slate-500 sm:inline-flex" aria-label={`${t.title} 끌어서 순서 바꾸기`} data-testid="drag-handle"><GripVertical className="size-4" /></button>
+      } />
     </div>
   );
 }
@@ -451,7 +568,7 @@ function MyGroupedList({ tasks, onPatch, onAcked, top }: { tasks: Task[]; onPatc
   );
 }
 
-function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean; add?: React.ReactNode; tail?: React.ReactNode }) {
+function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortable }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean; add?: React.ReactNode; tail?: React.ReactNode; sortable?: boolean }) {
   const openTask = useContext(OpenTaskCtx);
   if (!tasks.length && tail) return <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list">{add}{tail}</div>;
   if (!tasks.length && add) return <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list">{add}<p className="px-4 py-6 text-center text-sm text-ink-3">조건에 맞는 업무가 없습니다</p></div>;
@@ -470,14 +587,18 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail }: { ta
     <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list" onKeyDown={onKey}>
       {add}
       {hint && <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">행을 오른쪽으로 밀면 완료, 왼쪽으로 밀면 보류</p>}
-      {tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} />)}
+      {sortable ? (
+        <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+          {tasks.map((t) => <SortableRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} />)}
+        </SortableContext>
+      ) : tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} handle={<span className="hidden w-4 shrink-0 sm:inline-flex" />} />)}
       {tail}
     </div>
   );
 }
 
 /** 목록 행. 모바일에서는 오른쪽으로 밀면 완료(또는 검토 요청), 왼쪽으로 밀면 보류 */
-function ListRow({ t, onPatch, onAck }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void }) {
+function ListRow({ t, onPatch, onAck, handle }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; handle?: React.ReactNode }) {
   const { user } = useSession();
   const start = useRef<{ x: number; y: number; lock: 'x' | 'y' | null } | null>(null);
   const [dx, setDx] = useState(0);
@@ -508,6 +629,7 @@ function ListRow({ t, onPatch, onAck }: { t: Task; onPatch: (t: Task, b: any) =>
           if (d > TH) swipe(right); else if (d < -TH && t.status !== 'on_hold' && t.status !== 'done') swipe('on_hold');
         }}
         className={cx('group relative flex min-h-[44px] items-center gap-3 bg-white px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', !dx && 'transition-transform')}>
+        {handle}
         <CheckCircle t={t} onPatch={onPatch} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
           <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
@@ -517,8 +639,9 @@ function ListRow({ t, onPatch, onAck }: { t: Task; onPatch: (t: Task, b: any) =>
           <Meta t={t} />
         </div>
         {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
-        <span className="hidden w-[60px] justify-end sm:flex"><PriorityTag p={t.priority} /></span>
-        <span className="hidden sm:inline-flex"><StatusSelect t={t} onPatch={onPatch} /></span>
+        <span className="hidden w-[104px] min-w-0 md:flex"><AssigneePicker role="지시자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
+        <span className="hidden w-[60px] justify-end sm:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>
+        <span className="hidden w-[84px] sm:inline-flex"><StatusSelect t={t} onPatch={onPatch} /></span>
         <DueEdit t={t} onPatch={onPatch} />
         <AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} />
       </div>

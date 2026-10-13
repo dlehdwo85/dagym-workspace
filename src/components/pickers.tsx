@@ -30,10 +30,10 @@ export function UnitSelect({ value, onChange, allowEmpty, id, className }: { val
   );
 }
 
-export function UserSelect({ value, onChange, placeholder = '담당자 없음', id, className }: { value: string | null | undefined; onChange: (v: string | null) => void; placeholder?: string; id?: string; className?: string }) {
+export function UserSelect({ value, onChange, placeholder = '담당자 없음', id, className, ariaLabel }: { value: string | null | undefined; onChange: (v: string | null) => void; placeholder?: string; id?: string; className?: string; ariaLabel?: string }) {
   const { dir } = useSession();
   return (
-    <select id={id} className={className ?? inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+    <select id={id} className={className ?? inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} aria-label={ariaLabel}>
       <option value="">{placeholder}</option>
       {dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
     </select>
