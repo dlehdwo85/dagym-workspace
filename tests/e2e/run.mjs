@@ -3,7 +3,7 @@
 import { chromium, devices } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
-import { bootstrap, resetDb, startServer, BASE, Client, addDays, seoulToday, ensureTls, testDb } from '../helpers.mjs';
+import { bootstrap, resetDb, startServer, BASE, FAKE, Client, addDays, seoulToday, ensureTls, testDb } from '../helpers.mjs';
 import { startFakeGoogle } from '../fake-google.mjs';
 
 const SHOTS = 'docs/screens';
@@ -1349,6 +1349,42 @@ await step('V8: 등록 창 한 번에(자동 인식·템플릿·우선순위·�
   await sd.getByTestId('quick-nl-apply').waitFor();
   assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '360 넘침 없음');
   await m.screenshot({ path: `${SHOTS}/75-quick-add-v8-360.png` });
+  await mc.close();
+});
+
+await step('V9: 자료실 올리기·검색 → 홈 "AI에게 요청" → 비서가 찾은 로고 첨부 제안 → [확인] → 업무에 첨부, 360 넘침 없음', async () => {
+  const task = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V9 전단지 제작', orgUnitId: ctx.hq, approvalRequired: false })).id;
+  await owner.goto(BASE + '/library');
+  await owner.getByLabel('올릴 폴더').fill('브랜드');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await owner.getByTestId('library-file').setInputFiles([{ name: '다짐 로고 E2E.png', mimeType: 'image/png', buffer: png }]);
+  await owner.getByTestId('library-list').getByText('다짐 로고 E2E').waitFor();
+  await owner.getByLabel('자료 검색').fill('로고 E2E');
+  await owner.getByRole('tab', { name: /브랜드/ }).waitFor();
+  const [f] = await sql`select id from library_files where title = '다짐 로고 E2E'`;
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [
+    { content: [{ type: 'tool_use', id: 'e1', name: 'search_library', input: { query: '다짐 로고' } }], stop_reason: 'tool_use' },
+    { content: [{ type: 'tool_use', id: 'e2', name: 'propose_attach_file', input: { taskId: task, fileId: f.id } }], stop_reason: 'tool_use' },
+    { content: [{ type: 'text', text: '로고를 찾았습니다. 확인을 누르면 첨부됩니다.' }], stop_reason: 'end_turn' }] }) });
+  await owner.goto(BASE + '/');
+  await owner.getByTestId('home-ai').getByLabel('AI에게 요청').fill('다짐 로고 찾아서 전단지 업무에 붙여줘');
+  await owner.getByTestId('home-ai').getByRole('button', { name: '요청' }).click();
+  await owner.waitForURL(/\/assistant/);
+  const card = owner.getByTestId('ai-proposal');
+  await card.getByText(/다짐 로고 E2E → V9 전단지 제작/).waitFor();
+  assert.equal((await sql`select count(*)::int n from attachments where task_id = ${task}`)[0].n, 0, '확인 전 첨부 없음');
+  await card.getByRole('button', { name: '확인' }).click();
+  await card.getByText('✓ 반영됨').waitFor();
+  assert.equal((await sql`select count(*)::int n from attachments where task_id = ${task} and deleted_at is null`)[0].n, 1);
+  await owner.screenshot({ path: `${SHOTS}/76-ai-assistant.png` });
+  const mc = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  const m = await mc.newPage();
+  for (const path of ['/library', '/assistant']) {
+    await m.goto(BASE + path);
+    await m.getByRole('heading', { name: path === '/library' ? '자료실' : 'AI 비서' }).waitFor();
+    assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${path} 360 넘침 없음`);
+  }
+  await m.screenshot({ path: `${SHOTS}/77-library-360.png` });
   await mc.close();
 });
 

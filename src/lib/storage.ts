@@ -75,3 +75,12 @@ export async function putObject(key: string, data: Buffer, mime: string) {
     await s3().send(new PutObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key, Body: data, ContentType: mime }));
   } else await writeLocal(key, data);
 }
+
+/** 서버가 파일 내용을 읽음 (자료실 글자 추출·AI 읽기) */
+export async function getObject(key: string): Promise<Buffer> {
+  if (s3Configured()) {
+    const r = await s3().send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key }));
+    return Buffer.from(await r.Body!.transformToByteArray());
+  }
+  return readLocal(key);
+}

@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, MessageSquare, PlusCircle, Users, Activity as ActivityIcon } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, MessageSquare, PlusCircle, Sparkles, Users, Activity as ActivityIcon } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
@@ -131,8 +131,9 @@ function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: { personal: strin
 }
 
 export default function Dashboard() {
-  const { user, dir } = useSession();
+  const { user, dir, features } = useSession();
   const { data, error, loading, reload } = useApi<any>('/api/dashboard');
+  const [aiQ, setAiQ] = useState('');
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const router = useRouter();
   const { colors: calColors } = useCalColors();
@@ -230,6 +231,13 @@ export default function Dashboard() {
         <Link href="/tasks?view=overdue" className="flex items-center gap-2 rounded-card border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100" data-testid="overdue-banner">
           <AlertTriangle className="size-5 shrink-0" />기한 지난 업무 {tot.overdue}건<span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium">확인하기<ArrowRight className="size-3.5" /></span>
         </Link>
+      )}
+      {features.ai && (
+        <form onSubmit={(e) => { e.preventDefault(); if (aiQ.trim()) router.push(`/assistant?q=${encodeURIComponent(aiQ.trim())}`); }} className="flex items-center gap-2 rounded-card border border-line bg-white px-3 py-2 shadow-card" data-testid="home-ai">
+          <Sparkles className="size-5 shrink-0 text-amber-500" />
+          <input value={aiQ} onChange={(e) => setAiQ(e.target.value)} placeholder="✨ AI에게 요청 (예: 다짐 로고 찾아줘, 이번 주 내 마감 정리)" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3" aria-label="AI에게 요청" />
+          <button type="submit" className="shrink-0 rounded-input bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50" disabled={!aiQ.trim()}>요청</button>
+        </form>
       )}
       {/* WORKIN_V2 홈: 오늘 할 일 · 이번 주 일정 · 이달의 일정 · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동 (모바일은 위에서부터 이 순서) */}
       <div className="grid min-w-0 gap-4 lg:grid-flow-dense lg:grid-cols-3">

@@ -1564,3 +1564,125 @@ describe('WORKIN 휴대폰 예약 알림', () => {
     assert.equal((await sql`select local_reminders from push_subscriptions where endpoint = 'fcm-local-a'`)[0].local_reminders, false);
   });
 });
+
+describe('WORKIN_V9 회사 자료실 · AI 비서 (가짜 Anthropic 서버)', () => {
+  const up = async (c, meta, data) => {
+    const init = await c.ok('POST', '/api/library', { ...meta, size: data.length });
+    await fetch(BASE + init.upload.url, { method: 'PUT', headers: init.upload.headers, body: data });
+    await c.ok('POST', `/api/library/${init.id}/complete`);
+    return init.id;
+  };
+  const queue = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: items }) });
+  const fakeState = () => fetch(`${FAKE}/__state`).then((r) => r.json());
+  const toolUse = (id, name, input) => ({ content: [{ type: 'tool_use', id, name, input }], stop_reason: 'tool_use' });
+  const say = (text) => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn' });
+  let logo, price, demo;
+
+  test('자료실: 올리기·폴더·태그·본문 검색, 고치기/지우기는 올린 사람·관리자, 체험 계정·다른 회사 차단', async () => {
+    logo = await up(ctx.owner, { fileName: '다짐 로고.png', mimeType: 'image/png', folder: '브랜드/다짐', tags: ['로고', '다짐'] }, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    price = await up(ctx.staffA.client, { fileName: '단가표.csv', mimeType: 'text/csv', folder: '영업' }, Buffer.from('항목,가격\nPT 10회,550000\n', 'utf8'));
+    const all = await ctx.staffA.client.ok('GET', '/api/library');
+    assert.ok(all.files.some((f) => f.id === logo) && all.files.some((f) => f.id === price), '같은 회사 직원은 모두 봄');
+    assert.ok(all.folders.some((f) => f.folder === '브랜드/다짐'));
+    const byBody = await ctx.managerA.client.ok('GET', '/api/library?q=' + encodeURIComponent('PT 550000'));
+    assert.deepEqual(byBody.files.map((f) => f.id), [price], '본문 글자로 검색');
+    assert.ok(byBody.files[0].has_text && /550000/.test(byBody.files[0].snippet));
+    assert.ok((await ctx.staffA.client.ok('GET', '/api/library?q=' + encodeURIComponent('다짐 로고'))).files.some((f) => f.id === logo), '제목·태그 검색');
+    assert.deepEqual((await ctx.owner.ok('GET', '/api/library?folder=' + encodeURIComponent('브랜드'))).files.map((f) => f.id), [logo], '상위 폴더로 하위 포함');
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/library/${price}`, { title: 'x' })).status, 403, '남이 올린 자료는 못 고침');
+    assert.equal((await ctx.managerA.client.req('DELETE', `/api/library/${price}`)).status, 403);
+    await ctx.owner.ok('PATCH', `/api/library/${price}`, { title: '2026 단가표', tags: ['단가'] });
+    const dl = await ctx.staffA.client.req('GET', `/api/library/${logo}/download?inline=1`);
+    assert.equal(dl.status, 302);
+    assert.equal((await ctx.staffA.client.req('GET', '/api/library/00000000-0000-4000-8000-000000000000')).status, 404);
+    demo = new Client('iso');
+    await demo.ok('POST', '/api/auth/login', { email: 'iso@dagym.test', password: 'iso-pass-1234' });
+    assert.equal((await demo.req('GET', '/api/library')).status, 403, '체험 계정은 자료실 없음');
+    assert.equal((await demo.req('GET', `/api/library/${logo}`)).status, 403);
+    // 다른 회사(tenant) 자료는 없는 것처럼
+    await sql`update library_files set tenant = 'other-co' where id = ${price}`;
+    assert.equal((await ctx.owner.req('GET', `/api/library/${price}`)).status, 404);
+    assert.ok(!(await ctx.owner.ok('GET', '/api/library')).files.some((f) => f.id === price));
+    await sql`update library_files set tenant = 'default' where id = ${price}`;
+  });
+
+  test('AI 비서: 도구로 자료 찾기 → 첨부 제안 → [확인]해야 첨부, 사용량 기록, 남의 제안·두 번 실행 불가', async () => {
+    const st0 = await ctx.staffA.client.ok('GET', '/api/ai/status');
+    assert.equal(st0.enabled, true); assert.equal(st0.usage.costUsd, undefined, '직원에게 비용은 안 보임');
+    assert.equal((await demo.ok('GET', '/api/ai/status')).enabled, false, '체험 계정은 AI 숨김');
+    assert.equal((await demo.req('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '안녕' }] })).status, 403);
+    const task = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: 'V9 홍보물 제작', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+    const before = (await fakeState()).anthropic.length;
+    await queue([toolUse('tu1', 'search_library', { query: '다짐 로고' }), toolUse('tu2', 'propose_attach_file', { taskId: task, fileId: logo }), say('로고를 찾았습니다. 확인을 누르면 첨부됩니다.')]);
+    const r = await ctx.staffA.client.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '다짐 로고 불러와줘' }], taskId: task });
+    assert.match(r.reply, /확인을 누르면/);
+    assert.deepEqual(r.tools, ['search_library', 'propose_attach_file']);
+    assert.equal(r.proposals.length, 1); assert.match(r.proposals[0].summary, /다짐 로고 → V9 홍보물 제작/);
+    const reqs = (await fakeState()).anthropic.slice(before);
+    assert.equal(reqs.length, 3);
+    assert.equal(reqs[0].key, 'sk-ant-fake-test');
+    assert.match(reqs[0].beta ?? '', /server-side-fallback-2026-07-01/);
+    assert.equal(reqs[0].body.model, 'claude-opus-5-5'); assert.equal(reqs[0].body.fallbacks, 'default');
+    assert.match(reqs[0].body.system, /이직원/); assert.match(reqs[0].body.system, new RegExp(task), '보고 있는 업무 맥락');
+    assert.ok(reqs[0].body.tools.some((t) => t.name === 'propose_create_task'));
+    const tr = reqs[1].body.messages.at(-1).content[0];
+    assert.equal(tr.type, 'tool_result'); assert.ok(tr.content.includes(logo), '검색 결과에 로고 id');
+    // 확인 전에는 첨부 없음
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${task}`)).attachments.length, 0);
+    assert.equal((await ctx.managerA.client.req('POST', `/api/ai/proposals/${r.proposals[0].id}`, { accept: true })).status, 404, '남의 제안');
+    const done = await ctx.staffA.client.ok('POST', `/api/ai/proposals/${r.proposals[0].id}`, { accept: true });
+    assert.equal(done.status, 'done');
+    const att = (await ctx.staffA.client.ok('GET', `/api/tasks/${task}`)).attachments;
+    assert.equal(att.length, 1); assert.equal(att[0].file_name, '다짐 로고.png');
+    assert.equal((await ctx.staffA.client.req('POST', `/api/ai/proposals/${r.proposals[0].id}`, { accept: true })).status, 400, '두 번 실행 불가');
+    const used = await sql`select count(*)::int n, sum(cost_usd)::float8 c from ai_usage where user_id = ${ctx.staffA.id}`;
+    assert.equal(used[0].n, 3); assert.ok(used[0].c > 0);
+  });
+
+  test('AI 도구는 요청한 사람 권한으로만: 직원은 매출·남의 현장 업무 못 봄, 업무 만들기 제안 확인/취소', async () => {
+    const hidden = (await ctx.owner.ok('POST', '/api/tasks', { title: '판교 비밀 업무', orgUnitId: ctx.siteB, approvalRequired: false })).id;
+    const before = (await fakeState()).anthropic.length;
+    await queue([{ content: [{ type: 'tool_use', id: 'a1', name: 'revenue_summary', input: { fromMonth: '2026-01', toMonth: '2026-09' } },
+      { type: 'tool_use', id: 'a2', name: 'get_task', input: { taskId: hidden } },
+      { type: 'tool_use', id: 'a3', name: 'propose_create_task', input: { title: 'AI 제안 업무', dueDate: addDays(today, 3), assigneeId: ctx.staffA.id } },
+      { type: 'tool_use', id: 'a4', name: 'propose_comment', input: { taskId: hidden, text: '몰래 댓글' } }], stop_reason: 'tool_use' }, say('정리했습니다.')]);
+    const r = await ctx.staffA.client.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '매출 알려주고 업무 만들어줘' }] });
+    const results = (await fakeState()).anthropic.slice(before)[1].body.messages.at(-1).content;
+    const byId = Object.fromEntries(results.map((x) => [x.tool_use_id, x]));
+    assert.equal(byId.a1.is_error, true); assert.match(byId.a1.content, /대표·본사/);
+    assert.equal(byId.a2.is_error, true); assert.match(byId.a2.content, /권한/);
+    assert.equal(byId.a4.is_error, true, '볼 수 없는 업무에 댓글 제안도 불가');
+    assert.equal(r.proposals.length, 1);
+    assert.equal((await sql`select count(*)::int n from tasks where title = 'AI 제안 업무'`)[0].n, 0, '확인 전 미생성');
+    const made = await ctx.staffA.client.ok('POST', `/api/ai/proposals/${r.proposals[0].id}`, { accept: true });
+    const t = await ctx.staffA.client.ok('GET', made.link.replace('/tasks/', '/api/tasks/'));
+    assert.equal(t.task.title, 'AI 제안 업무'); assert.equal(t.task.due_date, addDays(today, 3)); assert.equal(t.task.assignee_id, ctx.staffA.id);
+    // 취소
+    await queue([toolUse('b1', 'propose_create_task', { title: '취소할 업무' }), say('확인을 눌러 주세요.')]);
+    const r2 = await ctx.staffA.client.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '업무 하나 더' }] });
+    assert.equal((await ctx.staffA.client.ok('POST', `/api/ai/proposals/${r2.proposals[0].id}`, { accept: false })).status, 'cancelled');
+    assert.equal((await sql`select count(*)::int n from tasks where title = '취소할 업무'`)[0].n, 0);
+  });
+
+  test('엑셀 보고서 제안 → 확인하면 자료실 "AI 보고서"에 저장(본문 검색 가능)·업무 첨부', async () => {
+    const task = (await ctx.owner.ok('POST', '/api/tasks', { title: '3분기 매출 분석', orgUnitId: ctx.hq, approvalRequired: false })).id;
+    await queue([toolUse('x1', 'propose_xlsx_report', { title: '3분기 매출 요약', taskId: task, sheets: [{ name: '요약', rows: [['현장', '매출'], ['강남점', 12345678]] }] }), say('보고서를 준비했습니다.')]);
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '3분기 매출 분석해서 올려줘' }], taskId: task });
+    const done = await ctx.owner.ok('POST', `/api/ai/proposals/${r.proposals[0].id}`, { accept: true });
+    const lib = await ctx.owner.ok('GET', '/api/library?q=' + encodeURIComponent('강남점'));
+    assert.ok(lib.files.some((f) => f.id === done.fileId && f.folder === 'AI 보고서' && f.file_name === '3분기 매출 요약.xlsx'), '엑셀 본문 추출·검색');
+    const att = (await ctx.owner.ok('GET', `/api/tasks/${task}`)).attachments;
+    assert.equal(att[0].file_name, '3분기 매출 요약.xlsx');
+  });
+
+  test('회사별 월 한도: 대표만 설정, 넘으면 429 안내, 대표는 비용을 봄', async () => {
+    assert.equal((await ctx.staffA.client.req('PUT', '/api/ai/limit', { monthlyUsd: 1 })).status, 403);
+    await ctx.owner.ok('PUT', '/api/ai/limit', { monthlyUsd: 0.01 });
+    const st = await ctx.owner.ok('GET', '/api/ai/status');
+    assert.ok(st.usage.costUsd >= 0.01 && st.overLimit && st.canSetLimit);
+    const r = await ctx.staffA.client.req('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '안녕' }] });
+    assert.equal(r.status, 429); assert.match(r.body.error.message, /한도/);
+    await ctx.owner.ok('PUT', '/api/ai/limit', { monthlyUsd: 30 });
+    assert.equal((await ctx.staffA.client.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '안녕' }] })).reply, '테스트 응답입니다.');
+  });
+});

@@ -12,7 +12,7 @@ export interface Sess {
   user: { id: string; name: string; email: string; role: Role };
   dir: Dir;
   /** 선택 기능 스위치 (핵심 기능은 항상 켜짐) */
-  features: { googleSync: boolean };
+  features: { googleSync: boolean; /** V9 AI 비서 (플랫폼 API 키가 있을 때만) */ ai: boolean; /** V9 자료실 (체험 계정 제외) */ library: boolean };
 }
 export const SessionCtx = createContext<Sess | null>(null);
 export function useSession() {

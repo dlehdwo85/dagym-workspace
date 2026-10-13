@@ -17,6 +17,8 @@ export function startFakeGoogle(port = 3199) {
     stops: [],
     fcm: [],
     openai: [],
+    anthropic: [], // 받은 /v1/messages 요청
+    anthropicQueue: [], // 다음 응답들 (비면 짧은 글 답)
     fcmUnregistered: new Set(),
     webpush: [],
     webpushGone: new Set(),
@@ -48,12 +50,20 @@ export function startFakeGoogle(port = 3199) {
       });
       return json(res, 200, { choices: [{ message: { role: 'assistant', content } }], usage: { total_tokens: 321 } });
     }
+    // ---- 가짜 Anthropic Messages API (V9 AI 비서): 요청을 기록하고, 시험이 넣어 둔 응답을 차례로 돌려준다 ----
+    if (p === '/v1/messages' && req.method === 'POST') {
+      state.anthropic.push({ key: req.headers['x-api-key'], beta: req.headers['anthropic-beta'] ?? null, body });
+      const next = state.anthropicQueue.shift() ?? { content: [{ type: 'text', text: '테스트 응답입니다.' }], stop_reason: 'end_turn' };
+      return json(res, 200, { id: `msg_${state.anthropic.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null,
+        usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, ...next });
+    }
     // ---- 제어용 ----
     if (p === '/__state') return json(res, 200, { ...state, fcmUnregistered: [...state.fcmUnregistered], webpushGone: [...state.webpushGone] });
     if (p === '/__ctl' && req.method === 'POST') {
       if ('invalidGrant' in body) state.invalidGrant = body.invalidGrant;
       if ('expireSyncToken' in body) state.expireSyncToken = body.expireSyncToken;
       if (body.fcmUnregister) state.fcmUnregistered.add(body.fcmUnregister);
+      if (body.anthropicQueue) state.anthropicQueue.push(...body.anthropicQueue);
       if (body.webpushGone) state.webpushGone.add(body.webpushGone);
       if (body.googleEdit) { // Google 쪽에서 사용자가 직접 수정
         const e = evs(body.googleEdit.cal)[body.googleEdit.id];
