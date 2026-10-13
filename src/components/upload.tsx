@@ -76,3 +76,16 @@ export function UploadProgress({ items }: { items: { name: string; pct: number; 
     </ul>
   );
 }
+
+/** V12 10번: 업로드 안내 상자 — PC "끌어다 놓거나 눌러서 선택", 휴대폰 "눌러서 사진 찍기·파일 선택" */
+export function DropHint({ onClick, disabled, what = '사진·PDF·문서', max = '50MB', testid = 'drop-hint' }: { onClick: () => void; disabled?: boolean; what?: string; max?: string; testid?: string }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} data-testid={testid}
+      className="flex w-full flex-col items-center justify-center gap-1 rounded-card border-2 border-dashed border-slate-300 bg-slate-50/60 px-3 py-4 text-center text-sm text-ink-2 transition-colors hover:border-accent-500 hover:bg-accent-50/50 disabled:opacity-50">
+      <Upload className="size-5 text-ink-3" />
+      <span className="hidden sm:inline">파일을 여기로 <b className="font-semibold text-ink">끌어다 놓거나 눌러서 선택</b>하세요</span>
+      <span className="sm:hidden"><b className="font-semibold text-ink">눌러서 사진 찍기·파일 선택</b></span>
+      <span className="text-xs text-ink-3">{what}, 최대 {max} · 여러 개 가능</span>
+    </button>
+  );
+}

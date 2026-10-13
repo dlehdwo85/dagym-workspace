@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { api, broadcastRefresh } from './client';
 import { Camera, FileText, Image as ImageIcon, Link2, Loader2, Paperclip, Trash2 } from 'lucide-react';
 import { Button, Field, Modal, inputCls, toast, fmtDate, fmtDateTime } from './ui';
-import { DropZone, UploadProgress, putFile } from './upload';
+import { DropHint, DropZone, UploadProgress, putFile } from './upload';
 
 /** V8 5번: 사진은 올리기 전에 긴 변 1600px·JPEG 85% 로 줄인다(휴대폰 원본 5~10MB → 수백 KB). GIF·작은 사진·실패 시 원본 */
 export async function shrinkImage(file: File): Promise<File> {
@@ -82,7 +82,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   }
 
   return (
-    <DropZone onFiles={(f) => upload(f)} disabled={!canEdit || !!busy} label="여기에 놓으면 첨부됩니다 (여러 개 가능)" testid="attach-drop">
+    <DropZone onFiles={(f) => upload(f)} disabled={!canEdit || !!busy} label={taskId ? '놓으면 이 업무에 첨부됩니다' : '놓으면 이 일정에 첨부됩니다'} testid="attach-drop">
       {items.some(isImage) && (
         <div className="mb-2 grid grid-cols-3 gap-2 sm:grid-cols-4" data-testid="photo-grid">
           {items.filter(isImage).map((a) => (
@@ -119,6 +119,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
         ))}
         {!items.length && <li className="text-xs text-ink-3">첨부된 자료가 없습니다</li>}
       </ul>
+      {canEdit && <div className="mt-2"><DropHint onClick={() => fileRef.current?.click()} disabled={!!busy} /></div>}
       <div className="mt-2 flex flex-wrap gap-1.5">
         <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="file-input" />
         <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => upload(e.target.files)} />

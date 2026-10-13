@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { s3Configured } from '@/lib/storage';
+import { s3Configured, s3EnvWarnings } from '@/lib/storage';
 import { webPushConfigured, fcmConfigured } from '@/lib/push';
 import { googleSyncEnabled } from '@/lib/google/client';
 
@@ -24,6 +24,8 @@ export async function GET() {
       scheduler: { lastTick, lastTrigger: r.last_trigger ?? null, ageMinutes: tickAgeMin, healthy: tickAgeMin !== null && tickAgeMin <= 30 },
       config: {
         fileStorage: s3Configured() ? 's3' : 'local-disk',
+        // 값은 내보내지 않고 형식 이상(공백·줄바꿈·따옴표)만
+        storageWarnings: s3EnvWarnings(),
         webPush: webPushConfigured(),
         appPush: fcmConfigured(),
         googleCalendar: googleSyncEnabled(), // 선택 기능

@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { Download, FileSpreadsheet, FileText, Folder, Image as ImageIcon, Library, Loader2, Pencil, Search, Trash2, Upload } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { DropZone, UploadProgress, putFile } from '@/components/upload';
+import { DropHint, DropZone, UploadProgress, putFile } from '@/components/upload';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 type F = { id: string; folder: string; title: string; file_name: string; mime_type: string; size_bytes: number; tags: string[]; description: string | null;
@@ -94,9 +94,14 @@ export default function LibraryPage() {
         ))}
       </div>
       <UploadProgress items={prog} />
-      <DropZone onFiles={(f) => upload(f)} disabled={!!busy} label="여기에 놓으면 자료실에 올라갑니다 (여러 개 가능)" testid="library-drop" className="min-h-[120px]">
+      <DropZone onFiles={(f) => upload(f)} disabled={!!busy} label="놓으면 자료실에 올라갑니다" testid="library-drop" className="min-h-[120px]">
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={5} /> : !data!.files.length ? (
-        <Empty title={query ? '찾는 자료가 없습니다' : '아직 자료가 없습니다'} icon={Library}>{query ? '다른 말로 찾아 보세요' : '로고·소개서·단가표를 올려 두면 업무에 바로 첨부하고 AI 비서가 찾아 씁니다.'}</Empty>
+        query ? <Empty title="찾는 자료가 없습니다" icon={Library}>다른 말로 찾아 보세요</Empty> : (
+          <div className="space-y-2">
+            <Empty title="아직 자료가 없습니다" icon={Library}>로고·소개서·단가표를 올려 두면 업무에 바로 첨부하고 AI 비서가 찾아 씁니다.</Empty>
+            <DropHint onClick={() => fileRef.current?.click()} disabled={!!busy} what="로고·사진·PDF·엑셀·문서" testid="library-drop-hint" />
+          </div>
+        )
       ) : (
         <ul className="divide-y divide-line overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="library-list">
           {data!.files.map((f) => (

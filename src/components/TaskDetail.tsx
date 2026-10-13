@@ -531,7 +531,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <li className="pt-1 text-ink-3">작성: {t.created_by_name} · {fmtDateTime(t.created_at)}</li>
           </ul>
           {/* V12 9번: 댓글 칸에 파일을 끌어 놓으면 이 업무에 첨부 */}
-          <DropZone onFiles={async (f) => { await uploadTaskFiles(Array.from(f), { taskId: id }, setCprog); reload(); broadcastRefresh(); }} label="여기에 놓으면 이 업무에 첨부됩니다" testid="comment-drop">
+          <DropZone onFiles={async (f) => { await uploadTaskFiles(Array.from(f), { taskId: id }, setCprog); reload(); broadcastRefresh(); }} label="놓으면 이 업무에 첨부됩니다" testid="comment-drop">
           <form onSubmit={sendComment} className="relative mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20">
             {/* V8 7번: "@" 를 치면 이 업무를 볼 수 있는 사람 자동완성 */}
             {(() => {
