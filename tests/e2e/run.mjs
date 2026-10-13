@@ -771,8 +771,12 @@ await step('W-5 매출 AI 분석(AI 제안 표시·근거 숫자로 이동) · G
   const ai = owner.getByTestId('revenue-ai');
   await ai.getByRole('button', { name: 'AI 분석' }).click();
   await ai.getByText('AI 제안', { exact: true }).waitFor();
-  await ai.getByRole('button', { name: /다짐 강남점 · \d+월 매출/ }).click();
-  await owner.getByLabel('현장').evaluate((el) => el.value).then((v) => assert.equal(v, ctx.siteA, '근거 현장으로 이동'));
+  // 첫 이상치(근거 숫자) 버튼 → 그 현장이 선택됨 (어느 현장이 먼저 오는지는 DB 정렬에 따라 다를 수 있음)
+  const first = ai.getByRole('button', { name: /· \d+월 (매출|지출|회원 수)/ }).first();
+  const site = (await first.textContent()).split(' · ')[0];
+  await first.click();
+  const want = site === '다짐 강남점' ? ctx.siteA : ctx.siteB;
+  await owner.getByLabel('현장').evaluate((el) => el.value).then((v) => assert.equal(v, want, `근거 현장(${site})으로 이동`));
   const tk = owner.getByTestId('revenue-tokens');
   await tk.getByRole('button', { name: '토큰 만들기' }).click();
   await owner.getByTestId('fresh-token').getByText(/^wk_/).waitFor();
