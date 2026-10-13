@@ -48,7 +48,8 @@ export function EventWork({ eventId, occurrenceStart, eventDate, recurring, atte
   const [linkOpen, setLinkOpen] = useState(false);
   const [prep, setPrep] = useState({ preset: '', assigneeId: '' });
   const [rule, setRule] = useState({ title: '', daysBefore: 1, assigneeId: '' });
-  useEffect(() => { if (notes.data && body === null) setBody(notes.data.body); }, [notes.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 불러온 메모는 아직 아무것도 입력하지 않았을 때만 채운다 (불러오는 순간 입력한 내용을 덮어쓰지 않게 — 최신 상태로 비교)
+  useEffect(() => { if (notes.data) { const loaded = notes.data.body; setBody((b) => (b === null ? loaded : b)); } }, [notes.data]);
   const tasks = useMemo(() => linked.data?.tasks ?? [], [linked.data]);
   const followed = useMemo(() => new Set(tasks.filter((t) => t.note_line).map((t) => t.note_line.trim())), [tasks]);
   const people = attendees.length ? attendees : dir.users.map((u) => ({ user_id: u.id, name: u.name }));

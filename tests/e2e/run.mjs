@@ -776,7 +776,7 @@ await step('W-5 매출 AI 분석(AI 제안 표시·근거 숫자로 이동) · G
   const site = (await first.textContent()).split(' · ')[0];
   await first.click();
   const want = site === '다짐 강남점' ? ctx.siteA : ctx.siteB;
-  await owner.getByLabel('현장').evaluate((el) => el.value).then((v) => assert.equal(v, want, `근거 현장(${site})으로 이동`));
+  await owner.getByLabel('현장', { exact: true }).evaluate((el) => el.value).then((v) => assert.equal(v, want, `근거 현장(${site})으로 이동`));
   const tk = owner.getByTestId('revenue-tokens');
   await tk.getByRole('button', { name: '토큰 만들기' }).click();
   await owner.getByTestId('fresh-token').getByText(/^wk_/).waitFor();
