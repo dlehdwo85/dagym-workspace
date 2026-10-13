@@ -95,3 +95,4 @@
 
 ## 2026-10-14 휴대폰 예약 알림 네이티브(로컬)
 - 190f263(클라우드: local-notifications 플러그인·예약 로직) 후 Android Manifest 에 USE_EXACT_ALARM(13+)·SCHEDULE_EXACT_ALARM(≤12)·RECEIVE_BOOT_COMPLETED 추가. Play 정확한 알람 권한 선언(캘린더 앱) 필요 → 업로드 시 처리. 앱 빌드: Android 다음 vc, iOS 1.0.3.
+- 앱 새 빌드: Android vc14(mobile run 38467993425, edebe9d) 로컬 서명 → Play 내부 테스트 출시. iOS 1.0.3(release run 38468034087) TestFlight 업로드 성공.
