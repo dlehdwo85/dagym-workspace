@@ -267,7 +267,7 @@ const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + 'T00:00:00Z
  * 마감 = 일정 날짜(종일이 아니면 시작 시각), 담당 = 지정한 사람(없으면 나), 지시자 = 나.
  * 반복 일정이면 같은 규칙의 반복 업무 하나로 연결한다(회차마다 따로 만들지 않음).
  */
-export async function createSyncTask(u: SessionUser, eventId: string, assigneeId?: string | null) {
+export async function createSyncTask(u: SessionUser, eventId: string, assigneeId?: string | null, opt: { requestedById?: string | null; priority?: string } = {}) {
   const sql = db();
   const c = await eventCtx(u, eventId, sql);
   if (!c.canWork) throw forbidden('일정 작성자·편집 권한자·참석자만 업무를 만들 수 있습니다');
@@ -276,7 +276,7 @@ export async function createSyncTask(u: SessionUser, eventId: string, assigneeId
   if (already.length) throw badRequest('이미 연결된 업무가 있습니다');
   const orgUnitId = await defaultUnit(sql, c.cal, assigneeId, u);
   const { id } = await createTask(u, {
-    title: m.title, assigneeId: assigneeId ?? u.id, requestedById: u.id, orgUnitId, approvalRequired: false,
+    title: m.title, assigneeId: assigneeId ?? u.id, requestedById: opt.requestedById ?? u.id, orgUnitId, approvalRequired: false, priority: opt.priority ?? 'normal',
     dueDate: seoulDateOf(m.start_at), dueTime: m.all_day ? null : seoulHM(m.start_at), recurrenceRule: m.rrule ?? null,
     description: `일정 '${m.title}' 과 연결된 업무 — 날짜를 바꾸면 일정도 함께 바뀝니다`,
   } as never);

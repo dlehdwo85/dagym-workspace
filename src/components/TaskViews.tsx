@@ -76,6 +76,15 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [sortBy, setSortBy] = useState<SortKey>(() => { try { const v = localStorage.getItem('wos_task_sort'); return SORTS.includes(v as SortKey) ? (v as SortKey) : 'manual'; } catch { return 'manual'; } });
   const pickSort = (k: SortKey) => { setSortBy(k); try { localStorage.setItem('wos_task_sort', k); } catch {} };
   const [quickOpen, setQuickOpen] = useState(false);
+  const kbProxy = useRef<HTMLInputElement>(null);
+  const [addKey, setAddKey] = useState(0);
+  // V6 12번: 휴대폰은 업무 등록 시트(맨 위 줄이 화면 밖이거나 이미 열려 있어 반응 없던 문제), PC 는 맨 위 한 줄 추가(누를 때마다 새로 열고 초점)
+  const openAdd = () => {
+    const phone = window.innerWidth < 640;
+    if (phone || mode !== 'list') { kbProxy.current?.focus(); setQuickOpen(true); return; }
+    setAdding(true); setAddKey((k) => k + 1);
+    setTimeout(() => document.querySelector<HTMLElement>('[data-testid="task-groups"] [aria-label="업무 추가 제목"]')?.scrollIntoView({ block: 'center' }), 50);
+  };
   useEffect(() => { // URL 변경(메뉴 이동) 반영 — 패널로 /tasks/:id 가 된 동안에는 목록 필터를 그대로 둔다
     if (/^\/tasks\/[0-9a-f-]{36}$/.test(location.pathname)) return;
     const v = cleanView(sp.get('view'));
@@ -207,7 +216,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => (mode === 'list' ? setAdding(true) : setQuickOpen(true))} data-testid="add-task-top"><Plus />업무 추가</Button>
+        <Button onClick={openAdd} data-testid="add-task-top"><Plus />업무 추가</Button>
+        {/* 휴대폰 키보드: 누른 그 순간(클릭 처리 안)에 입력칸에 초점이 가야 WebView 가 키보드를 띄운다 → 임시 칸에 먼저 초점, 시트가 열리면 제목 칸으로 넘김 */}
+        <input ref={kbProxy} aria-hidden tabIndex={-1} className="pointer-events-none fixed left-0 top-0 h-0 w-0 opacity-0" />
         <div className="relative min-w-[160px] flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
           <input className={cx(inputCls, 'h-9 pl-8')} placeholder="제목·설명·태그 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="업무 검색" />
@@ -281,7 +292,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
             : <GroupedTasks tasks={tasks} group={group} view={curView} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
                 people={people} sortBy={sortBy} onSort={pickSort} onReorder={reorder}
-                top={adding ? <InlineAddTask autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
+                top={adding ? <InlineAddTask key={addKey} autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
           {mode === 'board' && projectId && (
             <div className="flex items-center gap-2 text-sm text-ink-2">열 기준
               <select className="h-8 rounded-input border border-line bg-white px-2 text-sm" value={boardBy} onChange={(e) => setBoardBy(e.target.value as any)} aria-label="보드 열 기준">
@@ -530,7 +541,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
                   {!x.items.length && <span className="text-xs font-normal text-ink-3">업무 없음</span>}
                 </button>
               )}
-              {!isFolded && <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={addRow} sortable={draggable} onMove={draggable ? (t, to) => {
+              {!isFolded && <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={addRow} sortable={draggable} dragHint={!draggable} onMove={draggable ? (t, to) => {
                 const ids = x.items.map((i) => i.id); const from = ids.indexOf(t.id);
                 const at = to === 'top' ? 0 : to === 'bottom' ? ids.length - 1 : Math.max(0, Math.min(ids.length - 1, from + (to === 'up' ? -1 : 1)));
                 if (at !== from) onReorder(arrayMove(ids, from, at));
@@ -551,8 +562,11 @@ function SortableRow({ t, onPatch, onAck, onMove }: { t: Task; onPatch: (t: Task
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   const { onMouseDown, onTouchStart } = (listeners ?? {}) as Record<string, any>;
   return (
-    <div ref={setNodeRef} onTouchStart={onTouchStart} style={{ transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined, transition }}
-      className={cx(isDragging && 'relative z-50 scale-[1.01] opacity-95 shadow-pop ring-2 ring-accent-500/40')} data-sortable-row={t.id}>
+    // 삼성 WebView: 꾹 누르는 동안 글자 선택·길게 누르기 메뉴가 먼저 잡혀 끌기가 취소되던 문제 → 선택·메뉴 막기,
+    // 끌기가 시작된 뒤에만 touch-action:none (그 전에는 세로 스크롤 그대로)
+    <div ref={setNodeRef} onTouchStart={onTouchStart} onContextMenu={(e) => e.preventDefault()}
+      style={{ transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined, transition, touchAction: isDragging ? 'none' : 'pan-y', WebkitTouchCallout: 'none' }}
+      className={cx('select-none', isDragging && 'relative z-50 scale-[1.02] opacity-95 shadow-pop ring-2 ring-accent-500/40')} data-sortable-row={t.id} data-dragging={isDragging ? '1' : undefined}>
       <ListRow t={t} onPatch={onPatch} onAck={onAck} onMove={onMove} handle={
         <button type="button" {...attributes} onMouseDown={onMouseDown} className="hidden w-4 shrink-0 cursor-grab touch-none text-slate-300 hover:text-slate-500 sm:inline-flex" aria-label={`${t.title} 끌어서 순서 바꾸기`} data-testid="drag-handle"><GripVertical className="size-4" /></button>
       } />
@@ -598,7 +612,7 @@ function MyGroupedList({ tasks, onPatch, onAcked, top }: { tasks: Task[]; onPatc
   );
 }
 
-function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortable, onMove }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean; add?: React.ReactNode; tail?: React.ReactNode; sortable?: boolean; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void }) {
+function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortable, onMove, dragHint }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean; add?: React.ReactNode; tail?: React.ReactNode; sortable?: boolean; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void; dragHint?: boolean }) {
   const openTask = useContext(OpenTaskCtx);
   if (!tasks.length && tail) return <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list">{add}{tail}</div>;
   if (!tasks.length && add) return <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list">{add}<p className="px-4 py-6 text-center text-sm text-ink-3">조건에 맞는 업무가 없습니다</p></div>;
@@ -621,14 +635,14 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortab
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((t) => <SortableRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} onMove={onMove} />)}
         </SortableContext>
-      ) : tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} handle={<span className="hidden w-4 shrink-0 sm:inline-flex" />} />)}
+      ) : tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} dragHint={dragHint} handle={<span className="hidden w-4 shrink-0 sm:inline-flex" />} />)}
       {tail}
     </div>
   );
 }
 
 /** 목록 행. 모바일에서는 오른쪽으로 밀면 완료(또는 검토 요청), 왼쪽으로 밀면 보류 */
-function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; handle?: React.ReactNode; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void }) {
+function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; handle?: React.ReactNode; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void; dragHint?: boolean }) {
   // 방금 추가한 업무는 2초 강조
   const [fresh, setFresh] = useState(() => isFresh(t.id));
   useEffect(() => { if (!fresh) return; const h = setTimeout(() => setFresh(false), 2000); return () => clearTimeout(h); }, [fresh]);
@@ -638,6 +652,13 @@ function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: 
   // 밀어서 완료: 기본 꺼짐(설정에서 켬). 켜도 오른쪽으로 행 너비 45% 이상 밀고 손을 뗄 때만, 세로 스크롤 중엔 무시. 보류 밀기는 없앰(실수로 업무가 사라지던 원인)
   const swipeOn = useSwipeSetting();
   const rowOpen = useRowOpen(t.id, useContext(OpenTaskCtx));
+  // 정렬이 "직접 순서"가 아니면 끌 수 없음 → 꾹 누르면 안내
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hintStart = (e: React.PointerEvent) => {
+    if (!dragHint || e.pointerType !== 'touch') return;
+    hintTimer.current = setTimeout(() => { toast.info('순서를 바꾸려면 정렬을 "직접 순서"로 바꾸세요'); }, 500);
+  };
+  const hintStop = () => { if (hintTimer.current) { clearTimeout(hintTimer.current); hintTimer.current = null; } };
   const right = nextStatusOnCheck(t, user.role);
   const swipe = async (to: TaskStatus) => {
     const before = t.status;
@@ -651,6 +672,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: 
         </div>
       )}
       <div tabIndex={0} data-row={t.id} data-task-id={t.id} {...rowOpen}
+        onPointerDown={hintStart} onPointerUp={hintStop} onPointerCancel={hintStop} onPointerLeave={hintStop}
         style={dx ? { transform: `translateX(${dx}px)` } : undefined}
         onTouchStart={(e) => { if (!swipeOn) return; start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, lock: null, w: (e.currentTarget as HTMLElement).offsetWidth }; }}
         onTouchMove={(e) => {

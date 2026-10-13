@@ -30,7 +30,7 @@ export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {
   const scope = scopeSchema.parse(raw);
   const i = eventInput.partial().parse(raw);
   const out: Record<string, unknown> = await updateEvent(user, params.id, i, scope);
-  if (i.alsoTask) out.taskId = (await createSyncTask(user, out.id as string, i.taskAssigneeId)).id; // 기존 일정에 "업무에도 추가"
+  if (i.alsoTask) out.taskId = (await createSyncTask(user, out.id as string, i.taskAssigneeId, { requestedById: i.taskRequestedById, priority: i.taskPriority })).id; // 기존 일정에 "업무에도 추가"
   after(() => dispatchPending().catch(() => {}));
   after(() => syncCalendarSoon(null, params.id).catch(() => {}));
   return out;

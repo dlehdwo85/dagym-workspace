@@ -27,6 +27,8 @@ export const eventInput = z.object({
   /** V5 "업무에도 추가": 같은 제목·날짜의 업무를 만들고 날짜를 서로 맞춤. 담당(없으면 나) */
   alsoTask: z.boolean().optional(),
   taskAssigneeId: zUuid.nullable().optional(),
+  taskRequestedById: zUuid.nullable().optional(),
+  taskPriority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
   version: z.number().int().optional(),
 });
 export type EventInput = z.infer<typeof eventInput>;
@@ -239,7 +241,7 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   });
   if (i.alsoTask) {
     const { createSyncTask } = await import('./eventtasks');
-    out.taskId = (await createSyncTask(u, out.id, i.taskAssigneeId)).id;
+    out.taskId = (await createSyncTask(u, out.id, i.taskAssigneeId, { requestedById: i.taskRequestedById, priority: i.taskPriority })).id;
   }
   return out;
 }

@@ -953,7 +953,7 @@ await step('V4 캘린더: 휴대폰 빈 칸 한 번 탭 → 빠른 등록 시트
   assert.equal(await mp.getByTestId('calendar').getByText('V4 탭 등록').count(), 0, '내 일정만');
   await mp.reload();
   await mp.getByTestId('calendar').waitFor();
-  assert.equal(await mp.getByTestId('people-filter').getByRole('button', { name: '내 일정' }).getAttribute('aria-pressed'), 'true', '필터 기억');
+  await mp.getByTestId('people-filter').locator('button[aria-pressed="true"]', { hasText: '내 일정' }).waitFor({ timeout: 5000 }); // 필터 기억(화면이 뜬 뒤 복원)
   await mp.getByTestId('people-filter').getByRole('button', { name: '김대표 일정' }).click();
   await mp.getByTestId('calendar').getByText('V4 탭 등록').first().waitFor();
   await mp.screenshot({ path: `${SHOTS}/65-calendar-people.png` });
@@ -983,19 +983,25 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   const slot = await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().boundingBox();
   await owner.mouse.click(col.x + col.width / 2, slot.y + 4);
   const q = owner.getByTestId('quick-create');
-  await q.getByRole('tab', { name: '업무' }).click();
+  assert.equal(await q.getByRole('tab').count(), 0, '탭 없이 일정 양식 하나(V6)');
   await q.getByLabel('빠른 입력 제목').fill('계약서 최종본 확인');
+  await q.getByTestId('quick-also-task').check({ force: true }); // 업무에도 추가 스위치 → 담당·지시·우선 칸
+  await q.getByTestId('quick-task-fields').getByLabel('업무 우선순위').selectOption('high');
   await q.getByLabel('빠른 입력 제목').press('Enter');
-  await owner.getByText('업무를 만들었습니다').waitFor();
-  const item = owner.locator('.fc-event.task-item', { hasText: '계약서 최종본 확인' }).first();
-  await item.waitFor();
-  const [t] = await sql`select id, to_char(due_date, 'YYYY-MM-DD') as due, to_char(due_time, 'HH24:MI') as tm from tasks where title = '계약서 최종본 확인'`;
-  assert.equal(t.due, d); assert.equal(t.tm, '11:00');
+  await owner.getByText(/업무에도 추가했습니다/).first().waitFor();
+  const [t] = await sql`select id, priority, to_char(due_date, 'YYYY-MM-DD') as due, to_char(due_time, 'HH24:MI') as tm from tasks where title = '계약서 최종본 확인' and deleted_at is null`;
+  assert.equal(t.due, d); assert.equal(t.tm, '11:00'); assert.equal(t.priority, 'high');
+  await owner.locator('[data-ev-block]', { hasText: '계약서 최종본 확인' }).first().waitFor();
   await owner.screenshot({ path: `${SHOTS}/57-calendar-google.png` });
-  await item.getByRole('button', { name: '계약서 최종본 확인 완료' }).click();
+  // 업무 마감 칩 체크로 완료 (연결 안 된 업무)
+  const lone = (await ctx.owner.ok('POST', '/api/tasks', { title: '체크 완료 시험', assigneeId: ctx.ownerId, dueDate: d, dueTime: '07:00', approvalRequired: false })).id;
+  await owner.reload();
+  const item = owner.locator('.fc-event.task-item', { hasText: '체크 완료 시험' }).first();
+  await item.waitFor();
+  await item.getByRole('button', { name: '체크 완료 시험 완료' }).click();
   await owner.getByText('완료했습니다').waitFor();
   await owner.waitForTimeout(500);
-  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t.id}`)).task.status, 'done');
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${lone}`)).task.status, 'done');
   // 일정 탭 빠른 입력
   const lane15 = owner.locator('td.fc-timegrid-slot-lane[data-time="15:00:00"]').first();
   await lane15.evaluate((el) => el.scrollIntoView({ block: 'center' })); // 화면 아래 안내(토스트)에 가리지 않게
@@ -1089,15 +1095,50 @@ await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 �
   await mc.close();
 });
 
-await step('V5 휴대폰: 홈 "+일정" → 빠른 등록·업무에도 추가 → 주 보기 블록 제목·업무 연동 → 삭제 시 연결 업무도', async () => {
+await step('V6-2 휴대폰(Android Chrome 터치): 행을 0.5초 꾹 눌러 위로 끌면 순서 저장, 길게 누르기 메뉴·상세 열림 없음', async () => {
+  const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  const m = await mc.newPage();
+  await m.goto(BASE + '/tasks');
+  const g = m.getByTestId('task-groups').locator(`[data-group="${ctx.ownerId}"]`);
+  await g.locator('[data-sortable-row]').nth(1).waitFor();
+  const ids = await g.locator('[data-sortable-row]').evaluateAll((els) => els.map((e) => e.getAttribute('data-sortable-row')));
+  const a = await g.locator('[data-sortable-row]').nth(0).boundingBox();
+  const b = await g.locator('[data-sortable-row]').nth(1).boundingBox();
+  let menus = 0;
+  await m.exposeFunction('wosCtx', () => { menus++; });
+  await m.evaluate(() => document.addEventListener('contextmenu', (e) => { if (!e.defaultPrevented) window.wosCtx?.(); }));
+  const cdp = await mc.newCDPSession(m);
+  // V6 12번: 휴대폰 "+ 업무 추가" 버튼 → 업무 등록 시트가 열리고 제목 칸에 바로 초점(키보드)
+  await m.getByTestId('add-task-top').tap();
+  const sheetDlg = m.getByRole('dialog', { name: '업무 등록' });
+  await sheetDlg.waitFor();
+  await m.waitForFunction(() => document.activeElement?.getAttribute('placeholder') === '무엇을 해야 하나요?');
+  await m.keyboard.press('Escape');
+  await sheetDlg.waitFor({ state: 'detached' });
+  const pt = (x, y) => ({ touchPoints: [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }] });
+  const x = b.x + b.width * 0.5, y0 = b.y + b.height / 2;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', ...pt(x, y0) });
+  await m.waitForTimeout(600); // 꾹 누르기
+  for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', ...pt(x, y0 - ((y0 - (a.y + 4)) * i) / 8) }); await m.waitForTimeout(40); }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await m.waitForTimeout(800);
+  assert.equal(await m.getByTestId('task-panel').count(), 0, '꾹 눌러 끈 뒤 상세가 열리지 않음');
+  assert.equal(menus, 0, '길게 누르기 메뉴 없음');
+  const after = await sql`select id from tasks where id = any(${ids.slice(0, 2)}::uuid[]) order by sort_order`;
+  assert.deepEqual(after.map((r) => r.id), [ids[1], ids[0]], '두 번째 업무가 맨 위로');
+  await mc.close();
+});
+
+await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에도 추가 → 주 보기 블록 제목·업무 연동 → 삭제 시 연결 업무도', async () => {
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   const m = await mc.newPage();
   await m.goto(BASE + '/');
-  await m.getByTestId('home-create').getByRole('link', { name: '일정' }).click();
+  assert.equal(await m.getByTestId('home-create').count(), 0, '홈에 따로 만들기 버튼 없음(V6)');
+  await m.locator(`[data-day="${today}"]`).first().click({ position: { x: 20, y: 30 } }); // 이번 주의 오늘 줄 → 빠른 등록
   const sheet = m.getByTestId('quick-create');
   await sheet.waitFor();
   await sheet.getByLabel('빠른 입력 제목').fill('V5 홈에서 만든 거래처 미팅 준비');
-  await sheet.getByTestId('quick-also-task').check();
+  await sheet.getByTestId('quick-also-task').check({ force: true });
   await sheet.getByLabel('빠른 입력 제목').press('Enter');
   await m.getByText('일정을 저장하고 업무에도 추가했습니다').waitFor();
   const [t] = await sql`select id, to_char(due_date,'YYYY-MM-DD') d, to_char(due_time,'HH24:MI') tm from tasks where title = 'V5 홈에서 만든 거래처 미팅 준비' and deleted_at is null`;
@@ -1114,8 +1155,13 @@ await step('V5 휴대폰: 홈 "+일정" → 빠른 등록·업무에도 추가 �
   const block = m.locator('[data-ev-block]', { hasText: 'V5 홈에서 만든' }).first();
   await block.waitFor();
   assert.ok(await block.getByLabel('업무와 연결').count(), '연결 표시 ✓');
-  assert.ok((await m.locator('[data-task-item]', { hasText: 'V5 마감 제목이 길어도' }).first().innerText()).includes('두 줄로'), '마감 업무 제목이 보임');
-  assert.equal(await m.locator('[data-task-item]', { hasText: 'V5 홈에서 만든' }).count(), 0, '연결 업무는 블록으로만(중복 표시 없음)');
+  const chip = m.locator(`[data-task-item][title="V5 마감 제목이 길어도 두 줄로 보여야 함"]`).first();
+  assert.ok((await chip.innerText()).startsWith('V5 마감'), '마감 업무 제목이 보임(주 보기는 앞 6자)');
+  const cb = await chip.boundingBox();
+  assert.ok(cb.width > 20 && cb.height >= 10, `마감 칩에 글자 칸이 있음 ${cb.width}x${cb.height}`);
+  await chip.scrollIntoViewIfNeeded();
+  await m.screenshot({ path: `${SHOTS}/69-mobile-week-due-chips-390.png` });
+  assert.equal(await m.locator('[data-task-item][title^="V5 홈에서 만든"]').count(), 0, '연결 업무는 블록으로만(중복 표시 없음)');
   assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '주 보기 가로 넘침 없음(390)');
   await block.scrollIntoViewIfNeeded();
   await m.screenshot({ path: `${SHOTS}/67-mobile-week-v5-390.png` });

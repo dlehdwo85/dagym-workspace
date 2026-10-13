@@ -16,7 +16,7 @@ import { CalendarPlus, Check, ChevronDown, ChevronLeft, ChevronRight, CircleChec
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
-import { MultiUserSelect, RecurSelect, ReminderEditor } from '@/components/pickers';
+import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
 import { EVENT_KIND_LABEL } from '@/lib/types';
 
@@ -122,7 +122,10 @@ export default function CalendarPage() {
     const id = sp.get('event'); if (id) setEditor({ id });
     if (sp.get('new') === '1') { setEditor({ draft: { date: seoulDate(new Date()) } }); router.replace('/calendar'); }
     // V5 홈·+ 버튼의 "일정": 다음 정각 1시간으로 빠른 등록 시트
-    if (sp.get('quick') === '1') { const d = seoulDate(new Date()), h = nextHour(); setQuick({ x: 16, y: 120, date: d, start: h.start, end: h.end, endDate: d, allDay: false }); router.replace('/calendar'); }
+    if (sp.get('quick') === '1') {
+      const want = sp.get('date'); const d = want && /^\d{4}-\d{2}-\d{2}$/.test(want) ? want : seoulDate(new Date()); const h = nextHour();
+      setQuick({ x: 16, y: 120, date: d, start: h.start, end: h.end, endDate: d, allDay: false }); router.replace(`/calendar?date=${d}`);
+    }
   }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
   const [preview, setPreview] = useState<{ ev: any; x: number; y: number } | null>(null);
 
@@ -338,6 +341,11 @@ export default function CalendarPage() {
               const p = arg.event.extendedProps;
               if (p.type === 'task') {
                 const t = p.task;
+                // 휴대폰 주(7일)·월 보기는 칸이 좁아 체크·시각을 빼고 제목만(6자, 2줄). 누르면 상세. 일·3일 보기는 전체 제목
+                if (mobile && (arg.view.type === 'timeGridWeek' || arg.view.type === 'dayGridMonth')) {
+                  const name = t.title.length > 6 ? `${t.title.slice(0, 6)}…` : t.title;
+                  return <div className={cx('line-clamp-2 whitespace-normal break-all px-px text-[10px] font-semibold leading-[1.15]', t.status === 'done' && 'line-through')} data-task-item={t.id} title={t.title}>{name}</div>;
+                }
                 return (
                   <div className="flex min-w-0 items-start gap-1 overflow-hidden px-0.5 text-[12px] max-sm:text-[11px]" data-task-item={t.id}>
                     <button type="button" data-task-check onClick={(e) => { e.stopPropagation(); completeTask(t); }} aria-label={`${t.title} ${t.status === 'done' ? '완료 취소' : '완료'}`}
@@ -487,7 +495,9 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
   const [alsoTask, setAlsoTask] = useState(false);
   const quickForm = useRef<HTMLFormElement>(null);
   const { user } = useSession();
-  const [tab, setTab] = useState<'event' | 'task'>('event');
+  const [taskWho, setTaskWho] = useState<string | null>(null);
+  const [taskReq, setTaskReq] = useState<string | null>(null);
+  const [taskPrio, setTaskPrio] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
   const [title, setTitle] = useState('');
   const editable = calendars.filter((c) => c.perms?.edit);
   const [calendarId, setCalendarId] = useState(editable.find((c) => c.type === 'personal')?.id ?? editable[0]?.id ?? '');
@@ -500,15 +510,12 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
     if (!title.trim()) return;
     setBusy(true);
     try {
-      if (tab === 'event') {
-        const s = allDay ? `${date}T00:00:00+09:00` : `${date}T${start}:00+09:00`;
-        const en = allDay ? `${addDays(endDate ?? date, 1)}T00:00:00+09:00` : `${endDate ?? date}T${end}:00+09:00`;
-        await api('/api/events', { body: { calendarId, title: title.trim(), start: s, end: en, allDay, isPrivate: priv, rrule, alsoTask } });
-        toast.ok(alsoTask ? '일정을 저장하고 업무에도 추가했습니다' : '일정을 저장했습니다');
-      } else {
-        await api('/api/tasks', { body: { title: title.trim(), assigneeId: user.id, dueDate: date, dueTime: allDay ? null : start, approvalRequired: false, recurrenceRule: rrule } });
-        toast.ok('업무를 만들었습니다 — 캘린더에 체크로 표시됩니다');
-      }
+      // 하나의 일정 양식 + "업무에도 추가" 스위치 (V6 3번)
+      const s = allDay ? `${date}T00:00:00+09:00` : `${date}T${start}:00+09:00`;
+      const en = allDay ? `${addDays(endDate ?? date, 1)}T00:00:00+09:00` : `${endDate ?? date}T${end}:00+09:00`;
+      await api('/api/events', { body: { calendarId, title: title.trim(), start: s, end: en, allDay, isPrivate: priv, rrule, alsoTask,
+        ...(alsoTask ? { taskAssigneeId: taskWho ?? user.id, taskRequestedById: taskReq ?? user.id, taskPriority: taskPrio } : {}) } });
+      toast.ok(alsoTask ? `일정을 저장하고 업무에도 추가했습니다${(taskWho ?? user.id) === user.id ? ' — 본인 업무는 마감 때 알려 드립니다' : ' — 담당자에게 알림을 보냈습니다'}` : '일정을 저장했습니다');
       onSaved();
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
@@ -518,33 +525,39 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
       <div className="fixed inset-0 z-40" onClick={() => (title.trim() ? quickForm.current?.requestSubmit() : onClose())} data-testid="quick-outside" />
       <form ref={quickForm} role="dialog" aria-label="빠른 입력" onSubmit={save} className={cx('fixed z-50 animate-fade-up border border-line bg-white p-4 shadow-pop', sheet ? 'inset-x-0 bottom-0 rounded-t-2xl pb-[calc(var(--sab)+16px)]' : 'w-80 rounded-card')} style={sheet ? undefined : { left: x, top: y }} data-testid="quick-create"
         onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
-        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tab === 'event' ? '제목 추가' : '할 일 제목'} aria-label="빠른 입력 제목" enterKeyHint="done"
+        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="제목 추가" aria-label="빠른 입력 제목" enterKeyHint="done"
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); quickForm.current?.requestSubmit(); } }}
           className="w-full border-b-2 border-line pb-1.5 text-lg font-medium placeholder:text-ink-3 focus:border-accent-500 focus:outline-none" />
-        <div className="mt-3 flex gap-1" role="tablist">
-          {([['event', '일정'], ['task', '업무']] as const).map(([k, l]) => (
-            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-              className={cx('rounded-md px-3 py-1 text-sm font-medium', tab === k ? 'bg-accent-50 text-accent-700' : 'text-ink-2 hover:bg-slate-100')}>{l}</button>
-          ))}
-        </div>
-        <p className="mt-3 flex items-center gap-2 text-sm text-ink-2"><Clock className="size-4" />{tab === 'task' ? `마감 ${allDay ? fmtDateK(date) : `${fmtDateK(date)} ${fmtTime(`${date}T${start}:00+09:00`)}`}` : allDay ? when : fmtDateK(date)}</p>
+        <p className="mt-3 flex items-center gap-2 text-sm text-ink-2"><Clock className="size-4" />{allDay ? when : fmtDateK(date)}</p>
         {!allDay && start && end && (endDate ?? date) === date && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="quick-times">
             <TimeSelect label="시작 시각" value={start} onChange={(v) => { setEnd(shiftEnd(start, end, v)); setStart(v); }} />
-            {tab === 'event' && <><span className="text-ink-3">–</span><TimeSelect label="종료 시각" value={end} from={start} onChange={setEnd} /></>}
+            <span className="text-ink-3">–</span><TimeSelect label="종료 시각" value={end} from={start} onChange={setEnd} />
           </div>
         )}
-        {tab === 'event' ? (
-          <select className={cx(inputCls, 'mt-2 h-9')} value={calendarId} onChange={(e) => setCalendarId(e.target.value)} aria-label="캘린더">
-            {editable.map((c) => <option key={c.id} value={c.id}>{c.type === 'personal' ? '내 일정' : c.name}</option>)}
-          </select>
-        ) : <p className="mt-2 text-xs text-ink-3">담당: 나 · 관리자 확인 없음 — 업무 캘린더에 체크로 표시됩니다</p>}
+        <select className={cx(inputCls, 'mt-2 h-9')} value={calendarId} onChange={(e) => setCalendarId(e.target.value)} aria-label="캘린더">
+          {editable.map((c) => <option key={c.id} value={c.id}>{c.type === 'personal' ? '내 일정' : c.name}</option>)}
+        </select>
         {/* V5 반복(일정·업무 모두) — 반복 일정 + 업무에도 추가 = 같은 규칙의 반복 업무 */}
         <div className="mt-2 [&_select]:h-9" data-testid="quick-repeat"><RecurSelect value={rrule} onChange={setRrule} anchorDate={date} /></div>
-        {tab === 'event' && <label className="mt-2 flex items-center gap-2 text-sm font-medium text-ink"><input type="checkbox" className="size-4 accent-brand-600" checked={alsoTask} onChange={(e) => setAlsoTask(e.target.checked)} data-testid="quick-also-task" />업무에도 추가 <span className="text-xs font-normal text-ink-3">(날짜를 바꾸면 서로 따라감)</span></label>}
-        {tab === 'event' && <label className="mt-2 flex items-center gap-2 text-sm text-ink-2"><input type="checkbox" className="size-4" checked={priv} onChange={(e) => setPriv(e.target.checked)} />비공개 (다른 사람에게는 &ldquo;바쁨&rdquo;으로만)</label>}
+        <label className="mt-2 flex cursor-pointer items-center gap-2.5 text-sm font-medium text-ink">
+          <input type="checkbox" role="switch" className="peer sr-only" checked={alsoTask} onChange={(e) => setAlsoTask(e.target.checked)} data-testid="quick-also-task" aria-label="업무에도 추가" />
+          <span aria-hidden className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:bg-brand-600 peer-checked:after:translate-x-4" />
+          업무에도 추가 <span className="text-xs font-normal text-ink-3">(날짜를 바꾸면 서로 따라감)</span>
+        </label>
+        {alsoTask && (
+          <div className="mt-2 grid grid-cols-2 gap-1.5 rounded-input bg-slate-50 p-2 text-xs" data-testid="quick-task-fields">
+            <label className="col-span-2 flex items-center gap-2"><span className="w-10 shrink-0 text-ink-2">담당</span><UserSelect className="h-8 flex-1" value={taskWho ?? user.id} onChange={setTaskWho} ariaLabel="업무 담당자" /></label>
+            <label className="col-span-2 flex items-center gap-2"><span className="w-10 shrink-0 text-ink-2">지시</span><UserSelect className="h-8 flex-1" value={taskReq ?? user.id} onChange={setTaskReq} ariaLabel="업무 지시자" /></label>
+            <label className="col-span-2 flex items-center gap-2"><span className="w-10 shrink-0 text-ink-2">우선</span>
+              <select className="h-8 flex-1 rounded-input border border-line bg-white px-2" value={taskPrio} onChange={(e) => setTaskPrio(e.target.value as typeof taskPrio)} aria-label="업무 우선순위">
+                <option value="low">낮음</option><option value="normal">보통</option><option value="high">높음</option><option value="urgent">긴급</option>
+              </select></label>
+          </div>
+        )}
+        {<label className="mt-2 flex items-center gap-2 text-sm text-ink-2"><input type="checkbox" className="size-4" checked={priv} onChange={(e) => setPriv(e.target.checked)} />비공개 (다른 사람에게는 &ldquo;바쁨&rdquo;으로만)</label>}
         <div className="mt-4 flex items-center justify-between">
-          {tab === 'event' ? <button type="button" className="text-sm font-medium text-ink-2 hover:text-ink" onClick={() => onMore({ date, allDay, start: start ?? '09:00', end: end ?? '10:00', endDate: endDate ?? date, title, calendarId, isPrivate: priv, rrule, alsoTask })}>옵션 더보기</button> : <span />}
+          {<button type="button" className="text-sm font-medium text-ink-2 hover:text-ink" onClick={() => onMore({ date, allDay, start: start ?? '09:00', end: end ?? '10:00', endDate: endDate ?? date, title, calendarId, isPrivate: priv, rrule, alsoTask })}>옵션 더보기</button>}
           <span className="text-xs text-ink-3">{busy ? '저장 중…' : 'Enter 또는 바깥을 누르면 저장'}</span>
         </div>
       </form>
