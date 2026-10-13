@@ -185,7 +185,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           </div>
         </aside>
 
-        <div className="min-w-0 flex-1 pb-24 sm:pb-0">
+        <div className="min-w-0 flex-1 pb-[calc(6rem+var(--sab))] sm:pb-0">
           {/* 상단 바 (데스크톱) */}
           <header className="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b border-line bg-white/90 px-5 backdrop-blur sm:flex">
             <button onClick={() => setPalette(true)} data-testid="open-palette"
@@ -243,18 +243,21 @@ export function AppShell({ session, children }: { session: Sess; children: React
             </div>
           )}
           {/* 상단 바 (모바일) */}
-          <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-line bg-white/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:hidden">
-            <span className="flex items-center gap-2 text-sm font-bold text-brand-700"><img src="/icon-192.png" alt="" className="size-6 rounded" />워크인</span>
-            <span className="flex items-center gap-1">
-              <button onClick={() => setPalette(true)} className="inline-flex size-9 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-5" /></button>
-              <button onClick={() => setMore(true)} className="inline-flex size-9 items-center justify-center rounded-full active:bg-slate-100" aria-label="메뉴 더보기"><Avatar id={session.user.id} name={session.user.name} size={28} /></button>
-            </span>
+          {/* 머리줄은 상태바 높이만큼 아래로 (고정 높이 안에서 눌리지 않게 높이는 내용 줄에만) */}
+          <header className="sticky top-0 z-30 border-b border-line bg-white/95 pt-[var(--sat)] backdrop-blur sm:hidden" data-testid="mobile-header">
+            <div className="flex h-12 items-center justify-between px-3">
+              <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon-192.png" alt="" className="size-7 rounded" />워크인</span>
+              <span className="flex items-center">
+                <button onClick={() => setPalette(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-[22px]" /></button>
+                <button onClick={() => setMore(true)} className="inline-flex size-11 items-center justify-center rounded-full active:bg-slate-100" aria-label="메뉴 더보기"><Avatar id={session.user.id} name={session.user.name} size={30} /></button>
+              </span>
+            </div>
           </header>
           <main className="mx-auto max-w-7xl p-3 sm:p-6">{children}</main>
         </div>
 
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 알림 */}
-        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
+        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
           {MOBILE_TABS.slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}
           <div className="flex items-center justify-center">
             <button onClick={() => setQuick(true)} aria-label="업무 등록" className="-mt-5 flex size-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-pop ring-4 ring-white active:scale-95">
@@ -266,7 +269,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
         {more && (
           <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setMore(false)}>
-            <div className="absolute bottom-0 left-0 right-0 animate-fade-up rounded-t-2xl bg-white p-3 pb-[calc(env(safe-area-inset-bottom)+16px)]" onClick={(e) => e.stopPropagation()}>
+            <div className="absolute bottom-0 left-0 right-0 animate-fade-up rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()}>
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
               <div className="flex items-center gap-3 px-3 py-2">
                 <Avatar id={session.user.id} name={session.user.name} size={40} />
@@ -313,8 +316,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
 function TabLink({ n, on, badge }: { n: NavItem; on: boolean; badge?: number }) {
   return (
-    <Link href={n.href} className={cx('relative flex flex-col items-center gap-0.5 py-2 text-[11px]', on ? 'font-semibold text-brand-700' : 'text-ink-3')}>
-      <n.icon className="size-[22px]" strokeWidth={on ? 2.3 : 1.8} aria-hidden />{n.label}
+    <Link href={n.href} className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs', on ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
+      <n.icon className="size-6" strokeWidth={on ? 2.4 : 1.8} aria-hidden />{n.label}
       {!!badge && <span className="absolute left-1/2 top-1 ml-2 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{badge > 99 ? '99+' : badge}</span>}
     </Link>
   );

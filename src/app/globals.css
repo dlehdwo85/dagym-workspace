@@ -4,7 +4,7 @@
 
 :root {
   --canvas: #f7f8fa; --surface: #ffffff; --line: #e5e7eb;
-  --ink: #111827; --ink-2: #4b5563; --ink-3: #9ca3af;
+  --ink: #111827; --ink-2: #4b5563; --ink-3: #6b7280; /* 흰 바탕 대비 4.8:1 (WCAG AA) */
 }
 html { -webkit-text-size-adjust: 100%; }
 body { background: var(--canvas); color: var(--ink); font-feature-settings: 'ss06'; letter-spacing: -0.005em; }
@@ -47,6 +47,8 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 @media (max-width: 640px) { .fc .fc-list-event-time { width: 5.5rem; } .fc .fc-list-day-side-text { float: none; display: block; } .fc .fc-toolbar-title { font-size: 1rem; } }
 /* 앱 셸 안전장치: 혹시 남은 넓은 요소가 있어도 문서 전체가 좌우로 밀리지 않게 */
 .app-shell { overflow-x: clip; }
+/* 앱(Android edge-to-edge·iOS 노치): Capacitor SystemBars 가 --safe-area-inset-* 를 넣어 준다. 없으면 브라우저 env() */
+:root { --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)); }
 
 /* QR 인쇄: 인쇄 영역만 출력 */
 @media print {

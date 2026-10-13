@@ -18,6 +18,9 @@ const config: CapacitorConfig = {
   ios: { contentInset: 'automatic', limitsNavigationsToAppBoundDomains: false },
   plugins: {
     FirebaseMessaging: { presentationOptions: ['badge', 'sound', 'alert'] },
+    // Android 15+ edge-to-edge: 상태바·내비게이션 바 높이를 CSS 변수(--safe-area-inset-*)로 넣어 머리줄·하단 탭이 겹치지 않게.
+    // style LIGHT = 밝은 바탕용(어두운 상태바 글자) — 앱 머리줄이 흰색
+    SystemBars: { insetsHandling: 'css', style: 'LIGHT', initialViewportFitValueHint: 'cover' },
   },
 };
 export default config;

@@ -840,6 +840,14 @@ await step('W-0 휴대폰 360·375·390·430px 모든 주요 화면 좌우 넘�
   const { checkWidths } = await import('./widths.mjs');
   const bad = await checkWidths(browser, await desk.storageState());
   assert.deepEqual(bad, []);
+  // 앱(Android edge-to-edge): SystemBars 가 넣는 --safe-area-inset-top 만큼 머리줄 내용이 내려가 상태바와 겹치지 않음
+  const mc = await browser.newContext({ viewport: { width: 390, height: 800 }, isMobile: true, hasTouch: true, storageState: await desk.storageState() });
+  const mp = await mc.newPage();
+  await mp.goto(BASE + '/');
+  await mp.evaluate(() => document.documentElement.style.setProperty('--safe-area-inset-top', '32px'));
+  const top = await mp.getByTestId('mobile-header').locator('> div').evaluate((el) => el.getBoundingClientRect().top);
+  assert.equal(Math.round(top), 32, '상태바 높이만큼 내려감');
+  await mc.close();
 });
 await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 → 업무가 체크로 표시 → 체크로 완료, 미니 달력·업무 캘린더', async () => {
   const d = addDays(today, 2);
