@@ -49,15 +49,20 @@ async function dueNotifications() {
         dedupeKey: `due_today:${t.id}:${today}` })).length;
     }
   }
-  // V6 10번: 마감 시각이 있는 업무는 1시간 전에 한 번 더 (본인이 만든 본인 업무도 받음)
-  const hourLeft = await sql<{ id: string; title: string; assignee_id: string; due_date: string; due_time: string }[]>`
-    select t.id, t.title, t.assignee_id, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time from tasks t join users u on u.id = t.assignee_id
-    where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_time is not null and u.status = 'active'
-      and ((t.due_date + t.due_time) at time zone 'Asia/Seoul') between now() and now() + interval '65 minutes'`;
+  // V8 8번 미리 알림: 시간 있는 업무는 업무별 알림(최대 3개) 또는 각자 기본값(60분 전), 날짜만 있는 업무는 업무별 알림을 정했을 때만(당일 09시 기준)
+  // 정기 실행 사이에 지나간 알림도 마감 전이면 보낸다(분 단위 정확도는 정기 실행 주기에 따름 — NEXT_ACTION 참고)
+  const hourLeft = await sql<{ id: string; title: string; assignee_id: string; due_date: string; due_time: string | null; m: number }[]>`
+    select t.id, t.title, t.assignee_id, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time, r.m
+    from tasks t join users u on u.id = t.assignee_id left join user_settings s on s.user_id = t.assignee_id
+    cross join lateral unnest(coalesce(t.reminder_minutes, case when t.due_time is not null then array[coalesce(s.task_reminder_minutes, 60)] else array[]::int[] end)) as r(m)
+    where t.deleted_at is null and t.status not in ('done','on_hold') and u.status = 'active' and t.due_date is not null
+      and ((t.due_date + coalesce(t.due_time, time '09:00')) at time zone 'Asia/Seoul') > now()
+      and ((t.due_date + coalesce(t.due_time, time '09:00')) at time zone 'Asia/Seoul') - make_interval(mins => r.m) <= now()`;
   for (const t of hourLeft) {
-    n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `1시간 뒤 마감: ${t.title}`,
-      body: `오늘 ${t.due_time}까지`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
-      dedupeKey: `due_hour:${t.id}:${t.due_date}:${t.due_time}` })).length;
+    const left = t.m >= 1440 ? `${Math.round(t.m / 1440)}일 뒤` : t.m >= 60 ? `${Math.round(t.m / 60)}시간 뒤` : t.m > 0 ? `${t.m}분 뒤` : '지금';
+    n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `${left} 마감: ${t.title}`,
+      body: `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
+      dedupeKey: `due_rem:${t.id}:${t.due_date}:${t.due_time ?? ''}:${t.m}` })).length;
   }
   return { dueSoon: soon.length, overdue: over.length, dueToday: dueToday.length, dueHour: hourLeft.length, created: n };
 }
@@ -154,7 +159,7 @@ export async function eventReminders(now = new Date()) {
       .filter((a) => a.response !== 'declined').map((a) => a.user_id);
     const people = [...new Set([...att, m.created_by, ...(m.cal_type === 'personal' && m.owner_user_id ? [m.owner_user_id] : [])])];
     const leads = await sql<{ id: string; lead: number }[]>`
-      select u.id, coalesce(s.event_reminder_minutes, 30) as lead from users u left join user_settings s on s.user_id = u.id
+      select u.id, coalesce(s.event_reminder_minutes, 10) as lead from users u left join user_settings s on s.user_id = u.id
       where u.id = any(${people}::uuid[]) and u.status = 'active'`;
     const custom: number[] | null = m.reminder_minutes ?? null; // 일정별 알림이 있으면 사용자 기본값 대신 적용
     // S-10 연결 업무 맥락 (제목 없이 건수만)

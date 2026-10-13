@@ -1,11 +1,13 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { LayoutTemplate } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from './client';
 import { Button, Field, Modal, cx, fmtMinutes, inputCls, toast, todayStr } from './ui';
 import { UserSelect } from './pickers';
-import { quickDues } from './TaskQuick';
+import { BellChip, RepeatChip, quickDues, voiceInput } from './TaskQuick';
+import { parseTaskText } from '@/lib/nlparse';
+import { PRIORITY_LABEL } from '@/lib/types';
+import { Mic, Sparkles } from 'lucide-react';
 import { TIMES, timeLabel } from './DateTimePickers';
 import { useSession } from './session';
 
@@ -19,8 +21,14 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   const { user, dir } = useSession();
   const router = useRouter();
   const projects = useApi<{ projects: any[] }>(open ? '/api/projects' : null);
-  const [showTpl, setShowTpl] = useState(false);
-  const templates = useApi<{ templates: any[] }>(open && showTpl ? '/api/templates' : null);
+  const templates = useApi<{ templates: any[] }>(open && !defaults?.parentId ? '/api/templates' : null);
+  // V8 3번: 위쪽 "템플릿에서 만들기" — 고르면 제목·마감(오프셋)·기본 담당·지시가 채워지고 체크리스트·하위 업무까지 만들어진다
+  const pickTpl = (id: string) => {
+    setTpl(id);
+    const t = templates.data?.templates.find((x) => x.id === id);
+    if (t) setF((x: any) => ({ ...x, title: x.title || t.payload.title || '', dueDate: t.payload.dueInDays !== undefined ? addDaysStr(todayStr(), t.payload.dueInDays) : x.dueDate,
+      assigneeId: t.payload.assigneeId ?? x.assigneeId, requestedById: t.payload.requestedById ?? x.requestedById }));
+  };
   const [f, setF] = useState<any>({});
   const [busy, setBusy] = useState(false);
   const [tpl, setTpl] = useState('');
@@ -31,8 +39,12 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
 
   useEffect(() => {
     if (open) {
-      setF({ title: '', multi: false, more: [], dueTime: '', assigneeId: defaults?.assigneeId ?? user.id, requestedById: user.id, dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? '' });
-      setTpl(''); setShowTpl(false);
+      // V8 9번: 마지막에 쓴 담당·지시·우선순위·프로젝트·알림을 기억(이 기기)
+      let last: any = {};
+      try { last = JSON.parse(localStorage.getItem('wos_quick_last') ?? '{}'); } catch {}
+      setF({ title: '', multi: false, more: [], dueTime: '', assigneeId: defaults?.assigneeId ?? last.assigneeId ?? user.id, requestedById: last.requestedById ?? user.id,
+        dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? last.projectId ?? '', priority: last.priority ?? 'normal', rrule: null, remind: last.remind ?? null });
+      setTpl('');
     }
   }, [open, defaults, user.id]);
 
@@ -41,6 +53,11 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   const avail = useApi<{ days: any[] }>(open && f.assigneeId && f.dueDate ? `/api/availability?userId=${f.assigneeId}&date=${f.dueDate}` : null, [f.assigneeId, f.dueDate]);
   const day = avail.data?.days?.[0];
   const who = dir.users.find((x) => x.id === f.assigneeId)?.name;
+  const parsed = (f.title ?? '').trim().length > 3 ? parseTaskText(f.title, dir.users, todayStr(), projects.data?.projects ?? []) : null;
+  const applyParsed = (p: NonNullable<typeof parsed>) => setF((x: any) => ({ ...x, title: p.title, ...(p.dueDate ? { dueDate: p.dueDate } : {}), ...(p.dueTime ? { dueTime: p.dueTime } : {}),
+    ...(p.assigneeId ? { assigneeId: p.assigneeId } : {}), ...(p.priority ? { priority: p.priority } : {}), ...(p.projectId ? { projectId: p.projectId } : {}), ...(p.rrule ? { rrule: p.rrule } : {}) }));
+  const [listening, setListening] = useState(false);
+  const voice = () => voiceInput(setListening, (text) => { const p = parseTaskText(text, dir.users, todayStr(), projects.data?.projects ?? []); applyParsed(p); toast.info(`들은 내용: "${text}"`); });
   const count = f.multi ? new Set([f.assigneeId, ...(f.more ?? [])].filter(Boolean)).size : 1;
 
   async function submit(e: React.FormEvent) {
@@ -51,12 +68,13 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
       let r: { id: string };
       if (tpl) {
         const unit = defaults?.orgUnitId ?? dir.users.find((u) => u.id === user.id)?.org_unit_ids?.[0] ?? dir.orgUnits[0]?.id;
-        r = await api(`/api/templates/${tpl}/apply`, { body: { title: f.title, orgUnitId: unit, projectId: f.projectId || null, assigneeId: f.assigneeId, dueDate: f.dueDate || undefined } });
+        r = await api(`/api/templates/${tpl}/apply`, { body: { title: f.title, orgUnitId: unit, projectId: f.projectId || null, assigneeId: f.assigneeId, requestedById: f.requestedById || undefined, dueDate: f.dueDate || undefined } });
       } else {
         r = await api('/api/tasks', {
           queueOffline: `업무 등록: ${f.title}`,
           body: {
-            title: f.title, assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || null, dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
+            title: f.title, assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
+            priority: f.priority ?? 'normal', recurrenceRule: f.rrule ?? null, reminderMinutes: f.remind ?? null,
             ...(count > 1 ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
             parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
             sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null,
@@ -64,6 +82,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           },
         });
       }
+      try { localStorage.setItem('wos_quick_last', JSON.stringify({ assigneeId: f.assigneeId, requestedById: f.requestedById, priority: f.priority, projectId: f.projectId, remind: f.remind })); } catch {}
       toast.ok(count > 1 ? `${count}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
       broadcastRefresh();
       if (keep && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setTpl(''); titleRef.current?.focus(); return; }
@@ -78,7 +97,34 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   return (
     <Modal open={open} onClose={onClose} title={defaults?.parentId ? '하위 업무 추가' : '업무 등록'}>
       <form onSubmit={submit} className="space-y-3" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget as HTMLFormElement).requestSubmit(); } }}>
-        <Field label="제목"><input ref={titleRef} autoFocus className={cx(inputCls, 'h-11 text-base')} value={f.title ?? ''} onChange={(e) => set('title')(e.target.value)} placeholder="무엇을 해야 하나요?" maxLength={200} /></Field>
+        {!defaults?.parentId && (templates.data?.templates.length ?? 0) > 0 && (
+          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" aria-label="템플릿에서 만들기" data-testid="tpl-chips">
+            <span className="shrink-0 self-center text-xs text-ink-2">템플릿</span>
+            {templates.data!.templates.map((t) => (
+              <button key={t.id} type="button" aria-pressed={tpl === t.id} onClick={() => (tpl === t.id ? setTpl('') : pickTpl(t.id))}
+                className={cx('shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium', tpl === t.id ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2')}>{t.personal ? '★ ' : ''}{t.name}</button>
+            ))}
+          </div>
+        )}
+        <Field label="제목">
+          <span className="flex items-center gap-1.5">
+            <input ref={titleRef} autoFocus className={cx(inputCls, 'h-11 text-base')} value={f.title ?? ''} onChange={(e) => set('title')(e.target.value)} placeholder="무엇을 해야 하나요?" maxLength={200} />
+            <button type="button" onClick={voice} aria-label="음성으로 입력" aria-pressed={listening} className={cx('flex size-11 shrink-0 items-center justify-center rounded-input border border-line', listening ? 'animate-pulse bg-red-500 text-white' : 'text-ink-2 hover:bg-slate-50')} data-testid="quick-voice"><Mic className="size-5" /></button>
+          </span>
+        </Field>
+        {/* V8 9번: "내일 3시 @김민수 !높음 #입찰 매주" 처럼 쓰면 알아봄 → 적용 */}
+        {parsed && parsed.matched.length > 0 && (
+          <button type="button" onClick={() => applyParsed(parsed)} className="-mt-1 inline-flex items-center gap-1.5 rounded-full bg-accent-50 px-2.5 py-1 text-xs font-medium text-accent-700 hover:bg-accent-100" data-testid="quick-nl-apply">
+            <Sparkles className="size-3.5" />인식: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName, parsed.priority && PRIORITY_LABEL[parsed.priority], parsed.projectName && `#${parsed.projectName}`, parsed.rrule && '반복'].filter(Boolean).join(' · ')} → 적용
+          </button>
+        )}
+        <div className="flex flex-wrap items-center gap-2 rounded-input bg-slate-50 px-2 py-1.5" data-testid="quick-chips">
+          <select className="min-h-8 rounded-md border border-line bg-white px-2 text-xs" value={f.priority ?? 'normal'} onChange={(e) => set('priority')(e.target.value)} aria-label="우선순위">
+            {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <RepeatChip value={f.rrule ?? null} anchorDate={f.dueDate || null} onChange={set('rrule')} />
+          <BellChip value={f.remind ?? null} onChange={set('remind')} />
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="담당자"><UserSelect ariaLabel="담당자" value={f.assigneeId} onChange={set('assigneeId')} /></Field>
           <Field label="지시자 (업무를 부여한 사람)"><UserSelect ariaLabel="지시자" placeholder="지시자 선택" value={f.requestedById} onChange={set('requestedById')} /></Field>
@@ -125,18 +171,6 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
             {who ?? '담당자'} · {f.dueDate} {day.holiday ? `공휴일(${day.holiday})` : day.away ? '휴가·출장' : !day.workday ? '쉬는 날' : `회의 ${fmtMinutes(day.meetingMinutes) || '없음'}, 남은 가용 ${fmtMinutes(day.freeMinutes) || '0분'}`}
           </p>
         )}
-        {!defaults?.parentId && (showTpl ? (
-          <Field label="템플릿에서 시작 (선택)">
-            <select className={inputCls} value={tpl} onChange={(e) => {
-              setTpl(e.target.value);
-              const t = templates.data?.templates.find((x) => x.id === e.target.value);
-              if (t) setF((x: any) => ({ ...x, title: x.title || t.payload.title || '', dueDate: x.dueDate || (t.payload.dueInDays !== undefined ? addDaysStr(todayStr(), t.payload.dueInDays) : '') }));
-            }}>
-              <option value="">빈 업무</option>
-              {templates.data?.templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </Field>
-        ) : <button type="button" onClick={() => setShowTpl(true)} className="inline-flex items-center gap-1 text-xs font-medium text-ink-2 hover:text-ink"><LayoutTemplate className="size-3.5" />템플릿에서 시작</button>)}
         {/* 하단 고정 저장·취소 (휴대폰 키보드 위에서도 보이게), Ctrl+Enter 저장 */}
         <div className="sticky bottom-0 -mx-5 -mb-5 flex items-center justify-between gap-2 border-t border-line bg-white px-5 py-3 pb-[calc(var(--sab)+12px)] sm:pb-3">
           {defaults?.parentId ? <span className="text-xs text-ink-3">설명·하위 업무·첨부는 만든 뒤 상세에서</span> : (

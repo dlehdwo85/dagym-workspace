@@ -2,8 +2,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { ArrowUpDown, CalendarDays, Check, Plus, Repeat, UserRound, X } from 'lucide-react';
+import { ArrowUpDown, Bell, CalendarDays, Check, Mic, Plus, Repeat, Sparkles, UserRound, X } from 'lucide-react';
 import { recurPresets } from './pickers';
+import { listenOnce, parseTaskText, speechSupported } from '@/lib/nlparse';
 import { TIMES, timeLabel } from './DateTimePickers';
 import { api, broadcastRefresh } from './client';
 import { useSession } from './session';
@@ -107,12 +108,52 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
 }
 
 /** V5 반복 칩: 안 함·매일·평일·매주·매월… (반복은 마감일 기준 — 마감이 없으면 오늘을 마감으로) */
+/** V8 4번 음성 받아쓰기: 지원 안 되면(일부 앱 WebView) 키보드의 마이크로 말하도록 안내 — 날짜·담당자 인식은 입력한 문장에도 적용됨 */
+export function voiceInput(setListening: (v: boolean) => void, onText: (t: string) => void) {
+  if (!speechSupported()) {
+    toast.info('이 화면에서는 음성 받아쓰기를 쓸 수 없습니다 — 키보드의 🎤(음성 입력)로 말해 보세요. "내일 3시 김민수 견적서" 처럼 말하면 날짜·담당자를 알아봅니다.');
+    return;
+  }
+  setListening(true);
+  listenOnce((t) => { if (t.trim()) onText(t.trim()); }, (e) => {
+    setListening(false);
+    if (e === 'not-allowed' || e === 'service-not-allowed') toast.info('마이크 권한이 없습니다 — 키보드의 🎤(음성 입력)를 써 주세요');
+    else if (e && e !== 'no-speech' && e !== 'aborted') toast.info('음성을 알아듣지 못했습니다 — 다시 눌러 말해 주세요');
+  });
+}
+
 /** V8 6번: 담당자가 그날 연차·출장·공휴일이면 알려 준다(배정은 그대로) */
 export function warnAway(userId: string, date: string, name: string) {
   api(`/api/availability?userId=${userId}&date=${date}`).then((r: any) => {
     const d = r?.days?.[0];
     if (d?.away || d?.holiday) toast.info(`${name}님은 ${date.slice(5).replace('-', '/')}에 ${d.holiday ? `공휴일(${d.holiday})` : '연차·출장(부재)'}입니다 — 마감일을 확인하세요`);
   }).catch(() => {});
+}
+
+/** V8 8번 🔔 미리 알림 칩: 업무마다 최대 3개, 비우면 각자 기본(시간 있는 업무 60분 전·날짜만은 당일 09시) */
+const REMIND_OPTS: [number, string][] = [[0, '마감 시각'], [10, '10분 전'], [30, '30분 전'], [60, '1시간 전'], [120, '2시간 전'], [1440, '하루 전'], [4320, '3일 전']];
+export const remindLabel = (m: number) => REMIND_OPTS.find((x) => x[0] === m)?.[1] ?? (m >= 1440 ? `${Math.round(m / 1440)}일 전` : m >= 60 ? `${Math.round(m / 60)}시간 전` : `${m}분 전`);
+export function BellChip({ value, onChange, label = '미리 알림' }: { value: number[] | null; onChange: (v: number[] | null) => void; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const cur = value ?? [];
+  return (
+    <span className="relative inline-flex">
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${label}: ${cur.length ? cur.map(remindLabel).join(', ') : '기본'}`} aria-haspopup="dialog" aria-expanded={open} data-testid="bell-chip"
+        className={cx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-slate-100', cur.length ? 'font-medium text-accent-700' : 'text-ink-3')}>
+        <Bell className="size-3.5" />{cur.length ? cur.map(remindLabel).join('·') : ''}
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref}>
+        <p className="px-2.5 py-1 text-[11px] text-ink-3">최대 3개 — 안 고르면 각자 기본 알림</p>
+        {REMIND_OPTS.map(([m, l]) => { const on = cur.includes(m); return (
+          <button key={m} type="button" disabled={!on && cur.length >= 3} onClick={() => { const n = on ? cur.filter((x) => x !== m) : [...cur, m].sort((a, b) => a - b); onChange(n.length ? n : null); }}
+            className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50 disabled:opacity-40" aria-pressed={on}>
+            {l}{on && <Check className="size-3.5 text-accent-600" />}
+          </button>); })}
+        {cur.length > 0 && <button type="button" onClick={() => { onChange(null); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded-input px-2.5 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><X className="size-3.5" />기본 알림으로</button>}
+      </Popover>
+    </span>
+  );
 }
 
 export function RepeatChip({ value, anchorDate, onChange }: { value: string | null; anchorDate: string | null; onChange: (v: string | null) => void }) {
@@ -155,6 +196,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const [requester, setRequester] = useState<string | null>(initRequester);
   const [rrule, setRrule] = useState<string | null>(null);
   const [dueTime, setDueTime] = useState<string | null>(null);
+  const [remind, setRemind] = useState<number[] | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
@@ -171,8 +213,8 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     const keepRrule = rrule;
     setTitle(''); setRrule(null);
     try {
-      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
-      markNew(r.id);
+      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
+      markNew(r.id); setRemind(null);
       const who = assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
       toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? ' — 담당자에게 알림을 보냈습니다' : assignee ? ' — 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       broadcastRefresh(); onCreated?.(r.id);
@@ -187,6 +229,14 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   // 업무 "생성"은 저장 버튼·Enter 로만 (WORKIN_SAVE_AND_SPEED, 대표 지시). 바깥을 눌러도 저장하지 않고 입력한 초안은 남긴다.
   // 칩(마감·담당·지시·반복)을 고른 뒤에는 입력칸으로 돌아온다
   const back = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setTimeout(() => input.current?.focus(), 0); };
+  // V8 4번: 문장 속 날짜·시각·담당자 인식 → "적용" 으로 칩에 반영 / 🎤 음성 받아쓰기는 바로 반영
+  const parsed = title.trim().length > 3 ? parseTaskText(title, dir.users, todayStr()) : null;
+  const applyParsed = (p: NonNullable<typeof parsed>) => {
+    setTitle(p.title); if (p.dueDate) setDue(p.dueDate); if (p.dueTime) setDueTime(p.dueTime); if (p.assigneeId) setAssignee(p.assigneeId); if (p.rrule) setRrule(p.rrule);
+    setTimeout(() => input.current?.focus(), 0);
+  };
+  const [listening, setListening] = useState(false);
+  const voice = () => voiceInput(setListening, (text) => { const p = parseTaskText(text, dir.users, todayStr()); applyParsed(p); toast.info(`들은 내용: "${text}"${p.matched.length ? ` — ${p.matched.join(' · ')} 인식` : ''}`); });
   // 작성 중에 창을 닫거나 새로고침하면 브라우저가 "작성 중인 내용" 확인
   useEffect(() => {
     if (!title.trim()) return;
@@ -213,11 +263,19 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
             <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" time={dueTime} onTime={setDueTime} />
             <AssigneePicker value={assignee} onChange={back(setAssignee)} />
             <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
+            <BellChip value={remind} onChange={setRemind} />
           </>
         )}
+        <button type="button" onClick={voice} aria-label="음성으로 업무 추가" aria-pressed={listening} data-testid="voice-btn"
+          className={cx('flex size-8 shrink-0 items-center justify-center rounded-full', listening ? 'animate-pulse bg-red-500 text-white' : 'text-ink-3 hover:bg-slate-100 hover:text-ink-2')}><Mic className="size-4" /></button>
         {title.trim() && <button type="submit" className="h-11 shrink-0 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white shadow-card active:scale-95 sm:h-8 sm:px-3" data-testid="inline-save">저장</button>}
         {busy && <span className="shrink-0 text-xs text-ink-3" data-testid="inline-saving">저장 중…</span>}
       </div>
+      {parsed && parsed.matched.length > 0 && (parsed.dueDate !== due || (parsed.dueTime && parsed.dueTime !== dueTime) || (parsed.assigneeId && parsed.assigneeId !== assignee)) && (
+        <button type="button" onClick={() => applyParsed(parsed)} className="mx-3 mb-2 ml-12 inline-flex items-center gap-1.5 rounded-full bg-accent-50 px-2.5 py-1 text-xs font-medium text-accent-700 hover:bg-accent-100" data-testid="nl-apply">
+          <Sparkles className="size-3.5" />인식: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName].filter(Boolean).join(' · ')} → 적용
+        </button>
+      )}
       {err && <p className="px-3 pb-2 pl-12 text-xs font-medium text-red-600" role="alert">{err} — 입력한 내용은 그대로 있습니다. 저장(Enter)을 다시 눌러 주세요.</p>}
     </form>
   );

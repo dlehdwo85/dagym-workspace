@@ -9,5 +9,8 @@ export const templatePayload = z.object({
   checklist: z.array(z.string()).optional(),
   subtasks: z.array(z.string()).optional(),
   recurrence: z.string().optional(),
+  /** V8 3번 기본 담당자·지시자 */
+  assigneeId: z.string().uuid().nullable().optional(),
+  requestedById: z.string().uuid().nullable().optional(),
 });
 export type TemplatePayload = z.infer<typeof templatePayload>;

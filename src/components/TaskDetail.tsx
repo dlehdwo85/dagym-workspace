@@ -6,7 +6,7 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import {
   BadgeCheck, Building2, CalendarClock, CalendarDays, Camera, Check, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash,
-  Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Percent, Plus, Repeat, RotateCcw, Rows3, Shapes, ShieldCheck,
+  Bell, Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Percent, Plus, Repeat, RotateCcw, Rows3, Shapes, ShieldCheck,
   Stamp, Tag, Timer, CalendarCheck, Trash2, Type, UserRound, Users, X, CalendarRange, AlertTriangle, type LucideIcon,
   Megaphone,
   ChevronDown,
@@ -14,7 +14,7 @@ import {
 import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
-import { DuePicker, warnAway } from '@/components/TaskQuick';
+import { BellChip, DuePicker, warnAway } from '@/components/TaskQuick';
 import { TIMES, timeLabel } from '@/components/DateTimePickers';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { PRIORITY_LABEL, STATUS_LABEL, STATUSES, type TaskStatus } from '@/lib/types';
@@ -160,7 +160,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   async function saveTemplate() {
     const name = prompt('템플릿 이름', t.title);
     if (!name) return;
-    try { await api('/api/templates', { body: { name, fromTaskId: id, orgUnitId: t.org_unit_id } }); toast.ok('템플릿으로 저장했습니다'); } catch (e: any) { toast.error(e.message); }
+    // V8 3번: 관리자는 공용(이 소속) 또는 개인, 직원은 개인 템플릿(나만 봄)
+    const personal = !perms.approve || !confirm('이 소속 모두가 쓰는 공용 템플릿으로 저장할까요?\n취소를 누르면 나만 쓰는 개인 템플릿으로 저장합니다.');
+    try { await api('/api/templates', { body: { name, fromTaskId: id, orgUnitId: t.org_unit_id, personal } }); toast.ok(personal ? '개인 템플릿으로 저장했습니다' : '공용 템플릿으로 저장했습니다'); } catch (e: any) { toast.error(e.message); }
   }
 
   // "필드 더보기" 안에 값이 들어 있는 항목 수
@@ -223,7 +225,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 <MenuItem icon={Copy} onClick={duplicate}>복제</MenuItem>
                 <MenuItem icon={Merge} onClick={() => setMergeOpen(true)}>중복 업무로 통합</MenuItem>
                 <MenuItem icon={Clock} onClick={() => setBlockOpen(true)}>실행 시간 배정</MenuItem>
-                {perms.approve && <MenuItem icon={LayoutTemplate} onClick={saveTemplate}>템플릿으로 저장</MenuItem>}
+                <MenuItem icon={LayoutTemplate} onClick={saveTemplate}>템플릿으로 저장</MenuItem>
                 {perms.delete && <><div className="my-1 border-t border-line" /><MenuItem icon={Trash2} danger onClick={del}>삭제</MenuItem></>}
               </div>
             </>
@@ -328,6 +330,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle className="size-3.5" />마감 위험</span>}
             </span>
           </Prop>
+          <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span></span></Prop>
           <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line" data-testid="detail-repeat">{t.due_date || t.recurrence_rule ? <RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /> : <span className="px-2 text-xs text-ink-3">마감일을 정하면 반복할 수 있습니다</span>}</div></Prop>
           <Prop icon={FolderKanban} label="프로젝트">
             <select className={ghostCls} value={t.project_id ?? ''} onChange={(e) => patch({ projectId: e.target.value || null })}>

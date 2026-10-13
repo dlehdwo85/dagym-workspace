@@ -771,8 +771,8 @@ describe('알림: 서버 정기 실행·중복 방지·푸시 발송·실패 기
   });
   test('일정 시작 전 알림: 설정 시간 안에 1회, 불참·끔 사용자는 제외', async () => {
     const cal = (await ctx.managerA.client.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'org_unit').id;
-    const start = new Date(Date.now() + 20 * 60000), end = new Date(start.getTime() + 3600e3);
-    // staffA: 기본 30분 → 대상, owner: 끔(0) → 제외
+    const start = new Date(Date.now() + 8 * 60000), end = new Date(start.getTime() + 3600e3);
+    // staffA: 기본 10분(V8) → 대상, owner: 끔(0) → 제외
     await ctx.owner.ok('PUT', '/api/notifications/prefs', { settings: { dueSoonHours: 24, eventReminderMinutes: 0, quietStart: null, quietEnd: null } });
     const id = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '현장 안전 회의', start: start.toISOString(), end: end.toISOString(), attendeeIds: [ctx.staffA.id, ctx.ownerId] })).id;
     await tick(); await tick();
@@ -1479,5 +1479,35 @@ describe('WORKIN_V8 아침 브리핑 · 주간 보고 초안 · 부재 종류 ·
     await ctx.managerA.client.ok('PUT', `/api/events/${ev}/notes`, { body: '- 장비 견적 @이직원 확인 부탁' });
     const n = await sql`select title, link from notifications where user_id = ${ctx.staffA.id} and type = 'mention' and entity_id = ${ev}`;
     assert.equal(n.length, 1); assert.match(n[0].title, /회의 메모에서 회원님을 언급/);
+  });
+});
+
+describe('WORKIN_V8 템플릿 · 미리 알림', () => {
+  test('시작 템플릿 3종, 직원 개인 템플릿(나만 봄)·업무에서 저장(기본 담당·마감 오프셋), 적용하면 체크리스트까지', async () => {
+    const list = (await ctx.owner.ok('GET', '/api/templates')).templates;
+    for (const n of ['현장 점검', '입찰 준비', '견적서 발송']) assert.ok(list.some((t) => t.name === n), `시작 템플릿 ${n}`);
+    const src = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '내 반복 점검', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 2), checklist: ['조명', '바닥'], approvalRequired: false })).id;
+    assert.equal((await ctx.staffA.client.req('POST', '/api/templates', { name: '공용 시도', fromTaskId: src })).status, 403, '직원은 공용 불가');
+    const tp = await ctx.staffA.client.ok('POST', '/api/templates', { name: '내 점검 양식', fromTaskId: src, personal: true });
+    const mine = (await ctx.staffA.client.ok('GET', '/api/templates')).templates.find((t) => t.id === tp.id);
+    assert.ok(mine && mine.personal); assert.equal(mine.payload.dueInDays, 2); assert.equal(mine.payload.assigneeId, ctx.staffA.id);
+    assert.ok(!(await ctx.managerA.client.ok('GET', '/api/templates')).templates.some((t) => t.id === tp.id), '다른 사람에게 안 보임');
+    const made = await ctx.staffA.client.ok('POST', `/api/templates/${tp.id}/apply`, { title: '내 점검 양식 적용', orgUnitId: ctx.siteA });
+    const d = await ctx.staffA.client.ok('GET', `/api/tasks/${made.id}`);
+    assert.equal(d.task.assignee_id, ctx.staffA.id); assert.equal(d.task.due_date, addDays(today, 2)); assert.equal(d.checklist.length, 2);
+  });
+  test('업무별 미리 알림(최대 3개)·기본값, 일정 기본 10분', async () => {
+    const p = await ctx.managerA.client.ok('GET', '/api/notifications/prefs');
+    assert.equal(p.settings.taskReminderMinutes, 60); assert.equal(p.settings.eventReminderMinutes, 10);
+    assert.equal((await ctx.managerA.client.req('POST', '/api/tasks', { title: 'x', orgUnitId: ctx.siteA, reminderMinutes: [1, 2, 3, 4] })).status, 400, '최대 3개');
+    const at = new Date(Date.now() + 25 * 60000);
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(at);
+    const hm = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(at);
+    const t = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'V8 30분 전 알림', orgUnitId: ctx.siteA, assigneeId: ctx.managerA.id, dueDate: day, dueTime: hm, reminderMinutes: [30, 1440], approvalRequired: false })).id;
+    assert.deepEqual((await ctx.managerA.client.ok('GET', `/api/tasks/${t}`)).task.reminder_minutes, [30, 1440]);
+    await tick(); await tick();
+    const n = await sql`select title from notifications where entity_id = ${t} and type = 'due_soon' and title like '%분 뒤 마감%' or (entity_id = ${t} and title like '1일 뒤 마감%')`;
+    assert.equal(n.filter((x) => /30분 뒤 마감/.test(x.title)).length, 1, '30분 전 알림 1번');
+    assert.equal(n.filter((x) => /1일 뒤/.test(x.title)).length, 1, '하루 전 알림도(이미 지났지만 마감 전) 1번');
   });
 });

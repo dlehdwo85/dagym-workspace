@@ -1201,6 +1201,7 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   await owner.getByRole('menuitem', { name: /업무/ }).first().click();
   const dlg = owner.getByRole('dialog', { name: '업무 등록' });
   await dlg.getByLabel('제목').fill('V6 다같이 점검');
+  await dlg.getByLabel('담당자', { exact: true }).selectOption({ label: '김대표' }); // 마지막 설정 기억(V8) 대신 명시
   await dlg.getByTestId('multi-assignee').getByRole('button', { name: /여러 명에게/ }).click();
   await dlg.getByTestId('multi-assignee').getByRole('button', { name: '이직원' }).click();
   await dlg.getByTestId('multi-assignee').getByRole('button', { name: '최매니저' }).click();
@@ -1295,6 +1296,60 @@ await step('V7: 홈 첫 화면에 오늘 할 일·이번 주(업무·일정 같�
   const [cs] = await sql`select cal_colors from user_settings where user_id = ${ctx.ownerId}`;
   assert.equal(cs.cal_colors.personal, '#3f51b5');
   await owner.screenshot({ path: `${SHOTS}/74-calendar-two-colors.png` });
+});
+
+await step('V8: 등록 창 한 번에(자동 인식·템플릿·우선순위·반복·알림), 🔔 미리 알림, 사진 여러 장·크게 보기, 내 주간 보고, 브리핑 설정', async () => {
+  await owner.goto(BASE + '/tasks');
+  await owner.getByTestId('create-menu').click();
+  await owner.getByRole('menuitem', { name: /업무/ }).first().click();
+  const dlg = owner.getByRole('dialog', { name: '업무 등록' });
+  await dlg.getByTestId('tpl-chips').getByRole('button', { name: '견적서 발송' }).waitFor(); // 시작 템플릿
+  await dlg.getByLabel('제목').fill('내일 3시 @최매니저 !높음 매주 장비 견적 비교');
+  await dlg.getByTestId('quick-nl-apply').click();
+  assert.equal(await dlg.getByLabel('제목').inputValue(), '장비 견적 비교');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await owner.getByText(/업무를 등록했습니다/).first().waitFor();
+  const [t] = await sql`select id, assignee_id, priority, recurrence_rule, to_char(due_date,'YYYY-MM-DD') d, to_char(due_time,'HH24:MI') tm from tasks where title = '장비 견적 비교'`;
+  assert.equal(t.d, addDays(today, 1)); assert.equal(t.tm, '15:00'); assert.equal(t.assignee_id, ctx.managerA.id); assert.equal(t.priority, 'high'); assert.match(t.recurrence_rule, /FREQ=WEEKLY/);
+  // 🔔 미리 알림
+  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.getByTestId('detail-remind').getByTestId('bell-chip').click();
+  await owner.getByRole('button', { name: '30분 전' }).click();
+  await owner.waitForTimeout(600);
+  assert.deepEqual((await sql`select reminder_minutes from tasks where id = ${t.id}`)[0].reminder_minutes, [30]);
+  await owner.keyboard.press('Escape');
+  // 사진 여러 장 → 격자 → 크게 보기·넘기기
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await owner.getByTestId('album-input').setInputFiles([{ name: '현장1.png', mimeType: 'image/png', buffer: png }, { name: '현장2.png', mimeType: 'image/png', buffer: png }]);
+  await owner.getByTestId('photo-grid').locator('[data-photo]').nth(1).waitFor();
+  await owner.getByTestId('photo-grid').locator('[data-photo]').first().click();
+  const viewer = owner.getByTestId('photo-viewer');
+  await viewer.getByRole('button', { name: '다음 사진' }).click();
+  await viewer.getByText(/현장2\.png|현장1\.png/).waitFor();
+  await viewer.getByRole('button', { name: '사진 닫기' }).click();
+  // 내 주간 보고: 초안 → 제출
+  await owner.goto(BASE + '/reports/mine');
+  await owner.getByTestId('report-draft').click();
+  await owner.getByLabel('주간 보고 내용').waitFor();
+  assert.match(await owner.getByLabel('주간 보고 내용').inputValue(), /■ 이번 주 완료/);
+  await owner.getByTestId('report-submit').click();
+  await owner.getByText('제출했습니다').waitFor();
+  await owner.getByTestId('team-reports').getByText('김대표').waitFor();
+  // 브리핑 설정
+  await owner.goto(BASE + '/settings');
+  await owner.getByTestId('briefing-settings').getByLabel('브리핑 시각').waitFor();
+  // 휴대폰 360: 등록 창 칩 줄 넘침 없음
+  const mc = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  const m = await mc.newPage();
+  await m.goto(BASE + '/tasks');
+  await m.getByTestId('add-task-top').tap();
+  const sd = m.getByRole('dialog', { name: '업무 등록' });
+  await sd.getByTestId('quick-chips').waitFor();
+  await sd.getByLabel('제목').fill('모레 오전 10시 현장 점검표 제출');
+  await sd.getByTestId('quick-nl-apply').waitFor();
+  assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '360 넘침 없음');
+  await m.screenshot({ path: `${SHOTS}/75-quick-add-v8-360.png` });
+  await mc.close();
 });
 
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {

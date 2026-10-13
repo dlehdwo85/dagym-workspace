@@ -39,6 +39,8 @@ export const taskInput = z.object({
   /** 캘린더에 표시 (기본 켜짐) */
   showOnCalendar: z.boolean().optional(),
   sortOrder: z.number().optional(),
+  /** V8 8번: 미리 알림(분 전, 최대 3개). null = 각자 기본(시간 있는 업무 60분 전, 날짜만은 당일 09시) */
+  reminderMinutes: z.array(z.number().int().min(0).max(10080)).max(3).nullable().optional(),
   /** V6 13번: 담당자 여러 명 → 각자 1건씩 (만들 때만) */
   assigneeIds: z.array(zUuid).max(50).optional(),
   version: z.number().int().optional(),
@@ -51,7 +53,7 @@ export const TASK_COLS = (sql: Sql) => sql`
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id,
-  t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id,
+  t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id, t.reminder_minutes,
   case when t.batch_id is null then null else (select json_build_object('total', count(*)::int, 'done', count(*) filter (where b.status = 'done')::int) from tasks b where b.batch_id = t.batch_id and b.deleted_at is null) end as batch,
   (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
     where be.deleted_at is null and be.kind = 'task_block' and (be.task_id = t.id or be.id in (select event_id from event_tasks where task_id = t.id and role = 'block'))) as scheduled_minutes,
@@ -258,12 +260,12 @@ export async function createTask(u: SessionUser, i: TaskInput) {
     const [t] = await tx<{ id: string }[]>`
       insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
         start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at,
-        task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id)
+        task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id, reminder_minutes)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
         ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
         ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null},
-        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null})
+        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null}, ${i.reminderMinutes ?? null})
       returning id`;
     for (const c of new Set(i.collaboratorIds ?? [])) {
       await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
@@ -358,7 +360,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const fields: [keyof TaskInput, string][] = [
       ['title', 'title'], ['description', 'description'], ['projectId', 'project_id'], ['brandId', 'brand_id'],
       ['assigneeId', 'assignee_id'], ['priority', 'priority'], ['startDate', 'start_date'], ['dueDate', 'due_date'],
-      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'], ['estimateMinutes', 'estimate_minutes'], ['showOnCalendar', 'show_on_calendar'], ['requestedById', 'requested_by'],
+      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'], ['estimateMinutes', 'estimate_minutes'], ['showOnCalendar', 'show_on_calendar'], ['requestedById', 'requested_by'], ['reminderMinutes', 'reminder_minutes'],
     ];
     for (const [k, col] of fields) {
       if (i[k] === undefined) continue;

@@ -52,11 +52,17 @@ export default function Settings() {
         </table>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Field label="일정 시작 전 알림">
-            <select className={inputCls} value={s.eventReminderMinutes ?? 30} onChange={(e) => setS({ ...s, eventReminderMinutes: Number(e.target.value) })}>
+            <select className={inputCls} value={s.eventReminderMinutes ?? 10} onChange={(e) => setS({ ...s, eventReminderMinutes: Number(e.target.value) })}>
               {[[0, '받지 않음'], [10, '10분 전'], [30, '30분 전'], [60, '1시간 전'], [120, '2시간 전'], [1440, '하루 전']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </Field>
           <Field label="마감 임박 알림 (시간 전)"><input type="number" min={1} max={168} className={inputCls} value={s.dueSoonHours} onChange={(e) => setS({ ...s, dueSoonHours: Number(e.target.value) })} /></Field>
+          {/* V8 8번 업무 미리 알림 기본값 (업무마다 🔔 로 바꿀 수 있음) */}
+          <Field label="시간 있는 업무 미리 알림 (기본)">
+            <select className={inputCls} value={s.taskReminderMinutes ?? 60} onChange={(e) => setS({ ...s, taskReminderMinutes: Number(e.target.value) })} aria-label="업무 미리 알림 기본">
+              {[[10, '10분 전'], [30, '30분 전'], [60, '1시간 전'], [120, '2시간 전'], [1440, '하루 전']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </Field>
           {/* V8 1번 아침 브리핑 */}
           <Field label="아침 브리핑 (오늘 할 일·일정 요약 알림)">
             <span className="flex flex-wrap items-center gap-2" data-testid="briefing-settings">
