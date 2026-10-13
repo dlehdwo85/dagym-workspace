@@ -76,3 +76,8 @@
 - iOS 내부 테스터: ASC 사용자 초대 김민수·김소담(역할 마케팅, 앱 접근 워크인만). 초대 수락 후 TestFlight 내부 그룹에 추가 예정. 이메일은 대표 제공(저장소에는 이름만 기록).
 
 - 17:09 김민수·김소담 ASC 초대 수락 → TestFlight 내부 그룹 "본사 테스터" 추가(테스터 3명, 초대됨). 대표 본인도 아직 "초대됨"(TestFlight 앱에서 수락 전).
+
+## 2026-10-13 18:00 — 운영 배포 막힘(Vercel 하루 한도)
+- 대표 "운영배포 승인" → Vercel API 배포 402 `api-deployments-free-per-day`. 계정 24시간 보이는 배포 63건(dagym-workspace 28) — 한도는 숨은 시도까지 세는 듯. 운영은 05cd155 (978a9fc 캘린더 4차·1f2d348 사라짐 방지 미반영).
+- **클라우드 요청 R-14**: `vercel.json` 에 `"ignoreCommand"` 로 docs/·*.md 만 바뀐 커밋은 빌드 건너뛰기(로컬 기록 푸시가 운영 빌드를 소모 중). 예: `git diff --quiet HEAD^ HEAD -- . ':(exclude)docs' ':(exclude)*.md' ':(exclude)NEXT_ACTION.md'`.
+- 로컬은 한도가 풀리면 다시 배포 시도.
