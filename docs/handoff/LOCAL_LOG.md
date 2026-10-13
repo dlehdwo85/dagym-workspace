@@ -100,3 +100,5 @@
 - 2026-10-14 R2 적용 확인: health fileStorage "s3"(commit 33650b8). 버킷 workin-files, S3_* 5개 production. 실제 업로드는 대표 첫 파일 업로드 후 R2 객체 확인 예정.
 
 - R2 CORS 설정(로컬): workin-files 에 운영 도메인·localhost·capacitor origin, GET/PUT/HEAD. 업로드 실패 원인(브라우저 presigned PUT CORS) 해소. ANTHROPIC_API_KEY 대표 등록(22:47) — 운영 반영은 다음 배포(현재 Vercel 한도) 후.
+
+- 2026-10-14 운영 1e7dc26 반영(자동 배포): V12 급함(aeccc1e)·AI 자료 일괄 생성(1c11266)·R2 체크섬 끄기+서버 경유 재시도+드래그 업로드. ANTHROPIC_API_KEY 반영. R2 CORS headers * 로 확대(로컬).
