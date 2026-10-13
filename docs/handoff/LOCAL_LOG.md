@@ -83,3 +83,5 @@
 - 로컬은 한도가 풀리면 다시 배포 시도.
 
 - 18:40 한도 풀림 → Vercel API 운영 배포 1e76f26 READY (b2b7345 포함: 캘린더 4차·1시간 칸·마감 표시·자동 저장·사라짐 방지·꾹 눌러 순서·홈 새 업무). health migration 017, scheduler healthy.
+
+- 20:20 한도 풀림 → Vercel API 운영 배포 aea0232 READY (f1065a1 상세 정리·행 클릭·칩 순서 + aea0232 V5 캘린더 Google 형·홈 일정·업무 연동·반복).
