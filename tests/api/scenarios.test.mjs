@@ -1169,3 +1169,34 @@ describe('WORKIN_V3 서로 배정 · 지시자 · 직접 순서', () => {
     assert.ok(other >= 200);
   });
 });
+
+describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로그인 없음)', () => {
+  test('대표만 → 격리 조직·예시 데이터·초대 링크, 심사 계정은 예시만 보고 회사 데이터는 404, 대표 화면엔 안 섞임, 다시 누르면 예시 초기화', async () => {
+    assert.equal((await ctx.managerA.client.post('/api/admin/review-account', { email: 'review@workin.test' })).status, 403);
+    assert.equal((await ctx.owner.req('POST', '/api/admin/review-account', { email: ctx.staffA.email })).status, 400, '회사 계정 이메일 불가');
+    const r = await ctx.owner.ok('POST', '/api/admin/review-account', { email: 'review@workin.test' });
+    assert.ok(r.invitePath.startsWith('/invite/'));
+    assert.equal(r.sample.tasks, 7);
+    const c = new Client('review');
+    await c.ok('POST', `/api/invitations/${r.invitePath.split('/').pop()}/accept`, { password: 'review-pass-1234' }); // 비밀번호는 대표가 링크에서 직접
+    const me = await c.ok('GET', '/api/auth/me');
+    assert.equal(me.user.role, 'site_manager');
+    const list = await c.ok('GET', '/api/tasks?limit=500');
+    assert.ok(list.tasks.length >= 7 && list.tasks.every((t) => t.org_unit_id === r.unitId), '예시 업무만');
+    assert.ok(list.tasks.some((t) => t.assignee_id === me.user.id), '심사 계정에게 배정된 예시');
+    const other = (await ctx.owner.ok('POST', '/api/tasks', { title: '회사 비밀 업무', orgUnitId: ctx.hq })).id;
+    assert.equal((await c.get(`/api/tasks/${other}`)).status, 404);
+    assert.ok(!(await c.ok('GET', '/api/org')).users.some((u) => u.role === 'owner'));
+    for (const path of ['/api/admin/users', '/api/admin/ops', '/api/revenue', '/api/reports']) assert.ok([403, 404].includes((await c.get(path)).status), path);
+    const t = list.tasks.find((x) => x.assignee_id === me.user.id && x.status !== 'done');
+    await c.ok('PATCH', `/api/tasks/${t.id}`, { status: 'done', version: t.version });
+    const add = await c.ok('POST', '/api/tasks', { title: '심사 중 추가', orgUnitId: r.unitId });
+    assert.ok(add.id);
+    assert.ok(!(await ctx.owner.ok('GET', '/api/tasks?limit=500')).tasks.some((x) => x.org_unit_id === r.unitId), '대표 화면에 체험 데이터 없음');
+    const again = await ctx.owner.ok('POST', '/api/admin/review-account', { email: 'review@workin.test' });
+    assert.equal(again.alreadyActive, true); assert.equal(again.invitePath, null);
+    const after = await c.ok('GET', '/api/tasks?limit=500');
+    assert.ok(!after.tasks.some((x) => x.title === '심사 중 추가'), '예시 초기화');
+    assert.ok((await c.ok('GET', '/api/notifications')).items.length >= 1, '예시 알림');
+  });
+});

@@ -28,6 +28,9 @@ export default function Users() {
   const [inv, setInv] = useState<any>(null);
   const [link, setLink] = useState('');
   const [edit, setEdit] = useState<any>(null);
+  const [review, setReview] = useState<{ email: string; name: string } | null>(null);
+  const [reviewMsg, setReviewMsg] = useState('');
+  const allUnits = useApi<{ units: any[] }>('/api/admin/org-units');
   const roles = (Object.keys(ROLE_LABEL) as Role[]).filter((r) => r !== 'owner' || user.role === 'owner');
 
   async function invite(e: React.FormEvent) {
@@ -44,12 +47,24 @@ export default function Users() {
   async function reinvite(u: any) {
     try { const r = await api('/api/admin/users', { body: { email: u.email, name: u.name, role: u.role, orgUnitIds: u.org_unit_ids, title: u.title ?? undefined } }); setLink(location.origin + r.path); reload(); } catch (er: any) { toast.error(er.message); }
   }
-  const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
+  const unitName = (id: string) => allUnits.data?.units.find((o) => o.id === id)?.name ?? dir.orgUnits.find((o) => o.id === id)?.name ?? '';
+  async function setupReview(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const r = await api('/api/admin/review-account', { body: review });
+      setReview(null); reload(); allUnits.reload();
+      setReviewMsg(r.alreadyActive ? '이미 비밀번호를 정한 심사용 계정입니다. 예시 데이터만 새로 만들었습니다.' : '초대 링크에서 비밀번호를 직접 정하세요. 그 아이디·비밀번호를 TestFlight "베타 앱 심사 정보"에 입력합니다.');
+      if (r.invitePath) setLink(location.origin + r.invitePath); else toast.ok('예시 데이터를 새로 만들었습니다');
+    } catch (er: any) { toast.error(er.message); }
+  }
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold">사용자·권한</h1>
-        <Button onClick={() => setInv({ email: '', name: '', role: 'staff', orgUnitIds: [] })}>+ 직원 초대</Button>
+        <span className="flex flex-wrap gap-2">
+          {user.role === 'owner' && <Button variant="secondary" onClick={() => setReview({ email: '', name: '앱 심사 담당자' })} data-testid="review-account">심사용 체험 계정</Button>}
+          <Button onClick={() => setInv({ email: '', name: '', role: 'staff', orgUnitIds: [] })}>+ 직원 초대</Button>
+        </span>
       </div>
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : (
         <div className="overflow-x-auto rounded-lg border bg-white">
@@ -57,7 +72,7 @@ export default function Users() {
             <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="p-2">이름</th><th className="p-2">권한</th><th className="p-2">소속</th><th className="p-2">상태</th><th className="p-2">최근 로그인</th><th className="p-2"></th></tr></thead>
             <tbody className="divide-y">{data!.users.map((u) => (
               <tr key={u.id} className={cx(u.status !== 'active' && u.status !== 'invited' && 'text-slate-400')}>
-                <td className="p-2"><div className="font-medium">{u.name}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}</div></td>
+                <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}</div></td>
                 <td className="p-2">{ROLE_LABEL[u.role as Role]}</td>
                 <td className="p-2 text-xs">{u.org_unit_ids.map(unitName).join(', ') || '-'}</td>
                 <td className="p-2">{STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}</td>
@@ -85,7 +100,16 @@ export default function Users() {
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setInv(null)}>취소</Button><Button type="submit">초대 링크 만들기</Button></div>
         </form>}
       </Modal>
-      <Modal open={!!link} onClose={() => setLink('')} title="링크를 전달하세요">
+      <Modal open={!!review} onClose={() => setReview(null)} title="심사용 체험 계정">
+        {review && <form onSubmit={setupReview} className="space-y-3">
+          <p className="text-sm text-ink-2">App Store·Play 심사 담당자가 로그인해 볼 계정입니다. <b>격리된 “체험 조직(심사용)”</b>과 예시 업무·일정을 만들고, 이 이메일로 초대 링크를 만듭니다. 이 계정은 회사 업무·사람을 전혀 볼 수 없고, 대표 화면에도 체험 데이터가 섞이지 않습니다. 다시 누르면 예시 데이터를 새로 만듭니다.</p>
+          <Field label="심사용 이메일 (회사 계정과 다른 주소)"><input type="email" required className={inputCls} value={review.email} onChange={(e) => setReview({ ...review, email: e.target.value })} placeholder="review@회사도메인" /></Field>
+          <Field label="표시 이름"><input className={inputCls} value={review.name} onChange={(e) => setReview({ ...review, name: e.target.value })} /></Field>
+          <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setReview(null)}>취소</Button><Button type="submit">만들기</Button></div>
+        </form>}
+      </Modal>
+      <Modal open={!!link} onClose={() => { setLink(''); setReviewMsg(''); }} title="링크를 전달하세요">
+        {reviewMsg && <p className="mb-2 rounded-input bg-amber-50 p-2 text-sm text-amber-900" data-testid="review-msg">{reviewMsg}</p>}
         <p className="text-sm text-slate-600">아래 링크를 카카오톡·문자·메일로 본인에게만 전달하세요. 링크는 1회용이며 초대 7일·재설정 24시간 후 만료됩니다.</p>
         <input readOnly className={cx(inputCls, 'mt-2 font-mono text-xs')} value={link} onFocus={(e) => e.target.select()} data-testid="invite-link" />
         <div className="mt-3 flex justify-end"><Button onClick={() => { navigator.clipboard?.writeText(link); toast.ok('복사했습니다'); }}>복사</Button></div>

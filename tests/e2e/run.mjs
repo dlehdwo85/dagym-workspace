@@ -868,6 +868,18 @@ await step('V3-6 휴대폰: 다른 사람 묶음에서 "저장" 버튼으로 추
   await m.getByTestId('overdue-banner').getByText(/기한 지난 업무 \d+건/).waitFor();
   await mc.close();
 });
+await step('심사용 체험 계정: 대표가 사용자 관리에서 버튼 → 초대 링크·안내, 목록에 "심사용" 표시', async () => {
+  await owner.goto(BASE + '/admin/users');
+  await owner.getByTestId('review-account').click();
+  const dlg = owner.getByRole('dialog', { name: '심사용 체험 계정' });
+  await dlg.getByLabel(/심사용 이메일/).fill('applereview@workin.test');
+  await dlg.getByRole('button', { name: '만들기' }).click();
+  await owner.getByTestId('review-msg').getByText(/비밀번호를 직접 정하세요/).waitFor();
+  assert.match(await owner.getByTestId('invite-link').inputValue(), /\/invite\//);
+  await owner.screenshot({ path: `${SHOTS}/63-review-account.png` });
+  await owner.keyboard.press('Escape');
+  await owner.getByTestId('users').getByText('심사용').first().waitFor();
+});
 await step('W-0 휴대폰 360·375·390·430px 모든 주요 화면 좌우 넘침 없음 (안전장치 끄고 측정)', async () => {
   const { checkWidths } = await import('./widths.mjs');
   const bad = await checkWidths(browser, await desk.storageState());

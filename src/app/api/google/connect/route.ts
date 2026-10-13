@@ -4,9 +4,11 @@ import { db } from '@/lib/db';
 import { newToken } from '@/lib/crypto';
 import { authUrl, googleConfigured } from '@/lib/google/client';
 import { HttpError } from '@/lib/errors';
+import { denyDemo } from '@/lib/access';
 
 /** 연결 범위 선택: mode=both(읽기·쓰기 양방향) | import(읽기 전용 가져오기) */
 export const GET = handler(async ({ req, user }) => {
+  denyDemo(user);
   if (!googleConfigured()) throw new HttpError(404, 'feature_disabled', 'Google Calendar 동기화는 선택 기능이며 현재 꺼져 있습니다');
   const mode = req.nextUrl.searchParams.get('mode') === 'import' ? 'import' : 'both';
   const state = newToken(24);
