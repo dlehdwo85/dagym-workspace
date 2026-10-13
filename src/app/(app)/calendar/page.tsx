@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DateField, TimeSelect, nextHour, shiftEnd } from '@/components/DateTimePickers';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -11,7 +12,7 @@ import luxonPlugin from '@fullcalendar/luxon3';
 import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { CalendarPlus, Check, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Timer, Trash2, Users, X } from 'lucide-react';
+import { CalendarPlus, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, X } from 'lucide-react';
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
@@ -23,6 +24,12 @@ type Scope = 'this' | 'following' | 'all';
 const seoulDate = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const seoulTime = (d: Date | string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+
+/** V5 연결된 업무가 있는 일정을 지울 때: 업무도 지울지 (반복 일정은 전체 삭제일 때만 물음) */
+function askAlsoTask(task: { title?: string } | null | undefined, scope: Scope, recurring: boolean) {
+  if (!task || (recurring && scope !== 'all')) return false;
+  return confirm(`연결된 업무${task.title ? ` '${task.title}'` : ''}도 함께 삭제할까요?\n취소를 누르면 일정만 삭제하고 업무는 남깁니다.`);
+}
 
 /** 반복 일정 수정·삭제 범위 선택 */
 function askScope(): Promise<Scope | null> {
@@ -87,6 +94,9 @@ export default function CalendarPage() {
   const showTask = (t: any) => who === 'all' || (who === 'mine' ? t.assignee_id === user.id : who.includes(t.assignee_id));
   const calRef = useRef<FullCalendar>(null);
   const mobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  // 휴대폰: 보기(일·3일·주·월·목록)를 이 기기에 기억, 처음은 주. PC 는 늘 주 보기로 시작
+  const savedView = !mobile ? null : (() => { try { const v = localStorage.getItem('wos_cal_view'); return v && ['timeGridDay', 'timeGrid3', 'timeGridWeek', 'dayGridMonth', 'listWeek'].includes(v) ? v : null; } catch { return null; } })();
+  const [monthPicker, setMonthPicker] = useState(false);
   const touch = typeof window !== 'undefined' && (window.innerWidth < 640 || !!window.matchMedia?.('(pointer: coarse)').matches);
 
   useEffect(() => { try { localStorage.setItem('wos_cal_hidden', JSON.stringify(hidden)); localStorage.setItem('wos_cal_tasks', showTasks ? '1' : '0'); localStorage.setItem('wos_cal_unscheduled', sidePanel ? '1' : '0'); } catch {} }, [hidden, showTasks, sidePanel]);
@@ -111,6 +121,8 @@ export default function CalendarPage() {
   useEffect(() => {
     const id = sp.get('event'); if (id) setEditor({ id });
     if (sp.get('new') === '1') { setEditor({ draft: { date: seoulDate(new Date()) } }); router.replace('/calendar'); }
+    // V5 홈·+ 버튼의 "일정": 다음 정각 1시간으로 빠른 등록 시트
+    if (sp.get('quick') === '1') { const d = seoulDate(new Date()), h = nextHour(); setQuick({ x: 16, y: 120, date: d, start: h.start, end: h.end, endDate: d, allDay: false }); router.replace('/calendar'); }
   }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
   const [preview, setPreview] = useState<{ ev: any; x: number; y: number } | null>(null);
 
@@ -127,6 +139,7 @@ export default function CalendarPage() {
   useEffect(() => { load(); }, [range?.from, range?.to]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const h = () => load(); window.addEventListener('wos-refresh', h); return () => window.removeEventListener('wos-refresh', h); });
 
+  const syncedIds = new Set(events.map((e) => e.linkedTask?.id).filter(Boolean));
   const fcEvents = useMemo(() => [
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
@@ -138,8 +151,8 @@ export default function CalendarPage() {
       backgroundColor: e.kind === 'vacation' ? '#a855f7' : e.kind === 'business_trip' ? '#0891b2' : e.calendarType === 'personal' && e.ownerId && e.ownerId !== user.id ? avatarColor(e.ownerId) : e.color, borderColor: 'transparent',
       extendedProps: { type: 'event', ev: e }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
     })),
-    // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로
-    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t)).map((t) => ({
+    // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
+    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id)).map((t) => ({
       // Google Tasks 처럼 마감을 표시: "마감: 업무명 (담당자)" — 다른 사람 업무면 담당자 이름
       id: `task|${t.id}`, title: `마감: ${t.title}${t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? ` (${t.assignee_name})` : ''}`,
       start: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : t.due_date, end: t.due_time ? new Date(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() + 30 * 60000).toISOString() : undefined,
@@ -253,7 +266,7 @@ export default function CalendarPage() {
             </ul>
           </div>
         </aside>
-        <div className="min-w-0 flex-1 rounded-card border border-line bg-white p-3 shadow-card" data-testid="calendar">
+        <div className="min-w-0 flex-1 rounded-card border border-line bg-white p-1.5 shadow-card sm:p-3" data-testid="calendar">
           <div className="-mx-1 mb-2 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-sm" role="group" aria-label="누구의 일정" data-testid="people-filter">
             <PeopleChip on={who === 'all'} onClick={() => setWho('all')}>전체</PeopleChip>
             <PeopleChip on={who === 'mine'} onClick={() => setWho('mine')}>내 일정</PeopleChip>
@@ -272,20 +285,47 @@ export default function CalendarPage() {
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-indigo-300 text-indigo-700' : 'border-line text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무 마감</button>
           </div>
+          {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}
+          <div className="mb-2 sm:hidden" data-testid="cal-mobile-head">
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => setMonthPicker((v) => !v)} aria-expanded={monthPicker} className="inline-flex items-center gap-1 rounded-input px-1.5 py-1 text-lg font-bold" data-testid="month-toggle">
+                {range ? `${Number(seoulDate(range.start).slice(5, 7))}월` : ''}<ChevronDown className={cx('size-4 transition-transform', monthPicker && 'rotate-180')} />
+              </button>
+              <span className="flex-1" />
+              <button type="button" onClick={() => calRef.current?.getApi().prev()} className="rounded-full p-2 text-ink-2 active:bg-slate-100" aria-label="이전"><ChevronLeft className="size-5" /></button>
+              <button type="button" onClick={() => calRef.current?.getApi().next()} className="rounded-full p-2 text-ink-2 active:bg-slate-100" aria-label="다음"><ChevronRight className="size-5" /></button>
+              <button type="button" onClick={() => calRef.current?.getApi().today()} className="rounded-input border border-line px-2.5 py-1 text-sm font-medium">오늘</button>
+            </div>
+            {monthPicker && <div className="mt-1 rounded-card border border-line p-2"><MiniMonth anchor={visibleStart} holidays={holidaySet} onPick={(d) => { goto(d); setMonthPicker(false); }} /></div>}
+            <div className="mt-1.5 flex gap-1 text-xs" role="group" aria-label="보기">
+              {([['timeGridDay', '일'], ['timeGrid3', '3일'], ['timeGridWeek', '주'], ['dayGridMonth', '월'], ['listWeek', '목록']] as const).map(([v, l]) => (
+                <button key={v} type="button" onClick={() => calRef.current?.getApi().changeView(v)} aria-pressed={range?.view === v}
+                  className={cx('flex-1 rounded-full border py-1 font-medium', range?.view === v ? 'border-brand-600 bg-brand-600 text-white' : 'border-line text-ink-2')}>{l}</button>
+              ))}
+            </div>
+          </div>
           <FullCalendar
             ref={calRef}
             plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
             timeZone="Asia/Seoul" locale="ko" firstDay={1} height="auto" nowIndicator
-            initialView={mobile ? 'timeGridDay' : 'timeGridWeek'}
+            initialView={savedView ?? 'timeGridWeek'}
             initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
-            headerToolbar={mobile ? { left: 'prev,next', center: 'title', right: 'today' } : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
-            footerToolbar={mobile ? { center: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' } : undefined}
+            headerToolbar={mobile ? false : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
+            views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' } }}
+            // Google 형 날짜 머리: 요일 한 줄 + 날짜 숫자(오늘은 동그라미), 시간 칸 글자 작게
+            dayHeaderContent={(a) => a.view.type.startsWith('timeGrid') ? (
+              <span className="flex flex-col items-center leading-tight" data-day-head>
+                <span className="text-[11px] font-medium">{'일월화수목금토'[a.date.getUTCDay()]}</span>
+                <span className={cx('mt-0.5 flex size-7 items-center justify-center rounded-full text-[15px] font-semibold tabular-nums', a.isToday && 'bg-accent-600 text-white')}>{a.date.getUTCDate()}</span>
+              </span>
+            ) : undefined}
+            slotLabelFormat={mobile ? { hour: 'numeric', hour12: false } : { hour: 'numeric', hour12: true }} // 휴대폰은 "13시"처럼 짧게 → 날짜 칸을 넓게
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
             allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime="06:00:00" scrollTime="08:00:00"
             slotDuration="01:00:00" snapDuration="01:00:00"
             editable selectable selectMirror droppable longPressDelay={350}
             events={fcEvents}
-            datesSet={(a: DatesSetArg) => setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type })}
+            datesSet={(a: DatesSetArg) => { setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view', a.view.type); } catch {} }}
             eventClick={onClick}
             eventReceive={receive}
             eventContent={(arg) => {
@@ -293,16 +333,26 @@ export default function CalendarPage() {
               if (p.type === 'task') {
                 const t = p.task;
                 return (
-                  <div className="flex min-w-0 items-center gap-1 overflow-hidden px-0.5 text-[12px]" data-task-item={t.id}>
+                  <div className="flex min-w-0 items-start gap-1 overflow-hidden px-0.5 text-[12px] max-sm:text-[11px]" data-task-item={t.id}>
                     <button type="button" data-task-check onClick={(e) => { e.stopPropagation(); completeTask(t); }} aria-label={`${t.title} ${t.status === 'done' ? '완료 취소' : '완료'}`}
-                      className={cx('flex size-3.5 shrink-0 items-center justify-center rounded-full border', t.status === 'done' ? 'border-indigo-500 bg-indigo-500 text-white' : 'border-indigo-400 bg-white hover:bg-indigo-50')}>
+                      className={cx('mt-px flex size-3.5 shrink-0 items-center justify-center rounded-full border', t.status === 'done' ? 'border-indigo-500 bg-indigo-500 text-white' : 'border-indigo-400 bg-white hover:bg-indigo-50')}>
                       {t.status === 'done' && <Check className="size-2.5" strokeWidth={3} />}
                     </button>
                     {arg.timeText && <span className="shrink-0 opacity-70">{arg.timeText}</span>}
-                    <span className={cx('truncate font-medium', t.status === 'done' && 'line-through')}>{arg.event.title}</span>
+                    <span className={cx('line-clamp-2 whitespace-normal break-all font-medium leading-tight', t.status === 'done' && 'line-through')}>{arg.event.title}</span>
                   </div>
                 );
               }
+              if (p.type === 'event' && arg.view.type.startsWith('timeGrid') && !arg.event.allDay) {
+                const lt = p.ev.linkedTask;
+                return (
+                  <div className="flex h-full min-w-0 flex-col overflow-hidden px-0.5 leading-tight" data-ev-block>
+                    <span className={cx('break-all text-[12px] font-semibold', lt?.status === 'done' && 'line-through opacity-80')}>{lt && <Check className="mr-0.5 inline size-3 align-[-2px]" strokeWidth={3} aria-label="업무와 연결" />}{arg.event.title}</span>
+                    {arg.timeText && <span className="mt-0.5 text-[11px] opacity-85">{arg.timeText}</span>}
+                  </div>
+                );
+              }
+              if (p.type === 'event' && p.ev.linkedTask) return <div className={cx('flex min-w-0 items-center gap-1 overflow-hidden px-0.5 text-[12px]', p.ev.linkedTask.status === 'done' && 'line-through')}><Check className="size-3 shrink-0" strokeWidth={3} aria-label="업무와 연결" />{arg.timeText && <span className="shrink-0 opacity-80">{arg.timeText}</span>}<span className="truncate font-medium">{arg.event.title}</span></div>;
               if (arg.event.classNames.includes('task-block')) return <div className="flex min-w-0 items-center gap-1 overflow-hidden px-0.5 text-[12px]"><Timer className="size-3 shrink-0" aria-label="업무 시간" />{arg.timeText && <span className="shrink-0 opacity-80">{arg.timeText}</span>}<span className="truncate font-medium">{arg.event.title}</span></div>;
               return true;
             }}
@@ -427,12 +477,16 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
   const [start, setStart] = useState(start0);
   const [end, setEnd] = useState(end0);
   const [priv, setPriv] = useState(false);
+  const [rrule, setRrule] = useState<string | null>(null);
+  const [alsoTask, setAlsoTask] = useState(false);
   const quickForm = useRef<HTMLFormElement>(null);
   const { user } = useSession();
   const [tab, setTab] = useState<'event' | 'task'>('event');
   const [title, setTitle] = useState('');
   const editable = calendars.filter((c) => c.perms?.edit);
   const [calendarId, setCalendarId] = useState(editable.find((c) => c.type === 'personal')?.id ?? editable[0]?.id ?? '');
+  // 캘린더 목록이 늦게 오면(홈에서 바로 열 때) 그때 기본값(내 일정)으로
+  useEffect(() => { if (!calendarId && editable.length) setCalendarId(editable.find((c) => c.type === 'personal')?.id ?? editable[0].id); }, [editable.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState(false);
   const when = allDay ? (endDate && endDate !== date ? `${fmtDateK(date)} ~ ${fmtDateK(endDate)} 종일` : `${fmtDateK(date)} 종일`) : fmtTimeRange(`${date}T${start}:00+09:00`, `${endDate ?? date}T${end}:00+09:00`);
   async function save(e: React.FormEvent) {
@@ -443,10 +497,10 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
       if (tab === 'event') {
         const s = allDay ? `${date}T00:00:00+09:00` : `${date}T${start}:00+09:00`;
         const en = allDay ? `${addDays(endDate ?? date, 1)}T00:00:00+09:00` : `${endDate ?? date}T${end}:00+09:00`;
-        await api('/api/events', { body: { calendarId, title: title.trim(), start: s, end: en, allDay, isPrivate: priv } });
-        toast.ok('일정을 저장했습니다');
+        await api('/api/events', { body: { calendarId, title: title.trim(), start: s, end: en, allDay, isPrivate: priv, rrule, alsoTask } });
+        toast.ok(alsoTask ? '일정을 저장하고 업무에도 추가했습니다' : '일정을 저장했습니다');
       } else {
-        await api('/api/tasks', { body: { title: title.trim(), assigneeId: user.id, dueDate: date, dueTime: allDay ? null : start, approvalRequired: false } });
+        await api('/api/tasks', { body: { title: title.trim(), assigneeId: user.id, dueDate: date, dueTime: allDay ? null : start, approvalRequired: false, recurrenceRule: rrule } });
         toast.ok('업무를 만들었습니다 — 캘린더에 체크로 표시됩니다');
       }
       onSaved();
@@ -479,9 +533,12 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
             {editable.map((c) => <option key={c.id} value={c.id}>{c.type === 'personal' ? '내 일정' : c.name}</option>)}
           </select>
         ) : <p className="mt-2 text-xs text-ink-3">담당: 나 · 관리자 확인 없음 — 업무 캘린더에 체크로 표시됩니다</p>}
+        {/* V5 반복(일정·업무 모두) — 반복 일정 + 업무에도 추가 = 같은 규칙의 반복 업무 */}
+        <div className="mt-2 [&_select]:h-9" data-testid="quick-repeat"><RecurSelect value={rrule} onChange={setRrule} anchorDate={date} /></div>
+        {tab === 'event' && <label className="mt-2 flex items-center gap-2 text-sm font-medium text-ink"><input type="checkbox" className="size-4 accent-brand-600" checked={alsoTask} onChange={(e) => setAlsoTask(e.target.checked)} data-testid="quick-also-task" />업무에도 추가 <span className="text-xs font-normal text-ink-3">(날짜를 바꾸면 서로 따라감)</span></label>}
         {tab === 'event' && <label className="mt-2 flex items-center gap-2 text-sm text-ink-2"><input type="checkbox" className="size-4" checked={priv} onChange={(e) => setPriv(e.target.checked)} />비공개 (다른 사람에게는 &ldquo;바쁨&rdquo;으로만)</label>}
         <div className="mt-4 flex items-center justify-between">
-          {tab === 'event' ? <button type="button" className="text-sm font-medium text-ink-2 hover:text-ink" onClick={() => onMore({ date, allDay, start: start ?? '09:00', end: end ?? '10:00', endDate: endDate ?? date, title, calendarId, isPrivate: priv })}>옵션 더보기</button> : <span />}
+          {tab === 'event' ? <button type="button" className="text-sm font-medium text-ink-2 hover:text-ink" onClick={() => onMore({ date, allDay, start: start ?? '09:00', end: end ?? '10:00', endDate: endDate ?? date, title, calendarId, isPrivate: priv, rrule, alsoTask })}>옵션 더보기</button> : <span />}
           <span className="text-xs text-ink-3">{busy ? '저장 중…' : 'Enter 또는 바깥을 누르면 저장'}</span>
         </div>
       </form>
@@ -512,7 +569,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
       setF({ title: draft?.title ?? '', calendarId: draft?.calendarId ?? personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
-        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate });
+        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, alsoTask: !!draft?.alsoTask });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -563,7 +620,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     try {
       const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, isPrivate: !!f.isPrivate };
       if (!id) {
-        await api('/api/events', { body });
+        await api('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } });
       } else {
         let scope: Scope = 'all';
         if (d.event.recurring_event_id) scope = 'this';
@@ -579,8 +636,9 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     if (d.event.recurring_event_id) scope = 'this';
     else if (d.event.rrule) { const s = await askScope(); if (!s) return; scope = s; }
     else if (!confirm('일정을 삭제할까요?')) return;
+    const alsoTask = askAlsoTask(d.syncTask, scope, isRecurring);
     try {
-      await api(`/api/events/${id}?scope=${scope}${occurrenceStart ? `&occurrenceStart=${encodeURIComponent(occurrenceStart)}` : ''}`, { method: 'DELETE' });
+      await api(`/api/events/${id}?scope=${scope}${occurrenceStart ? `&occurrenceStart=${encodeURIComponent(occurrenceStart)}` : ''}${alsoTask ? '&alsoTask=1' : ''}`, { method: 'DELETE' });
       toast.ok('삭제했습니다'); onSaved(); onClose();
     } catch (er: any) { toast.error(er.message); }
   }
@@ -620,6 +678,16 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
               : <button type="button" className="text-xs text-ink-2 underline" onClick={() => set('endDate')(addDays(f.date, 1))}>다음 날까지</button>}
           </div>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!f.isPrivate} onChange={(e) => set('isPrivate')(e.target.checked)} />비공개 — 다른 사람에게는 시간만 &ldquo;바쁨&rdquo;으로 보입니다</label>
+          {/* V5 일정 ↔ 업무 연동 */}
+          {!id ? (
+            <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!f.alsoTask} onChange={(e) => set('alsoTask')(e.target.checked)} data-testid="editor-also-task" />업무에도 추가 <span className="text-xs font-normal text-ink-3">— 같은 이름·날짜의 업무(담당 나), 날짜를 바꾸면 서로 따라갑니다{f.rrule ? ' · 반복 업무로' : ''}</span></label>
+          ) : d?.syncTask ? (
+            <p className="flex items-center gap-2 text-sm" data-testid="editor-sync-task"><CircleCheck className="size-4 text-emerald-600" />연결된 업무: <Link href={`/tasks/${d.syncTask.id}`} className="font-medium underline">{d.syncTask.title}</Link><span className="text-xs text-ink-3">날짜 연동</span></p>
+          ) : canEdit ? (
+            <button type="button" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline" data-testid="editor-add-task"
+              onClick={async () => { try { await api(`/api/events/${id}`, { method: 'PATCH', body: { alsoTask: true } }); toast.ok('업무에도 추가했습니다'); existing.reload(); onSaved(); } catch (er: any) { toast.error(er.message); } }}>
+              <Plus className="size-4" />업무에도 추가</button>
+          ) : null}
           {(!d?.event?.recurring_event_id) && <div><div className="mb-1 text-xs font-medium text-slate-600">반복</div><RecurSelect value={f.rrule} onChange={set('rrule')} anchorDate={f.date} /></div>}
           <div><div className="mb-1 text-xs font-medium text-slate-600">알림 {isRecurring && <span className="font-normal text-slate-400">(반복 일정 전체에 적용)</span>}</div><ReminderEditor value={f.reminders} onChange={set('reminders')} /></div>
           <div><div className="mb-1 text-xs font-medium text-slate-600">참석자</div><MultiUserSelect value={f.attendeeIds} onChange={set('attendeeIds')} /></div>
@@ -680,8 +748,9 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged }: { 
     if (ev.exception) scope = 'this';
     else if (ev.recurring) { const sc = await askScope(); if (!sc) return; scope = sc; }
     else if (!confirm('일정을 삭제할까요?')) return;
+    const alsoTask = askAlsoTask(ev.linkedTask, scope, !!ev.recurring);
     try {
-      await api(`/api/events/${ev.id}?scope=${scope}${ev.originalStart ? `&occurrenceStart=${encodeURIComponent(new Date(ev.originalStart).toISOString())}` : ''}`, { method: 'DELETE' });
+      await api(`/api/events/${ev.id}?scope=${scope}${ev.originalStart ? `&occurrenceStart=${encodeURIComponent(new Date(ev.originalStart).toISOString())}` : ''}${alsoTask ? '&alsoTask=1' : ''}`, { method: 'DELETE' });
       toast.ok('삭제했습니다'); onChanged();
     } catch (e: any) { toast.error(e.message); }
   }

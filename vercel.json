@@ -8,7 +8,8 @@
     "deploymentEnabled": {
       "main": true,
       "claude/**": false,
-      "local/**": false
+      "local/**": false,
+      "wip/**": false
     }
   }
 }

@@ -126,6 +126,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     location.href = '/login';
   }
   const toggleCollapsed = () => setCollapsed((c) => { writePref('wos_nav_collapsed', c ? '0' : '1'); return !c; });
+  const [fabMenu, setFabMenu] = useState(false);
   const create = (what: 'task' | 'event' | 'project') => {
     setCreateMenu(false);
     if (what === 'task') setQuick(true);
@@ -260,12 +261,25 @@ export function AppShell({ session, children }: { session: Sess; children: React
         <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
           {MOBILE_TABS.slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}
           <div className="flex items-center justify-center">
-            <button onClick={() => setQuick(true)} aria-label="업무 등록" className="-mt-5 flex size-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-pop ring-4 ring-white active:scale-95">
+            <button onClick={() => setFabMenu(true)} aria-label="만들기" aria-haspopup="menu" aria-expanded={fabMenu} data-testid="fab" className="-mt-5 flex size-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-pop ring-4 ring-white active:scale-95">
               <Plus className="size-7" />
             </button>
           </div>
           {MOBILE_TABS.slice(2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.href === '/notifications' ? unread : 0} />)}
         </nav>
+
+        {/* + 버튼: 업무 · 일정 (V5) */}
+        {fabMenu && (
+          <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setFabMenu(false)}>
+            <div role="menu" aria-label="만들기" className="absolute bottom-0 left-0 right-0 animate-fade-up rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()}>
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-200" />
+              <div className="grid grid-cols-2 gap-2">
+                <button role="menuitem" onClick={() => { setFabMenu(false); setQuick(true); }} aria-label="업무 등록" className="flex flex-col items-center gap-1.5 rounded-card border border-line py-4 text-sm font-semibold active:bg-slate-50"><SquarePen className="size-6 text-brand-600" />업무</button>
+                <button role="menuitem" onClick={() => { setFabMenu(false); router.push('/calendar?quick=1'); }} aria-label="일정 등록" className="flex flex-col items-center gap-1.5 rounded-card border border-line py-4 text-sm font-semibold active:bg-slate-50"><CalendarPlus className="size-6 text-emerald-600" />일정</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {more && (
           <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setMore(false)}>

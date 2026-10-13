@@ -24,6 +24,9 @@ export const eventInput = z.object({
   taskId: zUuid.nullable().optional(),
   /** 비공개: 주인·참석자 외에는 제목 없이 "바쁨" */
   isPrivate: z.boolean().optional(),
+  /** V5 "업무에도 추가": 같은 제목·날짜의 업무를 만들고 날짜를 서로 맞춤. 담당(없으면 나) */
+  alsoTask: z.boolean().optional(),
+  taskAssigneeId: zUuid.nullable().optional(),
   version: z.number().int().optional(),
 });
 export type EventInput = z.infer<typeof eventInput>;
@@ -110,9 +113,16 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
         select a.event_id, a.user_id, u.name, a.response from event_attendees a join users u on u.id = a.user_id
         where a.event_id = any(${ids}::uuid[])`
     : [];
+  // V5 "업무에도 추가"로 연결된 업무 (블록 ✓ 표시·완료 시 취소선)
+  const synced = ids.length
+    ? await sql<{ event_id: string; id: string; status: string }[]>`
+        select et.event_id, t.id, t.status from event_tasks et join tasks t on t.id = et.task_id
+        where et.sync and et.event_id = any(${ids}::uuid[]) and t.deleted_at is null`
+    : [];
   const out: any[] = [];
   for (const e of rows) {
     const att = attendees.filter((a) => a.event_id === e.id);
+    const lt = synced.find((x) => x.event_id === e.id);
     // 비공개 일정: 주인·만든 사람·참석자가 아니면 제목·장소·설명·참석자 없이 "바쁨"
     const masked = e.is_private && e.owner_id !== u.id && e.created_by !== u.id && !att.some((a) => a.user_id === u.id);
     if (masked) { e.title = '바쁨'; e.location = ''; e.description = ''; }
@@ -120,6 +130,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
       calendarId: e.calendar_id, calendarName: masked ? '' : e.cal_name, color: e.color, calendarType: e.cal_type,
       kind: e.kind, taskId: masked ? null : e.task_id, attendees: masked ? [] : att, createdBy: e.created_by,
       ownerId: e.owner_id, ownerName: e.owner_name, isPrivate: e.is_private, masked,
+      linkedTask: lt && !masked ? { id: lt.id, status: e.rrule ? null : lt.status } : null,
     };
     if (!e.rrule) {
       out.push({ ...base, id: e.id, seriesId: null, title: e.title, location: e.location, description: e.description,
@@ -209,7 +220,7 @@ export async function createEvent(u: SessionUser, i: EventInput) {
     const { loadTaskForUser } = await import('./access');
     await loadTaskForUser(u, i.taskId, sql);
   }
-  return sql.begin(async (tx) => {
+  const out: { id: string; taskId?: string } = await sql.begin(async (tx) => {
     const [ev] = await tx<{ id: string }[]>`
       insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private)
       values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
@@ -226,6 +237,11 @@ export async function createEvent(u: SessionUser, i: EventInput) {
     await activity(tx, 'event', ev.id, u.id, 'created', { title: i.title, start: s, end: e, rrule: rule });
     return { id: ev.id };
   });
+  if (i.alsoTask) {
+    const { createSyncTask } = await import('./eventtasks');
+    out.taskId = (await createSyncTask(u, out.id, i.taskAssigneeId)).id;
+  }
+  return out;
 }
 
 const EDIT_FIELDS: [keyof EventInput, string][] = [
@@ -273,11 +289,13 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
         set.updated_at = new Date();
         await tx`update events set ${tx(set as never, ...(Object.keys(set) as never[]))}, version = version + 1 where id = ${id}`;
       }
-      // S-8 준비 업무 마감을 일정 날짜에 맞춰 이동
+      // S-8 준비 업무 마감을 일정 날짜에 맞춰 이동, V5 연결 업무 마감도 함께
       if (times && !isSeries && times.s.getTime() !== e.start_at.getTime()) {
-        const { shiftPrepTasks } = await import('./eventtasks');
+        const { shiftPrepTasks, syncTasksFromEvent } = await import('./eventtasks');
         result.prepMoved = await shiftPrepTasks(tx, id, times.s, u.id);
+        result.tasksSynced = await syncTasksFromEvent(tx, id, e.start_at, times.s, i.allDay ?? e.all_day, u.id);
       }
+      if (!isSeries && i.rrule !== undefined) await tx`update tasks set recurrence_rule = ${normalizeRule(i.rrule)}, version = version + 1 where id in (select task_id from event_tasks where event_id = ${id} and sync) and deleted_at is null`;
     } else if (scope.scope === 'this') {
       if (!scope.occurrenceStart) throw badRequest('반복 일정의 어느 회차인지(occurrenceStart) 필요합니다');
       const occ = new Date(scope.occurrenceStart);
@@ -341,6 +359,14 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
       set.updated_at = new Date();
       await tx`update events set ${tx(set as never, ...(Object.keys(set) as never[]))}, version = version + 1 where id = ${master.id}`;
       target = master.id;
+      // V5 연결(반복) 업무: 시간 이동·반복 규칙을 함께
+      if (times && times.s.getTime() !== master.start_at.getTime()) {
+        const { syncTasksFromEvent } = await import('./eventtasks');
+        result.tasksSynced = await syncTasksFromEvent(tx, master.id, master.start_at, times.s, i.allDay ?? master.all_day, u.id);
+      }
+      if (i.rrule !== undefined) await tx`update tasks set recurrence_rule = ${normalizeRule(i.rrule)}, version = version + 1
+        where (id in (select task_id from event_tasks where event_id = ${master.id} and sync) or recurrence_source_id in (select task_id from event_tasks where event_id = ${master.id} and sync))
+          and deleted_at is null and status <> 'done'`;
     }
 
     if (i.attendeeIds) {

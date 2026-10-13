@@ -440,6 +440,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         dedupeKey: `assign:${id}:${set.assignee_id}:${upd.version}` });
     }
     if ('due_date' in set || 'due_time' in set) {
+      // V5 "업무에도 추가"로 연결된 일정도 같은 날짜·시각으로
+      const { syncEventsFromTask } = await import('./eventtasks');
+      await syncEventsFromTask(tx, id, ('due_date' in set ? set.due_date : cur.due_date) as string | null, ('due_time' in set ? set.due_time : cur.due_time_s) as string | null, u.id);
       await notify(tx, { userIds: [cur.assignee_id, ...(await collabIds(tx, id))], type: 'event_changed', title: `마감일 변경: ${title}`,
         body: `${cur.due_date ?? '없음'} → ${set.due_date ?? cur.due_date ?? '없음'}`, link: `/tasks/${id}`, entityType: 'task',
         entityId: id, actorId: u.id, dedupeKey: `due:${id}:${upd.version}` });

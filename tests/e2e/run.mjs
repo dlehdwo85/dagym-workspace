@@ -412,7 +412,8 @@ await step('모바일 대시보드·캘린더·하단 메뉴 화면', async () =
   await staff.getByTestId('calendar').waitFor();
   await staff.waitForTimeout(500);
   await staff.screenshot({ path: `${SHOTS}/18-mobile-calendar.png` });
-  await staff.getByRole('button', { name: '업무 등록' }).click();
+  await staff.getByTestId('fab').click(); // + → 업무 · 일정 메뉴
+  await staff.getByRole('menuitem', { name: '업무 등록' }).click();
   await staff.getByRole('dialog', { name: '업무 등록' }).waitFor();
   await staff.screenshot({ path: `${SHOTS}/19-mobile-quick-add.png` });
 });
@@ -922,7 +923,11 @@ await step('V4 캘린더: 휴대폰 빈 칸 한 번 탭 → 빠른 등록 시트
   await m.goto(`${BASE}/calendar?date=${d}`);
   const lane = m.locator('.fc-timegrid-slot-lane[data-time="14:00:00"]').first();
   await lane.waitFor();
-  await lane.tap();
+  await lane.evaluate((el) => el.scrollIntoView({ block: 'center' })); // 고정 머리줄에 가리지 않게 가운데로
+  // 휴대폰 기본 = 주 보기(V5): 그 날짜 열의 14시 칸을 탭
+  const colBox = await m.locator(`td.fc-timegrid-col[data-date="${d}"]`).boundingBox();
+  const laneBox = await lane.boundingBox();
+  await m.touchscreen.tap(colBox.x + colBox.width / 2, laneBox.y + laneBox.height / 2);
   const sheet = m.getByTestId('quick-create');
   await sheet.waitFor();
   await sheet.getByLabel('빠른 입력 제목').fill('V4 탭 등록');
@@ -1070,6 +1075,60 @@ await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 �
   const hb = await hrow.boundingBox();
   await m.touchscreen.tap(hb.x + hb.width * 0.5, hb.y + hb.height - 3);
   await m.waitForURL(`**/tasks/${hid}`);
+  await mc.close();
+});
+
+await step('V5 휴대폰: 홈 "+일정" → 빠른 등록·업무에도 추가 → 주 보기 블록 제목·업무 연동 → 삭제 시 연결 업무도', async () => {
+  const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  const m = await mc.newPage();
+  await m.goto(BASE + '/');
+  await m.getByTestId('home-create').getByRole('link', { name: '일정' }).click();
+  const sheet = m.getByTestId('quick-create');
+  await sheet.waitFor();
+  await sheet.getByLabel('빠른 입력 제목').fill('V5 홈에서 만든 거래처 미팅 준비');
+  await sheet.getByTestId('quick-also-task').check();
+  await sheet.getByLabel('빠른 입력 제목').press('Enter');
+  await m.getByText('일정을 저장하고 업무에도 추가했습니다').waitFor();
+  const [t] = await sql`select id, to_char(due_date,'YYYY-MM-DD') d, to_char(due_time,'HH24:MI') tm from tasks where title = 'V5 홈에서 만든 거래처 미팅 준비' and deleted_at is null`;
+  const [e] = await sql`select id, to_char(start_at at time zone 'Asia/Seoul','YYYY-MM-DD HH24:MI') s from events where title = 'V5 홈에서 만든 거래처 미팅 준비' and deleted_at is null`;
+  assert.ok(t && e, '일정과 업무 둘 다 생김');
+  assert.equal(`${t.d} ${t.tm}`, e.s, '업무 마감 = 일정 시작');
+  // 긴 제목의 종일 마감 업무도 제목이 보임(줄바꿈)
+  await ctx.owner.ok('POST', '/api/tasks', { title: 'V5 마감 제목이 길어도 두 줄로 보여야 함', assigneeId: ctx.ownerId, dueDate: t.d, approvalRequired: false });
+  await m.goto(`${BASE}/calendar?date=${t.d}`);
+  await m.getByTestId('cal-mobile-head').waitFor();
+  assert.equal(await m.locator('[data-day-head]').count(), 7, '휴대폰 기본 = 주 보기, 요일+날짜 머리');
+  const block = m.locator('[data-ev-block]', { hasText: 'V5 홈에서 만든' }).first();
+  await block.waitFor();
+  assert.ok(await block.getByLabel('업무와 연결').count(), '연결 표시 ✓');
+  assert.ok((await m.locator('[data-task-item]', { hasText: 'V5 마감 제목이 길어도' }).first().innerText()).includes('두 줄로'), '마감 업무 제목이 보임');
+  assert.equal(await m.locator('[data-task-item]', { hasText: 'V5 홈에서 만든' }).count(), 0, '연결 업무는 블록으로만(중복 표시 없음)');
+  assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '주 보기 가로 넘침 없음(390)');
+  await block.scrollIntoViewIfNeeded();
+  await m.screenshot({ path: `${SHOTS}/67-mobile-week-v5-390.png` });
+  await m.setViewportSize({ width: 360, height: 780 });
+  await m.waitForTimeout(300);
+  assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '주 보기 가로 넘침 없음(360)');
+  await m.screenshot({ path: `${SHOTS}/68-mobile-week-v5-360.png` });
+  await m.setViewportSize({ width: 390, height: 844 });
+  // 업무 마감 변경 → 일정 이동
+  const nd = addDays(t.d, 1);
+  await ctx.owner.ok('PATCH', `/api/tasks/${t.id}`, { dueDate: nd });
+  const [e2] = await sql`select to_char(start_at at time zone 'Asia/Seoul','YYYY-MM-DD') d from events where id = ${e.id}`;
+  assert.equal(e2.d, nd, '업무 날짜를 바꾸면 일정도 이동');
+  // 일정 삭제 → "연결된 업무도 삭제할까요?" 확인 → 둘 다 삭제
+  await m.goto(`${BASE}/calendar?date=${nd}`);
+  await m.locator('[data-ev-block]', { hasText: 'V5 홈에서 만든' }).first().click();
+  const msgs = [];
+  m.on('dialog', (dg) => { msgs.push(dg.message()); dg.accept(); });
+  await m.getByTestId('event-preview').getByRole('button', { name: '일정 삭제' }).click();
+  await m.getByText('삭제했습니다').waitFor();
+  assert.ok(msgs.some((x) => x.includes('연결된 업무')), '연결 업무 삭제 확인을 물음');
+  assert.equal((await sql`select deleted_at is not null as del from tasks where id = ${t.id}`)[0].del, true, '연결 업무도 삭제');
+  // + 버튼 메뉴에 업무·일정 둘 다
+  await m.getByTestId('fab').click();
+  await m.getByRole('menuitem', { name: '일정 등록' }).waitFor();
+  await m.getByRole('menuitem', { name: '업무 등록' }).waitFor();
   await mc.close();
 });
 

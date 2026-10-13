@@ -61,3 +61,26 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 
 /* 시간 칸 = 1시간 (V4-4). 한 시간 높이를 Google 캘린더처럼 넉넉히(48px) 두어 1시간 일정도 제목이 보이고 누르기 쉽게 */
 .fc .fc-timegrid-slot { height: 3rem; }
+
+/* V5 Google 형 주 보기: 색을 채운 둥근 블록·흰 글자·제목 줄바꿈, 좁은 시간 열, 현재 시각 선, 오늘 동그라미 */
+.fc .fc-timegrid-event { border-radius: 4px; padding: 2px 3px; box-shadow: 0 0 0 1px #fff; }
+.fc .fc-timegrid-event .fc-event-main { color: #fff; }
+.fc .fc-timegrid-event.task-item .fc-event-main { color: inherit; }
+.fc .fc-daygrid-event.task-item, .fc .fc-daygrid-event.task-item .fc-event-main { white-space: normal; }
+.fc .fc-col-header-cell-cushion:has([data-day-head]) { padding: 4px 0; }
+.fc .fc-day-sun [data-day-head] { color: #dc2626; }
+.fc .fc-timegrid-now-indicator-line { border-color: #ef4444; border-width: 2px 0 0; }
+.fc .fc-timegrid-now-indicator-arrow { border-color: #ef4444; border-width: 5px 0 5px 6px; border-top-color: transparent; border-bottom-color: transparent; }
+.fc .fc-timegrid-col.fc-day-today .fc-timegrid-now-indicator-line::before { content: ''; position: absolute; left: -5px; top: -6px; width: 10px; height: 10px; border-radius: 9999px; background: #ef4444; }
+/* 탭으로 잡은 1시간 블록: 위아래 동그라미 손잡이 */
+.fc .fc-timegrid-event.fc-event-mirror { background: #fff !important; border: 2px solid #6366f1 !important; border-radius: 6px; }
+.fc .fc-timegrid-event.fc-event-mirror::before, .fc .fc-timegrid-event.fc-event-mirror::after { content: ''; position: absolute; width: 10px; height: 10px; border-radius: 9999px; background: #6366f1; }
+.fc .fc-timegrid-event.fc-event-mirror::before { left: -6px; top: -6px; }
+.fc .fc-timegrid-event.fc-event-mirror::after { right: -6px; bottom: -6px; }
+.fc .fc-timegrid-event.fc-event-mirror .fc-event-main { color: #4338ca; }
+@media (max-width: 640px) {
+  .fc .fc-timegrid-slot-label-cushion, .fc .fc-timegrid-axis-cushion { font-size: 11px; padding: 0 2px; }
+  .fc .fc-timegrid-slot-label { vertical-align: top; }
+  .fc .fc-col-header-cell { font-size: 12px; }
+  .fc .fc-timegrid-event { padding: 1px 2px; }
+}

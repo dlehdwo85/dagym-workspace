@@ -2,6 +2,8 @@ import { after } from 'next/server';
 import { handler, body } from '@/lib/api';
 import { db } from '@/lib/db';
 import { deleteEvent, eventInput, loadEvent, scopeSchema, updateEvent } from '@/lib/events';
+import { createSyncTask, syncedTaskIds } from '@/lib/eventtasks';
+import { deleteTask } from '@/lib/tasks';
 import { dispatchPending } from '@/lib/push';
 import { syncCalendarSoon } from '@/lib/google/hooks';
 
@@ -18,14 +20,17 @@ export const GET = handler<{ id: string }>(async ({ user, params }) => {
     return { event: { ...event, title: '바쁨', description: '', location: '', task_id: null, rrule: master.rrule, reminder_minutes: null, masked: true }, perms: { edit: false, attendee: false }, calendar: { ...perms.calendar, name: '' }, attendees: [], attachments: [], task: null };
   }
   const task = event.task_id ? (await sql`select id, title, status from tasks where id = ${event.task_id}`)[0] : null;
-  return { event: { ...event, rrule: master.rrule, reminder_minutes: (master as any).reminder_minutes ?? null }, perms: { edit: perms.edit, attendee: perms.attendee }, calendar: perms.calendar, attendees, attachments, task };
+  // V5 "업무에도 추가"로 연결된 업무
+  const [syncTask] = await sql`select t.id, t.title, t.status from event_tasks et join tasks t on t.id = et.task_id where et.event_id = ${masterId} and et.sync and t.deleted_at is null`;
+  return { event: { ...event, rrule: master.rrule, reminder_minutes: (master as any).reminder_minutes ?? null }, perms: { edit: perms.edit, attendee: perms.attendee }, calendar: perms.calendar, attendees, attachments, task, syncTask: syncTask ?? null };
 });
 
 export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {
   const raw = await req.json();
   const scope = scopeSchema.parse(raw);
   const i = eventInput.partial().parse(raw);
-  const out = await updateEvent(user, params.id, i, scope);
+  const out: Record<string, unknown> = await updateEvent(user, params.id, i, scope);
+  if (i.alsoTask) out.taskId = (await createSyncTask(user, out.id as string, i.taskAssigneeId)).id; // 기존 일정에 "업무에도 추가"
   after(() => dispatchPending().catch(() => {}));
   after(() => syncCalendarSoon(null, params.id).catch(() => {}));
   return out;
@@ -35,7 +40,13 @@ export const DELETE = handler<{ id: string }>(async ({ req, user, params }) => {
   const p = req.nextUrl.searchParams;
   const scope = scopeSchema.parse({ scope: p.get('scope') ?? 'all', occurrenceStart: p.get('occurrenceStart') ?? undefined });
   const { event } = await loadEvent(user, params.id);
-  const out = await deleteEvent(user, params.id, scope);
+  // V5 "연결된 업무도 삭제" (반복 일정은 전체 삭제일 때만)
+  const alsoTask = p.get('alsoTask') === '1' && (scope.scope === 'all' || (!event.rrule && !event.recurring_event_id));
+  const taskIds = alsoTask ? await syncedTaskIds(db(), event.recurring_event_id ?? event.id) : [];
+  const out: Record<string, unknown> = await deleteEvent(user, params.id, scope);
+  let tasksDeleted = 0;
+  for (const t of taskIds) { try { await deleteTask(user, t); tasksDeleted++; } catch { /* 삭제 권한 없는 업무는 남김 */ } }
+  if (alsoTask) { out.tasksDeleted = tasksDeleted; out.tasksKept = taskIds.length - tasksDeleted; }
   after(() => dispatchPending().catch(() => {}));
   after(() => syncCalendarSoon(event.calendar_id).catch(() => {}));
   return out;

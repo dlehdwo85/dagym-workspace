@@ -1235,3 +1235,63 @@ describe('WORKIN_V4 본사 사람끼리 일정 보기 · 비공개', () => {
     assert.ok((await ctx.owner.ok('GET', q)).events.some((e) => e.id === mine && e.ownerId === me.id));
   });
 });
+
+describe('WORKIN_V5 일정 ↔ 업무 연동 ("업무에도 추가") · 반복', () => {
+  test('일정 만들 때 업무에도 추가 → 같은 날짜 업무, 일정 이동 → 마감 이동, 마감 변경 → 일정 이동, 연결 삭제', async () => {
+    const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    const d = addDays(today, 4);
+    const r = await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: 'V5 거래처 방문', start: `${d}T14:00:00+09:00`, end: `${d}T15:30:00+09:00`, alsoTask: true });
+    assert.ok(r.taskId, '연결 업무 생성');
+    let t = (await ctx.owner.ok('GET', `/api/tasks/${r.taskId}`)).task;
+    assert.equal(t.title, 'V5 거래처 방문'); assert.equal(t.due_date, d); assert.equal(t.due_time, '14:00');
+    assert.equal(t.assignee_id, ctx.ownerId); assert.equal(t.requested_by, ctx.ownerId);
+    const det = await ctx.owner.ok('GET', `/api/events/${r.id}`);
+    assert.equal(det.syncTask.id, r.taskId);
+    const q = `/api/events?from=${d}T00:00:00%2B09:00&to=${addDays(d, 1)}T00:00:00%2B09:00`;
+    assert.equal((await ctx.owner.ok('GET', q)).events.find((e) => e.id === r.id).linkedTask.id, r.taskId, '캘린더 블록에 연결 표시');
+    // 일정 이동 → 업무 마감 이동
+    const d2 = addDays(d, 2);
+    await ctx.owner.ok('PATCH', `/api/events/${r.id}`, { start: `${d2}T09:00:00+09:00`, end: `${d2}T10:30:00+09:00` });
+    t = (await ctx.owner.ok('GET', `/api/tasks/${r.taskId}`)).task;
+    assert.equal(t.due_date, d2); assert.equal(t.due_time, '09:00');
+    // 업무 마감 변경 → 일정 이동(길이 유지)
+    const d3 = addDays(d, 5);
+    await ctx.owner.ok('PATCH', `/api/tasks/${r.taskId}`, { dueDate: d3, dueTime: '16:00' });
+    const ev = (await ctx.owner.ok('GET', `/api/events/${r.id}`)).event;
+    assert.equal(new Date(ev.start_at).toISOString(), new Date(`${d3}T16:00:00+09:00`).toISOString());
+    assert.equal(new Date(ev.end_at).getTime() - new Date(ev.start_at).getTime(), 90 * 60000, '길이 유지');
+    const le = (await ctx.owner.ok('GET', `/api/tasks/${r.taskId}/events`)).events ?? (await ctx.owner.ok('GET', `/api/tasks/${r.taskId}/events`));
+    assert.ok(JSON.stringify(le).includes(r.id), '업무 상세에 연결된 일정');
+    // 일정 삭제 + 연결 업무도 삭제
+    const del = await ctx.owner.ok('DELETE', `/api/events/${r.id}?scope=all&alsoTask=1`);
+    assert.equal(del.tasksDeleted, 1);
+    assert.equal((await ctx.owner.get(`/api/tasks/${r.taskId}`)).status, 404);
+    // 반대 방향: 업무 삭제 + 연결 일정도 삭제, 그냥 삭제면 일정은 남음
+    const r2 = await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: 'V5 둘째', start: `${d}T10:00:00+09:00`, end: `${d}T11:00:00+09:00`, alsoTask: true });
+    const del2 = await ctx.owner.ok('DELETE', `/api/tasks/${r2.taskId}?alsoEvent=1`);
+    assert.equal(del2.eventsDeleted, 1);
+    assert.equal((await ctx.owner.get(`/api/events/${r2.id}`)).status, 404);
+    const r3 = await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: 'V5 셋째', start: `${d}T11:00:00+09:00`, end: `${d}T12:00:00+09:00` });
+    const linked = await ctx.owner.ok('PATCH', `/api/events/${r3.id}`, { alsoTask: true });
+    assert.ok(linked.taskId, '기존 일정에도 업무에도 추가');
+    await ctx.owner.ok('DELETE', `/api/tasks/${linked.taskId}`);
+    await ctx.owner.ok('GET', `/api/events/${r3.id}`);
+  });
+  test('반복 일정 + 업무에도 추가 = 같은 규칙의 반복 업무 하나, 완료하면 다음 회차', async () => {
+    const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    const d = addDays(today, 1);
+    const r = await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: 'V5 주간 회의', start: `${d}T09:00:00+09:00`, end: `${d}T10:00:00+09:00`, rrule: 'FREQ=WEEKLY;COUNT=4', alsoTask: true });
+    const t = (await ctx.owner.ok('GET', `/api/tasks/${r.taskId}`)).task;
+    assert.match(t.recurrence_rule, /FREQ=WEEKLY/); assert.equal(t.due_date, d);
+    assert.equal((await sql`select count(*)::int n from tasks where title = 'V5 주간 회의' and deleted_at is null`)[0].n, 1, '회차마다 만들지 않음');
+    await ctx.owner.ok('PATCH', `/api/tasks/${r.taskId}`, { status: 'done', version: t.version });
+    const next = await sql`select to_char(due_date,'YYYY-MM-DD') d from tasks where recurrence_source_id = ${r.taskId} and deleted_at is null`;
+    assert.equal(next[0]?.d, addDays(d, 7), '다음 회차 업무');
+  });
+  test('권한: 볼 수 없는 사람(현장 직원)은 대표 개인 일정에 업무 연결 불가(404)', async () => {
+    const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    const d = addDays(today, 3);
+    const r = await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: 'V5 권한', start: `${d}T10:00:00+09:00`, end: `${d}T11:00:00+09:00` });
+    assert.equal((await ctx.staffA.client.req('PATCH', `/api/events/${r.id}`, { alsoTask: true })).status, 404);
+  });
+});

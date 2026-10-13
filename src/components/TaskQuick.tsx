@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUpDown, CalendarDays, Check, Plus, UserRound, X } from 'lucide-react';
+import { ArrowUpDown, CalendarDays, Check, Plus, Repeat, UserRound, X } from 'lucide-react';
+import { recurPresets } from './pickers';
 import { api, broadcastRefresh } from './client';
 import { useSession } from './session';
 import { Avatar, DueChip, cx, toast, todayStr } from './ui';
@@ -95,6 +96,29 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
   );
 }
 
+/** V5 반복 칩: 안 함·매일·평일·매주·매월… (반복은 마감일 기준 — 마감이 없으면 오늘을 마감으로) */
+export function RepeatChip({ value, anchorDate, onChange }: { value: string | null; anchorDate: string | null; onChange: (v: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const presets = recurPresets(anchorDate ?? todayStr());
+  const cur = presets.find((p) => p.rule === value);
+  return (
+    <span className="relative inline-flex">
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`반복: ${value ? cur?.label ?? '사용자 지정' : '안 함'}`} aria-haspopup="dialog" aria-expanded={open} data-testid="repeat-chip"
+        className={cx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-slate-100', value ? 'font-medium text-accent-700' : 'text-ink-3')}>
+        <Repeat className="size-3.5" />{value ? cur?.label ?? '반복' : ''}
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref}>
+        {presets.map((p) => (
+          <button key={p.label} type="button" onClick={() => { onChange(p.rule); setOpen(false); }} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
+            {p.label}{p.rule === value && <Check className="size-3.5 text-accent-600" />}
+          </button>
+        ))}
+      </Popover>
+    </span>
+  );
+}
+
 /**
  * Asana 형 한 줄 업무 추가: 제목 입력 → Enter 로 즉시 생성(담당 = 나), 연속 입력.
  * 같은 줄의 담당자·마감일 칩으로 바로 지정. 관리자 최종 확인은 기본 꺼짐, 소속은 프로젝트/내 소속(본사)으로 자동.
@@ -111,6 +135,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const [due, setDue] = useState<string | null>(defaultDue ?? null);
   const initRequester = defaultRequester ?? user.id;
   const [requester, setRequester] = useState<string | null>(initRequester);
+  const [rrule, setRrule] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
@@ -123,8 +148,8 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     if (!t || busyRef.current) return;
     busyRef.current = true; setBusy(true); setErr(null);
     try {
-      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: due, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
-      setTitle('');
+      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: rrule && !due ? todayStr() : due, recurrenceRule: rrule, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
+      setTitle(''); setRrule(null);
       markNew(r.id);
       const who = assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
       toast.ok(`${who}에게 추가됨: ${t}`, { label: '보기', run: () => { window.location.href = `/tasks/${r.id}`; } });
@@ -134,7 +159,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
       setErr(e.message ?? '저장하지 못했습니다');
     } finally { busyRef.current = false; setBusy(false); if (refocus) input.current?.focus(); }
   }
-  const showChips = !!(title || due || assignee !== initAssignee || requester !== initRequester || autoFocus);
+  const showChips = !!(title || due || rrule || assignee !== initAssignee || requester !== initRequester || autoFocus);
   // 저장 버튼 없이 (WORKIN_AUTOSAVE): Enter·키보드 완료 또는 이 줄을 벗어나면 제목이 있을 때 자동 저장.
   // 같은 줄의 칩(마감·담당·지시)이나 그 선택 창을 누르는 동안은 저장하지 않고, 고른 뒤 입력칸으로 돌아온다.
   const formRef = useRef<HTMLFormElement>(null);
@@ -171,6 +196,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
             <span className="hidden sm:inline-flex" title="지시자(업무를 부여한 사람)"><span className="self-center text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={back((v: string | null) => setRequester(v ?? user.id))} size={20} withName /></span>
             <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" />
             <AssigneePicker value={assignee} onChange={back(setAssignee)} />
+            <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
           </>
         )}
         {busy && <span className="shrink-0 text-xs text-ink-3" data-testid="inline-saving">저장 중…</span>}

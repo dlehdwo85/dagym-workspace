@@ -135,7 +135,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   }
   async function del() {
     if (!confirm('이 업무와 하위 업무를 삭제할까요?')) return;
-    try { await api(`/api/tasks/${id}`, { method: 'DELETE' }); toast.ok('삭제했습니다'); broadcastRefresh(); if (onClose) onClose(); else router.push('/tasks'); } catch (e: any) { toast.error(e.message); }
+    // V5 "업무에도 추가"로 연결된 일정: 함께 지울지 묻는다 (반복 업무는 일정 시리즈 전체가 지워지므로 묻지 않고 남김)
+    const synced = (events.data?.events ?? []).filter((e: any) => e.sync);
+    const alsoEvent = synced.length > 0 && !data?.task?.recurrence_rule && confirm(`연결된 일정 '${synced[0].title}'도 함께 삭제할까요?\n취소를 누르면 업무만 삭제하고 일정은 남깁니다.`);
+    try { await api(`/api/tasks/${id}${alsoEvent ? '?alsoEvent=1' : ''}`, { method: 'DELETE' }); toast.ok('삭제했습니다'); broadcastRefresh(); if (onClose) onClose(); else router.push('/tasks'); } catch (e: any) { toast.error(e.message); }
   }
   async function saveTemplate() {
     const name = prompt('템플릿 이름', t.title);
@@ -144,7 +147,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   }
 
   // "필드 더보기" 안에 값이 들어 있는 항목 수
-  const moreSet = [t.start_date, t.priority !== 'normal', t.estimate_minutes, t.task_type && t.task_type !== 'normal', t.recurrence_rule, t.tags?.length, t.approval_line_id,
+  const moreSet = [t.start_date, t.priority !== 'normal', t.estimate_minutes, t.task_type && t.task_type !== 'normal', t.tags?.length, t.approval_line_id,
     Number(t.photo_required ?? 0) > 0, t.approval_required, data.collaborators?.length, data.dependencies?.length].filter(Boolean).length;
   const photoNeed = Number(t.photo_required ?? 0);
   const photoHave = Number(t.photo_count ?? 0);
@@ -289,6 +292,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle className="size-3.5" />마감 위험</span>}
             </span>
           </Prop>
+          <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:h-8 [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line" data-testid="detail-repeat">{t.due_date || t.recurrence_rule ? <RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /> : <span className="px-2 text-xs text-ink-3">마감일을 정하면 반복할 수 있습니다</span>}</div></Prop>
           <Prop icon={FolderKanban} label="프로젝트">
             <select className={ghostCls} value={t.project_id ?? ''} onChange={(e) => patch({ projectId: e.target.value || null })}>
               <option value="">없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -340,7 +344,6 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </Prop>
           <Prop icon={Building2} label="소속 (현장·부서)"><UnitSelect className={ghostCls} value={t.org_unit_id} onChange={(v) => patch({ orgUnitId: v })} /></Prop>
           <Prop icon={Tag} label="브랜드"><BrandSelect className={ghostCls} value={t.brand_id} onChange={(v) => patch({ brandId: v })} /></Prop>
-          <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:h-8 [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line"><RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /></div></Prop>
           <Prop icon={Hash} label="태그">
             <input className={ghostCls} placeholder="쉼표로 구분" defaultValue={t.tags.join(', ')} onBlur={(e) => { const v = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); if (v.join() !== t.tags.join()) patch({ tags: v }); }} />
           </Prop>
@@ -437,6 +440,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                   <span className="h-6 w-1 shrink-0 rounded-full" style={{ background: e.color }} />
                   {e.kind === 'task_block' ? <Timer className="size-4 shrink-0 text-ink-2" aria-label="업무 시간" /> : <CalendarDays className="size-4 shrink-0 text-ink-2" />}
                   <span className="min-w-0 flex-1 truncate font-medium">{e.title.replace(/^(\[(업무|업무 시간)\]\s*)+/, '')}</span>
+                  {e.sync && <span className="shrink-0 rounded-full bg-emerald-50 px-1.5 text-[11px] font-medium text-emerald-700" title="마감을 바꾸면 일정도 같이 옮겨집니다">날짜 연동</span>}
                   <span className="shrink-0 text-xs text-ink-2 tabular-nums">{fmtTimeRange(e.occurrence_start ?? e.start_at, e.occurrence_start ? new Date(new Date(e.occurrence_start).getTime() + (new Date(e.end_at).getTime() - new Date(e.start_at).getTime())) : e.end_at, { allDay: e.all_day })}{e.rrule && !e.occurrence_start ? ' · 반복' : ''}</span>
                 </Link>
               </li>

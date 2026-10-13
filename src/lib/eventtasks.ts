@@ -49,9 +49,9 @@ export async function linkedEvents(u: SessionUser, taskId: string) {
   const sql = db();
   await loadTaskForUser(u, taskId, sql);
   const rows = await sql<any[]>`
-    select distinct on (e.id) e.id, e.title, e.start_at, e.end_at, e.all_day, e.kind, e.rrule, c.color, c.name as calendar_name, et.role, et.occurrence_start
+    select distinct on (e.id) e.id, e.title, e.start_at, e.end_at, e.all_day, e.kind, e.rrule, c.color, c.name as calendar_name, et.role, et.occurrence_start, et.sync
     from event_tasks et join events e on e.id = et.event_id join calendars c on c.id = e.calendar_id
-    where et.task_id = ${taskId} and e.deleted_at is null order by e.id, e.start_at`;
+    where et.task_id in (select ${taskId}::uuid union select recurrence_source_id from tasks where id = ${taskId} and recurrence_source_id is not null) and e.deleted_at is null order by e.id, e.start_at`;
   const out = [];
   for (const r of rows) {
     try { await loadEvent(u, r.id, sql); out.push(r); } catch { /* 권한 밖 일정은 숨김 */ }
@@ -256,4 +256,76 @@ export async function seriesTasksJob(now = new Date(), onlyRuleId?: string) {
     }
   }
   return { created, cancelled };
+}
+
+// ---- V5 일정 ↔ 업무 연동 ("업무에도 추가") ----
+const seoulHM = (d: Date) => DateTime.fromJSDate(d).setZone(TZ).toFormat('HH:mm');
+const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+
+/**
+ * 일정과 같은 내용의 업무를 만들고 날짜 동기화 연결(sync)한다.
+ * 마감 = 일정 날짜(종일이 아니면 시작 시각), 담당 = 지정한 사람(없으면 나), 지시자 = 나.
+ * 반복 일정이면 같은 규칙의 반복 업무 하나로 연결한다(회차마다 따로 만들지 않음).
+ */
+export async function createSyncTask(u: SessionUser, eventId: string, assigneeId?: string | null) {
+  const sql = db();
+  const c = await eventCtx(u, eventId, sql);
+  if (!c.canWork) throw forbidden('일정 작성자·편집 권한자·참석자만 업무를 만들 수 있습니다');
+  const [m] = await sql<{ title: string; start_at: Date; all_day: boolean; rrule: string | null }[]>`select title, start_at, all_day, rrule from events where id = ${c.masterId}`;
+  const already = await sql`select 1 from event_tasks where event_id = ${c.masterId} and sync`;
+  if (already.length) throw badRequest('이미 연결된 업무가 있습니다');
+  const orgUnitId = await defaultUnit(sql, c.cal, assigneeId, u);
+  const { id } = await createTask(u, {
+    title: m.title, assigneeId: assigneeId ?? u.id, requestedById: u.id, orgUnitId, approvalRequired: false,
+    dueDate: seoulDateOf(m.start_at), dueTime: m.all_day ? null : seoulHM(m.start_at), recurrenceRule: m.rrule ?? null,
+    description: `일정 '${m.title}' 과 연결된 업무 — 날짜를 바꾸면 일정도 함께 바뀝니다`,
+  } as never);
+  await sql`insert into event_tasks (event_id, task_id, role, sync, created_by) values (${c.masterId}, ${id}, 'link', true, ${u.id})
+    on conflict (event_id, task_id) do update set sync = true`;
+  return { id };
+}
+
+/** 일정 시간이 바뀌면 연결 업무(반복이면 아직 안 끝난 회차들)의 마감을 같은 만큼 옮긴다 */
+export async function syncTasksFromEvent(tx: Sql, eventId: string, oldStart: Date, newStart: Date, allDay: boolean, actorId: string) {
+  const shift = dayDiff(seoulDateOf(oldStart), seoulDateOf(newStart));
+  const time = allDay ? null : seoulHM(newStart);
+  const rows = await tx<{ id: string; due_date: string | null; due_time: string | null }[]>`
+    select t.id, to_char(t.due_date, 'YYYY-MM-DD') as due_date, to_char(t.due_time, 'HH24:MI') as due_time
+    from event_tasks et join tasks t on (t.id = et.task_id or t.recurrence_source_id = et.task_id)
+    where et.event_id = ${eventId} and et.sync and t.deleted_at is null and t.status <> 'done' and t.due_date is not null`;
+  for (const r of rows) {
+    const due = shift ? addDays(r.due_date!, shift) : r.due_date!;
+    if (due === r.due_date && time === r.due_time) continue;
+    await tx`update tasks set due_date = ${due}, due_time = ${time}, version = version + 1, updated_at = now() where id = ${r.id}`;
+    await activity(tx, 'task', r.id, actorId, 'updated', { dueDate: { from: r.due_date, to: due }, dueTime: { from: r.due_time, to: time }, via: 'event', eventId });
+  }
+  return rows.length;
+}
+
+/** 업무 마감이 바뀌면 연결된 (반복 아닌) 일정을 그 날짜·시각으로 옮긴다. 길이 유지, 시각이 없으면 날짜만 이동 */
+export async function syncEventsFromTask(tx: Sql, taskId: string, dueDate: string | null, dueTime: string | null, actorId: string) {
+  if (!dueDate) return 0;
+  const evs = await tx<{ id: string; start_at: Date; end_at: Date; all_day: boolean }[]>`
+    select e.id, e.start_at, e.end_at, e.all_day from event_tasks et join events e on e.id = et.event_id
+    where et.task_id = ${taskId} and et.sync and e.deleted_at is null and e.rrule is null and e.recurring_event_id is null`;
+  for (const e of evs) {
+    const dur = e.end_at.getTime() - e.start_at.getTime();
+    let ns: Date;
+    if (e.all_day || !dueTime) ns = new Date(e.start_at.getTime() + dayDiff(seoulDateOf(e.start_at), dueDate) * 86400000);
+    else ns = DateTime.fromISO(`${dueDate}T${dueTime}`, { zone: TZ }).toJSDate();
+    if (ns.getTime() === e.start_at.getTime()) continue;
+    await tx`update events set start_at = ${ns}, end_at = ${new Date(ns.getTime() + dur)}, version = version + 1, updated_at = now() where id = ${e.id}`;
+    await activity(tx, 'event', e.id, actorId, 'updated', { start: ns, via: 'task', taskId });
+  }
+  return evs.length;
+}
+
+/** 연결(sync) 상대 id 목록: 업무 삭제 확인·일정 삭제 확인용 */
+export async function syncedTaskIds(sql: Sql, eventId: string) {
+  return (await sql<{ id: string }[]>`select t.id from event_tasks et join tasks t on (t.id = et.task_id or t.recurrence_source_id = et.task_id)
+    where et.event_id = ${eventId} and et.sync and t.deleted_at is null`).map((r) => r.id);
+}
+export async function syncedEventIds(sql: Sql, taskId: string) {
+  return (await sql<{ id: string }[]>`select e.id from tasks t join event_tasks et on et.task_id = coalesce(t.recurrence_source_id, t.id) and et.sync
+    join events e on e.id = et.event_id where t.id = ${taskId} and e.deleted_at is null`).map((r) => r.id);
 }

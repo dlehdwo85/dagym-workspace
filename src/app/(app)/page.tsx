@@ -1,11 +1,12 @@
 'use client';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, CalendarDays, CalendarRange, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, MessageSquare, PlusCircle, Users, Activity as ActivityIcon } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, MessageSquare, PlusCircle, Users, Activity as ActivityIcon } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
 import { InlineAddTask } from '@/components/TaskQuick';
+import { QuickAddTask } from '@/components/QuickAddTask';
 import { useRowOpen } from '@/components/rowOpen';
 import { useRouter } from 'next/navigation';
 
@@ -115,6 +116,7 @@ export default function Dashboard() {
   const { user, dir } = useSession();
   const { data, error, loading, reload } = useApi<any>('/api/dashboard');
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const [addTask, setAddTask] = useState(false);
   const mine = useApi<{ tasks: any[] }>('/api/tasks?view=today&limit=50');
   // 내 미완료 업무 전체: 이번 주 마감(요일별 표시)·마감 없는 새 업무(48시간)
   const myOpen = useApi<{ tasks: any[] }>('/api/tasks?view=my&limit=300');
@@ -184,6 +186,12 @@ export default function Dashboard() {
         <p className="text-sm text-ink-2">{fmtDate(data.today)} · {greet}, {user.name}님</p>
         <h1 className="mt-0.5 text-2xl font-bold tracking-tight">{company ? '전체 현황' : `${user.name}님의 업무 현황`}</h1>
       </div>
+      {/* V5 홈에서 바로 만들기: 일정은 캘린더와 같은 빠른 등록 시트, 업무는 등록 창 */}
+      <div className="flex gap-2" data-testid="home-create">
+        <Link href="/calendar?quick=1" className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-input border border-line bg-white text-sm font-semibold shadow-card hover:bg-slate-50 sm:flex-none sm:px-4"><CalendarPlus className="size-4 text-emerald-600" />일정</Link>
+        <button type="button" onClick={() => setAddTask(true)} className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-input border border-line bg-white text-sm font-semibold shadow-card hover:bg-slate-50 sm:flex-none sm:px-4"><PlusCircle className="size-4 text-brand-600" />업무</button>
+      </div>
+      <QuickAddTask open={addTask} onClose={() => setAddTask(false)} onCreated={() => { mine.reload(); myOpen.reload(); reload(); }} />
       {tot.overdue > 0 && (
         <Link href="/tasks?view=overdue" className="flex items-center gap-2 rounded-card border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 hover:bg-red-100" data-testid="overdue-banner">
           <AlertTriangle className="size-5 shrink-0" />기한 지난 업무 {tot.overdue}건<span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium">확인하기<ArrowRight className="size-3.5" /></span>

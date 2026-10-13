@@ -3,6 +3,9 @@ import { handler, body } from '@/lib/api';
 import { deleteTask, getTaskDetail, taskInput, updateTask } from '@/lib/tasks';
 import { dispatchPending } from '@/lib/push';
 import { syncTaskBlocksSoon } from '@/lib/google/hooks';
+import { db } from '@/lib/db';
+import { deleteEvent } from '@/lib/events';
+import { syncedEventIds } from '@/lib/eventtasks';
 
 export const GET = handler<{ id: string }>(async ({ user, params }) => getTaskDetail(user, params.id));
 
@@ -13,4 +16,12 @@ export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {
   return out;
 });
 
-export const DELETE = handler<{ id: string }>(async ({ user, params }) => deleteTask(user, params.id));
+export const DELETE = handler<{ id: string }>(async ({ req, user, params }) => {
+  // V5 "연결된 일정도 삭제" (?alsoEvent=1)
+  const evIds = req.nextUrl.searchParams.get('alsoEvent') === '1' ? await syncedEventIds(db(), params.id) : [];
+  const out: Record<string, unknown> = await deleteTask(user, params.id);
+  let eventsDeleted = 0;
+  for (const e of evIds) { try { await deleteEvent(user, e, { scope: 'all' }); eventsDeleted++; } catch { /* 권한 없는 일정은 남김 */ } }
+  if (evIds.length) { out.eventsDeleted = eventsDeleted; out.eventsKept = evIds.length - eventsDeleted; }
+  return out;
+});
