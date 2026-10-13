@@ -92,3 +92,6 @@
 - C 드라이브 0MB → 대표 승인 후 로컬 .next(351MB)·android-run 폴더 삭제, 중단된 merge 잔여물은 git stash 로 보관 후 fast-forward. 여유 ~340MB(근본 원인: Claude VM 번들 등).
 
 - 2026-10-14 V7(653d53f, mig 020)·V8(1fd88e0·05a8ae2, mig 022) 자동 배포 확인. 대표 결정 대기: 첨부 저장소(R2 추천, fileStorage local-disk), 분 단위 알림(cron-job.org 추천 — CRON_SECRET 은 sensitive 로 값 확인 불가 → 대표가 새 값을 정해 Vercel·cron-job.org 양쪽 입력 필요).
+
+## 2026-10-14 휴대폰 예약 알림 네이티브(로컬)
+- 190f263(클라우드: local-notifications 플러그인·예약 로직) 후 Android Manifest 에 USE_EXACT_ALARM(13+)·SCHEDULE_EXACT_ALARM(≤12)·RECEIVE_BOOT_COMPLETED 추가. Play 정확한 알람 권한 선언(캘린더 앱) 필요 → 업로드 시 처리. 앱 빌드: Android 다음 vc, iOS 1.0.3.
