@@ -757,6 +757,8 @@ describe('알림: 서버 정기 실행·중복 방지·푸시 발송·실패 기
     const msg = st.fcm.find((m) => m.token === 'fcm-token-good');
     assert.ok(msg, 'FCM 수신');
     assert.equal(msg.data.link, `/tasks/${t}`, '알림 탭 → 해당 업무로 이동할 링크');
+    assert.ok(msg.data.notificationId, '탭 시 읽음 처리할 알림 id');
+    assert.equal(msg.android.notification.click_action, undefined, 'click_action 없음(앱 기본 activity 로 열려야 탭 데이터가 전달됨)');
     assert.ok(st.webpush.some((w) => w.path === '/webpush/abc'), '웹 푸시 수신');
     const dead = await sql`select disabled_at from push_subscriptions where endpoint = 'fcm-token-dead'`;
     assert.ok(dead[0].disabled_at, '무효 토큰 비활성화');

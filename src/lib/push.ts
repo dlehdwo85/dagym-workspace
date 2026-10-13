@@ -64,7 +64,8 @@ async function sendFcm(token: string, p: Payload) {
         token,
         notification: { title: p.title, body: p.body },
         data: { link: p.link, notificationId: p.notificationId },
-        android: { priority: 'HIGH', notification: { channel_id: 'work', click_action: 'FCM_PLUGIN_ACTIVITY' } },
+        // click_action 없음: 기본(앱 실행 activity)으로 열려야 data(link·notificationId)가 앱의 notificationActionPerformed 로 전달된다
+        android: { priority: 'HIGH', notification: { channel_id: 'work' } },
         apns: { payload: { aps: { sound: 'default' } } },
       },
     }),

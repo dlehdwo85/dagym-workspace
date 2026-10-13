@@ -207,6 +207,15 @@ S-P2(ICS 구독·회의실 예약·휴가 결재·내보내기/휴지통/2단계
 - 운영 DB 확인(오늘 done/on_hold 로 바뀐 업무·변경자)은 클라우드에 접속 정보가 없어 못 함 — 로컬에서 `select a.created_at, u.name, t.title, a.changes from activities a join users u on u.id=a.actor_id join tasks t on t.id=a.entity_id where a.entity_type='task' and a.changes ? 'status' and a.created_at::date = current_date order by 1` 로 확인 부탁.
 - 시험: E2E 밀기 단계 교체(기본 꺼짐·30px·세로 무시·45% 완료·되돌리기), 47/47.
 
+### 2026-10-13 · WORKIN_PUSH_TAP (알림 눌러도 화면 이동 안 함) — 서버·웹 코드만
+- ✅ `src/lib/push.ts`: Android `click_action: 'FCM_PLUGIN_ACTIVITY'` 제거 → 알림 탭이 기본 실행 activity(MainActivity, singleTask)로 열리고 data(link·notificationId)가 `notificationActionPerformed` 로 전달됨. iOS 는 그대로.
+- ✅ `src/components/native.ts`: 탭 리스너를 initNative 맨 앞(모든 await 전)에 등록, 탭 → 해당 화면 이동 + 그 알림 읽음 처리(/api/notifications/read) + 화면 새로고침.
+- ⚠ **앱이 완전히 꺼진 상태에서 알림으로 켜질 때**: `@capacitor-firebase/messaging` Android 플러그인은 `handleOnNewIntent` 에서만 탭을 처리하고 **최초 실행 intent 는 보지 않음**(FirebaseMessagingPlugin.java load()·handleOnNewIntent 확인). 이 경우는 웹 코드만으로는 못 고침 → **로컬 요청(네이티브, 새 빌드 필요)**: `MainActivity.onCreate` 끝에
+  `Intent i = getIntent(); if (i != null && i.getExtras() != null && i.getExtras().containsKey("google.message_id")) bridge.onNewIntent(i);`
+  (플러그인이 이벤트를 retain=true 로 보내므로 웹 리스너가 붙는 순간 받음). 앱이 백그라운드에 살아 있을 때는 이번 서버·웹 수정만으로 동작해야 함.
+- 확인 요청(로컬): 운영 배포 후 대표 삼성 휴대폰으로 시험 푸시(링크 /tasks/…) → ① 앱 백그라운드 상태 탭 → 해당 업무 열림·알림 읽음 ② 앱 종료 상태 탭(네이티브 수정 전에는 앱만 열릴 수 있음).
+- 시험: API 91/91 (FCM 메시지에 click_action 없음·notificationId 포함 검사 추가). 실기기 확인 전이라 "동작 확인 완료"가 아님.
+
 ### 2026-10-13 · WORKIN_V4_CALENDAR 4-1~4-4 나머지 + WORKIN_AUTOSAVE + R-14
 - ✅ 4-1 캘린더 주/일 보기 시간 칸 = **1시간**(slotDuration·snapDuration 01:00), 한 시간 높이 48px. 탭/클릭 = 정각 1시간, 끌기도 1시간 단위. 세밀한 시각은 등록 창 15분 목록. ⛔ 설정 "기본 일정 길이" 는 아직 없음(1시간 고정).
 - ✅ 4-2 업무 마감 = 종일 칸 "마감: 업무명", 칩 이름 "업무 마감"(켜고 끔·사람 필터 연동은 기존 업무 표시 스위치 그대로).

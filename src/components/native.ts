@@ -21,10 +21,15 @@ export async function initNative(router: Router) {
       router.push(u.pathname + u.search + u.hash);
     } catch {}
   };
+  // 알림 탭 리스너는 맨 먼저(어떤 await 보다 앞) 등록: 플러그인이 보관해 둔 탭 이벤트를 바로 받아 해당 화면으로 이동하고 그 알림을 읽음 처리
+  FirebaseMessaging.addListener('notificationActionPerformed', (e: any) => {
+    const d = e?.notification?.data ?? {};
+    go(d.link);
+    if (d.notificationId) api('/api/notifications/read', { method: 'POST', body: { ids: [d.notificationId] } }).then(() => window.dispatchEvent(new Event('wos-refresh'))).catch(() => {});
+  });
   App.addListener('appUrlOpen', (e: any) => go(e.url.replace(/^[a-z]+:\/\/[^/]*/i, '') || '/'));
   App.addListener('backButton', ({ canGoBack }: any) => (canGoBack ? history.back() : App.exitApp()));
 
-  FirebaseMessaging.addListener('notificationActionPerformed', (e: any) => go(e.notification?.data?.link));
   FirebaseMessaging.addListener('notificationReceived', () => window.dispatchEvent(new Event('wos-refresh')));
   FirebaseMessaging.addListener('tokenReceived', (e: any) => registerToken(e.token));
   // 첫 실행: 시스템 권한 창을 바로 띄우지 않고, 이유를 먼저 보여 주는 안내(AppShell)를 띄운다
