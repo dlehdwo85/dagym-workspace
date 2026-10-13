@@ -122,7 +122,7 @@ await step('② 대표가 + 버튼으로 업무 등록·담당자 배정', async
   await dlg.getByLabel('담당자', { exact: true }).selectOption({ label: '이직원' });
   await dlg.getByLabel('마감일').fill(addDays(today, 3));
   assert.equal(await dlg.getByLabel('소속 (현장·부서)').count(), 0, '등록 창은 제목·담당자·마감일·프로젝트 4칸');
-  await dlg.getByRole('button', { name: '등록' }).click();
+  await dlg.getByRole('button', { name: '저장' }).click();
   await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
   taskId = owner.url().split('/').pop();
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${taskId}`)).task.approval_required, false, '관리자 최종 확인 기본 꺼짐');
@@ -880,7 +880,7 @@ await step('V3-6 휴대폰: 다른 사람 묶음에서 입력 후 바깥 누르�
   const g = m.getByTestId('task-groups').locator(`[data-group="${minsu.id}"]`);
   const add = g.getByPlaceholder('김민수님에게 업무 추가');
   await add.fill('두정점 원판 수량 파악');
-  await add.blur(); // 입력칸을 벗어나면 자동 저장 (저장 버튼 없음)
+  await g.getByTestId('inline-save').click(); // 업무 생성은 저장 버튼 (WORKIN_SAVE_AND_SPEED)
   await m.getByText('김민수님에게 추가됨: 두정점 원판 수량 파악').waitFor();
   await g.getByText('두정점 원판 수량 파악').waitFor();
   await g.locator('[data-fresh="1"]').first().waitFor();
@@ -978,6 +978,7 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   await owner.locator('.fc-toolbar-title').waitFor();
   await owner.getByTestId('mini-month').waitFor();
   await owner.getByTestId('calendar-list').getByLabel('업무 캘린더 표시').waitFor();
+  await owner.waitForLoadState('networkidle'); // 일정을 불러온 뒤(이른 시각 일정이 있으면 시간 칸이 늘어남) 위치 측정
   const col = await owner.locator(`.fc-timegrid-col[data-date="${d}"]`).boundingBox();
   const slot = await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().boundingBox();
   await owner.mouse.click(col.x + col.width / 2, slot.y + 4);
@@ -996,8 +997,11 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   await owner.waitForTimeout(500);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t.id}`)).task.status, 'done');
   // 일정 탭 빠른 입력
-  const slot2 = await owner.locator('td.fc-timegrid-slot-lane[data-time="15:00:00"]').first().boundingBox();
-  await owner.mouse.click(col.x + col.width / 2, slot2.y + 4);
+  const lane15 = owner.locator('td.fc-timegrid-slot-lane[data-time="15:00:00"]').first();
+  await lane15.evaluate((el) => el.scrollIntoView({ block: 'center' })); // 화면 아래 안내(토스트)에 가리지 않게
+  const slot2 = await lane15.boundingBox();
+  const col2 = await owner.locator(`.fc-timegrid-col[data-date="${d}"]`).boundingBox();
+  await owner.mouse.click(col2.x + col2.width / 2, slot2.y + 4);
   await owner.getByTestId('quick-create').getByLabel('빠른 입력 제목').fill('투자사 미팅');
   await owner.getByTestId('quick-create').getByLabel('빠른 입력 제목').press('Enter');
   await owner.getByText('일정을 저장했습니다').waitFor();
@@ -1014,12 +1018,12 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   assert.equal(await owner.locator('.fc-event.task-item', { hasText: '캘린더 숨김 시험' }).count(), 0);
 });
 
-await step('AUTOSAVE 저장 버튼 없음: 한 줄 추가는 칩 누르는 중엔 저장 안 됨 → 바깥 클릭 시 저장, 설명은 입력 후 이동해도 저장', async () => {
+await step('저장 버튼: 한 줄 추가는 저장 버튼·Enter 로만 생성(바깥 클릭은 초안 유지), 상세 설명은 입력 후 이동해도 자동 저장', async () => {
   await owner.goto(BASE + '/tasks');
   const row = owner.getByTestId('inline-add').first();
   const inp = row.getByLabel('업무 추가 제목');
   await inp.fill('자동 저장 시험 업무');
-  assert.equal(await row.getByRole('button', { name: '저장', exact: true }).count(), 0, '저장 버튼 없음');
+  await row.getByTestId('inline-save').waitFor(); // 제목을 쓰면 저장 버튼
   await row.getByTestId('due-picker').click(); // 칩을 누르는 동안은 저장하지 않음
   await owner.waitForTimeout(600);
   assert.equal((await sql`select count(*)::int n from tasks where title = '자동 저장 시험 업무'`)[0].n, 0, '칩 선택 중 저장 안 됨');
@@ -1027,8 +1031,15 @@ await step('AUTOSAVE 저장 버튼 없음: 한 줄 추가는 칩 누르는 중�
   await owner.getByLabel('새 업무 마감일 날짜 선택').fill(d);
   await owner.waitForTimeout(300);
   assert.equal((await sql`select count(*)::int n from tasks where title = '자동 저장 시험 업무'`)[0].n, 0, '날짜 고른 뒤에도 입력칸으로 돌아올 뿐 저장 안 됨');
-  await owner.getByRole('heading', { level: 1 }).first().click(); // 바깥 클릭 → 자동 저장
+  await owner.getByRole('heading', { level: 1 }).first().click(); // 바깥 클릭 → 저장하지 않고 초안 유지
+  await owner.waitForTimeout(500);
+  assert.equal((await sql`select count(*)::int n from tasks where title = '자동 저장 시험 업무'`)[0].n, 0, '바깥 클릭으로는 생성 안 됨');
+  assert.equal(await inp.inputValue(), '자동 저장 시험 업무', '초안 유지');
+  const t0 = Date.now();
+  await row.getByTestId('inline-save').click();
+  assert.equal(await inp.inputValue(), '', '누르는 즉시 입력칸 비움');
   await owner.getByText('나에게 추가됨: 자동 저장 시험 업무').waitFor();
+  console.log(`    업무 저장 → 추가됨 안내까지 ${Date.now() - t0}ms (로컬)`);
   const [t] = await sql`select id, to_char(due_date, 'YYYY-MM-DD') due from tasks where title = '자동 저장 시험 업무'`;
   assert.equal(t.due, d, '고른 마감일이 함께 저장');
   // 상세 설명: 입력 후 바로 다른 화면으로 이동해도 저장
@@ -1098,6 +1109,8 @@ await step('V5 휴대폰: 홈 "+일정" → 빠른 등록·업무에도 추가 �
   await m.goto(`${BASE}/calendar?date=${t.d}`);
   await m.getByTestId('cal-mobile-head').waitFor();
   assert.equal(await m.locator('[data-day-head]').count(), 7, '휴대폰 기본 = 주 보기, 요일+날짜 머리');
+  const dh = m.locator(`[data-day-head="${t.d}"]`);
+  assert.equal((await dh.innerText()).replace(/\s+/g, ''), `${'일월화수목금토'[new Date(t.d + 'T00:00:00Z').getUTCDay()]}${Number(t.d.slice(8))}`, '날짜 머리 = 그 칸의 요일·날짜(하루 밀림 없음)');
   const block = m.locator('[data-ev-block]', { hasText: 'V5 홈에서 만든' }).first();
   await block.waitFor();
   assert.ok(await block.getByLabel('업무와 연결').count(), '연결 표시 ✓');

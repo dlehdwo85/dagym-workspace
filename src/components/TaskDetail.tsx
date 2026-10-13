@@ -195,7 +195,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-emerald-50 px-2.5 text-sm font-semibold text-emerald-700"><CircleCheck className="size-4" />완료됨</span>}
         <span className="flex-1" />
         <IconButton label="링크 복사" onClick={() => { navigator.clipboard?.writeText(location.origin + `/tasks/${id}`); toast.ok('링크를 복사했습니다'); }}><Link2 /></IconButton>
-        {inPanel && <IconButton label="전체 화면" onClick={() => { location.href = `/tasks/${id}`; }}><Maximize2 /></IconButton>}
+        {inPanel && <IconButton label="전체 화면" onClick={() => router.push(`/tasks/${id}`)}><Maximize2 /></IconButton>}
         <div className="relative">
           <IconButton label="더보기" onClick={() => setMenu(!menu)} aria-expanded={menu}><MoreHorizontal /></IconButton>
           {menu && (

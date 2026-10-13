@@ -151,26 +151,24 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
     limit ${q.limit}`;
   if (q.view !== 'risk') return rows;
   const { deadlineRisk } = await import('./availability');
-  const out = [];
-  for (const r of rows) {
-    const risk = await deadlineRisk(r);
-    if (risk?.risk) out.push({ ...r, risk });
-  }
-  return out;
+  const risks = await Promise.all(rows.map((r) => deadlineRisk(r))); // 행마다 순서대로 기다리지 않게
+  return rows.flatMap((r, i) => (risks[i]?.risk ? [{ ...r, risk: risks[i] }] : []));
 }
 
 export async function getTaskDetail(u: SessionUser, id: string) {
   const sql = db();
   const { perms } = await loadTaskForUser(u, id, sql);
-  const [t] = await sql`select ${TASK_COLS(sql)}, cu.name as created_by_name, apu.name as approved_by_name,
+  // 속도: 서로 기다릴 필요 없는 쿼리는 한 번에 (DB 왕복 횟수 줄이기)
+  const [[t], units] = await Promise.all([sql`select ${TASK_COLS(sql)}, cu.name as created_by_name, apu.name as approved_by_name,
       parent.title as parent_title
     ${TASK_FROM(sql)}
     left join users cu on cu.id = t.created_by
     left join users apu on apu.id = t.approved_by
     left join tasks parent on parent.id = t.parent_id
-    where t.id = ${id}`;
-  const units = await accessibleUnitIds(u, sql);
-  const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks] = await Promise.all([
+    where t.id = ${id}`, accessibleUnitIds(u, sql)]);
+  const { openRound, stepApprovers } = await import('./approvals');
+  const { deadlineRisk } = await import('./availability');
+  const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks, approvals, fields, risk] = await Promise.all([
     sql`select u.id, u.name from task_collaborators c join users u on u.id = c.user_id where c.task_id = ${id} order by u.name`,
     sql`select id, text, done, sort, done_at from task_checklist_items where task_id = ${id} order by sort, id`,
     sql`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where t.parent_id = ${id} and t.deleted_at is null
@@ -184,14 +182,12 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     sql`select a.id, a.action, a.changes, a.created_at, u.name as actor_name from activities a left join users u on u.id = a.actor_id
         where a.entity_type = 'task' and a.entity_id = ${id} order by a.created_at desc limit 100`,
     sql`select id, start_at, end_at, title from events where task_id = ${id} and deleted_at is null order by start_at`,
+    openRound(sql, id),
+    t.project_id ? sql`select id, name, type, options, aggregate from project_fields where project_id = ${t.project_id} order by sort, created_at` : Promise.resolve([]),
+    deadlineRisk(t as never).catch(() => null),
   ]);
-  const { openRound, stepApprovers } = await import('./approvals');
-  const approvals = await openRound(sql, id);
   const pending = t.status === 'review' ? approvals.find((a) => a.status === 'pending' && a.round === approvals[0]?.round) : null;
   const canDecide = pending ? (await stepApprovers(sql, t.org_unit_id, pending)).includes(u.id) : false;
-  const fields = t.project_id ? await sql`select id, name, type, options, aggregate from project_fields where project_id = ${t.project_id} order by sort, created_at` : [];
-  const { deadlineRisk } = await import('./availability');
-  const risk = await deadlineRisk(t as never).catch(() => null);
   return { task: t, perms: { ...perms, decide: canDecide }, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk };
 }
 

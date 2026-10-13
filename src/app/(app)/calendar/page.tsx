@@ -139,6 +139,9 @@ export default function CalendarPage() {
   useEffect(() => { load(); }, [range?.from, range?.to]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const h = () => load(); window.addEventListener('wos-refresh', h); return () => window.removeEventListener('wos-refresh', h); });
 
+  // 시간 칸은 6시부터, 그보다 이른 일정·업무가 보이는 기간이면 그 시각부터(새벽 일정이 안 보이던 문제)
+  const earliest = Math.min(6, ...events.filter((e) => !e.allDay).map((e) => Number(seoulTime(e.start).slice(0, 2))), ...tasks.filter((t) => t.due_time).map((t) => Number(t.due_time.slice(0, 2))));
+  const slotMin = `${String(earliest).padStart(2, '0')}:00:00`;
   const syncedIds = new Set(events.map((e) => e.linkedTask?.id).filter(Boolean));
   const fcEvents = useMemo(() => [
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
@@ -313,15 +316,18 @@ export default function CalendarPage() {
             headerToolbar={mobile ? false : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
             views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' } }}
             // Google 형 날짜 머리: 요일 한 줄 + 날짜 숫자(오늘은 동그라미), 시간 칸 글자 작게
-            dayHeaderContent={(a) => a.view.type.startsWith('timeGrid') ? (
-              <span className="flex flex-col items-center leading-tight" data-day-head>
-                <span className="text-[11px] font-medium">{'일월화수목금토'[a.date.getUTCDay()]}</span>
-                <span className={cx('mt-0.5 flex size-7 items-center justify-center rounded-full text-[15px] font-semibold tabular-nums', a.isToday && 'bg-accent-600 text-white')}>{a.date.getUTCDate()}</span>
-              </span>
-            ) : undefined}
+            dayHeaderContent={(a) => { if (!a.view.type.startsWith('timeGrid')) return undefined;
+              // 날짜는 서울 기준으로 읽는다(a.date 는 서울 0시 = UTC 전날 15시)
+              const ds = seoulDate(a.date), dd = new Date(ds + 'T00:00:00Z');
+              return (
+                <span className="flex flex-col items-center leading-tight" data-day-head={ds}>
+                  <span className="text-[11px] font-medium">{'일월화수목금토'[dd.getUTCDay()]}</span>
+                  <span className={cx('mt-0.5 flex size-7 items-center justify-center rounded-full text-[15px] font-semibold tabular-nums', ds === seoulDate(new Date()) && 'bg-accent-600 text-white')}>{dd.getUTCDate()}</span>
+                </span>
+              ); }}
             slotLabelFormat={mobile ? { hour: 'numeric', hour12: false } : { hour: 'numeric', hour12: true }} // 휴대폰은 "13시"처럼 짧게 → 날짜 칸을 넓게
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
-            allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime="06:00:00" scrollTime="08:00:00"
+            allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime={slotMin} scrollTime="08:00:00"
             slotDuration="01:00:00" snapDuration="01:00:00"
             editable selectable selectMirror droppable longPressDelay={350}
             events={fcEvents}

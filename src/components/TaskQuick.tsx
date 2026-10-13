@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { ArrowUpDown, CalendarDays, Check, Plus, Repeat, UserRound, X } from 'lucide-react';
 import { recurPresets } from './pickers';
 import { api, broadcastRefresh } from './client';
@@ -140,6 +141,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const busyRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
   const { dir } = useSession();
+  const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   // 한글 입력: 조합 중 Enter 는 글자만 확정되고 다시 Enter 가 오지 않는 브라우저(Chrome)가 있어, 조합이 끝나면 대신 저장
   const enterWhileComposing = useRef(false);
@@ -147,39 +149,34 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     const t = (raw ?? input.current?.value ?? title).trim();
     if (!t || busyRef.current) return;
     busyRef.current = true; setBusy(true); setErr(null);
+    // 속도: 누르는 즉시 입력칸을 비워 다음 업무를 바로 쓸 수 있게(실패하면 되돌림)
+    const keepRrule = rrule;
+    setTitle(''); setRrule(null);
     try {
-      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: rrule && !due ? todayStr() : due, recurrenceRule: rrule, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
-      setTitle(''); setRrule(null);
+      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, recurrenceRule: keepRrule, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
       markNew(r.id);
       const who = assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
-      toast.ok(`${who}에게 추가됨: ${t}`, { label: '보기', run: () => { window.location.href = `/tasks/${r.id}`; } });
+      toast.ok(`${who}에게 추가됨: ${t}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       broadcastRefresh(); onCreated?.(r.id);
     } catch (e: any) {
-      // 저장 실패: 입력값은 그대로 두고 이유를 줄 아래에 표시 (조용히 사라지지 않게)
+      // 저장 실패: 입력값을 되살리고 이유를 줄 아래에 표시 (조용히 사라지지 않게)
+      setTitle((cur) => cur || t); setRrule(keepRrule);
       setErr(e.message ?? '저장하지 못했습니다');
     } finally { busyRef.current = false; setBusy(false); if (refocus) input.current?.focus(); }
   }
   const showChips = !!(title || due || rrule || assignee !== initAssignee || requester !== initRequester || autoFocus);
-  // 저장 버튼 없이 (WORKIN_AUTOSAVE): Enter·키보드 완료 또는 이 줄을 벗어나면 제목이 있을 때 자동 저장.
-  // 같은 줄의 칩(마감·담당·지시)이나 그 선택 창을 누르는 동안은 저장하지 않고, 고른 뒤 입력칸으로 돌아온다.
-  const formRef = useRef<HTMLFormElement>(null);
-  const onFormBlur = () => setTimeout(() => {
-    const a = document.activeElement as HTMLElement | null;
-    if (a && (formRef.current?.contains(a) || a.closest('[role=dialog]'))) return;
-    if (input.current?.value.trim()) submit(input.current.value, false);
-  }, 150);
+  // 업무 "생성"은 저장 버튼·Enter 로만 (WORKIN_SAVE_AND_SPEED, 대표 지시). 바깥을 눌러도 저장하지 않고 입력한 초안은 남긴다.
+  // 칩(마감·담당·지시·반복)을 고른 뒤에는 입력칸으로 돌아온다
   const back = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setTimeout(() => input.current?.focus(), 0); };
-  // 화면을 떠나거나 앱을 닫을 때도 입력 중인 제목 저장
-  const pendingRef = useRef<() => void>(() => {});
-  pendingRef.current = () => { const v = input.current?.value.trim(); if (v && !busyRef.current) submit(v, false); };
+  // 작성 중에 창을 닫거나 새로고침하면 브라우저가 "작성 중인 내용" 확인
   useEffect(() => {
-    const h = () => { if (document.visibilityState === 'hidden') pendingRef.current(); };
-    const leave = () => pendingRef.current();
-    document.addEventListener('visibilitychange', h); window.addEventListener('pagehide', leave);
-    return () => { document.removeEventListener('visibilitychange', h); window.removeEventListener('pagehide', leave); pendingRef.current(); };
-  }, []);
+    if (!title.trim()) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '작성 중인 업무가 있습니다'; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [title]);
   return (
-    <form ref={formRef} onBlur={onFormBlur} onSubmit={(e) => { e.preventDefault(); submit(); }} className={cx('border-b border-line last:border-b-0 focus-within:bg-accent-50/40', muted ? 'bg-transparent' : 'bg-white')} data-testid="inline-add">
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }} className={cx('border-b border-line last:border-b-0 focus-within:bg-accent-50/40', muted ? 'bg-transparent' : 'bg-white')} data-testid="inline-add">
       <div className="flex min-h-[44px] items-center gap-2 px-3 py-1.5 sm:gap-3">
         <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-dashed border-slate-300 text-slate-400"><Plus className="size-3.5" /></span>
         {/* 휴대폰 키보드의 "완료/이동" 은 form 제출로 확실히 저장 (Enter 가 keyCode 229 로 오는 키보드 대비) */}
@@ -199,9 +196,10 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
             <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
           </>
         )}
+        {title.trim() && <button type="submit" className="h-11 shrink-0 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white shadow-card active:scale-95 sm:h-8 sm:px-3" data-testid="inline-save">저장</button>}
         {busy && <span className="shrink-0 text-xs text-ink-3" data-testid="inline-saving">저장 중…</span>}
       </div>
-      {err && <p className="px-3 pb-2 pl-12 text-xs font-medium text-red-600" role="alert">{err} — 입력한 내용은 그대로 있습니다. Enter 를 누르거나 칸을 벗어나면 다시 시도합니다.</p>}
+      {err && <p className="px-3 pb-2 pl-12 text-xs font-medium text-red-600" role="alert">{err} — 입력한 내용은 그대로 있습니다. 저장(Enter)을 다시 눌러 주세요.</p>}
     </form>
   );
 }
