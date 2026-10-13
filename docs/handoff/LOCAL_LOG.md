@@ -90,3 +90,5 @@
 
 - 2026-10-14 V6 배포 확인: 789adfb(1차), 4328984(2차, migration 019) 자동 배포 성공, scheduler healthy.
 - C 드라이브 0MB → 대표 승인 후 로컬 .next(351MB)·android-run 폴더 삭제, 중단된 merge 잔여물은 git stash 로 보관 후 fast-forward. 여유 ~340MB(근본 원인: Claude VM 번들 등).
+
+- 2026-10-14 V7(653d53f, mig 020)·V8(1fd88e0·05a8ae2, mig 022) 자동 배포 확인. 대표 결정 대기: 첨부 저장소(R2 추천, fileStorage local-disk), 분 단위 알림(cron-job.org 추천 — CRON_SECRET 은 sensitive 로 값 확인 불가 → 대표가 새 값을 정해 Vercel·cron-job.org 양쪽 입력 필요).
