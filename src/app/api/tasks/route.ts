@@ -1,5 +1,5 @@
 import { handler, body } from '@/lib/api';
-import { createTask, listQuery, listTasks, taskInput } from '@/lib/tasks';
+import { createTasksForAssignees, listQuery, listTasks, taskInput } from '@/lib/tasks';
 import { after } from 'next/server';
 import { dispatchPending } from '@/lib/push';
 
@@ -9,7 +9,7 @@ export const GET = handler(async ({ req, user }) => {
 });
 
 export const POST = handler(async ({ req, user }) => {
-  const out = await createTask(user, await body(req, taskInput));
+  const out = await createTasksForAssignees(user, await body(req, taskInput)); // 담당자 여러 명이면 각자 1건씩
   after(() => dispatchPending().catch(() => {}));
   return out;
 }, { idempotent: true });

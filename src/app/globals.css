@@ -84,3 +84,7 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
   .fc .fc-col-header-cell { font-size: 12px; }
   .fc .fc-timegrid-event { padding: 1px 2px; }
 }
+
+/* V6 14번: 선택칸 글자 아래 잘림(큰 글씨 설정·안드로이드 글꼴) — 고정 높이 대신 최소 40px, 줄높이 보통 */
+select { min-height: 2.5rem; line-height: 1.5; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.fc select, table select { min-height: 2rem; }

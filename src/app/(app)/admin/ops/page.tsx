@@ -51,6 +51,36 @@ export default function Ops() {
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">푸시 발송 (최근 7일)</h2>
         <p className="text-sm">{data.deliveries.map((d: any) => `${({ sent: '성공', failed: '실패', pending: '대기', skipped: '건너뜀' } as any)[d.status]} ${d.c}`).join(' · ') || '기록 없음'}</p>
+        {data.noDevice?.length > 0 && (
+          <p className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900" data-testid="no-device">
+            휴대폰 알림을 받을 기기가 없는 사람: <b>{data.noDevice.map((u: any) => u.name).join(', ')}</b> — 앱에서 설정 → &ldquo;앱 알림 켜기&rdquo;를 눌러야 푸시가 갑니다(앱 안 알림 목록에는 그대로 쌓임).
+          </p>
+        )}
+      </section>
+      <section className="rounded-lg border bg-white p-4" data-testid="recent-notifications">
+        <h2 className="mb-1 text-sm font-semibold">최근 알림 발송 기록 (50건)</h2>
+        <p className="mb-2 text-xs text-ink-3">본인이 한 일(내가 나에게 배정 등)은 알림을 만들지 않습니다 — 본인 업무는 마감 알림(09시·마감 1시간 전)만 갑니다.</p>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-xs">
+            <thead><tr className="text-left text-ink-2"><th className="py-1 pr-2">시각</th><th className="pr-2">받는 사람</th><th className="pr-2">알림</th><th className="pr-2">기기</th><th>휴대폰 발송</th></tr></thead>
+            <tbody>
+              {data.recent?.map((n: any) => {
+                const ds = n.deliveries as any[];
+                const st = !n.devices && !ds.length ? '기기 없음' : !ds.length ? '대기(발송 전)' : ds.map((d) => `${d.channel === 'fcm' ? '앱' : '웹'} ${({ sent: '성공', failed: '실패', pending: '대기', skipped: '건너뜀' } as any)[d.status] ?? d.status}${d.error ? ` (${String(d.error).slice(0, 60)})` : ''}`).join(', ');
+                return (
+                  <tr key={n.id} className="border-t border-line align-top">
+                    <td className="whitespace-nowrap py-1 pr-2 tabular-nums">{fmtDateTime(n.created_at)}</td>
+                    <td className="whitespace-nowrap pr-2">{n.user_name}</td>
+                    <td className="pr-2">{n.title}</td>
+                    <td className="pr-2 tabular-nums">{n.devices}</td>
+                    <td className={cx(ds.some((d) => d.status === 'failed') ? 'text-red-700' : !n.devices ? 'text-amber-700' : ds.every((d) => d.status === 'sent') && ds.length ? 'text-emerald-700' : '')}>{st}</td>
+                  </tr>
+                );
+              })}
+              {!data.recent?.length && <tr><td colSpan={5} className="py-2 text-ink-3">기록 없음</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </section>
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">Google 동기화 오류·충돌</h2>

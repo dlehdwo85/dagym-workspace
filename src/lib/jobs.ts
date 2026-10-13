@@ -49,7 +49,17 @@ async function dueNotifications() {
         dedupeKey: `due_today:${t.id}:${today}` })).length;
     }
   }
-  return { dueSoon: soon.length, overdue: over.length, dueToday: dueToday.length, created: n };
+  // V6 10번: 마감 시각이 있는 업무는 1시간 전에 한 번 더 (본인이 만든 본인 업무도 받음)
+  const hourLeft = await sql<{ id: string; title: string; assignee_id: string; due_date: string; due_time: string }[]>`
+    select t.id, t.title, t.assignee_id, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time from tasks t join users u on u.id = t.assignee_id
+    where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_time is not null and u.status = 'active'
+      and ((t.due_date + t.due_time) at time zone 'Asia/Seoul') between now() and now() + interval '65 minutes'`;
+  for (const t of hourLeft) {
+    n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `1시간 뒤 마감: ${t.title}`,
+      body: `오늘 ${t.due_time}까지`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
+      dedupeKey: `due_hour:${t.id}:${t.due_date}:${t.due_time}` })).length;
+  }
+  return { dueSoon: soon.length, overdue: over.length, dueToday: dueToday.length, dueHour: hourLeft.length, created: n };
 }
 
 async function recurringTasks() {

@@ -1035,6 +1035,8 @@ await step('저장 버튼: 한 줄 추가는 저장 버튼·Enter 로만 생성(
   assert.equal((await sql`select count(*)::int n from tasks where title = '자동 저장 시험 업무'`)[0].n, 0, '칩 선택 중 저장 안 됨');
   const d = addDays(today, 3);
   await owner.getByLabel('새 업무 마감일 날짜 선택').fill(d);
+  await owner.getByLabel('새 업무 마감일 시각').selectOption('15:00'); // V6 10번: 날짜 다음 시각
+  await owner.locator('div.fixed.inset-0.z-\\[70\\]').click(); // 선택 창 닫기
   await owner.waitForTimeout(300);
   assert.equal((await sql`select count(*)::int n from tasks where title = '자동 저장 시험 업무'`)[0].n, 0, '날짜 고른 뒤에도 입력칸으로 돌아올 뿐 저장 안 됨');
   await owner.getByRole('heading', { level: 1 }).first().click(); // 바깥 클릭 → 저장하지 않고 초안 유지
@@ -1046,8 +1048,8 @@ await step('저장 버튼: 한 줄 추가는 저장 버튼·Enter 로만 생성(
   assert.equal(await inp.inputValue(), '', '누르는 즉시 입력칸 비움');
   await owner.getByText('나에게 추가됨: 자동 저장 시험 업무').waitFor();
   console.log(`    업무 저장 → 추가됨 안내까지 ${Date.now() - t0}ms (로컬)`);
-  const [t] = await sql`select id, to_char(due_date, 'YYYY-MM-DD') due from tasks where title = '자동 저장 시험 업무'`;
-  assert.equal(t.due, d, '고른 마감일이 함께 저장');
+  const [t] = await sql`select id, to_char(due_date, 'YYYY-MM-DD') due, to_char(due_time, 'HH24:MI') tm from tasks where title = '자동 저장 시험 업무'`;
+  assert.equal(t.due, d, '고른 마감일이 함께 저장'); assert.equal(t.tm, '15:00', '마감 시각도 저장');
   // 상세 설명: 입력 후 바로 다른 화면으로 이동해도 저장
   await owner.goto(`${BASE}/tasks/${t.id}`);
   await owner.getByTestId('desc-view').click();
@@ -1089,6 +1091,7 @@ await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 �
   const hrow = m.locator('[data-home-task]').first();
   await hrow.waitFor();
   const hid = await hrow.getAttribute('data-home-task');
+  await hrow.evaluate((el) => el.scrollIntoView({ block: 'center' })); // 달성률 카드 아래로 밀려 하단 탭에 가리지 않게
   const hb = await hrow.boundingBox();
   await m.touchscreen.tap(hb.x + hb.width * 0.5, hb.y + hb.height - 3);
   await m.waitForURL(`**/tasks/${hid}`);
@@ -1189,6 +1192,77 @@ await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에
   await m.getByRole('menuitem', { name: '일정 등록' }).waitFor();
   await m.getByRole('menuitem', { name: '업무 등록' }).waitFor();
   await mc.close();
+});
+
+await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별·삭제→되돌리기·휴지통·엑셀·사용자 지정 반복·달성률·알림 발송 기록', async () => {
+  // 담당자 여러 명 → 각자 1건씩
+  await owner.goto(BASE + '/tasks');
+  await owner.getByTestId('create-menu').click();
+  await owner.getByRole('menuitem', { name: /업무/ }).first().click();
+  const dlg = owner.getByRole('dialog', { name: '업무 등록' });
+  await dlg.getByLabel('제목').fill('V6 다같이 점검');
+  await dlg.getByTestId('multi-assignee').getByRole('button', { name: /여러 명에게/ }).click();
+  await dlg.getByTestId('multi-assignee').getByRole('button', { name: '이직원' }).click();
+  await dlg.getByTestId('multi-assignee').getByRole('button', { name: '최매니저' }).click();
+  await dlg.getByRole('button', { name: '3명에게 각각 만들기' }).click();
+  await owner.getByText('3명에게 각각 만들었습니다').waitFor();
+  const batch = await sql`select id, batch_id from tasks where title = 'V6 다같이 점검' and deleted_at is null`;
+  assert.equal(batch.length, 3); assert.equal(new Set(batch.map((b) => b.batch_id)).size, 1);
+  await owner.goto(BASE + '/tasks');
+  await owner.locator('[data-batch]').first().waitFor();
+  // 완료해도 제자리(취소선)
+  const row = owner.locator('[data-row]', { hasText: 'V6 다같이 점검' }).first();
+  const rid = await row.getAttribute('data-row');
+  await row.getByRole('button', { name: /V6 다같이 점검 (완료|검토 요청)/ }).first().click();
+  await owner.waitForTimeout(800);
+  await owner.locator(`[data-row="${rid}"]`).waitFor();
+  assert.ok((await owner.locator(`[data-row="${rid}"] a[data-open-task]`).getAttribute('class')).includes('line-through'), '완료해도 제자리 취소선');
+  // 완료 보기(월별)
+  await owner.getByRole('button', { name: '완료', exact: true }).click();
+  await owner.getByTestId('task-groups').getByText(/\d{4}년 \d+월/).first().waitFor();
+  await owner.screenshot({ path: `${SHOTS}/70-done-archive.png` });
+  // 삭제 → 되돌리기 → 다시 삭제 → 휴지통에서 되살리기
+  const del = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V6 지웠다 살릴 업무', orgUnitId: ctx.hq, approvalRequired: false })).id;
+  await owner.goto(`${BASE}/tasks/${del}`);
+  owner.once('dialog', (dg) => dg.accept());
+  await owner.getByRole('button', { name: '더보기', exact: true }).click();
+  await owner.getByRole('menuitem', { name: '삭제' }).click();
+  await owner.getByRole('button', { name: '되돌리기' }).click();
+  await owner.getByText('되살렸습니다').waitFor();
+  assert.equal((await sql`select deleted_at from tasks where id = ${del}`)[0].deleted_at, null);
+  await ctx.owner.ok('DELETE', `/api/tasks/${del}`);
+  await owner.goto(BASE + '/tasks/trash');
+  await owner.getByTestId('trash-list').getByRole('button', { name: 'V6 지웠다 살릴 업무 되살리기' }).click();
+  await owner.getByText('되살렸습니다').waitFor();
+  // 엑셀 내려받기
+  await owner.goto(BASE + '/tasks');
+  await owner.getByTestId('tasks-more').click();
+  await owner.getByRole('menuitem', { name: '엑셀로 내려받기' }).click();
+  const [download] = await Promise.all([owner.waitForEvent('download'), owner.getByTestId('export-download').click()]);
+  // 헤드리스 크로미움은 파일 이름을 'download' 로만 알려 줘서, 받은 파일 내용(xlsx = zip)과 서버의 파일 이름 헤더를 따로 확인
+  const fbuf = await (await import('node:fs/promises')).readFile(await download.path());
+  assert.equal(fbuf.subarray(0, 2).toString(), 'PK', 'xlsx(zip) 파일');
+  const head = await owner.request.get(download.url());
+  assert.match(head.headers()['content-disposition'], /filename\*=UTF-8''%EC%9B%8C%ED%81%AC%EC%9D%B8_%EC%97%85%EB%AC%B4_\d{4}-\d{2}\.xlsx/, '워크인_업무_YYYY-MM.xlsx');
+  // 사용자 지정 반복 (Google 형)
+  const rt = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V6 반복 지정', orgUnitId: ctx.hq, dueDate: today, approvalRequired: false })).id;
+  await owner.goto(`${BASE}/tasks/${rt}`);
+  await owner.getByTestId('detail-repeat').getByLabel('반복 규칙').selectOption('__custom');
+  const cr = owner.getByTestId('custom-recur');
+  await cr.getByLabel('반복 단위').selectOption('WEEKLY');
+  await cr.getByRole('group', { name: '반복 요일' }).getByRole('button', { name: '월' }).click();
+  await cr.getByRole('group', { name: '반복 요일' }).getByRole('button', { name: '금' }).click();
+  await cr.getByLabel('종료 횟수').fill('8');
+  await cr.getByRole('button', { name: '완료' }).click();
+  await owner.waitForTimeout(800);
+  const rr = (await sql`select recurrence_rule from tasks where id = ${rt}`)[0].recurrence_rule;
+  assert.match(rr, /FREQ=WEEKLY/); assert.match(rr, /COUNT=8/); assert.match(rr, /MO/); assert.match(rr, /FR/);
+  // 달성률 카드·운영 상태 알림 기록
+  await owner.goto(BASE + '/');
+  await owner.getByTestId('achievement').getByTestId('ach-completion').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/71-achievement.png` });
+  await owner.goto(BASE + '/admin/ops');
+  await owner.getByTestId('recent-notifications').getByText('V6 다같이 점검').first().waitFor();
 });
 
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {

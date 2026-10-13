@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { ArrowUpDown, CalendarDays, Check, Plus, Repeat, UserRound, X } from 'lucide-react';
 import { recurPresets } from './pickers';
+import { TIMES, timeLabel } from './DateTimePickers';
 import { api, broadcastRefresh } from './client';
 import { useSession } from './session';
 import { Avatar, DueChip, cx, toast, todayStr } from './ui';
@@ -43,25 +44,33 @@ function Popover({ open, onClose, anchor, children, width = 224 }: { open: boole
 }
 
 /** 마감일 칩: 누르면 빠른 선택 + 날짜 선택 */
-export function DuePicker({ value, onChange, status, label = '마감일', compact, emptyText }: { value: string | null | undefined; onChange: (v: string | null) => void; status?: string; label?: string; compact?: boolean; emptyText?: string }) {
+export function DuePicker({ value, onChange, status, label = '마감일', compact, emptyText, time, onTime }: { value: string | null | undefined; onChange: (v: string | null) => void; status?: string; label?: string; compact?: boolean; emptyText?: string; time?: string | null; onTime?: (v: string | null) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={label} aria-haspopup="dialog" aria-expanded={open} data-testid="due-picker"
         className={cx('inline-flex items-center rounded-md hover:bg-slate-100', !value && 'gap-1 px-1.5 py-0.5 text-xs text-ink-3', !value && emptyText && 'h-8 rounded-input border border-line bg-white px-2.5 text-sm')}>
-        {value ? <DueChip due={value} status={status} /> : <><CalendarDays className="size-3.5" />{compact ? '' : emptyText ?? '마감일'}</>}
+        {value ? <span className="inline-flex items-center gap-1"><DueChip due={value} status={status} />{time && <span className="text-xs font-medium text-ink-2 tabular-nums">{timeLabel(time)}</span>}</span> : <><CalendarDays className="size-3.5" />{compact ? '' : emptyText ?? '마감일'}</>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref}>
         {quickDues().map(([l, d]) => (
-          <button key={l} type="button" onClick={() => { onChange(d); setOpen(false); }} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
+          <button key={l} type="button" onClick={() => { onChange(d); if (!onTime) setOpen(false); }} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
             <span>{l}</span><span className="text-xs text-ink-3 tabular-nums">{Number(d.slice(5, 7))}/{Number(d.slice(8))}</span>
           </button>
         ))}
         <label className="flex items-center gap-2 px-2.5 py-1.5 text-sm"><span className="shrink-0 text-ink-2">날짜</span>
-          <input type="date" className="min-w-0 flex-1 rounded border border-line px-1.5 py-0.5 text-sm" value={value ?? ''} onChange={(e) => { onChange(e.target.value || null); setOpen(false); }} aria-label={`${label} 날짜 선택`} />
+          <input type="date" className="min-w-0 flex-1 rounded border border-line px-1.5 py-0.5 text-sm" value={value ?? ''} onChange={(e) => { onChange(e.target.value || null); if (!onTime) setOpen(false); }} aria-label={`${label} 날짜 선택`} />
         </label>
-        {value && <button type="button" onClick={() => { onChange(null); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded-input px-2.5 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><X className="size-3.5" />마감일 지우기</button>}
+        {/* V6 10번: 날짜 다음에 시각(15분, 기본 없음) */}
+        {value && onTime && (
+          <label className="flex items-center gap-2 px-2.5 py-1.5 text-sm"><span className="shrink-0 text-ink-2">시각</span>
+            <select className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-sm" value={time ?? ''} onChange={(e) => onTime(e.target.value || null)} aria-label={`${label} 시각`}>
+              <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
+            </select>
+          </label>
+        )}
+        {value && <button type="button" onClick={() => { onChange(null); onTime?.(null); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded-input px-2.5 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><X className="size-3.5" />마감일 지우기</button>}
       </Popover>
     </span>
   );
@@ -137,6 +146,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const initRequester = defaultRequester ?? user.id;
   const [requester, setRequester] = useState<string | null>(initRequester);
   const [rrule, setRrule] = useState<string | null>(null);
+  const [dueTime, setDueTime] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
@@ -153,10 +163,10 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     const keepRrule = rrule;
     setTitle(''); setRrule(null);
     try {
-      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, recurrenceRule: keepRrule, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
+      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
       markNew(r.id);
       const who = assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
-      toast.ok(`${who}에게 추가됨: ${t}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
+      toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? ' — 담당자에게 알림을 보냈습니다' : assignee ? ' — 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       broadcastRefresh(); onCreated?.(r.id);
     } catch (e: any) {
       // 저장 실패: 입력값을 되살리고 이유를 줄 아래에 표시 (조용히 사라지지 않게)
@@ -191,7 +201,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
         {showChips && (
           <>
             <span className="hidden sm:inline-flex" title="지시자(업무를 부여한 사람)"><span className="self-center text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={back((v: string | null) => setRequester(v ?? user.id))} size={20} withName /></span>
-            <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" />
+            <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" time={dueTime} onTime={setDueTime} />
             <AssigneePicker value={assignee} onChange={back(setAssignee)} />
             <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
           </>

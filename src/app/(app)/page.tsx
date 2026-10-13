@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, MessageSquare, PlusCircle, Users, Activity as ActivityIcon } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, Target, CalendarRange, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, MessageSquare, PlusCircle, Users, Activity as ActivityIcon } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
@@ -21,6 +21,65 @@ function eventDays(e: any): string[] {
   const out: string[] = [];
   for (let d = s; d <= end && out.length < 62; d = addDays(d, 1)) out.push(d);
   return out.length ? out : [s];
+}
+
+/** V6 7번 달성률 카드: 완료율·기한 준수율·기한 지남·평균 처리일, 사람별 막대, 프로젝트 진행률, 내가 지시한 업무, 일정 시간 — 숫자를 누르면 그 목록 */
+function Achievement() {
+  const [period, setPeriod] = useState<'week' | 'month'>('week');
+  const { data } = useApi<any>(`/api/stats?period=${period}`, [period]);
+  const arrow = (a: number | null, b: number | null) => (a === null || b === null || a === b ? null : <span className={cx('ml-1 text-xs font-semibold', a > b ? 'text-emerald-600' : 'text-red-600')}>{a > b ? '▲' : '▼'}{Math.abs(a - b)}</span>);
+  const pct = (v: number | null) => (v === null ? '—' : `${v}%`);
+  const hours = (m: number) => (m >= 60 ? `${Math.round(m / 6) / 10}시간` : `${m}분`);
+  return (
+    <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="achievement">
+      <div className="mb-3 flex items-center gap-2">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Target className="size-4 text-accent-600" />달성률</h2>
+        <div className="ml-auto flex rounded-full border border-line p-0.5 text-xs" role="group" aria-label="달성률 기간">
+          {([['week', '이번 주'], ['month', '이번 달']] as const).map(([k, l]) => (
+            <button key={k} onClick={() => setPeriod(k)} aria-pressed={period === k} className={cx('rounded-full px-2.5 py-0.5 font-medium', period === k ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{l}</button>
+          ))}
+        </div>
+      </div>
+      {!data ? <Skeleton rows={2} /> : (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Link href="/tasks?view=done" className="rounded-input bg-slate-50 p-2.5 hover:bg-slate-100" data-testid="ach-completion"><p className="text-xs text-ink-2">완료율</p><p className="text-xl font-bold tabular-nums">{pct(data.completion)}{arrow(data.completion, data.completionPrev)}</p><p className="text-[11px] text-ink-3">마감 {data.due}건 중 {data.done}건</p></Link>
+            <Link href="/tasks?view=done" className="rounded-input bg-slate-50 p-2.5 hover:bg-slate-100"><p className="text-xs text-ink-2">기한 준수율</p><p className="text-xl font-bold tabular-nums">{pct(data.onTime)}{arrow(data.onTime, data.onTimePrev)}</p><p className="text-[11px] text-ink-3">마감 전 완료</p></Link>
+            <Link href="/tasks?view=overdue" className="rounded-input bg-slate-50 p-2.5 hover:bg-slate-100"><p className="text-xs text-ink-2">기한 지남</p><p className={cx('text-xl font-bold tabular-nums', data.overdue > 0 && 'text-red-600')}>{data.overdue}건</p><p className="text-[11px] text-ink-3">지금 미완료</p></Link>
+            <div className="rounded-input bg-slate-50 p-2.5"><p className="text-xs text-ink-2">평균 처리일</p><p className="text-xl font-bold tabular-nums">{data.avgDays ?? '—'}{data.avgDays !== null && <span className="text-sm font-medium">일</span>}</p><p className="text-[11px] text-ink-3">만든 날 → 완료</p></div>
+          </div>
+          {data.people.length > 0 && (
+            <ul className="mt-3 space-y-1.5" aria-label="사람별 완료율">
+              {data.people.map((p: any) => (
+                <li key={p.id}><Link href={`/tasks?assigneeId=${p.id}`} className="flex items-center gap-2 text-xs hover:underline">
+                  <span className="w-16 shrink-0 truncate text-ink-2">{p.name}</span>
+                  <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-emerald-500" style={{ width: `${p.completion ?? 0}%` }} /></span>
+                  <span className="w-24 shrink-0 text-right tabular-nums text-ink-2">{pct(p.completion)} · {p.done}/{p.due}{p.overdue ? <span className="text-red-600"> · 지연 {p.overdue}</span> : null}</span>
+                </Link></li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <Link href="/tasks?view=requested" className="rounded-input border border-line p-2.5 text-xs hover:bg-slate-50" data-testid="ach-requested">
+              <p className="mb-1 font-semibold text-ink">내가 지시한 업무</p>
+              <p className="text-ink-2">진행 {data.requested?.open ?? 0} · <span className={cx(data.requested?.late && 'font-semibold text-red-600')}>지연 {data.requested?.late ?? 0}</span> · 이번 기간 완료 {data.requested?.done_period ?? 0}</p>
+            </Link>
+            <div className="rounded-input border border-line p-2.5 text-xs">
+              <p className="mb-1 font-semibold text-ink">프로젝트 진행률</p>
+              {data.projects.length ? data.projects.slice(0, 4).map((p: any) => (
+                <Link key={p.id} href={`/projects/${p.id}`} className="mb-1 flex items-center gap-1.5 hover:underline"><span className="w-20 shrink-0 truncate">{p.name}</span>
+                  <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full" style={{ width: `${p.progress}%`, background: p.color ?? '#6366f1' }} /></span><span className="tabular-nums text-ink-2">{p.progress}%</span></Link>
+              )) : <p className="text-ink-3">프로젝트 없음</p>}
+            </div>
+            <Link href="/calendar" className="rounded-input border border-line p-2.5 text-xs hover:bg-slate-50">
+              <p className="mb-1 font-semibold text-ink">일정 시간 ({period === 'week' ? '이번 주' : '이번 달'})</p>
+              {data.calendar.length ? data.calendar.slice(0, 4).map((c: any) => <p key={c.id} className="text-ink-2">{c.name} {hours(c.minutes)}{c.minutes ? ` · 회의 ${Math.round((c.meeting_minutes / c.minutes) * 100)}%` : ''}</p>) : <p className="text-ink-3">일정 없음</p>}
+            </Link>
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 function Section({ title, count, children, href, icon: Icon, className, actions, testid }: {
@@ -190,6 +249,7 @@ export default function Dashboard() {
           <AlertTriangle className="size-5 shrink-0" />기한 지난 업무 {tot.overdue}건<span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium">확인하기<ArrowRight className="size-3.5" /></span>
         </Link>
       )}
+      <Achievement />
       {/* WORKIN_V2 홈: 오늘 할 일 · 이번 주 일정 · 이달의 일정 · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동 (모바일은 위에서부터 이 순서) */}
       <div className="grid min-w-0 gap-4 lg:grid-flow-dense lg:grid-cols-3">
         <Section title="오늘 할 일" count={todayTasks.length} href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} icon={CheckCircle2} className="lg:col-span-2" testid="home-today"

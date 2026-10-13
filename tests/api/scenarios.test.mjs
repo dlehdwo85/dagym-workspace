@@ -1295,3 +1295,126 @@ describe('WORKIN_V5 일정 ↔ 업무 연동 ("업무에도 추가") · 반복',
     assert.equal((await ctx.staffA.client.req('PATCH', `/api/events/${r.id}`, { alsoTask: true })).status, 404);
   });
 });
+
+describe('WORKIN_V6 상태 알림 · 일괄 생성 · 삭제/휴지통 · 오늘 완료 · 1시간 전 알림', () => {
+  const mk = async (email, name) => {
+    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email, name, role: 'staff', orgUnitIds: [ctx.hq] });
+    const c = new Client(email);
+    await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${email}-pass-1234` });
+    c.id = (await c.ok('GET', '/api/auth/me')).user.id;
+    return c;
+  };
+  let a, b;
+  test('담당자가 상태를 바꿀 때마다 지시자에게 알림 (진행 중·보류·완료)', async () => {
+    a = await mk('v6a@dagym.test', '육가람'); b = await mk('v6b@dagym.test', '육나래');
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V6 상태 알림', orgUnitId: ctx.hq, assigneeId: a.id, approvalRequired: false })).id;
+    let v = (await a.ok('GET', `/api/tasks/${t}`)).task.version;
+    for (const st of ['in_progress', 'on_hold', 'done']) {
+      v = (await a.ok('PATCH', `/api/tasks/${t}`, { status: st, version: v })).version;
+    }
+    const ns = await sql`select title, body from notifications where user_id = ${ctx.ownerId} and entity_id = ${t} and type = 'task_done_for_requester' order by created_at`;
+    assert.equal(ns.length, 3, '상태 변경 3번 = 알림 3건');
+    assert.match(ns[0].body, /육가람님이 'V6 상태 알림'을\(를\) 시작했습니다/);
+    assert.match(ns[1].body, /보류했습니다/); assert.match(ns[2].body, /완료했습니다/);
+  });
+  test('담당자 여러 명 → 각자 1건씩(같은 묶음), 각자 알림, 묶음 진행률, 지시자만 묶음 수정·삭제', async () => {
+    const r = await ctx.owner.ok('POST', '/api/tasks', { title: 'V6 일괄 점검표 제출', orgUnitId: ctx.hq, assigneeIds: [a.id, b.id, ctx.ownerId], dueDate: addDays(today, 2), approvalRequired: false });
+    assert.equal(r.ids.length, 3);
+    const rows = await sql`select assignee_id, batch_id from tasks where id = any(${r.ids}::uuid[])`;
+    assert.equal(new Set(rows.map((x) => x.batch_id)).size, 1, '같은 묶음');
+    assert.equal((await sql`select count(*)::int n from notifications where type = 'task_assigned' and entity_id = any(${r.ids}::uuid[])`)[0].n, 2, '다른 사람 2명에게 각자 알림(본인 제외)');
+    const det = await a.ok('GET', `/api/tasks/${r.ids[0]}`);
+    assert.equal(det.batchMates.length, 3); assert.equal(det.task.batch.total, 3);
+    assert.equal((await a.req('PATCH', `/api/tasks/batch/${r.batchId}`, { dueDate: addDays(today, 5) })).status, 403, '담당자는 묶음 전체 수정 불가');
+    await ctx.owner.ok('PATCH', `/api/tasks/batch/${r.batchId}`, { dueDate: addDays(today, 5), priority: 'high' });
+    assert.equal((await sql`select count(*)::int n from tasks where batch_id = ${r.batchId} and due_date = ${addDays(today, 5)} and priority = 'high'`)[0].n, 3);
+    const del = await ctx.owner.ok('DELETE', `/api/tasks/batch/${r.batchId}`);
+    assert.equal(del.deleted, 3);
+  });
+  test('삭제 → 목록·검색·홈에서 빠짐 → 휴지통에서 되살리기, 지시자도 삭제 가능', async () => {
+    const t = (await a.ok('POST', '/api/tasks', { title: 'V6 지울 업무 고유어', orgUnitId: ctx.hq, assigneeId: a.id, requestedById: b.id, approvalRequired: false })).id;
+    await b.ok('DELETE', `/api/tasks/${t}`); // 지시자 삭제
+    assert.ok(!(await a.ok('GET', '/api/tasks?q=고유어')).tasks.some((x) => x.id === t), '검색에서 제외');
+    assert.equal((await a.get(`/api/tasks/${t}`)).status, 404);
+    const trash = (await b.ok('GET', '/api/tasks/trash')).tasks;
+    assert.ok(trash.some((x) => x.id === t), '휴지통에 보임');
+    assert.ok(!(await ctx.staffA.client.ok('GET', '/api/tasks/trash')).tasks.some((x) => x.id === t), '다른 현장 직원 휴지통엔 없음');
+    await b.ok('POST', `/api/tasks/${t}/restore`, {});
+    assert.equal((await a.ok('GET', `/api/tasks/${t}`)).task.title, 'V6 지울 업무 고유어');
+  });
+  test('기본 목록(includeDone=recent)에 오늘 완료한 업무는 남고, 완료 보기는 완료만', async () => {
+    const t = (await a.ok('POST', '/api/tasks', { title: 'V6 오늘 완료', orgUnitId: ctx.hq, assigneeId: a.id, approvalRequired: false })).id;
+    const v = (await a.ok('GET', `/api/tasks/${t}`)).task.version;
+    await a.ok('PATCH', `/api/tasks/${t}`, { status: 'done', version: v });
+    assert.ok((await a.ok('GET', '/api/tasks?includeDone=recent')).tasks.some((x) => x.id === t), '오늘 완료는 남김');
+    assert.ok(!(await a.ok('GET', '/api/tasks?includeDone=0')).tasks.some((x) => x.id === t));
+    await sql`update tasks set completed_at = now() - interval '3 days' where id = ${t}`;
+    assert.ok(!(await a.ok('GET', '/api/tasks?includeDone=recent')).tasks.some((x) => x.id === t), '지난 완료는 빠짐');
+    await a.ok('POST', `/api/tasks/${t}/comments`, { body: '확인 부탁드려요' });
+    assert.ok((await a.ok('GET', '/api/tasks?includeDone=recent')).tasks.some((x) => x.id === t), '댓글 달린 완료는 7일');
+    const done = (await a.ok('GET', '/api/tasks?view=done')).tasks;
+    assert.ok(done.every((x) => x.status === 'done') && done.some((x) => x.id === t));
+  });
+  test('마감 시각이 있는 업무: 1시간 전 알림 (본인 업무도)', async () => {
+    const hm = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(Date.now() + 40 * 60000));
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + 40 * 60000));
+    const t = (await a.ok('POST', '/api/tasks', { title: 'V6 한 시간 전', orgUnitId: ctx.hq, assigneeId: a.id, dueDate: day, dueTime: hm, approvalRequired: false })).id;
+    await tick();
+    const n = await sql`select title from notifications where user_id = ${a.id} and entity_id = ${t} and title like '1시간 뒤 마감%'`;
+    assert.equal(n.length, 1);
+  });
+});
+
+describe('WORKIN_V6 엑셀 내려받기', () => {
+  test('업무 목록형 .xlsx: 보이는 업무만·삭제 제외·한글, 캘린더 표형 + 주간 표·남의 비공개는 바쁨', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { writeFileSync } = await import('node:fs');
+    const keep = (await ctx.owner.ok('POST', '/api/tasks', { title: '엑셀 남는 업무 가나다', orgUnitId: ctx.hq, dueDate: today, approvalRequired: false })).id;
+    const gone = (await ctx.owner.ok('POST', '/api/tasks', { title: '엑셀 지운 업무 라마바', orgUnitId: ctx.hq, dueDate: today, approvalRequired: false })).id;
+    await ctx.owner.ok('DELETE', `/api/tasks/${gone}`);
+    const dl = (c, path) => fetch(BASE + path, { headers: { cookie: c.cookie, origin: BASE } }); // 파일 응답 그대로
+    const res = await dl(ctx.owner, `/api/export/tasks?basis=due&start=${today}&end=${today}`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /spreadsheetml/);
+    assert.match(res.headers.get('content-disposition'), /filename\*=UTF-8''%EC%9B%8C%ED%81%AC%EC%9D%B8/);
+    const f = `/tmp/wos-export-${Date.now()}.xlsx`;
+    writeFileSync(f, Buffer.from(await res.arrayBuffer()));
+    const xml = execFileSync('unzip', ['-p', f, 'xl/worksheets/sheet1.xml']).toString();
+    assert.ok(xml.includes('엑셀 남는 업무 가나다'), '업무 포함'); assert.ok(!xml.includes('라마바'), '삭제 업무 제외');
+    assert.ok(xml.includes('기한 준수'), '머리글');
+    // 다른 현장 직원은 본사 업무를 못 내보냄
+    const r2 = await dl(ctx.staffA.client, `/api/export/tasks?basis=due&start=${today}&end=${today}`);
+    const f2 = `/tmp/wos-export2-${Date.now()}.xlsx`; writeFileSync(f2, Buffer.from(await r2.arrayBuffer()));
+    assert.ok(!execFileSync('unzip', ['-p', f2, 'xl/worksheets/sheet1.xml']).toString().includes('가나다'));
+    void keep;
+    // 캘린더
+    const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '엑셀 비밀 약속', start: `${today}T10:00:00+09:00`, end: `${today}T11:00:00+09:00`, isPrivate: true });
+    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'xls@dagym.test', name: '엑셀본사', role: 'staff', orgUnitIds: [ctx.hq] });
+    const c = new Client('xls'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'xls-pass-1234' });
+    const r3 = await dl(c, `/api/export/calendar?start=${today}&end=${today}`);
+    assert.equal(r3.status, 200);
+    const f3 = `/tmp/wos-export3-${Date.now()}.xlsx`; writeFileSync(f3, Buffer.from(await r3.arrayBuffer()));
+    const s1 = execFileSync('unzip', ['-p', f3, 'xl/worksheets/sheet1.xml']).toString();
+    assert.ok(s1.includes('바쁨') && !s1.includes('엑셀 비밀 약속'), '남의 비공개는 바쁨만');
+    assert.ok(execFileSync('unzip', ['-p', f3, 'xl/worksheets/sheet2.xml']).toString().includes('10:00'), '주간 달력 표');
+  });
+});
+
+describe('WORKIN_V6 달성률', () => {
+  test('이번 주 완료율·기한 준수율·기한 지남·사람별·지시한 업무, 현장 직원은 자기 범위만', async () => {
+    const t1 = (await ctx.owner.ok('POST', '/api/tasks', { title: '달성률 완료', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, dueDate: today, approvalRequired: false })).id;
+    await ctx.owner.ok('POST', '/api/tasks', { title: '달성률 미완료', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, dueDate: today, approvalRequired: false });
+    const v = (await ctx.owner.ok('GET', `/api/tasks/${t1}`)).task.version;
+    await ctx.owner.ok('PATCH', `/api/tasks/${t1}`, { status: 'done', version: v });
+    const s = await ctx.owner.ok('GET', '/api/stats?period=week');
+    assert.ok(s.due >= 2 && s.done >= 1 && s.completion !== null && s.completion <= 100);
+    assert.ok(s.onTime === null || (s.onTime >= 0 && s.onTime <= 100));
+    assert.ok(Array.isArray(s.people) && s.people.some((p) => p.id === ctx.ownerId));
+    assert.equal(typeof s.requested.open, 'number');
+    const m = await ctx.owner.ok('GET', '/api/stats?period=month');
+    assert.ok(m.due >= s.due || m.start <= s.start);
+    const st = await ctx.staffA.client.ok('GET', '/api/stats?period=week');
+    assert.ok(!st.people.some((p) => p.id === ctx.ownerId && p.due >= 2), '현장 직원 달성률에 본사 업무가 섞이지 않음');
+  });
+});

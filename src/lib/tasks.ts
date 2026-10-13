@@ -39,6 +39,8 @@ export const taskInput = z.object({
   /** 캘린더에 표시 (기본 켜짐) */
   showOnCalendar: z.boolean().optional(),
   sortOrder: z.number().optional(),
+  /** V6 13번: 담당자 여러 명 → 각자 1건씩 (만들 때만) */
+  assigneeIds: z.array(zUuid).max(50).optional(),
   version: z.number().int().optional(),
   reviewNote: z.string().max(2000).optional(),
 });
@@ -49,7 +51,8 @@ export const TASK_COLS = (sql: Sql) => sql`
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id,
-  t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name,
+  t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id,
+  case when t.batch_id is null then null else (select json_build_object('total', count(*)::int, 'done', count(*) filter (where b.status = 'done')::int) from tasks b where b.batch_id = t.batch_id and b.deleted_at is null) end as batch,
   (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
     where be.deleted_at is null and be.kind = 'task_block' and (be.task_id = t.id or be.id in (select event_id from event_tasks where task_id = t.id and role = 'block'))) as scheduled_minutes,
   (select count(*)::int from event_tasks lk where lk.task_id = t.id) as event_count,
@@ -76,7 +79,7 @@ export const TASK_FROM = (sql: Sql) => sql`
 
 export const listQuery = z.object({
   // U-0a 주소창 값은 사람이 고칠 수 있다 — 모르는 보기·옵션 값은 오류 대신 기본값으로
-  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested']).catch('all'),
+  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done']).catch('all'),
   projectId: zUuid.optional(),
   orgUnitId: zUuid.optional(),
   brandId: z.string().optional(),
@@ -88,7 +91,7 @@ export const listQuery = z.object({
   to: zDate.optional().catch(undefined),
   parentId: zUuid.optional(),
   includeSubtasks: z.enum(['0', '1']).optional().catch(undefined),
-  includeDone: z.enum(['0', '1']).optional().catch(undefined),
+  includeDone: z.enum(['0', '1', 'recent']).optional().catch(undefined),
   limit: z.coerce.number().int().min(1).max(1000).catch(500),
 });
 
@@ -111,6 +114,9 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
     const st = q.status.split(',').filter((s) => s in STATUS_LABEL);
     if (st.length) conds.push(sql`t.status = any(${st})`);
   } else if (q.includeDone === '0') conds.push(sql`t.status <> 'done'`);
+  // V6 16번: 완료해도 오늘(서울 자정까지)은 목록에 남기고, 댓글이 달린 완료 업무는 7일 동안
+  else if (q.includeDone === 'recent') conds.push(sql`(t.status <> 'done' or t.completed_at >= ${today}::date::timestamp at time zone 'Asia/Seoul'
+    or (t.completed_at > now() - interval '7 days' and exists (select 1 from comments c where c.task_id = t.id and c.deleted_at is null)))`);
   if (q.q) {
     const like = '%' + q.q.replace(/[%_\\]/g, (m) => '\\' + m) + '%';
     conds.push(sql`(t.title ilike ${like} or t.description ilike ${like} or exists (select 1 from unnest(t.tags) tg where tg ilike ${like}))`);
@@ -121,6 +127,9 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
     case 'my':
       conds.push(sql`(t.assignee_id = ${u.id} or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id}))`);
       conds.push(sql`t.status <> 'done'`);
+      break;
+    case 'done': // V6 5번 완료 보관: 완료일 기준 (화면에서 월별로 묶음)
+      conds.push(sql`t.status = 'done'`);
       break;
     case 'requested': // 내가 지시한 업무 (Asana "내가 배정한 작업")
       conds.push(sql`t.requested_by = ${u.id}`);
@@ -147,7 +156,7 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
   }
   const where = conds.reduce((a, c) => sql`${a} and ${c}`);
   const rows = await sql<any[]>`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where ${where}
-    order by t.due_date asc nulls last, t.priority = 'urgent' desc, t.priority = 'high' desc, t.sort_order, t.created_at
+    order by ${q.view === 'done' ? sql`t.completed_at desc nulls last,` : sql``} t.due_date asc nulls last, t.priority = 'urgent' desc, t.priority = 'high' desc, t.sort_order, t.created_at
     limit ${q.limit}`;
   if (q.view !== 'risk') return rows;
   const { deadlineRisk } = await import('./availability');
@@ -168,7 +177,7 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     where t.id = ${id}`, accessibleUnitIds(u, sql)]);
   const { openRound, stepApprovers } = await import('./approvals');
   const { deadlineRisk } = await import('./availability');
-  const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks, approvals, fields, risk] = await Promise.all([
+  const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks, approvals, fields, risk, batchMates] = await Promise.all([
     sql`select u.id, u.name from task_collaborators c join users u on u.id = c.user_id where c.task_id = ${id} order by u.name`,
     sql`select id, text, done, sort, done_at from task_checklist_items where task_id = ${id} order by sort, id`,
     sql`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where t.parent_id = ${id} and t.deleted_at is null
@@ -185,10 +194,13 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     openRound(sql, id),
     t.project_id ? sql`select id, name, type, options, aggregate from project_fields where project_id = ${t.project_id} order by sort, created_at` : Promise.resolve([]),
     deadlineRisk(t as never).catch(() => null),
+    // V6 13번: 같이 받은 사람(담당자별 1건씩 만든 묶음)
+    t.batch_id ? sql`select b.id, b.status, b.assignee_id, a.name as assignee_name from tasks b left join users a on a.id = b.assignee_id
+      where b.batch_id = ${t.batch_id} and b.deleted_at is null order by a.name` : Promise.resolve([]),
   ]);
   const pending = t.status === 'review' ? approvals.find((a) => a.status === 'pending' && a.round === approvals[0]?.round) : null;
   const canDecide = pending ? (await stepApprovers(sql, t.org_unit_id, pending)).includes(u.id) : false;
-  return { task: t, perms: { ...perms, decide: canDecide }, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk };
+  return { task: t, perms: { ...perms, decide: canDecide }, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -246,12 +258,12 @@ export async function createTask(u: SessionUser, i: TaskInput) {
     const [t] = await tx<{ id: string }[]>`
       insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
         start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at,
-        task_type, photo_required, approval_line_id, estimate_minutes, requested_by)
+        task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
         ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
         ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null},
-        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id})
+        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null})
       returning id`;
     for (const c of new Set(i.collaboratorIds ?? [])) {
       await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
@@ -297,6 +309,39 @@ async function approverIds(sql: Sql, orgUnitId: string, projectId: string | null
   if (rows.length) return rows.map((r) => r.id);
   const admins = await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active'`;
   return admins.map((r) => r.id);
+}
+
+/** V6 13번: 같은 업무를 담당자마다 1건씩 (같은 batch_id). 각 담당자에게 배정 알림은 createTask 가 보냄 */
+export async function createTasksForAssignees(u: SessionUser, i: TaskInput) {
+  const ids = [...new Set(i.assigneeIds ?? [])];
+  if (ids.length < 2) return createTask(u, { ...i, assigneeId: ids[0] ?? i.assigneeId });
+  const batchId = crypto.randomUUID();
+  const out: string[] = [];
+  for (const a of ids) out.push((await createTask(u, { ...i, assigneeId: a, batchId } as TaskInput)).id);
+  return { id: out[0], ids: out, batchId };
+}
+
+/** 묶음 전체에 적용 (지시자·만든 사람·관리자만): 제목·마감·우선순위·설명 */
+export async function updateBatch(u: SessionUser, batchId: string, i: Pick<Partial<TaskInput>, 'title' | 'dueDate' | 'dueTime' | 'priority' | 'description'>) {
+  const sql = db();
+  const rows = await sql<{ id: string; requested_by: string | null; created_by: string }[]>`select id, requested_by, created_by from tasks where batch_id = ${batchId} and deleted_at is null`;
+  if (!rows.length) throw notFound('묶음이 없습니다');
+  await loadTaskForUser(u, rows[0].id, sql);
+  if (!(rows[0].requested_by === u.id || rows[0].created_by === u.id || atLeast(u, 'admin'))) throw forbidden('묶음 전체 수정은 지시자만 할 수 있습니다');
+  for (const r of rows) await updateTask(u, r.id, i);
+  return { updated: rows.length };
+}
+export async function deleteBatch(u: SessionUser, batchId: string) {
+  const sql = db();
+  const rows = await sql<{ id: string; requested_by: string | null; created_by: string }[]>`select id, requested_by, created_by from tasks where batch_id = ${batchId} and deleted_at is null`;
+  if (!rows.length) throw notFound('묶음이 없습니다');
+  await loadTaskForUser(u, rows[0].id, sql);
+  if (!(rows[0].requested_by === u.id || rows[0].created_by === u.id || atLeast(u, 'admin'))) throw forbidden('묶음 전체 삭제는 지시자만 할 수 있습니다');
+  await sql.begin(async (tx) => {
+    await tx`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where batch_id = ${batchId} and deleted_at is null`;
+    for (const r of rows) await activity(tx, 'task', r.id, u.id, 'deleted', { batch: batchId });
+  });
+  return { deleted: rows.length };
 }
 
 export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInput>) {
@@ -459,10 +504,14 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     }
     // WORKIN_V3 지시자에게: 담당자가 완료하거나 검토를 요청하면 알림 (지시자 본인이 한 변경은 제외)
     const requester = (set.requested_by ?? cur.requested_by) as string | null;
-    if (requester && requester !== u.id && (set.status === 'done' || statusEvent === 'review_requested')) {
+    // V6 15번: 진행 중·검토 요청·보류·완료·다시 진행 등 상태가 바뀔 때마다
+    if (requester && requester !== u.id && set.status && set.status !== cur.status) {
+      const verb = set.status === 'done' ? '완료했습니다' : statusEvent === 'review_requested' ? '완료하고 검토를 요청했습니다'
+        : set.status === 'in_progress' ? (cur.status === 'todo' ? '시작했습니다' : '다시 진행합니다') : set.status === 'on_hold' ? '보류했습니다' : '할 일로 되돌렸습니다';
+      const head = set.status === 'done' ? '완료' : statusEvent === 'review_requested' ? '검토 요청' : STATUS_LABEL[set.status as keyof typeof STATUS_LABEL] ?? '상태 변경';
       await notify(tx, { userIds: [requester], type: 'task_done_for_requester',
-        title: `${set.status === 'done' ? '완료' : '검토 요청'}: ${title}`, body: `${u.name}님이 지시하신 업무를 ${set.status === 'done' ? '완료했습니다' : '완료하고 검토를 요청했습니다'}`,
-        link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reqdone:${id}:${upd.version}` });
+        title: `${head}: ${title}`, body: `${u.name}님이 '${title}'을(를) ${verb}`,
+        link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reqst:${id}:${upd.version}` });
     }
     let spawned: string | null = null;
     if (set.status === 'done') spawned = await spawnNextRecurrence(tx, id, u.id);
@@ -518,6 +567,33 @@ export async function deleteTask(u: SessionUser, id: string) {
   await sql.begin(async (tx) => {
     await tx`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = ${id} or parent_id = ${id}`;
     await activity(tx, 'task', id, u.id, 'deleted');
+  });
+  return { ok: true };
+}
+
+/** V6 11번 휴지통: 삭제 후 30일까지, 삭제 권한이 있었던 사람(만든 사람·지시자·관리자)에게 보임 */
+export async function listTrash(u: SessionUser) {
+  const sql = db();
+  const units = await accessibleUnitIds(u, sql);
+  return sql`select t.id, t.title, t.deleted_at, t.due_date, t.assignee_id, a.name as assignee_name, t.parent_id
+    from tasks t left join users a on a.id = t.assignee_id
+    where t.deleted_at > now() - interval '30 days' and t.parent_id is null
+      and (t.created_by = ${u.id} or t.requested_by = ${u.id} or ${atLeast(u, 'admin')})
+      and ${units === null ? sql`true` : sql`t.org_unit_id = any(${units}::uuid[])`}
+    order by t.deleted_at desc limit 200`;
+}
+/** 되살리기: 같은 때 함께 지운 하위 업무도 */
+export async function restoreTask(u: SessionUser, id: string) {
+  const sql = db();
+  const [t] = await sql<{ id: string; deleted_at: Date | null; created_by: string; requested_by: string | null; org_unit_id: string }[]>`
+    select id, deleted_at, created_by, requested_by, org_unit_id from tasks where id = ${id}`;
+  if (!t || !t.deleted_at) throw notFound('휴지통에 없는 업무입니다');
+  await assertUnitAccess(u, t.org_unit_id, sql);
+  if (!(t.created_by === u.id || t.requested_by === u.id || atLeast(u, 'admin'))) throw forbidden('만든 사람·지시자·관리자만 되살릴 수 있습니다');
+  if (Date.now() - t.deleted_at.getTime() > 30 * 86400000) throw badRequest('30일이 지나 되살릴 수 없습니다');
+  await sql.begin(async (tx) => {
+    await tx`update tasks set deleted_at = null, updated_at = now(), version = version + 1 where id = ${id} or (parent_id = ${id} and deleted_at = ${t.deleted_at})`;
+    await activity(tx, 'task', id, u.id, 'restored');
   });
   return { ok: true };
 }

@@ -42,6 +42,7 @@ export interface TaskAccessRow {
   assignee_id: string | null;
   created_by: string;
   project_id: string | null;
+  requested_by?: string | null;
 }
 
 export interface TaskPerms {
@@ -62,7 +63,7 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
     view: inUnit || involved,
     edit: manager || involved || inUnit,
     approve: manager,
-    delete: manager || t.created_by === u.id,
+    delete: manager || t.created_by === u.id || (!!t.requested_by && t.requested_by === u.id), // 지시자도 삭제 가능(V6 11번)
   };
 }
 
@@ -72,7 +73,7 @@ export const isUuid = (s: string) => UUID_RE.test(s);
 export async function loadTaskForUser(u: SessionUser, taskId: string, sql: Sql = db()) {
   if (!isUuid(taskId)) throw notFound('업무를 찾을 수 없습니다');
   const rows = await sql<TaskAccessRow[]>`
-    select id, org_unit_id, assignee_id, created_by, project_id from tasks where id = ${taskId} and deleted_at is null`;
+    select id, org_unit_id, assignee_id, created_by, project_id, requested_by from tasks where id = ${taskId} and deleted_at is null`;
   const t = rows[0];
   if (!t) throw notFound('업무를 찾을 수 없습니다');
   const perms = await taskPerms(u, t, sql);

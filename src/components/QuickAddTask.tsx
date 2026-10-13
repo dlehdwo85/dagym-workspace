@@ -6,6 +6,7 @@ import { api, broadcastRefresh, useApi } from './client';
 import { Button, Field, Modal, cx, fmtMinutes, inputCls, toast, todayStr } from './ui';
 import { UserSelect } from './pickers';
 import { quickDues } from './TaskQuick';
+import { TIMES, timeLabel } from './DateTimePickers';
 import { useSession } from './session';
 
 export interface QuickDefaults { projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string }
@@ -30,7 +31,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
 
   useEffect(() => {
     if (open) {
-      setF({ title: '', assigneeId: defaults?.assigneeId ?? user.id, requestedById: user.id, dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? '' });
+      setF({ title: '', multi: false, more: [], dueTime: '', assigneeId: defaults?.assigneeId ?? user.id, requestedById: user.id, dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? '' });
       setTpl(''); setShowTpl(false);
     }
   }, [open, defaults, user.id]);
@@ -40,6 +41,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   const avail = useApi<{ days: any[] }>(open && f.assigneeId && f.dueDate ? `/api/availability?userId=${f.assigneeId}&date=${f.dueDate}` : null, [f.assigneeId, f.dueDate]);
   const day = avail.data?.days?.[0];
   const who = dir.users.find((x) => x.id === f.assigneeId)?.name;
+  const count = f.multi ? new Set([f.assigneeId, ...(f.more ?? [])].filter(Boolean)).size : 1;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -54,14 +56,15 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
         r = await api('/api/tasks', {
           queueOffline: `업무 등록: ${f.title}`,
           body: {
-            title: f.title, assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || null, projectId: f.projectId || null,
+            title: f.title, assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || null, dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
+            ...(count > 1 ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
             parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
             sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null,
             approvalRequired: false,
           },
         });
       }
-      toast.ok('업무를 등록했습니다');
+      toast.ok(count > 1 ? `${count}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
       broadcastRefresh();
       if (keep && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setTpl(''); titleRef.current?.focus(); return; }
       onClose();
@@ -80,7 +83,28 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           <Field label="담당자"><UserSelect ariaLabel="담당자" value={f.assigneeId} onChange={set('assigneeId')} /></Field>
           <Field label="지시자 (업무를 부여한 사람)"><UserSelect ariaLabel="지시자" placeholder="지시자 선택" value={f.requestedById} onChange={set('requestedById')} /></Field>
           <Field label="마감일"><input type="date" className={inputCls} value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} /></Field>
+          {/* V6 10번: 마감 시각(15분 단위, 기본 없음) — 날짜를 정한 뒤에만 */}
+          {f.dueDate && <Field label="마감 시각"><select className={inputCls} value={f.dueTime ?? ''} onChange={(e) => set('dueTime')(e.target.value)} aria-label="마감 시각">
+            <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
+          </select></Field>}
         </div>
+        {/* V6 13번: 다른 사람도 같은 업무를 각자 1건씩 (담당자별 묶음) */}
+        {!defaults?.parentId && !tpl && (
+          <div data-testid="multi-assignee">
+            <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={() => set('multi')(!f.multi)} aria-expanded={!!f.multi}>{f.multi ? '− 여러 명 선택 닫기' : '+ 여러 명에게 각자 1건씩'}</button>
+            {f.multi && (
+              <div className="mt-1.5 flex flex-wrap gap-1.5 rounded-input bg-slate-50 p-2">
+                {dir.users.map((x) => {
+                  const on = (f.more ?? []).includes(x.id) || x.id === f.assigneeId;
+                  return <button key={x.id} type="button" aria-pressed={on} disabled={x.id === f.assigneeId}
+                    onClick={() => set('more')(on ? (f.more ?? []).filter((y: string) => y !== x.id) : [...(f.more ?? []), x.id])}
+                    className={cx('rounded-full border px-2.5 py-1 text-xs font-medium', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2')}>{x.name}</button>;
+                })}
+                <button type="button" className="rounded-full px-2 py-1 text-xs text-ink-2 underline" onClick={() => set('more')(dir.users.filter((x) => x.id !== f.assigneeId).map((x) => x.id))}>전체 선택</button>
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap gap-1.5" aria-label="마감 빠른 선택">
           {quickDues().map(([l, d]) => (
             <button key={l} type="button" onClick={() => set('dueDate')(d)}
@@ -121,7 +145,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           )}
           <div className="flex gap-2">
             <Button type="button" variant="secondary" onClick={onClose}>취소</Button>
-            <Button type="submit" disabled={busy} className="min-w-[88px]" title="Ctrl+Enter">{busy ? '저장 중…' : '저장'}</Button>
+            <Button type="submit" disabled={busy} className="min-w-[88px]" title="Ctrl+Enter">{busy ? '저장 중…' : count > 1 ? `${count}명에게 각각 만들기` : '저장'}</Button>
           </div>
         </div>
       </form>

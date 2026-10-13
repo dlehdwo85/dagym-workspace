@@ -1,7 +1,7 @@
 'use client';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSession } from './session';
-import { inputCls } from './ui';
+import { Modal, cx, inputCls } from './ui';
 import { HIDDEN_BRANDS, UNIT_TYPE_LABEL } from '@/lib/types';
 
 export function UnitSelect({ value, onChange, allowEmpty, id, className }: { value: string | null | undefined; onChange: (v: string) => void; allowEmpty?: string; id?: string; className?: string }) {
@@ -74,25 +74,99 @@ export function BrandSelect({ value, onChange, className }: { value: string | nu
 const DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 const DAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
 
-/** 시작(기준)일로부터 반복 프리셋 규칙을 만든다 */
+const NTH_KO = ['', '첫째', '둘째', '셋째', '넷째', '다섯째'];
+/** 시작(기준)일로부터 반복 프리셋 규칙을 만든다 — Google Calendar 처럼 날짜에 맞춘 문구 (V6 8번) */
 export function recurPresets(anchorDate?: string | null): { label: string; rule: string | null }[] {
   const d = anchorDate ? new Date(anchorDate + 'T00:00:00Z') : null;
   const dow = d ? d.getUTCDay() : 1;
   const dom = d ? d.getUTCDate() : 1;
+  const mon = d ? d.getUTCMonth() + 1 : 1;
   const nth = Math.ceil(dom / 7);
   const last = d ? new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate() - dom < 7 : false;
   const list: { label: string; rule: string | null }[] = [
-    { label: '반복 안 함', rule: null },
+    { label: '반복 안함', rule: null },
     { label: '매일', rule: 'FREQ=DAILY' },
-    { label: '평일(월~금)', rule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' },
     { label: `매주 ${DAY_KO[dow]}요일`, rule: `FREQ=WEEKLY;BYDAY=${DAY_CODES[dow]}` },
-    { label: `2주마다 ${DAY_KO[dow]}요일`, rule: `FREQ=WEEKLY;INTERVAL=2;BYDAY=${DAY_CODES[dow]}` },
-    { label: `매월 ${dom}일`, rule: `FREQ=MONTHLY;BYMONTHDAY=${dom}` },
   ];
-  if (nth <= 4) list.push({ label: `매월 ${nth}번째 ${DAY_KO[dow]}요일`, rule: `FREQ=MONTHLY;BYDAY=${nth}${DAY_CODES[dow]}` });
+  if (nth <= 4) list.push({ label: `매월 ${NTH_KO[nth]} ${DAY_KO[dow]}요일`, rule: `FREQ=MONTHLY;BYDAY=${nth}${DAY_CODES[dow]}` });
   if (last) list.push({ label: `매월 마지막 ${DAY_KO[dow]}요일`, rule: `FREQ=MONTHLY;BYDAY=-1${DAY_CODES[dow]}` });
-  list.push({ label: '매년', rule: 'FREQ=YEARLY' });
+  list.push({ label: `매월 ${dom}일`, rule: `FREQ=MONTHLY;BYMONTHDAY=${dom}` });
+  list.push({ label: `매년 ${mon}월 ${dom}일`, rule: `FREQ=YEARLY;BYMONTH=${mon};BYMONTHDAY=${dom}` });
+  list.push({ label: '주중 매일(월-금)', rule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' });
   return list;
+}
+
+/** 규칙 → 사람이 읽는 문구 (사용자 지정 표시용) */
+export function ruleLabel(base: string | null): string {
+  if (!base) return '반복 안함';
+  const m = Object.fromEntries(base.split(';').map((p) => p.split('=')));
+  const iv = Number(m.INTERVAL ?? 1);
+  const unit = ({ DAILY: '일', WEEKLY: '주', MONTHLY: '개월', YEARLY: '년' } as Record<string, string>)[m.FREQ] ?? '';
+  const head = iv > 1 ? `${iv}${unit}마다` : ({ DAILY: '매일', WEEKLY: '매주', MONTHLY: '매월', YEARLY: '매년' } as Record<string, string>)[m.FREQ] ?? base;
+  if (m.BYDAY && m.FREQ === 'WEEKLY') return `${head} ${m.BYDAY.split(',').map((c: string) => DAY_KO[DAY_CODES.indexOf(c)]).join('·')}요일`;
+  if (m.BYDAY && m.FREQ === 'MONTHLY') { const n = Number(m.BYDAY.slice(0, -2)); return `${head} ${n === -1 ? '마지막' : NTH_KO[n]} ${DAY_KO[DAY_CODES.indexOf(m.BYDAY.slice(-2))]}요일`; }
+  if (m.BYMONTHDAY) return `${head} ${m.BYMONTH ? `${m.BYMONTH}월 ` : ''}${m.BYMONTHDAY}일`;
+  return head;
+}
+
+/** Google 형 "사용자 지정 반복" 창: 반복 주기 [n][일·주·월·년], 주 = 요일 동그라미, 월 = n일/n째 요일, 종료 = 없음·날짜·n회 */
+function CustomRecur({ value, anchorDate, onClose, onSave }: { value: string | null; anchorDate?: string | null; onClose: () => void; onSave: (v: string | null) => void }) {
+  const d = anchorDate ? new Date(anchorDate + 'T00:00:00Z') : new Date();
+  const dow = d.getUTCDay(), dom = d.getUTCDate(), nth = Math.min(4, Math.ceil(dom / 7));
+  const { base, until, count } = splitRule(value);
+  const m: Record<string, string> = base ? Object.fromEntries(base.split(';').map((p) => p.split('='))) : {};
+  const [iv, setIv] = useState(Number(m.INTERVAL ?? 1));
+  const [freq, setFreq] = useState<'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'>((m.FREQ as never) ?? 'WEEKLY');
+  const [days, setDays] = useState<string[]>(m.FREQ === 'WEEKLY' && m.BYDAY ? m.BYDAY.split(',') : [DAY_CODES[dow]]);
+  const [monthBy, setMonthBy] = useState<'day' | 'nth'>(m.FREQ === 'MONTHLY' && m.BYDAY ? 'nth' : 'day');
+  const [end, setEnd] = useState<'none' | 'until' | 'count'>(until ? 'until' : count ? 'count' : 'none');
+  const [endDate, setEndDate] = useState(until ?? (anchorDate ? addMonths(anchorDate, 3) : ''));
+  const [n, setN] = useState(count ?? 13);
+  const build = () => {
+    let r = `FREQ=${freq}${iv > 1 ? `;INTERVAL=${iv}` : ''}`;
+    if (freq === 'WEEKLY') r += `;BYDAY=${(days.length ? days : [DAY_CODES[dow]]).sort((a, b) => DAY_CODES.indexOf(a) - DAY_CODES.indexOf(b)).join(',')}`;
+    if (freq === 'MONTHLY') r += monthBy === 'nth' ? `;BYDAY=${nth}${DAY_CODES[dow]}` : `;BYMONTHDAY=${dom}`;
+    if (freq === 'YEARLY') r += `;BYMONTH=${d.getUTCMonth() + 1};BYMONTHDAY=${dom}`;
+    return joinRule(r, end === 'until' ? { until: endDate || null } : end === 'count' ? { count: n } : {});
+  };
+  return (
+    <Modal open onClose={onClose} title="사용자 지정 반복">
+      <div className="space-y-4 text-sm" data-testid="custom-recur">
+        <div className="flex items-center gap-2">반복 주기
+          <input type="number" min={1} max={99} value={iv} onChange={(e) => setIv(Math.max(1, Number(e.target.value) || 1))} className="w-16 rounded-input border border-line px-2 py-1.5" aria-label="반복 간격" />
+          <select value={freq} onChange={(e) => setFreq(e.target.value as typeof freq)} className="rounded-input border border-line px-2" aria-label="반복 단위">
+            <option value="DAILY">일</option><option value="WEEKLY">주</option><option value="MONTHLY">개월</option><option value="YEARLY">년</option>
+          </select>
+        </div>
+        {freq === 'WEEKLY' && (
+          <div><p className="mb-1.5 text-ink-2">반복 요일</p>
+            <div className="flex gap-1.5" role="group" aria-label="반복 요일">
+              {DAY_KO.map((k, i) => { const on = days.includes(DAY_CODES[i]); return (
+                <button key={k} type="button" aria-pressed={on} onClick={() => setDays(on ? days.filter((x) => x !== DAY_CODES[i]) : [...days, DAY_CODES[i]])}
+                  className={cx('flex size-9 items-center justify-center rounded-full text-sm font-semibold', on ? 'bg-brand-600 text-white' : 'bg-slate-100 text-ink-2')}>{k}</button>); })}
+            </div>
+          </div>
+        )}
+        {freq === 'MONTHLY' && (
+          <select value={monthBy} onChange={(e) => setMonthBy(e.target.value as 'day' | 'nth')} className="w-full rounded-input border border-line px-2" aria-label="매월 기준">
+            <option value="day">매월 {dom}일</option><option value="nth">매월 {NTH_KO[nth]} {DAY_KO[dow]}요일</option>
+          </select>
+        )}
+        <fieldset className="space-y-2"><legend className="mb-1 text-ink-2">종료</legend>
+          <label className="flex items-center gap-2"><input type="radio" name="rend" checked={end === 'none'} onChange={() => setEnd('none')} />없음</label>
+          <label className="flex items-center gap-2"><input type="radio" name="rend" checked={end === 'until'} onChange={() => setEnd('until')} />날짜
+            <input type="date" value={endDate} min={anchorDate ?? undefined} onChange={(e) => { setEndDate(e.target.value); setEnd('until'); }} className="rounded-input border border-line px-2 py-1" aria-label="종료 날짜" /></label>
+          <label className="flex items-center gap-2"><input type="radio" name="rend" checked={end === 'count'} onChange={() => setEnd('count')} />
+            <input type="number" min={1} max={500} value={n} onChange={(e) => { setN(Math.max(1, Number(e.target.value) || 1)); setEnd('count'); }} className="w-16 rounded-input border border-line px-2 py-1" aria-label="종료 횟수" />회 후</label>
+        </fieldset>
+        <p className="rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="custom-recur-preview">{ruleLabel(splitRule(build()).base)}{end === 'until' && endDate ? ` · ${endDate}까지` : end === 'count' ? ` · ${n}회` : ''}</p>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-input px-3 py-2 text-ink-2 hover:bg-slate-100">취소</button>
+          <button type="button" onClick={() => { onSave(build()); onClose(); }} className="rounded-input bg-brand-600 px-4 py-2 font-semibold text-white">완료</button>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 /** 규칙을 (기본 규칙, 종료 조건)으로 나눈다. UNTIL 은 서울 날짜로 바꾼다 */
@@ -128,15 +202,19 @@ export function RecurSelect({ value, onChange, anchorDate }: { value: string | n
   const known = presets.find((p) => p.rule === base);
   const endKind = until ? 'until' : count ? 'count' : 'none';
   const setBase = (b: string | null) => onChange(joinRule(b, { until, count }));
+  const [custom, setCustom] = useState(false);
   return (
     <div className="space-y-1.5" data-testid="recur-editor">
-      <select className={inputCls} value={known ? known.label : '__custom'} aria-label="반복 규칙" onChange={(e) => {
+      <select className={inputCls} value={known ? known.label : '__current'} aria-label="반복 규칙" onChange={(e) => {
+        if (e.target.value === '__custom') { setCustom(true); return; }
         const p = presets.find((x) => x.label === e.target.value);
         if (p) setBase(p.rule);
       }}>
         {presets.map((p) => <option key={p.label} value={p.label}>{p.label}</option>)}
-        {!known && <option value="__custom">사용자 지정: {base}</option>}
+        {!known && <option value="__current">{ruleLabel(base)}</option>}
+        <option value="__custom">사용자 지정…</option>
       </select>
+      {custom && <CustomRecur value={value} anchorDate={anchorDate} onClose={() => setCustom(false)} onSave={onChange} />}
       {base && (
         <div className="flex items-center gap-1.5 text-sm">
           <select className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" value={endKind} aria-label="반복 종료" onChange={(e) => {

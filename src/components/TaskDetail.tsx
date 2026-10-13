@@ -134,11 +134,22 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     reload();
   }
   async function del() {
-    if (!confirm('이 업무와 하위 업무를 삭제할까요?')) return;
-    // V5 "업무에도 추가"로 연결된 일정: 함께 지울지 묻는다 (반복 업무는 일정 시리즈 전체가 지워지므로 묻지 않고 남김)
+    const subs = data?.subtasks?.length ?? 0;
     const synced = (events.data?.events ?? []).filter((e: any) => e.sync);
+    if (!confirm(`이 업무를 삭제할까요?${subs ? `\n하위 업무 ${subs}개도 함께 삭제됩니다.` : ''}\n삭제한 업무는 30일 동안 휴지통에서 되살릴 수 있습니다.`)) return;
+    // V5 "업무에도 추가"로 연결된 일정: 함께 지울지 묻는다 (반복 업무는 일정 시리즈 전체가 지워지므로 묻지 않고 남김)
     const alsoEvent = synced.length > 0 && !data?.task?.recurrence_rule && confirm(`연결된 일정 '${synced[0].title}'도 함께 삭제할까요?\n취소를 누르면 업무만 삭제하고 일정은 남깁니다.`);
-    try { await api(`/api/tasks/${id}${alsoEvent ? '?alsoEvent=1' : ''}`, { method: 'DELETE' }); toast.ok('삭제했습니다'); broadcastRefresh(); if (onClose) onClose(); else router.push('/tasks'); } catch (e: any) { toast.error(e.message); }
+    // V6 13번: 담당자별로 같이 만든 묶음은 지시자가 한 번에 지울 수 있음
+    const t0 = data?.task;
+    const batchAll = !!t0?.batch_id && (t0.batch?.total ?? 0) > 1 && (t0.requested_by === user.id || t0.created_by === user.id) && confirm(`같이 만든 ${t0.batch.total}건(담당자별)을 모두 삭제할까요?\n취소를 누르면 이 업무만 삭제합니다.`);
+    try {
+      if (batchAll) await api(`/api/tasks/batch/${t0.batch_id}`, { method: 'DELETE' });
+      else await api(`/api/tasks/${id}${alsoEvent ? '?alsoEvent=1' : ''}`, { method: 'DELETE' });
+      toast.ok(batchAll ? `${t0.batch.total}건을 삭제했습니다` : '삭제했습니다 — 휴지통에서 30일 동안 되살릴 수 있습니다', batchAll ? undefined : {
+        label: '되돌리기', run: async () => { try { await api(`/api/tasks/${id}/restore`, { body: {} }); toast.ok('되살렸습니다'); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } },
+      });
+      broadcastRefresh(); if (onClose) onClose(); else router.push('/tasks');
+    } catch (e: any) { toast.error(e.message); }
   }
   async function saveTemplate() {
     const name = prompt('템플릿 이름', t.title);
@@ -271,6 +282,25 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </section>
         )}
 
+        {/* V6 13번: 같이 받은 사람 (담당자별로 1건씩 만든 묶음) */}
+        {data.batchMates?.length > 1 && (
+          <section className="rounded-card border border-violet-200 bg-violet-50/50 p-3 text-sm" data-testid="batch-mates">
+            <p className="mb-1.5 font-semibold text-violet-800">같이 받은 사람 {data.batchMates.length}명 · 완료 {data.batchMates.filter((b: any) => b.status === 'done').length}</p>
+            <ul className="flex flex-wrap gap-1.5">
+              {data.batchMates.map((b: any) => (
+                <li key={b.id}><Link href={`/tasks/${b.id}`} className={cx('inline-flex items-center gap-1 rounded-full border bg-white px-2 py-0.5 text-xs', b.id === id ? 'border-violet-400 font-semibold' : 'border-line')}>
+                  {b.assignee_name ?? '담당자 없음'} · {STATUS_LABEL[b.status as TaskStatus]}</Link></li>
+              ))}
+            </ul>
+            {(t.requested_by === user.id || t.created_by === user.id) && (
+              <button type="button" className="mt-2 text-xs font-medium text-violet-800 underline" data-testid="batch-apply"
+                onClick={async () => { if (!confirm('이 업무의 제목·마감·우선순위·설명을 같이 받은 모든 업무에 똑같이 적용할까요?')) return;
+                  try { const r = await api(`/api/tasks/batch/${t.batch_id}`, { method: 'PATCH', body: { title: t.title, dueDate: t.due_date, dueTime: t.due_time, priority: t.priority, description: t.description } }); toast.ok(`${r.updated}건에 적용했습니다`); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } }}>
+                같은 묶음 모두에 적용 (지시자)</button>
+            )}
+          </section>
+        )}
+
         {/* 속성 */}
         <section className="grid grid-cols-1 border-y border-line" aria-label="업무 속성">
           <Prop icon={UserRound} label="담당자">
@@ -292,7 +322,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle className="size-3.5" />마감 위험</span>}
             </span>
           </Prop>
-          <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:h-8 [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line" data-testid="detail-repeat">{t.due_date || t.recurrence_rule ? <RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /> : <span className="px-2 text-xs text-ink-3">마감일을 정하면 반복할 수 있습니다</span>}</div></Prop>
+          <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line" data-testid="detail-repeat">{t.due_date || t.recurrence_rule ? <RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /> : <span className="px-2 text-xs text-ink-3">마감일을 정하면 반복할 수 있습니다</span>}</div></Prop>
           <Prop icon={FolderKanban} label="프로젝트">
             <select className={ghostCls} value={t.project_id ?? ''} onChange={(e) => patch({ projectId: e.target.value || null })}>
               <option value="">없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}

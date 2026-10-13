@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useRowOpen } from './rowOpen';
@@ -12,9 +13,9 @@ import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import {
   CalendarDays as CalIcon, Camera, CheckCheck, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip,
-  GripVertical, Plus, Repeat, Search, SlidersHorizontal, Stamp, X,
+  FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X,
 } from 'lucide-react';
-import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
+import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
@@ -30,7 +31,8 @@ export type Task = {
   section_id?: string | null; assignee_ack_at?: string | null; created_by?: string; sort_order?: number;
   task_type?: 'normal' | 'milestone' | 'approval' | 'inspection'; approval_line_id?: string | null; photo_required?: number; photo_count?: number;
   fields?: Record<string, unknown>;
-  requested_by?: string | null; requested_by_name?: string | null; created_at?: string;
+  requested_by?: string | null; requested_by_name?: string | null; created_at?: string; completed_at?: string | null;
+  batch_id?: string | null; batch?: { total: number; done: number } | null; recurrence_source_id?: string | null;
 };
 
 /** B-1 업무를 목록 옆 오른쪽 패널로 연다. URL 은 /tasks/:id 로 바꿔 새로고침·공유가 가능하다. 새 탭(Ctrl/⌘/가운데 클릭)은 그대로 전체 화면 */
@@ -46,7 +48,7 @@ type Section = { id: string; name: string; sort: number };
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 const VIEW_MODES: ViewMode[] = ['list', 'board', 'calendar', 'timeline'];
-const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review', 'risk'];
+const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done'];
 const cleanView = (v: string | null) => (v && LIST_VIEWS.includes(v) ? v : '');
 
 export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Record<string, string>; title?: string; defaultMode?: ViewMode }) {
@@ -77,6 +79,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const pickSort = (k: SortKey) => { setSortBy(k); try { localStorage.setItem('wos_task_sort', k); } catch {} };
   const [quickOpen, setQuickOpen] = useState(false);
   const kbProxy = useRef<HTMLInputElement>(null);
+  const [moreMenu, setMoreMenu] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [addKey, setAddKey] = useState(0);
   // V6 12번: 휴대폰은 업무 등록 시트(맨 위 줄이 화면 밖이거나 이미 열려 있어 반응 없던 문제), PC 는 맨 위 한 줄 추가(누를 때마다 새로 열고 초점)
   const openAdd = () => {
@@ -94,7 +98,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const qs = useMemo(() => {
     const p = new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), ...(fixed ?? {}) });
     if (q) p.set('q', q);
-    if (!showDone && mode !== 'board' && !filters.status) p.set('includeDone', '0');
+    // V6 16번: 기본 목록에도 오늘 완료한 업무(댓글 있으면 7일)는 남겨 취소선으로 — "완료" 보기는 완료 업무 전체(월별)
+    if (!showDone && mode !== 'board' && !filters.status && (fixed?.view ?? filters.view) !== 'done') p.set('includeDone', 'recent');
+    if ((fixed?.view ?? filters.view) === 'done') p.set('limit', '500');
     return p.toString();
   }, [filters, fixed, q, showDone, mode]);
   const { data, error, loading, reload, setData } = useApi<{ tasks: Task[] }>(`/api/tasks?${qs}`);
@@ -111,6 +117,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   // "방금 완료한 업무": 완료되어 목록에서 빠진 업무를 다시 찾고 되돌릴 수 있게 (실수로 사라진 듯 보이지 않게)
   const [justDone, setJustDone] = useState<{ t: Task; prev: TaskStatus }[]>([]);
   const [justOpen, setJustOpen] = useState(false);
+  // 이 화면에서 방금 완료한 업무는 그 자리에 취소선으로 남긴다(목록을 새로 불러와도)
+  const keepIds = useMemo(() => new Set(justDone.map((x) => x.t.id)), [justDone]);
   async function patch(t: Task, body: Record<string, unknown>) {
     const before = data;
     if (body.status === 'done' && t.status !== 'done') setJustDone((x) => [{ t, prev: t.status }, ...x.filter((y) => y.t.id !== t.id)].slice(0, 20));
@@ -175,7 +183,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     const hq = dir.users.filter((u) => u.org_unit_ids?.some((id) => hqIds.has(id)));
     return (hq.length ? hq : dir.users).slice(0, 5);
   })();
-  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 지시한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기']];
+  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 지시한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['done', '완료']];
   const setView = (v: string) => setFilters((f) => ({ ...f, view: v, assigneeId: '' }));
   const [filterOpen, setFilterOpen] = useState(false);
   const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
@@ -222,6 +230,18 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         <div className="relative min-w-[160px] flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
           <input className={cx(inputCls, 'h-9 pl-8')} placeholder="제목·설명·태그 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="업무 검색" />
+        </div>
+        <div className="relative">
+          <Button variant="secondary" onClick={() => setMoreMenu(!moreMenu)} aria-expanded={moreMenu} aria-label="업무 더보기 메뉴" data-testid="tasks-more"><MoreHorizontal /></Button>
+          {moreMenu && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setMoreMenu(false)} />
+              <div role="menu" className="absolute left-0 z-40 mt-1 w-56 rounded-card border border-line bg-white p-1 shadow-pop">
+                <button role="menuitem" className="flex w-full items-center gap-2 rounded-input px-2.5 py-2 text-left text-sm hover:bg-slate-50" onClick={() => { setMoreMenu(false); setExportOpen(true); }}><FileSpreadsheet className="size-4 text-emerald-700" />엑셀로 내려받기</button>
+                <Link role="menuitem" href="/tasks/trash" className="flex w-full items-center gap-2 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50" onClick={() => setMoreMenu(false)}><Trash2 className="size-4 text-ink-2" />휴지통 (30일 복원)</Link>
+              </div>
+            </>
+          )}
         </div>
         <Button variant="secondary" onClick={() => setFilterOpen(!filterOpen)} aria-expanded={filterOpen} data-testid="filter-toggle">
           <SlidersHorizontal />필터{chips.length > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] leading-4 text-white">{chips.length}</span>}
@@ -290,7 +310,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         <>
           {mode === 'list' && projectId && adding && <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask autoFocus projectId={projectId} onEscape={() => setAdding(false)} /></div>}
           {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
-            : <GroupedTasks tasks={tasks} group={group} view={curView} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
+            : <GroupedTasks tasks={tasks} group={curView === 'done' ? 'month' : group} view={curView} keepIds={keepIds} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
                 people={people} sortBy={sortBy} onSort={pickSort} onReorder={reorder}
                 top={adding ? <InlineAddTask key={addKey} autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
           {mode === 'board' && projectId && (
@@ -306,6 +326,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         </>
       )}
     </div>
+    {exportOpen && <ExportTasks qs={qs} onClose={() => setExportOpen(false)} />}
     <QuickAddTask open={quickOpen} onClose={() => setQuickOpen(false)} defaults={{ projectId, assigneeId: filters.assigneeId || undefined }} onCreated={() => { setQuickOpen(false); reload(); }} />
     {panelId && (
       <aside className="fixed inset-0 z-40 animate-slide-in overflow-y-auto bg-white shadow-pop sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(680px,100vw-240px)] sm:border-l sm:border-line" data-testid="task-panel" aria-label="업무 상세 패널">
@@ -334,6 +355,7 @@ function Meta({ t, compact }: { t: Task; compact?: boolean }) {
       {t.attachment_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="첨부"><Paperclip className="size-3.5" />{t.attachment_count}</span>}
       {!!t.photo_required && <span className={cx('inline-flex items-center gap-0.5 tabular-nums', (t.photo_count ?? 0) >= t.photo_required ? 'text-emerald-600' : 'text-amber-700')} title="완료 증빙 사진"><Camera className="size-3.5" />{t.photo_count ?? 0}/{t.photo_required}</span>}
       {t.recurrence_rule && <span title="반복 업무"><Repeat className="size-3.5" /></span>}
+      {t.batch && t.batch.total > 1 && <span className="rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
       {t.blocked_by_count > 0 && <span className="font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
     </span>
   );
@@ -439,12 +461,16 @@ function ViewChip({ on, onClick, children, label }: { on: boolean; onClick: () =
  * 담당자별은 본사 사람 전원을 업무 0건이어도 묶음으로 보여 준다(바로 그 사람에게 배정).
  * 직접 순서일 때는 손잡이로 끌어 순서를 바꾸고, 다른 묶음으로 끌면 그 묶음 값(담당자·지시자·마감·프로젝트)으로 바뀐다.
  */
-function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, top, people, sortBy, onSort, onReorder }: {
-  tasks: Task[]; group: GroupBy; view: string; assigneeFilter: string | null; onPatch: (t: Task, b: any) => any; onAcked: () => void; top: React.ReactNode;
+function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, top, people, sortBy, onSort, onReorder, keepIds }: {
+  tasks: Task[]; group: GroupBy | 'month'; view: string; keepIds?: Set<string>; assigneeFilter: string | null; onPatch: (t: Task, b: any) => any; onAcked: () => void; top: React.ReactNode;
   people: { id: string; name: string }[]; sortBy: SortKey; onSort: (k: SortKey) => void; onReorder: (ids: string[]) => void;
 }) {
   const { user, dir } = useSession();
   const [folded, setFolded] = useState<Record<string, boolean>>({});
+  // "오늘 완료 n건" 접힘 줄 펼침 상태(이 기기에 기억)
+  const [doneOpen, setDoneOpen] = useState(false);
+  useEffect(() => { try { setDoneOpen(localStorage.getItem('wos_done_fold') === '1'); } catch {} }, []);
+  const toggleDone = () => setDoneOpen((v) => { try { localStorage.setItem('wos_done_fold', v ? '0' : '1'); } catch {} return !v; });
   // PC: 손잡이를 마우스로 끌기 · 휴대폰: 행을 0.4초 꾹 누르면 들어 올려 위아래로
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 8 } }));
   if (group === 'due' && view === 'my') return <MyGroupedList tasks={tasks} onPatch={onPatch} onAcked={onAcked} top={top} />;
@@ -485,9 +511,19 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     }
     groups = [...m.values()].sort((a, b) => (a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.label.localeCompare(b.label, 'ko')));
     if (!groups.length) groups = [{ key: 'none', label: '프로젝트 없음', items: [], add: {} }];
+  } else if (group === 'month') {
+    // V6 5번 완료 보관: 완료일 기준 월별 (최신 달 먼저)
+    const m = new Map<string, G>();
+    for (const t of tasks) {
+      const k = (t.completed_at ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(t.completed_at)) : '0000-00').slice(0, 7);
+      if (!m.has(k)) m.set(k, { key: k, label: k === '0000-00' ? '완료일 없음' : `${k.slice(0, 4)}년 ${Number(k.slice(5))}월`, items: [], add: {} });
+      m.get(k)!.items.push(t);
+    }
+    groups = [...m.values()].sort((a, b) => b.key.localeCompare(a.key));
+    if (!groups.length) groups = [{ key: 'none', label: '완료한 업무 없음', items: [], add: {} }];
   } else groups = [{ key: 'all', label: '', items: tasks, add: {} }];
 
-  const draggable = sortBy === 'manual';
+  const draggable = sortBy === 'manual' && group !== 'month';
   // 다른 묶음으로 옮길 때 바뀌는 값
   const moveBody = (g: G): Record<string, unknown> | null => {
     if (group === 'assignee') return { assigneeId: g.add.defaultAssignee ?? null };
@@ -524,6 +560,10 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
         <ListHeader sortBy={sortBy} onSort={onSort} />
         {groups.map((x, gi) => {
           const open = x.items.filter((t) => t.status !== 'done').length;
+          // 완료 업무: 이 화면에서 방금 끝낸 건 제자리(취소선), 그 밖의 오늘 완료는 묶음 끝 "오늘 완료 n건" 접힘 줄
+          const archive = group === 'month';
+          const shown = archive ? x.items : x.items.filter((t) => t.status !== 'done' || keepIds?.has(t.id));
+          const doneFold = archive ? [] : x.items.filter((t) => t.status === 'done' && !keepIds?.has(t.id));
           const late = x.items.filter((t) => t.status !== 'done' && t.due_date && t.due_date < today).length;
           const isFolded = folded[x.key];
           const who = x.label === '담당자 없음' ? '담당자 없이' : `${x.label}님에게`;
@@ -541,11 +581,19 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
                   {!x.items.length && <span className="text-xs font-normal text-ink-3">업무 없음</span>}
                 </button>
               )}
-              {!isFolded && <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={addRow} sortable={draggable} dragHint={!draggable} onMove={draggable ? (t, to) => {
-                const ids = x.items.map((i) => i.id); const from = ids.indexOf(t.id);
+              {!isFolded && <ListView tasks={shown} onPatch={onPatch} hint={gi === 0} tail={archive ? undefined : addRow} sortable={draggable} dragHint={!draggable && !archive} onMove={draggable ? (t, to) => {
+                const ids = shown.map((i) => i.id); const from = ids.indexOf(t.id);
                 const at = to === 'top' ? 0 : to === 'bottom' ? ids.length - 1 : Math.max(0, Math.min(ids.length - 1, from + (to === 'up' ? -1 : 1)));
                 if (at !== from) onReorder(arrayMove(ids, from, at));
               } : undefined} />}
+              {!isFolded && doneFold.length > 0 && (
+                <div className="mt-1" data-testid="done-fold">
+                  <button type="button" onClick={toggleDone} aria-expanded={doneOpen} className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-ink-2 hover:text-ink">
+                    <ChevronDown className={cx('size-3.5 transition-transform', !doneOpen && '-rotate-90')} /><CircleCheck className="size-3.5 text-emerald-600" />오늘 완료 {doneFold.length}건
+                  </button>
+                  {doneOpen && <ListView tasks={doneFold} onPatch={onPatch} hint={false} />}
+                </div>
+              )}
             </GroupDrop>
           );
         })}
@@ -1025,4 +1073,39 @@ export function useSwipeSetting() {
 function SwipeHint() {
   const on = useSwipeSetting();
   return <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">{on ? '행을 오른쪽 끝까지 밀면 완료 · 꾹 누르면 순서 바꾸기' : '꾹 누르면 순서 바꾸기 · ⇅ 버튼으로도 이동'}</p>;
+}
+
+/** V6 6번 엑셀 내려받기: 화면 필터 그대로 + 기간(마감일·완료일·생성일 기준) */
+function ExportTasks({ qs, onClose }: { qs: string; onClose: () => void }) {
+  const today = todayStr();
+  const ym = today.slice(0, 7);
+  const lastM = (() => { const d = new Date(ym + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })();
+  const endOf = (m: string) => { const d = new Date(m + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return d.toISOString().slice(0, 10); };
+  const [basis, setBasis] = useState<'due' | 'done' | 'created'>('due');
+  const [range, setRange] = useState<'this' | 'last' | 'year' | 'all' | 'custom'>('this');
+  const [start, setStart] = useState(ym + '-01'); const [end, setEnd] = useState(endOf(ym));
+  const [split, setSplit] = useState(false);
+  const period = range === 'this' ? [ym + '-01', endOf(ym)] : range === 'last' ? [lastM + '-01', endOf(lastM)] : range === 'year' ? [today.slice(0, 4) + '-01-01', today.slice(0, 4) + '-12-31'] : range === 'custom' ? [start, end] : [null, null];
+  const p = new URLSearchParams(qs); p.delete('includeDone'); p.delete('limit');
+  p.set('basis', basis); if (period[0]) p.set('start', period[0]); if (period[1]) p.set('end', period[1]); if (split) p.set('split', '1');
+  const url = `/api/export/tasks?${p}`;
+  return (
+    <Modal open onClose={onClose} title="업무 엑셀로 내려받기">
+      <div className="space-y-3 text-sm" data-testid="export-tasks">
+        <p className="text-ink-2">지금 화면의 사람·상태·검색 조건이 그대로 적용됩니다. 삭제한 업무는 빠집니다.</p>
+        <label className="flex items-center gap-2">기준<select className={inputCls} value={basis} onChange={(e) => setBasis(e.target.value as typeof basis)} aria-label="기간 기준"><option value="due">마감일</option><option value="done">완료일</option><option value="created">만든 날</option></select></label>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="기간">
+          {([['this', '이번 달'], ['last', '지난달'], ['year', '올해'], ['all', '전체'], ['custom', '직접']] as const).map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(k)} className={cx('rounded-full border px-3 py-1 text-xs font-medium', range === k ? 'border-brand-600 bg-brand-600 text-white' : 'border-line')}>{l}</button>
+          ))}
+        </div>
+        {range === 'custom' && <div className="flex items-center gap-2"><input type="date" className={inputCls} value={start} onChange={(e) => setStart(e.target.value)} aria-label="시작" />~<input type="date" className={inputCls} value={end} onChange={(e) => setEnd(e.target.value)} aria-label="끝" /></div>}
+        <label className="flex items-center gap-2"><input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} />완료 업무를 월별 시트로도 나누기</label>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>닫기</Button>
+          <a href={url} onClick={() => setTimeout(onClose, 300)} className="inline-flex h-9 items-center gap-1.5 rounded-input bg-brand-600 px-4 font-semibold text-white" data-testid="export-download"><FileSpreadsheet className="size-4" />내려받기 (.xlsx)</a>
+        </div>
+      </div>
+    </Modal>
+  );
 }
