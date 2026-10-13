@@ -11,28 +11,30 @@ import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
-import { initNative } from './native';
+import { enableNativePush, initNative } from './native';
 import { QuickAddTask } from './QuickAddTask';
 import { CommandPalette } from './CommandPalette';
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
-/** 본사 운영 도구로 단순화(HQ_SIMPLIFY): 사이드바 4개. 숨긴 화면(현장 신고 QR·자동화·현장 비교 등)은 코드·주소는 남겨 둔다 */
+/** 워크인(WORKIN_V2) 사이드바: 홈 · 업무(본사 전체) · 프로젝트 · 캘린더 · 알림 + 관리 묶음. 숨긴 화면(현장 신고 QR·자동화·현장 비교 등)은 코드·주소는 남겨 둔다 */
 const NAV: NavItem[] = [
   { href: '/', label: '홈', icon: House },
-  { href: '/tasks?view=my', label: '내 업무', icon: CircleCheck },
+  { href: '/tasks', label: '업무', icon: CircleCheck },
   { href: '/projects', label: '프로젝트', icon: FolderKanban },
   { href: '/calendar', label: '캘린더', icon: CalendarDays },
+  { href: '/notifications', label: '알림', icon: Bell },
 ];
-const MOBILE_TABS: NavItem[] = [NAV[0], NAV[1], NAV[3], { href: '/notifications', label: '알림', icon: Bell }];
-/** 계정 메뉴 안 관리 항목 (대표·본사 관리자) */
+const MOBILE_TABS: NavItem[] = [NAV[0], NAV[1], NAV[3], NAV[4]];
+/** 사이드바 "관리" 묶음 (대표·본사 관리자) */
 const ADMIN_MENU: NavItem[] = [
-  { href: '/admin/users', label: '사용자 관리', icon: Users },
   { href: '/reports', label: '주간 보고', icon: FileBarChart },
+  { href: '/revenue', label: '매출', icon: BarChart3 },
+  { href: '/admin/users', label: '사용자 관리', icon: Users },
   { href: '/admin/ops', label: '운영 상태', icon: Activity },
 ];
 const SHORTCUTS: [string, string][] = [
   ['Ctrl K', '검색·명령 열기'], ['N', '새 업무 만들기'], ['?', '단축키 도움말'], ['Esc', '패널·창 닫기'],
-  ['G 다음 H', '홈'], ['G 다음 M', '내 업무'], ['G 다음 C', '캘린더'],
+  ['G 다음 H', '홈'], ['G 다음 M', '업무'], ['G 다음 C', '캘린더'],
   ['S', '(업무 상세) 하위 업무 추가'], ['D · W · M · A', '(캘린더) 일 · 주 · 월 · 일정목록'], ['T', '(캘린더) 오늘로'], ['C', '(캘린더) 새 일정'],
 ];
 
@@ -53,6 +55,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const [collapsed, setCollapsed] = useState(false);
   const [adminOpen, setAdminOpen] = useState(true);
   const [search, setSearch] = useState('');
+  const [pushAsk, setPushAsk] = useState(false);
+  useEffect(() => { const h = () => setPushAsk(true); window.addEventListener('wos-push-ask', h); return () => window.removeEventListener('wos-push-ask', h); }, []);
   useEffect(() => { setCollapsed(readPref('wos_nav_collapsed') === '1'); setAdminOpen(readPref('wos_nav_admin') !== '0'); }, []);
   const pending = useOutboxCount();
   const admin = isAdminRole(session.user.role);
@@ -70,7 +74,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setQuick(true); return; }
       if (e.key === 'g') { gPressed.current = Date.now(); return; }
       if (Date.now() - gPressed.current < 1200) {
-        const to = { h: '/', m: '/tasks?view=my', c: '/calendar' }[e.key];
+        const to = { h: '/', m: '/tasks', c: '/calendar' }[e.key];
         if (to) { e.preventDefault(); router.push(to); }
         gPressed.current = 0;
       }
@@ -112,7 +116,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     const [p, q] = href.split('?');
     if (p === '/') return path === '/';
     if (q) return path === p && typeof window !== 'undefined' && window.location.search.includes(q);
-    return path.startsWith(p) && !(p === '/tasks' && typeof window !== 'undefined' && window.location.search.includes('view=my'));
+    return path.startsWith(p);
   };
 
   async function logout() {
@@ -142,17 +146,17 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
   return (
     <SessionCtx.Provider value={session}>
-      <div className="min-h-screen bg-canvas text-ink sm:flex">
+      <div className="app-shell min-h-screen bg-canvas text-ink sm:flex">
         {/* 사이드바 (데스크톱) */}
         <aside className={cx('hidden shrink-0 flex-col bg-brand-800 text-white transition-[width] duration-150 sm:sticky sm:top-0 sm:flex sm:h-screen', collapsed ? 'w-[60px]' : 'w-60')} aria-label="사이드바">
           <div className={cx('flex h-14 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
             <img src="/icon-192.png" alt="" className="size-7 rounded-md" />
-            {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold">업무·일정</div><div className="truncate text-[11px] text-slate-400">다짐 · 하이링크 · BODY LAB</div></div>}
+            {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold">워크인</div><div className="truncate text-[11px] text-slate-400">다짐 · 하이링크</div></div>}
           </div>
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
             {NAV.map((n) => (
               <div key={n.href}>
-                {navLink(n)}
+                {navLink(n, n.href === '/notifications' ? unread : 0)}
                 {/* 즐겨찾는 프로젝트는 "프로젝트" 바로 아래 */}
                 {n.href === '/projects' && !collapsed && favorites.length > 0 && (
                   <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l border-white/10 pl-2">
@@ -165,6 +169,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 )}
               </div>
             ))}
+            {admin && (
+              <div className="pt-3" data-testid="nav-admin">
+                <div className="my-2 border-t border-white/10" />
+                {!collapsed && <button onClick={() => setAdminOpen((v) => { writePref('wos_nav_admin', v ? '0' : '1'); return !v; })} aria-expanded={adminOpen}
+                  className="flex w-full items-center gap-1 px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-200">관리<ChevronDown className={cx('size-3 transition-transform', !adminOpen && '-rotate-90')} /></button>}
+                {(adminOpen || collapsed) && ADMIN_MENU.map((n) => navLink(n))}
+              </div>
+            )}
           </nav>
           <div className={cx('border-t border-white/10 p-2', collapsed && 'flex justify-center')}>
             <button onClick={toggleCollapsed} className={cx('flex h-8 items-center gap-2 rounded-input px-2.5 text-xs text-slate-400 hover:bg-white/5 hover:text-white', !collapsed && 'w-full')} aria-label={collapsed ? '사이드바 펼치기' : '사이드바 접기'}>
@@ -217,9 +229,6 @@ export function AppShell({ session, children }: { session: Sess; children: React
                     </div>
                     <div className="my-1 border-t border-line" />
                     <Link role="menuitem" href="/settings" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Settings className="size-4 text-ink-2" />설정·알림</Link>
-                    {admin && ADMIN_MENU.map((n) => (
-                      <Link key={n.href} role="menuitem" href={n.href} className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><n.icon className="size-4 text-ink-2" />{n.label}</Link>
-                    ))}
                     <button role="menuitem" onClick={() => { setUserMenu(false); setHelp(true); }} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Keyboard className="size-4 text-ink-2" /><span className="flex-1 text-left">단축키</span><Kbd>?</Kbd></button>
                     <button role="menuitem" onClick={logout} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm text-red-600 hover:bg-red-50"><LogOut className="size-4" />로그아웃</button>
                   </div>
@@ -235,7 +244,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           )}
           {/* 상단 바 (모바일) */}
           <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-line bg-white/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:hidden">
-            <span className="flex items-center gap-2 text-sm font-bold text-brand-700"><img src="/icon-192.png" alt="" className="size-6 rounded" />업무·일정</span>
+            <span className="flex items-center gap-2 text-sm font-bold text-brand-700"><img src="/icon-192.png" alt="" className="size-6 rounded" />워크인</span>
             <span className="flex items-center gap-1">
               <button onClick={() => setPalette(true)} className="inline-flex size-9 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-5" /></button>
               <button onClick={() => setMore(true)} className="inline-flex size-9 items-center justify-center rounded-full active:bg-slate-100" aria-label="메뉴 더보기"><Avatar id={session.user.id} name={session.user.name} size={28} /></button>
@@ -244,7 +253,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <main className="mx-auto max-w-7xl p-3 sm:p-6">{children}</main>
         </div>
 
-        {/* 하단 탭 (모바일): 홈 · 내 업무 · [+] · 캘린더 · 알림 */}
+        {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 알림 */}
         <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
           {MOBILE_TABS.slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}
           <div className="flex items-center justify-center">
@@ -279,6 +288,20 @@ export function AppShell({ session, children }: { session: Sess; children: React
             {SHORTCUTS.map(([k, l]) => <li key={k} className="flex items-center justify-between py-2"><span>{l}</span><span className="flex gap-1">{k.split(' ').filter((x) => x !== '다음' && x !== '·').map((x) => <Kbd key={x}>{x}</Kbd>)}</span></li>)}
           </ul>
           <p className="mt-3 text-xs text-ink-2">업무 목록에서는 ↑↓ 로 이동하고 Enter 로 엽니다.</p>
+        </Modal>
+        <Modal open={pushAsk} onClose={() => { try { localStorage.setItem('wos_push_asked', '1'); } catch {} setPushAsk(false); }} title="알림 받기">
+          <div className="space-y-3 text-sm" data-testid="push-ask">
+            <p>워크인은 다음 경우에 휴대폰으로 알려 드립니다. 앱이 닫혀 있어도 받을 수 있습니다.</p>
+            <ul className="list-disc space-y-1 pl-5 text-ink-2">
+              <li>일정 시작 전 (기본 30분 전, 설정·일정마다 변경)</li>
+              <li>업무 배정 · 멘션 · 마감 임박 · 검토 요청</li>
+            </ul>
+            <p className="text-xs text-ink-3">알림을 누르면 해당 업무·일정 화면이 열립니다. 언제든 설정에서 끄거나 종류별로 고를 수 있습니다.</p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button className="h-9 rounded-input px-3 text-sm text-ink-2 hover:bg-slate-100" onClick={() => { try { localStorage.setItem('wos_push_asked', '1'); } catch {} setPushAsk(false); }}>나중에</button>
+              <button className="h-9 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white" onClick={async () => { setPushAsk(false); try { await enableNativePush(); toast.ok('이 기기에서 알림을 받습니다'); } catch (e: any) { toast.error(e.message); } }}>알림 받기</button>
+            </div>
+          </div>
         </Modal>
         <QuickAddTask open={quick} onClose={() => setQuick(false)} />
         <CommandPalette open={palette} onClose={() => setPalette(false)} onQuickAdd={() => setQuick(true)} />

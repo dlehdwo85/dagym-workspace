@@ -21,9 +21,9 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
       </div>
       <article className="print-area mx-auto max-w-4xl space-y-6 rounded-card border border-line bg-white p-6 shadow-card sm:p-10" data-testid="weekly-report">
         <header className="border-b border-line pb-4">
-          <p className="text-sm text-ink-2">다짐 · 하이링크 · BODY LAB</p>
+          <p className="text-sm text-ink-2">다짐 · 하이링크</p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight">주간 보고 · {fmtDate(d.weekStart)} ~ {fmtDate(d.weekEnd)}</h1>
-          <p className="mt-1 text-xs text-ink-3">{fmtDateTime(r.created_at)} 자동 생성 · 업무·일정 관리 서비스 집계</p>
+          <p className="mt-1 text-xs text-ink-3">{fmtDateTime(r.created_at)} 자동 생성 · 워크인 집계</p>
         </header>
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           {[['완료', d.totals.done, ''], ['새 업무', d.totals.created, ''], ['지연(주말 기준)', d.totals.overdue, d.totals.overdue ? 'text-red-600' : ''], ['검토 대기', d.totals.review, ''], ['미해결 민원', d.totals.complaints, d.totals.complaints ? 'text-violet-600' : '']].map(([l, v, c]) => (

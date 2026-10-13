@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, Field, Loading, fmtDateTime, inputCls, toast } from '@/components/ui';
-import { isNativeApp, subscribeWebPush } from '@/components/native';
+import { enableNativePush, isNativeApp, subscribeWebPush } from '@/components/native';
 import { ROLE_LABEL } from '@/lib/types';
 
 export default function Settings() {
@@ -33,7 +33,7 @@ export default function Settings() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <h1 className="text-lg font-bold">설정</h1>
-      {(user.role === 'owner' || user.role === 'admin') && <p className="text-sm text-ink-2">관리: <a href="/admin/holidays" className="font-medium text-accent-600 underline">공휴일</a> · <a href="/admin/users" className="font-medium text-accent-600 underline">사용자 관리</a></p>}
+      {(user.role === 'owner' || user.role === 'admin') && <p className="text-sm text-ink-2">관리: <a href="/admin/holidays" className="font-medium text-accent-600 underline">공휴일</a> · <a href="/admin/users" className="font-medium text-accent-600 underline">사용자 관리</a> · <a href="/revenue" className="font-medium text-accent-600 underline">매출</a></p>}
       <section className="rounded-lg border bg-white p-4 text-sm">
         <div className="font-semibold">{user.name}</div>
         <div className="text-slate-500">{user.email} · {ROLE_LABEL[user.role]}</div>
@@ -63,7 +63,7 @@ export default function Settings() {
         <Button className="mt-3" onClick={save}>저장</Button>
       </section>
       <section className="rounded-lg border bg-white p-4">
-        <h2 className="mb-2 text-sm font-semibold">알림 받는 기기</h2>
+        <h2 className="mb-2 text-sm font-semibold">알림 받는 기기 (앱·브라우저)</h2>
         <ul className="space-y-1 text-sm">
           {data.subscriptions.map((d: any) => (
             <li key={d.id} className="flex justify-between"><span>{d.kind === 'fcm' ? `앱 (${d.platform})` : '웹 브라우저'} · 등록 {fmtDateTime(d.created_at)}</span>
@@ -72,7 +72,8 @@ export default function Settings() {
           {!data.subscriptions.length && <li className="text-xs text-slate-400">등록된 기기가 없습니다</li>}
         </ul>
         <div className="mt-3 flex gap-2">
-          {!isNativeApp() && <Button variant="secondary" onClick={enablePush}>이 브라우저에서 알림 받기</Button>}
+          {isNativeApp() ? <Button variant="secondary" onClick={async () => { try { await enableNativePush(); toast.ok('이 기기에서 앱 알림을 받습니다'); reload(); } catch (e: any) { toast.error(e.message); } }}>이 기기에서 앱 알림 받기</Button>
+            : <Button variant="secondary" onClick={enablePush}>이 브라우저에서 알림 받기</Button>}
           <Button variant="secondary" onClick={test}>시험 알림 보내기</Button>
         </div>
       </section>

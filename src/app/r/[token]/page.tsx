@@ -41,7 +41,7 @@ export default function ReportPage({ params }: { params: Promise<{ token: string
       <div className="mx-auto max-w-md">
         <div className="mb-5 flex items-center gap-2.5">
           <img src="/icon-192.png" alt="" className="size-9 rounded-lg" />
-          <div><div className="text-xs text-ink-2">{info?.brand ?? '다짐 · 하이링크 · BODY LAB'}</div><div className="font-bold">{info ? `${info.place} ${info.kindLabel} 신고` : '현장 신고'}</div></div>
+          <div><div className="text-xs text-ink-2">{info?.brand ?? '다짐 · 하이링크'}</div><div className="font-bold">{info ? `${info.place} ${info.kindLabel} 신고` : '현장 신고'}</div></div>
         </div>
         {!info && !err && <div className="flex items-center justify-center gap-2 py-16 text-sm text-ink-2"><Loader2 className="size-4 animate-spin" />불러오는 중…</div>}
         {!info && err && <div className="rounded-card border border-line bg-white p-6 text-center text-sm" role="alert">{err}</div>}

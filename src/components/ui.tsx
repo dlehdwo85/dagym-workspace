@@ -31,7 +31,7 @@ export function IconButton({ className, label, ...p }: React.ButtonHTMLAttribute
 }
 
 export function Card({ className, children, ...p }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div {...p} className={clsx('rounded-card border border-line bg-white shadow-card', className)}>{children}</div>;
+  return <div {...p} className={clsx('min-w-0 rounded-card border border-line bg-white shadow-card', className)}>{children}</div>;
 }
 
 export function Kbd({ children }: { children: ReactNode }) {

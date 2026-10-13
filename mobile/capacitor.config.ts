@@ -6,7 +6,7 @@ const appUrl = process.env.APP_URL ?? 'https://dagym-workspace.vercel.app';
 
 const config: CapacitorConfig = {
   appId: 'kr.co.dagym.workos',
-  appName: '업무일정',
+  appName: '워크인',
   webDir: 'www',
   server: {
     url: appUrl,

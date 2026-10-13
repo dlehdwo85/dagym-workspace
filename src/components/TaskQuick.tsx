@@ -98,12 +98,15 @@ export function AssigneePicker({ value, name, onChange, size = 24 }: { value: st
  * Asana 형 한 줄 업무 추가: 제목 입력 → Enter 로 즉시 생성(담당 = 나), 연속 입력.
  * 같은 줄의 담당자·마감일 칩으로 바로 지정. 관리자 최종 확인은 기본 꺼짐, 소속은 프로젝트/내 소속(본사)으로 자동.
  */
-export function InlineAddTask({ projectId, sectionId, defaultDue, onCreated, placeholder = '업무 추가 — 제목 입력 후 Enter' }: {
-  projectId?: string; sectionId?: string | null; defaultDue?: string | null; onCreated?: (id: string) => void; placeholder?: string;
+export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssignee, onCreated, onEscape, autoFocus, muted, placeholder = '업무 추가 — 제목 입력 후 Enter' }: {
+  projectId?: string | null; sectionId?: string | null; defaultDue?: string | null; defaultAssignee?: string | null; onCreated?: (id: string) => void;
+  onEscape?: () => void; autoFocus?: boolean; muted?: boolean; placeholder?: string;
 }) {
   const { user } = useSession();
   const [title, setTitle] = useState('');
-  const [assignee, setAssignee] = useState<string | null>(user.id);
+  // 묶음 끝 줄은 그 묶음 값(담당자·마감·프로젝트)이 자동으로 들어간다. 지정이 없으면 담당 = 나
+  const initAssignee = defaultAssignee === undefined ? user.id : defaultAssignee;
+  const [assignee, setAssignee] = useState<string | null>(initAssignee);
   const [due, setDue] = useState<string | null>(defaultDue ?? null);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -118,12 +121,12 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, onCreated, pla
     finally { setBusy(false); input.current?.focus(); }
   }
   return (
-    <div className="flex min-h-[44px] items-center gap-3 border-b border-line bg-white px-3 py-1.5 last:border-b-0" data-testid="inline-add">
+    <div className={cx('flex min-h-[44px] items-center gap-3 border-b border-line px-3 py-1.5 last:border-b-0 focus-within:bg-accent-50/40', muted ? 'bg-transparent' : 'bg-white')} data-testid="inline-add">
       <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-dashed border-slate-300 text-slate-400"><Plus className="size-3.5" /></span>
-      <input ref={input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={placeholder} aria-label="업무 추가 제목" maxLength={200}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } if (e.key === 'Escape') setTitle(''); }}
+      <input ref={input} autoFocus={autoFocus} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={placeholder} aria-label="업무 추가 제목" maxLength={200}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } if (e.key === 'Escape') { e.stopPropagation(); setTitle(''); onEscape?.(); } }}
         className="min-w-0 flex-1 bg-transparent py-1 text-sm placeholder:text-ink-3 focus:outline-none" />
-      {(title || due || assignee !== user.id) && (
+      {(title || due || assignee !== initAssignee || autoFocus) && (
         <>
           <DuePicker value={due} onChange={setDue} label="새 업무 마감일" />
           <AssigneePicker value={assignee} onChange={setAssignee} />

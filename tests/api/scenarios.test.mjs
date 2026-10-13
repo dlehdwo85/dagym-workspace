@@ -563,7 +563,9 @@ describe('Asana 이상 P2 (B-14~B-17)', () => {
     const fri = addDays(mon, 4);
     for (let i = 0; i < 3; i++) await ctx.managerA.client.ok('POST', '/api/tasks', { title: `업무량 ${i}`, orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: fri });
     const cal = (await ctx.staffA.client.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
-    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '외부 미팅', start: `${addDays(mon, 1)}T10:00:00+09:00`, end: `${addDays(mon, 1)}T13:00:00+09:00` });
+    // 오늘은 지난 시간을 빼고 계산하므로 미팅은 오늘이 아닌 날에 둔다 (시각에 따라 실패하던 문제)
+    const meetDay = addDays(mon, 1) === today ? addDays(mon, 3) : addDays(mon, 1);
+    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '외부 미팅', start: `${meetDay}T10:00:00+09:00`, end: `${meetDay}T13:00:00+09:00` });
     await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '연차', kind: 'vacation', allDay: true, start: `${addDays(mon, 2)}T00:00:00+09:00`, end: `${addDays(mon, 3)}T00:00:00+09:00` });
     const mine = await ctx.staffA.client.ok('GET', '/api/insights/workload');
     assert.equal(mine.people.length, 1, '직원은 자기 것만');
@@ -980,5 +982,50 @@ describe('대표 대시보드', () => {
     assert.equal(s.scope, 'units');
     assert.ok(!s.bySite.some((x) => x.name === '하이링크 판교 위탁현장'));
     for (const k of ['important', 'overdue', 'review', 'bySite', 'workload', 'completion', 'events', 'totals']) assert.ok(k in o, k);
+  });
+});
+
+describe('WORKIN_V2 홈·매출', () => {
+  test('홈: 오늘 할 일(전체)·최근 활동·담당자별 오늘 마감/주간 완료가 권한 범위로 나온다', async () => {
+    const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '홈 오늘 마감 업무', orgUnitId: ctx.siteB, assigneeId: ctx.ownerId, dueDate: today })).id;
+    await ctx.owner.ok('POST', `/api/tasks/${id}/comments`, { body: '홈 활동 댓글' });
+    const o = await ctx.owner.ok('GET', '/api/dashboard');
+    assert.ok(o.todayAll.some((t) => t.id === id));
+    assert.ok(o.activity.some((a) => a.kind === 'comment' && a.task_id === id));
+    assert.ok(o.activity.length <= 10);
+    const w = o.workload.find((x) => x.id === ctx.ownerId);
+    assert.ok(w.due_today >= 1 && 'done_week' in w);
+    const s = await ctx.staffA.client.ok('GET', '/api/dashboard');
+    assert.ok(!s.todayAll.some((t) => t.id === id), '다른 현장 업무는 직원에게 안 보임');
+    assert.ok(!s.activity.some((a) => a.task_id === id));
+  });
+  test('매출: 본사만 열람·입력, 그 밖은 404', async () => {
+    for (const c of [ctx.staffA.client, ctx.managerA.client]) {
+      assert.equal((await c.get('/api/revenue')).status, 404);
+      assert.equal((await c.req('PUT', '/api/revenue', { orgUnitId: ctx.siteA, month: '2026-01', revenue: 1 })).status, 404);
+    }
+    await ctx.owner.ok('PUT', '/api/revenue', { orgUnitId: ctx.siteA, month: '2026-03', revenue: 52000000, expense: 31000000, members: 820, target: 50000000 });
+    await ctx.owner.ok('PUT', '/api/revenue', { orgUnitId: ctx.siteA, month: '2026-03', revenue: 53000000, expense: 31000000 }); // 같은 달은 덮어쓰기
+    const r = await ctx.owner.ok('GET', '/api/revenue?year=2026');
+    const rows = r.rows.filter((x) => x.org_unit_id === ctx.siteA && x.month === '2026-03');
+    assert.equal(rows.length, 1); assert.equal(rows[0].revenue, 53000000); assert.equal(rows[0].source, 'manual');
+    assert.ok(r.units.some((u) => u.id === ctx.siteB));
+    const bad = await ctx.owner.req('PUT', '/api/revenue', { orgUnitId: ctx.siteA, month: '2026-13', revenue: -1 });
+    assert.equal(bad.status, 400);
+  });
+  test('매출 CSV: 오류가 있으면 아무것도 저장하지 않고 줄 번호를 알려 준다, 정상이면 근거 파일명과 함께 저장', async () => {
+    const badCsv = '현장,월,매출,지출\n다짐 강남점,2026-04,"41,000,000",20000000\n없는 현장,2026-04,100,0\n';
+    const dry = await ctx.owner.ok('POST', '/api/revenue/import', { csv: badCsv, fileName: 'a.csv' });
+    assert.equal(dry.ok, false); assert.equal(dry.errors[0].line, 3);
+    assert.equal((await sql`select count(*)::int as n from revenue_entries where month = '2026-04-01'`)[0].n, 0);
+    const good = '﻿현장,월,매출,지출,회원수,메모\n다짐 강남점,2026.4,"41,000,000",20000000,800,4월 정산표\n하이링크 판교 위탁현장,2026-04,9000000,7000000,,\n';
+    const pre = await ctx.owner.ok('POST', '/api/revenue/import', { csv: good, fileName: '2026-04 실적.csv', dryRun: true });
+    assert.equal(pre.ok, true); assert.equal(pre.count, 2);
+    assert.equal((await sql`select count(*)::int as n from revenue_entries where month = '2026-04-01'`)[0].n, 0, 'dryRun 은 저장 안 함');
+    const r = await ctx.owner.ok('POST', '/api/revenue/import', { csv: good, fileName: '2026-04 실적.csv' });
+    assert.equal(r.count, 2);
+    const [row] = await sql`select revenue::float8 as revenue, source, source_file, members from revenue_entries where org_unit_id = ${ctx.siteA} and month = '2026-04-01'`;
+    assert.equal(row.revenue, 41000000); assert.equal(row.source, 'csv'); assert.equal(row.source_file, '2026-04 실적.csv'); assert.equal(row.members, 800);
+    assert.equal((await ctx.staffA.client.req('POST', '/api/revenue/import', { csv: good })).status, 404);
   });
 });

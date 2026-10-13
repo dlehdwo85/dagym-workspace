@@ -37,6 +37,16 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 .fc .fc-toolbar.fc-header-toolbar { margin-bottom: 0.75rem; }
 .fc .fc-toolbar-chunk { display: flex; align-items: center; gap: 0.4rem; }
 @media (max-width: 640px) { .fc .fc-toolbar { flex-direction: column; gap: 0.4rem; } }
+/* WORKIN_V2 0: 일정목록 표가 긴 제목·날짜 머리글로 화면보다 넓어지지 않게 — 고정 표 배치, 제목 말줄임, 날짜 머리글 2줄 허용 */
+.fc .fc-list-table { table-layout: fixed; width: 100%; }
+.fc .fc-list-event-time { width: 7.5rem; white-space: normal; }
+.fc .fc-list-event-graphic { width: 1.75rem; }
+.fc .fc-list-event-title { overflow: hidden; }
+.fc .fc-list-event-title a, .fc .fc-list-event-title > * { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fc .fc-list-day-cushion { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .fc .fc-list-event-time { width: 5.5rem; } .fc .fc-list-day-side-text { float: none; display: block; } .fc .fc-toolbar-title { font-size: 1rem; } }
+/* 앱 셸 안전장치: 혹시 남은 넓은 요소가 있어도 문서 전체가 좌우로 밀리지 않게 */
+.app-shell { overflow-x: clip; }
 
 /* QR 인쇄: 인쇄 영역만 출력 */
 @media print {

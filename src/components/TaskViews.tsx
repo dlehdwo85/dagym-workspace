@@ -10,13 +10,13 @@ import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import {
   CalendarDays as CalIcon, Camera, CheckCheck, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip,
-  GripVertical, Repeat, Search, SlidersHorizontal, Stamp, X,
+  GripVertical, Plus, Repeat, Search, SlidersHorizontal, Stamp, X,
 } from 'lucide-react';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
-import { STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
+import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
-import { AssigneePicker, DuePicker, InlineAddTask } from './TaskQuick';
+import { AssigneePicker, DuePicker, InlineAddTask, quickDues } from './TaskQuick';
 import { QuickAddTask } from './QuickAddTask';
 
 export type Task = {
@@ -63,6 +63,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     return f;
   });
   const [showDone, setShowDone] = useState(sp.get('done') === '1');
+  // 묶기: 담당자별(기본) · 마감일 · 프로젝트 · 묶지 않음. "내 업무"는 마감일 묶음(새로 배정됨 확인 포함)이 기본
+  const [groupPick, setGroupPick] = useState<GroupBy | ''>(() => {
+    const g = sp.get('group'); if (GROUPS.includes(g as GroupBy)) return g as GroupBy;
+    try { const v = localStorage.getItem('wos_task_group'); return GROUPS.includes(v as GroupBy) ? (v as GroupBy) : ''; } catch { return ''; }
+  });
+  const [adding, setAdding] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
   useEffect(() => { // URL 변경(메뉴 이동) 반영 — 패널로 /tasks/:id 가 된 동안에는 목록 필터를 그대로 둔다
     if (/^\/tasks\/[0-9a-f-]{36}$/.test(location.pathname)) return;
     const v = cleanView(sp.get('view'));
@@ -133,7 +140,17 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const sections = sectionsApi.data?.sections ?? [];
   const [boardBy, setBoardBy] = useState<'status' | 'section'>('status');
 
-  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['today', '오늘 할 일'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['risk', '마감 위험']];
+  const curView = fixed?.view ?? filters.view ?? '';
+  const group: GroupBy = groupPick || (curView === 'my' ? 'due' : 'assignee');
+  const pickGroup = (g: GroupBy) => { setGroupPick(g); try { localStorage.setItem('wos_task_group', g); } catch {} };
+  // 상단 칩: 전체 · 내 업무 · 사람별 · 지연 · 이번 주 · 검토 대기. 사람 칩은 본사 사람(없으면 앞쪽 5명)
+  const hqIds = new Set(dir.orgUnits.filter((o) => o.type === 'hq').map((o) => o.id));
+  const people = (() => {
+    const hq = dir.users.filter((u) => u.org_unit_ids?.some((id) => hqIds.has(id)));
+    return (hq.length ? hq : dir.users).slice(0, 5);
+  })();
+  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기']];
+  const setView = (v: string) => setFilters((f) => ({ ...f, view: v, assigneeId: '' }));
   const [filterOpen, setFilterOpen] = useState(false);
   const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
   const chips: [string, string][] = [
@@ -162,14 +179,19 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       </div>
       {!fixed?.view && (
         <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 text-sm sm:mx-0 sm:px-0">
-          {views.map(([v, l]) => (
-            <button key={v} onClick={() => setFilters((f) => ({ ...f, view: v }))}
-              className={cx('whitespace-nowrap rounded-full border px-3 py-1 font-medium transition-colors', (filters.view ?? '') === v ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:border-slate-300')}>{l}</button>
+          {views.slice(0, 2).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
+          {people.map((u) => (
+            <ViewChip key={u.id} on={filters.assigneeId === u.id} onClick={() => setFilters((f) => ({ ...f, view: '', assigneeId: f.assigneeId === u.id ? '' : u.id }))} label={`${u.name} 업무`}>
+              <Avatar id={u.id} name={u.name} size={18} />{u.name}
+            </ViewChip>
           ))}
+          {views.slice(2).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
+          {!views.some(([v]) => v === (filters.view ?? '')) && <ViewChip on onClick={() => setView('')}>{({ today: '오늘 할 일', risk: '마감 위험' } as Record<string, string>)[filters.view ?? ''] ?? filters.view}</ViewChip>}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+        <Button onClick={() => (mode === 'list' ? setAdding(true) : setQuickOpen(true))} data-testid="add-task-top"><Plus />업무 추가</Button>
+        <div className="relative min-w-[160px] flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
           <input className={cx(inputCls, 'h-9 pl-8')} placeholder="제목·설명·태그 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="업무 검색" />
         </div>
@@ -177,6 +199,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           <SlidersHorizontal />필터{chips.length > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] leading-4 text-white">{chips.length}</span>}
           <ChevronDown className={cx('!size-3.5 transition-transform', filterOpen && 'rotate-180')} />
         </Button>
+        {mode === 'list' && !projectId && (
+          <label className="inline-flex h-9 items-center gap-1.5 text-sm text-ink-2">묶기
+            <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={group} onChange={(e) => pickGroup(e.target.value as GroupBy)} aria-label="묶기 기준" data-testid="group-by">
+              <option value="assignee">담당자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="none">묶지 않음</option>
+            </select>
+          </label>
+        )}
         {mode !== 'board' && (
           <label className="inline-flex h-9 cursor-pointer select-none items-center gap-2 rounded-input px-2 text-sm text-ink-2 hover:bg-slate-100">
             <input type="checkbox" className="size-4 rounded accent-brand-600" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />완료된 업무도 보기
@@ -192,7 +221,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       {filterOpen && (
         <div className="grid animate-fade-up grid-cols-2 gap-2 rounded-card border border-line bg-white p-3 shadow-card sm:grid-cols-3 xl:grid-cols-6" data-testid="filter-panel">
           <select className={inputCls} value={filters.brandId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, brandId: e.target.value }))} aria-label="브랜드">
-            <option value="">모든 브랜드</option>{dir.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            <option value="">모든 브랜드</option>{dir.brands.filter((b) => !HIDDEN_BRANDS.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
           <UnitSelect value={filters.orgUnitId ?? ''} onChange={(v) => setFilters((f) => ({ ...f, orgUnitId: v }))} allowEmpty="모든 현장·부서" />
           <select className={inputCls} value={filters.assigneeId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, assigneeId: e.target.value }))} aria-label="담당자">
@@ -207,9 +236,10 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       )}
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton /> : (
         <>
-          {mode === 'list' && ((fixed?.view ?? filters.view) === 'my' ? <MyGroupedList tasks={tasks} onPatch={patch} onAcked={reload} />
-            : projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
-            : <ListView tasks={tasks} onPatch={patch} add={<InlineAddTask />} />)}
+          {mode === 'list' && projectId && adding && <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask autoFocus projectId={projectId} onEscape={() => setAdding(false)} /></div>}
+          {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
+            : <GroupedTasks tasks={tasks} group={group} view={curView} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
+                top={adding ? <InlineAddTask autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
           {mode === 'board' && projectId && (
             <div className="flex items-center gap-2 text-sm text-ink-2">열 기준
               <select className="h-8 rounded-input border border-line bg-white px-2 text-sm" value={boardBy} onChange={(e) => setBoardBy(e.target.value as any)} aria-label="보드 열 기준">
@@ -223,6 +253,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         </>
       )}
     </div>
+    <QuickAddTask open={quickOpen} onClose={() => setQuickOpen(false)} defaults={{ projectId, assigneeId: filters.assigneeId || undefined }} onCreated={() => { setQuickOpen(false); reload(); }} />
     {panelId && (
       <aside className="fixed inset-0 z-40 animate-slide-in overflow-y-auto bg-white shadow-pop sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(680px,100vw-240px)] sm:border-l sm:border-line" data-testid="task-panel" aria-label="업무 상세 패널">
         <TaskDetail key={panelId} id={panelId} inPanel onClose={closePanel} />
@@ -298,11 +329,96 @@ function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }
   return <span className="inline-flex w-[92px] justify-end"><DuePicker value={t.due_date} status={t.status} onChange={(v) => onPatch(t, { dueDate: v })} label={`${t.title} 마감일`} /></span>;
 }
 
+type GroupBy = 'assignee' | 'due' | 'project' | 'none';
+const GROUPS: GroupBy[] = ['assignee', 'due', 'project', 'none'];
+/** 마감 묶음 끝 "업무 추가" 줄의 기본 마감일 */
+const DUE_DEFAULT: Record<string, () => string | null> = {
+  over: () => todayStr(), today: () => todayStr(), week: () => quickDues()[2][1], later: () => quickDues()[3][1], none: () => null, new: () => null,
+};
+function ViewChip({ on, onClick, children, label }: { on: boolean; onClick: () => void; children: React.ReactNode; label?: string }) {
+  return (
+    <button onClick={onClick} aria-pressed={on} aria-label={label}
+      className={cx('inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 font-medium transition-colors', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:border-slate-300')}>{children}</button>
+  );
+}
+
+/**
+ * 업무 화면 목록 (Asana "팀 작업"): 담당자별(기본)·마감일·프로젝트로 묶고, 묶음마다 끝에 "업무 추가" 줄 — 그 묶음 값이 자동으로 들어간다.
+ * 맨 위 줄(top)은 "+ 업무 추가" 버튼으로 열리며 Enter = 저장 후 다음 줄, Esc = 끝내기.
+ */
+function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, top }: {
+  tasks: Task[]; group: GroupBy; view: string; assigneeFilter: string | null; onPatch: (t: Task, b: any) => any; onAcked: () => void; top: React.ReactNode;
+}) {
+  const { user, dir } = useSession();
+  const [folded, setFolded] = useState<Record<string, boolean>>({});
+  if (group === 'due' && view === 'my') return <MyGroupedList tasks={tasks} onPatch={onPatch} onAcked={onAcked} top={top} />;
+  const today = todayStr();
+  type G = { key: string; label: string; head?: React.ReactNode; items: Task[]; add: { defaultAssignee?: string | null; defaultDue?: string | null; projectId?: string | null }; tone?: string };
+  let groups: G[] = [];
+  if (group === 'assignee') {
+    const m = new Map<string, G>();
+    const ensure = (id: string | null, name: string | null) => {
+      const k = id ?? 'none';
+      if (!m.has(k)) m.set(k, { key: k, label: id ? (name ?? dir.users.find((u) => u.id === id)?.name ?? '알 수 없음') : '담당자 없음', head: <Avatar id={id} name={id ? name ?? dir.users.find((u) => u.id === id)?.name ?? null : null} size={24} />, items: [], add: { defaultAssignee: id } });
+      return m.get(k)!;
+    };
+    if (!assigneeFilter || assigneeFilter === user.id) ensure(user.id, user.name);
+    if (assigneeFilter) ensure(assigneeFilter, null);
+    for (const t of tasks) ensure(t.assignee_id, t.assignee_name).items.push(t);
+    groups = [...m.values()].sort((a, b) => (a.key === user.id ? -1 : b.key === user.id ? 1 : a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.label.localeCompare(b.label, 'ko')));
+  } else if (group === 'due') {
+    const d = new Date(today + 'T00:00:00Z');
+    const weekEnd = new Date(d.getTime() + (6 - ((d.getUTCDay() + 6) % 7)) * 86400000).toISOString().slice(0, 10);
+    const defs: [string, string, string?][] = [['over', '기한 지남', 'text-red-600'], ['today', '오늘'], ['week', '이번 주'], ['later', '나중'], ['none', '마감일 없음']];
+    groups = defs.map(([k, l, tone]) => ({ key: k, label: l, tone, items: [], add: { defaultDue: DUE_DEFAULT[k]() } }));
+    const g = (k: string) => groups.find((x) => x.key === k)!.items;
+    for (const t of tasks) g(!t.due_date ? 'none' : t.due_date < today ? 'over' : t.due_date === today ? 'today' : t.due_date <= weekEnd ? 'week' : 'later').push(t);
+    groups = groups.filter((x) => x.items.length || x.key === 'today');
+  } else if (group === 'project') {
+    const m = new Map<string, G>();
+    for (const t of tasks) {
+      const k = t.project_id ?? 'none';
+      if (!m.has(k)) m.set(k, { key: k, label: t.project_name ?? '프로젝트 없음', head: <span className="size-2.5 rounded-[3px]" style={{ background: t.project_color ?? '#cbd5e1' }} />, items: [], add: { projectId: t.project_id } });
+      m.get(k)!.items.push(t);
+    }
+    groups = [...m.values()].sort((a, b) => (a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.label.localeCompare(b.label, 'ko')));
+    if (!groups.length) groups = [{ key: 'none', label: '프로젝트 없음', items: [], add: {} }];
+  } else groups = [{ key: 'all', label: '', items: tasks, add: {} }];
+
+  return (
+    <div className="space-y-4" data-testid="task-groups" data-group-by={group}>
+      {top && <div className="overflow-hidden rounded-card border border-accent-500/40 bg-white shadow-card ring-2 ring-accent-500/10">{top}</div>}
+      {groups.map((x, gi) => {
+        const open = x.items.filter((t) => t.status !== 'done').length;
+        const late = x.items.filter((t) => t.status !== 'done' && t.due_date && t.due_date < today).length;
+        const isFolded = folded[x.key];
+        const addRow = <InlineAddTask key={x.key} muted defaultAssignee={x.add.defaultAssignee} defaultDue={x.add.defaultDue} projectId={x.add.projectId}
+          placeholder={group === 'assignee' ? `${x.label === '담당자 없음' ? '담당자 없이' : x.label + '님에게'} 업무 추가` : x.label ? `${x.label}에 업무 추가` : '업무 추가'} />;
+        return (
+          <section key={x.key} data-group={x.key}>
+            {x.label && (
+              <button onClick={() => setFolded((f) => ({ ...f, [x.key]: !f[x.key] }))} aria-expanded={!isFolded}
+                className={cx('mb-1.5 flex w-full items-center gap-2 px-1 text-left text-sm font-semibold', x.tone ?? 'text-ink')}>
+                <ChevronDown className={cx('size-4 text-ink-3 transition-transform', isFolded && '-rotate-90')} />
+                {x.head}{x.label}
+                <span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums" title="진행 중">{open}</span>
+                {late > 0 && <span className="rounded-full bg-red-50 px-1.5 text-xs font-medium text-red-600 tabular-nums">지연 {late}</span>}
+              </button>
+            )}
+            {!isFolded && <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={addRow} />}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 /** 내 업무: 최근 배정 → 기한 지남 → 오늘 → 이번 주 → 나중 → 날짜 없음 (Asana '내 작업' 참고) */
-function MyGroupedList({ tasks, onPatch, onAcked }: { tasks: Task[]; onPatch: (t: Task, b: any) => void; onAcked: () => void }) {
+function MyGroupedList({ tasks, onPatch, onAcked, top }: { tasks: Task[]; onPatch: (t: Task, b: any) => void; onAcked: () => void; top?: React.ReactNode }) {
   const { user } = useSession();
-  const add = <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask /></div>;
-  if (!tasks.length) return <div className="space-y-3" data-testid="my-groups">{add}<Empty title="내 업무가 없습니다" icon={CircleCheck}>맡은 업무가 모두 끝났습니다. 위 줄에 제목을 입력하고 Enter 로 바로 추가하세요.</Empty></div>;
+  const add = top ? <div className="overflow-hidden rounded-card border border-line bg-white shadow-card">{top}</div> : null;
+  if (!tasks.length) return <div className="space-y-3" data-testid="my-groups">{add}<Empty title="내 업무가 없습니다" icon={CircleCheck}>맡은 업무가 모두 끝났습니다. 아래 줄이나 <b>+ 업무 추가</b>로 바로 추가하세요.</Empty>
+    <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask muted /></div></div>;
   const today = todayStr();
   const d = new Date(today + 'T00:00:00Z');
   const weekEnd = new Date(d.getTime() + ((7 - ((d.getUTCDay() + 6) % 7)) - 1) * 86400000).toISOString().slice(0, 10); // 이번 주 일요일
@@ -328,15 +444,16 @@ function MyGroupedList({ tasks, onPatch, onAcked }: { tasks: Task[]; onPatch: (t
           <h2 className={cx('mb-1.5 flex items-center gap-2 px-1 text-sm font-semibold', x.key === 'over' ? 'text-red-600' : 'text-ink')}>
             {x.label}<span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums">{x.items.length}</span>
           </h2>
-          <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} onAck={x.key === 'new' ? async (t) => { try { await api(`/api/tasks/${t.id}/ack`, { body: {} }); onAcked(); } catch (e: any) { toast.error(e.message); } } : undefined} />
+          <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={<InlineAddTask muted defaultDue={DUE_DEFAULT[x.key]?.() ?? null} placeholder="업무 추가" />} onAck={x.key === 'new' ? async (t) => { try { await api(`/api/tasks/${t.id}/ack`, { body: {} }); onAcked(); } catch (e: any) { toast.error(e.message); } } : undefined} />
         </section>
       ))}
     </div>
   );
 }
 
-function ListView({ tasks, onPatch, onAck, empty, hint = true, add }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean; add?: React.ReactNode }) {
+function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail }: { tasks: Task[]; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; empty?: React.ReactNode; hint?: boolean; add?: React.ReactNode; tail?: React.ReactNode }) {
   const openTask = useContext(OpenTaskCtx);
+  if (!tasks.length && tail) return <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list">{add}{tail}</div>;
   if (!tasks.length && add) return <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list">{add}<p className="px-4 py-6 text-center text-sm text-ink-3">조건에 맞는 업무가 없습니다</p></div>;
   if (!tasks.length) return <>{empty ?? <Empty title="조건에 맞는 업무가 없습니다" icon={Search}>필터를 바꾸거나 <b>만들기</b>(단축키 N)로 업무를 등록하세요.</Empty>}</>;
   // ↑↓ 로 행 이동, Enter 로 열기
@@ -354,6 +471,7 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true, add }: { tasks: T
       {add}
       {hint && <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">행을 오른쪽으로 밀면 완료, 왼쪽으로 밀면 보류</p>}
       {tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} />)}
+      {tail}
     </div>
   );
 }

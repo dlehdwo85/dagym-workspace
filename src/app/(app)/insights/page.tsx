@@ -5,7 +5,7 @@ import { ArrowDownUp, BarChart3, MapPin } from 'lucide-react';
 import { useApi } from '@/components/client';
 import { useSession, canManage } from '@/components/session';
 import { BRAND_TONE, ErrorBox, PageHeader, Skeleton, cx, fmtDate } from '@/components/ui';
-import { UNIT_TYPE_LABEL } from '@/lib/types';
+import { HIDDEN_BRANDS, UNIT_TYPE_LABEL } from '@/lib/types';
 
 type Site = any;
 const COLS: { key: string; label: string; hint: string; fmt: (s: Site) => string; tone?: (s: Site) => string; sortVal: (s: Site) => number }[] = [
@@ -45,7 +45,7 @@ export default function InsightsPage() {
           {[4, 8, 12].map((w) => <button key={w} onClick={() => setWeeks(w)} aria-pressed={weeks === w} className={cx('rounded-md px-3 py-1.5 font-medium', weeks === w ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{w}주</button>)}
         </div>
         <select className="h-9 rounded-input border border-line bg-white px-2 text-sm shadow-card" value={brand} onChange={(e) => setBrand(e.target.value)} aria-label="브랜드">
-          <option value="">전체 브랜드</option>{dir.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          <option value="">전체 브랜드</option>{dir.brands.filter((b) => !HIDDEN_BRANDS.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       </>} />
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={5} /> : !rows.length ? (

@@ -10,6 +10,10 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
 export const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'review', 'on_hold', 'done'];
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';
 export const PRIORITY_LABEL: Record<Priority, string> = { low: '낮음', normal: '보통', high: '높음', urgent: '긴급' };
+/** 화면에서 숨기는 브랜드 (WORKIN_V2: BODY LAB 은 DB 값만 보존, 선택지·문구에서 제외) */
+export const HIDDEN_BRANDS = ['bodylab'];
+export const SERVICE_NAME = '워크인';
+export const SERVICE_SUB = '다짐 · 하이링크';
 export const UNIT_TYPE_LABEL = { hq: '본사', department: '부서', branch: '지점', site: '위탁운영 현장' } as const;
 export const EVENT_KIND_LABEL = { normal: '일정', vacation: '휴가', business_trip: '출장', task_block: '업무 시간' } as const;
 

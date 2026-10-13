@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { CalendarDays, CheckCircle2, Eye, EyeOff, ShieldCheck, TriangleAlert, Users } from 'lucide-react';
 import { inputCls } from './ui';
 
-const BRANDS = [['다짐', '#f97316'], ['하이링크', '#3b82f6'], ['BODY LAB', '#10b981']] as const;
+const BRANDS = [['다짐', '#f97316'], ['하이링크', '#3b82f6']] as const;
 
 /** 로그인·초대·재설정 공통 틀: 왼쪽 회사 소개, 오른쪽 입력 */
 export function AuthCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
@@ -14,7 +14,7 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
         <div className="absolute -bottom-32 -left-16 size-96 rounded-full bg-orange-500/10 blur-3xl" />
         <div className="relative flex items-center gap-3">
           <img src="/icon-192.png" alt="" className="size-10 rounded-lg" />
-          <div><div className="text-lg font-bold">업무·일정</div><div className="text-xs text-slate-400">사내 업무·일정 관리</div></div>
+          <div><div className="text-lg font-bold">워크인</div><div className="text-xs text-slate-400">다짐 · 하이링크</div></div>
         </div>
         <div className="relative">
           <h2 className="text-[28px] font-bold leading-snug tracking-tight">본사부터 현장까지,<br />할 일과 일정을 한곳에서.</h2>
@@ -36,7 +36,7 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <img src="/icon-192.png" alt="" className="size-9 rounded-lg" />
-            <div><div className="font-bold text-brand-700">업무·일정</div><div className="text-xs text-ink-2">다짐 · 하이링크 · BODY LAB</div></div>
+            <div><div className="font-bold text-brand-700">워크인</div><div className="text-xs text-ink-2">다짐 · 하이링크</div></div>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-ink">{title}</h1>
           {sub && <p className="mt-1.5 text-sm text-ink-2">{sub}</p>}

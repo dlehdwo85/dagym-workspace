@@ -1,6 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LayoutTemplate } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from './client';
 import { Button, Field, Modal, cx, fmtMinutes, inputCls, toast, todayStr } from './ui';
@@ -23,6 +23,10 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   const [f, setF] = useState<any>({});
   const [busy, setBusy] = useState(false);
   const [tpl, setTpl] = useState('');
+  // 모바일 바텀시트에서 연달아 등록: "계속 추가"면 저장 후 창을 닫지 않고 제목만 비운다
+  const [keep, setKeep] = useState(false);
+  useEffect(() => { try { setKeep(localStorage.getItem('wos_quick_keep') === '1'); } catch {} }, []);
+  const titleRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -59,6 +63,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
       }
       toast.ok('업무를 등록했습니다');
       broadcastRefresh();
+      if (keep && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setTpl(''); titleRef.current?.focus(); return; }
       onClose();
       // 자세한 항목은 만든 뒤 상세에서 — 목록 안(onCreated)이 아니면 상세로 이동
       if (onCreated) onCreated(r.id); else router.push(`/tasks/${r.id}`);
@@ -70,7 +75,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   return (
     <Modal open={open} onClose={onClose} title={defaults?.parentId ? '하위 업무 추가' : '업무 등록'}>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="제목"><input autoFocus className={cx(inputCls, 'h-11 text-base')} value={f.title ?? ''} onChange={(e) => set('title')(e.target.value)} placeholder="무엇을 해야 하나요?" maxLength={200} /></Field>
+        <Field label="제목"><input ref={titleRef} autoFocus className={cx(inputCls, 'h-11 text-base')} value={f.title ?? ''} onChange={(e) => set('title')(e.target.value)} placeholder="무엇을 해야 하나요?" maxLength={200} /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="담당자"><UserSelect value={f.assigneeId} onChange={set('assigneeId')} /></Field>
           <Field label="마감일"><input type="date" className={inputCls} value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} /></Field>
@@ -108,7 +113,10 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           </Field>
         ) : <button type="button" onClick={() => setShowTpl(true)} className="inline-flex items-center gap-1 text-xs font-medium text-ink-2 hover:text-ink"><LayoutTemplate className="size-3.5" />템플릿에서 시작</button>)}
         <div className="flex items-center justify-between gap-2 pt-1">
-          <span className="text-xs text-ink-3">설명·하위 업무·첨부는 만든 뒤 상세에서</span>
+          {defaults?.parentId ? <span className="text-xs text-ink-3">설명·하위 업무·첨부는 만든 뒤 상세에서</span> : (
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink-2"><input type="checkbox" className="size-4 accent-brand-600" checked={keep}
+              onChange={(e) => { setKeep(e.target.checked); try { localStorage.setItem('wos_quick_keep', e.target.checked ? '1' : '0'); } catch {} }} />계속 추가 (등록 후 창 유지)</label>
+          )}
           <div className="flex gap-2">
             <Button type="button" variant="secondary" onClick={onClose}>취소</Button>
             <Button type="submit" disabled={busy}>{busy ? '등록 중…' : '등록'}</Button>

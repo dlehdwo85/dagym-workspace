@@ -1,6 +1,6 @@
 {
-  "name": "업무·일정 관리",
-  "short_name": "업무일정",
+  "name": "워크인",
+  "short_name": "워크인",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f8fafc",

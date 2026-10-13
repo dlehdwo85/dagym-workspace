@@ -407,7 +407,7 @@ await step('U-0a 알 수 없는 주소 값(/tasks?view=board·?view=xyz)에도 �
   await owner.getByTestId('board').waitFor();
   assert.equal(await owner.getByText('불러오지 못했습니다').count(), 0);
   await owner.goto(BASE + '/tasks?view=xyz&from=not-a-date');
-  await owner.getByTestId('task-list').waitFor();
+  await owner.getByTestId('task-list').first().waitFor();
   assert.equal(await owner.getByText('불러오지 못했습니다').count(), 0);
 });
 await step('U-0b·U-0c 검증 오류는 항목 이름과 한국어로, 연결 실패는 한국어 안내', async () => {
@@ -665,40 +665,111 @@ await step('S-5 오늘·이번 주: 업무를 시간표로 끌어 놓아 실행 
 });
 
 // 본사 운영 도구 단순화 (HQ_SIMPLIFY)
-await step('HQ-1 사이드바 4개(홈·내 업무·프로젝트·캘린더), 관리 메뉴는 계정 메뉴 안', async () => {
+await step('W-1 이름 워크인·부제 다짐 · 하이링크, 사이드바(홈·업무·프로젝트·캘린더·알림 + 관리), 계정 메뉴는 설정·단축키·로그아웃', async () => {
   await owner.goto(BASE + '/');
+  assert.match(await owner.title(), /^워크인/);
+  const side = owner.getByRole('complementary', { name: '사이드바' });
+  await side.getByText('워크인', { exact: true }).waitFor();
+  await side.getByText('다짐 · 하이링크', { exact: true }).waitFor();
+  assert.equal(await owner.getByText('BODY LAB').count(), 0, 'BODY LAB 문구 없음');
   const nav = owner.getByRole('navigation', { name: '주 메뉴' });
-  await nav.getByRole('link', { name: '캘린더' }).waitFor();
-  const labels = (await nav.getByRole('link').allTextContents()).map((x) => x.trim()).filter(Boolean);
-  for (const l of ['홈', '내 업무', '프로젝트', '캘린더']) assert.ok(labels.includes(l), `${l} 있음`);
-  for (const l of ['현장 신고 QR', '자동화', '현장 비교', '업무량', '결재선', '전체 업무', '오늘·이번 주', '템플릿']) assert.ok(!labels.includes(l), `${l} 숨김`);
+  const labels = (await nav.getByRole('link').allTextContents()).map((x) => x.replace(/\d+$/, '').trim()).filter(Boolean);
+  for (const l of ['홈', '업무', '프로젝트', '캘린더', '알림', '주간 보고', '매출', '사용자 관리', '운영 상태']) assert.ok(labels.includes(l), `${l} 있음 (${labels})`);
+  for (const l of ['내 업무', '현장 신고 QR', '자동화', '현장 비교', '업무량', '결재선', '전체 업무', '오늘·이번 주', '템플릿']) assert.ok(!labels.includes(l), `${l} 숨김`);
   await owner.getByRole('button', { name: '내 계정 메뉴' }).click();
-  for (const l of ['설정·알림', '사용자 관리', '주간 보고', '운영 상태']) await owner.getByRole('menuitem', { name: l }).waitFor();
+  const items = (await owner.getByRole('menuitem').allTextContents()).map((x) => x.replace(/\?$/, '').trim());
+  assert.deepEqual(items, ['설정·알림', '단축키', '로그아웃']);
   await owner.keyboard.press('Escape');
   await owner.screenshot({ path: `${SHOTS}/55-hq-sidebar.png` });
 });
-await step('HQ-2 내 업무 목록에서 제목 입력 → Enter 로 즉시 생성(담당=나), 줄에서 마감 빠른 선택·담당자 지정', async () => {
-  await owner.goto(BASE + '/tasks?view=my');
-  const add = owner.getByTestId('inline-add').first().getByLabel('업무 추가 제목');
-  await add.fill('주간 매출 보고 정리');
+await step('W-2 업무 화면: 기본 전체·담당자별 묶음, "+ 업무 추가" → 제목 Enter 연속 추가·Esc 종료, 묶음 끝 줄은 그 담당자로, 줄에서 마감·담당 칩', async () => {
+  await owner.goto(BASE + '/tasks');
+  const groups = owner.getByTestId('task-groups');
+  await groups.waitFor();
+  assert.equal(await groups.getAttribute('data-group-by'), 'assignee');
+  await groups.locator(`[data-group="${ctx.staffA.id}"]`).waitFor(); // 다른 사람 업무도 기본으로 보임
+  assert.equal(await groups.locator('section').first().getAttribute('data-group'), ctx.ownerId, '내 묶음이 맨 위');
+  await owner.getByTestId('add-task-top').click();
+  const top = owner.getByLabel('업무 추가 제목').first();
+  await top.waitFor();
+  assert.ok(await top.evaluate((el) => el === document.activeElement), '빈 줄에 커서');
+  await owner.keyboard.type('주간 매출 보고 정리');
   const t0 = Date.now();
-  await add.press('Enter');
-  await owner.getByTestId('my-groups').getByText('주간 매출 보고 정리').waitFor();
+  await owner.keyboard.press('Enter');
+  await groups.locator(`[data-group="${ctx.ownerId}"]`).getByText('주간 매출 보고 정리').waitFor();
   assert.ok(Date.now() - t0 < 5000, '빠르게 생성');
-  await add.fill('본부장 회의 자료');
-  await add.press('Enter');
-  await owner.getByTestId('my-groups').getByText('본부장 회의 자료').waitFor();
+  assert.ok(await top.evaluate((el) => el === document.activeElement && !el.value), '저장 후 다음 빈 줄');
+  await owner.keyboard.type('본부장 회의 자료');
+  await owner.keyboard.press('Enter');
+  await groups.getByText('본부장 회의 자료').waitFor();
+  await owner.keyboard.press('Escape');
+  await owner.waitForTimeout(200);
+  assert.equal(await groups.locator('[data-group]').first().getByPlaceholder(/Esc 로 끝내기/).count(), 0, 'Esc 로 맨 위 줄 닫힘');
   const [t] = await sql`select id, assignee_id, approval_required from tasks where title = '주간 매출 보고 정리'`;
   assert.equal(t.assignee_id, ctx.ownerId); assert.equal(t.approval_required, false);
+  // 묶음 끝 "업무 추가" 줄 → 그 묶음의 담당자
+  const endRow = groups.locator(`[data-group="${ctx.staffA.id}"]`).getByLabel('업무 추가 제목');
+  await endRow.fill('강남점 전단 배포');
+  await endRow.press('Enter');
+  await groups.locator(`[data-group="${ctx.staffA.id}"]`).getByText('강남점 전단 배포').waitFor();
+  const [t2] = await sql`select assignee_id from tasks where title = '강남점 전단 배포'`;
+  assert.equal(t2.assignee_id, ctx.staffA.id);
+  // 줄에서 마감·담당 칩
   const row = owner.locator(`[data-row="${t.id}"]`);
   await row.getByTestId('due-picker').click();
   await owner.getByRole('button', { name: /^내일/ }).click();
   await row.getByTestId('assignee-picker').click();
-  await owner.getByRole('button', { name: /^최매니저/ }).click();
+  await owner.getByRole('dialog').getByRole('button', { name: /^최매니저/ }).click();
   await owner.waitForTimeout(800);
   const [u] = await sql`select assignee_id, to_char(due_date, 'YYYY-MM-DD') as due from tasks where id = ${t.id}`;
   assert.equal(u.assignee_id, ctx.managerA.id); assert.equal(u.due, addDays(today, 1));
+  // 사람 칩·묶기 전환
+  await owner.getByTestId('group-by').selectOption('due');
+  await owner.locator('[data-group-by="due"]').waitFor();
+  await owner.getByTestId('group-by').selectOption('assignee');
   await owner.screenshot({ path: `${SHOTS}/56-inline-add.png` });
+});
+await step('W-3 홈: 오늘 할 일(내 것/전체) · 이번 주 일정 · 이달의 일정(미니 달력) · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동', async () => {
+  await owner.goto(BASE + '/');
+  for (const id of ['home-today', 'home-week', 'home-month-card', 'home-people', 'home-alerts', 'home-activity']) await owner.getByTestId(id).waitFor();
+  await owner.getByTestId('home-today').getByRole('button', { name: '전체' }).click();
+  await owner.getByTestId('home-activity').getByText('강남점 전단 배포').waitFor();
+  const d = addDays(today, 1);
+  if (d.slice(0, 7) === today.slice(0, 7)) {
+    await owner.getByTestId('home-month').locator('button[aria-pressed]', { hasText: new RegExp(`^${Number(d.slice(8))}$`) }).click();
+    await owner.waitForTimeout(200);
+    assert.equal(await owner.getByText('다가오는 일정').count(), 0, '날짜를 누르면 그날 목록');
+  }
+  await owner.screenshot({ path: `${SHOTS}/59-home-dashboard.png`, fullPage: true });
+});
+await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
+  await owner.goto(BASE + '/revenue');
+  const month = today.slice(0, 7);
+  const box = owner.getByTestId('revenue-input');
+  await box.getByLabel('입력할 월').fill(month);
+  await box.getByLabel('다짐 강남점 매출(원)').fill('48000000');
+  await box.getByLabel('다짐 강남점 지출(원)').fill('30000000');
+  await box.getByLabel('다짐 강남점 목표(원)').fill('50000000');
+  await box.getByRole('button', { name: '다짐 강남점 저장' }).click();
+  await owner.getByText('저장했습니다').waitFor();
+  await box.locator('[data-unit="다짐 강남점"]').getByText(/근거: 직접 입력/).waitFor();
+  const bad = '현장,월,매출\n없는 현장,' + month + ',100\n';
+  await box.getByLabel('CSV 파일 선택').setInputFiles({ name: 'bad.csv', mimeType: 'text/csv', buffer: Buffer.from(bad) });
+  await owner.getByTestId('csv-preview').getByText('2번째 줄').waitFor();
+  await owner.getByTestId('csv-preview').getByRole('button', { name: '취소' }).click();
+  const good = '현장,월,매출,지출\n하이링크 판교 위탁현장,' + month + ',12000000,9000000\n';
+  await box.getByLabel('CSV 파일 선택').setInputFiles({ name: '실적.csv', mimeType: 'text/csv', buffer: Buffer.from(good) });
+  await owner.getByTestId('csv-preview').getByRole('button', { name: '가져오기' }).click();
+  await owner.getByText('1건을 가져왔습니다').waitFor();
+  await owner.getByText('표로 보기').click();
+  await owner.getByTestId('revenue-table').getByText('60,000,000원').first().waitFor();
+  await owner.screenshot({ path: `${SHOTS}/58-revenue.png`, fullPage: true });
+  assert.equal((await ctx.staffA.client.get('/api/revenue')).status, 404);
+});
+await step('W-0 휴대폰 360·375·390·430px 모든 주요 화면 좌우 넘침 없음 (안전장치 끄고 측정)', async () => {
+  const { checkWidths } = await import('./widths.mjs');
+  const bad = await checkWidths(browser, await desk.storageState());
+  assert.deepEqual(bad, []);
 });
 await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 → 업무가 체크로 표시 → 체크로 완료, 미니 달력·업무 캘린더', async () => {
   const d = addDays(today, 2);
@@ -749,7 +820,7 @@ await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)',
   await p.waitForTimeout(400);
   await p.screenshot({ path: `${SHOTS}/40-dashboard-1440.png`, fullPage: true });
   await p.goto(BASE + '/tasks?mode=list');
-  await p.getByTestId('task-list').waitFor();
+  await p.getByTestId('task-list').first().waitFor();
   await p.screenshot({ path: `${SHOTS}/41-task-list-1440.png` });
   await p.goto(BASE + '/tasks?mode=board');
   await p.getByTestId('board').waitFor();

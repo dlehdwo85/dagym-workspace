@@ -4,7 +4,7 @@ import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor
 // 네이티브 플러그인은 앱(mobile/)에 설치되어 있고, 웹 번들에는 프록시만 둔다
 type L = (e: any) => void;
 interface AppPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; exitApp(): Promise<void> }
-interface FcmPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; requestPermissions(): Promise<{ receive: string }>; getToken(): Promise<{ token: string }> }
+interface FcmPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; requestPermissions(): Promise<{ receive: string }>; checkPermissions(): Promise<{ receive: string }>; getToken(): Promise<{ token: string }> }
 const App = registerPlugin<AppPlugin>('App');
 const FirebaseMessaging = registerPlugin<FcmPlugin>('FirebaseMessaging');
 import { api } from './client';
@@ -27,8 +27,19 @@ export async function initNative(router: Router) {
   FirebaseMessaging.addListener('notificationActionPerformed', (e: any) => go(e.notification?.data?.link));
   FirebaseMessaging.addListener('notificationReceived', () => window.dispatchEvent(new Event('wos-refresh')));
   FirebaseMessaging.addListener('tokenReceived', (e: any) => registerToken(e.token));
+  // 첫 실행: 시스템 권한 창을 바로 띄우지 않고, 이유를 먼저 보여 주는 안내(AppShell)를 띄운다
+  const perm = await FirebaseMessaging.checkPermissions().catch(() => ({ receive: 'prompt' }));
+  if (perm.receive === 'granted') { await enableNativePush().catch(() => {}); return; }
+  let asked = false;
+  try { asked = localStorage.getItem('wos_push_asked') === '1'; } catch {}
+  if (perm.receive !== 'denied' && !asked) window.dispatchEvent(new Event('wos-push-ask'));
+}
+
+/** 앱 알림 켜기: 권한 요청 → FCM 토큰 등록. 거부되면 오류 */
+export async function enableNativePush() {
+  try { localStorage.setItem('wos_push_asked', '1'); } catch {}
   const perm = await FirebaseMessaging.requestPermissions();
-  if (perm.receive !== 'granted') return;
+  if (perm.receive !== 'granted') throw new Error('알림 권한이 꺼져 있습니다. 휴대폰 설정 → 앱 → 워크인 → 알림에서 허용해 주세요.');
   const { token } = await FirebaseMessaging.getToken();
   await registerToken(token);
 }

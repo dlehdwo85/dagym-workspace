@@ -2,7 +2,7 @@
 import { useMemo } from 'react';
 import { useSession } from './session';
 import { inputCls } from './ui';
-import { UNIT_TYPE_LABEL } from '@/lib/types';
+import { HIDDEN_BRANDS, UNIT_TYPE_LABEL } from '@/lib/types';
 
 export function UnitSelect({ value, onChange, allowEmpty, id, className }: { value: string | null | undefined; onChange: (v: string) => void; allowEmpty?: string; id?: string; className?: string }) {
   const { dir } = useSession();
@@ -66,7 +66,7 @@ export function BrandSelect({ value, onChange, className }: { value: string | nu
   return (
     <select className={className ?? inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
       <option value="">브랜드 공통</option>
-      {dir.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+      {dir.brands.filter((b) => !HIDDEN_BRANDS.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
     </select>
   );
 }
