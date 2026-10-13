@@ -12,6 +12,7 @@ export async function GET() {
     const sql = db();
     const [r] = await sql`select now() as now,
       (select max(started_at) from job_runs where job = 'tick' and status = 'ok') as last_tick,
+      (select trigger from job_runs where job = 'tick' and status = 'ok' order by id desc limit 1) as last_trigger,
       (select name from schema_migrations order by name desc limit 1) as migration`;
     const lastTick = r.last_tick ? new Date(r.last_tick) : null;
     const tickAgeMin = lastTick ? Math.round((Date.now() - lastTick.getTime()) / 60000) : null;
@@ -20,7 +21,7 @@ export async function GET() {
       db: 'ok',
       dbLatencyMs: Date.now() - started,
       migration: r.migration,
-      scheduler: { lastTick, ageMinutes: tickAgeMin, healthy: tickAgeMin !== null && tickAgeMin <= 30 },
+      scheduler: { lastTick, lastTrigger: r.last_trigger ?? null, ageMinutes: tickAgeMin, healthy: tickAgeMin !== null && tickAgeMin <= 30 },
       config: {
         fileStorage: s3Configured() ? 's3' : 'local-disk',
         webPush: webPushConfigured(),

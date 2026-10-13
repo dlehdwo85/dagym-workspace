@@ -49,6 +49,7 @@ export function serverEnv() {
     FCM_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: 'fake-proj', client_email: 'svc@fake.iam', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }), token_uri: `${FAKE}/token` }),
     LOCAL_UPLOAD_DIR: path.join(TMP, 'uploads'),
     OPENAI_API_KEY: 'sk-fake-test',
+    PIGGYBACK_TICK: '0', // 요청 편승 정기 실행은 tests/api/piggyback.test.mjs 에서만 켬 (다른 시험의 실행 횟수가 흔들리지 않게)
     DUE_DIGEST_HOUR: '0', // 기한 지남·오늘 마감 하루 1회 알림을 시험 시각과 무관하게
     OPENAI_BASE_URL: `${FAKE}/openai/v1`,
   };

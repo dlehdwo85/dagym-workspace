@@ -33,8 +33,18 @@ export default function Ops() {
       </div>
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">정기 작업 실행 기록</h2>
+        {(() => {
+          const last = data.jobs.find((j: any) => j.job === 'tick' && j.status === 'ok');
+          const age = last ? Math.round((Date.now() - new Date(last.started_at).getTime()) / 60000) : null;
+          return (
+            <p className={cx('mb-2 rounded p-2 text-sm', age !== null && age <= 30 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900')} data-testid="last-tick">
+              마지막 정기 실행 {age === null ? '기록 없음' : `${age}분 전`}{last && ` · 원인: ${TRIGGER_LABEL[last.trigger] ?? last.trigger}`}
+              <span className="block text-xs opacity-80">원인 — GitHub 예약(10분, 자주 건너뜀) · Vercel Cron(매일 09시, CRON_SECRET 필요) · 사용 중 요청 편승(앱을 쓰는 동안 10분마다)</span>
+            </p>
+          );
+        })()}
         <ul className="space-y-1 text-xs">{data.jobs.map((j: any) => (
-          <li key={j.id} className={cx(j.status === 'error' && 'text-red-700')}>{fmtDateTime(j.started_at)} · {j.job} ({j.trigger}) · {j.status}
+          <li key={j.id} className={cx(j.status === 'error' && 'text-red-700')}>{fmtDateTime(j.started_at)} · {j.job} ({TRIGGER_LABEL[j.trigger] ?? j.trigger}) · {j.status}
             {j.detail?.due && ` · 마감알림 ${j.detail.due.created}`}{j.detail?.recurring && ` · 반복생성 ${j.detail.recurring.spawned}`}{j.detail?.push && ` · 푸시 ${j.detail.push.sent}/${j.detail.push.claimed}`}</li>
         ))}{!data.jobs.length && <li className="text-slate-400">아직 실행 기록이 없습니다 — 스케줄러 연결을 확인하세요</li>}</ul>
       </section>
@@ -53,3 +63,5 @@ export default function Ops() {
     </div>
   );
 }
+
+const TRIGGER_LABEL: Record<string, string> = { scheduler: 'GitHub 예약', 'github-oidc': 'GitHub 예약', secret: 'Vercel Cron', piggyback: '사용 중 요청 편승', manual: '수동' };

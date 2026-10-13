@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, after, type NextRequest } from 'next/server';
 import { z, ZodError, type ZodTypeAny } from 'zod';
 import { currentUser } from './auth';
 import { db } from './db';
@@ -100,6 +100,7 @@ export function handler<P>(fn: (ctx: any) => Promise<unknown>, opts: Opts = {}) 
       }
 
       const out = await fn({ req, user, params });
+      if (user) afterRequest(req.method);
       if (out instanceof Response) return out;
       return NextResponse.json(out ?? { ok: true });
     } catch (e) {
@@ -127,3 +128,26 @@ export const zUuid = z.string().uuid();
 export const zDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '날짜는 YYYY-MM-DD 형식이어야 합니다')
   .refine((s) => { const d = new Date(s + 'T00:00:00Z'); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; }, '없는 날짜입니다');
 export const zTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, '시각은 HH:MM 형식이어야 합니다');
+
+/**
+ * 알림이 정기 실행에만 기대지 않도록 (WORKIN_NOTIFY_RELIABILITY):
+ * 1) 로그인 사용자의 쓰기 요청 뒤에는 대기 중인 푸시를 바로 보낸다.
+ * 2) 요청 편승 정기 실행: 마지막 정기 실행이 10분 넘게 지났으면 응답 뒤에 한 번 돌린다
+ *    (인스턴스당 1분에 한 번만 확인, 실행 자체는 runTick 의 job_locks 잠금으로 동시에 하나만).
+ */
+let lastPiggyCheck = 0;
+function afterRequest(method: string) {
+  try {
+    if (MUTATING.has(method)) after(async () => { const { dispatchPending } = await import('./push'); await dispatchPending().catch(() => {}); });
+    if (process.env.PIGGYBACK_TICK === '0' || Date.now() - lastPiggyCheck < Number(process.env.PIGGYBACK_CHECK_MS ?? 60_000)) return;
+    lastPiggyCheck = Date.now();
+    after(async () => {
+      try {
+        const [r] = await db()<{ age: number | null }[]>`select extract(epoch from now() - max(started_at))::int as age from job_runs where job = 'tick' and status in ('ok', 'running', 'error')`;
+        if (r?.age !== null && r?.age !== undefined && r.age < 600) return;
+        const { runTick } = await import('./jobs');
+        await runTick('piggyback');
+      } catch (e) { await logError('piggyback-tick', e); }
+    });
+  } catch { /* after() 를 쓸 수 없는 환경(시험 스크립트 등)은 건너뜀 */ }
+}
