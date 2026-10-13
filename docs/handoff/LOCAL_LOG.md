@@ -102,3 +102,5 @@
 - R2 CORS 설정(로컬): workin-files 에 운영 도메인·localhost·capacitor origin, GET/PUT/HEAD. 업로드 실패 원인(브라우저 presigned PUT CORS) 해소. ANTHROPIC_API_KEY 대표 등록(22:47) — 운영 반영은 다음 배포(현재 Vercel 한도) 후.
 
 - 2026-10-14 운영 1e7dc26 반영(자동 배포): V12 급함(aeccc1e)·AI 자료 일괄 생성(1c11266)·R2 체크섬 끄기+서버 경유 재시도+드래그 업로드. ANTHROPIC_API_KEY 반영. R2 CORS headers * 로 확대(로컬).
+
+- 2026-10-14 대표 요청으로 운영에 업무 일괄 생성(대표 세션, API): "지점별 SNS 촬영 자료 수집" 김민수(141facae…)·김소담(69c8377a…), batch 7082ca97, 마감 10/22 14:00, 높음, 체크리스트 7. 촬영 요청서 사진(local-screens/59) 첨부는 업로드 수정(c105d54) 운영 반영 후.
