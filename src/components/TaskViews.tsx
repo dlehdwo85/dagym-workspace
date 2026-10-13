@@ -922,9 +922,11 @@ function SectionGroup({ id, name, count, children, onRename, onDelete, onMove, o
     <section ref={setNodeRef} className={cx('overflow-hidden rounded-card border border-line bg-white shadow-card', isOver && 'ring-2 ring-accent-500/40')} data-section={id ?? 'none'}>
       <div className="flex items-center gap-1 border-b border-line bg-slate-50/60 px-3 py-1.5">
         {edit && onRename ? (
-          <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem('n') as HTMLInputElement).value.trim(); if (v) onRename(v); setEdit(false); }}>
-            <input name="n" defaultValue={name} autoFocus className="rounded border px-2 py-0.5 text-sm" aria-label="섹션 이름" />
-            <Button size="sm" type="submit">저장</Button>
+          <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); (e.currentTarget.elements.namedItem('n') as HTMLInputElement).blur(); }}>
+            {/* 저장 버튼 없이: Enter 또는 칸을 벗어나면 저장, Esc 취소 */}
+            <input name="n" defaultValue={name} autoFocus enterKeyHint="done" className="rounded border px-2 py-0.5 text-sm" aria-label="섹션 이름"
+              onKeyDown={(e) => { if (e.key === 'Escape') { (e.currentTarget as HTMLInputElement).dataset.cancel = '1'; setEdit(false); } }}
+              onBlur={(e) => { const v = e.currentTarget.value.trim(); if (e.currentTarget.dataset.cancel !== '1' && v && v !== name) onRename(v); setEdit(false); }} />
           </form>
         ) : <h2 className="flex items-center gap-2 text-sm font-semibold" onDoubleClick={() => onRename && setEdit(true)}>{name} <span className="rounded-full bg-white px-1.5 text-xs font-medium text-ink-2 shadow-card tabular-nums">{count}</span></h2>}
         <span className="flex-1" />

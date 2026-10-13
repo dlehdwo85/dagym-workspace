@@ -112,6 +112,8 @@ export default function Dashboard() {
   const { data, error, loading, reload } = useApi<any>('/api/dashboard');
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const mine = useApi<{ tasks: any[] }>('/api/tasks?view=today&limit=50');
+  // 내 미완료 업무 전체: 이번 주 마감(요일별 표시)·마감 없는 새 업무(48시간)
+  const myOpen = useApi<{ tasks: any[] }>('/api/tasks?view=my&limit=300');
   const today = data?.today ?? seoulDay(new Date());
   const [month, setMonth] = useState(() => seoulDay(new Date()).slice(0, 7));
   const [selected, setSelected] = useState(() => seoulDay(new Date()));
@@ -155,6 +157,10 @@ export default function Dashboard() {
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(data.week.start, i));
   const byDay = new Map<string, any[]>(weekDays.map((d) => [d, []]));
   for (const e of data.events) for (const d of eventDays(e)) byDay.get(d)?.push(e);
+  // 이번 주 마감인 내 업무도 그 요일에 (등록 즉시 보이게)
+  const weekTasks = (myOpen.data?.tasks ?? []).filter((t) => t.due_date && t.due_date >= data.week.start && t.due_date <= data.week.end);
+  const tasksByDay = new Map<string, any[]>(weekDays.map((d) => [d, weekTasks.filter((t) => t.due_date === d)]));
+  const freshNoDue = (myOpen.data?.tasks ?? []).filter((t) => !t.due_date && Date.now() - new Date(t.assigned_at ?? t.created_at).getTime() < 48 * 3600000);
   // 이달의 일정: 선택한 날 목록, 오늘이면 다가오는 일정
   const mEvents = monthEvents.data?.events ?? [];
   const dayList = selected === today
@@ -191,13 +197,20 @@ export default function Dashboard() {
           )}>
           {!todayTasks.length ? <p className="flex items-center justify-center gap-1.5 px-2 py-6 text-center text-sm text-ink-3"><CheckCircle2 className="size-4" />{scope === 'mine' ? '오늘 마감이거나 지난 내 업무가 없습니다' : '오늘 마감이거나 지난 업무가 없습니다'}</p>
             : <ul>{todayTasks.slice(0, 10).map((t) => <TodayRow key={t.id} t={t} onDone={done} />)}</ul>}
-          <div className="border-t border-line px-1 pt-1"><InlineAddTask muted defaultDue={data.today} onCreated={() => { mine.reload(); reload(); }} placeholder="오늘 할 일 추가 — 제목 입력 후 Enter" /></div>
+          {scope === 'mine' && freshNoDue.length > 0 && (
+            <div className="mt-1 border-t border-line pt-1" data-testid="home-fresh">
+              <p className="px-2 pb-0.5 pt-1 text-xs font-semibold text-ink-2">새로 받은 업무 (48시간, 마감 없음)</p>
+              <ul>{freshNoDue.slice(0, 5).map((t) => <TodayRow key={t.id} t={t} onDone={done} />)}</ul>
+            </div>
+          )}
+          <div className="border-t border-line px-1 pt-1"><InlineAddTask muted defaultDue={data.today} onCreated={() => { mine.reload(); myOpen.reload(); reload(); }} placeholder="오늘 할 일 추가 — 제목 입력 후 Enter" /></div>
         </Section>
 
         <Section title="이번 주 일정" count={data.events.length} href="/calendar" icon={CalendarDays} className="lg:col-span-2" testid="home-week">
           <ul className="divide-y divide-line">
             {weekDays.map((d) => {
               const list = (byDay.get(d) ?? []).sort((a, b) => +new Date(a.start) - +new Date(b.start));
+              const dayTasks = tasksByDay.get(d) ?? [];
               const isToday = d === today;
               if (!list.length && !isToday && d < today) return null;
               return (
@@ -205,7 +218,12 @@ export default function Dashboard() {
                   <span className={cx('w-12 shrink-0 px-2 pt-1.5 text-xs font-semibold tabular-nums', isToday ? 'text-accent-600' : dow(d) === 0 ? 'text-red-600' : 'text-ink-2')}>
                     {DOW[dow(d)]} {Number(d.slice(8))}{isToday && <span className="block text-[10px] font-medium">오늘</span>}
                   </span>
-                  {list.length ? <ul className="min-w-0 flex-1">{list.slice(0, 4).map((e) => <EventRow key={e.id + e.start} e={e} />)}{list.length > 4 && <li className="px-2 text-xs text-ink-3">외 {list.length - 4}건</li>}</ul>
+                  {list.length || dayTasks.length ? <ul className="min-w-0 flex-1">{list.slice(0, 4).map((e) => <EventRow key={e.id + e.start} e={e} />)}{list.length > 4 && <li className="px-2 text-xs text-ink-3">외 {list.length - 4}건</li>}
+                    {dayTasks.slice(0, 4).map((t) => (
+                      <li key={t.id} className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1 text-sm hover:bg-slate-50" data-week-task={t.id}>
+                        <CircleCheck className="size-4 shrink-0 text-indigo-500" /><Link href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate hover:underline">마감: {t.title}</Link>
+                      </li>
+                    ))}</ul>
                     : <span className="flex-1 px-2 pt-1.5 text-xs text-ink-3">일정 없음</span>}
                 </li>
               );

@@ -47,6 +47,8 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 @media (max-width: 640px) { .fc .fc-list-event-time { width: 5.5rem; } .fc .fc-list-day-side-text { float: none; display: block; } .fc .fc-toolbar-title { font-size: 1rem; } }
 /* 앱 셸 안전장치: 혹시 남은 넓은 요소가 있어도 문서 전체가 좌우로 밀리지 않게 */
 .app-shell { overflow-x: clip; }
+/* iPhone: 16px 보다 작은 입력칸을 누르면 화면이 확대되어 옆으로 밀려 보임 → 휴대폰에서는 입력칸 글자 16px */
+@media (max-width: 640px) { input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px !important; } }
 /* 앱(Android edge-to-edge·iOS 노치): Capacitor SystemBars 가 --safe-area-inset-* 를 넣어 준다. 없으면 브라우저 env() */
 :root { --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)); }
 
@@ -56,3 +58,6 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
   .print-area, .print-area * { visibility: visible !important; }
   .print-area { position: fixed; left: 50%; top: 20mm; transform: translateX(-50%); border: none !important; width: 150mm; max-width: none; }
 }
+
+/* 시간 칸 = 1시간 (V4-4). 한 시간 높이를 Google 캘린더처럼 넉넉히(48px) 두어 1시간 일정도 제목이 보이고 누르기 쉽게 */
+.fc .fc-timegrid-slot { height: 3rem; }

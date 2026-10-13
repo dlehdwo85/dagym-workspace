@@ -118,7 +118,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const input = useRef<HTMLInputElement>(null);
   // 한글 입력: 조합 중 Enter 는 글자만 확정되고 다시 Enter 가 오지 않는 브라우저(Chrome)가 있어, 조합이 끝나면 대신 저장
   const enterWhileComposing = useRef(false);
-  async function submit(raw?: string) {
+  async function submit(raw?: string, refocus = true) {
     const t = (raw ?? input.current?.value ?? title).trim();
     if (!t || busyRef.current) return;
     busyRef.current = true; setBusy(true); setErr(null);
@@ -132,11 +132,29 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     } catch (e: any) {
       // 저장 실패: 입력값은 그대로 두고 이유를 줄 아래에 표시 (조용히 사라지지 않게)
       setErr(e.message ?? '저장하지 못했습니다');
-    } finally { busyRef.current = false; setBusy(false); input.current?.focus(); }
+    } finally { busyRef.current = false; setBusy(false); if (refocus) input.current?.focus(); }
   }
   const showChips = !!(title || due || assignee !== initAssignee || requester !== initRequester || autoFocus);
+  // 저장 버튼 없이 (WORKIN_AUTOSAVE): Enter·키보드 완료 또는 이 줄을 벗어나면 제목이 있을 때 자동 저장.
+  // 같은 줄의 칩(마감·담당·지시)이나 그 선택 창을 누르는 동안은 저장하지 않고, 고른 뒤 입력칸으로 돌아온다.
+  const formRef = useRef<HTMLFormElement>(null);
+  const onFormBlur = () => setTimeout(() => {
+    const a = document.activeElement as HTMLElement | null;
+    if (a && (formRef.current?.contains(a) || a.closest('[role=dialog]'))) return;
+    if (input.current?.value.trim()) submit(input.current.value, false);
+  }, 150);
+  const back = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setTimeout(() => input.current?.focus(), 0); };
+  // 화면을 떠나거나 앱을 닫을 때도 입력 중인 제목 저장
+  const pendingRef = useRef<() => void>(() => {});
+  pendingRef.current = () => { const v = input.current?.value.trim(); if (v && !busyRef.current) submit(v, false); };
+  useEffect(() => {
+    const h = () => { if (document.visibilityState === 'hidden') pendingRef.current(); };
+    const leave = () => pendingRef.current();
+    document.addEventListener('visibilitychange', h); window.addEventListener('pagehide', leave);
+    return () => { document.removeEventListener('visibilitychange', h); window.removeEventListener('pagehide', leave); pendingRef.current(); };
+  }, []);
   return (
-    <form onSubmit={(e) => { e.preventDefault(); submit(); }} className={cx('border-b border-line last:border-b-0 focus-within:bg-accent-50/40', muted ? 'bg-transparent' : 'bg-white')} data-testid="inline-add">
+    <form ref={formRef} onBlur={onFormBlur} onSubmit={(e) => { e.preventDefault(); submit(); }} className={cx('border-b border-line last:border-b-0 focus-within:bg-accent-50/40', muted ? 'bg-transparent' : 'bg-white')} data-testid="inline-add">
       <div className="flex min-h-[44px] items-center gap-2 px-3 py-1.5 sm:gap-3">
         <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-dashed border-slate-300 text-slate-400"><Plus className="size-3.5" /></span>
         {/* 휴대폰 키보드의 "완료/이동" 은 form 제출로 확실히 저장 (Enter 가 keyCode 229 로 오는 키보드 대비) */}
@@ -150,18 +168,14 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
           className="min-w-0 flex-1 bg-transparent py-1 text-sm placeholder:text-ink-3 focus:outline-none" />
         {showChips && (
           <>
-            <span className="hidden sm:inline-flex" title="지시자(업무를 부여한 사람)"><span className="self-center text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={(v) => setRequester(v ?? user.id)} size={20} withName /></span>
-            <DuePicker value={due} onChange={setDue} label="새 업무 마감일" />
-            <AssigneePicker value={assignee} onChange={setAssignee} />
+            <span className="hidden sm:inline-flex" title="지시자(업무를 부여한 사람)"><span className="self-center text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={back((v: string | null) => setRequester(v ?? user.id))} size={20} withName /></span>
+            <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" />
+            <AssigneePicker value={assignee} onChange={back(setAssignee)} />
           </>
         )}
-        {title.trim() && (
-          <button type="submit" disabled={busy} className="inline-flex h-9 min-w-[44px] shrink-0 items-center justify-center rounded-input bg-brand-600 px-3 text-sm font-semibold text-white disabled:opacity-60" data-testid="inline-save">
-            {busy ? '저장 중' : '저장'}
-          </button>
-        )}
+        {busy && <span className="shrink-0 text-xs text-ink-3" data-testid="inline-saving">저장 중…</span>}
       </div>
-      {err && <p className="px-3 pb-2 pl-12 text-xs font-medium text-red-600" role="alert">{err} — 입력한 내용은 그대로 있습니다. 다시 저장을 눌러 주세요.</p>}
+      {err && <p className="px-3 pb-2 pl-12 text-xs font-medium text-red-600" role="alert">{err} — 입력한 내용은 그대로 있습니다. Enter 를 누르거나 칸을 벗어나면 다시 시도합니다.</p>}
     </form>
   );
 }

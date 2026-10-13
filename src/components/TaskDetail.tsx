@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
@@ -78,6 +78,28 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     if (h) setTimeout(() => document.querySelector(h)?.scrollIntoView({ behavior: 'smooth' }), 100);
   }, [data]);
 
+  // 저장 버튼 없이 자동 기록 (WORKIN_AUTOSAVE): 제목은 칸을 벗어나거나 Enter, 설명은 입력을 멈춘 1초 뒤·칸을 벗어날 때
+  const [descState, setDescState] = useState<'' | 'saving' | 'saved' | 'error'>('');
+  const descTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const descSent = useRef<string | null>(null);
+  async function saveText(field: 'title' | 'description', value: string) {
+    if (field === 'description') setDescState('saving');
+    try {
+      await api(`/api/tasks/${id}`, { method: 'PATCH', body: { [field]: value } }); // 글자 입력은 버전 비교 없이(연속 저장 충돌 방지)
+      if (field === 'description') { descSent.current = value; setDescState('saved'); }
+      reload(); broadcastRefresh();
+    } catch (e: any) { if (field === 'description') setDescState('error'); toast.error(`${field === 'title' ? '제목' : '설명'}을 저장하지 못했습니다: ${e.message}`); }
+  }
+  const flushDesc = (v: string | null) => { if (descTimer.current) { clearTimeout(descTimer.current); descTimer.current = null; } if (v !== null && v !== (descSent.current ?? data?.task?.description)) saveText('description', v); };
+  // 다른 화면으로 가거나 앱을 닫을 때도 입력 중인 설명을 저장
+  const descRef = useRef<string | null>(null); descRef.current = desc;
+  useEffect(() => {
+    const h = () => { if (document.visibilityState === 'hidden') flushDesc(descRef.current); };
+    const leave = () => flushDesc(descRef.current);
+    document.addEventListener('visibilitychange', h); window.addEventListener('pagehide', leave);
+    return () => { document.removeEventListener('visibilitychange', h); window.removeEventListener('pagehide', leave); flushDesc(descRef.current); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const titleCancel = useRef(false);
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (loading && !data) return <div className="p-5"><Skeleton rows={8} /></div>;
   if (!data) return null;
@@ -199,9 +221,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <h1 className={cx('-mx-1.5 rounded-input px-1.5 py-0.5 text-[22px] font-bold leading-snug tracking-tight', perms.edit && 'cursor-text hover:bg-slate-50', t.status === 'done' && 'text-ink-2')}
               onClick={() => perms.edit && setTitle(t.title)} data-testid="task-title">{t.title}</h1>
           ) : (
-            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (title.trim()) patch({ title }); setTitle(null); }}>
-              <input autoFocus className={cx(inputCls, 'text-lg font-bold')} value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setTitle(null)} aria-label="제목" />
-              <Button size="sm">저장</Button>
+            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); (e.currentTarget.elements.namedItem('title') as HTMLInputElement)?.blur(); }}>
+              <input name="title" autoFocus enterKeyHint="done" className={cx(inputCls, 'text-lg font-bold')} value={title} onChange={(e) => setTitle(e.target.value)} aria-label="제목"
+                onKeyDown={(e) => { if (e.key === 'Escape') { titleCancel.current = true; setTitle(null); } }}
+                onBlur={() => { if (!titleCancel.current && title.trim() && title.trim() !== t.title) saveText('title', title.trim()); titleCancel.current = false; setTitle(null); }} />
             </form>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-1.5" data-testid="task-actions">
@@ -346,13 +369,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         <section>
           <h2 className="mb-1.5 text-sm font-semibold">설명</h2>
           {desc === null ? (
-            <div className="-mx-2 min-h-[56px] cursor-text whitespace-pre-wrap rounded-input border border-transparent px-2 py-1.5 text-sm leading-relaxed hover:border-line" onClick={() => setDesc(t.description)}>
+            <div className="-mx-2 min-h-[56px] cursor-text whitespace-pre-wrap rounded-input border border-transparent px-2 py-1.5 text-sm leading-relaxed hover:border-line" onClick={() => { descSent.current = t.description; setDescState(''); setDesc(t.description); }} data-testid="desc-view">
               {t.description || <span className="text-ink-3">업무 내용, 기준, 참고 사항을 적어 주세요</span>}
             </div>
           ) : (
             <div>
-              <textarea autoFocus rows={6} className={inputCls} value={desc} onChange={(e) => setDesc(e.target.value)} aria-label="설명" />
-              <div className="mt-1.5 flex gap-1"><Button size="sm" onClick={() => { patch({ description: desc }); setDesc(null); }}>저장</Button><Button size="sm" variant="ghost" onClick={() => setDesc(null)}>취소</Button></div>
+              <textarea autoFocus rows={6} className={inputCls} value={desc} aria-label="설명"
+                onChange={(e) => { const v = e.target.value; setDesc(v); setDescState(''); if (descTimer.current) clearTimeout(descTimer.current); descTimer.current = setTimeout(() => { descTimer.current = null; saveText('description', v); }, 1000); }}
+                onBlur={() => { flushDesc(desc); setDesc(null); }} />
+              <p className="mt-1 h-4 text-xs text-ink-3" aria-live="polite" data-testid="desc-state">{descState === 'saving' ? '저장 중…' : descState === 'saved' ? '저장됨 ✓' : descState === 'error' ? <span className="text-red-600">저장 안 됨 — 다시 입력하거나 칸을 벗어나면 다시 시도합니다</span> : '입력하면 자동으로 저장됩니다'}</p>
             </div>
           )}
         </section>

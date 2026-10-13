@@ -1,7 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["icn1"],
-    "buildCommand": "node scripts/migrate.mjs && next build",
+  "buildCommand": "node scripts/migrate.mjs && next build",
+  "ignoreCommand": "bash scripts/vercel-ignore.sh",
   "crons": [{ "path": "/api/cron/tick", "schedule": "0 0 * * *" }],
   "git": {
     "deploymentEnabled": {

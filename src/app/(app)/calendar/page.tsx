@@ -140,7 +140,8 @@ export default function CalendarPage() {
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로
     ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t)).map((t) => ({
-      id: `task|${t.id}`, title: t.title,
+      // Google Tasks 처럼 마감을 표시: "마감: 업무명 (담당자)" — 다른 사람 업무면 담당자 이름
+      id: `task|${t.id}`, title: `마감: ${t.title}${t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? ` (${t.assignee_name})` : ''}`,
       start: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : t.due_date, end: t.due_time ? new Date(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() + 30 * 60000).toISOString() : undefined,
       allDay: !t.due_time, backgroundColor: '#ffffff', borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#fca5a5' : '#c7d2fe',
       textColor: t.status === 'done' ? '#9ca3af' : '#1e3a8a', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t }, durationEditable: false,
@@ -246,7 +247,7 @@ export default function CalendarPage() {
               <li>
                 <label className="flex cursor-pointer items-center gap-2 rounded-input px-1.5 py-1 text-sm hover:bg-slate-100">
                   <input type="checkbox" className="size-4 rounded accent-indigo-600" checked={showTasks} onChange={() => setShowTasks(!showTasks)} aria-label="업무 캘린더 표시" />
-                  <span className="flex items-center gap-1"><CircleCheck className="size-3.5 text-indigo-600" />업무</span>
+                  <span className="flex items-center gap-1"><CircleCheck className="size-3.5 text-indigo-600" />업무 마감</span>
                 </label>
               </li>
             </ul>
@@ -269,7 +270,7 @@ export default function CalendarPage() {
                 <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : c.color }} />{c.type === 'personal' ? '내 일정' : c.name}
               </button>
             ))}
-            <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-indigo-300 text-indigo-700' : 'border-line text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무</button>
+            <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-indigo-300 text-indigo-700' : 'border-line text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무 마감</button>
           </div>
           <FullCalendar
             ref={calRef}
@@ -281,6 +282,7 @@ export default function CalendarPage() {
             footerToolbar={mobile ? { center: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' } : undefined}
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
             allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime="06:00:00" scrollTime="08:00:00"
+            slotDuration="01:00:00" snapDuration="01:00:00"
             editable selectable selectMirror droppable longPressDelay={350}
             events={fcEvents}
             datesSet={(a: DatesSetArg) => setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type })}
@@ -425,6 +427,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
   const [start, setStart] = useState(start0);
   const [end, setEnd] = useState(end0);
   const [priv, setPriv] = useState(false);
+  const quickForm = useRef<HTMLFormElement>(null);
   const { user } = useSession();
   const [tab, setTab] = useState<'event' | 'task'>('event');
   const [title, setTitle] = useState('');
@@ -451,10 +454,12 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
   }
   return (
     <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
-      <form role="dialog" aria-label="빠른 입력" onSubmit={save} className={cx('fixed z-50 animate-fade-up border border-line bg-white p-4 shadow-pop', sheet ? 'inset-x-0 bottom-0 rounded-t-2xl pb-[calc(var(--sab)+16px)]' : 'w-80 rounded-card')} style={sheet ? undefined : { left: x, top: y }} data-testid="quick-create"
+      {/* 저장 버튼 없이: Enter 또는 바깥을 누르면 저장(제목이 없으면 닫기) */}
+      <div className="fixed inset-0 z-40" onClick={() => (title.trim() ? quickForm.current?.requestSubmit() : onClose())} data-testid="quick-outside" />
+      <form ref={quickForm} role="dialog" aria-label="빠른 입력" onSubmit={save} className={cx('fixed z-50 animate-fade-up border border-line bg-white p-4 shadow-pop', sheet ? 'inset-x-0 bottom-0 rounded-t-2xl pb-[calc(var(--sab)+16px)]' : 'w-80 rounded-card')} style={sheet ? undefined : { left: x, top: y }} data-testid="quick-create"
         onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
-        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tab === 'event' ? '제목 추가' : '할 일 제목'} aria-label="빠른 입력 제목"
+        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tab === 'event' ? '제목 추가' : '할 일 제목'} aria-label="빠른 입력 제목" enterKeyHint="done"
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); quickForm.current?.requestSubmit(); } }}
           className="w-full border-b-2 border-line pb-1.5 text-lg font-medium placeholder:text-ink-3 focus:border-accent-500 focus:outline-none" />
         <div className="mt-3 flex gap-1" role="tablist">
           {([['event', '일정'], ['task', '업무']] as const).map(([k, l]) => (
@@ -477,7 +482,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
         {tab === 'event' && <label className="mt-2 flex items-center gap-2 text-sm text-ink-2"><input type="checkbox" className="size-4" checked={priv} onChange={(e) => setPriv(e.target.checked)} />비공개 (다른 사람에게는 &ldquo;바쁨&rdquo;으로만)</label>}
         <div className="mt-4 flex items-center justify-between">
           {tab === 'event' ? <button type="button" className="text-sm font-medium text-ink-2 hover:text-ink" onClick={() => onMore({ date, allDay, start: start ?? '09:00', end: end ?? '10:00', endDate: endDate ?? date, title, calendarId, isPrivate: priv })}>옵션 더보기</button> : <span />}
-          <Button type="submit" disabled={busy || !title.trim()}>저장</Button>
+          <span className="text-xs text-ink-3">{busy ? '저장 중…' : 'Enter 또는 바깥을 누르면 저장'}</span>
         </div>
       </form>
     </>
@@ -522,6 +527,27 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     api(`/api/events/conflicts?start=${encodeURIComponent(t.start)}&end=${encodeURIComponent(t.end)}&userIds=${f.attendeeIds.join(',')}${ex}`).then((r) => setConf(r.conflicts)).catch(() => {});
   }, [f?.date, f?.start, f?.end, f?.endDate, f?.allDay, f?.attendeeIds?.join()]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 처음 불러온 값(변경 여부 비교용)과 자동 저장 상태
+  const baseRef = useRef<string | null>(null);
+  const [autoState, setAutoState] = useState<'' | 'saving' | 'saved' | 'error'>('');
+  useEffect(() => { if (f && baseRef.current === null) baseRef.current = JSON.stringify(f); }, [f]);
+  useEffect(() => {
+    if (!id || !f || !baseRef.current || !existing.data?.perms.edit) return;
+    const ev = existing.data.event;
+    if (ev.rrule || ev.recurring_event_id) return; // 반복 일정은 "이 일정만/이후 모두" 를 물어야 하므로 닫을 때 저장
+    const cur = JSON.stringify(f);
+    if (cur === baseRef.current || !f.title?.trim()) return;
+    const h = setTimeout(async () => {
+      const t = times();
+      if (t.end < t.start) return;
+      setAutoState('saving');
+      try {
+        await api(`/api/events/${id}`, { method: 'PATCH', body: { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, isPrivate: !!f.isPrivate, scope: 'all' } });
+        baseRef.current = cur; setAutoState('saved'); onSaved();
+      } catch (er: any) { setAutoState('error'); toast.error(`자동 저장 실패: ${er.message}`); }
+    }, 1000);
+    return () => clearTimeout(h);
+  }, [f]); // eslint-disable-line react-hooks/exhaustive-deps
   if (id && existing.error) return <Modal open onClose={onClose} title="일정"><ErrorBox error={existing.error} /></Modal>;
   if (!f) return null;
   const d = existing.data;
@@ -529,8 +555,8 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
   const isRecurring = !!(d?.event?.rrule || d?.event?.recurring_event_id);
   const myAtt = d?.attendees?.find((a: any) => a.user_id === user.id);
 
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
+  async function save(e?: React.FormEvent) {
+    e?.preventDefault();
     const t = times();
     if (t.end < t.start) return toast.error('종료가 시작보다 빠릅니다');
     setBusy(true);
@@ -562,9 +588,12 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     try { await api(`/api/events/${id}/respond`, { body: { response: r } }); existing.reload(); toast.ok('응답했습니다'); } catch (er: any) { toast.error(er.message); }
   }
   const set = (k: string) => (v: any) => setF((x: any) => ({ ...x, [k]: v }));
+  // 저장 버튼 없이 (WORKIN_AUTOSAVE): 기존(반복 아닌) 일정은 칸을 바꾸면 1초 뒤 바로 저장, 새 일정·반복 일정은 창을 닫을 때 저장
+  const dirty = !!baseRef.current && JSON.stringify(f) !== baseRef.current;
+  const closeAndSave = () => { if (canEdit && dirty && f.title?.trim()) save(); else onClose(); };
 
   return (
-    <Modal open onClose={onClose} title={id ? (canEdit ? '일정 수정' : '일정') : '일정 등록'} wide>
+    <Modal open onClose={closeAndSave} title={id ? (canEdit ? '일정 수정' : '일정') : '일정 등록'} wide>
       <form onSubmit={save} className="space-y-3">
         <fieldset disabled={!canEdit} className="space-y-3">
           <Field label="제목"><input className={inputCls} value={f.title} onChange={(e) => set('title')(e.target.value)} required autoFocus={!id} /></Field>
@@ -624,8 +653,8 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
         <div className="flex justify-between gap-2 pt-2">
           <div>{id && canEdit && <Button type="button" variant="danger" onClick={remove}>삭제</Button>}</div>
           <div className="flex gap-2">
-            <Button type="button" variant="secondary" onClick={onClose}>닫기</Button>
-            {canEdit && <Button type="submit" disabled={busy}>{busy ? '저장 중…' : '저장'}</Button>}
+            {canEdit && <span className="self-center text-xs text-ink-3" aria-live="polite" data-testid="editor-autosave">{busy || autoState === 'saving' ? '저장 중…' : autoState === 'saved' ? '저장됨 ✓' : autoState === 'error' ? '저장 안 됨' : id ? '바꾸면 자동 저장' : '닫으면 자동 저장'}</span>}
+            <Button type="button" variant={canEdit && dirty ? 'primary' : 'secondary'} onClick={closeAndSave} data-testid="editor-close">{canEdit && dirty ? '완료' : '닫기'}</Button>
           </div>
         </div>
       </form>

@@ -206,3 +206,12 @@ S-P2(ICS 구독·회의실 예약·휴가 결재·내보내기/휴지통/2단계
 - ✅ 휴대폰에서 행을 0.4초 꾹 누르면 들어 올려 위아래로 순서 변경(진동 가능 시), PC 는 손잡이, ⇅ 메뉴는 보조로 유지.
 - 운영 DB 확인(오늘 done/on_hold 로 바뀐 업무·변경자)은 클라우드에 접속 정보가 없어 못 함 — 로컬에서 `select a.created_at, u.name, t.title, a.changes from activities a join users u on u.id=a.actor_id join tasks t on t.id=a.entity_id where a.entity_type='task' and a.changes ? 'status' and a.created_at::date = current_date order by 1` 로 확인 부탁.
 - 시험: E2E 밀기 단계 교체(기본 꺼짐·30px·세로 무시·45% 완료·되돌리기), 47/47.
+
+### 2026-10-13 · WORKIN_V4_CALENDAR 4-1~4-4 나머지 + WORKIN_AUTOSAVE + R-14
+- ✅ 4-1 캘린더 주/일 보기 시간 칸 = **1시간**(slotDuration·snapDuration 01:00), 한 시간 높이 48px. 탭/클릭 = 정각 1시간, 끌기도 1시간 단위. 세밀한 시각은 등록 창 15분 목록. ⛔ 설정 "기본 일정 길이" 는 아직 없음(1시간 고정).
+- ✅ 4-2 업무 마감 = 종일 칸 "마감: 업무명", 칩 이름 "업무 마감"(켜고 끔·사람 필터 연동은 기존 업무 표시 스위치 그대로).
+- ✅ 4-3 홈: "오늘 할 일" 아래 **새로 받은 업무(48시간·마감 없음)**, "이번 주" 각 요일에 그날 마감인 내 업무, 등록 즉시 갱신.
+- ✅ 4-4 휴대폰 입력칸 글자 16px(iPhone 확대로 화면이 옆으로 밀리는 현상 방지), 폭 검사 E2E(W-0) 통과.
+- ✅ AUTOSAVE: 저장 버튼 제거 — 한 줄 추가(Enter·칸 벗어남·화면 이동·앱 닫기, 칩 고르는 동안은 저장 안 함), 업무 상세 제목·설명(설명은 1초 멈춤·칸 벗어남·화면 이동), 섹션 이름, 캘린더 빠른 등록(Enter·바깥 누름), 일정 수정 창(기존 일정은 바뀐 값 자동 저장, 아래 "완료/닫기"). 쓰기 요청은 keepalive 로 화면을 떠나도 끊기지 않음. 관리자 화면은 그대로(저장 버튼 유지).
+- ✅ R-14: `vercel.json` ignoreCommand → `scripts/vercel-ignore.sh`. 마지막 배포 커밋(VERCEL_GIT_PREVIOUS_SHA) 이후 `docs/`·`*.md` 만 바뀌었으면 빌드 건너뜀, 기준 커밋을 못 찾으면 빌드. 이번 푸시부터 적용(이번 푸시는 코드 변경이라 빌드됨). 클라우드는 앞으로 문서만 고칠 때도 코드 수정과 모아서 올립니다.
+- 시험: API 91/91, E2E 48/48 (+AUTOSAVE 단계: 칩 선택 중 미저장 → 바깥 클릭 저장·마감일 함께 저장, 설명 입력 후 이동해도 저장).

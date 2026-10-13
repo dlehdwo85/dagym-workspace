@@ -24,7 +24,10 @@ async function raw(url: string, method: string, body?: unknown, key?: string) {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (key) headers['idempotency-key'] = key;
-  const res = await fetch(url, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+  const data = body !== undefined ? JSON.stringify(body) : undefined;
+  // 쓰기 요청은 keepalive: 입력 직후 화면을 떠나거나 앱을 닫아도 자동 저장 요청이 끊기지 않게 (브라우저 한도 64KB 미만만)
+  const keepalive = method !== 'GET' && (data?.length ?? 0) < 60000;
+  const res = await fetch(url, { method, headers, body: data, credentials: 'same-origin', keepalive });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401 && typeof window !== 'undefined' && !location.pathname.startsWith('/login')) {
