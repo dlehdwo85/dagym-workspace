@@ -81,3 +81,5 @@
 - 대표 "운영배포 승인" → Vercel API 배포 402 `api-deployments-free-per-day`. 계정 24시간 보이는 배포 63건(dagym-workspace 28) — 한도는 숨은 시도까지 세는 듯. 운영은 05cd155 (978a9fc 캘린더 4차·1f2d348 사라짐 방지 미반영).
 - **클라우드 요청 R-14**: `vercel.json` 에 `"ignoreCommand"` 로 docs/·*.md 만 바뀐 커밋은 빌드 건너뛰기(로컬 기록 푸시가 운영 빌드를 소모 중). 예: `git diff --quiet HEAD^ HEAD -- . ':(exclude)docs' ':(exclude)*.md' ':(exclude)NEXT_ACTION.md'`.
 - 로컬은 한도가 풀리면 다시 배포 시도.
+
+- 18:40 한도 풀림 → Vercel API 운영 배포 1e76f26 READY (b2b7345 포함: 캘린더 4차·1시간 칸·마감 표시·자동 저장·사라짐 방지·꾹 눌러 순서·홈 새 업무). health migration 017, scheduler healthy.
