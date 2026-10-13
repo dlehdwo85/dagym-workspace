@@ -27,10 +27,10 @@ async function busyOf(userId: string, from: Date, to: Date, sql: Sql) {
   const away = new Set<string>();
   for (const e of evs) {
     const mine = e.attendees.some((a: any) => a.user_id === userId && a.response !== 'declined') || e.calendarType === 'personal'
-      || ((e.kind === 'vacation' || e.kind === 'business_trip' || e.kind === 'task_block') && e.createdBy === userId);
+      || ((e.kind === 'vacation' || e.kind === 'half_day' || e.kind === 'outside' || e.kind === 'business_trip' || e.kind === 'task_block') && e.createdBy === userId);
     if (!mine) continue;
     const s = new Date(e.start).getTime(), en = new Date(e.end).getTime();
-    if (e.kind === 'vacation' || e.kind === 'business_trip') {
+    if (e.kind === 'vacation' || e.kind === 'business_trip') { // 반차·외근은 하루 부재가 아니라 그 시간만 바쁨
       for (let d = DateTime.fromMillis(s).setZone(TZ).startOf('day'); d.toMillis() < en; d = d.plus({ days: 1 })) away.add(d.toISODate()!);
       continue;
     }

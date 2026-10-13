@@ -15,7 +15,9 @@ export const HIDDEN_BRANDS = ['bodylab'];
 export const SERVICE_NAME = '워크인';
 export const SERVICE_SUB = '다짐 · 하이링크';
 export const UNIT_TYPE_LABEL = { hq: '본사', department: '부서', branch: '지점', site: '위탁운영 현장' } as const;
-export const EVENT_KIND_LABEL = { normal: '일정', vacation: '휴가', business_trip: '출장', task_block: '업무 시간' } as const;
+export const EVENT_KIND_LABEL = { normal: '일정', vacation: '연차', half_day: '반차', outside: '외근', business_trip: '출장', task_block: '업무 시간' } as const;
+/** V8 6번: 부재(본사 모두에게 보임, 업무 배정 경고) */
+export const ABSENCE_KINDS = ['vacation', 'half_day', 'outside', 'business_trip'] as const;
 
 export interface SessionUser {
   id: string;
@@ -43,5 +45,6 @@ export const NOTIFICATION_TYPES = {
   event_reminder: '일정 시작 전',
   weekly_report: '주간 보고',
   task_done_for_requester: '지시한 업무 상태 변경(시작·보류·검토 요청·완료)',
+  briefing: '아침 브리핑(오늘 할 일·일정)',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

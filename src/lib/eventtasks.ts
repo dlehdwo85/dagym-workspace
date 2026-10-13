@@ -132,6 +132,18 @@ export async function saveNotes(u: SessionUser, eventId: string, i: z.infer<type
   const occ = c.event.rrule && i.occurrenceStart ? new Date(i.occurrenceStart).toISOString() : '';
   await sql`insert into event_notes (event_id, occ, body, updated_by) values (${c.event.id}, ${occ}, ${i.body}, ${u.id})
     on conflict (event_id, occ) do update set body = excluded.body, updated_by = excluded.updated_by, updated_at = now()`;
+  // V8 7번: 회의 메모의 "@이름" → 이 일정을 볼 수 있는 사람(참석자·주인·만든 사람)에게 알림, 같은 메모 안 같은 사람은 한 번
+  const names = [...new Set([...i.body.matchAll(/@([가-힣A-Za-z]{2,20})/g)].map((m) => m[1]))];
+  if (names.length) {
+    const cands = await sql<{ id: string; name: string }[]>`select u.id, u.name from users u where u.status = 'active' and (
+      u.id in (select user_id from event_attendees where event_id = ${c.masterId}) or u.id = ${c.event.created_by}
+      or u.id = (select owner_user_id from calendars where id = ${c.event.calendar_id}))`;
+    const hit = cands.filter((x) => names.some((n) => n === x.name || n.startsWith(x.name)));
+    if (hit.length) {
+      await notify(sql, { userIds: hit.map((x) => x.id), type: 'mention', title: `${u.name}님이 회의 메모에서 회원님을 언급했습니다`, body: c.event.title,
+        link: `/calendar?event=${c.masterId}`, entityType: 'event', entityId: c.masterId, actorId: u.id, dedupeKey: `evmention:${c.masterId}:${occ}:${hit.map((x) => x.id).sort().join(',')}:${i.body.length}` });
+    }
+  }
   return { ok: true };
 }
 

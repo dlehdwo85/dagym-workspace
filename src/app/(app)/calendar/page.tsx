@@ -18,7 +18,7 @@ import { TaskDetail } from '@/components/TaskDetail';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
-import { EVENT_KIND_LABEL } from '@/lib/types';
+import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
 import { CalColorsDialog, isPersonalEvent, isPersonalTask, useCalColors } from '@/components/calColors';
 
 type Scope = 'this' | 'following' | 'all';
@@ -153,7 +153,7 @@ export default function CalendarPage() {
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e)).map((e) => ({
-      id: `${e.id}|${e.originalStart ?? ''}`, title: `${e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? `${initials(e.ownerName ?? '')} · ` : ''}${e.kind === 'vacation' || e.kind === 'business_trip' ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}`,
+      id: `${e.id}|${e.originalStart ?? ''}`, title: `${e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? `${initials(e.ownerName ?? '')} · ` : ''}${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}`,
       classNames: e.kind === 'task_block' ? ['task-block'] : [],
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
       // V7 4번: 색은 개인/회사 두 가지만(사람 구분은 제목 앞 머리글자)
@@ -680,7 +680,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
               </select>
             </Field>
             <Field label="종류">
-              <select className={inputCls} value={f.kind} onChange={(e) => { set('kind')(e.target.value); if (e.target.value === 'vacation') set('allDay')(true); }}>
+              <select className={inputCls} value={f.kind} onChange={(e) => { set('kind')(e.target.value); if (e.target.value === 'vacation' || e.target.value === 'business_trip') set('allDay')(true); }}>
                 {Object.entries(EVENT_KIND_LABEL).filter(([k]) => k !== 'task_block' || f.kind === 'task_block').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </Field>

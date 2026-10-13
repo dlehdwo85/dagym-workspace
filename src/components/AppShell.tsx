@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
+  Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, FileText, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
   ListTodo, LogOut, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
 } from 'lucide-react';
@@ -23,6 +23,7 @@ const NAV: NavItem[] = [
   { href: '/projects', label: '프로젝트', icon: FolderKanban },
   { href: '/calendar', label: '캘린더', icon: CalendarDays },
   { href: '/notifications', label: '알림', icon: Bell },
+  { href: '/reports/mine', label: '내 주간 보고', icon: FileText },
 ];
 const MOBILE_TABS: NavItem[] = [NAV[0], NAV[1], NAV[3], NAV[4]];
 /** 사이드바 "관리" 묶음 (대표·본사 관리자) */

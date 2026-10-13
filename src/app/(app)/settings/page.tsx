@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { Button, ErrorBox, Field, Loading, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { Button, ErrorBox, cx, Field, Loading, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { enableNativePush, isNativeApp, subscribeWebPush } from '@/components/native';
 import { ROLE_LABEL } from '@/lib/types';
 
@@ -57,6 +57,14 @@ export default function Settings() {
             </select>
           </Field>
           <Field label="마감 임박 알림 (시간 전)"><input type="number" min={1} max={168} className={inputCls} value={s.dueSoonHours} onChange={(e) => setS({ ...s, dueSoonHours: Number(e.target.value) })} /></Field>
+          {/* V8 1번 아침 브리핑 */}
+          <Field label="아침 브리핑 (오늘 할 일·일정 요약 알림)">
+            <span className="flex flex-wrap items-center gap-2" data-testid="briefing-settings">
+              <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.briefingEnabled ?? true} onChange={(e) => setS({ ...s, briefingEnabled: e.target.checked })} aria-label="아침 브리핑 받기" />받기</label>
+              <input type="time" step={900} className={cx(inputCls, '!w-32')} value={s.briefingTime ?? '08:30'} onChange={(e) => setS({ ...s, briefingTime: e.target.value })} aria-label="브리핑 시각" />
+              <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={!!s.briefingWeekend} onChange={(e) => setS({ ...s, briefingWeekend: e.target.checked })} />주말·공휴일에도</label>
+            </span>
+          </Field>
           <Field label="푸시 받지 않는 시간 시작"><input type="time" className={inputCls} value={s.quietStart ?? ''} onChange={(e) => setS({ ...s, quietStart: e.target.value || null })} /></Field>
           <Field label="끝"><input type="time" className={inputCls} value={s.quietEnd ?? ''} onChange={(e) => setS({ ...s, quietEnd: e.target.value || null })} /></Field>
         </div>

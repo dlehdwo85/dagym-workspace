@@ -1433,3 +1433,51 @@ describe('WORKIN_V7 캘린더 색 (개인/회사 두 가지)', () => {
     assert.equal((await ctx.staffA.client.ok('GET', '/api/calendar-colors')).colors.personal, '#d50000', '바꾼 사람은 자기 색 유지');
   });
 });
+
+describe('WORKIN_V8 아침 브리핑 · 주간 보고 초안 · 부재 종류 · 멘션', () => {
+  test('아침 브리핑: 설정 시각 이후 하루 1번, 할 일·일정 요약, 끄면 안 옴', async () => {
+    const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date()));
+    const p = await ctx.staffA.client.ok('GET', '/api/notifications/prefs');
+    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...p.settings, briefingTime: '00:00', briefingWeekend: true, briefingEnabled: true } });
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/notifications/prefs')).settings.briefingTime, '00:00');
+    await ctx.managerA.client.ok('POST', '/api/tasks', { title: '브리핑용 오늘 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today, approvalRequired: false });
+    await tick(); await tick();
+    const n = await sql`select title, body from notifications where user_id = ${ctx.staffA.id} and type = 'briefing'`;
+    if (hour < 22) {
+      assert.equal(n.length, 1, '하루 한 번');
+      assert.match(n[0].body, /오늘 할 일 \d+건/);
+    }
+    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...p.settings, briefingEnabled: false } });
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/notifications/prefs')).settings.briefingEnabled, false);
+  });
+  test('개인 주간 보고: 초안 만들기(완료·진행·다음 주·일정) → 고쳐서 제출 → 대표 화면에 모두의 보고, 직원은 모두 보기 403', async () => {
+    const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '보고용 완료 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today, approvalRequired: false })).id;
+    const v = (await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.version;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done', version: v });
+    const r = await ctx.staffA.client.ok('POST', '/api/reports/mine', {});
+    assert.equal(r.report.status, 'draft');
+    assert.match(r.report.body, /■ 이번 주 완료/); assert.ok(r.report.body.includes('보고용 완료 업무'));
+    const s = await ctx.staffA.client.ok('PUT', '/api/reports/mine', { body: r.report.body + '\n특이사항 없음', submit: true });
+    assert.equal(s.report.status, 'submitted');
+    const team = await ctx.owner.ok('GET', '/api/reports/team');
+    assert.ok(team.reports.some((x) => x.user_id === ctx.staffA.id && x.status === 'submitted'));
+    assert.equal((await ctx.staffA.client.req('GET', '/api/reports/team')).status, 403);
+  });
+  test('일정 종류 연차·반차·외근, 연차 날은 가용 시간 부재', async () => {
+    const cal = (await ctx.staffA.client.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    const d = addDays(today, 9);
+    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '연차', kind: 'vacation', allDay: true, start: `${d}T00:00:00+09:00`, end: `${addDays(d, 1)}T00:00:00+09:00` });
+    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '오후 반차', kind: 'half_day', start: `${addDays(d, 1)}T13:00:00+09:00`, end: `${addDays(d, 1)}T18:00:00+09:00` });
+    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '거래처 외근', kind: 'outside', start: `${addDays(d, 2)}T10:00:00+09:00`, end: `${addDays(d, 2)}T12:00:00+09:00` });
+    const av = await ctx.managerA.client.ok('GET', `/api/availability?userId=${ctx.staffA.id}&date=${d}`);
+    assert.equal(av.days[0].away, true, '연차 날은 부재 → 배정 경고');
+  });
+  test('회의 메모 @이름 → 참석자에게 멘션 알림, 댓글 멘션 문구', async () => {
+    const cal = (await ctx.managerA.client.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    const d = addDays(today, 3);
+    const ev = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: 'V8 멘션 회의', start: `${d}T10:00:00+09:00`, end: `${d}T11:00:00+09:00`, attendeeIds: [ctx.staffA.id] })).id;
+    await ctx.managerA.client.ok('PUT', `/api/events/${ev}/notes`, { body: '- 장비 견적 @이직원 확인 부탁' });
+    const n = await sql`select title, link from notifications where user_id = ${ctx.staffA.id} and type = 'mention' and entity_id = ${ev}`;
+    assert.equal(n.length, 1); assert.match(n[0].title, /회의 메모에서 회원님을 언급/);
+  });
+});

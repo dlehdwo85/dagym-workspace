@@ -107,6 +107,14 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
 }
 
 /** V5 반복 칩: 안 함·매일·평일·매주·매월… (반복은 마감일 기준 — 마감이 없으면 오늘을 마감으로) */
+/** V8 6번: 담당자가 그날 연차·출장·공휴일이면 알려 준다(배정은 그대로) */
+export function warnAway(userId: string, date: string, name: string) {
+  api(`/api/availability?userId=${userId}&date=${date}`).then((r: any) => {
+    const d = r?.days?.[0];
+    if (d?.away || d?.holiday) toast.info(`${name}님은 ${date.slice(5).replace('-', '/')}에 ${d.holiday ? `공휴일(${d.holiday})` : '연차·출장(부재)'}입니다 — 마감일을 확인하세요`);
+  }).catch(() => {});
+}
+
 export function RepeatChip({ value, anchorDate, onChange }: { value: string | null; anchorDate: string | null; onChange: (v: string | null) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
@@ -168,6 +176,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
       const who = assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
       toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? ' — 담당자에게 알림을 보냈습니다' : assignee ? ' — 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       broadcastRefresh(); onCreated?.(r.id);
+      if (assignee && assignee !== user.id && due) warnAway(assignee, due, dir.users.find((u) => u.id === assignee)?.name ?? '담당자');
     } catch (e: any) {
       // 저장 실패: 입력값을 되살리고 이유를 줄 아래에 표시 (조용히 사라지지 않게)
       setTitle((cur) => cur || t); setRrule(keepRrule);

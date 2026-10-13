@@ -624,7 +624,7 @@ export async function addComment(u: SessionUser, taskId: string, text: string) {
       if (p.view) visibleMentions.push(m);
     }
     if (visibleMentions.length) {
-      await notify(tx, { userIds: visibleMentions, type: 'mention', title: `${u.name}님이 언급했습니다: ${t.title}`, body: preview,
+      await notify(tx, { userIds: visibleMentions, type: 'mention', title: `${u.name}님이 댓글에서 회원님을 언급했습니다`, body: `${t.title} — ${preview}`,
         link: `/tasks/${taskId}#c-${c.id}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `mention:${c.id}` });
     }
     const followers = [task.assignee_id, task.created_by, ...(await collabIds(tx, taskId))].filter((x) => x && !visibleMentions.includes(x));

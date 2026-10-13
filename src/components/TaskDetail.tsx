@@ -14,7 +14,7 @@ import {
 import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
-import { DuePicker } from '@/components/TaskQuick';
+import { DuePicker, warnAway } from '@/components/TaskQuick';
 import { TIMES, timeLabel } from '@/components/DateTimePickers';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { PRIORITY_LABEL, STATUS_LABEL, STATUSES, type TaskStatus } from '@/lib/types';
@@ -102,6 +102,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     return () => { document.removeEventListener('visibilitychange', h); window.removeEventListener('pagehide', leave); flushDesc(descRef.current); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const titleCancel = useRef(false);
+  // V8 7번: 멘션 알림을 누르면 그 댓글로 (#c-…)
+  useEffect(() => {
+    if (!data || typeof window === 'undefined' || !location.hash.startsWith('#c-')) return;
+    const el = document.getElementById(location.hash.slice(1));
+    if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('ring-2', 'ring-amber-300', 'rounded'); setTimeout(() => el.classList.remove('ring-2', 'ring-amber-300'), 2500); }
+  }, [!!data]); // eslint-disable-line react-hooks/exhaustive-deps
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (loading && !data) return <div className="p-5"><Skeleton rows={8} /></div>;
   if (!data) return null;
@@ -304,7 +310,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         {/* 속성 */}
         <section className="grid grid-cols-1 border-y border-line" aria-label="업무 속성">
           <Prop icon={UserRound} label="담당자">
-            <span className="flex pl-2 items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} /><UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => patch({ assigneeId: v })} /></span>
+            <span className="flex pl-2 items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} /><UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => { patch({ assigneeId: v }); if (v && v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }} /></span>
           </Prop>
           <Prop icon={Megaphone} label="지시자">
             <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
@@ -517,8 +523,24 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             ))}
             <li className="pt-1 text-ink-3">작성: {t.created_by_name} · {fmtDateTime(t.created_at)}</li>
           </ul>
-          <form onSubmit={sendComment} className="mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20">
-            <textarea className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={2} placeholder="댓글 입력 (사람을 언급하려면 아래 @ 멘션)" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
+          <form onSubmit={sendComment} className="relative mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20">
+            {/* V8 7번: "@" 를 치면 이 업무를 볼 수 있는 사람 자동완성 */}
+            {(() => {
+              const m = /(^|\s)@([^\s@]*)$/.exec(comment);
+              if (!m) return null;
+              const list = (mentionable.data?.users ?? []).filter((u) => u.id !== user.id && u.name.includes(m[2])).slice(0, 6);
+              if (!list.length) return null;
+              return (
+                <ul role="listbox" aria-label="멘션 자동완성" className="absolute bottom-full left-2 z-20 mb-1 w-56 overflow-hidden rounded-card border border-line bg-white shadow-pop" data-testid="mention-suggest">
+                  {list.map((u) => (
+                    <li key={u.id}><button type="button" role="option" aria-selected={false} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                      onClick={() => { setComment((c) => c.replace(/@[^\s@]*$/, `@${u.name} `)); setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }])); }}>
+                      <Avatar id={u.id} name={u.name} size={20} />{u.name}{u.title && <span className="text-xs text-ink-3">{u.title}</span>}</button></li>
+                  ))}
+                </ul>
+              );
+            })()}
+            <textarea className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={2} placeholder="댓글 입력 — @ 를 치면 사람을 언급할 수 있어요" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} aria-label="댓글" />
             <div className="flex items-center gap-2 border-t border-line px-2 py-1.5">
               <select className="h-7 rounded-md border border-line bg-white px-1.5 text-xs" value="" onChange={(e) => {

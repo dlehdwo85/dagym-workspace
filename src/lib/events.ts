@@ -13,7 +13,7 @@ export const eventInput = z.object({
   title: z.string().trim().min(1, '제목을 입력하세요').max(200),
   description: z.string().max(20000).optional(),
   location: z.string().max(300).optional(),
-  kind: z.enum(['normal', 'vacation', 'business_trip', 'task_block']).optional(),
+  kind: z.enum(['normal', 'vacation', 'half_day', 'outside', 'business_trip', 'task_block']).optional(),
   allDay: z.boolean().optional(),
   start: z.string().datetime({ offset: true }),
   end: z.string().datetime({ offset: true }),

@@ -7,6 +7,7 @@ import { useSession } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
 import { InlineAddTask } from '@/components/TaskQuick';
 import { useCalColors } from '@/components/calColors';
+import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
 import { useRowOpen } from '@/components/rowOpen';
 import { useRouter } from 'next/navigation';
 
@@ -149,6 +150,7 @@ export default function Dashboard() {
   const monthEvents = useApi<{ events: any[] }>(`/api/events?from=${encodeURIComponent(monthRange.from)}&to=${encodeURIComponent(monthRange.to)}`, [monthRange.from]);
   // V7: "이번 주 일정" = 오늘부터 7일
   const d0 = seoulDay(new Date());
+  const hol = useApi<{ holidays: { date: string; name: string }[] }>('/api/holidays');
   const week7 = useApi<{ events: any[] }>(`/api/events?from=${encodeURIComponent(`${d0}T00:00:00+09:00`)}&to=${encodeURIComponent(`${addDays(d0, 7)}T00:00:00+09:00`)}`, [d0]);
 
   if (error) return <ErrorBox error={error} retry={reload} />;
@@ -196,12 +198,13 @@ export default function Dashboard() {
     const linked = new Set(evs.map((e) => e.linkedTask?.id).filter(Boolean));
     const items: WeekItem[] = [
       ...evs.map((e) => ({ key: `e${e.id}${e.start}`, time: e.allDay || seoulDay(e.start) !== d ? '' : fmtHM(e.start), title: cleanTitle(e.title), personal: e.calendarType === 'personal',
-        tag: e.linkedTask ? '일정·업무' : '일정', href: `/calendar?date=${d}&event=${e.id}`, task: e.linkedTask ? { id: e.linkedTask.id, status: e.linkedTask.status } : null })),
+        tag: e.linkedTask ? '일정·업무' : (ABSENCE_KINDS as readonly string[]).includes(e.kind) ? EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL] : '일정', href: `/calendar?date=${d}&event=${e.id}`, task: e.linkedTask ? { id: e.linkedTask.id, status: e.linkedTask.status } : null })),
       ...(tasksByDay.get(d) ?? []).filter((t) => !linked.has(t.id)).map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id,
         tag: '업무', href: `/tasks/${t.id}`, task: t })),
     ];
     return [d, items.sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'))] as [string, WeekItem[]];
   }));
+  const holName = (d: string) => hol.data?.holidays.find((h) => h.date === d)?.name ?? null;
   const weekCount = [...weekRows.values()].reduce((n, x) => n + x.length, 0);
   const freshNoDue = (myOpen.data?.tasks ?? []).filter((t) => !t.due_date && Date.now() - new Date(t.assigned_at ?? t.created_at).getTime() < 48 * 3600000);
   // 이달의 일정: 선택한 날 목록, 오늘이면 다가오는 일정
@@ -253,8 +256,9 @@ export default function Dashboard() {
                 // 날짜 줄의 빈 곳을 누르면 그 날짜로 일정 빠른 등록 (홈에 따로 만들기 버튼 없이 — V6 1번)
                 <li key={d} className={cx('flex min-w-0 cursor-pointer gap-2 py-1.5 hover:bg-slate-50/70', isToday && 'rounded-input bg-accent-50/60')} data-day={d}
                   onClick={(ev) => { if ((ev.target as HTMLElement).closest('a,button')) return; router.push(`/calendar?quick=1&date=${d}`); }}>
-                  <span className={cx('w-12 shrink-0 px-2 pt-1.5 text-xs font-semibold tabular-nums', isToday ? 'text-accent-600' : dow(d) === 0 ? 'text-red-600' : 'text-ink-2')}>
+                  <span className={cx('w-12 shrink-0 px-2 pt-1.5 text-xs font-semibold tabular-nums', isToday ? 'text-accent-600' : dow(d) === 0 || holName(d) ? 'text-red-600' : 'text-ink-2')}>
                     {DOW[dow(d)]} {Number(d.slice(8))}{isToday && <span className="block text-[10px] font-medium">오늘</span>}
+                    {holName(d) && <span className="block truncate text-[10px] font-medium text-red-600" data-holiday={d}>{holName(d)}</span>}
                   </span>
                   {rows.length ? <ul className="min-w-0 flex-1">{rows.map((r) => <WeekRow key={r.key} r={r} colors={calColors} onDone={done} />)}</ul>
                     : <span className="flex-1 px-2 pt-1.5 text-xs text-ink-3">일정 없음 — 눌러서 추가</span>}
