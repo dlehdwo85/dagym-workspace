@@ -25,6 +25,8 @@ export interface SessionUser {
   status: string;
   timezone: string;
   sessionId: string;
+  /** 앱 심사용 체험 계정: 데모 조직 밖은 하나도 보이지 않고 설정·초대·첨부 등은 막힌다 */
+  isDemo?: boolean;
 }
 
 export const NOTIFICATION_TYPES = {

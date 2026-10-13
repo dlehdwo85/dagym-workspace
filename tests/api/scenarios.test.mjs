@@ -1029,3 +1029,91 @@ describe('WORKIN_V2 홈·매출', () => {
     assert.equal((await ctx.staffA.client.req('POST', '/api/revenue/import', { csv: good })).status, 404);
   });
 });
+
+describe('매출 2·3단계 (대표 승인): 표준 CSV · GPT Action 토큰 · AI 분석', () => {
+  test('표준 양식(현장·월·항목·금액·근거파일명): 들어온 항목만 바꾸고 근거 파일명 보관', async () => {
+    await ctx.owner.ok('PUT', '/api/revenue', { orgUnitId: ctx.siteB, month: '2026-05', revenue: 7000000, expense: 5000000, members: 300 });
+    const csv = '현장,월,항목,금액,근거파일명\n하이링크 판교 위탁현장,2026-05,매출,"8,000,000",5월 정산표.xlsx\n하이링크 판교 위탁현장,2026-05,목표,9000000,5월 목표.xlsx\n';
+    const r = await ctx.owner.ok('POST', '/api/revenue/import', { csv, fileName: 'std.csv' });
+    assert.equal(r.count, 1);
+    const [row] = await sql`select revenue::float8 as revenue, expense::float8 as expense, members, target::float8 as target, source_file from revenue_entries where org_unit_id = ${ctx.siteB} and month = '2026-05-01'`;
+    assert.equal(row.revenue, 8000000); assert.equal(row.expense, 5000000, '지출은 그대로'); assert.equal(row.members, 300); assert.equal(row.target, 9000000);
+    assert.equal(row.source_file, '5월 정산표.xlsx, 5월 목표.xlsx');
+    const bad = await ctx.owner.ok('POST', '/api/revenue/import', { csv: '현장,월,항목,금액\n하이링크 판교 위탁현장,2026-05,포인트,1\n' });
+    assert.equal(bad.ok, false); assert.match(bad.errors[0].message, /매출·지출·회원수·목표/);
+  });
+  test('GPT Action 토큰: 본사만 발급, 원문은 한 번만, 입력만 가능, 폐기하면 401', async () => {
+    assert.equal((await ctx.staffA.client.post('/api/revenue/tokens', { name: 'x' })).status, 404);
+    const { id, token } = await ctx.owner.ok('POST', '/api/revenue/tokens', { name: 'GPT 자료 운영체계' });
+    assert.match(token, /^wk_/);
+    const list = await ctx.owner.ok('GET', '/api/revenue/tokens');
+    assert.ok(!JSON.stringify(list).includes(token), '목록에 원문 없음');
+    const [h] = await sql`select token_hash from api_tokens where id = ${id}`;
+    assert.notEqual(h.token_hash, token);
+    const send = (t, b) => fetch(BASE + '/api/public/revenue', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${t}`, origin: BASE }, body: JSON.stringify(b) });
+    const entries = [{ site: '다짐 강남점', month: '2026-06', item: '매출', amount: 61000000, sourceFile: '6월 정산.xlsx' }, { site: '다짐 강남점', month: '2026-06', item: '회원수', amount: 850 }];
+    assert.equal((await send('wk_wrong', { entries })).status, 401);
+    const dry = await (await send(token, { entries: [...entries, { site: '없는 현장', month: '2026-06', item: '매출', amount: 1 }] })).json();
+    assert.equal(dry.ok, false); assert.equal(dry.errors[0].line, 3);
+    assert.equal((await sql`select count(*)::int as n from revenue_entries where month = '2026-06-01'`)[0].n, 0);
+    const ok = await (await send(token, { entries })).json();
+    assert.equal(ok.count, 1);
+    const [row] = await sql`select revenue::float8 as revenue, members, source, source_file from revenue_entries where org_unit_id = ${ctx.siteA} and month = '2026-06-01'`;
+    assert.equal(row.revenue, 61000000); assert.equal(row.members, 850); assert.equal(row.source, 'gpt'); assert.equal(row.source_file, '6월 정산.xlsx');
+    assert.equal((await fetch(BASE + '/api/revenue', { headers: { authorization: `Bearer ${token}`, origin: BASE } })).status, 401, '토큰으로 조회 불가');
+    const spec = await (await fetch(BASE + '/api/public/revenue/openapi.json')).json();
+    assert.equal(spec.paths['/api/public/revenue'].post.operationId, 'submitMonthlyRevenue');
+    await ctx.owner.ok('DELETE', `/api/revenue/tokens/${id}`);
+    assert.equal((await send(token, { entries })).status, 401, '폐기 후 거부');
+  });
+  test('AI 분석: 집계 숫자만 전송(메모·파일명·개인정보 없음), 입력에 없는 현장 제안은 버림, 본사만', async () => {
+    await ctx.owner.ok('PUT', '/api/revenue', { orgUnitId: ctx.siteA, month: '2026-07', revenue: 70000000, expense: 40000000, note: '비밀 메모 김대표 010-1234-5678' });
+    assert.equal((await ctx.staffA.client.post('/api/revenue/ai', { period: '2026-07' })).status, 404);
+    const { report } = await ctx.owner.ok('POST', '/api/revenue/ai', { period: '2026-07' });
+    assert.equal(report.output.anomalies.length, 1, '없는 현장 제안 제거');
+    assert.equal(report.output.anomalies[0].site, '다짐 강남점');
+    const st = await (await fetch(FAKE + '/__state')).json();
+    const sent = st.openai.at(-1);
+    assert.equal(sent.auth, 'Bearer sk-fake-test');
+    const payload = JSON.stringify(sent.body);
+    for (const bad of ['비밀 메모', '010-1234-5678', '정산.xlsx', '@dagym.test', '김대표']) assert.ok(!payload.includes(bad), `보내면 안 되는 값: ${bad}`);
+    assert.ok(payload.includes('70000000'));
+    const again = await ctx.owner.ok('GET', '/api/revenue/ai?period=2026-07');
+    assert.equal(again.report.id, report.id);
+    assert.equal((await ctx.owner.post('/api/revenue/ai', { period: '2020-01' })).status, 400, '실적 없는 달');
+  });
+});
+
+describe('데모(체험) 계정 격리 — is_demo 조직·계정은 밖을 못 보고, 대표 화면에도 섞이지 않음', () => {
+  test('체험 계정: 회사 일정·관리자 명단·전사 템플릿·검색 사람 안 보임, 대표 목록에 데모 업무 없음', async () => {
+    const unit = (await ctx.owner.ok('POST', '/api/admin/org-units', { name: '격리 시험 지점', type: 'branch', parentId: null })).id;
+    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'iso@dagym.test', name: '격리직원', role: 'staff', orgUnitIds: [unit] });
+    const c = new Client('iso');
+    await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'iso-pass-1234' });
+    await sql`update org_units set is_demo = true where id = ${unit}`;
+    await sql`update users set is_demo = true where email = 'iso@dagym.test'`;
+    const compCal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'company');
+    const ev = (await ctx.owner.ok('POST', '/api/events', { calendarId: compCal.id, title: '전사 비공개 회의', start: `${today}T15:00:00+09:00`, end: `${today}T16:00:00+09:00` })).id;
+    await ctx.owner.ok('POST', '/api/templates', { name: '전사 템플릿 비공개', payload: { title: '전사' } }).catch(() => {});
+    const org = await c.ok('GET', '/api/org');
+    assert.ok(!org.users.some((u) => u.role === 'owner'), '대표 이름·이메일 안 보임');
+    assert.deepEqual(org.orgUnits.map((o) => o.id), [unit]);
+    assert.ok(!(await c.ok('GET', '/api/calendars')).calendars.some((x) => x.type === 'company'));
+    assert.equal((await c.get(`/api/events/${ev}`)).status, 404);
+    const evs = await c.ok('GET', `/api/events?from=${today}T00:00:00%2B09:00&to=${addDays(today, 1)}T00:00:00%2B09:00`);
+    assert.ok(!evs.events.some((e) => e.id === ev));
+    const sr = await c.ok('GET', '/api/search?q=' + encodeURIComponent('김'));
+    assert.ok(!JSON.stringify(sr).includes('김대표'));
+    assert.ok(!(await c.ok('GET', '/api/templates')).templates.some((t) => t.org_unit_id === null));
+    assert.ok(!(await c.ok('GET', '/api/approval-lines')).lines?.some?.((l) => l.org_unit_id === null));
+    // 밖의 사람에게 배정·밖의 프로젝트에 넣기 불가
+    assert.equal((await c.post('/api/tasks', { title: 'x', orgUnitId: unit, assigneeId: ctx.ownerId })).status, 400);
+    const proj = (await sql`select id from projects where org_unit_id <> ${unit} limit 1`)[0];
+    if (proj) assert.ok([400, 403, 404].includes((await c.post('/api/tasks', { title: 'x', orgUnitId: unit, projectId: proj.id })).status));
+    const t = (await c.ok('POST', '/api/tasks', { title: '데모 전용 업무', orgUnitId: unit })).id;
+    // 대표 쪽: 데모 업무·데모 사람은 섞이지 않음
+    assert.ok(!(await ctx.owner.ok('GET', '/api/tasks?limit=500')).tasks.some((x) => x.id === t));
+    assert.ok(!(await ctx.owner.ok('GET', '/api/org')).users.some((u) => u.email === 'iso@dagym.test'));
+    assert.ok(!(await ctx.owner.ok('GET', '/api/revenue')).units.some((u) => u.id === unit));
+  });
+});

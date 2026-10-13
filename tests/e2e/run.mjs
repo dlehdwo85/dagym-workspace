@@ -766,6 +766,21 @@ await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄
   await owner.screenshot({ path: `${SHOTS}/58-revenue.png`, fullPage: true });
   assert.equal((await ctx.staffA.client.get('/api/revenue')).status, 404);
 });
+await step('W-5 매출 AI 분석(AI 제안 표시·근거 숫자로 이동) · GPT 연동 토큰 한 번만 표시', async () => {
+  await owner.goto(BASE + '/revenue');
+  const ai = owner.getByTestId('revenue-ai');
+  await ai.getByRole('button', { name: 'AI 분석' }).click();
+  await ai.getByText('AI 제안', { exact: true }).waitFor();
+  await ai.getByRole('button', { name: /다짐 강남점 · \d+월 매출/ }).click();
+  await owner.getByLabel('현장').evaluate((el) => el.value).then((v) => assert.equal(v, ctx.siteA, '근거 현장으로 이동'));
+  const tk = owner.getByTestId('revenue-tokens');
+  await tk.getByRole('button', { name: '토큰 만들기' }).click();
+  await owner.getByTestId('fresh-token').getByText(/^wk_/).waitFor();
+  await owner.screenshot({ path: `${SHOTS}/60-revenue-ai.png`, fullPage: true });
+  await owner.reload();
+  await owner.getByTestId('revenue-tokens').getByText('GPT 자료 운영체계').waitFor();
+  assert.equal(await owner.getByTestId('fresh-token').count(), 0, '새로 고침하면 원문 다시 안 보임');
+});
 await step('W-0 휴대폰 360·375·390·430px 모든 주요 화면 좌우 넘침 없음 (안전장치 끄고 측정)', async () => {
   const { checkWidths } = await import('./widths.mjs');
   const bad = await checkWidths(browser, await desk.storageState());

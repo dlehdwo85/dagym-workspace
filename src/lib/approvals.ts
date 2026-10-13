@@ -26,7 +26,7 @@ export async function listLines(u: SessionUser) {
   const sql = db();
   const units = await accessibleUnitIds(u, sql);
   return sql`select l.id, l.name, l.org_unit_id, l.steps, l.active, o.name as org_unit_name from approval_lines l left join org_units o on o.id = l.org_unit_id
-    where (l.org_unit_id is null or ${units === null ? sql`true` : sql`l.org_unit_id = any(${units}::uuid[])`}) order by l.org_unit_id nulls first, l.name`;
+    where ((l.org_unit_id is null and ${!u.isDemo}) or ${units === null ? sql`true` : sql`l.org_unit_id = any(${units}::uuid[])`}) order by l.org_unit_id nulls first, l.name`;
 }
 
 export async function saveLine(u: SessionUser, id: string | null, i: z.infer<typeof lineInput>, ip: string | null) {

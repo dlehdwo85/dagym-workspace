@@ -48,6 +48,8 @@ export function serverEnv() {
     FCM_API_BASE: FAKE,
     FCM_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: 'fake-proj', client_email: 'svc@fake.iam', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }), token_uri: `${FAKE}/token` }),
     LOCAL_UPLOAD_DIR: path.join(TMP, 'uploads'),
+    OPENAI_API_KEY: 'sk-fake-test',
+    OPENAI_BASE_URL: `${FAKE}/openai/v1`,
   };
 }
 

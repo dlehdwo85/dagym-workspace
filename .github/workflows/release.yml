@@ -114,6 +114,12 @@ jobs:
             -archivePath $RUNNER_TEMP/App.xcarchive DEVELOPMENT_TEAM=${{ vars.APPLE_TEAM_ID }} \
             MARKETING_VERSION=${{ inputs.version_name }} CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGNING_ALLOWED=NO archive
+          # 무서명 archive 에는 entitlements 가 박히지 않아 export 후 푸시(aps-environment)가 빠진다 →
+          # 임시(ad-hoc) 서명으로 entitlements 를 넣어 두면 export 의 배포 서명이 그대로 이어받는다
+          APP=$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app
+          find "$APP/Frameworks" -maxdepth 1 \( -name '*.framework' -o -name '*.dylib' \) -exec codesign --force --sign - {} \; 2>/dev/null || true
+          codesign --force --sign - --entitlements App/App.entitlements "$APP"
+          codesign -d --entitlements - "$APP" 2>/dev/null | grep -q aps-environment || { echo "::error::aps-environment 가 앱에 없습니다"; exit 1; }
           # 서명은 아래 export 단계에서 배포용(App Store Connect)으로 자동 처리 — 개발용 프로필·등록 기기 불필요
           xcodebuild -exportArchive -archivePath $RUNNER_TEMP/App.xcarchive -exportOptionsPlist $RUNNER_TEMP/export.plist \
             -exportPath $RUNNER_TEMP/out $AUTH

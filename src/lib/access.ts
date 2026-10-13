@@ -26,7 +26,8 @@ export async function accessibleUnitIds(u: SessionUser, sql: Sql = db()): Promis
 
 /** 업무 조회 가능 조건 (tasks 별칭 t 기준) */
 export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null) {
-  if (units === null) return sql`true`;
+  // 대표·본사 관리자(전체)에게도 앱 심사용 데모 조직 업무는 섞지 않는다
+  if (units === null) return sql`not exists (select 1 from org_units dz where dz.id = t.org_unit_id and dz.is_demo)`;
   return sql`(
     t.org_unit_id = any(${units}::uuid[])
     or t.assignee_id = ${u.id}
@@ -95,7 +96,7 @@ export interface CalendarRow {
 
 export async function calendarPerms(u: SessionUser, c: CalendarRow, units?: string[] | null) {
   units = units === undefined ? await accessibleUnitIds(u) : units;
-  if (c.type === 'company') return { view: true, edit: atLeast(u, 'dept_lead') };
+  if (c.type === 'company') return { view: !u.isDemo, edit: !u.isDemo && atLeast(u, 'dept_lead') };
   if (c.type === 'personal') return { view: c.owner_user_id === u.id, edit: c.owner_user_id === u.id };
   const inUnit = units === null || (c.org_unit_id !== null && units.includes(c.org_unit_id));
   return { view: inUnit, edit: inUnit };
@@ -106,9 +107,9 @@ export async function visibleCalendars(u: SessionUser, sql: Sql = db()) {
   const rows = await sql<(CalendarRow & { name: string; color: string; unit_name: string | null; brand_id: string | null })[]>`
     select c.id, c.type, c.org_unit_id, c.owner_user_id, c.name, c.color, o.name as unit_name, o.brand_id
     from calendars c left join org_units o on o.id = c.org_unit_id
-    where c.type = 'company'
+    where (c.type = 'company' and ${!u.isDemo})
        or (c.type = 'personal' and c.owner_user_id = ${u.id})
-       or (c.type = 'org_unit' and ${units === null ? sql`true` : sql`c.org_unit_id = any(${units}::uuid[])`})
+       or (c.type = 'org_unit' and ${units === null ? sql`not exists (select 1 from org_units dz where dz.id = c.org_unit_id and dz.is_demo)` : sql`c.org_unit_id = any(${units}::uuid[])`})
     order by case c.type when 'personal' then 0 when 'company' then 1 else 2 end, c.name`;
   return Promise.all(rows.map(async (c) => ({ ...c, perms: await calendarPerms(u, c, units) })));
 }
@@ -119,4 +120,9 @@ export async function ensurePersonalCalendar(userId: string, name: string, sql: 
     on conflict (owner_user_id) where type = 'personal' do update set name = calendars.name
     returning id`;
   return r[0].id;
+}
+
+/** 체험 계정이면 막는다 (설정 변경·초대·첨부·외부 연동 등) */
+export function denyDemo(u: SessionUser) {
+  if (u.isDemo) throw forbidden('체험 계정에서는 사용할 수 없는 기능입니다');
 }

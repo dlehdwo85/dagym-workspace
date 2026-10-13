@@ -10,7 +10,7 @@ export const GET = handler(async ({ user }) => {
   const units = await accessibleUnitIds(user, sql);
   const templates = await sql`select t.id, t.name, t.description, t.payload, t.org_unit_id, o.name as org_unit_name, t.updated_at
     from templates t left join org_units o on o.id = t.org_unit_id
-    where not t.archived and (t.org_unit_id is null or ${units === null ? sql`true` : sql`t.org_unit_id = any(${units}::uuid[])`})
+    where not t.archived and ((t.org_unit_id is null and ${!user.isDemo}) or ${units === null ? sql`true` : sql`t.org_unit_id = any(${units}::uuid[])`})
     order by t.org_unit_id nulls first, t.name`;
   return { templates };
 });

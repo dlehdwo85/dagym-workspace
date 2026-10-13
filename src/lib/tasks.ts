@@ -192,11 +192,16 @@ async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: s
   if (i.projectId) {
     const p = await sql`select org_unit_id from projects where id = ${i.projectId}`;
     if (!p[0]) throw badRequest('프로젝트가 없습니다');
+    if (u.isDemo) await assertUnitAccess(u, p[0].org_unit_id, sql); // 체험 계정은 데모 조직 프로젝트만
   }
   const ids = [i.assigneeId, ...(i.collaboratorIds ?? [])].filter(Boolean) as string[];
   if (ids.length) {
-    const ok = await sql`select id from users where id = any(${ids}::uuid[]) and status = 'active'`;
+    const ok = await sql`select id from users where id = any(${ids}::uuid[]) and status = 'active' and (is_demo or ${!u.isDemo})`;
     if (ok.length !== new Set(ids).size) throw badRequest('비활성 사용자이거나 없는 사용자입니다');
+  }
+  if (u.isDemo && i.dependsOn?.length) { // 체험 계정은 데모 조직 업무만 선행으로
+    const ok = await sql`select t.id from tasks t join org_units o on o.id = t.org_unit_id where t.id = any(${i.dependsOn}::uuid[]) and o.is_demo`;
+    if (ok.length !== new Set(i.dependsOn).size) throw badRequest('선행 업무를 찾을 수 없습니다');
   }
   if (i.startDate && i.dueDate && i.startDate > i.dueDate) throw badRequest('시작일이 마감일보다 늦습니다');
 }
@@ -340,6 +345,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const due = (set.due_date ?? cur.due_date) as string | null;
     if (start && due && start > due) throw badRequest('시작일이 마감일보다 늦습니다');
     if (set.assignee_id) await validateRefs(tx, u, { assigneeId: set.assignee_id as string } as TaskInput, cur.org_unit_id);
+    if (u.isDemo) await validateRefs(tx, u, { projectId: (set.project_id as string) ?? undefined, collaboratorIds: i.collaboratorIds, dependsOn: i.dependsOn } as TaskInput, (set.org_unit_id as string) ?? cur.org_unit_id);
     if (('photo_required' in set || 'approval_line_id' in set) && !perms.approve) throw forbidden('사진 증빙·결재선은 관리자가 정합니다');
     if (set.approval_line_id) await checkLine(tx, set.approval_line_id as string);
     if (cur.status === 'review' && 'approval_line_id' in set) throw conflict('결재 진행 중에는 결재선을 바꿀 수 없습니다');

@@ -16,6 +16,7 @@ export function startFakeGoogle(port = 3199) {
     watches: [],
     stops: [],
     fcm: [],
+    openai: [],
     fcmUnregistered: new Set(),
     webpush: [],
     webpushGone: new Set(),
@@ -35,6 +36,18 @@ export function startFakeGoogle(port = 3199) {
     state.requests.push({ method: req.method, path: p, query: url.search });
     const body = raw && (req.headers['content-type'] ?? '').includes('json') ? JSON.parse(raw) : raw;
 
+    // ---- 가짜 OpenAI (매출 AI 분석): 받은 요청을 기록하고, 입력의 첫 현장·월로 정해진 JSON 을 돌려준다 ----
+    if (p === '/openai/v1/chat/completions' && req.method === 'POST') {
+      state.openai.push({ auth: req.headers.authorization, body });
+      const input = JSON.parse(body.messages.find((m) => m.role === 'user').content);
+      const row = input.rows.find((r) => r.month === input.period) ?? input.rows[0];
+      const content = JSON.stringify({
+        summary: `${row.site} ${row.month} 매출은 ${row.revenue}원입니다.`,
+        anomalies: [{ site: row.site, month: row.month, metric: 'revenue', comment: '전월 대비 크게 늘었습니다.' }, { site: '없는 현장', month: row.month, metric: 'revenue', comment: '지어낸 제안' }],
+        comparisons: [{ site: row.site, comment: '가장 높습니다.' }],
+      });
+      return json(res, 200, { choices: [{ message: { role: 'assistant', content } }], usage: { total_tokens: 321 } });
+    }
     // ---- 제어용 ----
     if (p === '/__state') return json(res, 200, { ...state, fcmUnregistered: [...state.fcmUnregistered], webpushGone: [...state.webpushGone] });
     if (p === '/__ctl' && req.method === 'POST') {

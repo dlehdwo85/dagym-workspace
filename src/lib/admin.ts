@@ -209,13 +209,13 @@ export async function updateOrgUnit(actor: SessionUser, id: string, i: Partial<z
 export async function directory(u: SessionUser, sql: Sql = db()) {
   const units = await accessibleUnitIds(u, sql);
   const orgUnits = await sql`select id, parent_id, brand_id, type, name, active, sort from org_units
-    where ${units === null ? sql`true` : sql`id = any(${units}::uuid[])`} order by sort, name`;
+    where ${units === null ? sql`not is_demo` : sql`id = any(${units}::uuid[])`} order by sort, name`;
   const users = await sql`
     select u.id, u.name, u.title, u.role, u.email,
       coalesce(array_agg(m.org_unit_id) filter (where m.org_unit_id is not null), '{}') as org_unit_ids
     from users u left join memberships m on m.user_id = u.id
-    where u.status = 'active' and (${units === null ? sql`true` : sql`
-      u.role in ('owner','admin') or exists (select 1 from memberships mm where mm.user_id = u.id and mm.org_unit_id = any(${units}::uuid[]))`})
+    where u.status = 'active' and u.is_demo = ${!!u.isDemo} and (${units === null ? sql`true` : sql`
+      (u.role in ('owner','admin') and ${!u.isDemo}) or exists (select 1 from memberships mm where mm.user_id = u.id and mm.org_unit_id = any(${units}::uuid[]))`})
     group by u.id order by u.name`;
   const brands = await sql`select id, name, color from brands order by sort`;
   return { brands, orgUnits, users, accessibleUnitIds: units, isAdmin: isAdmin(u) };

@@ -86,9 +86,9 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
     where e.deleted_at is null and e.recurring_event_id is null
       and (e.rrule is not null or (e.start_at < ${to} and e.end_at > ${from}))
       and (
-        c.type = 'company'
+        (c.type = 'company' and ${!u.isDemo})
         or (c.type = 'personal' and c.owner_user_id = ${u.id})
-        or (c.type = 'org_unit' and ${units === null ? sql`true` : sql`c.org_unit_id = any(${units}::uuid[])`})
+        or (c.type = 'org_unit' and ${units === null ? sql`not exists (select 1 from org_units dz where dz.id = c.org_unit_id and dz.is_demo)` : sql`c.org_unit_id = any(${units}::uuid[])`})
         or exists (select 1 from event_attendees a where a.event_id = e.id and a.user_id = ${u.id})
       ) ${calFilter}`;
   const ids = rows.map((r) => r.id);
@@ -138,7 +138,11 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
 export async function findConflicts(u: SessionUser, userIds: string[], start: Date, end: Date, excludeIds: string[] = []) {
   if (end <= start) return [];
   const sql = db();
-  const ids = [...new Set([u.id, ...userIds])];
+  let ids = [...new Set([u.id, ...userIds])];
+  if (u.isDemo) { // 체험 계정은 같은 데모 조직 사람만
+    const ok = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and is_demo`;
+    ids = [u.id, ...ok.map((r) => r.id).filter((x) => x !== u.id)];
+  }
   const rows = await sql<(EventRow & { cal_type: string; owner_user_id: string | null })[]>`
     select e.*, c.type as cal_type, c.owner_user_id from events e join calendars c on c.id = e.calendar_id
     where e.deleted_at is null and e.recurring_event_id is null and not e.all_day and e.kind <> 'task_block'

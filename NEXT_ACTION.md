@@ -140,3 +140,12 @@ S-P2(ICS 구독·회의실 예약·휴가 결재·내보내기/휴지통/2단계
 
 참고(운영 health 에서 발견): `fileStorage: local-disk` — Vercel 에서는 첨부 파일이 배포·재시작 때 사라질 수 있습니다. S3 호환 저장소(R2 등) 설정(`S3_*` 환경 변수)이 필요합니다(비용 발생 가능 → 대표 결정).
 로컬 확인 부탁: 운영 주소·실기기에서 8절 완료 기준(휴대폰 좌우 스크롤 없음, 이름 워크인, 업무 화면 "+ 업무 추가" 연속, 기본 3명 전체·담당자별, 홈 3영역).
+
+### 2026-10-13 · 대표 승인 3건 (앱 푸시 · 체험하기 · AI 매출) 처리
+| 항목 | 처리 | 확인 |
+|---|---|---|
+| 1 앱 푸시 | ✅ iOS `App/App.entitlements`(aps-environment **production**) 추가, Release 설정에 `CODE_SIGN_ENTITLEMENTS`. release.yml: 무서명 archive 는 entitlements 가 빠지므로 export 전에 임시 서명으로 entitlements 를 넣고 `aps-environment` 없으면 실패하도록 검사. `GoogleService-Info.plist`·`google-services.json` 은 Secrets 에서 주입(기존 단계 확인, iOS 는 빌드 단계 스크립트가 앱에 복사). 네이티브 표시 이름 워크인(strings.xml·Info.plist). 앱 첫 실행 권한 안내·FCM 토큰 등록은 직전 커밋. ⚠ macOS 가 없어 iOS 빌드는 여기서 못 돌림 → **로컬이 release.yml(iOS) 한 번 실행해 TestFlight 빌드 확인 부탁** (실패 시 로그의 aps-environment 검사 줄 확인) | 코드 검토만 |
+| 2 체험하기 | ⛔ **보류**: 비밀번호 없이 로그인되는 경로를 추가하는 코드가 클라우드 세션의 자동 안전 검사에서 막혔습니다(대표 본인 확인 필요). 대신 격리 기반은 완료: `is_demo` 조직·계정은 회사 일정·관리자 명단·전사 템플릿/결재선/자동화·검색 사람·밖의 프로젝트/담당자/선행 업무를 볼 수도 지정할 수도 없고, 대표·본사 목록·디렉터리·매출에도 데모 데이터가 섞이지 않음(마이그레이션 015). 대안: 대표가 승인하면 그대로 구현 / 또는 심사용 일반 계정(비밀번호)을 데모 조직에 만들어 심사 메모에 적는 방식 | API 1건(격리) |
+| 3 AI 매출 | ✅ 표준 양식 CSV(현장·월·항목·금액·근거파일명, 들어온 항목만 갱신, 근거 파일명 보관) + 가로형 유지. GPT Custom Action: 본사가 쓰기 전용 토큰 발급(원문 한 번만 표시, 해시 저장, 폐기 가능) → `POST /api/public/revenue`(입력만, 오류 시 전부 미저장, dryRun), 스키마 `GET /api/public/revenue/openapi.json`. AI 분석: `OPENAI_API_KEY` 있을 때만 표시, **집계 숫자만 전송**(현장 이름·월·매출·지출·회원 수·목표 — 메모·파일명·사람 정보 없음, 시험으로 확인), 결과는 "AI 제안" 표시·근거 숫자 클릭 시 해당 현장·월로 이동·보낸 숫자 표 공개, 입력에 없는 현장·월 제안은 서버에서 제거. 모델 `OPENAI_MODEL`(기본 gpt-4o-mini), 사용 토큰 수 감사 기록. 마이그레이션 014 | API 3건·E2E W-5, `60` |
+
+대표/로컬 준비물: Vercel `OPENAI_API_KEY`(대표 OpenAI 결제, 선택 `OPENAI_MODEL`), Custom GPT 에서 위 스키마 주소 + 토큰. 비용: OpenAI 사용량 과금(분석 1회 수천 토큰 수준, 버튼을 누를 때만 호출 — 자동 반복 호출 없음).
