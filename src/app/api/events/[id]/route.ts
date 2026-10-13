@@ -6,13 +6,17 @@ import { dispatchPending } from '@/lib/push';
 import { syncCalendarSoon } from '@/lib/google/hooks';
 
 export const GET = handler<{ id: string }>(async ({ user, params }) => {
-  const { event, perms } = await loadEvent(user, params.id);
+  const { event, perms } = await loadEvent(user, params.id, db(), { allowMasked: true });
   const sql = db();
   const masterId = event.recurring_event_id ?? event.id;
   const attendees = await sql`select a.user_id, u.name, a.response from event_attendees a join users u on u.id = a.user_id where a.event_id = ${masterId}`;
   const attachments = await sql`select a.*, u.name as created_by_name from attachments a join users u on u.id = a.created_by
     where a.event_id = ${params.id} and a.deleted_at is null and a.upload_status = 'ready'`;
   const master = event.recurring_event_id ? (await sql`select rrule, reminder_minutes from events where id = ${masterId}`)[0] : event;
+  if (perms.masked) {
+    // 비공개 일정: 시간만 ("바쁨")
+    return { event: { ...event, title: '바쁨', description: '', location: '', task_id: null, rrule: master.rrule, reminder_minutes: null, masked: true }, perms: { edit: false, attendee: false }, calendar: { ...perms.calendar, name: '' }, attendees: [], attachments: [], task: null };
+  }
   const task = event.task_id ? (await sql`select id, title, status from tasks where id = ${event.task_id}`)[0] : null;
   return { event: { ...event, rrule: master.rrule, reminder_minutes: (master as any).reminder_minutes ?? null }, perms: { edit: perms.edit, attendee: perms.attendee }, calendar: perms.calendar, attendees, attachments, task };
 });

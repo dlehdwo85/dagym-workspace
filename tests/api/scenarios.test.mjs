@@ -1200,3 +1200,36 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
     assert.ok((await c.ok('GET', '/api/notifications')).items.length >= 1, '예시 알림');
   });
 });
+
+describe('WORKIN_V4 본사 사람끼리 일정 보기 · 비공개', () => {
+  test('본사 소속·대표는 서로의 개인 일정을 보고, 비공개는 "바쁨"(내용·메모 없음), 현장 직원에게는 안 보임', async () => {
+    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'hqcal@dagym.test', name: '김소담', role: 'staff', orgUnitIds: [ctx.hq] });
+    const c = new Client('hqcal');
+    await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'hqcal-pass-1234' });
+    const me = (await c.ok('GET', '/api/auth/me')).user;
+    const d = addDays(today, 2);
+    const ownerCal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    const open = (await ctx.owner.ok('POST', '/api/events', { calendarId: ownerCal, title: '대표 거래처 미팅', location: '본사 3층', start: `${d}T10:00:00+09:00`, end: `${d}T11:00:00+09:00` })).id;
+    const priv = (await ctx.owner.ok('POST', '/api/events', { calendarId: ownerCal, title: '대표 병원 예약', location: '비밀 장소', start: `${d}T15:00:00+09:00`, end: `${d}T16:00:00+09:00`, isPrivate: true })).id;
+    const q = `/api/events?from=${d}T00:00:00%2B09:00&to=${addDays(d, 1)}T00:00:00%2B09:00`;
+    const seen = (await c.ok('GET', q)).events;
+    const o = seen.find((e) => e.id === open);
+    assert.ok(o, '본사 직원이 대표 개인 일정을 봄');
+    assert.equal(o.ownerId, ctx.ownerId); assert.equal(o.ownerName, '김대표'); assert.equal(o.title, '대표 거래처 미팅');
+    const p = seen.find((e) => e.id === priv);
+    assert.equal(p.title, '바쁨'); assert.equal(p.location, ''); assert.equal(p.masked, true);
+    const det = await c.ok('GET', `/api/events/${priv}`);
+    assert.equal(det.event.title, '바쁨'); assert.equal(det.event.location, ''); assert.equal(det.perms.edit, false);
+    assert.equal((await c.get(`/api/events/${priv}/notes`)).status, 404, '비공개 일정 메모는 없는 것처럼');
+    assert.equal((await c.req('PATCH', `/api/events/${open}`, { title: '바꿈' })).status, 403, '남의 일정은 보기만');
+    // 주인은 그대로 보임
+    assert.equal((await ctx.owner.ok('GET', q)).events.find((e) => e.id === priv).title, '대표 병원 예약');
+    // 현장 직원에게는 대표 개인 일정 안 보임
+    assert.ok(!(await ctx.staffA.client.ok('GET', q)).events.some((e) => e.id === open || e.id === priv));
+    assert.equal((await ctx.staffA.client.get(`/api/events/${open}`)).status, 404);
+    // 대표도 본사 직원 일정을 봄
+    const myCal = (await c.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+    const mine = (await c.ok('POST', '/api/events', { calendarId: myCal, title: '김소담 외근', start: `${d}T13:00:00+09:00`, end: `${d}T14:00:00+09:00` })).id;
+    assert.ok((await ctx.owner.ok('GET', q)).events.some((e) => e.id === mine && e.ownerId === me.id));
+  });
+});

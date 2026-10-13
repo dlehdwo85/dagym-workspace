@@ -29,6 +29,20 @@ const ctx = await bootstrap();
 const today = seoulToday();
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }).catch(() => chromium.launch());
 
+/** 일정 등록 창의 날짜 버튼 → 작은 달력에서 날짜 고르기 (달 이동 포함) */
+async function pickDate(page, scope, label, d) {
+  await scope.getByRole('button', { name: new RegExp(`^${label}:`) }).click();
+  const cal = page.getByRole('dialog', { name: `${label} 달력` });
+  const t = new Date(d + 'T00:00:00Z');
+  const name = `${t.getUTCMonth() + 1}월 ${t.getUTCDate()}일 (${'일월화수목금토'[t.getUTCDay()]})`;
+  for (let i = 0; i < 24 && !(await cal.getByRole('button', { name, exact: true }).count()); i++) {
+    const head = await cal.locator('span.font-semibold').first().textContent();
+    const [y, m] = head.match(/\d+/g).map(Number);
+    await cal.getByRole('button', { name: y * 12 + m < t.getUTCFullYear() * 12 + t.getUTCMonth() + 1 ? '다음 달' : '이전 달' }).click();
+  }
+  await cal.getByRole('button', { name, exact: true }).click();
+}
+
 /** 업무 상세의 "필드 더보기" 펼치기 (이미 펼쳐져 있으면 그대로) */
 async function openMoreFields(scope) {
   const btn = scope.getByTestId('more-fields').first();
@@ -297,10 +311,10 @@ await step('④ 캘린더 화면에서 매주 반복 일정 등록 → 주 보�
   await dlg.getByLabel('제목').fill('주간 운영 회의');
   await dlg.getByLabel('캘린더').selectOption({ label: '회사 일정' });
   const d = addDays(today, 1);
-  await dlg.getByLabel('시작일').fill(d);
-  await dlg.getByLabel('종료일').fill(d);
-  await dlg.getByLabel('시작 시각').fill('10:00');
-  await dlg.getByLabel('종료 시각').fill('11:00');
+  await pickDate(owner, dlg, '시작일', d); // Google 형 날짜 달력 팝업
+  await dlg.getByLabel('시작 시각').selectOption('10:00'); // 15분 목록
+  assert.match(await dlg.getByLabel('종료 시각').locator('option:checked').textContent(), /오전 11:00 \(1시간\)/, '시작을 바꾸면 길이(1시간) 유지');
+  await dlg.getByLabel('종료 시각').selectOption('11:00');
   const dow = '일월화수목금토'[new Date(d + 'T00:00:00Z').getUTCDay()];
   await dlg.getByLabel('반복 규칙').selectOption({ label: `매주 ${dow}요일` });
   await dlg.getByLabel('반복 종료').selectOption('count');
@@ -879,6 +893,45 @@ await step('심사용 체험 계정: 대표가 사용자 관리에서 버튼 →
   await owner.screenshot({ path: `${SHOTS}/63-review-account.png` });
   await owner.keyboard.press('Escape');
   await owner.getByTestId('users').getByText('심사용').first().waitFor();
+});
+await step('V4 캘린더: 휴대폰 빈 칸 한 번 탭 → 빠른 등록 시트 저장, 본사 동료 화면에 보임, 비공개는 "바쁨", 내 일정·사람 필터 기억', async () => {
+  const d = addDays(today, 3);
+  const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  const m = await mc.newPage();
+  await m.goto(`${BASE}/calendar?date=${d}`);
+  const lane = m.locator('.fc-timegrid-slot-lane[data-time="14:00:00"]').first();
+  await lane.waitFor();
+  await lane.tap();
+  const sheet = m.getByTestId('quick-create');
+  await sheet.waitFor();
+  await sheet.getByLabel('빠른 입력 제목').fill('V4 탭 등록');
+  assert.equal(await sheet.getByLabel('종료 시각').inputValue(), '15:00', '탭 = 1시간 블록');
+  await sheet.getByRole('button', { name: '저장' }).click();
+  await m.getByText('일정을 저장했습니다').waitFor();
+  await m.screenshot({ path: `${SHOTS}/64-mobile-tap-create.png` });
+  await mc.close();
+  const [ev] = await sql`select to_char(start_at at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') s from events where title = 'V4 탭 등록'`;
+  assert.equal(ev.s, `${d} 14:00`);
+  const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
+  await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: 'V4 비밀 일정', start: `${d}T16:00:00+09:00`, end: `${d}T17:00:00+09:00`, isPrivate: true });
+  // 본사 동료(김민수) 화면
+  const mctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const mp = await login(mctx, 'minsu@dagym.test', 'minsu-pass-1234');
+  await mp.goto(`${BASE}/calendar?date=${d}`);
+  await mp.getByTestId('calendar').getByText('V4 탭 등록').first().waitFor();
+  await mp.getByTestId('calendar').getByText('바쁨').first().waitFor();
+  assert.equal(await mp.getByText('V4 비밀 일정').count(), 0, '비공개 제목 안 보임');
+  const filter = mp.getByTestId('people-filter');
+  await filter.getByRole('button', { name: '내 일정' }).click();
+  await mp.waitForTimeout(300);
+  assert.equal(await mp.getByTestId('calendar').getByText('V4 탭 등록').count(), 0, '내 일정만');
+  await mp.reload();
+  await mp.getByTestId('calendar').waitFor();
+  assert.equal(await mp.getByTestId('people-filter').getByRole('button', { name: '내 일정' }).getAttribute('aria-pressed'), 'true', '필터 기억');
+  await mp.getByTestId('people-filter').getByRole('button', { name: '김대표 일정' }).click();
+  await mp.getByTestId('calendar').getByText('V4 탭 등록').first().waitFor();
+  await mp.screenshot({ path: `${SHOTS}/65-calendar-people.png` });
+  await mctx.close();
 });
 await step('W-0 휴대폰 360·375·390·430px 모든 주요 화면 좌우 넘침 없음 (안전장치 끄고 측정)', async () => {
   const { checkWidths } = await import('./widths.mjs');

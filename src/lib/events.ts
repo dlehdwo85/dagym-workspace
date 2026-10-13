@@ -22,6 +22,8 @@ export const eventInput = z.object({
   /** 일정별 알림(분). null = 사용자 기본 설정. 시리즈(반복 전체) 단위로 저장 */
   reminderMinutes: z.array(z.number().int().min(0).max(40320)).max(5).nullable().optional(),
   taskId: zUuid.nullable().optional(),
+  /** 비공개: 주인·참석자 외에는 제목 없이 "바쁨" */
+  isPrivate: z.boolean().optional(),
   version: z.number().int().optional(),
 });
 export type EventInput = z.infer<typeof eventInput>;
@@ -63,15 +65,21 @@ async function eventPerms(u: SessionUser, e: EventRow, sql: Sql) {
   const cp = await calendarPerms(u, cal);
   const masterId = e.recurring_event_id ?? e.id;
   const attendee = (await sql`select 1 from event_attendees where event_id = ${masterId} and user_id = ${u.id}`).length > 0;
-  return { view: cp.view || attendee || e.created_by === u.id, edit: cp.edit || e.created_by === u.id, attendee, calendar: cal };
+  const mate = !cp.view && cal.type === 'personal' && !!cal.owner_user_id && (await hqColleagues(u, sql)).includes(cal.owner_user_id);
+  const own = cal.owner_user_id === u.id || e.created_by === u.id;
+  // 비공개는 주인·만든 사람·참석자가 아니면 내용 숨김
+  const masked = !!(e as any).is_private && !own && !attendee;
+  return { view: cp.view || mate || attendee || e.created_by === u.id, edit: cp.edit || e.created_by === u.id, attendee, calendar: cal, masked };
 }
 
-export async function loadEvent(u: SessionUser, id: string, sql: Sql = db()) {
+export async function loadEvent(u: SessionUser, id: string, sql: Sql = db(), opts: { allowMasked?: boolean } = {}) {
   if (!zUuid.safeParse(id).success) throw notFound('일정을 찾을 수 없습니다');
   const [e] = await sql<EventRow[]>`select * from events where id = ${id} and deleted_at is null`;
   if (!e) throw notFound('일정을 찾을 수 없습니다');
   const perms = await eventPerms(u, e, sql);
   if (!perms.view) throw notFound('일정을 찾을 수 없습니다');
+  // 남의 비공개 일정: 상세 미리보기("바쁨")만 허용, 메모·연결 업무·첨부 등은 없는 것처럼
+  if (perms.masked && !opts.allowMasked) throw notFound('일정을 찾을 수 없습니다');
   return { event: e, perms };
 }
 
@@ -80,14 +88,16 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
   const sql = db();
   const units = await accessibleUnitIds(u, sql);
   const calFilter = calendarIds?.length ? sql`and c.id = any(${calendarIds}::uuid[])` : sql``;
-  const rows = await sql<(EventRow & { cal_name: string; color: string; cal_type: string })[]>`
-    select e.*, c.name as cal_name, c.color, c.type as cal_type
-    from events e join calendars c on c.id = e.calendar_id
+  const mates = await hqColleagues(u, sql);
+  const rows = await sql<(EventRow & { cal_name: string; color: string; cal_type: string; owner_id: string; owner_name: string | null; is_private: boolean })[]>`
+    select e.*, c.name as cal_name, c.color, c.type as cal_type, coalesce(c.owner_user_id, e.created_by) as owner_id, ow.name as owner_name
+    from events e join calendars c on c.id = e.calendar_id left join users ow on ow.id = coalesce(c.owner_user_id, e.created_by)
     where e.deleted_at is null and e.recurring_event_id is null
       and (e.rrule is not null or (e.start_at < ${to} and e.end_at > ${from}))
       and (
         (c.type = 'company' and ${!u.isDemo})
         or (c.type = 'personal' and c.owner_user_id = ${u.id})
+        or (c.type = 'personal' and c.owner_user_id = any(${mates}::uuid[]))
         or (c.type = 'org_unit' and ${units === null ? sql`not exists (select 1 from org_units dz where dz.id = c.org_unit_id and dz.is_demo)` : sql`c.org_unit_id = any(${units}::uuid[])`})
         or exists (select 1 from event_attendees a where a.event_id = e.id and a.user_id = ${u.id})
       ) ${calFilter}`;
@@ -103,9 +113,13 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
   const out: any[] = [];
   for (const e of rows) {
     const att = attendees.filter((a) => a.event_id === e.id);
+    // 비공개 일정: 주인·만든 사람·참석자가 아니면 제목·장소·설명·참석자 없이 "바쁨"
+    const masked = e.is_private && e.owner_id !== u.id && e.created_by !== u.id && !att.some((a) => a.user_id === u.id);
+    if (masked) { e.title = '바쁨'; e.location = ''; e.description = ''; }
     const base = {
-      calendarId: e.calendar_id, calendarName: e.cal_name, color: e.color, calendarType: e.cal_type,
-      kind: e.kind, taskId: e.task_id, attendees: att, createdBy: e.created_by,
+      calendarId: e.calendar_id, calendarName: masked ? '' : e.cal_name, color: e.color, calendarType: e.cal_type,
+      kind: e.kind, taskId: masked ? null : e.task_id, attendees: masked ? [] : att, createdBy: e.created_by,
+      ownerId: e.owner_id, ownerName: e.owner_name, isPrivate: e.is_private, masked,
     };
     if (!e.rrule) {
       out.push({ ...base, id: e.id, seriesId: null, title: e.title, location: e.location, description: e.description,
@@ -125,7 +139,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
     }
     for (const x of exs) {
       if (x.cancelled || x.start_at >= to || x.end_at <= from) continue;
-      out.push({ ...base, id: x.id, seriesId: e.id, title: x.title, location: x.location, description: x.description,
+      out.push({ ...base, id: x.id, seriesId: e.id, title: base.masked ? '바쁨' : x.title, location: base.masked ? '' : x.location, description: base.masked ? '' : x.description,
         start: x.start_at, end: x.end_at, allDay: x.all_day, recurring: true, exception: true, rrule: e.rrule,
         version: x.version, originalStart: x.original_start, kind: x.kind });
     }
@@ -197,9 +211,9 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   }
   return sql.begin(async (tx) => {
     const [ev] = await tx<{ id: string }[]>`
-      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes)
+      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private)
       values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
-        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)})
+        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)}, ${i.isPrivate ?? false})
       returning id`;
     if (i.taskId) await tx`insert into event_tasks (event_id, task_id, role, created_by) values (${ev.id}, ${i.taskId}, 'block', ${u.id}) on conflict do nothing`;
     if (i.attendeeIds?.length) {
@@ -215,7 +229,7 @@ export async function createEvent(u: SessionUser, i: EventInput) {
 }
 
 const EDIT_FIELDS: [keyof EventInput, string][] = [
-  ['title', 'title'], ['description', 'description'], ['location', 'location'], ['kind', 'kind'], ['allDay', 'all_day'],
+  ['title', 'title'], ['description', 'description'], ['location', 'location'], ['kind', 'kind'], ['allDay', 'all_day'], ['isPrivate', 'is_private'],
 ];
 
 /**
@@ -399,4 +413,18 @@ export async function respondEvent(u: SessionUser, id: string, response: 'accept
 function normReminders(v: number[] | null | undefined): number[] | null {
   if (v === undefined || v === null) return null;
   return [...new Set(v)].sort((a, b) => a - b);
+}
+
+/**
+ * WORKIN_V4 본사 사람끼리 개인 일정 서로 보기: 보는 사람이 본사(hq) 소속이거나 대표·본사 관리자면,
+ * 본사 소속·대표·본사 관리자의 개인 캘린더가 보인다(체험 계정 제외). 다른 조직은 그대로 안 보임.
+ */
+export async function hqColleagues(u: SessionUser, sql: Sql): Promise<string[]> {
+  if (u.isDemo) return [];
+  const rows = await sql<{ id: string }[]>`
+    with hq as (select id from org_units where type = 'hq' and not is_demo),
+    me as (select (${u.role} in ('owner','admin')) or exists (select 1 from memberships m where m.user_id = ${u.id} and m.org_unit_id in (select id from hq)) as ok)
+    select u.id from users u, me where me.ok and u.status = 'active' and not u.is_demo and u.id <> ${u.id}
+      and (u.role in ('owner','admin') or exists (select 1 from memberships m where m.user_id = u.id and m.org_unit_id in (select id from hq)))`;
+  return rows.map((r) => r.id);
 }
