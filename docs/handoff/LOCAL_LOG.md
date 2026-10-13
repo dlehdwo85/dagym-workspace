@@ -74,3 +74,5 @@
 - CRON_SECRET: Vercel production 환경 변수에 무작위 64자(브라우저에서 생성, 값 미표시, sensitive) 등록. 다음 운영 배포부터 매일 09시 Vercel Cron 인증 통과 예정 → 배포 후 health lastTick 확인 필요.
 - Android: mobile run 38354402256(7884d83 상단바 수정) AAB 로컬 서명 → Play 내부 테스트 **11 (1.0) 내부 테스터에게 제공됨**(16:56).
 - iOS 내부 테스터: ASC 사용자 초대 김민수·김소담(역할 마케팅, 앱 접근 워크인만). 초대 수락 후 TestFlight 내부 그룹에 추가 예정. 이메일은 대표 제공(저장소에는 이름만 기록).
+
+- 17:09 김민수·김소담 ASC 초대 수락 → TestFlight 내부 그룹 "본사 테스터" 추가(테스터 3명, 초대됨). 대표 본인도 아직 "초대됨"(TestFlight 앱에서 수락 전).
