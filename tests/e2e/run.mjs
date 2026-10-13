@@ -1194,7 +1194,7 @@ await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에
   await mc.close();
 });
 
-await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별·삭제→되돌리기·휴지통·엑셀·사용자 지정 반복·달성률·알림 발송 기록', async () => {
+await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별·삭제→되돌리기·휴지통·엑셀·사용자 지정 반복·알림 발송 기록', async () => {
   // 담당자 여러 명 → 각자 1건씩
   await owner.goto(BASE + '/tasks');
   await owner.getByTestId('create-menu').click();
@@ -1257,12 +1257,44 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   await owner.waitForTimeout(800);
   const rr = (await sql`select recurrence_rule from tasks where id = ${rt}`)[0].recurrence_rule;
   assert.match(rr, /FREQ=WEEKLY/); assert.match(rr, /COUNT=8/); assert.match(rr, /MO/); assert.match(rr, /FR/);
-  // 달성률 카드·운영 상태 알림 기록
-  await owner.goto(BASE + '/');
-  await owner.getByTestId('achievement').getByTestId('ach-completion').waitFor();
-  await owner.screenshot({ path: `${SHOTS}/71-achievement.png` });
+  // 운영 상태 알림 기록 (달성률 카드는 V7 에서 제거)
   await owner.goto(BASE + '/admin/ops');
   await owner.getByTestId('recent-notifications').getByText('V6 다같이 점검').first().waitFor();
+});
+
+await step('V7: 홈 첫 화면에 오늘 할 일·이번 주(업무·일정 같은 한 줄), 달성률 없음, 업무 ⋯ 메뉴 시트, 캘린더 개인/회사 색', async () => {
+  for (const [w, h] of [[390, 844], [360, 780]]) {
+    const mc = await browser.newContext({ viewport: { width: w, height: h }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+    const m = await mc.newPage();
+    await m.goto(BASE + '/');
+    await m.getByTestId('home-week').waitFor();
+    assert.equal(await m.getByTestId('achievement').count(), 0, '달성률 카드 없음');
+    const tb = await m.getByTestId('home-today').boundingBox();
+    const wb = await m.getByTestId('home-week').boundingBox();
+    assert.ok(tb.y < h && wb.y < h, `첫 화면에 두 카드 시작이 보임 (오늘 ${Math.round(tb.y)}, 이번 주 ${Math.round(wb.y)}, 화면 ${h})`);
+    assert.ok(tb.y < wb.y, '오늘 할 일이 먼저');
+    assert.ok(!(await m.getByTestId('home-week').innerText()).includes('마감:'), '"마감:" 접두어 없음 — 업무·일정 같은 한 줄');
+    await m.screenshot({ path: `${SHOTS}/72-home-first-screen-${w}.png` });
+    await m.goto(BASE + '/tasks');
+    await m.getByTestId('tasks-more').click();
+    const menu = m.getByRole('menu', { name: '업무 더보기' });
+    for (const name of ['엑셀로 내려받기', '휴지통 (30일 복원)']) {
+      const b = await menu.getByRole('menuitem', { name }).boundingBox();
+      assert.ok(b.x >= 0 && b.x + b.width <= w && b.y + b.height <= h && b.height >= 44, `${name} 잘림 없음·44px (${JSON.stringify(b)})`);
+    }
+    await m.screenshot({ path: `${SHOTS}/73-tasks-more-sheet-${w}.png` });
+    await mc.close();
+  }
+  // V7 4번 캘린더 색: 개인/회사 두 가지, 사용자별 저장
+  await owner.goto(BASE + '/calendar');
+  await owner.getByTestId('cal-colors-open').click();
+  const cd = owner.getByTestId('cal-colors');
+  await cd.getByRole('radio', { name: '개인 일정 색 블루베리' }).click();
+  await cd.getByRole('button', { name: '저장' }).click();
+  await owner.getByText('캘린더 색을 바꿨습니다').waitFor();
+  const [cs] = await sql`select cal_colors from user_settings where user_id = ${ctx.ownerId}`;
+  assert.equal(cs.cal_colors.personal, '#3f51b5');
+  await owner.screenshot({ path: `${SHOTS}/74-calendar-two-colors.png` });
 });
 
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {

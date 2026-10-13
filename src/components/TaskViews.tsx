@@ -234,11 +234,18 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         <div className="relative">
           <Button variant="secondary" onClick={() => setMoreMenu(!moreMenu)} aria-expanded={moreMenu} aria-label="업무 더보기 메뉴" data-testid="tasks-more"><MoreHorizontal /></Button>
           {moreMenu && (
+            // V7 3번: 휴대폰은 아래에서 올라오는 시트(잘리지 않게), PC 는 버튼 아래 — 화면 오른쪽을 넘으면 오른쪽 맞춤(가장자리 8px)
             <>
-              <div className="fixed inset-0 z-30" onClick={() => setMoreMenu(false)} />
-              <div role="menu" className="absolute left-0 z-40 mt-1 w-56 rounded-card border border-line bg-white p-1 shadow-pop">
-                <button role="menuitem" className="flex w-full items-center gap-2 rounded-input px-2.5 py-2 text-left text-sm hover:bg-slate-50" onClick={() => { setMoreMenu(false); setExportOpen(true); }}><FileSpreadsheet className="size-4 text-emerald-700" />엑셀로 내려받기</button>
-                <Link role="menuitem" href="/tasks/trash" className="flex w-full items-center gap-2 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50" onClick={() => setMoreMenu(false)}><Trash2 className="size-4 text-ink-2" />휴지통 (30일 복원)</Link>
+              <div className="fixed inset-0 z-40 bg-slate-900/30 sm:z-30 sm:bg-transparent" onClick={() => setMoreMenu(false)} />
+              <div role="menu" aria-label="업무 더보기" ref={(el) => {
+                if (!el || window.innerWidth < 640) return;
+                const r = el.getBoundingClientRect();
+                if (r.right > window.innerWidth - 8) { el.style.left = 'auto'; el.style.right = '0'; }
+              }}
+                className="fixed inset-x-0 bottom-0 z-50 animate-fade-up rounded-t-2xl border-t border-line bg-white p-2 pb-[calc(var(--sab)+12px)] shadow-pop sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:z-40 sm:mt-1 sm:w-60 sm:rounded-card sm:border sm:p-1 sm:pb-1">
+                <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden />
+                <button role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-left text-sm hover:bg-slate-50" onClick={() => { setMoreMenu(false); setExportOpen(true); }}><FileSpreadsheet className="size-4 text-emerald-700" />엑셀로 내려받기</button>
+                <Link role="menuitem" href="/tasks/trash" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-sm hover:bg-slate-50" onClick={() => setMoreMenu(false)}><Trash2 className="size-4 text-ink-2" />휴지통 (30일 복원)</Link>
               </div>
             </>
           )}

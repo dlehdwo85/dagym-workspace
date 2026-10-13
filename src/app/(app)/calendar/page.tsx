@@ -19,6 +19,7 @@ import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
 import { EVENT_KIND_LABEL } from '@/lib/types';
+import { CalColorsDialog, isPersonalEvent, isPersonalTask, useCalColors } from '@/components/calColors';
 
 type Scope = 'this' | 'following' | 'all';
 const seoulDate = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
@@ -93,6 +94,8 @@ export default function CalendarPage() {
   };
   const showTask = (t: any) => who === 'all' || (who === 'mine' ? t.assignee_id === user.id : who.includes(t.assignee_id));
   const calRef = useRef<FullCalendar>(null);
+  const { colors: calColors } = useCalColors();
+  const [colorDlg, setColorDlg] = useState(false);
   const mobile = typeof window !== 'undefined' && window.innerWidth < 640;
   // 휴대폰: 보기(일·3일·주·월·목록)를 이 기기에 기억, 처음은 주. PC 는 늘 주 보기로 시작
   const savedView = !mobile ? null : (() => { try { const v = localStorage.getItem('wos_cal_view'); return v && ['timeGridDay', 'timeGrid3', 'timeGridWeek', 'dayGridMonth', 'listWeek'].includes(v) ? v : null; } catch { return null; } })();
@@ -153,19 +156,19 @@ export default function CalendarPage() {
       id: `${e.id}|${e.originalStart ?? ''}`, title: `${e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? `${initials(e.ownerName ?? '')} · ` : ''}${e.kind === 'vacation' || e.kind === 'business_trip' ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}`,
       classNames: e.kind === 'task_block' ? ['task-block'] : [],
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
-      // 다른 사람의 개인 일정은 그 사람 색(아바타와 같은 색)으로, 보기만
-      backgroundColor: e.kind === 'vacation' ? '#a855f7' : e.kind === 'business_trip' ? '#0891b2' : e.calendarType === 'personal' && e.ownerId && e.ownerId !== user.id ? avatarColor(e.ownerId) : e.color, borderColor: 'transparent',
+      // V7 4번: 색은 개인/회사 두 가지만(사람 구분은 제목 앞 머리글자)
+      backgroundColor: isPersonalEvent(e) ? calColors.personal : calColors.company, borderColor: 'transparent', textColor: '#ffffff',
       extendedProps: { type: 'event', ev: e }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
     ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id)).map((t) => ({
-      // Google Tasks 처럼 마감을 표시: "마감: 업무명 (담당자)" — 다른 사람 업무면 담당자 이름
-      id: `task|${t.id}`, title: `마감: ${t.title}${t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? ` (${t.assignee_name})` : ''}`,
+      // V7 4번: 일정과 같은 모양 — 앞에 ✓ 만 다름, 다른 사람 업무는 머리글자
+      id: `task|${t.id}`, title: `${t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? `${initials(t.assignee_name)} · ` : ''}${t.title}`,
       start: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : t.due_date, end: t.due_time ? new Date(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() + 30 * 60000).toISOString() : undefined,
-      allDay: !t.due_time, backgroundColor: '#ffffff', borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#fca5a5' : '#c7d2fe',
-      textColor: t.status === 'done' ? '#9ca3af' : '#1e3a8a', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t }, durationEditable: false,
+      allDay: !t.due_time, backgroundColor: isPersonalTask(t) ? calColors.personal : calColors.company, borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#ef4444' : 'transparent',
+      textColor: '#ffffff', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t }, durationEditable: false,
     })) : []),
-  ], [events, tasks, hidden, showTasks, hol.data, who]); // eslint-disable-line react-hooks/exhaustive-deps
+  ], [events, tasks, hidden, showTasks, hol.data, who, calColors.personal, calColors.company]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function completeTask(t: any) {
     const to = t.status === 'done' ? 'in_progress' : t.status === 'review' ? 'done' : t.approval_line_id || (t.approval_required && user.role === 'staff') ? 'review' : 'done';
@@ -256,12 +259,12 @@ export default function CalendarPage() {
         <aside className="hidden w-56 shrink-0 space-y-4 lg:block" aria-label="캘린더 목록">
           <MiniMonth anchor={visibleStart} holidays={holidaySet} onPick={goto} />
           <div>
-            <p className="mb-1.5 px-1 text-xs font-semibold text-ink-2">내 캘린더</p>
+            <p className="mb-1.5 flex items-center px-1 text-xs font-semibold text-ink-2">내 캘린더<button type="button" onClick={() => setColorDlg(true)} className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-accent-700 hover:bg-slate-100" data-testid="cal-colors-open"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button></p>
             <ul className="space-y-0.5" data-testid="calendar-list">
               {cals.data?.calendars.map((c) => (
                 <li key={c.id}>
                   <label className="flex cursor-pointer items-center gap-2 rounded-input px-1.5 py-1 text-sm hover:bg-slate-100">
-                    <input type="checkbox" className="size-4 rounded" style={{ accentColor: c.color }} checked={!hidden.includes(c.id)} onChange={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} />
+                    <input type="checkbox" className="size-4 rounded" style={{ accentColor: c.type === 'personal' ? calColors.personal : calColors.company }} checked={!hidden.includes(c.id)} onChange={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} />
                     <span className="truncate">{c.type === 'personal' ? '내 일정' : c.name}</span>
                   </label>
                 </li>
@@ -289,10 +292,11 @@ export default function CalendarPage() {
             {cals.data?.calendars.map((c) => (
               <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} aria-pressed={!hidden.includes(c.id)}
                 className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(c.id) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
-                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : c.color }} />{c.type === 'personal' ? '내 일정' : c.name}
+                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : c.type === 'personal' ? calColors.personal : calColors.company }} />{c.type === 'personal' ? '내 일정' : c.name}
               </button>
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-indigo-300 text-indigo-700' : 'border-line text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무 마감</button>
+            <button onClick={() => setColorDlg(true)} className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 font-medium text-ink-2" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
           </div>
           {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}
           <div className="mb-2 sm:hidden" data-testid="cal-mobile-head">
@@ -341,37 +345,28 @@ export default function CalendarPage() {
             eventClick={onClick}
             eventReceive={receive}
             eventContent={(arg) => {
+              // V7 4번: 업무와 일정을 같은 모양·크기로 — 업무는 앞에 ✓(완료 동그라미)만 다르고, 완료면 취소선
               const p = arg.event.extendedProps;
-              if (p.type === 'task') {
-                const t = p.task;
-                // 휴대폰 주(7일)·월 보기는 칸이 좁아 체크·시각을 빼고 제목만(6자, 2줄). 누르면 상세. 일·3일 보기는 전체 제목
-                if (mobile && (arg.view.type === 'timeGridWeek' || arg.view.type === 'dayGridMonth')) {
-                  const name = t.title.length > 6 ? `${t.title.slice(0, 6)}…` : t.title;
-                  return <div className={cx('line-clamp-2 whitespace-normal break-all px-px text-[10px] font-semibold leading-[1.15]', t.status === 'done' && 'line-through')} data-task-item={t.id} title={t.title}>{name}</div>;
-                }
-                return (
-                  <div className="flex min-w-0 items-start gap-1 overflow-hidden px-0.5 text-[12px] max-sm:text-[11px]" data-task-item={t.id}>
-                    <button type="button" data-task-check onClick={(e) => { e.stopPropagation(); completeTask(t); }} aria-label={`${t.title} ${t.status === 'done' ? '완료 취소' : '완료'}`}
-                      className={cx('mt-px flex size-3.5 shrink-0 items-center justify-center rounded-full border', t.status === 'done' ? 'border-indigo-500 bg-indigo-500 text-white' : 'border-indigo-400 bg-white hover:bg-indigo-50')}>
-                      {t.status === 'done' && <Check className="size-2.5" strokeWidth={3} />}
-                    </button>
-                    {arg.timeText && <span className="shrink-0 opacity-70">{arg.timeText}</span>}
-                    <span className={cx('line-clamp-2 whitespace-normal break-all font-medium leading-tight', t.status === 'done' && 'line-through')}>{arg.event.title}</span>
-                  </div>
-                );
-              }
-              if (p.type === 'event' && arg.view.type.startsWith('timeGrid') && !arg.event.allDay) {
-                const lt = p.ev.linkedTask;
-                return (
-                  <div className="flex h-full min-w-0 flex-col overflow-hidden px-0.5 leading-tight" data-ev-block>
-                    <span className={cx('break-all text-[12px] font-semibold', lt?.status === 'done' && 'line-through opacity-80')}>{lt && <Check className="mr-0.5 inline size-3 align-[-2px]" strokeWidth={3} aria-label="업무와 연결" />}{arg.event.title}</span>
-                    {arg.timeText && <span className="mt-0.5 text-[11px] opacity-85">{arg.timeText}</span>}
-                  </div>
-                );
-              }
-              if (p.type === 'event' && p.ev.linkedTask) return <div className={cx('flex min-w-0 items-center gap-1 overflow-hidden px-0.5 text-[12px]', p.ev.linkedTask.status === 'done' && 'line-through')}><Check className="size-3 shrink-0" strokeWidth={3} aria-label="업무와 연결" />{arg.timeText && <span className="shrink-0 opacity-80">{arg.timeText}</span>}<span className="truncate font-medium">{arg.event.title}</span></div>;
-              if (arg.event.classNames.includes('task-block')) return <div className="flex min-w-0 items-center gap-1 overflow-hidden px-0.5 text-[12px]"><Timer className="size-3 shrink-0" aria-label="업무 시간" />{arg.timeText && <span className="shrink-0 opacity-80">{arg.timeText}</span>}<span className="truncate font-medium">{arg.event.title}</span></div>;
-              return true;
+              if (p.type === 'holiday') return true;
+              const isTask = p.type === 'task';
+              const t = p.task, lt = p.ev?.linkedTask;
+              const done = isTask ? t.status === 'done' : lt?.status === 'done';
+              const narrow = mobile && (arg.view.type === 'timeGridWeek' || arg.view.type === 'dayGridMonth');
+              const timed = arg.view.type.startsWith('timeGrid') && !arg.event.allDay;
+              const mark = isTask ? (narrow ? <Check className="mr-0.5 inline size-3 align-[-2px]" strokeWidth={3} aria-hidden />
+                : <button type="button" data-task-check onClick={(e) => { e.stopPropagation(); completeTask(t); }} aria-label={`${t.title} ${done ? '완료 취소' : '완료'}`}
+                  className={cx('mr-1 inline-flex size-3.5 items-center justify-center rounded-full border border-white/90 align-[-2px]', done ? 'bg-white text-ink' : 'hover:bg-white/30')}>{done && <Check className="size-2.5" strokeWidth={3} />}</button>)
+                : lt ? <Check className="mr-0.5 inline size-3 align-[-2px]" strokeWidth={3} aria-label="업무와 연결" />
+                : arg.event.classNames.includes('task-block') ? <Timer className="mr-0.5 inline size-3 align-[-2px]" aria-label="업무 시간" /> : null;
+              return (
+                <div className={cx('flex min-w-0 overflow-hidden px-0.5 leading-tight', timed ? 'h-full flex-col' : 'items-start', narrow ? 'text-[10px]' : 'text-[12px]')}
+                  {...(isTask ? { 'data-task-item': t.id, title: t.title } : { 'data-ev-block': '1' })}>
+                  <span className={cx('min-w-0 break-all font-semibold', !timed && 'line-clamp-2 whitespace-normal', done && 'line-through opacity-80')}>
+                    {mark}{!timed && !narrow && arg.timeText && <span className="mr-1 font-normal opacity-85">{arg.timeText}</span>}{arg.event.title}
+                  </span>
+                  {timed && !narrow && arg.timeText && <span className="mt-0.5 text-[11px] opacity-85">{arg.timeText}</span>}
+                </div>
+              );
             }}
             dayCellClassNames={(a) => { const d = seoulDate(a.date); return holidaySet.has(d) ? ['is-holiday'] : []; }}
             dayHeaderClassNames={(a) => (a.view.type !== 'dayGridMonth' && holidaySet.has(seoulDate(a.date)) ? ['is-holiday'] : [])}
@@ -396,6 +391,7 @@ export default function CalendarPage() {
       </div>
       <p className="text-xs text-ink-2">빈 칸을 누르거나 끌면 빠른 입력, 업무는 체크로 완료합니다. 오른쪽 “미배정 업무”를 시간 칸으로 끌어 놓으면 업무 시간이 잡힙니다. 단축키 D·W·M·A·T·C</p>
       <ScopeDialog />
+      {colorDlg && <CalColorsDialog onClose={() => setColorDlg(false)} />}
       {quick && <QuickCreate {...quick} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
         onMore={(draft) => { setQuick(null); setEditor({ draft }); }} onSaved={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }} />}
       {preview && <EventPreview ev={preview.ev} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}

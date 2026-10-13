@@ -1418,3 +1418,18 @@ describe('WORKIN_V6 달성률', () => {
     assert.ok(!st.people.some((p) => p.id === ctx.ownerId && p.due >= 2), '현장 직원 달성률에 본사 업무가 섞이지 않음');
   });
 });
+
+describe('WORKIN_V7 캘린더 색 (개인/회사 두 가지)', () => {
+  test('기본값 → 내 색 저장(나만), 대표만 모두의 기본값, 팔레트 밖 색 거부', async () => {
+    const d0 = await ctx.staffA.client.ok('GET', '/api/calendar-colors');
+    assert.equal(d0.colors.personal, '#039be5'); assert.equal(d0.palette.length, 12);
+    await ctx.staffA.client.ok('PUT', '/api/calendar-colors', { personal: '#d50000', company: '#3f51b5' });
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/calendar-colors')).colors.personal, '#d50000');
+    assert.equal((await ctx.owner.ok('GET', '/api/calendar-colors')).colors.personal, '#039be5', '남의 색은 그대로');
+    assert.equal((await ctx.staffA.client.req('PUT', '/api/calendar-colors', { personal: '#8e24aa', company: '#0b8043', asDefault: true })).status, 403, '기본값은 대표만');
+    assert.equal((await ctx.staffA.client.req('PUT', '/api/calendar-colors', { personal: '#123456', company: '#0b8043' })).status, 400);
+    await ctx.owner.ok('PUT', '/api/calendar-colors', { personal: '#8e24aa', company: '#f4511e', asDefault: true });
+    assert.equal((await ctx.staffB.client.ok('GET', '/api/calendar-colors').catch(async () => ctx.managerA.client.ok('GET', '/api/calendar-colors'))).colors.company, '#f4511e', '안 바꾼 사람은 새 기본값');
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/calendar-colors')).colors.personal, '#d50000', '바꾼 사람은 자기 색 유지');
+  });
+});
