@@ -98,3 +98,5 @@
 - 앱 새 빌드: Android vc14(mobile run 38467993425, edebe9d) 로컬 서명 → Play 내부 테스트 출시. iOS 1.0.3(release run 38468034087) TestFlight 업로드 성공.
 
 - 2026-10-14 R2 적용 확인: health fileStorage "s3"(commit 33650b8). 버킷 workin-files, S3_* 5개 production. 실제 업로드는 대표 첫 파일 업로드 후 R2 객체 확인 예정.
+
+- R2 CORS 설정(로컬): workin-files 에 운영 도메인·localhost·capacitor origin, GET/PUT/HEAD. 업로드 실패 원인(브라우저 presigned PUT CORS) 해소. ANTHROPIC_API_KEY 대표 등록(22:47) — 운영 반영은 다음 배포(현재 Vercel 한도) 후.
