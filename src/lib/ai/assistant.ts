@@ -83,6 +83,15 @@ const TOOLS: AiTool[] = [
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }, projectId: str('프로젝트 id (선택)'), orgUnitId: str('조직 id (선택)'),
       checklist: { type: 'array', items: { type: 'string' }, description: '체크리스트 (선택)' },
     }, required: ['title'] } },
+  { name: 'propose_create_tasks', description: '같은 업무를 여러 담당자에게 각각 1건씩 만들기를 제안한다(첨부 자료를 읽고 정리할 때). 체크리스트·설명(메모)·마감 시각·지시자·첨부 자료를 함께. [확인] 후 생성.',
+    input_schema: { type: 'object', properties: {
+      title: str('업무 제목'), description: str('설명·메모 (자료 요약, 촬영 팁 등)'),
+      assigneeIds: { type: 'array', items: { type: 'string' }, description: '담당자 id 목록 (list_people 로 찾기)' },
+      dueDate: str('마감일 YYYY-MM-DD'), dueTime: str('마감 시각 HH:MM (선택)'), priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
+      requestedById: str('지시자 id (기본: 요청한 사람)'),
+      checklist: { type: 'array', items: { type: 'string' }, description: '체크리스트 항목 (예: 자료 표의 각 줄)' },
+      attachFileIds: { type: 'array', items: { type: 'string' }, description: '만든 업무마다 붙일 첨부 자료 id' },
+    }, required: ['title', 'assigneeIds'] } },
   { name: 'propose_update_task', description: '업무 고치기(상태·마감·담당·우선순위·제목)를 제안한다. [확인] 후 실행.',
     input_schema: { type: 'object', properties: {
       taskId: str('업무 id'), title: str('새 제목'), status: { type: 'string', enum: ['todo', 'in_progress', 'review', 'on_hold', 'done'] },
@@ -102,17 +111,18 @@ const TOOLS: AiTool[] = [
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 한국 피트니스 회사(다짐·하이링크) 직원을 돕습니다.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·엑셀 보고서)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
+- 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
 - 사람 이름은 list_people 로 id 를 찾아 쓰세요. 날짜는 Asia/Seoul 기준입니다.
 - 권한 오류가 나면 그 사람이 볼 수 없는 정보라고 짧게 알려 주세요.
 - 답은 한국어로 짧고 분명하게. 목록은 짧은 줄로.`;
 
-type Ctx = { u: SessionUser; proposals: { id: string; kind: string; summary: string }[] };
+type Ctx = { u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[] };
 const clip = (s: unknown, n = 400) => (typeof s === 'string' ? (s.length > n ? s.slice(0, n) + '…' : s) : s);
 const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
-async function propose(c: Ctx, kind: string, summary: string, payload: unknown) {
+async function propose(c: Ctx, kind: string, summary: string, payload: unknown, preview?: unknown) {
   const [p] = await db()<{ id: string }[]>`insert into ai_proposals (tenant, user_id, kind, summary, payload) values (${tenantOf(c.u)}, ${c.u.id}, ${kind}, ${summary}, ${db().json(payload as never)}) returning id`;
-  c.proposals.push({ id: p.id, kind, summary });
+  c.proposals.push({ id: p.id, kind, summary, preview });
   return { proposalId: p.id, status: '사용자 확인 대기 — 화면의 [확인]을 눌러야 실행됩니다' };
 }
 
@@ -168,6 +178,22 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         orgUnitId: input.orgUnitId || undefined, checklist: Array.isArray(input.checklist) ? input.checklist.slice(0, 50) : undefined });
       return propose(c, 'create_task', `업무 만들기: ${i.title}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`, i);
     }
+    case 'propose_create_tasks': {
+      const ids = [...new Set((Array.isArray(input.assigneeIds) ? input.assigneeIds : []).map(String))].slice(0, 50);
+      if (!ids.length) throw badRequest('담당자를 1명 이상 정하세요');
+      const people = (await directory(u)).users as unknown as { id: string; name: string }[];
+      const unknown = ids.filter((id) => !people.some((p) => p.id === id));
+      if (unknown.length) throw badRequest(`배정할 수 없는 사람 id: ${unknown.join(', ')} — list_people 로 다시 찾으세요`);
+      const files = (Array.isArray(input.attachFileIds) ? input.attachFileIds : []).map(String).slice(0, 5);
+      for (const f of files) await loadLibraryFile(u, f);
+      const i = taskInput.parse({ title: input.title, description: input.description || undefined, dueDate: isDate(input.dueDate) ? input.dueDate : undefined,
+        dueTime: /^\d{2}:\d{2}$/.test(input.dueTime ?? '') ? input.dueTime : undefined, priority: input.priority || undefined, requestedById: input.requestedById || u.id,
+        checklist: Array.isArray(input.checklist) ? input.checklist.map((x: unknown) => String(x).slice(0, 300)).filter(Boolean).slice(0, 100) : undefined,
+        assigneeIds: ids, approvalRequired: false });
+      const names = ids.map((id) => people.find((p) => p.id === id)!.name);
+      return propose(c, 'create_tasks', `업무 ${ids.length}건 만들기: ${i.title} — ${names.join('·')}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`,
+        { input: i, attachFileIds: files }, { assignees: names, due: i.dueDate ? `${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''}` : null, checklist: i.checklist ?? [], description: clip(i.description ?? '', 600), files: files.length });
+    }
     case 'propose_update_task': {
       const d = await getTaskDetail(u, String(input.taskId));
       const patch = taskInput.partial().parse({ title: input.title || undefined, status: input.status || undefined, dueDate: isDate(input.dueDate) ? input.dueDate : undefined,
@@ -198,8 +224,33 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
 const chatInput = z.object({
   messages: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000) })).min(1).max(30),
   taskId: z.string().uuid().optional(),
+  /** V12 8번: 이번 질문에 붙인 자료실 파일(최대 5개) — 이미지는 비전, PDF 는 문서, 그 밖은 추출한 글자로 전달 */
+  fileIds: z.array(z.string().uuid()).max(5).optional(),
 });
 export { chatInput };
+
+const IMG = /^image\/(png|jpe?g|gif|webp)$/;
+/** 첨부 파일 → Claude 입력 블록 (회사 자료실 권한 그대로, 큰 파일은 글자만) */
+async function fileBlocks(u: SessionUser, ids: string[]) {
+  const { getObject } = await import('../storage');
+  const blocks: any[] = [];
+  const notes: string[] = [];
+  for (const id of ids) {
+    const f = await loadLibraryFile(u, id);
+    notes.push(`- id=${f.id} · ${f.title} (${f.file_name})`);
+    const size = Number(f.size_bytes);
+    if (IMG.test(f.mime_type) && size <= 4.5 * 1024 * 1024) {
+      const data = (await getObject(f.storage_key)).toString('base64');
+      blocks.push({ type: 'image', source: { type: 'base64', media_type: f.mime_type === 'image/jpg' ? 'image/jpeg' : f.mime_type, data } });
+    } else if (f.mime_type === 'application/pdf' && size <= 20 * 1024 * 1024) {
+      const data = (await getObject(f.storage_key)).toString('base64');
+      blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data }, title: f.title });
+    } else if (f.text_content) {
+      blocks.push({ type: 'text', text: `[첨부 자료: ${f.title}]\n${String(f.text_content).slice(0, 60000)}` });
+    } else notes.push(`  (이 파일은 내용을 읽을 수 없습니다 — 이름만 참고)`);
+  }
+  return { blocks, note: `사용자가 이번에 자료를 첨부했습니다. 업무에 붙일 때 아래 id 를 attachFileIds 로 쓰세요.\n${notes.join('\n')}` };
+}
 
 export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provider: AiProvider = anthropicProvider()) {
   denyDemo(u);
@@ -218,6 +269,11 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   const system = `${SYSTEM}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}(id=${u.id}, 역할=${u.role}).${context}`;
   const messages: AiMessage[] = i.messages.map((m) => ({ role: m.role, content: m.text }));
+  if (i.fileIds?.length) {
+    const fb = await fileBlocks(u, i.fileIds);
+    const last = messages[messages.length - 1];
+    messages[messages.length - 1] = { role: 'user', content: [...fb.blocks, { type: 'text', text: `${fb.note}\n\n${last.content as string}` }] as never };
+  }
   const c: Ctx = { u, proposals: [] };
   const sql = db();
   const steps: string[] = [];
@@ -268,6 +324,14 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
   try {
     switch (p.kind) {
       case 'create_task': { const r: any = await createTask(u, taskInput.parse(x)); result = { taskId: r.id, link: `/tasks/${r.id}` }; break; }
+      case 'create_tasks': {
+        const { createTasksForAssignees } = await import('../tasks');
+        const r: any = await createTasksForAssignees(u, taskInput.parse(x.input));
+        const ids: string[] = r.ids ?? [r.id];
+        for (const t of ids) for (const f of x.attachFileIds ?? []) await attachLibraryToTask(u, f, t);
+        result = { taskIds: ids, link: ids.length === 1 ? `/tasks/${ids[0]}` : `/tasks?view=requested` };
+        break;
+      }
       case 'update_task': { await updateTask(u, x.taskId, taskInput.partial().parse(x.patch)); result = { taskId: x.taskId, link: `/tasks/${x.taskId}` }; break; }
       case 'comment': { const r = await addComment(u, x.taskId, `${x.text}\n\n— AI 제안을 확인해 작성`); result = { commentId: r.id, link: `/tasks/${x.taskId}#c-${r.id}` }; break; }
       case 'attach_file': { const r = await attachLibraryToTask(u, x.fileId, x.taskId); result = { attachmentId: r.id, link: `/tasks/${x.taskId}` }; break; }
@@ -288,4 +352,40 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
   await sql`update ai_proposals set status = 'done', result = ${sql.json(result as never)}, decided_at = now() where id = ${id}`;
   await audit(sql, u.id, 'ai.proposal_done', null, null, { id, kind: p.kind, result }, null);
   return { ok: true, status: 'done', ...result };
+}
+
+// ---------------- V12 8번 "📎 자료로 채우기": 첨부를 읽어 업무 등록 칸을 채움(저장은 사람이) ----------------
+export const fillInput = z.object({ fileIds: z.array(z.string().uuid()).min(1).max(5), hint: z.string().max(2000).optional() });
+const FILL_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    title: { type: 'string' }, description: { type: 'string' },
+    checklist: { type: 'array', items: { type: 'string' } },
+    dueDate: { type: ['string', 'null'] }, dueTime: { type: ['string', 'null'] },
+  },
+  required: ['title', 'description', 'checklist', 'dueDate', 'dueTime'],
+};
+export async function fillFromFiles(u: SessionUser, i: z.infer<typeof fillInput>, provider: AiProvider = anthropicProvider()) {
+  denyDemo(u);
+  if (!aiEnabled()) throw notFound();
+  const tenant = tenantOf(u);
+  const usage = await usageThisMonth(tenant);
+  if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다.`);
+  await (await import('../plans')).assertAiRequest(u);
+  const fb = await fileBlocks(u, i.fileIds);
+  const system = `워크인 업무 등록 도우미입니다. 첨부 자료를 읽고 업무 한 건의 제목(짧게), 설명(핵심 요약·메모, 한국어), 체크리스트(자료의 각 항목·할 일, 최대 30개), 자료에 마감이 있으면 dueDate(YYYY-MM-DD)·dueTime(HH:MM)을 JSON 으로만 답하세요. 없는 내용은 지어내지 말고 null. 오늘: ${todaySeoul()} (Asia/Seoul).`;
+  const r = await provider.chat({ system, tools: [], format: FILL_SCHEMA,
+    messages: [{ role: 'user', content: [...fb.blocks, { type: 'text', text: `${i.hint ? `요청: ${i.hint}\n` : ''}이 자료로 업무 등록 칸을 채워 주세요.` }] as never }] });
+  await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+    values (${tenant}, ${u.id}, ${crypto.randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0},
+      ${r.usage.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, r.usage)}, 'fill')`;
+  if (r.stop_reason === 'refusal') throw badRequest('이 자료로는 채울 수 없습니다');
+  const text = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('');
+  let j: any;
+  try { j = JSON.parse(text); } catch { throw new HttpError(502, 'ai_bad_output', 'AI 응답을 해석하지 못했습니다. 다시 시도해 주세요.'); }
+  return {
+    title: String(j.title ?? '').slice(0, 200), description: String(j.description ?? '').slice(0, 20000),
+    checklist: (Array.isArray(j.checklist) ? j.checklist : []).map((x: unknown) => String(x).slice(0, 300)).filter(Boolean).slice(0, 50),
+    dueDate: isDate(j.dueDate) ? j.dueDate : null, dueTime: /^\d{2}:\d{2}$/.test(j.dueTime ?? '') ? j.dueTime : null,
+  };
 }

@@ -5,7 +5,7 @@ import { Camera, FileText, Image as ImageIcon, Link2, Loader2, Paperclip, Trash2
 import { Button, Field, Modal, inputCls, toast, fmtDate, fmtDateTime } from './ui';
 
 /** V8 5번: 사진은 올리기 전에 긴 변 1600px·JPEG 85% 로 줄인다(휴대폰 원본 5~10MB → 수백 KB). GIF·작은 사진·실패 시 원본 */
-async function shrinkImage(file: File): Promise<File> {
+export async function shrinkImage(file: File): Promise<File> {
   if (!/^image\/(jpeg|png|webp|heic|heif)$/i.test(file.type) || file.size < 400 * 1024 || typeof createImageBitmap !== 'function') return file;
   try {
     const bmp = await createImageBitmap(file);

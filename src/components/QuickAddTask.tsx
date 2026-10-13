@@ -7,7 +7,8 @@ import { UserSelect } from './pickers';
 import { BellChip, RepeatChip, quickDues, voiceInput } from './TaskQuick';
 import { parseTaskText } from '@/lib/nlparse';
 import { PRIORITY_LABEL } from '@/lib/types';
-import { Mic, Sparkles } from 'lucide-react';
+import { Loader2, Mic, Paperclip, Sparkles } from 'lucide-react';
+import { AI_ACCEPT, uploadToLibrary } from './libraryUpload';
 import { TIMES, timeLabel } from './DateTimePickers';
 import { useSession } from './session';
 
@@ -36,6 +37,22 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   const [keep, setKeep] = useState(false);
   useEffect(() => { try { setKeep(localStorage.getItem('wos_quick_keep') === '1'); } catch {} }, []);
   const titleRef = useRef<HTMLInputElement>(null);
+  const { features } = useSession();
+  // V12 8번 "📎 자료로 채우기": 자료를 올리면 AI 가 제목·설명·체크리스트·마감을 채우고, 저장하면 그 자료가 업무에 첨부된다
+  const fillRef = useRef<HTMLInputElement>(null);
+  const [filling, setFilling] = useState('');
+  async function fillFrom(files: FileList | null) {
+    if (!files?.length) return;
+    try {
+      const ups: { id: string; name: string }[] = [];
+      for (const fl of Array.from(files).slice(0, 5)) { setFilling(`${fl.name} 올리는 중…`); ups.push(await uploadToLibrary(fl)); }
+      setFilling('AI 가 자료를 읽는 중…');
+      const r = await api('/api/ai/fill', { body: { fileIds: ups.map((u) => u.id), hint: f.title || undefined } });
+      setF((x: any) => ({ ...x, title: r.title || x.title, description: r.description, checklist: r.checklist, ...(r.dueDate ? { dueDate: r.dueDate } : {}), ...(r.dueTime ? { dueTime: r.dueTime } : {}),
+        fileIds: [...(x.fileIds ?? []), ...ups.map((u) => u.id)], fileNames: [...(x.fileNames ?? []), ...ups.map((u) => u.name)] }));
+      toast.ok('자료 내용으로 채웠습니다 — 확인하고 저장하세요');
+    } catch (e: any) { toast.error(e.message); } finally { setFilling(''); if (fillRef.current) fillRef.current.value = ''; }
+  }
 
   useEffect(() => {
     if (open) {
@@ -75,6 +92,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           body: {
             title: f.title, assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
             priority: f.priority ?? 'normal', recurrenceRule: f.rrule ?? null, reminderMinutes: f.remind ?? null,
+            ...(f.description ? { description: f.description } : {}), ...(f.checklist?.length ? { checklist: f.checklist } : {}),
             ...(count > 1 ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
             parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
             sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null,
@@ -82,6 +100,8 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           },
         });
       }
+      // 자료로 채웠으면 그 자료를 만든 업무(여러 명이면 각각)에 첨부
+      for (const tid of ((r as any).ids ?? [r.id]) as string[]) for (const fid of f.fileIds ?? []) await api(`/api/library/${fid}/attach`, { body: { taskId: tid } }).catch(() => {});
       try { localStorage.setItem('wos_quick_last', JSON.stringify({ assigneeId: f.assigneeId, requestedById: f.requestedById, priority: f.priority, projectId: f.projectId, remind: f.remind })); } catch {}
       toast.ok(count > 1 ? `${count}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
       broadcastRefresh();
@@ -100,6 +120,14 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
         <button type="button" onClick={() => { onClose(); setTimeout(() => window.dispatchEvent(new Event('wos-voice-add')), 0); }} className="mb-3 flex w-full items-center justify-center gap-2 rounded-input border border-brand-600/30 bg-brand-50 py-3 text-base font-semibold text-brand-700" data-testid="quick-voice-add">
           <Mic className="size-5" />🎤 말로 등록
         </button>
+      )}
+      {!defaults?.parentId && features.ai && (
+        <>
+          <button type="button" onClick={() => fillRef.current?.click()} disabled={!!filling} className="mb-3 flex w-full items-center justify-center gap-2 rounded-input border border-amber-300 bg-amber-50 py-2.5 text-sm font-semibold text-amber-800 disabled:opacity-60" data-testid="quick-fill">
+            {filling ? <><Loader2 className="size-4 animate-spin" />{filling}</> : <><Paperclip className="size-4" />📎 자료로 채우기 (사진·PDF·엑셀)</>}
+          </button>
+          <input ref={fillRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => fillFrom(e.target.files)} data-testid="quick-fill-input" />
+        </>
       )}
       <form onSubmit={submit} className="space-y-3" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget as HTMLFormElement).requestSubmit(); } }}>
         {!defaults?.parentId && (templates.data?.templates.length ?? 0) > 0 && (
@@ -122,6 +150,20 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           <button type="button" onClick={() => applyParsed(parsed)} className="-mt-1 inline-flex items-center gap-1.5 rounded-full bg-accent-50 px-2.5 py-1 text-xs font-medium text-accent-700 hover:bg-accent-100" data-testid="quick-nl-apply">
             <Sparkles className="size-3.5" />인식: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName, parsed.priority && PRIORITY_LABEL[parsed.priority], parsed.projectName && `#${parsed.projectName}`, parsed.rrule && '반복'].filter(Boolean).join(' · ')} → 적용
           </button>
+        )}
+        {(f.description || f.checklist?.length || f.fileNames?.length) && (
+          <div className="space-y-2 rounded-input border border-amber-200 bg-amber-50/50 p-2.5" data-testid="quick-filled">
+            {f.fileNames?.length > 0 && <p className="text-xs text-ink-2">📎 {f.fileNames.join(', ')} — 저장하면 업무에 첨부</p>}
+            <Field label="설명·메모"><textarea className={cx(inputCls, 'min-h-[80px] text-sm')} value={f.description ?? ''} onChange={(e) => set('description')(e.target.value)} /></Field>
+            {f.checklist?.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-medium text-ink-2">체크리스트 {f.checklist.length}개</p>
+                <ul className="space-y-1">{f.checklist.map((c: string, k: number) => (
+                  <li key={k} className="flex items-center gap-1.5"><input className={cx(inputCls, 'h-8 py-1 text-sm')} value={c} onChange={(e) => set('checklist')(f.checklist.map((y: string, j: number) => (j === k ? e.target.value : y)))} aria-label={`체크리스트 ${k + 1}`} />
+                    <button type="button" className="px-1 text-ink-3" onClick={() => set('checklist')(f.checklist.filter((_: string, j: number) => j !== k))} aria-label={`체크리스트 ${k + 1} 빼기`}>×</button></li>))}</ul>
+              </div>
+            )}
+          </div>
         )}
         <div className="flex flex-wrap items-center gap-2 rounded-input bg-slate-50 px-2 py-1.5" data-testid="quick-chips">
           <select className="min-h-8 rounded-md border border-line bg-white px-2 text-xs" value={f.priority ?? 'normal'} onChange={(e) => set('priority')(e.target.value)} aria-label="우선순위">

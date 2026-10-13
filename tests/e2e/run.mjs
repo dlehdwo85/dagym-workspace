@@ -1516,6 +1516,40 @@ await step('V12: PC 상세 패널 — 다른 업무 클릭 시 교체·바깥/Es
   await owner.setViewportSize({ width: 1366, height: 900 });
 });
 
+await step('V12-8: 업무 등록 "📎 자료로 채우기" → 제목·설명·체크리스트 채움 → 저장하면 자료 첨부, AI 비서에 사진 첨부 → 담당자별 일괄 제안 미리보기', async () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const q = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: items }) });
+  await q([{ content: [{ type: 'text', text: JSON.stringify({ title: 'E2E 촬영 자료 수집', description: '요청서 표 기준', checklist: ['외관', '내부', '기구'], dueDate: addDays(today, 4), dueTime: '14:00' }) }], stop_reason: 'end_turn' }]);
+  await owner.goto(BASE + '/tasks');
+  await owner.getByTestId('create-menu').click();
+  await owner.getByRole('menuitem', { name: /업무/ }).first().click();
+  const dlg = owner.getByRole('dialog', { name: '업무 등록' });
+  await dlg.getByTestId('quick-fill-input').setInputFiles([{ name: 'E2E 요청서.png', mimeType: 'image/png', buffer: png }]);
+  await dlg.getByTestId('quick-filled').getByText('체크리스트 3개').waitFor();
+  assert.equal(await dlg.getByLabel('제목').inputValue(), 'E2E 촬영 자료 수집');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await owner.getByText(/업무를 등록했습니다/).first().waitFor();
+  await owner.waitForTimeout(800);
+  const [t] = await sql`select id, to_char(due_time,'HH24:MI') tm from tasks where title = 'E2E 촬영 자료 수집'`;
+  assert.equal(t.tm, '14:00');
+  assert.equal((await sql`select count(*)::int n from task_checklist_items where task_id = ${t.id}`)[0].n, 3);
+  assert.equal((await sql`select count(*)::int n from attachments where task_id = ${t.id} and deleted_at is null`)[0].n, 1, '자료 첨부');
+  // AI 비서에 사진 첨부 → 일괄 제안 미리보기
+  await owner.goto(BASE + '/assistant');
+  await owner.getByTestId('ai-file-input').setInputFiles([{ name: 'E2E 표.png', mimeType: 'image/png', buffer: png }]);
+  await owner.getByTestId('ai-files').getByText('E2E 표.png').waitFor();
+  await q([{ content: [{ type: 'tool_use', id: 'e8', name: 'propose_create_tasks', input: { title: 'E2E 지점 자료', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: addDays(today, 5), checklist: ['가', '나'] } }], stop_reason: 'tool_use' },
+    { content: [{ type: 'text', text: '확인을 누르면 만들어집니다.' }], stop_reason: 'end_turn' }]);
+  await owner.getByLabel('AI 에게 요청').fill('각 지점 자료 받아오라고 배정해줘');
+  await owner.getByRole('button', { name: '보내기' }).click();
+  const pv = owner.getByTestId('ai-proposal-preview');
+  await pv.getByText(/담당: .*\(각자 1건\)/).waitFor();
+  await owner.screenshot({ path: `${SHOTS}/83-ai-attach-proposal.png` });
+  await owner.getByTestId('ai-proposal').getByRole('button', { name: '확인' }).click();
+  await owner.getByTestId('ai-proposal').getByText('✓ 반영됨').waitFor();
+  assert.equal((await sql`select count(*)::int n from tasks where title = 'E2E 지점 자료'`)[0].n, 2);
+});
+
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
   const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');

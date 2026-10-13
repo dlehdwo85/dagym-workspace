@@ -11,7 +11,7 @@ export type AiResponse = Anthropic.Beta.BetaMessage;
 export interface AiProvider {
   name: string;
   model: string;
-  chat(p: { system: string; messages: AiMessage[]; tools: AiTool[] }): Promise<AiResponse>;
+  chat(p: { system: string; messages: AiMessage[]; tools: AiTool[]; format?: Record<string, unknown> }): Promise<AiResponse>;
 }
 
 /** 모델 단가 (입력/출력, 100만 토큰당 달러) — 사용량·한도 계산용 추정 */
@@ -35,14 +35,15 @@ export function anthropicProvider(): AiProvider {
   return {
     name: 'anthropic',
     model,
-    chat: ({ system, messages, tools }) =>
+    chat: ({ system, messages, tools, format }) =>
       client!.beta.messages.create({
         model,
         max_tokens: 16000,
         system,
         messages,
-        tools,
-        output_config: { effort },
+        ...(tools.length ? { tools } : {}),
+        // 구조화 출력(JSON 스키마)이 필요하면 format — "자료로 채우기"
+        output_config: { effort, ...(format ? { format: { type: 'json_schema', schema: format } } : {}) } as never,
         cache_control: { type: 'ephemeral' },
         ...(FALLBACK_MODELS.has(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
       }),

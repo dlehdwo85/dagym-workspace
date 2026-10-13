@@ -1791,3 +1791,63 @@ describe('WORKIN_V12 상태 권한 · 확인 완료 · 검토 요청 알림', ()
     await ctx.owner.ok('PATCH', `/api/tasks/${t3}`, { status: 'done' });
   });
 });
+
+describe('WORKIN_V12 8번 자료로 업무 일괄 생성 (가짜 Anthropic)', () => {
+  const queue = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: items }) });
+  const fakeState = () => fetch(`${FAKE}/__state`).then((r) => r.json());
+  const up = async (c, name, mime, data) => {
+    const init = await c.ok('POST', '/api/library', { fileName: name, mimeType: mime, size: data.length, folder: 'AI 요청 첨부' });
+    await fetch(BASE + init.upload.url, { method: 'PUT', headers: init.upload.headers, body: data });
+    await c.ok('POST', `/api/library/${init.id}/complete`);
+    return init.id;
+  };
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  test('사진 첨부 → 비전 입력, create_tasks 제안(담당자별·체크리스트·메모·마감 시각) → 확인하면 각자 1건 + 원본 첨부', async () => {
+    const img = await up(ctx.owner, '촬영 요청서.png', 'image/png', png);
+    const before = (await fakeState()).anthropic.length;
+    const checklist = ['1 지점 외관', '2 내부 전경', '3 기구 근접', '4 트레이너', '5 회원 운동', '6 이벤트 배너', '7 야간 조명'];
+    await queue([{ content: [{ type: 'tool_use', id: 'c1', name: 'propose_create_tasks', input: { title: '각 지점 촬영 자료 받아오기', assigneeIds: [ctx.staffA.id, ctx.managerA.id],
+      dueDate: addDays(today, 5), dueTime: '14:00', description: '요청서 7개 게시물용 사진 — 촬영 팁: 자연광', checklist, attachFileIds: [img] } }], stop_reason: 'tool_use' },
+      { content: [{ type: 'text', text: '2명에게 각각 만들 업무를 준비했습니다. 확인을 누르면 만들어집니다.' }], stop_reason: 'end_turn' }]);
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '이직원·최매니저에게 각 지점 자료 받아오라고 배정해줘' }], fileIds: [img] });
+    const req0 = (await fakeState()).anthropic.slice(before)[0].body;
+    const last = req0.messages.at(-1).content;
+    assert.equal(last[0].type, 'image'); assert.equal(last[0].source.type, 'base64'); assert.equal(last[0].source.data, png.toString('base64'), '사진 내용(base64)을 비전 입력으로');
+    assert.ok(last.at(-1).text.includes(img) && last.at(-1).text.includes('각 지점 자료'), '첨부 id + 요청 문장');
+    assert.ok(req0.tools.some((t) => t.name === 'propose_create_tasks'));
+    const p = r.proposals[0];
+    assert.equal(p.kind, 'create_tasks'); assert.deepEqual(p.preview.assignees.sort(), ['이직원', '최매니저'].sort()); assert.equal(p.preview.checklist.length, 7); assert.equal(p.preview.files, 1);
+    assert.equal((await sql`select count(*)::int n from tasks where title = '각 지점 촬영 자료 받아오기'`)[0].n, 0, '확인 전 미생성');
+    const done = await ctx.owner.ok('POST', `/api/ai/proposals/${p.id}`, { accept: true });
+    assert.equal(done.taskIds.length, 2);
+    for (const id of done.taskIds) {
+      const d = await ctx.owner.ok('GET', `/api/tasks/${id}`);
+      assert.equal(d.checklist.length, 7); assert.equal(d.task.due_time?.slice(0, 5), '14:00'); assert.match(d.task.description, /촬영 팁/);
+      assert.equal(d.attachments.length, 1); assert.equal(d.attachments[0].file_name, '촬영 요청서.png');
+    }
+  });
+  test('모르는 담당자 id·다른 회사 자료는 거절, 자료로 채우기(구조화 출력)', async () => {
+    await queue([{ content: [{ type: 'tool_use', id: 'd1', name: 'propose_create_tasks', input: { title: 'x', assigneeIds: ['00000000-0000-4000-8000-000000000000'] } }], stop_reason: 'tool_use' },
+      { content: [{ type: 'text', text: '사람을 찾지 못했습니다.' }], stop_reason: 'end_turn' }]);
+    const before = (await fakeState()).anthropic.length;
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '없는 사람에게 배정' }] });
+    assert.equal(r.proposals.length, 0);
+    const tr = (await fakeState()).anthropic.slice(before)[1].body.messages.at(-1).content[0];
+    assert.equal(tr.is_error, true); assert.match(tr.content, /배정할 수 없는 사람/);
+    const csv = await up(ctx.staffA.client, '촬영목록.csv', 'text/csv', Buffer.from('번호,내용\n1,외관\n2,내부\n', 'utf8'));
+    await sql`update library_files set tenant = 'other-co' where id = ${csv}`;
+    assert.equal((await ctx.staffA.client.req('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '읽어줘' }], fileIds: [csv] })).status, 404);
+    await sql`update library_files set tenant = 'default' where id = ${csv}`;
+    await queue([{ content: [{ type: 'text', text: JSON.stringify({ title: '촬영 목록 정리', description: '외관·내부 촬영', checklist: ['외관', '내부'], dueDate: addDays(today, 3), dueTime: null }) }], stop_reason: 'end_turn' }]);
+    const b2 = (await fakeState()).anthropic.length;
+    const fill = await ctx.staffA.client.ok('POST', '/api/ai/fill', { fileIds: [csv] });
+    assert.deepEqual(fill, { title: '촬영 목록 정리', description: '외관·내부 촬영', checklist: ['외관', '내부'], dueDate: addDays(today, 3), dueTime: null });
+    const fr = (await fakeState()).anthropic.slice(b2)[0].body;
+    assert.equal(fr.output_config.format.type, 'json_schema'); assert.ok(!fr.tools, '도구 없이');
+    assert.match(fr.messages[0].content[0].text, /번호,내용/, 'CSV 는 추출한 글자로');
+    // 업무에 첨부 API
+    const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '자료 첨부 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+    await ctx.staffA.client.ok('POST', `/api/library/${csv}/attach`, { taskId: t });
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).attachments.length, 1);
+  });
+});
