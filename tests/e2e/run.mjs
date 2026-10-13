@@ -453,7 +453,7 @@ await step('목록: 원형 체크로 완료 → 되돌리기, 필터 칩 표시�
   await owner.getByText('완료했습니다').waitFor();
   await owner.waitForTimeout(500);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
-  await owner.getByRole('button', { name: '되돌리기' }).click();
+  await owner.getByRole('button', { name: '되돌리기', exact: true }).click();
   await owner.waitForTimeout(800);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'todo');
   await owner.getByTestId('filter-toggle').click();
@@ -566,20 +566,39 @@ await step('B-14·B-15·B-16·B-17 현장 비교·주간 보고·업무량·공�
   await owner.locator('.fc-dayGridMonth-view').waitFor();
   await owner.screenshot({ path: `${SHOTS}/48-calendar-holidays.png` });
 });
-await step('모바일 목록 행을 오른쪽으로 밀어 완료 → 되돌리기', async () => {
+await step('모바일 밀기: 기본 꺼짐·짧은/세로 밀기 무시, 켜면 45% 이상 밀어 완료 → "방금 완료한 업무"에서 되돌리기', async () => {
   const id = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '밀어서 완료 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
   await staff.goto(BASE + '/tasks?mode=list');
   await staff.getByLabel('업무 검색').fill('밀어서');
   const row = staff.locator(`[data-row="${id}"]`);
   await row.waitFor();
-  const b = await row.boundingBox();
-  const y = b.y + b.height / 2;
-  await row.dispatchEvent('touchstart', { touches: [{ identifier: 1, clientX: b.x + 20, clientY: y }] });
-  for (const x of [40, 80, 120, 150]) await row.dispatchEvent('touchmove', { touches: [{ identifier: 1, clientX: b.x + 20 + x, clientY: y }] });
-  await row.dispatchEvent('touchend', { touches: [] });
+  const drag = async (steps, dy = 0) => {
+    const b = await row.boundingBox(); const y = b.y + b.height / 2;
+    await row.dispatchEvent('touchstart', { touches: [{ identifier: 1, clientX: b.x + 10, clientY: y }] });
+    for (const x of steps) await row.dispatchEvent('touchmove', { touches: [{ identifier: 1, clientX: b.x + 10 + x, clientY: y + dy }] });
+    await row.dispatchEvent('touchend', { touches: [] });
+    await staff.waitForTimeout(400);
+  };
+  const status = async () => (await ctx.staffA.client.ok('GET', `/api/tasks/${id}`)).task.status;
+  await drag([60, 120, 200, 260]);
+  assert.notEqual(await status(), 'done', '기본 꺼짐: 길게 밀어도 그대로');
+  await staff.evaluate(() => localStorage.setItem('wos_swipe_done', '1'));
+  await staff.reload(); await staff.getByLabel('업무 검색').fill('밀어서'); await row.waitFor();
+  await drag([15, 30]);
+  assert.notEqual(await status(), 'done', '가로 30px 는 무시');
+  await drag([20, 40, 60], 150);
+  assert.notEqual(await status(), 'done', '세로 스크롤 중엔 무시');
+  const w = (await row.boundingBox()).width;
+  await drag([w * 0.2, w * 0.4, w * 0.5]);
   await staff.getByText('완료했습니다').waitFor();
-  await staff.waitForTimeout(500);
-  assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
+  assert.equal(await status(), 'done');
+  const bar = staff.getByTestId('just-done');
+  await bar.getByText('방금 완료한 업무 1건').waitFor();
+  await bar.getByRole('button', { name: /방금 완료한 업무/ }).click();
+  await bar.getByRole('button', { name: '되돌리기', exact: true }).click();
+  await staff.waitForTimeout(600);
+  assert.notEqual(await status(), 'done', '되돌리기');
+  await staff.evaluate(() => localStorage.removeItem('wos_swipe_done'));
 });
 
 // 일정 × 업무 통합 (TASK_SCHEDULE_INTEGRATION)

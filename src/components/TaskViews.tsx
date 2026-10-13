@@ -1,7 +1,7 @@
 'use client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { DndContext, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { DndContext, MouseSensor, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -98,8 +98,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   }, [mode]);
 
   /** 모든 보기에서 같은 경로로 원본 업무를 수정 → 다른 보기에도 즉시 반영 */
+  // "방금 완료한 업무": 완료되어 목록에서 빠진 업무를 다시 찾고 되돌릴 수 있게 (실수로 사라진 듯 보이지 않게)
+  const [justDone, setJustDone] = useState<{ t: Task; prev: TaskStatus }[]>([]);
+  const [justOpen, setJustOpen] = useState(false);
   async function patch(t: Task, body: Record<string, unknown>) {
     const before = data;
+    if (body.status === 'done' && t.status !== 'done') setJustDone((x) => [{ t, prev: t.status }, ...x.filter((y) => y.t.id !== t.id)].slice(0, 20));
+    if (body.status && body.status !== 'done') setJustDone((x) => x.filter((y) => y.t.id !== t.id));
     setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, ...snake(body) } : x)) });
     try {
       const r = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { ...body, version: t.version } });
@@ -250,6 +255,23 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           </select>
           <input type="date" className={inputCls} value={filters.from ?? ''} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} aria-label="기간 시작" />
           <input type="date" className={inputCls} value={filters.to ?? ''} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} aria-label="기간 끝" />
+        </div>
+      )}
+      {justDone.length > 0 && !showDone && (
+        <div className="rounded-card border border-emerald-200 bg-emerald-50 text-sm" data-testid="just-done">
+          <button onClick={() => setJustOpen(!justOpen)} aria-expanded={justOpen} className="flex w-full items-center gap-2 px-3 py-2 text-left font-medium text-emerald-800">
+            <CircleCheck className="size-4" />방금 완료한 업무 {justDone.length}건<span className="ml-auto text-xs font-normal">{justOpen ? '접기' : '보기 · 되돌리기'}</span>
+          </button>
+          {justOpen && (
+            <ul className="divide-y divide-emerald-100 border-t border-emerald-200">
+              {justDone.map(({ t, prev }) => (
+                <li key={t.id} className="flex items-center gap-2 px-3 py-1.5">
+                  <span className="min-w-0 flex-1 truncate text-ink-2 line-through">{t.title}</span>
+                  <Button size="sm" variant="secondary" onClick={async () => { if (await patch({ ...t, status: 'done', version: t.version + 1 }, { status: prev === 'done' ? 'in_progress' : prev })) { setJustDone((x) => x.filter((y) => y.t.id !== t.id)); reload(); } }}>되돌리기</Button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton /> : (
@@ -411,7 +433,8 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
 }) {
   const { user, dir } = useSession();
   const [folded, setFolded] = useState<Record<string, boolean>>({});
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  // PC: 손잡이를 마우스로 끌기 · 휴대폰: 행을 0.4초 꾹 누르면 들어 올려 위아래로
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 8 } }));
   if (group === 'due' && view === 'my') return <MyGroupedList tasks={tasks} onPatch={onPatch} onAcked={onAcked} top={top} />;
   const today = todayStr();
   const nameOf = (id: string) => dir.users.find((u) => u.id === id)?.name ?? null;
@@ -483,7 +506,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
   };
 
   return (
-    <DndContext sensors={sensors} onDragEnd={draggable ? end : undefined}>
+    <DndContext sensors={sensors} onDragEnd={draggable ? end : undefined} onDragStart={(_e: DragStartEvent) => { try { navigator.vibrate?.(15); } catch {} }}>
       <div className="space-y-4" data-testid="task-groups" data-group-by={group}>
         {top && <div className="overflow-hidden rounded-card border border-accent-500/40 bg-white shadow-card ring-2 ring-accent-500/10">{top}</div>}
         <ListHeader sortBy={sortBy} onSort={onSort} />
@@ -525,10 +548,12 @@ function GroupDrop({ id, groupKey, children }: { id: string; groupKey: string; c
 /** 끌어서 순서 바꾸는 행 (손잡이는 PC 에서만 — 휴대폰은 밀기 동작과 겹치지 않게) */
 function SortableRow({ t, onPatch, onAck, onMove }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
+  const { onMouseDown, onTouchStart } = (listeners ?? {}) as Record<string, any>;
   return (
-    <div ref={setNodeRef} style={{ transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined, transition }} className={cx(isDragging && 'relative z-50 opacity-90 shadow-pop')}>
+    <div ref={setNodeRef} onTouchStart={onTouchStart} style={{ transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined, transition }}
+      className={cx(isDragging && 'relative z-50 scale-[1.01] opacity-95 shadow-pop ring-2 ring-accent-500/40')} data-sortable-row={t.id}>
       <ListRow t={t} onPatch={onPatch} onAck={onAck} onMove={onMove} handle={
-        <button type="button" {...attributes} {...listeners} className="hidden w-4 shrink-0 cursor-grab touch-none text-slate-300 hover:text-slate-500 sm:inline-flex" aria-label={`${t.title} 끌어서 순서 바꾸기`} data-testid="drag-handle"><GripVertical className="size-4" /></button>
+        <button type="button" {...attributes} onMouseDown={onMouseDown} className="hidden w-4 shrink-0 cursor-grab touch-none text-slate-300 hover:text-slate-500 sm:inline-flex" aria-label={`${t.title} 끌어서 순서 바꾸기`} data-testid="drag-handle"><GripVertical className="size-4" /></button>
       } />
     </div>
   );
@@ -590,7 +615,7 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortab
   return (
     <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list" onKeyDown={onKey}>
       {add}
-      {hint && <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">행을 오른쪽으로 밀면 완료, 왼쪽으로 밀면 보류</p>}
+      {hint && <SwipeHint />}
       {sortable ? (
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((t) => <SortableRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} onMove={onMove} />)}
@@ -607,9 +632,10 @@ function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: 
   const [fresh, setFresh] = useState(() => isFresh(t.id));
   useEffect(() => { if (!fresh) return; const h = setTimeout(() => setFresh(false), 2000); return () => clearTimeout(h); }, [fresh]);
   const { user } = useSession();
-  const start = useRef<{ x: number; y: number; lock: 'x' | 'y' | null } | null>(null);
+  const start = useRef<{ x: number; y: number; lock: 'x' | 'y' | null; w: number } | null>(null);
   const [dx, setDx] = useState(0);
-  const TH = 80;
+  // 밀어서 완료: 기본 꺼짐(설정에서 켬). 켜도 오른쪽으로 행 너비 45% 이상 밀고 손을 뗄 때만, 세로 스크롤 중엔 무시. 보류 밀기는 없앰(실수로 업무가 사라지던 원인)
+  const swipeOn = useSwipeSetting();
   const right = nextStatusOnCheck(t, user.role);
   const swipe = async (to: TaskStatus) => {
     const before = t.status;
@@ -619,22 +645,23 @@ function ListRow({ t, onPatch, onAck, handle, onMove }: { t: Task; onPatch: (t: 
     <div className="relative overflow-hidden border-b border-line last:border-b-0">
       {dx !== 0 && (
         <div className={cx('absolute inset-0 flex items-center px-5 text-sm font-semibold text-white', dx > 0 ? 'justify-start bg-emerald-500' : 'justify-end bg-zinc-500')} aria-hidden>
-          {dx > 0 ? (right === 'review' ? '검토 요청' : right === 'done' ? '완료' : '다시 진행') : '보류'}
+          {right === 'review' ? '검토 요청' : right === 'done' ? '완료' : '다시 진행'}
         </div>
       )}
       <div tabIndex={0} data-row={t.id} data-task-id={t.id}
         style={dx ? { transform: `translateX(${dx}px)` } : undefined}
-        onTouchStart={(e) => { start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, lock: null }; }}
+        onTouchStart={(e) => { if (!swipeOn) return; start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, lock: null, w: (e.currentTarget as HTMLElement).offsetWidth }; }}
         onTouchMove={(e) => {
           const st = start.current; if (!st) return;
           const mx = e.touches[0].clientX - st.x, my = e.touches[0].clientY - st.y;
-          if (!st.lock && (Math.abs(mx) > 10 || Math.abs(my) > 10)) st.lock = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
-          if (st.lock === 'x') setDx(Math.max(-140, Math.min(140, mx)));
+          if (!st.lock && (Math.abs(mx) > 12 || Math.abs(my) > 12)) st.lock = Math.abs(mx) > Math.abs(my) * 2 ? 'x' : 'y';
+          if (st.lock === 'x') setDx(Math.max(0, Math.min(st.w * 0.6, mx)));
         }}
         onTouchEnd={() => {
-          const d = dx; start.current = null; setDx(0);
-          if (d > TH) swipe(right); else if (d < -TH && t.status !== 'on_hold' && t.status !== 'done') swipe('on_hold');
+          const st = start.current; const d = dx; start.current = null; setDx(0);
+          if (st?.lock === 'x' && d >= st.w * 0.45) swipe(right);
         }}
+        onTouchCancel={() => { start.current = null; setDx(0); }}
         data-fresh={fresh ? '1' : undefined}
         className={cx('group relative flex min-h-[44px] items-center gap-3 px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
         {handle}
@@ -960,4 +987,15 @@ function SectionColumn({ id, name, tasks }: { id: string | null; name: string; t
       <div className="flex min-h-[80px] flex-col gap-2">{tasks.map((t) => <BoardCard key={t.id} t={t} />)}</div>
     </div>
   );
+}
+
+/** 밀어서 완료 설정(이 기기): 기본 꺼짐 */
+export function useSwipeSetting() {
+  const [on, setOn] = useState(false);
+  useEffect(() => { try { setOn(localStorage.getItem('wos_swipe_done') === '1'); } catch {} }, []);
+  return on;
+}
+function SwipeHint() {
+  const on = useSwipeSetting();
+  return <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">{on ? '행을 오른쪽 끝까지 밀면 완료 · 꾹 누르면 순서 바꾸기' : '꾹 누르면 순서 바꾸기 · ⇅ 버튼으로도 이동'}</p>;
 }

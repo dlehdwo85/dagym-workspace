@@ -39,6 +39,7 @@ export default function Settings() {
         <div className="text-slate-500">{user.email} · {ROLE_LABEL[user.role]}</div>
         {features.googleSync && <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 (선택 기능) →</Link>}
       </section>
+      <SwipeToggle />
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 종류별 수신</h2>
         <table className="w-full text-sm" data-testid="prefs">
@@ -78,5 +79,20 @@ export default function Settings() {
         </div>
       </section>
     </div>
+  );
+}
+
+/** 휴대폰 목록에서 행을 밀어 완료 (이 기기 설정, 기본 꺼짐 — 옆으로 밀다 실수로 완료되는 일을 막기 위해) */
+function SwipeToggle() {
+  const [on, setOn] = useState(false);
+  useEffect(() => { try { setOn(localStorage.getItem('wos_swipe_done') === '1'); } catch {} }, []);
+  return (
+    <section className="rounded-lg border bg-white p-4">
+      <label className="flex items-start gap-3 text-sm">
+        <input type="checkbox" role="switch" className="mt-0.5 size-4" checked={on} aria-label="밀어서 완료"
+          onChange={(e) => { setOn(e.target.checked); try { localStorage.setItem('wos_swipe_done', e.target.checked ? '1' : '0'); } catch {} toast.ok(e.target.checked ? '켰습니다' : '껐습니다'); }} />
+        <span><b className="font-semibold">밀어서 완료 (휴대폰, 이 기기)</b><span className="block text-xs text-ink-2">켜면 업무 목록에서 행을 오른쪽 끝까지(절반 가까이) 밀었다 놓을 때 완료됩니다. 실수로 완료되지 않도록 기본은 꺼져 있습니다. 완료한 업무는 목록 위 &ldquo;방금 완료한 업무&rdquo;에서 되돌릴 수 있습니다.</span></span>
+      </label>
+    </section>
   );
 }
