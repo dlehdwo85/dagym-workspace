@@ -103,6 +103,8 @@ jobs:
           AUTH="-allowProvisioningUpdates -authenticationKeyPath $RUNNER_TEMP/asc/key.p8 -authenticationKeyID ${{ secrets.ASC_KEY_ID }} -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }}"
           xcodebuild -project App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' \
             -archivePath $RUNNER_TEMP/App.xcarchive DEVELOPMENT_TEAM=${{ vars.APPLE_TEAM_ID }} \
-            MARKETING_VERSION=${{ inputs.version_name }} CURRENT_PROJECT_VERSION=${{ github.run_number }} $AUTH archive
+            MARKETING_VERSION=${{ inputs.version_name }} CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO archive
+          # 서명은 아래 export 단계에서 배포용(App Store Connect)으로 자동 처리 — 개발용 프로필·등록 기기 불필요
           xcodebuild -exportArchive -archivePath $RUNNER_TEMP/App.xcarchive -exportOptionsPlist $RUNNER_TEMP/export.plist \
             -exportPath $RUNNER_TEMP/out $AUTH
