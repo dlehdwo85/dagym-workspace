@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, FileText, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
-  Building2, ListTodo, Library, LogOut, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
+  Building2, ListTodo, Library, LogOut, Mic, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
 } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
@@ -14,6 +14,7 @@ import { ROLE_LABEL } from '@/lib/types';
 import { clearReminders, enableNativePush, initNative } from './native';
 import { QuickAddTask } from './QuickAddTask';
 import { CommandPalette } from './CommandPalette';
+import { VoiceAddTask, openVoiceAdd } from './VoiceAddTask';
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 /** 워크인(WORKIN_V2) 사이드바: 홈 · 업무(본사 전체) · 프로젝트 · 캘린더 · 알림 + 관리 묶음. 숨긴 화면(현장 신고 QR·자동화·현장 비교 등)은 코드·주소는 남겨 둔다 */
@@ -279,6 +280,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setFabMenu(false)}>
             <div role="menu" aria-label="만들기" className="absolute bottom-0 left-0 right-0 animate-fade-up rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()}>
               <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-200" />
+              <button role="menuitem" onClick={() => { setFabMenu(false); openVoiceAdd(); }} aria-label="말로 등록" className="mb-2 flex w-full items-center justify-center gap-2 rounded-card bg-brand-600 py-3.5 text-base font-semibold text-white active:bg-brand-700" data-testid="fab-voice"><Mic className="size-5" />🎤 말로 등록</button>
               <div className="grid grid-cols-2 gap-2">
                 <button role="menuitem" onClick={() => { setFabMenu(false); setQuick(true); }} aria-label="업무 등록" className="flex flex-col items-center gap-1.5 rounded-card border border-line py-4 text-sm font-semibold active:bg-slate-50"><SquarePen className="size-6 text-brand-600" />업무</button>
                 <button role="menuitem" onClick={() => { setFabMenu(false); router.push('/calendar?quick=1'); }} aria-label="일정 등록" className="flex flex-col items-center gap-1.5 rounded-card border border-line py-4 text-sm font-semibold active:bg-slate-50"><CalendarPlus className="size-6 text-emerald-600" />일정</button>
@@ -306,6 +308,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
             </div>
           </div>
         )}
+        <VoiceAddTask />
         <Modal open={help} onClose={() => setHelp(false)} title="단축키">
           <ul className="divide-y divide-line text-sm">
             {SHORTCUTS.map(([k, l]) => <li key={k} className="flex items-center justify-between py-2"><span>{l}</span><span className="flex gap-1">{k.split(' ').filter((x) => x !== '다음' && x !== '·').map((x) => <Kbd key={x}>{x}</Kbd>)}</span></li>)}

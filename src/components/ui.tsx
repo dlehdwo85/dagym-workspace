@@ -110,8 +110,8 @@ export function Toaster() {
 export const STATUS_TONE: Record<TaskStatus, { badge: string; dot: string; bar: string }> = {
   todo: { badge: 'bg-slate-100 text-slate-700', dot: 'bg-slate-400', bar: '#94a3b8' },
   in_progress: { badge: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500', bar: '#3b82f6' },
-  review: { badge: 'bg-amber-50 text-amber-800', dot: 'bg-amber-500', bar: '#f59e0b' },
-  on_hold: { badge: 'bg-zinc-100 text-zinc-600', dot: 'bg-zinc-400', bar: '#a1a1aa' },
+  review: { badge: 'bg-violet-50 text-violet-700', dot: 'bg-violet-500', bar: '#8b5cf6' },
+  on_hold: { badge: 'bg-orange-50 text-orange-700', dot: 'bg-orange-500', bar: '#f97316' },
   done: { badge: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', bar: '#10b981' },
 };
 export function StatusBadge({ status }: { status: TaskStatus }) {

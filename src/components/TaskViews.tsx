@@ -14,12 +14,13 @@ import { useSession } from './session';
 import {
   CalendarDays as CalIcon, Camera, CheckCheck, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip,
   FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X,
+  Check,
 } from 'lucide-react';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
-import { AssigneePicker, DuePicker, InlineAddTask, OrderMenu, PriorityPicker, isFresh, quickDues } from './TaskQuick';
+import { AssigneePicker, DuePicker, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
 import { QuickAddTask } from './QuickAddTask';
 
 export type Task = {
@@ -67,7 +68,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     const v = cleanView(sp.get('view')); if (v) f.view = v;
     return f;
   });
-  const [showDone, setShowDone] = useState(sp.get('done') === '1');
+  // V11 2번: "완료된 업무도 보기" 체크박스는 없앰(상단 "완료" 칩 = 완료 업무 월별). 주소 ?done=1 만 호환
+  const [showDone] = useState(sp.get('done') === '1');
   // 묶기: 담당자별(기본) · 마감일 · 프로젝트 · 묶지 않음. "내 업무"는 마감일 묶음(새로 배정됨 확인 포함)이 기본
   const [groupPick, setGroupPick] = useState<GroupBy | ''>(() => {
     const g = sp.get('group'); if (GROUPS.includes(g as GroupBy)) return g as GroupBy;
@@ -212,15 +214,19 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         </div>
       </div>
       {!fixed?.view && (
-        <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 text-sm sm:mx-0 sm:px-0">
+        <div className="-mx-3 flex items-center gap-1.5 px-3 text-sm sm:mx-0 sm:px-0">
+        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-0.5">
           {views.slice(0, 2).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
           {people.map((u) => (
             <ViewChip key={u.id} on={filters.assigneeId === u.id} onClick={() => setFilters((f) => ({ ...f, view: '', assigneeId: f.assigneeId === u.id ? '' : u.id }))} label={`${u.name} 업무`}>
               <Avatar id={u.id} name={u.name} size={18} />{u.name}
             </ViewChip>
           ))}
-          {views.slice(2).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
+          {views.slice(2, -1).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
           {!views.some(([v]) => v === (filters.view ?? '')) && <ViewChip on onClick={() => setView('')}>{({ today: '오늘 할 일', risk: '마감 위험' } as Record<string, string>)[filters.view ?? ''] ?? filters.view}</ViewChip>}
+        </div>
+        {/* V11 2번: "완료" 칩은 가로 스크롤 끝에 숨지 않게 줄 끝에 고정 */}
+        <span className="shrink-0 border-l border-line pl-1.5" data-testid="done-chip"><ViewChip on={filters.view === 'done' && !filters.assigneeId} onClick={() => setView('done')}><CircleCheck className="size-3.5" />완료</ViewChip></span>
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -257,7 +263,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         {mode === 'list' && !projectId && (
           <label className="inline-flex h-9 items-center gap-1.5 text-sm text-ink-2">묶기
             <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={group} onChange={(e) => pickGroup(e.target.value as GroupBy)} aria-label="묶기 기준" data-testid="group-by">
-              <option value="assignee">담당자별</option><option value="requester">지시자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="none">묶지 않음</option>
+              <option value="assignee">담당자별</option><option value="requester">지시자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="status">상태별</option><option value="none">묶지 않음</option>
             </select>
           </label>
         )}
@@ -266,11 +272,6 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={sortBy} onChange={(e) => pickSort(e.target.value as SortKey)} aria-label="정렬" data-testid="sort-by">
               {SORTS.map((k) => <option key={k} value={k}>{SORT_LABEL[k]}</option>)}
             </select>
-          </label>
-        )}
-        {mode !== 'board' && (
-          <label className="inline-flex h-9 cursor-pointer select-none items-center gap-2 rounded-input px-2 text-sm text-ink-2 hover:bg-slate-100">
-            <input type="checkbox" className="size-4 rounded accent-brand-600" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />완료된 업무도 보기
           </label>
         )}
         {chips.map(([k, l]) => (
@@ -349,12 +350,16 @@ function snake(b: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(b).map(([k, v]) => [m[k] ?? k, v]));
 }
 
-function Meta({ t, compact }: { t: Task; compact?: boolean }) {
+function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (t: Task, b: any) => any }) {
+  const { dir } = useSession();
+  const hq = dir.orgUnits.find((o) => o.id === t.org_unit_id)?.type === 'hq';
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2">
+      {/* V11 1번: 휴대폰은 제목 아래 줄에 상태 칩(누르면 바로 변경) — PC 는 상태 열 */}
+      {onPatch && <span className="sm:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
       {t.project_name && <span className="inline-flex min-w-0 items-center gap-1"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
       {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate md:hidden" title="지시자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
-      {!compact && <span className="truncate">{t.org_unit_name}</span>}
+      {!compact && <span className={cx('truncate', onPatch && hq && 'hidden sm:inline')}>{t.org_unit_name}</span>}
       {!compact && <BrandDot brand={t.brand_id} />}
       {t.subtask_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
       {t.checklist_total > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{t.checklist_done}/{t.checklist_total}</span>}
@@ -407,13 +412,34 @@ function StatusSelect({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => v
     </select>
   );
 }
+/** V11 1번: 상태 칩(진행 전·진행 중·검토 요청·보류·완료) — 누르면 상태 메뉴 */
+function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(true); }} onPointerDown={(e) => e.stopPropagation()} aria-haspopup="dialog" aria-label={`${t.title} 상태: ${STATUS_LABEL[t.status]}`} data-testid="row-status-chip"
+        className={cx('inline-flex h-6 items-center gap-1 rounded-full px-2 text-[11px] font-medium', STATUS_TONE[t.status].badge)}>
+        <span className={cx('size-1.5 rounded-full', STATUS_TONE[t.status].dot)} aria-hidden />{STATUS_LABEL[t.status]}
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={170}>
+        {STATUSES.map((s) => (
+          <button key={s} type="button" onClick={() => { setOpen(false); if (s !== t.status) onPatch(t, { status: s }); }} aria-pressed={s === t.status}
+            className="flex w-full items-center gap-2 rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
+            <span className={cx('size-2 rounded-full', STATUS_TONE[s].dot)} />{STATUS_LABEL[s]}{s === t.status && <Check className="ml-auto size-3.5 text-accent-600" />}
+          </button>
+        ))}
+      </Popover>
+    </>
+  );
+}
 /** 마감일 칩 + 그 위의 투명 날짜 입력 (눌러서 바로 변경) */
 function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }) {
   return <span className="inline-flex w-[92px] justify-end"><DuePicker value={t.due_date} status={t.status} onChange={(v) => onPatch(t, { dueDate: v })} label={`${t.title} 마감일`} /></span>;
 }
 
-type GroupBy = 'assignee' | 'requester' | 'due' | 'project' | 'none';
-const GROUPS: GroupBy[] = ['assignee', 'requester', 'due', 'project', 'none'];
+type GroupBy = 'assignee' | 'requester' | 'due' | 'project' | 'status' | 'none';
+const GROUPS: GroupBy[] = ['assignee', 'requester', 'due', 'project', 'status', 'none'];
 type SortKey = 'manual' | 'due' | 'priority' | 'created' | 'title' | 'assignee' | 'requester' | 'status';
 const SORTS: SortKey[] = ['manual', 'due', 'priority', 'created', 'title', 'assignee', 'requester', 'status'];
 const SORT_LABEL: Record<SortKey, string> = { manual: '직접 순서', due: '마감일순', priority: '우선순위순', created: '최근 생성순', title: '이름순', assignee: '담당자순', requester: '지시자순', status: '상태순' };
@@ -518,6 +544,12 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     }
     groups = [...m.values()].sort((a, b) => (a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.label.localeCompare(b.label, 'ko')));
     if (!groups.length) groups = [{ key: 'none', label: '프로젝트 없음', items: [], add: {} }];
+  } else if (group === 'status') {
+    // V11 1번: 진행 전 → 진행 중 → 검토 요청 → 보류 (완료는 각 묶음 끝 "오늘 완료" 줄)
+    const order: TaskStatus[] = ['todo', 'in_progress', 'review', 'on_hold'];
+    groups = order.map((st) => ({ key: st, label: STATUS_LABEL[st], head: <span className={cx('size-2.5 rounded-full', STATUS_TONE[st].dot)} />, items: [], add: {} }));
+    if (tasks.some((t) => t.status === 'done')) groups.push({ key: 'done', label: STATUS_LABEL.done, head: <span className={cx('size-2.5 rounded-full', STATUS_TONE.done.dot)} />, items: [], add: {} });
+    for (const t of tasks) groups.find((g) => g.key === t.status)?.items.push(t);
   } else if (group === 'month') {
     // V6 5번 완료 보관: 완료일 기준 월별 (최신 달 먼저)
     const m = new Map<string, G>();
@@ -537,6 +569,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     if (group === 'requester') return g.add.defaultRequester ? { requestedById: g.add.defaultRequester } : null;
     if (group === 'due') return { dueDate: g.add.defaultDue ?? null };
     if (group === 'project') return { projectId: g.add.projectId ?? null };
+    if (group === 'status') return { status: g.key };
     return null;
   };
   const end = (e: DragEndEvent) => {
@@ -564,7 +597,13 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     <DndContext sensors={sensors} onDragEnd={draggable ? end : undefined} onDragStart={(_e: DragStartEvent) => { try { navigator.vibrate?.(15); } catch {} }}>
       <div className="space-y-4" data-testid="task-groups" data-group-by={group}>
         {top && <div className="overflow-hidden rounded-card border border-accent-500/40 bg-white shadow-card ring-2 ring-accent-500/10">{top}</div>}
-        <ListHeader sortBy={sortBy} onSort={onSort} />
+        {group === 'month' ? (() => {
+          // V11 2번: 완료 보기 머리 요약
+          const ym = today.slice(0, 7), d = new Date(today.slice(0, 7) + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1);
+          const prev = d.toISOString().slice(0, 7);
+          const n = (k: string) => groups.find((g) => g.key === k)?.items.length ?? 0;
+          return <p className="px-1 text-sm text-ink-2" data-testid="done-summary">이번 달 <b className="text-ink">{n(ym)}건</b> · 지난달 <b className="text-ink">{n(prev)}건</b> 완료</p>;
+        })() : <ListHeader sortBy={sortBy} onSort={onSort} />}
         {groups.map((x, gi) => {
           const open = x.items.filter((t) => t.status !== 'done').length;
           // 완료 업무: 이 화면에서 방금 끝낸 건 제자리(취소선), 그 밖의 오늘 완료는 묶음 끝 "오늘 완료 n건" 접힘 줄
@@ -750,7 +789,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
             <TypeIcon t={t} />
             <TaskLink id={t.id} className={cx('truncate text-sm font-medium text-ink hover:text-accent-600 hover:underline', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
           </span>
-          <Meta t={t} />
+          <Meta t={t} onPatch={onPatch} />
         </div>
         {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
         <span className="hidden w-[104px] min-w-0 md:flex"><AssigneePicker role="지시자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>

@@ -96,6 +96,11 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
 
   return (
     <Modal open={open} onClose={onClose} title={defaults?.parentId ? '하위 업무 추가' : '업무 등록'}>
+      {!defaults?.parentId && (
+        <button type="button" onClick={() => { onClose(); setTimeout(() => window.dispatchEvent(new Event('wos-voice-add')), 0); }} className="mb-3 flex w-full items-center justify-center gap-2 rounded-input border border-brand-600/30 bg-brand-50 py-3 text-base font-semibold text-brand-700" data-testid="quick-voice-add">
+          <Mic className="size-5" />🎤 말로 등록
+        </button>
+      )}
       <form onSubmit={submit} className="space-y-3" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget as HTMLFormElement).requestSubmit(); } }}>
         {!defaults?.parentId && (templates.data?.templates.length ?? 0) > 0 && (
           <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" aria-label="템플릿에서 만들기" data-testid="tpl-chips">

@@ -20,27 +20,71 @@ export function quickDues() {
   return [['오늘', t], ['내일', addDays(t, 1)], ['이번 주 금요일', fri], ['다음 주 월요일', nextMon]] as [string, string][];
 }
 
-/** 작은 떠 있는 창: 문서 맨 위(포털)에 고정 위치로 띄워 목록 행의 overflow 에 잘리지 않게. 바깥 클릭·Esc 로 닫힘 */
-function Popover({ open, onClose, anchor, children, width = 224 }: { open: boolean; onClose: () => void; anchor: React.RefObject<HTMLElement | null>; children: React.ReactNode; width?: number }) {
-  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
+/**
+ * 작은 떠 있는 창: 문서 맨 위(포털)에 고정 위치로 띄워 목록 행의 overflow 에 잘리지 않게. 바깥 클릭·Esc 로 닫힘.
+ * V11 3번: 휴대폰(<640px)에서는 아래에서 올라오는 시트 — 키보드를 내리고, 상태바·하단 탭·키보드에 가리지 않게(안전 영역), 맨 아래 "완료".
+ */
+export function Popover({ open, onClose, anchor, children, width = 224, title }: { open: boolean; onClose: () => void; anchor: React.RefObject<HTMLElement | null>; children: React.ReactNode; width?: number; title?: string }) {
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | 'sheet' | null>(null);
   useEffect(() => {
     if (!open) { setPos(null); return; }
-    const r = anchor.current?.getBoundingClientRect();
-    if (!r) return;
-    const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.right - width));
-    const below = window.innerHeight - r.bottom > 280;
-    setPos(below ? { left, top: r.bottom + 4 } : { left, bottom: window.innerHeight - r.top + 4 });
+    if (window.innerWidth < 640) {
+      (document.activeElement as HTMLElement | null)?.blur?.(); // 키보드 내림
+      setPos('sheet');
+    } else {
+      const r = anchor.current?.getBoundingClientRect();
+      if (!r) return;
+      const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.right - width));
+      const below = window.innerHeight - r.bottom > 280;
+      setPos(below ? { left, top: r.bottom + 4 } : { left, bottom: window.innerHeight - r.top + 4 });
+    }
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
     window.addEventListener('keydown', h, true);
     return () => window.removeEventListener('keydown', h, true);
   }, [open, onClose, anchor, width]);
   if (!open || !pos || typeof document === 'undefined') return null;
+  if (pos === 'sheet') return createPortal(
+    <>
+      <div className="fixed inset-0 z-[70] bg-slate-900/40" onClick={(e) => { e.stopPropagation(); onClose(); }} />
+      <div role="dialog" aria-label={title} data-sheet className="fixed inset-x-0 bottom-0 z-[71] flex max-h-[min(80dvh,calc(100dvh-var(--sat,0px)-24px))] animate-fade-up flex-col rounded-t-2xl bg-white shadow-pop"
+        onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+        <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-slate-200" aria-hidden />
+        {title && <p className="px-4 pt-2 text-sm font-semibold">{title}</p>}
+        <div className="min-h-0 flex-1 overflow-y-auto p-2 [&_button]:min-h-11 [&_button]:text-[15px]">{children}</div>
+        <div className="shrink-0 border-t border-line p-2 pb-[calc(var(--sab,0px)+8px)]">
+          <button type="button" onClick={onClose} className="h-12 w-full rounded-input bg-brand-600 text-base font-semibold text-white" data-testid="sheet-done">완료</button>
+        </div>
+      </div>
+    </>,
+    document.body,
+  );
   return createPortal(
     <>
       <div className="fixed inset-0 z-[70]" onClick={(e) => { e.stopPropagation(); onClose(); }} />
-      <div role="dialog" className="fixed z-[71] animate-fade-up rounded-card border border-line bg-white p-1 shadow-pop" style={{ ...pos, width }} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>{children}</div>
+      <div role="dialog" aria-label={title} className="fixed z-[71] max-h-[min(70vh,520px)] animate-fade-up overflow-y-auto rounded-card border border-line bg-white p-1 shadow-pop" style={{ ...pos, width }} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>{children}</div>
     </>,
     document.body,
+  );
+}
+
+/** V11 3번: 시각은 큰 버튼 격자(09:00~18:00, 30분) + "직접"(15분 목록) */
+const GRID_TIMES = Array.from({ length: 19 }, (_, i) => `${String(9 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`);
+function TimeGrid({ value, onChange, label }: { value: string | null | undefined; onChange: (v: string | null) => void; label: string }) {
+  return (
+    <div className="px-1.5 py-1">
+      <div className="mb-1 text-xs text-ink-2">시각</div>
+      <div className="grid grid-cols-4 gap-1" role="group" aria-label={`시각 빠른 선택 (${label})`}>
+        <button type="button" onClick={() => onChange(null)} aria-pressed={!value} className={cx('rounded-input border px-1 py-1.5 text-xs', !value ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line')}>없음</button>
+        {GRID_TIMES.map((t) => (
+          <button key={t} type="button" onClick={() => onChange(t)} aria-pressed={value === t} className={cx('rounded-input border px-1 py-1.5 text-xs tabular-nums', value === t ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line')}>{t}</button>
+        ))}
+      </div>
+      <label className="mt-1.5 flex items-center gap-2 text-sm"><span className="shrink-0 text-xs text-ink-2">직접</span>
+        <select className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-sm" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} aria-label={`${label} 시각`}>
+          <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
+        </select>
+      </label>
+    </div>
   );
 }
 
@@ -54,7 +98,7 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
         className={cx('inline-flex items-center rounded-md hover:bg-slate-100', !value && 'gap-1 px-1.5 py-0.5 text-xs text-ink-3', !value && emptyText && 'h-8 rounded-input border border-line bg-white px-2.5 text-sm')}>
         {value ? <span className="inline-flex items-center gap-1"><DueChip due={value} status={status} />{time && <span className="text-xs font-medium text-ink-2 tabular-nums">{timeLabel(time)}</span>}</span> : <><CalendarDays className="size-3.5" />{compact ? '' : emptyText ?? '마감일'}</>}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={ref}>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={label} width={260}>
         {quickDues().map(([l, d]) => (
           <button key={l} type="button" onClick={() => { onChange(d); if (!onTime) setOpen(false); }} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
             <span>{l}</span><span className="text-xs text-ink-3 tabular-nums">{Number(d.slice(5, 7))}/{Number(d.slice(8))}</span>
@@ -64,13 +108,7 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
           <input type="date" className="min-w-0 flex-1 rounded border border-line px-1.5 py-0.5 text-sm" value={value ?? ''} onChange={(e) => { onChange(e.target.value || null); if (!onTime) setOpen(false); }} aria-label={`${label} 날짜 선택`} />
         </label>
         {/* V6 10번: 날짜 다음에 시각(15분, 기본 없음) */}
-        {value && onTime && (
-          <label className="flex items-center gap-2 px-2.5 py-1.5 text-sm"><span className="shrink-0 text-ink-2">시각</span>
-            <select className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-sm" value={time ?? ''} onChange={(e) => onTime(e.target.value || null)} aria-label={`${label} 시각`}>
-              <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
-            </select>
-          </label>
-        )}
+        {value && onTime && <TimeGrid value={time} onChange={onTime} label={label} />}
         {value && <button type="button" onClick={() => { onChange(null); onTime?.(null); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded-input px-2.5 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><X className="size-3.5" />마감일 지우기</button>}
       </Popover>
     </span>
@@ -92,8 +130,8 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
         className={withName ? 'inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100' : 'rounded-full hover:ring-2 hover:ring-accent-500/30'} data-testid={role === '지시자' ? 'requester-picker' : 'assignee-picker'}>
         <Avatar id={value} name={cur?.name ?? name ?? null} size={size} />{withName && <span className="truncate">{cur?.name ?? name ?? '없음'}</span>}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={ref}>
-        <input autoFocus className="mb-1 w-full rounded-input border border-line px-2 py-1 text-sm" placeholder="이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="담당자 검색" />
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={`${role} 선택`}>
+        <input autoFocus={typeof window !== 'undefined' && window.innerWidth >= 640} className="mb-1 w-full rounded-input border border-line px-2 py-1 text-sm" placeholder="이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="담당자 검색" />
         <div className="max-h-60 overflow-y-auto">
           {shown.map((u) => (
             <button key={u.id} type="button" onClick={() => { onChange(u.id); setOpen(false); }} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm hover:bg-slate-50">
@@ -140,10 +178,10 @@ export function BellChip({ value, onChange, label = '미리 알림' }: { value: 
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${label}: ${cur.length ? cur.map(remindLabel).join(', ') : '기본'}`} aria-haspopup="dialog" aria-expanded={open} data-testid="bell-chip"
-        className={cx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-slate-100', cur.length ? 'font-medium text-accent-700' : 'text-ink-3')}>
-        <Bell className="size-3.5" />{cur.length ? cur.map(remindLabel).join('·') : ''}
+        className={cx('inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-xs', cur.length ? 'border-accent-500/40 bg-accent-50 font-medium text-accent-700' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>
+        <Bell className="size-3.5" />{cur.length ? `알림 ${cur.map(remindLabel).join('·')}` : '알림 기본'}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={ref}>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="미리 알림">
         <p className="px-2.5 py-1 text-[11px] text-ink-3">최대 3개 — 안 고르면 각자 기본 알림</p>
         {REMIND_OPTS.map(([m, l]) => { const on = cur.includes(m); return (
           <button key={m} type="button" disabled={!on && cur.length >= 3} onClick={() => { const n = on ? cur.filter((x) => x !== m) : [...cur, m].sort((a, b) => a - b); onChange(n.length ? n : null); }}
@@ -164,10 +202,10 @@ export function RepeatChip({ value, anchorDate, onChange }: { value: string | nu
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`반복: ${value ? cur?.label ?? '사용자 지정' : '안 함'}`} aria-haspopup="dialog" aria-expanded={open} data-testid="repeat-chip"
-        className={cx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-slate-100', value ? 'font-medium text-accent-700' : 'text-ink-3')}>
-        <Repeat className="size-3.5" />{value ? cur?.label ?? '반복' : ''}
+        className={cx('inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-xs', value ? 'border-accent-500/40 bg-accent-50 font-medium text-accent-700' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>
+        <Repeat className="size-3.5" />{value ? cur?.label ?? '반복' : '반복 안 함'}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={ref}>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="반복">
         {presets.map((p) => (
           <button key={p.label} type="button" onClick={() => { onChange(p.rule); setOpen(false); }} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
             {p.label}{p.rule === value && <Check className="size-3.5 text-accent-600" />}
@@ -257,20 +295,22 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
           }}
           onCompositionEnd={() => { if (enterWhileComposing.current) { enterWhileComposing.current = false; setTimeout(() => submit(input.current?.value), 0); } }}
           className="min-w-0 flex-1 bg-transparent py-1 text-sm placeholder:text-ink-3 focus:outline-none" />
-        {showChips && (
-          <>
-            <span className="hidden sm:inline-flex" title="지시자(업무를 부여한 사람)"><span className="self-center text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={back((v: string | null) => setRequester(v ?? user.id))} size={20} withName /></span>
-            <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" time={dueTime} onTime={setDueTime} />
-            <AssigneePicker value={assignee} onChange={back(setAssignee)} />
-            <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
-            <BellChip value={remind} onChange={setRemind} />
-          </>
-        )}
+        {/* V11 4번: 음성은 입력칸 오른쪽 큰 마이크 버튼 */}
         <button type="button" onClick={voice} aria-label="음성으로 업무 추가" aria-pressed={listening} data-testid="voice-btn"
-          className={cx('flex size-8 shrink-0 items-center justify-center rounded-full', listening ? 'animate-pulse bg-red-500 text-white' : 'text-ink-3 hover:bg-slate-100 hover:text-ink-2')}><Mic className="size-4" /></button>
+          className={cx('flex size-11 shrink-0 items-center justify-center rounded-full sm:size-9', listening ? 'animate-pulse bg-red-500 text-white' : 'bg-accent-50 text-accent-700 hover:bg-accent-100')}><Mic className="size-5" /></button>
         {title.trim() && <button type="submit" className="h-11 shrink-0 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white shadow-card active:scale-95 sm:h-8 sm:px-3" data-testid="inline-save">저장</button>}
         {busy && <span className="shrink-0 text-xs text-ink-3" data-testid="inline-saving">저장 중…</span>}
       </div>
+      {showChips && (
+        // V11 4번: 글자 있는 칩, 길면 2줄로 감김(가로 스크롤 없음)
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 pl-12" data-testid="inline-chips">
+          <span className="inline-flex items-center gap-1" title="지시자(업무를 부여한 사람)"><span className="text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={back((v: string | null) => setRequester(v ?? user.id))} size={20} withName /></span>
+          <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" time={dueTime} onTime={setDueTime} emptyText="마감 없음" />
+          <span className="inline-flex items-center gap-1"><span className="text-[11px] text-ink-3">담당</span><AssigneePicker value={assignee} onChange={back(setAssignee)} size={20} withName /></span>
+          <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
+          <BellChip value={remind} onChange={setRemind} />
+        </div>
+      )}
       {parsed && parsed.matched.length > 0 && (parsed.dueDate !== due || (parsed.dueTime && parsed.dueTime !== dueTime) || (parsed.assigneeId && parsed.assigneeId !== assignee)) && (
         <button type="button" onClick={() => applyParsed(parsed)} className="mx-3 mb-2 ml-12 inline-flex items-center gap-1.5 rounded-full bg-accent-50 px-2.5 py-1 text-xs font-medium text-accent-700 hover:bg-accent-100" data-testid="nl-apply">
           <Sparkles className="size-3.5" />인식: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName].filter(Boolean).join(' · ')} → 적용

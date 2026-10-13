@@ -5,7 +5,7 @@ export const ROLE_LABEL: Record<Role, string> = {
 };
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'on_hold' | 'done';
 export const STATUS_LABEL: Record<TaskStatus, string> = {
-  todo: '예정', in_progress: '진행 중', review: '검토 요청', on_hold: '보류', done: '완료',
+  todo: '진행 전', in_progress: '진행 중', review: '검토 요청', on_hold: '보류', done: '완료',
 };
 export const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'review', 'on_hold', 'done'];
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';

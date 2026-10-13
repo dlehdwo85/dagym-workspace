@@ -461,9 +461,9 @@ await step('목록: 원형 체크로 완료 → 되돌리기, 필터 칩 표시�
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'todo');
   await owner.getByTestId('filter-toggle').click();
   await owner.getByTestId('filter-panel').getByLabel('상태').selectOption('todo');
-  await owner.getByTestId('filter-chip').filter({ hasText: '상태: 예정' }).waitFor();
+  await owner.getByTestId('filter-chip').filter({ hasText: '상태: 진행 전' }).waitFor();
   await owner.screenshot({ path: `${SHOTS}/35-task-list-filters.png` });
-  await owner.getByRole('button', { name: '상태: 예정 필터 해제' }).click();
+  await owner.getByRole('button', { name: '상태: 진행 전 필터 해제' }).click();
   assert.equal(await owner.getByTestId('filter-chip').count(), 0);
   await owner.getByTestId('open-palette').click();
   await owner.getByTestId('palette-input').waitFor();
@@ -1068,7 +1068,7 @@ await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 �
   await row.waitFor();
   const id = await row.getAttribute('data-row');
   const box = await row.boundingBox();
-  await m.touchscreen.tap(box.x + 60, box.y + box.height - 4); // 제목 글자가 아닌 행 아래쪽 여백
+  await m.touchscreen.tap(box.x + box.width / 2, box.y + box.height - 4); // 제목·상태 칩이 아닌 행 아래쪽 가운데 여백
   await m.getByTestId('task-panel').waitFor();
   assert.ok(m.url().endsWith(`/tasks/${id}`), '행 빈 곳 탭 → 그 업무 상세');
   await m.getByTestId('status-chip').waitFor();
@@ -1410,6 +1410,66 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await owner.screenshot({ path: `${SHOTS}/79-platform.png`, fullPage: true });
   const r = await ctx.staffA.client.req('GET', '/api/platform');
   assert.equal(r.status, 404);
+});
+
+await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 상태별, 완료 칩 보임·월별 요약, 마감 선택 = 아래 시트(화면 안)·시각 버튼, 글자 칩, 🎤 말로 등록 → 인식 카드(빠진 마감 빨간 표시)', async () => {
+  const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V11 상태 칩 업무', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, dueDate: addDays(today, 1), approvalRequired: false })).id;
+  const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  const m = await mc.newPage();
+  await m.goto(BASE + '/tasks');
+  const row = m.locator(`[data-row="${t}"]`);
+  await row.getByTestId('row-status-chip').getByText('진행 전').waitFor();
+  await row.getByTestId('row-status-chip').tap();
+  const sheet = m.locator('[data-sheet]');
+  await sheet.getByRole('button', { name: '진행 중' }).tap();
+  await row.getByTestId('row-status-chip').getByText('진행 중').waitFor();
+  assert.equal((await sql`select status from tasks where id = ${t}`)[0].status, 'in_progress');
+  // 완료 칩은 줄 끝에 고정되어 화면 안에 보임
+  const box = await m.getByTestId('done-chip').boundingBox();
+  assert.ok(box && box.x + box.width <= 390, '완료 칩 화면 안');
+  assert.equal(await m.getByText('완료된 업무도 보기').count(), 0, '체크박스 없음');
+  await m.getByTestId('group-by').selectOption('status');
+  await m.locator('[data-group="in_progress"]').getByText('V11 상태 칩 업무').waitFor();
+  await m.getByTestId('group-by').selectOption('assignee');
+  // 한 줄 추가: 글자 칩 + 마감 시트
+  const add = m.getByTestId('inline-add').first();
+  await add.getByLabel('업무 추가 제목').fill('V11 시트 마감 업무');
+  await add.getByTestId('repeat-chip').getByText('반복 안 함').waitFor();
+  await add.getByTestId('bell-chip').getByText('알림 기본').waitFor();
+  await add.getByTestId('due-picker').tap();
+  await sheet.waitFor();
+  await m.waitForTimeout(400); // 올라오는 동작 끝난 뒤
+  const sb = await sheet.boundingBox();
+  assert.ok(sb.y >= 0 && sb.y + sb.height <= 844 + 1, `시트가 화면 안(상태바·아래 가림 없음): ${JSON.stringify(sb)}`);
+  await sheet.getByRole('button', { name: /^내일/ }).tap();
+  await sheet.getByRole('button', { name: '15:00' }).tap();
+  await m.screenshot({ path: `${SHOTS}/80-v11-due-sheet-390.png` });
+  await sheet.getByTestId('sheet-done').tap();
+  await add.getByTestId('inline-save').tap();
+  await m.getByText(/추가됨: V11 시트 마감 업무/).first().waitFor();
+  const [nt] = await sql`select to_char(due_date,'YYYY-MM-DD') d, to_char(due_time,'HH24:MI') tm from tasks where title = 'V11 시트 마감 업무'`;
+  assert.equal(nt.d, addDays(today, 1)); assert.equal(nt.tm, '15:00');
+  assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '390 넘침 없음');
+  await m.screenshot({ path: `${SHOTS}/81-v11-tasks-390.png` });
+  // 🎤 말로 등록 (텍스트로 대체 시험)
+  await m.getByTestId('fab').tap();
+  await m.getByTestId('fab-voice').tap();
+  const dlg = m.getByRole('dialog', { name: '🎤 말로 업무 등록' });
+  await dlg.getByTestId('voice-guide').getByText('마감(언제까지)').waitFor();
+  await dlg.getByTestId('voice-text').fill('견적서 보내기');
+  await dlg.getByTestId('voice-recognize').tap();
+  await dlg.getByTestId('voice-card').getByText('말씀하지 않으셨어요 — 눌러서 선택').waitFor();
+  assert.equal(await dlg.getByTestId('voice-save').isDisabled(), true, '마감 없으면 저장 불가');
+  await dlg.getByRole('button', { name: '다시 말하기' }).tap();
+  await dlg.getByTestId('voice-text').fill('금요일까지 최매니저 쌍용점 덤벨 수량 파악 !높음');
+  await dlg.getByTestId('voice-recognize').tap();
+  assert.equal(await dlg.getByLabel('인식한 업무명').inputValue(), '쌍용점 덤벨 수량 파악');
+  await m.screenshot({ path: `${SHOTS}/82-v11-voice-card-390.png` });
+  await dlg.getByTestId('voice-save').tap();
+  await m.getByText(/업무를 등록했습니다: 쌍용점 덤벨 수량 파악/).first().waitFor();
+  const [vt] = await sql`select assignee_id, priority, due_date from tasks where title = '쌍용점 덤벨 수량 파악'`;
+  assert.equal(vt.assignee_id, ctx.managerA.id); assert.equal(vt.priority, 'high'); assert.ok(vt.due_date);
+  await mc.close();
 });
 
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {

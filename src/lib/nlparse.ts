@@ -91,3 +91,20 @@ export function listenOnce(onText: (t: string) => void, onEnd: (err?: string) =>
   try { r.start(); } catch { onEnd('error'); }
   return () => { try { r.stop(); } catch { /* 이미 끝남 */ } };
 }
+
+/** V11 5번: 말하는 동안 실시간 글자(중간 결과) + 끝나면 최종 문장 */
+export function listenLive(onText: (t: string, final: boolean) => void, onEnd: (err?: string) => void) {
+  const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  if (!SR) { onEnd('unsupported'); return () => {}; }
+  const r = new SR();
+  r.lang = 'ko-KR'; r.interimResults = true; r.maxAlternatives = 1; r.continuous = false;
+  r.onresult = (e: any) => {
+    let text = '', final = false;
+    for (let i = 0; i < e.results.length; i++) { text += e.results[i][0].transcript; final = final || e.results[i].isFinal; }
+    onText(text, final);
+  };
+  r.onerror = (e: any) => onEnd(e?.error ?? 'error');
+  r.onend = () => onEnd();
+  try { r.start(); } catch { onEnd('error'); }
+  return () => { try { r.stop(); } catch { /* 이미 끝남 */ } };
+}
