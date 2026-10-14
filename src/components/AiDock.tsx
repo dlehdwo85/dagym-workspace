@@ -53,6 +53,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   useEffect(() => { setMsgs([]); setThreadId(null); }, [key]);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy]);
   if (path.startsWith('/assistant')) return null;
+  const hideFab = path.startsWith('/messages'); // 메시지 화면은 아래 오른쪽에 보내기 버튼 — 겹치지 않게(휴대폰은 상단 ✨)
 
   async function send(q: string) {
     const t = q.trim(); if (!t || busy) return;
@@ -71,7 +72,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   }
   return (
     <>
-      {!open && (
+      {!open && !hideFab && (
         <button onClick={() => onOpenChange(true)} aria-label="AI 비서 열기" data-testid="ai-dock-open"
           className="fixed bottom-6 right-6 z-40 hidden size-12 items-center justify-center rounded-full bg-violet-600 text-white shadow-pop hover:bg-violet-700 sm:flex"><Sparkles className="size-6" /></button>
       )}
