@@ -2118,3 +2118,52 @@ describe('V13 6번 마감 알림을 지시자에게도', () => {
     assert.ok(mine.some((x) => x.title.startsWith('[지시] 1시간 뒤 마감')));
   });
 });
+
+describe('V13 8번 대댓글·댓글 알림·반응', () => {
+  const cnotes = (uid, cid) => sql`select title from notifications where user_id = ${uid} and link like ${'%#c-' + cid}`;
+  test('새 댓글 → 담당·지시·댓글 단 사람(본인 제외), 답글 → 원 작성자·스레드 참여자만, 멘션은 1건', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-8 댓글', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id })).id;
+    const c1 = await ctx.staffA.client.ok('POST', `/api/tasks/${t}/comments`, { body: '시작했습니다' });
+    assert.equal((await cnotes(ctx.managerA.id, c1.id)).length, 1, '지시자');
+    assert.equal((await cnotes(ctx.ownerId, c1.id)).length, 1, '만든 사람');
+    assert.equal((await cnotes(ctx.staffA.id, c1.id)).length, 0, '본인 제외');
+    const c2 = await ctx.owner.ok('POST', `/api/tasks/${t}/comments`, { body: '좋습니다' });
+    assert.equal((await cnotes(ctx.staffA.id, c2.id)).length, 1, '담당자');
+    // 답글: 원 작성자(staffA) + 스레드 참여자
+    const r1 = await ctx.managerA.client.ok('POST', `/api/tasks/${t}/comments`, { body: '사진도 올려 주세요', parentId: c1.id });
+    assert.equal(r1.parentId, c1.id);
+    assert.deepEqual((await cnotes(ctx.staffA.id, r1.id)).map((n) => n.title), ['답글: V13-8 댓글']);
+    assert.equal((await cnotes(ctx.ownerId, r1.id)).length, 0, '스레드 밖 사람에게는 안 감');
+    // 답글의 답글 → 같은 스레드(1단계), 참여자 managerA 에게
+    const r2 = await ctx.staffA.client.ok('POST', `/api/tasks/${t}/comments`, { body: `@[최매니저](${ctx.managerA.id}) 올렸습니다`, parentId: r1.id });
+    assert.equal(r2.parentId, c1.id, '답글은 1단계');
+    const m = await sql`select type from notifications where user_id = ${ctx.managerA.id} and link like ${'%#c-' + r2.id}`;
+    assert.deepEqual(m.map((x) => x.type), ['mention'], '멘션된 사람은 1건');
+    // 다른 업무의 댓글에 답글 달기 불가
+    const other = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-8 다른 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id })).id;
+    assert.equal((await ctx.staffA.client.post(`/api/tasks/${other}/comments`, { body: 'x', parentId: c1.id })).status, 404);
+    // 상세: 답글 구조
+    const d = await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
+    assert.equal(d.comments.filter((c) => c.parent_id === c1.id).length, 2);
+  });
+  test('반응 토글·수정·삭제(작성자만), 답글 있는 댓글은 "삭제된 댓글"로 남음, 볼 수 없는 사람은 반응 불가', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-8 반응', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id })).id;
+    const c = await ctx.owner.ok('POST', `/api/tasks/${t}/comments`, { body: '확인 부탁합니다' });
+    assert.equal((await ctx.staffA.client.ok('POST', `/api/comments/${c.id}/reactions`, { emoji: '👍' })).on, true);
+    let d = await ctx.owner.ok('GET', `/api/tasks/${t}`);
+    assert.deepEqual(d.comments[0].reactions.map((r) => [r.emoji, r.n, r.mine]), [['👍', 1, false]]);
+    assert.equal((await ctx.staffA.client.ok('POST', `/api/comments/${c.id}/reactions`, { emoji: '👍' })).on, false, '다시 누르면 취소');
+    assert.equal((await ctx.staffA.client.post(`/api/comments/${c.id}/reactions`, { emoji: '💩' })).status, 400);
+    const hidden = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-8 판교', orgUnitId: ctx.siteB })).id;
+    const hc = await ctx.owner.ok('POST', `/api/tasks/${hidden}/comments`, { body: '판교 전용' });
+    assert.equal((await ctx.staffA.client.post(`/api/comments/${hc.id}/reactions`, { emoji: '👍' })).status, 404, '볼 수 없는 업무의 댓글');
+    assert.equal((await ctx.staffA.client.req('PATCH', `/api/comments/${c.id}`, { body: '남의 댓글' })).status, 403);
+    await ctx.owner.ok('PATCH', `/api/comments/${c.id}`, { body: '확인 부탁드립니다' });
+    await ctx.staffA.client.ok('POST', `/api/tasks/${t}/comments`, { body: '네', parentId: c.id });
+    await ctx.owner.ok('DELETE', `/api/comments/${c.id}`);
+    d = await ctx.owner.ok('GET', `/api/tasks/${t}`);
+    const top = d.comments.find((x) => x.id === c.id);
+    assert.equal(top.deleted, true); assert.equal(top.body, '', '지운 내용은 안 보냄');
+    assert.equal(d.comments.filter((x) => x.parent_id === c.id).length, 1);
+  });
+});

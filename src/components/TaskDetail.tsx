@@ -53,6 +53,13 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [menu, setMenu] = useState(false);
   const [tab, setTab] = useState<'comments' | 'history'>('comments');
   const [moreFields, setMoreFields] = useState(false);
+  const wide = !inPanel; // V13 11번: 전체 화면(PC)은 2열
+  const [details, setDetails] = useState(true);
+  useEffect(() => { if (window.innerWidth < 640) setDetails(false); }, []); // 휴대폰은 "세부 정보" 요약 한 줄로 시작
+  const [subTitle, setSubTitle] = useState('');
+  const [subAssignee, setSubAssignee] = useState<string | null>(null);
+  const [subDue, setSubDue] = useState('');
+  const [planOpen, setPlanOpen] = useState<'' | 'check' | 'sub'>('');
   useEffect(() => { try { setMoreFields(localStorage.getItem('wos_task_more') === '1'); } catch {} }, []);
   const lines = useApi<{ lines: any[] }>('/api/approval-lines');
   const events = useApi<{ events: any[] }>(`/api/tasks/${id}/events`);
@@ -177,6 +184,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const lastRound = data.approvals?.length ? data.approvals[0].round : null;
   const roundSteps = (data.approvals ?? []).filter((a: any) => a.round === lastRound).sort((a: any, b: any) => a.step - b.step);
   const checkDone = data.checklist.filter((c: any) => c.done).length;
+  const subDone = data.subtasks.filter((x: any) => x.status === 'done').length;
+  const planEmpty = !planOpen && !data.checklist.length && !data.subtasks.length && !data.dependencies.length && !moreFields;
 
   async function decide(decision: 'approve' | 'reject') {
     let comment: string | undefined;
@@ -204,7 +213,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
 
   return (
-    <div className={cx(!inPanel && 'mx-auto max-w-4xl', 'pb-[calc(6rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
+    <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(6rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
       {/* 상단 도구 막대 */}
       <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
         {primary && (
@@ -313,113 +322,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </section>
         )}
 
-        {/* 속성 */}
-        <section className="grid grid-cols-1 border-y border-line" aria-label="업무 속성">
-          <Prop icon={UserRound} label="담당자">
-            <span className="flex pl-2 items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} /><UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => { patch({ assigneeId: v }); if (v && v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }} /></span>
-          </Prop>
-          <Prop icon={Megaphone} label="지시자">
-            <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
-          </Prop>
-          <Prop icon={CalendarDays} label="마감일">
-            {/* 값이 없으면 "마감일 없음" 칩 하나, 누르면 빠른 선택·달력. 시각은 날짜를 정한 뒤에만 */}
-            <span className="flex pl-2 flex-wrap items-center gap-1.5" data-testid="detail-due" data-value={t.due_date ?? ''}>
-              <DuePicker value={t.due_date} status={t.status} label="마감일" emptyText="마감일 없음" onChange={(v) => patch({ dueDate: v, ...(v ? {} : { dueTime: null }) })} />
-              {t.due_date && (
-                <select className="h-8 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={t.due_time?.slice(0, 5) ?? ''} onChange={(e) => patch({ dueTime: e.target.value || null })} aria-label="마감 시각">
-                  <option value="">시각 없음</option>
-                  {(TIMES.includes(t.due_time?.slice(0, 5) ?? '') || !t.due_time ? TIMES : [...TIMES, t.due_time.slice(0, 5)].sort()).map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
-                </select>
-              )}
-              {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle className="size-3.5" />마감 위험</span>}
-            </span>
-          </Prop>
-          <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span></span></Prop>
-          <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line" data-testid="detail-repeat">{t.due_date || t.recurrence_rule ? <RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /> : <span className="px-2 text-xs text-ink-3">마감일을 정하면 반복할 수 있습니다</span>}</div></Prop>
-          <Prop icon={FolderKanban} label="프로젝트">
-            <select className={ghostCls} value={t.project_id ?? ''} onChange={(e) => patch({ projectId: e.target.value || null })}>
-              <option value="">없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </Prop>
-          {t.project_id && (sections.data?.sections.length ?? 0) > 0 && (
-            <Prop icon={Rows3} label="섹션">
-              <select className={ghostCls} value={t.section_id ?? ''} onChange={(e) => patch({ sectionId: e.target.value || null })}>
-                <option value="">섹션 없음</option>{sections.data!.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </Prop>
-          )}
-          <Prop icon={CalendarCheck} label="캘린더 표시" asDiv>
-            <label className="flex min-h-8 cursor-pointer items-center gap-2.5 px-2 text-sm">
-              <input type="checkbox" role="switch" className="peer sr-only" checked={t.show_on_calendar !== false} onChange={(e) => patch({ showOnCalendar: e.target.checked })} aria-label="캘린더에 표시" />
-              <span aria-hidden className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:bg-accent-600 peer-checked:after:translate-x-4 peer-focus-visible:ring-2 peer-focus-visible:ring-accent-500/40" />
-              <span className="text-xs text-ink-2">{t.due_date ? (t.show_on_calendar !== false ? `${t.due_time ? '마감 시각' : '마감일'} 칸에 체크로 표시` : '캘린더에 안 보임') : '마감일을 정하면 캘린더에 표시됩니다'}</span>
-            </label>
-          </Prop>
-        </section>
-        <div>
-          <button type="button" onClick={() => setMoreFields((v) => { try { localStorage.setItem('wos_task_more', v ? '0' : '1'); } catch {} return !v; })}
-            className="inline-flex items-center gap-1 rounded-input px-1.5 py-1 text-sm font-medium text-ink-2 hover:bg-slate-100 hover:text-ink" aria-expanded={moreFields} data-testid="more-fields">
-            <ChevronRight className={cx('size-4 transition-transform', moreFields && 'rotate-90')} />필드 더보기
-            {moreSet > 0 && <span className="rounded-full bg-slate-100 px-1.5 text-xs text-ink-2">{moreSet}개 설정됨</span>}
-          </button>
-          {moreFields && (
-            <section className={cx('mt-1 grid grid-cols-1 gap-x-6 gap-y-0.5 border-l-2 border-line pl-3', !inPanel && 'lg:grid-cols-2')} aria-label="추가 필드">
-          {t.task_type !== 'milestone' && <Prop icon={CalendarClock} label="시작일"><input type="date" className={cx(ghostCls, '!w-[140px]')} value={t.start_date ?? ''} onChange={(e) => patch({ startDate: e.target.value || null })} /></Prop>}
-          <Prop icon={Flag} label="우선순위">
-            <select className={ghostCls} value={t.priority} onChange={(e) => patch({ priority: e.target.value })}>
-              {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </Prop>
-          <Prop icon={Timer} label="예상 소요">
-            <span className="flex w-full flex-wrap items-center gap-2">
-              <select className={cx(ghostCls, '!w-[120px]')} value={t.estimate_minutes ?? ''} onChange={(e) => patch({ estimateMinutes: e.target.value === '' ? null : Number(e.target.value) })}>
-                <option value="">미정</option>{[15, 30, 60, 90, 120, 180, 240, 360, 480, 960, 1440].map((m) => <option key={m} value={m}>{fmtMinutes(m)}</option>)}
-                {t.estimate_minutes && ![15, 30, 60, 90, 120, 180, 240, 360, 480, 960, 1440].includes(t.estimate_minutes) && <option value={t.estimate_minutes}>{fmtMinutes(t.estimate_minutes)}</option>}
-              </select>
-              {t.estimate_minutes > 0 && <span className="text-xs text-ink-2 tabular-nums" data-testid="estimate-progress">{fmtMinutes(t.scheduled_minutes ?? 0) || '0분'} 배정</span>}
-              {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700" data-testid="risk-badge" title={`남은 예상 ${fmtMinutes(data.risk.remaining)} · 마감까지 가용 ${fmtMinutes(data.risk.available ?? 0) || '0분'}`}><AlertTriangle className="size-3.5" />마감 위험</span>}
-            </span>
-          </Prop>
-          <Prop icon={Shapes} label="업무 유형">
-            <select className={ghostCls} value={t.task_type ?? 'normal'} onChange={(e) => patch({ taskType: e.target.value })}>
-              {Object.entries(TASK_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </Prop>
-          <Prop icon={Building2} label="소속 (현장·부서)"><UnitSelect className={ghostCls} value={t.org_unit_id} onChange={(v) => patch({ orgUnitId: v })} /></Prop>
-          <Prop icon={Tag} label="브랜드"><BrandSelect className={ghostCls} value={t.brand_id} onChange={(v) => patch({ brandId: v })} /></Prop>
-          <Prop icon={Hash} label="태그">
-            <input className={ghostCls} placeholder="쉼표로 구분" defaultValue={t.tags.join(', ')} onBlur={(e) => { const v = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); if (v.join() !== t.tags.join()) patch({ tags: v }); }} />
-          </Prop>
-          <Prop icon={Stamp} label="결재선">
-            <select className={ghostCls} value={t.approval_line_id ?? ''} disabled={!perms.approve || t.status === 'review'} onChange={(e) => patch({ approvalLineId: e.target.value || null })}>
-              <option value="">없음 (관리자 확인 방식)</option>{lines.data?.lines.filter((l: any) => l.active || l.id === t.approval_line_id).map((l: any) => <option key={l.id} value={l.id}>{l.name} ({l.steps.length}단계)</option>)}
-            </select>
-          </Prop>
-          <Prop icon={Camera} label="증빙 사진">
-            <span className="flex items-center gap-2">
-              <select className={cx(ghostCls, '!w-[120px]')} value={photoNeed} disabled={!perms.approve} onChange={(e) => patch({ photoRequired: Number(e.target.value) })}>
-                {[0, 1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n ? `${n}장 필수` : '필요 없음'}</option>)}
-              </select>
-              {photoNeed > 0 && <span className={cx('text-xs font-semibold tabular-nums', photoShort ? 'text-amber-700' : 'text-emerald-600')}>{photoHave}/{photoNeed}</span>}
-            </span>
-          </Prop>
-          <Prop icon={ShieldCheck} label="완료 확인" asDiv>
-            <label className="flex h-8 items-center gap-2 px-2 text-sm">
-              <input type="checkbox" className="size-4 accent-brand-600" checked={t.approval_required} disabled={!perms.approve} onChange={(e) => patch({ approvalRequired: e.target.checked })} />
-              관리자 최종 확인 필요 {!perms.approve && <span className="text-xs text-ink-3">(관리자만 변경)</span>}
-            </label>
-          </Prop>
-          {(data.fields ?? []).map((f: any) => <CustomField key={f.id} f={f} value={t.fields?.[f.id]} onSave={(v) => setField(f.id, v)} />)}
-          <Prop icon={Users} label="협업자" asDiv className="lg:col-span-2"><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
-            </section>
-          )}
-        </div>
-
-        <section>
+        <div className={cx('flex flex-col gap-6', wide && 'lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-x-6')}>
+        <section className={cx(wide && 'lg:col-start-1 lg:row-start-1')} data-testid="desc-section">
           <h2 className="mb-1.5 text-sm font-semibold">설명</h2>
           {desc === null ? (
-            <div className="-mx-2 min-h-[56px] cursor-text whitespace-pre-wrap rounded-input border border-transparent px-2 py-1.5 text-sm leading-relaxed hover:border-line" onClick={() => { descSent.current = t.description; setDescState(''); setDesc(t.description); }} data-testid="desc-view">
-              {t.description || <span className="text-ink-3">업무 내용, 기준, 참고 사항을 적어 주세요</span>}
+            <div className="min-h-[56px] cursor-text rounded-card border border-line bg-slate-50/70 px-3 py-2.5 text-sm leading-relaxed hover:border-slate-300" onClick={() => { descSent.current = t.description; setDescState(''); setDesc(t.description); }} data-testid="desc-view">
+              {t.description ? <RichText text={t.description} /> : <span className="text-ink-3">업무 내용·기준·참고 링크를 적어 주세요 (**굵게**, 링크 자동 연결)</span>}
             </div>
           ) : (
             <div>
@@ -431,8 +339,17 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           )}
         </section>
 
-        {(data.checklist.length > 0 || moreFields) && <section>
-          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">체크리스트 {data.checklist.length > 0 && <span className="text-xs font-medium text-ink-2 tabular-nums">{checkDone}/{data.checklist.length}</span>}</h2>
+        {/* V13 11-1: 설명 바로 아래 체크리스트·하위 업무. 둘 다 비어 있으면 한 줄만 */}
+        <div className={cx('min-w-0 space-y-6', wide && 'lg:col-start-1 lg:row-start-2')} data-testid="plan-area">
+        {planEmpty ? (
+          <div className="flex flex-wrap gap-2" data-testid="plan-empty">
+            <button type="button" className="rounded-input border border-dashed border-line px-3 py-2 text-sm text-ink-2 hover:border-slate-400 hover:text-ink" onClick={() => setPlanOpen('check')}>＋ 단계 추가 <span className="text-xs text-ink-3">(체크리스트)</span></button>
+            <button type="button" className="rounded-input border border-dashed border-line px-3 py-2 text-sm text-ink-2 hover:border-slate-400 hover:text-ink" onClick={() => setPlanOpen('sub')}>＋ 하위 업무 나눠 맡기기</button>
+          </div>
+        ) : <>
+        <section data-testid="checklist-section">
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">체크리스트 {data.checklist.length > 0 && <span className="text-xs font-medium text-ink-2 tabular-nums">{checkDone}/{data.checklist.length}</span>}
+            <HelpTip testid="help-checklist">이 업무를 하는 사람이 따라갈 단계입니다. 담당자·마감이 따로 없고, 이 업무 안에서만 체크합니다.</HelpTip></h2>
           {data.checklist.length > 0 && <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${(checkDone / data.checklist.length) * 100}%` }} /></div>}
           <ul className="space-y-0.5" data-testid="checklist">
             {data.checklist.map((c: any) => (
@@ -444,13 +361,23 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             ))}
           </ul>
           <form className="mt-1.5 flex gap-1.5" onSubmit={async (e) => { e.preventDefault(); if (!newItem.trim()) return; await api(`/api/tasks/${id}/checklist`, { body: { text: newItem } }).catch((er) => toast.error(er.message)); setNewItem(''); reload(); }}>
-            <input className={cx(inputCls, 'h-8')} placeholder="+ 항목 추가" value={newItem} onChange={(e) => setNewItem(e.target.value)} aria-label="체크리스트 항목 추가" />
+            <input autoFocus={planOpen === 'check'} className={cx(inputCls, 'h-8')} placeholder="+ 단계 추가" value={newItem} onChange={(e) => setNewItem(e.target.value)} aria-label="체크리스트 항목 추가" />
             <Button size="sm" variant="secondary">추가</Button>
           </form>
-        </section>}
+        </section>
 
         <section>
-          <div className="mb-1.5 flex items-center justify-between"><h2 className="text-sm font-semibold">하위 업무 {data.subtasks.length > 0 && <span className="text-xs font-medium text-ink-2">{data.subtasks.filter((s: any) => s.status === 'done').length}/{data.subtasks.length}</span>}</h2><Button size="sm" variant="ghost" onClick={() => setSub(true)}><Plus />추가</Button></div>
+          <div className="mb-1.5 flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-semibold">하위 업무 {data.subtasks.length > 0 && <span className="text-xs font-medium text-ink-2 tabular-nums" data-testid="subtask-progress">{subDone}/{data.subtasks.length} 완료</span>}
+            <HelpTip testid="help-subtasks">다른 사람에게 나눠 맡기거나 마감이 따로 있는 작은 업무입니다. 하위 업무마다 목록·알림·상태가 따로 생깁니다.</HelpTip></h2>
+            <Button size="sm" variant="ghost" onClick={() => setSub(true)}><Plus />자세히 추가</Button></div>
+          {data.subtasks.length > 0 && <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-accent-600 transition-all" style={{ width: `${(subDone / data.subtasks.length) * 100}%` }} /></div>}
+          {/* 모든 하위 업무 완료 → 상위도 완료할지 안내 (상태를 바꿀 수 있는 사람에게만) */}
+          {data.subtasks.length > 0 && subDone === data.subtasks.length && t.status !== 'done' && t.status !== 'review' && (t.assignee_id ?? t.created_by) === user.id && (
+            <p className="mb-2 flex flex-wrap items-center gap-2 rounded-input bg-emerald-50 px-3 py-2 text-sm text-emerald-900" data-testid="subtasks-all-done">
+              <CircleCheck className="size-4 shrink-0" />하위 업무가 모두 끝났습니다 — 이 업무도 완료할까요?
+              {primary && <Button size="sm" onClick={primary.run}>{primary.label}</Button>}
+            </p>
+          )}
           <ul className="divide-y divide-line rounded-input border border-line">
             {data.subtasks.map((s: any) => (
               <li key={s.id} className="flex items-center gap-2.5 px-3 py-2 text-sm">
@@ -462,6 +389,19 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             ))}
             {!data.subtasks.length && <li className="px-3 py-2.5 text-xs text-ink-3">하위 업무가 없습니다</li>}
           </ul>
+          {/* 한 줄 추가: 제목 + 담당·마감 칩 */}
+          <form className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="subtask-add" onSubmit={async (e) => {
+            e.preventDefault(); if (!subTitle.trim()) return;
+            try {
+              await api('/api/tasks', { body: { title: subTitle.trim(), parentId: id, assigneeId: subAssignee ?? t.assignee_id ?? undefined, dueDate: subDue || undefined, approvalRequired: false } });
+              setSubTitle(''); setSubDue(''); reload(); broadcastRefresh();
+            } catch (er: any) { toast.error(er.message); }
+          }}>
+            <input className={cx(inputCls, 'h-8 min-w-0 flex-1 basis-40')} autoFocus={planOpen === 'sub'} placeholder="+ 하위 업무 추가 (담당·마감 지정)" value={subTitle} onChange={(e) => setSubTitle(e.target.value)} aria-label="하위 업무 제목" />
+            <UserSelect className="h-8 w-auto max-w-[9rem] rounded-full border border-line bg-white px-2 text-xs" value={subAssignee ?? t.assignee_id} onChange={(v) => setSubAssignee(v)} />
+            <input type="date" className="h-8 rounded-full border border-line bg-white px-2 text-xs" value={subDue} onChange={(e) => setSubDue(e.target.value)} aria-label="하위 업무 마감" />
+            <Button size="sm" variant="secondary" disabled={!subTitle.trim()}>추가</Button>
+          </form>
           {(moreFields || data.dependencies.length > 0) && <>
           <div className="mt-4 mb-1.5 flex items-center justify-between"><h2 className="text-sm font-semibold">선행 업무</h2><Button size="sm" variant="ghost" onClick={() => setDepOpen(true)}>편집</Button></div>
           <ul className="space-y-1 text-sm">
@@ -473,6 +413,121 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </>}
         </section>
 
+        </>}
+        </div>
+        {/* V13 11번: PC 는 오른쪽 320px 고정 열, 휴대폰·좁은 패널은 "세부 정보" 요약 한 줄(누르면 펼침) */}
+        <aside className={cx('min-w-0', wide && 'lg:sticky lg:top-16 lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:self-start lg:rounded-card lg:border lg:border-line lg:p-2')} aria-label="세부 정보" data-testid="detail-aside">
+          <button type="button" onClick={() => setDetails((v) => !v)} aria-expanded={details} data-testid="details-toggle"
+            className={cx('flex w-full items-center gap-2 rounded-input border border-line bg-white px-3 py-2 text-left text-sm', wide && 'lg:hidden', details && 'mb-1')}>
+            <span className="shrink-0 font-semibold">세부 정보</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-ink-2">👤{t.assignee_name ?? '담당 없음'} · 📣{t.requested_by_name ?? '-'} · 📅{t.due_date ? `${Number(t.due_date.slice(5, 7))}/${Number(t.due_date.slice(8, 10))}${t.due_time ? ' ' + t.due_time.slice(0, 5) : ''}` : '마감 없음'} · 🔔{t.reminder_minutes?.length ? `${t.reminder_minutes.length}개` : '기본'}</span>
+            <ChevronRight className={cx('size-4 shrink-0 transition-transform', details && 'rotate-90')} />
+          </button>
+          <div className={cx(!details && 'hidden', wide && 'lg:block')}>
+        {/* 속성 */}
+          <section className={cx('grid grid-cols-1 border-y border-line', wide && 'lg:border-y-0')} aria-label="업무 속성">
+            <Prop icon={UserRound} label="담당자">
+              <span className="flex pl-2 items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} /><UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => { patch({ assigneeId: v }); if (v && v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }} /></span>
+            </Prop>
+            <Prop icon={Megaphone} label="지시자">
+              <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
+            </Prop>
+            <Prop icon={CalendarDays} label="마감일">
+              {/* 값이 없으면 "마감일 없음" 칩 하나, 누르면 빠른 선택·달력. 시각은 날짜를 정한 뒤에만 */}
+              <span className="flex pl-2 flex-wrap items-center gap-1.5" data-testid="detail-due" data-value={t.due_date ?? ''}>
+                <DuePicker value={t.due_date} status={t.status} label="마감일" emptyText="마감일 없음" onChange={(v) => patch({ dueDate: v, ...(v ? {} : { dueTime: null }) })} />
+                {t.due_date && (
+                  <select className="h-8 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={t.due_time?.slice(0, 5) ?? ''} onChange={(e) => patch({ dueTime: e.target.value || null })} aria-label="마감 시각">
+                    <option value="">시각 없음</option>
+                    {(TIMES.includes(t.due_time?.slice(0, 5) ?? '') || !t.due_time ? TIMES : [...TIMES, t.due_time.slice(0, 5)].sort()).map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
+                  </select>
+                )}
+                {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle className="size-3.5" />마감 위험</span>}
+              </span>
+            </Prop>
+            <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span></span></Prop>
+            <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line" data-testid="detail-repeat">{t.due_date || t.recurrence_rule ? <RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /> : <span className="px-2 text-xs text-ink-3">마감일을 정하면 반복할 수 있습니다</span>}</div></Prop>
+            <Prop icon={FolderKanban} label="프로젝트">
+              <select className={ghostCls} value={t.project_id ?? ''} onChange={(e) => patch({ projectId: e.target.value || null })}>
+                <option value="">없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </Prop>
+            {t.project_id && (sections.data?.sections.length ?? 0) > 0 && (
+              <Prop icon={Rows3} label="섹션">
+                <select className={ghostCls} value={t.section_id ?? ''} onChange={(e) => patch({ sectionId: e.target.value || null })}>
+                  <option value="">섹션 없음</option>{sections.data!.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </Prop>
+            )}
+            <Prop icon={CalendarCheck} label="캘린더 표시" asDiv>
+              <label className="flex min-h-8 cursor-pointer items-center gap-2.5 px-2 text-sm">
+                <input type="checkbox" role="switch" className="peer sr-only" checked={t.show_on_calendar !== false} onChange={(e) => patch({ showOnCalendar: e.target.checked })} aria-label="캘린더에 표시" />
+                <span aria-hidden className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:bg-accent-600 peer-checked:after:translate-x-4 peer-focus-visible:ring-2 peer-focus-visible:ring-accent-500/40" />
+                <span className="text-xs text-ink-2">{t.due_date ? (t.show_on_calendar !== false ? `${t.due_time ? '마감 시각' : '마감일'} 칸에 체크로 표시` : '캘린더에 안 보임') : '마감일을 정하면 캘린더에 표시됩니다'}</span>
+              </label>
+            </Prop>
+          </section>
+          <div>
+            <button type="button" onClick={() => setMoreFields((v) => { try { localStorage.setItem('wos_task_more', v ? '0' : '1'); } catch {} return !v; })}
+              className="inline-flex items-center gap-1 rounded-input px-1.5 py-1 text-sm font-medium text-ink-2 hover:bg-slate-100 hover:text-ink" aria-expanded={moreFields} data-testid="more-fields">
+              <ChevronRight className={cx('size-4 transition-transform', moreFields && 'rotate-90')} />필드 더보기
+              {moreSet > 0 && <span className="rounded-full bg-slate-100 px-1.5 text-xs text-ink-2">{moreSet}개 설정됨</span>}
+            </button>
+            {moreFields && (
+              <section className="mt-1 grid grid-cols-1 gap-x-6 gap-y-0.5 border-l-2 border-line pl-3" aria-label="추가 필드">
+            {t.task_type !== 'milestone' && <Prop icon={CalendarClock} label="시작일"><input type="date" className={cx(ghostCls, '!w-[140px]')} value={t.start_date ?? ''} onChange={(e) => patch({ startDate: e.target.value || null })} /></Prop>}
+            <Prop icon={Flag} label="우선순위">
+              <select className={ghostCls} value={t.priority} onChange={(e) => patch({ priority: e.target.value })}>
+                {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </Prop>
+            <Prop icon={Timer} label="예상 소요">
+              <span className="flex w-full flex-wrap items-center gap-2">
+                <select className={cx(ghostCls, '!w-[120px]')} value={t.estimate_minutes ?? ''} onChange={(e) => patch({ estimateMinutes: e.target.value === '' ? null : Number(e.target.value) })}>
+                  <option value="">미정</option>{[15, 30, 60, 90, 120, 180, 240, 360, 480, 960, 1440].map((m) => <option key={m} value={m}>{fmtMinutes(m)}</option>)}
+                  {t.estimate_minutes && ![15, 30, 60, 90, 120, 180, 240, 360, 480, 960, 1440].includes(t.estimate_minutes) && <option value={t.estimate_minutes}>{fmtMinutes(t.estimate_minutes)}</option>}
+                </select>
+                {t.estimate_minutes > 0 && <span className="text-xs text-ink-2 tabular-nums" data-testid="estimate-progress">{fmtMinutes(t.scheduled_minutes ?? 0) || '0분'} 배정</span>}
+                {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700" data-testid="risk-badge" title={`남은 예상 ${fmtMinutes(data.risk.remaining)} · 마감까지 가용 ${fmtMinutes(data.risk.available ?? 0) || '0분'}`}><AlertTriangle className="size-3.5" />마감 위험</span>}
+              </span>
+            </Prop>
+            <Prop icon={Shapes} label="업무 유형">
+              <select className={ghostCls} value={t.task_type ?? 'normal'} onChange={(e) => patch({ taskType: e.target.value })}>
+                {Object.entries(TASK_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </Prop>
+            <Prop icon={Building2} label="소속 (현장·부서)"><UnitSelect className={ghostCls} value={t.org_unit_id} onChange={(v) => patch({ orgUnitId: v })} /></Prop>
+            <Prop icon={Tag} label="브랜드"><BrandSelect className={ghostCls} value={t.brand_id} onChange={(v) => patch({ brandId: v })} /></Prop>
+            <Prop icon={Hash} label="태그">
+              <input className={ghostCls} placeholder="쉼표로 구분" defaultValue={t.tags.join(', ')} onBlur={(e) => { const v = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); if (v.join() !== t.tags.join()) patch({ tags: v }); }} />
+            </Prop>
+            <Prop icon={Stamp} label="결재선">
+              <select className={ghostCls} value={t.approval_line_id ?? ''} disabled={!perms.approve || t.status === 'review'} onChange={(e) => patch({ approvalLineId: e.target.value || null })}>
+                <option value="">없음 (관리자 확인 방식)</option>{lines.data?.lines.filter((l: any) => l.active || l.id === t.approval_line_id).map((l: any) => <option key={l.id} value={l.id}>{l.name} ({l.steps.length}단계)</option>)}
+              </select>
+            </Prop>
+            <Prop icon={Camera} label="증빙 사진">
+              <span className="flex items-center gap-2">
+                <select className={cx(ghostCls, '!w-[120px]')} value={photoNeed} disabled={!perms.approve} onChange={(e) => patch({ photoRequired: Number(e.target.value) })}>
+                  {[0, 1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n ? `${n}장 필수` : '필요 없음'}</option>)}
+                </select>
+                {photoNeed > 0 && <span className={cx('text-xs font-semibold tabular-nums', photoShort ? 'text-amber-700' : 'text-emerald-600')}>{photoHave}/{photoNeed}</span>}
+              </span>
+            </Prop>
+            <Prop icon={ShieldCheck} label="완료 확인" asDiv>
+              <label className="flex h-8 items-center gap-2 px-2 text-sm">
+                <input type="checkbox" className="size-4 accent-brand-600" checked={t.approval_required} disabled={!perms.approve} onChange={(e) => patch({ approvalRequired: e.target.checked })} />
+                관리자 최종 확인 필요 {!perms.approve && <span className="text-xs text-ink-3">(관리자만 변경)</span>}
+              </label>
+            </Prop>
+            {(data.fields ?? []).map((f: any) => <CustomField key={f.id} f={f} value={t.fields?.[f.id]} onSave={(v) => setField(f.id, v)} />)}
+            <Prop icon={Users} label="협업자" asDiv><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
+              </section>
+            )}
+          </div>
+          </div>
+        </aside>
+        <div className={cx('min-w-0 space-y-6', wide && 'lg:col-start-1 lg:row-start-3')}>
         <section data-testid="linked-events">
           <div className="mb-1.5 flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-sm font-semibold"><CalendarRange className="size-4 text-ink-3" />연결 일정 {(events.data?.events.length ?? 0) > 0 && <span className="text-xs font-medium text-ink-2">{events.data!.events.length}</span>}</h2>
             <Button size="sm" variant="ghost" onClick={() => setBlockOpen(true)}><Timer />실행 시간 배정</Button></div>
@@ -503,14 +558,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <button role="tab" aria-selected={tab === 'history'} onClick={() => setTab('history')} className={cx('border-b-2 pb-1', tab === 'history' ? 'border-brand-600 text-ink' : 'border-transparent text-ink-3')}>변경 이력</button>
           </div>
           <ul className={cx('space-y-4', tab !== 'comments' && 'hidden')} data-testid="comments">
-            {data.comments.map((c: any) => (
-              <li key={c.id} id={`c-${c.id}`} className="flex gap-2.5 text-sm">
-                <Avatar id={c.author_id} name={c.author_name} size={28} />
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs text-ink-2"><b className="text-sm text-ink">{c.author_name}</b> · {fmtDateTime(c.created_at)}{c.edited_at && ' (수정됨)'}</div>
-                  <div className="mt-0.5 whitespace-pre-wrap leading-relaxed">{renderMentions(c.body)}</div>
-                </div>
-              </li>
+            {/* V13 8번: 댓글 + 들여쓴 답글(1단계), 답글·수정·삭제·반응 */}
+            {data.comments.filter((c: any) => !c.parent_id).map((c: any) => (
+              <CommentThread key={c.id} c={c} replies={data.comments.filter((r: any) => r.parent_id === c.id)} taskId={id} meId={user.id}
+                mentionable={mentionable.data?.users ?? []} onChange={() => { reload(); broadcastRefresh(); }} />
             ))}
             {!data.comments.length && <li className="text-xs text-ink-3">아직 댓글이 없습니다. 진행 상황이나 질문을 남겨 주세요.</li>}
           </ul>
@@ -568,6 +619,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <UploadProgress items={cprog} />
           </DropZone>
         </section>
+        </div>
+        </div>
       </div>
 
       <QuickAddTask open={sub} onClose={() => setSub(false)} defaults={{ parentId: id, dueDate: t.due_date ?? undefined, assigneeId: t.assignee_id ?? undefined }} onCreated={() => reload()} />
@@ -771,5 +824,122 @@ function DepsModal({ open, onClose, taskId, current, onSave }: { open: boolean; 
       </ul>
       <div className="mt-3 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>취소</Button><Button onClick={() => onSave(sel)}>저장</Button></div>
     </Modal>
+  );
+}
+
+/** V13 12번: 제목 옆 (?) — 누르면 설명이 펼쳐짐 */
+function HelpTip({ children, testid }: { children: React.ReactNode; testid?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex font-normal">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-label="도움말" data-testid={testid}
+        className="inline-flex size-[18px] items-center justify-center rounded-full border border-line text-[11px] font-semibold text-ink-3 hover:border-slate-400 hover:text-ink">?</button>
+      {open && <span role="note" className="absolute left-0 top-6 z-20 w-64 rounded-card border border-line bg-white p-2.5 text-xs leading-relaxed text-ink-2 shadow-pop">{children}</span>}
+    </span>
+  );
+}
+
+/** V13 11번 설명 보기: 줄바꿈·**굵게**·[이름](주소)·주소 자동 링크, 6줄 넘으면 접기 */
+function RichText({ text }: { text: string }) {
+  const [more, setMore] = useState(false);
+  const long = text.split('\n').length > 6 || text.length > 420;
+  const inline = (line: string, k: number) => {
+    const out: React.ReactNode[] = [];
+    const re = /\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<]+)/g;
+    let last = 0; let m: RegExpExecArray | null; let n = 0;
+    while ((m = re.exec(line))) {
+      if (m.index > last) out.push(line.slice(last, m.index));
+      if (m[1]) out.push(<b key={`${k}-${n++}`}>{m[1]}</b>);
+      else out.push(<a key={`${k}-${n++}`} href={m[3] ?? m[4]} target="_blank" rel="noreferrer" className="text-accent-600 underline break-all" onClick={(e) => e.stopPropagation()}>{m[2] ?? m[4]}</a>);
+      last = m.index + m[0].length;
+    }
+    if (last < line.length) out.push(line.slice(last));
+    return out;
+  };
+  return (
+    <div>
+      <div className={cx('whitespace-pre-wrap break-words', long && !more && 'line-clamp-6')} data-testid="desc-rich">
+        {text.split('\n').map((l, i) => <span key={i}>{inline(l, i)}{'\n'}</span>)}
+      </div>
+      {long && <button type="button" className="mt-1 text-xs font-medium text-accent-600" onClick={(e) => { e.stopPropagation(); setMore(!more); }} data-testid="desc-more">{more ? '접기' : '더 보기'}</button>}
+    </div>
+  );
+}
+
+const REACTIONS = [['👍', '확인했습니다'], ['✅', '완료'], ['🙏', '감사합니다'], ['❤️', '좋아요'], ['😂', '웃음']] as const;
+/** V13 8번 댓글 한 묶음: 원 댓글 + 답글(접힘 "답글 n개 보기") + 답글 입력 */
+function CommentThread({ c, replies, taskId, meId, mentionable, onChange }: { c: any; replies: any[]; taskId: string; meId: string; mentionable: { id: string; name: string }[]; onChange: () => void }) {
+  const [open, setOpen] = useState(() => typeof window !== 'undefined' && replies.some((r) => location.hash === `#c-${r.id}`));
+  const [reply, setReply] = useState<string | null>(null);
+  async function sendReply(e: React.FormEvent) {
+    e.preventDefault(); if (!reply?.trim()) return;
+    // 입력창의 @이름 → 내부 멘션 표기
+    let text = reply;
+    for (const u of mentionable) text = text.split(`@${u.name} `).join(`@[${u.name}](${u.id}) `);
+    try { await api(`/api/tasks/${taskId}/comments`, { body: { body: text, parentId: c.id } }); setReply(null); setOpen(true); onChange(); } catch (er: any) { toast.error(er.message); }
+  }
+  return (
+    <li className="text-sm" data-testid="comment-thread">
+      <CommentItem c={c} meId={meId} onChange={onChange} onReply={() => setReply((r) => (r === null ? '' : r))} />
+      {(replies.length > 0 || reply !== null) && (
+        <div className="ml-9 mt-2 space-y-3 border-l-2 border-line pl-3">
+          {replies.length > 0 && !open && <button type="button" className="text-xs font-medium text-accent-600" onClick={() => setOpen(true)} data-testid="show-replies">답글 {replies.length}개 보기</button>}
+          {open && replies.map((r) => <CommentItem key={r.id} c={r} meId={meId} onChange={onChange} onReply={() => setReply((x) => (x === null ? `@${r.author_name} ` : x))} small />)}
+          {reply !== null && (
+            <form onSubmit={sendReply} className="flex gap-1.5" data-testid="reply-form">
+              <input autoFocus className={cx(inputCls, 'h-8')} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="답글 입력" aria-label="답글"
+                onKeyDown={(e) => { if (e.key === 'Escape') setReply(null); }} />
+              <Button size="sm" disabled={!reply.trim()}>등록</Button>
+            </form>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: string; onChange: () => void; onReply: () => void; small?: boolean }) {
+  const [edit, setEdit] = useState<string | null>(null);
+  const [pick, setPick] = useState(false);
+  const mine = c.author_id === meId;
+  async function react(emoji: string) {
+    setPick(false);
+    try { await api(`/api/comments/${c.id}/reactions`, { body: { emoji } }); onChange(); } catch (e: any) { toast.error(e.message); }
+  }
+  async function save(e: React.FormEvent) {
+    e.preventDefault(); if (!edit?.trim()) return;
+    try { await api(`/api/comments/${c.id}`, { method: 'PATCH', body: { body: edit } }); setEdit(null); onChange(); } catch (er: any) { toast.error(er.message); }
+  }
+  async function remove() {
+    if (!confirm('이 댓글을 지울까요?')) return;
+    try { await api(`/api/comments/${c.id}`, { method: 'DELETE' }); onChange(); } catch (e: any) { toast.error(e.message); }
+  }
+  if (c.deleted) return <div id={`c-${c.id}`} className="text-xs italic text-ink-3">삭제된 댓글입니다</div>;
+  return (
+    <div id={`c-${c.id}`} className="group flex gap-2.5 rounded-input target:bg-amber-50" data-testid="comment">
+      <Avatar id={c.author_id} name={c.author_name} size={small ? 22 : 28} />
+      <div className="min-w-0 flex-1">
+        <div className="text-xs text-ink-2"><b className="text-sm text-ink">{c.author_name}</b> · {fmtDateTime(c.created_at)}{c.edited_at && ' (수정됨)'}</div>
+        {edit === null ? <div className="mt-0.5 whitespace-pre-wrap leading-relaxed">{renderMentions(c.body)}</div> : (
+          <form onSubmit={save} className="mt-1 flex gap-1.5"><input autoFocus className={cx(inputCls, 'h-8')} value={edit} onChange={(e) => setEdit(e.target.value)} aria-label="댓글 수정" onKeyDown={(e) => { if (e.key === 'Escape') setEdit(null); }} /><Button size="sm">저장</Button></form>
+        )}
+        <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-3">
+          {(c.reactions ?? []).map((r: any) => (
+            <button key={r.emoji} type="button" onClick={() => react(r.emoji)} title={r.names.join(', ')} aria-pressed={r.mine} data-testid="reaction"
+              className={cx('inline-flex h-6 items-center gap-1 rounded-full border px-1.5', r.mine ? 'border-accent-500 bg-accent-50 text-accent-700' : 'border-line bg-white text-ink-2')}>{r.emoji}<span className="tabular-nums">{r.n}</span></button>
+          ))}
+          <span className="relative">
+            <button type="button" onClick={() => setPick(!pick)} className="rounded px-1.5 py-0.5 hover:bg-slate-100" aria-label="반응 추가" data-testid="react-open">🙂+</button>
+            {pick && <span className="absolute left-0 top-6 z-20 flex gap-0.5 rounded-full border border-line bg-white p-1 shadow-pop">
+              {REACTIONS.map(([e, l]) => <button key={e} type="button" onClick={() => react(e)} title={l} aria-label={l} className="size-7 rounded-full text-base hover:bg-slate-100">{e}</button>)}
+            </span>}
+          </span>
+          <button type="button" onClick={onReply} className="rounded px-1.5 py-0.5 font-medium hover:bg-slate-100 hover:text-ink" data-testid="reply-open">답글</button>
+          {mine && edit === null && <>
+            <button type="button" onClick={() => setEdit(c.body.replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/g, '@$1'))} className="rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-ink">수정</button>
+            <button type="button" onClick={remove} className="rounded px-1.5 py-0.5 hover:bg-red-50 hover:text-red-600">삭제</button>
+          </>}
+        </div>
+      </div>
+    </div>
   );
 }

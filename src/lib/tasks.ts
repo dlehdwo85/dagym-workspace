@@ -186,8 +186,14 @@ export async function getTaskDetail(u: SessionUser, id: string) {
         and ${taskVisibleSql(sql, u, units)} order by t.sort_order, t.created_at`,
     sql`select dt.id, dt.title, dt.status, dt.due_date from task_dependencies d join tasks dt on dt.id = d.depends_on_id
         where d.task_id = ${id} and dt.deleted_at is null`,
-    sql`select c.id, c.body, c.mentions, c.created_at, c.edited_at, c.author_id, u.name as author_name
-        from comments c join users u on u.id = c.author_id where c.task_id = ${id} and c.deleted_at is null order by c.created_at`,
+    // V13 8번: 답글(parent_id)·반응. 지운 댓글은 답글이 있을 때만 "삭제된 댓글"로 남긴다
+    sql`select c.id, case when c.deleted_at is null then c.body else '' end as body, c.mentions, c.created_at, c.edited_at, c.author_id, u.name as author_name,
+          c.parent_id, (c.deleted_at is not null) as deleted,
+          coalesce((select json_agg(json_build_object('emoji', g.emoji, 'n', g.n, 'mine', g.mine, 'names', g.names) order by g.first)
+            from (select r.emoji, count(*)::int n, bool_or(r.user_id = ${u.id}) mine, array_agg(ru.name order by r.created_at) names, min(r.created_at) first
+              from comment_reactions r join users ru on ru.id = r.user_id where r.comment_id = c.id group by r.emoji) g), '[]') as reactions
+        from comments c join users u on u.id = c.author_id where c.task_id = ${id}
+          and (c.deleted_at is null or exists (select 1 from comments r where r.parent_id = c.id and r.deleted_at is null)) order by c.created_at`,
     sql`select a.*, u.name as created_by_name from attachments a join users u on u.id = a.created_by
         where a.task_id = ${id} and a.deleted_at is null and a.upload_status = 'ready' order by a.created_at`,
     sql`select a.id, a.action, a.changes, a.created_at, u.name as actor_name from activities a left join users u on u.id = a.actor_id
@@ -612,11 +618,18 @@ export async function restoreTask(u: SessionUser, id: string) {
 }
 
 // ---- 댓글 ----
-export async function addComment(u: SessionUser, taskId: string, text: string) {
+export async function addComment(u: SessionUser, taskId: string, text: string, replyTo: string | null = null) {
   const sql = db();
   const { task } = await loadTaskForUser(u, taskId, sql);
   const body = text.trim();
   if (!body) throw badRequest('내용을 입력하세요');
+  // V13 8번: 답글은 1단계 — 답글에 답하면 같은 스레드(원 댓글)에 붙는다
+  let parent: { id: string; author_id: string } | null = null;
+  if (replyTo) {
+    const [p] = await sql<{ id: string; parent_id: string | null; author_id: string }[]>`select id, parent_id, author_id from comments where id = ${replyTo} and task_id = ${taskId}`;
+    if (!p) throw notFound('댓글이 없습니다');
+    parent = p.parent_id ? (await sql<{ id: string; author_id: string }[]>`select id, author_id from comments where id = ${p.parent_id}`)[0] : p;
+  }
   // 멘션: @[이름](uuid) 형식
   const mentionIds = [...body.matchAll(/@\[[^\]]{1,50}\]\(([0-9a-f-]{36})\)/g)].map((m) => m[1]);
   return sql.begin(async (tx) => {
@@ -624,7 +637,7 @@ export async function addComment(u: SessionUser, taskId: string, text: string) {
       ? (await tx<{ id: string }[]>`select id from users where id = any(${mentionIds}::uuid[]) and status = 'active'`).map((r) => r.id)
       : [];
     const [c] = await tx<{ id: string; created_at: Date }[]>`
-      insert into comments (task_id, author_id, body, mentions) values (${taskId}, ${u.id}, ${body}, ${validMentions})
+      insert into comments (task_id, author_id, body, mentions, parent_id) values (${taskId}, ${u.id}, ${body}, ${validMentions}, ${parent?.id ?? null})
       returning id, created_at`;
     const [t] = await tx<{ title: string }[]>`select title from tasks where id = ${taskId}`;
     const preview = body.replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/g, '@$1').slice(0, 120);
@@ -640,10 +653,25 @@ export async function addComment(u: SessionUser, taskId: string, text: string) {
       await notify(tx, { userIds: visibleMentions, type: 'mention', title: `${u.name}님이 댓글에서 회원님을 언급했습니다`, body: `${t.title} — ${preview}`,
         link: `/tasks/${taskId}#c-${c.id}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `mention:${c.id}` });
     }
-    const followers = [task.assignee_id, task.created_by, ...(await collabIds(tx, taskId))].filter((x) => x && !visibleMentions.includes(x));
-    await notify(tx, { userIds: followers, type: 'comment', title: `새 댓글: ${t.title}`, body: `${u.name}: ${preview}`,
+    // V13 8번 알림 대상 — 새 댓글: 담당·지시·만든 사람·협업자·이 업무에 댓글 단 사람 / 답글: 원 댓글 작성자 + 그 스레드 참여자. 멘션된 사람은 멘션 알림 1건만
+    let followers: string[];
+    if (parent) {
+      followers = [parent.author_id, ...(await tx<{ author_id: string }[]>`select distinct author_id from comments where parent_id = ${parent.id} and deleted_at is null`).map((r) => r.author_id)];
+    } else {
+      const commenters = (await tx<{ author_id: string }[]>`select distinct author_id from comments where task_id = ${taskId} and deleted_at is null`).map((r) => r.author_id);
+      followers = [task.assignee_id, task.requested_by, task.created_by, ...(await collabIds(tx, taskId)), ...commenters].filter((x): x is string => !!x);
+    }
+    followers = [...new Set(followers.filter((x): x is string => !!x && x !== u.id && !visibleMentions.includes(x)))];
+    // 업무를 더는 볼 수 없게 된 사람(예: 예전에 댓글 단 사람)에게는 보내지 않는다
+    const { taskPerms } = await import('./access');
+    const canSee: string[] = [];
+    for (const f of followers) {
+      const [fu] = await tx`select id, email, name, role, status, timezone from users where id = ${f} and status = 'active'`;
+      if (fu && (await taskPerms({ ...(fu as any), sessionId: '' }, task, tx)).view) canSee.push(f);
+    }
+    await notify(tx, { userIds: canSee, type: 'comment', title: parent ? `답글: ${t.title}` : `새 댓글: ${t.title}`, body: `${u.name}: ${preview}`,
       link: `/tasks/${taskId}#c-${c.id}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `comment:${c.id}` });
-    return { id: c.id, createdAt: c.created_at, mentions: visibleMentions };
+    return { id: c.id, createdAt: c.created_at, mentions: visibleMentions, parentId: parent?.id ?? null, notified: canSee };
   });
 }
 
