@@ -2528,3 +2528,28 @@ describe('V14 8번 팀 단위 업무·팀 업무 권한', () => {
     assert.ok(!(await ctx.owner.ok('GET', '/api/teams')).teams.some((x) => x.id === team));
   });
 });
+
+describe('V14 12번 업무 다중 선택 작업', () => {
+  test('권한 없는 건 건너뛰고 이유, 완료는 본인 업무만, 휴지통·되돌리기, 담당 변경 되돌리기', async () => {
+    const mine = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14-12 내 것', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+    const other = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14-12 남의 것', orgUnitId: ctx.siteA, assigneeId: ctx.managerA.id, approvalRequired: false })).id;
+    const hidden = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14-12 판교', orgUnitId: ctx.siteB })).id;
+    const d = await ctx.staffA.client.ok('POST', '/api/tasks/bulk', { ids: [mine, other, hidden], action: 'done' });
+    assert.deepEqual(d.done, [mine]);
+    assert.equal(d.skipped.length, 2);
+    assert.ok(d.skipped.some((s) => s.id === hidden && s.reason === '볼 수 없는 업무'));
+    assert.ok(d.skipped.some((s) => s.id === other && /담당자만/.test(s.reason)));
+    // 마감 일괄 변경 → 되돌리기(이전 값)
+    const due = addDays(today, 9);
+    const p = await ctx.owner.ok('POST', '/api/tasks/bulk', { ids: [other, hidden], action: 'patch', patch: { dueDate: due } });
+    assert.equal(p.done.length, 2);
+    await ctx.owner.ok('POST', '/api/tasks/bulk', { ids: p.done, action: 'patch', each: { [other]: { dueDate: null }, [hidden]: { dueDate: null } } });
+    assert.equal((await ctx.owner.ok('GET', `/api/tasks/${other}`)).task.due_date, null);
+    // 휴지통 → 되돌리기
+    const del = await ctx.owner.ok('POST', '/api/tasks/bulk', { ids: [other, hidden], action: 'delete' });
+    assert.equal(del.done.length, 2);
+    assert.equal((await ctx.owner.req('GET', `/api/tasks/${other}`)).status, 404);
+    await ctx.owner.ok('POST', '/api/tasks/bulk', { ids: del.done, action: 'restore' });
+    await ctx.owner.ok('GET', `/api/tasks/${other}`);
+  });
+});

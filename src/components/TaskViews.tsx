@@ -40,6 +40,10 @@ export type Task = {
 
 /** B-1 업무를 목록 옆 오른쪽 패널로 연다. URL 은 /tasks/:id 로 바꿔 새로고침·공유가 가능하다. 새 탭(Ctrl/⌘/가운데 클릭)은 그대로 전체 화면 */
 const OpenTaskCtx = createContext<(id: string) => void>(() => {});
+/** V14 12번 다중 선택: 선택 모드·선택된 id·토글(Shift 는 화면 순서로 범위) */
+type Sel = { on: boolean; sel: Set<string>; toggle: (id: string, range?: boolean) => void; enter: (id: string) => void };
+const SelectCtx = createContext<Sel | null>(null);
+
 function TaskLink({ id, className, children }: { id: string; className?: string; children: React.ReactNode }) {
   const open = useContext(OpenTaskCtx);
   return (
@@ -199,6 +203,25 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   })();
   const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 지시한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['done', '완료']];
   const teamList = useApi<{ teams: { id: string; name: string }[] }>('/api/teams'); // V14 8번 팀 필터
+  // V14 12번 다중 선택
+  const [selOn, setSelOn] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const lastPick = useRef<string | null>(null);
+  const selCtx = useMemo<Sel>(() => ({
+    on: selOn, sel,
+    toggle: (id, range) => setSel((cur) => {
+      const n = new Set(cur);
+      if (range && lastPick.current) { // 화면에 보이는 순서로 범위 선택
+        const ids = Array.from(document.querySelectorAll<HTMLElement>('[data-row]')).map((e) => e.dataset.row!);
+        const [a, b] = [ids.indexOf(lastPick.current), ids.indexOf(id)].sort((x, y) => x - y);
+        if (a >= 0 && b >= 0) for (const x of ids.slice(a, b + 1)) n.add(x);
+      } else if (n.has(id)) n.delete(id); else n.add(id);
+      lastPick.current = id;
+      return n;
+    }),
+    enter: (id) => { setSelOn(true); setSel(new Set([id])); lastPick.current = id; },
+  }), [selOn, sel]);
+  const exitSel = () => { setSelOn(false); setSel(new Set()); };
   const setView = (v: string) => setFilters((f) => ({ ...f, view: v, assigneeId: '' }));
   const [filterOpen, setFilterOpen] = useState(false);
   const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
@@ -271,6 +294,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             </>
           )}
         </div>
+        {mode === 'list' && !projectId && <Button variant={selOn ? 'primary' : 'secondary'} onClick={() => (selOn ? exitSel() : setSelOn(true))} aria-pressed={selOn} data-testid="select-mode">{selOn ? '선택 끝내기' : '선택'}</Button>}
         <Button variant="secondary" onClick={() => setFilterOpen(!filterOpen)} aria-expanded={filterOpen} data-testid="filter-toggle">
           <SlidersHorizontal />필터{chips.length > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] leading-4 text-white">{chips.length}</span>}
           <ChevronDown className={cx('!size-3.5 transition-transform', filterOpen && 'rotate-180')} />
@@ -335,10 +359,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton /> : (
         <>
           {mode === 'list' && projectId && adding && <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask autoFocus projectId={projectId} onEscape={() => setAdding(false)} /></div>}
+          {selOn && <BulkBar ids={[...sel]} tasks={tasks} onClear={exitSel} onDone={() => { setSel(new Set()); reload(); broadcastRefresh(); }} />}
+          <SelectCtx.Provider value={mode === 'list' && !projectId ? selCtx : null}>
           {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
             : <GroupedTasks tasks={tasks} group={curView === 'done' ? 'month' : group} view={curView} keepIds={keepIds} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
                 people={people} sortBy={sortBy} onSort={pickSort} onReorder={reorder}
                 top={adding ? <InlineAddTask key={addKey} autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
+          </SelectCtx.Provider>
           {mode === 'board' && projectId && (
             <div className="flex items-center gap-2 text-sm text-ink-2">열 기준
               <select className="h-8 rounded-input border border-line bg-white px-2 text-sm" value={boardBy} onChange={(e) => setBoardBy(e.target.value as any)} aria-label="보드 열 기준">
@@ -792,14 +819,21 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
   // 밀어서 완료: 기본 꺼짐(설정에서 켬). 켜도 오른쪽으로 행 너비 45% 이상 밀고 손을 뗄 때만, 세로 스크롤 중엔 무시. 보류 밀기는 없앰(실수로 업무가 사라지던 원인)
   // V12 11번: 상태를 바꿀 수 없는 업무는 밀어서 완료도 끔
   const swipeOn = useSwipeSetting() && canSetStatus(t, user.id, nextStatusOnCheck(t, user.role));
-  const rowOpen = useRowOpen(t.id, useContext(OpenTaskCtx));
+  const rowOpen0 = useRowOpen(t.id, useContext(OpenTaskCtx));
+  const selc = useContext(SelectCtx);
+  const picked = !!selc?.sel.has(t.id);
+  // 선택 모드에서는 행을 누르면 선택/해제 (Shift = 범위)
+  const rowOpen = selc?.on ? { onClick: (e: React.MouseEvent) => { e.preventDefault(); selc.toggle(t.id, e.shiftKey); } } : rowOpen0;
+  const lp = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 정렬이 "직접 순서"가 아니면 끌 수 없음 → 꾹 누르면 안내
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hintStart = (e: React.PointerEvent) => {
+    // V14 12번: 휴대폰에서 길게 누르면 선택 모드
+    if (e.pointerType === 'touch' && selc && !selc.on) lp.current = setTimeout(() => { selc.enter(t.id); navigator.vibrate?.(20); }, 550);
     if (!dragHint || e.pointerType !== 'touch') return;
     hintTimer.current = setTimeout(() => { toast.info('순서를 바꾸려면 정렬을 "직접 순서"로 바꾸세요'); }, 500);
   };
-  const hintStop = () => { if (hintTimer.current) { clearTimeout(hintTimer.current); hintTimer.current = null; } };
+  const hintStop = () => { if (hintTimer.current) { clearTimeout(hintTimer.current); hintTimer.current = null; } if (lp.current) { clearTimeout(lp.current); lp.current = null; } };
   const right = nextStatusOnCheck(t, user.role);
   const swipe = async (to: TaskStatus) => {
     const before = t.status;
@@ -828,9 +862,10 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         }}
         onTouchCancel={() => { start.current = null; setDx(0); }}
         data-fresh={fresh ? '1' : undefined}
-        className={cx('group relative flex min-h-[44px] cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
+        className={cx('group relative flex min-h-[44px] cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', picked ? 'bg-brand-50' : fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
         {handle}
-        <CheckCircle t={t} onPatch={onPatch} />
+        {selc?.on ? <input type="checkbox" className="size-5 shrink-0 accent-brand-600" checked={picked} readOnly onClick={(e) => { e.stopPropagation(); selc.toggle(t.id, e.shiftKey); }} aria-label={`${t.title} 선택`} data-testid="row-select" />
+          : <CheckCircle t={t} onPatch={onPatch} />}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
           <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
             <TypeIcon t={t} />
@@ -1259,5 +1294,48 @@ function ExportTasks({ qs, onClose }: { qs: string; onClose: () => void }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** V14 12번 선택한 업무 작업 막대: 담당자·마감·프로젝트 변경, (본인 업무만) 완료, 휴지통. 권한 없는 건 건너뛰고 안내, 되돌리기 */
+function BulkBar({ ids, tasks, onClear, onDone }: { ids: string[]; tasks: Task[]; onClear: () => void; onDone: () => void }) {
+  const { dir } = useSession();
+  const projects = useApi<{ projects: { id: string; name: string }[] }>('/api/projects');
+  const [busy, setBusy] = useState(false);
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  async function run(action: 'patch' | 'done' | 'delete', patch?: Record<string, unknown>, label?: string) {
+    if (!ids.length) return;
+    if (action === 'delete' && !confirm(`${ids.length}건을 휴지통으로 옮길까요?`)) return;
+    setBusy(true);
+    // 되돌리기용 이전 값
+    const key = patch ? Object.keys(patch)[0] : 'status';
+    const col: Record<string, keyof Task> = { assigneeId: 'assignee_id', dueDate: 'due_date', projectId: 'project_id', status: 'status' };
+    const before = Object.fromEntries(ids.map((id) => [id, { [key]: (byId.get(id) as any)?.[col[key]] ?? null }]));
+    try {
+      const r = await api('/api/tasks/bulk', { body: { ids, action, ...(patch ? { patch } : {}) } });
+      const msg = `${r.done.length}건 ${label ?? '바꿨습니다'}${r.skipped.length ? ` · ${r.skipped.length}건 건너뜀` : ''}`;
+      const undo = r.done.length ? { label: '되돌리기', run: async () => {
+        const back = action === 'delete' ? { ids: r.done, action: 'restore' } : { ids: r.done, action: 'patch', each: Object.fromEntries(r.done.map((id: string) => [id, before[id]])) };
+        try { await api('/api/tasks/bulk', { body: back }); onDone(); toast.ok('되돌렸습니다'); } catch (e: any) { toast.error(e.message); }
+      } } : undefined;
+      toast.ok(msg, undo);
+      if (r.skipped.length) toast.info(`건너뜀: ${r.skipped.slice(0, 3).map((s: any) => `${s.title}(${s.reason})`).join(', ')}${r.skipped.length > 3 ? ' 외' : ''}`);
+      onDone();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="fixed inset-x-2 bottom-[calc(4.5rem+var(--sab))] z-40 flex flex-wrap items-center gap-2 rounded-card border border-line bg-white p-2 shadow-pop sm:inset-x-auto sm:bottom-4 sm:left-1/2 sm:-translate-x-1/2" role="toolbar" aria-label="선택한 업무" data-testid="bulk-bar">
+      <b className="px-1 text-sm" data-testid="bulk-count">{ids.length}건 선택</b>
+      <select className="h-8 max-w-[9rem] rounded-input border border-line bg-white px-1.5 text-xs" value="" disabled={busy || !ids.length} onChange={(e) => e.target.value && run('patch', { assigneeId: e.target.value === '-' ? null : e.target.value }, '담당자 변경')} aria-label="담당자 바꾸기">
+        <option value="">담당자…</option><option value="-">담당자 없음</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
+      </select>
+      <input type="date" className="h-8 rounded-input border border-line bg-white px-1.5 text-xs" disabled={busy || !ids.length} onChange={(e) => e.target.value && run('patch', { dueDate: e.target.value }, '마감 변경')} aria-label="마감 바꾸기" />
+      <select className="h-8 max-w-[9rem] rounded-input border border-line bg-white px-1.5 text-xs" value="" disabled={busy || !ids.length} onChange={(e) => e.target.value && run('patch', { projectId: e.target.value === '-' ? null : e.target.value }, '프로젝트 변경')} aria-label="프로젝트 바꾸기">
+        <option value="">프로젝트…</option><option value="-">프로젝트 없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <Button size="sm" variant="secondary" disabled={busy || !ids.length} onClick={() => run('done', undefined, '완료')} data-testid="bulk-done">완료</Button>
+      <Button size="sm" variant="danger" disabled={busy || !ids.length} onClick={() => run('delete', undefined, '휴지통으로')} data-testid="bulk-delete">삭제</Button>
+      <Button size="sm" variant="ghost" onClick={onClear}>취소</Button>
+    </div>
   );
 }

@@ -1723,6 +1723,34 @@ await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 �
   await owner.getByTestId('team-chip').first().getByText('운영팀 E2E').waitFor();
   assert.ok(t);
 });
+await step('V14 12·13번: 업무 여러 개 선택(Shift 범위) → 마감 일괄 변경 → 되돌리기 / 주간 캘린더 시간 있는 업무는 1시간 칸 높이', async () => {
+  const base = (await ctx.owner.ok('POST', '/api/tasks', { title: '다중선택 가', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, approvalRequired: false })).id;
+  for (const n of ['나', '다']) await ctx.owner.ok('POST', '/api/tasks', { title: `다중선택 ${n}`, orgUnitId: ctx.hq, assigneeId: ctx.ownerId, approvalRequired: false });
+  await owner.goto(BASE + '/tasks?group=none&q=' + encodeURIComponent('다중선택'));
+  await owner.getByText('다중선택 다').first().waitFor();
+  await owner.getByTestId('select-mode').click();
+  const rows = owner.locator('[data-row]').filter({ hasText: '다중선택' });
+  await rows.first().getByTestId('row-select').click();
+  await rows.nth(2).getByTestId('row-select').click({ modifiers: ['Shift'] });
+  await owner.getByTestId('bulk-count').getByText('3건 선택').waitFor();
+  const due = addDays(today, 12);
+  await owner.getByLabel('마감 바꾸기').fill(due);
+  await owner.getByText(/3건 마감 변경/).waitFor();
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${base}`)).task.due_date, due);
+  await owner.getByRole('button', { name: '되돌리기' }).first().click();
+  await owner.getByText('되돌렸습니다').waitFor();
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${base}`)).task.due_date, null);
+  await owner.getByTestId('select-mode').click();
+  // 주간 캘린더: 마감 15:00 업무 → 14~15시 한 칸 높이
+  await ctx.owner.ok('POST', '/api/tasks', { title: '주간 블록 높이 시험', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, dueDate: today, dueTime: '15:00', approvalRequired: false });
+  await owner.goto(BASE + '/calendar');
+  const blk = owner.locator('.fc-timegrid-event.task-item', { hasText: '주간 블록 높이 시험' }).first();
+  await blk.waitFor();
+  const slot = await owner.locator('.fc-timegrid-slot').first().boundingBox();
+  const bb = await blk.boundingBox();
+  assert.ok(bb.height >= slot.height * 0.9, `블록 높이 ${bb.height} ≥ 한 칸 ${slot.height}`);
+  await blk.getByText('15:00 마감').waitFor();
+});
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
   const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');

@@ -164,7 +164,8 @@ export default function CalendarPage() {
     ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id)).map((t) => ({
       // V7 4번: 일정과 같은 모양 — 앞에 ✓ 만 다름, 다른 사람 업무는 머리글자
       id: `task|${t.id}`, title: `${t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? `${initials(t.assignee_name)} · ` : ''}${t.title}`,
-      start: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : t.due_date, end: t.due_time ? new Date(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() + 30 * 60000).toISOString() : undefined,
+      // V14 13번: 시간 있는 업무는 마감 직전 1시간 블록(한 칸 높이) — 얇게 찌그러지지 않게
+      start: t.due_time ? new Date(Math.max(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() - 60 * 60000, new Date(`${t.due_date}T00:00:00+09:00`).getTime())).toISOString() : t.due_date, // 자정 넘지 않게 end: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : undefined,
       allDay: !t.due_time, backgroundColor: isPersonalTask(t) ? calColors.personal : calColors.company, borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#ef4444' : 'transparent',
       textColor: '#ffffff', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t }, durationEditable: false,
     })) : []),
@@ -188,7 +189,9 @@ export default function CalendarPage() {
       const nd = seoulDate(info.event.start);
       try {
         const shift = Math.round((Date.parse(nd) - Date.parse(t.due_date)) / 86400000);
-        await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { dueDate: nd, ...(!info.event.allDay ? { dueTime: seoulTime(info.event.start) } : t.due_time ? { dueTime: null } : {}), ...(t.start_date ? { startDate: addDays(t.start_date, shift) } : {}), version: t.version } });
+        // 블록 끝 = 마감 시각 (블록은 마감 1시간 전부터)
+        const dueAt = info.event.end ?? new Date(info.event.start.getTime() + 60 * 60000);
+        await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { dueDate: info.event.allDay ? nd : seoulDate(dueAt), ...(!info.event.allDay ? { dueTime: seoulTime(dueAt) } : t.due_time ? { dueTime: null } : {}), ...(t.start_date ? { startDate: addDays(t.start_date, shift) } : {}), version: t.version } });
         toast.ok('업무 마감을 옮겼습니다'); broadcastRefresh();
       } catch (e: any) { toast.error(e.message); info.revert(); }
       load();
@@ -338,7 +341,7 @@ export default function CalendarPage() {
             slotLabelFormat={mobile ? { hour: 'numeric', hour12: false } : { hour: 'numeric', hour12: true }} // 휴대폰은 "13시"처럼 짧게 → 날짜 칸을 넓게
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
             allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime={slotMin} scrollTime="08:00:00"
-            slotDuration="01:00:00" snapDuration="01:00:00"
+            slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap={false} eventMinHeight={28}
             editable selectable selectMirror droppable longPressDelay={350}
             events={fcEvents}
             datesSet={(a: DatesSetArg) => { setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view', a.view.type); } catch {} }}
@@ -361,10 +364,10 @@ export default function CalendarPage() {
               return (
                 <div className={cx('flex min-w-0 overflow-hidden px-0.5 leading-tight', timed ? 'h-full flex-col' : 'items-start', narrow ? 'text-[10px]' : 'text-[12px]')}
                   {...(isTask ? { 'data-task-item': t.id, title: t.title } : { 'data-ev-block': '1' })}>
-                  <span className={cx('min-w-0 break-all font-semibold', !timed && 'line-clamp-2 whitespace-normal', done && 'line-through opacity-80')}>
+                  <span className={cx('min-w-0 break-all font-semibold line-clamp-2 whitespace-normal', done && 'line-through opacity-80')}>
                     {mark}{!timed && !narrow && arg.timeText && <span className="mr-1 font-normal opacity-85">{arg.timeText}</span>}{arg.event.title}
                   </span>
-                  {timed && !narrow && arg.timeText && <span className="mt-0.5 text-[11px] opacity-85">{arg.timeText}</span>}
+                  {timed && !narrow && (isTask ? t.due_time && <span className="mt-0.5 text-[11px] opacity-85">{t.due_time.slice(0, 5)} 마감</span> : arg.timeText && <span className="mt-0.5 text-[11px] opacity-85">{arg.timeText}</span>)}
                 </div>
               );
             }}
