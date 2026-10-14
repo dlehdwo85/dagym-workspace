@@ -1,195 +1,456 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Download, FileSpreadsheet, FileText, Folder, Image as ImageIcon, Library, Loader2, Lock, Pencil, Search, Sparkles, Trash2, Undo2, Upload } from 'lucide-react';
+import { ChevronRight, Download, FileSpreadsheet, FileText, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock,
+  Pencil, Search, ShieldAlert, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { DropHint, DropZone, UploadProgress, fileHash, putFile } from '@/components/upload';
+import { DropZone, UploadProgress, fileHash, putFile } from '@/components/upload';
 import { ROLE_LABEL } from '@/lib/types';
-import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
+type Sec = 'public' | 'internal' | 'confidential';
 type F = { id: string; folder: string; title: string; file_name: string; mime_type: string; size_bytes: number; tags: string[]; description: string | null;
-  created_at: string; created_by: string; created_by_name: string; has_text: boolean; snippet: string | null;
-  organized_by: 'ai' | 'rule' | null; ai_confidence: number | null; needs_review: boolean; can_undo: boolean; level: string; organize_status: string | null; organize_error: string | null };
+  created_at: string; updated_at: string; created_by: string; created_by_name: string; has_text: boolean; snippet: string | null;
+  organized_by: 'ai' | 'rule' | null; ai_confidence: number | null; needs_review: boolean; can_undo: boolean; level: string; organize_status: string | null; organize_error: string | null;
+  security: Sec; security_suggested: Sec | null; security_confirmed: boolean; effective_security: Sec };
+type Fo = { folder: string; n: number; security: Sec; level: string };
+type Data = { files: F[]; folders: Fo[]; review: number; level: string; aiOrganize: boolean; confEdit: boolean };
 const RANK: Record<string, number> = { none: 0, view: 1, edit: 2, delete: 3 };
+const SEC: Record<Sec, { label: string; cls: string }> = {
+  public: { label: '일반', cls: 'bg-emerald-50 text-emerald-700' }, internal: { label: '내부', cls: 'bg-slate-100 text-ink-2' }, confidential: { label: '기밀', cls: 'bg-red-50 text-red-700' } };
 const fmtSize = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n >= 1024 ? `${Math.round(n / 1024)}KB` : `${n}B`);
 const isImg = (f: F) => /^image\/(png|jpe?g|gif|webp)$/.test(f.mime_type);
+const parentOf = (p: string) => p.split('/').slice(0, -1).join('/');
+const nameOf = (p: string) => p.split('/').pop() || '최상위';
+const DRAG = 'application/x-workin-files';
+const pref = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const setPref = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch {} };
 
-/** V9 회사 자료실: 로고·소개서·단가표·보고서. 업무 첨부와 같은 저장소, AI 비서가 찾아 쓸 수 있음 */
+function SecBadge({ s, suggested }: { s: Sec; suggested?: boolean }) {
+  return <span className={cx('inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 text-[11px] font-semibold', SEC[s].cls)} data-testid="sec-badge" data-sec={s}>
+    {s === 'confidential' && <Lock className="size-3" />}{SEC[s].label}{suggested && ' 제안'}</span>;
+}
+
+/** V9 회사 자료실 → V14 18번 폴더 탐색기: PC 왼쪽 폴더 나무 + 오른쪽 내용(경로·목록/격자·정렬), 휴대폰은 폴더를 눌러 들어감. 내용 영역 전체가 끌어 놓기 영역 */
 export default function LibraryPage() {
   const { user } = useSession();
   const admin = user.role === 'owner' || user.role === 'admin';
-  const [review, setReview] = useState(false);
-  const [permFolder, setPermFolder] = useState<string | null>(null);
   const sp = useSearchParams();
+  const [cur, setCur] = useState(sp.get('folder') ?? '');
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
-  const [folder, setFolder] = useState<string | null>(null);
-  const url = `/api/library?${new URLSearchParams({ ...(query ? { q: query } : {}), ...(folder !== null ? { folder } : {}), ...(review ? { review: '1' } : {}) })}`;
-  const { data, error, loading, reload } = useApi<{ files: F[]; folders: { folder: string; n: number }[]; review: number; level: string; aiOrganize: boolean }>(url);
-  const canUpload = RANK[data?.level ?? 'edit'] >= RANK.edit;
+  const [review, setReview] = useState(false);
+  const url = `/api/library?${new URLSearchParams({ limit: '500', ...(query ? { q: query } : {}), ...(review ? { review: '1' } : {}) })}`;
+  const { data, error, loading, reload } = useApi<Data>(url);
+  const [view, setView] = useState<'list' | 'grid'>('list');
+  const [sort, setSort] = useState('name');
+  useEffect(() => { setView(pref('wos_lib_view', 'list') as 'list' | 'grid'); setSort(pref('wos_lib_sort', 'name')); }, []);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [recent, setRecent] = useState<Set<string>>(new Set()); // 방금 올린 파일은 AI 가 다른 폴더로 정리해도 이 화면에 남겨 "→ ○○로 정리됨 · 바꾸기"를 보여 준다
   const [busy, setBusy] = useState('');
-  const [upFolder, setUpFolder] = useState('');
-  const [upTags, setUpTags] = useState('');
   const [edit, setEdit] = useState<F | null>(null);
+  const [dlg, setDlg] = useState<null | { kind: 'new' | 'rename' | 'move'; value: string }>(null);
+  const [permFolder, setPermFolder] = useState<string | null>(null);
+  const [preview, setPreview] = useState<any[] | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const hi = sp.get('file');
   useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 300); return () => clearTimeout(t); }, [q]);
-  useEffect(() => { setUpFolder(folder ?? ''); }, [folder]);
+  useEffect(() => { setSel(new Set()); }, [cur, query]);
+  const canUpload = RANK[data?.level ?? 'edit'] >= RANK.edit;
 
-  // V12 9번: 여러 개·진행률·알기 쉬운 실패 원인 (자료실은 원본 그대로 — 로고 화질 유지)
+  // 폴더 나무: 보이는 폴더 + 그 상위 경로
+  const folders = data?.folders ?? [];
+  const allPaths = useMemo(() => {
+    const s = new Set<string>();
+    for (const f of folders) { const parts = f.folder.split('/').filter(Boolean); for (let i = 1; i <= parts.length; i++) s.add(parts.slice(0, i).join('/')); }
+    return [...s].sort((a, b) => a.localeCompare(b, 'ko'));
+  }, [folders]);
+  const children = (p: string) => allPaths.filter((x) => parentOf(x) === p);
+  const folderInfo = (p: string) => folders.find((f) => f.folder === p);
+  const countUnder = (p: string) => folders.filter((f) => f.folder === p || f.folder.startsWith(p + '/')).reduce((a, f) => a + f.n, 0);
+  const secOf = (p: string) => folderInfo(p)?.security ?? 'public';
+  const files = useMemo(() => {
+    const list = (data?.files ?? []).filter((f) => (query || review ? true : f.folder === cur || recent.has(f.id)));
+    const by: Record<string, (a: F, b: F) => number> = {
+      name: (a, b) => a.title.localeCompare(b.title, 'ko'), updated: (a, b) => b.updated_at.localeCompare(a.updated_at), size: (a, b) => Number(b.size_bytes) - Number(a.size_bytes) };
+    return [...list].sort(by[sort] ?? by.name);
+  }, [data, cur, query, review, sort, recent]);
+  const sub = query || review ? [] : children(cur);
+  const crumbs = cur ? cur.split('/').map((_, i, a) => a.slice(0, i + 1).join('/')) : [];
+
+  // ---- 올리기 (현재 폴더 또는 놓은 폴더) ----
   const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
-  async function upload(files: FileList | null) {
-    if (!files?.length) return;
-    const list = Array.from(files);
-    const tags = upTags.split(/[,\s]+/).map((t) => t.replace(/^#/, '').trim()).filter(Boolean).slice(0, 20);
+  async function upload(list0: FileList | File[] | null, folder = cur) {
+    if (!list0 || !list0.length) return;
+    const list = Array.from(list0);
     setProg(list.map((f) => ({ name: f.name, pct: 0 })));
     const upd = (i: number, patch: Partial<{ pct: number; error: string }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
     let ok = 0;
     for (const [n, file] of list.entries()) {
       setBusy(`${list.length > 1 ? `${n + 1}/${list.length} ` : ''}${file.name} 올리는 중…`);
       try {
-        const meta = { fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, folder: upFolder, tags, contentHash: await fileHash(file) };
-        // V13 3번: 같은 파일이 이미 있으면 물어본다
+        const meta = { fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, folder, contentHash: await fileHash(file) };
         const r = await api('/api/library', { body: meta }).catch(async (e: any) => {
           if (e.code !== 'duplicate' || !confirm(`${e.message}\n그래도 한 번 더 올릴까요?`)) throw e;
           return api('/api/library', { body: { ...meta, allowDuplicate: true } });
         });
         await putFile(r.upload, file, (pct) => upd(n, { pct }));
-        setBusy(`${file.name} 정리하는 중…`);
+        setBusy(`${file.name} AI 정리 중…`);
         const c = await api(`/api/library/${r.id}/complete`, { body: {} });
-        if (c.organized?.by === 'ai') toast.ok(`AI 정리됨: ${c.organized.folder || '최상위'} · ${(c.organized.tags ?? []).slice(0, 3).map((t: string) => '#' + t).join(' ')}`);
-        else if (c.organized) toast.error(`AI 정리 못 함 — ${c.organized.error ?? '이유 모름'} (파일명 규칙으로 정리)`);
+        setRecent((s) => new Set(s).add(r.id));
+        if (c.organized?.by === 'ai') toast.ok(`AI 정리됨 → ${c.organized.folder || '최상위'}`);
+        else if (c.organized?.error) toast.error(`AI 정리 못 함 — ${c.organized.error} (파일명 규칙으로 정리)`);
         upd(n, { pct: 100 }); ok++;
       } catch (e: any) { upd(n, { error: e.message }); toast.error(`${file.name}: ${e.message}`); }
     }
     setBusy(''); if (fileRef.current) fileRef.current.value = '';
-    if (ok) toast.ok(`${ok}개 올렸습니다`);
+    if (ok) toast.ok(`${ok}개 올렸습니다${folder ? ` — ${folder}` : ''}`);
     if (ok === list.length) setTimeout(() => setProg([]), 1500);
     reload();
   }
+  // ---- 옮기기 (파일을 폴더 위에 끌어 놓기 / 여러 개 선택) ----
+  async function move(ids: string[], folder: string) {
+    try {
+      const r = await api('/api/library/move', { body: { ids, folder } });
+      toast.ok(`${r.moved}개를 "${folder || '최상위'}"로 옮겼습니다`);
+      if (r.skipped.length) toast.error(`${r.skipped.length}개는 못 옮김: ${r.skipped[0].reason}`);
+      setSel(new Set()); reload();
+    } catch (e: any) { toast.error(e.message); }
+  }
+  const dropProps = (folder: string) => ({
+    onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes(DRAG) || e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.stopPropagation(); (e.currentTarget as HTMLElement).dataset.over = '1'; } },
+    onDragLeave: (e: React.DragEvent) => { delete (e.currentTarget as HTMLElement).dataset.over; },
+    onDrop: (e: React.DragEvent) => {
+      delete (e.currentTarget as HTMLElement).dataset.over;
+      const ids = e.dataTransfer.getData(DRAG);
+      if (ids) { e.preventDefault(); e.stopPropagation(); move(JSON.parse(ids), folder); return; }
+      if (e.dataTransfer.files?.length) { e.preventDefault(); e.stopPropagation(); upload(e.dataTransfer.files, folder); } // 폴더 위에 놓으면 그 폴더에 고정
+    },
+  });
+  const dragFile = (f: F) => (e: React.DragEvent) => {
+    const ids = sel.has(f.id) ? [...sel] : [f.id];
+    e.dataTransfer.setData(DRAG, JSON.stringify(ids)); e.dataTransfer.effectAllowed = 'move';
+  };
+  // ---- 폴더 만들기·이름 바꾸기·삭제 ----
+  async function folderDialog(e: React.FormEvent) {
+    e.preventDefault(); if (!dlg) return;
+    const v = dlg.value.trim().replace(/^\/+|\/+$/g, '');
+    try {
+      if (dlg.kind === 'new') { const p = cur ? `${cur}/${v}` : v; await api('/api/library/folders', { body: { path: p } }); setCur(p); }
+      if (dlg.kind === 'rename') { const to = parentOf(cur) ? `${parentOf(cur)}/${v}` : v; const r = await api('/api/library/folders', { method: 'PATCH', body: { from: cur, to } }); setCur(to); toast.ok(`이름을 바꿨습니다 (자료 ${r.moved}개)`); }
+      if (dlg.kind === 'move') await move([...sel], v);
+      setDlg(null); reload();
+    } catch (er: any) { toast.error(er.message); }
+  }
+  async function deleteFolder() {
+    if (!confirm(`"${cur}" 폴더를 지울까요? (빈 폴더만 지울 수 있습니다)`)) return;
+    try { await api('/api/library/folders', { method: 'DELETE', body: { path: cur } }); setCur(parentOf(cur)); reload(); toast.ok('폴더를 지웠습니다'); } catch (e: any) { toast.error(e.message); }
+  }
+  async function setFolderSec(security: string) {
+    try { await api('/api/library/folder-security', { method: 'PUT', body: { folder: cur, security: security || null } }); reload(); toast.ok('폴더 등급을 바꿨습니다'); } catch (e: any) { toast.error(e.message); }
+  }
+  // ---- 파일 ----
   async function save(e: React.FormEvent) {
     e.preventDefault(); if (!edit) return;
     try {
-      await api(`/api/library/${edit.id}`, { method: 'PATCH', body: { title: edit.title, folder: edit.folder, description: edit.description || null,
+      await api(`/api/library/${edit.id}`, { method: 'PATCH', body: { title: edit.title, folder: edit.folder, description: edit.description || null, security: edit.security,
         tags: String(edit.tags).split(/[,\s]+/).map((t) => t.replace(/^#/, '')).filter(Boolean) } });
       setEdit(null); reload(); toast.ok('저장했습니다');
     } catch (e: any) { toast.error(e.message); }
   }
-  async function remove(f: F) {
-    if (!confirm(`"${f.title}" 을(를) 자료실에서 지울까요? (이미 업무에 첨부한 파일은 그대로 남습니다)`)) return;
-    try { await api(`/api/library/${f.id}`, { method: 'DELETE' }); reload(); } catch (e: any) { toast.error(e.message); }
+  async function patchSec(f: F, security: Sec) {
+    try { await api(`/api/library/${f.id}`, { method: 'PATCH', body: { security } }); reload(); toast.ok(security === 'confidential' ? '기밀로 정했습니다' : '등급을 확인했습니다'); } catch (e: any) { toast.error(e.message); }
+  }
+  async function remove(ids: string[]) {
+    if (!confirm(ids.length > 1 ? `${ids.length}개 자료를 지울까요?` : '이 자료를 지울까요? (이미 업무에 첨부한 파일은 그대로 남습니다)')) return;
+    let ok = 0;
+    for (const id of ids) { try { await api(`/api/library/${id}`, { method: 'DELETE' }); ok++; } catch (e: any) { toast.error(e.message); } }
+    if (ok) toast.ok(`${ok}개 지웠습니다`);
+    setSel(new Set()); reload();
   }
   async function organize(f: F, action: 'undo' | 'redo') {
     try { await api(`/api/library/${f.id}/organize`, { body: { action } }); reload(); toast.ok(action === 'undo' ? '정리 전으로 되돌렸습니다' : '다시 정리했습니다'); } catch (e: any) { toast.error(e.message); }
   }
+  // ---- 관리자 전체 정리: 미리보기 → 고른 것만 적용 ----
   const [allBusy, setAllBusy] = useState('');
-  async function organizeAll() {
-    if (!confirm('아직 정리하지 않았거나 정리에 실패한 파일을 AI 로 정리할까요? (파일마다 AI 요청 1회)')) return;
-    let total = 0, ai = 0;
+  async function previewAll() {
+    const out: any[] = [];
     try {
-      for (let i = 0; i < 50; i++) {
-        setAllBusy(`정리 중… ${total}개`);
-        const r = await api('/api/library/organize-all', { body: {} });
-        total += r.done; ai += r.ai;
-        if (!r.done || !r.left) break;
+      for (let i = 0; i < 5; i++) {
+        setAllBusy(`미리보기 만드는 중… ${out.length}개`);
+        const r = await api('/api/library/organize-all', { body: { preview: true } });
+        out.push(...r.preview);
+        if (r.preview.length < 10) break;
       }
-      toast.ok(`${total}개 정리 (AI ${ai}개)`);
-    } catch (e: any) { toast.error(e.message); } finally { setAllBusy(''); reload(); }
+      if (!out.length) toast.ok('정리할 파일이 없습니다'); else setPreview(out.map((p) => ({ ...p, on: true })));
+    } catch (e: any) { toast.error(e.message); } finally { setAllBusy(''); }
   }
-  const folders = data?.folders ?? [];
-  const top = [...new Set(folders.map((f) => f.folder).filter(Boolean))];
+  async function applyPreview() {
+    try { const r = await api('/api/library/organize-all', { body: { apply: preview!.filter((p) => p.on).map((p) => p.id) } }); toast.ok(`${r.applied}개 적용했습니다`); setPreview(null); reload(); }
+    catch (e: any) { toast.error(e.message); }
+  }
+  const curInfo = folderInfo(cur);
+  const canEditFolder = cur && RANK[curInfo?.level ?? data?.level ?? 'none'] >= RANK.edit;
+  const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  const Tree = ({ p, depth }: { p: string; depth: number }) => (
+    <>
+      {children(p).map((c) => (
+        <li key={c}>
+          <button role="treeitem" aria-selected={cur === c} onClick={() => setCur(c)} {...dropProps(c)} data-folder={c}
+            className={cx('flex w-full items-center gap-1.5 rounded-input py-1.5 pr-2 text-left text-sm data-[over]:bg-accent-100 data-[over]:ring-2 data-[over]:ring-accent-500',
+              cur === c ? 'bg-brand-50 font-semibold text-brand-700' : 'text-ink-2 hover:bg-slate-100')} style={{ paddingLeft: 8 + depth * 14 }}>
+            <Folder className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{nameOf(c)}</span>
+            {secOf(c) === 'confidential' && <Lock className="size-3 shrink-0 text-red-600" aria-label="기밀 폴더" />}
+            <span className="text-[11px] text-ink-3">{countUnder(c)}</span>
+          </button>
+          {(cur === c || cur.startsWith(c + '/')) && children(c).length > 0 && <ul><Tree p={c} depth={depth + 1} /></ul>}
+        </li>
+      ))}
+    </>
+  );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4">
-      <PageHeader title="자료실" icon={Library} sub="로고·회사 소개서·단가표·보고서를 한곳에. 업무에 바로 첨부하고, AI 비서가 찾아 씁니다."
-        actions={canUpload && <>{admin && <Button variant="secondary" onClick={organizeAll} disabled={!!allBusy} data-testid="library-organize-all">{allBusy ? <><Loader2 className="animate-spin" />{allBusy}</> : <><Sparkles />전체 정리</>}</Button>}<Button onClick={() => fileRef.current?.click()} disabled={!!busy} data-testid="library-upload">{busy ? <Loader2 className="animate-spin" /> : <Upload />}올리기</Button></>} />
+    <div className="mx-auto max-w-6xl space-y-3">
+      <PageHeader title="자료실" icon={Library} sub="폴더로 정리하고, 업무에 바로 첨부하고, AI 비서가 찾아 씁니다. 🔒 기밀 자료는 권한 있는 사람만 봅니다."
+        actions={<>
+          {data?.confEdit && <Button variant="ghost" onClick={() => setLogOpen(true)} data-testid="conf-log-open"><ShieldAlert />기밀 열람 기록</Button>}
+          {canUpload && admin && <Button variant="secondary" onClick={previewAll} disabled={!!allBusy} data-testid="library-organize-all">{allBusy ? <><Loader2 className="animate-spin" />{allBusy}</> : <><Sparkles />전체 정리</>}</Button>}
+          {canUpload && <Button onClick={() => fileRef.current?.click()} disabled={!!busy} data-testid="library-upload">{busy ? <Loader2 className="animate-spin" /> : <Upload />}올리기</Button>}
+        </>} />
       <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="library-file" />
-      {busy && <p className="text-sm text-ink-2">{busy}</p>}
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <label className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
-          <input className={cx(inputCls, 'pl-9')} placeholder="자료 검색" title="제목·태그·본문에서 찾습니다" value={q} onChange={(e) => setQ(e.target.value)} aria-label="자료 검색" />
-        </label>
-        <div className="flex gap-2">
-          <input className={cx(inputCls, 'sm:w-44')} placeholder="올릴 폴더" title="예: 브랜드/로고" value={upFolder} onChange={(e) => setUpFolder(e.target.value)} aria-label="올릴 폴더" />
-          <input className={cx(inputCls, 'sm:w-36')} placeholder="태그 (쉼표)" value={upTags} onChange={(e) => setUpTags(e.target.value)} aria-label="올릴 때 태그" />
-        </div>
-      </div>
-      <div className="scrollbar-thin -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label="폴더">
-        {!!data?.review && <button role="tab" aria-selected={review} onClick={() => setReview(!review)} data-testid="library-review"
-          className={cx('inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-sm', review ? 'border-amber-500 bg-amber-50 font-semibold text-amber-800' : 'border-amber-200 bg-white text-amber-800')}>정리 필요 {data.review}</button>}
-        <button role="tab" aria-selected={folder === null} onClick={() => setFolder(null)} className={cx('shrink-0 rounded-full border px-3 py-1 text-sm', folder === null ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line bg-white text-ink-2')}>전체</button>
-        {top.map((f) => (
-          <button key={f} role="tab" aria-selected={folder === f} onClick={() => setFolder(f)} className={cx('inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-sm', folder === f ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line bg-white text-ink-2')}>
-            <Folder className="size-3.5" />{f}<span className="text-xs text-ink-3">{folders.find((x) => x.folder === f)?.n}</span>
-          </button>
-        ))}
-      </div>
-      {user.role === 'owner' && folder && <div className="-mt-1 text-right"><Button size="sm" variant="ghost" onClick={() => setPermFolder(folder)} data-testid="folder-perms-open"><Lock />&ldquo;{folder}&rdquo; 폴더 권한</Button></div>}
-      {data && !data.aiOrganize && <p className="text-xs text-ink-3">올린 파일은 회사가 고친 정리 규칙(파일명)으로 자동 정리됩니다. 내장 AI 가 켜지면 내용까지 보고 정리합니다.</p>}
-      <UploadProgress items={prog} />
-      <DropZone onFiles={(f) => upload(f)} disabled={!!busy} label="놓으면 자료실에 올라갑니다" testid="library-drop" className="min-h-[120px]">
-      {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={5} /> : !data!.files.length ? (
-        query ? <Empty title="찾는 자료가 없습니다" icon={Library}>다른 말로 찾아 보세요</Empty> : (
-          <div className="space-y-2">
-            <Empty title="아직 자료가 없습니다" icon={Library}>로고·소개서·단가표를 올려 두면 업무에 바로 첨부하고 AI 비서가 찾아 씁니다.</Empty>
-            <DropHint onClick={() => fileRef.current?.click()} disabled={!!busy} what="로고·사진·PDF·엑셀·문서" testid="library-drop-hint" />
+      <div className="flex gap-4">
+        {/* PC 폴더 나무 */}
+        <aside className="hidden w-60 shrink-0 md:block" aria-label="폴더">
+          <ul role="tree" className="space-y-0.5 rounded-card border border-line bg-white p-1.5 shadow-card" data-testid="library-tree">
+            <li><button role="treeitem" aria-selected={cur === ''} onClick={() => setCur('')} {...dropProps('')}
+              className={cx('flex w-full items-center gap-1.5 rounded-input px-2 py-1.5 text-sm data-[over]:bg-accent-100', cur === '' ? 'bg-brand-50 font-semibold text-brand-700' : 'text-ink-2 hover:bg-slate-100')}>
+              <Home className="size-4" />자료실</button></li>
+            <Tree p="" depth={0} />
+          </ul>
+        </aside>
+        <section className="min-w-0 flex-1 space-y-2">
+          {/* 경로 · 검색 · 보기 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <nav aria-label="경로" className="flex min-w-0 flex-1 items-center gap-0.5 text-sm" data-testid="library-path">
+              <button onClick={() => setCur('')} className="hit rounded px-1 font-medium text-ink-2 hover:bg-slate-100" {...dropProps('')}>자료실</button>
+              {crumbs.map((c) => <span key={c} className="flex min-w-0 items-center gap-0.5"><ChevronRight className="size-3.5 shrink-0 text-ink-3" />
+                <button onClick={() => setCur(c)} className={cx('hit truncate rounded px-1 hover:bg-slate-100', c === cur ? 'font-semibold text-ink' : 'text-ink-2')} {...dropProps(c)}>{nameOf(c)}</button></span>)}
+              {cur && <SecBadge s={secOf(cur)} />}
+            </nav>
+            <label className="relative w-full sm:w-56">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
+              <input className={cx(inputCls, 'h-9 pl-9')} placeholder="자료 검색" title="제목·태그·본문에서 찾습니다" value={q} onChange={(e) => setQ(e.target.value)} aria-label="자료 검색" />
+            </label>
+            <select className={cx(inputCls, 'h-9 !w-auto')} value={sort} onChange={(e) => { setSort(e.target.value); setPref('wos_lib_sort', e.target.value); }} aria-label="정렬">
+              <option value="name">이름순</option><option value="updated">최근 바뀐 순</option><option value="size">큰 파일 순</option>
+            </select>
+            <div className="flex rounded-input border border-line" role="group" aria-label="보기">
+              {([['list', List, '목록'], ['grid', LayoutGrid, '격자']] as const).map(([k, I, l]) => (
+                <button key={k} onClick={() => { setView(k); setPref('wos_lib_view', k); }} aria-pressed={view === k} aria-label={`${l} 보기`}
+                  className={cx('inline-flex size-9 items-center justify-center', view === k ? 'bg-slate-100 text-ink' : 'text-ink-3')}><I className="size-4" /></button>
+              ))}
+            </div>
           </div>
-        )
-      ) : (
-        <ul className="divide-y divide-line overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="library-list">
-          {data!.files.map((f) => (
-            <li key={f.id} className={cx('flex items-center gap-3 px-3 py-2.5', hi === f.id && 'bg-amber-50')}>
-              <a href={`/api/library/${f.id}/download${isImg(f) ? '?inline=1' : ''}`} target="_blank" rel="noreferrer" className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-input border border-line bg-slate-50">
-                {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" />
-                  : /sheet|excel|csv/.test(f.mime_type + f.file_name) ? <FileSpreadsheet className="size-5 text-emerald-600" /> : /^image\//.test(f.mime_type) ? <ImageIcon className="size-5 text-ink-3" /> : <FileText className="size-5 text-ink-3" />}
-              </a>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 truncate text-sm font-medium">{f.title}
-                  {f.organized_by && <span className={cx('inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 text-[11px] font-semibold', f.needs_review ? 'bg-amber-100 text-amber-800' : 'bg-violet-100 text-violet-700')}
-                    title={f.ai_confidence !== null ? `확신 ${Math.round(f.ai_confidence * 100)}%` : undefined} data-testid="ai-organized"><Sparkles className="size-3" />{f.organized_by === 'ai' ? 'AI 정리됨' : '규칙 정리'}{f.needs_review && ' · 확인 필요'}</span>}
-                </div>
-                <div className="truncate text-xs text-ink-3">
-                  {f.folder && <span className="mr-1.5"><Folder className="mr-0.5 inline size-3" />{f.folder}</span>}
-                  {f.tags.map((t) => <span key={t} className="mr-1 text-brand-600">#{t}</span>)}
-                  {fmtSize(Number(f.size_bytes))} · {f.created_by_name} · {fmtDateTime(f.created_at)}
-                </div>
-                {f.snippet && <div className="mt-0.5 line-clamp-1 text-xs text-ink-2">…{f.snippet}…</div>}
-                {/* V14 3번: 정리 상태 — 중 / 됨(폴더·태그) / 실패(이유 + 다시 정리) */}
-                {f.organize_status === 'pending' && <div className="mt-0.5 flex items-center gap-1 text-xs text-violet-700" data-testid="organize-pending"><Loader2 className="size-3 animate-spin" />AI 정리 중…</div>}
-                {f.organize_status === 'done' && f.organized_by === 'ai' && <div className="mt-0.5 truncate text-xs text-violet-700" data-testid="organize-done">AI 정리됨: {f.folder || '최상위'}{f.tags.length > 0 && ` · ${f.tags.slice(0, 4).map((t) => '#' + t).join(' ')}`}</div>}
-                {f.organize_status === 'failed' && (
-                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-amber-800" data-testid="organize-failed">
-                    <span className="min-w-0 truncate">AI 정리 못 함 — {f.organize_error ?? '이유 모름'}</span>
-                    {(f.created_by === user.id || admin) && <button className="shrink-0 font-semibold underline" onClick={() => organize(f, 'redo')} data-testid="organize-retry">다시 정리</button>}
-                  </div>
+          {/* 현재 폴더 도구 */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {canUpload && <Button size="sm" variant="secondary" onClick={() => setDlg({ kind: 'new', value: '' })} data-testid="folder-new"><FolderPlus />새 폴더</Button>}
+            {canEditFolder && RANK[curInfo?.level ?? 'none'] >= RANK.delete && <Button size="sm" variant="ghost" onClick={() => setDlg({ kind: 'rename', value: nameOf(cur) })} data-testid="folder-rename"><Pencil />이름 바꾸기</Button>}
+            {canEditFolder && RANK[curInfo?.level ?? 'none'] >= RANK.delete && <Button size="sm" variant="ghost" onClick={deleteFolder}><Trash2 />폴더 지우기</Button>}
+            {cur && user.role === 'owner' && <Button size="sm" variant="ghost" onClick={() => setPermFolder(cur)} data-testid="folder-perms-open"><Lock />폴더 권한</Button>}
+            {cur && (admin || data?.confEdit) && (
+              <select className={cx(inputCls, 'h-8 !w-auto text-xs')} value={folders.find((f) => f.folder === cur) ? (secOf(cur) === 'public' ? '' : secOf(cur)) : ''} onChange={(e) => setFolderSec(e.target.value)} aria-label="폴더 보안 등급">
+                <option value="">등급: 상속·일반</option><option value="internal">등급: 내부</option><option value="confidential">등급: 🔒 기밀</option>
+              </select>
+            )}
+            {!!data?.review && <button onClick={() => setReview(!review)} aria-pressed={review} data-testid="library-review"
+              className={cx('hit ml-auto rounded-full border px-3 py-1 text-xs', review ? 'border-amber-500 bg-amber-50 font-semibold text-amber-800' : 'border-amber-200 text-amber-800')}>정리 필요 {data.review}</button>}
+          </div>
+          {sel.size > 0 && (
+            <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-card border border-brand-200 bg-brand-50 px-3 py-2 text-sm shadow-card" data-testid="library-bulk">
+              <b>{sel.size}개 선택</b>
+              <Button size="sm" variant="secondary" onClick={() => setDlg({ kind: 'move', value: cur })}><FolderInput />옮기기</Button>
+              <Button size="sm" variant="secondary" onClick={() => remove([...sel])}><Trash2 />지우기</Button>
+              <button className="ml-auto inline-flex size-8 items-center justify-center rounded-input hover:bg-white" onClick={() => setSel(new Set())} aria-label="선택 해제"><X className="size-4" /></button>
+            </div>
+          )}
+          <UploadProgress items={prog} />
+          {busy && <p className="text-sm text-ink-2">{busy}</p>}
+          {/* 내용 영역 전체가 끌어 놓기 영역 — 안내 줄 상시 */}
+          <DropZone onFiles={(f) => upload(f)} disabled={!!busy || !canUpload} label={`놓으면 "${cur || '자료실'}"에 올라갑니다`} testid="library-drop" className="min-h-[50vh] rounded-card">
+            {canUpload && (
+              <button type="button" onClick={() => fileRef.current?.click()} className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-card border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2 text-xs text-ink-2 hover:border-accent-500" data-testid="library-drop-hint">
+                <Upload className="size-3.5" /><span className="hidden sm:inline">파일을 이 영역 어디든 끌어다 놓으면 <b className="text-ink">&ldquo;{cur || '자료실'}&rdquo;</b>에 올라갑니다 · 폴더 위에 놓으면 그 폴더로</span>
+                <span className="sm:hidden">눌러서 <b className="text-ink">&ldquo;{nameOf(cur)}&rdquo;</b>에 올리기</span>
+              </button>
+            )}
+            {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={5} /> : (
+              <>
+                {sub.length > 0 && (
+                  <ul className={cx('mb-2 grid gap-2', view === 'grid' ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2')} data-testid="library-subfolders">
+                    {sub.map((c) => (
+                      <li key={c}><button onClick={() => setCur(c)} {...dropProps(c)} data-folder={c}
+                        className="flex w-full items-center gap-2 rounded-card border border-line bg-white px-3 py-2.5 text-left text-sm shadow-card hover:border-slate-400 data-[over]:border-accent-500 data-[over]:bg-accent-50">
+                        <Folder className="size-5 text-amber-500" /><span className="min-w-0 flex-1 truncate font-medium">{nameOf(c)}</span>
+                        {secOf(c) === 'confidential' && <Lock className="size-3.5 text-red-600" />}<span className="text-xs text-ink-3">{countUnder(c)}</span>
+                      </button></li>
+                    ))}
+                  </ul>
                 )}
-              </div>
-              <a href={`/api/library/${f.id}/download`} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label={`${f.title} 내려받기`}><Download className="size-4" /></a>
-              {f.can_undo && (f.created_by === user.id || admin) && <button onClick={() => organize(f, 'undo')} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label={`${f.title} 정리 되돌리기`} title="AI 정리 되돌리기"><Undo2 className="size-4" /></button>}
-              {(f.created_by === user.id || admin) && RANK[f.level] >= RANK.edit && <>
-                <button onClick={() => setEdit({ ...f, tags: f.tags.join(', ') as never })} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label={`${f.title} 고치기`}><Pencil className="size-4" /></button>
-                {(RANK[f.level] >= RANK.delete || f.created_by === user.id) && <button onClick={() => remove(f)} className="inline-flex size-8 items-center justify-center rounded-input text-red-600 hover:bg-red-50" aria-label={`${f.title} 지우기`}><Trash2 className="size-4" /></button>}
-              </>}
-            </li>
-          ))}
-        </ul>
-      )}
-      </DropZone>
+                {!files.length && !sub.length ? (
+                  <div className="flex flex-col items-center justify-center gap-1 py-14 text-center text-sm text-ink-3" data-testid="library-empty">
+                    <Library className="size-8" />{query ? '찾는 자료가 없습니다' : '이 폴더는 비어 있습니다'}
+                  </div>
+                ) : view === 'list' ? (
+                  <ul className="divide-y divide-line overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="library-list">
+                    {files.map((f) => <FileRow key={f.id} f={f} hi={hi === f.id} sel={sel.has(f.id)} onSel={() => toggle(f.id)} onDrag={dragFile(f)} user={user.id} admin={admin} confEdit={!!data?.confEdit}
+                      showFolder={!!(query || review) || f.folder !== cur} onEdit={() => setEdit({ ...f, tags: f.tags.join(', ') as never })} onRemove={() => remove([f.id])} onOrganize={(a) => organize(f, a)} onSec={(s) => patchSec(f, s)} onOpenFolder={() => { setQ(''); setCur(f.folder); }} />)}
+                  </ul>
+                ) : (
+                  <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="library-list">
+                    {files.map((f) => (
+                      <li key={f.id} draggable onDragStart={dragFile(f)} className={cx('group relative overflow-hidden rounded-card border bg-white shadow-card', sel.has(f.id) ? 'border-brand-600 ring-1 ring-brand-600' : 'border-line', hi === f.id && 'ring-2 ring-amber-400')}>
+                        <input type="checkbox" checked={sel.has(f.id)} onChange={() => toggle(f.id)} className="absolute left-2 top-2 z-10" aria-label={`${f.title} 선택`} />
+                        <a href={`/api/library/${f.id}/download${isImg(f) ? '?inline=1' : ''}`} target="_blank" rel="noreferrer" className="flex aspect-[4/3] items-center justify-center bg-slate-50">
+                          {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : <FileIcon f={f} big />}
+                        </a>
+                        <div className="p-2"><div className="flex items-center gap-1 text-sm font-medium"><span className="min-w-0 flex-1 truncate">{f.title}</span>{f.effective_security !== 'internal' && <SecBadge s={f.effective_security} />}</div>
+                          <div className="truncate text-[11px] text-ink-3">{fmtSize(Number(f.size_bytes))} · {f.created_by_name}</div></div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </DropZone>
+          {data && !data.aiOrganize && <p className="text-xs text-ink-3">올린 파일은 회사가 고친 정리 규칙(파일명)으로 자동 정리됩니다. 내장 AI 가 켜지면 내용까지 보고 정리합니다.</p>}
+        </section>
+      </div>
+
+      <Modal open={!!dlg} onClose={() => setDlg(null)} title={dlg?.kind === 'new' ? `새 폴더 — ${cur || '자료실'} 안에` : dlg?.kind === 'rename' ? '폴더 이름 바꾸기' : `${sel.size}개 옮기기`}>
+        {dlg && (
+          <form onSubmit={folderDialog} className="space-y-3">
+            {dlg.kind === 'move' ? (
+              <Field label="옮길 폴더"><select className={inputCls} value={dlg.value} onChange={(e) => setDlg({ ...dlg, value: e.target.value })} aria-label="옮길 폴더">
+                <option value="">자료실(최상위)</option>{allPaths.map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
+            ) : (
+              <Field label="폴더 이름" hint={dlg.kind === 'rename' ? '하위 폴더·자료·권한·등급이 함께 옮겨집니다' : '/ 로 하위 폴더까지 한 번에 (예: 브랜드/로고)'}>
+                <input className={inputCls} value={dlg.value} onChange={(e) => setDlg({ ...dlg, value: e.target.value })} autoFocus required aria-label="폴더 이름" /></Field>
+            )}
+            <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setDlg(null)}>취소</Button><Button type="submit" data-testid="folder-save">확인</Button></div>
+          </form>
+        )}
+      </Modal>
       {permFolder && <FolderPerms folder={permFolder} onClose={() => setPermFolder(null)} />}
       <Modal open={!!edit} onClose={() => setEdit(null)} title="자료 고치기">
         {edit && (
           <form onSubmit={save} className="space-y-3">
             <Field label="제목"><input className={inputCls} value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} required /></Field>
-            <Field label="폴더" hint="/ 로 하위 폴더 (예: 브랜드/다짐)"><input className={inputCls} value={edit.folder} onChange={(e) => setEdit({ ...edit, folder: e.target.value })} /></Field>
+            <Field label="폴더" hint="/ 로 하위 폴더 (예: 브랜드/로고)"><input className={inputCls} value={edit.folder} onChange={(e) => setEdit({ ...edit, folder: e.target.value })} aria-label="폴더" /></Field>
             <Field label="태그" hint="쉼표로 구분"><input className={inputCls} value={edit.tags as never} onChange={(e) => setEdit({ ...edit, tags: e.target.value as never })} /></Field>
+            <Field label="보안 등급" hint="폴더 등급보다 낮출 수는 없습니다. 기밀을 내리려면 기밀 편집 권한이 필요합니다">
+              <select className={inputCls} value={edit.security} onChange={(e) => setEdit({ ...edit, security: e.target.value as Sec })} aria-label="보안 등급">
+                <option value="public">일반 — 전 직원</option><option value="internal">내부 — 내부 자료 열람 권한</option><option value="confidential">🔒 기밀 — 기밀 열람 권한자만</option></select></Field>
             <Field label="설명"><textarea className={inputCls} value={edit.description ?? ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></Field>
             <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEdit(null)}>취소</Button><Button type="submit">저장</Button></div>
           </form>
         )}
       </Modal>
+      <Modal open={!!preview} onClose={() => setPreview(null)} title="전체 정리 미리보기" wide>
+        {preview && (
+          <div className="space-y-3" data-testid="organize-preview">
+            <p className="text-sm text-ink-2">AI 가 제안한 정리입니다. 적용할 것만 남기고 [적용]을 누르세요. 적용 전에는 아무것도 바뀌지 않습니다.</p>
+            <ul className="max-h-[50vh] divide-y divide-line overflow-y-auto rounded-input border border-line text-sm">
+              {preview.map((p, i) => (
+                <li key={p.id} className="flex items-start gap-2 px-3 py-2">
+                  <input type="checkbox" className="mt-1" checked={p.on} onChange={(e) => setPreview(preview.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)))} aria-label={`${p.from?.title} 적용`} />
+                  <div className="min-w-0 flex-1"><div className="truncate font-medium">{p.from?.title} → {p.title}</div>
+                    <div className="text-xs text-ink-3">{p.from?.folder || '최상위'} → <b className="text-ink">{p.folder || '최상위'}</b> · {p.tags.slice(0, 4).map((t: string) => '#' + t).join(' ')}
+                      {p.suggestedSecurity === 'confidential' && <span className="ml-1 text-red-700">🔒 기밀 제안</span>}{p.error && <span className="ml-1 text-amber-700">({p.error})</span>}</div></div>
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setPreview(null)}>닫기</Button><Button onClick={applyPreview} data-testid="organize-apply">적용 ({preview.filter((p) => p.on).length})</Button></div>
+          </div>
+        )}
+      </Modal>
+      {logOpen && <ConfLog onClose={() => setLogOpen(false)} />}
     </div>
+  );
+}
+
+function FileIcon({ f, big }: { f: F; big?: boolean }) {
+  const c = big ? 'size-8' : 'size-5';
+  return /sheet|excel|csv/.test(f.mime_type + f.file_name) ? <FileSpreadsheet className={cx(c, 'text-emerald-600')} /> : /^image\//.test(f.mime_type) ? <ImageIcon className={cx(c, 'text-ink-3')} /> : <FileText className={cx(c, 'text-ink-3')} />;
+}
+
+function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder, onEdit, onRemove, onOrganize, onSec, onOpenFolder }: {
+  f: F; hi: boolean; sel: boolean; onSel: () => void; onDrag: (e: React.DragEvent) => void; user: string; admin: boolean; confEdit: boolean; showFolder: boolean;
+  onEdit: () => void; onRemove: () => void; onOrganize: (a: 'undo' | 'redo') => void; onSec: (s: Sec) => void; onOpenFolder: () => void }) {
+  const mine = f.created_by === user;
+  const suggestConf = f.security_suggested === 'confidential' && f.effective_security !== 'confidential' && !f.security_confirmed;
+  return (
+    <li draggable onDragStart={onDrag} className={cx('flex items-center gap-3 px-3 py-2.5', hi && 'bg-amber-50', sel && 'bg-brand-50/60')} data-file={f.id}>
+      <input type="checkbox" checked={sel} onChange={onSel} aria-label={`${f.title} 선택`} />
+      <a href={`/api/library/${f.id}/download${isImg(f) ? '?inline=1' : ''}`} target="_blank" rel="noreferrer" className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-input border border-line bg-slate-50">
+        {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : <FileIcon f={f} />}
+      </a>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-sm font-medium"><span className="min-w-0 truncate">{f.title}</span>
+          {f.effective_security !== 'internal' && <SecBadge s={f.effective_security} />}
+          {f.organized_by && <span className={cx('inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 text-[11px] font-semibold', f.needs_review ? 'bg-amber-100 text-amber-800' : 'bg-violet-100 text-violet-700')}
+            title={f.ai_confidence !== null ? `확신 ${Math.round(f.ai_confidence * 100)}%` : undefined} data-testid="ai-organized"><Sparkles className="size-3" />{f.organized_by === 'ai' ? 'AI 정리됨' : '규칙 정리'}{f.needs_review && ' · 확인 필요'}</span>}
+        </div>
+        <div className="truncate text-xs text-ink-3">
+          {showFolder && <button onClick={onOpenFolder} className="mr-1.5 hover:underline"><Folder className="mr-0.5 inline size-3" />{f.folder || '최상위'}</button>}
+          {f.tags.map((t) => <span key={t} className="mr-1 text-brand-600">#{t}</span>)}
+          {fmtSize(Number(f.size_bytes))} · {f.created_by_name} · {fmtDateTime(f.created_at)}
+        </div>
+        {f.snippet && <div className="mt-0.5 line-clamp-1 text-xs text-ink-2">…{f.snippet}…</div>}
+        {f.organize_status === 'pending' && <div className="mt-0.5 flex items-center gap-1 text-xs text-violet-700" data-testid="organize-pending"><Loader2 className="size-3 animate-spin" />AI 정리 중…</div>}
+        {f.organize_status === 'done' && f.organized_by === 'ai' && (
+          <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-violet-700" data-testid="organize-done">
+            <span className="truncate">AI 정리됨 → {f.folder || '최상위'}{f.tags.length > 0 && ` · ${f.tags.slice(0, 4).map((t) => '#' + t).join(' ')}`}</span>
+            {(mine || admin) && <button className="shrink-0 font-semibold underline" onClick={onEdit}>바꾸기</button>}
+          </div>
+        )}
+        {f.organize_status === 'failed' && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-amber-800" data-testid="organize-failed">
+            <span className="min-w-0 truncate">AI 정리 못 함 — {f.organize_error ?? '이유 모름'}</span>
+            {(mine || admin) && <button className="shrink-0 font-semibold underline" onClick={() => onOrganize('redo')} data-testid="organize-retry">다시 정리</button>}
+          </div>
+        )}
+        {suggestConf && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-red-700" data-testid="sec-suggest"><Lock className="size-3" />AI·규칙이 기밀을 제안했습니다
+            {confEdit ? <><button className="font-semibold underline" onClick={() => onSec('confidential')} data-testid="sec-confirm">기밀로 정하기</button><button className="text-ink-3 underline" onClick={() => onSec(f.security)}>지금 등급 유지</button></>
+              : <span className="text-ink-3">(기밀 관리자 확인 대기 — 그때까지 내부)</span>}
+          </div>
+        )}
+      </div>
+      <a href={`/api/library/${f.id}/download`} className="inline-flex size-9 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label={`${f.title} 내려받기`}><Download className="size-4" /></a>
+      {f.can_undo && (mine || admin) && <button onClick={() => onOrganize('undo')} className="hidden size-9 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:inline-flex" aria-label={`${f.title} 정리 되돌리기`} title="AI 정리 되돌리기"><Undo2 className="size-4" /></button>}
+      {(mine || admin) && RANK[f.level] >= RANK.edit && <>
+        <button onClick={onEdit} className="inline-flex size-9 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label={`${f.title} 고치기`}><Pencil className="size-4" /></button>
+        {(RANK[f.level] >= RANK.delete || mine) && <button onClick={onRemove} className="hidden size-9 items-center justify-center rounded-input text-red-600 hover:bg-red-50 sm:inline-flex" aria-label={`${f.title} 지우기`}><Trash2 className="size-4" /></button>}
+      </>}
+    </li>
+  );
+}
+
+/** 기밀 자료 열람·내려받기·AI 참조 기록 */
+function ConfLog({ onClose }: { onClose: () => void }) {
+  const { data } = useApi<{ logs: { id: number; action: string; detail: any; created_at: string; user_name: string }[] }>('/api/library/confidential-log');
+  const L: Record<string, string> = { 'library.confidential_open': '열람', 'library.confidential_download': '내려받기', 'library.confidential_ai': 'AI 참조' };
+  return (
+    <Modal open onClose={onClose} title="🔒 기밀 자료 열람 기록" wide>
+      <ul className="max-h-[60vh] divide-y divide-line overflow-y-auto text-sm" data-testid="conf-log">
+        {data?.logs.map((l) => <li key={l.id} className="flex gap-2 py-1.5"><span className="w-20 shrink-0 font-medium">{L[l.action] ?? l.action}</span><span className="min-w-0 flex-1 truncate">{l.detail?.title}</span>
+          <span className="shrink-0 text-xs text-ink-3">{l.user_name} · {fmtDateTime(l.created_at)}</span></li>)}
+        {data && !data.logs.length && <li className="py-3 text-ink-3">기록이 없습니다</li>}
+      </ul>
+    </Modal>
   );
 }
 

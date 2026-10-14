@@ -845,7 +845,8 @@ await step('V13 메뉴 권한: 대표만 "메뉴 권한" 탭 → 현장 관리�
   await owner.goto(BASE + '/admin/users');
   await owner.getByTestId('tab-menus').click();
   const mp = owner.getByTestId('menu-perms');
-  await mp.getByLabel('매출 현장 관리자').selectOption('view');
+  // V14 17번: 단계마다 독립 스위치
+  await mp.getByRole('switch', { name: '매출 현장 관리자 조회' }).click();
   await owner.getByText('바꿨습니다').first().waitFor();
   await owner.screenshot({ path: `${SHOTS}/62-menu-perms.png`, fullPage: true });
   const c = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
@@ -855,7 +856,12 @@ await step('V13 메뉴 권한: 대표만 "메뉴 권한" 탭 → 현장 관리�
   assert.equal(await m.getByTestId('revenue-input').count(), 0, '보기 권한은 입력 칸 없음');
   await m.goto(BASE + '/admin/users');
   assert.equal(await m.getByTestId('tab-menus').count(), 0, '대표 외에는 권한 탭 없음');
-  await mp.getByLabel('매출 현장 관리자').selectOption('none');
+  await mp.getByRole('switch', { name: '매출 현장 관리자 조회' }).click();
+  await owner.getByText('바꿨습니다').first().waitFor();
+  // 자료실 행 펼침 → 내부·기밀 열람 행 + 폴더별 권한·등급
+  await mp.getByTestId('perm-library-toggle').click();
+  await mp.locator('[data-menu="confidential"]').waitFor();
+  assert.equal(await mp.getByRole('switch', { name: '기밀 자료 열람 현장 관리자 조회' }).getAttribute('aria-checked'), 'false', '기밀 기본은 대표만');
   await owner.waitForTimeout(500);
   assert.equal((await ctx.managerA.client.get('/api/revenue')).status, 404);
   await c.close();
@@ -1394,12 +1400,17 @@ await step('V8: 등록 창 한 번에(자동 인식·템플릿·우선순위·�
 await step('V9: 자료실 올리기·검색 → 홈 "AI에게 요청" → 비서가 찾은 로고 첨부 제안 → [확인] → 업무에 첨부, 360 넘침 없음', async () => {
   const task = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V9 전단지 제작', orgUnitId: ctx.hq, approvalRequired: false })).id;
   await owner.goto(BASE + '/library');
-  await owner.getByLabel('올릴 폴더').fill('브랜드');
+  // V14 18번 폴더 탐색기: 새 폴더 → 그 폴더에 올리기
+  await owner.getByTestId('folder-new').click();
+  await owner.getByLabel('폴더 이름').fill('브랜드');
+  await owner.getByTestId('folder-save').click();
+  await owner.getByTestId('library-path').getByText('브랜드').waitFor();
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
   await owner.getByTestId('library-file').setInputFiles([{ name: '다짐 로고 E2E.png', mimeType: 'image/png', buffer: png }]);
   await owner.getByTestId('library-list').getByText('다짐 로고 E2E').waitFor();
   await owner.getByLabel('자료 검색').fill('로고 E2E');
-  await owner.getByRole('tab', { name: /브랜드/ }).waitFor();
+  await owner.getByRole('treeitem', { name: /브랜드/ }).waitFor();
+  assert.equal((await sql`select folder from library_files where title = '다짐 로고 E2E'`)[0].folder, '브랜드', '보고 있던 폴더에 올라감');
   const [f] = await sql`select id from library_files where title = '다짐 로고 E2E'`;
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [
     { content: [{ type: 'tool_use', id: 'e1', name: 'search_library', input: { query: '다짐 로고' } }], stop_reason: 'tool_use' },
@@ -1695,6 +1706,41 @@ await step('V14 2·6번: AI 비서 대화가 남아 다시 열면 이어짐, 직
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ folder: '영업/단가', tags: ['단가표', 'PT'], title: 'V14 단가표', summary: 'PT 단가', confidence: 0.9 }) }], stop_reason: 'end_turn' }] }) });
   await row.getByTestId('organize-retry').click();
   await owner.getByTestId('library-list').locator('li').filter({ hasText: 'V14 단가표' }).getByTestId('organize-done').getByText(/영업\/단가 ·.*#단가표/).waitFor();
+});
+await step('V14 15·18번 자료실 탐색기: 폴더 나무·경로, 파일을 폴더 위로 끌어 옮기기, 기밀 자물쇠·직원 화면에 없음, 기밀 제안 확인, 전체 정리 미리보기 → 적용', async () => {
+  await ctx.owner.ok('POST', '/api/library/folders', { path: '보관/2026' });
+  await owner.goto(BASE + '/library');
+  const tree = owner.getByTestId('library-tree');
+  await tree.getByRole('treeitem', { name: /보관/ }).waitFor();
+  // 최상위의 파일 하나를 "보관" 폴더 위로 끌어 놓기
+  const row = owner.getByTestId('library-list').locator('li', { hasText: '끌기 자료' });
+  await row.dragTo(tree.getByRole('treeitem', { name: /보관/ }));
+  await owner.getByText(/1개를 "보관"로 옮겼습니다/).waitFor();
+  assert.equal((await sql`select folder from library_files where title = '끌기 자료'`)[0].folder, '보관');
+  // 폴더로 들어가 경로 확인 → 하위 폴더
+  await tree.getByRole('treeitem', { name: /보관/ }).click();
+  await owner.getByTestId('library-path').getByText('보관').waitFor();
+  await owner.getByTestId('library-subfolders').getByText('2026').waitFor();
+  // 기밀: 급여 파일 → 기밀 제안 → 대표가 기밀로 → 자물쇠, 직원 화면에는 없음
+  await owner.getByTestId('library-file').setInputFiles([{ name: 'E2E 급여 명세.txt', mimeType: 'text/plain', buffer: Buffer.from('급여 1') }]);
+  const conf = owner.getByTestId('library-list').locator('li', { hasText: 'E2E 급여 명세' });
+  await conf.getByTestId('sec-suggest').waitFor();
+  await conf.getByTestId('sec-confirm').click();
+  await conf.locator('[data-sec="confidential"]').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/90-library-explorer.png` });
+  await staff.goto(BASE + '/library?folder=' + encodeURIComponent('보관'));
+  await staff.getByTestId('library-path').getByText('보관').waitFor();
+  await staff.getByText('끌기 자료').waitFor();
+  assert.equal(await staff.getByText('E2E 급여 명세').count(), 0, '직원 화면에는 기밀 파일 없음');
+  await staff.screenshot({ path: `${SHOTS}/91-library-mobile.png` });
+  // 관리자 전체 정리: 미리보기 → 적용
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true }) });
+  await sql`update library_files set organize_status = null, organized_by = null, organize_preview = null where title = '끌기 자료'`;
+  await owner.getByTestId('library-organize-all').click();
+  const pv = owner.getByTestId('organize-preview');
+  await pv.getByText(/끌기 자료/).first().waitFor();
+  await owner.getByTestId('organize-apply').click();
+  await owner.getByText(/개 적용했습니다/).waitFor();
 });
 await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 질문) / 사용자 관리 "팀" 탭 → 팀 만들기 → 팀 업무 등록 → 팀 보드·업무 칩', async () => {
   await owner.goto(BASE + '/calendar');

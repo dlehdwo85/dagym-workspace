@@ -298,7 +298,7 @@ const ORG_SYSTEM = `회사 자료실 정리 담당입니다. 파일 하나의 �
 - 태그는 3~6개, # 없이 짧게. 제목은 사람이 읽기 좋게(확장자 없이). 요약은 한 문장.
 - confidence 는 0~1, 내용을 확인하지 못했거나 애매하면 0.5 이하.
 - security(보안 등급): 매출·급여·인사·계약서·주민번호·계좌·견적 단가·정산·손익 등 민감하면 "confidential", 회사 내부용이면 "internal", 누구에게 보여도 되는 홍보물·로고면 "public".`;
-export async function organizeLibraryFile(u: SessionUser, id: string, opt: { keepFolder?: boolean } = {}) {
+export async function organizeLibraryFile(u: SessionUser, id: string, opt: { keepFolder?: boolean; preview?: boolean } = {}) {
   const sql = db();
   const [f] = await sql<any[]>`select * from library_files where id = ${id} and tenant = ${tenantOf(u)} and deleted_at is null`;
   if (!f) throw notFound();
@@ -310,7 +310,7 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   let out: { folder: string; tags: string[]; title?: string; summary?: string; confidence: number; security?: Security } | null = null;
   let by: 'ai' | 'rule' = 'rule';
   let reason: string | null = null; // V14 3번: AI 로 정리하지 못한 이유(화면에 표시)
-  await sql`update library_files set organize_status = 'pending', organize_error = null where id = ${id}`;
+  if (!opt.preview) await sql`update library_files set organize_status = 'pending', organize_error = null where id = ${id}`;
   const { aiEnabled, anthropicProvider, costUsd } = await import('./ai/provider');
   const quota = aiEnabled() ? await (await import('./plans')).assertAiRequest(u).then(() => null, (e: any) => e?.message ?? '이번 달 AI 한도를 모두 썼습니다') : '내장 AI 가 꺼져 있습니다(운영자 설정)';
   if (quota) reason = quota;
@@ -363,10 +363,12 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   // V14 15번 등급 제안: AI 답 + 이름·본문 규칙 중 높은 쪽. 등급 자체는 기밀 관리자가 확인할 때까지 그대로(기본 내부) — 화면에 "기밀 제안" 표시
   const suggested: Security = maxSec(out.security ?? 'internal', ruleSecurity(`${f.file_name} ${title} ${tags.join(' ')} ${String(f.text_content ?? '').slice(0, 3000)}`) ?? 'public');
   const security: Security = f.security;
-  await sql`update library_files set security_suggested = ${suggested} where id = ${id}`;
-  await sql`update library_files set folder = ${folder}, tags = ${tags}, title = ${title}, description = ${description}, organized_by = ${by},
-    ai_confidence = ${confidence}, needs_review = ${confidence < 0.6}, ai_prev = ${sql.json(prev as never)}, updated_at = now(),
-    organize_status = ${by === 'ai' ? 'done' : 'failed'}, organize_error = ${reason} where id = ${id}`;
+  const result = { by, folder, tags, title, description, confidence, reason, suggested };
+  if (opt.preview) { // V14 18번: 관리자 전체 정리 미리보기 — 적용 전까지 아무것도 바꾸지 않는다
+    await sql`update library_files set organize_preview = ${sql.json(result as never)} where id = ${id}`;
+    return { by, folder, tags, title, description, confidence, needsReview: confidence < 0.6, error: reason, security, suggestedSecurity: suggested, preview: true };
+  }
+  await applyOrganize(id, prev, result);
   return { by, folder, tags, title, description, confidence, needsReview: confidence < 0.6, error: reason, security, suggestedSecurity: suggested };
 }
 export async function undoOrganize(u: SessionUser, id: string) {
@@ -383,6 +385,20 @@ export async function reorganize(u: SessionUser, id: string) {
   await requireMenu(u, 'library', 'edit');
   if (!canEdit(u, f)) throw forbidden('올린 사람 또는 관리자만 다시 정리할 수 있습니다');
   return organizeLibraryFile(u, id);
+}
+
+type OrgResult = { by: string; folder: string; tags: string[]; title: string; description: string | null; confidence: number; reason: string | null; suggested: Security };
+async function applyOrganize(id: string, prev: unknown, r: OrgResult) {
+  await db()`update library_files set security_suggested = ${r.suggested}, folder = ${r.folder}, tags = ${r.tags}, title = ${r.title}, description = ${r.description}, organized_by = ${r.by},
+    ai_confidence = ${r.confidence}, needs_review = ${r.confidence < 0.6}, ai_prev = ${db().json(prev as never)}, updated_at = now(), organize_preview = null,
+    organize_status = ${r.by === 'ai' ? 'done' : 'failed'}, organize_error = ${r.reason} where id = ${id}`;
+}
+/** 전체 정리 미리보기를 고른 것만 적용 */
+export async function applyOrganizePreviews(u: SessionUser, ids: string[]) {
+  if (!isAdmin(u)) throw forbidden('대표·본사 관리자만 전체 정리할 수 있습니다');
+  const rows = await db()<any[]>`select id, folder, title, tags, description, organize_preview from library_files where tenant = ${tenantOf(u)} and id = any(${ids}::uuid[]) and organize_preview is not null`;
+  for (const f of rows) await applyOrganize(f.id, { folder: f.folder, title: f.title, tags: f.tags, description: f.description }, f.organize_preview);
+  return { applied: rows.length };
 }
 
 // ---------------- V13 4번 폴더 권한 설정 (대표만) ----------------
@@ -404,15 +420,25 @@ export async function setFolderPerm(u: SessionUser, i: z.infer<typeof folderPerm
 }
 
 /** V14 3번: 관리자 "전체 정리" — 아직 정리하지 않았거나 실패한 파일을 한 번에 최대 10개씩(화면이 반복 호출) */
-export async function organizeAll(u: SessionUser) {
+export async function organizeAll(u: SessionUser, opt: { preview?: boolean } = {}) {
   if (!isAdmin(u)) throw forbidden('대표·본사 관리자만 전체 정리할 수 있습니다');
   await requireMenu(u, 'library', 'edit');
   const sql = db();
   const rows = await sql<{ id: string }[]>`select id from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready'
     and source not in ('revenue', 'ai_attach') and (organize_status is null or organize_status in ('failed', 'pending')) and organized_by is distinct from 'ai'
+    ${opt.preview ? sql`and organize_preview is null` : sql``}
     order by (organize_status is null) desc, created_at desc limit 10`;
   let ai = 0, failed = 0;
-  for (const r of rows) { const o = await organizeLibraryFile(u, r.id).catch(() => null); if (o?.by === 'ai') ai++; else failed++; }
+  const previews: any[] = [];
+  for (const r of rows) {
+    const o: any = await organizeLibraryFile(u, r.id, { preview: opt.preview }).catch(() => null);
+    if (o?.by === 'ai') ai++; else failed++;
+    if (opt.preview && o) previews.push({ id: r.id, ...o });
+  }
+  if (opt.preview) { // 미리보기: 같은 파일을 다시 고르지 않게 이번 묶음 다음부터
+    const before = await db()<{ id: string; title: string; folder: string }[]>`select id, title, folder from library_files where id = any(${rows.map((r) => r.id)}::uuid[])`;
+    return { preview: previews.map((p) => ({ ...p, from: before.find((b) => b.id === p.id) })), ai, failed };
+  }
   const [{ left }] = await sql<{ left: number }[]>`select count(*)::int left from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready'
     and source not in ('revenue', 'ai_attach') and organize_status is null and organized_by is distinct from 'ai'`;
   return { done: rows.length, ai, failed, left };

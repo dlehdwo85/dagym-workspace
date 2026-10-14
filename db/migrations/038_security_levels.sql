@@ -32,3 +32,5 @@ create table if not exists library_folders (
   created_at timestamptz not null default now(),
   primary key (tenant, path)
 );
+-- 관리자 "전체 정리" 미리보기(적용 전 AI 제안 보관)
+alter table library_files add column if not exists organize_preview jsonb;

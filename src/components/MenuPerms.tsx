@@ -1,6 +1,6 @@
 'use client';
-import { useState } from 'react';
-import { ShieldCheck, Trash2 } from 'lucide-react';
+import { Fragment, useState } from 'react';
+import { ChevronDown, ChevronRight, Lock, ShieldCheck, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { ROLE_LABEL, type Role } from '@/lib/types';
@@ -13,6 +13,7 @@ export function MenuPermsTab({ users }: { users: { id: string; name: string; rol
   const { data, error, loading, reload } = useApi<M>('/api/admin/menu-perms');
   const [busy, setBusy] = useState('');
   const [add, setAdd] = useState({ menu: 'revenue', userId: '', level: 'view' });
+  const [libOpen, setLibOpen] = useState(false);
   async function put(b: Record<string, unknown>, key: string) {
     setBusy(key);
     try { await api('/api/admin/menu-perms', { method: 'PUT', body: b }); reload(); toast.ok('바꿨습니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
@@ -27,23 +28,17 @@ export function MenuPermsTab({ users }: { users: { id: string; name: string; rol
       <p className="flex items-start gap-1.5 text-sm text-ink-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand-600" />
         등급마다 메뉴를 켜고 끕니다. 꺼진 메뉴는 화면에서 사라지고 서버도 막습니다. 대표 본인 권한은 끌 수 없습니다. 바꾼 내용은 감사 기록에 남습니다.</p>
       <div className="overflow-x-auto rounded-card border border-line bg-white">
-        <table className="w-full min-w-[640px] text-sm">
+        <table className="w-full min-w-[760px] text-sm">
           <thead><tr className="border-b border-line bg-slate-50 text-left text-xs text-ink-2"><th className="p-2">메뉴</th>{d.roles.map((r) => <th key={r} className="p-2">{ROLE_LABEL[r]}</th>)}</tr></thead>
           <tbody className="divide-y divide-line">
-            {d.menus.map((m) => (
-              <tr key={m.key} data-menu={m.key}>
-                <td className="p-2 font-medium">{m.label}</td>
-                {d.roles.map((r) => (
-                  <td key={r} className="p-2">
-                    {r === 'owner' ? <span className="text-xs text-ink-3">{label(m.key, d.matrix[m.key][r])} (고정)</span> : (
-                      <select className={cx(inputCls, 'h-8 min-w-[6.5rem] text-xs', d.matrix[m.key][r] === 'none' && 'text-ink-3')} value={d.matrix[m.key][r]} disabled={busy === `${m.key}.${r}`}
-                        onChange={(e) => put({ menu: m.key, role: r, level: e.target.value }, `${m.key}.${r}`)} aria-label={`${m.label} ${ROLE_LABEL[r]}`}>
-                        {m.levels.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-                      </select>
-                    )}
-                  </td>
-                ))}
-              </tr>
+            {d.menus.filter((m) => !NESTED.includes(m.key)).map((m) => (
+              <Fragment key={m.key}>
+                <Row m={m} d={d} busy={busy} put={put} open={m.key === 'library' ? libOpen : undefined} onToggle={m.key === 'library' ? () => setLibOpen(!libOpen) : undefined} />
+                {m.key === 'library' && libOpen && <>
+                  {d.menus.filter((x) => NESTED.includes(x.key)).map((x) => <Row key={x.key} m={x} d={d} busy={busy} put={put} nested />)}
+                  <tr><td colSpan={d.roles.length + 1} className="bg-slate-50/60 p-2"><LibraryFolders roles={d.roles} /></td></tr>
+                </>}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -60,19 +55,115 @@ export function MenuPermsTab({ users }: { users: { id: string; name: string; rol
           {!d.overrides.length && <li className="py-1.5 text-ink-3">예외 없음</li>}
         </ul>
         <div className="mt-2 flex flex-wrap gap-2">
-          <select className={cx(inputCls, 'h-9 w-auto')} value={add.userId} onChange={(e) => setAdd({ ...add, userId: e.target.value })} aria-label="예외 사람">
+          <select className={cx(inputCls, 'h-9 !w-auto')} value={add.userId} onChange={(e) => setAdd({ ...add, userId: e.target.value })} aria-label="예외 사람">
             <option value="">사람 선택</option>{users.filter((u) => u.role !== 'owner' && u.status !== 'disabled').map((u) => <option key={u.id} value={u.id}>{u.name} ({ROLE_LABEL[u.role]})</option>)}
           </select>
-          <select className={cx(inputCls, 'h-9 w-auto')} value={add.menu} onChange={(e) => setAdd({ ...add, menu: e.target.value, level: d.menus.find((m) => m.key === e.target.value)!.levels[1].value })} aria-label="예외 메뉴">
+          <select className={cx(inputCls, 'h-9 !w-auto')} value={add.menu} onChange={(e) => setAdd({ ...add, menu: e.target.value, level: d.menus.find((m) => m.key === e.target.value)!.levels[1].value })} aria-label="예외 메뉴">
             {d.menus.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
           </select>
-          <select className={cx(inputCls, 'h-9 w-auto')} value={add.level} onChange={(e) => setAdd({ ...add, level: e.target.value })} aria-label="예외 단계">
+          <select className={cx(inputCls, 'h-9 !w-auto')} value={add.level} onChange={(e) => setAdd({ ...add, level: e.target.value })} aria-label="예외 단계">
             {addLevels.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
           <Button size="sm" disabled={!add.userId || busy === 'add'} onClick={() => put({ menu: add.menu, userId: add.userId, level: add.level }, 'add')}>예외 추가</Button>
         </div>
       </section>
-      <p className="text-xs text-ink-3">자료실은 폴더마다 따로 좁힐 수 있습니다(자료실 → 폴더 고르기 → &ldquo;폴더 권한&rdquo;). 폴더 설정은 하위 폴더에 그대로 이어집니다.</p>
+      <p className="text-xs text-ink-3">자료실 행을 펼치면 보안 등급(내부·기밀)별 열람과 폴더별 권한·등급을 같은 화면에서 정합니다. 폴더 설정은 하위 폴더에 그대로 이어집니다.</p>
+    </div>
+  );
+}
+
+/** 자료실 아래에 펼쳐 보이는 행: 보안 등급별 열람 (V14 15·17번) */
+const NESTED = ['library_internal', 'confidential'];
+/** 단계별 독립 스위치 — 저장은 기존 단계(편집을 켜면 조회도, 조회를 끄면 나머지도) */
+function Switches({ levels, value, onSet, label, disabled }: { levels: Level[]; value: string; onSet: (v: string) => void; label: string; disabled?: boolean }) {
+  const idx = levels.findIndex((l) => l.value === value);
+  const steps = levels.slice(1);
+  return (
+    <div className="flex flex-wrap gap-1">
+      {steps.map((l, j) => {
+        const on = j + 1 <= idx;
+        const name = steps.length === 1 ? '켬' : SHORT[l.value] ?? l.label;
+        return (
+          <button key={l.value} type="button" role="switch" aria-checked={on} disabled={disabled} aria-label={`${label} ${name}`}
+            onClick={() => onSet(on ? levels[j].value : l.value)}
+            className={cx('hit inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-colors disabled:opacity-50',
+              on ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-3 hover:border-slate-400')}>
+            <span className={cx('size-2 rounded-full', on ? 'bg-white' : 'bg-slate-300')} />{name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+const SHORT: Record<string, string> = { view: '조회', edit: '편집', delete: '삭제', use: '켬' };
+function Row({ m, d, busy, put, nested, open, onToggle }: { m: M['menus'][number]; d: M; busy: string; put: (b: Record<string, unknown>, key: string) => void; nested?: boolean; open?: boolean; onToggle?: () => void }) {
+  const levels = m.key === 'library' ? m.levels.map((l) => (l.value === 'edit' ? { ...l, label: '올리기·수정' } : l)) : m.levels;
+  const lib = m.key === 'library';
+  return (
+    <tr data-menu={m.key} className={nested ? 'bg-slate-50/60' : ''}>
+      <td className={cx('p-2 font-medium', nested && 'pl-7 text-ink-2')}>
+        {onToggle ? <button type="button" onClick={onToggle} aria-expanded={open} className="inline-flex items-center gap-1 hover:underline" data-testid="perm-library-toggle">
+          {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}{m.label}</button>
+          : <span className="inline-flex items-center gap-1">{m.key === 'confidential' && <Lock className="size-3.5 text-red-600" />}{m.label}</span>}
+      </td>
+      {d.roles.map((r) => (
+        <td key={r} className="p-2">
+          <Switches levels={lib ? levels.map((l) => ({ ...l, label: l.value === 'edit' ? '올리기·수정' : l.label })) : levels} value={d.matrix[m.key][r]} label={`${m.label} ${ROLE_LABEL[r]}`}
+            disabled={r === 'owner' || busy === `${m.key}.${r}`} onSet={(v) => put({ menu: m.key, role: r, level: v }, `${m.key}.${r}`)} />
+          {r === 'owner' && <span className="text-[10px] text-ink-3">고정</span>}
+        </td>
+      ))}
+    </tr>
+  );
+}
+type Folder = { folder: string; n: number; security?: string };
+/** 자료실 행 펼침: 폴더별 등급 + 등급(역할)별 폴더 권한 */
+function LibraryFolders({ roles }: { roles: Role[] }) {
+  const lib = useApi<{ folders: Folder[] }>('/api/library');
+  const fp = useApi<{ perms: { folder: string; role: string; level: string }[] }>('/api/library/folder-perms');
+  const fs = useApi<{ folders: { folder: string; security: string }[] }>('/api/library/folder-security');
+  const [busy, setBusy] = useState('');
+  async function call(url: string, body: unknown, key: string) {
+    setBusy(key);
+    try { await api(url, { method: 'PUT', body }); fp.reload(); fs.reload(); lib.reload(); toast.ok('바꿨습니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
+  }
+  const folders = (lib.data?.folders ?? []).filter((f) => f.folder);
+  const levels: Level[] = [{ value: 'none', label: '끔' }, { value: 'view', label: '조회' }, { value: 'edit', label: '올리기·수정' }, { value: 'delete', label: '삭제' }];
+  const others = roles.filter((r) => r !== 'owner');
+  if (!folders.length) return <p className="text-xs text-ink-3">아직 폴더가 없습니다. 자료실에서 폴더를 만들면 여기서 폴더별 권한·등급을 정할 수 있습니다.</p>;
+  return (
+    <div className="space-y-1.5" data-testid="perm-folders">
+      <p className="text-xs text-ink-3">폴더별: 보안 등급(하위 폴더·파일에 상속, 파일은 더 높게만) · 등급별 권한(비워 두면 위 자료실 설정을 따름, 더 넓힐 수는 없음)</p>
+      <table className="w-full text-xs">
+        <thead><tr className="text-left text-ink-3"><th className="p-1.5">폴더</th><th className="p-1.5">보안 등급</th>{others.map((r) => <th key={r} className="p-1.5">{ROLE_LABEL[r]}</th>)}</tr></thead>
+        <tbody className="divide-y divide-line">
+          {folders.map((f) => {
+            const sec = fs.data?.folders.find((x) => x.folder === f.folder)?.security ?? '';
+            return (
+              <tr key={f.folder} data-folder={f.folder}>
+                <td className="p-1.5 font-medium">{f.folder}</td>
+                <td className="p-1.5">
+                  <select className={cx(inputCls, 'h-8 w-28 text-xs', sec === 'confidential' && 'text-red-700')} value={sec} disabled={busy === `sec.${f.folder}`} aria-label={`${f.folder} 보안 등급`}
+                    onChange={(e) => call('/api/library/folder-security', { folder: f.folder, security: e.target.value || null }, `sec.${f.folder}`)}>
+                    <option value="">상속(설정 없음)</option><option value="public">일반</option><option value="internal">내부</option><option value="confidential">🔒 기밀</option>
+                  </select>
+                </td>
+                {others.map((r) => {
+                  const p = fp.data?.perms.find((x) => x.folder === f.folder && x.role === r);
+                  return (
+                    <td key={r} className="p-1.5">
+                      {p ? <div className="flex items-center gap-1"><Switches levels={levels} value={p.level} label={`${f.folder} ${ROLE_LABEL[r]}`} disabled={busy === `fp.${f.folder}.${r}`}
+                        onSet={(v) => call('/api/library/folder-perms', { folder: f.folder, role: r, level: v }, `fp.${f.folder}.${r}`)} />
+                        <button className="text-ink-3 underline" onClick={() => call('/api/library/folder-perms', { folder: f.folder, role: r, level: null }, `fp.${f.folder}.${r}`)}>기본</button></div>
+                        : <button className="text-ink-3 underline" onClick={() => call('/api/library/folder-perms', { folder: f.folder, role: r, level: 'view' }, `fp.${f.folder}.${r}`)} aria-label={`${f.folder} ${ROLE_LABEL[r]} 따로 정하기`}>자료실 설정 따름 · 따로 정하기</button>}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
