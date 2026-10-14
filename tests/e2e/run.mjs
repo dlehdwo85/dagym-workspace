@@ -179,7 +179,8 @@ await step('② 직원(모바일) 댓글·멘션·사진 첨부·문서 링크 �
 await step('② 현장 관리자가 대시보드에서 최종 완료 확인', async () => {
   const c = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const m = await login(c, ctx.managerA.email, ctx.managerA.password);
-  const row = m.locator('li', { hasText: '강남점 소방 점검 대응' }).first();
+  // V14 28번: 같은 이름의 "[검토] …" 업무도 생기므로 완료 확인 버튼이 있는 줄을 고른다
+  const row = m.locator('li', { hasText: '강남점 소방 점검 대응' }).filter({ has: m.getByRole('button', { name: '완료 확인' }) }).first();
   await row.getByRole('button', { name: '완료 확인' }).click();
   await m.getByText('최종 완료 처리했습니다').waitFor();
   const d = await ctx.staffA.client.ok('GET', `/api/tasks/${taskId}`);
@@ -302,8 +303,12 @@ await step('B-4 Ctrl+K 검색 → Enter 로 업무 열기, 권한 밖 결과 없
   await owner.getByRole('heading', { name: '전체 현황' }).waitFor(); // 화면 준비 후 단축키
   await owner.keyboard.press('Control+K');
   await owner.getByTestId('palette-input').fill('소방 점검');
-  await owner.getByTestId('palette-results').getByText('강남점 소방 점검 대응').waitFor();
+  await owner.getByTestId('palette-results').getByText('강남점 소방 점검 대응', { exact: true }).waitFor();
   await owner.screenshot({ path: `${SHOTS}/33-command-palette.png` });
+  // V14 28번: "[검토] 강남점 소방 점검 대응"도 나오므로 원 업무까지 ↓ 로 옮긴 뒤 Enter
+  const names = await owner.getByTestId('palette-results').locator('button').allTextContents();
+  const idx = names.findIndex((x) => x.startsWith('강남점 소방 점검 대응'));
+  for (let k = 0; k < idx; k++) await owner.keyboard.press('ArrowDown');
   await owner.keyboard.press('Enter');
   await owner.waitForURL(`${BASE}/tasks/${taskId}`);
   const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR' });

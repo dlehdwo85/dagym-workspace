@@ -55,7 +55,7 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   t.id, t.title, t.description, t.status, t.priority, t.project_id, t.parent_id, t.org_unit_id, t.brand_id,
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
-  t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id,
+  t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id, t.review_of,
   t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id, t.reminder_minutes,
   t.team_id, (select tm.name from teams tm where tm.id = t.team_id) as team_name, (select tm.color from teams tm where tm.id = t.team_id) as team_color,
   case when t.batch_id is null then null else (select json_build_object('total', count(*)::int, 'done', count(*) filter (where b.status = 'done')::int) from tasks b where b.batch_id = t.batch_id and b.deleted_at is null) end as batch,
@@ -224,7 +224,9 @@ export async function getTaskDetail(u: SessionUser, id: string) {
   const canDecideHandoff = !!pendingHandoff && ((t.requested_by ?? t.created_by) === u.id || reassign);
   // R-15 4번: 담당자의 최근 처리 속도 → 예상 처리 기간
   const speed = t.assignee_id && t.status !== 'done' ? (await (await import('./insights')).speedStats(u, [t.assignee_id]).catch(() => []))[0] ?? null : null;
-  return { speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
+  // V14 28번: 검토 업무면 원 업무(제목·상태·담당), 원 업무면 자기 검토 업무
+  const [reviewTarget] = t.review_of ? await sql`select r.id, r.title, r.status, r.requested_by, r.created_by, au.name as assignee_name from tasks r left join users au on au.id = r.assignee_id where r.id = ${t.review_of} and r.deleted_at is null` : [];
+  return { reviewTarget: reviewTarget ?? null, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -576,6 +578,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         title: `${head}: ${title}`, body: `${u.name}님이 '${title}'을(를) ${verb}`,
         link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reqst:${id}:${upd.version}` });
     }
+    if (set.status || 'requested_by' in set || (cur.status === 'review' && ('title' in set || 'due_date' in set || 'assignee_id' in set))) await syncReviewTask(tx, id, u.id);
     let spawned: string | null = null;
     if (set.status === 'done') spawned = await spawnNextRecurrence(tx, id, u.id);
     // B-10 자동화 (사람이 한 변경에만 반응, 규칙이 한 변경은 다시 부르지 않음)
@@ -584,6 +587,40 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if ('section_id' in set && set.section_id) await runAutomations(tx, { trigger: 'section_moved', taskId: id, actorId: u.id });
     return { id, version: upd.version, changed: true, spawned };
   });
+}
+
+/**
+ * V14 28번: 검토 요청 → 지시자(없으면 만든 사람)에게 "[검토] 원 업무" 업무. 원 업무당 하나 — 다시 요청하면 다시 연다.
+ * 원 업무가 검토에서 벗어나면(승인·반려·되돌림) 자동 완료, 삭제되면 같이 삭제. 지시자 = 담당자, 결재선 업무, 검토 업무 자체는 만들지 않는다.
+ */
+export async function syncReviewTask(sql: Sql, id: string, actorId: string | null) {
+  const [o] = await sql<any[]>`select t.id, t.title, t.status, t.assignee_id, t.requested_by, t.created_by, t.org_unit_id, t.brand_id, t.due_date, t.deleted_at,
+      t.approval_line_id, t.review_of, o.tenant from tasks t join org_units o on o.id = t.org_unit_id where t.id = ${id}`;
+  if (!o || o.review_of) return;
+  const reviewer: string | null = o.requested_by ?? o.created_by;
+  const [rv] = await sql<{ id: string; status: string; deleted_at: Date | null; assignee_id: string | null }[]>`select id, status, deleted_at, assignee_id from tasks where review_of = ${id}`;
+  const active = o.status === 'review' && !o.deleted_at && !o.approval_line_id && !!reviewer && reviewer !== o.assignee_id;
+  if (active) {
+    const today = todaySeoul();
+    const hol = new Set((await sql<{ d: string }[]>`select to_char(date, 'YYYY-MM-DD') d from holidays where date between ${today} and ${addDays(today, 20)} and (tenant is null or tenant = ${o.tenant})`).map((h) => h.d));
+    let biz = addDays(today, 1);
+    for (let k = 0; k < 20; k++) { const w = new Date(biz + 'T00:00:00Z').getUTCDay(); if (w !== 0 && w !== 6 && !hol.has(biz)) break; biz = addDays(biz, 1); }
+    const due = o.due_date && String(o.due_date) < biz ? String(o.due_date) : biz;
+    const title = `[검토] ${o.title}`.slice(0, 200);
+    const desc = `원 업무: ${o.title}\n위 "검토할 업무" 상자에서 [승인] 또는 [반려]를 눌러 주세요. 처리하면 이 검토 업무는 자동으로 완료됩니다.`;
+    if (rv) {
+      await sql`update tasks set status = 'todo', deleted_at = null, completed_at = null, title = ${title}, due_date = ${due}, assignee_id = ${reviewer},
+        assignee_ack_at = ${reviewer === actorId ? new Date() : null}, updated_at = now(), version = version + 1 where id = ${rv.id}`;
+      await activity(sql, 'task', rv.id, actorId, 'reopened', { reason: 'review_requested_again' });
+    } else {
+      await sql`insert into tasks (org_unit_id, brand_id, title, description, status, priority, assignee_id, due_date, created_by, requested_by, sort_order, approval_required, review_of, assignee_ack_at)
+        values (${o.org_unit_id}, ${o.brand_id}, ${title}, ${desc}, 'todo', 'high', ${reviewer}, ${due}, ${actorId ?? reviewer}, ${o.assignee_id ?? actorId ?? reviewer},
+          extract(epoch from now()), false, ${o.id}, ${reviewer === actorId ? new Date() : null})`;
+    }
+  } else if (rv && !rv.deleted_at && rv.status !== 'done') {
+    if (o.deleted_at || !reviewer || reviewer === o.assignee_id) await sql`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = ${rv.id}`;
+    else if (o.status !== 'review') await sql`update tasks set status = 'done', completed_at = now(), updated_at = now(), version = version + 1 where id = ${rv.id}`;
+  }
 }
 
 async function collabIds(sql: Sql, id: string) {
@@ -630,6 +667,7 @@ export async function deleteTask(u: SessionUser, id: string) {
   await sql.begin(async (tx) => {
     await tx`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = ${id} or parent_id = ${id}`;
     await activity(tx, 'task', id, u.id, 'deleted');
+    await syncReviewTask(tx, id, u.id);
   });
   return { ok: true };
 }
@@ -657,6 +695,7 @@ export async function restoreTask(u: SessionUser, id: string) {
   await sql.begin(async (tx) => {
     await tx`update tasks set deleted_at = null, updated_at = now(), version = version + 1 where id = ${id} or (parent_id = ${id} and deleted_at = ${t.deleted_at})`;
     await activity(tx, 'task', id, u.id, 'restored');
+    await syncReviewTask(tx, id, u.id);
   });
   return { ok: true };
 }

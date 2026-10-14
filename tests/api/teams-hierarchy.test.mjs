@@ -100,3 +100,41 @@ describe('V14 20번 완료 해지', () => {
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${tk}`, { status: 'in_progress', version: v }); // 담당자
   });
 });
+
+describe('V14 28번 검토 요청 → 지시자 검토 업무', () => {
+  const rv = async (id) => (await sql`select id, title, status, assignee_id, due_date, deleted_at from tasks where review_of = ${id}`)[0];
+  test('생성·승인으로 자동 완료·다시 요청하면 다시 열기(중복 없음)·반려·삭제 정리·지시자=담당자면 없음', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '계약서 정리', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    let r = await rv(t);
+    assert.equal(r.title, '[검토] 계약서 정리'); assert.equal(r.assignee_id, ctx.ownerId); assert.equal(r.status, 'todo');
+    const d = await ctx.owner.ok('GET', `/api/tasks/${r.id}`);
+    assert.equal(d.reviewTarget.id, t); assert.equal(d.reviewTarget.status, 'review');
+    assert.ok((await ctx.owner.ok('GET', '/api/tasks?view=my')).tasks.some((x) => x.id === r.id), '지시자의 내 업무에 보임');
+    // 반려 → 검토 업무 자동 완료
+    await ctx.owner.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress', reviewNote: '서명란 확인' });
+    assert.equal((await rv(t)).status, 'done');
+    // 다시 요청 → 같은 검토 업무를 다시 연다
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    const again = await rv(t);
+    assert.equal(again.id, r.id); assert.equal(again.status, 'todo');
+    assert.equal((await sql`select count(*)::int n from tasks where review_of = ${t}`)[0].n, 1);
+    // 승인 → 원 업무 완료, 검토 업무 완료
+    await ctx.owner.ok('PATCH', `/api/tasks/${t}`, { status: 'done' });
+    assert.equal((await rv(t)).status, 'done');
+    // 원 업무 삭제 → 열린 검토 업무도 삭제
+    const t2 = (await ctx.owner.ok('POST', '/api/tasks', { title: '삭제될 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t2}`, { status: 'review' });
+    await ctx.owner.ok('DELETE', `/api/tasks/${t2}`);
+    assert.ok((await rv(t2)).deleted_at, '검토 업무도 정리');
+    // 지시자 = 담당자 → 만들지 않음
+    const t3 = (await ctx.owner.ok('POST', '/api/tasks', { title: '내가 할 일', assigneeId: ctx.ownerId, approvalRequired: false })).id;
+    await ctx.owner.ok('PATCH', `/api/tasks/${t3}`, { status: 'review' });
+    assert.equal(await rv(t3), undefined);
+    // 검토 업무의 마감: 원 업무 마감이 더 빠르면 그 날
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    const t4 = (await ctx.owner.ok('POST', '/api/tasks', { title: '오늘 마감', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today, approvalRequired: false })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t4}`, { status: 'review' });
+    assert.equal((await rv(t4)).due_date, today);
+  });
+});

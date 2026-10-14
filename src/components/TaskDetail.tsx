@@ -372,6 +372,25 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           {photoShort && t.status !== 'done' && <p className="mt-3 flex items-center gap-2 rounded-input bg-sky-50 px-3 py-2 text-sm text-sky-900"><Camera className="size-4 shrink-0" />완료하려면 증빙 사진 {photoNeed}장이 필요합니다 (현재 {photoHave}장). 아래 <b>사진 촬영</b>으로 올려 주세요.</p>}
         </div>
 
+        {/* V14 28번: 검토 업무 — 원 업무로 가지 않고 여기서 승인·반려 */}
+        {data.reviewTarget && (
+          <section className="rounded-card border border-violet-200 bg-violet-50/60 p-3 text-sm" data-testid="review-target">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-violet-700">검토할 업무</span>
+              <Link href={`/tasks/${data.reviewTarget.id}`} className="min-w-0 flex-1 truncate font-medium underline">{data.reviewTarget.title}</Link>
+              <span className="text-xs text-ink-2">{data.reviewTarget.assignee_name ?? '담당 없음'} · {STATUS_LABEL[data.reviewTarget.status as TaskStatus] ?? data.reviewTarget.status}</span>
+            </div>
+            {data.reviewTarget.status === 'review' ? (
+              <div className="mt-2 flex gap-2">
+                <Button size="sm" onClick={async () => { try { await api(`/api/tasks/${data.reviewTarget.id}`, { method: 'PATCH', body: { status: 'done' } }); toast.ok('승인했습니다 — 원 업무 완료'); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } }} data-testid="review-approve"><Check />승인</Button>
+                <Button size="sm" variant="secondary" onClick={async () => {
+                  const note = prompt('반려(보완 요청) 내용을 입력하세요'); if (!note) return;
+                  try { await api(`/api/tasks/${data.reviewTarget.id}`, { method: 'PATCH', body: { status: 'in_progress', reviewNote: note } }); await api(`/api/tasks/${data.reviewTarget.id}/comments`, { body: { body: `[보완 요청] ${note}` } }).catch(() => {}); toast.ok('반려했습니다'); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); }
+                }} data-testid="review-reject">반려</Button>
+              </div>
+            ) : <p className="mt-1 text-xs text-ink-3">원 업무가 검토 대기 상태가 아닙니다</p>}
+          </section>
+        )}
         {/* B-9 결재 단계 */}
         {roundSteps.length > 0 && (
           <section className="rounded-card border border-line p-4" data-testid="approval-steps">
