@@ -88,9 +88,9 @@ describe('⑥ 다른 직원·현장 데이터 접근 차단 (서버 권한 검�
     assert.equal((await ctx.owner.get(`/api/tasks/${taskA}`)).status, 200);
   });
   test('직원은 관리자 API 를 쓸 수 없다', async () => {
-    assert.equal((await ctx.staffA.client.get('/api/admin/users')).status, 403);
-    assert.equal((await ctx.staffA.client.post('/api/admin/org-units', { name: 'x', type: 'site' })).status, 403);
-    assert.equal((await ctx.managerA.client.get('/api/admin/audit')).status, 403);
+    assert.equal((await ctx.staffA.client.get('/api/admin/users')).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
+    assert.equal((await ctx.staffA.client.post('/api/admin/org-units', { name: 'x', type: 'site' })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
+    assert.equal((await ctx.managerA.client.get('/api/admin/audit')).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
   });
   test('직원은 다른 현장에 업무를 만들 수 없다', async () => {
     assert.equal((await ctx.staffA.client.post('/api/tasks', { title: 'x', orgUnitId: ctx.siteB })).status, 403);
@@ -400,7 +400,7 @@ describe('Asana 이상 P1 (B-7~B-13)', () => {
   });
   test('B-9 2단계 결재: 현장 관리자 → 대표, 반려 사유 필수, 결재자 아니면 거부, 최종 승인 시 완료', async () => {
     const line = (await ctx.owner.ok('POST', '/api/approval-lines', { name: '현장→대표', steps: [{ label: '현장 관리자', type: 'role', role: 'site_manager' }, { label: '대표', type: 'role', role: 'owner' }] })).id;
-    assert.equal((await ctx.managerA.client.post('/api/approval-lines', { name: 'x', steps: [{ label: 'a', type: 'role', role: 'owner' }] })).status, 403);
+    assert.equal((await ctx.managerA.client.post('/api/approval-lines', { name: 'x', steps: [{ label: 'a', type: 'role', role: 'owner' }] })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     const id = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'GX 강사 계약', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, taskType: 'approval', approvalLineId: line })).id;
     assert.equal((await ctx.managerA.client.patch(`/api/tasks/${id}`, { status: 'done' })).status, 403, '결재선 업무는 바로 완료 불가');
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
@@ -593,7 +593,7 @@ describe('Asana 이상 P2 (B-14~B-17)', () => {
   test('B-17 공휴일: 기본 목록, 관리자만 추가·삭제', async () => {
     const h = (await ctx.staffA.client.ok('GET', '/api/holidays?from=2026-01-01&to=2027-12-31')).holidays;
     assert.ok(h.some((x) => x.date === '2026-10-09' && x.name === '한글날'));
-    assert.equal((await ctx.staffA.client.req('PUT', '/api/holidays/2026-11-20', { name: '임시' })).status, 403);
+    assert.equal((await ctx.staffA.client.req('PUT', '/api/holidays/2026-11-20', { name: '임시' })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     await ctx.owner.ok('PUT', '/api/holidays/2026-11-20', { name: '임시공휴일' });
     assert.ok((await ctx.staffA.client.ok('GET', '/api/holidays?from=2026-11-01&to=2026-11-30')).holidays.some((x) => x.name === '임시공휴일'));
     await ctx.owner.ok('DELETE', '/api/holidays/2026-11-20');
@@ -1754,7 +1754,7 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
     assert.ok(u.usage.storageBytes > 0 && u.usage.users >= 4 && u.usage.aiRequests >= 1, '첨부·자료실·사람·AI 요청 셈');
     assert.ok(u.topFiles.length > 0 && u.topFiles[0].size >= u.topFiles.at(-1).size, '큰 파일 순');
     assert.ok(u.plans.some((p) => p.code === 'basic' && p.per_user_krw === 1500) && u.plans.some((p) => p.code === 'free' && p.limits.users === 20) && !u.plans.some((p) => p.code === 'internal' || p.code === 'standard'), '2안: 무료·베이직(1인 1,500원), 내부·1안은 목록에 없음');
-    assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 403);
+    assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.deepEqual(pf.tenants.map((t) => t.id).sort(), ['default', 'demo']);
     assert.equal(pf.tenants.find((t) => t.id === 'default').overLimit, false);
@@ -1808,7 +1808,7 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
 
   test('요금제 변경 요청 → 운영자 승인하면 반영·요청자 알림, 반려도 가능', async () => {
     const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'basic', note: '지점 늘어남' });
-    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'basic' })).status, 403);
+    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'basic' })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     assert.equal((await ctx.owner.req('POST', '/api/usage/request', { planCode: 'internal' })).status, 400, '공개 안 된 요금제는 요청 불가');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.equal(pf.requests.find((x) => x.id === r.id).status, 'pending');
@@ -2292,7 +2292,7 @@ describe('V14 3번 자료실 자동 정리 점검 — 상태·실패 사유·다
     assert.equal(r.left, 0); assert.ok(total > 0);
     const [{ n }] = await sql`select count(*)::int n from library_files where source = 'upload' and deleted_at is null and upload_status = 'ready' and organize_status is null`;
     assert.equal(n, 0);
-    await ctl({ anthropicQueue: [] });
+    await ctl({ anthropicReset: true });
   });
 });
 
@@ -2345,5 +2345,94 @@ describe('V14 1번 담당자 재배정 권한', () => {
     assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t2}`)).task.assignee_id, ctx.staffA.id);
     await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign_handoff', role: 'staff', level: null });
     assert.equal((await ctx.staffA.client.post(`/api/tasks/${t2}/handoff`, { toUserId: ctx.ownerId })).status, 403, '꺼지면 요청 불가');
+  });
+});
+
+describe('V14 2·4·5·6·7번 AI 대화 보관·업무 무관 차단·사용 내역 권한·관리 메뉴 권한', () => {
+  const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+  const st = () => fetch(`${FAKE}/__state`).then((r) => r.json());
+  const say = (text) => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn' });
+  let thread;
+  before(() => ctl({ anthropicReset: true }));
+  test('대화가 보관되고 이어서 물으면 서버가 앞 대화를 문맥으로 보냄, 본인만 열람·이름·고정·삭제', async () => {
+    await ctl({ anthropicQueue: [say('네, 강남점 오픈 준비 업무가 3건 있습니다.')] });
+    const a = await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '강남점 오픈 준비 업무 알려줘' });
+    thread = a.threadId; assert.ok(thread);
+    await ctl({ anthropicQueue: [say('가장 급한 것은 간판 설치입니다.')] });
+    const before = (await st()).anthropic.length;
+    const b = await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '그중에 제일 급한 건?', threadId: thread });
+    assert.equal(b.threadId, thread);
+    const sent = (await st()).anthropic.slice(before).find((x) => !String(x.body.system).startsWith('WORKIN_TOPIC_CLASSIFIER'));
+    const ctxText = JSON.stringify(sent.body.messages);
+    assert.ok(ctxText.includes('강남점 오픈 준비 업무 알려줘') && ctxText.includes('3건 있습니다'), '앞 대화가 문맥으로');
+    const list = await ctx.staffA.client.ok('GET', '/api/ai/threads');
+    const t = list.threads.find((x) => x.id === thread);
+    assert.equal(t.title, '강남점 오픈 준비 업무 알려줘'); assert.equal(t.turns, 2);
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/ai/threads/${thread}`)).messages.length, 4);
+    assert.equal((await ctx.managerA.client.get(`/api/ai/threads/${thread}`)).status, 404, '남의 대화');
+    assert.equal((await ctx.managerA.client.post('/api/ai/chat', { text: '이어서', threadId: thread })).status, 404);
+    await ctx.staffA.client.ok('PATCH', `/api/ai/threads/${thread}`, { title: '오픈 준비', pinned: true });
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/ai/threads?q=' + encodeURIComponent('간판'))).threads[0].id, thread, '내용 검색');
+  });
+  test('업무 무관 질문은 가벼운 모델 판정으로 차단(비싼 모델 호출 없음), 같은 질문 반복·긴 입력·하루 한도', async () => {
+    await ctl({ classifyQueue: [false] });
+    const before = (await st()).anthropic.length;
+    const r = await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '오늘 저녁 메뉴 추천하고 로또 번호 뽑아줘', threadId: thread });
+    assert.equal(r.blocked, true); assert.match(r.reply, /업무와 관련된 요청만/);
+    assert.equal((await st()).anthropic.length, before, '비싼 모델은 부르지 않음');
+    assert.ok((await st()).classified.includes('오늘 저녁 메뉴 추천하고 로또 번호 뽑아줘'), '가벼운 모델로 분류');
+    const [m] = await sql`select status from ai_messages where thread_id = ${thread} and role = 'user' order by id desc limit 1`;
+    assert.equal(m.status, 'blocked', '차단 기록');
+    await ctl({ anthropicQueue: [say('확인했습니다.')] });
+    await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '이번 주 내 마감 업무 정리해줘', threadId: thread });
+    const rep = await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '이번 주 내 마감 업무 정리해줘', threadId: thread });
+    assert.equal(rep.blocked, true); assert.match(rep.reply, /같은 질문/);
+    assert.equal((await ctx.staffA.client.post('/api/ai/chat', { text: '가'.repeat(4001) })).status, 400, '입력 길이');
+    await ctx.owner.ok('PUT', '/api/ai/settings', { dailyLimit: 1 });
+    await ctl({ anthropicQueue: [say('네.')] });
+    const lim = await ctx.managerA.client.ok('POST', '/api/ai/chat', { text: '현장 점검 일정 알려줘' });
+    assert.equal(lim.blocked ?? false, false);
+    const over = await ctx.managerA.client.ok('POST', '/api/ai/chat', { text: '내일 회의 준비 업무 만들어줘', threadId: lim.threadId });
+    assert.equal(over.blocked, true); assert.match(over.reply, /오늘 AI 요청 1회/);
+    await ctx.owner.ok('PUT', '/api/ai/settings', { dailyLimit: 50 });
+  });
+  test('AI 사용 내역: 기본 대표만 조회(열람 감사 기록)·삭제, 권한 주면 조회만, 직원 고지', async () => {
+    assert.equal((await ctx.staffA.client.get('/api/ai/logs')).status, 404);
+    const logs = await ctx.owner.ok('GET', '/api/ai/logs?userId=' + ctx.staffA.id);
+    assert.ok(logs.threads.some((t) => t.id === thread && t.blocked >= 1));
+    const d = await ctx.owner.ok('GET', `/api/ai/logs/${thread}`);
+    assert.ok(d.messages.some((m) => m.status === 'blocked'));
+    assert.ok((await sql`select 1 from audit_logs where action = 'ai_log.view' and target_id = ${thread}`).length, '열람 기록');
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'ai_logs', userId: ctx.managerA.id, level: 'view' });
+    await ctx.managerA.client.ok('GET', '/api/ai/logs');
+    assert.equal((await ctx.managerA.client.req('DELETE', `/api/ai/logs/${thread}`)).status, 403);
+    assert.equal((await ctx.managerA.client.req('PUT', '/api/ai/settings', { retentionDays: 30 })).status, 403);
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'ai_logs', userId: ctx.managerA.id, level: null });
+    // 보관 기간: 지난 대화는 정기 실행이 지움
+    await ctx.owner.ok('PUT', '/api/ai/settings', { retentionDays: 30 });
+    await sql`update ai_threads set updated_at = now() - interval '31 days' where id = ${thread}`;
+    await tick();
+    assert.equal((await sql`select count(*)::int n from ai_threads where id = ${thread}`)[0].n, 0, '보관 기간 지나 삭제');
+    await ctx.owner.ok('PUT', '/api/ai/settings', { retentionDays: 90 });
+  });
+  test('관리 메뉴 조회/편집: 사용자 관리·운영 상태·사용량 — 꺼짐 404, 조회만이면 쓰기 403, AI 사용량 사람별·기능별·한도 %', async () => {
+    assert.equal((await ctx.managerA.client.get('/api/admin/users')).status, 404);
+    assert.equal((await ctx.managerA.client.get('/api/admin/ops')).status, 404);
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'admin_users', role: 'site_manager', level: 'view' });
+    await ctx.managerA.client.ok('GET', '/api/admin/users');
+    assert.equal((await ctx.managerA.client.post('/api/admin/users', { email: 'x@dagym.test', name: 'x', role: 'staff', orgUnitIds: [ctx.siteA] })).status, 403);
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'admin_users', role: 'site_manager', level: null });
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'usage', userId: ctx.managerA.id, level: 'view' });
+    const u = await ctx.managerA.client.ok('GET', '/api/usage');
+    assert.equal(u.canEdit, false);
+    assert.equal((await ctx.managerA.client.post('/api/usage/request', { note: '팩 요청' })).status, 403);
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'usage', userId: ctx.managerA.id, level: null });
+    const o = await ctx.owner.ok('GET', '/api/usage');
+    assert.ok(o.ai.limitUsd > 0 && typeof o.ai.pct === 'number');
+    assert.ok(o.ai.byUser.some((x) => x.user_id === ctx.staffA.id));
+    assert.ok(o.ai.byPurpose.some((x) => x.purpose === 'classify') && o.ai.byPurpose.some((x) => x.purpose === 'assistant'));
+    assert.ok(o.ai.blocked >= 1);
+    const m = await ctx.owner.ok('GET', '/api/admin/menu-perms');
+    for (const k of ['team_reports', 'revenue', 'admin_users', 'ops', 'usage', 'library', 'ai_logs', 'reassign']) assert.ok(m.menus.some((x) => x.key === k), k);
   });
 });

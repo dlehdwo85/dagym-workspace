@@ -223,7 +223,10 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
 }
 
 const chatInput = z.object({
-  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000) })).min(1).max(30),
+  /** V14 2번: 보관된 대화로 이어 묻기 — threadId + text (예전 방식 messages 도 받음) */
+  threadId: z.string().uuid().optional(),
+  text: z.string().max(20000).optional(),
+  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000) })).min(1).max(30).optional(),
   taskId: z.string().uuid().optional(),
   /** V12 8번: 이번 질문에 붙인 자료실 파일(최대 5개) — 이미지는 비전, PDF 는 문서, 그 밖은 추출한 글자로 전달 */
   fileIds: z.array(z.string().uuid()).max(5).optional(),
@@ -262,17 +265,31 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   const tenant = tenantOf(u);
   const usage = await usageThisMonth(tenant);
   if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다. 대표에게 한도 조정을 요청하세요.`);
-  if (i.messages[i.messages.length - 1].role !== 'user') throw badRequest('마지막은 질문이어야 합니다');
+  const userText = (i.text ?? (i.messages?.[i.messages.length - 1]?.role === 'user' ? i.messages[i.messages.length - 1].text : '')).trim();
+  if (!userText) throw badRequest('질문을 입력하세요');
   await (await import('../plans')).assertAiRequest(u); // V10 요금제 월 AI 요청 수
   const requestId = crypto.randomUUID();
+  // V14 2·5번: 대화 보관 + 사전 점검(입력 길이·하루 한도·반복·업무 무관 질문)
+  const T = await import('./threads');
+  if (i.threadId) await T.ownThread(u, i.threadId);
+  const blocked = await T.precheck(u, userText, i.threadId ?? null, !!i.fileIds?.length);
+  const threadId = i.threadId ?? (await T.startThread(u, userText, i.taskId ?? null));
+  const fileNames = i.fileIds?.length ? (await db()<{ file_name: string }[]>`select file_name from library_files where id = any(${i.fileIds}::uuid[])`).map((f) => f.file_name) : [];
+  if (blocked) {
+    await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: blocked, status: 'blocked', reason: blocked });
+    return { reply: blocked, proposals: [], tools: [], threadId, blocked: true };
+  }
+  const hist = i.threadId ? await T.threadHistory(i.threadId) : null;
 
   let context = '';
   if (i.taskId) {
     const d = await getTaskDetail(u, i.taskId); // 볼 수 없는 업무면 여기서 404
     context = `\n지금 사용자가 보고 있는 업무: id=${i.taskId}, 제목="${(d.task as any).title}". "이 업무"는 이것을 뜻합니다.`;
   }
-  const system = `${SYSTEM}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}(id=${u.id}, 역할=${u.role}).${context}`;
-  const messages: AiMessage[] = i.messages.map((m) => ({ role: m.role, content: m.text }));
+  const system = `${SYSTEM}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}`;
+  // 문맥: 보관된 대화면 최근 20개 + 요약, 예전 방식이면 화면이 보낸 것
+  const messages: AiMessage[] = hist ? [...hist.messages.map((m) => ({ role: m.role, content: m.text })), { role: 'user', content: userText }]
+    : (i.messages ?? [{ role: 'user' as const, text: userText }]).map((m) => ({ role: m.role, content: m.text }));
   if (i.fileIds?.length) {
     const fb = await fileBlocks(u, i.fileIds);
     const last = messages[messages.length - 1];
@@ -282,11 +299,13 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   const sql = db();
   const steps: string[] = [];
   let reply = '';
+  let turnCost = 0, inTok = 0, outTok = 0;
   for (let step = 0; step < MAX_STEPS; step++) {
     const r = await provider.chat({ system, messages, tools: TOOLS }).catch((e: any) => {
       throw new HttpError(502, 'ai_unavailable', `AI 서버 응답 오류${e?.status ? ` (${e.status})` : ''}. 잠시 후 다시 시도하세요.`);
     });
     const used = r.usage;
+    turnCost += costUsd(r.model ?? provider.model, used); inTok += used.input_tokens; outTok += used.output_tokens;
     await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
       values (${tenant}, ${u.id}, ${requestId}, ${provider.name}, ${r.model ?? provider.model}, ${used.input_tokens}, ${used.output_tokens}, ${used.cache_read_input_tokens ?? 0},
         ${used.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, used)})`;
@@ -308,8 +327,10 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     messages.push({ role: 'user', content: results });
     if (step === MAX_STEPS - 1) reply = text || '여러 단계를 거쳤지만 끝내지 못했습니다. 요청을 나눠서 다시 해 주세요.';
   }
-  await audit(sql, u.id, 'ai.chat', i.taskId ? 'task' : null, i.taskId ?? null, { tools: steps, proposals: c.proposals.map((p) => p.id) }, null);
-  return { reply, proposals: c.proposals, tools: steps };
+  await audit(sql, u.id, 'ai.chat', i.taskId ? 'task' : null, i.taskId ?? null, { tools: steps, proposals: c.proposals.map((p) => p.id), threadId }, null);
+  await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: reply, proposalIds: c.proposals.map((p) => p.id), cost: turnCost, inTok, outTok });
+  await T.maybeSummarize(u, threadId);
+  return { reply, proposals: c.proposals, tools: steps, threadId };
 }
 
 // ---------------- 제안 실행 (사람이 [확인]) ----------------

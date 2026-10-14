@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
-import { accessibleUnitIds, isAdmin, loadTaskForUser, requireAdmin } from './access';
+import { accessibleUnitIds, isAdmin, loadTaskForUser } from './access';
 import { badRequest, forbidden, notFound } from './errors';
 import { activity, audit } from './log';
 import { notify } from './notifications';
@@ -30,7 +30,7 @@ export async function listLines(u: SessionUser) {
 }
 
 export async function saveLine(u: SessionUser, id: string | null, i: z.infer<typeof lineInput>, ip: string | null) {
-  requireAdmin(u);
+  await (await import('./menuPerms')).requireMenu(u, 'ops', 'edit');
   const sql = db();
   if (id) {
     const r = await sql`update approval_lines set name = ${i.name}, org_unit_id = ${i.orgUnitId ?? null}, steps = ${sql.json(i.steps as never)},

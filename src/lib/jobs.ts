@@ -156,6 +156,7 @@ export async function runTick(trigger: string) {
   await step('briefing', async () => (await import('./briefing')).briefingJob());
   await step('personalReport', async () => (await import('./briefing')).personalReportJob());
   await step('usage', async () => (await import('./plans')).usageJob());
+  await step('aiRetention', async () => ({ purged: await (await import('./ai/threads')).purgeOldThreads() })); // V14 2번 AI 대화 보관 기간
   await step('push', () => dispatchPending(200));
   if (googleConfigured()) await step('google', () => syncAllDue());
   await step('cleanup', cleanup);

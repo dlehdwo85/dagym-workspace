@@ -101,11 +101,12 @@ export async function assertSeat(tenant: string, sql: Sql = db()) {
 }
 
 // ---------------- 회사 관리자: 사용량·요금제 ----------------
-function requireTenantAdmin(u: SessionUser) {
-  if (!(u.role === 'owner' || u.role === 'admin') || u.isDemo) throw forbidden('대표·본사 관리자만 볼 수 있습니다');
+async function requireTenantAdmin(u: SessionUser, need: 'view' | 'edit' = 'view') { // V14 7번: 메뉴 권한 "사용량·요금제"
+  if (u.isDemo) throw forbidden('대표·본사 관리자만 볼 수 있습니다');
+  await (await import('./menuPerms')).requireMenu(u, 'usage', need);
 }
 export async function usageOverview(u: SessionUser) {
-  requireTenantAdmin(u);
+  await requireTenantAdmin(u);
   const tenant = tenantOfUser(u);
   const sql = db();
   const [{ limits, sub }, usage, plans, addons, top, requests] = await Promise.all([
@@ -121,12 +122,32 @@ export async function usageOverview(u: SessionUser) {
       where r.tenant = ${tenant} order by r.created_at desc limit 10`,
   ]);
   return { tenant, subscription: { planCode: sub.plan_code, planName: sub.plan_name, monthlyKrw: sub.per_user_krw ? sub.per_user_krw * Math.max(1, usage.users) : sub.monthly_krw, perUserKrw: sub.per_user_krw ?? null, addons: sub.addons, periodStart: sub.period_start, periodEnd: sub.period_end, status: sub.status },
-    limits, usage, plans, addons, topFiles: top, requests, demo: tenant === 'demo' };
+    limits, usage, plans, addons, topFiles: top, requests, demo: tenant === 'demo', ai: await aiBreakdown(tenant, sql), canEdit: (await (await import('./menuPerms')).menuLevel(u, 'usage', sql)) === 'edit' };
+}
+
+/** V14 4번: 이번 달 AI 사용 — 사람별·기능별, 회사 월 한도($) 대비 %, 원 환산(USD_KRW, 기본 1,400) */
+export async function aiBreakdown(tenant: string, sql: Sql = db()) {
+  const { usageThisMonth } = await import('./ai/assistant');
+  const { aiSettings } = await import('./ai/threads');
+  const m = await usageThisMonth(tenant);
+  const start = `${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7)}-01`;
+  const [byUser, byPurpose, [blocked]] = await Promise.all([
+    sql`select a.user_id, coalesce(us.name, '(삭제된 사용자)') as name, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost
+      from ai_usage a left join users us on us.id = a.user_id where a.tenant = ${tenant} and a.created_at >= (${start}::date at time zone 'Asia/Seoul') group by a.user_id, us.name order by cost desc limit 50`,
+    sql`select a.purpose, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost from ai_usage a
+      where a.tenant = ${tenant} and a.created_at >= (${start}::date at time zone 'Asia/Seoul') group by a.purpose order by cost desc`,
+    sql<{ n: number }[]>`select count(*)::int n from ai_messages m join ai_threads t on t.id = m.thread_id where t.tenant = ${tenant} and m.role = 'user' and m.status = 'blocked'
+      and m.created_at >= (${start}::date at time zone 'Asia/Seoul')`,
+  ]);
+  const rate = Number(process.env.USD_KRW) || 1400;
+  const s = await aiSettings(tenant, sql);
+  return { costUsd: m.costUsd, limitUsd: m.limitUsd, pct: m.limitUsd > 0 ? Math.round((m.costUsd / m.limitUsd) * 1000) / 10 : 0, leftUsd: Math.max(0, Math.round((m.limitUsd - m.costUsd) * 100) / 100),
+    requests: m.requests, tokens: m.tokens, usdKrw: rate, byUser, byPurpose, blocked: blocked.n, dailyLimit: s.daily_limit, consoleNote: s.console_note };
 }
 
 export const planRequestInput = z.object({ planCode: z.string().max(40).optional(), addons: z.record(z.string(), z.number().int().min(0).max(100)).optional(), note: z.string().max(1000).optional() });
 export async function requestPlanChange(u: SessionUser, i: z.infer<typeof planRequestInput>) {
-  requireTenantAdmin(u);
+  await requireTenantAdmin(u, 'edit');
   if (!i.planCode && !i.addons && !i.note) throw badRequest('바꿀 요금제나 옵션을 고르세요');
   const sql = db();
   if (i.planCode && !(await sql`select 1 from plans where code = ${i.planCode} and public and active`).length) throw badRequest('없는 요금제입니다');

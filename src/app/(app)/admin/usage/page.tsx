@@ -7,7 +7,9 @@ import { Meter, fmtBytes, won } from '@/components/usage';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const GB = 1024 ** 3;
-const lim = (v: number | null, unit: string) => (v === null ? '무제한' : `${v.toLocaleString('ko-KR')}${unit}`);
+const lim = (v: number | null, unit: string) => (v === null ? '한도 미설정' : `${v.toLocaleString('ko-KR')}${unit}`);
+/** V14 4번 기능 이름 */
+const PURPOSE: Record<string, string> = { assistant: 'AI 비서', library_organize: '자료실 자동 정리', revenue: '매출 AI 분석', revenue_extract: '매출 자료로 입력', classify: '질문 분류(업무 여부)', summary: '긴 대화 요약', chat_to_task: '메시지 → 업무', fill: '자료로 채우기' };
 
 /** V10 관리 → 사용량·요금제 (대표·본사 관리자) */
 export default function UsagePage() {
@@ -22,11 +24,11 @@ export default function UsagePage() {
   }
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (loading && !data) return <Skeleton rows={6} />;
-  const { subscription: s, limits, usage, plans, addons, topFiles, requests } = data;
+  const { subscription: s, limits, usage, plans, addons, topFiles, requests, ai, canEdit } = data;
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <PageHeader title="사용량·요금제" icon={Gauge} sub="회사 전체 저장공간·AI 요청·사용자 수. 한도를 넘어도 업무·일정은 그대로 쓰고, 새 파일 올리기·AI·초대만 멈춥니다."
-        actions={<Button onClick={() => setReq({ planCode: '', addons: {}, note: '' })} data-testid="plan-request">요금제 변경 요청</Button>} />
+        actions={canEdit && <Button onClick={() => setReq({ planCode: '', addons: {}, note: '' })} data-testid="plan-request">요금제 변경 요청</Button>} />
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="current-plan">
         <div className="text-sm text-ink-2">현재 요금제</div>
         <div className="text-xl font-bold">{s.planName} <span className="text-base font-normal text-ink-2">{s.monthlyKrw === null ? '별도 협의' : s.perUserKrw ? `1인 월 ${won(s.perUserKrw)} · 이번 달 약 ${won(s.monthlyKrw)}` : `월 ${won(s.monthlyKrw)}`}</span></div>
@@ -37,9 +39,34 @@ export default function UsagePage() {
       </section>
       <div className="grid gap-3 sm:grid-cols-3">
         <Meter label="저장공간" icon={HardDrive} used={usage.storageBytes / GB} limit={limits.storageGb} usedLabel={fmtBytes(usage.storageBytes)} limitLabel={lim(limits.storageGb, 'GB')} testid="meter-storage" />
-        <Meter label="이번 달 AI 요청" icon={Sparkles} used={usage.aiRequests} limit={limits.aiRequests} usedLabel={`${usage.aiRequests.toLocaleString('ko-KR')}회`} limitLabel={lim(limits.aiRequests, '회')} testid="meter-ai" />
+        <Meter label="이번 달 AI 비용" icon={Sparkles} used={ai.costUsd} limit={ai.limitUsd} usedLabel={`$${ai.costUsd.toFixed(2)} (약 ${won(Math.round(ai.costUsd * ai.usdKrw))})`} limitLabel={`$${ai.limitUsd}`} testid="meter-ai" />
         <Meter label="사용자" icon={Users} used={usage.users} limit={limits.users} usedLabel={`${usage.users}명${usage.invited ? ` (+초대 중 ${usage.invited})` : ''}`} limitLabel={lim(limits.users, '명')} testid="meter-users" />
       </div>
+      {/* V14 4번: 이번 달 AI 사용 — 사람별·기능별, 한도 대비 % */}
+      <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-usage">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">이번 달 AI 사용</h2>
+          <span className="text-xs text-ink-2" data-testid="ai-usage-pct">회사 월 한도 ${ai.limitUsd} 중 <b className={cx(ai.pct >= 100 ? 'text-red-600' : ai.pct >= 80 ? 'text-amber-700' : 'text-ink')}>{ai.pct}%</b> · 남은 ${ai.leftUsd} · 요청 {ai.requests.toLocaleString('ko-KR')}회{ai.blocked ? ` · 차단 ${ai.blocked}건` : ''}</span>
+        </div>
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          {([['사람별', ai.byUser.map((x: any) => ({ k: x.user_id, label: x.name, cost: x.cost, n: x.requests }))], ['기능별', ai.byPurpose.map((x: any) => ({ k: x.purpose, label: PURPOSE[x.purpose] ?? x.purpose, cost: x.cost, n: x.requests }))]] as const).map(([title, rows]) => {
+            const max = Math.max(0.0001, ...rows.map((r: any) => r.cost));
+            return (
+              <div key={title}>
+                <h3 className="mb-1 text-xs font-semibold text-ink-2">{title}</h3>
+                <ul className="space-y-1 text-xs">{rows.map((r: any) => (
+                  <li key={r.k ?? r.label} className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-2">
+                    <span className="truncate">{r.label}</span>
+                    <span className="h-2 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-violet-500" style={{ width: `${(r.cost / max) * 100}%` }} /></span>
+                    <span className="tabular-nums text-ink-2">${r.cost.toFixed(2)} · {r.n}회</span>
+                  </li>
+                ))}{!rows.length && <li className="text-ink-3">아직 사용이 없습니다</li>}</ul>
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-3 text-[11px] text-ink-3">1인 하루 요청 {ai.dailyLimit}회까지 · 80%·100% 에 알림, 100% 가 되면 AI 기능만 멈추고 업무·일정은 그대로입니다. 결제 잔액은 Claude Console 에서 확인합니다{ai.consoleNote ? ` (메모: ${ai.consoleNote})` : ''}.</p>
+      </section>
       {/* V12 1번: 한도에 가까우면 해당 팩 바로 안내 */}
       {(() => {
         const near = (u: number, l: number | null) => l !== null && l > 0 && u / l >= 0.8;

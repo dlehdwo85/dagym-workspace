@@ -1,9 +1,9 @@
 import { handler } from '@/lib/api';
 import { db } from '@/lib/db';
-import { requireAdmin } from '@/lib/access';
+import { requireMenu } from '@/lib/menuPerms';
 
 export const GET = handler(async ({ user }) => {
-  requireAdmin(user);
+  await requireMenu(user, 'ops', 'view');
   const sql = db();
   const [jobs, errors, deliveries, syncErrors, counts, recent, noDevice] = await Promise.all([
     sql`select id, job, trigger, started_at, finished_at, status, detail from job_runs order by id desc limit 30`,

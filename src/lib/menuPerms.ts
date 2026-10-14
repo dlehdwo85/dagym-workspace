@@ -9,20 +9,26 @@ import type { Role, SessionUser } from './types';
  * 단계: none < view < edit (AI 비서는 none/use)
  */
 export const MENUS = {
+  // V14 7번: 관리 메뉴 전체 — 조회 / 조회·편집 (편집이면 조회 포함) × 등급 + 사람별 예외. 꺼지면 사이드바에서 숨기고 서버도 404/403
+  team_reports: { label: '주간 보고(모아보기)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   revenue: { label: '매출', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
-  team_reports: { label: '모두의 주간 보고', levels: ['none', 'view'], defaults: { owner: 'view', admin: 'view', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  admin_users: { label: '사용자 관리', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  ops: { label: '운영 상태(조직·감사·공휴일·결재선)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  usage: { label: '사용량·요금제', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V13 4번: 자료실 3단계 — 보기 / 올리기·수정 / 삭제 (폴더별 권한은 library_folder_perms, 상속)
   library: { label: '자료실', levels: ['none', 'view', 'edit', 'delete'], defaults: { owner: 'delete', admin: 'delete', dept_lead: 'edit', site_manager: 'edit', staff: 'edit' } },
   assistant: { label: 'AI 비서', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
+  // V14 6번: 회사 AI 사용 내역(누가·언제·무슨 질문·비용) 조회 / 편집(삭제·보관 기간·한도) — 기본 대표만
+  ai_logs: { label: 'AI 사용 내역', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V14 1번 담당자 재배정: 아무 업무나 / 지시자는 자기가 지시한 업무만 / 담당자 본인의 넘기기(지시자 승인)
   reassign: { label: '업무 담당자 재배정', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   reassign_requester: { label: '지시자는 자기 업무 재배정 가능', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
   reassign_handoff: { label: '담당자가 다른 사람에게 넘기기(지시자 승인)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
 } as const;
 export type MenuKey = keyof typeof MENUS;
-export const LEVEL_LABEL: Record<string, string> = { none: '안 보임', view: '보기', edit: '보기·입력', use: '사용', delete: '삭제까지' };
+export const LEVEL_LABEL: Record<string, string> = { none: '끔', view: '조회', edit: '조회·편집', use: '사용', delete: '삭제까지' };
 /** 메뉴별 단계 이름 (자료실은 "올리기·수정") */
-export const levelLabel = (menu: string, lv: string) => (menu === 'library' && lv === 'edit' ? '올리기·수정' : menu.startsWith('reassign') ? (lv === 'use' ? '켬' : '끔') : LEVEL_LABEL[lv] ?? lv);
+export const levelLabel = (menu: string, lv: string) => (menu === 'library' && lv === 'edit' ? '올리기·수정' : menu.startsWith('reassign') ? (lv === 'use' ? '켬' : '끔') : menu === 'assistant' ? (lv === 'use' ? '사용' : '끔') : LEVEL_LABEL[lv] ?? lv);
 export const RANK: Record<string, number> = { none: 0, view: 1, use: 1, edit: 2, delete: 3 };
 const topLevel = (menu: MenuKey) => MENUS[menu].levels[MENUS[menu].levels.length - 1] as string;
 const ROLES: Role[] = ['owner', 'admin', 'dept_lead', 'site_manager', 'staff'];
@@ -39,6 +45,11 @@ export async function menuLevels(u: SessionUser) {
   const out: Record<string, string> = {};
   for (const m of Object.keys(MENUS) as MenuKey[]) out[m] = await menuLevel(u, m);
   return out;
+}
+/** 여러 메뉴 중 하나라도 need 이상이면 통과 (예: 조직 목록은 사용자 관리·운영 상태 어느 쪽이든 조회) */
+export async function requireAnyMenu(u: SessionUser, menus: MenuKey[], need: 'view' | 'edit' = 'view', sql: Sql = db()) {
+  for (const m of menus) if (RANK[await menuLevel(u, m, sql)] >= RANK[need]) return;
+  return requireMenu(u, menus[0], need, sql);
 }
 /** need 보다 낮으면: 메뉴 자체가 안 보이는 사람은 404(있는 줄도 모르게), 보기만 되는 사람의 쓰기는 403 */
 export async function requireMenu(u: SessionUser, menu: MenuKey, need: 'view' | 'edit' | 'use' | 'delete' = 'view', sql: Sql = db()) {

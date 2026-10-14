@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
-import { requireAdmin, ensurePersonalCalendar, accessibleUnitIds, isAdmin } from './access';
+import { ensurePersonalCalendar, accessibleUnitIds, isAdmin } from './access';
 import { revokeAllSessions } from './auth';
 import { newToken, sha256, hashPassword } from './crypto';
 import { badRequest, conflict, forbidden, notFound } from './errors';
@@ -22,7 +22,7 @@ function assertCanGrant(actor: SessionUser, role: Role) {
 }
 
 export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInput>, ip: string | null) {
-  requireAdmin(actor);
+  await (await import('./menuPerms')).requireMenu(actor, 'admin_users', 'edit');
   assertCanGrant(actor, i.role);
   const sql = db();
   if (i.role !== 'owner' && i.role !== 'admin' && i.orgUnitIds.length === 0) throw badRequest('소속 조직을 1개 이상 선택하세요');
@@ -95,7 +95,7 @@ export const userPatch = z.object({
 });
 
 export async function updateUser(actor: SessionUser, id: string, p: z.infer<typeof userPatch>, ip: string | null) {
-  requireAdmin(actor);
+  await (await import('./menuPerms')).requireMenu(actor, 'admin_users', 'edit');
   const sql = db();
   return sql.begin(async (tx) => {
     const [cur] = await tx<{ id: string; role: Role; status: string; email: string }[]>`select id, role, status, email from users where id = ${id} for update`;
@@ -140,7 +140,7 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
 }
 
 export async function createPasswordReset(actor: SessionUser, userId: string, ip: string | null) {
-  requireAdmin(actor);
+  await (await import('./menuPerms')).requireMenu(actor, 'admin_users', 'edit');
   const sql = db();
   const [u] = await sql<{ status: string; role: Role }[]>`select status, role from users where id = ${userId}`;
   if (!u || u.status !== 'active') throw badRequest('활성 사용자만 비밀번호를 재설정할 수 있습니다');
@@ -177,7 +177,7 @@ export const orgUnitInput = z.object({
 });
 
 export async function createOrgUnit(actor: SessionUser, i: z.infer<typeof orgUnitInput>, ip: string | null) {
-  requireAdmin(actor);
+  await (await import('./menuPerms')).requireMenu(actor, 'ops', 'edit');
   const sql = db();
   if (i.isDemo && i.parentId) throw badRequest('앱 심사용 격리 조직은 최상위(상위 조직 없음)로만 만들 수 있습니다');
   return sql.begin(async (tx) => {
@@ -192,7 +192,7 @@ export async function createOrgUnit(actor: SessionUser, i: z.infer<typeof orgUni
 }
 
 export async function updateOrgUnit(actor: SessionUser, id: string, i: Partial<z.infer<typeof orgUnitInput>>, ip: string | null) {
-  requireAdmin(actor);
+  await (await import('./menuPerms')).requireMenu(actor, 'ops', 'edit');
   const sql = db();
   if (i.parentId === id) throw badRequest('자기 자신을 상위 조직으로 지정할 수 없습니다');
   if (i.parentId) {

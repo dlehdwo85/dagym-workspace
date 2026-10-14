@@ -36,7 +36,10 @@ const ADMIN_MENU: NavItem[] = [
   { href: '/admin/users', label: '사용자 관리', icon: Users },
   { href: '/admin/ops', label: '운영 상태', icon: Activity },
   { href: '/admin/usage', label: '사용량·요금제', icon: Gauge },
+  { href: '/admin/ai-logs', label: 'AI 사용 내역', icon: Sparkles },
 ];
+/** V14 7번: 관리 메뉴 ↔ 메뉴 권한 키 (꺼진 메뉴는 숨김) */
+const ADMIN_KEY: Record<string, string> = { '/reports': 'team_reports', '/revenue': 'revenue', '/admin/users': 'admin_users', '/admin/ops': 'ops', '/admin/usage': 'usage', '/admin/ai-logs': 'ai_logs' };
 const SHORTCUTS: [string, string][] = [
   ['Ctrl K', '검색·명령 열기'], ['N', '새 업무 만들기'], ['?', '단축키 도움말'], ['Esc', '패널·창 닫기'],
   ['G 다음 H', '홈'], ['G 다음 M', '업무'], ['G 다음 C', '캘린더'],
@@ -73,7 +76,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // V9: 자료실(체험 계정 제외) · AI 비서(플랫폼 API 키가 있을 때만)
   // V13 메뉴 권한: 매출·주간 보고는 권한 있는 사람만(관리 묶음이 없는 사람도 매출 권한이 있으면 주 메뉴에)
   const menus = session.menus ?? {};
-  const adminMenu = ADMIN_MENU.filter((n) => (n.href !== '/revenue' || (menus.revenue ?? 'none') !== 'none') && (n.href !== '/reports' || (menus.team_reports ?? 'none') !== 'none'));
+  const adminMenu = ADMIN_MENU.filter((n) => (menus[ADMIN_KEY[n.href]] ?? 'none') !== 'none');
   const nav: NavItem[] = [...NAV, ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
 
@@ -186,7 +189,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 )}
               </div>
             ))}
-            {admin && (
+            {(adminMenu.length > 0 || session.user.platformAdmin) && (
               <div className="pt-3" data-testid="nav-admin">
                 <div className="my-2 border-t border-white/10" />
                 {!collapsed && <button onClick={() => setAdminOpen((v) => { writePref('wos_nav_admin', v ? '0' : '1'); return !v; })} aria-expanded={adminOpen}

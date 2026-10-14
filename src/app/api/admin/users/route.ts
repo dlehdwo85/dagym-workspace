@@ -1,10 +1,10 @@
 import { handler, body, clientIp } from '@/lib/api';
 import { db } from '@/lib/db';
-import { requireAdmin } from '@/lib/access';
+import { requireMenu } from '@/lib/menuPerms';
 import { inviteInput, inviteUser } from '@/lib/admin';
 
 export const GET = handler(async ({ user }) => {
-  requireAdmin(user);
+  await requireMenu(user, 'admin_users', 'view');
   const sql = db();
   const users = await sql`
     select u.id, u.email, u.name, u.title, u.role, u.status, u.last_login_at, u.created_at, u.is_demo,

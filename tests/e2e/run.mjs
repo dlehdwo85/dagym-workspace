@@ -1672,6 +1672,30 @@ await step('V13 10번 메신저: 1:1 대화 → 상대 화면에 실시간 도�
   assert.equal(await dlg.getByPlaceholder('무엇을 해야 하나요?').inputValue(), '내일 오전에 현장 사진 부탁해요', 'AI 꺼짐·실패 시 첫 줄이 제목');
   await c.close();
 });
+await step('V14 2·6번: AI 비서 대화가 남아 다시 열면 이어짐, 직원 고지 상시 / 3번 자료실 정리 상태 표시·다시 정리', async () => {
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: '이번 주 마감은 2건입니다.' }], stop_reason: 'end_turn' }] }) });
+  await owner.goto(BASE + '/assistant');
+  await owner.getByTestId('ai-notice').getByText(/관리자가 사용 내역을 볼 수 있습니다/).waitFor();
+  await owner.getByLabel('AI 에게 요청').fill('이번 주 내 마감 업무 정리해줘');
+  await owner.getByLabel('AI 에게 요청').press('Enter');
+  await owner.getByTestId('ai-chat').getByText('이번 주 마감은 2건입니다.').waitFor();
+  await owner.waitForURL(/thread=/);
+  await owner.reload();
+  await owner.getByTestId('ai-chat').getByText('이번 주 마감은 2건입니다.').waitFor();
+  await owner.getByTestId('ai-threads').getByText('이번 주 내 마감 업무 정리해줘').first().waitFor();
+  await owner.getByTestId('ai-new-thread').click();
+  await owner.getByText('이렇게 말해 보세요').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/65-ai-threads.png`, fullPage: true });
+  // 자료실: AI 응답이 해석 안 되면 "정리 못 함 — 이유 · 다시 정리" → 다시 정리하면 "AI 정리됨"
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [{ content: [{ type: 'text', text: '모르겠어요' }], stop_reason: 'end_turn' }] }) });
+  await owner.goto(BASE + '/library');
+  await owner.getByTestId('library-file').setInputFiles([{ name: 'V14 단가표.txt', mimeType: 'text/plain', buffer: Buffer.from('PT 10회 550000') }]);
+  const row = owner.getByTestId('library-list').locator('li').filter({ hasText: 'V14 단가표' });
+  await row.getByTestId('organize-failed').waitFor();
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ folder: '영업/단가', tags: ['단가표', 'PT'], title: 'V14 단가표', summary: 'PT 단가', confidence: 0.9 }) }], stop_reason: 'end_turn' }] }) });
+  await row.getByTestId('organize-retry').click();
+  await owner.getByTestId('library-list').locator('li').filter({ hasText: 'V14 단가표' }).getByTestId('organize-done').getByText(/영업\/단가 · #단가표/).waitFor();
+});
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
   const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');

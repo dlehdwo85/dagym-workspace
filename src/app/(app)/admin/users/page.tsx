@@ -42,7 +42,8 @@ export default function UsersPage() {
 }
 
 function Users() {
-  const { user, dir } = useSession();
+  const { user, dir, menus } = useSession();
+  const canEdit = (menus?.admin_users ?? 'none') === 'edit'; // V14 7번: 조회만이면 읽기 전용
   const { data, error, loading, reload } = useApi<{ users: any[] }>('/api/admin/users');
   const [inv, setInv] = useState<any>(null);
   const [link, setLink] = useState('');
@@ -82,7 +83,7 @@ function Users() {
         <h1 className="text-lg font-bold">사용자·권한</h1>
         <span className="flex flex-wrap gap-2">
           {user.role === 'owner' && <Button variant="secondary" onClick={() => setReview({ email: '', name: '앱 심사 담당자' })} data-testid="review-account">심사용 체험 계정</Button>}
-          <Button onClick={() => setInv({ email: '', name: '', role: 'staff', orgUnitIds: [] })}>+ 직원 초대</Button>
+          {canEdit ? <Button onClick={() => setInv({ email: '', name: '', role: 'staff', orgUnitIds: [] })}>+ 직원 초대</Button> : <span className="text-xs text-ink-3" data-testid="users-readonly">조회 권한 — 바꾸려면 대표에게 &ldquo;편집&rdquo;을 요청하세요</span>}
         </span>
       </div>
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : (
@@ -96,11 +97,11 @@ function Users() {
                 <td className="p-2 text-xs">{u.org_unit_ids.map(unitName).join(', ') || '-'}</td>
                 <td className="p-2">{STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}</td>
                 <td className="p-2 text-xs">{u.last_login_at ? fmtDateTime(u.last_login_at) : '-'}</td>
-                <td className="p-2 text-right whitespace-nowrap">
+                <td className="p-2 text-right whitespace-nowrap">{canEdit && <>
                   <Button size="sm" variant="ghost" onClick={() => setEdit({ ...u })}>편집</Button>
                   {u.status === 'active' && <Button size="sm" variant="ghost" onClick={() => reset(u)}>비번 재설정 링크</Button>}
                   {u.status === 'invited' && <Button size="sm" variant="ghost" onClick={() => reinvite(u)}>초대 링크 재발급</Button>}
-                </td>
+                </>}</td>
               </tr>))}
             </tbody>
           </table>

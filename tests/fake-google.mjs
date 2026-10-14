@@ -19,6 +19,7 @@ export function startFakeGoogle(port = 3199) {
     openai: [],
     anthropic: [], // 받은 /v1/messages 요청
     anthropicQueue: [], // 다음 응답들 (비면 짧은 글 답)
+    classified: [], classifyQueue: [], // V14 5번 업무 무관 질문 분류
     fcmUnregistered: new Set(),
     webpush: [],
     webpushGone: new Set(),
@@ -52,6 +53,13 @@ export function startFakeGoogle(port = 3199) {
     }
     // ---- 가짜 Anthropic Messages API (V9 AI 비서): 요청을 기록하고, 시험이 넣어 둔 응답을 차례로 돌려준다 ----
     if (p === '/v1/messages' && req.method === 'POST') {
+      // V14 5번: 업무 무관 질문 분류(가벼운 모델)는 시험 응답 줄을 쓰지 않고 따로 답한다(기본: 업무 맞음)
+      if (String(body.system ?? '').startsWith('WORKIN_TOPIC_CLASSIFIER')) {
+        state.classified.push(body.messages[0].content);
+        const work = state.classifyQueue.length ? state.classifyQueue.shift() : true;
+        return json(res, 200, { id: `msg_c${state.classified.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_reason: 'end_turn',
+          usage: { input_tokens: 50, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, content: [{ type: 'text', text: JSON.stringify({ work }) }] });
+      }
       state.anthropic.push({ key: req.headers['x-api-key'], beta: req.headers['anthropic-beta'] ?? null, body });
       let next = state.anthropicQueue.shift();
       // 매출 AI 분석(구조화 출력)인데 넣어 둔 응답이 없으면: 입력의 첫 현장·월로 정해진 JSON (예전 가짜 OpenAI 와 같은 모양)
@@ -74,6 +82,8 @@ export function startFakeGoogle(port = 3199) {
       if ('expireSyncToken' in body) state.expireSyncToken = body.expireSyncToken;
       if (body.fcmUnregister) state.fcmUnregistered.add(body.fcmUnregister);
       if (body.anthropicQueue) state.anthropicQueue.push(...body.anthropicQueue);
+      if (body.classifyQueue) state.classifyQueue.push(...body.classifyQueue);
+      if (body.anthropicReset) { state.anthropicQueue.length = 0; state.classifyQueue.length = 0; }
       if (body.webpushGone) state.webpushGone.add(body.webpushGone);
       if (body.googleEdit) { // Google 쪽에서 사용자가 직접 수정
         const e = evs(body.googleEdit.cal)[body.googleEdit.id];
