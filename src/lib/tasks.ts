@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
 import { accessibleUnitIds, assertUnitAccess, loadTaskForUser, taskVisibleSql, atLeast } from './access';
-import { badRequest, conflict, forbidden, notFound } from './errors';
+import { HttpError, badRequest, conflict, forbidden, notFound } from './errors';
 import { activity } from './log';
 import { notify } from './notifications';
 import { nextDate, normalizeRule } from './recurrence';
@@ -208,7 +208,13 @@ export async function getTaskDetail(u: SessionUser, id: string) {
   ]);
   const pending = t.status === 'review' ? approvals.find((a) => a.status === 'pending' && a.round === approvals[0]?.round) : null;
   const canDecide = pending ? (await stepApprovers(sql, t.org_unit_id, pending)).includes(u.id) : false;
-  return { task: t, perms: { ...perms, decide: canDecide }, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
+  const { menuLevel } = await import('./menuPerms');
+  const reassign = await canReassign(u, t, sql);
+  const handoff = !reassign && t.assignee_id === u.id && (await menuLevel(u, 'reassign_handoff', sql)) === 'use';
+  const [pendingHandoff] = await sql`select h.id, h.from_user, h.to_user, h.note, h.created_at, fu.name as from_name, tu.name as to_name
+    from task_handoffs h join users fu on fu.id = h.from_user join users tu on tu.id = h.to_user where h.task_id = ${id} and h.status = 'pending' order by h.created_at desc limit 1`;
+  const canDecideHandoff = !!pendingHandoff && ((t.requested_by ?? t.created_by) === u.id || reassign);
+  return { task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -397,6 +403,14 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     delete changes.sortOrder; // 순서 변경은 이력에 남기지 않는다
     // 담당자가 바뀌면 새 담당자의 '확인' 전 상태로 (본인에게 배정하면 확인 처리)
     if ('assignee_id' in set) set.assignee_ack_at = set.assignee_id === u.id ? new Date() : null;
+    // V14 1번: 이미 담당자가 있는 업무의 담당자를 바꾸는 것(재배정)은 메뉴 권한으로
+    const reassigned = 'assignee_id' in set && !!cur.assignee_id && set.assignee_id !== cur.assignee_id;
+    if (reassigned && !(await canReassign(u, cur, tx))) {
+      const { menuLevel } = await import('./menuPerms');
+      if (cur.assignee_id === u.id && (await menuLevel(u, 'reassign_handoff', tx)) === 'use')
+        throw new HttpError(403, 'handoff_required', '다른 사람에게 넘기려면 지시자 승인이 필요합니다 — "넘기기 요청"을 보내 주세요');
+      throw forbidden('담당자를 바꿀 권한이 없습니다 — 대표가 메뉴 권한에서 열 수 있습니다');
+    }
     if ('approval_required' in set && !perms.approve) throw forbidden('검토 필요 여부는 관리자만 바꿀 수 있습니다');
     const start = (set.start_date ?? cur.start_date) as string | null;
     const due = (set.due_date ?? cur.due_date) as string | null;
@@ -487,6 +501,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       for (const d of new Set(i.dependsOn)) await tx`insert into task_dependencies (task_id, depends_on_id) values (${id}, ${d})`;
       changes.dependsOn = { from: null, to: i.dependsOn };
     }
+    if (reassigned && changes.assigneeId) { // 이력: "재배정: 김민수 → 김소담 (바꾼 사람)"
+      await activity(tx, 'task', id, u.id, 'reassigned', { assigneeId: changes.assigneeId });
+      delete changes.assigneeId;
+    }
     if (Object.keys(changes).length) {
       await activity(tx, 'task', id, u.id, statusEvent ?? 'updated', { ...changes, ...(i.reviewNote ? { note: i.reviewNote } : {}) });
     }
@@ -497,6 +515,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         body: `${u.name}님이 업무를 배정했습니다`, link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id,
         dedupeKey: `assign:${id}:${set.assignee_id}:${upd.version}` });
     }
+    if (reassigned) await notifyReassign(tx, u, { id, title, from: cur.assignee_id as string, to: (set.assignee_id as string | null) ?? null, requestedBy: cur.requested_by as string | null, version: upd.version });
     if ('due_date' in set || 'due_time' in set) {
       // V5 "업무에도 추가"로 연결된 일정도 같은 날짜·시각으로
       const { syncEventsFromTask } = await import('./eventtasks');
@@ -805,4 +824,67 @@ export async function reorderTasks(u: SessionUser, ids: string[]) {
     await sql`update tasks t set sort_order = v.ord from (select unnest(${rows.map((r) => r.id)}::uuid[]) as id, unnest(${rows.map((r) => r.i)}::float8[]) as ord) v where t.id = v.id`;
   }
   return { updated: rows.length };
+}
+
+// ---------------- V14 1번 담당자 재배정 권한 ----------------
+/** 재배정 가능: 메뉴 권한 "업무 담당자 재배정" 또는 (내가 지시자 + "지시자는 자기 업무 재배정 가능") */
+export async function canReassign(u: SessionUser, t: { requested_by?: string | null }, sql: Sql = db()) {
+  const { menuLevel } = await import('./menuPerms');
+  if ((await menuLevel(u, 'reassign', sql)) === 'use') return true;
+  return !!t.requested_by && t.requested_by === u.id && (await menuLevel(u, 'reassign_requester', sql)) === 'use';
+}
+async function notifyReassign(tx: Sql, u: SessionUser, p: { id: string; title: string; from: string; to: string | null; requestedBy: string | null; version: number }) {
+  const names = await tx<{ id: string; name: string }[]>`select id, name from users where id = any(${[p.from, p.to].filter(Boolean) as string[]}::uuid[])`;
+  const nm = (id: string | null) => (id ? names.find((x) => x.id === id)?.name ?? '' : '없음');
+  const body = `${nm(p.from)} → ${nm(p.to)} (${u.name})`;
+  await notify(tx, { userIds: [p.from, p.requestedBy], type: 'task_assigned', title: `담당자 변경: ${p.title}`, body, link: `/tasks/${p.id}`,
+    entityType: 'task', entityId: p.id, actorId: u.id, dedupeKey: `reassign:${p.id}:${p.version}` });
+}
+export const handoffInput = z.object({ toUserId: zUuid, note: z.string().trim().max(500).optional() });
+/** 담당자 본인 → 지시자에게 "넘기기 요청" */
+export async function requestHandoff(u: SessionUser, taskId: string, i: z.infer<typeof handoffInput>) {
+  const sql = db();
+  const { task } = await loadTaskForUser(u, taskId, sql);
+  const [cur] = await sql<{ title: string; assignee_id: string | null; requested_by: string | null; created_by: string; org_unit_id: string }[]>`
+    select title, assignee_id, requested_by, created_by, org_unit_id from tasks where id = ${task.id}`;
+  if (cur.assignee_id !== u.id) throw forbidden('담당자 본인만 넘기기를 요청할 수 있습니다');
+  const { menuLevel } = await import('./menuPerms');
+  if ((await menuLevel(u, 'reassign_handoff', sql)) !== 'use') throw forbidden('넘기기 기능이 꺼져 있습니다 — 대표가 메뉴 권한에서 켤 수 있습니다');
+  if (i.toUserId === u.id) throw badRequest('다른 사람을 고르세요');
+  await validateRefs(sql, u, { assigneeId: i.toUserId } as TaskInput, cur.org_unit_id);
+  await sql`update task_handoffs set status = 'cancelled' where task_id = ${task.id} and status = 'pending'`;
+  const [h] = await sql<{ id: string }[]>`insert into task_handoffs (task_id, from_user, to_user, note) values (${task.id}, ${u.id}, ${i.toUserId}, ${i.note ?? null}) returning id`;
+  const [to] = await sql<{ name: string }[]>`select name from users where id = ${i.toUserId}`;
+  await activity(sql, 'task', task.id, u.id, 'handoff_requested', { to: to?.name, note: i.note ?? null });
+  await notify(sql, { userIds: [cur.requested_by ?? cur.created_by], type: 'review_requested', title: `담당 넘기기 요청: ${cur.title}`,
+    body: `${u.name} → ${to?.name ?? ''}${i.note ? ` · ${i.note}` : ''}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `handoff:${h.id}` });
+  return { id: h.id };
+}
+/** 지시자(또는 재배정 권한자)가 넘기기 요청을 승인·거절 */
+export async function decideHandoff(u: SessionUser, taskId: string, handoffId: string, approve: boolean) {
+  const sql = db();
+  const { task } = await loadTaskForUser(u, taskId, sql);
+  const [h] = await sql<{ id: string; from_user: string; to_user: string; status: string }[]>`select id, from_user, to_user, status from task_handoffs where id = ${handoffId} and task_id = ${task.id}`;
+  if (!h) throw notFound('요청이 없습니다');
+  if (h.status !== 'pending') throw conflict('이미 처리된 요청입니다');
+  const [cur] = await sql<{ title: string; assignee_id: string | null; requested_by: string | null; created_by: string; version: number }[]>`
+    select title, assignee_id, requested_by, created_by, version from tasks where id = ${task.id}`;
+  const decider = (cur.requested_by ?? cur.created_by) === u.id || (await canReassign(u, cur, sql));
+  if (!decider) throw forbidden('지시자만 승인할 수 있습니다');
+  return sql.begin(async (tx) => {
+    await tx`update task_handoffs set status = ${approve ? 'approved' : 'rejected'}, decided_by = ${u.id}, decided_at = now() where id = ${h.id}`;
+    if (!approve) {
+      await activity(tx as unknown as Sql, 'task', task.id, u.id, 'handoff_rejected', {});
+      await notify(tx as unknown as Sql, { userIds: [h.from_user], type: 'review_result', title: `넘기기 요청 거절: ${cur.title}`, body: `${u.name}님이 거절했습니다`,
+        link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `handoff_done:${h.id}` });
+      return { ok: true, approved: false };
+    }
+    if (cur.assignee_id !== h.from_user) throw conflict('그사이 담당자가 바뀌었습니다');
+    const [upd] = await tx<{ version: number }[]>`update tasks set assignee_id = ${h.to_user}, assignee_ack_at = null, updated_at = now(), version = version + 1 where id = ${task.id} returning version`;
+    await activity(tx as unknown as Sql, 'task', task.id, u.id, 'reassigned', { assigneeId: { from: h.from_user, to: h.to_user }, handoff: true });
+    await notify(tx as unknown as Sql, { userIds: [h.to_user], type: 'task_assigned', title: `업무 배정: ${cur.title}`, body: `${u.name}님이 넘기기 요청을 승인했습니다`,
+      link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `assign:${task.id}:${h.to_user}:${upd.version}` });
+    await notifyReassign(tx as unknown as Sql, u, { id: task.id, title: cur.title, from: h.from_user, to: h.to_user, requestedBy: cur.requested_by, version: upd.version });
+    return { ok: true, approved: true };
+  });
 }

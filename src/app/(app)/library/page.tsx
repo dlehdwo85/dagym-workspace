@@ -10,7 +10,7 @@ import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDat
 
 type F = { id: string; folder: string; title: string; file_name: string; mime_type: string; size_bytes: number; tags: string[]; description: string | null;
   created_at: string; created_by: string; created_by_name: string; has_text: boolean; snippet: string | null;
-  organized_by: 'ai' | 'rule' | null; ai_confidence: number | null; needs_review: boolean; can_undo: boolean; level: string };
+  organized_by: 'ai' | 'rule' | null; ai_confidence: number | null; needs_review: boolean; can_undo: boolean; level: string; organize_status: string | null; organize_error: string | null };
 const RANK: Record<string, number> = { none: 0, view: 1, edit: 2, delete: 3 };
 const fmtSize = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n >= 1024 ? `${Math.round(n / 1024)}KB` : `${n}B`);
 const isImg = (f: F) => /^image\/(png|jpe?g|gif|webp)$/.test(f.mime_type);
@@ -58,7 +58,8 @@ export default function LibraryPage() {
         await putFile(r.upload, file, (pct) => upd(n, { pct }));
         setBusy(`${file.name} 정리하는 중…`);
         const c = await api(`/api/library/${r.id}/complete`, { body: {} });
-        if (c.organized) toast.ok(`${c.organized.by === 'ai' ? 'AI 정리' : '규칙 정리'}: ${c.organized.folder || '최상위'} · ${c.organized.title}`);
+        if (c.organized?.by === 'ai') toast.ok(`AI 정리됨: ${c.organized.folder || '최상위'} · ${(c.organized.tags ?? []).slice(0, 3).map((t: string) => '#' + t).join(' ')}`);
+        else if (c.organized) toast.error(`AI 정리 못 함 — ${c.organized.error ?? '이유 모름'} (파일명 규칙으로 정리)`);
         upd(n, { pct: 100 }); ok++;
       } catch (e: any) { upd(n, { error: e.message }); toast.error(`${file.name}: ${e.message}`); }
     }
@@ -82,13 +83,27 @@ export default function LibraryPage() {
   async function organize(f: F, action: 'undo' | 'redo') {
     try { await api(`/api/library/${f.id}/organize`, { body: { action } }); reload(); toast.ok(action === 'undo' ? '정리 전으로 되돌렸습니다' : '다시 정리했습니다'); } catch (e: any) { toast.error(e.message); }
   }
+  const [allBusy, setAllBusy] = useState('');
+  async function organizeAll() {
+    if (!confirm('아직 정리하지 않았거나 정리에 실패한 파일을 AI 로 정리할까요? (파일마다 AI 요청 1회)')) return;
+    let total = 0, ai = 0;
+    try {
+      for (let i = 0; i < 50; i++) {
+        setAllBusy(`정리 중… ${total}개`);
+        const r = await api('/api/library/organize-all', { body: {} });
+        total += r.done; ai += r.ai;
+        if (!r.done || !r.left) break;
+      }
+      toast.ok(`${total}개 정리 (AI ${ai}개)`);
+    } catch (e: any) { toast.error(e.message); } finally { setAllBusy(''); reload(); }
+  }
   const folders = data?.folders ?? [];
   const top = [...new Set(folders.map((f) => f.folder).filter(Boolean))];
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <PageHeader title="자료실" icon={Library} sub="로고·회사 소개서·단가표·보고서를 한곳에. 업무에 바로 첨부하고, AI 비서가 찾아 씁니다."
-        actions={canUpload && <Button onClick={() => fileRef.current?.click()} disabled={!!busy} data-testid="library-upload">{busy ? <Loader2 className="animate-spin" /> : <Upload />}올리기</Button>} />
+        actions={canUpload && <>{admin && <Button variant="secondary" onClick={organizeAll} disabled={!!allBusy} data-testid="library-organize-all">{allBusy ? <><Loader2 className="animate-spin" />{allBusy}</> : <><Sparkles />전체 정리</>}</Button>}<Button onClick={() => fileRef.current?.click()} disabled={!!busy} data-testid="library-upload">{busy ? <Loader2 className="animate-spin" /> : <Upload />}올리기</Button></>} />
       <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="library-file" />
       {busy && <p className="text-sm text-ink-2">{busy}</p>}
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -141,6 +156,15 @@ export default function LibraryPage() {
                   {fmtSize(Number(f.size_bytes))} · {f.created_by_name} · {fmtDateTime(f.created_at)}
                 </div>
                 {f.snippet && <div className="mt-0.5 line-clamp-1 text-xs text-ink-2">…{f.snippet}…</div>}
+                {/* V14 3번: 정리 상태 — 중 / 됨(폴더·태그) / 실패(이유 + 다시 정리) */}
+                {f.organize_status === 'pending' && <div className="mt-0.5 flex items-center gap-1 text-xs text-violet-700" data-testid="organize-pending"><Loader2 className="size-3 animate-spin" />AI 정리 중…</div>}
+                {f.organize_status === 'done' && f.organized_by === 'ai' && <div className="mt-0.5 truncate text-xs text-violet-700" data-testid="organize-done">AI 정리됨: {f.folder || '최상위'}{f.tags.length > 0 && ` · ${f.tags.slice(0, 4).map((t) => '#' + t).join(' ')}`}</div>}
+                {f.organize_status === 'failed' && (
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-amber-800" data-testid="organize-failed">
+                    <span className="min-w-0 truncate">AI 정리 못 함 — {f.organize_error ?? '이유 모름'}</span>
+                    {(f.created_by === user.id || admin) && <button className="shrink-0 font-semibold underline" onClick={() => organize(f, 'redo')} data-testid="organize-retry">다시 정리</button>}
+                  </div>
+                )}
               </div>
               <a href={`/api/library/${f.id}/download`} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label={`${f.title} 내려받기`}><Download className="size-4" /></a>
               {f.can_undo && (f.created_by === user.id || admin) && <button onClick={() => organize(f, 'undo')} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label={`${f.title} 정리 되돌리기`} title="AI 정리 되돌리기"><Undo2 className="size-4" /></button>}

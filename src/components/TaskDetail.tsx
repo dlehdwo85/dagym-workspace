@@ -13,7 +13,7 @@ import {
   Sparkles,
   MessageCircle,
 } from 'lucide-react';
-import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
+import { Avatar, Button, personLabel, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, uploadTaskFiles } from '@/components/Attachments';
 import { DropZone, UploadProgress } from '@/components/upload';
@@ -26,7 +26,7 @@ import { encodeMentions } from '@/lib/mentions';
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
   reopened: '다시 열기', deleted: '삭제', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
-  checklist_done: '체크리스트 완료', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
+  checklist_done: '체크리스트 완료', reassigned: '재배정', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
   file_attached: '파일 첨부', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
 const FIELD_LABEL: Record<string, string> = {
@@ -427,10 +427,30 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <ChevronRight className={cx('size-4 shrink-0 transition-transform', details && 'rotate-90')} />
           </button>
           <div className={cx(!details && 'hidden', wide && 'lg:block')}>
+        {data.handoff && (
+          <section className="rounded-card border border-sky-200 bg-sky-50 p-3 text-sm" data-testid="handoff-pending">
+            <p className="font-semibold text-sky-900">담당 넘기기 요청: {data.handoff.from_name} → {data.handoff.to_name}</p>
+            {data.handoff.note && <p className="mt-0.5 text-sky-900">“{data.handoff.note}”</p>}
+            {data.handoff.canDecide ? (
+              <div className="mt-2 flex gap-2">
+                <Button size="sm" onClick={async () => { try { await api(`/api/tasks/${id}/handoff/${data.handoff.id}`, { body: { approve: true } }); toast.ok('넘기기를 승인했습니다'); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } }}>승인</Button>
+                <Button size="sm" variant="secondary" onClick={async () => { try { await api(`/api/tasks/${id}/handoff/${data.handoff.id}`, { body: { approve: false } }); reload(); } catch (e: any) { toast.error(e.message); } }}>거절</Button>
+              </div>
+            ) : <p className="mt-1 text-xs text-sky-800">지시자의 승인을 기다리는 중입니다</p>}
+          </section>
+        )}
         {/* 속성 */}
           <section className={cx('grid grid-cols-1 border-y border-line', wide && 'lg:border-y-0')} aria-label="업무 속성">
             <Prop icon={UserRound} label="담당자">
-              <span className="flex pl-2 items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} /><UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => { patch({ assigneeId: v }); if (v && v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }} /></span>
+              <span className="flex pl-2 items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} />{/* V14 1번: 재배정 권한이 없으면 잠금, 담당자 본인 + 넘기기 켜짐이면 "넘기기 요청" */}
+              {perms.reassign ? <UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => { patch({ assigneeId: v }); if (v && v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }} />
+                : perms.handoff ? <UserSelect className={ghostCls} value={t.assignee_id} ariaLabel="다른 사람에게 넘기기" onChange={async (v) => {
+                    if (!v || v === t.assignee_id) return;
+                    const note = prompt(`${dir.users.find((x) => x.id === v)?.name ?? ''}님에게 넘기기를 지시자에게 요청할까요? (사유, 선택)`);
+                    if (note === null) return;
+                    try { await api(`/api/tasks/${id}/handoff`, { body: { toUserId: v, note: note || undefined } }); toast.ok('지시자에게 넘기기 요청을 보냈습니다'); reload(); } catch (e: any) { toast.error(e.message); }
+                  }} />
+                : <span className="px-2 text-sm" title="담당자를 바꿀 권한이 없습니다" data-testid="assignee-locked">{t.assignee_name ? personLabel(dir.users.find((x) => x.id === t.assignee_id) ?? { name: t.assignee_name }) : '담당자 없음'}</span>}</span>
             </Prop>
             <Prop icon={Megaphone} label="지시자">
               <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>

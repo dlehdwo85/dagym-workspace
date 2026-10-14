@@ -37,7 +37,7 @@ export const libraryPatch = z.object({
 });
 
 const COLS = `f.id, f.folder, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
-  (f.text_content is not null) as has_text, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo`;
+  (f.text_content is not null) as has_text, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error`;
 
 // ---------------- V13 4번 폴더 권한 ----------------
 type FolderPerm = { folder: string; role: string; level: string };
@@ -152,7 +152,10 @@ export async function completeLibraryFile(u: SessionUser, id: string) {
   const text = await getObject(f.storage_key).then((b) => extractText(b, f.file_name, f.mime_type)).catch(() => null);
   await db()`update library_files set upload_status = 'ready', size_bytes = ${size}, text_content = ${text}, updated_at = now() where id = ${id}`;
   // V13 3번: 올리자마자 자동 정리(AI, 한도 소진·AI 꺼짐이면 파일명 규칙). 정리 실패는 올리기 성공에 영향 없음
-  const organized = f.source === 'revenue' || f.source === 'ai_attach' ? null : await organizeLibraryFile(u, id, { keepFolder: !!f.folder }).catch(() => null);
+  const organized = f.source === 'revenue' || f.source === 'ai_attach' ? null : await organizeLibraryFile(u, id, { keepFolder: !!f.folder }).catch(async (e: any) => {
+    await db()`update library_files set organize_status = 'failed', organize_error = ${String(e?.message ?? '정리 오류').slice(0, 200)} where id = ${id}`;
+    return { by: 'rule' as const, error: String(e?.message ?? '정리 오류') };
+  });
   return { ok: true, id, hasText: !!text, organized };
 }
 
@@ -225,28 +228,44 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   ]);
   let out: { folder: string; tags: string[]; title?: string; summary?: string; confidence: number } | null = null;
   let by: 'ai' | 'rule' = 'rule';
+  let reason: string | null = null; // V14 3번: AI 로 정리하지 못한 이유(화면에 표시)
+  await sql`update library_files set organize_status = 'pending', organize_error = null where id = ${id}`;
   const { aiEnabled, anthropicProvider, costUsd } = await import('./ai/provider');
-  const quotaOk = aiEnabled() && (await (await import('./plans')).assertAiRequest(u).then(() => true, () => false));
-  if (quotaOk) {
+  const quota = aiEnabled() ? await (await import('./plans')).assertAiRequest(u).then(() => null, (e: any) => e?.message ?? '이번 달 AI 한도를 모두 썼습니다') : '내장 AI 가 꺼져 있습니다(운영자 설정)';
+  if (quota) reason = quota;
+  else {
     const provider = anthropicProvider({ tier: 'fast' });
     const isImg = /^image\/(png|jpe?g|gif|webp)$/.test(f.mime_type) && Number(f.size_bytes) <= 3_500_000;
-    const img = isImg ? await getObject(f.storage_key).catch(() => null) : null;
+    const isPdf = f.mime_type === 'application/pdf' && !f.text_content && Number(f.size_bytes) <= 8_000_000;
+    const bin = isImg || isPdf ? await getObject(f.storage_key).catch(() => null) : null;
     const info = `파일명: ${f.file_name}\n종류: ${f.mime_type}\n지금 폴더: ${f.folder || '(없음)'}\n이미 있는 폴더: ${folders.map((x) => x.folder).join(', ') || '(없음)'}\n` +
       `회사가 고친 예시: ${rules.slice(0, 20).map((r) => `${r.file_name} → ${r.folder} [${r.tags.join(',')}]`).join(' / ') || '(없음)'}\n` +
       (f.text_content ? `본문 일부:\n${String(f.text_content).slice(0, 2500)}` : '(본문 글자 없음)');
     const schema = { type: 'object', additionalProperties: false, required: ['folder', 'tags', 'title', 'summary', 'confidence'], properties: {
       folder: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, title: { type: 'string' }, summary: { type: 'string' }, confidence: { type: 'number' } } };
+    const content = [
+      ...(bin && isImg ? [{ type: 'image', source: { type: 'base64', media_type: f.mime_type === 'image/jpg' ? 'image/jpeg' : f.mime_type, data: bin.toString('base64') } }] : []),
+      ...(bin && isPdf ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: bin.toString('base64') } }] : []),
+      { type: 'text', text: info }] as never;
+    const ask = (format: boolean) => provider.chat({ system: ORG_SYSTEM + (format ? '' : '\n반드시 {"folder","tags","title","summary","confidence"} JSON 하나만 답하세요.'), tools: [], ...(format ? { format: schema } : {}), messages: [{ role: 'user', content }] });
     try {
-      const r = await provider.chat({ system: ORG_SYSTEM, tools: [], format: schema, messages: [{ role: 'user', content: [
-        ...(img ? [{ type: 'image', source: { type: 'base64', media_type: f.mime_type === 'image/jpg' ? 'image/jpeg' : f.mime_type, data: img.toString('base64') } }] : []),
-        { type: 'text', text: info }] as never }] });
+      // 구조화 출력이 거절되면(400) 일반 답변 + JSON 추출로 한 번 더
+      const r = await ask(true).catch((e: any) => (e?.status === 400 ? ask(false) : Promise.reject(e)));
       await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
         values (${tenantOf(u)}, ${u.id}, ${crypto.randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens},
           ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, r.usage)}, 'library_organize')`;
-      const j = JSON.parse(r.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(''));
+      const text = r.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      const m = /\{[\s\S]*\}/.exec(text);
+      if (!m) throw new Error('AI 답을 해석하지 못했습니다');
+      const j = JSON.parse(m[0]);
       out = { folder: String(j.folder ?? ''), tags: (Array.isArray(j.tags) ? j.tags : []).map(String), title: String(j.title ?? ''), summary: String(j.summary ?? ''), confidence: Number(j.confidence) || 0 };
       by = 'ai';
-    } catch { out = null; }
+    } catch (e: any) {
+      out = null;
+      reason = e?.status ? `AI 서버 오류(${e.status})${e?.error?.error?.message ? ': ' + String(e.error.error.message).slice(0, 120) : ''}` : String(e?.message ?? 'AI 오류').slice(0, 200);
+      const { logError } = await import('./log');
+      await logError('library.organize', e, { fileId: id });
+    }
   }
   if (!out) { // AI 꺼짐·한도 소진·실패 → 파일명 규칙
     const g = ruleGuess(f.file_name, rules);
@@ -259,8 +278,9 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   const description = f.description || (out.summary || '').trim().slice(0, 500) || null;
   const confidence = Math.max(0, Math.min(1, out.confidence));
   await sql`update library_files set folder = ${folder}, tags = ${tags}, title = ${title}, description = ${description}, organized_by = ${by},
-    ai_confidence = ${confidence}, needs_review = ${confidence < 0.6}, ai_prev = ${sql.json(prev as never)}, updated_at = now() where id = ${id}`;
-  return { by, folder, tags, title, description, confidence, needsReview: confidence < 0.6 };
+    ai_confidence = ${confidence}, needs_review = ${confidence < 0.6}, ai_prev = ${sql.json(prev as never)}, updated_at = now(),
+    organize_status = ${by === 'ai' ? 'done' : 'failed'}, organize_error = ${reason} where id = ${id}`;
+  return { by, folder, tags, title, description, confidence, needsReview: confidence < 0.6, error: reason };
 }
 export async function undoOrganize(u: SessionUser, id: string) {
   const f = await loadLibraryFile(u, id);
@@ -294,4 +314,19 @@ export async function setFolderPerm(u: SessionUser, i: z.infer<typeof folderPerm
   const { audit } = await import('./log');
   await audit(sql, u.id, 'library_folder_perm.set', null, null, { folder, role: i.role, level: i.level }, ip);
   return { ok: true };
+}
+
+/** V14 3번: 관리자 "전체 정리" — 아직 정리하지 않았거나 실패한 파일을 한 번에 최대 10개씩(화면이 반복 호출) */
+export async function organizeAll(u: SessionUser) {
+  if (!isAdmin(u)) throw forbidden('대표·본사 관리자만 전체 정리할 수 있습니다');
+  await requireMenu(u, 'library', 'edit');
+  const sql = db();
+  const rows = await sql<{ id: string }[]>`select id from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready'
+    and source not in ('revenue', 'ai_attach') and (organize_status is null or organize_status in ('failed', 'pending')) and organized_by is distinct from 'ai'
+    order by (organize_status is null) desc, created_at desc limit 10`;
+  let ai = 0, failed = 0;
+  for (const r of rows) { const o = await organizeLibraryFile(u, r.id).catch(() => null); if (o?.by === 'ai') ai++; else failed++; }
+  const [{ left }] = await sql<{ left: number }[]>`select count(*)::int left from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready'
+    and source not in ('revenue', 'ai_attach') and organize_status is null and organized_by is distinct from 'ai'`;
+  return { done: rows.length, ai, failed, left };
 }

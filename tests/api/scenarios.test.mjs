@@ -2258,3 +2258,92 @@ describe('V13 10번 사내 메신저', () => {
     assert.ok(p.messages.some((m) => m.id === sent.id), '폴링으로도');
   });
 });
+
+describe('V14 3번 자료실 자동 정리 점검 — 상태·실패 사유·다시 정리·전체 정리', () => {
+  const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+  const say = (o) => ({ content: [{ type: 'text', text: typeof o === 'string' ? o : JSON.stringify(o) }], stop_reason: 'end_turn' });
+  const up = async (meta, data) => {
+    const init = await ctx.owner.ok('POST', '/api/library', { ...meta, size: data.length });
+    await fetch(BASE + init.upload.url, { method: 'PUT', headers: init.upload.headers, body: data });
+    return { id: init.id, done: await ctx.owner.ok('POST', `/api/library/${init.id}/complete`) };
+  };
+  test('실패하면 이유를 남기고(조용히 넘어가지 않음) "다시 정리"로 AI 정리, 설명 섞인 답에서도 JSON 추출', async () => {
+    await ctl({ anthropicQueue: [say('죄송합니다')] });
+    const a = await up({ fileName: 'V14_견적서.pdf', mimeType: 'application/pdf' }, Buffer.from('%PDF-1.4 fake'));
+    assert.equal(a.done.organized.by, 'rule'); assert.match(a.done.organized.error, /해석하지 못했습니다/);
+    let [f] = await sql`select organize_status, organize_error from library_files where id = ${a.id}`;
+    assert.equal(f.organize_status, 'failed'); assert.ok(f.organize_error);
+    const st = await (await fetch(FAKE + '/__state')).json();
+    assert.ok(st.anthropic.at(-1).body.messages[0].content.some((b) => b.type === 'document'), 'PDF 는 문서로 보냄');
+    await ctl({ anthropicQueue: [say('정리 결과입니다: ' + JSON.stringify({ folder: '영업/견적', tags: ['견적'], title: '견적서', summary: '견적', confidence: 0.9 }))] });
+    const r = await ctx.owner.ok('POST', `/api/library/${a.id}/organize`, { action: 'redo' });
+    assert.equal(r.by, 'ai'); assert.equal(r.folder, '영업/견적');
+    [f] = await sql`select organize_status, organize_error, folder from library_files where id = ${a.id}`;
+    assert.equal(f.organize_status, 'done'); assert.equal(f.organize_error, null);
+    const list = await ctx.owner.ok('GET', '/api/library');
+    assert.equal(list.files.find((x) => x.id === a.id).organize_status, 'done');
+  });
+  test('관리자 "전체 정리": 정리 안 된 파일을 차례로, 직원은 403', async () => {
+    await sql`update library_files set organize_status = null, organized_by = null where source = 'upload' and deleted_at is null`;
+    assert.equal((await ctx.staffA.client.post('/api/library/organize-all', {})).status, 403);
+    await ctl({ anthropicQueue: Array.from({ length: 30 }, () => say({ folder: '정리됨', tags: ['일괄'], title: '', summary: '', confidence: 0.8 })) });
+    let total = 0; let r;
+    for (let i = 0; i < 10; i++) { r = await ctx.owner.ok('POST', '/api/library/organize-all', {}); total += r.done; if (!r.left) break; }
+    assert.equal(r.left, 0); assert.ok(total > 0);
+    const [{ n }] = await sql`select count(*)::int n from library_files where source = 'upload' and deleted_at is null and upload_status = 'ready' and organize_status is null`;
+    assert.equal(n, 0);
+    await ctl({ anthropicQueue: [] });
+  });
+});
+
+describe('V14 1번 담당자 재배정 권한', () => {
+  test('기본: 직원·현장 관리자는 남의 업무 재배정 403, 지시자는 자기 업무 재배정 가능, 대표는 언제나 · 이력·알림', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14 재배정', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.ownerId })).id;
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.managerA.id })).status, 403, '권한 없음');
+    const r = await ctx.staffA.client.req('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.managerA.id });
+    assert.equal(r.status, 403, '담당자 본인도 넘기기 꺼짐이면 403');
+    await ctx.owner.ok('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.managerA.id });
+    const d = await ctx.owner.ok('GET', `/api/tasks/${t}`);
+    const h = d.history.find((x) => x.action === 'reassigned');
+    assert.deepEqual([h.changes.assigneeId.from, h.changes.assigneeId.to], [ctx.staffA.id, ctx.managerA.id]);
+    const n = await sql`select title, body from notifications where user_id = ${ctx.staffA.id} and title = 'V14 재배정' or (user_id = ${ctx.staffA.id} and title = '담당자 변경: V14 재배정')`;
+    assert.ok(n.some((x) => x.body === '이직원 → 최매니저 (김대표)'), '이전 담당자에게 알림');
+    // 지시자 = 현장 관리자: 자기가 지시한 업무는 재배정 가능
+    const t2 = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14 지시자 재배정', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id })).id;
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t2}`, { assigneeId: ctx.ownerId });
+    // 대표가 "지시자는 자기 업무 재배정" 끄면 403
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign_requester', role: 'site_manager', level: 'none' });
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t2}`, { assigneeId: ctx.staffA.id })).status, 403);
+    // 사람별 예외로 재배정 허용
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign', userId: ctx.managerA.id, level: 'use' });
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t2}`, { assigneeId: ctx.staffA.id });
+    assert.equal((await ctx.managerA.client.ok('GET', `/api/tasks/${t2}`)).perms.reassign, true);
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign', userId: ctx.managerA.id, level: null });
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign_requester', role: 'site_manager', level: null });
+    // 담당자 없는 업무에 처음 배정하는 것은 재배정이 아님
+    const t3 = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'V14 첫 배정', orgUnitId: ctx.siteA, assigneeId: null, requestedById: ctx.ownerId })).id;
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t3}`, { assigneeId: ctx.staffA.id });
+  });
+  test('담당자 넘기기(켜면): 요청 → 지시자 승인 → 담당 변경·알림, 거절, 남이 승인 403', async () => {
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign_handoff', role: 'staff', level: 'use' });
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14 넘기기', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id })).id;
+    const direct = await ctx.staffA.client.req('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.managerA.id });
+    assert.equal(direct.status, 403); assert.equal(direct.body.error.code, 'handoff_required');
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).perms.handoff, true);
+    const h = await ctx.staffA.client.ok('POST', `/api/tasks/${t}/handoff`, { toUserId: ctx.ownerId, note: '휴가라서요' });
+    assert.ok((await sql`select 1 from notifications where user_id = ${ctx.managerA.id} and title = 'V14 넘기기' or (user_id = ${ctx.managerA.id} and title = '담당 넘기기 요청: V14 넘기기')`).length);
+    assert.equal((await ctx.staffA.client.post(`/api/tasks/${t}/handoff/${h.id}`, { approve: true })).status, 403, '요청한 본인은 승인 못 함');
+    const d = await ctx.managerA.client.ok('GET', `/api/tasks/${t}`);
+    assert.equal(d.handoff.canDecide, true); assert.equal(d.handoff.note, '휴가라서요');
+    await ctx.managerA.client.ok('POST', `/api/tasks/${t}/handoff/${h.id}`, { approve: true });
+    assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t}`)).task.assignee_id, ctx.ownerId);
+    assert.equal((await ctx.managerA.client.post(`/api/tasks/${t}/handoff/${h.id}`, { approve: true })).status, 409, '이미 처리');
+    // 거절
+    const t2 = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14 넘기기 거절', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id })).id;
+    const h2 = await ctx.staffA.client.ok('POST', `/api/tasks/${t2}/handoff`, { toUserId: ctx.ownerId });
+    await ctx.managerA.client.ok('POST', `/api/tasks/${t2}/handoff/${h2.id}`, { approve: false });
+    assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t2}`)).task.assignee_id, ctx.staffA.id);
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign_handoff', role: 'staff', level: null });
+    assert.equal((await ctx.staffA.client.post(`/api/tasks/${t2}/handoff`, { toUserId: ctx.ownerId })).status, 403, '꺼지면 요청 불가');
+  });
+});

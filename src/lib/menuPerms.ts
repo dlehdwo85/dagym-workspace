@@ -14,11 +14,15 @@ export const MENUS = {
   // V13 4번: 자료실 3단계 — 보기 / 올리기·수정 / 삭제 (폴더별 권한은 library_folder_perms, 상속)
   library: { label: '자료실', levels: ['none', 'view', 'edit', 'delete'], defaults: { owner: 'delete', admin: 'delete', dept_lead: 'edit', site_manager: 'edit', staff: 'edit' } },
   assistant: { label: 'AI 비서', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
+  // V14 1번 담당자 재배정: 아무 업무나 / 지시자는 자기가 지시한 업무만 / 담당자 본인의 넘기기(지시자 승인)
+  reassign: { label: '업무 담당자 재배정', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  reassign_requester: { label: '지시자는 자기 업무 재배정 가능', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
+  reassign_handoff: { label: '담당자가 다른 사람에게 넘기기(지시자 승인)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
 } as const;
 export type MenuKey = keyof typeof MENUS;
 export const LEVEL_LABEL: Record<string, string> = { none: '안 보임', view: '보기', edit: '보기·입력', use: '사용', delete: '삭제까지' };
 /** 메뉴별 단계 이름 (자료실은 "올리기·수정") */
-export const levelLabel = (menu: string, lv: string) => (menu === 'library' && lv === 'edit' ? '올리기·수정' : LEVEL_LABEL[lv] ?? lv);
+export const levelLabel = (menu: string, lv: string) => (menu === 'library' && lv === 'edit' ? '올리기·수정' : menu.startsWith('reassign') ? (lv === 'use' ? '켬' : '끔') : LEVEL_LABEL[lv] ?? lv);
 export const RANK: Record<string, number> = { none: 0, view: 1, use: 1, edit: 2, delete: 3 };
 const topLevel = (menu: MenuKey) => MENUS[menu].levels[MENUS[menu].levels.length - 1] as string;
 const ROLES: Role[] = ['owner', 'admin', 'dept_lead', 'site_manager', 'staff'];
