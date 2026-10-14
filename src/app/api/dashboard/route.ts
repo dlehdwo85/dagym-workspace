@@ -1,6 +1,6 @@
 import { handler } from '@/lib/api';
 import { db } from '@/lib/db';
-import { accessibleUnitIds, taskVisibleSql, atLeast } from '@/lib/access';
+import { accessibleUnitIds, taskVisibleSql, atLeast, isAdmin } from '@/lib/access';
 import { todaySeoul, weekRangeSeoul, seoulMidnight, addDays } from '@/lib/time';
 import { listEvents } from '@/lib/events';
 
@@ -67,7 +67,7 @@ export const GET = handler(async ({ user, req }) => {
       count(*) filter (where t.status = 'todo')::int as s_todo, count(*) filter (where t.status = 'in_progress')::int as s_in_progress,
       count(*) filter (where t.status = 'on_hold')::int as s_on_hold ${base}`;
   return {
-    scope: units === null ? 'company' : 'units', canApprove: atLeast(user, 'site_manager'), today, week,
+    scope: isAdmin(user) ? 'company' : 'units', canApprove: atLeast(user, 'site_manager'), today, week,
     totals, important, overdue, review, bySite, workload, completion, todayAll: todayTasks, activity,
     events: events.filter((e) => e.kind !== 'task_block' || e.createdBy === user.id).slice(0, 60),
   };

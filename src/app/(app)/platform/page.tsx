@@ -39,6 +39,7 @@ export default function PlatformPage() {
           ))}
         </section>
       )}
+      <Signups />
       {/* V12 3번: 문의 접수함 */}
       <section id="support" className="rounded-card border border-line bg-white shadow-card" data-testid="support-inbox">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">문의 접수함 {tickets.data && <span className="text-xs font-normal text-ink-3">미답변 {tickets.data.tickets.filter((t) => t.status === 'open').length}건</span>}</h2>
@@ -129,5 +130,40 @@ export default function PlatformPage() {
         <p className="px-3 py-2 text-xs text-ink-3">추가 옵션: {data.addons.map((a: any) => `${a.name} 월 ${won(a.monthly_krw)}`).join(' · ')} (옵션 숫자 변경은 API PUT /api/platform/addons/:code)</p>
       </section>
     </div>
+  );
+}
+
+/** V15 신규 가입 목록 · 차단 · 최근 하루 가입 시도 */
+function Signups() {
+  const { data, reload } = useApi<any>('/api/platform/signups');
+  if (!data) return null;
+  const setStatus = async (id: string, status: string) => {
+    if (status === 'blocked' && !confirm('이 공간을 차단할까요? 모든 구성원이 바로 로그아웃됩니다.')) return;
+    try { await api(`/api/platform/tenants/${id}/status`, { method: 'PUT', body: { status } }); reload(); toast.ok('바꿨습니다'); } catch (e: any) { toast.error(e.message); }
+  };
+  return (
+    <section className="rounded-card border border-line bg-white shadow-card" data-testid="platform-signups">
+      <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">신규 가입 {data.tenants.length}곳
+        <span className="ml-2 text-xs font-normal text-ink-3">최근 24시간 시도: {data.attempts.map((a: any) => `${({ ok: '성공', exists: '이미 있음', bot: '봇', rate: '제한', resend: '재발송' } as Record<string, string>)[a.reason] ?? a.reason} ${a.n}`).join(' · ') || '없음'}</span></h2>
+      <div className="max-h-96 overflow-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>공간</th><th className={cell}>대표</th><th className={cell}>사람·업무</th><th className={cell}>가입</th><th className={cell}>상태</th><th /></tr></thead>
+          <tbody>
+            {data.tenants.map((t: any) => (
+              <tr key={t.id} className={cx('border-t border-line', t.status !== 'active' && 'bg-slate-50 text-ink-3')}>
+                <td className={cell}><div className="font-medium">{t.name}</div><div className="text-[11px] text-ink-3">{t.kind === 'personal' ? '개인' : '팀'} · {t.id}</div></td>
+                <td className={cell}>{t.owner_email}{t.signup_pending && <span className="ml-1 text-[11px] text-amber-700">메일 미확인</span>}</td>
+                <td className={cell}>{t.users}명 · 업무 {t.tasks}</td>
+                <td className={cell}><div>{fmtDateTime(t.created_at)}</div><div className="text-[11px] text-ink-3">{t.created_ip}</div></td>
+                <td className={cell}>{({ active: '사용 중', blocked: '차단', deleted: '삭제' } as Record<string, string>)[t.status] ?? t.status}</td>
+                <td className={cell}>{t.status === 'active' ? <Button size="sm" variant="secondary" onClick={() => setStatus(t.id, 'blocked')}>차단</Button> : t.status === 'blocked' ? <Button size="sm" variant="secondary" onClick={() => setStatus(t.id, 'active')}>해제</Button> : null}</td>
+              </tr>
+            ))}
+            {!data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={6}>아직 가입한 공간이 없습니다</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {!!data.ips.length && <p className="border-t border-line px-3 py-2 text-xs text-ink-3">IP별(24시간): {data.ips.map((x: any) => `${x.ip ?? '?'} ${x.n}회(성공 ${x.ok})`).join(' · ')}</p>}
+    </section>
   );
 }

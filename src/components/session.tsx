@@ -14,6 +14,7 @@ export interface Sess {
   /** 선택 기능 스위치 (핵심 기능은 항상 켜짐) */
   /** V13 메뉴 권한 (revenue·team_reports·library·assistant → none/view/edit/use) */
   menus?: Record<string, string>;
+  tenant?: { name: string; personal: boolean; internal: boolean; onboarding: boolean };
   features: { googleSync: boolean; /** V9 AI 비서 (플랫폼 API 키가 있을 때만) */ ai: boolean; /** V9 자료실 (체험 계정 제외) */ library: boolean };
 }
 export const SessionCtx = createContext<Sess | null>(null);

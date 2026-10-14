@@ -1753,7 +1753,8 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
     assert.deepEqual(u.limits, { users: null, storageGb: null, aiRequests: null });
     assert.ok(u.usage.storageBytes > 0 && u.usage.users >= 4 && u.usage.aiRequests >= 1, '첨부·자료실·사람·AI 요청 셈');
     assert.ok(u.topFiles.length > 0 && u.topFiles[0].size >= u.topFiles.at(-1).size, '큰 파일 순');
-    assert.ok(u.plans.some((p) => p.code === 'basic' && p.per_user_krw === 1500) && u.plans.some((p) => p.code === 'free' && p.limits.users === 20) && !u.plans.some((p) => p.code === 'internal' || p.code === 'standard'), '2안: 무료·베이직(1인 1,500원), 내부·1안은 목록에 없음');
+    assert.ok(u.plans.some((p) => p.code === 'team' && p.per_user_krw === 3900) && u.plans.some((p) => p.code === 'personal' && p.limits.users === 1) && u.plans.some((p) => p.code === 'team_free' && p.limits.users === 5)
+      && !u.plans.some((p) => ['internal', 'standard', 'free', 'basic'].includes(p.code)), '15차: 개인·팀 무료·팀(1인 3,900원), 내부·예전 요금제는 목록에 없음');
     assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.deepEqual(pf.tenants.map((t) => t.id).sort(), ['default', 'demo']);
@@ -1807,13 +1808,13 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
   });
 
   test('요금제 변경 요청 → 운영자 승인하면 반영·요청자 알림, 반려도 가능', async () => {
-    const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'basic', note: '지점 늘어남' });
-    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'basic' })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
+    const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'team', note: '지점 늘어남' });
+    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'team' })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     assert.equal((await ctx.owner.req('POST', '/api/usage/request', { planCode: 'internal' })).status, 400, '공개 안 된 요금제는 요청 불가');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.equal(pf.requests.find((x) => x.id === r.id).status, 'pending');
     await ctx.owner.ok('POST', `/api/platform/requests/${r.id}`, { approve: true });
-    assert.equal((await ctx.owner.ok('GET', '/api/usage')).subscription.planCode, 'basic');
+    assert.equal((await ctx.owner.ok('GET', '/api/usage')).subscription.planCode, 'team');
     assert.equal((await ctx.owner.req('POST', `/api/platform/requests/${r.id}`, { approve: true })).status, 400);
     const before = (await ctx.owner.ok('GET', '/api/usage')).limits.aiRequests;
     const r2 = await ctx.owner.ok('POST', '/api/usage/request', { addons: { ai500: 1 } });

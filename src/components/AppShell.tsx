@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { AiDock } from './AiDock';
+import { Onboarding } from './Onboarding';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
@@ -174,7 +175,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         <aside className={cx('hidden shrink-0 flex-col bg-brand-800 text-white transition-[width] duration-150 sm:sticky sm:top-0 sm:flex sm:h-screen', collapsed ? 'w-[60px]' : 'w-60')} aria-label="사이드바">
           <div className={cx('flex h-14 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
             <img src="/icon.svg" alt="" className="size-7" />
-            {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold">워크인</div><div className="truncate text-[11px] text-slate-400">다짐 · 하이링크</div></div>}
+            {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold">워크인</div><div className="truncate text-[11px] text-slate-400">{session.tenant?.name ?? '워크인'}</div></div>}
           </div>
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
             {nav.map((n) => (
@@ -284,6 +285,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <main className="mx-auto max-w-7xl p-3 sm:p-6">{children}</main>
         </div>
 
+        {session.tenant?.onboarding && <Onboarding />}
         {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} /></Suspense>}
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">

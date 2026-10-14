@@ -59,7 +59,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const c = await browser.newContext();
   const p = await c.newPage();
   await p.goto(BASE + '/login');
-  await p.getByLabel('회사 이메일').fill(process.env.WEMAIL ?? 'ceo@dagym.test');
+  await p.getByLabel('이메일', { exact: true }).fill(process.env.WEMAIL ?? 'ceo@dagym.test');
   await p.getByLabel('비밀번호').fill(process.env.WPASS ?? 'owner-pass-1234');
   await p.getByRole('button', { name: '로그인' }).click();
   await p.waitForURL(BASE + '/');

@@ -145,3 +145,46 @@ describe('V15 회사 간 분리 — 다른 회사 데이터는 404·빈 목록',
     assert.equal(tenant, T.me.user.tenant);
   });
 });
+
+describe('V15 계정 관리·플랫폼 운영', () => {
+  test('온보딩 끝내기 · 내 데이터 내려받기 · 개인 → 팀 전환', async () => {
+    await P.c.ok('POST', '/api/onboarding', { name: '혼자씨', title: '프리랜서', done: true });
+    assert.ok((await sql`select onboarded_at from tenants where id = ${P.me.user.tenant}`)[0].onboarded_at);
+    const r = await P.c.get('/api/account/export');
+    assert.equal(r.status, 200); assert.match(r.headers.get('content-disposition'), /attachment/);
+    assert.ok(r.body.tasks.some((t) => t.title === '내 첫 업무')); assert.equal(r.body.profile.title, '프리랜서');
+    assert.ok(!JSON.stringify(r.body).includes('기본회사'));
+    assert.equal((await T.c.post('/api/account/upgrade', { company: 'x' })).status, 403, '이미 팀이면 불가');
+    await P.c.ok('POST', '/api/account/upgrade', { company: '혼자상사' });
+    const me = await P.c.ok('GET', '/api/auth/me');
+    assert.equal(me.user.personal, false);
+    assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = ${P.me.user.tenant}`)[0].plan_code, 'team_free');
+  });
+  test('기본 회사 직원은 스스로 탈퇴 불가 · 비밀번호 틀리면 불가 · 대표 혼자면 탈퇴 시 공간도 삭제, 같은 이메일 재가입 가능', async () => {
+    assert.equal((await ctx.staffA.client.post('/api/account/delete', { password: ctx.staffA.password, confirm: '탈퇴합니다' })).status, 403);
+    assert.equal((await P.c.post('/api/account/delete', { password: 'wrong-pass', confirm: '탈퇴합니다' })).status, 400);
+    await P.c.ok('POST', '/api/account/delete', { password: 'signup-pass-1234', confirm: '탈퇴합니다' });
+    assert.equal((await P.c.get('/api/auth/me')).status, 401);
+    assert.equal((await sql`select status from tenants where id = ${P.me.user.tenant}`)[0].status, 'deleted');
+    assert.equal((await sql`select count(*)::int n from users where email = 'solo@example.com'`)[0].n, 0, '이메일 지움');
+  });
+  test('구성원이 있는 팀 대표는 바로 탈퇴 불가 → 공간 삭제는 이름 확인', async () => {
+    assert.equal((await T.c.post('/api/account/delete', { password: 'signup-pass-1234', confirm: '탈퇴합니다' })).status, 400);
+    assert.equal((await T.c.req('DELETE', '/api/account/space', { password: 'signup-pass-1234', confirmName: '틀린이름' })).status, 400);
+  });
+  test('플랫폼 운영: 신규 가입 목록, 차단하면 즉시 로그아웃·로그인 불가, 해제', async () => {
+    const s = await ctx.owner.ok('GET', '/api/platform/signups');
+    assert.ok(s.tenants.some((t) => t.id === T.me.user.tenant && t.owner_email === 'boss@other.test'));
+    assert.ok(!s.tenants.some((t) => t.id === 'default'));
+    assert.equal((await T.c.get('/api/platform/signups')).status, 404, '가입한 회사 대표는 플랫폼 화면 없음');
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${T.me.user.tenant}/status`, { status: 'blocked' });
+    assert.equal((await T.c.get('/api/auth/me')).status, 401);
+    const l = await new Client().post('/api/auth/login', { email: 'boss@other.test', password: 'signup-pass-1234' });
+    assert.equal(l.status, 403); assert.equal(l.body.error.code, 'tenant_blocked');
+    assert.equal((await ctx.owner.req('PUT', '/api/platform/tenants/default/status', { status: 'blocked' })).status, 400);
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${T.me.user.tenant}/status`, { status: 'active' });
+    const c = new Client(); await c.ok('POST', '/api/auth/login', { email: 'boss@other.test', password: 'signup-pass-1234' });
+    await c.ok('DELETE', '/api/account/space', { password: 'signup-pass-1234', confirmName: '남의상사' });
+    assert.equal((await new Client().post('/api/auth/login', { email: 'emp@other.test', password: 'emp-pass-12345' })).status, 401, '공간 삭제 → 구성원도 로그인 불가');
+  });
+});

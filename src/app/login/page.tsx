@@ -6,6 +6,7 @@ import { AuthCard, PasswordInput } from '@/components/AuthCard';
 import { Button, Field, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
 import { Capacitor } from '@capacitor/core';
+import Link from 'next/link';
 
 function LoginForm() {
   const sp = useSearchParams();
@@ -23,6 +24,14 @@ function LoginForm() {
         : '데이터베이스에 연결할 수 없어 지금은 로그인할 수 없습니다. 잠시 후 다시 시도하고, 계속되면 관리자에게 알려 주세요.');
     }).catch(() => {});
   }, []);
+  const [signupOn, setSignupOn] = useState(false);
+  const [unverified, setUnverified] = useState<string | null>(sp.get('resend'));
+  const [resent, setResent] = useState<string | null>(null);
+  useEffect(() => { api('/api/auth/signup').then((r) => setSignupOn(!!r.enabled)).catch(() => {}); }, []);
+  async function resend() {
+    try { const r = await api('/api/auth/resend', { body: { email: unverified || email } }); setResent(r.devLink ? `${r.message} (개발용: ${r.devLink})` : r.message); }
+    catch (e: any) { setResent(e.message); }
+  }
   const [mfa, setMfa] = useState(false);
   const [otp, setOtp] = useState('');
   async function submit(e?: React.FormEvent) {
@@ -40,6 +49,7 @@ function LoginForm() {
       location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
     } catch (e) {
       // U-0c 연결 실패는 영어 원문 대신 한국어 안내 + 다시 시도
+      if (e instanceof ApiError && e.code === 'email_unverified') setUnverified(email);
       const network = !(e instanceof ApiError) || e.status === 0 || (e.status >= 500 && e.code !== 'not_configured');
       setErr({ text: e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도하세요.', network });
     } finally { setBusy(false); }
@@ -54,7 +64,7 @@ function LoginForm() {
       {mfa ? (
         <Field label="2단계 인증 코드 (OTP 앱의 6자리)"><input className={inputCls + ' h-11 font-mono text-lg tracking-widest'} inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} autoFocus aria-label="OTP 코드" data-testid="otp-input" /></Field>
       ) : <>
-      <Field label="회사 이메일"><input className={inputCls + ' h-11'} type="email" inputMode="email" autoComplete="username" placeholder="name@company.co.kr" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></Field>
+      <Field label="이메일"><input className={inputCls + ' h-11'} type="email" inputMode="email" autoComplete="username" placeholder="name@company.co.kr" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></Field>
       <Field label="비밀번호"><PasswordInput value={password} onChange={setPassword} /></Field>
       </>}
       {err && (
@@ -66,11 +76,21 @@ function LoginForm() {
           </div>
         </div>
       )}
+      {unverified !== null && (
+        <div className="rounded-input border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900" data-testid="resend-box">
+          <p>가입 확인 메일을 다시 받을 수 있습니다{unverified ? ` (${unverified})` : ''}.</p>
+          {resent ? <p className="mt-1.5 text-xs">{resent}</p> : <button type="button" onClick={resend} className="mt-1.5 font-semibold underline" data-testid="resend">확인 메일 다시 받기</button>}
+        </div>
+      )}
       <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy}>{busy ? <><Loader2 className="animate-spin" />확인 중…</> : <>{mfa ? '확인' : '로그인'}<ArrowRight /></>}</Button>
-      <p className="text-center text-xs leading-relaxed text-ink-2">계정은 관리자 초대로만 만들 수 있습니다.<br />비밀번호를 잊었다면 관리자에게 재설정 링크를 요청하세요.</p>
+      {signupOn
+        ? <p className="text-center text-sm text-ink-2">처음이신가요? <Link href="/signup" className="font-semibold text-brand-700 underline" data-testid="to-signup">무료로 시작</Link></p>
+        : <p className="text-center text-xs leading-relaxed text-ink-2">계정은 관리자 초대로만 만들 수 있습니다.</p>}
+      <p className="text-center text-xs leading-relaxed text-ink-2">비밀번호를 잊었다면 회사 관리자에게 재설정 링크를 요청하세요.</p>
+      <p className="text-center text-[11px] text-ink-3"><Link href="/terms" className="underline">이용약관</Link> · <Link href="/privacy" className="underline">개인정보 처리방침</Link></p>
     </form>
   );
 }
 export default function LoginPage() {
-  return <AuthCard title="로그인" sub="회사 계정으로 로그인하세요"><Suspense><LoginForm /></Suspense></AuthCard>;
+  return <AuthCard title="로그인" sub="워크인 계정으로 로그인하세요"><Suspense><LoginForm /></Suspense></AuthCard>;
 }

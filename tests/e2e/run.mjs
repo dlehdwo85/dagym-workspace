@@ -53,7 +53,7 @@ async function openMoreFields(scope) {
 async function login(context, email, password) {
   const page = await context.newPage();
   await page.goto(BASE + '/login');
-  await page.getByLabel('회사 이메일').fill(email);
+  await page.getByLabel('이메일', { exact: true }).fill(email);
   await page.getByLabel('비밀번호').fill(password);
   await page.getByRole('button', { name: '로그인' }).click();
   await page.waitForURL(BASE + '/');

@@ -42,6 +42,7 @@ export default function Settings() {
       <SwipeToggle />
       <CalendarFeed />
       <TwoFactor />
+      <AccountSection />
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 종류별 수신</h2>
         <table className="w-full text-sm" data-testid="prefs">
@@ -193,6 +194,52 @@ function TwoFactor() {
           ))}
         </ul>
       </div>
+    </section>
+  );
+}
+
+/** V15 계정: 내 데이터 내려받기 · 회원 탈퇴 · 공간 삭제(가입한 공간 대표) */
+function AccountSection() {
+  const { user, tenant } = useSession();
+  const [pw, setPw] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [space, setSpace] = useState('');
+  const [team, setTeam] = useState('');
+  const own = !!tenant && !tenant.internal;
+  async function leave() {
+    try { await api('/api/account/delete', { body: { password: pw, confirm } }); location.href = '/login'; } catch (e: any) { toast.error(e.message); }
+  }
+  async function dropSpace() {
+    if (!window.confirm(`"${tenant?.name}" 공간의 모든 사람·업무·일정이 삭제됩니다. 계속할까요?`)) return;
+    try { await api('/api/account/space', { method: 'DELETE', body: { password: pw, confirmName: space } }); location.href = '/login'; } catch (e: any) { toast.error(e.message); }
+  }
+  return (
+    <section className="rounded-lg border bg-white p-4 text-sm" data-testid="account">
+      <h2 className="font-semibold">계정</h2>
+      <p className="mt-1 text-ink-2">내 업무·일정·댓글·메시지를 파일(JSON)로 내려받을 수 있습니다.</p>
+      <a href="/api/account/export" className="mt-2 inline-block rounded-input border border-line px-3 py-1.5 font-medium hover:bg-slate-50" data-testid="account-export">내 데이터 내려받기</a>
+      {tenant?.personal && user.role === 'owner' && (
+        <form className="mt-4 flex flex-wrap items-end gap-2 rounded-input border border-line p-3" onSubmit={async (e) => { e.preventDefault(); try { await api('/api/account/upgrade', { body: { company: team } }); location.reload(); } catch (er: any) { toast.error(er.message); } }} data-testid="upgrade-team">
+          <Field label="팀으로 바꾸기 — 데이터는 그대로, 5명까지 무료로 초대"><input className={inputCls} value={team} onChange={(e) => setTeam(e.target.value)} placeholder="회사(팀) 이름" aria-label="팀 이름" /></Field>
+          <Button type="submit" disabled={!team.trim()}>팀 만들기</Button>
+        </form>
+      )}
+      {own && (
+        <details className="mt-4 rounded-input border border-red-200 p-3">
+          <summary className="cursor-pointer font-medium text-red-700">회원 탈퇴{user.role === 'owner' ? ' · 공간 삭제' : ''}</summary>
+          <div className="mt-3 space-y-2">
+            <Field label="비밀번호"><input type="password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" aria-label="탈퇴 비밀번호" /></Field>
+            <Field label='확인 문구 "탈퇴합니다"'><input className={inputCls} value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label="탈퇴 확인 문구" /></Field>
+            <Button variant="danger" onClick={leave} disabled={!pw || confirm !== '탈퇴합니다'}>탈퇴하기</Button>
+            <p className="text-xs text-ink-3">탈퇴하면 이름·이메일이 지워지고 다시 로그인할 수 없습니다. 혼자 쓰던 공간은 함께 삭제됩니다(30일 뒤 완전 삭제).</p>
+            {user.role === 'owner' && <>
+              <hr className="my-2 border-line" />
+              <Field label={`공간 삭제 — 공간 이름 "${tenant?.name}" 입력`}><input className={inputCls} value={space} onChange={(e) => setSpace(e.target.value)} aria-label="삭제할 공간 이름" /></Field>
+              <Button variant="danger" onClick={dropSpace} disabled={!pw || space !== tenant?.name}>공간 삭제</Button>
+            </>}
+          </div>
+        </details>
+      )}
     </section>
   );
 }

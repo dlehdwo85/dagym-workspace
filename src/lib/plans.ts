@@ -275,3 +275,28 @@ export async function usageJob() {
   }
   return { alerts };
 }
+
+// ---------------- V15 공개 가입 관리 (플랫폼 운영자) ----------------
+export async function platformSignups(u: SessionUser) {
+  requirePlatform(u);
+  const sql = db();
+  const [tenants, attempts, ips] = await Promise.all([
+    sql`select t.id, t.name, t.kind, t.status, t.created_ip, t.created_at, t.onboarded_at, ow.email as owner_email, ow.signup_pending,
+          (select count(*)::int from users x where x.tenant = t.id and x.status = 'active') as users,
+          (select count(*)::int from tasks k join org_units o on o.id = k.org_unit_id where o.tenant = t.id and k.deleted_at is null) as tasks
+        from tenants t left join users ow on ow.id = t.owner_user_id where t.id not in ('default','demo') order by t.created_at desc limit 200`,
+    sql`select coalesce(reason, 'ok') as reason, count(*)::int n from signup_attempts where created_at > now() - interval '1 day' group by 1 order by 2 desc`,
+    sql`select ip, count(*)::int n, count(*) filter (where ok)::int ok from signup_attempts where created_at > now() - interval '1 day' group by ip order by n desc limit 10`,
+  ]);
+  return { tenants, attempts, ips };
+}
+export async function setTenantStatus(u: SessionUser, tenant: string, status: 'active' | 'blocked') {
+  requirePlatform(u);
+  if (['default', 'demo'].includes(tenant)) throw badRequest('기본 회사는 차단할 수 없습니다');
+  const sql = db();
+  const [t] = await sql`update tenants set status = ${status} where id = ${tenant} and status <> 'deleted' returning id`;
+  if (!t) throw notFound('없는 회사입니다');
+  if (status === 'blocked') await sql`update sessions set revoked_at = now() where revoked_at is null and user_id in (select id from users where tenant = ${tenant})`;
+  await audit(sql, u.id, status === 'blocked' ? 'tenant.block' : 'tenant.unblock', null, null, { tenant }, null);
+  return { ok: true };
+}

@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { CalendarDays, CheckCircle2, Eye, EyeOff, ShieldCheck, TriangleAlert, Users } from 'lucide-react';
 import { inputCls } from './ui';
 
-const BRANDS = [['다짐', '#f97316'], ['하이링크', '#3b82f6']] as const;
 
 /** 로그인·초대·재설정 공통 틀: 왼쪽 회사 소개, 오른쪽 입력 */
 export function AuthCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
@@ -14,29 +13,23 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
         <div className="absolute -bottom-32 -left-16 size-96 rounded-full bg-orange-500/10 blur-3xl" />
         <div className="relative flex items-center gap-3">
           <img src="/icon.svg" alt="" className="size-10" />
-          <div><div className="text-lg font-bold">워크인</div><div className="text-xs text-slate-400">다짐 · 하이링크</div></div>
+          <div><div className="text-lg font-bold">워크인</div><div className="text-xs text-slate-400">업무 · 일정 · 알림을 한 곳에</div></div>
         </div>
         <div className="relative">
-          <h2 className="text-[28px] font-bold leading-snug tracking-tight">본사부터 현장까지,<br />할 일과 일정을 한곳에서.</h2>
+          <h2 className="text-[28px] font-bold leading-snug tracking-tight">말로 등록하고,<br />정확한 시간에 알림 받기.</h2>
           <ul className="mt-8 space-y-4 text-sm text-slate-300">
             <li className="flex items-center gap-3"><CheckCircle2 className="size-5 text-emerald-400" />업무 배정 · 완료 확인 · 결재까지 한 흐름으로</li>
             <li className="flex items-center gap-3"><CalendarDays className="size-5 text-sky-400" />회사·부서·현장 일정과 마감일을 한 캘린더에</li>
-            <li className="flex items-center gap-3"><Users className="size-5 text-orange-300" />조직·현장별 권한으로 필요한 사람만</li>
+            <li className="flex items-center gap-3"><Users className="size-5 text-orange-300" />혼자서도, 팀으로도 — 무료로 시작</li>
           </ul>
         </div>
-        <div className="relative flex flex-wrap gap-2">
-          {BRANDS.map(([n, c]) => (
-            <span key={n} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-sm font-semibold">
-              <span className="size-2.5 rounded-full" style={{ background: c }} />{n}
-            </span>
-          ))}
-        </div>
+        <div className="relative text-xs text-slate-400">개인 무료 · 팀 5명까지 무료</div>
       </section>
       <section className="flex flex-1 flex-col items-center justify-center p-5">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <img src="/icon.svg" alt="" className="size-9" />
-            <div><div className="font-bold text-brand-700">워크인</div><div className="text-xs text-ink-2">다짐 · 하이링크</div></div>
+            <div><div className="font-bold text-brand-700">워크인</div><div className="text-xs text-ink-2">업무 · 일정 · 알림을 한 곳에</div></div>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-ink">{title}</h1>
           {sub && <p className="mt-1.5 text-sm text-ink-2">{sub}</p>}
