@@ -322,7 +322,9 @@ export default function Dashboard() {
               {data.review.slice(0, 3).map((t: any) => (
                 <li key={t.id} className="flex min-w-0 flex-wrap items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50">
                   <Link href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{t.title}</Link>
-                  <span className="flex gap-1"><Button size="sm" onClick={() => approve(t, true)}>완료 확인</Button><Button size="sm" variant="secondary" onClick={() => approve(t, false)}>보완 요청</Button></span>
+                  {/* V12 11번: 검토 승인·반려는 그 업무의 지시자만 */}
+                  {t.requested_by === user.id ? <span className="flex gap-1"><Button size="sm" onClick={() => approve(t, true)}>완료 확인</Button><Button size="sm" variant="secondary" onClick={() => approve(t, false)}>보완 요청</Button></span>
+                    : <span className="text-xs text-ink-3">지시자 확인 대기{t.requested_by_name ? ` · ${t.requested_by_name}` : ''}</span>}
                 </li>
               ))}
             </ul>

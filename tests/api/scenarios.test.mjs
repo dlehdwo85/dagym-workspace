@@ -106,7 +106,7 @@ describe('⑥ 다른 직원·현장 데이터 접근 차단 (서버 권한 검�
 describe('② 등록 → 배정 → 알림 → 댓글·자료 → 검토 요청 → 최종 완료', () => {
   let id;
   test('대표가 업무를 등록·배정하면 직원에게 알림이 간다', async () => {
-    id = (await ctx.owner.ok('POST', '/api/tasks', { title: 'GX 시간표 개편', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 5), approvalRequired: true })).id;
+    id = (await ctx.owner.ok('POST', '/api/tasks', { title: 'GX 시간표 개편', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, dueDate: addDays(today, 5), approvalRequired: true })).id; // V12-11: 검토 승인은 지시자
     const n = await notifs(ctx.staffA.client);
     assert.ok(n.some((x) => x.type === 'task_assigned' && x.link === `/tasks/${id}`));
   });
@@ -1776,7 +1776,7 @@ describe('WORKIN_V12 상태 권한 · 확인 완료 · 검토 요청 알림', ()
     await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
     assert.equal((await sql`select count(*)::int c from notifications where entity_id = ${t} and title like '확인 완료%'`)[0].c, 1, '한 번만');
     const deny = await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
-    assert.equal(deny.status, 403); assert.match(deny.body.error.message, /담당자만/);
+    assert.equal(deny.status, 403); assert.match(deny.body.error.message, /담당자만 바꿀 수 있어요/);
     assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t}`, { status: 'done' })).status, 403, '대표도 남의 업무 완료 불가');
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
@@ -1788,13 +1788,38 @@ describe('WORKIN_V12 상태 권한 · 확인 완료 · 검토 요청 알림', ()
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
     await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done' }); // 승인
     assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done');
-    // 보류는 지시자도
-    const t2 = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 보류 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
-    await ctx.owner.ok('PATCH', `/api/tasks/${t2}`, { status: 'on_hold' });
-    await ctx.owner.ok('PATCH', `/api/tasks/${t2}`, { status: 'in_progress' });
-    // 담당자 없는 업무는 누구나
-    const t3 = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 담당 없음', orgUnitId: ctx.hq, assigneeId: null, approvalRequired: false })).id;
-    await ctx.owner.ok('PATCH', `/api/tasks/${t3}`, { status: 'done' });
+  });
+});
+
+describe('WORKIN_V12 11번 상태는 담당자만 (대표·관리자 예외 없음)', () => {
+  test('대표·관리자·지시자도 담당자 업무의 보류·진행·완료 불가(403), 담당자는 가능', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12-11 보류 시도', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+    for (const st of ['on_hold', 'in_progress', 'done']) {
+      for (const c of [ctx.owner, ctx.managerA.client]) {
+        const r = await c.req('PATCH', `/api/tasks/${t}`, { status: st });
+        assert.equal(r.status, 403, `${st} 거절`); assert.match(r.body.error.message, /상태는 담당자만/);
+      }
+    }
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'on_hold' });
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'in_progress');
+  });
+  test('유일한 예외: 검토 요청된 업무를 그 업무의 지시자가 승인·반려 — 지시자가 아닌 대표·관리자는 불가, 검토 전에는 지시자도 불가', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12-11 검토', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, approvalRequired: false })).id;
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { status: 'done' })).status, 403, '검토 전에는 지시자도 불가');
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t}`, { status: 'done' })).status, 403, '지시자가 아닌 대표는 승인 불가');
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { status: 'on_hold' })).status, 403, '지시자도 보류는 불가');
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress', reviewNote: '보완' }); // 반려
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done' }); // 승인
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done');
+  });
+  test('담당자가 없는 업무는 만든 사람만 상태 변경', async () => {
+    const t = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'V12-11 담당 없음', orgUnitId: ctx.siteA, assigneeId: null, approvalRequired: false })).id;
+    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t}`, { status: 'in_progress' })).status, 403, '대표도 불가');
+    assert.equal((await ctx.staffA.client.req('PATCH', `/api/tasks/${t}`, { status: 'done' })).status, 403);
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done' });
   });
 });
 

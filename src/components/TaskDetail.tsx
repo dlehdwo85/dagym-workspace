@@ -198,7 +198,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   }
 
   const primary = t.status === 'done' ? null
-    : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : perms.approve ? { label: '최종 완료 확인', run: () => patch({ status: 'done' }, '최종 완료 확인했습니다') } : null)
+    : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : t.requested_by === user.id ? { label: '최종 완료 확인', run: () => patch({ status: 'done' }, '최종 완료 확인했습니다') } : null)
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
     : t.approval_required && !perms.approve ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') }
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
