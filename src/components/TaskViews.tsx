@@ -193,10 +193,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [boardBy, setBoardBy] = useState<'status' | 'section'>('status');
 
   const curView = fixed?.view ?? filters.view ?? '';
-  // V14 34번: 휴대폰 기본 묶기는 마감별(가까운 순), 담당자별은 선택
-  const [phone, setPhone] = useState(false);
-  useEffect(() => { try { setPhone(window.matchMedia('(max-width: 639px)').matches); } catch {} }, []);
-  const group: GroupBy = groupPick || (curView === 'my' || phone ? 'due' : 'assignee');
+  // V14 34-보정: 기본 묶기는 PC·휴대폰 모두 담당자별(각 묶음 안은 마감 일시 오름차순 — 기본 정렬 'due'), 마감별은 묶기 메뉴에서 선택
+  const group: GroupBy = groupPick || (curView === 'my' ? 'due' : 'assignee');
   const pickGroup = (g: GroupBy) => { setGroupPick(g); try { localStorage.setItem('wos_task_group', g); } catch {} };
   // 상단 칩: 전체 · 내 업무 · 사람별 · 내가 지시한 업무 · 지연 · 이번 주 · 검토 대기. 사람 칩은 본사 사람(없으면 앞쪽 5명)
   const hqIds = new Set(dir.orgUnits.filter((o) => o.type === 'hq').map((o) => o.id));
