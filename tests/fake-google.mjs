@@ -81,9 +81,9 @@ export function startFakeGoogle(port = 3199) {
       if ('invalidGrant' in body) state.invalidGrant = body.invalidGrant;
       if ('expireSyncToken' in body) state.expireSyncToken = body.expireSyncToken;
       if (body.fcmUnregister) state.fcmUnregistered.add(body.fcmUnregister);
+      if (body.anthropicReset) { state.anthropicQueue.length = 0; state.classifyQueue.length = 0; } // 비운 다음에 새로 넣는다
       if (body.anthropicQueue) state.anthropicQueue.push(...body.anthropicQueue);
       if (body.classifyQueue) state.classifyQueue.push(...body.classifyQueue);
-      if (body.anthropicReset) { state.anthropicQueue.length = 0; state.classifyQueue.length = 0; }
       if (body.webpushGone) state.webpushGone.add(body.webpushGone);
       if (body.googleEdit) { // Google 쪽에서 사용자가 직접 수정
         const e = evs(body.googleEdit.cal)[body.googleEdit.id];
