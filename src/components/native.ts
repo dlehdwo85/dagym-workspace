@@ -25,6 +25,7 @@ type Router = { push: (href: string) => void };
 /** 앱(안드로이드·iOS) 안에서 실행될 때만 동작: 푸시 토큰 등록, 알림 탭 → 해당 화면 이동, 딥링크, 뒤로가기 */
 export async function initNative(router: Router) {
   if (!Capacitor.isNativePlatform()) return;
+  document.documentElement.classList.add('native', `native-${Capacitor.getPlatform()}`); // 하단 시스템 바 여백 대체값(globals.css)
   const go = (link?: string) => {
     if (!link) return;
     try {
