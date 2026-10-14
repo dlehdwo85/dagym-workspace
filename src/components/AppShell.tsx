@@ -28,7 +28,7 @@ const NAV: NavItem[] = [
   { href: '/notifications', label: '알림', icon: Bell },
   { href: '/reports/mine', label: '내 주간 보고', icon: FileText },
 ];
-const MOBILE_TABS: NavItem[] = [NAV[0], NAV[1], NAV[3], NAV[4], NAV[5]];
+const MOBILE_TABS: NavItem[] = [NAV[0], NAV[1], NAV[3], NAV[4]]; // V14 9번: 홈·업무·(+)·캘린더·메시지 — 알림은 상단 종
 /** 사이드바 "관리" 묶음 (대표·본사 관리자) */
 const ADMIN_MENU: NavItem[] = [
   { href: '/reports', label: '주간 보고', icon: FileBarChart },
@@ -270,6 +270,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
               <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon.svg" alt="" className="size-7" />워크인</span>
               <span className="flex items-center">
                 <button onClick={() => setPalette(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-[22px]" /></button>
+                <Link href="/notifications" className="relative inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label={`알림${unread ? ` ${unread}건` : ''}`} data-testid="mobile-bell">
+                  <Bell className="size-[22px]" />{unread > 0 && <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{unread > 99 ? '99+' : unread}</span>}
+                </Link>
                 <button onClick={() => setMore(true)} className="inline-flex size-11 items-center justify-center rounded-full active:bg-slate-100" aria-label="메뉴 더보기"><Avatar id={session.user.id} name={session.user.name} size={30} /></button>
               </span>
             </div>
@@ -277,8 +280,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <main className="mx-auto max-w-7xl p-3 sm:p-6">{children}</main>
         </div>
 
-        {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 · 알림 */}
-        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-6 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
+        {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
+        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
           {MOBILE_TABS.slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}
           <div className="flex items-center justify-center">
             <button onClick={() => setFabMenu(true)} aria-label="만들기" aria-haspopup="menu" aria-expanded={fabMenu} data-testid="fab" className="-mt-5 flex size-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-pop ring-4 ring-white active:scale-95">

@@ -76,7 +76,9 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     for (const m of ms) push(`task:${t.id}:${t.due_date}:${t.due_time ?? ''}:${m}`, due.minus({ minutes: m }), `${leftLabel(m)} 마감: ${t.title}`,
       `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), `/tasks/${t.id}`);
     push(`today:${t.id}:${t.due_date}`, kst(t.due_date, '09:00'), `오늘 마감: ${t.title}`, t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', `/tasks/${t.id}`);
-    if (st.soon > 0) push(`soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, kst(t.due_date, t.due_time ?? '23:59').minus({ hours: st.soon }), `마감 임박: ${t.title}`, `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, `/tasks/${t.id}`);
+    // V14 10번: 마감 당일에 울리는 "마감 임박"은 "오늘 마감"과 겹치므로 빼고, 업무별 🔔 를 정했으면 그것만
+    const soonAt = kst(t.due_date, t.due_time ?? '23:59').minus({ hours: st.soon });
+    if (st.soon > 0 && !t.reminder_minutes && soonAt.toISODate()! < t.due_date) push(`soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, soonAt, `마감 임박: ${t.title}`, `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, `/tasks/${t.id}`);
   }
 
   // V13 6번: 내가 지시한 업무(담당자가 다른 사람) — 서버 알림과 같은 키(묶음 업무는 묶음 1건)

@@ -2436,3 +2436,18 @@ describe('V14 2·4·5·6·7번 AI 대화 보관·업무 무관 차단·사용 �
     for (const k of ['team_reports', 'revenue', 'admin_users', 'ops', 'usage', 'library', 'ai_logs', 'reassign']) assert.ok(m.menus.some((x) => x.key === k), k);
   });
 });
+
+describe('V14 10번 마감 알림 중복 없음', () => {
+  test('마감 당일 업무는 "오늘 마감" 1건만(마감 임박 없음), 업무별 🔔 를 정한 업무는 그 알림만', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14-10 오늘', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today, dueTime: '23:50' })).id;
+    const t2 = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14-10 내일', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 1), dueTime: '00:20', reminderMinutes: [30] })).id;
+    await tick(); await tick();
+    const a = await sql`select title from notifications where user_id = ${ctx.staffA.id} and entity_id = ${t} and type = 'due_soon'`;
+    assert.ok(a.some((x) => x.title.startsWith('오늘 마감')));
+    assert.ok(!a.some((x) => x.title.startsWith('마감 임박')), '같은 날 마감 임박 중복 없음');
+    const b = await sql`select title from notifications where user_id = ${ctx.staffA.id} and entity_id = ${t2} and type = 'due_soon'`;
+    assert.ok(!b.some((x) => x.title.startsWith('마감 임박')), '🔔 를 정한 업무는 그 알림만');
+    const { reminders } = await ctx.staffA.client.ok('GET', '/api/reminders/upcoming');
+    assert.ok(!reminders.some((r) => r.link === `/tasks/${t2}` && r.title.startsWith('마감 임박')));
+  });
+});
