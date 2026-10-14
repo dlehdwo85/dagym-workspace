@@ -6,7 +6,7 @@ import { activity } from './log';
 import { notify } from './notifications';
 import { nextDate, normalizeRule } from './recurrence';
 import { addDays, todaySeoul, weekRangeSeoul } from './time';
-import { STATUS_LABEL, type SessionUser, type TaskStatus } from './types';
+import { STATUS_LABEL, tenantOf, type SessionUser, type TaskStatus } from './types';
 import { zDate, zTime, zUuid } from './api';
 
 export const taskInput = z.object({
@@ -228,15 +228,16 @@ async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: s
   if (i.projectId) {
     const p = await sql`select org_unit_id from projects where id = ${i.projectId}`;
     if (!p[0]) throw badRequest('프로젝트가 없습니다');
-    if (u.isDemo) await assertUnitAccess(u, p[0].org_unit_id, sql); // 체험 계정은 데모 조직 프로젝트만
+    const [pt] = await sql`select 1 from org_units where id = ${p[0].org_unit_id} and tenant = ${tenantOf(u)}`; // 다른 회사·체험 조직 프로젝트 금지
+    if (!pt) throw badRequest('프로젝트가 없습니다');
   }
   const ids = [i.assigneeId, i.requestedById, ...(i.collaboratorIds ?? [])].filter(Boolean) as string[];
   if (ids.length) {
-    const ok = await sql`select id from users where id = any(${ids}::uuid[]) and status = 'active' and (is_demo or ${!u.isDemo})`;
+    const ok = await sql`select id from users where id = any(${ids}::uuid[]) and status = 'active' and tenant = ${tenantOf(u)}`;
     if (ok.length !== new Set(ids).size) throw badRequest('비활성 사용자이거나 없는 사용자입니다');
   }
-  if (u.isDemo && i.dependsOn?.length) { // 체험 계정은 데모 조직 업무만 선행으로
-    const ok = await sql`select t.id from tasks t join org_units o on o.id = t.org_unit_id where t.id = any(${i.dependsOn}::uuid[]) and o.is_demo`;
+  if (i.dependsOn?.length) { // 같은 회사 업무만 선행으로
+    const ok = await sql`select t.id from tasks t join org_units o on o.id = t.org_unit_id where t.id = any(${i.dependsOn}::uuid[]) and o.tenant = ${tenantOf(u)}`;
     if (ok.length !== new Set(i.dependsOn).size) throw badRequest('선행 업무를 찾을 수 없습니다');
   }
   if (i.startDate && i.dueDate && i.startDate > i.dueDate) throw badRequest('시작일이 마감일보다 늦습니다');
@@ -333,7 +334,7 @@ async function approverIds(sql: Sql, orgUnitId: string, projectId: string | null
     union
     select owner_id from projects where id = ${projectId} and owner_id is not null`;
   if (rows.length) return rows.map((r) => r.id);
-  const admins = await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active'`;
+  const admins = await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active' and tenant = (select tenant from org_units where id = ${orgUnitId})`;
   return admins.map((r) => r.id);
 }
 
@@ -435,7 +436,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if (set.assignee_id) await validateRefs(tx, u, { assigneeId: set.assignee_id as string } as TaskInput, cur.org_unit_id);
     if (set.team_id) await assertTeamAssign(u, set.team_id as string, tx);
     if (set.requested_by) await validateRefs(tx, u, { requestedById: set.requested_by as string } as TaskInput, cur.org_unit_id);
-    if (u.isDemo) await validateRefs(tx, u, { projectId: (set.project_id as string) ?? undefined, collaboratorIds: i.collaboratorIds, dependsOn: i.dependsOn } as TaskInput, (set.org_unit_id as string) ?? cur.org_unit_id);
+    if (set.project_id || i.collaboratorIds?.length || i.dependsOn?.length) await validateRefs(tx, u, { projectId: (set.project_id as string) ?? undefined, collaboratorIds: i.collaboratorIds, dependsOn: i.dependsOn } as TaskInput, (set.org_unit_id as string) ?? cur.org_unit_id);
     if (('photo_required' in set || 'approval_line_id' in set) && !perms.approve) throw forbidden('사진 증빙·결재선은 관리자가 정합니다');
     if (set.approval_line_id) await checkLine(tx, set.approval_line_id as string);
     if (cur.status === 'review' && 'approval_line_id' in set) throw conflict('결재 진행 중에는 결재선을 바꿀 수 없습니다');
@@ -681,7 +682,7 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
     // 멘션된 사람이 그 업무를 볼 수 없으면 협업자로 추가하지 않고 알림도 보내지 않는다 (권한 우회 방지)
     const visibleMentions: string[] = [];
     for (const m of validMentions) {
-      const [mu] = await tx`select id, email, name, role, status, timezone from users where id = ${m}`;
+      const [mu] = await tx`select id, email, name, role, status, timezone, tenant, is_demo as "isDemo" from users where id = ${m}`;
       const { taskPerms } = await import('./access');
       const p = await taskPerms({ ...(mu as any), sessionId: '' }, task, tx);
       if (p.view) visibleMentions.push(m);
@@ -703,7 +704,7 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
     const { taskPerms } = await import('./access');
     const canSee: string[] = [];
     for (const f of followers) {
-      const [fu] = await tx`select id, email, name, role, status, timezone from users where id = ${f} and status = 'active'`;
+      const [fu] = await tx`select id, email, name, role, status, timezone, tenant, is_demo as "isDemo" from users where id = ${f} and status = 'active'`;
       if (fu && (await taskPerms({ ...(fu as any), sessionId: '' }, task, tx)).view) canSee.push(f);
     }
     await notify(tx, { userIds: canSee, type: 'comment', title: parent ? `답글: ${t.title}` : `새 댓글: ${t.title}`, body: `${u.name}: ${preview}`,
@@ -736,7 +737,7 @@ export async function mentionableUsers(u: SessionUser, taskId: string) {
   const dir = await directory(u, sql);
   const out: { id: string; name: string; title: string | null }[] = [];
   for (const cand of dir.users as any[]) {
-    const p = await taskPerms({ id: cand.id, email: cand.email, name: cand.name, role: cand.role, status: 'active', timezone: 'Asia/Seoul', sessionId: '' }, task, sql);
+    const p = await taskPerms({ id: cand.id, email: cand.email, name: cand.name, role: cand.role, status: 'active', timezone: 'Asia/Seoul', sessionId: '', tenant: tenantOf(u) }, task, sql);
     if (p.view) out.push({ id: cand.id, name: cand.name, title: cand.title });
   }
   return out;
@@ -911,7 +912,7 @@ export async function decideHandoff(u: SessionUser, taskId: string, handoffId: s
 
 /** V14 8번: 이 팀에 업무를 배정할 수 있나 — 팀원(팀 업무 조회 이상)·대표/본사 관리자·"다른 팀 업무" 편집 권한 */
 async function assertTeamAssign(u: SessionUser, teamId: string, sql: Sql = db()) {
-  const [t] = await sql<{ id: string }[]>`select id from teams where id = ${teamId} and tenant = ${u.isDemo ? 'demo' : 'default'} and not archived`;
+  const [t] = await sql<{ id: string }[]>`select id from teams where id = ${teamId} and tenant = ${tenantOf(u)} and not archived`;
   if (!t) throw badRequest('팀이 없습니다');
   const lv = await teamTaskLevel(u, teamId, sql);
   const member = (await sql`select 1 from team_members where team_id = ${teamId} and user_id = ${u.id}`).length > 0;

@@ -13,7 +13,8 @@ import { RANK, menuLevel, requireMenu } from './menuPerms';
  * V13 4번 권한: 메뉴 권한(자료실: 보기 / 올리기·수정 / 삭제) × 폴더 권한(가까운 상위 폴더 설정을 상속, 메뉴 권한보다 넓힐 수 없음).
  * 내려받기 주소 발급·AI 비서 검색·읽기 모두 listLibrary / loadLibraryFile 을 거치므로 같은 검사를 받는다.
  */
-export const tenantOf = (u: SessionUser) => (u.isDemo ? 'demo' : 'default');
+export { tenantOf } from './types';
+import { tenantOf } from './types';
 const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|ps1|vbs|jar|apk|ipa|dll|sh)$/i;
 const cleanFolder = (f?: string | null) => (f ?? '').split('/').map((s) => s.trim()).filter(Boolean).join('/').slice(0, 200);
 

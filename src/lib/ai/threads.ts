@@ -10,7 +10,7 @@ import type { SessionUser } from '../types';
  * - 문맥은 최근 20개 + 앞부분 요약만 보낸다. 보관 기간 지나면 정기 실행이 지운다(기본 90일, 0 = 무기한).
  * - 업무와 무관한 질문·하루 한도·긴 입력·같은 질문 반복은 비싼 모델 호출 전에 막고 "차단됨"으로 남긴다.
  */
-const tenantOf = (u: SessionUser) => (u.isDemo ? 'demo' : 'default');
+import { tenantOf } from '../types';
 export type AiSettings = { retention_days: number; daily_limit: number; input_max: number; topic_filter: boolean; console_note: string | null };
 export async function aiSettings(tenant: string, sql: Sql = db()): Promise<AiSettings> {
   const [s] = await sql<AiSettings[]>`select retention_days, daily_limit, input_max, topic_filter, console_note from ai_settings where tenant = ${tenant}`;

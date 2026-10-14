@@ -11,7 +11,7 @@ import type { SessionUser } from './types';
  * 한 사람이 여러 팀, 팀장 1명 이상. 팀을 만들면 팀 대화방이 자동으로 생기고 팀원이 바뀌면 대화방 멤버도 맞춘다.
  * 팀 관리 = 메뉴 권한 "사용자 관리"(조회/편집). 팀 업무 열람·편집 = "팀 업무"·"다른 팀 업무 보기"(access.ts).
  */
-const tenantOf = (u: SessionUser) => (u.isDemo ? 'demo' : 'default');
+import { tenantOf } from './types';
 
 export async function listTeams(u: SessionUser) {
   const sql = db();
@@ -32,7 +32,7 @@ export const teamInput = z.object({
 async function syncMembers(sql: Sql, u: SessionUser, teamId: string, members: z.infer<typeof teamInput>['members']) {
   if (!members.some((m) => m.lead)) throw badRequest('팀장을 1명 이상 정하세요');
   const ids = [...new Set(members.map((m) => m.userId))];
-  const ok = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and status = 'active' and is_demo = ${!!u.isDemo}`;
+  const ok = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and status = 'active' and tenant = ${tenantOf(u)}`;
   if (ok.length !== ids.length) throw badRequest('넣을 수 없는 사람이 있습니다');
   await sql`delete from team_members where team_id = ${teamId} and not (user_id = any(${ids}::uuid[]))`;
   for (const m of members) await sql`insert into team_members (team_id, user_id, is_lead) values (${teamId}, ${m.userId}, ${m.lead})

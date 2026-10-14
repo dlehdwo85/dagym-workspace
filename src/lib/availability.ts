@@ -4,7 +4,7 @@ import { accessibleUnitIds, atLeast } from './access';
 import { forbidden, notFound } from './errors';
 import { listEvents } from './events';
 import { addDays, todaySeoul } from './time';
-import type { SessionUser } from './types';
+import { tenantOf, type SessionUser } from './types';
 
 const TZ = 'Asia/Seoul';
 /** 근무 시간 기준: 09:00~18:00, 점심 12:00~13:00 제외 = 하루 8시간 */
@@ -20,7 +20,7 @@ type Interval = { s: number; e: number; kind: 'meeting' | 'block' };
 
 /** 그 사람이 바쁜 시간(회의·업무 시간 블록)과 휴가·출장 날짜. 다른 사람 일정은 시간만 쓰고 제목은 돌려주지 않는다 */
 async function busyOf(userId: string, from: Date, to: Date, sql: Sql) {
-  const [p] = await sql<any[]>`select id, email, name, role, status from users where id = ${userId}`;
+  const [p] = await sql<any[]>`select id, email, name, role, status, tenant, is_demo as "isDemo" from users where id = ${userId}`;
   if (!p) throw notFound('사용자가 없습니다');
   const evs = await listEvents({ ...p, timezone: TZ, sessionId: '' } as SessionUser, from, to);
   const intervals: Interval[] = [];
@@ -88,7 +88,7 @@ export async function assertCanSeeUser(u: SessionUser, userId: string, sql: Sql 
   if (u.id === userId) return;
   if (!atLeast(u, 'site_manager')) throw forbidden('다른 사람의 일정 시간은 관리자만 볼 수 있습니다');
   const units = await accessibleUnitIds(u, sql);
-  if (units === null) return;
+  if (atLeast(u, 'admin') && (await sql`select 1 from users where id = ${userId} and tenant = ${tenantOf(u)}`).length) return;
   const ok = await sql`select 1 from memberships where user_id = ${userId} and org_unit_id = any(${units}::uuid[]) limit 1`;
   if (!ok.length) throw notFound('사용자를 찾을 수 없습니다');
 }

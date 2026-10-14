@@ -23,13 +23,13 @@ const MATES: [string, string, string][] = [['demo-mate1@workin.invalid', '체험
 async function ensureUnit(tx: Sql) {
   let [u] = await tx<{ id: string }[]>`select id from org_units where is_demo and name = ${UNIT_NAME} limit 1`;
   if (!u) {
-    [u] = await tx<{ id: string }[]>`insert into org_units (parent_id, brand_id, type, name, sort, is_demo) values (null, null, 'branch', ${UNIT_NAME}, 999, true) returning id`;
+    [u] = await tx<{ id: string }[]>`insert into org_units (parent_id, brand_id, type, name, sort, is_demo, tenant) values (null, null, 'branch', ${UNIT_NAME}, 999, true, 'demo') returning id`;
     await tx`insert into calendars (type, org_unit_id, name, color) values ('org_unit', ${u.id}, ${UNIT_NAME + ' 일정'}, '#0d9488')`;
   }
   // 예시 담당자(로그인 불가: 비밀번호 없음·이름만)
   const mates: string[] = [];
   for (const [email, name, title] of MATES) {
-    const [m] = await tx<{ id: string }[]>`insert into users (email, name, role, status, title) values (${email}, ${name}, 'staff', 'active', ${title})
+    const [m] = await tx<{ id: string }[]>`insert into users (email, name, role, status, title, tenant) values (${email}, ${name}, 'staff', 'active', ${title}, 'demo')
       on conflict (lower(email)) do update set name = excluded.name returning id`;
     await tx`insert into memberships (user_id, org_unit_id) values (${m.id}, ${u.id}) on conflict do nothing`;
     await ensurePersonalCalendar(m.id, name, tx);
@@ -82,7 +82,7 @@ async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: 
 
 export async function setupReviewAccount(actor: SessionUser, i: z.infer<typeof reviewInput>, ip: string | null) {
   if (actor.role !== 'owner') throw forbidden('대표만 만들 수 있습니다');
-  if (actor.isDemo) throw forbidden();
+  if (actor.isDemo || (actor.tenant ?? 'default') !== 'default') throw forbidden();
   const sql = db();
   const { unitId, mates } = await sql.begin(async (tx) => ensureUnit(tx as unknown as Sql));
   const [existing] = await sql<{ id: string; status: string; is_demo: boolean }[]>`select id, status, is_demo from users where lower(email) = ${i.email}`;

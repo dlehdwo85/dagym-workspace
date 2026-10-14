@@ -21,8 +21,9 @@ export const POST = handler(async ({ req }) => {
   const fails = await sql<{ c: number }[]>`select count(*)::int c from audit_logs
     where action = 'auth.login_failed' and detail->>'email' = ${i.email} and created_at > now() - interval '15 minutes'`;
   if (fails[0].c >= 10) throw new HttpError(429, 'too_many', '로그인 시도가 너무 많습니다. 15분 후 다시 시도하세요.');
-  const [u] = await sql<{ id: string; status: string; password_hash: string | null; name: string; role: string; totp_enabled_at: Date | null }[]>`
-    select id, status, password_hash, name, role, totp_enabled_at from users where lower(email) = ${i.email}`;
+  const [u] = await sql<{ id: string; status: string; password_hash: string | null; name: string; role: string; totp_enabled_at: Date | null; signup_pending: boolean; tstatus: string }[]>`
+    select u.id, u.status, u.password_hash, u.name, u.role, u.totp_enabled_at, u.signup_pending, t.status as tstatus
+    from users u join tenants t on t.id = u.tenant where lower(u.email) = ${i.email}`;
   const ok = u ? await verifyPassword(i.password, u.password_hash) : false;
   if (!u || !ok) {
     await audit(sql, null, 'auth.login_failed', 'user', u?.id ?? null, { email: i.email }, ip);
@@ -31,6 +32,11 @@ export const POST = handler(async ({ req }) => {
   if (u.status !== 'active') {
     await audit(sql, u.id, 'auth.login_blocked', 'user', u.id, { status: u.status }, ip);
     throw new HttpError(403, 'inactive', '사용이 중지된 계정입니다. 관리자에게 문의하세요.');
+  }
+  if (u.signup_pending) throw new HttpError(403, 'email_unverified', '이메일 확인이 아직 끝나지 않았습니다. 가입 때 받은 메일의 링크를 눌러 주세요.');
+  if (u.tstatus !== 'active') {
+    await audit(sql, u.id, 'auth.login_blocked', 'user', u.id, { tenant: u.tstatus }, ip);
+    throw new HttpError(403, 'tenant_blocked', '사용이 중지된 회사(공간)입니다. 문의: 워크인 운영팀');
   }
   // V12 3번: 2단계 인증을 켠 사람은 10분짜리 "코드 대기" 세션 → /api/auth/2fa/verify 로 확인해야 로그인 완료
   if (u.totp_enabled_at) {

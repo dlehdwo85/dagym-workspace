@@ -32,9 +32,9 @@ export async function feedIcs(token: string, origin: string): Promise<string | n
   const sql = db();
   const [f] = await sql<{ user_id: string }[]>`update calendar_feeds set last_used_at = now() where token_hash = ${sha256(token)} returning user_id`;
   if (!f) return null;
-  const [r] = await sql<any[]>`select id, email, name, role, status, timezone, is_demo from users where id = ${f.user_id}`;
+  const [r] = await sql<any[]>`select id, email, name, role, status, timezone, is_demo, tenant from users where id = ${f.user_id}`;
   if (!r || r.status !== 'active') return null;
-  const u: SessionUser = { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: '', isDemo: r.is_demo };
+  const u: SessionUser = { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: '', isDemo: r.is_demo, tenant: r.tenant };
   const from = DateTime.now().minus({ days: 30 }).toJSDate(), to = DateTime.now().plus({ days: 180 }).toJSDate();
   const evs = (await listEvents(u, from, to)).filter((e: any) => !e.masked && (e.ownerId === u.id || e.createdBy === u.id || e.attendees?.some((a: any) => a.user_id === u.id)));
   const tasks = await sql<{ id: string; title: string; due_date: string; due_time: string | null; status: string; updated_at: Date }[]>`

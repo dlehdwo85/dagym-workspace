@@ -5,7 +5,7 @@ import { badRequest, forbidden, notFound } from './errors';
 import { activity, logError } from './log';
 import { notify } from './notifications';
 import { addDays, todaySeoul } from './time';
-import type { SessionUser } from './types';
+import { tenantOf, type SessionUser } from './types';
 import { zUuid } from './api';
 
 /**
@@ -54,7 +54,7 @@ export async function listRules(u: SessionUser) {
       (select count(*)::int from automation_runs x where x.rule_id = r.id) as run_count,
       (select max(created_at) from automation_runs x where x.rule_id = r.id) as last_run
     from automation_rules r left join org_units o on o.id = r.org_unit_id left join projects p on p.id = r.project_id
-    where ${units === null ? sql`true` : sql`(r.org_unit_id = any(${units}::uuid[]) or p.org_unit_id = any(${units}::uuid[]) or (r.org_unit_id is null and r.project_id is null and ${!u.isDemo}))`}
+    where ${units === null ? sql`true` : sql`(r.org_unit_id = any(${units}::uuid[]) or p.org_unit_id = any(${units}::uuid[]) or (r.org_unit_id is null and r.project_id is null and r.tenant = ${tenantOf(u)}))`}
     order by r.created_at desc`;
   const runs = await sql`select x.id, x.rule_id, x.task_id, x.status, x.detail, x.created_at, t.title as task_title, r.name as rule_name
     from automation_runs x join automation_rules r on r.id = x.rule_id left join tasks t on t.id = x.task_id and ${taskVisibleSql(sql, u, units)}

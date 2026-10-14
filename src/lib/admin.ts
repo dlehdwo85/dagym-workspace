@@ -5,7 +5,7 @@ import { revokeAllSessions } from './auth';
 import { newToken, sha256, hashPassword } from './crypto';
 import { badRequest, conflict, forbidden, notFound } from './errors';
 import { audit } from './log';
-import { ROLE_RANK, type Role, type SessionUser } from './types';
+import { tenantOf, ROLE_RANK, type Role, type SessionUser } from './types';
 import { zUuid } from './api';
 
 export const inviteInput = z.object({
@@ -28,20 +28,22 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
   if (i.role !== 'owner' && i.role !== 'admin' && i.orgUnitIds.length === 0) throw badRequest('소속 조직을 1개 이상 선택하세요');
   const existing = await sql<{ id: string; status: string }[]>`select id, status from users where lower(email) = ${i.email}`;
   if (existing[0] && existing[0].status === 'active') throw conflict('이미 활성 사용자입니다');
-  const units = i.orgUnitIds.length ? await sql`select id from org_units where id = any(${i.orgUnitIds}::uuid[])` : [];
+  const tn = tenantOf(actor);
+  if (existing[0]) { const [et] = await sql<{ tenant: string }[]>`select tenant from users where id = ${existing[0].id}`; if (!homeTenants(actor).includes(et.tenant)) throw conflict('이미 다른 곳에서 쓰는 이메일입니다'); }
+  const units = i.orgUnitIds.length ? await sql`select id from org_units where id = any(${i.orgUnitIds}::uuid[]) and tenant = any(${homeTenants(actor)})` : [];
   if (units.length !== i.orgUnitIds.length) throw badRequest('없는 조직이 포함되어 있습니다');
   // V10 요금제 사용자 수 (이미 초대 중인 사람을 다시 초대하는 건 셈하지 않음)
   if (existing[0]?.status !== 'invited') {
     const demoOnly = i.role !== 'owner' && i.role !== 'admin' && i.orgUnitIds.length > 0
       && (await sql`select 1 from org_units where id = any(${i.orgUnitIds}::uuid[]) and not is_demo`).length === 0;
-    await (await import('./plans')).assertSeat(demoOnly ? 'demo' : 'default', sql);
+    await (await import('./plans')).assertSeat(demoOnly ? 'demo' : tn, sql);
   }
   const token = newToken();
   return sql.begin(async (tx) => {
     let userId = existing[0]?.id;
     if (!userId) {
       const [u] = await tx<{ id: string }[]>`
-        insert into users (email, name, role, status, title) values (${i.email}, ${i.name}, ${i.role}, 'invited', ${i.title ?? null}) returning id`;
+        insert into users (email, name, role, status, title, tenant) values (${i.email}, ${i.name}, ${i.role}, 'invited', ${i.title ?? null}, ${tn}) returning id`;
       userId = u.id;
     } else {
       await tx`update users set name = ${i.name}, role = ${i.role}, title = ${i.title ?? null}, updated_at = now() where id = ${userId}`;
@@ -97,6 +99,8 @@ export const userPatch = z.object({
 export async function updateUser(actor: SessionUser, id: string, p: z.infer<typeof userPatch>, ip: string | null) {
   await (await import('./menuPerms')).requireMenu(actor, 'admin_users', 'edit');
   const sql = db();
+  await assertHomeUser(actor, id, sql);
+  if (p.orgUnitIds?.length && (await sql`select id from org_units where id = any(${p.orgUnitIds}::uuid[]) and tenant = any(${homeTenants(actor)})`).length !== new Set(p.orgUnitIds).size) throw badRequest('없는 조직이 포함되어 있습니다');
   return sql.begin(async (tx) => {
     const [cur] = await tx<{ id: string; role: Role; status: string; email: string }[]>`select id, role, status, email from users where id = ${id} for update`;
     if (!cur) throw notFound('사용자가 없습니다');
@@ -105,7 +109,7 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
     if (id === actor.id && (p.status && p.status !== 'active')) throw badRequest('본인 계정은 비활성화할 수 없습니다');
     if (id === actor.id && p.role && p.role !== actor.role) throw badRequest('본인 권한은 바꿀 수 없습니다');
     if (cur.role === 'owner' && (p.role && p.role !== 'owner' || p.status && p.status !== 'active')) {
-      const owners = await tx`select 1 from users where role = 'owner' and status = 'active' and id <> ${id}`;
+      const owners = await tx`select 1 from users where role = 'owner' and status = 'active' and id <> ${id} and tenant = ${tenantOf(actor)}`;
       if (!owners.length) throw badRequest('마지막 대표 계정은 변경할 수 없습니다');
     }
     const set: Record<string, unknown> = {};
@@ -142,6 +146,7 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
 export async function createPasswordReset(actor: SessionUser, userId: string, ip: string | null) {
   await (await import('./menuPerms')).requireMenu(actor, 'admin_users', 'edit');
   const sql = db();
+  await assertHomeUser(actor, userId, sql);
   const [u] = await sql<{ status: string; role: Role }[]>`select status, role from users where id = ${userId}`;
   if (!u || u.status !== 'active') throw badRequest('활성 사용자만 비밀번호를 재설정할 수 있습니다');
   if (u.role === 'owner' && actor.role !== 'owner') throw forbidden('대표 계정은 대표만 재설정할 수 있습니다');
@@ -180,9 +185,12 @@ export async function createOrgUnit(actor: SessionUser, i: z.infer<typeof orgUni
   await (await import('./menuPerms')).requireMenu(actor, 'ops', 'edit');
   const sql = db();
   if (i.isDemo && i.parentId) throw badRequest('앱 심사용 격리 조직은 최상위(상위 조직 없음)로만 만들 수 있습니다');
+  if (i.isDemo && tenantOf(actor) !== 'default') throw badRequest('격리 조직은 만들 수 없습니다');
+  if (i.parentId) await assertHomeUnit(actor, i.parentId, sql);
+  const tn = i.isDemo ? 'demo' : tenantOf(actor);
   return sql.begin(async (tx) => {
     const [o] = await tx<{ id: string }[]>`
-      insert into org_units (parent_id, brand_id, type, name, sort, is_demo) values (${i.parentId ?? null}, ${i.brandId ?? null}, ${i.type}, ${i.name}, ${i.sort ?? 0}, ${!!i.isDemo})
+      insert into org_units (parent_id, brand_id, type, name, sort, is_demo, tenant) values (${i.parentId ?? null}, ${i.brandId ?? null}, ${i.type}, ${i.name}, ${i.sort ?? 0}, ${!!i.isDemo}, ${tn})
       returning id`;
     await tx`insert into calendars (type, org_unit_id, name, color) values ('org_unit', ${o.id}, ${i.name + ' 일정'},
       ${i.brandId === 'dagym' ? '#ea580c' : i.brandId === 'hilink' ? '#2563eb' : i.brandId === 'bodylab' ? '#059669' : '#475569'})`;
@@ -195,6 +203,9 @@ export async function updateOrgUnit(actor: SessionUser, id: string, i: Partial<z
   await (await import('./menuPerms')).requireMenu(actor, 'ops', 'edit');
   const sql = db();
   if (i.parentId === id) throw badRequest('자기 자신을 상위 조직으로 지정할 수 없습니다');
+  await assertHomeUnit(actor, id, sql);
+  if (i.parentId) await assertHomeUnit(actor, i.parentId, sql);
+  if (i.isDemo !== undefined && tenantOf(actor) !== 'default') throw badRequest('격리 조직은 만들 수 없습니다');
   if (i.parentId) {
     const cyc = await sql`with recursive d as (select id from org_units where id = ${id} union select c.id from org_units c join d on c.parent_id = d.id)
       select 1 from d where id = ${i.parentId}`;
@@ -216,7 +227,7 @@ export async function updateOrgUnit(actor: SessionUser, id: string, i: Partial<z
   }
   if (!Object.keys(set).length) return { ok: true };
   await sql.begin(async (tx) => {
-    if (set.is_demo !== undefined) { await tx`update org_units set is_demo = ${set.is_demo as boolean} where id = ${id}`; delete set.is_demo; await syncDemoFlag(tx, (await tx<{ user_id: string }[]>`select user_id from memberships where org_unit_id = ${id}`).map((r) => r.user_id)); if (!Object.keys(set).length) { await audit(tx, actor.id, 'org.update', 'org_unit', id, i, ip); return; } }
+    if (set.is_demo !== undefined) { await tx`update org_units set is_demo = ${set.is_demo as boolean}, tenant = ${set.is_demo ? 'demo' : 'default'} where id = ${id}`; delete set.is_demo; await syncDemoFlag(tx, (await tx<{ user_id: string }[]>`select user_id from memberships where org_unit_id = ${id}`).map((r) => r.user_id)); if (!Object.keys(set).length) { await audit(tx, actor.id, 'org.update', 'org_unit', id, i, ip); return; } }
     await tx`update org_units set ${tx(set as never, ...(Object.keys(set) as never[]))} where id = ${id}`;
     if (i.name) await tx`update calendars set name = ${i.name + ' 일정'} where org_unit_id = ${id}`;
     await audit(tx, actor.id, 'org.update', 'org_unit', id, i, ip);
@@ -228,13 +239,12 @@ export async function updateOrgUnit(actor: SessionUser, id: string, i: Partial<z
 export async function directory(u: SessionUser, sql: Sql = db()) {
   const units = await accessibleUnitIds(u, sql);
   const orgUnits = await sql`select id, parent_id, brand_id, type, name, active, sort from org_units
-    where ${units === null ? sql`not is_demo` : sql`id = any(${units}::uuid[])`} order by sort, name`;
+    where id = any(${units ?? []}::uuid[]) order by sort, name`;
   const users = await sql`
     select u.id, u.name, u.title, u.role, u.email,
       coalesce(array_agg(m.org_unit_id) filter (where m.org_unit_id is not null), '{}') as org_unit_ids
     from users u left join memberships m on m.user_id = u.id
-    where u.status = 'active' and u.is_demo = ${!!u.isDemo} and (${units === null ? sql`true` : sql`
-      (u.role in ('owner','admin') and ${!u.isDemo}) or exists (select 1 from memberships mm where mm.user_id = u.id and mm.org_unit_id = any(${units}::uuid[]))`})
+    where u.status = 'active' and u.tenant = ${tenantOf(u)} and (u.role in ('owner','admin') or exists (select 1 from memberships mm where mm.user_id = u.id and mm.org_unit_id = any(${units ?? []}::uuid[])))
     group by u.id order by u.name`;
   const brands = await sql`select id, name, color from brands order by sort`;
   return { brands, orgUnits, users, accessibleUnitIds: units, isAdmin: isAdmin(u) };
@@ -247,4 +257,17 @@ export async function syncDemoFlag(tx: Sql, userIds: string[]) {
       and exists (select 1 from memberships m join org_units o on o.id = m.org_unit_id where m.user_id = u.id and o.is_demo)
       and not exists (select 1 from memberships m join org_units o on o.id = m.org_unit_id where m.user_id = u.id and not o.is_demo))
     where u.id = any(${userIds}::uuid[])`;
+  // V15: 체험 격리는 기본 회사 안에서만 — 표시가 바뀌면 회사(tenant)도 따라간다
+  await tx`update users set tenant = case when is_demo then 'demo' else 'default' end where id = any(${userIds}::uuid[]) and tenant in ('default','demo')`;
+}
+
+/** 관리 화면에서 다룰 수 있는 회사: 기본 회사 관리자는 체험(격리) 조직까지 */
+export const homeTenants = (u: SessionUser) => (tenantOf(u) === 'default' ? ['default', 'demo'] : [tenantOf(u)]);
+export async function assertHomeUnit(u: SessionUser, unitId: string, sql: Sql = db()) {
+  const [o] = await sql<{ tenant: string }[]>`select tenant from org_units where id = ${unitId}`;
+  if (!o || !homeTenants(u).includes(o.tenant)) throw notFound('조직이 없습니다');
+}
+export async function assertHomeUser(u: SessionUser, userId: string, sql: Sql = db()) {
+  const [o] = await sql<{ tenant: string }[]>`select tenant from users where id = ${userId}`;
+  if (!o || !homeTenants(u).includes(o.tenant)) throw notFound('사용자가 없습니다');
 }

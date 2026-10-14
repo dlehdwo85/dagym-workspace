@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { db, type Sql } from './db';
 import { forbidden, notFound } from './errors';
 import { audit } from './log';
-import type { Role, SessionUser } from './types';
+import { tenantOf, type Role, type SessionUser } from './types';
 
 /**
  * V13 2번 메뉴 권한: 메뉴 × 등급 스위치 + 사람별 예외 (대표만 바꿈). 서버가 모든 API 에서 403/404 로 강제한다.
@@ -34,14 +34,18 @@ export const LEVEL_LABEL: Record<string, string> = { none: '끔', view: '조회'
 export const levelLabel = (menu: string, lv: string) => (menu === 'library' && lv === 'edit' ? '올리기·수정' : menu.startsWith('reassign') ? (lv === 'use' ? '켬' : '끔') : menu === 'assistant' ? (lv === 'use' ? '사용' : '끔') : LEVEL_LABEL[lv] ?? lv);
 export const RANK: Record<string, number> = { none: 0, view: 1, use: 1, edit: 2, delete: 3 };
 const topLevel = (menu: MenuKey) => MENUS[menu].levels[MENUS[menu].levels.length - 1] as string;
+ /** 개인 공간(1인)에서는 관리·회사 메뉴를 숨긴다 */
+const PERSONAL_OFF = new Set<string>(['team_reports', 'revenue', 'admin_users', 'ops', 'ai_logs', 'team_tasks', 'team_tasks_all', 'reassign_requester', 'reassign_handoff']);
 const ROLES: Role[] = ['owner', 'admin', 'dept_lead', 'site_manager', 'staff'];
 
 export async function menuLevel(u: SessionUser, menu: MenuKey, sql: Sql = db()): Promise<string> {
   if (u.isDemo && menu === 'revenue') return 'none';
+  if ((menu === 'revenue' || menu === 'ops') && tenantOf(u) !== 'default') return 'none'; // 현장 매출·서버 운영은 기본 회사 전용
+  if (u.personal && PERSONAL_OFF.has(menu)) return 'none'; // 개인 공간: 관리 메뉴 숨김
   if (u.role === 'owner' && !u.isDemo) return topLevel(menu); // 대표 본인 권한은 끌 수 없다(잠김 방지)
   const [o] = await sql<{ level: string }[]>`select level from menu_user_perms where menu = ${menu} and user_id = ${u.id}`;
   if (o) return o.level;
-  const [r] = await sql<{ level: string }[]>`select level from menu_role_perms where menu = ${menu} and role = ${u.role}`;
+  const [r] = await sql<{ level: string }[]>`select level from menu_role_perms_t where tenant = ${tenantOf(u)} and menu = ${menu} and role = ${u.role}`;
   return r?.level ?? MENUS[menu].defaults[u.role];
 }
 export async function menuLevels(u: SessionUser) {
@@ -68,8 +72,8 @@ export async function menuMatrix(u: SessionUser) {
   requireOwner(u);
   const sql = db();
   const [roles, users] = await Promise.all([
-    sql<{ menu: string; role: string; level: string }[]>`select menu, role, level from menu_role_perms`,
-    sql`select p.menu, p.user_id, p.level, u.name from menu_user_perms p join users u on u.id = p.user_id order by u.name`,
+    sql<{ menu: string; role: string; level: string }[]>`select menu, role, level from menu_role_perms_t where tenant = ${tenantOf(u)}`,
+    sql`select p.menu, p.user_id, p.level, u.name from menu_user_perms p join users u on u.id = p.user_id where u.tenant = ${tenantOf(u)} order by u.name`,
   ]);
   const matrix: Record<string, Record<string, string>> = {};
   for (const [m, def] of Object.entries(MENUS)) {
@@ -93,11 +97,11 @@ export async function setMenuPerm(u: SessionUser, i: z.infer<typeof menuPermInpu
   if (!!i.role === !!i.userId) throw forbidden('등급 또는 사람 중 하나를 고르세요');
   if (i.role) {
     if (i.role === 'owner') throw forbidden('대표 본인 권한은 끌 수 없습니다(잠김 방지)');
-    if (i.level === null) await sql`delete from menu_role_perms where menu = ${i.menu} and role = ${i.role}`;
-    else await sql`insert into menu_role_perms (menu, role, level, updated_by) values (${i.menu}, ${i.role}, ${i.level}, ${u.id})
-      on conflict (menu, role) do update set level = excluded.level, updated_by = excluded.updated_by, updated_at = now()`;
+    if (i.level === null) await sql`delete from menu_role_perms_t where tenant = ${tenantOf(u)} and menu = ${i.menu} and role = ${i.role}`;
+    else await sql`insert into menu_role_perms_t (tenant, menu, role, level, updated_by) values (${tenantOf(u)}, ${i.menu}, ${i.role}, ${i.level}, ${u.id})
+      on conflict (tenant, menu, role) do update set level = excluded.level, updated_by = excluded.updated_by, updated_at = now()`;
   } else {
-    const [t] = await sql<{ role: string }[]>`select role from users where id = ${i.userId!}`;
+    const [t] = await sql<{ role: string }[]>`select role from users where id = ${i.userId!} and tenant = ${tenantOf(u)}`;
     if (!t) throw notFound();
     if (t.role === 'owner') throw forbidden('대표 본인 권한은 끌 수 없습니다(잠김 방지)');
     if (i.level === null) await sql`delete from menu_user_perms where menu = ${i.menu} and user_id = ${i.userId!}`;

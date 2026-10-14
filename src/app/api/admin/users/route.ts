@@ -1,7 +1,7 @@
 import { handler, body, clientIp } from '@/lib/api';
 import { db } from '@/lib/db';
 import { requireMenu } from '@/lib/menuPerms';
-import { inviteInput, inviteUser } from '@/lib/admin';
+import { homeTenants, inviteInput, inviteUser } from '@/lib/admin';
 
 export const GET = handler(async ({ user }) => {
   await requireMenu(user, 'admin_users', 'view');
@@ -12,6 +12,7 @@ export const GET = handler(async ({ user }) => {
       (select count(*)::int from sessions s where s.user_id = u.id and s.revoked_at is null and s.expires_at > now()) as active_sessions,
       (select max(i.expires_at) from invitations i where i.user_id = u.id and i.accepted_at is null and i.revoked_at is null) as invite_expires_at
     from users u left join memberships m on m.user_id = u.id
+    where u.tenant = any(${homeTenants(user)})
     group by u.id order by u.status = 'active' desc, u.name`;
   return { users };
 });

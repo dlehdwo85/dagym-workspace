@@ -33,7 +33,7 @@ export async function listRevenue(u: SessionUser, year: number) {
   const sql = db();
   await requireRevenue(u, sql);
   const [units, rows] = await Promise.all([
-    sql`select o.id, o.name, o.type, o.brand_id from org_units o where o.active and not o.is_demo and o.type in ('branch', 'site') order by o.brand_id nulls last, o.sort, o.name`,
+    sql`select o.id, o.name, o.type, o.brand_id from org_units o where o.active and o.tenant = 'default' and o.type in ('branch', 'site') order by o.brand_id nulls last, o.sort, o.name`,
     sql`select r.id, r.org_unit_id, to_char(r.month, 'YYYY-MM') as month, r.revenue::float8 as revenue, r.expense::float8 as expense, r.members,
           r.target::float8 as target, r.note, r.source, r.source_file, r.source_file_ids, r.updated_at, u.name as updated_by_name
         from revenue_entries r left join users u on u.id = r.updated_by
@@ -44,7 +44,7 @@ export async function listRevenue(u: SessionUser, year: number) {
 }
 
 async function upsert(sql: Sql, u: SessionUser | null, i: RevenueInput, source: 'manual' | 'csv' | 'gpt', file: string | null) {
-  const unit = await sql`select id from org_units where id = ${i.orgUnitId} and not is_demo`;
+  const unit = await sql`select id from org_units where id = ${i.orgUnitId} and tenant = 'default'`;
   if (!unit.length) throw badRequest('현장을 찾을 수 없습니다');
   await sql`insert into revenue_entries (org_unit_id, month, revenue, expense, members, target, note, source, source_file, created_by, updated_by)
     values (${i.orgUnitId}, ${i.month + '-01'}, ${i.revenue}, ${i.expense ?? 0}, ${i.members ?? null}, ${i.target ?? null}, ${i.note ?? null}, ${source}, ${file}, ${u?.id ?? null}, ${u?.id ?? null})
@@ -55,7 +55,7 @@ async function upsert(sql: Sql, u: SessionUser | null, i: RevenueInput, source: 
 /** 항목별 입력(표준 양식·GPT): 들어온 항목만 바꾸고 나머지 값은 유지 */
 type Partial1 = { orgUnitId: string; month: string; revenue?: number; expense?: number; members?: number; target?: number; file?: string | null; note?: string | null };
 async function upsertPartial(sql: Sql, u: SessionUser | null, i: Partial1, source: 'csv' | 'gpt' | 'ai', fileIds: string[] | null = null) {
-  const unit = await sql`select id from org_units where id = ${i.orgUnitId} and not is_demo`;
+  const unit = await sql`select id from org_units where id = ${i.orgUnitId} and tenant = 'default'`;
   if (!unit.length) throw badRequest('현장을 찾을 수 없습니다');
   const v = (x: number | undefined) => (x === undefined ? null : x);
   await sql`insert into revenue_entries (org_unit_id, month, revenue, expense, members, target, note, source, source_file, source_file_ids, created_by, updated_by)
@@ -77,7 +77,7 @@ const normMonth = (m: string) => (m ?? '').trim().replace(/[./]/g, '-').replace(
 
 /** 항목 행들을 검사해 현장·월별로 묶는다. 오류는 줄 번호와 함께 */
 async function collectItems(sql: Sql, rows: { line: number; r: ItemRow }[]) {
-  const units = await sql<{ id: string; name: string }[]>`select id, name from org_units where not is_demo`;
+  const units = await sql<{ id: string; name: string }[]>`select id, name from org_units where tenant = 'default'`;
   const byName = new Map(units.map((x) => [x.name.trim(), x.id]));
   const out = new Map<string, Partial1>(); const errors: { line: number; message: string }[] = [];
   for (const { line, r } of rows) {
@@ -157,7 +157,7 @@ export async function importRevenueCsv(u: SessionUser, csv: string, fileName: st
   }
   const cols = rawHead.map((h) => HEAD[h] ?? '');
   for (const need of ['unit', 'month', 'revenue']) if (!cols.includes(need)) throw badRequest(`머리글에 ${({ unit: '현장', month: '월', revenue: '매출' } as Record<string, string>)[need]} 칸이 없습니다`);
-  const units = await sql<{ id: string; name: string }[]>`select id, name from org_units where not is_demo`;
+  const units = await sql<{ id: string; name: string }[]>`select id, name from org_units where tenant = 'default'`;
   const byName = new Map(units.map((x) => [x.name.trim(), x.id]));
   const rows: RevenueInput[] = []; const errors: { line: number; message: string }[] = [];
   for (let li = 1; li < lines.length; li++) {
@@ -239,10 +239,10 @@ async function aiInput(sql: Sql, period: string) {
   const rows = await sql<{ site: string; month: string; revenue: number; expense: number; members: number | null; target: number | null }[]>`
     select o.name as site, to_char(r.month, 'YYYY-MM') as month, r.revenue::float8 as revenue, r.expense::float8 as expense, r.members, r.target::float8 as target
     from revenue_entries r join org_units o on o.id = r.org_unit_id
-    where not o.is_demo and r.month >= ${from} and r.month <= ${period + '-01'} order by o.name, r.month`;
+    where o.tenant = 'default' and r.month >= ${from} and r.month <= ${period + '-01'} order by o.name, r.month`;
   const prevYear = `${y - 1}-${String(m).padStart(2, '0')}`;
   const prevRows = await sql<{ site: string; revenue: number }[]>`select o.name as site, r.revenue::float8 as revenue from revenue_entries r join org_units o on o.id = r.org_unit_id
-    where not o.is_demo and r.month = ${prevYear + '-01'}`;
+    where o.tenant = 'default' and r.month = ${prevYear + '-01'}`;
   return { period, unit: '원(회원 수는 명)', rows, sameMonthLastYear: prevRows.map((r) => ({ site: r.site, month: prevYear, revenue: r.revenue })) };
 }
 
@@ -301,7 +301,7 @@ export async function aiExtract(u: SessionUser, fileIds: string[]) {
   const { loadLibraryFile, tenantOf } = await import('./library');
   const files = await Promise.all(fileIds.map((id) => loadLibraryFile(u, id)));
   const fb = await fileBlocksFor(u, fileIds);
-  const units = await sql<{ name: string }[]>`select name from org_units where active and not is_demo and type in ('branch', 'site') order by name`;
+  const units = await sql<{ name: string }[]>`select name from org_units where active and tenant = 'default' and type in ('branch', 'site') order by name`;
   const provider = anthropicProvider({ tier: 'fast' }); // 표 읽기는 가벼운 모델
   const schema = { type: 'object', additionalProperties: false, required: ['rows', 'notes'], properties: {
     rows: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['site', 'month', 'item', 'amount'], properties: {

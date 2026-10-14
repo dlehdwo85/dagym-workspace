@@ -4,7 +4,7 @@ import { accessibleUnitIds, isAdmin, loadTaskForUser } from './access';
 import { badRequest, forbidden, notFound } from './errors';
 import { activity, audit } from './log';
 import { notify } from './notifications';
-import type { SessionUser } from './types';
+import { tenantOf, type SessionUser } from './types';
 import { zUuid } from './api';
 
 /** 결재선 단계: 역할(해당 업무 조직과 상위 조직의 그 역할 사용자) 또는 지정 사용자 */
@@ -26,7 +26,7 @@ export async function listLines(u: SessionUser) {
   const sql = db();
   const units = await accessibleUnitIds(u, sql);
   return sql`select l.id, l.name, l.org_unit_id, l.steps, l.active, o.name as org_unit_name from approval_lines l left join org_units o on o.id = l.org_unit_id
-    where ((l.org_unit_id is null and ${!u.isDemo}) or ${units === null ? sql`true` : sql`l.org_unit_id = any(${units}::uuid[])`}) order by l.org_unit_id nulls first, l.name`;
+    where ((l.org_unit_id is null and l.tenant = ${tenantOf(u)}) or ${units === null ? sql`true` : sql`l.org_unit_id = any(${units}::uuid[])`}) order by l.org_unit_id nulls first, l.name`;
 }
 
 export async function saveLine(u: SessionUser, id: string | null, i: z.infer<typeof lineInput>, ip: string | null) {

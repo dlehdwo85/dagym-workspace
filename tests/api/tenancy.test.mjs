@@ -1,0 +1,147 @@
+// V15 공개 가입 · 회사(tenant) 분리 시험: 가입한 다른 회사·개인 공간에서 기존 회사 데이터가 절대 보이지 않아야 한다
+import { test, before, after, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { Client, bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
+
+let srv, ctx, sql;
+const today = seoulToday();
+const D = { task: null, event: null, proj: null, room: null, companyCal: null };
+
+before(async () => {
+  await resetDb();
+  srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SIGNUP_IP_PER_DAY: '3' });
+  sql = testDb();
+  ctx = await bootstrap();
+  // 기존 회사(default) 데이터
+  D.task = (await ctx.owner.ok('POST', '/api/tasks', { title: '기본회사 비밀 업무', orgUnitId: ctx.siteA, dueDate: addDays(today, 2) })).id;
+  const cals = (await ctx.owner.ok('GET', '/api/calendars')).calendars;
+  D.companyCal = cals.find((c) => c.type === 'company')?.id;
+  D.event = (await ctx.owner.ok('POST', '/api/events', { calendarId: D.companyCal, title: '기본회사 비밀 회의', start: `${addDays(today, 1)}T10:00:00+09:00`, end: `${addDays(today, 1)}T11:00:00+09:00` })).id;
+  D.proj = (await ctx.owner.ok('POST', '/api/projects', { name: '기본회사 비밀 프로젝트', orgUnitId: ctx.siteA })).id;
+  D.room = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.staffA.id })).id;
+  await ctx.owner.ok('POST', '/api/templates', { name: '기본회사 전사 템플릿', payload: { title: '전사' } });
+});
+after(async () => { srv?.proc.kill(); await sql?.end(); });
+
+const form = (o) => ({ password: 'signup-pass-1234', agree: { terms: true, privacy: true, ai: true, marketing: false }, ...o });
+async function join(o) {
+  const c = new Client(o.email);
+  const r = await c.ok('POST', '/api/auth/signup', form(o));
+  assert.ok(r.devLink, '개발·시험에서는 확인 링크를 돌려준다');
+  return { c, link: r.devLink };
+}
+
+let P, T;
+describe('V15 공개 가입 → 이메일 확인 → 로그인', () => {
+  test('개인으로 시작: 확인 전 로그인 불가, 링크 누르면 로그인, 관리 메뉴 숨김', async () => {
+    const { c, link } = await join({ email: 'solo@example.com', name: '혼자씨', mode: 'personal' });
+    const bad = await new Client().post('/api/auth/login', { email: 'solo@example.com', password: 'signup-pass-1234' });
+    assert.equal(bad.status, 403); assert.equal(bad.body.error.code, 'email_unverified');
+    await c.ok('POST', '/api/auth/verify', { token: link.split('/').pop() });
+    const me = await c.ok('GET', '/api/auth/me');
+    assert.equal(me.user.role, 'owner'); assert.equal(me.user.personal, true); assert.match(me.user.tenant, /^t_/);
+    // 같은 링크 재사용 불가
+    assert.equal((await new Client().post('/api/auth/verify', { token: link.split('/').pop() })).status, 400);
+    assert.equal((await c.get('/api/admin/users')).status, 404, '개인 공간: 사용자 관리 메뉴 없음');
+    // 업무 만들기: 지시자 = 본인
+    const t = await c.ok('POST', '/api/tasks', { title: '내 첫 업무', orgUnitId: me.orgUnits[0].id });
+    const got = await c.ok('GET', `/api/tasks/${t.id}`);
+    assert.equal((got.task ?? got).requested_by ?? (got.task ?? got).created_by, me.user.id);
+    P = { c, me };
+  });
+  test('팀으로 시작: 회사 이름 필수, 동의 필수, 봇(숨은 칸)은 아무것도 안 만듦', async () => {
+    const c = new Client();
+    assert.equal((await c.post('/api/auth/signup', form({ email: 'x@example.com', name: 'x', mode: 'team' }))).status, 400);
+    assert.equal((await c.post('/api/auth/signup', { ...form({ email: 'x@example.com', name: 'x', mode: 'personal' }), agree: { terms: true, privacy: false } })).status, 400);
+    const bot = await c.ok('POST', '/api/auth/signup', form({ email: 'bot@example.com', name: 'bot', mode: 'personal', website: 'http://spam' }));
+    assert.ok(!bot.devLink);
+    assert.equal((await sql`select 1 from users where email = 'bot@example.com'`).length, 0);
+    const { c: tc, link } = await join({ email: 'boss@other.test', name: '남사장', mode: 'team', company: '남의상사' });
+    await tc.ok('POST', '/api/auth/verify', { token: link.split('/').pop() });
+    const me = await tc.ok('GET', '/api/auth/me');
+    assert.equal(me.user.personal, false);
+    T = { c: tc, me };
+    // 이미 있는 이메일로 가입해도 같은 안내(가입 여부 드러내지 않음), 계정은 새로 안 생김
+    const dup = await new Client().ok('POST', '/api/auth/signup', form({ email: 'ceo@dagym.test', name: '사칭', mode: 'personal' }));
+    assert.ok(!dup.devLink);
+    assert.equal((await sql`select count(*)::int n from users where lower(email) = 'ceo@dagym.test'`)[0].n, 1);
+  });
+  test('같은 IP 하루 가입 수 제한', async () => {
+    await join({ email: 'third@example.com', name: '셋째', mode: 'personal' });
+    const r = await new Client().post('/api/auth/signup', form({ email: 'fourth@example.com', name: '넷째', mode: 'personal' }));
+    assert.equal(r.status, 429);
+  });
+});
+
+describe('V15 회사 간 분리 — 다른 회사 데이터는 404·빈 목록', () => {
+  test('가입한 회사 대표에게 기존 회사 업무·일정·프로젝트·사람·조직·대화가 안 보인다', async () => {
+    for (const X of [T, P]) {
+      const c = X.c;
+      assert.equal((await c.get(`/api/tasks/${D.task}`)).status, 404);
+      assert.equal((await c.get(`/api/events/${D.event}`)).status, 404);
+      assert.ok((await c.get(`/api/projects/${D.proj}`)).status >= 403);
+      const tasks = (await c.ok('GET', '/api/tasks')).tasks;
+      assert.ok(!tasks.some((t) => t.id === D.task));
+      const evs = (await c.ok('GET', `/api/events?from=${today}T00:00:00Z&to=${addDays(today, 5)}T00:00:00Z`)).events;
+      assert.ok(!evs.some((e) => e.id === D.event || /기본회사/.test(e.title)));
+      const cals = (await c.ok('GET', '/api/calendars')).calendars;
+      assert.ok(!cals.some((x) => x.id === D.companyCal));
+      const projs = (await c.ok('GET', '/api/projects')).projects;
+      assert.ok(!projs.some((p) => p.id === D.proj));
+      const org = await c.ok('GET', '/api/org');
+      assert.deepEqual(org.users.map((u) => u.id), [X.me.user.id], '디렉터리에는 우리 회사 사람만');
+      assert.ok(org.orgUnits.every((o) => X.me.orgUnits.some((m) => m.id === o.id)));
+      const s = await c.ok('GET', `/api/search?q=${encodeURIComponent('기본회사')}`);
+      assert.equal(JSON.stringify(s).includes('기본회사'), false, '검색에도 안 나옴');
+      const rooms = await c.ok('GET', '/api/chat/rooms');
+      assert.ok(!JSON.stringify(rooms).includes(D.room));
+      const tpl = await c.ok('GET', '/api/templates');
+      assert.ok(!JSON.stringify(tpl).includes('기본회사'));
+      assert.equal((await c.get(`/api/chat/messages?roomId=${D.room}`)).status >= 400, true);
+      // 기본 회사 전용 메뉴
+      assert.equal((await c.get('/api/revenue?year=2026')).status, 404);
+      assert.equal((await c.get('/api/admin/ops')).status, 404);
+      assert.equal((await c.get('/api/admin/audit')).status, 404);
+    }
+  });
+  test('다른 회사 사람·조직을 배정·수정할 수 없다', async () => {
+    const c = T.c; const unit = T.me.orgUnits[0].id;
+    assert.equal((await c.post('/api/tasks', { title: 'x', orgUnitId: unit, assigneeId: ctx.staffA.id })).status, 400);
+    assert.ok((await c.post('/api/tasks', { title: 'x', orgUnitId: ctx.siteA })).status >= 403);
+    assert.equal((await c.patch(`/api/admin/users/${ctx.staffA.id}`, { status: 'disabled' })).status, 404);
+    assert.equal((await c.patch(`/api/admin/org-units/${ctx.siteA}`, { name: '탈취' })).status, 404);
+    assert.equal((await c.post('/api/admin/users', { email: 'staffA@dagym.test', name: '빼오기', role: 'staff', orgUnitIds: [unit] })).status, 409);
+    const users = (await c.ok('GET', '/api/admin/users')).users;
+    assert.deepEqual(users.map((u) => u.email), ['boss@other.test']);
+    const units = (await c.ok('GET', '/api/admin/org-units')).units;
+    assert.deepEqual(units.map((u) => u.id), [unit]);
+    assert.equal((await c.post('/api/chat/rooms', { kind: 'dm', userId: ctx.staffA.id })).status >= 400, true);
+    assert.equal((await c.post('/api/events', { calendarId: D.companyCal, title: 'x', start: `${today}T10:00:00+09:00`, end: `${today}T11:00:00+09:00` })).status >= 403, true);
+  });
+  test('메뉴 권한 등급표는 회사별: 남의 회사가 바꿔도 기본 회사는 그대로', async () => {
+    await T.c.ok('PUT', '/api/admin/menu-perms', { menu: 'assistant', role: 'staff', level: 'none' });
+    const m = await ctx.owner.ok('GET', '/api/admin/menu-perms');
+    assert.equal(m.matrix.assistant.staff, 'use');
+    const mt = await T.c.ok('GET', '/api/admin/menu-perms');
+    assert.equal(mt.matrix.assistant.staff, 'none');
+  });
+  test('기존 회사 대표에게도 가입한 회사 사람·데이터가 안 보인다', async () => {
+    const users = (await ctx.owner.ok('GET', '/api/admin/users')).users;
+    assert.ok(!users.some((u) => /other\.test|example\.com/.test(u.email)));
+    const org = await ctx.owner.ok('GET', '/api/org');
+    assert.ok(!org.users.some((u) => u.id === T.me.user.id || u.id === P.me.user.id));
+    const pt = (await P.c.ok('GET', '/api/tasks')).tasks[0];
+    assert.equal((await ctx.owner.get(`/api/tasks/${pt.id}`)).status, 404);
+  });
+  test('팀 회사는 직원 초대 가능, 초대된 직원도 자기 회사만', async () => {
+    const unit = T.me.orgUnits[0].id;
+    const inv = await T.c.ok('POST', '/api/admin/users', { email: 'emp@other.test', name: '남직원', role: 'staff', orgUnitIds: [unit] });
+    const e = new Client('emp');
+    await e.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'emp-pass-12345' });
+    const org = await e.ok('GET', '/api/org');
+    assert.deepEqual(org.users.map((u) => u.name).sort(), ['남사장', '남직원']);
+    assert.equal((await e.get(`/api/tasks/${D.task}`)).status, 404);
+    const [{ tenant }] = await sql`select tenant from users where email = 'emp@other.test'`;
+    assert.equal(tenant, T.me.user.tenant);
+  });
+});

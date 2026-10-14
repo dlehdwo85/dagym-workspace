@@ -5,7 +5,7 @@ import { badRequest, conflict, forbidden, notFound } from './errors';
 import { activity } from './log';
 import { notify } from './notifications';
 import { hasOccurrenceFrom, normalizeRule, occurrences, ruleRemainingFrom, ruleUntilBefore } from './recurrence';
-import type { SessionUser } from './types';
+import { tenantOf, type SessionUser } from './types';
 import { zUuid } from './api';
 
 export const eventInput = z.object({
@@ -100,7 +100,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
     where e.deleted_at is null and e.recurring_event_id is null
       and (e.rrule is not null or (e.start_at < ${to} and e.end_at > ${from}))
       and (
-        (c.type = 'company' and ${!u.isDemo})
+        (c.type = 'company' and c.tenant = ${tenantOf(u)})
         or (c.type = 'personal' and c.owner_user_id = ${u.id})
         or (c.type = 'personal' and c.owner_user_id = any(${mates}::uuid[]))
         or (c.type = 'org_unit' and ${units === null ? sql`not exists (select 1 from org_units dz where dz.id = c.org_unit_id and dz.is_demo)` : sql`c.org_unit_id = any(${units}::uuid[])`})
@@ -166,8 +166,8 @@ export async function findConflicts(u: SessionUser, userIds: string[], start: Da
   if (end <= start) return [];
   const sql = db();
   let ids = [...new Set([u.id, ...userIds])];
-  if (u.isDemo) { // 체험 계정은 같은 데모 조직 사람만
-    const ok = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and is_demo`;
+  { // 같은 회사 사람만
+    const ok = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and tenant = ${tenantOf(u)}`;
     ids = [u.id, ...ok.map((r) => r.id).filter((x) => x !== u.id)];
   }
   const rows = await sql<(EventRow & { cal_type: string; owner_user_id: string | null })[]>`
@@ -450,9 +450,9 @@ function normReminders(v: number[] | null | undefined): number[] | null {
 export async function hqColleagues(u: SessionUser, sql: Sql): Promise<string[]> {
   if (u.isDemo) return [];
   const rows = await sql<{ id: string }[]>`
-    with hq as (select id from org_units where type = 'hq' and not is_demo),
+    with hq as (select id from org_units where type = 'hq' and tenant = ${tenantOf(u)}),
     me as (select (${u.role} in ('owner','admin')) or exists (select 1 from memberships m where m.user_id = ${u.id} and m.org_unit_id in (select id from hq)) as ok)
-    select u.id from users u, me where me.ok and u.status = 'active' and not u.is_demo and u.id <> ${u.id}
+    select u.id from users u, me where me.ok and u.status = 'active' and u.tenant = ${tenantOf(u)} and u.id <> ${u.id}
       and (u.role in ('owner','admin') or exists (select 1 from memberships m where m.user_id = u.id and m.org_unit_id in (select id from hq)))`;
   return rows.map((r) => r.id);
 }

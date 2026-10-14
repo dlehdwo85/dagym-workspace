@@ -15,7 +15,7 @@ import type { SessionUser } from './types';
 const TZ = 'Asia/Seoul';
 const GB = 1024 ** 3;
 export type Limits = { users: number | null; storageGb: number | null; aiRequests: number | null };
-export const tenantOfUser = (u: { isDemo?: boolean | null }) => (u.isDemo ? 'demo' : 'default');
+export const tenantOfUser = (u: { tenant?: string | null; isDemo?: boolean | null }) => u.tenant ?? (u.isDemo ? 'demo' : 'default');
 const monthStart = () => DateTime.now().setZone(TZ).startOf('month');
 
 export async function subscription(tenant: string, sql: Sql = db()) {
@@ -34,7 +34,7 @@ export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<
   const limits: Limits = { users: base.users ?? null, storageGb: base.storageGb ?? null, aiRequests: base.aiRequests ?? null };
   // V12 1번 베이직: 1인 한도 × 활성 사용자 수(회사 합산, 최소 1명)
   if (base.perUserStorageGb || base.perUserAi) {
-    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from users where status = 'active' and is_demo = ${tenant === 'demo'}`;
+    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from users where status = 'active' and tenant = ${tenant}`;
     const people = Math.max(1, n);
     if (base.perUserStorageGb) limits.storageGb = base.perUserStorageGb * people;
     if (base.perUserAi) limits.aiRequests = base.perUserAi * people;
@@ -57,7 +57,7 @@ export async function currentUsage(tenant: string, sql: Sql = db()) {
     sql<{ bytes: number; photo: number; doc: number }[]>`select coalesce(sum(a.size_bytes), 0)::float8 bytes,
         coalesce(sum(a.size_bytes) filter (where a.mime_type like 'image/%'), 0)::float8 photo,
         coalesce(sum(a.size_bytes) filter (where a.mime_type ~ '(pdf|word|sheet|excel|presentation|powerpoint|text|csv|hwp)'), 0)::float8 doc
-      from attachments a join users u on u.id = a.created_by where a.kind = 'file' and a.storage_key is not null and u.is_demo = ${demo}
+      from attachments a join users u on u.id = a.created_by where a.kind = 'file' and a.storage_key is not null and u.tenant = ${tenant}
         and not exists (select 1 from library_files l where l.storage_key = a.storage_key)`, // 자료실에서 첨부한 파일은 한 번만 셈
     sql<{ bytes: number; photo: number; doc: number }[]>`select coalesce(sum(size_bytes), 0)::float8 bytes,
         coalesce(sum(size_bytes) filter (where mime_type like 'image/%'), 0)::float8 photo,
@@ -67,7 +67,7 @@ export async function currentUsage(tenant: string, sql: Sql = db()) {
         coalesce(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens), 0)::float8 tokens, coalesce(sum(cost_usd), 0)::float8 cost
       from ai_usage where tenant = ${tenant} and created_at >= ${start}`,
     sql<{ active: number; invited: number }[]>`select count(*) filter (where status = 'active')::int active, count(*) filter (where status = 'invited')::int invited
-      from users where is_demo = ${demo}`,
+      from users where tenant = ${tenant}`,
   ]);
   const bytes = att.bytes + lib.bytes, photo = att.photo + lib.photo, doc = att.doc + lib.doc;
   return { storageBytes: bytes, byKind: { photo, doc, other: Math.max(0, bytes - photo - doc) }, aiRequests: ai.requests, aiTokens: ai.tokens, aiCostUsd: Math.round(ai.cost * 100) / 100,
@@ -114,7 +114,7 @@ export async function usageOverview(u: SessionUser) {
     sql`select code, name, monthly_krw, per_user_krw, limits, description from plans where public and active order by sort`,
     sql`select code, name, monthly_krw, adds from plan_addons where active order by sort`,
     sql`(select 'attachment' as kind, a.id, coalesce(a.doc_title, a.file_name) as title, a.file_name, a.size_bytes::float8 size, a.mime_type, a.task_id, a.event_id, a.deleted_at, a.created_at
-        from attachments a join users u2 on u2.id = a.created_by where a.kind = 'file' and a.storage_key is not null and u2.is_demo = false
+        from attachments a join users u2 on u2.id = a.created_by where a.kind = 'file' and a.storage_key is not null and u2.tenant = ${tenant}
           and not exists (select 1 from library_files l where l.storage_key = a.storage_key))
       union all (select 'library', id, title, file_name, size_bytes::float8, mime_type, null, null, deleted_at, created_at from library_files where tenant = ${tenant})
       order by size desc limit 20`,
@@ -259,7 +259,7 @@ export async function usageJob() {
     await sql`insert into tenant_usage (tenant, month, storage_bytes, ai_requests, ai_tokens, active_users) values (${t.id}, ${month}, ${usage.storageBytes}, ${usage.aiRequests}, ${usage.aiTokens}, ${usage.users})
       on conflict (tenant, month) do update set storage_bytes = excluded.storage_bytes, ai_requests = excluded.ai_requests, ai_tokens = excluded.ai_tokens, active_users = excluded.active_users, updated_at = now()`;
     if (t.id === 'demo') continue; // 체험 조직에는 관리자 알림 없음
-    const admins = (await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active' and is_demo = false`).map((x) => x.id);
+    const admins = (await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active' and tenant = ${t.id}`).map((x) => x.id);
     const checks: [string, string, number, number | null][] = [
       ['storage', '저장공간', usage.storageBytes / GB, limits.storageGb], ['ai', 'AI 요청', usage.aiRequests, limits.aiRequests], ['users', '사용자', usage.users, limits.users]];
     for (const [key, label, used, lim] of checks) {

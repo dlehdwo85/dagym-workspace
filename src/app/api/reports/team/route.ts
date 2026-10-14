@@ -1,3 +1,4 @@
+import { tenantOf } from '@/lib/types';
 import { handler } from '@/lib/api';
 import { db } from '@/lib/db';
 import { requireMenu } from '@/lib/menuPerms';
@@ -11,7 +12,7 @@ export const GET = handler(async ({ req, user }) => {
   const teamId = req.nextUrl.searchParams.get('teamId'); // V14 8번 팀별 모아 보기
   const sql = db();
   const reports = await sql`select r.id, r.user_id, u.name, r.status, r.submitted_at, r.body, r.data, r.updated_at from personal_reports r join users u on u.id = r.user_id
-    where r.week_start = ${week} and not u.is_demo ${teamId && /^[0-9a-f-]{36}$/.test(teamId) ? sql`and r.user_id in (select user_id from team_members where team_id = ${teamId})` : sql``} order by u.name`;
+    where r.week_start = ${week} and u.tenant = ${tenantOf(user)} ${teamId && /^[0-9a-f-]{36}$/.test(teamId) ? sql`and r.user_id in (select user_id from team_members where team_id = ${teamId})` : sql``} order by u.name`;
   const teams = await sql`select id, name, color from teams where tenant = 'default' and not archived order by name`;
   return { weekStart: week, reports, teams };
 });

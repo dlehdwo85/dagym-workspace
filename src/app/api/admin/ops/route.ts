@@ -20,9 +20,9 @@ export const GET = handler(async ({ user }) => {
           coalesce((select json_agg(json_build_object('channel', d.channel, 'status', d.status, 'error', d.error, 'sent_at', d.sent_at) order by d.id)
             from notification_deliveries d where d.notification_id = n.id), '[]') as deliveries
         from notifications n join users u on u.id = n.user_id
-        where not u.is_demo order by n.created_at desc limit 50`,
+        where u.tenant = 'default' order by n.created_at desc limit 50`,
     // 알림을 받을 기기가 하나도 없는 사람 (앱 알림 켜기 안내 대상)
-    sql`select u.id, u.name from users u where u.status = 'active' and not u.is_demo
+    sql`select u.id, u.name from users u where u.status = 'active' and u.tenant = 'default'
         and not exists (select 1 from push_subscriptions p where p.user_id = u.id and p.disabled_at is null) order by u.name`,
   ]);
   return { jobs, errors, deliveries, syncErrors, counts: counts[0], recent, noDevice };

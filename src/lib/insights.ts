@@ -3,7 +3,7 @@ import { accessibleUnitIds, atLeast, isAdmin } from './access';
 import { forbidden, notFound } from './errors';
 import { notify } from './notifications';
 import { addDays, seoulMidnight, todaySeoul, weekRangeSeoul } from './time';
-import type { SessionUser } from './types';
+import { tenantOf, type SessionUser } from './types';
 import { DateTime } from 'luxon';
 
 const TZ = 'Asia/Seoul';
@@ -125,17 +125,17 @@ export async function buildWeeklyReport(weekStart: string) {
       count(t.id) filter (where t.status = 'review')::int as review,
       count(t.id) filter (where t.status <> 'done' and '회원 민원' = any(t.tags))::int as open_complaints
     from org_units o left join tasks t on t.org_unit_id = o.id and t.deleted_at is null and t.parent_id is null
-    where o.active group by o.id order by done desc, o.name`;
+    where o.active and o.tenant = 'default' group by o.id order by done desc, o.name`;
   const issues = await sql<any[]>`
     select t.id, t.title, t.priority, t.due_date, o.name as org_unit_name, u.name as assignee_name
     from tasks t join org_units o on o.id = t.org_unit_id left join users u on u.id = t.assignee_id
-    where t.deleted_at is null and t.status <> 'done' and (t.priority in ('urgent','high') or t.due_date <= ${end})
+    where t.deleted_at is null and o.tenant = 'default' and t.status <> 'done' and (t.priority in ('urgent','high') or t.due_date <= ${end})
     order by t.priority = 'urgent' desc, t.due_date nulls last limit 10`;
   const photos = await sql<any[]>`
     select a.id, a.file_name, t.id as task_id, t.title as task_title, o.name as org_unit_name, a.captured_at
     from attachments a join tasks t on t.id = a.task_id join org_units o on o.id = t.org_unit_id
     where a.deleted_at is null and a.upload_status = 'ready' and a.kind = 'file' and a.mime_type like 'image/%'
-      and a.created_at >= ${from} and a.created_at < ${to} and t.deleted_at is null
+      and a.created_at >= ${from} and a.created_at < ${to} and t.deleted_at is null and o.tenant = 'default'
     order by a.created_at desc limit 8`;
   const tot = sites.reduce((a, s) => ({ done: a.done + s.done, created: a.created + s.created, overdue: a.overdue + s.overdue, review: a.review + s.review, complaints: a.complaints + s.open_complaints }),
     { done: 0, created: 0, overdue: 0, review: 0, complaints: 0 });
@@ -154,7 +154,7 @@ export async function weeklyReportJob(now = new Date()) {
   const [r] = await sql<{ id: string }[]>`insert into weekly_reports (week_start, data) values (${lastMonday}, ${sql.json(data as never)})
     on conflict (week_start) do nothing returning id`;
   if (!r) return { skipped: 'race' };
-  const admins = (await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active'`).map((x) => x.id);
+  const admins = (await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active' and tenant = 'default'`).map((x) => x.id);
   await notify(sql, { userIds: admins, type: 'weekly_report', title: `주간 보고 (${lastMonday.slice(5).replace('-', '/')} 주)`,
     body: `완료 ${data.totals.done} · 새 업무 ${data.totals.created} · 지연 ${data.totals.overdue} · 미해결 민원 ${data.totals.complaints}`,
     link: `/reports/${r.id}`, entityType: 'weekly_report', entityId: r.id, actorId: null, dedupeKey: `weekly:${lastMonday}` });
@@ -163,11 +163,12 @@ export async function weeklyReportJob(now = new Date()) {
 
 export async function listReports(u: SessionUser) {
   if (!isAdmin(u)) throw forbidden('주간 보고는 대표·본사 관리자가 봅니다');
+  if (tenantOf(u) !== 'default') return [];
   return db()`select id, week_start, created_at, data->'totals' as totals from weekly_reports order by week_start desc limit 52`;
 }
 export async function getReport(u: SessionUser, id: string) {
   if (!isAdmin(u)) throw forbidden('주간 보고는 대표·본사 관리자가 봅니다');
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound();
+  if (!/^[0-9a-f-]{36}$/.test(id) || tenantOf(u) !== 'default') throw notFound();
   const [r] = await db()`select id, week_start, created_at, data from weekly_reports where id = ${id}`;
   if (!r) throw notFound('보고서가 없습니다');
   return r;

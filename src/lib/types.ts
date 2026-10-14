@@ -31,7 +31,13 @@ export interface SessionUser {
   isDemo?: boolean;
   /** V10 플랫폼 운영자(워크인 운영사): 모든 회사 사용량·요금제 */
   platformAdmin?: boolean;
+  /** V15 회사(tenant) — 'default'(다짐·하이링크) · 'demo'(체험) · 't_…'(공개 가입) */
+  tenant?: string;
+  /** V15 개인 공간(1인 회사)이면 관리 메뉴를 숨긴다 */
+  personal?: boolean;
 }
+/** V15: 이 사용자의 회사. 예전 코드(isDemo)와 호환 */
+export const tenantOf = (u: { tenant?: string | null; isDemo?: boolean | null }) => u.tenant ?? (u.isDemo ? 'demo' : 'default');
 
 export const NOTIFICATION_TYPES = {
   task_assigned: '업무 배정',

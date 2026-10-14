@@ -1,6 +1,6 @@
 import { db, type Sql } from './db';
 import { forbidden, notFound } from './errors';
-import { ROLE_RANK, type SessionUser } from './types';
+import { ROLE_RANK, tenantOf, type SessionUser } from './types';
 
 export const isAdmin = (u: SessionUser) => u.role === 'owner' || u.role === 'admin';
 export const atLeast = (u: SessionUser, role: keyof typeof ROLE_RANK) => ROLE_RANK[u.role] >= ROLE_RANK[role];
@@ -10,16 +10,17 @@ export function requireAdmin(u: SessionUser) {
 }
 
 /**
- * 사용자가 접근 가능한 조직 단위 id 목록. 대표·본사 관리자는 null(전체).
- * 소속 단위와 그 하위 단위 전체가 포함된다.
+ * 사용자가 접근 가능한 조직 단위 id 목록. 소속 단위와 그 하위 단위 전체가 포함된다.
+ * V15: 대표·본사 관리자도 "전체"(null)가 아니라 **자기 회사(tenant)의 조직 전체** 목록 — 공개 가입한 다른 회사 데이터가 절대 섞이지 않게.
+ * (반환 타입의 null 은 예전 호출부 호환용으로만 남겨 둠 — 이제 돌려주지 않는다)
  */
 export async function accessibleUnitIds(u: SessionUser, sql: Sql = db()): Promise<string[] | null> {
-  if (isAdmin(u)) return null;
+  if (isAdmin(u)) return (await sql<{ id: string }[]>`select id from org_units where tenant = ${tenantOf(u)}`).map((r) => r.id);
   const rows = await sql<{ id: string }[]>`
     with recursive t as (
-      select o.id from org_units o join memberships m on m.org_unit_id = o.id where m.user_id = ${u.id}
+      select o.id from org_units o join memberships m on m.org_unit_id = o.id where m.user_id = ${u.id} and o.tenant = ${tenantOf(u)}
       union
-      select c.id from org_units c join t on c.parent_id = t.id
+      select c.id from org_units c join t on c.parent_id = t.id where c.tenant = ${tenantOf(u)}
     ) select id from t`;
   return rows.map((r) => r.id);
 }
@@ -129,7 +130,7 @@ export interface CalendarRow {
 
 export async function calendarPerms(u: SessionUser, c: CalendarRow, units?: string[] | null) {
   units = units === undefined ? await accessibleUnitIds(u) : units;
-  if (c.type === 'company') return { view: !u.isDemo, edit: !u.isDemo && atLeast(u, 'dept_lead') };
+  if (c.type === 'company') { const mine = ((c as any).tenant ?? 'default') === tenantOf(u); return { view: mine, edit: mine && atLeast(u, 'dept_lead') }; }
   if (c.type === 'personal') return { view: c.owner_user_id === u.id, edit: c.owner_user_id === u.id };
   const inUnit = units === null || (c.org_unit_id !== null && units.includes(c.org_unit_id));
   return { view: inUnit, edit: inUnit };
@@ -138,9 +139,9 @@ export async function calendarPerms(u: SessionUser, c: CalendarRow, units?: stri
 export async function visibleCalendars(u: SessionUser, sql: Sql = db()) {
   const units = await accessibleUnitIds(u, sql);
   const rows = await sql<(CalendarRow & { name: string; color: string; unit_name: string | null; brand_id: string | null })[]>`
-    select c.id, c.type, c.org_unit_id, c.owner_user_id, c.name, c.color, o.name as unit_name, o.brand_id
+    select c.id, c.type, c.org_unit_id, c.owner_user_id, c.name, c.color, o.name as unit_name, o.brand_id, c.tenant
     from calendars c left join org_units o on o.id = c.org_unit_id
-    where (c.type = 'company' and ${!u.isDemo})
+    where (c.type = 'company' and c.tenant = ${tenantOf(u)})
        or (c.type = 'personal' and c.owner_user_id = ${u.id})
        or (c.type = 'org_unit' and ${units === null ? sql`not exists (select 1 from org_units dz where dz.id = c.org_unit_id and dz.is_demo)` : sql`c.org_unit_id = any(${units}::uuid[])`})
     order by case c.type when 'personal' then 0 when 'company' then 1 else 2 end, c.name`;

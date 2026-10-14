@@ -170,7 +170,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       const ok = (m: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
       if (!ok(input.fromMonth) || !ok(input.toMonth)) throw badRequest('YYYY-MM 형식');
       const rows = await db()`select o.name as site, to_char(r.month, 'YYYY-MM') as month, r.revenue::float8 revenue, r.expense::float8 expense, r.members, r.target::float8 target
-        from revenue_entries r join org_units o on o.id = r.org_unit_id where not o.is_demo and r.month between ${input.fromMonth + '-01'} and ${input.toMonth + '-01'} order by o.name, r.month limit 600`;
+        from revenue_entries r join org_units o on o.id = r.org_unit_id where o.tenant = 'default' and not o.is_demo and r.month between ${input.fromMonth + '-01'} and ${input.toMonth + '-01'} order by o.name, r.month limit 600`;
       return { unit: '원(회원 수는 명)', rows };
     }
     case 'propose_create_task': {

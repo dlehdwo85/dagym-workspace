@@ -1,7 +1,7 @@
 import { db } from './db';
 import { accessibleUnitIds, taskVisibleSql } from './access';
 import { addDays, todaySeoul } from './time';
-import type { SessionUser } from './types';
+import { tenantOf, type SessionUser } from './types';
 
 /** V6 7번 달성률: 기간(이번 주/이번 달)과 그 전 기간 비교. 보이는 업무만, 삭제 제외 */
 export async function achievement(u: SessionUser, period: 'week' | 'month') {
@@ -34,7 +34,7 @@ export async function achievement(u: SessionUser, period: 'week' | 'month') {
         count(*) filter (where t.status = 'done' and (t.completed_at at time zone 'Asia/Seoul')::date <= t.due_date)::int as on_time,
         count(*) filter (where t.status <> 'done' and t.due_date < ${today})::int as overdue
       from tasks t join users a on a.id = t.assignee_id
-      where t.deleted_at is null and t.parent_id is null and t.due_date between ${start} and ${end < today ? end : today} and ${vis} and not a.is_demo
+      where t.deleted_at is null and t.parent_id is null and t.due_date between ${start} and ${end < today ? end : today} and ${vis} and a.tenant = ${tenantOf(u)}
       group by a.id, a.name order by a.name`,
     // 프로젝트 진행률 (완료/전체, 하위 업무 제외)
     sql<{ id: string; name: string; color: string; total: number; done: number }[]>`
@@ -52,7 +52,7 @@ export async function achievement(u: SessionUser, period: 'week' | 'month') {
       select ow.id, ow.name, coalesce(sum(extract(epoch from (e.end_at - e.start_at)) / 60), 0)::int as minutes,
         coalesce(sum(extract(epoch from (e.end_at - e.start_at)) / 60) filter (where (select count(*) from event_attendees x where x.event_id = e.id) >= 2), 0)::int as meeting_minutes
       from events e join calendars c on c.id = e.calendar_id join users ow on ow.id = coalesce(c.owner_user_id, e.created_by)
-      where e.deleted_at is null and not e.all_day and e.recurring_event_id is null and e.rrule is null and not ow.is_demo
+      where e.deleted_at is null and not e.all_day and e.recurring_event_id is null and e.rrule is null and ow.tenant = ${tenantOf(u)}
         and (e.start_at at time zone 'Asia/Seoul')::date between ${start} and ${end}
         and (c.type <> 'personal' or c.owner_user_id = ${u.id} or exists (select 1 from memberships m join org_units o on o.id = m.org_unit_id where m.user_id = c.owner_user_id and o.type = 'hq'))
       group by ow.id, ow.name order by minutes desc limit 10`,

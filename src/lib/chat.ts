@@ -13,7 +13,7 @@ import type { SessionUser } from './types';
  * - 접근: dm·group = 멤버만 / company = 같은 회사 직원 모두(자동 가입) / task = 그 업무를 볼 수 있는 사람(자동 가입).
  *   볼 수 없는 방은 404 (있는 줄도 모르게).
  */
-const tenantOf = (u: SessionUser) => (u.isDemo ? 'demo' : 'default');
+import { tenantOf } from './types';
 type Room = { id: string; tenant: string; kind: 'dm' | 'group' | 'company' | 'task' | 'team'; name: string | null; task_id: string | null; dm_key: string | null; team_id?: string | null };
 
 async function companyRoom(u: SessionUser, sql: Sql) {
@@ -78,7 +78,7 @@ export const roomInput = z.discriminatedUnion('kind', [
 ]);
 /** 같은 회사의 활동 중인 사람만 초대할 수 있다 */
 async function sameTenantUsers(u: SessionUser, ids: string[], sql: Sql) {
-  const rows = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and status = 'active' and is_demo = ${!!u.isDemo}`;
+  const rows = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and status = 'active' and tenant = ${tenantOf(u)}`;
   if (rows.length !== new Set(ids).size) throw badRequest('초대할 수 없는 사람이 있습니다');
   return rows.map((r) => r.id);
 }
