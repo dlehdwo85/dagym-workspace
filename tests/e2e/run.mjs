@@ -3,12 +3,13 @@
 import { chromium, devices } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
-import { bootstrap, resetDb, startServer, BASE, FAKE, Client, addDays, seoulToday, ensureTls, testDb } from '../helpers.mjs';
+import { bootstrap, resetDb, startServer, BASE, FAKE, Client, addDays, seoulToday, ensureTls, testDb, tick } from '../helpers.mjs';
 import { startFakeGoogle } from '../fake-google.mjs';
 import { v1440 } from './v14-40.step.mjs';
 import { v1436 } from './v14-36.step.mjs';
 import { v19a } from './v19a.step.mjs';
 import { blocksStep } from './blocks.step.mjs';
+import { v20 } from './v20.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -850,6 +851,7 @@ await step('V14 35 캘린더에서 바로 업무: 빈 칸 = 업무 등록(누른
 await step('V14 36~39 캘린더: 업무 동그라미 없음·블록 12px 여러 줄·계단 겹침·휴대폰 3일·좌우 밀어 이동·뒤로가기는 상세만 닫고 날짜·보기·스크롤 유지', () => v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDays, today }));
 await step('V19 부록 A: AI 비서 PC Enter 보내기·Shift+Enter 줄바꿈, 휴대폰 Enter 줄바꿈·자동 높이, [수정]·[다시 답하기]·[복사]·[멈춤], 패널 같은 동작 / 보기 칩 다시 누르면 해제', () => v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('캘린더: 완료한 업무의 시간 블록은 숨김(완료 보기 켜면 완료 모양), 삭제한 업무의 블록은 사라지고 휴지통 복원 시 다시 보임', () => blocksStep({ owner, ctx, BASE, SHOTS, addDays, today }));
+await step('V20 업무 월별 보관·이월: 이월 표시·이월만 보기, 완료 = 이번 달만 펼침·지난달은 펼칠 때 불러오기·달 이동, 리포트 월별 기록', () => v20({ owner, ctx, sql, BASE, SHOTS, tick }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');
   const month = today.slice(0, 7);

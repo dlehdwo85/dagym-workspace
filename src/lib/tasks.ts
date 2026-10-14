@@ -101,7 +101,23 @@ export const listQuery = z.object({
   includeSubtasks: z.enum(['0', '1']).optional().catch(undefined),
   includeDone: z.enum(['0', '1', 'recent']).optional().catch(undefined),
   limit: z.coerce.number().int().min(1).max(1000).catch(500),
+  /** V20 완료 보관: 이 달(YYYY-MM, 서울 기준)에 완료한 업무만 */
+  doneMonth: z.string().regex(/^\d{4}-\d{2}$/).optional().catch(undefined),
+  /** V20 이월만 보기: 지난달 이전부터 이어진 진행 중 업무(마감일, 없으면 만든 날 기준) */
+  carried: z.enum(['1']).optional().catch(undefined),
 });
+
+/** V20 완료 보관: 달별 완료 개수 (서울 기준 완료일, 볼 수 있는 업무만, 담당자 필터 선택) */
+export async function doneMonths(u: SessionUser, raw: Record<string, string>) {
+  const q = z.object({ assigneeId: zUuid.optional().catch(undefined), projectId: zUuid.optional().catch(undefined), teamId: zUuid.optional().catch(undefined) }).parse(raw);
+  const sql = db();
+  const units = await accessibleUnitIds(u, sql);
+  const rows = await sql<{ month: string; n: number }[]>`select to_char(t.completed_at at time zone 'Asia/Seoul', 'YYYY-MM') as month, count(*)::int n
+    from tasks t where t.deleted_at is null and t.status = 'done' and t.parent_id is null and t.completed_at is not null and ${taskVisibleSql(sql, u, units)}
+      ${q.assigneeId ? sql`and t.assignee_id = ${q.assigneeId}` : sql``} ${q.projectId ? sql`and t.project_id = ${q.projectId}` : sql``} ${q.teamId ? sql`and t.team_id = ${q.teamId}` : sql``}
+    group by 1 order by 1 desc limit 60`;
+  return { months: rows };
+}
 
 export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
   const sql = db();
@@ -130,6 +146,8 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
     const like = '%' + q.q.replace(/[%_\\]/g, (m) => '\\' + m) + '%';
     conds.push(sql`(t.title ilike ${like} or t.description ilike ${like} or exists (select 1 from unnest(t.tags) tg where tg ilike ${like}))`);
   }
+  if (q.doneMonth) conds.push(sql`t.completed_at >= (${q.doneMonth + '-01'}::date::timestamp at time zone 'Asia/Seoul') and t.completed_at < ((${q.doneMonth + '-01'}::date + interval '1 month')::timestamp at time zone 'Asia/Seoul')`);
+  if (q.carried) conds.push(sql`t.status <> 'done' and coalesce(t.due_date, (t.created_at at time zone 'Asia/Seoul')::date) < date_trunc('month', (now() at time zone 'Asia/Seoul'))::date`);
   if (q.from) conds.push(sql`coalesce(t.due_date, t.start_date) >= ${q.from}`);
   if (q.to) conds.push(sql`coalesce(t.start_date, t.due_date) <= ${q.to}`);
   switch (q.view) {
