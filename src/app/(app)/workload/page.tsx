@@ -70,7 +70,30 @@ export default function WorkloadPage() {
           </table>
         </section>
       )}
+      <SpeedTable />
       <p className="text-xs text-ink-2">과부하 기준: 이번 주 마감 업무가 가용 근무일×2건 초과, 회의·업무 시간 블록이 근무 시간(하루 8시간, 점심 제외)의 70% 초과, 또는 지연 3건 이상. 가용 근무일은 공휴일·휴가·출장을 뺀 날입니다. 다른 사람의 개인 일정은 제목 없이 시간만 합산합니다.</p>
     </div>
+  );
+}
+
+/** R-15 4번 직원별 업무 처리 속도(최근 90일 완료 업무): 만든 뒤 완료까지·시작 뒤 완료까지·지연 비율·체크리스트 항목 */
+function SpeedTable() {
+  const { data } = useApi<{ people: any[] }>('/api/insights/speed');
+  if (!data?.people.length) return null;
+  return (
+    <section className="overflow-x-auto rounded-card border border-line bg-white p-3 shadow-card" data-testid="speed-table">
+      <h2 className="mb-2 text-sm font-semibold">처리 속도 <span className="font-normal text-ink-3">최근 90일 완료 업무 · 업무 상세의 &ldquo;예상 처리 기간&rdquo;에 쓰입니다</span></h2>
+      <table className="w-full min-w-[560px] text-sm">
+        <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">사람</th><th>완료</th><th>만든 뒤 완료(중앙값·평균)</th><th>시작 뒤 완료</th><th>지연 비율</th><th>체크리스트 항목</th></tr></thead>
+        <tbody className="divide-y divide-line">
+          {data.people.map((p) => (
+            <tr key={p.user_id}><td className="py-1.5"><span className="flex items-center gap-1.5"><Avatar id={p.user_id} name={p.name} size={20} />{p.name}</span></td>
+              <td className="tabular-nums">{p.done}건</td><td className="tabular-nums">{p.median_days}일 · {p.avg_days}일</td><td className="tabular-nums">{p.work_days != null ? `${p.work_days}일` : '-'}</td>
+              <td className={cx('tabular-nums', p.late_rate >= 30 ? 'font-semibold text-red-600' : '')}>{p.late_rate != null ? `${p.late_rate}%` : '-'}</td>
+              <td className="tabular-nums text-ink-2">{p.checklist ? `${p.checklist.n}개 · 평균 ${p.checklist.hours}시간` : '-'}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }

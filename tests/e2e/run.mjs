@@ -45,6 +45,7 @@ async function pickDate(page, scope, label, d) {
 
 /** 업무 상세의 "필드 더보기" 펼치기 (이미 펼쳐져 있으면 그대로) */
 async function openMoreFields(scope) {
+  if (!(await scope.getByTestId('more-fields').count())) return; // R-15 4번: "필드 더보기"를 없애 모든 항목이 기본으로 보임
   const btn = scope.getByTestId('more-fields').first();
   await btn.waitFor();
   if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click();
@@ -1741,6 +1742,41 @@ await step('V14 15·18번 자료실 탐색기: 폴더 나무·경로, 파일을 
   await pv.getByText(/끌기 자료/).first().waitFor();
   await owner.getByTestId('organize-apply').click();
   await owner.getByText(/개 적용했습니다/).waitFor();
+});
+await step('V14 19번·R-15·R-16: 업무 상세 머리 요약·D-day·다음 행동·진행률·활동 타임라인·항목 담당 / 메신저 바로가기 패널 바로 답장 / 휴대폰 하단 댓글줄', async () => {
+  const tk = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V19 상세 개선', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, dueDate: addDays(today, 2), priority: 'high', approvalRequired: false })).id;
+  await ctx.owner.ok('POST', `/api/tasks/${tk}/checklist`, { text: '자료 모으기', assigneeId: ctx.managerA.id });
+  await ctx.owner.ok('POST', `/api/tasks/${tk}/comments`, { body: '시작합니다' });
+  await owner.goto(`${BASE}/tasks/${tk}`);
+  const sum = owner.getByTestId('task-summary');
+  await sum.getByTestId('dday').getByText('D-2').waitFor();
+  await owner.getByTestId('task-progress').getByText('0%').waitFor();
+  await owner.getByTestId('next-action').waitFor();
+  await owner.getByTestId('comments').getByText('시작합니다').waitFor();
+  await owner.getByTestId('comments').locator('[data-activity="history"]').first().waitFor(); // 활동 = 댓글 + 이력
+  assert.equal(await owner.getByTestId('more-fields').count(), 0, '필드 더보기 없음');
+  await owner.getByLabel('자료 모으기 담당').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/92-task-detail-v19.png`, fullPage: true });
+  await owner.getByTestId('next-action').click();
+  await owner.getByText('완료 처리했습니다').first().waitFor();
+  // 메신저 바로가기
+  await owner.goto(BASE + '/tasks');
+  await owner.getByTestId('msg-dock-open').click();
+  await owner.getByTestId('msg-dock-rooms').locator('li').first().click();
+  await owner.getByTestId('msg-dock-input').fill('바로 답장 E2E');
+  await owner.getByTestId('msg-dock-input').press('Enter');
+  await owner.getByTestId('msg-dock-chat').getByText('바로 답장 E2E').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/93-messenger-dock.png` });
+  await owner.getByRole('dialog', { name: '메신저' }).getByLabel('닫기').click();
+  // 휴대폰: 댓글 입력줄이 화면 아래 고정
+  const st = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V19 휴대폰', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+  await staff.goto(`${BASE}/tasks/${st}`);
+  const form = staff.getByTestId('comment-form');
+  await form.waitFor();
+  // 화면 폭 판정 뒤 아래로 옮겨 붙는다 — 고정될 때까지 기다림
+  await staff.waitForFunction(() => { const r = document.querySelector('[data-testid="comment-form"]')?.getBoundingClientRect(); return !!r && r.bottom <= innerHeight && r.bottom > innerHeight - 140; }, null, { timeout: 5000 });
+  await form.getByLabel('사진 찍기').waitFor();
+  await staff.screenshot({ path: `${SHOTS}/94-mobile-comment-bar.png` });
 });
 await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 질문) / 사용자 관리 "팀" 탭 → 팀 만들기 → 팀 업무 등록 → 팀 보드·업무 칩', async () => {
   await owner.goto(BASE + '/calendar');

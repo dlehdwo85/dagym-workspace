@@ -15,7 +15,7 @@ import { tenantOf } from './types';
 
 export async function listTeams(u: SessionUser) {
   const sql = db();
-  const teams = await sql`select t.id, t.name, t.color,
+  const teams = await sql`select t.id, t.name, t.color, t.parent_id,
       coalesce(json_agg(json_build_object('id', us.id, 'name', us.name, 'title', us.title, 'lead', m.is_lead) order by m.is_lead desc, us.name) filter (where us.id is not null), '[]') as members,
       bool_or(m.user_id = ${u.id}) as mine, bool_or(m.user_id = ${u.id} and m.is_lead) as i_lead,
       (select id from chat_rooms r where r.team_id = t.id) as room_id
@@ -28,7 +28,18 @@ export const teamInput = z.object({
   name: z.string().trim().min(1).max(40),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#0F766E'),
   members: z.array(z.object({ userId: z.string().uuid(), lead: z.boolean().default(false) })).max(200),
+  /** R-16 상위 팀(관리 팀): 그 팀 구성원은 이 팀 업무 전체를 보고·고치고·배정 */
+  parentId: z.string().uuid().nullable().optional(),
 });
+/** 상위 팀 검사: 같은 회사, 자기 자신·자기 하위 팀은 안 됨(순환 방지) */
+async function checkParent(sql: Sql, u: SessionUser, teamId: string | null, parentId: string | null | undefined) {
+  if (!parentId) return;
+  const [p] = await sql`select 1 from teams where id = ${parentId} and tenant = ${tenantOf(u)} and not archived`;
+  if (!p) throw badRequest('상위 팀이 없습니다');
+  if (!teamId) return;
+  const cyc = await sql`with recursive d as (select id from teams where id = ${teamId} union select c.id from teams c join d on c.parent_id = d.id) select 1 from d where id = ${parentId}`;
+  if (cyc.length) throw badRequest('자기 자신이나 하위 팀을 상위 팀으로 정할 수 없습니다');
+}
 async function syncMembers(sql: Sql, u: SessionUser, teamId: string, members: z.infer<typeof teamInput>['members']) {
   if (!members.some((m) => m.lead)) throw badRequest('팀장을 1명 이상 정하세요');
   const ids = [...new Set(members.map((m) => m.userId))];
@@ -48,7 +59,8 @@ export async function createTeam(u: SessionUser, i: z.infer<typeof teamInput>, i
   await requireMenu(u, 'admin_users', 'edit');
   const sql = db();
   return sql.begin(async (tx) => {
-    const [t] = await tx<{ id: string }[]>`insert into teams (tenant, name, color, created_by) values (${tenantOf(u)}, ${i.name}, ${i.color}, ${u.id}) returning id`
+    await checkParent(tx as unknown as Sql, u, null, i.parentId);
+    const [t] = await tx<{ id: string }[]>`insert into teams (tenant, name, color, created_by, parent_id) values (${tenantOf(u)}, ${i.name}, ${i.color}, ${u.id}, ${i.parentId ?? null}) returning id`
       .catch((e: any) => { throw e?.code === '23505' ? badRequest('같은 이름의 팀이 있습니다') : e; });
     await syncMembers(tx as unknown as Sql, u, t.id, i.members);
     await audit(tx as unknown as Sql, u.id, 'team.create', 'team', t.id, { name: i.name, members: i.members.length }, ip);
@@ -61,6 +73,7 @@ export async function updateTeam(u: SessionUser, id: string, i: Partial<z.infer<
   const [t] = await sql<{ id: string; name: string; color: string }[]>`select id, name, color from teams where id = ${id} and tenant = ${tenantOf(u)}`;
   if (!t) throw notFound('팀이 없습니다');
   return sql.begin(async (tx) => {
+    if (i.parentId !== undefined) { await checkParent(tx as unknown as Sql, u, id, i.parentId); await tx`update teams set parent_id = ${i.parentId} where id = ${id}`; }
     await tx`update teams set name = ${i.name ?? t.name}, color = ${i.color ?? t.color}, archived = ${i.archived ?? false} where id = ${id}`;
     if (i.members) await syncMembers(tx as unknown as Sql, u, id, i.members);
     else if (i.name) await tx`update chat_rooms set name = ${i.name} where team_id = ${id}`;

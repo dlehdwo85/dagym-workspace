@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
@@ -13,7 +14,7 @@ import {
   Sparkles,
   MessageCircle,
 } from 'lucide-react';
-import { Avatar, Button, personLabel, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
+import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, uploadTaskFiles } from '@/components/Attachments';
 import { DropZone, UploadProgress } from '@/components/upload';
@@ -52,8 +53,17 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [depOpen, setDepOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [menu, setMenu] = useState(false);
-  const [tab, setTab] = useState<'comments' | 'history'>('comments');
-  const [moreFields, setMoreFields] = useState(false);
+  const [tab, setTab] = useState<'all' | 'comments' | 'history'>('all'); // V14 19번 ⑦: 댓글·이력·첨부를 활동 하나로(기본)
+  const moreFields = true; // R-15 4번: "필드 더보기" 없앰 — 모든 항목을 기본으로 보여 준다
+  // V14 19번 ⑤: 섹션 접기 기억(이 기기)
+  const [fold, setFold] = useState<Record<string, boolean>>({});
+  useEffect(() => { try { setFold(JSON.parse(localStorage.getItem('wos_td_fold') ?? '{}')); } catch {} }, []);
+  const toggleFold = (k: string) => setFold((f) => { const n = { ...f, [k]: !f[k] }; try { localStorage.setItem('wos_td_fold', JSON.stringify(n)); } catch {} return n; });
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => { const m = () => setMobile(window.innerWidth < 640); m(); window.addEventListener('resize', m); return () => window.removeEventListener('resize', m); }, []);
+  const [itemAssignee, setItemAssignee] = useState<string | null>(null);
+  const camRef = useRef<HTMLInputElement>(null);
+  const clipRef = useRef<HTMLInputElement>(null);
   const wide = !inPanel; // V13 11번: 전체 화면(PC)은 2열
   const teamList = useApi<{ teams: { id: string; name: string }[] }>('/api/teams');
   const [details, setDetails] = useState(true);
@@ -62,7 +72,6 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [subAssignee, setSubAssignee] = useState<string | null>(null);
   const [subDue, setSubDue] = useState('');
   const [planOpen, setPlanOpen] = useState<'' | 'check' | 'sub'>('');
-  useEffect(() => { try { setMoreFields(localStorage.getItem('wos_task_more') === '1'); } catch {} }, []);
   const lines = useApi<{ lines: any[] }>('/api/approval-lines');
   const events = useApi<{ events: any[] }>(`/api/tasks/${id}/events`);
 
@@ -187,7 +196,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const roundSteps = (data.approvals ?? []).filter((a: any) => a.round === lastRound).sort((a: any, b: any) => a.step - b.step);
   const checkDone = data.checklist.filter((c: any) => c.done).length;
   const subDone = data.subtasks.filter((x: any) => x.status === 'done').length;
-  const planEmpty = !planOpen && !data.checklist.length && !data.subtasks.length && !data.dependencies.length && !moreFields;
+  const planEmpty = !planOpen && !data.checklist.length && !data.subtasks.length && !data.dependencies.length;
+  // V14 19번 ③ 진행률: 체크리스트 + 하위 업무
+  const progTotal = data.checklist.length + data.subtasks.length, progDone = checkDone + subDone;
 
   async function decide(decision: 'approve' | 'reject') {
     let comment: string | undefined;
@@ -214,17 +225,54 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     : t.approval_required && !perms.approve ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') }
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
 
+  // V14 19번 ④: 휴대폰은 댓글 입력줄을 화면 아래에 고정(📎·📷) — 변형(transform)된 부모 영향 없게 body 로 띄운다
+  const commentFormEl = (
+          <form onSubmit={sendComment} className={cx(!mobile && 'relative', 'mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20',
+            mobile && cx('fixed inset-x-0 mt-0 rounded-none border-x-0 border-b-0 shadow-pop', inPanel ? 'bottom-0 z-[45] pb-[var(--sab)]' : 'bottom-[calc(4rem+var(--sab))] z-30'))} data-testid="comment-form">
+            {/* V8 7번: "@" 를 치면 이 업무를 볼 수 있는 사람 자동완성 */}
+            {(() => {
+              const m = /(^|\s)@([^\s@]*)$/.exec(comment);
+              if (!m) return null;
+              const list = (mentionable.data?.users ?? []).filter((u) => u.id !== user.id && u.name.includes(m[2])).slice(0, 6);
+              if (!list.length) return null;
+              return (
+                <ul role="listbox" aria-label="멘션 자동완성" className="absolute bottom-full left-2 z-20 mb-1 w-56 overflow-hidden rounded-card border border-line bg-white shadow-pop" data-testid="mention-suggest">
+                  {list.map((u) => (
+                    <li key={u.id}><button type="button" role="option" aria-selected={false} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                      onClick={() => { setComment((c) => c.replace(/@[^\s@]*$/, `@${u.name} `)); setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }])); }}>
+                      <Avatar id={u.id} name={u.name} size={20} />{u.name}{u.title && <span className="text-xs text-ink-3">{u.title}</span>}</button></li>
+                  ))}
+                </ul>
+              );
+            })()}
+            <textarea className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={mobile ? 1 : 2} placeholder="댓글 입력 — @ 를 치면 사람을 언급할 수 있어요" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} aria-label="댓글" />
+            <div className="flex items-center gap-2 border-t border-line px-2 py-1.5">
+              <select className="h-7 rounded-md border border-line bg-white px-1.5 text-xs" value="" onChange={(e) => {
+                const u = mentionable.data?.users.find((x) => x.id === e.target.value);
+                if (!u) return;
+                setComment((c) => `${c}${c && !c.endsWith(' ') ? ' ' : ''}@${u.name} `);
+                setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }]));
+              }} aria-label="멘션할 사람">
+                <option value="">@ 멘션</option>{mentionable.data?.users.filter((u) => u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
+              </select>
+              {mobile && <>
+                <button type="button" onClick={() => clipRef.current?.click()} className="inline-flex size-9 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="파일 첨부">📎</button>
+                <button type="button" onClick={() => camRef.current?.click()} className="inline-flex size-9 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="사진 찍기">📷</button>
+                <input ref={clipRef} type="file" multiple className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
+                <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
+              </>}
+              <span className="hidden text-[11px] text-ink-3 sm:inline">이 업무를 볼 수 있는 사람만 · Ctrl+Enter 로 등록</span>
+              <span className="flex-1" />
+              <Button size="sm" type="submit" disabled={!comment.trim()}>등록</Button>
+            </div>
+          </form>
+  );
+  const commentForm = mobile && typeof document !== 'undefined' ? createPortal(commentFormEl, document.body) : commentFormEl;
   return (
-    <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(6rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
+    <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(11rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
       {/* 상단 도구 막대 */}
       <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
-        {primary && (
-          <Button size="sm" variant={t.status === 'review' ? 'primary' : 'secondary'} onClick={primary.run} disabled={photoShort && primary.label !== '최종 완료 확인'}
-            title={photoShort ? `증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)` : undefined}
-            className={cx(t.status !== 'review' && 'hover:border-emerald-500 hover:text-emerald-700')}>
-            <CircleCheck />{primary.label}
-          </Button>
-        )}
         {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-emerald-50 px-2.5 text-sm font-semibold text-emerald-700"><CircleCheck className="size-4" />완료됨</span>}
         <span className="flex-1" />
         {/* V13 10번: 업무별 대화방 */}
@@ -241,6 +289,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 <MenuItem icon={Copy} onClick={duplicate}>복제</MenuItem>
                 <MenuItem icon={Merge} onClick={() => setMergeOpen(true)}>중복 업무로 통합</MenuItem>
                 <MenuItem icon={Clock} onClick={() => setBlockOpen(true)}>실행 시간 배정</MenuItem>
+                <MenuItem icon={ListFilter} onClick={() => setDepOpen(true)}>선행 업무 지정</MenuItem>
                 <MenuItem icon={LayoutTemplate} onClick={saveTemplate}>템플릿으로 저장</MenuItem>
                 {features.ai && <MenuItem icon={Sparkles} onClick={() => router.push(`/assistant?task=${id}`)}>✨ AI에게 요청</MenuItem>}
                 {perms.delete && <><div className="my-1 border-t border-line" /><MenuItem icon={Trash2} danger onClick={del}>삭제</MenuItem></>}
@@ -276,6 +325,28 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             {t.status === 'review' && perms.approve && !t.approval_line_id && <Button size="sm" variant="secondary" onClick={reject}>보완 요청</Button>}
             {t.status === 'done' && <Button size="sm" variant="ghost" onClick={() => patch({ status: 'in_progress' })}><RotateCcw />다시 진행</Button>}
           </div>
+          {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="task-summary">
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={16} />{t.assignee_name ?? '담당 없음'}{data.collaborators?.length > 0 && <span className="text-ink-3">+{data.collaborators.length}</span>}</span>
+            <DdayChip due={t.due_date} time={t.due_time} status={t.status} />
+            <PriorityTag p={t.priority} />
+            {data.speed?.median_days != null && t.status !== 'done' && <span className="text-ink-3" data-testid="speed-hint" title="담당자의 최근 90일 완료 업무 기준">예상 처리 ≈ {data.speed.median_days}일</span>}
+          </div>
+          {progTotal > 0 && (
+            <div className="mt-2.5 flex items-center gap-2 text-xs text-ink-2" data-testid="task-progress">
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${(progDone / progTotal) * 100}%` }} /></div>
+              <span className="tabular-nums">{Math.round((progDone / progTotal) * 100)}% · {progDone}/{progTotal}</span>
+            </div>
+          )}
+          {/* V14 19번 ②: 상태별 다음 행동 — 큰 버튼 하나 */}
+          {primary && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button onClick={primary.run} disabled={photoShort && primary.label !== '최종 완료 확인'} data-testid="next-action"
+                title={photoShort ? `증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)` : undefined}
+                className={cx('h-11 flex-1 text-base sm:flex-none sm:px-6', t.status !== 'review' && 'bg-emerald-600 hover:bg-emerald-700')}><CircleCheck />{primary.label}</Button>
+              {(t.status === 'todo' || t.status === 'on_hold') && <Button variant="secondary" className="h-11" onClick={() => patch({ status: 'in_progress' }, '시작했습니다')}>시작하기</Button>}
+            </div>
+          )}
           {t.status === 'review' && !roundSteps.length && <p className="mt-3 flex items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900"><Hourglass className="size-4 shrink-0" />검토 요청 중 — {fmtDateTime(t.review_requested_at)} · 관리자의 최종 확인을 기다립니다.</p>}
           {t.status === 'done' && t.approved_by_name && <p className="mt-3 flex items-center gap-2 rounded-input bg-emerald-50 px-3 py-2 text-sm text-emerald-800"><BadgeCheck className="size-4 shrink-0" />{t.approved_by_name}님이 {fmtDateTime(t.approved_at)}에 최종 완료를 확인했습니다.</p>}
           {photoShort && t.status !== 'done' && <p className="mt-3 flex items-center gap-2 rounded-input bg-sky-50 px-3 py-2 text-sm text-sky-900"><Camera className="size-4 shrink-0" />완료하려면 증빙 사진 {photoNeed}장이 필요합니다 (현재 {photoHave}장). 아래 <b>사진 촬영</b>으로 올려 주세요.</p>}
@@ -352,26 +423,32 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </div>
         ) : <>
         <section data-testid="checklist-section">
-          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">체크리스트 {data.checklist.length > 0 && <span className="text-xs font-medium text-ink-2 tabular-nums">{checkDone}/{data.checklist.length}</span>}
-            <HelpTip testid="help-checklist">이 업무를 하는 사람이 따라갈 단계입니다. 담당자·마감이 따로 없고, 이 업무 안에서만 체크합니다.</HelpTip></h2>
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.check} onClick={() => toggleFold('check')} label="체크리스트" />{data.checklist.length > 0 && <span className="text-xs font-medium text-ink-2 tabular-nums">{checkDone}/{data.checklist.length}</span>}
+            <HelpTip testid="help-checklist">이 업무를 하는 사람이 따라갈 단계입니다. 항목마다 담당자를 정할 수 있고, 내 몫은 &ldquo;내 업무&rdquo;에 보입니다.</HelpTip></h2>
+          {!fold.check && <>
           {data.checklist.length > 0 && <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${(checkDone / data.checklist.length) * 100}%` }} /></div>}
           <ul className="space-y-0.5" data-testid="checklist">
             {data.checklist.map((c: any) => (
               <li key={c.id} className="group flex items-center gap-2.5 rounded-input px-1 py-1 text-sm hover:bg-slate-50">
                 <input type="checkbox" className="size-4 accent-emerald-600" checked={c.done} onChange={async (e) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { done: e.target.checked } }).catch((er) => toast.error(er.message)); reload(); }} aria-label={c.text} />
-                <span className={cx('flex-1', c.done && 'text-ink-3 line-through')}>{c.text}</span>
+                <span className={cx('flex-1', c.done && 'text-ink-3 line-through', !c.done && c.assignee_id === user.id && 'font-semibold')}>{c.text}{!c.done && c.assignee_id === user.id && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">내 몫</span>}</span>
+                {perms.edit ? <UserSelect className="h-7 w-auto max-w-[7.5rem] rounded-full border border-line bg-white px-1.5 text-[11px] text-ink-2" placeholder="담당 없음" value={c.assignee_id}
+                  ariaLabel={`${c.text} 담당`} onChange={async (v) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { assigneeId: v } }).catch((er) => toast.error(er.message)); reload(); broadcastRefresh(); }} />
+                  : c.assignee_name && <span className="text-[11px] text-ink-3">{c.assignee_name}</span>}
                 <button className="rounded p-0.5 text-ink-3 opacity-0 hover:text-red-600 group-hover:opacity-100 focus:opacity-100" onClick={async () => { await api(`/api/checklist/${c.id}`, { method: 'DELETE' }); reload(); }} aria-label="항목 삭제"><X className="size-3.5" /></button>
               </li>
             ))}
           </ul>
-          <form className="mt-1.5 flex gap-1.5" onSubmit={async (e) => { e.preventDefault(); if (!newItem.trim()) return; await api(`/api/tasks/${id}/checklist`, { body: { text: newItem } }).catch((er) => toast.error(er.message)); setNewItem(''); reload(); }}>
+          <form className="mt-1.5 flex gap-1.5" onSubmit={async (e) => { e.preventDefault(); if (!newItem.trim()) return; await api(`/api/tasks/${id}/checklist`, { body: { text: newItem, assigneeId: itemAssignee } }).catch((er) => toast.error(er.message)); setNewItem(''); reload(); }}>
             <input autoFocus={planOpen === 'check'} className={cx(inputCls, 'h-8')} placeholder="+ 단계 추가" value={newItem} onChange={(e) => setNewItem(e.target.value)} aria-label="체크리스트 항목 추가" />
+            <UserSelect className="h-8 w-auto max-w-[8rem] rounded-input border border-line bg-white px-1.5 text-xs" placeholder="담당(선택)" value={itemAssignee} onChange={setItemAssignee} ariaLabel="새 항목 담당" />
             <Button size="sm" variant="secondary">추가</Button>
           </form>
+          </>}
         </section>
 
         <section>
-          <div className="mb-1.5 flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-semibold">하위 업무 {data.subtasks.length > 0 && <span className="text-xs font-medium text-ink-2 tabular-nums" data-testid="subtask-progress">{subDone}/{data.subtasks.length} 완료</span>}
+          <div className="mb-1.5 flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.sub} onClick={() => toggleFold('sub')} label="하위 업무" />{data.subtasks.length > 0 && <span className="text-xs font-medium text-ink-2 tabular-nums" data-testid="subtask-progress">{subDone}/{data.subtasks.length} 완료</span>}
             <HelpTip testid="help-subtasks">다른 사람에게 나눠 맡기거나 마감이 따로 있는 작은 업무입니다. 하위 업무마다 목록·알림·상태가 따로 생깁니다.</HelpTip></h2>
             <Button size="sm" variant="ghost" onClick={() => setSub(true)}><Plus />자세히 추가</Button></div>
           {data.subtasks.length > 0 && <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-accent-600 transition-all" style={{ width: `${(subDone / data.subtasks.length) * 100}%` }} /></div>}
@@ -382,7 +459,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {primary && <Button size="sm" onClick={primary.run}>{primary.label}</Button>}
             </p>
           )}
-          <ul className="divide-y divide-line rounded-input border border-line">
+          <ul className={cx('divide-y divide-line rounded-input border border-line', fold.sub && 'hidden')}>
             {data.subtasks.map((s: any) => (
               <li key={s.id} className="flex items-center gap-2.5 px-3 py-2 text-sm">
                 <StatusBadge status={s.status} />
@@ -406,7 +483,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <input type="date" className="h-8 rounded-full border border-line bg-white px-2 text-xs" value={subDue} onChange={(e) => setSubDue(e.target.value)} aria-label="하위 업무 마감" />
             <Button size="sm" variant="secondary" disabled={!subTitle.trim()}>추가</Button>
           </form>
-          {(moreFields || data.dependencies.length > 0) && <>
+          {data.dependencies.length > 0 && <>
           <div className="mt-4 mb-1.5 flex items-center justify-between"><h2 className="text-sm font-semibold">선행 업무</h2><Button size="sm" variant="ghost" onClick={() => setDepOpen(true)}>편집</Button></div>
           <ul className="space-y-1 text-sm">
             {data.dependencies.map((d: any) => (
@@ -418,6 +495,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         </section>
 
         </>}
+        {/* R-15 2번: 자료·첨부는 접힌 "세부 정보" 밖에 기본으로 */}
+        <section data-testid="attach-section">
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.att} onClick={() => toggleFold('att')} label="자료·첨부" />{data.attachments.length > 0 && <span className="text-xs font-medium text-ink-2">{data.attachments.length}</span>}</h2>
+          {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.approve} onChange={reload} meId={user.id} />}
+        </section>
         </div>
         {/* V13 11번: PC 는 오른쪽 320px 고정 열, 휴대폰·좁은 패널은 "세부 정보" 요약 한 줄(누르면 펼침) */}
         <aside className={cx('min-w-0', wide && 'lg:sticky lg:top-16 lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:self-start lg:rounded-card lg:border lg:border-line lg:p-2')} aria-label="세부 정보" data-testid="detail-aside">
@@ -453,6 +535,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                   }} />
                 : <span className="px-2 text-sm" title="담당자를 바꿀 권한이 없습니다" data-testid="assignee-locked">{t.assignee_name ? personLabel(dir.users.find((x) => x.id === t.assignee_id) ?? { name: t.assignee_name }) : '담당자 없음'}</span>}</span>
             </Prop>
+            {/* R-15 6번: 1명 배정 뒤에도 협업자 추가 */}
+            <Prop icon={Users} label="협업자" asDiv><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
             <Prop icon={Megaphone} label="지시자">
               <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
             </Prop>
@@ -469,7 +553,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle className="size-3.5" />마감 위험</span>}
               </span>
             </Prop>
+            {/* R-15 4번: 담당자의 처리 속도로 예상 처리 기간 */}
+            {data.speed && t.status !== 'done' && <p className="px-2 pb-1 text-xs text-ink-3" data-testid="speed-detail">예상 처리 기간: {t.assignee_name}님은 보통 {data.speed.median_days}일(최근 90일 {data.speed.done}건{data.speed.late_rate != null ? ` · 지연 ${data.speed.late_rate}%` : ''})</p>}
             <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span></span></Prop>
+            {/* R-15 5번: 우선순위는 마감일·미리 알림과 같은 묶음 */}
+            <Prop icon={Flag} label="우선순위">
+              <select className={ghostCls} value={t.priority} onChange={(e) => patch({ priority: e.target.value })} aria-label="우선순위">
+                {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </Prop>
             <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line" data-testid="detail-repeat">{t.due_date || t.recurrence_rule ? <RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /> : <span className="px-2 text-xs text-ink-3">마감일을 정하면 반복할 수 있습니다</span>}</div></Prop>
             {/* V14 8번 팀 */}
             <Prop icon={Users} label="팀">
@@ -501,19 +593,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </Prop>
           </section>
           <div>
-            <button type="button" onClick={() => setMoreFields((v) => { try { localStorage.setItem('wos_task_more', v ? '0' : '1'); } catch {} return !v; })}
-              className="inline-flex items-center gap-1 rounded-input px-1.5 py-1 text-sm font-medium text-ink-2 hover:bg-slate-100 hover:text-ink" aria-expanded={moreFields} data-testid="more-fields">
-              <ChevronRight className={cx('size-4 transition-transform', moreFields && 'rotate-90')} />필드 더보기
-              {moreSet > 0 && <span className="rounded-full bg-slate-100 px-1.5 text-xs text-ink-2">{moreSet}개 설정됨</span>}
-            </button>
+            <h3 className="mt-2 px-1.5 text-xs font-semibold text-ink-3">기타 세부 정보</h3>
             {moreFields && (
-              <section className="mt-1 grid grid-cols-1 gap-x-6 gap-y-0.5 border-l-2 border-line pl-3" aria-label="추가 필드">
+              <section className="mt-1 grid grid-cols-1 gap-x-6 gap-y-0.5" aria-label="추가 필드">
             {t.task_type !== 'milestone' && <Prop icon={CalendarClock} label="시작일"><input type="date" className={cx(ghostCls, '!w-[140px]')} value={t.start_date ?? ''} onChange={(e) => patch({ startDate: e.target.value || null })} /></Prop>}
-            <Prop icon={Flag} label="우선순위">
-              <select className={ghostCls} value={t.priority} onChange={(e) => patch({ priority: e.target.value })}>
-                {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </Prop>
             <Prop icon={Timer} label="예상 소요">
               <span className="flex w-full flex-wrap items-center gap-2">
                 <select className={cx(ghostCls, '!w-[120px]')} value={t.estimate_minutes ?? ''} onChange={(e) => patch({ estimateMinutes: e.target.value === '' ? null : Number(e.target.value) })}>
@@ -554,7 +637,6 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               </label>
             </Prop>
             {(data.fields ?? []).map((f: any) => <CustomField key={f.id} f={f} value={t.fields?.[f.id]} onSave={(v) => setField(f.id, v)} />)}
-            <Prop icon={Users} label="협업자" asDiv><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
               </section>
             )}
           </div>
@@ -562,9 +644,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         </aside>
         <div className={cx('min-w-0 space-y-6', wide && 'lg:col-start-1 lg:row-start-3')}>
         <section data-testid="linked-events">
-          <div className="mb-1.5 flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-sm font-semibold"><CalendarRange className="size-4 text-ink-3" />연결 일정 {(events.data?.events.length ?? 0) > 0 && <span className="text-xs font-medium text-ink-2">{events.data!.events.length}</span>}</h2>
+          <div className="mb-1.5 flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-sm font-semibold"><CalendarRange className="size-4 text-ink-3" /><FoldBtn open={!fold.ev} onClick={() => toggleFold('ev')} label="연결 일정" /> {(events.data?.events.length ?? 0) > 0 && <span className="text-xs font-medium text-ink-2">{events.data!.events.length}</span>}</h2>
             <Button size="sm" variant="ghost" onClick={() => setBlockOpen(true)}><Timer />실행 시간 배정</Button></div>
-          <ul className="space-y-1">
+          <ul className={cx('space-y-1', fold.ev && 'hidden')}>
             {events.data?.events.map((e: any) => (
               <li key={e.id}>
                 <Link href={`/calendar?event=${e.id}`} className="flex items-center gap-2.5 rounded-input border border-line px-3 py-2 text-sm hover:bg-slate-50">
@@ -580,75 +662,37 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </ul>
         </section>
 
-        <section>
-          <h2 className="mb-2 text-sm font-semibold">자료·첨부</h2>
-          <Attachments items={data.attachments} taskId={id} canEdit={perms.approve} onChange={reload} meId={user.id} />
-        </section>
 
         <section id="comments" className="border-t border-line pt-5">
           <div className="mb-3 flex items-center gap-4 text-sm font-semibold" role="tablist">
+            <button role="tab" aria-selected={tab === 'all'} onClick={() => setTab('all')} className={cx('border-b-2 pb-1', tab === 'all' ? 'border-brand-600 text-ink' : 'border-transparent text-ink-3')}>활동</button>
             <button role="tab" aria-selected={tab === 'comments'} onClick={() => setTab('comments')} className={cx('border-b-2 pb-1', tab === 'comments' ? 'border-brand-600 text-ink' : 'border-transparent text-ink-3')}>댓글 {data.comments.length > 0 && data.comments.length}</button>
             <button role="tab" aria-selected={tab === 'history'} onClick={() => setTab('history')} className={cx('border-b-2 pb-1', tab === 'history' ? 'border-brand-600 text-ink' : 'border-transparent text-ink-3')}>변경 이력</button>
           </div>
-          <ul className={cx('space-y-4', tab !== 'comments' && 'hidden')} data-testid="comments">
-            {/* V13 8번: 댓글 + 들여쓴 답글(1단계), 답글·수정·삭제·반응 */}
-            {data.comments.filter((c: any) => !c.parent_id).map((c: any) => (
-              <CommentThread key={c.id} c={c} replies={data.comments.filter((r: any) => r.parent_id === c.id)} taskId={id} meId={user.id}
-                mentionable={mentionable.data?.users ?? []} onChange={() => { reload(); broadcastRefresh(); }} />
-            ))}
-            {!data.comments.length && <li className="text-xs text-ink-3">아직 댓글이 없습니다. 진행 상황이나 질문을 남겨 주세요.</li>}
+          <ul className={cx('space-y-4', tab === 'history' && 'hidden')} data-testid="comments">
+            {/* V13 8번: 댓글 + 들여쓴 답글(1단계). V14 19번 ⑦: "활동"은 댓글·변경 이력·첨부를 시간순 하나로 */}
+            {[...data.comments.filter((c: any) => !c.parent_id).map((c: any) => ({ k: 'c', at: c.created_at, c })),
+              ...(tab === 'all' ? data.history.filter((h: any) => h.action !== 'created').map((h: any) => ({ k: 'h', at: h.created_at, h })) : [])]
+              .sort((a: any, b: any) => String(a.at).localeCompare(String(b.at)))
+              .map((x: any) => x.k === 'c'
+                ? <CommentThread key={x.c.id} c={x.c} replies={data.comments.filter((r: any) => r.parent_id === x.c.id)} taskId={id} meId={user.id}
+                    mentionable={mentionable.data?.users ?? []} onChange={() => { reload(); broadcastRefresh(); }} />
+                : <li key={`h${x.h.id}`} className="flex gap-2 text-xs text-ink-2" data-activity="history"><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-slate-300" /><span><HistLine h={x.h} userName={userName} /></span></li>)}
+            {!data.comments.length && tab === 'comments' && <li className="text-xs text-ink-3">아직 댓글이 없습니다. 진행 상황이나 질문을 남겨 주세요.</li>}
+            {tab === 'all' && <li className="text-xs text-ink-3">작성: {t.created_by_name} · {fmtDateTime(t.created_at)}</li>}
           </ul>
           <ul className={cx('space-y-1.5 text-xs text-ink-2', tab !== 'history' && 'hidden')} data-testid="history">
             {data.history.map((h: any) => (
               <li key={h.id} className="flex gap-2">
                 <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-slate-300" />
-                <span>
-                  <span className="text-ink-3">{fmtDateTime(h.created_at)}</span> · <b className="text-ink">{h.actor_name ?? '시스템'}</b> · {ACTION_LABEL[h.action] ?? h.action}
-                  {h.action !== 'created' && Object.entries(h.changes ?? {}).filter(([k, v]: any) => FIELD_LABEL[k] && v && typeof v === 'object' && 'to' in v).map(([k, v]: any) => (
-                    <span key={k} className="ml-1">[{FIELD_LABEL[k]}: {fmtVal(k, v?.from, userName)} → {fmtVal(k, v?.to, userName)}]</span>
-                  ))}
-                  {h.changes?.note && <span className="ml-1">“{h.changes.note}”</span>}
-                  {['file_attached', 'link_attached', 'attachment_removed', 'checklist_added', 'checklist_done', 'checklist_undone', 'checklist_removed'].includes(h.action) && <span className="ml-1">{h.changes?.name ?? h.changes?.title ?? h.changes?.text}</span>}
-                </span>
+                <span><HistLine h={h} userName={userName} /></span>
               </li>
             ))}
             <li className="pt-1 text-ink-3">작성: {t.created_by_name} · {fmtDateTime(t.created_at)}</li>
           </ul>
           {/* V12 9번: 댓글 칸에 파일을 끌어 놓으면 이 업무에 첨부 */}
           <DropZone onFiles={async (f) => { await uploadTaskFiles(Array.from(f), { taskId: id }, setCprog); reload(); broadcastRefresh(); }} label="놓으면 이 업무에 첨부됩니다" testid="comment-drop">
-          <form onSubmit={sendComment} className="relative mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20">
-            {/* V8 7번: "@" 를 치면 이 업무를 볼 수 있는 사람 자동완성 */}
-            {(() => {
-              const m = /(^|\s)@([^\s@]*)$/.exec(comment);
-              if (!m) return null;
-              const list = (mentionable.data?.users ?? []).filter((u) => u.id !== user.id && u.name.includes(m[2])).slice(0, 6);
-              if (!list.length) return null;
-              return (
-                <ul role="listbox" aria-label="멘션 자동완성" className="absolute bottom-full left-2 z-20 mb-1 w-56 overflow-hidden rounded-card border border-line bg-white shadow-pop" data-testid="mention-suggest">
-                  {list.map((u) => (
-                    <li key={u.id}><button type="button" role="option" aria-selected={false} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
-                      onClick={() => { setComment((c) => c.replace(/@[^\s@]*$/, `@${u.name} `)); setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }])); }}>
-                      <Avatar id={u.id} name={u.name} size={20} />{u.name}{u.title && <span className="text-xs text-ink-3">{u.title}</span>}</button></li>
-                  ))}
-                </ul>
-              );
-            })()}
-            <textarea className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={2} placeholder="댓글 입력 — @ 를 치면 사람을 언급할 수 있어요" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} aria-label="댓글" />
-            <div className="flex items-center gap-2 border-t border-line px-2 py-1.5">
-              <select className="h-7 rounded-md border border-line bg-white px-1.5 text-xs" value="" onChange={(e) => {
-                const u = mentionable.data?.users.find((x) => x.id === e.target.value);
-                if (!u) return;
-                setComment((c) => `${c}${c && !c.endsWith(' ') ? ' ' : ''}@${u.name} `);
-                setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }]));
-              }} aria-label="멘션할 사람">
-                <option value="">@ 멘션</option>{mentionable.data?.users.filter((u) => u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
-              </select>
-              <span className="hidden text-[11px] text-ink-3 sm:inline">이 업무를 볼 수 있는 사람만 · Ctrl+Enter 로 등록</span>
-              <span className="flex-1" />
-              <Button size="sm" type="submit" disabled={!comment.trim()}>등록</Button>
-            </div>
-          </form>
+          {commentForm}
           <UploadProgress items={cprog} />
           </DropZone>
         </section>
@@ -664,6 +708,28 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   );
 }
 
+/** V14 19번 ⑤ 섹션 제목 = 접기 버튼 */
+function FoldBtn({ open, onClick, label }: { open: boolean; onClick: () => void; label: string }) {
+  return <button type="button" onClick={onClick} aria-expanded={open} className="inline-flex items-center gap-1 hover:text-ink-2"><ChevronRight className={cx('size-4 text-ink-3 transition-transform', open && 'rotate-90')} />{label}</button>;
+}
+/** V14 19번 ⑧ 마감 D-day 색: 지남 빨강 · 오늘 주황 · 3일 안 노랑 · 그 뒤 회색 */
+function DdayChip({ due, time, status }: { due: string | null; time: string | null; status: string }) {
+  if (!due) return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-3">마감 없음</span>;
+  const d = Math.round((new Date(due + 'T00:00:00Z').getTime() - new Date(todayStr() + 'T00:00:00Z').getTime()) / 86400000);
+  const label = d === 0 ? 'D-day' : d > 0 ? `D-${d}` : `D+${-d}`;
+  const cls = status === 'done' ? 'bg-slate-100 text-ink-3' : d < 0 ? 'bg-red-100 text-red-700' : d === 0 ? 'bg-orange-100 text-orange-700' : d <= 3 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-ink-2';
+  return <span className={cx('rounded-full px-2 py-0.5 font-semibold tabular-nums', cls)} data-testid="dday">{label} · {Number(due.slice(5, 7))}/{Number(due.slice(8, 10))}{time ? ' ' + time.slice(0, 5) : ''}</span>;
+}
+function HistLine({ h, userName }: { h: any; userName: (id: string | null) => string }) {
+  return <>
+    <span className="text-ink-3">{fmtDateTime(h.created_at)}</span> · <b className="text-ink">{h.actor_name ?? '시스템'}</b> · {ACTION_LABEL[h.action] ?? h.action}
+    {h.action !== 'created' && Object.entries(h.changes ?? {}).filter(([k, v]: any) => FIELD_LABEL[k] && v && typeof v === 'object' && 'to' in v).map(([k, v]: any) => (
+      <span key={k} className="ml-1">[{FIELD_LABEL[k]}: {fmtVal(k, v?.from, userName)} → {fmtVal(k, v?.to, userName)}]</span>
+    ))}
+    {h.changes?.note && <span className="ml-1">“{h.changes.note}”</span>}
+    {['file_attached', 'link_attached', 'attachment_removed', 'checklist_added', 'checklist_done', 'checklist_undone', 'checklist_removed'].includes(h.action) && <span className="ml-1">{h.changes?.name ?? h.changes?.title ?? h.changes?.text}</span>}
+  </>;
+}
 const TASK_TYPE_LABEL: Record<string, string> = { normal: '일반', milestone: '마일스톤', approval: '결재', inspection: '점검' };
 const ghostCls = 'h-8 w-full min-w-0 rounded-input border border-transparent bg-transparent px-2 text-sm text-ink transition-colors hover:border-line hover:bg-white focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent-500/20 disabled:cursor-not-allowed disabled:text-ink-2 disabled:hover:border-transparent';
 

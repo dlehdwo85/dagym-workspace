@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { AiDock } from './AiDock';
+import { MessengerDock } from './MessengerDock';
 import { Onboarding } from './Onboarding';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -287,6 +288,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
         {session.tenant?.onboarding && <Onboarding />}
         {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} /></Suspense>}
+        <MessengerDock aiOpen={aiDock} />
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
           {MOBILE_TABS.slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}

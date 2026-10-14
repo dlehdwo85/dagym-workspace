@@ -1,5 +1,5 @@
 import { db } from './db';
-import { accessibleUnitIds, atLeast, isAdmin } from './access';
+import { accessibleUnitIds, atLeast, isAdmin, taskVisibleSql } from './access';
 import { forbidden, notFound } from './errors';
 import { notify } from './notifications';
 import { addDays, seoulMidnight, todaySeoul, weekRangeSeoul } from './time';
@@ -176,4 +176,37 @@ export async function getReport(u: SessionUser, id: string) {
 
 export async function listHolidays(from: string, to: string) {
   return db()<{ date: string; name: string }[]>`select to_char(date, 'YYYY-MM-DD') as date, name from holidays where date between ${from} and ${to} order by date`;
+}
+
+/**
+ * R-15 4번 직원별 업무 처리 속도(최근 90일 완료 업무, 하위 업무 제외): 만든 뒤 완료까지(중앙값·평균 일), 시작(진행 중) 뒤 완료까지, 지연 비율(마감일 지나 완료),
+ * 체크리스트 항목 완료까지 평균 시간. 볼 수 있는 업무만 센다.
+ */
+export async function speedStats(u: SessionUser, userIds?: string[]) {
+  const sql = db();
+  const units = await accessibleUnitIds(u, sql);
+  const vis = taskVisibleSql(sql, u, units);
+  const rows = await sql<any[]>`
+    with done as (
+      select t.id, t.assignee_id, t.created_at, t.completed_at, t.due_date,
+        (select min(a.created_at) from activities a where a.entity_type = 'task' and a.entity_id = t.id and a.changes->'status'->>'to' = 'in_progress') as started_at
+      from tasks t
+      where t.deleted_at is null and t.parent_id is null and t.status = 'done' and t.completed_at > now() - interval '90 days' and t.assignee_id is not null and ${vis}
+        ${userIds?.length ? sql`and t.assignee_id = any(${userIds}::uuid[])` : sql``}
+    )
+    select d.assignee_id as user_id, us.name, count(*)::int as done,
+      round((percentile_cont(0.5) within group (order by extract(epoch from d.completed_at - d.created_at)) / 86400)::numeric, 1)::float8 as median_days,
+      round((avg(extract(epoch from d.completed_at - d.created_at)) / 86400)::numeric, 1)::float8 as avg_days,
+      round((avg(extract(epoch from d.completed_at - d.started_at)) filter (where d.started_at is not null) / 86400)::numeric, 1)::float8 as work_days,
+      count(*) filter (where d.due_date is not null)::int as with_due,
+      count(*) filter (where d.due_date is not null and (d.completed_at at time zone 'Asia/Seoul')::date > d.due_date)::int as late
+    from done d join users us on us.id = d.assignee_id
+    group by d.assignee_id, us.name order by us.name`;
+  const cl = await sql<{ user_id: string; hours: number; n: number }[]>`
+    select ci.assignee_id as user_id, count(*)::int n, round((avg(extract(epoch from ci.done_at - t.created_at)) / 3600)::numeric, 1)::float8 as hours
+    from task_checklist_items ci join tasks t on t.id = ci.task_id
+    where ci.done and ci.done_at > now() - interval '90 days' and ci.assignee_id is not null and t.deleted_at is null and ${vis}
+      ${userIds?.length ? sql`and ci.assignee_id = any(${userIds}::uuid[])` : sql``}
+    group by ci.assignee_id`;
+  return rows.map((r) => ({ ...r, late_rate: r.with_due ? Math.round((r.late / r.with_due) * 100) : null, checklist: cl.find((c) => c.user_id === r.user_id) ?? null }));
 }

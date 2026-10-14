@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
-import { accessibleUnitIds, assertUnitAccess, loadTaskForUser, taskVisibleSql, atLeast, teamTaskLevel } from './access';
+import { accessibleUnitIds, assertUnitAccess, loadTaskForUser, taskVisibleSql, atLeast, teamTaskLevel, subTeamsSql } from './access';
 import { HttpError, badRequest, conflict, forbidden, notFound } from './errors';
 import { activity } from './log';
 import { notify } from './notifications';
@@ -45,13 +45,13 @@ export const taskInput = z.object({
   assigneeIds: z.array(zUuid).max(50).optional(),
   /** V14 8번: 팀에 배정 — each = 팀원 모두에게 각각, lead = 팀장이 담당자 지정 */
   teamId: zUuid.nullable().optional(),
-  teamMode: z.enum(['each', 'lead']).optional(),
+  teamMode: z.enum(['each', 'lead', 'tag']).optional(), // tag(R-16): 소속 팀만 붙이고 담당자는 그대로
   version: z.number().int().optional(),
   reviewNote: z.string().max(2000).optional(),
 });
 export type TaskInput = z.infer<typeof taskInput>;
 
-export const TASK_COLS = (sql: Sql) => sql`
+export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   t.id, t.title, t.description, t.status, t.priority, t.project_id, t.parent_id, t.org_unit_id, t.brand_id,
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
@@ -69,6 +69,7 @@ export const TASK_COLS = (sql: Sql) => sql`
   (select count(*)::int from tasks s where s.parent_id = t.id and s.deleted_at is null and s.status = 'done') as subtask_done,
   (select count(*)::int from task_checklist_items ci where ci.task_id = t.id) as checklist_total,
   (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.done) as checklist_done,
+  (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.assignee_id = ${uid} and not ci.done) as my_items,
   (select count(*)::int from comments cm where cm.task_id = t.id and cm.deleted_at is null) as comment_count,
   (select count(*)::int from attachments at where at.task_id = t.id and at.deleted_at is null) as attachment_count,
   (select count(*)::int from task_dependencies d join tasks dt on dt.id = d.depends_on_id
@@ -133,7 +134,8 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
   if (q.to) conds.push(sql`coalesce(t.start_date, t.due_date) <= ${q.to}`);
   switch (q.view) {
     case 'my':
-      conds.push(sql`(t.assignee_id = ${u.id} or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id}))`);
+      conds.push(sql`(t.assignee_id = ${u.id} or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id})
+        or exists (select 1 from task_checklist_items mi where mi.task_id = t.id and mi.assignee_id = ${u.id} and not mi.done))`); // R-15 6번: 내 몫 체크리스트가 남은 업무도
       conds.push(sql`t.status <> 'done'`);
       break;
     case 'done': // V6 5번 완료 보관: 완료일 기준 (화면에서 월별로 묶음)
@@ -163,7 +165,7 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
       break;
   }
   const where = conds.reduce((a, c) => sql`${a} and ${c}`);
-  const rows = await sql<any[]>`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where ${where}
+  const rows = await sql<any[]>`select ${TASK_COLS(sql, u.id)} ${TASK_FROM(sql)} where ${where}
     order by ${q.view === 'done' ? sql`t.completed_at desc nulls last,` : sql``} t.due_date asc nulls last, t.priority = 'urgent' desc, t.priority = 'high' desc, t.sort_order, t.created_at
     limit ${q.limit}`;
   if (q.view !== 'risk') return rows;
@@ -187,7 +189,7 @@ export async function getTaskDetail(u: SessionUser, id: string) {
   const { deadlineRisk } = await import('./availability');
   const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks, approvals, fields, risk, batchMates] = await Promise.all([
     sql`select u.id, u.name from task_collaborators c join users u on u.id = c.user_id where c.task_id = ${id} order by u.name`,
-    sql`select id, text, done, sort, done_at from task_checklist_items where task_id = ${id} order by sort, id`,
+    sql`select ci.id, ci.text, ci.done, ci.sort, ci.done_at, ci.assignee_id, au.name as assignee_name from task_checklist_items ci left join users au on au.id = ci.assignee_id where ci.task_id = ${id} order by ci.sort, ci.id`,
     sql`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where t.parent_id = ${id} and t.deleted_at is null
         and ${taskVisibleSql(sql, u, units)} order by t.sort_order, t.created_at`,
     sql`select dt.id, dt.title, dt.status, dt.due_date from task_dependencies d join tasks dt on dt.id = d.depends_on_id
@@ -220,7 +222,9 @@ export async function getTaskDetail(u: SessionUser, id: string) {
   const [pendingHandoff] = await sql`select h.id, h.from_user, h.to_user, h.note, h.created_at, fu.name as from_name, tu.name as to_name
     from task_handoffs h join users fu on fu.id = h.from_user join users tu on tu.id = h.to_user where h.task_id = ${id} and h.status = 'pending' order by h.created_at desc limit 1`;
   const canDecideHandoff = !!pendingHandoff && ((t.requested_by ?? t.created_by) === u.id || reassign);
-  return { task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
+  // R-15 4번: 담당자의 최근 처리 속도 → 예상 처리 기간
+  const speed = t.assignee_id && t.status !== 'done' ? (await (await import('./insights')).speedStats(u, [t.assignee_id]).catch(() => []))[0] ?? null : null;
+  return { speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -852,6 +856,7 @@ export async function canReassign(u: SessionUser, t: { requested_by?: string | n
   if ((await menuLevel(u, 'reassign', sql)) === 'use') return true;
   // V14 8번: 팀장은 자기 팀 업무 재배정
   if (t.team_id && (await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`).length && (await teamTaskLevel(u, t.team_id, sql)) === 'edit') return true;
+  if (t.team_id && (await sql`select 1 from (${subTeamsSql(sql, u)}) s where s.id = ${t.team_id}`).length) return true; // R-16 상위 팀 구성원은 하위 팀 업무 배정
   return !!t.requested_by && t.requested_by === u.id && (await menuLevel(u, 'reassign_requester', sql)) === 'use';
 }
 async function notifyReassign(tx: Sql, u: SessionUser, p: { id: string; title: string; from: string; to: string | null; requestedBy: string | null; version: number }) {

@@ -27,7 +27,7 @@ export async function accessibleUnitIds(u: SessionUser, sql: Sql = db()): Promis
 
 /** 메뉴 권한 단계를 SQL 안에서 (사람별 예외 → 등급 설정 → 기본값). 동기 함수(taskVisibleSql)에서 쓰려고 */
 function menuLevelSql(sql: Sql, u: SessionUser, menu: string, def: string) {
-  return sql`coalesce((select level from menu_user_perms where menu = ${menu} and user_id = ${u.id}), (select level from menu_role_perms where menu = ${menu} and role = ${u.role}), ${def})`;
+  return sql`coalesce((select level from menu_user_perms where menu = ${menu} and user_id = ${u.id}), (select level from menu_role_perms_t where tenant = ${tenantOf(u)} and menu = ${menu} and role = ${u.role}), ${def})`;
 }
 const TEAM_DEF: Record<string, [string, string]> = { owner: ['edit', 'edit'], admin: ['edit', 'edit'], dept_lead: ['view', 'none'], site_manager: ['view', 'none'], staff: ['view', 'none'] };
 
@@ -39,19 +39,31 @@ export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null)
   const [dTeam, dAll] = TEAM_DEF[u.role] ?? ['view', 'none'];
   return sql`(
     (t.team_id is null and t.org_unit_id = any(${units}::uuid[]))
-    or (t.team_id is not null and (
+    or (t.team_id is not null and exists (select 1 from teams tt where tt.id = t.team_id and tt.tenant = ${tenantOf(u)}) and (
       (${menuLevelSql(sql, u, 'team_tasks', dTeam)} <> 'none' and exists (select 1 from team_members tm where tm.team_id = t.team_id and tm.user_id = ${u.id}))
+      or t.team_id in (${subTeamsSql(sql, u)})
       or ${menuLevelSql(sql, u, 'team_tasks_all', dAll)} <> 'none'))
     or t.assignee_id = ${u.id}
     or t.created_by = ${u.id}
     or t.requested_by = ${u.id}
     or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id})
+    or exists (select 1 from task_checklist_items ci where ci.task_id = t.id and ci.assignee_id = ${u.id})
   )`;
 }
 
+/** R-16: 내가 속한 팀의 하위 팀들(자식·손자…) — 상위 팀 구성원은 하위 팀 업무 전체 권한 */
+export function subTeamsSql(sql: Sql, u: SessionUser) {
+  return sql`with recursive d as (
+      select c.id from teams c join team_members m on m.team_id = c.parent_id and m.user_id = ${u.id} where c.tenant = ${tenantOf(u)} and not c.archived
+      union select c.id from teams c join d on c.parent_id = d.id where not c.archived
+    ) select id from d`;
+}
 /** V14 8번: 이 사용자가 팀 업무에 갖는 단계 (none/view/edit) */
 export async function teamTaskLevel(u: SessionUser, teamId: string, sql: Sql = db()) {
+  const [tm] = await sql<{ tenant: string }[]>`select tenant from teams where id = ${teamId}`;
+  if (!tm || tm.tenant !== tenantOf(u)) return 'none'; // 다른 회사 팀
   if (isAdmin(u)) return 'edit';
+  if ((await sql`select 1 from (${subTeamsSql(sql, u)}) s where s.id = ${teamId}`).length) return 'edit'; // R-16 상위 팀
   const { menuLevel } = await import('./menuPerms');
   const [m] = await sql<{ is_lead: boolean }[]>`select is_lead from team_members where team_id = ${teamId} and user_id = ${u.id}`;
   const rank: Record<string, number> = { none: 0, view: 1, edit: 2 };
@@ -82,7 +94,8 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
   const units = await accessibleUnitIds(u, sql);
   const inUnit = units === null || units.includes(t.org_unit_id);
   const isCollab =
-    (await sql`select 1 from task_collaborators where task_id = ${t.id} and user_id = ${u.id}`).length > 0;
+    (await sql`select 1 from task_collaborators where task_id = ${t.id} and user_id = ${u.id}`).length > 0
+    || (await sql`select 1 from task_checklist_items where task_id = ${t.id} and assignee_id = ${u.id} limit 1`).length > 0; // R-15 6번 항목 담당자도 참여자
   const involved = t.assignee_id === u.id || t.created_by === u.id || isCollab || (!!t.requested_by && t.requested_by === u.id);
   if (t.team_id) { // V14 8번 팀 업무
     const lv = await teamTaskLevel(u, t.team_id, sql);

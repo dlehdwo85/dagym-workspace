@@ -4,6 +4,13 @@ import { db } from '@/lib/db';
 import { loadTaskForUser } from '@/lib/access';
 import { forbidden, notFound } from '@/lib/errors';
 import { activity } from '@/lib/log';
+import { tenantOf } from '@/lib/types';
+
+/** R-15 6번 항목 담당자: 같은 회사 활성 사용자만 */
+async function assertSameTenant(user: any, id: string) {
+  const [x] = await db()`select 1 from users where id = ${id} and status = 'active' and tenant = ${tenantOf(user)}`;
+  if (!x) throw forbidden('배정할 수 없는 사람입니다');
+}
 
 async function load(user: any, id: string) {
   const [c] = await db()`select * from task_checklist_items where id = ${id}`;
@@ -15,10 +22,11 @@ async function load(user: any, id: string) {
 
 export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {
   const c = await load(user, params.id);
-  const i = await body(req, z.object({ done: z.boolean().optional(), text: z.string().trim().min(1).max(300).optional() }));
+  const i = await body(req, z.object({ done: z.boolean().optional(), text: z.string().trim().min(1).max(300).optional(), assigneeId: z.string().uuid().nullable().optional() }));
+  if (i.assigneeId) await assertSameTenant(user, i.assigneeId);
   const sql = db();
   await sql`update task_checklist_items set
-    done = ${i.done ?? c.done}, text = ${i.text ?? c.text},
+    done = ${i.done ?? c.done}, text = ${i.text ?? c.text}, assignee_id = ${i.assigneeId !== undefined ? i.assigneeId : c.assignee_id},
     done_by = ${i.done === undefined ? c.done_by : i.done ? user.id : null},
     done_at = ${i.done === undefined ? c.done_at : i.done ? new Date() : null}
     where id = ${params.id}`;

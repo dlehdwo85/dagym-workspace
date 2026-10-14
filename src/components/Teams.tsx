@@ -6,7 +6,7 @@ import { api, useApi } from './client';
 import { useSession } from './session';
 import { Avatar, Button, Field, Modal, Skeleton, cx, inputCls, toast } from './ui';
 
-export type Team = { id: string; name: string; color: string; members: { id: string; name: string; title: string | null; lead: boolean }[]; mine: boolean; i_lead: boolean; room_id: string | null };
+export type Team = { id: string; name: string; color: string; parent_id: string | null; members: { id: string; name: string; title: string | null; lead: boolean }[]; mine: boolean; i_lead: boolean; room_id: string | null };
 const COLORS = ['#0F766E', '#2563EB', '#EA580C', '#7C3AED', '#DB2777', '#059669', '#475569'];
 
 /** V14 8번 사용자 관리 → "팀" 탭: 팀 만들기(이름·색·팀장 1명 이상·팀원), 한 사람 여러 팀 가능 */
@@ -14,13 +14,13 @@ export function TeamsTab() {
   const { dir, menus } = useSession();
   const canEdit = (menus?.admin_users ?? 'none') === 'edit';
   const { data, loading, reload } = useApi<{ teams: Team[] }>('/api/teams');
-  const [edit, setEdit] = useState<{ id?: string; name: string; color: string; members: { userId: string; lead: boolean }[] } | null>(null);
+  const [edit, setEdit] = useState<{ id?: string; name: string; color: string; parentId: string | null; members: { userId: string; lead: boolean }[] } | null>(null);
   const [q, setQ] = useState('');
   async function save(e: React.FormEvent) {
     e.preventDefault(); if (!edit) return;
     try {
-      if (edit.id) await api(`/api/teams/${edit.id}`, { method: 'PATCH', body: { name: edit.name, color: edit.color, members: edit.members } });
-      else await api('/api/teams', { body: { name: edit.name, color: edit.color, members: edit.members } });
+      if (edit.id) await api(`/api/teams/${edit.id}`, { method: 'PATCH', body: { name: edit.name, color: edit.color, members: edit.members, parentId: edit.parentId } });
+      else await api('/api/teams', { body: { name: edit.name, color: edit.color, members: edit.members, parentId: edit.parentId } });
       setEdit(null); reload(); toast.ok('저장했습니다');
     } catch (er: any) { toast.error(er.message); }
   }
@@ -35,16 +35,17 @@ export function TeamsTab() {
     <div className="space-y-3" data-testid="teams-tab">
       <div className="flex items-center justify-between">
         <p className="text-sm text-ink-2">팀은 현장·부서(조직 구성)와 별개의 업무 묶음입니다. 한 사람이 여러 팀에 속할 수 있고, 팀 대화방이 자동으로 생깁니다.</p>
-        {canEdit && <Button onClick={() => setEdit({ name: '', color: COLORS[0], members: [] })} data-testid="team-new"><Plus />팀 만들기</Button>}
+        {canEdit && <Button onClick={() => setEdit({ name: '', color: COLORS[0], parentId: null, members: [] })} data-testid="team-new"><Plus />팀 만들기</Button>}
       </div>
       <ul className="grid gap-3 sm:grid-cols-2">
         {data?.teams.map((t) => (
           <li key={t.id} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="team-card">
             <div className="flex items-center gap-2">
               <span className="size-3 rounded-full" style={{ background: t.color }} />
-              <Link href={`/teams/${t.id}`} className="flex-1 font-semibold hover:underline">{t.name}</Link>
+              <Link href={`/teams/${t.id}`} className="flex-1 font-semibold hover:underline">{t.name}
+                {t.parent_id && <span className="ml-1.5 text-xs font-normal text-ink-3">↑ {data?.teams.find((x) => x.id === t.parent_id)?.name} 관리</span>}</Link>
               {t.room_id && <Link href={`/messages?room=${t.room_id}`} className="text-ink-3 hover:text-ink" aria-label={`${t.name} 대화방`}><MessageCircle className="size-4" /></Link>}
-              {canEdit && <Button size="sm" variant="ghost" onClick={() => setEdit({ id: t.id, name: t.name, color: t.color, members: t.members.map((m) => ({ userId: m.id, lead: m.lead })) })}>편집</Button>}
+              {canEdit && <Button size="sm" variant="ghost" onClick={() => setEdit({ id: t.id, name: t.name, color: t.color, parentId: t.parent_id, members: t.members.map((m) => ({ userId: m.id, lead: m.lead })) })}>편집</Button>}
               {canEdit && <Button size="sm" variant="ghost" onClick={() => archive(t)}>보관</Button>}
             </div>
             <ul className="mt-2 flex flex-wrap gap-1.5 text-xs">
@@ -58,6 +59,9 @@ export function TeamsTab() {
         {edit && (
           <form onSubmit={save} className="space-y-3">
             <Field label="팀 이름"><input className={inputCls} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="예: 마케팅팀" required aria-label="팀 이름" /></Field>
+            <Field label="상위 팀(관리 팀)"><select className={inputCls} value={edit.parentId ?? ''} onChange={(e) => setEdit({ ...edit, parentId: e.target.value || null })} aria-label="상위 팀">
+              <option value="">없음</option>{data?.teams.filter((x) => x.id !== edit.id).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>
+            <p className="-mt-2 text-xs text-ink-3">상위 팀 구성원은 이 팀 업무를 모두 보고·고치고·배정합니다. 이 팀은 상위 팀 업무를 볼 수 없습니다.</p>
             <div className="flex gap-1.5">{COLORS.map((c) => <button key={c} type="button" onClick={() => setEdit({ ...edit, color: c })} aria-label={`색 ${c}`} className={cx('size-7 rounded-full ring-offset-2', edit.color === c && 'ring-2 ring-ink')} style={{ background: c }} />)}</div>
             <input className={cx(inputCls, 'h-9')} placeholder="이름·직책으로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="팀원 찾기" />
             <ul className="max-h-64 divide-y divide-line overflow-y-auto rounded-input border border-line">

@@ -154,7 +154,7 @@ export default function CalendarPage() {
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e)).map((e) => ({
       id: `${e.id}|${e.originalStart ?? ''}`, title: `${e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? `${initials(e.ownerName ?? '')} · ` : ''}${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}`,
-      classNames: e.kind === 'task_block' ? ['task-block'] : [],
+      classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(e.linkedTask?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
       // V7 4번: 색은 개인/회사 두 가지만(사람 구분은 제목 앞 머리글자)
       backgroundColor: isPersonalEvent(e) ? calColors.personal : calColors.company, borderColor: 'transparent', textColor: '#ffffff',
@@ -356,14 +356,17 @@ export default function CalendarPage() {
               const done = isTask ? t.status === 'done' : lt?.status === 'done';
               const narrow = mobile && (arg.view.type === 'timeGridWeek' || arg.view.type === 'dayGridMonth');
               const timed = arg.view.type.startsWith('timeGrid') && !arg.event.allDay;
-              const mark = isTask ? (narrow ? <Check className="mr-0.5 inline size-3 align-[-2px]" strokeWidth={3} aria-hidden />
+              // R-15 1번: 완료는 흰 동그라미 안 ✓ + 흐림·취소선(월·주·일·목록 모두), 미완료 업무는 빈 동그라미
+              const mark = isTask ? (narrow ? (done ? <span className="mr-0.5 inline-flex size-3 items-center justify-center rounded-full bg-white align-[-2px] text-ink" aria-label="완료"><Check className="size-2.5" strokeWidth={3} /></span>
+                : <span className="mr-0.5 inline-block size-2.5 rounded-full border border-white/90 align-[-1px]" aria-hidden />)
                 : <button type="button" data-task-check onClick={(e) => { e.stopPropagation(); completeTask(t); }} aria-label={`${t.title} ${done ? '완료 취소' : '완료'}`}
                   className={cx('mr-1 inline-flex size-3.5 items-center justify-center rounded-full border border-white/90 align-[-2px]', done ? 'bg-white text-ink' : 'hover:bg-white/30')}>{done && <Check className="size-2.5" strokeWidth={3} />}</button>)
-                : lt ? <Check className="mr-0.5 inline size-3 align-[-2px]" strokeWidth={3} aria-label="업무와 연결" />
+                : lt ? (done ? <span className="mr-0.5 inline-flex size-3 items-center justify-center rounded-full bg-white align-[-2px] text-ink" aria-label="연결 업무 완료"><Check className="size-2.5" strokeWidth={3} /></span>
+                  : <Check className="mr-0.5 inline size-3 align-[-2px]" strokeWidth={3} aria-label="업무와 연결" />)
                 : arg.event.classNames.includes('task-block') ? <Timer className="mr-0.5 inline size-3 align-[-2px]" aria-label="업무 시간" /> : null;
               return (
                 <div className={cx('flex min-w-0 overflow-hidden px-0.5 leading-tight', timed ? 'h-full flex-col' : 'items-start', narrow ? 'text-[10px]' : 'text-[12px]')}
-                  {...(isTask ? { 'data-task-item': t.id, title: t.title } : { 'data-ev-block': '1' })}>
+                  {...(isTask ? { 'data-task-item': t.id, title: t.title } : { 'data-ev-block': '1' })} data-done={done ? '1' : undefined}>
                   <span className={cx('min-w-0 break-all font-semibold line-clamp-2 whitespace-normal', done && 'line-through opacity-80')}>
                     {mark}{!timed && !narrow && arg.timeText && <span className="mr-1 font-normal opacity-85">{arg.timeText}</span>}{arg.event.title}
                   </span>

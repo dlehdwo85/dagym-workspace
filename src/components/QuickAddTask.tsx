@@ -38,6 +38,11 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   // 모바일 바텀시트에서 연달아 등록: "계속 추가"면 저장 후 창을 닫지 않고 제목만 비운다
   const [keep, setKeep] = useState(false);
   useEffect(() => { try { setKeep(localStorage.getItem('wos_quick_keep') === '1'); } catch {} }, []);
+  // R-16: 소속 팀 기본값 = 작성자의 팀(담당자는 그대로 — "소속 팀만"). 한 번도 고르지 않았을 때만
+  useEffect(() => {
+    const mine = teams.data?.teams.find((t) => t.mine);
+    if (open && mine && f.teamId === undefined && !defaults?.parentId) setF((x: any) => (x.teamId === undefined ? { ...x, teamId: mine.id, teamMode: 'tag' } : x));
+  }, [open, teams.data, f.teamId, defaults?.parentId]);
   const titleRef = useRef<HTMLInputElement>(null);
   const { features } = useSession();
   // V12 8번 "📎 자료로 채우기": 자료를 올리면 AI 가 제목·설명·체크리스트·마감을 채우고, 저장하면 그 자료가 업무에 첨부된다
@@ -56,8 +61,12 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
     } catch (e: any) { toast.error(e.message); } finally { setFilling(''); if (fillRef.current) fillRef.current.value = ''; }
   }
 
+  // 창이 "새로 열릴 때"만 초기화 — 부모가 다시 그려져 defaults 객체가 바뀌어도 입력 중인 내용을 지우지 않게
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) {
+    const opening = open && !wasOpen.current;
+    wasOpen.current = open;
+    if (opening) {
       // V8 9번: 마지막에 쓴 담당·지시·우선순위·프로젝트·알림을 기억(이 기기)
       let last: any = {};
       try { last = JSON.parse(localStorage.getItem('wos_quick_last') ?? '{}'); } catch {}
@@ -95,8 +104,10 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
             title: f.title, assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
             priority: f.priority ?? 'normal', recurrenceRule: f.rrule ?? null, reminderMinutes: f.remind ?? null,
             ...(f.description ? { description: f.description } : {}), ...(f.checklist?.length ? { checklist: f.checklist } : {}),
-            ...(count > 1 && !f.teamId ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
-            ...(f.teamId ? { teamId: f.teamId, teamMode: f.teamMode ?? 'lead', ...(f.teamMode === 'each' ? {} : { assigneeId: null }) } : {}),
+            ...(count > 1 && !f.teamId && f.multiMode !== 'together' ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
+            // R-15 6번: "한 업무로 함께" — 첫 사람이 주 담당, 나머지는 협업자
+            ...(f.multi && f.multiMode === 'together' && (f.more ?? []).length ? { collaboratorIds: (f.more ?? []).filter((x: string) => x !== f.assigneeId) } : {}),
+            ...(f.teamId ? { teamId: f.teamId, teamMode: f.teamMode ?? 'lead', ...(f.teamMode === 'each' || f.teamMode === 'tag' ? {} : { assigneeId: null }) } : {}),
             parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
             sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null,
             approvalRequired: false,
@@ -193,6 +204,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
               <option value="">팀 없음</option>{teams.data!.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             {f.teamId && <>
+              <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={f.teamMode === 'tag'} onChange={() => set('teamMode')('tag')} />소속 팀만(담당 그대로)</label>
               <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={(f.teamMode ?? 'lead') === 'lead'} onChange={() => set('teamMode')('lead')} />팀에 배정(팀장이 담당 지정)</label>
               <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={f.teamMode === 'each'} onChange={() => set('teamMode')('each')} />팀원 모두에게 각각</label>
             </>}
@@ -204,6 +216,10 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
             <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={() => set('multi')(!f.multi)} aria-expanded={!!f.multi}>{f.multi ? '− 여러 명 선택 닫기' : '+ 여러 명에게 각자 1건씩'}</button>
             {f.multi && (
               <div className="mt-1.5 flex flex-wrap gap-1.5 rounded-input bg-slate-50 p-2">
+                <div className="flex w-full flex-wrap gap-3 pb-1 text-xs" role="radiogroup" aria-label="여러 명 방식">
+                  <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode !== 'together'} onChange={() => set('multiMode')('each')} />각자 1건씩</label>
+                  <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode === 'together'} onChange={() => set('multiMode')('together')} data-testid="multi-together" />한 업무로 함께(위 담당자 = 주 담당, 고른 사람 = 협업자)</label>
+                </div>
                 {dir.users.map((x) => {
                   const on = (f.more ?? []).includes(x.id) || x.id === f.assigneeId;
                   return <button key={x.id} type="button" aria-pressed={on} disabled={x.id === f.assigneeId}
