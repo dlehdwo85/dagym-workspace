@@ -13,7 +13,7 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
         <div className="absolute -right-24 -top-24 size-80 rounded-full bg-accent-500/20 blur-3xl" />
         <div className="absolute -bottom-32 -left-16 size-96 rounded-full bg-orange-500/10 blur-3xl" />
         <div className="relative flex items-center gap-3">
-          <img src="/icon-192.png" alt="" className="size-10 rounded-lg" />
+          <img src="/icon.svg" alt="" className="size-10" />
           <div><div className="text-lg font-bold">워크인</div><div className="text-xs text-slate-400">다짐 · 하이링크</div></div>
         </div>
         <div className="relative">
@@ -35,7 +35,7 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
       <section className="flex flex-1 flex-col items-center justify-center p-5">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <img src="/icon-192.png" alt="" className="size-9 rounded-lg" />
+            <img src="/icon.svg" alt="" className="size-9" />
             <div><div className="font-bold text-brand-700">워크인</div><div className="text-xs text-ink-2">다짐 · 하이링크</div></div>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-ink">{title}</h1>

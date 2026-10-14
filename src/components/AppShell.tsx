@@ -161,7 +161,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* 사이드바 (데스크톱) */}
         <aside className={cx('hidden shrink-0 flex-col bg-brand-800 text-white transition-[width] duration-150 sm:sticky sm:top-0 sm:flex sm:h-screen', collapsed ? 'w-[60px]' : 'w-60')} aria-label="사이드바">
           <div className={cx('flex h-14 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
-            <img src="/icon-192.png" alt="" className="size-7 rounded-md" />
+            <img src="/icon.svg" alt="" className="size-7" />
             {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold">워크인</div><div className="truncate text-[11px] text-slate-400">다짐 · 하이링크</div></div>}
           </div>
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
@@ -258,7 +258,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           {/* 머리줄은 상태바 높이만큼 아래로 (고정 높이 안에서 눌리지 않게 높이는 내용 줄에만) */}
           <header className="sticky top-0 z-30 border-b border-line bg-white/95 pt-[var(--sat)] backdrop-blur sm:hidden" data-testid="mobile-header">
             <div className="flex h-12 items-center justify-between px-3">
-              <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon-192.png" alt="" className="size-7 rounded" />워크인</span>
+              <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon.svg" alt="" className="size-7" />워크인</span>
               <span className="flex items-center">
                 <button onClick={() => setPalette(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-[22px]" /></button>
                 <button onClick={() => setMore(true)} className="inline-flex size-11 items-center justify-center rounded-full active:bg-slate-100" aria-label="메뉴 더보기"><Avatar id={session.user.id} name={session.user.name} size={30} /></button>

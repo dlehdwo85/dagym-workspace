@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   manifest: '/manifest.webmanifest',
   robots: { index: false, follow: false },
   appleWebApp: { capable: true, title: '워크인', statusBarStyle: 'default' },
-  icons: { icon: '/icon-192.png', apple: '/icon-192.png' },
+  icons: { icon: [{ url: '/icon.svg', type: 'image/svg+xml' }, { url: '/favicon-48.png', sizes: '48x48', type: 'image/png' }], apple: '/apple-touch-icon.png' }, // V13 7번 시안 B
 };
 export const viewport: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#1f3a5f' };
 
