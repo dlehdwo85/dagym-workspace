@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, refreshBadges, toast } from '@/components/ui';
 import { ROLE_LABEL, type Role } from '@/lib/types';
 import { MenuPermsTab } from '@/components/MenuPerms';
 import { TeamsTab } from '@/components/Teams';
@@ -60,7 +60,7 @@ function Users() {
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    try { await api(`/api/admin/users/${edit.id}`, { method: 'PATCH', body: { name: edit.name, title: edit.title, role: edit.role, status: edit.status === 'invited' ? undefined : edit.status, orgUnitIds: edit.org_unit_ids } }); toast.ok('저장했습니다'); setEdit(null); reload(); } catch (er: any) { toast.error(er.message); }
+    try { await api(`/api/admin/users/${edit.id}`, { method: 'PATCH', body: { name: edit.name, title: edit.title, titleShort: edit.title_short ?? null, role: edit.role, status: edit.status === 'invited' ? undefined : edit.status, orgUnitIds: edit.org_unit_ids } }); toast.ok('저장했습니다'); setEdit(null); reload(); refreshBadges(); } catch (er: any) { toast.error(er.message); }
   }
   async function reset(u: any) {
     try { const r = await api(`/api/admin/users/${u.id}/reset-password`, { body: {} }); setLink(location.origin + r.path); } catch (er: any) { toast.error(er.message); }
@@ -93,7 +93,7 @@ function Users() {
             <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="p-2">이름</th><th className="p-2">권한</th><th className="p-2">소속</th><th className="p-2">상태</th><th className="p-2">최근 로그인</th><th className="p-2"></th></tr></thead>
             <tbody className="divide-y">{data!.users.map((u) => (
               <tr key={u.id} className={cx(u.status !== 'active' && u.status !== 'invited' && 'text-slate-400')}>
-                <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}</div></td>
+                <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}{u.title_short ? ` (${u.title_short})` : ''}</div></td>
                 <td className="p-2">{ROLE_LABEL[u.role as Role]}</td>
                 <td className="p-2 text-xs">{u.org_unit_ids.map(unitName).join(', ') || '-'}</td>
                 <td className="p-2">{STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}</td>
@@ -140,6 +140,7 @@ function Users() {
           <div className="grid grid-cols-2 gap-3">
             <Field label="이름"><input className={inputCls} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
             <Field label="직책"><input className={inputCls} value={edit.title ?? ''} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></Field>
+            <Field label="직책 약칭 (예: CEO·CPO, 아바타 옆에 표시 — 비우면 직책)"><input className={inputCls} maxLength={12} value={edit.title_short ?? ''} onChange={(e) => setEdit({ ...edit, title_short: e.target.value })} aria-label="직책 약칭" /></Field>
             <Field label="권한"><select className={inputCls} value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })}>{roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></Field>
             <Field label="상태"><select className={inputCls} value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })} disabled={edit.status === 'invited'}>
               {edit.status === 'invited' && <option value="invited">초대됨</option>}<option value="active">사용 중</option><option value="disabled">사용 중지</option><option value="left">퇴사</option></select></Field>

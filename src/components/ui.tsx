@@ -1,6 +1,6 @@
 'use client';
 import clsx from 'clsx';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AlertCircle, CalendarDays, CheckCircle2, Flag, Inbox, Info, Loader2, Lock, RotateCw, UserRound, X, type LucideIcon } from 'lucide-react';
 import { STATUS_LABEL, PRIORITY_LABEL, type TaskStatus, type Priority } from '@/lib/types';
 
@@ -157,14 +157,47 @@ export function initials(name: string) {
   const parts = n.split(/\s+/);
   return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase();
 }
-export function Avatar({ name, id, size = 24, className, ring }: { name: string | null | undefined; id?: string | null; size?: number; className?: string; ring?: boolean }) {
+/** V14 24번: 직책 약칭(없으면 직책) — 한 번 받아 두고 모든 아바타가 같이 쓴다 */
+let badgeCache: Record<string, string> | null = null;
+let badgeLoading = false;
+const badgeSubs = new Set<() => void>();
+function loadBadges() {
+  if (badgeLoading || badgeCache) return;
+  badgeLoading = true;
+  fetch('/api/people/badges').then((r) => (r.ok ? r.json() : { people: {} })).catch(() => ({ people: {} }))
+    .then((j) => { badgeCache = j.people ?? {}; badgeLoading = false; badgeSubs.forEach((f) => f()); });
+}
+export function refreshBadges() { badgeCache = null; badgeLoading = false; loadBadges(); }
+function useBadge(id: string | null | undefined) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!id) return;
+    const f = () => force((x) => x + 1);
+    badgeSubs.add(f);
+    loadBadges();
+    return () => { badgeSubs.delete(f); };
+  }, [id]);
+  return id ? badgeCache?.[id] ?? null : null;
+}
+
+export function Avatar({ name, id, size = 24, className, ring, badge = true }: { name: string | null | undefined; id?: string | null; size?: number; className?: string; ring?: boolean; badge?: boolean }) {
+  const label = useBadge(badge && !ring && name ? id : null);
+  const press = useRef<ReturnType<typeof setTimeout> | null>(null);
   if (!name) {
     return <span className={clsx('inline-flex shrink-0 items-center justify-center rounded-full border border-dashed border-slate-300 text-slate-300', className)} style={{ width: size, height: size }} title="담당자 없음"><UserRound style={{ width: size * 0.6, height: size * 0.6 }} /></span>;
   }
-  return (
-    <span title={name} aria-label={name} className={clsx('inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold text-white', ring && 'ring-2 ring-white', className)}
+  const dot = (
+    <span title={label ? undefined : name} aria-label={name} className={clsx('inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold text-white', ring && 'ring-2 ring-white', !label && className)}
       style={{ width: size, height: size, background: avatarColor(id ?? name), fontSize: Math.max(9, Math.round(size * 0.4)) }}>
       {initials(name)}
+    </span>
+  );
+  if (!label) return dot;
+  const end = () => { if (press.current) clearTimeout(press.current); press.current = null; };
+  return (
+    <span className={clsx('inline-flex min-w-0 shrink-0 items-center gap-1', className)} title={`${name} · ${label}`} data-testid="avatar-badge"
+      onTouchStart={() => { end(); press.current = setTimeout(() => toast.info(`${name} · ${label}`), 500); }} onTouchEnd={end} onTouchMove={end}>
+      {dot}<span className="max-w-[4.5rem] truncate text-[10px] font-medium leading-none text-ink-3">{label}</span>
     </span>
   );
 }

@@ -10,7 +10,7 @@ import { useSession } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
 import { listenOnce, speechSupported } from '@/lib/nlparse';
 
-type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number } };
+type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; calendar?: string; warnings?: string[] } };
 type Msg = { role: 'user' | 'assistant'; text: string; proposals?: Proposal[]; error?: boolean; files?: string[]; blocked?: boolean };
 type Thread = { id: string; title: string; task_id: string | null; task_title: string | null; pinned: boolean; updated_at: string; turns: number };
 const EXAMPLES = ['다짐 로고 찾아서 이 업무에 첨부해줘', '이번 주 내 마감 업무 정리해줘', '내일 3시 회의 준비 업무 만들어줘', '3분기 매출 현장별로 엑셀 만들어줘'];
@@ -171,6 +171,8 @@ export default function AssistantPage() {
                           {p.preview.assignees && <div>담당: {p.preview.assignees.join(', ')} (각자 1건){p.preview.due && ` · 마감 ${p.preview.due}`}{p.preview.files ? ` · 📎 ${p.preview.files}개 첨부` : ''}</div>}
                           {!!p.preview.checklist?.length && <details><summary className="cursor-pointer">체크리스트 {p.preview.checklist.length}개</summary><ul className="ml-4 list-disc">{p.preview.checklist.map((c, k) => <li key={k}>{c}</li>)}</ul></details>}
                           {p.preview.description && <p className="line-clamp-3 whitespace-pre-wrap rounded bg-slate-50 p-1.5">{p.preview.description}</p>}
+                          {p.preview.when && <div data-testid="ai-event-preview">🗓 {p.preview.when}{p.preview.place && ` · 📍 ${p.preview.place}`}{p.preview.calendar && ` · ${p.preview.calendar}`}{!!p.preview.attendees?.length && <div>참석: {p.preview.attendees.join(', ')}</div>}</div>}
+                          {!!p.preview.warnings?.length && <ul className="rounded bg-amber-50 p-1.5 text-amber-800" data-testid="ai-event-warnings">{p.preview.warnings.map((w, k) => <li key={k}>⚠ {w}</li>)}</ul>}
                         </div>
                       )}
                       {p.state === 'done' ? <div className="mt-1 text-xs text-emerald-700">✓ 반영됨 {p.link && <Link href={p.link} className="underline">열기</Link>}</div>

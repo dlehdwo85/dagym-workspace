@@ -91,6 +91,7 @@ export async function acceptInvitation(token: string, password: string) {
 export const userPatch = z.object({
   name: z.string().trim().min(1).max(50).optional(),
   title: z.string().max(50).nullable().optional(),
+  titleShort: z.string().trim().max(12).nullable().optional(),
   role: z.enum(['owner', 'admin', 'dept_lead', 'site_manager', 'staff']).optional(),
   status: z.enum(['active', 'disabled', 'left']).optional(),
   orgUnitIds: z.array(zUuid).max(20).optional(),
@@ -115,6 +116,7 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
     const set: Record<string, unknown> = {};
     if (p.name !== undefined) set.name = p.name;
     if (p.title !== undefined) set.title = p.title;
+    if (p.titleShort !== undefined) set.title_short = p.titleShort || null;
     if (p.role !== undefined) set.role = p.role;
     if (p.status !== undefined) {
       if (p.status === 'active' && cur.status === 'invited') throw badRequest('초대 수락 전 사용자는 활성화할 수 없습니다');
@@ -241,7 +243,7 @@ export async function directory(u: SessionUser, sql: Sql = db()) {
   const orgUnits = await sql`select id, parent_id, brand_id, type, name, active, sort from org_units
     where id = any(${units ?? []}::uuid[]) order by sort, name`;
   const users = await sql`
-    select u.id, u.name, u.title, u.role, u.email,
+    select u.id, u.name, u.title, u.title_short, u.role, u.email,
       coalesce(array_agg(m.org_unit_id) filter (where m.org_unit_id is not null), '{}') as org_unit_ids
     from users u left join memberships m on m.user_id = u.id
     where u.status = 'active' and u.tenant = ${tenantOf(u)} and (u.role in ('owner','admin') or exists (select 1 from memberships mm where mm.user_id = u.id and mm.org_unit_id = any(${units ?? []}::uuid[])))

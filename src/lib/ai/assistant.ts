@@ -6,7 +6,7 @@ import { audit } from '../log';
 import { isAdmin, denyDemo } from '../access';
 import { todaySeoul } from '../time';
 import { listTasks, listQuery, getTaskDetail, createTask, updateTask, addComment, taskInput } from '../tasks';
-import { listEvents } from '../events';
+import { listEvents, eventInput, createEvent, updateEvent, deleteEvent, findConflicts, loadEvent } from '../events';
 import { canSeeRevenue } from '../revenue';
 import { directory } from '../admin';
 import { listLibrary, loadLibraryFile, attachLibraryToTask, saveGeneratedFile, tenantOf } from '../library';
@@ -102,6 +102,29 @@ const TOOLS: AiTool[] = [
     input_schema: { type: 'object', properties: { taskId: str('업무 id'), text: str('댓글 내용') }, required: ['taskId', 'text'] } },
   { name: 'propose_attach_file', description: '자료실 파일을 업무에 첨부하기를 제안한다. [확인] 후 실행.',
     input_schema: { type: 'object', properties: { taskId: str('업무 id'), fileId: str('자료 id') }, required: ['taskId', 'fileId'] } },
+  { name: 'find_free_time', description: '참석자들(나 포함)이 모두 비어 있는 근무 시간(평일 9~12시·13~18시, 공휴일·연차·출장 제외)을 찾는다. 회의 시간을 정할 때 먼저 쓴다.',
+    input_schema: { type: 'object', properties: {
+      attendeeIds: { type: 'array', items: { type: 'string' }, description: '참석자 id (list_people 로 찾기, 나는 자동 포함)' },
+      from: str('찾기 시작 날짜 YYYY-MM-DD'), to: str('끝 날짜 YYYY-MM-DD (포함, 최대 14일)'), durationMinutes: { type: 'number', description: '필요한 길이(분), 기본 60' },
+      notBefore: str('이 시각 이후만 HH:MM (선택)'), notAfter: str('이 시각까지 끝나야 HH:MM (선택)'),
+    }, required: ['from', 'to'] } },
+  { name: 'propose_create_event', description: '캘린더 일정(회의 등) 만들기를 제안한다. 참석자 충돌·연차/부재를 함께 경고한다. [확인] 후 생성되고 참석자에게 초대 알림이 간다.',
+    input_schema: { type: 'object', properties: {
+      title: str('제목'), date: str('날짜 YYYY-MM-DD'), startTime: str('시작 HH:MM (종일이면 생략)'), endTime: str('끝 HH:MM (선택)'),
+      durationMinutes: { type: 'number', description: '끝 시각 대신 길이(분), 기본 60' }, allDay: { type: 'boolean', description: '종일 일정' }, endDate: str('여러 날 종일 일정의 마지막 날 YYYY-MM-DD (선택)'),
+      location: str('장소 (선택)'), attendeeIds: { type: 'array', items: { type: 'string' }, description: '참석자 id (list_people 로 찾기)' },
+      calendar: { type: 'string', enum: ['personal', 'company'], description: 'personal=내 캘린더(기본), company=회사 공용 캘린더' },
+      repeat: { type: 'string', enum: ['none', 'daily', 'weekdays', 'weekly', 'biweekly', 'monthly'], description: '반복 (선택)' }, repeatUntil: str('반복 끝 날짜 YYYY-MM-DD (선택)'),
+      reminderMinutes: { type: 'array', items: { type: 'number' }, description: '알림: 시작 몇 분 전 (예: [10], 하루 전은 1440)' },
+      description: str('메모 (선택)'), taskId: str('연결할 업무 id (선택)'), isPrivate: { type: 'boolean', description: '비공개 (선택)' },
+    }, required: ['title', 'date'] } },
+  { name: 'propose_update_event', description: '일정 시간 바꾸기 또는 취소(삭제)를 제안한다. 일정 id 는 list_events 로 찾는다. [확인] 후 실행되고 참석자에게 알림이 간다.',
+    input_schema: { type: 'object', properties: {
+      eventId: str('일정 id'), action: { type: 'string', enum: ['move', 'cancel'] },
+      date: str('새 날짜 YYYY-MM-DD (move)'), startTime: str('새 시작 HH:MM (move)'), endTime: str('새 끝 HH:MM (선택)'), durationMinutes: { type: 'number', description: '새 길이(분, 선택 — 없으면 원래 길이)' },
+      title: str('새 제목 (선택)'), location: str('새 장소 (선택)'),
+      scope: { type: 'string', enum: ['this', 'all'], description: '반복 일정이면 this=이번 일정만(occurrenceDate 필요), all=전체' }, occurrenceDate: str('반복 중 바꿀 회차의 날짜 YYYY-MM-DD'),
+    }, required: ['eventId', 'action'] } },
   { name: 'propose_xlsx_report', description: '표를 엑셀(.xlsx)로 만들어 자료실 "AI 보고서" 폴더에 저장(업무 id 가 있으면 그 업무에도 첨부)하기를 제안한다. 숫자는 도구로 확인한 값만 넣는다.',
     input_schema: { type: 'object', properties: {
       title: str('파일 제목'), taskId: str('첨부할 업무 id (선택)'),
@@ -111,8 +134,9 @@ const TOOLS: AiTool[] = [
 
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 한국 피트니스 회사(다짐·하이링크) 직원을 돕습니다.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
-- 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·엑셀 보고서)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
+- 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
+- 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
 - 사람 이름은 list_people 로 id 를 찾아 쓰세요. 날짜는 Asia/Seoul 기준입니다.
 - 권한 오류가 나면 그 사람이 볼 수 없는 정보라고 짧게 알려 주세요.
 - 답은 한국어로 짧고 분명하게. 목록은 짧은 줄로.`;
@@ -126,6 +150,97 @@ async function propose(c: Ctx, kind: string, summary: string, payload: unknown, 
   const [p] = await db()<{ id: string }[]>`insert into ai_proposals (tenant, user_id, kind, summary, payload, confidential) values (${tenantOf(c.u)}, ${c.u.id}, ${kind}, ${summary}, ${db().json(payload as never)}, ${!!c.confidential}) returning id`;
   c.proposals.push({ id: p.id, kind, summary, preview });
   return { proposalId: p.id, status: '사용자 확인 대기 — 화면의 [확인]을 눌러야 실행됩니다' };
+}
+
+
+// ---- V14 22번: 일정 도구 ----
+const isTime = (s?: string) => !!s && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
+const at = (date: string, time: string) => DateTime.fromISO(`${date}T${time}`, { zone: TZ });
+const fmtWhen = (s: DateTime, e: DateTime, allDay: boolean) => allDay
+  ? `${s.toFormat('M/d(ccc)', { locale: 'ko' })}${e.minus({ days: 1 }).toISODate() !== s.toISODate() ? ` ~ ${e.minus({ days: 1 }).toFormat('M/d(ccc)', { locale: 'ko' })}` : ''} 종일`
+  : `${s.toFormat('M/d(ccc) HH:mm', { locale: 'ko' })}~${e.toFormat('HH:mm')}`;
+const REPEAT: Record<string, string> = { daily: 'FREQ=DAILY', weekdays: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', weekly: 'FREQ=WEEKLY', biweekly: 'FREQ=WEEKLY;INTERVAL=2', monthly: 'FREQ=MONTHLY' };
+
+async function peopleNames(u: SessionUser, ids: string[]) {
+  if (!ids.length) return [] as { id: string; name: string; title?: string | null }[];
+  const people = (await directory(u)).users as unknown as { id: string; name: string; title?: string | null }[];
+  const unknown = ids.filter((id) => !people.some((p) => p.id === id));
+  if (unknown.length) throw badRequest(`찾을 수 없는 사람 id: ${unknown.join(', ')} — list_people 로 다시 찾으세요`);
+  return ids.map((id) => people.find((p) => p.id === id)!);
+}
+
+/** 충돌(같은 시간 다른 일정)·연차/출장·반차/외근 경고 */
+async function eventWarnings(u: SessionUser, ids: string[], s: Date, e: Date, allDay: boolean, excludeIds: string[] = []) {
+  const out: string[] = [];
+  if (!allDay) for (const c of await findConflicts(u, ids, s, e, excludeIds)) {
+    out.push(`겹치는 일정: ${c.who.join('·') || '나'} — ${c.title} ${DateTime.fromJSDate(c.start).setZone(TZ).toFormat('HH:mm')}~${DateTime.fromJSDate(c.end).setZone(TZ).toFormat('HH:mm')}`);
+  }
+  const { busyOf } = await import('../availability');
+  const sql = db();
+  const all = [...new Set([u.id, ...ids])];
+  const users = await sql<{ id: string; name: string }[]>`select id, name from users where id = any(${all}::uuid[]) and tenant = ${tenantOf(u)}`;
+  const day0 = DateTime.fromJSDate(s).setZone(TZ).startOf('day'), day1 = DateTime.fromJSDate(e).setZone(TZ).endOf('day');
+  const half = await sql<{ name: string; kind: string; start_at: Date; end_at: Date }[]>`select us.name, e.kind, e.start_at, e.end_at from events e join users us on us.id = e.created_by
+    where e.deleted_at is null and e.kind in ('half_day', 'outside') and e.created_by = any(${users.map((x) => x.id)}::uuid[]) and e.start_at < ${e} and e.end_at > ${s}`;
+  for (const x of users) {
+    const { away } = await busyOf(x.id, day0.toJSDate(), day1.toJSDate(), sql).catch(() => ({ away: new Set<string>() }));
+    if (away.size) out.push(`${x.name}: 연차·출장 (${[...away].sort().map((d) => DateTime.fromISO(d).toFormat('M/d')).join(', ')})`);
+  }
+  for (const h of half) out.push(`${h.name}: ${h.kind === 'half_day' ? '반차' : '외근'} ${DateTime.fromJSDate(h.start_at).setZone(TZ).toFormat('HH:mm')}~${DateTime.fromJSDate(h.end_at).setZone(TZ).toFormat('HH:mm')}`);
+  const hol = await sql<{ d: string; name: string }[]>`select to_char(date, 'YYYY-MM-DD') d, name from holidays where date between ${day0.toISODate()} and ${day1.toISODate()} and (tenant is null or tenant = ${tenantOf(u)})`;
+  for (const h of hol) out.push(`공휴일: ${h.name} (${DateTime.fromISO(h.d).toFormat('M/d')})`);
+  return [...new Set(out)].slice(0, 10);
+}
+
+async function findFreeTime(u: SessionUser, input: any) {
+  if (!isDate(input.from) || !isDate(input.to)) throw badRequest('날짜는 YYYY-MM-DD');
+  const ids = [...new Set((Array.isArray(input.attendeeIds) ? input.attendeeIds : []).map(String))].slice(0, 20) as string[];
+  const people = await peopleNames(u, ids);
+  const dur = Math.min(Math.max(Number(input.durationMinutes) || 60, 15), 480);
+  const now = DateTime.now().setZone(TZ);
+  let from = DateTime.fromISO(input.from, { zone: TZ }).startOf('day');
+  if (from < now.startOf('day')) from = now.startOf('day');
+  const to = DateTime.fromISO(input.to, { zone: TZ }).plus({ days: 1 }).startOf('day');
+  if (to.diff(from, 'days').days > 15) throw badRequest('최대 14일까지 찾을 수 있습니다');
+  const { busyOf, WORK } = await import('../availability');
+  const sql = db();
+  const busy: { s: number; e: number }[] = [];
+  const away = new Set<string>();
+  for (const id of [u.id, ...people.map((p) => p.id)]) {
+    const b = await busyOf(id, from.toJSDate(), to.toJSDate(), sql);
+    busy.push(...b.intervals.map((x) => ({ s: x.s, e: x.e })));
+    b.away.forEach((d) => away.add(d));
+  }
+  const hol = new Set((await sql<{ d: string }[]>`select to_char(date, 'YYYY-MM-DD') d from holidays where date between ${from.toISODate()} and ${to.toISODate()} and (tenant is null or tenant = ${tenantOf(u)})`).map((h) => h.d));
+  const nb = isTime(input.notBefore) ? Number(input.notBefore.slice(0, 2)) * 60 + Number(input.notBefore.slice(3)) : 0;
+  const na = isTime(input.notAfter) ? Number(input.notAfter.slice(0, 2)) * 60 + Number(input.notAfter.slice(3)) : 24 * 60;
+  const slots: { date: string; start: string; end: string; freeUntil: string }[] = [];
+  for (let d = from; d < to && slots.length < 12; d = d.plus({ days: 1 })) {
+    const date = d.toISODate()!;
+    if (d.weekday > 5 || hol.has(date) || away.has(date)) continue;
+    for (const w of WORK) {
+      let cur = d.plus({ minutes: Math.max(w.s, nb) }).toMillis();
+      const end = d.plus({ minutes: Math.min(w.e, na) }).toMillis();
+      cur = Math.max(cur, Math.ceil(now.toMillis() / 1800000) * 1800000); // 지금 이후, 30분 단위
+      const blocks = busy.filter((x) => x.e > cur && x.s < end).sort((a, b) => a.s - b.s);
+      for (const x of [...blocks, { s: end, e: end }]) {
+        if (x.s - cur >= dur * 60000) {
+          slots.push({ date, start: DateTime.fromMillis(cur).setZone(TZ).toFormat('HH:mm'), end: DateTime.fromMillis(cur + dur * 60000).setZone(TZ).toFormat('HH:mm'), freeUntil: DateTime.fromMillis(x.s).setZone(TZ).toFormat('HH:mm') });
+          if (slots.length >= 12) break;
+        }
+        cur = Math.max(cur, x.e);
+        if (cur >= end) break;
+      }
+    }
+  }
+  return { attendees: [u.name, ...people.map((p) => p.name)], durationMinutes: dur, slots, note: slots.length ? '근무 시간(9~12·13~18시) 기준. 비공개 일정도 바쁨으로 계산했습니다.' : '조건에 맞는 빈 시간이 없습니다. 기간·길이를 바꿔 보세요.' };
+}
+
+async function personalCalendarId(u: SessionUser) {
+  const { ensurePersonalCalendar } = await import('../access');
+  await ensurePersonalCalendar(u.id, u.name);
+  const [c] = await db()<{ id: string }[]>`select id from calendars where type = 'personal' and owner_user_id = ${u.id}`;
+  return c.id;
 }
 
 async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
@@ -176,6 +291,72 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         from revenue_entries r join org_units o on o.id = r.org_unit_id where o.tenant = 'default' and not o.is_demo and r.month between ${input.fromMonth + '-01'} and ${input.toMonth + '-01'} order by o.name, r.month limit 600`;
       c.confidential = true; // 매출은 기밀 근거
       return { unit: '원(회원 수는 명)', rows };
+    }
+    case 'find_free_time': return findFreeTime(u, input);
+    case 'propose_create_event': {
+      if (!isDate(input.date)) throw badRequest('날짜는 YYYY-MM-DD');
+      const allDay = !!input.allDay || !isTime(input.startTime);
+      let s: DateTime, e: DateTime;
+      if (allDay) { s = DateTime.fromISO(input.date, { zone: TZ }); e = (isDate(input.endDate) && input.endDate >= input.date ? DateTime.fromISO(input.endDate, { zone: TZ }) : s).plus({ days: 1 }); }
+      else { s = at(input.date, input.startTime); e = isTime(input.endTime) && input.endTime > input.startTime ? at(input.date, input.endTime) : s.plus({ minutes: Math.min(Math.max(Number(input.durationMinutes) || 60, 5), 24 * 60) }); }
+      const ids = [...new Set((Array.isArray(input.attendeeIds) ? input.attendeeIds : []).map(String))].filter((x) => x !== u.id).slice(0, 50) as string[];
+      const people = await peopleNames(u, ids);
+      let calendarId: string; let calName = '내 캘린더';
+      if (input.calendar === 'company') {
+        const [cc] = await db()<{ id: string; name: string }[]>`select id, name from calendars where type = 'company' and tenant = ${tenantOf(u)}`;
+        if (!cc) throw badRequest('회사 공용 캘린더가 없습니다');
+        calendarId = cc.id; calName = cc.name;
+      } else calendarId = await personalCalendarId(u);
+      const until = isDate(input.repeatUntil) ? `;UNTIL=${input.repeatUntil.replace(/-/g, '')}T145959Z` : '';
+      const rrule = REPEAT[input.repeat] ? REPEAT[input.repeat] + until : null;
+      if (input.taskId) await getTaskDetail(u, String(input.taskId));
+      const i = eventInput.parse({ calendarId, title: String(input.title ?? '').slice(0, 200), description: input.description ? String(input.description).slice(0, 5000) : undefined,
+        location: input.location ? String(input.location).slice(0, 300) : undefined, allDay, start: s.toISO(), end: e.toISO(), rrule, attendeeIds: ids.length ? ids : undefined,
+        reminderMinutes: Array.isArray(input.reminderMinutes) ? input.reminderMinutes.map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 40320).slice(0, 5) : undefined,
+        taskId: input.taskId || undefined, isPrivate: input.isPrivate ? true : undefined, kind: input.taskId ? 'normal' : undefined });
+      const { calendarPerms } = await import('../access');
+      const [cal] = await db()<any[]>`select id, type, org_unit_id, owner_user_id, tenant from calendars where id = ${calendarId}`;
+      if (!(await calendarPerms(u, cal)).edit) throw new HttpError(403, 'forbidden', `${calName}에 일정을 만들 권한이 없습니다 — 내 캘린더(personal)로 만드세요`);
+      const warnings = await eventWarnings(u, ids, s.toJSDate(), e.toJSDate(), allDay);
+      const when = fmtWhen(s, e, allDay) + (rrule ? ` · 반복 ${({ daily: '매일', weekdays: '평일', weekly: '매주', biweekly: '격주', monthly: '매월' } as Record<string, string>)[input.repeat]}` : '');
+      return { ...(await propose(c, 'create_event', `일정 만들기: ${i.title} — ${when}${people.length ? ` · ${people.map((p) => p.name).join('·')}` : ''}`, i,
+        { when, place: i.location || null, attendees: people.map((p) => `${p.name}${p.title ? ` · ${p.title}` : ''}`), calendar: calName, warnings })), warnings };
+    }
+    case 'propose_update_event': {
+      const { event: ev, perms } = await loadEvent(u, String(input.eventId));
+      if (!perms.edit) throw new HttpError(403, 'forbidden', '이 일정을 바꿀 권한이 없습니다(만든 사람·캘린더 편집 권한)');
+      const series = !!ev.rrule;
+      const scope = series && input.scope === 'this' ? 'this' : 'all';
+      let occ: DateTime | null = null;
+      if (scope === 'this') {
+        if (!isDate(input.occurrenceDate)) throw badRequest('반복 일정의 이번 회차만 바꾸려면 occurrenceDate 가 필요합니다');
+        const t0 = DateTime.fromJSDate(ev.start_at).setZone(TZ);
+        occ = DateTime.fromISO(input.occurrenceDate, { zone: TZ }).set({ hour: t0.hour, minute: t0.minute });
+      }
+      const ids = (await db()<{ user_id: string }[]>`select user_id from event_attendees where event_id = ${ev.id}`).map((r) => r.user_id).filter((x) => x !== u.id);
+      const scopeLabel = series ? (scope === 'this' ? ' (이번 회차만)' : ' (반복 전체)') : '';
+      if (input.action === 'cancel') {
+        return propose(c, 'cancel_event', `일정 취소: ${ev.title}${scopeLabel}`, { eventId: ev.id, scope: { scope, occurrenceStart: occ?.toISO() ?? undefined } },
+          { when: fmtWhen(occ ?? DateTime.fromJSDate(ev.start_at).setZone(TZ), (occ ?? DateTime.fromJSDate(ev.start_at).setZone(TZ)).plus({ milliseconds: ev.end_at.getTime() - ev.start_at.getTime() }), ev.all_day), attendees: [], warnings: ids.length ? [`참석자 ${ids.length}명에게 취소 알림이 갑니다`] : [] });
+      }
+      if (!isDate(input.date) && !isTime(input.startTime) && !input.title && !input.location) throw badRequest('바꿀 내용이 없습니다');
+      const base = occ ?? DateTime.fromJSDate(ev.start_at).setZone(TZ);
+      const durMs = ev.end_at.getTime() - ev.start_at.getTime();
+      const date = isDate(input.date) ? input.date : base.toISODate()!;
+      let s: DateTime, e: DateTime;
+      if (ev.all_day) { s = DateTime.fromISO(date, { zone: TZ }); e = s.plus({ milliseconds: durMs }); }
+      else {
+        s = at(date, isTime(input.startTime) ? input.startTime : base.toFormat('HH:mm'));
+        e = isTime(input.endTime) && input.endTime > s.toFormat('HH:mm') ? at(date, input.endTime) : Number(input.durationMinutes) > 0 ? s.plus({ minutes: Math.min(Number(input.durationMinutes), 1440) }) : s.plus({ milliseconds: durMs });
+      }
+      const patch: Record<string, unknown> = { start: s.toISO(), end: e.toISO() };
+      if (input.title) patch.title = String(input.title).slice(0, 200);
+      if (input.location) patch.location = String(input.location).slice(0, 300);
+      eventInput.partial().parse(patch);
+      const warnings = await eventWarnings(u, ids, s.toJSDate(), e.toJSDate(), ev.all_day, [ev.recurring_event_id ?? ev.id]);
+      const when = fmtWhen(s, e, ev.all_day);
+      return { ...(await propose(c, 'update_event', `일정 변경: ${ev.title}${scopeLabel} → ${when}`, { eventId: ev.id, patch, scope: { scope, occurrenceStart: occ?.toISO() ?? undefined } },
+        { when, attendees: [], warnings: [...warnings, ...(ids.length ? [`참석자 ${ids.length}명에게 변경 알림이 갑니다`] : [])] })), warnings };
     }
     case 'propose_create_task': {
       const i = taskInput.parse({ title: input.title, description: input.description || undefined, assigneeId: input.assigneeId || undefined, dueDate: isDate(input.dueDate) ? input.dueDate : undefined,
@@ -365,6 +546,7 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
       const { userSeesConfidential, assertConfidentialAudience } = await import('../library');
       const need = (ids: unknown[]) => Promise.all(ids.filter(Boolean).map(async (id) => { if (!(await userSeesConfidential(String(id)))) throw forbidden('기밀 자료를 근거로 한 내용이라 기밀 열람 권한이 없는 사람에게 줄 수 없습니다'); }));
       if (p.kind === 'create_task') await need([x.assigneeId, x.requestedById, ...(x.collaboratorIds ?? [])]);
+      if (p.kind === 'create_event') await need(x.attendeeIds ?? []);
       if (p.kind === 'create_tasks') await need([...(x.input?.assigneeIds ?? []), x.input?.requestedById]);
       if (p.kind === 'update_task' || p.kind === 'comment') await assertConfidentialAudience(x.taskId, [x.patch?.assigneeId].filter(Boolean));
       if (p.kind === 'xlsx_report' && x.taskId) await assertConfidentialAudience(x.taskId);
@@ -390,6 +572,9 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
         result = { fileId: f.id, link: x.taskId ? `/tasks/${x.taskId}` : `/library?file=${f.id}` };
         break;
       }
+      case 'create_event': { const r = await createEvent(u, eventInput.parse(x)); result = { eventId: r.id, link: `/calendar?event=${r.id}` }; break; }
+      case 'update_event': { await updateEvent(u, x.eventId, eventInput.partial().parse(x.patch), x.scope); result = { eventId: x.eventId, link: `/calendar?event=${x.eventId}` }; break; }
+      case 'cancel_event': { await deleteEvent(u, x.eventId, x.scope); result = { eventId: x.eventId, link: '/calendar' }; break; }
       default: throw badRequest('모르는 제안');
     }
   } catch (e) {

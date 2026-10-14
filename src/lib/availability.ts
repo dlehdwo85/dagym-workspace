@@ -8,7 +8,7 @@ import { tenantOf, type SessionUser } from './types';
 
 const TZ = 'Asia/Seoul';
 /** 근무 시간 기준: 09:00~18:00, 점심 12:00~13:00 제외 = 하루 8시간 */
-const WORK = [{ s: 9 * 60, e: 12 * 60 }, { s: 13 * 60, e: 18 * 60 }];
+export const WORK = [{ s: 9 * 60, e: 12 * 60 }, { s: 13 * 60, e: 18 * 60 }];
 export const DAY_CAPACITY_MIN = 480;
 
 export type DayLoad = {
@@ -19,7 +19,7 @@ export type DayLoad = {
 type Interval = { s: number; e: number; kind: 'meeting' | 'block' };
 
 /** 그 사람이 바쁜 시간(회의·업무 시간 블록)과 휴가·출장 날짜. 다른 사람 일정은 시간만 쓰고 제목은 돌려주지 않는다 */
-async function busyOf(userId: string, from: Date, to: Date, sql: Sql) {
+export async function busyOf(userId: string, from: Date, to: Date, sql: Sql) {
   const [p] = await sql<any[]>`select id, email, name, role, status, tenant, is_demo as "isDemo" from users where id = ${userId}`;
   if (!p) throw notFound('사용자가 없습니다');
   const evs = await listEvents({ ...p, timezone: TZ, sessionId: '' } as SessionUser, from, to);

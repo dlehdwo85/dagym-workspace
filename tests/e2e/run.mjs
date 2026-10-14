@@ -148,12 +148,15 @@ await step('② 직원(모바일) 알림 수신 → 알림 눌러 업무로 이�
 });
 
 await step('② 직원(모바일) 댓글·멘션·사진 첨부·문서 링크 → 검토 요청', async () => {
-  await staff.getByTestId('comment-input').fill('점검 완료 사진 올립니다');
-  await staff.getByLabel('멘션할 사람').selectOption({ label: '최매니저' });
+  // V14 23번: 휴대폰은 @ 드롭다운 없이 입력 중 @ 자동완성으로만
+  await staff.getByTestId('comment-input').fill('점검 완료 사진 올립니다 @');
+  assert.equal(await staff.getByLabel('멘션할 사람').count(), 0, '휴대폰 댓글줄에 @ 드롭다운 없음');
+  const opts = await staff.getByTestId('mention-suggest').locator('button').allTextContents();
+  assert.ok(!opts.some((o) => o.includes('박직원')), '다른 현장 직원은 멘션 목록에 없음');
+  await staff.getByTestId('comment-input').fill('점검 완료 사진 올립니다 @최');
+  await staff.getByTestId('mention-suggest').getByRole('option', { name: /최매니저/ }).click();
   const typed = await staff.getByTestId('comment-input').inputValue();
   assert.ok(typed.endsWith('@최매니저 ') && !typed.includes(']('), `입력창에는 이름만 보여야 함: ${typed}`);
-  const opts = await staff.getByLabel('멘션할 사람').locator('option').allTextContents();
-  assert.ok(!opts.some((o) => o.includes('박직원')), '다른 현장 직원은 멘션 목록에 없음');
   await staff.getByRole('button', { name: '등록', exact: true }).click();
   await staff.getByTestId('comments').getByText('@최매니저').waitFor();
   await staff.getByTestId('file-input').setInputFiles({ name: '소화기.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]) });
@@ -1750,13 +1753,19 @@ await step('V14 19번·R-15·R-16: 업무 상세 머리 요약·D-day·다음 �
   const tk = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V19 상세 개선', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, dueDate: addDays(today, 2), priority: 'high', approvalRequired: false })).id;
   await ctx.owner.ok('POST', `/api/tasks/${tk}/checklist`, { text: '자료 모으기', assigneeId: ctx.managerA.id });
   await ctx.owner.ok('POST', `/api/tasks/${tk}/comments`, { body: '시작합니다' });
+  await ctx.owner.ok('PATCH', `/api/admin/users/${ctx.ownerId}`, { titleShort: 'CEO' }); // V14 24번 직책 약칭
   await owner.goto(`${BASE}/tasks/${tk}`);
+  await owner.locator('[data-testid="avatar-badge"][title$="· CEO"]').first().waitFor();
   const sum = owner.getByTestId('task-summary');
   await sum.getByTestId('dday').getByText('D-2').waitFor();
   await owner.getByTestId('task-progress').getByText('0%').waitFor();
   await owner.getByTestId('next-action').waitFor();
   await owner.getByTestId('comments').getByText('시작합니다').waitFor();
-  await owner.getByTestId('comments').locator('[data-activity="history"]').first().waitFor(); // 활동 = 댓글 + 이력
+  assert.equal(await owner.getByRole('tab', { name: '활동' }).count(), 0, 'V14 23번: 활동 탭 없음 — 댓글(기본)·변경 이력');
+  assert.equal(await owner.getByRole('tab', { name: /댓글/ }).getAttribute('aria-selected'), 'true');
+  await owner.getByRole('tab', { name: '변경 이력' }).click();
+  await owner.getByTestId('history').locator('li').first().waitFor();
+  await owner.getByRole('tab', { name: /댓글/ }).click();
   assert.equal(await owner.getByTestId('more-fields').count(), 0, '필드 더보기 없음');
   await owner.getByLabel('자료 모으기 담당').waitFor();
   await owner.screenshot({ path: `${SHOTS}/92-task-detail-v19.png`, fullPage: true });
@@ -1779,6 +1788,9 @@ await step('V14 19번·R-15·R-16: 업무 상세 머리 요약·D-day·다음 �
   // 화면 폭 판정 뒤 아래로 옮겨 붙는다 — 고정될 때까지 기다림
   await staff.waitForFunction(() => { const r = document.querySelector('[data-testid="comment-form"]')?.getBoundingClientRect(); return !!r && r.bottom <= innerHeight && r.bottom > innerHeight - 140; }, null, { timeout: 5000 });
   await form.getByLabel('사진 찍기').waitFor();
+  const bar = await form.boundingBox();
+  assert.ok(bar.height <= 60, `휴대폰 댓글줄은 한 줄 (높이 ${bar.height})`);
+  assert.equal(await form.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)', '불투명 배경');
   await staff.screenshot({ path: `${SHOTS}/94-mobile-comment-bar.png` });
 });
 await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 질문) / 사용자 관리 "팀" 탭 → 팀 만들기 → 팀 업무 등록 → 팀 보드·업무 칩', async () => {

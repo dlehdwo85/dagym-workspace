@@ -53,7 +53,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [depOpen, setDepOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [menu, setMenu] = useState(false);
-  const [tab, setTab] = useState<'all' | 'comments' | 'history'>('all'); // V14 19번 ⑦: 댓글·이력·첨부를 활동 하나로(기본)
+  const [tab, setTab] = useState<'comments' | 'history'>('comments'); // V14 23번: 활동 탭 철회 — 댓글(기본)·변경 이력
   const moreFields = true; // R-15 4번: "필드 더보기" 없앰 — 모든 항목을 기본으로 보여 준다
   // V14 19번 ⑤: 섹션 접기 기억(이 기기)
   const [fold, setFold] = useState<Record<string, boolean>>({});
@@ -230,9 +230,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const primary = primary0 && (statusOwner || (t.status === 'review' && isRequester)) ? primary0 : null;
 
   // V14 19번 ④: 휴대폰은 댓글 입력줄을 화면 아래에 고정(📎·📷) — 변형(transform)된 부모 영향 없게 body 로 띄운다
+  const autoGrow = (el: HTMLTextAreaElement | null) => { if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 112)}px`; } };
   const commentFormEl = (
           <form onSubmit={sendComment} className={cx(!mobile && 'relative', 'mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20',
-            mobile && cx('fixed inset-x-0 mt-0 rounded-none border-x-0 border-b-0 shadow-pop', inPanel ? 'bottom-0 z-[45] pb-[var(--sab)]' : 'bottom-[calc(4rem+var(--sab))] z-30'))} data-testid="comment-form">
+            mobile && cx('fixed inset-x-0 mt-0 rounded-none border-x-0 border-b-0 bg-white shadow-[0_-4px_12px_rgba(15,23,42,0.08)]', inPanel ? 'bottom-0 z-[45] pb-[var(--sab)]' : 'bottom-[calc(4rem+var(--sab))] z-30'))} data-testid="comment-form">
             {/* V8 7번: "@" 를 치면 이 업무를 볼 수 있는 사람 자동완성 */}
             {(() => {
               const m = /(^|\s)@([^\s@]*)$/.exec(comment);
@@ -249,7 +250,19 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 </ul>
               );
             })()}
-            <textarea className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={mobile ? 1 : 2} placeholder="댓글 입력 — @ 를 치면 사람을 언급할 수 있어요" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
+            {/* V14 23번: 휴대폰은 한 줄 — [📎][📷][자동 높이 입력][등록], @ 는 입력 중 자동완성으로만 */}
+            {mobile ? (
+            <div className="flex items-end gap-1 px-1.5 py-1.5">
+              <button type="button" onClick={() => clipRef.current?.click()} className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="파일 첨부">📎</button>
+              <button type="button" onClick={() => camRef.current?.click()} className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="사진 찍기">📷</button>
+              <input ref={clipRef} type="file" multiple className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
+              <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
+              <textarea ref={autoGrow} rows={1} className="block max-h-28 min-h-9 min-w-0 flex-1 resize-none rounded-input border border-line bg-slate-50 px-3 py-[7px] text-sm leading-5 focus:border-accent-500 focus:outline-none focus:ring-0" placeholder="댓글 입력"
+                value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input" aria-label="댓글" />
+              <Button size="sm" type="submit" className="h-9 shrink-0" disabled={!comment.trim()}>등록</Button>
+            </div>
+            ) : (<>
+            <textarea className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={2} placeholder="댓글 입력 — @ 를 치면 사람을 언급할 수 있어요" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} aria-label="댓글" />
             <div className="flex items-center gap-2 border-t border-line px-2 py-1.5">
               <select className="h-7 rounded-md border border-line bg-white px-1.5 text-xs" value="" onChange={(e) => {
@@ -260,21 +273,16 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               }} aria-label="멘션할 사람">
                 <option value="">@ 멘션</option>{mentionable.data?.users.filter((u) => u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
               </select>
-              {mobile && <>
-                <button type="button" onClick={() => clipRef.current?.click()} className="inline-flex size-9 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="파일 첨부">📎</button>
-                <button type="button" onClick={() => camRef.current?.click()} className="inline-flex size-9 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="사진 찍기">📷</button>
-                <input ref={clipRef} type="file" multiple className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
-                <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
-              </>}
               <span className="hidden text-[11px] text-ink-3 sm:inline">이 업무를 볼 수 있는 사람만 · Ctrl+Enter 로 등록</span>
               <span className="flex-1" />
               <Button size="sm" type="submit" disabled={!comment.trim()}>등록</Button>
             </div>
+            </>)}
           </form>
   );
   const commentForm = mobile && typeof document !== 'undefined' ? createPortal(commentFormEl, document.body) : commentFormEl;
   return (
-    <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(11rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
+    <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(7.5rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
       {/* 상단 도구 막대 */}
       <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
         {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-emerald-50 px-2.5 text-sm font-semibold text-emerald-700"><CircleCheck className="size-4" />완료됨</span>}
@@ -675,21 +683,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
 
         <section id="comments" className="border-t border-line pt-5">
           <div className="mb-3 flex items-center gap-4 text-sm font-semibold" role="tablist">
-            <button role="tab" aria-selected={tab === 'all'} onClick={() => setTab('all')} className={cx('border-b-2 pb-1', tab === 'all' ? 'border-brand-600 text-ink' : 'border-transparent text-ink-3')}>활동</button>
             <button role="tab" aria-selected={tab === 'comments'} onClick={() => setTab('comments')} className={cx('border-b-2 pb-1', tab === 'comments' ? 'border-brand-600 text-ink' : 'border-transparent text-ink-3')}>댓글 {data.comments.length > 0 && data.comments.length}</button>
             <button role="tab" aria-selected={tab === 'history'} onClick={() => setTab('history')} className={cx('border-b-2 pb-1', tab === 'history' ? 'border-brand-600 text-ink' : 'border-transparent text-ink-3')}>변경 이력</button>
           </div>
           <ul className={cx('space-y-4', tab === 'history' && 'hidden')} data-testid="comments">
-            {/* V13 8번: 댓글 + 들여쓴 답글(1단계). V14 19번 ⑦: "활동"은 댓글·변경 이력·첨부를 시간순 하나로 */}
-            {[...data.comments.filter((c: any) => !c.parent_id).map((c: any) => ({ k: 'c', at: c.created_at, c })),
-              ...(tab === 'all' ? data.history.filter((h: any) => h.action !== 'created').map((h: any) => ({ k: 'h', at: h.created_at, h })) : [])]
-              .sort((a: any, b: any) => String(a.at).localeCompare(String(b.at)))
-              .map((x: any) => x.k === 'c'
-                ? <CommentThread key={x.c.id} c={x.c} replies={data.comments.filter((r: any) => r.parent_id === x.c.id)} taskId={id} meId={user.id}
-                    mentionable={mentionable.data?.users ?? []} onChange={() => { reload(); broadcastRefresh(); }} />
-                : <li key={`h${x.h.id}`} className="flex gap-2 text-xs text-ink-2" data-activity="history"><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-slate-300" /><span><HistLine h={x.h} userName={userName} /></span></li>)}
+            {/* V13 8번: 댓글 + 들여쓴 답글(1단계) */}
+            {data.comments.filter((c: any) => !c.parent_id).map((c: any) => (
+              <CommentThread key={c.id} c={c} replies={data.comments.filter((r: any) => r.parent_id === c.id)} taskId={id} meId={user.id}
+                mentionable={mentionable.data?.users ?? []} onChange={() => { reload(); broadcastRefresh(); }} />))}
             {!data.comments.length && tab === 'comments' && <li className="text-xs text-ink-3">아직 댓글이 없습니다. 진행 상황이나 질문을 남겨 주세요.</li>}
-            {tab === 'all' && <li className="text-xs text-ink-3">작성: {t.created_by_name} · {fmtDateTime(t.created_at)}</li>}
           </ul>
           <ul className={cx('space-y-1.5 text-xs text-ink-2', tab !== 'history' && 'hidden')} data-testid="history">
             {data.history.map((h: any) => (

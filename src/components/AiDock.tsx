@@ -7,7 +7,7 @@ import { api, broadcastRefresh } from './client';
 import { Button, cx, inputCls, toast } from './ui';
 
 type Ctx = { page: 'home' | 'tasks' | 'task' | 'calendar' | 'library' | 'revenue' | 'reports' | 'messages' | 'other'; id?: string; taskId?: string };
-type P = { id: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string };
+type P = { id: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { warnings?: string[] } };
 type M = { role: 'user' | 'assistant'; text: string; proposals?: P[]; error?: boolean; blocked?: boolean };
 
 /** 지금 화면 → 맥락(id 만) */
@@ -31,7 +31,7 @@ const SUGGEST: Record<Ctx['page'], string[]> = {
   home: ['오늘 내가 할 일 정리해줘', '이번 주 마감 위험한 업무 알려줘', '내일 아침 브리핑처럼 요약해줘'],
   tasks: ['이번 주 마감 업무 담당자별로 정리해줘', '기한 지난 업무 알려줘', '내일 3시 회의 준비 업무 만들어줘'],
   task: ['이 업무 체크리스트 만들어줘', '이 업무 진행 상황 요약해줘', '이 업무 관련 자료 찾아서 첨부해줘'],
-  calendar: ['이 날 일정과 마감 업무 정리해줘', '이번 주 회의 준비 업무 만들어줘', '비어 있는 시간 알려줘'],
+  calendar: ['회의 잡아줘', '이 날 일정과 마감 업무 정리해줘', '비어 있는 시간 알려줘', '이번 주 회의 준비 업무 만들어줘'],
   library: ['이 자료 요약해줘', '다짐 로고 찾아줘', '최근 단가표 찾아줘'],
   revenue: ['이번 달 현장별 매출 비교해줘', '전년 대비 많이 줄어든 현장 알려줘', '3분기 매출 엑셀로 만들어줘'],
   reports: ['이번 주 주간 보고 초안 써줘', '지난주 완료한 업무 요약해줘', '다음 주 할 일 정리해줘'],
@@ -100,6 +100,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
                     {m.proposals?.map((p) => (
                       <div key={p.id} className="mt-1.5 rounded-input border border-amber-200 bg-white p-2 text-ink">
                         <div className="text-xs font-semibold text-amber-700">✨ AI 제안</div><div className="text-sm">{p.summary}</div>
+                        {!!p.preview?.warnings?.length && <ul className="mt-1 rounded bg-amber-50 p-1.5 text-xs text-amber-800" data-testid="ai-dock-warnings">{p.preview.warnings.map((w, k) => <li key={k}>⚠ {w}</li>)}</ul>}
                         {p.state === 'done' ? <div className="mt-1 text-xs text-emerald-700">✓ 반영됨 {p.link && <Link href={p.link} className="underline">열기</Link>}</div>
                           : p.state === 'cancelled' ? <div className="mt-1 text-xs text-ink-3">취소함</div>
                           : <div className="mt-1 flex gap-1.5"><Button size="sm" onClick={() => decide(i, p, true)} disabled={p.state === 'busy'}><Check />확인</Button><Button size="sm" variant="secondary" onClick={() => decide(i, p, false)} disabled={p.state === 'busy'}><X />취소</Button></div>}
