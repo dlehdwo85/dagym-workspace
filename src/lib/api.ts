@@ -71,6 +71,8 @@ export function handler<P>(fn: (ctx: any) => Promise<unknown>, opts: Opts = {}) 
       const user = await currentUser();
       if (!user && !opts.public) throw unauthorized();
       const params = (await ctx?.params) ?? ({} as P);
+      // 17차: 체험이 끝난 공간은 읽기 전용(보기·내보내기·요금제 신청은 허용)
+      if (user && MUTATING.has(req.method)) await (await import('./plans')).assertWritable(user, req.nextUrl.pathname);
 
       const idemKey = opts.idempotent && req.method === 'POST' ? req.headers.get('idempotency-key') : null;
       if (idemKey && user) {

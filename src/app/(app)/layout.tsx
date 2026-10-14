@@ -17,13 +17,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const dir = await directory(user);
   const menus = await menuLevels(user); // V13 메뉴 권한
   const [t] = await db()<{ name: string; kind: string; owner_user_id: string | null; onboarded_at: Date | null }[]>`select name, kind, owner_user_id, onboarded_at from tenants where id = ${tenantOf(user)}`;
+  const trial = ['default', 'demo'].includes(tenantOf(user)) ? null : await (await import('@/lib/plans')).trialInfo(tenantOf(user)).catch(() => null);
   const session = {
     user: { id: user.id, name: user.name, email: user.email, role: user.role, platformAdmin: !!user.platformAdmin },
     dir: JSON.parse(JSON.stringify(dir)),
     features: { googleSync: googleSyncEnabled(), ai: aiEnabled() && !user.isDemo && menus.assistant === 'use', library: !user.isDemo && menus.library !== 'none' },
     menus,
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)
-    tenant: { name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), onboarding: !!t && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)) },
+    tenant: { name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), onboarding: !!t && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)),
+      trial: trial ? { trial: trial.trial, readOnly: trial.readOnly, daysLeft: trial.daysLeft } : null },
   };
   return <AppShell session={session}><Suspense>{children}</Suspense></AppShell>;
 }

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, BellRing, CalendarDays, Check, Mic, Sparkles, Users } from 'lucide-react';
 
-export const metadata = { title: '워크인 — 업무·일정·알림을 한 곳에', description: '말로 등록하고 정확한 시간에 알림. 개인 무료, 팀 5명까지 무료.' };
+export const metadata = { title: '워크인 — 업무·일정·알림을 한 곳에', description: '말로 등록하고 정확한 시간에 알림. 14일 무료 체험 후 월 2,900원부터.' };
 
 const SHOTS = [
   { src: '/landing/home.png', t: '오늘 할 일과 일정이 한 화면에', d: '마감 위험·오늘 일정·팀 현황을 첫 화면에서' },
@@ -9,9 +9,10 @@ const SHOTS = [
   { src: '/landing/calendar.png', t: '업무와 일정을 한 캘린더에', d: '마감 업무가 시간 블록으로, 회의 준비 업무는 자동으로' },
 ];
 const PLANS = [
-  { n: '개인', p: '무료', s: '혼자 쓰는 업무·일정', f: ['업무·일정·알림·캘린더 전부', '저장공간 1GB', 'AI 비서 월 20회'] },
-  { n: '팀 무료', p: '무료', s: '5명까지', f: ['팀 업무·메신저', '회사 저장 2GB', 'AI 비서 월 30회'], hi: true },
-  { n: '팀', p: '1인 월 3,900원', s: '인원 무제한 · 베타 기간 사전 신청', f: ['1인 저장 3GB', '1인 AI 월 50회', '결제 오픈 전까지 과금 없음'] },
+  // 17차: 무료 요금제 폐지 → 14일 무료 체험 + 유료 요금제 (금액은 운영 화면 값과 맞춰 갱신)
+  { n: '개인', p: '월 2,900원', s: '1명 · 연간 결제 시 월 2,400원', f: ['업무·일정·알림·캘린더 전부', '저장공간 5GB', 'AI 비서 월 50회'] },
+  { n: '팀', p: '1인 월 3,900원', s: '최소 3인 · 연간 결제 시 1인 3,300원', f: ['팀 업무·메신저·권한', '1인 저장 3GB(회사 합산)', '1인 AI 월 50회'], hi: true },
+  { n: '비즈니스', p: '1인 월 6,900원', s: '연간 결제 시 1인 5,900원', f: ['감사 로그·기밀 등급·고급 권한', '1인 저장 10GB', '1인 AI 월 150회 · 우선 지원'] },
 ];
 
 export default function Welcome() {
@@ -22,14 +23,14 @@ export default function Welcome() {
         <nav className="ml-auto flex items-center gap-2 text-sm">
           <a href="#pricing" className="hidden px-2 text-ink-2 hover:text-ink sm:inline">요금</a>
           <Link href="/login" className="rounded-input px-3 py-2 font-semibold text-ink-2 hover:bg-slate-100" data-testid="landing-login">로그인</Link>
-          <Link href="/signup" className="rounded-input bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700">무료로 시작</Link>
+          <Link href="/signup" className="rounded-input bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700">14일 무료 체험</Link>
         </nav>
       </header>
       <section className="mx-auto max-w-6xl px-4 pb-10 pt-8 text-center sm:pt-16">
         <h1 className="text-3xl font-bold leading-tight tracking-tight sm:text-5xl" data-testid="landing-title">업무·일정·알림을 한 곳에</h1>
         <p className="mx-auto mt-4 max-w-xl text-base text-ink-2 sm:text-lg">말로 등록하고, 정확한 시간에 알림 받으세요.<br className="hidden sm:inline" /> 혼자서도, 팀으로도 바로 시작할 수 있습니다.</p>
         <div className="mt-7 flex flex-wrap justify-center gap-2">
-          <Link href="/signup" className="inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-testid="landing-start">무료로 시작<ArrowRight className="size-4" /></Link>
+          <Link href="/signup" className="inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-testid="landing-start">14일 무료 체험<ArrowRight className="size-4" /></Link>
           <Link href="/login" className="rounded-input border border-line px-5 py-3 text-base font-semibold hover:bg-slate-50">로그인</Link>
         </div>
         <p className="mt-3 text-xs text-ink-3">카드 등록 없음 · 웹·Android·iOS</p>
@@ -61,7 +62,7 @@ export default function Welcome() {
             </div>
           ))}
         </div>
-        <div className="mt-8 text-center"><Link href="/signup" className="inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white hover:bg-brand-700">무료로 시작<ArrowRight className="size-4" /></Link></div>
+        <div className="mt-8 text-center"><Link href="/signup" className="inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white hover:bg-brand-700">14일 무료 체험<ArrowRight className="size-4" /></Link></div>
       </section>
       <footer className="border-t border-line py-6 text-center text-xs text-ink-3">
         <Link href="/terms" className="underline">이용약관</Link> · <Link href="/privacy" className="underline">개인정보 처리방침</Link> · <Link href="/ai-notice" className="underline">AI 이용 안내</Link>

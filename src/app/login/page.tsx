@@ -84,7 +84,7 @@ function LoginForm() {
       )}
       <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy}>{busy ? <><Loader2 className="animate-spin" />확인 중…</> : <>{mfa ? '확인' : '로그인'}<ArrowRight /></>}</Button>
       {signupOn
-        ? <p className="text-center text-sm text-ink-2">처음이신가요? <Link href="/signup" className="font-semibold text-brand-700 underline" data-testid="to-signup">무료로 시작</Link></p>
+        ? <p className="text-center text-sm text-ink-2">처음이신가요? <Link href="/signup" className="font-semibold text-brand-700 underline" data-testid="to-signup">14일 무료 체험</Link></p>
         : <p className="text-center text-xs leading-relaxed text-ink-2">계정은 관리자 초대로만 만들 수 있습니다.</p>}
       <p className="text-center text-xs leading-relaxed text-ink-2">비밀번호를 잊었다면 회사 관리자에게 재설정 링크를 요청하세요.</p>
       <p className="text-center text-[11px] text-ink-3"><Link href="/terms" className="underline">이용약관</Link> · <Link href="/privacy" className="underline">개인정보 처리방침</Link></p>

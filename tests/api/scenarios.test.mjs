@@ -1753,8 +1753,9 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
     assert.deepEqual(u.limits, { users: null, storageGb: null, aiRequests: null });
     assert.ok(u.usage.storageBytes > 0 && u.usage.users >= 4 && u.usage.aiRequests >= 1, '첨부·자료실·사람·AI 요청 셈');
     assert.ok(u.topFiles.length > 0 && u.topFiles[0].size >= u.topFiles.at(-1).size, '큰 파일 순');
-    assert.ok(u.plans.some((p) => p.code === 'team' && p.per_user_krw === 3900) && u.plans.some((p) => p.code === 'personal' && p.limits.users === 1) && u.plans.some((p) => p.code === 'team_free' && p.limits.users === 5)
-      && !u.plans.some((p) => ['internal', 'standard', 'free', 'basic'].includes(p.code)), '15차: 개인·팀 무료·팀(1인 3,900원), 내부·예전 요금제는 목록에 없음');
+    assert.ok(u.plans.some((p) => p.code === 'team' && p.per_user_krw === 3900 && p.min_users === 3 && p.annual_per_user_krw === 3300) && u.plans.some((p) => p.code === 'personal' && p.monthly_krw === 2900 && p.limits.users === 1)
+      && u.plans.some((p) => p.code === 'business' && p.per_user_krw === 6900)
+      && !u.plans.some((p) => ['internal', 'standard', 'free', 'basic', 'team_free', 'trial'].includes(p.code)), '17차: 개인 2,900·팀 1인 3,900(최소 3인)·비즈니스 1인 6,900, 무료·체험·내부 요금제는 목록에 없음');
     assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.deepEqual(pf.tenants.map((t) => t.id).sort(), ['default', 'demo']);

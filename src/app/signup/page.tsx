@@ -49,10 +49,10 @@ export default function SignupPage() {
       <span><span className={cx('mr-1 text-xs font-semibold', req ? 'text-red-600' : 'text-ink-3')}>{req ? '[필수]' : '[선택]'}</span>{label}</span></label>
   );
   return (
-    <AuthCard title="무료로 시작" sub="카드 등록 없이 바로 쓸 수 있습니다">
+    <AuthCard title="14일 무료 체험" sub="카드 등록 없이 비즈니스 기능 전부 · 끝나면 요금제를 고르세요">
       <form onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="시작 방식">
-          {([['personal', User, '개인으로 시작', '혼자 쓰는 업무·일정'], ['team', Building2, '팀으로 시작', '5명까지 무료']] as const).map(([k, Icon, t, d]) => (
+          {([['personal', User, '개인으로 시작', '혼자 쓰는 업무·일정'], ['team', Building2, '팀으로 시작', '팀·메신저·권한']] as const).map(([k, Icon, t, d]) => (
             <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => setMode(k)} data-testid={`mode-${k}`}
               className={cx('rounded-card border p-3 text-left', mode === k ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
               <Icon className="size-5 text-brand-700" /><div className="mt-1 text-sm font-semibold">{t}</div><div className="text-xs text-ink-3">{d}</div>
@@ -75,7 +75,7 @@ export default function SignupPage() {
         {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
         <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy || enabled === null} data-testid="signup-submit">{busy ? <><Loader2 className="animate-spin" />가입 중…</> : <>가입하고 확인 메일 받기<ArrowRight /></>}</Button>
         <p className="text-center text-sm text-ink-2">이미 계정이 있나요? <Link href="/login" className="font-semibold text-brand-700 underline">로그인</Link></p>
-        <ul className="space-y-1 text-xs text-ink-3"><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />개인 무료: 저장 1GB · AI 월 20회</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />팀 무료: 5명 · 저장 2GB · AI 월 30회</li></ul>
+        <ul className="space-y-1 text-xs text-ink-3"><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />14일 체험: 10명 · 저장 20GB · AI 300회 · 카드 없음</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />이후 월 2,900원부터 (개인 2,900원 · 팀 1인 3,900원 · 비즈니스 1인 6,900원)</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />고르지 않으면 읽기 전용 — 데이터는 지우지 않고 내보낼 수 있어요</li></ul>
       </form>
     </AuthCard>
   );

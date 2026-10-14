@@ -113,7 +113,7 @@ export default function UsagePage() {
               {plans.map((p: any) => (
                 <tr key={p.code} className={cx('border-t border-line', p.code === s.planCode && 'bg-brand-50 font-semibold')}>
                   <td className="py-1.5">{p.name}{p.description && <div className="text-[11px] font-normal text-ink-3">{p.description}</div>}</td>
-                  <td>{p.per_user_krw ? `1인 ${won(p.per_user_krw)}` : won(p.monthly_krw)}</td><td>{lim(p.limits.users, '명')}</td>
+                  <td>{p.per_user_krw ? `1인 ${won(p.per_user_krw)}` : won(p.monthly_krw)}{p.min_users ? <div className="text-[11px] font-normal text-ink-3">최소 {p.min_users}인</div> : null}{(p.annual_per_user_krw || p.annual_monthly_krw) ? <div className="text-[11px] font-normal text-brand-700">연간 결제 시 {p.annual_per_user_krw ? `1인 ${won(p.annual_per_user_krw)}` : won(p.annual_monthly_krw)}</div> : null}</td><td>{lim(p.limits.users, '명')}</td>
                   <td>{p.limits.perUserStorageGb ? `1인 ${p.limits.perUserStorageGb}GB(합산)` : lim(p.limits.storageGb, 'GB')}</td><td>{p.limits.perUserAi ? `1인 ${p.limits.perUserAi}회` : lim(p.limits.aiRequests, '회')}</td>
                 </tr>
               ))}

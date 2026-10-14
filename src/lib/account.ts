@@ -82,7 +82,7 @@ export async function upgradeToTeam(u: SessionUser, company: string, ip: string 
   const t = tenantOf(u);
   await db().begin(async (tx) => {
     await tx`update tenants set kind = 'company', name = ${name} where id = ${t}`;
-    await tx`update tenant_subscriptions set plan_code = 'team_free', updated_at = now() where tenant = ${t} and plan_code = 'personal'`;
+    await tx`update tenant_subscriptions set plan_code = 'team', updated_at = now() where tenant = ${t} and plan_code = 'personal'`;
     await tx`update org_units set name = ${name} where tenant = ${t} and type = 'hq'`;
     await tx`insert into calendars (type, name, color, tenant) values ('company', ${name + ' 공용'}, '#0F766E', ${t}) on conflict do nothing`;
     await audit(tx, u.id, 'tenant.upgrade', null, null, { tenant: t, name }, ip);

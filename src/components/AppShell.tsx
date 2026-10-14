@@ -291,6 +291,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} /></Suspense>}
         <MessengerDock aiOpen={aiDock} />
         <VersionWatch />
+        {/* 17차: 무료 체험 D-n · 끝나면 읽기 전용 안내 */}
+        {session.tenant?.trial && (
+          <div className={cx('fixed inset-x-0 top-0 z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',
+            session.tenant.trial.readOnly ? 'bg-red-600 text-white' : session.tenant.trial.daysLeft <= 3 ? 'bg-warm-500 text-white' : 'bg-brand-50 text-brand-800')} data-testid="trial-banner">
+            {session.tenant.trial.readOnly ? '무료 체험이 끝나 읽기 전용입니다' : session.tenant.trial.daysLeft === 0 ? '무료 체험 오늘 종료' : `무료 체험 D-${session.tenant.trial.daysLeft}`}
+            <Link href="/admin/usage" className="underline">요금제 선택</Link>
+          </div>
+        )}
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
           {MOBILE_TABS.slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}

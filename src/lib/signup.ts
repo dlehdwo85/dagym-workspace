@@ -67,7 +67,9 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
   const hash = await hashPassword(i.password);
   const userId = await sql.begin(async (tx) => {
     await tx`insert into tenants (id, name, kind, created_ip) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${ip})`;
-    await tx`insert into tenant_subscriptions (tenant, plan_code) values (${tenant}, ${i.mode === 'personal' ? 'personal' : 'team_free'})`;
+    // 17차: 무료 요금제 대신 14일 무료 체험(비즈니스 기능 전부, 카드 없음)
+    await tx`insert into tenant_subscriptions (tenant, plan_code, status, trial_ends_at, period_end)
+      values (${tenant}, 'trial', 'trial', now() + interval '14 days', (now() + interval '14 days')::date)`;
     const [u] = await tx<{ id: string }[]>`insert into users (email, name, role, status, password_hash, tenant, signup_pending)
       values (${i.email}, ${i.name}, 'owner', 'active', ${hash}, ${tenant}, true) returning id`;
     await tx`update tenants set owner_user_id = ${u.id} where id = ${tenant}`;

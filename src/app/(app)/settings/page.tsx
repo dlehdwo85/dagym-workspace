@@ -220,7 +220,7 @@ function AccountSection() {
       <a href="/api/account/export" className="mt-2 inline-block rounded-input border border-line px-3 py-1.5 font-medium hover:bg-slate-50" data-testid="account-export">내 데이터 내려받기</a>
       {tenant?.personal && user.role === 'owner' && (
         <form className="mt-4 flex flex-wrap items-end gap-2 rounded-input border border-line p-3" onSubmit={async (e) => { e.preventDefault(); try { await api('/api/account/upgrade', { body: { company: team } }); location.reload(); } catch (er: any) { toast.error(er.message); } }} data-testid="upgrade-team">
-          <Field label="팀으로 바꾸기 — 데이터는 그대로, 5명까지 무료로 초대"><input className={inputCls} value={team} onChange={(e) => setTeam(e.target.value)} placeholder="회사(팀) 이름" aria-label="팀 이름" /></Field>
+          <Field label="팀으로 바꾸기 — 데이터는 그대로, 사람을 초대해 함께"><input className={inputCls} value={team} onChange={(e) => setTeam(e.target.value)} placeholder="회사(팀) 이름" aria-label="팀 이름" /></Field>
           <Button type="submit" disabled={!team.trim()}>팀 만들기</Button>
         </form>
       )}

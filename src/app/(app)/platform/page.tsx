@@ -138,6 +138,9 @@ export default function PlatformPage() {
 function Signups() {
   const { data, reload } = useApi<any>('/api/platform/signups');
   if (!data) return null;
+  const trial = async (id: string, body: any) => {
+    try { await api(`/api/platform/tenants/${id}/trial`, { body }); reload(); toast.ok('바꿨습니다'); } catch (e: any) { toast.error(e.message); }
+  };
   const setStatus = async (id: string, status: string) => {
     if (status === 'blocked' && !confirm('이 공간을 차단할까요? 모든 구성원이 바로 로그아웃됩니다.')) return;
     try { await api(`/api/platform/tenants/${id}/status`, { method: 'PUT', body: { status } }); reload(); toast.ok('바꿨습니다'); } catch (e: any) { toast.error(e.message); }
@@ -147,8 +150,8 @@ function Signups() {
       <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">신규 가입 {data.tenants.length}곳
         <span className="ml-2 text-xs font-normal text-ink-3">최근 24시간 시도: {data.attempts.map((a: any) => `${({ ok: '성공', exists: '이미 있음', bot: '봇', rate: '제한', resend: '재발송' } as Record<string, string>)[a.reason] ?? a.reason} ${a.n}`).join(' · ') || '없음'}</span></h2>
       <div className="max-h-96 overflow-auto">
-        <table className="w-full min-w-[760px] text-sm">
-          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>공간</th><th className={cell}>대표</th><th className={cell}>사람·업무</th><th className={cell}>가입</th><th className={cell}>상태</th><th /></tr></thead>
+        <table className="w-full min-w-[900px] text-sm">
+          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>공간</th><th className={cell}>대표</th><th className={cell}>사람·업무</th><th className={cell}>가입</th><th className={cell}>체험·요금</th><th className={cell}>상태</th><th /></tr></thead>
           <tbody>
             {data.tenants.map((t: any) => (
               <tr key={t.id} className={cx('border-t border-line', t.status !== 'active' && 'bg-slate-50 text-ink-3')}>
@@ -156,11 +159,19 @@ function Signups() {
                 <td className={cell}>{t.owner_email}{t.signup_pending && <span className="ml-1 text-[11px] text-amber-700">메일 미확인</span>}</td>
                 <td className={cell}>{t.users}명 · 업무 {t.tasks}</td>
                 <td className={cell}><div>{fmtDateTime(t.created_at)}</div><div className="text-[11px] text-ink-3">{t.created_ip}</div></td>
+                <td className={cell} data-testid={`trial-${t.id}`}>
+                  <div className="text-xs">{t.sub_status === 'trial' ? `체험 ~${String(t.trial_ends_at ?? '').slice(0, 10)}` : t.sub_status === 'expired' ? '체험 끝(읽기 전용)' : t.plan_code ?? '-'}{t.chosen_plan && <span className="ml-1 text-brand-700">신청: {t.chosen_plan}</span>}</div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {[7, 14].map((d) => <Button key={d} size="sm" variant="ghost" onClick={() => trial(t.id, { action: 'extend', days: d })}>+{d}일</Button>)}
+                    {t.sub_status !== 'expired' && <Button size="sm" variant="ghost" onClick={() => trial(t.id, { action: 'end' })}>종료</Button>}
+                    <Button size="sm" variant="ghost" onClick={() => { const code = prompt('전환할 요금제 코드 (personal · team · business)', t.chosen_plan ?? 'team'); if (code) trial(t.id, { action: 'convert', planCode: code }); }}>유료 전환</Button>
+                  </div>
+                </td>
                 <td className={cell}>{({ active: '사용 중', blocked: '차단', deleted: '삭제' } as Record<string, string>)[t.status] ?? t.status}</td>
                 <td className={cell}>{t.status === 'active' ? <Button size="sm" variant="secondary" onClick={() => setStatus(t.id, 'blocked')}>차단</Button> : t.status === 'blocked' ? <Button size="sm" variant="secondary" onClick={() => setStatus(t.id, 'active')}>해제</Button> : null}</td>
               </tr>
             ))}
-            {!data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={6}>아직 가입한 공간이 없습니다</td></tr>}
+            {!data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={7}>아직 가입한 공간이 없습니다</td></tr>}
           </tbody>
         </table>
       </div>

@@ -1,7 +1,7 @@
 // V15 공개 가입 · 회사(tenant) 분리 시험: 가입한 다른 회사·개인 공간에서 기존 회사 데이터가 절대 보이지 않아야 한다
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { Client, bootstrap, resetDb, startServer, testDb, seoulToday, addDays, BASE } from '../helpers.mjs';
+import { Client, bootstrap, resetDb, startServer, testDb, seoulToday, addDays, BASE, tick } from '../helpers.mjs';
 
 let srv, ctx, sql;
 const today = seoulToday();
@@ -164,7 +164,7 @@ describe('V15 계정 관리·플랫폼 운영', () => {
     await P.c.ok('POST', '/api/account/upgrade', { company: '혼자상사' });
     const me = await P.c.ok('GET', '/api/auth/me');
     assert.equal(me.user.personal, false);
-    assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = ${P.me.user.tenant}`)[0].plan_code, 'team_free');
+    assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = ${P.me.user.tenant}`)[0].plan_code, 'trial', '17차: 체험 중에는 팀으로 바꿔도 체험 그대로');
   });
   test('기본 회사 직원은 스스로 탈퇴 불가 · 비밀번호 틀리면 불가 · 대표 혼자면 탈퇴 시 공간도 삭제, 같은 이메일 재가입 가능', async () => {
     assert.equal((await ctx.staffA.client.post('/api/account/delete', { password: ctx.staffA.password, confirm: '탈퇴합니다' })).status, 403);
@@ -205,5 +205,56 @@ describe('V15 첫 주소(/) 비로그인 → 랜딩, 앱은 로그인', () => {
     }
     const me = await ctx.owner.req('GET', '/');
     assert.equal(me.status, 200); assert.doesNotMatch(String(me.body), /무료로 시작/);
+  });
+});
+
+describe('17차 14일 무료 체험 · 끝나면 읽기 전용', () => {
+  let c, tid, owner;
+  test('가입하면 14일 체험(비즈니스 기능, 10명·20GB·AI 300), 무료 요금제 없음', async () => {
+    await sql`delete from signup_attempts`; // 이 서버는 IP 하루 3회 제한으로 띄움
+    const r = await join({ email: 'trial@example.com', name: '체험씨', mode: 'team', company: '체험상사' });
+    c = r.c; await c.ok('POST', '/api/auth/verify', { token: r.link.split('/').pop() });
+    await c.ok('POST', '/api/auth/login', { email: 'trial@example.com', password: 'signup-pass-1234' });
+    owner = (await c.ok('GET', '/api/auth/me')).user; tid = owner.tenant;
+    const [s] = await sql`select plan_code, status, trial_ends_at from tenant_subscriptions where tenant = ${tid}`;
+    assert.equal(s.plan_code, 'trial'); assert.equal(s.status, 'trial');
+    const days = (new Date(s.trial_ends_at).getTime() - Date.now()) / 86400000;
+    assert.ok(days > 13.9 && days <= 14, '14일');
+    const u = await c.ok('GET', '/api/usage');
+    assert.equal(u.limits.users, 10); assert.equal(u.limits.storageGb, 20); assert.equal(u.limits.aiRequests, 300);
+    await c.ok('POST', '/api/tasks', { title: '체험 중 업무' });
+  });
+  test('종료 3·1·0일 전 알림(한 번씩), 끝나면 expired → 쓰기 402·보기·내보내기·요금제 신청은 됨', async () => {
+    await sql`update tenant_subscriptions set trial_ends_at = now() + interval '2 days' where tenant = ${tid}`;
+    await tick(); await tick();
+    const n = await sql`select title from notifications where user_id = ${owner.id} and title like '무료 체험%'`;
+    assert.equal(n.length, 1); assert.match(n[0].title, /2일 남았습니다/);
+    await sql`update tenant_subscriptions set trial_ends_at = now() - interval '1 minute' where tenant = ${tid}`;
+    await tick();
+    assert.equal((await sql`select status from tenant_subscriptions where tenant = ${tid}`)[0].status, 'expired');
+    const w = await c.post('/api/tasks', { title: '막혀야 함' });
+    assert.equal(w.status, 402); assert.equal(w.body.error.code, 'read_only');
+    assert.ok((await c.ok('GET', '/api/tasks')).tasks.some((t) => t.title === '체험 중 업무'), '보기는 됨');
+    assert.equal((await c.get('/api/account/export')).status, 200, '내보내기는 됨');
+    await c.ok('POST', '/api/usage/request', { planCode: 'team', note: '팀으로 할게요' });
+    assert.equal((await sql`select chosen_plan from tenant_subscriptions where tenant = ${tid}`)[0].chosen_plan, 'team');
+    const me = await c.ok('GET', '/api/auth/me');
+    assert.ok(me.user);
+  });
+  test('플랫폼 운영: +7일 연장 → 다시 쓰기 가능, 유료 전환, 플랫폼 운영자 아니면 404', async () => {
+    const platform = (await sql`select email from users where platform_admin limit 1`)[0];
+    const p = new Client('platform');
+    await p.ok('POST', '/api/auth/login', { email: platform.email, password: 'owner-pass-1234' });
+    assert.ok([402, 404].includes((await c.post(`/api/platform/tenants/${tid}/trial`, { action: 'extend', days: 7 })).status), '플랫폼 운영자만(읽기 전용이면 먼저 402)');
+    const r = await p.ok('POST', `/api/platform/tenants/${tid}/trial`, { action: 'extend', days: 7 });
+    assert.equal(r.trial.trial, true); assert.ok(r.trial.daysLeft >= 6);
+    await c.ok('POST', '/api/tasks', { title: '연장 뒤 업무' });
+    await p.ok('POST', `/api/platform/tenants/${tid}/trial`, { action: 'end' });
+    assert.equal((await c.post('/api/tasks', { title: 'x' })).status, 402);
+    await p.ok('POST', `/api/platform/tenants/${tid}/trial`, { action: 'convert' });
+    const [s] = await sql`select plan_code, status from tenant_subscriptions where tenant = ${tid}`;
+    assert.deepEqual({ ...s }, { plan_code: 'team', status: 'active' });
+    await c.ok('POST', '/api/tasks', { title: '유료 전환 뒤 업무' });
+    assert.equal((await p.req('POST', `/api/platform/tenants/${tid}/trial`, { action: 'convert', planCode: 'team_free' })).status, 400);
   });
 });

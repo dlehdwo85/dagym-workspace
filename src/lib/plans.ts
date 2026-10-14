@@ -111,7 +111,7 @@ export async function usageOverview(u: SessionUser) {
   const sql = db();
   const [{ limits, sub }, usage, plans, addons, top, requests] = await Promise.all([
     effectiveLimits(tenant, sql), currentUsage(tenant, sql),
-    sql`select code, name, monthly_krw, per_user_krw, limits, description from plans where public and active order by sort`,
+    sql`select code, name, monthly_krw, per_user_krw, annual_monthly_krw, annual_per_user_krw, min_users, limits, description from plans where public and active order by sort`,
     sql`select code, name, monthly_krw, adds from plan_addons where active order by sort`,
     sql`(select 'attachment' as kind, a.id, coalesce(a.doc_title, a.file_name) as title, a.file_name, a.size_bytes::float8 size, a.mime_type, a.task_id, a.event_id, a.deleted_at, a.created_at
         from attachments a join users u2 on u2.id = a.created_by where a.kind = 'file' and a.storage_key is not null and u2.tenant = ${tenant}
@@ -156,6 +156,7 @@ export async function requestPlanChange(u: SessionUser, i: z.infer<typeof planRe
   const admins = (await sql<{ id: string }[]>`select id from users where platform_admin and status = 'active'`).map((x) => x.id);
   await notify(sql, { userIds: admins, type: 'usage_alert', title: '요금제 변경 요청', body: `${tenant} — ${i.planCode ?? '옵션'}${i.note ? ` · ${i.note.slice(0, 60)}` : ''}`, link: '/platform',
     entityType: null as never, entityId: null as never, actorId: u.id, dedupeKey: `planreq:${r.id}` });
+  await rememberChosenPlan(tenant, i.planCode);
   await audit(sql, u.id, 'plan.request', null, null, { tenant, ...i }, null);
   return { id: r.id };
 }
@@ -233,6 +234,7 @@ export async function upsertAddon(u: SessionUser, code: string, i: z.infer<typeo
   await audit(sql, u.id, 'platform.addon', null, null, { code, ...i }, null);
   return { ok: true };
 }
+export async function rememberChosenPlan(tenant: string, code: string | undefined) { if (code) await db()`update tenant_subscriptions set chosen_plan = ${code} where tenant = ${tenant}`; }
 export async function decidePlanRequest(u: SessionUser, id: string, approve: boolean) {
   requirePlatform(u);
   const sql = db();
@@ -242,6 +244,7 @@ export async function decidePlanRequest(u: SessionUser, id: string, approve: boo
   if (approve) {
     const sub = await subscription(r.tenant, sql);
     await setSubscription(u, r.tenant, subscriptionInput.parse({ planCode: r.plan_code ?? sub.plan_code, addons: r.addons ?? sub.addons ?? {}, periodEnd: sub.period_end ? DateTime.fromJSDate(new Date(sub.period_end)).toISODate() : null, status: 'active', note: sub.note ?? null }));
+    clearReadOnlyCache(r.tenant);
   }
   await sql`update plan_requests set status = ${approve ? 'approved' : 'rejected'}, decided_by = ${u.id}, decided_at = now() where id = ${id}`;
   await notify(sql, { userIds: [r.requested_by], type: 'usage_alert', title: approve ? '요금제 변경 요청이 반영됐습니다' : '요금제 변경 요청이 반려됐습니다', body: r.plan_code ?? '추가 옵션',
@@ -282,9 +285,10 @@ export async function platformSignups(u: SessionUser) {
   const sql = db();
   const [tenants, attempts, ips] = await Promise.all([
     sql`select t.id, t.name, t.kind, t.status, t.created_ip, t.created_at, t.onboarded_at, ow.email as owner_email, ow.signup_pending,
+          ts.status as sub_status, ts.plan_code, ts.trial_ends_at, ts.chosen_plan,
           (select count(*)::int from users x where x.tenant = t.id and x.status = 'active') as users,
           (select count(*)::int from tasks k join org_units o on o.id = k.org_unit_id where o.tenant = t.id and k.deleted_at is null) as tasks
-        from tenants t left join users ow on ow.id = t.owner_user_id where t.id not in ('default','demo') order by t.created_at desc limit 200`,
+        from tenants t left join users ow on ow.id = t.owner_user_id left join tenant_subscriptions ts on ts.tenant = t.id where t.id not in ('default','demo') order by t.created_at desc limit 200`,
     sql`select coalesce(reason, 'ok') as reason, count(*)::int n from signup_attempts where created_at > now() - interval '1 day' group by 1 order by 2 desc`,
     sql`select ip, count(*)::int n, count(*) filter (where ok)::int ok from signup_attempts where created_at > now() - interval '1 day' group by ip order by n desc limit 10`,
   ]);
@@ -299,4 +303,82 @@ export async function setTenantStatus(u: SessionUser, tenant: string, status: 'a
   if (status === 'blocked') await sql`update sessions set revoked_at = now() where revoked_at is null and user_id in (select id from users where tenant = ${tenant})`;
   await audit(sql, u.id, status === 'blocked' ? 'tenant.block' : 'tenant.unblock', null, null, { tenant }, null);
   return { ok: true };
+}
+
+// ---------------- 17차: 14일 무료 체험 · 끝나면 읽기 전용 ----------------
+export const TRIAL_DAYS = 14;
+/** 체험 상태: 남은 날(서울 날짜 기준, 0 = 오늘 끝남), 끝났으면 readOnly */
+export async function trialInfo(tenant: string, sql: Sql = db()) {
+  const [s] = await sql<{ status: string; plan_code: string; trial_ends_at: Date | null; chosen_plan: string | null }[]>`
+    select status, plan_code, trial_ends_at, chosen_plan from tenant_subscriptions where tenant = ${tenant}`;
+  if (!s) return null;
+  const ended = s.status === 'expired' || (s.status === 'trial' && !!s.trial_ends_at && s.trial_ends_at.getTime() <= Date.now());
+  if (s.status !== 'trial' && s.status !== 'expired') return null;
+  const days = s.trial_ends_at ? Math.max(0, Math.ceil(DateTime.fromJSDate(s.trial_ends_at).setZone(TZ).startOf('day').diff(DateTime.now().setZone(TZ).startOf('day'), 'days').days)) : 0;
+  return { trial: !ended, readOnly: ended, daysLeft: ended ? 0 : days, endsAt: s.trial_ends_at, chosenPlan: s.chosen_plan };
+}
+
+const roCache = new Map<string, { at: number; ro: boolean }>();
+/** 읽기 전용(체험 끝·미결제)이면 쓰기 요청을 막는다. 보기·내보내기·로그인·요금제 신청·알림 읽음·탈퇴는 허용 */
+const RO_ALLOW = [/^\/api\/auth\//, /^\/api\/account\//, /^\/api\/plan/, /^\/api\/usage/, /^\/api\/push\//, /\/read$/, /^\/api\/notifications/, /^\/api\/export/, /^\/api\/support/, /^\/api\/me\//];
+export async function assertWritable(u: SessionUser, path: string) {
+  const t = tenantOfUser(u);
+  if (t === 'default' || t === 'demo' || RO_ALLOW.some((r) => r.test(path))) return;
+  const c = roCache.get(t);
+  let ro: boolean;
+  if (c && Date.now() - c.at < 15_000) ro = c.ro;
+  else { ro = !!(await trialInfo(t))?.readOnly; roCache.set(t, { at: Date.now(), ro }); }
+  if (ro) throw new HttpError(402, 'read_only', '무료 체험이 끝나 읽기 전용입니다. 요금제를 선택하면 다시 쓸 수 있어요 (보기·내보내기는 그대로).');
+}
+export const clearReadOnlyCache = (t?: string) => (t ? roCache.delete(t) : roCache.clear());
+
+/** 정기 실행: 종료 3·1·0일 전 알림(공간 관리자에게 앱+메일), 끝난 체험은 expired */
+export async function trialJob() {
+  const sql = db();
+  const subs = await sql<{ tenant: string; trial_ends_at: Date; trial_notified: Record<string, boolean>; name: string }[]>`
+    select s.tenant, s.trial_ends_at, s.trial_notified, t.name from tenant_subscriptions s join tenants t on t.id = s.tenant
+    where s.status = 'trial' and s.trial_ends_at is not null and t.deleted_at is null`;
+  let notified = 0, expired = 0;
+  for (const s of subs) {
+    if (s.trial_ends_at.getTime() <= Date.now()) {
+      await sql`update tenant_subscriptions set status = 'expired', updated_at = now() where tenant = ${s.tenant} and status = 'trial'`;
+      clearReadOnlyCache(s.tenant); expired++;
+    }
+    const info = await trialInfo(s.tenant, sql);
+    const d = info?.readOnly ? 0 : info?.daysLeft ?? 99;
+    const key = d === 0 ? 'd0' : d === 1 ? 'd1' : d <= 3 ? 'd3' : null;
+    if (!key || s.trial_notified?.[key]) continue;
+    const admins = await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${s.tenant} and status = 'active' and role in ('owner','admin')`;
+    const title = d === 0 ? '무료 체험이 오늘 끝납니다' : `무료 체험이 ${d}일 남았습니다`;
+    const body = d === 0 ? '오늘이 지나면 읽기 전용(보기·내보내기만)이 됩니다 — 요금제를 선택해 주세요' : '요금제를 선택하면 끊김 없이 계속 쓸 수 있어요';
+    await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title, body, link: '/admin/usage', dedupeKey: `trial:${s.tenant}:${key}` });
+    const { sendMail } = await import('./mail');
+    for (const a of admins) await sendMail(a.email, `[워크인] ${title}`, `${s.name}\n${body}\n${process.env.APP_URL ?? ''}/admin/usage`).catch(() => {});
+    await sql`update tenant_subscriptions set trial_notified = trial_notified || ${sql.json({ [key]: true })} where tenant = ${s.tenant}`;
+    notified++;
+  }
+  return { trials: subs.length, notified, expired };
+}
+
+export const trialActionInput = z.object({ action: z.enum(['extend', 'end', 'convert']), days: z.number().int().min(1).max(60).optional(), planCode: z.string().max(40).optional() });
+/** 플랫폼 운영: 체험 연장(+7/+14일)·즉시 종료(읽기 전용)·유료 전환 */
+export async function platformTrial(u: SessionUser, tenant: string, i: z.infer<typeof trialActionInput>) {
+  requirePlatform(u);
+  const sql = db();
+  const [s] = await sql<{ status: string; trial_ends_at: Date | null; chosen_plan: string | null }[]>`select status, trial_ends_at, chosen_plan from tenant_subscriptions where tenant = ${tenant}`;
+  if (!s) throw notFound('없는 공간입니다');
+  if (i.action === 'extend') {
+    const base = s.trial_ends_at && s.trial_ends_at.getTime() > Date.now() ? s.trial_ends_at : new Date();
+    const end = new Date(base.getTime() + (i.days ?? 7) * 86400000);
+    await sql`update tenant_subscriptions set status = 'trial', trial_ends_at = ${end}, period_end = ${end.toISOString().slice(0, 10)}, trial_notified = '{}', updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
+  } else if (i.action === 'end') {
+    await sql`update tenant_subscriptions set status = 'expired', trial_ends_at = least(coalesce(trial_ends_at, now()), now()), updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
+  } else {
+    const code = i.planCode ?? s.chosen_plan;
+    if (!code || !(await sql`select 1 from plans where code = ${code} and code not in ('trial','free','team_free')`).length) throw badRequest('전환할 유료 요금제를 고르세요');
+    await sql`update tenant_subscriptions set plan_code = ${code}, status = 'active', period_start = current_date, period_end = null, updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
+  }
+  clearReadOnlyCache(tenant);
+  await audit(sql, u.id, `platform.trial_${i.action}`, 'tenant', null, { tenant, ...i }, null);
+  return { ok: true, trial: await trialInfo(tenant, sql) };
 }
