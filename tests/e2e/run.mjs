@@ -1894,6 +1894,32 @@ await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 �
   await owner.screenshot({ path: `${SHOTS}/66b-ai-dock-threads.png` });
   await owner.getByTestId('ai-dock-related').getByTestId('ai-dock-thread').first().click();
   await owner.getByTestId('ai-dock-chat').getByText('오늘은 일정 2건입니다.').waitFor();
+  // 대표 요청(2026-10-14): 패널에서도 사진 첨부 — 📎 버튼 + 붙여넣기(Ctrl+V 캡처) → 글 없이 보내도 됨 → 문서 만들기 제안 → 확인 → 자료실
+  const dock = owner.getByTestId('ai-dock');
+  await dock.getByTestId('ai-dock-new').click();
+  const png1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await dock.getByTestId('ai-dock-file-input').setInputFiles([{ name: '화이트보드.png', mimeType: 'image/png', buffer: png1 }]);
+  await dock.getByTestId('ai-files').getByText('화이트보드.png').waitFor();
+  await dock.getByLabel('AI 에게 요청 (화면 맥락)').evaluate((el, b64) => {
+    const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer(); dt.items.add(new File([bin], 'image.png', { type: 'image/png' }));
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, png1.toString('base64'));
+  await dock.getByTestId('ai-files').getByText(/붙여넣은 이미지/).waitFor();
+  await owner.screenshot({ path: `${SHOTS}/v14-ai-dock-attach.png` });
+  const n0 = (await fetch(`${FAKE}/__state`).then((r) => r.json())).anthropic.length;
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: [
+    { content: [{ type: 'tool_use', id: 'doc1', name: 'propose_create_document', input: { title: 'E2E 회의 정리', content: '# 결정\n- 전단 배포 금요일', folder: '회의록' } }], stop_reason: 'tool_use' },
+    { content: [{ type: 'text', text: '사진 두 장으로 문서를 준비했습니다. 확인을 누르면 만들어집니다.' }], stop_reason: 'end_turn' }] }) });
+  await dock.getByRole('button', { name: '보내기' }).click(); // 글 없이 사진만
+  await dock.getByText('📁 저장 폴더: 회의록').waitFor();
+  const sent = (await fetch(`${FAKE}/__state`).then((r) => r.json())).anthropic.slice(n0)[0].body.messages.at(-1).content;
+  assert.equal(sent.filter((b) => b.type === 'image').length, 2, '사진 2장이 AI 에 전달');
+  await dock.getByRole('button', { name: '확인' }).click();
+  await dock.getByText('✓ 반영됨').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/v14-ai-dock-document.png` });
+  const [doc] = await sql`select folder, file_name from library_files where title = 'E2E 회의 정리' and deleted_at is null`;
+  assert.equal(doc.folder, '회의록'); assert.equal(doc.file_name, 'E2E 회의 정리.docx');
   await owner.getByTestId('ai-dock').getByRole('button', { name: '닫기' }).click();
   // 팀
   await owner.goto(BASE + '/admin/users');

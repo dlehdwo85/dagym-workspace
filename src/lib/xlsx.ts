@@ -32,7 +32,7 @@ function sheetXml(sh: Sheet) {
 const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(b: Buffer) { let c = 0xffffffff; for (const x of b) c = CRC[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
 
-function zip(files: { name: string; data: Buffer }[]) {
+export function zip(files: { name: string; data: Buffer }[]) {
   const locals: Buffer[] = [], centrals: Buffer[] = [];
   let offset = 0;
   for (const f of files) {

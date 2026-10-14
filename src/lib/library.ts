@@ -16,7 +16,7 @@ import { RANK, menuLevel, requireMenu } from './menuPerms';
 export { tenantOf } from './types';
 import { tenantOf } from './types';
 const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|ps1|vbs|jar|apk|ipa|dll|sh)$/i;
-const cleanFolder = (f?: string | null) => (f ?? '').split('/').map((s) => s.trim()).filter(Boolean).join('/').slice(0, 200);
+export const cleanFolder = (f?: string | null) => (f ?? '').split('/').map((s) => s.trim()).filter(Boolean).join('/').slice(0, 200);
 
 export const libraryInput = z.object({
   fileName: z.string().trim().min(1).max(200),

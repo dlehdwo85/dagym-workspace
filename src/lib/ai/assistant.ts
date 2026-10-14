@@ -9,7 +9,8 @@ import { listTasks, listQuery, getTaskDetail, createTask, updateTask, addComment
 import { listEvents, eventInput, createEvent, updateEvent, deleteEvent, findConflicts, loadEvent } from '../events';
 import { canSeeRevenue } from '../revenue';
 import { directory } from '../admin';
-import { listLibrary, loadLibraryFile, attachLibraryToTask, saveGeneratedFile, tenantOf } from '../library';
+import { listLibrary, loadLibraryFile, attachLibraryToTask, saveGeneratedFile, tenantOf, folderLevel, updateLibraryFile, organizeLibraryFile, cleanFolder } from '../library';
+import { RANK } from '../menuPerms';
 import { writeXlsx } from '../xlsx';
 import { anthropicProvider, aiEnabled, modelFor, costUsd, type AiMessage, type AiProvider, type AiTool } from './provider';
 import type { SessionUser } from '../types';
@@ -130,13 +131,34 @@ const TOOLS: AiTool[] = [
       title: str('파일 제목'), taskId: str('첨부할 업무 id (선택)'),
       sheets: { type: 'array', items: { type: 'object', properties: { name: str('시트 이름'), rows: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'null'] } }, description: '첫 줄은 머리글' } }, required: ['name', 'rows'] } },
     }, required: ['title', 'sheets'] } },
+  // 대표 요청(2026-10-14): 이미지·대화 자료로 문서 파일 만들기, 대화에 올린 자료를 자료실에 정리
+  { name: 'list_library_folders', description: '자료실에 이미 있는 폴더 목록(내가 볼 수 있는 것). 자료를 정리하거나 문서를 저장할 폴더를 고를 때 먼저 본다.',
+    input_schema: { type: 'object', properties: {} } },
+  { name: 'propose_create_document', description: '첨부 이미지·문서 분석이나 대화 내용을 바탕으로 문서 파일(Word .docx, 또는 .md/.txt)을 만들어 자료실에 저장(업무 id 가 있으면 그 업무에도 첨부)하기를 제안한다. 표 형식 숫자 위주면 propose_xlsx_report 를 쓴다. [확인] 후 생성.',
+    input_schema: { type: 'object', properties: {
+      title: str('문서 제목(파일 이름)'),
+      content: str('본문 — 간단한 마크다운: "# 제목"(1~3단계), "- 글머리", "1. 번호", "| 표 | 머리 |" 줄, **굵게**. 첨부·대화에 있는 내용만, 지어내지 않는다'),
+      format: { type: 'string', enum: ['docx', 'md', 'txt'], description: '기본 docx(Word)' },
+      folder: str('저장할 자료실 폴더 "상위/하위" (선택, 기본 "AI 문서"). 가능하면 이미 있는 폴더'),
+      tags: { type: 'array', items: { type: 'string' }, description: '태그 2~5개 (선택)' },
+      taskId: str('첨부할 업무 id (선택)'),
+    }, required: ['title', 'content'] } },
+  { name: 'propose_organize_files', description: '대화에 올린 자료(첨부 id)나 자료실 파일을 알맞은 자료실 폴더로 옮기고 제목·태그를 정리하기를 제안한다. 폴더는 list_library_folders 로 이미 있는 폴더를 먼저 고르고, 맞는 것이 없을 때만 새 폴더. folder 를 비우면 자료실 자동 정리(AI)에 맡긴다. [확인] 후 실행.',
+    input_schema: { type: 'object', properties: {
+      items: { type: 'array', items: { type: 'object', properties: {
+        fileId: str('자료 id'), folder: str('옮길 폴더 "상위/하위" (비우면 자동 정리)'), title: str('새 제목 (선택)'),
+        tags: { type: 'array', items: { type: 'string' }, description: '태그 (선택)' }, description: str('한 줄 요약 (선택)'),
+      }, required: ['fileId'] } },
+    }, required: ['items'] } },
 ];
 
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 한국 피트니스 회사(다짐·하이링크) 직원을 돕습니다.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
-- 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
+- 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
 - 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
+- 첨부한 이미지·문서를 보고 문서(회의록·보고서·안내문·견적 정리 등)를 만들어 달라고 하면 propose_create_document 로, 표·숫자 위주면 propose_xlsx_report 로 제안하세요. 이미지에서 읽은 내용만 쓰고, 읽기 어려운 부분은 "확인 필요"로 표시하세요.
+- 대화에 올린 자료를 자료실에 정리해 달라고 하면 list_library_folders 로 기존 폴더를 보고 propose_organize_files 로 폴더·제목·태그를 제안하세요(기존 폴더 우선). 앞선 질문의 첨부 id 는 대화 기록의 [첨부] 줄에 있습니다.
 - 사람 이름은 list_people 로 id 를 찾아 쓰세요. 날짜는 Asia/Seoul 기준입니다.
 - 권한 오류가 나면 그 사람이 볼 수 없는 정보라고 짧게 알려 주세요.
 - 답은 한국어로 짧고 분명하게. 목록은 짧은 줄로.`;
@@ -403,6 +425,33 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       if (input.taskId) await getTaskDetail(u, String(input.taskId));
       return propose(c, 'xlsx_report', `엑셀 보고서 만들기: ${title} (${sheets.length}개 시트, ${sheets.reduce((n, s) => n + s.rows.length, 0)}줄)${input.taskId ? ' + 업무 첨부' : ''}`, { title, taskId: input.taskId || null, sheets });
     }
+    case 'list_library_folders': {
+      const r = await listLibrary(u, { limit: 1 });
+      return { folders: (r.folders as any[]).map((f) => (typeof f === 'string' ? f : f.path ?? f.folder ?? f.name)).filter(Boolean).slice(0, 200) };
+    }
+    case 'propose_create_document': {
+      const i = z.object({ title: z.string().trim().min(1).max(100), content: z.string().min(1).max(60000), format: z.enum(['docx', 'md', 'txt']).catch('docx').default('docx'),
+        folder: z.string().max(200).optional(), tags: z.array(z.string().trim().min(1).max(30)).max(8).optional(), taskId: z.string().optional() }).parse(input);
+      const folder = cleanFolder(i.folder ?? '') || 'AI 문서';
+      if (RANK[await folderLevel(u, folder)] < RANK.edit) throw forbidden(`"${folder}" 폴더에 저장할 권한이 없습니다`);
+      if (i.taskId) await getTaskDetail(u, i.taskId);
+      const fileName = `${i.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'AI 문서'}.${i.format}`;
+      return propose(c, 'create_document', `문서 만들기: ${fileName} → 자료실 ${folder}${i.taskId ? ' + 업무 첨부' : ''}`, { ...i, folder, fileName },
+        { folder, description: clip(i.content, 600) });
+    }
+    case 'propose_organize_files': {
+      const items = z.array(z.object({ fileId: z.string().uuid(), folder: z.string().max(200).optional(), title: z.string().trim().max(200).optional(),
+        tags: z.array(z.string().trim().min(1).max(30)).max(20).optional(), description: z.string().max(500).optional() })).min(1).max(20).parse(input.items);
+      const moves: string[] = [];
+      for (const it of items) {
+        const f = await loadLibraryFile(u, it.fileId, 'meta'); // 볼 수 없는 자료면 404
+        if (f.created_by !== u.id && !isAdmin(u)) throw forbidden(`${f.title}: 올린 사람 또는 관리자만 정리할 수 있습니다`);
+        const to = it.folder ? cleanFolder(it.folder) : '';
+        if (to && RANK[await folderLevel(u, to)] < RANK.edit) throw forbidden(`"${to}" 폴더에 넣을 권한이 없습니다`);
+        moves.push(`${f.title} (${f.folder || '폴더 없음'}) → ${to || '자동 정리'}${it.title && it.title !== f.title ? ` · 제목 "${it.title}"` : ''}${it.tags?.length ? ` · #${it.tags.join(' #')}` : ''}`);
+      }
+      return propose(c, 'organize_files', `자료실 정리: ${items.length}개 — ${moves[0]}${items.length > 1 ? ` 외 ${items.length - 1}개` : ''}`, { items }, { moves });
+    }
   }
   throw badRequest(`모르는 도구: ${name}`);
 }
@@ -549,7 +598,7 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
       if (p.kind === 'create_event') await need(x.attendeeIds ?? []);
       if (p.kind === 'create_tasks') await need([...(x.input?.assigneeIds ?? []), x.input?.requestedById]);
       if (p.kind === 'update_task' || p.kind === 'comment') await assertConfidentialAudience(x.taskId, [x.patch?.assigneeId].filter(Boolean));
-      if (p.kind === 'xlsx_report' && x.taskId) await assertConfidentialAudience(x.taskId);
+      if ((p.kind === 'xlsx_report' || p.kind === 'create_document') && x.taskId) await assertConfidentialAudience(x.taskId);
     }
     switch (p.kind) {
       case 'create_task': { const r: any = await createTask(u, taskInput.parse(x)); result = { taskId: r.id, link: `/tasks/${r.id}` }; break; }
@@ -570,6 +619,37 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
         const f = await saveGeneratedFile(u, { fileName, mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', data: buf, title: x.title, folder: 'AI 보고서', tags: ['AI'], description: 'AI 비서가 만든 보고서(사용자 확인)', security: p.confidential ? 'confidential' : undefined });
         if (x.taskId) await attachLibraryToTask(u, f.id, x.taskId);
         result = { fileId: f.id, link: x.taskId ? `/tasks/${x.taskId}` : `/library?file=${f.id}` };
+        break;
+      }
+      case 'create_document': {
+        const { writeDocx } = await import('../docx');
+        const data = x.format === 'docx' ? writeDocx(x.title, x.content) : Buffer.from((x.format === 'md' ? `# ${x.title}\n\n` : `${x.title}\n\n`) + x.content, 'utf8');
+        const mime = x.format === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : x.format === 'md' ? 'text/markdown' : 'text/plain';
+        if (RANK[await folderLevel(u, x.folder)] < RANK.edit) throw forbidden(`"${x.folder}" 폴더에 저장할 권한이 없습니다`);
+        const f = await saveGeneratedFile(u, { fileName: x.fileName, mime, data, title: x.title, folder: x.folder, tags: ['AI', ...(x.tags ?? [])].slice(0, 8), description: 'AI 비서가 만든 문서(사용자 확인)', security: p.confidential ? 'confidential' : undefined });
+        await sql`insert into library_folders (tenant, path, created_by) values (${tenantOf(u)}, ${x.folder}, ${u.id}) on conflict do nothing`;
+        if (x.taskId) await attachLibraryToTask(u, f.id, x.taskId);
+        result = { fileId: f.id, link: x.taskId ? `/tasks/${x.taskId}` : `/library?file=${f.id}` };
+        break;
+      }
+      case 'organize_files': {
+        const done: { id: string; folder: string }[] = [];
+        for (const it of x.items as { fileId: string; folder?: string; title?: string; tags?: string[]; description?: string }[]) {
+          if (it.folder) {
+            const f = await loadLibraryFile(u, it.fileId, 'meta');
+            await updateLibraryFile(u, it.fileId, { folder: it.folder, ...(it.title ? { title: it.title } : {}), tags: [...new Set([...f.tags.filter((t: string) => t !== 'AI 첨부'), ...(it.tags ?? [])])].slice(0, 20),
+              ...(it.description && !f.description ? { description: it.description } : {}) });
+            const folder = cleanFolder(it.folder);
+            if (folder) await sql`insert into library_folders (tenant, path, created_by) values (${tenantOf(u)}, ${folder}, ${u.id}) on conflict do nothing`;
+            done.push({ id: it.fileId, folder });
+          } else {
+            const r = await organizeLibraryFile(u, it.fileId);
+            done.push({ id: it.fileId, folder: r.folder });
+          }
+          // 대화 첨부였던 자료도 이제 일반 자료(전체 정리 대상)로
+          await sql`update library_files set source = 'upload' where id = ${it.fileId} and source = 'ai_attach'`;
+        }
+        result = { files: done, link: done.length === 1 ? `/library?file=${done[0].id}` : `/library${done[0]?.folder ? `?folder=${encodeURIComponent(done[0].folder)}` : ''}` };
         break;
       }
       case 'create_event': { const r = await createEvent(u, eventInput.parse(x)); result = { eventId: r.id, link: `/calendar?event=${r.id}` }; break; }

@@ -33,12 +33,14 @@ export async function startThread(u: SessionUser, firstText: string, taskId: str
 }
 /** 문맥: 앞부분 요약 + 최근 20개(차단·오류 제외). 제안은 처리 결과와 함께 */
 export async function threadHistory(threadId: string, sql: Sql = db()) {
-  const rows = await sql<{ id: string; role: 'user' | 'assistant'; text: string; proposal_ids: string[] }[]>`
-    select id::text, role, text, proposal_ids from ai_messages where thread_id = ${threadId} and status = 'ok' order by id desc limit 20`;
+  const rows = await sql<{ id: string; role: 'user' | 'assistant'; text: string; proposal_ids: string[]; file_ids: string[] | null; file_names: string[] | null }[]>`
+    select id::text, role, text, proposal_ids, file_ids, file_names from ai_messages where thread_id = ${threadId} and status = 'ok' order by id desc limit 20`;
   rows.reverse();
   const pids = rows.flatMap((r) => r.proposal_ids);
   const props = pids.length ? await sql<{ id: string; summary: string; status: string }[]>`select id, summary, status from ai_proposals where id = any(${pids}::uuid[])` : [];
-  const msgs = rows.map((r) => ({ role: r.role, text: r.text + (r.proposal_ids.length ? `\n(제안: ${r.proposal_ids.map((p) => props.find((x) => x.id === p)).filter(Boolean).map((p) => `${p!.summary} [${p!.status === 'done' ? '실행됨' : p!.status === 'cancelled' ? '취소됨' : '대기'}]`).join('; ')})` : '') }));
+  // 앞선 질문의 첨부 id — "아까 올린 사진 자료실에 정리해줘" 처럼 나중에 가리킬 수 있게
+  const files = (r: (typeof rows)[number]) => (r.file_ids?.length ? `\n[첨부: ${r.file_ids.map((id, k) => `id=${id} · ${r.file_names?.[k] ?? ''}`).join(' / ')}]` : '');
+  const msgs = rows.map((r) => ({ role: r.role, text: r.text + files(r) + (r.proposal_ids.length ? `\n(제안: ${r.proposal_ids.map((p) => props.find((x) => x.id === p)).filter(Boolean).map((p) => `${p!.summary} [${p!.status === 'done' ? '실행됨' : p!.status === 'cancelled' ? '취소됨' : '대기'}]`).join('; ')})` : '') }));
   // 처음은 user 여야 한다
   while (msgs.length && msgs[0].role !== 'user') msgs.shift();
   const [t] = await sql<{ summary: string | null }[]>`select summary from ai_threads where id = ${threadId}`;

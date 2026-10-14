@@ -3,14 +3,15 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Loader2, MessageSquarePlus, Mic, Paperclip, Pin, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
-import { AI_ACCEPT, uploadToLibrary } from '@/components/libraryUpload';
+import { AI_ACCEPT } from '@/components/libraryUpload';
+import { AttachChips, DEFAULT_FILE_ASK, useAiAttach } from '@/components/aiAttach';
 import { DropZone } from '@/components/upload';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
 import { listenOnce, speechSupported } from '@/lib/nlparse';
 
-type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; calendar?: string; warnings?: string[] } };
+type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
 type Msg = { role: 'user' | 'assistant'; text: string; proposals?: Proposal[]; error?: boolean; files?: string[]; blocked?: boolean };
 type Thread = { id: string; title: string; task_id: string | null; task_title: string | null; pinned: boolean; updated_at: string; turns: number };
 const EXAMPLES = ['다짐 로고 찾아서 이 업무에 첨부해줘', '이번 주 내 마감 업무 정리해줘', '내일 3시 회의 준비 업무 만들어줘', '3분기 매출 현장별로 엑셀 만들어줘'];
@@ -58,22 +59,14 @@ export default function AssistantPage() {
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy]);
 
   // V12 8번: 자료(사진·PDF·엑셀)를 붙여 요청 → 자료실 "AI 요청 첨부"에 저장하고 AI 가 내용을 읽음
-  const [files, setFiles] = useState<{ id: string; name: string }[]>([]);
-  const [uploading, setUploading] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
-  async function attach(list: FileList | null) {
-    if (!list?.length) return;
-    for (const f of Array.from(list).slice(0, 5 - files.length)) {
-      setUploading(`${f.name} 올리는 중…`);
-      try { const r = await uploadToLibrary(f, undefined, (pct) => setUploading(`${f.name} 올리는 중… ${pct}%`)); setFiles((x) => [...x, r]); } catch (e: any) { toast.error(`${f.name}: ${e.message}`); }
-    }
-    setUploading(''); if (fileRef.current) fileRef.current.value = '';
-  }
+  // 대표 요청(2026-10-14): 사진은 버튼·끌어 놓기·붙여넣기(Ctrl+V) 모두
+  const att = useAiAttach();
+  const { files, uploading, attach } = att;
   async function send(q: string) {
-    const t = q.trim(); if (!t || busy || uploading) return;
-    const sending = files;
+    const t = q.trim() || (files.length ? DEFAULT_FILE_ASK : ''); if (!t || busy || uploading) return;
+    const sending = att.take();
     const next: Msg[] = [...msgs, { role: 'user', text: t, files: sending.map((f) => f.name) }];
-    setMsgs(next); setText(''); setFiles([]); setBusy(true);
+    setMsgs(next); setText(''); setBusy(true);
     try {
       // 문맥(최근 20개 + 요약)은 서버가 보관된 대화에서 꺼낸다
       const r = await api('/api/ai/chat', { body: { text: t, ...(threadId ? { threadId } : {}), taskId, ...(sending.length ? { fileIds: sending.map((f) => f.id) } : {}) } });
@@ -147,7 +140,7 @@ export default function AssistantPage() {
       </div>
       {taskId && (taskThreads.data?.threads.length ?? 0) > 0 && <p className="mb-1 text-xs text-ink-3" data-testid="task-thread-count">이 업무 대화 {taskThreads.data!.threads.length}개</p>}
       {taskId && task.data && <div className="mb-2 rounded-input bg-brand-50 px-3 py-1.5 text-sm text-brand-800">이 업무 기준: <Link href={`/tasks/${taskId}`} className="font-semibold underline">{task.data.task.title}</Link></div>}
-      <DropZone onFiles={(f) => attach(f)} disabled={files.length >= 5 || !!uploading} label="여기에 놓으면 AI 요청에 첨부됩니다 (최대 5개)" className="flex min-h-0 flex-1 flex-col" testid="ai-drop">
+      <DropZone onFiles={(f) => attach(f)} disabled={att.full || !!uploading} label="여기에 놓으면 AI 요청에 첨부됩니다 (최대 5개)" className="flex min-h-0 flex-1 flex-col" testid="ai-drop">
       <div className="scrollbar-thin flex-1 space-y-3 overflow-y-auto rounded-card border border-line bg-white p-3 shadow-card" data-testid="ai-chat">
         {!msgs.length && (
           <div className="space-y-2 p-2">
@@ -172,6 +165,8 @@ export default function AssistantPage() {
                           {!!p.preview.checklist?.length && <details><summary className="cursor-pointer">체크리스트 {p.preview.checklist.length}개</summary><ul className="ml-4 list-disc">{p.preview.checklist.map((c, k) => <li key={k}>{c}</li>)}</ul></details>}
                           {p.preview.description && <p className="line-clamp-3 whitespace-pre-wrap rounded bg-slate-50 p-1.5">{p.preview.description}</p>}
                           {p.preview.when && <div data-testid="ai-event-preview">🗓 {p.preview.when}{p.preview.place && ` · 📍 ${p.preview.place}`}{p.preview.calendar && ` · ${p.preview.calendar}`}{!!p.preview.attendees?.length && <div>참석: {p.preview.attendees.join(', ')}</div>}</div>}
+                          {!!p.preview.moves?.length && <ul className="ml-4 list-disc" data-testid="ai-organize-preview">{p.preview.moves.map((x, k) => <li key={k}>{x}</li>)}</ul>}
+                          {p.preview.folder && <div>📁 저장 폴더: {p.preview.folder}</div>}
                           {!!p.preview.warnings?.length && <ul className="rounded bg-amber-50 p-1.5 text-amber-800" data-testid="ai-event-warnings">{p.preview.warnings.map((w, k) => <li key={k}>⚠ {w}</li>)}</ul>}
                         </div>
                       )}
@@ -193,19 +188,14 @@ export default function AssistantPage() {
         <div ref={end} />
       </div>
       </DropZone>
-      {(files.length > 0 || uploading) && (
-        <div className="mt-2 flex flex-wrap gap-1.5 text-xs" data-testid="ai-files">
-          {files.map((f) => <span key={f.id} className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-amber-800">📎 {f.name}<button type="button" onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))} aria-label={`${f.name} 빼기`}><X className="size-3" /></button></span>)}
-          {uploading && <span className="inline-flex items-center gap-1 text-ink-3"><Loader2 className="size-3 animate-spin" />{uploading}</span>}
-        </div>
-      )}
-      <input ref={fileRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => attach(e.target.files)} data-testid="ai-file-input" />
+      <AttachChips files={files} uploading={uploading} onRemove={att.remove} />
+      <input ref={att.inputRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => attach(e.target.files)} data-testid="ai-file-input" />
       <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="mt-2 flex items-end gap-2">
-        <Button type="button" variant="secondary" onClick={() => fileRef.current?.click()} aria-label="자료 첨부 (사진·PDF·엑셀)" disabled={files.length >= 5 || !!uploading}><Paperclip /></Button>
-        <textarea className={cx(inputCls, 'max-h-32 min-h-[42px] flex-1 resize-none')} rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : 'AI에게 요청'}
+        <Button type="button" variant="secondary" onClick={() => att.inputRef.current?.click()} aria-label="자료 첨부 (사진·PDF·엑셀)" disabled={att.full || !!uploading}><Paperclip /></Button>
+        <textarea className={cx(inputCls, 'max-h-32 min-h-[42px] flex-1 resize-none')} rows={1} value={text} onChange={(e) => setText(e.target.value)} onPaste={att.onPaste} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : 'AI에게 요청 · 사진은 붙여넣기(Ctrl+V)도 됩니다'}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} aria-label="AI 에게 요청" disabled={status.data?.overLimit} />
         {speechSupported() && <Button type="button" variant="secondary" onClick={voice} aria-label="말로 요청" disabled={listening}>{listening ? <Loader2 className="animate-spin" /> : <Mic />}</Button>}
-        <Button type="submit" disabled={busy || !text.trim()} aria-label="보내기"><Send /></Button>
+        <Button type="submit" disabled={busy || !!uploading || (!text.trim() && !files.length)} aria-label="보내기"><Send /></Button>
       </form>
       {/* V14 6번: 직원 고지 (상시) */}
       <p className="mt-1.5 text-center text-[11px] text-ink-3" data-testid="ai-notice">회사 업무용 AI 입니다. 대화는 보관되며 권한이 있는 관리자가 사용 내역을 볼 수 있습니다. 업무와 무관한 요청은 처리하지 않습니다.</p>
