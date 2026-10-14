@@ -113,3 +113,5 @@
 
 - 2026-10-14 운영 fcf4fc1 반영(13차: 매출 GPT 토큰 제거·AI 입력·메뉴 권한·자료실 AI 정리, migration 029). 앱 아이콘 B 빌드: Android mobile run 38492961286, iOS 1.0.4 release run 38493041107.
 - 앱 아이콘 B: Android vc16 Play 내부 테스트 출시, iOS 1.0.4 TestFlight 업로드 성공.
+
+- 2026-10-14 운영 9d2312a 수동 재배포(상시 승인): 지시자 마감 알림(915de03)·AI 모델 3단계(bf45f0a) 반영.
