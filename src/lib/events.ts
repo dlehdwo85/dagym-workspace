@@ -60,7 +60,7 @@ interface EventRow {
 
 async function loadCalendar(sql: Sql, id: string) {
   const [c] = await sql<(CalendarRow & { name: string; color: string })[]>`
-    select id, type, org_unit_id, owner_user_id, name, color from calendars where id = ${id}`;
+    select id, type, org_unit_id, owner_user_id, name, color, tenant from calendars where id = ${id}`;
   if (!c) throw notFound('캘린더가 없습니다');
   return c;
 }

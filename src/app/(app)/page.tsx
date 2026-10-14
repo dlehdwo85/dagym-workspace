@@ -236,7 +236,7 @@ export default function Dashboard() {
       {features.ai && (
         <form onSubmit={(e) => { e.preventDefault(); if (aiQ.trim()) router.push(`/assistant?q=${encodeURIComponent(aiQ.trim())}`); }} className="flex items-center gap-2 rounded-card border border-line bg-white px-3 py-2 shadow-card" data-testid="home-ai">
           <Sparkles className="size-5 shrink-0 text-amber-500" />
-          <input value={aiQ} onChange={(e) => setAiQ(e.target.value)} placeholder="✨ AI에게 요청 (예: 다짐 로고 찾아줘, 이번 주 내 마감 정리)" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3" aria-label="AI에게 요청" />
+          <input value={aiQ} onChange={(e) => setAiQ(e.target.value)} placeholder="✨ AI에게 요청" title="예: 로고 찾아줘, 이번 주 내 마감 정리" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3" aria-label="AI에게 요청" />
           <button type="submit" className="shrink-0 rounded-input bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50" disabled={!aiQ.trim()}>요청</button>
         </form>
       )}
@@ -263,7 +263,7 @@ export default function Dashboard() {
           actions={(
             <div className="flex rounded-full border border-line p-0.5 text-xs" role="group" aria-label="오늘 할 일 범위">
               {([['mine', '내 것'], ['all', '전체']] as const).map(([k, l]) => (
-                <button key={k} onClick={() => setScope(k)} aria-pressed={scope === k} className={cx('rounded-full px-2.5 py-0.5 font-medium', scope === k ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{l}</button>
+                <button key={k} onClick={() => setScope(k)} aria-pressed={scope === k} className={cx('hit rounded-full px-2.5 py-0.5 font-medium', scope === k ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{l}</button>
               ))}
             </div>
           )}>

@@ -61,6 +61,12 @@ describe('V15 공개 가입 → 이메일 확인 → 로그인', () => {
     const me = await tc.ok('GET', '/api/auth/me');
     assert.equal(me.user.personal, false);
     T = { c: tc, me };
+    // 우리 회사 공용 캘린더에 일정 등록 가능(회사별 1개)
+    const cc = (await tc.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'company');
+    assert.ok(cc && cc.id !== D.companyCal);
+    await tc.ok('POST', '/api/events', { calendarId: cc.id, title: '남의상사 회의', start: `${today}T15:00:00+09:00`, end: `${today}T16:00:00+09:00` });
+    const own = (await ctx.owner.ok('GET', `/api/events?from=${today}T00:00:00Z&to=${addDays(today, 2)}T00:00:00Z`)).events;
+    assert.ok(!own.some((e) => e.title === '남의상사 회의'), '기존 회사에는 안 보임');
     // 이미 있는 이메일로 가입해도 같은 안내(가입 여부 드러내지 않음), 계정은 새로 안 생김
     const dup = await new Client().ok('POST', '/api/auth/signup', form({ email: 'ceo@dagym.test', name: '사칭', mode: 'personal' }));
     assert.ok(!dup.devLink);

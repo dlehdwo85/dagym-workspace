@@ -218,7 +218,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
             </button>
             <div className="relative">
               <button onClick={() => setCreateMenu((v) => !v)} aria-haspopup="menu" aria-expanded={createMenu} data-testid="create-menu"
-                className="inline-flex h-9 items-center gap-1.5 rounded-input bg-brand-600 px-3.5 text-sm font-semibold text-white shadow-card hover:bg-brand-700">
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-input bg-brand-600 px-3.5 text-sm font-semibold text-white shadow-card hover:bg-brand-700">
                 <Plus className="size-4" />만들기
               </button>
               {createMenu && (

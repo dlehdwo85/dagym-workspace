@@ -82,9 +82,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     try { const v = localStorage.getItem('wos_task_group'); return GROUPS.includes(v as GroupBy) ? (v as GroupBy) : ''; } catch { return ''; }
   });
   const [adding, setAdding] = useState(false);
-  // 정렬: 직접 순서(기본)·마감일·우선순위·최근 생성 … 사용자별(이 기기) 기억
-  const [sortBy, setSortBy] = useState<SortKey>(() => { try { const v = localStorage.getItem('wos_task_sort'); return SORTS.includes(v as SortKey) ? (v as SortKey) : 'manual'; } catch { return 'manual'; } });
-  const pickSort = (k: SortKey) => { setSortBy(k); try { localStorage.setItem('wos_task_sort', k); } catch {} };
+  // 정렬: 마감순(기본, V14 16번)·직접 순서·우선순위·최근 생성 … 사용자별(이 기기) 기억
+  const [sortBy, setSortBy] = useState<SortKey>(() => { try { const v = localStorage.getItem('wos_task_sort2'); return SORTS.includes(v as SortKey) ? (v as SortKey) : 'due'; } catch { return 'due'; } });
+  const pickSort = (k: SortKey) => { setSortBy(k); try { localStorage.setItem('wos_task_sort2', k); } catch {} };
   const [quickOpen, setQuickOpen] = useState(false);
   const kbProxy = useRef<HTMLInputElement>(null);
   const [moreMenu, setMoreMenu] = useState(false);
@@ -450,7 +450,7 @@ function CheckCircle({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => Pr
       const ok = await onPatch(t, { status: to });
       if (ok !== false) toast.ok(to === 'done' ? '완료했습니다' : to === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: to, version: t.version + 1 }, { status: before }) });
     }} aria-label={label} title={label} data-testid="check-circle"
-      className={cx('group flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+      className={cx('hit group flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-40',
         t.status === 'done' ? 'border-emerald-500 bg-emerald-500 text-white' : t.status === 'review' ? 'border-amber-400 bg-amber-50 text-amber-500' : 'border-slate-300 text-transparent hover:border-emerald-500 hover:text-emerald-500')}>
       {t.status === 'review' ? <Stamp className="size-3" /> : <CircleCheck className="size-[22px] stroke-[1.8]" style={{ margin: -1.5 }} />}
     </button>
@@ -508,7 +508,9 @@ const SORTS: SortKey[] = ['manual', 'due', 'priority', 'created', 'title', 'assi
 const SORT_LABEL: Record<SortKey, string> = { manual: '직접 순서', due: '마감일순', priority: '우선순위순', created: '최근 생성순', title: '이름순', assignee: '담당자순', requester: '지시자순', status: '상태순' };
 const PRI_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 const ko = (a?: string | null, b?: string | null) => (a ?? '\uffff').localeCompare(b ?? '\uffff', 'ko');
-const byDue = (x: Task, y: Task) => (x.due_date ?? '9999-12-31').localeCompare(y.due_date ?? '9999-12-31');
+/** 마감 일시 오름차순: 기한 지남 → 오늘 → 이후, 시간 없는 마감은 그날 끝, 마감 없는 업무는 맨 아래 */
+const dueKey = (t: Task) => (t.due_date ? `${t.due_date} ${t.due_time ?? '24:00'}` : '9999-12-31 99');
+const byDue = (x: Task, y: Task) => dueKey(x).localeCompare(dueKey(y));
 function sortTasks(ts: Task[], k: SortKey) {
   const cmp: Record<SortKey, (x: Task, y: Task) => number> = {
     manual: (x, y) => (x.sort_order ?? 0) - (y.sort_order ?? 0) || ko(x.created_at, y.created_at),
@@ -526,7 +528,7 @@ function sortTasks(ts: Task[], k: SortKey) {
 /** PC 열 머리: 누르면 그 기준으로 정렬 */
 function ListHeader({ sortBy, onSort }: { sortBy: SortKey; onSort: (k: SortKey) => void }) {
   const H = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => (
-    <button type="button" onClick={() => onSort(sortBy === k ? 'manual' : k)} aria-pressed={sortBy === k}
+    <button type="button" onClick={() => onSort(sortBy === k ? 'due' : k)} aria-pressed={sortBy === k}
       className={cx('truncate text-left hover:text-ink', sortBy === k ? 'font-semibold text-accent-600' : '', className)}>{children}{sortBy === k ? ' ↓' : ''}</button>
   );
   return (

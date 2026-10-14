@@ -13,7 +13,7 @@ export const POST = handler(async ({ req, user }) => {
   featureGate();
   const i = await body(req, z.object({ googleCalendarId: z.string().min(1), localCalendarId: zUuid, direction: z.enum(['both', 'import']) }));
   const sql = db();
-  const [cal] = await sql<CalendarRow[]>`select id, type, org_unit_id, owner_user_id from calendars where id = ${i.localCalendarId}`;
+  const [cal] = await sql<CalendarRow[]>`select id, type, org_unit_id, owner_user_id, tenant from calendars where id = ${i.localCalendarId}`;
   if (!cal || !(await calendarPerms(user, cal)).edit) throw forbidden('연결할 회사 캘린더에 편집 권한이 없습니다');
   const [acct] = await sql`select scopes from google_accounts where user_id = ${user.id} and status = 'active'`;
   if (!acct) throw badRequest('먼저 Google 계정을 연결하세요');

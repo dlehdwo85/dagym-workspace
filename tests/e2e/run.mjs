@@ -446,7 +446,7 @@ await step('U-0b·U-0c 검증 오류는 항목 이름과 한국어로, 연결 �
   const p = await c.newPage();
   await p.goto(BASE + '/login');
   await p.route('**/api/auth/login', (route) => route.abort('connectionrefused'));
-  await p.getByLabel('회사 이메일').fill('ceo@dagym.test');
+  await p.getByLabel('이메일', { exact: true }).fill('ceo@dagym.test');
   await p.getByLabel('비밀번호').fill('x');
   await p.getByRole('button', { name: '로그인' }).click();
   await p.getByText('서버에 연결할 수 없습니다').waitFor({ timeout: 15000 });
@@ -866,7 +866,7 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'minsu-pass-1234' });
   const minsu = (await c.ok('GET', '/api/auth/me')).user.id;
   for (const n of ['순서 시험 1', '순서 시험 2']) await ctx.owner.ok('POST', '/api/tasks', { title: n, orgUnitId: ctx.hq, assigneeId: ctx.ownerId });
-  await owner.evaluate(() => { localStorage.removeItem('wos_task_sort'); localStorage.removeItem('wos_task_group'); });
+  await owner.evaluate(() => { localStorage.setItem('wos_task_sort2', 'manual'); localStorage.removeItem('wos_task_group'); }); // 기본은 마감순 — 끌어 놓기 시험은 직접 순서로
   await owner.goto(BASE + '/tasks');
   const groups = owner.getByTestId('task-groups');
   const g = groups.locator(`[data-group="${minsu}"]`);
@@ -1433,7 +1433,7 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await owner.getByTestId('meter-storage').getByText('무제한').first().waitFor();
   await owner.getByTestId('top-files').locator('li').first().waitFor();
   await owner.getByTestId('plan-request').click();
-  await owner.getByLabel('요청할 요금제').selectOption('basic');
+  await owner.getByLabel('요청할 요금제').selectOption('team');
   await owner.getByRole('button', { name: '요청 보내기' }).click();
   await owner.getByText(/요청을 보냈습니다/).waitFor();
   await owner.screenshot({ path: `${SHOTS}/78-usage-plan.png`, fullPage: true });
@@ -1771,7 +1771,7 @@ await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)',
   const c2 = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR' });
   const p2 = await c2.newPage();
   await p2.goto(BASE + '/login');
-  await p2.getByLabel('회사 이메일').waitFor();
+  await p2.getByLabel('이메일', { exact: true }).waitFor();
   await p2.screenshot({ path: `${SHOTS}/44-login-1440.png` });
   await c2.close();
 });

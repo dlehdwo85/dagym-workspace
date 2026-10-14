@@ -299,7 +299,7 @@ export default function CalendarPage() {
               </button>
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-indigo-300 text-indigo-700' : 'border-line text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무 마감</button>
-            <button onClick={() => setColorDlg(true)} className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 font-medium text-ink-2" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
+            <button onClick={() => setColorDlg(true)} className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
           </div>
           {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}
           <div className="mb-2 sm:hidden" data-testid="cal-mobile-head">

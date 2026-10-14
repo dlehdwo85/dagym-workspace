@@ -109,10 +109,10 @@ export default function LibraryPage() {
       <div className="flex flex-col gap-2 sm:flex-row">
         <label className="relative flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
-          <input className={cx(inputCls, 'pl-9')} placeholder="제목·태그·본문 검색 (예: 로고, 단가표)" value={q} onChange={(e) => setQ(e.target.value)} aria-label="자료 검색" />
+          <input className={cx(inputCls, 'pl-9')} placeholder="자료 검색" title="제목·태그·본문에서 찾습니다" value={q} onChange={(e) => setQ(e.target.value)} aria-label="자료 검색" />
         </label>
         <div className="flex gap-2">
-          <input className={cx(inputCls, 'sm:w-44')} placeholder="올릴 폴더 (예: 브랜드/다짐)" value={upFolder} onChange={(e) => setUpFolder(e.target.value)} aria-label="올릴 폴더" />
+          <input className={cx(inputCls, 'sm:w-44')} placeholder="올릴 폴더" title="예: 브랜드/로고" value={upFolder} onChange={(e) => setUpFolder(e.target.value)} aria-label="올릴 폴더" />
           <input className={cx(inputCls, 'sm:w-36')} placeholder="태그 (쉼표)" value={upTags} onChange={(e) => setUpTags(e.target.value)} aria-label="올릴 때 태그" />
         </div>
       </div>

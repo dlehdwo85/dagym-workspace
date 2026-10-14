@@ -113,7 +113,7 @@ export default function AssistantPage() {
   return (
     <div className="mx-auto flex max-w-5xl gap-4">
     {/* V14 2번: 대화 목록 (휴대폰은 위 "대화 목록" 버튼) */}
-    <aside className={cx('w-64 shrink-0 flex-col gap-2 sm:flex', listOpen ? 'fixed inset-0 z-50 flex bg-white p-3 pt-[calc(var(--sat)+12px)]' : 'hidden')} data-testid="ai-threads">
+    <aside className={cx('w-64 shrink-0 flex-col gap-2 lg:flex', listOpen ? 'fixed inset-0 z-50 flex bg-white p-3 pt-[calc(var(--sat)+12px)]' : 'hidden')} data-testid="ai-threads">
       <div className="flex gap-1.5">
         <Button className="flex-1" onClick={() => openThread(null)} data-testid="ai-new-thread"><MessageSquarePlus />새 대화</Button>
         {listOpen && <Button variant="secondary" onClick={() => setListOpen(false)} aria-label="닫기"><X /></Button>}
@@ -141,7 +141,7 @@ export default function AssistantPage() {
       <PageHeader title="AI 비서" icon={Sparkles}
         sub={<>자료실·업무·일정{user.role === 'owner' || user.role === 'admin' ? '·매출' : ''}을 내 권한 안에서 찾아 답합니다. 업무 만들기·첨부·댓글은 <b>[확인]</b>을 눌러야 반영됩니다.
           {u?.costUsd !== undefined && <span className="ml-1 text-xs text-ink-3">이번 달 ${u.costUsd.toFixed(2)} / 한도 ${u.limitUsd}{status.data?.canSetLimit && <button onClick={editLimit} className="ml-1 text-brand-600 underline">한도 바꾸기</button>}</span>}</>} />
-      <div className="mb-2 flex items-center gap-2 sm:hidden">
+      <div className="mb-2 flex items-center gap-2 lg:hidden">
         <Button size="sm" variant="secondary" onClick={() => setListOpen(true)} data-testid="ai-threads-open">대화 목록</Button>
         <Button size="sm" variant="ghost" onClick={() => openThread(null)}><MessageSquarePlus />새 대화</Button>
       </div>
@@ -200,7 +200,7 @@ export default function AssistantPage() {
       <input ref={fileRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => attach(e.target.files)} data-testid="ai-file-input" />
       <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="mt-2 flex items-end gap-2">
         <Button type="button" variant="secondary" onClick={() => fileRef.current?.click()} aria-label="자료 첨부 (사진·PDF·엑셀)" disabled={files.length >= 5 || !!uploading}><Paperclip /></Button>
-        <textarea className={cx(inputCls, 'max-h-32 min-h-[42px] flex-1 resize-none')} rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : 'AI 에게 요청하기'}
+        <textarea className={cx(inputCls, 'max-h-32 min-h-[42px] flex-1 resize-none')} rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : 'AI에게 요청'}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} aria-label="AI 에게 요청" disabled={status.data?.overLimit} />
         {speechSupported() && <Button type="button" variant="secondary" onClick={voice} aria-label="말로 요청" disabled={listening}>{listening ? <Loader2 className="animate-spin" /> : <Mic />}</Button>}
         <Button type="submit" disabled={busy || !text.trim()} aria-label="보내기"><Send /></Button>

@@ -52,6 +52,12 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 /* 앱(Android edge-to-edge·iOS 노치): Capacitor SystemBars 가 --safe-area-inset-* 를 넣어 준다. 없으면 브라우저 env() */
 :root { --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)); }
 /* V14 14번: 안드로이드 앱(edge-to-edge)에서 일부 기기(3버튼 내비)는 하단 inset 이 0 으로 들어온다 → 최소 48px */
+/* V14 14번: 휴대폰(터치)에서 작은 칩·체크박스의 누를 수 있는 영역을 넓힌다(모양은 그대로) */
+@media (pointer: coarse) {
+  .hit { position: relative; }
+  .hit::after { content: ''; position: absolute; inset: -10px -6px; }
+  input[type='checkbox'], input[type='radio'] { width: 20px; height: 20px; }
+}
 html.native-android { --sab: max(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)), 48px); }
 
 /* QR 인쇄: 인쇄 영역만 출력 */

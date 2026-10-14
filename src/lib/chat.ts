@@ -21,7 +21,7 @@ async function companyRoom(u: SessionUser, sql: Sql) {
   await sql`insert into chat_rooms (tenant, kind, name) values (${t}, 'company', '회사 전체') on conflict do nothing`;
   const [r] = await sql<{ id: string }[]>`select id from chat_rooms where tenant = ${t} and kind = 'company'`;
   // V14 14번: 회사 전체방은 모든 직원이 자동 참여 (한 번도 메시지 화면을 안 연 사람도)
-  await sql`insert into chat_members (room_id, user_id) select ${r.id}, id from users where status = 'active' and is_demo = ${t === 'demo'} on conflict do nothing`;
+  await sql`insert into chat_members (room_id, user_id) select ${r.id}, id from users where status = 'active' and tenant = ${t} on conflict do nothing`;
   return r.id;
 }
 

@@ -112,7 +112,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
               <div ref={end} />
             </div>
             <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="flex items-end gap-1.5 border-t border-line p-2">
-              <textarea rows={1} className={cx(inputCls, 'max-h-28 min-h-9 resize-none py-1.5')} value={text} onChange={(e) => setText(e.target.value)} placeholder="AI 에게 요청하기" aria-label="AI 에게 요청 (화면 맥락)"
+              <textarea rows={1} className={cx(inputCls, 'max-h-28 min-h-9 resize-none py-1.5')} value={text} onChange={(e) => setText(e.target.value)} placeholder="AI에게 요청" aria-label="AI 에게 요청 (화면 맥락)"
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} />
               <Button type="submit" disabled={busy || !text.trim()} aria-label="보내기"><Send /></Button>
             </form>

@@ -210,7 +210,7 @@ export function BellChip({ value, onChange, label = '미리 알림' }: { value: 
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${label}: ${cur.length ? cur.map(remindLabel).join(', ') : '기본'}`} aria-haspopup="dialog" aria-expanded={open} data-testid="bell-chip"
-        className={cx('inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-xs', cur.length ? 'border-accent-500/40 bg-accent-50 font-medium text-accent-700' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>
+        className={cx('hit inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-xs', cur.length ? 'border-accent-500/40 bg-accent-50 font-medium text-accent-700' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>
         <Bell className="size-3.5" />{cur.length ? `알림 ${cur.map(remindLabel).join('·')}` : '알림 기본'}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="미리 알림">
@@ -234,7 +234,7 @@ export function RepeatChip({ value, anchorDate, onChange }: { value: string | nu
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`반복: ${value ? cur?.label ?? '사용자 지정' : '안 함'}`} aria-haspopup="dialog" aria-expanded={open} data-testid="repeat-chip"
-        className={cx('inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-xs', value ? 'border-accent-500/40 bg-accent-50 font-medium text-accent-700' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>
+        className={cx('hit inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-xs', value ? 'border-accent-500/40 bg-accent-50 font-medium text-accent-700' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>
         <Repeat className="size-3.5" />{value ? cur?.label ?? '반복' : '반복 안 함'}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="반복">
