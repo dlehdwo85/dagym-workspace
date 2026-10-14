@@ -117,3 +117,5 @@
 - 2026-10-14 운영 9d2312a 수동 재배포(상시 승인): 지시자 마감 알림(915de03)·AI 모델 3단계(bf45f0a) 반영.
 
 - 2026-10-14 Vercel 팀 Pro 전환(대표 결제, plan pro active) — 하루 100회 배포 한도 해소. 운영 4e9e3ae 재배포.
+
+- 2026-10-14 운영 70aef89(15차 ①~⑧·V14 14·16, migration 037): /signup·/terms·/privacy·/welcome 200. 비로그인 / → /login(랜딩은 /welcome). 약관·처리방침 사업자 정보 = COMPANY_NAME·COMPANY_CEO·COMPANY_BIZNO·COMPANY_ADDRESS 환경변수 대기(대표 입력).
