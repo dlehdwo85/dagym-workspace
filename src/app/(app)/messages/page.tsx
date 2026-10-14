@@ -138,6 +138,7 @@ function Room({ id, live, onRead, onBack }: { id: string; live: ReturnType<typeo
   const { data, error, loading, reload } = useApi<{ room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean }; messages: Msg[]; members: { id: string; name: string; last_read_id: string }[]; pinned: Msg[] }>(`/api/chat/rooms/${id}`);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
+  useEffect(() => { if (!text) document.querySelector<HTMLTextAreaElement>('[data-testid=chat-input]')?.style.removeProperty('height'); }, [text]); // 보낸 뒤 입력칸 높이 원래대로
   const [typing, setTyping] = useState<string[]>([]);
   const [reads, setReads] = useState<Record<string, string>>({});
   const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
@@ -293,7 +294,8 @@ function Room({ id, live, onRead, onBack }: { id: string; live: ReturnType<typeo
           )}
           <button type="button" className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" onClick={() => fileRef.current?.click()} aria-label="파일 보내기"><Paperclip className="size-5" /></button>
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-file" />
-          <textarea rows={1} className={cx(inputCls, 'max-h-32 min-h-9 resize-none py-1.5')} placeholder="메시지 입력 — Enter 보내기, Shift+Enter 줄바꿈, @ 멘션" value={text} onChange={(e) => onType(e.target.value)} aria-label="메시지" data-testid="chat-input"
+          <textarea rows={1} className={cx(inputCls, 'max-h-32 min-h-9 resize-none py-1.5')} placeholder="메시지 입력" title="Enter 보내기 · Shift+Enter 줄바꿈 · @ 멘션" value={text}
+            onChange={(e) => { onType(e.target.value); const el = e.currentTarget; el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 128)}px`; }} aria-label="메시지" data-testid="chat-input"
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
           <Button type="submit" disabled={!text.trim()} aria-label="보내기" data-testid="chat-send"><Send /></Button>
         </form>
