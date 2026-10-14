@@ -2451,3 +2451,24 @@ describe('V14 10번 마감 알림 중복 없음', () => {
     assert.ok(!reminders.some((r) => r.link === `/tasks/${t2}` && r.title.startsWith('마감 임박')));
   });
 });
+
+describe('V14 11번 모든 화면 AI 비서 — 화면 맥락은 id 만, 서버가 권한 안에서', () => {
+  const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+  const lastSystem = async () => (await (await fetch(`${FAKE}/__state`)).json()).anthropic.at(-1).body.system;
+  test('메시지 방 맥락은 최근 대화를, 볼 수 없는 방·자료는 맥락 없이', async () => {
+    const room = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.managerA.id })).id;
+    await ctx.owner.ok('POST', `/api/chat/rooms/${room}/messages`, { body: '금요일까지 간판 시안 받아 주세요' });
+    await ctl({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: '요약했습니다.' }], stop_reason: 'end_turn' }] });
+    await ctx.managerA.client.ok('POST', '/api/ai/chat', { text: '이 대화 요약해줘', context: { page: 'messages', id: room } });
+    assert.match(await lastSystem(), /간판 시안/);
+    // 남의 방: 맥락 없음 (존재도 드러내지 않음)
+    await ctl({ anthropicQueue: [{ content: [{ type: 'text', text: '네.' }], stop_reason: 'end_turn' }] });
+    await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '이 대화 요약해줘', context: { page: 'messages', id: room } });
+    assert.ok(!(await lastSystem()).includes('간판 시안'), '볼 수 없는 방의 내용은 안 보냄');
+    await ctl({ anthropicQueue: [{ content: [{ type: 'text', text: '네.' }], stop_reason: 'end_turn' }] });
+    await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '이 날 일정 정리해줘', context: { page: 'calendar', id: today } });
+    assert.match(await lastSystem(), new RegExp(`캘린더에서 ${today}`));
+    assert.equal((await ctx.staffA.client.post('/api/ai/chat', { text: 'x', context: { page: 'hack' } })).status, 400);
+    await ctl({ anthropicReset: true });
+  });
+});

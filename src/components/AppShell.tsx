@@ -1,5 +1,7 @@
 'use client';
 import Link from 'next/link';
+import { Suspense } from 'react';
+import { AiDock } from './AiDock';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
@@ -54,6 +56,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const router = useRouter();
   const [unread, setUnread] = useState(0);
   const [chatUnread, setChatUnread] = useState(0);
+  const [aiDock, setAiDock] = useState(false); // V14 11번 모든 화면 AI 비서
   // 메시지 화면을 오가면 메시지 배지를 바로 새로
   useEffect(() => { api('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}); }, [path]);
   const [online, setOnline] = useState(true);
@@ -270,6 +273,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon.svg" alt="" className="size-7" />워크인</span>
               <span className="flex items-center">
                 <button onClick={() => setPalette(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-[22px]" /></button>
+                {session.features.ai && <button onClick={() => setAiDock(true)} className="inline-flex size-11 items-center justify-center rounded-full text-violet-600 active:bg-violet-50" aria-label="AI 비서" data-testid="mobile-ai"><Sparkles className="size-[22px]" /></button>}
                 <Link href="/notifications" className="relative inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label={`알림${unread ? ` ${unread}건` : ''}`} data-testid="mobile-bell">
                   <Bell className="size-[22px]" />{unread > 0 && <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{unread > 99 ? '99+' : unread}</span>}
                 </Link>
@@ -280,6 +284,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <main className="mx-auto max-w-7xl p-3 sm:p-6">{children}</main>
         </div>
 
+        {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} /></Suspense>}
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
           {MOBILE_TABS.slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}

@@ -228,6 +228,8 @@ const chatInput = z.object({
   text: z.string().max(20000).optional(),
   messages: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000) })).min(1).max(30).optional(),
   taskId: z.string().uuid().optional(),
+  /** V14 11번: 어느 화면에서 물었는지 — id 만 받고 서버가 권한 안에서 조회 */
+  context: z.object({ page: z.enum(['home', 'tasks', 'task', 'calendar', 'library', 'revenue', 'reports', 'messages', 'other']), id: z.string().max(80).optional() }).optional(),
   /** V12 8번: 이번 질문에 붙인 자료실 파일(최대 5개) — 이미지는 비전, PDF 는 문서, 그 밖은 추출한 글자로 전달 */
   fileIds: z.array(z.string().uuid()).max(5).optional(),
 });
@@ -286,6 +288,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     const d = await getTaskDetail(u, i.taskId); // 볼 수 없는 업무면 여기서 404
     context = `\n지금 사용자가 보고 있는 업무: id=${i.taskId}, 제목="${(d.task as any).title}". "이 업무"는 이것을 뜻합니다.`;
   }
+  if (i.context && !i.taskId) context += await pageContext(u, i.context);
   const system = `${SYSTEM}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}`;
   // 문맥: 보관된 대화면 최근 20개 + 요약, 예전 방식이면 화면이 보낸 것
   const messages: AiMessage[] = hist ? [...hist.messages.map((m) => ({ role: m.role, content: m.text })), { role: 'user', content: userText }]
@@ -414,4 +417,21 @@ export async function fillFromFiles(u: SessionUser, i: z.infer<typeof fillInput>
     checklist: (Array.isArray(j.checklist) ? j.checklist : []).map((x: unknown) => String(x).slice(0, 300)).filter(Boolean).slice(0, 50),
     dueDate: isDate(j.dueDate) ? j.dueDate : null, dueTime: /^\d{2}:\d{2}$/.test(j.dueTime ?? '') ? j.dueTime : null,
   };
+}
+
+/** V14 11번: 화면 맥락 — id 로 권한 안에서만 조회해 한 줄로. 볼 수 없으면 맥락 없이(404 를 드러내지 않음) */
+async function pageContext(u: SessionUser, c: { page: string; id?: string }) {
+  const PAGE: Record<string, string> = { home: '홈(오늘 할 일)', tasks: '업무 목록', calendar: '캘린더', library: '자료실', revenue: '매출', reports: '주간 보고', messages: '메시지', other: '' };
+  try {
+    if (c.page === 'library' && c.id) { const f = await loadLibraryFile(u, c.id); return `\n지금 사용자가 보고 있는 자료실 파일: id=${f.id}, 제목="${f.title}". "이 자료"는 이것을 뜻합니다.`; }
+    if (c.page === 'messages' && c.id) {
+      const { roomDetail } = await import('../chat');
+      const r = await roomDetail(u, c.id, {});
+      const recent = r.messages.slice(-15).filter((m: any) => !m.deleted).map((m: any) => `${m.author_name}: ${String(m.body).replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/g, '@$1').slice(0, 200)}`).join('\n');
+      return `\n지금 사용자가 보고 있는 대화방: "${r.room.name}". 최근 메시지(요약·업무로 만들기 요청에 참고):\n${recent}`;
+    }
+    if (c.page === 'calendar' && c.id && /^\d{4}-\d{2}-\d{2}$/.test(c.id)) return `\n지금 사용자가 캘린더에서 ${c.id} 를 보고 있습니다. "이 날"은 이 날짜입니다.`;
+    if (c.page === 'revenue' && !(await canSeeRevenue(u))) return '';
+  } catch { return ''; }
+  return PAGE[c.page] ? `\n지금 사용자가 보고 있는 화면: ${PAGE[c.page]}.` : '';
 }
