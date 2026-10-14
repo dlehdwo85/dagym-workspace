@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Building2, Check, X } from 'lucide-react';
+import { Building2, Check, Copy, KeyRound, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { fmtBytes, lim, won } from '@/components/usage';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -40,6 +40,7 @@ export default function PlatformPage() {
         </section>
       )}
       <Signups />
+      <InquiryLink />
       {/* V12 3번: 문의 접수함 */}
       <section id="support" className="rounded-card border border-line bg-white shadow-card" data-testid="support-inbox">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">문의 접수함 {tickets.data && <span className="text-xs font-normal text-ink-3">미답변 {tickets.data.tickets.filter((t) => t.status === 'open').length}건</span>}</h2>
@@ -164,6 +165,77 @@ function Signups() {
         </table>
       </div>
       {!!data.ips.length && <p className="border-t border-line px-3 py-2 text-xs text-ink-3">IP별(24시간): {data.ips.map((x: any) => `${x.ip ?? '?'} ${x.n}회(성공 ${x.ok})`).join(' · ')}</p>}
+    </section>
+  );
+}
+
+/** 16차: 다짐·하이링크 웹사이트 문의 → 워크인 업무. 다짐 회사 슈퍼관리자에게만 보인다(다른 회사는 API 404 → 섹션 없음) */
+function InquiryLink() {
+  const { data, reload } = useApi<any>('/api/platform/inquiries');
+  const [shown, setShown] = useState<{ site: string; token: string } | null>(null);
+  const [asg, setAsg] = useState<Record<string, string | null> | null>(null);
+  if (!data) return null;
+  const cur = asg ?? data.assignees;
+  const SITE: Record<string, string> = { dagym: '다짐', hilink: '하이링크' };
+  const issue = async (site: string) => {
+    try { const r = await api('/api/platform/inquiries/tokens', { body: { site } }); setShown({ site, token: r.token }); reload(); } catch (e: any) { toast.error(e.message); }
+  };
+  const revoke = async (id: string) => {
+    if (!confirm('이 토큰을 폐기할까요? 이 토큰을 쓰는 사이트의 문의가 더 이상 워크인에 등록되지 않습니다.')) return;
+    try { await api(`/api/platform/inquiries/tokens/${id}`, { method: 'DELETE' }); reload(); toast.ok('폐기했습니다'); } catch (e: any) { toast.error(e.message); }
+  };
+  const saveAsg = async () => {
+    try { await api('/api/platform/inquiries/assignees', { method: 'PUT', body: { assignees: Object.fromEntries(data.types.map((t: string) => [t, cur[t] || null])) } }); setAsg(null); reload(); toast.ok('저장했습니다'); } catch (e: any) { toast.error(e.message); }
+  };
+  return (
+    <section className="rounded-card border border-line bg-white shadow-card" data-testid="inquiry-link">
+      <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">웹사이트 문의 연동 <span className="text-xs font-normal text-ink-3">다짐·하이링크 사이트 문의 → &lsquo;웹사이트 문의&rsquo; 프로젝트에 업무로 자동 등록</span></h2>
+      <div className="space-y-3 p-3 text-sm">
+        <p className="text-xs text-ink-3">주소: <code className="break-all">POST {data.endpoint || '/api/integrations/inquiries'}</code> · 헤더 <code>Authorization: Bearer 토큰</code> · 같은 lead_id 는 한 번만 등록</p>
+        {shown && (
+          <div className="rounded border border-amber-300 bg-amber-50 p-2" data-testid="inquiry-token-shown">
+            <p className="text-xs font-semibold text-amber-800">{SITE[shown.site]} 토큰 — 지금 한 번만 보입니다. 사이트 환경변수에 넣어 주세요.</p>
+            <div className="mt-1 flex items-center gap-2"><code className="min-w-0 flex-1 break-all rounded bg-white px-2 py-1 text-xs">{shown.token}</code>
+              <Button size="sm" variant="secondary" onClick={() => { navigator.clipboard?.writeText(shown.token); toast.ok('복사했습니다'); }}><Copy />복사</Button>
+              <Button size="sm" variant="ghost" onClick={() => setShown(null)}>닫기</Button></div>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {Object.keys(SITE).map((s) => <Button key={s} size="sm" variant="secondary" onClick={() => issue(s)}><KeyRound />{SITE[s]} 토큰 발급</Button>)}
+        </div>
+        <ul className="divide-y divide-line rounded border border-line">
+          {data.tokens.map((t: any) => (
+            <li key={t.id} className={cx('flex flex-wrap items-center gap-2 px-2 py-1.5', t.revoked_at && 'text-ink-3')}>
+              <span className="min-w-0 flex-1">{t.name} <span className="text-xs text-ink-3">…{t.hint} · 발급 {fmtDateTime(t.created_at)}{t.created_by_name && ` · ${t.created_by_name}`} · 마지막 사용 {t.last_used_at ? fmtDateTime(t.last_used_at) : '없음'}</span></span>
+              {t.revoked_at ? <span className="text-xs">폐기됨</span> : <Button size="sm" variant="ghost" onClick={() => revoke(t.id)}>폐기</Button>}
+            </li>
+          ))}
+          {!data.tokens.length && <li className="px-2 py-1.5 text-ink-3">발급한 토큰이 없습니다</li>}
+        </ul>
+        <div>
+          <h3 className="text-xs font-semibold text-ink-2">유형별 기본 담당자 <span className="font-normal text-ink-3">(비워 두면 대표)</span></h3>
+          <div className="mt-1 grid gap-2 sm:grid-cols-2">
+            {data.types.map((t: string) => (
+              <label key={t} className="flex items-center gap-2 text-xs"><span className="w-28 shrink-0">{t}</span>
+                <select className={small} value={cur[t] ?? ''} onChange={(e) => setAsg({ ...cur, [t]: e.target.value || null })} aria-label={`${t} 기본 담당자`}>
+                  <option value="">대표</option>
+                  {data.users.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select></label>
+            ))}
+          </div>
+          {asg && <Button size="sm" className="mt-2" onClick={saveAsg}>담당자 저장</Button>}
+        </div>
+        {!!data.recent.length && (
+          <div>
+            <h3 className="text-xs font-semibold text-ink-2">최근 문의</h3>
+            <ul className="mt-1 space-y-0.5 text-xs">
+              {data.recent.map((q: any) => (
+                <li key={q.lead_id}>{fmtDateTime(q.created_at)} · {SITE[q.site]} · {q.inquiry_type} · {q.task_id ? <a className="text-accent-600 underline" href={`/tasks/${q.task_id}`}>{q.title}</a> : q.organization ?? q.lead_id}{q.assignee_name && ` · ${q.assignee_name}`}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

@@ -119,6 +119,16 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 메신저 바로가기 버튼은 AI 비서 화면에서도 숨김(보내기 버튼 옆을 가리던 것)
 - E2E 간헐 실패 원인: 화면 준비(하이드레이션) 전에 입력해 글자가 사라짐 → 시험이 준비를 기다리게 함, AI 단계마다 남은 가짜 응답 비움
 
+## 16차 웹사이트 문의 → 워크인 업무 자동 등록 (2026-10-14, 클라우드)
+| 항목 | 처리 |
+|---|---|
+| 받는 곳 | `POST /api/integrations/inquiries` · 헤더 `Authorization: Bearer <연동 토큰>` · 본문 JSON(snake_case): `lead_id`(필수) + inquiry_type·organization·region·facility_scale·name·phone·email·organization_type·services[]·current_operation·message·submitted_at·utm{}/utm_source…·landing_page·referrer(모두 선택). 응답 `{ ok, duplicate, taskId }` |
+| 토큰 | 플랫폼 운영 → "웹사이트 문의 연동"에서 사이트별(다짐·하이링크) 발급·**한 번만 표시**·해시 저장(끝 4자리만 보관)·폐기. **다짐 회사(tenant default) 고정** — 다른 회사 토큰 401, 다른 회사·체험 계정은 화면·API 404(슈퍼관리자 표시가 있어도) |
+| 업무 형식 | 프로젝트 "웹사이트 문의"(없으면 자동 생성), 섹션 = 위탁운영 / HILINK 플랫폼 / 운영 진단·컨설팅 / 기타, 태그 다짐웹·하이링크웹·지역·관심 서비스, 제목 `[하이링크 문의] 음성푸르지오더퍼스트 · HILINK 플랫폼 (충북)`, 설명 = 항목 표(업무 상세에서 표로 보임) + 연락처 표(내부 표시) + 문의 원문, 체크리스트 6단계(+위탁운영 "현장 실사", HILINK "데모 일정"), 우선순위 높음, 마감 = 접수 + 1영업일(주말·공휴일 제외) 18:00, 지시자 대표, 담당 = 유형별 기본 담당자(플랫폼 운영 화면에서 지정, 없으면 대표), 담당자에게 즉시 알림·푸시 "새 웹사이트 문의 · {단지}" |
+| 멱등 | lead_id 유일(회사별) — 재전송·동시 3번 전송도 1건, 두 번째부터 `duplicate: true` 와 같은 taskId |
+| AI 요약 | AI 키가 있고 한도 안이면 응답 뒤에 가벼운 모델로 한 줄 요약을 설명 맨 위에(연락처는 AI 로 보내지 않음, `INQUIRY_AI_SUMMARY=0` 이면 끔) |
+| 남은 것 | ⓐ **사이트 쪽 전송 코드**(dagym-website·hilink-website `app/contact/actions.ts` — 기존 저장·메일 뒤에 3초 타임아웃 비차단 fetch, 실패해도 접수 성공)는 각 사이트 담당 세션이 수정 ⓑ 토큰을 운영에서 발급해 각 사이트 Vercel 환경변수(예: `WORKIN_INQUIRY_TOKEN`)에 넣기 — 대표/로컬 ⓒ 업무에는 보안 등급 칸이 없어 연락처 "내부"는 업무 공개 범위(담당·지시자·관리자)로 지켜짐 ⓓ Supabase 누락분 보충(2단계)은 읽기 키 필요해 미구현 |
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

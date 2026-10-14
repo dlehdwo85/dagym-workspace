@@ -949,6 +949,20 @@ function HelpTip({ children, testid }: { children: React.ReactNode; testid?: str
 }
 
 /** V13 11번 설명 보기: 줄바꿈·**굵게**·[이름](주소)·주소 자동 링크, 6줄 넘으면 접기 */
+/** 16차: '| 항목 | 내용 |' 형식 줄 묶음은 표로 (머리줄·구분줄은 건너뜀) */
+function blocks(text: string): (string | string[][])[] {
+  const out: (string | string[][])[] = [];
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\|.*\|\s*$/.test(lines[i]) && /^\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? '')) {
+      const rows: string[][] = [];
+      for (i += 2; i < lines.length && /^\|.*\|\s*$/.test(lines[i]); i++) rows.push(lines[i].trim().slice(1, -1).split('|').map((c) => c.trim()));
+      i--; out.push(rows);
+    } else out.push(lines[i]);
+  }
+  return out;
+}
+
 function RichText({ text }: { text: string }) {
   const [more, setMore] = useState(false);
   const long = text.split('\n').length > 6 || text.length > 420;
@@ -968,7 +982,11 @@ function RichText({ text }: { text: string }) {
   return (
     <div>
       <div className={cx('whitespace-pre-wrap break-words', long && !more && 'line-clamp-6')} data-testid="desc-rich">
-        {text.split('\n').map((l, i) => <span key={i}>{inline(l, i)}{'\n'}</span>)}
+        {blocks(text).map((b, i) => typeof b === 'string' ? <span key={i}>{inline(b, i)}{'\n'}</span> : (
+          <table key={i} className="my-1 w-full border-collapse whitespace-normal text-[13px]" data-testid="desc-table"><tbody>
+            {b.map((r, j) => <tr key={j} className="border-b border-line last:border-0">{r.map((c, k) => k === 0 ? <th key={k} className="w-32 py-1 pr-2 text-left align-top font-medium text-ink-2">{inline(c, i * 1000 + j)}</th> : <td key={k} className="py-1 align-top">{inline(c, i * 1000 + j * 10 + k)}</td>)}</tr>)}
+          </tbody></table>
+        ))}
       </div>
       {long && <button type="button" className="mt-1 text-xs font-medium text-accent-600" onClick={(e) => { e.stopPropagation(); setMore(!more); }} data-testid="desc-more">{more ? '접기' : '더 보기'}</button>}
     </div>
