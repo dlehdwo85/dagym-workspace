@@ -370,8 +370,8 @@ export default function CalendarPage() {
               // R-15 1번: 완료는 흰 동그라미 안 ✓ + 흐림·취소선(월·주·일·목록 모두), 미완료 업무는 빈 동그라미
               const mark = isTask ? (narrow ? (done ? <span className="mr-0.5 inline-flex size-3 items-center justify-center rounded-full bg-white align-[-2px] text-ink" aria-label="완료"><Check className="size-2.5" strokeWidth={3} /></span>
                 : <span className="mr-0.5 inline-block size-2.5 rounded-full border border-white/90 align-[-1px]" aria-hidden />)
-                : <button type="button" data-task-check onClick={(e) => { e.stopPropagation(); completeTask(t); }} aria-label={`${t.title} ${done ? '완료 취소' : '완료'}`}
-                  className={cx('mr-1 inline-flex size-3.5 items-center justify-center rounded-full border border-white/90 align-[-2px]', done ? 'bg-white text-ink' : 'hover:bg-white/30')}>{done && <Check className="size-2.5" strokeWidth={3} />}</button>)
+                // V14 33번: 캘린더에서는 완료 동그라미를 누를 수 없게(실수 완료 방지) — 누르면 미리보기·상세만
+                : <span className={cx('mr-1 inline-flex size-3.5 items-center justify-center rounded-full border border-white/90 align-[-2px]', done && 'bg-white text-ink')} aria-label={done ? '완료' : '업무'}>{done && <Check className="size-2.5" strokeWidth={3} />}</span>)
                 : lt ? (done ? <span className="mr-0.5 inline-flex size-3 items-center justify-center rounded-full bg-white align-[-2px] text-ink" aria-label="연결 업무 완료"><Check className="size-2.5" strokeWidth={3} /></span>
                   : <Check className="mr-0.5 inline size-3 align-[-2px]" strokeWidth={3} aria-label="업무와 연결" />)
                 : arg.event.classNames.includes('task-block') ? <Timer className="mr-0.5 inline size-3 align-[-2px]" aria-label="업무 시간" /> : null;

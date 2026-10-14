@@ -102,3 +102,8 @@ select { min-height: 2.5rem; line-height: 1.5; padding-top: 0.25rem; padding-bot
 @media (max-width: 639px) {
   html.task-detail-open nav[aria-label="하단 메뉴"] { display: none; }
 }
+
+/* 휴대폰: 아래 고정 탭에 가려지지 않게 스크롤 여백 */
+@media (max-width: 639px) {
+  html { scroll-padding-bottom: calc(5rem + var(--sab, 0px)); }
+}

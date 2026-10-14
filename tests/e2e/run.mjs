@@ -591,6 +591,7 @@ await step('B-14·B-15·B-16·B-17 현장 비교·주간 보고·업무량·공�
 });
 await step('모바일 밀기: 기본 꺼짐·짧은/세로 밀기 무시, 켜면 45% 이상 밀어 완료 → "방금 완료한 업무"에서 되돌리기', async () => {
   const id = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '밀어서 완료 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+  await staff.evaluate(() => localStorage.setItem('wos_task_group', 'assignee')); // V14 34번: 휴대폰 기본 마감별 — 뜬 뒤 묶기가 바뀌지 않게 고정
   await staff.goto(BASE + '/tasks?mode=list');
   await staff.getByLabel('업무 검색').fill('밀어서');
   const row = staff.locator(`[data-row="${id}"]`);
@@ -930,6 +931,7 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
 });
 await step('V3-6 휴대폰: 다른 사람 묶음에서 입력 후 바깥 누르면 자동 추가 → 안내·강조·그 묶음에 표시, 순서 메뉴로 위로, 홈 기한 지남 경고 띠', async () => {
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  await mc.addInitScript(() => { try { localStorage.setItem('wos_task_group', 'assignee'); } catch {} }); // V14 34번: 휴대폰 기본은 마감별 — 이 시험은 담당자별 묶음
   const m = await mc.newPage();
   await m.goto(BASE + '/tasks');
   const [minsu] = await sql`select id from users where email = 'minsu@dagym.test'`;
@@ -1054,10 +1056,13 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   await owner.reload();
   const item = owner.locator('.fc-event.task-item', { hasText: '체크 완료 시험' }).first();
   await item.waitFor();
-  await item.getByRole('button', { name: '체크 완료 시험 완료' }).click();
-  await owner.getByText('완료했습니다').waitFor();
-  await owner.waitForTimeout(500);
-  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${lone}`)).task.status, 'done');
+  // V14 33번: 캘린더의 동그라미는 누를 수 없음 — 눌러도 완료되지 않고 상세만 열린다
+  assert.equal(await item.getByRole('button', { name: '체크 완료 시험 완료' }).count(), 0, '캘린더에 완료 버튼 없음');
+  await item.click();
+  await owner.getByTestId('task-panel').waitFor();
+  assert.notEqual((await ctx.owner.ok('GET', `/api/tasks/${lone}`)).task.status, 'done', '누르기만으로 완료되지 않음');
+  await owner.getByTestId('task-panel').getByRole('button', { name: '패널 닫기' }).click();
+  await owner.getByTestId('task-panel').waitFor({ state: 'detached' });
   // 일정 탭 빠른 입력
   const lane15 = owner.locator('td.fc-timegrid-slot-lane[data-time="15:00:00"]').first();
   await lane15.evaluate((el) => el.scrollIntoView({ block: 'center' })); // 화면 아래 안내(토스트)에 가리지 않게
@@ -1156,6 +1161,7 @@ await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 �
 
 await step('V6-2 휴대폰(Android Chrome 터치): 행을 0.5초 꾹 눌러 위로 끌면 순서 저장, 길게 누르기 메뉴·상세 열림 없음', async () => {
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  await mc.addInitScript(() => { try { localStorage.setItem('wos_task_group', 'assignee'); } catch {} }); // V14 34번: 휴대폰 기본은 마감별 — 이 시험은 담당자별 묶음
   const m = await mc.newPage();
   await m.goto(BASE + '/tasks');
   const g = m.getByTestId('task-groups').locator(`[data-group="${ctx.ownerId}"]`);
@@ -1477,6 +1483,7 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
 await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 상태별, 완료 칩 보임·월별 요약, 마감 선택 = 아래 시트(화면 안)·시각 버튼, 글자 칩, 🎤 말로 등록 → 인식 카드(빠진 마감 빨간 표시)', async () => {
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V11 상태 칩 업무', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, dueDate: addDays(today, 1), approvalRequired: false })).id;
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  await mc.addInitScript(() => { try { localStorage.setItem('wos_task_group', 'assignee'); } catch {} }); // V14 34번: 휴대폰 기본은 마감별 — 이 시험은 담당자별 묶음
   const m = await mc.newPage();
   await m.goto(BASE + '/tasks');
   const row = m.locator(`[data-row="${t}"]`);

@@ -193,7 +193,10 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [boardBy, setBoardBy] = useState<'status' | 'section'>('status');
 
   const curView = fixed?.view ?? filters.view ?? '';
-  const group: GroupBy = groupPick || (curView === 'my' ? 'due' : 'assignee');
+  // V14 34번: 휴대폰 기본 묶기는 마감별(가까운 순), 담당자별은 선택
+  const [phone, setPhone] = useState(false);
+  useEffect(() => { try { setPhone(window.matchMedia('(max-width: 639px)').matches); } catch {} }, []);
+  const group: GroupBy = groupPick || (curView === 'my' || phone ? 'due' : 'assignee');
   const pickGroup = (g: GroupBy) => { setGroupPick(g); try { localStorage.setItem('wos_task_group', g); } catch {} };
   // 상단 칩: 전체 · 내 업무 · 사람별 · 내가 지시한 업무 · 지연 · 이번 주 · 검토 대기. 사람 칩은 본사 사람(없으면 앞쪽 5명)
   const hqIds = new Set(dir.orgUnits.filter((o) => o.type === 'hq').map((o) => o.id));
@@ -559,7 +562,7 @@ function ListHeader({ sortBy, onSort }: { sortBy: SortKey; onSort: (k: SortKey) 
 }
 /** 마감 묶음 끝 "업무 추가" 줄의 기본 마감일 */
 const DUE_DEFAULT: Record<string, () => string | null> = {
-  over: () => todayStr(), today: () => todayStr(), week: () => quickDues()[2][1], later: () => quickDues()[3][1], none: () => null, new: () => null,
+  over: () => todayStr(), today: () => todayStr(), tomorrow: () => quickDues()[1][1], week: () => quickDues()[2][1], next: () => quickDues()[3][1], later: () => null, none: () => null, new: () => null,
 };
 function ViewChip({ on, onClick, children, label }: { on: boolean; onClick: () => void; children: React.ReactNode; label?: string }) {
   return (
@@ -609,10 +612,14 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
   } else if (group === 'due') {
     const d = new Date(today + 'T00:00:00Z');
     const weekEnd = new Date(d.getTime() + (6 - ((d.getUTCDay() + 6) % 7)) * 86400000).toISOString().slice(0, 10);
-    const defs: [string, string, string?][] = [['over', '기한 지남', 'text-red-600'], ['today', '오늘'], ['week', '이번 주'], ['later', '나중'], ['none', '마감일 없음']];
+    const nextEnd = new Date(new Date(weekEnd + 'T00:00:00Z').getTime() + 7 * 86400000).toISOString().slice(0, 10);
+    const tomorrow = new Date(d.getTime() + 86400000).toISOString().slice(0, 10);
+    // V14 34번: 마감이 가까운 순 — 기한 지남·오늘·내일·이번 주·다음 주·이후·마감 없음 (묶음 안은 날짜·시각순)
+    const defs: [string, string, string?][] = [['over', '기한 지남', 'text-red-600'], ['today', '오늘'], ['tomorrow', '내일'], ['week', '이번 주'], ['next', '다음 주'], ['later', '이후'], ['none', '마감 없음']];
     groups = defs.map(([k, l, tone]) => ({ key: k, label: l, tone, items: [], add: { defaultDue: DUE_DEFAULT[k]() } }));
     const g = (k: string) => groups.find((x) => x.key === k)!.items;
-    for (const t of tasks) g(!t.due_date ? 'none' : t.due_date < today ? 'over' : t.due_date === today ? 'today' : t.due_date <= weekEnd ? 'week' : 'later').push(t);
+    for (const t of tasks) g(!t.due_date ? 'none' : t.due_date < today ? 'over' : t.due_date === today ? 'today' : t.due_date === tomorrow ? 'tomorrow' : t.due_date <= weekEnd ? 'week' : t.due_date <= nextEnd ? 'next' : 'later').push(t);
+    if (sortBy === 'due') for (const x of groups) x.items.sort((a, b) => `${a.due_date ?? '9'}${a.due_time ?? '99'}`.localeCompare(`${b.due_date ?? '9'}${b.due_time ?? '99'}`));
     groups = groups.filter((x) => x.items.length || x.key === 'today');
   } else if (group === 'project') {
     const m = new Map<string, G>();
@@ -813,7 +820,7 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortab
   return (
     <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="task-list" onKeyDown={onKey}>
       {add}
-      {hint && <SwipeHint />}
+      {hint && <SwipeHint sortable={!!sortable} />}
       {sortable ? (
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((t) => <SortableRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} onMove={onMove} />)}
@@ -845,10 +852,10 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hintStart = (e: React.PointerEvent) => {
     // V14 12번: 휴대폰에서 길게 누르면 선택 모드
-    if (e.pointerType === 'touch' && selc && !selc.on) lp.current = setTimeout(() => { selc.enter(t.id); navigator.vibrate?.(20); }, 550);
-    if (!dragHint || e.pointerType !== 'touch') return;
-    hintTimer.current = setTimeout(() => { toast.info('순서를 바꾸려면 정렬을 "직접 순서"로 바꾸세요'); }, 500);
+    // V14 34번: 길게 누르기 = 선택 모드만(진동, 화면 이동 없음). 손을 뗄 때 오는 클릭은 버린다
+    if (e.pointerType === 'touch' && selc && !selc.on) lp.current = setTimeout(() => { selc.enter(t.id); lpFired.current = true; try { navigator.vibrate?.(20); } catch {} }, 550);
   };
+  const lpFired = useRef(false);
   const hintStop = () => { if (hintTimer.current) { clearTimeout(hintTimer.current); hintTimer.current = null; } if (lp.current) { clearTimeout(lp.current); lp.current = null; } };
   const right = nextStatusOnCheck(t, user.role);
   const swipe = async (to: TaskStatus) => {
@@ -864,6 +871,8 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
       )}
       <div tabIndex={0} data-row={t.id} data-task-id={t.id} {...rowOpen}
         onPointerDown={hintStart} onPointerUp={hintStop} onPointerCancel={hintStop} onPointerLeave={hintStop}
+        onClickCapture={(e) => { if (lpFired.current) { lpFired.current = false; e.preventDefault(); e.stopPropagation(); } }}
+        onContextMenu={(e) => { if (lpFired.current || selc?.on) e.preventDefault(); }}
         style={dx ? { transform: `translateX(${dx}px)` } : undefined}
         onTouchStart={(e) => { if (!swipeOn) return; start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, lock: null, w: (e.currentTarget as HTMLElement).offsetWidth }; }}
         onTouchMove={(e) => {
@@ -1280,9 +1289,11 @@ export function useSwipeSetting() {
   useEffect(() => { try { setOn(localStorage.getItem('wos_swipe_done') === '1'); } catch {} }, []);
   return on;
 }
-function SwipeHint() {
+function SwipeHint({ sortable }: { sortable: boolean }) {
   const on = useSwipeSetting();
-  return <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">{on ? '행을 오른쪽 끝까지 밀면 완료 · 꾹 누르면 순서 바꾸기' : '꾹 누르면 순서 바꾸기 · ⇅ 버튼으로도 이동'}</p>;
+  // V14 34번: 순서 바꾸기 안내는 "직접 순서"일 때만(⇅ 로 이동). 마감일순(기본)에서는 길게 누르면 선택
+  const text = sortable ? (on ? '행을 오른쪽 끝까지 밀면 완료 · ⇅ 로 순서 바꾸기' : '⇅ 버튼으로 순서 바꾸기 · 꾹 누르면 선택') : on ? '행을 오른쪽 끝까지 밀면 완료 · 꾹 누르면 선택' : null;
+  return text ? <p className="border-b border-line bg-slate-50 px-3 py-1 text-[11px] text-ink-3 sm:hidden">{text}</p> : null;
 }
 
 /** V6 6번 엑셀 내려받기: 화면 필터 그대로 + 기간(마감일·완료일·생성일 기준) */

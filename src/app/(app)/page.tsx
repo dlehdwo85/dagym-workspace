@@ -122,7 +122,8 @@ function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: { personal: strin
     <li className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50" data-week-item={r.tag} {...(r.task ? { 'data-week-task': r.task.id } : {})}>
       <span className="w-10 shrink-0 text-xs tabular-nums text-ink-2">{r.time || '종일'}</span>
       {r.task && r.tag !== '일정·업무' ? (
-        <button type="button" onClick={() => onDone(r.task)} aria-label={`${r.title} 완료`} className={cx('flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px]', done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 hover:border-emerald-500')}>{done && <Check className="size-3" strokeWidth={3} />}</button>
+        // V14 33번: 이번 주 목록의 업무 동그라미는 표시만(누르면 실수로 완료) — 제목을 누르면 상세
+        <span aria-hidden className={cx('flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px]', done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300')}>{done && <Check className="size-3" strokeWidth={3} />}</span>
       ) : <span className="size-2.5 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden />}
       <Link href={r.href} className={cx('min-w-0 flex-1 truncate font-medium hover:underline', done && 'text-ink-3 line-through')}>{r.title}</Link>
       <span className="shrink-0 rounded-full bg-slate-100 px-1.5 text-[10px] font-medium text-ink-2">{r.tag}</span>
