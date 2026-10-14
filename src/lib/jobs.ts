@@ -5,6 +5,7 @@ import { dispatchPending } from './push';
 import { spawnNextRecurrence } from './tasks';
 import { nextDate, occurrences } from './recurrence';
 import { addDays, todaySeoul } from './time';
+import { STATUS_LABEL, type TaskStatus } from './types';
 import { logError } from './log';
 import { googleConfigured } from './google/client';
 import { syncAllDue } from './google/sync';
@@ -17,7 +18,7 @@ async function dueNotifications() {
   const soon = await sql<{ id: string; title: string; assignee_id: string; due_date: string; due_time: string | null }[]>`
     select t.id, t.title, t.assignee_id, t.due_date, to_char(t.due_time,'HH24:MI') due_time
     from tasks t join users u on u.id = t.assignee_id left join user_settings s on s.user_id = u.id
-    where t.deleted_at is null and t.status not in ('done') and u.status = 'active' and t.due_date is not null
+    where t.deleted_at is null and t.status not in ('done','on_hold') and u.status = 'active' and t.due_date is not null
       and ((t.due_date + coalesce(t.due_time, time '23:59')) at time zone 'Asia/Seoul') between now() and now() + make_interval(hours => coalesce(s.due_soon_hours, 24))`;
   let n = 0;
   for (const t of soon) {
@@ -63,6 +64,35 @@ async function dueNotifications() {
     n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `${left} 마감: ${t.title}`,
       body: `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
       dedupeKey: `due_rem:${t.id}:${t.due_date}:${t.due_time ?? ''}:${t.m}` })).length;
+  }
+  // V13 6번: 같은 알림을 지시자에게도 (담당자 이름·상태로 구분, 지시자 = 담당자면 생략, 일괄 업무는 묶음 1건)
+  const kinds = [
+    ...soon.map((t) => ({ id: t.id, kind: 'soon', label: '마감 임박', when: `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, key: `${t.due_date}:${t.due_time ?? ''}` })),
+    ...dueToday.map((t) => ({ id: t.id, kind: 'today', label: '오늘 마감', when: t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지', key: today })),
+    ...hourLeft.map((t) => { const left = t.m >= 1440 ? `${Math.round(t.m / 1440)}일 뒤` : t.m >= 60 ? `${Math.round(t.m / 60)}시간 뒤` : t.m > 0 ? `${t.m}분 뒤` : '지금';
+      return { id: t.id, kind: `rem${t.m}`, label: `${left} 마감`, when: `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), key: `${t.due_date}:${t.due_time ?? ''}` }; }),
+  ];
+  if (kinds.length) {
+    const info = await sql<{ id: string; title: string; status: TaskStatus; requested_by: string; batch_id: string | null; assignee_name: string }[]>`
+      select t.id, t.title, t.status, t.requested_by, t.batch_id, a.name assignee_name from tasks t
+        join users a on a.id = t.assignee_id join users r on r.id = t.requested_by left join user_settings rs on rs.user_id = r.id
+      where t.id = any(${[...new Set(kinds.map((k) => k.id))]}::uuid[]) and t.requested_by is not null and t.requested_by <> t.assignee_id
+        and r.status = 'active' and coalesce(rs.requester_due_alerts, true) and t.status not in ('done','on_hold')`;
+    type Info = (typeof info)[number];
+    const groups = new Map<string, { k: (typeof kinds)[number]; ts: Info[] }>();
+    for (const k of kinds) {
+      const t = info.find((x) => x.id === k.id); if (!t) continue;
+      const g = `${t.requested_by}|${t.batch_id ?? t.id}|${k.kind}|${k.key}`;
+      const cur = groups.get(g) ?? { k, ts: [] }; if (!cur.ts.some((x) => x.id === t.id)) cur.ts.push(t); groups.set(g, cur);
+    }
+    for (const [g, { k, ts }] of groups) {
+      const t = ts[0];
+      const who = ts.length > 1 ? `${t.assignee_name} 외 ${ts.length - 1}명` : t.assignee_name;
+      const states = ts.length > 1 ? Object.entries(ts.reduce((a, x) => ({ ...a, [STATUS_LABEL[x.status]]: (a[STATUS_LABEL[x.status]] ?? 0) + 1 }), {} as Record<string, number>)).map(([s, c]) => `${s} ${c}`).join('·') : STATUS_LABEL[t.status];
+      n += (await notify(sql, { userIds: [t.requested_by], type: 'due_soon', title: `[지시] ${k.label}: ${t.title}`,
+        body: `담당 ${who} · ${states} · ${k.when}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
+        dedupeKey: `req_${g.split('|').slice(1).join(':')}` })).length;
+    }
   }
   return { dueSoon: soon.length, overdue: over.length, dueToday: dueToday.length, dueHour: hourLeft.length, created: n };
 }

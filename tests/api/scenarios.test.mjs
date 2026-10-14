@@ -733,9 +733,9 @@ describe('알림: 서버 정기 실행·중복 방지·푸시 발송·실패 기
     assert.equal(r, 1, '지시자(만든 사람)에게도 하루 1번');
     const todayTask = (await ctx.owner.ok('POST', '/api/tasks', { title: '오늘 마감 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today })).id;
     await tick(); await tick();
-    const [{ dt }] = await sql`select count(*)::int dt from notifications where entity_id = ${todayTask} and title like '오늘 마감:%'`;
+    const [{ dt }] = await sql`select count(*)::int dt from notifications where entity_id = ${todayTask} and title like '오늘 마감:%' and user_id = ${ctx.staffA.id}`;
     assert.equal(dt, 1, '오늘 마감 알림 하루 1번');
-    const [{ s }] = await sql`select count(*)::int s from notifications where entity_id = ${soon} and type = 'due_soon'`;
+    const [{ s }] = await sql`select count(*)::int s from notifications where entity_id = ${soon} and type = 'due_soon' and user_id = ${ctx.staffA.id}`;
     assert.equal(s, 1);
     const [run] = await sql`select status, trigger from job_runs where job = 'tick' order by id desc limit 1`;
     assert.equal(run.status, 'ok');
@@ -2074,5 +2074,47 @@ describe('V13 자료실 자동 정리·중복·폴더 권한 (가짜 Anthropic)'
     assert.equal((await ctx.managerA.client.req('DELETE', `/api/library/${auto}`)).status, 403);
     assert.ok((await sql`select 1 from audit_logs where action = 'library_folder_perm.set'`).length);
     await ctx.owner.ok('PUT', '/api/library/folder-perms', { folder: '인사', role: 'site_manager', level: null });
+  });
+});
+
+describe('V13 6번 마감 알림을 지시자에게도', () => {
+  const notes = (uid, id) => sql`select title, body, link from notifications where user_id = ${uid} and entity_id = ${id} and type = 'due_soon' order by id`;
+  test('지시자에게 담당자 이름·상태와 함께, 반복 실행해도 1번 · 지시자 = 담당자면 1건 · 완료·보류는 안 보냄', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-6 오늘 마감', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, dueDate: today })).id;
+    const self = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-6 내 업무', orgUnitId: ctx.siteA, assigneeId: ctx.managerA.id, requestedById: ctx.managerA.id, dueDate: today })).id;
+    const held = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-6 보류', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, dueDate: today })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${held}`, { status: 'on_hold' });
+    await tick(); await tick();
+    const mine = await notes(ctx.managerA.id, t);
+    assert.equal(mine.filter((n) => n.title === '[지시] 오늘 마감: V13-6 오늘 마감').length, 1, '하루 1번');
+    assert.match(mine[0].body, /담당 이직원 · 시작 전|담당 이직원 · /);
+    assert.ok((await notes(ctx.staffA.id, t)).some((n) => n.title === '오늘 마감: V13-6 오늘 마감'), '담당자는 그대로');
+    const s = await notes(ctx.managerA.id, self);
+    assert.ok(s.length >= 1 && !s.some((n) => n.title.startsWith('[지시]')), '지시자 = 담당자면 담당자 알림만(중복 없음)');
+    assert.equal(s.filter((n) => n.title.startsWith('오늘 마감')).length, 1);
+    assert.equal((await notes(ctx.managerA.id, held)).length, 0, '보류는 안 보냄');
+  });
+  test('일괄 업무는 지시자에게 묶음 1건, 설정을 끄면 안 보냄', async () => {
+    const r = await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-6 일괄', orgUnitId: ctx.siteA, assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: today });
+    const ids = (r.ids ?? r.tasks?.map((x) => x.id)) ?? [r.id];
+    await tick();
+    const all = await sql`select title, body from notifications where user_id = ${ctx.ownerId} and type = 'due_soon' and title = '[지시] 오늘 마감: V13-6 일괄'`;
+    assert.equal(all.length, 1, `묶음 1건 (업무 ${ids.length}개)`); assert.match(all[0].body, /외 1명/);
+    // 끄기
+    const pre = await ctx.staffA.client.ok('GET', '/api/notifications/prefs');
+    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...pre.settings, requesterDueAlerts: false } });
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/notifications/prefs')).settings.requesterDueAlerts, false);
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-6 끔', orgUnitId: ctx.siteA, assigneeId: ctx.managerA.id, requestedById: ctx.staffA.id, dueDate: today })).id;
+    await tick();
+    assert.equal((await notes(ctx.staffA.id, t)).length, 0, '설정 끄면 지시자 알림 없음');
+    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...pre.settings, requesterDueAlerts: true } });
+  });
+  test('휴대폰 예약 알림 목록에 내가 지시한 업무 포함', async () => {
+    const tomorrow = addDays(today, 1);
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-6 내일', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, dueDate: tomorrow, dueTime: '15:00' })).id;
+    const { reminders } = await ctx.managerA.client.ok('GET', '/api/reminders/upcoming');
+    const mine = reminders.filter((x) => x.link === `/tasks/${t}`);
+    assert.ok(mine.some((x) => x.title === '[지시] 오늘 마감: V13-6 내일' && x.body === '담당 이직원'));
+    assert.ok(mine.some((x) => x.title.startsWith('[지시] 1시간 뒤 마감')));
   });
 });

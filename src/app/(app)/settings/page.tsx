@@ -65,6 +65,10 @@ export default function Settings() {
               {[[10, '10분 전'], [30, '30분 전'], [60, '1시간 전'], [120, '2시간 전'], [1440, '하루 전']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </Field>
+          {/* V13 6번 내가 지시한 업무도 마감 알림 */}
+          <Field label="내가 지시한 업무의 마감 알림">
+            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.requesterDueAlerts ?? true} onChange={(e) => setS({ ...s, requesterDueAlerts: e.target.checked })} aria-label="내가 지시한 업무의 마감 알림" data-testid="requester-due-alerts" />받기 (담당자 이름·상태 표시)</label>
+          </Field>
           {/* V8 1번 아침 브리핑 */}
           <Field label="아침 브리핑 (오늘 할 일·일정 요약 알림)">
             <span className="flex flex-wrap items-center gap-2" data-testid="briefing-settings">

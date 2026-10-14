@@ -28,11 +28,11 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
   const now = DateTime.now().setZone(TZ);
   const until = now.plus({ days });
   const today = todaySeoul();
-  const [s] = await sql<{ ev: number; task: number; soon: number; btime: string; bon: boolean; bweekend: boolean }[]>`
-    select coalesce(event_reminder_minutes, 10) ev, coalesce(task_reminder_minutes, 60) task, coalesce(due_soon_hours, 24) soon,
+  const [s] = await sql<{ ev: number; task: number; soon: number; btime: string; bon: boolean; bweekend: boolean; req: boolean }[]>`
+    select coalesce(requester_due_alerts, true) req, coalesce(event_reminder_minutes, 10) ev, coalesce(task_reminder_minutes, 60) task, coalesce(due_soon_hours, 24) soon,
       to_char(coalesce(briefing_time, time '08:30'), 'HH24:MI') btime, coalesce(briefing_enabled, true) bon, coalesce(briefing_weekend, false) bweekend
     from user_settings where user_id = ${u.id}`;
-  const st = s ?? { ev: 10, task: 60, soon: 24, btime: '08:30', bon: true, bweekend: false };
+  const st = s ?? { ev: 10, task: 60, soon: 24, btime: '08:30', bon: true, bweekend: false, req: true };
   const out: Upcoming[] = [];
   const push = (key: string, at: DateTime, title: string, body: string, link: string) => {
     if (at <= now || at > until) return;
@@ -79,6 +79,26 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     if (st.soon > 0) push(`soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, kst(t.due_date, t.due_time ?? '23:59').minus({ hours: st.soon }), `마감 임박: ${t.title}`, `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, `/tasks/${t.id}`);
   }
 
+  // V13 6번: 내가 지시한 업무(담당자가 다른 사람) — 서버 알림과 같은 키(묶음 업무는 묶음 1건)
+  if (st.req) {
+    const mine = await sql<{ id: string; title: string; due_date: string; due_time: string | null; reminder_minutes: number[] | null; batch_id: string | null; assignee_name: string; atask: number | null }[]>`
+      select t.id, t.title, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time, t.reminder_minutes, t.batch_id, a.name assignee_name, s.task_reminder_minutes atask
+      from tasks t join users a on a.id = t.assignee_id left join user_settings s on s.user_id = t.assignee_id
+      where t.deleted_at is null and t.requested_by = ${u.id} and t.assignee_id <> ${u.id} and t.status not in ('done','on_hold')
+        and t.due_date between ${today} and ${addDays(today, days + 1)}`;
+    const byGroup = new Map<string, (typeof mine)[number][]>();
+    for (const t of mine) { const g = t.batch_id ?? t.id; byGroup.set(g, [...(byGroup.get(g) ?? []), t]); }
+    for (const [g, ts] of byGroup) {
+      const t = ts[0];
+      const who = ts.length > 1 ? `${t.assignee_name} 외 ${ts.length - 1}명` : t.assignee_name;
+      const link = `/tasks/${t.id}`;
+      const due = kst(t.due_date, t.due_time ?? '09:00');
+      for (const m of t.reminder_minutes ?? (t.due_time ? [t.atask ?? 60] : []))
+        push(`req:${g}:rem${m}:${t.due_date}:${t.due_time ?? ''}`, due.minus({ minutes: m }), `[지시] ${leftLabel(m)} 마감: ${t.title}`, `담당 ${who}`, link);
+      push(`req:${g}:today:${t.due_date}`, kst(t.due_date, '09:00'), `[지시] 오늘 마감: ${t.title}`, `담당 ${who}`, link);
+    }
+  }
+
   // 아침 브리핑 (내용은 열어서 확인 — 미리 예약하므로 숫자 대신 안내)
   if (st.bon) {
     const hol = new Set((await sql<{ d: string }[]>`select to_char(date,'YYYY-MM-DD') d from holidays where date between ${today} and ${addDays(today, days)}`).map((h) => h.d));
@@ -94,7 +114,8 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
 
 /** 바뀐 일정·업무의 미리 알림을 받는 사람 (조용한 재예약 메시지 대상) */
 export async function affectedByTask(taskId: string) {
-  return (await db()<{ id: string }[]>`select assignee_id as id from tasks where id = ${taskId} and assignee_id is not null`).map((r) => r.id);
+  return (await db()<{ id: string }[]>`select assignee_id as id from tasks where id = ${taskId} and assignee_id is not null
+    union select requested_by from tasks where id = ${taskId} and requested_by is not null`).map((r) => r.id);
 }
 export async function affectedByEvent(eventId: string) {
   return (await db()<{ id: string }[]>`
