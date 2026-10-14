@@ -17,7 +17,7 @@ export function MessengerDock({ aiOpen }: { aiOpen: boolean }) {
   const [room, setRoom] = useState<Room | null>(null);
   const unread = useApi<{ unread: number }>('/api/chat/unread');
   useEffect(() => { const t = setInterval(() => unread.reload(), 30000); return () => clearInterval(t); }, [unread]);
-  if (path.startsWith('/messages')) return null;
+  if (path.startsWith('/messages') || path.startsWith('/assistant')) return null; // 메시지·AI 비서 화면은 아래 오른쪽에 보내기 버튼이 있어 겹치지 않게
   const n = unread.data?.unread ?? 0;
   return (
     <>

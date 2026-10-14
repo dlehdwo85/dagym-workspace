@@ -204,7 +204,8 @@ export default function Dashboard() {
       ...(tasksByDay.get(d) ?? []).filter((t) => !linked.has(t.id)).map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id,
         tag: '업무', href: `/tasks/${t.id}`, task: t })),
     ];
-    return [d, items.sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'))] as [string, WeekItem[]];
+    // V14 20번(대표 결정): 완료된 업무·일정은 이번 주 목록에서 숨김
+    return [d, items.filter((x) => x.task?.status !== 'done').sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'))] as [string, WeekItem[]];
   }));
   const holName = (d: string) => hol.data?.holidays.find((h) => h.date === d)?.name ?? null;
   const weekCount = [...weekRows.values()].reduce((n, x) => n + x.length, 0);

@@ -67,6 +67,9 @@ export default function CalendarPage() {
   const cals = useApi<{ calendars: any[] }>('/api/calendars');
   const [hidden, setHidden] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('wos_cal_hidden') ?? '[]'); } catch { return []; } });
   const [showTasks, setShowTasks] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_tasks') !== '0'; } catch { return true; } });
+  // V14 20번(대표 결정): 완료된 업무·일정은 기본으로 숨기고 "완료 보기"로만 (이 기기 기억)
+  const [showDone, setShowDone] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_done') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('wos_cal_done', showDone ? '1' : '0'); } catch {} }, [showDone]);
   const [sidePanel, setSidePanel] = useState<boolean>(() => { try { const v = localStorage.getItem('wos_cal_unscheduled'); return v === null ? typeof window !== 'undefined' && window.innerWidth >= 1440 : v === '1'; } catch { return false; } });
   const [range, setRange] = useState<{ from: string; to: string; start: Date; view: string } | null>(null);
   const [events, setEvents] = useState<any[]>([]);
@@ -152,7 +155,7 @@ export default function CalendarPage() {
   const fcEvents = useMemo(() => [
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
-    ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e)).map((e) => ({
+    ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e) && (showDone || e.linkedTask?.status !== 'done')).map((e) => ({
       id: `${e.id}|${e.originalStart ?? ''}`, title: `${e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? `${initials(e.ownerName ?? '')} · ` : ''}${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}`,
       classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(e.linkedTask?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
@@ -161,7 +164,7 @@ export default function CalendarPage() {
       extendedProps: { type: 'event', ev: e }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
-    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id)).map((t) => ({
+    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id)).map((t) => ({
       // V7 4번: 일정과 같은 모양 — 앞에 ✓ 만 다름, 다른 사람 업무는 머리글자
       id: `task|${t.id}`, title: `${t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? `${initials(t.assignee_name)} · ` : ''}${t.title}`,
       // V14 13번: 시간 있는 업무는 마감 직전 1시간 블록(한 칸 높이) — 얇게 찌그러지지 않게
@@ -169,7 +172,7 @@ export default function CalendarPage() {
       allDay: !t.due_time, backgroundColor: isPersonalTask(t) ? calColors.personal : calColors.company, borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#ef4444' : 'transparent',
       textColor: '#ffffff', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t }, durationEditable: false,
     })) : []),
-  ], [events, tasks, hidden, showTasks, hol.data, who, calColors.personal, calColors.company]); // eslint-disable-line react-hooks/exhaustive-deps
+  ], [events, tasks, hidden, showTasks, showDone, hol.data, who, calColors.personal, calColors.company]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function completeTask(t: any) {
     const to = t.status === 'done' ? 'in_progress' : t.status === 'review' ? 'done' : t.approval_line_id || (t.approval_required && user.role === 'staff') ? 'review' : 'done';
@@ -278,6 +281,12 @@ export default function CalendarPage() {
                   <span className="flex items-center gap-1"><CircleCheck className="size-3.5 text-indigo-600" />업무 마감</span>
                 </label>
               </li>
+              <li>
+                <label className="flex cursor-pointer items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50">
+                  <input type="checkbox" className="size-4 rounded accent-emerald-600" checked={showDone} onChange={() => setShowDone(!showDone)} aria-label="완료된 업무·일정 보기" />
+                  <span className="flex items-center gap-1"><Check className="size-3.5 text-emerald-600" />완료 보기</span>
+                </label>
+              </li>
             </ul>
           </div>
         </aside>
@@ -299,6 +308,7 @@ export default function CalendarPage() {
               </button>
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-indigo-300 text-indigo-700' : 'border-line text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무 마감</button>
+            <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-emerald-400 text-emerald-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
             <button onClick={() => setColorDlg(true)} className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
           </div>
           {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}

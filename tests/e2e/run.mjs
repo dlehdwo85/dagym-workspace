@@ -1569,7 +1569,7 @@ await step('V12: PC 상세 패널 — 다른 업무 클릭 시 교체·바깥/Es
 
 await step('V12-8: 업무 등록 "📎 자료로 채우기" → 제목·설명·체크리스트 채움 → 저장하면 자료 첨부, AI 비서에 사진 첨부 → 담당자별 일괄 제안 미리보기', async () => {
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-  const q = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: items }) });
+  const q = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: items }) }); // 앞 단계에서 남은 가짜 AI 응답을 비우고 넣는다
   await q([{ content: [{ type: 'text', text: JSON.stringify({ title: 'E2E 촬영 자료 수집', description: '요청서 표 기준', checklist: ['외관', '내부', '기구'], dueDate: addDays(today, 4), dueTime: '14:00' }) }], stop_reason: 'end_turn' }]);
   await owner.goto(BASE + '/tasks');
   await owner.getByTestId('create-menu').click();
@@ -1588,6 +1588,7 @@ await step('V12-8: 업무 등록 "📎 자료로 채우기" → 제목·설명·
   // AI 비서에 사진 첨부 → 일괄 제안 미리보기
   await owner.goto(BASE + '/assistant');
   await owner.getByText('이렇게 말해 보세요').waitFor(); // 화면 준비(상태 불러옴) 뒤에 파일 선택
+  await owner.waitForLoadState('networkidle');
   await owner.getByTestId('ai-file-input').setInputFiles([{ name: 'E2E 표.png', mimeType: 'image/png', buffer: png }]);
   await owner.getByTestId('ai-files').getByText('E2E 표.png').waitFor();
   await q([{ content: [{ type: 'tool_use', id: 'e8', name: 'propose_create_tasks', input: { title: 'E2E 지점 자료', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: addDays(today, 5), checklist: ['가', '나'] } }], stop_reason: 'tool_use' },
@@ -1688,7 +1689,9 @@ await step('V14 2·6번: AI 비서 대화가 남아 다시 열면 이어짐, 직
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: '이번 주 마감은 2건입니다.' }], stop_reason: 'end_turn' }] }) });
   await owner.goto(BASE + '/assistant');
   await owner.getByTestId('ai-notice').getByText(/관리자가 사용 내역을 볼 수 있습니다/).waitFor();
+  await owner.waitForLoadState('networkidle'); // 화면 준비(하이드레이션) 전에 입력하면 글자가 사라진다
   await owner.getByLabel('AI 에게 요청').fill('이번 주 내 마감 업무 정리해줘');
+  assert.equal(await owner.getByLabel('AI 에게 요청').inputValue(), '이번 주 내 마감 업무 정리해줘');
   await owner.getByLabel('AI 에게 요청').press('Enter');
   await owner.getByTestId('ai-chat').getByText('이번 주 마감은 2건입니다.').waitFor();
   await owner.waitForURL(/thread=/);

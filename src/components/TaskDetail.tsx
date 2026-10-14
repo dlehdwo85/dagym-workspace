@@ -219,11 +219,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     try { await api(`/api/tasks/${id}/fields/${fid}`, { method: 'PUT', body: { value } }); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); }
   }
 
-  const primary = t.status === 'done' ? null
+  // V14 20번: 상태는 담당자(없으면 만든 사람)만 — 지시자는 검토 요청 승인·반려와 완료 해지만
+  const statusOwner = (t.assignee_id ?? t.created_by) === user.id;
+  const isRequester = !!t.requested_by && t.requested_by === user.id;
+  const primary0 = t.status === 'done' ? null
     : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : t.requested_by === user.id ? { label: '최종 완료 확인', run: () => patch({ status: 'done' }, '최종 완료 확인했습니다') } : null)
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
     : t.approval_required && !perms.approve ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') }
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
+  const primary = primary0 && (statusOwner || (t.status === 'review' && isRequester)) ? primary0 : null;
 
   // V14 19번 ④: 휴대폰은 댓글 입력줄을 화면 아래에 고정(📎·📷) — 변형(transform)된 부모 영향 없게 body 로 띄운다
   const commentFormEl = (
@@ -319,11 +323,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           )}
           <div className="mt-3 flex flex-wrap items-center gap-1.5" data-testid="task-actions">
             <StatusChip status={t.status} onChange={(v) => patch({ status: v })} />
-            {t.status !== 'done' && t.status !== 'review' && t.approval_required && !perms.approve && !t.approval_line_id && primary?.label !== '완료 → 검토 요청' && (
+            {statusOwner && t.status !== 'done' && t.status !== 'review' && t.approval_required && !perms.approve && !t.approval_line_id && primary?.label !== '완료 → 검토 요청' && (
               <Button size="sm" onClick={() => patch({ status: 'review' }, '검토를 요청했습니다')}>완료 → 검토 요청</Button>
             )}
             {t.status === 'review' && perms.approve && !t.approval_line_id && <Button size="sm" variant="secondary" onClick={reject}>보완 요청</Button>}
-            {t.status === 'done' && <Button size="sm" variant="ghost" onClick={() => patch({ status: 'in_progress' })}><RotateCcw />다시 진행</Button>}
+
           </div>
           {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="task-summary">
@@ -338,6 +342,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <span className="tabular-nums">{Math.round((progDone / progTotal) * 100)}% · {progDone}/{progTotal}</span>
             </div>
           )}
+          {/* V14 20번: 완료 업무는 "다시 진행"을 크게 (권한 없으면 서버가 이유를 알려 줌) */}
+ {t.status !== 'done' && t.status !== 'review' && !primary && (
+            <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">{t.assignee_name ? `담당자 ${t.assignee_name}님이 진행합니다` : `만든 사람 ${t.created_by_name}님이 진행합니다`}</p>
+          )}
+          {t.status === 'done' && !(statusOwner || isRequester) && <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">완료됨 — 다시 진행은 담당자·지시자만 할 수 있습니다</p>}
+          {t.status === 'done' && (statusOwner || isRequester) && <div className="mt-3"><Button variant="secondary" className="h-11 w-full sm:w-auto sm:px-6" onClick={() => patch({ status: 'in_progress' }, '다시 진행 중으로 바꿨습니다')} data-testid="reopen"><RotateCcw />다시 진행</Button></div>}
           {/* V14 19번 ②: 상태별 다음 행동 — 큰 버튼 하나 */}
           {primary && (
             <div className="mt-3 flex flex-wrap gap-2">

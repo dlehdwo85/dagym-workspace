@@ -205,6 +205,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const teamList = useApi<{ teams: { id: string; name: string }[] }>('/api/teams'); // V14 8번 팀 필터
   // V14 12번 다중 선택
   const [selOn, setSelOn] = useState(false);
+  const [selTip, setSelTip] = useState(false);
+  useEffect(() => { try { setSelTip(localStorage.getItem('wos_sel_tip') !== '1'); } catch {} }, []);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const lastPick = useRef<string | null>(null);
   const selCtx = useMemo<Sel>(() => ({
@@ -294,7 +296,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             </>
           )}
         </div>
-        {mode === 'list' && !projectId && <Button variant={selOn ? 'primary' : 'secondary'} onClick={() => (selOn ? exitSel() : setSelOn(true))} aria-pressed={selOn} data-testid="select-mode">{selOn ? '선택 끝내기' : '선택'}</Button>}
+        {(mode === 'list' || mode === 'board') && <Button variant={selOn ? 'primary' : 'secondary'} onClick={() => (selOn ? exitSel() : setSelOn(true))} aria-pressed={selOn} data-testid="select-mode">{selOn ? '선택 끝내기' : '선택'}</Button>}
         <Button variant="secondary" onClick={() => setFilterOpen(!filterOpen)} aria-expanded={filterOpen} data-testid="filter-toggle">
           <SlidersHorizontal />필터{chips.length > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] leading-4 text-white">{chips.length}</span>}
           <ChevronDown className={cx('!size-3.5 transition-transform', filterOpen && 'rotate-180')} />
@@ -360,12 +362,11 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         <>
           {mode === 'list' && projectId && adding && <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask autoFocus projectId={projectId} onEscape={() => setAdding(false)} /></div>}
           {selOn && <BulkBar ids={[...sel]} tasks={tasks} onClear={exitSel} onDone={() => { setSel(new Set()); reload(); broadcastRefresh(); }} />}
-          <SelectCtx.Provider value={mode === 'list' && !projectId ? selCtx : null}>
+          <SelectCtx.Provider value={mode === 'list' || mode === 'board' ? selCtx : null}>
           {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
             : <GroupedTasks tasks={tasks} group={curView === 'done' ? 'month' : group} view={curView} keepIds={keepIds} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
                 people={people} sortBy={sortBy} onSort={pickSort} onReorder={reorder}
                 top={adding ? <InlineAddTask key={addKey} autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
-          </SelectCtx.Provider>
           {mode === 'board' && projectId && (
             <div className="flex items-center gap-2 text-sm text-ink-2">열 기준
               <select className="h-8 rounded-input border border-line bg-white px-2 text-sm" value={boardBy} onChange={(e) => setBoardBy(e.target.value as any)} aria-label="보드 열 기준">
@@ -374,6 +375,15 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             </div>
           )}
           {mode === 'board' && (boardBy === 'section' && projectId ? <SectionBoard sections={sections} tasks={tasks} onPatch={patch} /> : <BoardView tasks={tasks} onPatch={patch} />)}
+          </SelectCtx.Provider>
+          {/* V14 20번: 처음 쓰는 사람에게 "선택" 안내 (목록 아래 — 늦게 떠도 행이 밀리지 않게) */}
+          {!selOn && selTip && (mode === 'list' || mode === 'board') && (
+            <p className="mt-2 flex items-center gap-2 rounded-input border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800" data-testid="select-tip">
+              <span className="flex-1">여러 업무를 한 번에 옮기거나 지우려면 위의 <b>선택</b>을 누르세요. PC 는 행에 마우스를 올리면 체크칸, 휴대폰은 행을 길게 누르면 선택됩니다.</span>
+              <button className="shrink-0 text-xs underline" onClick={() => { setSelTip(false); try { localStorage.setItem('wos_sel_tip', '1'); } catch {} }}>알겠어요</button>
+            </p>
+          )}
+
           {mode === 'calendar' && <CalendarView tasks={tasks} onPatch={patch} />}
           {mode === 'timeline' && <TimelineView tasks={tasks} onPatch={patch} />}
         </>
@@ -423,9 +433,10 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
 export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
   if (to === t.status) return true;
   if ((t.assignee_id ?? t.created_by) === uid) return true;
+  if (t.status === 'done' && to === 'in_progress' && !!t.requested_by && t.requested_by === uid) return true; // V14 20번 지시자 완료 해지
   return t.status === 'review' && (to === 'done' || to === 'in_progress') && !!t.requested_by && t.requested_by === uid;
 }
-const NOT_MINE = '상태는 담당자만 바꿀 수 있어요 (지시자는 검토 요청된 업무의 승인·반려만)';
+const NOT_MINE = '상태는 담당자만 바꿀 수 있어요 (지시자는 검토 요청 승인·반려와 완료 해지만)';
 /** 진행 전 업무는 담당자 확인 여부로 "확인 전"·"확인 완료" */
 export function statusText(t: Task) {
   if (t.status === 'todo' && t.assignee_id) return t.assignee_ack_at ? '확인 완료' : '확인 전';
@@ -445,15 +456,18 @@ function CheckCircle({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => Pr
   const allowed = canSetStatus(t, user.id, to);
   const label = !allowed ? `${t.title} — 담당자만 완료할 수 있습니다` : t.status === 'done' ? `${t.title} 완료 취소` : to === 'review' ? `${t.title} 검토 요청` : t.status === 'review' && t.assignee_id !== user.id ? `${t.title} 승인(완료)` : `${t.title} 완료`;
   return (
+    // V14 20번: 권한이 없으면 눌렀을 때 이유를 알려 준다(비활성 버튼은 클릭이 안 와서 감싸는 칸이 받음)
+    <span className="inline-flex" onClick={allowed ? undefined : () => toast.info(`${t.status === 'done' ? '완료 해지' : '완료'}는 담당자${t.status === 'done' ? '·지시자' : ''}만 할 수 있어요 — ${t.assignee_name ?? '담당자'}에게 요청하세요`)}>
     <button disabled={!allowed} onClick={async () => {
       const before = t.status;
       const ok = await onPatch(t, { status: to });
       if (ok !== false) toast.ok(to === 'done' ? '완료했습니다' : to === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: to, version: t.version + 1 }, { status: before }) });
     }} aria-label={label} title={label} data-testid="check-circle"
-      className={cx('hit group flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+      className={cx('hit group flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors disabled:pointer-events-none disabled:opacity-40',
         t.status === 'done' ? 'border-emerald-500 bg-emerald-500 text-white' : t.status === 'review' ? 'border-amber-400 bg-amber-50 text-amber-500' : 'border-slate-300 text-transparent hover:border-emerald-500 hover:text-emerald-500')}>
       {t.status === 'review' ? <Stamp className="size-3" /> : <CircleCheck className="size-[22px] stroke-[1.8]" style={{ margin: -1.5 }} />}
     </button>
+    </span>
   );
 }
 function TypeIcon({ t }: { t: Task }) {
@@ -866,6 +880,8 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         data-fresh={fresh ? '1' : undefined}
         className={cx('group relative flex min-h-[44px] cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', picked ? 'bg-brand-50' : fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
         {handle}
+        {selc && !selc.on && <input type="checkbox" checked={false} readOnly onClick={(e) => { e.stopPropagation(); selc.enter(t.id); }} aria-label={`${t.title} 선택 시작`} data-testid="row-hover-select"
+          className="absolute left-0.5 top-1/2 hidden size-3.5 -translate-y-1/2 accent-brand-600 opacity-0 group-hover:opacity-100 focus:opacity-100 md:block" />}
         {selc?.on ? <input type="checkbox" className="size-5 shrink-0 accent-brand-600" checked={picked} readOnly onClick={(e) => { e.stopPropagation(); selc.toggle(t.id, e.shiftKey); }} aria-label={`${t.title} 선택`} data-testid="row-select" />
           : <CheckCircle t={t} onPatch={onPatch} />}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
@@ -888,15 +904,20 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
 }
 
 function BoardCard({ t }: { t: Task }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: t.id, data: t });
-  const cardOpen = useRowOpen(t.id, useContext(OpenTaskCtx));
+  const selc = useContext(SelectCtx);
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: t.id, data: t, disabled: !!selc?.on });
+  const cardOpen0 = useRowOpen(t.id, useContext(OpenTaskCtx));
+  // V14 20번: 보드에서도 선택 모드 — 카드를 누르면 선택/해제
+  const cardOpen = selc?.on ? { onClick: (e: React.MouseEvent) => { e.preventDefault(); selc.toggle(t.id, e.shiftKey); } } : cardOpen0;
+  const picked = !!selc?.sel.has(t.id);
   const stripe = t.priority === 'urgent' ? 'before:bg-red-500' : t.priority === 'high' ? 'before:bg-orange-400' : 'before:bg-transparent';
   return (
     <div ref={setNodeRef} {...listeners} {...attributes} {...cardOpen} data-task-id={t.id}
       style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined}
       className={cx('relative cursor-grab touch-none overflow-hidden rounded-input border border-line bg-white p-3 shadow-card transition-shadow before:absolute before:inset-y-0 before:left-0 before:w-[3px] hover:border-slate-300 hover:shadow-pop',
-        stripe, isDragging && 'z-50 rotate-1 cursor-grabbing opacity-90 shadow-pop ring-2 ring-accent-500/40')}>
+        stripe, isDragging && 'z-50 rotate-1 cursor-grabbing opacity-90 shadow-pop ring-2 ring-accent-500/40', picked && 'ring-2 ring-brand-600')}>
       <div className="flex items-start gap-1.5">
+        {selc?.on && <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-brand-600" checked={picked} readOnly aria-label={`${t.title} 선택`} data-testid="card-select" />}
         <TypeIcon t={t} />
         <TaskLink id={t.id} className={cx('line-clamp-2 text-sm font-medium leading-snug text-ink hover:text-accent-600 hover:underline', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
       </div>

@@ -84,3 +84,19 @@ describe('R-15 체크리스트 항목 담당 · 처리 속도', () => {
     assert.ok((await ctx.owner.ok('GET', `/api/tasks/${t2}`)).speed.median_days >= 2.9);
   });
 });
+
+describe('V14 20번 완료 해지', () => {
+  test('담당자·지시자는 완료를 다시 진행으로, 그 외는 403', async () => {
+    const tk = (await ctx.owner.ok('POST', '/api/tasks', { title: '해지 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+    let v = (await ctx.staffA.client.ok('GET', `/api/tasks/${tk}`)).task.version;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${tk}`, { status: 'done', version: v });
+    v = (await ctx.owner.ok('GET', `/api/tasks/${tk}`)).task.version;
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${tk}`, { status: 'in_progress', version: v })).status, 403, '지시자도 담당자도 아니면 불가');
+    await ctx.owner.ok('PATCH', `/api/tasks/${tk}`, { status: 'in_progress', version: v }); // 지시자(만든 사람)
+    assert.equal((await sql`select status from tasks where id = ${tk}`)[0].status, 'in_progress');
+    v = (await ctx.staffA.client.ok('GET', `/api/tasks/${tk}`)).task.version;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${tk}`, { status: 'done', version: v });
+    v = (await ctx.staffA.client.ok('GET', `/api/tasks/${tk}`)).task.version;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${tk}`, { status: 'in_progress', version: v }); // 담당자
+  });
+});

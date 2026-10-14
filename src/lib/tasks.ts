@@ -452,7 +452,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if (i.status && i.status !== cur.status) {
       const owner = cur.assignee_id ?? cur.created_by;
       const reviewByRequester = cur.status === 'review' && (i.status === 'done' || i.status === 'in_progress') && !!cur.requested_by && cur.requested_by === u.id;
-      if (owner !== u.id && !reviewByRequester) {
+      // V14 20번: 지시자는 완료된 업무를 다시 진행으로 돌릴 수 있다(승인 취소·보완 요청)
+      const reopenByRequester = cur.status === 'done' && i.status === 'in_progress' && !!cur.requested_by && cur.requested_by === u.id;
+      if (owner !== u.id && !reviewByRequester && !reopenByRequester) {
         throw forbidden(cur.assignee_id ? '상태는 담당자만 바꿀 수 있어요. 지시자는 검토 요청된 업무를 승인·반려할 수 있습니다.' : '담당자가 없는 업무의 상태는 만든 사람만 바꿀 수 있어요.');
       }
     }
