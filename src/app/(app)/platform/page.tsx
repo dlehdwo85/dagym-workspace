@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Building2, Check, Copy, KeyRound, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { fmtBytes, lim, won } from '@/components/usage';
+import { PlatformPayments } from '@/components/Billing';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const num = (v: string) => (v.trim() === '' ? null : Number(v));
@@ -40,6 +41,7 @@ export default function PlatformPage() {
         </section>
       )}
       <Signups />
+      <PlatformPayments />
       <InquiryLink />
       {/* V12 3번: 문의 접수함 */}
       <section id="support" className="rounded-card border border-line bg-white shadow-card" data-testid="support-inbox">

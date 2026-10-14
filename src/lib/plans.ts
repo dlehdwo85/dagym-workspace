@@ -320,7 +320,7 @@ export async function trialInfo(tenant: string, sql: Sql = db()) {
 
 const roCache = new Map<string, { at: number; ro: boolean }>();
 /** 읽기 전용(체험 끝·미결제)이면 쓰기 요청을 막는다. 보기·내보내기·로그인·요금제 신청·알림 읽음·탈퇴는 허용 */
-const RO_ALLOW = [/^\/api\/auth\//, /^\/api\/account\//, /^\/api\/plan/, /^\/api\/usage/, /^\/api\/push\//, /\/read$/, /^\/api\/notifications/, /^\/api\/export/, /^\/api\/support/, /^\/api\/me\//];
+const RO_ALLOW = [/^\/api\/billing/, /^\/api\/auth\//, /^\/api\/account\//, /^\/api\/plan/, /^\/api\/usage/, /^\/api\/push\//, /\/read$/, /^\/api\/notifications/, /^\/api\/export/, /^\/api\/support/, /^\/api\/me\//];
 export async function assertWritable(u: SessionUser, path: string) {
   const t = tenantOfUser(u);
   if (t === 'default' || t === 'demo' || RO_ALLOW.some((r) => r.test(path))) return;

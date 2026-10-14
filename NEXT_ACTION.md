@@ -215,6 +215,20 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 | 문구 | 랜딩 요금표(개인·팀·비즈니스), "14일 무료 체험" 버튼, 가입 화면, 로그인 링크, 설정의 팀 전환 문구, 약관 요금 조항 |
 | 남은 것 | 결제는 18차(나이스페이 test). 읽기 전용 30일 뒤 데이터 처리 정책은 대표 결정 |
 
+## 18차 나이스페이 결제 — test 모드 구현 (2026-10-14, 클라우드)
+| 항목 | 처리 |
+|---|---|
+| 정기 구독(월) | 사용량·요금제 화면 "결제" 칸에서 카드 등록 → 나이스페이 **비인증 빌키 발급**(`billing_regist`, 카드정보 AES128-ECB·MerchantKey 앞 16자리, SignData = sha256(MID+EdiDate+Moid+Key)) → 빌키는 앱 비밀키로 암호화 저장, **카드번호·비밀번호는 저장하지 않음**(끝 4자리만). "결제하고 구독" = 즉시 첫 달 승인(`billing_approve`) → active·다음 결제일 한 달 뒤 |
+| 연간·팩 | 결제창(goPay, 인증결제) → `/api/billing/nicepay/return` 에서 인증 Signature 검증 → NextAppURL(나이스페이 도메인만)로 승인 → 응답 Signature·금액 검증 → 연간 전환/팩 +1 |
+| 결제통보 | `/api/billing/nicepay/notify` — 규격에 서명이 없어서 ① live 모드는 나이스페이 발신 IP(121.133.126.10·11, 211.33.136.39)만 ② 우리 주문번호·금액·MID 일치할 때만 반영 ③ (TID, 상태) 한 번만 → "OK" |
+| 금액 | VAT 별도 요금 × 1.1. 1인 요금제는 max(최소 3인, 활성 인원) |
+| 실패 | 결제일 실패 → 1·3·5일 뒤 재시도(알림), 첫 실패 7일 뒤 읽기 전용. 카드 바꾸고 다시 결제하면 바로 복구(결제 API 는 읽기 전용에서도 허용) |
+| 해지 | "구독 해지" = 다음 결제일에 종료(그날 결제 없이 읽기 전용), 해지 취소 가능 |
+| 플랫폼 운영 | "결제 내역"(전체 회사), 환불(전체·부분, `cancel_process`, 빌링 결제는 빌링 MID 로) |
+| 환경변수(값은 Vercel 에만) | `NICEPAY_MODE`(test/live) · `NICEPAY_MID` · `NICEPAY_MERCHANT_KEY`(인증결제) · `NICEPAY_BILLING_MID` · `NICEPAY_BILLING_KEY`(빌링) — 없으면 결제 칸에 "아직 열리지 않음" |
+| 확인 수준 | 가짜 나이스페이 서버로 전 과정 시험(아래 TEST_REPORT). **실제 나이스페이 테스트 서버**에는 빌링 승인 요청을 보내 서명·형식이 통과하는 것까지 확인(틀린 서명 → A211 해쉬 검증 실패, 맞는 서명 → "해당 BillKey 가 존재하지 않습니다" — 존재하지 않는 빌키로 시험). **실제 카드로 빌키 발급·승인·결제창·통보는 미확인** — 로컬/대표가 Preview 에 테스트 MID 를 넣고 확인 필요 |
+| 대표 결정·준비 | 판매 명의 = 하이링크(로컬 지시). 실결제 MID·빌링 서비스 계약 여부·결제통보 URL 등록(가맹점관리자 → `https://dagym-workspace.vercel.app/api/billing/nicepay/notify`) |
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

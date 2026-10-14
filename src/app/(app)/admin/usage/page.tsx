@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Gauge, HardDrive, Sparkles, Users } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Meter, fmtBytes, won } from '@/components/usage';
+import { BillingSection } from '@/components/Billing';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const GB = 1024 ** 3;
@@ -43,6 +44,7 @@ export default function UsagePage() {
         <Meter label="사용자" icon={Users} used={usage.users} limit={limits.users} usedLabel={`${usage.users}명${usage.invited ? ` (+초대 중 ${usage.invited})` : ''}`} limitLabel={lim(limits.users, '명')} testid="meter-users" />
       </div>
       {/* V14 4번: 이번 달 AI 사용 — 사람별·기능별, 한도 대비 % */}
+      <BillingSection />
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-usage">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">이번 달 AI 사용</h2>
