@@ -195,7 +195,7 @@ export async function createOrgUnit(actor: SessionUser, i: z.infer<typeof orgUni
       insert into org_units (parent_id, brand_id, type, name, sort, is_demo, tenant) values (${i.parentId ?? null}, ${i.brandId ?? null}, ${i.type}, ${i.name}, ${i.sort ?? 0}, ${!!i.isDemo}, ${tn})
       returning id`;
     await tx`insert into calendars (type, org_unit_id, name, color) values ('org_unit', ${o.id}, ${i.name + ' 일정'},
-      ${i.brandId === 'dagym' ? '#ea580c' : i.brandId === 'hilink' ? '#2563eb' : i.brandId === 'bodylab' ? '#059669' : '#475569'})`;
+      ${i.brandId === 'dagym' ? '#ea580c' : i.brandId === 'hilink' ? '#2563eb' : i.brandId === 'bodylab' ? '#16a34a' : '#475569'})`;
     await audit(tx, actor.id, 'org.create', 'org_unit', o.id, i, ip);
     return { id: o.id };
   });

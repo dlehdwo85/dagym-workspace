@@ -57,7 +57,7 @@ export default function Welcome() {
             <div key={p.n} className={'rounded-card border p-5 ' + (p.hi ? 'border-brand-600 ring-1 ring-brand-600' : 'border-line')}>
               <div className="flex items-center gap-2 font-semibold">{p.n === '개인' ? null : <Users className="size-4" />}{p.n}</div>
               <div className="mt-2 text-2xl font-bold">{p.p}</div><div className="text-sm text-ink-3">{p.s}</div>
-              <ul className="mt-4 space-y-1.5 text-sm">{p.f.map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 text-emerald-600" />{x}</li>)}</ul>
+              <ul className="mt-4 space-y-1.5 text-sm">{p.f.map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 text-green-600" />{x}</li>)}</ul>
             </div>
           ))}
         </div>

@@ -84,11 +84,11 @@ export default function UsagePage() {
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
         <h2 className="text-sm font-semibold">파일 종류별</h2>
         <div className="mt-2 flex h-3 overflow-hidden rounded-full bg-slate-100">
-          {(['photo', 'doc', 'other'] as const).map((k, i) => <div key={k} className={['bg-sky-500', 'bg-emerald-500', 'bg-slate-400'][i]} style={{ width: `${usage.storageBytes ? (usage.byKind[k] / usage.storageBytes) * 100 : 0}%` }} />)}
+          {(['photo', 'doc', 'other'] as const).map((k, i) => <div key={k} className={['bg-sky-500', 'bg-green-500', 'bg-slate-400'][i]} style={{ width: `${usage.storageBytes ? (usage.byKind[k] / usage.storageBytes) * 100 : 0}%` }} />)}
         </div>
         <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-ink-2">
           <span><i className="mr-1 inline-block size-2 rounded-full bg-sky-500" />사진 {fmtBytes(usage.byKind.photo)}</span>
-          <span><i className="mr-1 inline-block size-2 rounded-full bg-emerald-500" />문서 {fmtBytes(usage.byKind.doc)}</span>
+          <span><i className="mr-1 inline-block size-2 rounded-full bg-green-500" />문서 {fmtBytes(usage.byKind.doc)}</span>
           <span><i className="mr-1 inline-block size-2 rounded-full bg-slate-400" />기타 {fmtBytes(usage.byKind.other)}</span>
         </div>
         <h2 className="mt-4 text-sm font-semibold">큰 파일 TOP 20 <span className="font-normal text-ink-3">— 눌러서 정리</span></h2>

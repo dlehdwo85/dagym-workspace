@@ -174,7 +174,7 @@ function TwoFactor() {
       <h2 className="font-semibold">보안</h2>
       <div className="mt-2">
         <b className="font-medium">2단계 인증 (OTP 앱)</b>{' '}
-        {st.data?.enabled ? <span className="text-emerald-700">켜짐 · {fmtDateTime(st.data.enabledAt!)}</span> : <span className="text-ink-2">꺼짐</span>}
+        {st.data?.enabled ? <span className="text-green-700">켜짐 · {fmtDateTime(st.data.enabledAt!)}</span> : <span className="text-ink-2">꺼짐</span>}
         <p className="text-xs text-ink-2">켜면 로그인할 때 비밀번호 다음에 휴대폰 OTP 앱(구글·마이크로소프트 Authenticator 등)의 6자리 코드를 입력합니다.</p>
         {st.data?.enabled ? <Button size="sm" variant="secondary" className="mt-1" onClick={disable}>끄기</Button> : !setup ? <Button size="sm" className="mt-1" onClick={start} data-testid="2fa-start">2단계 인증 설정</Button> : (
           <div className="mt-2 space-y-2 rounded-input bg-slate-50 p-3">
@@ -190,7 +190,7 @@ function TwoFactor() {
         <div className="flex items-center justify-between"><b className="font-medium">로그인한 기기</b><Button size="sm" variant="secondary" onClick={logoutOthers}>다른 기기 모두 로그아웃</Button></div>
         <ul className="mt-1 divide-y divide-line text-xs" data-testid="sessions">
           {ss.data?.sessions.map((x) => (
-            <li key={x.id} className="flex justify-between gap-2 py-1.5"><span className="min-w-0 truncate">{x.client === 'web' ? '웹' : x.client === 'android' ? 'Android 앱' : 'iPhone 앱'} · {(x.user_agent ?? '').replace(/\(.*?\)/g, '').slice(0, 40)}{x.ip ? ` · ${x.ip}` : ''}{x.current && <b className="ml-1 text-emerald-700">지금 이 기기</b>}</span><span className="shrink-0 text-ink-3">{fmtDateTime(x.last_seen_at)}</span></li>
+            <li key={x.id} className="flex justify-between gap-2 py-1.5"><span className="min-w-0 truncate">{x.client === 'web' ? '웹' : x.client === 'android' ? 'Android 앱' : 'iPhone 앱'} · {(x.user_agent ?? '').replace(/\(.*?\)/g, '').slice(0, 40)}{x.ip ? ` · ${x.ip}` : ''}{x.current && <b className="ml-1 text-green-700">지금 이 기기</b>}</span><span className="shrink-0 text-ink-3">{fmtDateTime(x.last_seen_at)}</span></li>
           ))}
         </ul>
       </div>

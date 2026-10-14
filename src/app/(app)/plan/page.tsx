@@ -112,7 +112,7 @@ export default function PlanPage() {
       {todayGaps.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-card border border-line bg-white px-4 py-3 text-sm shadow-card" data-testid="focus-gaps">
           <Sparkles className="size-4 text-amber-500" /><span className="font-medium">오늘 집중 가능한 시간</span>
-          {todayGaps.map((g, i) => <span key={i} className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">{fmtTime(new Date(g.s))}~{fmtTime(new Date(g.e)).replace(/^(오전|오후) /, '')} · {fmtMinutes(Math.round((g.e - g.s) / 60000))}</span>)}
+          {todayGaps.map((g, i) => <span key={i} className="rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700">{fmtTime(new Date(g.s))}~{fmtTime(new Date(g.e)).replace(/^(오전|오후) /, '')} · {fmtMinutes(Math.round((g.e - g.s) / 60000))}</span>)}
         </div>
       )}
       <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
@@ -130,7 +130,7 @@ export default function PlanPage() {
                       <Link href={`/tasks/${t.id}`} className="line-clamp-2 font-medium hover:underline" onMouseDown={(e) => e.stopPropagation()}>{t.title}</Link>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-2">
                         <DueChip due={t.due_date} status={t.status} /><PriorityTag p={t.priority} label={false} />
-                        {t.estimate_minutes ? <span className={cx('inline-flex items-center gap-0.5 tabular-nums', remaining ? 'text-ink-2' : 'text-emerald-600')}><Timer className="size-3.5" />{remaining ? `${fmtMinutes(remaining)} 미배정` : '배정 완료'}</span> : <span className="text-ink-3">예상 시간 없음</span>}
+                        {t.estimate_minutes ? <span className={cx('inline-flex items-center gap-0.5 tabular-nums', remaining ? 'text-ink-2' : 'text-green-600')}><Timer className="size-3.5" />{remaining ? `${fmtMinutes(remaining)} 미배정` : '배정 완료'}</span> : <span className="text-ink-3">예상 시간 없음</span>}
                         {riskIds.has(t.id) && <span className="inline-flex items-center gap-0.5 font-semibold text-red-600"><AlertTriangle className="size-3.5" />마감 위험</span>}
                       </div>
                     </div>

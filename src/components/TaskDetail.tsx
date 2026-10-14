@@ -301,7 +301,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(4.5rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
       {/* 상단 도구 막대 */}
       <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
-        {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-emerald-50 px-2.5 text-sm font-semibold text-emerald-700"><CircleCheck className="size-4" />완료됨</span>}
+        {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-green-50 px-2.5 text-sm font-semibold text-green-700"><CircleCheck className="size-4" />완료됨</span>}
         <span className="flex-1" />
         {/* V13 10번: 업무별 대화방 */}
         <IconButton label="대화방 열기" data-testid="task-chat" onClick={async () => { try { const r = await api('/api/chat/rooms', { body: { kind: 'task', taskId: id } }); router.push(`/messages?room=${r.id}`); } catch (e: any) { toast.error(e.message); } }}><MessageCircle /></IconButton>
@@ -360,12 +360,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <button type="button" onClick={() => editProp('[data-testid="due-picker"]', true)} className="rounded-full hover:opacity-80" title="마감일 바꾸기" data-testid="sum-due"><DdayChip due={t.due_date} time={t.due_time} status={t.status} /></button>
             <button type="button" onClick={() => editProp('select[aria-label="우선순위"]')} className="rounded-full hover:opacity-80" title="우선순위 바꾸기" data-testid="sum-priority"><PriorityTag p={t.priority} /></button>
             {t.project_id && <Link href={`/projects/${t.project_id}`} className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded-full bg-slate-100 px-2 py-0.5 text-ink-2 hover:bg-slate-200" data-testid="summary-project"><FolderKanban className="size-3 shrink-0" /><span className="truncate">{t.project_name ?? '프로젝트'}</span></Link>}
-            {photoNeed > 0 && <span className={cx('rounded-full px-2 py-0.5 font-medium tabular-nums', photoShort ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700')}>사진 {photoHave}/{photoNeed}</span>}
+            {photoNeed > 0 && <span className={cx('rounded-full px-2 py-0.5 font-medium tabular-nums', photoShort ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700')}>사진 {photoHave}/{photoNeed}</span>}
             {data.speed?.median_days != null && t.status !== 'done' && <span className="text-ink-3" data-testid="speed-hint" title="담당자의 최근 90일 완료 업무 기준">예상 처리 ≈ {data.speed.median_days}일</span>}
           </div>
           {progTotal > 0 && (
             <div className="mt-2.5 flex items-center gap-2 text-xs text-ink-2" data-testid="task-progress">
-              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${(progDone / progTotal) * 100}%` }} /></div>
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${(progDone / progTotal) * 100}%` }} /></div>
               <span className="tabular-nums">{Math.round((progDone / progTotal) * 100)}% · {progDone}/{progTotal}</span>
             </div>
           )}
@@ -380,12 +380,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <div className="mt-3 flex flex-wrap gap-2">
               <Button onClick={primary.run} disabled={photoShort && primary.label !== '최종 완료 확인'} data-testid="next-action"
                 title={photoShort ? `증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)` : undefined}
-                className={cx('h-11 flex-1 text-base sm:flex-none sm:px-6', t.status !== 'review' && 'bg-emerald-600 hover:bg-emerald-700')}><CircleCheck />{primary.label}</Button>
+                className={cx('h-11 flex-1 text-base sm:flex-none sm:px-6', t.status !== 'review' && 'bg-green-600 hover:bg-green-700')}><CircleCheck />{primary.label}</Button>
               {(t.status === 'todo' || t.status === 'on_hold') && <Button variant="secondary" className="h-11" onClick={() => patch({ status: 'in_progress' }, '시작했습니다')}>시작하기</Button>}
             </div>
           )}
           {t.status === 'review' && !roundSteps.length && <p className="mt-3 flex items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900"><Hourglass className="size-4 shrink-0" />검토 요청 중 — {fmtDateTime(t.review_requested_at)} · 관리자의 최종 확인을 기다립니다.</p>}
-          {t.status === 'done' && t.approved_by_name && <p className="mt-3 flex items-center gap-2 rounded-input bg-emerald-50 px-3 py-2 text-sm text-emerald-800"><BadgeCheck className="size-4 shrink-0" />{t.approved_by_name}님이 {fmtDateTime(t.approved_at)}에 최종 완료를 확인했습니다.</p>}
+          {t.status === 'done' && t.approved_by_name && <p className="mt-3 flex items-center gap-2 rounded-input bg-green-50 px-3 py-2 text-sm text-green-800"><BadgeCheck className="size-4 shrink-0" />{t.approved_by_name}님이 {fmtDateTime(t.approved_at)}에 최종 완료를 확인했습니다.</p>}
           {photoShort && t.status !== 'done' && <p className="mt-3 flex items-center gap-2 rounded-input bg-sky-50 px-3 py-2 text-sm text-sky-900"><Camera className="size-4 shrink-0" />완료하려면 증빙 사진 {photoNeed}장이 필요합니다 (현재 {photoHave}장). 아래 <b>사진 촬영</b>으로 올려 주세요.</p>}
         </div>
 
@@ -416,7 +416,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {roundSteps.map((a: any, i: number) => (
                 <li key={a.id} className="flex items-center gap-2">
                   <div className={cx('min-w-[120px] rounded-input border px-3 py-2 text-xs',
-                    a.status === 'approved' ? 'border-emerald-200 bg-emerald-50' : a.status === 'rejected' ? 'border-red-200 bg-red-50' : a.status === 'pending' ? 'border-amber-300 bg-amber-50' : 'border-line bg-slate-50')}>
+                    a.status === 'approved' ? 'border-green-200 bg-green-50' : a.status === 'rejected' ? 'border-red-200 bg-red-50' : a.status === 'pending' ? 'border-amber-300 bg-amber-50' : 'border-line bg-slate-50')}>
                     <div className="font-semibold text-ink">{i + 1}. {a.label}</div>
                     <div className="mt-0.5 text-ink-2">{a.status === 'approved' ? `승인 · ${a.decided_by_name}` : a.status === 'rejected' ? `반려 · ${a.decided_by_name}` : a.status === 'pending' ? '결재 대기' : '대기'}</div>
                     {a.comment && <div className="mt-1 text-red-700">“{a.comment}”</div>}
@@ -482,11 +482,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.check} onClick={() => toggleFold('check')} label="체크리스트" />{data.checklist.length > 0 && <span className="text-xs font-medium text-ink-2 tabular-nums">{checkDone}/{data.checklist.length}</span>}
             <HelpTip testid="help-checklist">이 업무를 하는 사람이 따라갈 단계입니다. 항목마다 담당자를 정할 수 있고, 내 몫은 &ldquo;내 업무&rdquo;에 보입니다.</HelpTip></h2>
           {!fold.check && <>
-          {data.checklist.length > 0 && <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${(checkDone / data.checklist.length) * 100}%` }} /></div>}
+          {data.checklist.length > 0 && <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${(checkDone / data.checklist.length) * 100}%` }} /></div>}
           <ul className="space-y-0.5" data-testid="checklist">
             {data.checklist.map((c: any) => (
               <li key={c.id} className="group flex items-center gap-2.5 rounded-input px-1 py-1 text-sm hover:bg-slate-50">
-                <input type="checkbox" className="size-4 accent-emerald-600" checked={c.done} onChange={async (e) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { done: e.target.checked } }).catch((er) => toast.error(er.message)); reload(); }} aria-label={c.text} />
+                <input type="checkbox" className="size-4 accent-green-600" checked={c.done} onChange={async (e) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { done: e.target.checked } }).catch((er) => toast.error(er.message)); reload(); }} aria-label={c.text} />
                 <span className={cx('flex-1', c.done && 'text-ink-3 line-through', !c.done && c.assignee_id === user.id && 'font-semibold')}>{c.text}{!c.done && c.assignee_id === user.id && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">내 몫</span>}</span>
                 {perms.edit ? <UserSelect className="h-7 w-auto max-w-[7.5rem] rounded-full border border-line bg-white px-1.5 text-[11px] text-ink-2" placeholder="담당 없음" value={c.assignee_id}
                   ariaLabel={`${c.text} 담당`} onChange={async (v) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { assigneeId: v } }).catch((er) => toast.error(er.message)); reload(); broadcastRefresh(); }} />
@@ -510,7 +510,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           {data.subtasks.length > 0 && <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-accent-600 transition-all" style={{ width: `${(subDone / data.subtasks.length) * 100}%` }} /></div>}
           {/* 모든 하위 업무 완료 → 상위도 완료할지 안내 (상태를 바꿀 수 있는 사람에게만) */}
           {data.subtasks.length > 0 && subDone === data.subtasks.length && t.status !== 'done' && t.status !== 'review' && (t.assignee_id ?? t.created_by) === user.id && (
-            <p className="mb-2 flex flex-wrap items-center gap-2 rounded-input bg-emerald-50 px-3 py-2 text-sm text-emerald-900" data-testid="subtasks-all-done">
+            <p className="mb-2 flex flex-wrap items-center gap-2 rounded-input bg-green-50 px-3 py-2 text-sm text-green-900" data-testid="subtasks-all-done">
               <CircleCheck className="size-4 shrink-0" />하위 업무가 모두 끝났습니다 — 이 업무도 완료할까요?
               {primary && <Button size="sm" onClick={primary.run}>{primary.label}</Button>}
             </p>

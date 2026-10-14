@@ -116,7 +116,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
                       <div key={p.id} className="mt-1.5 rounded-input border border-amber-200 bg-white p-2 text-ink">
                         <div className="text-xs font-semibold text-amber-700">✨ AI 제안</div><div className="text-sm">{p.summary}</div>
                         {!!p.preview?.warnings?.length && <ul className="mt-1 rounded bg-amber-50 p-1.5 text-xs text-amber-800" data-testid="ai-dock-warnings">{p.preview.warnings.map((w, k) => <li key={k}>⚠ {w}</li>)}</ul>}
-                        {p.state === 'done' ? <div className="mt-1 text-xs text-emerald-700">✓ 반영됨 {p.link && <Link href={p.link} className="underline">열기</Link>}</div>
+                        {p.state === 'done' ? <div className="mt-1 text-xs text-green-700">✓ 반영됨 {p.link && <Link href={p.link} className="underline">열기</Link>}</div>
                           : p.state === 'cancelled' ? <div className="mt-1 text-xs text-ink-3">취소함</div>
                           : <div className="mt-1 flex gap-1.5"><Button size="sm" onClick={() => decide(i, p, true)} disabled={p.state === 'busy'}><Check />확인</Button><Button size="sm" variant="secondary" onClick={() => decide(i, p, false)} disabled={p.state === 'busy'}><X />취소</Button></div>}
                       </div>

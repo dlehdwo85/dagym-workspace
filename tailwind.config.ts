@@ -5,8 +5,10 @@ export default {
   theme: {
     extend: {
       colors: {
-        brand: { DEFAULT: '#1f3a5f', 50: '#f2f6fb', 100: '#e1e9f4', 200: '#c3d3e8', 500: '#2d5487', 600: '#1f3a5f', 700: '#172c49', 800: '#0f1f35' },
-        accent: { DEFAULT: '#3b82f6', 50: '#eff6ff', 100: '#dbeafe', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' },
+        // V14 31번(D안): 로고 청록. 600 = 기본(#0F766E)
+        brand: { DEFAULT: '#0F766E', 50: '#F0FDFA', 100: '#CCFBF1', 200: '#99F6E4', 300: '#5EEAD4', 400: '#2DD4BF', 500: '#0D9488', 600: '#0F766E', 700: '#115E59', 800: '#134E4A', 900: '#134E4A' },
+        accent: { DEFAULT: '#0D9488', 50: '#F0FDFA', 100: '#CCFBF1', 500: '#14B8A6', 600: '#0D9488', 700: '#0F766E' },
+        warm: { DEFAULT: '#F59E0B', 50: '#FFFBEB', 500: '#F59E0B', 600: '#D97706' }, // 보조 강조(소량)
         canvas: 'var(--canvas)',
         surface: 'var(--surface)',
         line: 'var(--line)',

@@ -162,8 +162,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
     const on = active(n.href);
     return (
       <Link key={n.href} href={n.href} title={collapsed ? n.label : undefined}
-        className={cx('group flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm transition-colors', on ? 'bg-white/10 font-semibold text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white', collapsed && 'justify-center px-0')}>
-        <n.icon className={cx('size-[18px] shrink-0', on ? 'text-white' : 'text-slate-400 group-hover:text-slate-200')} aria-hidden />
+        className={cx('group flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm transition-colors', on ? 'bg-brand-600 font-semibold text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-ink', collapsed && 'justify-center px-0')}>
+        <n.icon className={cx('size-[18px] shrink-0', on ? 'text-white' : 'text-slate-400 group-hover:text-slate-600')} aria-hidden />
         {!collapsed && <span className="flex-1 truncate">{n.label}</span>}
         {!!badge && <span className={cx('rounded-full bg-red-500 text-[10px] font-semibold leading-4 text-white tabular-nums', collapsed ? 'absolute ml-5 -mt-5 px-1' : 'px-1.5')}>{badge > 99 ? '99+' : badge}</span>}
       </Link>
@@ -174,10 +174,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
     <SessionCtx.Provider value={session}>
       <div className="app-shell min-h-screen bg-canvas text-ink sm:flex">
         {/* 사이드바 (데스크톱) */}
-        <aside className={cx('hidden shrink-0 flex-col bg-brand-800 text-white transition-[width] duration-150 sm:sticky sm:top-0 sm:flex sm:h-screen', collapsed ? 'w-[60px]' : 'w-60')} aria-label="사이드바">
+        <aside className={cx('hidden shrink-0 flex-col border-r border-line bg-white text-slate-700 transition-[width] duration-150 sm:sticky sm:top-0 sm:flex sm:h-screen', collapsed ? 'w-[60px]' : 'w-60')} aria-label="사이드바">
           <div className={cx('flex h-14 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
             <img src="/icon.svg" alt="" className="size-7" />
-            {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold">워크인</div><div className="truncate text-[11px] text-slate-400">{session.tenant?.name ?? '워크인'}</div></div>}
+            {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold text-ink">워크인</div><div className="truncate text-[11px] text-slate-500">{session.tenant?.name ?? '워크인'}</div></div>}
           </div>
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
             {nav.map((n) => (
@@ -185,9 +185,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 {navLink(n, n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0)}
                 {/* 즐겨찾는 프로젝트는 "프로젝트" 바로 아래 */}
                 {n.href === '/projects' && !collapsed && favorites.length > 0 && (
-                  <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l border-white/10 pl-2">
+                  <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l border-line pl-2">
                     {favorites.map((p) => (
-                      <Link key={p.id} href={`/projects/${p.id}`} className={cx('flex h-7 items-center gap-2 rounded-input px-2 text-[13px]', path === `/projects/${p.id}` ? 'bg-white/10 font-semibold text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white')}>
+                      <Link key={p.id} href={`/projects/${p.id}`} className={cx('flex h-7 items-center gap-2 rounded-input px-2 text-[13px]', path === `/projects/${p.id}` ? 'bg-brand-50 font-semibold text-brand-700' : 'text-slate-600 hover:bg-slate-100 hover:text-ink')}>
                         <span className="size-2 shrink-0 rounded-[3px]" style={{ background: p.color }} /><span className="truncate">{p.name}</span>
                       </Link>
                     ))}
@@ -197,15 +197,15 @@ export function AppShell({ session, children }: { session: Sess; children: React
             ))}
             {(adminMenu.length > 0 || session.user.platformAdmin) && (
               <div className="pt-3" data-testid="nav-admin">
-                <div className="my-2 border-t border-white/10" />
+                <div className="my-2 border-t border-line" />
                 {!collapsed && <button onClick={() => setAdminOpen((v) => { writePref('wos_nav_admin', v ? '0' : '1'); return !v; })} aria-expanded={adminOpen}
-                  className="flex w-full items-center gap-1 px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-200">관리<ChevronDown className={cx('size-3 transition-transform', !adminOpen && '-rotate-90')} /></button>}
+                  className="flex w-full items-center gap-1 px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700">관리<ChevronDown className={cx('size-3 transition-transform', !adminOpen && '-rotate-90')} /></button>}
                 {(adminOpen || collapsed) && [...adminMenu, ...(session.user.platformAdmin ? [{ href: '/platform', label: '플랫폼 운영', icon: Building2 }] : [])].map((n) => navLink(n))}
               </div>
             )}
           </nav>
-          <div className={cx('border-t border-white/10 p-2', collapsed && 'flex justify-center')}>
-            <button onClick={toggleCollapsed} className={cx('flex h-8 items-center gap-2 rounded-input px-2.5 text-xs text-slate-400 hover:bg-white/5 hover:text-white', !collapsed && 'w-full')} aria-label={collapsed ? '사이드바 펼치기' : '사이드바 접기'}>
+          <div className={cx('border-t border-line p-2', collapsed && 'flex justify-center')}>
+            <button onClick={toggleCollapsed} className={cx('flex h-8 items-center gap-2 rounded-input px-2.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-ink', !collapsed && 'w-full')} aria-label={collapsed ? '사이드바 펼치기' : '사이드바 접기'}>
               {collapsed ? <PanelLeftOpen className="size-4" /> : <><PanelLeftClose className="size-4" />사이드바 접기</>}
             </button>
           </div>
@@ -310,7 +310,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               <button role="menuitem" onClick={() => { setFabMenu(false); openVoiceAdd(); }} aria-label="말로 등록" className="mb-2 flex w-full items-center justify-center gap-2 rounded-card bg-brand-600 py-3.5 text-base font-semibold text-white active:bg-brand-700" data-testid="fab-voice"><Mic className="size-5" />🎤 말로 등록</button>
               <div className="grid grid-cols-2 gap-2">
                 <button role="menuitem" onClick={() => { setFabMenu(false); setQuick(true); }} aria-label="업무 등록" className="flex flex-col items-center gap-1.5 rounded-card border border-line py-4 text-sm font-semibold active:bg-slate-50"><SquarePen className="size-6 text-brand-600" />업무</button>
-                <button role="menuitem" onClick={() => { setFabMenu(false); router.push('/calendar?quick=1'); }} aria-label="일정 등록" className="flex flex-col items-center gap-1.5 rounded-card border border-line py-4 text-sm font-semibold active:bg-slate-50"><CalendarPlus className="size-6 text-emerald-600" />일정</button>
+                <button role="menuitem" onClick={() => { setFabMenu(false); router.push('/calendar?quick=1'); }} aria-label="일정 등록" className="flex flex-col items-center gap-1.5 rounded-card border border-line py-4 text-sm font-semibold active:bg-slate-50"><CalendarPlus className="size-6 text-green-600" />일정</button>
               </div>
             </div>
           </div>

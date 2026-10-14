@@ -53,9 +53,9 @@ export default function HelpPage() {
           <ul className="mt-3 divide-y divide-line text-sm" data-testid="my-tickets">
             {mine.data.tickets.map((t) => (
               <li key={t.id} className="py-2">
-                <div className="flex justify-between gap-2"><b className="font-medium">{t.subject}</b><span className={cx('text-xs', t.status === 'open' ? 'text-amber-700' : 'text-emerald-700')}>{t.status === 'open' ? '접수됨' : '답변 완료'}</span></div>
+                <div className="flex justify-between gap-2"><b className="font-medium">{t.subject}</b><span className={cx('text-xs', t.status === 'open' ? 'text-amber-700' : 'text-green-700')}>{t.status === 'open' ? '접수됨' : '답변 완료'}</span></div>
                 <div className="text-xs text-ink-3">{fmtDateTime(t.created_at)}</div>
-                {t.answer && <p className="mt-1 whitespace-pre-wrap rounded bg-emerald-50 p-2 text-ink-2">{t.answer}</p>}
+                {t.answer && <p className="mt-1 whitespace-pre-wrap rounded bg-green-50 p-2 text-ink-2">{t.answer}</p>}
               </li>
             ))}
           </ul>

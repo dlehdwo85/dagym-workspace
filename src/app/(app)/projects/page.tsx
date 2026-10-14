@@ -49,7 +49,7 @@ export default function Projects() {
               </div>
               <p className="mt-2 line-clamp-2 min-h-[2.5em] text-sm text-ink-2">{p.description || <span className="text-ink-3">설명 없음</span>}</p>
               <div className="mt-3 flex items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${p.task_count ? (p.done_count / p.task_count) * 100 : 0}%` }} /></div>
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-green-500" style={{ width: `${p.task_count ? (p.done_count / p.task_count) * 100 : 0}%` }} /></div>
                 <span className="text-xs font-medium text-ink-2 tabular-nums">{p.done_count}/{p.task_count}</span>
               </div>
               <div className="mt-3 flex items-center gap-1.5 text-xs text-ink-2"><Avatar id={p.owner_id} name={p.owner_name} size={20} />{p.owner_name ?? '담당 없음'}</div>

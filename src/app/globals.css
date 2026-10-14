@@ -11,7 +11,7 @@ body { background: var(--canvas); color: var(--ink); font-feature-settings: 'ss0
 .tabular, time, .num { font-variant-numeric: tabular-nums; }
 input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 @media (min-width: 640px) { input, select, textarea { font-size: 14px; } }
-:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+:focus-visible { outline: 2px solid #0D9488; outline-offset: 2px; }
 .skeleton { background: linear-gradient(90deg, #eef0f3 0, #f6f7f9 40px, #eef0f3 80px); background-size: 800px 100%; animation: shimmer 1.3s linear infinite; }
 @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
 .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -23,10 +23,10 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 .fc .fc-button { padding: 0.3rem 0.7rem; font-size: 0.8rem; background: #fff; color: #374151; border-color: #e5e7eb; border-radius: 8px; box-shadow: none !important; }
 .fc .fc-button:hover { background: #f3f4f6; color: #111827; }
 .fc .fc-button:disabled, .fc .fc-button-primary:disabled { background: #fff; color: #9ca3af; border-color: #e5e7eb; opacity: 1; }
-.fc .fc-button-primary:not(:disabled).fc-button-active, .fc .fc-button-primary:not(:disabled):active { background: #1f3a5f; border-color: #1f3a5f; color: #fff; }
+.fc .fc-button-primary:not(:disabled).fc-button-active, .fc .fc-button-primary:not(:disabled):active { background: #0F766E; border-color: #0F766E; color: #fff; }
 .fc .fc-col-header-cell-cushion { font-weight: 600; color: #4b5563; padding: 6px 4px; }
 .fc .fc-daygrid-day-number { color: #4b5563; font-variant-numeric: tabular-nums; padding: 6px 8px; }
-.fc .fc-day-today .fc-daygrid-day-number { background: #2563eb; color: #fff; border-radius: 9999px; min-width: 24px; text-align: center; margin: 3px; padding: 2px 6px; }
+.fc .fc-day-today .fc-daygrid-day-number { background: #0F766E; color: #fff; border-radius: 9999px; min-width: 24px; text-align: center; margin: 3px; padding: 2px 6px; }
 .fc .fc-daygrid-event, .fc .fc-timegrid-event { cursor: pointer; border-radius: 6px; padding: 1px 4px; font-weight: 500; }
 .fc-event.task-due { border-style: dashed !important; border-width: 1.5px !important; background: #fff !important; }
 .fc-event.task-due .fc-event-title, .fc-event.task-due .fc-event-time { color: #374151 !important; }

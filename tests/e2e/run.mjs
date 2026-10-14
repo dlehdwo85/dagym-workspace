@@ -1123,6 +1123,7 @@ await step('저장 버튼: 한 줄 추가는 저장 버튼·Enter 로만 생성(
 
 await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 → 상세 안 열리고 선택 창, 홈 줄 탭 → 상세', async () => {
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  await mc.addInitScript(() => { try { localStorage.setItem('wos_task_group', 'assignee'); } catch {} }); // V14 34번: 뜬 뒤 묶기가 바뀌지 않게
   const m = await mc.newPage();
   await m.goto(BASE + '/tasks');
   const row = m.locator('[data-row]').first();

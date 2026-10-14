@@ -37,7 +37,7 @@ export default function SignupPage() {
   );
   if (done) return (
     <AuthCard title="메일을 확인해 주세요" sub={f.email}>
-      <div className="flex gap-3 rounded-card border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900" data-testid="signup-done">
+      <div className="flex gap-3 rounded-card border border-green-200 bg-green-50 p-4 text-sm text-green-900" data-testid="signup-done">
         <MailCheck className="size-5 shrink-0" /><p>{done.message}</p>
       </div>
       {done.devLink && <p className="mt-3 text-xs text-ink-3">개발용 확인 링크: <a href={done.devLink} className="underline" data-testid="dev-verify-link">{done.devLink}</a></p>}

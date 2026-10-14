@@ -37,7 +37,7 @@ export default function Ops() {
           const last = data.jobs.find((j: any) => j.job === 'tick' && j.status === 'ok');
           const age = last ? Math.round((Date.now() - new Date(last.started_at).getTime()) / 60000) : null;
           return (
-            <p className={cx('mb-2 rounded p-2 text-sm', age !== null && age <= 30 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900')} data-testid="last-tick">
+            <p className={cx('mb-2 rounded p-2 text-sm', age !== null && age <= 30 ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-900')} data-testid="last-tick">
               마지막 정기 실행 {age === null ? '기록 없음' : `${age}분 전`}{last && ` · 원인: ${TRIGGER_LABEL[last.trigger] ?? last.trigger}`}
               <span className="block text-xs opacity-80">원인 — GitHub 예약(10분, 자주 건너뜀) · Vercel Cron(매일 09시, CRON_SECRET 필요) · 사용 중 요청 편승(앱을 쓰는 동안 10분마다)</span>
             </p>
@@ -73,7 +73,7 @@ export default function Ops() {
                     <td className="whitespace-nowrap pr-2">{n.user_name}</td>
                     <td className="pr-2">{n.title}</td>
                     <td className="pr-2 tabular-nums">{n.devices}</td>
-                    <td className={cx(ds.some((d) => d.status === 'failed') ? 'text-red-700' : !n.devices ? 'text-amber-700' : ds.every((d) => d.status === 'sent') && ds.length ? 'text-emerald-700' : '')}>{st}</td>
+                    <td className={cx(ds.some((d) => d.status === 'failed') ? 'text-red-700' : !n.devices ? 'text-amber-700' : ds.every((d) => d.status === 'sent') && ds.length ? 'text-green-700' : '')}>{st}</td>
                   </tr>
                 );
               })}

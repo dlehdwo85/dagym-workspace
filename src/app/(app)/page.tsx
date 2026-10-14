@@ -52,7 +52,7 @@ function TodayRow({ t, onDone, className }: { t: any; onDone: (t: any) => void; 
   return (
     <li {...rowOpen} className={cx(className, "flex min-w-0 cursor-pointer items-center gap-2.5 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50")} data-home-task={t.id}>
       <button onClick={() => onDone(t)} aria-label={`${t.title} ${toReview ? '검토 요청' : '완료'}`} title={toReview ? '검토 요청' : '완료'}
-        className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-slate-300 text-transparent hover:border-emerald-500 hover:text-emerald-500">
+        className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-slate-300 text-transparent hover:border-green-500 hover:text-green-500">
         <CircleCheck className="size-[22px] stroke-[1.8]" style={{ margin: -1.5 }} />
       </button>
       <div className="min-w-0 flex-1">
@@ -123,7 +123,7 @@ function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: { personal: strin
       <span className="w-10 shrink-0 text-xs tabular-nums text-ink-2">{r.time || '종일'}</span>
       {r.task && r.tag !== '일정·업무' ? (
         // V14 33번: 이번 주 목록의 업무 동그라미는 표시만(누르면 실수로 완료) — 제목을 누르면 상세
-        <span aria-hidden className={cx('flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px]', done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300')}>{done && <Check className="size-3" strokeWidth={3} />}</span>
+        <span aria-hidden className={cx('flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px]', done ? 'border-green-500 bg-green-500 text-white' : 'border-slate-300')}>{done && <Check className="size-3" strokeWidth={3} />}</span>
       ) : <span className="size-2.5 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden />}
       <Link href={r.href} className={cx('min-w-0 flex-1 truncate font-medium hover:underline', done && 'text-ink-3 line-through')}>{r.title}</Link>
       <span className="shrink-0 rounded-full bg-slate-100 px-1.5 text-[10px] font-medium text-ink-2">{r.tag}</span>
@@ -316,7 +316,7 @@ export default function Dashboard() {
               <Link key={p.id} href={`/tasks?assigneeId=${p.id}`} className="min-w-0 rounded-input border border-line p-3 hover:border-slate-300 hover:shadow-card">
                 <div className="flex min-w-0 items-center gap-2"><Avatar id={p.id} name={p.name} size={28} /><span className="truncate font-semibold">{p.name}</span></div>
                 <dl className="mt-2 grid grid-cols-4 gap-1 text-center">
-                  {([['진행', p.open, ''], ['오늘 마감', p.due_today, p.due_today ? 'text-amber-700' : ''], ['지연', p.overdue, p.overdue ? 'text-red-600' : ''], ['주간 완료', p.done_week, 'text-emerald-600']] as const).map(([l, v, tone]) => (
+                  {([['진행', p.open, ''], ['오늘 마감', p.due_today, p.due_today ? 'text-amber-700' : ''], ['지연', p.overdue, p.overdue ? 'text-red-600' : ''], ['주간 완료', p.done_week, 'text-green-600']] as const).map(([l, v, tone]) => (
                     <div key={l} className="min-w-0"><dt className="truncate text-[10px] text-ink-3">{l}</dt><dd className={cx('text-lg font-bold tabular-nums', tone)}>{v ?? 0}</dd></div>
                   ))}
                 </dl>
@@ -356,7 +356,7 @@ export default function Dashboard() {
             <ul>
               {data.activity.map((a: any, i: number) => (
                 <li key={i} className="flex min-w-0 items-start gap-2 rounded-input px-2 py-1.5 text-sm">
-                  <span className="mt-0.5 shrink-0">{a.kind === 'done' ? <CheckCircle2 className="size-4 text-emerald-500" /> : a.kind === 'comment' ? <MessageSquare className="size-4 text-accent-500" /> : <PlusCircle className="size-4 text-ink-3" />}</span>
+                  <span className="mt-0.5 shrink-0">{a.kind === 'done' ? <CheckCircle2 className="size-4 text-green-500" /> : a.kind === 'comment' ? <MessageSquare className="size-4 text-accent-500" /> : <PlusCircle className="size-4 text-ink-3" />}</span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate"><b className="font-semibold">{a.actor_name ?? '시스템'}</b> {a.kind === 'done' ? '완료' : a.kind === 'comment' ? '댓글' : '등록'} · <Link href={`/tasks/${a.task_id}`} className="hover:underline">{a.title}</Link></p>
                     {a.body && <p className="truncate text-xs text-ink-2">{a.body}</p>}

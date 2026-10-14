@@ -26,7 +26,7 @@ export default function AutomationsPage() {
         <ul className="divide-y divide-line rounded-card border border-line bg-white text-sm shadow-card">
           {(runs.data?.runs ?? []).slice(0, 30).map((r) => (
             <li key={r.id} className="flex items-center gap-3 px-4 py-2">
-              <span className={r.status === 'ok' ? 'text-emerald-600' : 'text-red-600'}>{r.status === 'ok' ? '성공' : '실패'}</span>
+              <span className={r.status === 'ok' ? 'text-green-600' : 'text-red-600'}>{r.status === 'ok' ? '성공' : '실패'}</span>
               <span className="font-medium">{r.rule_name}</span><span className="flex-1 truncate text-ink-2">{r.task_title}</span>
               <span className="text-xs text-ink-3">{fmtDateTime(r.created_at)}</span>
             </li>

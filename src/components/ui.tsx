@@ -96,7 +96,7 @@ export function Toaster() {
     <div className="pointer-events-none fixed bottom-24 left-0 right-0 z-[60] flex flex-col items-center gap-2 px-4 sm:bottom-6 sm:left-auto sm:right-6 sm:items-end" role="status" aria-live="polite">
       {items.map((t) => (
         <div key={t.id} className="pointer-events-auto flex max-w-md animate-fade-up items-center gap-3 rounded-card bg-slate-900 py-2.5 pl-3.5 pr-2 text-sm text-white shadow-pop">
-          {t.kind === 'ok' ? <CheckCircle2 className="size-4 shrink-0 text-emerald-400" /> : t.kind === 'error' ? <AlertCircle className="size-4 shrink-0 text-red-400" /> : <Info className="size-4 shrink-0 text-sky-300" />}
+          {t.kind === 'ok' ? <CheckCircle2 className="size-4 shrink-0 text-green-400" /> : t.kind === 'error' ? <AlertCircle className="size-4 shrink-0 text-red-400" /> : <Info className="size-4 shrink-0 text-sky-300" />}
           <span className="min-w-0 flex-1">{t.text}</span>
           {t.action && <button className="rounded px-2 py-1 font-semibold text-sky-300 hover:bg-white/10" onClick={() => { t.action!.run(); close(t.id); }}>{t.action.label}</button>}
           <button className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-white" aria-label="알림 닫기" onClick={() => close(t.id)}><X className="size-3.5" /></button>
@@ -112,7 +112,7 @@ export const STATUS_TONE: Record<TaskStatus, { badge: string; dot: string; bar: 
   in_progress: { badge: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500', bar: '#3b82f6' },
   review: { badge: 'bg-violet-50 text-violet-700', dot: 'bg-violet-500', bar: '#8b5cf6' },
   on_hold: { badge: 'bg-orange-50 text-orange-700', dot: 'bg-orange-500', bar: '#f97316' },
-  done: { badge: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', bar: '#10b981' },
+  done: { badge: 'bg-green-50 text-green-700', dot: 'bg-green-500', bar: '#22c55e' },
 };
 export function StatusBadge({ status }: { status: TaskStatus }) {
   const t = STATUS_TONE[status];
@@ -135,7 +135,7 @@ export function PriorityTag({ p, label = true }: { p: Priority; label?: boolean 
 export const BRAND_TONE: Record<string, { name: string; dot: string; chip: string; hex: string }> = {
   dagym: { name: '다짐', dot: 'bg-orange-500', chip: 'bg-orange-50 text-orange-700', hex: '#f97316' },
   hilink: { name: '하이링크', dot: 'bg-blue-600', chip: 'bg-blue-50 text-blue-700', hex: '#2563eb' },
-  bodylab: { name: 'BODY LAB', dot: 'bg-emerald-600', chip: 'bg-emerald-50 text-emerald-700', hex: '#059669' },
+  bodylab: { name: 'BODY LAB', dot: 'bg-green-600', chip: 'bg-green-50 text-green-700', hex: '#16a34a' },
 };
 export function BrandDot({ brand }: { brand: string | null }) {
   if (!brand) return null;
@@ -144,7 +144,7 @@ export function BrandDot({ brand }: { brand: string | null }) {
 }
 
 /** 사람 아바타: 이름 해시로 8색 중 하나, 이니셜(한글은 성 빼고 이름 앞 두 글자) */
-const AVATAR_BG = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#059669', '#0891b2', '#4f46e5', '#b45309'];
+const AVATAR_BG = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#0891b2', '#4f46e5', '#b45309'];
 export function avatarColor(seed: string) {
   let h = 0;
   for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;

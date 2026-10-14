@@ -256,7 +256,7 @@ export default function CalendarPage() {
           <Button variant="secondary" className="hidden lg:inline-flex" onClick={() => setSidePanel(!sidePanel)} aria-pressed={sidePanel}><ListChecks />미배정 업무</Button>
           {/* V6 6번 엑셀: 지금 보이는 기간·사람 필터 (남의 비공개 일정은 "바쁨"만) */}
           {range && <a href={`/api/export/calendar?start=${seoulDate(range.from)}&end=${addDays(seoulDate(range.to), -1)}${who === 'mine' ? `&who=${user.id}` : Array.isArray(who) ? `&who=${who.join(',')}` : ''}`}
-            className="inline-flex h-9 items-center gap-1.5 rounded-input border border-line bg-white px-3 text-sm font-medium text-ink-2 hover:bg-slate-50" data-testid="cal-export"><FileSpreadsheet className="size-4 text-emerald-700" /><span className="hidden sm:inline">엑셀</span></a>}
+            className="inline-flex h-9 items-center gap-1.5 rounded-input border border-line bg-white px-3 text-sm font-medium text-ink-2 hover:bg-slate-50" data-testid="cal-export"><FileSpreadsheet className="size-4 text-green-700" /><span className="hidden sm:inline">엑셀</span></a>}
           <Button onClick={() => { const v = calRef.current?.getApi().getDate(); const d = v ? seoulDate(v) : seoulDate(new Date()); const h = nextHour(); setEditor({ draft: { date: d, start: h.start, end: h.end } }); }}><CalendarPlus />일정 등록</Button>
         </div>
       </div>
@@ -284,8 +284,8 @@ export default function CalendarPage() {
               </li>
               <li>
                 <label className="flex cursor-pointer items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50">
-                  <input type="checkbox" className="size-4 rounded accent-emerald-600" checked={showDone} onChange={() => setShowDone(!showDone)} aria-label="완료된 업무·일정 보기" />
-                  <span className="flex items-center gap-1"><Check className="size-3.5 text-emerald-600" />완료 보기</span>
+                  <input type="checkbox" className="size-4 rounded accent-green-600" checked={showDone} onChange={() => setShowDone(!showDone)} aria-label="완료된 업무·일정 보기" />
+                  <span className="flex items-center gap-1"><Check className="size-3.5 text-green-600" />완료 보기</span>
                 </label>
               </li>
             </ul>
@@ -309,7 +309,7 @@ export default function CalendarPage() {
               </button>
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-indigo-300 text-indigo-700' : 'border-line text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무 마감</button>
-            <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-emerald-400 text-emerald-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
+            <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
             <button onClick={() => setColorDlg(true)} className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
           </div>
           {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}
@@ -717,7 +717,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           {!id ? (
             <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!f.alsoTask} onChange={(e) => set('alsoTask')(e.target.checked)} data-testid="editor-also-task" />업무에도 추가 <span className="text-xs font-normal text-ink-3">— 같은 이름·날짜의 업무(담당 나), 날짜를 바꾸면 서로 따라갑니다{f.rrule ? ' · 반복 업무로' : ''}</span></label>
           ) : d?.syncTask ? (
-            <p className="flex items-center gap-2 text-sm" data-testid="editor-sync-task"><CircleCheck className="size-4 text-emerald-600" />연결된 업무: <Link href={`/tasks/${d.syncTask.id}`} className="font-medium underline">{d.syncTask.title}</Link><span className="text-xs text-ink-3">날짜 연동</span></p>
+            <p className="flex items-center gap-2 text-sm" data-testid="editor-sync-task"><CircleCheck className="size-4 text-green-600" />연결된 업무: <Link href={`/tasks/${d.syncTask.id}`} className="font-medium underline">{d.syncTask.title}</Link><span className="text-xs text-ink-3">날짜 연동</span></p>
           ) : canEdit ? (
             <button type="button" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline" data-testid="editor-add-task"
               onClick={async () => { try { await api(`/api/events/${id}`, { method: 'PATCH', body: { alsoTask: true } }); toast.ok('업무에도 추가했습니다'); existing.reload(); onSaved(); } catch (er: any) { toast.error(er.message); } }}>

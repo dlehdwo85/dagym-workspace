@@ -18,7 +18,7 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
         <div className="relative">
           <h2 className="text-[28px] font-bold leading-snug tracking-tight">말로 등록하고,<br />정확한 시간에 알림 받기.</h2>
           <ul className="mt-8 space-y-4 text-sm text-slate-300">
-            <li className="flex items-center gap-3"><CheckCircle2 className="size-5 text-emerald-400" />업무 배정 · 완료 확인 · 결재까지 한 흐름으로</li>
+            <li className="flex items-center gap-3"><CheckCircle2 className="size-5 text-green-400" />업무 배정 · 완료 확인 · 결재까지 한 흐름으로</li>
             <li className="flex items-center gap-3"><CalendarDays className="size-5 text-sky-400" />회사·부서·현장 일정과 마감일을 한 캘린더에</li>
             <li className="flex items-center gap-3"><Users className="size-5 text-orange-300" />혼자서도, 팀으로도 — 무료로 시작</li>
           </ul>

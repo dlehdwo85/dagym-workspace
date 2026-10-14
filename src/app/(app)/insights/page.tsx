@@ -9,12 +9,12 @@ import { HIDDEN_BRANDS, UNIT_TYPE_LABEL } from '@/lib/types';
 
 type Site = any;
 const COLS: { key: string; label: string; hint: string; fmt: (s: Site) => string; tone?: (s: Site) => string; sortVal: (s: Site) => number }[] = [
-  { key: 'onTime', label: '기한 준수율', hint: '기간 중 완료한 업무 중 마감일 안에 끝낸 비율', fmt: (s) => (s.onTimeRate === null ? '—' : `${s.onTimeRate}%`), tone: (s) => (s.onTimeRate === null ? '' : s.onTimeRate >= 90 ? 'text-emerald-600' : s.onTimeRate >= 70 ? 'text-amber-600' : 'text-red-600'), sortVal: (s) => s.onTimeRate ?? -1 },
+  { key: 'onTime', label: '기한 준수율', hint: '기간 중 완료한 업무 중 마감일 안에 끝낸 비율', fmt: (s) => (s.onTimeRate === null ? '—' : `${s.onTimeRate}%`), tone: (s) => (s.onTimeRate === null ? '' : s.onTimeRate >= 90 ? 'text-green-600' : s.onTimeRate >= 70 ? 'text-amber-600' : 'text-red-600'), sortVal: (s) => s.onTimeRate ?? -1 },
   { key: 'avgDays', label: '평균 처리', hint: '등록부터 완료까지 평균 일수', fmt: (s) => (s.avgDays === null ? '—' : `${s.avgDays}일`), sortVal: (s) => s.avgDays ?? 999 },
   { key: 'done', label: '완료', hint: '기간 중 완료 건수', fmt: (s) => String(s.done), sortVal: (s) => s.done },
   { key: 'overdue', label: '지연', hint: '지금 마감이 지난 미완료 업무', fmt: (s) => String(s.overdue), tone: (s) => (s.overdue ? 'text-red-600' : ''), sortVal: (s) => s.overdue },
   { key: 'complaints', label: '미해결 민원', hint: '현장 QR 회원 민원 중 미완료', fmt: (s) => String(s.openComplaints), tone: (s) => (s.openComplaints ? 'text-violet-600' : ''), sortVal: (s) => s.openComplaints },
-  { key: 'insp', label: '점검 수행률', hint: '기간 중 마감인 점검 업무 중 완료 비율', fmt: (s) => (s.inspectionRate === null ? '—' : `${s.inspectionRate}% (${s.inspection.done}/${s.inspection.total})`), tone: (s) => (s.inspectionRate === null ? '' : s.inspectionRate >= 90 ? 'text-emerald-600' : 'text-amber-600'), sortVal: (s) => s.inspectionRate ?? -1 },
+  { key: 'insp', label: '점검 수행률', hint: '기간 중 마감인 점검 업무 중 완료 비율', fmt: (s) => (s.inspectionRate === null ? '—' : `${s.inspectionRate}% (${s.inspection.done}/${s.inspection.total})`), tone: (s) => (s.inspectionRate === null ? '' : s.inspectionRate >= 90 ? 'text-green-600' : 'text-amber-600'), sortVal: (s) => s.inspectionRate ?? -1 },
 ];
 
 function Spark({ points }: { points: { done: number; onTimeRate: number | null }[] }) {

@@ -49,7 +49,7 @@ export default function PlatformPage() {
             <li key={t.id} className="p-3">
               <div className="flex justify-between gap-2"><b className="font-medium">[{({ question: '사용', bug: '오류', billing: '요금', idea: '제안' } as Record<string, string>)[t.category]}] {t.subject}</b><span className="text-xs text-ink-3">{t.user_name} · {t.tenant} · {fmtDateTime(t.created_at)}</span></div>
               <p className="mt-1 whitespace-pre-wrap text-ink-2">{t.body}</p>
-              {t.answer ? <p className="mt-1 rounded bg-emerald-50 p-2 text-xs">답변: {t.answer}</p> : (
+              {t.answer ? <p className="mt-1 rounded bg-green-50 p-2 text-xs">답변: {t.answer}</p> : (
                 <form className="mt-2 flex gap-2" onSubmit={async (e) => { e.preventDefault(); const a = (e.currentTarget.elements.namedItem('a') as HTMLInputElement).value;
                   try { await api(`/api/support/${t.id}`, { body: { answer: a } }); tickets.reload(); toast.ok('답변했습니다'); } catch (er: any) { toast.error(er.message); } }}>
                   <input name="a" className={small} placeholder="답변 (문의한 사람에게 알림)" aria-label={`${t.subject} 답변`} /><Button size="sm" type="submit">답변</Button>

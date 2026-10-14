@@ -60,7 +60,7 @@ export default function WorkloadPage() {
                   <td className="truncate py-1 pr-2 font-medium">{p.name}</td>
                   {p.days.map((d: any) => {
                     const ratio = d.capacity ? d.busy / d.capacity : 0;
-                    const tone = !d.workday ? 'bg-slate-100 text-ink-3' : ratio >= 0.9 ? 'bg-red-500 text-white' : ratio >= 0.7 ? 'bg-orange-400 text-white' : ratio >= 0.4 ? 'bg-amber-200 text-amber-900' : ratio > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-50 text-ink-3';
+                    const tone = !d.workday ? 'bg-slate-100 text-ink-3' : ratio >= 0.9 ? 'bg-red-500 text-white' : ratio >= 0.7 ? 'bg-orange-400 text-white' : ratio >= 0.4 ? 'bg-amber-200 text-amber-900' : ratio > 0 ? 'bg-green-100 text-green-800' : 'bg-slate-50 text-ink-3';
                     return <td key={d.date} className="p-0.5"><div className={cx('flex h-8 items-center justify-center rounded-md tabular-nums', tone)} title={`${d.date} ${d.holiday ?? (d.away ? '휴가·출장' : `바쁨 ${Math.round(d.busy / 6) / 10}시간`)}`}>{d.holiday ? '휴일' : d.away ? '휴가' : !d.workday ? '' : `${Math.round(ratio * 100)}%`}</div></td>;
                   })}
                   <td className="py-1 pl-2 text-right tabular-nums text-ink-2">회의 {p.meetingHours}h · 업무 {p.blockHours}h · 가용 {p.freeHours}h</td>

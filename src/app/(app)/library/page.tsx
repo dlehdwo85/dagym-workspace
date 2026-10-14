@@ -18,7 +18,7 @@ type Fo = { folder: string; n: number; security: Sec; level: string };
 type Data = { files: F[]; folders: Fo[]; review: number; level: string; aiOrganize: boolean; confEdit: boolean };
 const RANK: Record<string, number> = { none: 0, view: 1, edit: 2, delete: 3 };
 const SEC: Record<Sec, { label: string; cls: string }> = {
-  public: { label: '일반', cls: 'bg-emerald-50 text-emerald-700' }, internal: { label: '내부', cls: 'bg-slate-100 text-ink-2' }, confidential: { label: '기밀', cls: 'bg-red-50 text-red-700' } };
+  public: { label: '일반', cls: 'bg-green-50 text-green-700' }, internal: { label: '내부', cls: 'bg-slate-100 text-ink-2' }, confidential: { label: '기밀', cls: 'bg-red-50 text-red-700' } };
 const fmtSize = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n >= 1024 ? `${Math.round(n / 1024)}KB` : `${n}B`);
 const isImg = (f: F) => /^image\/(png|jpe?g|gif|webp)$/.test(f.mime_type);
 const parentOf = (p: string) => p.split('/').slice(0, -1).join('/');
@@ -383,7 +383,7 @@ export default function LibraryPage() {
 
 function FileIcon({ f, big }: { f: F; big?: boolean }) {
   const c = big ? 'size-8' : 'size-5';
-  return /sheet|excel|csv/.test(f.mime_type + f.file_name) ? <FileSpreadsheet className={cx(c, 'text-emerald-600')} /> : /^image\//.test(f.mime_type) ? <ImageIcon className={cx(c, 'text-ink-3')} /> : <FileText className={cx(c, 'text-ink-3')} />;
+  return /sheet|excel|csv/.test(f.mime_type + f.file_name) ? <FileSpreadsheet className={cx(c, 'text-green-600')} /> : /^image\//.test(f.mime_type) ? <ImageIcon className={cx(c, 'text-ink-3')} /> : <FileText className={cx(c, 'text-ink-3')} />;
 }
 
 function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder, onEdit, onRemove, onOrganize, onSec, onOpenFolder }: {

@@ -293,7 +293,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
               }}
                 className="fixed inset-x-0 bottom-0 z-50 animate-fade-up rounded-t-2xl border-t border-line bg-white p-2 pb-[calc(var(--sab)+12px)] shadow-pop sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:z-40 sm:mt-1 sm:w-60 sm:rounded-card sm:border sm:p-1 sm:pb-1">
                 <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden />
-                <button role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-left text-sm hover:bg-slate-50" onClick={() => { setMoreMenu(false); setExportOpen(true); }}><FileSpreadsheet className="size-4 text-emerald-700" />엑셀로 내려받기</button>
+                <button role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-left text-sm hover:bg-slate-50" onClick={() => { setMoreMenu(false); setExportOpen(true); }}><FileSpreadsheet className="size-4 text-green-700" />엑셀로 내려받기</button>
                 <Link role="menuitem" href="/tasks/trash" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-sm hover:bg-slate-50" onClick={() => setMoreMenu(false)}><Trash2 className="size-4 text-ink-2" />휴지통 (30일 복원)</Link>
               </div>
             </>
@@ -345,12 +345,12 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         </div>
       )}
       {justDone.length > 0 && !showDone && (
-        <div className="rounded-card border border-emerald-200 bg-emerald-50 text-sm" data-testid="just-done">
-          <button onClick={() => setJustOpen(!justOpen)} aria-expanded={justOpen} className="flex w-full items-center gap-2 px-3 py-2 text-left font-medium text-emerald-800">
+        <div className="rounded-card border border-green-200 bg-green-50 text-sm" data-testid="just-done">
+          <button onClick={() => setJustOpen(!justOpen)} aria-expanded={justOpen} className="flex w-full items-center gap-2 px-3 py-2 text-left font-medium text-green-800">
             <CircleCheck className="size-4" />방금 완료한 업무 {justDone.length}건<span className="ml-auto text-xs font-normal">{justOpen ? '접기' : '보기 · 되돌리기'}</span>
           </button>
           {justOpen && (
-            <ul className="divide-y divide-emerald-100 border-t border-emerald-200">
+            <ul className="divide-y divide-green-100 border-t border-green-200">
               {justDone.map(({ t, prev }) => (
                 <li key={t.id} className="flex items-center gap-2 px-3 py-1.5">
                   <span className="min-w-0 flex-1 truncate text-ink-2 line-through">{t.title}</span>
@@ -424,7 +424,7 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {t.checklist_total > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{t.checklist_done}/{t.checklist_total}</span>}
       {t.comment_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
       {t.attachment_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="첨부"><Paperclip className="size-3.5" />{t.attachment_count}</span>}
-      {!!t.photo_required && <span className={cx('inline-flex items-center gap-0.5 tabular-nums', (t.photo_count ?? 0) >= t.photo_required ? 'text-emerald-600' : 'text-amber-700')} title="완료 증빙 사진"><Camera className="size-3.5" />{t.photo_count ?? 0}/{t.photo_required}</span>}
+      {!!t.photo_required && <span className={cx('inline-flex items-center gap-0.5 tabular-nums', (t.photo_count ?? 0) >= t.photo_required ? 'text-green-600' : 'text-amber-700')} title="완료 증빙 사진"><Camera className="size-3.5" />{t.photo_count ?? 0}/{t.photo_required}</span>}
       {t.recurrence_rule && <span title="반복 업무"><Repeat className="size-3.5" /></span>}
       {t.batch && t.batch.total > 1 && <span className="rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
       {t.blocked_by_count > 0 && <span className="font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
@@ -467,7 +467,7 @@ function CheckCircle({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => Pr
       if (ok !== false) toast.ok(to === 'done' ? '완료했습니다' : to === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: to, version: t.version + 1 }, { status: before }) });
     }} aria-label={label} title={label} data-testid="check-circle"
       className={cx('hit group flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors disabled:pointer-events-none disabled:opacity-40',
-        t.status === 'done' ? 'border-emerald-500 bg-emerald-500 text-white' : t.status === 'review' ? 'border-amber-400 bg-amber-50 text-amber-500' : 'border-slate-300 text-transparent hover:border-emerald-500 hover:text-emerald-500')}>
+        t.status === 'done' ? 'border-green-500 bg-green-500 text-white' : t.status === 'review' ? 'border-amber-400 bg-amber-50 text-amber-500' : 'border-slate-300 text-transparent hover:border-green-500 hover:text-green-500')}>
       {t.status === 'review' ? <Stamp className="size-3" /> : <CircleCheck className="size-[22px] stroke-[1.8]" style={{ margin: -1.5 }} />}
     </button>
     </span>
@@ -731,7 +731,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
               {!isFolded && doneFold.length > 0 && (
                 <div className="mt-1" data-testid="done-fold">
                   <button type="button" onClick={toggleDone} aria-expanded={doneOpen} className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-ink-2 hover:text-ink">
-                    <ChevronDown className={cx('size-3.5 transition-transform', !doneOpen && '-rotate-90')} /><CircleCheck className="size-3.5 text-emerald-600" />오늘 완료 {doneFold.length}건
+                    <ChevronDown className={cx('size-3.5 transition-transform', !doneOpen && '-rotate-90')} /><CircleCheck className="size-3.5 text-green-600" />오늘 완료 {doneFold.length}건
                   </button>
                   {doneOpen && <ListView tasks={doneFold} onPatch={onPatch} hint={false} />}
                 </div>
@@ -865,7 +865,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
   return (
     <div className="relative overflow-hidden border-b border-line last:border-b-0">
       {dx !== 0 && (
-        <div className={cx('absolute inset-0 flex items-center px-5 text-sm font-semibold text-white', dx > 0 ? 'justify-start bg-emerald-500' : 'justify-end bg-zinc-500')} aria-hidden>
+        <div className={cx('absolute inset-0 flex items-center px-5 text-sm font-semibold text-white', dx > 0 ? 'justify-start bg-green-500' : 'justify-end bg-zinc-500')} aria-hidden>
           {right === 'review' ? '검토 요청' : right === 'done' ? '완료' : '다시 진행'}
         </div>
       )}
@@ -988,7 +988,7 @@ function CalendarView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b:
     id: t.id, title: `${t.status === 'done' ? '✓ ' : ''}${t.title}`, allDay: true,
     start: t.start_date && t.start_date < t.due_date! ? t.start_date : t.due_date!,
     end: addDays(t.due_date!, 1), extendedProps: { task: t },
-    backgroundColor: t.status === 'done' ? '#94a3b8' : t.due_date! < todayStr() ? '#dc2626' : t.project_color ?? '#1f3a5f',
+    backgroundColor: t.status === 'done' ? '#94a3b8' : t.due_date! < todayStr() ? '#dc2626' : t.project_color ?? '#0F766E',
     borderColor: 'transparent',
   }));
   return (
@@ -1025,7 +1025,7 @@ function CalendarView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b:
  */
 const ZOOMS = { '2w': { days: 14, label: '2주' }, '6w': { days: 42, label: '6주' }, '3m': { days: 91, label: '3달' } } as const;
 type Zoom = keyof typeof ZOOMS;
-const TL_TONE: Record<TaskStatus, string> = { todo: '#94a3b8', in_progress: '#3b82f6', review: '#8b5cf6', on_hold: '#f97316', done: '#10b981' };
+const TL_TONE: Record<TaskStatus, string> = { todo: '#94a3b8', in_progress: '#3b82f6', review: '#8b5cf6', on_hold: '#f97316', done: '#22c55e' };
 function TimelineView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => void }) {
   const monday = () => { const d = new Date(todayStr() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
   const [anchor, setAnchor] = useState(monday);

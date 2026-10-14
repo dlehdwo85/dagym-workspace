@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, title: '워크인', statusBarStyle: 'default' },
   icons: { icon: [{ url: '/icon.svg', type: 'image/svg+xml' }, { url: '/favicon-48.png', sizes: '48x48', type: 'image/png' }], apple: '/apple-touch-icon.png' }, // V13 7번 시안 B
 };
-export const viewport: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#1f3a5f' };
+export const viewport: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#0F766E' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

@@ -7,7 +7,7 @@ import { useSession } from './session';
 import { Avatar, Button, Field, Modal, Skeleton, cx, inputCls, toast } from './ui';
 
 export type Team = { id: string; name: string; color: string; parent_id: string | null; members: { id: string; name: string; title: string | null; lead: boolean }[]; mine: boolean; i_lead: boolean; room_id: string | null };
-const COLORS = ['#0F766E', '#2563EB', '#EA580C', '#7C3AED', '#DB2777', '#059669', '#475569'];
+const COLORS = ['#0F766E', '#2563EB', '#EA580C', '#7C3AED', '#DB2777', '#16a34a', '#475569'];
 
 /** V14 8번 사용자 관리 → "팀" 탭: 팀 만들기(이름·색·팀장 1명 이상·팀원), 한 사람 여러 팀 가능 */
 export function TeamsTab() {

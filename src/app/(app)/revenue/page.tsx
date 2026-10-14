@@ -186,7 +186,7 @@ export default function RevenuePage() {
             </div>
           </div>
           {csv && (
-            <div className={cx('mb-3 rounded-input border p-3 text-sm', csv.result?.ok ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50')} data-testid="csv-preview">
+            <div className={cx('mb-3 rounded-input border p-3 text-sm', csv.result?.ok ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50')} data-testid="csv-preview">
               <p className="font-medium">{csv.name} — {csv.result?.ok ? `${csv.result.count}건 가져올 수 있습니다` : `오류 ${csv.result?.errors.length}건 (아무것도 저장되지 않았습니다)`}</p>
               {!!csv.result?.errors.length && <ul className="mt-1 list-disc pl-5 text-xs text-red-700">{csv.result.errors.slice(0, 10).map((e: any) => <li key={e.line}>{e.line}번째 줄: {e.message}</li>)}</ul>}
               <div className="mt-2 flex gap-2">{csv.result?.ok && <Button size="sm" onClick={commitCsv}>가져오기</Button>}<Button size="sm" variant="secondary" onClick={() => setCsv(null)}>취소</Button></div>

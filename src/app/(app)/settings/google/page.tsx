@@ -58,7 +58,7 @@ export default function GoogleSettings() {
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>연결된 계정: <b>{d.account.google_email ?? '(이메일 미확인)'}</b> · {d.canWrite ? '읽기·쓰기' : '읽기 전용'}
-                <span className={cx('ml-2 rounded px-1.5 text-xs', d.account.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800')}>{d.account.status === 'active' ? '정상' : '다시 연결 필요'}</span></div>
+                <span className={cx('ml-2 rounded px-1.5 text-xs', d.account.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800')}>{d.account.status === 'active' ? '정상' : '다시 연결 필요'}</span></div>
               <div className="flex gap-2">
                 {d.account.status !== 'active' && <a href={`/api/google/connect?mode=${d.canWrite ? 'both' : 'import'}`}><Button size="sm">다시 연결</Button></a>}
                 <Button size="sm" variant="secondary" onClick={async () => { if (!confirm('Google 연결을 해제할까요? Google·회사 일정은 삭제되지 않습니다.')) return; await api('/api/google/disconnect', { body: {} }); st.reload(); }}>연결 해제</Button>
@@ -105,7 +105,7 @@ export default function GoogleSettings() {
                 </span>
               </div>
               <div className="text-xs text-slate-500">
-                상태 <b className={l.status === 'active' ? 'text-emerald-700' : 'text-red-700'}>{l.status === 'active' ? '정상' : l.status === 'error' ? '오류' : '일시중지'}</b>
+                상태 <b className={l.status === 'active' ? 'text-green-700' : 'text-red-700'}>{l.status === 'active' ? '정상' : l.status === 'error' ? '오류' : '일시중지'}</b>
                 · 마지막 동기화 {l.last_synced_at ? fmtDateTime(l.last_synced_at) : '없음'}
                 · 실시간 알림 {l.channel_expires_at ? `~${fmtDateTime(l.channel_expires_at)}` : '미등록(10분마다 확인)'}
               </div>

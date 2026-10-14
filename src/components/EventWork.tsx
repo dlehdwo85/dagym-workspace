@@ -111,7 +111,7 @@ export function EventWork({ eventId, occurrenceStart, eventDate, recurring, atte
             {lines.map((l, i) => (
               <li key={i} className="flex items-center gap-2 rounded-input bg-white px-2.5 py-1.5 text-sm">
                 <span className="min-w-0 flex-1 truncate">{l}</span>
-                {followed.has(l) ? <span className="text-xs font-medium text-emerald-600">업무로 만듦</span> : (
+                {followed.has(l) ? <span className="text-xs font-medium text-green-600">업무로 만듦</span> : (
                   <Button type="button" size="sm" variant="ghost" onClick={() => setNewTask({ title: l.replace(/\s*\([^)]*\)\s*$/, ''), assigneeId: people.find((p) => l.includes(p.name))?.user_id ?? '', dueDate: defaultDue, noteLine: l })} aria-label={`${l} 업무로 만들기`}>
                     <ListPlus />업무로
                   </Button>

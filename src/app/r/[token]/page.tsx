@@ -47,7 +47,7 @@ export default function ReportPage({ params }: { params: Promise<{ token: string
         {!info && err && <div className="rounded-card border border-line bg-white p-6 text-center text-sm" role="alert">{err}</div>}
         {done && (
           <div className="rounded-card border border-line bg-white p-8 text-center shadow-card" data-testid="report-done">
-            <CheckCircle2 className="mx-auto size-12 text-emerald-500" />
+            <CheckCircle2 className="mx-auto size-12 text-green-500" />
             <p className="mt-3 text-lg font-bold">접수되었습니다</p>
             <p className="mt-1 text-sm text-ink-2">접수 번호 <b className="tabular-nums text-ink">{done}</b><br />현장 담당자에게 바로 전달했습니다. 감사합니다.</p>
             <Button variant="secondary" className="mt-5" onClick={() => { setDone(null); setF({ content: '', location: '', name: '', phone: '', website: '', agree: false }); setPhoto(''); }}>다른 내용 신고</Button>

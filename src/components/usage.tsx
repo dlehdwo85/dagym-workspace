@@ -15,7 +15,7 @@ export function Meter({ label, icon: Icon, used, limit, usedLabel, limitLabel, t
         <span className={cx('ml-auto text-xs font-medium', pct !== null && pct >= 100 ? 'text-red-600' : pct !== null && pct >= 80 ? 'text-amber-600' : 'text-ink-3')}>{pct === null ? '무제한' : `${pct}%`}</span></div>
       <div className="mt-1 text-lg font-bold">{usedLabel} <span className="text-sm font-normal text-ink-3">/ {limitLabel}</span></div>
       <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
-        <div className={cx('h-full rounded-full', pct === null ? 'bg-emerald-400' : pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-brand-600')} style={{ width: `${pct ?? 6}%` }} />
+        <div className={cx('h-full rounded-full', pct === null ? 'bg-green-400' : pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-brand-600')} style={{ width: `${pct ?? 6}%` }} />
       </div>
     </div>
   );
