@@ -97,3 +97,8 @@ html.native-android { --sab: max(var(--safe-area-inset-bottom, env(safe-area-ins
 /* V6 14번: 선택칸 글자 아래 잘림(큰 글씨 설정·안드로이드 글꼴) — 고정 높이 대신 최소 40px, 줄높이 보통 */
 select { min-height: 2.5rem; line-height: 1.5; padding-top: 0.25rem; padding-bottom: 0.25rem; }
 .fc select, table select { min-height: 2rem; }
+
+/* V14 30번: 휴대폰 업무 상세(패널·전체 화면)가 열려 있으면 하단 탭·+ 버튼을 숨긴다 — 댓글 입력줄이 맨 아래 */
+@media (max-width: 639px) {
+  html.task-detail-open nav[aria-label="하단 메뉴"] { display: none; }
+}

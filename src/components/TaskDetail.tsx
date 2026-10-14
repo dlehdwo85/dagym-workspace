@@ -60,6 +60,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   useEffect(() => { try { setFold(JSON.parse(localStorage.getItem('wos_td_fold') ?? '{}')); } catch {} }, []);
   const toggleFold = (k: string) => setFold((f) => { const n = { ...f, [k]: !f[k] }; try { localStorage.setItem('wos_td_fold', JSON.stringify(n)); } catch {} return n; });
   const [mobile, setMobile] = useState(false);
+  // V14 30번: 휴대폰에서 업무 상세가 열려 있으면 하단 탭(+ 버튼)을 숨겨 댓글 입력줄과 겹치지 않게
+  useEffect(() => {
+    if (!mobile) return;
+    document.documentElement.classList.add('task-detail-open');
+    return () => document.documentElement.classList.remove('task-detail-open');
+  }, [mobile]);
   useEffect(() => { const m = () => setMobile(window.innerWidth < 640); m(); window.addEventListener('resize', m); return () => window.removeEventListener('resize', m); }, []);
   const [itemAssignee, setItemAssignee] = useState<string | null>(null);
   const camRef = useRef<HTMLInputElement>(null);
@@ -233,7 +239,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const autoGrow = (el: HTMLTextAreaElement | null) => { if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 112)}px`; } };
   const commentFormEl = (
           <form onSubmit={sendComment} className={cx(!mobile && 'relative', 'mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20',
-            mobile && cx('fixed inset-x-0 mt-0 rounded-none border-x-0 border-b-0 bg-white shadow-[0_-4px_12px_rgba(15,23,42,0.08)]', inPanel ? 'bottom-0 z-[45] pb-[var(--sab)]' : 'bottom-[calc(4rem+var(--sab))] z-30'))} data-testid="comment-form">
+            mobile && cx('fixed inset-x-0 mt-0 rounded-none border-x-0 border-b-0 bg-white shadow-[0_-4px_12px_rgba(15,23,42,0.08)]', 'bottom-0 z-[45] pb-[var(--sab)]'))} data-testid="comment-form">
             {/* V8 7번: "@" 를 치면 이 업무를 볼 수 있는 사람 자동완성 */}
             {(() => {
               const m = /(^|\s)@([^\s@]*)$/.exec(comment);
@@ -282,7 +288,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   );
   const commentForm = mobile && typeof document !== 'undefined' ? createPortal(commentFormEl, document.body) : commentFormEl;
   return (
-    <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(7.5rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
+    <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(4.5rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
       {/* 상단 도구 막대 */}
       <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
         {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-emerald-50 px-2.5 text-sm font-semibold text-emerald-700"><CircleCheck className="size-4" />완료됨</span>}

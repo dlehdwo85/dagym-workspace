@@ -1814,7 +1814,15 @@ await step('V14 19번·R-15·R-16: 업무 상세 머리 요약·D-day·다음 �
   const bar = await form.boundingBox();
   assert.ok(bar.height <= 60, `휴대폰 댓글줄은 한 줄 (높이 ${bar.height})`);
   assert.equal(await form.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)', '불투명 배경');
+  // V14 30번: 업무 상세에서는 하단 탭·+ 버튼을 숨기고 입력줄이 맨 아래
+  assert.equal(await staff.getByTestId('fab').isVisible(), false, '업무 상세에서 + 버튼 숨김');
+  assert.ok(Math.abs((await form.boundingBox()).y + (await form.boundingBox()).height - (staff.viewportSize().height)) <= 2, '입력줄이 화면 맨 아래');
   await staff.screenshot({ path: `${SHOTS}/94-mobile-comment-bar.png` });
+  const vp0 = staff.viewportSize();
+  for (const w of [360, 390]) { await staff.setViewportSize({ width: w, height: 780 }); await staff.waitForTimeout(300); await staff.screenshot({ path: `${SHOTS}/94-mobile-comment-bar-${w}.png` }); }
+  await staff.setViewportSize(vp0);
+  await staff.goto(`${BASE}/tasks`);
+  await staff.getByTestId('fab').waitFor(); // 상세를 벗어나면 하단 탭 다시 보임
 });
 await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 질문) / 사용자 관리 "팀" 탭 → 팀 만들기 → 팀 업무 등록 → 팀 보드·업무 칩', async () => {
   await owner.goto(BASE + '/calendar');
