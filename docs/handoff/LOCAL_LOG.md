@@ -119,3 +119,5 @@
 - 2026-10-14 Vercel 팀 Pro 전환(대표 결제, plan pro active) — 하루 100회 배포 한도 해소. 운영 4e9e3ae 재배포.
 
 - 2026-10-14 운영 70aef89(15차 ①~⑧·V14 14·16, migration 037): /signup·/terms·/privacy·/welcome 200. 비로그인 / → /login(랜딩은 /welcome). 약관·처리방침 사업자 정보 = COMPANY_NAME·COMPANY_CEO·COMPANY_BIZNO·COMPANY_ADDRESS 환경변수 대기(대표 입력).
+
+- 2026-10-14 자료실 AI 자동 정리 운영 확인: 새 업로드(앱 아이콘 png) → 자동으로 폴더 디자인/아이콘·태그 5개·제목 생성. 기존 파일(촬영 요청서)은 업로드 당시(13차 전)라 미정리 → "다시 정리"로 마케팅/촬영요청서 정리(신뢰도 0.9).
