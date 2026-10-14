@@ -518,9 +518,9 @@ await step('B-9 결재선 화면에서 2단계 결재선 만들기 → 업무에
   await owner.getByTestId('approval-lines').getByText('계약 결재').waitFor();
   const id = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'PT 강사 계약서 검토', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, taskType: 'approval' })).id;
   await owner.goto(`${BASE}/tasks/${id}`);
-  await openMoreFields(owner);
-  await owner.getByLabel('결재선').selectOption({ label: '계약 결재 (2단계)' });
-  await owner.waitForTimeout(600);
+  // V14 27번: 상세 화면에서 결재선 칸은 뺌(데이터는 유지) — 결재선 지정은 API/업무 생성 때
+  const line = (await ctx.owner.ok('GET', '/api/approval-lines')).lines.find((l) => l.name === '계약 결재');
+  await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { approvalLineId: line.id });
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
   const c = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const m = await login(c, ctx.managerA.email, ctx.managerA.password);
@@ -663,7 +663,9 @@ await step('S-2 회의 메모 2줄 → 후속 업무 2건(담당=참석자) 자�
 await step('S-3 업무 시간 배정: 담당자 조직 캘린더 + 담당자 참석, 블록 미리보기에서 업무 완료', async () => {
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '소화기 위치 표지 교체', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 2), approvalRequired: false, estimateMinutes: 120 })).id;
   await owner.goto(`${BASE}/tasks/${t}`);
-  await owner.getByTestId('linked-events').getByRole('button', { name: '실행 시간 배정' }).click();
+  assert.equal(await owner.getByTestId('linked-events').count(), 0, 'V14 27번: 연결 일정이 없으면 줄 없음');
+  await owner.getByRole('button', { name: '더보기' }).click();
+  await owner.getByRole('menuitem', { name: '실행 시간 배정' }).click();
   const dlg = owner.getByRole('dialog', { name: '업무 실행 시간 배정' });
   await dlg.getByText('이직원님을 참석자로 넣어').waitFor();
   assert.equal(await dlg.getByLabel('캘린더').locator('option:checked').textContent(), '다짐 강남점 일정');
@@ -671,7 +673,7 @@ await step('S-3 업무 시간 배정: 담당자 조직 캘린더 + 담당자 참
   await dlg.getByRole('button', { name: '배정' }).click();
   await owner.getByText('이직원님의 실행 시간을 배정했습니다').waitFor();
   await owner.getByTestId('linked-events').getByText('소화기 위치 표지 교체').waitFor();
-  await owner.getByTestId('estimate-progress').getByText('2시간 배정').waitFor();
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t}`)).task.scheduled_minutes, 120, '2시간 배정');
   const blk = (await ctx.staffA.client.ok('GET', `/api/tasks/${t}/events`)).events[0];
   assert.equal(blk.role, 'block');
   // 직원 캘린더에서 블록 미리보기 → 완료

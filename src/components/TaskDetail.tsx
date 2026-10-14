@@ -342,6 +342,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={16} />{t.assignee_name ?? '담당 없음'}{data.collaborators?.length > 0 && <span className="text-ink-3">+{data.collaborators.length}</span>}</span>
             <DdayChip due={t.due_date} time={t.due_time} status={t.status} />
             <PriorityTag p={t.priority} />
+            {t.project_id && <Link href={`/projects/${t.project_id}`} className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded-full bg-slate-100 px-2 py-0.5 text-ink-2 hover:bg-slate-200" data-testid="summary-project"><FolderKanban className="size-3 shrink-0" /><span className="truncate">{t.project_name ?? '프로젝트'}</span></Link>}
+            {photoNeed > 0 && <span className={cx('rounded-full px-2 py-0.5 font-medium tabular-nums', photoShort ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700')}>사진 {photoHave}/{photoNeed}</span>}
             {data.speed?.median_days != null && t.status !== 'done' && <span className="text-ink-3" data-testid="speed-hint" title="담당자의 최근 90일 완료 업무 기준">예상 처리 ≈ {data.speed.median_days}일</span>}
           </div>
           {progTotal > 0 && (
@@ -581,105 +583,33 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               </select>
             </Prop>
             <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line" data-testid="detail-repeat">{t.due_date || t.recurrence_rule ? <RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /> : <span className="px-2 text-xs text-ink-3">마감일을 정하면 반복할 수 있습니다</span>}</div></Prop>
-            {/* V14 8번 팀 */}
-            <Prop icon={Users} label="팀">
-              <span className="flex w-full items-center gap-1.5" data-testid="detail-team">
-                <select className={ghostCls} value={t.team_id ?? ''} onChange={(e) => patch({ teamId: e.target.value || null })} aria-label="팀">
-                  <option value="">팀 없음</option>{teamList.data?.teams.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                </select>
-                {t.team_id && <Link href={`/teams/${t.team_id}`} className="shrink-0 text-xs text-accent-600 underline">보드</Link>}
-              </span>
-            </Prop>
-            <Prop icon={FolderKanban} label="프로젝트">
-              <select className={ghostCls} value={t.project_id ?? ''} onChange={(e) => patch({ projectId: e.target.value || null })}>
-                <option value="">없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </Prop>
-            {t.project_id && (sections.data?.sections.length ?? 0) > 0 && (
-              <Prop icon={Rows3} label="섹션">
-                <select className={ghostCls} value={t.section_id ?? ''} onChange={(e) => patch({ sectionId: e.target.value || null })}>
-                  <option value="">섹션 없음</option>{sections.data!.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </Prop>
-            )}
-            <Prop icon={CalendarCheck} label="캘린더 표시" asDiv>
-              <label className="flex min-h-8 cursor-pointer items-center gap-2.5 px-2 text-sm">
-                <input type="checkbox" role="switch" className="peer sr-only" checked={t.show_on_calendar !== false} onChange={(e) => patch({ showOnCalendar: e.target.checked })} aria-label="캘린더에 표시" />
-                <span aria-hidden className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:bg-accent-600 peer-checked:after:translate-x-4 peer-focus-visible:ring-2 peer-focus-visible:ring-accent-500/40" />
-                <span className="text-xs text-ink-2">{t.due_date ? (t.show_on_calendar !== false ? `${t.due_time ? '마감 시각' : '마감일'} 칸에 체크로 표시` : '캘린더에 안 보임') : '마감일을 정하면 캘린더에 표시됩니다'}</span>
-              </label>
-            </Prop>
           </section>
-          <div>
-            <h3 className="mt-2 px-1.5 text-xs font-semibold text-ink-3">기타 세부 정보</h3>
-            {moreFields && (
-              <section className="mt-1 grid grid-cols-1 gap-x-6 gap-y-0.5" aria-label="추가 필드">
-            {t.task_type !== 'milestone' && <Prop icon={CalendarClock} label="시작일"><input type="date" className={cx(ghostCls, '!w-[140px]')} value={t.start_date ?? ''} onChange={(e) => patch({ startDate: e.target.value || null })} /></Prop>}
-            <Prop icon={Timer} label="예상 소요">
-              <span className="flex w-full flex-wrap items-center gap-2">
-                <select className={cx(ghostCls, '!w-[120px]')} value={t.estimate_minutes ?? ''} onChange={(e) => patch({ estimateMinutes: e.target.value === '' ? null : Number(e.target.value) })}>
-                  <option value="">미정</option>{[15, 30, 60, 90, 120, 180, 240, 360, 480, 960, 1440].map((m) => <option key={m} value={m}>{fmtMinutes(m)}</option>)}
-                  {t.estimate_minutes && ![15, 30, 60, 90, 120, 180, 240, 360, 480, 960, 1440].includes(t.estimate_minutes) && <option value={t.estimate_minutes}>{fmtMinutes(t.estimate_minutes)}</option>}
-                </select>
-                {t.estimate_minutes > 0 && <span className="text-xs text-ink-2 tabular-nums" data-testid="estimate-progress">{fmtMinutes(t.scheduled_minutes ?? 0) || '0분'} 배정</span>}
-                {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700" data-testid="risk-badge" title={`남은 예상 ${fmtMinutes(data.risk.remaining)} · 마감까지 가용 ${fmtMinutes(data.risk.available ?? 0) || '0분'}`}><AlertTriangle className="size-3.5" />마감 위험</span>}
-              </span>
-            </Prop>
-            <Prop icon={Shapes} label="업무 유형">
-              <select className={ghostCls} value={t.task_type ?? 'normal'} onChange={(e) => patch({ taskType: e.target.value })}>
-                {Object.entries(TASK_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </Prop>
-            <Prop icon={Building2} label="소속 (현장·부서)"><UnitSelect className={ghostCls} value={t.org_unit_id} onChange={(v) => patch({ orgUnitId: v })} /></Prop>
-            <Prop icon={Tag} label="브랜드"><BrandSelect className={ghostCls} value={t.brand_id} onChange={(v) => patch({ brandId: v })} /></Prop>
-            <Prop icon={Hash} label="태그">
-              <input className={ghostCls} placeholder="쉼표로 구분" defaultValue={t.tags.join(', ')} onBlur={(e) => { const v = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); if (v.join() !== t.tags.join()) patch({ tags: v }); }} />
-            </Prop>
-            <Prop icon={Stamp} label="결재선">
-              <select className={ghostCls} value={t.approval_line_id ?? ''} disabled={!perms.approve || t.status === 'review'} onChange={(e) => patch({ approvalLineId: e.target.value || null })}>
-                <option value="">없음 (관리자 확인 방식)</option>{lines.data?.lines.filter((l: any) => l.active || l.id === t.approval_line_id).map((l: any) => <option key={l.id} value={l.id}>{l.name} ({l.steps.length}단계)</option>)}
-              </select>
-            </Prop>
-            <Prop icon={Camera} label="증빙 사진">
-              <span className="flex items-center gap-2">
-                <select className={cx(ghostCls, '!w-[120px]')} value={photoNeed} disabled={!perms.approve} onChange={(e) => patch({ photoRequired: Number(e.target.value) })}>
-                  {[0, 1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n ? `${n}장 필수` : '필요 없음'}</option>)}
-                </select>
-                {photoNeed > 0 && <span className={cx('text-xs font-semibold tabular-nums', photoShort ? 'text-amber-700' : 'text-emerald-600')}>{photoHave}/{photoNeed}</span>}
-              </span>
-            </Prop>
-            <Prop icon={ShieldCheck} label="완료 확인" asDiv>
-              <label className="flex h-8 items-center gap-2 px-2 text-sm">
-                <input type="checkbox" className="size-4 accent-brand-600" checked={t.approval_required} disabled={!perms.approve} onChange={(e) => patch({ approvalRequired: e.target.checked })} />
-                관리자 최종 확인 필요 {!perms.approve && <span className="text-xs text-ink-3">(관리자만 변경)</span>}
-              </label>
-            </Prop>
-            {(data.fields ?? []).map((f: any) => <CustomField key={f.id} f={f} value={t.fields?.[f.id]} onSave={(v) => setField(f.id, v)} />)}
-              </section>
-            )}
-          </div>
+          {/* 프로젝트에 사용자 지정 필드를 만들어 둔 경우에만 그 값 입력칸 */}
+          {(data.fields ?? []).length > 0 && (
+            <section className="mt-1 grid grid-cols-1 gap-y-0.5" aria-label="추가 필드">
+              {(data.fields ?? []).map((f: any) => <CustomField key={f.id} f={f} value={t.fields?.[f.id]} onSave={(v) => setField(f.id, v)} />)}
+            </section>
+          )}
+          {/* V14 27번: 기타 세부 정보(프로젝트·섹션·팀·태그·캘린더 표시·사용자 필드·결재선·예상 소요·유형·사진 필수 등)는 화면에서 뺌 — 데이터는 그대로 */}
           </div>
         </aside>
         <div className={cx('min-w-0 space-y-6', wide && 'lg:col-start-1 lg:row-start-3')}>
+        {/* V14 27번: 연결 일정은 있을 때만 한 줄씩 (실행 시간 배정은 ⋯ 메뉴) */}
+        {(events.data?.events.length ?? 0) > 0 && (
         <section data-testid="linked-events">
-          <div className="mb-1.5 flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-sm font-semibold"><CalendarRange className="size-4 text-ink-3" /><FoldBtn open={!fold.ev} onClick={() => toggleFold('ev')} label="연결 일정" /> {(events.data?.events.length ?? 0) > 0 && <span className="text-xs font-medium text-ink-2">{events.data!.events.length}</span>}</h2>
-            <Button size="sm" variant="ghost" onClick={() => setBlockOpen(true)}><Timer />실행 시간 배정</Button></div>
-          <ul className={cx('space-y-1', fold.ev && 'hidden')}>
-            {events.data?.events.map((e: any) => (
+          <ul className="space-y-1">
+            {events.data!.events.map((e: any) => (
               <li key={e.id}>
-                <Link href={`/calendar?event=${e.id}`} className="flex items-center gap-2.5 rounded-input border border-line px-3 py-2 text-sm hover:bg-slate-50">
-                  <span className="h-6 w-1 shrink-0 rounded-full" style={{ background: e.color }} />
-                  {e.kind === 'task_block' ? <Timer className="size-4 shrink-0 text-ink-2" aria-label="업무 시간" /> : <CalendarDays className="size-4 shrink-0 text-ink-2" />}
-                  <span className="min-w-0 flex-1 truncate font-medium">{e.title.replace(/^(\[(업무|업무 시간)\]\s*)+/, '')}</span>
-                  {e.sync && <span className="shrink-0 rounded-full bg-emerald-50 px-1.5 text-[11px] font-medium text-emerald-700" title="마감을 바꾸면 일정도 같이 옮겨집니다">날짜 연동</span>}
-                  <span className="shrink-0 text-xs text-ink-2 tabular-nums">{fmtTimeRange(e.occurrence_start ?? e.start_at, e.occurrence_start ? new Date(new Date(e.occurrence_start).getTime() + (new Date(e.end_at).getTime() - new Date(e.start_at).getTime())) : e.end_at, { allDay: e.all_day })}{e.rrule && !e.occurrence_start ? ' · 반복' : ''}</span>
+                <Link href={`/calendar?event=${e.id}`} className="flex items-center gap-2 rounded-input px-1 py-1 text-sm text-ink-2 hover:bg-slate-50">
+                  <CalendarRange className="size-4 shrink-0 text-ink-3" aria-label="연결 일정" />
+                  <span className="min-w-0 flex-1 truncate">{e.title.replace(/^(\[(업무|업무 시간)\]\s*)+/, '')}</span>
+                  <span className="shrink-0 text-xs tabular-nums">{fmtTimeRange(e.occurrence_start ?? e.start_at, e.occurrence_start ? new Date(new Date(e.occurrence_start).getTime() + (new Date(e.end_at).getTime() - new Date(e.start_at).getTime())) : e.end_at, { allDay: e.all_day })}{e.rrule && !e.occurrence_start ? ' · 반복' : ''}</span>
                 </Link>
               </li>
             ))}
-            {!events.data?.events.length && <li className="text-xs text-ink-3">연결된 일정이 없습니다 — 일정(회의)에서 이 업무를 연결하거나 실행 시간을 배정하세요</li>}
           </ul>
         </section>
-
+        )}
 
         <section id="comments" className="border-t border-line pt-5">
           <div className="mb-3 flex items-center gap-4 text-sm font-semibold" role="tablist">

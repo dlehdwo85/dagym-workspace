@@ -197,19 +197,6 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
             <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
           </select></Field>}
         </div>
-        {/* V14 8번: 팀에 배정 — 팀원 모두에게 각각 / 팀장이 담당자 지정 */}
-        {!defaults?.parentId && !tpl && (teams.data?.teams.length ?? 0) > 0 && (
-          <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="team-assign">
-            <select className="h-8 rounded-input border border-line bg-white px-2 text-xs" value={f.teamId ?? ''} onChange={(e) => set('teamId')(e.target.value || null)} aria-label="팀">
-              <option value="">팀 없음</option>{teams.data!.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-            {f.teamId && <>
-              <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={f.teamMode === 'tag'} onChange={() => set('teamMode')('tag')} />소속 팀만(담당 그대로)</label>
-              <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={(f.teamMode ?? 'lead') === 'lead'} onChange={() => set('teamMode')('lead')} />팀에 배정(팀장이 담당 지정)</label>
-              <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={f.teamMode === 'each'} onChange={() => set('teamMode')('each')} />팀원 모두에게 각각</label>
-            </>}
-          </div>
-        )}
         {/* V6 13번: 다른 사람도 같은 업무를 각자 1건씩 (담당자별 묶음) */}
         {!defaults?.parentId && !tpl && (
           <div data-testid="multi-assignee">
@@ -238,13 +225,34 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           ))}
           {f.dueDate && <button type="button" onClick={() => set('dueDate')('')} className="rounded-full px-2 py-1 text-xs text-ink-3 hover:text-ink-2">지우기</button>}
         </div>
+        {/* V14 27번: 상세와 같은 기준 — 프로젝트·팀은 "더 입력"에 접어 둠(기본 닫힘) */}
         {!defaults?.parentId && (
+          <details className="rounded-input border border-line px-2.5 py-1.5 text-sm" data-testid="quick-more" open={!!f.projectId && !defaults?.projectId ? true : undefined}>
+            <summary className="cursor-pointer text-xs font-medium text-ink-2">더 입력 (프로젝트·팀){f.projectId ? ` · ${projects.data?.projects.find((p) => p.id === f.projectId)?.name ?? ''}` : ''}</summary>
+            <div className="mt-2 space-y-2">
+        {(
           <Field label="프로젝트">
             <select className={inputCls} value={f.projectId ?? ''} onChange={(e) => set('projectId')(e.target.value)}>
               <option value="">없음</option>
               {projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </Field>
+        )}
+        {/* V14 8번: 팀에 배정 — 팀원 모두에게 각각 / 팀장이 담당자 지정 */}
+        {!tpl && (teams.data?.teams.length ?? 0) > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="team-assign">
+            <select className="h-8 rounded-input border border-line bg-white px-2 text-xs" value={f.teamId ?? ''} onChange={(e) => set('teamId')(e.target.value || null)} aria-label="팀">
+              <option value="">팀 없음</option>{teams.data!.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            {f.teamId && <>
+              <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={f.teamMode === 'tag'} onChange={() => set('teamMode')('tag')} />소속 팀만(담당 그대로)</label>
+              <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={(f.teamMode ?? 'lead') === 'lead'} onChange={() => set('teamMode')('lead')} />팀에 배정(팀장이 담당 지정)</label>
+              <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={f.teamMode === 'each'} onChange={() => set('teamMode')('each')} />팀원 모두에게 각각</label>
+            </>}
+          </div>
+        )}
+            </div>
+          </details>
         )}
         {day && f.assigneeId !== user.id && (
           <p className={day.freeMinutes < 60 || day.away || day.holiday ? 'rounded-input bg-amber-50 p-2 text-xs text-amber-900' : 'rounded-input bg-slate-50 p-2 text-xs text-ink-2'} data-testid="assign-availability">
