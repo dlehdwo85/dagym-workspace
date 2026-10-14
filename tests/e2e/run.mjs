@@ -391,6 +391,9 @@ await step('⑥ 다른 현장 직원은 화면에서도 접근 불가 안내', a
 await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 조회)', async () => {
   await staff.goto(`${BASE}/tasks/${t3}`);
   const nd = addDays(today, 8);
+  // V13 11번: 휴대폰은 "세부 정보" 요약 한 줄 → 눌러서 펼침
+  await staff.getByTestId('details-toggle').getByText(/👤/).waitFor();
+  await staff.getByTestId('details-toggle').click();
   await staff.getByTestId('detail-due').getByTestId('due-picker').click(); // 마감일 칩 → 빠른 선택·달력
   await staff.getByLabel('마감일 날짜 선택').fill(nd);
   await staff.locator(`[data-testid="detail-due"][data-value="${nd}"]`).waitFor();
@@ -1618,6 +1621,7 @@ await step('V13 11·12·8번: 업무 상세 — 설명 위·오른쪽 속성 열
   const desc = await owner.getByTestId('desc-section').boundingBox(), aside = await owner.getByTestId('detail-aside').boundingBox();
   assert.ok(aside.x > desc.x + desc.width - 5, 'PC: 속성은 오른쪽 열');
   assert.ok(desc.y < (await owner.getByTestId('detail-requester').boundingBox()).y + 200, '설명이 위쪽');
+  await owner.evaluate(() => localStorage.setItem('wos_task_more', '0')); await owner.reload(); // 필드 더보기 접힘 = 빈 상태 한 줄
   await owner.getByTestId('plan-empty').getByText('＋ 하위 업무 나눠 맡기기').click();
   await owner.getByTestId('help-subtasks').click();
   await owner.getByRole('note').getByText(/나눠 맡기거나 마감이 따로/).waitFor();
