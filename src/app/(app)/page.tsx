@@ -138,6 +138,7 @@ export default function Dashboard() {
   const router = useRouter();
   const { colors: calColors } = useCalColors();
   const mine = useApi<{ tasks: any[] }>('/api/tasks?view=today&limit=50');
+  const myTeams = useApi<{ teams: { id: string; name: string; color: string }[]; tasks: any[] }>('/api/teams/today'); // V14 8번 우리 팀
   // 내 미완료 업무 전체: 이번 주 마감(요일별 표시)·마감 없는 새 업무(48시간)
   const myOpen = useApi<{ tasks: any[] }>('/api/tasks?view=my&limit=300');
   const today = data?.today ?? seoulDay(new Date());
@@ -238,6 +239,23 @@ export default function Dashboard() {
           <input value={aiQ} onChange={(e) => setAiQ(e.target.value)} placeholder="✨ AI에게 요청 (예: 다짐 로고 찾아줘, 이번 주 내 마감 정리)" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3" aria-label="AI에게 요청" />
           <button type="submit" className="shrink-0 rounded-input bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50" disabled={!aiQ.trim()}>요청</button>
         </form>
+      )}
+      {/* V14 8번: 우리 팀 오늘 할 일 (팀에 속해 있을 때만) */}
+      {(myTeams.data?.teams.length ?? 0) > 0 && (
+        <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="home-team">
+          <div className="mb-2 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">우리 팀 오늘 할 일</h2>
+            {myTeams.data!.teams.map((t) => <Link key={t.id} href={`/teams/${t.id}`} className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs hover:bg-slate-50"><span className="size-2 rounded-full" style={{ background: t.color }} />{t.name} 보드</Link>)}</div>
+          <ul className="divide-y divide-line text-sm">
+            {myTeams.data!.tasks.slice(0, 8).map((t) => (
+              <li key={t.id} className="flex items-center gap-2 py-1.5">
+                <span className="size-2 shrink-0 rounded-full" style={{ background: t.team_color ?? '#0F766E' }} />
+                <Link href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate hover:underline">{t.title}</Link>
+                <span className="shrink-0 text-xs text-ink-3">{t.assignee_name ?? '담당 미정'}</span><DueChip due={t.due_date} status={t.status} />
+              </li>
+            ))}
+            {!myTeams.data!.tasks.length && <li className="py-2 text-xs text-ink-3">오늘 할 팀 업무가 없습니다</li>}
+          </ul>
+        </section>
       )}
       {/* WORKIN_V2 홈: 오늘 할 일 · 이번 주 일정 · 이달의 일정 · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동 (모바일은 위에서부터 이 순서) */}
       <div className="grid min-w-0 gap-4 lg:grid-flow-dense lg:grid-cols-3">

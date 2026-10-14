@@ -1696,6 +1696,33 @@ await step('V14 2·6번: AI 비서 대화가 남아 다시 열면 이어짐, 직
   await row.getByTestId('organize-retry').click();
   await owner.getByTestId('library-list').locator('li').filter({ hasText: 'V14 단가표' }).getByTestId('organize-done').getByText(/영업\/단가 ·.*#단가표/).waitFor();
 });
+await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 질문) / 사용자 관리 "팀" 탭 → 팀 만들기 → 팀 업무 등록 → 팀 보드·업무 칩', async () => {
+  await owner.goto(BASE + '/calendar');
+  await owner.getByTestId('ai-dock-open').click();
+  await owner.getByTestId('ai-dock').getByText('이 날 일정과 마감 업무 정리해줘').waitFor();
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: '오늘은 일정 2건입니다.' }], stop_reason: 'end_turn' }] }) });
+  await owner.getByTestId('ai-dock-suggest').first().click();
+  await owner.getByTestId('ai-dock-chat').getByText('오늘은 일정 2건입니다.').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/66-ai-dock.png` });
+  await owner.getByTestId('ai-dock').getByRole('button', { name: '닫기' }).click();
+  // 팀
+  await owner.goto(BASE + '/admin/users');
+  await owner.getByTestId('tab-teams').click();
+  await owner.getByTestId('team-new').click();
+  await owner.getByLabel('팀 이름').fill('운영팀 E2E');
+  await owner.getByLabel('김대표 팀원').check();
+  await owner.getByLabel('최매니저 팀원').check();
+  await owner.getByTestId('team-save').click();
+  await owner.getByTestId('team-card').filter({ hasText: '운영팀 E2E' }).waitFor();
+  const [tm] = await sql`select id from teams where name = '운영팀 E2E'`;
+  const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '팀 보드 시험 업무', orgUnitId: ctx.siteA, teamId: tm.id, teamMode: 'lead', assigneeId: null })).id;
+  await owner.goto(`${BASE}/teams/${tm.id}`);
+  await owner.getByTestId('team-board').getByText('팀 보드 시험 업무').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/67-team-board.png`, fullPage: true });
+  await owner.goto(`${BASE}/tasks?teamId=${tm.id}`);
+  await owner.getByTestId('team-chip').first().getByText('운영팀 E2E').waitFor();
+  assert.ok(t);
+});
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
   const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');

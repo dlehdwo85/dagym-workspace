@@ -14,7 +14,7 @@ import type { SessionUser } from './types';
  *   볼 수 없는 방은 404 (있는 줄도 모르게).
  */
 const tenantOf = (u: SessionUser) => (u.isDemo ? 'demo' : 'default');
-type Room = { id: string; tenant: string; kind: 'dm' | 'group' | 'company' | 'task'; name: string | null; task_id: string | null; dm_key: string | null };
+type Room = { id: string; tenant: string; kind: 'dm' | 'group' | 'company' | 'task' | 'team'; name: string | null; task_id: string | null; dm_key: string | null; team_id?: string | null };
 
 async function companyRoom(u: SessionUser, sql: Sql) {
   const t = tenantOf(u);
@@ -27,10 +27,14 @@ async function companyRoom(u: SessionUser, sql: Sql) {
 /** 방 접근 확인 (+ 회사·업무 방은 자동 가입). 못 보면 404 */
 export async function loadRoom(u: SessionUser, roomId: string, sql: Sql = db()): Promise<Room> {
   if (!/^[0-9a-f-]{36}$/.test(roomId)) throw notFound('대화방이 없습니다');
-  const [r] = await sql<Room[]>`select id, tenant, kind, name, task_id, dm_key from chat_rooms where id = ${roomId}`;
+  const [r] = await sql<Room[]>`select id, tenant, kind, name, task_id, dm_key, team_id from chat_rooms where id = ${roomId}`;
   if (!r || r.tenant !== tenantOf(u)) throw notFound('대화방이 없습니다');
   if (r.kind === 'task') {
     await loadTaskForUser(u, r.task_id!, sql).catch(() => { throw notFound('대화방이 없습니다'); });
+    await sql`insert into chat_members (room_id, user_id) values (${r.id}, ${u.id}) on conflict do nothing`;
+  } else if (r.kind === 'team') { // V14 8번 팀 대화방: 팀원만 (팀원이 바뀌면 teams.ts 가 멤버를 맞춘다)
+    const [m] = await sql`select 1 from team_members where team_id = ${r.team_id ?? null} and user_id = ${u.id}`;
+    if (!m) throw notFound('대화방이 없습니다');
     await sql`insert into chat_members (room_id, user_id) values (${r.id}, ${u.id}) on conflict do nothing`;
   } else if (r.kind === 'company') {
     await sql`insert into chat_members (room_id, user_id) values (${r.id}, ${u.id}) on conflict do nothing`;

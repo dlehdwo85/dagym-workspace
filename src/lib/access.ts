@@ -24,16 +24,40 @@ export async function accessibleUnitIds(u: SessionUser, sql: Sql = db()): Promis
   return rows.map((r) => r.id);
 }
 
-/** 업무 조회 가능 조건 (tasks 별칭 t 기준) */
+/** 메뉴 권한 단계를 SQL 안에서 (사람별 예외 → 등급 설정 → 기본값). 동기 함수(taskVisibleSql)에서 쓰려고 */
+function menuLevelSql(sql: Sql, u: SessionUser, menu: string, def: string) {
+  return sql`coalesce((select level from menu_user_perms where menu = ${menu} and user_id = ${u.id}), (select level from menu_role_perms where menu = ${menu} and role = ${u.role}), ${def})`;
+}
+const TEAM_DEF: Record<string, [string, string]> = { owner: ['edit', 'edit'], admin: ['edit', 'edit'], dept_lead: ['view', 'none'], site_manager: ['view', 'none'], staff: ['view', 'none'] };
+
+/** 업무 조회 가능 조건 (tasks 별칭 t 기준)
+ * V14 8번: 팀 업무(team_id)는 소속(현장)이 아니라 팀으로 — 팀원("팀 업무" 조회 이상) · "다른 팀 업무 보기" 권한자만. 본인이 담당·지시·만든·참여한 업무는 항상 */
 export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null) {
   // 대표·본사 관리자(전체)에게도 앱 심사용 데모 조직 업무는 섞지 않는다
   if (units === null) return sql`not exists (select 1 from org_units dz where dz.id = t.org_unit_id and dz.is_demo)`;
+  const [dTeam, dAll] = TEAM_DEF[u.role] ?? ['view', 'none'];
   return sql`(
-    t.org_unit_id = any(${units}::uuid[])
+    (t.team_id is null and t.org_unit_id = any(${units}::uuid[]))
+    or (t.team_id is not null and (
+      (${menuLevelSql(sql, u, 'team_tasks', dTeam)} <> 'none' and exists (select 1 from team_members tm where tm.team_id = t.team_id and tm.user_id = ${u.id}))
+      or ${menuLevelSql(sql, u, 'team_tasks_all', dAll)} <> 'none'))
     or t.assignee_id = ${u.id}
     or t.created_by = ${u.id}
+    or t.requested_by = ${u.id}
     or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id})
   )`;
+}
+
+/** V14 8번: 이 사용자가 팀 업무에 갖는 단계 (none/view/edit) */
+export async function teamTaskLevel(u: SessionUser, teamId: string, sql: Sql = db()) {
+  if (isAdmin(u)) return 'edit';
+  const { menuLevel } = await import('./menuPerms');
+  const [m] = await sql<{ is_lead: boolean }[]>`select is_lead from team_members where team_id = ${teamId} and user_id = ${u.id}`;
+  const rank: Record<string, number> = { none: 0, view: 1, edit: 2 };
+  const own = m ? await menuLevel(u, 'team_tasks', sql) : 'none';
+  const mine = m?.is_lead && rank[own] >= 1 ? 'edit' : own; // 팀장은 조회 이상이면 자기 팀 편집
+  const all = await menuLevel(u, 'team_tasks_all', sql);
+  return rank[all] > rank[mine] ? all : mine;
 }
 
 export interface TaskAccessRow {
@@ -43,6 +67,7 @@ export interface TaskAccessRow {
   created_by: string;
   project_id: string | null;
   requested_by?: string | null;
+  team_id?: string | null;
 }
 
 export interface TaskPerms {
@@ -57,7 +82,14 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
   const inUnit = units === null || units.includes(t.org_unit_id);
   const isCollab =
     (await sql`select 1 from task_collaborators where task_id = ${t.id} and user_id = ${u.id}`).length > 0;
-  const involved = t.assignee_id === u.id || t.created_by === u.id || isCollab;
+  const involved = t.assignee_id === u.id || t.created_by === u.id || isCollab || (!!t.requested_by && t.requested_by === u.id);
+  if (t.team_id) { // V14 8번 팀 업무
+    const lv = await teamTaskLevel(u, t.team_id, sql);
+    const [lead] = await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`;
+    const teamManager = isAdmin(u) || (!!lead && lv === 'edit');
+    return { view: lv !== 'none' || involved, edit: lv === 'edit' || involved, approve: teamManager || (inUnit && atLeast(u, 'site_manager')),
+      delete: teamManager || t.created_by === u.id || (!!t.requested_by && t.requested_by === u.id) };
+  }
   const manager = inUnit && atLeast(u, 'site_manager');
   return {
     view: inUnit || involved,
@@ -73,7 +105,7 @@ export const isUuid = (s: string) => UUID_RE.test(s);
 export async function loadTaskForUser(u: SessionUser, taskId: string, sql: Sql = db()) {
   if (!isUuid(taskId)) throw notFound('업무를 찾을 수 없습니다');
   const rows = await sql<TaskAccessRow[]>`
-    select id, org_unit_id, assignee_id, created_by, project_id, requested_by from tasks where id = ${taskId} and deleted_at is null`;
+    select id, org_unit_id, assignee_id, created_by, project_id, requested_by, team_id from tasks where id = ${taskId} and deleted_at is null`;
   const t = rows[0];
   if (!t) throw notFound('업무를 찾을 수 없습니다');
   const perms = await taskPerms(u, t, sql);

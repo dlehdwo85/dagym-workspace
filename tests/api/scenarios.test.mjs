@@ -2472,3 +2472,59 @@ describe('V14 11번 모든 화면 AI 비서 — 화면 맥락은 id 만, 서버�
     await ctl({ anthropicReset: true });
   });
 });
+
+describe('V14 8번 팀 단위 업무·팀 업무 권한', () => {
+  let team;
+  test('팀 만들기(사용자 관리 편집)·팀장 필수·팀 대화방 자동', async () => {
+    assert.equal((await ctx.managerA.client.post('/api/teams', { name: '마케팅팀', members: [{ userId: ctx.managerA.id, lead: true }] })).status, 404, '사용자 관리 권한 없음');
+    assert.equal((await ctx.owner.post('/api/teams', { name: '마케팅팀', members: [{ userId: ctx.managerA.id, lead: false }] })).status, 400, '팀장 1명 이상');
+    team = (await ctx.owner.ok('POST', '/api/teams', { name: '마케팅팀', color: '#2563EB', members: [{ userId: ctx.managerA.id, lead: true }, { userId: ctx.ownerId, lead: false }] })).id;
+    const list = await ctx.managerA.client.ok('GET', '/api/teams');
+    const t = list.teams.find((x) => x.id === team);
+    assert.equal(t.i_lead, true); assert.ok(t.room_id);
+    assert.equal((await ctx.managerA.client.ok('GET', `/api/chat/rooms/${t.room_id}`)).room.kind, 'team');
+    assert.equal((await ctx.staffA.client.get(`/api/chat/rooms/${t.room_id}`)).status, 404, '팀원 아니면 팀 대화방 404');
+  });
+  test('팀 업무는 팀원만(같은 현장이어도 팀 밖이면 404), 본인 담당이면 보임, 팀장 배정 알림·재배정, 팀원 각각', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14-8 팀 배정', orgUnitId: ctx.siteA, teamId: team, teamMode: 'lead', assigneeId: null })).id;
+    assert.ok((await sql`select 1 from notifications where user_id = ${ctx.managerA.id} and title = ${'팀 업무 배정: V14-8 팀 배정'}`).length, '팀장에게 담당 지정 알림');
+    assert.equal((await ctx.staffA.client.get(`/api/tasks/${t}`)).status, 404, '같은 현장이어도 팀 밖이면 404');
+    assert.ok(!(await ctx.staffA.client.ok('GET', '/api/tasks?includeDone=1')).tasks.some((x) => x.id === t));
+    const d = await ctx.managerA.client.ok('GET', `/api/tasks/${t}`);
+    assert.equal(d.task.team_name, '마케팅팀'); assert.equal(d.perms.edit, true);
+    // 팀장이 담당 지정 → 담당이 된 사람은 팀 밖이어도 볼 수 있다
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.staffA.id });
+    await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
+    // 팀장은 자기 팀 업무 재배정 가능 (기본 재배정 권한 없는 현장 관리자)
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.ownerId });
+    assert.equal((await ctx.staffA.client.get(`/api/tasks/${t}`)).status, 404, '담당에서 빠지면 다시 안 보임');
+    // 사람별 예외 "다른 팀 업무 보기"
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'team_tasks_all', userId: ctx.staffA.id, level: 'view' });
+    const v = await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
+    assert.equal(v.perms.edit, false, '조회만');
+    assert.equal((await ctx.staffA.client.req('PATCH', `/api/tasks/${t}`, { title: '바꾸기' })).status, 403);
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'team_tasks_all', userId: ctx.staffA.id, level: null });
+    // 팀원 모두에게 각각
+    const each = await ctx.owner.ok('POST', '/api/tasks', { title: 'V14-8 각자', orgUnitId: ctx.siteA, teamId: team, teamMode: 'each' });
+    assert.equal(each.ids.length, 2);
+    const rows = await sql`select assignee_id, team_id from tasks where batch_id = ${each.batchId}`;
+    assert.deepEqual(new Set(rows.map((r) => r.assignee_id)), new Set([ctx.managerA.id, ctx.ownerId])); assert.ok(rows.every((r) => r.team_id === team));
+    // 필터·팀 밖 사람의 팀 배정 불가
+    assert.ok((await ctx.managerA.client.ok('GET', `/api/tasks?teamId=${team}&includeDone=1`)).tasks.every((x) => x.team_id === team));
+    assert.equal((await ctx.staffA.client.post('/api/tasks', { title: 'x', orgUnitId: ctx.siteA, teamId: team })).status, 403);
+    // 홈 우리 팀
+    const home = await ctx.managerA.client.ok('GET', '/api/teams/today');
+    assert.equal(home.teams[0].name, '마케팅팀');
+    // 주간 보고 팀별
+    const rep = await ctx.owner.ok('GET', `/api/reports/team?teamId=${team}`);
+    assert.ok(rep.reports.every((r) => [ctx.managerA.id, ctx.ownerId].includes(r.user_id))); assert.ok(rep.teams.some((x) => x.id === team));
+  });
+  test('팀원이 바뀌면 대화방 멤버도 맞춤, 보관하면 목록에서 빠짐', async () => {
+    await ctx.owner.ok('PATCH', `/api/teams/${team}`, { members: [{ userId: ctx.managerA.id, lead: true }, { userId: ctx.staffA.id, lead: false }] });
+    const room = (await ctx.staffA.client.ok('GET', '/api/teams')).teams.find((x) => x.id === team).room_id;
+    await ctx.staffA.client.ok('GET', `/api/chat/rooms/${room}`);
+    assert.equal((await sql`select count(*)::int n from chat_members where room_id = ${room} and user_id = ${ctx.ownerId}`)[0].n, 0, '빠진 팀원은 대화방에서도');
+    await ctx.owner.ok('PATCH', `/api/teams/${team}`, { archived: true });
+    assert.ok(!(await ctx.owner.ok('GET', '/api/teams')).teams.some((x) => x.id === team));
+  });
+});

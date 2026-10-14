@@ -55,6 +55,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [tab, setTab] = useState<'comments' | 'history'>('comments');
   const [moreFields, setMoreFields] = useState(false);
   const wide = !inPanel; // V13 11번: 전체 화면(PC)은 2열
+  const teamList = useApi<{ teams: { id: string; name: string }[] }>('/api/teams');
   const [details, setDetails] = useState(true);
   useEffect(() => { if (window.innerWidth < 640) setDetails(false); }, []); // 휴대폰은 "세부 정보" 요약 한 줄로 시작
   const [subTitle, setSubTitle] = useState('');
@@ -470,6 +471,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </Prop>
             <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span></span></Prop>
             <Prop icon={Repeat} label="반복" asDiv><div className="w-full [&_select]:border-transparent [&_select]:bg-transparent hover:[&_select]:border-line" data-testid="detail-repeat">{t.due_date || t.recurrence_rule ? <RecurSelect value={t.recurrence_rule} onChange={(v) => patch({ recurrenceRule: v })} anchorDate={t.due_date} /> : <span className="px-2 text-xs text-ink-3">마감일을 정하면 반복할 수 있습니다</span>}</div></Prop>
+            {/* V14 8번 팀 */}
+            <Prop icon={Users} label="팀">
+              <span className="flex w-full items-center gap-1.5" data-testid="detail-team">
+                <select className={ghostCls} value={t.team_id ?? ''} onChange={(e) => patch({ teamId: e.target.value || null })} aria-label="팀">
+                  <option value="">팀 없음</option>{teamList.data?.teams.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+                {t.team_id && <Link href={`/teams/${t.team_id}`} className="shrink-0 text-xs text-accent-600 underline">보드</Link>}
+              </span>
+            </Prop>
             <Prop icon={FolderKanban} label="프로젝트">
               <select className={ghostCls} value={t.project_id ?? ''} onChange={(e) => patch({ projectId: e.target.value || null })}>
                 <option value="">없음</option>{projects.data?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}

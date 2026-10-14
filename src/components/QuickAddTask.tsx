@@ -23,6 +23,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   const { user, dir } = useSession();
   const router = useRouter();
   const projects = useApi<{ projects: any[] }>(open ? '/api/projects' : null);
+  const teams = useApi<{ teams: { id: string; name: string; mine: boolean; members: { id: string }[] }[] }>(open ? '/api/teams' : null); // V14 8번
   const templates = useApi<{ templates: any[] }>(open && !defaults?.parentId ? '/api/templates' : null);
   // V8 3번: 위쪽 "템플릿에서 만들기" — 고르면 제목·마감(오프셋)·기본 담당·지시가 채워지고 체크리스트·하위 업무까지 만들어진다
   const pickTpl = (id: string) => {
@@ -94,7 +95,8 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
             title: f.title, assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
             priority: f.priority ?? 'normal', recurrenceRule: f.rrule ?? null, reminderMinutes: f.remind ?? null,
             ...(f.description ? { description: f.description } : {}), ...(f.checklist?.length ? { checklist: f.checklist } : {}),
-            ...(count > 1 ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
+            ...(count > 1 && !f.teamId ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
+            ...(f.teamId ? { teamId: f.teamId, teamMode: f.teamMode ?? 'lead', ...(f.teamMode === 'each' ? {} : { assigneeId: null }) } : {}),
             parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
             sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null,
             approvalRequired: false,
@@ -104,7 +106,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
       // 자료로 채웠으면 그 자료를 만든 업무(여러 명이면 각각)에 첨부
       for (const tid of ((r as any).ids ?? [r.id]) as string[]) for (const fid of f.fileIds ?? []) await api(`/api/library/${fid}/attach`, { body: { taskId: tid } }).catch(() => {});
       try { localStorage.setItem('wos_quick_last', JSON.stringify({ assigneeId: f.assigneeId, requestedById: f.requestedById, priority: f.priority, projectId: f.projectId, remind: f.remind })); } catch {}
-      toast.ok(count > 1 ? `${count}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
+      toast.ok(f.teamId ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다 — 팀장에게 알림을 보냈습니다') : count > 1 ? `${count}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
       broadcastRefresh();
       if (keep && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setTpl(''); titleRef.current?.focus(); return; }
       onClose();
@@ -184,6 +186,18 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
             <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
           </select></Field>}
         </div>
+        {/* V14 8번: 팀에 배정 — 팀원 모두에게 각각 / 팀장이 담당자 지정 */}
+        {!defaults?.parentId && !tpl && (teams.data?.teams.length ?? 0) > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="team-assign">
+            <select className="h-8 rounded-input border border-line bg-white px-2 text-xs" value={f.teamId ?? ''} onChange={(e) => set('teamId')(e.target.value || null)} aria-label="팀">
+              <option value="">팀 없음</option>{teams.data!.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            {f.teamId && <>
+              <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={(f.teamMode ?? 'lead') === 'lead'} onChange={() => set('teamMode')('lead')} />팀에 배정(팀장이 담당 지정)</label>
+              <label className="flex items-center gap-1"><input type="radio" name="teamMode" checked={f.teamMode === 'each'} onChange={() => set('teamMode')('each')} />팀원 모두에게 각각</label>
+            </>}
+          </div>
+        )}
         {/* V6 13번: 다른 사람도 같은 업무를 각자 1건씩 (담당자별 묶음) */}
         {!defaults?.parentId && !tpl && (
           <div data-testid="multi-assignee">

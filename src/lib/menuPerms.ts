@@ -20,6 +20,9 @@ export const MENUS = {
   assistant: { label: 'AI 비서', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
   // V14 6번: 회사 AI 사용 내역(누가·언제·무슨 질문·비용) 조회 / 편집(삭제·보관 기간·한도) — 기본 대표만
   ai_logs: { label: 'AI 사용 내역', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  // V14 8번 팀 업무: 자기 팀(팀원은 이 단계, 팀장은 조회 이상이면 편집까지) / 다른 팀 업무
+  team_tasks: { label: '팀 업무(자기 팀)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'view', site_manager: 'view', staff: 'view' } },
+  team_tasks_all: { label: '다른 팀 업무 보기', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V14 1번 담당자 재배정: 아무 업무나 / 지시자는 자기가 지시한 업무만 / 담당자 본인의 넘기기(지시자 승인)
   reassign: { label: '업무 담당자 재배정', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   reassign_requester: { label: '지시자는 자기 업무 재배정 가능', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },

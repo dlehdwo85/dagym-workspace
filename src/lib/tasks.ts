@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
-import { accessibleUnitIds, assertUnitAccess, loadTaskForUser, taskVisibleSql, atLeast } from './access';
+import { accessibleUnitIds, assertUnitAccess, loadTaskForUser, taskVisibleSql, atLeast, teamTaskLevel } from './access';
 import { HttpError, badRequest, conflict, forbidden, notFound } from './errors';
 import { activity } from './log';
 import { notify } from './notifications';
@@ -43,6 +43,9 @@ export const taskInput = z.object({
   reminderMinutes: z.array(z.number().int().min(0).max(10080)).max(3).nullable().optional(),
   /** V6 13번: 담당자 여러 명 → 각자 1건씩 (만들 때만) */
   assigneeIds: z.array(zUuid).max(50).optional(),
+  /** V14 8번: 팀에 배정 — each = 팀원 모두에게 각각, lead = 팀장이 담당자 지정 */
+  teamId: zUuid.nullable().optional(),
+  teamMode: z.enum(['each', 'lead']).optional(),
   version: z.number().int().optional(),
   reviewNote: z.string().max(2000).optional(),
 });
@@ -54,6 +57,7 @@ export const TASK_COLS = (sql: Sql) => sql`
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id,
   t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id, t.reminder_minutes,
+  t.team_id, (select tm.name from teams tm where tm.id = t.team_id) as team_name, (select tm.color from teams tm where tm.id = t.team_id) as team_color,
   case when t.batch_id is null then null else (select json_build_object('total', count(*)::int, 'done', count(*) filter (where b.status = 'done')::int) from tasks b where b.batch_id = t.batch_id and b.deleted_at is null) end as batch,
   (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
     where be.deleted_at is null and be.kind = 'task_block' and (be.task_id = t.id or be.id in (select event_id from event_tasks where task_id = t.id and role = 'block'))) as scheduled_minutes,
@@ -92,6 +96,7 @@ export const listQuery = z.object({
   from: zDate.optional().catch(undefined),
   to: zDate.optional().catch(undefined),
   parentId: zUuid.optional(),
+  teamId: zUuid.optional(),
   includeSubtasks: z.enum(['0', '1']).optional().catch(undefined),
   includeDone: z.enum(['0', '1', 'recent']).optional().catch(undefined),
   limit: z.coerce.number().int().min(1).max(1000).catch(500),
@@ -110,6 +115,7 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
       union select c.id from org_units c join s on c.parent_id = s.id) select id from s)`);
   }
   if (q.brandId) conds.push(sql`t.brand_id = ${q.brandId}`);
+  if (q.teamId) conds.push(sql`t.team_id = ${q.teamId}`); // V14 8번
   if (q.assigneeId) conds.push(sql`t.assignee_id = ${q.assigneeId}`);
   if (q.requestedById) conds.push(sql`t.requested_by = ${q.requestedById}`);
   if (q.status) {
@@ -267,18 +273,24 @@ export async function createTask(u: SessionUser, i: TaskInput) {
   if (i.approvalLineId) await checkLine(sql, i.approvalLineId);
   const status = i.status ?? 'todo';
   if (status === 'done') throw badRequest('새 업무를 완료 상태로 만들 수 없습니다');
+  if (i.teamId) await assertTeamAssign(u, i.teamId, sql);
 
   return sql.begin(async (tx) => {
     const [t] = await tx<{ id: string }[]>`
       insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
         start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at,
-        task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id, reminder_minutes)
+        task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id, reminder_minutes, team_id)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
         ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
         ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null},
-        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null}, ${i.reminderMinutes ?? null})
+        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null}, ${i.reminderMinutes ?? null}, ${i.teamId ?? null})
       returning id`;
+    if (i.teamId && i.teamMode === 'lead' && !i.assigneeId) { // 팀에 배정 → 팀장이 담당자를 정한다
+      const leads = await tx<{ user_id: string }[]>`select user_id from team_members where team_id = ${i.teamId} and is_lead`;
+      await notify(tx, { userIds: leads.map((l) => l.user_id), type: 'task_assigned', title: `팀 업무 배정: ${i.title}`, body: `${u.name}님이 팀에 배정했습니다 — 담당자를 정해 주세요`,
+        link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, actorId: u.id, dedupeKey: `team_assign:${t.id}` });
+    }
     for (const c of new Set(i.collaboratorIds ?? [])) {
       await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
     }
@@ -327,6 +339,11 @@ async function approverIds(sql: Sql, orgUnitId: string, projectId: string | null
 
 /** V6 13번: 같은 업무를 담당자마다 1건씩 (같은 batch_id). 각 담당자에게 배정 알림은 createTask 가 보냄 */
 export async function createTasksForAssignees(u: SessionUser, i: TaskInput) {
+  if (i.teamId && i.teamMode === 'each') { // V14 8번: 팀원 모두에게 각각
+    await assertTeamAssign(u, i.teamId);
+    i = { ...i, assigneeIds: (await db()<{ user_id: string }[]>`select m.user_id from team_members m join users us on us.id = m.user_id where m.team_id = ${i.teamId} and us.status = 'active' order by m.is_lead desc, us.name`).map((r) => r.user_id) };
+    if (!i.assigneeIds!.length) throw badRequest('팀원이 없습니다');
+  }
   const ids = [...new Set(i.assigneeIds ?? [])];
   if (ids.length < 2) return createTask(u, { ...i, assigneeId: ids[0] ?? i.assigneeId });
   const batchId = crypto.randomUUID();
@@ -372,7 +389,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const fields: [keyof TaskInput, string][] = [
       ['title', 'title'], ['description', 'description'], ['projectId', 'project_id'], ['brandId', 'brand_id'],
       ['assigneeId', 'assignee_id'], ['priority', 'priority'], ['startDate', 'start_date'], ['dueDate', 'due_date'],
-      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'], ['estimateMinutes', 'estimate_minutes'], ['showOnCalendar', 'show_on_calendar'], ['requestedById', 'requested_by'], ['reminderMinutes', 'reminder_minutes'],
+      ['tags', 'tags'], ['approvalRequired', 'approval_required'], ['orgUnitId', 'org_unit_id'], ['sectionId', 'section_id'], ['sortOrder', 'sort_order'], ['taskType', 'task_type'], ['photoRequired', 'photo_required'], ['approvalLineId', 'approval_line_id'], ['estimateMinutes', 'estimate_minutes'], ['showOnCalendar', 'show_on_calendar'], ['requestedById', 'requested_by'], ['reminderMinutes', 'reminder_minutes'], ['teamId', 'team_id'],
     ];
     for (const [k, col] of fields) {
       if (i[k] === undefined) continue;
@@ -416,6 +433,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const due = (set.due_date ?? cur.due_date) as string | null;
     if (start && due && start > due) throw badRequest('시작일이 마감일보다 늦습니다');
     if (set.assignee_id) await validateRefs(tx, u, { assigneeId: set.assignee_id as string } as TaskInput, cur.org_unit_id);
+    if (set.team_id) await assertTeamAssign(u, set.team_id as string, tx);
     if (set.requested_by) await validateRefs(tx, u, { requestedById: set.requested_by as string } as TaskInput, cur.org_unit_id);
     if (u.isDemo) await validateRefs(tx, u, { projectId: (set.project_id as string) ?? undefined, collaboratorIds: i.collaboratorIds, dependsOn: i.dependsOn } as TaskInput, (set.org_unit_id as string) ?? cur.org_unit_id);
     if (('photo_required' in set || 'approval_line_id' in set) && !perms.approve) throw forbidden('사진 증빙·결재선은 관리자가 정합니다');
@@ -828,9 +846,11 @@ export async function reorderTasks(u: SessionUser, ids: string[]) {
 
 // ---------------- V14 1번 담당자 재배정 권한 ----------------
 /** 재배정 가능: 메뉴 권한 "업무 담당자 재배정" 또는 (내가 지시자 + "지시자는 자기 업무 재배정 가능") */
-export async function canReassign(u: SessionUser, t: { requested_by?: string | null }, sql: Sql = db()) {
+export async function canReassign(u: SessionUser, t: { requested_by?: string | null; team_id?: string | null }, sql: Sql = db()) {
   const { menuLevel } = await import('./menuPerms');
   if ((await menuLevel(u, 'reassign', sql)) === 'use') return true;
+  // V14 8번: 팀장은 자기 팀 업무 재배정
+  if (t.team_id && (await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`).length && (await teamTaskLevel(u, t.team_id, sql)) === 'edit') return true;
   return !!t.requested_by && t.requested_by === u.id && (await menuLevel(u, 'reassign_requester', sql)) === 'use';
 }
 async function notifyReassign(tx: Sql, u: SessionUser, p: { id: string; title: string; from: string; to: string | null; requestedBy: string | null; version: number }) {
@@ -887,4 +907,13 @@ export async function decideHandoff(u: SessionUser, taskId: string, handoffId: s
     await notifyReassign(tx as unknown as Sql, u, { id: task.id, title: cur.title, from: h.from_user, to: h.to_user, requestedBy: cur.requested_by, version: upd.version });
     return { ok: true, approved: true };
   });
+}
+
+/** V14 8번: 이 팀에 업무를 배정할 수 있나 — 팀원(팀 업무 조회 이상)·대표/본사 관리자·"다른 팀 업무" 편집 권한 */
+async function assertTeamAssign(u: SessionUser, teamId: string, sql: Sql = db()) {
+  const [t] = await sql<{ id: string }[]>`select id from teams where id = ${teamId} and tenant = ${u.isDemo ? 'demo' : 'default'} and not archived`;
+  if (!t) throw badRequest('팀이 없습니다');
+  const lv = await teamTaskLevel(u, teamId, sql);
+  const member = (await sql`select 1 from team_members where team_id = ${teamId} and user_id = ${u.id}`).length > 0;
+  if (!(lv === 'edit' || (member && lv !== 'none'))) throw forbidden('이 팀에 업무를 배정할 권한이 없습니다');
 }

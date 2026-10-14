@@ -9,11 +9,11 @@ import { DropZone, UploadProgress, putFile } from '@/components/upload';
 import { Avatar, Button, Empty, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { QuickAddTask } from '@/components/QuickAddTask';
 
-type RoomRow = { id: string; kind: 'dm' | 'group' | 'company' | 'task'; name: string | null; task_id: string | null; muted: boolean; unread: number; member_count: number;
+type RoomRow = { id: string; kind: 'dm' | 'group' | 'company' | 'task' | 'team'; name: string | null; task_id: string | null; muted: boolean; unread: number; member_count: number;
   last_body: string | null; last_file: string | null; last_author: string | null; last_deleted: boolean; last_message_at: string | null; other_id: string | null };
 type Msg = { id: string; room_id: string; author_id: string | null; author_name: string | null; created_at: string; edited_at: string | null; pinned_at: string | null;
   body: string; deleted: boolean; file_name: string | null; file_mime: string | null; file_size: number | null; task_id: string | null; mine: boolean };
-const KIND_LABEL = { dm: '1:1', group: '그룹', company: '회사 전체', task: '업무' } as const;
+const KIND_LABEL = { dm: '1:1', group: '그룹', company: '회사 전체', task: '업무', team: '팀' } as const;
 const shortTime = (s: string | null) => {
   if (!s) return '';
   const d = new Date(s); const now = new Date();

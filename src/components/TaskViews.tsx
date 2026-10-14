@@ -25,6 +25,7 @@ import { QuickAddTask } from './QuickAddTask';
 
 export type Task = {
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
+  team_id?: string | null; team_name?: string | null; team_color?: string | null;
   org_unit_id: string; org_unit_name: string; brand_id: string | null; assignee_id: string | null; assignee_name: string | null;
   start_date: string | null; due_date: string | null; due_time: string | null; version: number; subtask_count: number; subtask_done: number;
   checklist_total: number; checklist_done: number; comment_count: number; attachment_count: number; blocked_by_count: number;
@@ -65,7 +66,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [q, setQ] = useState(sp.get('q') ?? '');
   const [filters, setFilters] = useState<Record<string, string>>(() => {
     const f: Record<string, string> = {};
-    for (const k of ['brandId', 'orgUnitId', 'assigneeId', 'status', 'from', 'to']) { const v = sp.get(k); if (v) f[k] = v; }
+    for (const k of ['brandId', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId']) { const v = sp.get(k); if (v) f[k] = v; }
     const v = cleanView(sp.get('view')); if (v) f.view = v;
     return f;
   });
@@ -197,6 +198,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     return (hq.length ? hq : dir.users).slice(0, 5);
   })();
   const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 지시한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['done', '완료']];
+  const teamList = useApi<{ teams: { id: string; name: string }[] }>('/api/teams'); // V14 8번 팀 필터
   const setView = (v: string) => setFilters((f) => ({ ...f, view: v, assigneeId: '' }));
   const [filterOpen, setFilterOpen] = useState(false);
   const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
@@ -204,6 +206,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     ...(filters.brandId ? [['brandId', `브랜드: ${dir.brands.find((b) => b.id === filters.brandId)?.name ?? filters.brandId}`]] : []),
     ...(filters.orgUnitId ? [['orgUnitId', `소속: ${unitName(filters.orgUnitId)}`]] : []),
     ...(filters.assigneeId ? [['assigneeId', `담당: ${dir.users.find((u) => u.id === filters.assigneeId)?.name ?? ''}`]] : []),
+    ...(filters.teamId ? [['teamId', `팀: ${teamList.data?.teams.find((t) => t.id === filters.teamId)?.name ?? ''}`]] : []),
     ...(filters.status ? [['status', `상태: ${filters.status.split(',').map((x) => STATUS_LABEL[x as TaskStatus] ?? x).join('·')}`]] : []),
     ...(filters.from || filters.to ? [['period', `기간: ${filters.from ? fmtDate(filters.from) : '처음'} ~ ${filters.to ? fmtDate(filters.to) : '끝'}`]] : []),
   ] as [string, string][];
@@ -275,7 +278,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         {mode === 'list' && !projectId && (
           <label className="inline-flex h-9 items-center gap-1.5 text-sm text-ink-2">묶기
             <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={group} onChange={(e) => pickGroup(e.target.value as GroupBy)} aria-label="묶기 기준" data-testid="group-by">
-              <option value="assignee">담당자별</option><option value="requester">지시자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="status">상태별</option><option value="none">묶지 않음</option>
+              <option value="assignee">담당자별</option><option value="requester">지시자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="status">상태별</option><option value="team">팀별</option><option value="none">묶지 않음</option>
             </select>
           </label>
         )}
@@ -301,6 +304,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           <UnitSelect value={filters.orgUnitId ?? ''} onChange={(v) => setFilters((f) => ({ ...f, orgUnitId: v }))} allowEmpty="모든 현장·부서" />
           <select className={inputCls} value={filters.assigneeId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, assigneeId: e.target.value }))} aria-label="담당자">
             <option value="">모든 담당자</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
+          </select>
+          <select className={inputCls} value={filters.teamId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, teamId: e.target.value }))} aria-label="팀">
+            <option value="">모든 팀</option>{(teamList.data?.teams ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <select className={inputCls} value={filters.status ?? ''} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))} aria-label="상태">
             <option value="">모든 상태</option>{STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
@@ -369,6 +375,7 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
     <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2">
       {/* V11 1번: 휴대폰은 제목 아래 줄에 상태 칩(누르면 바로 변경) — PC 는 상태 열 */}
       {onPatch && <span className="sm:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
+      {t.team_name && <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
       {t.project_name && <span className="inline-flex min-w-0 items-center gap-1"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
       {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate md:hidden" title="지시자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
       {!compact && <span className={cx('truncate', onPatch && hq && 'hidden sm:inline')}>{t.org_unit_name}</span>}
@@ -467,8 +474,8 @@ function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }
   return <span className="inline-flex w-[92px] justify-end"><DuePicker value={t.due_date} status={t.status} onChange={(v) => onPatch(t, { dueDate: v })} label={`${t.title} 마감일`} /></span>;
 }
 
-type GroupBy = 'assignee' | 'requester' | 'due' | 'project' | 'status' | 'none';
-const GROUPS: GroupBy[] = ['assignee', 'requester', 'due', 'project', 'status', 'none'];
+type GroupBy = 'assignee' | 'requester' | 'due' | 'project' | 'status' | 'team' | 'none';
+const GROUPS: GroupBy[] = ['assignee', 'requester', 'due', 'project', 'status', 'team', 'none'];
 type SortKey = 'manual' | 'due' | 'priority' | 'created' | 'title' | 'assignee' | 'requester' | 'status';
 const SORTS: SortKey[] = ['manual', 'due', 'priority', 'created', 'title', 'assignee', 'requester', 'status'];
 const SORT_LABEL: Record<SortKey, string> = { manual: '직접 순서', due: '마감일순', priority: '우선순위순', created: '최근 생성순', title: '이름순', assignee: '담당자순', requester: '지시자순', status: '상태순' };
@@ -573,6 +580,15 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     }
     groups = [...m.values()].sort((a, b) => (a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.label.localeCompare(b.label, 'ko')));
     if (!groups.length) groups = [{ key: 'none', label: '프로젝트 없음', items: [], add: {} }];
+  } else if (group === 'team') { // V14 8번 팀별 묶기
+    const m = new Map<string, G>();
+    for (const t of tasks) {
+      const k = t.team_id ?? 'none';
+      if (!m.has(k)) m.set(k, { key: k, label: t.team_name ?? '팀 없음', head: <span className="size-2.5 rounded-full" style={{ background: t.team_color ?? '#cbd5e1' }} />, items: [], add: {} });
+      m.get(k)!.items.push(t);
+    }
+    groups = [...m.values()].sort((a, b) => (a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.label.localeCompare(b.label, 'ko')));
+    if (!groups.length) groups = [{ key: 'none', label: '팀 없음', items: [], add: {} }];
   } else if (group === 'status') {
     // V11 1번: 진행 전 → 진행 중 → 검토 요청 → 보류 (완료는 각 묶음 끝 "오늘 완료" 줄)
     const order: TaskStatus[] = ['todo', 'in_progress', 'review', 'on_hold'];

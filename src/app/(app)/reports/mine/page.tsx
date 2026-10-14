@@ -7,10 +7,11 @@ import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, input
 
 /** V8 2번 내 주간 보고: 금요일 16시에 자동 초안 → 고쳐서 제출. 대표·관리자는 모두의 보고를 아래에서 */
 export default function MyReportPage() {
-  const { user } = useSession();
-  const admin = user.role === 'owner' || user.role === 'admin';
+  const { user, menus } = useSession();
+  const admin = (menus?.team_reports ?? 'none') !== 'none'; // V14 7번 메뉴 권한 "주간 보고(모아보기)"
+  const [teamId, setTeamId] = useState(''); // V14 8번 팀별 모아 보기
   const { data, error, loading, reload, setData } = useApi<{ weekStart: string; report: any }>('/api/reports/mine');
-  const team = useApi<{ reports: any[] }>(admin ? '/api/reports/team' : null);
+  const team = useApi<{ reports: any[]; teams?: { id: string; name: string }[] }>(admin ? `/api/reports/team${teamId ? `?teamId=${teamId}` : ''}` : null, [teamId]);
   const [body, setBody] = useState('');
   useEffect(() => { if (data?.report) setBody(data.report.body); }, [data?.report?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   async function draft() {
@@ -39,7 +40,9 @@ export default function MyReportPage() {
       )}
       {admin && (
         <section className="space-y-2" data-testid="team-reports">
-          <h2 className="text-sm font-semibold">이번 주 모두의 보고</h2>
+          <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">이번 주 모두의 보고</h2>
+            {!!team.data?.teams?.length && <select className="h-8 rounded-input border border-line bg-white px-2 text-xs" value={teamId} onChange={(e) => setTeamId(e.target.value)} aria-label="팀별 보기">
+              <option value="">모든 사람</option>{team.data.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}</div>
           {!team.data?.reports.length ? <p className="text-sm text-ink-3">아직 초안이 없습니다 (금요일 오후 4시에 자동으로 만들어집니다)</p> : team.data.reports.map((x) => (
             <details key={x.id} className="rounded-card border border-line bg-white p-3 shadow-card">
               <summary className="cursor-pointer text-sm font-medium">{x.name} <span className={cx('ml-1 rounded-full px-2 py-0.5 text-xs', x.status === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-ink-2')}>{x.status === 'submitted' ? '제출' : '초안'}</span>
