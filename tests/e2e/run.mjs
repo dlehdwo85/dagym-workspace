@@ -810,7 +810,7 @@ await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄
   await owner.screenshot({ path: `${SHOTS}/58-revenue.png`, fullPage: true });
   assert.equal((await ctx.staffA.client.get('/api/revenue')).status, 404);
 });
-await step('W-5 매출 AI 분석(AI 제안 표시·근거 숫자로 이동) · GPT 연동 토큰 한 번만 표시', async () => {
+await step('W-5 매출 AI 분석(내장 AI, AI 제안 표시·근거 숫자로 이동) · V13 GPT 카드 없음 · 자료로 입력(AI)', async () => {
   await owner.goto(BASE + '/revenue');
   const ai = owner.getByTestId('revenue-ai');
   await ai.getByRole('button', { name: 'AI 분석' }).click();
@@ -821,13 +821,41 @@ await step('W-5 매출 AI 분석(AI 제안 표시·근거 숫자로 이동) · G
   await first.click();
   const want = site === '다짐 강남점' ? ctx.siteA : ctx.siteB;
   await owner.getByLabel('현장', { exact: true }).evaluate((el) => el.value).then((v) => assert.equal(v, want, `근거 현장(${site})으로 이동`));
-  const tk = owner.getByTestId('revenue-tokens');
-  await tk.getByRole('button', { name: '토큰 만들기' }).click();
-  await owner.getByTestId('fresh-token').getByText(/^wk_/).waitFor();
+  // V13: GPT 토큰 카드 없음 → 자료로 입력(AI): 정산서 올리기 → 미리보기 표 → 고쳐서 반영
+  assert.equal(await owner.getByTestId('revenue-tokens').count(), 0, 'GPT 연동 카드 제거');
+  assert.equal(await owner.getByText('GPT 연동').count(), 0);
+  const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7);
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [
+    { content: [{ type: 'text', text: JSON.stringify({ rows: [{ site: '하이링크 판교 위탁현장', month, item: '매출', amount: 12300000 }], notes: '사진이 흐려 지출은 못 읽었습니다' }) }], stop_reason: 'end_turn' }] }) });
+  const box = owner.getByTestId('revenue-ai-input');
+  await box.getByTestId('revenue-ai-file').setInputFiles([{ name: '판교 정산.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') }]);
+  const pv = owner.getByTestId('revenue-ai-preview');
+  await pv.getByText('AI 메모: 사진이 흐려').waitFor();
+  await pv.getByLabel('1번째 금액').fill('12400000');
   await owner.screenshot({ path: `${SHOTS}/60-revenue-ai.png`, fullPage: true });
-  await owner.reload();
-  await owner.getByTestId('revenue-tokens').getByText('GPT 자료 운영체계').waitFor();
-  assert.equal(await owner.getByTestId('fresh-token').count(), 0, '새로 고침하면 원문 다시 안 보임');
+  await pv.getByTestId('revenue-ai-apply').click();
+  await owner.getByText('1건을 반영했습니다').waitFor();
+  const [row] = await sql`select revenue::float8 as revenue, source, source_file_ids from revenue_entries where org_unit_id = ${ctx.siteB} and month = ${month + '-01'}`;
+  assert.equal(row.revenue, 12400000, '사람이 고친 값으로 반영'); assert.equal(row.source, 'ai'); assert.equal(row.source_file_ids.length, 1);
+});
+await step('V13 메뉴 권한: 대표만 "메뉴 권한" 탭 → 현장 관리자에게 매출 보기 켜기 → 그 사람 메뉴에 매출(입력 칸 없음) → 끄면 사라짐', async () => {
+  await owner.goto(BASE + '/admin/users');
+  await owner.getByTestId('tab-menus').click();
+  const mp = owner.getByTestId('menu-perms');
+  await mp.getByLabel('매출 현장 관리자').selectOption('view');
+  await owner.getByText('바꿨습니다').first().waitFor();
+  await owner.screenshot({ path: `${SHOTS}/62-menu-perms.png`, fullPage: true });
+  const c = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const m = await login(c, ctx.managerA.email, ctx.managerA.password);
+  await m.goto(BASE + '/revenue');
+  await m.getByTestId('revenue-view-only').waitFor();
+  assert.equal(await m.getByTestId('revenue-input').count(), 0, '보기 권한은 입력 칸 없음');
+  await m.goto(BASE + '/admin/users');
+  assert.equal(await m.getByTestId('tab-menus').count(), 0, '대표 외에는 권한 탭 없음');
+  await mp.getByLabel('매출 현장 관리자').selectOption('none');
+  await owner.waitForTimeout(500);
+  assert.equal((await ctx.managerA.client.get('/api/revenue')).status, 404);
+  await c.close();
 });
 await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 행에서 지시자·우선순위 변경, 손잡이로 끌어 순서 → 새로고침해도 유지, 정렬·내가 지시한 업무', async () => {
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'minsu@dagym.test', name: '김민수', role: 'staff', orgUnitIds: [ctx.hq] });

@@ -1,6 +1,7 @@
 // 필수 시나리오 API 통합 시험: 실제 next start 서버 + 실제 PostgreSQL + 가짜 Google/FCM/웹푸시 서버
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { Client, bootstrap, resetDb, startServer, tick, testDb, seoulToday, addDays, BASE, FAKE, FAKE_TLS, ensureTls } from '../helpers.mjs';
 import { startFakeGoogle } from '../fake-google.mjs';
 
@@ -1050,45 +1051,99 @@ describe('매출 2·3단계 (대표 승인): 표준 CSV · GPT Action 토큰 · 
     const bad = await ctx.owner.ok('POST', '/api/revenue/import', { csv: '현장,월,항목,금액\n하이링크 판교 위탁현장,2026-05,포인트,1\n' });
     assert.equal(bad.ok, false); assert.match(bad.errors[0].message, /매출·지출·회원수·목표/);
   });
-  test('GPT Action 토큰: 본사만 발급, 원문은 한 번만, 입력만 가능, 폐기하면 401', async () => {
-    assert.equal((await ctx.staffA.client.post('/api/revenue/tokens', { name: 'x' })).status, 404);
-    const { id, token } = await ctx.owner.ok('POST', '/api/revenue/tokens', { name: 'GPT 자료 운영체계' });
-    assert.match(token, /^wk_/);
-    const list = await ctx.owner.ok('GET', '/api/revenue/tokens');
-    assert.ok(!JSON.stringify(list).includes(token), '목록에 원문 없음');
-    const [h] = await sql`select token_hash from api_tokens where id = ${id}`;
-    assert.notEqual(h.token_hash, token);
-    const send = (t, b) => fetch(BASE + '/api/public/revenue', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${t}`, origin: BASE }, body: JSON.stringify(b) });
-    const entries = [{ site: '다짐 강남점', month: '2026-06', item: '매출', amount: 61000000, sourceFile: '6월 정산.xlsx' }, { site: '다짐 강남점', month: '2026-06', item: '회원수', amount: 850 }];
-    assert.equal((await send('wk_wrong', { entries })).status, 401);
-    const dry = await (await send(token, { entries: [...entries, { site: '없는 현장', month: '2026-06', item: '매출', amount: 1 }] })).json();
-    assert.equal(dry.ok, false); assert.equal(dry.errors[0].line, 3);
-    assert.equal((await sql`select count(*)::int as n from revenue_entries where month = '2026-06-01'`)[0].n, 0);
-    const ok = await (await send(token, { entries })).json();
-    assert.equal(ok.count, 1);
-    const [row] = await sql`select revenue::float8 as revenue, members, source, source_file from revenue_entries where org_unit_id = ${ctx.siteA} and month = '2026-06-01'`;
-    assert.equal(row.revenue, 61000000); assert.equal(row.members, 850); assert.equal(row.source, 'gpt'); assert.equal(row.source_file, '6월 정산.xlsx');
-    assert.equal((await fetch(BASE + '/api/revenue', { headers: { authorization: `Bearer ${token}`, origin: BASE } })).status, 401, '토큰으로 조회 불가');
-    const spec = await (await fetch(BASE + '/api/public/revenue/openapi.json')).json();
-    assert.equal(spec.paths['/api/public/revenue'].post.operationId, 'submitMonthlyRevenue');
-    await ctx.owner.ok('DELETE', `/api/revenue/tokens/${id}`);
-    assert.equal((await send(token, { entries })).status, 401, '폐기 후 거부');
+  test('V13 GPT Action: 기본 꺼짐 — 토큰 발급·공개 입력·openapi 모두 404, 기존 토큰 무효', async () => {
+    assert.equal((await ctx.owner.post('/api/revenue/tokens', { name: 'GPT 자료 운영체계' })).status, 404);
+    const send = (b) => fetch(BASE + '/api/public/revenue', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer wk_anything', origin: BASE }, body: JSON.stringify(b) });
+    assert.equal((await send({ entries: [] })).status, 404);
+    assert.equal((await fetch(BASE + '/api/public/revenue/openapi.json')).status, 404);
+    assert.equal((await sql`select count(*)::int n from api_tokens where revoked_at is null`)[0].n, 0);
   });
-  test('AI 분석: 집계 숫자만 전송(메모·파일명·개인정보 없음), 입력에 없는 현장 제안은 버림, 본사만', async () => {
+  test('V13 AI 분석: 내장 AI(가짜 Anthropic)로 집계 숫자만 전송, 입력에 없는 현장 제안은 버림, 사용량 기록', async () => {
     await ctx.owner.ok('PUT', '/api/revenue', { orgUnitId: ctx.siteA, month: '2026-07', revenue: 70000000, expense: 40000000, note: '비밀 메모 김대표 010-1234-5678' });
     assert.equal((await ctx.staffA.client.post('/api/revenue/ai', { period: '2026-07' })).status, 404);
+    const before = (await (await fetch(FAKE + '/__state')).json()).anthropic.length;
+    const out = { summary: '다짐 강남점 2026-07 매출은 70000000원입니다.', anomalies: [{ site: '다짐 강남점', month: '2026-07', metric: 'revenue', comment: '늘었습니다.' }, { site: '없는 현장', month: '2026-07', metric: 'revenue', comment: '지어낸 제안' }], comparisons: [{ site: '다짐 강남점', comment: '가장 높습니다.' }] };
+    await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify(out) }], stop_reason: 'end_turn' }] }) });
     const { report } = await ctx.owner.ok('POST', '/api/revenue/ai', { period: '2026-07' });
     assert.equal(report.output.anomalies.length, 1, '없는 현장 제안 제거');
     assert.equal(report.output.anomalies[0].site, '다짐 강남점');
-    const st = await (await fetch(FAKE + '/__state')).json();
-    const sent = st.openai.at(-1);
-    assert.equal(sent.auth, 'Bearer sk-fake-test');
-    const payload = JSON.stringify(sent.body);
+    const sent = (await (await fetch(FAKE + '/__state')).json()).anthropic.slice(before);
+    assert.equal(sent.length, 1); assert.equal(sent[0].key, 'sk-ant-fake-test');
+    assert.equal(sent[0].body.output_config.format.type, 'json_schema');
+    const payload = JSON.stringify(sent[0].body.messages);
     for (const bad of ['비밀 메모', '010-1234-5678', '정산.xlsx', '@dagym.test', '김대표']) assert.ok(!payload.includes(bad), `보내면 안 되는 값: ${bad}`);
     assert.ok(payload.includes('70000000'));
+    assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'revenue'`)[0].n, 1, '회사 AI 사용량에 포함');
     const again = await ctx.owner.ok('GET', '/api/revenue/ai?period=2026-07');
     assert.equal(again.report.id, report.id);
     assert.equal((await ctx.owner.post('/api/revenue/ai', { period: '2020-01' })).status, 400, '실적 없는 달');
+  });
+  test('V13 자료로 입력(AI): 정산서 → "매출 근거" 폴더 저장 → AI 추출 미리보기(저장 안 함) → 확인 후 반영, 숫자에 근거 파일 연결', async () => {
+    const data = Buffer.from('8월 정산\n강남점 매출 81,000,000');
+    const init = await ctx.owner.ok('POST', '/api/library', { fileName: '8월 정산.csv', mimeType: 'text/csv', size: data.length, purpose: 'revenue', folder: '아무데나' });
+    await fetch(BASE + init.upload.url, { method: 'PUT', headers: init.upload.headers, body: data });
+    const done = await ctx.owner.ok('POST', `/api/library/${init.id}/complete`);
+    assert.equal(done.organized, null, '매출 근거는 자동 정리 안 함');
+    assert.equal((await sql`select folder from library_files where id = ${init.id}`)[0].folder, '매출 근거');
+    const rows = [{ site: '다짐 강남점', month: '2026-08', item: '매출', amount: 81000000 }, { site: '다짐 강남점', month: '2026-08', item: '회원수', amount: 900 }];
+    await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ rows, notes: '' }) }], stop_reason: 'end_turn' }] }) });
+    assert.equal((await ctx.staffA.client.post('/api/revenue/extract', { fileIds: [init.id] })).status, 404, '매출 권한 없음');
+    const x = await ctx.owner.ok('POST', '/api/revenue/extract', { fileIds: [init.id] });
+    assert.equal(x.ok, true); assert.equal(x.count, 1); assert.equal(x.rows.length, 2);
+    assert.equal((await sql`select count(*)::int n from revenue_entries where month = '2026-08-01'`)[0].n, 0, '미리보기는 저장 안 함');
+    const r = await ctx.owner.ok('POST', '/api/revenue/import', { csv: x.csv, fileName: x.fileName, evidenceFileIds: [init.id] });
+    assert.equal(r.count, 1);
+    const [row] = await sql`select revenue::float8 as revenue, members, source, source_file_ids from revenue_entries where org_unit_id = ${ctx.siteA} and month = '2026-08-01'`;
+    assert.equal(row.revenue, 81000000); assert.equal(row.members, 900); assert.equal(row.source, 'ai'); assert.deepEqual(row.source_file_ids, [init.id]);
+    assert.ok((await sql`select 1 from audit_logs where action = 'revenue.ai_import'`).length, '감사 로그');
+    // 근거 폴더는 직원에게 안 보임 (기본 폴더 권한)
+    assert.equal((await ctx.staffA.client.req('GET', `/api/library/${init.id}`)).status, 404);
+    assert.equal((await ctx.staffA.client.req('GET', `/api/library/${init.id}/download`)).status, 404, '서명 주소 발급 전 검사');
+  });
+});
+
+describe('V13 메뉴 권한 — 대표만 설정, 등급별·사람별, 서버가 403/404, 감사 로그', () => {
+  test('매출 기본은 대표만: 직원·현장 관리자 404, 권한 화면은 대표 외 403', async () => {
+    for (const c of [ctx.staffA.client, ctx.managerA.client]) assert.equal((await c.get('/api/revenue')).status, 404);
+    assert.equal((await ctx.managerA.client.get('/api/admin/menu-perms')).status, 403);
+    assert.equal((await ctx.managerA.client.req('PUT', '/api/admin/menu-perms', { menu: 'revenue', role: 'site_manager', level: 'edit' })).status, 403);
+    const m = await ctx.owner.ok('GET', '/api/admin/menu-perms');
+    assert.equal(m.matrix.revenue.owner, 'edit'); assert.equal(m.matrix.revenue.admin, 'none'); assert.equal(m.matrix.revenue.staff, 'none');
+    assert.ok(m.menus.find((x) => x.key === 'library').levels.some((l) => l.value === 'delete'));
+  });
+  test('대표가 등급을 켜면 200, 보기만이면 입력 403, 끄면 다시 404 · 대표 본인 권한은 못 끔', async () => {
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'revenue', role: 'site_manager', level: 'view' });
+    const v = await ctx.managerA.client.ok('GET', '/api/revenue?year=2026');
+    assert.equal(v.canEdit, false);
+    assert.equal((await ctx.managerA.client.req('PUT', '/api/revenue', { orgUnitId: ctx.siteA, month: '2026-01', revenue: 1 })).status, 403);
+    assert.equal((await ctx.managerA.client.post('/api/revenue/import', { csv: '현장,월,항목,금액\n다짐 강남점,2026-01,매출,1\n' })).status, 403);
+    assert.equal((await ctx.staffA.client.get('/api/revenue')).status, 404, '다른 등급은 그대로');
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'revenue', role: 'site_manager', level: 'edit' });
+    await ctx.managerA.client.ok('PUT', '/api/revenue', { orgUnitId: ctx.siteA, month: '2026-01', revenue: 1 });
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'revenue', role: 'site_manager', level: null });
+    assert.equal((await ctx.managerA.client.get('/api/revenue')).status, 404, '기본값으로 되돌림');
+    assert.equal((await ctx.owner.req('PUT', '/api/admin/menu-perms', { menu: 'revenue', role: 'owner', level: 'none' })).status, 403);
+    assert.equal((await ctx.owner.req('PUT', '/api/admin/menu-perms', { menu: 'revenue', userId: ctx.ownerId, level: 'none' })).status, 403);
+    const logs = await sql`select detail from audit_logs where action = 'menu_perm.set' order by id`;
+    assert.ok(logs.length >= 3);
+  });
+  test('사람별 예외가 등급보다 먼저: 이 직원만 매출 보기 허용 → 지우면 다시 404', async () => {
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'revenue', userId: ctx.staffA.id, level: 'view' });
+    await ctx.staffA.client.ok('GET', '/api/revenue');
+    assert.equal((await ctx.managerA.client.get('/api/revenue')).status, 404, '같은 등급 다른 사람은 그대로');
+    const m = await ctx.owner.ok('GET', '/api/admin/menu-perms');
+    assert.ok(m.overrides.some((o) => o.user_id === ctx.staffA.id && o.level === 'view'));
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'revenue', userId: ctx.staffA.id, level: null });
+    assert.equal((await ctx.staffA.client.get('/api/revenue')).status, 404);
+  });
+  test('자료실: 등급을 "안 보임"으로 끄면 목록·파일·AI 검색 모두 막힘, "보기"면 올리기 403', async () => {
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'library', role: 'staff', level: 'view' });
+    assert.equal((await ctx.staffA.client.post('/api/library', { fileName: 'a.txt', size: 3 })).status, 403);
+    await ctx.staffA.client.ok('GET', '/api/library');
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'library', role: 'staff', level: 'none' });
+    assert.equal((await ctx.staffA.client.get('/api/library')).status, 404);
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'library', role: 'staff', level: null });
+    await ctx.staffA.client.ok('GET', '/api/library');
   });
 });
 
@@ -1461,7 +1516,7 @@ describe('WORKIN_V8 아침 브리핑 · 주간 보고 초안 · 부재 종류 ·
     assert.equal(s.report.status, 'submitted');
     const team = await ctx.owner.ok('GET', '/api/reports/team');
     assert.ok(team.reports.some((x) => x.user_id === ctx.staffA.id && x.status === 'submitted'));
-    assert.equal((await ctx.staffA.client.req('GET', '/api/reports/team')).status, 403);
+    assert.equal((await ctx.staffA.client.req('GET', '/api/reports/team')).status, 404, 'V13: 메뉴 권한이 없으면 메뉴째 숨김(404)');
   });
   test('일정 종류 연차·반차·외근, 연차 날은 가용 시간 부재', async () => {
     const cal = (await ctx.staffA.client.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
@@ -1635,8 +1690,8 @@ describe('WORKIN_V9 회사 자료실 · AI 비서 (가짜 Anthropic 서버)', ()
     const att = (await ctx.staffA.client.ok('GET', `/api/tasks/${task}`)).attachments;
     assert.equal(att.length, 1); assert.equal(att[0].file_name, '다짐 로고.png');
     assert.equal((await ctx.staffA.client.req('POST', `/api/ai/proposals/${r.proposals[0].id}`, { accept: true })).status, 400, '두 번 실행 불가');
-    const used = await sql`select count(*)::int n, sum(cost_usd)::float8 c from ai_usage where user_id = ${ctx.staffA.id}`;
-    assert.equal(used[0].n, 3); assert.ok(used[0].c > 0);
+    const used = await sql`select count(*)::int n, sum(cost_usd)::float8 c from ai_usage where user_id = ${ctx.staffA.id} and purpose = 'assistant'`;
+    assert.equal(used[0].n, 3, '자료실 자동 정리(library_organize)는 따로 기록'); assert.ok(used[0].c > 0);
   });
 
   test('AI 도구는 요청한 사람 권한으로만: 직원은 매출·남의 현장 업무 못 봄, 업무 만들기 제안 확인/취소', async () => {
@@ -1649,7 +1704,7 @@ describe('WORKIN_V9 회사 자료실 · AI 비서 (가짜 Anthropic 서버)', ()
     const r = await ctx.staffA.client.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '매출 알려주고 업무 만들어줘' }] });
     const results = (await fakeState()).anthropic.slice(before)[1].body.messages.at(-1).content;
     const byId = Object.fromEntries(results.map((x) => [x.tool_use_id, x]));
-    assert.equal(byId.a1.is_error, true); assert.match(byId.a1.content, /대표·본사/);
+    assert.equal(byId.a1.is_error, true); assert.match(byId.a1.content, /매출 보기 권한/);
     assert.equal(byId.a2.is_error, true); assert.match(byId.a2.content, /권한/);
     assert.equal(byId.a4.is_error, true, '볼 수 없는 업무에 댓글 제안도 불가');
     assert.equal(r.proposals.length, 1);
@@ -1944,5 +1999,77 @@ describe('WORKIN_V12 3번 ICS 구독 · 2단계 인증 · 도움말 문의 · �
     assert.equal(mine.status, 'answered'); assert.match(mine.answer, /다시 올려/);
     assert.ok((await sql`select 1 from notifications where user_id = ${ctx.staffA.id} and title = '문의 답변: 사진 업로드 실패'`).length);
     assert.equal((await fetch(BASE + '/status')).status, 200, '공개 상태 페이지');
+  });
+});
+
+describe('V13 자료실 자동 정리·중복·폴더 권한 (가짜 Anthropic)', () => {
+  const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+  const up = async (c, meta, data, extra = {}) => {
+    const init = await c.ok('POST', '/api/library', { ...meta, size: data.length, ...extra });
+    await fetch(BASE + init.upload.url, { method: 'PUT', headers: init.upload.headers, body: data });
+    return { id: init.id, done: await c.ok('POST', `/api/library/${init.id}/complete`) };
+  };
+  const hash = (b) => createHash('sha256').update(b).digest('hex');
+  let auto;
+  test('올리면 AI 가 폴더·태그·제목·요약을 바로 적용("AI 정리됨"), 확신 낮으면 "정리 필요", 되돌리기', async () => {
+    const org = { folder: '브랜드자료/다짐', tags: ['로고', '다짐', '가로형'], title: '다짐 로고 (가로형)', summary: '다짐 브랜드 가로형 로고', confidence: 0.92 };
+    await ctl({ anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify(org) }], stop_reason: 'end_turn' }] });
+    const data = Buffer.from('fake-png-garo');
+    const r = await up(ctx.owner, { fileName: '다짐_로고_가로형.png', mimeType: 'image/png', contentHash: hash(data) }, data);
+    auto = r.id;
+    assert.equal(r.done.organized.by, 'ai'); assert.equal(r.done.organized.folder, '브랜드자료/다짐');
+    const st = await (await fetch(FAKE + '/__state')).json();
+    assert.equal(st.anthropic.at(-1).body.model, 'claude-haiku-5-5', '가벼운 모델');
+    const [f] = await sql`select folder, tags, title, description, organized_by, needs_review from library_files where id = ${auto}`;
+    assert.equal(f.folder, '브랜드자료/다짐'); assert.deepEqual(f.tags, ['로고', '다짐', '가로형']); assert.equal(f.title, '다짐 로고 (가로형)');
+    assert.equal(f.organized_by, 'ai'); assert.equal(f.needs_review, false);
+    assert.ok((await sql`select 1 from ai_usage where purpose = 'library_organize'`).length, 'AI 한도에 포함');
+    // 같은 파일 다시 → 409 중복 안내, allowDuplicate 면 허용
+    const dup = await ctx.owner.req('POST', '/api/library', { fileName: '복사본.png', mimeType: 'image/png', size: data.length, contentHash: hash(data) });
+    assert.equal(dup.status, 409); assert.equal(dup.body.error.detail.duplicate.id, auto);
+    // 확신 낮은 정리 → 정리 필요 보기
+    await ctl({ anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ ...org, folder: '기타', title: '무언가', confidence: 0.3 }) }], stop_reason: 'end_turn' }] });
+    const low = await up(ctx.owner, { fileName: 'scan_0001.jpg', mimeType: 'image/jpeg' }, Buffer.from('blurry'));
+    const rv = await ctx.owner.ok('GET', '/api/library?review=1');
+    assert.ok(rv.review >= 1); assert.ok(rv.files.some((x) => x.id === low.id)); assert.ok(!rv.files.some((x) => x.id === auto));
+    await ctx.owner.ok('POST', `/api/library/${low.id}/organize`, { action: 'undo' });
+    const [u] = await sql`select folder, title, organized_by, needs_review from library_files where id = ${low.id}`;
+    assert.equal(u.folder, ''); assert.equal(u.title, 'scan_0001'); assert.equal(u.organized_by, null); assert.equal(u.needs_review, false);
+  });
+  test('사람이 고친 정리는 회사별 규칙으로 남고, AI 가 꺼진(응답 실패) 때는 그 규칙으로 정리', async () => {
+    await ctx.owner.ok('PATCH', `/api/library/${auto}`, { folder: '브랜드/다짐/로고', tags: ['로고', '다짐'] });
+    assert.equal((await sql`select folder from library_rules order by id desc limit 1`)[0].folder, '브랜드/다짐/로고');
+    await ctl({ anthropicQueue: [{ content: [{ type: 'text', text: 'JSON 아님' }], stop_reason: 'end_turn' }] });
+    const r = await up(ctx.owner, { fileName: '다짐_로고_세로형.png', mimeType: 'image/png' }, Buffer.from('fake-png-sero'));
+    assert.equal(r.done.organized.by, 'rule'); assert.equal(r.done.organized.folder, '브랜드/다짐/로고');
+    // 다음 AI 요청에는 고친 예시가 들어간다
+    await ctl({ anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ folder: '브랜드/다짐/로고', tags: ['로고'], title: '다짐 로고 심볼', summary: '', confidence: 0.9 }) }], stop_reason: 'end_turn' }] });
+    await up(ctx.owner, { fileName: '다짐_로고_심볼.png', mimeType: 'image/png' }, Buffer.from('fake-png-sym'));
+    const st = await (await fetch(FAKE + '/__state')).json();
+    assert.ok(JSON.stringify(st.anthropic.at(-1).body.messages).includes('브랜드/다짐/로고'));
+  });
+  test('폴더 권한(대표만): "인사" 폴더를 직원에게 숨기면 목록·파일·내려받기·AI 검색에서 빠지고 하위 폴더도 상속', async () => {
+    await ctl({ anthropicQueue: [{ content: [{ type: 'text', text: 'x' }], stop_reason: 'end_turn' }] });
+    const hr = await up(ctx.owner, { fileName: '연봉표.txt', mimeType: 'text/plain', folder: '인사/2026' }, Buffer.from('연봉 비밀'));
+    assert.equal((await sql`select folder from library_files where id = ${hr.id}`)[0].folder, '인사/2026', '사용자가 정한 폴더는 유지');
+    assert.equal((await ctx.managerA.client.req('PUT', '/api/library/folder-perms', { folder: '인사', role: 'staff', level: 'none' })).status, 403);
+    await ctx.owner.ok('PUT', '/api/library/folder-perms', { folder: '인사', role: 'staff', level: 'none' });
+    const list = await ctx.staffA.client.ok('GET', '/api/library');
+    assert.ok(!list.files.some((f) => f.id === hr.id)); assert.ok(!list.folders.some((f) => f.folder.startsWith('인사')));
+    assert.equal((await ctx.staffA.client.req('GET', `/api/library/${hr.id}`)).status, 404);
+    assert.equal((await ctx.staffA.client.req('GET', `/api/library/${hr.id}/download`)).status, 404);
+    assert.ok((await ctx.managerA.client.ok('GET', '/api/library')).files.some((f) => f.id === hr.id), '다른 등급은 그대로');
+    // AI 비서 검색도 요청자 권한 안에서만
+    await ctl({ anthropicQueue: [{ content: [{ type: 'tool_use', id: 's1', name: 'search_library', input: { query: '연봉' } }], stop_reason: 'tool_use' }, { content: [{ type: 'text', text: '없습니다' }], stop_reason: 'end_turn' }] });
+    const before = (await (await fetch(FAKE + '/__state')).json()).anthropic.length;
+    await ctx.staffA.client.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '연봉표 찾아줘' }] });
+    const res = (await (await fetch(FAKE + '/__state')).json()).anthropic.slice(before)[1].body.messages.at(-1).content;
+    assert.ok(!JSON.stringify(res).includes(hr.id), 'AI 검색 결과에 숨긴 폴더 파일 없음');
+    // 보기만 → 수정 403, 삭제 단계 없으면 남의 파일 삭제 403
+    await ctx.owner.ok('PUT', '/api/library/folder-perms', { folder: '인사', role: 'site_manager', level: 'view' });
+    assert.equal((await ctx.managerA.client.post('/api/library', { fileName: 'b.txt', size: 3, folder: '인사/2026' })).status, 403);
+    assert.equal((await ctx.managerA.client.req('DELETE', `/api/library/${auto}`)).status, 403);
+    assert.ok((await sql`select 1 from audit_logs where action = 'library_folder_perm.set'`).length);
+    await ctx.owner.ok('PUT', '/api/library/folder-perms', { folder: '인사', role: 'site_manager', level: null });
   });
 });

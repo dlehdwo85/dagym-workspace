@@ -4,6 +4,7 @@ import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ROLE_LABEL, type Role } from '@/lib/types';
+import { MenuPermsTab } from '@/components/MenuPerms';
 
 const STATUS: Record<string, string> = { invited: '초대됨', active: '사용 중', disabled: '사용 중지', left: '퇴사' };
 
@@ -22,7 +23,25 @@ function UnitChecks({ value, onChange }: { value: string[]; onChange: (v: string
   );
 }
 
-export default function Users() {
+export default function UsersPage() {
+  const { user } = useSession();
+  const [tab, setTab] = useState<'users' | 'menus'>('users');
+  const list = useApi<{ users: any[] }>('/api/admin/users');
+  if (user.role !== 'owner') return <Users />;
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-1.5" role="tablist" aria-label="사용자 관리">
+        {([['users', '사용자'], ['menus', '메뉴 권한']] as const).map(([k, l]) => (
+          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-testid={`tab-${k}`}
+            className={cx('rounded-full border px-3 py-1 text-sm', tab === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line bg-white text-ink-2')}>{l}</button>
+        ))}
+      </div>
+      {tab === 'users' ? <Users /> : <MenuPermsTab users={list.data?.users ?? []} />}
+    </div>
+  );
+}
+
+function Users() {
   const { user, dir } = useSession();
   const { data, error, loading, reload } = useApi<{ users: any[] }>('/api/admin/users');
   const [inv, setInv] = useState<any>(null);

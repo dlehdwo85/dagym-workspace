@@ -66,7 +66,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const favs = useApi<{ projects: { id: string; name: string; color: string; favorite: boolean }[] }>('/api/projects');
   const favorites = (favs.data?.projects ?? []).filter((p) => p.favorite);
   // V9: 자료실(체험 계정 제외) · AI 비서(플랫폼 API 키가 있을 때만)
-  const nav: NavItem[] = [...NAV, ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
+  // V13 메뉴 권한: 매출·주간 보고는 권한 있는 사람만(관리 묶음이 없는 사람도 매출 권한이 있으면 주 메뉴에)
+  const menus = session.menus ?? {};
+  const adminMenu = ADMIN_MENU.filter((n) => (n.href !== '/revenue' || (menus.revenue ?? 'none') !== 'none') && (n.href !== '/reports' || (menus.team_reports ?? 'none') !== 'none'));
+  const nav: NavItem[] = [...NAV, ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
@@ -182,7 +185,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <div className="my-2 border-t border-white/10" />
                 {!collapsed && <button onClick={() => setAdminOpen((v) => { writePref('wos_nav_admin', v ? '0' : '1'); return !v; })} aria-expanded={adminOpen}
                   className="flex w-full items-center gap-1 px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-200">관리<ChevronDown className={cx('size-3 transition-transform', !adminOpen && '-rotate-90')} /></button>}
-                {(adminOpen || collapsed) && [...ADMIN_MENU, ...(session.user.platformAdmin ? [{ href: '/platform', label: '플랫폼 운영', icon: Building2 }] : [])].map((n) => navLink(n))}
+                {(adminOpen || collapsed) && [...adminMenu, ...(session.user.platformAdmin ? [{ href: '/platform', label: '플랫폼 운영', icon: Building2 }] : [])].map((n) => navLink(n))}
               </div>
             )}
           </nav>
@@ -302,7 +305,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               <div className="my-1 border-t border-line" />
               {([['/projects', '프로젝트', FolderKanban], ...nav.filter((n) => n.href === '/library' || n.href === '/assistant').map((n) => [n.href, n.label, n.icon]), ['/settings', '설정·알림', Settings], ['/help', '도움말·문의', HelpCircle],
                 ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)', CalendarDays]] : []),
-                ...(admin ? ADMIN_MENU.map((n) => [n.href, n.label, n.icon]) : []), ...(session.user.platformAdmin ? [['/platform', '플랫폼 운영', Building2]] : [])] as [string, string, LucideIcon][]).map(([h, l, I]) => (
+                ...(admin ? adminMenu.map((n) => [n.href, n.label, n.icon]) : nav.filter((n) => n.href === '/revenue').map((n) => [n.href, n.label, n.icon])), ...(session.user.platformAdmin ? [['/platform', '플랫폼 운영', Building2]] : [])] as [string, string, LucideIcon][]).map(([h, l, I]) => (
                 <Link key={h} href={h} onClick={() => setMore(false)} className="flex items-center gap-3 rounded-input px-3 py-3 text-sm active:bg-slate-100"><I className="size-5 text-ink-2" />{l}</Link>
               ))}
               <button onClick={logout} className="flex w-full items-center gap-3 rounded-input px-3 py-3 text-left text-sm text-red-600 active:bg-red-50"><LogOut className="size-5" />로그아웃</button>

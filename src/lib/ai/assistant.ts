@@ -37,7 +37,8 @@ export async function usageThisMonth(tenant: string) {
 }
 
 export async function aiStatus(u: SessionUser) {
-  const enabled = aiEnabled() && !u.isDemo;
+  const { menuLevel } = await import('../menuPerms');
+  const enabled = aiEnabled() && !u.isDemo && (await menuLevel(u, 'assistant')) === 'use';
   if (!enabled) return { enabled: false };
   const usage = await usageThisMonth(tenantOf(u));
   // V10 요금제 월 AI 요청 수
@@ -165,7 +166,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       return { people: d.users.map((x: any) => ({ id: x.id, name: x.name, title: x.title, role: x.role })), orgUnits: d.orgUnits.filter((o: any) => o.active).map((o: any) => ({ id: o.id, name: o.name, type: o.type })) };
     }
     case 'revenue_summary': {
-      if (!(await canSeeRevenue(u))) throw new HttpError(403, 'forbidden', '매출은 대표·본사만 볼 수 있습니다');
+      if (!(await canSeeRevenue(u))) throw new HttpError(403, 'forbidden', '매출 보기 권한이 없습니다(대표가 메뉴 권한에서 열 수 있음)');
       const ok = (m: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
       if (!ok(input.fromMonth) || !ok(input.toMonth)) throw badRequest('YYYY-MM 형식');
       const rows = await db()`select o.name as site, to_char(r.month, 'YYYY-MM') as month, r.revenue::float8 revenue, r.expense::float8 expense, r.members, r.target::float8 target
@@ -231,6 +232,8 @@ export { chatInput };
 
 const IMG = /^image\/(png|jpe?g|gif|webp)$/;
 /** 첨부 파일 → Claude 입력 블록 (회사 자료실 권한 그대로, 큰 파일은 글자만) */
+/** 다른 기능(매출 자료로 입력)에서도 같은 첨부 → 입력 블록 변환을 쓴다 */
+export const fileBlocksFor = (u: SessionUser, ids: string[]) => fileBlocks(u, ids);
 async function fileBlocks(u: SessionUser, ids: string[]) {
   const { getObject } = await import('../storage');
   const blocks: any[] = [];
@@ -255,6 +258,7 @@ async function fileBlocks(u: SessionUser, ids: string[]) {
 export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provider: AiProvider = anthropicProvider()) {
   denyDemo(u);
   if (!aiEnabled()) throw notFound();
+  await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use'); // V13 메뉴 권한
   const tenant = tenantOf(u);
   const usage = await usageThisMonth(tenant);
   if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다. 대표에게 한도 조정을 요청하세요.`);
@@ -368,6 +372,7 @@ const FILL_SCHEMA = {
 export async function fillFromFiles(u: SessionUser, i: z.infer<typeof fillInput>, provider: AiProvider = anthropicProvider()) {
   denyDemo(u);
   if (!aiEnabled()) throw notFound();
+  await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use');
   const tenant = tenantOf(u);
   const usage = await usageThisMonth(tenant);
   if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다.`);

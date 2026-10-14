@@ -28,17 +28,18 @@ export const aiEnabled = () => !!process.env.ANTHROPIC_API_KEY;
 const FALLBACK_MODELS = new Set(['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5']);
 
 let client: Anthropic | null = null;
-export function anthropicProvider(): AiProvider {
+/** light: 자료실 자동 정리처럼 짧고 잦은 요청 — 가벼운 모델(AI_LIGHT_MODEL, 기본 claude-haiku-5-5) */
+export function anthropicProvider(opt: { light?: boolean } = {}): AiProvider {
   client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, baseURL: process.env.ANTHROPIC_BASE_URL || undefined, maxRetries: 2, timeout: 100_000 });
-  const model = process.env.AI_MODEL || 'claude-opus-5-5';
-  const effort = (process.env.AI_EFFORT || 'medium') as 'low' | 'medium' | 'high';
+  const model = opt.light ? process.env.AI_LIGHT_MODEL || 'claude-haiku-5-5' : process.env.AI_MODEL || 'claude-opus-5-5';
+  const effort = (opt.light ? 'low' : process.env.AI_EFFORT || 'medium') as 'low' | 'medium' | 'high';
   return {
     name: 'anthropic',
     model,
     chat: ({ system, messages, tools, format }) =>
       client!.beta.messages.create({
         model,
-        max_tokens: 16000,
+        max_tokens: opt.light ? 2000 : 16000,
         system,
         messages,
         ...(tools.length ? { tools } : {}),

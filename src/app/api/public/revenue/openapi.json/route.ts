@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 /** Custom GPT Action 설정용 스키마 (비밀값 없음). GPT 편집기 → Actions → "Import from URL" 에 이 주소를 넣는다 */
 export const dynamic = 'force-dynamic';
 export function GET() {
+  if (process.env.FEATURE_GPT_ACTION !== '1') return NextResponse.json({ error: 'not found' }, { status: 404 }); // V13 1번: 기본 꺼짐
   const url = process.env.APP_URL ?? 'https://dagym-workspace.vercel.app';
   return NextResponse.json({
     openapi: '3.1.0',

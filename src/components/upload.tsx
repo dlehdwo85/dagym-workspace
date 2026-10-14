@@ -89,3 +89,12 @@ export function DropHint({ onClick, disabled, what = '사진·PDF·문서', max 
     </button>
   );
 }
+
+/** V13 3번 중복 감지: 기기에서 SHA-256 (50MB 넘거나 보안 연결이 아니면 생략) */
+export async function fileHash(file: Blob): Promise<string | undefined> {
+  try {
+    if (file.size > 50 * 1024 * 1024 || !globalThis.crypto?.subtle) return undefined;
+    const h = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch { return undefined; }
+}

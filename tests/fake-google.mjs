@@ -53,7 +53,17 @@ export function startFakeGoogle(port = 3199) {
     // ---- 가짜 Anthropic Messages API (V9 AI 비서): 요청을 기록하고, 시험이 넣어 둔 응답을 차례로 돌려준다 ----
     if (p === '/v1/messages' && req.method === 'POST') {
       state.anthropic.push({ key: req.headers['x-api-key'], beta: req.headers['anthropic-beta'] ?? null, body });
-      const next = state.anthropicQueue.shift() ?? { content: [{ type: 'text', text: '테스트 응답입니다.' }], stop_reason: 'end_turn' };
+      let next = state.anthropicQueue.shift();
+      // 매출 AI 분석(구조화 출력)인데 넣어 둔 응답이 없으면: 입력의 첫 현장·월로 정해진 JSON (예전 가짜 OpenAI 와 같은 모양)
+      if (!next && body.output_config?.format?.schema?.required?.includes('anomalies')) {
+        const input = JSON.parse(body.messages.find((m) => m.role === 'user').content);
+        const row = input.rows.find((r) => r.month === input.period) ?? input.rows[0];
+        next = { content: [{ type: 'text', text: JSON.stringify({
+          summary: `${row.site} ${row.month} 매출은 ${row.revenue}원입니다.`,
+          anomalies: [{ site: row.site, month: row.month, metric: 'revenue', comment: '전월 대비 크게 늘었습니다.' }, { site: '없는 현장', month: row.month, metric: 'revenue', comment: '지어낸 제안' }],
+          comparisons: [{ site: row.site, comment: '가장 높습니다.' }] }) }], stop_reason: 'end_turn' };
+      }
+      next ??= { content: [{ type: 'text', text: '테스트 응답입니다.' }], stop_reason: 'end_turn' };
       return json(res, 200, { id: `msg_${state.anthropic.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null,
         usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, ...next });
     }

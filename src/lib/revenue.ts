@@ -7,13 +7,14 @@ import { audit } from './log';
 import type { SessionUser } from './types';
 
 /** 매출은 본사만: 대표·본사 관리자, 또는 본사(hq) 조직 소속. 그 밖에는 화면·API 모두 없는 것처럼(404) */
+/** V13 2번: 매출은 메뉴 권한(보기/입력) — 기본은 대표만. 대표가 "사용자 관리 → 메뉴 권한"에서 등급·사람별로 연다 */
 export async function canSeeRevenue(u: SessionUser, sql: Sql = db()) {
-  if (isAdmin(u)) return true;
-  const r = await sql`select 1 from memberships m join org_units o on o.id = m.org_unit_id where m.user_id = ${u.id} and o.type = 'hq' limit 1`;
-  return r.length > 0;
+  const { menuLevel } = await import('./menuPerms');
+  return (await menuLevel(u, 'revenue', sql)) !== 'none';
 }
-export async function requireRevenue(u: SessionUser, sql: Sql = db()) {
-  if (!(await canSeeRevenue(u, sql))) throw notFound();
+export async function requireRevenue(u: SessionUser, sql: Sql = db(), need: 'view' | 'edit' = 'view') {
+  const { requireMenu } = await import('./menuPerms');
+  await requireMenu(u, 'revenue', need, sql);
 }
 
 const won = z.coerce.number().int('원 단위 정수로 입력하세요').min(0, '0 이상이어야 합니다').max(1e13, '값이 너무 큽니다');
@@ -34,11 +35,12 @@ export async function listRevenue(u: SessionUser, year: number) {
   const [units, rows] = await Promise.all([
     sql`select o.id, o.name, o.type, o.brand_id from org_units o where o.active and not o.is_demo and o.type in ('branch', 'site') order by o.brand_id nulls last, o.sort, o.name`,
     sql`select r.id, r.org_unit_id, to_char(r.month, 'YYYY-MM') as month, r.revenue::float8 as revenue, r.expense::float8 as expense, r.members,
-          r.target::float8 as target, r.note, r.source, r.source_file, r.updated_at, u.name as updated_by_name
+          r.target::float8 as target, r.note, r.source, r.source_file, r.source_file_ids, r.updated_at, u.name as updated_by_name
         from revenue_entries r left join users u on u.id = r.updated_by
         where r.month >= ${`${year - 1}-01-01`} and r.month <= ${`${year}-12-01`} order by r.month`,
   ]);
-  return { year, units, rows, aiEnabled: aiConfigured() };
+  const { menuLevel } = await import('./menuPerms');
+  return { year, units, rows, aiEnabled: aiConfigured(), canEdit: (await menuLevel(u, 'revenue', sql)) === 'edit' };
 }
 
 async function upsert(sql: Sql, u: SessionUser | null, i: RevenueInput, source: 'manual' | 'csv' | 'gpt', file: string | null) {
@@ -52,17 +54,17 @@ async function upsert(sql: Sql, u: SessionUser | null, i: RevenueInput, source: 
 
 /** 항목별 입력(표준 양식·GPT): 들어온 항목만 바꾸고 나머지 값은 유지 */
 type Partial1 = { orgUnitId: string; month: string; revenue?: number; expense?: number; members?: number; target?: number; file?: string | null; note?: string | null };
-async function upsertPartial(sql: Sql, u: SessionUser | null, i: Partial1, source: 'csv' | 'gpt') {
+async function upsertPartial(sql: Sql, u: SessionUser | null, i: Partial1, source: 'csv' | 'gpt' | 'ai', fileIds: string[] | null = null) {
   const unit = await sql`select id from org_units where id = ${i.orgUnitId} and not is_demo`;
   if (!unit.length) throw badRequest('현장을 찾을 수 없습니다');
   const v = (x: number | undefined) => (x === undefined ? null : x);
-  await sql`insert into revenue_entries (org_unit_id, month, revenue, expense, members, target, note, source, source_file, created_by, updated_by)
-    values (${i.orgUnitId}, ${i.month + '-01'}, ${i.revenue ?? 0}, ${i.expense ?? 0}, ${v(i.members)}, ${v(i.target)}, ${i.note ?? null}, ${source}, ${i.file ?? null}, ${u?.id ?? null}, ${u?.id ?? null})
+  await sql`insert into revenue_entries (org_unit_id, month, revenue, expense, members, target, note, source, source_file, source_file_ids, created_by, updated_by)
+    values (${i.orgUnitId}, ${i.month + '-01'}, ${i.revenue ?? 0}, ${i.expense ?? 0}, ${v(i.members)}, ${v(i.target)}, ${i.note ?? null}, ${source}, ${i.file ?? null}, ${fileIds}::uuid[], ${u?.id ?? null}, ${u?.id ?? null})
     on conflict (org_unit_id, month) do update set
       revenue = coalesce(${v(i.revenue)}::bigint, revenue_entries.revenue), expense = coalesce(${v(i.expense)}::bigint, revenue_entries.expense),
       members = coalesce(${v(i.members)}::int, revenue_entries.members), target = coalesce(${v(i.target)}::bigint, revenue_entries.target),
       note = coalesce(${i.note ?? null}, revenue_entries.note), source = excluded.source,
-      source_file = coalesce(excluded.source_file, revenue_entries.source_file), updated_by = excluded.updated_by, updated_at = now()`;
+      source_file = coalesce(excluded.source_file, revenue_entries.source_file), source_file_ids = excluded.source_file_ids, updated_by = excluded.updated_by, updated_at = now()`;
 }
 
 /** 표준 양식(현장·월·항목·금액·근거파일명) 항목 이름 */
@@ -99,14 +101,14 @@ async function collectItems(sql: Sql, rows: { line: number; r: ItemRow }[]) {
 
 export async function saveRevenue(u: SessionUser, i: RevenueInput, ip: string | null) {
   const sql = db();
-  await requireRevenue(u, sql);
+  await requireRevenue(u, sql, 'edit');
   await upsert(sql, u, i, 'manual', null);
   await audit(sql, u.id, 'revenue.save', 'org_unit', i.orgUnitId, { month: i.month, revenue: i.revenue, expense: i.expense }, ip);
 }
 
 export async function deleteRevenue(u: SessionUser, orgUnitId: string, month: string, ip: string | null) {
   const sql = db();
-  await requireRevenue(u, sql);
+  await requireRevenue(u, sql, 'edit');
   if (!/^\d{4}-\d{2}$/.test(month)) throw badRequest('YYYY-MM 형식이어야 합니다');
   await sql`delete from revenue_entries where org_unit_id = ${orgUnitId} and month = ${month + '-01'}`;
   await audit(sql, u.id, 'revenue.delete', 'org_unit', orgUnitId, { month }, ip);
@@ -134,9 +136,10 @@ const num = (s: string) => (s === '' ? null : Number(s.replace(/[,원\s]/g, ''))
  * CSV 가져오기: 머리글 현장,월,매출,지출[,회원수,목표,메모]. 현장은 조직 이름과 정확히 일치해야 한다.
  * 오류가 하나라도 있으면 아무것도 저장하지 않고 줄 번호와 이유를 돌려준다. dryRun 이면 검사만.
  */
-export async function importRevenueCsv(u: SessionUser, csv: string, fileName: string | null, dryRun: boolean, ip: string | null) {
+export async function importRevenueCsv(u: SessionUser, csv: string, fileName: string | null, dryRun: boolean, ip: string | null, evidenceIds: string[] | null = null) {
   const sql = db();
-  await requireRevenue(u, sql);
+  await requireRevenue(u, sql, 'edit');
+  if (evidenceIds?.length) { const { loadLibraryFile } = await import('./library'); for (const id of evidenceIds) await loadLibraryFile(u, id); } // 근거 파일도 볼 수 있어야
   const lines = csv.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) throw badRequest('머리글과 한 줄 이상의 자료가 필요합니다');
   const rawHead = splitCsvLine(lines[0]).map((h) => h.replace(/^\uFEFF/, '').replace(/\s*\(.*\)$/, '').trim());
@@ -148,8 +151,8 @@ export async function importRevenueCsv(u: SessionUser, csv: string, fileName: st
     const items = lines.slice(1).map((l, i) => { const c = splitCsvLine(l); return { line: i + 2, r: { site: c[iS], month: c[iM], item: c[iI], amount: c[iA], sourceFile: iF >= 0 ? c[iF] || fileName : fileName } }; });
     const { entries, errors } = await collectItems(sql, items);
     if (errors.length || dryRun) return { ok: !errors.length, count: entries.length, errors, preview: entries.slice(0, 50) };
-    await sql.begin(async (tx) => { for (const e of entries) await upsertPartial(tx as unknown as Sql, u, e, 'csv'); });
-    await audit(sql, u.id, 'revenue.import', null, null, { count: entries.length, file: fileName, format: 'items' }, ip);
+    await sql.begin(async (tx) => { for (const e of entries) await upsertPartial(tx as unknown as Sql, u, e, evidenceIds?.length ? 'ai' : 'csv', evidenceIds?.length ? evidenceIds : null); });
+    await audit(sql, u.id, evidenceIds?.length ? 'revenue.ai_import' : 'revenue.import', null, null, { count: entries.length, file: fileName, format: 'items', evidence: evidenceIds }, ip);
     return { ok: true, count: entries.length, errors: [] };
   }
   const cols = rawHead.map((h) => HEAD[h] ?? '');
@@ -175,7 +178,8 @@ export async function importRevenueCsv(u: SessionUser, csv: string, fileName: st
   return { ok: true, count: rows.length, errors: [] };
 }
 
-// ---------------- GPT Custom Action: 쓰기 전용 토큰 ----------------
+// ---------------- GPT Custom Action: 쓰기 전용 토큰 (V13: 기본 꺼짐, FEATURE_GPT_ACTION=1 일 때만) ----------------
+export const gptActionEnabled = () => process.env.FEATURE_GPT_ACTION === '1';
 const sha = (t: string) => createHash('sha256').update(t).digest('hex');
 export async function listTokens(u: SessionUser) {
   const sql = db(); await requireRevenue(u, sql);
@@ -183,7 +187,8 @@ export async function listTokens(u: SessionUser) {
     from api_tokens t left join users cu on cu.id = t.created_by order by t.created_at desc`;
 }
 export async function createToken(u: SessionUser, name: string, ip: string | null) {
-  const sql = db(); await requireRevenue(u, sql);
+  if (!gptActionEnabled()) throw notFound();
+  const sql = db(); await requireRevenue(u, sql, 'edit');
   const token = 'wk_' + randomBytes(24).toString('base64url');
   const [r] = await sql`insert into api_tokens (name, token_hash, prefix, scope, created_by) values (${name}, ${sha(token)}, ${token.slice(0, 11)}, 'revenue:write', ${u.id}) returning id`;
   await audit(sql, u.id, 'api_token.create', 'api_token', r.id, { name, scope: 'revenue:write' }, ip);
@@ -220,7 +225,8 @@ export async function actionImport(token: { id: string; name: string }, i: z.inf
 }
 
 // ---------------- AI 분석 (OpenAI, OPENAI_API_KEY 있을 때만) ----------------
-export const aiConfigured = () => !!process.env.OPENAI_API_KEY;
+// V13 1번: AI 분석도 내장 AI(공급자 어댑터 — 기본 Anthropic) 사용, 키가 없으면 숨김
+export const aiConfigured = () => !!process.env.ANTHROPIC_API_KEY;
 const AI_SYSTEM = `당신은 한국 피트니스 회사(다짐·하이링크) 본사의 매출 분석 보조입니다. 입력은 현장별 월 집계 숫자(원·명)뿐입니다.
 반드시 입력 숫자만 근거로 쓰고, 없는 사실을 지어내지 마세요. 숫자를 말할 때는 그 현장·월을 함께 적으세요.
 JSON 으로만 답하세요: {"summary": "3~5문장 요약", "anomalies": [{"site": "현장 이름", "month": "YYYY-MM", "metric": "revenue|expense|members", "comment": "한두 문장"}], "comparisons": [{"site": "현장 이름", "comment": "한두 문장"}]}.
@@ -246,17 +252,24 @@ export async function aiAnalyze(u: SessionUser, period: string, ip: string | nul
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw badRequest('YYYY-MM 형식이어야 합니다');
   const input = await aiInput(sql, period);
   if (!input.rows.some((r) => r.month === period)) throw badRequest(`${period} 실적이 없습니다. 먼저 입력하세요`);
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  const res = await fetch(`${process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'}/chat/completions`, {
-    method: 'POST', signal: AbortSignal.timeout(60_000),
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-    body: JSON.stringify({ model, temperature: 0.2, response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: AI_SYSTEM }, { role: 'user', content: JSON.stringify(input) }] }),
-  }).catch((e) => { throw new HttpError(502, 'ai_unavailable', `AI 분석 서버에 연결하지 못했습니다 (${(e as Error).message})`); });
-  if (!res.ok) throw new HttpError(502, 'ai_failed', `AI 분석이 실패했습니다 (${res.status})`);
-  const j = await res.json();
+  const { anthropicProvider, costUsd } = await import('./ai/provider');
+  await (await import('./plans')).assertAiRequest(u);
+  const provider = anthropicProvider();
+  const model = provider.model;
+  const schema = { type: 'object', additionalProperties: false, required: ['summary', 'anomalies', 'comparisons'], properties: {
+    summary: { type: 'string' },
+    anomalies: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['site', 'month', 'metric', 'comment'], properties: { site: { type: 'string' }, month: { type: 'string' }, metric: { type: 'string' }, comment: { type: 'string' } } } },
+    comparisons: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['site', 'comment'], properties: { site: { type: 'string' }, comment: { type: 'string' } } } },
+  } };
+  const r0 = await provider.chat({ system: AI_SYSTEM, tools: [], format: schema, messages: [{ role: 'user', content: JSON.stringify(input) }] })
+    .catch((e: any) => { throw new HttpError(502, 'ai_unavailable', `AI 분석 서버 응답 오류${e?.status ? ` (${e.status})` : ''}`); });
+  const { tenantOf } = await import('./library');
+  await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+    values (${tenantOf(u)}, ${u.id}, ${crypto.randomUUID()}, ${provider.name}, ${r0.model ?? model}, ${r0.usage.input_tokens}, ${r0.usage.output_tokens}, ${r0.usage.cache_read_input_tokens ?? 0},
+      ${r0.usage.cache_creation_input_tokens ?? 0}, ${costUsd(r0.model ?? model, r0.usage)}, 'revenue')`;
+  const j = { usage: { total_tokens: r0.usage.input_tokens + r0.usage.output_tokens } };
   let out: any;
-  try { out = JSON.parse(j.choices?.[0]?.message?.content ?? ''); } catch { throw new HttpError(502, 'ai_bad_output', 'AI 응답을 해석하지 못했습니다'); }
+  try { out = JSON.parse(r0.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')); } catch { throw new HttpError(502, 'ai_bad_output', 'AI 응답을 해석하지 못했습니다'); }
   // 입력에 없는 현장·월을 가리키는 제안은 버린다 (근거 없는 숫자 방지)
   const known = new Set(input.rows.map((r) => `${r.site}|${r.month}`));
   const sites = new Set(input.rows.map((r) => r.site));
@@ -276,4 +289,38 @@ export async function latestAi(u: SessionUser, period: string) {
   const sql = db(); await requireRevenue(u, sql);
   const [r] = await sql`select id, period, model, input, output, created_at from revenue_ai_reports where period = ${period} order by created_at desc limit 1`;
   return r ?? null;
+}
+
+// ---------------- V13 1번 "자료로 입력(AI)": 정산서 엑셀·PDF·사진 → 표준 양식 CSV → 미리보기(검사) → 사람이 확인 후 반영 ----------------
+export async function aiExtract(u: SessionUser, fileIds: string[]) {
+  const sql = db(); await requireRevenue(u, sql, 'edit');
+  if (!aiConfigured()) throw notFound();
+  await (await import('./plans')).assertAiRequest(u);
+  const { anthropicProvider, costUsd } = await import('./ai/provider');
+  const { fileBlocksFor } = await import('./ai/assistant');
+  const { loadLibraryFile, tenantOf } = await import('./library');
+  const files = await Promise.all(fileIds.map((id) => loadLibraryFile(u, id)));
+  const fb = await fileBlocksFor(u, fileIds);
+  const units = await sql<{ name: string }[]>`select name from org_units where active and not is_demo and type in ('branch', 'site') order by name`;
+  const provider = anthropicProvider();
+  const schema = { type: 'object', additionalProperties: false, required: ['rows', 'notes'], properties: {
+    rows: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['site', 'month', 'item', 'amount'], properties: {
+      site: { type: 'string' }, month: { type: 'string' }, item: { type: 'string', enum: ['매출', '지출', '회원수', '목표'] }, amount: { type: 'number' } } } },
+    notes: { type: 'string' } } };
+  const system = `정산서·매출 자료에서 현장별 월 실적만 뽑아 JSON 으로 답하세요. 현장 이름은 반드시 이 목록 중 하나로: ${units.map((x) => x.name).join(', ')}. 월은 YYYY-MM. 항목은 매출·지출·회원수·목표. 금액은 원 단위 정수(천원·만원 단위면 원으로 환산). 자료에 없는 숫자는 만들지 말고, 애매한 것은 notes 에 적으세요.`;
+  const r = await provider.chat({ system, tools: [], format: schema, messages: [{ role: 'user', content: [...fb.blocks, { type: 'text', text: '이 자료의 현장별 월 실적을 뽑아 주세요.' }] as never }] })
+    .catch((e: any) => { throw new HttpError(502, 'ai_unavailable', `AI 서버 응답 오류${e?.status ? ` (${e.status})` : ''}`); });
+  await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+    values (${tenantOf(u)}, ${u.id}, ${crypto.randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0},
+      ${r.usage.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, r.usage)}, 'revenue_extract')`;
+  let out: any;
+  try { out = JSON.parse(r.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')); } catch { throw new HttpError(502, 'ai_bad_output', 'AI 응답을 해석하지 못했습니다'); }
+  const fileName = files.map((f: any) => f.file_name).join(' · ').slice(0, 190);
+  const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const rows = (Array.isArray(out.rows) ? out.rows : []).slice(0, 500);
+  const csv = ['현장,월,항목,금액,근거파일명', ...rows.map((x: any) => [x.site, x.month, x.item, Math.round(Number(x.amount)), fileName].map((v) => esc(String(v ?? ''))).join(','))].join('\n');
+  if (!rows.length) return { ok: false, count: 0, errors: [{ line: 0, message: '자료에서 실적을 찾지 못했습니다' }], preview: [], csv, fileName, notes: String(out.notes ?? ''), rows: [] };
+  const check = await importRevenueCsv(u, csv, fileName, true, null); // 검사·미리보기만 — 반영은 사람이 확인 후 /api/revenue/import
+  return { ...check, csv, fileName, notes: String(out.notes ?? '').slice(0, 1000),
+    rows: rows.map((x: any) => ({ site: String(x.site ?? ''), month: String(x.month ?? ''), item: String(x.item ?? ''), amount: Math.round(Number(x.amount) || 0) })) };
 }

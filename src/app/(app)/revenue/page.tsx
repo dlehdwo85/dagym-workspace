@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Copy, Download, FileUp, Info, KeyRound, Sparkles } from 'lucide-react';
+import { BarChart3, Download, FileUp, Info, Sparkles } from 'lucide-react';
+import { DropHint, UploadProgress, putFile } from '@/components/upload';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, Card, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -14,7 +15,7 @@ const fmtWon = (n: number) => (Math.abs(n) >= 1e8 ? `${(n / 1e8).toFixed(1).repl
 const fmtFull = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${Math.round(n).toLocaleString('ko-KR')}원`);
 const pct = (a: number, b: number) => (b ? `${a >= b ? '+' : ''}${(((a - b) / b) * 100).toFixed(1)}%` : '—');
 
-type Row = { id: string; org_unit_id: string; month: string; revenue: number; expense: number; members: number | null; target: number | null; note: string | null; source: string; source_file: string | null; updated_at: string; updated_by_name: string | null };
+type Row = { id: string; org_unit_id: string; month: string; revenue: number; expense: number; members: number | null; target: number | null; note: string | null; source: string; source_file: string | null; source_file_ids?: string[] | null; updated_at: string; updated_by_name: string | null };
 
 function Chart({ year, thisY, prevY, target }: { year: number; thisY: number[]; prevY: number[]; target: (number | null)[] }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -82,7 +83,7 @@ export default function RevenuePage() {
   const [brand, setBrand] = useState('');
   const [unit, setUnit] = useState('');
   const [month, setMonth] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7));
-  const { data, error, loading, reload } = useApi<{ year: number; units: any[]; rows: Row[]; aiEnabled?: boolean }>(`/api/revenue?year=${year}`, [year]);
+  const { data, error, loading, reload } = useApi<{ year: number; units: any[]; rows: Row[]; aiEnabled?: boolean; canEdit?: boolean }>(`/api/revenue?year=${year}`, [year]);
   const [drafts, setDrafts] = useState<Record<string, any>>({});
   const [csv, setCsv] = useState<{ name: string; text: string; result?: any } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -139,7 +140,7 @@ export default function RevenuePage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="매출" icon={BarChart3} sub="현장별 월 매출·지출 — 본사만 볼 수 있습니다" actions={<>
+      <PageHeader title="매출" icon={BarChart3} sub="현장별 월 매출·지출 — 대표가 권한을 켜 준 사람만 볼 수 있습니다" actions={<>
         <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={year} onChange={(e) => setYear(Number(e.target.value))} aria-label="연도">
           {[thisYear + 1, thisYear, thisYear - 1, thisYear - 2].map((y) => <option key={y} value={y}>{y}년</option>)}
         </select>
@@ -174,7 +175,7 @@ export default function RevenuePage() {
           </details>
         </Card>
 
-        <Card className="p-4" data-testid="revenue-input">
+        {data?.canEdit ? <Card className="p-4" data-testid="revenue-input">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold">월 실적 입력</h2>
             <div className="flex flex-wrap items-center gap-2">
@@ -199,7 +200,7 @@ export default function RevenuePage() {
                   <li key={u.id} className="py-3" data-unit={u.name}>
                     <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3">
                       <span className="font-medium">{u.name}</span>
-                      <span className="text-[11px] text-ink-3">{e ? `근거: ${e.source === 'csv' ? `CSV ${e.source_file ?? ''}` : e.source === 'gpt' ? 'GPT 연동' : '직접 입력'} · ${e.updated_by_name ?? ''} ${fmtDateTime(e.updated_at)}` : '아직 입력 전'}</span>
+                      <span className="text-[11px] text-ink-3">{e?.source_file_ids?.map((id, k) => <a key={id} href={`/api/library/${id}/download`} target="_blank" rel="noreferrer" className="mr-1 text-accent-600 underline">근거 파일{e.source_file_ids!.length > 1 ? ` ${k + 1}` : ''}</a>)}{e ? `근거: ${e.source === 'csv' ? `CSV ${e.source_file ?? ''}` : e.source === 'gpt' ? 'GPT 연동' : e.source === 'ai' ? `AI 추출 ${e.source_file ?? ''}` : '직접 입력'} · ${e.updated_by_name ?? ''} ${fmtDateTime(e.updated_at)}` : '아직 입력 전'}</span>
                     </div>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.5fr)_auto]">
                       {([['revenue', '매출(원)'], ['expense', '지출(원)'], ['members', '회원 수'], ['target', '목표(원)']] as const).map(([k, l]) => (
@@ -217,16 +218,16 @@ export default function RevenuePage() {
               })}
             </ul>
           )}
-        </Card>
+        </Card> : <p className="rounded-input bg-slate-50 p-3 text-sm text-ink-2" data-testid="revenue-view-only">보기 권한입니다 — 숫자 입력·가져오기는 대표가 &ldquo;입력&rdquo; 권한을 켜 준 사람만 할 수 있습니다.</p>}
 
         {data?.aiEnabled && <AiPanel period={month} onFocus={(site, m) => {
           const u = data.units.find((x) => x.name === site); if (u) setUnit(u.id); setMonth(m); setDrafts({});
           document.querySelector('[data-testid=revenue-input]')?.scrollIntoView({ behavior: 'smooth' });
         }} />}
-        <TokenPanel />
+        {data?.canEdit && data?.aiEnabled && <AiInputPanel units={units} onDone={reload} />}
         <p className="flex items-start gap-1.5 text-xs text-ink-3"><Info className="mt-0.5 size-3.5 shrink-0" />
           모든 숫자는 근거(입력 방식·파일·입력자·시각)와 함께 보관됩니다. CSV 는 표준 양식(현장·월·항목·금액·근거파일명)과 가로형(현장·월·매출·지출…) 모두 받습니다.
-          {!data?.aiEnabled && ' AI 분석은 서버에 OpenAI 키(OPENAI_API_KEY)가 설정되면 나타납니다.'}
+          {!data?.aiEnabled && ' 자료로 입력(AI)·AI 분석은 워크인 내장 AI 가 켜지면 나타납니다(운영자 설정).'}
         </p>
         {unit && <p className="text-xs text-ink-3">선택한 현장: {unitName(unit)}</p>}
       </>}
@@ -291,41 +292,78 @@ function AiPanel({ period, onFocus }: { period: string; onFocus: (site: string, 
   );
 }
 
-/** GPT Custom Action 연결: 쓰기 전용 토큰(매출 입력만) 발급·폐기 */
-function TokenPanel() {
-  const t = useApi<{ tokens: any[] }>('/api/revenue/tokens');
-  const [name, setName] = useState('GPT 자료 운영체계');
-  const [fresh, setFresh] = useState<string | null>(null);
-  const schemaUrl = typeof window !== 'undefined' ? `${location.origin}/api/public/revenue/openapi.json` : '';
-  async function create() {
-    try { const r = await api('/api/revenue/tokens', { body: { name } }); setFresh(r.token); t.reload(); } catch (e: any) { toast.error(e.message); }
+/** V13 1번 자료로 입력(AI): 정산서·매출 보고(엑셀·PDF·사진) → 자료실 "매출 근거"에 원본 저장 → 내장 AI 가 뽑은 표 미리보기 → 확인·수정 후 반영 */
+type XRow = { site: string; month: string; item: string; amount: number };
+function AiInputPanel({ units, onDone }: { units: { name: string }[]; onDone: () => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
+  const [busy, setBusy] = useState('');
+  const [res, setRes] = useState<{ ids: string[]; fileName: string; rows: XRow[]; notes: string; errors: any[] } | null>(null);
+  async function go(list: FileList | null) {
+    if (!list?.length) return;
+    const files = Array.from(list).slice(0, 5);
+    setRes(null); setProg(files.map((f) => ({ name: f.name, pct: 0 })));
+    const ids: string[] = [];
+    for (const [n, file] of files.entries()) {
+      setBusy(`${file.name} 올리는 중…`);
+      try {
+        const r = await api('/api/library', { body: { fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, purpose: 'revenue' } });
+        await putFile(r.upload, file, (pct) => setProg((x) => x.map((y, j) => (j === n ? { ...y, pct } : y))));
+        await api(`/api/library/${r.id}/complete`, { body: {} });
+        ids.push(r.id);
+      } catch (e: any) { setProg((x) => x.map((y, j) => (j === n ? { ...y, error: e.message } : y))); }
+    }
+    if (ref.current) ref.current.value = '';
+    if (!ids.length) { setBusy(''); return; }
+    setBusy('AI 가 숫자를 뽑는 중… (최대 1분)');
+    try {
+      const r = await api('/api/revenue/extract', { body: { fileIds: ids } });
+      setRes({ ids, fileName: r.fileName, rows: r.rows, notes: r.notes, errors: r.errors ?? [] }); setProg([]);
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
   }
-  async function revoke(id: string) {
-    if (!confirm('이 토큰을 폐기할까요? GPT 연결이 끊깁니다.')) return;
-    try { await api(`/api/revenue/tokens/${id}`, { method: 'DELETE' }); t.reload(); } catch (e: any) { toast.error(e.message); }
+  const setRow = (i: number, k: keyof XRow, v: string) => setRes((r) => r && { ...r, rows: r.rows.map((x, j) => (j === i ? { ...x, [k]: k === 'amount' ? Number(v.replace(/[^\d]/g, '')) || 0 : v } : x)) });
+  async function apply() {
+    if (!res) return;
+    const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const csv = ['현장,월,항목,금액,근거파일명', ...res.rows.map((x) => [x.site, x.month, x.item, String(x.amount), res.fileName].map(esc).join(','))].join('\n');
+    try {
+      const r = await api('/api/revenue/import', { body: { csv, fileName: res.fileName, evidenceFileIds: res.ids } });
+      if (!r.ok) { setRes({ ...res, errors: r.errors }); return toast.error(`고칠 곳 ${r.errors.length}건 — 아무것도 저장되지 않았습니다`); }
+      toast.ok(`${r.count}건을 반영했습니다`); setRes(null); onDone();
+    } catch (e: any) { toast.error(e.message); }
   }
   return (
-    <Card className="p-4" data-testid="revenue-tokens">
-      <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold"><KeyRound className="size-4 text-ink-3" />GPT 연동 (Custom GPT Action)</h2>
-      <p className="mb-2 text-xs text-ink-2">GPT 편집기 → Actions → Import from URL 에 <code className="break-all rounded bg-slate-100 px-1">{schemaUrl}</code> 를 넣고, 인증은 API Key(Bearer)로 아래 토큰을 넣습니다. 토큰은 <b>매출 입력만</b> 할 수 있습니다(조회·삭제 불가).</p>
-      {fresh && (
-        <div className="mb-2 rounded-input border border-amber-300 bg-amber-50 p-2 text-xs" data-testid="fresh-token">
-          <p className="mb-1 font-medium">지금 한 번만 보여 드립니다. 복사해 GPT 설정에 넣으세요.</p>
-          <div className="flex items-center gap-2"><code className="min-w-0 flex-1 break-all">{fresh}</code>
-            <Button size="sm" variant="secondary" onClick={() => { navigator.clipboard?.writeText(fresh); toast.ok('복사했습니다'); }}><Copy />복사</Button></div>
-        </div>
-      )}
-      <div className="flex flex-wrap gap-2">
-        <input className={cx(inputCls, 'h-9 max-w-xs')} value={name} onChange={(e) => setName(e.target.value)} aria-label="토큰 이름" maxLength={60} />
-        <Button size="sm" onClick={create} disabled={!name.trim()}>토큰 만들기</Button>
+    <Card className="p-4" data-testid="revenue-ai-input">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-violet-500" />자료로 입력 (AI)</h2>
+        <Button size="sm" variant="secondary" onClick={() => ref.current?.click()} disabled={!!busy}><FileUp />정산서 올리기</Button>
+        <input ref={ref} type="file" multiple accept=".xlsx,.xls,.csv,.pdf,image/*" className="hidden" onChange={(e) => go(e.target.files)} data-testid="revenue-ai-file" aria-label="정산서 파일 선택" />
       </div>
-      {!!t.data?.tokens.length && (
-        <ul className="mt-2 divide-y divide-line text-xs">{t.data.tokens.map((x) => (
-          <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
-            <span><b className="font-medium">{x.name}</b> <code className="text-ink-3">{x.prefix}…</code> · {x.created_by_name ?? ''} {fmtDateTime(x.created_at)}{x.last_used_at ? ` · 최근 사용 ${fmtDateTime(x.last_used_at)}` : ' · 사용 기록 없음'}</span>
-            {x.revoked_at ? <span className="text-ink-3">폐기됨</span> : <Button size="sm" variant="ghost" className="text-red-600" onClick={() => revoke(x.id)}>폐기</Button>}
-          </li>
-        ))}</ul>
+      {!res && <DropHint onClick={() => ref.current?.click()} disabled={!!busy} what="정산서·매출 보고 엑셀·PDF·사진" testid="revenue-ai-drop" />}
+      {busy && <p className="mt-2 text-sm text-ink-2">{busy}</p>}
+      <UploadProgress items={prog} />
+      {res && (
+        <div className="space-y-2" data-testid="revenue-ai-preview">
+          <p className="text-sm"><span className="mr-1.5 rounded bg-violet-600 px-1.5 py-0.5 text-[11px] font-semibold text-white">AI 추출</span>
+            {res.rows.length ? `${res.rows.length}개 숫자를 찾았습니다 — 확인하고 고친 뒤 반영하세요` : '자료에서 실적을 찾지 못했습니다'}</p>
+          {res.notes && <p className="rounded-input bg-amber-50 p-2 text-xs text-amber-900">AI 메모: {res.notes}</p>}
+          {!!res.rows.length && <div className="overflow-x-auto"><table className="w-full min-w-[480px] text-sm">
+            <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">현장</th><th>월</th><th>항목</th><th className="text-right">금액(원)</th><th /></tr></thead>
+            <tbody className="divide-y divide-line">{res.rows.map((x, i) => (
+              <tr key={i}>
+                <td className="py-1 pr-1"><select className={cx(inputCls, 'h-8')} value={x.site} onChange={(e) => setRow(i, 'site', e.target.value)} aria-label={`${i + 1}번째 현장`}>
+                  {!units.some((u) => u.name === x.site) && <option value={x.site}>{x.site} (없는 현장)</option>}{units.map((u) => <option key={u.name}>{u.name}</option>)}</select></td>
+                <td className="pr-1"><input type="month" className={cx(inputCls, 'h-8')} value={x.month} onChange={(e) => setRow(i, 'month', e.target.value)} aria-label={`${i + 1}번째 월`} /></td>
+                <td className="pr-1"><select className={cx(inputCls, 'h-8')} value={x.item} onChange={(e) => setRow(i, 'item', e.target.value)} aria-label={`${i + 1}번째 항목`}>{['매출', '지출', '회원수', '목표'].map((t) => <option key={t}>{t}</option>)}</select></td>
+                <td className="pr-1"><input inputMode="numeric" className={cx(inputCls, 'h-8 text-right tabular-nums')} value={x.amount.toLocaleString('ko-KR')} onChange={(e) => setRow(i, 'amount', e.target.value)} aria-label={`${i + 1}번째 금액`} /></td>
+                <td><button className="px-1 text-xs text-red-600" onClick={() => setRes({ ...res, rows: res.rows.filter((_, j) => j !== i) })} aria-label={`${i + 1}번째 빼기`}>빼기</button></td>
+              </tr>
+            ))}</tbody>
+          </table></div>}
+          {!!res.errors.length && <ul className="list-disc pl-5 text-xs text-red-700">{res.errors.slice(0, 10).map((e: any, i: number) => <li key={i}>{e.line ? `${e.line - 1}번째 줄: ` : ''}{e.message}</li>)}</ul>}
+          <div className="flex gap-2">{!!res.rows.length && <Button size="sm" onClick={apply} data-testid="revenue-ai-apply">확인 후 반영</Button>}<Button size="sm" variant="secondary" onClick={() => setRes(null)}>취소</Button></div>
+          <p className="text-[11px] text-ink-3">원본은 자료실 &ldquo;매출 근거&rdquo; 폴더에 보관되고, 반영한 숫자마다 근거 파일로 연결됩니다.</p>
+        </div>
       )}
     </Card>
   );

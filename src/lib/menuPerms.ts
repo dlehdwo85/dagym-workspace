@@ -1,0 +1,91 @@
+import { z } from 'zod';
+import { db, type Sql } from './db';
+import { forbidden, notFound } from './errors';
+import { audit } from './log';
+import type { Role, SessionUser } from './types';
+
+/**
+ * V13 2번 메뉴 권한: 메뉴 × 등급 스위치 + 사람별 예외 (대표만 바꿈). 서버가 모든 API 에서 403/404 로 강제한다.
+ * 단계: none < view < edit (AI 비서는 none/use)
+ */
+export const MENUS = {
+  revenue: { label: '매출', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  team_reports: { label: '모두의 주간 보고', levels: ['none', 'view'], defaults: { owner: 'view', admin: 'view', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  // V13 4번: 자료실 3단계 — 보기 / 올리기·수정 / 삭제 (폴더별 권한은 library_folder_perms, 상속)
+  library: { label: '자료실', levels: ['none', 'view', 'edit', 'delete'], defaults: { owner: 'delete', admin: 'delete', dept_lead: 'edit', site_manager: 'edit', staff: 'edit' } },
+  assistant: { label: 'AI 비서', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
+} as const;
+export type MenuKey = keyof typeof MENUS;
+export const LEVEL_LABEL: Record<string, string> = { none: '안 보임', view: '보기', edit: '보기·입력', use: '사용', delete: '삭제까지' };
+/** 메뉴별 단계 이름 (자료실은 "올리기·수정") */
+export const levelLabel = (menu: string, lv: string) => (menu === 'library' && lv === 'edit' ? '올리기·수정' : LEVEL_LABEL[lv] ?? lv);
+export const RANK: Record<string, number> = { none: 0, view: 1, use: 1, edit: 2, delete: 3 };
+const topLevel = (menu: MenuKey) => MENUS[menu].levels[MENUS[menu].levels.length - 1] as string;
+const ROLES: Role[] = ['owner', 'admin', 'dept_lead', 'site_manager', 'staff'];
+
+export async function menuLevel(u: SessionUser, menu: MenuKey, sql: Sql = db()): Promise<string> {
+  if (u.isDemo && menu === 'revenue') return 'none';
+  if (u.role === 'owner' && !u.isDemo) return topLevel(menu); // 대표 본인 권한은 끌 수 없다(잠김 방지)
+  const [o] = await sql<{ level: string }[]>`select level from menu_user_perms where menu = ${menu} and user_id = ${u.id}`;
+  if (o) return o.level;
+  const [r] = await sql<{ level: string }[]>`select level from menu_role_perms where menu = ${menu} and role = ${u.role}`;
+  return r?.level ?? MENUS[menu].defaults[u.role];
+}
+export async function menuLevels(u: SessionUser) {
+  const out: Record<string, string> = {};
+  for (const m of Object.keys(MENUS) as MenuKey[]) out[m] = await menuLevel(u, m);
+  return out;
+}
+/** need 보다 낮으면: 메뉴 자체가 안 보이는 사람은 404(있는 줄도 모르게), 보기만 되는 사람의 쓰기는 403 */
+export async function requireMenu(u: SessionUser, menu: MenuKey, need: 'view' | 'edit' | 'use' | 'delete' = 'view', sql: Sql = db()) {
+  const lv = await menuLevel(u, menu, sql);
+  if (RANK[lv] >= RANK[need]) return lv;
+  if (lv === 'none') throw notFound();
+  throw forbidden(`${MENUS[menu].label}: ${levelLabel(menu, need)} 권한이 없습니다 — 대표에게 요청하세요`);
+}
+
+// ---------------- 대표 전용 설정 ----------------
+const requireOwner = (u: SessionUser) => { if (u.role !== 'owner' || u.isDemo) throw forbidden('대표만 메뉴 권한을 바꿀 수 있습니다'); };
+export async function menuMatrix(u: SessionUser) {
+  requireOwner(u);
+  const sql = db();
+  const [roles, users] = await Promise.all([
+    sql<{ menu: string; role: string; level: string }[]>`select menu, role, level from menu_role_perms`,
+    sql`select p.menu, p.user_id, p.level, u.name from menu_user_perms p join users u on u.id = p.user_id order by u.name`,
+  ]);
+  const matrix: Record<string, Record<string, string>> = {};
+  for (const [m, def] of Object.entries(MENUS)) {
+    matrix[m] = {};
+    for (const r of ROLES) matrix[m][r] = r === 'owner' ? topLevel(m as MenuKey) : roles.find((x) => x.menu === m && x.role === r)?.level ?? (def.defaults as Record<string, string>)[r];
+  }
+  return { menus: Object.entries(MENUS).map(([k, v]) => ({ key: k, label: v.label, levels: v.levels.map((l) => ({ value: l, label: levelLabel(k, l) })) })),
+    roles: ROLES, matrix, overrides: users };
+}
+export const menuPermInput = z.object({
+  menu: z.enum(Object.keys(MENUS) as [MenuKey, ...MenuKey[]]),
+  role: z.enum(['owner', 'admin', 'dept_lead', 'site_manager', 'staff']).optional(),
+  userId: z.string().uuid().optional(),
+  level: z.string().nullable(),
+});
+export async function setMenuPerm(u: SessionUser, i: z.infer<typeof menuPermInput>, ip: string | null) {
+  requireOwner(u);
+  const sql = db();
+  const levels = MENUS[i.menu].levels as readonly string[];
+  if (i.level !== null && !levels.includes(i.level)) throw forbidden('없는 단계입니다');
+  if (!!i.role === !!i.userId) throw forbidden('등급 또는 사람 중 하나를 고르세요');
+  if (i.role) {
+    if (i.role === 'owner') throw forbidden('대표 본인 권한은 끌 수 없습니다(잠김 방지)');
+    if (i.level === null) await sql`delete from menu_role_perms where menu = ${i.menu} and role = ${i.role}`;
+    else await sql`insert into menu_role_perms (menu, role, level, updated_by) values (${i.menu}, ${i.role}, ${i.level}, ${u.id})
+      on conflict (menu, role) do update set level = excluded.level, updated_by = excluded.updated_by, updated_at = now()`;
+  } else {
+    const [t] = await sql<{ role: string }[]>`select role from users where id = ${i.userId!}`;
+    if (!t) throw notFound();
+    if (t.role === 'owner') throw forbidden('대표 본인 권한은 끌 수 없습니다(잠김 방지)');
+    if (i.level === null) await sql`delete from menu_user_perms where menu = ${i.menu} and user_id = ${i.userId!}`;
+    else await sql`insert into menu_user_perms (menu, user_id, level, updated_by) values (${i.menu}, ${i.userId!}, ${i.level}, ${u.id})
+      on conflict (menu, user_id) do update set level = excluded.level, updated_by = excluded.updated_by, updated_at = now()`;
+  }
+  await audit(sql, u.id, 'menu_perm.set', i.userId ? 'user' : null, i.userId ?? null, { menu: i.menu, role: i.role ?? null, level: i.level }, ip);
+  return { ok: true };
+}
