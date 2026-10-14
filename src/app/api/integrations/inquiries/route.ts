@@ -12,8 +12,8 @@ export const POST = handler(async ({ req }) => {
     after(async () => {
       const { dispatchPending } = await import('@/lib/push');
       await dispatchPending().catch(() => {});
-      await summarizeInquiry(r.taskId!, (r as { ceoId: string }).ceoId);
+      await summarizeInquiry(r.taskIds, (r as { ceoId: string }).ceoId);
     });
   }
-  return { ok: true, duplicate: r.duplicate, taskId: r.taskId };
+  return { ok: true, duplicate: r.duplicate, taskId: r.taskId, taskIds: r.taskIds };
 }, { public: true });

@@ -173,9 +173,11 @@ function Signups() {
 function InquiryLink() {
   const { data, reload } = useApi<any>('/api/platform/inquiries');
   const [shown, setShown] = useState<{ site: string; token: string } | null>(null);
-  const [asg, setAsg] = useState<Record<string, string | null> | null>(null);
+  const [asg, setAsg] = useState<{ a: Record<string, string[]>; m: Record<string, string> } | null>(null);
   if (!data) return null;
-  const cur = asg ?? data.assignees;
+  const cur = asg ?? { a: data.assignees ?? {}, m: data.modes ?? {} };
+  const setList = (t: string, list: string[]) => setAsg({ ...cur, a: { ...cur.a, [t]: list } });
+  const uname = (id: string) => data.users.find((u: any) => u.id === id)?.name ?? '?';
   const SITE: Record<string, string> = { dagym: '다짐', hilink: '하이링크' };
   const issue = async (site: string) => {
     try { const r = await api('/api/platform/inquiries/tokens', { body: { site } }); setShown({ site, token: r.token }); reload(); } catch (e: any) { toast.error(e.message); }
@@ -185,7 +187,7 @@ function InquiryLink() {
     try { await api(`/api/platform/inquiries/tokens/${id}`, { method: 'DELETE' }); reload(); toast.ok('폐기했습니다'); } catch (e: any) { toast.error(e.message); }
   };
   const saveAsg = async () => {
-    try { await api('/api/platform/inquiries/assignees', { method: 'PUT', body: { assignees: Object.fromEntries(data.types.map((t: string) => [t, cur[t] || null])) } }); setAsg(null); reload(); toast.ok('저장했습니다'); } catch (e: any) { toast.error(e.message); }
+    try { await api('/api/platform/inquiries/assignees', { method: 'PUT', body: { assignees: Object.fromEntries(data.types.map((t: string) => [t, cur.a[t] ?? []])), modes: Object.fromEntries(data.types.map((t: string) => [t, cur.m[t] ?? 'together'])) } }); setAsg(null); reload(); toast.ok('저장했습니다'); } catch (e: any) { toast.error(e.message); }
   };
   return (
     <section className="rounded-card border border-line bg-white shadow-card" data-testid="inquiry-link">
@@ -213,15 +215,36 @@ function InquiryLink() {
           {!data.tokens.length && <li className="px-2 py-1.5 text-ink-3">발급한 토큰이 없습니다</li>}
         </ul>
         <div>
-          <h3 className="text-xs font-semibold text-ink-2">유형별 기본 담당자 <span className="font-normal text-ink-3">(비워 두면 대표)</span></h3>
-          <div className="mt-1 grid gap-2 sm:grid-cols-2">
-            {data.types.map((t: string) => (
-              <label key={t} className="flex items-center gap-2 text-xs"><span className="w-28 shrink-0">{t}</span>
-                <select className={small} value={cur[t] ?? ''} onChange={(e) => setAsg({ ...cur, [t]: e.target.value || null })} aria-label={`${t} 기본 담당자`}>
-                  <option value="">대표</option>
-                  {data.users.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select></label>
-            ))}
+          <h3 className="text-xs font-semibold text-ink-2">유형별 기본 담당자 <span className="font-normal text-ink-3">(여러 명 가능 · 첫 사람이 주 담당 · 비워 두면 대표 · 알림은 전원)</span></h3>
+          <div className="mt-1 space-y-2">
+            {data.types.map((t: string) => {
+              const list: string[] = cur.a[t] ?? [];
+              return (
+                <div key={t} className="rounded border border-line p-2 text-xs" data-testid={`inquiry-asg-${t}`}>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <b className="w-28 shrink-0 font-medium">{t}</b>
+                    {!list.length && <span className="text-ink-3">대표</span>}
+                    {list.map((id, k) => (
+                      <span key={id} className={cx('inline-flex items-center gap-1 rounded-full border px-2 py-0.5', k === 0 ? 'border-brand-300 bg-brand-50' : 'border-line bg-white')}>
+                        {k === 0 && <span className="text-[10px] text-brand-700">주</span>}{uname(id)}
+                        {k > 0 && <button type="button" className="text-ink-3" aria-label={`${uname(id)} 주 담당으로`} title="주 담당으로" onClick={() => setList(t, [id, ...list.filter((x) => x !== id)])}>↑</button>}
+                        <button type="button" className="text-ink-3" aria-label={`${uname(id)} 빼기`} onClick={() => setList(t, list.filter((x) => x !== id))}><X className="size-3" /></button>
+                      </span>
+                    ))}
+                    <select className={cx(small, 'w-auto')} value="" onChange={(e) => e.target.value && setList(t, [...list, e.target.value])} aria-label={`${t} 담당자 추가`}>
+                      <option value="">+ 사람 추가</option>
+                      {data.users.filter((u: any) => !list.includes(u.id)).map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </div>
+                  {list.length > 1 && (
+                    <div className="mt-1.5 flex flex-wrap gap-3 pl-[7.5rem] text-ink-2">
+                      <label className="inline-flex items-center gap-1"><input type="radio" name={`mode-${t}`} checked={(cur.m[t] ?? 'together') === 'together'} onChange={() => setAsg({ ...cur, m: { ...cur.m, [t]: 'together' } })} />한 업무 — 주 담당 + 협업자</label>
+                      <label className="inline-flex items-center gap-1"><input type="radio" name={`mode-${t}`} checked={cur.m[t] === 'each'} onChange={() => setAsg({ ...cur, m: { ...cur.m, [t]: 'each' } })} />담당자마다 각각 업무</label>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {asg && <Button size="sm" className="mt-2" onClick={saveAsg}>담당자 저장</Button>}
         </div>

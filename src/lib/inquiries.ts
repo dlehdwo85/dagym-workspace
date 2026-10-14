@@ -120,7 +120,7 @@ export async function receiveInquiry(auth: string | null, raw: unknown) {
       on conflict (tenant, lead_id) do nothing returning id`;
     if (!ins) {
       const [prev] = await tx<{ task_id: string | null }[]>`select task_id from inquiries where tenant = ${INQUIRY_TENANT} and lead_id = ${i.lead_id}`;
-      return { ok: true, duplicate: true, taskId: prev?.task_id ?? null };
+      return { ok: true, duplicate: true, taskId: prev?.task_id ?? null, taskIds: [] as string[] };
     }
     const [ceo] = await tx<{ id: string }[]>`select id from users where tenant = ${INQUIRY_TENANT} and role = 'owner' and status = 'active' and not is_demo order by created_at limit 1`;
     if (!ceo) throw new HttpError(503, 'no_owner', '받을 대표 계정이 없습니다');
@@ -133,34 +133,48 @@ export async function receiveInquiry(auth: string | null, raw: unknown) {
     }
     let [sec] = await tx<{ id: string }[]>`select id from project_sections where project_id = ${proj.id} and name = ${type} limit 1`;
     if (!sec) [sec] = await tx<{ id: string }[]>`insert into project_sections (project_id, name, sort) values (${proj.id}, ${type}, ${INQUIRY_TYPES.indexOf(type)}) returning id`;
-    const [setting] = await tx<{ assignee_id: string | null }[]>`select s.assignee_id from inquiry_settings s join users u on u.id = s.assignee_id and u.status = 'active' and u.tenant = ${INQUIRY_TENANT}
-      where s.tenant = ${INQUIRY_TENANT} and s.inquiry_type = ${type}`;
-    const assignee = setting?.assignee_id ?? ceo.id;
+    // 유형별 기본 담당자(여러 명, 순서 = 첫 사람이 주 담당). 비활성·다른 회사 사람은 건너뛰고, 아무도 없으면 대표
+    const [setting] = await tx<{ assignee_ids: string[]; mode: string }[]>`select assignee_ids, mode from inquiry_settings where tenant = ${INQUIRY_TENANT} and inquiry_type = ${type}`;
+    const want = setting?.assignee_ids ?? [];
+    const okIds = new Set((await tx<{ id: string }[]>`select id from users where id = any(${want}::uuid[]) and status = 'active' and tenant = ${INQUIRY_TENANT}`).map((r) => r.id));
+    let people = want.filter((x) => okIds.has(x));
+    if (!people.length) people = [ceo.id];
+    const each = setting?.mode === 'each' && people.length > 1;
     const title = `[${SITES[site].label} 문의] ${org}${i.inquiry_type || type !== '기타' ? ` · ${i.inquiry_type || type}` : ''}${i.region ? ` (${i.region})` : ''}`.slice(0, 200);
     const services = (Array.isArray(i.services) ? i.services : (i.services ?? '').split(/[,·]/)).map((x) => x.trim()).filter(Boolean);
     const tags = [...new Set([SITES[site].tag, i.region, ...services].filter((x): x is string => !!x).map((x) => x.slice(0, 30)))].slice(0, 20);
     const due = await nextBusinessDay(tx, toSeoulDate(received));
-    const [t] = await tx<{ id: string }[]>`insert into tasks (project_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
-        due_date, due_time, tags, created_by, requested_by, sort_order, section_id, assignee_ack_at)
-      values (${proj.id}, ${hq.id}, ${site}, ${title}, ${describeInquiry(site, type, i, received)}, 'todo', 'high', ${assignee},
-        ${due}, '18:00', ${tags}, ${ceo.id}, ${ceo.id}, extract(epoch from now()), ${sec.id}, ${assignee === ceo.id ? new Date() : null})
-      returning id`;
-    let n = 0;
-    for (const text of checklistFor(type)) await tx`insert into task_checklist_items (task_id, text, sort) values (${t.id}, ${text}, ${n++})`;
-    await tx`update inquiries set task_id = ${t.id} where id = ${ins.id}`;
-    await activity(tx, 'task', t.id, null, 'created', { title, source: 'website_inquiry', site, leadId: i.lead_id });
-    await notify(tx, { userIds: [assignee], type: 'task_assigned', title: `새 웹사이트 문의 · ${org}`.slice(0, 120),
-      body: `${SITES[site].label} · ${type}${i.region ? ` · ${i.region}` : ''} · 마감 ${due} 18:00`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
-      actorId: null, dedupeKey: `inquiry:${t.id}` });
-    const { runAutomations } = await import('./automation');
-    await runAutomations(tx, { trigger: 'task_created', taskId: t.id, actorId: null });
-    return { ok: true, duplicate: false, taskId: t.id, ceoId: ceo.id };
+    const desc = describeInquiry(site, type, i, received);
+    const batchId = each ? crypto.randomUUID() : null;
+    const taskIds: string[] = [];
+    for (const assignee of each ? people : [people[0]]) {
+      const [t] = await tx<{ id: string }[]>`insert into tasks (project_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
+          due_date, due_time, tags, created_by, requested_by, sort_order, section_id, assignee_ack_at, batch_id)
+        values (${proj.id}, ${hq.id}, ${site}, ${title}, ${desc}, 'todo', 'high', ${assignee},
+          ${due}, '18:00', ${tags}, ${ceo.id}, ${ceo.id}, extract(epoch from now()), ${sec.id}, ${assignee === ceo.id ? new Date() : null}, ${batchId})
+        returning id`;
+      taskIds.push(t.id);
+      if (!each) for (const c of people.slice(1)) await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
+      let n = 0;
+      for (const text of checklistFor(type)) { // 1차 연락 항목 담당 = 주 담당
+        await tx`insert into task_checklist_items (task_id, text, sort, assignee_id) values (${t.id}, ${text}, ${n}, ${n === 0 ? assignee : null})`; n++;
+      }
+      await activity(tx, 'task', t.id, null, 'created', { title, source: 'website_inquiry', site, leadId: i.lead_id });
+      await notify(tx, { userIds: each ? [assignee] : people, type: 'task_assigned', title: `새 웹사이트 문의 · ${org}`.slice(0, 120),
+        body: `${SITES[site].label} · ${type}${i.region ? ` · ${i.region}` : ''} · 마감 ${due} 18:00${!each && people.length > 1 ? ` · 주 담당 외 협업 ${people.length - 1}명` : ''}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
+        actorId: null, dedupeKey: `inquiry:${t.id}` });
+      const { runAutomations } = await import('./automation');
+      await runAutomations(tx, { trigger: 'task_created', taskId: t.id, actorId: null });
+    }
+    await tx`update inquiries set task_id = ${taskIds[0]} where id = ${ins.id}`;
+    return { ok: true, duplicate: false, taskId: taskIds[0], taskIds, ceoId: ceo.id };
   });
   return out;
 }
 
 /** 설명 맨 위에 AI 한 줄 요약(선택). 응답 뒤에 실행 — 실패·한도 초과면 조용히 건너뜀 */
-export async function summarizeInquiry(taskId: string, ceoId: string) {
+export async function summarizeInquiry(taskIds: string[], ceoId: string) {
+  const taskId = taskIds[0];
   const { aiEnabled, anthropicProvider, costUsd } = await import('./ai/provider');
   if (!aiEnabled() || process.env.INQUIRY_AI_SUMMARY === '0') return;
   const sql = db();
@@ -179,7 +193,7 @@ export async function summarizeInquiry(taskId: string, ceoId: string) {
     await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
       values (${INQUIRY_TENANT}, ${u.id}, ${crypto.randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0},
         ${r.usage.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? p.model, r.usage)}, 'inquiry_summary')`;
-    if (line) await sql`update tasks set description = ${`> AI 요약: ${line}\n\n`} || description where id = ${taskId} and description not like '> AI 요약%'`;
+    if (line) await sql`update tasks set description = ${`> AI 요약: ${line}\n\n`} || description where id = any(${taskIds}::uuid[]) and description not like '> AI 요약%'`;
   } catch { /* 요약은 선택 기능 */ }
 }
 
@@ -194,13 +208,13 @@ export async function inquiryAdmin(u: SessionUser) {
   const [tokens, settings, users, recent] = await Promise.all([
     sql`select t.id, t.site, t.name, t.hint, t.created_at, t.last_used_at, t.revoked_at, u.name as created_by_name
       from integration_tokens t left join users u on u.id = t.created_by where t.tenant = ${INQUIRY_TENANT} order by t.revoked_at nulls first, t.created_at desc`,
-    sql<{ inquiry_type: string; assignee_id: string | null }[]>`select inquiry_type, assignee_id from inquiry_settings where tenant = ${INQUIRY_TENANT}`,
+    sql<{ inquiry_type: string; assignee_ids: string[]; mode: string }[]>`select inquiry_type, assignee_ids, mode from inquiry_settings where tenant = ${INQUIRY_TENANT}`,
     sql`select id, name, role from users where tenant = ${INQUIRY_TENANT} and status = 'active' and not is_demo order by name`,
     sql`select q.lead_id, q.site, q.inquiry_type, q.organization, q.created_at, q.task_id, t.title, t.status, a.name as assignee_name
       from inquiries q left join tasks t on t.id = q.task_id left join users a on a.id = t.assignee_id
       where q.tenant = ${INQUIRY_TENANT} order by q.created_at desc limit 20`,
   ]);
-  return { types: INQUIRY_TYPES, tokens, assignees: Object.fromEntries(settings.map((x) => [x.inquiry_type, x.assignee_id])), users, recent,
+  return { types: INQUIRY_TYPES, tokens, assignees: Object.fromEntries(settings.map((x) => [x.inquiry_type, x.assignee_ids])), modes: Object.fromEntries(settings.map((x) => [x.inquiry_type, x.mode])), users, recent,
     endpoint: `${process.env.APP_URL ?? ''}/api/integrations/inquiries` };
 }
 
@@ -222,18 +236,23 @@ export async function revokeToken(u: SessionUser, id: string) {
   return { ok: true };
 }
 
-export const assigneesInput = z.object({ assignees: z.record(z.enum(INQUIRY_TYPES), z.string().uuid().nullable()) });
+export const assigneesInput = z.object({
+  assignees: z.record(z.enum(INQUIRY_TYPES), z.union([z.array(z.string().uuid()).max(10), z.string().uuid(), z.null()])),
+  modes: z.record(z.enum(INQUIRY_TYPES), z.enum(['together', 'each'])).optional(),
+});
 export async function setInquiryAssignees(u: SessionUser, i: z.infer<typeof assigneesInput>) {
   assertInquiryAdmin(u);
   const sql = db();
-  const ids = Object.values(i.assignees).filter((x): x is string => !!x);
+  const lists = Object.fromEntries(Object.entries(i.assignees).map(([k, v]) => [k, [...new Set(Array.isArray(v) ? v : v ? [v] : [])]])) as Record<string, string[]>;
+  const ids = [...new Set(Object.values(lists).flat())];
   if (ids.length) {
     const ok = await sql`select id from users where id = any(${ids}::uuid[]) and tenant = ${INQUIRY_TENANT} and status = 'active'`;
-    if (ok.length !== new Set(ids).size) throw badRequest('다짐 회사의 활성 사용자만 지정할 수 있습니다');
+    if (ok.length !== ids.length) throw badRequest('다짐 회사의 활성 사용자만 지정할 수 있습니다');
   }
-  for (const [type, id] of Object.entries(i.assignees)) {
-    await sql`insert into inquiry_settings (tenant, inquiry_type, assignee_id) values (${INQUIRY_TENANT}, ${type}, ${id})
-      on conflict (tenant, inquiry_type) do update set assignee_id = excluded.assignee_id, updated_at = now()`;
+  for (const [type, list] of Object.entries(lists)) {
+    const mode = i.modes?.[type as InquiryType] ?? 'together';
+    await sql`insert into inquiry_settings (tenant, inquiry_type, assignee_id, assignee_ids, mode) values (${INQUIRY_TENANT}, ${type}, ${list[0] ?? null}, ${list}, ${mode})
+      on conflict (tenant, inquiry_type) do update set assignee_id = excluded.assignee_id, assignee_ids = excluded.assignee_ids, mode = excluded.mode, updated_at = now()`;
   }
   return { ok: true };
 }
