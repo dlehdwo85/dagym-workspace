@@ -45,7 +45,11 @@ async function dueNotifications() {
     }
     dueToday = await sql`
       select t.id, t.title, t.assignee_id, to_char(t.due_time,'HH24:MI') due_time from tasks t join users u on u.id = t.assignee_id
-      where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_date = ${today}::date and u.status = 'active'`;
+        left join user_settings s on s.user_id = t.assignee_id
+      where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_date = ${today}::date and u.status = 'active'
+        -- V14 10번(검수 3): 같은 업무·수신자·날짜당 1건 — 오늘 울리는 시각 알림(🔔 또는 기본 n분 전)이 있으면 "오늘 마감"은 생략
+        and not exists (select 1 from unnest(coalesce(t.reminder_minutes, case when t.due_time is not null then array[coalesce(s.task_reminder_minutes, 60)] else array[]::int[] end)) r(m)
+          where ((t.due_date + coalesce(t.due_time, time '09:00')) - make_interval(mins => r.m))::date = t.due_date)`;
     for (const t of dueToday) {
       n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `오늘 마감: ${t.title}`,
         body: t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,

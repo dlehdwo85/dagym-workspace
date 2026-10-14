@@ -75,7 +75,9 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     const ms = t.reminder_minutes ?? (t.due_time ? [st.task] : []);
     for (const m of ms) push(`task:${t.id}:${t.due_date}:${t.due_time ?? ''}:${m}`, due.minus({ minutes: m }), `${leftLabel(m)} 마감: ${t.title}`,
       `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), `/tasks/${t.id}`);
-    push(`today:${t.id}:${t.due_date}`, kst(t.due_date, '09:00'), `오늘 마감: ${t.title}`, t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', `/tasks/${t.id}`);
+    // V14 10번(검수 3): 마감 당일에 울리는 시각 알림이 있으면 "오늘 마감"은 생략(하루 1건)
+    if (!ms.some((m) => due.minus({ minutes: m }).toISODate() === t.due_date))
+      push(`today:${t.id}:${t.due_date}`, kst(t.due_date, '09:00'), `오늘 마감: ${t.title}`, t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', `/tasks/${t.id}`);
     // V14 10번: 마감 당일에 울리는 "마감 임박"은 "오늘 마감"과 겹치므로 빼고, 업무별 🔔 를 정했으면 그것만
     const soonAt = kst(t.due_date, t.due_time ?? '23:59').minus({ hours: st.soon });
     if (st.soon > 0 && !t.reminder_minutes && soonAt.toISODate()! < t.due_date) push(`soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, soonAt, `마감 임박: ${t.title}`, `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, `/tasks/${t.id}`);
@@ -95,9 +97,11 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
       const who = ts.length > 1 ? `${t.assignee_name} 외 ${ts.length - 1}명` : t.assignee_name;
       const link = `/tasks/${t.id}`;
       const due = kst(t.due_date, t.due_time ?? '09:00');
-      for (const m of t.reminder_minutes ?? (t.due_time ? [t.atask ?? 60] : []))
+      const rms = t.reminder_minutes ?? (t.due_time ? [t.atask ?? 60] : []);
+      for (const m of rms)
         push(`req:${g}:rem${m}:${t.due_date}:${t.due_time ?? ''}`, due.minus({ minutes: m }), `[지시] ${leftLabel(m)} 마감: ${t.title}`, `담당 ${who}`, link);
-      push(`req:${g}:today:${t.due_date}`, kst(t.due_date, '09:00'), `[지시] 오늘 마감: ${t.title}`, `담당 ${who}`, link);
+      if (!rms.some((m) => due.minus({ minutes: m }).toISODate() === t.due_date))
+        push(`req:${g}:today:${t.due_date}`, kst(t.due_date, '09:00'), `[지시] 오늘 마감: ${t.title}`, `담당 ${who}`, link);
     }
   }
 

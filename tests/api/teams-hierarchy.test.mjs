@@ -1,7 +1,7 @@
 // R-16 팀 권한 계층(상위 팀 = 하위 팀 전체 권한, 하위 팀 → 상위 팀 비공개) · 다른 회사 팀 업무 차단 / R-15 체크리스트 항목 담당·처리 속도
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { Client, bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
+import { Client, bootstrap, resetDb, startServer, testDb, seoulToday, addDays, BASE } from '../helpers.mjs';
 
 let srv, ctx, sql;
 const D = {};
@@ -136,5 +136,26 @@ describe('V14 28번 검토 요청 → 지시자 검토 업무', () => {
     const t4 = (await ctx.owner.ok('POST', '/api/tasks', { title: '오늘 마감', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today, approvalRequired: false })).id;
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t4}`, { status: 'review' });
     assert.equal((await rv(t4)).due_date, today);
+  });
+});
+
+describe('검수 3·12번 알림 정리', () => {
+  test('검토 요청 알림은 지시자에게만(승인권 있는 관리자 제외)', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '알림 대상 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: true })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    const to = (await sql`select user_id from notifications where entity_id = ${t} and type = 'review_requested'`).map((r) => r.user_id);
+    assert.deepEqual(to, [ctx.ownerId]);
+  });
+  test('시각 있는 오늘 마감 업무는 "오늘 마감" 대신 시각 알림 1건만', async () => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    const timed = (await ctx.owner.ok('POST', '/api/tasks', { title: '시각 있는 오늘 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today, dueTime: '23:45' })).id;
+    const plain = (await ctx.owner.ok('POST', '/api/tasks', { title: '날짜만 오늘 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today })).id;
+    await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } });
+    const n = async (id) => (await sql`select title from notifications where entity_id = ${id} and user_id = ${ctx.staffA.id} and title like '오늘 마감:%'`).length;
+    const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date()));
+    assert.equal(await n(timed), 0, '오늘 22:45 에 울리는 시각 알림이 있으므로 "오늘 마감" 생략');
+    if (hour >= 9 && hour < 23) assert.equal(await n(plain), 1, '날짜만 있는 업무는 "오늘 마감" 1건');
+    const r = await ctx.staffA.client.ok('GET', '/api/reminders/upcoming');
+    assert.ok(!(r.reminders ?? []).some((x) => x.link === `/tasks/${timed}` && /^오늘 마감/.test(x.title)), '휴대폰 예약에도 "오늘 마감" 없음');
   });
 });

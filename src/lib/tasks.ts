@@ -557,7 +557,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     } else if (statusEvent === 'review_requested') {
       // V12 7번: 지시자(없으면 만든 사람)에게도 즉시 — 알림에서 바로 승인·반려
       const reqr = (set.requested_by ?? cur.requested_by ?? cur.created_by) as string | null;
-      await notify(tx, { userIds: [...(await approverIds(tx, cur.org_unit_id, cur.project_id)), reqr], type: 'review_requested',
+      // 검수 12: 지시자(없으면 만든 사람)에게만. 지시자가 없고 만든 사람이 본인이면 승인권자에게
+      const reviewTo = reqr && reqr !== u.id ? [reqr] : await approverIds(tx, cur.org_unit_id, cur.project_id);
+      await notify(tx, { userIds: reviewTo, type: 'review_requested',
         title: `검토 요청: ${title}`, body: `${u.name}님이 검토를 요청했습니다 — 승인 또는 반려해 주세요`, link: `/tasks/${id}`,
         entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `review:${id}:${upd.version}` });
     }

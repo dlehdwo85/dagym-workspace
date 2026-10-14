@@ -168,7 +168,8 @@ export default function CalendarPage() {
       // V7 4번: 일정과 같은 모양 — 앞에 ✓ 만 다름, 다른 사람 업무는 머리글자
       id: `task|${t.id}`, title: `${t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? `${initials(t.assignee_name)} · ` : ''}${t.title}`,
       // V14 13번: 시간 있는 업무는 마감 직전 1시간 블록(한 칸 높이) — 얇게 찌그러지지 않게
-      start: t.due_time ? new Date(Math.max(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() - 60 * 60000, new Date(`${t.due_date}T00:00:00+09:00`).getTime())).toISOString() : t.due_date, // 자정 넘지 않게 end: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : undefined,
+      start: t.due_time ? new Date(Math.max(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() - 60 * 60000, new Date(`${t.due_date}T00:00:00+09:00`).getTime())).toISOString() : t.due_date, // 자정 넘지 않게
+      end: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : undefined, // 검수 11: 주석 안에 있던 end 를 살림
       allDay: !t.due_time, backgroundColor: isPersonalTask(t) ? calColors.personal : calColors.company, borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#ef4444' : 'transparent',
       textColor: '#ffffff', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t }, durationEditable: false,
     })) : []),

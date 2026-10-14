@@ -13,6 +13,7 @@ import {
   ChevronDown,
   Sparkles,
   MessageCircle,
+  Lock as LockIcon,
 } from 'lucide-react';
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
@@ -228,6 +229,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   // V14 20번: 상태는 담당자(없으면 만든 사람)만 — 지시자는 검토 요청 승인·반려와 완료 해지만
   const statusOwner = (t.assignee_id ?? t.created_by) === user.id;
   const isRequester = !!t.requested_by && t.requested_by === user.id;
+  const editProp = (sel: string, click = false) => {
+    setDetails(true);
+    setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-testid="detail-aside"] ${sel}`);
+      if (!el) return;
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus();
+      if (click) el.click(); else try { (el as HTMLSelectElement).showPicker?.(); } catch { /* 지원 안 하는 브라우저는 초점만 */ }
+    }, 50);
+  };
   const primary0 = t.status === 'done' ? null
     : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : t.requested_by === user.id ? { label: '최종 완료 확인', run: () => patch({ status: 'done' }, '최종 완료 확인했습니다') } : null)
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
@@ -336,18 +346,19 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </form>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-1.5" data-testid="task-actions">
-            <StatusChip status={t.status} onChange={(v) => patch({ status: v })} />
+            <StatusChip status={t.status} onChange={(v) => patch({ status: v })} locked={!statusOwner ? (isRequester && t.status === 'review' ? '검토 요청된 업무는 아래 [최종 완료 확인]·[반려]로 처리하세요' : `상태는 담당자${t.assignee_name ? ` ${t.assignee_name}님` : ''}만 바꿀 수 있어요`) : null} />
             {statusOwner && t.status !== 'done' && t.status !== 'review' && t.approval_required && !perms.approve && !t.approval_line_id && primary?.label !== '완료 → 검토 요청' && (
               <Button size="sm" onClick={() => patch({ status: 'review' }, '검토를 요청했습니다')}>완료 → 검토 요청</Button>
             )}
-            {t.status === 'review' && perms.approve && !t.approval_line_id && <Button size="sm" variant="secondary" onClick={reject}>보완 요청</Button>}
+            {t.status === 'review' && (perms.approve || isRequester) && !t.approval_line_id && <Button size="sm" variant="secondary" onClick={reject} data-testid="review-reject-here">반려(보완 요청)</Button>}
 
           </div>
           {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="task-summary">
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={16} />{t.assignee_name ?? '담당 없음'}{data.collaborators?.length > 0 && <span className="text-ink-3">+{data.collaborators.length}</span>}</span>
-            <DdayChip due={t.due_date} time={t.due_time} status={t.status} />
-            <PriorityTag p={t.priority} />
+            {/* V14 19번(검수 6): 요약 칩을 누르면 그 속성을 바로 고친다 */}
+            <button type="button" onClick={() => editProp('select[aria-label="담당자"]')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 hover:bg-slate-200" title="담당자 바꾸기" data-testid="sum-assignee"><Avatar id={t.assignee_id} name={t.assignee_name} size={16} badge={false} />{t.assignee_name ?? '담당 없음'}{data.collaborators?.length > 0 && <span className="text-ink-3">+{data.collaborators.length}</span>}</button>
+            <button type="button" onClick={() => editProp('[data-testid="due-picker"]', true)} className="rounded-full hover:opacity-80" title="마감일 바꾸기" data-testid="sum-due"><DdayChip due={t.due_date} time={t.due_time} status={t.status} /></button>
+            <button type="button" onClick={() => editProp('select[aria-label="우선순위"]')} className="rounded-full hover:opacity-80" title="우선순위 바꾸기" data-testid="sum-priority"><PriorityTag p={t.priority} /></button>
             {t.project_id && <Link href={`/projects/${t.project_id}`} className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded-full bg-slate-100 px-2 py-0.5 text-ink-2 hover:bg-slate-200" data-testid="summary-project"><FolderKanban className="size-3 shrink-0" /><span className="truncate">{t.project_name ?? '프로젝트'}</span></Link>}
             {photoNeed > 0 && <span className={cx('rounded-full px-2 py-0.5 font-medium tabular-nums', photoShort ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700')}>사진 {photoHave}/{photoNeed}</span>}
             {data.speed?.median_days != null && t.status !== 'done' && <span className="text-ink-3" data-testid="speed-hint" title="담당자의 최근 90일 완료 업무 기준">예상 처리 ≈ {data.speed.median_days}일</span>}
@@ -540,14 +551,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         </section>
 
         </>}
-        {/* R-15 2번: 자료·첨부는 접힌 "세부 정보" 밖에 기본으로 */}
-        <section data-testid="attach-section">
-          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.att} onClick={() => toggleFold('att')} label="자료·첨부" />{data.attachments.length > 0 && <span className="text-xs font-medium text-ink-2">{data.attachments.length}</span>}</h2>
-          {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.approve} onChange={reload} meId={user.id} />}
-        </section>
         </div>
         {/* V13 11번: PC 는 오른쪽 320px 고정 열, 휴대폰·좁은 패널은 "세부 정보" 요약 한 줄(누르면 펼침) */}
-        <aside className={cx('min-w-0', wide && 'lg:sticky lg:top-16 lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:self-start lg:rounded-card lg:border lg:border-line lg:p-2')} aria-label="세부 정보" data-testid="detail-aside">
+        <aside className={cx('relative z-10 min-w-0', wide && 'lg:sticky lg:top-16 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:self-start lg:rounded-card lg:border lg:border-line lg:p-2')} aria-label="세부 정보" data-testid="detail-aside">
           <button type="button" onClick={() => setDetails((v) => !v)} aria-expanded={details} data-testid="details-toggle"
             className={cx('flex w-full items-center gap-2 rounded-input border border-line bg-white px-3 py-2 text-left text-sm', wide && 'lg:hidden', details && 'mb-1')}>
             <span className="shrink-0 font-semibold">세부 정보</span>
@@ -571,7 +577,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <section className={cx('grid grid-cols-1 border-y border-line', wide && 'lg:border-y-0')} aria-label="업무 속성">
             <Prop icon={UserRound} label="담당자">
               <span className="flex pl-2 items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} />{/* V14 1번: 재배정 권한이 없으면 잠금, 담당자 본인 + 넘기기 켜짐이면 "넘기기 요청" */}
-              {perms.reassign ? <UserSelect className={ghostCls} value={t.assignee_id} onChange={(v) => { patch({ assigneeId: v }); if (v && v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }} />
+              {perms.reassign ? <UserSelect className={ghostCls} ariaLabel="담당자" value={t.assignee_id} onChange={(v) => { patch({ assigneeId: v }); if (v && v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }} />
                 : perms.handoff ? <UserSelect className={ghostCls} value={t.assignee_id} ariaLabel="다른 사람에게 넘기기" onChange={async (v) => {
                     if (!v || v === t.assignee_id) return;
                     const note = prompt(`${dir.users.find((x) => x.id === v)?.name ?? ''}님에게 넘기기를 지시자에게 요청할까요? (사유, 선택)`);
@@ -618,7 +624,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           {/* V14 27번: 기타 세부 정보(프로젝트·섹션·팀·태그·캘린더 표시·사용자 필드·결재선·예상 소요·유형·사진 필수 등)는 화면에서 뺌 — 데이터는 그대로 */}
           </div>
         </aside>
-        <div className={cx('min-w-0 space-y-6', wide && 'lg:col-start-1 lg:row-start-3')}>
+        {/* R-15 2번 · 검수 5: 첨부는 세부 정보 다음(휴대폰 순서: 설명 → 체크리스트·하위 → 세부 정보 → 첨부 → 댓글) */}
+        <section className={cx('min-w-0', wide && 'lg:col-start-1 lg:row-start-3')} data-testid="attach-section">
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.att} onClick={() => toggleFold('att')} label="자료·첨부" />{data.attachments.length > 0 && <span className="text-xs font-medium text-ink-2">{data.attachments.length}</span>}</h2>
+          {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.approve} onChange={reload} meId={user.id} />}
+        </section>
+        <div className={cx('min-w-0 space-y-6', wide && 'lg:col-start-1 lg:row-start-4')}>
         {/* V14 27번: 연결 일정은 있을 때만 한 줄씩 (실행 시간 배정은 ⋯ 메뉴) */}
         {(events.data?.events.length ?? 0) > 0 && (
         <section data-testid="linked-events">
@@ -683,7 +694,7 @@ function FoldBtn({ open, onClick, label }: { open: boolean; onClick: () => void;
 function DdayChip({ due, time, status }: { due: string | null; time: string | null; status: string }) {
   if (!due) return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-3">마감 없음</span>;
   const d = Math.round((new Date(due + 'T00:00:00Z').getTime() - new Date(todayStr() + 'T00:00:00Z').getTime()) / 86400000);
-  const label = d === 0 ? 'D-day' : d > 0 ? `D-${d}` : `D+${-d}`;
+  const label = d === 0 ? 'D-day' : d > 0 ? `D-${d}` : `${-d}일 지남`;
   const cls = status === 'done' ? 'bg-slate-100 text-ink-3' : d < 0 ? 'bg-red-100 text-red-700' : d === 0 ? 'bg-orange-100 text-orange-700' : d <= 3 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-ink-2';
   return <span className={cx('rounded-full px-2 py-0.5 font-semibold tabular-nums', cls)} data-testid="dday">{label} · {Number(due.slice(5, 7))}/{Number(due.slice(8, 10))}{time ? ' ' + time.slice(0, 5) : ''}</span>;
 }
@@ -713,8 +724,14 @@ function Prop({ icon: Icon, label, children, asDiv, className }: { icon: LucideI
     : <label className={cx('flex min-h-12 items-center gap-2 border-b border-line py-1.5 last:border-b-0', className)}>{inner}</label>;
 }
 /** 상태 칩 하나: 누르면 할 일·진행 중·검토·보류·완료 중 선택 (배지·버튼·select 중복 정리) */
-function StatusChip({ status, onChange }: { status: TaskStatus; onChange: (v: TaskStatus) => void }) {
+function StatusChip({ status, onChange, locked }: { status: TaskStatus; onChange: (v: TaskStatus) => void; locked?: string | null }) {
   const tone = STATUS_TONE[status];
+  // 검수 4: 담당자가 아니면 고를 수 없게(누르면 이유 안내)
+  if (locked) return (
+    <button type="button" onClick={() => toast.info(locked)} className={cx('inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-sm font-medium', tone.badge)} data-testid="status-chip" data-locked="1" title={locked} aria-label={`상태 ${STATUS_LABEL[status]} (${locked})`}>
+      <span className={cx('size-2 rounded-full', tone.dot)} aria-hidden />{STATUS_LABEL[status]}<LockIcon className="size-3 opacity-60" aria-hidden />
+    </button>
+  );
   return (
     <label className={cx('relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full pl-2.5 pr-7 text-sm font-medium', tone.badge)} data-testid="status-chip">
       <span className={cx('size-2 rounded-full', tone.dot)} aria-hidden />{STATUS_LABEL[status]}

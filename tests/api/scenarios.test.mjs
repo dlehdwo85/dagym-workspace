@@ -1587,7 +1587,7 @@ describe('WORKIN 휴대폰 예약 알림', () => {
     const r30 = reminders.find((r) => r.link === `/tasks/${t1}` && /30분 뒤 마감/.test(r.title));
     assert.ok(r30, '업무별 30분 전');
     assert.equal(new Date(r30.fireAt).toISOString(), new Date(`${tom}T14:30:00+09:00`).toISOString(), '서울 기준 14:30');
-    assert.ok(reminders.some((r) => r.link === `/tasks/${t1}` && /^오늘 마감/.test(r.title)), '당일 09시 오늘 마감');
+    assert.ok(!reminders.some((r) => r.link === `/tasks/${t1}` && /^오늘 마감/.test(r.title)), 'V14 10번: 시각 알림이 있는 날은 "오늘 마감" 생략(하루 1건)');
     assert.ok(!reminders.some((r) => r.link === `/tasks/${t2}`), '삭제한 업무 제외');
     const er = reminders.find((r) => r.link === `/calendar?event=${ev}`);
     assert.ok(er && /15분 뒤 일정/.test(er.title), '일정 15분 전');
@@ -2115,8 +2115,8 @@ describe('V13 6번 마감 알림을 지시자에게도', () => {
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-6 내일', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, dueDate: tomorrow, dueTime: '15:00' })).id;
     const { reminders } = await ctx.managerA.client.ok('GET', '/api/reminders/upcoming');
     const mine = reminders.filter((x) => x.link === `/tasks/${t}`);
-    assert.ok(mine.some((x) => x.title === '[지시] 오늘 마감: V13-6 내일' && x.body === '담당 이직원'));
-    assert.ok(mine.some((x) => x.title.startsWith('[지시] 1시간 뒤 마감')));
+    assert.ok(!mine.some((x) => x.title === '[지시] 오늘 마감: V13-6 내일'), 'V14 10번: 시각 알림이 있으면 "오늘 마감" 생략');
+    assert.ok(mine.some((x) => x.title.startsWith('[지시] 1시간 뒤 마감') && x.body === '담당 이직원'));
   });
 });
 
@@ -2444,7 +2444,7 @@ describe('V14 10번 마감 알림 중복 없음', () => {
     const t2 = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14-10 내일', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 1), dueTime: '00:20', reminderMinutes: [30] })).id;
     await tick(); await tick();
     const a = await sql`select title from notifications where user_id = ${ctx.staffA.id} and entity_id = ${t} and type = 'due_soon'`;
-    assert.ok(a.some((x) => x.title.startsWith('오늘 마감')));
+    assert.ok(!a.some((x) => x.title.startsWith('오늘 마감')), '시각 있는 업무는 "오늘 마감" 대신 n분 전 알림 1건');
     assert.ok(!a.some((x) => x.title.startsWith('마감 임박')), '같은 날 마감 임박 중복 없음');
     const b = await sql`select title from notifications where user_id = ${ctx.staffA.id} and entity_id = ${t2} and type = 'due_soon'`;
     assert.ok(!b.some((x) => x.title.startsWith('마감 임박')), '🔔 를 정한 업무는 그 알림만');
