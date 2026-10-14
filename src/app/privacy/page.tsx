@@ -39,7 +39,7 @@ export default function Privacy() {
       <H>9. 위치정보</H>
       <p>서비스는 위치정보를 수집하지 않습니다(위치기반서비스 미제공).</p>
       <H>10. 개인정보 보호책임자</H>
-      <p>{b.contact}</p>
+      <p>{b.officer} · 전화 {b.phone} · 이메일 {b.privacyEmail}</p>
     </LegalDoc>
   );
 }

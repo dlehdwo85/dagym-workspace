@@ -1,7 +1,7 @@
 // V15 공개 가입 · 회사(tenant) 분리 시험: 가입한 다른 회사·개인 공간에서 기존 회사 데이터가 절대 보이지 않아야 한다
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { Client, bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
+import { Client, bootstrap, resetDb, startServer, testDb, seoulToday, addDays, BASE } from '../helpers.mjs';
 
 let srv, ctx, sql;
 const today = seoulToday();
@@ -192,5 +192,18 @@ describe('V15 계정 관리·플랫폼 운영', () => {
     const c = new Client(); await c.ok('POST', '/api/auth/login', { email: 'boss@other.test', password: 'signup-pass-1234' });
     await c.ok('DELETE', '/api/account/space', { password: 'signup-pass-1234', confirmName: '남의상사' });
     assert.equal((await new Client().post('/api/auth/login', { email: 'emp@other.test', password: 'emp-pass-12345' })).status, 401, '공간 삭제 → 구성원도 로그인 불가');
+  });
+});
+
+describe('V15 첫 주소(/) 비로그인 → 랜딩, 앱은 로그인', () => {
+  test('웹 비로그인은 랜딩, 앱(WebView)은 로그인 화면, 로그인한 사람은 홈', async () => {
+    const web = await fetch(BASE + '/', { redirect: 'manual', headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/141 Safari/537.36' } });
+    assert.equal(web.status, 200); assert.match(await web.text(), /업무·일정·알림을 한 곳에/);
+    for (const ua of ['Mozilla/5.0 (Linux; Android 15; SM-S921N Build/AP3A; wv) AppleWebKit/537.36 Chrome/141 Mobile Safari/537.36', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148']) {
+      const app = await fetch(BASE + '/', { redirect: 'manual', headers: { 'user-agent': ua } });
+      assert.equal(app.status, 307); assert.match(app.headers.get('location'), /\/login/);
+    }
+    const me = await ctx.owner.req('GET', '/');
+    assert.equal(me.status, 200); assert.doesNotMatch(String(me.body), /무료로 시작/);
   });
 });
