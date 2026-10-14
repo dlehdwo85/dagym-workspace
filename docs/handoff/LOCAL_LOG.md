@@ -108,3 +108,8 @@
 - 2026-10-14 운영 ce1011f(V12-11 상태 권한·V12-12 타임라인) 반영, storageWarnings 비어 있음(R2 키 정상). 촬영 요청서 사진을 김민수·김소담 업무 2건에 첨부 성공(R2 업로드 실동작 확인).
 
 - 2026-10-14 AI 비서 원격 시험(운영, 대표 세션): status enabled(model claude-opus-5-5, 월 한도 $30). ① 글 지시 → 업무 제안 → 확인 → 업무 생성 성공(대표 본인 배정 "AI 비서 시험 업무", 10/15 17:00, 체크 2). ② 자료실에 촬영 요청서 이미지 업로드 후 첨부 지시 → 이미지 읽고 김민수·김소담 2건 제안(체크 7·메모·마감·첨부) 정상 — 중복 방지 위해 제안 취소. 5회 요청 $0.098(회당 약 27원). 비용 절감: 정리·추출은 Sonnet/Haiku 권장(클라우드 요청 예정).
+
+- 2026-10-14 앱 아이콘 시안 B(캘린더 체크, 청록) 확정: Android mipmap 6해상도(legacy·round·adaptive fg/bg)·배경색 #0F766E, iOS AppIcon 1024 생성(sharp, 원본 docs/handoff/brand). 새 앱 빌드 예정.
+
+- 2026-10-14 운영 fcf4fc1 반영(13차: 매출 GPT 토큰 제거·AI 입력·메뉴 권한·자료실 AI 정리, migration 029). 앱 아이콘 B 빌드: Android mobile run 38492961286, iOS 1.0.4 release run 38493041107.
+- 앱 아이콘 B: Android vc16 Play 내부 테스트 출시, iOS 1.0.4 TestFlight 업로드 성공.
