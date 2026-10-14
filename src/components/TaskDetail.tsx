@@ -11,6 +11,7 @@ import {
   Megaphone,
   ChevronDown,
   Sparkles,
+  MessageCircle,
 } from 'lucide-react';
 import { Avatar, Button, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
@@ -225,6 +226,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         )}
         {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-emerald-50 px-2.5 text-sm font-semibold text-emerald-700"><CircleCheck className="size-4" />완료됨</span>}
         <span className="flex-1" />
+        {/* V13 10번: 업무별 대화방 */}
+        <IconButton label="대화방 열기" data-testid="task-chat" onClick={async () => { try { const r = await api('/api/chat/rooms', { body: { kind: 'task', taskId: id } }); router.push(`/messages?room=${r.id}`); } catch (e: any) { toast.error(e.message); } }}><MessageCircle /></IconButton>
         <IconButton label="링크 복사" onClick={() => { navigator.clipboard?.writeText(location.origin + `/tasks/${id}`); toast.ok('링크를 복사했습니다'); }}><Link2 /></IconButton>
         {inPanel && <IconButton label="전체 화면" onClick={() => router.push(`/tasks/${id}`)}><Maximize2 /></IconButton>}
         <div className="relative">
@@ -682,7 +685,7 @@ function CustomField({ f, value, onSave }: { f: any; value: any; onSave: (v: any
         </span>
       ) : f.type === 'person' ? (
         <select className={ghostCls} value={value ?? ''} onChange={(e) => onSave(e.target.value || null)}>
-          <option value="">—</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          <option value="">—</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
         </select>
       ) : f.type === 'date' ? (
         <input type="date" className={cx(ghostCls, '!w-[140px]')} value={value ?? ''} onChange={(e) => onSave(e.target.value || null)} />

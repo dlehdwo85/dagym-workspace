@@ -2167,3 +2167,94 @@ describe('V13 8번 대댓글·댓글 알림·반응', () => {
     assert.equal(d.comments.filter((x) => x.parent_id === c.id).length, 1);
   });
 });
+
+describe('V13 10번 사내 메신저', () => {
+  let dm;
+  test('1:1 왕복·안 읽은 수·읽음·푸시(알림 목록에는 안 쌓임)', async () => {
+    await ctx.staffA.client.ok('POST', '/api/push/subscribe', { kind: 'fcm', endpoint: 'fcm-chat-a', platform: 'android' });
+    dm = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.staffA.id })).id;
+    assert.equal((await ctx.staffA.client.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.ownerId })).id, dm, '같은 두 사람은 같은 방');
+    const m1 = await ctx.owner.ok('POST', `/api/chat/rooms/${dm}/messages`, { body: '내일 10시 회의 자료 부탁해요' });
+    assert.deepEqual(m1.notified, [ctx.staffA.id]);
+    const list = await ctx.staffA.client.ok('GET', '/api/chat/rooms');
+    const row = list.rooms.find((r) => r.id === dm);
+    assert.equal(row.unread, 1); assert.equal(row.name, '김대표'); assert.ok(list.rooms.some((r) => r.kind === 'company'), '회사 전체방 자동');
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/chat/unread')).unread, 1);
+    const notes = await ctx.staffA.client.ok('GET', '/api/notifications');
+    assert.ok(!notes.items.some((n) => n.type === 'chat'), '알림 목록에는 메신저 안 쌓임');
+    await new Promise((r) => setTimeout(r, 800)); await tick();
+    const st = await fetch(`${FAKE}/__state`).then((r) => r.json());
+    assert.ok(st.fcm.some((m) => m.token === 'fcm-chat-a' && m.data.link === `/messages?room=${dm}`), '푸시 → 그 대화방으로');
+    const r2 = await ctx.staffA.client.ok('POST', `/api/chat/rooms/${dm}/messages`, { body: '네 준비하겠습니다' });
+    await ctx.staffA.client.ok('POST', `/api/chat/rooms/${dm}/read`, {});
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/chat/unread')).unread, 0);
+    const d = await ctx.owner.ok('GET', `/api/chat/rooms/${dm}`);
+    assert.deepEqual(d.messages.map((m) => m.body), ['내일 10시 회의 자료 부탁해요', '네 준비하겠습니다']);
+    assert.ok(BigInt(d.members.find((m) => m.id === ctx.staffA.id).last_read_id) >= BigInt(r2.id), '읽음 표시');
+  });
+  test('다른 사람·다른 회사의 방은 404, 볼 수 없는 업무의 방도 404', async () => {
+    assert.equal((await ctx.managerA.client.get(`/api/chat/rooms/${dm}`)).status, 404);
+    assert.equal((await ctx.managerA.client.post(`/api/chat/rooms/${dm}/messages`, { body: '끼어들기' })).status, 404);
+    const [{ id }] = await sql`select id::text from chat_messages where room_id = ${dm} limit 1`;
+    assert.equal((await ctx.managerA.client.req('DELETE', `/api/chat/messages/${id}`)).status, 404);
+    await sql`update chat_rooms set tenant = 'other-co' where id = ${dm}`;
+    assert.equal((await ctx.owner.get(`/api/chat/rooms/${dm}`)).status, 404, '다른 회사');
+    assert.ok(!(await ctx.owner.ok('GET', '/api/chat/rooms')).rooms.some((r) => r.id === dm));
+    await sql`update chat_rooms set tenant = 'default' where id = ${dm}`;
+    const pangyo = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-10 판교 업무', orgUnitId: ctx.siteB })).id;
+    assert.equal((await ctx.staffA.client.post('/api/chat/rooms', { kind: 'task', taskId: pangyo })).status, 404);
+    const room = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'task', taskId: pangyo })).id;
+    assert.equal((await ctx.staffA.client.get(`/api/chat/rooms/${room}`)).status, 404);
+  });
+  test('그룹·알림 끄기(멘션은 예외)·업무 방 담당자 자동 참여·수정/삭제·고정·검색·업무로 만들기·내보내기(대표만)', async () => {
+    const g = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'group', name: '강남점 오픈', userIds: [ctx.staffA.id, ctx.managerA.id] })).id;
+    await ctx.managerA.client.ok('PATCH', `/api/chat/rooms/${g}`, { muted: true });
+    const a = await ctx.owner.ok('POST', `/api/chat/rooms/${g}/messages`, { body: '오픈 일정 공유합니다' });
+    assert.deepEqual(a.notified, [ctx.staffA.id], '알림 끈 사람 제외');
+    const b = await ctx.owner.ok('POST', `/api/chat/rooms/${g}/messages`, { body: `@[최매니저](${ctx.managerA.id}) 확인 부탁` });
+    assert.ok(b.notified.includes(ctx.managerA.id), '멘션은 알림 끔이어도 보냄');
+    // 업무 방: 담당자는 방을 연 적 없어도 알림
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13-10 강남 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id })).id;
+    const tr = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'task', taskId: t })).id;
+    assert.ok((await ctx.owner.ok('POST', `/api/chat/rooms/${tr}/messages`, { body: '사진 올려 주세요' })).notified.includes(ctx.staffA.id));
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/chat/rooms/${tr}`)).room.name, 'V13-10 강남 업무');
+    // 수정·삭제(작성자만)·고정
+    assert.equal((await ctx.staffA.client.req('PATCH', `/api/chat/messages/${a.id}`, { body: '남의 것' })).status, 403);
+    await ctx.owner.ok('PATCH', `/api/chat/messages/${a.id}`, { body: '오픈 일정 공유합니다 (수정)' });
+    await ctx.staffA.client.ok('POST', `/api/chat/messages/${a.id}/pin`, { pin: true });
+    let d = await ctx.owner.ok('GET', `/api/chat/rooms/${g}`);
+    assert.equal(d.pinned[0].id, a.id); assert.ok(d.messages.find((m) => m.id === a.id).edited_at);
+    await ctx.owner.ok('DELETE', `/api/chat/messages/${b.id}`);
+    d = await ctx.owner.ok('GET', `/api/chat/rooms/${g}`);
+    const del = d.messages.find((m) => m.id === b.id);
+    assert.equal(del.deleted, true); assert.equal(del.body, '', '삭제된 내용은 안 보냄');
+    // 검색 (내가 속한 방만)
+    assert.ok((await ctx.staffA.client.ok('GET', '/api/chat/search?q=' + encodeURIComponent('오픈 일정'))).results.some((r) => r.id === a.id));
+    assert.ok(!(await ctx.managerA.client.ok('GET', '/api/chat/search?q=' + encodeURIComponent('회의 자료'))).results.length, '내가 없는 방은 검색 안 됨');
+    // 업무로 만들기: 제안 → 만든 업무 연결
+    const s = await ctx.staffA.client.ok('POST', `/api/chat/messages/${a.id}/to-task`, {});
+    assert.equal(s.title, '오픈 일정 공유합니다 (수정)');
+    const nt = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: s.title, orgUnitId: ctx.siteA })).id;
+    await ctx.staffA.client.ok('POST', `/api/chat/messages/${a.id}/link`, { taskId: nt });
+    assert.equal((await ctx.owner.ok('GET', `/api/chat/rooms/${g}`)).messages.find((m) => m.id === a.id).task_id, nt);
+    // 내보내기: 대표만, 감사 기록
+    assert.equal((await ctx.staffA.client.get(`/api/chat/rooms/${g}/export`)).status, 403);
+    const csv = await (await fetch(`${BASE}/api/chat/rooms/${g}/export`, { headers: { cookie: ctx.owner.cookie, origin: BASE } })).text();
+    assert.match(csv, /오픈 일정 공유합니다/); assert.match(csv, /삭제됨/);
+    assert.ok((await sql`select 1 from audit_logs where action = 'chat.export'`).length);
+  });
+  test('실시간: SSE 로 새 메시지·폴링 대체', async () => {
+    const ac = new AbortController();
+    const res = await fetch(`${BASE}/api/chat/stream`, { headers: { cookie: ctx.staffA.client.cookie, origin: BASE }, signal: ac.signal });
+    assert.match(res.headers.get('content-type'), /text\/event-stream/);
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    const until = async (re) => { const end = Date.now() + 15000; while (!re.test(buf) && Date.now() < end) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value); } return re.test(buf); };
+    assert.ok(await until(/event: ready/));
+    const sent = await ctx.owner.ok('POST', `/api/chat/rooms/${dm}/messages`, { body: '실시간 시험' });
+    assert.ok(await until(/event: messages[\s\S]*실시간 시험/), 'SSE 로 새 메시지');
+    assert.match(buf, new RegExp(`id: ${sent.id}`));
+    ac.abort();
+    const p = await ctx.staffA.client.ok('GET', `/api/chat/poll?since=${Number(sent.id) - 1}&t=${Date.now() - 1000}`);
+    assert.ok(p.messages.some((m) => m.id === sent.id), '폴링으로도');
+  });
+});

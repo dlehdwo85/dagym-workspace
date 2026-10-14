@@ -182,7 +182,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
     case 'propose_create_tasks': {
       const ids = [...new Set((Array.isArray(input.assigneeIds) ? input.assigneeIds : []).map(String))].slice(0, 50);
       if (!ids.length) throw badRequest('담당자를 1명 이상 정하세요');
-      const people = (await directory(u)).users as unknown as { id: string; name: string }[];
+      const people = (await directory(u)).users as unknown as { id: string; name: string; title?: string | null }[];
       const unknown = ids.filter((id) => !people.some((p) => p.id === id));
       if (unknown.length) throw badRequest(`배정할 수 없는 사람 id: ${unknown.join(', ')} — list_people 로 다시 찾으세요`);
       const files = (Array.isArray(input.attachFileIds) ? input.attachFileIds : []).map(String).slice(0, 5);
@@ -191,7 +191,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         dueTime: /^\d{2}:\d{2}$/.test(input.dueTime ?? '') ? input.dueTime : undefined, priority: input.priority || undefined, requestedById: input.requestedById || u.id,
         checklist: Array.isArray(input.checklist) ? input.checklist.map((x: unknown) => String(x).slice(0, 300)).filter(Boolean).slice(0, 100) : undefined,
         assigneeIds: ids, approvalRequired: false });
-      const names = ids.map((id) => people.find((p) => p.id === id)!.name);
+      const names = ids.map((id) => { const p = people.find((x) => x.id === id)!; return `${p.name}${p.title ? ` · ${p.title}` : ''}`; }); // V13 13번 이름·직책
       return propose(c, 'create_tasks', `업무 ${ids.length}건 만들기: ${i.title} — ${names.join('·')}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`,
         { input: i, attachFileIds: files }, { assignees: names, due: i.dueDate ? `${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''}` : null, checklist: i.checklist ?? [], description: clip(i.description ?? '', 600), files: files.length });
     }

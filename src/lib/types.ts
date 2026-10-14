@@ -49,5 +49,6 @@ export const NOTIFICATION_TYPES = {
   task_done_for_requester: '지시한 업무 상태 변경(시작·보류·검토 요청·완료)',
   briefing: '아침 브리핑(오늘 할 일·일정)',
   usage_alert: '사용량 한도(저장공간·AI·사용자) 80%·100%',
+  chat: '메신저 새 메시지',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

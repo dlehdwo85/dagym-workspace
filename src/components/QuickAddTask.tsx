@@ -13,7 +13,7 @@ import { DropZone } from './upload';
 import { TIMES, timeLabel } from './DateTimePickers';
 import { useSession } from './session';
 
-export interface QuickDefaults { projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string }
+export interface QuickDefaults { projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string; title?: string; description?: string }
 
 /**
  * 업무 만들기 (HQ_SIMPLIFY): 제목 · 담당자 · 마감일 · 프로젝트 4칸.
@@ -60,7 +60,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
       // V8 9번: 마지막에 쓴 담당·지시·우선순위·프로젝트·알림을 기억(이 기기)
       let last: any = {};
       try { last = JSON.parse(localStorage.getItem('wos_quick_last') ?? '{}'); } catch {}
-      setF({ title: '', multi: false, more: [], dueTime: '', assigneeId: defaults?.assigneeId ?? last.assigneeId ?? user.id, requestedById: last.requestedById ?? user.id,
+      setF({ title: defaults?.title ?? '', ...(defaults?.description ? { description: defaults.description } : {}), multi: false, more: [], dueTime: '', assigneeId: defaults?.assigneeId ?? last.assigneeId ?? user.id, requestedById: last.requestedById ?? user.id,
         dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? last.projectId ?? '', priority: last.priority ?? 'normal', rrule: null, remind: last.remind ?? null });
       setTpl('');
     }

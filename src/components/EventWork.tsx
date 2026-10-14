@@ -52,7 +52,8 @@ export function EventWork({ eventId, occurrenceStart, eventDate, recurring, atte
   useEffect(() => { if (notes.data) { const loaded = notes.data.body; setBody((b) => (b === null ? loaded : b)); } }, [notes.data]);
   const tasks = useMemo(() => linked.data?.tasks ?? [], [linked.data]);
   const followed = useMemo(() => new Set(tasks.filter((t) => t.note_line).map((t) => t.note_line.trim())), [tasks]);
-  const people = attendees.length ? attendees : dir.users.map((u) => ({ user_id: u.id, name: u.name }));
+  const withTitle = (id: string, name: string) => { const t = dir.users.find((x) => x.id === id)?.title; return t ? `${name} · ${t}` : name; };
+  const people = (attendees.length ? attendees : dir.users.map((u) => ({ user_id: u.id, name: u.name }))).map((p) => ({ ...p, label: withTitle(p.user_id, p.name) }));
   const refresh = () => { linked.reload(); broadcastRefresh(); };
 
   async function saveNotes() {
@@ -130,7 +131,7 @@ export function EventWork({ eventId, occurrenceStart, eventDate, recurring, atte
               {presets.data?.presets.map((p) => <option key={p.id} value={p.id}>{p.label} — {p.items.map((x) => `D-${x.daysBefore} ${x.title}`).join(', ')}</option>)}
             </select>
             <select className={inputCls + ' h-9 w-auto'} value={prep.assigneeId} onChange={(e) => setPrep({ ...prep, assigneeId: e.target.value })} aria-label="준비 업무 담당자">
-              <option value="">담당자 (나)</option>{people.map((p) => <option key={p.user_id} value={p.user_id}>{p.name}</option>)}
+              <option value="">담당자 (나)</option>{people.map((p) => <option key={p.user_id} value={p.user_id}>{p.label}</option>)}
             </select>
             <Button type="button" size="sm" onClick={makePrep} disabled={!prep.preset}>만들기</Button>
           </div>
@@ -157,7 +158,7 @@ export function EventWork({ eventId, occurrenceStart, eventDate, recurring, atte
                 {[0, 1, 2, 3, 5, 7].map((n) => <option key={n} value={n}>{n ? `${n}일 전 마감` : '당일 마감'}</option>)}
               </select>
               <select className={inputCls + ' h-9 w-auto'} value={rule.assigneeId} onChange={(e) => setRule({ ...rule, assigneeId: e.target.value })} aria-label="회차 업무 담당자">
-                <option value="">담당자 (나)</option>{people.map((p) => <option key={p.user_id} value={p.user_id}>{p.name}</option>)}
+                <option value="">담당자 (나)</option>{people.map((p) => <option key={p.user_id} value={p.user_id}>{p.label}</option>)}
               </select>
               <Button type="button" size="sm" onClick={addRule}>추가</Button>
             </div>
@@ -174,9 +175,9 @@ export function EventWork({ eventId, occurrenceStart, eventDate, recurring, atte
             <div className="grid grid-cols-2 gap-3">
               <label className="block"><span className="mb-1 block text-xs font-medium text-ink-2">담당자{attendees.length ? ' (참석자)' : ''}</span>
                 <select className={inputCls} value={newTask.assigneeId} onChange={(e) => setNewTask({ ...newTask, assigneeId: e.target.value })}>
-                  <option value="">미정</option>{people.map((p) => <option key={p.user_id} value={p.user_id}>{p.name}</option>)}
+                  <option value="">미정</option>{people.map((p) => <option key={p.user_id} value={p.user_id}>{p.label}</option>)}
                   {attendees.length > 0 && <option disabled>──────</option>}
-                  {attendees.length > 0 && dir.users.filter((u) => !attendees.some((a) => a.user_id === u.id)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  {attendees.length > 0 && dir.users.filter((u) => !attendees.some((a) => a.user_id === u.id)).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
                 </select></label>
               <label className="block"><span className="mb-1 block text-xs font-medium text-ink-2">마감일</span>
                 <input type="date" className={inputCls} value={newTask.dueDate} onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })} /></label>

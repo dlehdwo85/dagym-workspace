@@ -1608,6 +1608,66 @@ await step('V12-9: 첨부 칸·자료실에 파일 끌어 놓기(여러 개·진
   await owner.getByTestId('library-list').getByText('끌기 자료').waitFor();
 });
 
+await step('V13 11·12·8번: 업무 상세 — 설명 위·오른쪽 속성 열(PC), 빈 체크리스트·하위 업무 한 줄, (?) 안내, 하위 업무 추가·n/m, 답글·반응', async () => {
+  const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13 상세 배치', orgUnitId: ctx.siteA, assigneeId: ctx.ownerId, description: '**중요** 기준 문서 https://example.com/guide 참고', approvalRequired: false })).id;
+  await ctx.staffA.client.ok('POST', `/api/tasks/${t}/comments`, { body: '자료 확인했습니다' });
+  await owner.setViewportSize({ width: 1440, height: 900 });
+  await owner.goto(`${BASE}/tasks/${t}`);
+  await owner.getByTestId('desc-rich').getByText('중요').waitFor();
+  assert.equal(await owner.getByTestId('desc-rich').locator('a[href="https://example.com/guide"]').count(), 1, '링크');
+  const desc = await owner.getByTestId('desc-section').boundingBox(), aside = await owner.getByTestId('detail-aside').boundingBox();
+  assert.ok(aside.x > desc.x + desc.width - 5, 'PC: 속성은 오른쪽 열');
+  assert.ok(desc.y < (await owner.getByTestId('detail-requester').boundingBox()).y + 200, '설명이 위쪽');
+  await owner.getByTestId('plan-empty').getByText('＋ 하위 업무 나눠 맡기기').click();
+  await owner.getByTestId('help-subtasks').click();
+  await owner.getByRole('note').getByText(/나눠 맡기거나 마감이 따로/).waitFor();
+  await owner.getByLabel('하위 업무 제목').fill('사진 촬영');
+  await owner.getByTestId('subtask-add').getByRole('button', { name: '추가' }).click();
+  await owner.getByTestId('subtask-progress').getByText('0/1 완료').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/63-task-detail-2col.png`, fullPage: true });
+  // 답글·반응
+  const th = owner.getByTestId('comment-thread').first();
+  await th.getByTestId('reply-open').first().click();
+  await th.getByLabel('답글').fill('감사합니다');
+  await th.getByTestId('reply-form').getByRole('button', { name: '등록' }).click();
+  await th.getByText('감사합니다').waitFor();
+  await th.getByTestId('react-open').first().click();
+  await owner.getByRole('button', { name: '확인했습니다' }).click();
+  await th.getByTestId('reaction').first().getByText('1').waitFor();
+  const n = await sql`select title from notifications where user_id = ${ctx.staffA.id} and title = ${'답글: V13 상세 배치'}`;
+  assert.equal(n.length, 1, '원 댓글 작성자에게 답글 알림');
+  await owner.setViewportSize({ width: 1280, height: 860 });
+});
+await step('V13 10번 메신저: 1:1 대화 → 상대 화면에 실시간 도착·배지 → 답장 → 읽음, 파일 보내기, 업무로 만들기', async () => {
+  const c = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const a = await login(c, ctx.staffA.email, ctx.staffA.password);
+  await a.goto(BASE + '/messages');
+  await a.getByTestId('chat-rooms').waitFor();
+  await owner.goto(BASE + '/messages');
+  await owner.getByTestId('chat-new').click();
+  await owner.getByTestId('chat-new-modal').getByRole('button', { name: '이직원와 대화' }).click();
+  await owner.getByTestId('chat-room-name').getByText('이직원').waitFor();
+  await owner.getByTestId('chat-input').fill('내일 오전에 현장 사진 부탁해요');
+  await owner.getByTestId('chat-input').press('Enter');
+  // 상대: 목록에 안 읽은 수 → 열면 메시지
+  await a.getByTestId('room-unread').first().waitFor({ timeout: 15000 });
+  await a.getByTestId('chat-rooms').getByText('김대표').click();
+  await a.getByTestId('chat-messages').getByText('내일 오전에 현장 사진 부탁해요').waitFor();
+  await a.getByTestId('chat-input').fill('네 알겠습니다');
+  await a.getByTestId('chat-send').click();
+  await owner.getByTestId('chat-messages').getByText('네 알겠습니다').waitFor({ timeout: 15000 });
+  await owner.getByTestId('chat-messages').getByText('읽음').first().waitFor({ timeout: 15000 });
+  await owner.getByTestId('chat-file').setInputFiles([{ name: '현장 안내.txt', mimeType: 'text/plain', buffer: Buffer.from('안내문') }]);
+  await a.getByTestId('chat-messages').getByText('현장 안내.txt').waitFor({ timeout: 15000 });
+  await owner.screenshot({ path: `${SHOTS}/64-messenger.png`, fullPage: true });
+  // 업무로 만들기
+  await owner.getByTestId('chat-message').filter({ hasText: '내일 오전에 현장 사진' }).hover();
+  await owner.getByTestId('chat-message').filter({ hasText: '내일 오전에 현장 사진' }).getByTestId('msg-to-task').click();
+  const dlg = owner.getByRole('dialog', { name: '업무 등록' });
+  await dlg.waitFor();
+  assert.equal(await dlg.getByPlaceholder('무엇을 해야 하나요?').inputValue(), '내일 오전에 현장 사진 부탁해요', 'AI 꺼짐·실패 시 첫 줄이 제목');
+  await c.close();
+});
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
   const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');

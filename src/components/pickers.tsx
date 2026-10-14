@@ -48,14 +48,14 @@ export function MultiUserSelect({ value, onChange }: { value: string[]; onChange
         const u = dir.users.find((x) => x.id === id);
         return (
           <span key={id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs">
-            {u?.name ?? '알 수 없음'}
+            {u?.name ?? '알 수 없음'}{u?.title && <span className="hidden text-slate-500 sm:inline"> · {u.title}</span>}
             <button type="button" onClick={() => onChange(value.filter((x) => x !== id))} aria-label={`${u?.name} 제거`} className="text-slate-500">✕</button>
           </span>
         );
       })}
       <select className="rounded-md border border-slate-300 px-2 py-0.5 text-xs" value="" onChange={(e) => e.target.value && onChange([...value, e.target.value])} aria-label="사람 추가">
         <option value="">+ 추가</option>
-        {dir.users.filter((u) => !value.includes(u.id)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        {dir.users.filter((u) => !value.includes(u.id)).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
       </select>
     </div>
   );

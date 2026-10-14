@@ -105,10 +105,10 @@ function RuleModal({ open, onClose, projectId, orgUnitId, onSaved }: { open: boo
           <div className="mt-2 grid grid-cols-2 gap-2">
             {f.action === 'notify' && <>
               <select className={inputCls} value={f.to} onChange={set('to')} aria-label="받는 사람">{Object.entries(NOTIFY_TO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-              {f.to === 'user' && <select className={inputCls} value={f.userId} onChange={set('userId')} aria-label="지정한 사람" required><option value="">선택</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>}
+              {f.to === 'user' && <select className={inputCls} value={f.userId} onChange={set('userId')} aria-label="지정한 사람" required><option value="">선택</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}</select>}
               <input className={cx(inputCls, 'col-span-2')} value={f.message} onChange={set('message')} placeholder="알림 문구 (선택)" aria-label="알림 문구" />
             </>}
-            {f.action === 'set_assignee' && <select className={inputCls} value={f.userId} onChange={set('userId')} aria-label="담당자" required><option value="">선택</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>}
+            {f.action === 'set_assignee' && <select className={inputCls} value={f.userId} onChange={set('userId')} aria-label="담당자" required><option value="">선택</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}</select>}
             {f.action === 'set_priority' && <select className={inputCls} value={f.priority} onChange={set('priority')} aria-label="우선순위">{Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>}
             {f.action === 'create_follow_up' && <>
               <input className={inputCls} value={f.title} onChange={set('title')} placeholder="후속 업무 제목" aria-label="후속 업무 제목" required />

@@ -121,21 +121,21 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const people = [...dir.users].sort((a, b) => (a.id === user.id ? -1 : b.id === user.id ? 1 : a.name.localeCompare(b.name, 'ko')));
-  const shown = people.filter((u) => !q || u.name.includes(q));
+  const shown = people.filter((u) => !q || u.name.includes(q) || (u.title ?? '').includes(q));
   const cur = dir.users.find((u) => u.id === value);
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); setQ(''); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${role}: ${cur?.name ?? name ?? '없음'}`} aria-haspopup="dialog" aria-expanded={open}
         className={withName ? 'inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100' : 'rounded-full hover:ring-2 hover:ring-accent-500/30'} data-testid={role === '지시자' ? 'requester-picker' : 'assignee-picker'}>
-        <Avatar id={value} name={cur?.name ?? name ?? null} size={size} />{withName && <span className="truncate">{cur?.name ?? name ?? '없음'}</span>}
+        <Avatar id={value} name={cur?.name ?? name ?? null} size={size} />{withName && <span className="truncate">{cur?.name ?? name ?? '없음'}{cur?.title && <span className="hidden text-ink-3 sm:inline"> · {cur.title}</span>}</span>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={`${role} 선택`}>
-        <input autoFocus={typeof window !== 'undefined' && window.innerWidth >= 640} className="mb-1 w-full rounded-input border border-line px-2 py-1 text-sm" placeholder="이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="담당자 검색" />
+        <input autoFocus={typeof window !== 'undefined' && window.innerWidth >= 640} className="mb-1 w-full rounded-input border border-line px-2 py-1 text-sm" placeholder="이름·직책 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="담당자 검색" />
         <div className="max-h-60 overflow-y-auto">
           {shown.map((u) => (
             <button key={u.id} type="button" onClick={() => { onChange(u.id); setOpen(false); }} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm hover:bg-slate-50">
-              <Avatar id={u.id} name={u.name} size={22} /><span className="flex-1">{u.name}{u.id === user.id ? ' (나)' : ''}</span>{u.id === value && <Check className="size-4 text-accent-600" />}
+              <Avatar id={u.id} name={u.name} size={22} /><span className="flex-1">{u.name}{u.id === user.id ? ' (나)' : ''}{u.title && <span className="text-xs text-ink-3"> · {u.title}</span>}</span>{u.id === value && <Check className="size-4 text-accent-600" />}
             </button>
           ))}
         </div>
@@ -152,23 +152,23 @@ export function MultiAssigneePicker({ values, onChange }: { values: string[]; on
   const [q, setQ] = useState('');
   const ref = useRef<HTMLButtonElement>(null);
   const people = [...dir.users].sort((a, b) => (a.id === user.id ? -1 : b.id === user.id ? 1 : a.name.localeCompare(b.name, 'ko')));
-  const shown = people.filter((u) => !q || u.name.includes(q));
+  const shown = people.filter((u) => !q || u.name.includes(q) || (u.title ?? '').includes(q));
   const names = values.map((id) => dir.users.find((u) => u.id === id)?.name ?? '').filter(Boolean);
   const label = !values.length ? '없음' : values.length === 1 ? names[0] : `${names[0]} 외 ${values.length - 1}명`;
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); setQ(''); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`담당자: ${label}`} aria-haspopup="dialog" aria-expanded={open}
         className="inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100" data-testid="assignee-picker">
-        <Avatar id={values[0] ?? null} name={names[0] ?? null} size={20} /><span className="truncate">{label}</span>
+        <Avatar id={values[0] ?? null} name={names[0] ?? null} size={20} /><span className="truncate">{label}{values.length === 1 && dir.users.find((u) => u.id === values[0])?.title && <span className="hidden text-ink-3 sm:inline"> · {dir.users.find((u) => u.id === values[0])!.title}</span>}</span>
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="담당자 선택 (여러 명 가능)">
         <p className="px-2 pb-1 text-[11px] text-ink-3">여러 명 선택 — 2명 이상이면 각자 1건씩 만들어집니다</p>
-        <input autoFocus={typeof window !== 'undefined' && window.innerWidth >= 640} className="mb-1 w-full rounded-input border border-line px-2 py-1 text-sm" placeholder="이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="담당자 검색" />
+        <input autoFocus={typeof window !== 'undefined' && window.innerWidth >= 640} className="mb-1 w-full rounded-input border border-line px-2 py-1 text-sm" placeholder="이름·직책 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="담당자 검색" />
         <div className="max-h-60 overflow-y-auto">
           {shown.map((u) => { const on = values.includes(u.id); return (
             <button key={u.id} type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => onChange(on ? values.filter((x) => x !== u.id) : [...values, u.id])} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm hover:bg-slate-50">
               <span className={cx('flex size-4 items-center justify-center rounded border', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300')}>{on && <Check className="size-3" />}</span>
-              <Avatar id={u.id} name={u.name} size={22} /><span className="flex-1">{u.name}{u.id === user.id ? ' (나)' : ''}</span>
+              <Avatar id={u.id} name={u.name} size={22} /><span className="flex-1">{u.name}{u.id === user.id ? ' (나)' : ''}{u.title && <span className="text-xs text-ink-3"> · {u.title}</span>}</span>
             </button>); })}
         </div>
         {values.length > 0 && <button type="button" onClick={() => onChange([])} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><UserRound className="size-4" />담당자 없음</button>}

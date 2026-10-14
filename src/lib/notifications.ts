@@ -67,6 +67,6 @@ export async function notify(sql: Sql, n: NotifyInput): Promise<string[]> {
 }
 
 export async function unreadCount(userId: string) {
-  const r = await db()<{ c: number }[]>`select count(*)::int c from notifications where user_id = ${userId} and read_at is null`;
+  const r = await db()<{ c: number }[]>`select count(*)::int c from notifications where user_id = ${userId} and read_at is null and type <> 'chat'`;
   return r[0].c;
 }

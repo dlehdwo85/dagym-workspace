@@ -295,3 +295,6 @@ export function dueClass(due: string | null, status: string) {
   if (due === t) return 'text-orange-600 font-medium';
   return 'text-slate-600';
 }
+
+/** V13 13번: 사람 표시 "김민수 · 본부장" (직책 없으면 이름만) */
+export const personLabel = (u: { name: string; title?: string | null } | null | undefined) => (u ? `${u.name}${u.title ? ` · ${u.title}` : ''}` : '');

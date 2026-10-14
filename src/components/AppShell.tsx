@@ -6,6 +6,7 @@ import {
   Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, FileText, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
   Building2, HelpCircle, ListTodo, Library, LogOut, Mic, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
+  MessageCircle,
 } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
@@ -23,10 +24,11 @@ const NAV: NavItem[] = [
   { href: '/tasks', label: '업무', icon: CircleCheck },
   { href: '/projects', label: '프로젝트', icon: FolderKanban },
   { href: '/calendar', label: '캘린더', icon: CalendarDays },
+  { href: '/messages', label: '메시지', icon: MessageCircle }, // V13 10번 사내 메신저
   { href: '/notifications', label: '알림', icon: Bell },
   { href: '/reports/mine', label: '내 주간 보고', icon: FileText },
 ];
-const MOBILE_TABS: NavItem[] = [NAV[0], NAV[1], NAV[3], NAV[4]];
+const MOBILE_TABS: NavItem[] = [NAV[0], NAV[1], NAV[3], NAV[4], NAV[5]];
 /** 사이드바 "관리" 묶음 (대표·본사 관리자) */
 const ADMIN_MENU: NavItem[] = [
   { href: '/reports', label: '주간 보고', icon: FileBarChart },
@@ -48,6 +50,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const path = usePathname();
   const router = useRouter();
   const [unread, setUnread] = useState(0);
+  const [chatUnread, setChatUnread] = useState(0);
+  // 메시지 화면을 오가면 메시지 배지를 바로 새로
+  useEffect(() => { api('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}); }, [path]);
   const [online, setOnline] = useState(true);
   const [more, setMore] = useState(false);
   const [quick, setQuick] = useState(false);
@@ -96,6 +101,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     let alive = true;
     const poll = async () => {
       try { const r = await api('/api/notifications?unread=1'); if (alive) setUnread(r.unread); } catch {}
+      try { const c = await api('/api/chat/unread'); if (alive) setChatUnread(c.unread); } catch {}
     };
     poll();
     const t = setInterval(poll, 60_000);
@@ -167,7 +173,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
             {nav.map((n) => (
               <div key={n.href}>
-                {navLink(n, n.href === '/notifications' ? unread : 0)}
+                {navLink(n, n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0)}
                 {/* 즐겨찾는 프로젝트는 "프로젝트" 바로 아래 */}
                 {n.href === '/projects' && !collapsed && favorites.length > 0 && (
                   <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l border-white/10 pl-2">
@@ -268,15 +274,15 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <main className="mx-auto max-w-7xl p-3 sm:p-6">{children}</main>
         </div>
 
-        {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 알림 */}
-        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
+        {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 · 알림 */}
+        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-6 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴">
           {MOBILE_TABS.slice(0, 2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} />)}
           <div className="flex items-center justify-center">
             <button onClick={() => setFabMenu(true)} aria-label="만들기" aria-haspopup="menu" aria-expanded={fabMenu} data-testid="fab" className="-mt-5 flex size-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-pop ring-4 ring-white active:scale-95">
               <Plus className="size-7" />
             </button>
           </div>
-          {MOBILE_TABS.slice(2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.href === '/notifications' ? unread : 0} />)}
+          {MOBILE_TABS.slice(2).map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0} />)}
         </nav>
 
         {/* + 버튼: 업무 · 일정 (V5) */}
