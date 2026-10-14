@@ -112,3 +112,4 @@
 - 2026-10-14 앱 아이콘 시안 B(캘린더 체크, 청록) 확정: Android mipmap 6해상도(legacy·round·adaptive fg/bg)·배경색 #0F766E, iOS AppIcon 1024 생성(sharp, 원본 docs/handoff/brand). 새 앱 빌드 예정.
 
 - 2026-10-14 운영 fcf4fc1 반영(13차: 매출 GPT 토큰 제거·AI 입력·메뉴 권한·자료실 AI 정리, migration 029). 앱 아이콘 B 빌드: Android mobile run 38492961286, iOS 1.0.4 release run 38493041107.
+- 앱 아이콘 B: Android vc16 Play 내부 테스트 출시, iOS 1.0.4 TestFlight 업로드 성공.
