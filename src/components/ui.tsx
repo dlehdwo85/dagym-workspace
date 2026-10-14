@@ -93,7 +93,7 @@ export function Toaster() {
   }, []);
   const close = (id: number) => setItems((x) => x.filter((i) => i.id !== id));
   return (
-    <div className="pointer-events-none fixed bottom-24 left-0 right-0 z-[60] flex flex-col items-center gap-2 px-4 sm:bottom-6 sm:left-auto sm:right-6 sm:items-end" role="status" aria-live="polite">
+    <div className="pointer-events-none fixed bottom-[calc(6rem+var(--toast-lift,0px))] left-0 right-0 z-[60] flex flex-col items-center gap-2 px-4 sm:bottom-6 sm:left-auto sm:right-6 sm:items-end" role="status" aria-live="polite">
       {items.map((t) => (
         <div key={t.id} className="pointer-events-auto flex max-w-md animate-fade-up items-center gap-3 rounded-card bg-slate-900 py-2.5 pl-3.5 pr-2 text-sm text-white shadow-pop">
           {t.kind === 'ok' ? <CheckCircle2 className="size-4 shrink-0 text-green-400" /> : t.kind === 'error' ? <AlertCircle className="size-4 shrink-0 text-red-400" /> : <Info className="size-4 shrink-0 text-sky-300" />}

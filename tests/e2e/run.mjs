@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { bootstrap, resetDb, startServer, BASE, FAKE, Client, addDays, seoulToday, ensureTls, testDb } from '../helpers.mjs';
 import { startFakeGoogle } from '../fake-google.mjs';
+import { v1440 } from './v14-40.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -1240,6 +1241,7 @@ await step('V6-2 휴대폰(Android Chrome 터치): 행을 0.5초 꾹 눌러 위�
   await mc.close();
 });
 
+await step('V14 40번 휴대폰: 꾹 눌러 선택 → 완료 → 다시 선택 → 삭제 뒤에도 다음 터치로 상세가 열림(선택 모드·끌기 상태 정리, 안내가 막대를 덮지 않음)', () => v1440({ browser, desk, ctx, sql, BASE, SHOTS }));
 await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에도 추가 → 주 보기 블록 제목·업무 연동 → 삭제 시 연결 업무도', async () => {
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   const m = await mc.newPage();

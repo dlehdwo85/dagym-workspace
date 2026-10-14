@@ -58,6 +58,16 @@ const VIEW_MODES: ViewMode[] = ['list', 'board', 'calendar', 'timeline'];
 const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done'];
 const cleanView = (v: string | null) => (v && LIST_VIEWS.includes(v) ? v : '');
 
+/** V14 40번: 진행 중·대기 중인 끌기(dnd-kit) 취소 — 센서는 창 resize 에 취소되며 문서 클릭 가로채기도 걷어 낸다 */
+const NO_SENSORS: never[] = [];
+/** V14 40번: 꾹 눌러 선택한 뒤 손을 뗄 때 오는 클릭 한 번은 어디에 떨어져도(행이 움직여 옆 행이어도) 버린다 */
+function swallowNextClick() {
+  const h = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
+  document.addEventListener('click', h, { capture: true, once: true });
+  setTimeout(() => document.removeEventListener('click', h, { capture: true }), 900);
+}
+function cancelDrag() { try { window.dispatchEvent(new Event('resize')); } catch {} }
+
 export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Record<string, string>; title?: string; defaultMode?: ViewMode }) {
   const sp = useSearchParams();
   const router = useRouter();
@@ -222,9 +232,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       lastPick.current = id;
       return n;
     }),
-    enter: (id) => { setSelOn(true); setSel(new Set([id])); lastPick.current = id; },
+    enter: (id) => { cancelDrag(); setSelOn(true); setSel(new Set([id])); lastPick.current = id; },
   }), [selOn, sel]);
-  const exitSel = () => { setSelOn(false); setSel(new Set()); };
+  const exitSel = () => { cancelDrag(); setSelOn(false); setSel(new Set()); };
   const setView = (v: string) => setFilters((f) => ({ ...f, view: v, assigneeId: '' }));
   const [filterOpen, setFilterOpen] = useState(false);
   const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
@@ -362,7 +372,12 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton /> : (
         <>
           {mode === 'list' && projectId && adding && <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask autoFocus projectId={projectId} onEscape={() => setAdding(false)} /></div>}
-          {selOn && <BulkBar ids={[...sel]} tasks={tasks} onClear={exitSel} onDone={() => { setSel(new Set()); reload(); broadcastRefresh(); }} />}
+          {selOn && <BulkBar ids={[...sel]} tasks={tasks} onClear={exitSel} onDone={(action, done) => {
+            // V14 40번: 완료·삭제 뒤에는 선택 모드를 끝내고(남아 있으면 다음 터치가 "선택"으로 먹힘), 지운 업무의 상세 패널은 닫는다
+            if (action === 'patch') setSel(new Set()); else exitSel();
+            if (action === 'delete' && panelId && done.includes(panelId)) closePanel();
+            reload(); broadcastRefresh();
+          }} />}
           <SelectCtx.Provider value={mode === 'list' || mode === 'board' ? selCtx : null}>
           {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
             : <GroupedTasks tasks={tasks} group={curView === 'done' ? 'month' : group} view={curView} keepIds={keepIds} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
@@ -586,6 +601,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
   const toggleDone = () => setDoneOpen((v) => { try { localStorage.setItem('wos_done_fold', v ? '0' : '1'); } catch {} return !v; });
   // PC: 손잡이를 마우스로 끌기 · 휴대폰: 행을 0.4초 꾹 누르면 들어 올려 위아래로
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 8 } }));
+  const selOnCtx = !!useContext(SelectCtx)?.on; // V14 40번: 선택 모드·순서를 바꿀 수 없는 정렬에서는 끌기 꺼짐 — 꾹 누르면 행이 들려 옆 행이 눌리던 문제
   if (group === 'due' && view === 'my') return <MyGroupedList tasks={tasks} onPatch={onPatch} onAcked={onAcked} top={top} />;
   const today = todayStr();
   const nameOf = (id: string) => dir.users.find((u) => u.id === id)?.name ?? null;
@@ -688,7 +704,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
   };
 
   return (
-    <DndContext sensors={sensors} onDragEnd={draggable ? end : undefined} onDragStart={(_e: DragStartEvent) => { try { navigator.vibrate?.(15); } catch {} }}>
+    <DndContext sensors={selOnCtx || !draggable ? NO_SENSORS : sensors} onDragEnd={draggable ? end : undefined} onDragStart={(_e: DragStartEvent) => { try { navigator.vibrate?.(15); } catch {} }}>
       <div className="space-y-4" data-testid="task-groups" data-group-by={group}>
         {top && <div className="overflow-hidden rounded-card border border-accent-500/40 bg-white shadow-card ring-2 ring-accent-500/10">{top}</div>}
         {group === 'month' ? (() => {
@@ -749,6 +765,9 @@ function GroupDrop({ id, groupKey, children }: { id: string; groupKey: string; c
 function SortableRow({ t, onPatch, onAck, onMove }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   const { onMouseDown, onTouchStart } = (listeners ?? {}) as Record<string, any>;
+  // V14 40번: 끌던 행이 사라지면(완료·삭제로 목록에서 빠짐) 끌기 상태를 정리 — 남으면 다음 터치(클릭)를 먹는다
+  const dragging = useRef(false); dragging.current = isDragging;
+  useEffect(() => () => { if (dragging.current) cancelDrag(); }, []);
   return (
     // 삼성 WebView: 꾹 누르는 동안 글자 선택·길게 누르기 메뉴가 먼저 잡혀 끌기가 취소되던 문제 → 선택·메뉴 막기,
     // 끌기가 시작된 뒤에만 touch-action:none (그 전에는 세로 스크롤 그대로)
@@ -851,7 +870,8 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
   const hintStart = (e: React.PointerEvent) => {
     // V14 12번: 휴대폰에서 길게 누르면 선택 모드
     // V14 34번: 길게 누르기 = 선택 모드만(진동, 화면 이동 없음). 손을 뗄 때 오는 클릭은 버린다
-    if (e.pointerType === 'touch' && selc && !selc.on) lp.current = setTimeout(() => { selc.enter(t.id); lpFired.current = true; try { navigator.vibrate?.(20); } catch {} }, 550);
+    lpFired.current = false; // 지난 꾹 누르기 뒤 클릭이 안 와도(안드로이드) 다음 터치를 먹지 않게
+    if (e.pointerType === 'touch' && selc && !selc.on) lp.current = setTimeout(() => { selc.enter(t.id); lpFired.current = true; swallowNextClick(); try { navigator.vibrate?.(20); } catch {} }, 550);
   };
   const lpFired = useRef(false);
   const hintStop = () => { if (hintTimer.current) { clearTimeout(hintTimer.current); hintTimer.current = null; } if (lp.current) { clearTimeout(lp.current); lp.current = null; } };
@@ -1330,7 +1350,7 @@ function ExportTasks({ qs, onClose }: { qs: string; onClose: () => void }) {
 }
 
 /** V14 12번 선택한 업무 작업 막대: 담당자·마감·프로젝트 변경, (본인 업무만) 완료, 휴지통. 권한 없는 건 건너뛰고 안내, 되돌리기 */
-function BulkBar({ ids, tasks, onClear, onDone }: { ids: string[]; tasks: Task[]; onClear: () => void; onDone: () => void }) {
+function BulkBar({ ids, tasks, onClear, onDone }: { ids: string[]; tasks: Task[]; onClear: () => void; onDone: (action: 'patch' | 'done' | 'delete' | 'undo', done: string[]) => void }) {
   const { dir } = useSession();
   const projects = useApi<{ projects: { id: string; name: string }[] }>('/api/projects');
   const [busy, setBusy] = useState(false);
@@ -1348,15 +1368,25 @@ function BulkBar({ ids, tasks, onClear, onDone }: { ids: string[]; tasks: Task[]
       const msg = `${r.done.length}건 ${label ?? '바꿨습니다'}${r.skipped.length ? ` · ${r.skipped.length}건 건너뜀` : ''}`;
       const undo = r.done.length ? { label: '되돌리기', run: async () => {
         const back = action === 'delete' ? { ids: r.done, action: 'restore' } : { ids: r.done, action: 'patch', each: Object.fromEntries(r.done.map((id: string) => [id, before[id]])) };
-        try { await api('/api/tasks/bulk', { body: back }); onDone(); toast.ok('되돌렸습니다'); } catch (e: any) { toast.error(e.message); }
+        try { await api('/api/tasks/bulk', { body: back }); onDone('undo', []); toast.ok('되돌렸습니다'); } catch (e: any) { toast.error(e.message); }
       } } : undefined;
       toast.ok(msg, undo);
       if (r.skipped.length) toast.info(`건너뜀: ${r.skipped.slice(0, 3).map((s: any) => `${s.title}(${s.reason})`).join(', ')}${r.skipped.length > 3 ? ' 외' : ''}`);
-      onDone();
+      onDone(action, r.done);
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
+  // V14 40번(휴대폰): "n건 완료 · 되돌리기" 안내가 이 막대의 삭제·완료 버튼을 덮어 터치를 가로채던 문제 → 막대가 떠 있는 동안 안내를 막대 위로
+  const bar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    const fit = () => { const el = bar.current; root.style.setProperty('--toast-lift', el && window.innerWidth < 640 ? `${el.offsetHeight}px` : '0px'); };
+    fit();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
+    if (bar.current) ro?.observe(bar.current);
+    return () => { ro?.disconnect(); root.style.removeProperty('--toast-lift'); };
+  }, []);
   return (
-    <div className="fixed inset-x-2 bottom-[calc(4.5rem+var(--sab))] z-40 flex flex-wrap items-center gap-2 rounded-card border border-line bg-white p-2 shadow-pop sm:inset-x-auto sm:bottom-4 sm:left-1/2 sm:-translate-x-1/2" role="toolbar" aria-label="선택한 업무" data-testid="bulk-bar">
+    <div ref={bar} className="fixed inset-x-2 bottom-[calc(4.5rem+var(--sab))] z-40 flex flex-wrap items-center gap-2 rounded-card border border-line bg-white p-2 shadow-pop sm:inset-x-auto sm:bottom-4 sm:left-1/2 sm:-translate-x-1/2" role="toolbar" aria-label="선택한 업무" data-testid="bulk-bar">
       <b className="px-1 text-sm" data-testid="bulk-count">{ids.length}건 선택</b>
       <select className="h-8 max-w-[9rem] rounded-input border border-line bg-white px-1.5 text-xs" value="" disabled={busy || !ids.length} onChange={(e) => e.target.value && run('patch', { assigneeId: e.target.value === '-' ? null : e.target.value }, '담당자 변경')} aria-label="담당자 바꾸기">
         <option value="">담당자…</option><option value="-">담당자 없음</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
