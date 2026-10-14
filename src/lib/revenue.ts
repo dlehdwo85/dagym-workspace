@@ -254,7 +254,7 @@ export async function aiAnalyze(u: SessionUser, period: string, ip: string | nul
   if (!input.rows.some((r) => r.month === period)) throw badRequest(`${period} 실적이 없습니다. 먼저 입력하세요`);
   const { anthropicProvider, costUsd } = await import('./ai/provider');
   await (await import('./plans')).assertAiRequest(u);
-  const provider = anthropicProvider();
+  const provider = anthropicProvider({ tier: 'deep' }); // 복잡한 분석
   const model = provider.model;
   const schema = { type: 'object', additionalProperties: false, required: ['summary', 'anomalies', 'comparisons'], properties: {
     summary: { type: 'string' },
@@ -302,7 +302,7 @@ export async function aiExtract(u: SessionUser, fileIds: string[]) {
   const files = await Promise.all(fileIds.map((id) => loadLibraryFile(u, id)));
   const fb = await fileBlocksFor(u, fileIds);
   const units = await sql<{ name: string }[]>`select name from org_units where active and not is_demo and type in ('branch', 'site') order by name`;
-  const provider = anthropicProvider();
+  const provider = anthropicProvider({ tier: 'fast' }); // 표 읽기는 가벼운 모델
   const schema = { type: 'object', additionalProperties: false, required: ['rows', 'notes'], properties: {
     rows: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['site', 'month', 'item', 'amount'], properties: {
       site: { type: 'string' }, month: { type: 'string' }, item: { type: 'string', enum: ['매출', '지출', '회원수', '목표'] }, amount: { type: 'number' } } } },

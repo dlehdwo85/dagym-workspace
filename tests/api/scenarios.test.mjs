@@ -1069,6 +1069,7 @@ describe('매출 2·3단계 (대표 승인): 표준 CSV · GPT Action 토큰 · 
     assert.equal(report.output.anomalies[0].site, '다짐 강남점');
     const sent = (await (await fetch(FAKE + '/__state')).json()).anthropic.slice(before);
     assert.equal(sent.length, 1); assert.equal(sent[0].key, 'sk-ant-fake-test');
+    assert.equal(sent[0].body.model, 'claude-opus-5-5', '복잡한 분석만 opus(AI_MODEL_DEEP)');
     assert.equal(sent[0].body.output_config.format.type, 'json_schema');
     const payload = JSON.stringify(sent[0].body.messages);
     for (const bad of ['비밀 메모', '010-1234-5678', '정산.xlsx', '@dagym.test', '김대표']) assert.ok(!payload.includes(bad), `보내면 안 되는 값: ${bad}`);
@@ -1090,6 +1091,8 @@ describe('매출 2·3단계 (대표 승인): 표준 CSV · GPT Action 토큰 · 
     assert.equal((await ctx.staffA.client.post('/api/revenue/extract', { fileIds: [init.id] })).status, 404, '매출 권한 없음');
     const x = await ctx.owner.ok('POST', '/api/revenue/extract', { fileIds: [init.id] });
     assert.equal(x.ok, true); assert.equal(x.count, 1); assert.equal(x.rows.length, 2);
+    const xs = (await (await fetch(FAKE + '/__state')).json()).anthropic.at(-1).body;
+    assert.equal(xs.model, 'claude-haiku-5-5', '매출 추출은 가벼운 모델'); assert.equal(xs.output_config.effort, undefined);
     assert.equal((await sql`select count(*)::int n from revenue_entries where month = '2026-08-01'`)[0].n, 0, '미리보기는 저장 안 함');
     const r = await ctx.owner.ok('POST', '/api/revenue/import', { csv: x.csv, fileName: x.fileName, evidenceFileIds: [init.id] });
     assert.equal(r.count, 1);
@@ -1677,7 +1680,7 @@ describe('WORKIN_V9 회사 자료실 · AI 비서 (가짜 Anthropic 서버)', ()
     assert.equal(reqs.length, 3);
     assert.equal(reqs[0].key, 'sk-ant-fake-test');
     assert.match(reqs[0].beta ?? '', /server-side-fallback-2026-07-01/);
-    assert.equal(reqs[0].body.model, 'claude-opus-5-5'); assert.equal(reqs[0].body.fallbacks, 'default');
+    assert.equal(reqs[0].body.model, 'claude-sonnet-5-5', '기본 모델'); assert.equal(reqs[0].body.fallbacks, 'default');
     assert.match(reqs[0].body.system, /이직원/); assert.match(reqs[0].body.system, new RegExp(task), '보고 있는 업무 맥락');
     assert.ok(reqs[0].body.tools.some((t) => t.name === 'propose_create_task'));
     const tr = reqs[1].body.messages.at(-1).content[0];

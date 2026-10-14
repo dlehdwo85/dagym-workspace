@@ -11,7 +11,7 @@ import { canSeeRevenue } from '../revenue';
 import { directory } from '../admin';
 import { listLibrary, loadLibraryFile, attachLibraryToTask, saveGeneratedFile, tenantOf } from '../library';
 import { writeXlsx } from '../xlsx';
-import { anthropicProvider, aiEnabled, costUsd, type AiMessage, type AiProvider, type AiTool } from './provider';
+import { anthropicProvider, aiEnabled, modelFor, costUsd, type AiMessage, type AiProvider, type AiTool } from './provider';
 import type { SessionUser } from '../types';
 
 /**
@@ -45,7 +45,7 @@ export async function aiStatus(u: SessionUser) {
   const { effectiveLimits, currentUsage } = await import('../plans');
   const [{ limits }, cu] = await Promise.all([effectiveLimits(tenantOf(u)), currentUsage(tenantOf(u))]);
   const quota = { used: cu.aiRequests, limit: limits.aiRequests };
-  return { enabled: true, model: process.env.AI_MODEL || 'claude-opus-5-5', usage: isAdmin(u) ? usage : { ...usage, costUsd: undefined, tokens: undefined }, quota,
+  return { enabled: true, model: modelFor(), usage: isAdmin(u) ? usage : { ...usage, costUsd: undefined, tokens: undefined }, quota,
     overLimit: usage.costUsd >= usage.limitUsd || (quota.limit !== null && quota.used >= quota.limit), canSetLimit: u.role === 'owner' };
 }
 export async function setLimit(u: SessionUser, monthlyUsd: number) {

@@ -228,7 +228,7 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   const { aiEnabled, anthropicProvider, costUsd } = await import('./ai/provider');
   const quotaOk = aiEnabled() && (await (await import('./plans')).assertAiRequest(u).then(() => true, () => false));
   if (quotaOk) {
-    const provider = anthropicProvider({ light: true });
+    const provider = anthropicProvider({ tier: 'fast' });
     const isImg = /^image\/(png|jpe?g|gif|webp)$/.test(f.mime_type) && Number(f.size_bytes) <= 3_500_000;
     const img = isImg ? await getObject(f.storage_key).catch(() => null) : null;
     const info = `파일명: ${f.file_name}\n종류: ${f.mime_type}\n지금 폴더: ${f.folder || '(없음)'}\n이미 있는 폴더: ${folders.map((x) => x.folder).join(', ') || '(없음)'}\n` +

@@ -3,7 +3,9 @@ import Anthropic from '@anthropic-ai/sdk';
 /**
  * V9 AI 공급자 어댑터. 제품 AI 는 워크인 플랫폼 계정의 API 키로 호출한다(고객 회사는 외부 계정 연결 없음).
  * 기본 공급자 Anthropic(Claude). 다른 공급자를 붙일 때는 같은 모양(`AiProvider`)으로 구현한다.
- * 환경변수: ANTHROPIC_API_KEY(없으면 AI 기능 전체 숨김), AI_MODEL(기본 claude-opus-5-5), AI_EFFORT(기본 medium)
+ * 환경변수: ANTHROPIC_API_KEY(없으면 AI 기능 전체 숨김), AI_EFFORT(기본 medium)
+ * 모델 3단계(비용 조정 2026-10-14): AI_MODEL = 기본(AI 비서, 기본 claude-sonnet-5-5) · AI_MODEL_FAST = 가벼운 작업(자료실 자동 정리·매출 추출, 기본 claude-haiku-5-5)
+ *   · AI_MODEL_DEEP = 복잡한 분석(매출 AI 분석, 기본 claude-opus-5-5)
  */
 export type AiMessage = Anthropic.Beta.BetaMessageParam;
 export type AiTool = Anthropic.Beta.BetaTool;
@@ -28,23 +30,29 @@ export const aiEnabled = () => !!process.env.ANTHROPIC_API_KEY;
 const FALLBACK_MODELS = new Set(['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5']);
 
 let client: Anthropic | null = null;
-/** light: 자료실 자동 정리처럼 짧고 잦은 요청 — 가벼운 모델(AI_LIGHT_MODEL, 기본 claude-haiku-5-5) */
-export function anthropicProvider(opt: { light?: boolean } = {}): AiProvider {
+export type AiTier = 'default' | 'fast' | 'deep';
+export const modelFor = (tier: AiTier = 'default') =>
+  tier === 'fast' ? process.env.AI_MODEL_FAST || process.env.AI_LIGHT_MODEL || 'claude-haiku-5-5'
+  : tier === 'deep' ? process.env.AI_MODEL_DEEP || 'claude-opus-5-5'
+  : process.env.AI_MODEL || 'claude-sonnet-5-5';
+export function anthropicProvider(opt: { tier?: AiTier } = {}): AiProvider {
   client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, baseURL: process.env.ANTHROPIC_BASE_URL || undefined, maxRetries: 2, timeout: 100_000 });
-  const model = opt.light ? process.env.AI_LIGHT_MODEL || 'claude-haiku-5-5' : process.env.AI_MODEL || 'claude-opus-5-5';
-  const effort = (opt.light ? 'low' : process.env.AI_EFFORT || 'medium') as 'low' | 'medium' | 'high';
+  const light = opt.tier === 'fast';
+  const model = modelFor(opt.tier);
+  const effort = (light ? 'low' : process.env.AI_EFFORT || 'medium') as 'low' | 'medium' | 'high';
+  const withEffort = !/haiku/.test(model); // 가벼운 모델에는 생각 깊이 설정을 보내지 않는다
   return {
     name: 'anthropic',
     model,
     chat: ({ system, messages, tools, format }) =>
       client!.beta.messages.create({
         model,
-        max_tokens: opt.light ? 2000 : 16000,
+        max_tokens: light ? 4000 : 16000,
         system,
         messages,
         ...(tools.length ? { tools } : {}),
         // 구조화 출력(JSON 스키마)이 필요하면 format — "자료로 채우기"
-        output_config: { effort, ...(format ? { format: { type: 'json_schema', schema: format } } : {}) } as never,
+        output_config: { ...(withEffort ? { effort } : {}), ...(format ? { format: { type: 'json_schema', schema: format } } : {}) } as never,
         cache_control: { type: 'ephemeral' },
         ...(FALLBACK_MODELS.has(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
       }),
