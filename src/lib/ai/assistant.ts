@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DateTime } from 'luxon';
 import { db } from '../db';
-import { HttpError, badRequest, notFound } from '../errors';
+import { HttpError, badRequest, forbidden, notFound } from '../errors';
 import { audit } from '../log';
 import { isAdmin, denyDemo } from '../access';
 import { todaySeoul } from '../time';
@@ -117,12 +117,13 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 권한 오류가 나면 그 사람이 볼 수 없는 정보라고 짧게 알려 주세요.
 - 답은 한국어로 짧고 분명하게. 목록은 짧은 줄로.`;
 
-type Ctx = { u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[] };
+/** confidential: 이번 차례에 기밀 자료(기밀 파일·매출)를 읽었는지 — 결과물·제안이 같은 등급을 따른다(V14 15번) */
+type Ctx = { u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean };
 const clip = (s: unknown, n = 400) => (typeof s === 'string' ? (s.length > n ? s.slice(0, n) + '…' : s) : s);
 const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 async function propose(c: Ctx, kind: string, summary: string, payload: unknown, preview?: unknown) {
-  const [p] = await db()<{ id: string }[]>`insert into ai_proposals (tenant, user_id, kind, summary, payload) values (${tenantOf(c.u)}, ${c.u.id}, ${kind}, ${summary}, ${db().json(payload as never)}) returning id`;
+  const [p] = await db()<{ id: string }[]>`insert into ai_proposals (tenant, user_id, kind, summary, payload, confidential) values (${tenantOf(c.u)}, ${c.u.id}, ${kind}, ${summary}, ${db().json(payload as never)}, ${!!c.confidential}) returning id`;
   c.proposals.push({ id: p.id, kind, summary, preview });
   return { proposalId: p.id, status: '사용자 확인 대기 — 화면의 [확인]을 눌러야 실행됩니다' };
 }
@@ -131,11 +132,13 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
   const u = c.u;
   switch (name) {
     case 'search_library': {
-      const r = await listLibrary(u, { q: String(input.query ?? ''), folder: input.folder, limit: 10 });
+      const r = await listLibrary(u, { q: String(input.query ?? ''), folder: input.folder, limit: 10 }); // 등급·폴더 권한 밖 파일은 여기서 이미 빠짐
+      if (r.files.some((f: any) => f.effective_security === 'confidential')) c.confidential = true;
       return r.files.map((f: any) => ({ id: f.id, title: f.title, folder: f.folder, tags: f.tags, fileName: f.file_name, type: f.mime_type, snippet: clip(f.snippet, 200) }));
     }
     case 'read_library_file': {
-      const f = await loadLibraryFile(u, String(input.fileId));
+      const f = await loadLibraryFile(u, String(input.fileId), 'ai'); // 권한 밖이면 "자료가 없습니다"(존재도 숨김), 기밀이면 열람 기록
+      if (f.effective_security === 'confidential') c.confidential = true;
       return { title: f.title, fileName: f.file_name, text: f.text_content ? clip(f.text_content, 30000) : '(본문 글자 없음 — 이미지·PDF 등은 제목·태그로만 알 수 있습니다)' };
     }
     case 'search_tasks': {
@@ -171,6 +174,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       if (!ok(input.fromMonth) || !ok(input.toMonth)) throw badRequest('YYYY-MM 형식');
       const rows = await db()`select o.name as site, to_char(r.month, 'YYYY-MM') as month, r.revenue::float8 revenue, r.expense::float8 expense, r.members, r.target::float8 target
         from revenue_entries r join org_units o on o.id = r.org_unit_id where o.tenant = 'default' and not o.is_demo and r.month between ${input.fromMonth + '-01'} and ${input.toMonth + '-01'} order by o.name, r.month limit 600`;
+      c.confidential = true; // 매출은 기밀 근거
       return { unit: '원(회원 수는 명)', rows };
     }
     case 'propose_create_task': {
@@ -186,7 +190,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       const unknown = ids.filter((id) => !people.some((p) => p.id === id));
       if (unknown.length) throw badRequest(`배정할 수 없는 사람 id: ${unknown.join(', ')} — list_people 로 다시 찾으세요`);
       const files = (Array.isArray(input.attachFileIds) ? input.attachFileIds : []).map(String).slice(0, 5);
-      for (const f of files) await loadLibraryFile(u, f);
+      for (const f of files) await loadLibraryFile(u, f, 'meta');
       const i = taskInput.parse({ title: input.title, description: input.description || undefined, dueDate: isDate(input.dueDate) ? input.dueDate : undefined,
         dueTime: /^\d{2}:\d{2}$/.test(input.dueTime ?? '') ? input.dueTime : undefined, priority: input.priority || undefined, requestedById: input.requestedById || u.id,
         checklist: Array.isArray(input.checklist) ? input.checklist.map((x: unknown) => String(x).slice(0, 300)).filter(Boolean).slice(0, 100) : undefined,
@@ -209,7 +213,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       return propose(c, 'comment', `댓글: ${(d.task as any).title} — ${clip(text, 80)}`, { taskId: input.taskId, text });
     }
     case 'propose_attach_file': {
-      const [d, f] = await Promise.all([getTaskDetail(u, String(input.taskId)), loadLibraryFile(u, String(input.fileId))]);
+      const [d, f] = await Promise.all([getTaskDetail(u, String(input.taskId)), loadLibraryFile(u, String(input.fileId), 'meta')]);
       return propose(c, 'attach_file', `첨부: ${f.title} → ${(d.task as any).title}`, { taskId: input.taskId, fileId: input.fileId, fileTitle: f.title, mime: f.mime_type });
     }
     case 'propose_xlsx_report': {
@@ -243,8 +247,10 @@ async function fileBlocks(u: SessionUser, ids: string[]) {
   const { getObject } = await import('../storage');
   const blocks: any[] = [];
   const notes: string[] = [];
+  let confidential = false;
   for (const id of ids) {
-    const f = await loadLibraryFile(u, id);
+    const f = await loadLibraryFile(u, id, 'ai');
+    if (f.effective_security === 'confidential') confidential = true;
     notes.push(`- id=${f.id} · ${f.title} (${f.file_name})`);
     const size = Number(f.size_bytes);
     if (IMG.test(f.mime_type) && size <= 4.5 * 1024 * 1024) {
@@ -257,7 +263,7 @@ async function fileBlocks(u: SessionUser, ids: string[]) {
       blocks.push({ type: 'text', text: `[첨부 자료: ${f.title}]\n${String(f.text_content).slice(0, 60000)}` });
     } else notes.push(`  (이 파일은 내용을 읽을 수 없습니다 — 이름만 참고)`);
   }
-  return { blocks, note: `사용자가 이번에 자료를 첨부했습니다. 업무에 붙일 때 아래 id 를 attachFileIds 로 쓰세요.\n${notes.join('\n')}` };
+  return { confidential, blocks, note: `사용자가 이번에 자료를 첨부했습니다. 업무에 붙일 때 아래 id 를 attachFileIds 로 쓰세요.\n${notes.join('\n')}` };
 }
 
 export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provider: AiProvider = anthropicProvider()) {
@@ -293,12 +299,15 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   // 문맥: 보관된 대화면 최근 20개 + 요약, 예전 방식이면 화면이 보낸 것
   const messages: AiMessage[] = hist ? [...hist.messages.map((m) => ({ role: m.role, content: m.text })), { role: 'user', content: userText }]
     : (i.messages ?? [{ role: 'user' as const, text: userText }]).map((m) => ({ role: m.role, content: m.text }));
+  let fbConf = false;
   if (i.fileIds?.length) {
     const fb = await fileBlocks(u, i.fileIds);
+    fbConf = fb.confidential;
     const last = messages[messages.length - 1];
     messages[messages.length - 1] = { role: 'user', content: [...fb.blocks, { type: 'text', text: `${fb.note}\n\n${last.content as string}` }] as never };
   }
-  const c: Ctx = { u, proposals: [] };
+  const c: Ctx = { u, proposals: [], confidential: false };
+  if (i.fileIds?.length && fbConf) c.confidential = true;
   const sql = db();
   const steps: string[] = [];
   let reply = '';
@@ -332,6 +341,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   await audit(sql, u.id, 'ai.chat', i.taskId ? 'task' : null, i.taskId ?? null, { tools: steps, proposals: c.proposals.map((p) => p.id), threadId }, null);
   await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: reply, proposalIds: c.proposals.map((p) => p.id), cost: turnCost, inTok, outTok });
+  if (c.confidential) await sql`update ai_threads set confidential = true where id = ${threadId}`; // 사용 내역에서 기밀 권한 없는 사람에게 내용 가림
   await T.maybeSummarize(u, threadId);
   return { reply, proposals: c.proposals, tools: steps, threadId };
 }
@@ -350,6 +360,15 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
   const x = p.payload;
   let result: Record<string, unknown>;
   try {
+    // V14 15번: 기밀 자료(기밀 파일·매출)를 근거로 만든 제안 — 받는 사람도 기밀 열람 권한이 있어야 한다(서버 강제)
+    if (p.confidential) {
+      const { userSeesConfidential, assertConfidentialAudience } = await import('../library');
+      const need = (ids: unknown[]) => Promise.all(ids.filter(Boolean).map(async (id) => { if (!(await userSeesConfidential(String(id)))) throw forbidden('기밀 자료를 근거로 한 내용이라 기밀 열람 권한이 없는 사람에게 줄 수 없습니다'); }));
+      if (p.kind === 'create_task') await need([x.assigneeId, x.requestedById, ...(x.collaboratorIds ?? [])]);
+      if (p.kind === 'create_tasks') await need([...(x.input?.assigneeIds ?? []), x.input?.requestedById]);
+      if (p.kind === 'update_task' || p.kind === 'comment') await assertConfidentialAudience(x.taskId, [x.patch?.assigneeId].filter(Boolean));
+      if (p.kind === 'xlsx_report' && x.taskId) await assertConfidentialAudience(x.taskId);
+    }
     switch (p.kind) {
       case 'create_task': { const r: any = await createTask(u, taskInput.parse(x)); result = { taskId: r.id, link: `/tasks/${r.id}` }; break; }
       case 'create_tasks': {
@@ -366,7 +385,7 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
       case 'xlsx_report': {
         const buf = writeXlsx(x.sheets);
         const fileName = `${x.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'AI 보고서'}.xlsx`;
-        const f = await saveGeneratedFile(u, { fileName, mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', data: buf, title: x.title, folder: 'AI 보고서', tags: ['AI'], description: 'AI 비서가 만든 보고서(사용자 확인)' });
+        const f = await saveGeneratedFile(u, { fileName, mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', data: buf, title: x.title, folder: 'AI 보고서', tags: ['AI'], description: 'AI 비서가 만든 보고서(사용자 확인)', security: p.confidential ? 'confidential' : undefined });
         if (x.taskId) await attachLibraryToTask(u, f.id, x.taskId);
         result = { fileId: f.id, link: x.taskId ? `/tasks/${x.taskId}` : `/library?file=${f.id}` };
         break;
@@ -423,7 +442,7 @@ export async function fillFromFiles(u: SessionUser, i: z.infer<typeof fillInput>
 async function pageContext(u: SessionUser, c: { page: string; id?: string }) {
   const PAGE: Record<string, string> = { home: '홈(오늘 할 일)', tasks: '업무 목록', calendar: '캘린더', library: '자료실', revenue: '매출', reports: '주간 보고', messages: '메시지', other: '' };
   try {
-    if (c.page === 'library' && c.id) { const f = await loadLibraryFile(u, c.id); return `\n지금 사용자가 보고 있는 자료실 파일: id=${f.id}, 제목="${f.title}". "이 자료"는 이것을 뜻합니다.`; }
+    if (c.page === 'library' && c.id) { const f = await loadLibraryFile(u, c.id, 'meta'); return `\n지금 사용자가 보고 있는 자료실 파일: id=${f.id}, 제목="${f.title}". "이 자료"는 이것을 뜻합니다.`; }
     if (c.page === 'messages' && c.id) {
       const { roomDetail } = await import('../chat');
       const r = await roomDetail(u, c.id, {});

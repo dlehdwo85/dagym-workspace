@@ -35,10 +35,49 @@ export const libraryPatch = z.object({
   folder: z.string().max(200).optional(),
   tags: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
   description: z.string().max(2000).nullable().optional(),
+  security: z.enum(['public', 'internal', 'confidential']).optional(), // V14 15번 — 올리기는 편집자, 기밀을 내리거나 확인은 기밀 편집 권한
 });
 
-const COLS = `f.id, f.folder, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
+const COLS = `f.id, f.folder, f.security, f.security_suggested, f.security_confirmed, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
   (f.text_content is not null) as has_text, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error`;
+
+// ---------------- V14 15번 보안 등급 (일반·내부·기밀) ----------------
+export type Security = 'public' | 'internal' | 'confidential';
+export const SEC_RANK: Record<Security, number> = { public: 0, internal: 1, confidential: 2 };
+export const SEC_LABEL: Record<Security, string> = { public: '일반', internal: '내부', confidential: '기밀' };
+const maxSec = (a: Security, b: Security): Security => (SEC_RANK[a] >= SEC_RANK[b] ? a : b);
+type SecCtx = { folders: { folder: string; security: Security }[]; internal: boolean; confidential: boolean; confEdit: boolean };
+/** 사람의 등급 열람 권한 + 회사의 폴더 등급 (서버 강제 — AI 도구도 이 검사를 거친다) */
+export async function secCtx(u: SessionUser): Promise<SecCtx> {
+  const [folders, internal, conf] = await Promise.all([
+    db()<{ folder: string; security: Security }[]>`select folder, security from library_folder_security where tenant = ${tenantOf(u)}`,
+    menuLevel(u, 'library_internal'), menuLevel(u, 'confidential')]);
+  return { folders, internal: RANK[internal] >= RANK.view, confidential: RANK[conf] >= RANK.view, confEdit: RANK[conf] >= RANK.edit };
+}
+/** 폴더 등급: 자기와 모든 상위 폴더 설정 중 가장 높은 것 */
+function folderSec(c: SecCtx, folder: string): Security {
+  const parts = folder.split('/').filter(Boolean);
+  let s: Security = 'public';
+  for (let n = 1; n <= parts.length; n++) { const p = c.folders.find((x) => x.folder === parts.slice(0, n).join('/')); if (p) s = maxSec(s, p.security); }
+  return s;
+}
+export const effSec = (c: SecCtx, f: { folder: string; security: Security }) => maxSec(folderSec(c, f.folder), f.security);
+const secAllowed = (c: SecCtx, s: Security) => s === 'public' || (s === 'internal' ? c.internal : c.confidential);
+/** 이 사람이 이 파일을 볼 수 있는 등급인가 (올린 사람 본인은 항상) */
+export const canSeeSec = (c: SecCtx, u: SessionUser, f: { folder: string; security: Security; created_by?: string | null }) => f.created_by === u.id || secAllowed(c, effSec(c, f));
+/** 사람 id 로 기밀 열람 권한 확인 (업무 담당자 등) */
+export async function userSeesConfidential(userId: string) {
+  const [r] = await db()<any[]>`select id, email, name, role, status, tenant, is_demo as "isDemo" from users where id = ${userId}`;
+  if (!r || r.status !== 'active') return false;
+  return RANK[await menuLevel({ ...r, timezone: 'Asia/Seoul', sessionId: '' }, 'confidential')] >= RANK.view;
+}
+/** 이름·본문으로 기밀 후보 (AI 가 없거나 놓쳐도) */
+const CONF_WORDS = /(매출|급여|연봉|월급|상여|인사\s?(평가|기록|카드)|계약서|주민(등록)?번호|\d{6}-[1-4]\d{6}|계좌|통장|견적|단가|정산|손익|원가|재무|세금계산서|비밀|기밀|confidential|salary|payroll)/i;
+export function ruleSecurity(text: string): Security | null { return CONF_WORDS.test(text) ? 'confidential' : null; }
+async function secAudit(u: SessionUser, f: any, purpose: string) {
+  const { audit } = await import('./log');
+  await audit(db(), u.id, `library.confidential_${purpose}`, 'library_file', f.id, { title: f.title, folder: f.folder }, null);
+}
 
 // ---------------- V13 4번 폴더 권한 ----------------
 type FolderPerm = { folder: string; role: string; level: string };
@@ -70,9 +109,19 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
   const sql = db();
   // 폴더 권한: 볼 수 있는 폴더만 (올린 사람 본인 파일은 항상 보임)
   const [perms, allFolders] = await Promise.all([folderPerms(u),
-    sql<{ folder: string; n: number }[]>`select folder, count(*)::int n from library_files
-      where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready' group by folder order by folder`]);
-  const visible = allFolders.filter((f) => folderLevelOf(u.role, base, perms, f.folder) !== 'none');
+    sql<{ folder: string; n: number }[]>`select folder, sum(n)::int n from (
+        select folder, 1 as n from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready'
+        union all select path, 0 from library_folders where tenant = ${tenantOf(u)}) x group by folder order by folder`]);
+  const sc = await secCtx(u);
+  // 등급: 볼 수 있는 등급 목록 + 폴더 등급이 허용되는 폴더 (본인이 올린 파일은 항상)
+  const secs = (['public', 'internal', 'confidential'] as Security[]).filter((s) => secAllowed(sc, s));
+  const secFolders = allFolders.map((f) => f.folder).filter((f) => secAllowed(sc, folderSec(sc, f)));
+  const secCond = sql`(f.created_by = ${u.id} or (f.security = any(${secs}::text[]) and f.folder = any(${secFolders}::text[])))`;
+  const counts = new Map((await sql<{ folder: string; n: number }[]>`select folder, count(*)::int n from library_files f where f.tenant = ${tenantOf(u)} and f.deleted_at is null
+    and f.upload_status = 'ready' and ${secCond} group by folder`).map((r) => [r.folder, r.n]));
+  // 빈 폴더(V14 18번)는 폴더 권한·등급만 맞으면 보이고, 파일이 있는 폴더는 볼 수 있는 파일이 있을 때만(기밀 파일만 있는 폴더의 존재를 숨김)
+  const visible = allFolders.filter((f) => folderLevelOf(u.role, base, perms, f.folder) !== 'none' && (counts.has(f.folder) || (f.n === 0 && secAllowed(sc, folderSec(sc, f.folder)))))
+    .map((f) => ({ folder: f.folder, n: counts.get(f.folder) ?? 0, security: folderSec(sc, f.folder), level: folderLevelOf(u.role, base, perms, f.folder) }));
   const visibleNames = visible.map((f) => f.folder);
   const terms = (q.q ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 6);
   const like = (t: string) => `%${t.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
@@ -81,7 +130,7 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
       ${terms.length ? sql`substring(f.text_content from greatest(1, strpos(lower(f.text_content), lower(${terms[0]})) - 60) for 200)` : sql`null`} as snippet
     from library_files f left join users u on u.id = f.created_by
     where f.tenant = ${tenantOf(u)} and f.deleted_at is null and f.upload_status = 'ready'
-      and (f.folder = any(${visibleNames}::text[]) or f.created_by = ${u.id})
+      and (f.folder = any(${visibleNames}::text[]) or f.created_by = ${u.id}) and ${secCond}
       ${q.review ? sql`and f.needs_review` : sql``}
       ${q.folder !== undefined && q.folder !== null && q.folder !== '*' ? sql`and (f.folder = ${cleanFolder(q.folder)} or f.folder like ${cleanFolder(q.folder) + '/%'})` : sql``}
       ${terms.length ? sql`and ${terms.map((t) => sql`(f.title ilike ${like(t)} or f.file_name ilike ${like(t)} or f.folder ilike ${like(t)} or array_to_string(f.tags, ' ') ilike ${like(t)}
@@ -89,8 +138,8 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
     order by ${terms.length ? sql`(f.title ilike ${like(terms[0])}) desc,` : sql``} f.updated_at desc
     limit ${Math.min(q.limit ?? 200, 500)}`;
   const [{ review }] = await sql<{ review: number }[]>`select count(*)::int review from library_files f where f.tenant = ${tenantOf(u)} and f.deleted_at is null
-    and f.upload_status = 'ready' and f.needs_review and (f.folder = any(${visibleNames}::text[]) or f.created_by = ${u.id})`;
-  return { files: rows.map((r: any) => ({ ...r, level: r.created_by === u.id && folderLevelOf(u.role, base, perms, r.folder) === 'none' ? 'view' : folderLevelOf(u.role, base, perms, r.folder) })),
+    and f.upload_status = 'ready' and f.needs_review and (f.folder = any(${visibleNames}::text[]) or f.created_by = ${u.id}) and ${secCond}`;
+  return { secLevels: secs, confEdit: sc.confEdit, files: rows.map((r: any) => ({ ...r, effective_security: effSec(sc, r), level: r.created_by === u.id && folderLevelOf(u.role, base, perms, r.folder) === 'none' ? 'view' : folderLevelOf(u.role, base, perms, r.folder) })),
     folders: visible, review, level: base, aiOrganize: (await import('./ai/provider')).aiEnabled() };
 }
 
@@ -106,15 +155,18 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   const sql = db();
   const mime = i.mimeType || 'application/octet-stream';
   if (i.contentHash && !i.allowDuplicate) { // V13 3번: 같은 파일이 이미 있으면 알려 준다(볼 수 있는 것만)
-    const dups = await sql<{ id: string; title: string; folder: string; created_by: string }[]>`select id, title, folder, created_by from library_files
+    const dups = await sql<{ id: string; title: string; folder: string; created_by: string }[]>`select id, title, folder, created_by, security from library_files
       where tenant = ${tenantOf(u)} and content_hash = ${i.contentHash} and deleted_at is null and upload_status = 'ready' limit 5`;
     const base = await menuLevel(u, 'library'); const perms = await folderPerms(u);
-    const d = dups.find((x) => x.created_by === u.id || folderLevelOf(u.role, base, perms, x.folder) !== 'none');
+    const sc = await secCtx(u);
+    const d = dups.find((x: any) => x.created_by === u.id || (folderLevelOf(u.role, base, perms, x.folder) !== 'none' && canSeeSec(sc, u, x)));
     if (d) throw new HttpError(409, 'duplicate', `이미 있는 파일입니다: ${d.folder ? d.folder + ' / ' : ''}${d.title}`, { duplicate: d });
   }
-  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, tags, description, created_by, content_hash, source)
+  // V14 15번: 매출 근거는 기밀(확정), 그 외는 내부(대표 지시: 확인 전 기본값) — 이름이 기밀 후보면 "기밀 제안"으로 표시해 확인을 받는다
+  const ruled = revenue ? 'confidential' : ruleSecurity(`${i.fileName} ${i.title ?? ''} ${(i.tags ?? []).join(' ')}`);
+  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, tags, description, created_by, content_hash, source, security, security_suggested, security_confirmed)
     values (${tenantOf(u)}, ${folder}, ${i.title || i.fileName.replace(/\.[^.]+$/, '')}, ${i.fileName}, ${mime}, ${i.size}, ${i.tags ?? []}, ${i.description ?? null}, ${u.id},
-      ${i.contentHash ?? null}, ${revenue ? 'revenue' : i.purpose === 'ai_attach' ? 'ai_attach' : 'upload'}) returning id`;
+      ${i.contentHash ?? null}, ${revenue ? 'revenue' : i.purpose === 'ai_attach' ? 'ai_attach' : 'upload'}, ${revenue ? 'confidential' : 'internal'}, ${ruled}, ${revenue}) returning id`;
   const safe = i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120);
   const key = `lib/${tenantOf(u)}/${f.id}/${safe}`;
   await sql`update library_files set storage_key = ${key} where id = ${f.id}`;
@@ -122,24 +174,32 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
 }
 
 /** 서버가 만든 파일(AI 보고서 등)을 자료실에 바로 저장 */
-export async function saveGeneratedFile(u: SessionUser, p: { fileName: string; mime: string; data: Buffer; title: string; folder: string; tags?: string[]; description?: string; source?: string }) {
+export async function saveGeneratedFile(u: SessionUser, p: { fileName: string; mime: string; data: Buffer; title: string; folder: string; tags?: string[]; description?: string; source?: string; security?: Security }) {
   await (await import('./plans')).assertStorage(u, p.data.length);
   const sql = db();
-  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, tags, description, source, created_by, upload_status)
-    values (${tenantOf(u)}, ${cleanFolder(p.folder)}, ${p.title}, ${p.fileName}, ${p.mime}, ${p.data.length}, ${p.tags ?? []}, ${p.description ?? null}, ${p.source ?? 'ai'}, ${u.id}, 'pending') returning id`;
+  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, tags, description, source, created_by, upload_status, security, security_confirmed)
+    values (${tenantOf(u)}, ${cleanFolder(p.folder)}, ${p.title}, ${p.fileName}, ${p.mime}, ${p.data.length}, ${p.tags ?? []}, ${p.description ?? null}, ${p.source ?? 'ai'}, ${u.id}, 'pending',
+      ${p.security ?? 'internal'}, ${p.security === 'confidential'}) returning id`;
   const key = `lib/${tenantOf(u)}/${f.id}/${p.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
   await putObject(key, p.data, p.mime);
   await sql`update library_files set storage_key = ${key}, upload_status = 'ready', text_content = ${extractText(p.data, p.fileName, p.mime)} where id = ${f.id}`;
   return { id: f.id, storageKey: key };
 }
 
-export async function loadLibraryFile(u: SessionUser, id: string) {
+/** purpose: open(보기·고치기) · download(내려받기) · ai(AI 가 읽음) — 기밀이면 누가·언제를 감사 기록에 남긴다 */
+export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open' | 'download' | 'ai' | 'meta' = 'open') {
   denyDemo(u);
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('자료가 없습니다');
   const [f] = await db()<any[]>`select * from library_files where id = ${id} and tenant = ${tenantOf(u)} and deleted_at is null`;
   if (!f) throw notFound('자료가 없습니다'); // 다른 회사 자료는 없는 것처럼
-  if (f.created_by === u.id) return f; // 올린 사람 본인 (매출 근거처럼 다른 경로로 올린 파일 포함)
-  await requireMenu(u, 'library', 'view');
-  await requireFolder(u, f.folder, 'view'); // 폴더 권한 — 서명 주소 발급·AI 읽기 전에
+  const sc = await secCtx(u);
+  f.effective_security = effSec(sc, f);
+  if (f.created_by !== u.id) { // 올린 사람 본인 (매출 근거처럼 다른 경로로 올린 파일 포함)은 항상
+    await requireMenu(u, 'library', 'view');
+    await requireFolder(u, f.folder, 'view'); // 폴더 권한 — 서명 주소 발급·AI 읽기 전에
+    if (!canSeeSec(sc, u, f)) throw notFound('자료가 없습니다'); // V14 15번: 등급 밖이면 존재도 숨김
+  }
+  if (f.effective_security === 'confidential' && purpose !== 'meta') await secAudit(u, f, purpose);
   return f;
 }
 const canEdit = (u: SessionUser, f: { created_by?: string | null }) => f.created_by === u.id || isAdmin(u);
@@ -169,8 +229,17 @@ export async function updateLibraryFile(u: SessionUser, id: string, i: z.infer<t
   if (folder !== f.folder) await requireFolder(u, folder, 'edit');
   const tags = i.tags ?? f.tags;
   const sql = db();
+  let security: Security = f.security, confirmed: boolean = f.security_confirmed;
+  if (i.security && i.security !== f.security) {
+    const sc = await secCtx(u);
+    if (SEC_RANK[i.security] < SEC_RANK[f.security as Security] && f.security === 'confidential' && !sc.confEdit) throw forbidden('기밀 등급을 내리려면 "기밀 자료" 편집 권한이 필요합니다');
+    if (i.security === 'confidential' && !sc.confidential && f.created_by !== u.id) throw forbidden('기밀 열람 권한이 없어 기밀로 지정할 수 없습니다');
+    security = i.security; confirmed = sc.confEdit;
+    const { audit } = await import('./log');
+    await audit(sql, u.id, 'library.security_set', 'library_file', id, { from: f.security, to: i.security }, null);
+  } else if (i.security && (await secCtx(u)).confEdit) confirmed = true; // 같은 등급 저장 = 확인
   await sql`update library_files set title = ${i.title ?? f.title}, folder = ${folder}, tags = ${tags}, description = ${i.description !== undefined ? i.description : f.description},
-    needs_review = false, updated_at = now() where id = ${id}`;
+    needs_review = false, security = ${security}, security_confirmed = ${confirmed}, updated_at = now() where id = ${id}`;
   // 자동 정리된 파일을 사람이 고치면 회사별 학습 예시로 남긴다 → 다음 정리에 반영
   if (f.organized_by && (folder !== f.folder || String(tags) !== String(f.tags)))
     await sql`insert into library_rules (tenant, file_name, mime_type, folder, tags, created_by) values (${tenantOf(u)}, ${f.file_name}, ${f.mime_type}, ${folder}, ${tags}, ${u.id})`;
@@ -186,22 +255,32 @@ export async function deleteLibraryFile(u: SessionUser, id: string) {
   return { ok: true };
 }
 export async function libraryDownload(u: SessionUser, id: string, inline: boolean) {
-  const f = await loadLibraryFile(u, id);
+  const f = await loadLibraryFile(u, id, 'download');
   if (f.upload_status !== 'ready') throw notFound();
   return downloadUrl(f.storage_key, f.file_name, inline && /^(image\/(png|jpe?g|gif|webp)|application\/pdf)$/.test(f.mime_type));
 }
 
 /** 자료를 업무에 첨부 (같은 저장 파일을 가리킴 — 복사하지 않음) */
 export async function attachLibraryToTask(u: SessionUser, fileId: string, taskId: string) {
-  const f = await loadLibraryFile(u, fileId);
+  const f = await loadLibraryFile(u, fileId, 'meta');
   if (f.upload_status !== 'ready') throw badRequest('아직 올리는 중인 자료입니다');
   const { assertAttachTarget } = await import('./attachments');
   await assertAttachTarget(u, taskId, null);
   const sql = db();
+  if (f.effective_security === 'confidential') await assertConfidentialAudience(taskId); // V14 15번
   const [a] = await sql<{ id: string }[]>`insert into attachments (task_id, kind, storage_key, file_name, mime_type, size_bytes, upload_status, doc_title, source, created_by)
     values (${taskId}, 'file', ${f.storage_key}, ${f.file_name}, ${f.mime_type}, ${f.size_bytes}, 'ready', ${f.title}, 'other', ${u.id}) returning id`;
   await activity(sql, 'task', taskId, u.id, 'file_attached', { name: f.file_name, size: Number(f.size_bytes), from: 'library' });
   return { id: a.id };
+}
+
+/** 기밀 자료·기밀 근거 결과물: 업무에 관계된 모든 사람(담당·지시·만든 사람·협업자)이 기밀 열람 권한이 있어야 한다 */
+export async function assertConfidentialAudience(taskId: string, extraUserIds: string[] = []) {
+  const sql = db();
+  const [t] = await sql<any[]>`select assignee_id, requested_by, created_by from tasks where id = ${taskId}`;
+  const collab = (await sql<{ user_id: string }[]>`select user_id from task_collaborators where task_id = ${taskId}`.catch(() => [])).map((r) => r.user_id);
+  const ids = [...new Set([t?.assignee_id, t?.requested_by, t?.created_by, ...collab, ...extraUserIds].filter(Boolean) as string[])];
+  for (const id of ids) if (!(await userSeesConfidential(id))) throw forbidden('기밀 자료 — 이 업무에 기밀 열람 권한이 없는 사람이 있어 붙일 수 없습니다');
 }
 
 // ---------------- V13 3번 자료실 자동 정리 ----------------
@@ -217,7 +296,8 @@ const ORG_SYSTEM = `회사 자료실 정리 담당입니다. 파일 하나의 �
 - 폴더는 "상위/하위" 형식, 가능하면 이미 있는 폴더를 쓰고 없을 때만 새로 만드세요. 예: 다짐_로고_가로형.png → 브랜드자료/다짐, 태그 로고·다짐·가로형.
 - 회사가 직접 고친 예시가 있으면 그 규칙(같은 종류는 같은 폴더)을 우선 따르세요.
 - 태그는 3~6개, # 없이 짧게. 제목은 사람이 읽기 좋게(확장자 없이). 요약은 한 문장.
-- confidence 는 0~1, 내용을 확인하지 못했거나 애매하면 0.5 이하.`;
+- confidence 는 0~1, 내용을 확인하지 못했거나 애매하면 0.5 이하.
+- security(보안 등급): 매출·급여·인사·계약서·주민번호·계좌·견적 단가·정산·손익 등 민감하면 "confidential", 회사 내부용이면 "internal", 누구에게 보여도 되는 홍보물·로고면 "public".`;
 export async function organizeLibraryFile(u: SessionUser, id: string, opt: { keepFolder?: boolean } = {}) {
   const sql = db();
   const [f] = await sql<any[]>`select * from library_files where id = ${id} and tenant = ${tenantOf(u)} and deleted_at is null`;
@@ -227,7 +307,7 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
     sql<{ file_name: string; folder: string; tags: string[] }[]>`select file_name, folder, tags from library_rules where tenant = ${tenantOf(u)} order by created_at desc limit 40`,
     sql<{ folder: string }[]>`select distinct folder from library_files where tenant = ${tenantOf(u)} and deleted_at is null and folder <> '' order by folder limit 80`,
   ]);
-  let out: { folder: string; tags: string[]; title?: string; summary?: string; confidence: number } | null = null;
+  let out: { folder: string; tags: string[]; title?: string; summary?: string; confidence: number; security?: Security } | null = null;
   let by: 'ai' | 'rule' = 'rule';
   let reason: string | null = null; // V14 3번: AI 로 정리하지 못한 이유(화면에 표시)
   await sql`update library_files set organize_status = 'pending', organize_error = null where id = ${id}`;
@@ -242,13 +322,14 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
     const info = `파일명: ${f.file_name}\n종류: ${f.mime_type}\n지금 폴더: ${f.folder || '(없음)'}\n이미 있는 폴더: ${folders.map((x) => x.folder).join(', ') || '(없음)'}\n` +
       `회사가 고친 예시: ${rules.slice(0, 20).map((r) => `${r.file_name} → ${r.folder} [${r.tags.join(',')}]`).join(' / ') || '(없음)'}\n` +
       (f.text_content ? `본문 일부:\n${String(f.text_content).slice(0, 2500)}` : '(본문 글자 없음)');
-    const schema = { type: 'object', additionalProperties: false, required: ['folder', 'tags', 'title', 'summary', 'confidence'], properties: {
-      folder: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, title: { type: 'string' }, summary: { type: 'string' }, confidence: { type: 'number' } } };
+    const schema = { type: 'object', additionalProperties: false, required: ['folder', 'tags', 'title', 'summary', 'confidence', 'security'], properties: {
+      folder: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, title: { type: 'string' }, summary: { type: 'string' }, confidence: { type: 'number' },
+      security: { type: 'string', enum: ['public', 'internal', 'confidential'] } } };
     const content = [
       ...(bin && isImg ? [{ type: 'image', source: { type: 'base64', media_type: f.mime_type === 'image/jpg' ? 'image/jpeg' : f.mime_type, data: bin.toString('base64') } }] : []),
       ...(bin && isPdf ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: bin.toString('base64') } }] : []),
       { type: 'text', text: info }] as never;
-    const ask = (format: boolean) => provider.chat({ system: ORG_SYSTEM + (format ? '' : '\n반드시 {"folder","tags","title","summary","confidence"} JSON 하나만 답하세요.'), tools: [], ...(format ? { format: schema } : {}), messages: [{ role: 'user', content }] });
+    const ask = (format: boolean) => provider.chat({ system: ORG_SYSTEM + (format ? '' : '\n반드시 {"folder","tags","title","summary","confidence","security"} JSON 하나만 답하세요.'), tools: [], ...(format ? { format: schema } : {}), messages: [{ role: 'user', content }] });
     try {
       // 구조화 출력이 거절되면(400) 일반 답변 + JSON 추출로 한 번 더
       const r = await ask(true).catch((e: any) => (e?.status === 400 ? ask(false) : Promise.reject(e)));
@@ -259,7 +340,8 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
       const m = /\{[\s\S]*\}/.exec(text);
       if (!m) throw new Error('AI 답을 해석하지 못했습니다');
       const j = JSON.parse(m[0]);
-      out = { folder: String(j.folder ?? ''), tags: (Array.isArray(j.tags) ? j.tags : []).map(String), title: String(j.title ?? ''), summary: String(j.summary ?? ''), confidence: Number(j.confidence) || 0 };
+      out = { folder: String(j.folder ?? ''), tags: (Array.isArray(j.tags) ? j.tags : []).map(String), title: String(j.title ?? ''), summary: String(j.summary ?? ''), confidence: Number(j.confidence) || 0,
+        security: ['public', 'internal', 'confidential'].includes(j.security) ? j.security : undefined };
       by = 'ai';
     } catch (e: any) {
       out = null;
@@ -278,10 +360,14 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   const title = (out.title || '').trim().slice(0, 200) || f.title;
   const description = f.description || (out.summary || '').trim().slice(0, 500) || null;
   const confidence = Math.max(0, Math.min(1, out.confidence));
+  // V14 15번 등급 제안: AI 답 + 이름·본문 규칙 중 높은 쪽. 등급 자체는 기밀 관리자가 확인할 때까지 그대로(기본 내부) — 화면에 "기밀 제안" 표시
+  const suggested: Security = maxSec(out.security ?? 'internal', ruleSecurity(`${f.file_name} ${title} ${tags.join(' ')} ${String(f.text_content ?? '').slice(0, 3000)}`) ?? 'public');
+  const security: Security = f.security;
+  await sql`update library_files set security_suggested = ${suggested} where id = ${id}`;
   await sql`update library_files set folder = ${folder}, tags = ${tags}, title = ${title}, description = ${description}, organized_by = ${by},
     ai_confidence = ${confidence}, needs_review = ${confidence < 0.6}, ai_prev = ${sql.json(prev as never)}, updated_at = now(),
     organize_status = ${by === 'ai' ? 'done' : 'failed'}, organize_error = ${reason} where id = ${id}`;
-  return { by, folder, tags, title, description, confidence, needsReview: confidence < 0.6, error: reason };
+  return { by, folder, tags, title, description, confidence, needsReview: confidence < 0.6, error: reason, security, suggestedSecurity: suggested };
 }
 export async function undoOrganize(u: SessionUser, id: string) {
   const f = await loadLibraryFile(u, id);
@@ -330,4 +416,98 @@ export async function organizeAll(u: SessionUser) {
   const [{ left }] = await sql<{ left: number }[]>`select count(*)::int left from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready'
     and source not in ('revenue', 'ai_attach') and organize_status is null and organized_by is distinct from 'ai'`;
   return { done: rows.length, ai, failed, left };
+}
+
+// ---------------- V14 15번 폴더 등급 · 기밀 열람 기록 ----------------
+export const folderSecInput = z.object({ folder: z.string().min(1).max(200), security: z.enum(['public', 'internal', 'confidential']).nullable() });
+export async function listFolderSecurity(u: SessionUser) {
+  const sc = await secCtx(u);
+  return { folders: sc.folders, confEdit: sc.confEdit };
+}
+export async function setFolderSecurity(u: SessionUser, i: z.infer<typeof folderSecInput>, ip: string | null) {
+  const sc = await secCtx(u);
+  const folder = cleanFolder(i.folder);
+  const cur = sc.folders.find((x) => x.folder === folder)?.security;
+  // 기밀 편집 권한자는 모두, 그 외 대표·관리자는 올리기만(기밀 지정은 기밀 열람 권한 필요)
+  if (!sc.confEdit) {
+    if (!isAdmin(u)) throw forbidden('폴더 등급은 대표·관리자가 정합니다');
+    if (cur === 'confidential' || i.security === null || (i.security === 'confidential' && !sc.confidential) || (cur && SEC_RANK[i.security] < SEC_RANK[cur]))
+      throw forbidden('등급을 내리거나 기밀로 정하려면 "기밀 자료" 편집 권한이 필요합니다');
+  }
+  const sql = db();
+  if (i.security === null) await sql`delete from library_folder_security where tenant = ${tenantOf(u)} and folder = ${folder}`;
+  else await sql`insert into library_folder_security (tenant, folder, security, updated_by) values (${tenantOf(u)}, ${folder}, ${i.security}, ${u.id})
+    on conflict (tenant, folder) do update set security = excluded.security, updated_by = excluded.updated_by, updated_at = now()`;
+  const { audit } = await import('./log');
+  await audit(sql, u.id, 'library.folder_security_set', null, null, { folder, from: cur ?? null, to: i.security }, ip);
+  return { ok: true };
+}
+/** 기밀 자료 열람·내려받기·AI 참조 기록 (기밀 편집 권한자) */
+export async function confidentialLog(u: SessionUser) {
+  if (!(await secCtx(u)).confEdit) throw notFound();
+  return db()`select a.id, a.action, a.target_id, a.detail, a.created_at, x.name as user_name from audit_logs a left join users x on x.id = a.actor_id
+    where a.action like 'library.confidential_%' and a.actor_id in (select id from users where tenant = ${tenantOf(u)}) order by a.id desc limit 200`;
+}
+
+// ---------------- V14 18번 폴더 탐색기: 만들기·이름 바꾸기(옮기기)·삭제·여러 파일 옮기기 ----------------
+export const folderInput = z.object({ path: z.string().min(1).max(200) });
+export const folderRenameInput = z.object({ from: z.string().min(1).max(200), to: z.string().min(1).max(200) });
+export const moveInput = z.object({ ids: z.array(z.string().uuid()).min(1).max(200), folder: z.string().max(200) });
+export async function createFolder(u: SessionUser, i: z.infer<typeof folderInput>) {
+  denyDemo(u);
+  await requireMenu(u, 'library', 'edit');
+  const path = cleanFolder(i.path);
+  if (!path) throw badRequest('폴더 이름을 입력하세요');
+  await requireFolder(u, path, 'edit');
+  await db()`insert into library_folders (tenant, path, created_by) values (${tenantOf(u)}, ${path}, ${u.id}) on conflict do nothing`;
+  return { ok: true, path };
+}
+const under = (path: string) => [path, path + '/%'];
+export async function renameFolder(u: SessionUser, i: z.infer<typeof folderRenameInput>, ip: string | null) {
+  denyDemo(u);
+  await requireMenu(u, 'library', 'edit');
+  const from = cleanFolder(i.from), to = cleanFolder(i.to);
+  if (!from || !to) throw badRequest('폴더를 고르세요');
+  if (to === from || to.startsWith(from + '/')) throw badRequest('자기 안으로는 옮길 수 없습니다');
+  await requireFolder(u, from, 'delete'); await requireFolder(u, to, 'edit');
+  const sql = db(); const t = tenantOf(u); const [eq, like] = under(from);
+  // 보이지 않는(등급 밖) 파일이 있으면 옮기지 않는다 — 남의 기밀 파일을 모르게 옮기는 일 방지
+  const sc = await secCtx(u);
+  const files = await sql<any[]>`select id, folder, security, created_by from library_files where tenant = ${t} and deleted_at is null and (folder = ${eq} or folder like ${like})`;
+  if (files.some((f) => !canSeeSec(sc, u, f))) throw forbidden('이 폴더에 볼 수 없는 등급의 자료가 있어 옮길 수 없습니다 — 기밀 편집 권한자에게 요청하세요');
+  const re = (p: string) => to + p.slice(from.length);
+  await sql.begin(async (tx) => {
+    for (const f of files) await tx`update library_files set folder = ${re(f.folder)}, updated_at = now() where id = ${f.id}`;
+    for (const r of await tx<{ path: string }[]>`select path from library_folders where tenant = ${t} and (path = ${eq} or path like ${like})`)
+      await tx`insert into library_folders (tenant, path, created_by) values (${t}, ${re(r.path)}, ${u.id}) on conflict do nothing`;
+    await tx`delete from library_folders where tenant = ${t} and (path = ${eq} or path like ${like})`;
+    await tx`insert into library_folders (tenant, path, created_by) values (${t}, ${to}, ${u.id}) on conflict do nothing`;
+    for (const r of await tx<{ folder: string }[]>`select distinct folder from library_folder_perms where tenant = ${t} and (folder = ${eq} or folder like ${like})`)
+      await tx`update library_folder_perms set folder = ${re(r.folder)} where tenant = ${t} and folder = ${r.folder}`;
+    for (const r of await tx<{ folder: string }[]>`select folder from library_folder_security where tenant = ${t} and (folder = ${eq} or folder like ${like})`)
+      await tx`update library_folder_security set folder = ${re(r.folder)} where tenant = ${t} and folder = ${r.folder}`;
+    const { audit } = await import('./log');
+    await audit(tx, u.id, 'library.folder_rename', null, null, { from, to, files: files.length }, ip);
+  });
+  return { ok: true, moved: files.length };
+}
+export async function deleteFolder(u: SessionUser, i: z.infer<typeof folderInput>) {
+  denyDemo(u);
+  const path = cleanFolder(i.path);
+  await requireFolder(u, path, 'delete');
+  const sql = db(); const t = tenantOf(u); const [eq, like] = under(path);
+  const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from library_files where tenant = ${t} and deleted_at is null and (folder = ${eq} or folder like ${like})`;
+  if (n) throw new HttpError(409, 'not_empty', `폴더 안에 자료가 ${n}개 있습니다. 먼저 옮기거나 지우세요`);
+  await sql`delete from library_folders where tenant = ${t} and (path = ${eq} or path like ${like})`;
+  return { ok: true };
+}
+/** 여러 파일 한 번에 옮기기 — 파일마다 기존 권한 검사, 못 옮긴 것은 이유와 함께 */
+export async function moveFiles(u: SessionUser, i: z.infer<typeof moveInput>) {
+  const folder = cleanFolder(i.folder);
+  const done: string[] = []; const skipped: { id: string; reason: string }[] = [];
+  for (const id of i.ids) {
+    try { await updateLibraryFile(u, id, { folder }); done.push(id); } catch (e: any) { skipped.push({ id, reason: String(e?.message ?? '실패') }); }
+  }
+  if (folder) await db()`insert into library_folders (tenant, path, created_by) values (${tenantOf(u)}, ${folder}, ${u.id}) on conflict do nothing`;
+  return { moved: done.length, skipped };
 }

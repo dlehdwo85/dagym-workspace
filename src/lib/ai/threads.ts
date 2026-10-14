@@ -106,7 +106,8 @@ export async function saveTurn(u: SessionUser, threadId: string, user: { text: s
 export async function listThreads(u: SessionUser, q: { q?: string; taskId?: string }) {
   const sql = db();
   const like = q.q ? '%' + q.q.replace(/[%_\\]/g, (c) => '\\' + c) + '%' : null;
-  const threads = await sql`select t.id, t.title, t.task_id, tk.title as task_title, t.pinned, t.updated_at,
+  const conf = (await menuLevelOf(u)) !== 'none'; // 기밀 대화는 기밀 권한자에게만 제목·검색
+  const threads = await sql`select t.id, case when t.confidential and not ${conf} then '기밀 자료 대화' else t.title end as title, t.confidential, t.task_id, tk.title as task_title, t.pinned, t.updated_at,
       (select count(*)::int from ai_messages m where m.thread_id = t.id and m.role = 'user') as turns
     from ai_threads t left join tasks tk on tk.id = t.task_id
     where t.user_id = ${u.id} and t.tenant = ${tenantOf(u)} and t.deleted_at is null
@@ -147,12 +148,13 @@ export async function logList(u: SessionUser, q: { userId?: string; q?: string }
   await requireMenu(u, 'ai_logs', 'view');
   const sql = db();
   const like = q.q ? '%' + q.q.replace(/[%_\\]/g, (c) => '\\' + c) + '%' : null;
-  const threads = await sql`select t.id, t.title, t.user_id, us.name as user_name, t.task_id, t.updated_at, t.created_at, t.cost_usd::float8 cost_usd, (t.deleted_at is not null) as deleted_by_user,
+  const conf = (await menuLevelOf(u)) !== 'none'; // 기밀 대화는 기밀 권한자에게만 제목·검색
+  const threads = await sql`select t.id, case when t.confidential and not ${conf} then '기밀 자료 대화' else t.title end as title, t.confidential, t.user_id, us.name as user_name, t.task_id, t.updated_at, t.created_at, t.cost_usd::float8 cost_usd, (t.deleted_at is not null) as deleted_by_user,
       (select count(*)::int from ai_messages m where m.thread_id = t.id and m.role = 'user') as turns,
       (select count(*)::int from ai_messages m where m.thread_id = t.id and m.role = 'user' and m.status = 'blocked') as blocked
     from ai_threads t join users us on us.id = t.user_id
     where t.tenant = ${tenantOf(u)} ${q.userId ? sql`and t.user_id = ${q.userId}` : sql``}
-      ${like ? sql`and (t.title ilike ${like} or exists (select 1 from ai_messages m where m.thread_id = t.id and m.text ilike ${like}))` : sql``}
+      ${like ? sql`and (not t.confidential or ${conf}) and (t.title ilike ${like} or exists (select 1 from ai_messages m where m.thread_id = t.id and m.text ilike ${like}))` : sql``}
     order by t.updated_at desc limit 200`;
   return { threads, settings: await aiSettings(tenantOf(u), sql) };
 }
@@ -160,10 +162,14 @@ export async function logThread(u: SessionUser, id: string, ip: string | null) {
   const { requireMenu } = await import('../menuPerms');
   await requireMenu(u, 'ai_logs', 'view');
   const sql = db();
-  const [t] = await sql`select t.id, t.title, t.user_id, us.name as user_name, t.task_id, t.created_at from ai_threads t join users us on us.id = t.user_id where t.id = ${id} and t.tenant = ${tenantOf(u)}`;
+  const [t] = await sql`select t.id, t.title, t.user_id, us.name as user_name, t.task_id, t.created_at, t.confidential from ai_threads t join users us on us.id = t.user_id where t.id = ${id} and t.tenant = ${tenantOf(u)}`;
   if (!t) throw notFound('대화가 없습니다');
   await audit(sql, u.id, 'ai_log.view', 'ai_thread', id, { owner: t.user_id }, ip); // 누가 남의 대화를 봤는지 남긴다
-  return { thread: t, messages: await threadMessages(id, sql) };
+  const msgs = await threadMessages(id, sql);
+  // V14 15번: 기밀 자료를 근거로 한 대화는 기밀 열람 권한자만 내용을 본다
+  if (t.confidential && t.user_id !== u.id && (await menuLevelOf(u)) === 'none')
+    return { thread: { ...t, title: '기밀 자료 대화' }, redacted: true, messages: msgs.map((m: any) => ({ ...m, text: m.role === 'user' ? '(기밀 자료 대화 — 열람 권한 필요)' : '(기밀 자료 — 열람 권한 필요)', file_names: [], proposals: [] })) };
+  return { thread: t, messages: msgs };
 }
 export async function logDelete(u: SessionUser, id: string, ip: string | null) {
   const { requireMenu } = await import('../menuPerms');
@@ -197,3 +203,5 @@ export async function purgeOldThreads() {
     and coalesce((select s.retention_days from ai_settings s where s.tenant = t.tenant), 90) > 0 returning id`;
   return r.length;
 }
+
+const menuLevelOf = async (u: SessionUser) => (await import('../menuPerms')).menuLevel(u, 'confidential');

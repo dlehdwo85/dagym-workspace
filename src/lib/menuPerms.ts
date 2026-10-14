@@ -17,6 +17,9 @@ export const MENUS = {
   usage: { label: '사용량·요금제', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V13 4번: 자료실 3단계 — 보기 / 올리기·수정 / 삭제 (폴더별 권한은 library_folder_perms, 상속)
   library: { label: '자료실', levels: ['none', 'view', 'edit', 'delete'], defaults: { owner: 'delete', admin: 'delete', dept_lead: 'edit', site_manager: 'edit', staff: 'edit' } },
+  // V14 15번 보안 등급: 내부 자료(기본 전 직원) · 기밀 자료(기본 대표만, 편집 = 등급 내리기·확인·열람 기록)
+  library_internal: { label: '자료실: 내부 자료 열람', levels: ['none', 'view'], defaults: { owner: 'view', admin: 'view', dept_lead: 'view', site_manager: 'view', staff: 'view' } },
+  confidential: { label: '기밀 자료 열람', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   assistant: { label: 'AI 비서', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
   // V14 6번: 회사 AI 사용 내역(누가·언제·무슨 질문·비용) 조회 / 편집(삭제·보관 기간·한도) — 기본 대표만
   ai_logs: { label: 'AI 사용 내역', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
