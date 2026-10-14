@@ -13,13 +13,13 @@ import { DropZone } from './upload';
 import { TIMES, timeLabel } from './DateTimePickers';
 import { useSession } from './session';
 
-export interface QuickDefaults { projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string; title?: string; description?: string }
+export interface QuickDefaults { dueTime?: string; projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string; title?: string; description?: string }
 
 /**
  * 업무 만들기 (HQ_SIMPLIFY): 제목 · 담당자 · 마감일 · 프로젝트 4칸.
  * 관리자 최종 확인은 기본 꺼짐, 소속·브랜드는 프로젝트/내 소속(본사)으로 자동. 자세한 항목은 만든 뒤 상세 패널에서.
  */
-export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boolean; onClose: () => void; defaults?: QuickDefaults; onCreated?: (id: string) => void }) {
+export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: { open: boolean; onClose: () => void; defaults?: QuickDefaults; onCreated?: (id: string) => void; switchTo?: { label: string; onClick: () => void } }) {
   const { user, dir } = useSession();
   const router = useRouter();
   const projects = useApi<{ projects: any[] }>(open ? '/api/projects' : null);
@@ -71,7 +71,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
       // V8 9번 · 검수 20: 마지막에 쓴 담당·지시·우선순위·프로젝트·알림을 사용자 단위로 기억(서버). 서버 값이 오기 전엔 이 기기 값
       let last: any = lastSrv.data?.last ?? {};
       if (!lastSrv.data?.last) try { last = JSON.parse(localStorage.getItem('wos_quick_last') ?? '{}'); } catch {}
-      setF({ title: defaults?.title ?? '', ...(defaults?.description ? { description: defaults.description } : {}), multi: false, more: [], dueTime: '', assigneeId: defaults?.assigneeId ?? last.assigneeId ?? user.id, requestedById: last.requestedById ?? user.id,
+      setF({ title: defaults?.title ?? '', ...(defaults?.description ? { description: defaults.description } : {}), multi: false, more: [], dueTime: defaults?.dueTime ?? '', assigneeId: defaults?.assigneeId ?? last.assigneeId ?? user.id, requestedById: last.requestedById ?? user.id,
         dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? last.projectId ?? '', priority: last.priority ?? 'normal', rrule: null, remind: last.remind ?? null });
       setTpl(''); setNoAuto(false);
     }
@@ -148,6 +148,13 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
 
   return (
     <Modal open={open} onClose={onClose} title={defaults?.parentId ? '하위 업무 추가' : '업무 등록'}>
+      {/* V14 35번: 캘린더 빠른 등록 — 업무(기본) ↔ 일정 전환 */}
+      {switchTo && (
+        <div className="mb-3 inline-flex rounded-full bg-slate-100 p-0.5 text-sm" data-testid="quick-kind">
+          <span className="rounded-full bg-white px-3 py-1 font-semibold shadow-sm">업무</span>
+          <button type="button" className="rounded-full px-3 py-1 text-ink-2 hover:text-ink" onClick={switchTo.onClick} data-testid="quick-switch-event">{switchTo.label}</button>
+        </div>
+      )}
       {!defaults?.parentId && (
         <button type="button" onClick={() => { onClose(); setTimeout(() => window.dispatchEvent(new Event('wos-voice-add')), 0); }} className="mb-3 flex w-full items-center justify-center gap-2 rounded-input border border-brand-600/30 bg-brand-50 py-3 text-base font-semibold text-brand-700" data-testid="quick-voice-add">
           <Mic className="size-5" />🎤 말로 등록

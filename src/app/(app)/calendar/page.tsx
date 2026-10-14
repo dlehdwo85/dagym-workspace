@@ -15,6 +15,7 @@ import { useSession } from '@/components/session';
 import { CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, X } from 'lucide-react';
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
+import { QuickAddTask } from '@/components/QuickAddTask';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
@@ -76,7 +77,9 @@ export default function CalendarPage() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [err, setErr] = useState<any>(null);
   const [editor, setEditor] = useState<{ id?: string; occurrenceStart?: string; draft?: any } | null>(null);
-  const [quick, setQuick] = useState<{ x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean } | null>(null);
+  const [quick, setQuick] = useState<{ x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean; kind?: 'task' | 'event' } | null>(null);
+  // V14 35번: 빈 칸 빠른 등록은 업무가 기본 — 주·일 보기는 누른 시각이 마감 시각
+  const quickTaskDefaults = useMemo(() => quick && quick.kind === 'task' ? { dueDate: quick.date, dueTime: quick.allDay ? undefined : quick.start } : undefined, [quick]);
   const [openTask, setOpenTask] = useState<string | null>(null);
   // WORKIN_V4 사람 필터: 'all' · 'mine' · [사람 id…] (여러 명), 이 기기에 기억
   const [who, setWhoState] = useState<'all' | 'mine' | string[]>('all');
@@ -399,7 +402,7 @@ export default function CalendarPage() {
             select={(s) => {
               const js = (s.jsEvent as MouseEvent | undefined);
               const x = js?.clientX ?? window.innerWidth / 2, y = js?.clientY ?? 200;
-              setQuick({ x: Math.min(window.innerWidth - 336, Math.max(16, x - 160)), y: Math.min(window.innerHeight - 330, Math.max(16, y + 8)), date: seoulDate(s.start), allDay: s.allDay,
+              setQuick({ x: Math.min(window.innerWidth - 336, Math.max(16, x - 160)), y: Math.min(window.innerHeight - 380, Math.max(16, y + 8)), date: seoulDate(s.start), allDay: s.allDay, kind: 'task',
                 start: s.allDay ? undefined : seoulTime(s.start), end: s.allDay ? undefined : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) });
             }}
           />
@@ -409,7 +412,10 @@ export default function CalendarPage() {
       <p className="text-xs text-ink-2">빈 칸을 누르거나 끌면 빠른 입력, 업무는 체크로 완료합니다. 오른쪽 “미배정 업무”를 시간 칸으로 끌어 놓으면 업무 시간이 잡힙니다. 단축키 D·W·M·A·T·C</p>
       <ScopeDialog />
       {colorDlg && <CalColorsDialog onClose={() => setColorDlg(false)} />}
-      {quick && <QuickCreate {...quick} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
+      {quick?.kind === 'task' && <QuickAddTask open defaults={quickTaskDefaults} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
+        onCreated={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }}
+        switchTo={{ label: '일정', onClick: () => setQuick((q) => q && { ...q, kind: 'event' }) }} />}
+      {quick && quick.kind !== 'task' && <QuickCreate {...quick} onSwitchTask={() => setQuick((q) => q && { ...q, kind: 'task' })} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
         onMore={(draft) => { setQuick(null); setEditor({ draft }); }} onSaved={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }} />}
       {preview && <EventPreview ev={preview.ev} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}
         onClose={() => setPreview(null)} onEdit={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }} onChanged={() => { setPreview(null); load(); broadcastRefresh(); }} />}
@@ -501,8 +507,8 @@ function UnscheduledPanel({ onClose, onOpen }: { onClose: () => void; onOpen: (i
 const fmtMinutesShort = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ''}` : `${m}분`);
 
 /** 빈 칸 클릭·끌기 → 작은 빠른 입력 창 (일정 / 업무 탭) */
-function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, calendars, onClose, onMore, onSaved, sheet }: {
-  x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean; calendars: any[]; onClose: () => void; onMore: (draft: any) => void; onSaved: () => void; sheet?: boolean;
+function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, calendars, onClose, onMore, onSaved, sheet, onSwitchTask }: {
+  onSwitchTask?: () => void; x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean; calendars: any[]; onClose: () => void; onMore: (draft: any) => void; onSaved: () => void; sheet?: boolean;
 }) {
   const [start, setStart] = useState(start0);
   const [end, setEnd] = useState(end0);
@@ -541,6 +547,12 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
       <div className="fixed inset-0 z-40" onClick={() => (title.trim() ? quickForm.current?.requestSubmit() : onClose())} data-testid="quick-outside" />
       <form ref={quickForm} role="dialog" aria-label="빠른 입력" onSubmit={save} className={cx('fixed z-50 animate-fade-up border border-line bg-white p-4 shadow-pop', sheet ? 'inset-x-0 bottom-0 rounded-t-2xl pb-[calc(var(--sab)+16px)]' : 'w-80 rounded-card')} style={sheet ? undefined : { left: x, top: y }} data-testid="quick-create"
         onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+        {onSwitchTask && (
+          <div className="mb-3 inline-flex rounded-full bg-slate-100 p-0.5 text-sm" data-testid="quick-kind">
+            <button type="button" className="rounded-full px-3 py-1 text-ink-2 hover:text-ink" onClick={onSwitchTask} data-testid="quick-switch-task">업무</button>
+            <span className="rounded-full bg-white px-3 py-1 font-semibold shadow-sm">일정</span>
+          </div>
+        )}
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="제목 추가" aria-label="빠른 입력 제목" enterKeyHint="done"
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); quickForm.current?.requestSubmit(); } }}
           className="w-full border-b-2 border-line pb-1.5 text-lg font-medium placeholder:text-ink-3 focus:border-accent-500 focus:outline-none" />

@@ -6,6 +6,7 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
 import { InlineAddTask } from '@/components/TaskQuick';
+import { QuickAddTask } from '@/components/QuickAddTask';
 import { useCalColors } from '@/components/calColors';
 import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
 import { useRowOpen } from '@/components/rowOpen';
@@ -65,8 +66,8 @@ function TodayRow({ t, onDone, className }: { t: any; onDone: (t: any) => void; 
   );
 }
 
-function MonthCalendar({ month, setMonth, events, selected, setSelected, today }: {
-  month: string; setMonth: (m: string) => void; events: any[]; selected: string; setSelected: (d: string) => void; today: string;
+function MonthCalendar({ month, setMonth, events, taskDays, selected, setSelected, today }: {
+  month: string; setMonth: (m: string) => void; events: any[]; taskDays?: string[]; selected: string; setSelected: (d: string) => void; today: string;
 }) {
   const first = month + '-01';
   const startPad = (dow(first) + 6) % 7; // 월요일 시작
@@ -74,7 +75,7 @@ function MonthCalendar({ month, setMonth, events, selected, setSelected, today }
   const prevMonth = (() => { const [y, m] = month.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; })();
   const days: string[] = [];
   for (let d = first; d < nextMonth + '-01'; d = addDays(d, 1)) days.push(d);
-  const has = new Set(events.flatMap(eventDays));
+  const has = new Set([...events.flatMap(eventDays), ...(taskDays ?? [])]);
   return (
     <div className="px-2" data-testid="home-month">
       <div className="mb-1 flex items-center justify-between">
@@ -151,6 +152,11 @@ export default function Dashboard() {
     return { from: `${month}-01T00:00:00+09:00`, to: `${next}T00:00:00+09:00` };
   }, [month]);
   const monthEvents = useApi<{ events: any[] }>(`/api/events?from=${encodeURIComponent(monthRange.from)}&to=${encodeURIComponent(monthRange.to)}`, [monthRange.from]);
+  // V14 35번: 미니 캘린더에 그달 마감인 내 업무(담당·참여 + 내가 지시)도 — 날짜를 누르면 일정과 함께
+  const monthLast = addDays(monthRange.to.slice(0, 10), -1);
+  const monthMy = useApi<{ tasks: any[] }>(`/api/tasks?view=my&from=${month}-01&to=${monthLast}&limit=500`, [month]);
+  const monthReq = useApi<{ tasks: any[] }>(`/api/tasks?view=requested&includeDone=0&from=${month}-01&to=${monthLast}&limit=500`, [month]);
+  const [quickTask, setQuickTask] = useState<{ dueDate: string } | null>(null);
   // V7: "이번 주 일정" = 오늘부터 7일
   const d0 = seoulDay(new Date());
   const hol = useApi<{ holidays: { date: string; name: string }[] }>('/api/holidays');
@@ -213,6 +219,11 @@ export default function Dashboard() {
   const freshNoDue = (myOpen.data?.tasks ?? []).filter((t) => !t.due_date && Date.now() - new Date(t.assigned_at ?? t.created_at).getTime() < 48 * 3600000);
   // 이달의 일정: 선택한 날 목록, 오늘이면 다가오는 일정
   const mEvents = monthEvents.data?.events ?? [];
+  const mTasks = [...new Map([...(monthMy.data?.tasks ?? []), ...(monthReq.data?.tasks ?? [])].filter((t) => t.due_date).map((t) => [t.id, t])).values()];
+  const roleOf = (t: any) => t.assignee_id === user.id ? '담당' : t.requested_by === user.id ? '지시' : '참여';
+  const dayTasks: WeekItem[] = mTasks.filter((t) => t.due_date === selected)
+    .map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id, tag: roleOf(t), href: `/tasks/${t.id}`, task: t }))
+    .sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'));
   const dayList = selected === today
     ? mEvents.filter((e) => eventDays(e).some((d) => d >= today)).sort((a, b) => +new Date(a.start) - +new Date(b.start)).slice(0, 6)
     : mEvents.filter((e) => eventDays(e).includes(selected));
@@ -302,11 +313,20 @@ export default function Dashboard() {
           </Section>
         )}
         <Section title="이달의 일정" icon={CalendarRange} className="lg:col-start-3 lg:row-span-2 lg:row-start-1" testid="home-month-card">
-          <MonthCalendar month={month} setMonth={setMonth} events={mEvents} selected={selected} setSelected={setSelected} today={today} />
+          <MonthCalendar month={month} setMonth={setMonth} events={mEvents} taskDays={mTasks.map((t) => t.due_date)} selected={selected} setSelected={setSelected} today={today} />
           <div className="mt-2 border-t border-line pt-2">
             <p className="px-2 pb-1 text-xs font-semibold text-ink-2">{selected === today ? '다가오는 일정' : `${fmtDate(selected)} 일정`}</p>
             {!dayList.length ? <p className="px-2 py-4 text-center text-sm text-ink-3">일정이 없습니다</p>
               : <ul data-testid="home-day-list">{dayList.map((e) => <EventRow key={e.id + e.start} e={e} withDate={selected === today} />)}</ul>}
+            {dayTasks.length > 0 && <>
+              <p className="mt-1 px-2 pb-1 text-xs font-semibold text-ink-2">{selected === today ? '오늘 마감 업무' : `${fmtDate(selected)} 마감 업무`}</p>
+              <ul data-testid="home-day-tasks">{dayTasks.map((r) => <WeekRow key={r.key} r={r} colors={calColors} onDone={done} />)}</ul>
+            </>}
+            {/* V14 35번: 고른 날짜로 바로 등록 */}
+            <div className="mt-2 flex gap-2 px-2 pb-1">
+              <button type="button" onClick={() => setQuickTask({ dueDate: selected })} className="inline-flex min-h-9 flex-1 items-center justify-center gap-1 rounded-input border border-line text-sm font-medium text-ink hover:bg-slate-50" data-testid="home-day-add-task"><PlusCircle className="size-4" />업무</button>
+              <button type="button" onClick={() => router.push(`/calendar?quick=1&date=${selected}`)} className="inline-flex min-h-9 flex-1 items-center justify-center gap-1 rounded-input border border-line text-sm font-medium text-ink hover:bg-slate-50" data-testid="home-day-add-event"><CalendarPlus className="size-4" />일정</button>
+            </div>
           </div>
         </Section>
 
@@ -368,6 +388,8 @@ export default function Dashboard() {
           )}
         </Section>
       </div>
+      <QuickAddTask open={!!quickTask} defaults={quickTask ?? undefined} onClose={() => setQuickTask(null)}
+        onCreated={() => { setQuickTask(null); monthMy.reload(); monthReq.reload(); myOpen.reload(); reload(); broadcastRefresh(); }} />
     </div>
   );
 }
