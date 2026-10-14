@@ -10,9 +10,10 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
 import { listenOnce, speechSupported } from '@/lib/nlparse';
+import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
 
 type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
-type Msg = { role: 'user' | 'assistant'; text: string; proposals?: Proposal[]; error?: boolean; files?: string[]; blocked?: boolean };
+type Msg = Omit<ChatMsg, 'proposals'> & { proposals?: Proposal[] };
 type Thread = { id: string; title: string; task_id: string | null; task_title: string | null; pinned: boolean; updated_at: string; turns: number };
 const EXAMPLES = ['다짐 로고 찾아서 이 업무에 첨부해줘', '이번 주 내 마감 업무 정리해줘', '내일 3시 회의 준비 업무 만들어줘', '3분기 매출 현장별로 엑셀 만들어줘'];
 
@@ -35,7 +36,8 @@ export default function AssistantPage() {
     if (!id) { setMsgs([]); return; }
     try {
       const r = await api(`/api/ai/threads/${id}`);
-      setMsgs(r.messages.map((m: any) => ({ role: m.role, text: m.text, files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked',
+      conv.cancelEdit();
+      setMsgs(r.messages.map((m: any) => ({ role: m.role, text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text, stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked',
         proposals: m.proposals?.length ? m.proposals.map((p: any) => ({ id: p.id, kind: p.kind, summary: p.summary, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) : undefined })));
     } catch (e: any) { toast.error(e.message); setThreadId(null); }
   }
@@ -50,9 +52,18 @@ export default function AssistantPage() {
   }
   const status = useApi<{ enabled: boolean; model?: string; overLimit?: boolean; canSetLimit?: boolean; usage?: { costUsd?: number; limitUsd: number; requests: number } }>('/api/ai/status');
   const task = useApi<{ task: { title: string } }>(taskId ? `/api/tasks/${taskId}` : null);
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const threadRef = useRef(threadId); threadRef.current = threadId;
+  // V19 부록 A: 줄바꿈·멈춤·수정 (패널과 같은 동작)
+  const conv = useAiConversation<Msg>({
+    body: (t, fileIds) => ({ text: t, ...(threadRef.current ? { threadId: threadRef.current } : {}), taskId, ...(fileIds.length ? { fileIds } : {}) }),
+    onReply: (r) => {
+      if (r.threadId && r.threadId !== threadRef.current) { setThreadId(r.threadId); router.replace(`/assistant?${new URLSearchParams({ ...(taskId ? { task: taskId } : {}), thread: r.threadId })}`); }
+      status.reload(); threads.reload();
+    },
+    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked }),
+  });
+  const { msgs, setMsgs, busy } = conv;
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const started = useRef(false);
@@ -64,19 +75,14 @@ export default function AssistantPage() {
   const { files, uploading, attach } = att;
   async function send(q: string) {
     const t = q.trim() || (files.length ? DEFAULT_FILE_ASK : ''); if (!t || busy || uploading) return;
-    const sending = att.take();
-    const next: Msg[] = [...msgs, { role: 'user', text: t, files: sending.map((f) => f.name) }];
-    setMsgs(next); setText(''); setBusy(true);
-    try {
-      // 문맥(최근 20개 + 요약)은 서버가 보관된 대화에서 꺼낸다
-      const r = await api('/api/ai/chat', { body: { text: t, ...(threadId ? { threadId } : {}), taskId, ...(sending.length ? { fileIds: sending.map((f) => f.id) } : {}) } });
-      setMsgs((m) => [...m, { role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked }]);
-      if (r.threadId && r.threadId !== threadId) { setThreadId(r.threadId); router.replace(`/assistant?${new URLSearchParams({ ...(taskId ? { task: taskId } : {}), thread: r.threadId })}`); }
-      status.reload(); threads.reload();
-    } catch (e: any) {
-      setMsgs((m) => [...m, { role: 'assistant', text: e.message, error: true }]);
-    } finally { setBusy(false); }
+    setText('');
+    // 문맥(최근 20개 + 요약)은 서버가 보관된 대화에서 꺼낸다
+    await conv.send(t, att.take());
   }
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const editLast = () => { const t = conv.editLast(); if (t !== null) { setText(t); requestAnimationFrame(() => inputRef.current?.focus()); } };
+  const lastUserIdx = msgs.map((m) => m.role).lastIndexOf('user');
+  const lastAiIdx = msgs.map((m) => (m.role === 'assistant' && !m.note ? 'a' : '')).lastIndexOf('a');
   useEffect(() => {
     const q0 = sp.get('q');
     if (q0 && !started.current && status.data?.enabled) { started.current = true; send(q0); }
@@ -149,8 +155,10 @@ export default function AssistantPage() {
           </div>
         )}
         {msgs.map((m, i) => (
-          <div key={i} className={cx('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
-            <div className={cx('max-w-[88%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.blocked ? 'ai-blocked' : undefined}>
+          <div key={i} className={cx('flex flex-col', m.role === 'user' ? 'items-end' : 'items-start')}>
+            {m.stopped ? <div className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-ink-3" data-testid="ai-stopped">■ 멈춤</div>
+            : m.note ? <div className="rounded-input bg-green-50 px-2.5 py-1 text-xs text-green-800" data-testid="ai-kept">✓ {m.text}</div> : <>
+            <div className={cx('max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.blocked ? 'ai-blocked' : m.role === 'user' ? 'ai-user-msg' : 'ai-answer'}>
               {m.files?.length ? <div className="mb-1 text-xs opacity-80">📎 {m.files.join(', ')}</div> : null}
               {m.text}
               {!!m.proposals?.length && (
@@ -182,6 +190,8 @@ export default function AssistantPage() {
                 </div>
               )}
             </div>
+            {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
+            </>}
           </div>
         ))}
         {busy && <div className="flex items-center gap-2 text-sm text-ink-3"><Loader2 className="size-4 animate-spin" />찾아보는 중…</div>}
@@ -190,13 +200,12 @@ export default function AssistantPage() {
       </DropZone>
       <AttachChips files={files} uploading={uploading} onRemove={att.remove} />
       <input ref={att.inputRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => attach(e.target.files)} data-testid="ai-file-input" />
-      <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="mt-2 flex items-end gap-2">
-        <Button type="button" variant="secondary" onClick={() => att.inputRef.current?.click()} aria-label="자료 첨부 (사진·PDF·엑셀)" disabled={att.full || !!uploading}><Paperclip /></Button>
-        <textarea className={cx(inputCls, 'max-h-32 min-h-[42px] flex-1 resize-none')} rows={1} value={text} onChange={(e) => setText(e.target.value)} onPaste={att.onPaste} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : 'AI에게 요청 · 사진은 붙여넣기(Ctrl+V)도 됩니다'}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} aria-label="AI 에게 요청" disabled={status.data?.overLimit} />
-        {speechSupported() && <Button type="button" variant="secondary" onClick={voice} aria-label="말로 요청" disabled={listening}>{listening ? <Loader2 className="animate-spin" /> : <Mic />}</Button>}
-        <Button type="submit" disabled={busy || !!uploading || (!text.trim() && !files.length)} aria-label="보내기"><Send /></Button>
-      </form>
+      <div className="mt-2">
+        <ChatComposer value={text} onChange={setText} onSend={() => send(text)} onStop={() => conv.stop()} busy={busy} canSend={!uploading && (!!text.trim() || files.length > 0)} inputRef={inputRef}
+          onPaste={att.onPaste} ariaLabel="AI 에게 요청" disabled={status.data?.overLimit} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : 'AI에게 요청 · 사진은 붙여넣기(Ctrl+V)도 됩니다'}
+          leading={<Button type="button" variant="secondary" onClick={() => att.inputRef.current?.click()} aria-label="자료 첨부 (사진·PDF·엑셀)" disabled={att.full || !!uploading}><Paperclip /></Button>}
+          trailing={speechSupported() ? <Button type="button" variant="secondary" onClick={voice} aria-label="말로 요청" disabled={listening}>{listening ? <Loader2 className="animate-spin" /> : <Mic />}</Button> : null} />
+      </div>
       {/* V14 6번: 직원 고지 (상시) */}
       <p className="mt-1.5 text-center text-[11px] text-ink-3" data-testid="ai-notice">회사 업무용 AI 입니다. 대화는 보관되며 권한이 있는 관리자가 사용 내역을 볼 수 있습니다. 업무와 무관한 요청은 처리하지 않습니다.</p>
     </div>

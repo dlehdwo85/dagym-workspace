@@ -34,7 +34,7 @@ export async function startThread(u: SessionUser, firstText: string, taskId: str
 /** 문맥: 앞부분 요약 + 최근 20개(차단·오류 제외). 제안은 처리 결과와 함께 */
 export async function threadHistory(threadId: string, sql: Sql = db()) {
   const rows = await sql<{ id: string; role: 'user' | 'assistant'; text: string; proposal_ids: string[]; file_ids: string[] | null; file_names: string[] | null }[]>`
-    select id::text, role, text, proposal_ids, file_ids, file_names from ai_messages where thread_id = ${threadId} and status = 'ok' order by id desc limit 20`;
+    select id::text, role, text, proposal_ids, file_ids, file_names from ai_messages m where thread_id = ${threadId} and status = 'ok' order by m.id desc limit 20`;
   rows.reverse();
   const pids = rows.flatMap((r) => r.proposal_ids);
   const props = pids.length ? await sql<{ id: string; summary: string; status: string }[]>`select id, summary, status from ai_proposals where id = any(${pids}::uuid[])` : [];
@@ -50,10 +50,10 @@ export async function threadHistory(threadId: string, sql: Sql = db()) {
 export async function maybeSummarize(u: SessionUser, threadId: string) {
   const sql = db();
   const [t] = await sql<{ summary: string | null; upto: string }[]>`select summary, summarized_upto::text upto from ai_threads where id = ${threadId}`;
-  const keep = await sql<{ id: string }[]>`select id::text from ai_messages where thread_id = ${threadId} and status = 'ok' order by id desc limit 1 offset 19`;
+  const keep = await sql<{ id: string }[]>`select id::text from ai_messages m where thread_id = ${threadId} and status = 'ok' order by m.id desc limit 1 offset 19`;
   if (!keep[0]) return;
-  const old = await sql<{ id: string; role: string; text: string }[]>`select id::text, role, text from ai_messages where thread_id = ${threadId} and status = 'ok'
-    and id > ${t.upto}::bigint and id < ${keep[0].id}::bigint order by id`;
+  const old = await sql<{ id: string; role: string; text: string }[]>`select id::text, role, text from ai_messages m where thread_id = ${threadId} and status = 'ok'
+    and id > ${t.upto}::bigint and id < ${keep[0].id}::bigint order by m.id`;
   if (old.length < 10) return;
   const { anthropicProvider, costUsd } = await import('./provider');
   const p = anthropicProvider({ tier: 'fast' });
@@ -77,7 +77,7 @@ export async function precheck(u: SessionUser, text: string, threadId: string | 
     where t.user_id = ${u.id} and m.role = 'user' and m.created_at >= (date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul')`;
   if (n >= s.daily_limit) return `오늘 AI 요청 ${s.daily_limit}회를 모두 썼습니다. 내일 다시 이용해 주세요.`;
   if (threadId) {
-    const [last] = await sql<{ text: string; at: Date }[]>`select text, created_at at from ai_messages where thread_id = ${threadId} and role = 'user' order by id desc limit 1`;
+    const [last] = await sql<{ text: string; at: Date }[]>`select text, created_at at from ai_messages where thread_id = ${threadId} and role = 'user' and status <> 'stopped' order by id desc limit 1`;
     if (last && last.text.trim() === text.trim() && Date.now() - new Date(last.at).getTime() < 2 * 60_000 && !hasFiles) return '방금 같은 질문을 하셨어요. 위의 답을 확인해 주세요.';
   }
   if (!s.topic_filter || hasFiles || text.trim().length < 8) return null; // 자료를 붙인 요청·짧은 말은 업무로 본다
@@ -96,13 +96,28 @@ export async function precheck(u: SessionUser, text: string, threadId: string | 
 }
 
 export async function saveTurn(u: SessionUser, threadId: string, user: { text: string; fileIds?: string[]; fileNames?: string[] },
-  reply: { text: string; proposalIds?: string[]; status?: 'ok' | 'blocked' | 'error'; reason?: string | null; cost?: number; inTok?: number; outTok?: number }) {
+  reply: { text: string; proposalIds?: string[]; status?: 'ok' | 'blocked' | 'error' | 'stopped'; reason?: string | null; cost?: number; inTok?: number; outTok?: number }) {
   const sql = db();
   const st = reply.status ?? 'ok';
   await sql`insert into ai_messages (thread_id, role, text, file_ids, file_names, status, block_reason) values (${threadId}, 'user', ${user.text}, ${user.fileIds ?? []}, ${user.fileNames ?? []}, ${st}, ${reply.reason ?? null})`;
   await sql`insert into ai_messages (thread_id, role, text, proposal_ids, status, input_tokens, output_tokens, cost_usd)
     values (${threadId}, 'assistant', ${reply.text}, ${reply.proposalIds ?? []}, ${st}, ${reply.inTok ?? 0}, ${reply.outTok ?? 0}, ${reply.cost ?? 0})`;
   await sql`update ai_threads set updated_at = now(), cost_usd = cost_usd + ${reply.cost ?? 0} where id = ${threadId}`;
+}
+
+/** 부록 A3: 마지막 질문과 그 뒤(답변)를 지운다. 아직 확정 안 된 제안은 취소, 이미 실행된 제안은 그대로 두고 이름을 돌려준다 */
+export async function dropLastTurn(threadId: string, expect?: string) {
+  const sql = db();
+  const [last] = await sql<{ id: string; file_ids: string[]; text: string }[]>`select id::text, file_ids, text from ai_messages m where thread_id = ${threadId} and role = 'user' order by m.id desc limit 1`;
+  if (!last || (expect !== undefined && last.text.trim() !== expect.trim())) return { kept: [] as string[], fileIds: [] as string[] };
+  const gone = await sql<{ proposal_ids: string[] }[]>`delete from ai_messages where thread_id = ${threadId} and id >= ${last.id}::bigint returning proposal_ids`;
+  const pids = gone.flatMap((g) => g.proposal_ids);
+  let kept: string[] = [];
+  if (pids.length) {
+    await sql`update ai_proposals set status = 'cancelled', decided_at = now() where id = any(${pids}::uuid[]) and status = 'pending'`;
+    kept = (await sql<{ summary: string }[]>`select summary from ai_proposals where id = any(${pids}::uuid[]) and status = 'done'`).map((r) => r.summary);
+  }
+  return { kept, fileIds: last.file_ids ?? [] };
 }
 
 // ---------------- 내 대화 목록·열기·이름/고정·삭제 ----------------

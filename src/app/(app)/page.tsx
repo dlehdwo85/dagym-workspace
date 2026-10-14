@@ -197,7 +197,9 @@ export default function Dashboard() {
   // 이번 주 일정: 요일별
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(today, i));
   const byDay = new Map<string, any[]>(weekDays.map((d) => [d, []]));
-  for (const e of week7.data?.events ?? data.events) for (const d of eventDays(e)) byDay.get(d)?.push(e);
+  // 대표 지시(2026-10-15): 완료된 업무의 "업무 시간" 블록은 홈에도 안 보이게(캘린더 "완료 보기" 꺼짐과 같은 규칙)
+  const blockDone = (e: any) => e.blockTask?.status === 'done';
+  for (const e of (week7.data?.events ?? data.events).filter((x: any) => !blockDone(x))) for (const d of eventDays(e)) byDay.get(d)?.push(e);
   // 7일 안에 마감인 내 업무도 그날에 (등록 즉시 보이게) — 시각 있는 마감은 일정과 섞어 시간순
   const weekTasks = (myOpen.data?.tasks ?? []).filter((t) => t.due_date && t.due_date >= today && t.due_date <= weekDays[6]);
   const tasksByDay = new Map<string, any[]>(weekDays.map((d) => [d, weekTasks.filter((t) => t.due_date === d)]));
@@ -218,7 +220,7 @@ export default function Dashboard() {
   const weekCount = [...weekRows.values()].reduce((n, x) => n + x.length, 0);
   const freshNoDue = (myOpen.data?.tasks ?? []).filter((t) => !t.due_date && Date.now() - new Date(t.assigned_at ?? t.created_at).getTime() < 48 * 3600000);
   // 이달의 일정: 선택한 날 목록, 오늘이면 다가오는 일정
-  const mEvents = monthEvents.data?.events ?? [];
+  const mEvents = (monthEvents.data?.events ?? []).filter((e) => !blockDone(e));
   const mTasks = [...new Map([...(monthMy.data?.tasks ?? []), ...(monthReq.data?.tasks ?? [])].filter((t) => t.due_date).map((t) => [t.id, t])).values()];
   const roleOf = (t: any) => t.assignee_id === user.id ? '담당' : t.requested_by === user.id ? '지시' : '참여';
   const dayTasks: WeekItem[] = mTasks.filter((t) => t.due_date === selected)

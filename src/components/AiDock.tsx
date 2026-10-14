@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Check, Loader2, Maximize2, Menu, Paperclip, Pin, Plus, Search, Send, Sparkles, X } from 'lucide-react';
 import { AttachChips, DEFAULT_FILE_ASK, useAiAttach } from './aiAttach';
+import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from './aiChat';
 import { AI_ACCEPT } from './libraryUpload';
 import { DropZone } from './upload';
 import { api, broadcastRefresh, useApi } from './client';
@@ -11,7 +12,7 @@ import { Button, cx, inputCls, toast } from './ui';
 
 type Ctx = { page: 'home' | 'tasks' | 'task' | 'calendar' | 'library' | 'revenue' | 'reports' | 'messages' | 'other'; id?: string; taskId?: string };
 type P = { id: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { warnings?: string[]; moves?: string[]; folder?: string } };
-type M = { role: 'user' | 'assistant'; text: string; files?: string[]; proposals?: P[]; error?: boolean; blocked?: boolean };
+type M = Omit<ChatMsg, 'proposals'> & { proposals?: P[] };
 
 /** 지금 화면 → 맥락(id 만) */
 function useCtx(): Ctx {
@@ -46,35 +47,42 @@ const SUGGEST: Record<Ctx['page'], string[]> = {
 export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const ctx = useCtx();
   const path = usePathname();
-  const [msgs, setMsgs] = useState<M[]>([]);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const threadRef = useRef(threadId); threadRef.current = threadId;
+  const ctxRef = useRef(ctx); ctxRef.current = ctx;
+  // V19 부록 A: 줄바꿈·멈춤·수정 (AI 비서 화면과 같은 동작)
+  const conv = useAiConversation<M>({
+    body: (t, fileIds) => { const c = ctxRef.current; return { text: t, ...(threadRef.current ? { threadId: threadRef.current } : {}), ...(fileIds.length ? { fileIds } : {}), ...(c.taskId ? { taskId: c.taskId } : { context: { page: c.page, ...(c.id ? { id: c.id } : {}) } }) }; },
+    onReply: (r) => { if (r.threadId) setThreadId(r.threadId); },
+    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked }),
+  });
+  const { msgs, setMsgs, busy } = conv;
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [view, setView] = useState<'chat' | 'list'>('chat'); // V14 26번: 패널 안 대화 목록
   const end = useRef<HTMLDivElement>(null);
   const att = useAiAttach(); // 대표 요청(2026-10-14): 패널에서도 사진·문서 첨부(버튼·끌어 놓기·붙여넣기)
   // 다른 업무·화면으로 가면 새 대화 (맥락이 섞이지 않게)
   const key = `${ctx.page}:${ctx.id ?? ''}:${ctx.taskId ?? ''}`;
-  useEffect(() => { setMsgs([]); setThreadId(null); setView('chat'); }, [key]);
+  useEffect(() => { conv.stop(false); conv.cancelEdit(); setMsgs([]); setThreadId(null); setView('chat'); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy]);
   if (path.startsWith('/assistant')) return null;
   const hideFab = path.startsWith('/messages'); // 메시지 화면은 아래 오른쪽에 보내기 버튼 — 겹치지 않게(휴대폰은 상단 ✨)
 
   async function send(q: string) {
     const t = q.trim() || (att.files.length ? DEFAULT_FILE_ASK : ''); if (!t || busy || att.uploading) return;
-    const sending = att.take();
-    setMsgs((m) => [...m, { role: 'user', text: t, files: sending.length ? sending.map((f) => f.name) : undefined }]); setText(''); setBusy(true);
-    try {
-      const r = await api('/api/ai/chat', { body: { text: t, ...(threadId ? { threadId } : {}), ...(sending.length ? { fileIds: sending.map((f) => f.id) } : {}), ...(ctx.taskId ? { taskId: ctx.taskId } : { context: { page: ctx.page, ...(ctx.id ? { id: ctx.id } : {}) } }) } });
-      setThreadId(r.threadId ?? threadId);
-      setMsgs((m) => [...m, { role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked }]);
-    } catch (e: any) { setMsgs((m) => [...m, { role: 'assistant', text: e.message, error: true }]); } finally { setBusy(false); }
+    setText('');
+    await conv.send(t, att.take());
   }
-  const newChat = () => { setMsgs([]); setThreadId(null); setView('chat'); };
+  const editLast = () => { const t = conv.editLast(); if (t !== null) { setText(t); requestAnimationFrame(() => inputRef.current?.focus()); } };
+  const lastUserIdx = msgs.map((m) => m.role).lastIndexOf('user');
+  const lastAiIdx = msgs.map((m) => (m.role === 'assistant' && !m.note ? 'a' : '')).lastIndexOf('a');
+  const newChat = () => { conv.stop(false); conv.cancelEdit(); setMsgs([]); setThreadId(null); setView('chat'); };
   async function openThread(id: string) {
     try {
       const r = await api(`/api/ai/threads/${id}`);
-      setMsgs(r.messages.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'assistant', text: m.text || (m.status === 'error' ? '(오류)' : ''), files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked', error: m.status === 'error',
+      conv.cancelEdit();
+      setMsgs(r.messages.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'assistant', text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text || (m.status === 'error' ? '(오류)' : ''), stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked', error: m.status === 'error',
         proposals: (m.proposals ?? []).map((p: any) => ({ id: p.id, summary: p.summary, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) })));
       setThreadId(id); setView('chat');
     } catch (e: any) { toast.error(e.message); }
@@ -116,8 +124,10 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
                 </div>
               )}
               {msgs.map((m, i) => (
-                <div key={i} className={cx('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
-                  <div className={cx('max-w-[90%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')}>
+                <div key={i} className={cx('flex flex-col', m.role === 'user' ? 'items-end' : 'items-start')}>
+                  {m.stopped ? <div className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-ink-3" data-testid="ai-stopped">■ 멈춤</div>
+                  : m.note ? <div className="rounded-input bg-green-50 px-2.5 py-1 text-xs text-green-800" data-testid="ai-kept">✓ {m.text}</div> : <>
+                  <div className={cx('max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.role === 'user' ? 'ai-user-msg' : 'ai-answer'}>
                     {m.files && <div className="mb-0.5 text-xs opacity-80">📎 {m.files.join(', ')}</div>}
                     {m.text}
                     {m.proposals?.map((p) => (
@@ -132,6 +142,8 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
                       </div>
                     ))}
                   </div>
+                  {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
+                  </>}
                 </div>
               ))}
               {busy && <div className="flex items-center gap-2 text-sm text-ink-3"><Loader2 className="size-4 animate-spin" />찾아보는 중…</div>}
@@ -141,13 +153,12 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
             <div className="border-t border-line">
             <AttachChips files={att.files} uploading={att.uploading} onRemove={att.remove} compact />
             <input ref={att.inputRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => att.attach(e.target.files)} data-testid="ai-dock-file-input" />
-            <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="flex items-end gap-1.5 p-2">
-              <button type="button" onClick={() => att.inputRef.current?.click()} disabled={att.full || !!att.uploading} aria-label="사진·자료 첨부" title="사진·자료 첨부 (붙여넣기·끌어 놓기도 됩니다)" data-testid="ai-dock-attach"
-                className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 disabled:opacity-40"><Paperclip className="size-4" /></button>
-              <textarea rows={1} className={cx(inputCls, 'max-h-28 min-h-9 resize-none py-1.5')} value={text} onChange={(e) => setText(e.target.value)} onPaste={att.onPaste} placeholder="AI에게 요청 · 사진 첨부 가능" aria-label="AI 에게 요청 (화면 맥락)"
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} />
-              <Button type="submit" disabled={busy || !!att.uploading || (!text.trim() && !att.files.length)} aria-label="보내기"><Send /></Button>
-            </form>
+            <div className="p-2">
+              <ChatComposer small value={text} onChange={setText} onSend={() => send(text)} onStop={() => conv.stop()} busy={busy} canSend={!att.uploading && (!!text.trim() || att.files.length > 0)} inputRef={inputRef}
+                onPaste={att.onPaste} placeholder="AI에게 요청 · 사진 첨부 가능" ariaLabel="AI 에게 요청 (화면 맥락)"
+                leading={<button type="button" onClick={() => att.inputRef.current?.click()} disabled={att.full || !!att.uploading} aria-label="사진·자료 첨부" title="사진·자료 첨부 (붙여넣기·끌어 놓기도 됩니다)" data-testid="ai-dock-attach"
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 disabled:opacity-40"><Paperclip className="size-4" /></button>} />
+            </div>
             </div>
             <p className="px-3 pb-1.5 text-[10px] text-ink-3">회사 업무용 · 관리자가 사용 내역을 볼 수 있습니다</p>
             </>}

@@ -235,7 +235,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     enter: (id) => { cancelDrag(); setSelOn(true); setSel(new Set([id])); lastPick.current = id; },
   }), [selOn, sel]);
   const exitSel = () => { cancelDrag(); setSelOn(false); setSel(new Set()); };
-  const setView = (v: string) => setFilters((f) => ({ ...f, view: v, assigneeId: '' }));
+  // 대표 신고: 켜진 보기 칩(완료·내 업무·지연·이번 주…)을 다시 누르면 해제 → 전체
+  const setView = (v: string) => setFilters((f) => ({ ...f, view: v && (f.view ?? '') === v && !f.assigneeId ? '' : v, assigneeId: '' }));
   const [filterOpen, setFilterOpen] = useState(false);
   const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
   const chips: [string, string][] = [

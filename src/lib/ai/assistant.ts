@@ -161,7 +161,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 대화에 올린 자료를 자료실에 정리해 달라고 하면 list_library_folders 로 기존 폴더를 보고 propose_organize_files 로 폴더·제목·태그를 제안하세요(기존 폴더 우선). 앞선 질문의 첨부 id 는 대화 기록의 [첨부] 줄에 있습니다.
 - 사람 이름은 list_people 로 id 를 찾아 쓰세요. 날짜는 Asia/Seoul 기준입니다.
 - 권한 오류가 나면 그 사람이 볼 수 없는 정보라고 짧게 알려 주세요.
-- 답은 한국어로 짧고 분명하게. 목록은 짧은 줄로.`;
+- 답은 한국어로 짧고 분명하게. 2~3문장마다 빈 줄로 단락을 나누고, 여러 항목은 줄머리표(-)로 한 줄씩.`;
 
 /** confidential: 이번 차례에 기밀 자료(기밀 파일·매출)를 읽었는지 — 결과물·제안이 같은 등급을 따른다(V14 15번) */
 type Ctx = { u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean };
@@ -466,6 +466,10 @@ const chatInput = z.object({
   context: z.object({ page: z.enum(['home', 'tasks', 'task', 'calendar', 'library', 'revenue', 'reports', 'messages', 'other']), id: z.string().max(80).optional() }).optional(),
   /** V12 8번: 이번 질문에 붙인 자료실 파일(최대 5개) — 이미지는 비전, PDF 는 문서, 그 밖은 추출한 글자로 전달 */
   fileIds: z.array(z.string().uuid()).max(5).optional(),
+  /** 부록 A3: 마지막 질문을 고쳐 보내기·다시 답하기 — 그 질문과 이후 답변·확정 안 된 제안을 지우고 새로 답한다 */
+  replaceLast: z.boolean().optional(),
+  /** 바꿀 원래 질문 — 서버의 마지막 질문과 같을 때만 지운다(멈춘 요청이 늦게 저장되는 경우 엉뚱한 질문을 지우지 않게) */
+  replaceText: z.string().max(20000).optional(),
 });
 export { chatInput };
 
@@ -496,7 +500,7 @@ async function fileBlocks(u: SessionUser, ids: string[]) {
   return { confidential, blocks, note: `사용자가 이번에 자료를 첨부했습니다. 업무에 붙일 때 아래 id 를 attachFileIds 로 쓰세요.\n${notes.join('\n')}` };
 }
 
-export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provider: AiProvider = anthropicProvider()) {
+export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provider: AiProvider = anthropicProvider(), signal?: AbortSignal) {
   denyDemo(u);
   if (!aiEnabled()) throw notFound();
   await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use'); // V13 메뉴 권한
@@ -510,6 +514,12 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   // V14 2·5번: 대화 보관 + 사전 점검(입력 길이·하루 한도·반복·업무 무관 질문)
   const T = await import('./threads');
   if (i.threadId) await T.ownThread(u, i.threadId);
+  let kept: string[] = [];
+  if (i.replaceLast && i.threadId) { // 부록 A3: 고쳐 보내기 — 이전 첨부는 그대로 다시 쓴다
+    const r = await T.dropLastTurn(i.threadId, i.replaceText);
+    kept = r.kept;
+    if (!i.fileIds?.length && r.fileIds.length) i = { ...i, fileIds: r.fileIds };
+  }
   const blocked = await T.precheck(u, userText, i.threadId ?? null, !!i.fileIds?.length);
   const threadId = i.threadId ?? (await T.startThread(u, userText, i.taskId ?? null, db(), i.context));
   const fileNames = i.fileIds?.length ? (await db()<{ file_name: string }[]>`select file_name from library_files where id = any(${i.fileIds}::uuid[])`).map((f) => f.file_name) : [];
@@ -543,9 +553,12 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   let reply = '';
   let turnCost = 0, inTok = 0, outTok = 0;
   for (let step = 0; step < MAX_STEPS; step++) {
-    const r = await provider.chat({ system, messages, tools: TOOLS }).catch((e: any) => {
+    if (signal?.aborted) break;
+    const r = await provider.chat({ system, messages, tools: TOOLS, signal }).catch((e: any) => {
+      if (signal?.aborted) return null; // 부록 A2: 사용자가 멈춤
       throw new HttpError(502, 'ai_unavailable', `AI 서버 응답 오류${e?.status ? ` (${e.status})` : ''}. 잠시 후 다시 시도하세요.`);
     });
+    if (!r) break;
     const used = r.usage;
     turnCost += costUsd(r.model ?? provider.model, used); inTok += used.input_tokens; outTok += used.output_tokens;
     await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
@@ -569,11 +582,17 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     messages.push({ role: 'user', content: results });
     if (step === MAX_STEPS - 1) reply = text || '여러 단계를 거쳤지만 끝내지 못했습니다. 요청을 나눠서 다시 해 주세요.';
   }
+  if (signal?.aborted) { // 부록 A2: 멈춘 질문 — 만들던 제안은 버리고(실행 안 됨) "멈춤"만 남긴다. 사용량은 쓴 만큼 이미 기록됨
+    if (c.proposals.length) await sql`update ai_proposals set status = 'cancelled', decided_at = now() where id = any(${c.proposals.map((p) => p.id)}::uuid[]) and status = 'pending'`;
+    await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: '(멈춤)', status: 'stopped', cost: turnCost, inTok, outTok });
+    await audit(sql, u.id, 'ai.chat_stopped', null, null, { threadId, steps }, null);
+    return { reply: '', proposals: [], tools: steps, threadId, stopped: true };
+  }
   await audit(sql, u.id, 'ai.chat', i.taskId ? 'task' : null, i.taskId ?? null, { tools: steps, proposals: c.proposals.map((p) => p.id), threadId }, null);
   await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: reply, proposalIds: c.proposals.map((p) => p.id), cost: turnCost, inTok, outTok });
   if (c.confidential) await sql`update ai_threads set confidential = true where id = ${threadId}`; // 사용 내역에서 기밀 권한 없는 사람에게 내용 가림
   await T.maybeSummarize(u, threadId);
-  return { reply, proposals: c.proposals, tools: steps, threadId };
+  return { reply, proposals: c.proposals, tools: steps, threadId, ...(kept.length ? { kept } : {}) };
 }
 
 // ---------------- 제안 실행 (사람이 [확인]) ----------------

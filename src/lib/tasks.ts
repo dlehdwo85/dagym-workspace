@@ -377,6 +377,7 @@ export async function deleteBatch(u: SessionUser, batchId: string) {
   if (!(rows[0].requested_by === u.id || rows[0].created_by === u.id || atLeast(u, 'admin'))) throw forbidden('묶음 전체 삭제는 지시자만 할 수 있습니다');
   await sql.begin(async (tx) => {
     await tx`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where batch_id = ${batchId} and deleted_at is null`;
+    await hideTaskBlocks(tx, rows.map((r) => r.id));
     for (const r of rows) await activity(tx, 'task', r.id, u.id, 'deleted', { batch: batchId });
   });
   return { deleted: rows.length };
@@ -662,12 +663,25 @@ export async function spawnNextRecurrence(sql: Sql, taskId: string, actorId: str
   return n.id;
 }
 
+/** 대표 지시(2026-10-15): 업무를 지우면 그 업무의 "업무 시간" 블록도 숨긴다(되살리면 함께 복원). "업무에도 추가"로 연결된 일반 일정은 일정이 주인이라 두고, 연결 업무가 없는 것으로 보인다 */
+export async function hideTaskBlocks(tx: Sql, taskIds: string[]) {
+  if (!taskIds.length) return;
+  await tx`update events e set deleted_at = now(), hidden_by_task = coalesce(e.task_id, (select et.task_id from event_tasks et where et.event_id = e.id and et.role = 'block' and et.task_id = any(${taskIds}::uuid[]) limit 1)), updated_at = now(), version = version + 1
+    where e.kind = 'task_block' and e.deleted_at is null
+      and (e.task_id = any(${taskIds}::uuid[]) or exists (select 1 from event_tasks et where et.event_id = e.id and et.role = 'block' and et.task_id = any(${taskIds}::uuid[])))`;
+}
+export async function unhideTaskBlocks(tx: Sql, taskIds: string[]) {
+  if (!taskIds.length) return;
+  await tx`update events set deleted_at = null, hidden_by_task = null, updated_at = now(), version = version + 1 where hidden_by_task = any(${taskIds}::uuid[])`;
+}
+
 export async function deleteTask(u: SessionUser, id: string) {
   const sql = db();
   const { perms } = await loadTaskForUser(u, id, sql);
   if (!perms.delete) throw forbidden('삭제 권한이 없습니다 (작성자 또는 관리자)');
   await sql.begin(async (tx) => {
-    await tx`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = ${id} or parent_id = ${id}`;
+    const gone = await tx<{ id: string }[]>`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = ${id} or parent_id = ${id} returning id`;
+    await hideTaskBlocks(tx, gone.map((g) => g.id));
     await activity(tx, 'task', id, u.id, 'deleted');
     await syncReviewTask(tx, id, u.id);
   });
@@ -695,7 +709,8 @@ export async function restoreTask(u: SessionUser, id: string) {
   if (!(t.created_by === u.id || t.requested_by === u.id || atLeast(u, 'admin'))) throw forbidden('만든 사람·지시자·관리자만 되살릴 수 있습니다');
   if (Date.now() - t.deleted_at.getTime() > 30 * 86400000) throw badRequest('30일이 지나 되살릴 수 없습니다');
   await sql.begin(async (tx) => {
-    await tx`update tasks set deleted_at = null, updated_at = now(), version = version + 1 where id = ${id} or (parent_id = ${id} and deleted_at = ${t.deleted_at})`;
+    const back = await tx<{ id: string }[]>`update tasks set deleted_at = null, updated_at = now(), version = version + 1 where id = ${id} or (parent_id = ${id} and deleted_at = ${t.deleted_at}) returning id`;
+    await unhideTaskBlocks(tx, back.map((b) => b.id));
     await activity(tx, 'task', id, u.id, 'restored');
     await syncReviewTask(tx, id, u.id);
   });
@@ -869,6 +884,7 @@ export async function mergeTask(u: SessionUser, id: string, intoId: string) {
     await tx`insert into task_collaborators (task_id, user_id) select ${intoId}, user_id from task_collaborators where task_id = ${id} on conflict do nothing`;
     await tx`insert into comments (task_id, author_id, body) values (${intoId}, ${u.id}, ${`[중복 통합] '${src.title}' 업무를 이 업무로 통합했습니다`})`;
     await tx`update tasks set deleted_at = now(), version = version + 1, updated_at = now() where id = ${id}`;
+    await hideTaskBlocks(tx, [id]);
     await activity(tx, 'task', id, u.id, 'merged_into', { into: intoId, title: dst.title });
     await activity(tx, 'task', intoId, u.id, 'merged_from', { from: id, title: src.title });
     return { id: intoId };

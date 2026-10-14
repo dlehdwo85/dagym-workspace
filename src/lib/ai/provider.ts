@@ -13,7 +13,7 @@ export type AiResponse = Anthropic.Beta.BetaMessage;
 export interface AiProvider {
   name: string;
   model: string;
-  chat(p: { system: string; messages: AiMessage[]; tools: AiTool[]; format?: Record<string, unknown> }): Promise<AiResponse>;
+  chat(p: { system: string; messages: AiMessage[]; tools: AiTool[]; format?: Record<string, unknown>; signal?: AbortSignal }): Promise<AiResponse>;
 }
 
 /** 모델 단가 (입력/출력, 100만 토큰당 달러) — 사용량·한도 계산용 추정 */
@@ -44,7 +44,7 @@ export function anthropicProvider(opt: { tier?: AiTier } = {}): AiProvider {
   return {
     name: 'anthropic',
     model,
-    chat: ({ system, messages, tools, format }) =>
+    chat: ({ system, messages, tools, format, signal }) =>
       client!.beta.messages.create({
         model,
         max_tokens: light ? 4000 : 16000,
@@ -55,6 +55,6 @@ export function anthropicProvider(opt: { tier?: AiTier } = {}): AiProvider {
         output_config: { ...(withEffort ? { effort } : {}), ...(format ? { format: { type: 'json_schema', schema: format } } : {}) } as never,
         cache_control: { type: 'ephemeral' },
         ...(FALLBACK_MODELS.has(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
-      }),
+      }, signal ? { signal } : undefined), // 부록 A2: 사용자가 [멈춤]하면 AI 호출도 끊는다
   };
 }

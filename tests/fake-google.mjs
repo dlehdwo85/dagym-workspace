@@ -72,6 +72,7 @@ export function startFakeGoogle(port = 3199) {
           comparisons: [{ site: row.site, comment: '가장 높습니다.' }] }) }], stop_reason: 'end_turn' };
       }
       next ??= { content: [{ type: 'text', text: '테스트 응답입니다.' }], stop_reason: 'end_turn' };
+      if (next.delayMs) { const ms = next.delayMs; next = { ...next }; delete next.delayMs; await new Promise((r) => setTimeout(r, ms)); } // 부록 A2 멈춤 시험: 늦게 답하기
       return json(res, 200, { id: `msg_${state.anthropic.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null,
         usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, ...next });
     }

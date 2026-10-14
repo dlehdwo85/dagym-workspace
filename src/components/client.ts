@@ -20,14 +20,14 @@ export function newKey() {
   return (crypto as any).randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now();
 }
 
-async function raw(url: string, method: string, body?: unknown, key?: string) {
+async function raw(url: string, method: string, body?: unknown, key?: string, signal?: AbortSignal) {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (key) headers['idempotency-key'] = key;
   const data = body !== undefined ? JSON.stringify(body) : undefined;
   // 쓰기 요청은 keepalive: 입력 직후 화면을 떠나거나 앱을 닫아도 자동 저장 요청이 끊기지 않게 (브라우저 한도 64KB 미만만)
   const keepalive = method !== 'GET' && (data?.length ?? 0) < 60000;
-  const res = await fetch(url, { method, headers, body: data, credentials: 'same-origin', keepalive });
+  const res = await fetch(url, { method, headers, body: data, credentials: 'same-origin', keepalive: keepalive && !signal, ...(signal ? { signal } : {}) });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401 && typeof window !== 'undefined' && !location.pathname.startsWith('/login')) {
@@ -42,15 +42,16 @@ async function raw(url: string, method: string, body?: unknown, key?: string) {
  * API 호출. POST 는 Idempotency-Key 를 붙여 재시도해도 중복 생성되지 않는다.
  * queueOffline=true 이면 네트워크 끊김 시 기기에 보관했다가 재연결 시 같은 키로 다시 보낸다.
  */
-export async function api<T = any>(url: string, opts: { method?: string; body?: unknown; queueOffline?: string } = {}): Promise<T> {
+export async function api<T = any>(url: string, opts: { method?: string; body?: unknown; queueOffline?: string; signal?: AbortSignal } = {}): Promise<T> {
   const method = opts.method ?? (opts.body !== undefined ? 'POST' : 'GET');
   const key = method === 'POST' ? newKey() : undefined;
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await raw(url, method, opts.body, key);
+      return await raw(url, method, opts.body, key, opts.signal);
     } catch (e) {
       lastErr = e;
+      if (opts.signal?.aborted) throw e; // 부록 A2: 사용자가 멈춘 요청은 다시 보내지 않는다
       // 서버가 응답한 오류는 재시도하지 않는다 (게이트웨이 오류만 재시도)
       if (e instanceof ApiError && !(e.status >= 502 && e.status <= 504)) throw e;
       if (typeof navigator !== 'undefined' && !navigator.onLine) break;

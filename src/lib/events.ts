@@ -121,8 +121,18 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
         select et.event_id, t.id, t.status from event_tasks et join tasks t on t.id = et.task_id
         where et.sync and et.event_id = any(${ids}::uuid[]) and t.deleted_at is null`
     : [];
+  // 대표 지시(2026-10-15): "업무 시간" 블록의 업무 — 완료면 "완료 보기"를 켤 때만, 삭제된 업무의 블록은 그리지 않음
+  const blockIds = rows.filter((r) => r.kind === 'task_block').map((r) => r.id);
+  const blocks = blockIds.length
+    ? await sql<{ event_id: string; id: string; status: string; deleted: boolean }[]>`
+        select e.id as event_id, t.id, t.status, (t.deleted_at is not null) as deleted from events e
+        join tasks t on t.id = coalesce(e.task_id, (select et.task_id from event_tasks et where et.event_id = e.id and et.role = 'block' limit 1))
+        where e.id = any(${blockIds}::uuid[])`
+    : [];
   const out: any[] = [];
   for (const e of rows) {
+    const bt = e.kind === 'task_block' ? blocks.find((x) => x.event_id === e.id) : undefined;
+    if (bt?.deleted) continue;
     const att = attendees.filter((a) => a.event_id === e.id);
     const lt = synced.find((x) => x.event_id === e.id);
     // 비공개 일정: 주인·만든 사람·참석자가 아니면 제목·장소·설명·참석자 없이 "바쁨"
@@ -133,6 +143,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
       kind: e.kind, taskId: masked ? null : e.task_id, attendees: masked ? [] : att, createdBy: e.created_by,
       ownerId: e.owner_id, ownerName: e.owner_name, isPrivate: e.is_private, masked,
       linkedTask: lt && !masked ? { id: lt.id, status: e.rrule ? null : lt.status } : null,
+      blockTask: bt && !masked ? { id: bt.id, status: bt.status } : null,
     };
     if (!e.rrule) {
       out.push({ ...base, id: e.id, seriesId: null, title: e.title, location: e.location, description: e.description,
