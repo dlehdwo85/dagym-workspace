@@ -127,7 +127,7 @@ await step('② 대표가 + 버튼으로 업무 등록·담당자 배정', async
   taskId = owner.url().split('/').pop();
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${taskId}`)).task.approval_required, false, '관리자 최종 확인 기본 꺼짐');
   // 이 시나리오(현장 관리자 최종 확인)는 확인 필요·현장 소속으로 바꿔 진행
-  await ctx.owner.ok('PATCH', `/api/tasks/${taskId}`, { approvalRequired: true, orgUnitId: ctx.siteA });
+  await ctx.owner.ok('PATCH', `/api/tasks/${taskId}`, { approvalRequired: true, orgUnitId: ctx.siteA, requestedById: ctx.managerA.id }); // V12-11: 검토 승인 = 지시자
   await owner.reload();
   await owner.getByTestId('task-title').waitFor();
   await owner.screenshot({ path: `${SHOTS}/04-task-detail-owner.png`, fullPage: true });
@@ -203,7 +203,15 @@ await step('③ 목록에서 마감일 변경 → 보드·캘린더·타임라�
   await cell.getByText('보기 전환 시험 업무').waitFor();
   await owner.screenshot({ path: `${SHOTS}/08-task-calendar.png` });
   await owner.getByRole('tab', { name: '타임라인' }).click();
-  await owner.getByTestId('timeline').locator(`[data-task-id="${t3}"] [title="${nd} ~ ${nd}"]`).waitFor();
+  await owner.getByTestId('timeline').locator(`[data-task-id="${t3}"] [data-range="${nd} ~ ${nd}"]`).waitFor();
+  // V12 12번: 마감만 있는 업무는 배정일부터 옅은 기간 + 좁은 막대는 제목을 바깥에 전체로, 오늘 세로선·범례
+  const tlRow = owner.getByTestId('timeline').locator(`div[data-task-id="${t3}"]`);
+  await tlRow.locator('[data-outside-title]').getByText('보기 전환 시험 업무').waitFor();
+  assert.ok(await tlRow.locator('[data-implied]').count() >= 1, '배정→마감 옅은 기간');
+  assert.ok(await owner.getByTestId('timeline').locator('[data-today-line]').count() > 0, '오늘 세로선');
+  await owner.getByTestId('timeline-legend').getByText('검토 요청').waitFor();
+  await owner.getByRole('tab', { name: '6주' }).click();
+  await owner.getByRole('tab', { name: '2주' }).click();
   await owner.screenshot({ path: `${SHOTS}/09-timeline.png` });
 });
 

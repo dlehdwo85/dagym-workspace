@@ -404,11 +404,14 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if ((set.task_type ?? cur.task_type) === 'milestone' && (set.start_date ?? cur.start_date)) set.start_date = null;
     const lineId = ('approval_line_id' in set ? set.approval_line_id : cur.approval_line_id) as string | null;
 
-    // V12 6번: 진행 상태는 담당자만. 지시자·관리자는 검토 요청 업무의 승인(완료)·반려(진행 중)와 보류(·보류 해제)만
-    if (i.status && i.status !== cur.status && cur.assignee_id && cur.assignee_id !== u.id) {
-      const ok = (cur.status === 'review' && (i.status === 'done' || i.status === 'in_progress')) || i.status === 'on_hold'
-        || (cur.status === 'on_hold' && (i.status === 'todo' || i.status === 'in_progress'));
-      if (!ok) throw forbidden('진행 상태는 담당자만 바꿀 수 있습니다. 지시자·관리자는 검토 요청 업무의 승인·반려와 보류만 할 수 있습니다.');
+    // V12 11번: 상태는 담당자만(대표·관리자도 예외 없음). 예외는 하나 — 검토 요청된 업무를 그 업무의 지시자가 승인(완료)·반려(진행 중).
+    // 담당자가 없는 업무는 만든 사람만. (결재선 업무의 결재는 approvals 의 결재 API 로 따로)
+    if (i.status && i.status !== cur.status) {
+      const owner = cur.assignee_id ?? cur.created_by;
+      const reviewByRequester = cur.status === 'review' && (i.status === 'done' || i.status === 'in_progress') && !!cur.requested_by && cur.requested_by === u.id;
+      if (owner !== u.id && !reviewByRequester) {
+        throw forbidden(cur.assignee_id ? '상태는 담당자만 바꿀 수 있어요. 지시자는 검토 요청된 업무를 승인·반려할 수 있습니다.' : '담당자가 없는 업무의 상태는 만든 사람만 바꿀 수 있어요.');
+      }
     }
     // 상태 변경
     let statusEvent: string | null = null;

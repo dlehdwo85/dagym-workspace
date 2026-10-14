@@ -33,6 +33,7 @@ export type Task = {
   task_type?: 'normal' | 'milestone' | 'approval' | 'inspection'; approval_line_id?: string | null; photo_required?: number; photo_count?: number;
   fields?: Record<string, unknown>;
   requested_by?: string | null; requested_by_name?: string | null; created_at?: string; completed_at?: string | null;
+  assigned_at?: string | null;
   batch_id?: string | null; batch?: { total: number; done: number } | null; recurrence_source_id?: string | null;
 };
 
@@ -384,12 +385,13 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
   );
 }
 
-/** V12 6번: 진행 상태는 담당자만 — 지시자·관리자는 검토 업무 승인·반려, 보류(·해제)만 (서버와 같은 규칙) */
+/** V12 11번: 상태는 담당자만(없으면 만든 사람) — 예외는 검토 요청된 업무를 지시자가 승인·반려 (서버와 같은 규칙) */
 export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
-  if (to === t.status || !t.assignee_id || t.assignee_id === uid) return true;
-  return (t.status === 'review' && (to === 'done' || to === 'in_progress')) || to === 'on_hold' || (t.status === 'on_hold' && (to === 'todo' || to === 'in_progress'));
+  if (to === t.status) return true;
+  if ((t.assignee_id ?? t.created_by) === uid) return true;
+  return t.status === 'review' && (to === 'done' || to === 'in_progress') && !!t.requested_by && t.requested_by === uid;
 }
-const NOT_MINE = '진행 상태는 담당자만 바꿀 수 있습니다 (지시자·관리자는 검토 승인·반려·보류만)';
+const NOT_MINE = '상태는 담당자만 바꿀 수 있어요 (지시자는 검토 요청된 업무의 승인·반려만)';
 /** 진행 전 업무는 담당자 확인 여부로 "확인 전"·"확인 완료" */
 export function statusText(t: Task) {
   if (t.status === 'todo' && t.assignee_id) return t.assignee_ack_at ? '확인 완료' : '확인 전';
@@ -429,7 +431,7 @@ function TypeIcon({ t }: { t: Task }) {
 /** 상태 선택: 배지처럼 보이는 select */
 function StatusSelect({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }) {
   const { user } = useSession();
-  const mine = !t.assignee_id || t.assignee_id === user.id;
+  const mine = (t.assignee_id ?? t.created_by) === user.id;
   return (
     <select value={t.status} onChange={(e) => onPatch(t, { status: e.target.value })} aria-label={`${t.title} 상태`} title={mine ? undefined : NOT_MINE}
       className={cx('h-6 cursor-pointer appearance-none rounded-full border-0 bg-none py-0 pl-2.5 pr-2.5 text-xs font-medium focus:ring-2 focus:ring-accent-500', STATUS_TONE[t.status].badge)}>
@@ -449,7 +451,7 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
         <span className={cx('size-1.5 rounded-full', statusText(t) === '확인 전' ? 'bg-red-500' : STATUS_TONE[t.status].dot)} aria-hidden />{statusText(t)}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={190}>
-        {t.assignee_id && t.assignee_id !== user.id && <p className="px-2.5 pb-1 text-[11px] text-ink-3">{NOT_MINE}</p>}
+        {(t.assignee_id ?? t.created_by) !== user.id && <p className="px-2.5 pb-1 text-[11px] text-ink-3">{NOT_MINE}</p>}
         {STATUSES.map((s) => (
           <button key={s} type="button" disabled={!canSetStatus(t, user.id, s)} onClick={() => { setOpen(false); if (s !== t.status) onPatch(t, { status: s }); }} aria-pressed={s === t.status}
             className="flex w-full items-center gap-2 rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50 disabled:opacity-40">
@@ -596,7 +598,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     if (group === 'requester') return g.add.defaultRequester ? { requestedById: g.add.defaultRequester } : null;
     if (group === 'due') return { dueDate: g.add.defaultDue ?? null };
     if (group === 'project') return { projectId: g.add.projectId ?? null };
-    if (group === 'status') return { status: g.key };
+    if (group === 'status') return { status: g.key }; // 권한 없으면 아래 end 에서 막음
     return null;
   };
   const end = (e: DragEndEvent) => {
@@ -615,6 +617,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
       order.splice(at < 0 ? order.length : at, 0, a);
       const body = moveBody(dst);
       const t = src.items.find((x) => x.id === a)!;
+      if (body && 'status' in body && !canSetStatus(t, user.id, body.status as TaskStatus)) { toast.info(NOT_MINE); return; }
       if (body) onPatch(t, body);
     }
     onReorder(order);
@@ -771,7 +774,8 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
   const start = useRef<{ x: number; y: number; lock: 'x' | 'y' | null; w: number } | null>(null);
   const [dx, setDx] = useState(0);
   // 밀어서 완료: 기본 꺼짐(설정에서 켬). 켜도 오른쪽으로 행 너비 45% 이상 밀고 손을 뗄 때만, 세로 스크롤 중엔 무시. 보류 밀기는 없앰(실수로 업무가 사라지던 원인)
-  const swipeOn = useSwipeSetting();
+  // V12 11번: 상태를 바꿀 수 없는 업무는 밀어서 완료도 끔
+  const swipeOn = useSwipeSetting() && canSetStatus(t, user.id, nextStatusOnCheck(t, user.role));
   const rowOpen = useRowOpen(t.id, useContext(OpenTaskCtx));
   // 정렬이 "직접 순서"가 아니면 끌 수 없음 → 꾹 누르면 안내
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -872,11 +876,14 @@ function Column({ status, tasks }: { status: TaskStatus; tasks: Task[] }) {
   );
 }
 function BoardView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => void }) {
+  const { user } = useSession();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }));
   const end = (e: DragEndEvent) => {
     const t = e.active.data.current as Task;
     const to = e.over?.id as TaskStatus | undefined;
-    if (t && to && to !== t.status) onPatch(t, { status: to });
+    if (!t || !to || to === t.status) return;
+    if (!canSetStatus(t, user.id, to)) { toast.info(NOT_MINE); return; } // V12 11번
+    onPatch(t, { status: to });
   };
   return (
     <DndContext sensors={sensors} onDragEnd={end}>
@@ -928,18 +935,39 @@ function CalendarView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b:
   );
 }
 
+/**
+ * 타임라인 (V12 12번): 시작일이 없으면 배정일(없으면 만든 날)→마감을 옅은 기간으로, 진한 막대는 실제 시작~마감.
+ * 막대가 좁으면 제목을 막대 오른쪽 바깥에 전체로, 마우스를 올리면 툴팁. 왼쪽 업무 열 280px·끌어서 폭 조절,
+ * 2주(기본)·6주·3달 확대/축소, 오늘 세로선, 상태별 색·범례. 휴대폰은 기간 목록.
+ */
+const ZOOMS = { '2w': { days: 14, label: '2주' }, '6w': { days: 42, label: '6주' }, '3m': { days: 91, label: '3달' } } as const;
+type Zoom = keyof typeof ZOOMS;
+const TL_TONE: Record<TaskStatus, string> = { todo: '#94a3b8', in_progress: '#3b82f6', review: '#8b5cf6', on_hold: '#f97316', done: '#10b981' };
 function TimelineView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => void }) {
-  const [anchor, setAnchor] = useState(() => {
-    const d = new Date(todayStr() + 'T00:00:00Z'); const dow = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - dow - 7); return d.toISOString().slice(0, 10);
-  });
-  const DAYS = 35;
+  const monday = () => { const d = new Date(todayStr() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+  const [anchor, setAnchor] = useState(monday);
+  const [zoom, setZoom] = useState<Zoom>(() => { try { const z = localStorage.getItem('wos_tl_zoom'); return z && z in ZOOMS ? (z as Zoom) : '2w'; } catch { return '2w'; } });
+  const [leftW, setLeftW] = useState(() => { try { return Math.min(560, Math.max(180, Number(localStorage.getItem('wos_tl_left')) || 280)); } catch { return 280; } });
+  const DAYS = ZOOMS[zoom].days;
+  const step = zoom === '3m' ? 28 : 7;
   const days = Array.from({ length: DAYS }, (_, i) => addDays(anchor, i));
   const rows = tasks.filter((t) => t.due_date || t.start_date);
   const gridRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ id: string; kind: 'move' | 'end'; x0: number; dx: number } | null>(null);
+  const [resize, setResize] = useState<{ x0: number; w0: number } | null>(null);
   const colW = () => (gridRef.current ? gridRef.current.clientWidth / DAYS : 30);
   const today = todayStr();
+  const pickZoom = (z: Zoom) => { setZoom(z); try { localStorage.setItem('wos_tl_zoom', z); } catch {} };
+  const dayOf = (iso?: string | null) => (iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso)) : null);
+  function span(t: Task) {
+    const s = t.start_date && (!t.due_date || t.start_date <= t.due_date) ? t.start_date : (t.due_date ?? t.start_date)!;
+    const e = t.due_date ?? s;
+    // 시작일이 없으면 배정일(없으면 만든 날)부터 옅은 기간
+    const implied = !t.start_date ? dayOf((t as any).assigned_at ?? t.created_at) : null;
+    return { s, e, implied: implied && implied < s ? implied : null };
+  }
   function finish() {
+    if (resize) { setResize(null); try { localStorage.setItem('wos_tl_left', String(leftW)); } catch {} }
     if (!drag) return;
     const t = rows.find((r) => r.id === drag.id)!;
     const n = Math.round(drag.dx / colW());
@@ -953,38 +981,72 @@ function TimelineView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b:
       onPatch(t, { dueDate: nd });
     }
   }
+  const pct = (i: number) => `${(i / DAYS) * 100}%`;
+  const todayIdx = diffDays(anchor, today);
+  const label = (d: string) => (zoom === '3m' ? (Number(d.slice(8)) === 1 || d === days[0] ? `${Number(d.slice(5, 7))}/${Number(d.slice(8))}` : new Date(d + 'T00:00:00Z').getUTCDay() === 1 ? String(Number(d.slice(8))) : '') : String(Number(d.slice(8))));
   return (
-    <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="timeline" onPointerMove={(e) => drag && setDrag({ ...drag, dx: e.clientX - drag.x0 })} onPointerUp={finish} onPointerLeave={finish}>
-      <div className="flex items-center justify-between border-b border-line px-3 py-2 text-sm">
+    <div className="overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="timeline"
+      onPointerMove={(e) => { if (resize) setLeftW(Math.min(560, Math.max(180, resize.w0 + e.clientX - resize.x0))); else if (drag) setDrag({ ...drag, dx: e.clientX - drag.x0 }); }}
+      onPointerUp={finish} onPointerLeave={finish}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2 text-sm">
         <div className="flex gap-1">
-          <Button size="sm" variant="secondary" onClick={() => setAnchor(addDays(anchor, -7))}>‹ 이전</Button>
-          <Button size="sm" variant="secondary" onClick={() => setAnchor(addDays(anchor, 7))}>다음 ›</Button>
+          <Button size="sm" variant="secondary" onClick={() => setAnchor(addDays(anchor, -step))}>‹ 이전</Button>
+          <Button size="sm" variant="secondary" onClick={() => setAnchor(monday())}>오늘</Button>
+          <Button size="sm" variant="secondary" onClick={() => setAnchor(addDays(anchor, step))}>다음 ›</Button>
         </div>
         <span className="font-medium text-ink-2 tabular-nums">{fmtDate(days[0])} ~ {fmtDate(days[DAYS - 1])}</span>
+        <div className="flex rounded-input border border-line p-0.5 text-xs" role="tablist" aria-label="타임라인 범위">
+          {(Object.keys(ZOOMS) as Zoom[]).map((z) => <button key={z} role="tab" aria-selected={zoom === z} onClick={() => pickZoom(z)} className={cx('rounded px-2 py-1', zoom === z ? 'bg-brand-600 font-semibold text-white' : 'text-ink-2 hover:bg-slate-100')}>{ZOOMS[z].label}</button>)}
+        </div>
       </div>
-      <div className="overflow-x-auto">
-        <div className="min-w-[900px]">
+      <div className="flex flex-wrap gap-3 border-b border-line px-3 py-1.5 text-[11px] text-ink-2" data-testid="timeline-legend">
+        {STATUSES.map((st) => <span key={st} className="inline-flex items-center gap-1"><i className="inline-block size-2.5 rounded-sm" style={{ background: TL_TONE[st] }} />{STATUS_LABEL[st]}</span>)}
+        <span className="inline-flex items-center gap-1"><i className="inline-block h-2.5 w-4 rounded-sm bg-slate-300/60" />배정~마감(시작일 없음)</span>
+        <span className="inline-flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm ring-2 ring-red-500" />기한 지남</span>
+      </div>
+      {/* 휴대폰: 기간 목록 */}
+      <ul className="divide-y divide-line sm:hidden" data-testid="timeline-list">
+        {!rows.length && <li className="p-6 text-center text-sm text-ink-2">날짜가 있는 업무가 없습니다</li>}
+        {rows.map((t) => { const { s, e, implied } = span(t); return (
+          <li key={t.id} className="flex items-center gap-2 px-3 py-2 text-sm" data-task-id={t.id}>
+            <span className="w-1 self-stretch rounded" style={{ background: TL_TONE[t.status] }} />
+            <span className="min-w-0 flex-1"><TaskLink id={t.id} className="block truncate font-medium">{t.title}</TaskLink>
+              <span className={cx('text-xs tabular-nums', t.status !== 'done' && e < today ? 'font-semibold text-red-600' : 'text-ink-2')}>{fmtDate(implied ?? s)}{(implied ?? s) !== e ? ` ~ ${fmtDate(e)}` : ''} · {STATUS_LABEL[t.status]}{t.assignee_name ? ` · ${t.assignee_name}` : ''}</span></span>
+          </li>); })}
+      </ul>
+      <div className="hidden overflow-x-auto sm:block">
+        <div style={{ minWidth: leftW + Math.max(560, DAYS * (zoom === '2w' ? 56 : zoom === '6w' ? 22 : 10)) }}>
           <div className="flex border-b border-line bg-slate-50 text-[11px] text-ink-2">
-            <div className="w-56 shrink-0 px-3 py-1.5 font-medium">업무</div>
+            <div className="relative shrink-0 px-3 py-1.5 font-medium" style={{ width: leftW }}>업무
+              <span role="separator" aria-label="업무 열 폭 조절" className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-accent-500/40"
+                onPointerDown={(e) => { e.preventDefault(); setResize({ x0: e.clientX, w0: leftW }); }} />
+            </div>
             <div className="grid flex-1" style={{ gridTemplateColumns: `repeat(${DAYS}, 1fr)` }}>
-              {days.map((d) => <div key={d} className={cx('border-l border-line py-1.5 text-center tabular-nums', [0, 6].includes(new Date(d + 'T00:00:00Z').getUTCDay()) && 'bg-slate-100/70 text-ink-3', d === today && '!bg-accent-600 font-bold !text-white')}>{Number(d.slice(8))}</div>)}
+              {days.map((d) => <div key={d} className={cx('border-l border-line py-1.5 text-center tabular-nums', [0, 6].includes(new Date(d + 'T00:00:00Z').getUTCDay()) && 'bg-slate-100/70 text-ink-3', d === today && '!bg-accent-600 font-bold !text-white')}>{label(d)}</div>)}
             </div>
           </div>
           {!rows.length && <div className="p-8 text-center text-sm text-ink-2">날짜가 있는 업무가 없습니다</div>}
           {rows.map((t) => {
-            const s = t.start_date && (!t.due_date || t.start_date <= t.due_date) ? t.start_date : (t.due_date ?? t.start_date)!;
-            const e = t.due_date ?? s;
+            const { s, e, implied } = span(t);
             let from = diffDays(anchor, s), to = diffDays(anchor, e);
+            const imFrom = implied ? Math.max(0, diffDays(anchor, implied)) : null;
             const dx = drag?.id === t.id ? drag.dx : 0;
             const visible = to >= 0 && from < DAYS;
             from = Math.max(0, from); to = Math.min(DAYS - 1, to);
+            const narrow = (to - from + 1) * (zoom === '2w' ? 56 : zoom === '6w' ? 22 : 10) < 110; // 좁으면 제목을 막대 밖에
+            const late = t.status !== 'done' && e < today;
+            const tip = `${t.title}\n${implied ? `배정 ${implied} → ` : ''}${s === e ? `마감 ${e}` : `${s} ~ ${e}`} · ${STATUS_LABEL[t.status]}${t.assignee_name ? ` · ${t.assignee_name}` : ''}`;
             return (
               <div key={t.id} className="flex border-b border-line text-xs last:border-b-0 hover:bg-slate-50" data-task-id={t.id}>
-                <span className="flex w-56 shrink-0 items-center gap-2 px-3 py-2">
+                <span className="flex shrink-0 items-center gap-2 px-3 py-2" style={{ width: leftW }}>
                   <Avatar id={t.assignee_id} name={t.assignee_name} size={20} />
                   <TaskLink id={t.id} className="truncate font-medium text-ink hover:underline">{t.title}</TaskLink>
                 </span>
-                <div ref={gridRef} className="relative flex-1">
+                <div ref={gridRef} className="relative min-h-[36px] flex-1">
+                  {todayIdx >= 0 && todayIdx < DAYS && <span className="pointer-events-none absolute inset-y-0 w-px bg-accent-500/70" style={{ left: pct(todayIdx + 0.5) }} aria-hidden data-today-line />}
+                  {visible && imFrom !== null && imFrom < from && (
+                    <div className="pointer-events-none absolute top-1/2 h-4 -translate-y-1/2 rounded-l-md" style={{ left: pct(imFrom), width: pct(from - imFrom), background: TL_TONE[t.status], opacity: 0.22 }} data-implied />
+                  )}
                   {visible && t.task_type === 'milestone' && (
                     <div className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] bg-violet-500 shadow-card"
                       style={{ left: `calc(${((to + 0.5) / DAYS) * 100}% + ${drag?.id === t.id ? dx : 0}px)`, cursor: 'grab' }}
@@ -992,11 +1054,12 @@ function TimelineView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b:
                       title={`${s} ~ ${e}`} aria-label={`마일스톤 ${t.title}`} />
                   )}
                   {visible && t.task_type !== 'milestone' && (
-                    <div className="absolute top-1/2 flex h-6 -translate-y-1/2 select-none items-center rounded-md px-1.5 text-[11px] font-medium text-white shadow-card touch-none"
-                      data-bar style={{ background: t.status === 'done' ? '#94a3b8' : e < today ? '#dc2626' : t.project_color ?? STATUS_TONE[t.status].bar, left: `calc(${(from / DAYS) * 100}% + ${drag?.id === t.id && drag.kind === 'move' ? dx : 0}px)`, width: `calc(${((to - from + 1) / DAYS) * 100}% + ${drag?.id === t.id && drag.kind === 'end' ? dx : 0}px)`, cursor: 'grab' }}
+                    <div className={cx('absolute top-1/2 flex h-6 -translate-y-1/2 select-none items-center rounded-md px-1.5 text-[11px] font-medium text-white shadow-card touch-none', late && 'ring-2 ring-red-500')}
+                      data-bar style={{ background: TL_TONE[t.status], left: `calc(${pct(from)} + ${drag?.id === t.id && drag.kind === 'move' ? dx : 0}px)`, width: `calc(${pct(to - from + 1)} + ${drag?.id === t.id && drag.kind === 'end' ? dx : 0}px)`, cursor: 'grab' }}
                       onPointerDown={(ev) => { (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId); setDrag({ id: t.id, kind: 'move', x0: ev.clientX, dx: 0 }); }}
-                      title={`${s} ~ ${e}`}>
-                      <span className="truncate">{t.title}</span>
+                      title={tip} data-range={`${s} ~ ${e}`} aria-label={tip}>
+                      {!narrow && <span className="truncate">{t.title}</span>}
+                      {narrow && <span className="pointer-events-none absolute left-full top-1/2 ml-1.5 -translate-y-1/2 whitespace-nowrap font-medium text-ink" data-outside-title>{t.title}</span>}
                       <span className="absolute right-0 top-0 h-full w-2 cursor-ew-resize rounded-r bg-black/20"
                         onPointerDown={(ev) => { ev.stopPropagation(); setDrag({ id: t.id, kind: 'end', x0: ev.clientX, dx: 0 }); }} aria-label="마감일 조정" />
                     </div>

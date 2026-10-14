@@ -15,7 +15,7 @@ export const GET = handler(async ({ user, req }) => {
   const bf = brand ? sql`and t.brand_id = ${brand}` : sql``;
   const base = sql`from tasks t left join users au on au.id = t.assignee_id left join org_units o on o.id = t.org_unit_id
     where t.deleted_at is null and t.parent_id is null and ${vis} ${bf}`;
-  const cols = sql`t.id, t.title, t.status, t.priority, t.due_date, t.assignee_id, au.name as assignee_name, o.name as org_unit_name, t.brand_id`;
+  const cols = sql`t.id, t.title, t.status, t.priority, t.due_date, t.assignee_id, au.name as assignee_name, o.name as org_unit_name, t.brand_id, t.requested_by, (select name from users ru where ru.id = t.requested_by) as requested_by_name`;
   // 홈 "오늘 할 일" 전체: 오늘 마감 + 기한 지난 미완료 (권한 범위 전체)
   const todayAll = sql`select ${cols}, t.due_time, t.version, t.approval_required, t.approval_line_id ${base} and t.status <> 'done' and t.due_date <= ${today}
     order by t.due_date, t.priority = 'urgent' desc limit 30`;
