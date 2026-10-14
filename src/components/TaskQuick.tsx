@@ -6,7 +6,7 @@ import { ArrowUpDown, Bell, CalendarDays, Check, Mic, Plus, Repeat, Sparkles, Us
 import { recurPresets } from './pickers';
 import { listenOnce, parseTaskText, speechSupported } from '@/lib/nlparse';
 import { TIMES, timeLabel } from './DateTimePickers';
-import { api, broadcastRefresh } from './client';
+import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import { Avatar, DueChip, cx, toast, todayStr } from './ui';
 
@@ -269,6 +269,9 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const [rrule, setRrule] = useState<string | null>(null);
   const [dueTime, setDueTime] = useState<string | null>(null);
   const [remind, setRemind] = useState<number[] | null>(null);
+  const [priority, setPriority] = useState<string>('normal');
+  const [proj, setProj] = useState<{ id: string; name: string } | null>(null); // 검수 20: "#프로젝트" 인식
+  const projList = useApi<{ projects: { id: string; name: string }[] }>(projectId === undefined ? '/api/projects' : null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
@@ -286,8 +289,8 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     setTitle(''); setRrule(null);
     try {
       const multi = assignees.length > 1;
-      const r = await api('/api/tasks', { body: { title: t, assigneeId: assignee, ...(multi ? { assigneeIds: assignees } : {}), requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
-      markNew(r.id); setRemind(null);
+      const r = await api('/api/tasks', { body: { title: autoTitle(t), priority, assigneeId: assignee, ...(multi ? { assigneeIds: assignees } : {}), requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? proj?.id ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
+      markNew(r.id); setRemind(null); setPriority('normal'); setProj(null);
       const who = multi ? `${assignees.length}명 각각` : assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
       toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? ' — 담당자에게 알림을 보냈습니다' : assignee ? ' — 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       broadcastRefresh(); onCreated?.(r.id);
@@ -302,8 +305,16 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   // 업무 "생성"은 저장 버튼·Enter 로만 (WORKIN_SAVE_AND_SPEED, 대표 지시). 바깥을 눌러도 저장하지 않고 입력한 초안은 남긴다.
   // 칩(마감·담당·지시·반복)을 고른 뒤에는 입력칸으로 돌아온다
   const back = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setTimeout(() => input.current?.focus(), 0); };
-  // V8 4번: 문장 속 날짜·시각·담당자 인식 → "적용" 으로 칩에 반영 / 🎤 음성 받아쓰기는 바로 반영
-  const parsed = title.trim().length > 3 ? parseTaskText(title, dir.users, todayStr()) : null;
+  // V8 4번 · 검수 20: 문장 속 날짜·시각·담당자·!우선순위·#프로젝트·반복을 바로 칩에 반영(적용 버튼 없음). 저장할 때 제목에서 그 말을 뺀다
+  const parsed = title.trim().length > 3 ? parseTaskText(title, dir.users, todayStr(), projList.data?.projects ?? []) : null;
+  const autoTitle = (t: string) => { const p = t.trim().length > 3 ? parseTaskText(t, dir.users, todayStr(), projList.data?.projects ?? []) : null; return p && p.matched.length && p.title.trim() ? p.title.trim() : t; };
+  const autoKey = parsed && parsed.matched.length ? JSON.stringify([parsed.dueDate, parsed.dueTime, parsed.assigneeId, parsed.priority, parsed.projectId, parsed.rrule]) : '';
+  useEffect(() => {
+    if (!parsed || !autoKey) return;
+    if (parsed.dueDate) setDue(parsed.dueDate); if (parsed.dueTime) setDueTime(parsed.dueTime); if (parsed.assigneeId) setAssignee(parsed.assigneeId);
+    if (parsed.rrule) setRrule(parsed.rrule); if (parsed.priority) setPriority(parsed.priority);
+    if (parsed.projectId) setProj({ id: parsed.projectId, name: parsed.projectName ?? '' });
+  }, [autoKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const applyParsed = (p: NonNullable<typeof parsed>) => {
     setTitle(p.title); if (p.dueDate) setDue(p.dueDate); if (p.dueTime) setDueTime(p.dueTime); if (p.assigneeId) setAssignee(p.assigneeId); if (p.rrule) setRrule(p.rrule);
     setTimeout(() => input.current?.focus(), 0);
@@ -344,12 +355,14 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
           <span className="inline-flex items-center gap-1"><span className="text-[11px] text-ink-3">담당</span><MultiAssigneePicker values={assignees} onChange={setAssignees} /></span>
           <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
           <BellChip value={remind} onChange={setRemind} />
+          <PriorityPicker value={priority} onChange={back(setPriority)} />
+          {proj && <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs" data-testid="inline-project">#{proj.name}<button type="button" aria-label="프로젝트 빼기" onClick={() => setProj(null)}>×</button></span>}
         </div>
       )}
-      {parsed && parsed.matched.length > 0 && (parsed.dueDate !== due || (parsed.dueTime && parsed.dueTime !== dueTime) || (parsed.assigneeId && parsed.assigneeId !== assignee)) && (
-        <button type="button" onClick={() => applyParsed(parsed)} className="mx-3 mb-2 ml-12 inline-flex items-center gap-1.5 rounded-full bg-accent-50 px-2.5 py-1 text-xs font-medium text-accent-700 hover:bg-accent-100" data-testid="nl-apply">
-          <Sparkles className="size-3.5" />인식: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName].filter(Boolean).join(' · ')} → 적용
-        </button>
+      {parsed && parsed.matched.length > 0 && (
+        <p className="mx-3 mb-2 ml-12 inline-flex items-center gap-1.5 text-xs text-accent-700" data-testid="nl-apply">
+          <Sparkles className="size-3.5" />자동 인식: {parsed.matched.join(' · ')} — 칩에 반영, 저장하면 제목은 “{parsed.title}”
+        </p>
       )}
       {err && <p className="px-3 pb-2 pl-12 text-xs font-medium text-red-600" role="alert">{err} — 입력한 내용은 그대로 있습니다. 저장(Enter)을 다시 눌러 주세요.</p>}
     </form>

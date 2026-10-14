@@ -1361,8 +1361,9 @@ await step('V8: 등록 창 한 번에(자동 인식·템플릿·우선순위·�
   const dlg = owner.getByRole('dialog', { name: '업무 등록' });
   await dlg.getByTestId('tpl-chips').getByRole('button', { name: '견적서 발송' }).waitFor(); // 시작 템플릿
   await dlg.getByLabel('제목').fill('내일 3시 @최매니저 !높음 매주 장비 견적 비교');
-  await dlg.getByTestId('quick-nl-apply').click();
-  assert.equal(await dlg.getByLabel('제목').inputValue(), '장비 견적 비교');
+  // 검수 20: 적용 버튼 없이 바로 칩에 반영(담당·우선순위), 저장할 때 제목에서 인식한 말을 뺀다
+  await dlg.getByTestId('quick-nl-apply').getByText(/장비 견적 비교/).waitFor();
+  await owner.waitForFunction(() => (document.querySelector('[role=dialog] select[aria-label="담당자"]'))?.selectedOptions[0]?.textContent?.includes('최매니저'));
   await dlg.getByRole('button', { name: '저장' }).click();
   await owner.getByText(/업무를 등록했습니다/).first().waitFor();
   const [t] = await sql`select id, assignee_id, priority, recurrence_rule, to_char(due_date,'YYYY-MM-DD') d, to_char(due_time,'HH24:MI') tm from tasks where title = '장비 견적 비교'`;

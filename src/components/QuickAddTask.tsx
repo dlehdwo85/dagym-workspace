@@ -24,6 +24,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   const router = useRouter();
   const projects = useApi<{ projects: any[] }>(open ? '/api/projects' : null);
   const teams = useApi<{ teams: { id: string; name: string; mine: boolean; members: { id: string }[] }[] }>(open ? '/api/teams' : null); // V14 8번
+  const lastSrv = useApi<{ last: any }>(open ? '/api/me/quick-last' : null); // 검수 20: 사용자 단위 기억
   const templates = useApi<{ templates: any[] }>(open && !defaults?.parentId ? '/api/templates' : null);
   // V8 3번: 위쪽 "템플릿에서 만들기" — 고르면 제목·마감(오프셋)·기본 담당·지시가 채워지고 체크리스트·하위 업무까지 만들어진다
   const pickTpl = (id: string) => {
@@ -67,14 +68,20 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
     const opening = open && !wasOpen.current;
     wasOpen.current = open;
     if (opening) {
-      // V8 9번: 마지막에 쓴 담당·지시·우선순위·프로젝트·알림을 기억(이 기기)
-      let last: any = {};
-      try { last = JSON.parse(localStorage.getItem('wos_quick_last') ?? '{}'); } catch {}
+      // V8 9번 · 검수 20: 마지막에 쓴 담당·지시·우선순위·프로젝트·알림을 사용자 단위로 기억(서버). 서버 값이 오기 전엔 이 기기 값
+      let last: any = lastSrv.data?.last ?? {};
+      if (!lastSrv.data?.last) try { last = JSON.parse(localStorage.getItem('wos_quick_last') ?? '{}'); } catch {}
       setF({ title: defaults?.title ?? '', ...(defaults?.description ? { description: defaults.description } : {}), multi: false, more: [], dueTime: '', assigneeId: defaults?.assigneeId ?? last.assigneeId ?? user.id, requestedById: last.requestedById ?? user.id,
         dueDate: defaults?.dueDate ?? '', projectId: defaults?.projectId ?? last.projectId ?? '', priority: last.priority ?? 'normal', rrule: null, remind: last.remind ?? null });
-      setTpl('');
+      setTpl(''); setNoAuto(false);
     }
-  }, [open, defaults, user.id]);
+  }, [open, defaults, user.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 서버의 마지막 설정이 늦게 오면, 아직 손대지 않은 칸만 채운다
+  const lastApplied = useRef(false);
+  useEffect(() => { if (!open) { lastApplied.current = false; return; } const l = lastSrv.data?.last; if (!l || lastApplied.current) return; lastApplied.current = true;
+    setF((x: any) => ({ ...x, ...(defaults?.assigneeId || !l.assigneeId ? {} : { assigneeId: l.assigneeId }), ...(l.requestedById ? { requestedById: l.requestedById } : {}),
+      ...(defaults?.projectId || l.projectId === undefined ? {} : { projectId: l.projectId ?? '' }), ...(l.priority ? { priority: l.priority } : {}), ...(l.remind !== undefined ? { remind: l.remind } : {}) }));
+  }, [open, lastSrv.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k: string) => (v: any) => setF((x: any) => ({ ...x, [k]: v }));
   // 배정 경고: 담당자의 마감일 회의·남은 가용 시간
@@ -82,6 +89,15 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
   const day = avail.data?.days?.[0];
   const who = dir.users.find((x) => x.id === f.assigneeId)?.name;
   const parsed = (f.title ?? '').trim().length > 3 ? parseTaskText(f.title, dir.users, todayStr(), projects.data?.projects ?? []) : null;
+  // 검수 20: 인식 결과는 "적용" 없이 바로 칩에 반영, 저장할 때 제목에서 그 말을 뺀다 (✕ 로 끌 수 있음)
+  const [noAuto, setNoAuto] = useState(false);
+  const autoKey = !noAuto && parsed && parsed.matched.length ? JSON.stringify([parsed.dueDate, parsed.dueTime, parsed.assigneeId, parsed.priority, parsed.projectId, parsed.rrule]) : '';
+  useEffect(() => {
+    if (!autoKey || !parsed) return;
+    setF((x: any) => ({ ...x, ...(parsed.dueDate ? { dueDate: parsed.dueDate } : {}), ...(parsed.dueTime ? { dueTime: parsed.dueTime } : {}), ...(parsed.assigneeId ? { assigneeId: parsed.assigneeId } : {}),
+      ...(parsed.priority ? { priority: parsed.priority } : {}), ...(parsed.projectId ? { projectId: parsed.projectId } : {}), ...(parsed.rrule ? { rrule: parsed.rrule } : {}) }));
+  }, [autoKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const finalTitle = () => (!noAuto && parsed && parsed.matched.length && parsed.title.trim() ? parsed.title.trim() : f.title.trim());
   const applyParsed = (p: NonNullable<typeof parsed>) => setF((x: any) => ({ ...x, title: p.title, ...(p.dueDate ? { dueDate: p.dueDate } : {}), ...(p.dueTime ? { dueTime: p.dueTime } : {}),
     ...(p.assigneeId ? { assigneeId: p.assigneeId } : {}), ...(p.priority ? { priority: p.priority } : {}), ...(p.projectId ? { projectId: p.projectId } : {}), ...(p.rrule ? { rrule: p.rrule } : {}) }));
   const [listening, setListening] = useState(false);
@@ -96,12 +112,12 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
       let r: { id: string };
       if (tpl) {
         const unit = defaults?.orgUnitId ?? dir.users.find((u) => u.id === user.id)?.org_unit_ids?.[0] ?? dir.orgUnits[0]?.id;
-        r = await api(`/api/templates/${tpl}/apply`, { body: { title: f.title, orgUnitId: unit, projectId: f.projectId || null, assigneeId: f.assigneeId, requestedById: f.requestedById || undefined, dueDate: f.dueDate || undefined } });
+        r = await api(`/api/templates/${tpl}/apply`, { body: { title: finalTitle(), orgUnitId: unit, projectId: f.projectId || null, assigneeId: f.assigneeId, requestedById: f.requestedById || undefined, dueDate: f.dueDate || undefined } });
       } else {
         r = await api('/api/tasks', {
-          queueOffline: `업무 등록: ${f.title}`,
+          queueOffline: `업무 등록: ${finalTitle()}`,
           body: {
-            title: f.title, assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
+            title: finalTitle(), assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
             priority: f.priority ?? 'normal', recurrenceRule: f.rrule ?? null, reminderMinutes: f.remind ?? null,
             ...(f.description ? { description: f.description } : {}), ...(f.checklist?.length ? { checklist: f.checklist } : {}),
             ...(count > 1 && !f.teamId && f.multiMode !== 'together' ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
@@ -116,10 +132,12 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
       }
       // 자료로 채웠으면 그 자료를 만든 업무(여러 명이면 각각)에 첨부
       for (const tid of ((r as any).ids ?? [r.id]) as string[]) for (const fid of f.fileIds ?? []) await api(`/api/library/${fid}/attach`, { body: { taskId: tid } }).catch(() => {});
-      try { localStorage.setItem('wos_quick_last', JSON.stringify({ assigneeId: f.assigneeId, requestedById: f.requestedById, priority: f.priority, projectId: f.projectId, remind: f.remind })); } catch {}
+      const lastV = { assigneeId: f.assigneeId || null, requestedById: f.requestedById || null, priority: f.priority ?? 'normal', projectId: f.projectId || null, remind: f.remind ?? null };
+      try { localStorage.setItem('wos_quick_last', JSON.stringify(lastV)); } catch {}
+      api('/api/me/quick-last', { method: 'PUT', body: lastV }).catch(() => {});
       toast.ok(f.teamId ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다 — 팀장에게 알림을 보냈습니다') : count > 1 ? `${count}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
       broadcastRefresh();
-      if (keep && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setTpl(''); titleRef.current?.focus(); return; }
+      if (keep && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setNoAuto(false); setTpl(''); titleRef.current?.focus(); return; }
       onClose();
       // 자세한 항목은 만든 뒤 상세에서 — 목록 안(onCreated)이 아니면 상세로 이동
       if (onCreated) onCreated(r.id); else router.push(`/tasks/${r.id}`);
@@ -163,9 +181,11 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
         </Field>
         {/* V8 9번: "내일 3시 @김민수 !높음 #입찰 매주" 처럼 쓰면 알아봄 → 적용 */}
         {parsed && parsed.matched.length > 0 && (
-          <button type="button" onClick={() => applyParsed(parsed)} className="-mt-1 inline-flex items-center gap-1.5 rounded-full bg-accent-50 px-2.5 py-1 text-xs font-medium text-accent-700 hover:bg-accent-100" data-testid="quick-nl-apply">
-            <Sparkles className="size-3.5" />인식: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName, parsed.priority && PRIORITY_LABEL[parsed.priority], parsed.projectName && `#${parsed.projectName}`, parsed.rrule && '반복'].filter(Boolean).join(' · ')} → 적용
-          </button>
+          <div className={cx('-mt-1 inline-flex flex-wrap items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium', noAuto ? 'bg-slate-100 text-ink-3' : 'bg-accent-50 text-accent-700')} data-testid="quick-nl-apply">
+            <Sparkles className="size-3.5" />{noAuto ? '자동 인식 꺼짐' : '자동 인식'}: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName, parsed.priority && PRIORITY_LABEL[parsed.priority], parsed.projectName && `#${parsed.projectName}`, parsed.rrule && '반복'].filter(Boolean).join(' · ')}
+            {!noAuto && <span className="font-normal text-ink-2">→ 제목 “{parsed.title}”</span>}
+            <button type="button" className="ml-1 underline" onClick={() => setNoAuto(!noAuto)}>{noAuto ? '다시 켜기' : '끄기'}</button>
+          </div>
         )}
         {(f.description || f.checklist?.length || f.fileNames?.length) && (
           <div className="space-y-2 rounded-input border border-amber-200 bg-amber-50/50 p-2.5" data-testid="quick-filled">
@@ -185,17 +205,15 @@ export function QuickAddTask({ open, onClose, defaults, onCreated }: { open: boo
           <select className="min-h-8 rounded-md border border-line bg-white px-2 text-xs" value={f.priority ?? 'normal'} onChange={(e) => set('priority')(e.target.value)} aria-label="우선순위">
             {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
+          {/* 검수 20: 마감·담당·지시도 같은 칩 줄에 */}
+          <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">마감<input type="date" className="min-h-8 rounded-md border border-line bg-white px-1.5 text-xs text-ink" value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} aria-label="마감일" /></label>
+          {f.dueDate && <select className="min-h-8 rounded-md border border-line bg-white px-1.5 text-xs" value={f.dueTime ?? ''} onChange={(e) => set('dueTime')(e.target.value)} aria-label="마감 시각">
+            <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
+          </select>}
+          <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">담당<UserSelect className="min-h-8 max-w-[8.5rem] rounded-md border border-line bg-white px-1.5 text-xs text-ink" ariaLabel="담당자" value={f.assigneeId} onChange={set('assigneeId')} /></label>
+          <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">지시<UserSelect className="min-h-8 max-w-[8.5rem] rounded-md border border-line bg-white px-1.5 text-xs text-ink" ariaLabel="지시자" placeholder="지시자 선택" value={f.requestedById} onChange={set('requestedById')} /></label>
           <RepeatChip value={f.rrule ?? null} anchorDate={f.dueDate || null} onChange={set('rrule')} />
           <BellChip value={f.remind ?? null} onChange={set('remind')} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="담당자"><UserSelect ariaLabel="담당자" value={f.assigneeId} onChange={set('assigneeId')} /></Field>
-          <Field label="지시자 (업무를 부여한 사람)"><UserSelect ariaLabel="지시자" placeholder="지시자 선택" value={f.requestedById} onChange={set('requestedById')} /></Field>
-          <Field label="마감일"><input type="date" className={inputCls} value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} /></Field>
-          {/* V6 10번: 마감 시각(15분 단위, 기본 없음) — 날짜를 정한 뒤에만 */}
-          {f.dueDate && <Field label="마감 시각"><select className={inputCls} value={f.dueTime ?? ''} onChange={(e) => set('dueTime')(e.target.value)} aria-label="마감 시각">
-            <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
-          </select></Field>}
         </div>
         {/* V6 13번: 다른 사람도 같은 업무를 각자 1건씩 (담당자별 묶음) */}
         {!defaults?.parentId && !tpl && (

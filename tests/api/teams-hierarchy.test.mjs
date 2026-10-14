@@ -159,3 +159,14 @@ describe('검수 3·12번 알림 정리', () => {
     assert.ok(!(r.reminders ?? []).some((x) => x.link === `/tasks/${timed}` && /^오늘 마감/.test(x.title)), '휴대폰 예약에도 "오늘 마감" 없음');
   });
 });
+
+describe('검수 20 등록 창 마지막 설정(사용자 단위)', () => {
+  test('저장·읽기, 본인 것만', async () => {
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/me/quick-last')).last, null);
+    await ctx.staffA.client.ok('PUT', '/api/me/quick-last', { assigneeId: ctx.managerA.id, priority: 'high', remind: [30], projectId: '' });
+    const l = (await ctx.staffA.client.ok('GET', '/api/me/quick-last')).last;
+    assert.equal(l.assigneeId, ctx.managerA.id); assert.equal(l.priority, 'high'); assert.deepEqual(l.remind, [30]);
+    assert.equal((await ctx.managerA.client.ok('GET', '/api/me/quick-last')).last, null, '다른 사람 값은 안 보임');
+    assert.equal((await ctx.staffA.client.req('PUT', '/api/me/quick-last', { priority: 'x' })).status, 400);
+  });
+});
