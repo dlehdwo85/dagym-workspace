@@ -6,6 +6,7 @@ import { mkdirSync } from 'node:fs';
 import { bootstrap, resetDb, startServer, BASE, FAKE, Client, addDays, seoulToday, ensureTls, testDb } from '../helpers.mjs';
 import { startFakeGoogle } from '../fake-google.mjs';
 import { v1440 } from './v14-40.step.mjs';
+import { v1436 } from './v14-36.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -844,6 +845,7 @@ await step('V14 35 캘린더에서 바로 업무: 빈 칸 = 업무 등록(누른
   await owner.getByTestId('quick-create').waitFor();
   assert.ok(owner.url().includes(`date=${d2}`), '일정 등록도 그 날짜');
 });
+await step('V14 36~39 캘린더: 업무 동그라미 없음·블록 12px 여러 줄·계단 겹침·휴대폰 3일·좌우 밀어 이동·뒤로가기는 상세만 닫고 날짜·보기·스크롤 유지', () => v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDays, today }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');
   const month = today.slice(0, 7);
@@ -1262,12 +1264,12 @@ await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에
   await ctx.owner.ok('POST', '/api/tasks', { title: 'V5 마감 제목이 길어도 두 줄로 보여야 함', assigneeId: ctx.ownerId, dueDate: t.d, approvalRequired: false });
   await m.goto(`${BASE}/calendar?date=${t.d}`);
   await m.getByTestId('cal-mobile-head').waitFor();
-  assert.equal(await m.locator('[data-day-head]').count(), 7, '휴대폰 기본 = 주 보기, 요일+날짜 머리');
+  assert.equal(await m.locator('[data-day-head]').count(), 3, '휴대폰 기본 = 3일 보기(V14 38번), 요일+날짜 머리');
   const dh = m.locator(`[data-day-head="${t.d}"]`);
   assert.equal((await dh.innerText()).replace(/\s+/g, ''), `${'일월화수목금토'[new Date(t.d + 'T00:00:00Z').getUTCDay()]}${Number(t.d.slice(8))}`, '날짜 머리 = 그 칸의 요일·날짜(하루 밀림 없음)');
   const block = m.locator('[data-ev-block]', { hasText: 'V5 홈에서 만든' }).first();
   await block.waitFor();
-  assert.ok(await block.getByLabel('업무와 연결').count(), '연결 표시 ✓');
+  assert.ok(await m.locator('[data-ev-block][data-linked-task]', { hasText: 'V5 홈에서 만든' }).count(), '연결 표시(V14 37번: ✓·동그라미 대신 왼쪽 선)');
   const chip = m.locator(`[data-task-item][title="V5 마감 제목이 길어도 두 줄로 보여야 함"]`).first();
   assert.ok((await chip.innerText()).startsWith('V5 마감'), '마감 업무 제목이 보임(주 보기는 앞 6자)');
   const cb = await chip.boundingBox();

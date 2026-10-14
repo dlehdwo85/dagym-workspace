@@ -116,16 +116,16 @@ function EventRow({ e, withDate }: { e: any; withDate?: boolean }) {
 }
 
 type WeekItem = { key: string; time: string; title: string; personal: boolean; tag: string; href: string; task: any | null };
-/** 이번 주 한 줄: [시간/종일] [색 점] 제목 [꼬리표] — 업무는 앞에 완료 동그라미 */
+/** 이번 주 한 줄: [시간/종일] [색 점·업무는 색 막대] 제목 [꼬리표] */
 function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: { personal: string; company: string }; onDone: (t: any) => void }) {
   const done = r.task?.status === 'done';
   return (
     <li className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50" data-week-item={r.tag} {...(r.task ? { 'data-week-task': r.task.id } : {})}>
       <span className="w-10 shrink-0 text-xs tabular-nums text-ink-2">{r.time || '종일'}</span>
-      {r.task && r.tag !== '일정·업무' ? (
-        // V14 33번: 이번 주 목록의 업무 동그라미는 표시만(누르면 실수로 완료) — 제목을 누르면 상세
-        <span aria-hidden className={cx('flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px]', done ? 'border-green-500 bg-green-500 text-white' : 'border-slate-300')}>{done && <Check className="size-3" strokeWidth={3} />}</span>
-      ) : <span className="size-2.5 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden />}
+      {/* V14 37번: 업무 동그라미 제거 — 업무는 색 막대, 일정은 색 점 (제목을 누르면 상세) */}
+      {r.task && r.tag !== '일정·업무'
+        ? <span className="h-3.5 w-1 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden data-week-bar />
+        : <span className="size-2.5 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden />}
       <Link href={r.href} className={cx('min-w-0 flex-1 truncate font-medium hover:underline', done && 'text-ink-3 line-through')}>{r.title}</Link>
       <span className="shrink-0 rounded-full bg-slate-100 px-1.5 text-[10px] font-medium text-ink-2">{r.tag}</span>
     </li>

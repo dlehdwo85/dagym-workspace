@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DateField, TimeSelect, nextHour, shiftEnd } from '@/components/DateTimePickers';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -16,6 +16,8 @@ import { CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, Chevron
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
 import { QuickAddTask } from '@/components/QuickAddTask';
+import { useBackClose, useSheetBack } from '@/components/backClose';
+import { useCalendarSwipe } from '@/components/calSwipe';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
@@ -77,10 +79,14 @@ export default function CalendarPage() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [err, setErr] = useState<any>(null);
   const [editor, setEditor] = useState<{ id?: string; occurrenceStart?: string; draft?: any } | null>(null);
+  useBackClose(!!editor, () => setEditor(null));
   const [quick, setQuick] = useState<{ x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean; kind?: 'task' | 'event' } | null>(null);
   // V14 35번: 빈 칸 빠른 등록은 업무가 기본 — 주·일 보기는 누른 시각이 마감 시각
+  useSheetBack(!!quick && quick.kind !== 'task', () => { setQuick(null); calRef.current?.getApi().unselect(); });
   const quickTaskDefaults = useMemo(() => quick && quick.kind === 'task' ? { dueDate: quick.date, dueTime: quick.allDay ? undefined : quick.start } : undefined, [quick]);
   const [openTask, setOpenTask] = useState<string | null>(null);
+  // V14 39번: 상세·미리보기·일정 창은 history 한 칸 — 뒤로가기는 이것만 닫고 캘린더(날짜·보기·스크롤)는 그대로
+  useBackClose(!!openTask, () => { setOpenTask(null); load(); });
   // WORKIN_V4 사람 필터: 'all' · 'mine' · [사람 id…] (여러 명), 이 기기에 기억
   const [who, setWhoState] = useState<'all' | 'mine' | string[]>('all');
   // 저장된 선택은 화면이 뜬 뒤 읽는다(서버 렌더 값으로 덮어쓰지 않게), 바꿀 때만 저장
@@ -100,13 +106,20 @@ export default function CalendarPage() {
   };
   const showTask = (t: any) => who === 'all' || (who === 'mine' ? t.assignee_id === user.id : who.includes(t.assignee_id));
   const calRef = useRef<FullCalendar>(null);
+  // V14 36번: 좌우로 밀어 이전·다음 기간(휴대폰), 트랙패드 가로 스크롤(PC)
+  const swipeWrap = useRef<HTMLDivElement>(null);
+  const calApi = useCallback(() => calRef.current?.getApi(), []);
   const { colors: calColors } = useCalColors();
   const [colorDlg, setColorDlg] = useState(false);
   const mobile = typeof window !== 'undefined' && window.innerWidth < 640;
   // 휴대폰: 보기(일·3일·주·월·목록)를 이 기기에 기억, 처음은 주. PC 는 늘 주 보기로 시작
-  const savedView = !mobile ? null : (() => { try { const v = localStorage.getItem('wos_cal_view'); return v && ['timeGridDay', 'timeGrid3', 'timeGridWeek', 'dayGridMonth', 'listWeek'].includes(v) ? v : null; } catch { return null; } })();
+  const VIEWS = ['timeGridDay', 'timeGrid3', 'timeGridWeek', 'dayGridMonth', 'listWeek'];
+  // V14 39번: 보기·날짜·스크롤은 주소(URL)에 — 뒤로가기로 돌아와도 그대로. V14 38번: 휴대폰 기본 보기 = 3일(7일은 선택, 기억 키를 새로)
+  const urlView = VIEWS.includes(sp.get('view') ?? '') ? sp.get('view') : null;
+  const savedView = !mobile ? null : (() => { try { const v = localStorage.getItem('wos_cal_view2'); return v && ['timeGridDay', 'timeGrid3', 'timeGridWeek', 'dayGridMonth', 'listWeek'].includes(v) ? v : null; } catch { return null; } })();
   const [monthPicker, setMonthPicker] = useState(false);
   const touch = typeof window !== 'undefined' && (window.innerWidth < 640 || !!window.matchMedia?.('(pointer: coarse)').matches);
+  useCalendarSwipe(swipeWrap, calApi, touch);
 
   useEffect(() => { try { localStorage.setItem('wos_cal_hidden', JSON.stringify(hidden)); localStorage.setItem('wos_cal_tasks', showTasks ? '1' : '0'); localStorage.setItem('wos_cal_unscheduled', sidePanel ? '1' : '0'); } catch {} }, [hidden, showTasks, sidePanel]);
   // B-17 공휴일 + Google Calendar 와 같은 단축키 D·W·M·A·T·C
@@ -137,6 +150,7 @@ export default function CalendarPage() {
     }
   }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
   const [preview, setPreview] = useState<{ ev: any; x: number; y: number } | null>(null);
+  useBackClose(!!preview, () => setPreview(null));
 
   async function load() {
     if (!range) return;
@@ -160,7 +174,7 @@ export default function CalendarPage() {
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e) && (showDone || e.linkedTask?.status !== 'done')).map((e) => ({
       id: `${e.id}|${e.originalStart ?? ''}`, title: `${e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? `${initials(e.ownerName ?? '')} · ` : ''}${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}`,
-      classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(e.linkedTask?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
+      classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(e.linkedTask ? ['has-task'] : []), ...(e.linkedTask?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
       // V7 4번: 색은 개인/회사 두 가지만(사람 구분은 제목 앞 머리글자)
       backgroundColor: isPersonalEvent(e) ? calColors.personal : calColors.company, borderColor: 'transparent', textColor: '#ffffff',
@@ -168,12 +182,12 @@ export default function CalendarPage() {
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
     ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id)).map((t) => ({
-      // V7 4번: 일정과 같은 모양 — 앞에 ✓ 만 다름, 다른 사람 업무는 머리글자
+      // V7 4번: 일정과 같은 모양 — 업무는 왼쪽 굵은 선(V14 37번, 동그라미 없음), 다른 사람 업무는 머리글자
       id: `task|${t.id}`, title: `${t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? `${initials(t.assignee_name)} · ` : ''}${t.title}`,
       // V14 13번: 시간 있는 업무는 마감 직전 1시간 블록(한 칸 높이) — 얇게 찌그러지지 않게
       start: t.due_time ? new Date(Math.max(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() - 60 * 60000, new Date(`${t.due_date}T00:00:00+09:00`).getTime())).toISOString() : t.due_date, // 자정 넘지 않게
       end: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : undefined, // 검수 11: 주석 안에 있던 end 를 살림
-      allDay: !t.due_time, backgroundColor: isPersonalTask(t) ? calColors.personal : calColors.company, borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#ef4444' : 'transparent',
+      allDay: !t.due_time, backgroundColor: isPersonalTask(t) ? calColors.personal : calColors.company, borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#ef4444' : 'rgba(15,23,42,0.35)', // V14 37번: 왼쪽 굵은 선 = 업무
       textColor: '#ffffff', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t }, durationEditable: false,
     })) : []),
   ], [events, tasks, hidden, showTasks, showDone, hol.data, who, calColors.personal, calColors.company]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -221,6 +235,28 @@ export default function CalendarPage() {
     } catch (er: any) { toast.error(er.message); info.revert(); }
     load();
   }
+
+  /** 주소창만 바꿈(화면 다시 그리지 않음) — 다른 화면에 갔다가 뒤로 오면 같은 보기·날짜·스크롤 */
+  function keepInUrl(p: Record<string, string>) {
+    if (window.history.state?.__overlay) return; // 상세가 열린 칸은 건드리지 않음
+    const u = new URL(window.location.href);
+    for (const [k, v] of Object.entries(p)) u.searchParams.set(k, v);
+    for (const k of ['quick', 'new', 'event']) u.searchParams.delete(k); // 한 번 쓰는 값(다시 열리지 않게)
+    if (u.href !== window.location.href) window.history.replaceState(window.history.state, '', u.pathname + u.search);
+  }
+  const scrolled = useRef(false);
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = () => { clearTimeout(t); t = setTimeout(() => keepInUrl({ y: String(Math.round(window.scrollY)) }), 300); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { window.removeEventListener('scroll', onScroll); clearTimeout(t); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { // 돌아왔을 때 스크롤 위치 복원(일정을 불러와 높이가 잡힌 뒤 한 번)
+    const y = Number(sp.get('y'));
+    if (scrolled.current || !y || !events.length) return;
+    scrolled.current = true;
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  }, [events.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function onClick(i: EventClickArg) {
     i.jsEvent.preventDefault();
@@ -334,11 +370,12 @@ export default function CalendarPage() {
               ))}
             </div>
           </div>
+          <div ref={swipeWrap} className="overflow-x-clip" data-testid="cal-swipe">
           <FullCalendar
             ref={calRef}
             plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
             timeZone="Asia/Seoul" locale="ko" firstDay={1} height="auto" nowIndicator
-            initialView={savedView ?? 'timeGridWeek'}
+            initialView={urlView ?? savedView ?? (mobile ? 'timeGrid3' : 'timeGridWeek')}
             initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
             headerToolbar={mobile ? false : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
             views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' } }}
@@ -355,36 +392,38 @@ export default function CalendarPage() {
             slotLabelFormat={mobile ? { hour: 'numeric', hour12: false } : { hour: 'numeric', hour12: true }} // 휴대폰은 "13시"처럼 짧게 → 날짜 칸을 넓게
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
             allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime={slotMin} scrollTime="08:00:00"
-            slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap={false} eventMinHeight={28}
+            slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap eventMinHeight={28} eventShortHeight={30}
             editable selectable selectMirror droppable longPressDelay={350}
             events={fcEvents}
-            datesSet={(a: DatesSetArg) => { setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view', a.view.type); } catch {} }}
+            datesSet={(a: DatesSetArg) => { setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view2', a.view.type); } catch {} keepInUrl({ view: a.view.type, date: seoulDate(a.view.calendar.getDate()) }); }}
             eventClick={onClick}
             eventReceive={receive}
             eventContent={(arg) => {
-              // V7 4번: 업무와 일정을 같은 모양·크기로 — 업무는 앞에 ✓(완료 동그라미)만 다르고, 완료면 취소선
+              // V14 37번: 업무 동그라미 아이콘 제거 — 업무는 블록 왼쪽 굵은 선(CSS .task-item)으로 구분, 완료는 흐림·취소선
+              // V14 38번(Google 수준 가독성): 12px·줄간 1.25, 제목은 블록 높이만큼 여러 줄, 시간은 아래 작은 글자, 짧은 블록은 "제목, 9:00" 한 줄, 월 보기는 시간 생략 한 줄
               const p = arg.event.extendedProps;
               if (p.type === 'holiday') return true;
               const isTask = p.type === 'task';
               const t = p.task, lt = p.ev?.linkedTask;
               const done = isTask ? t.status === 'done' : lt?.status === 'done';
-              const narrow = mobile && (arg.view.type === 'timeGridWeek' || arg.view.type === 'dayGridMonth');
               const timed = arg.view.type.startsWith('timeGrid') && !arg.event.allDay;
-              // R-15 1번: 완료는 흰 동그라미 안 ✓ + 흐림·취소선(월·주·일·목록 모두), 미완료 업무는 빈 동그라미
-              const mark = isTask ? (narrow ? (done ? <span className="mr-0.5 inline-flex size-3 items-center justify-center rounded-full bg-white align-[-2px] text-ink" aria-label="완료"><Check className="size-2.5" strokeWidth={3} /></span>
-                : <span className="mr-0.5 inline-block size-2.5 rounded-full border border-white/90 align-[-1px]" aria-hidden />)
-                // V14 33번: 캘린더에서는 완료 동그라미를 누를 수 없게(실수 완료 방지) — 누르면 미리보기·상세만
-                : <span className={cx('mr-1 inline-flex size-3.5 items-center justify-center rounded-full border border-white/90 align-[-2px]', done && 'bg-white text-ink')} aria-label={done ? '완료' : '업무'}>{done && <Check className="size-2.5" strokeWidth={3} />}</span>)
-                : lt ? (done ? <span className="mr-0.5 inline-flex size-3 items-center justify-center rounded-full bg-white align-[-2px] text-ink" aria-label="연결 업무 완료"><Check className="size-2.5" strokeWidth={3} /></span>
-                  : <Check className="mr-0.5 inline size-3 align-[-2px]" strokeWidth={3} aria-label="업무와 연결" />)
-                : arg.event.classNames.includes('task-block') ? <Timer className="mr-0.5 inline size-3 align-[-2px]" aria-label="업무 시간" /> : null;
+              const month = arg.view.type === 'dayGridMonth';
+              const mins = arg.event.end && arg.event.start ? (+arg.event.end - +arg.event.start) / 60000 : 60;
+              const hm = (x: Date | null) => (x ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }).format(x) : '');
+              // 휴대폰(좁은 칸)은 시작 시각만 "13:00" — "오후 1:00 - 오후 2…"처럼 잘리지 않게
+              const when = isTask ? (t.due_time ? `${t.due_time.slice(0, 5)} 마감` : '') : mobile && timed ? hm(arg.event.start) : arg.timeText;
+              const icon = !isTask && arg.event.classNames.includes('task-block') ? <Timer className="mr-0.5 inline size-3 align-[-2px]" aria-label="업무 시간" /> : null;
+              const attrs = { ...(isTask ? { 'data-task-item': t.id, title: t.title } : { 'data-ev-block': '1', title: arg.event.title, ...(lt ? { 'data-linked-task': lt.id } : {}) }), 'data-done': done ? '1' : undefined };
+              if (timed && mins >= 45) return (
+                <div className="flex h-full min-w-0 flex-col overflow-hidden px-1 text-[12px] leading-[1.25]" {...attrs}>
+                  <span className={cx('min-h-0 shrink overflow-hidden break-all font-semibold', done && 'line-through opacity-80')}>{icon}{arg.event.title}</span>
+                  {when && <span className="shrink-0 truncate text-[11px] font-normal opacity-85">{when}</span>}
+                </div>
+              );
               return (
-                <div className={cx('flex min-w-0 overflow-hidden px-0.5 leading-tight', timed ? 'h-full flex-col' : 'items-start', narrow ? 'text-[10px]' : 'text-[12px]')}
-                  {...(isTask ? { 'data-task-item': t.id, title: t.title } : { 'data-ev-block': '1' })} data-done={done ? '1' : undefined}>
-                  <span className={cx('min-w-0 break-all font-semibold line-clamp-2 whitespace-normal', done && 'line-through opacity-80')}>
-                    {mark}{!timed && !narrow && arg.timeText && <span className="mr-1 font-normal opacity-85">{arg.timeText}</span>}{arg.event.title}
-                  </span>
-                  {timed && !narrow && (isTask ? t.due_time && <span className="mt-0.5 text-[11px] opacity-85">{t.due_time.slice(0, 5)} 마감</span> : arg.timeText && <span className="mt-0.5 text-[11px] opacity-85">{arg.timeText}</span>)}
+                <div className="min-w-0 overflow-hidden truncate px-1 text-[12px] leading-[1.25]" {...attrs}>
+                  <span className={cx('font-semibold', done && 'line-through opacity-80')}>{icon}{arg.event.title}</span>
+                  {!month && when && <span className="font-normal opacity-85">{timed ? ', ' : ' '}{when}</span>}
                 </div>
               );
             }}
@@ -406,6 +445,7 @@ export default function CalendarPage() {
                 start: s.allDay ? undefined : seoulTime(s.start), end: s.allDay ? undefined : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) });
             }}
           />
+          </div>
         </div>
         {sidePanel && <UnscheduledPanel onClose={() => setSidePanel(false)} onOpen={setOpenTask} />}
       </div>

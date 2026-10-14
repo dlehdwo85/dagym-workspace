@@ -1,5 +1,6 @@
 'use client';
 import clsx from 'clsx';
+import { useSheetBack } from './backClose';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AlertCircle, CalendarDays, CheckCircle2, Flag, Inbox, Info, Loader2, Lock, RotateCw, UserRound, X, type LucideIcon } from 'lucide-react';
 import { STATUS_LABEL, PRIORITY_LABEL, type TaskStatus, type Priority } from '@/lib/types';
@@ -51,6 +52,7 @@ export function Field({ label, children, hint, className }: { label: string; chi
 export const inputCls = 'w-full rounded-input border border-slate-300 bg-white px-3 py-2 text-sm text-ink placeholder:text-slate-400 transition-colors hover:border-slate-400 focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20 disabled:bg-slate-50';
 
 export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
+  useSheetBack(open, onClose); // V14 39번: 앱 뒤로 버튼은 열린 시트부터 닫는다
   useEffect(() => {
     if (!open) return;
     const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();

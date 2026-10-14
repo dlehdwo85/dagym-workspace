@@ -42,7 +42,18 @@ export async function initNative(router: Router) {
   // 휴대폰 예약 알림(서버 연결 없이 정시에 울림) 탭 → 해당 화면
   if (hasLocal()) LocalNotifications.addListener('localNotificationActionPerformed', (e: any) => go(e?.notification?.extra?.link));
   App.addListener('appUrlOpen', (e: any) => go(e.url.replace(/^[a-z]+:\/\/[^/]*/i, '') || '/'));
-  App.addListener('backButton', ({ canGoBack }: any) => (canGoBack ? history.back() : App.exitApp()));
+  // V14 39번: 하드웨어 뒤로 = 열린 시트·모달 닫기 → 이전 화면(history) → 홈 → (홈에서) 2초 안에 한 번 더 누르면 종료
+  let exitAt = 0;
+  App.addListener('backButton', async ({ canGoBack }: any) => {
+    const { closeTopSheet } = await import('./backClose');
+    if (closeTopSheet()) return;
+    if (canGoBack && history.length > 1 && location.pathname !== '/') { history.back(); return; }
+    if (location.pathname !== '/') { router.push('/'); return; }
+    if (Date.now() - exitAt < 2000) { App.exitApp(); return; }
+    exitAt = Date.now();
+    const { toast } = await import('./ui');
+    toast.info('한 번 더 누르면 앱을 닫습니다');
+  });
 
   FirebaseMessaging.addListener('notificationReceived', (e: any) => {
     // 일정·업무가 바뀌면 서버가 조용한 메시지를 보낸다 → 예약 다시 맞춤
