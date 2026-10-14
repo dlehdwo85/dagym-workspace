@@ -50,7 +50,7 @@ export async function listRooms(u: SessionUser) {
   const sql = db();
   await companyRoom(u, sql);
   const rooms = await sql`
-    select r.id, r.kind, r.task_id, r.last_message_at, m.muted, m.last_read_id,
+    select r.id, r.kind, r.task_id, r.last_message_at, m.muted, m.last_read_id, m.pinned_at is not null as pinned,
       case when r.kind = 'dm' then (select ou.name from chat_members om join users ou on ou.id = om.user_id where om.room_id = r.id and om.user_id <> ${u.id} limit 1)
            when r.kind = 'task' then coalesce(r.name, t.title) else r.name end as name,
       case when r.kind = 'dm' then (select om.user_id from chat_members om where om.room_id = r.id and om.user_id <> ${u.id} limit 1) end as other_id,
@@ -62,7 +62,7 @@ export async function listRooms(u: SessionUser) {
       left join lateral (select * from chat_messages x where x.room_id = r.id order by x.id desc limit 1) lm on true
       left join users lu on lu.id = lm.author_id
     where m.user_id = ${u.id} and r.tenant = ${tenantOf(u)} and (r.kind <> 'task' or t.deleted_at is null)
-    order by (r.kind = 'company') desc, coalesce(r.last_message_at, r.created_at) desc`;
+    order by (m.pinned_at is not null) desc, (r.kind = 'company') desc, coalesce(r.last_message_at, r.created_at) desc`;
   return { rooms, unread: rooms.reduce((a: number, r: any) => a + (r.muted ? 0 : r.unread), 0) };
 }
 
@@ -122,6 +122,12 @@ export async function leaveRoom(u: SessionUser, roomId: string) {
   await sql`delete from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
   return { ok: true };
 }
+export async function setRoomPinned(u: SessionUser, roomId: string, pinned: boolean) {
+  const sql = db();
+  await loadRoom(u, roomId, sql);
+  await sql`update chat_members set pinned_at = ${pinned ? new Date() : null} where room_id = ${roomId} and user_id = ${u.id}`;
+  return { ok: true };
+}
 export async function setMuted(u: SessionUser, roomId: string, muted: boolean) {
   const sql = db();
   await loadRoom(u, roomId, sql);
@@ -132,7 +138,13 @@ export async function setMuted(u: SessionUser, roomId: string, muted: boolean) {
 const MSG_COLS = (sql: Sql, u: SessionUser) => sql`m.id::text as id, m.room_id, m.author_id, au.name as author_name, m.created_at, m.edited_at, m.pinned_at,
   case when m.deleted_at is null then m.body else '' end as body, (m.deleted_at is not null) as deleted,
   case when m.deleted_at is null then m.file_name end as file_name, case when m.deleted_at is null then m.file_mime end as file_mime,
-  case when m.deleted_at is null then m.file_size end as file_size, m.task_id, (m.author_id = ${u.id}) as mine`;
+  case when m.deleted_at is null then m.file_size end as file_size, m.task_id, (m.author_id = ${u.id}) as mine,
+  m.reply_to::text as reply_to,
+  (select json_build_object('author', ru.name, 'body', case when rm.deleted_at is null then left(rm.body, 120) else '' end, 'file', case when rm.deleted_at is null then rm.file_name end, 'deleted', rm.deleted_at is not null)
+     from chat_messages rm left join users ru on ru.id = rm.author_id where rm.id = m.reply_to) as reply,
+  coalesce((select json_agg(json_build_object('emoji', g.emoji, 'n', g.n, 'mine', g.mine, 'names', g.names) order by g.first)
+     from (select r.emoji, count(*)::int n, bool_or(r.user_id = ${u.id}) mine, array_agg(ru2.name order by r.created_at) names, min(r.created_at) first
+       from chat_reactions r join users ru2 on ru2.id = r.user_id where r.message_id = m.id group by r.emoji) g), '[]') as reactions`;
 
 export async function roomDetail(u: SessionUser, roomId: string, q: { before?: string; q?: string }) {
   const sql = db();
@@ -153,6 +165,7 @@ export async function roomDetail(u: SessionUser, roomId: string, q: { before?: s
 export const messageInput = z.object({
   body: z.string().max(5000).default(''),
   file: z.object({ key: z.string().max(400), name: z.string().max(200), mime: z.string().max(100), size: z.number().int().positive() }).optional(),
+  replyTo: z.string().regex(/^\d+$/).max(20).optional(),
 });
 export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typeof messageInput>) {
   const sql = db();
@@ -163,6 +176,7 @@ export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typ
     if (!i.file.key.startsWith(`chat/${r.tenant}/${r.id}/`)) throw badRequest('잘못된 파일입니다');
     if ((await objectSize(i.file.key)) === null) throw badRequest('업로드된 파일을 찾을 수 없습니다. 다시 올려 주세요.');
   }
+  if (i.replyTo && !(await sql`select 1 from chat_messages where id = ${i.replyTo}::bigint and room_id = ${r.id}`).length) throw badRequest('답장할 메시지가 이 대화방에 없습니다');
   const mentionIds = [...body.matchAll(/@\[[^\]]{1,50}\]\(([0-9a-f-]{36})\)/g)].map((m) => m[1]);
   const members = (await sql<{ user_id: string; muted: boolean }[]>`select user_id, muted from chat_members where room_id = ${r.id}`);
   const memberIds = members.map((m) => m.user_id);
@@ -174,8 +188,8 @@ export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typ
     }
   }
   const mentions = mentionIds.filter((x) => memberIds.includes(x));
-  const [m] = await sql<{ id: string; created_at: Date }[]>`insert into chat_messages (room_id, author_id, body, mentions, file_key, file_name, file_mime, file_size)
-    values (${r.id}, ${u.id}, ${body}, ${mentions}, ${i.file?.key ?? null}, ${i.file?.name ?? null}, ${i.file?.mime ?? null}, ${i.file?.size ?? null}) returning id::text, created_at`;
+  const [m] = await sql<{ id: string; created_at: Date }[]>`insert into chat_messages (room_id, author_id, body, mentions, file_key, file_name, file_mime, file_size, reply_to)
+    values (${r.id}, ${u.id}, ${body}, ${mentions}, ${i.file?.key ?? null}, ${i.file?.name ?? null}, ${i.file?.mime ?? null}, ${i.file?.size ?? null}, ${i.replyTo ?? null}) returning id::text, created_at`;
   await sql`update chat_rooms set last_message_at = now() where id = ${r.id}`;
   await sql`update chat_members set last_read_id = ${m.id}::bigint where room_id = ${r.id} and user_id = ${u.id}`;
   await sql`delete from chat_typing where room_id = ${r.id} and user_id = ${u.id}`;
@@ -217,6 +231,17 @@ export async function pinMessage(u: SessionUser, id: string, pin: boolean) {
   await sql`update chat_messages set pinned_at = ${pin ? sql`now()` : null}, pinned_by = ${pin ? u.id : null} where id = ${id}::bigint`;
   return { ok: true };
 }
+export const CHAT_EMOJI = ['👍', '❤️', '😂', '😮', '🙏', '✅'] as const;
+export async function reactMessage(u: SessionUser, id: string, emoji: string) {
+  const sql = db();
+  const m = await ownMessage(u, id, sql);
+  if (m.deleted_at) throw badRequest('삭제된 메시지입니다');
+  if (!(CHAT_EMOJI as readonly string[]).includes(emoji)) throw badRequest('쓸 수 없는 반응입니다');
+  const del = await sql`delete from chat_reactions where message_id = ${id}::bigint and user_id = ${u.id} and emoji = ${emoji} returning 1`;
+  if (!del.length) await sql`insert into chat_reactions (message_id, user_id, emoji) values (${id}::bigint, ${u.id}, ${emoji}) on conflict do nothing`;
+  await sql`update chat_messages set reacted_at = now() where id = ${id}::bigint`;
+  return { ok: true, on: !del.length };
+}
 export async function markRead(u: SessionUser, roomId: string, upTo?: string) {
   const sql = db();
   await loadRoom(u, roomId, sql);
@@ -256,7 +281,7 @@ export async function changesSince(u: SessionUser, since: string, sinceTime: Dat
   const sql = db();
   const rows = await sql`select ${MSG_COLS(sql, u)} from chat_messages m join chat_members cm on cm.room_id = m.room_id and cm.user_id = ${u.id}
     left join users au on au.id = m.author_id
-    where m.id > ${since}::bigint or (m.edited_at > ${sinceTime} or m.deleted_at > ${sinceTime} or m.pinned_at > ${sinceTime})
+    where m.id > ${since}::bigint or (m.edited_at > ${sinceTime} or m.deleted_at > ${sinceTime} or m.pinned_at > ${sinceTime} or m.reacted_at > ${sinceTime})
     order by m.id limit 200`;
   const typing = await sql`select t.room_id, us.name from chat_typing t join chat_members cm on cm.room_id = t.room_id and cm.user_id = ${u.id}
     join users us on us.id = t.user_id where t.user_id <> ${u.id} and t.at > now() - interval '6 seconds'`;

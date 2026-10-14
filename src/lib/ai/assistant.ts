@@ -462,7 +462,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   const T = await import('./threads');
   if (i.threadId) await T.ownThread(u, i.threadId);
   const blocked = await T.precheck(u, userText, i.threadId ?? null, !!i.fileIds?.length);
-  const threadId = i.threadId ?? (await T.startThread(u, userText, i.taskId ?? null));
+  const threadId = i.threadId ?? (await T.startThread(u, userText, i.taskId ?? null, db(), i.context));
   const fileNames = i.fileIds?.length ? (await db()<{ file_name: string }[]>`select file_name from library_files where id = any(${i.fileIds}::uuid[])`).map((f) => f.file_name) : [];
   if (blocked) {
     await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: blocked, status: 'blocked', reason: blocked });

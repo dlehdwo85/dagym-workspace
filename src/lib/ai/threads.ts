@@ -25,9 +25,10 @@ export async function ownThread(u: SessionUser, id: string, sql: Sql = db()) {
   if (!t) throw notFound('대화가 없습니다');
   return t;
 }
-export async function startThread(u: SessionUser, firstText: string, taskId: string | null, sql: Sql = db()) {
+export async function startThread(u: SessionUser, firstText: string, taskId: string | null, sql: Sql = db(), ctx?: { page: string; id?: string }) {
   const title = firstText.replace(/\s+/g, ' ').trim().slice(0, 40) || '새 대화';
-  const [t] = await sql<{ id: string }[]>`insert into ai_threads (tenant, user_id, title, task_id) values (${tenantOf(u)}, ${u.id}, ${title}, ${taskId}) returning id`;
+  const [t] = await sql<{ id: string }[]>`insert into ai_threads (tenant, user_id, title, task_id, context_page, context_id)
+    values (${tenantOf(u)}, ${u.id}, ${title}, ${taskId}, ${taskId ? 'task' : ctx?.page ?? null}, ${ctx?.id ?? null}) returning id`;
   return t.id;
 }
 /** 문맥: 앞부분 요약 + 최근 20개(차단·오류 제외). 제안은 처리 결과와 함께 */
@@ -107,7 +108,7 @@ export async function listThreads(u: SessionUser, q: { q?: string; taskId?: stri
   const sql = db();
   const like = q.q ? '%' + q.q.replace(/[%_\\]/g, (c) => '\\' + c) + '%' : null;
   const conf = (await menuLevelOf(u)) !== 'none'; // 기밀 대화는 기밀 권한자에게만 제목·검색
-  const threads = await sql`select t.id, case when t.confidential and not ${conf} then '기밀 자료 대화' else t.title end as title, t.confidential, t.task_id, tk.title as task_title, t.pinned, t.updated_at,
+  const threads = await sql`select t.id, case when t.confidential and not ${conf} then '기밀 자료 대화' else t.title end as title, t.confidential, t.task_id, tk.title as task_title, t.pinned, t.updated_at, t.context_page, t.context_id,
       (select count(*)::int from ai_messages m where m.thread_id = t.id and m.role = 'user') as turns
     from ai_threads t left join tasks tk on tk.id = t.task_id
     where t.user_id = ${u.id} and t.tenant = ${tenantOf(u)} and t.deleted_at is null

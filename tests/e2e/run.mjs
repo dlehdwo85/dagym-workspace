@@ -1682,6 +1682,7 @@ await step('V13 10번 메신저: 1:1 대화 → 상대 화면에 실시간 도�
   await owner.screenshot({ path: `${SHOTS}/64-messenger.png`, fullPage: true });
   // 업무로 만들기
   await owner.getByTestId('chat-message').filter({ hasText: '내일 오전에 현장 사진' }).hover();
+  await owner.getByTestId('chat-message').filter({ hasText: '내일 오전에 현장 사진' }).getByTestId('msg-more').click();
   await owner.getByTestId('chat-message').filter({ hasText: '내일 오전에 현장 사진' }).getByTestId('msg-to-task').click();
   const dlg = owner.getByRole('dialog', { name: '업무 등록' });
   await dlg.waitFor();
@@ -1774,10 +1775,25 @@ await step('V14 19번·R-15·R-16: 업무 상세 머리 요약·D-day·다음 �
   // 메신저 바로가기
   await owner.goto(BASE + '/tasks');
   await owner.getByTestId('msg-dock-open').click();
-  await owner.getByTestId('msg-dock-rooms').locator('li').first().click();
-  await owner.getByTestId('msg-dock-input').fill('바로 답장 E2E');
-  await owner.getByTestId('msg-dock-input').press('Enter');
-  await owner.getByTestId('msg-dock-chat').getByText('바로 답장 E2E').waitFor();
+  const dock = owner.getByTestId('msg-dock');
+  const dockBox = await dock.boundingBox();
+  assert.ok(Math.abs(dockBox.width - 380) <= 2 && Math.abs(dockBox.height - 560) <= 2, `메신저 패널 380×560 (${dockBox.width}×${dockBox.height})`);
+  await dock.getByTestId('chat-new').waitFor(); // V14 25번: 패널에도 ＋ 새 대화
+  await dock.getByTestId('chat-rooms').locator('li button[data-room]').first().click();
+  await dock.getByTestId('chat-input').fill('바로 답장 E2E');
+  await dock.getByTestId('chat-input').press('Enter');
+  await dock.getByTestId('chat-messages').getByText('바로 답장 E2E').waitFor();
+  // 답장 인용 · 반응 (hover 메뉴)
+  const mine = dock.getByTestId('chat-message').filter({ hasText: '바로 답장 E2E' }).last();
+  await mine.hover();
+  await mine.getByTestId('msg-reply').click();
+  await dock.getByTestId('chat-replying').waitFor();
+  await dock.getByTestId('chat-input').fill('인용 답장');
+  await dock.getByTestId('chat-input').press('Enter');
+  await dock.getByTestId('chat-reply-quote').filter({ hasText: '바로 답장 E2E' }).first().waitFor();
+  await mine.hover();
+  await mine.getByRole('button', { name: '👍 반응' }).first().click();
+  await mine.getByTestId('chat-reactions').getByText('👍 1').waitFor();
   await owner.screenshot({ path: `${SHOTS}/93-messenger-dock.png` });
   await owner.getByRole('dialog', { name: '메신저' }).getByLabel('닫기').click();
   // 휴대폰: 댓글 입력줄이 화면 아래 고정
@@ -1801,6 +1817,14 @@ await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 �
   await owner.getByTestId('ai-dock-suggest').first().click();
   await owner.getByTestId('ai-dock-chat').getByText('오늘은 일정 2건입니다.').waitFor();
   await owner.screenshot({ path: `${SHOTS}/66-ai-dock.png` });
+  // V14 26번: 패널 안 대화 목록(이 화면 관련 먼저) · 새 대화 · 이어서 대화
+  await owner.getByTestId('ai-dock-new').click();
+  assert.equal(await owner.getByTestId('ai-dock-chat').getByText('오늘은 일정 2건입니다.').count(), 0, '새 대화는 비어 있음');
+  await owner.getByTestId('ai-dock-list-open').click();
+  await owner.getByTestId('ai-dock-related').getByTestId('ai-dock-thread').first().waitFor();
+  await owner.screenshot({ path: `${SHOTS}/66b-ai-dock-threads.png` });
+  await owner.getByTestId('ai-dock-related').getByTestId('ai-dock-thread').first().click();
+  await owner.getByTestId('ai-dock-chat').getByText('오늘은 일정 2건입니다.').waitFor();
   await owner.getByTestId('ai-dock').getByRole('button', { name: '닫기' }).click();
   // 팀
   await owner.goto(BASE + '/admin/users');

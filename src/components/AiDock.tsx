@@ -2,8 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Check, Loader2, Maximize2, Send, Sparkles, X } from 'lucide-react';
-import { api, broadcastRefresh } from './client';
+import { ArrowLeft, Check, Loader2, Maximize2, Menu, Pin, Plus, Search, Send, Sparkles, X } from 'lucide-react';
+import { api, broadcastRefresh, useApi } from './client';
 import { Button, cx, inputCls, toast } from './ui';
 
 type Ctx = { page: 'home' | 'tasks' | 'task' | 'calendar' | 'library' | 'revenue' | 'reports' | 'messages' | 'other'; id?: string; taskId?: string };
@@ -47,10 +47,11 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   const [threadId, setThreadId] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<'chat' | 'list'>('chat'); // V14 26번: 패널 안 대화 목록
   const end = useRef<HTMLDivElement>(null);
   // 다른 업무·화면으로 가면 새 대화 (맥락이 섞이지 않게)
   const key = `${ctx.page}:${ctx.id ?? ''}:${ctx.taskId ?? ''}`;
-  useEffect(() => { setMsgs([]); setThreadId(null); }, [key]);
+  useEffect(() => { setMsgs([]); setThreadId(null); setView('chat'); }, [key]);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy]);
   if (path.startsWith('/assistant')) return null;
   const hideFab = path.startsWith('/messages'); // 메시지 화면은 아래 오른쪽에 보내기 버튼 — 겹치지 않게(휴대폰은 상단 ✨)
@@ -63,6 +64,15 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
       setThreadId(r.threadId ?? threadId);
       setMsgs((m) => [...m, { role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked }]);
     } catch (e: any) { setMsgs((m) => [...m, { role: 'assistant', text: e.message, error: true }]); } finally { setBusy(false); }
+  }
+  const newChat = () => { setMsgs([]); setThreadId(null); setView('chat'); };
+  async function openThread(id: string) {
+    try {
+      const r = await api(`/api/ai/threads/${id}`);
+      setMsgs(r.messages.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'assistant', text: m.text || (m.status === 'error' ? '(오류)' : ''), blocked: m.status === 'blocked', error: m.status === 'error',
+        proposals: (m.proposals ?? []).map((p: any) => ({ id: p.id, summary: p.summary, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) })));
+      setThreadId(id); setView('chat');
+    } catch (e: any) { toast.error(e.message); }
   }
   async function decide(mi: number, p: P, accept: boolean) {
     const set = (patch: Partial<P>) => setMsgs((m) => m.map((x, i) => (i === mi ? { ...x, proposals: x.proposals!.map((y) => (y.id === p.id ? { ...y, ...patch } : y)) } : x)));
@@ -81,11 +91,16 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
           <section role="dialog" aria-label="AI 비서" onClick={(e) => e.stopPropagation()} data-testid="ai-dock"
             className="absolute inset-x-0 bottom-0 flex h-[78dvh] flex-col rounded-t-2xl bg-white pb-[var(--sab)] shadow-pop sm:static sm:h-[560px] sm:w-[380px] sm:rounded-card sm:border sm:border-line sm:pb-0">
             <header className="flex items-center gap-2 border-b border-line px-3 py-2">
-              <Sparkles className="size-4 text-violet-600" /><span className="flex-1 text-sm font-semibold">AI 비서</span>
+              {view === 'list'
+                ? <button onClick={() => setView('chat')} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="대화로 돌아가기"><ArrowLeft className="size-4" /></button>
+                : <button onClick={() => setView('list')} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="대화 목록" title="대화 목록" data-testid="ai-dock-list-open"><Menu className="size-4" /></button>}
+              <Sparkles className="size-4 text-violet-600" /><span className="min-w-0 flex-1 truncate text-sm font-semibold">{view === 'list' ? '대화 목록' : 'AI 비서'}</span>
+              <button onClick={newChat} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="새 대화" title="새 대화" data-testid="ai-dock-new"><Plus className="size-4" /></button>
               <Link href={`/assistant?${new URLSearchParams({ ...(threadId ? { thread: threadId } : {}), ...(ctx.taskId ? { task: ctx.taskId } : {}) })}`} onClick={() => onOpenChange(false)}
-                className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="전체 화면으로"><Maximize2 className="size-4" /></Link>
+                className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="크게 보기" title="크게 보기"><Maximize2 className="size-4" /></Link>
               <button onClick={() => onOpenChange(false)} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="닫기"><X className="size-4" /></button>
             </header>
+            {view === 'list' ? <ThreadList ctx={ctx} current={threadId} onPick={openThread} /> : <>
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3" data-testid="ai-dock-chat">
               {!msgs.length && (
                 <div className="space-y-1.5">
@@ -118,9 +133,44 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
               <Button type="submit" disabled={busy || !text.trim()} aria-label="보내기"><Send /></Button>
             </form>
             <p className="px-3 pb-1.5 text-[10px] text-ink-3">회사 업무용 · 관리자가 사용 내역을 볼 수 있습니다</p>
+            </>}
           </section>
         </div>
       )}
     </>
+  );
+}
+
+type Thread = { id: string; title: string; task_id: string | null; task_title: string | null; pinned: boolean; updated_at: string; turns: number; context_page: string | null; context_id: string | null };
+/** V14 26번: 패널 안 대화 목록 — 검색, 이 화면·이 업무 관련 대화를 먼저 */
+function ThreadList({ ctx, current, onPick }: { ctx: Ctx; current: string | null; onPick: (id: string) => void }) {
+  const [q, setQ] = useState('');
+  const [sq, setSq] = useState('');
+  useEffect(() => { const t = setTimeout(() => setSq(q.trim()), 250); return () => clearTimeout(t); }, [q]);
+  const { data, loading } = useApi<{ threads: Thread[] }>(`/api/ai/threads${sq ? `?q=${encodeURIComponent(sq)}` : ''}`);
+  const related = (t: Thread) => (ctx.taskId ? t.task_id === ctx.taskId : t.context_page === ctx.page && (!ctx.id || t.context_id === ctx.id));
+  const all = data?.threads ?? [];
+  const mine = all.filter(related), rest = all.filter((t) => !related(t));
+  const when = (s: string) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }).format(new Date(s));
+  const row = (t: Thread) => (
+    <li key={t.id}><button onClick={() => onPick(t.id)} className={cx('flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50', current === t.id && 'bg-violet-50')} data-testid="ai-dock-thread">
+      <span className="min-w-0 flex-1"><span className="flex items-center gap-1"><span className="truncate text-sm font-medium">{t.title}</span>{t.pinned && <Pin className="size-3 shrink-0 text-violet-600" />}</span>
+        <span className="block truncate text-[11px] text-ink-3">{t.task_title ? `업무: ${t.task_title} · ` : ''}{t.turns}번 물음</span></span>
+      <span className="shrink-0 text-[11px] text-ink-3">{when(t.updated_at)}</span>
+    </button></li>
+  );
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="ai-dock-threads">
+      <div className="relative border-b border-line p-2">
+        <Search className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
+        <input className={cx(inputCls, 'h-9 pl-8')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="대화 검색" aria-label="AI 대화 검색" autoFocus />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {loading && !data && <p className="p-3 text-sm text-ink-3">불러오는 중…</p>}
+        {!!mine.length && <><p className="px-3 pt-2 text-[11px] font-semibold text-violet-700">{ctx.taskId ? '이 업무 관련' : '이 화면 관련'}</p><ul data-testid="ai-dock-related">{mine.map(row)}</ul></>}
+        {!!rest.length && <><p className="px-3 pt-2 text-[11px] font-semibold text-ink-3">{mine.length ? '다른 대화' : '최근 대화'}</p><ul>{rest.map(row)}</ul></>}
+        {data && !all.length && <p className="p-4 text-center text-sm text-ink-3">{sq ? '찾는 대화가 없습니다' : '아직 대화가 없습니다'}</p>}
+      </div>
+    </div>
   );
 }

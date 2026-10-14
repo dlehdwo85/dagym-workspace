@@ -123,3 +123,35 @@ describe('V14 24번 직책 약칭', () => {
     assert.equal((await ctx.owner.ok('GET', '/api/people/badges')).people[ctx.ownerId], undefined, '비우면 직책(없으면 표시 없음)');
   });
 });
+
+describe('V14 25·26번 메신저 답장·반응·고정, AI 대화 화면 맥락', () => {
+  test('답장 인용·반응 켜고 끄기·대화방 고정, 다른 방 메시지에 답장 불가', async () => {
+    const room = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.staffA.id })).id;
+    const first = await ctx.owner.ok('POST', `/api/chat/rooms/${room}/messages`, { body: '원래 메시지' });
+    const rep = await ctx.staffA.client.ok('POST', `/api/chat/rooms/${room}/messages`, { body: '답장입니다', replyTo: first.id });
+    const d = await ctx.owner.ok('GET', `/api/chat/rooms/${room}`);
+    const m = d.messages.find((x) => x.id === rep.id);
+    assert.equal(m.reply_to, first.id); assert.equal(m.reply.body, '원래 메시지'); assert.equal(m.reply.author, '김대표');
+    const other = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.managerA.id })).id;
+    assert.equal((await ctx.owner.req('POST', `/api/chat/rooms/${other}/messages`, { body: 'x', replyTo: first.id })).status, 400);
+    assert.equal((await ctx.staffA.client.ok('POST', `/api/chat/messages/${first.id}/react`, { emoji: '👍' })).on, true);
+    await ctx.owner.ok('POST', `/api/chat/messages/${first.id}/react`, { emoji: '👍' });
+    let r = (await ctx.owner.ok('GET', `/api/chat/rooms/${room}`)).messages.find((x) => x.id === first.id).reactions;
+    assert.deepEqual(r.map((x) => [x.emoji, x.n, x.mine]), [['👍', 2, true]]);
+    assert.equal((await ctx.owner.ok('POST', `/api/chat/messages/${first.id}/react`, { emoji: '👍' })).on, false);
+    r = (await ctx.owner.ok('GET', `/api/chat/rooms/${room}`)).messages.find((x) => x.id === first.id).reactions;
+    assert.deepEqual(r.map((x) => [x.emoji, x.n, x.mine]), [['👍', 1, false]]);
+    assert.equal((await ctx.owner.req('POST', `/api/chat/messages/${first.id}/react`, { emoji: '💩' })).status, 400);
+    assert.equal((await ctx.managerA.client.req('POST', `/api/chat/messages/${first.id}/react`, { emoji: '👍' })).status, 404, '남의 방 메시지');
+    await ctx.owner.ok('PATCH', `/api/chat/rooms/${other}`, { pinned: true });
+    const list = (await ctx.owner.ok('GET', '/api/chat/rooms')).rooms;
+    assert.equal(list[0].id, other); assert.equal(list[0].pinned, true);
+  });
+
+  test('AI 대화는 시작한 화면(맥락)을 기억해 패널 목록에서 먼저 보인다', async () => {
+    await queue([say('네.')]);
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '이 날 일정 알려줘', context: { page: 'calendar', id: day } });
+    const t = (await ctx.owner.ok('GET', '/api/ai/threads')).threads.find((x) => x.id === r.threadId);
+    assert.equal(t.context_page, 'calendar'); assert.equal(t.context_id, day);
+  });
+});
