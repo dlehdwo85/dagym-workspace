@@ -164,6 +164,7 @@ export async function runTick(trigger: string) {
   await step('usage', async () => (await import('./plans')).usageJob());
   await step('trial', async () => (await import('./plans')).trialJob());
   await step('billing', async () => (await import('./billing')).billingJob()); // 18차 정기 결제·재시도
+  await step('monthClose', async () => (await import('./monthClose')).monthCloseJob()); // V20 월 마감 기록(매월 1일)
   await step('aiRetention', async () => ({ purged: await (await import('./ai/threads')).purgeOldThreads() })); // V14 2번 AI 대화 보관 기간
   await step('push', () => dispatchPending(200));
   if (googleConfigured()) await step('google', () => syncAllDue());

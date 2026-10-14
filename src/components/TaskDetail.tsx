@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { CarriedBadge } from './carried';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
@@ -334,6 +335,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <Link href="/tasks" className="hover:underline">업무</Link>
             {t.project_name && <><ChevronRight className="size-3" /><Link href={`/projects/${t.project_id}`} className="inline-flex items-center gap-1 hover:underline"><span className="size-2 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} />{t.project_name}</Link></>}
             {t.parent_id && <><ChevronRight className="size-3" /><Link href={`/tasks/${t.parent_id}`} className="hover:underline">상위: {t.parent_title}</Link></>}
+            <span className="ml-1"><CarriedBadge t={t} /></span>
           </div>
           {title === null ? (
             <h1 className={cx('-mx-1.5 rounded-input px-1.5 py-0.5 text-[22px] font-bold leading-snug tracking-tight', perms.edit && 'cursor-text hover:bg-slate-50', t.status === 'done' && 'text-ink-2')}

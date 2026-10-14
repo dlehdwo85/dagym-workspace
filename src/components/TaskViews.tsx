@@ -12,7 +12,7 @@ import listPlugin from '@fullcalendar/list';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import {
-  CalendarDays as CalIcon, Camera, CheckCheck, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip,
+  CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip,
   FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X,
   Check,
 } from 'lucide-react';
@@ -22,6 +22,7 @@ import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
 import { AssigneePicker, DuePicker, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
 import { QuickAddTask } from './QuickAddTask';
+import { CarriedBadge } from './carried';
 
 export type Task = {
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
@@ -118,7 +119,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     if (q) p.set('q', q);
     // V6 16번: 기본 목록에도 오늘 완료한 업무(댓글 있으면 7일)는 남겨 취소선으로 — "완료" 보기는 완료 업무 전체(월별)
     if (!showDone && mode !== 'board' && !filters.status && (fixed?.view ?? filters.view) !== 'done') p.set('includeDone', 'recent');
-    if ((fixed?.view ?? filters.view) === 'done') p.set('limit', '500');
+    if ((fixed?.view ?? filters.view) === 'done') { p.set('limit', '1000'); if (mode === 'list') p.set('doneMonth', todayStr().slice(0, 7)); } // V20: 목록은 이번 달만, 지난달은 펼칠 때
     return p.toString();
   }, [filters, fixed, q, showDone, mode]);
   const { data, error, loading, reload, setData } = useApi<{ tasks: Task[] }>(`/api/tasks?${qs}`);
@@ -245,6 +246,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     ...(filters.assigneeId ? [['assigneeId', `담당: ${dir.users.find((u) => u.id === filters.assigneeId)?.name ?? ''}`]] : []),
     ...(filters.teamId ? [['teamId', `팀: ${teamList.data?.teams.find((t) => t.id === filters.teamId)?.name ?? ''}`]] : []),
     ...(filters.status ? [['status', `상태: ${filters.status.split(',').map((x) => STATUS_LABEL[x as TaskStatus] ?? x).join('·')}`]] : []),
+    ...(filters.carried ? [['carried', '이월만']] : []),
     ...(filters.from || filters.to ? [['period', `기간: ${filters.from ? fmtDate(filters.from) : '처음'} ~ ${filters.to ? fmtDate(filters.to) : '끝'}`]] : []),
   ] as [string, string][];
   const clearChip = (k: string) => setFilters((f) => (k === 'period' ? { ...f, from: '', to: '' } : { ...f, [k]: '' }));
@@ -351,6 +353,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           </select>
           <input type="date" className={inputCls} value={filters.from ?? ''} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} aria-label="기간 시작" />
           <input type="date" className={inputCls} value={filters.to ?? ''} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} aria-label="기간 끝" />
+          {/* V20 이월만 보기 (담당자 묶음 안에서도) */}
+          <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.carried === '1'} onChange={(e) => setFilters((f) => ({ ...f, carried: e.target.checked ? '1' : '' }))} data-testid="filter-carried" />이월만 보기</label>
         </div>
       )}
       {justDone.length > 0 && !showDone && (
@@ -381,7 +385,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           }} />}
           <SelectCtx.Provider value={mode === 'list' || mode === 'board' ? selCtx : null}>
           {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
-            : <GroupedTasks tasks={tasks} group={curView === 'done' ? 'month' : group} view={curView} keepIds={keepIds} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
+            : curView === 'done' ? <DoneArchive thisMonth={tasks} filterQs={new URLSearchParams(Object.entries({ assigneeId: filters.assigneeId, teamId: filters.teamId, projectId: fixed?.projectId }).filter(([, v]) => v) as [string, string][]).toString()} onPatch={patch} />
+            : <GroupedTasks tasks={tasks} group={group} view={curView} keepIds={keepIds} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
                 people={people} sortBy={sortBy} onSort={pickSort} onReorder={reorder}
                 top={adding ? <InlineAddTask key={addKey} autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
           {mode === 'board' && projectId && (
@@ -762,6 +767,81 @@ function GroupDrop({ id, groupKey, children }: { id: string; groupKey: string; c
   const { setNodeRef, isOver } = useDroppable({ id });
   return <section ref={setNodeRef} data-group={groupKey} className={cx('rounded-card', isOver && 'ring-2 ring-accent-500/30')}>{children}</section>;
 }
+/**
+ * V20 완료 보관: 완료일(서울) 달별 — 이번 달만 펼치고 지난달들은 접힘(개수 표시). 펼칠 때 그 달만 불러온다(doneMonth).
+ * 맨 위 ◀ 2026년 10월 ▶ 로 달 이동. 달 안에서는 담당자별 → 완료일 최신순.
+ */
+function DoneArchive({ thisMonth, filterQs, onPatch }: { thisMonth: Task[]; filterQs: string; onPatch: (t: Task, b: any) => any }) {
+  const { user } = useSession();
+  const ym = todayStr().slice(0, 7);
+  const months = useApi<{ months: { month: string; n: number }[] }>(`/api/tasks/done-months${filterQs ? `?${filterQs}` : ''}`);
+  const list = useMemo(() => {
+    const m = [...(months.data?.months ?? [])];
+    if (!m.some((x) => x.month === ym)) m.unshift({ month: ym, n: thisMonth.length });
+    return m.map((x) => (x.month === ym ? { ...x, n: thisMonth.filter((t) => t.status === 'done').length } : x)).sort((a, b) => b.month.localeCompare(a.month));
+  }, [months.data, thisMonth, ym]);
+  const [open, setOpen] = useState<Record<string, boolean>>({ [ym]: true });
+  const [cache, setCache] = useState<Record<string, Task[] | 'loading'>>({});
+  useEffect(() => { setCache({}); }, [filterQs]);
+  async function load(m: string) {
+    if (m === ym || cache[m]) return;
+    setCache((c) => ({ ...c, [m]: 'loading' }));
+    try { const r = await api<{ tasks: Task[] }>(`/api/tasks?view=done&doneMonth=${m}&limit=1000${filterQs ? `&${filterQs}` : ''}`); setCache((c) => ({ ...c, [m]: r.tasks })); }
+    catch (e: any) { toast.error(e.message); setCache((c) => { const n = { ...c }; delete n[m]; return n; }); }
+  }
+  const toggle = (m: string) => { const next = !open[m]; setOpen((o) => ({ ...o, [m]: next })); if (next) void load(m); };
+  const [focus, setFocus] = useState(ym);
+  const jump = (dir: -1 | 1) => {
+    const i = list.findIndex((x) => x.month === focus);
+    const nx = list[i - dir]; // 목록은 최신 달이 앞
+    if (!nx) return;
+    setFocus(nx.month); setOpen((o) => ({ ...o, [nx.month]: true })); void load(nx.month);
+    setTimeout(() => document.querySelector(`[data-done-month="${nx.month}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+  };
+  const label = (m: string) => `${m.slice(0, 4)}년 ${Number(m.slice(5))}월`;
+  const prevYm = (() => { const d = new Date(ym + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })();
+  const cnt = (m: string) => list.find((x) => x.month === m)?.n ?? 0;
+  return (
+    <div className="space-y-3" data-testid="task-groups" data-group-by="month">
+      <div className="flex flex-wrap items-center gap-2 px-1">
+        <p className="text-sm text-ink-2" data-testid="done-summary">이번 달 <b className="text-ink">{cnt(ym)}건</b> · 지난달 <b className="text-ink">{cnt(prevYm)}건</b> 완료</p>
+        <span className="ml-auto inline-flex items-center gap-1 text-sm" data-testid="done-month-nav">
+          <button type="button" onClick={() => jump(-1)} className="rounded p-1 text-ink-2 hover:bg-slate-100 disabled:opacity-30" disabled={list.findIndex((x) => x.month === focus) >= list.length - 1} aria-label="이전 달"><ChevronLeft className="size-4" /></button>
+          <span className="min-w-[6.5rem] text-center font-semibold tabular-nums">{label(focus)}</span>
+          <button type="button" onClick={() => jump(1)} className="rounded p-1 text-ink-2 hover:bg-slate-100 disabled:opacity-30" disabled={list.findIndex((x) => x.month === focus) <= 0} aria-label="다음 달"><ChevronRight className="size-4" /></button>
+        </span>
+      </div>
+      {list.map(({ month: m, n }) => {
+        const isOpen = !!open[m];
+        const rows = m === ym ? thisMonth.filter((t) => t.status === 'done') : cache[m];
+        const byWho = new Map<string, { name: string; items: Task[] }>();
+        if (Array.isArray(rows)) for (const t of [...rows].sort((a, b) => String(b.completed_at ?? '').localeCompare(String(a.completed_at ?? '')))) {
+          const k = t.assignee_id ?? 'none';
+          if (!byWho.has(k)) byWho.set(k, { name: t.assignee_name ?? '담당자 없음', items: [] });
+          byWho.get(k)!.items.push(t);
+        }
+        const groups = [...byWho.entries()].sort(([a, x], [b, y]) => (a === user.id ? -1 : b === user.id ? 1 : a === 'none' ? 1 : b === 'none' ? -1 : x.name.localeCompare(y.name, 'ko')));
+        return (
+          <section key={m} data-done-month={m} data-open={isOpen ? '1' : undefined}>
+            <button type="button" onClick={() => toggle(m)} aria-expanded={isOpen} className="mb-1.5 flex w-full items-center gap-2 px-1 text-left text-sm font-semibold text-ink">
+              <ChevronDown className={cx('size-4 text-ink-3 transition-transform', !isOpen && '-rotate-90')} />{label(m)}
+              <span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums">{n}건</span>
+            </button>
+            {isOpen && (rows === 'loading' || rows === undefined ? <p className="px-3 py-2 text-sm text-ink-3">불러오는 중…</p>
+              : !groups.length ? <p className="px-3 py-2 text-sm text-ink-3">이 달에 완료한 업무가 없습니다</p>
+              : <div className="space-y-2">{groups.map(([k, g]) => (
+                  <div key={k} data-done-who={k}>
+                    <p className="flex items-center gap-1.5 px-2 pb-1 text-xs font-semibold text-ink-2"><Avatar id={k === 'none' ? null : k} name={k === 'none' ? null : g.name} size={18} />{g.name}<span className="font-normal text-ink-3">{g.items.length}</span></p>
+                    <ListView tasks={g.items} onPatch={onPatch} hint={false} />
+                  </div>
+                ))}</div>)}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 /** 끌어서 순서 바꾸는 행 (손잡이는 PC 에서만 — 휴대폰은 밀기 동작과 겹치지 않게) */
 function SortableRow({ t, onPatch, onAck, onMove }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
@@ -916,6 +996,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
           <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
             <TypeIcon t={t} />
             <TaskLink id={t.id} className={cx('truncate text-sm font-medium text-ink hover:text-accent-600 hover:underline', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
+            <CarriedBadge t={t} />
           </span>
           <Meta t={t} onPatch={onPatch} />
         </div>
@@ -948,6 +1029,7 @@ function BoardCard({ t }: { t: Task }) {
         {selc?.on && <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-brand-600" checked={picked} readOnly aria-label={`${t.title} 선택`} data-testid="card-select" />}
         <TypeIcon t={t} />
         <TaskLink id={t.id} className={cx('line-clamp-2 text-sm font-medium leading-snug text-ink hover:text-accent-600 hover:underline', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
+        <CarriedBadge t={t} />
       </div>
       <div className="mt-1.5"><Meta t={t} compact /></div>
       <div className="mt-2.5 flex items-center justify-between gap-2">

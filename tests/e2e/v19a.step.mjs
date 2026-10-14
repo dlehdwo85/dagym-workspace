@@ -12,10 +12,11 @@ export async function v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }
   const chip = owner.getByTestId('done-chip').getByRole('button');
   await chip.click();
   assert.equal(await chip.getAttribute('aria-pressed'), 'true');
-  await owner.getByText('지난달 완료 칩 시험').first().waitFor();
+  await owner.locator('[data-testid="task-groups"][data-group-by="month"]').waitFor(); // 완료 보관(달별) 화면
   await chip.click();
   await owner.waitForFunction(() => document.querySelector('[data-testid=done-chip] button')?.getAttribute('aria-pressed') === 'false');
-  await owner.getByText('지난달 완료 칩 시험').waitFor({ state: 'detached' });
+  await owner.locator('[data-testid="task-groups"][data-group-by="month"]').waitFor({ state: 'detached' });
+  assert.equal(await owner.getByText('지난달 완료 칩 시험').count(), 0, '해제하면 지난 완료 업무는 목록에서 빠짐');
   const mine = owner.getByRole('button', { name: '내 업무', exact: true }).first();
   await mine.click(); assert.equal(await mine.getAttribute('aria-pressed'), 'true');
   await mine.click(); assert.equal(await mine.getAttribute('aria-pressed'), 'false', '다른 보기 칩도 다시 누르면 해제');
