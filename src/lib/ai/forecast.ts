@@ -17,12 +17,13 @@ export const financeInput = z.object({
   consoleUsd: z.number().min(0).max(1_000_000).nullable().optional(), // 콘솔 실제 청구(이번 달)
   companySize: z.number().int().min(1).max(1000).optional(),      // 고객사 1곳 인원(기본 10)
   aiShare: z.number().min(0).max(1).optional(),                   // 요금 중 AI 몫(기본 30%)
+  cycleStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), // 크레딧 주기 시작일(예: Max 결제일 2026-09-25) — 비우면 달력 월
 });
-type Finance = { securedUsd: number; nextSecuredUsd: number; consoleUsd: number | null; consoleAt?: string; companySize: number; aiShare: number };
+type Finance = { securedUsd: number; nextSecuredUsd: number; consoleUsd: number | null; consoleAt?: string; companySize: number; aiShare: number; cycleStart: string | null };
 async function finance(sql: Sql): Promise<Finance> {
   const [r] = await sql<{ value: any }[]>`select value from app_settings where key = ${KEY}`;
   const v = r?.value ?? {};
-  return { securedUsd: v.securedUsd ?? 100, nextSecuredUsd: v.nextSecuredUsd ?? v.securedUsd ?? 100, consoleUsd: v.consoleUsd ?? null, consoleAt: v.consoleAt, companySize: v.companySize ?? 10, aiShare: v.aiShare ?? 0.3 };
+  return { securedUsd: v.securedUsd ?? 100, nextSecuredUsd: v.nextSecuredUsd ?? v.securedUsd ?? 100, consoleUsd: v.consoleUsd ?? null, consoleAt: v.consoleAt, companySize: v.companySize ?? 10, aiShare: v.aiShare ?? 0.3, cycleStart: v.cycleStart ?? null };
 }
 export async function setFinance(u: SessionUser, i: z.infer<typeof financeInput>) {
   if (!u.platformAdmin) throw notFound();
@@ -35,12 +36,19 @@ export async function setFinance(u: SessionUser, i: z.infer<typeof financeInput>
 }
 
 const seoulNow = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
-function monthInfo() {
+/** 크레딧 주기: 시작일(cycleStart)의 "일"이 매달 돌아오는 날부터 한 달(예: 25일~다음 달 24일). 없으면 달력 월 */
+function monthInfo(cycleStart?: string | null) {
   const n = seoulNow();
-  const days = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate();
-  const elapsed = n.getDate() - 1 + (n.getHours() * 60 + n.getMinutes()) / 1440; // 지난 날(소수)
-  const month = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`;
-  return { month, days, elapsed: Math.max(elapsed, 0.25), today: n };
+  const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const day = cycleStart ? Number(cycleStart.slice(8, 10)) : 1;
+  const clampDay = (y: number, m: number) => new Date(y, m, Math.min(day, new Date(y, m + 1, 0).getDate()));
+  let start = clampDay(n.getFullYear(), n.getMonth());
+  if (start > n) start = clampDay(n.getFullYear(), n.getMonth() - 1);
+  const end = clampDay(start.getFullYear(), start.getMonth() + 1);
+  const days = Math.round((end.getTime() - start.getTime()) / 86400_000);
+  const elapsed = (n.getTime() - start.getTime()) / 86400_000; // 지난 날(소수)
+  const month = cycleStart ? `${ymd(start)} ~ ${ymd(new Date(end.getTime() - 86400_000))}` : ymd(start).slice(0, 7);
+  return { month, start: ymd(start), days, elapsed: Math.max(elapsed, 0.25), today: n };
 }
 
 export async function aiForecast(u: SessionUser) {
@@ -50,8 +58,8 @@ export async function aiForecast(u: SessionUser) {
 export async function computeForecast(sql: Sql) {
   const f = await finance(sql);
   const rate = usdKrw();
-  const { month, days, elapsed, today } = monthInfo();
-  const start = sql`(${month + '-01'}::date::timestamp at time zone 'Asia/Seoul')`;
+  const { month, start: startDay, days, elapsed, today } = monthInfo(f.cycleStart);
+  const start = sql`(${startDay}::date::timestamp at time zone 'Asia/Seoul')`;
   const [[cum], byTenant, byPurpose, [week], unitRows, [docAvg], userRows, plans] = await Promise.all([
     sql<{ usd: number }[]>`select coalesce(sum(cost_usd), 0)::float8 usd from ai_usage where created_at >= ${start}`,
     sql<{ tenant: string; name: string | null; usd: number }[]>`select a.tenant, t.name, sum(a.cost_usd)::float8 usd from ai_usage a left join tenants t on t.id = a.tenant where a.created_at >= ${start} group by a.tenant, t.name order by usd desc`,
@@ -72,7 +80,13 @@ export async function computeForecast(sql: Sql) {
   // 사용자 유형: 사용량 순 3등분(가벼움·보통·많음) 평균, 30일 → 월
   const per = userRows.map((r) => r.usd * rate);
   const third = (k: number) => { const n = per.length; if (!n) return 0; const a = per.slice(Math.floor((n * k) / 3), Math.max(Math.floor((n * (k + 1)) / 3), Math.floor((n * k) / 3) + 1)); return Math.round(a.reduce((s, x) => s + x, 0) / a.length); };
-  const tiers = { light: third(0), medium: third(1), heavy: third(2), users: per.length };
+  const measured = { light: third(0), medium: third(1), heavy: third(2), users: per.length };
+  // 데이터 부족(사용자 10명 미만 또는 쌓인 기간 30일 미만)이면 V23 5.2 가정값으로 계산하고 실측은 옆에 표시
+  const [firstUse] = await sql<{ at: Date | null }[]>`select min(created_at) at from ai_usage`;
+  const dataDays = firstUse?.at ? (Date.now() - new Date(firstUse.at).getTime()) / 86400_000 : 0;
+  const estimated = measured.users < 10 || dataDays < 30;
+  const ASSUMED = { light: 1600, medium: 5300, heavy: 10600 };
+  const tiers = estimated ? { ...ASSUMED, users: measured.users } : measured;
   // 고객사 1곳 월 원가(인원 N, 많음 10%·보통 30%·가벼움 60%)
   const n = f.companySize;
   const heavyN = Math.max(1, Math.round(n * 0.1)), mediumN = Math.round(n * 0.3), lightN = Math.max(0, n - heavyN - mediumN);
@@ -96,9 +110,10 @@ export async function computeForecast(sql: Sql) {
   return {
     month, rate, days, elapsed: Math.round(elapsed * 10) / 10, finance: f,
     monthUsd: r2(monthUsd), monthKrw: Math.round(monthUsd * rate), forecastUsd: r2(forecastUsd), forecastKrw: Math.round(forecastUsd * rate), usedPct,
-    dailyUsd: r2(dailyUsd), exhaustDate: exhaustDate && exhaustDays !== null && exhaustDays < 400 ? exhaustDate.toISOString().slice(0, 10) : null,
+    dailyUsd: r2(dailyUsd), cycleStart: f.cycleStart, // 주기 안에 소진될 때만 날짜
+    exhaustDate: exhaustDate && exhaustDays !== null && exhaustDays <= days - elapsed ? exhaustDate.toISOString().slice(0, 10) : null,
     byTenant: byTenant.map((t) => ({ tenant: t.tenant, name: t.name ?? t.tenant, usd: r2(t.usd), forecastUsd: r2((t.usd / elapsed) * days) })),
-    byPurpose: byPurpose.map((p) => ({ ...p, usd: r2(p.usd) })), units, tiers,
+    byPurpose: byPurpose.map((p) => ({ ...p, usd: r2(p.usd) })), units, tiers, measuredTiers: measured, estimated, dataDays: Math.floor(dataDays),
     company: { size: n, heavyN, mediumN, lightN, krw: companyKrw }, ourForecastUsd: r2(ourForecastUsd), freeCompanies,
     rechargeUsd: r2(rechargeUsd), rechargeKrw: Math.round(rechargeUsd * rate), pricing,
     console: f.consoleUsd !== null ? { usd: f.consoleUsd, at: f.consoleAt ?? null, diffPct: f.consoleUsd > 0 ? Math.round(((monthUsd - f.consoleUsd) / f.consoleUsd) * 100) : null } : null,
@@ -111,8 +126,9 @@ export async function aiCreditAlertsJob() {
   const sql = db();
   const f = await finance(sql);
   if (!f.securedUsd) return { skipped: true };
-  const { month } = monthInfo();
-  const [cum] = await sql<{ usd: number }[]>`select coalesce(sum(cost_usd), 0)::float8 usd from ai_usage where created_at >= (${month + '-01'}::date::timestamp at time zone 'Asia/Seoul')`;
+  const { start } = monthInfo(f.cycleStart);
+  const month = start;
+  const [cum] = await sql<{ usd: number }[]>`select coalesce(sum(cost_usd), 0)::float8 usd from ai_usage where created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul')`;
   const pct = (cum.usd / f.securedUsd) * 100;
   const admins = (await sql<{ id: string }[]>`select id from users where platform_admin and status = 'active'`).map((x) => x.id);
   for (const level of [90, 70]) if (pct >= level) {

@@ -108,8 +108,17 @@ describe('V23 AI 비용·한도', () => {
     assert.equal(f.monthUsd, 3.5); assert.equal(f.monthKrw, 4900); assert.equal(f.usedPct, 88);
     assert.ok(f.forecastUsd >= 3.5, '예상 ≥ 누적');
     assert.equal(f.dailyUsd, 0.5, '최근 7일 하루 평균');
-    assert.ok(f.exhaustDate, '소진 예상일'); assert.ok(f.rechargeUsd > 0, '충전 권장');
-    assert.equal(f.tiers.users, 3); assert.ok(f.tiers.heavy >= f.tiers.medium && f.tiers.medium >= f.tiers.light);
+    assert.ok(f.rechargeUsd > 0, '충전 권장');
+    // 사용자 3명·며칠치 = 데이터 부족 → 가정값(1,600·5,300·10,600원)으로 계산, 실측은 따로
+    assert.equal(f.estimated, true); assert.deepEqual([f.tiers.light, f.tiers.medium, f.tiers.heavy], [1600, 5300, 10600]);
+    assert.equal(f.measuredTiers.users, 3); assert.ok(f.measuredTiers.heavy >= f.measuredTiers.light);
+    // 크레딧 주기 시작일(Max 결제일) — 오늘 날짜로 두면 주기 = 오늘부터, 어제 쓴 돈은 빠짐
+    await sql`update ai_usage set created_at = now() - interval '2 days' where purpose = 'library_organize'`;
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    await ctx.owner.ok('PUT', '/api/platform/ai-forecast', { cycleStart: today });
+    const fc = await ctx.owner.ok('GET', '/api/platform/ai-forecast');
+    assert.equal(fc.monthUsd, 3, '주기 시작 전 사용은 빠짐'); assert.match(fc.month, /~/);
+    await ctx.owner.ok('PUT', '/api/platform/ai-forecast', { cycleStart: null });
     assert.equal(f.console.usd, 3); assert.equal(f.console.diffPct, 17);
     assert.ok(Array.isArray(f.pricing) && f.pricing.length > 0); assert.ok(f.units.some((u) => u.purpose === 'assistant'));
     assert.ok(f.freeCompanies === 0 || f.freeCompanies === null, '확보 70% 를 우리 회사가 다 씀 → 무료 0곳');

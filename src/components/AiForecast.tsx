@@ -18,7 +18,7 @@ export function AiForecast() {
     const num = (v?: string) => (v === undefined || v === '' ? undefined : Number(v));
     try {
       await api('/api/platform/ai-forecast', { method: 'PUT', body: { securedUsd: num(edit!.securedUsd), nextSecuredUsd: num(edit!.nextSecuredUsd), consoleUsd: edit!.consoleUsd === '' ? null : num(edit!.consoleUsd),
-        companySize: num(edit!.companySize), aiShare: edit!.aiShare === '' ? undefined : Number(edit!.aiShare) / 100 } });
+        companySize: num(edit!.companySize), aiShare: edit!.aiShare === '' ? undefined : Number(edit!.aiShare) / 100, cycleStart: edit!.cycleStart ? edit!.cycleStart : null } });
       setEdit(null); reload(); toast.ok('저장했습니다');
     } catch (e: any) { toast.error(e.message); }
   }
@@ -28,22 +28,23 @@ export function AiForecast() {
   return (
     <section id="ai-forecast" className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ai-forecast">
       <h2 className="flex items-center text-sm font-semibold">AI 원가 전망 <span className="ml-1 text-xs font-normal text-ink-3">{data.month} · {data.elapsed}/{data.days}일 · 정가(건별 결제 가정) · 환율 {data.rate.toLocaleString('ko-KR')}원</span>
-        <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setEdit({ securedUsd: String(f.securedUsd), nextSecuredUsd: String(f.nextSecuredUsd), consoleUsd: f.consoleUsd === null ? '' : String(f.consoleUsd), companySize: String(f.companySize), aiShare: String(Math.round(f.aiShare * 100)) })} data-testid="ai-finance-edit">기준 입력</Button></h2>
+        <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setEdit({ securedUsd: String(f.securedUsd), nextSecuredUsd: String(f.nextSecuredUsd), consoleUsd: f.consoleUsd === null ? '' : String(f.consoleUsd), companySize: String(f.companySize), aiShare: String(Math.round(f.aiShare * 100)), cycleStart: f.cycleStart ?? '' })} data-testid="ai-finance-edit">기준 입력</Button></h2>
       {edit && (
-        <div className="mt-2 grid grid-cols-2 gap-2 rounded-input bg-slate-50 p-2 text-xs sm:grid-cols-6" data-testid="ai-finance-form">
-          {([['securedUsd', '이번 달 확보 크레딧($)'], ['nextSecuredUsd', '다음 달 확보($)'], ['consoleUsd', '콘솔 실제 청구($)'], ['companySize', '고객사 1곳 인원'], ['aiShare', '요금 중 AI 몫(%)']] as const).map(([k, l]) => (
+        <div className="mt-2 grid grid-cols-2 gap-2 rounded-input bg-slate-50 p-2 text-xs sm:grid-cols-7" data-testid="ai-finance-form">
+          {([['cycleStart', '크레딧 주기 시작일(YYYY-MM-DD, 비우면 달력 월)'], ['securedUsd', '이번 주기 확보 크레딧($)'], ['nextSecuredUsd', '다음 주기 확보($)'], ['consoleUsd', '콘솔 실제 청구($)'], ['companySize', '고객사 1곳 인원'], ['aiShare', '요금 중 AI 몫(%)']] as const).map(([k, l]) => (
             <label key={k} className="block">{l}<input className={cx(inputCls, 'mt-0.5 h-8')} inputMode="decimal" value={edit[k] ?? ''} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} aria-label={l} /></label>
           ))}
           <div className="flex items-end gap-1"><Button size="sm" onClick={save}>저장</Button><Button size="sm" variant="ghost" onClick={() => setEdit(null)}>취소</Button></div>
         </div>
       )}
       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Stat label="이번 달 누적" value={won(data.monthKrw)} sub={`${usd(data.monthUsd)} · 확보 ${usd(f.securedUsd)}의 ${data.usedPct ?? '-'}%`} warn={(data.usedPct ?? 0) >= 90} />
-        <Stat label="이번 달 예상(누적÷경과일×일수)" value={won(data.forecastKrw)} sub={usd(data.forecastUsd)} warn={data.forecastUsd > f.securedUsd * 0.7} />
-        <Stat label="크레딧 소진 예상일(최근 7일 평균)" value={data.exhaustDate ?? '이번 달 안 소진 없음'} sub={`하루 ${usd(data.dailyUsd)}`} warn={!!data.exhaustDate && data.exhaustDate.slice(0, 7) === data.month} />
+        <Stat label="이번 주기 누적" value={won(data.monthKrw)} sub={`${usd(data.monthUsd)} · 확보 ${usd(f.securedUsd)}의 ${data.usedPct ?? '-'}%`} warn={(data.usedPct ?? 0) >= 90} />
+        <Stat label="이번 주기 예상(누적÷경과일×일수)" value={won(data.forecastKrw)} sub={usd(data.forecastUsd)} warn={data.forecastUsd > f.securedUsd * 0.7} />
+        <Stat label="크레딧 소진 예상일(최근 7일 평균)" value={data.exhaustDate ?? '이번 주기 안 소진 없음'} sub={`하루 ${usd(data.dailyUsd)}`} warn={!!data.exhaustDate} />
         <Stat label="다음 달 충전 권장(예상×1.2 − 확보)" value={data.rechargeUsd > 0 ? won(data.rechargeKrw) : '충전 필요 없음'} sub={data.rechargeUsd > 0 ? usd(data.rechargeUsd) : `다음 달 확보 ${usd(f.nextSecuredUsd)}`} warn={data.rechargeUsd > 0} />
-        <Stat label={`무료 운영 가능 업체 수(${data.company.size}명 기준)`} value={data.freeCompanies === null ? '실측 부족' : `${data.freeCompanies}곳`} sub={`1곳 월 ${won(data.company.krw)} · (확보×70% − 우리 회사 ${usd(data.ourForecastUsd)})`} />
-        <Stat label="사용자 유형(최근 30일, 1인 월)" value={`${won(data.tiers.light)} · ${won(data.tiers.medium)} · ${won(data.tiers.heavy)}`} sub={`가벼움·보통·많음 (사용한 ${data.tiers.users}명 3등분)`} />
+        <Stat label={`무료 운영 가능 업체 수(${data.company.size}명 기준)${data.estimated ? ' · 추정' : ''}`} value={data.freeCompanies === null ? '실측 부족' : `${data.freeCompanies}곳`} sub={`1곳 월 ${won(data.company.krw)} · (확보×70% − 우리 회사 ${usd(data.ourForecastUsd)})`} />
+        <Stat label={data.estimated ? '사용자 유형(1인 월) — 데이터 부족 · 추정 모델' : '사용자 유형(최근 30일, 1인 월)'} value={`${won(data.tiers.light)} · ${won(data.tiers.medium)} · ${won(data.tiers.heavy)}`}
+          sub={data.estimated ? `가정값(가벼움·보통·많음) — 실측 ${won(data.measuredTiers.light)}·${won(data.measuredTiers.medium)}·${won(data.measuredTiers.heavy)} (${data.measuredTiers.users}명·${data.dataDays}일치, 10명·30일 쌓이면 실측으로)` : `가벼움·보통·많음 (사용한 ${data.tiers.users}명 3등분)`} warn={data.estimated} />
         <Stat label="콘솔 실제 청구" value={data.console ? usd(data.console.usd) : '입력 안 함'} sub={data.console ? `워크인 집계와 ${data.console.diffPct ?? '-'}% 차이${data.console.at ? ` · ${fmtDateTime(data.console.at)}` : ''}` : '기준 입력에서 넣기'} warn={!!data.console && Math.abs(data.console.diffPct ?? 0) > 10} />
       </div>
       <div className="mt-3 grid gap-3 lg:grid-cols-3">
