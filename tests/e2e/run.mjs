@@ -19,6 +19,7 @@ import { chatRename } from './chatRename.step.mjs';
 import { v1444 } from './v1444.step.mjs';
 import { v1445 } from './v1445.step.mjs';
 import { v21 } from './v21.step.mjs';
+import { v1447 } from './v1447.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -872,6 +873,7 @@ await step('V14 43 업무 목록: 왼쪽 동그라미 없음·상태 칩 버튼(
 await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머리줄·목록·상대에게 새 이름, Esc 취소, 1:1 은 버튼 없음', () => chatRename({ owner, ctx, BASE }));
 await step('V14 44 PC 업무 줄 선택 체크박스: 왼쪽 고정 홈·세로 가운데·올려도 제목 그대로·간격 좁게', () => v1444({ owner, ctx, BASE, SHOTS }));
 await step('V14 45 업무 추가 줄 마감 선택 창: 칩 바로 아래/위·칩 왼쪽 맞춤·화면 안·시각 버튼 닿음', () => v1445({ owner, BASE, SHOTS }));
+await step('V14 47 홈 이번 주: 같은 날·같은 제목 업무·일정 한 줄(업무 1 · 일정 1, 시각은 일정)', () => v1447({ owner, BASE, SHOTS }));
 await step('V21 메일 계정·명함 설정 + 업무 메일 시안(보내는 주소·회사 명함·미리보기)', () => v21({ owner, BASE, SHOTS, sql }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');

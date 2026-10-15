@@ -14,7 +14,7 @@ import { AiBudgetBar, costLine, type Budget } from '@/components/AiBudget';
 import { DocJobCard } from '@/components/DocJobCard';
 import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
 
-type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
+type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; tasks?: string[]; taskDue?: string; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
 type Msg = Omit<ChatMsg, 'proposals'> & { proposals?: Proposal[] };
 type Thread = { id: string; title: string; task_id: string | null; task_title: string | null; pinned: boolean; updated_at: string; turns: number };
 const EXAMPLES = ['다짐 로고 찾아서 이 업무에 첨부해줘', '이번 주 내 마감 업무 정리해줘', '내일 3시 회의 준비 업무 만들어줘', '3분기 매출 현장별로 엑셀 만들어줘'];
@@ -170,7 +170,7 @@ export default function AssistantPage() {
                           {p.preview.assignees && <div>담당: {p.preview.assignees.join(', ')} (각자 1건){p.preview.due && ` · 마감 ${p.preview.due}`}{p.preview.files ? ` · 📎 ${p.preview.files}개 첨부` : ''}</div>}
                           {!!p.preview.checklist?.length && <details><summary className="cursor-pointer">체크리스트 {p.preview.checklist.length}개</summary><ul className="ml-4 list-disc">{p.preview.checklist.map((c, k) => <li key={k}>{c}</li>)}</ul></details>}
                           {p.preview.description && <p className="line-clamp-3 whitespace-pre-wrap rounded bg-slate-50 p-1.5">{p.preview.description}</p>}
-                          {p.preview.when && <div data-testid="ai-event-preview">🗓 {p.preview.when}{p.preview.place && ` · 📍 ${p.preview.place}`}{p.preview.calendar && ` · ${p.preview.calendar}`}{!!p.preview.attendees?.length && <div>참석: {p.preview.attendees.join(', ')}</div>}</div>}
+                          {p.preview.when && <div data-testid="ai-event-preview">🗓 {p.preview.when}{p.preview.place && ` · 📍 ${p.preview.place}`}{p.preview.calendar && ` · ${p.preview.calendar}`}{!!p.preview.attendees?.length && <div>참석: {p.preview.attendees.join(', ')}</div>}{!!p.preview.tasks?.length && <div data-testid="ai-event-tasks">연결 업무: {p.preview.tasks.join(', ')} · 마감 {p.preview.taskDue} (일정과 날짜 연동)</div>}</div>}
                           {!!p.preview.moves?.length && <ul className="ml-4 list-disc" data-testid="ai-organize-preview">{p.preview.moves.map((x, k) => <li key={k}>{x}</li>)}</ul>}
                           {p.preview.folder && <div>📁 저장 폴더: {p.preview.folder}</div>}
                           {!!p.preview.warnings?.length && <ul className="rounded bg-amber-50 p-1.5 text-amber-800" data-testid="ai-event-warnings">{p.preview.warnings.map((w, k) => <li key={k}>⚠ {w}</li>)}</ul>}

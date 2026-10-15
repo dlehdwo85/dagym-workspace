@@ -155,3 +155,30 @@ describe('V14 25·26번 메신저 답장·반응·고정, AI 대화 화면 맥�
     assert.equal(t.context_page, 'calendar'); assert.equal(t.context_id, day);
   });
 });
+
+describe('V14 47 일정과 업무를 함께', () => {
+  test('일정 1 + 연결 업무(담당자별, 마감 = 일정 시작, 일정 주인 제외), 같은 턴의 중복 업무 제안은 거절, 날짜 연동', async () => {
+    const { r, results } = await chat(ctx.owner, '모레 13시 점검 회의 잡고 이직원·최매니저 업무로도 등록해줘', [
+      toolUse('e1', 'propose_create_event', { title: '현장 점검 회의', date: day, startTime: '13:00', durationMinutes: 60, attendeeIds: [ctx.staffA.id, ctx.managerA.id],
+        taskAssigneeIds: [ctx.ownerId, ctx.staffA.id, ctx.managerA.id] }),
+      toolUse('t1', 'propose_create_tasks', { title: '현장 점검 회의', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: day, dueTime: '11:00' }),
+      say('일정과 업무를 제안했습니다.')]);
+    assert.ok(!results.e1.is_error, results.e1.content);
+    assert.ok(results.t1.is_error, '같은 내용의 업무를 따로 만들지 않음');
+    assert.equal(r.proposals.length, 1);
+    assert.match(r.proposals[0].summary, /^일정 1 · 연결 업무 2 만들기/);
+    assert.deepEqual(r.proposals[0].preview.tasks.sort(), ['이직원', '최매니저'].sort());
+    const done = await ctx.owner.ok('POST', `/api/ai/proposals/${r.proposals[0].id}`, { accept: true });
+    const evId = done.result?.eventId ?? done.eventId;
+    const tasks = await sql`select t.assignee_id, to_char(t.due_date,'YYYY-MM-DD') d, to_char(t.due_time,'HH24:MI') tm from event_tasks et join tasks t on t.id = et.task_id
+      where et.sync and et.event_id = (select id from events where title = '현장 점검 회의' and deleted_at is null order by created_at desc limit 1)`;
+    assert.deepEqual(tasks.map((t) => t.assignee_id).sort(), [ctx.staffA.id, ctx.managerA.id].sort(), '일정 주인(대표)에게는 업무를 또 만들지 않음');
+    assert.ok(tasks.every((t) => t.d === day && t.tm === '13:00'), '마감 = 일정 시작');
+    // 이직원이 보는 일정 목록: 연결 업무는 자기 업무가 대표, 모든 연결 id 포함
+    const evs = (await ctx.staffA.client.ok('GET', `/api/events?from=${encodeURIComponent(iso(day, '00:00'))}&to=${encodeURIComponent(iso(addDays(day, 1), '00:00'))}`)).events;
+    const ev = evs.find((e) => e.title === '현장 점검 회의');
+    assert.equal(ev.linkedTaskIds.length, 2);
+    assert.equal((await sql`select assignee_id from tasks where id = ${ev.linkedTask.id}`)[0].assignee_id, ctx.staffA.id);
+    void evId;
+  });
+});

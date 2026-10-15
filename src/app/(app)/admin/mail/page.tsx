@@ -100,7 +100,7 @@ function Signatures({ data, reload }: { data: { me: { name: string; title: strin
   return (
     <section className="space-y-3 rounded-card border border-line bg-white p-4 shadow-card" data-testid="mail-signature">
       <h2 className="font-semibold">메일 명함</h2>
-      <p className="text-xs text-ink-2">메일 맨 아래에 붙는 명함입니다. 로고·회사명·대표 전화·주소·웹사이트는 <Link href="/admin/company" className="text-brand-700 underline">회사 정보·디자인</Link>에서, 이름·직급·휴대폰·이메일은 보내는 사람 프로필에서 자동으로 채웁니다.</p>
+      <p className="text-xs text-ink-2">메일 맨 아래에 붙는 명함입니다. 로고·회사명·대표 전화·주소·웹사이트는 <Link href="/admin/company" className="text-brand-700 underline">회사 정보·디자인</Link>에서, 이름·직급·휴대폰은 보내는 사람 프로필에서, 이메일은 업무 이메일(없으면 이 회사 메일 계정 주소)로 채웁니다 — 로그인 이메일은 쓰지 않습니다.</p>
       {!data.companies.length ? <p className="text-sm text-ink-3">먼저 회사 정보·디자인에서 회사를 추가해 주세요.</p> : <>
         <div className="flex flex-wrap gap-1.5">{data.companies.map((c) => (
           <button key={c.key} type="button" onClick={() => setKey(c.key)} aria-pressed={key === c.key} className={cx('rounded-full border px-3 py-1 text-sm', key === c.key ? 'border-brand-600 bg-brand-50 font-medium text-brand-700' : 'border-line hover:bg-slate-50')}>{c.name}</button>

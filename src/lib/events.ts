@@ -27,6 +27,8 @@ export const eventInput = z.object({
   /** V5 "업무에도 추가": 같은 제목·날짜의 업무를 만들고 날짜를 서로 맞춤. 담당(없으면 나) */
   alsoTask: z.boolean().optional(),
   taskAssigneeId: zUuid.nullable().optional(),
+  /** V14 47: 연결 업무를 여러 담당에게(각 1건, 모두 일정과 날짜 연동) */
+  taskAssigneeIds: z.array(zUuid).max(20).optional(),
   taskRequestedById: zUuid.nullable().optional(),
   taskPriority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
   version: z.number().int().optional(),
@@ -117,8 +119,8 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
     : [];
   // V5 "업무에도 추가"로 연결된 업무 (블록 ✓ 표시·완료 시 취소선)
   const synced = ids.length
-    ? await sql<{ event_id: string; id: string; status: string }[]>`
-        select et.event_id, t.id, t.status from event_tasks et join tasks t on t.id = et.task_id
+    ? await sql<{ event_id: string; id: string; status: string; assignee_id: string | null }[]>`
+        select et.event_id, t.id, t.status, t.assignee_id from event_tasks et join tasks t on t.id = et.task_id
         where et.sync and et.event_id = any(${ids}::uuid[]) and t.deleted_at is null`
     : [];
   // 대표 지시(2026-10-15): "업무 시간" 블록의 업무 — 완료면 "완료 보기"를 켤 때만, 삭제된 업무의 블록은 그리지 않음
@@ -134,7 +136,9 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
     const bt = e.kind === 'task_block' ? blocks.find((x) => x.event_id === e.id) : undefined;
     if (bt?.deleted) continue;
     const att = attendees.filter((a) => a.event_id === e.id);
-    const lt = synced.find((x) => x.event_id === e.id);
+    // V14 47: 연결 업무가 여러 개면(담당자별) 보는 사람의 업무를 대표로, 나머지 id 도 함께(목록에서 중복으로 안 그리게)
+    const lts = synced.filter((x) => x.event_id === e.id);
+    const lt = lts.find((x) => x.assignee_id === u.id) ?? lts[0];
     // 비공개 일정: 주인·만든 사람·참석자가 아니면 제목·장소·설명·참석자 없이 "바쁨"
     const masked = e.is_private && e.owner_id !== u.id && e.created_by !== u.id && !att.some((a) => a.user_id === u.id);
     if (masked) { e.title = '바쁨'; e.location = ''; e.description = ''; }
@@ -143,6 +147,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
       kind: e.kind, taskId: masked ? null : e.task_id, attendees: masked ? [] : att, createdBy: e.created_by,
       ownerId: e.owner_id, ownerName: e.owner_name, isPrivate: e.is_private, masked,
       linkedTask: lt && !masked ? { id: lt.id, status: e.rrule ? null : lt.status } : null,
+      linkedTaskIds: masked ? [] : lts.map((x) => x.id),
       blockTask: bt && !masked ? { id: bt.id, status: bt.status } : null,
     };
     if (!e.rrule) {
@@ -252,7 +257,10 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   });
   if (i.alsoTask) {
     const { createSyncTask } = await import('./eventtasks');
-    out.taskId = (await createSyncTask(u, out.id, i.taskAssigneeId, { requestedById: i.taskRequestedById, priority: i.taskPriority })).id;
+    const who = i.taskAssigneeIds?.length ? [...new Set(i.taskAssigneeIds)] : [i.taskAssigneeId ?? null];
+    const ids: string[] = [];
+    for (const a of who) ids.push((await createSyncTask(u, out.id, a, { requestedById: i.taskRequestedById, priority: i.taskPriority })).id);
+    out.taskId = ids[0]; (out as { taskIds?: string[] }).taskIds = ids;
   }
   return out;
 }

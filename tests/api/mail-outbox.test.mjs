@@ -85,7 +85,8 @@ describe('V21 메일 계정·명함', () => {
     const c = await ctx.owner.ok('GET', `/api/tasks/${taskId}/mail`);
     assert.equal(c.company, 'hilink'); assert.deepEqual(c.to, ['customer@client.test']); assert.equal(c.canSend, true);
     const sig = c.companies.find((x) => x.key === 'hilink').html;
-    for (const s of ['김대표', 'HI-LINK 시험', '시험시 시험로 36, 8층', 'www.hilink.test', '시험 소개 한 줄', 'Confidential', 'ceo@dagym.test']) assert.ok(sig.includes(s), s);
+    for (const s of ['김대표', 'HI-LINK 시험', '시험시 시험로 36, 8층', 'www.hilink.test', '시험 소개 한 줄', 'Confidential', 'office@mail.test']) assert.ok(sig.includes(s), s);
+    assert.ok(!sig.includes('ceo@dagym.test'), '로그인 이메일(개인 메일일 수 있음)은 명함에 안 나감');
     assert.ok(!/APART/i.test(sig));
     // 직원은 볼 수는 있어도 보내기 권한 없음(서버 403)
     const s = await ctx.staffA.client.ok('GET', `/api/tasks/${taskId}/mail`);
@@ -100,13 +101,13 @@ describe('V21 보관함 발송', () => {
   test('보내기 → 보관함 → 발송(첨부·고정 Message-ID·명함 HTML), 직급·휴대폰 학습, 기록·CRM 단계 체크', async () => {
     box.mails = [];
     const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], cc: ['boss@client.test'], subject: '견적서 송부의 건',
-      body: '안녕하세요.\n\n견적서를 보내 드립니다.', attachmentIds: [attId], senderTitle: '대표', senderPhone: '010-1111-2222' });
+      body: '안녕하세요.\n\n견적서를 보내 드립니다.', attachmentIds: [attId], senderTitle: '대표', senderPhone: '010-1111-2222', senderWorkEmail: 'ceo@company.test' });
     assert.equal(r.status, 'queued');
     await waitStatus(r.id, ['sent']);
     assert.equal(box.mails.length, 1);
     const m = box.mails[0];
     assert.equal(m.subject, '견적서 송부의 건'); assert.equal(m.attachments.length, 1); assert.equal(m.attachments[0].filename, '견적서.pdf');
-    assert.ok(m.html.includes('HI-LINK 시험') && m.html.includes('010-1111-2222') && m.html.includes('대표'));
+    assert.ok(m.html.includes('HI-LINK 시험') && m.html.includes('010-1111-2222') && m.html.includes('대표') && m.html.includes('ceo@company.test'));
     const [o] = await sql`select message_id from outbox where id = ${r.id}`;
     assert.equal(m.messageId, o.message_id);
     const [u] = await sql`select title, phone from users where id = ${ctx.ownerId}`;

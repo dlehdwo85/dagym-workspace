@@ -168,12 +168,17 @@ export default function CalendarPage() {
   // 시간 칸은 6시부터, 그보다 이른 일정·업무가 보이는 기간이면 그 시각부터(새벽 일정이 안 보이던 문제)
   const earliest = Math.min(6, ...events.filter((e) => !e.allDay).map((e) => Number(seoulTime(e.start).slice(0, 2))), ...tasks.filter((t) => t.due_time).map((t) => Number(t.due_time.slice(0, 2))));
   const slotMin = `${String(earliest).padStart(2, '0')}:00:00`;
-  const syncedIds = new Set(events.map((e) => e.linkedTask?.id).filter(Boolean));
+  const syncedIds = new Set(events.flatMap((e) => [e.linkedTask?.id, ...(e.linkedTaskIds ?? [])]).filter(Boolean));
+  // V14 47: 연결 안 됐어도 같은 날·같은 제목의 일정이 있으면 업무는 따로 그리지 않고 일정 줄에 "업무 n" 으로 묶는다
+  const normT = (x: string) => cleanTitle(x).replace(/\s+/g, ' ').trim().toLowerCase();
+  const evKey = new Set(events.filter((e) => !e.masked && e.kind !== 'task_block' && !(ABSENCE_KINDS as readonly string[]).includes(e.kind)).map((e) => `${seoulDate(e.start)}|${normT(e.title)}`));
+  const dupTasks = new Map<string, number>();
+  for (const t of tasks) if (t.due_date && !syncedIds.has(t.id) && evKey.has(`${t.due_date}|${normT(t.title)}`)) dupTasks.set(`${t.due_date}|${normT(t.title)}`, (dupTasks.get(`${t.due_date}|${normT(t.title)}`) ?? 0) + 1);
   const fcEvents = useMemo(() => [
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e) && (showDone || (e.linkedTask ?? e.blockTask)?.status !== 'done')).map((e) => ({ // 완료된 업무의 일정·업무 시간 블록은 "완료 보기"를 켤 때만
-      id: `${e.id}|${e.originalStart ?? ''}`, title: `${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}`,
+      id: `${e.id}|${e.originalStart ?? ''}`, title: `${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}${dupTasks.get(`${seoulDate(e.start)}|${normT(e.title)}`) ? ` · 업무 ${dupTasks.get(`${seoulDate(e.start)}|${normT(e.title)}`)}` : ''}`,
       classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(e.linkedTask ? ['has-task'] : []), ...((e.linkedTask ?? e.blockTask)?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
       // V7 4번: 색은 개인/회사 두 가지만(사람 구분은 제목 앞 머리글자)
@@ -182,7 +187,7 @@ export default function CalendarPage() {
       extendedProps: { type: 'event', ev: e, who: e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? `${initials(e.ownerName ?? '')} · ` : '' }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
-    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id)).map((t) => ({
+    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id) && !dupTasks.has(`${t.due_date}|${normT(t.title)}`)).map((t) => ({
       // V7 4번: 일정과 같은 모양 — 업무는 왼쪽 굵은 선(V14 37번, 동그라미 없음), 다른 사람 업무는 머리글자
       id: `task|${t.id}`, title: t.title,
       // V14 13번: 시간 있는 업무는 마감 직전 1시간 블록(한 칸 높이) — 얇게 찌그러지지 않게

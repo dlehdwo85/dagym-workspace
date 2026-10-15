@@ -152,7 +152,7 @@ export async function signatureList(u: SessionUser) {
   const sql = db();
   const me = await sender(u.id, sql);
   const profiles = (await companyProfiles(tenantOf(u), sql)) as SigProfile[];
-  return { me: { name: me.name, title: me.title, phone: me.phone, email: me.email }, companies: profiles.map((p) => ({ key: p.key, name: p.name, isDefault: p.is_default,
+  return { me: { name: me.name, title: me.title, phone: me.phone, email: me.email, workEmail: me.workEmail }, companies: profiles.map((p) => ({ key: p.key, name: p.name, isDefault: p.is_default,
     sigIntro: p.sig_intro ?? null, sigDisclaimer: p.sig_disclaimer ?? null, sigDisclaimerEn: p.sig_disclaimer_en ?? null, hasLogo: !!p.logo_file_id, html: signatureHtml(p, me) })) };
 }
 
@@ -172,7 +172,7 @@ export function signatureHtml(p: SigProfile, s: Sender) {
 <div style="font-size:13px;font-weight:bold;color:${color};margin:2px 0 6px">${esc(p.name)}</div>
 <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
 ${line('T', p.phone, p.phone ? `tel:${p.phone.replace(/[^0-9+]/g, '')}` : undefined)}${line('M', s.phone, s.phone ? `tel:${s.phone.replace(/[^0-9+]/g, '')}` : undefined)}${line('F', p.fax)}
-${line('E', s.email, `mailto:${s.email}`)}${line('W', p.website, web ?? undefined)}${line('A', p.address)}
+${s.email ? line('E', s.email, `mailto:${s.email}`) : ''}${line('W', p.website, web ?? undefined)}${line('A', p.address)}
 </table></td></tr>
 ${p.sig_intro ? `<tr><td colspan="2" style="padding:10px 0 0;font-size:12px;color:#475569">${esc(p.sig_intro)}</td></tr>` : ''}
 ${p.sig_disclaimer || p.sig_disclaimer_en ? `<tr><td colspan="2" style="padding:10px 0 0;font-size:10px;line-height:1.5;color:#94a3b8">${esc(p.sig_disclaimer)}${p.sig_disclaimer && p.sig_disclaimer_en ? '<br>' : ''}${esc(p.sig_disclaimer_en)}</td></tr>` : ''}
@@ -190,9 +190,11 @@ export function bodyHtml(text: string, sig: string, linkBlock = '') {
   return `<div style="font-family:'Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif;font-size:14px;line-height:1.6;color:#0f172a">${paras}${linkBlock}${sig}</div>`;
 }
 
-async function sender(userId: string, sql: Sql): Promise<Sender> {
-  const [s] = await sql<Sender[]>`select name, title, phone, email from users where id = ${userId}`;
-  return s;
+/** 명함의 보내는 사람: 이메일은 로그인 이메일(개인 메일일 수 있음)을 쓰지 않고 업무 이메일 → 없으면 회사 메일 계정 주소 */
+async function sender(userId: string, sql: Sql): Promise<Sender & { workEmail: string | null }> {
+  const [s] = await sql<{ name: string; title: string | null; phone: string | null; work_email: string | null; tenant: string }[]>`select name, title, phone, work_email, tenant from users where id = ${userId}`;
+  const acc = s.work_email ? null : await loadAccount(s.tenant, sql);
+  return { name: s.name, title: s.title, phone: s.phone, email: s.work_email || acc?.from_email || '', workEmail: s.work_email };
 }
 
 // ---------------- 시안 ----------------
@@ -238,7 +240,7 @@ export async function mailContext(u: SessionUser, taskId: string) {
   return {
     canSend: await canSend(u, sql), account: account ? { fromEmail: account.from_email, fromName: account.from_name, lastOkAt: account.last_ok_at } : null,
     kinds: Object.entries(MAIL_KINDS).map(([k, v]) => ({ key: k, ...v })), companies: sigs, company: guess,
-    to: contact?.email ? [contact.email] : [], contact, me: { name: me.name, title: me.title, phone: me.phone, email: me.email },
+    to: contact?.email ? [contact.email] : [], contact, me: { name: me.name, title: me.title, phone: me.phone, email: me.email, workEmail: me.workEmail },
     attachments: atts.map((a: any) => ({ id: a.id, name: a.file_name, size: Number(a.size_bytes), mime: a.mime_type, title: a.doc_title })),
     linkThresholdBytes: LINK_THRESHOLD, history, taskTitle: task.title,
   };
@@ -270,6 +272,7 @@ export const sendInput = z.object({
   /** 보내는 사람 명함 정보가 비어 있을 때 한 번 받아 프로필에 저장(학습) */
   senderTitle: z.string().trim().max(50).optional(),
   senderPhone: z.string().trim().max(40).optional(),
+  senderWorkEmail: z.string().trim().email('업무 이메일 형식이 아닙니다').max(200).optional(),
 });
 
 export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip: string | null) {
@@ -281,8 +284,9 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   const [profile] = (await companyProfiles(t, sql)).filter((p) => p.key === i.company) as SigProfile[];
   if (!profile) throw notFound('회사 정보가 없습니다');
   // 명함 학습: 직급·휴대폰이 비어 있으면 이번에 받은 값을 프로필에 저장
-  if (i.senderTitle || i.senderPhone) {
-    await sql`update users set title = coalesce(nullif(title, ''), ${i.senderTitle || null}), phone = coalesce(nullif(phone, ''), ${i.senderPhone || null}), updated_at = now() where id = ${u.id}`;
+  if (i.senderTitle || i.senderPhone || i.senderWorkEmail) {
+    await sql`update users set title = coalesce(nullif(title, ''), ${i.senderTitle || null}), phone = coalesce(nullif(phone, ''), ${i.senderPhone || null}),
+      work_email = coalesce(nullif(work_email, ''), ${i.senderWorkEmail || null}), updated_at = now() where id = ${u.id}`;
   }
   const me = await sender(u.id, sql);
   const ids = [...new Set(i.attachmentIds ?? [])];

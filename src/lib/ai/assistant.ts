@@ -121,6 +121,7 @@ const TOOLS: AiTool[] = [
       repeat: { type: 'string', enum: ['none', 'daily', 'weekdays', 'weekly', 'biweekly', 'monthly'], description: '반복 (선택)' }, repeatUntil: str('반복 끝 날짜 YYYY-MM-DD (선택)'),
       reminderMinutes: { type: 'array', items: { type: 'number' }, description: '알림: 시작 몇 분 전 (예: [10], 하루 전은 1440)' },
       description: str('메모 (선택)'), taskId: str('연결할 업무 id (선택)'), isPrivate: { type: 'boolean', description: '비공개 (선택)' },
+      taskAssigneeIds: { type: 'array', items: { type: 'string' }, description: '일정과 함께 업무도 만들 때 업무 담당자 id — 담당자마다 연결 업무 1건(마감 = 일정 시작, 날짜 연동). 같은 내용으로 propose_create_task(s) 를 따로 부르지 않는다' },
     }, required: ['title', 'date'] } },
   { name: 'propose_update_event', description: '일정 시간 바꾸기 또는 취소(삭제)를 제안한다. 일정 id 는 list_events 로 찾는다. [확인] 후 실행되고 참석자에게 알림이 간다.',
     input_schema: { type: 'object', properties: {
@@ -190,6 +191,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
+- 일정과 업무를 함께 요청하면(예: "회의 잡고 참석자들 업무로도") propose_create_event 하나에 taskAssigneeIds 를 넣어 "일정 1 + 연결 업무"로 제안하세요. 업무 마감은 일정 시작과 같고 날짜가 연동됩니다. 같은 내용의 propose_create_task(s) 를 따로 만들지 마세요(사용자가 다른 마감을 지시한 경우만 예외). 일정 주인 본인에게는 업무를 또 만들지 않습니다.
 - 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
 - 문서 비용을 아끼세요: 우리 회사 양식(자료실 "양식")에 **값만 바꾸면 되는** 요청은 list_templates(또는 첨부·참고 xlsx/docx) → read_template_layout → fill_template 로 바로 만드세요(거의 무료, 서식 그대로). 양식이 없거나, **다른 회사 양식을 "참고해서" 만드는 요청**, 구조·디자인을 새로 해야 할 때는 run_file_task(참고 파일은 referenceFileIds).
 - 서식·디자인이 중요한 문서(견적서·보고서·제안서·안내문·PPT)나 "참고해서 만들어/더 세련되게/색 바꿔" 같은 요청, 엑셀·CSV 계산·차트 분석은 run_file_task 를 쓰세요(실제 파일·미리보기). 앞서 만든 파일을 고칠 때는 대화 기록의 [파일 작업: id=…] 를 baseJobId 로 mode=edit. run_file_task 를 부른 뒤에는 "만들기 시작했습니다(1~3분, 아래 카드에 미리보기가 나옵니다)"처럼 시작했다고만 말하고, "~했습니다·~뺐습니다·~맞췄습니다" 같은 완료형으로 결과를 설명하지 마세요(아직 만들지 않았음). 간단한 글 문서는 propose_create_document, 단순 데이터 표는 propose_xlsx_report.
@@ -369,17 +371,29 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       const until = isDate(input.repeatUntil) ? `;UNTIL=${input.repeatUntil.replace(/-/g, '')}T145959Z` : '';
       const rrule = REPEAT[input.repeat] ? REPEAT[input.repeat] + until : null;
       if (input.taskId) await getTaskDetail(u, String(input.taskId));
+      // V14 47: "일정과 업무" = 일정 1 + 연결 업무(담당자별). 일정 주인은 이미 일정이 있으므로 다른 담당이 있으면 업무를 또 만들지 않는다
+      let taskWho = [...new Set((Array.isArray(input.taskAssigneeIds) ? input.taskAssigneeIds : []).map(String))].slice(0, 20) as string[];
+      if (taskWho.length > 1) taskWho = taskWho.filter((x) => x !== u.id);
+      if (taskWho.length) {
+        const dir = (await directory(u)).users as unknown as { id: string }[];
+        const bad = taskWho.filter((id) => !dir.some((p) => p.id === id));
+        if (bad.length) throw badRequest(`배정할 수 없는 사람 id: ${bad.join(', ')} — list_people 로 다시 찾으세요`);
+      }
+      const taskPeople = taskWho.length ? await peopleNames(u, taskWho.filter((x) => x !== u.id)) : [];
       const i = eventInput.parse({ calendarId, title: String(input.title ?? '').slice(0, 200), description: input.description ? String(input.description).slice(0, 5000) : undefined,
         location: input.location ? String(input.location).slice(0, 300) : undefined, allDay, start: s.toISO(), end: e.toISO(), rrule, attendeeIds: ids.length ? ids : undefined,
         reminderMinutes: Array.isArray(input.reminderMinutes) ? input.reminderMinutes.map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 40320).slice(0, 5) : undefined,
-        taskId: input.taskId || undefined, isPrivate: input.isPrivate ? true : undefined, kind: input.taskId ? 'normal' : undefined });
+        taskId: input.taskId || undefined, isPrivate: input.isPrivate ? true : undefined, kind: input.taskId ? 'normal' : undefined,
+        ...(taskWho.length ? { alsoTask: true, taskAssigneeIds: taskWho, taskRequestedById: u.id } : {}) });
       const { calendarPerms } = await import('../access');
       const [cal] = await db()<any[]>`select id, type, org_unit_id, owner_user_id, tenant from calendars where id = ${calendarId}`;
       if (!(await calendarPerms(u, cal)).edit) throw new HttpError(403, 'forbidden', `${calName}에 일정을 만들 권한이 없습니다 — 내 캘린더(personal)로 만드세요`);
       const warnings = await eventWarnings(u, ids, s.toJSDate(), e.toJSDate(), allDay);
       const when = fmtWhen(s, e, allDay) + (rrule ? ` · 반복 ${({ daily: '매일', weekdays: '평일', weekly: '매주', biweekly: '격주', monthly: '매월' } as Record<string, string>)[input.repeat]}` : '');
-      return { ...(await propose(c, 'create_event', `일정 만들기: ${i.title} — ${when}${people.length ? ` · ${people.map((p) => p.name).join('·')}` : ''}`, i,
-        { when, place: i.location || null, attendees: people.map((p) => `${p.name}${p.title ? ` · ${p.title}` : ''}`), calendar: calName, warnings })), warnings };
+      const linked = taskWho.length ? ` · 연결 업무 ${taskWho.length}` : '';
+      return { ...(await propose(c, 'create_event', `일정 1${linked} 만들기: ${i.title} — ${when}${people.length ? ` · ${people.map((p) => p.name).join('·')}` : ''}`, i,
+        { when, place: i.location || null, attendees: people.map((p) => `${p.name}${p.title ? ` · ${p.title}` : ''}`), calendar: calName, warnings,
+          ...(taskWho.length ? { tasks: taskWho.map((id) => id === u.id ? '나' : (taskPeople.find((p) => p.id === id)?.name ?? '')), taskDue: when.split('~')[0] } : {}) })), warnings };
     }
     case 'propose_update_event': {
       const { event: ev, perms } = await loadEvent(u, String(input.eventId));
@@ -418,12 +432,18 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         { when, attendees: [], warnings: [...warnings, ...(ids.length ? [`참석자 ${ids.length}명에게 변경 알림이 갑니다`] : [])] })), warnings };
     }
     case 'propose_create_task': {
+      if (c.proposals.some((p) => p.kind === 'create_event' && p.summary.includes(`: ${String(input.title ?? '').trim()} —`)
+          && (!isDate(input.dueDate) || p.summary.includes(`— ${Number(input.dueDate.slice(5, 7))}/${Number(input.dueDate.slice(8, 10))}(`))))
+        throw badRequest('같은 내용의 일정을 이미 제안했습니다 — 업무는 propose_create_event 의 taskAssigneeIds 로 일정에 연결해 만드세요(마감이 따로 정해진 경우만 별도 업무)');
       const i = taskInput.parse({ title: input.title, description: input.description || undefined, assigneeId: input.assigneeId || undefined, dueDate: isDate(input.dueDate) ? input.dueDate : undefined,
         dueTime: /^\d{2}:\d{2}$/.test(input.dueTime ?? '') ? input.dueTime : undefined, priority: input.priority || undefined, projectId: input.projectId || undefined,
         orgUnitId: input.orgUnitId || undefined, checklist: Array.isArray(input.checklist) ? input.checklist.slice(0, 50) : undefined });
       return propose(c, 'create_task', `업무 만들기: ${i.title}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`, i);
     }
     case 'propose_create_tasks': {
+      if (c.proposals.some((p) => p.kind === 'create_event' && p.summary.includes(`: ${String(input.title ?? '').trim()} —`)
+          && (!isDate(input.dueDate) || p.summary.includes(`— ${Number(input.dueDate.slice(5, 7))}/${Number(input.dueDate.slice(8, 10))}(`))))
+        throw badRequest('같은 내용의 일정을 이미 제안했습니다 — 업무는 propose_create_event 의 taskAssigneeIds 로 일정에 연결해 만드세요(마감이 따로 정해진 경우만 별도 업무)');
       const ids = [...new Set((Array.isArray(input.assigneeIds) ? input.assigneeIds : []).map(String))].slice(0, 50);
       if (!ids.length) throw badRequest('담당자를 1명 이상 정하세요');
       const people = (await directory(u)).users as unknown as { id: string; name: string; title?: string | null }[];

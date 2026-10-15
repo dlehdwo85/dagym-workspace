@@ -12,7 +12,7 @@ type Ctx = {
   kinds: { key: string; label: string; subject: string; body: string }[];
   companies: { key: string; name: string; isDefault: boolean; html: string; smsLine: string }[]; company: string | null;
   to: string[]; contact: { name: string | null; email: string | null; phone: string | null; organization: string | null } | null;
-  me: { name: string; title: string | null; phone: string | null; email: string };
+  me: { name: string; title: string | null; phone: string | null; email: string; workEmail: string | null };
   attachments: { id: string; name: string; size: number; mime: string }[]; linkThresholdBytes: number; taskTitle: string;
 };
 type Item = { id: string; channel: string; preview: string | null; status: string; to_addrs: string[]; subject: string; files: { name: string }[]; as_link: boolean; attempts: number; last_error: string | null;
@@ -71,7 +71,7 @@ export function TaskMail({ taskId, onChange }: { taskId: string; onChange: () =>
 function Compose({ taskId, onClose, onSent, onAttach }: { taskId: string; onClose: () => void; onSent: () => void; onAttach: () => void }) {
   const ctx = useApi<Ctx>(`/api/tasks/${taskId}/mail`, [taskId]);
   const d = ctx.data;
-  const [f, setF] = useState<{ company: string; kind: string; to: string; cc: string; subject: string; body: string; files: string[]; title: string; phone: string } | null>(null);
+  const [f, setF] = useState<{ company: string; kind: string; to: string; cc: string; subject: string; body: string; files: string[]; title: string; phone: string; workEmail: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [channel, setChannel] = useState<'email' | 'sms'>('email');
   const [drafting, setDrafting] = useState(false);
@@ -84,7 +84,7 @@ function Compose({ taskId, onClose, onSent, onAttach }: { taskId: string; onClos
   useEffect(() => {
     if (!d || f) return;
     const k = d.kinds[d.kinds.length - 1];
-    setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: d.to.join(', '), cc: '', subject: `${k.subject}${d.contact?.organization ? ` — ${d.contact.organization}` : ''}`, body: k.body, files: [], title: '', phone: '' });
+    setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: d.to.join(', '), cc: '', subject: `${k.subject}${d.contact?.organization ? ` — ${d.contact.organization}` : ''}`, body: k.body, files: [], title: '', phone: '', workEmail: '' });
   }, [d, f]);
   const sig = d?.companies.find((c) => c.key === f?.company);
   const total = useMemo(() => (d && f ? d.attachments.filter((a) => f.files.includes(a.id)).reduce((s, a) => s + a.size, 0) : 0), [d, f]);
@@ -157,7 +157,7 @@ function Compose({ taskId, onClose, onSent, onAttach }: { taskId: string; onClos
     setBusy(true);
     try {
       const r = await api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), subject: f!.subject, body: f!.body, attachmentIds: f!.files,
-        senderTitle: f!.title || undefined, senderPhone: f!.phone || undefined } });
+        senderTitle: f!.title || undefined, senderPhone: f!.phone || undefined, senderWorkEmail: f!.workEmail.trim() || undefined } });
       toast.ok(r.asLink ? '보관함에 넣었습니다 — 첨부는 다운로드 링크로 보냅니다' : '보관함에 넣었습니다 — 곧 발송됩니다');
       onSent();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
@@ -225,11 +225,12 @@ function Compose({ taskId, onClose, onSent, onAttach }: { taskId: string; onClos
           )}
           {asLink && <p className="text-xs text-amber-800" data-testid="mail-as-link">첨부 합계가 {mb(d.linkThresholdBytes)}를 넘어 메일에는 다운로드 링크(14일, 열람 기록)로 넣습니다.</p>}
         </div>
-        {channel === 'email' && (!d.me.title || !d.me.phone) && (
+        {channel === 'email' && (!d.me.title || !d.me.phone || !d.me.workEmail) && (
           <div className="grid gap-2 rounded-input bg-slate-50 p-3 sm:grid-cols-2" data-testid="mail-me-ask">
-            <p className="text-xs text-ink-2 sm:col-span-2">명함에 들어갈 내 {[!d.me.title && '직급', !d.me.phone && '휴대폰'].filter(Boolean).join('·')}이 비어 있습니다. 넣으면 프로필에 저장되어 다음부터 자동으로 들어갑니다.</p>
+            <p className="text-xs text-ink-2 sm:col-span-2">명함에 들어갈 내 {[!d.me.title && '직급', !d.me.phone && '휴대폰', !d.me.workEmail && '업무 이메일'].filter(Boolean).join('·')}이 비어 있습니다. 넣으면 프로필에 저장되어 다음부터 자동으로 들어갑니다.{!d.me.workEmail && ' 업무 이메일이 없으면 회사 메일 주소가 들어갑니다(로그인 이메일은 쓰지 않음).'}</p>
             {!d.me.title && <Field label="직급"><input className={inputCls} value={f.title} onChange={(e) => set({ title: e.target.value })} maxLength={50} data-testid="mail-me-title" /></Field>}
             {!d.me.phone && <Field label="휴대폰"><input className={inputCls} value={f.phone} onChange={(e) => set({ phone: e.target.value })} maxLength={40} inputMode="tel" /></Field>}
+            {!d.me.workEmail && <Field label="업무 이메일 (선택)"><input className={inputCls} type="email" value={f.workEmail} onChange={(e) => set({ workEmail: e.target.value })} placeholder={d.me.email || '회사 메일 주소'} data-testid="mail-me-work-email" /></Field>}
           </div>
         )}
         {channel === 'email' && <div>

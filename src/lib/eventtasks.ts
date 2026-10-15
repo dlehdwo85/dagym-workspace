@@ -284,8 +284,10 @@ export async function createSyncTask(u: SessionUser, eventId: string, assigneeId
   const c = await eventCtx(u, eventId, sql);
   if (!c.canWork) throw forbidden('일정 작성자·편집 권한자·참석자만 업무를 만들 수 있습니다');
   const [m] = await sql<{ title: string; start_at: Date; all_day: boolean; rrule: string | null }[]>`select title, start_at, all_day, rrule from events where id = ${c.masterId}`;
-  const already = await sql`select 1 from event_tasks where event_id = ${c.masterId} and sync`;
-  if (already.length) throw badRequest('이미 연결된 업무가 있습니다');
+  // V14 47: 담당자마다 연결 업무 1건(같은 사람에게 두 번 만들지 않음)
+  const [already] = await sql<{ id: string }[]>`select t.id from event_tasks et join tasks t on t.id = et.task_id
+    where et.event_id = ${c.masterId} and et.sync and t.deleted_at is null and t.assignee_id = ${assigneeId ?? u.id}`;
+  if (already) return { id: already.id };
   const orgUnitId = await defaultUnit(sql, c.cal, assigneeId, u);
   const { id } = await createTask(u, {
     title: m.title, assigneeId: assigneeId ?? u.id, requestedById: opt.requestedById ?? u.id, orgUnitId, approvalRequired: false, priority: opt.priority ?? 'normal',

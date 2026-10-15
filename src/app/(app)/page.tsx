@@ -115,7 +115,22 @@ function EventRow({ e, withDate }: { e: any; withDate?: boolean }) {
   );
 }
 
-type WeekItem = { key: string; time: string; title: string; personal: boolean; tag: string; href: string; task: any | null };
+type WeekItem = { key: string; time: string; title: string; personal: boolean; tag: string; href: string; task: any | null; kind?: 'event' | 'task' };
+/** V14 47: 같은 날·같은 제목의 일정과 업무(연결 안 된 것 포함)는 한 줄로 — 시각은 일정 기준, 꼬리표 "업무 n · 일정 m" */
+function mergeSameTitle(items: WeekItem[]): WeekItem[] {
+  const norm = (t: string) => t.replace(/\s+/g, ' ').trim().toLowerCase();
+  const groups = new Map<string, WeekItem[]>();
+  for (const it of items) { const k = norm(it.title); groups.set(k, [...(groups.get(k) ?? []), it]); }
+  const out: WeekItem[] = [];
+  for (const g of groups.values()) {
+    const evs = g.filter((x) => x.kind === 'event'); const tks = g.filter((x) => x.kind === 'task');
+    if (g.length === 1 || !evs.length || !tks.length) { out.push(...g); continue; }
+    const base = evs[0];
+    const linkedTasks = evs.filter((e) => e.task).length;
+    out.push({ ...base, key: base.key + ':m', tag: `업무 ${tks.length + linkedTasks} · 일정 ${evs.length}`, task: base.task ?? (tks.length === 1 ? tks[0].task : null) });
+  }
+  return out;
+}
 /** 이번 주 한 줄: [시간/종일] [색 점·업무는 색 막대] 제목 [꼬리표] */
 function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: { personal: string; company: string }; onDone: (t: any) => void }) {
   const done = r.task?.status === 'done';
@@ -206,15 +221,15 @@ export default function Dashboard() {
   // V7 5번: 일정과 업무를 같은 한 줄로 — 시간순(종일·시간 없는 마감이 맨 위), "업무에도 추가"로 연결된 일정·업무는 한 줄로 합침
   const weekRows = new Map<string, WeekItem[]>(weekDays.map((d) => {
     const evs = byDay.get(d) ?? [];
-    const linked = new Set(evs.map((e) => e.linkedTask?.id).filter(Boolean));
+    const linked = new Set(evs.flatMap((e) => [e.linkedTask?.id, ...(e.linkedTaskIds ?? [])]).filter(Boolean));
     const items: WeekItem[] = [
       ...evs.map((e) => ({ key: `e${e.id}${e.start}`, time: e.allDay || seoulDay(e.start) !== d ? '' : fmtHM(e.start), title: cleanTitle(e.title), personal: e.calendarType === 'personal',
-        tag: e.linkedTask ? '일정·업무' : (ABSENCE_KINDS as readonly string[]).includes(e.kind) ? EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL] : '일정', href: `/calendar?date=${d}&event=${e.id}`, task: e.linkedTask ? { id: e.linkedTask.id, status: e.linkedTask.status } : null })),
+        tag: e.linkedTask ? '일정·업무' : (ABSENCE_KINDS as readonly string[]).includes(e.kind) ? EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL] : '일정', href: `/calendar?date=${d}&event=${e.id}`, task: e.linkedTask ? { id: e.linkedTask.id, status: e.linkedTask.status } : null, kind: e.kind === 'task_block' ? undefined : ('event' as const) })),
       ...(tasksByDay.get(d) ?? []).filter((t) => !linked.has(t.id)).map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id,
-        tag: '업무', href: `/tasks/${t.id}`, task: t })),
+        tag: '업무', href: `/tasks/${t.id}`, task: t, kind: 'task' as const })),
     ];
     // V14 20번(대표 결정): 완료된 업무·일정은 이번 주 목록에서 숨김
-    return [d, items.filter((x) => x.task?.status !== 'done').sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'))] as [string, WeekItem[]];
+    return [d, mergeSameTitle(items.filter((x) => x.task?.status !== 'done')).sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'))] as [string, WeekItem[]];
   }));
   const holName = (d: string) => hol.data?.holidays.find((h) => h.date === d)?.name ?? null;
   const weekCount = [...weekRows.values()].reduce((n, x) => n + x.length, 0);
