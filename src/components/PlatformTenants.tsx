@@ -30,7 +30,7 @@ export function PlatformTenants() {
       </div>
       <div className="max-h-[28rem] overflow-auto">
         <table className="w-full min-w-[980px] text-sm">
-          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>회사</th><th className={cell}>요금제</th><th className={cell}>상태</th><th className={cell}>인원</th><th className={cell}>저장</th><th className={cell}>AI(이번 달)</th><th className={cell}>최근 접속</th><th className={cell}>가입</th><th className={cell} /></tr></thead>
+          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>회사</th><th className={cell}>요금제</th><th className={cell}>상태</th><th className={cell}>인원</th><th className={cell}>저장</th><th className={cell}>AI(이번 달)</th><th className={cell}>청구·미납</th><th className={cell}>최근 접속</th><th className={cell}>가입</th><th className={cell} /></tr></thead>
           <tbody>
             {(list.data?.tenants ?? []).map((t) => (
               <tr key={t.id} className={cx('border-t border-line', t.status !== 'active' && 'bg-slate-50 text-ink-3')} data-tenant={t.id}>
@@ -40,12 +40,16 @@ export function PlatformTenants() {
                 <td className={cell}>{t.users}명</td>
                 <td className={cell}>{t.storage_bytes != null ? fmtBytes(Number(t.storage_bytes)) : '-'}</td>
                 <td className={cell}>{t.ai_requests}회 · {Math.round(Number(t.ai_krw)).toLocaleString()}원</td>
+                <td className={cell}>{t.billing_amount ? `${Number(t.billing_amount).toLocaleString()}원/${t.billing_cycle === 'annual' ? '년' : '월'}` : '-'}
+                  {t.next_billing_on && <div className="text-[11px] text-ink-3">다음 {String(t.next_billing_on).slice(0, 10)}</div>}
+                  {t.past_due_since && <div className="text-[11px] font-medium text-red-600">미납 {String(t.past_due_since).slice(0, 10)}~{t.billing_lock === 'suspended' ? ' · 이용 중지' : t.billing_lock === 'read_only' ? ' · 읽기 전용' : ''}</div>}
+                  {t.last_payment && <div className="text-[11px] text-ink-3">최근 {String(t.last_payment.at).slice(0, 10)} {t.last_payment.status === 'paid' ? '성공' : t.last_payment.status}</div>}</td>
                 <td className={cell}>{t.last_login_at ? fmtDateTime(t.last_login_at) : '-'}</td>
                 <td className={cell}>{String(t.created_at).slice(0, 10)}</td>
                 <td className={cell}><Button size="sm" variant="secondary" onClick={() => setOpen(t.id)} data-testid={`company-open-${t.id}`}>관리</Button></td>
               </tr>
             ))}
-            {list.data && !list.data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={9}>찾는 회사가 없습니다</td></tr>}
+            {list.data && !list.data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={10}>찾는 회사가 없습니다</td></tr>}
           </tbody>
         </table>
       </div>
@@ -77,6 +81,26 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             {[7, 14].map((x) => <Button key={x} size="sm" variant="ghost" onClick={() => run(() => api(`/api/platform/tenants/${id}/trial`, { body: { action: 'extend', days: x } }), `체험 ${x}일 연장`)}>체험 +{x}일</Button>)}
             <Button size="sm" variant="ghost" onClick={() => confirm('읽기 전용으로 바꿀까요? (체험 종료와 같음)') && run(() => api(`/api/platform/tenants/${id}/trial`, { body: { action: 'end' } }), '읽기 전용으로 바꿨습니다')}>읽기 전용</Button>
             <Button size="sm" variant="ghost" onClick={() => { const code = prompt('바꿀 요금제 코드 (예: personal · team · business · trial)', d.data.subscription.planCode); if (code) run(() => api(`/api/platform/tenants/${id}`, { method: 'PUT', body: { planCode: code, addons: d.data.subscription.addons ?? {}, status: code === 'trial' ? 'trial' : 'active' } }), '요금제를 바꿨습니다'); }}>요금제 변경</Button>
+          </div>
+        )}
+        {d.data.billing && (
+          <div className="rounded-input border border-line p-3" data-testid="company-billing">
+            <p className="text-xs font-medium text-ink-2">요금·결제</p>
+            <p className="mt-1">이번 달 청구 예정 <b>{Number(d.data.billing.expectedThisMonth ?? 0).toLocaleString()}원</b>{d.data.billing.next_billing_on && ` · 다음 결제 ${String(d.data.billing.next_billing_on).slice(0, 10)}`}
+              {' '}· AI 원가 {Number(d.data.billing.aiCostKrw ?? 0).toLocaleString()}원{d.data.billing.aiCostRate != null && ` (매출 대비 ${d.data.billing.aiCostRate}%)`}</p>
+            {d.data.billing.past_due_since && (
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-red-700">
+                <span>미납 {Number(d.data.billing.unpaid ?? 0).toLocaleString()}원 · {String(d.data.billing.past_due_since).slice(0, 10)}부터{d.data.billing.billing_lock === 'suspended' ? ' · 이용 중지' : d.data.billing.billing_lock === 'read_only' ? ' · 읽기 전용' : ''}
+                  {d.data.billing.billing_grace_until && new Date(d.data.billing.billing_grace_until) > new Date() && ` · 유예 ${String(d.data.billing.billing_grace_until).slice(0, 10)}까지`}</span>
+                {[7, 14].map((x) => <Button key={x} size="sm" variant="secondary" onClick={() => run(() => api(`/api/platform/tenants/${id}/billing`, { body: { action: 'grace', days: x } }), `유예 ${x}일`)} data-testid={`grace-${x}`}>유예 +{x}일</Button>)}
+                {d.data.billing.billing_lock && <Button size="sm" variant="ghost" onClick={() => run(() => api(`/api/platform/tenants/${id}/billing`, { body: { action: 'unlock' } }), '잠금을 풀었습니다')}>잠금 해제</Button>}
+              </div>
+            )}
+            {!!d.data.payments?.length && (
+              <ul className="mt-2 max-h-32 overflow-y-auto text-xs text-ink-2">
+                {d.data.payments.map((p: any) => <li key={p.id}>{String(p.paid_at ?? p.created_at).slice(0, 16).replace('T', ' ')} · {p.kind} {p.plan_code ?? ''} · {Number(p.amount).toLocaleString()}원 · <b className={p.status === 'paid' ? 'text-emerald-700' : p.status === 'failed' ? 'text-red-600' : ''}>{p.status}</b>{p.result_msg && ` · ${p.result_msg}`}</li>)}
+              </ul>
+            )}
           </div>
         )}
         <div className="rounded-input border border-line p-3">

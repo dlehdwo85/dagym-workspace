@@ -301,6 +301,21 @@ export function AppShell({ session, children }: { session: Sess; children: React
               onClick={async () => { await api('/api/platform/support', { method: 'DELETE' }).catch(() => {}); window.location.href = '/platform'; }}>지원 모드 끝내기</button>
           </div>
         )}
+        {/* V28 B2 미납: 7일 읽기 전용 띠 · 30일 이용 중지(결제 안내만) */}
+        {session.tenant?.billingLock === 'read_only' && (
+          <div className="fixed inset-x-0 top-0 z-[36] bg-red-600 px-3 py-1 text-center text-xs font-medium text-white" data-testid="billing-ro-banner">
+            결제가 7일 넘게 밀려 읽기 전용입니다 — <a href="/admin/usage" className="underline">결제하면 바로 복구</a> (30일 미납이면 이용 중지)
+          </div>
+        )}
+        {session.tenant?.billingLock === 'suspended' && path !== '/admin/usage' && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/70 p-4" data-testid="billing-suspended">
+            <div className="max-w-sm rounded-card bg-white p-5 text-center shadow-pop">
+              <p className="text-lg font-bold">워크인 이용이 중지되었습니다</p>
+              <p className="mt-2 text-sm text-ink-2">결제가 30일 넘게 밀렸습니다. {['owner', 'admin'].includes(session.user.role) ? '결제하면 바로 다시 쓸 수 있어요. 데이터는 그대로 남아 있습니다.' : '회사 관리자에게 결제를 요청해 주세요. 데이터는 그대로 남아 있습니다.'}</p>
+              {['owner', 'admin'].includes(session.user.role) && <a href="/admin/usage" className="mt-4 inline-block rounded-input bg-brand-600 px-4 py-2 text-sm font-medium text-white">결제하러 가기</a>}
+            </div>
+          </div>
+        )}
         {/* 17차: 무료 체험 D-n · 끝나면 읽기 전용 안내 */}
         {session.tenant?.trial && (
           <div className={cx('fixed inset-x-0 top-0 z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',

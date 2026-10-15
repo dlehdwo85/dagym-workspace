@@ -321,17 +321,33 @@ export async function trialInfo(tenant: string, sql: Sql = db()) {
   return { trial: !ended, readOnly: ended, daysLeft: ended ? 0 : days, endsAt: s.trial_ends_at, chosenPlan: s.chosen_plan };
 }
 
-const roCache = new Map<string, { at: number; ro: boolean }>();
-/** 읽기 전용(체험 끝·미결제)이면 쓰기 요청을 막는다. 보기·내보내기·로그인·요금제 신청·알림 읽음·탈퇴는 허용 */
+const roCache = new Map<string, { at: number; ro: boolean; lock: string | null }>();
+/** 읽기 전용(체험 끝·미납 7일)이면 쓰기 요청을 막는다. 보기·내보내기·로그인·요금제 신청·알림 읽음·탈퇴는 허용 */
 const RO_ALLOW = [/^\/api\/billing/, /^\/api\/auth\//, /^\/api\/account\//, /^\/api\/plan/, /^\/api\/usage/, /^\/api\/push\//, /\/read$/, /^\/api\/notifications/, /^\/api\/export/, /^\/api\/support/, /^\/api\/me\//];
+/** V28 B2: 미납 30일 이용 중지 — 로그인해도 결제 안내만(결제·로그인·내보내기·요금 화면만 열림) */
+const SUSPEND_ALLOW = [/^\/api\/billing/, /^\/api\/auth\//, /^\/api\/account\//, /^\/api\/usage/, /^\/api\/export/, /^\/api\/support/, /^\/api\/platform/];
+async function roState(t: string) {
+  const c = roCache.get(t);
+  if (c && Date.now() - c.at < 15_000) return c;
+  const [s] = await db()<{ billing_lock: string | null }[]>`select billing_lock from tenant_subscriptions where tenant = ${t}`;
+  const lock = s?.billing_lock ?? null;
+  const v = { at: Date.now(), ro: !!lock || !!(await trialInfo(t))?.readOnly, lock };
+  roCache.set(t, v);
+  return v;
+}
+export async function billingLock(t: string) { return t === 'default' || t === 'demo' ? null : (await roState(t)).lock; }
 export async function assertWritable(u: SessionUser, path: string) {
   const t = tenantOfUser(u);
   if (t === 'default' || t === 'demo' || RO_ALLOW.some((r) => r.test(path))) return;
-  const c = roCache.get(t);
-  let ro: boolean;
-  if (c && Date.now() - c.at < 15_000) ro = c.ro;
-  else { ro = !!(await trialInfo(t))?.readOnly; roCache.set(t, { at: Date.now(), ro }); }
-  if (ro) throw new HttpError(402, 'read_only', '무료 체험이 끝나 읽기 전용입니다. 요금제를 선택하면 다시 쓸 수 있어요 (보기·내보내기는 그대로).');
+  const st = await roState(t);
+  if (st.lock === 'suspended') throw new HttpError(402, 'suspended', '미납 30일로 이용이 중지되었습니다 — 관리자가 결제하면 바로 다시 쓸 수 있어요(데이터는 그대로).');
+  if (st.ro) throw new HttpError(402, 'read_only', st.lock ? '미납 7일로 읽기 전용입니다 — 결제하면 바로 다시 쓸 수 있어요 (보기·내보내기는 그대로).' : '무료 체험이 끝나 읽기 전용입니다. 요금제를 선택하면 다시 쓸 수 있어요 (보기·내보내기는 그대로).');
+}
+/** 이용 중지 회사는 보기 요청도 막는다(결제 안내만) */
+export async function assertNotSuspended(u: SessionUser, path: string) {
+  const t = tenantOfUser(u);
+  if (t === 'default' || t === 'demo' || u.support || SUSPEND_ALLOW.some((r) => r.test(path))) return;
+  if ((await roState(t)).lock === 'suspended') throw new HttpError(402, 'suspended', '미납 30일로 이용이 중지되었습니다 — 관리자가 결제하면 바로 다시 쓸 수 있어요(데이터는 그대로).');
 }
 export const clearReadOnlyCache = (t?: string) => (t ? roCache.delete(t) : roCache.clear());
 

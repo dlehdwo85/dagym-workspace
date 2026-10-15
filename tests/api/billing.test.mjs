@@ -122,22 +122,42 @@ describe('18차 나이스페이 결제', () => {
     assert.equal((await sub()).addons.storage20, 1, '팩 1개만 더해짐');
   });
 
-  test('정기 결제 실패 → 1일 뒤 재시도 예약·알림 → 7일 지나면 읽기 전용(402), 카드 결제 성공하면 복구', async () => {
-    await sql`update tenant_subscriptions set billing_cycle = 'monthly', next_billing_on = current_date, past_due_since = null, retry_count = 0 where tenant = ${tid}`;
+  test('V28 B2 던닝: 결제 실패 → 알림·메일·3일 뒤 재시도 → 7일 미납 읽기 전용(402) → 30일 이용 중지(보기도 402, 결제 화면은 열림) → 유예 연장 → 결제 성공하면 즉시 복구', async () => {
+    await sql`update tenant_subscriptions set billing_cycle = 'monthly', next_billing_on = current_date, past_due_since = null, retry_count = 0, billing_lock = null where tenant = ${tid}`;
     state.failBids.add('*');
     await tick();
     let s = await sub();
-    assert.ok(s.past_due_since); assert.equal(s.status, 'active');
+    assert.ok(s.past_due_since); assert.equal(s.status, 'active'); assert.equal(s.billing_lock, null);
+    assert.equal(String(s.next_retry_on).slice(0, 10) > new Date().toISOString().slice(0, 10), true, '3일 뒤 재시도 예약');
     const n = await sql`select n.title from notifications n join users u on u.id = n.user_id where u.email = 'payer@example.com' and n.title = '구독 결제에 실패했습니다'`;
     assert.equal(n.length, 1);
-    await sql`update tenant_subscriptions set past_due_since = now() - interval '8 days', next_retry_on = current_date, retry_count = 2 where tenant = ${tid}`;
+    // 7일 미납 → 읽기 전용
+    await sql`update tenant_subscriptions set past_due_since = now() - interval '8 days', next_retry_on = current_date, retry_count = 1 where tenant = ${tid}`;
     await tick();
     s = await sub();
-    assert.equal(s.status, 'expired');
+    assert.equal(s.billing_lock, 'read_only'); assert.equal(s.status, 'active');
     assert.equal((await owner.post('/api/tasks', { title: '막힘' })).status, 402);
+    assert.equal((await owner.get('/api/tasks')).status, 200, '읽기 전용은 보기 가능');
+    // 30일 미납 → 이용 중지(보기도 막힘, 결제·요금 화면은 열림)
+    await sql`update tenant_subscriptions set past_due_since = now() - interval '31 days', next_retry_on = null where tenant = ${tid}`;
+    await tick();
+    assert.equal((await sub()).billing_lock, 'suspended');
+    const blocked = await owner.get('/api/tasks');
+    assert.equal(blocked.status, 402); assert.equal(blocked.body.error.code, 'suspended');
+    assert.equal((await owner.get('/api/billing')).status, 200, '결제 화면은 열림');
+    // 플랫폼 유예 → 잠금 풀림, 유예 동안 다시 잠그지 않음
+    const pf = ctx.owner; await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
+    await pf.ok('POST', `/api/platform/tenants/${tid}/billing`, { action: 'grace', days: 7 });
+    assert.equal((await sub()).billing_lock, null);
+    await tick();
+    assert.equal((await sub()).billing_lock, null, '유예 중에는 잠그지 않음');
+    assert.equal((await owner.post(`/api/platform/tenants/${tid}/billing`, { action: 'unlock' })).status, 404, '플랫폼 운영자만');
+    // 결제 성공 → 즉시 복구
     state.failBids.clear();
-    await owner.ok('POST', '/api/billing/subscribe', { planCode: 'team' }); // 결제는 읽기 전용에서도 가능
-    assert.equal((await sub()).status, 'active');
+    await sql`update tenant_subscriptions set billing_lock = 'suspended', billing_grace_until = null where tenant = ${tid}`;
+    await owner.ok('POST', '/api/billing/subscribe', { planCode: 'team' });
+    s = await sub();
+    assert.equal(s.billing_lock, null); assert.equal(s.past_due_since, null);
     await owner.ok('POST', '/api/tasks', { title: '다시 씀' });
   });
 

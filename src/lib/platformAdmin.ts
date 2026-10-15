@@ -23,6 +23,8 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
   const rows = await sql`
     select t.id, t.name, t.kind, t.status, t.created_at, t.delete_scheduled_at, t.support_consent_at, ow.email as owner_email,
       ts.plan_code, ts.status as sub_status, ts.trial_ends_at, ts.limit_overrides,
+      ts.billing_cycle, ts.next_billing_on, ts.billing_amount, ts.past_due_since, ts.billing_lock, ts.billing_grace_until,
+      (select json_build_object('at', coalesce(p.paid_at, p.created_at), 'status', p.status, 'amount', p.amount, 'msg', p.result_msg) from payments p where p.tenant = t.id order by p.created_at desc limit 1) as last_payment,
       (select count(*)::int from users x where x.tenant = t.id and x.status = 'active') as users,
       (select max(x.last_login_at) from users x where x.tenant = t.id) as last_login_at,
       (select storage_bytes from tenant_usage tu where tu.tenant = t.id order by month desc limit 1)::float8 as storage_bytes,
@@ -41,12 +43,18 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   const [t] = await sql`select t.*, ow.email as owner_email from tenants t left join users ow on ow.id = t.owner_user_id where t.id = ${tenant}`;
   if (!t) throw notFound('없는 회사입니다');
   const P = await import('./plans');
-  const [{ limits, sub }, usage, users, support] = await Promise.all([
+  const [{ limits, sub }, usage, users, support, payments] = await Promise.all([
     P.effectiveLimits(tenant, sql), P.currentUsage(tenant, sql),
     sql`select id, name, email, role, status, last_login_at, (totp_enabled_at is not null) as totp, platform_admin, created_at from users where tenant = ${tenant} and deleted_at is null order by (role = 'owner') desc, name`,
     sql`select s.created_at, s.expires_at, s.ended_at, s.reason, a.name as admin_name from support_sessions s join users a on a.id = s.admin_id where s.tenant = ${tenant} order by s.created_at desc limit 10`,
+    sql`select id, kind, plan_code, amount, status, canceled_amount, result_msg, paid_at, created_at from payments where tenant = ${tenant} order by created_at desc limit 12`,
   ]);
-  return { tenant: t, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support };
+  // V28 B2: 이번 달 청구 예정(정기 결제 금액, VAT 포함)·미납·AI 원가율
+  const [b] = await sql<any[]>`select billing_cycle, next_billing_on, billing_amount, past_due_since, billing_lock, billing_grace_until from tenant_subscriptions where tenant = ${tenant}`;
+  const [{ krw }] = await sql<{ krw: number }[]>`select coalesce(sum(cost_krw), 0)::float8 krw from ai_usage where tenant = ${tenant} and created_at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul'`;
+  const monthly = b?.billing_amount ? (b.billing_cycle === 'annual' ? Math.round(b.billing_amount / 12) : b.billing_amount) : 0;
+  const billing = { ...(b ?? {}), expectedThisMonth: monthly, unpaid: b?.past_due_since ? b.billing_amount : 0, aiCostKrw: Math.round(krw), aiCostRate: monthly ? Math.round((krw / (monthly / 1.1)) * 1000) / 10 : null };
+  return { billing, payments, tenant: t, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support };
 }
 
 export const overrideInput = z.object({

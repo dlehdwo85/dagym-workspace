@@ -61,6 +61,7 @@ export function BillingSection() {
           <div className="space-y-3">
             <div className="rounded-input bg-slate-50 p-3 text-sm" data-testid="billing-status">
               <div>현재: <b>{sub.plan_code ?? '-'}</b> {sub.billing_cycle ? `· ${sub.billing_cycle === 'annual' ? '연간' : '월'} 자동 결제` : ''}</div>
+              {sub.past_due_since && <div className="rounded-input bg-red-50 px-2 py-1 text-red-700" data-testid="billing-past-due">결제 실패(미납) {String(sub.past_due_since).slice(0, 10)}부터{sub.next_retry_on ? ` · ${String(sub.next_retry_on).slice(0, 10)}에 다시 시도` : ''}{sub.billing_lock === 'suspended' ? ' · 이용 중지됨' : sub.billing_lock === 'read_only' ? ' · 읽기 전용' : ' · 7일 지나면 읽기 전용, 30일 지나면 이용 중지'} — 카드를 바꾸거나 아래에서 바로 결제하면 즉시 복구됩니다.</div>}
               {sub.next_billing_on && <div className="text-ink-2">다음 결제: {String(sub.next_billing_on).slice(0, 10)} · {won(sub.billing_amount)}{sub.cancel_at_period_end && <b className="ml-1 text-red-600">해지 예약 — 이날 끝납니다</b>}</div>}
               {sub.past_due_since && <div className="font-medium text-red-600">결제 실패 — {sub.next_retry_on ? `${String(sub.next_retry_on).slice(0, 10)}에 다시 시도` : ''} (첫 실패 7일 뒤 읽기 전용)</div>}
               <div className="mt-1 text-ink-2">카드: {data.card ? `${data.card.card_name ?? ''} ····${data.card.card_last4}` : '없음'}</div>

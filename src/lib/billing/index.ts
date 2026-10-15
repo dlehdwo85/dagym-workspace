@@ -44,7 +44,7 @@ export async function billingOverview(u: SessionUser) {
   const sql = db();
   const [[card], [sub], payments, plans, addons] = await Promise.all([
     sql`select card_name, card_last4, created_at from billing_cards where tenant = ${t} and removed_at is null`,
-    sql`select plan_code, status, billing_cycle, next_billing_on, billing_amount, cancel_at_period_end, past_due_since, next_retry_on, trial_ends_at from tenant_subscriptions where tenant = ${t}`,
+    sql`select plan_code, status, billing_cycle, next_billing_on, billing_amount, cancel_at_period_end, past_due_since, next_retry_on, trial_ends_at, billing_lock, billing_grace_until from tenant_subscriptions where tenant = ${t}`,
     sql`select id, kind, plan_code, addon_code, amount, status, canceled_amount, result_msg, card_name, card_no, paid_at, created_at from payments where tenant = ${t} order by created_at desc limit 30`,
     sql<{ code: string }[]>`select code from plans where public and active and code not in ('trial', 'free', 'team_free') order by sort`,
     sql`select code, name, monthly_krw from plan_addons where active order by sort`,
@@ -87,8 +87,9 @@ const addPeriod = (d: string, cycle: 'monthly' | 'annual') => DateTime.fromISO(d
 
 async function activate(sql: Sql, tenant: string, planCode: string, cycle: 'monthly' | 'annual', amount: number) {
   await sql`update tenant_subscriptions set plan_code = ${planCode}, status = 'active', billing_cycle = ${cycle}, billing_amount = ${amount}, next_billing_on = ${addPeriod(today(), cycle)},
-    period_start = current_date, period_end = ${addPeriod(today(), cycle)}, cancel_at_period_end = false, past_due_since = null, retry_count = 0, next_retry_on = null, updated_at = now() where tenant = ${tenant}`;
-  (await import('../plans')).clearReadOnlyCache(tenant);
+    period_start = current_date, period_end = ${addPeriod(today(), cycle)}, cancel_at_period_end = false, past_due_since = null, retry_count = 0, next_retry_on = null,
+    billing_lock = null, billing_grace_until = null, updated_at = now() where tenant = ${tenant}`;
+  (await import('../plans')).clearReadOnlyCache(tenant); // B2: 결제되면 읽기 전용·이용 중지 즉시 복구
 }
 
 export const subscribeInput = z.object({ planCode: z.string().max(40) });
@@ -186,7 +187,11 @@ export async function setAutoRenew(u: SessionUser, renew: boolean, ip: string | 
   return { ok: true };
 }
 
-/** 정기 실행: 결제일 도래 → 자동 결제, 실패 시 1·3·5일 재시도, 7일 뒤 읽기 전용 */
+/**
+ * 정기 실행: 결제일 도래 → 자동 결제. V28 B2 미납 처리(던닝):
+ * 실패 즉시 관리자 알림·메일 → 3일·7일 뒤 재시도 → 첫 실패 7일 지나도 미납이면 읽기 전용(보기·내보내기·결제만) → 30일 미납이면 이용 중지(로그인해도 결제 안내만).
+ * 결제되면 즉시 복구(activate·자동 결제 성공). 플랫폼 운영자가 준 유예(billing_grace_until) 동안은 잠그지 않는다. 데이터는 지우지 않는다.
+ */
 export async function billingJob() {
   const c = npConf();
   const sql = db();
@@ -194,13 +199,19 @@ export async function billingJob() {
   const due = await sql<any[]>`select s.*, t.name from tenant_subscriptions s join tenants t on t.id = s.tenant
     where s.billing_cycle is not null and s.status = 'active' and t.deleted_at is null
       and ((s.past_due_since is null and s.next_billing_on <= ${d}) or (s.past_due_since is not null and s.next_retry_on <= ${d}))`;
-  let charged = 0, failed = 0, ended = 0;
-  const admins = async (t: string) => (await sql<{ id: string }[]>`select id from users where tenant = ${t} and status = 'active' and role in ('owner','admin')`).map((x) => x.id);
+  let charged = 0, failed = 0, ended = 0, locked = 0;
+  const admins = async (t: string) => sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${t} and status = 'active' and role in ('owner','admin')`;
+  const tell = async (t: string, name: string, title: string, body: string, key: string) => {
+    const a = await admins(t);
+    await notify(sql, { userIds: a.map((x) => x.id), type: 'usage_alert', title, body, link: '/admin/usage', dedupeKey: key });
+    const { sendMail } = await import('../mail');
+    for (const x of a) await sendMail(x.email, `[워크인] ${title}`, `${name}\n${body}\n${process.env.APP_URL ?? ''}/admin/usage`).catch(() => {});
+  };
   for (const s of due) {
     if (s.cancel_at_period_end) {
       await sql`update tenant_subscriptions set status = 'expired', billing_cycle = null, updated_at = now() where tenant = ${s.tenant}`;
       (await import('../plans')).clearReadOnlyCache(s.tenant); ended++;
-      await notify(sql, { userIds: await admins(s.tenant), type: 'usage_alert', title: '구독이 해지되어 읽기 전용이 되었습니다', body: '다시 결제하면 바로 쓸 수 있어요', link: '/admin/usage', dedupeKey: `bill-end:${s.tenant}:${d}` });
+      await tell(s.tenant, s.name, '구독이 해지되어 읽기 전용이 되었습니다', '다시 결제하면 바로 쓸 수 있어요', `bill-end:${s.tenant}:${d}`);
       continue;
     }
     if (!c) continue;
@@ -209,24 +220,46 @@ export async function billingJob() {
     const r = await chargeCard(sql, c, s.tenant, s.billing_cycle === 'annual' ? 'annual' : 'subscription', s.plan_code, amount, q?.goodsName ?? `Workin ${s.plan_code}`, null);
     if (r.ok) {
       await sql`update tenant_subscriptions set next_billing_on = ${addPeriod(s.next_billing_on ? DateTime.fromJSDate(new Date(s.next_billing_on)).setZone(TZ).toISODate()! : d, s.billing_cycle)},
-        billing_amount = ${amount}, past_due_since = null, retry_count = 0, next_retry_on = null, updated_at = now() where tenant = ${s.tenant}`;
+        billing_amount = ${amount}, past_due_since = null, retry_count = 0, next_retry_on = null, billing_lock = null, billing_grace_until = null, updated_at = now() where tenant = ${s.tenant}`;
+      (await import('../plans')).clearReadOnlyCache(s.tenant);
       charged++;
       continue;
     }
     failed++;
     const first = s.past_due_since ? DateTime.fromJSDate(new Date(s.past_due_since)).setZone(TZ) : DateTime.now().setZone(TZ);
-    const n = s.past_due_since ? s.retry_count + 1 : 0; // 0 = 결제일 실패, 1~3 = 재시도
-    const nextGap = [1, 3, 5][n];
-    if (nextGap === undefined || DateTime.now().setZone(TZ).diff(first, 'days').days >= 7) {
-      await sql`update tenant_subscriptions set status = 'expired', retry_count = ${n}, next_retry_on = null, updated_at = now() where tenant = ${s.tenant}`;
-      (await import('../plans')).clearReadOnlyCache(s.tenant);
-      await notify(sql, { userIds: await admins(s.tenant), type: 'usage_alert', title: '결제가 계속 실패해 읽기 전용이 되었습니다', body: '카드를 바꾸고 다시 결제해 주세요', link: '/admin/usage', dedupeKey: `bill-ro:${s.tenant}:${d}` });
-    } else {
-      await sql`update tenant_subscriptions set past_due_since = ${first.toJSDate()}, retry_count = ${n}, next_retry_on = ${first.plus({ days: nextGap }).toISODate()}, updated_at = now() where tenant = ${s.tenant}`;
-      await notify(sql, { userIds: await admins(s.tenant), type: 'usage_alert', title: '구독 결제에 실패했습니다', body: `${r.msg ?? '카드사 거절'} — ${first.plus({ days: nextGap }).toFormat('M/d')}에 다시 시도합니다. 카드를 확인해 주세요`, link: '/admin/usage', dedupeKey: `bill-fail:${s.tenant}:${d}` });
-    }
+    const n = s.past_due_since ? s.retry_count + 1 : 0; // 0 = 결제일 실패, 1 = 3일 재시도, 2 = 7일 재시도
+    const nextDay = [3, 7][n]; // 첫 실패 기준 3일·7일 뒤
+    await sql`update tenant_subscriptions set past_due_since = ${first.toJSDate()}, retry_count = ${n}, next_retry_on = ${nextDay ? first.plus({ days: nextDay }).toISODate() : null}, updated_at = now() where tenant = ${s.tenant}`;
+    await tell(s.tenant, s.name, '구독 결제에 실패했습니다',
+      `${r.msg ?? '카드사 거절'} — ${nextDay ? `${first.plus({ days: nextDay }).toFormat('M/d')}에 다시 시도합니다. ` : ''}카드를 확인해 주세요. 미납 7일이 지나면 읽기 전용, 30일이 지나면 이용이 중지됩니다(데이터는 그대로).`, `bill-fail:${s.tenant}:${d}`);
   }
-  return { due: due.length, charged, failed, ended };
+  // 미납 단계 올리기: 7일 → 읽기 전용, 30일 → 이용 중지 (유예 중이면 건너뜀)
+  const late = await sql<any[]>`select s.tenant, s.past_due_since, s.billing_lock, t.name from tenant_subscriptions s join tenants t on t.id = s.tenant
+    where s.past_due_since is not null and t.deleted_at is null and (s.billing_grace_until is null or s.billing_grace_until < now())`;
+  for (const s of late) {
+    const days = DateTime.now().diff(DateTime.fromJSDate(new Date(s.past_due_since)), 'days').days;
+    const want = days >= 30 ? 'suspended' : days >= 7 ? 'read_only' : null;
+    if (!want || want === s.billing_lock || (s.billing_lock === 'suspended' && want === 'read_only')) continue;
+    await sql`update tenant_subscriptions set billing_lock = ${want}, updated_at = now() where tenant = ${s.tenant}`;
+    (await import('../plans')).clearReadOnlyCache(s.tenant); locked++;
+    await tell(s.tenant, s.name, want === 'suspended' ? '미납 30일 — 워크인 이용이 중지되었습니다' : '미납 7일 — 읽기 전용이 되었습니다',
+      want === 'suspended' ? '관리자가 결제하면 바로 다시 쓸 수 있습니다. 데이터는 지우지 않았습니다.' : '보기·내보내기는 됩니다. 결제하면 바로 복구됩니다(30일 미납이면 이용 중지).', `bill-lock:${s.tenant}:${want}:${d}`);
+  }
+  return { due: due.length, charged, failed, ended, locked };
+}
+
+export const graceInput = z.object({ action: z.enum(['grace', 'unlock']), days: z.number().int().min(1).max(60).optional() });
+/** 플랫폼: 미납 유예 연장(그동안 잠금 풀림) · 잠금 바로 해제 */
+export async function platformBillingAction(u: SessionUser, tenant: string, i: z.infer<typeof graceInput>, ip: string | null) {
+  if (!u.platformAdmin || u.support) throw notFound();
+  const sql = db();
+  const r = i.action === 'grace'
+    ? await sql`update tenant_subscriptions set billing_grace_until = now() + make_interval(days => ${i.days ?? 7}), billing_lock = null, updated_at = now() where tenant = ${tenant} returning tenant`
+    : await sql`update tenant_subscriptions set billing_lock = null, updated_at = now() where tenant = ${tenant} returning tenant`;
+  if (!r.length) throw notFound('없는 회사입니다');
+  (await import('../plans')).clearReadOnlyCache(tenant);
+  await audit(sql, u.id, `platform.billing_${i.action}`, 'tenant', null, { tenant, days: i.days ?? null }, ip);
+  return { ok: true };
 }
 
 // ---- 플랫폼 운영 ----

@@ -80,6 +80,7 @@ export function handler<P>(fn: (ctx: any) => Promise<unknown>, opts: Opts = {}) 
       }
       // 17차: 체험이 끝난 공간은 읽기 전용(보기·내보내기·요금제 신청은 허용)
       if (user && MUTATING.has(req.method)) await (await import('./plans')).assertWritable(user, req.nextUrl.pathname);
+      else if (user) await (await import('./plans')).assertNotSuspended(user, req.nextUrl.pathname); // V28 B2 미납 이용 중지
 
       const idemKey = opts.idempotent && req.method === 'POST' ? req.headers.get('idempotency-key') : null;
       if (idemKey && user) {
