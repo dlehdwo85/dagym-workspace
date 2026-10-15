@@ -6,7 +6,7 @@ import { HttpError, badRequest, notFound } from '../errors';
 import { audit, logError } from '../log';
 import { notify } from '../notifications';
 import { tenantOf, type SessionUser } from '../types';
-import { approveAuth, approveBilling, cancelPayment, npConf, parseNiceForm, registerBillKey, removeBillKey, windowParams, type NpConf } from './nicepay';
+import { approveAuth, approveBilling, cancelPayment, npConf, npTestConf, parseNiceForm, registerBillKey, removeBillKey, windowParams, type NpConf } from './nicepay';
 
 /**
  * 18차 결제(나이스페이). 금액은 VAT 별도 요금 × 1.1 (원 단위 반올림).
@@ -18,6 +18,8 @@ const TZ = 'Asia/Seoul';
 const today = () => DateTime.now().setZone(TZ).toISODate()!;
 const VAT = 1.1;
 const conf = () => { const c = npConf(); if (!c) throw new HttpError(503, 'billing_off', '결제가 아직 설정되지 않았습니다(NICEPAY 환경변수)'); return c; };
+/** V32 1: 결제 시험 회사의 결제는 늘 시험 상점으로(운영이 live 여도) */
+const confFor = (p: { meta?: { test?: boolean } | null }) => (p.meta?.test ? npTestConf() : conf());
 const moid = (kind: string) => `WK${kind[0].toUpperCase()}${DateTime.now().setZone(TZ).toFormat('yyMMddHHmmss')}${newToken(6).replace(/[^A-Za-z0-9]/g, '').slice(0, 6)}`;
 
 async function requireBillingAdmin(u: SessionUser) {
@@ -136,7 +138,11 @@ export const windowInput = z.discriminatedUnion('kind', [
 /** 연간·팩: 결제창 파라미터(서명 포함) — 결제 기록은 대기(pending)로 먼저 남긴다 */
 export async function startWindow(u: SessionUser, i: z.infer<typeof windowInput>, origin: string) {
   const t = await requireBillingAdmin(u);
-  const c = conf(); const sql = db();
+  return openWindow(t, u, i, origin, conf(), false);
+}
+/** 결제창 열기(회사 관리자 · V32 1 플랫폼 시험). 취소 때 되돌릴 수 있게 결제 전 구독 상태를 함께 남긴다 */
+async function openWindow(t: string, u: SessionUser, i: z.infer<typeof windowInput>, origin: string, c: NpConf, test: boolean) {
+  const sql = db();
   let amount: number, goodsName: string, plan: string | null = null, addon: string | null = null;
   if (i.kind === 'annual' || i.kind === 'monthly') { const q = await quote(t, i.planCode, i.kind, sql); amount = q.amount; goodsName = q.goodsName; plan = i.planCode; }
   else {
@@ -146,9 +152,32 @@ export async function startWindow(u: SessionUser, i: z.infer<typeof windowInput>
   }
   const kind = i.kind === 'monthly' ? 'subscription' : i.kind;
   const m = moid(kind);
-  await sql`insert into payments (tenant, kind, plan_code, addon_code, moid, amount, created_by, meta) values (${t}, ${kind}, ${plan}, ${addon}, ${m}, ${amount}, ${u.id}, ${sql.json({ window: true, payMethod: i.payMethod })})`;
+  const [prev] = await sql`select plan_code, status, billing_cycle, billing_amount, next_billing_on::text, period_start::text, period_end::text, trial_ends_at, addons from tenant_subscriptions where tenant = ${t}`;
+  const [pay] = await sql<{ id: string }[]>`insert into payments (tenant, kind, plan_code, addon_code, moid, amount, created_by, meta)
+    values (${t}, ${kind}, ${plan}, ${addon}, ${m}, ${amount}, ${u.id}, ${sql.json({ window: true, payMethod: i.payMethod, prev: prev ?? null, ...(test ? { test: true } : {}) } as never)}) returning id`;
   const base = process.env.APP_URL || origin;
-  return { script: 'https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js', params: windowParams(c, { moid: m, amount, goodsName, returnUrl: `${base}/api/billing/nicepay/return`, buyerEmail: u.email, payMethod: i.payMethod }) };
+  return { paymentId: pay.id, mode: c.mode, script: 'https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js', params: windowParams(c, { moid: m, amount, goodsName, returnUrl: `${base}/api/billing/nicepay/return`, buyerEmail: u.email, payMethod: i.payMethod }) };
+}
+/** V32 1 플랫폼: 결제 시험 회사로 결제창(시험 상점 강제) */
+export async function platformTestWindow(u: SessionUser, tenant: string, i: z.infer<typeof windowInput>, origin: string) {
+  if (!u.platformAdmin || u.support) throw notFound();
+  const [t] = await db()<{ is_test: boolean }[]>`select is_test from tenants where id = ${tenant} and deleted_at is null`;
+  if (!t?.is_test) throw badRequest('결제 시험 회사에서만 열 수 있습니다');
+  return openWindow(tenant, u, i, origin, npTestConf(), true);
+}
+
+/** 전체 취소된 결제가 요금제를 바꿨다면 결제 전 상태로 되돌림 */
+async function revertPlan(sql: Sql, p: any) {
+  const prev = p.meta?.prev;
+  if (!prev) return false;
+  if (p.kind === 'addon' && p.addon_code) {
+    await sql`update tenant_subscriptions set addons = jsonb_set(addons, ${[p.addon_code]}, to_jsonb(greatest(coalesce((addons->>${p.addon_code})::int, 0) - 1, 0))), updated_at = now() where tenant = ${p.tenant}`;
+  } else {
+    await sql`update tenant_subscriptions set plan_code = ${prev.plan_code}, status = ${prev.status}, billing_cycle = ${prev.billing_cycle}, billing_amount = ${prev.billing_amount},
+      next_billing_on = ${prev.next_billing_on}, period_start = ${prev.period_start}, period_end = ${prev.period_end}, trial_ends_at = ${prev.trial_ends_at}, updated_at = now() where tenant = ${p.tenant}`;
+  }
+  (await import('../plans')).clearReadOnlyCache(p.tenant);
+  return true;
 }
 
 async function applyPaid(sql: Sql, p: { id: string; tenant: string; kind: string; plan_code: string | null; addon_code: string | null; amount: number }) {
@@ -167,18 +196,18 @@ export async function handleReturn(raw: string) {
   if (!p) return { ok: false, msg: '주문을 찾을 수 없습니다' };
   if (p.status === 'paid') return { ok: true, msg: '이미 결제되었습니다' }; // 새로고침·중복 제출
   if (p.status !== 'pending') return { ok: false, msg: '처리할 수 없는 주문입니다' };
-  const c = conf();
+  const c = confFor(p);
   const r = await approveAuth(c, a, p.amount);
   // 가상계좌: 계좌 발급만 된 상태 — 입금 통보(4110)가 오면 결제 완료
   if (r.ok && 'vbank' in r && r.vbank) {
     await sql`update payments set tid = ${r.tid ?? null}, result_code = ${r.code ?? null}, result_msg = '입금 대기', meta = meta || ${sql.json({ payMethod: 'VBANK', vbank: r.vbank })}, updated_at = now() where id = ${p.id} and status = 'pending'`;
-    return { ok: true, vbank: true, msg: `${r.vbank.bank} ${r.vbank.num} 으로 입금하면 바로 적용됩니다` };
+    return { ok: true, vbank: true, msg: `${r.vbank.bank} ${r.vbank.num} 으로 입금하면 바로 적용됩니다`, paymentId: p.id as string, test: !!p.meta?.test };
   }
   const upd = await sql`update payments set status = ${r.ok ? 'paid' : 'failed'}, tid = ${('tid' in r ? r.tid : a.TxTid) ?? null}, result_code = ${r.code ?? null}, result_msg = ${r.msg ?? null},
     card_name = ${('cardName' in r ? r.cardName : null) ?? null}, card_no = ${('cardNo' in r ? r.cardNo : null) ?? null}, auth_code = ${('authCode' in r ? r.authCode : null) ?? null},
     paid_at = ${r.ok ? new Date() : null}, meta = meta || ${sql.json({ payMethod: ('payMethod' in r ? r.payMethod : 'CARD') ?? 'CARD' })}, updated_at = now() where id = ${p.id} and status = 'pending' returning id`;
   if (r.ok && upd.length) { await applyPaid(sql, p); await sendReceipt(sql, p.id); }
-  return { ok: r.ok, vbank: false, msg: r.msg };
+  return { ok: r.ok, vbank: false, msg: r.msg, paymentId: p.id as string, test: !!p.meta?.test };
 }
 
 const NOTI_IPS = ['121.133.126.10', '121.133.126.11', '211.33.136.39'];
@@ -190,6 +219,8 @@ export async function handleNotification(raw: string, ip: string | null) {
   const c = npConf();
   const a = parseNiceForm(raw);
   if (c?.mode === 'live' && (!ip || !NOTI_IPS.includes(ip))) throw new HttpError(403, 'forbidden', 'not allowed');
+  // 빈·형식이 다른 요청(주소 확인 등)은 운영자 알림 없이 로그만
+  if (!(a.MOID ?? a.Moid) || !a.TID) { console.warn('[nicepay-noti] 형식이 다른 요청 무시', ip); return 'OK'; }
   const sql = db();
   const amount = Number(a.Amt ?? 0);
   const state = a.StateCd ?? '0';
@@ -197,7 +228,8 @@ export async function handleNotification(raw: string, ip: string | null) {
     ${sql.json(Object.fromEntries(Object.entries(a).filter(([k]) => !/CardNo|BuyerAuthNum/i.test(k))) as never)}) on conflict (tid, state) do nothing returning id`;
   if (!ins.length) return 'OK'; // 같은 통보 재전송
   const [p] = await sql<any[]>`select * from payments where moid = ${a.MOID ?? a.Moid ?? ''}`;
-  const midOk = !c || a.MID === c.mid || a.MID === c.billingMid;
+  const tc = npTestConf();
+  const midOk = p?.meta?.test ? (a.MID === tc.mid || a.MID === tc.billingMid) : (!c || a.MID === c.mid || a.MID === c.billingMid);
   if (!p || !midOk || p.amount !== amount) { await logError('nicepay-noti', new Error(`맞지 않는 통보: moid=${a.MOID} amt=${amount}`)); return 'OK'; }
   await sql`update payment_notifications set matched = true where id = ${ins[0].id}`;
   // 카드 3001 · 계좌이체 4000 · 가상계좌 입금 4110
@@ -230,7 +262,7 @@ export async function billingJob() {
   const sql = db();
   const d = today();
   const due = await sql<any[]>`select s.*, t.name from tenant_subscriptions s join tenants t on t.id = s.tenant
-    where s.billing_cycle is not null and s.status = 'active' and t.deleted_at is null
+    where s.billing_cycle is not null and s.status = 'active' and t.deleted_at is null and not t.is_test
       and ((s.past_due_since is null and s.next_billing_on <= ${d}) or (s.past_due_since is not null and s.next_retry_on <= ${d}))`;
   let charged = 0, failed = 0, ended = 0, locked = 0;
   const admins = async (t: string) => sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${t} and status = 'active' and role in ('owner','admin')`;
@@ -278,7 +310,8 @@ export async function billingJob() {
     await tell(s.tenant, s.name, want === 'suspended' ? '미납 30일 — 워크인 이용이 중지되었습니다' : '미납 7일 — 읽기 전용이 되었습니다',
       want === 'suspended' ? '관리자가 결제하면 바로 다시 쓸 수 있습니다. 데이터는 지우지 않았습니다.' : '보기·내보내기는 됩니다. 결제하면 바로 복구됩니다(30일 미납이면 이용 중지).', `bill-lock:${s.tenant}:${want}:${d}`);
   }
-  return { due: due.length, charged, failed, ended, locked };
+  const testCanceled = await (await import('./payTest')).autoCancelTestPayments().catch(() => 0); // V32 1 시험 결제 자동 취소
+  return { due: due.length, charged, failed, ended, locked, testCanceled };
 }
 
 export const graceInput = z.object({ action: z.enum(['grace', 'unlock']), days: z.number().int().min(1).max(60).optional() });
@@ -298,16 +331,17 @@ export async function platformBillingAction(u: SessionUser, tenant: string, i: z
 // ---- 플랫폼 운영 ----
 export async function platformPayments(u: SessionUser) {
   if (!u.platformAdmin) throw notFound();
-  return { payments: await db()`select p.id, p.tenant, t.name as tenant_name, p.kind, p.plan_code, p.addon_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.card_name, p.card_no, p.paid_at, p.created_at
+  return { payments: await db()`select p.id, p.tenant, t.name as tenant_name, p.kind, p.plan_code, p.addon_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.card_name, p.card_no, p.paid_at, p.created_at, t.is_test
     from payments p join tenants t on t.id = p.tenant order by p.created_at desc limit 200`, enabled: !!npConf(), mode: npConf()?.mode ?? null };
 }
-export const refundInput = z.object({ amount: z.number().int().positive().optional(), reason: z.string().trim().min(1).max(100) });
+export const refundInput = z.object({ amount: z.number().int().positive().optional(), reason: z.string().trim().min(1).max(100), revertPlan: z.boolean().optional() });
 /** 환불(전체·부분 취소) */
 export async function refundPayment(u: SessionUser, id: string, i: z.infer<typeof refundInput>, ip: string | null) {
   if (!u.platformAdmin) throw notFound();
-  const c = conf(); const sql = db();
+  const sql = db();
   const [p] = await sql<any[]>`select * from payments where id = ${id}`;
   if (!p) throw notFound();
+  const c = confFor(p);
   if (!['paid', 'partial_canceled'].includes(p.status) || !p.tid) throw badRequest('환불할 수 있는 결제가 아닙니다');
   const left = p.amount - p.canceled_amount;
   const amt = i.amount ?? left;
@@ -316,6 +350,8 @@ export async function refundPayment(u: SessionUser, id: string, i: z.infer<typeo
   if (!r.ok) throw badRequest(`환불하지 못했습니다: ${r.msg ?? r.code}`);
   const canceled = p.canceled_amount + amt;
   await sql`update payments set canceled_amount = ${canceled}, status = ${canceled >= p.amount ? 'canceled' : 'partial_canceled'}, updated_at = now() where id = ${id}`;
-  await audit(sql, u.id, 'billing.refund', 'payment', id, { tenant: p.tenant, amount: amt, reason: i.reason }, ip);
-  return { ok: true, canceled };
+  // V32 1: 전체 취소면 요금제 원복(시험 결제는 늘, 실제 결제는 고른 경우만)
+  const reverted = canceled >= p.amount && (i.revertPlan ?? !!p.meta?.test) ? await revertPlan(sql, p) : false;
+  await audit(sql, u.id, 'billing.refund', 'payment', id, { tenant: p.tenant, amount: amt, reason: i.reason, reverted }, ip);
+  return { ok: true, canceled, reverted };
 }

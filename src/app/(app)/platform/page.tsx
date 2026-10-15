@@ -1,12 +1,13 @@
 'use client';
 import { PlatformFunnel } from '@/components/PlatformFunnel';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Building2, Check, Copy, KeyRound, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { AiForecast } from '@/components/AiForecast';
 import { PlatformTenants } from '@/components/PlatformTenants';
 import { fmtBytes, lim, won } from '@/components/usage';
 import { PlatformPayments } from '@/components/Billing';
+import { PayTest } from '@/components/PayTest';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const num = (v: string) => (v.trim() === '' ? null : Number(v));
@@ -30,7 +31,7 @@ export default function PlatformPage() {
   const pctTone = (p: number | null) => (p === null ? 'text-ink-3' : p >= 100 ? 'font-semibold text-red-600' : p >= 80 ? 'text-amber-600' : 'text-ink-2');
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <PageHeader title="플랫폼 운영" icon={Building2} sub="모든 회사의 사용량과 요금제. 요금제 숫자는 여기서 바꾸면 바로 적용됩니다(배포 없음). 결제는 아직 연결되지 않았습니다." />
+      <PageHeader title="플랫폼 운영" icon={Building2} sub="모든 회사의 사용량과 요금제. 요금제 숫자는 여기서 바꾸면 바로 적용됩니다(배포 없음). 결제 흐름은 아래 [결제 시험]에서 시험 상점으로 확인합니다." />
       {!!data.requests.filter((r: any) => r.status === 'pending').length && (
         <section className="rounded-card border border-amber-200 bg-amber-50 p-3" data-testid="platform-requests">
           <h2 className="text-sm font-semibold">변경 요청</h2>
@@ -46,6 +47,7 @@ export default function PlatformPage() {
       <PlatformTenants />
       <Signups />
       <PlatformPayments />
+      <Suspense><PayTest /></Suspense>
       <InquiryLink />
       {/* V12 3번: 문의 접수함 */}
       <PlatformFunnel />

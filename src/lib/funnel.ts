@@ -15,7 +15,7 @@ export async function funnelStats(weeks = 8) {
       select t.id, t.created_at, coalesce(nullif(t.signup_utm->>'source', ''), 'direct') as source,
         to_char(date_trunc('week', t.created_at at time zone 'Asia/Seoul'), 'YYYY-MM-DD') as week
       from tenants t
-      where t.kind = 'company' and t.id not in ('default', 'demo') and t.status <> 'deleted'
+      where t.kind = 'company' and t.id not in ('default', 'demo') and t.status <> 'deleted' and not t.is_test
         and t.created_at >= (date_trunc('week', now() at time zone 'Asia/Seoul') - ${`${n - 1} weeks`}::interval) at time zone 'Asia/Seoul'
     ), m as (
       select t.*,

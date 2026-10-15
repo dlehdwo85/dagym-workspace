@@ -20,6 +20,12 @@ export function npConf(): NpConf | null {
   const cancelBase = (process.env.NICEPAY_API_BASE ?? 'https://pg-api.nicepay.co.kr').replace(/\/$/, '');
   if (process.env.NICEPAY_MODE === 'live') return { mode: 'live', mid, key, billingMid, billingKey, base, cancelBase };
   // 2026-10-16 로컬 요청: 시험 모드는 실제 MID·키를 절대 쓰지 않는다 — 공개 시험 상점(또는 NICEPAY_TEST_*)으로만. 실 키는 그대로 두고 NICEPAY_MODE=live 로만 전환
+  return npTestConf();
+}
+/** V32 1: 시험 상점 설정 — 운영(live)이어도 결제 시험 회사는 늘 이것만 쓴다(실 MID·키를 쓰지 않음) */
+export function npTestConf(): NpConf {
+  const base = (process.env.NICEPAY_API_BASE ?? 'https://webapi.nicepay.co.kr').replace(/\/$/, '');
+  const cancelBase = (process.env.NICEPAY_API_BASE ?? 'https://pg-api.nicepay.co.kr').replace(/\/$/, '');
   return { mode: 'test', base, cancelBase,
     mid: process.env.NICEPAY_TEST_PAY_MID || PUBLIC_TEST.payMid, key: process.env.NICEPAY_TEST_PAY_KEY || PUBLIC_TEST.payKey,
     billingMid: process.env.NICEPAY_TEST_BILL_MID || PUBLIC_TEST.billMid, billingKey: process.env.NICEPAY_TEST_BILL_KEY || PUBLIC_TEST.billKey };

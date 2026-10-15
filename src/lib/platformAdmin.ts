@@ -21,7 +21,7 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
   const term = (q.q ?? '').trim();
   const like = `%${term.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
   const rows = await sql`
-    select t.id, t.name, t.kind, t.status, t.created_at, t.delete_scheduled_at, t.support_consent_at, ow.email as owner_email,
+    select t.id, t.name, t.kind, t.status, t.is_test, t.created_at, t.delete_scheduled_at, t.support_consent_at, ow.email as owner_email,
       ts.plan_code, ts.status as sub_status, ts.trial_ends_at, ts.limit_overrides,
       ts.billing_cycle, ts.next_billing_on, ts.billing_amount, ts.past_due_since, ts.billing_lock, ts.billing_grace_until,
       (select json_build_object('at', coalesce(p.paid_at, p.created_at), 'status', p.status, 'amount', p.amount, 'msg', p.result_msg) from payments p where p.tenant = t.id order by p.created_at desc limit 1) as last_payment,

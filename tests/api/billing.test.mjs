@@ -211,6 +211,48 @@ describe('18차 나이스페이 결제', () => {
     const cancel = state.calls.filter((x) => x.path.endsWith('cancel_process.jsp')).at(-1);
     assert.equal(cancel.f.MID, BMID, '빌링 결제는 빌링 MID 로 취소');
   });
+  test('V32 1 결제 시험 회사: 플랫폼만 만듦 → 시험 상점 결제창 → 승인 후 자동 확인 → 자동 결제 제외 → 취소하면 원복 · 1시간 지난 시험 결제 자동 취소', async () => {
+    await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
+    assert.equal((await ctx.staffA.client.post('/api/platform/pay-test', {})).status, 404, '플랫폼 운영자만');
+    const t = await platform.ok('POST', '/api/platform/pay-test', { name: '결제시험A' });
+    assert.match(t.id, /^test_/);
+    assert.equal((await sql`select is_test from tenants where id = ${t.id}`)[0].is_test, true);
+    assert.equal((await sql`select count(*)::int n from users where tenant = ${t.id}`)[0].n, 0, '로그인 계정 없음');
+    assert.equal((await platform.req('POST', `/api/platform/pay-test/${tid}/window`, { kind: 'monthly', planCode: 'team', payMethod: 'CARD' })).status, 400, '시험 회사만');
+    const w = await platform.ok('POST', `/api/platform/pay-test/${t.id}/window`, { kind: 'monthly', planCode: 'team', payMethod: 'CARD' });
+    assert.equal(w.mode, 'test'); assert.equal(w.params.MID, MID, '시험 상점');
+    const [pay] = await sql`select id, meta from payments where moid = ${w.params.Moid}`;
+    assert.equal(pay.meta.test, true); assert.equal(pay.meta.prev.plan_code, 'trial');
+    const r = await postForm('/api/billing/nicepay/return', { AuthResultCode: '0000', AuthResultMsg: '인증 성공', AuthToken: 'tok777', PayMethod: 'CARD', MID, Moid: w.params.Moid, Amt: w.params.Amt,
+      TxTid: `${MID}01012610141200007777`, Signature: sha('tok777' + MID + w.params.Amt + KEY), NextAppURL: `${NP}/webapi/pay_process.jsp`, NetCancelURL: `${NP}/webapi/cancel_process.jsp` });
+    assert.equal(r.headers.get('location'), `${BASE}/platform?tab=paytest&check=${pay.id}`);
+    let c = await platform.ok('GET', `/api/platform/pay-test/check?payment=${pay.id}`);
+    const st = (k) => c.checks.find((x) => x.key === k).state;
+    assert.deepEqual(['approved', 'plan', 'history', 'receipt', 'ledger', 'revert'].map(st), ['ok', 'ok', 'ok', 'ok', 'later', 'wait']);
+    // 자동 결제·가입 목록에서 빠짐
+    await sql`update tenant_subscriptions set next_billing_on = current_date where tenant = ${t.id}`;
+    await tick();
+    assert.equal((await sql`select count(*)::int n from payments where tenant = ${t.id}`)[0].n, 1, '자동 결제 안 함');
+    assert.ok(!(await platform.ok('GET', '/api/platform/signups')).tenants.some((x) => x.id === t.id), '가입 목록 제외');
+    // 취소 → 원복
+    await platform.ok('POST', `/api/platform/payments/${pay.id}/refund`, { reason: '시험 결제 취소', revertPlan: true });
+    c = await platform.ok('GET', `/api/platform/pay-test/check?payment=${pay.id}`);
+    assert.equal(st('revert'), 'ok');
+    const s2 = (await sql`select plan_code, status from tenant_subscriptions where tenant = ${t.id}`)[0];
+    assert.deepEqual([s2.plan_code, s2.status], ['trial', 'trial']);
+    // 1시간 지난 시험 결제는 정기 실행이 취소
+    const w2 = await platform.ok('POST', `/api/platform/pay-test/${t.id}/window`, { kind: 'annual', planCode: 'team', payMethod: 'CARD' });
+    await postForm('/api/billing/nicepay/return', { AuthResultCode: '0000', AuthResultMsg: '인증 성공', AuthToken: 'tok778', PayMethod: 'CARD', MID, Moid: w2.params.Moid, Amt: w2.params.Amt,
+      TxTid: `${MID}01012610141200007778`, Signature: sha('tok778' + MID + w2.params.Amt + KEY), NextAppURL: `${NP}/webapi/pay_process.jsp`, NetCancelURL: `${NP}/webapi/cancel_process.jsp` });
+    await sql`update payments set paid_at = now() - interval '2 hours' where moid = ${w2.params.Moid}`;
+    await tick();
+    assert.equal((await sql`select status from payments where moid = ${w2.params.Moid}`)[0].status, 'canceled');
+    assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = ${t.id}`)[0].plan_code, 'trial');
+    // 빈 통보는 운영자 알림 없이 OK
+    const before = (await sql`select count(*)::int n from error_logs`.catch(() => [{ n: 0 }]))[0].n;
+    assert.equal(await (await postForm('/api/billing/nicepay/notify', {})).text(), 'OK');
+    assert.equal((await sql`select count(*)::int n from error_logs`.catch(() => [{ n: 0 }]))[0].n, before);
+  });
   test('시험 모드는 실제 MID·키를 쓰지 않음(결제 서버로 간 요청 전부 시험 상점)', async () => {
     assert.ok(state.calls.length > 0);
     assert.ok(state.calls.every((c) => !['walkin001m', 'walkin002m'].includes(c.f.MID)), '실 MID 로 나간 요청 없음');

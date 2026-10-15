@@ -310,7 +310,7 @@ export async function platformSignups(u: SessionUser) {
           ts.status as sub_status, ts.plan_code, ts.trial_ends_at, ts.chosen_plan,
           (select count(*)::int from users x where x.tenant = t.id and x.status = 'active') as users,
           (select count(*)::int from tasks k join org_units o on o.id = k.org_unit_id where o.tenant = t.id and k.deleted_at is null) as tasks
-        from tenants t left join users ow on ow.id = t.owner_user_id left join tenant_subscriptions ts on ts.tenant = t.id where t.id not in ('default','demo') order by t.created_at desc limit 200`,
+        from tenants t left join users ow on ow.id = t.owner_user_id left join tenant_subscriptions ts on ts.tenant = t.id where t.id not in ('default','demo') and not t.is_test order by t.created_at desc limit 200`,
     sql`select coalesce(reason, 'ok') as reason, count(*)::int n from signup_attempts where created_at > now() - interval '1 day' group by 1 order by 2 desc`,
     sql`select ip, count(*)::int n, count(*) filter (where ok)::int ok from signup_attempts where created_at > now() - interval '1 day' group by ip order by n desc limit 10`,
   ]);

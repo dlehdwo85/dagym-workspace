@@ -11,6 +11,17 @@ const KIND: Record<string, string> = { subscription: '월 구독', annual: '연�
 declare global { interface Window { goPay?: (f: HTMLFormElement) => void; nicepaySubmit?: () => void } }
 
 /** 18차: 결제 — 카드(빌키) 등록 · 월 구독 · 연간·팩(결제창) · 영수증 · 해지 */
+/** 나이스페이 결제창 띄우기(서버가 만든 서명된 파라미터) — 회사 결제·V32 1 플랫폼 결제 시험 공용 */
+export async function launchNicepay(r: { script: string; params: Record<string, string | number> }) {
+  await new Promise<void>((res, rej) => { if (window.goPay) return res(); const s = document.createElement('script'); s.src = r.script; s.onload = () => res(); s.onerror = () => rej(new Error('결제창을 불러오지 못했습니다')); document.head.appendChild(s); });
+  const f = document.createElement('form');
+  f.method = 'post'; f.action = String(r.params.ReturnURL); f.acceptCharset = 'euc-kr'; f.style.display = 'none';
+  for (const [k, v] of Object.entries(r.params)) { const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = String(v); f.appendChild(i); }
+  document.body.appendChild(f);
+  window.nicepaySubmit = () => f.submit();
+  window.goPay!(f);
+}
+
 export function BillingSection() {
   const { data, error, reload } = useApi<any>('/api/billing');
   const [card, setCard] = useState({ cardNo: '', exp: '', idNo: '', cardPw: '' });
@@ -44,14 +55,7 @@ export function BillingSection() {
   async function openWindow(body: any) {
     setBusy(true);
     try {
-      const r = await api('/api/billing/window', { body: { ...body, payMethod: pm } });
-      await new Promise<void>((res, rej) => { if (window.goPay) return res(); const s = document.createElement('script'); s.src = r.script; s.onload = () => res(); s.onerror = () => rej(new Error('결제창을 불러오지 못했습니다')); document.head.appendChild(s); });
-      const f = document.createElement('form');
-      f.method = 'post'; f.action = r.params.ReturnURL; f.acceptCharset = 'euc-kr'; f.style.display = 'none';
-      for (const [k, v] of Object.entries(r.params)) { const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = String(v); f.appendChild(i); }
-      document.body.appendChild(f);
-      window.nicepaySubmit = () => f.submit();
-      window.goPay!(f);
+      await launchNicepay(await api('/api/billing/window', { body: { ...body, payMethod: pm } }));
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   return (

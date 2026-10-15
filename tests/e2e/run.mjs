@@ -1569,6 +1569,18 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await sql`update plans set monthly_krw = 79000 where code = 'business'`;
   assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = 'default'`)[0].plan_code, 'internal', '반려하면 그대로');
   await owner.screenshot({ path: `${SHOTS}/79-platform.png`, fullPage: true });
+  // V32 1 결제 시험: 시험 회사 만들기 → (결제창은 외부라 승인 결과를 기록으로 넣고) 자동 확인 화면
+  await owner.getByTestId('pay-test-create').click();
+  await owner.getByTestId('pay-test-tenant').first().waitFor();
+  const [tt] = await sql`select id from tenants where is_test order by created_at desc limit 1`;
+  await sql`update tenant_subscriptions set plan_code = 'team', status = 'active', billing_cycle = 'monthly' where tenant = ${tt.id}`;
+  const [tp] = await sql`insert into payments (tenant, kind, plan_code, moid, amount, status, paid_at, meta) values (${tt.id}, 'subscription', 'team', ${'WTE2E' + Date.now()}, 9900, 'paid', now(),
+    ${sql.json({ test: true, payMethod: 'CARD', receiptSentAt: new Date().toISOString(), prev: { plan_code: 'trial', status: 'trial' } })}) returning id`;
+  await owner.goto(`${BASE}/platform?tab=paytest&check=${tp.id}`);
+  await owner.getByTestId('pay-test-check').waitFor();
+  assert.equal(await owner.getByTestId('check-plan').getAttribute('data-state'), 'ok');
+  assert.equal(await owner.getByTestId('check-receipt').getAttribute('data-state'), 'ok');
+  await owner.getByTestId('pay-test').screenshot({ path: `${SHOTS}/v32-pay-test.png` });
   const r = await ctx.staffA.client.req('GET', '/api/platform');
   assert.equal(r.status, 404);
 });
