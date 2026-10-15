@@ -7,6 +7,7 @@ import { Button, Field, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
 import { Capacitor } from '@capacitor/core';
 import Link from 'next/link';
+import { OrDivider, SocialButtons } from '@/components/SocialButtons';
 
 function LoginForm() {
   const sp = useSearchParams();
@@ -32,7 +33,9 @@ function LoginForm() {
     try { const r = await api('/api/auth/resend', { body: { email: unverified || email } }); setResent(r.devLink ? `${r.message} (개발용: ${r.devLink})` : r.message); }
     catch (e: any) { setResent(e.message); }
   }
-  const [mfa, setMfa] = useState(false);
+  const [mfa, setMfa] = useState(sp.get('mfa') === '1'); // 소셜 로그인 후 2단계 인증 코드
+  const oauthErr = sp.get('oauth_error');
+  const [social, setSocial] = useState(0);
   const [otp, setOtp] = useState('');
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -61,6 +64,8 @@ function LoginForm() {
           <ServerCrash className="mt-0.5 size-4 shrink-0" /><p>{down}</p>
         </div>
       )}
+      {oauthErr && <p className="flex gap-2 rounded-input border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert" data-testid="oauth-error"><AlertCircle className="mt-0.5 size-4 shrink-0" />{oauthErr}</p>}
+      {!mfa && <><SocialButtons verb="로그인" onReady={setSocial} />{social > 0 && <OrDivider />}</>}
       {mfa ? (
         <Field label="2단계 인증 코드 (OTP 앱의 6자리)"><input className={inputCls + ' h-11 font-mono text-lg tracking-widest'} inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} autoFocus aria-label="OTP 코드" data-testid="otp-input" /></Field>
       ) : <>

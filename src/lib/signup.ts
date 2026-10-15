@@ -26,7 +26,36 @@ export const signupInput = z.object({
   openedAt: z.number().optional(),
   /** 유입 경로(첫 방문 UTM) — 마케팅 퍼널 집계용, 개인정보 아님 */
   utm: z.object({ source: z.string().max(80), medium: z.string().max(80), campaign: z.string().max(120) }).partial().optional(),
+  /** V29 가입 2단계: 인원 규모·업종(선택) */
+  size: z.enum(['1', '2-10', '11-30', '31-100', '100+']).optional(),
+  industry: z.string().trim().max(40).optional(),
 });
+export const SIZE_LABEL: Record<string, string> = { '1': '혼자', '2-10': '2~10명', '11-30': '11~30명', '31-100': '31~100명', '100+': '100명 넘게' };
+
+type OwnerSpace = { email: string; name: string; mode: 'personal' | 'team'; company?: string; size?: string; industry?: string; utm?: Record<string, string | undefined>;
+  agree: Record<string, boolean>; passwordHash: string | null; pending: boolean; ip: string | null; workEmail?: string | null };
+/** 새 회사(또는 개인 공간) + 대표 계정 + 기본 조직·달력·동의 기록 — 이메일 가입·소셜 가입 공통 */
+export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
+  const tenant = `t_${newToken(9).replace(/[^A-Za-z0-9]/g, '').toLowerCase().slice(0, 12)}`;
+  const orgName = i.mode === 'personal' ? `${i.name}의 공간` : i.company!;
+  const utm = i.utm && Object.values(i.utm).some(Boolean) ? i.utm : null;
+  await tx`insert into tenants (id, name, kind, created_ip, signup_utm, size_band, industry) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${i.ip},
+    ${utm ? tx.json(utm as never) : null}, ${i.size ?? null}, ${i.industry || null})`;
+  // 17차: 무료 요금제 대신 14일 무료 체험(비즈니스 기능 전부, 카드 없음)
+  await tx`insert into tenant_subscriptions (tenant, plan_code, status, trial_ends_at, period_end)
+    values (${tenant}, 'trial', 'trial', now() + interval '14 days', (now() + interval '14 days')::date)`;
+  const [u] = await tx<{ id: string }[]>`insert into users (email, name, role, status, password_hash, tenant, signup_pending, email_verified_at, work_email)
+    values (${i.email}, ${i.name}, 'owner', 'active', ${i.passwordHash}, ${tenant}, ${i.pending}, ${i.pending ? null : new Date()}, ${i.workEmail ?? null}) returning id`;
+  await tx`update tenants set owner_user_id = ${u.id} where id = ${tenant}`;
+  const [o] = await tx<{ id: string }[]>`insert into org_units (type, name, sort, tenant) values ('hq', ${orgName}, 0, ${tenant}) returning id`;
+  await tx`insert into memberships (user_id, org_unit_id) values (${u.id}, ${o.id})`;
+  await tx`insert into calendars (type, org_unit_id, name, color, tenant) values ('org_unit', ${o.id}, ${orgName + ' 일정'}, '#475569', ${tenant})`;
+  if (i.mode === 'team') await tx`insert into calendars (type, name, color, tenant) values ('company', ${i.company + ' 공용'}, '#0F766E', ${tenant})`;
+  await ensurePersonalCalendar(u.id, i.name, tx);
+  for (const [kind, agreed] of Object.entries(i.agree)) await tx`insert into consents (user_id, kind, version, agreed) values (${u.id}, ${kind}, ${TERMS_VERSION}, ${agreed})`;
+  await audit(tx, u.id, 'auth.signup', 'user', u.id, { mode: i.mode, tenant, social: !i.passwordHash }, i.ip);
+  return u.id;
+}
 
 const LIMIT = { ipPerHour: Number(process.env.SIGNUP_IP_PER_HOUR ?? 10), ipSignupsPerDay: Number(process.env.SIGNUP_IP_PER_DAY ?? 3), totalPerDay: Number(process.env.SIGNUP_TOTAL_PER_DAY ?? 300) };
 const GENERIC = '확인 메일을 보냈습니다. 메일의 링크를 누르면 가입이 끝납니다(24시간 유효).';
@@ -64,27 +93,8 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
     const devLink = ex.signup_pending ? await issueVerification(sql, ex.id, i.email) : undefined;
     return { ok: true, message: GENERIC, ...(devLink ? { devLink } : {}) };
   }
-  const tenant = `t_${newToken(9).replace(/[^A-Za-z0-9]/g, '').toLowerCase().slice(0, 12)}`;
-  const orgName = i.mode === 'personal' ? `${i.name}의 공간` : i.company!;
   const hash = await hashPassword(i.password);
-  const userId = await sql.begin(async (tx) => {
-    const utm = i.utm && Object.values(i.utm).some(Boolean) ? i.utm : null;
-    await tx`insert into tenants (id, name, kind, created_ip, signup_utm) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${ip}, ${utm ? tx.json(utm as never) : null})`;
-    // 17차: 무료 요금제 대신 14일 무료 체험(비즈니스 기능 전부, 카드 없음)
-    await tx`insert into tenant_subscriptions (tenant, plan_code, status, trial_ends_at, period_end)
-      values (${tenant}, 'trial', 'trial', now() + interval '14 days', (now() + interval '14 days')::date)`;
-    const [u] = await tx<{ id: string }[]>`insert into users (email, name, role, status, password_hash, tenant, signup_pending)
-      values (${i.email}, ${i.name}, 'owner', 'active', ${hash}, ${tenant}, true) returning id`;
-    await tx`update tenants set owner_user_id = ${u.id} where id = ${tenant}`;
-    const [o] = await tx<{ id: string }[]>`insert into org_units (type, name, sort, tenant) values ('hq', ${orgName}, 0, ${tenant}) returning id`;
-    await tx`insert into memberships (user_id, org_unit_id) values (${u.id}, ${o.id})`;
-    await tx`insert into calendars (type, org_unit_id, name, color, tenant) values ('org_unit', ${o.id}, ${orgName + ' 일정'}, '#475569', ${tenant})`;
-    if (i.mode === 'team') await tx`insert into calendars (type, name, color, tenant) values ('company', ${i.company + ' 공용'}, '#0F766E', ${tenant})`;
-    await ensurePersonalCalendar(u.id, i.name, tx);
-    for (const [kind, agreed] of Object.entries(i.agree)) await tx`insert into consents (user_id, kind, version, agreed) values (${u.id}, ${kind}, ${TERMS_VERSION}, ${agreed})`;
-    await audit(tx, u.id, 'auth.signup', 'user', u.id, { mode: i.mode, tenant }, ip);
-    return u.id;
-  });
+  const userId = await sql.begin((tx) => createOwnerSpace(tx, { email: i.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, utm: i.utm, agree: i.agree, passwordHash: hash, pending: true, ip }));
   await attempt(sql, ip, i.email, true, null);
   const devLink = await issueVerification(sql, userId, i.email);
   return { ok: true, message: GENERIC, ...(devLink ? { devLink } : {}) };

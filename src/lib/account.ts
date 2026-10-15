@@ -28,12 +28,18 @@ export async function exportMine(u: SessionUser) {
   return { exportedAt: new Date().toISOString(), note: '첨부파일 원본은 각 업무·자료실에서 내려받으세요', profile, tasks, events, comments, chatMessages: messages, consents };
 }
 
-export const deleteInput = z.object({ password: z.string().min(1).max(200), confirm: z.literal('탈퇴합니다', { errorMap: () => ({ message: '확인 문구 "탈퇴합니다"를 입력하세요' }) }) });
-export const deleteSpaceInput = z.object({ password: z.string().min(1).max(200), confirmName: z.string().trim().min(1) });
+export const deleteInput = z.object({ password: z.string().max(200).default(''), confirm: z.literal('탈퇴합니다', { errorMap: () => ({ message: '확인 문구 "탈퇴합니다"를 입력하세요' }) }) });
+export const deleteSpaceInput = z.object({ password: z.string().max(200).default(''), confirmName: z.string().trim().min(1) });
 
 async function checkPassword(u: SessionUser, password: string) {
   const [r] = await db()<{ password_hash: string | null }[]>`select password_hash from users where id = ${u.id}`;
-  if (!(await verifyPassword(password, r?.password_hash ?? null))) throw badRequest('비밀번호가 올바르지 않습니다');
+  // V29 소셜로만 가입한 사람(비밀번호 없음): 비밀번호 대신 "방금(15분 안) 로그인한 세션"으로 본인 확인
+  if (!r?.password_hash) {
+    const [s] = await db()<{ ok: boolean }[]>`select created_at > now() - interval '15 minutes' ok from sessions where id = ${u.sessionId ?? ''}`;
+    if (!s?.ok) throw badRequest('본인 확인을 위해 로그아웃 후 소셜 계정으로 다시 로그인하고 15분 안에 진행해 주세요');
+    return;
+  }
+  if (!(await verifyPassword(password, r.password_hash))) throw badRequest('비밀번호가 올바르지 않습니다');
 }
 
 /** 사람 하나를 지운 것으로: 이메일·이름·비밀번호 제거(같은 이메일로 다시 가입 가능), 세션·푸시·연동 끊기 */

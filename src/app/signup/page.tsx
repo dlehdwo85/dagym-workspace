@@ -5,13 +5,16 @@ import { ArrowRight, Building2, CheckCircle2, Loader2, MailCheck, User } from 'l
 import { AuthCard, PasswordInput } from '@/components/AuthCard';
 import { Button, Field, cx, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
+import { OrDivider, SocialButtons } from '@/components/SocialButtons';
+import { CompanyFields } from '@/components/SignupFields';
 import { captureUtm, conversionTagsConfigured, readUtm, setAdsConsent } from '@/components/conversion';
 
 /** V15 공개 가입: 개인으로 시작 / 팀(회사)으로 시작 → 확인 메일 */
 export default function SignupPage() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [mode, setMode] = useState<'personal' | 'team'>('personal');
-  const [f, setF] = useState({ name: '', email: '', password: '', company: '', website: '' });
+  const [f, setF] = useState({ name: '', email: '', password: '', company: '', size: '', industry: '', website: '' });
+  const [social, setSocial] = useState(0);
   const [agree, setAgree] = useState({ terms: false, privacy: false, ai: false, marketing: false });
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -28,7 +31,7 @@ export default function SignupPage() {
     setBusy(true);
     try {
       setAdsConsent(ads);
-      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, mode, agree: { ...agree, ads }, openedAt: opened.current, utm: readUtm() } });
+      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, mode, agree: { ...agree, ads }, openedAt: opened.current, utm: readUtm() } });
       setDone(r);
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
   }
@@ -55,6 +58,9 @@ export default function SignupPage() {
   return (
     <AuthCard title="14일 무료 체험" sub="카드 등록 없이 비즈니스 기능 전부 · 끝나면 요금제를 고르세요">
       <form onSubmit={submit} className="space-y-4">
+        {/* V29: 소셜로 시작하면 그 이메일이 계정·업무 이메일이 되고 확인 메일 없이 바로 회사 만들기로 */}
+        <SocialButtons verb="시작" onReady={setSocial} />
+        {social > 0 && <OrDivider />}
         <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="시작 방식">
           {([['personal', User, '개인으로 시작', '혼자 쓰는 업무·일정'], ['team', Building2, '팀으로 시작', '팀·메신저·권한']] as const).map(([k, Icon, t, d]) => (
             <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => setMode(k)} data-testid={`mode-${k}`}
@@ -63,7 +69,7 @@ export default function SignupPage() {
             </button>
           ))}
         </div>
-        {mode === 'team' && <Field label="회사(팀) 이름"><input className={inputCls + ' h-11'} value={f.company} onChange={(e) => setF({ ...f, company: e.target.value })} required maxLength={60} placeholder="예: 우리상사" aria-label="회사 이름" /></Field>}
+        {mode === 'team' && <CompanyFields v={f} onChange={(v) => setF({ ...f, ...v })} />}
         <Field label="이름"><input className={inputCls + ' h-11'} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={50} autoComplete="name" aria-label="이름" /></Field>
         <Field label="이메일"><input className={inputCls + ' h-11'} type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required autoComplete="email" aria-label="이메일" /></Field>
         <Field label="비밀번호 (8자 이상)"><PasswordInput value={f.password} onChange={(v) => setF({ ...f, password: v })} autoComplete="new-password" minLength={8} /></Field>

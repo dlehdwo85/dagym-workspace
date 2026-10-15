@@ -484,6 +484,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 90%·100% 관리자 알림(사용량 정기 실행), 사용량·요금제 화면 "업무 수" 막대·안내.
 - "보관 파일로 내보내고 정리": 날짜 전에 완료한 업무 개수 → CSV(엑셀) 내려받기 → [정리](내려받은 뒤에만 누름) → 목록·휴지통·셈에서 빠짐(기록은 DB 에 남음, purged_at). 감사 기록 tasks.cleanup. 마이그레이션 062_task_quota.sql(추가형).
 
+## V29 1장 소셜 가입·로그인(Google·카카오·네이버) + 가입 2단계 (2026-10-15)
+- 키가 있는 제공자만 가입·로그인·초대 화면에 버튼이 보임(지금 운영은 키 없음 → 화면 변화 없음). 환경변수: GOOGLE_LOGIN_CLIENT_ID/SECRET · KAKAO_REST_KEY(+KAKAO_CLIENT_SECRET 선택) · NAVER_CLIENT_ID/SECRET.
+- 콜백(각 콘솔에 등록): https://dagym-workspace.vercel.app/api/auth/oauth/google/callback · /kakao/callback · /naver/callback (도메인 바뀌면 추가).
+- 흐름: 처음 → /signup/social "회사 만들기"(팀/개인·회사 이름·인원 규모·업종·약관) → 확인 메일 없이 바로 시작, 소셜 이메일 = 로그인·업무 이메일(회신 주소). 연결된 계정 → 버튼 한 번 로그인(2단계 인증 켠 사람은 코드 화면). 초대 링크 → 소셜 한 번으로 초대받은 계정에 합류.
+- 같은 이메일의 기존 계정은 자동으로 묶지 않음(비밀번호로 로그인 → 설정 > 계정 > 로그인 연결). 인증 안 된 이메일·이메일 미동의는 가입 거절. 상태값은 서명 쿠키(10분)로 위조 방지.
+- 설정 > 계정 "로그인 연결": 연결·끊기(로그인 방법이 하나는 남아야 함). 비밀번호 없는 소셜 가입자의 탈퇴·공간 삭제는 "로그인 15분 안" 본인 확인.
+- 이메일 가입 화면에도 인원 규모·업종(선택) 추가. 마이그레이션 063_social_login.sql(user_identities·oauth_pending·tenants.size_band/industry, 추가형).
+- 남은 것(로컬): 키 발급·콜백 등록·실제 로그인 확인. 앱(WebView)에서 Google 은 정책상 막힐 수 있음(disallowed_useragent) → 앱은 카카오·네이버 먼저, Google 은 시스템 브라우저 방식으로 나중.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

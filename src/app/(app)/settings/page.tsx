@@ -221,6 +221,8 @@ function AccountSection() {
   const [space, setSpace] = useState('');
   const [team, setTeam] = useState('');
   const own = !!tenant && !tenant.internal;
+  const ids = useApi<{ hasPassword: boolean }>('/api/account/identities');
+  const needPw = ids.data?.hasPassword !== false;
   async function leave() {
     try { await api('/api/account/delete', { body: { password: pw, confirm } }); location.href = '/login'; } catch (e: any) { toast.error(e.message); }
   }
@@ -233,6 +235,7 @@ function AccountSection() {
       <h2 className="font-semibold">계정</h2>
       <p className="mt-1 text-ink-2">내 업무·일정·댓글·메시지를 파일(JSON)로 내려받을 수 있습니다.</p>
       <a href="/api/account/export" className="mt-2 inline-block rounded-input border border-line px-3 py-1.5 font-medium hover:bg-slate-50" data-testid="account-export">내 데이터 내려받기</a>
+      <LinkedAccounts />
       {user.role === 'owner' && <SupportConsent />}
       {tenant?.personal && user.role === 'owner' && (
         <form className="mt-4 flex flex-wrap items-end gap-2 rounded-input border border-line p-3" onSubmit={async (e) => { e.preventDefault(); try { await api('/api/account/upgrade', { body: { company: team } }); location.reload(); } catch (er: any) { toast.error(er.message); } }} data-testid="upgrade-team">
@@ -244,18 +247,50 @@ function AccountSection() {
         <details className="mt-4 rounded-input border border-red-200 p-3">
           <summary className="cursor-pointer font-medium text-red-700">회원 탈퇴{user.role === 'owner' ? ' · 공간 삭제' : ''}</summary>
           <div className="mt-3 space-y-2">
-            <Field label="비밀번호"><input type="password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" aria-label="탈퇴 비밀번호" /></Field>
+            {needPw ? <Field label="비밀번호"><input type="password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" aria-label="탈퇴 비밀번호" /></Field>
+              : <p className="text-xs text-ink-2">소셜 계정으로 가입해 비밀번호가 없습니다 — 로그인한 지 15분 안에만 진행할 수 있습니다(지났으면 로그아웃 후 다시 로그인).</p>}
             <Field label='확인 문구 "탈퇴합니다"'><input className={inputCls} value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label="탈퇴 확인 문구" /></Field>
-            <Button variant="danger" onClick={leave} disabled={!pw || confirm !== '탈퇴합니다'}>탈퇴하기</Button>
+            <Button variant="danger" onClick={leave} disabled={(needPw && !pw) || confirm !== '탈퇴합니다'}>탈퇴하기</Button>
             <p className="text-xs text-ink-3">탈퇴하면 이름·이메일이 지워지고 다시 로그인할 수 없습니다. 혼자 쓰던 공간은 함께 삭제됩니다(30일 뒤 완전 삭제).</p>
             {user.role === 'owner' && <>
               <hr className="my-2 border-line" />
               <Field label={`공간 삭제 — 공간 이름 "${tenant?.name}" 입력`}><input className={inputCls} value={space} onChange={(e) => setSpace(e.target.value)} aria-label="삭제할 공간 이름" /></Field>
-              <Button variant="danger" onClick={dropSpace} disabled={!pw || space !== tenant?.name}>공간 삭제</Button>
+              <Button variant="danger" onClick={dropSpace} disabled={(needPw && !pw) || space !== tenant?.name}>공간 삭제</Button>
             </>}
           </div>
         </details>
       )}
     </section>
+  );
+}
+
+const PROVIDER_NAME: Record<string, string> = { google: 'Google', kakao: '카카오', naver: '네이버' };
+/** V29 로그인 연결: 소셜 계정 연결·해제(로그인 방법이 하나는 남아야 함) */
+function LinkedAccounts() {
+  const r = useApi<{ identities: { provider: string; email: string | null; last_login_at: string | null }[]; enabled: string[]; hasPassword: boolean }>('/api/account/identities');
+  const [justLinked, setJustLinked] = useState<string | null>(null);
+  useEffect(() => { const p = new URLSearchParams(location.search).get('linked'); if (p) { setJustLinked(p); toast.ok(`${PROVIDER_NAME[p] ?? p} 계정을 연결했습니다`); } }, []);
+  if (!r.data || (!r.data.enabled.length && !r.data.identities.length)) return null;
+  const linked = new Set(r.data.identities.map((x) => x.provider));
+  async function unlink(p: string) {
+    if (!window.confirm(`${PROVIDER_NAME[p]} 연결을 끊을까요?`)) return;
+    try { await api(`/api/account/identities?provider=${p}`, { method: 'DELETE' }); r.reload(); toast.ok('연결을 끊었습니다'); } catch (e: any) { toast.error(e.message); }
+  }
+  return (
+    <div className="mt-4 rounded-input border border-line p-3" data-testid="linked-accounts">
+      <b className="font-medium">로그인 연결</b><span className="ml-1 text-xs text-ink-3">연결하면 그 계정 버튼 한 번으로 로그인합니다{r.data.hasPassword ? '' : ' · 비밀번호 없이 소셜로 가입한 계정'}</span>
+      <ul className="mt-2 space-y-1.5">
+        {Array.from(new Set([...r.data.enabled, ...linked])).map((p) => {
+          const it = r.data!.identities.find((x) => x.provider === p);
+          return (
+            <li key={p} className="flex flex-wrap items-center gap-2" data-testid={`linked-${p}`}>
+              <span className="w-16 font-medium">{PROVIDER_NAME[p] ?? p}</span>
+              {it ? <><span className="text-xs text-ink-2">{it.email ?? '연결됨'}{justLinked === p ? ' · 방금 연결' : ''}</span><Button size="sm" variant="ghost" onClick={() => unlink(p)}>연결 끊기</Button></>
+                : <a href={`/api/auth/oauth/${p}/start?mode=link`} className="rounded-input border border-line px-2.5 py-1 text-xs font-medium hover:bg-slate-50">연결하기</a>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
