@@ -13,6 +13,7 @@
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -27,7 +28,7 @@
                 <data android:scheme="workos" />
             </intent-filter>
 
-            <!-- 앱 링크: 운영 주소의 /tasks, /calendar 링크를 앱에서 연다 (assetlinks.json 검증) -->
+            <!-- 앱 링크: 운영 주소의 /tasks·/calendar·/notifications·/messages·/projects 링크를 앱에서 연다 (assetlinks.json 검증) -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -35,6 +36,8 @@
                 <data android:scheme="https" android:host="${appHost}" android:pathPrefix="/tasks" />
                 <data android:scheme="https" android:host="${appHost}" android:pathPrefix="/calendar" />
                 <data android:scheme="https" android:host="${appHost}" android:pathPrefix="/notifications" />
+                <data android:scheme="https" android:host="${appHost}" android:pathPrefix="/messages" />
+                <data android:scheme="https" android:host="${appHost}" android:pathPrefix="/projects" />
             </intent-filter>
         </activity>
 
