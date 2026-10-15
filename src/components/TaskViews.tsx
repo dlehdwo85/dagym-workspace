@@ -600,7 +600,7 @@ function ListHeader({ sortBy, onSort, compact }: { sortBy: SortKey; onSort: (k: 
       <H k="title" className="flex-1">업무 이름</H>
       <H k="requester" className="hidden w-[104px] md:block">지시자</H>
       <H k="priority" className="w-[60px] text-right">우선순위</H>
-      <H k="status" className="w-[84px]">상태</H>
+      <H k="status" className="w-[84px] pl-2">상태</H>
       <H k="due" className="w-[92px] text-right">마감일</H>
       <H k="assignee" className="w-12 text-right">담당자</H>
     </div>

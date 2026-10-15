@@ -219,3 +219,40 @@ describe('V21 2차: AI 초안·자료 추천 / 문자 넘기기 / 전화 문의'
     assert.equal((await ctx.staffA.client.post('/api/inquiries/phone', { site: 'dagym', inquiryType: '기타', message: '내용만' })).status, 400);
   });
 });
+
+describe('V28-1 이 업무의 AI 비서', () => {
+  test('메일 초안: 업무 문맥(체크리스트·댓글·첨부 글자, 연락처 제외) → 제목·본문·고른 첨부, 대화는 업무×사람 단위로 남음, 남의 업무 404', async () => {
+    await ctx.owner.ok('POST', `/api/tasks/${taskId}/comments`, { body: '관리소장님이 견적서 먼저 달라고 하심' });
+    await ctl({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ reply: '견적서를 첨부한 회신 초안입니다.', subject: '견적서 송부드립니다', body: '안녕하세요.\n\n요청하신 견적서를 보내 드립니다.', attach: [1, 7] }) }], stop_reason: 'end_turn' }] });
+    const r = await ctx.owner.ok('POST', `/api/tasks/${taskId}/assist`, { action: 'mail', text: '견적서 첨부해서 회신 써줘' });
+    assert.equal(r.draft.channel, 'email'); assert.equal(r.draft.subject, '견적서 송부드립니다');
+    assert.deepEqual(r.draft.attachmentIds, [attId], '없는 번호(7)는 버림');
+    const st = await (await fetch(`${FAKE}/__state`)).json();
+    const sent = JSON.stringify(st.anthropic.at(-1).body);
+    assert.ok(sent.includes('관리소장님이 견적서 먼저') && sent.includes('견적서.pdf'), '댓글·첨부 이름');
+    assert.ok(!sent.includes('customer@client.test') && !sent.includes('010-0000-0000'), '연락처는 AI 에 안 보냄');
+    assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'task_assist'`)[0].n, 1);
+    const h = await ctx.owner.ok('GET', `/api/tasks/${taskId}/assist`);
+    assert.deepEqual(h.messages.map((m) => m.role), ['user', 'assistant']);
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${taskId}/assist`)).messages.length, 0, '대화는 사람마다 따로');
+    assert.equal((await ctx.staffB.client.get(`/api/tasks/${taskId}/assist`)).status, 404);
+    assert.equal((await ctx.owner.req('POST', `/api/tasks/${taskId}/assist`, { action: 'ask' })).status, 400);
+    await ctx.owner.ok('DELETE', `/api/tasks/${taskId}/assist`);
+    assert.equal((await ctx.owner.ok('GET', `/api/tasks/${taskId}/assist`)).messages.length, 0);
+  });
+});
+
+describe('V14 49 업무 첨부 내려받기', () => {
+  test('업무를 볼 수 있는 사람은 내려받기(json=1 서명 주소), 내려받기 기록 10분 1번, 다른 현장 404, 기밀 자료에서 온 파일은 기밀 권한 없으면 403', async () => {
+    const r = await ctx.staffA.client.ok('GET', `/api/attachments/${attId}/download?json=1`);
+    assert.ok(r.url.startsWith('http') && r.name === '견적서.pdf');
+    await ctx.staffA.client.ok('GET', `/api/attachments/${attId}/download?json=1`);
+    await ctx.staffA.client.ok('GET', `/api/attachments/${attId}/download?inline=1&json=1`);
+    assert.equal((await sql`select count(*)::int n from activities where entity_id = ${taskId} and action = 'file_downloaded' and actor_id = ${ctx.staffA.id}`)[0].n, 1, '미리보기는 기록 안 함·10분 1번');
+    assert.equal((await ctx.staffB.client.get(`/api/attachments/${attId}/download?json=1`)).status, 404);
+    const [a] = await sql`select storage_key from attachments where id = ${attId}`;
+    await sql`update library_files set storage_key = ${a.storage_key}, security = 'confidential' where id = ${libId}`;
+    assert.equal((await ctx.staffA.client.get(`/api/attachments/${attId}/download?json=1`)).status, 403);
+    assert.ok((await ctx.owner.ok('GET', `/api/attachments/${attId}/download?json=1`)).url, '대표(기밀 열람)는 됨');
+  });
+});

@@ -1,7 +1,8 @@
 'use client';
 import { useRef, useState } from 'react';
 import { api, broadcastRefresh } from './client';
-import { Camera, FileText, Image as ImageIcon, Link2, Loader2, Paperclip, Trash2 } from 'lucide-react';
+import { Camera, Download, Eye, FileText, Image as ImageIcon, Link2, Loader2, Paperclip, Trash2 } from 'lucide-react';
+import { isNativeApp } from './native';
 import { Button, Field, Modal, inputCls, toast, fmtDate, fmtDateTime } from './ui';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
 
@@ -76,6 +77,19 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       setLinkOpen(false); setLink({}); onChange(); toast.ok('문서 링크를 연결했습니다');
     } catch (e: any) { toast.error(e.message); }
   }
+  /** 미리보기 = 새 창(앱은 기기 브라우저), 내려받기 = 웹은 바로 저장, 앱은 서명 주소로 넘겨 기기 브라우저가 받음(iOS 는 미리보기에서 공유) */
+  async function openFile(id: string, preview: boolean) {
+    const q = preview ? '?inline=1' : '';
+    if (!isNativeApp()) {
+      if (preview) window.open(`/api/attachments/${id}/download${q}`, '_blank', 'noopener');
+      else { const el = document.createElement('a'); el.href = `/api/attachments/${id}/download`; el.rel = 'noopener'; document.body.appendChild(el); el.click(); el.remove(); }
+      return;
+    }
+    try {
+      const r = await api(`/api/attachments/${id}/download${q ? q + '&' : '?'}json=1`);
+      window.location.href = r.url; // 다른 도메인 주소 → 앱 밖 기기 브라우저로 열림(내려받기·공유)
+    } catch (e: any) { toast.error(e.message); }
+  }
   async function remove(id: string) {
     if (!confirm('첨부를 삭제할까요?')) return;
     try { await api(`/api/attachments/${id}`, { method: 'DELETE' }); onChange(); } catch (e: any) { toast.error(e.message); }
@@ -114,6 +128,13 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
                 {a.kind === 'link' && <span className="truncate">원본: {(() => { try { return new URL(a.url).hostname; } catch { return ''; } })()}</span>}
               </div>
             </div>
+            {/* V14 49: 업무를 볼 수 있는 사람 누구나 미리보기(PDF·사진)·내려받기 — 앱은 서명 주소를 받아 기기 브라우저/공유로 넘김 */}
+            {a.kind === 'file' && /^(image\/|application\/pdf)/.test(a.mime_type ?? '') && (
+              <button type="button" onClick={() => openFile(a.id, true)} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label={`${a.file_name} 미리보기`} title="미리보기" data-testid="att-preview"><Eye className="size-4" /></button>
+            )}
+            {a.kind === 'file' && (
+              <button type="button" onClick={() => openFile(a.id, false)} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label={`${a.file_name} 내려받기`} title="내려받기" data-testid="att-download"><Download className="size-4" /></button>
+            )}
             {(a.created_by === meId || canEdit) && <button onClick={() => remove(a.id)} className="rounded p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" aria-label="첨부 삭제"><Trash2 className="size-4" /></button>}
           </li>
         ))}

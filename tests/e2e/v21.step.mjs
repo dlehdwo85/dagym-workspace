@@ -1,5 +1,6 @@
 // V21 메일 계정·명함 설정 화면 + 업무 [메일로 보내기] 시안(보내는 주소·받는 사람·첨부·명함 미리보기). 실제 발송은 API 시험(모의 SMTP)에서
 import assert from 'node:assert/strict';
+import { FAKE } from '../helpers.mjs';
 export async function v21({ owner, BASE, SHOTS, sql }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   const call = (path, method, body) => owner.evaluate(async ([p, m, b]) => {
@@ -40,6 +41,19 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   await c.getByTestId('sms-body').fill('제안서 보내 드립니다.');
   assert.match(await c.getByTestId('sms-preview').innerText(), /제안서 보내 드립니다\.[\s\S]*HI-LINK 시험 \/ 1555-0000/);
   await owner.keyboard.press('Escape');
+  // V28-1 이 업무의 AI 비서: [메일 초안] → 시안 창이 초안(제목·본문)으로 열림
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true,
+    anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ reply: '회신 초안입니다.', subject: 'AI 초안 제목', body: 'AI 초안 본문입니다.', attach: [] }) }], stop_reason: 'end_turn' }] }) });
+  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.getByTestId('assist-section').waitFor();
+  await owner.getByTestId('assist-mail').click();
+  const c2 = owner.getByTestId('mail-compose');
+  await c2.waitFor();
+  assert.equal(await c2.getByTestId('mail-subject').inputValue(), 'AI 초안 제목');
+  assert.equal(await c2.getByTestId('mail-body').inputValue(), 'AI 초안 본문입니다.');
+  await owner.keyboard.press('Escape');
+  await owner.getByTestId('assist-reply').getByText('회신 초안입니다.').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/v28-1-task-assist.png` });
   // 전화 문의 등록 → 문의 업무
   await owner.goto(`${BASE}/tasks`);
   await owner.getByTestId('phone-inquiry-open').click();

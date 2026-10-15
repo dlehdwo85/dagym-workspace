@@ -6,6 +6,7 @@ import QRCode from 'qrcode';
 import { api, broadcastRefresh, useApi } from './client';
 import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
 import { uploadTaskFiles } from './Attachments';
+import type { AssistDraft } from './TaskAssist';
 
 type Ctx = {
   canSend: boolean; account: { fromEmail: string; fromName: string | null } | null;
@@ -27,7 +28,7 @@ const STATUS: Record<string, [string, string]> = {
 };
 
 /** V21 업무 안 "보낼 자료·메일": [메일로] 시안(실제 나갈 모습 그대로) → 사람이 [보내기] → 보관함 발송, 상태 실시간 */
-export function TaskMail({ taskId, onChange }: { taskId: string; onChange: () => void }) {
+export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: string; onChange: () => void; draft?: AssistDraft | null; onDraftUsed?: () => void }) {
   const hist = useApi<{ items: Item[]; canSend: boolean }>(`/api/tasks/${taskId}/mail?history=1`, [taskId]);
   const [open, setOpen] = useState(false);
   const busy = hist.data?.items.some((i) => ['queued', 'sending', 'retry'].includes(i.status));
@@ -35,6 +36,13 @@ export function TaskMail({ taskId, onChange }: { taskId: string; onChange: () =>
   async function retry(id: string) {
     try { await api(`/api/mail/outbox/${id}/retry`, { body: {} }); hist.reload(); } catch (e: any) { toast.error(e.message); }
   }
+  // V28-1: 업무 AI 비서의 초안 → 시안 창을 바로 연다(보내기 권한이 없으면 안내만)
+  const [initial, setInitial] = useState<AssistDraft | null>(null);
+  useEffect(() => {
+    if (!draft || !hist.data) return;
+    if (hist.data.canSend) { setInitial(draft); setOpen(true); } else toast.info('보내기 권한이 없어 시안 창을 열 수 없습니다 — 초안을 복사해 대표에게 전달해 주세요');
+    onDraftUsed?.();
+  }, [draft, hist.data]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!hist.data) return null;
   if (!hist.data.canSend && !hist.data.items.length) return null;
   return (
@@ -63,17 +71,17 @@ export function TaskMail({ taskId, onChange }: { taskId: string; onChange: () =>
           })}
         </ul>
       )}
-      {open && <Compose taskId={taskId} onClose={() => setOpen(false)} onSent={() => { setOpen(false); hist.reload(); onChange(); broadcastRefresh(); }} onAttach={onChange} />}
+      {open && <Compose taskId={taskId} initial={initial} onClose={() => { setOpen(false); setInitial(null); }} onSent={() => { setOpen(false); setInitial(null); hist.reload(); onChange(); broadcastRefresh(); }} onAttach={onChange} />}
     </div>
   );
 }
 
-function Compose({ taskId, onClose, onSent, onAttach }: { taskId: string; onClose: () => void; onSent: () => void; onAttach: () => void }) {
+function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: string; onClose: () => void; onSent: () => void; onAttach: () => void; initial?: AssistDraft | null }) {
   const ctx = useApi<Ctx>(`/api/tasks/${taskId}/mail`, [taskId]);
   const d = ctx.data;
   const [f, setF] = useState<{ company: string; kind: string; to: string; cc: string; subject: string; body: string; files: string[]; title: string; phone: string; workEmail: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [channel, setChannel] = useState<'email' | 'sms'>('email');
+  const [channel, setChannel] = useState<'email' | 'sms'>(initial?.channel === 'sms' ? 'sms' : 'email');
   const [drafting, setDrafting] = useState(false);
   const [rec, setRec] = useState<{ id: string; title: string; folder: string; size: number }[]>([]);
   const [sms, setSms] = useState({ to: '', body: '' });
@@ -84,7 +92,11 @@ function Compose({ taskId, onClose, onSent, onAttach }: { taskId: string; onClos
   useEffect(() => {
     if (!d || f) return;
     const k = d.kinds[d.kinds.length - 1];
-    setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: d.to.join(', '), cc: '', subject: `${k.subject}${d.contact?.organization ? ` — ${d.contact.organization}` : ''}`, body: k.body, files: [], title: '', phone: '', workEmail: '' });
+    const okFiles = (initial?.attachmentIds ?? []).filter((id) => d.attachments.some((a) => a.id === id));
+    setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: d.to.join(', '), cc: '',
+      subject: initial?.channel === 'email' && initial.subject ? initial.subject : `${k.subject}${d.contact?.organization ? ` — ${d.contact.organization}` : ''}`,
+      body: initial?.channel === 'email' && initial.body ? initial.body : k.body, files: okFiles, title: '', phone: '', workEmail: '' });
+    if (initial?.channel === 'sms') setSms({ to: d.contact?.phone ?? '', body: initial.body });
   }, [d, f]);
   const sig = d?.companies.find((c) => c.key === f?.company);
   const total = useMemo(() => (d && f ? d.attachments.filter((a) => f.files.includes(a.id)).reduce((s, a) => s + a.size, 0) : 0), [d, f]);
