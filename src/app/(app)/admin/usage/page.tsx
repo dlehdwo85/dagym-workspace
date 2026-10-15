@@ -5,6 +5,7 @@ import { Gauge, HardDrive, Sparkles, Users } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Meter, fmtBytes, won } from '@/components/usage';
 import { BillingSection } from '@/components/Billing';
+import { AiPeopleBudgets } from '@/components/AiPeopleBudgets';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const GB = 1024 ** 3;
@@ -69,6 +70,7 @@ export default function UsagePage() {
         </div>
         <p className="mt-3 text-[11px] text-ink-3">1인 하루 요청 {ai.dailyLimit}회까지 · 80%·100% 에 알림, 100% 가 되면 AI 기능만 멈추고 업무·일정은 그대로입니다. 결제 잔액은 Claude Console 에서 확인합니다{ai.consoleNote ? ` (메모: ${ai.consoleNote})` : ''}.</p>
       </section>
+      <AiPeopleBudgets />
       {/* V12 1번: 한도에 가까우면 해당 팩 바로 안내 */}
       {(() => {
         const near = (u: number, l: number | null) => l !== null && l > 0 && u / l >= 0.8;

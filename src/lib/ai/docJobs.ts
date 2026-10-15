@@ -22,7 +22,7 @@ export async function getDocJob(u: SessionUser, id: string) {
     select id, version, status, created_at from down order by version, created_at`;
   return { job: { id: j.id, title: j.title, kind: j.kind, mode: j.mode, version: j.version, status: j.status, pages: j.pages, summary: j.summary, error: j.error,
     resultName: j.result_name, resultSize: j.result_size, hasFile: !!j.result_key, hasPreview: !!j.preview_key, savedFileId: j.saved_file_id, costUsd: Number(j.cost_usd), createdAt: j.created_at, finishedAt: j.finished_at,
-    ...(isAdmin(u) && j.debug ? { debug: j.debug } : {}), ...(isAdmin(u) ? { costKrw: Math.round(Number(j.cost_usd) * (Number(process.env.USD_KRW) || 1400)), model: j.model } : {}) }, // 운영 진단·작업 비용(대표·관리자만)
+    ...(isAdmin(u) && j.debug ? { debug: j.debug } : {}), costKrw: Math.round(Number(j.cost_usd) * (Number(process.env.USD_KRW) || 1400)), ...(isAdmin(u) ? { model: j.model } : {}) }, // V23 4.3: 작업 비용은 모든 사용자에게(내 작업), 모델은 대표·관리자만
     versions };
 }
 export async function docJobFile(u: SessionUser, id: string, what: 'file' | 'preview') {

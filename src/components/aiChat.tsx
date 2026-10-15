@@ -10,7 +10,7 @@ import { Button, cx, inputCls, toast } from './ui';
  * A2 답을 기다리는 동안 [보내기] → [멈춤] — 요청을 끊으면 서버도 AI 호출을 멈추고 제안을 만들지 않는다
  * A3 마지막 내 말 [수정]·AI 답 [다시 답하기]·모든 말 [복사]
  */
-export type ChatMsg = { role: 'user' | 'assistant'; text: string; files?: string[]; proposals?: any[]; error?: boolean; blocked?: boolean; stopped?: boolean; note?: boolean; docJobs?: string[] };
+export type ChatMsg = { role: 'user' | 'assistant'; text: string; files?: string[]; proposals?: any[]; error?: boolean; blocked?: boolean; stopped?: boolean; note?: boolean; docJobs?: string[]; costKrw?: number };
 
 export function useAiConversation<M extends ChatMsg>(opts: {
   /** 이번 요청의 본문(대화 id·맥락·첨부) */

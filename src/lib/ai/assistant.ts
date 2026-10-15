@@ -12,7 +12,7 @@ import { directory } from '../admin';
 import { listLibrary, loadLibraryFile, attachLibraryToTask, saveGeneratedFile, tenantOf, folderLevel, updateLibraryFile, organizeLibraryFile, cleanFolder } from '../library';
 import { RANK } from '../menuPerms';
 import { writeXlsx } from '../xlsx';
-import { anthropicProvider, aiEnabled, modelFor, costUsd, type AiMessage, type AiProvider, type AiTool } from './provider';
+import { anthropicProvider, aiEnabled, modelFor, costUsd, usdKrw, type AiMessage, type AiProvider, type AiTool } from './provider';
 import type { SessionUser } from '../types';
 
 /**
@@ -46,8 +46,11 @@ export async function aiStatus(u: SessionUser) {
   const { effectiveLimits, currentUsage } = await import('../plans');
   const [{ limits }, cu] = await Promise.all([effectiveLimits(tenantOf(u)), currentUsage(tenantOf(u))]);
   const quota = { used: cu.aiRequests, limit: limits.aiRequests };
+  const G = await import('./guard');
+  const [budget, creditUntil] = await Promise.all([G.userAiBudget(u), G.creditBlockedUntil()]);
   return { enabled: true, model: modelFor(), usage: isAdmin(u) ? usage : { ...usage, costUsd: undefined, tokens: undefined }, quota,
-    overLimit: usage.costUsd >= usage.limitUsd || (quota.limit !== null && quota.used >= quota.limit), canSetLimit: u.role === 'owner' };
+    budget, creditBlocked: !!creditUntil, creditMessage: creditUntil ? G.CREDIT_MSG : null,
+    overLimit: usage.costUsd >= usage.limitUsd || (quota.limit !== null && quota.used >= quota.limit) || budget.usedKrw >= budget.limitKrw || !!creditUntil, canSetLimit: u.role === 'owner' };
 }
 export async function setLimit(u: SessionUser, monthlyUsd: number) {
   if (u.role !== 'owner') throw new HttpError(403, 'forbidden', '대표만 바꿀 수 있습니다');
@@ -161,6 +164,7 @@ const TOOLS: AiTool[] = [
       baseJobId: str('고칠 이전 파일 작업 id (대화 기록의 [파일 작업: id=…])'),
       company: str('회사 정보 키(예: dagym, hilink) — 공급자·로고·브랜드 색. 모르면 비움(기본 회사)'),
       design: { type: 'boolean', description: '사용자가 "새로 디자인/세련되게/처음부터" 를 원할 때만 true(더 비싼 모델). 보통은 비움' },
+      confirmedCost: { type: 'boolean', description: '도구가 needConfirm 을 돌려준 뒤 사용자가 비용에 동의했을 때만 true' },
     }, required: ['mode', 'kind', 'title', 'instructions'] } },
   // V22-A·부록 2: 양식 채우기 — 코드 실행 없이 서버가 원본 양식의 칸·문장만 바꿈(서식·로고 자리·인쇄 설정 그대로, 거의 무료)
   { name: 'list_templates', description: '자료실의 문서 양식(태그·폴더 "양식", xlsx·docx) 목록. 견적서·공문·월 보고처럼 같은 양식에 값만 바꾸는 요청이면 먼저 본다.',
@@ -460,12 +464,20 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
     }
     case 'run_file_task': {
       const i = z.object({ mode: z.enum(['create', 'edit', 'analyze']), kind: z.enum(['xlsx', 'docx', 'pptx', 'pdf', 'chart', 'none']), title: z.string().trim().min(1).max(100),
-        instructions: z.string().trim().min(1).max(20000), referenceFileIds: z.array(z.string().uuid()).max(5).optional(), baseJobId: z.string().uuid().optional(), company: z.string().max(30).optional(), design: z.boolean().optional() }).parse(input);
+        instructions: z.string().trim().min(1).max(20000), referenceFileIds: z.array(z.string().uuid()).max(5).optional(), baseJobId: z.string().uuid().optional(), company: z.string().max(30).optional(), design: z.boolean().optional(), confirmedCost: z.boolean().optional() }).parse(input);
       const T = await import('./threads');
       if (!(await T.aiSettings(tenantOf(u))).doc_engine) return { error: '회사 설정에서 문서 작업이 꺼져 있습니다. 대신 propose_create_document·propose_xlsx_report 를 쓰세요.' };
       const usage = await usageThisMonth(tenantOf(u));
       if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', '이번 달 AI 사용 한도에 도달해 문서 작업을 시작할 수 없습니다');
       for (const f of i.referenceFileIds ?? []) { const lf = await loadLibraryFile(u, f, 'ai'); if (lf.effective_security === 'confidential') c.confidential = true; }
+      // V23 4장·4.5: 예상 비용(최근 내 문서 평균, 새 디자인은 3배)이 남은 한도보다 크면 시작하지 않음, 500원 넘으면 먼저 확인
+      {
+        const G = await import('./guard');
+        const b = await G.userAiBudget(u);
+        const est = Math.round(b.avgDocKrw * (i.design ? 3 : 1));
+        if (est > b.remainingKrw) return { error: `예상 비용 약 ${est.toLocaleString('ko-KR')}원이 남은 AI 한도 ${b.remainingKrw.toLocaleString('ko-KR')}원보다 커서 시작하지 않았습니다. 양식 채우기(fill_template)를 쓰거나 대표에게 한도 추가를 요청하라고 안내하세요.` };
+        if (est > 500 && !i.confirmedCost) return { needConfirm: true, estimateKrw: est, note: `비용이 큰 작업입니다(약 ${est.toLocaleString('ko-KR')}원). 사용자에게 "계속할까요?"라고 물어보고, 동의하면 confirmedCost=true 로 다시 부르세요.` };
+      }
       let version = 1;
       if (i.mode === 'edit') {
         if (!i.baseJobId) throw badRequest('고칠 파일(baseJobId)이 필요합니다');
@@ -645,6 +657,9 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   const userText = (i.text ?? (i.messages?.[i.messages.length - 1]?.role === 'user' ? i.messages[i.messages.length - 1].text : '')).trim();
   if (!userText) throw badRequest('질문을 입력하세요');
   await (await import('../plans')).assertAiRequest(u); // V10 요금제 월 AI 요청 수
+  const G = await import('./guard');
+  await G.assertAiCredit();
+  await G.assertUserBudget(u); // V23 4장: 사람별 월·하루 한도
   const requestId = crypto.randomUUID();
   // V14 2·5번: 대화 보관 + 사전 점검(입력 길이·하루 한도·반복·업무 무관 질문)
   const T = await import('./threads');
@@ -699,14 +714,15 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     if (signal?.aborted) break;
     const r = await provider.chat({ system, messages, tools, signal }).catch((e: any) => {
       if (signal?.aborted) return null; // 부록 A2: 사용자가 멈춤
+      if (e instanceof HttpError) throw e; // V23-1: 크레딧 부족·요청 한도·일시 장애 문구
       throw new HttpError(502, 'ai_unavailable', `AI 서버 응답 오류${e?.status ? ` (${e.status})` : ''}. 잠시 후 다시 시도하세요.`);
     });
     if (!r) break;
     const used = r.usage;
     turnCost += costUsd(r.model ?? provider.model, used); inTok += used.input_tokens; outTok += used.output_tokens;
-    await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
+    await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose, web_searches)
       values (${tenant}, ${u.id}, ${requestId}, ${provider.name}, ${r.model ?? provider.model}, ${used.input_tokens}, ${used.output_tokens}, ${used.cache_read_input_tokens ?? 0},
-        ${used.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, used)})`;
+        ${used.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, used)}, 'assistant', ${(used as any).server_tool_use?.web_search_requests ?? 0})`;
     const text = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('\n').trim();
     if (r.stop_reason === 'refusal') { reply = '이 요청은 처리할 수 없습니다. 다르게 요청해 주세요.'; break; }
     if (r.stop_reason === 'pause_turn') { messages.push({ role: 'assistant', content: r.content as never }); continue; }
@@ -736,7 +752,8 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: reply, proposalIds: c.proposals.map((p) => p.id), docJobIds: c.docJobs?.map((j) => j.id), cost: turnCost, inTok, outTok });
   if (c.confidential) await sql`update ai_threads set confidential = true where id = ${threadId}`; // 사용 내역에서 기밀 권한 없는 사람에게 내용 가림
   await T.maybeSummarize(u, threadId);
-  return { reply, proposals: c.proposals, tools: steps, threadId, ...(kept.length ? { kept } : {}), ...(c.docJobs?.length ? { docJobs: c.docJobs } : {}) };
+  const budget = await G.userBudgetAlerts(u).catch(() => null); // 80%·100% 알림
+  return { reply, proposals: c.proposals, tools: steps, threadId, costKrw: Math.round(turnCost * usdKrw()), budget, ...(kept.length ? { kept } : {}), ...(c.docJobs?.length ? { docJobs: c.docJobs } : {}) };
 }
 
 // ---------------- 제안 실행 (사람이 [확인]) ----------------

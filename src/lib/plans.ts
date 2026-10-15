@@ -133,11 +133,11 @@ export async function aiBreakdown(tenant: string, sql: Sql = db()) {
   const start = `${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7)}-01`;
   const [byUser, byPurpose, [blocked]] = await Promise.all([
     sql`select a.user_id, coalesce(us.name, '(삭제된 사용자)') as name, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost
-      from ai_usage a left join users us on us.id = a.user_id where a.tenant = ${tenant} and a.created_at >= (${start}::date at time zone 'Asia/Seoul') group by a.user_id, us.name order by cost desc limit 50`,
+      from ai_usage a left join users us on us.id = a.user_id where a.tenant = ${tenant} and a.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul') group by a.user_id, us.name order by cost desc limit 50`,
     sql`select a.purpose, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost from ai_usage a
-      where a.tenant = ${tenant} and a.created_at >= (${start}::date at time zone 'Asia/Seoul') group by a.purpose order by cost desc`,
+      where a.tenant = ${tenant} and a.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul') group by a.purpose order by cost desc`,
     sql<{ n: number }[]>`select count(*)::int n from ai_messages m join ai_threads t on t.id = m.thread_id where t.tenant = ${tenant} and m.role = 'user' and m.status = 'blocked'
-      and m.created_at >= (${start}::date at time zone 'Asia/Seoul')`,
+      and m.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul')`,
   ]);
   const rate = Number(process.env.USD_KRW) || 1400;
   const s = await aiSettings(tenant, sql);

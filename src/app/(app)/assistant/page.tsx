@@ -10,6 +10,7 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
 import { VoiceButton } from '@/components/voice';
+import { AiBudgetBar, costLine, type Budget } from '@/components/AiBudget';
 import { DocJobCard } from '@/components/DocJobCard';
 import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
 
@@ -51,7 +52,7 @@ export default function AssistantPage() {
       threads.reload();
     } catch (e: any) { toast.error(e.message); }
   }
-  const status = useApi<{ enabled: boolean; model?: string; overLimit?: boolean; canSetLimit?: boolean; usage?: { costUsd?: number; limitUsd: number; requests: number } }>('/api/ai/status');
+  const status = useApi<{ enabled: boolean; model?: string; overLimit?: boolean; canSetLimit?: boolean; usage?: { costUsd?: number; limitUsd: number; requests: number }; budget?: Budget; creditMessage?: string | null }>('/api/ai/status');
   const task = useApi<{ task: { title: string } }>(taskId ? `/api/tasks/${taskId}` : null);
   const threadRef = useRef(threadId); threadRef.current = threadId;
   // V19 부록 A: 줄바꿈·멈춤·수정 (패널과 같은 동작)
@@ -61,7 +62,7 @@ export default function AssistantPage() {
       if (r.threadId && r.threadId !== threadRef.current) { setThreadId(r.threadId); router.replace(`/assistant?${new URLSearchParams({ ...(taskId ? { task: taskId } : {}), thread: r.threadId })}`); }
       status.reload(); threads.reload();
     },
-    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked, docJobs: r.docJobs?.map((j: any) => j.id) }),
+    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked, docJobs: r.docJobs?.map((j: any) => j.id), costKrw: r.costKrw }),
   });
   const { msgs, setMsgs, busy } = conv;
   const [text, setText] = useState('');
@@ -136,6 +137,7 @@ export default function AssistantPage() {
       <PageHeader title="AI 비서" icon={Sparkles}
         sub={<>자료실·업무·일정{user.role === 'owner' || user.role === 'admin' ? '·매출' : ''}을 내 권한 안에서 찾아 답합니다. 업무 만들기·첨부·댓글은 <b>[확인]</b>을 눌러야 반영됩니다.
           {u?.costUsd !== undefined && <span className="ml-1 text-xs text-ink-3">이번 달 ${u.costUsd.toFixed(2)} / 한도 ${u.limitUsd}{status.data?.canSetLimit && <button onClick={editLimit} className="ml-1 text-brand-600 underline">한도 바꾸기</button>}</span>}</>} />
+      <div className="mb-2"><AiBudgetBar budget={status.data?.budget} creditMessage={status.data?.creditMessage} onChanged={status.reload} /></div>
       <div className="mb-2 flex items-center gap-2 lg:hidden">
         <Button size="sm" variant="secondary" onClick={() => setListOpen(true)} data-testid="ai-threads-open">대화 목록</Button>
         <Button size="sm" variant="ghost" onClick={() => openThread(null)}><MessageSquarePlus />새 대화</Button>
@@ -188,6 +190,7 @@ export default function AssistantPage() {
             </div>
             {m.docJobs?.map((id) => <DocJobCard key={id} id={id} onRefine={(t) => { setText(t); inputRef.current?.focus(); }} />)}
             {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
+            {m.role === 'assistant' && costLine(m.costKrw) && <span className="mt-0.5 text-[10.5px] text-ink-3" data-testid="ai-cost">{costLine(m.costKrw)}</span>}
             </>}
           </div>
         ))}

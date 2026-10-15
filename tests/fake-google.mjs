@@ -93,6 +93,8 @@ export function startFakeGoogle(port = 3199) {
           anomalies: [{ site: row.site, month: row.month, metric: 'revenue', comment: '전월 대비 크게 늘었습니다.' }, { site: '없는 현장', month: row.month, metric: 'revenue', comment: '지어낸 제안' }],
           comparisons: [{ site: row.site, comment: '가장 높습니다.' }] }) }], stop_reason: 'end_turn' };
       }
+      // V23-1 시험: 오류 응답(크레딧 부족 402 billing_error 등)
+      if (next?.httpError) return json(res, next.httpError, { type: 'error', error: { type: next.errorType ?? 'api_error', message: next.message ?? 'error' } });
       next ??= { content: [{ type: 'text', text: '테스트 응답입니다.' }], stop_reason: 'end_turn' };
       if (next.delayMs) { const ms = next.delayMs; next = { ...next }; delete next.delayMs; await new Promise((r) => setTimeout(r, ms)); } // 부록 A2 멈춤 시험: 늦게 답하기
       return json(res, 200, { id: `msg_${state.anthropic.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null,

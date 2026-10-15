@@ -122,7 +122,9 @@ export async function correctVoice(u: SessionUser, i: z.infer<typeof correctInpu
   }
   text = out.join(' ');
   // 4) 애매한 곳만 AI 1번(단어장 후보 안에서만)
-  if (ambiguous.length && aiEnabled()) {
+  // 사람별 AI 한도를 다 썼거나 크레딧 부족이면 AI 보정은 건너뜀(서버 보정만)
+  const canAi = ambiguous.length > 0 && aiEnabled() && await (async () => { try { const G = await import('./ai/guard'); await G.assertAiCredit(); await G.assertUserBudget(u); return true; } catch { return false; } })();
+  if (canAi) {
     try {
       const p = anthropicProvider({ tier: 'fast' });
       const r = await p.chat({ system: '음성 받아쓰기 보정. 문장의 각 [n] 자리에 들어갈 말을 보기에서 하나씩 고르거나, 원래 말이 맞으면 원래 말을 고른다. JSON 만.', tools: [],

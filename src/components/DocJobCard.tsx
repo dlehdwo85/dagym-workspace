@@ -64,7 +64,7 @@ export function DocJobCard({ id, onRefine }: { id: string; onRefine?: (text: str
               <a href={`/api/ai/doc-jobs/${id}/preview`} target="_blank" rel="noreferrer" className="mt-2 block text-center text-xs text-brand-700 underline">새 창에서 원본 크기로</a>
             </Modal></>}
           {job.summary && <p className="whitespace-pre-wrap px-2.5 py-2 text-xs text-ink-2">{job.summary}</p>}
-          {job.costKrw !== undefined && <p className="px-2.5 pb-1.5 text-[11px] text-ink-3" data-testid="doc-job-cost">이번 작업 약 {job.costKrw.toLocaleString('ko-KR')}원{job.mode === 'fill' ? ' · 양식 채우기(대화 비용만)' : job.model ? ` · ${/haiku/.test(job.model) ? '가벼운 모델' : '깊은 모델'}` : ''} (관리자에게만 보임)</p>}
+          {job.costKrw !== undefined && <p className="px-2.5 pb-1.5 text-[11px] text-ink-3" data-testid="doc-job-cost">이번 작업 약 {job.costKrw.toLocaleString('ko-KR')}원{job.mode === 'fill' ? ' · 양식 채우기(대화 비용만)' : job.model ? ` · ${/haiku/.test(job.model) ? '가벼운 모델' : '깊은 모델'}` : ''}</p>}
           <div className="flex flex-wrap gap-1.5 px-2.5 pb-2.5">
             {job.hasFile && <a href={`/api/ai/doc-jobs/${id}/file`} className="inline-flex h-8 items-center gap-1 rounded-input bg-brand-600 px-2.5 text-xs font-semibold text-white hover:bg-brand-700" data-testid="doc-job-download"><Download className="size-3.5" />내려받기</a>}
             {job.hasFile && (job.savedFileId

@@ -86,6 +86,7 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
   // V22 부록 2: 기본은 가벼운 모델(Haiku), "새로 디자인"·가벼운 모델 실패 뒤 다시 할 때만 깊은 모델(Sonnet)
   let model = docModel(job.design);
   try {
+    await (await import('./guard')).assertAiCredit(); // 크레딧 부족으로 막혀 있으면 호출하지 않음
     // 참고 파일 + (고치기면) 직전 버전 결과 + 회사 로고 → 컨테이너에 올림
     const uploads: { id: string; name: string; role: string }[] = [];
     for (const r of job.ref_file_ids) { const f = await anthropicFileFor(r); if (f) uploads.push({ ...f, role: '참고 자료' }); }
@@ -203,7 +204,9 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
     }
     await logError('ai.doc_engine', e, { jobId: job.id });
     debug.error = String(e?.message ?? e).slice(0, 300); await saveDebug();
-    const msg = e?.status ? `AI 서버 오류(${e.status})` : String(e?.message ?? '문서 작업 실패').slice(0, 300);
+    // V23-1: 크레딧 부족(1시간 차단·알림)·요청 한도·일시 장애를 사람이 알 수 있는 문구로
+    const G = await import('./guard');
+    const msg = e?.code === 'ai_credit' ? G.CREDIT_MSG : e?.status ? (await G.onAiError(e)).message : String(e?.message ?? '문서 작업 실패').slice(0, 300);
     await sql`update ai_doc_jobs set status = 'failed', finished_at = now(), error = ${msg}, input_tokens = input_tokens + ${inTok}, output_tokens = output_tokens + ${outTok}, cache_read_tokens = cache_read_tokens + ${cacheR}, cache_write_tokens = cache_write_tokens + ${cacheW}, cost_usd = cost_usd + ${cost}, model = ${model} where id = ${job.id}`;
     return { failed: msg };
   } finally {
