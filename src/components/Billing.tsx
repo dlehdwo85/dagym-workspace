@@ -16,9 +16,10 @@ export function BillingSection() {
   const [card, setCard] = useState({ cardNo: '', exp: '', idNo: '', cardPw: '' });
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState('');
+  const [pm, setPm] = useState<'CARD' | 'BANK' | 'VBANK'>('CARD'); // V29 결제창 결제 수단
   useEffect(() => {
     const sp = new URLSearchParams(location.search);
-    if (sp.get('paid')) toast.ok('결제했습니다'); else if (sp.get('payfail')) toast.error(`결제하지 못했습니다: ${sp.get('payfail')}`);
+    if (sp.get('paid')) toast.ok('결제했습니다'); else if (sp.get('vbank')) toast.ok(`가상계좌를 만들었습니다 — ${sp.get('vbank')}`); else if (sp.get('payfail')) toast.error(`결제하지 못했습니다: ${sp.get('payfail')}`);
   }, []);
   if (error) return null; // 내부 공간(우리 회사)·권한 없는 사람은 결제 칸 없음
   if (!data) return null;
@@ -43,7 +44,7 @@ export function BillingSection() {
   async function openWindow(body: any) {
     setBusy(true);
     try {
-      const r = await api('/api/billing/window', { body });
+      const r = await api('/api/billing/window', { body: { ...body, payMethod: pm } });
       await new Promise<void>((res, rej) => { if (window.goPay) return res(); const s = document.createElement('script'); s.src = r.script; s.onload = () => res(); s.onerror = () => rej(new Error('결제창을 불러오지 못했습니다')); document.head.appendChild(s); });
       const f = document.createElement('form');
       f.method = 'post'; f.action = r.params.ReturnURL; f.acceptCharset = 'euc-kr'; f.style.display = 'none';
@@ -87,8 +88,17 @@ export function BillingSection() {
                 <select className={cx(inputCls, 'w-auto')} value={plan} onChange={(e) => setPlan(e.target.value)} aria-label="구독할 요금제">
                   <option value="">요금제 선택</option>{monthly.map((q: any) => <option key={q.planCode} value={q.planCode}>{q.name} · 월 {won(q.amount)} ({q.seats}인)</option>)}
                 </select>
-                <Button size="sm" disabled={!plan || !data.card || busy} onClick={() => subscribe(plan)} data-testid="billing-subscribe">{data.card ? '결제하고 구독' : '카드를 먼저 등록하세요'}</Button>
+                <Button size="sm" disabled={!plan || !data.card || busy} onClick={() => subscribe(plan)} data-testid="billing-subscribe">{data.card ? '등록 카드로 결제·자동 결제' : '카드를 먼저 등록하세요'}</Button>
+                <Button size="sm" variant="secondary" disabled={!plan || busy} onClick={() => openWindow({ kind: 'monthly', planCode: plan })} data-testid="billing-window-monthly">결제창으로 1개월</Button>
               </div>
+              <p className="mt-1 text-[11px] text-ink-3">결제창 결제는 카드 등록 없이 이번 1개월만 — 다음 달부터 자동 결제하려면 카드를 등록하세요.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 text-xs" role="radiogroup" aria-label="결제창 결제 수단" data-testid="billing-paymethod">
+              <span className="font-semibold text-ink-2">결제창 결제 수단</span>
+              {([['CARD', '카드'], ['BANK', '계좌이체'], ['VBANK', '가상계좌(무통장)']] as const).map(([k, l]) => (
+                <button key={k} type="button" role="radio" aria-checked={pm === k} onClick={() => setPm(k)} className={cx('rounded-full border px-2.5 py-0.5', pm === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line text-ink-2')}>{l}</button>
+              ))}
+              {pm === 'VBANK' && <span className="text-ink-3">계좌를 받은 뒤 3일 안에 입금하면 자동 적용</span>}
             </div>
             <div>
               <p className="text-xs font-semibold text-ink-2">연간 결제 (결제창, 할인가)</p>
@@ -104,7 +114,9 @@ export function BillingSection() {
                 {data.payments.map((p: any) => (
                   <li key={p.id} className="flex flex-wrap items-center gap-2 px-2 py-1.5">
                     <span className="w-28 shrink-0 text-ink-3">{fmtDateTime(p.paid_at ?? p.created_at)}</span>
-                    <span className="flex-1">{KIND[p.kind]} {p.plan_code ?? p.addon_code ?? ''} · {won(p.amount)}{p.card_no ? ` · ${p.card_name ?? ''} ${p.card_no}` : ''}</span>
+                    <span className="flex-1">{KIND[p.kind]} {p.plan_code ?? p.addon_code ?? ''} · {won(p.amount)}{p.pay_method && p.pay_method !== 'CARD' ? ` · ${p.pay_method === 'BANK' ? '계좌이체' : '가상계좌'}` : ''}{p.card_no ? ` · ${p.card_name ?? ''} ${p.card_no}` : ''}
+                      {p.status === 'pending' && p.vbank && <span className="block text-amber-700" data-testid="billing-vbank">입금 대기: {p.vbank.bank} {p.vbank.num}{p.vbank.exp ? ` · ${String(p.vbank.exp).slice(0, 4)}-${String(p.vbank.exp).slice(4, 6)}-${String(p.vbank.exp).slice(6, 8)}까지` : ''}</span>}
+                      {p.status === 'paid' && p.tid && <a className="ml-1 text-brand-700 underline" href={`https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0`} target="_blank" rel="noreferrer">영수증</a>}</span>
                     <span className={cx('rounded-full px-1.5', p.status === 'paid' ? 'bg-green-50 text-green-700' : p.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2')} title={p.result_msg ?? ''}>{STATUS[p.status]}</span>
                   </li>
                 ))}

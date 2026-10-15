@@ -34,7 +34,11 @@ function fakeNice() {
       if (p === '/webapi/billing/billkey_remove.jsp') return j({ ResultCode: f.SignData === sha(f.MID + f.EdiDate + f.Moid + f.BID + BKEY) ? 'F101' : 'F113', BID: f.BID });
       if (p === '/webapi/pay_process.jsp') {
         if (f.SignData !== sha(f.AuthToken + f.MID + f.Amt + f.EdiDate + KEY)) return j({ ResultCode: 'F113', ResultMsg: '위변조' });
-        return j({ ResultCode: '3001', ResultMsg: '카드 결제 성공', TID: f.TID, MID: f.MID, Amt: f.Amt.padStart(12, '0'), AuthCode: '11112222', CardName: '신한', CardNo: '45678912****9876', Signature: sha(f.TID + f.MID + f.Amt.padStart(12, '0') + KEY) });
+        const sig = sha(f.TID + f.MID + f.Amt.padStart(12, '0') + KEY);
+        // 시험: 인증 토큰 앞글자로 결제 수단 흉내(vb = 가상계좌 발급, bk = 계좌이체)
+        if (f.AuthToken.startsWith('vb')) return j({ ResultCode: '4100', ResultMsg: '가상계좌 발급 성공', PayMethod: 'VBANK', TID: f.TID, MID: f.MID, Amt: f.Amt.padStart(12, '0'), VbankBankName: '국민', VbankNum: '12345678901234', VbankExpDate: '20991231', Signature: sig });
+        if (f.AuthToken.startsWith('bk')) return j({ ResultCode: '4000', ResultMsg: '계좌이체 성공', PayMethod: 'BANK', TID: f.TID, MID: f.MID, Amt: f.Amt.padStart(12, '0'), BankName: '신한', Signature: sig });
+        return j({ ResultCode: '3001', ResultMsg: '카드 결제 성공', TID: f.TID, MID: f.MID, Amt: f.Amt.padStart(12, '0'), AuthCode: '11112222', CardName: '신한', CardNo: '45678912****9876', Signature: sig });
       }
       if (p === '/webapi/cancel_process.jsp') {
         const k = f.MID === BMID ? BKEY : KEY;
@@ -50,7 +54,7 @@ let owner, tid, platform;
 before(async () => {
   await resetDb();
   np = fakeNice();
-  srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', NICEPAY_MODE: 'test', NICEPAY_MID: MID, NICEPAY_MERCHANT_KEY: KEY, NICEPAY_BILLING_MID: BMID, NICEPAY_BILLING_KEY: BKEY, NICEPAY_API_BASE: NP });
+  srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', NICEPAY_MODE: 'test', NICEPAY_PAY_MID: MID, NICEPAY_PAY_KEY: KEY, NICEPAY_BILL_MID: BMID, NICEPAY_BILL_KEY: BKEY, /* V29 새 이름(MID 2개) */ NICEPAY_API_BASE: NP });
   sql = testDb();
   ctx = await bootstrap();
   platform = ctx.owner;
@@ -120,6 +124,29 @@ describe('18차 나이스페이 결제', () => {
     for (let k = 0; k < 2; k++) assert.equal(await (await postForm('/api/billing/nicepay/notify', noti(w.params.Amt))).text(), 'OK');
     assert.equal((await sql`select status from payments where moid = ${w.params.Moid}`)[0].status, 'paid');
     assert.equal((await sub()).addons.storage20, 1, '팩 1개만 더해짐');
+  });
+
+  test('V29 결제창 결제 수단: 가상계좌 → 입금 대기(계좌 표시) → 입금 통보 4110 에 월 구독 적용·영수증 메일 · 계좌이체는 바로 완료', async () => {
+    const w = await owner.ok('POST', '/api/billing/window', { kind: 'monthly', planCode: 'team', payMethod: 'VBANK' });
+    assert.equal(w.params.PayMethod, 'VBANK'); assert.match(w.params.VbankExpDate, /^\d{8}$/); assert.equal(w.params.MID, MID, '결제창 MID');
+    const auth = (tok, p) => ({ AuthResultCode: '0000', AuthToken: tok, PayMethod: 'VBANK', MID, Moid: p.Moid, Amt: p.Amt, TxTid: `${MID}03012610150900001111`,
+      Signature: sha(tok + MID + p.Amt + KEY), NextAppURL: `${NP}/webapi/pay_process.jsp`, NetCancelURL: `${NP}/webapi/cancel_process.jsp` });
+    const before = await sub();
+    const r = await postForm('/api/billing/nicepay/return', auth('vbtok1', w.params));
+    assert.equal(new URL(r.headers.get('location')).searchParams.get('vbank'), '국민 12345678901234 으로 입금하면 바로 적용됩니다');
+    let [pay] = await sql`select * from payments where moid = ${w.params.Moid}`;
+    assert.equal(pay.status, 'pending'); assert.equal(pay.meta.vbank.num, '12345678901234');
+    assert.equal((await sub()).plan_code, before.plan_code, '입금 전에는 그대로');
+    const b = await owner.ok('GET', '/api/billing');
+    assert.equal(b.payments.find((x) => x.id === pay.id).vbank.bank, '국민');
+    assert.equal(await (await postForm('/api/billing/nicepay/notify', { MID, MOID: w.params.Moid, Amt: w.params.Amt, TID: pay.tid, ResultCode: '4110', StateCd: '0', PayMethod: 'VBANK' })).text(), 'OK');
+    [pay] = await sql`select * from payments where moid = ${w.params.Moid}`;
+    assert.equal(pay.status, 'paid'); assert.equal(pay.result_msg, '가상계좌 입금 확인'); assert.ok(pay.meta.receiptSentAt, '영수증 메일');
+    const s1 = await sub(); assert.equal(s1.plan_code, 'team'); assert.equal(s1.billing_cycle, 'monthly');
+    const w2 = await owner.ok('POST', '/api/billing/window', { kind: 'addon', addonCode: 'storage20', payMethod: 'BANK' });
+    const r2 = await postForm('/api/billing/nicepay/return', { ...auth('bktok', w2.params), PayMethod: 'BANK' });
+    assert.match(r2.headers.get('location'), /paid=1/);
+    assert.equal((await sql`select meta->>'payMethod' pm from payments where moid = ${w2.params.Moid}`)[0].pm, 'BANK');
   });
 
   test('V28 B2 던닝: 결제 실패 → 알림·메일·3일 뒤 재시도 → 7일 미납 읽기 전용(402) → 30일 이용 중지(보기도 402, 결제 화면은 열림) → 유예 연장 → 결제 성공하면 즉시 복구', async () => {

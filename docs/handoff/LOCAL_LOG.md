@@ -262,3 +262,4 @@
 - 2026-10-15 [로컬 확인] c0444a8·fb5761b·4b26c57 운영(migration 062_task_quota.sql): /platform **"AI 가격 결정"** 카드(베이직·스탠다드·프로·크레딧 S/M/L 모두 "적정", 기준 실측 100/627/2,565원) · **가입 퍼널**(0→0→0, "아직 가입한 회사 없음") · 회사 상세 **"업무 총량(개)"** 칸·사용 줄 "업무 0개" 표시 확인. 요금 역산 무료 분리 반영.
 - 2026-10-15 [로컬] V14 51 iOS 네이티브: mobile/capacitor.config.ts ios → contentInset 'never' · backgroundColor '#ffffff' (클라우드 요청). 실기기 확인은 다음 TestFlight 빌드에서.
 - 대기: FUNNEL_STATS_TOKEN(대표 입력 → 마케팅 전달), 전환 태그 ID(NEXT_PUBLIC_META_PIXEL_ID/GA4_ID/GOOGLE_ADS_SIGNUP/NAVER_WA — 마케팅이 광고 계정 만든 뒤), 카카오 키 3종(대표 입력).
+- 2026-10-15 [로컬요청] V29 NICEPAY 결제창 준비 배포. 대표 입력 Vercel 환경변수: NICEPAY_PAY_MID=walkin001m · NICEPAY_PAY_KEY · NICEPAY_BILL_MID=walkin002m · NICEPAY_BILL_KEY · (실결제 시) NICEPAY_MODE=live. 나이스페이 가맹점 관리자 결제통보 URL: https://dagym-workspace.vercel.app/api/billing/nicepay/notify (가상계좌 입금 통보 포함). 확인: 시험 회사 /admin/usage 결제 칸 → 결제 수단 카드·계좌이체·가상계좌로 결제창 열림, 가상계좌 입금 대기 표시.

@@ -493,6 +493,14 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 이메일 가입 화면에도 인원 규모·업종(선택) 추가. 마이그레이션 063_social_login.sql(user_identities·oauth_pending·tenants.size_band/industry, 추가형).
 - 남은 것(로컬): 키 발급·콜백 등록·실제 로그인 확인. 앱(WebView)에서 Google 은 정책상 막힐 수 있음(disallowed_useragent) → 앱은 카카오·네이버 먼저, Google 은 시스템 브라우저 방식으로 나중.
 
+## V29 4장 NICEPAY 결제창 준비(MID 2개·결제 수단·가상계좌 입금·영수증) (2026-10-15)
+- 환경변수 새 이름: 결제창 NICEPAY_PAY_MID / NICEPAY_PAY_KEY(walkin001m), 빌링 NICEPAY_BILL_MID / NICEPAY_BILL_KEY(walkin002m), NICEPAY_MODE=live 일 때 실결제. 예전 이름(NICEPAY_MID·NICEPAY_MERCHANT_KEY·NICEPAY_BILLING_*)도 계속 읽음. 키 값은 대표가 Vercel 에 입력(코드·저장소에 없음).
+- 결제창 결제 수단 선택: 카드 · 계좌이체 · 가상계좌(입금 기한 3일). 가상계좌는 발급(4100) 뒤 "입금 대기 — 은행·계좌·기한" 표시, 입금 통보(4110)가 오면 결제 완료·적용. 계좌이체는 승인(4000) 즉시 완료.
+- 월 요금제도 결제창으로 1개월 결제 가능(카드 등록 없이). 다음 달 자동 결제는 카드(빌링) 등록 필요 — 없으면 B2 미납 안내로 이어짐.
+- 결제 완료(결제창·통보·빌링) → 결제한 사람(없으면 회사 대표)에게 영수증 메일(상품·금액·수단·일시·주문/거래번호·나이스페이 영수증 링크), 결제 내역에 [영수증] 링크.
+- 나이스페이 관리자에 등록할 결제통보(웹훅) URL: https://dagym-workspace.vercel.app/api/billing/nicepay/notify (운영 모드는 나이스페이 발신 IP 만 받음, 응답 "OK").
+- 남은 것: 시험 MID 로 실제 결제창(카드·계좌이체·가상계좌) 한 번씩 → 키 입력 후 실결제 소액 확인(대표 승인).
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

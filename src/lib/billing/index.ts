@@ -45,7 +45,7 @@ export async function billingOverview(u: SessionUser) {
   const [[card], [sub], payments, plans, addons] = await Promise.all([
     sql`select card_name, card_last4, created_at from billing_cards where tenant = ${t} and removed_at is null`,
     sql`select plan_code, status, billing_cycle, next_billing_on, billing_amount, cancel_at_period_end, past_due_since, next_retry_on, trial_ends_at, billing_lock, billing_grace_until from tenant_subscriptions where tenant = ${t}`,
-    sql`select id, kind, plan_code, addon_code, amount, status, canceled_amount, result_msg, card_name, card_no, paid_at, created_at from payments where tenant = ${t} order by created_at desc limit 30`,
+    sql`select id, kind, plan_code, addon_code, amount, status, canceled_amount, result_msg, card_name, card_no, paid_at, created_at, tid, meta->>'payMethod' as pay_method, meta->'vbank' as vbank from payments where tenant = ${t} order by created_at desc limit 30`,
     sql<{ code: string }[]>`select code from plans where public and active and code not in ('trial', 'free', 'team_free') order by sort`,
     sql`select code, name, monthly_krw from plan_addons where active order by sort`,
   ]);
@@ -81,6 +81,7 @@ async function chargeCard(sql: Sql, c: NpConf, tenant: string, kind: 'subscripti
   const r = await approveBilling(c, { bid: decrypt(card.bid_enc), moid: m, amount, goodsName });
   await sql`update payments set status = ${r.ok ? 'paid' : 'failed'}, tid = ${r.tid ?? null}, result_code = ${r.code ?? null}, result_msg = ${r.msg ?? null},
     card_name = ${r.cardName ?? card.card_name}, card_no = ${r.cardNo ?? null}, auth_code = ${r.authCode ?? null}, paid_at = ${r.ok ? new Date() : null}, updated_at = now() where id = ${p.id}`;
+  if (r.ok) await sendReceipt(sql, p.id);
   return { ok: r.ok, msg: r.msg, paymentId: p.id };
 }
 const addPeriod = (d: string, cycle: 'monthly' | 'annual') => DateTime.fromISO(d, { zone: TZ }).plus(cycle === 'annual' ? { years: 1 } : { months: 1 }).toISODate()!;
@@ -90,6 +91,24 @@ async function activate(sql: Sql, tenant: string, planCode: string, cycle: 'mont
     period_start = current_date, period_end = ${addPeriod(today(), cycle)}, cancel_at_period_end = false, past_due_since = null, retry_count = 0, next_retry_on = null,
     billing_lock = null, billing_grace_until = null, updated_at = now() where tenant = ${tenant}`;
   (await import('../plans')).clearReadOnlyCache(tenant); // B2: 결제되면 읽기 전용·이용 중지 즉시 복구
+}
+
+const PM_LABEL: Record<string, string> = { CARD: '카드', BANK: '계좌이체', VBANK: '가상계좌' };
+/** V29 결제 완료 → 결제한 사람(없으면 회사 대표)에게 영수증 메일(나이스페이 영수증 링크). 실패해도 결제는 그대로 */
+async function sendReceipt(sql: Sql, paymentId: string) {
+  try {
+    const [p] = await sql<any[]>`select p.*, t.name as tenant_name, coalesce(u.email, o.email) as email from payments p join tenants t on t.id = p.tenant
+      left join users u on u.id = p.created_by left join users o on o.id = t.owner_user_id where p.id = ${paymentId} and p.status = 'paid'`;
+    if (!p?.email) return;
+    const pm = PM_LABEL[p.meta?.payMethod ?? 'CARD'] ?? '카드';
+    const what = p.kind === 'addon' ? `추가 팩 ${p.addon_code}` : `${p.plan_code} ${p.kind === 'annual' ? '1년' : '1개월'}`;
+    const when = new Date(p.paid_at ?? Date.now()).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    const receipt = p.tid ? `https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0` : '';
+    const { sendMail } = await import('../mail');
+    await sendMail(p.email, `[워크인] 결제 영수증 — ${p.amount.toLocaleString('ko-KR')}원`,
+      `${p.tenant_name}\n\n상품: ${what}\n금액: ${p.amount.toLocaleString('ko-KR')}원 (VAT 포함)\n결제 수단: ${pm}${p.card_name ? ` · ${p.card_name}` : ''}${p.card_no ? ` ${p.card_no}` : ''}\n결제 일시: ${when}\n주문번호: ${p.moid}${p.tid ? `\n거래번호: ${p.tid}` : ''}\n\n${receipt ? `영수증(나이스페이): ${receipt}\n` : ''}결제 내역: ${process.env.APP_URL ?? ''}/admin/usage`);
+    await sql`update payments set meta = meta || ${sql.json({ receiptSentAt: new Date().toISOString() })} where id = ${p.id}`;
+  } catch (e) { await logError('billing-receipt', e); }
 }
 
 export const subscribeInput = z.object({ planCode: z.string().max(40) });
@@ -105,29 +124,34 @@ export async function subscribeMonthly(u: SessionUser, i: z.infer<typeof subscri
   return { ok: true, amount: q.amount, paymentId: r.paymentId };
 }
 
+const payMethod = z.enum(['CARD', 'BANK', 'VBANK']).default('CARD');
 export const windowInput = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('annual'), planCode: z.string().max(40) }),
-  z.object({ kind: z.literal('addon'), addonCode: z.string().max(40) }),
+  z.object({ kind: z.literal('annual'), planCode: z.string().max(40), payMethod }),
+  z.object({ kind: z.literal('addon'), addonCode: z.string().max(40), payMethod }),
+  // V29: 첫 결제·요금제 변경을 결제창으로(카드 등록 없이) — 다음 달부터 자동 결제는 카드 등록 필요
+  z.object({ kind: z.literal('monthly'), planCode: z.string().max(40), payMethod }),
 ]);
 /** 연간·팩: 결제창 파라미터(서명 포함) — 결제 기록은 대기(pending)로 먼저 남긴다 */
 export async function startWindow(u: SessionUser, i: z.infer<typeof windowInput>, origin: string) {
   const t = await requireBillingAdmin(u);
   const c = conf(); const sql = db();
   let amount: number, goodsName: string, plan: string | null = null, addon: string | null = null;
-  if (i.kind === 'annual') { const q = await quote(t, i.planCode, 'annual', sql); amount = q.amount; goodsName = q.goodsName; plan = i.planCode; }
+  if (i.kind === 'annual' || i.kind === 'monthly') { const q = await quote(t, i.planCode, i.kind, sql); amount = q.amount; goodsName = q.goodsName; plan = i.planCode; }
   else {
     const [a] = await sql<{ code: string; monthly_krw: number }[]>`select code, monthly_krw from plan_addons where code = ${i.addonCode} and active`;
     if (!a) throw badRequest('없는 팩입니다');
     amount = Math.round(a.monthly_krw * VAT); goodsName = `Workin pack ${a.code}`; addon = a.code;
   }
-  const m = moid(i.kind);
-  await sql`insert into payments (tenant, kind, plan_code, addon_code, moid, amount, created_by) values (${t}, ${i.kind}, ${plan}, ${addon}, ${m}, ${amount}, ${u.id})`;
+  const kind = i.kind === 'monthly' ? 'subscription' : i.kind;
+  const m = moid(kind);
+  await sql`insert into payments (tenant, kind, plan_code, addon_code, moid, amount, created_by, meta) values (${t}, ${kind}, ${plan}, ${addon}, ${m}, ${amount}, ${u.id}, ${sql.json({ window: true, payMethod: i.payMethod })})`;
   const base = process.env.APP_URL || origin;
-  return { script: 'https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js', params: windowParams(c, { moid: m, amount, goodsName, returnUrl: `${base}/api/billing/nicepay/return`, buyerEmail: u.email }) };
+  return { script: 'https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js', params: windowParams(c, { moid: m, amount, goodsName, returnUrl: `${base}/api/billing/nicepay/return`, buyerEmail: u.email, payMethod: i.payMethod }) };
 }
 
 async function applyPaid(sql: Sql, p: { id: string; tenant: string; kind: string; plan_code: string | null; addon_code: string | null; amount: number }) {
   if (p.kind === 'annual' && p.plan_code) await activate(sql, p.tenant, p.plan_code, 'annual', p.amount);
+  if (p.kind === 'subscription' && p.plan_code) await activate(sql, p.tenant, p.plan_code, 'monthly', p.amount); // 결제창 월 결제(빌링 결제는 여기로 오지 않음)
   if (p.kind === 'addon' && p.addon_code) {
     await sql`update tenant_subscriptions set addons = jsonb_set(addons, ${[p.addon_code]}, to_jsonb(coalesce((addons->>${p.addon_code})::int, 0) + 1)), updated_at = now() where tenant = ${p.tenant}`;
   }
@@ -143,11 +167,16 @@ export async function handleReturn(raw: string) {
   if (p.status !== 'pending') return { ok: false, msg: '처리할 수 없는 주문입니다' };
   const c = conf();
   const r = await approveAuth(c, a, p.amount);
+  // 가상계좌: 계좌 발급만 된 상태 — 입금 통보(4110)가 오면 결제 완료
+  if (r.ok && 'vbank' in r && r.vbank) {
+    await sql`update payments set tid = ${r.tid ?? null}, result_code = ${r.code ?? null}, result_msg = '입금 대기', meta = meta || ${sql.json({ payMethod: 'VBANK', vbank: r.vbank })}, updated_at = now() where id = ${p.id} and status = 'pending'`;
+    return { ok: true, vbank: true, msg: `${r.vbank.bank} ${r.vbank.num} 으로 입금하면 바로 적용됩니다` };
+  }
   const upd = await sql`update payments set status = ${r.ok ? 'paid' : 'failed'}, tid = ${('tid' in r ? r.tid : a.TxTid) ?? null}, result_code = ${r.code ?? null}, result_msg = ${r.msg ?? null},
     card_name = ${('cardName' in r ? r.cardName : null) ?? null}, card_no = ${('cardNo' in r ? r.cardNo : null) ?? null}, auth_code = ${('authCode' in r ? r.authCode : null) ?? null},
-    paid_at = ${r.ok ? new Date() : null}, updated_at = now() where id = ${p.id} and status = 'pending' returning id`;
-  if (r.ok && upd.length) await applyPaid(sql, p);
-  return { ok: r.ok, msg: r.msg };
+    paid_at = ${r.ok ? new Date() : null}, meta = meta || ${sql.json({ payMethod: ('payMethod' in r ? r.payMethod : 'CARD') ?? 'CARD' })}, updated_at = now() where id = ${p.id} and status = 'pending' returning id`;
+  if (r.ok && upd.length) { await applyPaid(sql, p); await sendReceipt(sql, p.id); }
+  return { ok: r.ok, vbank: false, msg: r.msg };
 }
 
 const NOTI_IPS = ['121.133.126.10', '121.133.126.11', '211.33.136.39'];
@@ -169,9 +198,11 @@ export async function handleNotification(raw: string, ip: string | null) {
   const midOk = !c || a.MID === c.mid || a.MID === c.billingMid;
   if (!p || !midOk || p.amount !== amount) { await logError('nicepay-noti', new Error(`맞지 않는 통보: moid=${a.MOID} amt=${amount}`)); return 'OK'; }
   await sql`update payment_notifications set matched = true where id = ${ins[0].id}`;
-  if (state === '0' && a.ResultCode === '3001' && p.status === 'pending') {
-    const upd = await sql`update payments set status = 'paid', tid = ${a.TID ?? p.tid}, auth_code = ${a.AuthCode ?? null}, paid_at = now(), result_msg = '결제통보로 확인', updated_at = now() where id = ${p.id} and status = 'pending' returning id`;
-    if (upd.length) await applyPaid(sql, p);
+  // 카드 3001 · 계좌이체 4000 · 가상계좌 입금 4110
+  if (state === '0' && ['3001', '4000', '4110'].includes(a.ResultCode ?? '') && p.status === 'pending') {
+    const msg = a.ResultCode === '4110' ? '가상계좌 입금 확인' : '결제통보로 확인';
+    const upd = await sql`update payments set status = 'paid', tid = ${a.TID ?? p.tid}, auth_code = ${a.AuthCode ?? null}, paid_at = now(), result_msg = ${msg}, updated_at = now() where id = ${p.id} and status = 'pending' returning id`;
+    if (upd.length) { await applyPaid(sql, p); await sendReceipt(sql, p.id); }
   } else if ((state === '1' || state === '2') && p.status === 'paid') {
     await sql`update payments set status = 'canceled', canceled_amount = amount, updated_at = now() where id = ${p.id}`;
   }

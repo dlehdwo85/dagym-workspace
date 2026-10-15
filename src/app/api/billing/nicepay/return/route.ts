@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
   const base = process.env.APP_URL || req.nextUrl.origin;
   try {
     const r = await handleReturn(await req.text());
-    return NextResponse.redirect(`${base}/admin/usage?${new URLSearchParams(r.ok ? { paid: '1' } : { payfail: r.msg ?? '결제 실패' })}`, 303);
+    return NextResponse.redirect(`${base}/admin/usage?${new URLSearchParams(r.ok ? ('vbank' in r && r.vbank ? { vbank: r.msg ?? '' } : { paid: '1' }) : { payfail: r.msg ?? '결제 실패' })}`, 303);
   } catch (e) {
     await logError('nicepay-return', e);
     return NextResponse.redirect(`${base}/admin/usage?payfail=${encodeURIComponent((e as Error).message)}`, 303);

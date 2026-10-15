@@ -9,8 +9,9 @@ import { createCipheriv, createHash, randomInt } from 'node:crypto';
  */
 export type NpConf = { mode: 'test' | 'live'; mid: string; key: string; billingMid: string; billingKey: string; base: string; cancelBase: string };
 export function npConf(): NpConf | null {
-  const mid = process.env.NICEPAY_MID, key = process.env.NICEPAY_MERCHANT_KEY;
-  const billingMid = process.env.NICEPAY_BILLING_MID ?? mid, billingKey = process.env.NICEPAY_BILLING_KEY ?? key;
+  // V29: 결제창 MID(walkin001m) = NICEPAY_PAY_MID/KEY, 빌링 MID(walkin002m) = NICEPAY_BILL_MID/KEY — 예전 이름(NICEPAY_MID·MERCHANT_KEY·BILLING_*)도 읽음
+  const mid = process.env.NICEPAY_PAY_MID || process.env.NICEPAY_MID, key = process.env.NICEPAY_PAY_KEY || process.env.NICEPAY_MERCHANT_KEY;
+  const billingMid = process.env.NICEPAY_BILL_MID || process.env.NICEPAY_BILLING_MID || mid, billingKey = process.env.NICEPAY_BILL_KEY || process.env.NICEPAY_BILLING_KEY || key;
   if (!mid || !key || !billingMid || !billingKey) return null;
   const base = (process.env.NICEPAY_API_BASE ?? 'https://webapi.nicepay.co.kr').replace(/\/$/, '');
   return { mode: process.env.NICEPAY_MODE === 'live' ? 'live' : 'test', mid, key, billingMid, billingKey, base,
@@ -66,9 +67,13 @@ export async function removeBillKey(c: NpConf, bid: string, moid: string) {
   return { ok: r.ResultCode === 'F101', code: r.ResultCode, msg: r.ResultMsg };
 }
 /** 결제창(goPay) 파라미터 — SignData 는 서버에서만 */
-export function windowParams(c: NpConf, i: { moid: string; amount: number; goodsName: string; returnUrl: string; buyerEmail?: string; buyerName?: string }) {
+export type PayMethod = 'CARD' | 'BANK' | 'VBANK';
+export function windowParams(c: NpConf, i: { moid: string; amount: number; goodsName: string; returnUrl: string; buyerEmail?: string; buyerName?: string; payMethod?: PayMethod }) {
   const edi = ediDate();
-  return { PayMethod: 'CARD', GoodsName: i.goodsName, Amt: String(i.amount), MID: c.mid, Moid: i.moid, EdiDate: edi, SignData: sha(edi + c.mid + String(i.amount) + c.key),
+  const pm = i.payMethod ?? 'CARD';
+  // 가상계좌: 입금 기한 3일(서울)
+  const vexp = pm === 'VBANK' ? new Date(Date.now() + 3 * 86400_000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }).replace(/-/g, '') : null;
+  return { PayMethod: pm, ...(vexp ? { VbankExpDate: vexp } : {}), GoodsName: i.goodsName, Amt: String(i.amount), MID: c.mid, Moid: i.moid, EdiDate: edi, SignData: sha(edi + c.mid + String(i.amount) + c.key),
     ReturnURL: i.returnUrl, CharSet: 'utf-8', ...(i.buyerEmail ? { BuyerEmail: i.buyerEmail } : {}), ...(i.buyerName ? { BuyerName: i.buyerName } : {}) };
 }
 const NICE_HOST = /^https:\/\/(dc1-api|dc2-api|pg-api|webapi)\.nicepay\.co\.kr\//;
@@ -82,7 +87,11 @@ export async function approveAuth(c: NpConf, a: Record<string, string>, expectAm
   const edi = ediDate();
   const r = await post(next, { TID: a.TxTid, AuthToken: a.AuthToken, MID: c.mid, Amt: a.Amt, EdiDate: edi, SignData: sha(a.AuthToken + c.mid + a.Amt + edi + c.key) });
   const sigOk = !r.Signature || r.Signature === sha((r.TID ?? '') + c.mid + (r.Amt ?? '') + c.key);
-  return { ok: r.ResultCode === '3001' && sigOk && Number(r.Amt) === expectAmount, code: r.ResultCode, msg: sigOk ? r.ResultMsg : '승인 응답 위변조 검증 실패', tid: r.TID ?? a.TxTid, authCode: r.AuthCode, cardName: r.CardName, cardNo: r.CardNo, netCancelUrl: a.NetCancelURL };
+  // 성공 코드: 카드 3001 · 계좌이체 4000 · 가상계좌 발급 4100(입금 전 — 입금 통보 4110 에서 결제 완료)
+  const okCode = r.ResultCode === '3001' || r.ResultCode === '4000' || r.ResultCode === '4100';
+  const vbank = r.ResultCode === '4100' ? { bank: r.VbankBankName ?? '', num: r.VbankNum ?? '', exp: r.VbankExpDate ?? '', holder: r.VbankAccountName ?? '' } : null;
+  return { ok: okCode && sigOk && Number(r.Amt) === expectAmount, code: r.ResultCode, msg: sigOk ? r.ResultMsg : '승인 응답 위변조 검증 실패', tid: r.TID ?? a.TxTid, authCode: r.AuthCode,
+    cardName: r.CardName ?? r.BankName, cardNo: r.CardNo, netCancelUrl: a.NetCancelURL, payMethod: (r.PayMethod ?? a.PayMethod ?? 'CARD') as string, vbank };
 }
 /** 취소 (2001·2211 성공). partial = 부분취소 */
 export async function cancelPayment(c: NpConf, i: { tid: string; moid: string; amount: number; partial: boolean; reason: string; billing?: boolean }) {
