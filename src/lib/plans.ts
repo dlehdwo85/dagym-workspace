@@ -74,11 +74,41 @@ export async function currentUsage(tenant: string, sql: Sql = db()) {
     users: users.active, invited: users.invited };
 }
 
+// ---------------- V27 8장 무료 요금제: 잠금 기능·파일 크기·메신저 90일·AI 원가 상한 ----------------
+export const FEATURES = {
+  perms: '권한 설정', approval_lines: '결재선', doc_templates: '견적·문서 양식', send_external: '문자·메일 발송',
+  revenue: '매출·CRM', audit: '감사 로그', dept_spaces: '부서 공간',
+} as const;
+export type Feature = keyof typeof FEATURES;
+export type PlanRules = { planCode: string; free: boolean; locked: Feature[]; fileMb: number | null; chatDays: number | null; aiCostKrw: number | null; docHaikuOnly: boolean };
+const rulesCache = new Map<string, { at: number; r: PlanRules }>();
+/** 요금제 규칙(한도 외). 우리 회사(default)·체험하기(demo)는 잠금 없음 */
+export async function planRules(tenant: string, sql: Sql = db()): Promise<PlanRules> {
+  const c = rulesCache.get(tenant);
+  if (c && Date.now() - c.at < 10_000) return c.r;
+  const sub = await subscription(tenant, sql);
+  const l = (sub.limits ?? {}) as Record<string, any>;
+  const exempt = tenant === 'default' || tenant === 'demo';
+  const r: PlanRules = { planCode: sub.plan_code, free: sub.plan_code === 'free', locked: exempt ? [] : ((l.locked ?? []) as Feature[]).filter((f) => f in FEATURES),
+    fileMb: l.fileMb ?? null, chatDays: l.chatDays ?? null, aiCostKrw: l.aiCostKrw ?? null, docHaikuOnly: !!l.docHaikuOnly };
+  rulesCache.set(tenant, { at: Date.now(), r });
+  return r;
+}
+export const clearPlanRulesCache = (t?: string) => (t ? rulesCache.delete(t) : rulesCache.clear());
+export const LOCK_MSG = (f: Feature) => `${FEATURES[f]}은(는) 스탠다드 요금제부터 쓸 수 있습니다 — 관리 → 사용량·요금제에서 확인하세요`;
+/** 잠긴 기능이면 402 plan_locked (화면은 자물쇠 + "스탠다드부터" → 요금제 화면) */
+export async function assertFeature(u: { tenant?: string | null; isDemo?: boolean | null }, f: Feature, sql: Sql = db()) {
+  const r = await planRules(tenantOfUser(u), sql);
+  if (r.locked.includes(f)) throw new HttpError(402, 'plan_locked', LOCK_MSG(f));
+}
+
 const over = (used: number, limit: number | null) => limit !== null && used >= limit;
 
 // ---------------- 한도 확인 (막는 곳: 올리기 · AI · 초대) ----------------
 export async function assertStorage(u: SessionUser, addBytes: number) {
   const tenant = tenantOfUser(u);
+  const rules = await planRules(tenant);
+  if (rules.fileMb !== null && addBytes > rules.fileMb * 1024 * 1024) throw new HttpError(409, 'file_too_big', `무료 요금제는 파일 1개 ${rules.fileMb}MB 까지 올릴 수 있습니다 — 더 큰 파일은 유료 요금제(체험)에서 올려 주세요.`);
   const { limits } = await effectiveLimits(tenant);
   if (limits.storageGb === null) return;
   const usage = await currentUsage(tenant);
@@ -91,13 +121,27 @@ export async function assertAiRequest(u: SessionUser) {
   const { limits } = await effectiveLimits(tenant);
   if (limits.aiRequests === null) return;
   const usage = await currentUsage(tenant);
-  if (usage.aiRequests >= limits.aiRequests) throw new HttpError(429, 'ai_quota', `이번 달 AI 요청 ${limits.aiRequests}회를 모두 썼습니다. 다음 달 1일에 다시 쓸 수 있습니다 — 관리자가 AI 팩(100회 월 3,000원부터)을 요청하면 바로 늘어납니다.`);
+  const rules = await planRules(tenant);
+  if (usage.aiRequests >= limits.aiRequests) throw new HttpError(429, 'ai_quota', rules.free
+    ? `무료 요금제 AI 맛보기 월 ${limits.aiRequests}회를 모두 썼습니다. 다음 달 1일에 다시 쓸 수 있습니다 — 더 쓰려면 유료 요금제(14일 체험)를 시작하세요.`
+    : `이번 달 AI 요청 ${limits.aiRequests}회를 모두 썼습니다. 다음 달 1일에 다시 쓸 수 있습니다 — 관리자가 AI 팩(100회 월 3,000원부터)을 요청하면 바로 늘어납니다.`);
+  if (rules.aiCostKrw !== null) {
+    const [{ krw }] = await db()<{ krw: number }[]>`select coalesce(sum(cost_krw), 0)::float8 krw from ai_usage where tenant = ${tenant} and created_at >= ${monthStart().toJSDate()}`;
+    if (krw >= rules.aiCostKrw) throw new HttpError(429, 'ai_quota', `무료 요금제 AI 맛보기 한도(월 ${rules.aiCostKrw.toLocaleString()}원어치)를 모두 썼습니다. 다음 달 1일에 다시 쓸 수 있습니다.`);
+  }
 }
 export async function assertSeat(tenant: string, sql: Sql = db()) {
   const { limits } = await effectiveLimits(tenant, sql);
   if (limits.users === null) return;
   const usage = await currentUsage(tenant, sql);
-  if (usage.users + usage.invited >= limits.users) throw new HttpError(409, 'seat_full', `요금제 사용자 수(${limits.users}명)를 넘어 초대할 수 없습니다. 쓰지 않는 계정을 비활성화하거나 사용자 추가 옵션을 신청해 주세요.`);
+  if (usage.users + usage.invited >= limits.users) {
+    const rules = await planRules(tenant, sql);
+    if (rules.free) {
+      const [s] = await sql<{ free_trial_used_at: Date | null }[]>`select free_trial_used_at from tenant_subscriptions where tenant = ${tenant}`;
+      throw new HttpError(409, 'free_seat_full', `무료 요금제는 ${limits.users}명까지입니다. ${s?.free_trial_used_at ? '유료 요금제로 바꾸거나' : '14일 체험(전 기능)을 시작하거나'} ${limits.users}명으로 계속 쓸 수 있어요.`);
+    }
+    throw new HttpError(409, 'seat_full', `요금제 사용자 수(${limits.users}명)를 넘어 초대할 수 없습니다. 쓰지 않는 계정을 비활성화하거나 사용자 추가 옵션을 신청해 주세요.`);
+  }
 }
 
 // ---------------- 회사 관리자: 사용량·요금제 ----------------
@@ -341,8 +385,17 @@ export async function trialJob() {
   let notified = 0, expired = 0;
   for (const s of subs) {
     if (s.trial_ends_at.getTime() <= Date.now()) {
-      await sql`update tenant_subscriptions set status = 'expired', updated_at = now() where tenant = ${s.tenant} and status = 'trial'`;
-      clearReadOnlyCache(s.tenant); expired++;
+      // 무료에서 시작한 체험은 읽기 전용 대신 무료로 돌아간다(데이터·사람 그대로, 4번째 이후 초대만 막힘)
+      const back = await sql`update tenant_subscriptions set plan_code = 'free', status = 'active', trial_ends_at = null, period_end = null, from_free = false, updated_at = now()
+        where tenant = ${s.tenant} and status = 'trial' and from_free returning tenant`;
+      if (!back.length) await sql`update tenant_subscriptions set status = 'expired', updated_at = now() where tenant = ${s.tenant} and status = 'trial'`;
+      clearReadOnlyCache(s.tenant); clearPlanRulesCache(s.tenant); expired++;
+      if (back.length) {
+        const admins = await sql<{ id: string }[]>`select id from users where tenant = ${s.tenant} and status = 'active' and role in ('owner','admin')`;
+        await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title: '14일 체험이 끝나 무료 요금제로 돌아왔습니다', body: '업무·일정·데이터는 그대로입니다. 잠긴 기능은 유료 요금제에서 다시 쓸 수 있어요.',
+          link: '/admin/usage', dedupeKey: `trial-back-free:${s.tenant}:${s.trial_ends_at.toISOString()}` });
+        continue;
+      }
     }
     const info = await trialInfo(s.tenant, sql);
     const d = info?.readOnly ? 0 : info?.daysLeft ?? 99;
@@ -381,4 +434,26 @@ export async function platformTrial(u: SessionUser, tenant: string, i: z.infer<t
   clearReadOnlyCache(tenant);
   await audit(sql, u.id, `platform.trial_${i.action}`, 'tenant', null, { tenant, ...i }, null);
   return { ok: true, trial: await trialInfo(tenant, sql) };
+}
+
+/** 무료 → 14일 체험(전 기능) 시작: 4번째 사람 초대 때 [체험 시작]. 공간당 1번, 끝나면 무료로 돌아간다 */
+export async function startTrialFromFree(u: SessionUser) {
+  await requireTenantAdmin(u, 'edit');
+  const tenant = tenantOfUser(u);
+  const sql = db();
+  const [s] = await sql<{ plan_code: string; free_trial_used_at: Date | null }[]>`select plan_code, free_trial_used_at from tenant_subscriptions where tenant = ${tenant}`;
+  if (!s || s.plan_code !== 'free') throw badRequest('무료 요금제에서만 시작할 수 있습니다');
+  if (s.free_trial_used_at) throw badRequest('14일 체험은 이미 한 번 썼습니다 — 유료 요금제를 신청해 주세요');
+  await sql`update tenant_subscriptions set plan_code = 'trial', status = 'trial', trial_ends_at = now() + make_interval(days => ${TRIAL_DAYS}),
+    period_end = (now() + make_interval(days => ${TRIAL_DAYS}))::date, trial_notified = '{}', from_free = true, free_trial_used_at = now(), updated_at = now() where tenant = ${tenant}`;
+  clearReadOnlyCache(tenant); clearPlanRulesCache(tenant);
+  await audit(sql, u.id, 'plan.free_trial_start', 'tenant', null, { tenant }, null);
+  return { ok: true, trial: await trialInfo(tenant, sql) };
+}
+/** 화면용: 내 공간 요금제 규칙 */
+export async function myPlan(u: SessionUser) {
+  const tenant = tenantOfUser(u);
+  const r = await planRules(tenant);
+  const [s] = await db()<{ free_trial_used_at: Date | null; status: string }[]>`select free_trial_used_at, status from tenant_subscriptions where tenant = ${tenant}`;
+  return { ...r, features: FEATURES, freeTrialUsed: !!s?.free_trial_used_at, status: s?.status ?? 'active' };
 }
