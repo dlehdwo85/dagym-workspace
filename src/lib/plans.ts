@@ -14,7 +14,7 @@ import type { SessionUser } from './types';
  */
 const TZ = 'Asia/Seoul';
 const GB = 1024 ** 3;
-export type Limits = { users: number | null; storageGb: number | null; aiRequests: number | null };
+export type Limits = { users: number | null; storageGb: number | null; aiRequests: number | null; tasksTotal?: number | null };
 export const tenantOfUser = (u: { tenant?: string | null; isDemo?: boolean | null }) => u.tenant ?? (u.isDemo ? 'demo' : 'default');
 const monthStart = () => DateTime.now().setZone(TZ).startOf('month');
 
@@ -31,7 +31,7 @@ export async function subscription(tenant: string, sql: Sql = db()) {
 export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<{ limits: Limits; sub: any }> {
   const sub = await subscription(tenant, sql);
   const base = sub.limits as Limits & { perUserStorageGb?: number; perUserAi?: number };
-  const limits: Limits = { users: base.users ?? null, storageGb: base.storageGb ?? null, aiRequests: base.aiRequests ?? null };
+  const limits: Limits = { users: base.users ?? null, storageGb: base.storageGb ?? null, aiRequests: base.aiRequests ?? null, tasksTotal: base.tasksTotal ?? null };
   // V12 1번 베이직: 1인 한도 × 활성 사용자 수(회사 합산, 최소 1명)
   if (base.perUserStorageGb || base.perUserAi) {
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from users where status = 'active' and tenant = ${tenant}`;
@@ -41,7 +41,7 @@ export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<
   }
   // V28-3 플랫폼 운영자가 회사별로 정한 한도(있으면 요금제 한도 대신, null = 무제한)
   const ov = (sub.limit_overrides ?? {}) as Partial<Limits>;
-  for (const k of ['users', 'storageGb', 'aiRequests'] as const) if (k in ov) limits[k] = ov[k] ?? null;
+  for (const k of ['users', 'storageGb', 'aiRequests', 'tasksTotal'] as const) if (k in ov) limits[k] = ov[k] ?? null;
   const counts = (sub.addons ?? {}) as Record<string, number>;
   const codes = Object.keys(counts).filter((k) => counts[k] > 0);
   if (codes.length) {
@@ -56,7 +56,7 @@ export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<
 export async function currentUsage(tenant: string, sql: Sql = db()) {
   const demo = tenant === 'demo';
   const start = monthStart().toJSDate();
-  const [[att], [lib], [ai], [users]] = await Promise.all([
+  const [[att], [lib], [ai], [users], [tk]] = await Promise.all([
     sql<{ bytes: number; photo: number; doc: number }[]>`select coalesce(sum(a.size_bytes), 0)::float8 bytes,
         coalesce(sum(a.size_bytes) filter (where a.mime_type like 'image/%'), 0)::float8 photo,
         coalesce(sum(a.size_bytes) filter (where a.mime_type ~ '(pdf|word|sheet|excel|presentation|powerpoint|text|csv|hwp)'), 0)::float8 doc
@@ -71,10 +71,27 @@ export async function currentUsage(tenant: string, sql: Sql = db()) {
       from ai_usage where tenant = ${tenant} and created_at >= ${start}`,
     sql<{ active: number; invited: number }[]>`select count(*) filter (where status = 'active')::int active, count(*) filter (where status = 'invited')::int invited
       from users where tenant = ${tenant}`,
+    taskCount(tenant, sql).then((n) => [n]),
   ]);
   const bytes = att.bytes + lib.bytes, photo = att.photo + lib.photo, doc = att.doc + lib.doc;
   return { storageBytes: bytes, byKind: { photo, doc, other: Math.max(0, bytes - photo - doc) }, aiRequests: ai.requests, aiTokens: ai.tokens, aiCostUsd: Math.round(ai.cost * 100) / 100,
-    users: users.active, invited: users.invited };
+    users: users.active, invited: users.invited, tasks: tk };
+}
+
+/** V29 3장 업무 총량: 진행 + 완료 + 휴지통(30일 안) — 정리(purged)한 업무·30일 지난 휴지통은 빠짐 */
+export async function taskCount(tenant: string, sql: Sql = db()) {
+  const [r] = await sql<{ n: number }[]>`select count(*)::int n from tasks t join users u on u.id = t.created_by
+    where u.tenant = ${tenant} and t.purged_at is null and (t.deleted_at is null or t.deleted_at > now() - interval '30 days')`;
+  return r.n;
+}
+/** 업무 총량 한도 — 요금제(또는 회사별 조정)에 tasksTotal 이 있을 때만. 새 업무 만들기만 막고 보기·완료·삭제·내보내기는 그대로 */
+export async function assertTaskQuota(u: SessionUser, adding = 1, sql: Sql = db()) {
+  const tenant = tenantOfUser(u);
+  if (tenant === 'default' || tenant === 'demo') return;
+  const { limits } = await effectiveLimits(tenant, sql);
+  if (limits.tasksTotal === null || limits.tasksTotal === undefined) return;
+  const n = await taskCount(tenant, sql);
+  if (n + adding > limits.tasksTotal) throw new HttpError(429, 'task_quota', `업무가 ${n.toLocaleString('ko-KR')}개로 한도(${limits.tasksTotal.toLocaleString('ko-KR')}개, 완료·휴지통 포함)에 닿아 새 업무를 만들 수 없습니다. 관리자가 사용량 화면에서 오래된 완료 업무를 보관 파일로 내보내고 정리하거나 요금제를 올리면 다시 만들 수 있습니다.`);
 }
 
 const over = (used: number, limit: number | null) => limit !== null && used >= limit;
@@ -104,7 +121,7 @@ export async function assertSeat(tenant: string, sql: Sql = db()) {
 }
 
 // ---------------- 회사 관리자: 사용량·요금제 ----------------
-async function requireTenantAdmin(u: SessionUser, need: 'view' | 'edit' = 'view') { // V14 7번: 메뉴 권한 "사용량·요금제"
+export async function requireTenantAdmin(u: SessionUser, need: 'view' | 'edit' = 'view') { // V14 7번: 메뉴 권한 "사용량·요금제"
   if (u.isDemo) throw forbidden('대표·본사 관리자만 볼 수 있습니다');
   await (await import('./menuPerms')).requireMenu(u, 'usage', need);
 }
@@ -210,7 +227,7 @@ export async function setSubscription(u: SessionUser, tenant: string, i: z.infer
 export const planInput = z.object({
   name: z.string().trim().min(1).max(50), monthlyKrw: z.number().int().min(0).max(100_000_000).nullable(),
   limits: z.object({ users: z.number().int().min(0).nullable(), storageGb: z.number().min(0).nullable(), aiRequests: z.number().int().min(0).nullable(),
-    perUserStorageGb: z.number().min(0).optional(), perUserAi: z.number().int().min(0).optional() }),
+    perUserStorageGb: z.number().min(0).optional(), perUserAi: z.number().int().min(0).optional(), tasksTotal: z.number().int().min(0).nullable().optional() }),
   perUserKrw: z.number().int().min(0).max(1_000_000).nullable().optional(),
   description: z.string().max(200).nullable().optional(), public: z.boolean().optional(), active: z.boolean().optional(), sort: z.number().int().optional(),
 });
@@ -267,15 +284,17 @@ export async function usageJob() {
     if (t.id === 'demo') continue; // 체험 조직에는 관리자 알림 없음
     const admins = (await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active' and tenant = ${t.id}`).map((x) => x.id);
     const checks: [string, string, number, number | null][] = [
-      ['storage', '저장공간', usage.storageBytes / GB, limits.storageGb], ['ai', 'AI 요청', usage.aiRequests, limits.aiRequests], ['users', '사용자', usage.users, limits.users]];
+      ['storage', '저장공간', usage.storageBytes / GB, limits.storageGb], ['ai', 'AI 요청', usage.aiRequests, limits.aiRequests], ['users', '사용자', usage.users, limits.users],
+      ['tasks', '업무 수(완료·휴지통 포함)', usage.tasks, limits.tasksTotal ?? null]];
     for (const [key, label, used, lim] of checks) {
       if (lim === null || lim === 0) continue;
       const pct = (used / lim) * 100;
-      const level = pct >= 100 ? 100 : pct >= 80 ? 80 : 0;
+      const warnAt = key === 'tasks' ? 90 : 80; // V29 3장: 업무는 900/1,000 에서 안내
+      const level = pct >= 100 ? 100 : pct >= warnAt ? warnAt : 0;
       if (!level) continue;
       // 저장·사용자는 한 번 넘으면 계속이므로 달마다, AI 는 그 달 기준
-      alerts += (await notify(sql, { userIds: admins, type: 'usage_alert', title: `${label} ${level === 100 ? '한도에 도달했습니다' : '80%를 넘었습니다'}`,
-        body: `${label} ${Math.round(pct)}% 사용 중 — 관리 → 사용량·요금제에서 확인하세요${level === 100 ? (key === 'ai' ? ' (AI 는 다음 달까지 멈춤, 업무·일정은 그대로)' : ' (새로 올리기·초대만 멈춤, 업무·일정은 그대로)') : ''}`,
+      alerts += (await notify(sql, { userIds: admins, type: 'usage_alert', title: `${label} ${level === 100 ? '한도에 도달했습니다' : `${level}%를 넘었습니다`}`,
+        body: `${label} ${Math.round(pct)}% 사용 중 — 관리 → 사용량·요금제에서 확인하세요${level === 100 ? (key === 'ai' ? ' (AI 는 다음 달까지 멈춤, 업무·일정은 그대로)' : key === 'tasks' ? ' (새 업무 만들기만 멈춤 — 오래된 완료 업무를 보관 파일로 내보내고 정리)' : ' (새로 올리기·초대만 멈춤, 업무·일정은 그대로)') : key === 'tasks' ? ' — 오래된 완료 업무를 보관 파일로 내보내고 정리할 수 있습니다' : ''}`,
         link: '/admin/usage', entityType: null as never, entityId: null as never, dedupeKey: `usage:${t.id}:${key}:${level}:${month}` })).length;
     }
   }
@@ -400,4 +419,37 @@ export async function platformTrial(u: SessionUser, tenant: string, i: z.infer<t
   clearReadOnlyCache(tenant);
   await audit(sql, u.id, `platform.trial_${i.action}`, 'tenant', null, { tenant, ...i }, null);
   return { ok: true, trial: await trialInfo(tenant, sql) };
+}
+
+// ---------------- V29 3장 오래된 완료 업무 보관 파일로 내보내고 정리 ----------------
+export const cleanupInput = z.object({ before: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '날짜 형식(YYYY-MM-DD)') });
+const cleanupWhere = (sql: Sql, tenant: string, before: string) => sql`t.status = 'done' and t.deleted_at is null and t.purged_at is null
+  and t.completed_at < (${before}::date::timestamp at time zone 'Asia/Seoul') and t.created_by in (select id from users where tenant = ${tenant})`;
+/** 정리 대상 개수(그 날짜 전에 완료한 업무) */
+export async function cleanupPreview(u: SessionUser, before: string) {
+  await requireTenantAdmin(u, 'edit');
+  const sql = db(), tenant = tenantOfUser(u);
+  const [r] = await sql<{ n: number }[]>`select count(*)::int n from tasks t where ${cleanupWhere(sql, tenant, before)}`;
+  const { limits } = await effectiveLimits(tenant, sql);
+  return { before, count: r.n, total: await taskCount(tenant, sql), limit: limits.tasksTotal ?? null };
+}
+/** 보관 파일(CSV, 엑셀에서 열림) — 정리 전에 먼저 내려받는다 */
+export async function cleanupCsv(u: SessionUser, before: string) {
+  await requireTenantAdmin(u, 'edit');
+  const sql = db(), tenant = tenantOfUser(u);
+  const rows = await sql<Record<string, unknown>[]>`select t.title, p.name as project, a.name as assignee, r.name as requester, t.due_date::text due, to_char(t.completed_at at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') done_at,
+      to_char(t.created_at at time zone 'Asia/Seoul', 'YYYY-MM-DD') created, t.description
+    from tasks t left join projects p on p.id = t.project_id left join users a on a.id = t.assignee_id left join users r on r.id = coalesce(t.requested_by, t.created_by)
+    where ${cleanupWhere(sql, tenant, before)} order by t.completed_at`;
+  const esc = (v: unknown) => { const x = v === null || v === undefined ? '' : String(v); return /[",\n\r]/.test(x) || /^[=+\-@]/.test(x) ? `"${(/^[=+\-@]/.test(x) ? "'" : '') + x.replace(/"/g, '""')}"` : x; };
+  const head = ['제목', '프로젝트', '담당', '지시자', '마감', '완료', '만든 날', '설명'];
+  return '\uFEFF' + [head, ...rows.map((r) => [r.title, r.project, r.assignee, r.requester, r.due, r.done_at, r.created, r.description])].map((l) => l.map(esc).join(',')).join('\r\n');
+}
+/** 정리: 셈·화면·휴지통에서 빠짐(기록은 남김, 되살리기 없음). 보관 파일을 먼저 내려받았는지는 화면에서 확인 */
+export async function cleanupApply(u: SessionUser, before: string) {
+  await requireTenantAdmin(u, 'edit');
+  const sql = db(), tenant = tenantOfUser(u);
+  const done = await sql<{ id: string }[]>`update tasks t set deleted_at = now(), purged_at = now(), updated_at = now(), version = version + 1 where ${cleanupWhere(sql, tenant, before)} returning t.id`;
+  await audit(sql, u.id, 'tasks.cleanup', null, null, { before, count: done.length }, null);
+  return { ok: true, purged: done.length, total: await taskCount(tenant, sql) };
 }

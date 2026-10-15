@@ -108,6 +108,33 @@ describe('V28-3 슈퍼 계정', () => {
     const txt = JSON.stringify(pub); assert.ok(!txt.includes('@') && !txt.includes('메타유입') && !txt.includes(me.user.tenant), '개인정보·회사 식별값 없음');
   });
 
+  test('V29 업무 총량 한도(완료·휴지통 포함): 다 차면 새 업무만 429 → 보관 파일(CSV) → 정리하면 다시 만들 수 있음', async () => {
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${custTenant}/limits`, { tasksTotal: 3 });
+    const a = await cust.ok('POST', '/api/tasks', { title: '총량 1' });
+    const b = await cust.ok('POST', '/api/tasks', { title: '총량 2' });
+    await cust.ok('DELETE', `/api/tasks/${b.id}`);
+    await cust.ok('POST', '/api/tasks', { title: '총량 3' });
+    const full = await cust.post('/api/tasks', { title: '총량 4' });
+    assert.equal(full.status, 429, '휴지통 업무도 셈');
+    let u = await cust.ok('GET', '/api/usage');
+    assert.equal(u.usage.tasks, 3); assert.equal(u.limits.tasksTotal, 3);
+    await cust.ok('GET', `/api/tasks/${a.id}`);
+    await sql`update tasks set status = 'done', completed_at = now() - interval '100 days' where id = ${a.id}`;
+    const day = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+    assert.equal((await cust.ok('GET', `/api/usage/tasks-cleanup?before=${day}`)).count, 1);
+    const csv = await cust.get(`/api/usage/tasks-cleanup?before=${day}&format=csv`);
+    assert.equal(csv.status, 200); assert.match(csv.body, /총량 1/);
+    assert.equal((await ctx.staffA.client.post('/api/usage/tasks-cleanup', { before: day })).status >= 400, true);
+    const r = await cust.ok('POST', '/api/usage/tasks-cleanup', { before: day });
+    assert.equal(r.purged, 1); assert.equal(r.total, 2);
+    assert.equal((await cust.get(`/api/tasks/${a.id}`)).status, 404, '정리한 업무는 화면에서 빠짐');
+    assert.ok(!(await cust.ok('GET', '/api/tasks/trash')).tasks.some((x) => x.id === a.id), '휴지통에도 없음');
+    await cust.ok('POST', '/api/tasks', { title: '총량 다시' });
+    assert.ok((await sql`select count(*)::int n from audit_logs where action = 'tasks.cleanup'`)[0].n >= 1);
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${custTenant}/limits`, { clear: ['tasksTotal'] });
+    u = await cust.ok('GET', '/api/usage'); assert.equal(u.limits.tasksTotal, null);
+  });
+
   test('삭제 예약(이름 확인·30일 유예) → 취소 → 예약일 지나면 영구 삭제, 기본 회사는 불가', async () => {
     assert.equal((await ctx.owner.post(`/api/platform/tenants/${custTenant}/delete`, { action: 'schedule', confirmName: '틀린이름' })).status, 400);
     await ctx.owner.ok('POST', `/api/platform/tenants/${custTenant}/delete`, { action: 'schedule', confirmName: '고객회사' });

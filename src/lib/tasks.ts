@@ -285,6 +285,7 @@ async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: s
 
 export async function createTask(u: SessionUser, i: TaskInput) {
   const sql = db();
+  await (await import('./plans')).assertTaskQuota(u, 1, sql); // V29 3장 업무 총량(요금제에 있을 때만)
   let orgUnitId = i.orgUnitId;
   let brandId = i.brandId;
   if (i.parentId) {
@@ -387,6 +388,7 @@ export async function createTasksForAssignees(u: SessionUser, i: TaskInput) {
   }
   const ids = [...new Set(i.assigneeIds ?? [])];
   if (ids.length < 2) return createTask(u, { ...i, assigneeId: ids[0] ?? i.assigneeId });
+  await (await import('./plans')).assertTaskQuota(u, ids.length); // 여러 명에게 각각: 다 만들 수 있을 때만
   const batchId = crypto.randomUUID();
   const out: string[] = [];
   for (const a of ids) out.push((await createTask(u, { ...i, assigneeId: a, batchId } as TaskInput)).id);
@@ -745,7 +747,7 @@ export async function listTrash(u: SessionUser) {
   const units = await accessibleUnitIds(u, sql);
   return sql`select t.id, t.title, t.deleted_at, t.due_date, t.assignee_id, a.name as assignee_name, t.parent_id
     from tasks t left join users a on a.id = t.assignee_id
-    where t.deleted_at > now() - interval '30 days' and t.parent_id is null
+    where t.deleted_at > now() - interval '30 days' and t.parent_id is null and t.purged_at is null
       and (t.created_by = ${u.id} or t.requested_by = ${u.id} or ${atLeast(u, 'admin')})
       and ${units === null ? sql`true` : sql`t.org_unit_id = any(${units}::uuid[])`}
     order by t.deleted_at desc limit 200`;
@@ -754,7 +756,7 @@ export async function listTrash(u: SessionUser) {
 export async function restoreTask(u: SessionUser, id: string) {
   const sql = db();
   const [t] = await sql<{ id: string; deleted_at: Date | null; created_by: string; requested_by: string | null; org_unit_id: string }[]>`
-    select id, deleted_at, created_by, requested_by, org_unit_id from tasks where id = ${id}`;
+    select id, deleted_at, created_by, requested_by, org_unit_id from tasks where id = ${id} and purged_at is null`;
   if (!t || !t.deleted_at) throw notFound('휴지통에 없는 업무입니다');
   await assertUnitAccess(u, t.org_unit_id, sql);
   if (!(t.created_by === u.id || t.requested_by === u.id || atLeast(u, 'admin'))) throw forbidden('만든 사람·지시자·관리자만 되살릴 수 있습니다');
