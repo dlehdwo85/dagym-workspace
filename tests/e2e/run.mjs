@@ -185,7 +185,7 @@ await step('② 직원(모바일) 댓글·멘션·사진 첨부·문서 링크 �
   await dlg.getByLabel('버전').fill('v1');
   await dlg.getByRole('button', { name: '연결' }).click();
   await staff.getByTestId('attachments').getByText('ChatGPT 결과물').waitFor();
-  await staff.getByRole('button', { name: '완료 → 검토 요청' }).click();
+  await staff.getByTestId('next-action').getByText('검토 요청').click(); // 대표 피드백: 진행 단계 바의 [검토 요청]
   await staff.getByText('검토 요청 중').waitFor();
   await staff.screenshot({ path: `${SHOTS}/06-mobile-task-review.png`, fullPage: true });
   const n = await ctx.managerA.client.ok('GET', '/api/notifications');

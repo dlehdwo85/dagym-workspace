@@ -8,7 +8,7 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import {
   BadgeCheck, Building2, CalendarClock, CalendarDays, Camera, Check, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash,
-  Bell, Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Percent, Plus, Repeat, RotateCcw, Rows3, Shapes, ShieldCheck,
+  Bell, Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck,
   Stamp, Tag, Timer, CalendarCheck, Trash2, Type, UserRound, Users, X, CalendarRange, AlertTriangle, type LucideIcon,
   Megaphone,
   ChevronDown,
@@ -350,13 +350,14 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 onBlur={() => { if (!titleCancel.current && title.trim() && title.trim() !== t.title) saveText('title', title.trim()); titleCancel.current = false; setTitle(null); }} />
             </form>
           )}
-          <div className="mt-3 flex flex-wrap items-center gap-1.5" data-testid="task-actions">
-            <StatusChip status={t.status} onChange={(v) => patch({ status: v })} locked={!statusOwner ? (isRequester && t.status === 'review' ? '검토 요청된 업무는 아래 [최종 완료 확인]·[반려]로 처리하세요' : `상태는 담당자${t.assignee_name ? ` ${t.assignee_name}님` : ''}만 바꿀 수 있어요`) : null} />
-            {statusOwner && t.status !== 'done' && t.status !== 'review' && t.approval_required && !perms.approve && !t.approval_line_id && primary?.label !== '완료 → 검토 요청' && (
-              <Button size="sm" onClick={() => patch({ status: 'review' }, '검토를 요청했습니다')}>완료 → 검토 요청</Button>
-            )}
+          {/* 대표 피드백(10/15): 따로 있던 큰 [완료] 버튼 대신 진행 단계를 한 줄로 크게 — 단계를 눌러 바로 바꾸고, 현재 단계가 색으로 보인다 */}
+          <div className="mt-3 space-y-2" data-testid="task-actions">
+            <StatusSteps status={t.status} reviewStep={!!(t.approval_line_id || (t.approval_required && !perms.approve) || t.status === 'review')}
+              canChange={statusOwner} canReopen={statusOwner || isRequester}
+              locked={!statusOwner ? (isRequester && t.status === 'review' ? '검토 요청된 업무는 아래 [최종 완료 확인]·[반려]로 처리하세요' : `상태는 담당자${t.assignee_name ? ` ${t.assignee_name}님` : ''}만 바꿀 수 있어요`) : null}
+              finish={primary && t.status !== 'review' ? primary : null} finishBlocked={photoShort ? `증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)` : null}
+              onSet={(v, msg) => patch({ status: v }, msg)} />
             {t.status === 'review' && isRequester && t.requested_by !== t.assignee_id && !t.approval_line_id && <Button size="sm" variant="secondary" onClick={reject} data-testid="review-reject-here">반려(보완 요청)</Button>}
-
           </div>
           {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="task-summary">
@@ -366,7 +367,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <button type="button" onClick={() => editProp('select[aria-label="우선순위"]')} className="rounded-full hover:opacity-80" title="우선순위 바꾸기" data-testid="sum-priority"><PriorityTag p={t.priority} /></button>
             {t.project_id && <Link href={`/projects/${t.project_id}`} className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded-full bg-slate-100 px-2 py-0.5 text-ink-2 hover:bg-slate-200" data-testid="summary-project"><FolderKanban className="size-3 shrink-0" /><span className="truncate">{t.project_name ?? '프로젝트'}</span></Link>}
             {photoNeed > 0 && <span className={cx('rounded-full px-2 py-0.5 font-medium tabular-nums', photoShort ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700')}>사진 {photoHave}/{photoNeed}</span>}
-            {data.speed?.median_days != null && t.status !== 'done' && <span className="text-ink-3" data-testid="speed-hint" title="담당자의 최근 90일 완료 업무 기준">예상 처리 ≈ {data.speed.median_days}일</span>}
+            {data.speed?.median_days != null && data.speed.median_days >= 1 && t.status !== 'done' && <span className="text-ink-3" data-testid="speed-hint" title="담당자의 최근 90일 완료 업무 기준">예상 처리 ≈ {data.speed.median_days}일</span>}
           </div>
           {progTotal > 0 && (
             <div className="mt-2.5 flex items-center gap-2 text-xs text-ink-2" data-testid="task-progress">
@@ -379,14 +380,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">{t.assignee_name ? `담당자 ${t.assignee_name}님이 진행합니다` : `만든 사람 ${t.created_by_name}님이 진행합니다`}</p>
           )}
           {t.status === 'done' && !(statusOwner || isRequester) && <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">완료됨 — 다시 진행은 담당자·지시자만 할 수 있습니다</p>}
-          {t.status === 'done' && (statusOwner || isRequester) && <div className="mt-3"><Button variant="secondary" className="h-11 w-full sm:w-auto sm:px-6" onClick={() => patch({ status: 'in_progress' }, '다시 진행 중으로 바꿨습니다')} data-testid="reopen"><RotateCcw />다시 진행</Button></div>}
           {/* V14 19번 ②: 상태별 다음 행동 — 큰 버튼 하나 */}
-          {primary && (
+          {/* 검토 요청을 받은 지시자: 최종 완료 확인 */}
+          {primary && t.status === 'review' && (
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button onClick={primary.run} disabled={photoShort && primary.label !== '최종 완료 확인'} data-testid="next-action"
-                title={photoShort ? `증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)` : undefined}
-                className={cx('h-11 flex-1 text-base sm:flex-none sm:px-6', t.status !== 'review' && 'bg-green-600 hover:bg-green-700')}><CircleCheck />{primary.label}</Button>
-              {(t.status === 'todo' || t.status === 'on_hold') && <Button variant="secondary" className="h-11" onClick={() => patch({ status: 'in_progress' }, '시작했습니다')}>시작하기</Button>}
+              <Button onClick={primary.run} data-testid="next-action" className="h-11 flex-1 text-base sm:flex-none sm:px-6"><CircleCheck />{primary.label}</Button>
             </div>
           )}
           {t.status === 'review' && !roundSteps.length && <p className="mt-3 flex items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900"><Hourglass className="size-4 shrink-0" />검토 요청 중 — {fmtDateTime(t.review_requested_at)} · 관리자의 최종 확인을 기다립니다.</p>}
@@ -741,24 +739,53 @@ function Prop({ icon: Icon, label, children, asDiv, className }: { icon: LucideI
     : <label className={cx('flex min-h-12 items-center gap-2 border-b border-line py-1.5 last:border-b-0', className)}>{inner}</label>;
 }
 /** 상태 칩 하나: 누르면 할 일·진행 중·검토·보류·완료 중 선택 (배지·버튼·select 중복 정리) */
-function StatusChip({ status, onChange, locked }: { status: TaskStatus; onChange: (v: TaskStatus) => void; locked?: string | null }) {
-  const tone = STATUS_TONE[status];
-  // 검수 4: 담당자가 아니면 고를 수 없게(누르면 이유 안내)
-  if (locked) return (
-    <button type="button" onClick={() => toast.info(locked)} className={cx('inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-sm font-medium', tone.badge)} data-testid="status-chip" data-locked="1" title={locked} aria-label={`상태 ${STATUS_LABEL[status]} (${locked})`}>
-      <span className={cx('size-2 rounded-full', tone.dot)} aria-hidden />{STATUS_LABEL[status]}<LockIcon className="size-3 opacity-60" aria-hidden />
-    </button>
-  );
+/** 진행 단계: 진행 전 → 진행 중 → (검토) → 완료. 현재 단계는 색으로 채우고, 지난 단계는 ✓. 누르면 그 단계로(완료·검토는 결재·사진 규칙을 따름) */
+function StatusSteps({ status, reviewStep, canChange, canReopen, locked, finish, finishBlocked, onSet }: {
+  status: TaskStatus; reviewStep: boolean; canChange: boolean; canReopen: boolean; locked: string | null;
+  finish: { label: string; run: () => void } | null; finishBlocked: string | null; onSet: (v: TaskStatus, msg?: string) => void;
+}) {
+  const order: TaskStatus[] = reviewStep ? ['todo', 'in_progress', 'review', 'done'] : ['todo', 'in_progress', 'done'];
+  const label: Partial<Record<TaskStatus, string>> = { todo: '진행 전', in_progress: '진행 중', review: '검토', done: '완료' };
+  const cur = status === 'on_hold' ? -1 : order.indexOf(status);
+  const ON: Partial<Record<TaskStatus, string>> = { todo: 'bg-slate-600 text-white', in_progress: 'bg-blue-600 text-white', review: 'bg-amber-500 text-white', done: 'bg-green-600 text-white' };
+  const goesToReview = !!finish && finish.label !== '완료'; // 검토 요청·결재 올리기
+  function click(s: TaskStatus) {
+    if (s === status) return;
+    if (status === 'done') { if (!canReopen) return toast.info('다시 진행은 담당자·지시자만 할 수 있어요'); if (s === 'todo' || s === 'in_progress') return onSet(s, s === 'in_progress' ? '다시 진행 중으로 바꿨습니다' : '진행 전으로 바꿨습니다'); return; }
+    if (locked) return toast.info(locked);
+    if (s === 'todo') return onSet('todo', '진행 전으로 바꿨습니다');
+    if (s === 'in_progress') return onSet('in_progress', '시작했습니다');
+    if (!finish) return;
+    if (finishBlocked) return toast.error(finishBlocked);
+    if (s === 'review') return goesToReview ? finish.run() : undefined;
+    if (s === 'done') return goesToReview ? toast.info(`완료는 검토를 거쳐야 해요 — [검토]를 눌러 ${finish.label.replace('완료 → ', '')}하세요`) : finish.run();
+  }
   return (
-    <label className={cx('relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full pl-2.5 pr-7 text-sm font-medium', tone.badge)} data-testid="status-chip">
-      <span className={cx('size-2 rounded-full', tone.dot)} aria-hidden />{STATUS_LABEL[status]}
-      <ChevronDown className="pointer-events-none absolute right-2 size-3.5 opacity-70" aria-hidden />
-      <select className="absolute inset-0 cursor-pointer opacity-0" value={status} onChange={(e) => onChange(e.target.value as TaskStatus)} aria-label="상태">
-        {STATUSES.map((x) => <option key={x} value={x}>{STATUS_LABEL[x]}</option>)}
-      </select>
-    </label>
+    <div data-testid="status-chip" data-status={status}>
+      <div className="grid overflow-hidden rounded-card border border-line" style={{ gridTemplateColumns: `repeat(${order.length}, minmax(0, 1fr))` }} role="radiogroup" aria-label="진행 단계">
+        {order.map((s, k) => {
+          const isCur = k === cur, past = cur >= 0 && k < cur;
+          const finishSeg = (s === 'done' && !goesToReview) || (s === 'review' && goesToReview);
+          return (
+            <button key={s} type="button" role="radio" aria-checked={isCur} onClick={() => click(s)} data-testid={finishSeg && finish && status !== 'done' ? 'next-action' : `step-${s}`}
+              title={isCur ? '지금 단계' : locked ?? undefined}
+              className={cx('flex h-11 items-center justify-center gap-1 border-l border-line text-[15px] font-semibold first:border-l-0 transition-colors',
+                isCur ? ON[s] : past ? 'bg-slate-50 text-ink-2' : 'bg-white text-ink-3 hover:bg-slate-50',
+                !isCur && (locked && status !== 'done') && 'cursor-default')}>
+              {past ? <Check className="size-4 text-green-600" aria-hidden /> : isCur ? <span className="size-2 rounded-full bg-white/90" aria-hidden /> : null}
+              {s === 'review' && goesToReview && !isCur && !past ? finish!.label.replace('완료 → ', '') : label[s]}
+              {locked && status !== 'done' && isCur && <LockIcon className="size-3.5 opacity-70" aria-hidden />}
+            </button>
+          );
+        })}
+      </div>
+      {status === 'on_hold'
+        ? <p className="mt-1.5 flex items-center gap-2 rounded-input bg-amber-50 px-3 py-1.5 text-sm text-amber-800" data-testid="on-hold">보류 중{canChange && <button type="button" className="font-semibold underline" onClick={() => onSet('in_progress', '다시 진행합니다')}>다시 진행</button>}</p>
+        : canChange && status !== 'done' && status !== 'review' && <button type="button" className="mt-1 text-xs text-ink-3 underline" onClick={() => onSet('on_hold', '보류로 두었습니다')} data-testid="step-hold">보류로 두기</button>}
+    </div>
   );
 }
+
 function MenuItem({ icon: Icon, children, onClick, danger }: { icon: LucideIcon; children: React.ReactNode; onClick: () => void; danger?: boolean }) {
   return (
     <button role="menuitem" onClick={onClick} className={cx('flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-left text-sm', danger ? 'text-red-600 hover:bg-red-50' : 'hover:bg-slate-50')}>

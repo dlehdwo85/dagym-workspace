@@ -267,3 +267,4 @@
 - 2026-10-15 [로컬요청] V29 쉬운 메일(워크인 발송) + B1 보내는 이름·회신 주소·숨은 참조 배포. Vercel: RESEND_API_KEY(대표) · MAIL_FROM_DOMAIN=mail.work-in.dev(Resend 도메인 인증 완료 후) → 재배포. 확인: 설정 > 메일 '보내는 방식'에서 워크인 발송 선택 가능, 업무 메일 시안 '보내는 이름·회신 주소·숨은 참조' 칸, 실제 1통 보내고 답장이 업무 이메일로 오는지.
 - 2026-10-15 [로컬] V29 ③ NICEPAY 결제창 준비(d57a2bf) 수신. 대기: 대표가 NICEPAY_PAY_MID/KEY·BILL_MID/KEY 입력, 가맹점 관리자 결제통보 URL https://dagym-workspace.vercel.app/api/billing/nicepay/notify 등록(웹훅 = 대표 승인 후 로컬이 화면 진행). 카카오 이메일 없는 가입 → 비즈 앱 전환 결정 대기, 클라우드는 ④ 다음에 "이메일 직접 입력" 대안 추가.
 - 2026-10-15 [로컬] work-in.dev 구매 완료(대표) → Vercel 프로젝트에 work-in.dev(308 → www.work-in.dev)·www.work-in.dev(Production) 연결, SSL 발급 중. 카카오 키 3종 대표 입력·재배포 → /api/auth/oauth/providers = ["kakao"] 확인. V30(없는 기능 우선순위) 설계 → 클라우드 전달.
+- 2026-10-15 [배포확인요청] 대표 피드백: 업무 상세의 따로 있던 큰 [완료]·[시작하기] 버튼 → 진행 단계 바(진행 전·진행 중·(검토)·완료, 지금 단계 색 채움). 휴대폰에서 단계 눌러 완료·되돌리기, 담당자 아니면 자물쇠 안내 확인 부탁.
