@@ -20,6 +20,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const trial = ['default', 'demo'].includes(tenantOf(user)) ? null : await (await import('@/lib/plans')).trialInfo(tenantOf(user)).catch(() => null);
   const session = {
     user: { id: user.id, name: user.name, email: user.email, role: user.role, platformAdmin: !!user.platformAdmin },
+    support: user.support ?? null, // V28-3 지원 모드 빨간 띠
     dir: JSON.parse(JSON.stringify(dir)),
     features: { googleSync: googleSyncEnabled(), ai: aiEnabled() && !user.isDemo && menus.assistant === 'use', library: !user.isDemo && menus.library !== 'none' },
     menus,

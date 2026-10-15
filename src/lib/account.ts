@@ -37,7 +37,7 @@ async function checkPassword(u: SessionUser, password: string) {
 }
 
 /** 사람 하나를 지운 것으로: 이메일·이름·비밀번호 제거(같은 이메일로 다시 가입 가능), 세션·푸시·연동 끊기 */
-async function anonymize(tx: any, userId: string) {
+export async function anonymize(tx: any, userId: string) {
   await tx`update users set status = 'left', deleted_at = now(), email = ${`deleted+${userId}@deleted.invalid`}, name = '탈퇴한 사용자', title = null,
     password_hash = null, totp_secret = null, totp_enabled_at = null, updated_at = now() where id = ${userId}`;
   await tx`update sessions set revoked_at = now() where user_id = ${userId} and revoked_at is null`;

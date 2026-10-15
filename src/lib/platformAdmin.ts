@@ -1,0 +1,174 @@
+import { z } from 'zod';
+import { db } from './db';
+import { newToken, sha256 } from './crypto';
+import { HttpError, badRequest, forbidden, notFound } from './errors';
+import { audit } from './log';
+import { appUrl, sendMail } from './mail';
+import { tenantOf, type SessionUser } from './types';
+
+/**
+ * V28-3 슈퍼 계정(플랫폼 운영자) — 고객사 전체 관리. 플랫폼 운영자(users.platform_admin)만, 다른 사람에게는 404.
+ * 비밀번호는 보거나 정하지 않는다(재설정 메일만). 지원 모드는 고객사 대표가 허용한 회사만, 읽기 전용·30분·모든 요청 감사 기록.
+ */
+const INTERNAL = ['default', 'demo'];
+function requirePlatform(u: SessionUser) {
+  if (!u.platformAdmin || u.support) throw notFound(); // 있는 줄도 모르게(지원 모드 중에는 운영 화면 막음)
+}
+
+export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: string }) {
+  requirePlatform(u);
+  const sql = db();
+  const term = (q.q ?? '').trim();
+  const like = `%${term.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+  const rows = await sql`
+    select t.id, t.name, t.kind, t.status, t.created_at, t.delete_scheduled_at, t.support_consent_at, ow.email as owner_email,
+      ts.plan_code, ts.status as sub_status, ts.trial_ends_at, ts.limit_overrides,
+      (select count(*)::int from users x where x.tenant = t.id and x.status = 'active') as users,
+      (select max(x.last_login_at) from users x where x.tenant = t.id) as last_login_at,
+      (select storage_bytes from tenant_usage tu where tu.tenant = t.id order by month desc limit 1)::float8 as storage_bytes,
+      (select count(distinct coalesce(a.request_id::text, a.id::text))::int from ai_usage a where a.tenant = t.id and a.created_at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul') as ai_requests,
+      (select coalesce(sum(a.cost_krw), 0)::float8 from ai_usage a where a.tenant = t.id and a.created_at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul') as ai_krw
+    from tenants t left join users ow on ow.id = t.owner_user_id left join tenant_subscriptions ts on ts.tenant = t.id
+    where (${term} = '' or t.name ilike ${like} or t.id ilike ${like} or coalesce(ow.email, '') ilike ${like})
+      and (${q.status ?? ''} = '' or t.status = ${q.status ?? ''} or (${q.status ?? ''} = 'trial' and ts.status in ('trial', 'expired')) or (${q.status ?? ''} = 'deleting' and t.delete_scheduled_at is not null))
+    order by (t.id in ('default', 'demo')) desc, t.created_at desc limit 300`;
+  return { tenants: rows };
+}
+
+export async function tenantAdminDetail(u: SessionUser, tenant: string) {
+  requirePlatform(u);
+  const sql = db();
+  const [t] = await sql`select t.*, ow.email as owner_email from tenants t left join users ow on ow.id = t.owner_user_id where t.id = ${tenant}`;
+  if (!t) throw notFound('없는 회사입니다');
+  const P = await import('./plans');
+  const [{ limits, sub }, usage, users, support] = await Promise.all([
+    P.effectiveLimits(tenant, sql), P.currentUsage(tenant, sql),
+    sql`select id, name, email, role, status, last_login_at, (totp_enabled_at is not null) as totp, platform_admin, created_at from users where tenant = ${tenant} and deleted_at is null order by (role = 'owner') desc, name`,
+    sql`select s.created_at, s.expires_at, s.ended_at, s.reason, a.name as admin_name from support_sessions s join users a on a.id = s.admin_id where s.tenant = ${tenant} order by s.created_at desc limit 10`,
+  ]);
+  return { tenant: t, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support };
+}
+
+export const overrideInput = z.object({
+  users: z.number().int().min(0).max(100000).nullable().optional(), storageGb: z.number().min(0).max(100000).nullable().optional(), aiRequests: z.number().int().min(0).max(10_000_000).nullable().optional(),
+  clear: z.array(z.enum(['users', 'storageGb', 'aiRequests'])).optional(),
+});
+/** 인원·저장·AI 한도 개별 조정(요금제 대신). clear 에 넣은 항목은 요금제 값으로 되돌림. AI 크레딧 지급 = aiRequests 를 올려 주는 것 */
+export async function setLimitOverrides(u: SessionUser, tenant: string, i: z.infer<typeof overrideInput>, ip: string | null) {
+  requirePlatform(u);
+  const sql = db();
+  const [s] = await sql<{ limit_overrides: Record<string, unknown> }[]>`select limit_overrides from tenant_subscriptions where tenant = ${tenant}`;
+  if (!s) throw notFound('요금제가 없는 회사입니다 — 먼저 요금제를 지정하세요');
+  const next: Record<string, unknown> = { ...(s.limit_overrides ?? {}) };
+  for (const k of ['users', 'storageGb', 'aiRequests'] as const) if (i[k] !== undefined) next[k] = i[k];
+  for (const k of i.clear ?? []) delete next[k];
+  await sql`update tenant_subscriptions set limit_overrides = ${sql.json(next as never)}, updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
+  await audit(sql, u.id, 'platform.limit_overrides', 'tenant', null, { tenant, ...next }, ip);
+  return { ok: true, overrides: next };
+}
+
+/** 삭제 예약(30일 유예) → 예약일이 지나면 [영구 삭제 실행](회사 이름 다시 입력). 예약 중에는 취소 가능, 정지(차단)는 따로 */
+export const deleteInput = z.object({ action: z.enum(['schedule', 'cancel', 'execute']), confirmName: z.string().max(100).optional() });
+export async function tenantDeletion(u: SessionUser, tenant: string, i: z.infer<typeof deleteInput>, ip: string | null) {
+  requirePlatform(u);
+  if (INTERNAL.includes(tenant)) throw badRequest('기본 회사는 삭제할 수 없습니다');
+  const sql = db();
+  const [t] = await sql<{ name: string; status: string; delete_scheduled_at: Date | null }[]>`select name, status, delete_scheduled_at from tenants where id = ${tenant}`;
+  if (!t || t.status === 'deleted') throw notFound('없는 회사입니다');
+  if (i.action !== 'cancel' && i.confirmName !== t.name) throw badRequest('회사 이름이 일치하지 않습니다(확인용으로 정확히 입력)');
+  if (i.action === 'schedule') {
+    await sql`update tenants set delete_scheduled_at = now() + interval '30 days' where id = ${tenant}`;
+    const admins = (await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${tenant} and status = 'active' and role in ('owner', 'admin')`);
+    const { notify } = await import('./notifications');
+    await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title: '워크인 공간 삭제가 예약되었습니다', body: '30일 뒤 삭제됩니다 — 필요한 자료는 설정 > 내보내기로 받아 두세요. 문의는 고객센터로.',
+      link: '/settings', dedupeKey: `tenant-delete:${tenant}:${Date.now()}` });
+    for (const a of admins) await sendMail(a.email, '[워크인] 공간 삭제 예약 안내', `${t.name} 공간 삭제가 예약되었습니다(30일 뒤).\n필요한 자료는 설정 > 내보내기로 받아 두세요.\n${appUrl()}/settings`).catch(() => {});
+  } else if (i.action === 'cancel') {
+    await sql`update tenants set delete_scheduled_at = null where id = ${tenant}`;
+  } else {
+    if (!t.delete_scheduled_at || t.delete_scheduled_at.getTime() > Date.now()) throw badRequest('삭제 예약 후 30일이 지나야 영구 삭제할 수 있습니다');
+    const { anonymize } = await import('./account');
+    await sql.begin(async (tx) => {
+      await tx`update tenants set status = 'deleted', deleted_at = now() where id = ${tenant}`;
+      for (const r of await tx<{ id: string }[]>`select id from users where tenant = ${tenant}`) await anonymize(tx, r.id);
+    });
+  }
+  await audit(sql, u.id, `platform.tenant_${i.action}_delete`, 'tenant', null, { tenant }, ip);
+  return { ok: true };
+}
+
+// ---------------- 사용자 ----------------
+async function loadTargetUser(u: SessionUser, userId: string) {
+  requirePlatform(u);
+  const [t] = await db()<{ id: string; tenant: string; email: string; name: string; status: string; platform_admin: boolean }[]>`select id, tenant, email, name, status, platform_admin from users where id = ${userId} and deleted_at is null`;
+  if (!t) throw notFound('없는 사용자입니다');
+  if (t.id === u.id) throw badRequest('본인 계정은 여기서 바꿀 수 없습니다');
+  return t;
+}
+export const userActionInput = z.object({ action: z.enum(['lock', 'unlock', 'reset_password', 'reset_2fa']) });
+export async function platformUserAction(u: SessionUser, userId: string, i: z.infer<typeof userActionInput>, ip: string | null) {
+  const t = await loadTargetUser(u, userId);
+  const sql = db();
+  let out: Record<string, unknown> = { ok: true };
+  if (i.action === 'lock') {
+    if (t.platform_admin) throw forbidden('플랫폼 운영자 계정은 잠글 수 없습니다');
+    await sql`update users set status = 'disabled', updated_at = now() where id = ${t.id} and status = 'active'`;
+    await sql`update sessions set revoked_at = now() where user_id = ${t.id} and revoked_at is null`;
+  } else if (i.action === 'unlock') {
+    await sql`update users set status = 'active', updated_at = now() where id = ${t.id} and status = 'disabled'`;
+  } else if (i.action === 'reset_2fa') {
+    await sql`update users set totp_secret = null, totp_enabled_at = null, updated_at = now() where id = ${t.id}`;
+    await sql`update sessions set revoked_at = now() where user_id = ${t.id} and revoked_at is null`;
+  } else {
+    // 비밀번호를 보거나 정하지 않는다 — 본인 메일로 재설정 링크(24시간)
+    if (t.status !== 'active') throw badRequest('활성 사용자만 재설정할 수 있습니다');
+    const token = newToken();
+    await sql`insert into password_resets (token_hash, user_id, created_by, expires_at) values (${sha256(token)}, ${t.id}, ${u.id}, now() + interval '24 hours')`;
+    const r = await sendMail(t.email, '[워크인] 비밀번호 재설정', `${t.name}님, 워크인 운영팀 요청으로 비밀번호 재설정 링크를 보냅니다(24시간 유효).\n\n${appUrl()}/reset/${token}\n\n요청하지 않았다면 이 메일을 무시하세요.`);
+    out = { ok: true, sentTo: t.email, ...(r === 'dev' ? { devLink: `/reset/${token}` } : {}) };
+  }
+  await audit(sql, u.id, `platform.user_${i.action}`, 'user', t.id, { tenant: t.tenant }, ip);
+  return out;
+}
+
+// ---------------- 지원 모드(대리 접속, 읽기 전용) ----------------
+export const SUPPORT_COOKIE = 'wos_support';
+const SUPPORT_MIN = 30;
+/** 고객사 대표: 설정에서 "워크인 지원 모드 허용" 켜고 끄기 */
+export async function setSupportConsent(u: SessionUser, on: boolean, ip: string | null) {
+  if (u.role !== 'owner' || u.isDemo || u.support) throw forbidden('공간 대표만 바꿀 수 있습니다');
+  const sql = db();
+  await sql`update tenants set support_consent_at = ${on ? sql`now()` : null}, support_consent_by = ${on ? u.id : null} where id = ${tenantOf(u)}`;
+  if (!on) await sql`update support_sessions set ended_at = now() where tenant = ${tenantOf(u)} and ended_at is null`;
+  await audit(sql, u.id, on ? 'support.consent_on' : 'support.consent_off', null, null, {}, ip);
+  return { ok: true, consent: on };
+}
+export async function supportConsent(u: SessionUser) {
+  const [t] = await db()<{ support_consent_at: Date | null }[]>`select support_consent_at from tenants where id = ${tenantOf(u)}`;
+  return { consent: !!t?.support_consent_at, since: t?.support_consent_at ?? null };
+}
+export const supportInput = z.object({ reason: z.string().trim().min(2, '지원 사유를 적어 주세요').max(300) });
+export async function startSupport(u: SessionUser, tenant: string, i: z.infer<typeof supportInput>, ip: string | null) {
+  requirePlatform(u);
+  const sql = db();
+  const [t] = await sql<{ name: string; status: string; support_consent_at: Date | null; owner_user_id: string | null }[]>`select name, status, support_consent_at, owner_user_id from tenants where id = ${tenant}`;
+  if (!t || t.status !== 'active') throw notFound('없는 회사입니다');
+  if (!t.support_consent_at) throw new HttpError(403, 'no_consent', '이 회사는 지원 모드를 허용하지 않았습니다 — 고객사 대표가 설정에서 "워크인 지원 모드 허용"을 켜야 합니다');
+  const [target] = await sql<{ id: string }[]>`select id from users where id = ${t.owner_user_id} and status = 'active'`;
+  if (!target) throw badRequest('대표 계정이 없습니다');
+  const token = newToken();
+  await sql`insert into support_sessions (id, admin_id, tenant, target_user_id, reason, expires_at) values (${sha256(token)}, ${u.id}, ${tenant}, ${target.id}, ${i.reason}, now() + make_interval(mins => ${SUPPORT_MIN}))`;
+  await audit(sql, u.id, 'support.start', 'tenant', null, { tenant, reason: i.reason }, ip);
+  return { token, maxAge: SUPPORT_MIN * 60, tenantName: t.name };
+}
+/** 쿠키 토큰 → 지원 대상(대표) + 운영자. 플랫폼 운영자 본인 로그인이 살아 있어야 한다 */
+export async function supportFromToken(token: string, admin: SessionUser) {
+  if (!admin.platformAdmin) return null;
+  const [s] = await db()<{ target_user_id: string; tenant: string; expires_at: Date; name: string }[]>`select s.target_user_id, s.tenant, s.expires_at, t.name from support_sessions s join tenants t on t.id = s.tenant
+    where s.id = ${sha256(token)} and s.admin_id = ${admin.id} and s.ended_at is null and s.expires_at > now() and t.support_consent_at is not null`;
+  return s ?? null;
+}
+export async function endSupport(token: string | undefined) {
+  if (token) await db()`update support_sessions set ended_at = now() where id = ${sha256(token)} and ended_at is null`;
+  return { ok: true };
+}

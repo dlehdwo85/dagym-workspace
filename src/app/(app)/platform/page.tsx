@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Building2, Check, Copy, KeyRound, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { AiForecast } from '@/components/AiForecast';
+import { PlatformTenants } from '@/components/PlatformTenants';
 import { fmtBytes, lim, won } from '@/components/usage';
 import { PlatformPayments } from '@/components/Billing';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -41,6 +42,7 @@ export default function PlatformPage() {
           ))}
         </section>
       )}
+      <PlatformTenants />
       <Signups />
       <PlatformPayments />
       <InquiryLink />

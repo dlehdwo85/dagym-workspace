@@ -11,6 +11,8 @@ export interface Dir {
 export interface Sess {
   user: { id: string; name: string; email: string; role: Role; /** V10 플랫폼 운영자 */ platformAdmin?: boolean };
   dir: Dir;
+  /** V28-3 지원 모드(플랫폼 운영자가 이 회사 대표 화면을 읽기 전용으로 보는 중) */
+  support?: { adminId: string; adminName: string; until: string; tenantName: string } | null;
   /** 선택 기능 스위치 (핵심 기능은 항상 켜짐) */
   /** V13 메뉴 권한 (revenue·team_reports·library·assistant → none/view/edit/use) */
   menus?: Record<string, string>;

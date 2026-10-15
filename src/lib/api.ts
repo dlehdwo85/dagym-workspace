@@ -71,6 +71,13 @@ export function handler<P>(fn: (ctx: any) => Promise<unknown>, opts: Opts = {}) 
       const user = await currentUser();
       if (!user && !opts.public) throw unauthorized();
       const params = (await ctx?.params) ?? ({} as P);
+      // V28-3 지원 모드: 읽기 전용(끝내기만 허용), 모든 요청을 운영자 이름으로 감사 기록
+      if (user?.support) {
+        const path = req.nextUrl.pathname;
+        await db()`insert into audit_logs (actor_id, action, target_type, target_id, detail) values (${user.support.adminId}, 'support.request', 'tenant', null,
+          ${db().json({ tenant: user.tenant, as: user.id, method: req.method, path } as never)})`.catch(() => {});
+        if (MUTATING.has(req.method) && path !== '/api/platform/support') throw forbidden('지원 모드는 읽기 전용입니다 — 바꾸려면 고객사에 요청하세요');
+      }
       // 17차: 체험이 끝난 공간은 읽기 전용(보기·내보내기·요금제 신청은 허용)
       if (user && MUTATING.has(req.method)) await (await import('./plans')).assertWritable(user, req.nextUrl.pathname);
 

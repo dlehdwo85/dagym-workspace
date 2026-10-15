@@ -293,6 +293,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} /></Suspense>}
         <MessengerDock aiOpen={aiDock} />
         <VersionWatch />
+        {/* V28-3 지원 모드: 빨간 띠(읽기 전용·남은 시간) + 끝내기 */}
+        {session.support && (
+          <div className="fixed inset-x-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-2 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white" data-testid="support-banner">
+            지원 모드 — {session.support.tenantName} (읽기 전용 · {new Date(session.support.until).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}까지 · 모든 조회 기록)
+            <button type="button" className="rounded bg-white/20 px-2 py-0.5 hover:bg-white/30" data-testid="support-end"
+              onClick={async () => { await api('/api/platform/support', { method: 'DELETE' }).catch(() => {}); window.location.href = '/platform'; }}>지원 모드 끝내기</button>
+          </div>
+        )}
         {/* 17차: 무료 체험 D-n · 끝나면 읽기 전용 안내 */}
         {session.tenant?.trial && (
           <div className={cx('fixed inset-x-0 top-0 z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',

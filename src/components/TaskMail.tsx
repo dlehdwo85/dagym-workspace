@@ -210,7 +210,8 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
         ) : (
         <div className="grid gap-2 text-sm">
           <p className="text-ink-2">보내는 주소 <b className="text-ink" data-testid="mail-from-line">{from ?? '연결 안 됨'}</b></p>
-          <Field label="받는 사람 (여러 명은 쉼표)"><input className={inputCls} value={f.to} onChange={(e) => set({ to: e.target.value })} placeholder={d.contact?.email ? '' : '고객 메일 주소 — 문의에 이메일이 없으면 직접 넣어 주세요'} data-testid="mail-to" /></Field>
+          <Field label="받는 사람 (여러 명은 쉼표)"><input className={cx(inputCls, !f.to.trim() && 'border-amber-400 bg-amber-50/40')} value={f.to} onChange={(e) => set({ to: e.target.value })} placeholder="고객 메일 주소" data-testid="mail-to" /></Field>
+          {!f.to.trim() && <p className="-mt-1 flex items-center gap-1 text-xs font-medium text-amber-700" data-testid="mail-to-missing"><AlertTriangle className="size-3.5" />받는 사람 이메일이 없습니다{d.contact ? ' (문의에 이메일 없음)' : ''} — 고객 메일 주소를 입력해 주세요</p>}
           <Field label="참조"><input className={inputCls} value={f.cc} onChange={(e) => set({ cc: e.target.value })} data-testid="mail-cc" /></Field>
           <Field label="제목"><input className={inputCls} value={f.subject} onChange={(e) => set({ subject: e.target.value })} maxLength={200} data-testid="mail-subject" /></Field>
           <Field label="본문"><textarea className={inputCls} rows={7} value={f.body} onChange={(e) => set({ body: e.target.value })} data-testid="mail-body" /></Field>

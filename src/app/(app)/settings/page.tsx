@@ -198,6 +198,21 @@ function TwoFactor() {
   );
 }
 
+/** V28-3 워크인 지원 모드 허용(대표만): 켜면 워크인 운영팀이 문제 확인을 위해 이 공간을 읽기 전용으로 30분 볼 수 있음(모든 조회 기록) */
+function SupportConsent() {
+  const c = useApi<{ consent: boolean; since: string | null }>('/api/account/support-consent');
+  if (!c.data) return null;
+  async function toggle(on: boolean) {
+    try { await api('/api/account/support-consent', { method: 'PUT', body: { on } }); c.reload(); toast.ok(on ? '지원 모드를 허용했습니다' : '지원 모드 허용을 껐습니다'); } catch (e: any) { toast.error(e.message); }
+  }
+  return (
+    <label className="mt-4 flex items-start gap-2 rounded-input border border-line p-3" data-testid="support-consent">
+      <input type="checkbox" className="mt-0.5" checked={c.data.consent} onChange={(e) => toggle(e.target.checked)} />
+      <span><b className="font-medium">워크인 지원 모드 허용</b><span className="block text-xs text-ink-3">문제를 확인할 때 워크인 운영팀이 이 공간을 <b>읽기 전용</b>으로 최대 30분 볼 수 있습니다. 화면을 본 기록이 모두 남고, 언제든 끌 수 있습니다(끄면 진행 중인 지원도 바로 끝남).</span></span>
+    </label>
+  );
+}
+
 /** V15 계정: 내 데이터 내려받기 · 회원 탈퇴 · 공간 삭제(가입한 공간 대표) */
 function AccountSection() {
   const { user, tenant } = useSession();
@@ -218,6 +233,7 @@ function AccountSection() {
       <h2 className="font-semibold">계정</h2>
       <p className="mt-1 text-ink-2">내 업무·일정·댓글·메시지를 파일(JSON)로 내려받을 수 있습니다.</p>
       <a href="/api/account/export" className="mt-2 inline-block rounded-input border border-line px-3 py-1.5 font-medium hover:bg-slate-50" data-testid="account-export">내 데이터 내려받기</a>
+      {user.role === 'owner' && <SupportConsent />}
       {tenant?.personal && user.role === 'owner' && (
         <form className="mt-4 flex flex-wrap items-end gap-2 rounded-input border border-line p-3" onSubmit={async (e) => { e.preventDefault(); try { await api('/api/account/upgrade', { body: { company: team } }); location.reload(); } catch (er: any) { toast.error(er.message); } }} data-testid="upgrade-team">
           <Field label="팀으로 바꾸기 — 데이터는 그대로, 사람을 초대해 함께"><input className={inputCls} value={team} onChange={(e) => setTeam(e.target.value)} placeholder="회사(팀) 이름" aria-label="팀 이름" /></Field>

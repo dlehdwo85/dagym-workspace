@@ -55,7 +55,20 @@ export async function currentUser(): Promise<SessionUser | null> {
   const auth = h.get('authorization');
   if (auth?.startsWith('Bearer ')) return userFromToken(auth.slice(7));
   const c = await cookies();
-  return userFromToken(c.get(SESSION_COOKIE)?.value);
+  const me = await userFromToken(c.get(SESSION_COOKIE)?.value);
+  // V28-3 지원 모드: 플랫폼 운영자 + 지원 쿠키 → 고객사 대표 화면(읽기 전용, api.ts 가 쓰기를 막고 모든 요청을 감사 기록)
+  const sup = c.get('wos_support')?.value;
+  if (me?.platformAdmin && sup) {
+    const { supportFromToken } = await import('./platformAdmin');
+    const s = await supportFromToken(sup, me);
+    if (s) {
+      const [t] = await db()<{ id: string; email: string; name: string; role: Role; status: string; timezone: string; tenant: string; kind: string }[]>`
+        select u.id, u.email, u.name, u.role, u.status, u.timezone, u.tenant, t.kind from users u join tenants t on t.id = u.tenant where u.id = ${s.target_user_id} and u.status = 'active'`;
+      if (t) return { id: t.id, email: t.email, name: t.name, role: t.role, status: t.status, timezone: t.timezone, sessionId: me.sessionId, tenant: t.tenant, personal: t.kind === 'personal',
+        support: { adminId: me.id, adminName: me.name, until: s.expires_at.toISOString(), tenantName: s.name } };
+    }
+  }
+  return me;
 }
 
 export async function revokeSession(sessionId: string) {

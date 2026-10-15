@@ -39,6 +39,9 @@ export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<
     if (base.perUserStorageGb) limits.storageGb = base.perUserStorageGb * people;
     if (base.perUserAi) limits.aiRequests = base.perUserAi * people;
   }
+  // V28-3 플랫폼 운영자가 회사별로 정한 한도(있으면 요금제 한도 대신, null = 무제한)
+  const ov = (sub.limit_overrides ?? {}) as Partial<Limits>;
+  for (const k of ['users', 'storageGb', 'aiRequests'] as const) if (k in ov) limits[k] = ov[k] ?? null;
   const counts = (sub.addons ?? {}) as Record<string, number>;
   const codes = Object.keys(counts).filter((k) => counts[k] > 0);
   if (codes.length) {

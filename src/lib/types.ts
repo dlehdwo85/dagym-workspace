@@ -33,6 +33,8 @@ export interface SessionUser {
   platformAdmin?: boolean;
   /** V15 회사(tenant) — 'default'(다짐·하이링크) · 'demo'(체험) · 't_…'(공개 가입) */
   tenant?: string;
+  /** V28-3 지원 모드: 플랫폼 운영자가 고객사 대표 화면을 읽기 전용으로 보는 중 */
+  support?: { adminId: string; adminName: string; until: string; tenantName: string };
   /** V15 개인 공간(1인 회사)이면 관리 메뉴를 숨긴다 */
   personal?: boolean;
 }
