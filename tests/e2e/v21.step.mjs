@@ -50,5 +50,8 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   await pf.getByTestId('pi-save').click();
   await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}/);
   await owner.getByText('[하이링크 전화 문의] 전화시험아파트', { exact: false }).first().waitFor();
+  // 뒤 단계(업무 목록 순서 시험)에 영향이 없도록 지운다
+  const tid = owner.url().match(/\/tasks\/([0-9a-f-]{36})/)[1];
+  await owner.evaluate(async (id) => { await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); }, tid);
   await sql`delete from mail_accounts where tenant = 'default'`;
 }

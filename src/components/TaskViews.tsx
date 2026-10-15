@@ -585,13 +585,17 @@ function sortTasks(ts: Task[], k: SortKey) {
 }
 
 /** PC 열 머리: 누르면 그 기준으로 정렬 */
-function ListHeader({ sortBy, onSort }: { sortBy: SortKey; onSort: (k: SortKey) => void }) {
-  const H = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => (
+function ListHeader({ sortBy, onSort, compact }: { sortBy: SortKey; onSort: (k: SortKey) => void; compact?: boolean }) {
+  // V14 48: 맨 위 줄은 스크롤해도 붙어 있고(정렬 버튼), 묶음마다 같은 열 제목을 작은 회색 글씨로(정렬 화살표 없음)
+  const H = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => compact
+    ? <span className={cx('truncate text-left', className)}>{children}</span>
+    : (
     <button type="button" onClick={() => onSort(sortBy === k ? 'due' : k)} aria-pressed={sortBy === k}
       className={cx('truncate text-left hover:text-ink', sortBy === k ? 'font-semibold text-accent-600' : '', className)}>{children}{sortBy === k ? ' ↓' : ''}</button>
   );
   return (
-    <div className="hidden items-center gap-3 px-3 pb-1 text-xs text-ink-3 sm:flex" data-testid="list-header">
+    <div className={cx('hidden items-center gap-3 px-3 sm:flex', compact ? 'pb-0.5 text-[11px] text-ink-3/80' : 'sticky top-14 z-20 -mx-1 border-b border-line bg-canvas px-4 py-1.5 text-xs text-ink-3')}
+      data-testid={compact ? 'group-col-header' : 'list-header'} aria-hidden={compact || undefined}>
       <span className="w-4" /><span className="w-[22px]" />
       <H k="title" className="flex-1">업무 이름</H>
       <H k="requester" className="hidden w-[104px] md:block">지시자</H>
@@ -766,6 +770,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
                   {!x.items.length && <span className="text-xs font-normal text-ink-3">업무 없음</span>}
                 </button>
               )}
+              {!isFolded && gi > 0 && !archive && shown.length > 0 && <ListHeader sortBy={sortBy} onSort={onSort} compact />}
               {!isFolded && <ListView tasks={shown} onPatch={onPatch} hint={gi === 0} tail={archive ? undefined : addRow} sortable={draggable} dragHint={!draggable && !archive} onMove={draggable ? (t, to) => {
                 const ids = shown.map((i) => i.id); const from = ids.indexOf(t.id);
                 const at = to === 'top' ? 0 : to === 'bottom' ? ids.length - 1 : Math.max(0, Math.min(ids.length - 1, from + (to === 'up' ? -1 : 1)));

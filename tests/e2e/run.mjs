@@ -20,6 +20,7 @@ import { v1444 } from './v1444.step.mjs';
 import { v1445 } from './v1445.step.mjs';
 import { v21 } from './v21.step.mjs';
 import { v1447 } from './v1447.step.mjs';
+import { v1448 } from './v1448.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -874,6 +875,7 @@ await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머
 await step('V14 44 PC 업무 줄 선택 체크박스: 왼쪽 고정 홈·세로 가운데·올려도 제목 그대로·간격 좁게', () => v1444({ owner, ctx, BASE, SHOTS }));
 await step('V14 45 업무 추가 줄 마감 선택 창: 칩 바로 아래/위·칩 왼쪽 맞춤·화면 안·시각 버튼 닿음', () => v1445({ owner, BASE, SHOTS }));
 await step('V14 47 홈 이번 주: 같은 날·같은 제목 업무·일정 한 줄(업무 1 · 일정 1, 시각은 일정)', () => v1447({ owner, BASE, SHOTS }));
+await step('V14 48 PC 업무 목록 열 제목: 맨 위 줄 고정(sticky)·묶음마다 작은 열 제목', () => v1448({ owner, BASE, SHOTS }));
 await step('V21 메일 계정·명함 설정 + 업무 메일 시안(보내는 주소·회사 명함·미리보기)', () => v21({ owner, BASE, SHOTS, sql }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');
@@ -984,6 +986,9 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   const n = await handles.count();
   assert.ok(n >= 2, '내 묶음에 업무 2건 이상');
   const lastTitle = (await mine.locator('[data-row] a[data-open-task]').nth(n - 1).textContent()).trim();
+  // 내 묶음 머리가 화면 위쪽(고정 머리·열 제목 아래)에 오게 — 첫 손잡이가 화면 밖이면 끌 곳이 없다
+  await mine.evaluate((el) => { el.scrollIntoView({ block: 'start' }); window.scrollBy(0, -120); });
+  await owner.waitForTimeout(200);
   const from = await handles.nth(n - 1).boundingBox(), to = await handles.nth(0).boundingBox();
   await owner.mouse.move(from.x + 8, from.y + 8); await owner.mouse.down();
   for (let i = 1; i <= 12; i++) await owner.mouse.move(from.x + 8, from.y + 8 + ((to.y - from.y - 6) * i) / 12);
