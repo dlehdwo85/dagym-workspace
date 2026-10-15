@@ -157,7 +157,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
       )}
       {!defaults?.parentId && (
         <button type="button" onClick={() => { onClose(); setTimeout(() => window.dispatchEvent(new Event('wos-voice-add')), 0); }} className="mb-3 flex w-full items-center justify-center gap-2 rounded-input border border-brand-600/30 bg-brand-50 py-3 text-base font-semibold text-brand-700" data-testid="quick-voice-add">
-          <Mic className="size-5" />🎤 말로 등록
+          <Mic className="size-5" />음성 등록
         </button>
       )}
       {!defaults?.parentId && features.ai && (

@@ -2,14 +2,14 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Check, Loader2, MessageSquarePlus, Mic, Paperclip, Pin, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { Check, Loader2, MessageSquarePlus, Paperclip, Pin, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { AI_ACCEPT } from '@/components/libraryUpload';
 import { AttachChips, DEFAULT_FILE_ASK, useAiAttach } from '@/components/aiAttach';
 import { DropZone } from '@/components/upload';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
-import { listenOnce, speechSupported } from '@/lib/nlparse';
+import { VoiceButton } from '@/components/voice';
 import { DocJobCard } from '@/components/DocJobCard';
 import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
 
@@ -65,7 +65,6 @@ export default function AssistantPage() {
   });
   const { msgs, setMsgs, busy } = conv;
   const [text, setText] = useState('');
-  const [listening, setListening] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const started = useRef(false);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy]);
@@ -97,10 +96,6 @@ export default function AssistantPage() {
       set({ state: accept ? 'done' : 'cancelled', link: r.link });
       if (accept) { toast.ok('반영했습니다'); broadcastRefresh(); }
     } catch (e: any) { set({ state: undefined }); toast.error(e.message); }
-  }
-  function voice() {
-    setListening(true);
-    listenOnce((t) => setText((x) => (x ? x + ' ' : '') + t), (err) => { setListening(false); if (err && err !== 'no-speech' && err !== 'aborted') toast.error('음성을 듣지 못했습니다. 키보드의 🎤 로 말해 보세요.'); });
   }
   async function editLimit() {
     const v = prompt('이번 달부터 적용할 AI 월 한도(달러)', String(status.data?.usage?.limitUsd ?? 30));
@@ -206,7 +201,7 @@ export default function AssistantPage() {
         <ChatComposer value={text} onChange={setText} onSend={() => send(text)} onStop={() => conv.stop()} busy={busy} canSend={!uploading && (!!text.trim() || files.length > 0)} inputRef={inputRef}
           onPaste={att.onPaste} ariaLabel="AI 에게 요청" disabled={status.data?.overLimit} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : 'AI에게 요청 · 사진은 붙여넣기(Ctrl+V)도 됩니다'}
           leading={<Button type="button" variant="secondary" onClick={() => att.inputRef.current?.click()} aria-label="자료 첨부 (사진·PDF·엑셀)" disabled={att.full || !!uploading}><Paperclip /></Button>}
-          trailing={speechSupported() ? <Button type="button" variant="secondary" onClick={voice} aria-label="말로 요청" disabled={listening}>{listening ? <Loader2 className="animate-spin" /> : <Mic />}</Button> : null} />
+          trailing={<VoiceButton value={text} onChange={setText} label="음성으로 요청" />} />
       </div>
       {/* V14 6번: 직원 고지 (상시) */}
       <p className="mt-1.5 text-center text-[11px] text-ink-3" data-testid="ai-notice">회사 업무용 AI 입니다. 대화는 보관되며 권한이 있는 관리자가 사용 내역을 볼 수 있습니다. 업무와 무관한 요청은 처리하지 않습니다.</p>

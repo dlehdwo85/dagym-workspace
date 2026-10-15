@@ -2,7 +2,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mic, RotateCcw } from 'lucide-react';
-import { listenLive, parseTaskText, speechSupported } from '@/lib/nlparse';
+import { parseTaskText } from '@/lib/nlparse';
+import { correctVoice, learnVoice, listen, voiceAvailable, voiceErrorToast, type VoiceFix } from './voice';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import { AssigneePicker, DuePicker, PriorityPicker, RepeatChip, markNew, warnAway } from './TaskQuick';
@@ -23,8 +24,8 @@ function Row({ label, children, bad }: { label: string; children: React.ReactNod
 export const openVoiceAdd = () => window.dispatchEvent(new Event('wos-voice-add'));
 
 /**
- * V11 5번 "🎤 말로 등록": 말하기 가이드 → 실시간 글자 → 인식 결과 카드(빠진 필수 항목 빨간 표시) → 고쳐서 저장.
- * 마이크를 못 쓰는 화면(일부 WebView·권한 거부)은 키보드 음성 입력으로 같은 카드를 만든다.
+ * V11 5번·V24 "음성 등록": 말하기 가이드 → 실시간 글자 → 회사 단어장 보정(고친 말 밑줄·되돌리기) → 인식 결과 카드(빠진 필수 항목 빨간 표시) → 고쳐서 저장.
+ * 앱은 휴대폰 음성 인식, 웹은 브라우저 음성 인식(voice.tsx). 마이크를 못 쓰면 키보드 음성 입력으로 같은 카드를 만든다.
  */
 export function VoiceAddTask() {
   const { user, dir } = useSession();
@@ -34,9 +35,11 @@ export function VoiceAddTask() {
   const [listening, setListening] = useState(false);
   const [card, setCard] = useState<Card | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fixes, setFixes] = useState<VoiceFix[]>([]);
+  const [fixing, setFixing] = useState(false);
   const stop = useRef<() => void>(() => {});
   const projects = useApi<{ projects: { id: string; name: string }[] }>(open ? '/api/projects' : null);
-  useEffect(() => { const h = () => { setOpen(true); setText(''); setCard(null); }; window.addEventListener('wos-voice-add', h); return () => window.removeEventListener('wos-voice-add', h); }, []);
+  useEffect(() => { const h = () => { setOpen(true); setText(''); setCard(null); setFixes([]); }; window.addEventListener('wos-voice-add', h); return () => window.removeEventListener('wos-voice-add', h); }, []);
   const close = () => { stop.current(); setListening(false); setOpen(false); };
 
   function recognize(t: string) {
@@ -44,15 +47,21 @@ export function VoiceAddTask() {
     setCard({ title: t.trim() ? p.title : '', dueDate: p.dueDate, dueTime: p.dueTime, assigneeId: p.assigneeId ?? user.id, requestedById: user.id, priority: p.priority ?? 'normal', rrule: p.rrule });
   }
   function start() {
-    if (!speechSupported()) { toast.info('이 화면에서는 마이크를 바로 쓸 수 없습니다 — 아래 칸을 누르고 키보드의 🎤(음성 입력)로 말해 주세요'); return; }
-    setText(''); setListening(true);
-    let last = '';
-    stop.current = listenLive((t) => { last = t; setText(t); }, (err) => {
+    if (!voiceAvailable()) { voiceErrorToast('unsupported'); return; }
+    setText(''); setFixes([]); setListening(true);
+    stop.current = listen({ onPartial: setText, onEnd: async (r, err) => {
       setListening(false);
-      if (err === 'not-allowed' || err === 'service-not-allowed') toast.info('마이크 권한이 없습니다 — 아래 칸에서 키보드의 🎤(음성 입력)를 써 주세요');
-      else if (err && err !== 'no-speech' && err !== 'aborted') toast.info('잘 듣지 못했습니다 — 다시 눌러 말해 주세요');
-      if (last.trim()) recognize(last);
-    });
+      if (!r) { voiceErrorToast(err); return; }
+      setText(r.text); setFixing(true);
+      const c = await correctVoice(r); // 회사 단어장(사람·현장·프로젝트·자주 쓰는 말)으로 보정
+      setFixing(false); setText(c.text); setFixes(c.fixes);
+      if (c.text.trim()) recognize(c.text);
+    } });
+  }
+  /** 고친 말 되돌리기 → 다시 인식, 다음부터 이 보정은 쓰지 않음 */
+  function undoFix(f: VoiceFix) {
+    const t = text.replace(f.to, f.from);
+    setText(t); setFixes((x) => x.filter((y) => y !== f)); learnVoice([f], false); recognize(t);
   }
   async function save() {
     if (!card || !card.title.trim() || !card.dueDate) return;
@@ -60,6 +69,7 @@ export function VoiceAddTask() {
     try {
       const r = await api('/api/tasks', { body: { title: card.title.trim(), dueDate: card.dueDate, dueTime: card.dueTime, assigneeId: card.assigneeId, requestedById: card.requestedById ?? user.id,
         priority: card.priority, recurrenceRule: card.rrule, approvalRequired: false } });
+      if (fixes.length) learnVoice(fixes, true); // 받아들인 보정은 다음부터 바로 적용
       markNew(r.id); broadcastRefresh(); close();
       toast.ok(`업무를 등록했습니다: ${card.title.trim()}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       if (card.assigneeId && card.assigneeId !== user.id) warnAway(card.assigneeId, card.dueDate, dir.users.find((u) => u.id === card.assigneeId)?.name ?? '담당자');
@@ -68,7 +78,7 @@ export function VoiceAddTask() {
   const missing = (_k: string) => <span className="text-sm font-semibold text-red-600">말씀하지 않으셨어요 — 눌러서 선택</span>;
   const set = <K extends keyof Card>(k: K) => (v: Card[K]) => setCard((c) => (c ? { ...c, [k]: v } : c));
   return (
-    <Modal open={open} onClose={close} title="🎤 말로 업무 등록">
+    <Modal open={open} onClose={close} title="음성으로 업무 등록">
       {!card ? (
         <div className="space-y-4" data-testid="voice-guide">
           <p className="text-lg font-semibold leading-snug"><b className="text-brand-700">업무 내용</b>과 <b className="text-brand-700">마감(언제까지)</b>을 말씀해 주세요.<span className="mt-1 block text-sm font-normal text-ink-2">담당자·우선순위·반복은 말해도 되고 안 해도 됩니다.</span></p>
@@ -76,7 +86,7 @@ export function VoiceAddTask() {
           <div className="flex flex-col items-center gap-2 py-2">
             <button type="button" onClick={listening ? () => stop.current() : start} aria-label={listening ? '듣기 멈추기' : '말하기 시작'} aria-pressed={listening} data-testid="voice-start"
               className={cx('flex size-20 items-center justify-center rounded-full text-white shadow-pop', listening ? 'animate-pulse bg-red-500' : 'bg-brand-600 active:scale-95')}><Mic className="size-9" /></button>
-            <span className="text-sm text-ink-2">{listening ? '듣고 있어요… 말을 마치면 자동으로 정리합니다' : '눌러서 말하기'}</span>
+            <span className="text-sm text-ink-2" data-testid="voice-state">{listening ? '듣고 있어요… 말을 마치면 자동으로 정리합니다 (최대 60초)' : fixing ? '회사 단어장으로 맞추는 중…' : '눌러서 말하기 · 조용히 또박또박 말해도 됩니다'}</span>
           </div>
           <label className="block text-sm text-ink-2">말한 내용 (키보드 🎤 음성 입력이나 글로도 됩니다)
             <textarea className={cx(inputCls, 'mt-1 min-h-[72px] text-base')} value={text} onChange={(e) => setText(e.target.value)} placeholder="예: 내일 오후 3시까지 견적서 보내기" aria-label="말한 내용" data-testid="voice-text" />
@@ -86,6 +96,16 @@ export function VoiceAddTask() {
       ) : (
         <div className="space-y-3" data-testid="voice-card">
           <p className="text-sm text-ink-2">들은 내용: “{text}”</p>
+          {fixes.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="voice-fixes">
+              <span className="text-ink-3">단어장으로 고침</span>
+              {fixes.map((f, k) => (
+                <button key={k} type="button" onClick={() => undoFix(f)} className="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-brand-800" title="눌러서 되돌리기" data-testid="voice-fix">
+                  <s className="text-ink-3">{f.from}</s> → <u className="decoration-brand-500 decoration-2 underline-offset-2">{f.to}</u> ↺
+                </button>
+              ))}
+            </div>
+          )}
           <div className="rounded-card border border-line px-3">
             <Row label="업무명" bad={!card.title.trim()}>
               <input className={cx(inputCls, 'h-10 text-base', !card.title.trim() && 'border-red-400')} value={card.title} onChange={(e) => set('title')(e.target.value)} placeholder="말씀하지 않으셨어요 — 눌러서 입력" aria-label="인식한 업무명" />

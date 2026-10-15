@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Check, Loader2, Maximize2, Menu, Paperclip, Pin, Plus, Search, Send, Sparkles, X } from 'lucide-react';
 import { AttachChips, DEFAULT_FILE_ASK, useAiAttach } from './aiAttach';
 import { DocJobCard } from '@/components/DocJobCard';
+import { VoiceButton } from './voice';
 import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from './aiChat';
 import { AI_ACCEPT } from './libraryUpload';
 import { DropZone } from './upload';
@@ -159,7 +160,8 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
               <ChatComposer small value={text} onChange={setText} onSend={() => send(text)} onStop={() => conv.stop()} busy={busy} canSend={!att.uploading && (!!text.trim() || att.files.length > 0)} inputRef={inputRef}
                 onPaste={att.onPaste} placeholder="AI에게 요청 · 사진 첨부 가능" ariaLabel="AI 에게 요청 (화면 맥락)"
                 leading={<button type="button" onClick={() => att.inputRef.current?.click()} disabled={att.full || !!att.uploading} aria-label="사진·자료 첨부" title="사진·자료 첨부 (붙여넣기·끌어 놓기도 됩니다)" data-testid="ai-dock-attach"
-                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 disabled:opacity-40"><Paperclip className="size-4" /></button>} />
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 disabled:opacity-40"><Paperclip className="size-4" /></button>}
+                trailing={<VoiceButton small value={text} onChange={setText} label="음성으로 요청" />} />
             </div>
             </div>
             <p className="px-3 pb-1.5 text-[10px] text-ink-3">회사 업무용 · 관리자가 사용 내역을 볼 수 있습니다</p>

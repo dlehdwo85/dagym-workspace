@@ -116,3 +116,14 @@ select { min-height: 2.5rem; line-height: 1.5; padding-top: 0.25rem; padding-bot
 .fc .fc-timegrid-event-harness-inset .fc-timegrid-event { box-shadow: 0 0 0 1px #fff; }
 .fc .fc-daygrid-event .fc-event-main { overflow: hidden; }
 @media (max-width: 640px) { .fc .fc-timegrid-event { padding: 1px 0; } }
+
+/* V14 41번: 휴대폰 주·3일 보기 가독성(Google 캘린더 앱 레퍼런스) — 종일 칩 2줄 줄바꿈, 블록 제목만·줄바꿈, 업무 선 2px, 칸 높이 주 52/3일 60/일 64px, 좁은 시간 축 */
+.cal-phone .fc .fc-timegrid-slot { height: 52px; }
+.cal-phone.cal-v-timeGrid3 .fc .fc-timegrid-slot { height: 60px; }
+.cal-phone.cal-v-timeGridDay .fc .fc-timegrid-slot { height: 64px; }
+.cal-phone .fc .fc-daygrid-event { white-space: normal; padding: 2px 4px; margin-top: 1px; }
+.cal-phone .fc .fc-daygrid-event .fc-event-main, .cal-phone .fc .fc-daygrid-event .fc-event-main-frame { white-space: normal; min-width: 0; }
+.cal-phone .fc .fc-timegrid-event { padding: 2px 3px; }
+.cal-phone .fc .fc-event.task-item, .cal-phone .fc .fc-event.has-task { border-left-width: 2px !important; }
+.cal-phone .fc .fc-timegrid-slot-label-cushion { padding: 0 1px; }
+.cal-phone .fc .fc-timegrid-axis-cushion { font-size: 10px; padding: 0 1px; }

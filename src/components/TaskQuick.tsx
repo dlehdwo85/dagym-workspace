@@ -4,7 +4,8 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { ArrowUpDown, Bell, CalendarDays, Check, Mic, Plus, Repeat, Sparkles, UserRound, X } from 'lucide-react';
 import { recurPresets } from './pickers';
-import { listenOnce, parseTaskText, speechSupported } from '@/lib/nlparse';
+import { parseTaskText } from '@/lib/nlparse';
+import { correctVoice, learnVoice, listen, voiceAvailable, voiceErrorToast } from './voice';
 import { TIMES, timeLabel } from './DateTimePickers';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
@@ -180,16 +181,15 @@ export function MultiAssigneePicker({ values, onChange }: { values: string[]; on
 /** V5 반복 칩: 안 함·매일·평일·매주·매월… (반복은 마감일 기준 — 마감이 없으면 오늘을 마감으로) */
 /** V8 4번 음성 받아쓰기: 지원 안 되면(일부 앱 WebView) 키보드의 마이크로 말하도록 안내 — 날짜·담당자 인식은 입력한 문장에도 적용됨 */
 export function voiceInput(setListening: (v: boolean) => void, onText: (t: string) => void) {
-  if (!speechSupported()) {
-    toast.info('이 화면에서는 음성 받아쓰기를 쓸 수 없습니다 — 키보드의 🎤(음성 입력)로 말해 보세요. "내일 3시 김민수 견적서" 처럼 말하면 날짜·담당자를 알아봅니다.');
-    return;
-  }
+  if (!voiceAvailable()) { voiceErrorToast('unsupported'); return; }
   setListening(true);
-  listenOnce((t) => { if (t.trim()) onText(t.trim()); }, (e) => {
+  listen({ onEnd: async (r, e) => {
+    if (!r) { setListening(false); voiceErrorToast(e); return; }
+    const c = await correctVoice(r); // V24 회사 단어장 보정
     setListening(false);
-    if (e === 'not-allowed' || e === 'service-not-allowed') toast.info('마이크 권한이 없습니다 — 키보드의 🎤(음성 입력)를 써 주세요');
-    else if (e && e !== 'no-speech' && e !== 'aborted') toast.info('음성을 알아듣지 못했습니다 — 다시 눌러 말해 주세요');
-  });
+    if (c.fixes.length) learnVoice(c.fixes, true);
+    if (c.text.trim()) onText(c.text.trim());
+  } });
 }
 
 /** V8 6번: 담당자가 그날 연차·출장·공휴일이면 알려 준다(배정은 그대로) */

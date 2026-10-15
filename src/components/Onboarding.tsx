@@ -48,7 +48,7 @@ export function Onboarding() {
           <Field label="직책 (선택)"><input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="예: 팀장, 프리랜서" aria-label="직책" /></Field>
         </>}
         {step === 1 && <>
-          <p className="text-sm text-ink-2">예시를 고쳐 쓰거나 빼도 됩니다. 나중에 화면 위 “+” 나 말로도 등록할 수 있어요.</p>
+          <p className="text-sm text-ink-2">예시를 고쳐 쓰거나 빼도 됩니다. 나중에 화면 위 “+” 나 음성 등록으로도 만들 수 있어요.</p>
           <ul className="space-y-2">{tasks.map((t, i) => (
             <li key={i} className="flex items-center gap-2">
               <input type="checkbox" checked={t.on} onChange={(e) => setTasks(tasks.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)))} aria-label={`예시 ${i + 1} 사용`} />

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, BellRing, CalendarDays, Check, Mic, Sparkles, Users } from 'lucide-react';
 
-export const metadata = { title: '워크인 — 업무·일정·알림을 한 곳에', description: '말로 등록하고 정확한 시간에 알림. 14일 무료 체험 후 월 2,900원부터.' };
+export const metadata = { title: '워크인 — 업무·일정·알림을 한 곳에', description: '음성으로 등록하고 정확한 시간에 알림. 14일 무료 체험 후 월 2,900원부터.' };
 
 const SHOTS = [
   { src: '/landing/home.png', t: '오늘 할 일과 일정이 한 화면에', d: '마감 위험·오늘 일정·팀 현황을 첫 화면에서' },
@@ -28,14 +28,14 @@ export default function Welcome() {
       </header>
       <section className="mx-auto max-w-6xl px-4 pb-10 pt-8 text-center sm:pt-16">
         <h1 className="text-3xl font-bold leading-tight tracking-tight sm:text-5xl" data-testid="landing-title">업무·일정·알림을 한 곳에</h1>
-        <p className="mx-auto mt-4 max-w-xl text-base text-ink-2 sm:text-lg">말로 등록하고, 정확한 시간에 알림 받으세요.<br className="hidden sm:inline" /> 혼자서도, 팀으로도 바로 시작할 수 있습니다.</p>
+        <p className="mx-auto mt-4 max-w-xl text-base text-ink-2 sm:text-lg">음성으로 등록하고, 정확한 시간에 알림 받으세요.<br className="hidden sm:inline" /> 혼자서도, 팀으로도 바로 시작할 수 있습니다.</p>
         <div className="mt-7 flex flex-wrap justify-center gap-2">
           <Link href="/signup" className="inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-testid="landing-start">14일 무료 체험<ArrowRight className="size-4" /></Link>
           <Link href="/login" className="rounded-input border border-line px-5 py-3 text-base font-semibold hover:bg-slate-50">로그인</Link>
         </div>
         <p className="mt-3 text-xs text-ink-3">카드 등록 없음 · 웹·Android·iOS</p>
         <ul className="mx-auto mt-10 grid max-w-4xl gap-3 text-left sm:grid-cols-4">
-          {[[Mic, '말로 등록', '“내일 3시 거래처 미팅” 한마디면 끝'], [BellRing, '정확한 알림', '휴대폰 앱·웹 푸시로 제때'], [CalendarDays, '업무 = 일정', '마감 업무가 캘린더에 그대로'], [Sparkles, 'AI 비서', '정리·요약·체크리스트를 대신']].map(([I, t, d]: any) => (
+          {[[Mic, '음성 등록', '“내일 3시 거래처 미팅” 한마디면 끝'], [BellRing, '정확한 알림', '휴대폰 앱·웹 푸시로 제때'], [CalendarDays, '업무 = 일정', '마감 업무가 캘린더에 그대로'], [Sparkles, 'AI 비서', '정리·요약·체크리스트를 대신']].map(([I, t, d]: any) => (
             <li key={t} className="rounded-card border border-line p-3"><I className="size-5 text-brand-700" /><div className="mt-1.5 font-semibold">{t}</div><div className="text-sm text-ink-2">{d}</div></li>
           ))}
         </ul>

@@ -4,7 +4,7 @@ export const metadata = { title: 'AI 이용 안내' };
 export default function AiNotice() {
   return (
     <LegalDoc title="AI 기능 이용 안내">
-      <p>워크인의 AI 비서·말로 등록·자료로 업무 만들기·매출 분석 기능은 외부 AI 처리 업체(Anthropic, OpenAI)의 API 를 사용합니다.</p>
+      <p>워크인의 AI 비서·음성 등록·자료로 업무 만들기·매출 분석 기능은 외부 AI 처리 업체(Anthropic, OpenAI)의 API 를 사용합니다.</p>
       <H>무엇이 전송되나요</H>
       <p>AI 에게 보낸 문장, 함께 첨부한 파일, 그리고 답에 필요한 범위의 업무·일정 정보(본인이 볼 수 있는 것만)가 전송됩니다.</p>
       <H>어떻게 쓰이나요</H>

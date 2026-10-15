@@ -11,6 +11,8 @@ import { v19a } from './v19a.step.mjs';
 import { blocksStep } from './blocks.step.mjs';
 import { v20 } from './v20.step.mjs';
 import { v22 } from './v22.step.mjs';
+import { v1441 } from './v1441.step.mjs';
+import { v24 } from './v24.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -854,6 +856,8 @@ await step('V19 부록 A: AI 비서 PC Enter 보내기·Shift+Enter 줄바꿈, �
 await step('캘린더: 완료한 업무의 시간 블록은 숨김(완료 보기 켜면 완료 모양), 삭제한 업무의 블록은 사라지고 휴지통 복원 시 다시 보임', () => blocksStep({ owner, ctx, BASE, SHOTS, addDays, today }));
 await step('V20 업무 월별 보관·이월: 이월 표시·이월만 보기, 완료 = 이번 달만 펼침·지난달은 펼칠 때 불러오기·달 이동, 리포트 월별 기록', () => v20({ owner, ctx, sql, BASE, SHOTS, tick }));
 await step('V22 AI 비서 문서 엔진: 회사 정보 화면, 파일 작업 카드(만드는 중 → 미리보기·쪽수) → 자료실에 저장 → 더 다듬기 입력 채움, 다시 열어도 카드 유지', () => v22({ owner, ctx, sql, BASE, FAKE, SHOTS }));
+await step('V14 41 휴대폰 주·3일: 종일 칩 2줄·블록 제목만 줄바꿈·머리글자 없음(일 보기는 있음)·칸 높이 52/60/64·오전/오후 축·색 버튼 머리줄', () => v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
+await step('V24 음성 등록: AI 비서 화면·패널 마이크 → 실시간 글자 → 단어장 보정(최매니져→최매니저) → 입력창에 남김(바로 안 보냄), 도움말에 "말로 등록" 없음', () => v24({ browser, desk, BASE, sql }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');
   const month = today.slice(0, 7);
@@ -1538,7 +1542,7 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   assert.equal(r.status, 404);
 });
 
-await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 상태별, 완료 칩 보임·월별 요약, 마감 선택 = 아래 시트(화면 안)·시각 버튼, 글자 칩, 🎤 말로 등록 → 인식 카드(빠진 마감 빨간 표시)', async () => {
+await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 상태별, 완료 칩 보임·월별 요약, 마감 선택 = 아래 시트(화면 안)·시각 버튼, 글자 칩, 🎤 음성 등록 → 인식 카드(빠진 마감 빨간 표시)', async () => {
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V11 상태 칩 업무', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, dueDate: addDays(today, 1), approvalRequired: false })).id;
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   await mc.addInitScript(() => { try { localStorage.setItem('wos_task_group', 'assignee'); } catch {} }); // V14 34번: 휴대폰 기본은 마감별 — 이 시험은 담당자별 묶음
@@ -1578,10 +1582,10 @@ await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 �
   assert.equal(nt.d, addDays(today, 1)); assert.equal(nt.tm, '15:00');
   assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '390 넘침 없음');
   await m.screenshot({ path: `${SHOTS}/81-v11-tasks-390.png` });
-  // 🎤 말로 등록 (텍스트로 대체 시험)
+  // 음성 등록 (텍스트로 대체 시험)
   await m.getByTestId('fab').tap();
   await m.getByTestId('fab-voice').tap();
-  const dlg = m.getByRole('dialog', { name: '🎤 말로 업무 등록' });
+  const dlg = m.getByRole('dialog', { name: '음성으로 업무 등록' });
   await dlg.getByTestId('voice-guide').getByText('마감(언제까지)').waitFor();
   await dlg.getByTestId('voice-text').fill('견적서 보내기');
   await dlg.getByTestId('voice-recognize').tap();
