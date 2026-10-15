@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Check, Loader2, Maximize2, Menu, Paperclip, Pin, Plus, Search, Send, Sparkles, X } from 'lucide-react';
 import { AttachChips, DEFAULT_FILE_ASK, useAiAttach } from './aiAttach';
+import { DocJobCard } from '@/components/DocJobCard';
 import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from './aiChat';
 import { AI_ACCEPT } from './libraryUpload';
 import { DropZone } from './upload';
@@ -54,7 +55,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   const conv = useAiConversation<M>({
     body: (t, fileIds) => { const c = ctxRef.current; return { text: t, ...(threadRef.current ? { threadId: threadRef.current } : {}), ...(fileIds.length ? { fileIds } : {}), ...(c.taskId ? { taskId: c.taskId } : { context: { page: c.page, ...(c.id ? { id: c.id } : {}) } }) }; },
     onReply: (r) => { if (r.threadId) setThreadId(r.threadId); },
-    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked }),
+    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked, docJobs: r.docJobs?.map((j: any) => j.id) }),
   });
   const { msgs, setMsgs, busy } = conv;
   const [text, setText] = useState('');
@@ -82,7 +83,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
     try {
       const r = await api(`/api/ai/threads/${id}`);
       conv.cancelEdit();
-      setMsgs(r.messages.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'assistant', text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text || (m.status === 'error' ? '(오류)' : ''), stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked', error: m.status === 'error',
+      setMsgs(r.messages.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'assistant', text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text || (m.status === 'error' ? '(오류)' : ''), stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked', docJobs: m.doc_jobs?.length ? m.doc_jobs.map((j: any) => j.id) : undefined, error: m.status === 'error',
         proposals: (m.proposals ?? []).map((p: any) => ({ id: p.id, summary: p.summary, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) })));
       setThreadId(id); setView('chat');
     } catch (e: any) { toast.error(e.message); }
@@ -142,6 +143,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
                       </div>
                     ))}
                   </div>
+                  {m.docJobs?.map((id) => <DocJobCard key={id} id={id} onRefine={(t) => { setText(t); inputRef.current?.focus(); }} />)}
                   {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
                   </>}
                 </div>

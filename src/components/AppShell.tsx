@@ -40,11 +40,12 @@ const ADMIN_MENU: NavItem[] = [
   { href: '/revenue', label: '매출', icon: BarChart3 },
   { href: '/admin/users', label: '사용자 관리', icon: Users },
   { href: '/admin/ops', label: '운영 상태', icon: Activity },
+  { href: '/admin/company', label: '회사 정보·디자인', icon: Building2 }, // V22
   { href: '/admin/usage', label: '사용량·요금제', icon: Gauge },
   { href: '/admin/ai-logs', label: 'AI 사용 내역', icon: Sparkles },
 ];
 /** V14 7번: 관리 메뉴 ↔ 메뉴 권한 키 (꺼진 메뉴는 숨김) */
-const ADMIN_KEY: Record<string, string> = { '/reports': 'team_reports', '/revenue': 'revenue', '/admin/users': 'admin_users', '/admin/ops': 'ops', '/admin/usage': 'usage', '/admin/ai-logs': 'ai_logs' };
+const ADMIN_KEY: Record<string, string> = { '/reports': 'team_reports', '/revenue': 'revenue', '/admin/users': 'admin_users', '/admin/ops': 'ops', '/admin/company': 'ops', '/admin/usage': 'usage', '/admin/ai-logs': 'ai_logs' };
 const SHORTCUTS: [string, string][] = [
   ['Ctrl K', '검색·명령 열기'], ['N', '새 업무 만들기'], ['?', '단축키 도움말'], ['Esc', '패널·창 닫기'],
   ['G 다음 H', '홈'], ['G 다음 M', '업무'], ['G 다음 C', '캘린더'],

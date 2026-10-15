@@ -25,7 +25,7 @@ export default function AiLogsPage() {
   }
   async function saveSettings(e: React.FormEvent) {
     e.preventDefault();
-    try { await api('/api/ai/settings', { method: 'PUT', body: { retentionDays: Number(set.retention_days), dailyLimit: Number(set.daily_limit), inputMax: Number(set.input_max), topicFilter: !!set.topic_filter } }); setSet(null); reload(); toast.ok('저장했습니다'); }
+    try { await api('/api/ai/settings', { method: 'PUT', body: { retentionDays: Number(set.retention_days), dailyLimit: Number(set.daily_limit), inputMax: Number(set.input_max), topicFilter: !!set.topic_filter, webTools: !!set.web_tools, docEngine: !!set.doc_engine } }); setSet(null); reload(); toast.ok('저장했습니다'); }
     catch (er: any) { toast.error(er.message); }
   }
   if (error) return <ErrorBox error={error} retry={reload} />;
@@ -33,7 +33,7 @@ export default function AiLogsPage() {
     <div className="mx-auto max-w-5xl space-y-4">
       <PageHeader title="AI 사용 내역" icon={Sparkles} sub="누가·언제·무슨 질문을 했는지와 비용. 열어 본 기록은 감사 기록에 남습니다."
         actions={canEdit && data && <Button variant="secondary" onClick={() => setSet({ ...data.settings })} data-testid="ai-settings-open">보관·한도 설정</Button>} />
-      {data && <p className="text-xs text-ink-2" data-testid="ai-settings-line">보관 {data.settings.retention_days ? `${data.settings.retention_days}일` : '무기한'} · 1인 하루 {data.settings.daily_limit}회 · 1회 {data.settings.input_max.toLocaleString('ko-KR')}자 · 업무 무관 질문 {data.settings.topic_filter ? '차단' : '허용'}</p>}
+      {data && <p className="text-xs text-ink-2" data-testid="ai-settings-line">보관 {data.settings.retention_days ? `${data.settings.retention_days}일` : '무기한'} · 1인 하루 {data.settings.daily_limit}회 · 1회 {data.settings.input_max.toLocaleString('ko-KR')}자 · 업무 무관 질문 {data.settings.topic_filter ? '차단' : '허용'} · 웹 검색 {data.settings.web_tools ? '켜짐' : '꺼짐'} · 문서 작업 {data.settings.doc_engine ? '켜짐' : '꺼짐'}</p>}
       <div className="flex flex-col gap-2 sm:flex-row">
         <select className={cx(inputCls, 'sm:w-48')} value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="사람">
           <option value="">모든 사람</option>{dir.users.map((u: any) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
@@ -82,6 +82,9 @@ export default function AiLogsPage() {
             <Field label="1인 하루 요청 수"><input type="number" min={1} max={1000} className={inputCls} value={set.daily_limit} onChange={(e) => setSet({ ...set, daily_limit: e.target.value })} aria-label="1인 하루 요청 수" /></Field>
             <Field label="1회 입력 글자 수"><input type="number" min={200} max={20000} className={inputCls} value={set.input_max} onChange={(e) => setSet({ ...set, input_max: e.target.value })} aria-label="1회 입력 글자 수" /></Field>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!set.topic_filter} onChange={(e) => setSet({ ...set, topic_filter: e.target.checked })} />업무와 무관한 질문 차단 (가벼운 AI 로 먼저 판정)</label>
+            {/* V22 */}
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!set.web_tools} onChange={(e) => setSet({ ...set, web_tools: e.target.checked })} data-testid="ai-web-tools" />웹 검색·페이지 읽기 (출처 링크 표시)</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!set.doc_engine} onChange={(e) => setSet({ ...set, doc_engine: e.target.checked })} data-testid="ai-doc-engine" />문서 작업 (엑셀·워드·PPT·PDF 만들기·디자인·데이터 분석 — 코드 실행, 사용량 더 듦)</label>
             <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setSet(null)}>취소</Button><Button type="submit">저장</Button></div>
           </form>
         )}

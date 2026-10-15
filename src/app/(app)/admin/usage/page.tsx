@@ -10,7 +10,7 @@ import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtD
 const GB = 1024 ** 3;
 const lim = (v: number | null, unit: string) => (v === null ? '한도 미설정' : `${v.toLocaleString('ko-KR')}${unit}`);
 /** V14 4번 기능 이름 */
-const PURPOSE: Record<string, string> = { assistant: 'AI 비서', library_organize: '자료실 자동 정리', revenue: '매출 AI 분석', revenue_extract: '매출 자료로 입력', classify: '질문 분류(업무 여부)', summary: '긴 대화 요약', chat_to_task: '메시지 → 업무', fill: '자료로 채우기' };
+const PURPOSE: Record<string, string> = { assistant: 'AI 비서', library_organize: '자료실 자동 정리', revenue: '매출 AI 분석', revenue_extract: '매출 자료로 입력', classify: '질문 분류(업무 여부)', summary: '긴 대화 요약', chat_to_task: '메시지 → 업무', fill: '자료로 채우기', doc_engine: '문서 작업(파일 만들기·분석)' };
 
 /** V10 관리 → 사용량·요금제 (대표·본사 관리자) */
 export default function UsagePage() {

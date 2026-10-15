@@ -10,6 +10,7 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
 import { listenOnce, speechSupported } from '@/lib/nlparse';
+import { DocJobCard } from '@/components/DocJobCard';
 import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
 
 type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
@@ -37,7 +38,7 @@ export default function AssistantPage() {
     try {
       const r = await api(`/api/ai/threads/${id}`);
       conv.cancelEdit();
-      setMsgs(r.messages.map((m: any) => ({ role: m.role, text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text, stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked',
+      setMsgs(r.messages.map((m: any) => ({ role: m.role, text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text, stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked', docJobs: m.doc_jobs?.length ? m.doc_jobs.map((j: any) => j.id) : undefined,
         proposals: m.proposals?.length ? m.proposals.map((p: any) => ({ id: p.id, kind: p.kind, summary: p.summary, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) : undefined })));
     } catch (e: any) { toast.error(e.message); setThreadId(null); }
   }
@@ -60,7 +61,7 @@ export default function AssistantPage() {
       if (r.threadId && r.threadId !== threadRef.current) { setThreadId(r.threadId); router.replace(`/assistant?${new URLSearchParams({ ...(taskId ? { task: taskId } : {}), thread: r.threadId })}`); }
       status.reload(); threads.reload();
     },
-    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked }),
+    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked, docJobs: r.docJobs?.map((j: any) => j.id) }),
   });
   const { msgs, setMsgs, busy } = conv;
   const [text, setText] = useState('');
@@ -190,6 +191,7 @@ export default function AssistantPage() {
                 </div>
               )}
             </div>
+            {m.docJobs?.map((id) => <DocJobCard key={id} id={id} onRefine={(t) => { setText(t); inputRef.current?.focus(); }} />)}
             {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
             </>}
           </div>

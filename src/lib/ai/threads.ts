@@ -11,10 +11,10 @@ import type { SessionUser } from '../types';
  * - 업무와 무관한 질문·하루 한도·긴 입력·같은 질문 반복은 비싼 모델 호출 전에 막고 "차단됨"으로 남긴다.
  */
 import { tenantOf } from '../types';
-export type AiSettings = { retention_days: number; daily_limit: number; input_max: number; topic_filter: boolean; console_note: string | null };
+export type AiSettings = { retention_days: number; daily_limit: number; input_max: number; topic_filter: boolean; console_note: string | null; web_tools: boolean; doc_engine: boolean };
 export async function aiSettings(tenant: string, sql: Sql = db()): Promise<AiSettings> {
-  const [s] = await sql<AiSettings[]>`select retention_days, daily_limit, input_max, topic_filter, console_note from ai_settings where tenant = ${tenant}`;
-  return s ?? { retention_days: 90, daily_limit: Number(process.env.AI_DAILY_LIMIT) || 50, input_max: 4000, topic_filter: process.env.AI_TOPIC_FILTER !== '0', console_note: null };
+  const [s] = await sql<AiSettings[]>`select retention_days, daily_limit, input_max, topic_filter, console_note, web_tools, doc_engine from ai_settings where tenant = ${tenant}`;
+  return s ?? { retention_days: 90, daily_limit: Number(process.env.AI_DAILY_LIMIT) || 50, input_max: 4000, topic_filter: process.env.AI_TOPIC_FILTER !== '0', console_note: null, web_tools: true, doc_engine: true };
 }
 
 /** 대화 하나 열기(본인 것만). 없으면 404 */
@@ -33,14 +33,18 @@ export async function startThread(u: SessionUser, firstText: string, taskId: str
 }
 /** 문맥: 앞부분 요약 + 최근 20개(차단·오류 제외). 제안은 처리 결과와 함께 */
 export async function threadHistory(threadId: string, sql: Sql = db()) {
-  const rows = await sql<{ id: string; role: 'user' | 'assistant'; text: string; proposal_ids: string[]; file_ids: string[] | null; file_names: string[] | null }[]>`
-    select id::text, role, text, proposal_ids, file_ids, file_names from ai_messages m where thread_id = ${threadId} and status = 'ok' order by m.id desc limit 20`;
+  const rows = await sql<{ id: string; role: 'user' | 'assistant'; text: string; proposal_ids: string[]; file_ids: string[] | null; file_names: string[] | null; doc_job_ids: string[] | null }[]>`
+    select id::text, role, text, proposal_ids, file_ids, file_names, doc_job_ids from ai_messages m where thread_id = ${threadId} and status = 'ok' order by m.id desc limit 20`;
   rows.reverse();
   const pids = rows.flatMap((r) => r.proposal_ids);
   const props = pids.length ? await sql<{ id: string; summary: string; status: string }[]>`select id, summary, status from ai_proposals where id = any(${pids}::uuid[])` : [];
   // 앞선 질문의 첨부 id — "아까 올린 사진 자료실에 정리해줘" 처럼 나중에 가리킬 수 있게
   const files = (r: (typeof rows)[number]) => (r.file_ids?.length ? `\n[첨부: ${r.file_ids.map((id, k) => `id=${id} · ${r.file_names?.[k] ?? ''}`).join(' / ')}]` : '');
-  const msgs = rows.map((r) => ({ role: r.role, text: r.text + files(r) + (r.proposal_ids.length ? `\n(제안: ${r.proposal_ids.map((p) => props.find((x) => x.id === p)).filter(Boolean).map((p) => `${p!.summary} [${p!.status === 'done' ? '실행됨' : p!.status === 'cancelled' ? '취소됨' : '대기'}]`).join('; ')})` : '') }));
+  // V22: 앞선 파일 작업 — "더 다듬어 줘" 처럼 이어서 고칠 때 baseJobId 로 쓴다
+  const jids = rows.flatMap((r) => r.doc_job_ids ?? []);
+  const jobs = jids.length ? await sql<{ id: string; title: string; kind: string; version: number; status: string; pages: number | null }[]>`select id, title, kind, version, status, pages from ai_doc_jobs where id = any(${jids}::uuid[])` : [];
+  const jobNote = (r: (typeof rows)[number]) => (r.doc_job_ids?.length ? `\n[파일 작업: ${r.doc_job_ids.map((id) => jobs.find((j) => j.id === id)).filter(Boolean).map((j) => `id=${j!.id} · ${j!.title} v${j!.version} · ${j!.kind} · ${j!.status}${j!.pages ? ` · ${j!.pages}쪽` : ''}`).join(' / ')}]` : '');
+  const msgs = rows.map((r) => ({ role: r.role, text: r.text + files(r) + jobNote(r) + (r.proposal_ids.length ? `\n(제안: ${r.proposal_ids.map((p) => props.find((x) => x.id === p)).filter(Boolean).map((p) => `${p!.summary} [${p!.status === 'done' ? '실행됨' : p!.status === 'cancelled' ? '취소됨' : '대기'}]`).join('; ')})` : '') }));
   // 처음은 user 여야 한다
   while (msgs.length && msgs[0].role !== 'user') msgs.shift();
   const [t] = await sql<{ summary: string | null }[]>`select summary from ai_threads where id = ${threadId}`;
@@ -96,12 +100,12 @@ export async function precheck(u: SessionUser, text: string, threadId: string | 
 }
 
 export async function saveTurn(u: SessionUser, threadId: string, user: { text: string; fileIds?: string[]; fileNames?: string[] },
-  reply: { text: string; proposalIds?: string[]; status?: 'ok' | 'blocked' | 'error' | 'stopped'; reason?: string | null; cost?: number; inTok?: number; outTok?: number }) {
+  reply: { text: string; proposalIds?: string[]; docJobIds?: string[]; status?: 'ok' | 'blocked' | 'error' | 'stopped'; reason?: string | null; cost?: number; inTok?: number; outTok?: number }) {
   const sql = db();
   const st = reply.status ?? 'ok';
   await sql`insert into ai_messages (thread_id, role, text, file_ids, file_names, status, block_reason) values (${threadId}, 'user', ${user.text}, ${user.fileIds ?? []}, ${user.fileNames ?? []}, ${st}, ${reply.reason ?? null})`;
-  await sql`insert into ai_messages (thread_id, role, text, proposal_ids, status, input_tokens, output_tokens, cost_usd)
-    values (${threadId}, 'assistant', ${reply.text}, ${reply.proposalIds ?? []}, ${st}, ${reply.inTok ?? 0}, ${reply.outTok ?? 0}, ${reply.cost ?? 0})`;
+  await sql`insert into ai_messages (thread_id, role, text, proposal_ids, doc_job_ids, status, input_tokens, output_tokens, cost_usd)
+    values (${threadId}, 'assistant', ${reply.text}, ${reply.proposalIds ?? []}, ${reply.docJobIds ?? []}, ${st}, ${reply.inTok ?? 0}, ${reply.outTok ?? 0}, ${reply.cost ?? 0})`;
   await sql`update ai_threads set updated_at = now(), cost_usd = cost_usd + ${reply.cost ?? 0} where id = ${threadId}`;
 }
 
@@ -137,7 +141,9 @@ export async function listThreads(u: SessionUser, q: { q?: string; taskId?: stri
 export async function threadMessages(threadId: string, sql: Sql = db()) {
   const msgs = await sql`select m.id::text, m.role, m.text, m.file_names, m.status, m.block_reason, m.cost_usd::float8 cost_usd, m.created_at,
       coalesce((select json_agg(json_build_object('id', p.id, 'kind', p.kind, 'summary', p.summary, 'status', p.status, 'result', p.result) order by p.created_at)
-        from ai_proposals p where p.id = any(m.proposal_ids)), '[]') as proposals
+        from ai_proposals p where p.id = any(m.proposal_ids)), '[]') as proposals,
+      coalesce((select json_agg(json_build_object('id', j.id, 'title', j.title, 'kind', j.kind, 'version', j.version, 'status', j.status) order by j.created_at)
+        from ai_doc_jobs j where j.id = any(m.doc_job_ids)), '[]') as doc_jobs
     from ai_messages m where m.thread_id = ${threadId} order by m.id`;
   return msgs;
 }
@@ -199,7 +205,8 @@ export async function logDelete(u: SessionUser, id: string, ip: string | null) {
   return { ok: true };
 }
 export const aiSettingsInput = z.object({ retentionDays: z.number().int().min(0).max(3650).optional(), dailyLimit: z.number().int().min(1).max(1000).optional(),
-  inputMax: z.number().int().min(200).max(20000).optional(), topicFilter: z.boolean().optional(), consoleNote: z.string().max(500).nullable().optional() });
+  inputMax: z.number().int().min(200).max(20000).optional(), topicFilter: z.boolean().optional(), consoleNote: z.string().max(500).nullable().optional(),
+  webTools: z.boolean().optional(), docEngine: z.boolean().optional() }); // V22 웹 검색·페이지 읽기 / 문서 작업 켜기·끄기
 export async function setAiSettings(u: SessionUser, i: z.infer<typeof aiSettingsInput>, ip: string | null) {
   const { requireMenu } = await import('../menuPerms');
   await requireMenu(u, 'ai_logs', 'edit');
@@ -207,11 +214,12 @@ export async function setAiSettings(u: SessionUser, i: z.infer<typeof aiSettings
   const sql = db(); const t = tenantOf(u);
   const cur = await aiSettings(t, sql);
   const next = { retention_days: i.retentionDays ?? cur.retention_days, daily_limit: i.dailyLimit ?? cur.daily_limit, input_max: i.inputMax ?? cur.input_max,
-    topic_filter: i.topicFilter ?? cur.topic_filter, console_note: i.consoleNote !== undefined ? i.consoleNote : cur.console_note };
-  await sql`insert into ai_settings (tenant, retention_days, daily_limit, input_max, topic_filter, console_note, updated_by)
-    values (${t}, ${next.retention_days}, ${next.daily_limit}, ${next.input_max}, ${next.topic_filter}, ${next.console_note}, ${u.id})
+    topic_filter: i.topicFilter ?? cur.topic_filter, console_note: i.consoleNote !== undefined ? i.consoleNote : cur.console_note,
+    web_tools: i.webTools ?? cur.web_tools, doc_engine: i.docEngine ?? cur.doc_engine };
+  await sql`insert into ai_settings (tenant, retention_days, daily_limit, input_max, topic_filter, console_note, web_tools, doc_engine, updated_by)
+    values (${t}, ${next.retention_days}, ${next.daily_limit}, ${next.input_max}, ${next.topic_filter}, ${next.console_note}, ${next.web_tools}, ${next.doc_engine}, ${u.id})
     on conflict (tenant) do update set retention_days = excluded.retention_days, daily_limit = excluded.daily_limit, input_max = excluded.input_max,
-      topic_filter = excluded.topic_filter, console_note = excluded.console_note, updated_by = excluded.updated_by, updated_at = now()`;
+      topic_filter = excluded.topic_filter, console_note = excluded.console_note, web_tools = excluded.web_tools, doc_engine = excluded.doc_engine, updated_by = excluded.updated_by, updated_at = now()`;
   await audit(sql, u.id, 'ai.settings', null, null, next, ip);
   return { ok: true, settings: next };
 }

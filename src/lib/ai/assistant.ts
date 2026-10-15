@@ -150,6 +150,22 @@ const TOOLS: AiTool[] = [
         tags: { type: 'array', items: { type: 'string' }, description: '태그 (선택)' }, description: str('한 줄 요약 (선택)'),
       }, required: ['fileId'] } },
     }, required: ['items'] } },
+  // V22 문서 엔진: 서식 있는 문서·디자인·데이터 분석은 코드 실행으로 실제 파일을 만든다(결과 카드 → 사람이 [자료실에 저장])
+  { name: 'run_file_task', description: '엑셀·워드·PPT·PDF 를 새로 만들거나(디자인 포함), 앞서 만든 파일을 고치거나(baseJobId), 올린 엑셀/CSV 를 코드로 계산·차트로 분석한다. 견적서·보고서·제안서·안내문 등 서식이 중요한 문서는 이 도구를 쓴다. 만드는 데 1~3분 걸리며 결과는 화면 카드에 미리보기로 나온다. 실행 즉시 작업이 시작되니 무엇을 만들지 정해진 뒤 한 번만 호출.',
+    input_schema: { type: 'object', properties: {
+      mode: { type: 'string', enum: ['create', 'edit', 'analyze'], description: 'create=새로, edit=앞서 만든 파일 고치기(baseJobId 필수), analyze=자료 계산·분석' },
+      kind: { type: 'string', enum: ['xlsx', 'docx', 'pptx', 'pdf', 'chart', 'none'], description: '결과 파일 종류(분석만이면 none 또는 chart)' },
+      title: str('파일 제목(한국어, 확장자 없이)'),
+      instructions: str('만들 내용·디자인 요구를 자세히: 들어갈 항목·숫자·문장, 1페이지 여부, 강조할 점, 참고 양식에서 따를 것/바꿀 것. 사용자가 준 숫자만'),
+      referenceFileIds: { type: 'array', items: { type: 'string' }, description: '참고할 자료실 파일 id(첨부·검색으로 찾은 것)' },
+      baseJobId: str('고칠 이전 파일 작업 id (대화 기록의 [파일 작업: id=…])'),
+      company: str('회사 정보 키(예: dagym, hilink) — 공급자·로고·브랜드 색. 모르면 비움(기본 회사)'),
+    }, required: ['mode', 'kind', 'title', 'instructions'] } },
+];
+
+const WEB_TOOLS: AiTool[] = [
+  { type: 'web_search_20260209', name: 'web_search', max_uses: 5 } as never,
+  { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 } as never,
 ];
 
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 한국 피트니스 회사(다짐·하이링크) 직원을 돕습니다.
@@ -157,14 +173,16 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
 - 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
-- 첨부한 이미지·문서를 보고 문서(회의록·보고서·안내문·견적 정리 등)를 만들어 달라고 하면 propose_create_document 로, 표·숫자 위주면 propose_xlsx_report 로 제안하세요. 이미지에서 읽은 내용만 쓰고, 읽기 어려운 부분은 "확인 필요"로 표시하세요.
+- 서식·디자인이 중요한 문서(견적서·보고서·제안서·안내문·PPT)나 "참고해서 만들어/더 세련되게/색 바꿔" 같은 요청, 엑셀·CSV 계산·차트 분석은 run_file_task 를 쓰세요(실제 파일·미리보기). 앞서 만든 파일을 고칠 때는 대화 기록의 [파일 작업: id=…] 를 baseJobId 로 mode=edit. 간단한 글 문서는 propose_create_document, 단순 데이터 표는 propose_xlsx_report.
+- 최신 정보·외부 자료가 필요하면 웹 검색(켜져 있을 때)을 쓰고 출처 링크를 답에 붙이세요.
+- 첨부한 이미지·문서를 보고 간단한 글 문서를 만들어 달라고 하면 propose_create_document 로, 표·숫자 위주면 propose_xlsx_report 로 제안하세요. 이미지에서 읽은 내용만 쓰고, 읽기 어려운 부분은 "확인 필요"로 표시하세요.
 - 대화에 올린 자료를 자료실에 정리해 달라고 하면 list_library_folders 로 기존 폴더를 보고 propose_organize_files 로 폴더·제목·태그를 제안하세요(기존 폴더 우선). 앞선 질문의 첨부 id 는 대화 기록의 [첨부] 줄에 있습니다.
 - 사람 이름은 list_people 로 id 를 찾아 쓰세요. 날짜는 Asia/Seoul 기준입니다.
 - 권한 오류가 나면 그 사람이 볼 수 없는 정보라고 짧게 알려 주세요.
 - 답은 한국어로 짧고 분명하게. 2~3문장마다 빈 줄로 단락을 나누고, 여러 항목은 줄머리표(-)로 한 줄씩.`;
 
 /** confidential: 이번 차례에 기밀 자료(기밀 파일·매출)를 읽었는지 — 결과물·제안이 같은 등급을 따른다(V14 15번) */
-type Ctx = { u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean };
+type Ctx = { u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean; threadId?: string; docJobs?: { id: string; title: string; kind: string; version: number; status: string }[] };
 const clip = (s: unknown, n = 400) => (typeof s === 'string' ? (s.length > n ? s.slice(0, n) + '…' : s) : s);
 const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
@@ -425,6 +443,29 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       if (input.taskId) await getTaskDetail(u, String(input.taskId));
       return propose(c, 'xlsx_report', `엑셀 보고서 만들기: ${title} (${sheets.length}개 시트, ${sheets.reduce((n, s) => n + s.rows.length, 0)}줄)${input.taskId ? ' + 업무 첨부' : ''}`, { title, taskId: input.taskId || null, sheets });
     }
+    case 'run_file_task': {
+      const i = z.object({ mode: z.enum(['create', 'edit', 'analyze']), kind: z.enum(['xlsx', 'docx', 'pptx', 'pdf', 'chart', 'none']), title: z.string().trim().min(1).max(100),
+        instructions: z.string().trim().min(1).max(20000), referenceFileIds: z.array(z.string().uuid()).max(5).optional(), baseJobId: z.string().uuid().optional(), company: z.string().max(30).optional() }).parse(input);
+      const T = await import('./threads');
+      if (!(await T.aiSettings(tenantOf(u))).doc_engine) return { error: '회사 설정에서 문서 작업이 꺼져 있습니다. 대신 propose_create_document·propose_xlsx_report 를 쓰세요.' };
+      const usage = await usageThisMonth(tenantOf(u));
+      if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', '이번 달 AI 사용 한도에 도달해 문서 작업을 시작할 수 없습니다');
+      for (const f of i.referenceFileIds ?? []) { const lf = await loadLibraryFile(u, f, 'ai'); if (lf.effective_security === 'confidential') c.confidential = true; }
+      let version = 1;
+      if (i.mode === 'edit') {
+        if (!i.baseJobId) throw badRequest('고칠 파일(baseJobId)이 필요합니다');
+        const [b] = await db()<{ version: number; status: string; confidential: boolean }[]>`select version, status, confidential from ai_doc_jobs where id = ${i.baseJobId} and user_id = ${u.id}`;
+        if (!b) throw notFound();
+        if (b.status !== 'done') return { error: '이전 파일 작업이 아직 끝나지 않았습니다' };
+        if (b.confidential) c.confidential = true;
+        version = b.version + 1;
+      }
+      const [j] = await db()<{ id: string }[]>`insert into ai_doc_jobs (tenant, user_id, thread_id, mode, kind, title, instructions, company_key, ref_file_ids, base_job_id, version, confidential)
+        values (${tenantOf(u)}, ${u.id}, ${c.threadId ?? null}, ${i.mode}, ${i.kind}, ${i.title}, ${i.instructions}, ${i.company ?? null}, ${i.referenceFileIds ?? []}, ${i.baseJobId ?? null}, ${version}, ${!!c.confidential})
+        returning id`;
+      (c.docJobs ??= []).push({ id: j.id, title: i.title, kind: i.kind, version, status: 'queued' });
+      return { jobId: j.id, version, status: '만드는 중 — 결과(미리보기·내려받기·자료실에 저장)는 화면 카드에 1~3분 뒤 나옵니다. 완성됐다고 말하지 말고 "만드는 중"이라고 안내하세요.' };
+    }
     case 'list_library_folders': {
       const r = await listLibrary(u, { limit: 1 });
       return { folders: (r.folders as any[]).map((f) => (typeof f === 'string' ? f : f.path ?? f.folder ?? f.name)).filter(Boolean).slice(0, 200) };
@@ -546,7 +587,9 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     const last = messages[messages.length - 1];
     messages[messages.length - 1] = { role: 'user', content: [...fb.blocks, { type: 'text', text: `${fb.note}\n\n${last.content as string}` }] as never };
   }
-  const c: Ctx = { u, proposals: [], confidential: false };
+  const c: Ctx = { u, proposals: [], confidential: false, threadId, docJobs: [] };
+  // V22 웹 검색·페이지 읽기 (회사 설정으로 끄기)
+  const tools = (await T.aiSettings(tenant)).web_tools ? [...TOOLS, ...WEB_TOOLS] : TOOLS;
   if (i.fileIds?.length && fbConf) c.confidential = true;
   const sql = db();
   const steps: string[] = [];
@@ -554,7 +597,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   let turnCost = 0, inTok = 0, outTok = 0;
   for (let step = 0; step < MAX_STEPS; step++) {
     if (signal?.aborted) break;
-    const r = await provider.chat({ system, messages, tools: TOOLS, signal }).catch((e: any) => {
+    const r = await provider.chat({ system, messages, tools, signal }).catch((e: any) => {
       if (signal?.aborted) return null; // 부록 A2: 사용자가 멈춤
       throw new HttpError(502, 'ai_unavailable', `AI 서버 응답 오류${e?.status ? ` (${e.status})` : ''}. 잠시 후 다시 시도하세요.`);
     });
@@ -584,15 +627,16 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   if (signal?.aborted) { // 부록 A2: 멈춘 질문 — 만들던 제안은 버리고(실행 안 됨) "멈춤"만 남긴다. 사용량은 쓴 만큼 이미 기록됨
     if (c.proposals.length) await sql`update ai_proposals set status = 'cancelled', decided_at = now() where id = any(${c.proposals.map((p) => p.id)}::uuid[]) and status = 'pending'`;
+    if (c.docJobs?.length) await sql`update ai_doc_jobs set status = 'failed', error = '멈춤', finished_at = now() where id = any(${c.docJobs.map((j) => j.id)}::uuid[]) and status = 'queued'`;
     await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: '(멈춤)', status: 'stopped', cost: turnCost, inTok, outTok });
     await audit(sql, u.id, 'ai.chat_stopped', null, null, { threadId, steps }, null);
     return { reply: '', proposals: [], tools: steps, threadId, stopped: true };
   }
   await audit(sql, u.id, 'ai.chat', i.taskId ? 'task' : null, i.taskId ?? null, { tools: steps, proposals: c.proposals.map((p) => p.id), threadId }, null);
-  await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: reply, proposalIds: c.proposals.map((p) => p.id), cost: turnCost, inTok, outTok });
+  await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: reply, proposalIds: c.proposals.map((p) => p.id), docJobIds: c.docJobs?.map((j) => j.id), cost: turnCost, inTok, outTok });
   if (c.confidential) await sql`update ai_threads set confidential = true where id = ${threadId}`; // 사용 내역에서 기밀 권한 없는 사람에게 내용 가림
   await T.maybeSummarize(u, threadId);
-  return { reply, proposals: c.proposals, tools: steps, threadId, ...(kept.length ? { kept } : {}) };
+  return { reply, proposals: c.proposals, tools: steps, threadId, ...(kept.length ? { kept } : {}), ...(c.docJobs?.length ? { docJobs: c.docJobs } : {}) };
 }
 
 // ---------------- 제안 실행 (사람이 [확인]) ----------------

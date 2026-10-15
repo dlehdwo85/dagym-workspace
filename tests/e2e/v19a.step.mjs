@@ -10,7 +10,8 @@ export async function v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }
   await sql`update tasks set completed_at = now() - interval '40 days' where id = ${old}`;
   await owner.goto(BASE + '/tasks');
   const chip = owner.getByTestId('done-chip').getByRole('button');
-  await chip.click();
+  await owner.getByTestId('task-groups').first().waitFor();
+  for (let i = 0; i < 3 && (await chip.getAttribute('aria-pressed')) !== 'true'; i++) { await chip.click(); await owner.waitForTimeout(400); } // 화면 준비(hydration) 전 눌림 대비
   assert.equal(await chip.getAttribute('aria-pressed'), 'true');
   await owner.locator('[data-testid="task-groups"][data-group-by="month"]').waitFor(); // 완료 보관(달별) 화면
   await chip.click();
@@ -18,8 +19,8 @@ export async function v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }
   await owner.locator('[data-testid="task-groups"][data-group-by="month"]').waitFor({ state: 'detached' });
   assert.equal(await owner.getByText('지난달 완료 칩 시험').count(), 0, '해제하면 지난 완료 업무는 목록에서 빠짐');
   const mine = owner.getByRole('button', { name: '내 업무', exact: true }).first();
-  await mine.click(); assert.equal(await mine.getAttribute('aria-pressed'), 'true');
-  await mine.click(); assert.equal(await mine.getAttribute('aria-pressed'), 'false', '다른 보기 칩도 다시 누르면 해제');
+  await mine.click(); await owner.getByRole('button', { name: '내 업무', exact: true, pressed: true }).first().waitFor();
+  await mine.click(); await owner.getByRole('button', { name: '내 업무', exact: true, pressed: false }).first().waitFor(); // 다른 보기 칩도 다시 누르면 해제
 
   // PC: Enter = 보내기, Shift+Enter = 줄바꿈, 안내 표시
   await owner.goto(BASE + '/assistant');

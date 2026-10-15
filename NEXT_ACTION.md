@@ -317,6 +317,14 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 시험: API 232/232(+tests/api/monthly.test.mjs 5건) · E2E 74/74(+V20 단계)
 - 다음: V22-A(양식 칸 채우기) → V21(메일·문자 보내기) → V22-B(Agent Skills). V22 부록(코드 실행 기본 경로)은 비용 통제 설계를 함께 확인할 것
 
+## V22 AI 비서 문서 엔진 (2026-10-15 클라우드, migration 051)
+- 문서·디자인 작업 기본 경로 = Anthropic Agent Skills(xlsx·docx·pptx·pdf) + 코드 실행. 대화에서 `run_file_task` 도구가 작업을 만들고(만드는 중 카드), 응답 뒤(`after()`)·정기 실행(tick `docJobs`)으로 처리.
+- 결과: 파일·첫 페이지 미리보기(png)·쪽수(PAGES:)·요약 → 카드 [내려받기] [자료실에 저장(사람이 누를 때만, 폴더 "AI 문서", 태그 vN)] [더 다듬기(입력창 채움 → 수정 작업 = 같은 컨테이너·이전 결과 파일 재사용, v2·v3 버전 줄)].
+- 참고 자료실 파일은 Files API 로 한 번만 올리고 id 기억(`library_files.anthropic_file_id`), 회사 정보(관리 > 회사 정보·디자인: 상호·대표·사업자번호·주소·연락처·계좌·로고·브랜드 색·글꼴·메모, 회사별·기본 회사)를 지시문에 넣음 — 저장소에 회사 정보 없음.
+- 웹 검색·웹 읽기 도구(web_search/web_fetch, 켜고 끄기), 문서 작업 켜고 끄기: 관리 > AI 사용 내역 설정. 비용은 `ai_usage` purpose `doc_engine`.
+- **미검증: 실제 Anthropic 키로 Skills·코드 실행·Files API 실행(가짜 서버 기준 통과)**. 로컬 검수에서 운영 화면으로 견적서 1건 생성·미리보기·쪽수·자료실 저장 확인 필요.
+- 다음: V23-1(크레딧 부족 안내·차단·자체 집계 점검) → V22-A(양식 채우기 빠른 길)·부록 → V21 → V23-2.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

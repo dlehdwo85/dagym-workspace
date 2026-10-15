@@ -10,6 +10,7 @@ import { v1436 } from './v14-36.step.mjs';
 import { v19a } from './v19a.step.mjs';
 import { blocksStep } from './blocks.step.mjs';
 import { v20 } from './v20.step.mjs';
+import { v22 } from './v22.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -852,6 +853,7 @@ await step('V14 36~39 캘린더: 업무 동그라미 없음·블록 12px 여러 
 await step('V19 부록 A: AI 비서 PC Enter 보내기·Shift+Enter 줄바꿈, 휴대폰 Enter 줄바꿈·자동 높이, [수정]·[다시 답하기]·[복사]·[멈춤], 패널 같은 동작 / 보기 칩 다시 누르면 해제', () => v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('캘린더: 완료한 업무의 시간 블록은 숨김(완료 보기 켜면 완료 모양), 삭제한 업무의 블록은 사라지고 휴지통 복원 시 다시 보임', () => blocksStep({ owner, ctx, BASE, SHOTS, addDays, today }));
 await step('V20 업무 월별 보관·이월: 이월 표시·이월만 보기, 완료 = 이번 달만 펼침·지난달은 펼칠 때 불러오기·달 이동, 리포트 월별 기록', () => v20({ owner, ctx, sql, BASE, SHOTS, tick }));
+await step('V22 AI 비서 문서 엔진: 회사 정보 화면, 파일 작업 카드(만드는 중 → 미리보기·쪽수) → 자료실에 저장 → 더 다듬기 입력 채움, 다시 열어도 카드 유지', () => v22({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');
   const month = today.slice(0, 7);

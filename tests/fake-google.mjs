@@ -19,6 +19,8 @@ export function startFakeGoogle(port = 3199) {
     openai: [],
     anthropic: [], // 받은 /v1/messages 요청
     anthropicQueue: [], // 다음 응답들 (비면 짧은 글 답)
+    anthropicFiles: {}, // V22 Files API: id → { filename, mime, b64 } (코드 실행 결과·올린 파일)
+    anthropicUploads: [], // 올린 파일 이름 기록
     classified: [], classifyQueue: [], // V14 5번 업무 무관 질문 분류
     fcmUnregistered: new Set(),
     webpush: [],
@@ -51,6 +53,21 @@ export function startFakeGoogle(port = 3199) {
       });
       return json(res, 200, { choices: [{ message: { role: 'assistant', content } }], usage: { total_tokens: 321 } });
     }
+    // ---- 가짜 Anthropic Files API (V22 문서 엔진) ----
+    if (p === '/v1/files' && req.method === 'POST') {
+      const filename = /filename="([^"]+)"/.exec(raw)?.[1] ?? 'upload';
+      const id = `file_up_${state.anthropicUploads.length + 1}`;
+      state.anthropicUploads.push(decodeURIComponent(filename));
+      state.anthropicFiles[id] = { filename, mime: 'application/octet-stream', b64: '' };
+      return json(res, 200, { id, type: 'file', filename, mime_type: 'application/octet-stream', size_bytes: raw.length, created_at: new Date().toISOString(), downloadable: false });
+    }
+    const afm = /^\/v1\/files\/([^/]+)(\/content)?$/.exec(p);
+    if (afm && req.method === 'GET') {
+      const f = state.anthropicFiles[afm[1]];
+      if (!f) return json(res, 404, { type: 'error', error: { type: 'not_found_error', message: 'file not found' } });
+      if (afm[2]) { res.writeHead(200, { 'content-type': f.mime }); return res.end(Buffer.from(f.b64, 'base64')); }
+      return json(res, 200, { id: afm[1], type: 'file', filename: f.filename, mime_type: f.mime, size_bytes: Buffer.from(f.b64, 'base64').length, created_at: new Date().toISOString(), downloadable: true });
+    }
     // ---- 가짜 Anthropic Messages API (V9 AI 비서): 요청을 기록하고, 시험이 넣어 둔 응답을 차례로 돌려준다 ----
     if (p === '/v1/messages' && req.method === 'POST') {
       // V14 5번: 업무 무관 질문 분류(가벼운 모델)는 시험 응답 줄을 쓰지 않고 따로 답한다(기본: 업무 맞음)
@@ -74,7 +91,8 @@ export function startFakeGoogle(port = 3199) {
       next ??= { content: [{ type: 'text', text: '테스트 응답입니다.' }], stop_reason: 'end_turn' };
       if (next.delayMs) { const ms = next.delayMs; next = { ...next }; delete next.delayMs; await new Promise((r) => setTimeout(r, ms)); } // 부록 A2 멈춤 시험: 늦게 답하기
       return json(res, 200, { id: `msg_${state.anthropic.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null,
-        usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, ...next });
+        usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        ...(body.container ? { container: { id: body.container.id ?? `cntr_fake_${state.anthropic.length}`, expires_at: new Date(Date.now() + 3600e3).toISOString() } } : {}), ...next });
     }
     // ---- 제어용 ----
     if (p === '/__state') return json(res, 200, { ...state, fcmUnregistered: [...state.fcmUnregistered], webpushGone: [...state.webpushGone] });
@@ -84,6 +102,7 @@ export function startFakeGoogle(port = 3199) {
       if (body.fcmUnregister) state.fcmUnregistered.add(body.fcmUnregister);
       if (body.anthropicReset) { state.anthropicQueue.length = 0; state.classifyQueue.length = 0; } // 비운 다음에 새로 넣는다
       if (body.anthropicQueue) state.anthropicQueue.push(...body.anthropicQueue);
+      if (body.anthropicFiles) Object.assign(state.anthropicFiles, body.anthropicFiles);
       if (body.classifyQueue) state.classifyQueue.push(...body.classifyQueue);
       if (body.webpushGone) state.webpushGone.add(body.webpushGone);
       if (body.googleEdit) { // Google 쪽에서 사용자가 직접 수정
