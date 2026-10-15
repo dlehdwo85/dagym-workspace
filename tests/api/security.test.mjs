@@ -137,6 +137,9 @@ describe('V14 15번 AI 비서 — 서버 강제(프롬프트에 의존하지 않
   });
   test('AI 사용 내역: 기밀 대화는 기밀 권한 없는 관리자에게 제목·내용 가림, 검색에도 안 걸림', async () => {
     await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'ai_logs', userId: D.adm.id, level: 'view' });
+    // V34 C4: 관리자는 기본으로 기밀 열람 — 이 시험은 권한을 끈 관리자
+    assert.ok(!(await D.adm.c.ok('GET', `/api/ai/logs/${D.thread}`)).redacted, '기본: 관리자 기밀 열람');
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'confidential', userId: D.adm.id, level: 'none' });
     const v = await D.adm.c.ok('GET', `/api/ai/logs/${D.thread}`);
     assert.equal(v.redacted, true); assert.ok(!JSON.stringify(v).includes('9000000') && !JSON.stringify(v).includes('급여'));
     const l = await D.adm.c.ok('GET', '/api/ai/logs?q=' + encodeURIComponent('급여'));

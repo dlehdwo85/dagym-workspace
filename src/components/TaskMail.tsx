@@ -138,7 +138,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!nums.length) { toast.error('받는 사람 전화번호를 넣어 주세요'); return; }
     let share: string | undefined;
     try {
-      if (f!.files.length) share = (await api('/api/mail/share', { body: { taskId, attachmentIds: f!.files } })).url;
+      if (f!.files.length) share = (await api('/api/mail/share', { body: { taskId, attachmentIds: f!.files, company: f!.company || undefined } })).url;
     } catch (e: any) { toast.error(e.message); return; }
     const text = [sms.body.trim(), share ? `자료 내려받기(14일): ${share}` : '', smsLine].filter(Boolean).join('\n\n');
     const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);

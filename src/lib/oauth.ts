@@ -216,6 +216,9 @@ export async function completeSocialSignup(i: z.infer<typeof completeInput>, ip:
     return id;
   });
   await sql`insert into signup_attempts (ip, email, ok, reason) values (${ip}, ${pend.email}, true, ${'social:' + pend.provider})`;
+  const [{ tenant }] = await sql<{ tenant: string }[]>`select tenant from users where id = ${userId}`;
+  const { recordStep } = await import('./funnel');
+  await recordStep('submitted', { tenant }, sql); await recordStep('verified', { tenant }, sql); // 소셜은 확인 메일 없이 바로 회사 생성
   return { userId };
 }
 
