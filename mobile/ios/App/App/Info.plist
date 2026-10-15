@@ -93,6 +93,39 @@
 		<string>kakaotalk</string>
 		<string>kakaokompassauth</string>
 		<string>kakaoplus</string>
+			<string>ispmobile</string>
+		<string>kftc-bankpay</string>
+		<string>kb-acp</string>
+		<string>kbbank</string>
+		<string>liivbank</string>
+		<string>newliiv</string>
+		<string>kb-auth</string>
+		<string>hdcardappcardansimclick</string>
+		<string>smhyundaiansimclick</string>
+		<string>shinhan-sr-ansimclick</string>
+		<string>smshinhanansimclick</string>
+		<string>mpocket.online.ansimclick</string>
+		<string>lottesmartpay</string>
+		<string>lotteappcard</string>
+		<string>cloudpay</string>
+		<string>nhappcardansimclick</string>
+		<string>nhallonepayansimclick</string>
+		<string>citimobileapp</string>
+		<string>citispay</string>
+		<string>citicardappkr</string>
+		<string>payco</string>
+		<string>lpayapp</string>
+		<string>samsungpay</string>
+		<string>wooripay</string>
+		<string>com.wooricard.wcard</string>
+		<string>newsmartpib</string>
+		<string>hanawalletmembers</string>
+		<string>supertoss</string>
+		<string>kakaobank</string>
+		<string>naversearchthirdlogin</string>
+		<string>tauthlink</string>
+		<string>ktauthexternalcall</string>
+		<string>upluscorporation</string>
 	</array>
 </dict>
 </plist>
