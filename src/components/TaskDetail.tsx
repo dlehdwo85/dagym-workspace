@@ -231,7 +231,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   }
 
   // V14 20번: 상태는 담당자(없으면 만든 사람)만 — 지시자는 검토 요청 승인·반려와 완료 해지만
-  const statusOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id && !(t.status === 'review' && t.requested_by && t.requested_by !== t.assignee_id); // V14 50
+  // V14 50 + 점검 2026-10-16 ③: 검토 중에는 서버가 정한 검토 담당자(data.reviewer)가 있으면 담당자도 단계 변경 불가(검토 요청 취소만) — 서버와 같은 기준
+  const statusOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id && !(t.status === 'review' && data.reviewer && data.reviewer.id !== user.id);
   const isRequester = !!t.requested_by && t.requested_by === user.id;
   // 대표 피드백(10/15): 검토 중 — 승인·반려는 검토 담당자([검토] 업무 담당, 없으면 지시자), 담당자는 [검토 요청 취소]만. 막힐 땐 실제 권한자 이름
   const reviewer: { id: string; name: string } | null = data.reviewer ?? null;

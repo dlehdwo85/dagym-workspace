@@ -448,11 +448,11 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2">
       {/* V11 1번: 휴대폰은 제목 아래 줄에 상태 칩(누르면 바로 변경) — PC 는 상태 열 */}
-      {onPatch && <span className="sm:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
+      {onPatch && <span className="lg:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
       {t.team_name && <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
       {t.project_name && <span className="inline-flex min-w-0 items-center gap-1"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
-      {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate md:hidden" title="지시자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
-      {!compact && <span className={cx('truncate', onPatch && hq && 'hidden sm:inline')}>{t.org_unit_name}</span>}
+      {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate xl:hidden" title="지시자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
+      {!compact && <span className={cx('truncate', onPatch && hq && 'hidden lg:inline')}>{t.org_unit_name}</span>}
       {!compact && <BrandDot brand={t.brand_id} />}
       {t.subtask_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
       {t.checklist_total > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{t.checklist_done}/{t.checklist_total}</span>}
@@ -469,9 +469,13 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
 /** V14 50(대표 결정): 상태는 담당자만(없으면 지시자·만든 사람). 검토 중인 업무의 승인·반려는 검토 담당자(지시자)만 — 서버와 같은 규칙 */
 export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
   if (to === t.status) return true;
+  const owner = t.assignee_id ?? t.requested_by ?? t.created_by;
+  // 점검 2026-10-16 ②: [검토] 업무는 "완료"(= 원 업무 승인)만
+  if ((t as Task & { review_of?: string | null }).review_of) return to === 'done' && owner === uid;
   const reviewer = t.requested_by && t.requested_by !== t.assignee_id ? t.requested_by : null;
-  if (t.status === 'review' && reviewer) return reviewer === uid && (to === 'done' || to === 'in_progress');
-  return (t.assignee_id ?? t.requested_by ?? t.created_by) === uid;
+  // 검토 중: 검토 담당자는 승인(완료)·반려(진행 중), 담당자는 검토 요청 취소(진행 중)만
+  if (t.status === 'review' && reviewer) return (reviewer === uid && (to === 'done' || to === 'in_progress')) || (owner === uid && to === 'in_progress');
+  return owner === uid;
 }
 const NOT_MINE = '상태는 담당자만 바꿀 수 있어요 (검토 중인 업무는 검토 담당자만 승인·반려)';
 /** 진행 전 업무는 담당자 확인 여부를 뒤에 — V14 43번: "확인 완료"가 "완료"와 헷갈려 "진행 전 · 확인함/확인 전" */
@@ -594,11 +598,11 @@ function ListHeader({ sortBy, onSort, compact }: { sortBy: SortKey; onSort: (k: 
       className={cx('truncate text-left hover:text-ink', sortBy === k ? 'font-semibold text-accent-600' : '', className)}>{children}{sortBy === k ? ' ↓' : ''}</button>
   );
   return (
-    <div className={cx('hidden items-center gap-3 px-3 sm:flex', compact ? 'pb-0.5 text-[11px] text-ink-3/80' : 'sticky top-14 z-20 -mx-1 border-b border-line bg-canvas px-4 py-1.5 text-xs text-ink-3')}
+    <div className={cx('hidden items-center gap-3 px-3 lg:flex', compact ? 'pb-0.5 text-[11px] text-ink-3/80' : 'sticky top-14 z-20 -mx-1 border-b border-line bg-canvas px-4 py-1.5 text-xs text-ink-3')}
       data-testid={compact ? 'group-col-header' : 'list-header'} aria-hidden={compact || undefined}>
       <span className="w-4" /><span className="w-[22px]" />
       <H k="title" className="flex-1">업무 이름</H>
-      <H k="requester" className="hidden w-[104px] md:block">지시자</H>
+      <H k="requester" className="hidden w-[104px] xl:block">지시자</H>
       <H k="priority" className="w-[60px] text-right">우선순위</H>
       <H k="status" className="w-[84px] pl-2">상태</H>
       <H k="due" className="w-[92px] text-right">마감일</H>
@@ -1026,19 +1030,20 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
                   className="size-4 accent-brand-600 opacity-0 group-hover:opacity-100 focus:opacity-100" />}
           </span>
         )}
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
-          <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
+        {/* 점검 2026-10-16 ①: 1024px 미만(태블릿·좁은 창)은 휴대폰처럼 제목 두 줄 + 아래 줄에 상태·정보 — 고정 열에 제목이 눌리지 않게 */}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 lg:flex-row lg:items-center lg:gap-3">
+          <span className="flex min-w-0 items-center gap-1.5 lg:max-w-[55%] lg:shrink-0">
             <TypeIcon t={t} />
             {/* 대표 피드백(10/15): 휴대폰은 제목이 너무 짧게 잘림 → 두 줄까지 보이고, PC 는 한 줄 */}
-            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline max-sm:line-clamp-2 max-sm:break-words max-sm:leading-snug sm:truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
+            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline max-lg:line-clamp-2 max-lg:break-words max-lg:leading-snug lg:truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
           </span>
           <Meta t={t} onPatch={onPatch} />
         </div>
         {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
-        <span className="hidden w-[104px] min-w-0 md:flex"><AssigneePicker role="지시자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
-        <span className="hidden w-[60px] justify-end sm:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>
-        <span className="hidden w-[112px] sm:inline-flex"><StatusChip t={t} onPatch={onPatch} /></span>
+        <span className="hidden w-[104px] min-w-0 xl:flex"><AssigneePicker role="지시자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
+        <span className="hidden w-[60px] justify-end lg:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>
+        <span className="hidden w-[112px] lg:inline-flex"><StatusChip t={t} onPatch={onPatch} /></span>
         <DueEdit t={t} onPatch={onPatch} />
         <AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} />
         {onMove && <OrderMenu title={t.title} onMove={(to) => onMove(t, to)} />}

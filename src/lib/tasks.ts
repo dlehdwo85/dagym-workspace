@@ -425,8 +425,22 @@ export async function deleteBatch(u: SessionUser, batchId: string) {
   return { deleted: rows.length };
 }
 
-export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInput>) {
+export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInput>): Promise<{ id: string; version: number; changed: boolean; spawned?: string | null; approvedOriginal?: string }> {
   const sql = db();
+  // 점검 2026-10-16 ②: [검토] 업무(review_of)는 상태를 직접 바꾸지 않는다 — "완료" = 원 업무 승인(검토 담당자 권한 그대로), 그 밖은 원 업무에서 승인·반려
+  if (i.status) {
+    const [rv] = await sql<{ review_of: string | null; status: string }[]>`select review_of, status from tasks where id = ${id} and deleted_at is null`;
+    if (rv?.review_of && i.status !== rv.status) {
+      await loadTaskForUser(u, id, sql);
+      const [orig] = await sql<{ status: string }[]>`select status from tasks where id = ${rv.review_of} and deleted_at is null`;
+      if (i.status === 'done' && orig?.status === 'review') {
+        await updateTask(u, rv.review_of, { status: 'done' });
+        const [after] = await sql<{ version: number }[]>`select version from tasks where id = ${id}`;
+        return { id, version: after?.version ?? 0, changed: true, approvedOriginal: rv.review_of };
+      }
+      throw badRequest('검토 업무의 상태는 원 업무에서 [승인]·[반려]로 처리해요 — 이 업무를 열면 원 업무 승인·반려 버튼이 있습니다');
+    }
+  }
   return sql.begin(async (tx) => {
     const { perms } = await loadTaskForUser(u, id, tx);
     const [cur] = await tx`select * , to_char(due_time,'HH24:MI') as due_time_s from tasks where id = ${id} for update`;

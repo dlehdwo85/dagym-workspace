@@ -21,7 +21,7 @@ import { v1445 } from './v1445.step.mjs';
 import { v21 } from './v21.step.mjs';
 import { v1447 } from './v1447.step.mjs';
 import { v1448 } from './v1448.step.mjs';
-import { panel1440 } from './panel1440.step.mjs';
+import { panel1440, listNarrow } from './panel1440.step.mjs';
 import { v283 } from './v283.step.mjs';
 
 const SHOTS = 'docs/screens';
@@ -2060,6 +2060,8 @@ await step('설정·Google 연동·관리자 화면', async () => {
   }
 });
 
+
+await step('점검 ①: 태블릿·좁은 창(768·1024·1100) 업무 목록 이름이 눌리지 않음', () => listNarrow({ owner, BASE, SHOTS }));
 await browser.close();
 srv.proc.kill();
 fake.server.close();

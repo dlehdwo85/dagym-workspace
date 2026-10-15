@@ -1899,6 +1899,17 @@ describe('대표 피드백 10/15 검토 중 업무', () => {
     await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done' });
     assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).reviewer, null, '완료되면 검토자 없음');
   });
+  test('점검 ②: [검토] 업무를 직접 "완료" = 원 업무 승인(원 업무가 검토 중에 멈추지 않음), 그 밖의 상태 변경은 400', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '검토 업무 완료 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, approvalRequired: false })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    const [rv] = await sql`select id from tasks where review_of = ${t} and deleted_at is null`;
+    assert.ok(rv, '[검토] 업무 생김');
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${rv.id}`, { status: 'on_hold' })).status, 400, '보류 등은 원 업무에서');
+    const r = await ctx.managerA.client.ok('PATCH', `/api/tasks/${rv.id}`, { status: 'done' });
+    assert.equal(r.approvedOriginal, t);
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done', '원 업무도 완료(승인)');
+    assert.equal((await sql`select status from tasks where id = ${rv.id}`)[0].status, 'done');
+  });
 });
 
 describe('WORKIN_V12 11번 상태는 담당자만 (대표·관리자 예외 없음)', () => {
