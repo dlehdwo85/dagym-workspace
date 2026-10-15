@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Copy, Loader2, Mail, MessageSquare, Send, Sparkles, Trash2 } from 'lucide-react';
 import { api, useApi } from './client';
 import { Button, cx, inputCls, toast } from './ui';
+import { KakaoSend } from './KakaoSend';
 
 export type AssistDraft = { channel: 'email' | 'sms' | 'kakao'; subject: string; body: string; attachmentIds: string[] };
 type Msg = { id: number; role: 'user' | 'assistant'; action: string; content: string; draft: AssistDraft | null; cost_krw: string | null; created_at: string };
@@ -56,7 +57,7 @@ export function TaskAssist({ taskId, onDraft }: { taskId: string; onDraft: (d: A
                     {m.draft.channel !== 'kakao' && <Button size="sm" variant="secondary" onClick={() => onDraft(m.draft!)} data-testid="assist-open-draft">
                       {m.draft.channel === 'sms' ? <MessageSquare /> : <Mail />}시안 창에서 열기</Button>}
                     <Button size="sm" variant="ghost" onClick={() => copy([m.draft!.subject, m.draft!.body].filter(Boolean).join('\n\n'))}><Copy />복사</Button>
-                    {m.draft.channel === 'kakao' && <span className="self-center text-xs text-ink-3">카카오톡 바로 보내기는 앱 키 발급 후 — 지금은 복사해서 보내 주세요</span>}
+                    {m.draft.channel === 'kakao' && <KakaoSend taskId={taskId} msgId={m.id} body={[m.draft.subject, m.draft.body].filter(Boolean).join('\n\n')} />}
                   </div>
                 </div>
               )}

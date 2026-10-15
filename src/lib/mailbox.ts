@@ -583,11 +583,24 @@ export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
 }
 
 /** 문자 A 방식(휴대폰 문자앱으로 넘김): 사람이 [보냈어요]를 누른 것만 기록 */
+/** V28-2A 카카오톡 공유 — 받는 사람은 카카오톡에서 고르므로 이름(선택)만 남긴다. [보냈어요]를 누른 것만 기록 */
+export const kakaoLogInput = z.object({ taskId: z.string().uuid(), to: z.string().trim().max(100).optional(), body: z.string().min(1).max(2000) });
+export async function logKakao(u: SessionUser, i: z.infer<typeof kakaoLogInput>, ip: string | null) {
+  await loadTaskForMail(u, i.taskId); // 못 보는 업무·다른 조직은 먼저 404
+  if (!(await canSend(u))) throw forbidden('카카오톡 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+  const sql = db(); const id = randomUUID();
+  const to = [i.to || '카카오톡'];
+  await sql`insert into outbox (id, tenant, channel, status, task_id, created_by, to_addrs, subject, body_text, message_id, sent_at)
+    values (${id}, ${tenantOf(u)}, 'kakao:handoff', 'sent', ${i.taskId}, ${u.id}, ${to}, ${'카카오톡'}, ${i.body}, ${`kakao-${id}`}, now())`;
+  await activity(sql, 'task', i.taskId, u.id, 'kakao_sent', { to, subject: i.body.slice(0, 40) });
+  await audit(sql, u.id, 'kakao.handoff', 'task', i.taskId, { outboxId: id }, ip);
+  return { id };
+}
 export const smsLogInput = z.object({ taskId: z.string().uuid(), to: z.array(z.string().trim().regex(/^[0-9+\-\s()]{8,20}$/, '전화번호 형식이 아닙니다')).min(1).max(20),
   body: z.string().max(2000), shareUrl: z.string().max(500).optional() });
 export async function logSms(u: SessionUser, i: z.infer<typeof smsLogInput>, ip: string | null) {
+  await loadTaskForMail(u, i.taskId); // 못 보는 업무·다른 조직은 먼저 404
   if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
-  await loadTaskForMail(u, i.taskId);
   const sql = db(); const id = randomUUID();
   let shareId: string | null = null;
   const tok = i.shareUrl?.match(/\/d\/([A-Za-z0-9_-]+)$/)?.[1];

@@ -58,7 +58,7 @@ export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: str
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', tone)} data-testid="mail-status">
                     {['queued', 'sending'].includes(i.status) ? <Loader2 className="size-3 animate-spin" /> : i.status === 'sent' ? <CheckCircle2 className="size-3" /> : i.status === 'failed' ? <AlertTriangle className="size-3" /> : null}{label}</span>
-                  <b className="min-w-0 flex-1 truncate">{i.channel === 'sms:handoff' ? `문자 · ${i.preview ?? ''}` : i.subject}</b>
+                  <b className="min-w-0 flex-1 truncate">{i.channel === 'sms:handoff' ? `문자 · ${i.preview ?? ''}` : i.channel === 'kakao:handoff' ? `카카오톡 · ${i.preview ?? ''}` : i.subject}</b>
                   <span className="text-xs text-ink-3">{i.sender_name} · {fmtDateTime(i.sent_at ?? i.created_at)}</span>
                 </div>
                 <p className="mt-0.5 truncate text-xs text-ink-2">받는 사람 {i.to_addrs.join(', ')}{i.files.length > 0 && ` · 첨부 ${i.files.length}개${i.as_link ? '(링크)' : ''}`}</p>

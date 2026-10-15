@@ -54,6 +54,35 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   await owner.keyboard.press('Escape');
   await owner.getByTestId('assist-reply').getByText('회신 초안입니다.').waitFor();
   await owner.screenshot({ path: `${SHOTS}/v28-1-task-assist.png` });
+  // V28-2A [카카오톡 초안] → [카카오톡으로 보내기](가짜 SDK: 텍스트 템플릿·업무 링크) → [보냈어요] → 보관함 기록, PC 는 QR 로 휴대폰에 넘김
+  await owner.addInitScript(() => { window.__KAKAO_STUB = { calls: [], Share: { sendDefault(o) { window.__KAKAO_STUB.calls.push(o); } } }; });
+  await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true,
+    anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ reply: '카톡 초안입니다.', subject: '', body: '소장님, 견적서 메일로 보내 드렸습니다. 확인 부탁드립니다.', attach: [] }) }], stop_reason: 'end_turn' }] }) });
+  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.getByTestId('assist-kakao').click();
+  const ks = owner.getByTestId('kakao-send').last();
+  await ks.getByTestId('kakao-open').click();
+  const sent = await owner.evaluate(() => window.__KAKAO_STUB.calls.at(-1));
+  assert.equal(sent.objectType, 'text');
+  assert.equal(sent.text, '소장님, 견적서 메일로 보내 드렸습니다. 확인 부탁드립니다.');
+  assert.match(sent.link.webUrl, new RegExp(`/tasks/${t.id}$`));
+  assert.equal(sent.buttonTitle, '업무 보기');
+  await ks.getByTestId('kakao-to').fill('관리소장님');
+  await owner.screenshot({ path: `${SHOTS}/v28-2a-kakao-pc.png` });
+  await ks.getByTestId('kakao-sent').click();
+  await owner.getByTestId('kakao-logged').waitFor();
+  await owner.getByTestId('mail-history').getByText('카카오톡 · 소장님, 견적서', { exact: false }).waitFor();
+  await owner.reload();
+  await owner.getByTestId('kakao-send').last().getByTestId('kakao-qr').click();
+  await owner.getByTestId('kakao-confirm').locator('img').waitFor();
+  // 휴대폰: QR 로 연 화면에서 같은 초안 → [카카오톡으로 보내기]
+  await owner.setViewportSize({ width: 390, height: 844 });
+  await owner.goto(`${BASE}/share/kakao?t=${t.id}`);
+  await owner.getByTestId('kakao-handoff').getByText('견적서 메일로 보내 드렸습니다', { exact: false }).first().waitFor();
+  await owner.getByTestId('kakao-handoff').getByTestId('kakao-open').click();
+  await owner.getByTestId('kakao-confirm').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/v28-2a-kakao-phone.png` });
+  await owner.setViewportSize({ width: 1366, height: 900 });
   // 전화 문의 등록 → 문의 업무
   await owner.goto(`${BASE}/tasks`);
   await owner.getByTestId('phone-inquiry-open').click();

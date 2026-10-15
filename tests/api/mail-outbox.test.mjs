@@ -271,6 +271,20 @@ describe('V21 2차: AI 초안·자료 추천 / 문자 넘기기 / 전화 문의'
     assert.equal((await ctx.owner.req('POST', '/api/mail/sms-log', { taskId, to: ['abc'], body: 'x' })).status, 400);
   });
 
+  test('V28-2A 카카오톡: [보냈어요]만 기록(보관함 kakao·받는 사람 이름 선택·업무 기록), 권한 없는 사람 403, 다른 조직 404', async () => {
+    const r = await ctx.owner.ok('POST', '/api/mail/kakao-log', { taskId, body: '견적서 보내 드렸습니다', to: '관리소장님' });
+    const [o] = await sql`select channel, status, to_addrs, subject from outbox where id = ${r.id}`;
+    assert.deepEqual([o.channel, o.status, o.to_addrs, o.subject], ['kakao:handoff', 'sent', ['관리소장님'], '카카오톡']);
+    const r2 = await ctx.owner.ok('POST', '/api/mail/kakao-log', { taskId, body: '두 번째' });
+    assert.deepEqual((await sql`select to_addrs from outbox where id = ${r2.id}`)[0].to_addrs, ['카카오톡'], '이름 없으면 카카오톡');
+    assert.ok((await sql`select 1 from activities where entity_id = ${taskId} and action = 'kakao_sent'`).length);
+    const h = await ctx.owner.ok('GET', `/api/tasks/${taskId}/mail?history=1`);
+    assert.ok(h.items.some((i) => i.channel === 'kakao:handoff' && i.preview === '견적서 보내 드렸습니다'), '업무 보관함에 보임');
+    assert.equal((await ctx.staffA.client.post('/api/mail/kakao-log', { taskId, body: 'x' })).status, 403);
+    assert.equal((await ctx.owner.req('POST', '/api/mail/kakao-log', { taskId, body: '' })).status, 400);
+    assert.equal((await ctx.staffB.client.post('/api/mail/kakao-log', { taskId, body: 'x' })).status, 404);
+  });
+
   test('전화 문의 등록 → 문의 업무(유형 단계·연락처), 메일 시안 받는 사람·회사 자동, 체험 계정 404', async () => {
     const r = await ctx.staffA.client.ok('POST', '/api/inquiries/phone', { site: 'hilink', inquiryType: '위탁운영', organization: '전화아파트', name: '관리소장', phone: '010-2222-3333',
       email: 'phone@client.test', region: '화성', message: '위탁 운영 문의 전화' });
