@@ -46,7 +46,18 @@ export async function userFromToken(token: string | undefined | null): Promise<S
   if (Date.now() - new Date(r.last_seen_at).getTime() > 86400_000) {
     await sql`update sessions set last_seen_at = now(), expires_at = now() + ${SESSION_DAYS + ' days'}::interval where id = ${id}`;
   }
+  markActiveDay(sql, r.id, r.tenant);
   return { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: id, isDemo: r.is_demo, platformAdmin: r.platform_admin, tenant: r.tenant, personal: r.kind === 'personal' };
+}
+
+/** 마케팅 퍼널 "실사용"(7일 안 3일 이상 접속)용 접속한 날 — 인스턴스마다 사람·날짜당 한 번만 기록, 실패해도 요청은 그대로 */
+const activeSeen = new Map<string, string>();
+function markActiveDay(sql: ReturnType<typeof db>, userId: string, tenant: string) {
+  const day = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+  if (activeSeen.get(userId) === day) return;
+  activeSeen.set(userId, day);
+  if (activeSeen.size > 5000) activeSeen.clear();
+  sql`insert into user_active_days (user_id, tenant, day) values (${userId}, ${tenant}, ${day}::date) on conflict do nothing`.catch(() => activeSeen.delete(userId));
 }
 
 /** 서버 컴포넌트·라우트 핸들러에서 현재 사용자 */

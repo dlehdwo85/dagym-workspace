@@ -11,13 +11,19 @@ import { usdKrw } from './provider';
  * 모든 금액은 ai_usage 의 정가(건별 결제 가정). 확보 크레딧·다음 달 확보·콘솔 실제 청구·AI 몫 비율은 운영자가 입력(app_settings ai_finance).
  */
 const KEY = 'ai_finance';
-/** 검토용 요금표(V27 확정안, 1인 월) — 계산·표시 전용. 실제 요금(plans)은 대표 확정 후 따로 바꾼다 */
-const REVIEW_PRICES = [
-  { code: 'free', name: '무료', perUserKrw: 0, note: '10명까지 — AI 한도로 관리' },
-  { code: 'basic', name: '베이직', perUserKrw: 2200, note: '' },
-  { code: 'standard', name: '스탠다드', perUserKrw: 4500, note: '' },
-  { code: 'pro', name: '프로', perUserKrw: 8500, note: '' },
+/** 검토용 요금표(V27 확정안) — 계산·표시 전용. 실제 요금(plans·plan_addons)은 대표 확정 후 따로 바꾼다
+ *  includedKrw = 1인당 포함 AI(정가 원가 기준 원분), 크레딧 faceKrw = 회사가 쓸 수 있는 AI 원가(판매가의 50%) */
+const REVIEW_PLANS = [
+  { code: 'basic', name: '베이직', perUserKrw: 2200, includedKrw: 300 },
+  { code: 'standard', name: '스탠다드', perUserKrw: 4500, includedKrw: 1000 },
+  { code: 'pro', name: '프로', perUserKrw: 8500, includedKrw: 3000 },
 ];
+const REVIEW_CREDITS = [
+  { code: 'credit_s', name: 'AI 크레딧 S', priceKrw: 9900, faceKrw: 4950 },
+  { code: 'credit_m', name: 'AI 크레딧 M', priceKrw: 29000, faceKrw: 14500 },
+  { code: 'credit_l', name: 'AI 크레딧 L', priceKrw: 59000, faceKrw: 29500 },
+];
+const FREE_COMPANY_CAP_KRW = 1000; // 무료: 회사당 AI 원가 상한(월)
 export const financeInput = z.object({
   securedUsd: z.number().min(0).max(1_000_000).optional(),        // 이번 달 확보 크레딧(예: Max $100)
   nextSecuredUsd: z.number().min(0).max(1_000_000).optional(),    // 다음 달 확보 예정
@@ -105,14 +111,21 @@ export async function computeForecast(sql: Sql) {
   const rechargeUsd = Math.max(0, forecastUsd * 1.2 - f.nextSecuredUsd);
   const units = [...unitRows.map((r) => ({ purpose: r.purpose, krw: Math.round(r.avg * rate * 10) / 10, n: r.n })),
     ...(docAvg.n ? [{ purpose: 'doc_job', krw: Math.round((docAvg.avg ?? 0) * rate * 10) / 10, n: docAvg.n }] : [])];
-  // 요금 역산(V28 로컬 요청): 실제 plans 가 아닌 "검토용 요금표"(V27 확정안)로 계산 — 무료는 적자/흑자가 아니라 AI 한도로 관리.
-  // 유료만 1인 AI 원가(보통 사용자, 추정/실측) × 2 와 1인 요금 × AI 몫 비율을 비교한다. plans 테이블 요금은 바꾸지 않는다
-  const needPerUser = tiers.medium * 2;
-  const pricing = REVIEW_PRICES.map((p) => {
-    if (!p.perUserKrw) return { code: p.code, name: p.name, free: true, note: p.note, perUserKrw: 0, aiPartKrw: 0, needKrw: needPerUser, deficit: false };
+  // AI 가격 결정(V28 대표 지시 "요금 역산으로 AI 요금 책정"): 실측 1인 월 원가(사용자 있으면 실측, 없으면 가정값)를 기준으로
+  // 요금제 포함 AI 와 AI 크레딧의 원가율·마진. 판정: 매출(요금 중 AI 몫 / 크레딧 판매가) ≥ 원가 × 2 → 적정, 아니면 가격 조정 필요.
+  // 무료·체험·내부는 대상 아님(무료는 회사당 상한만 표시). 데이터가 쌓이면 실측이 자동 갱신된다
+  const basis = measured.users > 0 ? { ...measured, source: 'measured' as const } : { ...tiers, source: 'assumed' as const };
+  const plansPricing = REVIEW_PLANS.map((p) => {
     const aiPart = Math.round(p.perUserKrw * f.aiShare);
-    return { code: p.code, name: p.name, free: false, note: p.note, perUserKrw: p.perUserKrw, aiPartKrw: aiPart, needKrw: needPerUser, deficit: aiPart < needPerUser };
+    const cost = Math.min(basis.medium, p.includedKrw);          // 보통 사용자 실제 원가(포함분 안에서)
+    const capRate = p.includedKrw / p.perUserKrw;                // 포함분을 다 쓰면 요금 대비 원가율
+    return { ...p, aiPartKrw: aiPart, costKrw: cost, heavyCostKrw: Math.min(basis.heavy, p.includedKrw), costRate: aiPart ? cost / aiPart : null,
+      capRate, marginKrw: aiPart - cost, ok: aiPart >= cost * 2 };
   });
+  const credits = REVIEW_CREDITS.map((c) => ({ ...c, costRate: c.faceKrw / c.priceKrw, marginKrw: c.priceKrw - c.faceKrw, ok: c.priceKrw >= c.faceKrw * 2,
+    mediumUserMonths: basis.medium > 0 ? Math.floor(c.faceKrw / basis.medium) : null }));
+  const pricing = { basis: { light: basis.light, medium: basis.medium, heavy: basis.heavy, users: basis.users, source: basis.source, days: Math.floor(dataDays) },
+    aiShare: f.aiShare, plans: plansPricing, credits, freeCompanyCapKrw: FREE_COMPANY_CAP_KRW };
   const usedPct = f.securedUsd > 0 ? Math.round((monthUsd / f.securedUsd) * 100) : null;
   return {
     month, rate, days, elapsed: Math.round(elapsed * 10) / 10, finance: f,

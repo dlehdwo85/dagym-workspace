@@ -5,7 +5,7 @@ import { ArrowRight, Building2, CheckCircle2, Loader2, MailCheck, User } from 'l
 import { AuthCard, PasswordInput } from '@/components/AuthCard';
 import { Button, Field, cx, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
-import { conversionTagsConfigured, setAdsConsent } from '@/components/conversion';
+import { captureUtm, conversionTagsConfigured, readUtm, setAdsConsent } from '@/components/conversion';
 
 /** V15 공개 가입: 개인으로 시작 / 팀(회사)으로 시작 → 확인 메일 */
 export default function SignupPage() {
@@ -18,6 +18,7 @@ export default function SignupPage() {
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<{ message: string; devLink?: string } | null>(null);
   const opened = useRef(Date.now());
+  useEffect(() => { captureUtm(); }, []);
   useEffect(() => { api('/api/auth/signup').then((r) => setEnabled(!!r.enabled)).catch(() => setEnabled(false)); }, []);
   const all = agree.terms && agree.privacy && agree.ai && agree.marketing;
 
@@ -27,7 +28,7 @@ export default function SignupPage() {
     setBusy(true);
     try {
       setAdsConsent(ads);
-      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, mode, agree: { ...agree, ads }, openedAt: opened.current } });
+      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, mode, agree: { ...agree, ads }, openedAt: opened.current, utm: readUtm() } });
       setDone(r);
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
   }

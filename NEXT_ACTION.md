@@ -472,6 +472,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 가입 전환 태그: NEXT_PUBLIC_META_PIXEL_ID · NEXT_PUBLIC_GA4_ID · NEXT_PUBLIC_GOOGLE_ADS_SIGNUP(AW-ID/라벨) · NEXT_PUBLIC_NAVER_WA. 하나라도 있으면 가입 화면에 "광고 효과 측정(선택)" 동의 칸, 동의한 브라우저에서만 이메일 확인(가입 완료) 순간 1회 로드(최대 1.5초). 앱 화면에는 넣지 않음. 동의는 consents(kind ads)에도 기록. 개인정보처리방침 문구 추가.
 - 플랫폼 AI 원가 전망 "요금 역산": 검토용 요금표(베이직 2,200·스탠다드 4,500·프로 8,500, 무료 10명 = AI 한도로 관리)로 계산, 부족/여유 표기와 설명 한 줄. plans 실요금은 그대로.
 
+## V28 AI 가격 결정 도구 + 마케팅 주간 퍼널 (2026-10-15)
+- /platform AI 원가 전망 "AI 가격 결정": 실측 1인 월 원가(사용자 있으면 실측, 데이터 쌓이면 자동 갱신)로 요금제 포함 AI(베이직 300·스탠다드 1,000·프로 3,000원분)·AI 크레딧(9,900/29,000/59,000원 = AI 4,950/14,500/29,500원분)의 원가율·마진. 판정: 매출(1인 요금 × AI 몫 / 크레딧 판매가) ≥ 원가 × 2 → 적정, 아니면 가격 조정 필요. 무료는 회사당 상한 1,000원만 표시, 체험·내부 제외. 검토용 값 — plans·plan_addons 실요금은 그대로.
+- 주간 퍼널: 가입 회사(회사형·내부/데모 제외) → 팀 초대 완료(활성 2명+) → 실사용(가입 7일 안 업무 5건+ 또는 3일+ 접속), utm_source 별(없으면 direct). /platform 표 + 읽기 전용 GET /api/public/funnel?weeks=8 (Authorization: Bearer FUNNEL_STATS_TOKEN, 16자 이상, 없으면 404, 숫자만).
+- UTM: 소개(/welcome)·가입 화면 첫 방문 utm_source·medium·campaign 30일 기억 → 가입 회사에 저장. 접속한 날(user_active_days) 하루 1번 기록. 마이그레이션 061_funnel.sql(추가형).
+- 대표/로컬 할 일: Vercel 환경변수 FUNNEL_STATS_TOKEN(임의 긴 값) 입력 → 마케팅 운영실에 전달. 이전 가입 회사는 UTM·접속일 기록이 없어 direct·접속 0일로 집계.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
