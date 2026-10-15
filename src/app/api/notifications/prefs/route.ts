@@ -14,8 +14,8 @@ export const GET = handler(async ({ user }) => {
       const p = prefs.find((x) => x.type === type);
       return { type, label, inApp: p?.in_app ?? true, push: p?.push ?? true };
     }),
-    settings: { dueSoonHours: s?.due_soon_hours ?? 24, eventReminderMinutes: s?.event_reminder_minutes ?? 60, taskReminderMinutes: s?.task_reminder_minutes ?? 60, quietStart: s?.quiet_start ?? null, quietEnd: s?.quiet_end ?? null,
-      briefingTime: s?.briefing_time ?? '08:30', briefingEnabled: s?.briefing_enabled ?? true, briefingWeekend: s?.briefing_weekend ?? false, requesterDueAlerts: s?.requester_due_alerts ?? true },
+    settings: { dueSoonHours: s?.due_soon_hours ?? 0, eventReminderMinutes: s?.event_reminder_minutes ?? 60, taskReminderMinutes: s?.task_reminder_minutes ?? 60, quietStart: s?.quiet_start ?? null, quietEnd: s?.quiet_end ?? null,
+      briefingTime: s?.briefing_time ?? '08:30', briefingEnabled: s?.briefing_enabled ?? true, briefingWeekend: s?.briefing_weekend ?? false, requesterDueAlerts: s?.requester_due_alerts ?? false },
     subscriptions: subs,
   };
 });
@@ -23,7 +23,7 @@ export const GET = handler(async ({ user }) => {
 export const PUT = handler(async ({ req, user }) => {
   const i = await body(req, z.object({
     types: z.array(z.object({ type: z.string(), inApp: z.boolean(), push: z.boolean() })).optional(),
-    settings: z.object({ dueSoonHours: z.number().int().min(1).max(168), eventReminderMinutes: z.number().int().min(0).max(1440).optional(), quietStart: zTime.nullable(), quietEnd: zTime.nullable(),
+    settings: z.object({ dueSoonHours: z.number().int().min(0).max(168), eventReminderMinutes: z.number().int().min(0).max(1440).optional(), quietStart: zTime.nullable(), quietEnd: zTime.nullable(),
       briefingTime: zTime.optional(), briefingEnabled: z.boolean().optional(), briefingWeekend: z.boolean().optional(),
       taskReminderMinutes: z.number().int().min(0).max(10080).optional(), requesterDueAlerts: z.boolean().optional() }).optional(),
   }));

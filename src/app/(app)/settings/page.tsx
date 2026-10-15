@@ -59,7 +59,7 @@ export default function Settings() {
               {[[0, '받지 않음'], [10, '10분 전'], [30, '30분 전'], [60, '1시간 전'], [120, '2시간 전'], [1440, '하루 전']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </Field>
-          <Field label="마감 임박 알림 (시간 전)"><input type="number" min={1} max={168} className={inputCls} value={s.dueSoonHours} onChange={(e) => setS({ ...s, dueSoonHours: Number(e.target.value) })} /></Field>
+          <Field label="마감 임박 알림 (시간 전, 0 = 받지 않음)"><input type="number" min={0} max={168} className={inputCls} value={s.dueSoonHours} onChange={(e) => setS({ ...s, dueSoonHours: Number(e.target.value) })} /></Field>
           {/* V8 8번 업무 미리 알림 기본값 (업무마다 🔔 로 바꿀 수 있음) */}
           <Field label="업무 미리 알림 (기본 — 날짜만 있으면 18시 기준)">
             <select className={inputCls} value={s.taskReminderMinutes ?? 60} onChange={(e) => setS({ ...s, taskReminderMinutes: Number(e.target.value) })} aria-label="업무 미리 알림 기본">
@@ -68,7 +68,7 @@ export default function Settings() {
           </Field>
           {/* V13 6번 내가 지시한 업무도 마감 알림 */}
           <Field label="내가 지시한 업무의 마감 알림">
-            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.requesterDueAlerts ?? true} onChange={(e) => setS({ ...s, requesterDueAlerts: e.target.checked })} aria-label="내가 지시한 업무의 마감 알림" data-testid="requester-due-alerts" />받기 (담당자 이름·상태 표시)</label>
+            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.requesterDueAlerts ?? false} onChange={(e) => setS({ ...s, requesterDueAlerts: e.target.checked })} aria-label="내가 지시한 업무의 마감 알림" data-testid="requester-due-alerts" />받기 (담당자 이름·상태 표시)</label>
           </Field>
           {/* V8 1번 아침 브리핑 */}
           <Field label="아침 브리핑 (오늘 할 일·일정 요약 알림)">

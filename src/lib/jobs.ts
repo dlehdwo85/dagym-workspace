@@ -19,7 +19,7 @@ async function dueNotifications() {
     select t.id, t.title, t.assignee_id, t.due_date, to_char(t.due_time,'HH24:MI') due_time
     from tasks t join users u on u.id = t.assignee_id left join user_settings s on s.user_id = u.id
     where t.deleted_at is null and t.status not in ('done','on_hold') and u.status = 'active' and t.due_date is not null
-      and ((t.due_date + coalesce(t.due_time, time '23:59')) at time zone 'Asia/Seoul') between now() and now() + make_interval(hours => coalesce(s.due_soon_hours, 24))
+      and ((t.due_date + coalesce(t.due_time, time '23:59')) at time zone 'Asia/Seoul') between now() and now() + make_interval(hours => coalesce(s.due_soon_hours, 0))
       -- V14 10번: 같은 업무·같은 날 알림은 가장 구체적인 1건 — 마감 당일은 "오늘 마감", 업무별 🔔 를 정했으면 그 알림만
       and t.due_date > (now() at time zone 'Asia/Seoul')::date and t.reminder_minutes is null`;
   let n = 0;
@@ -37,7 +37,8 @@ async function dueNotifications() {
   if (hour >= Number(process.env.DUE_DIGEST_HOUR ?? 9)) {
     over = await sql`
       select t.id, t.title, t.assignee_id, t.requested_by, t.created_by, t.due_date, (${today}::date - t.due_date)::int as days from tasks t
-      where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_date is not null and t.due_date < ${today}::date`;
+      -- 2026-10-15 대표: 기한 초과는 첫날(마감 다음 날) 1번만 — 그 뒤는 홈 "지연" 목록으로
+      where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_date is not null and t.due_date = ${today}::date - 1`;
     for (const t of over) {
       n += (await notify(sql, { userIds: [t.assignee_id, t.requested_by ?? t.created_by], type: 'overdue', title: `기한 지남: ${t.title}`,
         body: `마감일 ${t.due_date} · ${t.days}일 지났습니다`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
@@ -84,7 +85,7 @@ async function dueNotifications() {
       select t.id, t.title, t.status, t.requested_by, t.batch_id, a.name assignee_name from tasks t
         join users a on a.id = t.assignee_id join users r on r.id = t.requested_by left join user_settings rs on rs.user_id = r.id
       where t.id = any(${[...new Set(kinds.map((k) => k.id))]}::uuid[]) and t.requested_by is not null and t.requested_by <> t.assignee_id
-        and r.status = 'active' and coalesce(rs.requester_due_alerts, true) and t.status not in ('done','on_hold')`;
+        and r.status = 'active' and coalesce(rs.requester_due_alerts, false) and t.status not in ('done','on_hold')`;
     type Info = (typeof info)[number];
     const groups = new Map<string, { k: (typeof kinds)[number]; ts: Info[] }>();
     for (const k of kinds) {

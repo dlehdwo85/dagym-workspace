@@ -625,11 +625,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     }
     // WORKIN_V3 지시자에게: 담당자가 완료하거나 검토를 요청하면 알림 (지시자 본인이 한 변경은 제외)
     const requester = (set.requested_by ?? cur.requested_by) as string | null;
-    // V6 15번: 진행 중·검토 요청·보류·완료·다시 진행 등 상태가 바뀔 때마다
-    if (requester && requester !== u.id && set.status && set.status !== cur.status && statusEvent !== 'review_requested') {
-      const verb = set.status === 'done' ? '완료했습니다' : statusEvent === 'review_requested' ? '완료하고 검토를 요청했습니다'
-        : set.status === 'in_progress' ? (cur.status === 'todo' ? '시작했습니다' : '다시 진행합니다') : set.status === 'on_hold' ? '보류했습니다' : '할 일로 되돌렸습니다';
-      const head = set.status === 'done' ? '완료' : statusEvent === 'review_requested' ? '검토 요청' : STATUS_LABEL[set.status as keyof typeof STATUS_LABEL] ?? '상태 변경';
+    // 2026-10-15 대표: 알림은 중요한 것만 — 지시자에게는 완료·보류만(검토 요청은 위에서 따로). 시작·다시 진행·되돌림은 보내지 않음
+    if (requester && requester !== u.id && set.status && set.status !== cur.status && statusEvent !== 'review_requested' && (set.status === 'done' || set.status === 'on_hold')) {
+      const verb = set.status === 'done' ? '완료했습니다' : '보류했습니다';
+      const head = set.status === 'done' ? '완료' : '보류';
       await notify(tx, { userIds: [requester], type: 'task_done_for_requester',
         title: `${head}: ${title}`, body: `${u.name}님이 '${title}'을(를) ${verb}`,
         link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reqst:${id}:${upd.version}` });
@@ -878,11 +877,7 @@ export async function markAcked(u: SessionUser, id: string) {
   const [t] = await sql<{ title: string; requested_by: string | null; created_by: string }[]>`update tasks set assignee_ack_at = now()
     where id = ${id} and assignee_id = ${u.id} and assignee_ack_at is null and deleted_at is null returning title, requested_by, created_by`;
   if (!t) return false;
-  const to = t.requested_by ?? t.created_by;
-  if (to && to !== u.id) {
-    await notify(sql, { userIds: [to], type: 'task_done_for_requester', title: `확인 완료: ${t.title}`, body: `${u.name}님이 업무를 확인했습니다`,
-      link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `ack:${id}:${u.id}` });
-  }
+  // 2026-10-15 대표: "확인함"은 알림으로 보내지 않고 목록·상세의 "확인함" 표시로만
   return true;
 }
 

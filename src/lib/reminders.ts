@@ -29,10 +29,10 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
   const until = now.plus({ days });
   const today = todaySeoul();
   const [s] = await sql<{ ev: number; task: number; soon: number; btime: string; bon: boolean; bweekend: boolean; req: boolean }[]>`
-    select coalesce(requester_due_alerts, true) req, coalesce(event_reminder_minutes, 60) ev, coalesce(task_reminder_minutes, 60) task, coalesce(due_soon_hours, 24) soon,
+    select coalesce(requester_due_alerts, false) req, coalesce(event_reminder_minutes, 60) ev, coalesce(task_reminder_minutes, 60) task, coalesce(due_soon_hours, 0) soon,
       to_char(coalesce(briefing_time, time '08:30'), 'HH24:MI') btime, coalesce(briefing_enabled, true) bon, coalesce(briefing_weekend, false) bweekend
     from user_settings where user_id = ${u.id}`;
-  const st = s ?? { ev: 60, task: 60, soon: 24, btime: '08:30', bon: true, bweekend: false, req: true };
+  const st = s ?? { ev: 60, task: 60, soon: 0, btime: '08:30', bon: true, bweekend: false, req: false };
   const out: Upcoming[] = [];
   const push = (key: string, at: DateTime, title: string, body: string, link: string) => {
     if (at <= now || at > until) return;
