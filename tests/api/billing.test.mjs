@@ -6,6 +6,7 @@ import { createHash, createDecipheriv, randomInt } from 'node:crypto';
 import { Client, bootstrap, resetDb, startServer, testDb, tick, BASE } from '../helpers.mjs';
 
 const MID = 'nictest00m', KEY = 'TESTKEYabcdefghij0123456789', BMID = 'nictest04m', BKEY = 'BILLKEY0123456789zzzz';
+const LIVE_MID = 'walkin001m', LIVE_KEY = 'REAL-KEY-NEVER-USED-IN-TEST'; // V36 8 실결제 소액 시험만 실 상점(가짜 서버)
 const NP_PORT = 3202, NP = `http://localhost:${NP_PORT}`;
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 const state = { failBids: new Set(), calls: [] };
@@ -33,15 +34,16 @@ function fakeNice() {
       }
       if (p === '/webapi/billing/billkey_remove.jsp') return j({ ResultCode: f.SignData === sha(f.MID + f.EdiDate + f.Moid + f.BID + BKEY) ? 'F101' : 'F113', BID: f.BID });
       if (p === '/webapi/pay_process.jsp') {
-        if (f.SignData !== sha(f.AuthToken + f.MID + f.Amt + f.EdiDate + KEY)) return j({ ResultCode: 'F113', ResultMsg: '위변조' });
-        const sig = sha(f.TID + f.MID + f.Amt.padStart(12, '0') + KEY);
+        const PK = f.MID === LIVE_MID ? LIVE_KEY : KEY;
+        if (f.SignData !== sha(f.AuthToken + f.MID + f.Amt + f.EdiDate + PK)) return j({ ResultCode: 'F113', ResultMsg: '위변조' });
+        const sig = sha(f.TID + f.MID + f.Amt.padStart(12, '0') + PK);
         // 시험: 인증 토큰 앞글자로 결제 수단 흉내(vb = 가상계좌 발급, bk = 계좌이체)
         if (f.AuthToken.startsWith('vb')) return j({ ResultCode: '4100', ResultMsg: '가상계좌 발급 성공', PayMethod: 'VBANK', TID: f.TID, MID: f.MID, Amt: f.Amt.padStart(12, '0'), VbankBankName: '국민', VbankNum: '12345678901234', VbankExpDate: '20991231', Signature: sig });
         if (f.AuthToken.startsWith('bk')) return j({ ResultCode: '4000', ResultMsg: '계좌이체 성공', PayMethod: 'BANK', TID: f.TID, MID: f.MID, Amt: f.Amt.padStart(12, '0'), BankName: '신한', Signature: sig });
         return j({ ResultCode: '3001', ResultMsg: '카드 결제 성공', TID: f.TID, MID: f.MID, Amt: f.Amt.padStart(12, '0'), AuthCode: '11112222', CardName: '신한', CardNo: '45678912****9876', Signature: sig });
       }
       if (p === '/webapi/cancel_process.jsp') {
-        const k = f.MID === BMID ? BKEY : KEY;
+        const k = f.MID === BMID ? BKEY : f.MID === LIVE_MID ? LIVE_KEY : KEY;
         if (f.SignData !== sha(f.MID + f.CancelAmt + f.EdiDate + k)) return j({ ResultCode: '2003', ResultMsg: '위변조' });
         return j({ ResultCode: '2001', ResultMsg: '취소 성공', CancelAmt: f.CancelAmt, TID: f.TID });
       }
@@ -257,5 +259,30 @@ describe('18차 나이스페이 결제', () => {
     assert.ok(state.calls.length > 0);
     assert.ok(state.calls.every((c) => !['walkin001m', 'walkin002m'].includes(c.f.MID)), '실 MID 로 나간 요청 없음');
     assert.ok(!JSON.stringify(state.calls).includes('REAL-'), '실 키로 서명한 흔적 없음');
+  });
+  test('V36 8 실결제 소액 시험: 운영자·시험 회사·확인 문구·100원·실 상점 → 요금제 그대로 → 하루 3회 → 1시간 뒤 자동 취소(실 상점으로)', async () => {
+    await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
+    const t = await platform.ok('POST', '/api/platform/pay-test', { name: '실결제시험' });
+    assert.equal((await platform.req('POST', `/api/platform/pay-test/${t.id}/live`, { confirm: '네' })).status, 400, '확인 문구');
+    assert.equal((await ctx.staffA.client.post(`/api/platform/pay-test/${t.id}/live`, { confirm: '실결제 100원' })).status, 404);
+    assert.equal((await platform.req('POST', `/api/platform/pay-test/${tid}/live`, { confirm: '실결제 100원' })).status, 400, '시험 회사만');
+    const w = await platform.ok('POST', `/api/platform/pay-test/${t.id}/live`, { confirm: '실결제 100원' });
+    assert.equal(w.mode, 'live'); assert.equal(w.params.MID, LIVE_MID); assert.equal(Number(w.params.Amt), 100);
+    assert.equal(w.params.SignData, sha(w.params.EdiDate + LIVE_MID + w.params.Amt + LIVE_KEY));
+    const r = await postForm('/api/billing/nicepay/return', { AuthResultCode: '0000', AuthResultMsg: '인증 성공', AuthToken: 'tok900', PayMethod: 'CARD', MID: LIVE_MID, Moid: w.params.Moid, Amt: w.params.Amt,
+      TxTid: `${LIVE_MID}01012610141200009000`, Signature: sha('tok900' + LIVE_MID + w.params.Amt + LIVE_KEY), NextAppURL: `${NP}/webapi/pay_process.jsp`, NetCancelURL: `${NP}/webapi/cancel_process.jsp` });
+    assert.equal(r.headers.get('location'), `${BASE}/platform?tab=paytest&check=${w.paymentId}`);
+    assert.equal((await sql`select status from payments where id = ${w.paymentId}`)[0].status, 'paid');
+    assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = ${t.id}`)[0].plan_code, 'trial', '요금제 그대로');
+    const c = await platform.ok('GET', `/api/platform/pay-test/check?payment=${w.paymentId}`);
+    assert.equal(c.checks.find((x) => x.key === 'plan').state, 'later'); assert.equal(c.payment.live, true);
+    await platform.ok('POST', `/api/platform/pay-test/${t.id}/live`, { confirm: '실결제 100원' });
+    await platform.ok('POST', `/api/platform/pay-test/${t.id}/live`, { confirm: '실결제 100원' });
+    assert.equal((await platform.req('POST', `/api/platform/pay-test/${t.id}/live`, { confirm: '실결제 100원' })).status, 429, '하루 3번');
+    await sql`update payments set paid_at = now() - interval '2 hours' where id = ${w.paymentId}`;
+    await tick();
+    assert.equal((await sql`select status from payments where id = ${w.paymentId}`)[0].status, 'canceled');
+    assert.equal(state.calls.filter((x) => x.path.endsWith('cancel_process.jsp')).at(-1).f.MID, LIVE_MID, '실 상점으로 취소');
+    assert.ok((await sql`select 1 from audit_logs where action = 'platform.live_smoke_started'`).length);
   });
 });

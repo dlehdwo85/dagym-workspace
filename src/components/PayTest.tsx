@@ -17,7 +17,7 @@ const ST: Record<string, string> = { pending: '대기', paid: '결제 완료', f
 
 export function PayTest() {
   const sp = useSearchParams();
-  const list = useApi<{ tenants: any[]; plans: { code: string; name: string }[] }>('/api/platform/pay-test');
+  const list = useApi<{ tenants: any[]; plans: { code: string; name: string }[]; liveAvailable?: boolean }>('/api/platform/pay-test');
   const [checkId, setCheckId] = useState<string | null>(sp.get('check'));
   const [busy, setBusy] = useState(false);
   const [pick, setPick] = useState<Record<string, { plan: string; kind: 'monthly' | 'annual'; pm: 'CARD' | 'BANK' | 'VBANK' }>>({});
@@ -36,6 +36,17 @@ export function PayTest() {
     try {
       const r = await api(`/api/platform/pay-test/${t.id}/window`, { body: { kind: o.kind, planCode: o.plan, payMethod: o.pm } });
       if (r.mode !== 'test') throw new Error('시험 상점이 아닙니다 — 결제창을 열지 않습니다');
+      await launchNicepay(r);
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  /** V36 8 실결제 소액 시험(대표 승인) — 실 상점 100원, 1시간 뒤 자동 취소 */
+  async function live(t: any) {
+    const c = prompt('실제 카드로 100원이 결제됩니다(1시간 뒤 자동 취소, 하루 3번까지). 계속하려면 "실결제 100원" 을 입력하세요.');
+    if (c === null) return;
+    setBusy(true);
+    try {
+      const r = await api(`/api/platform/pay-test/${t.id}/live`, { body: { confirm: c } });
+      if (r.mode !== 'live' || Number(r.params.Amt) !== 100) throw new Error('실결제 소액 시험 조건이 아닙니다 — 결제창을 열지 않습니다');
       await launchNicepay(r);
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
@@ -63,12 +74,13 @@ export function PayTest() {
                 <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={o.kind} onChange={(e) => set({ kind: e.target.value as never })} aria-label="주기"><option value="monthly">월</option><option value="annual">연간</option></select>
                 <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={o.pm} onChange={(e) => set({ pm: e.target.value as never })} aria-label="결제 수단"><option value="CARD">카드</option><option value="BANK">계좌이체</option><option value="VBANK">가상계좌</option></select>
                 <Button size="sm" onClick={() => pay(t)} disabled={busy} data-testid="pay-test-open">이 회사로 결제창 열기</Button>
+                {list.data?.liveAvailable && <Button size="sm" variant="danger" onClick={() => live(t)} disabled={busy} data-testid="pay-live-open">실결제 100원 시험</Button>}
               </div>
               {(t.payments ?? []).length > 0 && (
                 <ul className="space-y-0.5 text-xs">
                   {t.payments.map((p: any) => (
                     <li key={p.id} className="flex flex-wrap items-center gap-2">
-                      <span className="text-ink-3">{fmtDateTime(p.paid_at ?? p.created_at)}</span><span>{p.plan_code ?? p.addon_code} · {won(p.amount)} · {ST[p.status] ?? p.status}</span>
+                      <span className="text-ink-3">{fmtDateTime(p.paid_at ?? p.created_at)}</span><span>{p.live ? <b className="text-red-700">실결제 시험</b> : p.plan_code ?? p.addon_code} · {won(p.amount)} · {ST[p.status] ?? p.status}</span>
                       <button type="button" className="text-brand-600 underline" onClick={() => setCheckId(p.id)}>확인</button>
                     </li>
                   ))}

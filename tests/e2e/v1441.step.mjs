@@ -17,6 +17,11 @@ export async function v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today })
     await blk.waitFor();
     assert.ok(!(await blk.innerText()).includes('·'), '휴대폰 주 보기: 사람 머리글자 없음');
     assert.equal(await m.locator('[data-narrow-block]').filter({ hasText: '판교' }).count(), 1, '블록은 제목만 줄바꿈');
+    // V36 6: 블록 글씨 12px 이상, 2시간 블록만 아래에 시각, 1시간 업무 블록은 제목만(시각이 제목을 가리지 않음)
+    const nb = m.locator('[data-narrow-block]').filter({ hasText: '판교' }).first();
+    assert.ok((await nb.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))) >= 12, '블록 글씨 12px 이상');
+    assert.equal(await nb.locator('[data-block-time]').count(), 1, '긴 블록은 시각 표시');
+    assert.equal(await m.locator('[data-narrow-block]').filter({ hasText: '고천' }).locator('[data-block-time]').count(), 0, '짧은 블록은 시각 생략');
     const slot = await m.locator('.fc-timegrid-slot').first().evaluate((el) => el.getBoundingClientRect().height);
     assert.ok(Math.abs(slot - 52) <= 1, `주 칸 52px ${slot}`);
     assert.match(await m.locator('[data-axis-label]').first().innerText(), /오[전후]\s*\d+시/);

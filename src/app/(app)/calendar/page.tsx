@@ -407,7 +407,7 @@ function CalendarPage() {
             slotLabelContent={mobile ? (a) => { const h = Number(seoulTime(a.date).slice(0, 2)); return <span className="block text-center text-[10px] leading-[1.1]" data-axis-label><span className="block text-ink-3">{h < 12 ? '오전' : '오후'}</span>{h % 12 || 12}시</span>; } : undefined}
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
             allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime={slotMin} scrollTime="08:00:00"
-            slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap eventMinHeight={28} eventShortHeight={30}
+            slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap eventMinHeight={mobile ? 34 : 28} eventShortHeight={30}
             editable selectable selectMirror droppable longPressDelay={350}
             events={fcEvents}
             datesSet={(a: DatesSetArg) => { setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view2', a.view.type); } catch {} keepInUrl({ view: a.view.type, date: seoulDate(a.view.calendar.getDate()) }); }}
@@ -436,9 +436,16 @@ function CalendarPage() {
                 <div className="line-clamp-2 min-w-0 whitespace-normal break-all px-0.5 text-[11px] font-semibold leading-[1.2]" data-allday-chip="1" {...attrs}>{icon}{label}</div>
               );
               if (narrow && timed) return (
-                <div className={cx('flex h-full min-w-0 flex-col overflow-hidden leading-[1.2]', arg.view.type === 'timeGridWeek' ? 'text-[11px]' : 'text-[12px]')} data-narrow-block="1" {...attrs}>
-                  <span className={cx('min-h-0 shrink overflow-hidden whitespace-normal break-all font-semibold', done && 'line-through opacity-80')}>{icon}{label}</span>
-                  {mins >= 60 && when && <span className="shrink-0 truncate text-[10px] font-normal opacity-85">{when}</span>}
+                // V36 6: 제목 먼저(12px·두 줄, 긴 블록은 세 줄), 시각은 1시간 30분 이상 블록에서만 아래 작게 — 짧은 블록에서 시각이 제목을 가리지 않게
+                <div className="flex h-full min-w-0 flex-col overflow-hidden text-[12px] leading-[1.2]" data-narrow-block="1" {...attrs}>
+                  <span className={cx('min-h-0 overflow-hidden whitespace-normal break-all font-semibold', mins >= 90 ? 'line-clamp-3' : 'line-clamp-2', done && 'line-through opacity-80')}>{icon}{label}</span>
+                  {mins >= 90 && when && <span className="mt-auto shrink-0 truncate text-[10px] font-normal opacity-85" data-block-time>{when}</span>}
+                </div>
+              );
+              // V36 6: 휴대폰 일 보기 짧은 블록 — 시각은 제목 옆 작게(아래 줄로 내려 제목을 가리지 않음)
+              if (mobile && timed && mins < 90) return (
+                <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-all px-1 text-[12px] leading-[1.25]" {...attrs}>
+                  <span className={cx('font-semibold', done && 'line-through opacity-80')}>{icon}{label}</span>{when && <span className="ml-1 text-[11px] font-normal opacity-85" data-block-time>{when}</span>}
                 </div>
               );
               if (timed && mins >= 45) return (

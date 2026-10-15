@@ -6,7 +6,7 @@ import { ArrowUpDown, Bell, CalendarDays, Check, Mic, Plus, Repeat, Sparkles, Us
 import { recurPresets } from './pickers';
 import { parseTaskText } from '@/lib/nlparse';
 import { correctVoice, learnVoice, listen, voiceAvailable, voiceErrorToast } from './voice';
-import { TIMES, timeLabel } from './DateTimePickers';
+import { TimePick, timeLabel } from './DateTimePickers';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import { Avatar, DueChip, cx, toast, todayStr } from './ui';
@@ -87,9 +87,7 @@ function TimeGrid({ value, onChange, label }: { value: string | null | undefined
         ))}
       </div>
       <label className="mt-1.5 flex items-center gap-2 text-sm"><span className="shrink-0 text-xs text-ink-2">직접</span>
-        <select className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-sm" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} aria-label={`${label} 시각`}>
-          <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
-        </select>
+        <TimePick className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-sm" value={value} onChange={onChange} ariaLabel={`${label} 시각`} />
       </label>
     </div>
   );

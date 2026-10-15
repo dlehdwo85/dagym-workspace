@@ -23,7 +23,7 @@ import { TaskMail } from '@/components/TaskMail';
 import { TaskAssist, type AssistDraft } from '@/components/TaskAssist';
 import { DropZone, UploadProgress } from '@/components/upload';
 import { BellChip, DuePicker, warnAway } from '@/components/TaskQuick';
-import { TIMES, timeLabel } from '@/components/DateTimePickers';
+import { TimePick } from '@/components/DateTimePickers';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { PRIORITY_LABEL, STATUS_LABEL, STATUSES, type TaskStatus } from '@/lib/types';
 import { encodeMentions } from '@/lib/mentions';
@@ -630,10 +630,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <span className="flex pl-2 flex-wrap items-center gap-1.5" data-testid="detail-due" data-value={t.due_date ?? ''}>
                 <DuePicker value={t.due_date} status={t.status} label="마감일" emptyText="마감일 없음" onChange={(v) => patch({ dueDate: v, ...(v ? {} : { dueTime: null }) })} />
                 {t.due_date && (
-                  <select className="h-8 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={t.due_time?.slice(0, 5) ?? ''} onChange={(e) => patch({ dueTime: e.target.value || null })} aria-label="마감 시각">
-                    <option value="">시각 없음</option>
-                    {(TIMES.includes(t.due_time?.slice(0, 5) ?? '') || !t.due_time ? TIMES : [...TIMES, t.due_time.slice(0, 5)].sort()).map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
-                  </select>
+                  <TimePick className="h-8 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={t.due_time?.slice(0, 5) ?? ''} onChange={(v) => patch({ dueTime: v })} ariaLabel="마감 시각" emptyLabel="시각 없음" />
                 )}
                 {data.risk?.risk && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle className="size-3.5" />마감 위험</span>}
               </span>

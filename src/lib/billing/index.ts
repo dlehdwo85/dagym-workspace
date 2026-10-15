@@ -6,7 +6,7 @@ import { HttpError, badRequest, notFound } from '../errors';
 import { audit, logError } from '../log';
 import { notify } from '../notifications';
 import { tenantOf, type SessionUser } from '../types';
-import { approveAuth, approveBilling, cancelPayment, npConf, npTestConf, parseNiceForm, registerBillKey, removeBillKey, windowParams, type NpConf } from './nicepay';
+import { approveAuth, approveBilling, cancelPayment, npConf, npLiveConf, npTestConf, parseNiceForm, registerBillKey, removeBillKey, windowParams, type NpConf } from './nicepay';
 
 /**
  * 18차 결제(나이스페이). 금액은 VAT 별도 요금 × 1.1 (원 단위 반올림).
@@ -19,7 +19,10 @@ const today = () => DateTime.now().setZone(TZ).toISODate()!;
 const VAT = 1.1;
 const conf = () => { const c = npConf(); if (!c) throw new HttpError(503, 'billing_off', '결제가 아직 설정되지 않았습니다(NICEPAY 환경변수)'); return c; };
 /** V32 1: 결제 시험 회사의 결제는 늘 시험 상점으로(운영이 live 여도) */
-const confFor = (p: { meta?: { test?: boolean } | null }) => (p.meta?.test ? npTestConf() : conf());
+const confFor = (p: { meta?: { test?: boolean; liveSmoke?: boolean } | null }) => {
+  if (p.meta?.liveSmoke) { const c = npLiveConf(); if (!c) throw new HttpError(503, 'billing_off', '실 상점 키가 없습니다'); return c; } // V36 8 실결제 소액 시험
+  return p.meta?.test ? npTestConf() : conf();
+};
 const moid = (kind: string) => `WK${kind[0].toUpperCase()}${DateTime.now().setZone(TZ).toFormat('yyMMddHHmmss')}${newToken(6).replace(/[^A-Za-z0-9]/g, '').slice(0, 6)}`;
 
 async function requireBillingAdmin(u: SessionUser) {
@@ -105,7 +108,7 @@ async function sendReceipt(sql: Sql, paymentId: string) {
       left join users u on u.id = p.created_by left join users o on o.id = t.owner_user_id where p.id = ${paymentId} and p.status = 'paid'`;
     if (!p?.email) return;
     const pm = PM_LABEL[p.meta?.payMethod ?? 'CARD'] ?? '카드';
-    const what = p.kind === 'addon' ? `추가 팩 ${p.addon_code}` : `${p.plan_code} ${p.kind === 'annual' ? '1년' : '1개월'}`;
+    const what = p.meta?.liveSmoke ? '실결제 소액 시험(1시간 뒤 자동 취소)' : p.kind === 'addon' ? `추가 팩 ${p.addon_code}` : `${p.plan_code} ${p.kind === 'annual' ? '1년' : '1개월'}`;
     const when = new Date(p.paid_at ?? Date.now()).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
     const receipt = p.tid ? `https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0` : '';
     const { sendMail } = await import('../mail');
@@ -166,10 +169,36 @@ export async function platformTestWindow(u: SessionUser, tenant: string, i: z.in
   return openWindow(tenant, u, i, origin, npTestConf(), true);
 }
 
+/**
+ * V36 8 실결제 소액 시험(대표 승인): 플랫폼 운영자 + 결제 시험 회사 + 100원 고정 + 확인 문구 + 하루 3회. 실 상점 MID 로 결제창을 열고,
+ * 요금제는 바꾸지 않으며 승인 1시간 뒤 정기 실행이 자동 취소한다(시험 결제 자동 취소와 같은 경로). 감사 기록.
+ */
+export const LIVE_SMOKE_AMOUNT = 100;
+export const liveSmokeInput = z.object({ confirm: z.string(), payMethod: z.enum(['CARD', 'BANK']).default('CARD') });
+export async function platformLiveSmoke(u: SessionUser, tenant: string, i: z.infer<typeof liveSmokeInput>, origin: string, ip: string | null) {
+  if (!u.platformAdmin || u.support) throw notFound();
+  if (i.confirm.trim() !== '실결제 100원') throw badRequest('확인 문구 "실결제 100원"을 그대로 입력하세요');
+  const sql = db();
+  const [t] = await sql<{ is_test: boolean }[]>`select is_test from tenants where id = ${tenant} and deleted_at is null`;
+  if (!t?.is_test) throw badRequest('결제 시험 회사에서만 열 수 있습니다');
+  const c = npLiveConf();
+  if (!c) throw new HttpError(503, 'billing_off', '실 상점 키(NICEPAY_PAY_MID/KEY)가 없습니다');
+  const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from payments where meta->>'liveSmoke' = 'true' and created_at > now() - interval '1 day'`;
+  if (n >= 3) throw new HttpError(429, 'too_many', '실결제 소액 시험은 하루 3번까지입니다');
+  const m = moid('addon');
+  const [pay] = await sql<{ id: string }[]>`insert into payments (tenant, kind, moid, amount, created_by, meta)
+    values (${tenant}, 'addon', ${m}, ${LIVE_SMOKE_AMOUNT}, ${u.id}, ${sql.json({ window: true, payMethod: i.payMethod, liveSmoke: true } as never)}) returning id`;
+  await audit(sql, u.id, 'platform.live_smoke_started', 'payment', pay.id, { tenant, amount: LIVE_SMOKE_AMOUNT, mid: c.mid }, ip);
+  const base = process.env.APP_URL || origin;
+  return { paymentId: pay.id, mode: c.mode, script: 'https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js',
+    params: windowParams(c, { moid: m, amount: LIVE_SMOKE_AMOUNT, goodsName: 'Workin live smoke', returnUrl: `${base}/api/billing/nicepay/return`, buyerEmail: u.email, payMethod: i.payMethod }) };
+}
+
 /** 전체 취소된 결제가 요금제를 바꿨다면 결제 전 상태로 되돌림 */
 async function revertPlan(sql: Sql, p: any) {
   const prev = p.meta?.prev;
   if (!prev) return false;
+  if (p.meta?.liveSmoke) return false; // 요금제를 바꾸지 않았으므로 되돌릴 것 없음
   if (p.kind === 'addon' && p.addon_code) {
     await sql`update tenant_subscriptions set addons = jsonb_set(addons, ${[p.addon_code]}, to_jsonb(greatest(coalesce((addons->>${p.addon_code})::int, 0) - 1, 0))), updated_at = now() where tenant = ${p.tenant}`;
   } else {
@@ -180,7 +209,8 @@ async function revertPlan(sql: Sql, p: any) {
   return true;
 }
 
-async function applyPaid(sql: Sql, p: { id: string; tenant: string; kind: string; plan_code: string | null; addon_code: string | null; amount: number }) {
+async function applyPaid(sql: Sql, p: { id: string; tenant: string; kind: string; plan_code: string | null; addon_code: string | null; amount: number; meta?: { liveSmoke?: boolean } | null }) {
+  if (p.meta?.liveSmoke) return; // 실결제 소액 시험: 요금제·팩 반영 없음(1시간 뒤 자동 취소)
   if (p.kind === 'annual' && p.plan_code) await activate(sql, p.tenant, p.plan_code, 'annual', p.amount);
   if (p.kind === 'subscription' && p.plan_code) await activate(sql, p.tenant, p.plan_code, 'monthly', p.amount); // 결제창 월 결제(빌링 결제는 여기로 오지 않음)
   if (p.kind === 'addon' && p.addon_code) {
@@ -201,13 +231,13 @@ export async function handleReturn(raw: string) {
   // 가상계좌: 계좌 발급만 된 상태 — 입금 통보(4110)가 오면 결제 완료
   if (r.ok && 'vbank' in r && r.vbank) {
     await sql`update payments set tid = ${r.tid ?? null}, result_code = ${r.code ?? null}, result_msg = '입금 대기', meta = meta || ${sql.json({ payMethod: 'VBANK', vbank: r.vbank })}, updated_at = now() where id = ${p.id} and status = 'pending'`;
-    return { ok: true, vbank: true, msg: `${r.vbank.bank} ${r.vbank.num} 으로 입금하면 바로 적용됩니다`, paymentId: p.id as string, test: !!p.meta?.test };
+    return { ok: true, vbank: true, msg: `${r.vbank.bank} ${r.vbank.num} 으로 입금하면 바로 적용됩니다`, paymentId: p.id as string, test: !!(p.meta?.test || p.meta?.liveSmoke) };
   }
   const upd = await sql`update payments set status = ${r.ok ? 'paid' : 'failed'}, tid = ${('tid' in r ? r.tid : a.TxTid) ?? null}, result_code = ${r.code ?? null}, result_msg = ${r.msg ?? null},
     card_name = ${('cardName' in r ? r.cardName : null) ?? null}, card_no = ${('cardNo' in r ? r.cardNo : null) ?? null}, auth_code = ${('authCode' in r ? r.authCode : null) ?? null},
     paid_at = ${r.ok ? new Date() : null}, meta = meta || ${sql.json({ payMethod: ('payMethod' in r ? r.payMethod : 'CARD') ?? 'CARD' })}, updated_at = now() where id = ${p.id} and status = 'pending' returning id`;
   if (r.ok && upd.length) { await applyPaid(sql, p); await sendReceipt(sql, p.id); }
-  return { ok: r.ok, vbank: false, msg: r.msg, paymentId: p.id as string, test: !!p.meta?.test };
+  return { ok: r.ok, vbank: false, msg: r.msg, paymentId: p.id as string, test: !!(p.meta?.test || p.meta?.liveSmoke) };
 }
 
 const NOTI_IPS = ['121.133.126.10', '121.133.126.11', '211.33.136.39'];
@@ -229,7 +259,8 @@ export async function handleNotification(raw: string, ip: string | null) {
   if (!ins.length) return 'OK'; // 같은 통보 재전송
   const [p] = await sql<any[]>`select * from payments where moid = ${a.MOID ?? a.Moid ?? ''}`;
   const tc = npTestConf();
-  const midOk = p?.meta?.test ? (a.MID === tc.mid || a.MID === tc.billingMid) : (!c || a.MID === c.mid || a.MID === c.billingMid);
+  const lc = npLiveConf();
+  const midOk = p?.meta?.liveSmoke ? (!!lc && a.MID === lc.mid) : p?.meta?.test ? (a.MID === tc.mid || a.MID === tc.billingMid) : (!c || a.MID === c.mid || a.MID === c.billingMid);
   if (!p || !midOk || p.amount !== amount) { await logError('nicepay-noti', new Error(`맞지 않는 통보: moid=${a.MOID} amt=${amount}`)); return 'OK'; }
   await sql`update payment_notifications set matched = true where id = ${ins[0].id}`;
   // 카드 3001 · 계좌이체 4000 · 가상계좌 입금 4110

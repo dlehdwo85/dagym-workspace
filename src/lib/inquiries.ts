@@ -22,7 +22,7 @@ const BASE_STEPS = ['1차 연락 (접수 24시간 이내)', '요구사항 확인
 export function checklistFor(type: InquiryType) {
   const s = [...BASE_STEPS];
   if (type === '위탁운영') s.splice(2, 0, '현장 실사');
-  if (type === 'HILINK 플랫폼') s.splice(2, 0, '플랫폼 시연 일정 잡기 (온라인·방문)');
+  if (type === 'HILINK 플랫폼') s.splice(s.indexOf('미팅 일정') + 1, 0, '플랫폼 시연 일정 잡기 (온라인·방문)'); // V36 7: 미팅 일정 다음
   return s;
 }
 

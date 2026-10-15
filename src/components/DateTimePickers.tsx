@@ -75,14 +75,37 @@ const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h
 export const timeLabel = (t: string) => { const h = Number(t.slice(0, 2)), m = t.slice(3, 5); return `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}:${m}`; };
 const durLabel = (min: number) => (min <= 0 ? '' : min < 60 ? `${min}분` : min % 60 ? `${Math.floor(min / 60)}시간 ${min % 60}분` : `${min / 60}시간`);
 
-/** 시간 = 15분 목록. 종료 시각은 시작 기준 길이를 함께 보여 줌 ("오후 3:00 (1시간)") */
-export function TimeSelect({ value, onChange, label, from }: { value: string; onChange: (v: string) => void; label: string; from?: string }) {
-  const opts = TIMES.includes(value) ? TIMES : [...TIMES, value].sort();
-  const list = from ? opts.filter((t) => toMin(t) > toMin(from)) : opts;
+/** V36 5: 기본은 07:00~22:00(30분), [그 외 시간 보기…]로 하루 전체(15분). 고른 값이 목록 밖이면 그 값도 넣는다 */
+export const DAY_TIMES = TIMES.filter((t) => t >= '07:00' && t <= '22:00' && /:(00|30)$/.test(t));
+const MORE = '__more';
+function useTimes(value: string | null | undefined) {
+  const [all, setAll] = useState(false);
+  const base = all ? TIMES : DAY_TIMES;
+  const opts = !value || base.includes(value) ? base : [...base, value].sort();
+  return { opts, all, more: () => setAll(true) };
+}
+/** 시각 고르기(빈 값 허용) — 업무 마감 시각·빠른 등록 등 */
+export function TimePick({ value, onChange, ariaLabel, className, emptyLabel = '시간 없음', testid }: { value: string | null | undefined; onChange: (v: string | null) => void; ariaLabel: string; className?: string; emptyLabel?: string; testid?: string }) {
+  const t = useTimes(value);
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} data-testid="time-select"
+    <select className={className} value={value ?? ''} aria-label={ariaLabel} data-testid={testid}
+      onChange={(e) => { if (e.target.value === MORE) { t.more(); return; } onChange(e.target.value || null); }}>
+      <option value="">{emptyLabel}</option>
+      {t.opts.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
+      {!t.all && <option value={MORE}>그 외 시간 보기…</option>}
+    </select>
+  );
+}
+
+/** 시간 = 목록(기본 07~22시). 종료 시각은 시작 기준 길이를 함께 보여 줌 ("오후 3:00 (1시간)") */
+export function TimeSelect({ value, onChange, label, from }: { value: string; onChange: (v: string) => void; label: string; from?: string }) {
+  const t = useTimes(value);
+  const list = from ? t.opts.filter((x) => toMin(x) > toMin(from)) : t.opts;
+  return (
+    <select value={value} onChange={(e) => { if (e.target.value === MORE) { t.more(); return; } onChange(e.target.value); }} aria-label={label} data-testid="time-select"
       className="h-10 rounded-input border border-line bg-white px-2 text-sm hover:border-slate-300">
-      {(list.length ? list : opts).map((t) => <option key={t} value={t}>{timeLabel(t)}{from ? ` (${durLabel(toMin(t) - toMin(from))})` : ''}</option>)}
+      {(list.length ? list : t.opts).map((x) => <option key={x} value={x}>{timeLabel(x)}{from ? ` (${durLabel(toMin(x) - toMin(from))})` : ''}</option>)}
+      {!t.all && <option value={MORE}>그 외 시간 보기…</option>}
     </select>
   );
 }

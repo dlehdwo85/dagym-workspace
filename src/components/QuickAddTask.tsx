@@ -10,7 +10,7 @@ import { PRIORITY_LABEL } from '@/lib/types';
 import { Loader2, Mic, Paperclip, Sparkles } from 'lucide-react';
 import { AI_ACCEPT, uploadToLibrary } from './libraryUpload';
 import { DropZone } from './upload';
-import { TIMES, timeLabel } from './DateTimePickers';
+import { TimePick } from './DateTimePickers';
 import { useSession } from './session';
 
 export interface QuickDefaults { dueTime?: string; projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string; title?: string; description?: string }
@@ -214,9 +214,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
           </select>
           {/* 검수 20: 마감·담당·지시도 같은 칩 줄에 */}
           <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">마감<input type="date" className="min-h-8 rounded-md border border-line bg-white px-1.5 text-xs text-ink" value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} aria-label="마감일" /></label>
-          {f.dueDate && <select className="min-h-8 rounded-md border border-line bg-white px-1.5 text-xs" value={f.dueTime ?? ''} onChange={(e) => set('dueTime')(e.target.value)} aria-label="마감 시각">
-            <option value="">시간 없음</option>{TIMES.map((x) => <option key={x} value={x}>{timeLabel(x)}</option>)}
-          </select>}
+          {f.dueDate && <TimePick className="min-h-8 rounded-md border border-line bg-white px-1.5 text-xs" value={f.dueTime} onChange={(v) => set('dueTime')(v ?? '')} ariaLabel="마감 시각" />}
           <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">담당<UserSelect className="min-h-8 max-w-[8.5rem] rounded-md border border-line bg-white px-1.5 text-xs text-ink" ariaLabel="담당자" value={f.assigneeId} onChange={set('assigneeId')} /></label>
           <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">지시<UserSelect className="min-h-8 max-w-[8.5rem] rounded-md border border-line bg-white px-1.5 text-xs text-ink" ariaLabel="지시자" placeholder="지시자 선택" value={f.requestedById} onChange={set('requestedById')} /></label>
           <RepeatChip value={f.rrule ?? null} anchorDate={f.dueDate || null} onChange={set('rrule')} />

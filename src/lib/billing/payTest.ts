@@ -30,11 +30,12 @@ export async function listTestTenants(u: SessionUser) {
   requirePlatform(u);
   const sql = db();
   const tenants = await sql`select t.id, t.name, t.created_at, ts.plan_code, ts.status, ts.billing_cycle,
-      (select json_agg(x order by x.created_at desc) from (select p.id, p.kind, p.plan_code, p.addon_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.paid_at, p.created_at, p.meta->>'payMethod' as pay_method
+      (select json_agg(x order by x.created_at desc) from (select p.id, p.kind, p.plan_code, p.addon_code, p.amount, p.status, (p.meta->>'liveSmoke') = 'true' as live, p.canceled_amount, p.result_msg, p.paid_at, p.created_at, p.meta->>'payMethod' as pay_method
         from payments p where p.tenant = t.id order by p.created_at desc limit 10) x) as payments
     from tenants t left join tenant_subscriptions ts on ts.tenant = t.id where t.is_test and t.deleted_at is null order by t.created_at desc limit 20`;
   const plans = await sql`select code, name from plans where public and active and code not in ('trial', 'free', 'team_free') order by sort`;
-  return { tenants, plans };
+  const { npLiveConf } = await import('./nicepay');
+  return { tenants, plans, liveAvailable: !!npLiveConf() };
 }
 
 type Check = { key: string; label: string; state: 'ok' | 'fail' | 'wait' | 'later'; detail?: string };
@@ -52,6 +53,7 @@ export async function testCheck(u: SessionUser, paymentId: string) {
   const prev = p.meta?.prev;
   const checks: Check[] = [
     { key: 'approved', label: '결제 승인', state: paid ? 'ok' : p.status === 'pending' ? 'wait' : 'fail', detail: p.result_msg ?? p.status },
+    p.meta?.liveSmoke ? { key: 'plan', label: '요금제 반영', state: 'later', detail: '실결제 소액 시험 — 요금제는 바꾸지 않음' } :
     { key: 'plan', label: '요금제 반영', state: !paid ? 'wait' : canceled ? 'ok'
       : (p.kind === 'addon' ? Number(s?.addons?.[p.addon_code] ?? 0) > 0 : s?.plan_code === p.plan_code && s?.status === 'active') ? 'ok' : 'fail',
       detail: canceled ? '취소됨 — 아래 원복 확인' : `${s?.plan_code ?? '-'} · ${s?.status ?? '-'}${s?.billing_cycle ? ` · ${s.billing_cycle}` : ''}` },
@@ -62,7 +64,7 @@ export async function testCheck(u: SessionUser, paymentId: string) {
       : (p.kind === 'addon' || !prev || (s?.plan_code === prev.plan_code && s?.status === prev.status)) ? 'ok' : 'fail',
       detail: canceled ? `지금 ${s?.plan_code} · ${s?.status} (결제 전 ${prev?.plan_code ?? '-'} · ${prev?.status ?? '-'})` : '[시험 결제 취소]를 누르면 확인' },
   ];
-  return { payment: { id: p.id, tenant: p.tenant, tenantName: p.tenant_name, kind: p.kind, plan: p.plan_code ?? p.addon_code, amount: p.amount, status: p.status, payMethod: p.meta?.payMethod ?? 'CARD', vbank: p.meta?.vbank ?? null }, checks };
+  return { payment: { id: p.id, tenant: p.tenant, tenantName: p.tenant_name, kind: p.kind, plan: p.meta?.liveSmoke ? '실결제 소액 시험' : p.plan_code ?? p.addon_code, live: !!p.meta?.liveSmoke, amount: p.amount, status: p.status, payMethod: p.meta?.payMethod ?? 'CARD', vbank: p.meta?.vbank ?? null }, checks };
 }
 
 /** 정기 실행: 승인 1시간이 지난 시험 결제는 자동 취소(요금제 원복) — 시험 상점도 당일 취소되지만 우리 기록도 맞춘다 */
