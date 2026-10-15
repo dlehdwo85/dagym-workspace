@@ -1,9 +1,28 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["sin1"],
+  "regions": [
+    "sin1"
+  ],
   "buildCommand": "node scripts/migrate.mjs && next build",
   "ignoreCommand": "bash scripts/vercel-ignore.sh",
-  "crons": [{ "path": "/api/cron/tick", "schedule": "0 0 * * *" }],
+  "crons": [
+    {
+      "path": "/api/cron/tick",
+      "schedule": "0 0 * * *"
+    }
+  ],
+  "functions": {
+    "src/app/api/org/mail-account/route.ts": {
+      "regions": [
+        "icn1"
+      ]
+    },
+    "src/app/api/mail/**/*.ts": {
+      "regions": [
+        "icn1"
+      ]
+    }
+  },
   "git": {
     "deploymentEnabled": {
       "main": true,
