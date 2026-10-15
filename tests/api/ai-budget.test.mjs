@@ -94,4 +94,28 @@ describe('V23 AI 비용·한도', () => {
     assert.equal(r3.status, 502);
     assert.equal((await sql`select count(*)::int n from app_settings where key = 'ai_credit_block'`)[0].n, 0);
   });
+  test('V23 5장 AI 원가 전망(운영자): 누적·예상·소진일·무료 업체 수·충전 권장·요금 역산·콘솔 대조, 70% 알림, 운영자 아니면 404', async () => {
+    assert.equal((await ctx.staffA.client.req('GET', '/api/platform/ai-forecast')).status, 404);
+    assert.equal((await ctx.staffA.client.req('PUT', '/api/platform/ai-forecast', { securedUsd: 1 })).status, 404);
+    await sql`delete from ai_usage`;
+    // 이번 달: 다짐(default) $3, 다른 회사 $1 — 모두 최근 7일 안
+    await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cost_usd, purpose, created_at) values
+      ('default', ${ctx.ownerId}, gen_random_uuid(), 'anthropic', 'claude-sonnet-5-5', 1, 1, 2, 'assistant', now()),
+      ('default', ${ctx.staffA.id}, gen_random_uuid(), 'anthropic', 'claude-sonnet-5-5', 1, 1, 1, 'assistant', now()),
+      ('default', ${ctx.managerA.id}, gen_random_uuid(), 'anthropic', 'claude-haiku-5-5', 1, 1, 0.5, 'library_organize', now())`;
+    await ctx.owner.ok('PUT', '/api/platform/ai-forecast', { securedUsd: 4, nextSecuredUsd: 4, consoleUsd: 3, companySize: 10, aiShare: 0.3 });
+    const f = await ctx.owner.ok('GET', '/api/platform/ai-forecast');
+    assert.equal(f.monthUsd, 3.5); assert.equal(f.monthKrw, 4900); assert.equal(f.usedPct, 88);
+    assert.ok(f.forecastUsd >= 3.5, '예상 ≥ 누적');
+    assert.equal(f.dailyUsd, 0.5, '최근 7일 하루 평균');
+    assert.ok(f.exhaustDate, '소진 예상일'); assert.ok(f.rechargeUsd > 0, '충전 권장');
+    assert.equal(f.tiers.users, 3); assert.ok(f.tiers.heavy >= f.tiers.medium && f.tiers.medium >= f.tiers.light);
+    assert.equal(f.console.usd, 3); assert.equal(f.console.diffPct, 17);
+    assert.ok(Array.isArray(f.pricing) && f.pricing.length > 0); assert.ok(f.units.some((u) => u.purpose === 'assistant'));
+    assert.ok(f.freeCompanies === 0 || f.freeCompanies === null, '확보 70% 를 우리 회사가 다 씀 → 무료 0곳');
+    // 70% 넘음 → 정기 실행 알림 1번(다시 돌려도 1번)
+    const { tick } = await import('../helpers.mjs');
+    await tick(); await tick();
+    assert.equal((await sql`select count(*)::int n from notifications where title like 'AI 크레딧 %% 사용'`)[0].n, 1);
+  });
 });

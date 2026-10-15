@@ -1,0 +1,66 @@
+'use client';
+import { useState } from 'react';
+import { api, useApi } from './client';
+import { Button, cx, fmtDateTime, inputCls, toast } from './ui';
+
+const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
+const usd = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+const PURPOSE: Record<string, string> = { assistant: '대화 1건', doc_job: '문서 1건', doc_engine: '문서 엔진', library_organize: '자료 정리 1건', revenue: '매출 분석 1건', revenue_extract: '매출 입력 1건',
+  voice: '음성 보정 1건', classify: '질문 분류 1건', summary: '대화 요약 1건', fill: '자료로 채우기 1건', chat_to_task: '메시지→업무 1건' };
+
+/** V23 5장: 플랫폼 운영자 "AI 원가 전망" — 이번 달 예상·단가 실측·사용자 유형·소진 예상일·무료 운영 가능 업체 수·충전 권장액·요금 역산·콘솔 대조 */
+export function AiForecast() {
+  const { data, reload } = useApi<any>('/api/platform/ai-forecast');
+  const [edit, setEdit] = useState<Record<string, string> | null>(null);
+  if (!data) return null;
+  const f = data.finance;
+  async function save() {
+    const num = (v?: string) => (v === undefined || v === '' ? undefined : Number(v));
+    try {
+      await api('/api/platform/ai-forecast', { method: 'PUT', body: { securedUsd: num(edit!.securedUsd), nextSecuredUsd: num(edit!.nextSecuredUsd), consoleUsd: edit!.consoleUsd === '' ? null : num(edit!.consoleUsd),
+        companySize: num(edit!.companySize), aiShare: edit!.aiShare === '' ? undefined : Number(edit!.aiShare) / 100 } });
+      setEdit(null); reload(); toast.ok('저장했습니다');
+    } catch (e: any) { toast.error(e.message); }
+  }
+  const Stat = ({ label, value, sub, warn }: { label: string; value: string; sub?: string; warn?: boolean }) => (
+    <div className={cx('rounded-input border px-3 py-2', warn ? 'border-red-200 bg-red-50' : 'border-line')}><div className="text-[11px] text-ink-3">{label}</div><div className="text-base font-bold tabular-nums">{value}</div>{sub && <div className="text-[11px] text-ink-3">{sub}</div>}</div>
+  );
+  return (
+    <section id="ai-forecast" className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ai-forecast">
+      <h2 className="flex items-center text-sm font-semibold">AI 원가 전망 <span className="ml-1 text-xs font-normal text-ink-3">{data.month} · {data.elapsed}/{data.days}일 · 정가(건별 결제 가정) · 환율 {data.rate.toLocaleString('ko-KR')}원</span>
+        <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setEdit({ securedUsd: String(f.securedUsd), nextSecuredUsd: String(f.nextSecuredUsd), consoleUsd: f.consoleUsd === null ? '' : String(f.consoleUsd), companySize: String(f.companySize), aiShare: String(Math.round(f.aiShare * 100)) })} data-testid="ai-finance-edit">기준 입력</Button></h2>
+      {edit && (
+        <div className="mt-2 grid grid-cols-2 gap-2 rounded-input bg-slate-50 p-2 text-xs sm:grid-cols-6" data-testid="ai-finance-form">
+          {([['securedUsd', '이번 달 확보 크레딧($)'], ['nextSecuredUsd', '다음 달 확보($)'], ['consoleUsd', '콘솔 실제 청구($)'], ['companySize', '고객사 1곳 인원'], ['aiShare', '요금 중 AI 몫(%)']] as const).map(([k, l]) => (
+            <label key={k} className="block">{l}<input className={cx(inputCls, 'mt-0.5 h-8')} inputMode="decimal" value={edit[k] ?? ''} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} aria-label={l} /></label>
+          ))}
+          <div className="flex items-end gap-1"><Button size="sm" onClick={save}>저장</Button><Button size="sm" variant="ghost" onClick={() => setEdit(null)}>취소</Button></div>
+        </div>
+      )}
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Stat label="이번 달 누적" value={won(data.monthKrw)} sub={`${usd(data.monthUsd)} · 확보 ${usd(f.securedUsd)}의 ${data.usedPct ?? '-'}%`} warn={(data.usedPct ?? 0) >= 90} />
+        <Stat label="이번 달 예상(누적÷경과일×일수)" value={won(data.forecastKrw)} sub={usd(data.forecastUsd)} warn={data.forecastUsd > f.securedUsd * 0.7} />
+        <Stat label="크레딧 소진 예상일(최근 7일 평균)" value={data.exhaustDate ?? '이번 달 안 소진 없음'} sub={`하루 ${usd(data.dailyUsd)}`} warn={!!data.exhaustDate && data.exhaustDate.slice(0, 7) === data.month} />
+        <Stat label="다음 달 충전 권장(예상×1.2 − 확보)" value={data.rechargeUsd > 0 ? won(data.rechargeKrw) : '충전 필요 없음'} sub={data.rechargeUsd > 0 ? usd(data.rechargeUsd) : `다음 달 확보 ${usd(f.nextSecuredUsd)}`} warn={data.rechargeUsd > 0} />
+        <Stat label={`무료 운영 가능 업체 수(${data.company.size}명 기준)`} value={data.freeCompanies === null ? '실측 부족' : `${data.freeCompanies}곳`} sub={`1곳 월 ${won(data.company.krw)} · (확보×70% − 우리 회사 ${usd(data.ourForecastUsd)})`} />
+        <Stat label="사용자 유형(최근 30일, 1인 월)" value={`${won(data.tiers.light)} · ${won(data.tiers.medium)} · ${won(data.tiers.heavy)}`} sub={`가벼움·보통·많음 (사용한 ${data.tiers.users}명 3등분)`} />
+        <Stat label="콘솔 실제 청구" value={data.console ? usd(data.console.usd) : '입력 안 함'} sub={data.console ? `워크인 집계와 ${data.console.diffPct ?? '-'}% 차이${data.console.at ? ` · ${fmtDateTime(data.console.at)}` : ''}` : '기준 입력에서 넣기'} warn={!!data.console && Math.abs(data.console.diffPct ?? 0) > 10} />
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-3">
+        <div>
+          <h3 className="text-xs font-semibold text-ink-2">단가 실측(최근 30일 1건 평균)</h3>
+          <ul className="mt-1 space-y-0.5 text-xs" data-testid="ai-units">{data.units.map((u: any) => <li key={u.purpose} className="flex justify-between gap-2"><span>{PURPOSE[u.purpose] ?? u.purpose}</span><span className="tabular-nums">{won(u.krw)} <span className="text-ink-3">({u.n}건)</span></span></li>)}</ul>
+        </div>
+        <div>
+          <h3 className="text-xs font-semibold text-ink-2">회사별 이번 달</h3>
+          <ul className="mt-1 space-y-0.5 text-xs">{data.byTenant.map((t: any) => <li key={t.tenant} className="flex justify-between gap-2"><span className="truncate">{t.name}</span><span className="tabular-nums">{usd(t.usd)} <span className="text-ink-3">→ 예상 {usd(t.forecastUsd)}</span></span></li>)}</ul>
+        </div>
+        <div>
+          <h3 className="text-xs font-semibold text-ink-2">요금 역산(보통 사용자 원가×2 vs 요금×AI 몫 {Math.round(f.aiShare * 100)}%)</h3>
+          <ul className="mt-1 space-y-0.5 text-xs" data-testid="ai-pricing">{data.pricing.map((p: any) => <li key={p.code} className={cx('flex justify-between gap-2', p.deficit && 'font-semibold text-red-600')}><span>{p.name}</span><span className="tabular-nums">AI 몫 {won(p.aiPartKrw)} / 필요 {won(p.needKrw)}{p.deficit ? ' 적자' : ''}</span></li>)}</ul>
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] text-ink-3">확보 크레딧의 70%·90% 에 닿으면 운영자에게 알림. 코드 실행 시간 요금은 응답에 없어 빠져 있어 콘솔 청구와 다를 수 있습니다. 기존 기능 동작에는 영향 없음(계산·표시만).</p>
+    </section>
+  );
+}
