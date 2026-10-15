@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "kr.co.dagym.workos",
+      "sha256_cert_fingerprints": ["1E:EA:73:BF:B5:40:C1:5D:A6:D9:67:02:B8:FC:3C:8C:15:5A:A1:D3:82:AA:97:BC:1B:C4:7A:62:B2:99:12:75"]
+    }
+  }
+]

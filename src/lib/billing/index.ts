@@ -40,6 +40,8 @@ export async function quote(tenant: string, planCode: string, cycle: 'monthly' |
 }
 
 export async function billingOverview(u: SessionUser) {
+  // 점검 2026-10-16 ⑥: 우리 회사·체험 조직은 404 대신 "결제 없음"(화면 콘솔 오류 방지)
+  if (['default', 'demo'].includes(tenantOf(u))) return { enabled: false, internal: true };
   const t = await requireBillingAdmin(u);
   const sql = db();
   const [[card], [sub], payments, plans, addons] = await Promise.all([

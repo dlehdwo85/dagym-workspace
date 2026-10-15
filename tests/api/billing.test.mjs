@@ -54,7 +54,7 @@ let owner, tid, platform;
 before(async () => {
   await resetDb();
   np = fakeNice();
-  srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', NICEPAY_MODE: 'test', NICEPAY_PAY_MID: MID, NICEPAY_PAY_KEY: KEY, NICEPAY_BILL_MID: BMID, NICEPAY_BILL_KEY: BKEY, /* V29 새 이름(MID 2개) */ NICEPAY_API_BASE: NP });
+  srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', NICEPAY_MODE: 'test', NICEPAY_PAY_MID: 'walkin001m', NICEPAY_PAY_KEY: 'REAL-KEY-NEVER-USED-IN-TEST', NICEPAY_BILL_MID: 'walkin002m', NICEPAY_BILL_KEY: 'REAL-BILL-KEY-NEVER-USED', /* 실 키는 있어도 시험 모드에선 안 씀 */ NICEPAY_TEST_PAY_MID: MID, NICEPAY_TEST_PAY_KEY: KEY, NICEPAY_TEST_BILL_MID: BMID, NICEPAY_TEST_BILL_KEY: BKEY, NICEPAY_API_BASE: NP });
   sql = testDb();
   ctx = await bootstrap();
   platform = ctx.owner;
@@ -71,7 +71,7 @@ const sub = async () => (await sql`select * from tenant_subscriptions where tena
 
 describe('18차 나이스페이 결제', () => {
   test('우리 회사·직원은 결제 칸 없음, 견적 = 1인 요금 × 최소 3인 × VAT', async () => {
-    assert.equal((await ctx.owner.get('/api/billing')).status, 404, '내부 요금제 회사');
+    assert.deepEqual((await ctx.owner.ok('GET', '/api/billing')), { enabled: false, internal: true }, '내부 요금제 회사 — 결제 없음(404 아님)');
     const b = await owner.ok('GET', '/api/billing');
     assert.equal(b.enabled, true); assert.equal(b.mode, 'test');
     const team = b.quotes.find((q) => q.planCode === 'team' && q.cycle === 'monthly');
@@ -210,5 +210,10 @@ describe('18차 나이스페이 결제', () => {
     assert.equal((await sql`select status from payments where id = ${p.id}`)[0].status, 'canceled');
     const cancel = state.calls.filter((x) => x.path.endsWith('cancel_process.jsp')).at(-1);
     assert.equal(cancel.f.MID, BMID, '빌링 결제는 빌링 MID 로 취소');
+  });
+  test('시험 모드는 실제 MID·키를 쓰지 않음(결제 서버로 간 요청 전부 시험 상점)', async () => {
+    assert.ok(state.calls.length > 0);
+    assert.ok(state.calls.every((c) => !['walkin001m', 'walkin002m'].includes(c.f.MID)), '실 MID 로 나간 요청 없음');
+    assert.ok(!JSON.stringify(state.calls).includes('REAL-'), '실 키로 서명한 흔적 없음');
   });
 });

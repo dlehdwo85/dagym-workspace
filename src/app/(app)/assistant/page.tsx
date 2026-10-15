@@ -136,7 +136,7 @@ export default function AssistantPage() {
     <div className="flex h-[calc(100dvh-9rem)] min-w-0 flex-1 flex-col sm:h-[calc(100dvh-6rem)]">
       <PageHeader title="AI 비서" icon={Sparkles}
         sub={<>자료실·업무·일정{user.role === 'owner' || user.role === 'admin' ? '·매출' : ''}을 내 권한 안에서 찾아 답합니다. 업무 만들기·첨부·댓글은 <b>[확인]</b>을 눌러야 반영됩니다.
-          {u?.costUsd !== undefined && <span className="ml-1 text-xs text-ink-3">이번 달 ${u.costUsd.toFixed(2)} / 한도 ${u.limitUsd}{status.data?.canSetLimit && <button onClick={editLimit} className="ml-1 text-brand-600 underline">한도 바꾸기</button>}</span>}</>} />
+          {u?.costUsd !== undefined && <span className="ml-1 text-xs text-ink-3">회사 전체 이번 달 ${u.costUsd.toFixed(2)} / 회사 한도 ${u.limitUsd}{status.data?.canSetLimit && <button onClick={editLimit} className="ml-1 text-brand-600 underline">한도 바꾸기</button>}</span>}</>} />
       <div className="mb-2"><AiBudgetBar budget={status.data?.budget} creditMessage={status.data?.creditMessage} onChanged={status.reload} /></div>
       <div className="mb-2 flex items-center gap-2 lg:hidden">
         <Button size="sm" variant="secondary" onClick={() => setListOpen(true)} data-testid="ai-threads-open">대화 목록</Button>
@@ -202,7 +202,7 @@ export default function AssistantPage() {
       <input ref={att.inputRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => attach(e.target.files)} data-testid="ai-file-input" />
       <div className="mt-2">
         <ChatComposer value={text} onChange={setText} onSend={() => send(text)} onStop={() => conv.stop()} busy={busy} canSend={!uploading && (!!text.trim() || files.length > 0)} inputRef={inputRef}
-          onPaste={att.onPaste} ariaLabel="AI 에게 요청" disabled={status.data?.overLimit} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : 'AI에게 요청 · 사진은 붙여넣기(Ctrl+V)도 됩니다'}
+          onPaste={att.onPaste} ariaLabel="AI 에게 요청" disabled={status.data?.overLimit} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? 'AI에게 요청' : 'AI에게 요청 · 사진 붙여넣기 가능')}
           leading={<Button type="button" variant="secondary" onClick={() => att.inputRef.current?.click()} aria-label="자료 첨부 (사진·PDF·엑셀)" disabled={att.full || !!uploading}><Paperclip /></Button>}
           trailing={<VoiceButton value={text} onChange={setText} label="음성으로 요청" />} />
       </div>

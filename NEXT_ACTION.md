@@ -544,6 +544,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - ③ 지시자 없는 검토 중 업무: 상세 단계 바 권한을 서버가 정한 검토 담당자(data.reviewer) 기준으로 — 화면이 열어 주고 서버가 403 하던 불일치 제거. 목록 상태 칩: 검토 중 담당자는 [진행 중](검토 요청 취소)만.
 - E2E: 좁은 창 목록 확인은 맨 끝 단계(좁은 화면 AI 호출이 앞 단계의 가짜 AI 순서를 바꾸던 문제 회피).
 
+## 점검 2026-10-16 경미 + 앱 링크 + 나이스페이 시험 모드 안전
+- 캘린더: 브라우저에서만 그리기(하이드레이션 #418 제거), FullCalendar 한국어 로케일 객체("+N more" → "+N개"), 업무 캘린더 timeZone Asia/Seoul(+luxon).
+- /api/billing: 우리 회사·체험 조직은 404 대신 { enabled:false, internal:true }(콘솔 오류 없음).
+- AI 비서: 머리글 "회사 전체 이번 달 $ / 회사 한도 $", 막대 "내 이번 달 남은 AI" — 회사/개인 한도 구분. 휴대폰 입력칸에 Ctrl+V 안내 없음.
+- PC 머리줄: 1024 미만은 검색 칸 "검색"만·Ctrl K 숨김(768 두 줄 꺾임·배지 겹침 해소), 본문 아래 여백(떠 있는 메신저·AI 버튼이 마지막 줄 안 가림). 375 "검토 대기" 칩 → "검토".
+- 앱 링크: public/.well-known/assetlinks.json(kr.co.dagym.workos, Play 앱 서명 SHA-256), apple-app-site-association(/.well-known·루트 둘 다, application/json, 88SSK23ZVB.kr.co.dagym.workos, /tasks/* /calendar* /notifications* /messages* /projects/*).
+- 나이스페이: NICEPAY_MODE 가 live 가 아니면 실 MID·키를 절대 쓰지 않고 공개 시험 상점(nictest00m 결제창·nictest04m 빌링, 또는 NICEPAY_TEST_PAY/BILL_MID/KEY)으로만 — 실 키는 Vercel 에 그대로 두고 MODE 만으로 전환. 시험에서 실 MID 로 나간 요청 0건 확인.
+- 남은 점검(앱 쪽): 직접 /api 내려받기·target=_blank 를 앱 공통 함수로, Google·소셜 로그인 시스템 브라우저, 알림으로 연 상세 뒤로 가기 → 목록.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

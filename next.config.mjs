@@ -16,6 +16,7 @@ const nextConfig = {
       },
       { source: '/sw.js', headers: [{ key: 'Cache-Control', value: 'no-cache' }, { key: 'Service-Worker-Allowed', value: '/' }] },
       { source: '/.well-known/(.*)', headers: [{ key: 'Content-Type', value: 'application/json' }] },
+      { source: '/apple-app-site-association', headers: [{ key: 'Content-Type', value: 'application/json' }] }, // iOS 앱 링크(루트에도)
     ];
   },
 };

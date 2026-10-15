@@ -10,6 +10,8 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import listPlugin from '@fullcalendar/list';
+import luxonPlugin from '@fullcalendar/luxon3';
+import koLocale from '@fullcalendar/core/locales/ko';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock } from 'lucide-react';
@@ -278,7 +280,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             return (
               <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)} label={l} grid>
                 {(v === 'overdue' || v === 'review') && n > 0 && <span className={cx('size-1.5 shrink-0 rounded-full', v === 'overdue' ? 'bg-red-500' : 'bg-amber-500')} aria-hidden />}
-                <span className="truncate">{v === 'requested' ? <><span className="sm:hidden">내가 지시</span><span className="hidden sm:inline">{l}</span></> : l}</span>
+                <span className="truncate">{v === 'requested' || v === 'review' ? <><span className="sm:hidden">{v === 'review' ? '검토' : '내가 지시'}</span><span className="hidden sm:inline">{l}</span></> : l}</span>
                 {n > 0 && <span className={cx('absolute -right-1 -top-1.5 min-w-[18px] rounded-full border px-1 text-center text-[10px] font-bold leading-4 tabular-nums sm:static sm:min-w-0 sm:border-0 sm:bg-transparent sm:px-0 sm:text-[11px] sm:font-semibold sm:opacity-80', (filters.view ?? '') === v && !filters.assigneeId ? 'border-white bg-brand-700 text-white' : v === 'overdue' ? 'border-red-200 bg-red-50 text-red-700 sm:text-inherit' : 'border-line bg-white text-ink-2')} data-count={v}>{n}</span>}
               </ViewChip>
             );
@@ -1135,8 +1137,8 @@ function CalendarView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b:
   return (
     <div className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="task-calendar">
       <FullCalendar
-        plugins={[dayGridPlugin, interactionPlugin, listPlugin]}
-        initialView="dayGridMonth" locale="ko" height="auto" firstDay={1} editable eventDurationEditable
+        plugins={[dayGridPlugin, interactionPlugin, listPlugin, luxonPlugin]}
+        initialView="dayGridMonth" locale={koLocale} timeZone="Asia/Seoul" height="auto" firstDay={1} editable eventDurationEditable
         headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,listMonth' }}
         buttonText={{ today: '오늘', month: '월', list: '목록' }} events={events} dayMaxEvents={4}
         eventClick={(i) => { i.jsEvent.preventDefault(); openTask(i.event.id); }}

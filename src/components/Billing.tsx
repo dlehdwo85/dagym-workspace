@@ -22,7 +22,7 @@ export function BillingSection() {
     if (sp.get('paid')) toast.ok('결제했습니다'); else if (sp.get('vbank')) toast.ok(`가상계좌를 만들었습니다 — ${sp.get('vbank')}`); else if (sp.get('payfail')) toast.error(`결제하지 못했습니다: ${sp.get('payfail')}`);
   }, []);
   if (error) return null; // 내부 공간(우리 회사)·권한 없는 사람은 결제 칸 없음
-  if (!data) return null;
+  if (!data || data.internal) return null;
   const sub = data.sub ?? {};
   const monthly = data.quotes.filter((q: any) => q.cycle === 'monthly');
   const annual = data.quotes.filter((q: any) => q.cycle === 'annual');

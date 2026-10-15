@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "88SSK23ZVB.kr.co.dagym.workos",
+        "paths": ["/tasks/*", "/calendar*", "/notifications*", "/messages*", "/projects/*"]
+      }
+    ]
+  }
+}

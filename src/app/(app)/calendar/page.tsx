@@ -9,6 +9,8 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
 import interactionPlugin, { Draggable } from '@fullcalendar/interaction';
 import luxonPlugin from '@fullcalendar/luxon3';
+import koLocale from '@fullcalendar/core/locales/ko';
+import dynamic from 'next/dynamic';
 import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
@@ -63,7 +65,8 @@ function ScopeDialog() {
   );
 }
 
-export default function CalendarPage() {
+/** 점검 2026-10-16 ④: 이 기기 기억(localStorage)·화면 폭을 첫 렌더에서 읽으므로 브라우저에서만 그린다(하이드레이션 오류 #418 방지) */
+function CalendarPage() {
   const { dir, user } = useSession();
   const sp = useSearchParams();
   const router = useRouter();
@@ -384,7 +387,7 @@ export default function CalendarPage() {
           <FullCalendar
             ref={calRef}
             plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
-            timeZone="Asia/Seoul" locale="ko" firstDay={1} height="auto" nowIndicator
+            timeZone="Asia/Seoul" locale={koLocale} firstDay={1} height="auto" nowIndicator
             initialView={urlView ?? savedView ?? (mobile ? 'timeGrid3' : 'timeGridWeek')}
             initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
             headerToolbar={mobile ? false : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
@@ -941,3 +944,5 @@ function PeopleChip({ on, onClick, children, label }: { on: boolean; onClick: ()
       className={cx('inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 font-medium', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:border-slate-300')}>{children}</button>
   );
 }
+
+export default dynamic(() => Promise.resolve(CalendarPage), { ssr: false });

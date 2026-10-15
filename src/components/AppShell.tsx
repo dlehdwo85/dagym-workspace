@@ -218,7 +218,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <header className="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b border-line bg-white/90 px-5 backdrop-blur sm:flex">
             <button onClick={() => setPalette(true)} data-testid="open-palette"
               className="mx-auto flex h-9 w-full max-w-md items-center gap-2 rounded-input border border-line bg-canvas px-3 text-sm text-ink-3 transition-colors hover:border-slate-300 hover:bg-white">
-              <Search className="size-4" /><span className="flex-1 text-left">업무·프로젝트·사람·일정 검색</span><Kbd>Ctrl K</Kbd>
+              <Search className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate text-left">{/* 점검 ⑧: 좁은 PC(768)에서 두 줄로 꺾이지 않게 */}<span className="lg:hidden">검색</span><span className="hidden lg:inline">업무·프로젝트·사람·일정 검색</span></span><span className="hidden lg:inline"><Kbd>Ctrl K</Kbd></span>
             </button>
             <div className="relative">
               <button onClick={() => setCreateMenu((v) => !v)} aria-haspopup="menu" aria-expanded={createMenu} data-testid="create-menu"
@@ -286,7 +286,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               </span>
             </div>
           </header>
-          <main className="mx-auto max-w-7xl p-3 sm:p-6">{children}</main>
+          <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>
 
         {session.tenant?.onboarding && <Onboarding />}

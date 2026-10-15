@@ -8,14 +8,21 @@ import { createCipheriv, createHash, randomInt } from 'node:crypto';
  * 키는 환경변수로만(NICEPAY_*). NICEPAY_API_BASE 로 주소를 바꿀 수 있다(시험용 가짜 서버).
  */
 export type NpConf = { mode: 'test' | 'live'; mid: string; key: string; billingMid: string; billingKey: string; base: string; cancelBase: string };
+// 나이스페이 공개 시험 상점(결제창 nictest00m · 빌링 nictest04m) — 실제 청구되지 않음(당일 자동 취소). 값이 다르면 NICEPAY_TEST_* 로 덮어씀
+const PUBLIC_TEST = { payMid: 'nictest00m', payKey: 'EYzu8jGGMfqaDEp76gSckuvnaHHu+bC4opsSN6lHv3b2lurNYkVXrZ7Z1AoqQnXI3eLuaUFyoRNC6FkrzVjceg==',
+  billMid: 'nictest04m', billKey: 'b+zhZ4yOZ7FsH8pm5lhDfHZEb79tIwnjsdA0FBXh86yLc6BJeFVrZFXhAoJ3gEWgrWwN+lJMV0W4hvDdbe4Sjw==' };
 export function npConf(): NpConf | null {
   // V29: 결제창 MID(walkin001m) = NICEPAY_PAY_MID/KEY, 빌링 MID(walkin002m) = NICEPAY_BILL_MID/KEY — 예전 이름(NICEPAY_MID·MERCHANT_KEY·BILLING_*)도 읽음
   const mid = process.env.NICEPAY_PAY_MID || process.env.NICEPAY_MID, key = process.env.NICEPAY_PAY_KEY || process.env.NICEPAY_MERCHANT_KEY;
   const billingMid = process.env.NICEPAY_BILL_MID || process.env.NICEPAY_BILLING_MID || mid, billingKey = process.env.NICEPAY_BILL_KEY || process.env.NICEPAY_BILLING_KEY || key;
-  if (!mid || !key || !billingMid || !billingKey) return null;
+  if (!mid || !key || !billingMid || !billingKey) return null; // 실제 키가 들어와야 결제 칸이 열림(준비 신호)
   const base = (process.env.NICEPAY_API_BASE ?? 'https://webapi.nicepay.co.kr').replace(/\/$/, '');
-  return { mode: process.env.NICEPAY_MODE === 'live' ? 'live' : 'test', mid, key, billingMid, billingKey, base,
-    cancelBase: (process.env.NICEPAY_API_BASE ?? 'https://pg-api.nicepay.co.kr').replace(/\/$/, '') };
+  const cancelBase = (process.env.NICEPAY_API_BASE ?? 'https://pg-api.nicepay.co.kr').replace(/\/$/, '');
+  if (process.env.NICEPAY_MODE === 'live') return { mode: 'live', mid, key, billingMid, billingKey, base, cancelBase };
+  // 2026-10-16 로컬 요청: 시험 모드는 실제 MID·키를 절대 쓰지 않는다 — 공개 시험 상점(또는 NICEPAY_TEST_*)으로만. 실 키는 그대로 두고 NICEPAY_MODE=live 로만 전환
+  return { mode: 'test', base, cancelBase,
+    mid: process.env.NICEPAY_TEST_PAY_MID || PUBLIC_TEST.payMid, key: process.env.NICEPAY_TEST_PAY_KEY || PUBLIC_TEST.payKey,
+    billingMid: process.env.NICEPAY_TEST_BILL_MID || PUBLIC_TEST.billMid, billingKey: process.env.NICEPAY_TEST_BILL_KEY || PUBLIC_TEST.billKey };
 }
 export const npEnabled = () => !!npConf();
 

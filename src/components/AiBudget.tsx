@@ -29,7 +29,7 @@ export function AiBudgetBar({ budget, creditMessage, compact, onChanged }: { bud
   return (
     <div className={cx('rounded-input border border-line bg-white', compact ? 'px-2 py-1' : 'px-3 py-2')} data-testid="ai-budget">
       <div className={cx('flex flex-wrap items-center gap-x-2 gap-y-0.5', compact ? 'text-[11px]' : 'text-xs')}>
-        <span className="font-semibold text-ink">이번 달 남은 AI <span data-testid="ai-budget-left">{won(budget.remainingKrw)}</span> <span className="font-normal text-ink-3">/ {won(budget.limitKrw)}</span></span>
+        <span className="font-semibold text-ink">내 이번 달 남은 AI <span data-testid="ai-budget-left">{won(budget.remainingKrw)}</span> <span className="font-normal text-ink-3">/ {won(budget.limitKrw)}</span></span>
         {!out && <span className="text-ink-3">대화 약 {budget.chatsLeft.toLocaleString('ko-KR')}회 · 문서 약 {budget.docsLeft.toLocaleString('ko-KR')}건</span>}
         {dayOut && <span className="text-amber-700">오늘 한도({won(budget.dayLimitKrw)})를 다 썼습니다 — 내일 다시</span>}
         {out && (sent ? <span className="text-ink-3">추가 요청을 보냈습니다</span>
