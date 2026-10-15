@@ -7,9 +7,10 @@ import { Button, Field, cx, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
 import { OrDivider, SocialButtons } from '@/components/SocialButtons';
 import { CompanyFields } from '@/components/SignupFields';
-import { captureUtm, conversionTagsConfigured, readUtm, setAdsConsent } from '@/components/conversion';
+import { captureUtm, conversionTagsConfigured, readUtm, setAdsConsent, signupStep } from '@/components/conversion';
+import { SignupSteps } from '@/components/SignupSteps';
 
-/** V15 공개 가입: 개인으로 시작 / 팀(회사)으로 시작 → 확인 메일 */
+/** V15 공개 가입 → V32 3 한 화면씩: ① 계정(소셜·이메일·약관) → ② 회사(개인/팀·이름·규모·업종) → 확인 메일. ③ 연락 채널·④ 동료 초대는 첫 로그인 안내에서 */
 export default function SignupPage() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [mode, setMode] = useState<'personal' | 'team'>('personal');
@@ -20,14 +21,23 @@ export default function SignupPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<{ message: string; devLink?: string } | null>(null);
+  const [step, setStep] = useState<1 | 2>(1);
   const opened = useRef(Date.now());
   useEffect(() => { captureUtm(); }, []);
+  useEffect(() => { if (enabled) signupStep(step === 1 ? 'account_view' : 'company_view'); }, [step, enabled]);
   useEffect(() => { api('/api/auth/signup').then((r) => setEnabled(!!r.enabled)).catch(() => setEnabled(false)); }, []);
   const all = agree.terms && agree.privacy && agree.ai && agree.marketing;
 
-  async function submit(e: React.FormEvent) {
+  function toCompany(e: React.FormEvent) {
     e.preventDefault(); setErr(null);
     if (!agree.terms || !agree.privacy) { setErr('필수 약관에 동의해 주세요'); return; }
+    if (f.password.length < 8) { setErr('비밀번호는 8자 이상이어야 합니다'); return; }
+    setStep(2); window.scrollTo({ top: 0 });
+  }
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setErr(null);
+    if (!agree.terms || !agree.privacy) { setStep(1); setErr('필수 약관에 동의해 주세요'); return; }
+    if (mode === 'team' && !f.company.trim()) { setErr('회사(팀) 이름을 입력하세요'); return; }
     setBusy(true);
     try {
       setAdsConsent(ads);
@@ -56,20 +66,13 @@ export default function SignupPage() {
       <span><span className={cx('mr-1 text-xs font-semibold', req ? 'text-red-600' : 'text-ink-3')}>{req ? '[필수]' : '[선택]'}</span>{label}</span></label>
   );
   return (
-    <AuthCard title="14일 무료 체험" sub="카드 등록 없이 비즈니스 기능 전부 · 끝나면 요금제를 고르세요">
-      <form onSubmit={submit} className="space-y-4">
+    <AuthCard title={step === 1 ? '14일 무료 체험' : '회사 만들기'} sub={step === 1 ? '카드 등록 없이 비즈니스 기능 전부 · 끝나면 요금제를 고르세요' : '혼자 쓰면 개인, 동료와 함께면 팀으로 시작하세요'}>
+      <SignupSteps at={step} />
+      {step === 1 ? (
+      <form onSubmit={toCompany} className="space-y-4" data-testid="signup-step-account">
         {/* V29: 소셜로 시작하면 그 이메일이 계정·업무 이메일이 되고 확인 메일 없이 바로 회사 만들기로 */}
         <SocialButtons verb="시작" onReady={setSocial} />
         {social > 0 && <OrDivider />}
-        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="시작 방식">
-          {([['personal', User, '개인으로 시작', '혼자 쓰는 업무·일정'], ['team', Building2, '팀으로 시작', '팀·메신저·권한']] as const).map(([k, Icon, t, d]) => (
-            <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => setMode(k)} data-testid={`mode-${k}`}
-              className={cx('rounded-card border p-3 text-left', mode === k ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
-              <Icon className="size-5 text-brand-700" /><div className="mt-1 text-sm font-semibold">{t}</div><div className="text-xs text-ink-3">{d}</div>
-            </button>
-          ))}
-        </div>
-        {mode === 'team' && <CompanyFields v={f} onChange={(v) => setF({ ...f, ...v })} />}
         <Field label="이름"><input className={inputCls + ' h-11'} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={50} autoComplete="name" aria-label="이름" /></Field>
         <Field label="이메일"><input className={inputCls + ' h-11'} type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required autoComplete="email" aria-label="이메일" /></Field>
         <Field label="비밀번호 (8자 이상)"><PasswordInput value={f.password} onChange={(v) => setF({ ...f, password: v })} autoComplete="new-password" minLength={8} /></Field>
@@ -84,10 +87,27 @@ export default function SignupPage() {
           {conversionTagsConfigured() && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" data-testid="agree-ads" /><span>광고 효과 측정(가입 완료 1회 — Meta·Google·네이버 태그) 동의 <span className="text-ink-3">(선택)</span></span></label>}
         </div>
         {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
-        <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy || enabled === null} data-testid="signup-submit">{busy ? <><Loader2 className="animate-spin" />가입 중…</> : <>가입하고 확인 메일 받기<ArrowRight /></>}</Button>
+        <Button type="submit" className="h-11 w-full text-[15px]" disabled={enabled === null} data-testid="signup-next">다음: 회사 만들기<ArrowRight /></Button>
         <p className="text-center text-sm text-ink-2">이미 계정이 있나요? <Link href="/login" className="font-semibold text-brand-700 underline">로그인</Link></p>
         <ul className="space-y-1 text-xs text-ink-3"><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />14일 체험: 10명 · 저장 20GB · AI 300회 · 카드 없음</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />이후 월 2,900원부터 (개인 2,900원 · 팀 1인 3,900원 · 비즈니스 1인 6,900원)</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />고르지 않으면 읽기 전용 — 데이터는 지우지 않고 내보낼 수 있어요</li></ul>
       </form>
+      ) : (
+      <form onSubmit={submit} className="space-y-4" data-testid="signup-step-company">
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="시작 방식">
+          {([['personal', User, '개인으로 시작', '혼자 쓰는 업무·일정'], ['team', Building2, '팀으로 시작', '팀·메신저·권한']] as const).map(([k, Icon, t, d]) => (
+            <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => setMode(k)} data-testid={`mode-${k}`}
+              className={cx('rounded-card border p-3 text-left', mode === k ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
+              <Icon className="size-5 text-brand-700" /><div className="mt-1 text-sm font-semibold">{t}</div><div className="text-xs text-ink-3">{d}</div>
+            </button>
+          ))}
+        </div>
+        {mode === 'team' && <CompanyFields v={f} onChange={(v) => setF({ ...f, ...v })} />}
+        {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
+        <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy || enabled === null} data-testid="signup-submit">{busy ? <><Loader2 className="animate-spin" />가입 중…</> : <>가입하고 확인 메일 받기<ArrowRight /></>}</Button>
+        <button type="button" className="w-full text-center text-sm text-ink-2 underline" onClick={() => { setErr(null); setStep(1); }}>이전 단계</button>
+        <p className="text-center text-xs text-ink-3">③ 연락 채널·④ 동료 초대는 메일 확인 뒤 처음 로그인할 때 안내합니다(나중에 해도 됩니다).</p>
+      </form>
+      )}
     </AuthCard>
   );
 }

@@ -80,3 +80,31 @@ export async function notifRead({ owner, BASE, SHOTS, ctx }) {
   await owner.getByTestId('notifications').getByText('알림읽음 시험 B', { exact: false }).waitFor();
   await owner.screenshot({ path: `${SHOTS}/v32-notifications.png` });
 }
+
+/** 로컬 실기기: 휴대폰 업무 상세(알림으로 #c-댓글 주소로 열림)에서 체크리스트를 체크해도 화면이 댓글로 내려가지 않음 */
+export async function checkScroll({ owner, BASE, SHOTS }) {
+  await owner.setViewportSize({ width: 390, height: 844 });
+  const t = await owner.evaluate(async () => {
+    const j = (u, b) => fetch(u, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.json());
+    const task = await j('/api/tasks', { title: '체크 스크롤 시험', approvalRequired: false, checklist: ['첫째 단계', '둘째 단계', '셋째 단계'], description: '설명\n'.repeat(30) });
+    const c = await j(`/api/tasks/${task.id}/comments`, { body: '아래쪽 댓글' });
+    return { id: task.id, comment: c.id };
+  });
+  await owner.goto(`${BASE}/tasks/${t.id}#c-${t.comment}`);
+  const box = owner.getByTestId('checklist').getByRole('checkbox', { name: '둘째 단계' });
+  await box.waitFor();
+  await owner.waitForTimeout(800); // 처음 한 번은 댓글로 이동 — 그 뒤 체크리스트로 올라와서 시험
+  await box.scrollIntoViewIfNeeded();
+  await owner.evaluate(() => window.scrollBy(0, -120));
+  const before = (await box.boundingBox()).y;
+  const done = owner.waitForResponse((r) => r.url().includes('/api/checklist/') && r.request().method() === 'PATCH');
+  await box.check();
+  await done;
+  await owner.waitForTimeout(700); // 다시 읽고 그린 뒤
+  const after = (await box.boundingBox()).y;
+  assert.ok(Math.abs(after - before) < 4, `체크 뒤 화면이 움직임 ${before} → ${after}`);
+  assert.equal(await owner.evaluate(() => document.activeElement?.getAttribute('aria-label')), '둘째 단계', '포커스는 체크박스에');
+  await owner.screenshot({ path: `${SHOTS}/v32-check-scroll.png` });
+  await owner.evaluate(async (id) => { await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); }, t.id);
+  await owner.setViewportSize({ width: 1366, height: 900 });
+}

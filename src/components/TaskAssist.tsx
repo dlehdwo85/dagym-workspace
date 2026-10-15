@@ -16,7 +16,8 @@ export function TaskAssist({ taskId, onDraft }: { taskId: string; onDraft: (d: A
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
   const msgs = hist.data?.messages ?? [];
-  useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [msgs.length, busy]);
+  // 대화 칸 안에서만 맨 아래로(페이지 전체를 끌어내리지 않음)
+  useEffect(() => { const box = end.current?.parentElement; if (box) box.scrollTop = box.scrollHeight; }, [msgs.length, busy]);
   async function run(action: string, t?: string) {
     if (busy) return;
     setBusy(action);

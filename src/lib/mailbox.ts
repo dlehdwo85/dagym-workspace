@@ -74,7 +74,7 @@ async function mailMode(tenant: string, sql: Sql): Promise<MailMode> {
   return r?.mail_mode ?? 'auto';
 }
 /** 이번 발송 경로: 회사 설정 + 준비 상태. 둘 다 안 되면 null */
-async function pickChannel(tenant: string, sql: Sql): Promise<'email:smtp' | 'email:workin' | null> {
+export async function pickChannel(tenant: string, sql: Sql): Promise<'email:smtp' | 'email:workin' | null> {
   const [mode, acc] = await Promise.all([mailMode(tenant, sql), loadAccount(tenant, sql)]);
   if (mode === 'smtp') return acc ? 'email:smtp' : null;
   if (mode === 'workin') return workinMailEnabled() ? 'email:workin' : acc ? 'email:smtp' : null;

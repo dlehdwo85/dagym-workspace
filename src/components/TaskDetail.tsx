@@ -44,7 +44,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const router = useRouter();
   const { user, dir, features, menus } = useSession();
   const [mailDraft, setMailDraft] = useState<AssistDraft | null>(null); // V28-1 업무 AI 비서 초안 → 시안 창
-  const { data, error, loading, reload } = useApi<any>(`/api/tasks/${id}`);
+  const { data, error, loading, reload, setData } = useApi<any>(`/api/tasks/${id}`);
   const [cprog, setCprog] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const projects = useApi<{ projects: any[] }>('/api/projects');
   const [comment, setComment] = useState('');
@@ -106,11 +106,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   }, []);
   const sections = useApi<{ sections: { id: string; name: string }[] }>(data?.task?.project_id ? `/api/projects/${data.task.project_id}/sections` : null);
 
+  // 주소의 #… 로는 처음 열 때 한 번만 이동 — 체크·단계·첨부 뒤 다시 읽을 때(data 바뀜) 또 내려가지 않게(로컬 실기기: 체크하면 댓글로 내려감)
+  const hashDone = useRef<string | null>(null);
   useEffect(() => {
     if (!data) return;
     const h = location.hash;
-    if (h) setTimeout(() => document.querySelector(h)?.scrollIntoView({ behavior: 'smooth' }), 100);
-  }, [data]);
+    if (!h || hashDone.current === id + h) return;
+    hashDone.current = id + h;
+    setTimeout(() => { try { document.querySelector(h)?.scrollIntoView({ behavior: 'smooth' }); } catch { /* 잘못된 선택자 */ } }, 100);
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 저장 버튼 없이 자동 기록 (WORKIN_AUTOSAVE): 제목은 칸을 벗어나거나 Enter, 설명은 입력을 멈춘 1초 뒤·칸을 벗어날 때
   const [descState, setDescState] = useState<'' | 'saving' | 'saved' | 'error'>('');
@@ -510,7 +514,13 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <ul className="space-y-0.5" data-testid="checklist">
             {data.checklist.map((c: any) => (
               <li key={c.id} className="group flex items-center gap-2.5 rounded-input px-1 py-1 text-sm hover:bg-slate-50">
-                <input type="checkbox" className="size-4 accent-green-600" checked={c.done} onChange={async (e) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { done: e.target.checked } }).catch((er) => toast.error(er.message)); reload(); }} aria-label={c.text} />
+                <input type="checkbox" className="size-4 accent-green-600" checked={c.done} aria-label={c.text} onChange={async (e) => {
+                  // 바로 체크 표시(서버 응답 기다리지 않음), 실패하면 되돌림 — 스크롤·포커스는 그대로
+                  const done = e.target.checked;
+                  setData((d: any) => d && { ...d, checklist: d.checklist.map((x: any) => (x.id === c.id ? { ...x, done } : x)) });
+                  try { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { done } }); } catch (er: any) { toast.error(er.message); }
+                  reload();
+                }} />
                 <span className={cx('flex-1', c.done && 'text-ink-3 line-through', !c.done && c.assignee_id === user.id && 'font-semibold')}>{c.text}{!c.done && c.assignee_id === user.id && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">내 몫</span>}</span>
                 {perms.edit ? <UserSelect className="h-7 w-auto max-w-[7.5rem] rounded-full border border-line bg-white px-1.5 text-[11px] text-ink-2" placeholder="담당 없음" value={c.assignee_id}
                   ariaLabel={`${c.text} 담당`} onChange={async (v) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { assigneeId: v } }).catch((er) => toast.error(er.message)); reload(); broadcastRefresh(); }} />

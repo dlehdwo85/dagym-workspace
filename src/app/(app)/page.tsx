@@ -10,6 +10,7 @@ import { QuickAddTask } from '@/components/QuickAddTask';
 import { useCalColors } from '@/components/calColors';
 import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
 import { useRowOpen } from '@/components/rowOpen';
+import { ConnectCard } from '@/components/ConnectCard';
 import { useRouter } from 'next/navigation';
 
 const seoulDay = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
@@ -258,6 +259,7 @@ export default function Dashboard() {
         <p className="text-sm text-ink-2">{fmtDate(data.today)} · {greet}, {user.name}님</p>
         <h1 className="mt-0.5 text-xl font-bold tracking-tight sm:text-2xl">{company ? '전체 현황' : `${user.name}님의 업무 현황`}</h1>
       </div>
+      <ConnectCard />
       {tot.overdue > 0 && (
         <Link href="/tasks?view=overdue" className="flex items-center gap-2 rounded-card border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100" data-testid="overdue-banner">
           <AlertTriangle className="size-5 shrink-0" />기한 지난 업무 {tot.overdue}건<span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium">확인하기<ArrowRight className="size-3.5" /></span>

@@ -86,7 +86,7 @@ const TOOLS: AiTool[] = [
     input_schema: { type: 'object', properties: {
       title: str('제목'), description: str('설명 (선택)'), assigneeId: str('담당자 id (선택)'), dueDate: str('마감일 YYYY-MM-DD (선택)'), dueTime: str('마감 시각 HH:MM (선택)'),
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }, projectId: str('프로젝트 id (선택)'), orgUnitId: str('조직 id (선택)'),
-      checklist: { type: 'array', items: { type: 'string' }, description: '체크리스트 (선택)' },
+      checklist: { type: 'array', items: { type: 'string' }, description: '체크리스트 (선택). 고객에게 보여 주는 단계는 "데모" 대신 "시연"(예: 플랫폼 시연 일정 잡기) — "데모"는 체험 계정과 헷갈림' },
     }, required: ['title'] } },
   { name: 'propose_create_tasks', description: '같은 업무를 여러 담당자에게 각각 1건씩 만들기를 제안한다(첨부 자료를 읽고 정리할 때). 체크리스트·설명(메모)·마감 시각·지시자·첨부 자료를 함께. [확인] 후 생성.',
     input_schema: { type: 'object', properties: {

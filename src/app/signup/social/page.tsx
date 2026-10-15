@@ -7,6 +7,7 @@ import { AuthCard } from '@/components/AuthCard';
 import { Button, Field, cx, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
 import { CompanyFields } from '@/components/SignupFields';
+import { SignupSteps } from '@/components/SignupSteps';
 import { conversionTagsConfigured, fireSignupConversion, readUtm, setAdsConsent } from '@/components/conversion';
 
 /** V29 소셜 확인 뒤 2단계 "회사 만들기" — 확인된 이메일이라 확인 메일 없이 바로 시작(동료 초대는 첫 화면 안내에서) */
@@ -64,5 +65,5 @@ function SocialSignup() {
   );
 }
 export default function SocialSignupPage() {
-  return <AuthCard title="회사 만들기" sub="2단계 — 회사 정보만 적으면 바로 시작합니다"><Suspense><SocialSignup /></Suspense></AuthCard>;
+  return <AuthCard title="회사 만들기" sub="회사 정보만 적으면 바로 시작합니다"><SignupSteps at={2} /><Suspense><SocialSignup /></Suspense></AuthCard>;
 }

@@ -64,7 +64,7 @@ describe('16차 웹사이트 문의 연동', () => {
     const dow = new Date(t.due_date + 'T00:00:00Z').getUTCDay(); assert.ok(dow >= 1 && dow <= 5, '마감은 영업일');
     assert.deepEqual([...t.tags].sort(), ['출입 관리', '충북', '커뮤니티 예약', '하이링크웹'].sort());
     for (const s of ['| 회사/단지명 | 음성푸르지오더퍼스트 |', '| 연락처 | 010-0000-0000 |', '| Lead ID | HL-20261014-0001 |', 'source=naver', '데모를 보고 싶습니다.']) assert.ok(t.description.includes(s), s);
-    assert.deepEqual(d.checklist.map((c) => c.text), ['1차 연락 (접수 24시간 이내)', '요구사항 확인·현장 정보 수집', '데모 일정', '자료/제안서 발송', '견적', '미팅 일정', '결과 기록 (수주·보류·실패)']);
+    assert.deepEqual(d.checklist.map((c) => c.text), ['1차 연락 (접수 24시간 이내)', '요구사항 확인·현장 정보 수집', '플랫폼 시연 일정 잡기 (온라인·방문)', '자료/제안서 발송', '견적', '미팅 일정', '결과 기록 (수주·보류·실패)']);
     const [p] = await sql`select p.name, s.name as section from tasks t join projects p on p.id = t.project_id join project_sections s on s.id = t.section_id where t.id = ${t.id}`;
     assert.deepEqual({ ...p }, { name: '웹사이트 문의', section: 'HILINK 플랫폼' });
     const n = await sql`select title from notifications where user_id = ${ctx.ownerId} and entity_id = ${t.id}`;

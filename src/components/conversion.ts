@@ -65,3 +65,12 @@ export function readUtm(): { source?: string; medium?: string; campaign?: string
     return { source: clip(r.source, 80), medium: clip(r.medium, 80), campaign: clip(r.campaign, 120) };
   } catch { return undefined; }
 }
+
+/** V32 3 가입 단계별 이탈률: 브라우저 임의 id + 단계만(개인정보 없음), 실패해도 무시 */
+export function signupStep(step: 'account_view' | 'company_view') {
+  try {
+    let anon = localStorage.getItem('wos_anon');
+    if (!anon) { anon = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('wos_anon', anon); }
+    fetch('/api/public/signup-step', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anon, step }), keepalive: true }).catch(() => {});
+  } catch { /* 저장소 막힘 등 */ }
+}
