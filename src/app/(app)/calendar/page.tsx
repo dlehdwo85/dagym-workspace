@@ -279,10 +279,12 @@ export default function CalendarPage() {
     const title = info.event.title as string;
     info.event.remove();
     if (!personal) return toast.error('개인 캘린더가 없습니다');
+    // V14 46: 시간을 잡은 업무는 미배정 목록에서 바로 뺀다(실패하면 되돌림)
+    window.dispatchEvent(new CustomEvent('wos-task-scheduled', { detail: { taskId, on: true } }));
     try {
       await api('/api/events', { body: { calendarId: personal.id, title, start: start.toISOString(), end: end.toISOString(), taskId, kind: 'task_block' } });
       toast.ok(`${fmtTimeRange(start, end)} 업무 시간을 잡았습니다`); load(); broadcastRefresh();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { window.dispatchEvent(new CustomEvent('wos-task-scheduled', { detail: { taskId, on: false } })); toast.error(e.message); }
   }
 
   const goto = (d: string) => calRef.current?.getApi().gotoDate(d);
@@ -525,6 +527,12 @@ function UnscheduledPanel({ onClose, onOpen }: { onClose: () => void; onOpen: (i
   const { user } = useSession();
   const tasks = useApi<{ tasks: any[] }>('/api/tasks?view=my&limit=200');
   const ref = useRef<HTMLDivElement>(null);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const h = (e: Event) => { const { taskId, on } = (e as CustomEvent).detail; setHidden((x) => { const n = new Set(x); if (on) n.add(taskId); else n.delete(taskId); return n; }); };
+    window.addEventListener('wos-task-scheduled', h);
+    return () => window.removeEventListener('wos-task-scheduled', h);
+  }, []);
   useEffect(() => {
     if (!ref.current) return;
     const d = new Draggable(ref.current, {
@@ -533,7 +541,9 @@ function UnscheduledPanel({ onClose, onOpen }: { onClose: () => void; onOpen: (i
     });
     return () => d.destroy();
   }, [tasks.data]);
-  const list = (tasks.data?.tasks ?? []).filter((t) => t.assignee_id === user.id && (!t.estimate_minutes || (t.scheduled_minutes ?? 0) < t.estimate_minutes))
+  // V14 46: 미배정 = 마감 시각도 업무 시간도 아직 없는 업무(예상 시간이 있으면 잡은 시간이 예상보다 적을 때까지)
+  const list = (tasks.data?.tasks ?? []).filter((t) => t.assignee_id === user.id && !hidden.has(t.id) && !t.due_time
+      && (t.estimate_minutes ? (t.scheduled_minutes ?? 0) < t.estimate_minutes : !(t.scheduled_minutes > 0)))
     .sort((a, b) => ((a.due_date ?? '9999') < (b.due_date ?? '9999') ? -1 : 1));
   return (
     <aside className="hidden w-64 shrink-0 rounded-card border border-line bg-white shadow-card lg:block" aria-label="미배정 업무" data-testid="unscheduled">

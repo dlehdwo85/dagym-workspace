@@ -732,6 +732,7 @@ await step('S-5 오늘·이번 주: 업무를 시간표로 끌어 놓아 실행 
   const evs = (await ctx.staffA.client.ok('GET', `/api/tasks/${t}/events`)).events;
   assert.equal(evs.length, 1); assert.equal(evs[0].kind, 'task_block');
   assert.equal(Math.round((new Date(evs[0].end_at) - new Date(evs[0].start_at)) / 60000), 90, '남은 예상 시간만큼');
+  await card.waitFor({ state: 'detached', timeout: 5000 }); // V14 46: 시간을 잡은 업무는 미배정 목록에서 바로 사라짐
   await staff.screenshot({ path: `${SHOTS}/53-plan-week.png` });
   await staff.setViewportSize(devices['iPhone 13'].viewport);
   await owner.goto(BASE + '/workload');
