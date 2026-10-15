@@ -553,6 +553,13 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 나이스페이: NICEPAY_MODE 가 live 가 아니면 실 MID·키를 절대 쓰지 않고 공개 시험 상점(nictest00m 결제창·nictest04m 빌링, 또는 NICEPAY_TEST_PAY/BILL_MID/KEY)으로만 — 실 키는 Vercel 에 그대로 두고 MODE 만으로 전환. 시험에서 실 MID 로 나간 요청 0건 확인.
 - 남은 점검(앱 쪽): 직접 /api 내려받기·target=_blank 를 앱 공통 함수로, Google·소셜 로그인 시스템 브라우저, 알림으로 연 상세 뒤로 가기 → 목록.
 
+## 점검 2026-10-16 앱 쪽(웹 코드로 할 수 있는 것)
+- 앱(native)에서 같은 도메인의 새 창(target=_blank)·직접 /api 내려받기·download 링크는 같은 창으로 — 안드로이드 내려받기 처리기(쿠키 포함, 로컬 eb4f7e9)가 받음. 일정 엑셀·계정 내보내기·대화 내보내기·정리 CSV·AI 문서·첨부 새 창 모두 해당. 화면 자체 처리(미리보기)가 먼저.
+- 매출 표준 양식: 앱에서는 blob 대신 /api/revenue/template?month= (본사만).
+- 소셜 로그인: 앱(WebView)에서는 Google 버튼 숨김(disallowed_useragent), 카카오·네이버만.
+- 하드웨어 뒤로: 알림으로 처음 연 업무 상세 → 업무 목록, 대화방 → 메시지 목록(홈 대신).
+- 로컬 요청: iOS 는 WKWebView 가 파일을 내려받지 않고 보여 주기만 함 → 확실하게 하려면 @capacitor/filesystem + @capacitor/share(또는 Browser) 설치 후 알려 주면 공통 함수에서 "공유 시트로 저장" 연결. Google 로그인을 앱에서 쓰려면 @capacitor/browser + 앱 링크 복귀 콜백.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

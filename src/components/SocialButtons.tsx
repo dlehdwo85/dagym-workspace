@@ -13,7 +13,11 @@ const LOOK: Record<string, { label: string; cls: string; mark: React.ReactNode }
 /** V29 소셜 가입·로그인 버튼 — 키가 등록된 제공자만(없으면 아무것도 안 보임) */
 export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady }: { verb?: string; invite?: string; mode?: 'login' | 'link'; onReady?: (n: number) => void }) {
   const [ps, setPs] = useState<string[]>([]);
-  useEffect(() => { api('/api/auth/oauth/providers').then((r) => { setPs(r.providers); onReady?.(r.providers.length); }).catch(() => onReady?.(0)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // 점검 2026-10-16: 앱(WebView)에서는 Google 로그인이 정책상 막힘(disallowed_useragent) → 앱에서는 카카오·네이버만
+    const inApp = Capacitor.isNativePlatform();
+    api('/api/auth/oauth/providers').then((r) => { const p = (r.providers as string[]).filter((x) => !(inApp && x === 'google')); setPs(p); onReady?.(p.length); }).catch(() => onReady?.(0));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!ps.length) return null;
   const href = (p: string) => {
     const q = new URLSearchParams({ mode, client: Capacitor.isNativePlatform() ? Capacitor.getPlatform() : 'web' });

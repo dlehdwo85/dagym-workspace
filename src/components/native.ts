@@ -26,6 +26,15 @@ type Router = { push: (href: string) => void };
 export async function initNative(router: Router) {
   if (!Capacitor.isNativePlatform()) return;
   document.documentElement.classList.add('native', `native-${Capacitor.getPlatform()}`); // 하단 시스템 바 여백 대체값(globals.css)
+  // 점검 2026-10-16: 앱에서는 새 창(target=_blank)·직접 /api 내려받기 링크를 같은 창으로 — 새 창은 쿠키 없는 외부 브라우저로 가거나 빈 화면이 되고,
+  // 같은 창 이동은 안드로이드 내려받기 처리기(쿠키 포함 DownloadManager)가 받는다. 다른 도메인 링크는 그대로(외부 브라우저)
+  document.addEventListener('click', (e) => {
+    const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+    if (!a || e.defaultPrevented) return;
+    let u: URL; try { u = new URL(a.href, location.href); } catch { return; }
+    if (u.origin !== location.origin) return;
+    if (a.target === '_blank' || u.pathname.startsWith('/api/') || a.hasAttribute('download')) { e.preventDefault(); location.assign(u.pathname + u.search); }
+  }); // 버블 단계: 화면의 자체 처리(미리보기 등 preventDefault)가 먼저
   const go = (link?: string) => {
     if (!link) return;
     try {
@@ -48,6 +57,9 @@ export async function initNative(router: Router) {
     const { closeTopSheet } = await import('./backClose');
     if (closeTopSheet()) return;
     if (canGoBack && history.length > 1 && location.pathname !== '/') { history.back(); return; }
+    // 점검 2026-10-16: 알림으로 처음 연 업무·일정 상세에서 뒤로 → 홈 대신 그 목록
+    if (/^\/tasks\/[^/]+/.test(location.pathname)) { router.push('/tasks'); return; }
+    if (/^\/messages\/./.test(location.pathname)) { router.push('/messages'); return; }
     if (location.pathname !== '/') { router.push('/'); return; }
     if (Date.now() - exitAt < 2000) { App.exitApp(); return; }
     exitAt = Date.now();

@@ -129,6 +129,8 @@ export default function RevenuePage() {
     catch (e: any) { toast.error(e.message); }
   }
   function template() {
+    // 앱(WebView)은 blob 내려받기가 안 됨 → 서버 주소로(안드로이드 내려받기 처리기가 받음)
+    if (document.documentElement.classList.contains('native')) { location.href = `/api/revenue/template?month=${month}${brand ? `&brand=${brand}` : ''}`; return; }
     // 표준 양식: 한 줄 = 현장·월·항목 하나 (GPT 자료 운영체계와 같은 칸)
     const head = '현장,월,항목,금액,근거파일명';
     const body = units.flatMap((u) => ['매출', '지출', '회원수', '목표'].map((it) => `${u.name},${month},${it},,`)).join('\n');

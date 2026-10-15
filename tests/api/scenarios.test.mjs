@@ -1866,6 +1866,15 @@ describe('WORKIN_V12 상태 권한 · 확인 완료 · 검토 요청 알림', ()
   });
 });
 
+describe('점검 2026-10-16 앱 내려받기', () => {
+  test('매출 표준 양식은 서버 주소로(앱 blob 대신) — 본사만, 머리줄·현장 줄', async () => {
+    const r = await ctx.owner.req('GET', '/api/revenue/template?month=2026-10');
+    assert.equal(r.status, 200); assert.match(r.headers.get('content-disposition'), /attachment/);
+    assert.match(r.body, /현장,월,항목,금액,근거파일명/); assert.match(r.body, /2026-10,매출/);
+    assert.equal((await ctx.staffA.client.get('/api/revenue/template?month=2026-10')).status, 404);
+  });
+});
+
 describe('V28-5 계정 삭제 요청(스토어)', () => {
   test('웹(로그인 없이): 같은 안내·기록, 시간당 5회 · 회사 계정 직원: 회사 대표·관리자에게 알림 · 안내 페이지 열림', async () => {
     const anon = new Client('del');
