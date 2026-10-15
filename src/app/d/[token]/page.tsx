@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
 import { openShare } from '@/lib/mailbox';
+import { biz } from '@/components/Legal';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '자료 내려받기', robots: { index: false, follow: false } };
@@ -19,7 +20,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
         <p className="text-center text-sm text-ink-2" data-testid="share-gone">링크가 없거나 내려받을 수 있는 기간이 지났습니다. 보낸 분께 다시 요청해 주세요.</p>
       ) : (
         <>
-          <h1 className="text-lg font-bold text-ink">{data.company ? `${data.company}에서 보낸 자료` : '보내 드린 자료'}</h1>
+          {/* V34 A5: 워크인 표시 + 메일·문자에서 고른 "보낸 회사" */}
+          <p className="text-xs font-semibold tracking-wide text-brand-700">워크인</p>
+          <h1 className="mt-1 text-lg font-bold text-ink" data-testid="share-company">{data.company ? `${data.company}에서 보낸 자료` : '보내 드린 자료'}</h1>
           <p className="mt-1 text-xs text-ink-3">{data.expiresAt.slice(0, 10)}까지 내려받을 수 있습니다.</p>
           <ul className="mt-5 divide-y divide-line rounded-card border border-line" data-testid="share-files">
             {data.files.map((f) => (
@@ -32,6 +35,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           </ul>
         </>
       )}
+      <p className="mt-10 text-center text-[11px] text-ink-3">워크인(업무·일정 관리 서비스)으로 보낸 자료입니다 · 운영 {biz().name}</p>
     </main>
   );
 }

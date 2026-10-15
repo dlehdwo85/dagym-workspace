@@ -96,6 +96,9 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
   const hash = await hashPassword(i.password);
   const userId = await sql.begin((tx) => createOwnerSpace(tx, { email: i.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, utm: i.utm, agree: i.agree, passwordHash: hash, pending: true, ip }));
   await attempt(sql, ip, i.email, true, null);
+  const { recordStep } = await import('./funnel');
+  const [{ tenant }] = await sql<{ tenant: string }[]>`select tenant from users where id = ${userId}`;
+  await recordStep('submitted', { tenant }, sql);
   const devLink = await issueVerification(sql, userId, i.email);
   return { ok: true, message: GENERIC, ...(devLink ? { devLink } : {}) };
 }
@@ -110,6 +113,8 @@ export async function verifyEmail(token: string) {
     const [u] = await tx<{ id: string; status: string }[]>`update users set signup_pending = false, email_verified_at = now() where id = ${v.user_id} returning id, status`;
     if (!u || u.status !== 'active') throw badRequest('사용할 수 없는 계정입니다');
     await audit(tx, u.id, 'auth.email_verified', 'user', u.id, {}, null);
+    const [own] = await tx<{ id: string }[]>`select id from tenants where owner_user_id = ${u.id}`;
+    if (own) await (await import('./funnel')).recordStep('verified', { tenant: own.id }, tx as unknown as Sql);
     return u.id;
   });
 }

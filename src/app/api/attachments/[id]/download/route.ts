@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { handler } from '@/lib/api';
 import { loadAttachment } from '@/lib/attachments';
 import { downloadUrl } from '@/lib/storage';
-import { badRequest, forbidden } from '@/lib/errors';
+import { badRequest, forbidden, notFound } from '@/lib/errors';
+import { tenantOf } from '@/lib/types';
 import { db } from '@/lib/db';
 import { activity } from '@/lib/log';
 
@@ -16,7 +17,10 @@ export const GET = handler<{ id: string }>(async ({ req, user, params }) => {
   if (a.kind === 'link') return req.nextUrl.searchParams.get('json') === '1' ? { url: a.url, name: a.doc_title ?? a.url, external: true } : NextResponse.redirect(a.url, 302);
   if (a.upload_status !== 'ready') throw badRequest('업로드가 끝나지 않은 파일입니다');
   const sql = db();
-  const [lib] = await sql<{ security: string }[]>`select security from library_files where storage_key = ${a.storage_key} and deleted_at is null limit 1`;
+  // V34 C2: 자료실에서 붙인 파일은 매번 자료실 등급(폴더 상속 포함)으로 다시 판단, 자료실에서 지웠으면 더는 못 엶
+  const { storageSecurity } = await import('@/lib/library');
+  const lib = await storageSecurity(tenantOf(user), a.storage_key);
+  if (lib?.deleted) throw notFound('자료실에서 지운 파일입니다');
   if (lib?.security === 'confidential') {
     const { userSeesConfidential } = await import('@/lib/library');
     if (!(await userSeesConfidential(user.id))) throw forbidden('기밀 자료입니다 — 기밀 열람 권한이 있어야 내려받을 수 있습니다');

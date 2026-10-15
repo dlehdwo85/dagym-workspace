@@ -291,7 +291,7 @@ export async function mailContext(u: SessionUser, taskId: string) {
   const [profiles, account, contact, me, atts, history] = await Promise.all([
     companyProfiles(t, sql) as Promise<SigProfile[]>,
     loadAccount(t, sql), inquiryContact(taskId, sql), sender(u.id, sql),
-    sql`select id, file_name, mime_type, size_bytes, doc_title from attachments where task_id = ${taskId} and kind = 'file' and deleted_at is null and upload_status = 'ready' order by created_at`,
+    sql`select id, file_name, mime_type, size_bytes, doc_title, storage_key from attachments where task_id = ${taskId} and kind = 'file' and deleted_at is null and upload_status = 'ready' order by created_at`,
     taskOutbox(taskId, sql),
   ]);
   const sigs = await Promise.all(profiles.map(async (p) => ({ key: p.key, name: p.name, isDefault: p.is_default, html: signatureHtml(p, me), smsLine: smsSignLine(p, me) })));
@@ -304,7 +304,9 @@ export async function mailContext(u: SessionUser, taskId: string) {
     replyToEditable: await replyToEditable(u, sql),
     kinds: Object.entries(MAIL_KINDS).map(([k, v]) => ({ key: k, ...v })), companies: sigs, company: guess,
     to: contact?.email ? [contact.email] : [], contact, me: { name: me.name, title: me.title, phone: me.phone, email: me.email, workEmail: me.workEmail },
-    attachments: atts.map((a: any) => ({ id: a.id, name: a.file_name, size: Number(a.size_bytes), mime: a.mime_type, title: a.doc_title })),
+    // V34 C1: 기밀·자료실에서 지운 첨부는 외부 발송 목록에서 뺀다
+    attachments: (await Promise.all(atts.map(async (a: any) => { const sec = await (await import('./library')).storageSecurity(t, a.storage_key); return sec?.deleted || sec?.security === 'confidential' ? null : a; })))
+      .filter(Boolean).map((a: any) => ({ id: a.id, name: a.file_name, size: Number(a.size_bytes), mime: a.mime_type, title: a.doc_title })),
     linkThresholdBytes: LINK_THRESHOLD, history, taskTitle: task.title,
   };
 }
@@ -358,15 +360,16 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   }
   const me = await sender(u.id, sql);
   const ids = [...new Set(i.attachmentIds ?? [])];
-  const files = ids.length ? await sql<{ id: string; file_name: string; size_bytes: string; mime_type: string }[]>`
-    select id, file_name, size_bytes, mime_type from attachments where id = any(${ids}::uuid[]) and task_id = ${i.taskId} and kind = 'file' and deleted_at is null and upload_status = 'ready'` : [];
+  const files = ids.length ? await sql<{ id: string; file_name: string; size_bytes: string; mime_type: string; storage_key: string }[]>`
+    select id, file_name, size_bytes, mime_type, storage_key from attachments where id = any(${ids}::uuid[]) and task_id = ${i.taskId} and kind = 'file' and deleted_at is null and upload_status = 'ready'` : [];
   if (files.length !== ids.length) throw badRequest('이 업무의 첨부만 보낼 수 있습니다');
+  await assertExportable(t, files); // V34 C1 기밀·지운 자료는 외부 메일로 안 나감
   const list = ids.map((id) => files.find((f) => f.id === id)!).map((f) => ({ attachmentId: f.id, name: f.file_name, size: Number(f.size_bytes), mime: f.mime_type }));
   const total = list.reduce((s, f) => s + f.size, 0);
   const asLink = total > LINK_THRESHOLD;
   let linkBlock = ''; let linkText = ''; let shareId: string | null = null;
   if (asLink) {
-    const s = await createShare(sql, t, i.taskId, u.id, list);
+    const s = await createShare(sql, t, i.taskId, u.id, list, i.company);
     shareId = s.id;
     linkBlock = `<p style="margin:0 0 12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc">첨부 자료 ${list.length}개 (${(total / 1048576).toFixed(1)}MB)는 용량이 커서 링크로 보내 드립니다.<br><a href="${esc(s.url)}">${esc(s.url)}</a><br><span style="font-size:12px;color:#64748b">${s.expiresAt.slice(0, 10)}까지 내려받을 수 있습니다.</span></p>`;
     linkText = `\n\n첨부 자료(${list.length}개)는 용량이 커서 링크로 보내 드립니다: ${s.url} (${s.expiresAt.slice(0, 10)}까지)`;
@@ -477,28 +480,39 @@ export async function outboxJob(limit = 20) {
 }
 
 // ---------------- 기간 다운로드 링크 ----------------
-async function createShare(sql: Sql, tenant: string, taskId: string | null, userId: string, files: { attachmentId: string; name: string; size: number }[]) {
+/** V34 C1: 기밀 자료(자료실 등급·폴더 상속)·자료실에서 지운 파일은 공개 링크·외부 메일로 내보내지 않는다 */
+async function assertExportable(tenant: string, files: { storage_key: string; file_name: string }[]) {
+  const { storageSecurity } = await import('./library');
+  for (const f of files) {
+    const s = await storageSecurity(tenant, f.storage_key);
+    if (s?.deleted) throw badRequest(`자료실에서 지운 파일입니다: ${f.file_name}`);
+    if (s?.security === 'confidential') throw forbidden(`기밀 자료는 외부 링크·메일로 보낼 수 없습니다: ${f.file_name}`);
+  }
+}
+async function createShare(sql: Sql, tenant: string, taskId: string | null, userId: string, files: { attachmentId: string; name: string; size: number }[], companyKey: string | null = null) {
   const token = newToken(24);
   const expiresAt = new Date(Date.now() + SHARE_DAYS * 86400_000).toISOString();
-  const [s] = await sql<{ id: string }[]>`insert into share_links (tenant, token_hash, task_id, created_by, files, expires_at)
-    values (${tenant}, ${sha256(token)}, ${taskId}, ${userId}, ${sql.json(files.map((f) => ({ attachmentId: f.attachmentId, name: f.name, size: f.size })) as never)}, ${expiresAt}) returning id`;
+  const [s] = await sql<{ id: string }[]>`insert into share_links (tenant, token_hash, task_id, created_by, files, expires_at, company_key)
+    values (${tenant}, ${sha256(token)}, ${taskId}, ${userId}, ${sql.json(files.map((f) => ({ attachmentId: f.attachmentId, name: f.name, size: f.size })) as never)}, ${expiresAt}, ${companyKey}) returning id`;
   return { id: s.id, url: `${appUrl()}/d/${token}`, expiresAt };
 }
 /** 문자에 넣을 링크 등 — 사람이 고른 첨부로 링크만 만든다 */
-export const shareInput = z.object({ taskId: z.string().uuid(), attachmentIds: z.array(z.string().uuid()).min(1).max(20) });
+export const shareInput = z.object({ taskId: z.string().uuid(), attachmentIds: z.array(z.string().uuid()).min(1).max(20), company: z.string().regex(/^[a-z0-9_-]{2,30}$/).optional() });
 export async function createTaskShare(u: SessionUser, i: z.infer<typeof shareInput>) {
   await loadTaskForMail(u, i.taskId);
   const sql = db();
-  const files = await sql<{ id: string; file_name: string; size_bytes: string }[]>`select id, file_name, size_bytes from attachments
+  const files = await sql<{ id: string; file_name: string; size_bytes: string; storage_key: string }[]>`select id, file_name, size_bytes, storage_key from attachments
     where id = any(${i.attachmentIds}::uuid[]) and task_id = ${i.taskId} and kind = 'file' and deleted_at is null and upload_status = 'ready'`;
   if (files.length !== new Set(i.attachmentIds).size) throw badRequest('이 업무의 첨부만 링크로 만들 수 있습니다');
-  const s = await createShare(sql, tenantOf(u), i.taskId, u.id, files.map((f) => ({ attachmentId: f.id, name: f.file_name, size: Number(f.size_bytes) })));
+  await assertExportable(tenantOf(u), files);
+  const s = await createShare(sql, tenantOf(u), i.taskId, u.id, files.map((f) => ({ attachmentId: f.id, name: f.file_name, size: Number(f.size_bytes) })), i.company ?? null);
   await activity(sql, 'task', i.taskId, u.id, 'share_created', { files: files.map((f) => f.file_name), expiresAt: s.expiresAt });
   return s;
 }
 async function loadShare(token: string) {
+  // V34 A5: 보낸 회사 = 메일·문자에서 고른 회사(없으면 회사 기본)
   const [s] = await db()<any[]>`select s.*, coalesce(c.name, '') as company from share_links s left join lateral (
-      select p.name from company_profiles p where p.tenant = s.tenant order by p.is_default desc limit 1) c on true where s.token_hash = ${sha256(token)}`;
+      select p.name from company_profiles p where p.tenant = s.tenant order by (p.key = s.company_key) desc nulls last, p.is_default desc limit 1) c on true where s.token_hash = ${sha256(token)}`;
   if (!s || new Date(s.expires_at) < new Date()) throw notFound('링크가 없거나 기간이 지났습니다');
   return s;
 }
@@ -522,8 +536,12 @@ export async function shareDownload(token: string, n: number, ip: string | null,
   const f = (s.files as any[])[n];
   if (!f) throw notFound();
   const sql = db();
-  const [a] = await sql<{ storage_key: string }[]>`select storage_key from attachments where id = ${f.attachmentId} and upload_status = 'ready'`;
+  const [a] = await sql<{ storage_key: string }[]>`select storage_key from attachments where id = ${f.attachmentId} and upload_status = 'ready' and deleted_at is null`;
   if (!a) throw notFound('파일이 지워졌습니다');
+  // V34 C1: 링크를 만든 뒤 기밀로 바뀌었거나 자료실에서 지웠으면 내려받지 못함
+  const { storageSecurity } = await import('./library');
+  const sec = await storageSecurity(s.tenant, a.storage_key);
+  if (sec?.deleted || sec?.security === 'confidential') throw notFound('보낸 분이 더 이상 공유하지 않는 파일입니다');
   await sql`insert into share_link_views (link_id, file_index, ip, user_agent) values (${s.id}, ${n}, ${ip}, ${(ua ?? '').slice(0, 300)})`;
   const { downloadUrl } = await import('./storage');
   return downloadUrl(a.storage_key, f.name, false);

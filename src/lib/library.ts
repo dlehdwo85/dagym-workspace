@@ -65,6 +65,20 @@ export const effSec = (c: SecCtx, f: { folder: string; security: Security }) => 
 const secAllowed = (c: SecCtx, s: Security) => s === 'public' || (s === 'internal' ? c.internal : c.confidential);
 /** 이 사람이 이 파일을 볼 수 있는 등급인가 (올린 사람 본인은 항상) */
 export const canSeeSec = (c: SecCtx, u: SessionUser, f: { folder: string; security: Security; created_by?: string | null }) => f.created_by === u.id || secAllowed(c, effSec(c, f));
+/**
+ * V34 C1·C2: 저장 파일(storage_key)의 자료실 등급(폴더 상속 포함). 자료실에서 온 파일이 아니면 null,
+ * 자료실에서 모두 지웠으면 deleted — 업무 첨부 내려받기·공유 링크·외부 메일이 매번 이 값으로 다시 판단한다
+ */
+export async function storageSecurity(tenant: string, storageKey: string): Promise<{ security: Security; deleted: boolean } | null> {
+  const sql = db();
+  const rows = await sql<{ folder: string; security: Security; deleted_at: Date | null }[]>`select folder, security, deleted_at from library_files where tenant = ${tenant} and storage_key = ${storageKey}`;
+  if (!rows.length) return null;
+  const folders = await sql<{ folder: string; security: Security }[]>`select folder, security from library_folder_security where tenant = ${tenant}`;
+  const c: SecCtx = { folders, internal: false, confidential: false, confEdit: false };
+  const live = rows.filter((r) => !r.deleted_at);
+  const sec = (live.length ? live : rows).map((r) => effSec(c, r)).reduce((a, b) => maxSec(a, b), 'public' as Security);
+  return { security: sec, deleted: !live.length };
+}
 /** 사람 id 로 기밀 열람 권한 확인 (업무 담당자 등) */
 export async function userSeesConfidential(userId: string) {
   const [r] = await db()<any[]>`select id, email, name, role, status, tenant, is_demo as "isDemo" from users where id = ${userId}`;

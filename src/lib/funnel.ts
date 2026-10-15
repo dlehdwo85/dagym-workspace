@@ -1,4 +1,4 @@
-import { db } from './db';
+import { db, type Sql } from './db';
 import { notFound } from './errors';
 import type { SessionUser } from './types';
 
@@ -36,7 +36,7 @@ export async function funnelStats(weeks = 8) {
   });
   const total = { signups: 0, invited: 0, active: 0 };
   for (const w of weeksOut) { total.signups += w.signups; total.invited += w.invited; total.active += w.active; }
-  return { generatedAt: new Date().toISOString(), weeks: n, definition: { invited: '활성 사용자 2명 이상', active: '가입 7일 안 업무 5건 이상 또는 3일 이상 접속', maturing: '가입 7일이 안 지나 실사용 판정 진행 중' }, total, byWeek: weeksOut };
+  return { generatedAt: new Date().toISOString(), steps: await stepStats(30), weeks: n, definition: { invited: '활성 사용자 2명 이상', active: '가입 7일 안 업무 5건 이상 또는 3일 이상 접속', maturing: '가입 7일이 안 지나 실사용 판정 진행 중' }, total, byWeek: weeksOut };
 }
 
 export async function platformFunnel(u: SessionUser, weeks?: number) {
@@ -53,4 +53,25 @@ export function funnelTokenOk(header: string | null) {
   if (got.length !== want.length) return false;
   let d = 0; for (let i = 0; i < got.length; i++) d |= got.charCodeAt(i) ^ want.charCodeAt(i);
   return d === 0;
+}
+
+// ---------------- V32 3 가입 단계별 이탈 ----------------
+export const SIGNUP_STEPS = [['account_view', '① 계정 화면'], ['company_view', '② 회사 화면'], ['submitted', '가입 신청'], ['verified', '이메일 확인·회사 생성'], ['channels_done', '③ 연락 채널'], ['invite_done', '④ 동료 초대']] as const;
+export type SignupStep = typeof SIGNUP_STEPS[number][0];
+/** 같은 사람(브라우저 anon 또는 회사)의 같은 단계는 1번만 */
+export async function recordStep(step: SignupStep, who: { anon?: string | null; tenant?: string | null }, sql: Sql = db()) {
+  if (who.tenant && ['default', 'demo'].includes(who.tenant)) return;
+  try {
+    if (who.tenant) await sql`insert into signup_steps (tenant, step) values (${who.tenant}, ${step}) on conflict (tenant, step) where tenant is not null do nothing`;
+    else if (who.anon) await sql`insert into signup_steps (anon, step) values (${who.anon}, ${step}) on conflict (anon, step) where anon is not null do nothing`;
+  } catch { /* 기록 실패는 가입을 막지 않음 */ }
+}
+export async function stepStats(days = 30) {
+  const rows = await db()<{ step: string; n: number }[]>`select s.step, count(*)::int n from signup_steps s left join tenants t on t.id = s.tenant
+    where s.created_at > now() - make_interval(days => ${days}) and coalesce(t.is_test, false) = false group by s.step`;
+  const n = (k: string) => rows.find((r) => r.step === k)?.n ?? 0;
+  return SIGNUP_STEPS.map(([k, label], i) => {
+    const prev = i ? n(SIGNUP_STEPS[i - 1][0]) : null;
+    return { step: k, label, n: n(k), fromPrev: prev ? Math.round((n(k) / prev) * 100) : null };
+  });
 }
