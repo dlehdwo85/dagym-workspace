@@ -15,7 +15,8 @@ const config: CapacitorConfig = {
     errorPath: 'offline.html',
   },
   android: { allowMixedContent: false },
-  ios: { contentInset: 'automatic', limitsNavigationsToAppBoundDomains: false },
+  // V14 51: 끌어당김 때 상단 흰/검정 띠 방지 — 웹이 safe-area 만큼 머리줄을 내리므로 네이티브 inset 은 끈다
+  ios: { contentInset: 'never', backgroundColor: '#ffffff', limitsNavigationsToAppBoundDomains: false },
   plugins: {
     FirebaseMessaging: { presentationOptions: ['badge', 'sound', 'alert'] },
     // Android 15+ edge-to-edge: 상태바·내비게이션 바 높이를 CSS 변수(--safe-area-inset-*)로 넣어 머리줄·하단 탭이 겹치지 않게.
