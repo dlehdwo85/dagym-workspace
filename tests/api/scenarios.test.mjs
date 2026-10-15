@@ -729,7 +729,7 @@ describe('알림: 서버 정기 실행·중복 방지·푸시 발송·실패 기
     // 2026-10-15 대표: 마감 하루 전 알림은 기본 꺼짐 — 켠 사람에게만
     const pre = await ctx.staffA.client.ok('GET', '/api/notifications/prefs');
     assert.equal(pre.settings.dueSoonHours, 0, '마감 임박(하루 전) 기본 끔');
-    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...pre.settings, dueSoonHours: 24 } });
+    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...pre.settings, dueSoonHours: 48 } }); // 48시간: 자정 직후에도 "내일 00:30" 이 창 안
     const soon = (await ctx.owner.ok('POST', '/api/tasks', { title: '곧 마감', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 1), dueTime: '00:30' })).id;
     await tick(); await tick();
     assert.equal((await sql`select count(*)::int c from notifications where entity_id = ${old2} and type = 'overdue'`)[0].c, 0, '기한 초과는 첫날 1번만(이틀 지난 업무는 안 보냄)');
@@ -1863,6 +1863,24 @@ describe('WORKIN_V12 상태 권한 · 확인 완료 · 검토 요청 알림', ()
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
     await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done' }); // 승인
     assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done');
+  });
+});
+
+describe('V28-5 계정 삭제 요청(스토어)', () => {
+  test('웹(로그인 없이): 같은 안내·기록, 시간당 5회 · 회사 계정 직원: 회사 대표·관리자에게 알림 · 안내 페이지 열림', async () => {
+    const anon = new Client('del');
+    const r = await anon.ok('POST', '/api/public/account-deletion', { email: 'someone@nowhere.test', reason: '안 씀' });
+    assert.match(r.message, /7일 안에 처리/);
+    assert.ok((await sql`select 1 from audit_logs where action = 'account.deletion_request' and detail->>'email' = 'someone@nowhere.test'`).length);
+    const me = await ctx.staffA.client.ok('POST', '/api/account/deletion-request', { reason: '퇴사 예정' });
+    assert.match(me.message, /삭제 요청을 받았습니다/);
+    const n = await sql`select user_id, title from notifications where type = 'account_request'`;
+    assert.ok(n.some((x) => x.user_id === ctx.ownerId && /계정 삭제 요청/.test(x.title)), '회사 대표에게 알림');
+    for (let k = 0; k < 4; k++) await anon.post('/api/public/account-deletion', { email: `x${k}@nowhere.test` });
+    assert.equal((await anon.post('/api/public/account-deletion', { email: 'y@nowhere.test' })).status, 400, '시간당 5회');
+    const page = await fetch(`${BASE}/account-deletion`);
+    assert.equal(page.status, 200); assert.match(await page.text(), /회원 탈퇴/);
+    assert.match(await (await fetch(`${BASE}/privacy`)).text(), /앱 접근 권한/);
   });
 });
 

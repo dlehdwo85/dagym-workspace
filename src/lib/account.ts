@@ -95,3 +95,31 @@ export async function upgradeToTeam(u: SessionUser, company: string, ip: string 
   });
   return { ok: true };
 }
+
+// ---------------- V28-5 계정 삭제 요청(스토어 필수: 앱 밖 웹 주소 + 회사 계정은 관리자에게 요청) ----------------
+export const deletionRequestInput = z.object({
+  email: z.string().trim().toLowerCase().email('이메일 형식이 아닙니다').max(200),
+  name: z.string().trim().max(50).optional(),
+  reason: z.string().trim().max(1000).optional(),
+});
+const DONE_MSG = '삭제 요청을 받았습니다. 본인 확인 후 영업일 기준 7일 안에 처리하고 결과를 이메일로 알려 드립니다.';
+/**
+ * 로그인 못 하는 사람(웹 폼) · 회사 계정 직원(앱 설정)의 삭제 요청 — 개인정보 담당 메일 + (로그인한 회사 직원이면) 회사 대표·관리자 알림.
+ * 응답은 항상 같은 문구(가입 여부를 드러내지 않음). IP 당 시간 5회.
+ */
+export async function requestDeletion(u: SessionUser | null, i: z.infer<typeof deletionRequestInput>, ip: string | null) {
+  const sql = db();
+  const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from audit_logs where action = 'account.deletion_request' and ip is not distinct from ${ip} and created_at > now() - interval '1 hour'`;
+  if (n >= 5) throw badRequest('요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
+  await audit(sql, u?.id ?? null, 'account.deletion_request', 'user', u?.id ?? null, { email: i.email, loggedIn: !!u, tenant: u ? tenantOf(u) : null }, ip);
+  const to = process.env.COMPANY_PRIVACY_EMAIL || process.env.SUPPORT_EMAIL;
+  const body = `계정 삭제 요청\n\n이메일: ${i.email}\n이름: ${i.name || '-'}\n로그인 상태: ${u ? `예 (${u.name}, 회사 ${tenantOf(u)})` : '아니오(웹 요청)'}\n사유: ${i.reason || '-'}\n\n본인 확인 후 처리: 회사 계정이면 회사 관리자에게 비활성화·삭제 요청, 개인·가입 공간이면 플랫폼 운영 화면에서 처리.`;
+  if (to) { const { sendMail } = await import('./mail'); await sendMail(to, '[워크인] 계정 삭제 요청', body).catch(() => {}); }
+  if (u) {
+    const admins = (await sql<{ id: string }[]>`select id from users where tenant = ${tenantOf(u)} and status = 'active' and role in ('owner','admin') and id <> ${u.id} and not is_demo`).map((r) => r.id);
+    const { notify } = await import('./notifications');
+    await notify(sql, { userIds: admins, type: 'account_request', title: `계정 삭제 요청: ${u.name}`, body: i.reason ? `사유: ${i.reason}` : '사용자 관리에서 계정을 비활성화·삭제해 주세요',
+      link: '/admin/users', entityType: 'user' as never, entityId: u.id, actorId: u.id, dedupeKey: `delreq:${u.id}:${new Date().toISOString().slice(0, 10)}` });
+  }
+  return { ok: true, message: DONE_MSG };
+}

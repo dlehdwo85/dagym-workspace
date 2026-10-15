@@ -19,3 +19,4 @@ test-results-e2e.json
 /mobile/ios/App/App/GoogleService-Info.plist
 /mobile/android/build
 /mobile/android/capacitor-cordova-android-plugins/build
+store-screenshots/

@@ -243,6 +243,15 @@ function AccountSection() {
           <Button type="submit" disabled={!team.trim()}>팀 만들기</Button>
         </form>
       )}
+      {/* V28-5: 회사(초대) 계정은 스스로 탈퇴 대신 삭제 요청 — 회사 관리자·개인정보 담당에게 */}
+      {!own && (
+        <details className="mt-4 rounded-input border border-red-200 p-3" data-testid="deletion-request">
+          <summary className="cursor-pointer font-medium text-red-700">계정 삭제 요청</summary>
+          <p className="mt-2 text-xs text-ink-2">회사가 만든 계정은 회사 관리자가 정리합니다. 요청을 보내면 회사 관리자와 워크인 개인정보 담당에게 전달됩니다. <a href="/account-deletion" target="_blank" className="underline">삭제 안내</a></p>
+          <Field label="사유 (선택)"><input className={inputCls} value={confirm} onChange={(e) => setConfirm(e.target.value)} maxLength={200} aria-label="삭제 요청 사유" /></Field>
+          <Button variant="danger" className="mt-2" onClick={async () => { try { const r = await api('/api/account/deletion-request', { body: { reason: confirm || undefined } }); toast.ok(r.message); setConfirm(''); } catch (e: any) { toast.error(e.message); } }} data-testid="deletion-request-send">삭제 요청 보내기</Button>
+        </details>
+      )}
       {own && (
         <details className="mt-4 rounded-input border border-red-200 p-3">
           <summary className="cursor-pointer font-medium text-red-700">회원 탈퇴{user.role === 'owner' ? ' · 공간 삭제' : ''}</summary>

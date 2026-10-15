@@ -60,5 +60,6 @@ export const NOTIFICATION_TYPES = {
   chat: '메신저 새 메시지',
   month_close: '월 마감 기록(지난달 완료·이월·지연)',
   mail_status: '메일 발송 실패·고객 자료 열람',
+  account_request: '직원 계정 삭제 요청',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;
