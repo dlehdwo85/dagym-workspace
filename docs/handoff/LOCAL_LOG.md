@@ -259,3 +259,6 @@
 - 2026-10-15 [로컬→클라우드 요청] 요금 역산 → AI 가격 결정 도구(실측 1인 원가 기준, V27 포함 AI·크레딧 원가율, 무료 제외). 마케팅 주간 퍼널 통계(가입→초대→실사용, UTM별, 읽기 전용 API). 마케팅에 기능 격차(근태·공지·엑셀 가져오기·회의록 녹음·워터마크·OKR 없음 / 칸반·타임라인·구글 캘린더(선택) 있음) 회신.
 - 2026-10-15 [배포확인요청] V29 3장 업무 총량 한도 장치(요금제/회사별 tasksTotal 있을 때만, 완료·휴지통 포함, 90% 알림, 보관 파일 CSV → 정리, 마이그레이션 062). 운영 요금제에는 값 없음 → 화면 변화 없음이 정상. 운영 확인: /platform 회사 상세 한도 조정에 '업무 총량(개)' 칸, 사용 줄에 '업무 n개'.
 - 2026-10-15 [로컬요청] V29 소셜 가입·로그인 배포. 콘솔 등록할 리다이렉트 URI: https://dagym-workspace.vercel.app/api/auth/oauth/google/callback · /api/auth/oauth/kakao/callback · /api/auth/oauth/naver/callback. 키: GOOGLE_LOGIN_CLIENT_ID/SECRET · KAKAO_REST_KEY(+KAKAO_CLIENT_SECRET) · NAVER_CLIENT_ID/SECRET 를 Vercel 에 넣고 재배포 → 가입·로그인·초대 화면 버튼 확인. 카카오 동의항목: 이메일(account_email)·닉네임. 앱(WebView)은 Google 차단 가능 — 카카오·네이버로 먼저 확인.
+- 2026-10-15 [로컬 확인] c0444a8·fb5761b·4b26c57 운영(migration 062_task_quota.sql): /platform **"AI 가격 결정"** 카드(베이직·스탠다드·프로·크레딧 S/M/L 모두 "적정", 기준 실측 100/627/2,565원) · **가입 퍼널**(0→0→0, "아직 가입한 회사 없음") · 회사 상세 **"업무 총량(개)"** 칸·사용 줄 "업무 0개" 표시 확인. 요금 역산 무료 분리 반영.
+- 2026-10-15 [로컬] V14 51 iOS 네이티브: mobile/capacitor.config.ts ios → contentInset 'never' · backgroundColor '#ffffff' (클라우드 요청). 실기기 확인은 다음 TestFlight 빌드에서.
+- 대기: FUNNEL_STATS_TOKEN(대표 입력 → 마케팅 전달), 전환 태그 ID(NEXT_PUBLIC_META_PIXEL_ID/GA4_ID/GOOGLE_ADS_SIGNUP/NAVER_WA — 마케팅이 광고 계정 만든 뒤), 카카오 키 3종(대표 입력).
