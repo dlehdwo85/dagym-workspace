@@ -8,8 +8,25 @@ import { BASE, FAKE, bootstrap, resetDb, startServer, testDb, tick } from '../he
 import { startFakeGoogle } from '../fake-google.mjs';
 
 const SMTP_PORT = 2526;
+const RESEND_PORT = 3205;
+import http from 'node:http';
+// V29 워크인 발송: 가짜 Resend(HTTP) — to 에 busy@ 면 첫 번 429, bounce@ 면 422
+const resend = { mails: [], busy: 0 };
+function startResend() {
+  return http.createServer((req, res) => {
+    let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => {
+      const j = (o, st = 200) => { res.statusCode = st; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(o)); };
+      if (req.headers.authorization !== 'Bearer re_test_key') return j({ message: 'API key is invalid' }, 401);
+      const m = JSON.parse(b);
+      if (m.to.some((t) => t.startsWith('bounce@'))) return j({ name: 'validation_error', message: 'Invalid `to` field. email address' }, 422);
+      if (m.to.some((t) => t.startsWith('busy@')) && resend.busy++ === 0) return j({ message: 'Too many requests' }, 429);
+      resend.mails.push({ ...m, idem: req.headers['idempotency-key'] });
+      j({ id: `re_${resend.mails.length}` });
+    });
+  }).listen(RESEND_PORT);
+}
 const PASS = 'app-pass-1234';
-let srv, sql, ctx, smtp, taskId, attId, fake, libId;
+let srv, sql, ctx, smtp, taskId, attId, fake, libId, resendSrv;
 const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
 const box = { mails: [], mode: [], pass: PASS };
 function startSmtp() {
@@ -43,7 +60,7 @@ const waitStatus = async (id, want, ms = 15000) => {
 const account = (extra = {}) => ({ provider: 'custom', host: '127.0.0.1', port: SMTP_PORT, secure: false, username: 'dagym-in', fromEmail: 'office@mail.test', fromName: '시험회사', password: PASS, ...extra });
 
 before(async () => {
-  await resetDb(); smtp = await startSmtp(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
+  await resetDb(); smtp = await startSmtp(); fake = await startFakeGoogle(); srv = await startServer({ RESEND_API_KEY: 're_test_key', MAIL_FROM_DOMAIN: 'mail.work-in.test', RESEND_API_BASE: `http://localhost:${RESEND_PORT}` }); resendSrv = startResend(); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'dagym', name: '시험상호 다짐', phone: '02-000-0000', isDefault: true });
   await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'hilink', name: 'HI-LINK 시험', phone: '1555-0000', address: '시험시 시험로 36, 8층', website: 'www.hilink.test' });
   taskId = (await ctx.owner.ok('POST', '/api/tasks', { title: '[하이링크 문의] 시험아파트', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
@@ -60,7 +77,7 @@ before(async () => {
   libId = lf.id;
   await new Promise((r) => setTimeout(r, 1500)); // 자료 정리(AI)가 끝나기를 기다림
 });
-after(async () => { srv?.proc.kill(); smtp?.close(); fake?.server.close(); await sql?.end(); });
+after(async () => { srv?.proc.kill(); smtp?.close(); resendSrv?.close(); fake?.server.close(); await sql?.end(); });
 
 describe('V21 메일 계정·명함', () => {
   test('메일 계정: 권한 없는 사람 404, 연결 시험 실패면 저장 안 함, 성공하면 암호화 저장·비밀번호 안 돌려줌', async () => {
@@ -179,6 +196,54 @@ describe('V21 보관함 발송', () => {
     assert.equal((await fetch(`${BASE}/api/public/share/wrongtoken/0`, { redirect: 'manual' })).status, 404);
     const h = await ctx.owner.ok('GET', `/api/tasks/${taskId}/mail?history=1`);
     assert.ok(h.items.find((i) => i.id === r.id).first_opened_at);
+  });
+});
+
+describe('V29 쉬운 메일(워크인 발송) + B1 직원별 보내는 이름·회신 주소·숨은 참조', () => {
+  test('회사 메일 계정: 보내는 이름 기본 "이름 직급 (회사)"·회신 = 직원 업무 이메일, 시안에서 바꾼 값·숨은 참조 그대로', async () => {
+    const ctxm = await ctx.owner.ok('GET', `/api/tasks/${taskId}/mail`);
+    assert.equal(ctxm.channel, 'email:smtp', '계정이 있으면 자동 = 회사 계정');
+    assert.equal(ctxm.defaults.fromName, `${(await sql`select name from users where id = ${ctx.ownerId}`)[0].name} 대표 (HI-LINK 시험)`);
+    assert.equal(ctxm.defaults.replyTo, 'ceo@company.test');
+    box.mails = [];
+    const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], bcc: ['archive@company.test'], subject: '회신 주소 시험', body: '본문' });
+    await waitStatus(r.id, ['sent']);
+    const m = box.mails.at(-1);
+    assert.equal(m.replyTo.value[0].address, 'ceo@company.test'); assert.equal(m.from.value[0].address, 'office@mail.test');
+    assert.match(m.from.value[0].name, /대표 \(HI-LINK 시험\)/);
+    const r2 = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '바꾼 값', body: '본문', fromName: '영업팀 김대표', replyTo: 'sales@company.test' });
+    await waitStatus(r2.id, ['sent']);
+    assert.equal(box.mails.at(-1).from.value[0].name, '영업팀 김대표'); assert.equal(box.mails.at(-1).replyTo.value[0].address, 'sales@company.test');
+  });
+
+  test('워크인 발송: 설정 없이 noreply@발송 도메인 · 회신 = 직원 업무 이메일 · 첨부 · 기록 · 일시 오류 재시도 · 주소 오류 즉시 실패', async () => {
+    const st = await ctx.owner.ok('GET', '/api/org/mail-account');
+    assert.equal(st.workin.enabled, true); assert.equal(st.mode, 'auto');
+    assert.equal((await ctx.staffA.client.req('PUT', '/api/org/mail-mode', { mode: 'workin' })).status >= 400, true, '직원은 못 바꿈');
+    assert.equal((await ctx.owner.ok('PUT', '/api/org/mail-mode', { mode: 'workin' })).channel, 'email:workin');
+    resend.mails = [];
+    const up = await ctx.owner.ok('POST', '/api/attachments', { taskId, kind: 'file', fileName: '견적서.pdf', mimeType: 'application/pdf', size: 12 });
+    await fetch(BASE + up.upload.url, { method: 'PUT', headers: up.upload.headers, body: Buffer.from('%PDF-1.4 abc') });
+    await ctx.owner.ok('POST', `/api/attachments/${up.id}/complete`, {});
+    const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], cc: ['boss@client.test'], bcc: ['archive@company.test'], subject: '워크인 발송 시험', body: '안녕하세요', attachmentIds: [up.id] });
+    assert.equal(r.channel, 'email:workin');
+    await waitStatus(r.id, ['sent']);
+    const m = resend.mails.at(-1);
+    assert.match(m.from, /^"[^"]+ 대표 \(HI-LINK 시험\)" <noreply@mail\.work-in\.test>$/);
+    assert.equal(m.reply_to, 'ceo@company.test'); assert.deepEqual(m.bcc, ['archive@company.test']); assert.deepEqual(m.cc, ['boss@client.test']);
+    assert.equal(m.attachments[0].filename, '견적서.pdf'); assert.equal(Buffer.from(m.attachments[0].content, 'base64').toString(), '%PDF-1.4 abc');
+    const [o] = await sql`select channel, message_id, from_email from outbox where id = ${r.id}`;
+    assert.equal(o.channel, 'email:workin'); assert.equal(m.headers['Message-ID'], o.message_id); assert.equal(m.idem, o.message_id, '같은 메일 두 번 안 감');
+    assert.equal(o.from_email, 'noreply@mail.work-in.test');
+    // 일시 오류(429) → 재시도 대기 → 다시 보내 1통
+    const busy = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['busy@client.test'], subject: '바쁨', body: 'x' });
+    const w = await waitStatus(busy.id, ['retry', 'sent']);
+    if (w.status === 'retry') { await sql`update outbox set next_attempt_at = now() where id = ${busy.id}`; await tick(); await waitStatus(busy.id, ['sent']); }
+    assert.equal(resend.mails.filter((x) => x.subject === '바쁨').length, 1);
+    const bad = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['bounce@client.test'], subject: '주소 오류', body: 'x' });
+    const b = await waitStatus(bad.id, ['failed']);
+    assert.equal(b.error_kind, 'address'); assert.equal(b.attempts, 1);
+    await ctx.owner.ok('PUT', '/api/org/mail-mode', { mode: 'auto' });
   });
 });
 

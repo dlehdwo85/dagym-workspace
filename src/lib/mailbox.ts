@@ -20,10 +20,13 @@ import { tenantOf, type SessionUser } from './types';
 
 // ---------------- 메일 계정 ----------------
 export const MAIL_PRESETS = {
-  naver: { label: '네이버 메일', host: 'smtp.naver.com', port: 465, secure: true, help: '네이버 메일 > 환경설정 > POP3/IMAP 설정 > SMTP 사용 "사용함". 2단계 인증을 쓰면 [내정보 > 보안설정 > 애플리케이션 비밀번호]로 발급한 비밀번호를 넣으세요.' },
+  naver: { label: '네이버 메일', host: 'smtp.naver.com', port: 465, secure: true, help: '네이버 메일 > 환경설정 > POP3/IMAP 설정 > SMTP 사용 "사용함". 2단계 인증을 쓰면 [내정보 > 보안설정 > 애플리케이션 비밀번호]로 발급한 비밀번호를 넣으세요.',
+    steps: [['네이버 메일 열기 → 왼쪽 아래 [환경설정]', 'https://mail.naver.com'], ['[POP3/IMAP 설정] 탭 → "IMAP/SMTP 사용" 을 [사용함] → 저장', ''], ['2단계 인증을 쓰면: 네이버 [내정보] → [보안설정] → [애플리케이션 비밀번호 관리] → 종류 "기타", 이름 "워크인" → 생성', 'https://nid.naver.com/user2/help/myInfo'], ['생성된 비밀번호(12자리)를 아래 "앱 비밀번호" 칸에 붙여넣기 — 2단계 인증을 안 쓰면 네이버 비밀번호', '']] },
   naverworks: { label: '네이버웍스', host: 'smtp.worksmobile.com', port: 465, secure: true, help: '네이버웍스 관리자에서 외부 메일 앱(SMTP) 사용을 켜고 앱 비밀번호를 발급하세요.' },
-  daum: { label: '다음(카카오) 메일', host: 'smtp.daum.net', port: 465, secure: true, help: '다음 메일 > 환경설정 > IMAP/SMTP 사용 설정. 2단계 인증이면 앱 비밀번호.' },
-  gmail: { label: 'Gmail (앱 비밀번호)', host: 'smtp.gmail.com', port: 465, secure: true, help: 'Google 계정 2단계 인증 → 앱 비밀번호 16자리를 넣으세요.' },
+  daum: { label: '다음(카카오) 메일', host: 'smtp.daum.net', port: 465, secure: true, help: '다음 메일 > 환경설정 > IMAP/SMTP 사용 설정. 2단계 인증이면 앱 비밀번호.',
+    steps: [['다음 메일 열기 → [환경설정]', 'https://mail.daum.net'], ['[IMAP/SMTP] → "사용함" → 저장', ''], ['카카오계정 2단계 인증을 쓰면: 카카오계정 → [계정 보안] → [앱 비밀번호] 발급', 'https://accounts.kakao.com'], ['발급한 비밀번호를 아래 "앱 비밀번호" 칸에 붙여넣기', '']] },
+  gmail: { label: 'Gmail (앱 비밀번호)', host: 'smtp.gmail.com', port: 465, secure: true, help: 'Google 계정 2단계 인증 → 앱 비밀번호 16자리를 넣으세요.',
+    steps: [['Google 계정 2단계 인증 켜기', 'https://myaccount.google.com/security'], ['앱 비밀번호 만들기 → 이름 "워크인" → 16자리 복사', 'https://myaccount.google.com/apppasswords'], ['아래 "앱 비밀번호" 칸에 붙여넣기(띄어쓰기는 지워도 됨)', '']] },
   m365: { label: 'Microsoft 365', host: 'smtp.office365.com', port: 587, secure: false, help: '관리 센터에서 사용자 "SMTP 인증"을 켜야 합니다(STARTTLS 587).' },
   custom: { label: '직접 입력 (SMTP)', host: '', port: 465, secure: true, help: '메일 업체가 알려 준 SMTP 서버·포트를 넣으세요.' },
 } as const;
@@ -52,13 +55,56 @@ async function loadAccount(tenant: string, sql: Sql = db()) {
   const [a] = await sql<AccountRow[]>`select * from mail_accounts where tenant = ${tenant}`;
   return a ?? null;
 }
+// ---------------- V29 워크인 발송(설정 없이) ----------------
+/** RESEND_API_KEY + MAIL_FROM_DOMAIN(예: mail.work-in.dev, Resend 에서 인증된 도메인)이 있으면 켜짐 */
+export const workinMailEnabled = () => !!(process.env.RESEND_API_KEY && process.env.MAIL_FROM_DOMAIN);
+const workinFrom = () => `noreply@${process.env.MAIL_FROM_DOMAIN}`;
+export type MailMode = 'auto' | 'workin' | 'smtp';
+async function mailMode(tenant: string, sql: Sql): Promise<MailMode> {
+  const [r] = await sql<{ mail_mode: MailMode }[]>`select mail_mode from tenants where id = ${tenant}`;
+  return r?.mail_mode ?? 'auto';
+}
+/** 이번 발송 경로: 회사 설정 + 준비 상태. 둘 다 안 되면 null */
+async function pickChannel(tenant: string, sql: Sql): Promise<'email:smtp' | 'email:workin' | null> {
+  const [mode, acc] = await Promise.all([mailMode(tenant, sql), loadAccount(tenant, sql)]);
+  if (mode === 'smtp') return acc ? 'email:smtp' : null;
+  if (mode === 'workin') return workinMailEnabled() ? 'email:workin' : acc ? 'email:smtp' : null;
+  return acc ? 'email:smtp' : workinMailEnabled() ? 'email:workin' : null;
+}
+export const mailModeInput = z.object({ mode: z.enum(['auto', 'workin', 'smtp']) });
+export async function setMailMode(u: SessionUser, i: z.infer<typeof mailModeInput>) {
+  await requireMenu(u, mailSettingsMenu, 'edit');
+  const sql = db();
+  await sql`update tenants set mail_mode = ${i.mode} where id = ${tenantOf(u)}`;
+  await audit(sql, u.id, 'mail.mode', null, null, { mode: i.mode }, null);
+  return { ok: true, mode: i.mode, channel: await pickChannel(tenantOf(u), sql) };
+}
+type ResendMail = { from: string; to: string[]; cc?: string[]; bcc?: string[]; replyTo?: string; subject: string; text: string; html?: string; messageId: string;
+  attachments: { filename: string; content: Buffer; contentType?: string }[] };
+/** Resend HTTP API 로 보냄 — 실패는 SMTP 와 같은 분류(auth·address·transient·config)로 */
+async function resendSend(m: ResendMail) {
+  const base = (process.env.RESEND_API_BASE ?? 'https://api.resend.com').replace(/\/$/, '');
+  let r: Response;
+  try {
+    r = await fetch(`${base}/emails`, { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'content-type': 'application/json', 'idempotency-key': m.messageId },
+      body: JSON.stringify({ from: m.from, to: m.to, cc: m.cc?.length ? m.cc : undefined, bcc: m.bcc?.length ? m.bcc : undefined, reply_to: m.replyTo || undefined, subject: m.subject, text: m.text, html: m.html,
+        headers: { 'Message-ID': m.messageId }, attachments: m.attachments.map((a) => ({ filename: a.filename, content: a.content.toString('base64'), content_type: a.contentType })) }) });
+  } catch (e: any) { throw Object.assign(new Error(`워크인 발송 서버에 연결하지 못했습니다(${e?.name ?? 'network'})`), { kind: 'transient' }); }
+  if (r.ok) return;
+  const j = await r.json().catch(() => ({})) as { message?: string; name?: string };
+  const kind = r.status === 429 || r.status >= 500 ? 'transient' : r.status === 422 && /email|recipient|to/i.test(j.message ?? '') ? 'address' : 'config';
+  throw Object.assign(new Error(kind === 'address' ? `받는 주소를 확인해 주세요: ${j.message ?? ''}` : kind === 'transient' ? '워크인 발송이 잠시 바쁩니다 — 자동으로 다시 보냅니다' : `워크인 발송 설정 오류(${r.status}) — 운영팀에 알려 주세요`), { kind });
+}
+
 /** 화면용 — 비밀번호는 절대 돌려주지 않는다 */
 const publicAccount = (a: AccountRow | null) => a && { provider: a.provider, providerLabel: MAIL_PRESETS[a.provider as MailProvider]?.label ?? a.provider, host: a.host, port: a.port, secure: a.secure,
   username: a.username, fromEmail: a.from_email, fromName: a.from_name, lastOkAt: a.last_ok_at, lastError: a.last_error, updatedAt: a.updated_at };
 
 export async function getMailAccount(u: SessionUser) {
   await requireMenu(u, mailSettingsMenu, 'view');
-  return { account: publicAccount(await loadAccount(tenantOf(u))), presets: Object.entries(MAIL_PRESETS).map(([k, v]) => ({ key: k, ...v })) };
+  const sql = db(), t = tenantOf(u);
+  return { account: publicAccount(await loadAccount(t, sql)), presets: Object.entries(MAIL_PRESETS).map(([k, v]) => ({ key: k, ...v })),
+    mode: await mailMode(t, sql), channel: await pickChannel(t, sql), workin: { enabled: workinMailEnabled(), from: workinMailEnabled() ? workinFrom() : null } };
 }
 
 type Conn = { host: string; port: number; secure: boolean; username: string; password: string; provider: string };
@@ -239,6 +285,8 @@ export async function mailContext(u: SessionUser, taskId: string) {
   const guess = contact?.site && profiles.some((p) => p.key === contact.site) ? contact.site : (profiles.find((p) => p.is_default) ?? profiles[0])?.key ?? null;
   return {
     canSend: await canSend(u, sql), account: account ? { fromEmail: account.from_email, fromName: account.from_name, lastOkAt: account.last_ok_at } : null,
+    channel: await pickChannel(t, sql), workinFrom: workinMailEnabled() ? workinFrom() : null,
+    defaults: { fromName: defaultFromName(me, (profiles.find((p) => p.key === guess) ?? profiles[0])?.name ?? ''), replyTo: me.workEmail || account?.from_email || u.email },
     kinds: Object.entries(MAIL_KINDS).map(([k, v]) => ({ key: k, ...v })), companies: sigs, company: guess,
     to: contact?.email ? [contact.email] : [], contact, me: { name: me.name, title: me.title, phone: me.phone, email: me.email, workEmail: me.workEmail },
     attachments: atts.map((a: any) => ({ id: a.id, name: a.file_name, size: Number(a.size_bytes), mime: a.mime_type, title: a.doc_title })),
@@ -246,7 +294,7 @@ export async function mailContext(u: SessionUser, taskId: string) {
   };
 }
 async function taskOutbox(taskId: string, sql: Sql) {
-  return sql`select o.id, o.channel, o.status, o.to_addrs, o.cc_addrs, o.subject, left(o.body_text, 200) as preview, o.files, o.as_link, o.attempts, o.last_error, o.error_kind, o.sent_at, o.created_at,
+  return sql`select o.id, o.channel, o.status, o.to_addrs, o.cc_addrs, o.bcc_addrs, o.from_name, o.reply_to, o.subject, left(o.body_text, 200) as preview, o.files, o.as_link, o.attempts, o.last_error, o.error_kind, o.sent_at, o.created_at,
       o.next_attempt_at, u.name as sender_name, s.first_opened_at
     from outbox o join users u on u.id = o.created_by left join share_links s on s.id = o.share_id
     where o.task_id = ${taskId} order by o.created_at desc limit 50`;
@@ -266,6 +314,10 @@ export const sendInput = z.object({
   company: z.string().regex(/^[a-z0-9_-]{2,30}$/),
   to: emails.min(1, '받는 사람을 넣어 주세요'),
   cc: emails.optional(),
+  bcc: emails.optional(),
+  /** B1: 보내는 이름·회신 주소 — 비우면 "이름 직급 (회사)" · 직원 업무 이메일 */
+  fromName: z.string().trim().max(80).optional(),
+  replyTo: z.string().trim().email('회신 주소 형식이 아닙니다').max(200).optional().or(z.literal('')),
   subject: z.string().trim().min(1, '제목을 넣어 주세요').max(200),
   body: z.string().max(20000),
   attachmentIds: z.array(z.string().uuid()).max(20).optional(),
@@ -279,8 +331,9 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   if (!(await canSend(u))) throw forbidden('메일 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
   const { task } = await loadTaskForMail(u, i.taskId);
   const sql = db(); const t = tenantOf(u);
-  const account = await loadAccount(t, sql);
-  if (!account) throw new HttpError(409, 'mail_account_missing', '회사 메일 계정이 연결되지 않았습니다 — 설정 > 메일 계정에서 먼저 연결하세요');
+  const channel = await pickChannel(t, sql);
+  if (!channel) throw new HttpError(409, 'mail_account_missing', '메일을 보낼 방법이 아직 없습니다 — 설정 > 메일에서 회사 메일 계정을 연결하거나 워크인 발송을 켜 주세요');
+  const account = channel === 'email:smtp' ? await loadAccount(t, sql) : null;
   const [profile] = (await companyProfiles(t, sql)).filter((p) => p.key === i.company) as SigProfile[];
   if (!profile) throw notFound('회사 정보가 없습니다');
   // 명함 학습: 직급·휴대폰이 비어 있으면 이번에 받은 값을 프로필에 저장
@@ -305,15 +358,20 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   }
   const html = bodyHtml(i.body, signatureHtml(profile, me), linkBlock);
   const text = `${i.body}${linkText}\n\n${signatureText(profile, me)}`;
-  const domain = account.from_email.split('@')[1] ?? 'workin';
+  const fromEmail = account ? account.from_email : workinFrom();
+  const domain = fromEmail.split('@')[1] ?? 'workin';
+  // B1 보내는 사람별: 이름 "이름 직급 (회사)", 회신 = 직원 업무 이메일(없으면 회사 계정/로그인 이메일) — 둘 다 시안에서 바꿀 수 있음
+  const fromName = (i.fromName || defaultFromName(me, profile.name)).slice(0, 80);
+  const replyTo = i.replyTo || me.workEmail || account?.from_email || u.email;
   const id = randomUUID();
-  await sql`insert into outbox (id, tenant, channel, status, task_id, company_key, created_by, from_email, to_addrs, cc_addrs, subject, body_text, body_html, files, as_link, share_id, message_id)
-    values (${id}, ${t}, 'email:smtp', 'queued', ${i.taskId}, ${i.company}, ${u.id}, ${account.from_email}, ${i.to}, ${i.cc ?? []}, ${i.subject}, ${text}, ${html},
+  await sql`insert into outbox (id, tenant, channel, status, task_id, company_key, created_by, from_email, from_name, reply_to, to_addrs, cc_addrs, bcc_addrs, subject, body_text, body_html, files, as_link, share_id, message_id)
+    values (${id}, ${t}, ${channel}, 'queued', ${i.taskId}, ${i.company}, ${u.id}, ${fromEmail}, ${fromName}, ${replyTo}, ${i.to}, ${i.cc ?? []}, ${i.bcc ?? []}, ${i.subject}, ${text}, ${html},
       ${sql.json(list as never)}, ${asLink}, ${shareId}, ${`<${id}@${domain}>`})`;
   await activity(sql, 'task', i.taskId, u.id, 'mail_queued', { to: i.to, subject: i.subject, files: list.map((f) => f.name), asLink });
   await audit(sql, u.id, 'mail.queue', 'task', i.taskId, { outboxId: id, to: i.to, files: list.length, asLink }, ip);
-  return { id, status: 'queued', asLink, taskTitle: task.title };
+  return { id, status: 'queued', asLink, taskTitle: task.title, channel };
 }
+export const defaultFromName = (me: { name: string; title: string | null }, company: string) => `${me.name}${me.title ? ` ${me.title}` : ''} (${company})`;
 
 /** 실패 행 다시 보내기 (같은 Message-ID — 받는 쪽 중복 판별 가능) */
 export async function retryOutbox(u: SessionUser, id: string) {
@@ -337,30 +395,37 @@ export async function processOutbox(id: string): Promise<string> {
       and (locked_until is null or locked_until < now()) returning *`;
   if (!o) return 'skipped';
   try {
-    const account = await loadAccount(o.tenant, sql);
-    if (!account) throw Object.assign(new Error('메일 계정이 연결되지 않았습니다'), { code: 'NOACCOUNT' });
+    const workin = o.channel === 'email:workin';
+    const account = workin ? null : await loadAccount(o.tenant, sql);
+    if (!workin && !account) throw Object.assign(new Error('메일 계정이 연결되지 않았습니다'), { code: 'NOACCOUNT' });
+    if (workin && !workinMailEnabled()) throw Object.assign(new Error('워크인 발송이 꺼져 있습니다 — 회사 메일 계정을 연결하세요'), { code: 'NOACCOUNT' });
     const attachments = o.as_link ? [] : await Promise.all((o.files as { attachmentId: string; name: string; mime: string }[]).map(async (f) => {
       const [a] = await sql<{ storage_key: string }[]>`select storage_key from attachments where id = ${f.attachmentId}`;
       if (!a) throw Object.assign(new Error(`첨부가 지워졌습니다: ${f.name}`), { code: 'NOFILE' });
       const { getObject } = await import('./storage');
       return { filename: f.name, content: await getObject(a.storage_key), contentType: f.mime };
     }));
-    await transport({ host: account.host, port: account.port, secure: account.secure, username: account.username, password: decrypt(account.password_enc), provider: account.provider })
-      .sendMail({ from: { name: account.from_name || account.from_email, address: account.from_email }, to: o.to_addrs, cc: o.cc_addrs?.length ? o.cc_addrs : undefined,
-        subject: o.subject, text: o.body_text, html: o.body_html ?? undefined, attachments, messageId: o.message_id, replyTo: account.from_email });
+    if (workin) {
+      await resendSend({ from: `"${String(o.from_name ?? '워크인').replace(/"/g, '')}" <${workinFrom()}>`, to: o.to_addrs, cc: o.cc_addrs, bcc: o.bcc_addrs, replyTo: o.reply_to ?? undefined,
+        subject: o.subject, text: o.body_text, html: o.body_html ?? undefined, messageId: o.message_id, attachments });
+    } else {
+      await transport({ host: account!.host, port: account!.port, secure: account!.secure, username: account!.username, password: decrypt(account!.password_enc), provider: account!.provider })
+        .sendMail({ from: { name: o.from_name || account!.from_name || account!.from_email, address: account!.from_email }, to: o.to_addrs, cc: o.cc_addrs?.length ? o.cc_addrs : undefined,
+          bcc: o.bcc_addrs?.length ? o.bcc_addrs : undefined, subject: o.subject, text: o.body_text, html: o.body_html ?? undefined, attachments, messageId: o.message_id, replyTo: o.reply_to || account!.from_email });
+    }
     await sql`update outbox set status = 'sent', sent_at = now(), locked_until = null, last_error = null, error_kind = null where id = ${id}`;
-    await sql`update mail_accounts set last_ok_at = now(), last_error = null where tenant = ${o.tenant}`;
+    if (!workin) await sql`update mail_accounts set last_ok_at = now(), last_error = null where tenant = ${o.tenant}`;
     if (o.task_id) {
       await activity(sql, 'task', o.task_id, o.created_by, 'mail_sent', { to: o.to_addrs, subject: o.subject, files: (o.files as any[]).map((f) => f.name), asLink: o.as_link });
       await crmSteps(sql, o.task_id, o.subject, o.files as any[]);
     }
     return 'sent';
   } catch (e: any) {
-    const c = e?.code === 'NOACCOUNT' || e?.code === 'NOFILE' ? { kind: 'config' as const, message: e.message } : classifySmtpError(e);
+    const c = e?.code === 'NOACCOUNT' || e?.code === 'NOFILE' ? { kind: 'config' as const, message: e.message } : e?.kind ? { kind: e.kind as SendErrKind, message: e.message as string } : classifySmtpError(e);
     const retry = c.kind === 'transient' && o.attempts <= RETRY_MIN.length;
     await sql`update outbox set status = ${retry ? 'retry' : 'failed'}, locked_until = null, last_error = ${c.message}, error_kind = ${c.kind},
       next_attempt_at = now() + make_interval(mins => ${retry ? RETRY_MIN[o.attempts - 1] : 0}) where id = ${id}`;
-    if (c.kind === 'auth') await sql`update mail_accounts set last_error = ${c.message} where tenant = ${o.tenant}`;
+    if (c.kind === 'auth' && o.channel === 'email:smtp') await sql`update mail_accounts set last_error = ${c.message} where tenant = ${o.tenant}`;
     if (!retry) {
       if (o.task_id) await activity(sql, 'task', o.task_id, o.created_by, 'mail_failed', { to: o.to_addrs, subject: o.subject, error: c.message });
       // 보낸 사람 + 대표에게 알림 (다시 보내기는 업무 화면)

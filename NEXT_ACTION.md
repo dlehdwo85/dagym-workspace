@@ -501,6 +501,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 나이스페이 관리자에 등록할 결제통보(웹훅) URL: https://dagym-workspace.vercel.app/api/billing/nicepay/notify (운영 모드는 나이스페이 발신 IP 만 받음, 응답 "OK").
 - 남은 것: 시험 MID 로 실제 결제창(카드·계좌이체·가상계좌) 한 번씩 → 키 입력 후 실결제 소액 확인(대표 승인).
 
+## V29 2장 쉬운 메일(워크인 발송) + B1 보내는 이름·회신 주소·숨은 참조 (2026-10-15)
+- 워크인 발송: RESEND_API_KEY + MAIL_FROM_DOMAIN(예 mail.work-in.dev, Resend 도메인 인증 후)이 있으면 켜짐. 보내는 주소 noreply@MAIL_FROM_DOMAIN, 이름 "이름 직급 (회사)", Reply-To = 직원 업무 이메일 → 답장은 직원 메일함. 회사 보낸메일함엔 안 남고 업무 발송 기록에 남음. 같은 Message-ID 를 멱등 키로(중복 발송 방지), 429·5xx 자동 재시도, 주소 오류 즉시 실패.
+- 설정 > 메일 "보내는 방식": 자동(계정 있으면 회사 계정, 없으면 워크인) · 워크인 발송 · 회사 메일 계정. 네이버·다음·Gmail 연결은 단계별 안내 + 바로가기 링크.
+- 메일 시안 "보내는 이름·회신 주소·숨은 참조" 칸(기본값 채움, 자유 수정). 회사 계정 발송도 Reply-To = 직원 업무 이메일로 바뀜(B1).
+- Gmail·Microsoft 365 OAuth 버튼 연결은 아직(Google 은 gmail.send 권한 심사 필요) — 앱 비밀번호 방식 + 워크인 발송으로 대체. 마이그레이션 064_mail_workin.sql.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

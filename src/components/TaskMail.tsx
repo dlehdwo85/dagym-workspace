@@ -10,6 +10,7 @@ import type { AssistDraft } from './TaskAssist';
 
 type Ctx = {
   canSend: boolean; account: { fromEmail: string; fromName: string | null } | null;
+  channel: 'email:smtp' | 'email:workin' | null; workinFrom: string | null; defaults: { fromName: string; replyTo: string };
   kinds: { key: string; label: string; subject: string; body: string }[];
   companies: { key: string; name: string; isDefault: boolean; html: string; smsLine: string }[]; company: string | null;
   to: string[]; contact: { name: string | null; email: string | null; phone: string | null; organization: string | null } | null;
@@ -79,7 +80,7 @@ export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: str
 function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: string; onClose: () => void; onSent: () => void; onAttach: () => void; initial?: AssistDraft | null }) {
   const ctx = useApi<Ctx>(`/api/tasks/${taskId}/mail`, [taskId]);
   const d = ctx.data;
-  const [f, setF] = useState<{ company: string; kind: string; to: string; cc: string; subject: string; body: string; files: string[]; title: string; phone: string; workEmail: string } | null>(null);
+  const [f, setF] = useState<{ company: string; kind: string; to: string; cc: string; bcc: string; fromName: string; replyTo: string; more: boolean; subject: string; body: string; files: string[]; title: string; phone: string; workEmail: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [channel, setChannel] = useState<'email' | 'sms'>(initial?.channel === 'sms' ? 'sms' : 'email');
   const [drafting, setDrafting] = useState(false);
@@ -93,7 +94,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!d || f) return;
     const k = d.kinds[d.kinds.length - 1];
     const okFiles = (initial?.attachmentIds ?? []).filter((id) => d.attachments.some((a) => a.id === id));
-    setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: d.to.join(', '), cc: '',
+    setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: d.to.join(', '), cc: '', bcc: '', fromName: d.defaults?.fromName ?? '', replyTo: d.defaults?.replyTo ?? '', more: false,
       subject: initial?.channel === 'email' && initial.subject ? initial.subject : `${k.subject}${d.contact?.organization ? ` — ${d.contact.organization}` : ''}`,
       body: initial?.channel === 'email' && initial.body ? initial.body : k.body, files: okFiles, title: '', phone: '', workEmail: '' });
     if (initial?.channel === 'sms') setSms({ to: d.contact?.phone ?? '', body: initial.body });
@@ -168,17 +169,18 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!to.length) { toast.error('받는 사람 메일 주소를 넣어 주세요'); return; }
     setBusy(true);
     try {
-      const r = await api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), subject: f!.subject, body: f!.body, attachmentIds: f!.files,
+      const r = await api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), bcc: splitAddrs(f!.bcc), fromName: f!.fromName.trim() || undefined, replyTo: f!.replyTo.trim() || undefined, subject: f!.subject, body: f!.body, attachmentIds: f!.files,
         senderTitle: f!.title || undefined, senderPhone: f!.phone || undefined, senderWorkEmail: f!.workEmail.trim() || undefined } });
       toast.ok(r.asLink ? '보관함에 넣었습니다 — 첨부는 다운로드 링크로 보냅니다' : '보관함에 넣었습니다 — 곧 발송됩니다');
       onSent();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
-  const from = d.account ? (d.account.fromName ? `${d.account.fromName} <${d.account.fromEmail}>` : d.account.fromEmail) : null;
+  const fromAddr = d.channel === 'email:workin' ? d.workinFrom : d.channel === 'email:smtp' ? d.account?.fromEmail ?? null : null;
+  const from = fromAddr ? `${f.fromName || d.account?.fromName || ''} <${fromAddr}>`.trim() : null;
   return (
     <Modal open onClose={onClose} title={channel === 'sms' ? '문자 시안' : '메일 시안 — 실제 나갈 모습'} wide>
       <div className="space-y-3" data-testid="mail-compose">
-        {channel === 'email' && !d.account && <p className="rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-800" data-testid="mail-no-account">회사 메일 계정이 아직 연결되지 않아 보낼 수 없습니다. <Link href="/admin/mail" className="font-medium underline">메일 계정 연결</Link></p>}
+        {channel === 'email' && !d.channel && <p className="rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-800" data-testid="mail-no-account">메일을 보낼 방법이 아직 없습니다 — 회사 메일 계정을 연결하거나 워크인 발송을 켜 주세요. <Link href="/admin/mail" className="font-medium underline">메일 설정</Link></p>}
         <div className="flex flex-wrap items-center gap-1.5">
           <div className="mr-2 flex rounded-input border border-line p-0.5 text-sm" role="tablist" aria-label="보내는 방법">
             {([['email', '메일', Mail], ['sms', '문자', MessageSquare]] as const).map(([k, l, I]) => (
@@ -209,7 +211,15 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           </div>
         ) : (
         <div className="grid gap-2 text-sm">
-          <p className="text-ink-2">보내는 주소 <b className="text-ink" data-testid="mail-from-line">{from ?? '연결 안 됨'}</b></p>
+          <p className="text-ink-2">보내는 주소 <b className="text-ink" data-testid="mail-from-line">{from ?? '연결 안 됨'}</b>{d.channel === 'email:workin' && <span className="ml-1 text-xs text-ink-3">(워크인 발송 — 답장은 회신 주소로)</span>}
+            {d.channel && <button type="button" className="ml-2 text-xs text-brand-700 underline" onClick={() => set({ more: !f.more })} data-testid="mail-more">{f.more ? '접기' : '보내는 이름·회신 주소·숨은 참조'}</button>}</p>
+          {f.more && (
+            <div className="grid gap-2 rounded-input bg-slate-50 p-2 sm:grid-cols-2" data-testid="mail-more-fields">
+              <Field label="보내는 이름"><input className={inputCls} value={f.fromName} onChange={(e) => set({ fromName: e.target.value })} maxLength={80} data-testid="mail-from-name" /></Field>
+              <Field label="회신 주소(Reply-To) — 답장이 오는 곳"><input className={inputCls} type="email" value={f.replyTo} onChange={(e) => set({ replyTo: e.target.value })} data-testid="mail-reply-to" /></Field>
+              <Field label="숨은 참조"><input className={inputCls} value={f.bcc} onChange={(e) => set({ bcc: e.target.value })} data-testid="mail-bcc" /></Field>
+            </div>
+          )}
           <Field label="받는 사람 (여러 명은 쉼표)"><input className={cx(inputCls, !f.to.trim() && 'border-amber-400 bg-amber-50/40')} value={f.to} onChange={(e) => set({ to: e.target.value })} placeholder="고객 메일 주소" data-testid="mail-to" /></Field>
           {!f.to.trim() && <p className="-mt-1 flex items-center gap-1 text-xs font-medium text-amber-700" data-testid="mail-to-missing"><AlertTriangle className="size-3.5" />받는 사람 이메일이 없습니다{d.contact ? ' (문의에 이메일 없음)' : ''} — 고객 메일 주소를 입력해 주세요</p>}
           <Field label="참조"><input className={inputCls} value={f.cc} onChange={(e) => set({ cc: e.target.value })} data-testid="mail-cc" /></Field>
@@ -261,7 +271,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
         <div className="flex items-center justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>닫기</Button>
           {channel === 'email'
-            ? <Button onClick={send} disabled={busy || !d.account || !d.canSend} data-testid="mail-send"><Send />{busy ? '보관함에 넣는 중…' : '보내기'}</Button>
+            ? <Button onClick={send} disabled={busy || !d.channel || !d.canSend} data-testid="mail-send"><Send />{busy ? '보관함에 넣는 중…' : '보내기'}</Button>
             : <Button onClick={openSms} disabled={!d.canSend} data-testid="sms-open"><MessageSquare />문자앱으로 보내기</Button>}
         </div>
       </div>
