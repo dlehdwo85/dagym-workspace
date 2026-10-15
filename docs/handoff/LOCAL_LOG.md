@@ -289,3 +289,4 @@
 - 2026-10-16 [배포확인요청] V30 P1 ① 엑셀·CSV 업무 가져오기: 업무 화면 [엑셀로 가져오기] → /tasks/import. 확인 부탁: ① [예시 양식 내려받기] → 그대로 올리기 → 미리보기 3줄 → 만들기 → 업무 목록에 보임 → [되돌리기] ② 실제 쓰던 엑셀(.xlsx) 한 개로 열 짝·담당자 맞추기 ③ 휴대폰(앱)에서 파일 고르기·카드 미리보기·[만들기] 버튼이 아래 메뉴에 안 가리는지 ④ 앱에서 [예시 양식 내려받기](안드로이드 내려받기 처리기). 마이그레이션 068(tasks.import_id 추가만).
 - 2026-10-16 [로컬 확인] 92607f0: /account-deletion 200, /privacy "10. 앱 접근 권한·11. 계정 삭제", 1024px 업무 목록 제목 정상. assetlinks 값 전달(Play 앱 서명 SHA-256 1E:EA:73:…:12:75, kr.co.dagym.workos), AASA appID 88SSK23ZVB.kr.co.dagym.workos. iOS Associated Domains 엔타이틀먼트는 Apple 개발자 포털에서 App ID 에 기능을 켠 뒤 추가(먼저 넣으면 서명 실패 위험).
 - ⚠ NICEPAY_MODE 는 표시만 바꿈(실 키면 실제 승인) → 시험 MODE 에서 시험 MID·sandbox 를 쓰도록 클라우드에 수정 요청, 대표에게 방식 확인 중. 확인 전 결제 시험 금지.
+- 2026-10-16 [로컬] 52ec734(카카오 intent·kakaolink Android 처리, iOS LSApplicationQueriesSchemes, filesystem·share·browser 플러그인) — mobile CI(Android 빌드 + iOS 시뮬레이터 컴파일) **성공**. 실기기 확인은 다음 내부 테스트 빌드에서.
