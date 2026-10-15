@@ -1029,7 +1029,8 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
           <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
             <TypeIcon t={t} />
-            <TaskLink id={t.id} className={cx('truncate text-sm font-medium text-ink hover:text-accent-600 hover:underline', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
+            {/* 대표 피드백(10/15): 휴대폰은 제목이 너무 짧게 잘림 → 두 줄까지 보이고, PC 는 한 줄 */}
+            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline max-sm:line-clamp-2 max-sm:break-words max-sm:leading-snug sm:truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
           </span>
           <Meta t={t} onPatch={onPatch} />

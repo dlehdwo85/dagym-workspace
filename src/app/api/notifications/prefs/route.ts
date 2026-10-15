@@ -14,7 +14,7 @@ export const GET = handler(async ({ user }) => {
       const p = prefs.find((x) => x.type === type);
       return { type, label, inApp: p?.in_app ?? true, push: p?.push ?? true };
     }),
-    settings: { dueSoonHours: s?.due_soon_hours ?? 24, eventReminderMinutes: s?.event_reminder_minutes ?? 10, taskReminderMinutes: s?.task_reminder_minutes ?? 60, quietStart: s?.quiet_start ?? null, quietEnd: s?.quiet_end ?? null,
+    settings: { dueSoonHours: s?.due_soon_hours ?? 24, eventReminderMinutes: s?.event_reminder_minutes ?? 60, taskReminderMinutes: s?.task_reminder_minutes ?? 60, quietStart: s?.quiet_start ?? null, quietEnd: s?.quiet_end ?? null,
       briefingTime: s?.briefing_time ?? '08:30', briefingEnabled: s?.briefing_enabled ?? true, briefingWeekend: s?.briefing_weekend ?? false, requesterDueAlerts: s?.requester_due_alerts ?? true },
     subscriptions: subs,
   };
@@ -34,7 +34,7 @@ export const PUT = handler(async ({ req, user }) => {
       on conflict (user_id, type) do update set in_app = excluded.in_app, push = excluded.push`;
   }
   if (i.settings) {
-    const rem = i.settings.eventReminderMinutes ?? 10;
+    const rem = i.settings.eventReminderMinutes ?? 60;
     await sql`insert into user_settings (user_id, due_soon_hours, event_reminder_minutes, quiet_start, quiet_end) values (${user.id}, ${i.settings.dueSoonHours}, ${rem}, ${i.settings.quietStart}, ${i.settings.quietEnd})
       on conflict (user_id) do update set due_soon_hours = excluded.due_soon_hours, event_reminder_minutes = excluded.event_reminder_minutes, quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, updated_at = now()`;
     if (i.settings.requesterDueAlerts !== undefined) await sql`update user_settings set requester_due_alerts = ${i.settings.requesterDueAlerts} where user_id = ${user.id}`; // V13 6번

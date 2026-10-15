@@ -18,8 +18,8 @@ const leftLabel = (m: number) => (m >= 1440 ? `${Math.round(m / 1440)}일 뒤` :
 
 /**
  * 휴대폰 예약 알림용: 앞으로 N일(기본 7) 동안 내가 받을 미리 알림. 서버 정기 실행이 보내는 것과 같은 규칙.
- * - 일정: 일정별 알림(분) 또는 내 기본값(기본 10분 전), 0 = 끔, 불참 응답한 일정 제외
- * - 시간 있는 업무: 업무별 🔔 또는 내 기본값(60분 전) / 날짜만 있는 업무: 업무별 🔔(09시 기준) + 당일 09시 "오늘 마감"
+ * - 일정: 일정별 알림(분) 또는 내 기본값(기본 1시간 전), 0 = 끔, 불참 응답한 일정 제외
+ * - 시간 있는 업무: 업무별 🔔 또는 내 기본값(1시간 전) / 날짜만 있는 업무: 업무별 🔔(09시 기준) 또는 기본(18시 기준 1시간 전 = 17시) + 당일 09시 "오늘 마감"
  * - 마감 임박(설정한 시간 전, 기본 24시간) / 아침 브리핑(켜져 있으면 평일 설정 시각)
  * 가까운 순 최대 `limit`(Android·iOS 예약 한도 고려 64)
  */
@@ -29,10 +29,10 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
   const until = now.plus({ days });
   const today = todaySeoul();
   const [s] = await sql<{ ev: number; task: number; soon: number; btime: string; bon: boolean; bweekend: boolean; req: boolean }[]>`
-    select coalesce(requester_due_alerts, true) req, coalesce(event_reminder_minutes, 10) ev, coalesce(task_reminder_minutes, 60) task, coalesce(due_soon_hours, 24) soon,
+    select coalesce(requester_due_alerts, true) req, coalesce(event_reminder_minutes, 60) ev, coalesce(task_reminder_minutes, 60) task, coalesce(due_soon_hours, 24) soon,
       to_char(coalesce(briefing_time, time '08:30'), 'HH24:MI') btime, coalesce(briefing_enabled, true) bon, coalesce(briefing_weekend, false) bweekend
     from user_settings where user_id = ${u.id}`;
-  const st = s ?? { ev: 10, task: 60, soon: 24, btime: '08:30', bon: true, bweekend: false, req: true };
+  const st = s ?? { ev: 60, task: 60, soon: 24, btime: '08:30', bon: true, bweekend: false, req: true };
   const out: Upcoming[] = [];
   const push = (key: string, at: DateTime, title: string, body: string, link: string) => {
     if (at <= now || at > until) return;
@@ -75,6 +75,9 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     const ms = t.reminder_minutes ?? (t.due_time ? [st.task] : []);
     for (const m of ms) push(`task:${t.id}:${t.due_date}:${t.due_time ?? ''}:${m}`, due.minus({ minutes: m }), `${leftLabel(m)} 마감: ${t.title}`,
       `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), `/tasks/${t.id}`);
+    // 2026-10-15 대표: 날짜만 있는 업무도 기본 1시간 전 — 18시(퇴근) 기준(서버 정기 실행과 같은 키)
+    if (!t.due_time && !t.reminder_minutes) push(`task:${t.id}:${t.due_date}::${st.task}`, kst(t.due_date, '18:00').minus({ minutes: st.task }), `${leftLabel(st.task)} 마감: ${t.title}`,
+      `${t.due_date === today ? '오늘' : t.due_date}까지`, `/tasks/${t.id}`);
     // V14 10번(검수 3): 마감 당일에 울리는 시각 알림이 있으면 "오늘 마감"은 생략(하루 1건)
     if (!ms.some((m) => due.minus({ minutes: m }).toISODate() === t.due_date))
       push(`today:${t.id}:${t.due_date}`, kst(t.due_date, '09:00'), `오늘 마감: ${t.title}`, t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', `/tasks/${t.id}`);
@@ -100,6 +103,7 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
       const rms = t.reminder_minutes ?? (t.due_time ? [t.atask ?? 60] : []);
       for (const m of rms)
         push(`req:${g}:rem${m}:${t.due_date}:${t.due_time ?? ''}`, due.minus({ minutes: m }), `[지시] ${leftLabel(m)} 마감: ${t.title}`, `담당 ${who}`, link);
+      if (!t.due_time && !t.reminder_minutes) { const m = t.atask ?? 60; push(`req:${g}:rem${m}:${t.due_date}:`, kst(t.due_date, '18:00').minus({ minutes: m }), `[지시] ${leftLabel(m)} 마감: ${t.title}`, `담당 ${who}`, link); }
       if (!rms.some((m) => due.minus({ minutes: m }).toISODate() === t.due_date))
         push(`req:${g}:today:${t.due_date}`, kst(t.due_date, '09:00'), `[지시] 오늘 마감: ${t.title}`, `담당 ${who}`, link);
     }

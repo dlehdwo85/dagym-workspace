@@ -61,10 +61,11 @@ async function dueNotifications() {
   const hourLeft = await sql<{ id: string; title: string; assignee_id: string; due_date: string; due_time: string | null; m: number }[]>`
     select t.id, t.title, t.assignee_id, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time, r.m
     from tasks t join users u on u.id = t.assignee_id left join user_settings s on s.user_id = t.assignee_id
-    cross join lateral unnest(coalesce(t.reminder_minutes, case when t.due_time is not null then array[coalesce(s.task_reminder_minutes, 60)] else array[]::int[] end)) as r(m)
+    cross join lateral unnest(coalesce(t.reminder_minutes, array[coalesce(s.task_reminder_minutes, 60)])) as r(m)
+    -- 기준 시각: 마감 시각 / 날짜만 있는 업무는 업무별 🔔 면 09시, 기본 알림이면 18시(퇴근 기준) → 기본 1시간 전 = 17시 (2026-10-15 대표: 모든 업무 1시간 전)
+    cross join lateral (select (t.due_date + coalesce(t.due_time, case when t.reminder_minutes is null then time '18:00' else time '09:00' end)) at time zone 'Asia/Seoul' as at) b
     where t.deleted_at is null and t.status not in ('done','on_hold') and u.status = 'active' and t.due_date is not null
-      and ((t.due_date + coalesce(t.due_time, time '09:00')) at time zone 'Asia/Seoul') > now()
-      and ((t.due_date + coalesce(t.due_time, time '09:00')) at time zone 'Asia/Seoul') - make_interval(mins => r.m) <= now()`;
+      and b.at > now() and b.at - make_interval(mins => r.m) <= now()`;
   for (const t of hourLeft) {
     const left = t.m >= 1440 ? `${Math.round(t.m / 1440)}일 뒤` : t.m >= 60 ? `${Math.round(t.m / 60)}시간 뒤` : t.m > 0 ? `${t.m}분 뒤` : '지금';
     n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `${left} 마감: ${t.title}`,
@@ -203,7 +204,7 @@ export async function eventReminders(now = new Date()) {
       .filter((a) => a.response !== 'declined').map((a) => a.user_id);
     const people = [...new Set([...att, m.created_by, ...(m.cal_type === 'personal' && m.owner_user_id ? [m.owner_user_id] : [])])];
     const leads = await sql<{ id: string; lead: number }[]>`
-      select u.id, coalesce(s.event_reminder_minutes, 10) as lead from users u left join user_settings s on s.user_id = u.id
+      select u.id, coalesce(s.event_reminder_minutes, 60) as lead from users u left join user_settings s on s.user_id = u.id
       where u.id = any(${people}::uuid[]) and u.status = 'active'`;
     const custom: number[] | null = m.reminder_minutes ?? null; // 일정별 알림이 있으면 사용자 기본값 대신 적용
     // S-10 연결 업무 맥락 (제목 없이 건수만)

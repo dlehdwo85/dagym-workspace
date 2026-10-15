@@ -1557,7 +1557,7 @@ describe('WORKIN_V8 템플릿 · 미리 알림', () => {
   });
   test('업무별 미리 알림(최대 3개)·기본값, 일정 기본 10분', async () => {
     const p = await ctx.managerA.client.ok('GET', '/api/notifications/prefs');
-    assert.equal(p.settings.taskReminderMinutes, 60); assert.equal(p.settings.eventReminderMinutes, 10);
+    assert.equal(p.settings.taskReminderMinutes, 60); assert.equal(p.settings.eventReminderMinutes, 60, '대표 지시: 일정 기본 1시간 전');
     assert.equal((await ctx.managerA.client.req('POST', '/api/tasks', { title: 'x', orgUnitId: ctx.siteA, reminderMinutes: [1, 2, 3, 4] })).status, 400, '최대 3개');
     const at = new Date(Date.now() + 25 * 60000);
     const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(at);
@@ -1598,6 +1598,15 @@ describe('WORKIN 휴대폰 예약 알림', () => {
     assert.ok(reminders.every((r, i) => i === 0 || reminders[i - 1].fireAt <= r.fireAt), '가까운 순');
     // 다른 사람 목록에는 내 업무가 없음
     assert.ok(!(await ctx.managerA.client.ok('GET', '/api/reminders/upcoming')).reminders.some((r) => r.link === `/tasks/${t1}`));
+    // 2026-10-15 대표: 모든 업무 기본 1시간 전 — 날짜만 있는 업무는 18시 기준 17시, 일정 기본도 1시간 전
+    const t3 = (await c.ok('POST', '/api/tasks', { title: '날짜만 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: tom, approvalRequired: false })).id;
+    const ev3 = (await ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title: '기본 알림 회의', start: start.toISOString(), end: end.toISOString(), attendeeIds: [ctx.staffA.id] })).id;
+    const r2 = (await c.ok('GET', '/api/reminders/upcoming')).reminders;
+    const d1 = r2.find((r) => r.link === `/tasks/${t3}` && /1시간 뒤 마감/.test(r.title));
+    assert.ok(d1, '날짜만 있는 업무도 1시간 전'); assert.equal(new Date(d1.fireAt).toISOString(), new Date(`${tom}T17:00:00+09:00`).toISOString());
+    assert.ok(r2.some((r) => r.link === `/tasks/${t3}` && /^오늘 마감/.test(r.title)), '아침 9시 "오늘 마감"은 그대로');
+    const e1 = r2.find((r) => r.link === `/calendar?event=${ev3}`);
+    assert.ok(e1 && /1시간 뒤 일정/.test(e1.title), '일정 기본 1시간 전'); assert.equal(new Date(e1.fireAt).getTime(), start.getTime() - 60 * 60000);
   });
   test('예약 알림 기기: 바뀌면 조용한 FCM, 서버는 미리 알림(마감·일정·브리핑)을 이 기기에 보내지 않음', async () => {
     const c = ctx.staffA.client;
