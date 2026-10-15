@@ -260,7 +260,13 @@ export async function getTaskDetail(u: SessionUser, id: string) {
   const speed = t.assignee_id && t.status !== 'done' ? (await (await import('./insights')).speedStats(u, [t.assignee_id]).catch(() => []))[0] ?? null : null;
   // V14 28번: 검토 업무면 원 업무(제목·상태·담당), 원 업무면 자기 검토 업무
   const [reviewTarget] = t.review_of ? await sql`select r.id, r.title, r.status, r.requested_by, r.created_by, au.name as assignee_name from tasks r left join users au on au.id = r.assignee_id where r.id = ${t.review_of} and r.deleted_at is null` : [];
-  return { reviewTarget: reviewTarget ?? null, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
+  // 대표 피드백(10/15): 검토 중이면 누가 승인·반려하는지(이름) — 서버 권한 규칙과 같은 순서([검토] 업무 담당 → 지시자)
+  let reviewer: { id: string; name: string } | null = null;
+  if (t.status === 'review' && !t.approval_line_id) {
+    const [rv] = await sql<{ id: string; name: string }[]>`select u2.id, u2.name from tasks r join users u2 on u2.id = r.assignee_id where r.review_of = ${id} and r.deleted_at is null and r.status <> 'done' limit 1`;
+    reviewer = rv ?? (t.requested_by && t.requested_by !== t.assignee_id ? { id: t.requested_by, name: t.requested_by_name ?? '' } : null);
+  }
+  return { reviewTarget: reviewTarget ?? null, reviewer, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -503,7 +509,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       if (cur.status === 'review' && !lineId) {
         const [rv] = await tx<{ assignee_id: string | null }[]>`select assignee_id from tasks where review_of = ${id} and deleted_at is null and status <> 'done' limit 1`;
         const reviewer = rv?.assignee_id ?? (cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : null);
-        if (reviewer && reviewer !== u.id) {
+        // 대표 피드백(10/15): 담당자는 자기 검토 요청을 취소(→ 진행 중)할 수 있다. 승인(완료)·반려는 검토 담당자만
+        const cancelByOwner = owner === u.id && i.status === 'in_progress';
+        if (reviewer && reviewer !== u.id && !cancelByOwner) {
           const [nm] = await tx<{ name: string }[]>`select name from users where id = ${reviewer}`;
           throw forbidden(`검토 중인 업무의 승인·반려는 검토 담당자 ${nm?.name ?? ''}님만 할 수 있습니다`);
         }

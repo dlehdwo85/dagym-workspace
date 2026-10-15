@@ -233,6 +233,17 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   // V14 20번: 상태는 담당자(없으면 만든 사람)만 — 지시자는 검토 요청 승인·반려와 완료 해지만
   const statusOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id && !(t.status === 'review' && t.requested_by && t.requested_by !== t.assignee_id); // V14 50
   const isRequester = !!t.requested_by && t.requested_by === user.id;
+  // 대표 피드백(10/15): 검토 중 — 승인·반려는 검토 담당자([검토] 업무 담당, 없으면 지시자), 담당자는 [검토 요청 취소]만. 막힐 땐 실제 권한자 이름
+  const reviewer: { id: string; name: string } | null = data.reviewer ?? null;
+  const isReviewer = t.status === 'review' && !!reviewer && reviewer.id === user.id;
+  const isTaskOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id;
+  const reviewerLabel = reviewer ? `${reviewer.id === t.requested_by ? '지시자' : '검토 담당'} ${reviewer.name}님` : '검토자';
+  const ownerLabel = t.assignee_id ? `담당자 ${t.assignee_name}님` : t.requested_by ? `지시자 ${t.requested_by_name}님` : `만든 사람 ${t.created_by_name}님`;
+  const lockMsg = statusOwner ? null : t.status === 'review'
+    ? (isReviewer ? '검토 중인 업무는 아래 [승인]·[반려]로 처리하세요' : isTaskOwner ? `검토 중에는 ${reviewerLabel}의 승인·반려를 기다립니다 — 고칠 게 있으면 [검토 요청 취소]` : `검토 중 — ${reviewerLabel}이 승인·반려합니다`)
+    : `상태는 ${ownerLabel}만 바꿀 수 있어요`;
+  // 예상 처리 기간: 1일 이상 · 완료 표본 3건 이상일 때만(0일·1건 기준은 의미 없음)
+  const showSpeed = !!data.speed && data.speed.median_days != null && data.speed.median_days >= 1 && (data.speed.done ?? 0) >= 3;
   const editProp = (sel: string, click = false) => {
     setDetails(true);
     setTimeout(() => {
@@ -243,11 +254,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     }, 50);
   };
   const primary0 = t.status === 'done' ? null
-    : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : t.requested_by === user.id && t.requested_by !== t.assignee_id ? { label: '최종 완료 확인', run: () => patch({ status: 'done' }, '최종 완료 확인했습니다') } : null)
+    : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : isReviewer ? { label: '승인(최종 완료)', run: () => patch({ status: 'done' }, '승인했습니다 — 최종 완료') } : null)
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
     : t.approval_required && !perms.approve ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') }
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
-  const primary = primary0 && (statusOwner || (t.status === 'review' && isRequester && t.requested_by !== t.assignee_id)) ? primary0 : null;
+  const primary = primary0 && (statusOwner || isReviewer) ? primary0 : null;
 
   // V14 19번 ④: 휴대폰은 댓글 입력줄을 화면 아래에 고정(📎·📷) — 변형(transform)된 부모 영향 없게 body 로 띄운다
   const autoGrow = (el: HTMLTextAreaElement | null) => { if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 112)}px`; } };
@@ -354,10 +365,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <div className="mt-3 space-y-2" data-testid="task-actions">
             <StatusSteps status={t.status} reviewStep={!!(t.approval_line_id || (t.approval_required && !perms.approve) || t.status === 'review')}
               canChange={statusOwner} canReopen={statusOwner || isRequester}
-              locked={!statusOwner ? (isRequester && t.status === 'review' ? '검토 요청된 업무는 아래 [최종 완료 확인]·[반려]로 처리하세요' : `상태는 담당자${t.assignee_name ? ` ${t.assignee_name}님` : ''}만 바꿀 수 있어요`) : null}
+              locked={lockMsg}
               finish={primary && t.status !== 'review' ? primary : null} finishBlocked={photoShort ? `증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)` : null}
               onSet={(v, msg) => patch({ status: v }, msg)} />
-            {t.status === 'review' && isRequester && t.requested_by !== t.assignee_id && !t.approval_line_id && <Button size="sm" variant="secondary" onClick={reject} data-testid="review-reject-here">반려(보완 요청)</Button>}
+            {t.status === 'review' && isTaskOwner && !isReviewer && (
+              <div className="flex flex-wrap items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="review-wait">
+                <Hourglass className="size-4 shrink-0" /><span className="flex-1">검토 중에는 {reviewerLabel}의 승인·반려를 기다립니다.</span>
+                <Button size="sm" variant="secondary" onClick={() => patch({ status: 'in_progress' }, '검토 요청을 취소했습니다 — 다시 진행 중')} data-testid="review-cancel">검토 요청 취소</Button>
+              </div>
+            )}
           </div>
           {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="task-summary">
@@ -367,7 +383,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <button type="button" onClick={() => editProp('select[aria-label="우선순위"]')} className="rounded-full hover:opacity-80" title="우선순위 바꾸기" data-testid="sum-priority"><PriorityTag p={t.priority} /></button>
             {t.project_id && <Link href={`/projects/${t.project_id}`} className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded-full bg-slate-100 px-2 py-0.5 text-ink-2 hover:bg-slate-200" data-testid="summary-project"><FolderKanban className="size-3 shrink-0" /><span className="truncate">{t.project_name ?? '프로젝트'}</span></Link>}
             {photoNeed > 0 && <span className={cx('rounded-full px-2 py-0.5 font-medium tabular-nums', photoShort ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700')}>사진 {photoHave}/{photoNeed}</span>}
-            {data.speed?.median_days != null && data.speed.median_days >= 1 && t.status !== 'done' && <span className="text-ink-3" data-testid="speed-hint" title="담당자의 최근 90일 완료 업무 기준">예상 처리 ≈ {data.speed.median_days}일</span>}
+            {showSpeed && t.status !== 'done' && <span className="text-ink-3" data-testid="speed-hint" title="담당자의 최근 90일 완료 업무 기준">예상 처리 ≈ {data.speed.median_days}일</span>}
           </div>
           {progTotal > 0 && (
             <div className="mt-2.5 flex items-center gap-2 text-xs text-ink-2" data-testid="task-progress">
@@ -382,12 +398,14 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           {t.status === 'done' && !(statusOwner || isRequester) && <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">완료됨 — 다시 진행은 담당자·지시자만 할 수 있습니다</p>}
           {/* V14 19번 ②: 상태별 다음 행동 — 큰 버튼 하나 */}
           {/* 검토 요청을 받은 지시자: 최종 완료 확인 */}
+          {/* 검토 담당자(지시자 또는 [검토] 업무 담당): 승인·반려를 바로 */}
           {primary && t.status === 'review' && (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap gap-2" data-testid="review-decide">
               <Button onClick={primary.run} data-testid="next-action" className="h-11 flex-1 text-base sm:flex-none sm:px-6"><CircleCheck />{primary.label}</Button>
+              {!t.approval_line_id && <Button variant="secondary" className="h-11" onClick={reject} data-testid="review-reject-here">반려(보완 요청)</Button>}
             </div>
           )}
-          {t.status === 'review' && !roundSteps.length && <p className="mt-3 flex items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900"><Hourglass className="size-4 shrink-0" />검토 요청 중 — {fmtDateTime(t.review_requested_at)} · 관리자의 최종 확인을 기다립니다.</p>}
+          {t.status === 'review' && !roundSteps.length && !(isTaskOwner && !isReviewer) && <p className="mt-3 flex items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900"><Hourglass className="size-4 shrink-0" />검토 요청 중 — {fmtDateTime(t.review_requested_at)} · {reviewer ? `${reviewerLabel}의 승인·반려를 기다립니다.` : '최종 확인을 기다립니다.'}</p>}
           {t.status === 'done' && t.approved_by_name && <p className="mt-3 flex items-center gap-2 rounded-input bg-green-50 px-3 py-2 text-sm text-green-800"><BadgeCheck className="size-4 shrink-0" />{t.approved_by_name}님이 {fmtDateTime(t.approved_at)}에 최종 완료를 확인했습니다.</p>}
           {photoShort && t.status !== 'done' && <p className="mt-3 flex items-center gap-2 rounded-input bg-sky-50 px-3 py-2 text-sm text-sky-900"><Camera className="size-4 shrink-0" />완료하려면 증빙 사진 {photoNeed}장이 필요합니다 (현재 {photoHave}장). 아래 <b>사진 촬영</b>으로 올려 주세요.</p>}
         </div>
@@ -610,7 +628,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               </span>
             </Prop>
             {/* R-15 4번: 담당자의 처리 속도로 예상 처리 기간 */}
-            {data.speed && t.status !== 'done' && <p className="px-2 pb-1 text-xs text-ink-3" data-testid="speed-detail">예상 처리 기간: {t.assignee_name}님은 보통 {data.speed.median_days}일(최근 90일 {data.speed.done}건{data.speed.late_rate != null ? ` · 지연 ${data.speed.late_rate}%` : ''})</p>}
+            {showSpeed && t.status !== 'done' && <p className="px-2 pb-1 text-xs text-ink-3" data-testid="speed-detail">예상 처리 기간: {t.assignee_name}님은 보통 {data.speed.median_days}일(최근 90일 {data.speed.done}건{data.speed.late_rate != null ? ` · 지연 ${data.speed.late_rate}%` : ''})</p>}
             <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span></span></Prop>
             {/* R-15 5번: 우선순위는 마감일·미리 알림과 같은 묶음 */}
             <Prop icon={Flag} label="우선순위">

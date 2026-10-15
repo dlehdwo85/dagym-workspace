@@ -21,6 +21,7 @@ import { v1445 } from './v1445.step.mjs';
 import { v21 } from './v21.step.mjs';
 import { v1447 } from './v1447.step.mjs';
 import { v1448 } from './v1448.step.mjs';
+import { panel1440 } from './panel1440.step.mjs';
 import { v283 } from './v283.step.mjs';
 
 const SHOTS = 'docs/screens';
@@ -186,7 +187,7 @@ await step('② 직원(모바일) 댓글·멘션·사진 첨부·문서 링크 �
   await dlg.getByRole('button', { name: '연결' }).click();
   await staff.getByTestId('attachments').getByText('ChatGPT 결과물').waitFor();
   await staff.getByTestId('next-action').getByText('검토 요청').click(); // 대표 피드백: 진행 단계 바의 [검토 요청]
-  await staff.getByText('검토 요청 중').waitFor();
+  await staff.getByTestId('review-wait').waitFor(); // 담당자: 검토자 이름 안내 + [검토 요청 취소]
   await staff.screenshot({ path: `${SHOTS}/06-mobile-task-review.png`, fullPage: true });
   const n = await ctx.managerA.client.ok('GET', '/api/notifications');
   assert.ok(n.items.some((x) => x.type === 'mention'));
@@ -879,6 +880,7 @@ await step('V14 44 PC 업무 줄 선택 체크박스: 왼쪽 고정 홈·세로 
 await step('V14 45 업무 추가 줄 마감 선택 창: 칩 바로 아래/위·칩 왼쪽 맞춤·화면 안·시각 버튼 닿음', () => v1445({ owner, BASE, SHOTS }));
 await step('V14 47 홈 이번 주: 같은 날·같은 제목 업무·일정 한 줄(업무 1 · 일정 1, 시각은 일정)', () => v1447({ owner, BASE, SHOTS }));
 await step('V14 48 PC 업무 목록 열 제목: 맨 위 줄 고정(sticky)·묶음마다 작은 열 제목', () => v1448({ owner, BASE, SHOTS }));
+await step('검수 81: PC 1440 패널을 열어도 목록 업무 이름이 눌리지 않음(덮개, 1280·1440·1720)', () => panel1440({ owner, BASE, SHOTS }));
 await step('V28-3 플랫폼 회사 관리: 목록 → 상세(사용자·한도)', () => v283({ owner, BASE, SHOTS }));
 await step('V21 메일 계정·명함 설정 + 업무 메일 시안(보내는 주소·회사 명함·미리보기)', () => v21({ owner, BASE, SHOTS, sql }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {

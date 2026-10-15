@@ -256,7 +256,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   return (
     <OpenTaskCtx.Provider value={openTask}>
     {/* V12 4번: 넓은 화면에서는 패널만큼 목록을 좁혀 칩·마감 열이 가려지지 않게 */}
-    <div className={cx('space-y-3', panelId && 'xl:pr-[560px]')}>
+    <div className="space-y-3">{/* 상세 패널은 늘 목록 위 덮개 — 목록 열·업무 이름이 눌리지 않게(로컬 검수 81·82: 1280~1720px) */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold tracking-tight">{title ?? '업무'}</h1>
         {sess.tenant?.inquiries && !fixed?.view && <PhoneInquiryButton className="ml-auto" />}

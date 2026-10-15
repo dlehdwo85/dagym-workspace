@@ -1866,6 +1866,23 @@ describe('WORKIN_V12 상태 권한 · 확인 완료 · 검토 요청 알림', ()
   });
 });
 
+describe('대표 피드백 10/15 검토 중 업무', () => {
+  test('담당자는 [검토 요청 취소](→ 진행 중)만, 승인·반려는 검토 담당자(지시자) · 상세에 검토자 이름', async () => {
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '검토 취소 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, approvalRequired: false })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    const d = await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
+    assert.equal(d.reviewer.id, ctx.managerA.id); assert.ok(d.reviewer.name);
+    const self = await ctx.staffA.client.req('PATCH', `/api/tasks/${t}`, { status: 'done' });
+    assert.equal(self.status, 403, '담당자 본인은 승인 불가'); assert.match(self.body.error.message, new RegExp(d.reviewer.name));
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'in_progress', '검토 요청 취소');
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
+    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t}`, { status: 'done' })).status, 403, '검토자가 아닌 대표는 불가');
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done' });
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).reviewer, null, '완료되면 검토자 없음');
+  });
+});
+
 describe('WORKIN_V12 11번 상태는 담당자만 (대표·관리자 예외 없음)', () => {
   test('대표·관리자·지시자도 담당자 업무의 보류·진행·완료 불가(403), 담당자는 가능', async () => {
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12-11 보류 시도', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
