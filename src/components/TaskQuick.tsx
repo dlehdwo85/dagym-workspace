@@ -26,23 +26,29 @@ export function quickDues() {
  * V11 3번: 휴대폰(<640px)에서는 아래에서 올라오는 시트 — 키보드를 내리고, 상태바·하단 탭·키보드에 가리지 않게(안전 영역), 맨 아래 "완료".
  */
 export function Popover({ open, onClose, anchor, children, width = 224, title }: { open: boolean; onClose: () => void; anchor: React.RefObject<HTMLElement | null>; children: React.ReactNode; width?: number; title?: string }) {
-  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | 'sheet' | null>(null);
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | 'sheet' | null>(null);
+  const closeRef = useRef(onClose); closeRef.current = onClose; // 부모가 매번 새 함수를 넘겨도 위치 계산을 다시 돌리지 않게
   useEffect(() => {
     if (!open) { setPos(null); return; }
-    if (window.innerWidth < 640) {
-      (document.activeElement as HTMLElement | null)?.blur?.(); // 키보드 내림
-      setPos('sheet');
-    } else {
+    // V14 45번: 칩 바로 아래(공간이 모자라면 위)에, 칩 왼쪽에 맞춰 화면 안쪽 8px 안으로. 높이는 그쪽 남은 공간까지 — 넘치면 창 안에서 스크롤
+    const place = () => {
+      if (window.innerWidth < 640) { setPos('sheet'); return; }
       const r = anchor.current?.getBoundingClientRect();
       if (!r) return;
-      const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.right - width));
-      const below = window.innerHeight - r.bottom > 280;
-      setPos(below ? { left, top: r.bottom + 4 } : { left, bottom: window.innerHeight - r.top + 4 });
-    }
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+      const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.left));
+      const below = window.innerHeight - r.bottom - 12, above = r.top - 12;
+      const down = below >= 360 || below >= above;
+      const maxHeight = Math.max(160, Math.min(520, down ? below : above));
+      const next = down ? { left, top: r.bottom + 4, maxHeight } : { left, bottom: window.innerHeight - r.top + 4, maxHeight };
+      setPos((p) => (p && p !== 'sheet' && p.left === next.left && p.top === next.top && p.bottom === next.bottom && p.maxHeight === next.maxHeight ? p : next));
+    };
+    if (window.innerWidth < 640) (document.activeElement as HTMLElement | null)?.blur?.(); // 키보드 내림
+    place();
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); closeRef.current(); } };
     window.addEventListener('keydown', h, true);
-    return () => window.removeEventListener('keydown', h, true);
-  }, [open, onClose, anchor, width]);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('keydown', h, true); window.removeEventListener('resize', place); };
+  }, [open, anchor, width]);
   if (!open || !pos || typeof document === 'undefined') return null;
   if (pos === 'sheet') return createPortal(
     <>
@@ -62,7 +68,7 @@ export function Popover({ open, onClose, anchor, children, width = 224, title }:
   return createPortal(
     <>
       <div className="fixed inset-0 z-[70]" onClick={(e) => { e.stopPropagation(); onClose(); }} />
-      <div role="dialog" aria-label={title} className="fixed z-[71] max-h-[min(70vh,520px)] animate-fade-up overflow-y-auto rounded-card border border-line bg-white p-1 shadow-pop" style={{ ...pos, width }} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>{children}</div>
+      <div role="dialog" aria-label={title} data-popover className="fixed z-[71] animate-fade-up overflow-y-auto overscroll-contain rounded-card border border-line bg-white p-1 shadow-pop" style={{ ...pos, width }} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>{children}</div>
     </>,
     document.body,
   );

@@ -19,5 +19,5 @@ export async function v1444({ owner, ctx, BASE, SHOTS }) {
     assert.ok(t.x - (c.x + c.width) <= 16, `체크박스-제목 간격 ${t.x - (c.x + c.width)}px`);
     assert.ok(Math.abs((c.y + c.height / 2) - (r.y + r.height / 2)) <= 2, '세로 가운데');
     await owner.screenshot({ path: `${SHOTS}/v14-44-row-hover.png`, clip: { x: r.x - 4, y: r.y - 4, width: Math.min(700, r.width + 8), height: r.height + 8 } });
-  } finally { await ctx.owner.ok('DELETE', `/api/tasks/${id}`).catch(() => {}); }
+  } finally { await owner.setViewportSize({ width: 1366, height: 900 }); await ctx.owner.ok('DELETE', `/api/tasks/${id}`).catch(() => {}); }
 }

@@ -18,7 +18,8 @@ export function DateField({ value, onChange, label, min }: { value: string; onCh
     if (!open) return;
     setMonth(value.slice(0, 7));
     const r = ref.current?.getBoundingClientRect();
-    if (r) setPos({ left: Math.max(8, Math.min(window.innerWidth - 268, r.left)), top: Math.min(window.innerHeight - 300, r.bottom + 4) });
+    // V14 45번: 아래 공간이 모자라면 칸 위로(칸을 가리지 않게), 화면 안쪽 8px
+    if (r) setPos({ left: Math.max(8, Math.min(window.innerWidth - 268, r.left)), top: window.innerHeight - r.bottom >= 312 || r.top < 312 ? Math.min(window.innerHeight - 308, r.bottom + 4) : r.top - 304 });
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
     window.addEventListener('keydown', h, true);
     return () => window.removeEventListener('keydown', h, true);

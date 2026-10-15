@@ -17,6 +17,7 @@ import { v1442 } from './v1442.step.mjs';
 import { v1443 } from './v1443.step.mjs';
 import { chatRename } from './chatRename.step.mjs';
 import { v1444 } from './v1444.step.mjs';
+import { v1445 } from './v1445.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -868,6 +869,7 @@ await step('V14 42 업무 보기 칩: 412px 에서 7개 모두 보임(4칸 2줄)
 await step('V14 43 업무 목록: 왼쪽 동그라미 없음·상태 칩 버튼(테두리·▾·32px)·메뉴 맨 위 완료 → 되돌리기·남의 업무 잠김·"확인 완료" 문구 없음', () => v1443({ browser, desk, ctx, BASE, SHOTS, sql }));
 await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머리줄·목록·상대에게 새 이름, Esc 취소, 1:1 은 버튼 없음', () => chatRename({ owner, ctx, BASE }));
 await step('V14 44 PC 업무 줄 선택 체크박스: 왼쪽 고정 홈·세로 가운데·올려도 제목 그대로·간격 좁게', () => v1444({ owner, ctx, BASE, SHOTS }));
+await step('V14 45 업무 추가 줄 마감 선택 창: 칩 바로 아래/위·칩 왼쪽 맞춤·화면 안·시각 버튼 닿음', () => v1445({ owner, BASE, SHOTS }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');
   const month = today.slice(0, 7);
@@ -1167,7 +1169,7 @@ await step('저장 버튼: 한 줄 추가는 저장 버튼·Enter 로만 생성(
   const d = addDays(today, 3);
   await owner.getByLabel('새 업무 마감일 날짜 선택').fill(d);
   await owner.getByLabel('새 업무 마감일 시각').selectOption('15:00'); // V6 10번: 날짜 다음 시각
-  await owner.locator('div.fixed.inset-0.z-\\[70\\]').click(); // 선택 창 닫기
+  await owner.locator('div.fixed.inset-0.z-\\[70\\]').click({ position: { x: 4, y: 4 } }); // 선택 창 닫기
   await owner.waitForTimeout(300);
   assert.equal((await sql`select count(*)::int n from tasks where title = '자동 저장 시험 업무'`)[0].n, 0, '날짜 고른 뒤에도 입력칸으로 돌아올 뿐 저장 안 됨');
   await owner.getByRole('heading', { level: 1 }).first().click(); // 바깥 클릭 → 저장하지 않고 초안 유지
@@ -1639,7 +1641,7 @@ await step('V12: PC 상세 패널 — 다른 업무 클릭 시 교체·바깥/Es
   const dlg = owner.getByRole('dialog', { name: '담당자 선택 (여러 명 가능)' });
   await dlg.getByRole('menuitemcheckbox', { name: /최매니저/ }).click();
   await dlg.getByRole('menuitemcheckbox', { name: /이직원/ }).click();
-  await owner.locator('div.fixed.inset-0.z-\\[70\\]').click();
+  await owner.locator('div.fixed.inset-0.z-\\[70\\]').click({ position: { x: 4, y: 4 } });
   await add.getByRole('button', { name: '3명에게 각각 만들기' }).click();
   await owner.getByText(/3명 각각에게 추가됨: V12 각자 제출/).first().waitFor();
   assert.equal((await sql`select count(distinct batch_id)::int b, count(*)::int n from tasks where title = 'V12 각자 제출'`)[0].n, 3);
