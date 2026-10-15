@@ -7,6 +7,7 @@
 - `main` = 운영 배포 브랜치(Vercel Production, https://dagym-workspace.vercel.app). **2026-10-13 대표 지시: 작업이 끝나면 바로 `main` 에 푸시한다** (PR·승인 대기 없음). 푸시 전에 `git fetch` → `origin/main` merge → 할 수 있는 시험(typecheck·build·API·E2E)을 돌리고, 문제가 생기면 운영 화면에서 확인한 뒤 후속 커밋으로 바로 고친다.
 - 클라우드 세션: `claude/cool-pascal-h2e787` 에서 작업하고 같은 커밋을 `main` 에도 푸시, `src/ db/ tests/ scripts/ public/ .github/workflows/` 와 루트 문서 담당.
 - 로컬 Claude Code: `main` 기준으로 작업(필요하면 `local/*`)하고 `main` 에 바로 푸시, `docs/handoff/LOCAL_LOG.md`·`docs/handoff/*`, 필요 시 `mobile/android`·`mobile/ios` 네이티브 설정 담당. 상대 영역은 직접 고치지 말고 LOCAL_LOG 의 "클라우드 요청"에 적는다.
+- **클라우드 → 로컬 전달 (2026-10-15 대표 지시)**: 로컬 확인이 필요한 일(배포 확인·대표 작업·실기기 검증 등)이 생기면 묻지 않고 바로 로컬 대화에 전달한다 — `mcp__claude-code-remote__send_message`(session_id = 로컬 세션 id, 예: session_01WaSfdkTFUFyshMEuyNiu3Y). 같은 내용을 `docs/handoff/LOCAL_LOG.md` "클라우드 → 로컬 요청" 칸에도 적고 커밋 제목 앞에 [로컬요청]/[배포확인요청]을 붙인다(전달 실패 대비). SendMessage(bridge:…)는 클라우드에서 거부되므로 쓰지 않는다.
 - 강제 푸시·rebase 금지, merge 로 합친다. 비밀값(.env*, google-services.json, keystore, .p8)은 커밋하지 않는다.
 
 ## 프로젝트 원칙
