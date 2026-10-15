@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Download, FileSpreadsheet, FileText, Library, Loader2, Presentation, Wand2 } from 'lucide-react';
 import { api } from './client';
-import { Button, cx, toast } from './ui';
+import { Button, Modal, cx, toast } from './ui';
 
 type Job = { id: string; title: string; kind: string; mode: string; version: number; status: 'queued' | 'running' | 'done' | 'failed'; pages: number | null; summary: string | null; error: string | null;
   resultName: string | null; resultSize: number | null; hasFile: boolean; hasPreview: boolean; savedFileId: string | null; costUsd: number; debug?: unknown };
@@ -17,6 +17,7 @@ export function DocJobCard({ id, onRefine }: { id: string; onRefine?: (text: str
   const [job, setJob] = useState<Job | null>(null);
   const [versions, setVersions] = useState<{ id: string; version: number; status: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  const [big, setBig] = useState(false);
   useEffect(() => {
     let stop = false, t: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
@@ -52,7 +53,12 @@ export function DocJobCard({ id, onRefine }: { id: string; onRefine?: (text: str
           {job.debug ? <details className="mt-1 text-[11px] text-ink-3" data-testid="doc-job-debug"><summary className="cursor-pointer">진단 기록 (관리자)</summary><pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-1.5">{JSON.stringify(job.debug, null, 1)}</pre></details> : null}</div>
       ) : (
         <>
-          {job.hasPreview && <a href={`/api/ai/doc-jobs/${id}/preview`} target="_blank" rel="noreferrer"><img src={`/api/ai/doc-jobs/${id}/preview`} alt={`${job.title} 첫 페이지 미리보기`} className="max-h-72 w-full border-b border-line bg-slate-50 object-contain" data-testid="doc-job-preview" /></a>}
+          {job.hasPreview && <>
+            <button type="button" className="block w-full cursor-zoom-in" onClick={() => setBig(true)} aria-label="미리보기 크게 보기"><img src={`/api/ai/doc-jobs/${id}/preview`} alt={`${job.title} 첫 페이지 미리보기`} className="max-h-72 w-full border-b border-line bg-slate-50 object-contain" data-testid="doc-job-preview" /></button>
+            <Modal open={big} onClose={() => setBig(false)} title={`${job.title} v${job.version} 미리보기`} wide>
+              <img src={`/api/ai/doc-jobs/${id}/preview`} alt={`${job.title} 첫 페이지`} className="mx-auto max-h-[75vh] w-auto max-w-full bg-white object-contain" data-testid="doc-job-preview-big" />
+              <a href={`/api/ai/doc-jobs/${id}/preview`} target="_blank" rel="noreferrer" className="mt-2 block text-center text-xs text-brand-700 underline">새 창에서 원본 크기로</a>
+            </Modal></>}
           {job.summary && <p className="whitespace-pre-wrap px-2.5 py-2 text-xs text-ink-2">{job.summary}</p>}
           <div className="flex flex-wrap gap-1.5 px-2.5 pb-2.5">
             {job.hasFile && <a href={`/api/ai/doc-jobs/${id}/file`} className="inline-flex h-8 items-center gap-1 rounded-input bg-brand-600 px-2.5 text-xs font-semibold text-white hover:bg-brand-700" data-testid="doc-job-download"><Download className="size-3.5" />내려받기</a>}

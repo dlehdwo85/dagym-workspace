@@ -24,13 +24,19 @@ export async function v22({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
         { type: 'text', text: '휴관 안내문을 만들었습니다.\nPAGES: 1' }], stop_reason: 'end_turn' }] });
   await owner.goto(BASE + '/assistant');
   const box = owner.getByLabel('AI 에게 요청', { exact: true });
+  await owner.getByTestId('ai-enter-hint').waitFor(); // 화면 준비(hydration) 뒤 입력
   await box.fill('휴관 안내문 만들어줘');
   await box.press('Enter');
+  await owner.getByTestId('ai-user-msg').last().waitFor();
   const card = owner.getByTestId('doc-job').last();
   await card.waitFor();
   await owner.waitForFunction(() => [...document.querySelectorAll('[data-testid=doc-job]')].pop()?.getAttribute('data-status') === 'done', null, { timeout: 30000 });
   await card.getByTestId('doc-job-preview').waitFor();
   assert.match(await card.innerText(), /1쪽/);
+  await card.getByTestId('doc-job-preview').click();
+  await owner.getByTestId('doc-job-preview-big').waitFor();
+  await owner.keyboard.press('Escape');
+  await owner.getByTestId('doc-job-preview-big').waitFor({ state: 'detached' });
   assert.equal(await card.getByTestId('doc-job-download').getAttribute('href') !== null, true);
   await owner.screenshot({ path: `${SHOTS}/v22-doc-card.png` });
   await card.getByTestId('doc-job-save').click();
