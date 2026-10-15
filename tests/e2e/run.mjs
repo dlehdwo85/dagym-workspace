@@ -13,6 +13,7 @@ import { v20 } from './v20.step.mjs';
 import { v22 } from './v22.step.mjs';
 import { v1441 } from './v1441.step.mjs';
 import { v24 } from './v24.step.mjs';
+import { v1442 } from './v1442.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -858,6 +859,7 @@ await step('V20 업무 월별 보관·이월: 이월 표시·이월만 보기, �
 await step('V22 AI 비서 문서 엔진: 회사 정보 화면, 파일 작업 카드(만드는 중 → 미리보기·쪽수) → 자료실에 저장 → 더 다듬기 입력 채움, 다시 열어도 카드 유지', () => v22({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('V14 41 휴대폰 주·3일: 종일 칩 2줄·블록 제목만 줄바꿈·머리글자 없음(일 보기는 있음)·칸 높이 52/60/64·오전/오후 축·색 버튼 머리줄', () => v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('V24 음성 등록: AI 비서 화면·패널 마이크 → 실시간 글자 → 단어장 보정(최매니져→최매니저) → 입력창에 남김(바로 안 보냄), 도움말에 "말로 등록" 없음', () => v24({ browser, desk, BASE, sql }));
+await step('V14 42 업무 보기 칩: 412px 에서 7개 모두 보임(4칸 2줄)·건수 = API·0건 숨김·사람 칩 둘째 줄·PC 한 줄', () => v1442({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');
   const month = today.slice(0, 7);
@@ -1556,7 +1558,7 @@ await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 �
   await row.getByTestId('row-status-chip').getByText('진행 중').waitFor();
   assert.equal((await sql`select status from tasks where id = ${t}`)[0].status, 'in_progress');
   // 완료 칩은 줄 끝에 고정되어 화면 안에 보임
-  const box = await m.getByTestId('done-chip').boundingBox();
+  const box = await m.getByTestId('done-chip').getByRole('button').boundingBox();
   assert.ok(box && box.x + box.width <= 390, '완료 칩 화면 안');
   assert.equal(await m.getByText('완료된 업무도 보기').count(), 0, '체크박스 없음');
   await m.getByTestId('group-by').selectOption('status');

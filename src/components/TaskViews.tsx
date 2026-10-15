@@ -124,6 +124,10 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   }, [filters, fixed, q, showDone, mode]);
   const { data, error, loading, reload, setData } = useApi<{ tasks: Task[] }>(`/api/tasks?${qs}`);
   const tasks = useMemo(() => sortTasks(data?.tasks ?? [], sortBy), [data, sortBy]);
+  // V14 42번: 보기 칩 건수 — 목록과 같은 필터(보기·담당자 제외), 목록이 바뀔 때마다 다시
+  const countQs = useMemo(() => { const p = new URLSearchParams(qs); ['view', 'assigneeId', 'limit', 'doneMonth', 'carried'].forEach((k) => p.delete(k)); return p.toString(); }, [qs]);
+  const counts = useApi<{ counts: Record<string, number> }>(fixed?.view ? null : `/api/tasks/counts?${countQs}`);
+  useEffect(() => { if (data) counts.reload(); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const p = new URLSearchParams(sp.toString());
@@ -268,19 +272,32 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         </div>
       </div>
       {!fixed?.view && (
-        <div className="-mx-3 flex items-center gap-1.5 px-3 text-sm sm:mx-0 sm:px-0">
-        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-0.5">
-          {views.slice(0, 2).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
-          {people.map((u) => (
-            <ViewChip key={u.id} on={filters.assigneeId === u.id} onClick={() => setFilters((f) => ({ ...f, view: '', assigneeId: f.assigneeId === u.id ? '' : u.id }))} label={`${u.name} 업무`}>
-              <Avatar id={u.id} name={u.name} size={18} />{u.name}
-            </ViewChip>
-          ))}
-          {views.slice(2, -1).map(([v, l]) => <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)}>{l}</ViewChip>)}
-          {!views.some(([v]) => v === (filters.view ?? '')) && <ViewChip on onClick={() => setView('')}>{({ today: '오늘 할 일', risk: '마감 위험' } as Record<string, string>)[filters.view ?? ''] ?? filters.view}</ViewChip>}
+        // V14 42번: 보기 칩 7개는 휴대폰에서도 스크롤 없이 한눈에(4칸 격자 2줄, PC 는 한 줄) + 건수, 사람 칩은 둘째 줄 가로 스크롤
+        <div className="space-y-1.5 text-sm" data-testid="view-chips">
+        <div className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:items-center">
+          {views.filter(([v]) => v !== 'done').map(([v, l]) => {
+            const n = counts.data?.counts?.[v] ?? 0;
+            return (
+              <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)} label={l} grid>
+                {(v === 'overdue' || v === 'review') && n > 0 && <span className={cx('size-1.5 shrink-0 rounded-full', v === 'overdue' ? 'bg-red-500' : 'bg-amber-500')} aria-hidden />}
+                <span className="truncate">{v === 'requested' ? <><span className="sm:hidden">내가 지시</span><span className="hidden sm:inline">{l}</span></> : l}</span>
+                {n > 0 && <span className={cx('absolute -right-1 -top-1.5 min-w-[18px] rounded-full border px-1 text-center text-[10px] font-bold leading-4 tabular-nums sm:static sm:min-w-0 sm:border-0 sm:bg-transparent sm:px-0 sm:text-[11px] sm:font-semibold sm:opacity-80', (filters.view ?? '') === v && !filters.assigneeId ? 'border-white bg-brand-700 text-white' : v === 'overdue' ? 'border-red-200 bg-red-50 text-red-700 sm:text-inherit' : 'border-line bg-white text-ink-2')} data-count={v}>{n}</span>}
+              </ViewChip>
+            );
+          })}
+          {/* V11 2번: "완료" 칩 — 다시 누르면 해제 */}
+          <span className="contents sm:block" data-testid="done-chip"><ViewChip on={filters.view === 'done' && !filters.assigneeId} onClick={() => setView("done")} label="완료" grid><CircleCheck className="size-3.5 shrink-0" />완료</ViewChip></span>
+          {!views.some(([v]) => v === (filters.view ?? '')) && <ViewChip on onClick={() => setView('')} grid>{({ today: '오늘 할 일', risk: '마감 위험' } as Record<string, string>)[filters.view ?? ''] ?? filters.view}</ViewChip>}
         </div>
-        {/* V11 2번: "완료" 칩은 가로 스크롤 끝에 숨지 않게 줄 끝에 고정 */}
-        <span className="shrink-0 border-l border-line pl-1.5" data-testid="done-chip"><ViewChip on={filters.view === 'done' && !filters.assigneeId} onClick={() => setView('done')}><CircleCheck className="size-3.5" />완료</ViewChip></span>
+        {people.length > 0 && (
+          <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 sm:mx-0 sm:px-0" data-testid="people-chips" aria-label="사람별 업무">
+            {people.map((u) => (
+              <ViewChip key={u.id} on={filters.assigneeId === u.id} onClick={() => setFilters((f) => ({ ...f, view: '', assigneeId: f.assigneeId === u.id ? '' : u.id }))} label={`${u.name} 업무`}>
+                <Avatar id={u.id} name={u.name} size={18} badge={false} />{u.name}
+              </ViewChip>
+            ))}
+          </div>
+        )}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -583,10 +600,10 @@ function ListHeader({ sortBy, onSort }: { sortBy: SortKey; onSort: (k: SortKey) 
 const DUE_DEFAULT: Record<string, () => string | null> = {
   over: () => todayStr(), today: () => todayStr(), tomorrow: () => quickDues()[1][1], week: () => quickDues()[2][1], next: () => quickDues()[3][1], later: () => null, none: () => null, new: () => null,
 };
-function ViewChip({ on, onClick, children, label }: { on: boolean; onClick: () => void; children: React.ReactNode; label?: string }) {
+function ViewChip({ on, onClick, children, label, grid }: { on: boolean; onClick: () => void; children: React.ReactNode; label?: string; grid?: boolean }) {
   return (
     <button onClick={onClick} aria-pressed={on} aria-label={label}
-      className={cx('inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 font-medium transition-colors', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:border-slate-300')}>{children}</button>
+      className={cx('inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 font-medium transition-colors', grid && 'relative min-w-0 justify-center gap-1 px-1.5 text-[13px] sm:justify-start sm:gap-1.5 sm:px-3 sm:text-sm', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:border-slate-300')}>{children}</button>
   );
 }
 

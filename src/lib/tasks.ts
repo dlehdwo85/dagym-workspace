@@ -108,6 +108,18 @@ export const listQuery = z.object({
 });
 
 /** V20 완료 보관: 달별 완료 개수 (서울 기준 완료일, 볼 수 있는 업무만, 담당자 필터 선택) */
+/** V14 42번: 보기 칩 건수(목록과 같은 조건·필터, 담당자 필터는 제외) — 0건은 화면에서 숨김 */
+export const COUNT_VIEWS = ['my', 'requested', 'overdue', 'week', 'review'] as const;
+export async function viewCounts(u: SessionUser, raw: Record<string, string>) {
+  const sql = db();
+  const units = await accessibleUnitIds(u, sql);
+  const today = todaySeoul();
+  const base = { ...raw }; delete base.view; delete base.assigneeId; delete base.limit; delete base.doneMonth; delete base.carried;
+  const parts = COUNT_VIEWS.map((v) => sql`(select count(*)::int from tasks t where ${taskWhere(sql, u, listQuery.parse({ ...base, view: v }), units, today)}) as ${sql(v)}`);
+  const [r] = await sql<Record<string, number>[]>`select ${parts.reduce((a, c) => sql`${a}, ${c}`)}`;
+  return { counts: r };
+}
+
 export async function doneMonths(u: SessionUser, raw: Record<string, string>) {
   const q = z.object({ assigneeId: zUuid.optional().catch(undefined), projectId: zUuid.optional().catch(undefined), teamId: zUuid.optional().catch(undefined) }).parse(raw);
   const sql = db();
@@ -119,10 +131,8 @@ export async function doneMonths(u: SessionUser, raw: Record<string, string>) {
   return { months: rows };
 }
 
-export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
-  const sql = db();
-  const units = await accessibleUnitIds(u, sql);
-  const today = todaySeoul();
+/** 목록 조건(보기·필터·권한) — 목록과 V14 42번 칩 건수가 같은 규칙을 쓴다 */
+function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units: string[] | null, today: string) {
   const conds = [sql`t.deleted_at is null`, taskVisibleSql(sql, u, units)];
   if (q.parentId) conds.push(sql`t.parent_id = ${q.parentId}`);
   else if (q.includeSubtasks !== '1') conds.push(sql`t.parent_id is null`);
@@ -182,7 +192,13 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
       conds.push(sql`t.status <> 'done' and t.estimate_minutes > 0 and t.assignee_id is not null and t.due_date <= ${addDays(today, 14)}`);
       break;
   }
-  const where = conds.reduce((a, c) => sql`${a} and ${c}`);
+  return conds.reduce((a, c) => sql`${a} and ${c}`);
+}
+
+export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
+  const sql = db();
+  const units = await accessibleUnitIds(u, sql);
+  const where = taskWhere(sql, u, q, units, todaySeoul());
   const rows = await sql<any[]>`select ${TASK_COLS(sql, u.id)} ${TASK_FROM(sql)} where ${where}
     order by ${q.view === 'done' ? sql`t.completed_at desc nulls last,` : sql``} t.due_date asc nulls last, t.priority = 'urgent' desc, t.priority = 'high' desc, t.sort_order, t.created_at
     limit ${q.limit}`;
