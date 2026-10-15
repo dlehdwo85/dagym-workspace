@@ -14,6 +14,7 @@ import { v22 } from './v22.step.mjs';
 import { v1441 } from './v1441.step.mjs';
 import { v24 } from './v24.step.mjs';
 import { v1442 } from './v1442.step.mjs';
+import { v1443 } from './v1443.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -476,12 +477,14 @@ await step('U-0b·U-0c 검증 오류는 항목 이름과 한국어로, 연결 �
   assert.match(fam[0], /Pretendard Variable/); assert.equal(fam[1], true, 'Pretendard 글꼴 로드');
   await c.close();
 });
-await step('목록: 원형 체크로 완료 → 되돌리기, 필터 칩 표시·해제, 상단 검색(Ctrl K 버튼)', async () => {
+await step('목록: 상태 칩 [✓ 완료]로 완료 → 되돌리기 (V14 43번: 왼쪽 동그라미 없음), 필터 칩 표시·해제, 상단 검색(Ctrl K 버튼)', async () => {
   const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '원형 체크 시험', orgUnitId: ctx.siteA, approvalRequired: false })).id;
   await owner.goto(BASE + '/tasks?mode=list');
   await owner.getByLabel('업무 검색').fill('원형 체크');
   const row = owner.locator(`[data-task-id="${id}"]`);
-  await row.getByTestId('check-circle').click();
+  assert.equal(await row.getByTestId('check-circle').count(), 0, '왼쪽 완료 동그라미 없음');
+  await row.getByTestId('row-status-chip').filter({ visible: true }).click();
+  await owner.getByTestId('status-quick').click();
   await owner.getByText('완료했습니다').waitFor();
   await owner.waitForTimeout(500);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
@@ -860,6 +863,7 @@ await step('V22 AI 비서 문서 엔진: 회사 정보 화면, 파일 작업 카
 await step('V14 41 휴대폰 주·3일: 종일 칩 2줄·블록 제목만 줄바꿈·머리글자 없음(일 보기는 있음)·칸 높이 52/60/64·오전/오후 축·색 버튼 머리줄', () => v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('V24 음성 등록: AI 비서 화면·패널 마이크 → 실시간 글자 → 단어장 보정(최매니져→최매니저) → 입력창에 남김(바로 안 보냄), 도움말에 "말로 등록" 없음', () => v24({ browser, desk, BASE, sql }));
 await step('V14 42 업무 보기 칩: 412px 에서 7개 모두 보임(4칸 2줄)·건수 = API·0건 숨김·사람 칩 둘째 줄·PC 한 줄', () => v1442({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
+await step('V14 43 업무 목록: 왼쪽 동그라미 없음·상태 칩 버튼(테두리·▾·32px)·메뉴 맨 위 완료 → 되돌리기·남의 업무 잠김·"확인 완료" 문구 없음', () => v1443({ browser, desk, ctx, BASE, SHOTS, sql }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');
   const month = today.slice(0, 7);
@@ -1340,7 +1344,7 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   // 완료해도 제자리(취소선)
   const row = owner.locator('[data-row]', { hasText: 'V6 다같이 점검' }).first();
   const rid = await row.getAttribute('data-row');
-  await row.getByRole('button', { name: /V6 다같이 점검 (완료|검토 요청)/ }).first().click();
+  await row.getByTestId('row-status-chip').filter({ visible: true }).click(); await owner.getByTestId('status-quick').click(); // V14 43번: 상태 칩 메뉴 맨 위 완료
   await owner.waitForTimeout(800);
   await owner.locator(`[data-row="${rid}"]`).waitFor();
   assert.ok((await owner.locator(`[data-row="${rid}"] a[data-open-task]`).getAttribute('class')).includes('line-through'), '완료해도 제자리 취소선');
@@ -1551,11 +1555,11 @@ await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 �
   const m = await mc.newPage();
   await m.goto(BASE + '/tasks');
   const row = m.locator(`[data-row="${t}"]`);
-  await row.getByTestId('row-status-chip').getByText('확인 완료').waitFor();
-  await row.getByTestId('row-status-chip').tap();
+  await row.getByTestId('row-status-chip').filter({ visible: true }).getByText('· 확인함').waitFor();
+  await row.getByTestId('row-status-chip').filter({ visible: true }).tap();
   const sheet = m.locator('[data-sheet]');
   await sheet.getByRole('button', { name: '진행 중' }).tap();
-  await row.getByTestId('row-status-chip').getByText('진행 중').waitFor();
+  await row.getByTestId('row-status-chip').filter({ visible: true }).getByText('진행 중').waitFor();
   assert.equal((await sql`select status from tasks where id = ${t}`)[0].status, 'in_progress');
   // 완료 칩은 줄 끝에 고정되어 화면 안에 보임
   const box = await m.getByTestId('done-chip').getByRole('button').boundingBox();
@@ -1639,7 +1643,8 @@ await step('V12: PC 상세 패널 — 다른 업무 클릭 시 교체·바깥/Es
   // 남의 업무: 원형 체크 비활성, 검토 요청 알림에서 승인
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 검토 승인 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
   await owner.goto(BASE + '/tasks?mode=list');
-  assert.equal(await owner.locator(`[data-row="${t}"]`).getByTestId('check-circle').isDisabled(), true, '담당자만 완료');
+  await owner.locator(`[data-row="${t}"]`).getByTestId('row-status-locked').filter({ visible: true }).waitFor(); // 담당자만 상태 변경 — 남의 업무는 잠김 표시
+  assert.equal(await owner.locator(`[data-row="${t}"]`).getByTestId('row-status-chip').count(), 0, '담당자만 완료');
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
   await owner.goto(BASE + '/notifications');
   const li = owner.getByTestId('notifications').locator('li', { hasText: '검토 요청: V12 검토 승인 업무' });

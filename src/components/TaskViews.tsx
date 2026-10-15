@@ -11,11 +11,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import listPlugin from '@fullcalendar/list';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
-import {
-  CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip,
-  FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X,
-  Check,
-} from 'lucide-react';
+import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock } from 'lucide-react';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
@@ -476,9 +472,9 @@ export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
   return t.status === 'review' && (to === 'done' || to === 'in_progress') && !!t.requested_by && t.requested_by === uid;
 }
 const NOT_MINE = '상태는 담당자만 바꿀 수 있어요 (지시자는 검토 요청 승인·반려와 완료 해지만)';
-/** 진행 전 업무는 담당자 확인 여부로 "확인 전"·"확인 완료" */
+/** 진행 전 업무는 담당자 확인 여부를 뒤에 — V14 43번: "확인 완료"가 "완료"와 헷갈려 "진행 전 · 확인함/확인 전" */
 export function statusText(t: Task) {
-  if (t.status === 'todo' && t.assignee_id) return t.assignee_ack_at ? '확인 완료' : '확인 전';
+  if (t.status === 'todo' && t.assignee_id) return `진행 전 · ${t.assignee_ack_at ? '확인함' : '확인 전'}`;
   return STATUS_LABEL[t.status];
 }
 /** 원형 완료 체크: 결재선·관리자 확인 업무는 "검토 요청", 아니면 완료. 완료 상태에서 누르면 다시 진행 중 */
@@ -489,64 +485,72 @@ function nextStatusOnCheck(t: Task, role: string): TaskStatus {
   if (t.approval_required && role === 'staff') return 'review';
   return 'done';
 }
-function CheckCircle({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => Promise<boolean> | void }) {
-  const { user } = useSession();
-  const to = nextStatusOnCheck(t, user.role);
-  const allowed = canSetStatus(t, user.id, to);
-  const label = !allowed ? `${t.title} — 담당자만 완료할 수 있습니다` : t.status === 'done' ? `${t.title} 완료 취소` : to === 'review' ? `${t.title} 검토 요청` : t.status === 'review' && t.assignee_id !== user.id ? `${t.title} 승인(완료)` : `${t.title} 완료`;
-  return (
-    // V14 20번: 권한이 없으면 눌렀을 때 이유를 알려 준다(비활성 버튼은 클릭이 안 와서 감싸는 칸이 받음)
-    <span className="inline-flex" onClick={allowed ? undefined : () => toast.info(`${t.status === 'done' ? '완료 해지' : '완료'}는 담당자${t.status === 'done' ? '·지시자' : ''}만 할 수 있어요 — ${t.assignee_name ?? '담당자'}에게 요청하세요`)}>
-    <button disabled={!allowed} onClick={async () => {
-      const before = t.status;
-      const ok = await onPatch(t, { status: to });
-      if (ok !== false) toast.ok(to === 'done' ? '완료했습니다' : to === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: to, version: t.version + 1 }, { status: before }) });
-    }} aria-label={label} title={label} data-testid="check-circle"
-      className={cx('hit group flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors disabled:pointer-events-none disabled:opacity-40',
-        t.status === 'done' ? 'border-green-500 bg-green-500 text-white' : t.status === 'review' ? 'border-amber-400 bg-amber-50 text-amber-500' : 'border-slate-300 text-transparent hover:border-green-500 hover:text-green-500')}>
-      {t.status === 'review' ? <Stamp className="size-3" /> : <CircleCheck className="size-[22px] stroke-[1.8]" style={{ margin: -1.5 }} />}
-    </button>
-    </span>
-  );
-}
 function TypeIcon({ t }: { t: Task }) {
   if (t.task_type === 'milestone') return <span title="마일스톤"><Diamond className="size-3.5 shrink-0 fill-violet-500 text-violet-500" /></span>;
   if (t.task_type === 'approval') return <span title="결재 업무"><Stamp className="size-3.5 shrink-0 text-amber-600" /></span>;
   if (t.task_type === 'inspection') return <span title="점검 업무"><Camera className="size-3.5 shrink-0 text-sky-600" /></span>;
   return null;
 }
-/** 상태 선택: 배지처럼 보이는 select */
-function StatusSelect({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }) {
-  const { user } = useSession();
-  const mine = (t.assignee_id ?? t.created_by) === user.id;
-  return (
-    <select value={t.status} onChange={(e) => onPatch(t, { status: e.target.value })} aria-label={`${t.title} 상태`} title={mine ? undefined : NOT_MINE}
-      className={cx('h-6 cursor-pointer appearance-none rounded-full border-0 bg-none py-0 pl-2.5 pr-2.5 text-xs font-medium focus:ring-2 focus:ring-accent-500', STATUS_TONE[t.status].badge)}>
-      {STATUSES.map((s) => <option key={s} value={s} disabled={!canSetStatus(t, user.id, s)}>{s === t.status ? statusText(t) : STATUS_LABEL[s]}</option>)}
-    </select>
-  );
-}
-/** V11 1번: 상태 칩(진행 전·진행 중·검토 요청·보류·완료) — 누르면 상태 메뉴 */
+/** V14 43번 상태 칩 색: 진행 전 회색·진행 중 파랑·검토 요청 주황·보류 노랑·완료 초록 */
+const CHIP_TONE: Record<TaskStatus, string> = {
+  todo: 'border-slate-300 bg-white text-slate-700', in_progress: 'border-blue-300 bg-blue-50 text-blue-700', review: 'border-orange-300 bg-orange-50 text-orange-700',
+  on_hold: 'border-yellow-300 bg-yellow-50 text-yellow-800', done: 'border-green-300 bg-green-50 text-green-700',
+};
+const CHIP_DOT: Record<TaskStatus, string> = { todo: 'bg-slate-400', in_progress: 'bg-blue-500', review: 'bg-orange-500', on_hold: 'bg-yellow-500', done: 'bg-green-500' };
+let tipClaimed = false; // 한 화면에 말풍선은 하나만
+/**
+ * V11 1번·V14 43번: 상태 칩 = 누르는 버튼(테두리 알약 + ▾, 터치 44px, 눌림 효과) — 누르면 메뉴 맨 위 [✓ 완료](결재가 필요하면 [검토 요청]) 다음 나머지 상태.
+ * 바꿀 수 없는 사람에게는 ▾ 없는 평평한 표시 + 자물쇠(누르면 이유 안내). 처음 3번은 "눌러서 상태 바꾸기" 말풍선.
+ */
 function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any }) {
   const { user } = useSession();
   const [open, setOpen] = useState(false);
+  const [tip, setTip] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
+  const quick = nextStatusOnCheck(t, user.role); // 완료(또는 검토 요청, 완료 상태면 다시 진행 중)
+  const can = STATUSES.some((s) => s !== t.status && canSetStatus(t, user.id, s));
+  const ack = t.status === 'todo' && t.assignee_id ? (t.assignee_ack_at ? '확인함' : '확인 전') : null;
+  useEffect(() => {
+    if (!can || tipClaimed) return;
+    try { const n = Number(localStorage.getItem('wos_status_tip') ?? 0); if (n < 3) { tipClaimed = true; setTip(true); localStorage.setItem('wos_status_tip', String(n + 1)); } } catch {}
+    return () => { tipClaimed = false; };
+  }, [can]);
+  async function go(s: TaskStatus) {
+    setOpen(false); setTip(false);
+    if (s === t.status) return;
+    const before = t.status;
+    const ok = await onPatch(t, { status: s });
+    if (ok !== false && (s === quick || s === 'done')) toast.ok(s === 'done' ? '완료했습니다' : s === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: s, version: t.version + 1 }, { status: before }) });
+  }
+  const sub = ack && <span className={cx('text-[10.5px] font-normal', ack === '확인 전' ? 'text-red-600' : 'text-ink-3')}>· {ack}</span>;
+  if (!can) return (
+    <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); toast.info(NOT_MINE); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${t.title} 상태: ${statusText(t)} (담당자만 변경)`} data-testid="row-status-locked"
+      className="inline-flex h-8 min-w-0 items-center gap-1 whitespace-nowrap px-1 text-[12px] font-medium text-ink-2">
+      <span className={cx('size-1.5 shrink-0 rounded-full', CHIP_DOT[t.status])} aria-hidden />{STATUS_LABEL[t.status]}{sub}<Lock className="size-3 shrink-0 text-ink-3" aria-hidden />
+    </span>
+  );
   return (
-    <>
-      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(true); }} onPointerDown={(e) => e.stopPropagation()} aria-haspopup="dialog" aria-label={`${t.title} 상태: ${statusText(t)}`} data-testid="row-status-chip"
-        className={cx('inline-flex h-6 items-center gap-1 rounded-full px-2 text-[11px] font-medium', STATUS_TONE[t.status].badge)}>
-        <span className={cx('size-1.5 rounded-full', statusText(t) === '확인 전' ? 'bg-red-500' : STATUS_TONE[t.status].dot)} aria-hidden />{statusText(t)}
+    <span className="relative inline-flex min-w-0">
+      <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setTip(false); setOpen(true); }} onPointerDown={(e) => e.stopPropagation()} aria-haspopup="dialog" aria-label={`${t.title} 상태: ${statusText(t)}`} data-testid="row-status-chip"
+        className={cx('hit inline-flex h-8 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border pl-2 pr-1.5 text-[12px] font-semibold shadow-sm transition active:scale-95 active:shadow-none', CHIP_TONE[t.status])}>
+        <span className={cx('size-1.5 shrink-0 rounded-full', ack === '확인 전' ? 'bg-red-500' : CHIP_DOT[t.status])} aria-hidden />{STATUS_LABEL[t.status]}{sub}<ChevronDown className="size-3.5 shrink-0 opacity-70" aria-hidden />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={190}>
-        {(t.assignee_id ?? t.created_by) !== user.id && <p className="px-2.5 pb-1 text-[11px] text-ink-3">{NOT_MINE}</p>}
-        {STATUSES.map((s) => (
-          <button key={s} type="button" disabled={!canSetStatus(t, user.id, s)} onClick={() => { setOpen(false); if (s !== t.status) onPatch(t, { status: s }); }} aria-pressed={s === t.status}
+      {tip && <span className="pointer-events-none absolute bottom-full left-0 z-10 mb-1 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] text-white shadow-pop after:absolute after:left-4 after:top-full after:border-4 after:border-transparent after:border-t-ink" data-testid="status-tip">눌러서 상태 바꾸기</span>}
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={200}>
+        {canSetStatus(t, user.id, quick) && quick !== t.status && (
+          <button type="button" onClick={() => go(quick)} data-testid="status-quick"
+            className="mb-1 flex w-full items-center gap-2 rounded-input bg-green-50 px-2.5 py-2 text-left text-sm font-bold text-green-800 hover:bg-green-100">
+            <Check className="size-4" />{quick === 'done' ? '완료' : quick === 'review' ? '검토 요청' : '다시 진행 중'}
+          </button>
+        )}
+        {(['in_progress', 'todo', 'review', 'on_hold', 'done'] as TaskStatus[]).filter((s) => s !== quick).map((s) => (
+          <button key={s} type="button" disabled={!canSetStatus(t, user.id, s)} onClick={() => go(s)} aria-pressed={s === t.status}
             className="flex w-full items-center gap-2 rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50 disabled:opacity-40">
-            <span className={cx('size-2 rounded-full', STATUS_TONE[s].dot)} />{STATUS_LABEL[s]}{s === t.status && <Check className="ml-auto size-3.5 text-accent-600" />}
+            <span className={cx('size-2 rounded-full', CHIP_DOT[s])} />{STATUS_LABEL[s]}{s === t.status && <Check className="ml-auto size-3.5 text-accent-600" />}
           </button>
         ))}
       </Popover>
-    </>
+    </span>
   );
 }
 /** 마감일 칩 + 그 위의 투명 날짜 입력 (눌러서 바로 변경) */
@@ -1008,7 +1012,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         {selc && !selc.on && <input type="checkbox" checked={false} readOnly onClick={(e) => { e.stopPropagation(); selc.enter(t.id); }} aria-label={`${t.title} 선택 시작`} data-testid="row-hover-select"
           className="absolute left-0.5 top-1/2 hidden size-3.5 -translate-y-1/2 accent-brand-600 opacity-0 group-hover:opacity-100 focus:opacity-100 md:block" />}
         {selc?.on ? <input type="checkbox" className="size-5 shrink-0 accent-brand-600" checked={picked} readOnly onClick={(e) => { e.stopPropagation(); selc.toggle(t.id, e.shiftKey); }} aria-label={`${t.title} 선택`} data-testid="row-select" />
-          : <CheckCircle t={t} onPatch={onPatch} />}
+          : null /* V14 43번: 왼쪽 완료 동그라미 없음 — 상태 칩 메뉴의 [✓ 완료]·오른쪽 밀기로 완료 */}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
           <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
             <TypeIcon t={t} />
@@ -1020,7 +1024,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
         <span className="hidden w-[104px] min-w-0 md:flex"><AssigneePicker role="지시자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
         <span className="hidden w-[60px] justify-end sm:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>
-        <span className="hidden w-[84px] sm:inline-flex"><StatusSelect t={t} onPatch={onPatch} /></span>
+        <span className="hidden w-[112px] sm:inline-flex"><StatusChip t={t} onPatch={onPatch} /></span>
         <DueEdit t={t} onPatch={onPatch} />
         <AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} />
         {onMove && <OrderMenu title={t.title} onMove={(to) => onMove(t, to)} />}
@@ -1356,7 +1360,6 @@ function DraggableRow({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => v
     <div ref={setNodeRef} style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined}
       className={cx('group flex min-h-[44px] items-center gap-2.5 bg-white px-2 py-2 hover:bg-slate-50', isDragging && 'relative z-50 opacity-90 shadow-pop')} data-task-id={t.id}>
       <span {...listeners} {...attributes} className="cursor-grab touch-none select-none px-0.5 text-slate-300 group-hover:text-slate-500" aria-label={`${t.title} 끌어서 이동`}><GripVertical className="size-4" /></span>
-      <CheckCircle t={t} onPatch={onPatch} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
         <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
           <TypeIcon t={t} />
@@ -1365,7 +1368,7 @@ function DraggableRow({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => v
         <Meta t={t} compact />
       </div>
       <span className="hidden w-[60px] justify-end sm:flex"><PriorityTag p={t.priority} /></span>
-      <StatusSelect t={t} onPatch={onPatch} />
+      <StatusChip t={t} onPatch={onPatch} />
       <span className="hidden sm:inline-flex"><DueEdit t={t} onPatch={onPatch} /></span>
       <AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} />
     </div>
