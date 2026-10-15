@@ -6,7 +6,7 @@ import { api } from './client';
 import { Button, cx, toast } from './ui';
 
 type Job = { id: string; title: string; kind: string; mode: string; version: number; status: 'queued' | 'running' | 'done' | 'failed'; pages: number | null; summary: string | null; error: string | null;
-  resultName: string | null; resultSize: number | null; hasFile: boolean; hasPreview: boolean; savedFileId: string | null; costUsd: number };
+  resultName: string | null; resultSize: number | null; hasFile: boolean; hasPreview: boolean; savedFileId: string | null; costUsd: number; debug?: unknown };
 const ICON: Record<string, typeof FileText> = { xlsx: FileSpreadsheet, pptx: Presentation };
 
 /**
@@ -48,7 +48,8 @@ export function DocJobCard({ id, onRefine }: { id: string; onRefine?: (text: str
       {working ? (
         <p className="flex items-center gap-2 px-2.5 py-3 text-sm text-ink-2" data-testid="doc-job-working"><Loader2 className="size-4 animate-spin" />만드는 중… (1~3분, 미리보기를 확인하며 다듬는 중)</p>
       ) : job.status === 'failed' ? (
-        <p className="px-2.5 py-3 text-sm text-red-700">만들지 못했습니다: {job.error ?? '오류'}</p>
+        <div className="px-2.5 py-3 text-sm text-red-700">만들지 못했습니다: {job.error ?? '오류'}
+          {job.debug ? <details className="mt-1 text-[11px] text-ink-3" data-testid="doc-job-debug"><summary className="cursor-pointer">진단 기록 (관리자)</summary><pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-1.5">{JSON.stringify(job.debug, null, 1)}</pre></details> : null}</div>
       ) : (
         <>
           {job.hasPreview && <a href={`/api/ai/doc-jobs/${id}/preview`} target="_blank" rel="noreferrer"><img src={`/api/ai/doc-jobs/${id}/preview`} alt={`${job.title} 첫 페이지 미리보기`} className="max-h-72 w-full border-b border-line bg-slate-50 object-contain" data-testid="doc-job-preview" /></a>}

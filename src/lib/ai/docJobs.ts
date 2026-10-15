@@ -4,6 +4,7 @@ import { forbidden, notFound } from '../errors';
 import { getObject } from '../storage';
 import { audit } from '../log';
 import { tenantOf, type SessionUser } from '../types';
+import { isAdmin } from '../access';
 
 /** V22 문서 작업 결과 — 만든 사람만 본다. 자료실 저장·업무 첨부는 사람이 누를 때만 */
 async function own(u: SessionUser, id: string) {
@@ -20,7 +21,8 @@ export async function getDocJob(u: SessionUser, id: string) {
       down as (select id, version, status, created_at from ai_doc_jobs where id = (select id from root) union all select c.id, c.version, c.status, c.created_at from ai_doc_jobs c join down on c.base_job_id = down.id)
     select id, version, status, created_at from down order by version, created_at`;
   return { job: { id: j.id, title: j.title, kind: j.kind, mode: j.mode, version: j.version, status: j.status, pages: j.pages, summary: j.summary, error: j.error,
-    resultName: j.result_name, resultSize: j.result_size, hasFile: !!j.result_key, hasPreview: !!j.preview_key, savedFileId: j.saved_file_id, costUsd: Number(j.cost_usd), createdAt: j.created_at, finishedAt: j.finished_at },
+    resultName: j.result_name, resultSize: j.result_size, hasFile: !!j.result_key, hasPreview: !!j.preview_key, savedFileId: j.saved_file_id, costUsd: Number(j.cost_usd), createdAt: j.created_at, finishedAt: j.finished_at,
+    ...(isAdmin(u) && j.debug ? { debug: j.debug } : {}) }, // 운영 진단(대표·관리자만)
     versions };
 }
 export async function docJobFile(u: SessionUser, id: string, what: 'file' | 'preview') {

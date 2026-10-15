@@ -101,6 +101,56 @@ describe('V22 문서 엔진', () => {
     assert.equal((await ctx.owner.ok('GET', `/api/ai/doc-jobs/${job2}`)).job.savedFileId, s.fileId);
   });
 
+  test('운영 실패 보정: 잘린 답(max_tokens) 이어 요청, text_editor 결과의 file_id 도 찾음, 진단 기록(대표만)', async () => {
+    const n0 = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicFiles: { fx_edit: { filename: '잘림 시험.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', b64: xlsxBytes.toString('base64') } },
+      anthropicQueue: [toolUse('t5', 'run_file_task', { mode: 'create', kind: 'xlsx', title: '잘림 시험', instructions: '긴 표' }), say('만들기 시작했습니다.'),
+        { content: [{ type: 'text', text: '표를 만드는 중' }, { type: 'server_tool_use', id: 'srv_cut', name: 'bash_code_execution', input: { command: 'python big.py' } }], stop_reason: 'max_tokens' },
+        { content: [{ type: 'server_tool_use', id: 'srv_te', name: 'text_editor_code_execution', input: { command: 'create', path: '/mnt/user-data/outputs/잘림 시험.xlsx' } },
+          { type: 'text_editor_code_execution_tool_result', tool_use_id: 'srv_te', content: { type: 'text_editor_code_execution_create_result', is_file_update: false, file_id: 'fx_edit' } },
+          { type: 'text', text: '표를 만들었습니다.\nPAGES: 2' }], stop_reason: 'end_turn' }] });
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '긴 표 엑셀로' });
+    const id = r.docJobs[0].id;
+    const d = await waitJob(ctx.owner, id);
+    assert.equal(d.job.status, 'done', d.job.error);
+    assert.equal(d.job.pages, 2); assert.equal(d.job.summary, '표를 만들었습니다.', '마지막 단계 글이 요약');
+    const eng = (await fakeState()).anthropic.slice(n0).filter((x) => x.body.container);
+    assert.equal(eng.length, 2);
+    assert.equal(eng[0].body.max_tokens, 20000);
+    const cont = eng[1].body.messages;
+    assert.ok(!JSON.stringify(cont.at(-2)).includes('srv_cut'), '결과 없는 잘린 도구 호출은 빼고 이어 보냄');
+    assert.match(JSON.stringify(cont.at(-1)), /잘렸습니다/);
+    assert.deepEqual(d.job.debug.steps.map((x) => x.stop), ['max_tokens', 'end_turn']);
+    assert.equal(d.job.debug.found, 1);
+    const st = (await sql`select debug from ai_doc_jobs where id = ${id}`)[0].debug;
+    assert.ok(st.steps[1].types.text_editor_code_execution_tool_result === 1);
+  });
+
+  test('운영 실패 보정: 파일이 안 오면 한 번 다시 저장 요청 → 그래도 없으면 이 작업 제목의 새 파일만 목록에서 찾음, 끝내 없으면 실패+진단', async () => {
+    const n0 = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicFiles: { fl_other: { filename: '남의 문서.docx', mime: 'application/octet-stream', b64: Buffer.from('x').toString('base64') },
+      // 엔진이 만든 결과 파일이 응답에는 안 오고 목록에만 있는 경우
+      fl_mine: { filename: '휴관 안내문.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', b64: Buffer.from('PK docx').toString('base64') } },
+      anthropicQueue: [toolUse('t6', 'run_file_task', { mode: 'create', kind: 'docx', title: '휴관 안내문', instructions: '휴관 안내' }), say('만들기 시작했습니다.'),
+        say('휴관 안내문을 만들었습니다.\nPAGES: 1'), say('다시 저장했습니다.\nPAGES: 1')] });
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '휴관 안내문' });
+    const d = await waitJob(ctx.owner, r.docJobs[0].id);
+    assert.equal(d.job.status, 'done', d.job.error);
+    assert.equal(d.job.resultName, '휴관 안내문.docx', '제목이 같은 파일만, 남의 문서는 안 가져옴');
+    const eng = (await fakeState()).anthropic.slice(n0).filter((x) => x.body.container);
+    assert.equal(eng.length, 2); assert.match(JSON.stringify(eng[1].body.messages.at(-1)), /결과 파일이 전달되지 않았습니다/);
+    assert.equal(d.job.debug.fallback, 'files.list 1');
+
+    await ctl({ anthropicReset: true, anthropicQueue: [toolUse('t7', 'run_file_task', { mode: 'create', kind: 'pptx', title: '없는 발표', instructions: 'x' }), say('만들기 시작했습니다.'), say('만들었습니다.'), say('저장했습니다.')] });
+    const r2 = await ctx.owner.ok('POST', '/api/ai/chat', { text: '발표 자료' });
+    const d2 = await waitJob(ctx.owner, r2.docJobs[0].id);
+    assert.equal(d2.job.status, 'failed'); assert.match(d2.job.error, /결과 파일을 받지 못했습니다/);
+    assert.equal(d2.job.debug.found, 0); assert.equal(d2.job.debug.lastText, '저장했습니다.');
+    // 시스템 지시: 시작만 알리고 완료형 금지
+    const chat = (await fakeState()).anthropic.at(-4);
+    assert.match(chat.body.system?.[0]?.text ?? JSON.stringify(chat.body.system), /만들기 시작했습니다/);
+  });
+
   test('회사 설정: 웹 도구 끄기·문서 작업 끄기', async () => {
     await ctx.owner.ok('PUT', '/api/ai/settings', { webTools: false, docEngine: false });
     const n0 = (await fakeState()).anthropic.length;

@@ -61,6 +61,11 @@ export function startFakeGoogle(port = 3199) {
       state.anthropicFiles[id] = { filename, mime: 'application/octet-stream', b64: '' };
       return json(res, 200, { id, type: 'file', filename, mime_type: 'application/octet-stream', size_bytes: raw.length, created_at: new Date().toISOString(), downloadable: false });
     }
+    if (p === '/v1/files' && req.method === 'GET') { // 목록(최신순) — scope_id 를 주면 그 컨테이너 범위만(가짜는 scope 를 기록하지 않으므로 빈 목록)
+      if (url.searchParams.get('scope_id')) return json(res, 200, { data: [], has_more: false, first_id: null, last_id: null });
+      const data = Object.entries(state.anthropicFiles).reverse().map(([id, f]) => ({ id, type: 'file', filename: f.filename, mime_type: f.mime, size_bytes: Buffer.from(f.b64 ?? '', 'base64').length, created_at: f.at ?? new Date().toISOString(), downloadable: !id.startsWith('file_up_') }));
+      return json(res, 200, { data, has_more: false, first_id: data[0]?.id ?? null, last_id: data.at(-1)?.id ?? null });
+    }
     const afm = /^\/v1\/files\/([^/]+)(\/content)?$/.exec(p);
     if (afm && req.method === 'GET') {
       const f = state.anthropicFiles[afm[1]];
@@ -102,7 +107,7 @@ export function startFakeGoogle(port = 3199) {
       if (body.fcmUnregister) state.fcmUnregistered.add(body.fcmUnregister);
       if (body.anthropicReset) { state.anthropicQueue.length = 0; state.classifyQueue.length = 0; } // 비운 다음에 새로 넣는다
       if (body.anthropicQueue) state.anthropicQueue.push(...body.anthropicQueue);
-      if (body.anthropicFiles) Object.assign(state.anthropicFiles, body.anthropicFiles);
+      if (body.anthropicFiles) for (const [k, v] of Object.entries(body.anthropicFiles)) state.anthropicFiles[k] = { at: new Date().toISOString(), ...v };
       if (body.classifyQueue) state.classifyQueue.push(...body.classifyQueue);
       if (body.webpushGone) state.webpushGone.add(body.webpushGone);
       if (body.googleEdit) { // Google 쪽에서 사용자가 직접 수정

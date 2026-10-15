@@ -173,7 +173,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
 - 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
-- 서식·디자인이 중요한 문서(견적서·보고서·제안서·안내문·PPT)나 "참고해서 만들어/더 세련되게/색 바꿔" 같은 요청, 엑셀·CSV 계산·차트 분석은 run_file_task 를 쓰세요(실제 파일·미리보기). 앞서 만든 파일을 고칠 때는 대화 기록의 [파일 작업: id=…] 를 baseJobId 로 mode=edit. 간단한 글 문서는 propose_create_document, 단순 데이터 표는 propose_xlsx_report.
+- 서식·디자인이 중요한 문서(견적서·보고서·제안서·안내문·PPT)나 "참고해서 만들어/더 세련되게/색 바꿔" 같은 요청, 엑셀·CSV 계산·차트 분석은 run_file_task 를 쓰세요(실제 파일·미리보기). 앞서 만든 파일을 고칠 때는 대화 기록의 [파일 작업: id=…] 를 baseJobId 로 mode=edit. run_file_task 를 부른 뒤에는 "만들기 시작했습니다(1~3분, 아래 카드에 미리보기가 나옵니다)"처럼 시작했다고만 말하고, "~했습니다·~뺐습니다·~맞췄습니다" 같은 완료형으로 결과를 설명하지 마세요(아직 만들지 않았음). 간단한 글 문서는 propose_create_document, 단순 데이터 표는 propose_xlsx_report.
 - 최신 정보·외부 자료가 필요하면 웹 검색(켜져 있을 때)을 쓰고 출처 링크를 답에 붙이세요.
 - 첨부한 이미지·문서를 보고 간단한 글 문서를 만들어 달라고 하면 propose_create_document 로, 표·숫자 위주면 propose_xlsx_report 로 제안하세요. 이미지에서 읽은 내용만 쓰고, 읽기 어려운 부분은 "확인 필요"로 표시하세요.
 - 대화에 올린 자료를 자료실에 정리해 달라고 하면 list_library_folders 로 기존 폴더를 보고 propose_organize_files 로 폴더·제목·태그를 제안하세요(기존 폴더 우선). 앞선 질문의 첨부 id 는 대화 기록의 [첨부] 줄에 있습니다.
@@ -464,7 +464,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         values (${tenantOf(u)}, ${u.id}, ${c.threadId ?? null}, ${i.mode}, ${i.kind}, ${i.title}, ${i.instructions}, ${i.company ?? null}, ${i.referenceFileIds ?? []}, ${i.baseJobId ?? null}, ${version}, ${!!c.confidential})
         returning id`;
       (c.docJobs ??= []).push({ id: j.id, title: i.title, kind: i.kind, version, status: 'queued' });
-      return { jobId: j.id, version, status: '만드는 중 — 결과(미리보기·내려받기·자료실에 저장)는 화면 카드에 1~3분 뒤 나옵니다. 완성됐다고 말하지 말고 "만드는 중"이라고 안내하세요.' };
+      return { jobId: j.id, version, status: '만드는 중 — 결과(미리보기·내려받기·자료실에 저장)는 화면 카드에 1~3분 뒤 나옵니다. 아직 아무것도 만들지 않았습니다. "만들기 시작했습니다"라고만 답하고, 결과 내용(무엇을 넣고 뺐는지)을 완료형으로 말하지 마세요.' };
     }
     case 'list_library_folders': {
       const r = await listLibrary(u, { limit: 1 });
