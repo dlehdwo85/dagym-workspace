@@ -1,8 +1,8 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, AtSign, Bell, BellOff, Camera, CornerUpLeft, Download, FileText, Hash, Loader2, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Users, X } from 'lucide-react';
-import { api, useApi } from '@/components/client';
+import { ArrowLeft, AtSign, Pencil, Bell, BellOff, Camera, CornerUpLeft, Download, FileText, Hash, Loader2, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Users, X } from 'lucide-react';
+import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { DropZone, UploadProgress, putFile } from '@/components/upload';
 import { Avatar, Button, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -179,7 +179,7 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
   );
 }
 
-type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean }; messages: Msg[]; members: { id: string; name: string; last_read_id: string }[]; pinned: Msg[] };
+type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean; canRename?: boolean }; messages: Msg[]; members: { id: string; name: string; last_read_id: string }[]; pinned: Msg[] };
 
 /** 대화방 */
 export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose, backAlways }: { id: string; live: Live; onRead: () => void; onBack: () => void; compact?: boolean; onExpand?: () => void; onClose?: () => void; backAlways?: boolean }) {
@@ -187,6 +187,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const { data, error, loading, reload } = useApi<RoomData>(`/api/chat/rooms/${id}`);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
+  const [nameDraft, setNameDraft] = useState<string | null>(null); // 대화방 이름 바꾸기 입력 중
   const [typing, setTyping] = useState<string[]>([]);
   const [reads, setReads] = useState<Record<string, string>>({});
   const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
@@ -299,13 +300,29 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const mention = /(^|\s)@([^\s@]*)$/.exec(text);
   const mentionList = mention ? members.filter((m) => m.id !== user.id && m.name.includes(mention[2])).slice(0, 6) : [];
   const iconBtn = 'inline-flex size-8 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100';
+  async function saveName() {
+    if (nameDraft === null) return; // Enter 뒤 blur 로 두 번 불리지 않게
+    const n = nameDraft.trim();
+    setNameDraft(null);
+    if (n === room.name) return;
+    try { await api(`/api/chat/rooms/${id}`, { method: 'PATCH', body: { name: n } }); broadcastRefresh(); onRead(); /* 머리줄·대화 목록 모두 새 이름 */ toast.ok(n ? `대화방 이름을 "${n}"(으)로 바꿨습니다` : '업무 제목으로 되돌렸습니다'); } catch (e: any) { toast.error(e.message); }
+  }
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-room">
       <header className="flex items-center gap-2 border-b border-line px-2 py-2">
         <button className={cx(iconBtn, !backAlways && 'sm:hidden')} onClick={onBack} aria-label="목록으로"><ArrowLeft className="size-5" /></button>
         <RoomIcon r={{ kind: room.kind, other_id: other?.id ?? null, name: room.name }} size={compact ? 30 : 36} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold" data-testid="chat-room-name">{room.name}</div>
+          {nameDraft !== null ? (
+            <input autoFocus className={cx(inputCls, 'h-7 px-2 text-sm font-semibold')} value={nameDraft} maxLength={50} onChange={(e) => setNameDraft(e.target.value)} aria-label="대화방 이름" data-testid="chat-room-name-input"
+              placeholder={room.kind === 'task' ? '비우면 업무 제목' : '대화방 이름'} onBlur={saveName}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); saveName(); } else if (e.key === 'Escape') { e.stopPropagation(); setNameDraft(null); } }} />
+          ) : (
+            <div className="flex min-w-0 items-center gap-1">
+              <span className="truncate text-sm font-semibold" data-testid="chat-room-name">{room.name}</span>
+              {room.canRename && <button type="button" onClick={() => setNameDraft(room.name)} className="shrink-0 rounded p-0.5 text-ink-3 hover:bg-slate-100 hover:text-ink" aria-label="대화방 이름 바꾸기" title="대화방 이름 바꾸기" data-testid="chat-room-rename"><Pencil className="size-3.5" /></button>}
+            </div>
+          )}
           <div className="truncate text-[11px] text-ink-3">{room.kind === 'dm' ? dir.users.find((x) => x.id === other?.id)?.title ?? '1:1' : `${KIND_LABEL[room.kind]} · ${members.length}명`}
             {room.taskId && <> · <Link href={`/tasks/${room.taskId}`} className="text-accent-600 underline">업무 보기</Link></>}{live.mode === 'poll' && ' · 5초마다 새로 고침'}</div>
         </div>

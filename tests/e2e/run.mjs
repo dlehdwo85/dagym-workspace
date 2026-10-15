@@ -15,6 +15,7 @@ import { v1441 } from './v1441.step.mjs';
 import { v24 } from './v24.step.mjs';
 import { v1442 } from './v1442.step.mjs';
 import { v1443 } from './v1443.step.mjs';
+import { chatRename } from './chatRename.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -864,6 +865,7 @@ await step('V14 41 휴대폰 주·3일: 종일 칩 2줄·블록 제목만 줄바
 await step('V24 음성 등록: AI 비서 화면·패널 마이크 → 실시간 글자 → 단어장 보정(최매니져→최매니저) → 입력창에 남김(바로 안 보냄), 도움말에 "말로 등록" 없음', () => v24({ browser, desk, BASE, sql }));
 await step('V14 42 업무 보기 칩: 412px 에서 7개 모두 보임(4칸 2줄)·건수 = API·0건 숨김·사람 칩 둘째 줄·PC 한 줄', () => v1442({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('V14 43 업무 목록: 왼쪽 동그라미 없음·상태 칩 버튼(테두리·▾·32px)·메뉴 맨 위 완료 → 되돌리기·남의 업무 잠김·"확인 완료" 문구 없음', () => v1443({ browser, desk, ctx, BASE, SHOTS, sql }));
+await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머리줄·목록·상대에게 새 이름, Esc 취소, 1:1 은 버튼 없음', () => chatRename({ owner, ctx, BASE }));
 await step('W-4 매출: 본사가 월 실적 입력·CSV 가져오기(오류 줄 안내) → 차트·표, 직원은 404', async () => {
   await owner.goto(BASE + '/revenue');
   const month = today.slice(0, 7);

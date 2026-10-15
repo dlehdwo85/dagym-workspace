@@ -2259,6 +2259,30 @@ describe('V13 10번 사내 메신저', () => {
     const p = await ctx.staffA.client.ok('GET', `/api/chat/poll?since=${Number(sent.id) - 1}&t=${Date.now() - 1000}`);
     assert.ok(p.messages.some((m) => m.id === sent.id), '폴링으로도');
   });
+  test('대화방 이름 바꾸기: 그룹·업무는 참여자 누구나(업무는 비우면 업무 제목), 회사 전체는 대표·관리자만, 1:1·팀은 불가, 남의 방 404', async () => {
+    const g = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'group', name: '이름 바꾸기 방', userIds: [ctx.staffA.id] })).id;
+    await ctx.staffA.client.ok('PATCH', `/api/chat/rooms/${g}`, { name: '  강남점   오픈 준비 ' });
+    assert.equal((await ctx.owner.ok('GET', `/api/chat/rooms/${g}`)).room.name, '강남점 오픈 준비', '공백 정리·다른 참여자에게도');
+    assert.ok((await ctx.owner.ok('GET', '/api/chat/rooms')).rooms.some((r) => r.id === g && r.name === '강남점 오픈 준비'), '목록에도');
+    assert.equal((await ctx.owner.ok('GET', `/api/chat/rooms/${g}`)).room.canRename, true);
+    assert.equal((await ctx.owner.patch(`/api/chat/rooms/${g}`, { name: ' ' })).status, 400, '그룹은 빈 이름 안 됨');
+    assert.equal((await ctx.owner.patch(`/api/chat/rooms/${g}`, { name: 'x'.repeat(51) })).status, 400);
+    assert.equal((await ctx.managerA.client.patch(`/api/chat/rooms/${g}`, { name: '남의 방' })).status, 404, '참여자 아니면 없는 방');
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '이름 바꾸기 업무', assigneeId: ctx.ownerId, approvalRequired: false })).id;
+    const tr = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'task', taskId: t })).id;
+    await ctx.owner.ok('PATCH', `/api/chat/rooms/${tr}`, { name: '업무방 새 이름' });
+    assert.equal((await ctx.owner.ok('GET', `/api/chat/rooms/${tr}`)).room.name, '업무방 새 이름');
+    await ctx.owner.ok('PATCH', `/api/chat/rooms/${tr}`, { name: '' });
+    assert.equal((await ctx.owner.ok('GET', `/api/chat/rooms/${tr}`)).room.name, '이름 바꾸기 업무', '비우면 업무 제목');
+    const dm = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.staffA.id })).id;
+    assert.equal((await ctx.owner.patch(`/api/chat/rooms/${dm}`, { name: '별명' })).status, 403);
+    assert.equal((await ctx.owner.ok('GET', `/api/chat/rooms/${dm}`)).room.canRename, false);
+    const company = (await ctx.staffA.client.ok('GET', '/api/chat/rooms')).rooms.find((r) => r.kind === 'company').id;
+    assert.equal((await ctx.staffA.client.patch(`/api/chat/rooms/${company}`, { name: '직원이 바꿈' })).status, 403);
+    await ctx.owner.ok('PATCH', `/api/chat/rooms/${company}`, { name: '다짐 전체' });
+    await ctx.owner.ok('PATCH', `/api/chat/rooms/${company}`, { name: '회사 전체' });
+    assert.ok((await sql`select count(*)::int n from audit_logs where action = 'chat.room_renamed'`)[0].n >= 4, '감사 기록');
+  });
 });
 
 describe('V14 3번 자료실 자동 정리 점검 — 상태·실패 사유·다시 정리·전체 정리', () => {

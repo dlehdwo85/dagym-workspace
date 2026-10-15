@@ -122,6 +122,19 @@ export async function leaveRoom(u: SessionUser, roomId: string) {
   await sql`delete from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
   return { ok: true };
 }
+/** 대화방 이름 바꾸기: 그룹·업무 대화는 참여자 누구나, 회사 전체방은 대표·관리자. 1:1(상대 이름)·팀(팀 이름을 따름)은 안 됨.
+ *  업무 대화는 빈 이름이면 업무 제목으로 되돌린다 */
+export const canRenameRoom = (u: SessionUser, kind: Room['kind']) => kind === 'group' || kind === 'task' || (kind === 'company' && (u.role === 'owner' || u.role === 'admin'));
+export async function renameRoom(u: SessionUser, roomId: string, name: string) {
+  const sql = db();
+  const r = await loadRoom(u, roomId, sql);
+  if (!canRenameRoom(u, r.kind)) throw forbidden(r.kind === 'dm' ? '1:1 대화는 이름을 바꿀 수 없습니다' : r.kind === 'team' ? '팀 대화방 이름은 팀 이름을 따릅니다 — 팀 설정에서 바꿔 주세요' : '회사 전체방 이름은 대표·관리자만 바꿀 수 있습니다');
+  const n = name.trim().replace(/\s+/g, ' ');
+  if (!n && r.kind !== 'task') throw badRequest('이름을 입력해 주세요');
+  await sql`update chat_rooms set name = ${n || null} where id = ${r.id}`;
+  await audit(sql, u.id, 'chat.room_renamed', 'chat_room', r.id, { from: r.name, to: n || null }, null);
+  return { ok: true, name: n || null };
+}
 export async function setRoomPinned(u: SessionUser, roomId: string, pinned: boolean) {
   const sql = db();
   await loadRoom(u, roomId, sql);
@@ -158,8 +171,8 @@ export async function roomDetail(u: SessionUser, roomId: string, q: { before?: s
   const [me] = await sql<{ muted: boolean }[]>`select muted from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
   let name = r.name;
   if (r.kind === 'dm') name = (members as any[]).find((m) => m.id !== u.id)?.name ?? '대화';
-  if (r.kind === 'task') name = (await sql<{ title: string }[]>`select title from tasks where id = ${r.task_id}`)[0]?.title ?? '업무';
-  return { room: { id: r.id, kind: r.kind, name, taskId: r.task_id, muted: me?.muted ?? false }, messages, members, pinned };
+  if (r.kind === 'task' && !r.name) name = (await sql<{ title: string }[]>`select title from tasks where id = ${r.task_id}`)[0]?.title ?? '업무';
+  return { room: { id: r.id, kind: r.kind, name, taskId: r.task_id, muted: me?.muted ?? false, canRename: canRenameRoom(u, r.kind) }, messages, members, pinned };
 }
 
 export const messageInput = z.object({

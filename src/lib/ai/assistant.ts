@@ -187,7 +187,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
 - 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
-- 문서 비용을 아끼세요: 견적서·공문·월 보고처럼 **양식이 있고 값만 바꾸면 되는** 요청은 list_templates(또는 첨부·참고 xlsx/docx) → read_template_layout → fill_template 로 바로 만드세요(거의 무료, 서식 그대로). 양식이 없거나 구조·디자인을 새로 해야 할 때만 run_file_task.
+- 문서 비용을 아끼세요: 우리 회사 양식(자료실 "양식")에 **값만 바꾸면 되는** 요청은 list_templates(또는 첨부·참고 xlsx/docx) → read_template_layout → fill_template 로 바로 만드세요(거의 무료, 서식 그대로). 양식이 없거나, **다른 회사 양식을 "참고해서" 만드는 요청**, 구조·디자인을 새로 해야 할 때는 run_file_task(참고 파일은 referenceFileIds).
 - 서식·디자인이 중요한 문서(견적서·보고서·제안서·안내문·PPT)나 "참고해서 만들어/더 세련되게/색 바꿔" 같은 요청, 엑셀·CSV 계산·차트 분석은 run_file_task 를 쓰세요(실제 파일·미리보기). 앞서 만든 파일을 고칠 때는 대화 기록의 [파일 작업: id=…] 를 baseJobId 로 mode=edit. run_file_task 를 부른 뒤에는 "만들기 시작했습니다(1~3분, 아래 카드에 미리보기가 나옵니다)"처럼 시작했다고만 말하고, "~했습니다·~뺐습니다·~맞췄습니다" 같은 완료형으로 결과를 설명하지 마세요(아직 만들지 않았음). 간단한 글 문서는 propose_create_document, 단순 데이터 표는 propose_xlsx_report.
 - 최신 정보·외부 자료가 필요하면 웹 검색(켜져 있을 때)을 쓰고 출처 링크를 답에 붙이세요.
 - 첨부한 이미지·문서를 보고 간단한 글 문서를 만들어 달라고 하면 propose_create_document 로, 표·숫자 위주면 propose_xlsx_report 로 제안하세요. 이미지에서 읽은 내용만 쓰고, 읽기 어려운 부분은 "확인 필요"로 표시하세요.
@@ -519,6 +519,16 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         if (co?.logo_file_id) { const lf = await loadLibraryFile(u, co.logo_file_id, 'ai'); logo = { data: await getObject(lf.storage_key), ext: String(lf.file_name).split('.').pop()! }; }
       }
       const src = await getObject(f.storage_key);
+      // 로컬 운영 시험: 다른 회사 양식(하이링크)에 다짐 값을 채우면 수신처·품목·소개 문구가 남는다 → 다른 회사 정보가 든 양식은 채우기 금지, 참고해 새로 만들기로
+      {
+        const { templateLayout } = await import('../docFill');
+        const { companyProfiles } = await import('../companyProfiles');
+        const profiles = await companyProfiles(tenantOf(u));
+        const target = profiles.find((p) => p.key === i.company) ?? profiles.find((p) => p.is_default) ?? null;
+        const plain = JSON.stringify(templateLayout(src, ext)).replace(/\s+/g, '');
+        const foreign = profiles.filter((p) => p.key !== target?.key && [p.name, p.biz_no].some((v) => v && v.replace(/\s+/g, '').length >= 3 && plain.includes(v.replace(/\s+/g, ''))));
+        if (foreign.length) return { error: `이 양식에는 다른 회사(${foreign.map((p) => p.name).join(', ')}) 정보가 들어 있어 칸 채우기를 하지 않습니다. run_file_task(mode=create, referenceFileIds=[이 파일 id])로 "참고해서 새로 만들기"를 하세요(가벼운 모델·저렴).` };
+      }
       let out: { data: Buffer; warnings: string[] };
       try { out = ext === 'xlsx' ? fillXlsx(src, i.edits ?? [], { fitOnePage: i.fitOnePage, logo }) : fillDocx(src, i.replacements ?? [], { logo }); }
       catch (e: any) { return { error: `양식을 고치지 못했습니다: ${e.message}` }; }
@@ -608,7 +618,24 @@ async function fileBlocks(u: SessionUser, ids: string[]) {
   return { confidential, blocks, note: `사용자가 이번에 자료를 첨부했습니다. 업무에 붙일 때 아래 id 를 attachFileIds 로 쓰세요.\n${notes.join('\n')}` };
 }
 
-export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provider: AiProvider = anthropicProvider(), signal?: AbortSignal) {
+/**
+ * V22 부록 2 ⑥: 문서 요청(견적서·공문·엑셀 등 + 만들기/채우기/고치기)은 대화도 싸게 — 가벼운 모델(Haiku)·짧은 지시·문서 도구만·최근 대화 6개.
+ * 목표 대화 건당 $0.02 이하. 분류는 규칙(추가 AI 호출 없음)
+ */
+const DOC_NOUN = /(견적서|거래\s*명세서|명세서|공문|안내문|보고서|제안서|계약서|문서|엑셀|워드|ppt|피피티|파워포인트|pdf|양식|발주서|청구서|영수증|xlsx|docx)/i;
+const DOC_VERB = /(만들|작성|채워|채우|바꿔|고쳐|다듬|수정|뽑아|써\s*줘|생성|디자인)/;
+export const isDocRequest = (text: string) => (DOC_NOUN.test(text) && DOC_VERB.test(text)) || /^「[^」]+」\s*v\d+을/.test(text.trim());
+const DOC_TOOL_NAMES = new Set(['run_file_task', 'list_templates', 'read_template_layout', 'fill_template', 'search_library', 'read_library_file', 'list_library_folders',
+  'propose_create_document', 'propose_xlsx_report', 'propose_organize_files', 'propose_attach_file', 'search_tasks', 'get_task']);
+const DOC_SYSTEM = `당신은 사내 서비스 "워크인"의 문서 담당 AI 입니다. 이번 요청은 문서·파일 만들기입니다.
+- 우리 회사 양식(자료실 "양식")에 값만 바꾸면 되면: list_templates → read_template_layout → fill_template (거의 무료, 서식 그대로).
+- 양식이 없거나, 다른 회사 양식을 "참고해서" 만들거나, 새 디자인이면: run_file_task (참고 파일은 referenceFileIds, "새로 디자인"만 design=true). 앞서 만든 파일을 고칠 때는 대화 기록의 [파일 작업: id=…] 를 baseJobId 로 mode=edit.
+- 참고 자료는 첨부·search_library 로 찾고, 숫자·이름은 사용자가 준 것만 씁니다.
+- 서식이 중요하지 않은 간단한 글 문서(회의록·메모)는 propose_create_document, 데이터 표는 propose_xlsx_report, 자료실 정리는 propose_organize_files(확인을 눌러야 반영). 첨부 id 는 대화 기록의 [첨부] 줄.
+- run_file_task 뒤에는 "만들기 시작했습니다(1~3분, 아래 카드)"라고만 짧게. fill_template 뒤에는 결과·경고를 한두 줄로.
+- 답은 한국어로 짧게.`;
+
+export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, providerArg?: AiProvider, signal?: AbortSignal) {
   denyDemo(u);
   if (!aiEnabled()) throw notFound();
   await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use'); // V13 메뉴 권한
@@ -636,6 +663,10 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     return { reply: blocked, proposals: [], tools: [], threadId, blocked: true };
   }
   const hist = i.threadId ? await T.threadHistory(i.threadId) : null;
+  const settings = await T.aiSettings(tenant);
+  // 문서 요청이면 가벼운 모델·문서 도구만(부록 2 ⑥) — 문서 작업이 꺼져 있으면 보통 경로
+  const docMode = !providerArg && settings.doc_engine && isDocRequest(userText);
+  const provider: AiProvider = providerArg ?? anthropicProvider(docMode ? { tier: 'fast' } : {});
 
   let context = '';
   if (i.taskId) {
@@ -643,9 +674,11 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     context = `\n지금 사용자가 보고 있는 업무: id=${i.taskId}, 제목="${(d.task as any).title}". "이 업무"는 이것을 뜻합니다.`;
   }
   if (i.context && !i.taskId) context += await pageContext(u, i.context);
-  const system = `${SYSTEM}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}`;
+  const system = `${docMode ? DOC_SYSTEM : SYSTEM}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}`;
   // 문맥: 보관된 대화면 최근 20개 + 요약, 예전 방식이면 화면이 보낸 것
-  const messages: AiMessage[] = hist ? [...hist.messages.map((m) => ({ role: m.role, content: m.text })), { role: 'user', content: userText }]
+  const recent = hist ? (docMode ? hist.messages.slice(-6) : hist.messages) : [];
+  while (docMode && recent[0]?.role === 'assistant') recent.shift(); // 대화는 사용자 말로 시작
+  const messages: AiMessage[] = hist ? [...recent.map((m) => ({ role: m.role, content: m.text })), { role: 'user', content: userText }]
     : (i.messages ?? [{ role: 'user' as const, text: userText }]).map((m) => ({ role: m.role, content: m.text }));
   let fbConf = false;
   if (i.fileIds?.length) {
@@ -656,7 +689,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   const c: Ctx = { u, proposals: [], confidential: false, threadId, docJobs: [] };
   // V22 웹 검색·페이지 읽기 (회사 설정으로 끄기)
-  const tools = (await T.aiSettings(tenant)).web_tools ? [...TOOLS, ...WEB_TOOLS] : TOOLS;
+  const tools = docMode ? TOOLS.filter((t) => DOC_TOOL_NAMES.has(t.name)) : settings.web_tools ? [...TOOLS, ...WEB_TOOLS] : TOOLS;
   if (i.fileIds?.length && fbConf) c.confidential = true;
   const sql = db();
   const steps: string[] = [];

@@ -48,7 +48,10 @@ describe('V22 문서 엔진', () => {
     job1 = r.docJobs[0].id;
     const chatReq = (await fakeState()).anthropic.slice(n0)[0];
     assert.ok(chatReq.body.tools.some((t) => t.name === 'run_file_task'));
-    assert.ok(chatReq.body.tools.some((t) => t.type === 'web_search_20260209') && chatReq.body.tools.some((t) => t.type === 'web_fetch_20260209'), '웹 도구 기본 켜짐');
+    // 부록 2 ⑥: 문서 요청은 가벼운 모델·문서 도구만·짧은 지시
+    assert.equal(chatReq.body.model, 'claude-haiku-5-5');
+    assert.ok(!chatReq.body.tools.some((t) => t.name === 'propose_create_task' || t.type === 'web_search_20260209'), '문서 도구만');
+    assert.match(JSON.stringify(chatReq.body.system), /문서 담당 AI/);
     const done = await waitJob(ctx.owner, job1);
     assert.equal(done.job.status, 'done', done.job.error);
     assert.equal(done.job.pages, 1); assert.match(done.job.summary, /1페이지/); assert.ok(done.job.hasPreview && done.job.hasFile);
@@ -192,23 +195,31 @@ describe('V22 문서 엔진', () => {
       await ctx.owner.ok('POST', `/api/library/${init.id}/complete`);
       return init.id;
     };
-    const tplBuf = readFileSync(new URL('../fixtures/quote-template.xlsx', import.meta.url));
+    // 다른 회사(하이링크) 양식은 채우기 금지 → 참고해 새로 만들기로 안내
+    const foreignBuf = readFileSync(new URL('../fixtures/quote-template.xlsx', import.meta.url));
+    const foreign = await up('하이링크 견적서 양식.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', foreignBuf, '양식', ['양식']);
+    const tplBuf = readFileSync(new URL('../fixtures/quote-template-own.xlsx', import.meta.url));
     const tpl = await up('견적서 양식.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', tplBuf, '양식', ['양식']);
     const logo = await up('다짐 로고.png', 'image/png', png, '회사 로고', ['로고']);
     await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'dagym', name: '시험상호 다짐', ceo: '시험대표', bizNo: '000-00-00000', address: '시험시 시험구', phone: '02-000-0000', brandColor: '#0F766E', isDefault: true, logoFileId: logo });
+    const nf = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicQueue: [toolUse('fx', 'fill_template', { sourceFileId: foreign, title: '다짐 견적서', company: 'dagym', edits: [{ cell: 'B3', value: '시험상호 다짐' }] }), say('참고해서 새로 만들겠습니다.')] });
+    const rf = await ctx.owner.ok('POST', '/api/ai/chat', { text: '하이링크 견적서 참고해서 다짐 견적서' });
+    assert.equal(rf.docJobs, undefined, '다른 회사 양식은 채우지 않음');
+    assert.match(JSON.stringify((await fakeState()).anthropic.slice(nf)[1].body.messages.at(-1)), /다른 회사\(시험상호 하이링크\)/);
     const n0 = (await fakeState()).anthropic.length;
     await ctl({ anthropicReset: true, anthropicQueue: [
       toolUse('f1', 'list_templates', { query: '견적서' }),
       toolUse('f2', 'read_template_layout', { fileId: tpl, company: 'dagym' }),
       toolUse('f3', 'fill_template', { sourceFileId: tpl, title: '다짐 견적서 10월', company: 'dagym', fitOnePage: true, replaceLogo: true,
-        edits: [{ cell: 'B3', value: '시험상호 다짐' }, { cell: 'B4', value: '000-00-00000' }, { cell: 'A8', value: '요가' }, { cell: 'B8', value: 3 }, { cell: 'C8', value: 30000 }, { cell: 'D10', value: 999 }] }),
+        edits: [{ cell: 'B2', value: '새 고객사' }, { cell: 'A8', value: '요가' }, { cell: 'B8', value: 3 }, { cell: 'C8', value: 30000 }, { cell: 'D10', value: 999 }] }),
       say('견적서를 만들었습니다.')] });
     const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '견적서 양식으로 다짐 10월 견적서, 요가 3회 3만원 추가' });
     const reqs = (await fakeState()).anthropic.slice(n0);
     assert.ok(!reqs.some((x) => x.body.container), '코드 실행(문서 엔진) 안 씀');
     assert.match(JSON.stringify(reqs[1].body.messages.at(-1)), /견적서 양식/, '양식 목록');
     const layoutMsg = JSON.stringify(reqs[2].body.messages.at(-1));
-    assert.ok(layoutMsg.includes('B3') && layoutMsg.includes('시험상호 하이링크') && layoutMsg.includes('=SUM(D7:D9)'), '요약 지도: 칸·값·수식');
+    assert.ok(layoutMsg.includes('B2') && layoutMsg.includes('지난달 고객사') && layoutMsg.includes('=SUM(D7:D9)'), '요약 지도: 칸·값·수식');
     assert.ok(layoutMsg.includes('시험상호 다짐') && layoutMsg.includes('000-00-00000'), '고른 회사 정보');
     const fillRes = JSON.stringify(reqs[3].body.messages.at(-1));
     assert.match(fillRes, /D10 는 수식 칸이라 그대로 둠/);
@@ -221,8 +232,8 @@ describe('V22 문서 엔진', () => {
     // 자료실에 저장 → 본문 추출로 내용 확인(다짐 정보 있음·하이링크 정보 없음)
     const s1 = await ctx.owner.ok('POST', `/api/ai/doc-jobs/${d.job.id}/save`, {});
     const [lf] = await sql`select text_content from library_files where id = ${s1.fileId}`;
-    assert.ok(lf.text_content.includes('시험상호 다짐') && lf.text_content.includes('요가'), lf.text_content);
-    assert.ok(!lf.text_content.includes('시험상호 하이링크') && !lf.text_content.includes('999-99-99999'), '다른 회사 정보 없음');
+    assert.ok(lf.text_content.includes('시험상호 다짐') && lf.text_content.includes('요가') && lf.text_content.includes('새 고객사'), lf.text_content);
+    assert.ok(!lf.text_content.includes('지난달 고객사'), '바꾼 칸');
     // [양식으로 저장] → 양식 폴더·태그
     const s2 = await ctx.owner.ok('POST', `/api/ai/doc-jobs/${d.job.id}/save`, { asTemplate: true });
     const [t2] = await sql`select folder, tags, title from library_files where id = ${s2.fileId}`;
@@ -231,16 +242,23 @@ describe('V22 문서 엔진', () => {
     await ctl({ anthropicReset: true, anthropicQueue: [toolUse('f4', 'read_template_layout', { fileId: '00000000-0000-0000-0000-00000000abcd' }), say('없습니다')] });
     await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '양식 보기' });
     // docx 문장 바꾸기
-    const ntBuf = readFileSync(new URL('../fixtures/notice-template.docx', import.meta.url));
+    const ntBuf = readFileSync(new URL('../fixtures/notice-template-own.docx', import.meta.url));
     const nt = await up('공문 양식.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', ntBuf, '양식', ['양식']);
-    await ctl({ anthropicReset: true, anthropicQueue: [toolUse('f5', 'fill_template', { sourceFileId: nt, title: '휴관 공문', replacements: [{ from: '시험상호 하이링크', to: '시험상호 다짐' }, { from: '휴관 안내', to: '10월 휴관 안내' }] }), say('공문을 만들었습니다.')] });
+    await ctl({ anthropicReset: true, anthropicQueue: [toolUse('f5', 'fill_template', { sourceFileId: nt, title: '휴관 공문', replacements: [{ from: '휴관 안내', to: '10월 휴관 안내' }] }), say('공문을 만들었습니다.')] });
     const r3 = await ctx.owner.ok('POST', '/api/ai/chat', { text: '공문 양식으로 휴관 공문' });
     const s3 = await ctx.owner.ok('POST', `/api/ai/doc-jobs/${r3.docJobs[0].id}/save`, {});
     const [lf3] = await sql`select text_content from library_files where id = ${s3.fileId}`;
-    assert.ok(lf3.text_content.includes('발신: 시험상호 다짐') && lf3.text_content.includes('10월 휴관 안내') && !lf3.text_content.includes('하이링크'));
+    assert.ok(lf3.text_content.includes('발신: 시험상호 다짐') && lf3.text_content.includes('10월 휴관 안내'));
   });
 
   test('회사 설정: 웹 도구 끄기·문서 작업 끄기', async () => {
+    // 문서 요청이 아니면 보통 모델·웹 도구(기본 켜짐)
+    const n0b = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicQueue: [say('안녕하세요')] });
+    await ctx.owner.ok('POST', '/api/ai/chat', { text: '이번 주 내 일정 알려줘' });
+    const plainReq = (await fakeState()).anthropic.slice(n0b)[0];
+    assert.equal(plainReq.body.model, 'claude-sonnet-5-5');
+    assert.ok(plainReq.body.tools.some((t) => t.type === 'web_search_20260209') && plainReq.body.tools.some((t) => t.type === 'web_fetch_20260209'), '웹 도구 기본 켜짐');
     await ctx.owner.ok('PUT', '/api/ai/settings', { webTools: false, docEngine: false });
     const n0 = (await fakeState()).anthropic.length;
     await ctl({ anthropicReset: true, anthropicQueue: [toolUse('t3', 'run_file_task', { mode: 'create', kind: 'docx', title: '안내문', instructions: '휴관 안내' }), say('대신 간단한 문서로 하겠습니다.')] });
