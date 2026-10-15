@@ -262,6 +262,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold tracking-tight">{title ?? '업무'}</h1>
         {sess.tenant?.inquiries && !fixed?.view && <PhoneInquiryButton className="ml-auto" />}
+        {!fixed?.view && <Link href="/tasks/import" className={cx('inline-flex items-center gap-1 rounded-input border border-line bg-white px-2.5 py-1.5 text-xs font-medium text-ink-2 shadow-card hover:border-brand-600 hover:text-brand-700', !sess.tenant?.inquiries && 'ml-auto')} data-testid="task-import-open"><FileSpreadsheet className="size-4" />엑셀로 가져오기</Link>}
         <div className="flex rounded-input border border-line bg-white p-0.5 text-sm shadow-card" role="tablist" aria-label="보기 방식">
           {MODES.map(([m, l, I]) => (
             <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}

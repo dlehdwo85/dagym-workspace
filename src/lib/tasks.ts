@@ -289,9 +289,10 @@ async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: s
   if (i.startDate && i.dueDate && i.startDate > i.dueDate) throw badRequest('시작일이 마감일보다 늦습니다');
 }
 
-export async function createTask(u: SessionUser, i: TaskInput) {
+/** opts.quiet: 배정 알림을 건너뜀(V30 가져오기 — 담당자별 요약 1건을 따로 보냄), opts.skipQuota: 호출한 쪽에서 한꺼번에 확인함 */
+export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: boolean; skipQuota?: boolean } = {}) {
   const sql = db();
-  await (await import('./plans')).assertTaskQuota(u, 1, sql); // V29 3장 업무 총량(요금제에 있을 때만)
+  if (!opts.skipQuota) await (await import('./plans')).assertTaskQuota(u, 1, sql); // V29 3장 업무 총량(요금제에 있을 때만)
   let orgUnitId = i.orgUnitId;
   let brandId = i.brandId;
   if (i.parentId) {
@@ -350,7 +351,7 @@ export async function createTask(u: SessionUser, i: TaskInput) {
       await tx`insert into task_dependencies (task_id, depends_on_id) values (${t.id}, ${d}) on conflict do nothing`;
     }
     await activity(tx, 'task', t.id, u.id, 'created', { title: i.title, assigneeId: i.assigneeId ?? null, dueDate: i.dueDate ?? null });
-    if (i.assigneeId) {
+    if (i.assigneeId && !opts.quiet) {
       await notify(tx, {
         userIds: [i.assigneeId], type: 'task_assigned', title: `새 업무 배정: ${i.title}`,
         body: `${u.name}님이 업무를 배정했습니다${i.dueDate ? ` · 마감 ${i.dueDate}` : ''}`,
