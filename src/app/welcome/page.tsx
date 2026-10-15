@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { UtmCapture } from '@/components/UtmCapture';
 import { ArrowRight, BellRing, CalendarDays, Check, Mic, Sparkles, Users } from 'lucide-react';
 
 export const metadata = { title: '워크인 — 업무·일정·알림을 한 곳에', description: '음성으로 등록하고 정확한 시간에 알림. 14일 무료 체험 후 월 2,900원부터.' };
@@ -18,6 +19,7 @@ const PLANS = [
 export default function Welcome() {
   return (
     <div className="min-h-screen bg-white text-ink">
+      <UtmCapture />
       <header className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-4">
         <img src="/icon.svg" alt="" className="size-8" /><span className="text-lg font-bold">워크인</span>
         <nav className="ml-auto flex items-center gap-2 text-sm">

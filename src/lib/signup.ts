@@ -24,6 +24,8 @@ export const signupInput = z.object({
   /** 봇 방지: 사람에게 안 보이는 칸(채워져 있으면 봇) · 화면을 연 시각(너무 빨리 제출하면 봇) */
   website: z.string().max(200).optional(),
   openedAt: z.number().optional(),
+  /** 유입 경로(첫 방문 UTM) — 마케팅 퍼널 집계용, 개인정보 아님 */
+  utm: z.object({ source: z.string().max(80), medium: z.string().max(80), campaign: z.string().max(120) }).partial().optional(),
 });
 
 const LIMIT = { ipPerHour: Number(process.env.SIGNUP_IP_PER_HOUR ?? 10), ipSignupsPerDay: Number(process.env.SIGNUP_IP_PER_DAY ?? 3), totalPerDay: Number(process.env.SIGNUP_TOTAL_PER_DAY ?? 300) };
@@ -66,7 +68,8 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
   const orgName = i.mode === 'personal' ? `${i.name}의 공간` : i.company!;
   const hash = await hashPassword(i.password);
   const userId = await sql.begin(async (tx) => {
-    await tx`insert into tenants (id, name, kind, created_ip) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${ip})`;
+    const utm = i.utm && Object.values(i.utm).some(Boolean) ? i.utm : null;
+    await tx`insert into tenants (id, name, kind, created_ip, signup_utm) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${ip}, ${utm ? tx.json(utm as never) : null})`;
     // 17차: 무료 요금제 대신 14일 무료 체험(비즈니스 기능 전부, 카드 없음)
     await tx`insert into tenant_subscriptions (tenant, plan_code, status, trial_ends_at, period_end)
       values (${tenant}, 'trial', 'trial', now() + interval '14 days', (now() + interval '14 days')::date)`;

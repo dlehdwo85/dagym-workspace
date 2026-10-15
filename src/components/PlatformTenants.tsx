@@ -60,19 +60,19 @@ export function PlatformTenants() {
 
 function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const d = useApi<any>(`/api/platform/tenants/${id}/detail`, [id]);
-  const [ov, setOv] = useState<{ users: string; storageGb: string; aiRequests: string } | null>(null);
+  const [ov, setOv] = useState<{ users: string; storageGb: string; aiRequests: string; tasksTotal: string } | null>(null);
   const t = d.data?.tenant;
   const run = async (fn: () => Promise<any>, ok: string) => { try { const r = await fn(); toast.ok(ok); d.reload(); return r; } catch (e: any) { toast.error(e.message); } };
   if (!d.data) return <Modal open onClose={onClose} title="회사 관리" wide><p className="text-sm text-ink-3">불러오는 중…</p></Modal>;
   const internal = id === 'default' || id === 'demo';
   const o = d.data.subscription.overrides ?? {};
-  const cur = ov ?? { users: o.users === undefined ? '' : String(o.users ?? ''), storageGb: o.storageGb === undefined ? '' : String(o.storageGb ?? ''), aiRequests: o.aiRequests === undefined ? '' : String(o.aiRequests ?? '') };
+  const cur = ov ?? { users: o.users === undefined ? '' : String(o.users ?? ''), storageGb: o.storageGb === undefined ? '' : String(o.storageGb ?? ''), aiRequests: o.aiRequests === undefined ? '' : String(o.aiRequests ?? ''), tasksTotal: o.tasksTotal === undefined ? '' : String(o.tasksTotal ?? '') };
   const n = (v: string) => (v.trim() === '' ? undefined : v.trim() === '무제한' ? null : Number(v));
   return (
     <Modal open onClose={onClose} title={`회사 관리 — ${t.name}`} wide>
       <div className="space-y-4 text-sm" data-testid="company-detail">
         <p className="text-xs text-ink-2">{t.id} · 대표 {t.owner_email ?? '-'} · 요금제 {d.data.subscription.planCode}({SUB[d.data.subscription.status] ?? d.data.subscription.status}) · {STATUS[t.status] ?? t.status}
-          {' '}· 사용 {d.data.usage.users}명 / 저장 {fmtBytes(d.data.usage.storageBytes)} / AI {d.data.usage.aiRequests}회</p>
+          {' '}· 사용 {d.data.usage.users}명 / 저장 {fmtBytes(d.data.usage.storageBytes)} / AI {d.data.usage.aiRequests}회{d.data.usage.tasks !== undefined && ` / 업무 ${d.data.usage.tasks.toLocaleString('ko-KR')}개`}</p>
         {!internal && (
           <div className="flex flex-wrap gap-1.5">
             {t.status === 'active'
@@ -106,11 +106,11 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
         <div className="rounded-input border border-line p-3">
           <p className="mb-2 text-xs font-medium text-ink-2">한도 개별 조정 (비우면 요금제 값, ‘무제한’ 입력 가능) — AI 크레딧 지급은 AI 한도를 올려 주세요</p>
           <div className="flex flex-wrap items-end gap-2">
-            {([['users', '인원(명)'], ['storageGb', '저장(GB)'], ['aiRequests', 'AI(회/월)']] as const).map(([k, l]) => (
+            {([['users', '인원(명)'], ['storageGb', '저장(GB)'], ['aiRequests', 'AI(회/월)'], ['tasksTotal', '업무 총량(개)']] as const).map(([k, l]) => (
               <label key={k} className="text-xs">{l}<input className={cx(inputCls, 'mt-0.5 h-8 w-28 py-1 text-xs')} value={cur[k]} placeholder={String(d.data.limits[k] ?? '무제한')} onChange={(e) => setOv({ ...cur, [k]: e.target.value })} data-testid={`ov-${k}`} /></label>
             ))}
-            <Button size="sm" onClick={() => run(() => api(`/api/platform/tenants/${id}/limits`, { method: 'PUT', body: { users: n(cur.users), storageGb: n(cur.storageGb), aiRequests: n(cur.aiRequests),
-              clear: (['users', 'storageGb', 'aiRequests'] as const).filter((k) => cur[k].trim() === '') } }), '한도를 바꿨습니다')} data-testid="ov-save">저장</Button>
+            <Button size="sm" onClick={() => run(() => api(`/api/platform/tenants/${id}/limits`, { method: 'PUT', body: { users: n(cur.users), storageGb: n(cur.storageGb), aiRequests: n(cur.aiRequests), tasksTotal: n(cur.tasksTotal),
+              clear: (['users', 'storageGb', 'aiRequests', 'tasksTotal'] as const).filter((k) => cur[k].trim() === '') } }), '한도를 바꿨습니다')} data-testid="ov-save">저장</Button>
           </div>
         </div>
         <div>

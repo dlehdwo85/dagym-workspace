@@ -47,3 +47,21 @@ export async function fireSignupConversion() {
   }
   await Promise.race([Promise.all(jobs), new Promise((r) => setTimeout(r, 1500))]);
 }
+
+/** 유입 경로(UTM): 첫 방문 값을 30일 기억 → 가입할 때 회사에 남긴다(마케팅 퍼널 출처별 집계, 개인정보 아님) */
+const UTM_KEY = 'wos_utm';
+export function captureUtm() {
+  if (typeof window === 'undefined') return;
+  const q = new URLSearchParams(location.search);
+  const v = { source: q.get('utm_source') ?? '', medium: q.get('utm_medium') ?? '', campaign: q.get('utm_campaign') ?? '' };
+  if (!v.source && !v.medium && !v.campaign) return;
+  try { if (!readUtm()) localStorage.setItem(UTM_KEY, JSON.stringify({ ...v, at: Date.now() })); } catch {}
+}
+export function readUtm(): { source?: string; medium?: string; campaign?: string } | undefined {
+  try {
+    const r = JSON.parse(localStorage.getItem(UTM_KEY) ?? 'null');
+    if (!r || Date.now() - (r.at ?? 0) > 30 * 86400_000) return undefined;
+    const clip = (s: unknown, n: number) => (typeof s === 'string' && s ? s.slice(0, n) : undefined);
+    return { source: clip(r.source, 80), medium: clip(r.medium, 80), campaign: clip(r.campaign, 120) };
+  } catch { return undefined; }
+}

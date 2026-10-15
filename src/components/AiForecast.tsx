@@ -56,15 +56,41 @@ export function AiForecast() {
           <h3 className="text-xs font-semibold text-ink-2">회사별 이번 달</h3>
           <ul className="mt-1 space-y-0.5 text-xs">{data.byTenant.map((t: any) => <li key={t.tenant} className="flex justify-between gap-2"><span className="truncate">{t.name}</span><span className="tabular-nums">{usd(t.usd)} <span className="text-ink-3">→ 예상 {usd(t.forecastUsd)}</span></span></li>)}</ul>
         </div>
-        <div>
-          <h3 className="text-xs font-semibold text-ink-2">요금 역산 — 검토용 요금표(V27 안, 실제 요금 아님)</h3>
-          <p className="mt-0.5 text-[11px] leading-snug text-ink-3">유료 요금제마다 &ldquo;1인 요금 × AI 몫 {Math.round(f.aiShare * 100)}%&rdquo;가 &ldquo;보통 사용자 1인 AI 원가({data.estimated ? '추정' : '실측'}) × 2&rdquo;보다 크면 여유, 작으면 부족입니다. 무료는 AI 한도로 관리합니다.</p>
-          <ul className="mt-1 space-y-0.5 text-xs" data-testid="ai-pricing">{data.pricing.map((p: any) => p.free
-            ? <li key={p.code} className="flex justify-between gap-2 text-ink-3"><span>{p.name}</span><span>{p.note}</span></li>
-            : <li key={p.code} className={cx('flex justify-between gap-2', p.deficit && 'font-semibold text-red-600')}><span>{p.name} <span className="font-normal text-ink-3">1인 {won(p.perUserKrw)}</span></span><span className="tabular-nums">AI 몫 {won(p.aiPartKrw)} / 필요 {won(p.needKrw)} {p.deficit ? '부족' : '여유'}</span></li>)}</ul>
+        <div className="lg:col-span-3">
+          <h3 className="text-xs font-semibold text-ink-2">AI 가격 결정 — 검토용 요금표(V27 안, 실제 요금 아님)</h3>
+          <AiPricing p={data.pricing} />
         </div>
       </div>
       <p className="mt-2 text-[11px] text-ink-3">확보 크레딧의 70%·90% 에 닿으면 운영자에게 알림. 코드 실행 시간 요금은 응답에 없어 빠져 있어 콘솔 청구와 다를 수 있습니다. 기존 기능 동작에는 영향 없음(계산·표시만).</p>
     </section>
+  );
+}
+
+const pct = (x: number | null) => (x === null ? '-' : `${Math.round(x * 100)}%`);
+/** 실측 1인 월 원가 기준 포함 AI·AI 크레딧의 원가율·마진 — 매출 ≥ 원가×2 면 적정 */
+function AiPricing({ p }: { p: any }) {
+  const Verdict = ({ ok }: { ok: boolean }) => <span className={cx('rounded px-1 text-[10px] font-semibold', ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700')}>{ok ? '적정' : '가격 조정 필요'}</span>;
+  return (
+    <div className="mt-1 space-y-1.5 text-xs" data-testid="ai-pricing">
+      <p className="text-[11px] leading-snug text-ink-3">
+        기준 1인 월 원가({p.basis.source === 'measured' ? `실측 ${p.basis.users}명·${p.basis.days}일` : '가정값'}): 가벼움 {won(p.basis.light)} · 보통 {won(p.basis.medium)} · 많음 {won(p.basis.heavy)}.
+        요금제는 &ldquo;1인 요금 × AI 몫 {Math.round(p.aiShare * 100)}%&rdquo;가 보통 사용자 원가(포함분 안)의 2배 이상이면 적정, 크레딧은 판매가가 쓸 수 있는 AI 원가의 2배 이상이면 적정입니다.
+      </p>
+      <ul className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+        {p.plans.map((r: any) => (
+          <li key={r.code} className="rounded-input border border-line px-2 py-1" data-testid={`ai-price-${r.code}`}>
+            <div className="flex items-center justify-between gap-2"><span className="font-semibold">{r.name} <span className="font-normal text-ink-3">1인 {won(r.perUserKrw)} · 포함 AI {won(r.includedKrw)}분</span></span><Verdict ok={r.ok} /></div>
+            <div className="tabular-nums text-ink-2">AI 몫 {won(r.aiPartKrw)} · 보통 원가 {won(r.costKrw)}(원가율 {pct(r.costRate)}) · 마진 {won(r.marginKrw)} <span className="text-ink-3">· 많음 {won(r.heavyCostKrw)} · 포함분 다 쓰면 요금의 {pct(r.capRate)}</span></div>
+          </li>
+        ))}
+        {p.credits.map((c: any) => (
+          <li key={c.code} className="rounded-input border border-line px-2 py-1" data-testid={`ai-price-${c.code}`}>
+            <div className="flex items-center justify-between gap-2"><span className="font-semibold">{c.name} <span className="font-normal text-ink-3">월 {won(c.priceKrw)} · AI {won(c.faceKrw)}분</span></span><Verdict ok={c.ok} /></div>
+            <div className="tabular-nums text-ink-2">원가율 {pct(c.costRate)} · 마진 {won(c.marginKrw)}{c.mediumUserMonths !== null && <span className="text-ink-3"> · 보통 사용자 약 {c.mediumUserMonths.toLocaleString('ko-KR')}명·월분</span>}</div>
+          </li>
+        ))}
+        <li className="self-center px-2 text-ink-3">무료: 회사당 AI 상한 월 {won(p.freeCompanyCapKrw)} (가격 판정 대상 아님 · 체험·내부 제외)</li>
+      </ul>
+    </div>
   );
 }

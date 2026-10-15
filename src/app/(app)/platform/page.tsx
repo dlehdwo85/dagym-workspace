@@ -1,4 +1,5 @@
 'use client';
+import { PlatformFunnel } from '@/components/PlatformFunnel';
 import { useState } from 'react';
 import { Building2, Check, Copy, KeyRound, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
@@ -47,6 +48,7 @@ export default function PlatformPage() {
       <PlatformPayments />
       <InquiryLink />
       {/* V12 3번: 문의 접수함 */}
+      <PlatformFunnel />
       <AiForecast />
       <section id="support" className="rounded-card border border-line bg-white shadow-card" data-testid="support-inbox">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">문의 접수함 {tickets.data && <span className="text-xs font-normal text-ink-3">미답변 {tickets.data.tickets.filter((t) => t.status === 'open').length}건</span>}</h2>

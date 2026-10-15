@@ -59,7 +59,8 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
 
 export const overrideInput = z.object({
   users: z.number().int().min(0).max(100000).nullable().optional(), storageGb: z.number().min(0).max(100000).nullable().optional(), aiRequests: z.number().int().min(0).max(10_000_000).nullable().optional(),
-  clear: z.array(z.enum(['users', 'storageGb', 'aiRequests'])).optional(),
+  tasksTotal: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  clear: z.array(z.enum(['users', 'storageGb', 'aiRequests', 'tasksTotal'])).optional(),
 });
 /** 인원·저장·AI 한도 개별 조정(요금제 대신). clear 에 넣은 항목은 요금제 값으로 되돌림. AI 크레딧 지급 = aiRequests 를 올려 주는 것 */
 export async function setLimitOverrides(u: SessionUser, tenant: string, i: z.infer<typeof overrideInput>, ip: string | null) {
@@ -68,7 +69,7 @@ export async function setLimitOverrides(u: SessionUser, tenant: string, i: z.inf
   const [s] = await sql<{ limit_overrides: Record<string, unknown> }[]>`select limit_overrides from tenant_subscriptions where tenant = ${tenant}`;
   if (!s) throw notFound('요금제가 없는 회사입니다 — 먼저 요금제를 지정하세요');
   const next: Record<string, unknown> = { ...(s.limit_overrides ?? {}) };
-  for (const k of ['users', 'storageGb', 'aiRequests'] as const) if (i[k] !== undefined) next[k] = i[k];
+  for (const k of ['users', 'storageGb', 'aiRequests', 'tasksTotal'] as const) if (i[k] !== undefined) next[k] = i[k];
   for (const k of i.clear ?? []) delete next[k];
   await sql`update tenant_subscriptions set limit_overrides = ${sql.json(next as never)}, updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
   await audit(sql, u.id, 'platform.limit_overrides', 'tenant', null, { tenant, ...next }, ip);

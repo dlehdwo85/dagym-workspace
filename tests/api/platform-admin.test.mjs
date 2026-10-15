@@ -7,7 +7,7 @@ let srv, sql, ctx, cust, custTenant, custOwnerId;
 const form = (o) => ({ password: 'signup-pass-1234', agree: { terms: true, privacy: true, ai: true, marketing: false }, ...o });
 
 before(async () => {
-  await resetDb(); srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1' }); sql = testDb(); ctx = await bootstrap();
+  await resetDb(); srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', FUNNEL_STATS_TOKEN: 'funnel-token-0123456789' }); sql = testDb(); ctx = await bootstrap();
   await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
   cust = new Client('cust');
   const r = await cust.ok('POST', '/api/auth/signup', form({ email: 'boss@cust.test', name: '고객대표', mode: 'team', company: '고객회사' }));
@@ -77,6 +77,62 @@ describe('V28-3 슈퍼 계정', () => {
     assert.equal((await p.ok('GET', '/api/auth/me')).user.id, custOwnerId);
     await cust.ok('PUT', '/api/account/support-consent', { on: false });
     assert.equal((await p.ok('GET', '/api/auth/me')).user.id, ctx.ownerId, '허용을 끄면 지원 모드 즉시 종료');
+  });
+
+  test('가입 퍼널: UTM 출처별 가입 → 팀 초대(2명+) → 실사용(3일 접속), 운영자 화면·읽기 전용 토큰 API(숫자만)', async () => {
+    const m = new Client('meta');
+    const r = await m.ok('POST', '/api/auth/signup', form({ email: 'boss@meta.test', name: '메타대표', mode: 'team', company: '메타유입', utm: { source: 'meta', medium: 'paid', campaign: 'launch' } }));
+    await m.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
+    const me = await m.ok('GET', '/api/auth/me');
+    const [t] = await sql`select signup_utm from tenants where id = ${me.user.tenant}`;
+    assert.equal(t.signup_utm.source, 'meta');
+    assert.ok((await sql`select count(*)::int n from user_active_days where user_id = ${me.user.id}`)[0].n >= 1, '접속한 날 기록');
+    let f = await ctx.owner.ok('GET', '/api/platform/funnel');
+    const src = (w) => Object.fromEntries(f.byWeek.flatMap((x) => x.bySource).map((s) => [s.source, s]));
+    assert.equal(src().meta.signups, 1); assert.equal(src().meta.invited, 0); assert.equal(src().meta.active, 0);
+    assert.equal(src().direct.signups, 1, 'UTM 없으면 direct');
+    // 동료 1명 합류 + 3일 접속 → 초대 완료·실사용
+    await sql`insert into users (email, name, role, password_hash, tenant) select 'mate@meta.test', '동료', 'staff', password_hash, tenant from users where id = ${me.user.id}`;
+    await sql`insert into user_active_days (user_id, tenant, day) select ${me.user.id}, ${me.user.tenant}, (now() at time zone 'Asia/Seoul')::date + k from generate_series(1, 2) k on conflict do nothing`;
+    f = await ctx.owner.ok('GET', '/api/platform/funnel');
+    assert.equal(src().meta.invited, 1); assert.equal(src().meta.active, 1);
+    assert.equal((await ctx.staffA.client.get('/api/platform/funnel')).status, 404);
+    // 토큰 API: 없거나 틀리면 401, 맞으면 같은 숫자 — 이메일·회사 이름 없음
+    assert.equal((await new Client().get('/api/public/funnel')).status, 401);
+    const bad = await fetch(`${BASE}/api/public/funnel`, { headers: { authorization: 'Bearer wrong-token-0123456789x' } });
+    assert.equal(bad.status, 401);
+    const ok = await fetch(`${BASE}/api/public/funnel?weeks=4`, { headers: { authorization: 'Bearer funnel-token-0123456789' } });
+    assert.equal(ok.status, 200);
+    const pub = await ok.json();
+    assert.equal(pub.total.signups, f.total.signups); assert.equal(pub.total.active, f.total.active);
+    const txt = JSON.stringify(pub); assert.ok(!txt.includes('@') && !txt.includes('메타유입') && !txt.includes(me.user.tenant), '개인정보·회사 식별값 없음');
+  });
+
+  test('V29 업무 총량 한도(완료·휴지통 포함): 다 차면 새 업무만 429 → 보관 파일(CSV) → 정리하면 다시 만들 수 있음', async () => {
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${custTenant}/limits`, { tasksTotal: 3 });
+    const a = await cust.ok('POST', '/api/tasks', { title: '총량 1' });
+    const b = await cust.ok('POST', '/api/tasks', { title: '총량 2' });
+    await cust.ok('DELETE', `/api/tasks/${b.id}`);
+    await cust.ok('POST', '/api/tasks', { title: '총량 3' });
+    const full = await cust.post('/api/tasks', { title: '총량 4' });
+    assert.equal(full.status, 429, '휴지통 업무도 셈');
+    let u = await cust.ok('GET', '/api/usage');
+    assert.equal(u.usage.tasks, 3); assert.equal(u.limits.tasksTotal, 3);
+    await cust.ok('GET', `/api/tasks/${a.id}`);
+    await sql`update tasks set status = 'done', completed_at = now() - interval '100 days' where id = ${a.id}`;
+    const day = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+    assert.equal((await cust.ok('GET', `/api/usage/tasks-cleanup?before=${day}`)).count, 1);
+    const csv = await cust.get(`/api/usage/tasks-cleanup?before=${day}&format=csv`);
+    assert.equal(csv.status, 200); assert.match(csv.body, /총량 1/);
+    assert.equal((await ctx.staffA.client.post('/api/usage/tasks-cleanup', { before: day })).status >= 400, true);
+    const r = await cust.ok('POST', '/api/usage/tasks-cleanup', { before: day });
+    assert.equal(r.purged, 1); assert.equal(r.total, 2);
+    assert.equal((await cust.get(`/api/tasks/${a.id}`)).status, 404, '정리한 업무는 화면에서 빠짐');
+    assert.ok(!(await cust.ok('GET', '/api/tasks/trash')).tasks.some((x) => x.id === a.id), '휴지통에도 없음');
+    await cust.ok('POST', '/api/tasks', { title: '총량 다시' });
+    assert.ok((await sql`select count(*)::int n from audit_logs where action = 'tasks.cleanup'`)[0].n >= 1);
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${custTenant}/limits`, { clear: ['tasksTotal'] });
+    u = await cust.ok('GET', '/api/usage'); assert.equal(u.limits.tasksTotal, null);
   });
 
   test('삭제 예약(이름 확인·30일 유예) → 취소 → 예약일 지나면 영구 삭제, 기본 회사는 불가', async () => {

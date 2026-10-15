@@ -1751,7 +1751,7 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
   test('우리 회사 = 내부(무제한), 사용량 화면은 대표·관리자만, /platform 은 플랫폼 운영자만(그 외 404)', async () => {
     const u = await ctx.owner.ok('GET', '/api/usage');
     assert.equal(u.subscription.planCode, 'internal');
-    assert.deepEqual(u.limits, { users: null, storageGb: null, aiRequests: null });
+    assert.deepEqual(u.limits, { users: null, storageGb: null, aiRequests: null, tasksTotal: null });
     assert.ok(u.usage.storageBytes > 0 && u.usage.users >= 4 && u.usage.aiRequests >= 1, '첨부·자료실·사람·AI 요청 셈');
     assert.ok(u.topFiles.length > 0 && u.topFiles[0].size >= u.topFiles.at(-1).size, '큰 파일 순');
     assert.ok(u.plans.some((p) => p.code === 'team' && p.per_user_krw === 3900 && p.min_users === 3 && p.annual_per_user_krw === 3300) && u.plans.some((p) => p.code === 'personal' && p.monthly_krw === 2900 && p.limits.users === 1)
@@ -1771,7 +1771,7 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
     await ctx.owner.ok('PUT', '/api/platform/plans/standard', { name: '스탠다드', monthlyKrw: 29000, limits: { users: 20, storageGb: 50, aiRequests: 500 } });
     await setPlan('free', { storage20: 2, ai100: 1 });
     const u = await ctx.owner.ok('GET', '/api/usage');
-    assert.deepEqual(u.limits, { users: 20, storageGb: 41, aiRequests: 110 }, '무료(20명·1GB·AI 10) + 저장 20GB 팩 2개 + AI 100회 팩');
+    assert.deepEqual(u.limits, { users: 20, storageGb: 41, aiRequests: 110, tasksTotal: null }, '무료(20명·1GB·AI 10) + 저장 20GB 팩 2개 + AI 100회 팩');
     // 베이직: 1인 1GB·AI 20회 × 활성 사용자 수
     await setPlan('basic');
     const b = await ctx.owner.ok('GET', '/api/usage');
