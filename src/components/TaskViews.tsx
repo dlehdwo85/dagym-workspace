@@ -1009,10 +1009,16 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         data-fresh={fresh ? '1' : undefined}
         className={cx('group relative flex min-h-[44px] cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', picked ? 'bg-brand-50' : fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
         {handle}
-        {selc && !selc.on && <input type="checkbox" checked={false} readOnly onClick={(e) => { e.stopPropagation(); selc.enter(t.id); }} aria-label={`${t.title} 선택 시작`} data-testid="row-hover-select"
-          className="absolute left-0.5 top-1/2 hidden size-3.5 -translate-y-1/2 accent-brand-600 opacity-0 group-hover:opacity-100 focus:opacity-100 md:block" />}
-        {selc?.on ? <input type="checkbox" className="size-5 shrink-0 accent-brand-600" checked={picked} readOnly onClick={(e) => { e.stopPropagation(); selc.toggle(t.id, e.shiftKey); }} aria-label={`${t.title} 선택`} data-testid="row-select" />
-          : null /* V14 43번: 왼쪽 완료 동그라미 없음 — 상태 칩 메뉴의 [✓ 완료]·오른쪽 밀기로 완료 */}
+        {/* V14 44번: 선택 체크박스 홈 — PC 는 줄 왼쪽에 고정 폭(24px) 자리를 늘 비워 두고(제목이 안 움직이게) 그 안 세로 가운데에 16px 체크박스,
+            마우스 올림·선택 모드에서만 보임. 휴대폰은 길게 눌러 선택 모드일 때만 자리. (V14 43번: 왼쪽 완료 동그라미 없음) */}
+        {selc && (
+          <span className={cx('-mr-1 w-6 shrink-0 items-center justify-center', selc.on ? 'flex' : 'hidden md:flex')} data-testid="row-select-slot">
+            {selc.on
+              ? <input type="checkbox" className="size-5 shrink-0 accent-brand-600 md:size-4" checked={picked} readOnly onClick={(e) => { e.stopPropagation(); selc.toggle(t.id, e.shiftKey); }} aria-label={`${t.title} 선택`} data-testid="row-select" />
+              : <input type="checkbox" checked={false} readOnly onClick={(e) => { e.stopPropagation(); selc.enter(t.id); }} aria-label={`${t.title} 선택 시작`} data-testid="row-hover-select"
+                  className="size-4 accent-brand-600 opacity-0 group-hover:opacity-100 focus:opacity-100" />}
+          </span>
+        )}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
           <span className="flex min-w-0 items-center gap-1.5 sm:max-w-[55%] sm:shrink-0">
             <TypeIcon t={t} />
