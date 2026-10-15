@@ -33,6 +33,7 @@ export default function Settings() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <h1 className="text-lg font-bold">설정</h1>
+      <MyCard />
       {(user.role === 'owner' || user.role === 'admin') && <p className="text-sm text-ink-2">관리: <a href="/admin/holidays" className="font-medium text-accent-600 underline">공휴일</a> · <a href="/admin/users" className="font-medium text-accent-600 underline">사용자 관리</a> · <a href="/revenue" className="font-medium text-accent-600 underline">매출</a></p>}
       <section className="rounded-lg border bg-white p-4 text-sm">
         <div className="font-semibold">{user.name}</div>
@@ -301,5 +302,31 @@ function LinkedAccounts() {
         })}
       </ul>
     </div>
+  );
+}
+
+/** V32 6 내 명함·회신 주소: 메일·문자 서명에 들어가는 직급·휴대폰, 내가 보낸 메일의 답장이 오는 업무 이메일 */
+function MyCard() {
+  const c = useApi<{ title: string; phone: string; workEmail: string; loginEmail: string; replyToEditable: boolean }>('/api/account/card');
+  const [f, setF] = useState<{ title: string; phone: string; workEmail: string } | null>(null);
+  useEffect(() => { if (c.data) setF({ title: c.data.title, phone: c.data.phone, workEmail: c.data.workEmail }); }, [c.data]);
+  if (!c.data || !f) return null;
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    try { await api('/api/account/card', { method: 'PUT', body: c.data!.replyToEditable ? f : { title: f!.title, phone: f!.phone } }); toast.ok('저장했습니다'); c.reload(); } catch (er: any) { toast.error(er.message); }
+  }
+  return (
+    <section className="rounded-lg border bg-white p-4 text-sm" data-testid="my-card">
+      <h2 className="font-semibold">내 명함·회신 주소</h2>
+      <p className="mt-0.5 text-xs text-ink-3">고객에게 보내는 메일·문자 서명에 들어가고, 내가 보낸 메일의 답장은 업무 이메일로 옵니다.</p>
+      <form onSubmit={save} className="mt-3 grid gap-2 sm:grid-cols-3">
+        <Field label="직급"><input className={inputCls} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} maxLength={50} /></Field>
+        <Field label="휴대폰"><input className={inputCls} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} maxLength={40} inputMode="tel" /></Field>
+        <Field label="업무 이메일(회신 주소)" hint={c.data.replyToEditable ? undefined : '회사 설정으로 관리자만 바꿀 수 있습니다'}>
+          <input className={inputCls} type="email" value={f.workEmail} onChange={(e) => setF({ ...f, workEmail: e.target.value })} placeholder={c.data.loginEmail} disabled={!c.data.replyToEditable} data-testid="my-work-email" />
+        </Field>
+        <div className="flex justify-end sm:col-span-3"><Button type="submit" size="sm" data-testid="my-card-save">저장</Button></div>
+      </form>
+    </section>
   );
 }

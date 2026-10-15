@@ -50,6 +50,15 @@ type AccountRow = { tenant: string; provider: string; host: string; port: number
   password_enc: string; last_ok_at: string | null; last_error: string | null; updated_at: string };
 
 const mailSettingsMenu = 'mail_settings' as const;
+/** V32 6: 회사 기본 발송 방식·보내는 주소·회사 메일 계정은 회사 관리자(대표·관리자)만 — 메뉴 권한이 있어도 직원은 읽기 전용 */
+export const isMailAdmin = (u: SessionUser) => ['owner', 'admin'].includes(u.role);
+function requireMailAdmin(u: SessionUser) { if (!isMailAdmin(u)) throw forbidden('회사 기본 메일 설정은 대표·관리자만 바꿀 수 있습니다'); }
+/** 직원이 회신 주소(업무 이메일)를 바꿀 수 있는지 */
+export async function replyToEditable(u: SessionUser, sql: Sql = db()) {
+  if (isMailAdmin(u)) return true;
+  const [t] = await sql<{ allow_staff_reply_to: boolean }[]>`select allow_staff_reply_to from tenants where id = ${tenantOf(u)}`;
+  return t?.allow_staff_reply_to ?? true;
+}
 
 async function loadAccount(tenant: string, sql: Sql = db()) {
   const [a] = await sql<AccountRow[]>`select * from mail_accounts where tenant = ${tenant}`;
@@ -71,13 +80,15 @@ async function pickChannel(tenant: string, sql: Sql): Promise<'email:smtp' | 'em
   if (mode === 'workin') return workinMailEnabled() ? 'email:workin' : acc ? 'email:smtp' : null;
   return acc ? 'email:smtp' : workinMailEnabled() ? 'email:workin' : null;
 }
-export const mailModeInput = z.object({ mode: z.enum(['auto', 'workin', 'smtp']) });
+export const mailModeInput = z.object({ mode: z.enum(['auto', 'workin', 'smtp']).optional(), allowStaffReplyTo: z.boolean().optional() });
 export async function setMailMode(u: SessionUser, i: z.infer<typeof mailModeInput>) {
   await requireMenu(u, mailSettingsMenu, 'edit');
+  requireMailAdmin(u);
   const sql = db();
-  await sql`update tenants set mail_mode = ${i.mode} where id = ${tenantOf(u)}`;
-  await audit(sql, u.id, 'mail.mode', null, null, { mode: i.mode }, null);
-  return { ok: true, mode: i.mode, channel: await pickChannel(tenantOf(u), sql) };
+  if (i.mode) await sql`update tenants set mail_mode = ${i.mode} where id = ${tenantOf(u)}`;
+  if (i.allowStaffReplyTo !== undefined) await sql`update tenants set allow_staff_reply_to = ${i.allowStaffReplyTo} where id = ${tenantOf(u)}`;
+  await audit(sql, u.id, 'mail.mode', null, null, { mode: i.mode ?? null, allowStaffReplyTo: i.allowStaffReplyTo ?? null }, null);
+  return { ok: true, mode: await mailMode(tenantOf(u), sql), channel: await pickChannel(tenantOf(u), sql) };
 }
 type ResendMail = { from: string; to: string[]; cc?: string[]; bcc?: string[]; replyTo?: string; subject: string; text: string; html?: string; messageId: string;
   attachments: { filename: string; content: Buffer; contentType?: string }[] };
@@ -104,7 +115,8 @@ export async function getMailAccount(u: SessionUser) {
   await requireMenu(u, mailSettingsMenu, 'view');
   const sql = db(), t = tenantOf(u);
   return { account: publicAccount(await loadAccount(t, sql)), presets: Object.entries(MAIL_PRESETS).map(([k, v]) => ({ key: k, ...v })),
-    mode: await mailMode(t, sql), channel: await pickChannel(t, sql), workin: { enabled: workinMailEnabled(), from: workinMailEnabled() ? workinFrom() : null } };
+    mode: await mailMode(t, sql), channel: await pickChannel(t, sql), workin: { enabled: workinMailEnabled(), from: workinMailEnabled() ? workinFrom() : null },
+    canEdit: isMailAdmin(u), allowStaffReplyTo: (await sql<{ a: boolean }[]>`select allow_staff_reply_to a from tenants where id = ${t}`)[0]?.a ?? true };
 }
 
 type Conn = { host: string; port: number; secure: boolean; username: string; password: string; provider: string };
@@ -136,6 +148,7 @@ export function classifySmtpError(e: any): { kind: SendErrKind; message: string 
 /** [연결 시험]: 시험 메일 1통(기본 자기에게)이 나가야 저장한다 */
 export async function saveMailAccount(u: SessionUser, i: z.infer<typeof accountInput>, ip: string | null) {
   await requireMenu(u, mailSettingsMenu, 'edit');
+  requireMailAdmin(u);
   const sql = db(); const t = tenantOf(u);
   const prev = await loadAccount(t, sql);
   const preset = MAIL_PRESETS[i.provider];
@@ -167,6 +180,7 @@ export async function saveMailAccount(u: SessionUser, i: z.infer<typeof accountI
 }
 export async function deleteMailAccount(u: SessionUser, ip: string | null) {
   await requireMenu(u, mailSettingsMenu, 'edit');
+  requireMailAdmin(u);
   const sql = db();
   await sql`delete from mail_accounts where tenant = ${tenantOf(u)}`;
   await audit(sql, u.id, 'mail_account.delete', null, null, {}, ip);
@@ -287,6 +301,7 @@ export async function mailContext(u: SessionUser, taskId: string) {
     canSend: await canSend(u, sql), account: account ? { fromEmail: account.from_email, fromName: account.from_name, lastOkAt: account.last_ok_at } : null,
     channel: await pickChannel(t, sql), workinFrom: workinMailEnabled() ? workinFrom() : null,
     defaults: { fromName: defaultFromName(me, (profiles.find((p) => p.key === guess) ?? profiles[0])?.name ?? ''), replyTo: me.workEmail || account?.from_email || u.email },
+    replyToEditable: await replyToEditable(u, sql),
     kinds: Object.entries(MAIL_KINDS).map(([k, v]) => ({ key: k, ...v })), companies: sigs, company: guess,
     to: contact?.email ? [contact.email] : [], contact, me: { name: me.name, title: me.title, phone: me.phone, email: me.email, workEmail: me.workEmail },
     attachments: atts.map((a: any) => ({ id: a.id, name: a.file_name, size: Number(a.size_bytes), mime: a.mime_type, title: a.doc_title })),
@@ -362,7 +377,8 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   const domain = fromEmail.split('@')[1] ?? 'workin';
   // B1 보내는 사람별: 이름 "이름 직급 (회사)", 회신 = 직원 업무 이메일(없으면 회사 계정/로그인 이메일) — 둘 다 시안에서 바꿀 수 있음
   const fromName = (i.fromName || defaultFromName(me, profile.name)).slice(0, 80);
-  const replyTo = i.replyTo || me.workEmail || account?.from_email || u.email;
+  // V32 6: 회사가 막았으면 직원 회신 주소는 늘 본인 업무 이메일
+  const replyTo = ((await replyToEditable(u, sql)) && i.replyTo) || me.workEmail || account?.from_email || u.email;
   const id = randomUUID();
   await sql`insert into outbox (id, tenant, channel, status, task_id, company_key, created_by, from_email, from_name, reply_to, to_addrs, cc_addrs, bcc_addrs, subject, body_text, body_html, files, as_link, share_id, message_id)
     values (${id}, ${t}, ${channel}, 'queued', ${i.taskId}, ${i.company}, ${u.id}, ${fromEmail}, ${fromName}, ${replyTo}, ${i.to}, ${i.cc ?? []}, ${i.bcc ?? []}, ${i.subject}, ${text}, ${html},
@@ -611,4 +627,26 @@ export async function logSms(u: SessionUser, i: z.infer<typeof smsLogInput>, ip:
   await audit(sql, u.id, 'sms.handoff', 'task', i.taskId, { outboxId: id, to: i.to.length }, ip);
   if (shareId) await crmSteps(sql, i.taskId, i.body, [{ name: 'link' }]);
   return { id };
+}
+
+// ---------------- V32 6 내 명함·회신 주소(프로필) ----------------
+export const myCardInput = z.object({
+  title: z.string().trim().max(50).optional(), phone: z.string().trim().max(40).optional(),
+  workEmail: z.string().trim().email('업무 이메일 형식이 아닙니다').max(200).optional().or(z.literal('')),
+});
+export async function myCard(u: SessionUser) {
+  const sql = db();
+  const [me] = await sql<{ title: string | null; phone: string | null; work_email: string | null; email: string }[]>`select title, phone, work_email, email from users where id = ${u.id}`;
+  return { title: me?.title ?? '', phone: me?.phone ?? '', workEmail: me?.work_email ?? '', loginEmail: me?.email ?? '', replyToEditable: await replyToEditable(u, sql) };
+}
+export async function saveMyCard(u: SessionUser, i: z.infer<typeof myCardInput>, ip: string | null) {
+  const sql = db();
+  if (i.workEmail !== undefined && !(await replyToEditable(u, sql))) {
+    const [me] = await sql<{ work_email: string | null }[]>`select work_email from users where id = ${u.id}`;
+    if ((me?.work_email ?? '') !== i.workEmail) throw forbidden('회사 설정으로 회신 주소(업무 이메일)는 관리자만 바꿀 수 있습니다');
+  }
+  await sql`update users set title = coalesce(${i.title ?? null}, title), phone = coalesce(${i.phone ?? null}, phone),
+    work_email = case when ${i.workEmail === undefined} then work_email else ${i.workEmail || null} end, updated_at = now() where id = ${u.id}`;
+  await audit(sql, u.id, 'user.card', 'user', u.id, { title: i.title !== undefined, phone: i.phone !== undefined, workEmail: i.workEmail !== undefined }, ip);
+  return myCard(u);
 }

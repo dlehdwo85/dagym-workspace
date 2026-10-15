@@ -10,7 +10,7 @@ import type { AssistDraft } from './TaskAssist';
 
 type Ctx = {
   canSend: boolean; account: { fromEmail: string; fromName: string | null } | null;
-  channel: 'email:smtp' | 'email:workin' | null; workinFrom: string | null; defaults: { fromName: string; replyTo: string };
+  channel: 'email:smtp' | 'email:workin' | null; workinFrom: string | null; defaults: { fromName: string; replyTo: string }; replyToEditable?: boolean;
   kinds: { key: string; label: string; subject: string; body: string }[];
   companies: { key: string; name: string; isDefault: boolean; html: string; smsLine: string }[]; company: string | null;
   to: string[]; contact: { name: string | null; email: string | null; phone: string | null; organization: string | null } | null;
@@ -216,7 +216,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           {f.more && (
             <div className="grid gap-2 rounded-input bg-slate-50 p-2 sm:grid-cols-2" data-testid="mail-more-fields">
               <Field label="보내는 이름"><input className={inputCls} value={f.fromName} onChange={(e) => set({ fromName: e.target.value })} maxLength={80} data-testid="mail-from-name" /></Field>
-              <Field label="회신 주소(Reply-To) — 답장이 오는 곳"><input className={inputCls} type="email" value={f.replyTo} onChange={(e) => set({ replyTo: e.target.value })} data-testid="mail-reply-to" /></Field>
+              <Field label="회신 주소(Reply-To) — 답장이 오는 곳"><input className={inputCls} type="email" value={f.replyTo} onChange={(e) => set({ replyTo: e.target.value })} disabled={d.replyToEditable === false} title={d.replyToEditable === false ? '회사 설정으로 바꿀 수 없습니다(관리자에게 요청)' : undefined} data-testid="mail-reply-to" /></Field>
               <Field label="숨은 참조"><input className={inputCls} value={f.bcc} onChange={(e) => set({ bcc: e.target.value })} data-testid="mail-bcc" /></Field>
             </div>
           )}

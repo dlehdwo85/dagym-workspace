@@ -11,22 +11,22 @@ type Sig = { key: string; name: string; isDefault: boolean; sigIntro: string | n
 
 /** V21 메일 계정 연결(SMTP)·메일 명함 — 회사(조직)마다 자기 값. 비밀번호는 화면에 다시 보이지 않는다 */
 export default function MailSettingsPage() {
-  const acc = useApi<{ account: Account | null; presets: Preset[]; mode: 'auto' | 'workin' | 'smtp'; channel: string | null; workin: { enabled: boolean; from: string | null } }>('/api/org/mail-account');
+  const acc = useApi<{ account: Account | null; presets: Preset[]; mode: 'auto' | 'workin' | 'smtp'; channel: string | null; workin: { enabled: boolean; from: string | null }; canEdit: boolean; allowStaffReplyTo: boolean }>('/api/org/mail-account');
   const sig = useApi<{ me: { name: string; title: string | null; phone: string | null; email: string }; companies: Sig[] }>('/api/org/mail-signature');
   if (acc.error) return <ErrorBox error={acc.error} retry={acc.reload} />;
   return (
     <div className="mx-auto max-w-4xl space-y-4">
       <PageHeader title="메일 계정·명함" icon={Mail} sub="업무에서 고객에게 보내는 메일은 설정 없이 워크인 발송으로, 또는 여기 연결한 회사 메일 계정(보낸메일함에도 남음)으로 나갑니다. AI 는 초안만 만들고 실제 발송은 사람이 [보내기]를 눌러야 합니다." />
       {acc.data && <SendMode data={acc.data} reload={acc.reload} />}
-      {acc.loading && !acc.data ? <Skeleton rows={3} /> : acc.data && <AccountCard data={acc.data} reload={acc.reload} />}
+      {acc.loading && !acc.data ? <Skeleton rows={3} /> : acc.data && (acc.data.canEdit || acc.data.account) && <AccountCard data={acc.data} reload={acc.reload} />}
       {sig.error ? <ErrorBox error={sig.error} retry={sig.reload} /> : sig.loading && !sig.data ? <Skeleton rows={3} /> : sig.data && <Signatures data={sig.data} reload={sig.reload} />}
     </div>
   );
 }
 
-function AccountCard({ data, reload }: { data: { account: Account | null; presets: Preset[] }; reload: () => void }) {
+function AccountCard({ data, reload }: { data: { account: Account | null; presets: Preset[]; canEdit: boolean }; reload: () => void }) {
   const a = data.account;
-  const [edit, setEdit] = useState(!a);
+  const [edit, setEdit] = useState(!a && data.canEdit);
   const [f, setF] = useState({ provider: a?.provider ?? 'naver', host: a?.host ?? '', port: String(a?.port ?? 465), secure: a?.secure ?? true, username: a?.username ?? '', fromEmail: a?.fromEmail ?? '', fromName: a?.fromName ?? '', password: '' });
   const [busy, setBusy] = useState(false);
   const preset = data.presets.find((p) => p.key === f.provider);
@@ -56,8 +56,8 @@ function AccountCard({ data, reload }: { data: { account: Account | null; preset
           <span><b>{a.fromName ? `${a.fromName} <${a.fromEmail}>` : a.fromEmail}</b> · {a.providerLabel}</span>
           {a.lastOkAt && <span className="text-ink-3">마지막 성공 {fmtDateTime(a.lastOkAt)}</span>}
           {a.lastError && <span className="text-red-600" data-testid="mail-last-error">최근 오류: {a.lastError}</span>}
-          <span className="ml-auto flex gap-1.5"><Button size="sm" variant="secondary" onClick={() => setEdit(true)}>바꾸기·다시 시험</Button>
-            <Button size="sm" variant="ghost" className="text-red-600" onClick={remove} aria-label="연결 끊기"><Trash2 /></Button></span>
+          {data.canEdit && <span className="ml-auto flex gap-1.5"><Button size="sm" variant="secondary" onClick={() => setEdit(true)}>바꾸기·다시 시험</Button>
+            <Button size="sm" variant="ghost" className="text-red-600" onClick={remove} aria-label="연결 끊기"><Trash2 /></Button></span>}
         </div>
       )}
       {edit && (
@@ -128,9 +128,12 @@ function Signatures({ data, reload }: { data: { me: { name: string; title: strin
 }
 
 /** V29 발송 방식: 워크인 발송(설정 없이) · 회사 메일 계정 · 자동 */
-function SendMode({ data, reload }: { data: { mode: 'auto' | 'workin' | 'smtp'; channel: string | null; account: Account | null; workin: { enabled: boolean; from: string | null } }; reload: () => void }) {
+function SendMode({ data, reload }: { data: { mode: 'auto' | 'workin' | 'smtp'; channel: string | null; account: Account | null; workin: { enabled: boolean; from: string | null }; canEdit: boolean; allowStaffReplyTo: boolean }; reload: () => void }) {
   async function pick(mode: string) {
     try { await api('/api/org/mail-mode', { method: 'PUT', body: { mode } }); reload(); toast.ok('발송 방식을 바꿨습니다'); } catch (e: any) { toast.error(e.message); }
+  }
+  async function allow(v: boolean) {
+    try { await api('/api/org/mail-mode', { method: 'PUT', body: { allowStaffReplyTo: v } }); reload(); toast.ok(v ? '직원이 회신 주소를 바꿀 수 있습니다' : '직원 회신 주소는 관리자만 바꿉니다'); } catch (e: any) { toast.error(e.message); }
   }
   const opts: [string, string, string][] = [
     ['auto', '자동', '회사 메일 계정이 있으면 그것으로, 없으면 워크인 발송'],
@@ -142,11 +145,19 @@ function SendMode({ data, reload }: { data: { mode: 'auto' | 'workin' | 'smtp'; 
       <h2 className="text-sm font-semibold">보내는 방식 <span className="ml-1 text-xs font-normal text-ink-3">지금: {data.channel === 'email:workin' ? '워크인 발송' : data.channel === 'email:smtp' ? '회사 메일 계정' : '보낼 수 없음(계정 연결 필요)'}</span></h2>
       <div className="mt-2 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="보내는 방식">
         {opts.map(([k, l, d]) => (
-          <button key={k} type="button" role="radio" aria-checked={data.mode === k} onClick={() => pick(k)} disabled={k === 'workin' && !data.workin.enabled} data-testid={`mail-mode-${k}`}
+          <button key={k} type="button" role="radio" aria-checked={data.mode === k} onClick={() => pick(k)} disabled={!data.canEdit || (k === 'workin' && !data.workin.enabled)} data-testid={`mail-mode-${k}`}
             className={cx('rounded-input border p-2.5 text-left text-sm disabled:opacity-50', data.mode === k ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
             <b className="font-semibold">{l}</b><span className="mt-0.5 block text-xs text-ink-2">{d}</span></button>
         ))}
       </div>
+      {/* V32 6: 회사 기본 메일은 대표·관리자만 — 직원은 읽기 전용 */}
+      {!data.canEdit && <p className="mt-2 rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="mail-readonly">회사 기본 발송 방식·주소·메일 계정은 대표·관리자만 바꿀 수 있습니다. 내가 보내는 메일의 답장은 내 업무 이메일로 옵니다(설정 &gt; 내 명함·회신 주소).</p>}
+      {data.canEdit && (
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={data.allowStaffReplyTo} onChange={(e) => allow(e.target.checked)} data-testid="allow-staff-reply" />
+          직원이 자기 회신 주소(업무 이메일)를 바꿀 수 있음 <span className="text-xs text-ink-3">끄면 직원 메일의 답장은 늘 가입 때 정해진 업무 이메일로</span>
+        </label>
+      )}
     </section>
   );
 }
