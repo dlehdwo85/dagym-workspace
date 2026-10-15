@@ -10,7 +10,7 @@ export const GET = handler(async ({ req, user }) => {
     from notifications n left join users u on u.id = n.actor_id
     left join tasks t on n.entity_type = 'task' and t.id = n.entity_id and t.deleted_at is null
     where n.user_id = ${user.id} and n.type <> 'chat' ${unreadOnly ? sql`and n.read_at is null` : sql``}
-    order by n.created_at desc limit 100`;
+    order by (n.read_at is null) desc, n.created_at desc limit 150`;
   const [c] = await sql`select count(*)::int c from notifications where user_id = ${user.id} and read_at is null and type <> 'chat'`; // 메신저는 메시지 화면 배지로
   return { items, unread: c.c };
 });

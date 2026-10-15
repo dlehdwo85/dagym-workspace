@@ -118,6 +118,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
     const t = setInterval(poll, 60_000);
     const onFocus = () => { poll(); };
     window.addEventListener('focus', onFocus);
+    // V32 0: 읽음 즉시 배지 반영(알림 화면이 보내는 값) + 다른 화면에서 바뀌면 다시 셈
+    const onUnread = (e: Event) => { const d = (e as CustomEvent<{ delta?: number; value?: number }>).detail ?? {}; setUnread((u) => Math.max(0, d.value ?? u + (d.delta ?? 0))); };
+    let rt: ReturnType<typeof setTimeout> | undefined;
+    const onRefresh = () => { clearTimeout(rt); rt = setTimeout(poll, 400); };
+    window.addEventListener('wos-unread', onUnread);
+    window.addEventListener('wos-refresh', onRefresh);
     const sync = async () => {
       setOnline(navigator.onLine);
       if (navigator.onLine) {
@@ -132,11 +138,18 @@ export function AppShell({ session, children }: { session: Sess; children: React
     try { bc = new BroadcastChannel('wos'); bc.onmessage = () => window.dispatchEvent(new Event('wos-refresh')); } catch {}
     initNative(router).catch(() => {});
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-    return () => { alive = false; clearInterval(t); window.removeEventListener('focus', onFocus); window.removeEventListener('online', sync); window.removeEventListener('offline', sync); bc?.close(); };
+    return () => { alive = false; clearInterval(t); clearTimeout(rt); window.removeEventListener('focus', onFocus); window.removeEventListener('wos-unread', onUnread); window.removeEventListener('wos-refresh', onRefresh); window.removeEventListener('online', sync); window.removeEventListener('offline', sync); bc?.close(); };
   }, [router]);
   const reloadFavs = favs.reload;
   useEffect(() => { const h = () => reloadFavs(); window.addEventListener('wos-favorites', h); return () => window.removeEventListener('wos-favorites', h); }, [reloadFavs]);
   useEffect(() => { setCreateMenu(false); setUserMenu(false); setMore(false); }, [path]);
+  // V32 0: 업무·일정 등 화면을 열면 그 화면으로 가는 안 읽은 알림을 자동 읽음(앱 푸시로 들어온 경우 포함)
+  const hasUnread = unread > 0;
+  useEffect(() => {
+    if (!hasUnread || path === '/notifications' || path === '/') return;
+    api<{ changed: number; unread: number }>('/api/notifications/read', { body: { link: path } })
+      .then((r) => { if (r.changed) setUnread(r.unread); }).catch(() => {});
+  }, [path, hasUnread]);
 
   const active = (href: string) => {
     const [p, q] = href.split('?');

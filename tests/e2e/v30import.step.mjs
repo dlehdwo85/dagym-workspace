@@ -58,3 +58,25 @@ export async function sheetPhone({ owner, BASE, SHOTS }) {
   await owner.evaluate(async (id) => { await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); }, t.id);
   await owner.setViewportSize({ width: 1366, height: 900 });
 }
+
+/** V32 0: 알림 화면 — 안 읽은 것만 기본, 누르면 바로 읽음(배지 감소), 업무 화면을 열면 그 알림 자동 읽음, 전체 탭에는 남음 */
+export async function notifRead({ owner, BASE, SHOTS, ctx }) {
+  await owner.setViewportSize({ width: 1366, height: 900 });
+  await ctx.owner.ok('POST', '/api/notifications/read', { all: true });
+  const mk = async (title) => (await ctx.staffA.client.ok('POST', '/api/tasks', { title, assigneeId: ctx.ownerId, approvalRequired: false })).id;
+  const a = await mk('알림읽음 시험 A'), b = await mk('알림읽음 시험 B');
+  await owner.goto(`${BASE}/notifications`);
+  const list = owner.getByTestId('notifications');
+  await list.getByText('알림읽음 시험 A', { exact: false }).waitFor();
+  await owner.getByTestId('notif-unread').getByText('안 읽음 2').waitFor();
+  await list.getByText('알림읽음 시험 A', { exact: false }).click();
+  await owner.waitForURL(new RegExp(`/tasks/${a}`));
+  // 업무 B 를 직접 열면 자동 읽음
+  await owner.goto(`${BASE}/tasks/${b}`);
+  await owner.waitForFunction(async () => (await (await fetch('/api/notifications?unread=1')).json()).unread === 0, null, { timeout: 10000 });
+  await owner.goto(`${BASE}/notifications`);
+  await owner.getByText('새 알림이 없습니다').waitFor();
+  await owner.getByTestId('notif-all').click();
+  await owner.getByTestId('notifications').getByText('알림읽음 시험 B', { exact: false }).waitFor();
+  await owner.screenshot({ path: `${SHOTS}/v32-notifications.png` });
+}
