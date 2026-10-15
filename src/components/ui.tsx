@@ -2,6 +2,7 @@
 import clsx from 'clsx';
 import { useSheetBack } from './backClose';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertCircle, CalendarDays, CheckCircle2, Flag, Inbox, Info, Loader2, Lock, RotateCw, UserRound, X, type LucideIcon } from 'lucide-react';
 import { STATUS_LABEL, PRIORITY_LABEL, type TaskStatus, type Priority } from '@/lib/types';
 
@@ -59,11 +60,18 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [open, onClose]);
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-[1px] sm:items-center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+  // 로컬 실기기 83: 열린 동안 업무 상세의 고정 댓글 입력줄을 숨김(시트 버튼 줄을 가리지 않게)
+  useEffect(() => {
+    if (!open) return;
+    document.body.classList.add('modal-open');
+    return () => { setTimeout(() => { if (!document.querySelector('[data-modal-root]')) document.body.classList.remove('modal-open'); }, 0); };
+  }, [open]);
+  if (!open || typeof document === 'undefined') return null;
+  // body 로 띄움: 업무 상세 패널(transform) 안에서 fixed·z-index 가 갇혀 스크롤이 안 되고 댓글 입력줄 아래로 깔리던 문제
+  return createPortal(
+    <div data-modal-root className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-[1px] sm:items-center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal="true" aria-label={title}
-        className={clsx('max-h-[calc(100dvh-var(--sat)-12px)] sm:max-h-[92vh] w-full animate-fade-up overflow-y-auto rounded-t-2xl bg-white shadow-pop sm:rounded-card', wide ? 'sm:max-w-3xl' : 'sm:max-w-lg')}>
+        className={clsx('max-h-[calc(100dvh-var(--sat)-12px)] sm:max-h-[92vh] w-full animate-fade-up overflow-y-auto overscroll-contain rounded-t-2xl bg-white shadow-pop sm:rounded-card', wide ? 'sm:max-w-3xl' : 'sm:max-w-lg')}>
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden />
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-white px-5 py-3">
           <h2 className="text-base font-semibold">{title}</h2>
@@ -71,7 +79,8 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
         </div>
         <div className="p-5 pb-[calc(var(--sab)+20px)] sm:pb-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

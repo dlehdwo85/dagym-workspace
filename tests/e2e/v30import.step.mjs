@@ -34,3 +34,27 @@ export async function v30import({ owner, BASE, SHOTS }) {
   await owner.screenshot({ path: `${SHOTS}/v30-import-phone.png`, fullPage: true });
   await owner.setViewportSize({ width: 1366, height: 900 });
 }
+
+/** 로컬 실기기 83: 휴대폰 업무 상세 → 문자·메일 시안 시트가 스크롤되고, 댓글 입력줄이 버튼 줄을 가리지 않음 */
+export async function sheetPhone({ owner, BASE, SHOTS }) {
+  await owner.setViewportSize({ width: 390, height: 700 });
+  const t = await owner.evaluate(async () => (await (await fetch('/api/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '시트 스크롤 시험', approvalRequired: false }) })).json()));
+  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.getByTestId('comment-form').waitFor();
+  await owner.getByTestId('mail-compose-open').click();
+  await owner.getByTestId('mail-compose').waitFor();
+  assert.equal(await owner.getByTestId('comment-form').isVisible(), false, '시트가 열린 동안 댓글 입력줄 숨김');
+  for (const ch of ['email', 'sms']) {
+    if (ch === 'sms') await owner.getByTestId('mail-channel-sms').click();
+    const bar = owner.getByTestId('compose-actions');
+    const box = await bar.boundingBox(); const dlg = await owner.getByRole('dialog').boundingBox();
+    assert.ok(box && box.y + box.height <= Math.min(700, dlg.y + dlg.height) + 4 && box.y > 300, `${ch}: 버튼 줄이 화면 아래에 보임 (${box?.y}+${box?.height}, 시트 끝 ${dlg.y + dlg.height})`);
+    const scrolled = await owner.getByRole('dialog').evaluate((d) => { d.scrollTop = 10000; return d.scrollTop > 0 || d.scrollHeight <= d.clientHeight; });
+    assert.ok(scrolled, `${ch}: 시트 스크롤`);
+  }
+  await owner.screenshot({ path: `${SHOTS}/v31-sheet-phone.png` });
+  await owner.keyboard.press('Escape');
+  await owner.getByTestId('comment-form').waitFor();
+  await owner.evaluate(async (id) => { await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); }, t.id);
+  await owner.setViewportSize({ width: 1366, height: 900 });
+}

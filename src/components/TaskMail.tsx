@@ -268,7 +268,8 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
             <div className="flex gap-2"><Button size="sm" onClick={() => smsDone(true)} data-testid="sms-sent">보냈어요</Button><Button size="sm" variant="secondary" onClick={() => smsDone(false)}>안 보냄</Button></div>
           </div>
         )}
-        <div className="flex items-center justify-end gap-2">
+        {/* 로컬 실기기 83: 버튼 줄은 시트 아래에 붙어 있게(긴 시안을 내려도 보임) */}
+        <div className="sticky bottom-0 z-10 -mx-5 -mb-[calc(var(--sab)+20px)] flex items-center justify-end gap-2 border-t border-line bg-white px-5 pb-[calc(var(--sab)+12px)] pt-3 sm:-mb-5 sm:pb-4" data-testid="compose-actions">
           <Button variant="secondary" onClick={onClose}>닫기</Button>
           {channel === 'email'
             ? <Button onClick={send} disabled={busy || !d.channel || !d.canSend} data-testid="mail-send"><Send />{busy ? '보관함에 넣는 중…' : '보내기'}</Button>

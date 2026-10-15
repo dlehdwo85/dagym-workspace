@@ -23,7 +23,7 @@ import { v1447 } from './v1447.step.mjs';
 import { v1448 } from './v1448.step.mjs';
 import { panel1440, listNarrow } from './panel1440.step.mjs';
 import { v283 } from './v283.step.mjs';
-import { v30import } from './v30import.step.mjs';
+import { v30import, sheetPhone } from './v30import.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -2063,6 +2063,7 @@ await step('설정·Google 연동·관리자 화면', async () => {
 
 
 await step('V30 ① 엑셀·CSV 업무 가져오기(PC 표·담당자 고르기·만들기·되돌리기, 휴대폰 카드)', () => v30import({ owner, BASE, SHOTS }));
+await step('실기기 83: 휴대폰 문자·메일 시안 시트 스크롤·버튼 줄이 댓글 입력줄에 안 가림', () => sheetPhone({ owner, BASE, SHOTS }));
 await step('점검 ①: 태블릿·좁은 창(768·1024·1100) 업무 목록 이름이 눌리지 않음', () => listNarrow({ owner, BASE, SHOTS }));
 await browser.close();
 srv.proc.kill();

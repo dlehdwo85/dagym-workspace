@@ -574,6 +574,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 알림: 업무마다 배정 알림 대신 담당자마다 "새 업무 N건 배정" 1건. 업무 총량 한도는 한꺼번에 확인. [예시 양식 내려받기] = 회사 사람 이름으로 채운 CSV(데모 회사에서 그대로 올리면 바로 맞춰짐).
 - 마이그레이션 068: tasks.import_id(되돌리기 묶음) 추가만.
 
+## 실기기 83 시안 시트 + 앱 플러그인 연결 (2026-10-16)
+- 버그: 휴대폰 업무 상세 → 문자·메일 시안 시트가 스크롤되지 않고 [보내기] 줄이 댓글 입력줄에 가림 → 원인: 시트(Modal)가 업무 상세 패널(transform) 안에 그려져 fixed·z-index 가 갇힘. Modal 을 body 로 띄움(모든 시트 공통), 시트가 열린 동안 댓글 입력줄 숨김, 시안 버튼 줄은 시트 아래 고정(safe-area 여백), overscroll-contain.
+- iOS 내려받기: 앱에서 /api 내려받기·download 링크 → 쿠키 포함으로 받아 임시 저장 → 공유 시트(파일에 저장·카톡 등). Filesystem·Share 플러그인 없는 예전 앱은 그대로. 안드로이드는 기존 내려받기 처리기.
+- 앱 소셜 로그인: Browser 플러그인 있는 앱의 [로그인]은 시스템 브라우저(Google 도 다시 보임) → 콜백 → 1회용 표(2분) → /auth/app-return 이 workos://open/auth/app 으로 앱 복귀 → 앱 WebView 가 표 + 앱이 보관한 검증값(PKCE 방식, sha256)으로 세션. 다른 앱이 workos:// 를 가로채도 검증값 없이는 못 씀. 처음 가입·오류도 앱으로 돌아와 회사 만들기·로그인 화면. 계정 연결(설정)은 지금처럼 앱 안에서. 앱 링크(https) 경로 추가는 필요 없음(workos 스킴 사용).
+- 마이그레이션 069 oauth_handoff(추가만).
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

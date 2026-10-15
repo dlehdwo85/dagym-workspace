@@ -131,3 +131,6 @@ select { min-height: 2.5rem; line-height: 1.5; padding-top: 0.25rem; padding-bot
 .cal-phone .fc .fc-event.task-item, .cal-phone .fc .fc-event.has-task { border-left-width: 2px !important; }
 .cal-phone .fc .fc-timegrid-slot-label-cushion { padding: 0 1px; }
 .cal-phone .fc .fc-timegrid-axis-cushion { font-size: 10px; padding: 0 1px; }
+
+/* 로컬 실기기 83: 시트(모달)가 열린 동안 업무 상세의 고정 댓글 입력줄 숨김 */
+body.modal-open [data-testid="comment-form"] { display: none; }

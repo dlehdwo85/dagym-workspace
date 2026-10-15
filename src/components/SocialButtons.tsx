@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { api } from './client';
 import { readUtm } from './conversion';
+import { hasBrowser, openOAuthInBrowser } from './native';
 
 const LOOK: Record<string, { label: string; cls: string; mark: React.ReactNode }> = {
   kakao: { label: '카카오', cls: 'bg-[#FEE500] text-[#191600] hover:brightness-95', mark: <svg viewBox="0 0 24 24" className="size-[18px]" aria-hidden><path fill="currentColor" d="M12 3C6.5 3 2 6.6 2 11c0 2.8 1.9 5.3 4.7 6.7l-1 3.6c-.1.3.3.6.6.4l4.2-2.8c.5.1 1 .1 1.5.1 5.5 0 10-3.6 10-8S17.5 3 12 3z" /></svg> },
@@ -15,7 +16,8 @@ export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady
   const [ps, setPs] = useState<string[]>([]);
   useEffect(() => {
     // 점검 2026-10-16: 앱(WebView)에서는 Google 로그인이 정책상 막힘(disallowed_useragent) → 앱에서는 카카오·네이버만
-    const inApp = Capacitor.isNativePlatform();
+    // 시스템 브라우저 플러그인이 있는 앱의 로그인은 브라우저에서 하므로 Google 도 됨
+    const inApp = Capacitor.isNativePlatform() && !(hasBrowser() && mode === 'login');
     api('/api/auth/oauth/providers').then((r) => { const p = (r.providers as string[]).filter((x) => !(inApp && x === 'google')); setPs(p); onReady?.(p.length); }).catch(() => onReady?.(0));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!ps.length) return null;
@@ -29,7 +31,7 @@ export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady
   return (
     <div className="space-y-2" data-testid="social-buttons">
       {ps.map((p) => (
-        <a key={p} href={href(p)} className={`flex h-11 w-full items-center justify-center gap-2 rounded-input text-[15px] font-semibold ${LOOK[p].cls}`} data-testid={`social-${p}`}>
+        <a key={p} href={href(p)} onClick={(e) => { if (hasBrowser() && mode === 'login') { e.preventDefault(); openOAuthInBrowser(href(p)).catch(() => { location.href = href(p); }); } }} className={`flex h-11 w-full items-center justify-center gap-2 rounded-input text-[15px] font-semibold ${LOOK[p].cls}`} data-testid={`social-${p}`}>
           {LOOK[p].mark}{LOOK[p].label}로 {verb}
         </a>
       ))}

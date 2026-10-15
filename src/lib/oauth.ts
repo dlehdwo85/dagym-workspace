@@ -48,17 +48,19 @@ const redirectUri = (p: Provider) => `${appUrl()}/api/auth/oauth/${p}/callback`;
 
 // ---------------- 시작: 상태 쿠키(서명) + 제공자 화면으로 ----------------
 export const STATE_COOKIE = 'wos_oauth';
-type State = { n: string; p: Provider; mode: 'login' | 'link'; invite?: string; client: string; utm?: Record<string, string>; at: number };
+type State = { n: string; p: Provider; mode: 'login' | 'link'; invite?: string; client: string; utm?: Record<string, string>; at: number; ac?: string };
 const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
 export const startInput = z.object({
   mode: z.enum(['login', 'link']).default('login'), invite: z.string().max(200).optional(), client: z.enum(['web', 'android', 'ios']).default('web'),
   utm_source: z.string().max(80).optional(), utm_medium: z.string().max(80).optional(), utm_campaign: z.string().max(120).optional(),
+  /** 앱: 시스템 브라우저에서 로그인 → 앱으로 복귀. 앱이 만든 검증값의 sha256(hex) */
+  ac: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 export function startOAuth(p: Provider, i: z.infer<typeof startInput>) {
   const c = conf(p);
   if (!c) throw notFound('이 로그인 방법은 아직 준비 중입니다');
   const utm = Object.fromEntries(Object.entries({ source: i.utm_source, medium: i.utm_medium, campaign: i.utm_campaign }).filter(([, v]) => v)) as Record<string, string>;
-  const st: State = { n: newToken(16), p, mode: i.mode, invite: i.invite, client: i.client, utm: Object.keys(utm).length ? utm : undefined, at: Date.now() };
+  const st: State = { n: newToken(16), p, mode: i.mode, invite: i.invite, client: i.client, utm: Object.keys(utm).length ? utm : undefined, at: Date.now(), ac: i.ac };
   const body = enc(st);
   const cookie = `${body}.${hmac('oauth:' + body)}`;
   const q = new URLSearchParams({ response_type: 'code', client_id: c.id, redirect_uri: redirectUri(p), state: st.n });
@@ -72,6 +74,27 @@ function readState(cookie: string | undefined, state: string | null, p: Provider
   const st = JSON.parse(Buffer.from(body, 'base64url').toString()) as State;
   if (st.p !== p || !state || st.n !== state || Date.now() - st.at > 10 * 60_000) throw badRequest('로그인 요청이 만료되었습니다. 다시 시도해 주세요.');
   return st;
+}
+
+/** 콜백 라우트용: 앱(시스템 브라우저)에서 시작한 로그인인지 — 서명만 확인(나머지 검사는 oauthCallback) */
+export function stateAppChallenge(cookie: string | undefined): string | null {
+  const [body, sig] = (cookie ?? '').split('.');
+  if (!body || !sig || hmac('oauth:' + body) !== sig) return null;
+  try { return (JSON.parse(Buffer.from(body, 'base64url').toString()) as State).ac ?? null; } catch { return null; }
+}
+/** 앱 복귀 1회용 표(2분) */
+export async function createHandoff(userId: string, mfa: boolean, client: string, challenge: string) {
+  const token = newToken(); const sql = db();
+  await sql`delete from oauth_handoff where expires_at < now()`;
+  await sql`insert into oauth_handoff (token_hash, user_id, mfa, client, challenge, expires_at) values (${sha256(token)}, ${userId}, ${mfa}, ${client}, ${challenge}, now() + interval '2 minutes')`;
+  return token;
+}
+export const exchangeInput = z.object({ t: z.string().min(10).max(200), v: z.string().min(32).max(200) });
+/** 앱 WebView 에서: 표 + 앱이 보관한 검증값 → 세션(한 번만) */
+export async function exchangeHandoff(i: z.infer<typeof exchangeInput>) {
+  const [r] = await db()<{ user_id: string; mfa: boolean; client: string; challenge: string }[]>`delete from oauth_handoff where token_hash = ${sha256(i.t)} and expires_at > now() returning user_id, mfa, client, challenge`;
+  if (!r || r.challenge !== sha256(i.v)) throw badRequest('로그인 시간이 지났습니다. 다시 시도해 주세요.');
+  return { userId: r.user_id, mfa: r.mfa, client: r.client };
 }
 
 // ---------------- 콜백: 코드 → 토큰 → 프로필 ----------------

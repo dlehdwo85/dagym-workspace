@@ -16,6 +16,15 @@ interface LocalPlugin {
   createChannel(c: { id: string; name: string; description?: string; importance?: number; visibility?: number; vibration?: boolean }): Promise<void>;
 }
 const LocalNotifications = registerPlugin<LocalPlugin>('LocalNotifications');
+// 52ec734(로컬): filesystem·share·browser 플러그인 — 이 플러그인이 없는 예전 앱은 지금처럼 동작
+interface BrowserPlugin { open(o: { url: string; presentationStyle?: string }): Promise<void>; close(): Promise<void> }
+interface FsPlugin { writeFile(o: { path: string; data: string; directory: string }): Promise<{ uri: string }> }
+interface SharePlugin { share(o: { title?: string; files?: string[]; dialogTitle?: string }): Promise<unknown> }
+const Browser = registerPlugin<BrowserPlugin>('Browser');
+const Filesystem = registerPlugin<FsPlugin>('Filesystem');
+const Share = registerPlugin<SharePlugin>('Share');
+export const hasBrowser = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('Browser');
+const canShareFiles = () => Capacitor.getPlatform() === 'ios' && Capacitor.isPluginAvailable('Filesystem') && Capacitor.isPluginAvailable('Share');
 /** 예전 앱(플러그인 없음)에서는 서버 알림을 그대로 받는다 */
 const hasLocal = () => Capacitor.isPluginAvailable('LocalNotifications');
 import { api } from './client';
@@ -32,7 +41,9 @@ export async function initNative(router: Router) {
     const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
     if (!a || e.defaultPrevented) return;
     let u: URL; try { u = new URL(a.href, location.href); } catch { return; }
-    if (u.origin !== location.origin) return;
+    if (u.protocol === 'blob:' || u.origin !== location.origin) return;
+    // iOS: WKWebView 는 파일을 내려받지 않고 보여 주기만 함 → 받아서 공유 시트(파일에 저장·카톡 등)로
+    if (canShareFiles() && (u.pathname.startsWith('/api/') || a.hasAttribute('download'))) { e.preventDefault(); saveViaShare(u.pathname + u.search); return; }
     if (a.target === '_blank' || u.pathname.startsWith('/api/') || a.hasAttribute('download')) { e.preventDefault(); location.assign(u.pathname + u.search); }
   }); // 버블 단계: 화면의 자체 처리(미리보기 등 preventDefault)가 먼저
   const go = (link?: string) => {
@@ -160,3 +171,30 @@ export async function subscribeWebPush(): Promise<string> {
   try { localStorage.setItem('wos_push_endpoint', j.endpoint); } catch {}
   return j.endpoint;
 }
+
+/** iOS 내려받기: 쿠키 포함으로 받아 임시 저장 → 공유 시트("파일에 저장" 등) */
+async function saveViaShare(path: string) {
+  const { toast } = await import('./ui');
+  try {
+    const r = await fetch(path, { credentials: 'include' });
+    if (!r.ok) throw new Error((await r.json().catch(() => null))?.error?.message ?? '내려받지 못했습니다');
+    const cd = r.headers.get('content-disposition') ?? '';
+    const name = decodeURIComponent(/filename\*=UTF-8''([^;]+)/i.exec(cd)?.[1] ?? /filename="?([^";]+)/i.exec(cd)?.[1] ?? path.split('?')[0].split('/').pop() ?? 'file').replace(/[\\/:*?"<>|]/g, '_');
+    const blob = await r.blob();
+    const data = await new Promise<string>((ok, fail) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1] ?? ''); fr.onerror = () => fail(fr.error); fr.readAsDataURL(blob); });
+    const { uri } = await Filesystem.writeFile({ path: name, data, directory: 'CACHE' });
+    await Share.share({ title: name, files: [uri], dialogTitle: '파일 저장·보내기' });
+  } catch (e: any) { if (!/cancel/i.test(String(e?.message))) toast.error(e?.message || '내려받지 못했습니다'); }
+}
+
+/** 앱 소셜 로그인: 검증값(앱 보관) 만들고 시스템 브라우저로 시작 → 끝나면 workos://open/auth/app 으로 돌아옴 */
+export async function openOAuthInBrowser(startPath: string) {
+  const v = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const ac = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v))), (b) => b.toString(16).padStart(2, '0')).join('');
+  try { localStorage.setItem('wos_oauth_v', v); } catch {}
+  await Browser.open({ url: `${location.origin}${startPath}${startPath.includes('?') ? '&' : '?'}ac=${ac}`, presentationStyle: 'popover' });
+}
+export function takeOAuthVerifier() {
+  try { const v = localStorage.getItem('wos_oauth_v'); localStorage.removeItem('wos_oauth_v'); return v; } catch { return null; }
+}
+export function closeSystemBrowser() { if (hasBrowser()) Browser.close().catch(() => {}); }

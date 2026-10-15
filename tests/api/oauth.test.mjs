@@ -77,6 +77,30 @@ describe('V29 소셜 가입·로그인', () => {
     assert.equal((await c2.req('DELETE', '/api/account/identities?provider=google')).status, 400);
   });
 
+  test('앱(시스템 브라우저) 로그인: 쿠키 대신 1회용 표로 앱 복귀 → 앱 검증값이 맞아야 세션, 한 번만 · 처음 가입·오류도 앱으로', async () => {
+    const { createHash } = await import('node:crypto');
+    const v = 'a'.repeat(40) + 'verifier-for-app-test', ac = createHash('sha256').update(v).digest('hex');
+    const b = new Client('browser');
+    const to = await social(b, 'google', { sub: 'g-100', email: 'boss@social.test' }, `client=android&ac=${ac}`);
+    assert.equal(to.pathname, '/auth/app-return');
+    const t = to.searchParams.get('t'); assert.ok(t);
+    assert.equal((await b.req('GET', '/api/auth/me')).status, 401, '브라우저에는 세션 없음');
+    const app = new Client('app');
+    assert.equal((await app.post('/api/auth/oauth/app-exchange', { t, v: 'b'.repeat(40) })).status, 400, '검증값 다르면 거절(표도 소멸)');
+    const to2 = await social(new Client(), 'google', { sub: 'g-100', email: 'boss@social.test' }, `client=android&ac=${ac}`);
+    const t2 = to2.searchParams.get('t');
+    assert.equal((await app.post('/api/auth/oauth/app-exchange', { t: t2, v })).status, 200);
+    assert.equal((await app.ok('GET', '/api/auth/me')).user.email, 'boss@social.test');
+    assert.equal((await new Client().post('/api/auth/oauth/app-exchange', { t: t2, v })).status, 400, '한 번만');
+    const [s] = await sql`select client from sessions where user_id = (select id from users where email = 'boss@social.test') order by created_at desc limit 1`;
+    assert.equal(s.client, 'android');
+    // 처음 가입·오류 → 앱으로(회사 만들기 표 / 메시지)
+    const p = await social(new Client(), 'kakao', { sub: '9001', email: 'appnew@social.test', name: '앱가입' }, `client=ios&ac=${ac}`);
+    assert.equal(p.pathname, '/auth/app-return'); assert.ok(p.searchParams.get('pending'));
+    const e = await social(new Client(), 'kakao', { sub: '9002', email: null }, `client=ios&ac=${ac}`);
+    assert.match(e.searchParams.get('error'), /이메일/);
+  });
+
   test('같은 이메일의 기존 계정은 자동으로 묶지 않음 · 인증 안 된 이메일·이메일 미동의는 가입 불가 · 상태 위조는 거절', async () => {
     let to = await social(new Client(), 'naver', { sub: 'n-1', email: 'boss@social.test', name: '다른사람' });
     assert.equal(to.pathname, '/login'); assert.equal(to.searchParams.get('code'), 'exists');
