@@ -244,7 +244,7 @@ export async function mailContext(u: SessionUser, taskId: string) {
   };
 }
 async function taskOutbox(taskId: string, sql: Sql) {
-  return sql`select o.id, o.channel, o.status, o.to_addrs, o.cc_addrs, o.subject, o.files, o.as_link, o.attempts, o.last_error, o.error_kind, o.sent_at, o.created_at,
+  return sql`select o.id, o.channel, o.status, o.to_addrs, o.cc_addrs, o.subject, left(o.body_text, 200) as preview, o.files, o.as_link, o.attempts, o.last_error, o.error_kind, o.sent_at, o.created_at,
       o.next_attempt_at, u.name as sender_name, s.first_opened_at
     from outbox o join users u on u.id = o.created_by left join share_links s on s.id = o.share_id
     where o.task_id = ${taskId} order by o.created_at desc limit 50`;
@@ -464,4 +464,69 @@ export async function outboxTick() {
     } catch { /* 아래에서 직접 */ }
   }
   return outboxJob();
+}
+
+// ---------------- V21 2차: AI 초안·자료 추천 / 문자 넘기기 기록 ----------------
+export const draftInput = z.object({ taskId: z.string().uuid(), kind: z.enum(Object.keys(MAIL_KINDS) as [MailKind, ...MailKind[]]), company: z.string().regex(/^[a-z0-9_-]{2,30}$/).optional(), channel: z.enum(['email', 'sms']).default('email') });
+const DRAFT_SYSTEM = `회사 영업·고객 응대 메일(또는 문자) 초안을 씁니다. 사람이 보고 고친 뒤 직접 보냅니다.
+- 한국어 존댓말, 짧고 정중하게. 메일 본문은 3~6문장, 2~3문장마다 빈 줄. 문자는 2~3문장(명함·서명·링크는 시스템이 붙이므로 쓰지 않음).
+- 업무 내용·문의 내용에 있는 사실만 씁니다. 금액·날짜·약속을 지어내지 않습니다. 모르는 값은 [ ] 로 비워 둡니다.
+- 받는 사람 이름·전화·이메일은 쓰지 않습니다(호칭은 "담당자님").
+- recommend: 보낼 자료 후보 목록에서 이 고객에게 보내면 좋은 자료 번호를 최대 3개(없으면 빈 배열).`;
+const DRAFT_SCHEMA = { type: 'object', additionalProperties: false, required: ['subject', 'body', 'recommend'],
+  properties: { subject: { type: 'string' }, body: { type: 'string' }, recommend: { type: 'array', items: { type: 'integer' } } } };
+
+/** [AI 초안]: 제목·본문 + 자료실 추천 상위 3 (초안만 — 보내기는 사람) */
+export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
+  const { task } = await loadTaskForMail(u, i.taskId);
+  await requireMenu(u, 'assistant', 'use');
+  const P = await import('./ai/provider');
+  if (!P.aiEnabled()) throw new HttpError(503, 'ai_off', 'AI 가 설정되지 않았습니다 — 양식 문구로 작성해 주세요');
+  const G = await import('./ai/guard');
+  await G.assertUserBudget(u);
+  await (await import('./plans')).assertAiRequest(u);
+  const sql = db();
+  const [t] = await sql<{ description: string | null }[]>`select description from tasks where id = ${i.taskId}`;
+  const items = await sql<{ text: string; done: boolean }[]>`select text, done from task_checklist_items where task_id = ${i.taskId} order by sort`;
+  const contact = await inquiryContact(i.taskId, sql);
+  const lib = await (await import('./library')).listLibrary(u, { limit: 60 }).catch(() => ({ files: [] as any[] }));
+  const cands = (lib.files as any[]).filter((f) => f.effective_security !== 'confidential').slice(0, 60);
+  const desc = (t?.description ?? '').replace(/\*\*연락처[\s\S]*?(?=\*\*문의 내용 원문\*\*|$)/, ''); // 연락처는 AI 에 보내지 않는다
+  const kind = MAIL_KINDS[i.kind];
+  const profile = i.company ? (await companyProfiles(tenantOf(u), sql)).find((p) => p.key === i.company) : null;
+  const prompt = [`[종류] ${i.channel === 'sms' ? '문자' : '메일'} · ${kind.label}`, profile ? `[보내는 회사] ${profile.name}` : '', `[업무 제목] ${task.title}`,
+    contact?.organization ? `[고객 기관] ${contact.organization}` : '', `[업무 내용]\n${desc.slice(0, 3000)}`,
+    items.length ? `[진행 단계]\n${items.map((x) => `${x.done ? '✔' : '·'} ${x.text}`).join('\n')}` : '',
+    `[기본 문구 참고]\n제목: ${kind.subject}\n${kind.body}`,
+    `[보낼 자료 후보]\n${cands.map((f, n) => `${n + 1}. ${f.title || f.file_name} (${f.folder || '최상위'}${f.tags?.length ? ' · ' + f.tags.join(',') : ''})`).join('\n') || '없음'}`].filter(Boolean).join('\n\n');
+  const p = P.anthropicProvider({ tier: 'fast' });
+  const r = await p.chat({ system: DRAFT_SYSTEM, tools: [], messages: [{ role: 'user', content: prompt }], format: DRAFT_SCHEMA });
+  await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+    values (${tenantOf(u)}, ${u.id}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0},
+      ${r.usage.cache_creation_input_tokens ?? 0}, ${P.costUsd(r.model ?? p.model, r.usage)}, 'mail_draft')`;
+  const text = r.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+  let out: { subject?: string; body?: string; recommend?: number[] } = {};
+  try { out = JSON.parse(text); } catch { out = { body: text }; }
+  const picks = [...new Set((out.recommend ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= cands.length))].slice(0, 3).map((n) => cands[n - 1]);
+  await G.userBudgetAlerts(u).catch(() => {});
+  return { subject: String(out.subject ?? kind.subject).slice(0, 200), body: String(out.body ?? kind.body).slice(0, 5000),
+    recommend: picks.map((f) => ({ id: f.id, title: f.title || f.file_name, folder: f.folder, size: Number(f.size_bytes) })) };
+}
+
+/** 문자 A 방식(휴대폰 문자앱으로 넘김): 사람이 [보냈어요]를 누른 것만 기록 */
+export const smsLogInput = z.object({ taskId: z.string().uuid(), to: z.array(z.string().trim().regex(/^[0-9+\-\s()]{8,20}$/, '전화번호 형식이 아닙니다')).min(1).max(20),
+  body: z.string().max(2000), shareUrl: z.string().max(500).optional() });
+export async function logSms(u: SessionUser, i: z.infer<typeof smsLogInput>, ip: string | null) {
+  if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+  await loadTaskForMail(u, i.taskId);
+  const sql = db(); const id = randomUUID();
+  let shareId: string | null = null;
+  const tok = i.shareUrl?.match(/\/d\/([A-Za-z0-9_-]+)$/)?.[1];
+  if (tok) { const [sl] = await sql<{ id: string }[]>`select id from share_links where token_hash = ${sha256(tok)} and tenant = ${tenantOf(u)}`; shareId = sl?.id ?? null; }
+  await sql`insert into outbox (id, tenant, channel, status, task_id, created_by, to_addrs, subject, body_text, share_id, message_id, sent_at)
+    values (${id}, ${tenantOf(u)}, 'sms:handoff', 'sent', ${i.taskId}, ${u.id}, ${i.to}, ${'문자'}, ${i.body}, ${shareId}, ${`sms-${id}`}, now())`;
+  await activity(sql, 'task', i.taskId, u.id, 'sms_sent', { to: i.to, subject: i.body.slice(0, 40) });
+  await audit(sql, u.id, 'sms.handoff', 'task', i.taskId, { outboxId: id, to: i.to.length }, ip);
+  if (shareId) await crmSteps(sql, i.taskId, i.body, [{ name: 'link' }]);
+  return { id };
 }

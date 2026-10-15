@@ -4,11 +4,13 @@ import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { SMTPServer } from 'smtp-server';
 import { simpleParser } from 'mailparser';
-import { BASE, bootstrap, resetDb, startServer, testDb, tick } from '../helpers.mjs';
+import { BASE, FAKE, bootstrap, resetDb, startServer, testDb, tick } from '../helpers.mjs';
+import { startFakeGoogle } from '../fake-google.mjs';
 
 const SMTP_PORT = 2526;
 const PASS = 'app-pass-1234';
-let srv, sql, ctx, smtp, taskId, attId;
+let srv, sql, ctx, smtp, taskId, attId, fake, libId;
+const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
 const box = { mails: [], mode: [], pass: PASS };
 function startSmtp() {
   return new Promise((resolve) => {
@@ -41,7 +43,7 @@ const waitStatus = async (id, want, ms = 15000) => {
 const account = (extra = {}) => ({ provider: 'custom', host: '127.0.0.1', port: SMTP_PORT, secure: false, username: 'dagym-in', fromEmail: 'office@mail.test', fromName: '시험회사', password: PASS, ...extra });
 
 before(async () => {
-  await resetDb(); smtp = await startSmtp(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
+  await resetDb(); smtp = await startSmtp(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'dagym', name: '시험상호 다짐', phone: '02-000-0000', isDefault: true });
   await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'hilink', name: 'HI-LINK 시험', phone: '1555-0000', address: '시험시 시험로 36, 8층', website: 'www.hilink.test' });
   taskId = (await ctx.owner.ok('POST', '/api/tasks', { title: '[하이링크 문의] 시험아파트', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
@@ -52,8 +54,13 @@ before(async () => {
   await fetch(BASE + init.upload.url, { method: 'PUT', headers: init.upload.headers, body: Buffer.from('%PDF-1.4 abc') });
   await ctx.owner.ok('POST', `/api/attachments/${init.id}/complete`, {});
   attId = init.id;
+  const lf = await ctx.owner.ok('POST', '/api/library', { fileName: '하이링크 회사소개서.pdf', mimeType: 'application/pdf', size: 12, folder: '영업자료' });
+  await fetch(BASE + lf.upload.url, { method: 'PUT', headers: lf.upload.headers, body: Buffer.from('%PDF-1.4 abc') });
+  await ctx.owner.ok('POST', `/api/library/${lf.id}/complete`);
+  libId = lf.id;
+  await new Promise((r) => setTimeout(r, 1500)); // 자료 정리(AI)가 끝나기를 기다림
 });
-after(async () => { srv?.proc.kill(); smtp?.close(); await sql?.end(); });
+after(async () => { srv?.proc.kill(); smtp?.close(); fake?.server.close(); await sql?.end(); });
 
 describe('V21 메일 계정·명함', () => {
   test('메일 계정: 권한 없는 사람 404, 연결 시험 실패면 저장 안 함, 성공하면 암호화 저장·비밀번호 안 돌려줌', async () => {
@@ -171,5 +178,43 @@ describe('V21 보관함 발송', () => {
     assert.equal((await fetch(`${BASE}/api/public/share/wrongtoken/0`, { redirect: 'manual' })).status, 404);
     const h = await ctx.owner.ok('GET', `/api/tasks/${taskId}/mail?history=1`);
     assert.ok(h.items.find((i) => i.id === r.id).first_opened_at);
+  });
+});
+
+describe('V21 2차: AI 초안·자료 추천 / 문자 넘기기 / 전화 문의', () => {
+  test('AI 초안: 제목·본문 + 자료실 추천(후보 번호만 받아들임), 사용량 기록, 연락처는 AI 에 안 보냄', async () => {
+    await ctl({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ subject: '시험아파트 제안서 송부', body: '안녕하세요.\n\n제안서를 보내 드립니다.', recommend: [1, 99] }) }], stop_reason: 'end_turn' }] });
+    const r = await ctx.owner.ok('POST', '/api/mail/draft', { taskId, kind: 'proposal', company: 'hilink' });
+    assert.equal(r.subject, '시험아파트 제안서 송부');
+    assert.deepEqual(r.recommend.map((x) => x.id), [libId], '없는 번호(99)는 버림');
+    assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'mail_draft'`)[0].n, 1);
+    const st = await (await fetch(`${FAKE}/__state`)).json();
+    const sent = JSON.stringify(st.anthropic.at(-1));
+    assert.ok(!sent.includes('customer@client.test') && !sent.includes('010-0000-0000'), '연락처는 AI 에 안 보냄');
+    assert.equal((await ctx.staffB.client.post('/api/mail/draft', { taskId, kind: 'proposal' })).status, 404);
+  });
+
+  test('문자: [보냈어요]만 기록(보관함 sms·업무 기록), 권한 없는 사람 403, 번호 형식 확인', async () => {
+    const share = await ctx.owner.ok('POST', '/api/mail/share', { taskId, attachmentIds: [attId] });
+    assert.match(share.url, /\/d\//);
+    const r = await ctx.owner.ok('POST', '/api/mail/sms-log', { taskId, to: ['010-0000-0000'], body: '자료 보내 드립니다', shareUrl: share.url });
+    const [o] = await sql`select channel, status, share_id from outbox where id = ${r.id}`;
+    assert.deepEqual([o.channel, o.status, !!o.share_id], ['sms:handoff', 'sent', true]);
+    assert.ok((await sql`select 1 from activities where entity_id = ${taskId} and action = 'sms_sent'`).length);
+    assert.equal((await ctx.staffA.client.post('/api/mail/sms-log', { taskId, to: ['010-0000-0000'], body: 'x' })).status, 403);
+    assert.equal((await ctx.owner.req('POST', '/api/mail/sms-log', { taskId, to: ['abc'], body: 'x' })).status, 400);
+  });
+
+  test('전화 문의 등록 → 문의 업무(유형 단계·연락처), 메일 시안 받는 사람·회사 자동, 체험 계정 404', async () => {
+    const r = await ctx.staffA.client.ok('POST', '/api/inquiries/phone', { site: 'hilink', inquiryType: '위탁운영', organization: '전화아파트', name: '관리소장', phone: '010-2222-3333',
+      email: 'phone@client.test', region: '화성', message: '위탁 운영 문의 전화' });
+    const [t] = await sql`select title, description from tasks where id = ${r.taskId}`;
+    assert.match(t.title, /^\[하이링크 전화 문의\] 전화아파트/);
+    assert.match(t.description, /대표번호 전화/);
+    const steps = (await sql`select text from task_checklist_items where task_id = ${r.taskId} order by sort`).map((x) => x.text);
+    assert.ok(steps.includes('현장 실사') && steps.includes('자료/제안서 발송'));
+    const c = await ctx.owner.ok('GET', `/api/tasks/${r.taskId}/mail`);
+    assert.deepEqual(c.to, ['phone@client.test']); assert.equal(c.company, 'hilink'); assert.equal(c.contact.phone, '010-2222-3333');
+    assert.equal((await ctx.staffA.client.post('/api/inquiries/phone', { site: 'dagym', inquiryType: '기타', message: '내용만' })).status, 400);
   });
 });

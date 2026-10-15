@@ -1,4 +1,5 @@
 'use client';
+import { PhoneInquiryButton } from './PhoneInquiry';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -68,7 +69,7 @@ function cancelDrag() { try { window.dispatchEvent(new Event('resize')); } catch
 export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Record<string, string>; title?: string; defaultMode?: ViewMode }) {
   const sp = useSearchParams();
   const router = useRouter();
-  const { dir } = useSession();
+  const sess = useSession(); const { dir } = sess;
   const [mode, setMode] = useState<ViewMode>(() => {
     // U-0a ?view=board 처럼 보기 이름이 view 로 들어와도 화면 보기로 해석, 모르는 값은 기본 보기
     const m = sp.get('mode') ?? sp.get('view');
@@ -258,6 +259,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     <div className={cx('space-y-3', panelId && 'xl:pr-[560px]')}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold tracking-tight">{title ?? '업무'}</h1>
+        {sess.tenant?.inquiries && !fixed?.view && <PhoneInquiryButton className="ml-auto" />}
         <div className="flex rounded-input border border-line bg-white p-0.5 text-sm shadow-card" role="tablist" aria-label="보기 방식">
           {MODES.map(([m, l, I]) => (
             <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}

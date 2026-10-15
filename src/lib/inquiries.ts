@@ -70,7 +70,7 @@ async function nextBusinessDay(sql: Sql, from: string) {
 
 const cellText = (v: unknown) => String(v ?? '').replace(/\|/g, '／').replace(/\s*\n\s*/g, ' / ').trim() || '-';
 
-export function describeInquiry(site: Site, type: InquiryType, i: InquiryInput, received: Date) {
+export function describeInquiry(site: Site, type: InquiryType, i: InquiryInput, received: Date, channel: Channel = 'web') {
   const services = Array.isArray(i.services) ? i.services.join(', ') : i.services;
   const utm = typeof i.utm === 'string' ? i.utm
     : Object.entries({ ...(i.utm && typeof i.utm === 'object' ? i.utm : {}), source: i.utm_source, medium: i.utm_medium, campaign: i.utm_campaign, term: i.utm_term, content: i.utm_content })
@@ -80,7 +80,7 @@ export function describeInquiry(site: Site, type: InquiryType, i: InquiryInput, 
     ['문의 유형', i.inquiry_type || type], ['회사/단지명', i.organization], ['지역', i.region], ['시설 규모/세대수', i.facility_scale],
     ['소속', i.organization_type], ['관심 서비스', services], ['현재 운영 상황', i.current_operation],
     ['접수 시각', when], ['유입 경로', [utm, i.landing_page || i.landing ? `랜딩 ${i.landing_page || i.landing}` : '', i.referrer ? `참조 ${i.referrer}` : ''].filter(Boolean).join(' · ')],
-    ['접수 사이트', `${SITES[site].label} 웹사이트`], ['Lead ID', i.lead_id],
+    [channel === 'phone' ? '접수 경로' : '접수 사이트', channel === 'phone' ? `${SITES[site].label} 대표번호 전화` : `${SITES[site].label} 웹사이트`], ['Lead ID', i.lead_id],
   ];
   const contact: [string, unknown][] = [['담당자', i.name], ['연락처', i.phone], ['이메일', i.email]];
   return [
@@ -112,11 +112,18 @@ export async function receiveInquiry(auth: string | null, raw: unknown) {
   const type = normalizeType(i.inquiry_type);
   const site = tok.site;
   const received = (() => { const d = new Date(String(i.submitted_at || i.created_at || '')); return isNaN(+d) || +d > Date.now() + 3600e3 ? new Date() : d; })();
-  const org = i.organization || i.name || '이름 없는 문의';
 
+  return insertInquiry(sql, { site, type, i, received, tokenId: tok.id, channel: 'web', actorId: null });
+}
+
+type Channel = 'web' | 'phone';
+/** 문의 1건 → 문의 기록 + 업무(유형별 담당·체크리스트·알림). 웹사이트·전화 문의 공용 */
+async function insertInquiry(sql: ReturnType<typeof db>, a: { site: Site; type: InquiryType; i: InquiryInput; received: Date; tokenId: string | null; channel: Channel; actorId: string | null }) {
+  const { site, type, i, received } = a;
+  const org = i.organization || i.name || '이름 없는 문의';
   const out = await sql.begin(async (tx) => {
     const [ins] = await tx<{ id: string }[]>`insert into inquiries (tenant, lead_id, site, inquiry_type, organization, token_id, payload)
-      values (${INQUIRY_TENANT}, ${i.lead_id}, ${site}, ${type}, ${i.organization ?? null}, ${tok.id}, ${tx.json(i as never)})
+      values (${INQUIRY_TENANT}, ${i.lead_id}, ${site}, ${type}, ${i.organization ?? null}, ${a.tokenId}, ${tx.json(i as never)})
       on conflict (tenant, lead_id) do nothing returning id`;
     if (!ins) {
       const [prev] = await tx<{ task_id: string | null }[]>`select task_id from inquiries where tenant = ${INQUIRY_TENANT} and lead_id = ${i.lead_id}`;
@@ -140,11 +147,11 @@ export async function receiveInquiry(auth: string | null, raw: unknown) {
     let people = want.filter((x) => okIds.has(x));
     if (!people.length) people = [ceo.id];
     const each = setting?.mode === 'each' && people.length > 1;
-    const title = `[${SITES[site].label} 문의] ${org}${i.inquiry_type || type !== '기타' ? ` · ${i.inquiry_type || type}` : ''}${i.region ? ` (${i.region})` : ''}`.slice(0, 200);
+    const title = `[${SITES[site].label} ${a.channel === 'phone' ? '전화 ' : ''}문의] ${org}${i.inquiry_type || type !== '기타' ? ` · ${i.inquiry_type || type}` : ''}${i.region ? ` (${i.region})` : ''}`.slice(0, 200);
     const services = (Array.isArray(i.services) ? i.services : (i.services ?? '').split(/[,·]/)).map((x) => x.trim()).filter(Boolean);
     const tags = [...new Set([SITES[site].tag, i.region, ...services].filter((x): x is string => !!x).map((x) => x.slice(0, 30)))].slice(0, 20);
     const due = await nextBusinessDay(tx, toSeoulDate(received));
-    const desc = describeInquiry(site, type, i, received);
+    const desc = describeInquiry(site, type, i, received, a.channel);
     const batchId = each ? crypto.randomUUID() : null;
     const taskIds: string[] = [];
     for (const assignee of each ? people : [people[0]]) {
@@ -159,10 +166,10 @@ export async function receiveInquiry(auth: string | null, raw: unknown) {
       for (const text of checklistFor(type)) { // 1차 연락 항목 담당 = 주 담당
         await tx`insert into task_checklist_items (task_id, text, sort, assignee_id) values (${t.id}, ${text}, ${n}, ${n === 0 ? assignee : null})`; n++;
       }
-      await activity(tx, 'task', t.id, null, 'created', { title, source: 'website_inquiry', site, leadId: i.lead_id });
-      await notify(tx, { userIds: each ? [assignee] : people, type: 'task_assigned', title: `새 웹사이트 문의 · ${org}`.slice(0, 120),
+      await activity(tx, 'task', t.id, a.actorId, 'created', { title, source: a.channel === 'phone' ? 'phone_inquiry' : 'website_inquiry', site, leadId: i.lead_id });
+      await notify(tx, { userIds: each ? [assignee] : people, type: 'task_assigned', title: `새 ${a.channel === 'phone' ? '전화' : '웹사이트'} 문의 · ${org}`.slice(0, 120),
         body: `${SITES[site].label} · ${type}${i.region ? ` · ${i.region}` : ''} · 마감 ${due} 18:00${!each && people.length > 1 ? ` · 주 담당 외 협업 ${people.length - 1}명` : ''}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
-        actorId: null, dedupeKey: `inquiry:${t.id}` });
+        actorId: a.actorId, dedupeKey: `inquiry:${t.id}` });
       const { runAutomations } = await import('./automation');
       await runAutomations(tx, { trigger: 'task_created', taskId: t.id, actorId: null });
     }
@@ -255,4 +262,20 @@ export async function setInquiryAssignees(u: SessionUser, i: z.infer<typeof assi
       on conflict (tenant, inquiry_type) do update set assignee_id = excluded.assignee_id, assignee_ids = excluded.assignee_ids, mode = excluded.mode, updated_at = now()`;
   }
   return { ok: true };
+}
+
+// ---- V21 1장: 대표번호 전화 문의 → 업무(문의 단계 그대로). 다짐 회사 직원 누구나 등록 ----
+export const phoneInquiryInput = z.object({
+  site: z.enum(['dagym', 'hilink']), inquiryType: z.enum(INQUIRY_TYPES), organization: z.string().trim().max(120).optional(),
+  name: z.string().trim().max(60).optional(), phone: z.string().trim().max(40).optional(), email: z.string().trim().email('이메일 형식이 아닙니다').max(120).optional().or(z.literal('')),
+  region: z.string().trim().max(40).optional(), message: z.string().trim().min(1, '문의 내용을 적어 주세요').max(5000),
+});
+export async function registerPhoneInquiry(u: SessionUser, x: z.infer<typeof phoneInquiryInput>) {
+  if (tenantOf(u) !== INQUIRY_TENANT || u.isDemo) throw notFound();
+  if (!x.organization && !x.name) throw badRequest('소속(아파트명 등) 또는 이름을 적어 주세요');
+  const sql = db();
+  const i = inquiryInput.parse({ lead_id: `phone-${crypto.randomUUID()}`, inquiry_type: x.inquiryType, organization: x.organization, name: x.name, phone: x.phone,
+    email: x.email || undefined, region: x.region, message: x.message, submitted_at: new Date().toISOString() });
+  const out = await insertInquiry(sql, { site: x.site, type: x.inquiryType, i, received: new Date(), tokenId: null, channel: 'phone', actorId: u.id });
+  return { taskId: out.taskId, taskIds: out.taskIds };
 }

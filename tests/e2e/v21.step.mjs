@@ -34,6 +34,21 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   assert.equal(await pv.getByText(/APART/i).count(), 0);
   assert.ok(await c.getByTestId('mail-send').isEnabled());
   await owner.screenshot({ path: `${SHOTS}/v21-mail-compose.png` });
+  // 문자 탭: 받는 번호·내용·서명 한 줄(이름 / 회사 / 대표번호) 미리보기
+  await c.getByTestId('mail-channel-sms').click();
+  await c.getByTestId('sms-to').fill('010-0000-0000');
+  await c.getByTestId('sms-body').fill('제안서 보내 드립니다.');
+  assert.match(await c.getByTestId('sms-preview').innerText(), /제안서 보내 드립니다\.[\s\S]*HI-LINK 시험 \/ 1555-0000/);
   await owner.keyboard.press('Escape');
+  // 전화 문의 등록 → 문의 업무
+  await owner.goto(`${BASE}/tasks`);
+  await owner.getByTestId('phone-inquiry-open').click();
+  const pf = owner.getByTestId('phone-inquiry-form');
+  await pf.getByRole('button', { name: '하이링크 대표번호' }).click();
+  await pf.getByTestId('pi-org').fill('전화시험아파트');
+  await pf.getByTestId('pi-message').fill('위탁 운영 문의 전화');
+  await pf.getByTestId('pi-save').click();
+  await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}/);
+  await owner.getByText('[하이링크 전화 문의] 전화시험아파트', { exact: false }).first().waitFor();
   await sql`delete from mail_accounts where tenant = 'default'`;
 }
