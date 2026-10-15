@@ -425,7 +425,14 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if (i.version !== undefined && i.version !== cur.version) {
       throw conflict('다른 사용자가 먼저 수정했습니다. 새로고침 후 다시 시도하세요.', { currentVersion: cur.version });
     }
-    if (!perms.edit) throw forbidden('이 업무를 수정할 권한이 없습니다');
+    // V14 8번 팀장 배정(팀 업무 "팀장이 담당 지정"): 담당이 비어 있는 팀 업무는 팀장이 처음 담당을 정할 수 있다(그 뒤 변경은 지시자만)
+    const onlyAssign = Object.entries(i).every(([k, v]) => v === undefined || k === 'assigneeId' || k === 'version');
+    const leadFirstAssign = !perms.edit && onlyAssign && !!i.assigneeId && !cur.assignee_id && !!cur.team_id
+      && (await tx`select 1 from team_members where team_id = ${cur.team_id} and user_id = ${u.id} and is_lead`).length > 0;
+    if (!perms.edit && !leadFirstAssign) {
+      const onlyStatus = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote'].includes(k));
+      throw forbidden(onlyStatus ? '상태는 담당자만 바꿀 수 있어요' : '이 업무를 수정할 권한이 없습니다 — 업무 내용·일정은 지시자·담당자만 바꿀 수 있습니다');
+    }
     const changes: Record<string, { from: unknown; to: unknown }> = {};
     const set: Record<string, unknown> = {};
     const fields: [keyof TaskInput, string][] = [
@@ -464,6 +471,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if ('assignee_id' in set) set.assignee_ack_at = set.assignee_id === u.id ? new Date() : null;
     // V14 1번: 이미 담당자가 있는 업무의 담당자를 바꾸는 것(재배정)은 메뉴 권한으로
     const reassigned = 'assignee_id' in set && !!cur.assignee_id && set.assignee_id !== cur.assignee_id;
+    if ('assignee_id' in set && !cur.assignee_id && !leadFirstAssign && !perms.edit) throw forbidden();
     if (reassigned && !(await canReassign(u, cur, tx))) {
       const { menuLevel } = await import('./menuPerms');
       if (cur.assignee_id === u.id && (await menuLevel(u, 'reassign_handoff', tx)) === 'use')
@@ -487,12 +495,21 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     // V12 11번: 상태는 담당자만(대표·관리자도 예외 없음). 예외는 하나 — 검토 요청된 업무를 그 업무의 지시자가 승인(완료)·반려(진행 중).
     // 담당자가 없는 업무는 만든 사람만. (결재선 업무의 결재는 approvals 의 결재 API 로 따로)
     if (i.status && i.status !== cur.status) {
-      const owner = cur.assignee_id ?? cur.created_by;
-      const reviewByRequester = cur.status === 'review' && (i.status === 'done' || i.status === 'in_progress') && !!cur.requested_by && cur.requested_by === u.id;
-      // V14 20번: 지시자는 완료된 업무를 다시 진행으로 돌릴 수 있다(승인 취소·보완 요청)
-      const reopenByRequester = cur.status === 'done' && i.status === 'in_progress' && !!cur.requested_by && cur.requested_by === u.id;
-      if (owner !== u.id && !reviewByRequester && !reopenByRequester) {
-        throw forbidden(cur.assignee_id ? '상태는 담당자만 바꿀 수 있어요. 지시자는 검토 요청된 업무를 승인·반려할 수 있습니다.' : '담당자가 없는 업무의 상태는 만든 사람만 바꿀 수 있어요.');
+      // V14 50(대표 결정): 상태는 배정된 담당자만(대표·관리자·지시자·협업자 모두 불가). 담당자가 없는 업무는 지시자(없으면 만든 사람).
+      // 검토 중인 업무의 승인(완료)·반려(진행 중)는 검토 담당자만 — "[검토]" 업무가 있으면 그 담당자, 없으면 지시자. 담당자 본인은 자기 검토를 승인할 수 없다.
+      const owner = cur.assignee_id ?? cur.requested_by ?? cur.created_by;
+      if (cur.status === 'review' && !lineId) {
+        const [rv] = await tx<{ assignee_id: string | null }[]>`select assignee_id from tasks where review_of = ${id} and deleted_at is null and status <> 'done' limit 1`;
+        const reviewer = rv?.assignee_id ?? (cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : null);
+        if (reviewer && reviewer !== u.id) {
+          const [nm] = await tx<{ name: string }[]>`select name from users where id = ${reviewer}`;
+          throw forbidden(`검토 중인 업무의 승인·반려는 검토 담당자 ${nm?.name ?? ''}님만 할 수 있습니다`);
+        }
+        if (reviewer && reviewer === u.id && i.status !== 'done' && i.status !== 'in_progress') throw forbidden('검토 담당자는 승인(완료)·반려(진행 중)만 할 수 있어요');
+        if (!reviewer && owner !== u.id) throw forbidden('상태는 담당자만 바꿀 수 있어요');
+      } else if (owner !== u.id) {
+        const [nm] = cur.assignee_id ? await tx<{ name: string }[]>`select name from users where id = ${cur.assignee_id}` : [];
+        throw forbidden(cur.assignee_id ? `상태는 담당자만 바꿀 수 있어요(담당 ${nm?.name ?? ''})` : '담당자가 없는 업무의 상태는 지시자(만든 사람)만 바꿀 수 있어요');
       }
     }
     // 상태 변경
@@ -508,7 +525,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       }
       if (to === 'done' && lineId) throw forbidden('결재선이 지정된 업무입니다. "검토 요청"으로 결재를 올려 주세요.');
       if (to === 'done') {
-        if (cur.approval_required && !perms.approve) {
+        if (cur.approval_required && !perms.approve && cur.status !== 'review') { // 검토 승인은 위에서 검토 담당자 확인
           throw forbidden('이 업무는 관리자 확인이 필요합니다. "검토 요청"으로 바꿔 주세요.');
         }
         const blockers = await tx`select 1 from task_dependencies d join tasks dt on dt.id = d.depends_on_id
@@ -526,7 +543,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
           const { cancelOpenRound } = await import('./approvals');
           await cancelOpenRound(tx, id);
         }
-        if (cur.status === 'review' && perms.approve && cur.review_requested_by !== u.id) statusEvent = 'review_rejected';
+        if (cur.status === 'review' && cur.review_requested_by !== u.id) statusEvent = 'review_rejected';
         if (cur.status === 'done') { set.completed_at = null; set.approved_at = null; set.approved_by = null; statusEvent = 'reopened'; }
       }
       set.status = to;
@@ -944,13 +961,9 @@ export async function reorderTasks(u: SessionUser, ids: string[]) {
 
 // ---------------- V14 1번 담당자 재배정 권한 ----------------
 /** 재배정 가능: 메뉴 권한 "업무 담당자 재배정" 또는 (내가 지시자 + "지시자는 자기 업무 재배정 가능") */
-export async function canReassign(u: SessionUser, t: { requested_by?: string | null; team_id?: string | null }, sql: Sql = db()) {
-  const { menuLevel } = await import('./menuPerms');
-  if ((await menuLevel(u, 'reassign', sql)) === 'use') return true;
-  // V14 8번: 팀장은 자기 팀 업무 재배정
-  if (t.team_id && (await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`).length && (await teamTaskLevel(u, t.team_id, sql)) === 'edit') return true;
-  if (t.team_id && (await sql`select 1 from (${subTeamsSql(sql, u)}) s where s.id = ${t.team_id}`).length) return true; // R-16 상위 팀 구성원은 하위 팀 업무 배정
-  return !!t.requested_by && t.requested_by === u.id && (await menuLevel(u, 'reassign_requester', sql)) === 'use';
+export async function canReassign(u: SessionUser, t: { requested_by?: string | null; created_by?: string | null; team_id?: string | null }, _sql: Sql = db()) {
+  // V14 50(대표 결정): 담당자 변경은 지시자(없으면 만든 사람)만 — 대표·관리자·팀장도 예외 없음. 담당자는 "넘기기 요청"
+  return (t.requested_by ?? t.created_by ?? null) === u.id;
 }
 async function notifyReassign(tx: Sql, u: SessionUser, p: { id: string; title: string; from: string; to: string | null; requestedBy: string | null; version: number }) {
   const names = await tx<{ id: string; name: string }[]>`select id, name from users where id = any(${[p.from, p.to].filter(Boolean) as string[]}::uuid[])`;

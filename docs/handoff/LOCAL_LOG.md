@@ -241,3 +241,4 @@
 - 2026-10-15 [로컬] NICEPAY 회신 확인(V18 문서 기록): walkin001m 결제창·가상계좌·계좌이체 / walkin002m 빌링, 계약·심사 불필요, 이용확인증 첨부. 첨부 파일 내려받기는 대표 허락 대기.
 - 2026-10-15 [로컬] 브랜드·도메인 조사: KIPRIS "워크인(workin)" 09류(박창희) **포기**, 35류(이상호) **소멸**, "캡스 스마트워크인" 09·37·45류 SK쉴더스 **등록**, "WORKIN PREMIUM SHARED OFFICE" 36류 등록. 웹: workin.vercel.app = 다른 "WorkIN" 서비스, getworkin.vercel.app = "WorkIn — AI-Powered Business…" 서비스 운영 중, getworkin.com·useworkin.com·workin.app 이미 등록됨. Vercel 은 .kr 도메인 미지원, 무료는 *.vercel.app 만(workin-app·workinapp·workin-kr·myworkin.vercel.app 비어 있음).
 - 2026-10-15 [배포확인요청] V28-3 슈퍼 계정: /platform 회사 관리(목록·상세·한도·사용자 잠금/재설정 메일/2단계 초기화·삭제 예약·지원 모드), 설정 > 계정 "워크인 지원 모드 허용"(대표). 운영 확인 부탁(실제 고객사 삭제·잠금은 하지 말 것).
+- 2026-10-15 [배포확인요청] V14 50 업무 권한(상태·검토 승인 = 담당자/검토 담당자만, 내용·일정 = 지시자·담당자만, 담당 변경·삭제 = 지시자만). 운영 확인 부탁: 대표 화면에서 김민수 담당 [검토] 업무 → 승인·반려 버튼 대신 🔒 안내, 김민수 계정으로는 승인 가능.

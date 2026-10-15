@@ -55,7 +55,7 @@ export async function v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDa
   // 홈 이번 주 줄에도 동그라미 없음
   await owner.goto(BASE + '/');
   await owner.getByTestId('home-week').waitFor();
-  assert.equal(await owner.locator('[data-week-task] .rounded-full').count(), 0, '홈 이번 주 업무 동그라미 없음');
+  assert.equal(await owner.locator('[data-week-task] button.rounded-full, [data-week-task] [role="checkbox"]').count(), 0, '홈 이번 주 업무 동그라미(체크 버튼) 없음 — 색 막대·꼬리표만');
 
   // 휴대폰: 기본 3일 보기, 블록 글자 5자 넘게 보임, 좌우로 밀어 이동, 스크롤 위치 복원
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });

@@ -231,7 +231,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   }
 
   // V14 20번: 상태는 담당자(없으면 만든 사람)만 — 지시자는 검토 요청 승인·반려와 완료 해지만
-  const statusOwner = (t.assignee_id ?? t.created_by) === user.id;
+  const statusOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id && !(t.status === 'review' && t.requested_by && t.requested_by !== t.assignee_id); // V14 50
   const isRequester = !!t.requested_by && t.requested_by === user.id;
   const editProp = (sel: string, click = false) => {
     setDetails(true);
@@ -243,11 +243,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     }, 50);
   };
   const primary0 = t.status === 'done' ? null
-    : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : t.requested_by === user.id ? { label: '최종 완료 확인', run: () => patch({ status: 'done' }, '최종 완료 확인했습니다') } : null)
+    : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : t.requested_by === user.id && t.requested_by !== t.assignee_id ? { label: '최종 완료 확인', run: () => patch({ status: 'done' }, '최종 완료 확인했습니다') } : null)
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
     : t.approval_required && !perms.approve ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') }
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
-  const primary = primary0 && (statusOwner || (t.status === 'review' && isRequester)) ? primary0 : null;
+  const primary = primary0 && (statusOwner || (t.status === 'review' && isRequester && t.requested_by !== t.assignee_id)) ? primary0 : null;
 
   // V14 19번 ④: 휴대폰은 댓글 입력줄을 화면 아래에 고정(📎·📷) — 변형(transform)된 부모 영향 없게 body 로 띄운다
   const autoGrow = (el: HTMLTextAreaElement | null) => { if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 112)}px`; } };
@@ -355,7 +355,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             {statusOwner && t.status !== 'done' && t.status !== 'review' && t.approval_required && !perms.approve && !t.approval_line_id && primary?.label !== '완료 → 검토 요청' && (
               <Button size="sm" onClick={() => patch({ status: 'review' }, '검토를 요청했습니다')}>완료 → 검토 요청</Button>
             )}
-            {t.status === 'review' && (perms.approve || isRequester) && !t.approval_line_id && <Button size="sm" variant="secondary" onClick={reject} data-testid="review-reject-here">반려(보완 요청)</Button>}
+            {t.status === 'review' && isRequester && t.requested_by !== t.assignee_id && !t.approval_line_id && <Button size="sm" variant="secondary" onClick={reject} data-testid="review-reject-here">반려(보완 요청)</Button>}
 
           </div>
           {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
@@ -402,7 +402,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <Link href={`/tasks/${data.reviewTarget.id}`} className="min-w-0 flex-1 truncate font-medium underline">{data.reviewTarget.title}</Link>
               <span className="text-xs text-ink-2">{data.reviewTarget.assignee_name ?? '담당 없음'} · {STATUS_LABEL[data.reviewTarget.status as TaskStatus] ?? data.reviewTarget.status}</span>
             </div>
-            {data.reviewTarget.status === 'review' ? (
+            {data.reviewTarget.status === 'review' && t.assignee_id !== user.id ? (
+              <p className="mt-1 flex items-center gap-1 text-xs text-ink-2" data-testid="review-locked">🔒 승인·반려는 검토 담당자{t.assignee_name ? ` ${t.assignee_name}님` : ''}만 할 수 있습니다</p>
+            ) : data.reviewTarget.status === 'review' ? (
               <div className="mt-2 flex gap-2">
                 <Button size="sm" onClick={async () => { try { await api(`/api/tasks/${data.reviewTarget.id}`, { method: 'PATCH', body: { status: 'done' } }); toast.ok('승인했습니다 — 원 업무 완료'); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } }} data-testid="review-approve"><Check />승인</Button>
                 <Button size="sm" variant="secondary" onClick={async () => {
@@ -632,7 +634,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         {/* R-15 2번 · 검수 5: 첨부는 세부 정보 다음(휴대폰 순서: 설명 → 체크리스트·하위 → 세부 정보 → 첨부 → 댓글) */}
         <section className={cx('min-w-0', wide && 'lg:col-start-1 lg:row-start-3')} data-testid="attach-section">
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.att} onClick={() => toggleFold('att')} label="자료·첨부" />{data.attachments.length > 0 && <span className="text-xs font-medium text-ink-2">{data.attachments.length}</span>}</h2>
-          {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.approve} onChange={reload} meId={user.id} />}
+          {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.edit} onChange={reload} meId={user.id} />}
           {!fold.att && <TaskMail taskId={id} onChange={reload} draft={mailDraft} onDraftUsed={() => setMailDraft(null)} />}
           {/* V28-1 이 업무의 AI 비서 — 자료·첨부 바로 아래(초안 → 메일·문자 시안 창) */}
           {features.ai && menus?.assistant !== 'none' && (

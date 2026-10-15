@@ -415,7 +415,9 @@ await step('⑥ 다른 현장 직원은 화면에서도 접근 불가 안내', a
 });
 
 await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 조회)', async () => {
-  await staff.goto(`${BASE}/tasks/${t3}`);
+  // V14 50: 일정 수정은 지시자·담당자만 — 직원이 담당인 업무로 시험
+  const t7 = (await ctx.owner.ok('POST', '/api/tasks', { title: '모바일 수정 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 3) })).id;
+  await staff.goto(`${BASE}/tasks/${t7}`);
   const nd = addDays(today, 8);
   // V13 11번: 휴대폰은 "세부 정보" 요약 한 줄 → 눌러서 펼침
   await staff.getByTestId('details-toggle').getByText(/👤/).waitFor();
@@ -423,7 +425,7 @@ await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 �
   await staff.getByTestId('detail-due').getByTestId('due-picker').click(); // 마감일 칩 → 빠른 선택·달력
   await staff.getByLabel('마감일 날짜 선택').fill(nd);
   await staff.locator(`[data-testid="detail-due"][data-value="${nd}"]`).waitFor();
-  await owner.goto(`${BASE}/tasks/${t3}`);
+  await owner.goto(`${BASE}/tasks/${t7}`);
   assert.equal(await owner.getByTestId('detail-due').getAttribute('data-value'), nd);
   assert.equal(await owner.getByTestId('status-chip').count(), 1, '상태 표시는 칩 하나');
 });
@@ -544,7 +546,7 @@ await step('B-9 결재선 화면에서 2단계 결재선 만들기 → 업무에
   await owner.goto(`${BASE}/tasks/${id}`);
   // V14 27번: 상세 화면에서 결재선 칸은 뺌(데이터는 유지) — 결재선 지정은 API/업무 생성 때
   const line = (await ctx.owner.ok('GET', '/api/approval-lines')).lines.find((l) => l.name === '계약 결재');
-  await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { approvalLineId: line.id });
+  await ctx.managerA.client.ok('PATCH', `/api/tasks/${id}`, { approvalLineId: line.id }); // V14 50: 지시자가 결재선 지정
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
   const c = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const m = await login(c, ctx.managerA.email, ctx.managerA.password);
@@ -975,10 +977,12 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   assert.equal(t.assignee_id, minsu); assert.equal(t.requested_by, ctx.ownerId, '지시자 = 나(만든 사람)');
   // 행에서 지시자·우선순위
   const row = owner.locator(`[data-row="${t.id}"]`);
-  await row.getByTestId('requester-picker').click();
-  await owner.getByRole('dialog').getByRole('button', { name: /^최매니저/ }).click();
+  // V14 50: 지시자를 넘기면 나는 더 고칠 수 없으므로 우선순위 먼저
   await row.getByTestId('priority-picker').click();
   await owner.getByRole('dialog').getByRole('button', { name: /긴급/ }).click();
+  await owner.waitForTimeout(500);
+  await row.getByTestId('requester-picker').click();
+  await owner.getByRole('dialog').getByRole('button', { name: /^최매니저/ }).click();
   await owner.waitForTimeout(800);
   const [u] = await sql`select requested_by, priority from tasks where id = ${t.id}`;
   assert.equal(u.requested_by, ctx.managerA.id); assert.equal(u.priority, 'urgent');

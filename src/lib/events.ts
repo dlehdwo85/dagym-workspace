@@ -236,7 +236,8 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   const rule = normalizeRule(i.rrule);
   if (i.taskId) {
     const { loadTaskForUser } = await import('./access');
-    await loadTaskForUser(u, i.taskId, sql);
+    const { perms: tp } = await loadTaskForUser(u, i.taskId, sql);
+    if (!tp.edit) throw forbidden('업무의 일정(시간 블록)은 지시자·담당자만 정할 수 있습니다'); // V14 50
   }
   const out: { id: string; taskId?: string } = await sql.begin(async (tx) => {
     const [ev] = await tx<{ id: string }[]>`

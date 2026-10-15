@@ -1206,7 +1206,8 @@ describe('WORKIN_V3 서로 배정 · 지시자 · 직접 순서', () => {
     assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t}`)).task.requested_by_name, '최매니저');
     assert.equal((await ctx.owner.req('POST', '/api/tasks', { title: 'x', orgUnitId: ctx.hq, requestedById: '00000000-0000-0000-0000-00000000dead' })).status, 400);
     const d0 = await ctx.owner.ok('GET', `/api/tasks/${t}`);
-    await ctx.owner.ok('PATCH', `/api/tasks/${t}`, { requestedById: ctx.ownerId, version: d0.task.version });
+    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t}`, { requestedById: ctx.ownerId, version: d0.task.version })).status, 403, 'V14 50: 지시자·담당자가 아니면(대표라도) 수정 불가');
+    await hq2.ok('PATCH', `/api/tasks/${t}`, { requestedById: ctx.ownerId, version: d0.task.version }); // 담당자가 지시자를 바로잡음
     const d1 = await ctx.owner.ok('GET', `/api/tasks/${t}`);
     assert.ok(d1.history.some((h) => h.changes?.requestedById?.to === ctx.ownerId), '변경 이력');
     const mine = await ctx.owner.ok('GET', '/api/tasks?view=requested&limit=500');
@@ -2323,7 +2324,7 @@ describe('V14 3번 자료실 자동 정리 점검 — 상태·실패 사유·다
 });
 
 describe('V14 1번 담당자 재배정 권한', () => {
-  test('기본: 직원·현장 관리자는 남의 업무 재배정 403, 지시자는 자기 업무 재배정 가능, 대표는 언제나 · 이력·알림', async () => {
+  test('V14 50: 담당자 변경은 지시자만(대표·관리자·담당자 403) · 이력·알림', async () => {
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14 재배정', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.ownerId })).id;
     assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.managerA.id })).status, 403, '권한 없음');
     const r = await ctx.staffA.client.req('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.managerA.id });
@@ -2337,18 +2338,15 @@ describe('V14 1번 담당자 재배정 권한', () => {
     // 지시자 = 현장 관리자: 자기가 지시한 업무는 재배정 가능
     const t2 = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V14 지시자 재배정', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id })).id;
     await ctx.managerA.client.ok('PATCH', `/api/tasks/${t2}`, { assigneeId: ctx.ownerId });
-    // 대표가 "지시자는 자기 업무 재배정" 끄면 403
-    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign_requester', role: 'site_manager', level: 'none' });
-    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t2}`, { assigneeId: ctx.staffA.id })).status, 403);
-    // 사람별 예외로 재배정 허용
-    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign', userId: ctx.managerA.id, level: 'use' });
-    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t2}`, { assigneeId: ctx.staffA.id });
+    // V14 50(대표 결정): 담당자 변경은 지시자만 — 메뉴 권한(재배정)을 줘도 지시자가 아니면 403
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign', userId: ctx.staffB.id, level: 'use' });
+    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t2}`, { assigneeId: ctx.staffA.id })).status, 403, '대표도 지시자가 아니면 불가');
+    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign', userId: ctx.staffB.id, level: null });
     assert.equal((await ctx.managerA.client.ok('GET', `/api/tasks/${t2}`)).perms.reassign, true);
-    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign', userId: ctx.managerA.id, level: null });
-    await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign_requester', role: 'site_manager', level: null });
-    // 담당자 없는 업무에 처음 배정하는 것은 재배정이 아님
+    // 담당자 없는 업무: 지시자가 배정(만든 사람이라도 지시자가 따로 있으면 불가)
     const t3 = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'V14 첫 배정', orgUnitId: ctx.siteA, assigneeId: null, requestedById: ctx.ownerId })).id;
-    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t3}`, { assigneeId: ctx.staffA.id });
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t3}`, { assigneeId: ctx.staffA.id })).status, 403);
+    await ctx.owner.ok('PATCH', `/api/tasks/${t3}`, { assigneeId: ctx.staffA.id });
   });
   test('담당자 넘기기(켜면): 요청 → 지시자 승인 → 담당 변경·알림, 거절, 남이 승인 403', async () => {
     await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'reassign_handoff', role: 'staff', level: 'use' });
@@ -2517,12 +2515,13 @@ describe('V14 8번 팀 단위 업무·팀 업무 권한', () => {
     assert.equal((await ctx.staffA.client.get(`/api/tasks/${t}`)).status, 404, '같은 현장이어도 팀 밖이면 404');
     assert.ok(!(await ctx.staffA.client.ok('GET', '/api/tasks?includeDone=1')).tasks.some((x) => x.id === t));
     const d = await ctx.managerA.client.ok('GET', `/api/tasks/${t}`);
-    assert.equal(d.task.team_name, '마케팅팀'); assert.equal(d.perms.edit, true);
+    assert.equal(d.task.team_name, '마케팅팀'); assert.equal(d.perms.edit, false, 'V14 50: 팀장도 지시자·담당자가 아니면 내용 수정 불가');
     // 팀장이 담당 지정 → 담당이 된 사람은 팀 밖이어도 볼 수 있다
     await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.staffA.id });
     await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
-    // 팀장은 자기 팀 업무 재배정 가능 (기본 재배정 권한 없는 현장 관리자)
-    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.ownerId });
+    // V14 50: 담당이 정해진 뒤 변경은 지시자만(팀장 403, 지시자 = 만든 대표)
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.ownerId })).status, 403);
+    await ctx.owner.ok('PATCH', `/api/tasks/${t}`, { assigneeId: ctx.ownerId });
     assert.equal((await ctx.staffA.client.get(`/api/tasks/${t}`)).status, 404, '담당에서 빠지면 다시 안 보임');
     // 사람별 예외 "다른 팀 업무 보기"
     await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'team_tasks_all', userId: ctx.staffA.id, level: 'view' });

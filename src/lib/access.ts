@@ -97,20 +97,19 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
     (await sql`select 1 from task_collaborators where task_id = ${t.id} and user_id = ${u.id}`).length > 0
     || (await sql`select 1 from task_checklist_items where task_id = ${t.id} and assignee_id = ${u.id} limit 1`).length > 0; // R-15 6번 항목 담당자도 참여자
   const involved = t.assignee_id === u.id || t.created_by === u.id || isCollab || (!!t.requested_by && t.requested_by === u.id);
-  if (t.team_id) { // V14 8번 팀 업무
+  // V14 50(대표 결정): 내용·일정 수정 = 지시자(없으면 만든 사람)·담당자 2명만(대표·관리자·협업자·같은 팀은 보기·댓글·첨부 올리기만),
+  // 담당자 변경·삭제 = 지시자만, 상태·검토 승인은 tasks.updateTask 에서 담당자(검토는 검토 담당자)만
+  const requester = t.requested_by ?? t.created_by;
+  const edit = t.assignee_id === u.id || requester === u.id;
+  const del = requester === u.id;
+  if (t.team_id) { // V14 8번 팀 업무: 보기는 팀 권한, 수정은 위 규칙
     const lv = await teamTaskLevel(u, t.team_id, sql);
     const [lead] = await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`;
     const teamManager = isAdmin(u) || (!!lead && lv === 'edit');
-    return { view: lv !== 'none' || involved, edit: lv === 'edit' || involved, approve: teamManager || (inUnit && atLeast(u, 'site_manager')),
-      delete: teamManager || t.created_by === u.id || (!!t.requested_by && t.requested_by === u.id) };
+    return { view: lv !== 'none' || involved, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del };
   }
   const manager = inUnit && atLeast(u, 'site_manager');
-  return {
-    view: inUnit || involved,
-    edit: manager || involved || inUnit,
-    approve: manager,
-    delete: manager || t.created_by === u.id || (!!t.requested_by && t.requested_by === u.id), // 지시자도 삭제 가능(V6 11번)
-  };
+  return { view: inUnit || involved, edit, approve: manager, delete: del };
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

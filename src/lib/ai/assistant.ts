@@ -464,6 +464,11 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       const patch = taskInput.partial().parse({ title: input.title || undefined, status: input.status || undefined, dueDate: isDate(input.dueDate) ? input.dueDate : undefined,
         dueTime: /^\d{2}:\d{2}$/.test(input.dueTime ?? '') ? input.dueTime : undefined, assigneeId: input.assigneeId || undefined, priority: input.priority || undefined });
       if (!Object.values(patch).some((v) => v !== undefined)) throw badRequest('바꿀 내용이 없습니다');
+      // V14 50: 제안 단계에서 권한 확인 — 상태는 담당자만, 내용·일정은 지시자·담당자만, 담당자 변경은 지시자만
+      const tk = d.task as any; const req = tk.requested_by ?? tk.created_by;
+      if (patch.status && (tk.assignee_id ?? req) !== u.id && tk.status !== 'review') throw new HttpError(403, 'forbidden', '상태는 담당자만 바꿀 수 있습니다 — 담당자에게 요청하세요');
+      if (!(d.perms as any).edit) throw new HttpError(403, 'forbidden', '이 업무의 내용·일정은 지시자·담당자만 바꿀 수 있습니다 — 댓글로 요청하세요');
+      if (patch.assigneeId && req !== u.id) throw new HttpError(403, 'forbidden', '담당자 변경은 지시자만 할 수 있습니다 — 담당자는 "넘기기 요청"을 쓰세요');
       return propose(c, 'update_task', `업무 고치기: ${(d.task as any).title} — ${Object.entries(patch).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${v}`).join(', ')}`, { taskId: input.taskId, patch });
     }
     case 'propose_comment': {

@@ -12,17 +12,18 @@ async function assertSameTenant(user: any, id: string) {
   if (!x) throw forbidden('배정할 수 없는 사람입니다');
 }
 
-async function load(user: any, id: string) {
+/** V14 50: 항목 편집·삭제는 지시자·담당자만, 완료 체크는 그 항목 담당자도 */
+async function load(user: any, id: string, onlyDone = false) {
   const [c] = await db()`select * from task_checklist_items where id = ${id}`;
   if (!c) throw notFound('항목이 없습니다');
   const { perms } = await loadTaskForUser(user, c.task_id);
-  if (!perms.edit) throw forbidden();
+  if (!perms.edit && !(onlyDone && c.assignee_id === user.id)) throw forbidden('업무 내용은 지시자·담당자만 바꿀 수 있습니다');
   return c;
 }
 
 export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {
-  const c = await load(user, params.id);
   const i = await body(req, z.object({ done: z.boolean().optional(), text: z.string().trim().min(1).max(300).optional(), assigneeId: z.string().uuid().nullable().optional() }));
+  const c = await load(user, params.id, i.text === undefined && i.assigneeId === undefined);
   if (i.assigneeId) await assertSameTenant(user, i.assigneeId);
   const sql = db();
   await sql`update task_checklist_items set

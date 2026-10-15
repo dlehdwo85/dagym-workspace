@@ -466,14 +466,14 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
   );
 }
 
-/** V12 11번: 상태는 담당자만(없으면 만든 사람) — 예외는 검토 요청된 업무를 지시자가 승인·반려 (서버와 같은 규칙) */
+/** V14 50(대표 결정): 상태는 담당자만(없으면 지시자·만든 사람). 검토 중인 업무의 승인·반려는 검토 담당자(지시자)만 — 서버와 같은 규칙 */
 export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
   if (to === t.status) return true;
-  if ((t.assignee_id ?? t.created_by) === uid) return true;
-  if (t.status === 'done' && to === 'in_progress' && !!t.requested_by && t.requested_by === uid) return true; // V14 20번 지시자 완료 해지
-  return t.status === 'review' && (to === 'done' || to === 'in_progress') && !!t.requested_by && t.requested_by === uid;
+  const reviewer = t.requested_by && t.requested_by !== t.assignee_id ? t.requested_by : null;
+  if (t.status === 'review' && reviewer) return reviewer === uid && (to === 'done' || to === 'in_progress');
+  return (t.assignee_id ?? t.requested_by ?? t.created_by) === uid;
 }
-const NOT_MINE = '상태는 담당자만 바꿀 수 있어요 (지시자는 검토 요청 승인·반려와 완료 해지만)';
+const NOT_MINE = '상태는 담당자만 바꿀 수 있어요 (검토 중인 업무는 검토 담당자만 승인·반려)';
 /** 진행 전 업무는 담당자 확인 여부를 뒤에 — V14 43번: "확인 완료"가 "완료"와 헷갈려 "진행 전 · 확인함/확인 전" */
 export function statusText(t: Task) {
   if (t.status === 'todo' && t.assignee_id) return `진행 전 · ${t.assignee_ack_at ? '확인함' : '확인 전'}`;

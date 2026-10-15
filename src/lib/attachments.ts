@@ -30,8 +30,9 @@ export async function assertAttachTarget(u: SessionUser, taskId?: string | null,
   if (!!taskId === !!eventId) throw badRequest('업무 또는 일정 중 하나에 첨부해야 합니다');
   if (taskId) {
     const { perms } = await loadTaskForUser(u, taskId);
-    if (need === 'edit' && !perms.edit) throw forbidden();
-    return { perms: { edit: perms.edit, manage: perms.approve } };
+    // V14 50: 업무를 볼 수 있는 사람은 첨부 올리기 가능, 남이 올린 첨부 삭제는 지시자·담당자만
+    void need;
+    return { perms: { edit: true, manage: perms.edit } };
   }
   const { perms } = await loadEvent(u, eventId!);
   if (need === 'edit' && !(perms.edit || perms.attendee)) throw forbidden();
