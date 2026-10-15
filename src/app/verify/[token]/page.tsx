@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { AuthCard } from '@/components/AuthCard';
 import { api } from '@/components/client';
+import { fireSignupConversion } from '@/components/conversion';
 
 /** 가입 확인 링크 → 확인 + 바로 로그인 → 첫 화면(온보딩) */
 export default function VerifyPage() {
@@ -13,7 +14,7 @@ export default function VerifyPage() {
   const once = useRef(false);
   useEffect(() => {
     if (once.current) return; once.current = true;
-    api('/api/auth/verify', { body: { token } }).then(() => { location.href = '/'; }).catch((e) => setErr(e.message));
+    api('/api/auth/verify', { body: { token } }).then(async () => { await fireSignupConversion(); location.href = '/'; }).catch((e) => setErr(e.message));
   }, [token]);
   return (
     <AuthCard title="이메일 확인" sub="가입을 마무리하고 있습니다">

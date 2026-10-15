@@ -6,7 +6,7 @@
   --canvas: #f7f8fa; --surface: #ffffff; --line: #e5e7eb;
   --ink: #111827; --ink-2: #4b5563; --ink-3: #6b7280; /* 흰 바탕 대비 4.8:1 (WCAG AA) */
 }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 body { background: var(--canvas); color: var(--ink); font-feature-settings: 'ss06'; letter-spacing: -0.005em; }
 .tabular, time, .num { font-variant-numeric: tabular-nums; }
 input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
@@ -59,6 +59,10 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
   .hit::after { content: ''; position: absolute; inset: -10px -6px; }
   input[type='checkbox'], input[type='radio'] { width: 20px; height: 20px; }
 }
+/* V14 51: iPhone 앱 — 위에서 아래로 끌어당길 때(바운스) 상태바 아래 흰/회색 빈 공간이 생기지 않게: 문서 바운스 끔, 바탕은 머리줄과 같은 흰색 */
+html.native-ios, html.native-ios body { overscroll-behavior-y: none; }
+html.native-ios { background: #ffffff; }
+html.native-ios body { min-height: 100dvh; }
 html.native-android { --sab: max(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)), 48px); }
 
 /* QR 인쇄: 인쇄 영역만 출력 */

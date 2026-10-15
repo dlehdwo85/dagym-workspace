@@ -467,6 +467,11 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 회사 사용량·요금제 화면에 미납 경고 줄. 마이그레이션 060_dunning.sql(추가형: billing_lock·billing_grace_until).
 - 남은 것: 실제 NICEPAY 키 연동 후 실패 재현 확인(지금은 가짜 서버 시험).
 
+## V14 51 iPhone 상단·메뉴 눌림 + 가입 전환 태그 자리 + AI 원가 표 정리 (2026-10-15)
+- iPhone 앱: 문서 바운스 끔(overscroll-behavior none)·바탕 흰색, 탭 하이라이트 투명, 이름 메뉴 항목은 화면 이동 후 닫힘(눌림 효과가 뒤 화면에 남지 않게). 상태바 자리 검정 띠는 네이티브 설정(ios.contentInset 'never' + backgroundColor '#ffffff') 필요 → [로컬요청].
+- 가입 전환 태그: NEXT_PUBLIC_META_PIXEL_ID · NEXT_PUBLIC_GA4_ID · NEXT_PUBLIC_GOOGLE_ADS_SIGNUP(AW-ID/라벨) · NEXT_PUBLIC_NAVER_WA. 하나라도 있으면 가입 화면에 "광고 효과 측정(선택)" 동의 칸, 동의한 브라우저에서만 이메일 확인(가입 완료) 순간 1회 로드(최대 1.5초). 앱 화면에는 넣지 않음. 동의는 consents(kind ads)에도 기록. 개인정보처리방침 문구 추가.
+- 플랫폼 AI 원가 전망 "요금 역산": 검토용 요금표(베이직 2,200·스탠다드 4,500·프로 8,500, 무료 10명 = AI 한도로 관리)로 계산, 부족/여유 표기와 설명 한 줄. plans 실요금은 그대로.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

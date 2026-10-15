@@ -57,8 +57,11 @@ export function AiForecast() {
           <ul className="mt-1 space-y-0.5 text-xs">{data.byTenant.map((t: any) => <li key={t.tenant} className="flex justify-between gap-2"><span className="truncate">{t.name}</span><span className="tabular-nums">{usd(t.usd)} <span className="text-ink-3">→ 예상 {usd(t.forecastUsd)}</span></span></li>)}</ul>
         </div>
         <div>
-          <h3 className="text-xs font-semibold text-ink-2">요금 역산(보통 사용자 원가×2 vs 요금×AI 몫 {Math.round(f.aiShare * 100)}%)</h3>
-          <ul className="mt-1 space-y-0.5 text-xs" data-testid="ai-pricing">{data.pricing.map((p: any) => <li key={p.code} className={cx('flex justify-between gap-2', p.deficit && 'font-semibold text-red-600')}><span>{p.name}</span><span className="tabular-nums">AI 몫 {won(p.aiPartKrw)} / 필요 {won(p.needKrw)}{p.deficit ? ' 적자' : ''}</span></li>)}</ul>
+          <h3 className="text-xs font-semibold text-ink-2">요금 역산 — 검토용 요금표(V27 안, 실제 요금 아님)</h3>
+          <p className="mt-0.5 text-[11px] leading-snug text-ink-3">유료 요금제마다 &ldquo;1인 요금 × AI 몫 {Math.round(f.aiShare * 100)}%&rdquo;가 &ldquo;보통 사용자 1인 AI 원가({data.estimated ? '추정' : '실측'}) × 2&rdquo;보다 크면 여유, 작으면 부족입니다. 무료는 AI 한도로 관리합니다.</p>
+          <ul className="mt-1 space-y-0.5 text-xs" data-testid="ai-pricing">{data.pricing.map((p: any) => p.free
+            ? <li key={p.code} className="flex justify-between gap-2 text-ink-3"><span>{p.name}</span><span>{p.note}</span></li>
+            : <li key={p.code} className={cx('flex justify-between gap-2', p.deficit && 'font-semibold text-red-600')}><span>{p.name} <span className="font-normal text-ink-3">1인 {won(p.perUserKrw)}</span></span><span className="tabular-nums">AI 몫 {won(p.aiPartKrw)} / 필요 {won(p.needKrw)} {p.deficit ? '부족' : '여유'}</span></li>)}</ul>
         </div>
       </div>
       <p className="mt-2 text-[11px] text-ink-3">확보 크레딧의 70%·90% 에 닿으면 운영자에게 알림. 코드 실행 시간 요금은 응답에 없어 빠져 있어 콘솔 청구와 다를 수 있습니다. 기존 기능 동작에는 영향 없음(계산·표시만).</p>

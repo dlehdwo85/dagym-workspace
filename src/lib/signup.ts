@@ -20,7 +20,7 @@ export const signupInput = z.object({
   name: z.string().trim().min(1, '이름을 입력하세요').max(50),
   mode: z.enum(['personal', 'team']),
   company: z.string().trim().max(60).optional(),
-  agree: z.object({ terms: z.literal(true, { errorMap: () => ({ message: '이용약관에 동의해 주세요' }) }), privacy: z.literal(true, { errorMap: () => ({ message: '개인정보 처리방침에 동의해 주세요' }) }), ai: z.boolean().default(false), marketing: z.boolean().default(false) }),
+  agree: z.object({ terms: z.literal(true, { errorMap: () => ({ message: '이용약관에 동의해 주세요' }) }), privacy: z.literal(true, { errorMap: () => ({ message: '개인정보 처리방침에 동의해 주세요' }) }), ai: z.boolean().default(false), marketing: z.boolean().default(false), ads: z.boolean().default(false) }),
   /** 봇 방지: 사람에게 안 보이는 칸(채워져 있으면 봇) · 화면을 연 시각(너무 빨리 제출하면 봇) */
   website: z.string().max(200).optional(),
   openedAt: z.number().optional(),

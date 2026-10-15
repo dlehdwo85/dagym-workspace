@@ -120,7 +120,7 @@ describe('V23 AI 비용·한도', () => {
     assert.equal(fc.monthUsd, 3, '주기 시작 전 사용은 빠짐'); assert.match(fc.month, /~/);
     await ctx.owner.ok('PUT', '/api/platform/ai-forecast', { cycleStart: null });
     assert.equal(f.console.usd, 3); assert.equal(f.console.diffPct, 17);
-    assert.ok(Array.isArray(f.pricing) && f.pricing.length > 0); assert.ok(f.units.some((u) => u.purpose === 'assistant'));
+    assert.ok(Array.isArray(f.pricing) && f.pricing.length > 0); assert.equal(f.pricing.find((p) => p.code === 'free').free, true, '무료는 적자 계산 안 함'); assert.equal(f.pricing.find((p) => p.code === 'pro').perUserKrw, 8500, '검토용 요금표'); assert.ok(f.units.some((u) => u.purpose === 'assistant'));
     assert.ok(f.freeCompanies === 0 || f.freeCompanies === null, '확보 70% 를 우리 회사가 다 씀 → 무료 0곳');
     // 70% 넘음 → 정기 실행 알림 1번(다시 돌려도 1번)
     const { tick } = await import('../helpers.mjs');

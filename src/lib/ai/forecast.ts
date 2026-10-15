@@ -11,6 +11,13 @@ import { usdKrw } from './provider';
  * 모든 금액은 ai_usage 의 정가(건별 결제 가정). 확보 크레딧·다음 달 확보·콘솔 실제 청구·AI 몫 비율은 운영자가 입력(app_settings ai_finance).
  */
 const KEY = 'ai_finance';
+/** 검토용 요금표(V27 확정안, 1인 월) — 계산·표시 전용. 실제 요금(plans)은 대표 확정 후 따로 바꾼다 */
+const REVIEW_PRICES = [
+  { code: 'free', name: '무료', perUserKrw: 0, note: '10명까지 — AI 한도로 관리' },
+  { code: 'basic', name: '베이직', perUserKrw: 2200, note: '' },
+  { code: 'standard', name: '스탠다드', perUserKrw: 4500, note: '' },
+  { code: 'pro', name: '프로', perUserKrw: 8500, note: '' },
+];
 export const financeInput = z.object({
   securedUsd: z.number().min(0).max(1_000_000).optional(),        // 이번 달 확보 크레딧(예: Max $100)
   nextSecuredUsd: z.number().min(0).max(1_000_000).optional(),    // 다음 달 확보 예정
@@ -60,7 +67,7 @@ export async function computeForecast(sql: Sql) {
   const rate = usdKrw();
   const { month, start: startDay, days, elapsed, today } = monthInfo(f.cycleStart);
   const start = sql`(${startDay}::date::timestamp at time zone 'Asia/Seoul')`;
-  const [[cum], byTenant, byPurpose, [week], unitRows, [docAvg], userRows, plans] = await Promise.all([
+  const [[cum], byTenant, byPurpose, [week], unitRows, [docAvg], userRows] = await Promise.all([
     sql<{ usd: number }[]>`select coalesce(sum(cost_usd), 0)::float8 usd from ai_usage where created_at >= ${start}`,
     sql<{ tenant: string; name: string | null; usd: number }[]>`select a.tenant, t.name, sum(a.cost_usd)::float8 usd from ai_usage a left join tenants t on t.id = a.tenant where a.created_at >= ${start} group by a.tenant, t.name order by usd desc`,
     sql<{ purpose: string; usd: number; n: number }[]>`select coalesce(purpose, 'assistant') purpose, sum(cost_usd)::float8 usd, count(*)::int n from ai_usage where created_at >= ${start} group by 1 order by usd desc`,
@@ -72,7 +79,6 @@ export async function computeForecast(sql: Sql) {
     sql<{ avg: number | null; n: number }[]>`select avg(cost_usd)::float8 avg, count(*)::int n from ai_doc_jobs where status = 'done' and created_at >= now() - interval '30 days'`,
     // 사람별 최근 30일 사용(원) — 사용한 사람만
     sql<{ usd: number }[]>`select sum(cost_usd)::float8 usd from ai_usage where created_at >= now() - interval '30 days' and user_id is not null group by user_id order by 1`,
-    sql<{ code: string; name: string; per_user_krw: number | null; monthly_krw: number | null; min_users: number | null }[]>`select code, name, per_user_krw, monthly_krw, min_users from plans where active order by sort`,
   ]);
   const monthUsd = cum.usd;
   const forecastUsd = (monthUsd / elapsed) * days;
@@ -99,12 +105,13 @@ export async function computeForecast(sql: Sql) {
   const rechargeUsd = Math.max(0, forecastUsd * 1.2 - f.nextSecuredUsd);
   const units = [...unitRows.map((r) => ({ purpose: r.purpose, krw: Math.round(r.avg * rate * 10) / 10, n: r.n })),
     ...(docAvg.n ? [{ purpose: 'doc_job', krw: Math.round((docAvg.avg ?? 0) * rate * 10) / 10, n: docAvg.n }] : [])];
-  // 요금 역산: 1인 AI 원가 × 2 = AI 몫 최소 → 요금 × AI 몫 비율과 비교(보통 사용자 기준)
+  // 요금 역산(V28 로컬 요청): 실제 plans 가 아닌 "검토용 요금표"(V27 확정안)로 계산 — 무료는 적자/흑자가 아니라 AI 한도로 관리.
+  // 유료만 1인 AI 원가(보통 사용자, 추정/실측) × 2 와 1인 요금 × AI 몫 비율을 비교한다. plans 테이블 요금은 바꾸지 않는다
   const needPerUser = tiers.medium * 2;
-  const pricing = plans.filter((p) => p.per_user_krw !== null || p.monthly_krw !== null).map((p) => {
-    const perUser = p.per_user_krw ?? (p.monthly_krw && p.min_users ? Math.round(p.monthly_krw / p.min_users) : p.monthly_krw ?? 0);
-    const aiPart = Math.round(perUser * f.aiShare);
-    return { code: p.code, name: p.name, perUserKrw: perUser, aiPartKrw: aiPart, needKrw: needPerUser, deficit: perUser > 0 && aiPart < needPerUser };
+  const pricing = REVIEW_PRICES.map((p) => {
+    if (!p.perUserKrw) return { code: p.code, name: p.name, free: true, note: p.note, perUserKrw: 0, aiPartKrw: 0, needKrw: needPerUser, deficit: false };
+    const aiPart = Math.round(p.perUserKrw * f.aiShare);
+    return { code: p.code, name: p.name, free: false, note: p.note, perUserKrw: p.perUserKrw, aiPartKrw: aiPart, needKrw: needPerUser, deficit: aiPart < needPerUser };
   });
   const usedPct = f.securedUsd > 0 ? Math.round((monthUsd / f.securedUsd) * 100) : null;
   return {

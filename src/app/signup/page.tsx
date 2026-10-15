@@ -5,6 +5,7 @@ import { ArrowRight, Building2, CheckCircle2, Loader2, MailCheck, User } from 'l
 import { AuthCard, PasswordInput } from '@/components/AuthCard';
 import { Button, Field, cx, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
+import { conversionTagsConfigured, setAdsConsent } from '@/components/conversion';
 
 /** V15 공개 가입: 개인으로 시작 / 팀(회사)으로 시작 → 확인 메일 */
 export default function SignupPage() {
@@ -12,6 +13,7 @@ export default function SignupPage() {
   const [mode, setMode] = useState<'personal' | 'team'>('personal');
   const [f, setF] = useState({ name: '', email: '', password: '', company: '', website: '' });
   const [agree, setAgree] = useState({ terms: false, privacy: false, ai: false, marketing: false });
+  const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<{ message: string; devLink?: string } | null>(null);
@@ -24,7 +26,8 @@ export default function SignupPage() {
     if (!agree.terms || !agree.privacy) { setErr('필수 약관에 동의해 주세요'); return; }
     setBusy(true);
     try {
-      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, mode, agree, openedAt: opened.current } });
+      setAdsConsent(ads);
+      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, mode, agree: { ...agree, ads }, openedAt: opened.current } });
       setDone(r);
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
   }
@@ -71,6 +74,7 @@ export default function SignupPage() {
           {box('privacy', <><Link href="/privacy" target="_blank" className="underline">개인정보 수집·이용</Link> 동의</>, true)}
           {box('ai', <><Link href="/ai-notice" target="_blank" className="underline">AI 기능 이용</Link>(입력 내용이 AI 처리 업체로 전송) 동의</>, false)}
           {box('marketing', '새 기능·혜택 소식 받기', false)}
+          {conversionTagsConfigured() && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" data-testid="agree-ads" /><span>광고 효과 측정(가입 완료 1회 — Meta·Google·네이버 태그) 동의 <span className="text-ink-3">(선택)</span></span></label>}
         </div>
         {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
         <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy || enabled === null} data-testid="signup-submit">{busy ? <><Loader2 className="animate-spin" />가입 중…</> : <>가입하고 확인 메일 받기<ArrowRight /></>}</Button>
