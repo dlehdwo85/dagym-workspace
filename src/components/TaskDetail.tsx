@@ -19,6 +19,7 @@ import {
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, uploadTaskFiles } from '@/components/Attachments';
+import { TaskMail } from '@/components/TaskMail';
 import { DropZone, UploadProgress } from '@/components/upload';
 import { BellChip, DuePicker, warnAway } from '@/components/TaskQuick';
 import { TIMES, timeLabel } from '@/components/DateTimePickers';
@@ -30,7 +31,7 @@ const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
   reopened: '다시 열기', deleted: '삭제', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
   checklist_done: '체크리스트 완료', reassigned: '재배정', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
-  file_attached: '파일 첨부', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
+  file_attached: '파일 첨부', mail_queued: '메일 보내기 요청', mail_sent: '메일 보냄', mail_failed: '메일 발송 실패', share_created: '다운로드 링크 만듦', share_opened: '고객이 자료를 열어봄', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
 const FIELD_LABEL: Record<string, string> = {
   title: '제목', description: '설명', assigneeId: '담당자', requestedById: '지시자', priority: '우선순위', startDate: '시작일', dueDate: '마감일', dueTime: '마감 시각', status: '상태',
@@ -630,6 +631,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         <section className={cx('min-w-0', wide && 'lg:col-start-1 lg:row-start-3')} data-testid="attach-section">
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.att} onClick={() => toggleFold('att')} label="자료·첨부" />{data.attachments.length > 0 && <span className="text-xs font-medium text-ink-2">{data.attachments.length}</span>}</h2>
           {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.approve} onChange={reload} meId={user.id} />}
+          {!fold.att && <TaskMail taskId={id} onChange={reload} />}
         </section>
         <div className={cx('min-w-0 space-y-6', wide && 'lg:col-start-1 lg:row-start-4')}>
         {/* V14 27번: 연결 일정은 있을 때만 한 줄씩 (실행 시간 배정은 ⋯ 메뉴) */}
@@ -707,6 +709,8 @@ function HistLine({ h, userName }: { h: any; userName: (id: string | null) => st
       <span key={k} className="ml-1">[{FIELD_LABEL[k]}: {fmtVal(k, v?.from, userName)} → {fmtVal(k, v?.to, userName)}]</span>
     ))}
     {h.changes?.note && <span className="ml-1">“{h.changes.note}”</span>}
+    {['mail_queued', 'mail_sent', 'mail_failed'].includes(h.action) && <span className="ml-1">“{h.changes?.subject}” → {(h.changes?.to ?? []).join(', ')}{h.changes?.error ? ` (${h.changes.error})` : ''}</span>}
+    {['share_created', 'share_opened'].includes(h.action) && <span className="ml-1">{(h.changes?.files ?? []).join(', ')}</span>}
     {['file_attached', 'link_attached', 'attachment_removed', 'checklist_added', 'checklist_done', 'checklist_undone', 'checklist_removed'].includes(h.action) && <span className="ml-1">{h.changes?.name ?? h.changes?.title ?? h.changes?.text}</span>}
   </>;
 }

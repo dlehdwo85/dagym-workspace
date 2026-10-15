@@ -57,5 +57,6 @@ export const NOTIFICATION_TYPES = {
   usage_alert: '사용량 한도(저장공간·AI·사용자) 80%·100%',
   chat: '메신저 새 메시지',
   month_close: '월 마감 기록(지난달 완료·이월·지연)',
+  mail_status: '메일 발송 실패·고객 자료 열람',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

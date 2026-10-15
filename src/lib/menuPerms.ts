@@ -30,11 +30,14 @@ export const MENUS = {
   reassign: { label: '업무 담당자 재배정', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   reassign_requester: { label: '지시자는 자기 업무 재배정 가능', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
   reassign_handoff: { label: '담당자가 다른 사람에게 넘기기(지시자 승인)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  // V21 메일·문자 보내기: 실제 발송([보내기])은 기본 대표만, 사용자 관리에서 사람별로 켬. 메일 계정·명함 설정은 대표·본사 관리자
+  send_external: { label: '외부 발송(메일·문자 보내기)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  mail_settings: { label: '메일 계정·명함 설정', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
 } as const;
 export type MenuKey = keyof typeof MENUS;
 export const LEVEL_LABEL: Record<string, string> = { none: '끔', view: '조회', edit: '조회·편집', use: '사용', delete: '삭제까지' };
 /** 메뉴별 단계 이름 (자료실은 "올리기·수정") */
-export const levelLabel = (menu: string, lv: string) => (menu === 'library' && lv === 'edit' ? '올리기·수정' : menu.startsWith('reassign') ? (lv === 'use' ? '켬' : '끔') : menu === 'assistant' ? (lv === 'use' ? '사용' : '끔') : LEVEL_LABEL[lv] ?? lv);
+export const levelLabel = (menu: string, lv: string) => (menu === 'library' && lv === 'edit' ? '올리기·수정' : menu.startsWith('reassign') || menu === 'send_external' ? (lv === 'use' ? '켬' : '끔') : menu === 'assistant' ? (lv === 'use' ? '사용' : '끔') : LEVEL_LABEL[lv] ?? lv);
 export const RANK: Record<string, number> = { none: 0, view: 1, use: 1, edit: 2, delete: 3 };
 const topLevel = (menu: MenuKey) => MENUS[menu].levels[MENUS[menu].levels.length - 1] as string;
  /** 개인 공간(1인)에서는 관리·회사 메뉴를 숨긴다 */

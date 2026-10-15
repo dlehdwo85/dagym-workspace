@@ -19,10 +19,11 @@ export const profileInput = z.object({
   font: z.string().trim().max(60).nullable().optional(), note: z.string().trim().max(1000).nullable().optional(), isDefault: z.boolean().optional(),
 });
 export type CompanyProfile = { id: string; key: string; name: string; ceo: string | null; biz_no: string | null; address: string | null; phone: string | null; fax: string | null; email: string | null;
-  website: string | null; bank: string | null; logo_file_id: string | null; brand_color: string | null; font: string | null; note: string | null; is_default: boolean };
+  website: string | null; bank: string | null; logo_file_id: string | null; brand_color: string | null; font: string | null; note: string | null; is_default: boolean;
+  sig_intro?: string | null; sig_disclaimer?: string | null; sig_disclaimer_en?: string | null };
 
 export async function companyProfiles(tenant: string, sql: Sql = db()) {
-  return sql<CompanyProfile[]>`select id, key, name, ceo, biz_no, address, phone, fax, email, website, bank, logo_file_id, brand_color, font, note, is_default
+  return sql<CompanyProfile[]>`select id, key, name, ceo, biz_no, address, phone, fax, email, website, bank, logo_file_id, brand_color, font, note, is_default, sig_intro, sig_disclaimer, sig_disclaimer_en
     from company_profiles where tenant = ${tenant} order by is_default desc, key`;
 }
 export async function listProfiles(u: SessionUser) {
