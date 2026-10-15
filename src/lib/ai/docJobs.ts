@@ -22,7 +22,7 @@ export async function getDocJob(u: SessionUser, id: string) {
     select id, version, status, created_at from down order by version, created_at`;
   return { job: { id: j.id, title: j.title, kind: j.kind, mode: j.mode, version: j.version, status: j.status, pages: j.pages, summary: j.summary, error: j.error,
     resultName: j.result_name, resultSize: j.result_size, hasFile: !!j.result_key, hasPreview: !!j.preview_key, savedFileId: j.saved_file_id, costUsd: Number(j.cost_usd), createdAt: j.created_at, finishedAt: j.finished_at,
-    ...(isAdmin(u) && j.debug ? { debug: j.debug } : {}) }, // 운영 진단(대표·관리자만)
+    ...(isAdmin(u) && j.debug ? { debug: j.debug } : {}), ...(isAdmin(u) ? { costKrw: Math.round(Number(j.cost_usd) * (Number(process.env.USD_KRW) || 1400)), model: j.model } : {}) }, // 운영 진단·작업 비용(대표·관리자만)
     versions };
 }
 export async function docJobFile(u: SessionUser, id: string, what: 'file' | 'preview') {
@@ -37,23 +37,24 @@ export async function docJobFile(u: SessionUser, id: string, what: 'file' | 'pre
     'cache-control': 'private, max-age=300',
   } });
 }
-export const saveDocInput = z.object({ folder: z.string().max(200).optional(), title: z.string().trim().min(1).max(200).optional(), taskId: z.string().uuid().optional() });
+export const saveDocInput = z.object({ folder: z.string().max(200).optional(), title: z.string().trim().min(1).max(200).optional(), taskId: z.string().uuid().optional(), asTemplate: z.boolean().optional() });
 export async function saveDocJob(u: SessionUser, id: string, i: z.infer<typeof saveDocInput>) {
   const j = await own(u, id);
   if (j.status !== 'done' || !j.result_key) throw forbidden('아직 결과 파일이 없습니다');
   const { saveGeneratedFile, folderLevel, cleanFolder, attachLibraryToTask, assertConfidentialAudience } = await import('../library');
   const { RANK } = await import('../menuPerms');
-  const folder = cleanFolder(i.folder ?? '') || 'AI 문서';
+  // V22 부록 2: [양식으로 저장] = 폴더 "양식"·태그 "양식" → 다음부터 칸 채우기(코드 실행 없이 거의 무료)
+  const folder = cleanFolder(i.folder ?? '') || (i.asTemplate ? '양식' : 'AI 문서');
   if (RANK[await folderLevel(u, folder)] < RANK.edit) throw forbidden(`"${folder}" 폴더에 저장할 권한이 없습니다`);
   if (i.taskId && j.confidential) await assertConfidentialAudience(i.taskId);
-  const title = i.title ?? `${j.title}${j.version > 1 ? ` v${j.version}` : ''}`;
+  const title = i.title ?? (i.asTemplate ? `${j.title} 양식` : `${j.title}${j.version > 1 ? ` v${j.version}` : ''}`);
   const ext = (j.result_name as string).split('.').pop();
   const f = await saveGeneratedFile(u, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').trim()}.${ext}`, mime: j.result_mime, data: await getObject(j.result_key), title, folder,
-    tags: ['AI', `v${j.version}`], description: `AI 비서 문서 작업(v${j.version})${j.summary ? ` — ${String(j.summary).slice(0, 200)}` : ''}`, source: 'ai', security: j.confidential ? 'confidential' : undefined });
+    tags: i.asTemplate ? ['양식', 'AI'] : ['AI', `v${j.version}`], description: `AI 비서 문서 작업(v${j.version})${j.summary ? ` — ${String(j.summary).slice(0, 200)}` : ''}`, source: 'ai', security: j.confidential ? 'confidential' : undefined });
   const sql = db();
   await sql`insert into library_folders (tenant, path, created_by) values (${tenantOf(u)}, ${folder}, ${u.id}) on conflict do nothing`;
   if (i.taskId) await attachLibraryToTask(u, f.id, i.taskId);
-  await sql`update ai_doc_jobs set saved_file_id = ${f.id} where id = ${j.id}`;
+  if (!i.asTemplate) await sql`update ai_doc_jobs set saved_file_id = ${f.id} where id = ${j.id}`;
   await audit(sql, u.id, 'ai.doc_saved', 'library_file', f.id, { job: j.id, version: j.version, taskId: i.taskId ?? null }, null);
-  return { fileId: f.id, link: i.taskId ? `/tasks/${i.taskId}` : `/library?file=${f.id}` };
+  return { fileId: f.id, template: !!i.asTemplate, link: i.taskId ? `/tasks/${i.taskId}` : `/library?file=${f.id}` };
 }

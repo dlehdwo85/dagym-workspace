@@ -500,7 +500,7 @@ const CHIP_DOT: Record<TaskStatus, string> = { todo: 'bg-slate-400', in_progress
 let tipClaimed = false; // 한 화면에 말풍선은 하나만
 /**
  * V11 1번·V14 43번: 상태 칩 = 누르는 버튼(테두리 알약 + ▾, 터치 44px, 눌림 효과) — 누르면 메뉴 맨 위 [✓ 완료](결재가 필요하면 [검토 요청]) 다음 나머지 상태.
- * 바꿀 수 없는 사람에게는 ▾ 없는 평평한 표시 + 자물쇠(누르면 이유 안내). 처음 3번은 "눌러서 상태 바꾸기" 말풍선.
+ * 바꿀 수 없는 사람에게는 ▾ 없는 평평한 표시 + 자물쇠(누르면 이유 안내). 처음 3번은 "눌러서 상태 바꾸기" 말풍선(칩 오른쪽 — 제목을 가리지 않게).
  */
 function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any }) {
   const { user } = useSession();
@@ -535,7 +535,7 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
         className={cx('hit inline-flex h-8 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border pl-2 pr-1.5 text-[12px] font-semibold shadow-sm transition active:scale-95 active:shadow-none', CHIP_TONE[t.status])}>
         <span className={cx('size-1.5 shrink-0 rounded-full', ack === '확인 전' ? 'bg-red-500' : CHIP_DOT[t.status])} aria-hidden />{STATUS_LABEL[t.status]}{sub}<ChevronDown className="size-3.5 shrink-0 opacity-70" aria-hidden />
       </button>
-      {tip && <span className="pointer-events-none absolute bottom-full left-0 z-10 mb-1 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] text-white shadow-pop after:absolute after:left-4 after:top-full after:border-4 after:border-transparent after:border-t-ink" data-testid="status-tip">눌러서 상태 바꾸기</span>}
+      {tip && <span className="pointer-events-none absolute left-full top-1/2 z-10 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] text-white shadow-pop after:absolute after:right-full after:top-1/2 after:-translate-y-1/2 after:border-4 after:border-transparent after:border-r-ink" data-testid="status-tip">눌러서 상태 바꾸기</span>}
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={200}>
         {canSetStatus(t, user.id, quick) && quick !== t.status && (
           <button type="button" onClick={() => go(quick)} data-testid="status-quick"

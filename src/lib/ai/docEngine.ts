@@ -1,7 +1,7 @@
 import Anthropic, { toFile } from '@anthropic-ai/sdk';
 import { db } from '../db';
 import { getObject, putObject } from '../storage';
-import { costUsd, modelFor } from './provider';
+import { costUsd } from './provider';
 import { companyProfiles, profileText } from '../companyProfiles';
 import { logError } from '../log';
 
@@ -19,6 +19,8 @@ const MIME: Record<string, string> = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', csv: 'text/csv', md: 'text/markdown', txt: 'text/plain',
 };
+/** 문서 엔진 모델: 기본 AI_MODEL_DOC(Haiku), 새 디자인은 AI_MODEL_DOC_DEEP(Sonnet) */
+export const docModel = (deep: boolean) => (deep ? process.env.AI_MODEL_DOC_DEEP || 'claude-sonnet-5-5' : process.env.AI_MODEL_DOC || 'claude-haiku-5-5');
 const extOf = (n: string) => (n.toLowerCase().split('.').pop() ?? '');
 let client: Anthropic | null = null;
 const api = () => (client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, baseURL: process.env.ANTHROPIC_BASE_URL || undefined, maxRetries: 1, timeout: 590_000 }));
@@ -27,8 +29,9 @@ const SYSTEM = `당신은 회사 문서·디자인 담당입니다. 코드 실�
 규칙:
 - 결과 파일은 /mnt/user-data/outputs/ 에 저장합니다(환경 변수 OUTPUT_DIR 이 있으면 그 폴더에도 복사). 파일 이름은 한국어 제목 그대로(확장자 포함). 저장 뒤 ls -la 로 확인하세요.
 - 코드는 한 번에 아주 길게 쓰지 말고 단계(데이터 준비 → 파일 만들기 → 미리보기 점검)로 나눠 실행하세요.
-- 문서(xlsx·docx·pptx·pdf)를 만들면 LibreOffice 로 PDF 변환(soffice --headless --convert-to pdf) 후 첫 페이지를 pdftoppm -png -r 130 -f 1 -l 1 로 /mnt/user-data/outputs/preview.png 에 저장하고, 그 이미지를 직접 보고 점검하세요: 글자 잘림·겹침·정렬·페이지 수. 문제가 있으면 고쳐 다시 저장(점검은 최대 2번).
-- 1페이지 요청이면 인쇄 설정(A4, 한 페이지에 맞춤)과 행 높이·글자 크기를 조정해 PDF 가 1페이지가 되게 하세요. 그래도 넘치면 억지로 줄이지 말고 마지막 줄에 "1페이지 초과: 이유"를 쓰세요.
+- 문서(xlsx·docx·pptx·pdf)를 만들면 LibreOffice 로 PDF 변환(soffice --headless --convert-to pdf) → pdfinfo 로 쪽수만 확인 → 첫 페이지를 pdftoppm -png -r 130 -f 1 -l 1 로 /mnt/user-data/outputs/preview.png 에 저장. **미리보기 이미지를 열어 보지 마세요**(비용 절감 — 사람이 화면에서 봅니다).
+- 1페이지 요청인데 쪽수가 넘칠 때만 1번 고칩니다(인쇄 설정 A4·한 페이지에 맞춤, 행 높이·글자 크기). 그래도 넘치면 마지막 줄에 "1페이지 초과: 이유".
+- 단계는 적게: 가능하면 파일 만들기·변환·쪽수 확인·미리보기를 한 번의 스크립트로. 스킬 문서는 필요한 부분만 읽으세요.
 - 회사 정보는 아래 [회사] 데이터만 씁니다. 다른 회사(참고 양식의 회사 등)의 상호·사업자번호·주소·전화·로고를 결과에 남기지 마세요.
 - 숫자는 참고 자료·지시에 있는 값만 쓰고, 계산은 코드로 합니다. 모르는 값은 칸을 비우고 "확인 필요"로 표시.
 - 디자인: 회사 브랜드 색을 강조색으로, 표는 얇은 테두리·머리글 채우기, 넉넉한 여백, 숫자 오른쪽 정렬·천 단위 쉼표, 원화는 "원".
@@ -67,16 +70,21 @@ async function anthropicFileFor(libId: string): Promise<{ id: string; name: stri
   return { id: up.id, name: f.file_name };
 }
 
-/** 작업 하나 실행 (중복 실행 방지: queued → running 으로 바꾼 쪽만) */
+/** 작업 하나 실행 (중복 실행 방지: queued → running 으로 바꾼 쪽만). 가벼운 모델이 실패하면 깊은 모델로 1번 더 */
 export async function processDocJob(id: string) {
+  const r = await runDocJob(id);
+  return 'retry' in r ? runDocJob(id) : r;
+}
+async function runDocJob(id: string): Promise<Record<string, unknown>> {
   const sql = db();
-  const [job] = await sql<Job[]>`update ai_doc_jobs set status = 'running', started_at = now()
+  const [job] = await sql<(Job & { design: boolean })[]>`update ai_doc_jobs set status = 'running', started_at = now()
     where id = ${id} and (status = 'queued' or (status = 'running' and started_at < now() - interval '10 minutes')) returning *`;
   if (!job) return { skipped: true };
-  let inTok = 0, outTok = 0, cost = 0;
+  let inTok = 0, outTok = 0, cost = 0, cacheR = 0, cacheW = 0, retry = false;
   const debug: { steps: any[]; container?: string | null; found?: number; fallback?: string; lastText?: string; skipped?: string[]; error?: string } = { steps: [] };
   const saveDebug = () => sql`update ai_doc_jobs set debug = ${sql.json(debug as never)} where id = ${job.id}`.catch(() => {});
-  const model = modelFor('default');
+  // V22 부록 2: 기본은 가벼운 모델(Haiku), "새로 디자인"·가벼운 모델 실패 뒤 다시 할 때만 깊은 모델(Sonnet)
+  let model = docModel(job.design);
   try {
     // 참고 파일 + (고치기면) 직전 버전 결과 + 회사 로고 → 컨테이너에 올림
     const uploads: { id: string; name: string; role: string }[] = [];
@@ -108,20 +116,21 @@ export async function processDocJob(id: string) {
         model, max_tokens: 20000, system: SYSTEM, messages,
         container: { ...(container ? { id: container } : {}), ...(skill ? { skills: [{ type: 'anthropic' as const, skill_id: skill, version: 'latest' }] } : {}) },
         tools: [{ type: 'code_execution_20260521' as const, name: 'code_execution' as const }],
-        betas: ['code-execution-2025-08-25'], output_config: { effort: 'medium' as const },
+        betas: ['code-execution-2025-08-25'], ...(/haiku/.test(model) ? {} : { output_config: { effort: 'low' as const } }),
+        cache_control: { type: 'ephemeral' as const }, // 이어 받기(pause_turn·잘림)·같은 대화 연속 작업에서 지시문·회사 정보·이전 단계를 캐시로
       };
       const r = await api().beta.messages.create(params as never).catch(async (e: any) => {
         // 지난 컨테이너가 만료됐으면 새 컨테이너로 한 번 더
         if (container && (e?.status === 400 || e?.status === 404)) { container = null; return api().beta.messages.create({ ...params, container: skill ? { skills: params.container.skills } : undefined } as never); }
         throw e;
       }) as Anthropic.Beta.BetaMessage;
-      inTok += r.usage.input_tokens; outTok += r.usage.output_tokens; cost += costUsd(r.model ?? model, r.usage);
+      inTok += r.usage.input_tokens; outTok += r.usage.output_tokens; cacheR += r.usage.cache_read_input_tokens ?? 0; cacheW += r.usage.cache_creation_input_tokens ?? 0; cost += costUsd(r.model ?? model, r.usage);
       container = r.container?.id ?? container;
       const ids = collectFileIds(r.content).filter((x) => !uploadedIds.has(x));
       outputs.push(...ids);
       const stepText = (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
       if (stepText) text = stepText; // 마지막 단계의 글이 요약
-      debug.steps.push({ stop: r.stop_reason, types: countTypes(r.content as any[]), files: ids.length, out: r.usage.output_tokens });
+      debug.steps.push({ stop: r.stop_reason, types: countTypes(r.content as any[]), files: ids.length, in: r.usage.input_tokens, out: r.usage.output_tokens, cacheR: r.usage.cache_read_input_tokens ?? 0, model: r.model ?? model });
       debug.container = container;
       if (r.stop_reason === 'refusal') throw new Error('이 요청은 처리할 수 없습니다');
       if (r.stop_reason === 'pause_turn') { messages.push({ role: 'assistant', content: r.content as never }); continue; }
@@ -182,17 +191,24 @@ export async function processDocJob(id: string) {
       result_key = ${main ? `${base}/${main.name}` : null}, result_name = ${main?.name ?? null}, result_mime = ${main ? MIME[extOf(main.name)] ?? 'application/octet-stream' : null},
       result_size = ${main?.buf.length ?? null}, result_anthropic_file_id = ${main?.fileId ?? null},
       preview_key = ${preview ? (preview === main ? `${base}/${main!.name}` : `${base}/preview.png`) : null},
-      input_tokens = ${inTok}, output_tokens = ${outTok}, cost_usd = ${cost} where id = ${job.id}`;
+      input_tokens = input_tokens + ${inTok}, output_tokens = output_tokens + ${outTok}, cache_read_tokens = cache_read_tokens + ${cacheR}, cache_write_tokens = cache_write_tokens + ${cacheW}, cost_usd = cost_usd + ${cost}, model = ${model} where id = ${job.id}`;
     return { done: true };
   } catch (e: any) {
+    // 가벼운 모델이 파일을 못 만들었으면 깊은 모델로 1번 다시(실패 비용은 그대로 기록)
+    if (!job.design && !e?.status && /결과 파일/.test(String(e?.message))) {
+      debug.error = `가벼운 모델 실패 → 깊은 모델로 다시: ${String(e?.message).slice(0, 200)}`; await saveDebug();
+      await sql`update ai_doc_jobs set status = 'queued', design = true, started_at = null, input_tokens = input_tokens + ${inTok}, output_tokens = output_tokens + ${outTok}, cache_read_tokens = cache_read_tokens + ${cacheR}, cache_write_tokens = cache_write_tokens + ${cacheW}, cost_usd = cost_usd + ${cost} where id = ${job.id}`;
+      retry = true;
+      return { retry: true };
+    }
     await logError('ai.doc_engine', e, { jobId: job.id });
     debug.error = String(e?.message ?? e).slice(0, 300); await saveDebug();
     const msg = e?.status ? `AI 서버 오류(${e.status})` : String(e?.message ?? '문서 작업 실패').slice(0, 300);
-    await sql`update ai_doc_jobs set status = 'failed', finished_at = now(), error = ${msg}, input_tokens = ${inTok}, output_tokens = ${outTok}, cost_usd = ${cost} where id = ${job.id}`;
+    await sql`update ai_doc_jobs set status = 'failed', finished_at = now(), error = ${msg}, input_tokens = input_tokens + ${inTok}, output_tokens = output_tokens + ${outTok}, cache_read_tokens = cache_read_tokens + ${cacheR}, cache_write_tokens = cache_write_tokens + ${cacheW}, cost_usd = cost_usd + ${cost}, model = ${model} where id = ${job.id}`;
     return { failed: msg };
   } finally {
     if (inTok || outTok) await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-      values (${job.tenant}, ${job.user_id}, ${crypto.randomUUID()}, 'anthropic', ${model}, ${inTok}, ${outTok}, 0, 0, ${cost}, 'doc_engine')`.catch(() => {});
+      values (${job.tenant}, ${job.user_id}, ${crypto.randomUUID()}, 'anthropic', ${model}, ${inTok}, ${outTok}, ${cacheR}, ${cacheW}, ${cost}, 'doc_engine')`.catch(() => {});
   }
 }
 

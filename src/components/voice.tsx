@@ -100,7 +100,11 @@ export function voiceErrorToast(err?: string) {
       ios ? { label: '설정 열기', run: () => { window.location.href = 'app-settings:'; } } : undefined);
     return;
   }
-  if (err === 'unsupported') toast.info('이 브라우저는 음성 인식을 지원하지 않습니다 — 키보드의 🎤(음성 입력)로 말해 주세요 (크롬·엣지·사파리는 지원)');
+  if (err === 'unsupported') {
+    // 앱인데 음성 인식 플러그인이 없으면 = 옛 버전 앱 → 업데이트 안내(브라우저 문구는 웹에서만)
+    if (Capacitor.isNativePlatform()) toast.info(`앱을 최신 버전으로 업데이트해 주세요 (${Capacitor.getPlatform() === 'ios' ? 'TestFlight·App Store' : 'Play 스토어'}) — 그동안은 키보드의 🎤(음성 입력)로 말하면 됩니다`);
+    else toast.info('이 브라우저는 음성 인식을 지원하지 않습니다 — 키보드의 🎤(음성 입력)로 말해 주세요 (크롬·엣지·사파리는 지원)');
+  }
   else toast.info('음성을 알아듣지 못했습니다 — 다시 눌러 말해 주세요');
 }
 

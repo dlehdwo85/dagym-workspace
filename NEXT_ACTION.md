@@ -362,6 +362,16 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 오른쪽 밀기 = 완료는 기존 기능 그대로.
 - 화면: docs/screens/v14-43-row-412.png.
 
+## V22 부록 2 문서 원가 절감 (2026-10-15 클라우드, migration 054)
+- 문서 엔진 기본 모델 = `AI_MODEL_DOC`(기본 claude-haiku-5-5), "새로 디자인"(run_file_task design=true)·가벼운 모델이 파일을 못 만들었을 때만 `AI_MODEL_DOC_DEEP`(기본 claude-sonnet-5-5)로 1번 다시(비용·토큰 합산).
+- 지시문: 미리보기 이미지를 AI 가 열어 보지 않음(pdfinfo 로 쪽수만), 1쪽 넘칠 때만 1번 고침, 단계는 한 스크립트로. 깊은 모델 effort low, 가벼운 모델은 effort 안 보냄.
+- 캐싱: 엔진 요청 cache_control(ephemeral) — 캐시 읽기/쓰기 토큰을 ai_doc_jobs·ai_usage 에 그대로 기록(전엔 0).
+- **V22-A 양식 채우기 실제 구현**(`src/lib/docFill.ts`): AI 도구 list_templates → read_template_layout(칸 주소·값·수식·병합·인쇄 설정 요약 + 고른 회사 정보) → fill_template(xlsx 칸 값 / docx 문장, 수식 칸은 그대로·열 때 다시 계산, A4 한 페이지 맞춤, 로고 그림 1개면 회사 로고로 교체). 코드 실행 없음 = 대화 비용만, 결과 카드 바로 완료(미리보기 이미지는 없음).
+- 카드: [양식으로 저장](자료실 "양식" 폴더·태그) → 다음부터 칸 채우기. 관리자에게 "이번 작업 약 OO원 · 가벼운/깊은 모델".
+- 아직 안 한 것: ⑤ 문서 요청일 때 대화 쪽을 짧게(분류 Haiku) — 대화 비용 실측 후 판단. 품목 줄 추가(행 삽입)·docx 표 서식 단위 치환은 다음.
+- 그 밖: V14 43 말풍선을 칩 오른쪽으로(제목 가림), 옛 앱(플러그인 없음)에서 음성 → "앱을 최신 버전으로 업데이트" 안내.
+- **실제 키 미검증**(가짜 서버) — 로컬에서 같은 견적서 요청으로 ① Haiku 새로 만들기 ② 양식 채우기 ③ Sonnet 새 디자인 비용·품질 비교 부탁.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨

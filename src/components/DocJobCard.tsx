@@ -6,7 +6,7 @@ import { api } from './client';
 import { Button, Modal, cx, toast } from './ui';
 
 type Job = { id: string; title: string; kind: string; mode: string; version: number; status: 'queued' | 'running' | 'done' | 'failed'; pages: number | null; summary: string | null; error: string | null;
-  resultName: string | null; resultSize: number | null; hasFile: boolean; hasPreview: boolean; savedFileId: string | null; costUsd: number; debug?: unknown };
+  resultName: string | null; resultSize: number | null; hasFile: boolean; hasPreview: boolean; savedFileId: string | null; costUsd: number; debug?: unknown; costKrw?: number; model?: string | null };
 const ICON: Record<string, typeof FileText> = { xlsx: FileSpreadsheet, pptx: Presentation };
 
 /**
@@ -31,10 +31,14 @@ export function DocJobCard({ id, onRefine }: { id: string; onRefine?: (text: str
     load();
     return () => { stop = true; clearTimeout(t); };
   }, [id]);
-  async function save() {
+  const [tpl, setTpl] = useState(false);
+  async function save(asTemplate = false) {
     setBusy(true);
-    try { const r = await api(`/api/ai/doc-jobs/${id}/save`, { body: {} }); setJob((j) => j && { ...j, savedFileId: r.fileId }); toast.ok('자료실 "AI 문서"에 저장했습니다'); }
-    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+    try {
+      const r = await api(`/api/ai/doc-jobs/${id}/save`, { body: asTemplate ? { asTemplate: true } : {} });
+      if (asTemplate) { setTpl(true); toast.ok('자료실 "양식"에 저장했습니다 — 다음부터 같은 문서는 값만 채워 거의 무료로 만듭니다'); }
+      else { setJob((j) => j && { ...j, savedFileId: r.fileId }); toast.ok('자료실 "AI 문서"에 저장했습니다'); }
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   const Icon = ICON[job?.kind ?? ''] ?? FileText;
   const working = !job || job.status === 'queued' || job.status === 'running';
@@ -60,11 +64,14 @@ export function DocJobCard({ id, onRefine }: { id: string; onRefine?: (text: str
               <a href={`/api/ai/doc-jobs/${id}/preview`} target="_blank" rel="noreferrer" className="mt-2 block text-center text-xs text-brand-700 underline">새 창에서 원본 크기로</a>
             </Modal></>}
           {job.summary && <p className="whitespace-pre-wrap px-2.5 py-2 text-xs text-ink-2">{job.summary}</p>}
+          {job.costKrw !== undefined && <p className="px-2.5 pb-1.5 text-[11px] text-ink-3" data-testid="doc-job-cost">이번 작업 약 {job.costKrw.toLocaleString('ko-KR')}원{job.mode === 'fill' ? ' · 양식 채우기(대화 비용만)' : job.model ? ` · ${/haiku/.test(job.model) ? '가벼운 모델' : '깊은 모델'}` : ''} (관리자에게만 보임)</p>}
           <div className="flex flex-wrap gap-1.5 px-2.5 pb-2.5">
             {job.hasFile && <a href={`/api/ai/doc-jobs/${id}/file`} className="inline-flex h-8 items-center gap-1 rounded-input bg-brand-600 px-2.5 text-xs font-semibold text-white hover:bg-brand-700" data-testid="doc-job-download"><Download className="size-3.5" />내려받기</a>}
             {job.hasFile && (job.savedFileId
               ? <Link href={`/library?file=${job.savedFileId}`} className="inline-flex h-8 items-center gap-1 rounded-input border border-green-300 px-2.5 text-xs font-medium text-green-700"><Library className="size-3.5" />자료실에 저장됨</Link>
-              : <Button size="sm" variant="secondary" onClick={save} disabled={busy} data-testid="doc-job-save"><Library />자료실에 저장</Button>)}
+              : <Button size="sm" variant="secondary" onClick={() => save()} disabled={busy} data-testid="doc-job-save"><Library />자료실에 저장</Button>)}
+            {job.hasFile && /^(xlsx|docx)$/.test(job.kind) && (tpl ? <span className="inline-flex h-8 items-center px-1 text-xs text-green-700">✓ 양식 저장됨</span>
+              : <Button size="sm" variant="ghost" onClick={() => save(true)} disabled={busy} data-testid="doc-job-template" title="다음부터 같은 문서를 값만 바꿔 싸고 빠르게"><FileText />양식으로 저장</Button>)}
             {onRefine && job.hasFile && <Button size="sm" variant="ghost" onClick={() => onRefine(`「${job.title}」 v${job.version}을 `)} data-testid="doc-job-refine"><Wand2 />더 다듬기</Button>}
           </div>
           {versions.length > 1 && (

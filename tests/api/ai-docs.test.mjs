@@ -141,14 +141,103 @@ describe('V22 문서 엔진', () => {
     assert.equal(eng.length, 2); assert.match(JSON.stringify(eng[1].body.messages.at(-1)), /결과 파일이 전달되지 않았습니다/);
     assert.equal(d.job.debug.fallback, 'files.list 1');
 
-    await ctl({ anthropicReset: true, anthropicQueue: [toolUse('t7', 'run_file_task', { mode: 'create', kind: 'pptx', title: '없는 발표', instructions: 'x' }), say('만들기 시작했습니다.'), say('만들었습니다.'), say('저장했습니다.')] });
+    const n1 = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicQueue: [toolUse('t7', 'run_file_task', { mode: 'create', kind: 'pptx', title: '없는 발표', instructions: 'x' }), say('만들기 시작했습니다.'),
+      say('만들었습니다.'), say('저장했습니다.'), say('깊은 모델: 만들었습니다.'), say('깊은 모델: 저장했습니다.')] });
     const r2 = await ctx.owner.ok('POST', '/api/ai/chat', { text: '발표 자료' });
     const d2 = await waitJob(ctx.owner, r2.docJobs[0].id);
     assert.equal(d2.job.status, 'failed'); assert.match(d2.job.error, /결과 파일을 받지 못했습니다/);
-    assert.equal(d2.job.debug.found, 0); assert.equal(d2.job.debug.lastText, '저장했습니다.');
+    assert.equal(d2.job.debug.found, 0); assert.equal(d2.job.debug.lastText, '깊은 모델: 저장했습니다.');
+    // V22 부록 2: 가벼운 모델(Haiku)이 실패하면 깊은 모델(Sonnet)로 1번 다시, 비용은 합산
+    const reqs2 = (await fakeState()).anthropic.slice(n1);
+    assert.deepEqual(reqs2.filter((x) => x.body.container).map((x) => x.body.model), ['claude-haiku-5-5', 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5']);
+    assert.equal(d2.job.model, 'claude-sonnet-5-5');
     // 시스템 지시: 시작만 알리고 완료형 금지
-    const chat = (await fakeState()).anthropic.at(-4);
+    const chat = reqs2.find((x) => !x.body.container);
     assert.match(chat.body.system?.[0]?.text ?? JSON.stringify(chat.body.system), /만들기 시작했습니다/);
+  });
+
+  test('부록 2 원가: 기본 가벼운 모델·캐시 지시·미리보기 이미지 안 봄·"새로 디자인"만 깊은 모델·캐시 토큰 기록·관리자에게 작업 비용', async () => {
+    const n0 = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicFiles: { fc1: { filename: '원가 시험.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', b64: xlsxBytes.toString('base64') } },
+      anthropicQueue: [toolUse('c1', 'run_file_task', { mode: 'create', kind: 'xlsx', title: '원가 시험', instructions: '표' }), say('만들기 시작했습니다.'),
+        { ...engineReply(['fc1']), usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 5000, cache_creation_input_tokens: 2000 } }] });
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '원가 시험 표' });
+    const d = await waitJob(ctx.owner, r.docJobs[0].id);
+    assert.equal(d.job.status, 'done', d.job.error);
+    const eng = (await fakeState()).anthropic.slice(n0).find((x) => x.body.container);
+    assert.equal(eng.body.model, 'claude-haiku-5-5'); assert.equal(eng.body.output_config, undefined, '가벼운 모델엔 effort 안 보냄');
+    assert.deepEqual(eng.body.cache_control, { type: 'ephemeral' });
+    assert.match(eng.body.system, /미리보기 이미지를 열어 보지 마세요/);
+    const [row] = await sql`select cache_read_tokens, cache_write_tokens, model from ai_doc_jobs where id = ${d.job.id}`;
+    assert.equal(row.cache_read_tokens, 5000); assert.equal(row.cache_write_tokens, 2000);
+    const [u] = await sql`select cache_read_tokens, cache_write_tokens from ai_usage where purpose = 'doc_engine' order by created_at desc limit 1`;
+    assert.equal(u.cache_read_tokens, 5000, '사용량에도 캐시 토큰');
+    assert.equal(typeof d.job.costKrw, 'number', '대표에게 작업 비용');
+    // 새로 디자인 → 깊은 모델
+    const n1 = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicFiles: { fc2: { filename: '디자인 시험.pptx', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', b64: xlsxBytes.toString('base64') } },
+      anthropicQueue: [toolUse('c2', 'run_file_task', { mode: 'create', kind: 'pptx', title: '디자인 시험', instructions: '세련되게', design: true }), say('만들기 시작했습니다.'), engineReply(['fc2'])] });
+    const r2 = await ctx.owner.ok('POST', '/api/ai/chat', { text: '새로 디자인해줘' });
+    await waitJob(ctx.owner, r2.docJobs[0].id);
+    const eng2 = (await fakeState()).anthropic.slice(n1).find((x) => x.body.container);
+    assert.equal(eng2.body.model, 'claude-sonnet-5-5'); assert.deepEqual(eng2.body.output_config, { effort: 'low' });
+  });
+
+  test('V22-A 양식 채우기: [양식으로 저장] → 양식 찾기·요약 지도(회사 정보 포함) → 칸 채우기 = 코드 실행 없음·서식 그대로·로고 교체·다른 회사 정보 없음', async () => {
+    const { readFileSync } = await import('node:fs');
+    const up = async (name, mime, buf, folder, tags) => {
+      const init = await ctx.owner.ok('POST', '/api/library', { fileName: name, mimeType: mime, size: buf.length, folder, tags });
+      await fetch(BASE + init.upload.url, { method: 'PUT', headers: init.upload.headers, body: buf });
+      await ctx.owner.ok('POST', `/api/library/${init.id}/complete`);
+      return init.id;
+    };
+    const tplBuf = readFileSync(new URL('../fixtures/quote-template.xlsx', import.meta.url));
+    const tpl = await up('견적서 양식.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', tplBuf, '양식', ['양식']);
+    const logo = await up('다짐 로고.png', 'image/png', png, '회사 로고', ['로고']);
+    await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'dagym', name: '시험상호 다짐', ceo: '시험대표', bizNo: '000-00-00000', address: '시험시 시험구', phone: '02-000-0000', brandColor: '#0F766E', isDefault: true, logoFileId: logo });
+    const n0 = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicQueue: [
+      toolUse('f1', 'list_templates', { query: '견적서' }),
+      toolUse('f2', 'read_template_layout', { fileId: tpl, company: 'dagym' }),
+      toolUse('f3', 'fill_template', { sourceFileId: tpl, title: '다짐 견적서 10월', company: 'dagym', fitOnePage: true, replaceLogo: true,
+        edits: [{ cell: 'B3', value: '시험상호 다짐' }, { cell: 'B4', value: '000-00-00000' }, { cell: 'A8', value: '요가' }, { cell: 'B8', value: 3 }, { cell: 'C8', value: 30000 }, { cell: 'D10', value: 999 }] }),
+      say('견적서를 만들었습니다.')] });
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '견적서 양식으로 다짐 10월 견적서, 요가 3회 3만원 추가' });
+    const reqs = (await fakeState()).anthropic.slice(n0);
+    assert.ok(!reqs.some((x) => x.body.container), '코드 실행(문서 엔진) 안 씀');
+    assert.match(JSON.stringify(reqs[1].body.messages.at(-1)), /견적서 양식/, '양식 목록');
+    const layoutMsg = JSON.stringify(reqs[2].body.messages.at(-1));
+    assert.ok(layoutMsg.includes('B3') && layoutMsg.includes('시험상호 하이링크') && layoutMsg.includes('=SUM(D7:D9)'), '요약 지도: 칸·값·수식');
+    assert.ok(layoutMsg.includes('시험상호 다짐') && layoutMsg.includes('000-00-00000'), '고른 회사 정보');
+    const fillRes = JSON.stringify(reqs[3].body.messages.at(-1));
+    assert.match(fillRes, /D10 는 수식 칸이라 그대로 둠/);
+    assert.equal(r.docJobs.length, 1); assert.equal(r.docJobs[0].status, 'done');
+    const d = await ctx.owner.ok('GET', `/api/ai/doc-jobs/${r.docJobs[0].id}`);
+    assert.equal(d.job.mode, 'fill'); assert.ok(d.job.hasFile); assert.equal(d.job.hasPreview, false);
+    const f = await fetch(`${BASE}/api/ai/doc-jobs/${d.job.id}/file`, { headers: { cookie: ctx.owner.cookie } });
+    const out = Buffer.from(await f.arrayBuffer());
+    assert.ok(out.length > 1000 && out.subarray(0, 2).toString() === 'PK');
+    // 자료실에 저장 → 본문 추출로 내용 확인(다짐 정보 있음·하이링크 정보 없음)
+    const s1 = await ctx.owner.ok('POST', `/api/ai/doc-jobs/${d.job.id}/save`, {});
+    const [lf] = await sql`select text_content from library_files where id = ${s1.fileId}`;
+    assert.ok(lf.text_content.includes('시험상호 다짐') && lf.text_content.includes('요가'), lf.text_content);
+    assert.ok(!lf.text_content.includes('시험상호 하이링크') && !lf.text_content.includes('999-99-99999'), '다른 회사 정보 없음');
+    // [양식으로 저장] → 양식 폴더·태그
+    const s2 = await ctx.owner.ok('POST', `/api/ai/doc-jobs/${d.job.id}/save`, { asTemplate: true });
+    const [t2] = await sql`select folder, tags, title from library_files where id = ${s2.fileId}`;
+    assert.equal(t2.folder, '양식'); assert.ok(t2.tags.includes('양식')); assert.equal(t2.title, '다짐 견적서 10월 양식');
+    // 남의 양식(볼 수 없는 파일)은 못 씀
+    await ctl({ anthropicReset: true, anthropicQueue: [toolUse('f4', 'read_template_layout', { fileId: '00000000-0000-0000-0000-00000000abcd' }), say('없습니다')] });
+    await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '양식 보기' });
+    // docx 문장 바꾸기
+    const ntBuf = readFileSync(new URL('../fixtures/notice-template.docx', import.meta.url));
+    const nt = await up('공문 양식.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', ntBuf, '양식', ['양식']);
+    await ctl({ anthropicReset: true, anthropicQueue: [toolUse('f5', 'fill_template', { sourceFileId: nt, title: '휴관 공문', replacements: [{ from: '시험상호 하이링크', to: '시험상호 다짐' }, { from: '휴관 안내', to: '10월 휴관 안내' }] }), say('공문을 만들었습니다.')] });
+    const r3 = await ctx.owner.ok('POST', '/api/ai/chat', { text: '공문 양식으로 휴관 공문' });
+    const s3 = await ctx.owner.ok('POST', `/api/ai/doc-jobs/${r3.docJobs[0].id}/save`, {});
+    const [lf3] = await sql`select text_content from library_files where id = ${s3.fileId}`;
+    assert.ok(lf3.text_content.includes('발신: 시험상호 다짐') && lf3.text_content.includes('10월 휴관 안내') && !lf3.text_content.includes('하이링크'));
   });
 
   test('회사 설정: 웹 도구 끄기·문서 작업 끄기', async () => {

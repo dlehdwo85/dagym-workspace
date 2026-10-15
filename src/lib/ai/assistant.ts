@@ -160,7 +160,21 @@ const TOOLS: AiTool[] = [
       referenceFileIds: { type: 'array', items: { type: 'string' }, description: '참고할 자료실 파일 id(첨부·검색으로 찾은 것)' },
       baseJobId: str('고칠 이전 파일 작업 id (대화 기록의 [파일 작업: id=…])'),
       company: str('회사 정보 키(예: dagym, hilink) — 공급자·로고·브랜드 색. 모르면 비움(기본 회사)'),
+      design: { type: 'boolean', description: '사용자가 "새로 디자인/세련되게/처음부터" 를 원할 때만 true(더 비싼 모델). 보통은 비움' },
     }, required: ['mode', 'kind', 'title', 'instructions'] } },
+  // V22-A·부록 2: 양식 채우기 — 코드 실행 없이 서버가 원본 양식의 칸·문장만 바꿈(서식·로고 자리·인쇄 설정 그대로, 거의 무료)
+  { name: 'list_templates', description: '자료실의 문서 양식(태그·폴더 "양식", xlsx·docx) 목록. 견적서·공문·월 보고처럼 같은 양식에 값만 바꾸는 요청이면 먼저 본다.',
+    input_schema: { type: 'object', properties: { query: str('찾을 말(예: 견적서)') } } },
+  { name: 'read_template_layout', description: '양식 파일(xlsx·docx) 요약 지도: 시트별 값 있는 칸 주소·수식 칸·병합·인쇄 설정(xlsx), 단락 글(docx) + 고른 회사 정보. fill_template 전에 본다.',
+    input_schema: { type: 'object', properties: { fileId: str('자료실 파일 id'), company: str('회사 정보 키(모르면 비움 = 기본 회사)') }, required: ['fileId'] } },
+  { name: 'fill_template', description: '양식을 복사해 칸 값(xlsx: edits)·문장(docx: replacements)만 바꿔 새 파일을 바로 만든다(화면 카드, 자료실 저장은 사람이). 수식 칸은 쓰지 말 것(열 때 다시 계산됨). 공급자 칸은 read_template_layout 의 [회사] 값만, 다른 회사 정보는 남기지 말 것.',
+    input_schema: { type: 'object', properties: {
+      sourceFileId: str('양식 파일 id'), title: str('새 파일 제목(확장자 없이)'), company: str('회사 정보 키'),
+      edits: { type: 'array', items: { type: 'object', properties: { sheet: { type: 'string' }, cell: { type: 'string' }, value: { type: ['string', 'number', 'null'] } }, required: ['cell', 'value'] }, description: 'xlsx 칸 값(예: {cell:"B3", value:"주식회사 다짐"})' },
+      replacements: { type: 'array', items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] }, description: 'docx 문장 바꾸기' },
+      fitOnePage: { type: 'boolean', description: 'xlsx 인쇄를 A4 한 페이지에 맞춤' },
+      replaceLogo: { type: 'boolean', description: '원본 로고 그림을 고른 회사 로고로 바꿈(그림 1개·같은 형식일 때)' },
+    }, required: ['sourceFileId', 'title'] } },
 ];
 
 const WEB_TOOLS: AiTool[] = [
@@ -173,6 +187,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
 - 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
+- 문서 비용을 아끼세요: 견적서·공문·월 보고처럼 **양식이 있고 값만 바꾸면 되는** 요청은 list_templates(또는 첨부·참고 xlsx/docx) → read_template_layout → fill_template 로 바로 만드세요(거의 무료, 서식 그대로). 양식이 없거나 구조·디자인을 새로 해야 할 때만 run_file_task.
 - 서식·디자인이 중요한 문서(견적서·보고서·제안서·안내문·PPT)나 "참고해서 만들어/더 세련되게/색 바꿔" 같은 요청, 엑셀·CSV 계산·차트 분석은 run_file_task 를 쓰세요(실제 파일·미리보기). 앞서 만든 파일을 고칠 때는 대화 기록의 [파일 작업: id=…] 를 baseJobId 로 mode=edit. run_file_task 를 부른 뒤에는 "만들기 시작했습니다(1~3분, 아래 카드에 미리보기가 나옵니다)"처럼 시작했다고만 말하고, "~했습니다·~뺐습니다·~맞췄습니다" 같은 완료형으로 결과를 설명하지 마세요(아직 만들지 않았음). 간단한 글 문서는 propose_create_document, 단순 데이터 표는 propose_xlsx_report.
 - 최신 정보·외부 자료가 필요하면 웹 검색(켜져 있을 때)을 쓰고 출처 링크를 답에 붙이세요.
 - 첨부한 이미지·문서를 보고 간단한 글 문서를 만들어 달라고 하면 propose_create_document 로, 표·숫자 위주면 propose_xlsx_report 로 제안하세요. 이미지에서 읽은 내용만 쓰고, 읽기 어려운 부분은 "확인 필요"로 표시하세요.
@@ -445,7 +460,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
     }
     case 'run_file_task': {
       const i = z.object({ mode: z.enum(['create', 'edit', 'analyze']), kind: z.enum(['xlsx', 'docx', 'pptx', 'pdf', 'chart', 'none']), title: z.string().trim().min(1).max(100),
-        instructions: z.string().trim().min(1).max(20000), referenceFileIds: z.array(z.string().uuid()).max(5).optional(), baseJobId: z.string().uuid().optional(), company: z.string().max(30).optional() }).parse(input);
+        instructions: z.string().trim().min(1).max(20000), referenceFileIds: z.array(z.string().uuid()).max(5).optional(), baseJobId: z.string().uuid().optional(), company: z.string().max(30).optional(), design: z.boolean().optional() }).parse(input);
       const T = await import('./threads');
       if (!(await T.aiSettings(tenantOf(u))).doc_engine) return { error: '회사 설정에서 문서 작업이 꺼져 있습니다. 대신 propose_create_document·propose_xlsx_report 를 쓰세요.' };
       const usage = await usageThisMonth(tenantOf(u));
@@ -460,11 +475,63 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         if (b.confidential) c.confidential = true;
         version = b.version + 1;
       }
-      const [j] = await db()<{ id: string }[]>`insert into ai_doc_jobs (tenant, user_id, thread_id, mode, kind, title, instructions, company_key, ref_file_ids, base_job_id, version, confidential)
-        values (${tenantOf(u)}, ${u.id}, ${c.threadId ?? null}, ${i.mode}, ${i.kind}, ${i.title}, ${i.instructions}, ${i.company ?? null}, ${i.referenceFileIds ?? []}, ${i.baseJobId ?? null}, ${version}, ${!!c.confidential})
+      const [j] = await db()<{ id: string }[]>`insert into ai_doc_jobs (tenant, user_id, thread_id, mode, kind, title, instructions, company_key, ref_file_ids, base_job_id, version, confidential, design)
+        values (${tenantOf(u)}, ${u.id}, ${c.threadId ?? null}, ${i.mode}, ${i.kind}, ${i.title}, ${i.instructions}, ${i.company ?? null}, ${i.referenceFileIds ?? []}, ${i.baseJobId ?? null}, ${version}, ${!!c.confidential}, ${!!i.design})
         returning id`;
       (c.docJobs ??= []).push({ id: j.id, title: i.title, kind: i.kind, version, status: 'queued' });
       return { jobId: j.id, version, status: '만드는 중 — 결과(미리보기·내려받기·자료실에 저장)는 화면 카드에 1~3분 뒤 나옵니다. 아직 아무것도 만들지 않았습니다. "만들기 시작했습니다"라고만 답하고, 결과 내용(무엇을 넣고 뺐는지)을 완료형으로 말하지 마세요.' };
+    }
+    case 'list_templates': {
+      const i = z.object({ query: z.string().max(60).optional() }).parse(input ?? {});
+      const r = await listLibrary(u, { q: i.query || '양식', limit: 100 });
+      const files = (r.files as any[]).filter((f) => /\.(xlsx|docx)$/i.test(f.file_name) && ((f.tags ?? []).includes('양식') || /양식|template/i.test(`${f.folder} ${f.title}`) || i.query));
+      return { templates: files.slice(0, 20).map((f) => ({ id: f.id, title: f.title, file: f.file_name, folder: f.folder, tags: f.tags })) };
+    }
+    case 'read_template_layout': {
+      const i = z.object({ fileId: z.string().uuid(), company: z.string().max(30).optional() }).parse(input);
+      const f = await loadLibraryFile(u, i.fileId, 'ai');
+      if (f.effective_security === 'confidential') c.confidential = true;
+      const ext = String(f.file_name).split('.').pop()!.toLowerCase();
+      if (ext !== 'xlsx' && ext !== 'docx') return { error: 'xlsx·docx 양식만 칸 채우기가 됩니다. 다른 형식은 run_file_task 를 쓰세요.' };
+      const { getObject } = await import('../storage');
+      const { templateLayout } = await import('../docFill');
+      const { companyProfiles, profileText } = await import('../companyProfiles');
+      const profiles = await companyProfiles(tenantOf(u));
+      const co = profiles.find((p) => p.key === i.company) ?? profiles.find((p) => p.is_default) ?? null;
+      return { file: f.file_name, layout: templateLayout(await getObject(f.storage_key), ext), company: co ? profileText(co) : '[회사] 회사 정보 설정 없음 — 공급자 칸은 비우고 "회사 정보 설정 필요"' };
+    }
+    case 'fill_template': {
+      const i = z.object({ sourceFileId: z.string().uuid(), title: z.string().trim().min(1).max(100), company: z.string().max(30).optional(),
+        edits: z.array(z.object({ sheet: z.string().max(60).optional(), cell: z.string().regex(/^[A-Za-z]{1,3}\d{1,7}$/), value: z.union([z.string().max(2000), z.number(), z.null()]) })).max(500).optional(),
+        replacements: z.array(z.object({ from: z.string().min(1).max(500), to: z.string().max(2000) })).max(200).optional(),
+        fitOnePage: z.boolean().optional(), replaceLogo: z.boolean().optional() }).parse(input);
+      const f = await loadLibraryFile(u, i.sourceFileId, 'ai');
+      if (f.effective_security === 'confidential') c.confidential = true;
+      const ext = String(f.file_name).split('.').pop()!.toLowerCase();
+      if (ext !== 'xlsx' && ext !== 'docx') return { error: 'xlsx·docx 양식만 됩니다' };
+      const { getObject, putObject } = await import('../storage');
+      const { fillXlsx, fillDocx } = await import('../docFill');
+      let logo: { data: Buffer; ext: string } | null = null;
+      if (i.replaceLogo) {
+        const { companyProfiles } = await import('../companyProfiles');
+        const profiles = await companyProfiles(tenantOf(u));
+        const co = profiles.find((p) => p.key === i.company) ?? profiles.find((p) => p.is_default);
+        if (co?.logo_file_id) { const lf = await loadLibraryFile(u, co.logo_file_id, 'ai'); logo = { data: await getObject(lf.storage_key), ext: String(lf.file_name).split('.').pop()! }; }
+      }
+      const src = await getObject(f.storage_key);
+      let out: { data: Buffer; warnings: string[] };
+      try { out = ext === 'xlsx' ? fillXlsx(src, i.edits ?? [], { fitOnePage: i.fitOnePage, logo }) : fillDocx(src, i.replacements ?? [], { logo }); }
+      catch (e: any) { return { error: `양식을 고치지 못했습니다: ${e.message}` }; }
+      const name = `${i.title.replace(/[\\/:*?"<>|]+/g, ' ').trim()}.${ext}`;
+      const mime = ext === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      const [j] = await db()<{ id: string }[]>`insert into ai_doc_jobs (tenant, user_id, thread_id, mode, kind, title, instructions, company_key, ref_file_ids, version, confidential, status, started_at, finished_at, source_file_id, summary, model)
+        values (${tenantOf(u)}, ${u.id}, ${c.threadId ?? null}, 'fill', ${ext}, ${i.title}, ${'양식 채우기'}, ${i.company ?? null}, ${[i.sourceFileId]}, 1, ${!!c.confidential}, 'done', now(), now(), ${i.sourceFileId},
+          ${`「${f.title}」 양식에 ${ext === 'xlsx' ? `칸 ${i.edits?.length ?? 0}개` : `문장 ${i.replacements?.length ?? 0}곳`}을 채웠습니다.${out.warnings.length ? `\n확인: ${out.warnings.slice(0, 5).join(' · ')}` : ''}`}, 'fill') returning id`;
+      const key = `ai-doc/${tenantOf(u)}/${j.id}/${name}`;
+      await putObject(key, out.data, mime);
+      await db()`update ai_doc_jobs set result_key = ${key}, result_name = ${name}, result_mime = ${mime}, result_size = ${out.data.length} where id = ${j.id}`;
+      (c.docJobs ??= []).push({ id: j.id, title: i.title, kind: ext, version: 1, status: 'done' });
+      return { jobId: j.id, done: true, warnings: out.warnings, note: '파일을 만들었습니다(화면 카드에서 내려받기·자료실에 저장). 경고가 있으면 짧게 알려 주세요.' };
     }
     case 'list_library_folders': {
       const r = await listLibrary(u, { limit: 1 });

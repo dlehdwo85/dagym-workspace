@@ -7,7 +7,7 @@ import { inflateRawSync } from 'node:zlib';
 export const MAX_EXTRACT_BYTES = 15 * 1024 * 1024;
 const MAX_CHARS = 300_000;
 
-function unzip(buf: Buffer): Map<string, () => Buffer> {
+export function unzip(buf: Buffer): Map<string, () => Buffer> {
   const out = new Map<string, () => Buffer>();
   // 끝에서 중앙 디렉터리 끝 레코드 찾기
   let eocd = -1;
