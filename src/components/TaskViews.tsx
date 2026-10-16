@@ -19,7 +19,7 @@ import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag,
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
-import { AssigneePicker, DuePicker, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
+import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
 import { QuickAddTask } from './QuickAddTask';
 import { CarriedBadge } from './carried';
 
@@ -36,6 +36,8 @@ export type Task = {
   requested_by?: string | null; requested_by_name?: string | null; created_at?: string; completed_at?: string | null;
   assigned_at?: string | null;
   batch_id?: string | null; batch?: { total: number; done: number } | null; recurrence_source_id?: string | null;
+  /** V32 4 마감 연장: 횟수 · 대기 중인 요청 */
+  due_extend_count?: number; ext_pending?: { id: string; from: string | null; to: string; reason: string; by: string; byName: string } | null;
 };
 
 /** B-1 업무를 목록 옆 오른쪽 패널로 연다. URL 은 /tasks/:id 로 바꿔 새로고침·공유가 가능하다. 새 탭(Ctrl/⌘/가운데 클릭)은 그대로 전체 화면 */
@@ -55,7 +57,7 @@ type Section = { id: string; name: string; sort: number };
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 const VIEW_MODES: ViewMode[] = ['list', 'board', 'calendar', 'timeline'];
-const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done'];
+const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done', 'extend'];
 const cleanView = (v: string | null) => (v && LIST_VIEWS.includes(v) ? v : '');
 
 /** V14 40번: 진행 중·대기 중인 끌기(dnd-kit) 취소 — 센서는 창 resize 에 취소되며 문서 클릭 가로채기도 걷어 낸다 */
@@ -216,7 +218,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     const hq = dir.users.filter((u) => u.org_unit_ids?.some((id) => hqIds.has(id)));
     return (hq.length ? hq : dir.users).slice(0, 5);
   })();
-  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 지시한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['done', '완료']];
+  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 지시한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['extend', '연장 요청'], ['done', '완료']];
   const teamList = useApi<{ teams: { id: string; name: string }[] }>('/api/teams'); // V14 8번 팀 필터
   // V14 12번 다중 선택
   const [selOn, setSelOn] = useState(false);
@@ -281,7 +283,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             const n = counts.data?.counts?.[v] ?? 0;
             return (
               <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)} label={l} grid>
-                {(v === 'overdue' || v === 'review') && n > 0 && <span className={cx('size-1.5 shrink-0 rounded-full', v === 'overdue' ? 'bg-red-500' : 'bg-amber-500')} aria-hidden />}
+                {(v === 'overdue' || v === 'review' || v === 'extend') && n > 0 && <span className={cx('size-1.5 shrink-0 rounded-full', v === 'overdue' ? 'bg-red-500' : 'bg-amber-500')} aria-hidden />}
                 <span className="truncate">{v === 'requested' || v === 'review' ? <><span className="sm:hidden">{v === 'review' ? '검토' : '내가 지시'}</span><span className="hidden sm:inline">{l}</span></> : l}</span>
                 {n > 0 && <span className={cx('absolute -right-1 -top-1.5 min-w-[18px] rounded-full border px-1 text-center text-[10px] font-bold leading-4 tabular-nums sm:static sm:min-w-0 sm:border-0 sm:bg-transparent sm:px-0 sm:text-[11px] sm:font-semibold sm:opacity-80', (filters.view ?? '') === v && !filters.assigneeId ? 'border-white bg-brand-700 text-white' : v === 'overdue' ? 'border-red-200 bg-red-50 text-red-700 sm:text-inherit' : 'border-line bg-white text-ink-2')} data-count={v}>{n}</span>}
               </ViewChip>
@@ -470,6 +472,9 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {t.recurrence_rule && <span title="반복 업무"><Repeat className="size-3.5" /></span>}
       {t.batch && t.batch.total > 1 && <span className="rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
       {t.blocked_by_count > 0 && <span className="font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
+      {/* V32 4: 연장 요청 대기(지시자가 목록에서 바로 알아봄) · 연장 횟수 */}
+      {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장 요청 → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
+      {!t.ext_pending && !!t.due_extend_count && <span className="shrink-0 rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}
     </span>
   );
 }
@@ -569,7 +574,17 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
 }
 /** 마감일 칩 + 그 위의 투명 날짜 입력 (눌러서 바로 변경) */
 function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }) {
-  return <span className="inline-flex w-[92px] justify-end"><DuePicker value={t.due_date} status={t.status} onChange={(v) => onPatch(t, { dueDate: v })} label={`${t.title} 마감일`} /></span>;
+  const { user } = useSession();
+  const [ext, setExt] = useState<string | null | false>(false);
+  const ex = extendRole(t, user.id);
+  // V32 4: 담당자가 마감을 뒤로 미루면 바로 바꾸지 않고 연장 요청 창(사유 필수)으로
+  const change = (v: string | null) => (ex === 'request' && t.due_date && (!v || v > t.due_date) ? setExt(v) : onPatch(t, { dueDate: v }));
+  return (
+    <span className="inline-flex w-[92px] justify-end">
+      <DuePicker value={t.due_date} status={t.status} onChange={change} label={`${t.title} 마감일`} onExtend={ex ? () => setExt(null) : undefined} extendLabel={ex === 'request' ? '마감 연장 요청' : '마감 연장'} />
+      {ex && <ExtendDialog task={t} boss={ex === 'boss'} open={ext !== false} initial={ext || null} onClose={() => setExt(false)} />}
+    </span>
+  );
 }
 
 type GroupBy = 'assignee' | 'requester' | 'due' | 'project' | 'status' | 'team' | 'none';
@@ -1041,7 +1056,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         {/* 점검 2026-10-16 ①: 1024px 미만(태블릿·좁은 창)은 휴대폰처럼 제목 두 줄 + 아래 줄에 상태·정보 — 고정 열에 제목이 눌리지 않게 */}
         {/* 대표 실기기(10/16): 휴대폰은 오른쪽 마감·담당 칸 때문에 제목이 절반 폭에서 줄바꿈 → 제목은 한 줄 전체 폭, 마감·담당은 아래 줄(상태 칩 옆) */}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 max-lg:contents lg:flex-row lg:items-center lg:gap-3">
-          <span className="flex min-w-0 items-center gap-1.5 max-lg:min-w-[75%] max-lg:flex-1 lg:max-w-[55%] lg:shrink-0" data-testid="row-title">
+          <span className="flex min-w-0 items-center gap-1.5 max-lg:basis-full lg:max-w-[55%] lg:shrink-0" data-testid="row-title">
             <TypeIcon t={t} />
             {/* 대표 피드백(10/15): 휴대폰은 제목이 너무 짧게 잘림 → 두 줄까지 보이고, PC 는 한 줄 */}
             <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline max-lg:line-clamp-2 max-lg:break-words max-lg:leading-snug lg:truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>

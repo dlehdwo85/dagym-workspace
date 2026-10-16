@@ -22,7 +22,7 @@ import { Attachments, FileKindIcon, uploadTaskFiles } from '@/components/Attachm
 import { TaskMail } from '@/components/TaskMail';
 import { TaskAssist, type AssistDraft } from '@/components/TaskAssist';
 import { DropZone, UploadProgress } from '@/components/upload';
-import { BellChip, DuePicker, warnAway } from '@/components/TaskQuick';
+import { BellChip, DuePicker, ExtendDialog, extendRole, warnAway } from '@/components/TaskQuick';
 import { TimePick } from '@/components/DateTimePickers';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { PRIORITY_LABEL, STATUS_LABEL, STATUSES, type TaskStatus } from '@/lib/types';
@@ -32,7 +32,7 @@ import { VoiceButton } from '@/components/voice';
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
   reopened: '다시 열기', deleted: '삭제', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
-  checklist_done: '체크리스트 완료', reassigned: '재배정', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
+  checklist_done: '체크리스트 완료', reassigned: '재배정', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
   file_attached: '파일 첨부', file_downloaded: '파일 내려받음', mail_queued: '메일 보내기 요청', mail_sent: '메일 보냄', mail_failed: '메일 발송 실패', share_created: '다운로드 링크 만듦', share_opened: '고객이 자료를 열어봄', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
 const FIELD_LABEL: Record<string, string> = {
@@ -81,6 +81,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const wide = !inPanel; // V13 11번: 전체 화면(PC)은 2열
   const teamList = useApi<{ teams: { id: string; name: string }[] }>('/api/teams');
   const [details, setDetails] = useState(true);
+  const [ext, setExt] = useState<string | null | false>(false); // V32 4 마감 연장 창(false = 닫힘, 문자열 = 고른 날짜)
   useEffect(() => { if (window.innerWidth < 640) setDetails(false); }, []); // 휴대폰은 "세부 정보" 요약 한 줄로 시작
   const [subTitle, setSubTitle] = useState('');
   const [subAssignee, setSubAssignee] = useState<string | null>(null);
@@ -154,6 +155,13 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const perms = data.perms;
   const userName = (uid: string | null) => dir.users.find((u) => u.id === uid)?.name ?? '';
 
+  // V32 4 마감 연장: 지시자 = 바로, 담당자 = 요청(사유 필수)
+  const extRole = extendRole(t, user.id);
+  const md = (d: string | null) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '-');
+  async function decideExt(approve: boolean) {
+    try { await api(`/api/tasks/${id}/extend/${t.ext_pending.id}`, { body: { approve } }); toast.ok(approve ? '마감 연장을 승인했습니다' : '연장 요청을 반려했습니다'); reload(); broadcastRefresh(); }
+    catch (e: any) { toast.error(e.message); reload(); }
+  }
   async function patch(body: Record<string, unknown>, okMsg?: string) {
     try {
       const r = await api(`/api/tasks/${id}`, { method: 'PATCH', body: { ...body, version: t.version } });
@@ -305,7 +313,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <input ref={clipRef} type="file" multiple className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
               <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
               {/* 대표: 댓글도 음성으로 — 말한 글이 입력칸에 들어감(바로 보내지 않음) */}
-              <VoiceButton small value={comment} onChange={setComment} label="음성으로 댓글" />
+              <VoiceButton small value={comment} onChange={setComment} label="말로 입력" />
               <textarea ref={autoGrow} rows={1} className="block max-h-28 min-h-9 min-w-0 flex-1 resize-none rounded-input border border-line bg-slate-50 px-3 py-[7px] text-sm leading-5 focus:border-accent-500 focus:outline-none focus:ring-0" placeholder="댓글 입력"
                 value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input" aria-label="댓글" />
               <Button size="sm" type="submit" className="h-9 shrink-0" disabled={!comment.trim()}>등록</Button>
@@ -322,7 +330,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               }} aria-label="멘션할 사람">
                 <option value="">@ 멘션</option>{mentionable.data?.users.filter((u) => u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
               </select>
-              <VoiceButton small value={comment} onChange={setComment} label="음성으로 댓글" />
+              <VoiceButton small value={comment} onChange={setComment} label="말로 입력" />
               <span className="hidden text-[11px] text-ink-3 sm:inline">이 업무를 볼 수 있는 사람만 · Ctrl+Enter 로 등록</span>
               <span className="flex-1" />
               <Button size="sm" type="submit" disabled={!comment.trim()}>등록</Button>
@@ -393,12 +401,27 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 <Button size="sm" variant="secondary" onClick={() => patch({ status: 'in_progress' }, '검토 요청을 취소했습니다 — 다시 진행 중')} data-testid="review-cancel">검토 요청 취소</Button>
               </div>
             )}
+            {/* V32 4: 마감 연장 요청 — 세부 정보를 펼치지 않아도 머리에 보이고, 지시자는 바로 승인·반려 */}
+            {t.ext_pending && (
+              <div className="flex flex-wrap items-center gap-2 rounded-input border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="ext-pending">
+                <CalendarDays className="size-4 shrink-0" />
+                <span className="min-w-0 flex-1"><b>마감 연장 요청</b> {md(t.ext_pending.from)} → {md(t.ext_pending.to)} · {t.ext_pending.byName}<span className="block text-xs">“{t.ext_pending.reason}”</span></span>
+                {extRole === 'boss' ? <span className="flex gap-1.5">
+                  <Button size="sm" onClick={() => decideExt(true)} data-testid="ext-approve">승인</Button>
+                  <Button size="sm" variant="secondary" onClick={() => decideExt(false)} data-testid="ext-reject">반려</Button>
+                </span> : <span className="text-xs">지시자 승인을 기다리는 중</span>}
+              </div>
+            )}
           </div>
           {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="task-summary">
             {/* V14 19번(검수 6): 요약 칩을 누르면 그 속성을 바로 고친다 */}
             <button type="button" onClick={() => editProp('select[aria-label="담당자"]')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 hover:bg-slate-200" title="담당자 바꾸기" data-testid="sum-assignee"><Avatar id={t.assignee_id} name={t.assignee_name} size={16} badge={false} />{t.assignee_name ?? '담당 없음'}{data.collaborators?.length > 0 && <span className="text-ink-3">+{data.collaborators.length}</span>}</button>
             <button type="button" onClick={() => editProp('[data-testid="due-picker"]', true)} className="rounded-full hover:opacity-80" title="마감일 바꾸기" data-testid="sum-due"><DdayChip due={t.due_date} time={t.due_time} status={t.status} /></button>
+            {extRole && !t.ext_pending && <button type="button" onClick={() => setExt(null)} className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100" data-testid="sum-extend">
+              <CalendarDays className="size-3.5" />{extRole === 'boss' ? '마감 연장' : '마감 연장 요청'}</button>}
+            {!!t.due_extend_count && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2" data-testid="sum-ext-count">연장 {t.due_extend_count}회</span>}
+            {extRole && <ExtendDialog task={t} boss={extRole === 'boss'} open={ext !== false} initial={ext || null} onClose={() => setExt(false)} onDone={reload} />}
             <button type="button" onClick={() => editProp('select[aria-label="우선순위"]')} className="rounded-full hover:opacity-80" title="우선순위 바꾸기" data-testid="sum-priority"><PriorityTag p={t.priority} /></button>
             {t.project_id && <Link href={`/projects/${t.project_id}`} className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded-full bg-slate-100 px-2 py-0.5 text-ink-2 hover:bg-slate-200" data-testid="summary-project"><FolderKanban className="size-3 shrink-0" /><span className="truncate">{t.project_name ?? '프로젝트'}</span></Link>}
             {data.attachments.length > 0 && <button type="button" onClick={() => { if (fold.att) toggleFold('att'); setTimeout(() => document.getElementById('attach-section')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 0); }}
@@ -644,7 +667,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <Prop icon={CalendarDays} label="마감일">
               {/* 값이 없으면 "마감일 없음" 칩 하나, 누르면 빠른 선택·달력. 시각은 날짜를 정한 뒤에만 */}
               <span className="flex pl-2 flex-wrap items-center gap-1.5" data-testid="detail-due" data-value={t.due_date ?? ''}>
-                <DuePicker value={t.due_date} status={t.status} label="마감일" emptyText="마감일 없음" onChange={(v) => patch({ dueDate: v, ...(v ? {} : { dueTime: null }) })} />
+                <DuePicker value={t.due_date} status={t.status} label="마감일" emptyText="마감일 없음" onExtend={extRole ? () => setExt(null) : undefined} extendLabel={extRole === 'request' ? '마감 연장 요청' : '마감 연장'}
+                  onChange={(v) => (extRole === 'request' && t.due_date && (!v || v > t.due_date) ? setExt(v) : patch({ dueDate: v, ...(v ? {} : { dueTime: null }) }))} />
                 {t.due_date && (
                   <TimePick className="h-8 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={t.due_time?.slice(0, 5) ?? ''} onChange={(v) => patch({ dueTime: v })} ariaLabel="마감 시각" emptyLabel="시각 없음" />
                 )}
@@ -1103,7 +1127,7 @@ function CommentThread({ c, replies, taskId, meId, mentionable, onChange }: { c:
               )}
               <input ref={replyRef} autoFocus className={cx(inputCls, 'h-8')} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="답글 입력 — @ 로 사람 태그" aria-label="답글"
                 onKeyDown={(e) => { if (e.key === 'Escape') setReply(null); }} />
-              <VoiceButton small value={reply} onChange={(v) => setReply(v)} label="음성으로 답글" />
+              <VoiceButton small value={reply} onChange={(v) => setReply(v)} label="말로 입력" />
               <Button size="sm" disabled={!reply.trim()}>등록</Button>
             </form>
           )}

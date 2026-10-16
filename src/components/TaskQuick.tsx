@@ -9,7 +9,7 @@ import { correctVoice, learnVoice, listen, voiceAvailable, voiceErrorToast } fro
 import { TimePick, timeLabel } from './DateTimePickers';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
-import { Avatar, DueChip, cx, toast, todayStr } from './ui';
+import { Avatar, Button, DueChip, Modal, cx, inputCls, toast, todayStr } from './ui';
 
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 /** 마감 빠른 선택: 오늘 · 내일 · 이번 주 금요일 · 다음 주 월요일 */
@@ -94,7 +94,7 @@ function TimeGrid({ value, onChange, label }: { value: string | null | undefined
 }
 
 /** 마감일 칩: 누르면 빠른 선택 + 날짜 선택 */
-export function DuePicker({ value, onChange, status, label = '마감일', compact, emptyText, time, onTime }: { value: string | null | undefined; onChange: (v: string | null) => void; status?: string; label?: string; compact?: boolean; emptyText?: string; time?: string | null; onTime?: (v: string | null) => void }) {
+export function DuePicker({ value, onChange, status, label = '마감일', compact, emptyText, time, onTime, onExtend, extendLabel }: { value: string | null | undefined; onChange: (v: string | null) => void; status?: string; label?: string; compact?: boolean; emptyText?: string; time?: string | null; onTime?: (v: string | null) => void; onExtend?: () => void; extendLabel?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   return (
@@ -104,6 +104,9 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
         {value ? <span className="inline-flex items-center gap-1"><DueChip due={value} status={status} />{time && <span className="text-xs font-medium text-ink-2 tabular-nums">{timeLabel(time)}</span>}</span> : <><CalendarDays className="size-3.5" />{compact ? '' : emptyText ?? '마감일'}</>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={label} width={260}>
+        {/* V32 4: 마감 연장(담당자 = 지시자에게 요청, 지시자 = 바로) — 목록에서도 상세에 들어가지 않고 */}
+        {onExtend && <button type="button" onClick={() => { setOpen(false); onExtend(); }} data-testid="due-extend-open"
+          className="mb-1 flex w-full items-center gap-2 rounded-input bg-amber-50 px-2.5 py-2 text-left text-sm font-semibold text-amber-900 hover:bg-amber-100"><CalendarDays className="size-4" />{extendLabel ?? '마감 연장'}</button>}
         {quickDues().map(([l, d]) => (
           <button key={l} type="button" onClick={() => { onChange(d); if (!onTime) setOpen(false); }} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
             <span>{l}</span><span className="text-xs text-ink-3 tabular-nums">{Number(d.slice(5, 7))}/{Number(d.slice(8))}</span>
@@ -421,4 +424,51 @@ export function OrderMenu({ title, onMove }: { title: string; onMove: (to: 'top'
       </Popover>
     </span>
   );
+}
+
+
+/** V32 4 마감 연장 대화창: +1일·+3일·+1주·날짜 고르기 + 사유(필수). 지시자는 바로 연장, 담당자는 지시자에게 요청 */
+export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { task: { id: string; title: string; due_date: string | null }; boss: boolean; open: boolean; onClose: () => void; initial?: string | null; onDone?: () => void }) {
+  const base = task.due_date ?? todayStr();
+  const [to, setTo] = useState<string>(initial ?? addDays(base, 1));
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) { setTo(initial && initial > base ? initial : addDays(base, 1)); setReason(''); } }, [open, initial, base]);
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reason.trim()) { toast.error('연장 사유를 적어 주세요'); return; }
+    setBusy(true);
+    try {
+      const r = await api<{ applied: boolean }>(`/api/tasks/${task.id}/extend`, { body: { toDate: to, reason: reason.trim() } });
+      toast.ok(r.applied ? `마감을 ${Number(to.slice(5, 7))}/${Number(to.slice(8))}로 연장했습니다` : '지시자에게 연장 요청을 보냈습니다');
+      broadcastRefresh(); onDone?.(); onClose();
+    } catch (err: any) { toast.error(err.message); } finally { setBusy(false); }
+  };
+  const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
+  return (
+    <Modal open={open} onClose={onClose} title={boss ? '마감 연장' : '마감 연장 요청'}>
+      <form onSubmit={send} className="space-y-3 text-sm" data-testid="extend-dialog">
+        <p className="text-ink-2"><b className="text-ink">{task.title}</b><br />지금 마감 {task.due_date ? md(task.due_date) : '없음'} → <b className="text-amber-800" data-testid="extend-to">{md(to)}</b></p>
+        <div className="grid grid-cols-3 gap-2">
+          {([['+1일', 1], ['+3일', 3], ['+1주', 7]] as const).map(([l, n]) => (
+            <button key={l} type="button" onClick={() => setTo(addDays(base, n))} aria-pressed={to === addDays(base, n)}
+              className={cx('h-11 rounded-input border text-sm font-medium', to === addDays(base, n) ? 'border-brand-600 bg-brand-50 text-brand-700 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>{l}</button>
+          ))}
+        </div>
+        <label className="flex items-center gap-2"><span className="shrink-0 text-ink-2">날짜 고르기</span>
+          <input type="date" className={cx(inputCls, 'h-11')} min={addDays(base, 1)} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} aria-label="연장할 마감일" /></label>
+        <label className="block"><span className="text-ink-2">연장 사유 <span className="text-red-600">*</span></span>
+          <input className={cx(inputCls, 'mt-1 h-11')} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="예: 거래처 자료 회신이 늦어짐" aria-label="연장 사유" data-testid="extend-reason" /></label>
+        {!boss && <p className="text-xs text-ink-3">지시자가 승인하면 마감이 바뀝니다. 지시자에게 알림이 갑니다.</p>}
+        <Button type="submit" className="h-11 w-full" disabled={busy || to <= base} data-testid="extend-submit">{boss ? '연장하기' : '연장 요청 보내기'}</Button>
+      </form>
+    </Modal>
+  );
+}
+
+/** V32 4: 연장 가능 — 지시자(없으면 만든 사람) = 바로 'boss', 담당자 = 'request'. 마감 있고 미완료일 때만 */
+export function extendRole(t: { due_date: string | null; status: string; assignee_id: string | null; requested_by?: string | null; created_by?: string }, uid: string): 'boss' | 'request' | null {
+  if (!t.due_date || t.status === 'done') return null;
+  if ((t.requested_by ?? t.created_by) === uid) return 'boss';
+  return t.assignee_id === uid ? 'request' : null;
 }

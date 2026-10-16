@@ -57,6 +57,8 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id, t.review_of,
   t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id, t.reminder_minutes,
+  t.due_extend_count, (select json_build_object('id', x.id, 'from', to_char(x.from_date, 'YYYY-MM-DD'), 'to', to_char(x.to_date, 'YYYY-MM-DD'), 'reason', x.reason, 'by', x.requested_by, 'byName', xu.name)
+    from task_due_extensions x join users xu on xu.id = x.requested_by where x.task_id = t.id and x.status = 'pending' order by x.created_at desc limit 1) as ext_pending,
   t.team_id, (select tm.name from teams tm where tm.id = t.team_id) as team_name, (select tm.color from teams tm where tm.id = t.team_id) as team_color,
   case when t.batch_id is null then null else (select json_build_object('total', count(*)::int, 'done', count(*) filter (where b.status = 'done')::int) from tasks b where b.batch_id = t.batch_id and b.deleted_at is null) end as batch,
   (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
@@ -89,7 +91,7 @@ export const TASK_FROM = (sql: Sql) => sql`
 
 export const listQuery = z.object({
   // U-0a 주소창 값은 사람이 고칠 수 있다 — 모르는 보기·옵션 값은 오류 대신 기본값으로
-  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done']).catch('all'),
+  view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done', 'extend']).catch('all'),
   projectId: zUuid.optional(),
   orgUnitId: zUuid.optional(),
   brandId: z.string().optional(),
@@ -114,7 +116,7 @@ export const listQuery = z.object({
 
 /** V20 완료 보관: 달별 완료 개수 (서울 기준 완료일, 볼 수 있는 업무만, 담당자 필터 선택) */
 /** V14 42번: 보기 칩 건수(목록과 같은 조건·필터, 담당자 필터는 제외) — 0건은 화면에서 숨김 */
-export const COUNT_VIEWS = ['my', 'requested', 'overdue', 'week', 'review'] as const;
+export const COUNT_VIEWS = ['my', 'requested', 'overdue', 'week', 'review', 'extend'] as const;
 export async function viewCounts(u: SessionUser, raw: Record<string, string>) {
   const sql = db();
   const units = await accessibleUnitIds(u, sql);
@@ -193,6 +195,10 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
       conds.push(sql`t.status = 'review'`);
       if (units !== null) conds.push(sql`t.org_unit_id = any(${units}::uuid[])`);
       if (!atLeast(u, 'site_manager')) conds.push(sql`false`);
+      break;
+    case 'extend': // V32 4: 마감 연장 요청 — 내가 승인할 것(지시자)·내가 보낸 것(담당자)
+      conds.push(sql`exists (select 1 from task_due_extensions x where x.task_id = t.id and x.status = 'pending'
+        and (x.requested_by = ${u.id} or coalesce(t.requested_by, t.created_by) = ${u.id}))`);
       break;
     case 'risk': // S-6 마감 위험 후보: 예상 시간이 있고 2주 안에 마감인 미완료 업무 → 아래에서 가용 시간으로 거른다
       conds.push(sql`t.status <> 'done' and t.estimate_minutes > 0 and t.assignee_id is not null and t.due_date <= ${addDays(today, 14)}`);
@@ -497,6 +503,11 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if (i.dueTime !== undefined && (i.dueTime ?? null) !== (cur.due_time_s ?? null)) {
       set.due_time = i.dueTime;
       changes.dueTime = { from: cur.due_time_s, to: i.dueTime };
+    }
+    // V32 4(대표 결정): 담당자는 마감을 뒤로 미루거나 지울 수 없다 — 지시자에게 [마감 연장] 요청(앞당기기는 됨). 지시자 = 본인이면 제한 없음
+    if ('due_date' in set && cur.due_date && cur.status !== 'done' && cur.assignee_id === u.id && (cur.requested_by ?? cur.created_by) !== u.id
+      && (!set.due_date || String(set.due_date).slice(0, 10) > dstr(cur.due_date))) {
+      throw new HttpError(403, 'extend_required', '마감을 미루려면 지시자에게 [마감 연장]을 요청하세요');
     }
     if (i.recurrenceRule !== undefined) {
       const rule = normalizeRule(i.recurrenceRule);
@@ -1070,4 +1081,63 @@ async function assertTeamAssign(u: SessionUser, teamId: string, sql: Sql = db())
   const lv = await teamTaskLevel(u, teamId, sql);
   const member = (await sql`select 1 from team_members where team_id = ${teamId} and user_id = ${u.id}`).length > 0;
   if (!(lv === 'edit' || (member && lv !== 'none'))) throw forbidden('이 팀에 업무를 배정할 권한이 없습니다');
+}
+
+
+// ---------------- V32 4 마감 연장 ----------------
+const dstr = (d: unknown) => (d instanceof Date ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d) : String(d ?? '').slice(0, 10));
+export const extendInput = z.object({ toDate: zDate, reason: z.string().trim().min(1, '연장 사유를 적어 주세요').max(300) });
+/** 지시자(없으면 만든 사람) = 바로 연장, 담당자 = 지시자에게 연장 요청(이전 요청은 취소) */
+export async function requestExtension(u: SessionUser, taskId: string, i: z.infer<typeof extendInput>) {
+  const sql = db();
+  const { task } = await loadTaskForUser(u, taskId, sql);
+  const [cur] = await sql<{ title: string; status: string; assignee_id: string | null; requested_by: string | null; created_by: string; due_date: string | null }[]>`
+    select title, status, assignee_id, requested_by, created_by, to_char(due_date, 'YYYY-MM-DD') due_date from tasks where id = ${task.id}`;
+  if (!cur.due_date) throw badRequest('마감일이 없는 업무입니다 — 마감일을 먼저 정하세요');
+  if (cur.status === 'done') throw badRequest('완료된 업무입니다');
+  if (i.toDate <= cur.due_date) throw badRequest('지금 마감일보다 뒤 날짜를 고르세요');
+  const boss = cur.requested_by ?? cur.created_by;
+  if (boss === u.id) {
+    await updateTask(u, task.id, { dueDate: i.toDate });
+    await sql.begin(async (tx) => {
+      await tx`update task_due_extensions set status = 'cancelled' where task_id = ${task.id} and status = 'pending'`;
+      await tx`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason, status, decided_by, decided_at)
+        values (${task.id}, ${u.id}, ${cur.due_date}, ${i.toDate}, ${i.reason}, 'applied', ${u.id}, now())`;
+      await tx`update tasks set due_extend_count = due_extend_count + 1 where id = ${task.id}`;
+      await activity(tx as unknown as Sql, 'task', task.id, u.id, 'due_extended', { from: cur.due_date, to: i.toDate, reason: i.reason });
+    });
+    return { applied: true };
+  }
+  if (cur.assignee_id !== u.id) throw forbidden('마감 연장은 담당자(요청)·지시자(바로 연장)만 할 수 있습니다');
+  const id = await sql.begin(async (tx) => {
+    await tx`update task_due_extensions set status = 'cancelled' where task_id = ${task.id} and status = 'pending'`;
+    const [x] = await tx<{ id: string }[]>`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason)
+      values (${task.id}, ${u.id}, ${cur.due_date}, ${i.toDate}, ${i.reason}) returning id`;
+    await activity(tx as unknown as Sql, 'task', task.id, u.id, 'due_extension_requested', { from: cur.due_date, to: i.toDate, reason: i.reason });
+    await notify(tx as unknown as Sql, { userIds: [boss], type: 'review_requested', title: `마감 연장 요청: ${cur.title}`,
+      body: `${u.name}: ${md(cur.due_date!)} → ${md(i.toDate)} · ${i.reason}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `extend:${x.id}` });
+    return x.id;
+  });
+  return { applied: false, id };
+}
+const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+/** 지시자가 연장 요청 승인(마감 변경) · 반려 */
+export async function decideExtension(u: SessionUser, taskId: string, extId: string, approve: boolean) {
+  const sql = db();
+  const { task } = await loadTaskForUser(u, taskId, sql);
+  const [x] = await sql<{ id: string; requested_by: string; to_date: string; from_date: string | null; reason: string; status: string }[]>`
+    select id, requested_by, to_char(to_date, 'YYYY-MM-DD') to_date, to_char(from_date, 'YYYY-MM-DD') from_date, reason, status from task_due_extensions where id = ${extId} and task_id = ${task.id}`;
+  if (!x) throw notFound('요청이 없습니다');
+  if (x.status !== 'pending') throw conflict('이미 처리된 요청입니다');
+  const [cur] = await sql<{ title: string; requested_by: string | null; created_by: string }[]>`select title, requested_by, created_by from tasks where id = ${task.id}`;
+  if ((cur.requested_by ?? cur.created_by) !== u.id) throw forbidden('지시자만 승인할 수 있습니다');
+  if (approve) await updateTask(u, task.id, { dueDate: x.to_date });
+  await sql.begin(async (tx) => {
+    await tx`update task_due_extensions set status = ${approve ? 'approved' : 'rejected'}, decided_by = ${u.id}, decided_at = now() where id = ${x.id}`;
+    if (approve) await tx`update tasks set due_extend_count = due_extend_count + 1 where id = ${task.id}`;
+    await activity(tx as unknown as Sql, 'task', task.id, u.id, approve ? 'due_extended' : 'due_extension_rejected', { from: x.from_date, to: x.to_date, reason: x.reason });
+    if (!approve) await notify(tx as unknown as Sql, { userIds: [x.requested_by], type: 'review_result', title: `마감 연장 반려: ${cur.title}`,
+      body: `${u.name}님이 반려했습니다 — 마감은 그대로(${x.from_date ? md(x.from_date) : ''})`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `extend_done:${x.id}` });
+  });
+  return { ok: true, approved: approve };
 }

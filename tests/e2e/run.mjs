@@ -17,6 +17,7 @@ import { v1442 } from './v1442.step.mjs';
 import { v1443 } from './v1443.step.mjs';
 import { chatRename } from './chatRename.step.mjs';
 import { chatScroll } from './chatScroll.step.mjs';
+import { dueExtend } from './dueExtend.step.mjs';
 import { v1444 } from './v1444.step.mjs';
 import { v1445 } from './v1445.step.mjs';
 import { v21 } from './v21.step.mjs';
@@ -939,6 +940,7 @@ await step('V24 음성 등록: AI 비서 화면·패널 마이크 → 실시간 
 await step('V14 42 업무 보기 칩: 412px 에서 7개 모두 보임(4칸 2줄)·건수 = API·0건 숨김·사람 칩 둘째 줄·PC 한 줄', () => v1442({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('V14 43 업무 목록: 왼쪽 동그라미 없음·상태 칩 버튼(테두리·▾·32px)·메뉴 맨 위 완료 → 되돌리기·남의 업무 잠김·"확인 완료" 문구 없음', () => v1443({ browser, desk, ctx, BASE, SHOTS, sql }));
 await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머리줄·목록·상대에게 새 이름, Esc 취소, 1:1 은 버튼 없음', () => chatRename({ owner, ctx, BASE }));
+await step('V32 4 마감 연장: 휴대폰 담당자 목록 마감 칩 → 연장 요청(사유 필수, 뒤 날짜는 요청 창) → PC 지시자 "연장 요청" 칩·행 표시 → 머리에서 승인 → 마감 변경·연장 1회', () => dueExtend({ staff, owner, ctx, sql, BASE }));
 await step('V38 1 메시지방 흔들림: 휴대폰 위로 올려 보는 중 새 메시지 → 자리 유지·"새 메시지 n ↓", 맨 아래면 따라감, 화면 전체는 그대로', () => chatScroll({ browser, desk, ctx, BASE }));
 await step('V14 44 PC 업무 줄 선택 체크박스: 왼쪽 고정 홈·세로 가운데·올려도 제목 그대로·간격 좁게', () => v1444({ owner, ctx, BASE, SHOTS }));
 await step('V14 45 업무 추가 줄 마감 선택 창: 칩 바로 아래/위·칩 왼쪽 맞춤·화면 안·시각 버튼 닿음', () => v1445({ owner, BASE, SHOTS }));
