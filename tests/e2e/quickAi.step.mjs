@@ -24,3 +24,12 @@ export async function quickAi({ owner, ctx, sql, BASE, FAKE }) {
   assert.equal(t.assignee_id, ctx.staffA.id); assert.equal(t.d, addDays(today, 7)); assert.match(t.description, /검수/);
   assert.equal((await sql`select count(*)::int n from task_checklist_items where task_id = ${t.id}`)[0].n, 3);
 }
+
+// 대표(10/16): 홈 "오늘의 일정" = 오늘 일정(시간순) + 오늘 업무
+export async function homeTodayEvents({ owner, ctx, BASE }) {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'personal').id;
+  await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '오늘 홈 일정 시험', start: `${today}T23:00:00+09:00`, end: `${today}T23:30:00+09:00` });
+  await owner.goto(BASE + '/');
+  await owner.getByTestId('home-today').getByTestId('home-today-events').getByText('오늘 홈 일정 시험').waitFor();
+}

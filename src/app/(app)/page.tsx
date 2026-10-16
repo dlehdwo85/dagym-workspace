@@ -227,6 +227,11 @@ export default function Dashboard() {
     // V14 20번(대표 결정): 완료된 업무·일정은 이번 주 목록에서 숨김
     return [d, mergeSameTitle(items.filter((x) => x.task?.status !== 'done')).sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'))] as [string, WeekItem[]];
   }));
+  // 대표(10/16): "오늘의 일정" = 오늘 일정(시간순) + 오늘 마감·지난 업무 — 일정에 연결된 업무는 일정 줄 하나로
+  const todayEvents = (weekRows.get(today) ?? []).filter((r) => r.key.startsWith('e'));
+  const evTaskIds = new Set(todayEvents.map((r) => r.task?.id).filter(Boolean));
+  const todayList = todayTasks.filter((t) => !evTaskIds.has(t.id));
+  const todayCount = todayEvents.length + todayList.length;
   const holName = (d: string) => hol.data?.holidays.find((h) => h.date === d)?.name ?? null;
   const weekCount = [...weekRows.values()].reduce((n, x) => n + x.length, 0);
   const freshNoDue = (myOpen.data?.tasks ?? []).filter((t) => !t.due_date && Date.now() - new Date(t.assigned_at ?? t.created_at).getTime() < 48 * 3600000);
@@ -292,7 +297,7 @@ export default function Dashboard() {
       )}
       {/* WORKIN_V2 홈: 오늘의 일정 · 이번 주 일정 · 이달의 일정 · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동 (모바일은 위에서부터 이 순서) */}
       <div className="grid min-w-0 gap-4 lg:grid-flow-dense lg:grid-cols-3">
-        <Section title="오늘의 일정" count={todayTasks.length} href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} icon={CheckCircle2} className="lg:col-span-2" testid="home-today"
+        <Section title="오늘의 일정" count={todayCount} href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} icon={CheckCircle2} className="lg:col-span-2" testid="home-today"
           actions={(
             <div className="flex rounded-full border border-line p-0.5 text-xs" role="group" aria-label="오늘의 일정 범위">
               {([['mine', '내 것'], ['all', '전체']] as const).map(([k, l]) => (
@@ -300,9 +305,10 @@ export default function Dashboard() {
               ))}
             </div>
           )}>
-          {!todayTasks.length ? <p className="flex items-center justify-center gap-1.5 px-2 py-6 text-center text-sm text-ink-3"><CheckCircle2 className="size-4" />{scope === 'mine' ? '오늘 마감이거나 지난 내 업무가 없습니다' : '오늘 마감이거나 지난 업무가 없습니다'}</p>
-            : <ul>{todayTasks.slice(0, 10).map((t, i) => <TodayRow key={t.id} t={t} className={i >= 6 ? 'max-sm:hidden' : undefined} />)}</ul>}
-          {todayTasks.length > 6 && <Link href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} className="block px-2 py-1 text-xs font-medium text-accent-700 sm:hidden">{todayTasks.length - 6}건 더 보기</Link>}
+          {todayEvents.length > 0 && <ul data-testid="home-today-events" className={cx(todayList.length > 0 && 'mb-1 border-b border-line pb-1')}>{todayEvents.map((r) => <WeekRow key={r.key} r={r} colors={calColors} onDone={done} />)}</ul>}
+          {!todayCount ? <p className="flex items-center justify-center gap-1.5 px-2 py-6 text-center text-sm text-ink-3"><CheckCircle2 className="size-4" />{scope === 'mine' ? '오늘 일정과 오늘 마감이거나 지난 내 업무가 없습니다' : '오늘 일정과 오늘 마감·지난 업무가 없습니다'}</p>
+            : todayList.length > 0 && <ul>{todayList.slice(0, 10).map((t, i) => <TodayRow key={t.id} t={t} className={i >= 6 ? 'max-sm:hidden' : undefined} />)}</ul>}
+          {todayList.length > 6 && <Link href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} className="block px-2 py-1 text-xs font-medium text-accent-700 sm:hidden">업무 {todayList.length - 6}건 더 보기</Link>}
           <div className="border-t border-line px-1 pt-1"><InlineAddTask muted defaultDue={data.today} onCreated={() => { mine.reload(); myOpen.reload(); reload(); }} placeholder="할 일 추가" /></div>
         </Section>
 
