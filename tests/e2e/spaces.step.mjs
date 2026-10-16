@@ -5,8 +5,8 @@ export async function spaces({ browser, desk, owner, staff, BASE }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
-  await owner.getByTestId('space-toggle-sales').check();
-  await owner.waitForLoadState('load');
+  await owner.getByTestId('space-toggle-sales').click(); // 저장 → 화면 새로고침(사이드바에 공간 카드)
+  await owner.getByTestId('space-switch').waitFor();
   await owner.goto(`${BASE}/`);
   await owner.getByTestId('space-switch').click();
   await owner.getByTestId('space-menu').getByText(/내 업무 \d+/).waitFor();
@@ -45,6 +45,6 @@ export async function spaces({ browser, desk, owner, staff, BASE }) {
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
-  await owner.getByTestId('space-toggle-sales').uncheck();
-  await owner.waitForLoadState('load');
+  await owner.getByTestId('space-toggle-sales').click();
+  await owner.getByTestId('space-switch').waitFor({ state: 'detached' });
 }
