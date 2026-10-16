@@ -138,8 +138,11 @@ export function AppShell({ session, children }: { session: Sess; children: React
   useEffect(() => { setCreateMenu(false); setUserMenu(false); setMore(false); }, [path]);
   // V32 0: 업무·일정 등 화면을 열면 그 화면으로 가는 안 읽은 알림을 자동 읽음(앱 푸시로 들어온 경우 포함)
   const hasUnread = unread > 0;
+  const readTried = useRef('');
   useEffect(() => {
-    if (!hasUnread || path === '/notifications' || path === '/') return;
+    // 화면을 처음 열 때는 안 읽은 수를 아직 모를 수 있어(0 으로 시작) 한 번은 늘 확인 — 그 뒤엔 안 읽은 게 있을 때만
+    if (path === '/notifications' || path === '/' || (!hasUnread && readTried.current === path)) return;
+    readTried.current = path;
     api<{ changed: number; unread: number }>('/api/notifications/read', { body: { link: path } })
       .then((r) => { if (r.changed) setUnread(r.unread); }).catch(() => {});
   }, [path, hasUnread]);
