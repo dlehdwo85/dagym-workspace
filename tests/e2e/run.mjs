@@ -462,7 +462,7 @@ await step('⑥ 다른 현장 직원은 화면에서도 접근 불가 안내', a
   await p.getByText('찾을 수 없거나 접근 권한이 없습니다').waitFor();
   await p.screenshot({ path: `${SHOTS}/16-forbidden-task.png` });
   await p.goto(`${BASE}/admin/users`);
-  await p.getByText('접근 권한이 없습니다').waitFor();
+  await p.getByTestId('admin-no-access').getByText('관리 화면 권한이 없습니다').waitFor(); // V36 3 안내 화면
   await c.close();
 });
 
