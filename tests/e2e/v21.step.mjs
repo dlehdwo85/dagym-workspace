@@ -40,6 +40,10 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   await c.getByTestId('sms-to').fill('010-0000-0000');
   await c.getByTestId('sms-body').fill('제안서 보내 드립니다.');
   assert.match(await c.getByTestId('sms-preview').innerText(), /제안서 보내 드립니다\.[\s\S]*HI-LINK 시험 \/ 1555-0000/);
+  // 대표 실기기: 카카오톡 보내기가 안 보임 → 메일·문자 옆 [카카오톡] 탭(문자 내용을 이어받음)
+  await c.getByTestId('mail-channel-kakao').click();
+  await c.getByTestId('kakao-pane').waitFor();
+  assert.equal(await c.getByTestId('kakao-body').inputValue(), '제안서 보내 드립니다.');
   await owner.keyboard.press('Escape');
   // V28-1 이 업무의 AI 비서: [메일 초안] → 시안 창이 초안(제목·본문)으로 열림
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true,

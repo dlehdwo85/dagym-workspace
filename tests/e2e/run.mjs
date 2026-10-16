@@ -1846,9 +1846,15 @@ await step('V13 11·12·8번: 업무 상세 — 설명 위·오른쪽 속성 열
   // 답글·반응
   const th = owner.getByTestId('comment-thread').first();
   await th.getByTestId('reply-open').first().click();
-  await th.getByLabel('답글').fill('감사합니다');
+  // 대표 실기기: 답글에서 사람 태그가 안 됨 → "@" 자동완성으로 고르면 멘션
+  await th.getByLabel('답글').fill('감사합니다 @이');
+  await th.getByTestId('reply-mention-suggest').getByRole('option', { name: /이직원/ }).click();
+  await th.getByLabel('답글').press('End');
+  await th.getByLabel('답글').pressSequentially('확인 부탁');
   await th.getByTestId('reply-form').getByRole('button', { name: '등록' }).click();
-  await th.getByText('감사합니다').waitFor();
+  await th.getByText(/감사합니다/).first().waitFor();
+  const [rp] = await sql`select body, mentions from comments where body like '감사합니다%' order by created_at desc limit 1`;
+  assert.ok(rp.mentions.includes(ctx.staffA.id), '답글 멘션 저장: ' + rp.body);
   await th.getByTestId('react-open').first().click();
   await owner.getByRole('button', { name: '확인했습니다' }).click();
   await th.getByTestId('reaction').first().getByText('1').waitFor();

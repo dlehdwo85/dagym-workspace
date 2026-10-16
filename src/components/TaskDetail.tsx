@@ -48,6 +48,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [cprog, setCprog] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const projects = useApi<{ projects: any[] }>('/api/projects');
   const [comment, setComment] = useState('');
+  const commentRef = useRef<HTMLTextAreaElement | null>(null);
+  const sendingRef = useRef(false);
   const [picked, setPicked] = useState<{ id: string; name: string }[]>([]); // 입력창에는 @이름만, 전송 때 내부 표기로 변환
   const mentionable = useApi<{ users: { id: string; name: string; title: string | null }[] }>(`/api/tasks/${id}/mentionable`);
   const [sub, setSub] = useState(false);
@@ -161,12 +163,20 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   }
   async function sendComment(e: React.FormEvent) {
     e.preventDefault();
-    if (!comment.trim()) return;
-    const body = encodeMentions(comment, picked);
+    if (sendingRef.current) return;
+    // 대표 실기기: "길면 두 개로 나뉘어 달림" — 휴대폰 한글 자판은 입력 중인 글자가 아직 확정 전이라, 그대로 보내면 마지막 말이 빠졌다가
+    // 지운 입력칸에 다시 들어와 또 등록됨 → 먼저 입력칸에서 빠져 글자를 확정하고, 화면에 실제로 있는 글을 보낸다
+    const el = commentRef.current;
+    if (el && document.activeElement === el) { el.blur(); await new Promise((res) => setTimeout(res, 60)); }
+    const raw = el?.value ?? comment;
+    if (!raw.trim()) return;
+    const body = encodeMentions(raw, picked);
+    sendingRef.current = true;
     try {
       await api(`/api/tasks/${id}/comments`, { body: { body }, queueOffline: '댓글' });
       setComment(''); setPicked([]); reload();
     } catch (e: any) { if (e.code === 'queued') { toast.info(e.message); setComment(''); setPicked([]); } else toast.error(e.message); }
+    finally { sendingRef.current = false; }
   }
   async function reject() {
     const note = prompt('보완 요청 내용을 입력하세요');
@@ -266,7 +276,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const primary = primary0 && (statusOwner || isReviewer) ? primary0 : null;
 
   // V14 19번 ④: 휴대폰은 댓글 입력줄을 화면 아래에 고정(📎·📷) — 변형(transform)된 부모 영향 없게 body 로 띄운다
-  const autoGrow = (el: HTMLTextAreaElement | null) => { if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 112)}px`; } };
+  const autoGrow = (el: HTMLTextAreaElement | null) => { commentRef.current = el; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 112)}px`; } };
   const commentFormEl = (
           <form onSubmit={sendComment} className={cx(!mobile && 'relative', 'mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20',
             mobile && cx('fixed inset-x-0 mt-0 rounded-none border-x-0 border-b-0 bg-white shadow-[0_-4px_12px_rgba(15,23,42,0.08)]', 'bottom-0 z-[45] pb-[var(--sab)]'))} data-testid="comment-form">
@@ -298,7 +308,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <Button size="sm" type="submit" className="h-9 shrink-0" disabled={!comment.trim()}>등록</Button>
             </div>
             ) : (<>
-            <textarea className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={2} placeholder="댓글 입력 — @ 를 치면 사람을 언급할 수 있어요" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
+            <textarea ref={commentRef} className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={2} placeholder="댓글 입력 — @ 를 치면 사람을 언급할 수 있어요" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} aria-label="댓글" />
             <div className="flex items-center gap-2 border-t border-line px-2 py-1.5">
               <select className="h-7 rounded-md border border-line bg-white px-1.5 text-xs" value="" onChange={(e) => {
@@ -1048,13 +1058,27 @@ const REACTIONS = [['👍', '확인했습니다'], ['✅', '완료'], ['🙏', '
 function CommentThread({ c, replies, taskId, meId, mentionable, onChange }: { c: any; replies: any[]; taskId: string; meId: string; mentionable: { id: string; name: string }[]; onChange: () => void }) {
   const [open, setOpen] = useState(() => typeof window !== 'undefined' && replies.some((r) => location.hash === `#c-${r.id}`));
   const [reply, setReply] = useState<string | null>(null);
+  const [rPicked, setRPicked] = useState<{ id: string; name: string }[]>([]);
+  const replyRef = useRef<HTMLInputElement | null>(null);
+  const busy = useRef(false);
   async function sendReply(e: React.FormEvent) {
-    e.preventDefault(); if (!reply?.trim()) return;
-    // 입력창의 @이름 → 내부 멘션 표기
-    let text = reply;
+    e.preventDefault();
+    if (busy.current) return;
+    // 휴대폰 한글 자판: 입력 중인 글자를 먼저 확정하고 화면에 있는 글을 보냄(두 번 나뉘어 달리지 않게)
+    const el = replyRef.current;
+    if (el && document.activeElement === el) { el.blur(); await new Promise((res) => setTimeout(res, 60)); }
+    const raw = el?.value ?? reply ?? '';
+    if (!raw.trim()) return;
+    // 입력창의 @이름 → 내부 멘션 표기 (자동완성으로 고른 사람 + 이 업무를 볼 수 있는 사람 이름)
+    let text = encodeMentions(raw, rPicked);
     for (const u of mentionable) text = text.split(`@${u.name} `).join(`@[${u.name}](${u.id}) `);
-    try { await api(`/api/tasks/${taskId}/comments`, { body: { body: text, parentId: c.id } }); setReply(null); setOpen(true); onChange(); } catch (er: any) { toast.error(er.message); }
+    busy.current = true;
+    try { await api(`/api/tasks/${taskId}/comments`, { body: { body: text, parentId: c.id } }); setReply(null); setRPicked([]); setOpen(true); onChange(); } catch (er: any) { toast.error(er.message); }
+    finally { busy.current = false; }
   }
+  // 대표 실기기: 답글에서 사람 태그가 안 됨 → 본 댓글처럼 "@" 를 치면 자동완성
+  const rm = reply !== null ? /(^|\s)@([^\s@]*)$/.exec(reply) : null;
+  const rList = rm ? mentionable.filter((u) => u.id !== meId && u.name.includes(rm[2])).slice(0, 6) : [];
   return (
     <li className="text-sm" data-testid="comment-thread">
       <CommentItem c={c} meId={meId} onChange={onChange} onReply={() => setReply((r) => (r === null ? '' : r))} />
@@ -1063,8 +1087,17 @@ function CommentThread({ c, replies, taskId, meId, mentionable, onChange }: { c:
           {replies.length > 0 && !open && <button type="button" className="text-xs font-medium text-accent-600" onClick={() => setOpen(true)} data-testid="show-replies">답글 {replies.length}개 보기</button>}
           {open && replies.map((r) => <CommentItem key={r.id} c={r} meId={meId} onChange={onChange} onReply={() => setReply((x) => (x === null ? `@${r.author_name} ` : x))} small />)}
           {reply !== null && (
-            <form onSubmit={sendReply} className="flex gap-1.5" data-testid="reply-form">
-              <input autoFocus className={cx(inputCls, 'h-8')} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="답글 입력" aria-label="답글"
+            <form onSubmit={sendReply} className="relative flex gap-1.5" data-testid="reply-form">
+              {rList.length > 0 && (
+                <ul role="listbox" aria-label="답글 멘션 자동완성" className="absolute bottom-full left-0 z-20 mb-1 w-56 overflow-hidden rounded-card border border-line bg-white shadow-pop" data-testid="reply-mention-suggest">
+                  {rList.map((u) => (
+                    <li key={u.id}><button type="button" role="option" aria-selected={false} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                      onClick={() => { setReply((x) => (x ?? '').replace(/@[^\s@]*$/, `@${u.name} `)); setRPicked((p) => (p.some((y) => y.id === u.id) ? p : [...p, u])); setTimeout(() => replyRef.current?.focus(), 0); }}>
+                      <Avatar id={u.id} name={u.name} size={20} badge={false} />{u.name}</button></li>
+                  ))}
+                </ul>
+              )}
+              <input ref={replyRef} autoFocus className={cx(inputCls, 'h-8')} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="답글 입력 — @ 로 사람 태그" aria-label="답글"
                 onKeyDown={(e) => { if (e.key === 'Escape') setReply(null); }} />
               <Button size="sm" disabled={!reply.trim()}>등록</Button>
             </form>

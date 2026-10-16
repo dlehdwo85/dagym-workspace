@@ -94,7 +94,7 @@ export async function userSeesConfidential(userId: string) {
  * 회사 설정(회사 정보·디자인 화면)에서 관리자가 고칠 수 있고, 비우면 이 기본 목록. 주민등록번호 모양은 항상 기밀
  */
 export const DEFAULT_CONF_WORDS = ['급여', '연봉', '월급', '상여', '인사평가', '인사기록', '인사카드', '평가표', '주민등록', '주민번호', '통장', '계좌', '비밀번호', '계약 원본', '계약서 원본',
-  '재무제표', '손익', '원가', '매입 단가', '매입단가', '매출 장부', '정산서', '세금계산서', '비밀', '기밀', 'confidential', 'salary', 'payroll'];
+  '재무제표', '손익', '원가', '매입 단가', '매입단가', '매출 장부', '비밀', '기밀', 'confidential', 'salary', 'payroll'];
 const RRN = /\d{6}-[1-4]\d{6}/;
 const norm = (x: string) => x.toLowerCase().replace(/\s+/g, '');
 function matchWords(text: string, words: string[]) { const t = norm(text); return RRN.test(text) || words.some((w) => w.trim() && t.includes(norm(w))); }

@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2, Eye, Library, Loader2, Mail, MessageSquare, Paperclip, RotateCcw, Search, Send, Sparkles, Upload } from 'lucide-react';
+import { AlertTriangle, MessageCircle, CheckCircle2, Eye, Library, Loader2, Mail, MessageSquare, Paperclip, RotateCcw, Search, Send, Sparkles, Upload } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api, broadcastRefresh, useApi } from './client';
 import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
 import { uploadTaskFiles } from './Attachments';
 import type { AssistDraft } from './TaskAssist';
+import { KakaoSend } from './KakaoSend';
 
 type Ctx = {
   canSend: boolean; account: { fromEmail: string; fromName: string | null } | null;
@@ -82,7 +83,9 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   const d = ctx.data;
   const [f, setF] = useState<{ company: string; kind: string; to: string; cc: string; bcc: string; fromName: string; replyTo: string; more: boolean; subject: string; body: string; files: string[]; title: string; phone: string; workEmail: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [channel, setChannel] = useState<'email' | 'sms'>(initial?.channel === 'sms' ? 'sms' : 'email');
+  // 대표 실기기: 카카오톡 보내기 버튼이 안 보임(AI 카카오 초안에만 있었음) → 메일·문자 옆에 [카카오톡] 탭
+  const [channel, setChannel] = useState<'email' | 'sms' | 'kakao'>(initial?.channel === 'sms' ? 'sms' : initial?.channel === 'kakao' ? 'kakao' : 'email');
+  const [kakao, setKakao] = useState(initial?.channel === 'kakao' ? [initial.subject, initial.body].filter(Boolean).join('\n\n') : '');
   const [drafting, setDrafting] = useState(false);
   const [rec, setRec] = useState<{ id: string; title: string; folder: string; size: number }[]>([]);
   const [sms, setSms] = useState({ to: '', body: '' });
@@ -118,8 +121,8 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   async function aiDraft() {
     setDrafting(true);
     try {
-      const r = await api('/api/mail/draft', { body: { taskId, kind: f!.kind, company: f!.company || undefined, channel } });
-      if (channel === 'sms') setSms((x) => ({ ...x, body: r.body })); else set({ subject: r.subject, body: r.body });
+      const r = await api('/api/mail/draft', { body: { taskId, kind: f!.kind, company: f!.company || undefined, channel: channel === 'kakao' ? 'sms' : channel } }); // 카카오톡은 짧은 문자 초안을 씀
+      if (channel === 'sms') setSms((x) => ({ ...x, body: r.body })); else if (channel === 'kakao') setKakao(r.body); else set({ subject: r.subject, body: r.body });
       setRec(r.recommend ?? []);
       toast.ok('AI 초안을 넣었습니다 — 확인하고 고쳐 주세요');
     } catch (e: any) { toast.error(e.message); } finally { setDrafting(false); }
@@ -183,14 +186,14 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   const fromAddr = d.channel === 'email:workin' ? d.workinFrom : d.channel === 'email:smtp' ? d.account?.fromEmail ?? null : null;
   const from = fromAddr ? `${f.fromName || d.account?.fromName || ''} <${fromAddr}>`.trim() : null;
   return (
-    <Modal open onClose={onClose} title={channel === 'sms' ? '문자 시안' : '메일 시안 — 실제 나갈 모습'} wide>
+    <Modal open onClose={onClose} title={channel === 'sms' ? '문자 시안' : channel === 'kakao' ? '카카오톡 시안' : '메일 시안 — 실제 나갈 모습'} wide>
       <div className="space-y-3" data-testid="mail-compose">
         {channel === 'email' && !d.channel && <p className="rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-800" data-testid="mail-no-account">메일을 보낼 방법이 아직 없습니다 — 회사 메일 계정을 연결하거나 워크인 발송을 켜 주세요. <Link href="/admin/mail" className="font-medium underline">메일 설정</Link></p>}
         <div className="flex flex-wrap items-center gap-1.5">
           <div className="mr-2 flex rounded-input border border-line p-0.5 text-sm" role="tablist" aria-label="보내는 방법">
-            {([['email', '메일', Mail], ['sms', '문자', MessageSquare]] as const).map(([k, l, I]) => (
+            {([['email', '메일', Mail], ['sms', '문자', MessageSquare], ['kakao', '카카오톡', MessageCircle]] as const).map(([k, l, I]) => (
               <button key={k} type="button" role="tab" aria-selected={channel === k} data-testid={`mail-channel-${k}`}
-                onClick={() => { setChannel(k); if (k === 'sms' && !sms.to && !sms.body) setSms({ to: d!.contact?.phone ?? '', body: '' }); }}
+                onClick={() => { setChannel(k); if (k === 'sms' && !sms.to && !sms.body) setSms({ to: d!.contact?.phone ?? '', body: '' }); if (k === 'kakao' && !kakao) setKakao(sms.body || f.body.replace(/<[^>]+>/g, '').slice(0, 1000)); }}
                 className={cx('inline-flex items-center gap-1 rounded-md px-2.5 py-1', channel === k ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}><I className="size-4" />{l}</button>
             ))}
           </div>
@@ -207,7 +210,12 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
             <div className="flex flex-wrap gap-1.5">{rec.map((r) => <button key={r.id} type="button" onClick={() => attachRec(r.id)} className="rounded-full border border-brand-200 bg-white px-2.5 py-0.5 hover:bg-brand-50">+ {r.title} <span className="text-xs text-ink-3">{mb(r.size)}</span></button>)}</div>
           </div>
         )}
-        {channel === 'sms' ? (
+        {channel === 'kakao' ? (
+          <div className="grid gap-2 text-sm" data-testid="kakao-pane">
+            <p className="text-ink-2">카카오톡 친구를 골라 보냅니다(휴대폰은 카카오톡 앱, PC 는 공유 창·QR). 보낸 뒤 [보냈어요]를 누르면 보관함·업무 기록에 남습니다.</p>
+            <Field label="카카오톡 내용"><textarea className={inputCls} rows={5} value={kakao} onChange={(e) => setKakao(e.target.value)} data-testid="kakao-body" /></Field>
+          </div>
+        ) : channel === 'sms' ? (
           <div className="grid gap-2 text-sm" data-testid="sms-pane">
             <p className="text-ink-2">내 휴대폰 문자앱으로 넘겨서 <b>내 번호로</b> 보냅니다. 첨부를 고르면 14일 다운로드 링크가 들어갑니다.</p>
             <Field label="받는 사람 전화번호 (여러 명은 쉼표)"><input className={inputCls} value={sms.to} onChange={(e) => setSms({ ...sms, to: e.target.value })} inputMode="tel" data-testid="sms-to" /></Field>
@@ -278,6 +286,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           <Button variant="secondary" onClick={onClose}>닫기</Button>
           {channel === 'email'
             ? <Button onClick={send} disabled={busy || !d.channel || !d.canSend} data-testid="mail-send"><Send />{busy ? '보관함에 넣는 중…' : '보내기'}</Button>
+            : channel === 'kakao' ? (kakao.trim() ? <KakaoSend taskId={taskId} body={kakao} onLogged={onSent} /> : <span className="text-xs text-ink-3">내용을 넣어 주세요</span>)
             : <Button onClick={openSms} disabled={!d.canSend} data-testid="sms-open"><MessageSquare />문자앱으로 보내기</Button>}
         </div>
       </div>
