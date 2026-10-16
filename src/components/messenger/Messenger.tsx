@@ -1,13 +1,14 @@
 'use client';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, AtSign, Pencil, Bell, BellOff, Camera, CornerUpLeft, Download, FileText, Hash, Loader2, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Users, X } from 'lucide-react';
+import { ArrowLeft, AtSign, Headphones, Mic, Pencil, Bell, BellOff, Camera, CornerUpLeft, Download, FileText, Hash, Loader2, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Users, X } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { DropZone, UploadProgress, putFile } from '@/components/upload';
 import { Avatar, Button, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { VoiceButton } from '@/components/voice';
+import { hearOnce, keepScreenOn, speak, stopSpeaking, yesNo } from '@/components/speak';
 
 /**
  * V14 25번 메신저 — /messages 화면과 오른쪽 아래 패널이 같은 컴포넌트를 쓴다.
@@ -204,7 +205,16 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const lastTyping = useRef(0);
-  useEffect(() => { if (data) { setMsgs(data.messages); setReads(Object.fromEntries(data.members.map((m) => [m.id, m.last_read_id]))); } }, [data]);
+  // V38 3 음성 모드(운전 중): 새 메시지를 소리로 읽어 주고, 말로 보내기(읽어 주고 "보낼까요?" → 보내/취소 확인). 방마다 이 기기에 기억
+  const [voice, setVoice] = useState(() => { try { return localStorage.getItem(`wos_voice_${id}`) === '1'; } catch { return false; } });
+  const [vPhase, setVPhase] = useState<'idle' | 'listen' | 'confirm' | 'sending'>('idle');
+  const [heard, setHeard] = useState('');
+  const voiceRef = useRef(voice); voiceRef.current = voice;
+  const vPhaseRef = useRef(vPhase); vPhaseRef.current = vPhase;
+  const spoken = useRef(new Set<string>());
+  const sayQ = useRef<Promise<void>>(Promise.resolve());
+  const say = (t: string) => { sayQ.current = sayQ.current.then(() => speak(t)); return sayQ.current; };
+  useEffect(() => { if (data) { for (const m of data.messages) spoken.current.add(m.id); setMsgs(data.messages); setReads(Object.fromEntries(data.members.map((m) => [m.id, m.last_read_id]))); } }, [data]);
   const markRead = useCallback(async () => { try { await api(`/api/chat/rooms/${id}/read`, { body: {} }); onRead(); } catch { /* 다음에 */ } }, [id, onRead]);
   useEffect(() => { if (data) markRead(); }, [data, markRead]);
   // V38 1 흔들림 방지: 대화 칸만 움직인다(scrollIntoView 는 화면 전체를 끌어 올려 위아래로 튐).
@@ -249,10 +259,17 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
         return [...map.values()].sort((a, b) => Number(BigInt(a.id) - BigInt(b.id)));
       });
       if (document.visibilityState === 'visible') markRead();
+      // 음성 모드: 남이 보낸 새 메시지만 "이름: 내용"으로 읽어 줌(파일은 "파일을 보냈습니다")
+      for (const m of e.messages.filter((x) => x.room_id === id)) {
+        if (spoken.current.has(m.id)) continue;
+        spoken.current.add(m.id);
+        if (!voiceRef.current || m.mine || m.author_id === user.id || m.deleted) continue;
+        say(`${m.author_name ?? '알 수 없음'}: ${plain(m.body) || (m.file_name ? `파일을 보냈습니다. ${m.file_name}` : '')}`);
+      }
     }
     if (e.typing) setTyping(e.typing.filter((x) => x.room_id === id).map((x) => x.name));
     if (e.reads) setReads((r) => ({ ...r, ...Object.fromEntries(e.reads!.filter((x) => x.room_id === id).map((x) => [x.user_id, x.last_read_id])) }));
-  }), [live, id, markRead]);
+  }), [live, id, markRead, user.id]);
   useEffect(() => { if (!menu) return; const close = () => setMenu(null); window.addEventListener('click', close); return () => window.removeEventListener('click', close); }, [menu]);
 
   const members = data?.members ?? [];
@@ -265,9 +282,47 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     const body = toWire(text); const rep = replyTo; setText(''); setReplyTo(null);
     try {
       const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body, ...(rep ? { replyTo: rep.id } : {}) } });
+      spoken.current.add(r.id);
       mergeMine(r.id, { body, reply_to: rep?.id ?? null, reply: rep ? { author: rep.author_name, body: rep.body.slice(0, 120), file: rep.file_name, deleted: false } : null });
     } catch (er: any) { setText(text); setReplyTo(rep); toast.error(er.message); }
   }
+  // ---- V38 3 음성 모드 ----
+  async function sendSpoken(t: string) {
+    setVPhase('sending');
+    try {
+      const body = toWire(t);
+      const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body } });
+      spoken.current.add(r.id); mergeMine(r.id, { body });
+      setVPhase('idle'); setHeard(''); await say('보냈습니다');
+    } catch (er: any) { setVPhase('confirm'); toast.error(er.message); await say('보내지 못했습니다'); }
+  }
+  function cancelSpoken() { stopSpeaking(); setVPhase('idle'); setHeard(''); }
+  const talking = useRef(false);
+  async function talk() {
+    if (talking.current) return;
+    talking.current = true; stopSpeaking();
+    try {
+      setVPhase('listen'); setHeard('');
+      const t = await hearOnce();
+      if (!t) { setVPhase('idle'); await say('못 들었어요. 다시 눌러 말씀해 주세요'); return; }
+      setHeard(t); setVPhase('confirm');
+      await say(`${t}. 보낼까요? 보내, 또는 취소라고 말해 주세요`);
+      if (vPhaseRef.current !== 'confirm') return; // 그사이 화면에서 처리
+      const a = yesNo(await hearOnce());
+      if (vPhaseRef.current !== 'confirm') return;
+      if (a === true) await sendSpoken(t);
+      else if (a === false) { cancelSpoken(); await say('취소했습니다'); }
+      else await say('화면에서 보내기나 취소를 눌러 주세요');
+    } finally { talking.current = false; }
+  }
+  function toggleVoice() {
+    const on = !voice;
+    setVoice(on); try { localStorage.setItem(`wos_voice_${id}`, on ? '1' : '0'); } catch {}
+    keepScreenOn(on);
+    if (on) say('음성 모드를 켰습니다. 새 메시지를 읽어 드리고, 큰 마이크를 누르면 말로 보낼 수 있습니다');
+    else { stopSpeaking(); setVPhase('idle'); setHeard(''); }
+  }
+  useEffect(() => { if (voice) keepScreenOn(true); return () => { keepScreenOn(false); stopSpeaking(); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   async function upload(files: FileList | File[]) {
     const list = Array.from(files).slice(0, 10);
     if (!list.length) return;
@@ -359,6 +414,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           <div className="truncate text-[11px] text-ink-3">{room.kind === 'dm' ? dir.users.find((x) => x.id === other?.id)?.title ?? '1:1' : `${KIND_LABEL[room.kind]} · ${members.length}명`}
             {room.taskId && <> · <Link href={`/tasks/${room.taskId}`} className="text-accent-600 underline">업무 보기</Link></>}{live.mode === 'poll' && ' · 5초마다 새로 고침'}</div>
         </div>
+        <button className={cx(iconBtn, voice && 'bg-accent-600 text-white hover:bg-accent-700')} onClick={toggleVoice} aria-pressed={voice} aria-label={voice ? '음성 모드 끄기' : '음성 모드(운전 중) 켜기'} title={voice ? '음성 모드 끄기' : '음성 모드 — 새 메시지 읽어 주기·말로 보내기'} data-testid="chat-voice"><Headphones className="size-4" /></button>
         <button className={iconBtn} onClick={toggleMute} aria-label={room.muted ? '알림 켜기' : '알림 끄기'} title={room.muted ? '알림 켜기' : '알림 끄기'} data-testid="chat-mute">{room.muted ? <BellOff className="size-4" /> : <Bell className="size-4" />}</button>
         {!compact && user.role === 'owner' && <a className={iconBtn} href={`/api/chat/rooms/${id}/export`} aria-label="대화 내보내기(감사용)" title="대화 내보내기(감사용, 기록 남음)"><Download className="size-4" /></a>}
         {onExpand && <button className={iconBtn} onClick={onExpand} aria-label="크게 보기" title="크게 보기"><Maximize2 className="size-4" /></button>}
@@ -464,6 +520,27 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           <div className="flex items-center gap-2 border-t border-line bg-teal-50/60 px-3 py-1.5 text-xs" data-testid="chat-replying">
             <CornerUpLeft className="size-3.5 shrink-0 text-teal-700" /><span className="min-w-0 flex-1 truncate"><b>{replyTo.author_name}</b>에게 답장: {plain(replyTo.body) || replyTo.file_name}</span>
             <button onClick={() => setReplyTo(null)} aria-label="답장 취소" className="text-ink-3"><X className="size-4" /></button>
+          </div>
+        )}
+        {voice && (
+          // 운전 중: 큰 마이크 하나 — 말하면 읽어 주고 "보낼까요?" 음성 확인, 화면 버튼으로도
+          <div className="flex flex-col items-center gap-2 border-t border-line bg-accent-50/60 px-3 py-3" data-testid="chat-voice-panel">
+            {vPhase === 'confirm' || vPhase === 'sending' ? (
+              <>
+                <p className="w-full rounded-input bg-white px-3 py-2 text-base font-medium text-ink shadow-card" data-testid="chat-voice-heard">“{heard}”</p>
+                <div className="grid w-full grid-cols-3 gap-2">
+                  <Button className="h-12 text-base" disabled={vPhase === 'sending'} onClick={() => sendSpoken(heard)} data-testid="chat-voice-send">보내기</Button>
+                  <Button variant="secondary" className="h-12 text-base" onClick={() => { cancelSpoken(); talk(); }}>다시 말하기</Button>
+                  <Button variant="ghost" className="h-12 text-base" onClick={cancelSpoken}>취소</Button>
+                </div>
+              </>
+            ) : (
+              <button type="button" onClick={talk} disabled={vPhase === 'listen'} aria-label="말로 보내기" data-testid="chat-voice-talk"
+                className={cx('flex size-20 items-center justify-center rounded-full text-white shadow-pop transition active:scale-95', vPhase === 'listen' ? 'animate-pulse bg-red-500' : 'bg-accent-600')}>
+                <Mic className="size-9" />
+              </button>
+            )}
+            <p className="text-sm font-medium text-ink-2" data-testid="chat-voice-state">{vPhase === 'listen' ? '듣고 있어요… 말을 멈추면 읽어 드려요' : vPhase === 'confirm' ? '“보내” 또는 “취소”라고 말하거나 눌러 주세요' : vPhase === 'sending' ? '보내는 중…' : '새 메시지를 읽어 드려요 · 마이크를 누르고 말하세요'}</p>
           </div>
         )}
         <form onSubmit={send} className="relative flex items-end gap-1 border-t border-line bg-white p-2">

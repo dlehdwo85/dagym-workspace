@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Check, Loader2, MessageSquarePlus, Paperclip, Pin, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { Check, Headphones, Loader2, MessageSquarePlus, Mic, Paperclip, Pin, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { AI_ACCEPT } from '@/components/libraryUpload';
 import { AttachChips, DEFAULT_FILE_ASK, useAiAttach } from '@/components/aiAttach';
 import { DropZone } from '@/components/upload';
@@ -10,6 +10,7 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
 import { VoiceButton } from '@/components/voice';
+import { hearOnce, keepScreenOn, speak, stopSpeaking, yesNo } from '@/components/speak';
 import { AiBudgetBar, costLine, type Budget } from '@/components/AiBudget';
 import { DocJobCard } from '@/components/DocJobCard';
 import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
@@ -98,6 +99,46 @@ export default function AssistantPage() {
       if (accept) { toast.ok('반영했습니다'); broadcastRefresh(); }
     } catch (e: any) { set({ state: undefined }); toast.error(e.message); }
   }
+  // ---- V38 3 음성 모드(운전 중): 말로 묻기 → 답을 소리로(길면 앞부분만) → 제안은 "확인/취소" 음성으로 ----
+  const [voice, setVoice] = useState(() => { try { return localStorage.getItem('wos_ai_voice') === '1'; } catch { return false; } });
+  const [vState, setVState] = useState<'idle' | 'listen' | 'think' | 'confirm'>('idle');
+  const msgsRef = useRef(msgs); msgsRef.current = msgs;
+  const vBusy = useRef(false);
+  const forSpeech = (t: string) => {
+    const s = t.replace(/```[\s\S]*?```/g, ' ').replace(/[#*_`>|]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\s+/g, ' ').trim();
+    return s.length > 280 ? `${s.slice(0, 260)}… 자세한 내용은 화면에 있습니다` : s;
+  };
+  async function voiceAsk() {
+    if (vBusy.current || busy) return;
+    vBusy.current = true; stopSpeaking();
+    try {
+      setVState('listen');
+      const q = await hearOnce();
+      if (!q) { setVState('idle'); await speak('못 들었어요. 다시 눌러 말씀해 주세요'); return; }
+      setVState('think');
+      await conv.send(q, []);
+      await new Promise((r) => setTimeout(r, 60)); // 화면에 답이 들어간 뒤
+      const mi = msgsRef.current.length - 1; const last = msgsRef.current[mi];
+      if (!last || last.role !== 'assistant') { setVState('idle'); return; }
+      await speak(forSpeech(last.text));
+      const pend = (last.proposals ?? []).filter((p) => !p.state);
+      if (!pend.length) { setVState('idle'); return; }
+      setVState('confirm');
+      await speak(`${pend.map((p) => p.summary).join('. ')}. 실행할까요? 확인, 또는 취소라고 말해 주세요`);
+      const a = yesNo(await hearOnce());
+      if (a === true) { for (const p of pend) await decide(mi, p, true); await speak('반영했습니다'); }
+      else if (a === false) { for (const p of pend) await decide(mi, p, false); await speak('취소했습니다'); }
+      else await speak('화면에서 확인을 눌러 주세요');
+      setVState('idle');
+    } finally { vBusy.current = false; }
+  }
+  function toggleVoice() {
+    const on = !voice; setVoice(on);
+    try { localStorage.setItem('wos_ai_voice', on ? '1' : '0'); } catch {}
+    keepScreenOn(on);
+    if (on) speak('음성 모드를 켰습니다. 큰 마이크를 누르고 말씀하세요'); else { stopSpeaking(); setVState('idle'); }
+  }
+  useEffect(() => { if (voice) keepScreenOn(true); return () => { keepScreenOn(false); stopSpeaking(); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   async function editLimit() {
     const v = prompt('이번 달부터 적용할 AI 월 한도(달러)', String(status.data?.usage?.limitUsd ?? 30));
     if (v === null) return;
@@ -201,6 +242,19 @@ export default function AssistantPage() {
       <AttachChips files={files} uploading={uploading} onRemove={att.remove} />
       <input ref={att.inputRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => attach(e.target.files)} data-testid="ai-file-input" />
       <div className="mt-2">
+        <div className="mb-1.5 flex justify-end">
+          <button type="button" onClick={toggleVoice} aria-pressed={voice} data-testid="ai-voice-toggle"
+            className={cx('inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-medium', voice ? 'border-accent-600 bg-accent-600 text-white' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>
+            <Headphones className="size-4" />{voice ? '음성 모드 끄기' : '음성 모드(운전 중)'}</button>
+        </div>
+        {voice && (
+          <div className="mb-2 flex flex-col items-center gap-2 rounded-card border border-accent-200 bg-accent-50/60 p-3" data-testid="ai-voice-panel">
+            <button type="button" onClick={voiceAsk} disabled={vState !== 'idle' || busy} aria-label="말로 묻기" data-testid="ai-voice-talk"
+              className={cx('flex size-20 items-center justify-center rounded-full text-white shadow-pop transition active:scale-95 disabled:opacity-80', vState === 'listen' ? 'animate-pulse bg-red-500' : 'bg-accent-600')}>
+              {vState === 'think' ? <Loader2 className="size-9 animate-spin" /> : <Mic className="size-9" />}</button>
+            <p className="text-sm font-medium text-ink-2" data-testid="ai-voice-state">{vState === 'listen' ? '듣고 있어요…' : vState === 'think' ? '답을 찾는 중…' : vState === 'confirm' ? '“확인” 또는 “취소”라고 말해 주세요' : '예: 오늘 남은 업무 알려 줘 · 3시 미팅 30분 미뤄 줘'}</p>
+          </div>
+        )}
         <ChatComposer value={text} onChange={setText} onSend={() => send(text)} onStop={() => conv.stop()} busy={busy} canSend={!uploading && (!!text.trim() || files.length > 0)} inputRef={inputRef}
           onPaste={att.onPaste} ariaLabel="AI 에게 요청" disabled={status.data?.overLimit} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? 'AI에게 요청' : 'AI에게 요청 · 사진 붙여넣기 가능')}
           leading={<Button type="button" variant="secondary" onClick={() => att.inputRef.current?.click()} aria-label="자료 첨부 (사진·PDF·엑셀)" disabled={att.full || !!uploading}><Paperclip /></Button>}
