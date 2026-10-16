@@ -334,3 +334,4 @@
 - 2026-10-17 [로컬] Google 동의 화면 **프로덕션 게시**(대표 승인) · 네이버 키 대표 입력 → providers = ["google","kakao","naver"], 네이버 동의 화면 "워크인 · 이름·이메일" 정상, 처음 온 네이버 계정은 "아직 가입을 받지 않습니다"(PUBLIC_SIGNUP 꺼짐 — 출시 전 대표 결정). 네이버 동의 화면 회사명 "주식회사 다짐" → 개발자센터 계정 설정 회사 이름 "주식회사 하이링크" 입력(대표 승인, 동의 화면 반영은 재동의 때 확인).
 - 2026-10-17 [클라우드 요청] 공개 화면(/, /login, /signup, /welcome) 하단 사업자 정보 Footer(biz() env 값 + 통신판매업 신고번호 env, 약관·개인정보 링크) — 네이버 광고 비즈채널 검수 조건. 출시 전 PUBLIC_SIGNUP 판단(회사 간 분리 시험 결과).
 - 2026-10-17 [로컬] 대표 지시: 업종별 영업 DB — 통합 우선, 공공데이터포털 활용 신청은 지금 병행(대표 계정 로그인 대기). AI 가 사업자 업종·지역 보고 데이터 원천·검색어 자동 설정(V40 예정).
+- 2026-10-17 [배포확인요청] 공개 화면(/·/welcome·/login·/signup) 하단 사업자 정보 줄(BizFooter, env COMPANY_NAME·CEO·BIZNO·ADDRESS·PHONE·SUPPORT_EMAIL·COMPANY_MAIL_ORDER_NO — 없으면 '신고 진행 중', 요청 때 읽어 env 만 바꾸면 반영). 회사 간 분리: API 시험(tenancy·security·security-v34·signup-steps·ai-tenant) 전부 통과 — 가짜 서버 기준, 운영에서 두 회사 실제 확인은 아직. PUBLIC_SIGNUP 은 대표 결정.
