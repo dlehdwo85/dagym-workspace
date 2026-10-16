@@ -552,8 +552,9 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
   return (
     <span className="relative inline-flex min-w-0">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setTip(false); setOpen(true); }} onPointerDown={(e) => e.stopPropagation()} aria-haspopup="dialog" aria-label={`${t.title} 상태: ${statusText(t)}`} data-testid="row-status-chip"
-        className={cx('hit inline-flex h-8 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border pl-2 pr-1.5 text-[12px] font-semibold shadow-sm transition active:scale-95 active:shadow-none', CHIP_TONE[t.status])}>
-        <span className={cx('size-1.5 shrink-0 rounded-full', ack === '확인 전' ? 'bg-red-500' : CHIP_DOT[t.status])} aria-hidden />{STATUS_LABEL[t.status]}{sub}<ChevronDown className="size-3.5 shrink-0 opacity-70" aria-hidden />
+        // 대표(10/16): 휴대폰에서 상태 버튼이 너무 큼 → 보이는 크기 24px·글자 11px(누르는 범위는 hit 로 44px 유지)
+        className={cx('hit inline-flex h-6 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border pl-1.5 pr-1 text-[11px] font-semibold transition active:scale-95 lg:h-7 lg:text-[12px]', CHIP_TONE[t.status])}>
+        <span className={cx('size-1.5 shrink-0 rounded-full', ack === '확인 전' ? 'bg-red-500' : CHIP_DOT[t.status])} aria-hidden />{STATUS_LABEL[t.status]}{sub}<ChevronDown className="size-3 shrink-0 opacity-70" aria-hidden />
       </button>
       {tip && <span className="pointer-events-none absolute left-full top-1/2 z-10 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] text-white shadow-pop after:absolute after:right-full after:top-1/2 after:-translate-y-1/2 after:border-4 after:border-transparent after:border-r-ink" data-testid="status-tip">눌러서 상태 바꾸기</span>}
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={200}>

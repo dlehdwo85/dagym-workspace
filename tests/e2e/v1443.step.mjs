@@ -13,7 +13,8 @@ export async function v1443({ browser, desk, ctx, BASE, SHOTS, sql }) {
     await chip.waitFor();
     assert.equal(await m.getByTestId('check-circle').count(), 0, '동그라미 없음');
     const st = await chip.evaluate((el) => ({ h: el.getBoundingClientRect().height, bw: parseFloat(getComputedStyle(el).borderTopWidth), svg: el.querySelectorAll('svg').length }));
-    assert.ok(st.h >= 31.5 && st.bw >= 1 && st.svg >= 1, `버튼 모양 ${JSON.stringify(st)}`);
+    assert.ok(st.h >= 23.5 && st.h <= 28 && st.bw >= 1 && st.svg >= 1, // 대표 10/16: 너무 큼 → 24px(누르는 범위는 hit 44px)
+       `버튼 모양 ${JSON.stringify(st)}`);
     assert.equal(await m.getByText('확인 완료', { exact: false }).count(), 0, '"확인 완료" 문구 없음');
     await m.screenshot({ path: `${SHOTS}/v14-43-row-412.png`, clip: { x: 0, y: 0, width: 412, height: 520 } });
     await chip.tap();
