@@ -1092,10 +1092,12 @@ function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: stri
   }
   if (c.deleted) return <div id={`c-${c.id}`} className="text-xs italic text-ink-3">삭제된 댓글입니다</div>;
   return (
-    <div id={`c-${c.id}`} className="group flex gap-2.5 rounded-input target:bg-amber-50" data-testid="comment">
-      <Avatar id={c.author_id} name={c.author_name} size={small ? 22 : 28} />
-      <div className="min-w-0 flex-1">
-        <div className="text-xs text-ink-2"><b className="text-sm text-ink">{c.author_name}</b> · {fmtDateTime(c.created_at)}{c.edited_at && ' (수정됨)'}</div>
+    <div id={`c-${c.id}`} className="group rounded-input target:bg-amber-50" data-testid="comment">
+      <div className="min-w-0">
+        {/* 대표 실기기: 이름이 왼쪽(아바타·직책)과 위(이름)에 두 번 → 위 한 줄만: 색 원 + 직책 + 이름 · 시각 (다른 화면의 "동재 대표 이동재"와 같은 모양) */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-2" data-testid="comment-head">
+          <Avatar id={c.author_id} name={c.author_name} size={small ? 20 : 22} /><b className="text-sm text-ink">{c.author_name}</b><span>· {fmtDateTime(c.created_at)}{c.edited_at && ' (수정됨)'}</span>
+        </div>
         {edit === null ? <div className="mt-0.5 whitespace-pre-wrap leading-relaxed">{renderMentions(c.body)}</div> : (
           <form onSubmit={save} className="mt-1 flex gap-1.5"><input autoFocus className={cx(inputCls, 'h-8')} value={edit} onChange={(e) => setEdit(e.target.value)} aria-label="댓글 수정" onKeyDown={(e) => { if (e.key === 'Escape') setEdit(null); }} /><Button size="sm">저장</Button></form>
         )}

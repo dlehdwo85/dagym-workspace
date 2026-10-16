@@ -328,6 +328,7 @@ const SHARE_DAYS = 14;
 const emails = z.array(z.string().trim().email('메일 주소 형식이 아닙니다').max(200)).max(20);
 export const sendInput = z.object({
   taskId: z.string().uuid(),
+  confirmConfidential: z.boolean().optional(), // V38 4: 이름 규칙상 기밀로 분류된 업무 첨부 — 경고 확인 후 보냄
   company: z.string().regex(/^[a-z0-9_-]{2,30}$/),
   to: emails.min(1, '받는 사람을 넣어 주세요'),
   cc: emails.optional(),
@@ -363,7 +364,7 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   const files = ids.length ? await sql<{ id: string; file_name: string; size_bytes: string; mime_type: string; storage_key: string }[]>`
     select id, file_name, size_bytes, mime_type, storage_key from attachments where id = any(${ids}::uuid[]) and task_id = ${i.taskId} and kind = 'file' and deleted_at is null and upload_status = 'ready'` : [];
   if (files.length !== ids.length) throw badRequest('이 업무의 첨부만 보낼 수 있습니다');
-  await assertExportable(t, files); // V34 C1 기밀·지운 자료는 외부 메일로 안 나감
+  await assertExportable(t, files, { u, confirm: i.confirmConfidential, how: 'mail' }); // V34 C1 기밀·지운 자료는 외부 메일로 안 나감
   const list = ids.map((id) => files.find((f) => f.id === id)!).map((f) => ({ attachmentId: f.id, name: f.file_name, size: Number(f.size_bytes), mime: f.mime_type }));
   const total = list.reduce((s, f) => s + f.size, 0);
   const asLink = total > LINK_THRESHOLD;
@@ -481,13 +482,23 @@ export async function outboxJob(limit = 20) {
 
 // ---------------- 기간 다운로드 링크 ----------------
 /** V34 C1: 기밀 자료(자료실 등급·폴더 상속)·자료실에서 지운 파일은 공개 링크·외부 메일로 내보내지 않는다 */
-async function assertExportable(tenant: string, files: { storage_key: string; file_name: string }[]) {
+async function assertExportable(tenant: string, files: { storage_key: string; file_name: string }[], ctx?: { u: SessionUser; confirm?: boolean; how: 'mail' | 'share' }) {
   const { storageSecurity } = await import('./library');
   for (const f of files) {
     const s = await storageSecurity(tenant, f.storage_key);
     if (s?.deleted) throw badRequest(`자료실에서 지운 파일입니다: ${f.file_name}`);
     if (s?.security === 'confidential') throw forbidden(`기밀 자료는 외부 링크·메일로 보낼 수 없습니다: ${f.file_name}`);
   }
+  // V38 4(로컬 검수): 업무에서 올린 파일이 이름 규칙으로 기밀 분류(자동 등록 행)됐으면 막지 않고 경고 + 확인 한 번, 보내면 감사 기록
+  const keys = files.map((f) => f.storage_key).filter(Boolean);
+  if (!ctx || !keys.length) return;
+  const sql = db();
+  const flagged = await sql<{ id: string; storage_key: string }[]>`select id, storage_key from library_files where tenant = ${tenant} and storage_key = any(${keys}::text[])
+    and source = 'task_attach' and security = 'confidential' and deleted_at is null`;
+  if (!flagged.length) return;
+  const names = files.filter((f) => flagged.some((x) => x.storage_key === f.storage_key)).map((f) => f.file_name);
+  if (!ctx.confirm) throw new HttpError(409, 'confirm_confidential', `이 파일은 기밀로 분류됐습니다(파일 이름 규칙): ${names.join(', ')}\n외부로 보내시겠어요?`, { files: names });
+  for (const x of flagged) await audit(sql, ctx.u.id, 'library.confidential_share_confirmed', 'library_file', x.id, { how: ctx.how, files: names }, null);
 }
 async function createShare(sql: Sql, tenant: string, taskId: string | null, userId: string, files: { attachmentId: string; name: string; size: number }[], companyKey: string | null = null) {
   const token = newToken(24);
@@ -497,14 +508,14 @@ async function createShare(sql: Sql, tenant: string, taskId: string | null, user
   return { id: s.id, url: `${appUrl()}/d/${token}`, expiresAt };
 }
 /** 문자에 넣을 링크 등 — 사람이 고른 첨부로 링크만 만든다 */
-export const shareInput = z.object({ taskId: z.string().uuid(), attachmentIds: z.array(z.string().uuid()).min(1).max(20), company: z.string().regex(/^[a-z0-9_-]{2,30}$/).optional() });
+export const shareInput = z.object({ taskId: z.string().uuid(), confirmConfidential: z.boolean().optional(), attachmentIds: z.array(z.string().uuid()).min(1).max(20), company: z.string().regex(/^[a-z0-9_-]{2,30}$/).optional() });
 export async function createTaskShare(u: SessionUser, i: z.infer<typeof shareInput>) {
   await loadTaskForMail(u, i.taskId);
   const sql = db();
   const files = await sql<{ id: string; file_name: string; size_bytes: string; storage_key: string }[]>`select id, file_name, size_bytes, storage_key from attachments
     where id = any(${i.attachmentIds}::uuid[]) and task_id = ${i.taskId} and kind = 'file' and deleted_at is null and upload_status = 'ready'`;
   if (files.length !== new Set(i.attachmentIds).size) throw badRequest('이 업무의 첨부만 링크로 만들 수 있습니다');
-  await assertExportable(tenantOf(u), files);
+  await assertExportable(tenantOf(u), files, { u, confirm: i.confirmConfidential, how: 'share' });
   const s = await createShare(sql, tenantOf(u), i.taskId, u.id, files.map((f) => ({ attachmentId: f.id, name: f.file_name, size: Number(f.size_bytes) })), i.company ?? null);
   await activity(sql, 'task', i.taskId, u.id, 'share_created', { files: files.map((f) => f.file_name), expiresAt: s.expiresAt });
   return s;

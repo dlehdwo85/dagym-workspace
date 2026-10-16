@@ -138,7 +138,11 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!nums.length) { toast.error('받는 사람 전화번호를 넣어 주세요'); return; }
     let share: string | undefined;
     try {
-      if (f!.files.length) share = (await api('/api/mail/share', { body: { taskId, attachmentIds: f!.files, company: f!.company || undefined } })).url;
+      if (f!.files.length) {
+        const r = await withConfidentialConfirm((ok) => api('/api/mail/share', { body: { taskId, attachmentIds: f!.files, company: f!.company || undefined, ...(ok ? { confirmConfidential: true } : {}) } }));
+        if (!r) return; // 기밀 경고에서 [취소]
+        share = r.url;
+      }
     } catch (e: any) { toast.error(e.message); return; }
     const text = [sms.body.trim(), share ? `자료 내려받기(14일): ${share}` : '', smsLine].filter(Boolean).join('\n\n');
     const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -169,8 +173,9 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!to.length) { toast.error('받는 사람 메일 주소를 넣어 주세요'); return; }
     setBusy(true);
     try {
-      const r = await api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), bcc: splitAddrs(f!.bcc), fromName: f!.fromName.trim() || undefined, replyTo: f!.replyTo.trim() || undefined, subject: f!.subject, body: f!.body, attachmentIds: f!.files,
-        senderTitle: f!.title || undefined, senderPhone: f!.phone || undefined, senderWorkEmail: f!.workEmail.trim() || undefined } });
+      const r = await withConfidentialConfirm((ok) => api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), bcc: splitAddrs(f!.bcc), fromName: f!.fromName.trim() || undefined, replyTo: f!.replyTo.trim() || undefined, subject: f!.subject, body: f!.body, attachmentIds: f!.files,
+        senderTitle: f!.title || undefined, senderPhone: f!.phone || undefined, senderWorkEmail: f!.workEmail.trim() || undefined, ...(ok ? { confirmConfidential: true } : {}) } }));
+      if (!r) return; // 기밀 경고에서 [취소]
       toast.ok(r.asLink ? '보관함에 넣었습니다 — 첨부는 다운로드 링크로 보냅니다' : '보관함에 넣었습니다 — 곧 발송됩니다');
       onSent();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
@@ -303,4 +308,13 @@ function LibraryPick({ taskId, onPicked }: { taskId: string; onPicked: (attachme
       </ul>
     </div>
   );
+}
+
+/** V38 4: 이름 규칙상 기밀로 분류된 업무 첨부를 밖으로 보낼 때 경고 + 확인 한 번(서버가 409 confirm_confidential) — 취소하면 null */
+async function withConfidentialConfirm<T>(run: (confirmed: boolean) => Promise<T>): Promise<T | null> {
+  try { return await run(false); } catch (e: any) {
+    if (e?.code !== 'confirm_confidential') throw e;
+    if (!window.confirm(e.message)) return null;
+    return await run(true);
+  }
 }
