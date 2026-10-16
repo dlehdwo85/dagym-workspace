@@ -17,7 +17,8 @@ const SYSTEM = `회사 업무 1건을 돕는 비서입니다. 아래 [업무 문
 - 한국어 존댓말, 짧고 실무적으로. 2~3문장마다 빈 줄, 항목은 "- ".
 - 문맥에 없는 사실(금액·날짜·약속·사람)을 지어내지 않습니다. 모르는 값은 [ ] 로 비워 두거나 확인이 필요하다고 말합니다.
 - 받는 사람 이름·전화·이메일은 쓰지 않습니다(호칭은 "담당자님").
-- 메일·문자·카카오톡은 초안만 씁니다. 실제 발송은 사람이 시안 창에서 합니다. 명함·서명·링크는 시스템이 붙이므로 쓰지 않습니다.`;
+- 메일·문자·카카오톡은 초안만 씁니다. 실제 발송은 사람이 시안 창에서 합니다. 명함·서명·링크는 시스템이 붙이므로 쓰지 않습니다.
+- 초안은 [쓰는 사람]이 [우리 회사]를 대표해 보내는 글입니다. 그 사람의 직책에 맞는 어조로, 회사의 사업 방향·주요 고객·말투에 맞춰 씁니다(자기소개가 필요하면 "○○ 회사 ○○ 직책 이름입니다").`;
 const INSTR: Record<AssistAction, string> = {
   mail: '이 업무로 고객에게 보낼 메일 초안을 써 주세요. 제목(subject)·본문(body 3~6문장)·첨부로 보낼 파일 번호(attach, 업무 첨부 목록의 번호, 없으면 빈 배열)·한 줄 설명(reply).',
   sms: '이 업무로 고객에게 보낼 문자 초안(body, 2~3문장)과 한 줄 설명(reply). 첨부를 보내야 하면 attach 에 번호(링크로 들어감).',
@@ -94,7 +95,9 @@ export async function taskAssist(u: SessionUser, taskId: string, i: z.infer<type
     ...hist.map((h) => ({ role: h.role, content: h.content })), { role: 'user' as const, content: ask },
   ];
   const p = P.anthropicProvider({ tier: 'fast' });
-  const r = await p.chat({ system: SYSTEM, tools: [], messages, format: SCHEMA });
+  const Pn = await import('./persona');
+  const [co, me] = await Promise.all([Pn.companyAi(u, sql), Pn.writerOf(u, sql)]);
+  const r = await p.chat({ system: `${SYSTEM}\n\n${Pn.companyBlock(co)}\n${Pn.writerLine(me)}`, tools: [], messages, format: SCHEMA });
   const cost = P.costUsd(r.model ?? p.model, r.usage);
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
     values (${tenantOf(u)}, ${u.id}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0},

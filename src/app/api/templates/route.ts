@@ -11,7 +11,7 @@ export const GET = handler(async ({ user }) => {
   const units = await accessibleUnitIds(user, sql);
   const templates = await sql`select t.id, t.name, t.description, t.payload, t.org_unit_id, o.name as org_unit_name, t.updated_at, t.personal
     from templates t left join org_units o on o.id = t.org_unit_id
-    where not t.archived and (not t.personal or t.created_by = ${user.id}) and ((t.org_unit_id is null and t.tenant = ${tenantOf(user)}) or ${units === null ? sql`true` : sql`t.org_unit_id = any(${units}::uuid[])`})
+    where not t.archived and t.tenant = ${tenantOf(user)} and (not t.personal or t.created_by = ${user.id}) and (t.org_unit_id is null or ${units === null ? sql`true` : sql`t.org_unit_id = any(${units}::uuid[])`})
     order by t.org_unit_id nulls first, t.name`;
   return { templates };
 });
@@ -38,7 +38,10 @@ export const POST = handler(async ({ req, user }) => {
   }
   if (!payload) payload = { title: i.name, checklist: [] } as never;
   if (!i.personal && i.orgUnitId === null && !atLeast(user, 'admin')) throw forbidden('전사 템플릿은 관리자만 만들 수 있습니다');
-  const [r] = await sql<{ id: string }[]>`insert into templates (name, description, payload, org_unit_id, created_by, personal)
-    values (${i.name}, ${i.description ?? ''}, ${sql.json(payload as never)}, ${i.personal ? null : i.orgUnitId ?? null}, ${user.id}, ${!!i.personal}) returning id`;
+  const orgUnitId = i.personal ? null : i.orgUnitId ?? null;
+  if (orgUnitId) { const units = await accessibleUnitIds(user, sql); if (units !== null && !units.includes(orgUnitId)) throw forbidden(); }
+  if (orgUnitId && !(await sql`select 1 from org_units where id = ${orgUnitId} and tenant = ${tenantOf(user)}`).length) throw forbidden();
+  const [r] = await sql<{ id: string }[]>`insert into templates (name, description, payload, org_unit_id, created_by, personal, tenant)
+    values (${i.name}, ${i.description ?? ''}, ${sql.json(payload as never)}, ${orgUnitId}, ${user.id}, ${!!i.personal}, ${tenantOf(user)}) returning id`;
   return { id: r.id };
 }, { idempotent: true });

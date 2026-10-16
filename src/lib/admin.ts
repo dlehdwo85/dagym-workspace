@@ -248,7 +248,8 @@ export async function directory(u: SessionUser, sql: Sql = db()) {
     from users u left join memberships m on m.user_id = u.id
     where u.status = 'active' and u.tenant = ${tenantOf(u)} and (u.role in ('owner','admin') or exists (select 1 from memberships mm where mm.user_id = u.id and mm.org_unit_id = any(${units ?? []}::uuid[])))
     group by u.id order by u.name`;
-  const brands = await sql`select id, name, color from brands order by sort`;
+  // 브랜드(다짐·하이링크·바디랩)는 기존 회사 전용 — 다른 회사에는 보이지 않게(AI·음성 단어에도 섞이지 않음)
+  const brands = tenantOf(u) === 'default' ? await sql`select id, name, color from brands order by sort` : [];
   return { brands, orgUnits, users, accessibleUnitIds: units, isAdmin: isAdmin(u) };
 }
 

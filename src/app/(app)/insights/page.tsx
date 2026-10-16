@@ -44,9 +44,10 @@ export default function InsightsPage() {
         <div className="flex rounded-input border border-line bg-white p-0.5 text-sm shadow-card" role="group" aria-label="기간">
           {[4, 8, 12].map((w) => <button key={w} onClick={() => setWeeks(w)} aria-pressed={weeks === w} className={cx('rounded-md px-3 py-1.5 font-medium', weeks === w ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{w}주</button>)}
         </div>
+{dir.brands.length > 0 && (
         <select className="h-9 rounded-input border border-line bg-white px-2 text-sm shadow-card" value={brand} onChange={(e) => setBrand(e.target.value)} aria-label="브랜드">
           <option value="">전체 브랜드</option>{dir.brands.filter((b) => !HIDDEN_BRANDS.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        </select>)}
       </>} />
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={5} /> : !rows.length ? (
         <p className="rounded-card border border-dashed border-line bg-white p-10 text-center text-sm text-ink-2">비교할 현장이 없습니다</p>

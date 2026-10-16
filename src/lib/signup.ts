@@ -1,3 +1,4 @@
+import { INDUSTRY_PRESETS } from './industries';
 import { z } from 'zod';
 import { db, type Sql } from './db';
 import { HttpError, badRequest, notFound } from './errors';
@@ -51,6 +52,12 @@ export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
   await tx`insert into memberships (user_id, org_unit_id) values (${u.id}, ${o.id})`;
   await tx`insert into calendars (type, org_unit_id, name, color, tenant) values ('org_unit', ${o.id}, ${orgName + ' 일정'}, '#475569', ${tenant})`;
   if (i.mode === 'team') await tx`insert into calendars (type, name, color, tenant) values ('company', ${i.company + ' 공용'}, '#0F766E', ${tenant})`;
+  // 상용화: AI 비서는 빈 상태에서 이 회사 기준으로 — 회사 정보(상호) 1건 + 업종별 시작 템플릿(다른 회사 데이터는 복사하지 않음)
+  if (i.mode === 'team') await tx`insert into company_profiles (tenant, key, name, is_default, updated_by) values (${tenant}, 'main', ${i.company!}, true, ${u.id}) on conflict do nothing`;
+  for (const s of (i.industry && INDUSTRY_PRESETS[i.industry]?.starters) || []) {
+    await tx`insert into templates (name, description, payload, org_unit_id, created_by, personal, tenant)
+      values (${s.name}, ${s.description}, ${tx.json({ title: s.name, checklist: s.checklist, ...(s.dueInDays !== undefined ? { dueInDays: s.dueInDays } : {}) } as never)}, null, ${u.id}, false, ${tenant})`;
+  }
   await ensurePersonalCalendar(u.id, i.name, tx);
   for (const [kind, agreed] of Object.entries(i.agree)) await tx`insert into consents (user_id, kind, version, agreed) values (${u.id}, ${kind}, ${TERMS_VERSION}, ${agreed})`;
   await audit(tx, u.id, 'auth.signup', 'user', u.id, { mode: i.mode, tenant, social: !i.passwordHash }, i.ip);

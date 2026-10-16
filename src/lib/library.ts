@@ -331,7 +331,7 @@ function ruleGuess(fileName: string, rules: { file_name: string; folder: string;
   return best && score > 0 ? { folder: best.folder, tags: best.tags, confidence: Math.min(0.9, 0.4 + score * 0.2) } : null;
 }
 const ORG_SYSTEM = `회사 자료실 정리 담당입니다. 파일 하나의 이름·종류·본문 일부(또는 이미지)를 보고 폴더·태그·제목·한 줄 요약을 정해 JSON 으로 답하세요.
-- 폴더는 "상위/하위" 형식, 가능하면 이미 있는 폴더를 쓰고 없을 때만 새로 만드세요. 예: 다짐_로고_가로형.png → 브랜드자료/다짐, 태그 로고·다짐·가로형.
+- 폴더는 "상위/하위" 형식, 가능하면 이미 있는 폴더를 쓰고 없을 때만 새로 만드세요. 예: 회사명_로고_가로형.png → 브랜드자료/회사명, 태그 로고·회사명·가로형.
 - 회사가 직접 고친 예시가 있으면 그 규칙(같은 종류는 같은 폴더)을 우선 따르세요.
 - 태그는 3~6개, # 없이 짧게. 제목은 사람이 읽기 좋게(확장자 없이). 요약은 한 문장.
 - confidence 는 0~1, 내용을 확인하지 못했거나 애매하면 0.5 이하.

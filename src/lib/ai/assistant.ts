@@ -65,7 +65,7 @@ export async function setLimit(u: SessionUser, monthlyUsd: number) {
 const str = (d: string) => ({ type: 'string' as const, description: d });
 const TOOLS: AiTool[] = [
   { name: 'search_library', description: '회사 자료실(로고·소개서·단가표·보고서 등)에서 제목·폴더·태그·본문으로 자료를 찾는다. 결과의 id 로 읽거나 업무에 첨부할 수 있다.',
-    input_schema: { type: 'object', properties: { query: str('찾을 말 (예: "다짐 로고", "단가표")'), folder: str('폴더로 좁히기 (선택)') }, required: ['query'] } },
+    input_schema: { type: 'object', properties: { query: str('찾을 말 (예: "회사 로고", "단가표")'), folder: str('폴더로 좁히기 (선택)') }, required: ['query'] } },
   { name: 'read_library_file', description: '자료실 파일의 본문 글자를 읽는다(문서·엑셀·텍스트). 이미지·PDF 는 본문이 없을 수 있다.',
     input_schema: { type: 'object', properties: { fileId: str('자료 id') }, required: ['fileId'] } },
   { name: 'search_tasks', description: '사용자가 볼 수 있는 업무를 찾는다.',
@@ -163,7 +163,7 @@ const TOOLS: AiTool[] = [
       instructions: str('만들 내용·디자인 요구를 자세히: 들어갈 항목·숫자·문장, 1페이지 여부, 강조할 점, 참고 양식에서 따를 것/바꿀 것. 사용자가 준 숫자만'),
       referenceFileIds: { type: 'array', items: { type: 'string' }, description: '참고할 자료실 파일 id(첨부·검색으로 찾은 것)' },
       baseJobId: str('고칠 이전 파일 작업 id (대화 기록의 [파일 작업: id=…])'),
-      company: str('회사 정보 키(예: dagym, hilink) — 공급자·로고·브랜드 색. 모르면 비움(기본 회사)'),
+      company: str('회사 정보 키(회사 정보·디자인에 등록된 key) — 공급자·로고·브랜드 색. 모르면 비움(기본 회사)'),
       design: { type: 'boolean', description: '사용자가 "새로 디자인/세련되게/처음부터" 를 원할 때만 true(더 비싼 모델). 보통은 비움' },
       confirmedCost: { type: 'boolean', description: '도구가 needConfirm 을 돌려준 뒤 사용자가 비용에 동의했을 때만 true' },
     }, required: ['mode', 'kind', 'title', 'instructions'] } },
@@ -175,7 +175,7 @@ const TOOLS: AiTool[] = [
   { name: 'fill_template', description: '양식을 복사해 칸 값(xlsx: edits)·문장(docx: replacements)만 바꿔 새 파일을 바로 만든다(화면 카드, 자료실 저장은 사람이). 수식 칸은 쓰지 말 것(열 때 다시 계산됨). 공급자 칸은 read_template_layout 의 [회사] 값만, 다른 회사 정보는 남기지 말 것.',
     input_schema: { type: 'object', properties: {
       sourceFileId: str('양식 파일 id'), title: str('새 파일 제목(확장자 없이)'), company: str('회사 정보 키'),
-      edits: { type: 'array', items: { type: 'object', properties: { sheet: { type: 'string' }, cell: { type: 'string' }, value: { type: ['string', 'number', 'null'] } }, required: ['cell', 'value'] }, description: 'xlsx 칸 값(예: {cell:"B3", value:"주식회사 다짐"})' },
+      edits: { type: 'array', items: { type: 'object', properties: { sheet: { type: 'string' }, cell: { type: 'string' }, value: { type: ['string', 'number', 'null'] } }, required: ['cell', 'value'] }, description: 'xlsx 칸 값(예: {cell:"B3", value:"주식회사 ○○"})' },
       replacements: { type: 'array', items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] }, description: 'docx 문장 바꾸기' },
       fitOnePage: { type: 'boolean', description: 'xlsx 인쇄를 A4 한 페이지에 맞춤' },
       replaceLogo: { type: 'boolean', description: '원본 로고 그림을 고른 회사 로고로 바꿈(그림 1개·같은 형식일 때)' },
@@ -187,7 +187,7 @@ const WEB_TOOLS: AiTool[] = [
   { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 } as never,
 ];
 
-const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 한국 피트니스 회사(다짐·하이링크) 직원을 돕습니다.
+const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 아래 [우리 회사] 직원을 돕습니다. 그 회사의 업종·사업 방향·말투에 맞춰 답하고, 다른 회사 이야기를 지어내지 마세요.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
@@ -714,7 +714,9 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     context = `\n지금 사용자가 보고 있는 업무: id=${i.taskId}, 제목="${(d.task as any).title}". "이 업무"는 이것을 뜻합니다.`;
   }
   if (i.context && !i.taskId) context += await pageContext(u, i.context);
-  const system = `${docMode ? DOC_SYSTEM : SYSTEM}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}`;
+  const Pn = await import('./persona');
+  const [co, me] = await Promise.all([Pn.companyAi(u), Pn.writerOf(u)]);
+  const system = `${docMode ? DOC_SYSTEM : SYSTEM}\n\n${Pn.companyBlock(co)}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}${me.title ? ` ${me.title}` : ''}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}`;
   // 문맥: 보관된 대화면 최근 20개 + 요약, 예전 방식이면 화면이 보낸 것
   const recent = hist ? (docMode ? hist.messages.slice(-6) : hist.messages) : [];
   while (docMode && recent[0]?.role === 'assistant') recent.shift(); // 대화는 사용자 말로 시작

@@ -146,9 +146,10 @@ export default function RevenuePage() {
         <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={year} onChange={(e) => setYear(Number(e.target.value))} aria-label="연도">
           {[thisYear + 1, thisYear, thisYear - 1, thisYear - 2].map((y) => <option key={y} value={y}>{y}년</option>)}
         </select>
+{dir.brands.length > 0 && (
         <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={brand} onChange={(e) => { setBrand(e.target.value); setUnit(''); }} aria-label="브랜드">
           <option value="">전체 브랜드</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        </select>)}
         <select className="h-9 max-w-[11rem] rounded-input border border-line bg-white px-2 text-sm" value={unit} onChange={(e) => setUnit(e.target.value)} aria-label="현장">
           <option value="">전체 현장</option>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>

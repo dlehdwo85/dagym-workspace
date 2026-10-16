@@ -227,7 +227,7 @@ export async function actionImport(token: { id: string; name: string }, i: z.inf
 // ---------------- AI 분석 (OpenAI, OPENAI_API_KEY 있을 때만) ----------------
 // V13 1번: AI 분석도 내장 AI(공급자 어댑터 — 기본 Anthropic) 사용, 키가 없으면 숨김
 export const aiConfigured = () => !!process.env.ANTHROPIC_API_KEY;
-const AI_SYSTEM = `당신은 한국 피트니스 회사(다짐·하이링크) 본사의 매출 분석 보조입니다. 입력은 현장별 월 집계 숫자(원·명)뿐입니다.
+const AI_SYSTEM = `당신은 한국 회사 본사의 매출 분석 보조입니다(회사·업종은 아래 [우리 회사]). 입력은 현장별 월 집계 숫자(원·명)뿐입니다.
 반드시 입력 숫자만 근거로 쓰고, 없는 사실을 지어내지 마세요. 숫자를 말할 때는 그 현장·월을 함께 적으세요.
 JSON 으로만 답하세요: {"summary": "3~5문장 요약", "anomalies": [{"site": "현장 이름", "month": "YYYY-MM", "metric": "revenue|expense|members", "comment": "한두 문장"}], "comparisons": [{"site": "현장 이름", "comment": "한두 문장"}]}.
 이상치는 전월·전년 동월 대비 크게 오르거나 내린 경우(대략 ±30% 이상)만 고르세요. 투자 조언·사람 평가는 하지 마세요.`;
@@ -261,7 +261,8 @@ export async function aiAnalyze(u: SessionUser, period: string, ip: string | nul
     anomalies: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['site', 'month', 'metric', 'comment'], properties: { site: { type: 'string' }, month: { type: 'string' }, metric: { type: 'string' }, comment: { type: 'string' } } } },
     comparisons: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['site', 'comment'], properties: { site: { type: 'string' }, comment: { type: 'string' } } } },
   } };
-  const r0 = await provider.chat({ system: AI_SYSTEM, tools: [], format: schema, messages: [{ role: 'user', content: JSON.stringify(input) }] })
+  const Pn = await import('./ai/persona');
+  const r0 = await provider.chat({ system: `${AI_SYSTEM}\n\n${Pn.companyBlock(await Pn.companyAi(u, sql))}`, tools: [], format: schema, messages: [{ role: 'user', content: JSON.stringify(input) }] })
     .catch((e: any) => { throw new HttpError(502, 'ai_unavailable', `AI 분석 서버 응답 오류${e?.status ? ` (${e.status})` : ''}`); });
   const { tenantOf } = await import('./library');
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)

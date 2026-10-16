@@ -5,6 +5,7 @@ import { notFound } from '@/lib/errors';
 import { createTask } from '@/lib/tasks';
 import { addDays, todaySeoul } from '@/lib/time';
 import type { TemplatePayload } from '@/lib/templates';
+import { tenantOf } from '@/lib/types';
 
 /** 템플릿을 복사해 새 업무(체크리스트·하위 업무 포함)를 만든다 */
 export const POST = handler<{ id: string }>(async ({ req, user, params }) => {
@@ -12,7 +13,7 @@ export const POST = handler<{ id: string }>(async ({ req, user, params }) => {
     title: z.string().trim().min(1).max(200).optional(), orgUnitId: zUuid.optional(), projectId: zUuid.nullable().optional(),
     assigneeId: zUuid.nullable().optional(), requestedById: zUuid.nullable().optional(), dueDate: zDate.optional(), brandId: z.enum(['dagym', 'hilink', 'bodylab']).nullable().optional(),
   }));
-  const [t] = await db()`select * from templates where id = ${params.id} and not archived and (not personal or created_by = ${user.id})`;
+  const [t] = await db()`select * from templates where id = ${params.id} and tenant = ${tenantOf(user)} and not archived and (not personal or created_by = ${user.id})`;
   if (!t) throw notFound('템플릿이 없습니다');
   const p = t.payload as TemplatePayload;
   const due = i.dueDate ?? (p.dueInDays !== undefined ? addDays(todaySeoul(), p.dueInDays) : null);

@@ -112,7 +112,8 @@ export async function submitForm(token: string, i: z.infer<typeof submitInput>, 
     const creator = user?.id ?? assignee ?? (await tx<{ id: string }[]>`select id from users where role = 'owner' and status = 'active' limit 1`)[0]?.id;
     const kind = f.kind as keyof typeof KIND_LABEL;
     const tplName = KIND_TEMPLATE[kind];
-    const tpl = tplName ? (await tx`select payload from templates where name = ${tplName} and not archived limit 1`)[0] : null;
+    const tpl = tplName ? (await tx`select payload from templates where name = ${tplName} and not archived and not personal
+      and tenant = (select tenant from org_units where id = ${f.org_unit_id}) limit 1`)[0] : null;
     const reporter = user ? `${user.name} (직원)` : i.name ? `${i.name}${i.phone ? ` · ${i.phone}` : ''}` : '익명';
     const firstLine = i.content.split('\n')[0].slice(0, 60);
     const [o] = await tx<{ brand_id: string | null }[]>`select brand_id from org_units where id = ${f.org_unit_id}`;

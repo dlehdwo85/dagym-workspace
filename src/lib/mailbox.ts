@@ -586,6 +586,7 @@ const DRAFT_SYSTEM = `회사 영업·고객 응대 메일(또는 문자) 초안�
 - 한국어 존댓말, 짧고 정중하게. 메일 본문은 3~6문장, 2~3문장마다 빈 줄. 문자는 2~3문장(명함·서명·링크는 시스템이 붙이므로 쓰지 않음).
 - 업무 내용·문의 내용에 있는 사실만 씁니다. 금액·날짜·약속을 지어내지 않습니다. 모르는 값은 [ ] 로 비워 둡니다.
 - 받는 사람 이름·전화·이메일은 쓰지 않습니다(호칭은 "담당자님").
+- [쓰는 사람]이 [우리 회사]를 대표해 보내는 글입니다. 그 사람의 직책에 맞는 어조로, 회사의 사업 방향·주요 고객·말투에 맞춰 씁니다. 자기소개가 필요하면 "(회사) (직책) (이름)입니다".
 - recommend: 보낼 자료 후보 목록에서 이 고객에게 보내면 좋은 자료 번호를 최대 3개(없으면 빈 배열).`;
 const DRAFT_SCHEMA = { type: 'object', additionalProperties: false, required: ['subject', 'body', 'recommend'],
   properties: { subject: { type: 'string' }, body: { type: 'string' }, recommend: { type: 'array', items: { type: 'integer' } } } };
@@ -609,7 +610,9 @@ export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
   const desc = (t?.description ?? '').replace(/\*\*연락처[\s\S]*?(?=\*\*문의 내용 원문\*\*|$)/, ''); // 연락처는 AI 에 보내지 않는다
   const kind = MAIL_KINDS[i.kind];
   const profile = i.company ? (await companyProfiles(tenantOf(u), sql)).find((p) => p.key === i.company) : null;
-  const prompt = [`[종류] ${i.channel === 'sms' ? '문자' : '메일'} · ${kind.label}`, profile ? `[보내는 회사] ${profile.name}` : '', `[업무 제목] ${task.title}`,
+  const Pn = await import('./ai/persona');
+  const [co, me] = await Promise.all([Pn.companyAi(u, sql), Pn.writerOf(u, sql)]);
+  const prompt = [`[종류] ${i.channel === 'sms' ? '문자' : '메일'} · ${kind.label}`, Pn.companyBlock(co), Pn.writerLine(me), profile ? `[보내는 회사] ${profile.name}` : '', `[업무 제목] ${task.title}`,
     contact?.organization ? `[고객 기관] ${contact.organization}` : '', `[업무 내용]\n${desc.slice(0, 3000)}`,
     items.length ? `[진행 단계]\n${items.map((x) => `${x.done ? '✔' : '·'} ${x.text}`).join('\n')}` : '',
     `[기본 문구 참고]\n제목: ${kind.subject}\n${kind.body}`,

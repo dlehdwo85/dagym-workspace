@@ -63,6 +63,7 @@ export function MultiUserSelect({ value, onChange }: { value: string[]; onChange
 
 export function BrandSelect({ value, onChange, className }: { value: string | null | undefined; onChange: (v: string | null) => void; className?: string }) {
   const { dir } = useSession();
+  if (!dir.brands.length) return null; // 브랜드가 없는 회사(새 가입)는 칸 자체를 숨김
   return (
     <select className={className ?? inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
       <option value="">브랜드 공통</option>

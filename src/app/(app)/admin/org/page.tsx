@@ -47,7 +47,7 @@ export default function Org() {
           <Field label="이름"><input className={inputCls} required value={f.name ?? ''} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="유형"><select className={inputCls} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>{Object.entries(UNIT_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
-            <Field label="브랜드"><select className={inputCls} value={f.brandId ?? ''} onChange={(e) => setF({ ...f, brandId: e.target.value })}><option value="">공통</option>{dir.brands.filter((b) => !HIDDEN_BRANDS.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
+            {dir.brands.length > 0 && <Field label="브랜드"><select className={inputCls} value={f.brandId ?? ''} onChange={(e) => setF({ ...f, brandId: e.target.value })}><option value="">공통</option>{dir.brands.filter((b) => !HIDDEN_BRANDS.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>}
           </div>
           <Field label="상위 조직"><select className={inputCls} value={f.parentId ?? ''} onChange={(e) => setF({ ...f, parentId: e.target.value })}><option value="">(최상위)</option>{units.filter((u) => u.id !== f.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
           {f.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />사용 중</label>}
