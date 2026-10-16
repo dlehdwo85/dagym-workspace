@@ -45,18 +45,12 @@ function Section({ title, count, children, href, icon: Icon, className, actions,
   );
 }
 
-/** 오늘의 일정 한 줄: 원형 체크로 바로 완료(관리자 확인·결재선 업무는 검토 요청) */
-function TodayRow({ t, onDone, className }: { t: any; onDone: (t: any) => void; className?: string }) {
-  const { user } = useSession();
-  const toReview = !!t.approval_line_id || (t.approval_required && user.role === 'staff');
+/** 오늘의 일정 한 줄 — 줄을 누르면 상세. 대표(10/16): 왼쪽 완료 동그라미 없앰(업무 목록 V14 43·이번 주 V14 37 과 같게, 완료는 업무 안에서) */
+function TodayRow({ t, className }: { t: any; className?: string }) {
   const router = useRouter();
   const rowOpen = useRowOpen(t.id, (id) => router.push(`/tasks/${id}`)); // 줄 아무 곳이나 눌러 상세
   return (
     <li {...rowOpen} className={cx(className, "flex min-w-0 cursor-pointer items-center gap-2.5 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50")} data-home-task={t.id}>
-      <button onClick={() => onDone(t)} aria-label={`${t.title} ${toReview ? '검토 요청' : '완료'}`} title={toReview ? '검토 요청' : '완료'}
-        className="flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-slate-300 text-transparent hover:border-green-500 hover:text-green-500">
-        <CircleCheck className="size-[22px] stroke-[1.8]" style={{ margin: -1.5 }} />
-      </button>
       <div className="min-w-0 flex-1">
         <Link href={`/tasks/${t.id}`} className="block truncate font-medium hover:text-accent-600 hover:underline">{t.title}</Link>
         <div className="truncate text-xs text-ink-2">{t.assignee_name ?? '담당자 없음'}{t.org_unit_name ? ` · ${t.org_unit_name}` : ''}</div>
@@ -307,7 +301,7 @@ export default function Dashboard() {
             </div>
           )}>
           {!todayTasks.length ? <p className="flex items-center justify-center gap-1.5 px-2 py-6 text-center text-sm text-ink-3"><CheckCircle2 className="size-4" />{scope === 'mine' ? '오늘 마감이거나 지난 내 업무가 없습니다' : '오늘 마감이거나 지난 업무가 없습니다'}</p>
-            : <ul>{todayTasks.slice(0, 10).map((t, i) => <TodayRow key={t.id} t={t} onDone={done} className={i >= 6 ? 'max-sm:hidden' : undefined} />)}</ul>}
+            : <ul>{todayTasks.slice(0, 10).map((t, i) => <TodayRow key={t.id} t={t} className={i >= 6 ? 'max-sm:hidden' : undefined} />)}</ul>}
           {todayTasks.length > 6 && <Link href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} className="block px-2 py-1 text-xs font-medium text-accent-700 sm:hidden">{todayTasks.length - 6}건 더 보기</Link>}
           <div className="border-t border-line px-1 pt-1"><InlineAddTask muted defaultDue={data.today} onCreated={() => { mine.reload(); myOpen.reload(); reload(); }} placeholder="할 일 추가" /></div>
         </Section>
@@ -335,7 +329,7 @@ export default function Dashboard() {
 
         {scope === 'mine' && freshNoDue.length > 0 && (
           <Section title="새로 받은 업무 (48시간, 마감 없음)" count={freshNoDue.length} icon={CheckCircle2} className="lg:col-span-2" testid="home-fresh">
-            <ul>{freshNoDue.slice(0, 5).map((t) => <TodayRow key={t.id} t={t} onDone={done} />)}</ul>
+            <ul>{freshNoDue.slice(0, 5).map((t) => <TodayRow key={t.id} t={t} />)}</ul>
           </Section>
         )}
         <Section title="이달의 일정" icon={CalendarRange} className="lg:col-start-3 lg:row-span-2 lg:row-start-1" testid="home-month-card">
