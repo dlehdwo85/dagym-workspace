@@ -1347,13 +1347,16 @@ await step('V6-2 휴대폰(Android Chrome 터치): 행을 0.5초 꾹 눌러 위�
   await m.waitForFunction(() => document.activeElement?.getAttribute('placeholder') === '무엇을 해야 하나요?');
   await m.keyboard.press('Escape');
   await sheetDlg.waitFor({ state: 'detached' });
+  // 시트를 닫으면 목록을 다시 불러옴 → 다 불러온 뒤 위치를 재야 다른 줄을 누르지 않음
+  await m.waitForLoadState('networkidle');
   await g.locator('[data-sortable-row]').nth(0).evaluate((el) => el.scrollIntoView({ block: 'center' }));
-  await m.waitForTimeout(200);
+  await m.waitForTimeout(300);
   a = await g.locator('[data-sortable-row]').nth(0).boundingBox(); b = await g.locator('[data-sortable-row]').nth(1).boundingBox();
   const pt = (x, y) => ({ touchPoints: [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }] });
   // 휴대폰 줄은 제목(윗줄)·마감·담당(아랫줄) — 사람이 누르는 제목을 꾹 누른다(마감 칩은 누르면 날짜 선택)
   const tb = await g.locator('[data-sortable-row]').nth(1).getByTestId('row-title').boundingBox();
   const x = tb.x + Math.min(tb.width * 0.5, 120), y0 = tb.y + tb.height / 2;
+  assert.equal(await m.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-sortable-row]')?.getAttribute('data-sortable-row'), [x, y0]), ids[1], '두 번째 줄을 누름');
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', ...pt(x, y0) });
   await m.waitForTimeout(600); // 꾹 누르기
   for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', ...pt(x, y0 - ((y0 - (a.y + 4)) * i) / 8) }); await m.waitForTimeout(40); }
