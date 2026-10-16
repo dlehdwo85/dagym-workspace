@@ -334,6 +334,17 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
   if (i.approvalLineId) await checkLine(sql, i.approvalLineId);
   const status = i.status ?? 'todo';
   if (status === 'done') throw badRequest('새 업무를 완료 상태로 만들 수 없습니다');
+  // 부서(팀) 업무 환경(대표 10/16): 부서를 고르지 않으면 하위 업무는 상위 업무의 부서, 아니면 담당자와 같은 내 부서 → 내 첫 부서.
+  // 부서 업무는 그 부서원·상위 부서·부서장·대표/본사 관리자만 보고, 담당·지시·협업자는 늘 본다(다른 부서원에게는 안 보임). teamId: null = 부서 없이
+  if (i.teamId === undefined) {
+    if (i.parentId) i.teamId = (await sql<{ team_id: string | null }[]>`select team_id from tasks where id = ${i.parentId}`)[0]?.team_id ?? undefined;
+    else {
+      const mine = await sql<{ team_id: string }[]>`select m.team_id from team_members m join teams tm on tm.id = m.team_id
+        where m.user_id = ${u.id} and not tm.archived and tm.tenant = ${tenantOf(u)}
+        order by (select count(*) from team_members a where a.team_id = m.team_id and a.user_id = ${i.assigneeId ?? u.id}) desc, m.is_lead desc, tm.name limit 1`;
+      if (mine[0]) i.teamId = mine[0].team_id;
+    }
+  }
   if (i.teamId) await assertTeamAssign(u, i.teamId, sql);
 
   return sql.begin(async (tx) => {

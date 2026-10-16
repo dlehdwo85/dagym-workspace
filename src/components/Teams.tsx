@@ -34,7 +34,7 @@ export function TeamsTab() {
   return (
     <div className="space-y-3" data-testid="teams-tab">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-ink-2">팀은 현장·부서(조직 구성)와 별개의 업무 묶음입니다. 한 사람이 여러 팀에 속할 수 있고, 팀 대화방이 자동으로 생깁니다.</p>
+        <p className="text-sm text-ink-2">마케팅부·영업부처럼 부서를 만들고 부서장(팀장)을 정하세요. 직원은 자기 부서 업무와 본인이 참여한 업무만 보고, 부서장은 부서원이 참여한 다른 부서와의 협업 업무까지 봅니다. 상위 부서를 정하면 그 부서장이 하위 부서 업무도 봅니다. 부서 대화방은 자동으로 생깁니다.</p>
         {canEdit && <Button onClick={() => setEdit({ name: '', color: COLORS[0], parentId: null, members: [] })} data-testid="team-new"><Plus />팀 만들기</Button>}
       </div>
       <ul className="grid gap-3 sm:grid-cols-2">

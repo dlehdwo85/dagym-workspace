@@ -28,7 +28,7 @@ export default function UsersPage() {
   const { user } = useSession();
   const [tab, setTab] = useState<'users' | 'teams' | 'menus'>('users');
   const list = useApi<{ users: any[] }>(user.role === 'owner' ? '/api/admin/users' : null);
-  const tabs = [['users', '사용자'], ['teams', '팀'], ...(user.role === 'owner' ? [['menus', '메뉴 권한']] : [])] as ['users' | 'teams' | 'menus', string][];
+  const tabs = [['users', '사용자'], ['teams', '부서·팀'], ...(user.role === 'owner' ? [['menus', '메뉴 권한']] : [])] as ['users' | 'teams' | 'menus', string][];
   return (
     <div className="space-y-3">
       <div className="flex gap-1.5" role="tablist" aria-label="사용자 관리">

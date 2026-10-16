@@ -293,13 +293,21 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           <span className="contents sm:block" data-testid="done-chip"><ViewChip on={filters.view === 'done' && !filters.assigneeId} onClick={() => setView("done")} label="완료" grid><CircleCheck className="size-3.5 shrink-0" />완료</ViewChip></span>
           {!views.some(([v]) => v === (filters.view ?? '')) && <ViewChip on onClick={() => setView('')} grid>{({ today: '오늘의 일정', risk: '마감 위험' } as Record<string, string>)[filters.view ?? ''] ?? filters.view}</ViewChip>}
         </div>
+        {/* 대표(10/16): 보기 버튼과 직원 이름이 섞여 보임 → 직원 줄은 구분선·"직원별" 머리·둥근 이름표로 따로 */}
         {people.length > 0 && (
-          <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 sm:mx-0 sm:px-0" data-testid="people-chips" aria-label="사람별 업무">
-            {people.map((u) => (
-              <ViewChip key={u.id} on={filters.assigneeId === u.id} onClick={() => setFilters((f) => ({ ...f, view: '', assigneeId: f.assigneeId === u.id ? '' : u.id }))} label={`${u.name} 업무`}>
-                <Avatar id={u.id} name={u.name} size={18} badge={false} />{u.name}
-              </ViewChip>
-            ))}
+          <div className="flex items-center gap-2 border-t border-line pt-2" data-testid="people-row">
+            <span className="shrink-0 text-[11px] font-semibold text-ink-3">직원별</span>
+            <div className="-mr-3 flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-0.5 pr-3 sm:mr-0 sm:pr-0" data-testid="people-chips" aria-label="사람별 업무">
+              {people.map((u) => {
+                const on = filters.assigneeId === u.id;
+                return (
+                  <button key={u.id} type="button" aria-pressed={on} aria-label={`${u.name} 업무`} onClick={() => setFilters((f) => ({ ...f, view: '', assigneeId: f.assigneeId === u.id ? '' : u.id }))}
+                    className={cx('inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-3 text-[13px] transition', on ? 'bg-ink text-white' : 'bg-slate-100 text-ink-2 hover:bg-slate-200')}>
+                    <Avatar id={u.id} name={u.name} size={24} badge={false} />{u.name}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
         </div>

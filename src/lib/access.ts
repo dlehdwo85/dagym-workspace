@@ -45,12 +45,21 @@ export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null)
       or ${menuLevelSql(sql, u, 'team_tasks_all', dAll)} <> 'none'))
     or t.assignee_id = ${u.id}
     or t.created_by = ${u.id}
+    or ${leadOfInvolvedSql(sql, u)}
     or t.requested_by = ${u.id}
     or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id})
     or exists (select 1 from task_checklist_items ci where ci.task_id = t.id and ci.assignee_id = ${u.id})
   )`;
 }
 
+/** 부서(팀) 업무 환경(대표 10/16): 부서장(팀장)은 자기 부서원(하위 부서 포함)이 담당·지시한 업무를 본다 — 부서 간 협업 업무는 참여자와 양쪽 부서장에게만 */
+export function leadOfInvolvedSql(sql: Sql, u: SessionUser) {
+  return sql`exists (
+    with recursive lt as (
+      select lm.team_id as id from team_members lm join teams lt0 on lt0.id = lm.team_id where lm.user_id = ${u.id} and lm.is_lead and not lt0.archived and lt0.tenant = ${tenantOf(u)}
+      union select c.id from teams c join lt on c.parent_id = lt.id where not c.archived
+    ) select 1 from team_members pm where pm.team_id in (select id from lt) and pm.user_id in (t.assignee_id, t.requested_by))`;
+}
 /** R-16: 내가 속한 팀의 하위 팀들(자식·손자…) — 상위 팀 구성원은 하위 팀 업무 전체 권한 */
 export function subTeamsSql(sql: Sql, u: SessionUser) {
   return sql`with recursive d as (
@@ -102,14 +111,16 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
   const requester = t.requested_by ?? t.created_by;
   const edit = t.assignee_id === u.id || requester === u.id;
   const del = requester === u.id;
+  // 부서장: 자기 부서원이 담당·지시한 업무(부서 간 협업 포함)
+  const deptLead = (await sql`select 1 from tasks t where t.id = ${t.id} and ${leadOfInvolvedSql(sql, u)}`).length > 0;
   if (t.team_id) { // V14 8번 팀 업무: 보기는 팀 권한, 수정은 위 규칙
     const lv = await teamTaskLevel(u, t.team_id, sql);
     const [lead] = await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`;
     const teamManager = isAdmin(u) || (!!lead && lv === 'edit');
-    return { view: lv !== 'none' || involved, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del };
+    return { view: lv !== 'none' || involved || deptLead, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del };
   }
   const manager = inUnit && atLeast(u, 'site_manager');
-  return { view: inUnit || involved, edit, approve: manager, delete: del };
+  return { view: inUnit || involved || deptLead, edit, approve: manager, delete: del };
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
