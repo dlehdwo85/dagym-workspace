@@ -35,12 +35,13 @@ async function requireBillingAdmin(u: SessionUser) {
 /** 요금 견적: 1인 요금 × max(최소 인원, 활성 인원) — 월 또는 연간(12개월), VAT 포함 */
 export async function quote(tenant: string, planCode: string, cycle: 'monthly' | 'annual', sql: Sql = db()) {
   const [p] = await sql<any[]>`select code, name, monthly_krw, per_user_krw, annual_monthly_krw, annual_per_user_krw, min_users from plans
-    where code = ${planCode} and public and active and code not in ('trial', 'free', 'team_free')`;
+    where code = ${planCode} and public and active and code not in ('trial', 'free', 'team_free', 'w_free')`;
   if (!p) throw badRequest('결제할 수 없는 요금제입니다');
   const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from users where tenant = ${tenant} and status = 'active'`;
   const seats = p.per_user_krw ? Math.max(p.min_users ?? 1, n) : 1;
   const unit = cycle === 'annual' ? (p.per_user_krw ? p.annual_per_user_krw ?? p.per_user_krw : p.annual_monthly_krw ?? p.monthly_krw) : (p.per_user_krw ?? p.monthly_krw);
-  const supply = unit * seats * (cycle === 'annual' ? 12 : 1);
+  // V27(대표 10/17): 30인 이상 10% 할인
+  const supply = Math.round(unit * seats * (cycle === 'annual' ? 12 : 1) * (p.per_user_krw && seats >= 30 ? 0.9 : 1));
   return { plan: p, seats, unit, supply, amount: Math.round(supply * VAT), cycle, goodsName: `Workin ${p.code} ${cycle}` };
 }
 
@@ -53,7 +54,7 @@ export async function billingOverview(u: SessionUser) {
     sql`select card_name, card_last4, created_at from billing_cards where tenant = ${t} and removed_at is null`,
     sql`select plan_code, status, billing_cycle, next_billing_on, billing_amount, cancel_at_period_end, past_due_since, next_retry_on, trial_ends_at, billing_lock, billing_grace_until from tenant_subscriptions where tenant = ${t}`,
     sql`select id, kind, plan_code, addon_code, amount, status, canceled_amount, result_msg, card_name, card_no, paid_at, created_at, tid, meta->>'payMethod' as pay_method, meta->'vbank' as vbank from payments where tenant = ${t} order by created_at desc limit 30`,
-    sql<{ code: string }[]>`select code from plans where public and active and code not in ('trial', 'free', 'team_free') order by sort`,
+    sql<{ code: string }[]>`select code from plans where public and active and code not in ('trial', 'free', 'team_free', 'w_free') order by sort`,
     sql`select code, name, monthly_krw from plan_addons where active order by sort`,
   ]);
   const quotes = [];

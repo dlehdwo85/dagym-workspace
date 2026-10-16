@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { UtmCapture } from '@/components/UtmCapture';
 import { ArrowRight, BellRing, CalendarDays, Check, Mic, Sparkles, Users } from 'lucide-react';
 
-export const metadata = { title: '워크인 — 업무·일정·알림을 한 곳에', description: '음성으로 등록하고 정확한 시간에 알림. 14일 무료 체험 후 월 2,900원부터.' };
+export const metadata = { title: '워크인 — 업무·일정·알림을 한 곳에', description: '음성으로 등록하고 정확한 시간에 알림. 무료로 시작하고, 유료는 1인 월 2,200원부터.' };
 
 const SHOTS = [
   { src: '/landing/home.png', t: '오늘의 일정과 일정이 한 화면에', d: '마감 위험·오늘 일정·팀 현황을 첫 화면에서' },
@@ -10,10 +10,11 @@ const SHOTS = [
   { src: '/landing/calendar.png', t: '업무와 일정을 한 캘린더에', d: '마감 업무가 시간 블록으로, 회의 준비 업무는 자동으로' },
 ];
 const PLANS = [
-  // 17차: 무료 요금제 폐지 → 14일 무료 체험 + 유료 요금제 (금액은 운영 화면 값과 맞춰 갱신)
-  { n: '개인', p: '월 2,900원', s: '1명 · 연간 결제 시 월 2,400원', f: ['업무·일정·알림·캘린더 전부', '저장공간 5GB', 'AI 비서 월 50회'] },
-  { n: '팀', p: '1인 월 3,900원', s: '최소 3인 · 연간 결제 시 1인 3,300원', f: ['팀 업무·메신저·권한', '1인 저장 3GB(회사 합산)', '1인 AI 월 50회'], hi: true },
-  { n: '비즈니스', p: '1인 월 6,900원', s: '연간 결제 시 1인 5,900원', f: ['감사 로그·기밀 등급·고급 권한', '1인 저장 10GB', '1인 AI 월 150회 · 우선 지원'] },
+  // V27 요금표(대표 확정 10/17): 1인 월·VAT 별도·최소 3인 — 금액은 운영 화면(plans) 값과 같게
+  { n: '무료', p: '0원', s: '5명까지 · 기간 제한 없음', f: ['업무·일정·캘린더·메신저 전부', '저장 1GB · 파일 1개 20MB', 'AI 회사 월 20회'] },
+  { n: '베이직', p: '1인 월 2,200원', s: '최소 3인 · 연간 결제 시 1인 1,800원', f: ['업무·일정·메신저·앱 알림·음성 등록', '1인 저장 2GB', 'AI 체험(회사 공유)'] },
+  { n: '스탠다드', p: '1인 월 4,500원', s: '최소 3인 · 연간 결제 시 1인 3,600원', f: ['권한·결재선·자료실·문서 양식', '문자·메일 발송 · 1인 저장 10GB', 'AI 회사 공유(1인당 약 1,000원분)'], hi: true },
+  { n: '프로', p: '1인 월 8,500원', s: '최소 3인 · 연간 결제 시 1인 6,800원', f: ['부서별 공간·감사 로그·고급 권한', '매출·CRM · 1인 저장 30GB', 'AI 회사 공유(1인당 약 3,000원분) · 우선 지원'] },
 ];
 
 export default function Welcome() {
@@ -55,7 +56,7 @@ export default function Welcome() {
       <section id="pricing" className="mx-auto max-w-6xl px-4 py-14">
         <h2 className="text-center text-2xl font-bold">요금</h2>
         <p className="mt-1 text-center text-sm text-ink-2">공개 베타 기간에는 결제 없이 쓸 수 있습니다. 팀 요금제는 사전 신청을 받습니다.</p>
-        <div className="mt-8 grid gap-4 md:grid-cols-3" data-testid="pricing">
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="pricing">
           {PLANS.map((p) => (
             <div key={p.n} className={'rounded-card border p-5 ' + (p.hi ? 'border-brand-600 ring-1 ring-brand-600' : 'border-line')}>
               <div className="flex items-center gap-2 font-semibold">{p.n === '개인' ? null : <Users className="size-4" />}{p.n}</div>

@@ -114,23 +114,23 @@ export default function UsagePage() {
         </ul>
       </section>
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
-        <h2 className="text-sm font-semibold">요금제 (VAT 별도, 회사당 월)</h2>
+        <h2 className="text-sm font-semibold">요금제 (VAT 별도 · 1인 월 · 최소 3인 · 30인 이상 10% 할인)</h2>
         <div className="mt-2 overflow-x-auto">
           <table className="w-full min-w-[480px] text-sm">
-            <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">요금제</th><th>월 요금</th><th>사용자</th><th>저장공간</th><th>AI 요청/월</th></tr></thead>
+            <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">요금제</th><th>월 요금</th><th>사용자</th><th>저장공간</th><th>AI(회사 공유)/월</th></tr></thead>
             <tbody>
               {plans.map((p: any) => (
                 <tr key={p.code} className={cx('border-t border-line', p.code === s.planCode && 'bg-brand-50 font-semibold')}>
                   <td className="py-1.5">{p.name}{p.description && <div className="text-[11px] font-normal text-ink-3">{p.description}</div>}</td>
                   <td>{p.per_user_krw ? `1인 ${won(p.per_user_krw)}` : won(p.monthly_krw)}{p.min_users ? <div className="text-[11px] font-normal text-ink-3">최소 {p.min_users}인</div> : null}{(p.annual_per_user_krw || p.annual_monthly_krw) ? <div className="text-[11px] font-normal text-brand-700">연간 결제 시 {p.annual_per_user_krw ? `1인 ${won(p.annual_per_user_krw)}` : won(p.annual_monthly_krw)}</div> : null}</td><td>{lim(p.limits.users, '명')}</td>
-                  <td>{p.limits.perUserStorageGb ? `1인 ${p.limits.perUserStorageGb}GB(합산)` : lim(p.limits.storageGb, 'GB')}</td><td>{p.limits.perUserAi ? `1인 ${p.limits.perUserAi}회` : lim(p.limits.aiRequests, '회')}</td>
+                  <td>{p.limits.perUserStorageGb ? `1인 ${p.limits.perUserStorageGb}GB(합산)` : lim(p.limits.storageGb, 'GB')}</td><td>{p.limits.perUserAi ? `1인당 ${p.limits.perUserAi}회` : lim(p.limits.aiRequests, '회')}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <p className="mt-2 text-xs text-ink-2">팩(여러 개 구매 가능): {addons.map((a: any) => `${a.name} 월 ${won(a.monthly_krw)}`).join(' · ')}</p>
-        <p className="mt-1 text-xs text-ink-3">결제는 아직 연결되지 않았습니다 — 변경 요청을 보내면 운영자가 확인해 반영합니다.</p>
+        <p className="mt-1 text-xs text-ink-3">카드 결제는 위 결제 칸에서 바로, 팩·인원 조정 등은 변경 요청을 보내면 운영자가 확인해 반영합니다. AI 는 회사 전체가 나눠 쓰고(대화 1회 약 50원 기준), 하루 1인 사용 횟수 제한은 AI 설정에서 바꿉니다.</p>
         {!!requests.length && (
           <ul className="mt-3 space-y-1 text-xs text-ink-2">
             {requests.map((r: any) => <li key={r.id}>{fmtDateTime(r.created_at)} · {r.requested_by_name} · {r.plan_code ? plans.find((p: any) => p.code === r.plan_code)?.name ?? r.plan_code : '추가 옵션'} · <b>{{ pending: '검토 중', approved: '반영됨', rejected: '반려' }[r.status as 'pending']}</b></li>)}

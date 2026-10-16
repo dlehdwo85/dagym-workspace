@@ -1840,13 +1840,13 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
   });
 
   test('요금제 변경 요청 → 운영자 승인하면 반영·요청자 알림, 반려도 가능', async () => {
-    const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'team', note: '지점 늘어남' });
-    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'team' })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
+    const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'w_standard', note: '지점 늘어남' });
+    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'w_standard' })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     assert.equal((await ctx.owner.req('POST', '/api/usage/request', { planCode: 'internal' })).status, 400, '공개 안 된 요금제는 요청 불가');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.equal(pf.requests.find((x) => x.id === r.id).status, 'pending');
     await ctx.owner.ok('POST', `/api/platform/requests/${r.id}`, { approve: true });
-    assert.equal((await ctx.owner.ok('GET', '/api/usage')).subscription.planCode, 'team');
+    assert.equal((await ctx.owner.ok('GET', '/api/usage')).subscription.planCode, 'w_standard');
     assert.equal((await ctx.owner.req('POST', `/api/platform/requests/${r.id}`, { approve: true })).status, 400);
     const before = (await ctx.owner.ok('GET', '/api/usage')).limits.aiRequests;
     const r2 = await ctx.owner.ok('POST', '/api/usage/request', { addons: { ai500: 1 } });

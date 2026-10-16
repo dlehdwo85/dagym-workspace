@@ -76,9 +76,9 @@ describe('18차 나이스페이 결제', () => {
     assert.deepEqual((await ctx.owner.ok('GET', '/api/billing')), { enabled: false, internal: true }, '내부 요금제 회사 — 결제 없음(404 아님)');
     const b = await owner.ok('GET', '/api/billing');
     assert.equal(b.enabled, true); assert.equal(b.mode, 'test');
-    const team = b.quotes.find((q) => q.planCode === 'team' && q.cycle === 'monthly');
-    assert.equal(team.seats, 3); assert.equal(team.amount, Math.round(3900 * 3 * 1.1));
-    assert.equal(b.quotes.find((q) => q.planCode === 'team' && q.cycle === 'annual').amount, Math.round(3300 * 3 * 12 * 1.1));
+    const team = b.quotes.find((q) => q.planCode === 'w_standard' && q.cycle === 'monthly');
+    assert.equal(team.seats, 3); assert.equal(team.amount, Math.round(4500 * 3 * 1.1));
+    assert.equal(b.quotes.find((q) => q.planCode === 'w_standard' && q.cycle === 'annual').amount, Math.round(3600 * 3 * 12 * 1.1));
   });
 
   test('카드 등록: 실패 카드 400, 성공하면 끝 4자리만(카드번호 저장 안 함), 서명·암호화 규격', async () => {
@@ -92,16 +92,16 @@ describe('18차 나이스페이 결제', () => {
   });
 
   test('월 구독: 바로 첫 달 결제 → active·다음 결제일 한 달 뒤, 결제 내역', async () => {
-    const r = await owner.ok('POST', '/api/billing/subscribe', { planCode: 'team' });
-    assert.equal(r.amount, 12870);
+    const r = await owner.ok('POST', '/api/billing/subscribe', { planCode: 'w_standard' });
+    assert.equal(r.amount, 14850);
     const s = await sub();
-    assert.equal(s.status, 'active'); assert.equal(s.plan_code, 'team'); assert.equal(s.billing_cycle, 'monthly');
+    assert.equal(s.status, 'active'); assert.equal(s.plan_code, 'w_standard'); assert.equal(s.billing_cycle, 'monthly');
     const b = await owner.ok('GET', '/api/billing');
     assert.equal(b.payments[0].status, 'paid'); assert.equal(b.payments[0].card_no, '12345678****1234');
   });
 
   test('연간 결제창: 서명 파라미터 → 인증 응답(위변조면 실패) → 승인 → 연간 전환', async () => {
-    const w = await owner.ok('POST', '/api/billing/window', { kind: 'annual', planCode: 'team' });
+    const w = await owner.ok('POST', '/api/billing/window', { kind: 'annual', planCode: 'w_standard' });
     const p = w.params;
     assert.equal(p.SignData, sha(p.EdiDate + MID + p.Amt + KEY)); assert.equal(p.MID, MID); assert.match(p.ReturnURL, /\/api\/billing\/nicepay\/return$/);
     const auth = (sig) => ({ AuthResultCode: '0000', AuthResultMsg: '인증 성공', AuthToken: 'tok123', PayMethod: 'CARD', MID, Moid: p.Moid, Amt: p.Amt, TxTid: `${MID}01012610141200001234`,
@@ -109,7 +109,7 @@ describe('18차 나이스페이 결제', () => {
     const bad = await postForm('/api/billing/nicepay/return', auth('tampered'));
     assert.equal(bad.status, 303); assert.match(bad.headers.get('location'), /payfail=/);
     assert.equal((await sql`select status from payments where moid = ${p.Moid}`)[0].status, 'failed');
-    const w2 = await owner.ok('POST', '/api/billing/window', { kind: 'annual', planCode: 'team' });
+    const w2 = await owner.ok('POST', '/api/billing/window', { kind: 'annual', planCode: 'w_standard' });
     const ok = await postForm('/api/billing/nicepay/return', { ...auth(sha('tok123' + MID + w2.params.Amt + KEY)), Moid: w2.params.Moid, Amt: w2.params.Amt });
     assert.match(ok.headers.get('location'), /paid=1/);
     assert.equal((await sub()).billing_cycle, 'annual');
@@ -129,7 +129,7 @@ describe('18차 나이스페이 결제', () => {
   });
 
   test('V29 결제창 결제 수단: 가상계좌 → 입금 대기(계좌 표시) → 입금 통보 4110 에 월 구독 적용·영수증 메일 · 계좌이체는 바로 완료', async () => {
-    const w = await owner.ok('POST', '/api/billing/window', { kind: 'monthly', planCode: 'team', payMethod: 'VBANK' });
+    const w = await owner.ok('POST', '/api/billing/window', { kind: 'monthly', planCode: 'w_standard', payMethod: 'VBANK' });
     assert.equal(w.params.PayMethod, 'VBANK'); assert.match(w.params.VbankExpDate, /^\d{8}$/); assert.equal(w.params.MID, MID, '결제창 MID');
     const auth = (tok, p) => ({ AuthResultCode: '0000', AuthToken: tok, PayMethod: 'VBANK', MID, Moid: p.Moid, Amt: p.Amt, TxTid: `${MID}03012610150900001111`,
       Signature: sha(tok + MID + p.Amt + KEY), NextAppURL: `${NP}/webapi/pay_process.jsp`, NetCancelURL: `${NP}/webapi/cancel_process.jsp` });
@@ -144,7 +144,7 @@ describe('18차 나이스페이 결제', () => {
     assert.equal(await (await postForm('/api/billing/nicepay/notify', { MID, MOID: w.params.Moid, Amt: w.params.Amt, TID: pay.tid, ResultCode: '4110', StateCd: '0', PayMethod: 'VBANK' })).text(), 'OK');
     [pay] = await sql`select * from payments where moid = ${w.params.Moid}`;
     assert.equal(pay.status, 'paid'); assert.equal(pay.result_msg, '가상계좌 입금 확인'); assert.ok(pay.meta.receiptSentAt, '영수증 메일');
-    const s1 = await sub(); assert.equal(s1.plan_code, 'team'); assert.equal(s1.billing_cycle, 'monthly');
+    const s1 = await sub(); assert.equal(s1.plan_code, 'w_standard'); assert.equal(s1.billing_cycle, 'monthly');
     const w2 = await owner.ok('POST', '/api/billing/window', { kind: 'addon', addonCode: 'storage20', payMethod: 'BANK' });
     const r2 = await postForm('/api/billing/nicepay/return', { ...auth('bktok', w2.params), PayMethod: 'BANK' });
     assert.match(r2.headers.get('location'), /paid=1/);
@@ -184,7 +184,7 @@ describe('18차 나이스페이 결제', () => {
     // 결제 성공 → 즉시 복구
     state.failBids.clear();
     await sql`update tenant_subscriptions set billing_lock = 'suspended', billing_grace_until = null where tenant = ${tid}`;
-    await owner.ok('POST', '/api/billing/subscribe', { planCode: 'team' });
+    await owner.ok('POST', '/api/billing/subscribe', { planCode: 'w_standard' });
     s = await sub();
     assert.equal(s.billing_lock, null); assert.equal(s.past_due_since, null);
     await owner.ok('POST', '/api/tasks', { title: '다시 씀' });
@@ -220,8 +220,8 @@ describe('18차 나이스페이 결제', () => {
     assert.match(t.id, /^test_/);
     assert.equal((await sql`select is_test from tenants where id = ${t.id}`)[0].is_test, true);
     assert.equal((await sql`select count(*)::int n from users where tenant = ${t.id}`)[0].n, 0, '로그인 계정 없음');
-    assert.equal((await platform.req('POST', `/api/platform/pay-test/${tid}/window`, { kind: 'monthly', planCode: 'team', payMethod: 'CARD' })).status, 400, '시험 회사만');
-    const w = await platform.ok('POST', `/api/platform/pay-test/${t.id}/window`, { kind: 'monthly', planCode: 'team', payMethod: 'CARD' });
+    assert.equal((await platform.req('POST', `/api/platform/pay-test/${tid}/window`, { kind: 'monthly', planCode: 'w_standard', payMethod: 'CARD' })).status, 400, '시험 회사만');
+    const w = await platform.ok('POST', `/api/platform/pay-test/${t.id}/window`, { kind: 'monthly', planCode: 'w_standard', payMethod: 'CARD' });
     assert.equal(w.mode, 'test'); assert.equal(w.params.MID, MID, '시험 상점');
     const [pay] = await sql`select id, meta from payments where moid = ${w.params.Moid}`;
     assert.equal(pay.meta.test, true); assert.equal(pay.meta.prev.plan_code, 'trial');
@@ -243,7 +243,7 @@ describe('18차 나이스페이 결제', () => {
     const s2 = (await sql`select plan_code, status from tenant_subscriptions where tenant = ${t.id}`)[0];
     assert.deepEqual([s2.plan_code, s2.status], ['trial', 'trial']);
     // 1시간 지난 시험 결제는 정기 실행이 취소
-    const w2 = await platform.ok('POST', `/api/platform/pay-test/${t.id}/window`, { kind: 'annual', planCode: 'team', payMethod: 'CARD' });
+    const w2 = await platform.ok('POST', `/api/platform/pay-test/${t.id}/window`, { kind: 'annual', planCode: 'w_standard', payMethod: 'CARD' });
     await postForm('/api/billing/nicepay/return', { AuthResultCode: '0000', AuthResultMsg: '인증 성공', AuthToken: 'tok778', PayMethod: 'CARD', MID, Moid: w2.params.Moid, Amt: w2.params.Amt,
       TxTid: `${MID}01012610141200007778`, Signature: sha('tok778' + MID + w2.params.Amt + KEY), NextAppURL: `${NP}/webapi/pay_process.jsp`, NetCancelURL: `${NP}/webapi/cancel_process.jsp` });
     await sql`update payments set paid_at = now() - interval '2 hours' where moid = ${w2.params.Moid}`;

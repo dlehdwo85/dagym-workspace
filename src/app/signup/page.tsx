@@ -89,7 +89,7 @@ export default function SignupPage() {
         {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
         <Button type="submit" className="h-11 w-full text-[15px]" disabled={enabled === null} data-testid="signup-next">다음: 회사 만들기<ArrowRight /></Button>
         <p className="text-center text-sm text-ink-2">이미 계정이 있나요? <Link href="/login" className="font-semibold text-brand-700 underline">로그인</Link></p>
-        <ul className="space-y-1 text-xs text-ink-3"><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />14일 체험: 10명 · 저장 20GB · AI 300회 · 카드 없음</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />이후 월 2,900원부터 (개인 2,900원 · 팀 1인 3,900원 · 비즈니스 1인 6,900원)</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />고르지 않으면 읽기 전용 — 데이터는 지우지 않고 내보낼 수 있어요</li></ul>
+        <ul className="space-y-1 text-xs text-ink-3"><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />14일 체험: 10명 · 저장 20GB · AI 300회 · 카드 없음</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />이후 1인 월 2,200원부터 (베이직 2,200원 · 스탠다드 4,500원 · 프로 8,500원, VAT 별도·최소 3인)</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />고르지 않으면 읽기 전용 — 데이터는 지우지 않고 내보낼 수 있어요</li></ul>
       </form>
       ) : (
       <form onSubmit={submit} className="space-y-4" data-testid="signup-step-company">

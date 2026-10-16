@@ -33,7 +33,7 @@ export async function listTestTenants(u: SessionUser) {
       (select json_agg(x order by x.created_at desc) from (select p.id, p.kind, p.plan_code, p.addon_code, p.amount, p.status, (p.meta->>'liveSmoke') = 'true' as live, p.canceled_amount, p.result_msg, p.paid_at, p.created_at, p.meta->>'payMethod' as pay_method
         from payments p where p.tenant = t.id order by p.created_at desc limit 10) x) as payments
     from tenants t left join tenant_subscriptions ts on ts.tenant = t.id where t.is_test and t.deleted_at is null order by t.created_at desc limit 20`;
-  const plans = await sql`select code, name from plans where public and active and code not in ('trial', 'free', 'team_free') order by sort`;
+  const plans = await sql`select code, name from plans where public and active and code not in ('trial', 'free', 'team_free', 'w_free') order by sort`;
   const { npLiveConf } = await import('./nicepay');
   return { tenants, plans, liveAvailable: !!npLiveConf() };
 }

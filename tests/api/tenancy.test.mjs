@@ -236,8 +236,8 @@ describe('17차 14일 무료 체험 · 끝나면 읽기 전용', () => {
     assert.equal(w.status, 402); assert.equal(w.body.error.code, 'read_only');
     assert.ok((await c.ok('GET', '/api/tasks')).tasks.some((t) => t.title === '체험 중 업무'), '보기는 됨');
     assert.equal((await c.get('/api/account/export')).status, 200, '내보내기는 됨');
-    await c.ok('POST', '/api/usage/request', { planCode: 'team', note: '팀으로 할게요' });
-    assert.equal((await sql`select chosen_plan from tenant_subscriptions where tenant = ${tid}`)[0].chosen_plan, 'team');
+    await c.ok('POST', '/api/usage/request', { planCode: 'w_standard', note: '팀으로 할게요' });
+    assert.equal((await sql`select chosen_plan from tenant_subscriptions where tenant = ${tid}`)[0].chosen_plan, 'w_standard');
     const me = await c.ok('GET', '/api/auth/me');
     assert.ok(me.user);
   });

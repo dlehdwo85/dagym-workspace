@@ -413,7 +413,7 @@ export async function platformTrial(u: SessionUser, tenant: string, i: z.infer<t
     await sql`update tenant_subscriptions set status = 'expired', trial_ends_at = least(coalesce(trial_ends_at, now()), now()), updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
   } else {
     const code = i.planCode ?? s.chosen_plan;
-    if (!code || !(await sql`select 1 from plans where code = ${code} and code not in ('trial','free','team_free')`).length) throw badRequest('전환할 유료 요금제를 고르세요');
+    if (!code || !(await sql`select 1 from plans where code = ${code} and code not in ('trial','free','team_free','w_free')`).length) throw badRequest('전환할 유료 요금제를 고르세요');
     await sql`update tenant_subscriptions set plan_code = ${code}, status = 'active', period_start = current_date, period_end = null, updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
   }
   clearReadOnlyCache(tenant);
