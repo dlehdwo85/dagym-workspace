@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { SpacesTab } from '@/components/SpacesTab';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, refreshBadges, toast } from '@/components/ui';
@@ -26,9 +27,9 @@ function UnitChecks({ value, onChange }: { value: string[]; onChange: (v: string
 
 export default function UsersPage() {
   const { user } = useSession();
-  const [tab, setTab] = useState<'users' | 'teams' | 'menus'>('users');
+  const [tab, setTab] = useState<'users' | 'teams' | 'menus' | 'spaces'>('users');
   const list = useApi<{ users: any[] }>(user.role === 'owner' ? '/api/admin/users' : null);
-  const tabs = [['users', '사용자'], ['teams', '부서·팀'], ...(user.role === 'owner' ? [['menus', '메뉴 권한']] : [])] as ['users' | 'teams' | 'menus', string][];
+  const tabs = [['users', '사용자'], ['teams', '부서·팀'], ...(user.role === 'owner' ? [['menus', '메뉴 권한']] : []), ...(['owner', 'admin'].includes(user.role) ? [['spaces', '공간']] : [])] as ['users' | 'teams' | 'menus' | 'spaces', string][];
   return (
     <div className="space-y-3">
       <div className="flex gap-1.5" role="tablist" aria-label="사용자 관리">
@@ -37,7 +38,7 @@ export default function UsersPage() {
             className={cx('rounded-full border px-3 py-1 text-sm', tab === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line bg-white text-ink-2')}>{l}</button>
         ))}
       </div>
-      {tab === 'users' ? <Users /> : tab === 'teams' ? <TeamsTab /> : <MenuPermsTab users={list.data?.users ?? []} />}
+      {tab === 'users' ? <Users /> : tab === 'teams' ? <TeamsTab /> : tab === 'spaces' ? <SpacesTab /> : <MenuPermsTab users={list.data?.users ?? []} />}
     </div>
   );
 }

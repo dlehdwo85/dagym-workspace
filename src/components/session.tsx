@@ -17,6 +17,8 @@ export interface Sess {
   /** V13 메뉴 권한 (revenue·team_reports·library·assistant → none/view/edit/use) */
   menus?: Record<string, string>;
   tenant?: { name: string; personal: boolean; internal: boolean; /** V21 문의(웹·전화) 받는 회사 */ inquiries?: boolean; onboarding: boolean; trial?: { trial: boolean; readOnly: boolean; daysLeft: number } | null; /** V28 B2 미납 잠금 */ billingLock?: 'read_only' | 'suspended' | null };
+  /** V41 공간: 들어갈 수 있는 공간(업무는 늘) */
+  spaces?: ('work' | 'sales' | 'marketing')[];
   features: { googleSync: boolean; /** V9 AI 비서 (플랫폼 API 키가 있을 때만) */ ai: boolean; /** V9 자료실 (체험 계정 제외) */ library: boolean };
 }
 export const SessionCtx = createContext<Sess | null>(null);

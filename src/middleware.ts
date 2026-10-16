@@ -11,6 +11,11 @@ export function middleware(req: NextRequest) {
   if (req.nextUrl.pathname === '/' && !req.cookies.get('wos_session')?.value && !req.headers.get('authorization') && !isApp(req.headers.get('user-agent') ?? '')) {
     return NextResponse.rewrite(new URL('/welcome', req.url));
   }
+  // V41 공간 주소: 앱 레이아웃이 화면을 그리기 전에 공간 권한을 보고 404(상태 코드까지)로 막을 수 있게 주소를 넘김
+  if (req.nextUrl.pathname.startsWith('/s/')) {
+    const h = new Headers(req.headers); h.set('x-wos-path', req.nextUrl.pathname);
+    return NextResponse.next({ request: { headers: h } });
+  }
   return NextResponse.next();
 }
-export const config = { matcher: ['/'] };
+export const config = { matcher: ['/', '/s/:path*'] };

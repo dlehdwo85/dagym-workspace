@@ -22,6 +22,7 @@ import { quickAi, homeTodayEvents } from './quickAi.step.mjs';
 import { voiceMode } from './voiceMode.step.mjs';
 import { verify1017 } from './verify1017.step.mjs';
 import { meeting } from './meeting.step.mjs';
+import { spaces } from './spaces.step.mjs';
 import { v1444 } from './v1444.step.mjs';
 import { v1445 } from './v1445.step.mjs';
 import { v21 } from './v21.step.mjs';
@@ -949,6 +950,7 @@ await step('V32 4 마감 연장: 휴대폰 담당자 목록 마감 칩 → 연�
 await step('V38 3 음성 모드(운전 중): 메시지방 새 메시지 읽어 주기·말로 보내기("보내" 확인·"취소")·AI 비서 말로 묻고 답 읽어 주기', () => voiceMode({ browser, desk, ctx, sql, BASE, FAKE }));
 await step('로컬 검수 10/17: 홈 최근 활동 멘션 @이름 · 월 보기 요일 머리 · 휴대폰 일정 시트 닫기 버튼 화면 안 · 휴대폰 업무 둘째 줄 한 줄', () => verify1017({ owner, staff, ctx, sql, BASE }));
 await step('V37 8 미팅 일정: 업무 상세 [미팅 일정 만들기] → 목록 📍장소·시간 칩 · 등록 창 "방문" → 미팅 일정 제안 → 연결 일정', () => meeting({ owner, ctx, sql, BASE }));
+await step('V41 단계 1 공간: 영업 켜기 → PC 공간 카드로 영업(파란 강조)·Ctrl+1/2·뒤로가기 → 휴대폰 프로필 시트 전환 → 미배정 직원 카드 없음·주소 404', () => spaces({ browser, desk, owner, staff, BASE }));
 await step('홈 오늘의 일정: 오늘 일정도 함께(시간순)', () => homeTodayEvents({ owner, ctx, BASE }));
 await step('업무 등록 창 AI 비서: 편하게 적고 [AI로 채우기] → 업무명·담당·마감·설명·체크리스트 채움 → 저장', () => quickAi({ owner, ctx, sql, BASE, FAKE }));
 await step('V38 1 메시지방 흔들림: 휴대폰 위로 올려 보는 중 새 메시지 → 자리 유지·"새 메시지 n ↓", 맨 아래면 따라감, 화면 전체는 그대로', () => chatScroll({ browser, desk, ctx, BASE }));

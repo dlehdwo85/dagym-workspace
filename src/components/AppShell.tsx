@@ -13,8 +13,10 @@ import {
   Building2, HelpCircle, ListTodo, Library, LogOut, Mic, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
   MessageCircle, Mail,
+  TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck,
 } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
+import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
@@ -72,6 +74,18 @@ export function AppShell({ session, children }: { session: Sess; children: React
   useEffect(() => { setCollapsed(readPref('wos_nav_collapsed') === '1'); setAdminOpen(readPref('wos_nav_admin') !== '0'); }, []);
   const pending = useOutboxCount();
   const admin = isAdminRole(session.user.role);
+  // V41 공간: 지금 공간(주소로) · 들어갈 수 있는 공간 · 전환(마지막 공간 기억)
+  const spaces = (session.spaces ?? ['work']) as SpaceKey[];
+  const space = spaceOfPath(path);
+  const sm = SPACE_META[space];
+  const [spaceMenu, setSpaceMenu] = useState(false);
+  const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number }> }>(spaces.length > 1 && (spaceMenu || more) ? '/api/spaces' : null);
+  const goSpace = (sp: SpaceKey) => { setSpaceMenu(false); try { localStorage.setItem('wos_space', sp); } catch {} router.push(SPACE_META[sp].home); };
+  useEffect(() => { // 앱을 처음 열 때 마지막으로 쓴 공간으로
+    if (path !== '/') return;
+    let last: string | null = null; try { last = localStorage.getItem('wos_space'); } catch {}
+    if (last && last !== 'work' && spaces.includes(last as SpaceKey)) router.replace(SPACE_META[last as SpaceKey].home);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const favs = useApi<{ projects: { id: string; name: string; color: string; favorite: boolean }[] }>('/api/projects');
   const favorites = (favs.data?.projects ?? []).filter((p) => p.favorite);
   // V9: 자료실(체험 계정 제외) · AI 비서(플랫폼 API 키가 있을 때만)
@@ -80,12 +94,16 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const adminMenu = ADMIN_MENU.filter((n) => (menus[ADMIN_KEY[n.href]] ?? 'none') !== 'none');
   const nav: NavItem[] = [...NAV, ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
+  // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
+  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '영업 현황', icon: TrendingUp }] : space === 'marketing' ? [{ href: '/s/marketing', label: '마케팅 운영실', icon: Megaphone }] : [];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(true); return; }
+      // V41 공간 전환 단축키 Ctrl 1·2·3 (들어갈 수 있는 공간만)
+      if ((e.ctrlKey || e.metaKey) && ['1', '2', '3'].includes(e.key)) { const sp = (['work', 'sales', 'marketing'] as SpaceKey[])[Number(e.key) - 1]; if (spaces.includes(sp)) { e.preventDefault(); goSpace(sp); } return; }
       const t = e.target as HTMLElement;
       if (e.ctrlKey || e.metaKey || e.altKey || t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || document.querySelector('[role=dialog]')) return;
       if (e.key === '?') { e.preventDefault(); setHelp(true); return; }
@@ -135,7 +153,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   }, [router]);
   const reloadFavs = favs.reload;
   useEffect(() => { const h = () => reloadFavs(); window.addEventListener('wos-favorites', h); return () => window.removeEventListener('wos-favorites', h); }, [reloadFavs]);
-  useEffect(() => { setCreateMenu(false); setUserMenu(false); setMore(false); }, [path]);
+  useEffect(() => { setCreateMenu(false); setUserMenu(false); setMore(false); setSpaceMenu(false); }, [path]);
   // V32 0: 업무·일정 등 화면을 열면 그 화면으로 가는 안 읽은 알림을 자동 읽음(앱 푸시로 들어온 경우 포함)
   const hasUnread = unread > 0;
   const readTried = useRef('');
@@ -172,7 +190,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const navLink = (n: NavItem, badge?: number) => {
     const on = active(n.href);
     return (
-      <Link key={n.href} href={n.href} title={collapsed ? n.label : undefined}
+      <Link key={n.href} href={n.href} title={collapsed ? n.label : undefined} style={on && space !== 'work' ? { background: sm.color } : undefined}
         className={cx('group flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm transition-colors', on ? 'bg-brand-600 font-semibold text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-ink', collapsed && 'justify-center px-0')}>
         <n.icon className={cx('size-[18px] shrink-0', on ? 'text-white' : 'text-slate-400 group-hover:text-slate-600')} aria-hidden />
         {!collapsed && <span className="flex-1 truncate">{n.label}</span>}
@@ -183,15 +201,42 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
   return (
     <SessionCtx.Provider value={session}>
-      <div className="app-shell min-h-screen bg-canvas text-ink sm:flex">
+      <div className="app-shell min-h-screen bg-canvas text-ink sm:flex" data-space={space} style={sm.bg ? { background: sm.bg } : undefined}>
         {/* 사이드바 (데스크톱) */}
         <aside className={cx('hidden shrink-0 flex-col border-r border-line bg-white text-slate-700 transition-[width] duration-150 sm:sticky sm:top-0 sm:flex sm:h-screen', collapsed ? 'w-[60px]' : 'w-60')} aria-label="사이드바">
+          {spaces.length > 1 ? (
+            // V41 공간 카드 → 드롭다운(공간·요약·단축키)
+            <div className="relative px-2 pt-2">
+              <button onClick={() => setSpaceMenu((v) => !v)} aria-haspopup="menu" aria-expanded={spaceMenu} aria-label="공간 전환" data-testid="space-switch"
+                className={cx('flex w-full items-center gap-2.5 rounded-[10px] border p-2 text-left', collapsed && 'justify-center border-transparent p-1')} style={{ background: sm.soft, borderColor: collapsed ? 'transparent' : sm.border }}>
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] text-white" style={{ background: sm.color }}><SpaceIcon s={space} /></span>
+                {!collapsed && <span className="min-w-0 flex-1 leading-tight"><span className="block truncate text-sm font-bold text-ink" data-testid="space-current">{sm.label}</span><span className="block truncate text-[11px] text-slate-500">{session.tenant?.name ?? '워크인'}</span></span>}
+                {!collapsed && <ChevronsUpDown className="size-4 shrink-0" style={{ color: sm.color }} />}
+              </button>
+              {spaceMenu && (<>
+                <div className="fixed inset-0 z-40" onClick={() => setSpaceMenu(false)} />
+                <div role="menu" aria-label="공간 전환 메뉴" className="absolute left-2 top-full z-50 mt-1 w-80 rounded-card border border-line bg-white p-2 shadow-pop" data-testid="space-menu">
+                  <div className="px-2 py-1.5 text-xs text-ink-3">공간</div>
+                  {spaces.map((sp, i) => (
+                    <button key={sp} role="menuitem" onClick={() => goSpace(sp)} data-testid={`space-go-${sp}`} className="flex w-full items-center gap-2.5 rounded-[10px] p-2.5 text-left hover:bg-slate-50" style={sp === space ? { background: SPACE_META[sp].soft } : undefined}>
+                      <span className="size-3 shrink-0 rounded-full" style={{ background: SPACE_META[sp].color }} />
+                      <span className="min-w-0 flex-1"><span className={cx('block text-sm', sp === space ? 'font-bold' : 'font-medium')}>{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-[11px] text-ink-3">{spaceInfo.data.summary[sp].text}</span>}</span>
+                      {sp === space ? <span className="text-xs" style={{ color: SPACE_META[sp].color }}>지금</span> : <Kbd>Ctrl {i + 1}</Kbd>}
+                    </button>
+                  ))}
+                  <div className="my-1 h-px bg-slate-100" />
+                  <p className="px-2 py-1.5 text-[11px] text-ink-3">{admin ? '관리자는 켠 공간을 모두 봅니다 · 공간 켜기와 직원 배정은 관리 › 사용자 › 공간' : '배정된 공간만 보입니다'}</p>
+                </div>
+              </>)}
+            </div>
+          ) : (
           <div className={cx('flex h-14 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
             <img src="/icon.svg" alt="" className="size-7" />
             {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold text-ink">워크인</div><div className="truncate text-[11px] text-slate-500">{session.tenant?.name ?? '워크인'}</div></div>}
           </div>
+          )}
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
-            {nav.map((n) => (
+            {(space === 'work' ? nav : spaceNav).map((n) => (
               <div key={n.href}>
                 {navLink(n, n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0)}
                 {/* 즐겨찾는 프로젝트는 "프로젝트" 바로 아래 */}
@@ -284,7 +329,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
           {/* 머리줄은 상태바 높이만큼 아래로 (고정 높이 안에서 눌리지 않게 높이는 내용 줄에만) */}
           <header className="sticky top-0 z-30 border-b border-line bg-white/95 pt-[var(--sat)] backdrop-blur sm:hidden" data-testid="mobile-header">
             <div className="flex h-12 items-center justify-between px-3">
-              <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon.svg" alt="" className="size-7" />워크인</span>
+              <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon.svg" alt="" className="size-7" />워크인
+                {spaces.length > 1 && <span className="rounded-full border px-2 py-0.5 text-xs font-medium" style={{ color: sm.color, background: sm.soft, borderColor: sm.border }} data-testid="mobile-space-chip">{sm.short}</span>}</span>
               <span className="flex items-center">
                 <button onClick={() => setPalette(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-[22px]" /></button>
                 {session.features.ai && <button onClick={() => setAiDock(true)} className="inline-flex size-11 items-center justify-center rounded-full text-violet-600 active:bg-violet-50" aria-label="AI 비서" data-testid="mobile-ai"><Sparkles className="size-[22px]" /></button>}
@@ -368,6 +414,20 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <div className="min-w-0 flex-1"><div className="font-semibold">{session.user.name}</div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
                 <button onClick={() => setMore(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button>
               </div>
+              {spaces.length > 1 && (
+                <div className="space-y-1 border-t border-line px-1 pb-1 pt-2" data-testid="mobile-spaces">
+                  <div className="px-2 text-xs text-ink-3">공간 전환</div>
+                  {spaces.map((sp) => (
+                    <button key={sp} onClick={() => goSpace(sp)} data-testid={`mobile-space-${sp}`} className="flex min-h-[60px] w-full items-center gap-3 rounded-xl border-[1.5px] px-3 py-2 text-left"
+                      style={sp === space ? { background: SPACE_META[sp].soft, borderColor: SPACE_META[sp].color } : { borderColor: 'transparent' }}>
+                      <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-white" style={{ background: SPACE_META[sp].color }}><SpaceIcon s={sp} /></span>
+                      <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-xs text-ink-2">{spaceInfo.data.summary[sp].text}</span>}</span>
+                      {sp === space && <Check className="size-5" style={{ color: SPACE_META[sp].color }} aria-label="지금 공간" />}
+                      {sp !== space && !!spaceInfo.data?.summary[sp]?.badge && <span className="min-w-[22px] rounded-full bg-red-600 px-1.5 text-center text-xs font-bold leading-[22px] text-white">{spaceInfo.data.summary[sp].badge}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="my-1 border-t border-line" />
               {([['/projects', '프로젝트', FolderKanban], ...nav.filter((n) => n.href === '/library' || n.href === '/assistant').map((n) => [n.href, n.label, n.icon]), ['/settings', '설정·알림', Settings], ['/help', '도움말·문의', HelpCircle],
                 ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)', CalendarDays]] : []),
@@ -414,4 +474,10 @@ function TabLink({ n, on, badge }: { n: NavItem; on: boolean; badge?: number }) 
       {!!badge && <span className="absolute left-1/2 top-1 ml-2 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{badge > 99 ? '99+' : badge}</span>}
     </Link>
   );
+}
+
+/** V41 공간 아이콘(업무 체크 달력 · 영업 상승 · 마케팅 확성기) */
+function SpaceIcon({ s }: { s: SpaceKey }) {
+  const I = s === 'sales' ? TrendingUp : s === 'marketing' ? Megaphone : CalendarCheck;
+  return <I className="size-[18px]" aria-hidden />;
 }
