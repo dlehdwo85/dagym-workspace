@@ -1072,6 +1072,7 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   for (let i = 1; i <= 12; i++) await owner.mouse.move(from.x + 8, from.y + 8 + ((to.y - from.y - 6) * i) / 12);
   await owner.mouse.up();
   await owner.waitForTimeout(1000);
+  await owner.waitForLoadState('networkidle'); // 순서 저장이 끝난 뒤 새로고침
   await owner.reload();
   await mine.locator('[data-row] a[data-open-task]').first().waitFor();
   assert.equal((await mine.locator('[data-row] a[data-open-task]').first().textContent()).trim(), lastTitle, '새로고침 후에도 끌어 놓은 순서');
@@ -1295,8 +1296,9 @@ await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 �
   const tw = await row.evaluate((el) => { const t = el.querySelector('[data-testid="row-title"]'); return [t.getBoundingClientRect().width, el.getBoundingClientRect().width]; });
   assert.ok(tw[0] >= tw[1] * 0.8, `제목 폭 ${tw[0]} / 줄 폭 ${tw[1]}`);
   const id = await row.getAttribute('data-row');
-  const box = await row.boundingBox();
-  await m.touchscreen.tap(box.x + box.width / 2, box.y + box.height - 4); // 제목·상태 칩이 아닌 행 아래쪽 가운데 여백
+  // 검수(10/16): 휴대폰 둘째 줄은 칩(상태·마감·담당 — 누르는 범위 넓음)이라 빈 곳 = 한 줄 제목 오른쪽 끝 여백
+  const tb = await row.getByTestId('row-title').boundingBox();
+  await m.touchscreen.tap(tb.x + tb.width - 6, tb.y + tb.height / 2);
   await m.getByTestId('task-panel').waitFor();
   assert.ok(m.url().endsWith(`/tasks/${id}`), '행 빈 곳 탭 → 그 업무 상세');
   await m.getByTestId('status-chip').waitFor();
