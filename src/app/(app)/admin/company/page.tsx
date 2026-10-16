@@ -38,6 +38,7 @@ export default function CompanyPage() {
     <div className="mx-auto max-w-4xl space-y-4">
       <PageHeader title="회사 정보·디자인" icon={Building2} sub="AI 비서가 견적서·문서를 만들 때 공급자 칸·로고·브랜드 색을 여기서 가져옵니다. 회사마다 따로 두고, 다른 회사 정보와 섞지 않습니다."
         actions={<Button onClick={() => setEdit({ ...EMPTY })} data-testid="company-new"><Plus />회사 추가</Button>} />
+      <AttachToLibrary />
       {loading && !data ? <Skeleton rows={3} /> : !data?.profiles.length ? <Empty title="아직 회사 정보가 없습니다" icon={Building2}>회사 추가를 눌러 상호·사업자번호·주소·로고·브랜드 색을 넣어 주세요.</Empty> : (
         <ul className="grid gap-3 sm:grid-cols-2" data-testid="company-list">
           {data.profiles.map((p) => (
@@ -75,5 +76,23 @@ export default function CompanyPage() {
         </form>
       )}
     </div>
+  );
+}
+
+/** V38 4 회사 설정: 업무 첨부를 자료실에 자동 등록(같은 파일·업무를 볼 수 있는 사람만) */
+function AttachToLibrary() {
+  const st = useApi<{ on: boolean }>('/api/org/attach-library');
+  const [busy, setBusy] = useState(false);
+  if (!st.data) return null;
+  const toggle = async (on: boolean) => {
+    setBusy(true);
+    try { await api('/api/org/attach-library', { method: 'PUT', body: { on } }); st.reload(); toast.ok(on ? '업무 첨부를 자료실에도 저장합니다' : '업무 첨부를 자료실에 저장하지 않습니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-card border border-line bg-white p-4 text-sm shadow-card">
+      <input type="checkbox" className="mt-0.5 size-4" checked={st.data.on} disabled={busy} onChange={(e) => toggle(e.target.checked)} data-testid="attach-to-library" />
+      <span><b>업무 첨부를 자료실에 자동 저장</b>
+        <span className="mt-0.5 block text-xs text-ink-2">업무에 올린 파일이 자료실 &ldquo;업무 첨부/프로젝트&rdquo; 폴더에도 보입니다(같은 파일 하나, 복사 없음). 그 업무를 볼 수 있는 사람만 자료실에서도 보이고, 자료실에서 지워도 업무 첨부는 남습니다.</span></span>
+    </label>
   );
 }

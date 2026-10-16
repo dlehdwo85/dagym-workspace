@@ -14,5 +14,7 @@ export const POST = handler<{ id: string }>(async ({ user, params }) => {
   const sql = db();
   await sql`update attachments set upload_status = 'ready', size_bytes = ${size} where id = ${a.id}`;
   await activity(sql, a.task_id ? 'task' : 'event', a.task_id ?? a.event_id, user.id, 'file_attached', { name: a.file_name, size });
-  return { ok: true, id: a.id };
+  // V38 4: 업무 첨부 → 자료실 자동 등록(같은 파일, 업무를 볼 수 있는 사람만). 실패해도 첨부는 그대로
+  const libraryId = await (await import('@/lib/library')).registerTaskAttachment(user, a as any, size).catch(() => null);
+  return { ok: true, id: a.id, libraryId };
 });

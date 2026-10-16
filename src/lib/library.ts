@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db } from './db';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
-import { isAdmin, denyDemo } from './access';
+import { isAdmin, denyDemo, accessibleUnitIds, taskVisibleSql } from './access';
 import { activity } from './log';
 import { MAX_UPLOAD_BYTES, downloadUrl, getObject, objectSize, putObject, uploadTarget } from './storage';
 import { extractText } from './textExtract';
@@ -71,7 +71,9 @@ export const canSeeSec = (c: SecCtx, u: SessionUser, f: { folder: string; securi
  */
 export async function storageSecurity(tenant: string, storageKey: string): Promise<{ security: Security; deleted: boolean } | null> {
   const sql = db();
-  const rows = await sql<{ folder: string; security: Security; deleted_at: Date | null }[]>`select folder, security, deleted_at from library_files where tenant = ${tenant} and storage_key = ${storageKey}`;
+  const all = await sql<{ folder: string; security: Security; deleted_at: Date | null; source: string }[]>`select folder, security, deleted_at, source from library_files where tenant = ${tenant} and storage_key = ${storageKey}`;
+  // V38 4: 업무 첨부를 자료실에 자동 등록한 행은 등급만 따르고, 자료실에서 지워도 업무 첨부는 막지 않는다(정리하다 업무 자료를 잃지 않게)
+  const rows = all.filter((r) => r.source !== 'task_attach' || !r.deleted_at);
   if (!rows.length) return null;
   const folders = await sql<{ folder: string; security: Security }[]>`select folder, security from library_folder_security where tenant = ${tenant}`;
   const c: SecCtx = { folders, internal: false, confidential: false, confEdit: false };
@@ -130,7 +132,10 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
   // 등급: 볼 수 있는 등급 목록 + 폴더 등급이 허용되는 폴더 (본인이 올린 파일은 항상)
   const secs = (['public', 'internal', 'confidential'] as Security[]).filter((s) => secAllowed(sc, s));
   const secFolders = allFolders.map((f) => f.folder).filter((f) => secAllowed(sc, folderSec(sc, f)));
-  const secCond = sql`(f.created_by = ${u.id} or (f.security = any(${secs}::text[]) and f.folder = any(${secFolders}::text[])))`;
+  const units = await accessibleUnitIds(u, sql);
+  // V38 4: 업무 첨부에서 온 파일은 그 업무를 볼 수 있는 사람에게만(올린 사람 본인은 항상)
+  const secCond = sql`(f.created_by = ${u.id} or (f.security = any(${secs}::text[]) and f.folder = any(${secFolders}::text[])
+    and (f.task_id is null or exists (select 1 from tasks t where t.id = f.task_id and t.deleted_at is null and ${taskVisibleSql(sql, u, units)}))))`;
   const counts = new Map((await sql<{ folder: string; n: number }[]>`select folder, count(*)::int n from library_files f where f.tenant = ${tenantOf(u)} and f.deleted_at is null
     and f.upload_status = 'ready' and ${secCond} group by folder`).map((r) => [r.folder, r.n]));
   // 빈 폴더(V14 18번)는 폴더 권한·등급만 맞으면 보이고, 파일이 있는 폴더는 볼 수 있는 파일이 있을 때만(기밀 파일만 있는 폴더의 존재를 숨김)
@@ -212,6 +217,10 @@ export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open
     await requireMenu(u, 'library', 'view');
     await requireFolder(u, f.folder, 'view'); // 폴더 권한 — 서명 주소 발급·AI 읽기 전에
     if (!canSeeSec(sc, u, f)) throw notFound('자료가 없습니다'); // V14 15번: 등급 밖이면 존재도 숨김
+    if (f.task_id) { // V38 4: 업무 첨부에서 온 파일 = 그 업무를 볼 수 있어야
+      const { loadTaskForUser } = await import('./access');
+      await loadTaskForUser(u, f.task_id).catch(() => { throw notFound('자료가 없습니다'); });
+    }
   }
   if (f.effective_security === 'confidential' && purpose !== 'meta') await secAudit(u, f, purpose);
   return f;
@@ -550,4 +559,40 @@ export async function moveFiles(u: SessionUser, i: z.infer<typeof moveInput>) {
   }
   if (folder) await db()`insert into library_folders (tenant, path, created_by) values (${tenantOf(u)}, ${folder}, ${u.id}) on conflict do nothing`;
   return { moved: done.length, skipped };
+}
+
+/**
+ * V38 4: 업무에 올린 파일을 자료실에도 자동 등록 — 같은 파일 하나(storage_key 공유, 복사 없음), 폴더 = 프로젝트 이름 또는 "업무 첨부/연-월",
+ * 등급은 이름 규칙(기밀 단어면 기밀, 아니면 내부), 그 업무를 볼 수 있는 사람만 자료실에서도 보임. 회사 설정으로 끌 수 있음(기본 켬).
+ * 자료실에서 고른 파일을 첨부한 경우(이미 자료실에 있음)·링크는 건너뜀. 실패해도 첨부 자체는 그대로.
+ */
+export async function registerTaskAttachment(u: SessionUser, a: { id: string; task_id: string | null; storage_key: string | null; file_name: string; mime_type: string; source: string }, size: number) {
+  if (!a.task_id || !a.storage_key || a.source === 'library') return null;
+  const sql = db();
+  const t = tenantOf(u);
+  const [ten] = await sql<{ on: boolean }[]>`select attach_to_library as on from tenants where id = ${t}`;
+  if (ten && !ten.on) return null;
+  const [dup] = await sql`select 1 from library_files where tenant = ${t} and storage_key = ${a.storage_key} limit 1`;
+  if (dup) return null;
+  const [task] = await sql<{ title: string; project: string | null }[]>`select t.title, p.name as project from tasks t left join projects p on p.id = t.project_id where t.id = ${a.task_id}`;
+  if (!task) return null;
+  const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(new Date());
+  const folder = cleanFolder(task.project ? `업무 첨부/${task.project}` : `업무 첨부/${month}`);
+  const title = a.file_name.replace(/\.[^.]+$/, '').slice(0, 200) || a.file_name;
+  const security = ruleSecurity(`${a.file_name} ${task.title}`) ?? 'internal';
+  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, storage_key, upload_status, tags, description, source, created_by, task_id, security)
+    values (${t}, ${folder}, ${title}, ${a.file_name}, ${a.mime_type}, ${size}, ${a.storage_key}, 'ready', ${['업무 첨부']}, ${`업무: ${task.title}`}, 'task_attach', ${u.id}, ${a.task_id}, ${security})
+    returning id`;
+  return f.id;
+}
+/** 회사 설정: 업무 첨부 자료실 자동 등록 켜기/끄기 */
+export async function getAttachToLibrary(u: SessionUser) {
+  const [r] = await db()<{ on: boolean }[]>`select attach_to_library as on from tenants where id = ${tenantOf(u)}`;
+  return { on: r?.on ?? true };
+}
+export async function setAttachToLibrary(u: SessionUser, on: boolean) {
+  const { requireAnyMenu } = await import('./menuPerms');
+  await requireAnyMenu(u, ['company', 'ops'], 'edit');
+  await db()`update tenants set attach_to_library = ${on} where id = ${tenantOf(u)}`;
+  return { on };
 }
