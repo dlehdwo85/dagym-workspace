@@ -175,6 +175,8 @@ function CalendarPage() {
   // V14 47: 연결 안 됐어도 같은 날·같은 제목의 일정이 있으면 업무는 따로 그리지 않고 일정 줄에 "업무 n" 으로 묶는다
   const normT = (x: string) => cleanTitle(x).replace(/\s+/g, ' ').trim().toLowerCase();
   const evKey = new Set(events.filter((e) => !e.masked && e.kind !== 'task_block' && !(ABSENCE_KINDS as readonly string[]).includes(e.kind)).map((e) => `${seoulDate(e.start)}|${normT(e.title)}`));
+  // V37 2: 마감 시각이 있는 업무에 같은 날 업무 시간 블록이 있으면 블록 하나만(중복 블록 금지)
+  const blockedDay = new Set(events.filter((e) => e.kind === 'task_block' && e.blockTask?.id).map((e) => `${e.blockTask.id}|${seoulDate(e.start)}`));
   const dupTasks = new Map<string, number>();
   for (const t of tasks) if (t.due_date && !syncedIds.has(t.id) && evKey.has(`${t.due_date}|${normT(t.title)}`)) dupTasks.set(`${t.due_date}|${normT(t.title)}`, (dupTasks.get(`${t.due_date}|${normT(t.title)}`) ?? 0) + 1);
   const fcEvents = useMemo(() => [
@@ -190,7 +192,7 @@ function CalendarPage() {
       extendedProps: { type: 'event', ev: e, who: e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? `${initials(e.ownerName ?? '')} · ` : '' }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
-    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id) && !dupTasks.has(`${t.due_date}|${normT(t.title)}`)).map((t) => ({
+    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id) && !dupTasks.has(`${t.due_date}|${normT(t.title)}`) && !(t.due_time && blockedDay.has(`${t.id}|${t.due_date}`))).map((t) => ({
       // V7 4번: 일정과 같은 모양 — 업무는 왼쪽 굵은 선(V14 37번, 동그라미 없음), 다른 사람 업무는 머리글자
       id: `task|${t.id}`, title: t.title,
       // V14 13번: 시간 있는 업무는 마감 직전 1시간 블록(한 칸 높이) — 얇게 찌그러지지 않게
@@ -328,8 +330,8 @@ function CalendarPage() {
               ))}
               <li>
                 <label className="flex cursor-pointer items-center gap-2 rounded-input px-1.5 py-1 text-sm hover:bg-slate-100">
-                  <input type="checkbox" className="size-4 rounded accent-indigo-600" checked={showTasks} onChange={() => setShowTasks(!showTasks)} aria-label="업무 캘린더 표시" />
-                  <span className="flex items-center gap-1"><CircleCheck className="size-3.5 text-indigo-600" />업무 마감</span>
+                  <input type="checkbox" className="size-4 rounded accent-indigo-600" checked={!showTasks} onChange={() => setShowTasks(!showTasks)} aria-label="업무 숨기기" data-testid="cal-hide-tasks" />
+                  <span className="flex items-center gap-1"><CircleCheck className="size-3.5 text-indigo-600" />업무 숨기기</span>
                 </label>
               </li>
               <li>
@@ -358,7 +360,7 @@ function CalendarPage() {
                 <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : c.type === 'personal' ? calColors.personal : calColors.company }} />{c.type === 'personal' ? '내 일정' : c.name}
               </button>
             ))}
-            <button onClick={() => setShowTasks(!showTasks)} aria-pressed={showTasks} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-indigo-300 text-indigo-700' : 'border-line text-ink-3 line-through')}><CircleCheck className="size-3.5" />업무 마감</button>
+            <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
             <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
             <button onClick={() => setColorDlg(true)} className="hidden items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:inline-flex" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
           </div>
@@ -475,7 +477,7 @@ function CalendarPage() {
             select={(s) => {
               const js = (s.jsEvent as MouseEvent | undefined);
               const x = js?.clientX ?? window.innerWidth / 2, y = js?.clientY ?? 200;
-              setQuick({ x: Math.min(window.innerWidth - 336, Math.max(16, x - 160)), y: Math.min(window.innerHeight - 380, Math.max(16, y + 8)), date: seoulDate(s.start), allDay: s.allDay, kind: 'task',
+              setQuick({ x: Math.min(window.innerWidth - 336, Math.max(16, x - 160)), y: Math.min(window.innerHeight - 380, Math.max(16, y + 8)), date: seoulDate(s.start), allDay: s.allDay, kind: 'event', // V37 2: 빈 칸 = 일정 먼저(업무는 "할 일로도 만들기" 또는 [업무] 전환)
                 start: s.allDay ? undefined : seoulTime(s.start), end: s.allDay ? undefined : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) });
             }}
           />
@@ -654,9 +656,9 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
         {/* V5 반복(일정·업무 모두) — 반복 일정 + 업무에도 추가 = 같은 규칙의 반복 업무 */}
         <div className="mt-2" data-testid="quick-repeat"><RecurSelect value={rrule} onChange={setRrule} anchorDate={date} /></div>
         <label className="mt-2 flex cursor-pointer items-center gap-2.5 text-sm font-medium text-ink">
-          <input type="checkbox" role="switch" className="peer sr-only" checked={alsoTask} onChange={(e) => setAlsoTask(e.target.checked)} data-testid="quick-also-task" aria-label="업무에도 추가" />
+          <input type="checkbox" role="switch" className="peer sr-only" checked={alsoTask} onChange={(e) => setAlsoTask(e.target.checked)} data-testid="quick-also-task" aria-label="할 일로도 만들기" />
           <span aria-hidden className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:bg-brand-600 peer-checked:after:translate-x-4" />
-          업무에도 추가 <span className="text-xs font-normal text-ink-3">(날짜를 바꾸면 서로 따라감)</span>
+          할 일로도 만들기 <span className="text-xs font-normal text-ink-3">(업무 목록에도 — 날짜를 바꾸면 서로 따라감)</span>
         </label>
         {alsoTask && (
           <div className="mt-2 grid grid-cols-2 gap-1.5 rounded-input bg-slate-50 p-2 text-xs" data-testid="quick-task-fields">
@@ -812,13 +814,13 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!f.isPrivate} onChange={(e) => set('isPrivate')(e.target.checked)} />비공개 — 다른 사람에게는 시간만 &ldquo;바쁨&rdquo;으로 보입니다</label>
           {/* V5 일정 ↔ 업무 연동 */}
           {!id ? (
-            <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!f.alsoTask} onChange={(e) => set('alsoTask')(e.target.checked)} data-testid="editor-also-task" />업무에도 추가 <span className="text-xs font-normal text-ink-3">— 같은 이름·날짜의 업무(담당 나), 날짜를 바꾸면 서로 따라갑니다{f.rrule ? ' · 반복 업무로' : ''}</span></label>
+            <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!f.alsoTask} onChange={(e) => set('alsoTask')(e.target.checked)} data-testid="editor-also-task" />할 일로도 만들기 <span className="text-xs font-normal text-ink-3">— 같은 이름·날짜의 업무(담당 나), 날짜를 바꾸면 서로 따라갑니다{f.rrule ? ' · 반복 업무로' : ''}</span></label>
           ) : d?.syncTask ? (
             <p className="flex items-center gap-2 text-sm" data-testid="editor-sync-task"><CircleCheck className="size-4 text-green-600" />연결된 업무: <Link href={`/tasks/${d.syncTask.id}`} className="font-medium underline">{d.syncTask.title}</Link><span className="text-xs text-ink-3">날짜 연동</span></p>
           ) : canEdit ? (
             <button type="button" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline" data-testid="editor-add-task"
               onClick={async () => { try { await api(`/api/events/${id}`, { method: 'PATCH', body: { alsoTask: true } }); toast.ok('업무에도 추가했습니다'); existing.reload(); onSaved(); } catch (er: any) { toast.error(er.message); } }}>
-              <Plus className="size-4" />업무에도 추가</button>
+              <Plus className="size-4" />할 일로도 만들기</button>
           ) : null}
           {(!d?.event?.recurring_event_id) && <div><div className="mb-1 text-xs font-medium text-slate-600">반복</div><RecurSelect value={f.rrule} onChange={set('rrule')} anchorDate={f.date} /></div>}
           <div><div className="mb-1 text-xs font-medium text-slate-600">알림 {isRecurring && <span className="font-normal text-slate-400">(반복 일정 전체에 적용)</span>}</div><ReminderEditor value={f.reminders} onChange={set('reminders')} /></div>

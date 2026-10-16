@@ -844,7 +844,7 @@ await step('W-3 홈: 오늘 할 일(내 것/전체) · 이번 주 일정 · 이�
   }
   await owner.screenshot({ path: `${SHOTS}/59-home-dashboard.png`, fullPage: true });
 });
-await step('V14 35 캘린더에서 바로 업무: 빈 칸 = 업무 등록(누른 시각이 마감 시각) · 일정 전환 · 홈 미니 캘린더 그날 업무 + [＋업무][＋일정]', async () => {
+await step('V14 35·V37 2 캘린더 빈 칸 = 일정 먼저(할 일로도 만들기) → [업무] 전환하면 누른 시각이 마감 시각 · 홈 미니 캘린더 그날 업무 + [＋업무][＋일정]', async () => {
   const d = addDays(today, 4);
   await owner.goto(`${BASE}/calendar?date=${d}`);
   await owner.locator('.fc-toolbar-title').waitFor();
@@ -854,13 +854,16 @@ await step('V14 35 캘린더에서 바로 업무: 빈 칸 = 업무 등록(누른
   const col = await owner.locator(`.fc-timegrid-col[data-date="${d}"]`).boundingBox();
   const slot = await lane.boundingBox();
   await owner.mouse.click(col.x + col.width / 2, slot.y + 4);
+  // V37 2: 빈 칸 = 일정 등록이 먼저, [저장] 버튼 항상 보임, "할 일로도 만들기" 스위치
+  const qc = owner.getByTestId('quick-create');
+  await qc.waitFor();
+  await qc.getByTestId('quick-save').waitFor();
+  await qc.getByLabel('할 일로도 만들기').waitFor({ state: 'attached' });
+  await qc.getByTestId('quick-switch-task').click();
   const dlg = owner.getByRole('dialog', { name: '업무 등록' });
   await dlg.waitFor();
   assert.equal(await dlg.getByLabel('마감일').inputValue(), d, '누른 날짜가 마감일');
   assert.equal(await dlg.getByLabel('마감 시각').inputValue(), '10:00', '주 보기 = 누른 시각이 마감 시각');
-  // 일정으로 바꿨다가 다시 업무로
-  await dlg.getByTestId('quick-switch-event').click();
-  await owner.getByTestId('quick-create').getByTestId('quick-switch-task').click();
   await dlg.getByLabel('제목').fill('캘린더 빈칸 업무');
   await dlg.getByRole('button', { name: '저장' }).click();
   await dlg.waitFor({ state: 'detached' });
@@ -1100,7 +1103,6 @@ await step('V4 캘린더: 휴대폰 빈 칸 한 번 탭 → 빠른 등록 시트
   const colBox = await m.locator(`td.fc-timegrid-col[data-date="${d}"]`).boundingBox();
   const laneBox = await lane.boundingBox();
   await m.touchscreen.tap(colBox.x + colBox.width / 2, laneBox.y + laneBox.height / 2);
-  await m.getByTestId('quick-switch-event').click(); // V14 35번: 빈 칸 = 업무가 기본 → 일정으로 전환
   const sheet = m.getByTestId('quick-create');
   await sheet.waitFor();
   await sheet.getByLabel('빠른 입력 제목').fill('V4 탭 등록');
@@ -1150,12 +1152,11 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   await owner.goto(`${BASE}/calendar?date=${d}`);
   await owner.locator('.fc-toolbar-title').waitFor();
   await owner.getByTestId('mini-month').waitFor();
-  await owner.getByTestId('calendar-list').getByLabel('업무 캘린더 표시').waitFor();
+  await owner.getByTestId('calendar-list').getByLabel('업무 숨기기').waitFor();
   await owner.waitForLoadState('networkidle'); // 일정을 불러온 뒤(이른 시각 일정이 있으면 시간 칸이 늘어남) 위치 측정
   const col = await owner.locator(`.fc-timegrid-col[data-date="${d}"]`).boundingBox();
   const slot = await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().boundingBox();
   await owner.mouse.click(col.x + col.width / 2, slot.y + 4);
-  await owner.getByTestId('quick-switch-event').click(); // V14 35번: 빈 칸 = 업무가 기본 → 일정으로 전환
   const q = owner.getByTestId('quick-create');
   assert.equal(await q.getByRole('tab').count(), 0, '탭 없이 일정 양식 하나(V6)');
   await q.getByLabel('빠른 입력 제목').fill('계약서 최종본 확인');
@@ -1179,13 +1180,18 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   assert.notEqual((await ctx.owner.ok('GET', `/api/tasks/${lone}`)).task.status, 'done', '누르기만으로 완료되지 않음');
   await owner.getByTestId('task-panel').getByRole('button', { name: '패널 닫기' }).click();
   await owner.getByTestId('task-panel').waitFor({ state: 'detached' });
+  // V37 2: [업무 숨기기] → 업무 칩이 사라지고 일정 블록은 그대로, 다시 끄면 보임
+  await owner.getByTestId('cal-hide-tasks').check();
+  await item.waitFor({ state: 'detached' });
+  assert.ok(await owner.locator('[data-ev-block]', { hasText: '계약서 최종본 확인' }).count() > 0, '일정은 그대로');
+  await owner.getByTestId('cal-hide-tasks').uncheck();
+  await item.waitFor();
   // 일정 탭 빠른 입력
   const lane15 = owner.locator('td.fc-timegrid-slot-lane[data-time="15:00:00"]').first();
   await lane15.evaluate((el) => el.scrollIntoView({ block: 'center' })); // 화면 아래 안내(토스트)에 가리지 않게
   const slot2 = await lane15.boundingBox();
   const col2 = await owner.locator(`.fc-timegrid-col[data-date="${d}"]`).boundingBox();
   await owner.mouse.click(col2.x + col2.width / 2, slot2.y + 4);
-  await owner.getByTestId('quick-switch-event').click();
   await owner.getByTestId('quick-create').getByLabel('빠른 입력 제목').fill('투자사 미팅');
   await owner.getByTestId('quick-create').getByLabel('빠른 입력 제목').press('Enter');
   await owner.getByText('일정을 저장했습니다').waitFor();
