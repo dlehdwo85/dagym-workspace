@@ -15,7 +15,8 @@ const FAKE_SR = () => {
   window.SpeechRecognition = FakeSR;
 };
 export async function voiceMode({ browser, desk, ctx, sql, BASE, FAKE }) {
-  const room = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'group', name: '음성 모드 시험방', userIds: [ctx.staffA.id] })).id;
+  // 이직원(staffA) 대화 목록은 건드리지 않음 — 뒤 메신저 시험이 그 목록에서 "김대표" 방을 누른다
+  const room = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'group', name: '음성 모드 시험방', userIds: [ctx.staffB.id] })).id;
   const c = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   await c.addInitScript(FAKE_SR);
   const m = await c.newPage();
@@ -25,8 +26,8 @@ export async function voiceMode({ browser, desk, ctx, sql, BASE, FAKE }) {
     await m.getByTestId('chat-voice').tap();
     await m.getByTestId('chat-voice-panel').waitFor();
     // 새 메시지 → "이름: 내용"으로 읽어 줌
-    const [sa] = await sql`select name from users where id = ${ctx.staffA.id}`;
-    await ctx.staffA.client.ok('POST', `/api/chat/rooms/${room}/messages`, { body: '3시 미팅 장소가 바뀌었습니다' });
+    const [sa] = await sql`select name from users where id = ${ctx.staffB.id}`;
+    await ctx.staffB.client.ok('POST', `/api/chat/rooms/${room}/messages`, { body: '3시 미팅 장소가 바뀌었습니다' });
     await m.waitForFunction((t) => (window.__spoken ?? []).includes(t), `${sa.name}: 3시 미팅 장소가 바뀌었습니다`, { timeout: 20_000 });
     // 말로 보내기: 말함 → 읽어 주고 "보낼까요?" → "보내" → 전송
     await m.evaluate(() => window.__srQueue.push('현장에 도착했습니다'));
