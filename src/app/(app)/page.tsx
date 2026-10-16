@@ -45,7 +45,7 @@ function Section({ title, count, children, href, icon: Icon, className, actions,
   );
 }
 
-/** 오늘 할 일 한 줄: 원형 체크로 바로 완료(관리자 확인·결재선 업무는 검토 요청) */
+/** 오늘의 일정 한 줄: 원형 체크로 바로 완료(관리자 확인·결재선 업무는 검토 요청) */
 function TodayRow({ t, onDone, className }: { t: any; onDone: (t: any) => void; className?: string }) {
   const { user } = useSession();
   const toReview = !!t.approval_line_id || (t.approval_required && user.role === 'staff');
@@ -279,10 +279,10 @@ export default function Dashboard() {
           <button type="submit" className="shrink-0 rounded-input bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50" disabled={!aiQ.trim()}>요청</button>
         </form>
       )}
-      {/* V14 8번: 우리 팀 오늘 할 일 (팀에 속해 있을 때만) */}
+      {/* V14 8번: 우리 팀 오늘의 일정 (팀에 속해 있을 때만) */}
       {(myTeams.data?.teams.length ?? 0) > 0 && (
         <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="home-team">
-          <div className="mb-2 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">우리 팀 오늘 할 일</h2>
+          <div className="mb-2 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">우리 팀 오늘의 일정</h2>
             {myTeams.data!.teams.map((t) => <Link key={t.id} href={`/teams/${t.id}`} className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs hover:bg-slate-50"><span className="size-2 rounded-full" style={{ background: t.color }} />{t.name} 보드</Link>)}</div>
           <ul className="divide-y divide-line text-sm">
             {myTeams.data!.tasks.slice(0, 8).map((t) => (
@@ -296,11 +296,11 @@ export default function Dashboard() {
           </ul>
         </section>
       )}
-      {/* WORKIN_V2 홈: 오늘 할 일 · 이번 주 일정 · 이달의 일정 · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동 (모바일은 위에서부터 이 순서) */}
+      {/* WORKIN_V2 홈: 오늘의 일정 · 이번 주 일정 · 이달의 일정 · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동 (모바일은 위에서부터 이 순서) */}
       <div className="grid min-w-0 gap-4 lg:grid-flow-dense lg:grid-cols-3">
-        <Section title="오늘 할 일" count={todayTasks.length} href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} icon={CheckCircle2} className="lg:col-span-2" testid="home-today"
+        <Section title="오늘의 일정" count={todayTasks.length} href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} icon={CheckCircle2} className="lg:col-span-2" testid="home-today"
           actions={(
-            <div className="flex rounded-full border border-line p-0.5 text-xs" role="group" aria-label="오늘 할 일 범위">
+            <div className="flex rounded-full border border-line p-0.5 text-xs" role="group" aria-label="오늘의 일정 범위">
               {([['mine', '내 것'], ['all', '전체']] as const).map(([k, l]) => (
                 <button key={k} onClick={() => setScope(k)} aria-pressed={scope === k} className={cx('hit rounded-full px-2.5 py-0.5 font-medium', scope === k ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{l}</button>
               ))}

@@ -301,7 +301,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     setTitle(''); setRrule(null);
     try {
       const multi = assignees.length > 1;
-      const r = await api('/api/tasks', { body: { title: autoTitle(t), priority, assigneeId: assignee, ...(multi ? { assigneeIds: assignees } : {}), requestedById: requester ?? user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? proj?.id ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
+      const r = await api('/api/tasks', { body: { title: autoTitle(t), priority, assigneeId: assignee, ...(multi ? { assigneeIds: assignees } : {}), requestedById: user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? proj?.id ?? null, sectionId: sectionId ?? null, approvalRequired: false } });
       markNew(r.id); setRemind(null); setPriority('normal'); setProj(null);
       const who = multi ? `${assignees.length}명 각각` : assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
       toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? ' — 담당자에게 알림을 보냈습니다' : assignee ? ' — 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
@@ -362,7 +362,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
       {showChips && (
         // V11 4번: 글자 있는 칩, 길면 2줄로 감김(가로 스크롤 없음)
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 pl-12" data-testid="inline-chips">
-          <span className="inline-flex items-center gap-1" title="지시자(업무를 부여한 사람)"><span className="text-[11px] text-ink-3">지시</span><AssigneePicker role="지시자" value={requester} onChange={back((v: string | null) => setRequester(v ?? user.id))} size={20} withName /></span>
+          {/* 대표(10/16): 지시자 = 로그인한 사람 고정 — 만들 때 고르는 칸 없음(바꾸려면 업무 상세에서) */}
           <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" time={dueTime} onTime={setDueTime} emptyText="마감 없음" />
           <span className="inline-flex items-center gap-1"><span className="text-[11px] text-ink-3">담당</span><MultiAssigneePicker values={assignees} onChange={setAssignees} /></span>
           <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />

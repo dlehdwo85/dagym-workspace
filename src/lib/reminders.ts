@@ -115,7 +115,7 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     for (let i = 0; i <= days; i++) {
       const d = addDays(today, i), at = kst(d, st.btime);
       if (!st.bweekend && (at.weekday >= 6 || hol.has(d))) continue;
-      push(`brief:${d}`, at, `좋은 아침입니다 · ${d.slice(5).replace('-', '/')} 브리핑`, '오늘 할 일과 일정을 확인하세요', '/');
+      push(`brief:${d}`, at, `좋은 아침입니다 · ${d.slice(5).replace('-', '/')} 브리핑`, '오늘의 일정과 일정을 확인하세요', '/');
     }
   }
   const seen = new Set<number>();

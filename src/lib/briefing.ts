@@ -51,7 +51,7 @@ export async function briefingJob(now = new Date()) {
     const evs = await eventsOfDay(sql, u.id, today);
     if (!c.open && !evs.length) continue;
     const first = evs.find((e) => !e.allDay) ?? evs[0];
-    const parts = [`오늘 할 일 ${c.open}건${c.over ? `(기한 지남 ${c.over})` : ''}`, `일정 ${evs.length}건`];
+    const parts = [`오늘의 일정 ${c.open}건${c.over ? `(기한 지남 ${c.over})` : ''}`, `일정 ${evs.length}건`];
     const body = `${parts.join(' · ')}${first ? ` — 첫 일정 ${first.allDay ? '종일' : hm(first.start)} ${first.title}` : ''}`;
     sent += (await notify(sql, { userIds: [u.id], type: 'briefing', title: `좋은 아침입니다 · ${today.slice(5).replace('-', '/')} 브리핑`, body,
       link: '/', entityType: null as never, entityId: null as never, dedupeKey: `briefing:${u.id}:${today}` })).length;

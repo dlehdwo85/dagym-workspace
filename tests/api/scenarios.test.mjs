@@ -1523,7 +1523,7 @@ describe('WORKIN_V8 아침 브리핑 · 주간 보고 초안 · 부재 종류 ·
     const n = await sql`select title, body from notifications where user_id = ${ctx.staffA.id} and type = 'briefing'`;
     if (hour < 22) {
       assert.equal(n.length, 1, '하루 한 번');
-      assert.match(n[0].body, /오늘 할 일 \d+건/);
+      assert.match(n[0].body, /오늘의 일정 \d+건/);
     }
     await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...p.settings, briefingEnabled: false } });
     assert.equal((await ctx.staffA.client.ok('GET', '/api/notifications/prefs')).settings.briefingEnabled, false);

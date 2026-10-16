@@ -912,7 +912,7 @@ export async function fillFromFiles(u: SessionUser, i: z.infer<typeof fillInput>
 
 /** V14 11번: 화면 맥락 — id 로 권한 안에서만 조회해 한 줄로. 볼 수 없으면 맥락 없이(404 를 드러내지 않음) */
 async function pageContext(u: SessionUser, c: { page: string; id?: string }) {
-  const PAGE: Record<string, string> = { home: '홈(오늘 할 일)', tasks: '업무 목록', calendar: '캘린더', library: '자료실', revenue: '매출', reports: '주간 보고', messages: '메시지', other: '' };
+  const PAGE: Record<string, string> = { home: '홈(오늘의 일정)', tasks: '업무 목록', calendar: '캘린더', library: '자료실', revenue: '매출', reports: '주간 보고', messages: '메시지', other: '' };
   try {
     if (c.page === 'library' && c.id) { const f = await loadLibraryFile(u, c.id, 'meta'); return `\n지금 사용자가 보고 있는 자료실 파일: id=${f.id}, 제목="${f.title}". "이 자료"는 이것을 뜻합니다.`; }
     if (c.page === 'messages' && c.id) {

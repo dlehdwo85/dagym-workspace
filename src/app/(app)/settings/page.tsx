@@ -72,7 +72,7 @@ export default function Settings() {
             <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.requesterDueAlerts ?? false} onChange={(e) => setS({ ...s, requesterDueAlerts: e.target.checked })} aria-label="내가 지시한 업무의 마감 알림" data-testid="requester-due-alerts" />받기 (담당자 이름·상태 표시)</label>
           </Field>
           {/* V8 1번 아침 브리핑 */}
-          <Field label="아침 브리핑 (오늘 할 일·일정 요약 알림)">
+          <Field label="아침 브리핑 (오늘의 일정·일정 요약 알림)">
             <span className="flex flex-wrap items-center gap-2" data-testid="briefing-settings">
               <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.briefingEnabled ?? true} onChange={(e) => setS({ ...s, briefingEnabled: e.target.checked })} aria-label="아침 브리핑 받기" />받기</label>
               <input type="time" step={900} className={cx(inputCls, '!w-32')} value={s.briefingTime ?? '08:30'} onChange={(e) => setS({ ...s, briefingTime: e.target.value })} aria-label="브리핑 시각" />

@@ -136,12 +136,12 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
       let r: { id: string };
       if (tpl) {
         const unit = defaults?.orgUnitId ?? dir.users.find((u) => u.id === user.id)?.org_unit_ids?.[0] ?? dir.orgUnits[0]?.id;
-        r = await api(`/api/templates/${tpl}/apply`, { body: { title: finalTitle(), orgUnitId: unit, projectId: f.projectId || null, assigneeId: f.assigneeId, requestedById: f.requestedById || undefined, dueDate: f.dueDate || undefined } });
+        r = await api(`/api/templates/${tpl}/apply`, { body: { title: finalTitle(), orgUnitId: unit, projectId: f.projectId || null, assigneeId: f.assigneeId, requestedById: user.id, dueDate: f.dueDate || undefined } });
       } else {
         r = await api('/api/tasks', {
           queueOffline: `업무 등록: ${finalTitle()}`,
           body: {
-            title: finalTitle(), assigneeId: f.assigneeId || null, requestedById: f.requestedById || user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
+            title: finalTitle(), assigneeId: f.assigneeId || null, requestedById: user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
             priority: f.priority ?? 'normal', recurrenceRule: f.rrule ?? null, reminderMinutes: f.remind ?? null,
             ...(f.description ? { description: f.description } : {}), ...(f.checklist?.length ? { checklist: f.checklist } : {}),
             ...(count > 1 && !f.teamId && f.multiMode !== 'together' ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
@@ -252,7 +252,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
           <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">마감<input type="date" className="min-h-8 rounded-md border border-line bg-white px-1.5 text-xs text-ink" value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} aria-label="마감일" /></label>
           {f.dueDate && <TimePick className="min-h-8 rounded-md border border-line bg-white px-1.5 text-xs" value={f.dueTime} onChange={(v) => set('dueTime')(v ?? '')} ariaLabel="마감 시각" />}
           <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">담당<UserSelect className="min-h-8 max-w-[8.5rem] rounded-md border border-line bg-white px-1.5 text-xs text-ink" ariaLabel="담당자" value={f.assigneeId} onChange={set('assigneeId')} /></label>
-          <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">지시<UserSelect className="min-h-8 max-w-[8.5rem] rounded-md border border-line bg-white px-1.5 text-xs text-ink" ariaLabel="지시자" placeholder="지시자 선택" value={f.requestedById} onChange={set('requestedById')} /></label>
+          {/* 대표(10/16): 지시자 = 로그인한 사람 고정(고르는 칸 없음) */}
           <RepeatChip value={f.rrule ?? null} anchorDate={f.dueDate || null} onChange={set('rrule')} />
           <BellChip value={f.remind ?? null} onChange={set('remind')} />
         </div>

@@ -82,7 +82,7 @@ export async function updateTeam(u: SessionUser, id: string, i: Partial<z.infer<
   });
 }
 
-/** 홈 "우리 팀 오늘 할 일": 내가 속한 팀의 오늘 마감·기한 지남·진행 중 업무 (볼 수 있는 것만) */
+/** 홈 "우리 팀 오늘의 일정": 내가 속한 팀의 오늘 마감·기한 지남·진행 중 업무 (볼 수 있는 것만) */
 export async function myTeamToday(u: SessionUser) {
   const sql = db();
   const teams = await sql<{ id: string; name: string; color: string }[]>`select t.id, t.name, t.color from teams t join team_members m on m.team_id = t.id

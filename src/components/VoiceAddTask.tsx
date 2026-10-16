@@ -76,7 +76,7 @@ export function VoiceAddTask() {
     if (!card || !card.title.trim() || !card.dueDate) return;
     setBusy(true);
     try {
-      const r = await api('/api/tasks', { body: { title: card.title.trim(), dueDate: card.dueDate, dueTime: card.dueTime, assigneeId: card.assigneeId, requestedById: card.requestedById ?? user.id,
+      const r = await api('/api/tasks', { body: { title: card.title.trim(), dueDate: card.dueDate, dueTime: card.dueTime, assigneeId: card.assigneeId, requestedById: user.id,
         priority: card.priority, recurrenceRule: card.rrule, approvalRequired: false } });
       if (fixes.length) learnVoice(fixes, true); // 받아들인 보정은 다음부터 바로 적용
       markNew(r.id); broadcastRefresh(); close();
@@ -127,7 +127,6 @@ export function VoiceAddTask() {
               </span>
             </Row>
             <Row label="담당자"><AssigneePicker value={card.assigneeId} onChange={set('assigneeId')} withName size={22} /></Row>
-            <Row label="지시자"><AssigneePicker role="지시자" value={card.requestedById} onChange={(v) => set('requestedById')(v ?? user.id)} withName size={22} /></Row>
             <Row label="우선순위"><PriorityPicker value={card.priority} onChange={set('priority')} label="인식한 우선순위" /></Row>
             <Row label="반복"><RepeatChip value={card.rrule} anchorDate={card.dueDate} onChange={set('rrule')} /></Row>
           </div>

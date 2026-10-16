@@ -5,7 +5,7 @@ import { ArrowRight, BellRing, CalendarDays, Check, Mic, Sparkles, Users } from 
 export const metadata = { title: '워크인 — 업무·일정·알림을 한 곳에', description: '음성으로 등록하고 정확한 시간에 알림. 14일 무료 체험 후 월 2,900원부터.' };
 
 const SHOTS = [
-  { src: '/landing/home.png', t: '오늘 할 일과 일정이 한 화면에', d: '마감 위험·오늘 일정·팀 현황을 첫 화면에서' },
+  { src: '/landing/home.png', t: '오늘의 일정과 일정이 한 화면에', d: '마감 위험·오늘 일정·팀 현황을 첫 화면에서' },
   { src: '/landing/tasks.png', t: '담당자별로 한눈에', d: '한 줄로 추가하고, 담당·마감·검토까지 한 흐름' },
   { src: '/landing/calendar.png', t: '업무와 일정을 한 캘린더에', d: '마감 업무가 시간 블록으로, 회의 준비 업무는 자동으로' },
 ];
