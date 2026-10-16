@@ -5,6 +5,7 @@ import { api, broadcastRefresh, useApi } from './client';
 import { Button, Field, Modal, cx, fmtMinutes, inputCls, toast, todayStr } from './ui';
 import { UserSelect } from './pickers';
 import { BellChip, RepeatChip, noteAway, quickDues, voiceInput } from './TaskQuick';
+import { VoiceButton } from './voice';
 import { parseTaskText } from '@/lib/nlparse';
 import { PRIORITY_LABEL } from '@/lib/types';
 import { Loader2, Mic, Paperclip, Sparkles } from 'lucide-react';
@@ -105,7 +106,25 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
   const applyParsed = (p: NonNullable<typeof parsed>) => setF((x: any) => ({ ...x, title: p.title, ...(p.dueDate ? { dueDate: p.dueDate } : {}), ...(p.dueTime ? { dueTime: p.dueTime } : {}),
     ...(p.assigneeId ? { assigneeId: p.assigneeId } : {}), ...(p.priority ? { priority: p.priority } : {}), ...(p.projectId ? { projectId: p.projectId } : {}), ...(p.rrule ? { rrule: p.rrule } : {}) }));
   const [listening, setListening] = useState(false);
-  const voice = () => voiceInput(setListening, (text) => { const p = parseTaskText(text, dir.users, todayStr(), projects.data?.projects ?? []); applyParsed(p); toast.info(`들은 내용: "${text}"`); });
+  const voice = () => voiceInput(setListening, (text) => {
+    const p = parseTaskText(text, dir.users, todayStr(), projects.data?.projects ?? []); applyParsed(p); toast.info(`들은 내용: "${text}"`);
+    if (features.ai && text.replace(/\s/g, '').length >= 12) { setAiText(text); aiFill(text); } // 길게 말하면 AI 비서가 업무명·담당·마감 정리
+  });
+  // 대표(10/16): 업무 등록 창에 AI 비서 — 말하거나 편하게 적으면 업무명·담당·마감·설명·체크리스트를 채운다(확인 후 저장)
+  const [aiText, setAiText] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  async function aiFill(text = aiText) {
+    if (!text.trim()) { toast.error('AI 비서에게 할 말을 적거나 마이크로 말해 주세요'); return; }
+    setAiBusy(true);
+    try {
+      const r = await api<{ ok: boolean; title?: string; assigneeId?: string | null; dueDate?: string | null; dueTime?: string | null; description?: string; checklist?: string[] }>('/api/voice/structure', { body: { text } });
+      if (!r.ok) { const p = parseTaskText(text, dir.users, todayStr(), projects.data?.projects ?? []); applyParsed(p); toast.info('AI 를 쓸 수 없어 기본 인식으로 채웠습니다'); return; }
+      setNoAuto(true);
+      setF((x: any) => ({ ...x, title: r.title || x.title, ...(r.assigneeId ? { assigneeId: r.assigneeId } : {}), ...(r.dueDate ? { dueDate: r.dueDate } : {}), ...(r.dueTime ? { dueTime: r.dueTime } : {}),
+        ...(r.description ? { description: r.description } : {}), ...(r.checklist?.length ? { checklist: r.checklist } : {}) }));
+      toast.ok('AI 비서가 채웠습니다 — 확인하고 저장하세요');
+    } catch (e: any) { toast.error(e.message); } finally { setAiBusy(false); }
+  }
   const count = f.multi ? new Set([f.assigneeId, ...(f.more ?? [])].filter(Boolean)).size : 1;
 
   async function submit(e: React.FormEvent) {
@@ -183,6 +202,18 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
               <button key={t.id} type="button" aria-pressed={tpl === t.id} onClick={() => (tpl === t.id ? setTpl('') : pickTpl(t.id))}
                 className={cx('shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium', tpl === t.id ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2')}>{t.personal ? '★ ' : ''}{t.name}</button>
             ))}
+          </div>
+        )}
+        {features.ai && !defaults?.parentId && (
+          <div className="space-y-1.5 rounded-input border border-accent-200 bg-accent-50/50 p-2.5" data-testid="quick-ai">
+            <p className="flex items-center gap-1 text-xs font-semibold text-accent-700"><Sparkles className="size-3.5" />AI 비서 — 말하거나 편하게 적으면 아래 칸을 채워요</p>
+            <textarea className={cx(inputCls, 'min-h-[56px] text-sm')} value={aiText} onChange={(e) => setAiText(e.target.value)} aria-label="AI 비서에게 업무 설명"
+              placeholder="예: 다음 주 금요일까지 김민수 본부장한테 푸르지오 비교 파일 검수받고 보고하라고 해 줘" />
+            <div className="flex items-center gap-2">
+              <VoiceButton value={aiText} onChange={setAiText} label="AI 비서에게 말하기" />
+              <Button type="button" size="sm" variant="accent" className="ml-auto" disabled={aiBusy || !aiText.trim()} onClick={() => aiFill()} data-testid="quick-ai-fill">
+                {aiBusy ? <><Loader2 className="animate-spin" />정리하는 중…</> : <><Sparkles />AI로 채우기</>}</Button>
+            </div>
           </div>
         )}
         <Field label="제목">
