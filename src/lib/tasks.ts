@@ -892,9 +892,18 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
       const [fu] = await tx`select id, email, name, role, status, timezone, tenant, is_demo as "isDemo" from users where id = ${f} and status = 'active'`;
       if (fu && (await taskPerms({ ...(fu as any), sessionId: '' }, task, tx)).view) canSee.push(f);
     }
-    await notify(tx, { userIds: canSee, type: 'comment', title: parent ? `답글: ${t.title}` : `새 댓글: ${t.title}`, body: `${u.name}: ${preview}`,
+    // 대표(10/17): 같은 업무의 댓글 알림을 아직 안 읽었으면 새 알림(푸시)을 보내지 않고, 그 안 읽은 알림만 최신 댓글로 바꿔 둔다.
+    // 읽은 뒤에 달린 댓글부터 다시 알림. (멘션은 따로 늘 보냄)
+    const pending = canSee.length ? (await tx<{ id: string; user_id: string }[]>`select id, user_id from notifications
+      where user_id = any(${canSee}::uuid[]) and type = 'comment' and entity_type = 'task' and entity_id = ${taskId} and read_at is null`) : [];
+    const waiting = new Set(pending.map((r) => r.user_id));
+    for (const r of pending) {
+      await tx`update notifications set title = ${`새 댓글 여러 개: ${t.title}`}, body = ${`${u.name}: ${preview}`}, link = ${`/tasks/${taskId}#c-${c.id}`}, actor_id = ${u.id} where id = ${r.id}`;
+    }
+    const send = canSee.filter((x) => !waiting.has(x));
+    await notify(tx, { userIds: send, type: 'comment', title: parent ? `답글: ${t.title}` : `새 댓글: ${t.title}`, body: `${u.name}: ${preview}`,
       link: `/tasks/${taskId}#c-${c.id}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `comment:${c.id}` });
-    return { id: c.id, createdAt: c.created_at, mentions: visibleMentions, parentId: parent?.id ?? null, notified: canSee };
+    return { id: c.id, createdAt: c.created_at, mentions: visibleMentions, parentId: parent?.id ?? null, notified: send };
   });
 }
 
