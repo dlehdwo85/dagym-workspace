@@ -470,9 +470,10 @@ await step('⑥ 다른 현장 직원은 화면에서도 접근 불가 안내', a
 
 await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 조회)', async () => {
   // V14 50: 일정 수정은 지시자·담당자만 — 직원이 담당인 업무로 시험
-  const t7 = (await ctx.owner.ok('POST', '/api/tasks', { title: '모바일 수정 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 3) })).id;
+  // V32 4: 담당자는 마감을 미루면 연장 요청 → 여기서는 앞당기기(바로 반영)
+  const t7 = (await ctx.owner.ok('POST', '/api/tasks', { title: '모바일 수정 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 8) })).id;
   await staff.goto(`${BASE}/tasks/${t7}`);
-  const nd = addDays(today, 8);
+  const nd = addDays(today, 3);
   // V13 11번: 휴대폰은 "세부 정보" 요약 한 줄 → 눌러서 펼침
   await staff.getByTestId('details-toggle').getByText(/👤/).waitFor();
   await staff.getByTestId('details-toggle').click();
@@ -1344,7 +1345,9 @@ await step('V6-2 휴대폰(Android Chrome 터치): 행을 0.5초 꾹 눌러 위�
   await m.keyboard.press('Escape');
   await sheetDlg.waitFor({ state: 'detached' });
   const pt = (x, y) => ({ touchPoints: [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }] });
-  const x = b.x + b.width * 0.5, y0 = b.y + b.height / 2;
+  // 휴대폰 줄은 제목(윗줄)·마감·담당(아랫줄) — 사람이 누르는 제목을 꾹 누른다(마감 칩은 누르면 날짜 선택)
+  const tb = await g.locator('[data-sortable-row]').nth(1).getByTestId('row-title').boundingBox();
+  const x = tb.x + Math.min(tb.width * 0.5, 120), y0 = tb.y + tb.height / 2;
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', ...pt(x, y0) });
   await m.waitForTimeout(600); // 꾹 누르기
   for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', ...pt(x, y0 - ((y0 - (a.y + 4)) * i) / 8) }); await m.waitForTimeout(40); }
