@@ -886,7 +886,8 @@ await step('V14 35 캘린더에서 바로 업무: 빈 칸 = 업무 등록(누른
   assert.equal(await hd.getByLabel('마감일').inputValue(), d2, '고른 날짜가 마감일');
   await hd.getByLabel('제목').fill('홈 달력에서 만든 업무');
   await hd.getByRole('button', { name: '저장' }).click();
-  await list.getByText('홈 달력에서 만든 업무').waitFor();
+  // V37 1: 담당이 나면 내 줄, 마지막에 고른 담당자가 다른 사람이면 지시 묶음(펼쳐 둔 상태)
+  await owner.locator('[data-testid="home-day-tasks"], [data-testid="home-day-requested"]').getByText('홈 달력에서 만든 업무').first().waitFor();
   await owner.screenshot({ path: `${SHOTS}/v14-35-home-day.png` });
   await owner.getByTestId('home-day-add-event').click();
   await owner.getByTestId('quick-create').waitFor();
