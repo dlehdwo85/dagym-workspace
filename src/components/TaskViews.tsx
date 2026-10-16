@@ -1025,7 +1025,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         }}
         onTouchCancel={() => { start.current = null; setDx(0); }}
         data-fresh={fresh ? '1' : undefined}
-        className={cx('group relative flex min-h-[44px] cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', picked ? 'bg-brand-50' : fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
+        className={cx('group relative flex min-h-[44px] cursor-pointer items-center gap-3 px-3 py-2 max-lg:flex-wrap max-lg:gap-x-2 max-lg:gap-y-1 hover:bg-slate-50 focus:bg-accent-50 focus:outline-none', picked ? 'bg-brand-50' : fresh ? 'bg-amber-50 ring-2 ring-inset ring-amber-300' : 'bg-white', !dx && 'transition-[transform,background-color]')}>
         {handle}
         {/* V14 44번: 선택 체크박스 홈 — PC 는 줄 왼쪽에 고정 폭(24px) 자리를 늘 비워 두고(제목이 안 움직이게) 그 안 세로 가운데에 16px 체크박스,
             마우스 올림·선택 모드에서만 보임. 휴대폰은 길게 눌러 선택 모드일 때만 자리. (V14 43번: 왼쪽 완료 동그라미 없음) */}
@@ -1038,14 +1038,15 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
           </span>
         )}
         {/* 점검 2026-10-16 ①: 1024px 미만(태블릿·좁은 창)은 휴대폰처럼 제목 두 줄 + 아래 줄에 상태·정보 — 고정 열에 제목이 눌리지 않게 */}
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 lg:flex-row lg:items-center lg:gap-3">
-          <span className="flex min-w-0 items-center gap-1.5 lg:max-w-[55%] lg:shrink-0">
+        {/* 대표 실기기(10/16): 휴대폰은 오른쪽 마감·담당 칸 때문에 제목이 절반 폭에서 줄바꿈 → 제목은 한 줄 전체 폭, 마감·담당은 아래 줄(상태 칩 옆) */}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 max-lg:contents lg:flex-row lg:items-center lg:gap-3">
+          <span className="flex min-w-0 items-center gap-1.5 max-lg:min-w-[75%] max-lg:flex-1 lg:max-w-[55%] lg:shrink-0" data-testid="row-title">
             <TypeIcon t={t} />
             {/* 대표 피드백(10/15): 휴대폰은 제목이 너무 짧게 잘림 → 두 줄까지 보이고, PC 는 한 줄 */}
             <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline max-lg:line-clamp-2 max-lg:break-words max-lg:leading-snug lg:truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
           </span>
-          <Meta t={t} onPatch={onPatch} />
+          <span className="min-w-0 max-lg:flex-1 lg:contents"><Meta t={t} onPatch={onPatch} /></span>
         </div>
         {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
         <span className="hidden w-[104px] min-w-0 xl:flex"><AssigneePicker role="지시자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>

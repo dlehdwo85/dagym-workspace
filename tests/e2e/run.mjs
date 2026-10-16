@@ -1285,6 +1285,9 @@ await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 �
   await m.goto(BASE + '/tasks');
   const row = m.locator('[data-row]').first();
   await row.waitFor();
+  // 대표 실기기(10/16): 휴대폰 업무 제목이 절반 폭에서 줄바꿈 → 제목은 줄 폭 거의 전부, 마감·담당은 아래 줄
+  const tw = await row.evaluate((el) => { const t = el.querySelector('[data-testid="row-title"]'); return [t.getBoundingClientRect().width, el.getBoundingClientRect().width]; });
+  assert.ok(tw[0] >= tw[1] * 0.8, `제목 폭 ${tw[0]} / 줄 폭 ${tw[1]}`);
   const id = await row.getAttribute('data-row');
   const box = await row.boundingBox();
   await m.touchscreen.tap(box.x + box.width / 2, box.y + box.height - 4); // 제목·상태 칩이 아닌 행 아래쪽 가운데 여백
@@ -1847,14 +1850,14 @@ await step('V13 11·12·8번: 업무 상세 — 설명 위·오른쪽 속성 열
   const th = owner.getByTestId('comment-thread').first();
   await th.getByTestId('reply-open').first().click();
   // 대표 실기기: 답글에서 사람 태그가 안 됨 → "@" 자동완성으로 고르면 멘션
-  await th.getByLabel('답글').fill('감사합니다 @이');
-  await th.getByTestId('reply-mention-suggest').getByRole('option', { name: /이직원/ }).click();
+  await th.getByLabel('답글').fill('감사합니다 @최');
+  await th.getByTestId('reply-mention-suggest').getByRole('option', { name: /최매니저/ }).click();
   await th.getByLabel('답글').press('End');
   await th.getByLabel('답글').pressSequentially('확인 부탁');
   await th.getByTestId('reply-form').getByRole('button', { name: '등록' }).click();
   await th.getByText(/감사합니다/).first().waitFor();
   const [rp] = await sql`select body, mentions from comments where body like '감사합니다%' order by created_at desc limit 1`;
-  assert.ok(rp.mentions.includes(ctx.staffA.id), '답글 멘션 저장: ' + rp.body);
+  assert.ok(rp.mentions.includes(ctx.managerA.id), '답글 멘션 저장: ' + rp.body);
   await th.getByTestId('react-open').first().click();
   await owner.getByRole('button', { name: '확인했습니다' }).click();
   await th.getByTestId('reaction').first().getByText('1').waitFor();

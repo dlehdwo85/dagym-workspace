@@ -346,7 +346,7 @@ function CalendarPage() {
             </ul>
           </div>
         </aside>
-        <div className="-mx-3 min-w-0 flex-1 border-y border-line bg-white px-0 py-1.5 sm:mx-0 sm:rounded-card sm:border sm:p-3 sm:shadow-card" data-testid="calendar">
+        <div className="-mx-3 min-w-0 flex-1 border-y border-line bg-white px-1 py-1.5 sm:mx-0 sm:rounded-card sm:border sm:p-3 sm:shadow-card" data-testid="calendar">
           <div className="-mx-1 mb-2 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-sm" role="group" aria-label="누구의 일정" data-testid="people-filter">
             <PeopleChip on={who === 'all'} onClick={() => setWho('all')}>전체</PeopleChip>
             <PeopleChip on={who === 'mine'} onClick={() => setWho('mine')}>내 일정</PeopleChip>

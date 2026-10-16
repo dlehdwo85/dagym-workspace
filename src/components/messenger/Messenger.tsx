@@ -7,6 +7,7 @@ import { useSession } from '@/components/session';
 import { DropZone, UploadProgress, putFile } from '@/components/upload';
 import { Avatar, Button, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { QuickAddTask } from '@/components/QuickAddTask';
+import { VoiceButton } from '@/components/voice';
 
 /**
  * V14 25번 메신저 — /messages 화면과 오른쪽 아래 패널이 같은 컴포넌트를 쓴다.
@@ -483,6 +484,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           <button type="button" className={iconBtn} onClick={() => camRef.current?.click()} aria-label="사진 보내기" title="사진 보내기"><Camera className="size-[18px]" /></button>
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-file" />
           <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
+          <VoiceButton small value={text} onChange={(v) => onType(v)} label="음성으로 메시지" />
           <textarea ref={inputRef} rows={1} className={cx(inputCls, 'max-h-32 min-h-9 min-w-0 flex-1 resize-none py-1.5')} placeholder="메시지 입력" title="Enter 보내기 · Shift+Enter 줄바꿈 · @ 멘션 · 이미지 붙여넣기" value={text}
             onChange={(e) => onType(e.target.value)} aria-label="메시지" data-testid="chat-input"
             onPaste={(e) => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); upload(fs); } }}

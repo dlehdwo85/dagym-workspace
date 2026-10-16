@@ -30,9 +30,9 @@ const webSR = () => (typeof window === 'undefined' ? null : (window as any).Spee
 export const voiceAvailable = () => nativeOk() || (!Capacitor.isNativePlatform() && !!webSR());
 const MAX_MS = 90_000;
 /** 말이 멈추고 이만큼 조용하면 끝 — 휴대폰 인식기는 1초 남짓 쉬면 혼자 끝나 버려서, 우리가 다시 켜 이어 듣는다 */
-export const SILENCE_MS = 3500;
+export const SILENCE_MS = 8000; // 대표 실기기(10/16): 3초만 쉬어도 끊김(안드로이드 인식기 allowForSilence 가 3.5초였음) → 8초
 /** 눌러 놓고 아무 말이 없을 때 기다리는 시간 */
-const FIRST_WAIT_MS = 8000;
+const FIRST_WAIT_MS = 15000;
 
 /**
  * 듣기 시작. 돌려준 함수를 부르면 멈춤(그때까지 들은 말로 끝남).
@@ -75,9 +75,17 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
     cleanup = () => { Native.removeAllListeners().catch(() => {}); };
     stopEngine = () => { Native.stop().catch(() => {}); };
     const startOnce = () => Native.start({ language: 'ko-KR', maxResults: 5, partialResults: true, popup: false, addPunctuation: false, allowForSilence: SILENCE_MS, contextualStrings: o.contextual?.slice(0, 100) })
-      .then((r) => { if (r?.matches?.length) partial(r.matches); }).catch(() => {});
+      .then((r) => { if (r?.matches?.length) partial(r.matches); if (!done) segmentEnded(); }) // 기기에 따라 "멈춤" 알림 없이 start 만 끝남 → 여기서도 이어 듣기
+      .catch(() => { if (!done) segmentEnded(); });
     // 인식기가 혼자 끝나면(짧은 쉼) 지금까지 말을 붙여 두고 다시 켠다
-    const segmentEnded = () => { if (done) { finish(); return; } commit(); setTimeout(() => { if (!done) startOnce(); }, 150); };
+    // 같은 구간 끝을 "멈춤" 알림과 start 끝남 양쪽에서 받아도 한 번만 다시 켠다(겹치면 인식기가 바쁨 오류 → 반복)
+    let restarting = false;
+    const segmentEnded = () => {
+      if (done) { finish(); return; }
+      if (restarting) return;
+      restarting = true; commit();
+      setTimeout(() => { restarting = false; if (!done) startOnce(); }, 250);
+    };
     (async () => {
       let p = (await Native.checkPermissions().catch(() => ({ speechRecognition: 'prompt' }))).speechRecognition;
       if (p !== 'granted') p = (await Native.requestPermissions().catch(() => ({ speechRecognition: 'denied' }))).speechRecognition;
