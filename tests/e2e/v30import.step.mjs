@@ -75,7 +75,9 @@ export async function notifRead({ owner, BASE, SHOTS, ctx }) {
   await owner.goto(`${BASE}/tasks/${b}`);
   await owner.waitForFunction(async () => (await (await fetch('/api/notifications?unread=1')).json()).unread === 0, null, { timeout: 10000 });
   await owner.goto(`${BASE}/notifications`);
-  await owner.getByText('새 알림이 없습니다').waitFor();
+  // 안 읽은 목록에서 두 알림이 빠짐(그사이 예약 알림 등 다른 알림이 올 수 있어 "비었음" 대신 이 두 건으로 확인)
+  await owner.locator('[data-testid="notifications"], :text("새 알림이 없습니다")').first().waitFor();
+  assert.equal(await owner.getByText('알림읽음 시험', { exact: false }).count(), 0, '읽은 알림은 안 읽음 목록에 없음');
   await owner.getByTestId('notif-all').click();
   await owner.getByTestId('notifications').getByText('알림읽음 시험 B', { exact: false }).waitFor();
   await owner.screenshot({ path: `${SHOTS}/v32-notifications.png` });
