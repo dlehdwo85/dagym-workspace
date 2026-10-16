@@ -18,12 +18,14 @@ export async function meeting({ owner, ctx, sql, BASE }) {
   await chip.waitFor();
   assert.match(await chip.textContent(), /강남역 3번 출구 카페.*15:00/);
   // 등록 창: 제목에 "방문" → 미팅 일정 제안
-  await owner.getByTestId('add-task-top').click();
-  await owner.getByPlaceholder('무엇을 해야 하나요?').fill('E2E 판교 현장 방문');
+  await owner.getByTestId('create-menu').click();
+  await owner.getByRole('menuitem', { name: /^업무/ }).click();
+  const dlg = owner.getByRole('dialog', { name: '업무 등록' });
+  await dlg.getByLabel('제목').fill('E2E 판교 현장 방문');
   const q = owner.getByTestId('quick-meeting');
   await q.waitFor();
   await q.getByTestId('quick-meeting-location').fill('판교 테크노밸리');
-  await owner.getByRole('dialog', { name: '업무 등록' }).getByRole('button', { name: /^(저장|등록|만들기)/ }).first().click();
+  await dlg.getByRole('button', { name: '저장', exact: true }).click();
   await owner.getByText(/업무를 등록했습니다/).first().waitFor();
   for (let i = 0; i < 30; i++) { if ((await sql`select 1 from tasks t join event_tasks et on et.task_id = t.id join events e on e.id = et.event_id where t.title = 'E2E 판교 현장 방문' and e.location = '판교 테크노밸리'`).length) return; await new Promise((r) => setTimeout(r, 200)); }
   assert.fail('등록 창 미팅 일정이 연결되지 않음');
