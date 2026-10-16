@@ -17,7 +17,6 @@ import { useSession } from '@/components/session';
 import { CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, X, Palette } from 'lucide-react';
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
-import { QuickAddTask } from '@/components/QuickAddTask';
 import { useBackClose, useSheetBack } from '@/components/backClose';
 import { useCalendarSwipe } from '@/components/calSwipe';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
@@ -86,7 +85,6 @@ function CalendarPage() {
   const [quick, setQuick] = useState<{ x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean; kind?: 'task' | 'event' } | null>(null);
   // V14 35번: 빈 칸 빠른 등록은 업무가 기본 — 주·일 보기는 누른 시각이 마감 시각
   useSheetBack(!!quick && quick.kind !== 'task', () => { setQuick(null); calRef.current?.getApi().unselect(); });
-  const quickTaskDefaults = useMemo(() => quick && quick.kind === 'task' ? { dueDate: quick.date, dueTime: quick.allDay ? undefined : quick.start } : undefined, [quick]);
   const [openTask, setOpenTask] = useState<string | null>(null);
   // V14 39번: 상세·미리보기·일정 창은 history 한 칸 — 뒤로가기는 이것만 닫고 캘린더(날짜·보기·스크롤)는 그대로
   useBackClose(!!openTask, () => { setOpenTask(null); load(); });
@@ -493,7 +491,7 @@ function CalendarPage() {
             select={(s) => {
               const js = (s.jsEvent as MouseEvent | undefined);
               const x = js?.clientX ?? window.innerWidth / 2, y = js?.clientY ?? 200;
-              setQuick({ x: Math.min(window.innerWidth - 336, Math.max(16, x - 160)), y: Math.min(window.innerHeight - 380, Math.max(16, y + 8)), date: seoulDate(s.start), allDay: s.allDay, kind: 'event', // V37 2: 빈 칸 = 일정 먼저(업무는 "할 일로도 만들기" 또는 [업무] 전환)
+              setQuick({ x: Math.min(window.innerWidth - 336, Math.max(16, x - 160)), y: Math.min(window.innerHeight - 380, Math.max(16, y + 8)), date: seoulDate(s.start), allDay: s.allDay, kind: 'event', // 캘린더 = 일정만(10/16 대표 결정). 연결된 할 일이 필요하면 "할 일로도 만들기"
                 start: s.allDay ? undefined : seoulTime(s.start), end: s.allDay ? undefined : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) });
             }}
           />
@@ -504,10 +502,8 @@ function CalendarPage() {
       <p className="text-xs text-ink-2">빈 칸을 누르거나 끌면 빠른 입력, 업무는 체크로 완료합니다. 오른쪽 “미배정 업무”를 시간 칸으로 끌어 놓으면 업무 시간이 잡힙니다. 단축키 D·W·M·A·T·C</p>
       <ScopeDialog />
       {colorDlg && <CalColorsDialog onClose={() => setColorDlg(false)} />}
-      {quick?.kind === 'task' && <QuickAddTask open defaults={quickTaskDefaults} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
-        onCreated={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }}
-        switchTo={{ label: '일정', onClick: () => setQuick((q) => q && { ...q, kind: 'event' }) }} />}
-      {quick && quick.kind !== 'task' && <QuickCreate {...quick} onSwitchTask={() => setQuick((q) => q && { ...q, kind: 'task' })} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
+      {/* 대표 결정(10/16): 캘린더에서는 일정만 등록 — 업무는 업무 화면·홈 [+업무]. 일정과 함께 할 일이 필요하면 "할 일로도 만들기" */}
+      {quick && <QuickCreate {...quick} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
         onMore={(draft) => { setQuick(null); setEditor({ draft }); }} onSaved={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }} />}
       {preview && <EventPreview ev={preview.ev} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}
         onClose={() => setPreview(null)} onEdit={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }} onChanged={() => { setPreview(null); load(); broadcastRefresh(); }} />}

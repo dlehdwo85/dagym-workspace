@@ -875,7 +875,7 @@ await step('W-3 홈: 오늘 할 일(내 것/전체) · 이번 주 일정 · 이�
   }
   await owner.screenshot({ path: `${SHOTS}/59-home-dashboard.png`, fullPage: true });
 });
-await step('V14 35·V37 2 캘린더 빈 칸 = 일정 먼저(할 일로도 만들기) → [업무] 전환하면 누른 시각이 마감 시각 · 홈 미니 캘린더 그날 업무 + [＋업무][＋일정]', async () => {
+await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없음), "할 일로도 만들기" = 누른 시각이 마감인 연결 업무 · 홈 미니 캘린더 그날 업무 + [＋업무][＋일정]', async () => {
   const d = addDays(today, 4);
   await owner.goto(`${BASE}/calendar?date=${d}`);
   await owner.locator('.fc-toolbar-title').waitFor();
@@ -890,14 +890,11 @@ await step('V14 35·V37 2 캘린더 빈 칸 = 일정 먼저(할 일로도 만들
   await qc.waitFor();
   await qc.getByTestId('quick-save').waitFor();
   await qc.getByLabel('할 일로도 만들기').waitFor({ state: 'attached' });
-  await qc.getByTestId('quick-switch-task').click();
-  const dlg = owner.getByRole('dialog', { name: '업무 등록' });
-  await dlg.waitFor();
-  assert.equal(await dlg.getByLabel('마감일').inputValue(), d, '누른 날짜가 마감일');
-  assert.equal(await dlg.getByLabel('마감 시각').inputValue(), '10:00', '주 보기 = 누른 시각이 마감 시각');
-  await dlg.getByLabel('제목').fill('캘린더 빈칸 업무');
-  await dlg.getByRole('button', { name: '저장' }).click();
-  await dlg.waitFor({ state: 'detached' });
+  assert.equal(await qc.getByTestId('quick-switch-task').count(), 0, '캘린더에서는 일정만 — 업무 전환 버튼 없음');
+  await qc.getByLabel('빠른 입력 제목').fill('캘린더 빈칸 업무');
+  await qc.getByTestId('quick-also-task').check({ force: true });
+  await qc.getByTestId('quick-save').click();
+  await qc.waitFor({ state: 'detached' });
   const [t] = await sql`select assignee_id, to_char(due_date, 'YYYY-MM-DD') due, to_char(due_time, 'HH24:MI') tm from tasks where title = '캘린더 빈칸 업무' and deleted_at is null`;
   assert.equal(t.due, d); assert.equal(t.tm, '10:00');
   await owner.screenshot({ path: `${SHOTS}/v14-35-calendar-task.png` });
