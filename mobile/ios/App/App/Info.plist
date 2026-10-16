@@ -84,7 +84,8 @@
 		</dict>
 	</array>
 	<key>UIBackgroundModes</key>
-	<array><string>remote-notification</string></array>
+	<array><string>remote-notification</string>	<string>audio</string>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSApplicationQueriesSchemes</key>
