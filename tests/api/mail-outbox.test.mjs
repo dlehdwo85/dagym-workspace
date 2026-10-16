@@ -137,6 +137,20 @@ describe('V21 보관함 발송', () => {
     assert.deepEqual(steps.map((s) => s.done), [true, true], '자료 첨부 → 자료/제안서 발송, 견적서 → 견적');
   });
 
+  test('로컬 검수 10/17 보안: 자료실에서 고른 파일은 업무 첨부로 안 남고 이번 메일·링크에만 담김, 볼 수 없는 자료는 404', async () => {
+    box.mails = [];
+    const before = (await sql`select count(*)::int n from attachments where task_id = ${taskId} and deleted_at is null`)[0].n;
+    const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '회사소개서', body: '보내 드립니다', libraryFileIds: [libId] });
+    await waitStatus(r.id, ['sent']);
+    assert.equal(box.mails.at(-1).attachments[0].filename, '하이링크 회사소개서.pdf');
+    const share = await ctx.owner.ok('POST', '/api/mail/share', { taskId, libraryFileIds: [libId] });
+    assert.ok((await fetch(`${BASE}/api/public/share/${share.url.split('/d/')[1]}/0`, { redirect: 'manual' })).status < 400, '링크로 받기');
+    await sql`delete from share_link_views where link_id in (select id from share_links where files->0->>'libraryFileId' = ${libId})`; // 아래 시험의 열람 횟수와 섞이지 않게
+    assert.equal((await sql`select count(*)::int n from attachments where task_id = ${taskId} and deleted_at is null`)[0].n, before, '업무 첨부 그대로');
+    assert.equal((await ctx.owner.req('POST', '/api/mail/share', { taskId, libraryFileIds: ['00000000-0000-4000-8000-000000000000'] })).status, 404);
+    assert.equal((await ctx.owner.req('POST', '/api/mail/share', { taskId })).status, 400, '파일 없이 링크 안 만듦');
+  });
+
   test('연결 끊김(일시 오류) → 재시도 대기 → 정기 실행에서 다시 보내 1통만', async () => {
     box.mails = []; box.mode = ['drop'];
     const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '재시도 시험', body: '본문' });

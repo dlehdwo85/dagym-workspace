@@ -91,6 +91,9 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   const [sms, setSms] = useState({ to: '', body: '' });
   const [smsOpen, setSmsOpen] = useState<{ url: string; qr: string | null; share?: string } | null>(null);
   const [lib, setLib] = useState(false);
+  // 로컬 검수 10/17 보안: 자료실에서 고른 파일은 업무 첨부로 붙이지 않고 이번 발송에만 담는다
+  const [libFiles, setLibFiles] = useState<{ id: string; name: string; size: number }[]>([]);
+  const addLib = (x: { id: string; name: string; size: number }) => setLibFiles((l) => (l.some((y) => y.id === x.id) ? l : [...l, x]));
   const fileRef = useRef<HTMLInputElement>(null);
   const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
   useEffect(() => {
@@ -103,14 +106,15 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (initial?.channel === 'sms') setSms({ to: d.contact?.phone ?? '', body: initial.body });
   }, [d, f]);
   const sig = d?.companies.find((c) => c.key === f?.company);
-  const total = useMemo(() => (d && f ? d.attachments.filter((a) => f.files.includes(a.id)).reduce((s, a) => s + a.size, 0) : 0), [d, f]);
+  const total = useMemo(() => (d && f ? d.attachments.filter((a) => f.files.includes(a.id)).reduce((s, a) => s + a.size, 0) + libFiles.reduce((s, a) => s + a.size, 0) : 0), [d, f, libFiles]);
+  const fileCount = (f?.files.length ?? 0) + libFiles.length;
   const asLink = !!d && total > d.linkThresholdBytes;
   const preview = useMemo(() => {
     if (!d || !f) return '';
     const paras = esc(f.body).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px">${p.replace(/\n/g, '<br>')}</p>`).join('');
-    const link = asLink ? `<p style="margin:0 0 12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc">첨부 자료 ${f.files.length}개(${mb(total)})는 용량이 커서 다운로드 링크로 바뀌어 들어갑니다(14일).</p>` : '';
+    const link = asLink ? `<p style="margin:0 0 12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc">첨부 자료 ${fileCount}개(${mb(total)})는 용량이 커서 다운로드 링크로 바뀌어 들어갑니다(14일).</p>` : '';
     return `<body style="margin:12px;font-family:'Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif;font-size:14px;line-height:1.6;color:#0f172a">${paras}${link}${sig?.html ?? ''}</body>`;
-  }, [d, f, sig, asLink, total]);
+  }, [d, f, sig, asLink, total, fileCount]);
   if (!d || !f) return <Modal open onClose={onClose} title="메일 시안" wide><p className="text-sm text-ink-3">불러오는 중…</p></Modal>;
   const set = (p: Partial<typeof f>) => setF({ ...f, ...p });
   function pickKind(key: string) {
@@ -127,13 +131,10 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
       toast.ok('AI 초안을 넣었습니다 — 확인하고 고쳐 주세요');
     } catch (e: any) { toast.error(e.message); } finally { setDrafting(false); }
   }
-  async function attachRec(id: string) {
-    try {
-      const r = await api(`/api/library/${id}/attach`, { body: { taskId } });
-      const c = await api<Ctx>(`/api/tasks/${taskId}/mail`); ctx.setData(c); onAttach();
-      setF((x) => x && { ...x, files: x.files.includes(r.id) ? x.files : [...x.files, r.id] }); setRec((x) => x.filter((y) => y.id !== id));
-    } catch (e: any) { toast.error(e.message); }
+  function attachRec(r: { id: string; title: string; size: number }) {
+    addLib({ id: r.id, name: r.title, size: r.size }); setRec((x) => x.filter((y) => y.id !== r.id));
   }
+  const libIds = () => (libFiles.length ? libFiles.map((x) => x.id) : undefined);
   // 문자 A 방식: 휴대폰 문자앱으로 넘김(본문·첨부 링크·서명 한 줄). PC 는 QR 로 휴대폰에서 열기
   const smsLine = sig?.smsLine ?? '';
   async function openSms() {
@@ -141,8 +142,8 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!nums.length) { toast.error('받는 사람 전화번호를 넣어 주세요'); return; }
     let share: string | undefined;
     try {
-      if (f!.files.length) {
-        const r = await withConfidentialConfirm((ok) => api('/api/mail/share', { body: { taskId, attachmentIds: f!.files, company: f!.company || undefined, ...(ok ? { confirmConfidential: true } : {}) } }));
+      if (f!.files.length || libFiles.length) {
+        const r = await withConfidentialConfirm((ok) => api('/api/mail/share', { body: { taskId, attachmentIds: f!.files, libraryFileIds: libIds(), company: f!.company || undefined, ...(ok ? { confirmConfidential: true } : {}) } }));
         if (!r) return; // 기밀 경고에서 [취소]
         share = r.url;
       }
@@ -176,7 +177,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!to.length) { toast.error('받는 사람 메일 주소를 넣어 주세요'); return; }
     setBusy(true);
     try {
-      const r = await withConfidentialConfirm((ok) => api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), bcc: splitAddrs(f!.bcc), fromName: f!.fromName.trim() || undefined, replyTo: f!.replyTo.trim() || undefined, subject: f!.subject, body: f!.body, attachmentIds: f!.files,
+      const r = await withConfidentialConfirm((ok) => api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), bcc: splitAddrs(f!.bcc), fromName: f!.fromName.trim() || undefined, replyTo: f!.replyTo.trim() || undefined, subject: f!.subject, body: f!.body, attachmentIds: f!.files, libraryFileIds: libIds(),
         senderTitle: f!.title || undefined, senderPhone: f!.phone || undefined, senderWorkEmail: f!.workEmail.trim() || undefined, ...(ok ? { confirmConfidential: true } : {}) } }));
       if (!r) return; // 기밀 경고에서 [취소]
       toast.ok(r.asLink ? '보관함에 넣었습니다 — 첨부는 다운로드 링크로 보냅니다' : '보관함에 넣었습니다 — 곧 발송됩니다');
@@ -207,7 +208,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
         {rec.length > 0 && (
           <div className="rounded-input bg-brand-50/60 px-3 py-2 text-sm" data-testid="mail-rec">
             <p className="mb-1 text-xs font-medium text-brand-700">AI 추천 자료 — 눌러서 첨부</p>
-            <div className="flex flex-wrap gap-1.5">{rec.map((r) => <button key={r.id} type="button" onClick={() => attachRec(r.id)} className="rounded-full border border-brand-200 bg-white px-2.5 py-0.5 hover:bg-brand-50">+ {r.title} <span className="text-xs text-ink-3">{mb(r.size)}</span></button>)}</div>
+            <div className="flex flex-wrap gap-1.5">{rec.map((r) => <button key={r.id} type="button" onClick={() => attachRec(r)} className="rounded-full border border-brand-200 bg-white px-2.5 py-0.5 hover:bg-brand-50">+ {r.title} <span className="text-xs text-ink-3">{mb(r.size)}</span></button>)}</div>
           </div>
         )}
         {channel === 'kakao' ? (
@@ -220,7 +221,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
             <p className="text-ink-2">내 휴대폰 문자앱으로 넘겨서 <b>내 번호로</b> 보냅니다. 첨부를 고르면 14일 다운로드 링크가 들어갑니다.</p>
             <Field label="받는 사람 전화번호 (여러 명은 쉼표)"><input className={inputCls} value={sms.to} onChange={(e) => setSms({ ...sms, to: e.target.value })} inputMode="tel" data-testid="sms-to" /></Field>
             <Field label="문자 내용"><textarea className={inputCls} rows={4} value={sms.body} onChange={(e) => setSms({ ...sms, body: e.target.value })} data-testid="sms-body" /></Field>
-            <p className="whitespace-pre-wrap rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="sms-preview">{[sms.body.trim() || '(내용)', f.files.length ? '자료 내려받기(14일): https://…/d/…' : '', smsLine].filter(Boolean).join('\n\n')}</p>
+            <p className="whitespace-pre-wrap rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="sms-preview">{[sms.body.trim() || '(내용)', fileCount ? '자료 내려받기(14일): https://…/d/…' : '', smsLine].filter(Boolean).join('\n\n')}</p>
           </div>
         ) : (
         <div className="grid gap-2 text-sm">
@@ -249,8 +250,18 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
             <span className="ml-auto text-xs tabular-nums text-ink-3" data-testid="mail-total">합계 {total ? mb(total) : '0'}</span>
           </div>
           {prog.map((p) => <p key={p.name} className="text-xs text-ink-3">{p.name} {p.error ?? `${p.pct}%`}</p>)}
-          {lib && <LibraryPick taskId={taskId} onPicked={async (id) => { await ctx.reload(); onAttach(); setF((x) => x && { ...x, files: x.files.includes(id) ? x.files : [...x.files, id] }); }} />}
-          {d.attachments.length === 0 ? <p className="text-xs text-ink-3">이 업무에 첨부가 없습니다.</p> : (
+          {lib && <LibraryPick onPicked={addLib} />}
+          {libFiles.length > 0 && (
+            <ul className="grid gap-1 sm:grid-cols-2" data-testid="mail-lib-files">
+              {libFiles.map((a) => (
+                <li key={a.id} className="flex items-center gap-2 rounded-input border border-brand-200 bg-brand-50/40 px-2 py-1 text-sm">
+                  <Library className="size-3.5 shrink-0 text-brand-700" /><span className="min-w-0 flex-1 truncate">{a.name}</span><span className="text-xs tabular-nums text-ink-3">{mb(a.size)}</span>
+                  <button type="button" onClick={() => setLibFiles((l) => l.filter((y) => y.id !== a.id))} className="text-xs text-ink-3 hover:text-ink" aria-label={`${a.name} 빼기`}>빼기</button></li>
+              ))}
+              <li className="text-xs text-ink-3 sm:col-span-2">자료실 파일은 이번 발송에만 담깁니다(업무 첨부로 남지 않음).</li>
+            </ul>
+          )}
+          {d.attachments.length === 0 ? (!libFiles.length && <p className="text-xs text-ink-3">이 업무에 첨부가 없습니다.</p>) : (
             <ul className="grid gap-1 sm:grid-cols-2" data-testid="mail-files">
               {d.attachments.map((a) => (
                 <li key={a.id}><label className="flex items-center gap-2 rounded-input border border-line px-2 py-1 text-sm hover:bg-slate-50">
@@ -294,13 +305,13 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   );
 }
 
-/** 자료실 검색 → 고르면 업무 첨부로 붙이고(같은 저장 파일) 메일 첨부에 체크. 권한 있는 자료만 보인다 */
-function LibraryPick({ taskId, onPicked }: { taskId: string; onPicked: (attachmentId: string) => void }) {
+/** 자료실 검색 → 고르면 이번 메일·문자 첨부에만 담는다(업무 첨부로 붙이지 않음). 권한 있는 자료만 보인다 */
+function LibraryPick({ onPicked }: { onPicked: (f: { id: string; name: string; size: number }) => void }) {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const res = useApi<{ files: { id: string; title: string; file_name: string; folder: string; size_bytes: number }[] }>(`/api/library?limit=30&q=${encodeURIComponent(query)}`, [query]);
-  async function pick(id: string) {
-    try { const r = await api(`/api/library/${id}/attach`, { body: { taskId } }); onPicked(r.id); toast.ok('업무에 붙이고 메일 첨부에 넣었습니다'); } catch (e: any) { toast.error(e.message); }
+  function pick(x: { id: string; title: string; file_name: string; size_bytes: number }) {
+    onPicked({ id: x.id, name: x.title || x.file_name, size: Number(x.size_bytes) }); toast.ok('메일 첨부에 넣었습니다');
   }
   return (
     <div className="space-y-1.5 rounded-input border border-line p-2" data-testid="mail-lib">
@@ -310,7 +321,7 @@ function LibraryPick({ taskId, onPicked }: { taskId: string; onPicked: (attachme
       </form>
       <ul className="max-h-48 overflow-y-auto text-sm">
         {(res.data?.files ?? []).map((x) => (
-          <li key={x.id}><button type="button" onClick={() => pick(x.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-50">
+          <li key={x.id}><button type="button" onClick={() => pick(x)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-50">
             <span className="min-w-0 flex-1 truncate">{x.title || x.file_name}</span><span className="truncate text-xs text-ink-3">{x.folder}</span><span className="text-xs tabular-nums text-ink-3">{mb(Number(x.size_bytes))}</span></button></li>
         ))}
         {res.data && !res.data.files.length && <li className="px-2 py-1 text-xs text-ink-3">찾는 자료가 없습니다</li>}
