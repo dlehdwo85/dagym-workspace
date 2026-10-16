@@ -100,7 +100,7 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={label} aria-haspopup="dialog" aria-expanded={open} data-testid="due-picker"
-        className={cx('inline-flex items-center rounded-md hover:bg-slate-100', !value && 'gap-1 px-1.5 py-0.5 text-xs text-ink-3', !value && emptyText && 'h-8 rounded-input border border-line bg-white px-2.5 text-sm')}>
+        className={cx('hit inline-flex items-center rounded-md hover:bg-slate-100', !value && 'gap-1 px-1.5 py-0.5 text-xs text-ink-3', !value && emptyText && 'h-8 rounded-input border border-line bg-white px-2.5 text-sm')}>
         {value ? <span className="inline-flex items-center gap-1"><DueChip due={value} status={status} />{time && <span className="text-xs font-medium text-ink-2 tabular-nums">{timeLabel(time)}</span>}</span> : <><CalendarDays className="size-3.5" />{compact ? '' : emptyText ?? '마감일'}</>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={label} width={260}>
@@ -135,7 +135,7 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); setQ(''); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${role}: ${cur?.name ?? name ?? '없음'}`} aria-haspopup="dialog" aria-expanded={open}
-        className={withName ? 'inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100' : 'rounded-full hover:ring-2 hover:ring-accent-500/30'} data-testid={role === '지시자' ? 'requester-picker' : 'assignee-picker'}>
+        className={withName ? 'hit inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100' : 'hit rounded-full hover:ring-2 hover:ring-accent-500/30'} data-testid={role === '지시자' ? 'requester-picker' : 'assignee-picker'}>
         <Avatar id={value} name={cur?.name ?? name ?? null} size={size} />{withName && <span className="truncate">{cur?.name ?? name ?? '없음'}{cur?.title && <span className="hidden text-ink-3 sm:inline"> · {cur.title}</span>}</span>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={`${role} 선택`}>
@@ -276,8 +276,6 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const assignee = assignees[0] ?? null;
   const setAssignee = (v: string | null) => setAssignees(v ? [v] : []);
   const [due, setDue] = useState<string | null>(defaultDue ?? null);
-  const initRequester = defaultRequester ?? user.id;
-  const [requester, setRequester] = useState<string | null>(initRequester);
   const [rrule, setRrule] = useState<string | null>(null);
   const [dueTime, setDueTime] = useState<string | null>(null);
   const [remind, setRemind] = useState<number[] | null>(null);
@@ -313,7 +311,9 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
       setErr(e.message ?? '저장하지 못했습니다');
     } finally { busyRef.current = false; setBusy(false); if (refocus) input.current?.focus(); }
   }
-  const showChips = !!(title || due || rrule || assignees.join() !== (initAssignee ?? '') || requester !== initRequester || autoFocus);
+  // 검수(10/16): 홈은 마감 기본값(오늘)이 있어 입력 전부터 칩 6개가 늘 펼쳐져 있었음 → 입력칸을 누르거나 값을 바꿨을 때만
+  const [touched, setTouched] = useState(false);
+  const showChips = !!(touched || title || due !== (defaultDue ?? null) || rrule || assignees.join() !== (initAssignee ?? '') || autoFocus);
   // 업무 "생성"은 저장 버튼·Enter 로만 (WORKIN_SAVE_AND_SPEED, 대표 지시). 바깥을 눌러도 저장하지 않고 입력한 초안은 남긴다.
   // 칩(마감·담당·지시·반복)을 고른 뒤에는 입력칸으로 돌아온다
   const back = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setTimeout(() => input.current?.focus(), 0); };

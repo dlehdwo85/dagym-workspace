@@ -459,9 +459,10 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {onPatch && <span className="lg:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
       {t.team_name && <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
       {t.project_name && <span className="inline-flex min-w-0 items-center gap-1"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
-      {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate xl:hidden" title="지시자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
-      {!compact && <span className={cx('truncate', onPatch && hq && 'hidden lg:inline')}>{t.org_unit_name}</span>}
-      {!compact && <BrandDot brand={t.brand_id} />}
+      {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 지시자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
+      {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate max-lg:hidden xl:hidden" title="지시자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
+      {!compact && <span className={cx('truncate max-lg:hidden', onPatch && hq && 'hidden lg:inline')}>{t.org_unit_name}</span>}
+      {!compact && <span className="max-lg:hidden"><BrandDot brand={t.brand_id} /></span>}
       {t.subtask_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
       {t.checklist_total > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{t.checklist_done}/{t.checklist_total}</span>}
       {t.comment_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
@@ -469,12 +470,12 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {t.attachment_count > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-sky-100 px-1.5 text-[11px] font-semibold tabular-nums text-sky-800" title={`첨부 ${t.attachment_count}개`} data-testid="att-chip"><Paperclip className="size-3" />{t.attachment_count}</span>}
       {t.share_state && <span className={cx('shrink-0 rounded-full px-1.5 text-[11px] font-semibold', t.share_state === 'opened' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700')} title={t.share_state === 'opened' ? '고객이 자료를 열어 봄' : '고객에게 자료를 보냄'} data-testid="share-chip">{t.share_state === 'opened' ? '열람' : '보냄'}</span>}
       {!!t.photo_required && <span className={cx('inline-flex items-center gap-0.5 tabular-nums', (t.photo_count ?? 0) >= t.photo_required ? 'text-green-600' : 'text-amber-700')} title="완료 증빙 사진"><Camera className="size-3.5" />{t.photo_count ?? 0}/{t.photo_required}</span>}
-      {t.recurrence_rule && <span title="반복 업무"><Repeat className="size-3.5" /></span>}
-      {t.batch && t.batch.total > 1 && <span className="rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
+      {t.recurrence_rule && <span title="반복 업무" className="max-lg:hidden"><Repeat className="size-3.5" /></span>}
+      {t.batch && t.batch.total > 1 && <span className="max-lg:hidden rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
       {t.blocked_by_count > 0 && <span className="font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
       {/* V32 4: 연장 요청 대기(지시자가 목록에서 바로 알아봄) · 연장 횟수 */}
       {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장 요청 → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
-      {!t.ext_pending && !!t.due_extend_count && <span className="shrink-0 rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}
+      {!t.ext_pending && !!t.due_extend_count && <span className="max-lg:hidden shrink-0 rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}
     </span>
   );
 }
@@ -541,7 +542,7 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
     const ok = await onPatch(t, { status: s });
     if (ok !== false && (s === quick || s === 'done')) toast.ok(s === 'done' ? '완료했습니다' : s === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: s, version: t.version + 1 }, { status: before }) });
   }
-  const sub = ack && <span className={cx('text-[10.5px] font-normal', ack === '확인 전' ? 'text-red-600' : 'text-ink-3')}>· {ack}</span>;
+  const sub = ack && <span className={cx('text-[10.5px] font-normal', ack === '확인 전' ? 'text-red-600' : 'text-ink-3 max-lg:hidden')}>· {ack}</span>; // 휴대폰은 "확인 전"만(검수 10/16)
   if (!can) return (
     <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); toast.info(NOT_MINE); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${t.title} 상태: ${statusText(t)} (담당자만 변경)`} data-testid="row-status-locked"
       className="inline-flex h-8 min-w-0 items-center gap-1 whitespace-nowrap px-1 text-[12px] font-medium text-ink-2">
@@ -1067,8 +1068,8 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 max-lg:contents lg:flex-row lg:items-center lg:gap-3">
           <span className="flex min-w-0 items-center gap-1.5 max-lg:basis-full lg:max-w-[55%] lg:shrink-0" data-testid="row-title">
             <TypeIcon t={t} />
-            {/* 대표 피드백(10/15): 휴대폰은 제목이 너무 짧게 잘림 → 두 줄까지 보이고, PC 는 한 줄 */}
-            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline max-lg:line-clamp-2 max-lg:break-words max-lg:leading-snug lg:truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
+            {/* 대표(10/16): 제목은 한 줄 전체 폭·길면 … (두 줄은 목록이 길어져 눈이 피로) — 전체 제목은 줄을 눌러 상세에서 */}
+            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
           </span>
           <span className="min-w-0 max-lg:flex-1 lg:contents"><Meta t={t} onPatch={onPatch} /></span>
@@ -1169,7 +1170,7 @@ function CalendarView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b:
     <div className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="task-calendar">
       <FullCalendar
         plugins={[dayGridPlugin, interactionPlugin, listPlugin, luxonPlugin]}
-        initialView="dayGridMonth" locale={koLocale} timeZone="Asia/Seoul" height="auto" firstDay={1} editable eventDurationEditable
+        initialView="dayGridMonth" locale={koLocale} timeZone="Asia/Seoul" height="auto" firstDay={0} editable eventDurationEditable
         headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,listMonth' }}
         buttonText={{ today: '오늘', month: '월', list: '목록' }} events={events} dayMaxEvents={4}
         eventClick={(i) => { i.jsEvent.preventDefault(); openTask(i.event.id); }}

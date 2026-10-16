@@ -25,7 +25,7 @@ export function DateField({ value, onChange, label, min }: { value: string; onCh
     return () => window.removeEventListener('keydown', h, true);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const first = month + '-01';
-  const pad = (dow(first) + 6) % 7;
+  const pad = dow(first); // 일요일 시작(캘린더와 같게)
   const [y, m] = month.split('-').map(Number);
   const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
   const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
@@ -49,7 +49,7 @@ export function DateField({ value, onChange, label, min }: { value: string; onCh
                 <button type="button" onClick={() => setMonth(next)} className="rounded p-1 hover:bg-slate-100" aria-label="다음 달"><ChevronRight className="size-4" /></button>
               </span>
             </div>
-            <div className="grid grid-cols-7 text-center text-[11px] text-ink-3">{['월', '화', '수', '목', '금', '토', '일'].map((d) => <span key={d} className="py-0.5">{d}</span>)}</div>
+            <div className="grid grid-cols-7 text-center text-[11px] text-ink-3">{['일', '월', '화', '수', '목', '금', '토'].map((d, i) => <span key={d} className={cx('py-0.5', i === 0 && 'text-red-400')}>{d}</span>)}</div>
             <div className="grid grid-cols-7 text-center text-sm">
               {Array.from({ length: pad }, (_, i) => <span key={'p' + i} />)}
               {days.map((d) => (

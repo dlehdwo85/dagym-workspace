@@ -65,7 +65,7 @@ function MonthCalendar({ month, setMonth, events, taskDays, selected, setSelecte
   month: string; setMonth: (m: string) => void; events: any[]; taskDays?: string[]; selected: string; setSelected: (d: string) => void; today: string;
 }) {
   const first = month + '-01';
-  const startPad = (dow(first) + 6) % 7; // 월요일 시작
+  const startPad = dow(first); // 일요일 시작(큰 캘린더와 같게)
   const nextMonth = (() => { const [y, m] = month.split('-').map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`; })();
   const prevMonth = (() => { const [y, m] = month.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; })();
   const days: string[] = [];
@@ -81,7 +81,7 @@ function MonthCalendar({ month, setMonth, events, taskDays, selected, setSelecte
           <button onClick={() => setMonth(nextMonth)} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label="다음 달"><ChevronRight className="size-4" /></button>
         </span>
       </div>
-      <div className="grid grid-cols-7 text-center text-[11px] text-ink-3">{['월', '화', '수', '목', '금', '토', '일'].map((d) => <span key={d} className="py-1">{d}</span>)}</div>
+      <div className="grid grid-cols-7 text-center text-[11px] text-ink-3">{['일', '월', '화', '수', '목', '금', '토'].map((d, i) => <span key={d} className={cx('py-1', i === 0 && 'text-red-400')}>{d}</span>)}</div>
       <div className="grid grid-cols-7 text-center text-sm">
         {Array.from({ length: startPad }, (_, i) => <span key={'p' + i} />)}
         {days.map((d) => (

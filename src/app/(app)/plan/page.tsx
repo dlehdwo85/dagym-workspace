@@ -145,7 +145,7 @@ export default function PlanPage() {
           <FullCalendar
             ref={calRef}
             plugins={[timeGridPlugin, interactionPlugin, luxonPlugin]}
-            timeZone="Asia/Seoul" locale="ko" firstDay={1} height="auto" nowIndicator allDaySlot
+            timeZone="Asia/Seoul" locale="ko" firstDay={0} height="auto" nowIndicator allDaySlot
             initialView={mobile ? 'timeGridDay' : 'timeGridWeek'}
             headerToolbar={{ left: 'prev,next today', center: 'title', right: mobile ? '' : 'timeGridDay,timeGridWeek' }}
             buttonText={{ today: '오늘', week: '주', day: '일' }} allDayText="종일"

@@ -53,7 +53,7 @@ export default function Notifications() {
             <li key={n.id} className={cx('flex gap-3 px-4 py-3', !n.read_at && 'bg-brand-50/50')}>
               <span className={cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', n.read_at ? 'bg-transparent' : 'bg-brand-600')} />
               <Link href={n.link} onClick={() => !n.read_at && read([n.id])} className="min-w-0 flex-1">
-                <div className="text-xs text-slate-500">{NOTIFICATION_TYPES[n.type as keyof typeof NOTIFICATION_TYPES] ?? n.type} · {fmtDateTime(n.created_at)}</div>
+                <div className="text-xs text-slate-500">{NOTIFICATION_TYPES[n.type as keyof typeof NOTIFICATION_TYPES] ?? n.type} · <span title={fmtDateTime(n.created_at)}>{relTime(n.created_at)}</span></div>
                 <div className="text-sm font-medium">{n.title}</div>
                 {n.body && <div className="truncate text-sm text-slate-600">{n.body}</div>}
               </Link>
@@ -69,4 +69,14 @@ export default function Notifications() {
       )}
     </div>
   );
+}
+
+/** 검수(10/16): 알림 시각은 "방금·n분 전·n시간 전·어제" — 하루 넘으면 날짜·시각 */
+function relTime(iso: string) {
+  const ms = Date.now() - Date.parse(iso);
+  if (ms < 60_000) return '방금';
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}분 전`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}시간 전`;
+  if (ms < 2 * 86_400_000) return '어제';
+  return fmtDateTime(iso);
 }

@@ -522,7 +522,7 @@ function MiniMonth({ anchor, holidays, onPick }: { anchor: string; holidays: Map
   const [month, setMonth] = useState(anchor.slice(0, 7));
   useEffect(() => { setMonth(anchor.slice(0, 7)); }, [anchor]);
   const first = new Date(`${month}-01T00:00:00Z`);
-  const startDow = (first.getUTCDay() + 6) % 7; // 월요일 시작
+  const startDow = first.getUTCDay(); // 일요일 시작(큰 캘린더와 같게)
   const cells = Array.from({ length: 42 }, (_, i) => addDays(`${month}-01`, i - startDow));
   const today = seoulDate(new Date());
   const shift = (n: number) => { const d = new Date(`${month}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); setMonth(d.toISOString().slice(0, 7)); };
@@ -536,7 +536,7 @@ function MiniMonth({ anchor, holidays, onPick }: { anchor: string; holidays: Map
         </span>
       </div>
       <div className="grid grid-cols-7 text-center text-[11px]">
-        {'월화수목금토일'.split('').map((d, i) => <span key={d} className={cx('py-0.5 font-medium text-ink-3', i === 6 && 'text-red-400')}>{d}</span>)}
+        {'일월화수목금토'.split('').map((d, i) => <span key={d} className={cx('py-0.5 font-medium text-ink-3', i === 0 && 'text-red-400')}>{d}</span>)}
         {cells.map((d) => {
           const inMonth = d.slice(0, 7) === month;
           const sun = new Date(d + 'T00:00:00Z').getUTCDay() === 0;

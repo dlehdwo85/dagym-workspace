@@ -630,7 +630,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <button type="button" onClick={() => setDetails((v) => !v)} aria-expanded={details} data-testid="details-toggle"
             className={cx('flex w-full items-center gap-2 rounded-input border border-line bg-white px-3 py-2 text-left text-sm', wide && 'lg:hidden', details && 'mb-1')}>
             <span className="shrink-0 font-semibold">세부 정보</span>
-            <span className="min-w-0 flex-1 truncate text-xs text-ink-2">👤{t.assignee_name ?? '담당 없음'} · 📣{t.requested_by_name ?? '-'} · 📅{t.due_date ? `${Number(t.due_date.slice(5, 7))}/${Number(t.due_date.slice(8, 10))}${t.due_time ? ' ' + t.due_time.slice(0, 5) : ''}` : '마감 없음'} · 🔔{t.reminder_minutes?.length ? `${t.reminder_minutes.length}개` : '기본'}</span>
+            {/* 검수(10/16): 머리 요약 칩(담당·마감)과 같은 내용을 반복하던 이모지 줄 대신 무엇이 있는지만 */}
+            <span className="min-w-0 flex-1 truncate text-xs text-ink-3">담당·지시·마감·알림·반복</span>
             <ChevronRight className={cx('size-4 shrink-0 transition-transform', details && 'rotate-90')} />
           </button>
           <div className={cx(!details && 'hidden', wide && 'lg:block')}>

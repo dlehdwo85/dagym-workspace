@@ -476,7 +476,7 @@ await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 �
   await staff.goto(`${BASE}/tasks/${t7}`);
   const nd = addDays(today, 3);
   // V13 11번: 휴대폰은 "세부 정보" 요약 한 줄 → 눌러서 펼침
-  await staff.getByTestId('details-toggle').getByText(/👤/).waitFor();
+  await staff.getByTestId('details-toggle').waitFor();
   await staff.getByTestId('details-toggle').click();
   await staff.getByTestId('detail-due').getByTestId('due-picker').click(); // 마감일 칩 → 빠른 선택·달력
   await staff.getByLabel('마감일 날짜 선택').fill(nd);
@@ -1682,7 +1682,8 @@ await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 �
   const m = await mc.newPage();
   await m.goto(BASE + '/tasks');
   const row = m.locator(`[data-row="${t}"]`);
-  await row.getByTestId('row-status-chip').filter({ visible: true }).getByText('· 확인함').waitFor();
+  await row.getByTestId('row-status-chip').filter({ visible: true }).getByText('진행 전').waitFor();
+  assert.equal(await row.getByTestId('row-status-chip').filter({ visible: true }).getByText('· 확인함').filter({ visible: true }).count(), 0, '검수 10/16: 휴대폰은 "확인 전"만 표시');
   await row.getByTestId('row-status-chip').filter({ visible: true }).tap();
   const sheet = m.locator('[data-sheet]');
   await sheet.getByRole('button', { name: '진행 중' }).tap();
