@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 알림 아이콘 강조색(워크인 초록) -->
+    <color name="workin_notification">#0F766E</color>
+</resources>
