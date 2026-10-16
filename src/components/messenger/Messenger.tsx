@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, AtSign, Pencil, Bell, BellOff, Camera, CornerUpLeft, Download, FileText, Hash, Loader2, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Users, X } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
@@ -206,7 +206,39 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   useEffect(() => { if (data) { setMsgs(data.messages); setReads(Object.fromEntries(data.members.map((m) => [m.id, m.last_read_id]))); } }, [data]);
   const markRead = useCallback(async () => { try { await api(`/api/chat/rooms/${id}/read`, { body: {} }); onRead(); } catch { /* 다음에 */ } }, [id, onRead]);
   useEffect(() => { if (data) markRead(); }, [data, markRead]);
-  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [msgs.length]);
+  // V38 1 흔들림 방지: 대화 칸만 움직인다(scrollIntoView 는 화면 전체를 끌어 올려 위아래로 튐).
+  // 맨 아래를 보고 있을 때·내가 보낸 때만 따라가고, 위로 올려 보는 중이면 그 자리 유지 + "새 메시지 n ↓"
+  const listRef = useRef<HTMLDivElement>(null);
+  const atBottom = useRef(true);
+  const edge = useRef<{ first?: string; last?: string; height: number; top: number }>({ height: 0, top: 0 });
+  const [unseen, setUnseen] = useState(0);
+  const toBottom = useCallback(() => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; atBottom.current = true; setUnseen(0); }, []);
+  const onScroll = () => {
+    const el = listRef.current; if (!el) return;
+    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (atBottom.current) setUnseen(0);
+  };
+  useLayoutEffect(() => {
+    const el = listRef.current; if (!el || !msgs.length) return;
+    const first = msgs[0].id, last = msgs[msgs.length - 1].id, prev = edge.current;
+    if (!prev.last) toBottom(); // 처음 열 때
+    else if (first !== prev.first && last === prev.last) el.scrollTop = prev.top + (el.scrollHeight - prev.height); // 이전 메시지 불러옴 → 보던 자리 유지
+    else if (last !== prev.last) {
+      const added = msgs.filter((m) => BigInt(m.id) > BigInt(prev.last!));
+      if (atBottom.current || added.some((m) => m.mine)) toBottom();
+      else setUnseen((n) => n + added.filter((m) => !m.mine).length);
+    }
+    edge.current = { first, last, height: el.scrollHeight, top: el.scrollTop };
+  }, [msgs, toBottom]);
+  // 사진이 늦게 뜨거나 키보드가 열려 칸 높이가 바뀌어도 맨 아래를 보던 중이면 맨 아래 유지
+  useEffect(() => {
+    const keep = () => { if (atBottom.current) { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; } };
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', keep);
+    const ro = typeof ResizeObserver !== 'undefined' && listRef.current ? new ResizeObserver(keep) : null;
+    if (ro && listRef.current) { ro.observe(listRef.current); if (listRef.current.firstElementChild) ro.observe(listRef.current.firstElementChild); }
+    return () => { vv?.removeEventListener('resize', keep); ro?.disconnect(); };
+  }, [data]);
   useEffect(() => { const el = inputRef.current; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 128)}px`; } }, [text]);
   useEffect(() => live.subscribe((e) => {
     if (e.messages?.some((m) => m.room_id === id)) {
@@ -338,7 +370,8 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
         </div>
       )}
       <DropZone onFiles={upload} label="놓으면 이 대화방에 보냅니다" testid="chat-drop" className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/60 px-3 py-2" data-testid="chat-messages" onClick={() => setActive(null)}>
+        <div className="relative flex min-h-0 flex-1 flex-col">
+        <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/60 px-3 py-2 [overflow-anchor:none]" data-testid="chat-messages" onClick={() => setActive(null)}>
           {msgs.length >= 60 && <div className="text-center"><Button size="sm" variant="ghost" onClick={loadOlder} disabled={older}>{older ? <Loader2 className="animate-spin" /> : null}이전 메시지</Button></div>}
           {!msgs.length && <p className="py-10 text-center text-sm text-ink-3">첫 메시지를 보내 보세요</p>}
           {msgs.map((m, i) => {
@@ -368,7 +401,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                             </div>
                           )}
                           {m.file_name && (img
-                            ? <a href={`/api/chat/messages/${m.id}/file?inline=1`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><img src={`/api/chat/messages/${m.id}/file?inline=1`} alt={m.file_name} className="max-h-60 max-w-full rounded-xl border border-line" /></a>
+                            ? <a href={`/api/chat/messages/${m.id}/file?inline=1`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><img src={`/api/chat/messages/${m.id}/file?inline=1`} alt={m.file_name} loading="lazy" className="h-48 w-auto max-w-full rounded-xl border border-line bg-slate-100 object-cover" /></a>
                             : <a href={`/api/chat/messages/${m.id}/file`} onClick={(e) => e.stopPropagation()} className={cx('flex items-center gap-2 rounded-xl p-2 no-underline', m.mine ? 'bg-white/15' : 'bg-slate-50')} data-testid="chat-file-card">
                                 <span className={cx('inline-flex size-9 shrink-0 items-center justify-center rounded-lg', m.mine ? 'bg-white/20' : 'bg-teal-50 text-teal-700')}><FileText className="size-5" /></span>
                                 <span className="min-w-0"><span className="block truncate font-medium">{m.file_name}</span><span className={cx('text-[11px]', m.mine ? 'text-white/70' : 'text-ink-3')}>{fmtSize(m.file_size)} · 내려받기</span></span>
@@ -421,6 +454,8 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
             );
           })}
           <div ref={bottom} />
+        </div>
+        {unseen > 0 && <button type="button" onClick={toBottom} className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-pop" data-testid="chat-new-below">새 메시지 {unseen} ↓</button>}
         </div>
         <div className="h-5 bg-slate-50/60 px-3 text-xs text-ink-3" aria-live="polite" data-testid="chat-typing">{typing.length ? `${typing.join(', ')} 님이 입력 중…` : ''}</div>
         <UploadProgress items={prog} />
