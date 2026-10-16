@@ -5,6 +5,7 @@ import { todaySeoul, weekRangeSeoul, seoulMidnight, addDays } from '@/lib/time';
 import { listEvents } from '@/lib/events';
 
 /** 대표 대시보드 (권한 범위 내 집계). 대표·본사 관리자는 전사, 그 외는 자기 조직 범위 */
+const MENTION_RE = String.raw`@\[([^\]]+)\]\([0-9a-f-]{36}\)`;
 export const GET = handler(async ({ user, req }) => {
   const sql = db();
   const units = await accessibleUnitIds(user, sql);
@@ -19,7 +20,7 @@ export const GET = handler(async ({ user, req }) => {
   // 홈 "오늘의 일정" 전체: 오늘 마감 + 기한 지난 미완료 (권한 범위 전체)
   const todayAll = sql`select ${cols}, t.due_time, t.version, t.approval_required, t.approval_line_id ${base} and t.status <> 'done' and t.due_date <= ${today}
     order by t.due_date, t.priority = 'urgent' desc limit 30`;
-  // 최근 활동: 업무 생성·완료·댓글 (보이는 업무만) 10건
+  // 최근 활동: 업무 생성·완료·댓글 (멘션 @[이름](id) 은 @이름 으로 — 로컬 검수 10/17) (보이는 업무만) 10건
   const recent = sql`select * from (
       select 'created' as kind, t.id as task_id, t.title, t.created_at as at, cu.id as actor_id, cu.name as actor_name, null::text as body
         from tasks t left join users cu on cu.id = t.created_by left join org_units o on o.id = t.org_unit_id
@@ -28,7 +29,7 @@ export const GET = handler(async ({ user, req }) => {
       select 'done', t.id, t.title, t.completed_at, au.id, au.name, null from tasks t left join users au on au.id = t.assignee_id left join org_units o on o.id = t.org_unit_id
         where t.deleted_at is null and ${vis} ${bf} and t.status = 'done' and t.completed_at > now() - interval '30 days'
       union all
-      select 'comment', t.id, t.title, c.created_at, cu.id, cu.name, left(c.body, 80) from comments c join tasks t on t.id = c.task_id left join users cu on cu.id = c.author_id left join org_units o on o.id = t.org_unit_id
+      select 'comment', t.id, t.title, c.created_at, cu.id, cu.name, left(regexp_replace(c.body, ${MENTION_RE}, ${'@\\1'}, 'g'), 80) from comments c join tasks t on t.id = c.task_id left join users cu on cu.id = c.author_id left join org_units o on o.id = t.org_unit_id
         where c.deleted_at is null and t.deleted_at is null and ${vis} ${bf} and c.created_at > now() - interval '30 days'
     ) a order by at desc limit 10`;
   const [important, overdue, review, bySite, workload, completion, events, todayTasks, activity] = await Promise.all([

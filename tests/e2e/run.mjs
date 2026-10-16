@@ -20,6 +20,7 @@ import { chatScroll } from './chatScroll.step.mjs';
 import { dueExtend } from './dueExtend.step.mjs';
 import { quickAi, homeTodayEvents } from './quickAi.step.mjs';
 import { voiceMode } from './voiceMode.step.mjs';
+import { verify1017 } from './verify1017.step.mjs';
 import { v1444 } from './v1444.step.mjs';
 import { v1445 } from './v1445.step.mjs';
 import { v21 } from './v21.step.mjs';
@@ -945,6 +946,7 @@ await step('V14 43 업무 목록: 왼쪽 동그라미 없음·상태 칩 버튼(
 await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머리줄·목록·상대에게 새 이름, Esc 취소, 1:1 은 버튼 없음', () => chatRename({ owner, ctx, BASE }));
 await step('V32 4 마감 연장: 휴대폰 담당자 목록 마감 칩 → 연장 요청(사유 필수, 뒤 날짜는 요청 창) → PC 지시자 "연장 요청" 칩·행 표시 → 머리에서 승인 → 마감 변경·연장 1회', () => dueExtend({ staff, owner, ctx, sql, BASE }));
 await step('V38 3 음성 모드(운전 중): 메시지방 새 메시지 읽어 주기·말로 보내기("보내" 확인·"취소")·AI 비서 말로 묻고 답 읽어 주기', () => voiceMode({ browser, desk, ctx, sql, BASE, FAKE }));
+await step('로컬 검수 10/17: 홈 최근 활동 멘션 @이름 · 월 보기 요일 머리 · 휴대폰 일정 시트 닫기 버튼 화면 안 · 휴대폰 업무 둘째 줄 한 줄', () => verify1017({ owner, staff, ctx, sql, BASE }));
 await step('홈 오늘의 일정: 오늘 일정도 함께(시간순)', () => homeTodayEvents({ owner, ctx, BASE }));
 await step('업무 등록 창 AI 비서: 편하게 적고 [AI로 채우기] → 업무명·담당·마감·설명·체크리스트 채움 → 저장', () => quickAi({ owner, ctx, sql, BASE, FAKE }));
 await step('V38 1 메시지방 흔들림: 휴대폰 위로 올려 보는 중 새 메시지 → 자리 유지·"새 메시지 n ↓", 맨 아래면 따라감, 화면 전체는 그대로', () => chatScroll({ browser, desk, ctx, BASE }));
@@ -1699,9 +1701,11 @@ await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 �
   const box = await m.getByTestId('done-chip').getByRole('button').boundingBox();
   assert.ok(box && box.x + box.width <= 390, '완료 칩 화면 안');
   assert.equal(await m.getByText('완료된 업무도 보기').count(), 0, '체크박스 없음');
+  await m.getByTestId('filter-toggle').click(); // 로컬 검수 10/17: 휴대폰은 묶기·정렬이 필터 안에
   await m.getByTestId('group-by').selectOption('status');
   await m.locator('[data-group="in_progress"]').getByText('V11 상태 칩 업무').waitFor();
   await m.getByTestId('group-by').selectOption('assignee');
+  await m.getByTestId('filter-toggle').click();
   // 한 줄 추가: 글자 칩 + 마감 시트
   const add = m.getByTestId('inline-add').first();
   await add.getByLabel('업무 추가 제목').fill('V11 시트 마감 업무');

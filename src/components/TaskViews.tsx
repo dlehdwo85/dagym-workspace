@@ -265,7 +265,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold tracking-tight">{title ?? '업무'}</h1>
         {sess.tenant?.inquiries && !fixed?.view && <PhoneInquiryButton className="ml-auto" />}
-        {!fixed?.view && <Link href="/tasks/import" className={cx('inline-flex items-center gap-1 rounded-input border border-line bg-white px-2.5 py-1.5 text-xs font-medium text-ink-2 shadow-card hover:border-brand-600 hover:text-brand-700', !sess.tenant?.inquiries && 'ml-auto')} data-testid="task-import-open"><FileSpreadsheet className="size-4" />엑셀로 가져오기</Link>}
+        {!fixed?.view && <Link href="/tasks/import" className={cx('inline-flex items-center gap-1 rounded-input border border-line bg-white px-2.5 py-1.5 text-xs font-medium text-ink-2 shadow-card hover:border-brand-600 hover:text-brand-700', !sess.tenant?.inquiries && 'ml-auto', 'max-sm:hidden')} data-testid="task-import-open"><FileSpreadsheet className="size-4" />엑셀로 가져오기</Link>}
         <div className="flex rounded-input border border-line bg-white p-0.5 text-sm shadow-card" role="tablist" aria-label="보기 방식">
           {MODES.map(([m, l, I]) => (
             <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}
@@ -334,6 +334,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
                 className="fixed inset-x-0 bottom-0 z-50 animate-fade-up rounded-t-2xl border-t border-line bg-white p-2 pb-[calc(var(--sab)+12px)] shadow-pop sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:z-40 sm:mt-1 sm:w-60 sm:rounded-card sm:border sm:p-1 sm:pb-1">
                 <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden />
                 <button role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-left text-sm hover:bg-slate-50" onClick={() => { setMoreMenu(false); setExportOpen(true); }}><FileSpreadsheet className="size-4 text-green-700" />엑셀로 내려받기</button>
+                {!fixed?.view && <Link role="menuitem" href="/tasks/import" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-sm hover:bg-slate-50 sm:hidden" onClick={() => setMoreMenu(false)}><FileSpreadsheet className="size-4 text-green-700" />엑셀로 가져오기</Link>}
                 <Link role="menuitem" href="/tasks/trash" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-sm hover:bg-slate-50" onClick={() => setMoreMenu(false)}><Trash2 className="size-4 text-ink-2" />휴지통 (30일 복원)</Link>
               </div>
             </>
@@ -344,15 +345,16 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           <SlidersHorizontal />필터{chips.length > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] leading-4 text-white">{chips.length}</span>}
           <ChevronDown className={cx('!size-3.5 transition-transform', filterOpen && 'rotate-180')} />
         </Button>
+        {/* 로컬 검수 10/17: 휴대폰은 목록 위 버튼 줄을 줄임 — 묶기·정렬은 [필터]를 열 때만 */}
         {mode === 'list' && !projectId && (
-          <label className="inline-flex h-9 items-center gap-1.5 text-sm text-ink-2">묶기
+          <label className={cx('inline-flex h-9 items-center gap-1.5 text-sm text-ink-2', !filterOpen && 'max-sm:hidden')}>묶기
             <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={group} onChange={(e) => pickGroup(e.target.value as GroupBy)} aria-label="묶기 기준" data-testid="group-by">
               <option value="assignee">담당자별</option><option value="requester">지시자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="status">상태별</option><option value="team">팀별</option><option value="none">묶지 않음</option>
             </select>
           </label>
         )}
         {mode === 'list' && (
-          <label className="inline-flex h-9 items-center gap-1.5 text-sm text-ink-2">정렬
+          <label className={cx('inline-flex h-9 items-center gap-1.5 text-sm text-ink-2', !filterOpen && 'max-sm:hidden')}>정렬
             <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={sortBy} onChange={(e) => pickSort(e.target.value as SortKey)} aria-label="정렬" data-testid="sort-by">
               {SORTS.map((k) => <option key={k} value={k}>{SORT_LABEL[k]}</option>)}
             </select>
@@ -462,25 +464,26 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
   const { dir } = useSession();
   const hq = dir.orgUnits.find((o) => o.id === t.org_unit_id)?.type === 'hq';
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2">
+    <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2 max-lg:flex-nowrap max-lg:overflow-hidden">
+      {/* 로컬 검수 10/17: 휴대폰 둘째 줄은 한 줄 고정 — 상태·연장 요청·열람·첨부·경고만, 프로젝트·하위·체크리스트·댓글 수는 숨김(상세에 있음) */}
       {/* V11 1번: 휴대폰은 제목 아래 줄에 상태 칩(누르면 바로 변경) — PC 는 상태 열 */}
-      {onPatch && <span className="lg:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
-      {t.team_name && <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
-      {t.project_name && <span className="inline-flex min-w-0 items-center gap-1"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
+      {onPatch && <span className="shrink-0 lg:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
+      {t.team_name && <span className="inline-flex min-w-0 max-w-[6rem] truncate items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
+      {t.project_name && <span className="inline-flex min-w-0 items-center gap-1 max-lg:hidden"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
       {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 지시자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
       {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate max-lg:hidden xl:hidden" title="지시자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
       {!compact && <span className={cx('truncate max-lg:hidden', onPatch && hq && 'hidden lg:inline')}>{t.org_unit_name}</span>}
       {!compact && <span className="max-lg:hidden"><BrandDot brand={t.brand_id} /></span>}
-      {t.subtask_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
-      {t.checklist_total > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{t.checklist_done}/{t.checklist_total}</span>}
-      {t.comment_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
+      {t.subtask_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
+      {t.checklist_total > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{t.checklist_done}/{t.checklist_total}</span>}
+      {t.comment_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
       {/* V35 1: 첨부는 파란 칩으로 눈에 띄게, 고객에게 보냄 = 초록 · 고객이 열어 봄 = 진한 초록 */}
       {t.attachment_count > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-sky-100 px-1.5 text-[11px] font-semibold tabular-nums text-sky-800" title={`첨부 ${t.attachment_count}개`} data-testid="att-chip"><Paperclip className="size-3" />{t.attachment_count}</span>}
       {t.share_state && <span className={cx('shrink-0 rounded-full px-1.5 text-[11px] font-semibold', t.share_state === 'opened' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700')} title={t.share_state === 'opened' ? '고객이 자료를 열어 봄' : '고객에게 자료를 보냄'} data-testid="share-chip">{t.share_state === 'opened' ? '열람' : '보냄'}</span>}
       {!!t.photo_required && <span className={cx('inline-flex items-center gap-0.5 tabular-nums', (t.photo_count ?? 0) >= t.photo_required ? 'text-green-600' : 'text-amber-700')} title="완료 증빙 사진"><Camera className="size-3.5" />{t.photo_count ?? 0}/{t.photo_required}</span>}
       {t.recurrence_rule && <span title="반복 업무" className="max-lg:hidden"><Repeat className="size-3.5" /></span>}
       {t.batch && t.batch.total > 1 && <span className="max-lg:hidden rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
-      {t.blocked_by_count > 0 && <span className="font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
+      {t.blocked_by_count > 0 && <span className="shrink-0 font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
       {/* V32 4: 연장 요청 대기(지시자가 목록에서 바로 알아봄) · 연장 횟수 */}
       {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장 요청 → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
       {!t.ext_pending && !!t.due_extend_count && <span className="max-lg:hidden shrink-0 rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}

@@ -405,7 +405,7 @@ function CalendarPage() {
             headerToolbar={mobile ? false : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
             views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' } }}
             // Google 형 날짜 머리: 요일 한 줄 + 날짜 숫자(오늘은 동그라미), 시간 칸 글자 작게
-            dayHeaderContent={(a) => { if (!a.view.type.startsWith('timeGrid')) return undefined;
+            dayHeaderContent={(a) => { if (!a.view.type.startsWith('timeGrid')) return a.text; // 월·목록 보기는 기본 요일 글자(undefined 를 돌려주면 빈칸 — 로컬 검수 10/17)
               // 날짜는 서울 기준으로 읽는다(a.date 는 서울 0시 = UTC 전날 15시)
               const ds = seoulDate(a.date), dd = new Date(ds + 'T00:00:00Z');
               return (
@@ -877,7 +877,8 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
             <Attachments items={d.attachments} eventId={d.event.id} canEdit={d.perms.edit} onChange={existing.reload} meId={user.id} />
           </div>
         )}
-        <div className="flex justify-between gap-2 pt-2">
+        {/* 로컬 검수 10/17: 휴대폰 시트에서도 [완료]/[닫기]가 늘 보이게 아래에 붙임(메일 시안과 같은 방식) */}
+        <div className="sticky bottom-0 z-10 -mx-5 -mb-[calc(var(--sab)+20px)] flex justify-between gap-2 border-t border-line bg-white px-5 pb-[calc(var(--sab)+12px)] pt-3 sm:-mb-5 sm:pb-4" data-testid="editor-actions">
           <div>{id && canEdit && <Button type="button" variant="danger" onClick={remove}>삭제</Button>}</div>
           <div className="flex gap-2">
             {canEdit && <span className="self-center text-xs text-ink-3" aria-live="polite" data-testid="editor-autosave">{busy || autoState === 'saving' ? '저장 중…' : autoState === 'saved' ? '저장됨 ✓' : autoState === 'error' ? '저장 안 됨' : id ? '바꾸면 자동 저장' : '닫으면 자동 저장'}</span>}

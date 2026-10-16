@@ -12,7 +12,10 @@ import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtD
 const GB = 1024 ** 3;
 const lim = (v: number | null, unit: string) => (v === null ? '한도 미설정' : `${v.toLocaleString('ko-KR')}${unit}`);
 /** V14 4번 기능 이름 */
-const PURPOSE: Record<string, string> = { assistant: 'AI 비서', library_organize: '자료실 자동 정리', revenue: '매출 AI 분석', revenue_extract: '매출 자료로 입력', classify: '질문 분류(업무 여부)', summary: '긴 대화 요약', chat_to_task: '메시지 → 업무', fill: '자료로 채우기', doc_engine: '문서 작업(파일 만들기·분석)' };
+const PURPOSE: Record<string, string> = { assistant: 'AI 비서', library_organize: '자료실 자동 정리', revenue: '매출 AI 분석', revenue_extract: '매출 자료로 입력', classify: '질문 분류(업무 여부)', summary: '긴 대화 요약', chat_to_task: '메시지 → 업무', fill: '자료로 채우기', doc_engine: '문서 작업(파일 만들기·분석)', doc_job: '문서 작업(파일 만들기·분석)',
+  task_assist: '업무 AI 도우미', inquiry_summary: '문의 요약', voice: '말로 등록 정리', mail_draft: '메일·문자 초안', briefing: '아침 브리핑', weekly_report: '주간 보고 초안', meeting: '회의 메모 정리' };
+// 로컬 검수 10/17: 고객 화면은 한국어 기능명·원화만(내부 키·달러·운영자 문구는 /platform)
+const krw = (usd: number, rate: number) => won(Math.round(usd * rate));
 
 /** V10 관리 → 사용량·요금제 (대표·본사 관리자) */
 export default function UsagePage() {
@@ -42,7 +45,7 @@ export default function UsagePage() {
       </section>
       <div className="grid gap-3 sm:grid-cols-3">
         <Meter label="저장공간" icon={HardDrive} used={usage.storageBytes / GB} limit={limits.storageGb} usedLabel={fmtBytes(usage.storageBytes)} limitLabel={lim(limits.storageGb, 'GB')} testid="meter-storage" />
-        <Meter label="이번 달 AI 비용" icon={Sparkles} used={ai.costUsd} limit={ai.limitUsd} usedLabel={`$${ai.costUsd.toFixed(2)} (약 ${won(Math.round(ai.costUsd * ai.usdKrw))})`} limitLabel={`$${ai.limitUsd}`} testid="meter-ai" />
+        <Meter label="이번 달 AI 비용" icon={Sparkles} used={ai.costUsd} limit={ai.limitUsd} usedLabel={`약 ${krw(ai.costUsd, ai.usdKrw)}`} limitLabel={`약 ${krw(ai.limitUsd, ai.usdKrw)}`} testid="meter-ai" />
         <Meter label="사용자" icon={Users} used={usage.users} limit={limits.users} usedLabel={`${usage.users}명${usage.invited ? ` (+초대 중 ${usage.invited})` : ''}`} limitLabel={lim(limits.users, '명')} testid="meter-users" />
       </div>
       {limits.tasksTotal != null && <TaskQuota used={usage.tasks} limit={limits.tasksTotal} canEdit={canEdit} onChanged={reload} />}
@@ -51,10 +54,10 @@ export default function UsagePage() {
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-usage">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">이번 달 AI 사용</h2>
-          <span className="text-xs text-ink-2" data-testid="ai-usage-pct">회사 월 한도 ${ai.limitUsd} 중 <b className={cx(ai.pct >= 100 ? 'text-red-600' : ai.pct >= 80 ? 'text-amber-700' : 'text-ink')}>{ai.pct}%</b> · 남은 ${ai.leftUsd} · 요청 {ai.requests.toLocaleString('ko-KR')}회{ai.blocked ? ` · 차단 ${ai.blocked}건` : ''}</span>
+          <span className="text-xs text-ink-2" data-testid="ai-usage-pct">회사 월 한도 약 {krw(ai.limitUsd, ai.usdKrw)} 중 <b className={cx(ai.pct >= 100 ? 'text-red-600' : ai.pct >= 80 ? 'text-amber-700' : 'text-ink')}>{ai.pct}%</b> · 남은 약 {krw(ai.leftUsd, ai.usdKrw)} · 요청 {ai.requests.toLocaleString('ko-KR')}회{ai.blocked ? ` · 차단 ${ai.blocked}건` : ''}</span>
         </div>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
-          {([['사람별', ai.byUser.map((x: any) => ({ k: x.user_id, label: x.name, cost: x.cost, n: x.requests }))], ['기능별', ai.byPurpose.map((x: any) => ({ k: x.purpose, label: PURPOSE[x.purpose] ?? x.purpose, cost: x.cost, n: x.requests }))]] as const).map(([title, rows]) => {
+          {([['사람별', ai.byUser.map((x: any) => ({ k: x.user_id, label: x.name, cost: x.cost, n: x.requests }))], ['기능별', ai.byPurpose.map((x: any) => ({ k: x.purpose, label: PURPOSE[x.purpose] ?? '기타 AI 기능', cost: x.cost, n: x.requests }))]] as const).map(([title, rows]) => {
             const max = Math.max(0.0001, ...rows.map((r: any) => r.cost));
             return (
               <div key={title}>
@@ -63,14 +66,14 @@ export default function UsagePage() {
                   <li key={r.k ?? r.label} className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-2">
                     <span className="truncate">{r.label}</span>
                     <span className="h-2 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-violet-500" style={{ width: `${(r.cost / max) * 100}%` }} /></span>
-                    <span className="tabular-nums text-ink-2">${r.cost.toFixed(2)} · {r.n}회</span>
+                    <span className="tabular-nums text-ink-2">{krw(r.cost, ai.usdKrw)} · {r.n}회</span>
                   </li>
                 ))}{!rows.length && <li className="text-ink-3">아직 사용이 없습니다</li>}</ul>
               </div>
             );
           })}
         </div>
-        <p className="mt-3 text-[11px] text-ink-3">1인 하루 요청 {ai.dailyLimit}회까지 · 80%·100% 에 알림, 100% 가 되면 AI 기능만 멈추고 업무·일정은 그대로입니다. 결제 잔액은 Claude Console 에서 확인합니다{ai.consoleNote ? ` (메모: ${ai.consoleNote})` : ''}.</p>
+        <p className="mt-3 text-[11px] text-ink-3">1인 하루 요청 {ai.dailyLimit}회까지 · 80%·100% 에 알림, 100% 가 되면 AI 기능만 멈추고 업무·일정은 그대로입니다.</p>
       </section>
       <AiPeopleBudgets />
       {/* V12 1번: 한도에 가까우면 해당 팩 바로 안내 */}
