@@ -780,7 +780,7 @@ function DdayChip({ due, time, status }: { due: string | null; time: string | nu
   const d = Math.round((new Date(due + 'T00:00:00Z').getTime() - new Date(todayStr() + 'T00:00:00Z').getTime()) / 86400000);
   const label = d === 0 ? 'D-day' : d > 0 ? `D-${d}` : `${-d}일 지남`;
   const cls = status === 'done' ? 'bg-slate-100 text-ink-3' : d < 0 ? 'bg-red-100 text-red-700' : d === 0 ? 'bg-orange-100 text-orange-700' : d <= 3 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-ink-2';
-  return <span className={cx('rounded-full px-2 py-0.5 font-semibold tabular-nums', cls)} data-testid="dday">{label} · {Number(due.slice(5, 7))}/{Number(due.slice(8, 10))}{time ? ' ' + time.slice(0, 5) : ''}</span>;
+  return <span className={cx('inline-flex h-6 items-center rounded-full px-2 font-semibold tabular-nums', cls)} data-testid="dday">{label} · {Number(due.slice(5, 7))}/{Number(due.slice(8, 10))}{time ? ' ' + time.slice(0, 5) : ''}</span>;
 }
 function HistLine({ h, userName }: { h: any; userName: (id: string | null) => string }) {
   return <>

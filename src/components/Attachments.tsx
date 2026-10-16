@@ -119,7 +119,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
                 {a.doc_base_date && <span>기준일 {fmtDate(a.doc_base_date)}</span>}
                 {a.doc_owner && <span>문서 담당 {a.doc_owner}</span>}
                 {a.size_bytes ? <span>{fmtSize(Number(a.size_bytes))}</span> : null}
-                {a.captured_at && <span>촬영 {fmtDateTime(a.captured_at)}</span>}
+                {a.captured_at && isImage(a) && <span>촬영 {fmtDateTime(a.captured_at)}</span>}{/* 로컬 검수 10/17: 문서(txt 등)는 "촬영" 아님 */}
                 <span>{a.created_by_name}</span>
                 {a.kind === 'link' && <span className="truncate">원본: {(() => { try { return new URL(a.url).hostname; } catch { return ''; } })()}</span>}
               </div>
@@ -151,7 +151,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       {view && (
         <div className="fixed inset-0 z-[80] flex flex-col bg-black/90" role="dialog" aria-label="사진 보기" data-testid="photo-viewer" onClick={() => setView(null)}>
           <div className="flex items-center justify-between px-4 pb-2 pt-[calc(var(--sat)+8px)] text-sm text-white">
-            <span className="truncate">{view.file_name}{view.captured_at ? ` · 촬영 ${fmtDateTime(view.captured_at)}` : ''}</span>
+            <span className="truncate">{view.file_name}{view.captured_at && isImage(view) ? ` · 촬영 ${fmtDateTime(view.captured_at)}` : ''}</span>
             <button type="button" className="rounded px-2 py-1 text-white/90" aria-label="사진 닫기" onClick={() => setView(null)}>닫기</button>
           </div>
           <div className="relative flex min-h-0 flex-1 items-center justify-center" onClick={(e) => e.stopPropagation()}>

@@ -4,8 +4,8 @@ import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: '워크인 | 다짐 · 하이링크',
-  description: '워크인 — 다짐 · 하이링크 사내 업무·일정 관리',
+  title: '워크인 — 업무·일정 관리',
+  description: '워크인 — 회사 업무·일정·메신저를 한곳에서',
   manifest: '/manifest.webmanifest',
   robots: { index: false, follow: false },
   appleWebApp: { capable: true, title: '워크인', statusBarStyle: 'default' },

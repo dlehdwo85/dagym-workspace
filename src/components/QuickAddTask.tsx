@@ -117,11 +117,11 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
     if (!text.trim()) { toast.error('AI 비서에게 할 말을 적거나 마이크로 말해 주세요'); return; }
     setAiBusy(true);
     try {
-      const r = await api<{ ok: boolean; title?: string; assigneeId?: string | null; dueDate?: string | null; dueTime?: string | null; description?: string; checklist?: string[] }>('/api/voice/structure', { body: { text } });
+      const r = await api<{ ok: boolean; title?: string; assigneeId?: string | null; dueDate?: string | null; dueTime?: string | null; description?: string; checklist?: string[]; priority?: string | null }>('/api/voice/structure', { body: { text } });
       if (!r.ok) { const p = parseTaskText(text, dir.users, todayStr(), projects.data?.projects ?? []); applyParsed(p); toast.info('AI 를 쓸 수 없어 기본 인식으로 채웠습니다'); return; }
       setNoAuto(true);
       setF((x: any) => ({ ...x, title: r.title || x.title, ...(r.assigneeId ? { assigneeId: r.assigneeId } : {}), ...(r.dueDate ? { dueDate: r.dueDate } : {}), ...(r.dueTime ? { dueTime: r.dueTime } : {}),
-        ...(r.description ? { description: r.description } : {}), ...(r.checklist?.length ? { checklist: r.checklist } : {}) }));
+        ...(r.description ? { description: r.description } : {}), ...(r.checklist?.length ? { checklist: r.checklist } : {}), ...(r.priority ? { priority: r.priority } : {}) }));
       toast.ok('AI 비서가 채웠습니다 — 확인하고 저장하세요');
     } catch (e: any) { toast.error(e.message); } finally { setAiBusy(false); }
   }

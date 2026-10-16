@@ -649,7 +649,8 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       for (const d of new Set(i.dependsOn)) await tx`insert into task_dependencies (task_id, depends_on_id) values (${id}, ${d})`;
       changes.dependsOn = { from: null, to: i.dependsOn };
     }
-    if (reassigned && changes.assigneeId) { // 이력: "재배정: 김민수 → 김소담 (바꾼 사람)"
+    // 로컬 검수 10/17: 담당 변경 이력은 늘 "재배정"(처음 배정·담당 없앰 포함 — 권한 판단은 위 reassigned 그대로)
+    if ('assignee_id' in set && set.assignee_id !== cur.assignee_id && changes.assigneeId) { // 이력: "재배정: 김민수 → 김소담 (바꾼 사람)"
       await activity(tx, 'task', id, u.id, 'reassigned', { assigneeId: changes.assigneeId });
       delete changes.assigneeId;
     }
