@@ -1013,7 +1013,10 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
     // V14 12번: 휴대폰에서 길게 누르면 선택 모드
     // V14 34번: 길게 누르기 = 선택 모드만(진동, 화면 이동 없음). 손을 뗄 때 오는 클릭은 버린다
     lpFired.current = false; // 지난 꾹 누르기 뒤 클릭이 안 와도(안드로이드) 다음 터치를 먹지 않게
-    if (e.pointerType === 'touch' && selc && !selc.on) lp.current = setTimeout(() => { selc.enter(t.id); lpFired.current = true; swallowNextClick(); try { navigator.vibrate?.(20); } catch {} }, 550);
+    if (e.pointerType === 'touch' && selc && !selc.on) lp.current = setTimeout(() => {
+      // 꾹 눌러 끌기(0.4초)가 이미 시작됐으면 선택 모드로 바꾸지 않는다 — 바꾸면 목록이 다시 그려져 끌기가 취소됨
+      if (document.querySelector('[data-dragging]')) return;
+      selc.enter(t.id); lpFired.current = true; swallowNextClick(); try { navigator.vibrate?.(20); } catch {} }, 550);
   };
   const lpFired = useRef(false);
   const hintStop = () => { if (hintTimer.current) { clearTimeout(hintTimer.current); hintTimer.current = null; } if (lp.current) { clearTimeout(lp.current); lp.current = null; } };
