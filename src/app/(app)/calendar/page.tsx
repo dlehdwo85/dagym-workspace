@@ -644,7 +644,9 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
     <>
       {/* V37 3: [저장] 버튼 항상 보임 + Enter·바깥·닫기도 저장(제목이 없으면 그냥 닫기) */}
       <div className="fixed inset-0 z-40" onClick={dismiss} data-testid="quick-outside" />
-      <form ref={quickForm} role="dialog" aria-label="빠른 입력" onSubmit={save} className={cx('fixed z-50 animate-fade-up border border-line bg-white p-4 shadow-pop', sheet ? 'inset-x-0 bottom-0 rounded-t-2xl pb-[calc(var(--sab)+16px)]' : 'w-80 rounded-card')} style={sheet ? undefined : { left: x, top: y }} data-testid="quick-create"
+      <form ref={quickForm} role="dialog" aria-label="빠른 입력" onSubmit={save} className={cx('fixed z-50 animate-fade-up border border-line bg-white p-4 shadow-pop', sheet ? 'inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-2xl pb-[calc(var(--sab)+16px)]' : 'w-80 overflow-y-auto rounded-card')}
+        // "할 일로도 만들기" 칸이 펼쳐져도 [저장]이 화면 밖으로 나가지 않게 — 화면 높이 안에서 스크롤
+        style={sheet ? undefined : { left: x, top: Math.max(8, Math.min(y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 420)), maxHeight: `calc(100dvh - ${Math.max(8, Math.min(y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 420)) + 8}px)` }} data-testid="quick-create"
         onKeyDown={(e) => { if (e.key === 'Escape') dismiss(); }}>
         {onSwitchTask && (
           <div className="mb-3 inline-flex rounded-full bg-slate-100 p-0.5 text-sm" data-testid="quick-kind">

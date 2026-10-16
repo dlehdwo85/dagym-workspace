@@ -1812,6 +1812,9 @@ await step('V12-9: 첨부 칸·자료실에 파일 끌어 놓기(여러 개·진
   // 앞 단계에서 남은 가짜 AI 응답이 있으면 자료 자동 정리가 그 응답으로 폴더를 옮겨 버린다 → 비우고 시작(정리 실패 = 맨 위에 남음)
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true }) });
   await owner.goto(BASE + '/library');
+  // 화면 준비(하이드레이션·목록 불러옴) 전에 놓으면 받는 쪽이 아직 없어 무시됨 → 목록이 뜬 뒤 놓기
+  await owner.getByTestId('library-list').waitFor();
+  await owner.waitForLoadState('networkidle');
   await drop('library-drop', [{ name: '끌기 자료.txt', type: 'text/plain', body: '끌어 놓은 자료' }]);
   await owner.getByTestId('library-list').getByText('끌기 자료').waitFor();
 });
