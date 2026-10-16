@@ -2150,6 +2150,18 @@ await step('실기기 83: 휴대폰 문자·메일 시안 시트 스크롤·버�
 await step('V32 0 알림 읽음: 안 읽은 것만·누르면 바로 읽음·업무를 열면 자동 읽음·전체 탭', () => notifRead({ owner, BASE, SHOTS, ctx }));
 await step('실기기: 휴대폰 업무 상세(#댓글 주소)에서 체크리스트 체크해도 화면이 내려가지 않음·포커스 유지', () => checkScroll({ owner, BASE, SHOTS }));
 await step('점검 ①: 태블릿·좁은 창(768·1024·1100) 업무 목록 이름이 눌리지 않음', () => listNarrow({ owner, BASE, SHOTS }));
+await step('V36 3 관리 화면 권한: 직원이 관리 주소로 들어가면 안내(무슨 메뉴·누구에게 요청), 대표가 그 메뉴만 켜 주면 그 화면만 열림', async () => {
+  await staff.goto(BASE + '/admin/company');
+  const na = staff.getByTestId('admin-no-access');
+  await na.waitFor();
+  await na.getByText('관리 화면 권한이 없습니다').waitFor(); // 관리 메뉴가 하나도 없으면 공통 안내
+  await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'mail_settings', userId: ctx.staffA.id, level: 'view' });
+  await staff.goto(BASE + '/admin/company');
+  await staff.getByTestId('admin-no-access').getByText('"회사 정보·디자인" 화면 권한이 없습니다').waitFor();
+  await staff.goto(BASE + '/admin/mail');
+  assert.equal(await staff.getByTestId('admin-no-access').count(), 0, '켜 준 메일 계정 화면은 열림');
+  await ctx.owner.ok('PUT', '/api/admin/menu-perms', { menu: 'mail_settings', userId: ctx.staffA.id, level: null });
+});
 // 맨 끝: 지금 진행 중인 휴가를 만들므로 다른 단계에 영향 없게 마지막에
 await step('V36 1·2 근무 상태: 휴가 중인 사람 아바타에 회색 점·"휴가 ~" 표시, 여러 명 배정은 휴가자 포함 + "복귀 후 확인" 안내', async () => {
   const cal = (await ctx.staffA.client.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'personal').id;

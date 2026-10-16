@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { db, type Sql } from './db';
 import { audit } from './log';
 import { notFound } from './errors';
-import { requireMenu } from './menuPerms';
+import { requireAnyMenu } from './menuPerms';
 import { tenantOf, type SessionUser } from './types';
 
 /**
@@ -27,11 +27,11 @@ export async function companyProfiles(tenant: string, sql: Sql = db()) {
     from company_profiles where tenant = ${tenant} order by is_default desc, key`;
 }
 export async function listProfiles(u: SessionUser) {
-  await requireMenu(u, 'ops', 'view');
+  await requireAnyMenu(u, ['company', 'ops'], 'view'); // V36 3: 회사 정보·디자인 = 자기 메뉴 권한(운영 상태와 분리)
   return { profiles: await companyProfiles(tenantOf(u)) };
 }
 export async function saveProfile(u: SessionUser, i: z.infer<typeof profileInput>, ip: string | null) {
-  await requireMenu(u, 'ops', 'edit');
+  await requireAnyMenu(u, ['company', 'ops'], 'edit');
   const sql = db(); const t = tenantOf(u);
   if (i.logoFileId) {
     const [f] = await sql`select 1 from library_files where id = ${i.logoFileId} and tenant = ${t} and deleted_at is null`;
@@ -52,7 +52,7 @@ export async function saveProfile(u: SessionUser, i: z.infer<typeof profileInput
   return { id: r.id };
 }
 export async function deleteProfile(u: SessionUser, key: string, ip: string | null) {
-  await requireMenu(u, 'ops', 'edit');
+  await requireAnyMenu(u, ['company', 'ops'], 'edit');
   const sql = db();
   const gone = await sql`delete from company_profiles where tenant = ${tenantOf(u)} and key = ${key} returning id`;
   if (!gone.length) throw notFound();

@@ -1,4 +1,5 @@
 'use client';
+import { ADMIN_PAGES } from '@/lib/adminPages';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { AiDock } from './AiDock';
@@ -34,19 +35,11 @@ const NAV: NavItem[] = [
   { href: '/reports/mine', label: '내 주간 보고', icon: FileText },
 ];
 const MOBILE_TABS: NavItem[] = [NAV[0], NAV[1], NAV[3], NAV[4]]; // V14 9번: 홈·업무·(+)·캘린더·메시지 — 알림은 상단 종
-/** 사이드바 "관리" 묶음 (대표·본사 관리자) */
-const ADMIN_MENU: NavItem[] = [
-  { href: '/reports', label: '주간 보고', icon: FileBarChart },
-  { href: '/revenue', label: '매출', icon: BarChart3 },
-  { href: '/admin/users', label: '사용자 관리', icon: Users },
-  { href: '/admin/ops', label: '운영 상태', icon: Activity },
-  { href: '/admin/company', label: '회사 정보·디자인', icon: Building2 }, // V22
-  { href: '/admin/mail', label: '메일 계정·명함', icon: Mail }, // V21
-  { href: '/admin/usage', label: '사용량·요금제', icon: Gauge },
-  { href: '/admin/ai-logs', label: 'AI 사용 내역', icon: Sparkles },
-];
+/** 사이드바 "관리" 묶음 — 주소·이름·메뉴 키는 lib/adminPages(V36 3 한 곳), 여기는 아이콘만 */
+const ADMIN_ICON: Record<string, NavItem['icon']> = { '/reports': FileBarChart, '/revenue': BarChart3, '/admin/users': Users, '/admin/ops': Activity, '/admin/company': Building2, '/admin/mail': Mail, '/admin/usage': Gauge, '/admin/ai-logs': Sparkles };
+const ADMIN_MENU: NavItem[] = ADMIN_PAGES.filter((p) => p.sidebar).map((p) => ({ href: p.href, label: p.label, icon: ADMIN_ICON[p.href] ?? Activity }));
 /** V14 7번: 관리 메뉴 ↔ 메뉴 권한 키 (꺼진 메뉴는 숨김) */
-const ADMIN_KEY: Record<string, string> = { '/reports': 'team_reports', '/revenue': 'revenue', '/admin/users': 'admin_users', '/admin/ops': 'ops', '/admin/company': 'ops', '/admin/mail': 'mail_settings', '/admin/usage': 'usage', '/admin/ai-logs': 'ai_logs' };
+const ADMIN_KEY: Record<string, string> = Object.fromEntries(ADMIN_PAGES.map((p) => [p.href, p.menu]));
 const SHORTCUTS: [string, string][] = [
   ['Ctrl K', '검색·명령 열기'], ['N', '새 업무 만들기'], ['?', '단축키 도움말'], ['Esc', '패널·창 닫기'],
   ['G 다음 H', '홈'], ['G 다음 M', '업무'], ['G 다음 C', '캘린더'],

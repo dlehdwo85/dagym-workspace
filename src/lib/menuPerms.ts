@@ -14,6 +14,8 @@ export const MENUS = {
   revenue: { label: '매출', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   admin_users: { label: '사용자 관리', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   ops: { label: '운영 상태(조직·감사·공휴일·결재선)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  // V36 3: 회사 정보·디자인을 운영 상태에서 분리(운영 상태는 기본 회사 전용이라 다른 회사는 못 들어가던 문제)
+  company: { label: '회사 정보·디자인', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   usage: { label: '사용량·요금제', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V13 4번: 자료실 3단계 — 보기 / 올리기·수정 / 삭제 (폴더별 권한은 library_folder_perms, 상속)
   library: { label: '자료실', levels: ['none', 'view', 'edit', 'delete'], defaults: { owner: 'delete', admin: 'delete', dept_lead: 'edit', site_manager: 'edit', staff: 'edit' } },
