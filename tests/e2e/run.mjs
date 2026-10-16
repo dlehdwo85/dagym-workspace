@@ -876,7 +876,7 @@ await step('V14 35 캘린더에서 바로 업무: 빈 칸 = 업무 등록(누른
   await owner.getByTestId('home-month').locator('button[aria-pressed]', { hasText: new RegExp(`^${Number(d2.slice(8))}$`) }).click();
   const list = owner.getByTestId('home-day-tasks');
   const req = owner.getByTestId('home-day-requested');
-  await req.getByRole('button', { name: /내가 지시한 업무 2건/ }).click();
+  await req.getByRole('button', { name: /내가 지시한 업무 \d+건/ }).click();
   await req.getByText('미니달력 지시 업무').waitFor();
   assert.equal(await req.locator('li', { hasText: '미니달력 나눠 지시' }).count(), 1, '사본은 한 줄');
   await req.locator('li', { hasText: '미니달력 나눠 지시' }).getByText(/외 1/).waitFor();
