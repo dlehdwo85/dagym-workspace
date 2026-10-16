@@ -72,8 +72,9 @@ export const canSeeSec = (c: SecCtx, u: SessionUser, f: { folder: string; securi
 export async function storageSecurity(tenant: string, storageKey: string): Promise<{ security: Security; deleted: boolean } | null> {
   const sql = db();
   const all = await sql<{ folder: string; security: Security; deleted_at: Date | null; source: string }[]>`select folder, security, deleted_at, source from library_files where tenant = ${tenant} and storage_key = ${storageKey}`;
-  // V38 4: 업무 첨부를 자료실에 자동 등록한 행은 등급만 따르고, 자료실에서 지워도 업무 첨부는 막지 않는다(정리하다 업무 자료를 잃지 않게)
-  const rows = all.filter((r) => r.source !== 'task_attach' || !r.deleted_at);
+  // V38 4(로컬 검수 반영): 업무에서 자동 등록한 행(task_attach)은 업무 첨부·공유 링크 판단에 쓰지 않는다 — 업무 첨부는 기존 규칙 그대로,
+  // 자료실에서 지워도(=자료실 목록에서만 숨김) 업무 첨부는 남음. 원래 자료실 파일을 붙인 경우는 V34-C2 대로 삭제·기밀이 첨부에도 적용
+  const rows = all.filter((r) => r.source !== 'task_attach');
   if (!rows.length) return null;
   const folders = await sql<{ folder: string; security: Security }[]>`select folder, security from library_folder_security where tenant = ${tenant}`;
   const c: SecCtx = { folders, internal: false, confidential: false, confEdit: false };
@@ -579,11 +580,12 @@ export async function registerTaskAttachment(u: SessionUser, a: { id: string; ta
   const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(new Date());
   const folder = cleanFolder(task.project ? `업무 첨부/${task.project}` : `업무 첨부/${month}`);
   const title = a.file_name.replace(/\.[^.]+$/, '').slice(0, 200) || a.file_name;
-  // 등급은 "내부"로 고정 — 자동 등록 때문에 업무 첨부가 기밀이 되어 직원 내려받기·고객 발송이 막히면 안 된다(견적서 등).
-  // 이름 규칙에 걸리면 "기밀 제안"만 남기고, 기밀 관리자가 자료실에서 확인해 올리면 그때부터 업무 첨부에도 적용
+  // 등급(V34-C5): 이름 규칙이 기밀이면 기밀로 저장 → 기밀 권한 없는 사람은 자료실 목록에서 안 보임(관리자가 내리기).
+  // 업무 화면 첨부는 이 행의 등급과 무관하게 기존 규칙(storageSecurity 가 task_attach 행을 보지 않음)
   const suggested = ruleSecurity(`${a.file_name} ${task.title}`);
+  const security = suggested ?? 'internal';
   const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, storage_key, upload_status, tags, description, source, created_by, task_id, security, security_suggested)
-    values (${t}, ${folder}, ${title}, ${a.file_name}, ${a.mime_type}, ${size}, ${a.storage_key}, 'ready', ${['업무 첨부']}, ${`업무: ${task.title}`}, 'task_attach', ${u.id}, ${a.task_id}, 'internal', ${suggested})
+    values (${t}, ${folder}, ${title}, ${a.file_name}, ${a.mime_type}, ${size}, ${a.storage_key}, 'ready', ${['업무 첨부']}, ${`업무: ${task.title}`}, 'task_attach', ${u.id}, ${a.task_id}, ${security}, ${suggested})
     returning id`;
   return f.id;
 }
