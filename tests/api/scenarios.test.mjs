@@ -2223,6 +2223,8 @@ describe('V13 8번 대댓글·댓글 알림·반응', () => {
     assert.equal((await cnotes(ctx.staffA.id, c1.id)).length, 0, '본인 제외');
     const c2 = await ctx.owner.ok('POST', `/api/tasks/${t}/comments`, { body: '좋습니다' });
     assert.equal((await cnotes(ctx.staffA.id, c2.id)).length, 1, '담당자');
+    // 대표(10/17) 댓글 알림 묶기: 안 읽은 댓글 알림이 있으면 새로 안 감 — 답글 대상 확인을 위해 담당자가 먼저 읽음
+    await sql`update notifications set read_at = now() where user_id = ${ctx.staffA.id} and read_at is null`;
     // 답글: 원 작성자(staffA) + 스레드 참여자
     const r1 = await ctx.managerA.client.ok('POST', `/api/tasks/${t}/comments`, { body: '사진도 올려 주세요', parentId: c1.id });
     assert.equal(r1.parentId, c1.id);

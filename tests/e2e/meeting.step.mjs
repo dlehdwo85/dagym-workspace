@@ -20,12 +20,12 @@ export async function meeting({ owner, ctx, sql, BASE }) {
   // 등록 창: 제목에 "방문" → 미팅 일정 제안
   await owner.getByTestId('create-menu').click();
   await owner.getByRole('menuitem', { name: /^업무/ }).click();
-  const dlg = owner.getByRole('dialog', { name: '업무 등록' });
-  await dlg.getByLabel('제목').fill('E2E 판교 현장 방문');
+  const sheet = owner.getByRole('dialog', { name: '업무 등록' });
+  await sheet.getByLabel('제목').fill('E2E 판교 현장 방문');
   const q = owner.getByTestId('quick-meeting');
   await q.waitFor();
   await q.getByTestId('quick-meeting-location').fill('판교 테크노밸리');
-  await dlg.getByRole('button', { name: '저장', exact: true }).click();
+  await sheet.getByRole('button', { name: '저장', exact: true }).click();
   await owner.getByText(/업무를 등록했습니다/).first().waitFor();
   for (let i = 0; i < 30; i++) { if ((await sql`select 1 from tasks t join event_tasks et on et.task_id = t.id join events e on e.id = et.event_id where t.title = 'E2E 판교 현장 방문' and e.location = '판교 테크노밸리'`).length) return; await new Promise((r) => setTimeout(r, 200)); }
   assert.fail('등록 창 미팅 일정이 연결되지 않음');
