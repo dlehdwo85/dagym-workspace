@@ -50,14 +50,14 @@ V39 "영업 기능 대조표" A·B·C·D 그대로 구현. 요약:
 | 메뉴 | 운영실 원본 | 비고 |
 |---|---|---|
 | 개요(홈) | overview(지금 할 일·오늘 게시·자동 처리 접힘) | 숫자 카드 4개(시안) |
-| 승인 대기 | approvals + daily(버전 단위 승인/수정 요청, 마감 게시일 09:00, 7일 창) | 대표 결정은 '승인'·'수정 요청' 둘뿐(10-13 원칙 유지) |
-| 콘텐츠 캘린더 | schedule · calendar · week7 · grid(IG 9칸) | 워크인 캘린더 컴포넌트 재사용, 채널 색 |
-| 제작·게시 | plan · production · publish · find · blog · blog-draft | 중복 게시 방지(72시간·첫 300자), 재시도 1회 규칙 |
+| 승인 대기 | approvals + daily + revisions + plan decide | **버전 단위**: 새 버전 오면 이전 승인 무효→재승인 대기, 보던 버전이 최신 아니거나 시안 이미지 없으면 승인 거부. 마감 게시일 09:00, 7일 창. 결정 버튼은 승인·수정 요청이 기본, 코드에 있는 반려·보류(revisions)·deferred(plan)는 ⛔ 대표 결정 |
+| 콘텐츠 캘린더 | schedule · calendar · week7 · grid(IG 9칸 — 하이링크 하드코딩, 템플릿으로 새로) | 워크인 캘린더 컴포넌트 재사용, 채널 색 |
+| 제작·게시 | plan · production · publish · find · blog · blog-draft · content(AI 플랜) | 중복 게시 방지 **여러 겹 그대로**: 게시 잠금·대상 잠금·멱등 키(effect)·작업 잠금·72시간 첫 300자·재시도 전 최근 글 확인·결과 불명 처리. 기준은 수정판(wip/publish-dedupe-guard 54968a9 — 운영실 main 반영 후) |
 | 광고 성과 | ads(브랜드별 지출·예산, 캠페인 7/30일, 정리안 미리보기·적용 기록, 비용 상세) | 예산·입찰·키워드 변경은 대상별 명시 승인 |
 | 전화 문의 전환 | calls + 전화 추적 비콘(/track/call.js) | → [영업 리드로] 전환(영업 공간 연결) |
 | 키워드·벤치마킹 | targets · benchmark · naver 검색 | |
-| 브랜드 자산 | assets · launch · strategy · roadmap · youtube(정적) | 브랜드 = 회사가 직접 등록(다짐·하이링크·바디랩 고정 제거) |
-| 채널 연결 | automation · system · meta-setup | 회사별 OAuth 연결 화면 |
+| 브랜드 자산 | assets(옮김) · launch·strategy·roadmap·youtube 는 우리 브랜드용 정적 데이터 → **템플릿으로 새로** | 브랜드 = 회사가 직접 등록(고정 제거는 리팩터 규모 — 아래 F-5) |
+| 채널 연결 | **새로 만듦**(회사별 OAuth·API 키 연결 화면). automation·system 은 내부 운영용(D), meta-setup 은 미사용 | |
 
 **C. 회사별 연결로 바꿀 것(상업화 필수)**
 - 네이버 검색광고(main·bodylab 계정 env) → 회사별 API 라이선스 입력(암호화 저장). Google Ads(개발자 토큰은 우리 것 1개, 고객 계정은 OAuth). Meta 페이지·IG → 회사별 OAuth(Meta 앱 심사 필요 — 지금은 미사용).
@@ -74,3 +74,39 @@ V39 "영업 기능 대조표" A·B·C·D 그대로 구현. 요약:
 ## 로컬이 할 일
 - 단계마다 운영 배포 확인·화면 검수(휴대폰·PC), 기능 체크리스트 갱신.
 - 대표 결정 모아 요청: 공간 추가 가격 · 이전용 원본 접속값 입력 시점 · 공개 가입(PUBLIC_SIGNUP).
+
+### 마케팅 대조표 보완 (마케팅 세션 검토 반영, 2026-10-17)
+**F-1. 빠진 화면·기능 추가**
+- 화면: ops-check(운영 점검)·execution(실행 로그) → 내부 운영용(D, 우리 회사 관리자만), content(AI 플랜) → 제작·게시. E 검수표에 31개 전부 자리 지정.
+- 대표 조작: media(choose·upload·asset·final·resume) · production review(제작 완료/수정 필요) · plan(decide·verify_request/resolve·admin_status·grid) · owner-actions('완료했어요'→검증 후 닫힘) · schedule metrics(성과 입력) · calls create/exclude/restore · posts publish_now·retry·reschedule_overdue · notifications 읽음 · client-log → 각 메뉴에 대응 버튼으로.
+- 실행기 API 49개: 행 단위로 **이전/폐기/내부 유지** 표를 단계 4 착수 때 작성(effect 멱등·remote_beat·scheduler·channel_freshness·keyword_tool·library_used(같은 사진 반복 방지) 등). bodylab_ads_fix·step2·status 는 1회성 → 폐기.
+- 서비스 인증: MARKETING_WORKER_SECRET Bearer·MCP OAuth/MCP_ACCESS_TOKEN·CRON_SECRET·QStash 서명·로그인 실패 제한 → 워크인 서비스 토큰(범위별)·OAuth·cron 비밀값·실패 제한으로 다시 정의.
+- 외부 연동 추가: 검색 점검(Search Console/Advisor — 지금은 세션이 브라우저로 본 값 입력), 전화 추적 CALL_HASH_SECRET(회사별), Windsor(금지 대상, 연동 안 함), AI 예산(일·월 사용량·중지 스위치 → 회사 AI 크레딧).
+- 운영 규칙 이전: CREATIVE_QUALITY_STANDARD(통과 못 하면 승인함에 안 올림)·AI_CONTENT_DISCLOSURE·SNS_PUBLISHING_POLICY 전체(삭제·수정·광고 변경은 대상별 승인, 경쟁사·미검증 수치 금지)를 마케팅 공간 '운영 규칙'으로, AI 초안 생성 시 검사.
+
+**F-2. 서버 자동화(예약 게시를 누가 돌리나)**
+- 운영실: Vercel Cron 08:10 runDailyOps · QStash 15분 cloud/tick(publish_sweep·검색 점검 12시간) · after() 이벤트 tick · GitHub OIDC 보조.
+- 워크인: 기존 워크인 스케줄러(1분 tick, /api/health scheduler)에 '마케팅 작업' 추가 — 승인 마감 처리·예약 시각 도래 작업 생성·채널 갱신 경보·보고. 실제 게시는 아래 F-3 경로.
+
+**F-3. 게시 경로(완료 기준 E 를 검증 가능하게)**
+- 우리 회사: **내부 실행기(노트북 Claude+Chrome)를 워크인 API(claim·heartbeat lease 180초·report 채널별 증거·upload)에 붙여** 그대로 사용. 실행기 PC 1대 규칙(executor 잠금) 유지 — 이전 중 운영실·워크인 두 곳에서 claim 금지(전환 시점에 한쪽만).
+- 고객사: 출시 범위 ⛔ 대표 결정 — 권장: **1차 = 승인·일정·성과(읽기)·수동 게시 확인**(URL 입력 또는 공개 글 확인 = daily_mark 증거 규칙), 공식 API 자동 게시는 Meta 앱 심사(instagram_content_publish·pages_manage_posts)·YouTube 감사 통과 뒤 2차. 네이버 블로그·플레이스는 쓰기 API 없음 → 영구 '복사·붙여넣기 + 게시 확인'.
+- daily_mark 규칙 유지: 미승인 항목 거부, 플랫폼 예약 목록에서 확인한 뒤에만 '예약됨/게시됨' + 증거·URL, 서버는 일일 콘텐츠를 직접 게시하지 않음.
+
+**F-4. 저장소·데이터**
+- 일일 콘텐츠 원본은 KV 가 아니라 운영실 저장소 파일(content/daily/<날짜>.json + public/content-daily/ + 생성 파일) → 워크인에선 **DB 표(콘텐츠·버전·채널 항목) + 자료실 미디어**로, 고객용 업로드·편집 화면 새로. 수정본 = 새 버전 행.
+- 자료실: 운영실은 Vercel Blob, 워크인은 S3 호환 presign(src/lib/storage.ts) → Blob 객체 복사·URL 재작성, S3 CORS·CSP 확인, 진단 업로드·사용 기록(library_used) 포함.
+- Preview 분리: Neon **Preview 브랜치(별도 DATABASE_URL)** 를 Vercel Preview 에 지정(운영 DB 공유 금지).
+- KV 이전 절차: 쓰기 동결 → 복사 → 건수 대조 → 전환. 대상 = 결정·이력 키(daily decisions·revisions·requests·posts·schedule·production·ads structure-decision·ads apply-log·call-records·library·owner actions done). 제외 = test: 접두사·TTL 키(upload 30일)·잠금 키. 동시 운영 중 이중 쓰기 금지(전환 후 운영실 읽기 전용). KV 잠금(SET NX+TTL) → Postgres advisory lock/행 잠금.
+
+**F-5. 회사별 연결·멀티테넌트**
+- 네이버 검색광고: 회사 → 광고계정 N개(브랜드별, API CUSTOMER_ID ≠ 화면 번호) 모델. keyword_tool·네이버 검색·MCP naver 도구도 회사별 키 사용(account 인자).
+- Google Ads: 개발자 토큰 1개 공유 → Standard access 신청 필요·일일 한도 회사 간 배분, 고객 OAuth 에 MCC(LOGIN_CUSTOMER_ID) 연결 방식 결정(단계 4 착수 때).
+- 광고 쓰기 안전장치 그대로: dryRun 기본, 24시간 안 미리보기가 막힘 없이 끝났을 때만 적용, 한 건씩 적용 후 재조회, 적용 잠금, 대상별 명시 승인.
+- 브랜드 고정 제거: lib/brands.ts(BrandKey 3개)·brand-resolver·91개 파일·브랜드별 Chrome 프로필 → **별도 견적(리팩터)**, 워크인 쪽은 처음부터 회사별 브랜드 표로 새로 짓고 운영실 코드는 옮기지 않고 참고만.
+- 비용: Claude 호출 회사별 차감·상한·실패 시 차단. 네이버 광고 정리 적용·Higgsfield 는 우리 크레딧 → 고객 회사에서 호출 불가 장치.
+- 전화 추적: 고객 사이트별 스니펫·회사별 해시 비밀값·속도 제한.
+
+**F-6. SSO(1단계) 보안**: 워크인이 발급하는 1회용 서명 토큰(수명 60초, jti 재사용 방지, 운영실 검증 엔드포인트), 운영실 공용 비밀번호는 SSO 확인 후 폐지.
+
+**⛔ 대표 결정(마케팅)**: ① 고객사 1차 출시 범위(권장: 승인·일정·성과 읽기·수동 게시 확인) ② 승인 화면 결정 버튼에 반려·보류 유지 여부(권장: 승인·수정 요청 2개 + '보류'만 유지) ③ Higgsfield 고객 판매 여부.
