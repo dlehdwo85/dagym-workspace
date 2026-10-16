@@ -415,7 +415,7 @@ await step('④ 캘린더 화면에서 매주 반복 일정 등록 → 주 보�
   await dlg.getByTestId('editor-close').click();
   await owner.getByText('저장했습니다').waitFor();
   await owner.getByRole('button', { name: '주', exact: true }).click();
-  if (new Date(d + 'T00:00:00+09:00').getDay() === 1) await owner.getByRole('button', { name: 'Next week' }).click().catch(() => {});
+  if (new Date(d + 'T00:00:00Z').getUTCDay() === 0) await owner.locator('.fc-next-button').click(); // 일요일 시작 주: 내일이 일요일이면 다음 주
   const ev = owner.locator('.fc-timegrid-event', { hasText: '주간 운영 회의' }).first();
   await ev.waitFor();
   await owner.screenshot({ path: `${SHOTS}/10-calendar-week.png` });
