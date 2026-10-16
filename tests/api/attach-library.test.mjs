@@ -31,9 +31,11 @@ describe('V38 4 업무 첨부 → 자료실', () => {
     assert.ok(!(await inList(ctx.staffB.client, '견학 안내문')), '다른 현장 직원은 자료실에서도 안 보임');
     assert.equal((await ctx.staffB.client.get(`/api/library/${a.libraryId}`)).status, 404);
   });
-  test('기밀 단어면 기밀 등급, 자료실에서 고른 파일 첨부는 또 등록하지 않음, 프로젝트 업무는 프로젝트 폴더', async () => {
+  test('기밀 단어면 등급은 내부 그대로 + 기밀 제안(업무 첨부·발송이 막히지 않게), 자료실에서 고른 파일 첨부는 또 등록하지 않음, 프로젝트 업무는 프로젝트 폴더', async () => {
     const c = await upload(ctx.owner, '급여 명세 정리.pdf');
-    assert.equal((await sql`select security from library_files where id = ${c.libraryId}`)[0].security, 'confidential');
+    const [cs] = await sql`select security, security_suggested from library_files where id = ${c.libraryId}`;
+    assert.equal(cs.security, 'internal'); assert.equal(cs.security_suggested, 'confidential');
+    assert.ok((await ctx.staffA.client.ok('GET', `/api/attachments/${c.id}/download?json=1`)).url, '직원(기밀 권한 없음)도 업무 첨부 내려받기 그대로');
     const proj = (await ctx.owner.ok('POST', '/api/projects', { name: '강남점 리뉴얼', orgUnitId: ctx.siteA })).id;
     const pt = (await ctx.owner.ok('POST', '/api/tasks', { title: '리뉴얼 도면', projectId: proj, assigneeId: ctx.ownerId, orgUnitId: ctx.siteA, approvalRequired: false })).id;
     const p = await upload(ctx.owner, '도면 1차.pdf', pt);

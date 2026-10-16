@@ -39,7 +39,7 @@ export const libraryPatch = z.object({
 });
 
 const COLS = `f.id, f.folder, f.security, f.security_suggested, f.security_confirmed, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
-  (f.text_content is not null) as has_text, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error`;
+  (f.text_content is not null) as has_text, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error, f.task_id, f.source`;
 
 // ---------------- V14 15번 보안 등급 (일반·내부·기밀) ----------------
 export type Security = 'public' | 'internal' | 'confidential';
@@ -579,9 +579,11 @@ export async function registerTaskAttachment(u: SessionUser, a: { id: string; ta
   const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(new Date());
   const folder = cleanFolder(task.project ? `업무 첨부/${task.project}` : `업무 첨부/${month}`);
   const title = a.file_name.replace(/\.[^.]+$/, '').slice(0, 200) || a.file_name;
-  const security = ruleSecurity(`${a.file_name} ${task.title}`) ?? 'internal';
-  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, storage_key, upload_status, tags, description, source, created_by, task_id, security)
-    values (${t}, ${folder}, ${title}, ${a.file_name}, ${a.mime_type}, ${size}, ${a.storage_key}, 'ready', ${['업무 첨부']}, ${`업무: ${task.title}`}, 'task_attach', ${u.id}, ${a.task_id}, ${security})
+  // 등급은 "내부"로 고정 — 자동 등록 때문에 업무 첨부가 기밀이 되어 직원 내려받기·고객 발송이 막히면 안 된다(견적서 등).
+  // 이름 규칙에 걸리면 "기밀 제안"만 남기고, 기밀 관리자가 자료실에서 확인해 올리면 그때부터 업무 첨부에도 적용
+  const suggested = ruleSecurity(`${a.file_name} ${task.title}`);
+  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, storage_key, upload_status, tags, description, source, created_by, task_id, security, security_suggested)
+    values (${t}, ${folder}, ${title}, ${a.file_name}, ${a.mime_type}, ${size}, ${a.storage_key}, 'ready', ${['업무 첨부']}, ${`업무: ${task.title}`}, 'task_attach', ${u.id}, ${a.task_id}, 'internal', ${suggested})
     returning id`;
   return f.id;
 }

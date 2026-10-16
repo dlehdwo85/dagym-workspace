@@ -593,7 +593,8 @@ export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
   const items = await sql<{ text: string; done: boolean }[]>`select text, done from task_checklist_items where task_id = ${i.taskId} order by sort`;
   const contact = await inquiryContact(i.taskId, sql);
   const lib = await (await import('./library')).listLibrary(u, { limit: 60 }).catch(() => ({ files: [] as any[] }));
-  const cands = (lib.files as any[]).filter((f) => f.effective_security !== 'confidential').slice(0, 60);
+  // V38 4: 이 업무에 이미 올린 첨부(자동 등록된 자료실 행)는 추천 후보에서 뺀다 — 같은 파일을 다시 권하지 않게
+  const cands = (lib.files as any[]).filter((f) => f.effective_security !== 'confidential' && f.task_id !== i.taskId).slice(0, 60);
   const desc = (t?.description ?? '').replace(/\*\*연락처[\s\S]*?(?=\*\*문의 내용 원문\*\*|$)/, ''); // 연락처는 AI 에 보내지 않는다
   const kind = MAIL_KINDS[i.kind];
   const profile = i.company ? (await companyProfiles(tenantOf(u), sql)).find((p) => p.key === i.company) : null;
