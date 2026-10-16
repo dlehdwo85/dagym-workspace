@@ -173,6 +173,7 @@ export default function Dashboard() {
   const monthMy = useApi<{ tasks: any[] }>(`/api/tasks?view=my&from=${month}-01&to=${monthLast}&limit=500`, [month]);
   const monthReq = useApi<{ tasks: any[] }>(`/api/tasks?view=requested&includeDone=0&from=${month}-01&to=${monthLast}&limit=500`, [month]);
   const [quickTask, setQuickTask] = useState<{ dueDate: string } | null>(null);
+  const [reqOpen, setReqOpen] = useState(false);
   // V7: "이번 주 일정" = 오늘부터 7일
   const d0 = seoulDay(new Date());
   const hol = useApi<{ holidays: { date: string; name: string }[] }>('/api/holidays');
@@ -239,9 +240,15 @@ export default function Dashboard() {
   const mEvents = (monthEvents.data?.events ?? []).filter((e) => !blockDone(e));
   const mTasks = [...new Map([...(monthMy.data?.tasks ?? []), ...(monthReq.data?.tasks ?? [])].filter((t) => t.due_date).map((t) => [t.id, t])).values()];
   const roleOf = (t: any) => t.assignee_id === user.id ? '담당' : t.requested_by === user.id ? '지시' : '참여';
-  const dayTasks: WeekItem[] = mTasks.filter((t) => t.due_date === selected)
+  // V37 1: 그날 마감 — 내가 담당(참여)인 것만 한 줄씩, 내가 지시만 한 것은 "내가 지시한 업무 n건" 한 줄로 묶고(펼치기) 같은 원본에서 나눈 사본은 한 줄
+  const dayAll = mTasks.filter((t) => t.due_date === selected);
+  const onlyRequested = (t: any) => t.requested_by === user.id && t.assignee_id !== user.id;
+  const dayTasks: WeekItem[] = dayAll.filter((t) => !onlyRequested(t))
     .map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id, tag: roleOf(t), href: `/tasks/${t.id}`, task: t }))
     .sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'));
+  const reqGroups = [...dayAll.filter(onlyRequested).reduce((m, t) => m.set(t.batch_id ?? t.id, [...(m.get(t.batch_id ?? t.id) ?? []), t]), new Map<string, any[]>()).values()]
+    .map((g) => ({ key: g[0].batch_id ?? g[0].id, title: g[0].title, href: `/tasks/${g[0].id}`, done: g.filter((x: any) => x.status === 'done').length, n: g.length,
+      who: g[0].assignee_name ? `${g[0].assignee_name}${g.length > 1 ? ` 외 ${g.length - 1}` : ''}` : '담당 없음' }));
   const dayList = selected === today
     ? mEvents.filter((e) => eventDays(e).some((d) => d >= today)).sort((a, b) => +new Date(a.start) - +new Date(b.start)).slice(0, 6)
     : mEvents.filter((e) => eventDays(e).includes(selected));
@@ -337,9 +344,22 @@ export default function Dashboard() {
             <p className="px-2 pb-1 text-xs font-semibold text-ink-2">{selected === today ? '다가오는 일정' : `${fmtDate(selected)} 일정`}</p>
             {!dayList.length ? <p className="px-2 py-4 text-center text-sm text-ink-3">일정이 없습니다</p>
               : <ul data-testid="home-day-list">{dayList.map((e) => <EventRow key={e.id + e.start} e={e} withDate={selected === today} />)}</ul>}
-            {dayTasks.length > 0 && <>
+            {(dayTasks.length > 0 || reqGroups.length > 0) && <>
               <p className="mt-1 px-2 pb-1 text-xs font-semibold text-ink-2">{selected === today ? '오늘 마감 업무' : `${fmtDate(selected)} 마감 업무`}</p>
               <ul data-testid="home-day-tasks">{dayTasks.map((r) => <WeekRow key={r.key} r={r} colors={calColors} onDone={done} />)}</ul>
+              {reqGroups.length > 0 && (
+                <div className="px-2" data-testid="home-day-requested">
+                  <button type="button" onClick={() => setReqOpen(!reqOpen)} aria-expanded={reqOpen} className="flex w-full items-center gap-1 rounded-input py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50">
+                    {reqOpen ? <ChevronLeft className="size-3.5 -rotate-90" /> : <ChevronRight className="size-3.5" />}
+                    내가 지시한 업무 {reqGroups.length}건 <span className="text-xs text-ink-3">— 진행 {reqGroups.filter((g) => g.done < g.n).length}·완료 {reqGroups.filter((g) => g.done === g.n).length}</span>
+                  </button>
+                  {reqOpen && <ul>{reqGroups.map((g) => (
+                    <li key={g.key} className="flex min-w-0 items-center gap-2 rounded-input py-1 pl-5 text-sm hover:bg-slate-50" data-req-group={g.n}>
+                      <Link href={g.href} className={cx('min-w-0 flex-1 truncate', g.done === g.n && 'text-ink-3 line-through')}>{g.title}</Link>
+                      <span className="shrink-0 text-xs text-ink-3">{g.who}{g.n > 1 ? ` · ${g.done}/${g.n} 완료` : ''}</span>
+                    </li>))}</ul>}
+                </div>
+              )}
             </>}
             {/* V14 35번: 고른 날짜로 바로 등록 */}
             <div className="mt-2 flex gap-2 px-2 pb-1">

@@ -623,12 +623,15 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
       onSaved();
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
+  // V37 3: 닫기(Esc·앱 뒤로·바깥) = 제목이 있으면 저장, 없으면 그냥 닫기
+  const dismiss = () => { if (busy) return; if (title.trim()) quickForm.current?.requestSubmit(); else onClose(); };
+  useSheetBack(!!sheet, dismiss);
   return (
     <>
-      {/* 저장 버튼 없이: Enter 또는 바깥을 누르면 저장(제목이 없으면 닫기) */}
-      <div className="fixed inset-0 z-40" onClick={() => (title.trim() ? quickForm.current?.requestSubmit() : onClose())} data-testid="quick-outside" />
+      {/* V37 3: [저장] 버튼 항상 보임 + Enter·바깥·닫기도 저장(제목이 없으면 그냥 닫기) */}
+      <div className="fixed inset-0 z-40" onClick={dismiss} data-testid="quick-outside" />
       <form ref={quickForm} role="dialog" aria-label="빠른 입력" onSubmit={save} className={cx('fixed z-50 animate-fade-up border border-line bg-white p-4 shadow-pop', sheet ? 'inset-x-0 bottom-0 rounded-t-2xl pb-[calc(var(--sab)+16px)]' : 'w-80 rounded-card')} style={sheet ? undefined : { left: x, top: y }} data-testid="quick-create"
-        onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+        onKeyDown={(e) => { if (e.key === 'Escape') dismiss(); }}>
         {onSwitchTask && (
           <div className="mb-3 inline-flex rounded-full bg-slate-100 p-0.5 text-sm" data-testid="quick-kind">
             <button type="button" className="rounded-full px-3 py-1 text-ink-2 hover:text-ink" onClick={onSwitchTask} data-testid="quick-switch-task">업무</button>
@@ -668,7 +671,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
         {<label className="mt-2 flex items-center gap-2 text-sm text-ink-2"><input type="checkbox" className="size-4" checked={priv} onChange={(e) => setPriv(e.target.checked)} />비공개 (다른 사람에게는 &ldquo;바쁨&rdquo;으로만)</label>}
         <div className="mt-4 flex items-center justify-between">
           {<button type="button" className="text-sm font-medium text-ink-2 hover:text-ink" onClick={() => onMore({ date, allDay, start: start ?? '09:00', end: end ?? '10:00', endDate: endDate ?? date, title, calendarId, isPrivate: priv, rrule, alsoTask })}>옵션 더보기</button>}
-          <span className="text-xs text-ink-3">{busy ? '저장 중…' : 'Enter 또는 바깥을 누르면 저장'}</span>
+          <Button type="submit" size="sm" disabled={busy || !title.trim()} data-testid="quick-save">{busy ? '저장 중…' : '저장'}</Button>
         </div>
       </form>
     </>

@@ -292,6 +292,25 @@ await step('B-1 목록에서 업무를 오른쪽 패널로 열기 → URL /tasks
   await owner.getByTestId('task-page').waitFor();
 });
 
+await step('V37 4 뒤로가기: 목록 → 업무 A(패널) → 하위 업무 B → 뒤로 = 목록 (기록 한 칸)', async () => {
+  const a = await ctx.owner.ok('POST', '/api/tasks', { title: '뒤로가기 상위 업무', assigneeId: ctx.ownerId, orgUnitId: ctx.siteA, approvalRequired: false });
+  const b = await ctx.owner.ok('POST', '/api/tasks', { title: '뒤로가기 하위 업무', assigneeId: ctx.ownerId, parentId: a.id, orgUnitId: ctx.siteA, approvalRequired: false });
+  await owner.goto(BASE + '/tasks?mode=list');
+  await owner.getByRole('button', { name: '전체', exact: true }).click();
+  await owner.getByLabel('업무 검색').fill('뒤로가기 상위');
+  const link = owner.locator(`[data-task-id="${a.id}"] a[data-open-task]`).first();
+  await link.waitFor();
+  await link.click();
+  const panel = owner.getByTestId('task-panel');
+  await panel.waitFor();
+  await panel.getByRole('link', { name: '뒤로가기 하위 업무' }).click();
+  await owner.waitForURL((u) => u.pathname === `/tasks/${b.id}`);
+  await owner.getByText('상위: 뒤로가기 상위 업무').first().waitFor();
+  await owner.goBack();
+  await owner.waitForURL((u) => u.pathname === '/tasks');
+  assert.ok(owner.url().includes('mode=list'), '목록 주소로 돌아옴: ' + owner.url());
+});
+
 await step('B-3 프로젝트 섹션: 추가 → 업무를 끌어 다른 섹션으로 → 보드 열=섹션', async () => {
   const pid = (await ctx.owner.ok('POST', '/api/projects', { name: 'GX 리뉴얼', orgUnitId: ctx.siteA })).id;
   const tk = (await ctx.owner.ok('POST', '/api/tasks', { title: '강사 섭외', projectId: pid })).id;
@@ -851,11 +870,17 @@ await step('V14 35 캘린더에서 바로 업무: 빈 칸 = 업무 등록(누른
   // 홈 미니 캘린더: 내가 지시한 업무도 그날 목록에
   const d2 = addDays(today, 1).slice(0, 7) === today.slice(0, 7) ? addDays(today, 1) : today;
   await ctx.owner.ok('POST', '/api/tasks', { title: '미니달력 지시 업무', assigneeId: ctx.staffA.id, requestedById: ctx.ownerId, dueDate: d2, approvalRequired: false });
+  // V37 1: 여러 명에게 나눠 만든 사본은 지시 묶음에서 한 줄
+  await ctx.owner.ok('POST', '/api/tasks', { title: '미니달력 나눠 지시', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: d2, approvalRequired: false });
   await owner.goto(BASE + '/');
   await owner.getByTestId('home-month').locator('button[aria-pressed]', { hasText: new RegExp(`^${Number(d2.slice(8))}$`) }).click();
   const list = owner.getByTestId('home-day-tasks');
-  await list.getByText('미니달력 지시 업무').waitFor();
-  await list.locator('li', { hasText: '미니달력 지시 업무' }).getByText('지시', { exact: true }).waitFor();
+  const req = owner.getByTestId('home-day-requested');
+  await req.getByRole('button', { name: /내가 지시한 업무 2건/ }).click();
+  await req.getByText('미니달력 지시 업무').waitFor();
+  assert.equal(await req.locator('li', { hasText: '미니달력 나눠 지시' }).count(), 1, '사본은 한 줄');
+  await req.locator('li', { hasText: '미니달력 나눠 지시' }).getByText(/외 1/).waitFor();
+  assert.equal(await list.getByText('미니달력 지시 업무').count(), 0, '지시한 업무는 내 줄에 따로 안 나옴');
   await owner.getByTestId('home-day-add-task').click();
   const hd = owner.getByRole('dialog', { name: '업무 등록' });
   assert.equal(await hd.getByLabel('마감일').inputValue(), d2, '고른 날짜가 마감일');

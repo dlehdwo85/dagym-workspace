@@ -45,6 +45,10 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
     if (open && mine && f.teamId === undefined && !defaults?.parentId) setF((x: any) => (x.teamId === undefined ? { ...x, teamId: mine.id, teamMode: 'tag' } : x));
   }, [open, teams.data, f.teamId, defaults?.parentId]);
   const titleRef = useRef<HTMLInputElement>(null);
+  // V37 3: 시트를 닫으면(바깥·✕·뒤로) 제목이 있을 때 자동 저장 — [취소]만 버린다. 자동 저장은 상세로 이동하지 않는다
+  const formRef = useRef<HTMLFormElement>(null);
+  const closing = useRef(false);
+  const dismiss = () => { if (busy) return; if (f.title?.trim()) { closing.current = true; formRef.current?.requestSubmit(); } else onClose(); };
   const { features } = useSession();
   // V12 8번 "📎 자료로 채우기": 자료를 올리면 AI 가 제목·설명·체크리스트·마감을 채우고, 저장하면 그 자료가 업무에 첨부된다
   const fillRef = useRef<HTMLInputElement>(null);
@@ -106,7 +110,8 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!f.title.trim()) return toast.error('제목을 입력하세요');
+    const auto = closing.current; closing.current = false;
+    if (!f.title?.trim()) return toast.error('제목을 입력하세요');
     setBusy(true);
     try {
       let r: { id: string };
@@ -137,17 +142,17 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
       api('/api/me/quick-last', { method: 'PUT', body: lastV }).catch(() => {});
       toast.ok(f.teamId ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다 — 팀장에게 알림을 보냈습니다') : count > 1 ? `${count}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
       broadcastRefresh();
-      if (keep && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setNoAuto(false); setTpl(''); titleRef.current?.focus(); return; }
+      if (keep && !auto && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setNoAuto(false); setTpl(''); titleRef.current?.focus(); return; }
       onClose();
       // 자세한 항목은 만든 뒤 상세에서 — 목록 안(onCreated)이 아니면 상세로 이동
-      if (onCreated) onCreated(r.id); else router.push(`/tasks/${r.id}`);
+      if (onCreated) onCreated(r.id); else if (!auto) router.push(`/tasks/${r.id}`);
     } catch (err: any) {
       if (err.code === 'queued') { toast.info(err.message); onClose(); } else toast.error(err.message);
     } finally { setBusy(false); }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={defaults?.parentId ? '하위 업무 추가' : '업무 등록'}>
+    <Modal open={open} onClose={dismiss} title={defaults?.parentId ? '하위 업무 추가' : '업무 등록'}>
       {/* V14 35번: 캘린더 빠른 등록 — 업무(기본) ↔ 일정 전환 */}
       {switchTo && (
         <div className="mb-3 inline-flex rounded-full bg-slate-100 p-0.5 text-sm" data-testid="quick-kind">
@@ -170,7 +175,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
           <input ref={fillRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => fillFrom(e.target.files)} data-testid="quick-fill-input" />
         </>
       )}
-      <form onSubmit={submit} className="space-y-3" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget as HTMLFormElement).requestSubmit(); } }}>
+      <form ref={formRef} onSubmit={submit} className="space-y-3" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget as HTMLFormElement).requestSubmit(); } }}>
         {!defaults?.parentId && (templates.data?.templates.length ?? 0) > 0 && (
           <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" aria-label="템플릿에서 만들기" data-testid="tpl-chips">
             <span className="shrink-0 self-center text-xs text-ink-2">템플릿</span>

@@ -353,7 +353,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <div className="mb-1.5 flex flex-wrap items-center gap-1 text-xs text-ink-2">
             <Link href="/tasks" className="hover:underline">업무</Link>
             {t.project_name && <><ChevronRight className="size-3" /><Link href={`/projects/${t.project_id}`} className="inline-flex items-center gap-1 hover:underline"><span className="size-2 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} />{t.project_name}</Link></>}
-            {t.parent_id && <><ChevronRight className="size-3" /><Link href={`/tasks/${t.parent_id}`} className="hover:underline">상위: {t.parent_title}</Link></>}
+            {t.parent_id && <><ChevronRight className="size-3" /><Link replace href={`/tasks/${t.parent_id}`} className="hover:underline">상위: {t.parent_title}</Link></>}
             <span className="ml-1"><CarriedBadge t={t} /></span>
           </div>
           {title === null ? (
@@ -420,7 +420,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <section className="rounded-card border border-violet-200 bg-violet-50/60 p-3 text-sm" data-testid="review-target">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold text-violet-700">검토할 업무</span>
-              <Link href={`/tasks/${data.reviewTarget.id}`} className="min-w-0 flex-1 truncate font-medium underline">{data.reviewTarget.title}</Link>
+              <Link replace href={`/tasks/${data.reviewTarget.id}`} className="min-w-0 flex-1 truncate font-medium underline">{data.reviewTarget.title}</Link>
               <span className="text-xs text-ink-2">{data.reviewTarget.assignee_name ?? '담당 없음'} · {STATUS_LABEL[data.reviewTarget.status as TaskStatus] ?? data.reviewTarget.status}</span>
             </div>
             {data.reviewTarget.status === 'review' && t.assignee_id !== user.id ? (
@@ -468,7 +468,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <p className="mb-1.5 font-semibold text-violet-800">같이 받은 사람 {data.batchMates.length}명 · 완료 {data.batchMates.filter((b: any) => b.status === 'done').length}</p>
             <ul className="flex flex-wrap gap-1.5">
               {data.batchMates.map((b: any) => (
-                <li key={b.id}><Link href={`/tasks/${b.id}`} className={cx('inline-flex items-center gap-1 rounded-full border bg-white px-2 py-0.5 text-xs', b.id === id ? 'border-violet-400 font-semibold' : 'border-line')}>
+                <li key={b.id}><Link replace href={`/tasks/${b.id}`} className={cx('inline-flex items-center gap-1 rounded-full border bg-white px-2 py-0.5 text-xs', b.id === id ? 'border-violet-400 font-semibold' : 'border-line')}>
                   {b.assignee_name ?? '담당자 없음'} · {STATUS_LABEL[b.status as TaskStatus]}</Link></li>
               ))}
             </ul>
@@ -553,7 +553,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             {data.subtasks.map((s: any) => (
               <li key={s.id} className="flex items-center gap-2.5 px-3 py-2 text-sm">
                 <StatusBadge status={s.status} />
-                <Link href={`/tasks/${s.id}`} className="flex-1 truncate hover:underline">{s.title}</Link>
+                <Link replace href={`/tasks/${s.id}`} className="flex-1 truncate hover:underline">{s.title}</Link>
                 <DueChip due={s.due_date} status={s.status} />
                 <Avatar id={s.assignee_id} name={s.assignee_name} size={22} />
               </li>
@@ -577,7 +577,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <div className="mt-4 mb-1.5 flex items-center justify-between"><h2 className="text-sm font-semibold">선행 업무</h2><Button size="sm" variant="ghost" onClick={() => setDepOpen(true)}>편집</Button></div>
           <ul className="space-y-1 text-sm">
             {data.dependencies.map((d: any) => (
-              <li key={d.id} className="flex items-center gap-2"><StatusBadge status={d.status} /><Link className="hover:underline" href={`/tasks/${d.id}`}>{d.title}</Link></li>
+              <li key={d.id} className="flex items-center gap-2"><StatusBadge status={d.status} /><Link replace className="hover:underline" href={`/tasks/${d.id}`}>{d.title}</Link></li>
             ))}
             {!data.dependencies.length && <li className="text-xs text-ink-3">없음 — 선행 업무가 끝나야 완료할 수 있게 하려면 추가하세요</li>}
           </ul>

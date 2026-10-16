@@ -65,7 +65,8 @@ async function sendFcm(token: string, p: Payload) {
         notification: { title: p.title, body: p.body },
         data: { link: p.link, notificationId: p.notificationId },
         // click_action 없음: 기본(앱 실행 activity)으로 열려야 data(link·notificationId)가 앱의 notificationActionPerformed 로 전달된다
-        android: { priority: 'HIGH', notification: { channel_id: 'work' } },
+        // V37 5: 안드로이드 상태바 단색 아이콘(앱 res/drawable/ic_stat_workin, 로컬 48806da)·강조색
+        android: { priority: 'HIGH', notification: { channel_id: 'work', icon: 'ic_stat_workin', color: '#0F766E' } },
         apns: { payload: { aps: { sound: 'default' } } },
       },
     }),
