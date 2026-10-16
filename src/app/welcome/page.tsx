@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { UtmCapture } from '@/components/UtmCapture';
+import { BizFooter } from '@/components/BizFooter';
 import { ArrowRight, BellRing, CalendarDays, Check, Mic, Sparkles, Users } from 'lucide-react';
 
 export const metadata = { title: '워크인 — 업무·일정·알림을 한 곳에', description: '음성으로 등록하고 정확한 시간에 알림. 무료로 시작하고, 유료는 1인 월 2,200원부터.' };
@@ -67,9 +68,7 @@ export default function Welcome() {
         </div>
         <div className="mt-8 text-center"><Link href="/signup" className="inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white hover:bg-brand-700">14일 무료 체험<ArrowRight className="size-4" /></Link></div>
       </section>
-      <footer className="border-t border-line py-6 text-center text-xs text-ink-3">
-        <Link href="/terms" className="underline">이용약관</Link> · <Link href="/privacy" className="underline">개인정보 처리방침</Link> · <Link href="/ai-notice" className="underline">AI 이용 안내</Link>
-      </footer>
+      <BizFooter />
     </div>
   );
 }
