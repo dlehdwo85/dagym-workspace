@@ -13,7 +13,7 @@ const dowOf = (d: string) => new Date(d + 'T00:00:00Z').getUTCDay();
 const NUM: Record<string, number> = { 한: 1, 두: 2, 세: 3, 네: 4, 다섯: 5, 여섯: 6, 일곱: 7, 여덟: 8, 아홉: 9, 열: 10, 열한: 11, 열두: 12 };
 const num = (s: string) => (/^\d+$/.test(s) ? Number(s) : NUM[s] ?? NaN);
 
-export function parseTaskText(text: string, people: { id: string; name: string }[], today: string, projects: { id: string; name: string }[] = []): Parsed {
+export function parseTaskText(text: string, people: { id: string; name: string; title?: string | null; title_short?: string | null }[], today: string, projects: { id: string; name: string }[] = []): Parsed {
   let t = ` ${text.trim()} `;
   const matched: string[] = [];
   const cut = (re: RegExp) => { const m = re.exec(t); if (m) { matched.push(m[0].trim()); t = t.replace(m[0], ' '); } return m; };
@@ -63,9 +63,22 @@ export function parseTaskText(text: string, people: { id: string; name: string }
   let assignee: { id: string; name: string } | null = null;
   for (const p of [...people].sort((a, b) => b.name.length - a.name.length)) {
     const esc = p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`\\s@?${esc}(님|씨)?(에게|한테|께|이|가)?\\s`);
+    // "김민수 본부장한테" — 이름 뒤 직책까지 함께 뺀다
+    const ttl = [p.title, p.title_short].filter(Boolean).map((x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const re = new RegExp(`\\s@?${esc}(님|씨)?${ttl ? `(\\s*(${ttl}))?(님)?` : ''}(에게|한테|께|이|가)?\\s`);
     if (re.test(t)) { cut(re); assignee = p; break; }
   }
+  // 대표 실기기(10/16): "김민수 본부장한테 업무 배정해 줘"를 인식기가 "나 지금 본부장한테"로 들음 → 이름이 안 맞으면 직책으로(그 직책이 1명일 때만)
+  if (!assignee) {
+    for (const tm of t.matchAll(/\s(\S+?)(님)?(에게|한테|께)(?=\s)/g)) {
+      const said = tm[1];
+      const hits = people.filter((p) => [p.title, p.title_short].some((x) => x && x.replace(/\s/g, '') === said));
+      if (hits.length === 1) { assignee = hits[0]; matched.push(tm[0].trim()); t = t.replace(tm[0], ' '); break; }
+    }
+  }
+  // 말로 한 지시 문구는 업무명에서 뺀다: "업무 배정해 줘", "~할 것", "나 지금"
+  t = ` ${t} `.replace(/\s(업무|일|이거|이것)?\s*(배정|지시|할당|부탁|요청|등록|맡겨|시켜)\s*(해|해\s*줘|해\s*주세요|해\s*줄래|하세요|해라|좀\s*해\s*줘)?\s*(줘|주세요)?\s/g, ' ')
+    .replace(/\s(나|내가|저|제가)\s+(지금|이제)\s/g, ' ').replace(/\s(할\s*것|하기|해\s*줘|해\s*주세요)\s*$/g, ' ').replace(/할\s*것\s*$/, ' ');
   const title = t.replace(/\s+/g, ' ').trim().replace(/^(까지|에|에게)\s+/, '');
   if (rm) {
     const dow = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][dowOf(due ?? today)];

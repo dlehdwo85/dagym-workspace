@@ -30,7 +30,7 @@ const webSR = () => (typeof window === 'undefined' ? null : (window as any).Spee
 export const voiceAvailable = () => nativeOk() || (!Capacitor.isNativePlatform() && !!webSR());
 const MAX_MS = 90_000;
 /** 말이 멈추고 이만큼 조용하면 끝 — 휴대폰 인식기는 1초 남짓 쉬면 혼자 끝나 버려서, 우리가 다시 켜 이어 듣는다 */
-export const SILENCE_MS = 8000; // 대표 실기기(10/16): 3초만 쉬어도 끊김(안드로이드 인식기 allowForSilence 가 3.5초였음) → 8초
+export const SILENCE_MS = 5000; // 대표 실기기(10/16): 3초만 쉬어도 끊김 → 8초 → "5초 정도로"(대표)
 /** 눌러 놓고 아무 말이 없을 때 기다리는 시간 */
 const FIRST_WAIT_MS = 15000;
 
@@ -43,16 +43,17 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
   let ended = false, done = false;
   const t0 = Date.now();
   let heard = 0; // 마지막으로 새 글자가 들어온 시각(0 = 아직 말 없음)
-  const acc: string[] = []; // 끝난 구간들
+  let base = ''; // 끝난 구간들을 이은 글
+  let segs = 0;
   let cur: string[] = []; // 지금 구간의 후보들
   let firstAlts: string[] = []; // 한 구간만 말했을 때 그 구간의 다른 후보(단어장 보정용)
-  const joined = () => [...acc, cur[0] ?? ''].map((x) => x.trim()).filter(Boolean).join(' ');
+  const joined = () => mergeSpeech(base, cur[0] ?? '');
   const result = (): VoiceResult | null => {
     const text = joined();
     if (!text) return null;
-    const segs = acc.length + (cur[0]?.trim() ? 1 : 0);
-    const alts = acc.length ? firstAlts : cur.slice(1);
-    return { text, alternatives: segs === 1 ? alts.map((x) => x.trim()).filter(Boolean) : [] };
+    const n = segs + (cur[0]?.trim() ? 1 : 0);
+    const alts = segs ? firstAlts : cur.slice(1);
+    return { text, alternatives: n === 1 ? alts.map((x) => x.trim()).filter(Boolean) : [] };
   };
   let cleanup = () => {};
   const end: VoiceEnd = (r, e) => { if (!ended) { ended = true; done = true; clearInterval(watch); cleanup(); o.onEnd(r, e); } };
@@ -61,7 +62,7 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
     if ((alts[0] ?? '') !== (cur[0] ?? '')) heard = Date.now();
     cur = alts; o.onPartial?.(joined());
   };
-  const commit = () => { if (cur[0]?.trim()) { if (!acc.length) firstAlts = cur.slice(1); acc.push(cur[0]); } cur = []; };
+  const commit = () => { if (cur[0]?.trim()) { if (!segs) firstAlts = cur.slice(1); base = mergeSpeech(base, cur[0]); segs++; } cur = []; };
   let stopEngine = () => {};
   const finish = (e?: 'no-speech' | 'error' | 'denied') => { done = true; commit(); const r = result(); end(r, r ? undefined : e ?? 'no-speech'); };
   // 조용함·최대 시간 감시
@@ -131,6 +132,25 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
   };
   try { startWeb(); } catch { end(null, 'error'); }
   return () => { if (done) return; done = true; stopEngine(); setTimeout(() => finish(), 400); };
+}
+
+/**
+ * 구간 이어 붙이기. 대표 실기기(10/16): 안드로이드 인식기는 중간 결과마다 "끝남"을 보내고 다음 결과가 앞말을 다시 포함해
+ * "다음 / 다음 주 / 다음 주 금요일까지"가 모두 붙었다 → 새 구간이 앞 글을 포함하면 바꾸고, 앞 글 끝과 겹치면 겹친 만큼만 잇는다.
+ */
+export function mergeSpeech(prev: string, next: string): string {
+  const a = prev.trim(), b = next.trim();
+  if (!a) return b;
+  if (!b) return a;
+  const na = a.replace(/\s/g, ''), nb = b.replace(/\s/g, '');
+  if (nb.startsWith(na)) return b; // 같은 말을 더 길게 = 바꿈
+  if (na.endsWith(nb) || na.includes(nb)) return a; // 이미 들은 말
+  // 앞 글의 끝 낱말들과 새 글의 첫 낱말들이 같으면 겹친 만큼 빼고 잇기
+  const aw = a.split(/\s+/), bw = b.split(/\s+/);
+  for (let k = Math.min(aw.length, bw.length); k >= 1; k--) {
+    if (aw.slice(-k).join('') === bw.slice(0, k).join('')) return [...aw, ...bw.slice(k)].join(' ');
+  }
+  return `${a} ${b}`;
 }
 
 /** 회사 단어장 보정(실패하면 원문 그대로) */

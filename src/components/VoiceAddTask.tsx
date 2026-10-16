@@ -46,6 +46,15 @@ export function VoiceAddTask() {
     const p = parseTaskText(t, dir.users, todayStr(), projects.data?.projects ?? []);
     setCard({ title: t.trim() ? p.title : '', dueDate: p.dueDate, dueTime: p.dueTime, assigneeId: p.assigneeId ?? user.id, requestedById: user.id, priority: p.priority ?? 'normal', rrule: p.rrule });
   }
+  /** 대표 실기기(10/16): 말더듬·반복·지시 문구가 업무명에 그대로 → AI 로 업무명·담당·마감 정리(없거나 실패하면 규칙 결과 그대로) */
+  async function tidy(t: string) {
+    if (t.replace(/\s/g, '').length < 12) return; // 짧은 말은 규칙으로 충분
+    setFixing(true);
+    try {
+      const r = await api<{ ok: boolean; title?: string; assigneeId?: string | null; dueDate?: string | null; dueTime?: string | null }>('/api/voice/structure', { body: { text: t } });
+      if (r.ok) setCard((c) => c && { ...c, title: r.title || c.title, assigneeId: r.assigneeId ?? c.assigneeId, dueDate: c.dueDate ?? r.dueDate ?? null, dueTime: c.dueTime ?? r.dueTime ?? null });
+    } catch { /* 규칙 결과 그대로 */ } finally { setFixing(false); }
+  }
   function start() {
     if (!voiceAvailable()) { voiceErrorToast('unsupported'); return; }
     setText(''); setFixes([]); setListening(true);
@@ -55,7 +64,7 @@ export function VoiceAddTask() {
       setText(r.text); setFixing(true);
       const c = await correctVoice(r); // 회사 단어장(사람·현장·프로젝트·자주 쓰는 말)으로 보정
       setFixing(false); setText(c.text); setFixes(c.fixes);
-      if (c.text.trim()) recognize(c.text);
+      if (c.text.trim()) { recognize(c.text); tidy(c.text); }
     } });
   }
   /** 고친 말 되돌리기 → 다시 인식, 다음부터 이 보정은 쓰지 않음 */
@@ -86,7 +95,7 @@ export function VoiceAddTask() {
           <div className="flex flex-col items-center gap-2 py-2">
             <button type="button" onClick={listening ? () => stop.current() : start} aria-label={listening ? '듣기 멈추기' : '말하기 시작'} aria-pressed={listening} data-testid="voice-start"
               className={cx('flex size-20 items-center justify-center rounded-full text-white shadow-pop', listening ? 'animate-pulse bg-red-500' : 'bg-brand-600 active:scale-95')}><Mic className="size-9" /></button>
-            <span className="text-sm text-ink-2" data-testid="voice-state">{listening ? '듣고 있어요… 말을 마치면 자동으로 정리합니다 (최대 60초)' : fixing ? '회사 단어장으로 맞추는 중…' : '눌러서 말하기 · 조용히 또박또박 말해도 됩니다'}</span>
+            <span className="text-sm text-ink-2" data-testid="voice-state">{listening ? '듣고 있어요… 말을 마치면 자동으로 정리합니다 (최대 60초)' : fixing ? '업무명·담당자·마감 정리하는 중…' : '눌러서 말하기 · 조용히 또박또박 말해도 됩니다'}</span>
           </div>
           <label className="block text-sm text-ink-2">말한 내용 (키보드 🎤 음성 입력이나 글로도 됩니다)
             <textarea className={cx(inputCls, 'mt-1 min-h-[72px] text-base')} value={text} onChange={(e) => setText(e.target.value)} placeholder="예: 내일 오후 3시까지 견적서 보내기" aria-label="말한 내용" data-testid="voice-text" />

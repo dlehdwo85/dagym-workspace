@@ -149,3 +149,41 @@ export async function learnVoice(u: SessionUser, i: z.infer<typeof learnInput>) 
     on conflict (tenant, heard, fixed) do update set hits = voice_lexicon.hits + ${i.accepted ? 1 : 0}, rejected = ${!i.accepted}, updated_at = now()`;
   return { ok: true };
 }
+
+// ---------------- 대표 실기기(10/16): 말한 지시 → 업무 카드(업무명·담당·마감) 정리 ----------------
+export const structureInput = z.object({ text: z.string().trim().min(1).max(2000) });
+/**
+ * 받아쓰기는 말더듬·반복("다음 다음 주")·지시 문구("본부장한테 업무 배정해 줘")가 섞여 업무명이 길고 지저분하다 →
+ * 가벼운 AI 1번으로 업무명(짧은 명사형)·담당자(볼 수 있는 사람만)·마감을 고른다. AI 가 없거나 한도면 null(화면은 규칙 결과 그대로).
+ */
+export async function structureVoice(u: SessionUser, i: z.infer<typeof structureInput>) {
+  if (!aiEnabled()) return { ok: false as const };
+  try { const G = await import('./ai/guard'); await G.assertAiCredit(); await G.assertUserBudget(u); } catch { return { ok: false as const }; }
+  const dir = await directory(u);
+  const people = (dir.users as unknown as { id: string; name: string; title: string | null; title_short: string | null }[]).slice(0, 200);
+  const { todaySeoul } = await import('./time');
+  const today = todaySeoul();
+  const dow = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', weekday: 'long' }).format(new Date());
+  const p = anthropicProvider({ tier: 'fast' });
+  try {
+    const r = await p.chat({
+      system: `음성으로 말한 업무 지시를 업무 카드로 정리합니다. JSON 만.
+- title: 해야 할 일만 짧게(30자 이내, "~하기"·명사형). 받아쓰기 반복·말더듬("다음 다음 주", "푸르지오 푸르지오")은 한 번만, 지시 문구("업무 배정해 줘", "나 지금", "~할 것")·담당자·마감 표현은 빼고, 고유명사(현장·아파트·거래처 이름)는 그대로.
+- assignee: 일을 맡을 사람. 아래 [사람] 목록의 이름 그대로. 이름이 잘못 들렸어도 직책이 목록에서 한 사람뿐이면 그 사람. 모르면 null(지어내지 않음).
+- dueDate: YYYY-MM-DD(오늘 ${today} ${dow} 기준, "다음 주 금요일" = 다음 주의 금요일). 말하지 않았으면 null. dueTime: HH:MM 또는 null.`,
+      tools: [],
+      messages: [{ role: 'user', content: `[사람]\n${people.map((x) => `${x.name}${x.title ? ` (${x.title})` : ''}`).join('\n')}\n\n[말한 내용]\n${i.text}` }],
+      format: { type: 'object', additionalProperties: false, required: ['title', 'assignee', 'dueDate', 'dueTime'], properties: {
+        title: { type: 'string' }, assignee: { type: ['string', 'null'] }, dueDate: { type: ['string', 'null'] }, dueTime: { type: ['string', 'null'] } } },
+    });
+    await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+      values (${tenantOf(u)}, ${u.id}, ${crypto.randomUUID()}, 'anthropic', ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${costUsd(r.model ?? p.model, r.usage)}, 'voice')`;
+    const o = JSON.parse((r.content as any[]).find((b) => b.type === 'text')?.text ?? '{}') as { title?: string; assignee?: string | null; dueDate?: string | null; dueTime?: string | null };
+    const nm = (o.assignee ?? '').replace(/\s/g, '');
+    const who = nm ? people.find((x) => x.name.replace(/\s/g, '') === nm)
+      ?? (() => { const h = people.filter((x) => [x.title, x.title_short].some((t) => t && t.replace(/\s/g, '') === nm)); return h.length === 1 ? h[0] : undefined; })() : undefined;
+    return { ok: true as const, title: String(o.title ?? '').trim().slice(0, 200), assigneeId: who?.id ?? null,
+      dueDate: /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate ?? '') && o.dueDate! >= today ? o.dueDate! : null,
+      dueTime: /^\d{2}:\d{2}$/.test(o.dueTime ?? '') ? o.dueTime! : null };
+  } catch { return { ok: false as const }; }
+}
