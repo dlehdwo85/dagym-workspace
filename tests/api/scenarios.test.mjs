@@ -320,6 +320,18 @@ describe('로컬 검수 요청 반영 (R-3·R-6·R-7)', () => {
     await ctx.managerA.client.ok('PATCH', `/api/events/${id}`, { reminderMinutes: [] });
     assert.deepEqual((await ctx.managerA.client.ok('GET', `/api/events/${id}`)).event.reminder_minutes, []);
   });
+  test('V36 4 이동 일정(장소 있음): 알림을 정하지 않으면 30분 전 알림이 더해짐·본문에 장소, 장소 없으면 기본(60분)만', async () => {
+    const cal = (await ctx.managerA.client.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'org_unit').id;
+    const start = new Date(Date.now() + 25 * 60000);
+    const mk = (title, location) => ctx.managerA.client.ok('POST', '/api/events', { calendarId: cal, title, start: start.toISOString(), end: new Date(start.getTime() + 3600e3).toISOString(), ...(location ? { location } : {}) });
+    const go = (await mk('현장 방문 이동', '음성 아이파크')).id;
+    const stay = (await mk('사무실 회의')).id;
+    await tick(); await tick();
+    const a = await sql`select dedupe_key, body from notifications where type = 'event_reminder' and entity_id = ${go} and user_id = ${ctx.managerA.id}`;
+    assert.equal(a.length, 1); assert.ok(a[0].dedupe_key.endsWith(':30'), a[0].dedupe_key); assert.match(a[0].body, /음성 아이파크/);
+    const b = await sql`select dedupe_key from notifications where type = 'event_reminder' and entity_id = ${stay} and user_id = ${ctx.managerA.id}`;
+    assert.equal(b.length, 1); assert.ok(b[0].dedupe_key.endsWith(':60'), b[0].dedupe_key);
+  });
 });
 
 describe('Asana 이상 P0 (B-2·B-3·B-4)', () => {

@@ -184,7 +184,7 @@ function CalendarPage() {
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e) && (showDone || (e.linkedTask ?? e.blockTask)?.status !== 'done')).map((e) => ({ // 완료된 업무의 일정·업무 시간 블록은 "완료 보기"를 켤 때만
       id: `${e.id}|${e.originalStart ?? ''}`, title: `${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}${dupTasks.get(`${seoulDate(e.start)}|${normT(e.title)}`) ? ` · 업무 ${dupTasks.get(`${seoulDate(e.start)}|${normT(e.title)}`)}` : ''}`,
-      classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(e.linkedTask ? ['has-task'] : []), ...((e.linkedTask ?? e.blockTask)?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
+      classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(!e.masked && e.location?.trim() ? ['is-travel'] : []), /* V36 4: 장소 있음 = 이동 일정 */ ...(e.linkedTask ? ['has-task'] : []), ...((e.linkedTask ?? e.blockTask)?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
       // V7 4번: 색은 개인/회사 두 가지만(사람 구분은 제목 앞 머리글자)
       backgroundColor: isPersonalEvent(e) ? calColors.personal : calColors.company, borderColor: 'transparent', textColor: '#ffffff',
@@ -362,6 +362,12 @@ function CalendarPage() {
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
             <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
+            {/* V36 4 범례: 일정 = 꽉 찬 블록, 업무 = 왼쪽 굵은 선, 이동(장소 있음) = 📍·진한 테두리 */}
+            <span className="inline-flex items-center gap-2 px-1 text-[11px] text-ink-3" data-testid="cal-legend">
+              <span className="inline-flex items-center gap-1"><span className="inline-block size-2.5 rounded-sm" style={{ background: calColors.company }} />일정</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border-l-[3px] border-slate-700 bg-slate-200" />업무</span>
+              <span className="inline-flex items-center gap-0.5"><MapPin className="size-3 text-ink-2" />이동</span>
+            </span>
             <button onClick={() => setColorDlg(true)} className="hidden items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:inline-flex" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
           </div>
           {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}
@@ -428,11 +434,15 @@ function CalendarPage() {
               const mins = arg.event.end && arg.event.start ? (+arg.event.end - +arg.event.start) / 60000 : 60;
               const hm = (x: Date | null) => (x ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }).format(x) : '');
               // 휴대폰(좁은 칸)은 시작 시각만 "13:00" — "오후 1:00 - 오후 2…"처럼 잘리지 않게
-              const when = isTask ? (t.due_time ? `${t.due_time.slice(0, 5)} 마감` : '') : mobile && timed ? hm(arg.event.start) : arg.timeText;
-              const icon = !isTask && arg.event.classNames.includes('task-block') ? <Timer className="mr-0.5 inline size-3 align-[-2px]" aria-label="업무 시간" /> : null;
+              const when0 = isTask ? (t.due_time ? `${t.due_time.slice(0, 5)} 마감` : '') : mobile && timed ? hm(arg.event.start) : arg.timeText;
+              // V36 4: 장소가 있는 일정 = 이동 — 📍 + (넓은 칸) 장소·출발 권장(시작 40분 전, 지도 계산 없음)
+              const loc = !isTask ? String(p.ev?.location ?? '').trim() : '';
+              const icon = loc ? <MapPin className="mr-0.5 inline size-3 align-[-2px]" aria-label="이동" data-travel-icon /> : !isTask && arg.event.classNames.includes('task-block') ? <Timer className="mr-0.5 inline size-3 align-[-2px]" aria-label="업무 시간" /> : null;
+              const depart = loc && timed && arg.event.start ? `${hm(new Date(+arg.event.start - 40 * 60000))} 출발 권장` : '';
               const narrow = mobile && (arg.view.type === 'timeGridWeek' || arg.view.type === 'timeGrid3'); // V14 41번: 휴대폰 주·3일
+              const when = loc && !narrow && !month ? [when0, loc, depart].filter(Boolean).join(' · ') : when0;
               const label = `${narrow ? '' : p.who ?? ''}${arg.event.title}`;
-              const attrs = { ...(isTask ? { 'data-task-item': t.id, title: label } : { 'data-ev-block': '1', title: label, ...(lt ? { 'data-linked-task': lt.id } : {}) }), 'data-done': done ? '1' : undefined };
+              const attrs = { ...(isTask ? { 'data-task-item': t.id, title: label } : { 'data-ev-block': '1', title: label, ...(lt ? { 'data-linked-task': lt.id } : {}) }), 'data-done': done ? '1' : undefined, ...(loc ? { 'data-travel': '1' } : {}) };
               // V14 41번(Google 앱 주 보기): 휴대폰 주·3일 — 종일 칩은 2줄까지 줄바꿈 11px, 시간 블록은 제목만 블록 높이만큼 줄바꿈(단어 중간 허용), 시각은 1시간 이상 블록만
               if (narrow && arg.event.allDay) return (
                 <div className="line-clamp-2 min-w-0 whitespace-normal break-all px-0.5 text-[11px] font-semibold leading-[1.2]" data-allday-chip="1" {...attrs}>{icon}{label}</div>
@@ -831,7 +841,9 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
               <ul className="mt-1 list-disc pl-4">{conf.map((c, i) => <li key={i}>{c.who.join(', ')}: {c.title} ({fmtTimeRange(c.start, c.end)})</li>)}</ul>
             </div>
           )}
-          <Field label="장소"><input className={inputCls} value={f.location} onChange={(e) => set('location')(e.target.value)} /></Field>
+          <Field label="장소"><input className={inputCls} value={f.location} onChange={(e) => set('location')(e.target.value)} placeholder="예: 음성 아이파크 — 적으면 이동 일정" /></Field>
+          {/* V36 4: 장소를 적으면 이동 일정 — 캘린더에서 📍·진한 테두리, 알림 따로 안 정하면 30분 전 알림이 더해짐 */}
+          {f.location?.trim() && <p className="-mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800" data-testid="editor-travel"><MapPin className="size-3" />이동 있음{!f.reminders ? ' · 30분 전 알림 기본' : ''}</p>}
           <Field label="설명"><textarea className={inputCls} rows={3} value={f.description} onChange={(e) => set('description')(e.target.value)} /></Field>
         </fieldset>
         {myAtt && (

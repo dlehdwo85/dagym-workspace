@@ -220,13 +220,14 @@ export async function eventReminders(now = new Date()) {
       const ctx = mine.length ? ` · 연결 업무 ${mine.length}건${open ? ` 중 미완료 ${open}건` : ' 모두 완료'}${late ? `(지연 ${late}건)` : ''}` : '';
       for (const p of leads) {
         // 아직 시각이 안 된 알림은 건너뛰고, 지난 알림 중 가장 가까운 것 하나만 보낸다(정기 실행 지연 시 몰아서 여러 번 보내지 않음)
-        const all = custom ?? (p.lead ? [p.lead] : []);
+        // V36 4: 장소가 있는 일정(이동) = 사용자 기본 알림 + 30분 전 기본(일정별 알림을 정했으면 그대로)
+        const all = custom ?? [...(p.lead ? [p.lead] : []), ...(String(m.location ?? '').trim() ? [30] : [])];
         const due = all.filter((l) => o.start.getTime() - l * 60000 <= now.getTime());
         if (!due.length) continue;
         const lead = Math.min(...due);
         const hm = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' }).format(o.start);
         const mins = Math.max(1, Math.round((o.start.getTime() - now.getTime()) / 60000));
-        sent += (await notify(sql, { userIds: [p.id], type: 'event_reminder', title: `일정 ${fmtLeft(mins)} 전: ${o.title}`, body: `${hm} 시작${m.location ? ` · ${m.location}` : ''}${ctx}`,
+        sent += (await notify(sql, { userIds: [p.id], type: 'event_reminder', title: `일정 ${fmtLeft(mins)} 전: ${o.title}`, body: `${hm} 시작${m.location ? ` · 📍 ${m.location} — 이동 시간 확인` : ''}${ctx}`,
           link: `/calendar?event=${o.id}`, entityType: 'event', entityId: o.id, dedupeKey: `evrem:${m.id}:${o.start.toISOString()}:${lead}` })).length;
       }
     }
