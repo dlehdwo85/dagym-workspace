@@ -331,14 +331,14 @@ await step('V35 1 첨부 눈에 띄게: 목록 파란 📎 칩·"첨부 있음" 
 });
 
 await step('V36 4 이동 일정: 장소 있는 일정 = 📍·진한 테두리·장소·출발 권장 시각, 범례(일정·업무·이동)', async () => {
-  const d = addDays(today, 3);
+  const d = addDays(today, 5); // 다른 단계(V4: +3일 14시 빈 칸 탭)와 겹치지 않게
   const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'personal').id;
-  await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '현장 방문 이동 시험', location: '음성 아이파크', start: `${d}T14:00:00+09:00`, end: `${d}T16:00:00+09:00` });
+  await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '현장 방문 이동 시험', location: '음성 아이파크', start: `${d}T19:00:00+09:00`, end: `${d}T21:00:00+09:00` });
   await owner.goto(`${BASE}/calendar?date=${d}&view=timeGridWeek`);
   await owner.getByTestId('cal-legend').waitFor();
   const blk = owner.locator('[data-travel]', { hasText: '현장 방문 이동 시험' }).first();
   await blk.waitFor();
-  await blk.getByText(/음성 아이파크 · 13:20 출발 권장/).waitFor();
+  await blk.getByText(/음성 아이파크 · 18:20 출발 권장/).waitFor();
   assert.equal(await owner.locator('.fc-event.is-travel', { hasText: '현장 방문 이동 시험' }).count() >= 1, true, '이동 일정 표시');
 });
 
