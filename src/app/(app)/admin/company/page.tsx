@@ -81,18 +81,35 @@ export default function CompanyPage() {
 
 /** V38 4 회사 설정: 업무 첨부를 자료실에 자동 등록(같은 파일·업무를 볼 수 있는 사람만) */
 function AttachToLibrary() {
-  const st = useApi<{ on: boolean }>('/api/org/attach-library');
+  const st = useApi<{ on: boolean; confWords: string[]; confWordsDefault: boolean; defaults: string[] }>('/api/org/attach-library');
   const [busy, setBusy] = useState(false);
+  const [words, setWords] = useState<string | null>(null);
   if (!st.data) return null;
+  const saveWords = async (list: string[] | null) => {
+    setBusy(true);
+    try { await api('/api/org/attach-library', { method: 'PUT', body: { confWords: list } }); setWords(null); st.reload(); toast.ok(list ? '기밀 단어를 저장했습니다' : '기본 단어로 되돌렸습니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
   const toggle = async (on: boolean) => {
     setBusy(true);
     try { await api('/api/org/attach-library', { method: 'PUT', body: { on } }); st.reload(); toast.ok(on ? '업무 첨부를 자료실에도 저장합니다' : '업무 첨부를 자료실에 저장하지 않습니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   };
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-card border border-line bg-white p-4 text-sm shadow-card">
+    <div className="space-y-3 rounded-card border border-line bg-white p-4 text-sm shadow-card">
+    <label className="flex cursor-pointer items-start gap-3">
       <input type="checkbox" className="mt-0.5 size-4" checked={st.data.on} disabled={busy} onChange={(e) => toggle(e.target.checked)} data-testid="attach-to-library" />
       <span><b>업무 첨부를 자료실에 자동 저장</b>
         <span className="mt-0.5 block text-xs text-ink-2">업무에 올린 파일이 자료실 &ldquo;업무 첨부/프로젝트&rdquo; 폴더에도 보입니다(같은 파일 하나, 복사 없음). 그 업무를 볼 수 있는 사람만 자료실에서도 보이고, 자료실에서 지워도 업무 첨부는 남습니다.</span></span>
     </label>
+    {/* V38 4: 기밀 이름 규칙 — 내부 민감 단어만. 견적서·제안서처럼 고객에게 보내는 문서는 넣지 않는다(보낼 때마다 경고가 뜸) */}
+    <div className="border-t border-line pt-3" data-testid="conf-words">
+      <p className="font-semibold">기밀로 분류할 파일 이름 단어 {st.data.confWordsDefault && <span className="text-xs font-normal text-ink-3">(기본값)</span>}</p>
+      <p className="mt-0.5 text-xs text-ink-2">이 단어가 이름에 있으면 자료실에서 기밀로 분류되고, 밖으로 보낼 때 한 번 확인합니다. 견적서·제안서·회사소개처럼 고객에게 보내는 문서 단어는 넣지 마세요.</p>
+      <textarea className={cx(inputCls, 'mt-2 min-h-20')} value={words ?? st.data.confWords.join(', ')} onChange={(e) => setWords(e.target.value)} aria-label="기밀 단어" />
+      <div className="mt-2 flex gap-2">
+        <Button size="sm" disabled={busy || words === null} onClick={() => saveWords((words ?? '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean))} data-testid="conf-words-save">저장</Button>
+        {!st.data.confWordsDefault && <Button size="sm" variant="ghost" disabled={busy} onClick={() => saveWords(null)}>기본값으로</Button>}
+      </div>
+    </div>
+    </div>
   );
 }

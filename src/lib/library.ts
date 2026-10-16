@@ -89,8 +89,22 @@ export async function userSeesConfidential(userId: string) {
   return RANK[await menuLevel({ ...r, timezone: 'Asia/Seoul', sessionId: '' }, 'confidential')] >= RANK.view;
 }
 /** 이름·본문으로 기밀 후보 (AI 가 없거나 놓쳐도) */
-const CONF_WORDS = /(매출|급여|연봉|월급|상여|인사\s?(평가|기록|카드)|계약서|주민(등록)?번호|\d{6}-[1-4]\d{6}|계좌|통장|견적|단가|정산|손익|원가|재무|세금계산서|비밀|기밀|confidential|salary|payroll)/i;
-export function ruleSecurity(text: string): Security | null { return CONF_WORDS.test(text) ? 'confidential' : null; }
+/**
+ * 기밀 이름 규칙(V38 4 로컬 검수): 내부 민감 단어 중심 — 견적·제안서·회사소개·브로슈어·카탈로그처럼 고객에게 보내는 문서는 넣지 않는다.
+ * 회사 설정(회사 정보·디자인 화면)에서 관리자가 고칠 수 있고, 비우면 이 기본 목록. 주민등록번호 모양은 항상 기밀
+ */
+export const DEFAULT_CONF_WORDS = ['급여', '연봉', '월급', '상여', '인사평가', '인사기록', '인사카드', '평가표', '주민등록', '주민번호', '통장', '계좌', '비밀번호', '계약 원본', '계약서 원본',
+  '재무제표', '손익', '원가', '매입 단가', '매입단가', '매출 장부', '정산서', '세금계산서', '비밀', '기밀', 'confidential', 'salary', 'payroll'];
+const RRN = /\d{6}-[1-4]\d{6}/;
+const norm = (x: string) => x.toLowerCase().replace(/\s+/g, '');
+function matchWords(text: string, words: string[]) { const t = norm(text); return RRN.test(text) || words.some((w) => w.trim() && t.includes(norm(w))); }
+export function ruleSecurity(text: string, words: string[] = DEFAULT_CONF_WORDS): Security | null { return matchWords(text, words) ? 'confidential' : null; }
+/** 회사별 기밀 단어(설정 없으면 기본) */
+export async function confWords(tenant: string): Promise<string[]> {
+  const [r] = await db()<{ w: string | null }[]>`select conf_words as w from tenants where id = ${tenant}`;
+  const list = (r?.w ?? '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
+  return list.length ? list.slice(0, 200) : DEFAULT_CONF_WORDS;
+}
 async function secAudit(u: SessionUser, f: any, purpose: string) {
   const { audit } = await import('./log');
   await audit(db(), u.id, `library.confidential_${purpose}`, 'library_file', f.id, { title: f.title, folder: f.folder }, null);
@@ -183,7 +197,7 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
     if (d) throw new HttpError(409, 'duplicate', `이미 있는 파일입니다: ${d.folder ? d.folder + ' / ' : ''}${d.title}`, { duplicate: d });
   }
   // V14 15번: 매출 근거는 기밀(확정), 그 외는 내부(대표 지시: 확인 전 기본값) — 이름이 기밀 후보면 "기밀 제안"으로 표시해 확인을 받는다
-  const ruled = revenue ? 'confidential' : ruleSecurity(`${i.fileName} ${i.title ?? ''} ${(i.tags ?? []).join(' ')}`);
+  const ruled = revenue ? 'confidential' : ruleSecurity(`${i.fileName} ${i.title ?? ''} ${(i.tags ?? []).join(' ')}`, await confWords(tenantOf(u)));
   const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, tags, description, created_by, content_hash, source, security, security_suggested, security_confirmed)
     values (${tenantOf(u)}, ${folder}, ${i.title || i.fileName.replace(/\.[^.]+$/, '')}, ${i.fileName}, ${mime}, ${i.size}, ${i.tags ?? []}, ${i.description ?? null}, ${u.id},
       ${i.contentHash ?? null}, ${revenue ? 'revenue' : i.purpose === 'ai_attach' ? 'ai_attach' : 'upload'}, ${revenue ? 'confidential' : 'internal'}, ${ruled}, ${revenue}) returning id`;
@@ -385,7 +399,7 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   const description = f.description || (out.summary || '').trim().slice(0, 500) || null;
   const confidence = Math.max(0, Math.min(1, out.confidence));
   // V14 15번 등급 제안: AI 답 + 이름·본문 규칙 중 높은 쪽. 등급 자체는 기밀 관리자가 확인할 때까지 그대로(기본 내부) — 화면에 "기밀 제안" 표시
-  const suggested: Security = maxSec(out.security ?? 'internal', ruleSecurity(`${f.file_name} ${title} ${tags.join(' ')} ${String(f.text_content ?? '').slice(0, 3000)}`) ?? 'public');
+  const suggested: Security = maxSec(out.security ?? 'internal', ruleSecurity(`${f.file_name} ${title} ${tags.join(' ')} ${String(f.text_content ?? '').slice(0, 3000)}`, await confWords(tenantOf(u))) ?? 'public');
   const security: Security = f.security;
   const result = { by, folder, tags, title, description, confidence, reason, suggested };
   if (opt.preview) { // V14 18번: 관리자 전체 정리 미리보기 — 적용 전까지 아무것도 바꾸지 않는다
@@ -582,7 +596,7 @@ export async function registerTaskAttachment(u: SessionUser, a: { id: string; ta
   const title = a.file_name.replace(/\.[^.]+$/, '').slice(0, 200) || a.file_name;
   // 등급(V34-C5): 이름 규칙이 기밀이면 기밀로 저장 → 기밀 권한 없는 사람은 자료실 목록에서 안 보임(관리자가 내리기).
   // 업무 화면 첨부는 이 행의 등급과 무관하게 기존 규칙(storageSecurity 가 task_attach 행을 보지 않음)
-  const suggested = ruleSecurity(`${a.file_name} ${task.title}`);
+  const suggested = ruleSecurity(`${a.file_name} ${task.title}`, await confWords(t));
   const security = suggested ?? 'internal';
   const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, storage_key, upload_status, tags, description, source, created_by, task_id, security, security_suggested)
     values (${t}, ${folder}, ${title}, ${a.file_name}, ${a.mime_type}, ${size}, ${a.storage_key}, 'ready', ${['업무 첨부']}, ${`업무: ${task.title}`}, 'task_attach', ${u.id}, ${a.task_id}, ${security}, ${suggested})
@@ -591,12 +605,18 @@ export async function registerTaskAttachment(u: SessionUser, a: { id: string; ta
 }
 /** 회사 설정: 업무 첨부 자료실 자동 등록 켜기/끄기 */
 export async function getAttachToLibrary(u: SessionUser) {
-  const [r] = await db()<{ on: boolean }[]>`select attach_to_library as on from tenants where id = ${tenantOf(u)}`;
-  return { on: r?.on ?? true };
+  const [r] = await db()<{ on: boolean; w: string | null }[]>`select attach_to_library as on, conf_words as w from tenants where id = ${tenantOf(u)}`;
+  return { on: r?.on ?? true, confWords: await confWords(tenantOf(u)), confWordsDefault: !r?.w?.trim(), defaults: DEFAULT_CONF_WORDS };
 }
-export async function setAttachToLibrary(u: SessionUser, on: boolean) {
+/** 업무 첨부 자료실 자동 저장 켜기/끄기 · 기밀 이름 규칙 단어(빈 목록 = 기본) — 회사 정보·디자인 편집 권한 */
+export async function setAttachToLibrary(u: SessionUser, i: { on?: boolean; confWords?: string[] | null }) {
   const { requireAnyMenu } = await import('./menuPerms');
   await requireAnyMenu(u, ['company', 'ops'], 'edit');
-  await db()`update tenants set attach_to_library = ${on} where id = ${tenantOf(u)}`;
-  return { on };
+  const sql = db();
+  if (i.on !== undefined) await sql`update tenants set attach_to_library = ${i.on} where id = ${tenantOf(u)}`;
+  if (i.confWords !== undefined) {
+    const list = (i.confWords ?? []).map((x) => x.trim()).filter(Boolean).slice(0, 200);
+    await sql`update tenants set conf_words = ${list.length ? list.join(', ') : null} where id = ${tenantOf(u)}`;
+  }
+  return getAttachToLibrary(u);
 }

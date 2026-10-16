@@ -119,11 +119,8 @@ describe('V21 보관함 발송', () => {
     box.mails = [];
     const mail = { taskId, company: 'hilink', to: ['customer@client.test'], cc: ['boss@client.test'], subject: '견적서 송부의 건',
       body: '안녕하세요.\n\n견적서를 보내 드립니다.', attachmentIds: [attId], senderTitle: '대표', senderPhone: '010-1111-2222', senderWorkEmail: 'ceo@company.test' };
-    // V38 4: "견적서" = 이름 규칙 기밀로 자동 분류된 업무 첨부 → 막지 않고 경고 + 확인 한 번(409), 확인하면 보내고 감사 기록
-    const warn = await ctx.owner.req('POST', '/api/mail/send', mail);
-    assert.equal(warn.status, 409); assert.equal(warn.body.error.code, 'confirm_confidential'); assert.match(warn.body.error.message, /기밀로 분류됐습니다/);
-    const r = await ctx.owner.ok('POST', '/api/mail/send', { ...mail, confirmConfidential: true });
-    assert.equal((await sql`select count(*)::int n from audit_logs where action = 'library.confidential_share_confirmed'`)[0].n >= 1, true, '감사 기록');
+    // V38 4: 견적서는 고객에게 보내는 문서 → 기밀 이름 규칙에 없음 = 경고 없이 바로 보냄(급여명세 같은 기밀 단어는 attach-library 시험에서 경고 → 확인)
+    const r = await ctx.owner.ok('POST', '/api/mail/send', mail);
     assert.equal(r.status, 'queued');
     await waitStatus(r.id, ['sent']);
     assert.equal(box.mails.length, 1);
@@ -182,7 +179,7 @@ describe('V21 보관함 발송', () => {
   test('첨부 합계 10MB 초과 → 다운로드 링크(14일)로 바꿔 보내고, 열면 업무에 "고객이 자료를 열어봄"', async () => {
     box.mails = [];
     await sql`update attachments set size_bytes = 12 * 1024 * 1024 where id = ${attId}`;
-    const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '큰 자료', body: '본문', attachmentIds: [attId], confirmConfidential: true });
+    const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '큰 자료', body: '본문', attachmentIds: [attId] });
     assert.equal(r.asLink, true);
     await waitStatus(r.id, ['sent']);
     const m = box.mails[0];
@@ -240,7 +237,7 @@ describe('V29 쉬운 메일(워크인 발송) + B1 직원별 보내는 이름·�
     const up = await ctx.owner.ok('POST', '/api/attachments', { taskId, kind: 'file', fileName: '견적서.pdf', mimeType: 'application/pdf', size: 12 });
     await fetch(BASE + up.upload.url, { method: 'PUT', headers: up.upload.headers, body: Buffer.from('%PDF-1.4 abc') });
     await ctx.owner.ok('POST', `/api/attachments/${up.id}/complete`, {});
-    const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], cc: ['boss@client.test'], bcc: ['archive@company.test'], subject: '워크인 발송 시험', body: '안녕하세요', attachmentIds: [up.id], confirmConfidential: true });
+    const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], cc: ['boss@client.test'], bcc: ['archive@company.test'], subject: '워크인 발송 시험', body: '안녕하세요', attachmentIds: [up.id] });
     assert.equal(r.channel, 'email:workin');
     await waitStatus(r.id, ['sent']);
     const m = resend.mails.at(-1);
@@ -276,7 +273,7 @@ describe('V21 2차: AI 초안·자료 추천 / 문자 넘기기 / 전화 문의'
   });
 
   test('문자: [보냈어요]만 기록(보관함 sms·업무 기록), 권한 없는 사람 403, 번호 형식 확인', async () => {
-    const share = await ctx.owner.ok('POST', '/api/mail/share', { taskId, attachmentIds: [attId], confirmConfidential: true });
+    const share = await ctx.owner.ok('POST', '/api/mail/share', { taskId, attachmentIds: [attId] });
     assert.match(share.url, /\/d\//);
     const r = await ctx.owner.ok('POST', '/api/mail/sms-log', { taskId, to: ['010-0000-0000'], body: '자료 보내 드립니다', shareUrl: share.url });
     const [o] = await sql`select channel, status, share_id from outbox where id = ${r.id}`;

@@ -61,6 +61,23 @@ describe('V38 4 업무 첨부 → 자료실', () => {
     await ctx.owner.ok('DELETE', `/api/library/${lf.id}`);
     assert.equal((await ctx.staffA.client.get(`/api/attachments/${attId}/download?json=1`)).status, 404, '자료실 원본을 지우면 첨부도 404');
   });
+  test('밖으로 보내기: 견적서.pdf = 경고 없이, 급여명세.pdf(기밀 단어) = 경고 409 → 확인하면 보냄·감사 기록, 회사가 단어 목록을 고칠 수 있음', async () => {
+    const q = await upload(ctx.owner, '견적서.pdf');
+    assert.equal((await sql`select security from library_files where id = ${q.libraryId}`)[0].security, 'internal', '견적은 고객 발송용 — 기밀 아님');
+    assert.match((await ctx.owner.ok('POST', '/api/mail/share', { taskId, attachmentIds: [q.id] })).url, /\/d\//);
+    const p = await upload(ctx.owner, '급여명세.pdf');
+    const warn = await ctx.owner.req('POST', '/api/mail/share', { taskId, attachmentIds: [p.id] });
+    assert.equal(warn.status, 409); assert.equal(warn.body.error.code, 'confirm_confidential'); assert.match(warn.body.error.message, /기밀로 분류됐습니다\(파일 이름 규칙\): 급여명세\.pdf/);
+    assert.match((await ctx.owner.ok('POST', '/api/mail/share', { taskId, attachmentIds: [p.id], confirmConfidential: true })).url, /\/d\//);
+    assert.ok((await sql`select 1 from audit_logs where action = 'library.confidential_share_confirmed'`).length, '감사 기록');
+    // 단어 목록: 기본 → "도면" 추가 → 도면 파일은 기밀 → 기본값으로 되돌림
+    const s0 = await ctx.owner.ok('GET', '/api/org/attach-library');
+    assert.ok(s0.confWordsDefault && s0.confWords.includes('급여') && !s0.confWords.some((w) => /견적|제안|소개|브로슈어|카탈로그/.test(w)));
+    await ctx.owner.ok('PUT', '/api/org/attach-library', { confWords: ['급여', '도면'] });
+    const d = await upload(ctx.owner, '현장 도면.pdf');
+    assert.equal((await sql`select security from library_files where id = ${d.libraryId}`)[0].security, 'confidential');
+    assert.equal((await ctx.owner.ok('PUT', '/api/org/attach-library', { confWords: null })).confWordsDefault, true);
+  });
   test('회사 설정 끄면 등록 안 함, 직원은 설정 못 바꿈', async () => {
     assert.equal((await ctx.owner.ok('GET', '/api/org/attach-library')).on, true);
     assert.ok([403, 404].includes((await ctx.staffA.client.req('PUT', '/api/org/attach-library', { on: false })).status));

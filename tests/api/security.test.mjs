@@ -51,7 +51,7 @@ describe('V14 15번 보안 등급 — 자료실', () => {
   test('기밀 제안: 이름에 급여 → 등급은 내부 그대로 + 제안 표시, 대표가 기밀로 지정하면 확인됨', async () => {
     const [f] = await sql`select security, security_suggested, security_confirmed from library_files where id = ${D.conf}`;
     assert.equal(f.security, 'confidential'); assert.equal(f.security_suggested, 'confidential'); assert.equal(f.security_confirmed, true);
-    const t = await up(ctx.staffA.client, { fileName: '거래처 견적 단가.csv', folder: '영업' }, 'a,b\n1,2\n');
+    const t = await up(ctx.staffA.client, { fileName: '거래처 매입 단가.csv', folder: '영업' }, 'a,b\n1,2\n');
     const [g] = await sql`select security, security_suggested from library_files where id = ${t}`;
     assert.equal(g.security, 'internal', '확인 전 기본 내부'); assert.equal(g.security_suggested, 'confidential');
     D.quote = t;
