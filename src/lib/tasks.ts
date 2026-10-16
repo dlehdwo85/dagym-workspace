@@ -73,7 +73,7 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   (select count(*)::int from comments cm where cm.task_id = t.id and cm.deleted_at is null) as comment_count,
   (select count(*)::int from attachments at where at.task_id = t.id and at.deleted_at is null) as attachment_count,
   -- V35 1: 고객에게 보낸 자료(메일·다운로드 링크) · 고객이 열어 봄
-  (select case when bool_or(a.action = 'share_opened') then 'opened' else 'sent' end from activities a
+  (select case when count(*) = 0 then null when bool_or(a.action = 'share_opened') then 'opened' else 'sent' end from activities a
      where a.entity_type = 'task' and a.entity_id = t.id and a.action in ('mail_sent', 'share_created', 'share_opened')) as share_state,
   (select count(*)::int from task_dependencies d join tasks dt on dt.id = d.depends_on_id
      where d.task_id = t.id and dt.status <> 'done' and dt.deleted_at is null) as blocked_by_count,
