@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useRowOpen } from './rowOpen';
-import { DndContext, MouseSensor, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
+import { DndContext, MouseSensor, PointerSensor, TouchSensor, rectIntersection, useDraggable, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -764,7 +764,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
   };
 
   return (
-    <DndContext sensors={selOnCtx || !draggable ? NO_SENSORS : sensors} onDragEnd={draggable ? end : undefined} onDragStart={(_e: DragStartEvent) => { try { navigator.vibrate?.(15); } catch {} }}>
+    <DndContext sensors={selOnCtx || !draggable ? NO_SENSORS : sensors} collisionDetection={rowsFirst} onDragEnd={draggable ? end : undefined} onDragStart={(_e: DragStartEvent) => { try { navigator.vibrate?.(15); } catch {} }}>
       <div className="space-y-4" data-testid="task-groups" data-group-by={group}>
         {top && <div className="overflow-hidden rounded-card border border-accent-500/40 bg-white shadow-card ring-2 ring-accent-500/10">{top}</div>}
         {group === 'month' ? (() => {
@@ -896,6 +896,12 @@ function DoneArchive({ thisMonth, filterQs, onPatch }: { thisMonth: Task[]; filt
     </div>
   );
 }
+
+/** 놓을 곳: 업무 줄과 겹치면 그 줄, 없을 때만 묶음(빈 묶음·끝으로) — 휴대폰 두 줄 행은 묶음 전체와 겹치는 비율이 커서 순서가 안 바뀌던 문제 */
+const rowsFirst: CollisionDetection = (args) => {
+  const rows = rectIntersection({ ...args, droppableContainers: args.droppableContainers.filter((c) => !String(c.id).startsWith('group:')) });
+  return rows.length ? rows : rectIntersection(args);
+};
 
 /** 끌어서 순서 바꾸는 행 (손잡이는 PC 에서만 — 휴대폰은 밀기 동작과 겹치지 않게) */
 function SortableRow({ t, onPatch, onAck, onMove }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void }) {
