@@ -45,12 +45,12 @@
 | tasks·task_subtasks(10종 유형, 6상태, 자동 생성) | 업무·체크리스트 | 업무에 `lead_id` 연결 칸 추가. 영업 유형 10종은 업무 분류(태그)로. 영업 업무 8건 이전 |
 | schedules(방문·1차/2차연락·제안서전달·계약미팅 등) | 캘린더 일정 | 일정에 `lead_id` 연결. 종류는 일정 분류로. 리드의 '다음 연락일'은 캘린더에 점선 일정으로 합성(지금과 같게) |
 | /dashboard 오늘 할 일 ①~⑦ | 홈 | 영업 공간 홈에 같은 7묶음. 업무 공간 홈에는 "영업 연락 N건" 한 줄만(대표 V37 홈 중복 지적 반영) |
-| AI 비서(ANTHROPIC_API_KEY, ai_usage·ai_proposals, 일/월 한도) | 워크인 AI 비서·회사 AI 크레딧 | **이미 Claude**. 영업 도구(리드 찾기·상태 변경 제안·견적 초안)를 워크인 AI 도구로 옮기고 사용량은 회사 AI 크레딧에서 차감 |
+| AI 비서(ANTHROPIC_API_KEY, ai_usage·ai_proposals, 일/월 한도) | 워크인 AI 비서·회사 AI 크레딧 | **이미 Claude**. 그대로 옮길 도구 — 읽기: today_summary·search_leads·get_lead·search_bids·list_schedules·list_tasks·list_vendors / 제안(확인 후 반영): create_schedule·create_task·set_lead_next_contact·set_bid_work·set_vendor_status. 사용량은 회사 AI 크레딧에서 차감. **견적 초안은 영업관리에 없음 → 워크인 신규 기능**으로 따로 |
 | proposal-attachments 버킷 | 자료실(V38-4 자동 저장) | 제안서 첨부를 자료실 '영업' 폴더로. 25MB 검사 → 워크인 업로드 한도 적용 |
 | 로그인(Supabase 이메일) | 워크인 로그인(카카오·구글·네이버 포함) | 사용자 2명 계정 연결 |
 | 새 버전 알림(VersionWatch)·PWA | 워크인 앱(Capacitor)·새 버전 알림 | 별도 구현 불필요 |
 | 전화(tel:)·문자 | 워크인 문자 초안(V32-7)·연락처(V31) | 리드 연락처에서 바로 워크인 문자 초안 |
-| 문의 접수 | 워크인 문의함(040 inquiries) | **겹침**: 웹 문의는 워크인 문의함에 들어오고 [영업 리드로] 한 번에 전환(마케팅 '문의 전환'도 같은 길) |
+| (영업관리에 문의 접수 없음) | 워크인 문의함(040 inquiries) | **워크인 신규 연결**: 웹 문의는 워크인 문의함에만 들어옴 → [영업 리드로] 한 번에 전환 기능 새로 만듦(마케팅 '문의 전환'도 같은 길) |
 
 ### B. 영업 공간에 새로 만드는 기능 (영업관리 그대로, 워크인 디자인)
 | 메뉴(시안 ③) | 영업관리 화면·데이터 | 이전 데이터(10/17) |
@@ -61,7 +61,7 @@
 | 제안·견적 | proposals(금액·할인·월 운영비·설치비·버전·상태 5) | 0 |
 | 계약 | contracts(재계약 단계 8구간, 90/180/365일 KPI), 영업 ROI(sales_costs, 기간·사업별) | 0 / 0 |
 | 리드 상세 | 탭 7개(정보·선행영업 시점·일정·업무·타임라인·제안·계약), 빠른 버튼 5개, 요약 카드 8개, sales_activities(전화·문자·메일·방문·미팅·메모) | 시점 2 |
-| 입찰·공고 모니터링 | procurement_notices(9 원천, 적합 분류 matchFit, 중복 정리, 낙찰 병합, 첨부 중계 다운로드), opportunity_work(7상태, 진행영업 전환) | 공고 4,356(관련 654·진행 112) · 진행기록 30 |
+| 입찰·공고 모니터링 | procurement_notices(9 원천, 적합 분류 matchFit, 중복 정리, 낙찰 병합), opportunity_work(7상태, 진행영업 전환). 세부: 진행 중/완료 탭·완료 목록 마감 월별 묶음, '미참여'(입찰만)와 [진행 목록으로 되돌리기], 미참여·대상아님은 홈 할 일·지금 영업·계약만료·AI 요약에서 제외, 정정 전 공고 배지, 첨부 중계 2종(K-apt 세션 중계 /api/bids/kapt-file, 나라장터 /api/bids/file — www.g2b.go.kr 첨부 경로만 허용·30MB·저장 안 함). **0037 정정·취소 트리거**: 같은 공고번호 새 차수 → 옛 차수 related=false·current_status '정정됨', 옛 차수의 opportunity_work·lead_id 를 새 차수로 이동(그대로 옮겨야 중복·옛 공고 재등장 없음) | 공고 4,356(관련 654·진행 112) · 진행기록 30 |
 | 영업기회 허브 | 요약·오늘 등록·지금 영업(5원천)·계약만료(뷰)·신규단지·준공/입주 시설(점수·lane)·협력사 등록 | 시설 4,346 · 신규단지 22 · 협력사 164 |
 | 지역별 | regions(RPC list/upsert) | 거래처 region 값 |
 | 관리 | 사업 카테고리(다짐/하이링크 7개)·지역·자동수집 현황·수동 실행 | 원천 19 · 실행 62 |
@@ -69,6 +69,10 @@
 
 ### C. 상업화 때문에 바꿔야 하는 것
 1. **수집 데이터는 회사 공용, 진행 기록은 회사별**: 입찰공고·준공시설·신규단지·협력사 목록은 공개 데이터라 전체 1벌(global 테이블)로 두고, opportunity_work·연락 상태·메모·전환은 tenant 칸으로 회사마다 따로. 다른 회사가 다짐의 검토 메모를 보면 안 됨.
+   - **표 단위가 아니라 칸 단위로 떼어 냄** — 지금 공용 표 안에 진행 기록 칸이 섞인 3곳:
+     - procurement_notices: classification(담당자가 바꾼 분류)·representative_judgment·qualification_gap·sales_point·lead_id → 회사별 표(tenant×notice). 수집기는 처음 넣을 때만 기본 classification 을 정하고 이후 안 건드림 → 공용 칸엔 '수집기 기본 분류', 회사별 칸엔 '회사가 바꾼 분류'.
+     - operating_facility_prospects(0024·0027): contact_status·contact_updated_at·next_action·next_action_date·lead_id·notes → 회사별 표.
+     - vendor_registrations(0033): 회사 정보(구분·회사·순위·모집 공지)는 공용, status·memo·next_date 는 회사별 표.
 2. **검색어·업종이 다짐 전용**: matchFit(헬스·피트니스·커뮤니티 등 18개 검색어, 다짐/하이링크 적합)과 사업 카테고리를 **회사 설정**(업종 템플릿 + 직접 추가)으로. 기본 템플릿 "시설 운영(피트니스·커뮤니티)"으로 다짐 값 그대로 제공.
 3. **입찰 모니터링은 업종 확장 기능**(요금제 '공간 추가'·업종 팩): 켜진 회사만 수집 결과 열람.
 4. **비밀값**: DATA_GO_KR_SERVICE_KEY·KAPT_SERVICE_KEY·KAKAO_REST_API_KEY 는 워크인 Vercel 에 대표가 직접 입력(우리 회사 키로 전체 수집, 고객 회사 키 불필요).
@@ -89,6 +93,8 @@
 | building_sales_pipeline 적재 경로 없음 | 이전 후 국토부 건축HUB 수집기로 채울지 대표 결정(⛔) |
 
 ### E. 검수 기준 (이전 완료 판정)
+- 분류 규칙(EXCLUDE_TOPICS·FACILITY_SERVICE_RE·CONSTRUCTION_RE·하이링크 '출입구축/자동출입/통합보안' 등, 10/15 기준)은 **'관련 654건'이 같게 나오는지**로 확인(규칙 하나라도 빠지면 숫자가 달라짐).
+- 옮기지 않는 것: 분류 정리 백업 표 2개(procurement_reclass_backup_20261014·_20261015), D 의 미사용 코드.
 - 건수 대조: 거래처 21·상담 4·업무 8/하위 1·시점 2·진행기록 30·신규단지 22·협력사 164·공고 4,356·시설 4,346 이 워크인에서 같게 나옴.
 - 화면 38개 각각 워크인 대응 화면을 열어 확인(로컬이 체크리스트로 검수), 수집기 12개 하루 실행 성공 기록.
 - 기존 영업관리 사이트는 이전 끝날 때까지 그대로 운영 → 끝나면 읽기 전용 2주 → 종료.
