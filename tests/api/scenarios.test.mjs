@@ -1784,9 +1784,11 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
     assert.deepEqual(u.limits, { users: null, storageGb: null, aiRequests: null, tasksTotal: null });
     assert.ok(u.usage.storageBytes > 0 && u.usage.users >= 4 && u.usage.aiRequests >= 1, '첨부·자료실·사람·AI 요청 셈');
     assert.ok(u.topFiles.length > 0 && u.topFiles[0].size >= u.topFiles.at(-1).size, '큰 파일 순');
-    assert.ok(u.plans.some((p) => p.code === 'team' && p.per_user_krw === 3900 && p.min_users === 3 && p.annual_per_user_krw === 3300) && u.plans.some((p) => p.code === 'personal' && p.monthly_krw === 2900 && p.limits.users === 1)
-      && u.plans.some((p) => p.code === 'business' && p.per_user_krw === 6900)
-      && !u.plans.some((p) => ['internal', 'standard', 'free', 'basic', 'team_free', 'trial'].includes(p.code)), '17차: 개인 2,900·팀 1인 3,900(최소 3인)·비즈니스 1인 6,900, 무료·체험·내부 요금제는 목록에 없음');
+    // V27(대표 10/17): 베이직 2,200·스탠다드 4,500·프로 8,500원(1인·최소 3인) + 무료(5명), 예전 개인·팀·비즈니스·내부·체험은 목록에 없음
+    const P = Object.fromEntries(u.plans.map((p) => [p.code, p]));
+    assert.ok(P.w_basic?.per_user_krw === 2200 && P.w_basic.annual_per_user_krw === 1800 && P.w_basic.min_users === 3 && P.w_standard?.per_user_krw === 4500 && P.w_pro?.per_user_krw === 8500 && P.w_free?.limits.users === 5
+      && !u.plans.some((p) => ['internal', 'standard', 'free', 'basic', 'team_free', 'trial', 'team', 'personal', 'business'].includes(p.code)), `V27 요금표: ${u.plans.map((p) => p.code).join(',')}`);
+    assert.deepEqual(u.addons.map((a) => a.monthly_krw).sort((a, b) => a - b), [4000, 9900, 29000, 59000], 'AI 크레딧 3종·저장 +50GB');
     assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.deepEqual(pf.tenants.map((t) => t.id).sort(), ['default', 'demo']);

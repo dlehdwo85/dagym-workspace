@@ -77,6 +77,8 @@ export async function notifRead({ owner, BASE, SHOTS, ctx }) {
   await owner.goto(`${BASE}/notifications`);
   // 안 읽은 목록에서 두 알림이 빠짐(그사이 예약 알림 등 다른 알림이 올 수 있어 "비었음" 대신 이 두 건으로 확인)
   await owner.locator('[data-testid="notifications"], :text("새 알림이 없습니다")').first().waitFor();
+  // 목록이 새로 받아질 때까지 잠깐 기다림(먼저 그려진 옛 목록 대신)
+  for (let i = 0; i < 25 && (await owner.getByText('알림읽음 시험', { exact: false }).count()) > 0; i++) await owner.waitForTimeout(200);
   assert.equal(await owner.getByText('알림읽음 시험', { exact: false }).count(), 0, '읽은 알림은 안 읽음 목록에 없음');
   await owner.getByTestId('notif-all').click();
   await owner.getByTestId('notifications').getByText('알림읽음 시험 B', { exact: false }).waitFor();

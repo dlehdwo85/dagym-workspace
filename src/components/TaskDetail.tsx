@@ -28,6 +28,7 @@ import { QuickAddTask } from '@/components/QuickAddTask';
 import { PRIORITY_LABEL, STATUS_LABEL, STATUSES, type TaskStatus } from '@/lib/types';
 import { encodeMentions } from '@/lib/mentions';
 import { VoiceButton } from '@/components/voice';
+import { MeetingDialog } from '@/components/MeetingDialog';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
@@ -61,6 +62,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [depOpen, setDepOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [meetOpen, setMeetOpen] = useState(false); // V37 8 미팅 일정 만들기
   const [tab, setTab] = useState<'comments' | 'history'>('comments'); // V14 23번: 활동 탭 철회 — 댓글(기본)·변경 이력
   const moreFields = true; // R-15 4번: "필드 더보기" 없앰 — 모든 항목을 기본으로 보여 준다
   // V14 19번 ⑤: 섹션 접기 기억(이 기기)
@@ -561,6 +563,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                   reload();
                 }} />
                 <span className={cx('flex-1', c.done && 'text-ink-3 line-through', !c.done && c.assignee_id === user.id && 'font-semibold')}>{c.text}{!c.done && c.assignee_id === user.id && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">내 몫</span>}</span>
+                {/* V37 8: 문의 체크리스트 "미팅 일정" 단계에서 바로 만들기 */}
+                {!c.done && perms.edit && /미팅|방문|실사|현장/.test(c.text) && <button type="button" onClick={() => setMeetOpen(true)} className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100" data-testid="checklist-meeting">📍 미팅 일정 만들기</button>}
                 {perms.edit ? <UserSelect className="h-7 w-auto max-w-[7.5rem] rounded-full border border-line bg-white px-1.5 text-[11px] text-ink-2" placeholder="담당 없음" value={c.assignee_id}
                   ariaLabel={`${c.text} 담당`} onChange={async (v) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { assigneeId: v } }).catch((er) => toast.error(er.message)); reload(); broadcastRefresh(); }} />
                   : c.assignee_name && <span className="text-[11px] text-ink-3">{c.assignee_name}</span>}
@@ -714,6 +718,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           )}
         </section>
         <div className={cx('min-w-0 space-y-6', wide && 'lg:col-start-1 lg:row-start-4')}>
+        {/* V37 8: 업무에 장소 칸 대신 장소 있는 미팅 일정 */}
+        {perms.edit && t.status !== 'done' && <button type="button" onClick={() => setMeetOpen(true)} className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-white px-2.5 py-1 text-xs font-medium text-rose-800 hover:bg-rose-50" data-testid="meeting-open">📍 미팅 일정 만들기</button>}
+        {meetOpen && <MeetingDialog taskId={id} title={t.title} defaultDate={t.due_date} onClose={() => setMeetOpen(false)} onDone={() => { reload(); events.reload?.(); }} />}
         {/* V14 27번: 연결 일정은 있을 때만 한 줄씩 (실행 시간 배정은 ⋯ 메뉴) */}
         {(events.data?.events.length ?? 0) > 0 && (
         <section data-testid="linked-events">

@@ -37,6 +37,7 @@ export type Task = {
   assigned_at?: string | null;
   batch_id?: string | null; batch?: { total: number; done: number } | null; recurrence_source_id?: string | null;
   /** V32 4 마감 연장: 횟수 · 대기 중인 요청 */
+  meeting?: { id: string; location: string; start: string } | null;
   due_extend_count?: number; ext_pending?: { id: string; from: string | null; to: string; reason: string; by: string; byName: string } | null;
 };
 
@@ -461,6 +462,15 @@ function snake(b: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(b).map(([k, v]) => [m[k] ?? k, v]));
 }
 
+/** 미팅 시각: 오늘이면 시:분, 아니면 월/일 시:분 (서울) */
+function meetingWhen(iso: string) {
+  const d = new Date(iso);
+  const ymd = (x: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x);
+  const hm = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  const day = ymd(d);
+  return day === ymd(new Date()) ? hm : `${Number(day.slice(5, 7))}/${Number(day.slice(8))} ${hm}`;
+}
+
 function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (t: Task, b: any) => any }) {
   const { dir } = useSession();
   const hq = dir.orgUnits.find((o) => o.id === t.org_unit_id)?.type === 'hq';
@@ -485,6 +495,8 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {t.recurrence_rule && <span title="반복 업무" className="max-lg:hidden"><Repeat className="size-3.5" /></span>}
       {t.batch && t.batch.total > 1 && <span className="max-lg:hidden rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
       {t.blocked_by_count > 0 && <span className="shrink-0 font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
+      {/* V37 8: 연결 미팅 일정 📍장소·시간 (장소는 일정에 한 번만) */}
+      {t.meeting && <span className="inline-flex min-w-0 max-w-[12rem] shrink items-center gap-0.5 rounded-full bg-rose-50 px-1.5 text-[11px] font-medium text-rose-800" title={`미팅 ${t.meeting.location}`} data-testid="meeting-chip"><span aria-hidden>📍</span><span className="truncate">{t.meeting.location}</span><span className="shrink-0 tabular-nums">· {meetingWhen(t.meeting.start)}</span></span>}
       {/* V32 4: 연장 요청 대기(지시자가 목록에서 바로 알아봄) · 연장 횟수 */}
       {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장 요청 → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
       {!t.ext_pending && !!t.due_extend_count && <span className="max-lg:hidden shrink-0 rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}

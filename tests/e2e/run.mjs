@@ -21,6 +21,7 @@ import { dueExtend } from './dueExtend.step.mjs';
 import { quickAi, homeTodayEvents } from './quickAi.step.mjs';
 import { voiceMode } from './voiceMode.step.mjs';
 import { verify1017 } from './verify1017.step.mjs';
+import { meeting } from './meeting.step.mjs';
 import { v1444 } from './v1444.step.mjs';
 import { v1445 } from './v1445.step.mjs';
 import { v21 } from './v21.step.mjs';
@@ -947,6 +948,7 @@ await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머
 await step('V32 4 마감 연장: 휴대폰 담당자 목록 마감 칩 → 연장 요청(사유 필수, 뒤 날짜는 요청 창) → PC 지시자 "연장 요청" 칩·행 표시 → 머리에서 승인 → 마감 변경·연장 1회', () => dueExtend({ staff, owner, ctx, sql, BASE }));
 await step('V38 3 음성 모드(운전 중): 메시지방 새 메시지 읽어 주기·말로 보내기("보내" 확인·"취소")·AI 비서 말로 묻고 답 읽어 주기', () => voiceMode({ browser, desk, ctx, sql, BASE, FAKE }));
 await step('로컬 검수 10/17: 홈 최근 활동 멘션 @이름 · 월 보기 요일 머리 · 휴대폰 일정 시트 닫기 버튼 화면 안 · 휴대폰 업무 둘째 줄 한 줄', () => verify1017({ owner, staff, ctx, sql, BASE }));
+await step('V37 8 미팅 일정: 업무 상세 [미팅 일정 만들기] → 목록 📍장소·시간 칩 · 등록 창 "방문" → 미팅 일정 제안 → 연결 일정', () => meeting({ owner, ctx, sql, BASE }));
 await step('홈 오늘의 일정: 오늘 일정도 함께(시간순)', () => homeTodayEvents({ owner, ctx, BASE }));
 await step('업무 등록 창 AI 비서: 편하게 적고 [AI로 채우기] → 업무명·담당·마감·설명·체크리스트 채움 → 저장', () => quickAi({ owner, ctx, sql, BASE, FAKE }));
 await step('V38 1 메시지방 흔들림: 휴대폰 위로 올려 보는 중 새 메시지 → 자리 유지·"새 메시지 n ↓", 맨 아래면 따라감, 화면 전체는 그대로', () => chatScroll({ browser, desk, ctx, BASE }));
@@ -1655,7 +1657,7 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await owner.getByTestId('meter-storage').getByText('무제한').first().waitFor();
   await owner.getByTestId('top-files').locator('li').first().waitFor();
   await owner.getByTestId('plan-request').click();
-  await owner.getByLabel('요청할 요금제').selectOption('team');
+  await owner.getByLabel('요청할 요금제').selectOption('w_standard'); // V27 요금표
   await owner.getByRole('button', { name: '요청 보내기' }).click();
   await owner.getByText(/요청을 보냈습니다/).waitFor();
   await owner.screenshot({ path: `${SHOTS}/78-usage-plan.png`, fullPage: true });

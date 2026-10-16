@@ -343,3 +343,26 @@ export async function syncedEventIds(sql: Sql, taskId: string) {
   return (await sql<{ id: string }[]>`select e.id from tasks t join event_tasks et on et.task_id = coalesce(t.recurrence_source_id, t.id) and et.sync
     join events e on e.id = et.event_id where t.id = ${taskId} and e.deleted_at is null`).map((r) => r.id);
 }
+
+// ---------------- V37 8 미팅 업무의 장소(대표 10/17): 업무에 장소 칸 대신 장소 있는 연결 일정 ----------------
+export const meetingInput = z.object({
+  location: z.string().trim().min(1, '장소를 넣어 주세요').max(300),
+  start: z.string().datetime({ offset: true }),
+  end: z.string().datetime({ offset: true }),
+  title: z.string().trim().max(200).optional(),
+});
+/** 업무 → 미팅 일정(내 개인 캘린더, 담당·지시자 참석, 30분 전 알림) + 업무와 연결. 캘린더에는 이 일정 블록 하나(장소 = 이동 강조·출발 권장) */
+export async function createMeeting(u: SessionUser, taskId: string, i: z.infer<typeof meetingInput>) {
+  const { perms } = await loadTaskForUser(u, taskId);
+  if (!perms.edit) throw forbidden('미팅 일정은 지시자·담당자만 만들 수 있습니다');
+  const sql = db();
+  const [t] = await sql<{ title: string; assignee_id: string | null; requested_by: string | null }[]>`select title, assignee_id, requested_by from tasks where id = ${taskId}`;
+  const { ensurePersonalCalendar } = await import('./access');
+  const { createEvent } = await import('./events');
+  const calendarId = await ensurePersonalCalendar(u.id, u.name, sql);
+  const attendeeIds = [...new Set([t.assignee_id, t.requested_by].filter((x): x is string => !!x && x !== u.id))];
+  const ev = await createEvent(u, { calendarId, title: i.title || t.title, location: i.location, start: i.start, end: i.end, kind: 'normal', reminderMinutes: [30], ...(attendeeIds.length ? { attendeeIds } : {}) });
+  await sql`insert into event_tasks (event_id, task_id, role, created_by) values (${ev.id}, ${taskId}, 'link', ${u.id}) on conflict do nothing`;
+  await activity(sql, 'task', taskId, u.id, 'meeting_created', { location: i.location, start: i.start });
+  return { id: ev.id };
+}

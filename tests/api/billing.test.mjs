@@ -118,14 +118,14 @@ describe('18차 나이스페이 결제', () => {
   });
 
   test('결제통보: 주문번호·금액이 맞을 때만 반영, 같은 통보는 한 번만, "OK"', async () => {
-    const w = await owner.ok('POST', '/api/billing/window', { kind: 'addon', addonCode: 'storage20' });
+    const w = await owner.ok('POST', '/api/billing/window', { kind: 'addon', addonCode: 'storage50_v27' });
     const noti = (amt) => ({ MID, MOID: w.params.Moid, Amt: String(amt), TID: 'NOTITID000000001', ResultCode: '3001', StateCd: '0', AuthCode: '1234', PayMethod: 'CARD' });
     const wrong = await postForm('/api/billing/nicepay/notify', { ...noti(1), TID: 'NOTITID-WRONG' });
     assert.equal(await wrong.text(), 'OK');
     assert.equal((await sql`select status from payments where moid = ${w.params.Moid}`)[0].status, 'pending', '금액 다르면 무시');
     for (let k = 0; k < 2; k++) assert.equal(await (await postForm('/api/billing/nicepay/notify', noti(w.params.Amt))).text(), 'OK');
     assert.equal((await sql`select status from payments where moid = ${w.params.Moid}`)[0].status, 'paid');
-    assert.equal((await sub()).addons.storage20, 1, '팩 1개만 더해짐');
+    assert.equal((await sub()).addons.storage50_v27, 1, '팩 1개만 더해짐');
   });
 
   test('V29 결제창 결제 수단: 가상계좌 → 입금 대기(계좌 표시) → 입금 통보 4110 에 월 구독 적용·영수증 메일 · 계좌이체는 바로 완료', async () => {
@@ -145,7 +145,7 @@ describe('18차 나이스페이 결제', () => {
     [pay] = await sql`select * from payments where moid = ${w.params.Moid}`;
     assert.equal(pay.status, 'paid'); assert.equal(pay.result_msg, '가상계좌 입금 확인'); assert.ok(pay.meta.receiptSentAt, '영수증 메일');
     const s1 = await sub(); assert.equal(s1.plan_code, 'w_standard'); assert.equal(s1.billing_cycle, 'monthly');
-    const w2 = await owner.ok('POST', '/api/billing/window', { kind: 'addon', addonCode: 'storage20', payMethod: 'BANK' });
+    const w2 = await owner.ok('POST', '/api/billing/window', { kind: 'addon', addonCode: 'storage50_v27', payMethod: 'BANK' });
     const r2 = await postForm('/api/billing/nicepay/return', { ...auth('bktok', w2.params), PayMethod: 'BANK' });
     assert.match(r2.headers.get('location'), /paid=1/);
     assert.equal((await sql`select meta->>'payMethod' pm from payments where moid = ${w2.params.Moid}`)[0].pm, 'BANK');

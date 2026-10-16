@@ -64,6 +64,9 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
     where be.deleted_at is null and be.kind = 'task_block' and (be.task_id = t.id or be.id in (select event_id from event_tasks where task_id = t.id and role = 'block'))) as scheduled_minutes,
   (select count(*)::int from event_tasks lk where lk.task_id = t.id) as event_count,
+  -- V37 8: 연결 일정 중 장소 있는 가장 가까운 미팅(지난 지 하루 안 포함) — 목록·카드에 📍장소·시간
+  (select json_build_object('id', me.id, 'location', me.location, 'start', me.start_at) from event_tasks ml join events me on me.id = ml.event_id
+    where ml.task_id = t.id and me.deleted_at is null and me.location <> '' and me.start_at > now() - interval '1 day' order by me.start_at limit 1) as meeting,
   (select count(*)::int from attachments ph where ph.task_id = t.id and ph.deleted_at is null and ph.upload_status = 'ready' and ph.kind = 'file' and ph.mime_type like 'image/%') as photo_count,
   (select coalesce(jsonb_object_agg(fv.field_id, fv.value), '{}'::jsonb) from task_field_values fv where fv.task_id = t.id) as fields,
   au.name as assignee_name, p.name as project_name, p.color as project_color, o.name as org_unit_name,

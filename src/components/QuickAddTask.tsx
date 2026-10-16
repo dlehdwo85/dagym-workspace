@@ -13,6 +13,7 @@ import { AI_ACCEPT, uploadToLibrary } from './libraryUpload';
 import { DropZone } from './upload';
 import { TimePick } from './DateTimePickers';
 import { useSession } from './session';
+import { MEETING_WORDS } from './MeetingDialog';
 
 export interface QuickDefaults { dueTime?: string; projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string; title?: string; description?: string }
 
@@ -113,6 +114,8 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
   // 대표(10/16): 업무 등록 창에 AI 비서 — 말하거나 편하게 적으면 업무명·담당·마감·설명·체크리스트를 채운다(확인 후 저장)
   const [aiText, setAiText] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  // V37 8: 제목에 미팅·방문·현장 등이 있으면 "미팅 일정도 만들까요?" — 장소·시각을 넣으면 업무와 연결된 일정까지
+  const [meet, setMeet] = useState({ location: '', start: '10:00' });
   async function aiFill(text = aiText) {
     if (!text.trim()) { toast.error('AI 비서에게 할 말을 적거나 마이크로 말해 주세요'); return; }
     setAiBusy(true);
@@ -153,6 +156,12 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
             approvalRequired: false,
           },
         });
+      }
+      if (meet.location.trim() && MEETING_WORDS.test(f.title ?? '')) {
+        const d = f.dueDate || todayStr(); const [h, m] = meet.start.split(':').map(Number);
+        const end = `${String(Math.min(23, h + 1)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        await api(`/api/tasks/${r.id}/meeting`, { body: { location: meet.location.trim(), start: `${d}T${meet.start}:00+09:00`, end: `${d}T${end}:00+09:00`, title: finalTitle() } })
+          .then(() => setMeet({ location: '', start: '10:00' })).catch((er: any) => toast.error(`업무는 만들었지만 미팅 일정은 못 만들었습니다: ${er.message}`));
       }
       // 자료로 채웠으면 그 자료를 만든 업무(여러 명이면 각각)에 첨부
       for (const tid of ((r as any).ids ?? [r.id]) as string[]) for (const fid of f.fileIds ?? []) await api(`/api/library/${fid}/attach`, { body: { taskId: tid } }).catch(() => {});
@@ -222,6 +231,14 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
             <button type="button" onClick={voice} aria-label="음성으로 입력" aria-pressed={listening} className={cx('flex size-11 shrink-0 items-center justify-center rounded-input border border-line', listening ? 'animate-pulse bg-red-500 text-white' : 'text-ink-2 hover:bg-slate-50')} data-testid="quick-voice"><Mic className="size-5" /></button>
           </span>
         </Field>
+        {!tpl && MEETING_WORDS.test(f.title ?? '') && (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-input bg-rose-50 px-2.5 py-2 text-xs text-rose-900" data-testid="quick-meeting">
+            <span className="font-medium">📍 미팅 일정도 만들까요?</span>
+            <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1 text-xs')} value={meet.location} onChange={(e) => setMeet({ ...meet, location: e.target.value })} placeholder="장소(비우면 업무만)" maxLength={300} aria-label="미팅 장소" data-testid="quick-meeting-location" />
+            <input type="time" step={900} className={cx(inputCls, 'h-8 w-28 py-1 text-xs')} value={meet.start} onChange={(e) => setMeet({ ...meet, start: e.target.value || '10:00' })} aria-label="미팅 시작 시각" data-testid="quick-meeting-start" />
+            <span className="text-[11px] text-rose-800/80">{f.dueDate ? '마감일' : '오늘'} · 1시간</span>
+          </div>
+        )}
         {/* V8 9번: "내일 3시 @김민수 !높음 #입찰 매주" 처럼 쓰면 알아봄 → 적용 */}
         {parsed && parsed.matched.length > 0 && (
           <div className={cx('-mt-1 inline-flex flex-wrap items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium', noAuto ? 'bg-slate-100 text-ink-3' : 'bg-accent-50 text-accent-700')} data-testid="quick-nl-apply">

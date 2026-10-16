@@ -253,7 +253,7 @@ describe('17차 14일 무료 체험 · 끝나면 읽기 전용', () => {
     assert.equal((await c.post('/api/tasks', { title: 'x' })).status, 402);
     await p.ok('POST', `/api/platform/tenants/${tid}/trial`, { action: 'convert' });
     const [s] = await sql`select plan_code, status from tenant_subscriptions where tenant = ${tid}`;
-    assert.deepEqual({ ...s }, { plan_code: 'team', status: 'active' });
+    assert.deepEqual({ ...s }, { plan_code: 'w_standard', status: 'active' });
     await c.ok('POST', '/api/tasks', { title: '유료 전환 뒤 업무' });
     assert.equal((await p.req('POST', `/api/platform/tenants/${tid}/trial`, { action: 'convert', planCode: 'team_free' })).status, 400);
   });
