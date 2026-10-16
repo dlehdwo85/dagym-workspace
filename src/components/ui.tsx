@@ -179,6 +179,31 @@ function loadBadges() {
     .then((j) => { badgeCache = j.people ?? {}; badgeLoading = false; badgeSubs.forEach((f) => f()); });
 }
 export function refreshBadges() { badgeCache = null; badgeLoading = false; loadBadges(); }
+/** V35 2·V36 1 근무 상태(휴가·출장·외근·미팅) — 5분마다 새로 받음. 근무 중은 점 없음 */
+type Pres = { s: 'leave' | 'trip' | 'out'; label: string; until: string };
+let presCache: Record<string, Pres> | null = null;
+let presAt = 0;
+let presLoading = false;
+const presSubs = new Set<() => void>();
+function loadPresence() {
+  if (presLoading || (presCache && Date.now() - presAt < 5 * 60000)) return;
+  presLoading = true;
+  fetch('/api/people/presence').then((r) => (r.ok ? r.json() : { people: {} })).catch(() => ({ people: {} }))
+    .then((j) => { presCache = j.people ?? {}; presAt = Date.now(); presLoading = false; presSubs.forEach((f) => f()); });
+}
+export function usePresence(id: string | null | undefined): Pres | null {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!id) return;
+    const f = () => force((x) => x + 1);
+    presSubs.add(f);
+    loadPresence();
+    return () => { presSubs.delete(f); };
+  }, [id]);
+  const p = id ? presCache?.[id] ?? null : null;
+  return p && new Date(p.until).getTime() > Date.now() ? p : null;
+}
+export const PRESENCE_DOT = { leave: 'bg-slate-400', trip: 'bg-sky-500', out: 'bg-sky-500' } as const;
 function useBadge(id: string | null | undefined) {
   const [, force] = useState(0);
   useEffect(() => {
@@ -193,6 +218,7 @@ function useBadge(id: string | null | undefined) {
 
 export function Avatar({ name, id, size = 24, className, ring, badge = true }: { name: string | null | undefined; id?: string | null; size?: number; className?: string; ring?: boolean; badge?: boolean }) {
   const label = useBadge(badge && !ring && name ? id : null);
+  const pres = usePresence(name ? id : null);
   const press = useRef<ReturnType<typeof setTimeout> | null>(null);
   if (!name) {
     return <span className={clsx('inline-flex shrink-0 items-center justify-center rounded-full border border-dashed border-slate-300 text-slate-300', className)} style={{ width: size, height: size }} title="담당자 없음"><UserRound style={{ width: size * 0.6, height: size * 0.6 }} /></span>;
@@ -203,12 +229,18 @@ export function Avatar({ name, id, size = 24, className, ring, badge = true }: {
       {initials(name)}
     </span>
   );
-  if (!label) return dot;
+  // 근무 상태 점(오른쪽 아래) — 휴가 회색, 출장·외근·미팅 파랑
+  const withPres = pres ? (
+    <span className={clsx('relative inline-flex shrink-0', !label && className)} title={`${name} · ${pres.label}`} data-presence={pres.s}>
+      {dot}<span className={clsx('absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-white', PRESENCE_DOT[pres.s])} style={{ width: Math.max(7, Math.round(size * 0.32)), height: Math.max(7, Math.round(size * 0.32)) }} aria-label={pres.label} />
+    </span>
+  ) : dot;
+  if (!label) return withPres;
   const end = () => { if (press.current) clearTimeout(press.current); press.current = null; };
   return (
     <span className={clsx('inline-flex min-w-0 shrink-0 items-center gap-1', className)} title={`${name} · ${label}`} data-testid="avatar-badge"
       onTouchStart={() => { end(); press.current = setTimeout(() => toast.info(`${name} · ${label}`), 500); }} onTouchEnd={end} onTouchMove={end}>
-      {dot}<span className="max-w-[4.5rem] truncate text-[10px] font-medium leading-none text-ink-3">{label}</span>
+      {withPres}<span className="max-w-[4.5rem] truncate text-[10px] font-medium leading-none text-ink-3">{label}</span>
     </span>
   );
 }

@@ -197,6 +197,11 @@ export function voiceInput(setListening: (v: boolean) => void, onText: (t: strin
 }
 
 /** V8 6번: 담당자가 그날 연차·출장·공휴일이면 알려 준다(배정은 그대로) */
+/** V36 2: 배정은 그대로 하고, 지금 휴가·출장 중인 담당자는 "복귀 후 확인" 안내만 */
+export function noteAway(r: any) {
+  const away: { name: string; label: string }[] = r?.away ?? [];
+  if (away.length) toast.info(`${away.map((a) => `${a.name}님 ${a.label}`).join(', ')} — 배정은 했고, 복귀 후 확인합니다`);
+}
 export function warnAway(userId: string, date: string, name: string) {
   api(`/api/availability?userId=${userId}&date=${date}`).then((r: any) => {
     const d = r?.days?.[0];
@@ -297,8 +302,8 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
       markNew(r.id); setRemind(null); setPriority('normal'); setProj(null);
       const who = multi ? `${assignees.length}명 각각` : assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
       toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? ' — 담당자에게 알림을 보냈습니다' : assignee ? ' — 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
-      broadcastRefresh(); onCreated?.(r.id);
-      if (assignee && assignee !== user.id && due) warnAway(assignee, due, dir.users.find((u) => u.id === assignee)?.name ?? '담당자');
+      broadcastRefresh(); onCreated?.(r.id); noteAway(r);
+      if (!r.away?.length && assignee && assignee !== user.id && due) warnAway(assignee, due, dir.users.find((u) => u.id === assignee)?.name ?? '담당자');
     } catch (e: any) {
       // 저장 실패: 입력값을 되살리고 이유를 줄 아래에 표시 (조용히 사라지지 않게)
       setTitle((cur) => cur || t); setRrule(keepRrule);

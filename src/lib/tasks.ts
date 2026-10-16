@@ -400,12 +400,28 @@ export async function createTasksForAssignees(u: SessionUser, i: TaskInput) {
     if (!i.assigneeIds!.length) throw badRequest('팀원이 없습니다');
   }
   const ids = [...new Set(i.assigneeIds ?? [])];
-  if (ids.length < 2) return createTask(u, { ...i, assigneeId: ids[0] ?? i.assigneeId });
+  if (ids.length < 2) {
+    const one = await createTask(u, { ...i, assigneeId: ids[0] ?? i.assigneeId });
+    const who = ids[0] ?? i.assigneeId;
+    return { ...one, away: who && who !== u.id ? await awayOf(u, [who]) : [] };
+  }
   await (await import('./plans')).assertTaskQuota(u, ids.length); // 여러 명에게 각각: 다 만들 수 있을 때만
   const batchId = crypto.randomUUID();
   const out: string[] = [];
+  // V36 2: 연차·출장 중인 사람도 빼지 않는다(업무를 잃어버리지 않게) — 누가 부재 중인지 돌려줘 화면에 "복귀 후 확인" 표시
   for (const a of ids) out.push((await createTask(u, { ...i, assigneeId: a, batchId } as TaskInput)).id);
-  return { id: out[0], ids: out, batchId };
+  return { id: out[0], ids: out, batchId, away: await awayOf(u, ids.filter((x) => x !== u.id)) };
+}
+
+/** V36 2: 지금 휴가·출장 중인 담당자(이름·상태) — 배정을 막지 않고 안내만 */
+async function awayOf(u: SessionUser, ids: string[]) {
+  if (!ids.length) return [];
+  const { presenceMap } = await import('./presence');
+  const pm = await presenceMap(u);
+  const hit = ids.filter((x) => pm[x] && pm[x].s !== 'out');
+  if (!hit.length) return [];
+  const names = new Map((await db()<{ id: string; name: string }[]>`select id, name from users where id = any(${hit}::uuid[])`).map((r) => [r.id, r.name]));
+  return hit.map((x) => ({ id: x, name: names.get(x) ?? '', label: pm[x].label }));
 }
 
 /** 묶음 전체에 적용 (지시자·만든 사람·관리자만): 제목·마감·우선순위·설명 */

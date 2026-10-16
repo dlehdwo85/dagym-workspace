@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, broadcastRefresh, useApi } from './client';
 import { Button, Field, Modal, cx, fmtMinutes, inputCls, toast, todayStr } from './ui';
 import { UserSelect } from './pickers';
-import { BellChip, RepeatChip, quickDues, voiceInput } from './TaskQuick';
+import { BellChip, RepeatChip, noteAway, quickDues, voiceInput } from './TaskQuick';
 import { parseTaskText } from '@/lib/nlparse';
 import { PRIORITY_LABEL } from '@/lib/types';
 import { Loader2, Mic, Paperclip, Sparkles } from 'lucide-react';
@@ -141,7 +141,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
       try { localStorage.setItem('wos_quick_last', JSON.stringify(lastV)); } catch {}
       api('/api/me/quick-last', { method: 'PUT', body: lastV }).catch(() => {});
       toast.ok(f.teamId ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다 — 팀장에게 알림을 보냈습니다') : count > 1 ? `${count}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
-      broadcastRefresh();
+      broadcastRefresh(); noteAway(r);
       if (keep && !auto && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setNoAuto(false); setTpl(''); titleRef.current?.focus(); return; }
       onClose();
       // 자세한 항목은 만든 뒤 상세에서 — 목록 안(onCreated)이 아니면 상세로 이동
