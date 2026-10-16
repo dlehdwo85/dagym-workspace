@@ -85,10 +85,8 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       else { const el = document.createElement('a'); el.href = `/api/attachments/${id}/download`; el.rel = 'noopener'; document.body.appendChild(el); el.click(); el.remove(); }
       return;
     }
-    try {
-      const r = await api(`/api/attachments/${id}/download${q ? q + '&' : '?'}json=1`);
-      window.location.href = r.url; // 다른 도메인 주소 → 앱 밖 기기 브라우저로 열림(내려받기·공유)
-    } catch (e: any) { toast.error(e.message); }
+    const { openFileExternally } = await import('./native');
+    await openFileExternally(`/api/attachments/${id}/download${q}`); // 기기 브라우저로(내려받기·공유)
   }
   async function remove(id: string) {
     if (!confirm('첨부를 삭제할까요?')) return;

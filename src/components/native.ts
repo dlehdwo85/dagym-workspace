@@ -44,6 +44,9 @@ export async function initNative(router: Router) {
     if (u.protocol === 'blob:' || u.origin !== location.origin) return;
     // iOS: WKWebView 는 파일을 내려받지 않고 보여 주기만 함 → 받아서 공유 시트(파일에 저장·카톡 등)로
     if (canShareFiles() && (u.pathname.startsWith('/api/') || a.hasAttribute('download'))) { e.preventDefault(); saveViaShare(u.pathname + u.search); return; }
+    // 대표 실기기(10/16): 첨부·자료실 파일을 안드로이드 내려받기 관리자로 넘기면 "내려받는 중"만 뜨고 안 받아짐(짧은 수명의 저장소 주소) →
+    // 서버에서 주소를 받아 기기 브라우저로 연다(한글 파일 이름·내려받기를 브라우저가 처리)
+    if (/^\/api\/(attachments|library)\/[^/]+\/download$/.test(u.pathname)) { e.preventDefault(); openFileExternally(u.pathname + u.search); return; }
     if (a.target === '_blank' || u.pathname.startsWith('/api/') || a.hasAttribute('download')) { e.preventDefault(); location.assign(u.pathname + u.search); }
   }); // 버블 단계: 화면의 자체 처리(미리보기 등 preventDefault)가 먼저
   const go = (link?: string) => {
@@ -173,6 +176,15 @@ export async function subscribeWebPush(): Promise<string> {
 }
 
 /** iOS 내려받기: 쿠키 포함으로 받아 임시 저장 → 공유 시트("파일에 저장" 등) */
+/** 첨부·자료실 파일: 서버가 권한 확인 후 주는 서명 주소를 기기 브라우저(없으면 앱 밖 이동)로 연다 */
+export async function openFileExternally(path: string) {
+  const { toast } = await import('./ui');
+  try {
+    const r = await api<{ url: string }>(`${path}${path.includes('?') ? '&' : '?'}json=1`);
+    if (hasBrowser()) await Browser.open({ url: r.url });
+    else window.location.href = r.url; // 다른 도메인 = 앱 밖 기기 브라우저
+  } catch (e: any) { toast.error(e?.message ?? '파일을 열지 못했습니다'); }
+}
 async function saveViaShare(path: string) {
   const { toast } = await import('./ui');
   try {
