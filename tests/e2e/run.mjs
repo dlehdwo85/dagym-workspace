@@ -1357,15 +1357,18 @@ await step('V6-2 휴대폰(Android Chrome 터치): 행을 0.5초 꾹 눌러 위�
   const tb = await g.locator('[data-sortable-row]').nth(1).getByTestId('row-title').boundingBox();
   const x = tb.x + Math.min(tb.width * 0.5, 120), y0 = tb.y + tb.height / 2;
   assert.equal(await m.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-sortable-row]')?.getAttribute('data-sortable-row'), [x, y0]), ids[1], '두 번째 줄을 누름');
+  await m.evaluate(() => { window.__ev = []; for (const t of ['resize', 'visibilitychange', 'touchcancel', 'popstate']) window.addEventListener(t, () => window.__ev.push(t), true); });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', ...pt(x, y0) });
   await m.waitForTimeout(600); // 꾹 누르기
-  for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', ...pt(x, y0 - ((y0 - (a.y + 4)) * i) / 8) }); await m.waitForTimeout(40); }
+  const diag = [await m.locator('[data-dragging]').count()];
+  for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', ...pt(x, y0 - ((y0 - (a.y + 4)) * i) / 8) }); await m.waitForTimeout(40); diag.push(await m.locator('[data-dragging]').count()); }
+  diag.push(await m.evaluate(() => window.__ev.join(',')), await m.evaluate(() => location.href));
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await m.waitForTimeout(800);
   assert.equal(await m.getByTestId('task-panel').count(), 0, '꾹 눌러 끈 뒤 상세가 열리지 않음');
   assert.equal(menus, 0, '길게 누르기 메뉴 없음');
   const after = await sql`select id from tasks where id = any(${ids.slice(0, 2)}::uuid[]) order by sort_order`;
-  assert.deepEqual(after.map((r) => r.id), [ids[1], ids[0]], '두 번째 업무가 맨 위로');
+  assert.deepEqual(after.map((r) => r.id), [ids[1], ids[0]], `두 번째 업무가 맨 위로 (끌기 상태 ${JSON.stringify(diag)})`);
   await mc.close();
 });
 
@@ -1568,7 +1571,9 @@ await step('V8: 등록 창 한 번에(자동 인식·템플릿·우선순위·�
   await viewer.getByRole('button', { name: '사진 닫기' }).click();
   // 내 주간 보고: 초안 → 제출
   await owner.goto(BASE + '/reports/mine');
-  await owner.getByTestId('report-draft').click();
+  // 금요일 16시가 지나면 예약 작업이 초안을 먼저 만들어 둠 → 그때는 버튼 없이 바로 초안
+  await owner.getByTestId('my-report').waitFor();
+  if (await owner.getByTestId('report-draft').count()) await owner.getByTestId('report-draft').click();
   await owner.getByLabel('주간 보고 내용').waitFor();
   assert.match(await owner.getByLabel('주간 보고 내용').inputValue(), /■ 이번 주 완료/);
   await owner.getByTestId('report-submit').click();
