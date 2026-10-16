@@ -1065,11 +1065,12 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   const handles = mine.getByTestId('drag-handle');
   const n = await handles.count();
   assert.ok(n >= 2, '내 묶음에 업무 2건 이상');
-  const lastTitle = (await mine.locator('[data-row] a[data-open-task]').nth(n - 1).textContent()).trim();
+  // 묶음이 길면 마지막 행 손잡이가 화면 밖 → 둘째 행을 맨 위로(새로고침해도 유지되는지가 핵심)
+  const lastTitle = (await mine.locator('[data-row] a[data-open-task]').nth(1).textContent()).trim();
   // 내 묶음 머리가 화면 위쪽(고정 머리·열 제목 아래)에 오게 — 첫 손잡이가 화면 밖이면 끌 곳이 없다
   await mine.evaluate((el) => { el.scrollIntoView({ block: 'start' }); window.scrollBy(0, -120); });
   await owner.waitForTimeout(200);
-  const from = await handles.nth(n - 1).boundingBox(), to = await handles.nth(0).boundingBox();
+  const from = await handles.nth(1).boundingBox(), to = await handles.nth(0).boundingBox();
   await owner.mouse.move(from.x + 8, from.y + 8); await owner.mouse.down();
   for (let i = 1; i <= 12; i++) await owner.mouse.move(from.x + 8, from.y + 8 + ((to.y - from.y - 6) * i) / 12);
   await owner.mouse.up();
