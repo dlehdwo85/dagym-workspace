@@ -1331,8 +1331,11 @@ await step('V6-2 휴대폰(Android Chrome 터치): 행을 0.5초 꾹 눌러 위�
   const g = m.getByTestId('task-groups').locator(`[data-group="${ctx.ownerId}"]`);
   await g.locator('[data-sortable-row]').nth(1).waitFor();
   const ids = await g.locator('[data-sortable-row]').evaluateAll((els) => els.map((e) => e.getAttribute('data-sortable-row')));
-  const a = await g.locator('[data-sortable-row]').nth(0).boundingBox();
-  const b = await g.locator('[data-sortable-row]').nth(1).boundingBox();
+  // 휴대폰 줄이 두 줄이라 묶음이 화면 아래로 밀릴 수 있음 → 사람처럼 그 묶음까지 내려서 끈다
+  await g.locator('[data-sortable-row]').nth(0).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await m.waitForTimeout(200);
+  let a = await g.locator('[data-sortable-row]').nth(0).boundingBox();
+  let b = await g.locator('[data-sortable-row]').nth(1).boundingBox();
   let menus = 0;
   await m.exposeFunction('wosCtx', () => { menus++; });
   await m.evaluate(() => document.addEventListener('contextmenu', (e) => { if (!e.defaultPrevented) window.wosCtx?.(); }));
@@ -1344,6 +1347,9 @@ await step('V6-2 휴대폰(Android Chrome 터치): 행을 0.5초 꾹 눌러 위�
   await m.waitForFunction(() => document.activeElement?.getAttribute('placeholder') === '무엇을 해야 하나요?');
   await m.keyboard.press('Escape');
   await sheetDlg.waitFor({ state: 'detached' });
+  await g.locator('[data-sortable-row]').nth(0).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await m.waitForTimeout(200);
+  a = await g.locator('[data-sortable-row]').nth(0).boundingBox(); b = await g.locator('[data-sortable-row]').nth(1).boundingBox();
   const pt = (x, y) => ({ touchPoints: [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }] });
   // 휴대폰 줄은 제목(윗줄)·마감·담당(아랫줄) — 사람이 누르는 제목을 꾹 누른다(마감 칩은 누르면 날짜 선택)
   const tb = await g.locator('[data-sortable-row]').nth(1).getByTestId('row-title').boundingBox();
