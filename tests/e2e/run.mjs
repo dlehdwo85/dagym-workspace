@@ -311,6 +311,25 @@ await step('V37 4 뒤로가기: 목록 → 업무 A(패널) → 하위 업무 B 
   assert.ok(owner.url().includes('mode=list'), '목록 주소로 돌아옴: ' + owner.url());
 });
 
+await step('V35 1 첨부 눈에 띄게: 목록 파란 📎 칩·"첨부 있음" 필터, 상세 머리 배지·파일 종류 색, 요약줄 "첨부 n" 누르면 첨부로', async () => {
+  const t = await ctx.owner.ok('POST', '/api/tasks', { title: '첨부 표시 시험 업무', assigneeId: ctx.ownerId, orgUnitId: ctx.siteA, approvalRequired: false });
+  const up = await ctx.owner.ok('POST', '/api/attachments', { taskId: t.id, kind: 'file', fileName: '견적서.pdf', mimeType: 'application/pdf', size: 12 });
+  await fetch(BASE + up.upload.url, { method: 'PUT', headers: up.upload.headers, body: Buffer.from('%PDF-1.4 abc') });
+  await ctx.owner.ok('POST', `/api/attachments/${up.id}/complete`, {});
+  await owner.goto(BASE + '/tasks?mode=list&hasAttach=1');
+  await owner.getByRole('button', { name: '전체', exact: true }).click();
+  const row = owner.locator(`[data-task-id="${t.id}"]`).first();
+  await row.getByTestId('att-chip').waitFor();
+  assert.equal((await row.getByTestId('att-chip').innerText()).trim(), '1');
+  await row.locator('a[data-open-task]').first().click();
+  const panel = owner.getByTestId('task-panel');
+  await panel.getByTestId('att-count').waitFor();
+  assert.equal(await panel.getByTestId('attach-section').locator('[data-file-kind="pdf"]').count() >= 1, true, 'PDF 빨강 아이콘');
+  await panel.getByTestId('sum-attach').click();
+  await panel.getByTestId('attachments').getByText('견적서.pdf').waitFor();
+  await owner.keyboard.press('Escape');
+});
+
 await step('B-3 프로젝트 섹션: 추가 → 업무를 끌어 다른 섹션으로 → 보드 열=섹션', async () => {
   const pid = (await ctx.owner.ok('POST', '/api/projects', { name: 'GX 리뉴얼', orgUnitId: ctx.siteA })).id;
   const tk = (await ctx.owner.ok('POST', '/api/tasks', { title: '강사 섭외', projectId: pid })).id;

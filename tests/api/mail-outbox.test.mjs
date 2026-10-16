@@ -196,6 +196,16 @@ describe('V21 보관함 발송', () => {
     assert.equal((await fetch(`${BASE}/api/public/share/wrongtoken/0`, { redirect: 'manual' })).status, 404);
     const h = await ctx.owner.ok('GET', `/api/tasks/${taskId}/mail?history=1`);
     assert.ok(h.items.find((i) => i.id === r.id).first_opened_at);
+    // V35 1: 목록에 첨부 수·"열람" 상태, "첨부 있음" 필터
+    const lst = await ctx.owner.ok('GET', '/api/tasks?hasAttach=1&limit=1000');
+    const row = lst.tasks.find((t) => t.id === taskId);
+    assert.ok(row && row.attachment_count >= 1, '첨부 있음 필터에 나옴');
+    assert.equal(row.share_state, 'opened');
+    assert.ok(lst.tasks.every((t) => t.attachment_count > 0), '첨부 없는 업무는 빠짐');
+    const plain = await ctx.owner.ok('POST', '/api/tasks', { title: '첨부 없는 업무', assigneeId: ctx.ownerId, orgUnitId: ctx.siteA, approvalRequired: false });
+    const all = await ctx.owner.ok('GET', '/api/tasks?limit=1000');
+    assert.equal(all.tasks.find((t) => t.id === plain.id).share_state, null);
+    assert.ok(!(await ctx.owner.ok('GET', '/api/tasks?hasAttach=1&limit=1000')).tasks.some((t) => t.id === plain.id));
   });
 });
 

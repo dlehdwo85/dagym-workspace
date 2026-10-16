@@ -72,6 +72,9 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.assignee_id = ${uid} and not ci.done) as my_items,
   (select count(*)::int from comments cm where cm.task_id = t.id and cm.deleted_at is null) as comment_count,
   (select count(*)::int from attachments at where at.task_id = t.id and at.deleted_at is null) as attachment_count,
+  -- V35 1: 고객에게 보낸 자료(메일·다운로드 링크) · 고객이 열어 봄
+  (select case when bool_or(a.action = 'share_opened') then 'opened' else 'sent' end from activities a
+     where a.entity_type = 'task' and a.entity_id = t.id and a.action in ('mail_sent', 'share_created', 'share_opened')) as share_state,
   (select count(*)::int from task_dependencies d join tasks dt on dt.id = d.depends_on_id
      where d.task_id = t.id and dt.status <> 'done' and dt.deleted_at is null) as blocked_by_count,
   (select max(a.created_at) from activities a where a.entity_type = 'task' and a.entity_id = t.id
@@ -105,6 +108,8 @@ export const listQuery = z.object({
   doneMonth: z.string().regex(/^\d{4}-\d{2}$/).optional().catch(undefined),
   /** V20 이월만 보기: 지난달 이전부터 이어진 진행 중 업무(마감일, 없으면 만든 날 기준) */
   carried: z.enum(['1']).optional().catch(undefined),
+  /** V35 1 첨부 있음 */
+  hasAttach: z.enum(['1']).optional().catch(undefined),
 });
 
 /** V20 완료 보관: 달별 완료 개수 (서울 기준 완료일, 볼 수 있는 업무만, 담당자 필터 선택) */
@@ -157,6 +162,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
     conds.push(sql`(t.title ilike ${like} or t.description ilike ${like} or exists (select 1 from unnest(t.tags) tg where tg ilike ${like}))`);
   }
   if (q.doneMonth) conds.push(sql`t.completed_at >= (${q.doneMonth + '-01'}::date::timestamp at time zone 'Asia/Seoul') and t.completed_at < ((${q.doneMonth + '-01'}::date + interval '1 month')::timestamp at time zone 'Asia/Seoul')`);
+  if (q.hasAttach) conds.push(sql`exists (select 1 from attachments at where at.task_id = t.id and at.deleted_at is null)`);
   if (q.carried) conds.push(sql`t.status <> 'done' and coalesce(t.due_date, (t.created_at at time zone 'Asia/Seoul')::date) < date_trunc('month', (now() at time zone 'Asia/Seoul'))::date`);
   if (q.from) conds.push(sql`coalesce(t.due_date, t.start_date) >= ${q.from}`);
   if (q.to) conds.push(sql`coalesce(t.start_date, t.due_date) <= ${q.to}`);

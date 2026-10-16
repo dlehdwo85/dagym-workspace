@@ -10,7 +10,7 @@ import {
   BadgeCheck, Building2, CalendarClock, CalendarDays, Camera, Check, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash,
   Bell, Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck,
   Stamp, Tag, Timer, CalendarCheck, Trash2, Type, UserRound, Users, X, CalendarRange, AlertTriangle, type LucideIcon,
-  Megaphone,
+  Megaphone, Paperclip,
   ChevronDown,
   Sparkles,
   MessageCircle,
@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
-import { Attachments, uploadTaskFiles } from '@/components/Attachments';
+import { Attachments, FileKindIcon, uploadTaskFiles } from '@/components/Attachments';
 import { TaskMail } from '@/components/TaskMail';
 import { TaskAssist, type AssistDraft } from '@/components/TaskAssist';
 import { DropZone, UploadProgress } from '@/components/upload';
@@ -387,6 +387,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <button type="button" onClick={() => editProp('[data-testid="due-picker"]', true)} className="rounded-full hover:opacity-80" title="마감일 바꾸기" data-testid="sum-due"><DdayChip due={t.due_date} time={t.due_time} status={t.status} /></button>
             <button type="button" onClick={() => editProp('select[aria-label="우선순위"]')} className="rounded-full hover:opacity-80" title="우선순위 바꾸기" data-testid="sum-priority"><PriorityTag p={t.priority} /></button>
             {t.project_id && <Link href={`/projects/${t.project_id}`} className="inline-flex max-w-[12rem] items-center gap-1 truncate rounded-full bg-slate-100 px-2 py-0.5 text-ink-2 hover:bg-slate-200" data-testid="summary-project"><FolderKanban className="size-3 shrink-0" /><span className="truncate">{t.project_name ?? '프로젝트'}</span></Link>}
+            {data.attachments.length > 0 && <button type="button" onClick={() => { if (fold.att) toggleFold('att'); setTimeout(() => document.getElementById('attach-section')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 0); }}
+              className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 font-semibold text-sky-800 hover:bg-sky-200" data-testid="sum-attach"><Paperclip className="size-3" />첨부 {data.attachments.length}</button>}
             {photoNeed > 0 && <span className={cx('rounded-full px-2 py-0.5 font-medium tabular-nums', photoShort ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700')}>사진 {photoHave}/{photoNeed}</span>}
             {showSpeed && t.status !== 'done' && <span className="text-ink-3" data-testid="speed-hint" title="담당자의 최근 90일 완료 업무 기준">예상 처리 ≈ {data.speed.median_days}일</span>}
           </div>
@@ -656,8 +658,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </div>
         </aside>
         {/* R-15 2번 · 검수 5: 첨부는 세부 정보 다음(휴대폰 순서: 설명 → 체크리스트·하위 → 세부 정보 → 첨부 → 댓글) */}
-        <section className={cx('min-w-0', wide && 'lg:col-start-1 lg:row-start-3')} data-testid="attach-section">
-          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.att} onClick={() => toggleFold('att')} label="자료·첨부" />{data.attachments.length > 0 && <span className="text-xs font-medium text-ink-2">{data.attachments.length}</span>}</h2>
+        <section id="attach-section" className={cx('min-w-0 scroll-mt-20', data.attachments.length > 0 && '-mx-2 rounded-card bg-sky-50/60 px-2 py-2', wide && 'lg:col-start-1 lg:row-start-3')} data-testid="attach-section">
+          {/* V35 1: 접혀 있어도 머리에 파란 배지 + 파일 종류 색 아이콘 3개까지 */}
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.att} onClick={() => toggleFold('att')} label="자료·첨부" />{data.attachments.length > 0 && <>
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-600 px-1.5 text-[11px] font-bold tabular-nums text-white" data-testid="att-count"><Paperclip className="size-3" />{data.attachments.length}</span>
+            <span className="flex gap-0.5">{data.attachments.slice(0, 3).map((a: any) => <FileKindIcon key={a.id} a={a} small />)}</span>
+          </>}</h2>
           {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.edit} onChange={reload} meId={user.id} />}
           {!fold.att && <TaskMail taskId={id} onChange={reload} draft={mailDraft} onDraftUsed={() => setMailDraft(null)} />}
           {/* V28-1 이 업무의 AI 비서 — 자료·첨부 바로 아래(초안 → 메일·문자 시안 창) */}

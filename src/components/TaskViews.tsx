@@ -28,7 +28,7 @@ export type Task = {
   team_id?: string | null; team_name?: string | null; team_color?: string | null;
   org_unit_id: string; org_unit_name: string; brand_id: string | null; assignee_id: string | null; assignee_name: string | null;
   start_date: string | null; due_date: string | null; due_time: string | null; version: number; subtask_count: number; subtask_done: number;
-  checklist_total: number; checklist_done: number; comment_count: number; attachment_count: number; blocked_by_count: number;
+  checklist_total: number; checklist_done: number; comment_count: number; attachment_count: number; share_state?: 'sent' | 'opened' | null; blocked_by_count: number;
   recurrence_rule: string | null; approval_required: boolean; tags: string[];
   section_id?: string | null; assignee_ack_at?: string | null; created_by?: string; sort_order?: number;
   task_type?: 'normal' | 'milestone' | 'approval' | 'inspection'; approval_line_id?: string | null; photo_required?: number; photo_count?: number;
@@ -80,7 +80,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [q, setQ] = useState(sp.get('q') ?? '');
   const [filters, setFilters] = useState<Record<string, string>>(() => {
     const f: Record<string, string> = {};
-    for (const k of ['brandId', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId']) { const v = sp.get(k); if (v) f[k] = v; }
+    for (const k of ['brandId', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId', 'hasAttach']) { const v = sp.get(k); if (v) f[k] = v; }
     const v = cleanView(sp.get('view')); if (v) f.view = v;
     return f;
   });
@@ -250,6 +250,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     ...(filters.teamId ? [['teamId', `팀: ${teamList.data?.teams.find((t) => t.id === filters.teamId)?.name ?? ''}`]] : []),
     ...(filters.status ? [['status', `상태: ${filters.status.split(',').map((x) => STATUS_LABEL[x as TaskStatus] ?? x).join('·')}`]] : []),
     ...(filters.carried ? [['carried', '이월만']] : []),
+    ...(filters.hasAttach ? [['hasAttach', '첨부 있음']] : []),
     ...(filters.from || filters.to ? [['period', `기간: ${filters.from ? fmtDate(filters.from) : '처음'} ~ ${filters.to ? fmtDate(filters.to) : '끝'}`]] : []),
   ] as [string, string][];
   const clearChip = (k: string) => setFilters((f) => (k === 'period' ? { ...f, from: '', to: '' } : { ...f, [k]: '' }));
@@ -373,6 +374,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           <input type="date" className={inputCls} value={filters.to ?? ''} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} aria-label="기간 끝" />
           {/* V20 이월만 보기 (담당자 묶음 안에서도) */}
           <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.carried === '1'} onChange={(e) => setFilters((f) => ({ ...f, carried: e.target.checked ? '1' : '' }))} data-testid="filter-carried" />이월만 보기</label>
+          <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.hasAttach === '1'} onChange={(e) => setFilters((f) => ({ ...f, hasAttach: e.target.checked ? '1' : '' }))} data-testid="filter-attach" /><Paperclip className="size-3.5 text-sky-700" />첨부 있음</label>
         </div>
       )}
       {justDone.length > 0 && !showDone && (
@@ -460,7 +462,9 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {t.subtask_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
       {t.checklist_total > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{t.checklist_done}/{t.checklist_total}</span>}
       {t.comment_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
-      {t.attachment_count > 0 && <span className="inline-flex items-center gap-0.5 tabular-nums" title="첨부"><Paperclip className="size-3.5" />{t.attachment_count}</span>}
+      {/* V35 1: 첨부는 파란 칩으로 눈에 띄게, 고객에게 보냄 = 초록 · 고객이 열어 봄 = 진한 초록 */}
+      {t.attachment_count > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-sky-100 px-1.5 text-[11px] font-semibold tabular-nums text-sky-800" title={`첨부 ${t.attachment_count}개`} data-testid="att-chip"><Paperclip className="size-3" />{t.attachment_count}</span>}
+      {t.share_state && <span className={cx('shrink-0 rounded-full px-1.5 text-[11px] font-semibold', t.share_state === 'opened' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700')} title={t.share_state === 'opened' ? '고객이 자료를 열어 봄' : '고객에게 자료를 보냄'} data-testid="share-chip">{t.share_state === 'opened' ? '열람' : '보냄'}</span>}
       {!!t.photo_required && <span className={cx('inline-flex items-center gap-0.5 tabular-nums', (t.photo_count ?? 0) >= t.photo_required ? 'text-green-600' : 'text-amber-700')} title="완료 증빙 사진"><Camera className="size-3.5" />{t.photo_count ?? 0}/{t.photo_required}</span>}
       {t.recurrence_rule && <span title="반복 업무"><Repeat className="size-3.5" /></span>}
       {t.batch && t.batch.total > 1 && <span className="rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}

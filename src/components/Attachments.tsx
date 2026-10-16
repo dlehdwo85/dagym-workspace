@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { api, broadcastRefresh } from './client';
 import { Camera, Download, Eye, FileText, Image as ImageIcon, Link2, Loader2, Paperclip, Trash2 } from 'lucide-react';
 import { isNativeApp } from './native';
-import { Button, Field, Modal, inputCls, toast, fmtDate, fmtDateTime } from './ui';
+import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
 
 /** V8 5번: 사진은 올리기 전에 긴 변 1600px·JPEG 85% 로 줄인다(휴대폰 원본 5~10MB → 수백 KB). GIF·작은 사진·실패 시 원본 */
@@ -110,11 +110,9 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       <ul className="space-y-1.5" data-testid="attachments">
         {items.map((a) => (
           <li key={a.id} className="flex items-center gap-2.5 rounded-input border border-line px-2.5 py-2 text-sm">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-ink-2" aria-hidden>
-              {a.kind === 'link' ? <Link2 className="size-4" /> : isImage(a) ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}
-            </span>
+            <FileKindIcon a={a} />
             <div className="min-w-0 flex-1">
-              <a href={`/api/attachments/${a.id}/download${a.kind === 'file' ? '?inline=1' : ''}`} target="_blank" rel="noopener noreferrer" className="block truncate font-medium text-accent-700 hover:underline">
+              <a href={`/api/attachments/${a.id}/download${a.kind === 'file' ? '?inline=1' : ''}`} target="_blank" rel="noopener noreferrer" className="block truncate font-semibold text-accent-700 hover:underline">
                 {a.doc_title || a.file_name || a.url}
               </a>
               <div className="flex flex-wrap gap-x-2 text-xs text-ink-2">
@@ -130,10 +128,10 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
             </div>
             {/* V14 49: 업무를 볼 수 있는 사람 누구나 미리보기(PDF·사진)·내려받기 — 앱은 서명 주소를 받아 기기 브라우저/공유로 넘김 */}
             {a.kind === 'file' && /^(image\/|application\/pdf)/.test(a.mime_type ?? '') && (
-              <button type="button" onClick={() => openFile(a.id, true)} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label={`${a.file_name} 미리보기`} title="미리보기" data-testid="att-preview"><Eye className="size-4" /></button>
+              <button type="button" onClick={() => openFile(a.id, true)} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 미리보기`} title="미리보기" data-testid="att-preview"><Eye className="size-4" /></button>
             )}
             {a.kind === 'file' && (
-              <button type="button" onClick={() => openFile(a.id, false)} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label={`${a.file_name} 내려받기`} title="내려받기" data-testid="att-download"><Download className="size-4" /></button>
+              <button type="button" onClick={() => openFile(a.id, false)} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 내려받기`} title="내려받기" data-testid="att-download"><Download className="size-4" /></button>
             )}
             {(a.created_by === meId || canEdit) && <button onClick={() => remove(a.id)} className="rounded p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" aria-label="첨부 삭제"><Trash2 className="size-4" /></button>}
           </li>
@@ -189,6 +187,28 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       </Modal>
       <UploadProgress items={prog} />
     </DropZone>
+  );
+}
+
+/** V35 1: 파일 종류 색 — PDF 빨강 · 엑셀 초록 · 이미지 보라 · 한글 파랑 · 워드 하늘 · 발표 주황 · 링크/기타 회색 */
+export function fileKind(a: { kind?: string; file_name?: string | null; mime_type?: string | null }): { key: string; label: string; cls: string } {
+  if (a.kind === 'link') return { key: 'link', label: '링크', cls: 'bg-slate-100 text-slate-600' };
+  const ext = (a.file_name ?? '').toLowerCase().split('.').pop() ?? '';
+  const mime = a.mime_type ?? '';
+  if (ext === 'pdf' || mime === 'application/pdf') return { key: 'pdf', label: 'PDF', cls: 'bg-red-100 text-red-700' };
+  if (['xls', 'xlsx', 'csv'].includes(ext) || /spreadsheet|excel|csv/.test(mime)) return { key: 'xls', label: '엑셀', cls: 'bg-green-100 text-green-700' };
+  if (mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].includes(ext)) return { key: 'img', label: '사진', cls: 'bg-violet-100 text-violet-700' };
+  if (['hwp', 'hwpx'].includes(ext)) return { key: 'hwp', label: '한글', cls: 'bg-blue-100 text-blue-700' };
+  if (['doc', 'docx'].includes(ext) || /word/.test(mime)) return { key: 'doc', label: '워드', cls: 'bg-sky-100 text-sky-700' };
+  if (['ppt', 'pptx'].includes(ext) || /presentation/.test(mime)) return { key: 'ppt', label: '발표', cls: 'bg-orange-100 text-orange-700' };
+  return { key: 'file', label: '파일', cls: 'bg-slate-100 text-slate-600' };
+}
+export function FileKindIcon({ a, small }: { a: any; small?: boolean }) {
+  const k = fileKind(a);
+  return (
+    <span className={cx('flex shrink-0 items-center justify-center rounded-md', k.cls, small ? 'size-5' : 'size-8')} title={k.label} data-file-kind={k.key} aria-hidden>
+      {k.key === 'link' ? <Link2 className={small ? 'size-3' : 'size-4'} /> : k.key === 'img' ? <ImageIcon className={small ? 'size-3' : 'size-4'} /> : <FileText className={small ? 'size-3' : 'size-4'} />}
+    </span>
   );
 }
 
