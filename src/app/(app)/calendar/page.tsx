@@ -317,6 +317,11 @@ function CalendarPage() {
         {/* 왼쪽: 미니 달력 + 캘린더 목록 (Google Calendar 형태) */}
         <aside className="hidden w-56 shrink-0 space-y-4 lg:block" aria-label="캘린더 목록">
           <MiniMonth anchor={visibleStart} holidays={holidaySet} onPick={goto} />
+          <p className="flex items-center gap-2.5 px-1 text-[11px] text-ink-3" data-testid="cal-legend">
+            <span className="inline-flex items-center gap-1"><span className="inline-block size-2.5 rounded-sm" style={{ background: calColors.company }} />일정</span>
+            <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border-l-[3px] border-slate-700 bg-slate-200" />업무</span>
+            <span className="inline-flex items-center gap-0.5"><MapPin className="size-3 text-ink-2" />이동(장소)</span>
+          </p>
           <div>
             <p className="mb-1.5 flex items-center px-1 text-xs font-semibold text-ink-2">내 캘린더<button type="button" onClick={() => setColorDlg(true)} className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-accent-700 hover:bg-slate-100" data-testid="cal-colors-open"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button></p>
             <ul className="space-y-0.5" data-testid="calendar-list">
@@ -354,6 +359,12 @@ function CalendarPage() {
             ))}
           </div>
           <div className="mb-2 flex flex-wrap gap-1.5 text-xs lg:hidden" aria-label="표시할 캘린더">
+            {/* V36 4 범례: 일정 = 꽉 찬 블록, 업무 = 왼쪽 굵은 선, 이동(장소 있음) = 📍·진한 테두리 */}
+            <span className="flex basis-full items-center gap-2 px-1 text-[11px] text-ink-3" data-testid="cal-legend-m">
+              <span className="inline-flex items-center gap-1"><span className="inline-block size-2.5 rounded-sm" style={{ background: calColors.company }} />일정</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border-l-[3px] border-slate-700 bg-slate-200" />업무</span>
+              <span className="inline-flex items-center gap-0.5"><MapPin className="size-3 text-ink-2" />이동</span>
+            </span>
             {cals.data?.calendars.map((c) => (
               <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} aria-pressed={!hidden.includes(c.id)}
                 className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(c.id) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
@@ -362,12 +373,7 @@ function CalendarPage() {
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
             <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
-            {/* V36 4 범례: 일정 = 꽉 찬 블록, 업무 = 왼쪽 굵은 선, 이동(장소 있음) = 📍·진한 테두리 */}
-            <span className="inline-flex items-center gap-2 px-1 text-[11px] text-ink-3" data-testid="cal-legend">
-              <span className="inline-flex items-center gap-1"><span className="inline-block size-2.5 rounded-sm" style={{ background: calColors.company }} />일정</span>
-              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border-l-[3px] border-slate-700 bg-slate-200" />업무</span>
-              <span className="inline-flex items-center gap-0.5"><MapPin className="size-3 text-ink-2" />이동</span>
-            </span>
+
             <button onClick={() => setColorDlg(true)} className="hidden items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:inline-flex" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
           </div>
           {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}
