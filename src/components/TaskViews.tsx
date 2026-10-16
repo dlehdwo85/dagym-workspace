@@ -377,9 +377,10 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           <select className={inputCls} value={filters.assigneeId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, assigneeId: e.target.value }))} aria-label="담당자">
             <option value="">모든 담당자</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
           </select>
-          <select className={inputCls} value={filters.teamId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, teamId: e.target.value }))} aria-label="팀">
-            <option value="">모든 팀</option>{(teamList.data?.teams ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          {/* 로컬 검수 10/17: 부서·팀이 없으면 팀 필터 숨김 */}
+          {(teamList.data?.teams.length ?? 0) > 0 && <select className={inputCls} value={filters.teamId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, teamId: e.target.value }))} aria-label="팀">
+            <option value="">모든 부서·팀</option>{(teamList.data?.teams ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>}
           <select className={inputCls} value={filters.status ?? ''} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))} aria-label="상태">
             <option value="">모든 상태</option>{STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
           </select>

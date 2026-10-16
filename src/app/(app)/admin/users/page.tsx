@@ -51,6 +51,9 @@ function Users() {
   const [edit, setEdit] = useState<any>(null);
   const [review, setReview] = useState<{ email: string; name: string } | null>(null);
   const [reviewMsg, setReviewMsg] = useState('');
+  // 로컬 검수 10/17: 심사용 체험 계정은 직원 목록에 섞지 않고 접어 둠
+  const [showDemo, setShowDemo] = useState(false);
+  const demoN = data?.users.filter((u: any) => u.is_demo).length ?? 0;
   const allUnits = useApi<{ units: any[] }>('/api/admin/org-units');
   const roles = (Object.keys(ROLE_LABEL) as Role[]).filter((r) => r !== 'owner' || user.role === 'owner');
 
@@ -87,11 +90,12 @@ function Users() {
           {canEdit ? <Button onClick={() => setInv({ email: '', name: '', role: 'staff', orgUnitIds: [] })}>+ 직원 초대</Button> : <span className="text-xs text-ink-3" data-testid="users-readonly">조회 권한 — 바꾸려면 대표에게 &ldquo;편집&rdquo;을 요청하세요</span>}
         </span>
       </div>
+      {demoN > 0 && <button type="button" className="text-xs text-ink-2 underline" onClick={() => setShowDemo((x) => !x)} data-testid="demo-toggle">{showDemo ? '심사용 체험 계정 숨기기' : `심사용 체험 계정 ${demoN}개 보기`}</button>}
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : (
         <div className="overflow-x-auto rounded-lg border bg-white">
           <table className="w-full text-sm" data-testid="users">
             <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="p-2">이름</th><th className="p-2">권한</th><th className="p-2">소속</th><th className="p-2">상태</th><th className="p-2">최근 로그인</th><th className="p-2"></th></tr></thead>
-            <tbody className="divide-y">{data!.users.map((u) => (
+            <tbody className="divide-y">{data!.users.filter((u: any) => showDemo || !u.is_demo).map((u) => (
               <tr key={u.id} className={cx(u.status !== 'active' && u.status !== 'invited' && 'text-slate-400')}>
                 <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}{u.title_short ? ` (${u.title_short})` : ''}</div></td>
                 <td className="p-2">{ROLE_LABEL[u.role as Role]}</td>

@@ -1135,6 +1135,8 @@ await step('심사용 체험 계정: 대표가 사용자 관리에서 버튼 →
   assert.match(await owner.getByTestId('invite-link').inputValue(), /\/invite\//);
   await owner.screenshot({ path: `${SHOTS}/63-review-account.png` });
   await owner.keyboard.press('Escape');
+  assert.equal(await owner.getByTestId('users').getByText('심사용').count(), 0, '심사용 계정은 접혀 있음');
+  await owner.getByTestId('demo-toggle').click();
   await owner.getByTestId('users').getByText('심사용').first().waitFor();
 });
 await step('V4 캘린더: 휴대폰 빈 칸 한 번 탭 → 빠른 등록 시트 저장, 본사 동료 화면에 보임, 비공개는 "바쁨", 내 일정·사람 필터 기억', async () => {

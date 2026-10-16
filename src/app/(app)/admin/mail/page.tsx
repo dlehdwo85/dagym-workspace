@@ -137,7 +137,7 @@ function SendMode({ data, reload }: { data: { mode: 'auto' | 'workin' | 'smtp'; 
   }
   const opts: [string, string, string][] = [
     ['auto', '자동', '회사 메일 계정이 있으면 그것으로, 없으면 워크인 발송'],
-    ['workin', '워크인 발송', data.workin.enabled ? `설정 없이 바로 — ${data.workin.from} 에서 "이름 직급 (회사)" 이름으로, 답장은 직원 업무 이메일로. 회사 보낸메일함에는 안 남고 워크인 발송 기록에 남음` : '준비 중(운영팀 도메인 인증 후 켜짐)'],
+    ['workin', '워크인 발송', data.workin.enabled ? `설정 없이 바로 — ${data.workin.from} 에서 "이름 직급 (회사)" 이름으로, 답장은 직원 업무 이메일로. 회사 보낸메일함에는 안 남고 워크인 발송 기록에 남음` : '준비 중 — 곧 켜집니다. 지금은 회사 메일 계정을 연결해 보내세요'],
     ['smtp', '회사 메일 계정', data.account ? `${data.account.fromEmail} 으로 보내고 회사 보낸메일함에도 남음` : '아래에서 계정을 먼저 연결하세요'],
   ];
   return (
