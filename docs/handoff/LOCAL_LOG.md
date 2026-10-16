@@ -336,3 +336,4 @@
 - 2026-10-17 [로컬] 대표 지시: 업종별 영업 DB — 통합 우선, 공공데이터포털 활용 신청은 지금 병행(대표 계정 로그인 대기). AI 가 사업자 업종·지역 보고 데이터 원천·검색어 자동 설정(V40 예정).
 - 2026-10-17 [배포확인요청] 공개 화면(/·/welcome·/login·/signup) 하단 사업자 정보 줄(BizFooter, env COMPANY_NAME·CEO·BIZNO·ADDRESS·PHONE·SUPPORT_EMAIL·COMPANY_MAIL_ORDER_NO — 없으면 '신고 진행 중', 요청 때 읽어 env 만 바꾸면 반영). 회사 간 분리: API 시험(tenancy·security·security-v34·signup-steps·ai-tenant) 전부 통과 — 가짜 서버 기준, 운영에서 두 회사 실제 확인은 아직. PUBLIC_SIGNUP 은 대표 결정.
 - 2026-10-17 [로컬] **영업 DB 공공데이터 1차 활용신청 35건 전부 자동승인**(대표 계정, 계정 총 45). 목록·업종 매핑·상업화 주의점 docs/handoff/WORKIN_V40_SALES_DATA_CATALOG.md. NEIS 는 별도 포털. 정부 통합로그인은 자동화 브라우저를 '개발자도구 감지'로 표시함(대표가 아이디 로그인으로 해결).
+- 2026-10-17 [클라우드 요청] **대표 "개발 시작"** → docs/handoff/WORKIN_V41_SPACES_DEV_ORDER.md(단계 1 공간 틀 → 2 영업 이전 → 3 공공데이터·AI 자동 세팅 → 4 마케팅). 근거 V39·V40·시안.
