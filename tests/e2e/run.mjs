@@ -890,13 +890,17 @@ await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없
   const qc = owner.getByTestId('quick-create');
   await qc.waitFor();
   await qc.getByTestId('quick-save').waitFor();
-  await qc.getByLabel('할 일로도 만들기').waitFor({ state: 'attached' });
+  await qc.getByLabel('업무 리스트에도 추가').waitFor({ state: 'attached' });
   assert.equal(await qc.getByTestId('quick-switch-task').count(), 0, '캘린더에서는 일정만 — 업무 전환 버튼 없음');
+  // 대표 실기기(10/16): 주는 일요일부터, 빠른 입력에 알림 고르기
+  assert.ok(await owner.locator('.fc-col-header-cell').first().evaluate((el) => el.classList.contains('fc-day-sun')), '주 보기 첫 칸 = 일요일');
   await qc.getByLabel('빠른 입력 제목').fill('캘린더 빈칸 업무');
+  await qc.getByTestId('quick-remind').selectOption('30');
   await qc.getByTestId('quick-also-task').check({ force: true });
   await qc.getByTestId('quick-save').click();
   await qc.waitFor({ state: 'detached' });
   const [t] = await sql`select assignee_id, to_char(due_date, 'YYYY-MM-DD') due, to_char(due_time, 'HH24:MI') tm from tasks where title = '캘린더 빈칸 업무' and deleted_at is null`;
+  assert.deepEqual((await sql`select reminder_minutes from events where title = '캘린더 빈칸 업무' and deleted_at is null`)[0].reminder_minutes, [30], '고른 알림 30분 전');
   assert.equal(t.due, d); assert.equal(t.tm, '10:00');
   await owner.screenshot({ path: `${SHOTS}/v14-35-calendar-task.png` });
   // 홈 미니 캘린더: 내가 지시한 업무도 그날 목록에

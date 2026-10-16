@@ -14,7 +14,7 @@ import dynamic from 'next/dynamic';
 import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, X, Palette } from 'lucide-react';
+import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, X, Palette } from 'lucide-react';
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
 import { useBackClose, useSheetBack } from '@/components/backClose';
@@ -346,7 +346,7 @@ function CalendarPage() {
             </ul>
           </div>
         </aside>
-        <div className="min-w-0 flex-1 rounded-card border border-line bg-white p-1.5 shadow-card sm:p-3" data-testid="calendar">
+        <div className="-mx-3 min-w-0 flex-1 border-y border-line bg-white px-0 py-1.5 sm:mx-0 sm:rounded-card sm:border sm:p-3 sm:shadow-card" data-testid="calendar">
           <div className="-mx-1 mb-2 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-sm" role="group" aria-label="누구의 일정" data-testid="people-filter">
             <PeopleChip on={who === 'all'} onClick={() => setWho('all')}>전체</PeopleChip>
             <PeopleChip on={who === 'mine'} onClick={() => setWho('mine')}>내 일정</PeopleChip>
@@ -399,7 +399,7 @@ function CalendarPage() {
           <FullCalendar
             ref={calRef}
             plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
-            timeZone="Asia/Seoul" locale={koLocale} firstDay={1} height="auto" nowIndicator
+            timeZone="Asia/Seoul" locale={koLocale} firstDay={0} height="auto" nowIndicator
             initialView={urlView ?? savedView ?? (mobile ? 'timeGrid3' : 'timeGridWeek')}
             initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
             headerToolbar={mobile ? false : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
@@ -502,7 +502,7 @@ function CalendarPage() {
       <p className="text-xs text-ink-2">빈 칸을 누르거나 끌면 빠른 입력, 업무는 체크로 완료합니다. 오른쪽 “미배정 업무”를 시간 칸으로 끌어 놓으면 업무 시간이 잡힙니다. 단축키 D·W·M·A·T·C</p>
       <ScopeDialog />
       {colorDlg && <CalColorsDialog onClose={() => setColorDlg(false)} />}
-      {/* 대표 결정(10/16): 캘린더에서는 일정만 등록 — 업무는 업무 화면·홈 [+업무]. 일정과 함께 할 일이 필요하면 "할 일로도 만들기" */}
+      {/* 대표 결정(10/16): 캘린더에서는 일정만 등록 — 업무는 업무 화면·홈 [+업무]. 일정과 함께 할 일이 필요하면 "업무 리스트에도 추가" */}
       {quick && <QuickCreate {...quick} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
         onMore={(draft) => { setQuick(null); setEditor({ draft }); }} onSaved={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }} />}
       {preview && <EventPreview ev={preview.ev} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}
@@ -611,6 +611,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
   const [priv, setPriv] = useState(false);
   const [rrule, setRrule] = useState<string | null>(null);
   const [alsoTask, setAlsoTask] = useState(false);
+  const [remind, setRemind] = useState<string>('default'); // 대표: 빠른 입력에 알림 설정이 안 보임 → 기본·없음·10분·30분·1시간·하루 전
   const quickForm = useRef<HTMLFormElement>(null);
   const { user } = useSession();
   const [taskWho, setTaskWho] = useState<string | null>(null);
@@ -632,6 +633,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
       const s = allDay ? `${date}T00:00:00+09:00` : `${date}T${start}:00+09:00`;
       const en = allDay ? `${addDays(endDate ?? date, 1)}T00:00:00+09:00` : `${endDate ?? date}T${end}:00+09:00`;
       await api('/api/events', { body: { calendarId, title: title.trim(), start: s, end: en, allDay, isPrivate: priv, rrule, alsoTask,
+        ...(remind !== 'default' ? { reminderMinutes: remind === 'none' ? [] : [Number(remind)] } : {}),
         ...(alsoTask ? { taskAssigneeId: taskWho ?? user.id, taskRequestedById: taskReq ?? user.id, taskPriority: taskPrio } : {}) } });
       toast.ok(alsoTask ? `일정을 저장하고 업무에도 추가했습니다${(taskWho ?? user.id) === user.id ? ' — 본인 업무는 마감 때 알려 드립니다' : ' — 담당자에게 알림을 보냈습니다'}` : '일정을 저장했습니다');
       onSaved();
@@ -669,10 +671,17 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
         </select>
         {/* V5 반복(일정·업무 모두) — 반복 일정 + 업무에도 추가 = 같은 규칙의 반복 업무 */}
         <div className="mt-2" data-testid="quick-repeat"><RecurSelect value={rrule} onChange={setRrule} anchorDate={date} /></div>
+        {!allDay && (
+          <label className="mt-2 flex items-center gap-2 text-sm"><Bell className="size-4 shrink-0 text-ink-2" aria-hidden />
+            <select className={cx(inputCls, 'h-9 flex-1')} value={remind} onChange={(e) => setRemind(e.target.value)} aria-label="알림" data-testid="quick-remind">
+              <option value="default">알림: 기본(설정 시간)</option><option value="10">알림: 10분 전</option><option value="30">알림: 30분 전</option>
+              <option value="60">알림: 1시간 전</option><option value="1440">알림: 하루 전</option><option value="none">알림 없음</option>
+            </select></label>
+        )}
         <label className="mt-2 flex cursor-pointer items-center gap-2.5 text-sm font-medium text-ink">
-          <input type="checkbox" role="switch" className="peer sr-only" checked={alsoTask} onChange={(e) => setAlsoTask(e.target.checked)} data-testid="quick-also-task" aria-label="할 일로도 만들기" />
+          <input type="checkbox" role="switch" className="peer sr-only" checked={alsoTask} onChange={(e) => setAlsoTask(e.target.checked)} data-testid="quick-also-task" aria-label="업무 리스트에도 추가" />
           <span aria-hidden className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:bg-brand-600 peer-checked:after:translate-x-4" />
-          할 일로도 만들기 <span className="text-xs font-normal text-ink-3">(업무 목록에도 — 날짜를 바꾸면 서로 따라감)</span>
+          <span className="min-w-0"><span className="whitespace-nowrap">업무 리스트에도 추가</span><span className="block text-xs font-normal text-ink-3">날짜를 바꾸면 서로 따라갑니다</span></span>
         </label>
         {alsoTask && (
           <div className="mt-2 grid grid-cols-2 gap-1.5 rounded-input bg-slate-50 p-2 text-xs" data-testid="quick-task-fields">
@@ -828,13 +837,13 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!f.isPrivate} onChange={(e) => set('isPrivate')(e.target.checked)} />비공개 — 다른 사람에게는 시간만 &ldquo;바쁨&rdquo;으로 보입니다</label>
           {/* V5 일정 ↔ 업무 연동 */}
           {!id ? (
-            <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!f.alsoTask} onChange={(e) => set('alsoTask')(e.target.checked)} data-testid="editor-also-task" />할 일로도 만들기 <span className="text-xs font-normal text-ink-3">— 같은 이름·날짜의 업무(담당 나), 날짜를 바꾸면 서로 따라갑니다{f.rrule ? ' · 반복 업무로' : ''}</span></label>
+            <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!f.alsoTask} onChange={(e) => set('alsoTask')(e.target.checked)} data-testid="editor-also-task" />업무 리스트에도 추가 <span className="text-xs font-normal text-ink-3">— 같은 이름·날짜의 업무(담당 나), 날짜를 바꾸면 서로 따라갑니다{f.rrule ? ' · 반복 업무로' : ''}</span></label>
           ) : d?.syncTask ? (
             <p className="flex items-center gap-2 text-sm" data-testid="editor-sync-task"><CircleCheck className="size-4 text-green-600" />연결된 업무: <Link href={`/tasks/${d.syncTask.id}`} className="font-medium underline">{d.syncTask.title}</Link><span className="text-xs text-ink-3">날짜 연동</span></p>
           ) : canEdit ? (
             <button type="button" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline" data-testid="editor-add-task"
               onClick={async () => { try { await api(`/api/events/${id}`, { method: 'PATCH', body: { alsoTask: true } }); toast.ok('업무에도 추가했습니다'); existing.reload(); onSaved(); } catch (er: any) { toast.error(er.message); } }}>
-              <Plus className="size-4" />할 일로도 만들기</button>
+              <Plus className="size-4" />업무 리스트에도 추가</button>
           ) : null}
           {(!d?.event?.recurring_event_id) && <div><div className="mb-1 text-xs font-medium text-slate-600">반복</div><RecurSelect value={f.rrule} onChange={set('rrule')} anchorDate={f.date} /></div>}
           <div><div className="mb-1 text-xs font-medium text-slate-600">알림 {isRecurring && <span className="font-normal text-slate-400">(반복 일정 전체에 적용)</span>}</div><ReminderEditor value={f.reminders} onChange={set('reminders')} /></div>
