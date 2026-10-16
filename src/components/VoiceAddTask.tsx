@@ -75,7 +75,7 @@ export function VoiceAddTask() {
       if (card.assigneeId && card.assigneeId !== user.id) warnAway(card.assigneeId, card.dueDate, dir.users.find((u) => u.id === card.assigneeId)?.name ?? '담당자');
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
-  const missing = (_k: string) => <span className="text-sm font-semibold text-red-600">말씀하지 않으셨어요 — 눌러서 선택</span>;
+  const missing = (_k: string) => <span className="text-xs font-semibold leading-snug text-red-600">말씀하지 않으셨어요 — 위 버튼을 눌러 고르세요</span>;
   const set = <K extends keyof Card>(k: K) => (v: Card[K]) => setCard((c) => (c ? { ...c, [k]: v } : c));
   return (
     <Modal open={open} onClose={close} title="음성으로 업무 등록">
@@ -111,8 +111,9 @@ export function VoiceAddTask() {
               <input className={cx(inputCls, 'h-10 text-base', !card.title.trim() && 'border-red-400')} value={card.title} onChange={(e) => set('title')(e.target.value)} placeholder="말씀하지 않으셨어요 — 눌러서 입력" aria-label="인식한 업무명" />
             </Row>
             <Row label="마감" bad={!card.dueDate}>
-              <span className="flex items-center gap-2">
-                <DuePicker value={card.dueDate} onChange={set('dueDate')} time={card.dueTime} onTime={set('dueTime')} label="인식한 마감" emptyText="선택" />
+              {/* 대표 실기기: "선택"이 세로로 꺾이고 오른쪽 안내가 따로 놀았음 → 버튼은 한 줄 고정, 안내는 버튼 아래 한 줄 왼쪽 맞춤 */}
+              <span className="flex flex-col items-start gap-1" data-testid="voice-due-row">
+                <span className="shrink-0 whitespace-nowrap [&_*]:whitespace-nowrap"><DuePicker value={card.dueDate} onChange={set('dueDate')} time={card.dueTime} onTime={set('dueTime')} label="인식한 마감" emptyText="날짜 선택" /></span>
                 {!card.dueDate && missing('마감')}
               </span>
             </Row>

@@ -1695,7 +1695,13 @@ await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 �
   await dlg.getByTestId('voice-guide').getByText('마감(언제까지)').waitFor();
   await dlg.getByTestId('voice-text').fill('견적서 보내기');
   await dlg.getByTestId('voice-recognize').tap();
-  await dlg.getByTestId('voice-card').getByText('말씀하지 않으셨어요 — 눌러서 선택').waitFor();
+  await dlg.getByTestId('voice-card').getByText(/말씀하지 않으셨어요/).waitFor();
+  // 대표 실기기: "선택" 버튼이 세로로 꺾이지 않고 한 줄, 안내는 버튼 아래 왼쪽 맞춤
+  const dueRow = dlg.getByTestId('voice-due-row');
+  const btn = await dueRow.getByTestId('due-picker').first().boundingBox();
+  assert.ok(btn.height <= 44, `마감 버튼 한 줄 높이: ${btn.height}`);
+  const msg = await dueRow.getByText(/말씀하지 않으셨어요/).boundingBox();
+  assert.ok(msg.y >= btn.y + btn.height - 1 && Math.abs(msg.x - btn.x) <= 2, `안내는 버튼 아래 왼쪽 맞춤: ${JSON.stringify({ btn, msg })}`);
   assert.equal(await dlg.getByTestId('voice-save').isDisabled(), true, '마감 없으면 저장 불가');
   await dlg.getByRole('button', { name: '다시 말하기' }).tap();
   await dlg.getByTestId('voice-text').fill('금요일까지 최매니저 쌍용점 덤벨 수량 파악 !높음');

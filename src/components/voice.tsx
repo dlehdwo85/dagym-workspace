@@ -28,56 +28,101 @@ const Native = registerPlugin<SR>('SpeechRecognition');
 const nativeOk = () => typeof window !== 'undefined' && Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('SpeechRecognition');
 const webSR = () => (typeof window === 'undefined' ? null : (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null);
 export const voiceAvailable = () => nativeOk() || (!Capacitor.isNativePlatform() && !!webSR());
-const MAX_MS = 60_000;
+const MAX_MS = 90_000;
+/** 말이 멈추고 이만큼 조용하면 끝 — 휴대폰 인식기는 1초 남짓 쉬면 혼자 끝나 버려서, 우리가 다시 켜 이어 듣는다 */
+export const SILENCE_MS = 3500;
+/** 눌러 놓고 아무 말이 없을 때 기다리는 시간 */
+const FIRST_WAIT_MS = 8000;
 
-/** 듣기 시작. 돌려준 함수를 부르면 멈춤(그때까지 들은 말로 끝남) */
+/**
+ * 듣기 시작. 돌려준 함수를 부르면 멈춤(그때까지 들은 말로 끝남).
+ * 대표 실기기: "한마디 하자마자 끊긴다" — 인식기가 짧게 쉬면 끝내는 것을 우리가 다시 켜서 이어 붙이고,
+ * [멈춤]을 누르거나 SILENCE_MS 동안 조용하거나 MAX_MS 가 되면 끝낸다.
+ */
 export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; engine?: 'device'; contextual?: string[] }): () => void {
-  let ended = false;
-  const end: VoiceEnd = (r, e) => { if (!ended) { ended = true; o.onEnd(r, e); } };
+  let ended = false, done = false;
+  const t0 = Date.now();
+  let heard = 0; // 마지막으로 새 글자가 들어온 시각(0 = 아직 말 없음)
+  const acc: string[] = []; // 끝난 구간들
+  let cur: string[] = []; // 지금 구간의 후보들
+  let firstAlts: string[] = []; // 한 구간만 말했을 때 그 구간의 다른 후보(단어장 보정용)
+  const joined = () => [...acc, cur[0] ?? ''].map((x) => x.trim()).filter(Boolean).join(' ');
+  const result = (): VoiceResult | null => {
+    const text = joined();
+    if (!text) return null;
+    const segs = acc.length + (cur[0]?.trim() ? 1 : 0);
+    const alts = acc.length ? firstAlts : cur.slice(1);
+    return { text, alternatives: segs === 1 ? alts.map((x) => x.trim()).filter(Boolean) : [] };
+  };
+  let cleanup = () => {};
+  const end: VoiceEnd = (r, e) => { if (!ended) { ended = true; done = true; clearInterval(watch); cleanup(); o.onEnd(r, e); } };
+  const partial = (alts: string[]) => {
+    if (!alts.length) return;
+    if ((alts[0] ?? '') !== (cur[0] ?? '')) heard = Date.now();
+    cur = alts; o.onPartial?.(joined());
+  };
+  const commit = () => { if (cur[0]?.trim()) { if (!acc.length) firstAlts = cur.slice(1); acc.push(cur[0]); } cur = []; };
+  let stopEngine = () => {};
+  const finish = (e?: 'no-speech' | 'error' | 'denied') => { done = true; commit(); const r = result(); end(r, r ? undefined : e ?? 'no-speech'); };
+  // 조용함·최대 시간 감시
+  const watch = setInterval(() => {
+    if (done) return;
+    const now = Date.now();
+    if ((heard && now - heard > SILENCE_MS) || (!heard && now - t0 > FIRST_WAIT_MS) || now - t0 > MAX_MS) { done = true; stopEngine(); setTimeout(() => finish(), 400); }
+  }, 300);
+
   if (nativeOk()) {
-    let last: string[] = [];
-    const handles: PluginListenerHandle[] = [];
-    const finish = (e?: 'no-speech' | 'error' | 'denied') => {
-      clearTimeout(timer);
-      Native.removeAllListeners().catch(() => {});
-      end(last[0]?.trim() ? { text: last[0].trim(), alternatives: last.slice(1).map((x) => x.trim()).filter(Boolean) } : null, last[0]?.trim() ? undefined : e ?? 'no-speech');
-    };
-    const timer = setTimeout(() => Native.stop().catch(() => finish()), MAX_MS);
+    cleanup = () => { Native.removeAllListeners().catch(() => {}); };
+    stopEngine = () => { Native.stop().catch(() => {}); };
+    const startOnce = () => Native.start({ language: 'ko-KR', maxResults: 5, partialResults: true, popup: false, addPunctuation: false, allowForSilence: SILENCE_MS, contextualStrings: o.contextual?.slice(0, 100) })
+      .then((r) => { if (r?.matches?.length) partial(r.matches); }).catch(() => {});
+    // 인식기가 혼자 끝나면(짧은 쉼) 지금까지 말을 붙여 두고 다시 켠다
+    const segmentEnded = () => { if (done) { finish(); return; } commit(); setTimeout(() => { if (!done) startOnce(); }, 150); };
     (async () => {
       let p = (await Native.checkPermissions().catch(() => ({ speechRecognition: 'prompt' }))).speechRecognition;
       if (p !== 'granted') p = (await Native.requestPermissions().catch(() => ({ speechRecognition: 'denied' }))).speechRecognition;
-      if (p !== 'granted') { clearTimeout(timer); return end(null, 'denied'); }
-      handles.push(await Native.addListener('partialResults', (ev) => { if (ev.matches?.length) { last = ev.matches; o.onPartial?.(ev.matches[0]); } }));
-      handles.push(await Native.addListener('listeningState', (ev) => { if ((ev.state ?? ev.status) === 'stopped') finish(); }));
-      handles.push(await Native.addListener('error', (ev) => finish(/permission|denied|not.?allowed|insufficient/i.test(ev.code + ev.message) ? 'denied' : /no.?match|speech.?timeout|no.?speech/i.test(ev.code + ev.message) ? 'no-speech' : 'error')));
-      const r = await Native.start({ language: 'ko-KR', maxResults: 5, partialResults: true, popup: false, addPunctuation: false, contextualStrings: o.contextual?.slice(0, 100) });
-      if (r?.matches?.length) { last = r.matches; finish(); }
+      if (p !== 'granted') return end(null, 'denied');
+      await Native.addListener('partialResults', (ev) => { if (ev.matches?.length) partial(ev.matches); });
+      await Native.addListener('listeningState', (ev) => { if ((ev.state ?? ev.status) === 'stopped') segmentEnded(); });
+      await Native.addListener('error', (ev) => {
+        const m = `${ev.code} ${ev.message}`;
+        if (/permission|denied|not.?allowed|insufficient/i.test(m)) return end(null, 'denied');
+        if (/no.?match|speech.?timeout|no.?speech|busy|client/i.test(m)) return segmentEnded(); // 쉼·잡음 = 다시 듣기(끝내는 건 감시가 정함)
+        done = true; finish('error');
+      });
+      await startOnce();
     })().catch(() => finish('error'));
-    return () => { Native.stop().catch(() => finish()); };
+    return () => { if (done) return; done = true; stopEngine(); setTimeout(() => finish(), 400); };
   }
   const SRc = webSR();
   if (!SRc || Capacitor.isNativePlatform()) { end(null, 'unsupported'); return () => {}; }
-  const r = new SRc();
-  r.lang = 'ko-KR'; r.interimResults = true; r.maxAlternatives = 5; r.continuous = false;
-  let finals: VoiceResult | null = null, interim = '';
-  r.onresult = (e: any) => {
-    let text = '';
-    const alts: string[][] = [];
-    for (let i = 0; i < e.results.length; i++) {
-      const res = e.results[i];
-      text += res[0].transcript;
-      if (res.isFinal) alts.push(Array.from({ length: res.length }, (_, k) => String(res[k].transcript)));
-    }
-    interim = text; o.onPartial?.(text);
-    // 문장이 한 덩어리면 그 덩어리의 후보들을, 여러 덩어리면 첫 후보만 이어 붙인 문장
-    if (alts.length === 1) finals = { text: alts[0][0].trim(), alternatives: alts[0].slice(1).map((x) => x.trim()).filter(Boolean) };
-    else if (alts.length) finals = { text: text.trim(), alternatives: [] };
+  let r: any = null;
+  stopEngine = () => { try { r?.stop(); } catch { /* 끝남 */ } };
+  cleanup = () => { stopEngine(); };
+  const startWeb = () => {
+    r = new SRc();
+    r.lang = 'ko-KR'; r.interimResults = true; r.maxAlternatives = 5; r.continuous = true; // 한 문장 뒤에도 계속 듣기
+    r.onresult = (e: any) => {
+      let text = '';
+      let alts: string[] = [];
+      for (let i = 0; i < e.results.length; i++) {
+        const res = e.results[i];
+        text += res[0].transcript;
+        if (e.results.length === 1) alts = Array.from({ length: res.length }, (_: unknown, k: number) => String(res[k].transcript)).slice(1);
+      }
+      partial([text, ...alts]);
+    };
+    r.onerror = (e: any) => {
+      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') return end(null, 'denied');
+      if (e?.error === 'no-speech' || e?.error === 'aborted') return; // onend 에서 이어 듣기/끝내기
+      done = true; finish('error');
+    };
+    // 브라우저가 혼자 끝내면(쉼) 지금까지 말을 붙여 두고 다시 켠다
+    r.onend = () => { if (done) { finish(); return; } commit(); setTimeout(() => { if (!done) { try { startWeb(); } catch { finish('error'); } } }, 150); };
+    r.start();
   };
-  r.onerror = (e: any) => end(finals ?? (interim.trim() ? { text: interim.trim(), alternatives: [] } : null), e?.error === 'not-allowed' || e?.error === 'service-not-allowed' ? 'denied' : e?.error === 'no-speech' || e?.error === 'aborted' ? 'no-speech' : 'error');
-  r.onend = () => end(finals ?? (interim.trim() ? { text: interim.trim(), alternatives: [] } : null), finals || interim.trim() ? undefined : 'no-speech');
-  const timer = setTimeout(() => { try { r.stop(); } catch { /* 끝남 */ } }, MAX_MS);
-  try { r.start(); } catch { clearTimeout(timer); end(null, 'error'); }
-  return () => { clearTimeout(timer); try { r.stop(); } catch { /* 이미 끝남 */ } };
+  try { startWeb(); } catch { end(null, 'error'); }
+  return () => { if (done) return; done = true; stopEngine(); setTimeout(() => finish(), 400); };
 }
 
 /** 회사 단어장 보정(실패하면 원문 그대로) */
