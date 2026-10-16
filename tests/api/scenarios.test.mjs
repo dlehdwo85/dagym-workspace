@@ -1532,6 +1532,8 @@ describe('WORKIN_V8 아침 브리핑 · 주간 보고 초안 · 부재 종류 ·
     const t = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '보고용 완료 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today, approvalRequired: false })).id;
     const v = (await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.version;
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done', version: v });
+    // 금요일 16시가 지나면 예약 작업이 서버 시작 때 초안을 먼저 만들어 둠(업무 완료 전) → 지우고 지금 만들기
+    await sql`delete from personal_reports where user_id = ${ctx.staffA.id} and status = 'draft'`;
     const r = await ctx.staffA.client.ok('POST', '/api/reports/mine', {});
     assert.equal(r.report.status, 'draft');
     assert.match(r.report.body, /■ 이번 주 완료/); assert.ok(r.report.body.includes('보고용 완료 업무'));
