@@ -479,6 +479,8 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {/* 로컬 검수 10/17: 휴대폰 둘째 줄은 한 줄 고정 — 상태·연장 요청·열람·첨부·경고만, 프로젝트·하위·체크리스트·댓글 수는 숨김(상세에 있음) */}
       {/* V11 1번: 휴대폰은 제목 아래 줄에 상태 칩(누르면 바로 변경) — PC 는 상태 열 */}
       {onPatch && <span className="shrink-0 lg:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
+      {/* V32 4: 연장 요청 대기(지시자가 목록에서 바로 알아봄). 로컬 검수 10/17: 휴대폰 둘째 줄이 넘치면 잘리므로 상태 칩 바로 다음·짧게("연장→10/20") */}
+      {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장<span className="max-lg:hidden"> 요청</span> → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
       {t.team_name && <span className="inline-flex min-w-0 max-w-[6rem] truncate items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
       {t.project_name && <span className="inline-flex min-w-0 items-center gap-1 max-lg:hidden"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
       {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 지시자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
@@ -497,8 +499,6 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {t.blocked_by_count > 0 && <span className="shrink-0 font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
       {/* V37 8: 연결 미팅 일정 📍장소·시간 (장소는 일정에 한 번만) */}
       {t.meeting && <span className="inline-flex min-w-0 max-w-[12rem] shrink items-center gap-0.5 rounded-full bg-rose-50 px-1.5 text-[11px] font-medium text-rose-800" title={`미팅 ${t.meeting.location}`} data-testid="meeting-chip"><span aria-hidden>📍</span><span className="truncate">{t.meeting.location}</span><span className="shrink-0 tabular-nums">· {meetingWhen(t.meeting.start)}</span></span>}
-      {/* V32 4: 연장 요청 대기(지시자가 목록에서 바로 알아봄) · 연장 횟수 */}
-      {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장 요청 → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
       {!t.ext_pending && !!t.due_extend_count && <span className="max-lg:hidden shrink-0 rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}
     </span>
   );
