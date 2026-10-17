@@ -170,6 +170,7 @@ export async function runTick(trigger: string) {
   await step('monthClose', async () => (await import('./monthClose')).monthCloseJob()); // V20 월 마감 기록(매월 1일)
   await step('aiCreditAlerts', async () => (await import('./ai/forecast')).aiCreditAlertsJob()); // V23 5장 확보 크레딧 70·90% 알림
   await step('salesCollect', async () => (await import('./sales/collect')).collectDue()); // V41 단계 3 공공데이터(하루 한 번, 원천 하나씩)
+  await step('adsSync', async () => (await import('./marketingAds')).adsSyncDue()); // V41 4-2 광고 성과(회사별 연결, 하루 한 번 최근 7일)
   await step('aiRetention', async () => ({ purged: await (await import('./ai/threads')).purgeOldThreads() })); // V14 2번 AI 대화 보관 기간
   await step('outbox', async () => (await import('./mailbox')).outboxTick()); // V21 메일 보관함 재시도(서울 지역)
   await step('push', () => dispatchPending(200));

@@ -38,6 +38,13 @@ export async function marketing({ owner, BASE }) {
   await owner.getByTestId('call-add').click();
   await owner.getByTestId('call-row').filter({ hasText: '010-2222-3333' }).getByTestId('call-convert').click();
   await owner.getByTestId('call-row').filter({ hasText: '010-2222-3333' }).getByRole('link', { name: '영업 업무 보기' }).waitFor();
+  // 광고 성과(연결 전): 카드 4·빈 안내·네이버 연결 창(관리자)
+  await owner.goto(`${BASE}/s/marketing/ads`);
+  assert.equal(await owner.getByTestId('ads-card').count(), 4);
+  await owner.getByText('광고 계정을 연결하면 매일 아침 성과가 들어옵니다').waitFor();
+  await owner.getByTestId('ads-add-naver').click();
+  await owner.getByTestId('naver-form').waitFor();
+  await owner.keyboard.press('Escape');
   // 원래대로
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
   await owner.goto(`${BASE}/admin/users`);
