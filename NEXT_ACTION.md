@@ -737,6 +737,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 로컬 검수 3차: 휴대폰 업무 둘째 줄 마감 칩(92px 칸)이 넓으면 왼쪽으로 넘쳐 열람·연장 칩을 덮던 것 → 휴대폰은 칩 폭 그대로 줄 흐름 안에.
 - 남은 것: 광고 성과 읽기(회사별 광고 계정 연결 필요), 운영실 KV 데이터 이전(원본 저장소 접근 필요).
 
+## 2026-10-17: V41 4-2 광고 성과 읽기 (클라우드)
+- 084: mkt_ad_accounts(회사·제공자·외부 ID·이름·브랜드·암호화 비밀값·상태) · mkt_ad_stats(계정×날짜×캠페인: 노출·클릭·비용·전환) · mkt_ad_oauth_states.
+- 회사별 직접 연결(F-5, Windsor 등 중개 없음). 읽기 전용 — 예산·입찰 변경 기능 없음.
+  - 네이버 검색광고: 관리자가 액세스 라이선스·비밀키·CUSTOMER_ID 입력 → 연결 확인 후 AES-256-GCM 저장.
+  - Meta: env META_APP_ID/META_APP_SECRET 있을 때만 [연결](OAuth ads_read, 장기 토큰). 다른 회사 계정은 Meta 앱 심사(ads_read 고급 권한) 필요.
+  - Google Ads: env GOOGLE_ADS_DEVELOPER_TOKEN·GOOGLE_ADS_CLIENT_ID·GOOGLE_ADS_CLIENT_SECRET(+선택 GOOGLE_ADS_LOGIN_CUSTOMER_ID). 콜백 주소 {APP_URL}/api/marketing/ads/callback/google · /meta 를 각 콘솔에 등록.
+- 하루 한 번 tick 에서 최근 7일 다시 읽기(전환 늦게 잡힘), 관리자 [지금 다시 불러오기]. 마케팅 메뉴 '광고 성과'(합계 4·날짜별 광고비·캠페인 표·연결 관리).
+- KV 이전: 운영실 읽기 전용 내보내기 API(서명 토큰) 사양을 받으면 가져오기 작업을 만듦 — 대기.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
