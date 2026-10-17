@@ -605,8 +605,9 @@ function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }
   const ex = extendRole(t, user.id);
   // V32 4: 담당자가 마감을 뒤로 미루면 바로 바꾸지 않고 연장 요청 창(사유 필수)으로
   const change = (v: string | null) => (ex === 'request' && t.due_date && (!v || v > t.due_date) ? setExt(v) : onPatch(t, { dueDate: v }));
+  // 로컬 검수 10/17(390폭): 마감 칩이 92px 보다 넓으면(시간 포함 등) 왼쪽으로 넘쳐 둘째 줄 칩을 덮음 → 휴대폰은 칩 폭 그대로·줄 흐름 안에서
   return (
-    <span className="inline-flex w-[92px] justify-end">
+    <span className="inline-flex w-[92px] shrink-0 justify-end max-lg:w-auto" data-testid="due-cell">
       <DuePicker value={t.due_date} status={t.status} onChange={change} label={`${t.title} 마감일`} onExtend={ex ? () => setExt(null) : undefined} extendLabel={ex === 'request' ? '마감 연장 요청' : '마감 연장'} />
       {ex && <ExtendDialog task={t} boss={ex === 'boss'} open={ext !== false} initial={ext || null} onClose={() => setExt(false)} />}
     </span>

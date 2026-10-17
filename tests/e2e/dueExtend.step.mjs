@@ -34,6 +34,8 @@ export async function dueExtend({ staff, owner, ctx, sql, BASE }) {
   const ec = await row.getByTestId('ext-chip').boundingBox(), dc = await row.getByTestId('due-picker').boundingBox();
   assert.ok(ec.x + ec.width <= dc.x + 1, `연장 칩 ${ec.x}+${ec.width} / 마감 칩 ${dc.x}`);
   const clip = await row.getByTestId('ext-chip').evaluate((el) => { const a = el.getBoundingClientRect(), p = el.parentElement.getBoundingClientRect(); return p.right - a.right; });
+  const over = await row.getByTestId('due-cell').evaluate((el) => el.getBoundingClientRect().left - el.querySelector('[data-testid="due-picker"]').getBoundingClientRect().left);
+  assert.ok(over <= 1, `마감 칩이 칸 왼쪽으로 ${over}px 넘침`);
   assert.ok(clip >= -1, `연장 칩이 둘째 줄 밖으로 ${-clip}px 잘림`);
   assert.equal((await row.getByTestId('ext-chip').innerText()).trim(), `연장 → ${md(addDays(due, 3))}`);
   assert.equal((await sql`select to_char(due_date, 'YYYY-MM-DD') d from tasks where id = ${id}`)[0].d, due);
