@@ -144,7 +144,9 @@ export async function adsOverview(u: SessionUser, q: { days?: number }) {
       sum(impressions)::float8 impressions, sum(clicks)::float8 clicks, sum(cost_krw)::float8 cost, sum(conversions)::float8 conversions ${base()}
     group by a.id, a.provider, a.label, s.campaign_id order by sum(cost_krw) desc limit 200`;
   const daily = await sql`select to_char(s.day, 'YYYY-MM-DD') as day, sum(clicks)::float8 clicks, sum(cost_krw)::float8 cost, sum(conversions)::float8 conversions ${base()} group by s.day order by s.day`;
-  return { days: n, from, accounts, totals: tot, campaigns, daily, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u) };
+  return { days: n, from, accounts, totals: tot, campaigns, daily, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
+    // 로컬 검수: 콘솔에 등록할 콜백 주소를 화면에 그대로(APP_URL 기준 — 도메인 바꾸면 이 주소도 바뀜)
+    callbacks: isAdmin(u) ? { meta: callback('meta'), google: callback('google') } : null };
 }
 
 export const naverInput = z.object({ customerId: z.string().trim().regex(/^\d{3,12}$/, 'CUSTOMER_ID 는 숫자입니다(광고 시스템 › 도구 › API 사용 관리)'), apiKey: z.string().trim().min(10).max(200), secretKey: z.string().trim().min(10).max(200),

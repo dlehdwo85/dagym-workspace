@@ -9,7 +9,7 @@ const P_COLOR: Record<string, string> = { naver: '#03C75A', google: '#4285F4', m
 type Acc = { id: string; provider: string; external_id: string; label: string; status: string; last_sync_at: string | null; last_error: string | null; brand: string | null };
 type Camp = { account_id: string; provider: string; label: string; campaign_id: string; campaign_name: string; currency: string; impressions: number; clicks: number; cost: number; conversions: number };
 type Data = { days: number; accounts: Acc[]; totals: { impressions: number; clicks: number; cost: number; conversions: number }; campaigns: Camp[];
-  daily: { day: string; clicks: number; cost: number; conversions: number }[]; providers: { key: string; label: string; ready: boolean }[]; canEdit: boolean };
+  daily: { day: string; clicks: number; cost: number; conversions: number }[]; providers: { key: string; label: string; ready: boolean }[]; canEdit: boolean; callbacks: { meta: string; google: string } | null };
 const n0 = (v: number) => Math.round(v).toLocaleString('ko-KR');
 const won = (v: number, cur = 'KRW') => (cur === 'KRW' ? `${n0(v)}원` : `${v.toLocaleString('ko-KR', { maximumFractionDigits: 2 })} ${cur}`);
 const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(2)}%` : '—');
@@ -89,6 +89,11 @@ export function Ads() {
               : <span key={p.key} className="inline-flex h-8 items-center rounded-input border border-dashed border-line px-3 text-xs text-ink-3" title="워크인 앱 등록·심사 후 열립니다">{p.label} — 준비 중</span>)}
           </div>
         ) : <p className="mt-2 text-xs text-ink-3">광고 계정 연결은 관리자가 합니다.</p>}
+        {data.callbacks && (
+          <details className="mt-2 text-xs text-ink-2" data-testid="ads-callbacks"><summary className="cursor-pointer">Google·Meta 콘솔에 등록할 콜백 주소</summary>
+            <ul className="mt-1 space-y-0.5">{(['google', 'meta'] as const).map((k) => <li key={k}><span className="inline-block w-14">{k === 'google' ? 'Google' : 'Meta'}</span><code className="select-all break-all rounded bg-slate-100 px-1">{data.callbacks![k]}</code></li>)}</ul>
+            <p className="mt-1 text-[11px] text-ink-3">운영 주소(APP_URL)를 바꾸면 이 주소도 바뀌니 콘솔에도 다시 등록해야 합니다.</p></details>
+        )}
         <p className="mt-2 text-[11px] text-ink-3">성과는 각 광고 플랫폼에서 직접 읽습니다(하루 한 번, 최근 7일을 다시 읽어 늦게 잡힌 전환까지 반영). 광고 예산·입찰을 바꾸는 기능은 없습니다.</p>
       </section>
       {naver && <NaverForm onClose={() => setNaver(false)} onDone={reload} />}

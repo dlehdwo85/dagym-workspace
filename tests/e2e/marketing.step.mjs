@@ -43,6 +43,7 @@ export async function marketing({ owner, BASE }) {
   await owner.getByTestId('ads-card').first().waitFor();
   assert.equal(await owner.getByTestId('ads-card').count(), 4);
   await owner.getByText('광고 계정을 연결하면 매일 아침 성과가 들어옵니다').waitFor();
+  await owner.getByTestId('ads-callbacks').getByText(/\/api\/marketing\/ads\/callback\/meta/).waitFor({ state: 'attached' });
   await owner.getByTestId('ads-add-naver').click();
   await owner.getByTestId('naver-form').waitFor();
   await owner.keyboard.press('Escape');

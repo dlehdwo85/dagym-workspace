@@ -51,7 +51,8 @@ test('네이버 라이선스 연결·읽기·합계·권한', async () => {
   assert.equal(hits.filter((h) => h.path === '/naver/stats').length, 7, '최근 7일 하루씩');
   const ov = await ctx.staffA.client.ok('GET', '/api/marketing/ads?days=7');
   assert.deepEqual([ov.totals.impressions, ov.totals.clicks, ov.totals.cost, ov.totals.conversions], [1000, 50, 25000, 2]);
-  assert.equal(ov.campaigns[0].campaign_name, '파워링크 본점'); assert.equal(ov.canEdit, false);
+  assert.equal(ov.campaigns[0].campaign_name, '파워링크 본점'); assert.equal(ov.canEdit, false); assert.equal(ov.callbacks, null, '직원은 콜백 주소 없음');
+  assert.match((await ctx.owner.ok('GET', '/api/marketing/ads')).callbacks.google, /\/api\/marketing\/ads\/callback\/google$/);
   assert.ok(!JSON.stringify(ov).includes('naver-secret') && !JSON.stringify(ov).includes('naver-license'), '비밀값 미노출');
   // 다시 읽어도 덮어쓰기(중복 없음)
   await ctx.owner.ok('POST', '/api/marketing/ads/sync', {});
