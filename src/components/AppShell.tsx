@@ -13,7 +13,7 @@ import {
   Building2, HelpCircle, ListTodo, Library, LogOut, Mic, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
   MessageCircle, Mail,
-  TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck,
+  TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon,
 } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
@@ -95,7 +95,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const nav: NavItem[] = [...NAV, ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
-  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '영업 현황', icon: TrendingUp }] : space === 'marketing' ? [{ href: '/s/marketing', label: '마케팅 운영실', icon: Megaphone }] : [];
+  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '영업 현황', icon: TrendingUp }, { href: '/s/sales/prospects', label: '영업기회', icon: Search }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '마케팅 운영실', icon: Megaphone }] : [];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);
