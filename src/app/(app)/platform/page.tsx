@@ -8,6 +8,7 @@ import { PlatformTenants } from '@/components/PlatformTenants';
 import { fmtBytes, lim, won } from '@/components/usage';
 import { PlatformPayments } from '@/components/Billing';
 import { PayTest } from '@/components/PayTest';
+import { PlatformSalesSources } from '@/components/sales/PlatformSalesSources';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const num = (v: string) => (v.trim() === '' ? null : Number(v));
@@ -52,6 +53,7 @@ export default function PlatformPage() {
       {/* V12 3번: 문의 접수함 */}
       <PlatformFunnel />
       <AiForecast />
+      <PlatformSalesSources />
       <section id="support" className="rounded-card border border-line bg-white shadow-card" data-testid="support-inbox">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">문의 접수함 {tickets.data && <span className="text-xs font-normal text-ink-3">미답변 {tickets.data.tickets.filter((t) => t.status === 'open').length}건</span>}</h2>
         <ul className="divide-y divide-line text-sm">
