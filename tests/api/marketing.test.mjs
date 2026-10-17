@@ -1,17 +1,19 @@
 // V41 4-2 마케팅 핵심: 승인은 버전 단위(옛 버전 승인 409·시안 없는 승인 400·수정 요청/보류는 이유 필수), 게시 확인은 승인된 최신 버전만, 전화 문의 → 영업 업무, 공간 권한 404
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { BASE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { BASE, FAKE, bootstrap, ensureTls, resetDb, startServer, testDb } from '../helpers.mjs';
+import { startFakeGoogle } from '../fake-google.mjs';
 
-let srv, ctx, sql, img;
+let srv, ctx, sql, img, fake;
+const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
 before(async () => {
-  await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
+  await resetDb(); await ensureTls(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   const lf = await ctx.owner.ok('POST', '/api/library', { fileName: '가을 행사 시안.png', mimeType: 'image/png', size: 4, folder: '마케팅' });
   await fetch(BASE + lf.upload.url, { method: 'PUT', headers: lf.upload.headers, body: Buffer.from('abcd') });
   await ctx.owner.ok('POST', `/api/library/${lf.id}/complete`);
   img = lf.id;
 });
-after(async () => { srv?.proc.kill(); await sql?.end(); });
+after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); });
 
 describe('V41 4-2 마케팅', () => {
   test('공간 꺼짐이면 404, 켜고 배정한 사람만', async () => {
@@ -67,5 +69,16 @@ describe('V41 4-2 마케팅', () => {
     assert.equal(calls.calls.find((c) => c.id === id).status, 'lead');
     assert.equal((await ctx.staffA.client.ok('POST', `/api/marketing/calls/${id}/convert`, {})).taskId, r.taskId, '두 번 눌러도 업무 하나');
     assert.equal((await ctx.staffB.client.req('GET', '/api/marketing/calls')).status, 404, '배정 안 된 직원');
+  });
+
+  test('AI 캡션 초안: 초안 3개·해시태그(# 빼고)·사용량 기록, 미배정 404', async () => {
+    await ctl({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ captions: ['가을 행사 첫 번째', '두 번째', '세 번째', '네 번째'], hashtags: ['#가을행사', '헬스 장', '#가을행사'] }) }], stop_reason: 'end_turn' }] });
+    const r = await ctx.staffA.client.ok('POST', '/api/marketing/assist', { channel: 'instagram', topic: '10월 가을 행사 안내' });
+    assert.equal(r.captions.length, 3); assert.deepEqual(r.hashtags, ['가을행사', '헬스장']);
+    const st = await fetch(`${FAKE}/__state`).then((x) => x.json());
+    assert.match(st.anthropic.at(-1).body.messages[0].content, /가을 행사 안내/);
+    assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'marketing_caption' and user_id = ${ctx.staffA.id}`)[0].n, 1);
+    assert.equal((await ctx.staffB.client.req('POST', '/api/marketing/assist', { channel: 'instagram', topic: '가을' })).status, 404);
+    assert.equal((await ctx.staffA.client.req('POST', '/api/marketing/assist', { channel: 'instagram', topic: '' })).status, 400);
   });
 });

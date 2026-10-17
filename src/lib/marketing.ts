@@ -183,3 +183,44 @@ export async function convertCall(u: SessionUser, id: string, i: z.infer<typeof 
   await sql`update mkt_calls set status = 'lead', task_id = ${(r as any).id} where id = ${id}`;
   return { taskId: (r as any).id };
 }
+
+// ---------------- V41 4-2 마케팅 AI 비서: 캡션·해시태그 초안(게시는 승인 대기를 거쳐 사람이) ----------------
+export const captionInput = z.object({ channel: zChannel, topic: z.string().trim().min(2, '무엇을 알릴지 적어 주세요').max(1000), brandId: zUuid.nullable().optional(), tone: z.string().max(40).optional() });
+const CAPTION_LEN: Record<string, string> = { instagram: '3~6줄, 첫 줄은 눈길을 끄는 한 문장', facebook: '3~5문장', blog: '제목 1줄 + 본문 8~12문장', youtube: '제목 1줄 + 설명 3~5줄', naver_place: '소식 2~4문장', other: '3~5문장' };
+export async function captionAssist(u: SessionUser, i: z.infer<typeof captionInput>) {
+  await assertSpace(u, 'marketing');
+  const { requireMenu } = await import('./menuPerms');
+  await requireMenu(u, 'assistant', 'use');
+  const P = await import('./ai/provider');
+  if (!P.aiEnabled()) throw new HttpError(503, 'ai_off', 'AI 가 설정되지 않았습니다');
+  const G = await import('./ai/guard');
+  await G.assertAiCredit();
+  await G.assertUserBudget(u);
+  await (await import('./plans')).assertAiRequest(u);
+  const sql = db();
+  const [brand] = i.brandId ? await sql<{ name: string }[]>`select name from mkt_brands where id = ${i.brandId} and tenant = ${tenantOf(u)}` : [];
+  const Pn = await import('./ai/persona');
+  const co = await Pn.companyAi(u, sql);
+  const p = P.anthropicProvider({ tier: 'fast' });
+  let r;
+  try {
+    r = await p.chat({
+      system: `회사 마케팅 담당을 돕는 카피라이터입니다. ${i.channel === 'other' ? 'SNS' : CHANNELS[i.channel]}에 올릴 글 초안 3개(서로 다른 각도)와 해시태그(최대 10개, # 없이)를 씁니다.
+- 한국어. 길이: ${CAPTION_LEN[i.channel]}. 과장·최상급·근거 없는 수치·가격·할인·의료 효능 표현은 쓰지 않습니다. 모르는 값은 [ ] 로 비워 둡니다.
+- 개인 연락처·실명은 쓰지 않습니다. 초안일 뿐이며 게시는 승인 뒤 사람이 합니다. JSON 만.
+${Pn.companyBlock(co)}`,
+      tools: [], messages: [{ role: 'user', content: `${brand ? `[브랜드] ${brand.name}\n` : ''}${i.tone ? `[말투] ${i.tone}\n` : ''}[알릴 것] ${i.topic}` }],
+      format: { type: 'object', additionalProperties: false, required: ['captions', 'hashtags'], properties: { captions: { type: 'array', items: { type: 'string' } }, hashtags: { type: 'array', items: { type: 'string' } } } },
+    });
+  } catch (e) { throw await G.onAiError(e); }
+  const cost = P.costUsd(r.model ?? p.model, r.usage);
+  await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+    values (${tenantOf(u)}, ${u.id}, ${(await import('node:crypto')).randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${cost}, 'marketing_caption')`;
+  let o: { captions?: unknown; hashtags?: unknown } = {};
+  try { o = JSON.parse((r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('')); } catch { /* 형식이 틀리면 빈 결과 */ }
+  const captions = (Array.isArray(o.captions) ? o.captions : []).map((x) => String(x).trim().slice(0, 3000)).filter(Boolean).slice(0, 3);
+  const hashtags = [...new Set((Array.isArray(o.hashtags) ? o.hashtags : []).map((x) => String(x).replace(/^#+/, '').replace(/\s+/g, '').slice(0, 30)).filter(Boolean))].slice(0, 10);
+  if (!captions.length) throw new HttpError(502, 'ai_unavailable', 'AI 가 초안을 만들지 못했습니다. 다시 시도해 주세요');
+  await G.userBudgetAlerts(u).catch(() => {});
+  return { captions, hashtags, costKrw: Math.round(cost * P.usdKrw() * 100) / 100 };
+}

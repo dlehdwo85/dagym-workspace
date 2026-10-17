@@ -33,6 +33,13 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
   const brands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
   const [f, setF] = useState({ title: '', channel: 'instagram', brandId: '', date: date ?? '', time: '10:00', body: '' });
   const [media, setMedia] = useState<{ id: string; title: string }[]>([]);
+  const [ai, setAi] = useState<{ captions: string[]; hashtags: string[] } | null>(null); const [aiBusy, setAiBusy] = useState(false);
+  async function draft() {
+    const topic = [f.title, f.body].filter(Boolean).join('\n');
+    if (topic.trim().length < 2) return toast.error('제목이나 본문에 알릴 것을 먼저 적어 주세요');
+    setAiBusy(true);
+    try { setAi(await api('/api/marketing/assist', { body: { channel: f.channel, topic, brandId: f.brandId || null } })); } catch (er: any) { toast.error(er.message); } finally { setAiBusy(false); }
+  }
   async function save(e: React.FormEvent) {
     e.preventDefault();
     try {
@@ -51,6 +58,13 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
           <Field label="시각"><input type="time" className={inputCls} value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
         </div>
         <Field label="본문·캡션"><textarea className={inputCls} rows={5} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} data-testid="mkt-body" /></Field>
+        <div className="space-y-1.5" data-testid="mkt-ai">
+          <Button type="button" size="sm" variant="secondary" onClick={draft} disabled={aiBusy} data-testid="mkt-ai-draft">{aiBusy ? 'AI 가 쓰는 중…' : 'AI 로 캡션 초안 3개'}</Button>
+          {ai && <ul className="space-y-1.5">{ai.captions.map((c, n) => (
+            <li key={n}><button type="button" className="w-full whitespace-pre-wrap rounded-input border border-violet-200 bg-violet-50/40 p-2 text-left text-xs hover:border-violet-400" data-testid="mkt-ai-pick"
+              onClick={() => { setF({ ...f, body: ai.hashtags.length ? `${c}\n\n${ai.hashtags.map((h) => `#${h}`).join(' ')}` : c }); setAi(null); }}>{c}</button></li>))}
+            <li className="text-[11px] text-ink-3">초안을 누르면 본문에 넣습니다(해시태그 포함). 사실·가격은 꼭 확인하세요.</li></ul>}
+        </div>
         <Field label="시안(승인하려면 1개 이상)"><MediaPick value={media} onChange={setMedia} /></Field>
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" data-testid="mkt-save">승인 요청</Button></div>
       </form>
