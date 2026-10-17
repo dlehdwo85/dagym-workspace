@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { currentUser } from '@/lib/auth';
 import { isSpace, userSpaces } from '@/lib/spaces';
 import { SPACE_META } from '@/components/spaceMeta';
+import { ssoConfigured } from '@/lib/sso';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,8 +25,8 @@ export default async function SpaceHome({ params }: { params: Promise<{ space: s
         </section>
       ) : (
         <section className="rounded-card border border-line bg-white p-5 shadow-card">
-          <p className="text-sm text-ink-2">마케팅 운영실(승인 대기·게시 일정·광고 성과)은 지금 별도 화면입니다. 워크인 로그인으로 바로 들어가는 연결은 다음 단계에서 붙입니다.</p>
-          <a href={marketingUrl} target="_blank" rel="noopener" className="mt-4 inline-block rounded-input px-4 py-2 text-sm font-medium text-white" style={{ background: m.color }}>마케팅 운영실 열기</a>
+          <p className="text-sm text-ink-2">마케팅 운영실(승인 대기·게시 일정·광고 성과)은 지금 별도 화면입니다. {ssoConfigured() ? '워크인 로그인 그대로 들어갑니다(비밀번호 입력 없음).' : '워크인 로그인 연결 설정 전이라 운영실 비밀번호로 들어갑니다.'}</p>
+          <a href={ssoConfigured() ? '/api/sso/marketing' : marketingUrl} target="_blank" rel="noopener" data-testid="marketing-open" className="mt-4 inline-block rounded-input px-4 py-2 text-sm font-medium text-white" style={{ background: m.color }}>마케팅 운영실 열기</a>
         </section>
       )}
     </div>

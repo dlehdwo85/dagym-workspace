@@ -407,7 +407,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* V14 51: 메뉴 항목을 누르면 화면이 바뀔 때(경로 변경 effect) 닫는다 — 누르는 순간 닫으면 iOS 가 눌림 효과를 뒤 화면 요소에 남긴다 */}
         {more && (
           <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setMore(false)}>
-            <div className="absolute bottom-0 left-0 right-0 animate-fade-up rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()}>
+            {/* 로컬 검수 10/17: 공간 카드가 더해져 화면보다 길어짐 → 화면 90% 까지만, 안에서 스크롤(맨 위 프로필·공간부터 보임) */}
+            <div className="absolute bottom-0 left-0 right-0 max-h-[90dvh] animate-fade-up overflow-y-auto overscroll-contain rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()} data-testid="more-sheet">
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
               <div className="flex items-center gap-3 px-3 py-2">
                 <Avatar id={session.user.id} name={session.user.name} size={40} />

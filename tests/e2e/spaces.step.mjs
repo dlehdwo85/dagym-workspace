@@ -23,11 +23,16 @@ export async function spaces({ browser, desk, owner, staff, BASE }) {
   await owner.goBack();
   await owner.waitForURL(`${BASE}/`);
   // 휴대폰(대표): 프로필 → 공간 시트
-  const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  const mc = await browser.newContext({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   const m = await mc.newPage();
   await m.goto(`${BASE}/tasks`);
   await m.getByRole('button', { name: '메뉴 더보기' }).tap();
   await m.getByTestId('mobile-spaces').waitFor();
+  // 로컬 검수: 시트가 화면보다 길어도 맨 위(프로필·업무 카드)가 화면 안
+  const top = await m.getByTestId('mobile-space-work').boundingBox();
+  assert.ok(top && top.y >= 0, `업무 카드 화면 안 (y=${top?.y})`);
+  const sheet = await m.getByTestId('more-sheet').boundingBox();
+  assert.ok(sheet.y >= 0 && sheet.height <= 780 * 0.9 + 1, `시트 높이 ${sheet.height}`);
   await m.getByTestId('mobile-space-sales').tap();
   await m.waitForURL(/\/s\/sales$/);
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
