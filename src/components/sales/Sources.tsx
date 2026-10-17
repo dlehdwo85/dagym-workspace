@@ -59,11 +59,12 @@ export function Sources() {
                 <input type="checkbox" className="size-4" checked={s.enabled} disabled={!data.canEdit} onChange={(e) => save(s, { enabled: e.target.checked })} aria-label={`${s.name} 켜기`} />
                 <span className="min-w-0 flex-1"><span className="font-medium">{s.name}</span>{s.common && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-ink-2">공통</span>}<span className="block text-[11px] text-ink-3">{s.provider} · {s.refresh} 갱신 · 모은 것 {s.total.toLocaleString('ko-KR')}건</span></span>
               </div>
+              {/* 로컬 검수 10/17: [이대로 켜기] 뒤 다시 불러와도 칸이 옛 값(빈칸)으로 남던 것 → 값이 바뀌면 칸을 새로 그림 */}
               {s.enabled && data.canEdit && (
                 <div className="mt-1.5 grid gap-1.5 pl-6 sm:grid-cols-3">
-                  <input className={cx(inputCls, 'h-8 py-1 text-xs')} defaultValue={s.keywords.join(', ')} placeholder="검색어(쉼표)" onBlur={(e) => save(s, { keywords: csv(e.target.value) })} aria-label={`${s.name} 검색어`} />
-                  <input className={cx(inputCls, 'h-8 py-1 text-xs')} defaultValue={s.regions.join(', ')} placeholder="지역(예: 서울, 경기)" onBlur={(e) => save(s, { regions: csv(e.target.value) })} aria-label={`${s.name} 지역`} />
-                  <input className={cx(inputCls, 'h-8 py-1 text-xs')} defaultValue={s.excludes.join(', ')} placeholder="제외어(쉼표)" onBlur={(e) => save(s, { excludes: csv(e.target.value) })} aria-label={`${s.name} 제외어`} />
+                  <input key={s.keywords.join(',')} className={cx(inputCls, 'h-8 py-1 text-xs')} defaultValue={s.keywords.join(', ')} placeholder="검색어(쉼표)" onBlur={(e) => save(s, { keywords: csv(e.target.value) })} aria-label={`${s.name} 검색어`} />
+                  <input key={s.regions.join(',')} className={cx(inputCls, 'h-8 py-1 text-xs')} defaultValue={s.regions.join(', ')} placeholder="지역(예: 서울, 경기)" onBlur={(e) => save(s, { regions: csv(e.target.value) })} aria-label={`${s.name} 지역`} />
+                  <input key={s.excludes.join(',')} className={cx(inputCls, 'h-8 py-1 text-xs')} defaultValue={s.excludes.join(', ')} placeholder="제외어(쉼표)" onBlur={(e) => save(s, { excludes: csv(e.target.value) })} aria-label={`${s.name} 제외어`} />
                 </div>
               )}
             </li>))}</ul>

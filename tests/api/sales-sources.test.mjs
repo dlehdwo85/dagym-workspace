@@ -34,6 +34,10 @@ test('카탈로그·자동 세팅·수집·영업기회', async () => {
   assert.equal((await ctx.staffA.client.req('POST', '/api/sales/sources/apply', { sources: sug.sources, keywords: [], regions: [] })).status, 403);
   await ctx.owner.ok('POST', '/api/sales/sources/apply', { sources: sug.sources, keywords: sug.keywords, regions: sug.regions });
   assert.ok((await sql`select 1 from tenant_data_sources where tenant = 'default' and source_code = '15154949' and enabled and regions = '{경기}'`).length);
+  assert.ok(sug.keywords.includes('청소용역'), '규칙표 검색어');
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/sources')).sources.find((s) => s.code === '15154949').keywords, sug.keywords, '켠 원천 목록에 검색어');
+  const sp = await ctx.owner.ok('POST', '/api/sales/sources/suggest', { industry: '서비스업 / 체육시설 위탁운영' });
+  assert.ok(['체육시설 위탁', '커뮤니티', '피트니스'].every((k) => sp.keywords.includes(k)), JSON.stringify(sp.keywords));
   // 공통 수집기: 플랫폼 운영자가 주소를 맞추고 수동 실행 → 공용 표에 2건
   await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
   await sql`update data_sources set endpoint = ${'http://localhost:' + PORT + '/permit'} where code = '15154949'`;

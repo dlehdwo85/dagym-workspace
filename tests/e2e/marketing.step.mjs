@@ -31,6 +31,9 @@ export async function marketing({ owner, BASE }) {
   const d = Number(today.slice(8));
   await owner.getByTestId(`mkt-day-${d}`).getByText('E2E 가을 행사 게시물').waitFor();
   await owner.goto(`${BASE}/s/marketing/calls`);
+  // 로컬 검수 10/17: 하위 메뉴에 있으면 공간 첫 화면(현황)은 같이 강조하지 않음 — 강조는 하나
+  await owner.getByTestId('call-phone').waitFor();
+  assert.deepEqual(await owner.locator('aside a[aria-current="page"]').allInnerTexts(), ['전화 문의']);
   await owner.getByTestId('call-phone').fill('010-2222-3333');
   await owner.getByTestId('call-add').click();
   await owner.getByTestId('call-row').filter({ hasText: '010-2222-3333' }).getByTestId('call-convert').click();

@@ -168,6 +168,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const active = (href: string) => {
     const [p, q] = href.split('?');
     if (p === '/') return path === '/';
+    if (/^\/s\/[a-z]+$/.test(p)) return path === p; // 로컬 검수 10/17: 공간 첫 화면(영업 현황 등)은 하위 메뉴에 있을 때 같이 강조하지 않음
     if (q) return path === p && typeof window !== 'undefined' && window.location.search.includes(q);
     return path.startsWith(p);
   };
@@ -190,7 +191,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const navLink = (n: NavItem, badge?: number) => {
     const on = active(n.href);
     return (
-      <Link key={n.href} href={n.href} title={collapsed ? n.label : undefined} style={on && space !== 'work' ? { background: sm.color } : undefined}
+      <Link key={n.href} href={n.href} aria-current={on ? 'page' : undefined} title={collapsed ? n.label : undefined} style={on && space !== 'work' ? { background: sm.color } : undefined}
         className={cx('group flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm transition-colors', on ? 'bg-brand-600 font-semibold text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-ink', collapsed && 'justify-center px-0')}>
         <n.icon className={cx('size-[18px] shrink-0', on ? 'text-white' : 'text-slate-400 group-hover:text-slate-600')} aria-hidden />
         {!collapsed && <span className="flex-1 truncate">{n.label}</span>}

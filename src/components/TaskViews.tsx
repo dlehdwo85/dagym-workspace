@@ -475,8 +475,8 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
   const { dir } = useSession();
   const hq = dir.orgUnits.find((o) => o.id === t.org_unit_id)?.type === 'hq';
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2 max-lg:flex-nowrap max-lg:overflow-hidden">
-      {/* 로컬 검수 10/17: 휴대폰 둘째 줄은 한 줄 고정 — 상태·연장 요청·열람·첨부·경고만, 프로젝트·하위·체크리스트·댓글 수는 숨김(상세에 있음) */}
+    <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2">
+      {/* 로컬 검수 10/17: 휴대폰 둘째 줄은 상태·연장 요청·열람·첨부·경고만, 프로젝트·하위·체크리스트·댓글 수는 숨김(상세에 있음). 2차: 그래도 넘치면 잘리지 않게 줄바꿈 */}
       {/* V11 1번: 휴대폰은 제목 아래 줄에 상태 칩(누르면 바로 변경) — PC 는 상태 열 */}
       {onPatch && <span className="shrink-0 lg:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
       {/* V32 4: 연장 요청 대기(지시자가 목록에서 바로 알아봄). 로컬 검수 10/17: 휴대폰 둘째 줄이 넘치면 잘리므로 상태 칩 바로 다음·짧게("연장→10/20") */}
