@@ -52,7 +52,7 @@ V39 "영업 기능 대조표" A·B·C·D 그대로 구현. 요약:
 | 개요(홈) | overview(지금 할 일·오늘 게시·자동 처리 접힘) | 숫자 카드 4개(시안) |
 | 승인 대기 | approvals + daily + revisions + plan decide | **버전 단위**: 새 버전 오면 이전 승인 무효→재승인 대기, 보던 버전이 최신 아니거나 시안 이미지 없으면 승인 거부. 마감 게시일 09:00, 7일 창. 결정 버튼은 승인·수정 요청이 기본, 코드에 있는 반려·보류(revisions)·deferred(plan)는 ⛔ 대표 결정 |
 | 콘텐츠 캘린더 | schedule · calendar · week7 · grid(IG 9칸 — 하이링크 하드코딩, 템플릿으로 새로) | 워크인 캘린더 컴포넌트 재사용, 채널 색 |
-| 제작·게시 | plan · production · publish · find · blog · blog-draft · content(AI 플랜) | 중복 게시 방지 **여러 겹 그대로**: 게시 잠금·대상 잠금·멱등 키(effect)·작업 잠금·72시간 첫 300자·재시도 전 최근 글 확인·결과 불명 처리. 기준은 수정판(wip/publish-dedupe-guard 54968a9 — 운영실 main 반영 후) |
+| 제작·게시 | plan · production · publish · find · blog · blog-draft · content(AI 플랜) | 중복 게시 방지 **여러 겹 그대로**: 게시 잠금·대상 잠금·멱등 키(effect)·작업 잠금·72시간 첫 300자·재시도 전 최근 글 확인·결과 불명 처리. 기준은 수정판(운영실 main 7b82d6c 반영 완료 — 결과 불명 채널 차단 포함) |
 | 광고 성과 | ads(브랜드별 지출·예산, 캠페인 7/30일, 정리안 미리보기·적용 기록, 비용 상세) | 예산·입찰·키워드 변경은 대상별 명시 승인 |
 | 전화 문의 전환 | calls + 전화 추적 비콘(/track/call.js) | → [영업 리드로] 전환(영업 공간 연결) |
 | 키워드·벤치마킹 | targets · benchmark · naver 검색 | |
