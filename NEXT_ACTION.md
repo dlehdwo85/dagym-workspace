@@ -766,6 +766,11 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 영업관리 원본 키: SALES_SRC_URL + SALES_SRC_SERVICE_KEY — sb_secret_(apikey 헤더만)·옛 service_role JWT(apikey + Bearer) 둘 다, publishable/anon 은 거절. /api/health config.salesSrcKey 에 종류만.
 - 운영실 이관 전화 기록: 해시는 받은 그대로 대조, 저장은 뒤 4자리만(원본 번호가 오면 워크인이 가림·개수 표시). 운영실 내보내기 라우트는 마케팅 세션 몫(대표 허용 대기) — 클라우드는 만들지 않음.
 
+## 2026-10-18: V41 단계 2 영업관리 이전 — 1) 미리보기 (클라우드)
+- 플랫폼 운영 화면 '영업관리 → 워크인 이전' [미리보기]: 원본 PostgREST 설명서(/rest/v1/)로 표·뷰·칸 이름, 표마다 count=exact 건수, V39 E 기준 숫자 옆에 표시(다르면 빨강), 관련 공고(related=true) 건수. 저장 없음, 마지막 미리보기 건수만 app_settings 'sales_migrate_preview' 에 기록.
+- 기준 숫자 표 이름은 추정(leads·lead_business_interests·sales_activities·tasks·task_subtasks·lead_timepoints·opportunity_work·building_sales_pipeline·vendor_registrations·procurement_notices·operating_facility_prospects) — 실제 이름이 다르면 미리보기 칸 이름을 보고 맞춤.
+- 다음: 로컬 대조 → 대표 확인 → 2) 적용(공용 표·회사별 진행 기록 분리, V39 C) → 3) 화면(V39 B).
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
