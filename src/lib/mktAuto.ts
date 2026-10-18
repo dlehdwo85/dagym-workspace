@@ -198,16 +198,18 @@ export async function produceContent(c: any, actorId?: string | null) {
   const kind = c.kind as Kind;
   const q = qualityCheck(d.body, d.brief, s, brand?.banned_words ?? [], kind, d.title);
   const deadline = deadlineOf(c.scheduled_at, s);
+  const v = (c.current_version ?? 0) + 1; // 처음 제작 = v1, 다시 만들기 = 다음 버전
   // 원고·원장·제작 요청 카드를 한 번에(중간에 끊겨 원고만 남고 카드가 빠지는 일이 없게)
   await sql.begin(async (tx) => {
-    await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${q.body}, ${[]}, ${'AI 자동 제작'}, ${c.created_by})`;
-    await tx`update mkt_contents set title = ${(c.is_test && !d.title.startsWith('[시험]') ? '[시험] ' : '') + d.title}, current_version = 1, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief } as never)}, updated_at = now() where id = ${c.id}`;
-    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note) values (${c.tenant}, ${c.id}, 1, 'text', 0, '원고(Claude) — 크레딧 0')`;
+    await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${[]}, ${v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기'}, ${c.created_by})`;
+    if (v > 1) await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('image', 'video') and status in ('open', 'needs_approval')`;
+    await tx`update mkt_contents set title = ${(c.is_test && !d.title.startsWith('[시험]') ? '[시험] ' : '') + d.title}, current_version = ${v}, reminded_at = null, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief } as never)}, updated_at = now() where id = ${c.id}`;
+    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'})`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임)
-    if (kind !== 'blog' || d.brief) await requestCard(c, 1, kind === 'video' || kind === 'reels' ? 'video' : 'image', d.brief || '실사 사진 + 글자 렌더', kind === 'video' ? EST.video : kind === 'reels' ? EST.video_reels : EST.image, tx);
+    if (kind !== 'blog' || d.brief) await requestCard(c, v, kind === 'video' || kind === 'reels' ? 'video' : 'image', d.brief || '실사 사진 + 글자 렌더', kind === 'video' ? EST.video : kind === 'reels' ? EST.video_reels : EST.image, tx);
   });
   if (!isQuiet(new Date(), s)) await notify(sql, { userIds: await audience(c, actorId), type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${d.title}` : `품질 검사 미통과: ${d.title}`,
-    body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:1` });
+    body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
   return { id: c.id, passed: q.passed, issues: q.issues };
 }
 
@@ -320,7 +322,11 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
       regen_monthly = excluded.regen_monthly, approval_hour = excluded.approval_hour, lead_days = excluded.lead_days, lead_hour = excluded.lead_hour, remind_hours = excluded.remind_hours,
       quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids,
       updated_by = excluded.updated_by, updated_at = now()`;
-  return { ok: true };
+  // 제작 시점(게시 D-n·시각)이 바뀌면 아직 만들지 않은 자동 칸도 다시 계산(지난 시각이면 지금)
+  const re = v.lead_days !== cur.lead_days || v.lead_hour !== cur.lead_hour
+    ? await sql`update mkt_contents set produce_at = greatest(now(), (((scheduled_at at time zone 'Asia/Seoul')::date - ${v.lead_days}::int) + make_time(${v.lead_hour}::int, 0, 0)) at time zone 'Asia/Seoul')
+        where tenant = ${tenantOf(u)} and auto and status = 'draft' and produced_at is null and scheduled_at is not null returning id` : [];
+  return { ok: true, rescheduled: re.length };
 }
 
 export const ruleInput = z.object({ brandId: zUuid.nullable().optional(), channel: z.enum(['instagram', 'facebook', 'blog', 'youtube', 'naver_place', 'other']), kind: z.enum(['feed', 'blog', 'reels', 'video']),
@@ -391,6 +397,27 @@ export async function actRequest(u: SessionUser, id: string, i: z.infer<typeof r
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, created_by) values (${t}, ${q.content_id}, ${q.version}, ${kind}, ${credits}, ${'제작 요청 완료'}, ${u.id})`;
   });
   return { status: 'done', credits };
+}
+
+export const contentActInput = z.object({ action: z.enum(['regen', 'archive']) });
+/** 시안 다시 만들기(자동 제작 시안: 지금 재료로 새 버전 — 이전 이미지·영상 카드는 취소) · 보관(취소 상태 = 목록에서 숨김, 지우지 않음) */
+export async function actContent(u: SessionUser, id: string, i: z.infer<typeof contentActInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
+  const sql = db();
+  const [c] = await sql<any[]>`select * from mkt_contents where id = ${id} and tenant = ${tenantOf(u)}`;
+  if (!c) throw notFound();
+  if (['published', 'canceled'].includes(c.status)) throw badRequest('게시되었거나 보관된 콘텐츠입니다');
+  if (i.action === 'archive') {
+    await sql.begin(async (tx) => {
+      await tx`update mkt_contents set status = 'canceled', quality = coalesce(quality, '{}'::jsonb) || ${tx.json({ archived_by: u.id } as never)}, updated_at = now() where id = ${id}`;
+      await tx`update mkt_production_requests set status = 'canceled', decided_by = ${u.id}, decided_at = now() where content_id = ${id} and status in ('open', 'needs_approval')`;
+    });
+    return { status: 'canceled' };
+  }
+  if (!c.auto) throw badRequest('자동 제작 시안만 다시 만들 수 있습니다');
+  if (c.status === 'approved') throw badRequest('승인된 시안은 다시 만들지 않습니다');
+  return produceContent(c, u.id);
 }
 
 export const brandKitInput = z.object({ tone: z.string().max(200).nullable().optional(), intro: z.string().max(1000).nullable().optional(), products: z.string().max(1000).nullable().optional(), weeklyTopic: z.string().max(300).nullable().optional(), bannedWords: z.array(z.string().trim().min(1).max(30)).max(50).optional(), testMode: z.boolean().optional() });

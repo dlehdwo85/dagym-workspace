@@ -116,3 +116,39 @@ test('알림 받는 사람 고르기 · 브랜드 시험 모드', async () => {
   await sql`update mkt_contents set status = 'approved', approved_version = current_version where id = ${tc[0].id}`;
   assert.equal((await ctx.owner.req('POST', `/api/marketing/contents/${tc[0].id}/publish`, { url: 'https://instagram.com/p/t' })).status, 400, '시험은 게시 확인 안 됨');
 });
+
+test('제작 시점 바꾸면 안 만든 칸 다시 계산 · AI 다시 만들기 · 보관', async () => {
+  // 로컬 검수 10/18 ①: 게시 D-n·제작 시각 변경 → 아직 안 만든 자동 칸의 produce_at 재계산
+  const b = (await ctx.owner.ok('POST', '/api/marketing/auto/brands', { name: '재계산 브랜드' })).brand;
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b.id}`, { intro: '동네 헬스장' });
+  const r = await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: b.id, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '11:00' });
+  const far = async () => (await sql`select produce_at from mkt_contents where rule_id = ${r.id} and produced_at is null order by scheduled_at desc limit 1`)[0].produce_at;
+  const [{ sched }] = await sql`select scheduled_at as sched from mkt_contents where rule_id = ${r.id} order by scheduled_at desc limit 1`;
+  const s = await ctx.owner.ok('PUT', '/api/marketing/auto', { leadDays: 5, leadHour: 15 });
+  assert.ok(s.rescheduled >= 1, JSON.stringify(s));
+  const kstDate = (d, back) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d.getTime() - back * 86400000));
+  const p = await far();
+  assert.equal(kstDate(p, 0), kstDate(sched, 5), '게시 5일 전');
+  assert.equal(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false }).format(p), '15', '15시');
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { leadDays: 3, leadHour: 13 });
+  // ③ 자동 시안 다시 만들기: 새 버전·이전 이미지 카드 취소·새 카드 / 보관 = 숨김(지우지 않음)
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '헬스장 소식', body: '[확인 필요] 이벤트', brief: '실사' })] });
+  const [c] = await sql`select * from mkt_contents where rule_id = ${r.id} order by scheduled_at limit 1`;
+  await sql`update mkt_contents set produce_at = now() where id = ${c.id}`;
+  await sql`update mkt_contents set produce_at = now() + interval '30 days' where rule_id = ${r.id} and id <> ${c.id}`;
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  assert.equal((await sql`select status from mkt_contents where id = ${c.id}`)[0].status, 'changes');
+  assert.equal((await ctx.staffA.client.req('POST', `/api/marketing/auto/contents/${c.id}`, { action: 'regen' })).status, 403, '다시 만들기는 관리자');
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '헬스장 가을 소식', body: '동네 헬스장 가을 안내', brief: '실사' })] });
+  const re = await ctx.owner.ok('POST', `/api/marketing/auto/contents/${c.id}`, { action: 'regen' });
+  assert.equal(re.passed, true, JSON.stringify(re));
+  const [after] = await sql`select status, current_version, title from mkt_contents where id = ${c.id}`;
+  assert.deepEqual([after.status, after.current_version, after.title], ['pending', 2, '헬스장 가을 소식']);
+  const cards = await sql`select version, status from mkt_production_requests where content_id = ${c.id} and kind = 'image' order by version`;
+  assert.deepEqual(cards.map((x) => `${x.version}:${x.status}`), ['1:canceled', '2:open']);
+  await ctx.owner.ok('POST', `/api/marketing/auto/contents/${c.id}`, { action: 'archive' });
+  assert.equal((await sql`select status from mkt_contents where id = ${c.id}`)[0].status, 'canceled', '보관 = 취소 상태(행은 남음)');
+  assert.equal((await sql`select count(*)::int n from mkt_production_requests where content_id = ${c.id} and status = 'open'`)[0].n, 0);
+  assert.ok(!(await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals')).contents.some((x) => x.id === c.id), '승인 대기에서 숨김');
+  assert.equal((await ctx.owner.req('POST', `/api/marketing/auto/contents/${c.id}`, { action: 'regen' })).status, 400);
+});

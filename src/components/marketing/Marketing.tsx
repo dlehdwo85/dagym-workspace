@@ -86,17 +86,31 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   async function newVersion() {
     try { await api(`/api/marketing/contents/${id}/versions`, { body: { body: ver!.body, mediaIds: ver!.media.map((m) => m.id), note: ver!.note || undefined } }); toast.ok('수정본을 올렸습니다 — 다시 승인 대기'); setVer(null); reload(); onChange(); } catch (e: any) { toast.error(e.message); }
   }
+  async function auto(action: 'regen' | 'archive') {
+    if (action === 'archive' && !confirm('이 콘텐츠를 보관할까요? 목록에서 숨겨지고 열린 제작 요청은 취소됩니다(지우지는 않음).')) return;
+    try { const r = await api<any>(`/api/marketing/auto/contents/${id}`, { body: { action } });
+      toast.ok(action === 'archive' ? '보관했습니다' : r.needsTopic ? '재료가 없어 주제 질문 카드를 만들었습니다' : r.passed ? '새 시안을 만들었습니다 — 다시 승인 대기' : `새 시안 품질 검사 미통과: ${r.issues.join(' · ')}`);
+      if (action === 'archive') { onChange(); onClose(); } else { reload(); onChange(); } } catch (e: any) { toast.error(e.message); }
+  }
   async function publish() { try { await api(`/api/marketing/contents/${id}/publish`, { body: { url } }); toast.ok('게시 확인했습니다'); reload(); onChange(); } catch (e: any) { toast.error(e.message); } }
   return (
     <Modal open onClose={onClose} title={c.title} wide>
       <div className="space-y-3 text-sm" data-testid="mkt-detail">
         <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b> · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
+        {c.auto && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">품질 검사: {c.quality.issues.join(' · ')}</p>}
+        {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">시안 없음 — 승인 불가</span>}</div></div>
         {data.canDecide && !['published', 'canceled'].includes(c.status) && (
           <div className="space-y-2 rounded-input border border-violet-200 p-3" data-testid="mkt-decide">
             <input className={inputCls} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="수정 요청·보류는 이유를 적어 주세요" aria-label="결정 메모" />
             <div className="flex flex-wrap gap-2"><Button onClick={() => act('approve')} data-testid="mkt-approve">승인</Button><Button variant="secondary" onClick={() => act('changes')} data-testid="mkt-changes">수정 요청</Button><Button variant="secondary" onClick={() => act('hold')} data-testid="mkt-hold">보류</Button></div>
+          </div>
+        )}
+        {data.canDecide && !['published', 'canceled'].includes(c.status) && (
+          <div className="flex flex-wrap gap-2 text-xs">
+            {c.auto && c.status !== 'approved' && <Button size="sm" variant="secondary" onClick={() => auto('regen')} data-testid="mkt-regen">AI 다시 만들기</Button>}
+            <Button size="sm" variant="secondary" onClick={() => auto('archive')} data-testid="mkt-archive">보관(숨기기)</Button>
           </div>
         )}
         {c.status !== 'published' && (ver ? (
@@ -110,6 +124,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         {c.status === 'approved' && (
           <div className="flex gap-2"><input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="게시한 글 주소(https://…)" aria-label="게시 주소" /><Button onClick={publish} disabled={!url} data-testid="mkt-publish">게시 확인</Button></div>
         )}
+        </>}
         {c.published_url && <p className="text-xs">게시됨: <a className="underline" href={c.published_url} target="_blank" rel="noopener">{c.published_url}</a></p>}
         {!!data.decisions.length && <ul className="space-y-0.5 border-t border-line pt-2 text-xs text-ink-2">{data.decisions.map((d: any, i: number) => <li key={i}>v{d.version} {({ approve: '승인', changes: '수정 요청', hold: '보류' } as any)[d.decision]} · {d.decided_by_name} · {fmtDateTime(d.decided_at)}{d.comment ? ` — ${d.comment}` : ''}</li>)}</ul>}
       </div>

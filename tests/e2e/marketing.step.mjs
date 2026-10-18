@@ -1,7 +1,7 @@
 // V41 4-2 마케팅 공간: 켜기 → 개요 카드 → 승인 대기에서 새 콘텐츠(시안 없음) → 상세에서 승인하면 거절 안내 → 수정 요청(이유) →
 // 캘린더에 칩 → 전화 문의 추가 → [영업 리드로] → 업무 보기 링크 → 끄기
 import assert from 'node:assert/strict';
-export async function marketing({ owner, BASE }) {
+export async function marketing({ owner, BASE, sql }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
@@ -64,6 +64,16 @@ export async function marketing({ owner, BASE }) {
   await owner.getByTestId('auto-brands').getByText('E2E 시험 브랜드', { exact: true }).waitFor();
   await owner.getByTestId('auto-rule-add').click();
   await owner.getByTestId('auto-rule').first().waitFor();
+  // 로컬 검수 10/18 ②: 자동 제작 시안(시험·수정 요청 상태)도 승인 대기에서 눌러 본문·결정 화면이 열림
+  const [{ tenant, created_by }] = await sql`select tenant, created_by from mkt_rules limit 1`;
+  const [ac] = await sql`insert into mkt_contents (tenant, title, channel, scheduled_at, status, current_version, created_by, kind, auto, produced_at, is_test, quality)
+    values (${tenant}, '[시험] E2E 자동 시안', 'instagram', now() + interval '3 days', 'changes', 1, ${created_by}, 'feed', true, now(), true, ${sql.json({ passed: false, issues: ['채우지 않은 자리표시'], brief: '실사' })}) returning id`;
+  await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${ac.id}, 1, '자동 본문', ${[]}, 'AI 자동 제작', ${created_by})`;
+  await owner.goto(`${BASE}/s/marketing/approvals`);
+  await owner.getByTestId('mkt-row').filter({ hasText: 'E2E 자동 시안' }).click();
+  await owner.getByTestId('mkt-detail').getByText('자동 본문').waitFor();
+  await owner.getByTestId('mkt-decide').waitFor();
+  await owner.keyboard.press('Escape');
   // 원래대로
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
   await owner.goto(`${BASE}/admin/users`);
