@@ -34,6 +34,13 @@ export async function marketing({ owner, BASE }) {
   // 로컬 검수 10/17: 하위 메뉴에 있으면 공간 첫 화면(현황)은 같이 강조하지 않음 — 강조는 하나
   await owner.getByTestId('call-phone').waitFor();
   assert.deepEqual(await owner.locator('aside a[aria-current="page"]').allInnerTexts(), ['전화 문의']);
+  // 대표 지적(10/18): 공간 메뉴 아래 '공통'(업무·캘린더·메시지·자료실·AI 비서), 공통 메뉴로 가도 마케팅 공간 유지
+  await owner.getByTestId('nav-common').waitFor();
+  await owner.locator('aside').getByRole('link', { name: '업무', exact: true }).click();
+  await owner.waitForURL(/\/tasks/);
+  assert.equal(await owner.locator('.app-shell').getAttribute('data-space'), 'marketing');
+  await owner.goto(`${BASE}/s/marketing/calls`);
+  await owner.getByTestId('call-phone').waitFor();
   await owner.getByTestId('call-phone').fill('010-2222-3333');
   await owner.getByTestId('call-add').click();
   await owner.getByTestId('call-row').filter({ hasText: '010-2222-3333' }).getByTestId('call-convert').click();

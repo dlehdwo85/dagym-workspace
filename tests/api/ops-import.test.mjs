@@ -10,7 +10,7 @@ const PORT = 3219, TOKEN = 'ops-export-test-token-123';
 const DATA = {
   'mkt:posts:v1': { kind: 'list', value: [{ id: 'p1', title: '가을 행사', status: 'published' }, { id: 'p2', title: '신규 회원' }, { id: 'p3', title: '리뷰' }] },
   'mkt:plan-state:v1': { kind: 'object', value: { week: '2026-W42', locked: false } },
-  'mkt:call-records:v1': { kind: 'list', value: [{ phone: '010-1111-2222', at: '2026-10-10T01:00:00Z', source: 'ads' }] },
+  'mkt:call-records:v1': { kind: 'list', value: [{ phone: '010-1111-2222', at: '2026-10-10T01:00:00Z', source: 'ads', memo: '02 555 3344 로 다시 전화' }] },
 };
 const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 let srv, ctx, sql, fake, tamper = false, seen = [];
@@ -70,7 +70,9 @@ test('미리보기·대조·적용·권한·보관 기간', async () => {
   assert.equal((await ctx.staffA.client.req('GET', '/api/marketing/imported')).status, 403, '직원은 못 봄');
   assert.equal((await ctx.owner.ok('GET', '/api/marketing/imported')).keys.length, 3);
   const calls = await ctx.owner.ok('GET', '/api/marketing/imported?key=mkt%3Acall-records%3Av1');
-  assert.equal(calls.items[0].item.phone, '010-1111-2222');
+  assert.equal(calls.items[0].item.phone, '***-****-2222', '가리지 않고 온 번호는 뒤 4자리만 저장');
+  assert.equal(calls.items[0].item.memo, '***-****-3344 로 다시 전화', '글 안의 번호도 가림');
+  assert.equal(pv.results.find((r) => r.key === 'mkt:call-records:v1').unmaskedPhones, 2);
   assert.equal((await sql`select count(*)::int n from audit_logs where action = 'ops_import.view_pii'`)[0].n, 1);
   // 보관 기간(기본 365일) 지난 전화 기록은 tick 이 삭제, 다른 키는 그대로
   await sql`update ops_import_items set imported_at = now() - interval '400 days'`;

@@ -617,6 +617,8 @@ const chatInput = z.object({
   text: z.string().max(20000).optional(),
   messages: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000) })).min(1).max(30).optional(),
   taskId: z.string().uuid().optional(),
+  /** 대표 지적(10/18): 영업·마케팅 공간에서 연 AI 비서 — 그 공간 맥락으로 답함(권한은 서버가 다시 확인) */
+  space: z.enum(['sales', 'marketing']).optional(),
   /** V14 11번: 어느 화면에서 물었는지 — id 만 받고 서버가 권한 안에서 조회 */
   context: z.object({ page: z.enum(['home', 'tasks', 'task', 'calendar', 'library', 'revenue', 'reports', 'messages', 'other']), id: z.string().max(80).optional() }).optional(),
   /** V12 8번: 이번 질문에 붙인 자료실 파일(최대 5개) — 이미지는 비전, PDF 는 문서, 그 밖은 추출한 글자로 전달 */
@@ -627,6 +629,24 @@ const chatInput = z.object({
   replaceText: z.string().max(20000).optional(),
 });
 export { chatInput };
+
+/** 공간 맥락: 그 공간 권한이 있을 때만 한 줄 요약(영업 = 영업기회, 마케팅 = 승인 대기·광고·전화 문의). 권한 없으면 아무것도 안 붙임 */
+async function spaceContext(u: SessionUser, space: 'sales' | 'marketing') {
+  const { userSpaces } = await import('../spaces');
+  if (!(await userSpaces(u)).includes(space)) return '';
+  const sql = db(); const t = tenantOf(u);
+  if (space === 'sales') {
+    const [r] = await sql<{ n: number; fresh: number }[]>`select count(*)::int n, count(*) filter (where p.opened_on >= current_date - 7)::int fresh
+      from prospects p join tenant_data_sources ts on ts.source_code = p.source_code and ts.tenant = ${t} and ts.enabled
+      left join tenant_prospects tp on tp.prospect_id = p.id and tp.tenant = ${t} where coalesce(tp.status, 'new') in ('new', 'contacting')`;
+    return `\n지금 사용자는 '영업' 공간에서 묻고 있습니다(리드·영업기회·입찰·거래처 관점으로 답하세요). 진행 중 영업기회 ${r?.n ?? 0}건(최근 7일 새로 ${r?.fresh ?? 0}건) — 자세한 목록은 영업 › 영업기회 화면.`;
+  }
+  const [c] = await sql<{ pending: number; changes: number; calls: number }[]>`select (select count(*)::int from mkt_contents where tenant = ${t} and status = 'pending') pending,
+      (select count(*)::int from mkt_contents where tenant = ${t} and status = 'changes') changes, (select count(*)::int from mkt_calls where tenant = ${t} and status = 'new') calls`;
+  const [a] = await sql<{ cost: number; clicks: number; conv: number }[]>`select coalesce(sum(s.cost_krw), 0)::float8 cost, coalesce(sum(s.clicks), 0)::float8 clicks, coalesce(sum(s.conversions), 0)::float8 conv
+      from mkt_ad_stats s join mkt_ad_accounts ac on ac.id = s.account_id where ac.tenant = ${t} and s.day >= current_date - 7`;
+  return `\n지금 사용자는 '마케팅' 공간에서 묻고 있습니다(콘텐츠·게시 일정·광고 성과·전화 문의 관점으로 답하세요). 승인 대기 ${c?.pending ?? 0}건, 수정 요청 ${c?.changes ?? 0}건, 새 전화 문의 ${c?.calls ?? 0}건, 최근 7일 광고비 ${Math.round(a?.cost ?? 0).toLocaleString('ko-KR')}원·클릭 ${Math.round(a?.clicks ?? 0)}·전환 ${Math.round(a?.conv ?? 0)}. 게시·광고 변경은 직접 하지 말고 화면에서 사람이 하도록 안내하세요.`;
+}
 
 const IMG = /^image\/(png|jpe?g|gif|webp)$/;
 /** 첨부 파일 → Claude 입력 블록 (회사 자료실 권한 그대로, 큰 파일은 글자만) */
@@ -714,6 +734,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     context = `\n지금 사용자가 보고 있는 업무: id=${i.taskId}, 제목="${(d.task as any).title}". "이 업무"는 이것을 뜻합니다.`;
   }
   if (i.context && !i.taskId) context += await pageContext(u, i.context);
+  if (i.space) context += await spaceContext(u, i.space);
   const Pn = await import('./persona');
   const [co, me] = await Promise.all([Pn.companyAi(u), Pn.writerOf(u)]);
   const system = `${docMode ? DOC_SYSTEM : SYSTEM}\n\n${Pn.companyBlock(co)}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}${me.title ? ` ${me.title}` : ''}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}`;

@@ -29,6 +29,7 @@ export async function GET() {
         webPush: webPushConfigured(),
         appPush: fcmConfigured(),
         googleCalendar: googleSyncEnabled(), // 선택 기능
+        salesSrcKey: (await import('@/lib/sales/supabaseSrc')).srcKeyKind(), // V41 단계 2: 영업관리 원본 키 종류(값은 안 보임)
 
       },
       env: process.env.VERCEL_ENV ?? process.env.NODE_ENV,

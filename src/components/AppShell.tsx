@@ -27,6 +27,7 @@ import { VoiceAddTask, openVoiceAdd } from './VoiceAddTask';
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 /** 워크인(WORKIN_V2) 사이드바: 홈 · 업무(본사 전체) · 프로젝트 · 캘린더 · 알림 + 관리 묶음. 숨긴 화면(현장 신고 QR·자동화·현장 비교 등)은 코드·주소는 남겨 둔다 */
+const COMMON_PATHS = ['/tasks', '/calendar', '/messages', '/library', '/assistant', '/notifications'];
 const NAV: NavItem[] = [
   { href: '/', label: '홈', icon: House },
   { href: '/tasks', label: '업무', icon: CircleCheck },
@@ -76,7 +77,16 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const admin = isAdminRole(session.user.role);
   // V41 공간: 지금 공간(주소로) · 들어갈 수 있는 공간 · 전환(마지막 공간 기억)
   const spaces = (session.spaces ?? ['work']) as SpaceKey[];
-  const space = spaceOfPath(path);
+  // 대표 지적(10/18): 영업·마케팅 공간에서 공통 메뉴(업무·캘린더·메시지·자료실·AI 비서)로 가도 그 공간에 머묾 — 공간 메뉴 아래 '공통' 묶음
+  const pathSpace = spaceOfPath(path);
+  const common = COMMON_PATHS.some((c) => path === c || path.startsWith(c + '/'));
+  const [ctxSpace, setCtxSpace] = useState<SpaceKey>('work');
+  useEffect(() => {
+    if (pathSpace !== 'work') { setCtxSpace(pathSpace); try { sessionStorage.setItem('wos_space_ctx', pathSpace); } catch {} }
+    else if (!common) { setCtxSpace('work'); try { sessionStorage.setItem('wos_space_ctx', 'work'); } catch {} }
+    else { try { const c = sessionStorage.getItem('wos_space_ctx') as SpaceKey | null; if (c && spaces.includes(c)) setCtxSpace(c); } catch {} }
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
+  const space: SpaceKey = pathSpace !== 'work' ? pathSpace : common && spaces.includes(ctxSpace) ? ctxSpace : 'work';
   const sm = SPACE_META[space];
   const [spaceMenu, setSpaceMenu] = useState(false);
   const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number }> }>(spaces.length > 1 && (spaceMenu || more) ? '/api/spaces' : null);
@@ -96,6 +106,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
   const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '영업 현황', icon: TrendingUp }, { href: '/s/sales/prospects', label: '영업기회', icon: Search }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '마케팅 현황', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }, { href: '/s/marketing/calls', label: '전화 문의', icon: Phone }] : [];
+
+  const commonNav: NavItem[] = [{ href: '/tasks', label: '업무', icon: CircleCheck }, { href: '/calendar', label: '캘린더', icon: CalendarDays }, { href: '/messages', label: '메시지', icon: MessageCircle },
+    ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []), ...(session.features.ai ? [{ href: `/assistant?space=${space}`, label: 'AI 비서', icon: Sparkles }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);
@@ -237,8 +250,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
           </div>
           )}
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
-            {(space === 'work' ? nav : spaceNav).map((n) => (
+            {space !== 'work' && !collapsed && <div className="px-2.5 pb-1 pt-0.5 text-[11px] font-semibold text-slate-400">{sm.short}</div>}
+            {(space === 'work' ? nav : [...spaceNav, ...commonNav]).map((n, k) => (
               <div key={n.href}>
+                {space !== 'work' && k === spaceNav.length && <div className={cx('px-2.5 pb-1 pt-3 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-common">공통</div>}
                 {navLink(n, n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0)}
                 {/* 즐겨찾는 프로젝트는 "프로젝트" 바로 아래 */}
                 {n.href === '/projects' && !collapsed && favorites.length > 0 && (

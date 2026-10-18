@@ -3,7 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { BASE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
 const PORT = 3220;
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
@@ -22,7 +22,7 @@ before(async () => {
     if (u.pathname.endsWith('/getUrbtyOfctlLttotPblancDetail')) return res.end(JSON.stringify({ page, matchCount: 1, data: [{ HOUSE_MANAGE_NO: 'O1', PBLANC_NO: 'O1', HOUSE_NM: '강남 오피스텔', HOUSE_DTL_SECD_NM: '오피스텔', HSSPLY_ADRES: '서울특별시 강남구 테헤란로 5', TOT_SUPLY_HSHLDCO: 80, RCRIT_PBLANC_DE: today }] }));
     res.statusCode = 500; return res.end(JSON.stringify({ code: -1, msg: '시험용 오류' })); // 공공지원민간임대는 실패
   }).listen(PORT);
-  await resetDb(); srv = await startServer({ DATA_GO_KR_SERVICE_KEY: 'test-key' }); sql = testDb(); ctx = await bootstrap();
+  await resetDb(); srv = await startServer({ DATA_GO_KR_SERVICE_KEY: 'test-key', SALES_SRC_SERVICE_KEY: 'sb_secret_abcdefghijklmnop123' }); sql = testDb(); ctx = await bootstrap();
   await sql`update data_sources set endpoint = ${`http://localhost:${PORT}/api/ApplyhomeInfoDetailSvc/v1`} where code = '15098547'`;
 });
 after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
@@ -48,5 +48,11 @@ test('처음 채우기 365일 → 공용 표·회사 필터·detail', async () =
   const list = (await ctx.owner.ok('GET', '/api/sales/prospects')).prospects;
   assert.deepEqual(list.map((x) => x.name), ['강남 오피스텔']);
   assert.equal(list[0].detail.households, 80);
+});
+
+test('영업관리 원본 키: 새 형식(sb_secret_) 인식, 값은 안 보임', async () => {
+  const h = await (await fetch(`${BASE}/api/health`)).json();
+  assert.equal(h.config.salesSrcKey, 'secret');
+  assert.ok(!JSON.stringify(h).includes('sb_secret_abc'));
 });
 

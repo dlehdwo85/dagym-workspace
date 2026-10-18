@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
-type Res = { key: string; missing?: true; kind?: string; expectedCount?: number; count?: number; countOk?: boolean; shaOk?: boolean; pageSha?: boolean; sample?: string[] };
+type Res = { key: string; unmaskedPhones?: number; missing?: true; kind?: string; expectedCount?: number; count?: number; countOk?: boolean; shaOk?: boolean; pageSha?: boolean; sample?: string[] };
 type Run = { id: string; tenant: string; mode: string; status: string; frozen: boolean | null; generated_at: string | null; results: Res[]; error: string | null; created_at: string; started_by_name: string | null };
 
 /** V41 4-2 운영실 → 워크인 이관(플랫폼 운영자): 회사 지정 → [미리보기](건수·해시 대조, 저장 없음) → [적용](대조가 모두 맞을 때만 저장, 여러 번 해도 같음) */
@@ -40,7 +40,7 @@ export function PlatformOpsImport() {
               {r.missing ? <td colSpan={4} className="p-1 text-amber-700">운영실 목록에 없음</td> : <>
                 <td className="p-1 text-right tabular-nums">{r.expectedCount}</td><td className={cx('p-1 text-right tabular-nums', !r.countOk && 'font-semibold text-red-700')}>{r.count}</td>
                 <td className={cx('p-1', r.shaOk ? 'text-emerald-700' : 'font-semibold text-red-700')}>{r.shaOk ? '일치' : r.pageSha ? '다름(계산 방식 확인)' : '다름'}</td>
-                <td className="p-1 text-ink-3">{r.sample?.join(', ') ?? '—'}</td></>}
+                <td className="p-1 text-ink-3">{r.sample?.join(', ') ?? '—'}{!!r.unmaskedPhones && <span className="ml-1 font-semibold text-amber-700">· 가리지 않은 전화번호 {r.unmaskedPhones}개 → 저장 전 뒤 4자리만 남김</span>}</td></>}
             </tr>))}</tbody></table></div>
       )}
       {!!data.stored.length && <p className="mt-2 text-[11px] text-ink-3">저장됨: {data.stored.map((s) => `${s.tenant} ${s.key.replace(/^mkt:|:v1$/g, '')} ${s.count}`).join(' · ')}</p>}

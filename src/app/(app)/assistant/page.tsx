@@ -26,6 +26,7 @@ export default function AssistantPage() {
   const sp = useSearchParams();
   const router = useRouter();
   const taskId = sp.get('task') ?? undefined;
+  const space = ['sales', 'marketing'].includes(sp.get('space') ?? '') ? sp.get('space')! : undefined; // 대표 지적(10/18): 영업·마케팅 공간에서 열면 그 공간 맥락
   // V14 2번: 보관된 대화 — ?thread= 로 이어서, 업무에서 열면 그 업무의 최근 대화로
   const [threadId, setThreadId] = useState<string | null>(sp.get('thread'));
   const [tq, setTq] = useState('');
@@ -58,7 +59,7 @@ export default function AssistantPage() {
   const threadRef = useRef(threadId); threadRef.current = threadId;
   // V19 부록 A: 줄바꿈·멈춤·수정 (패널과 같은 동작)
   const conv = useAiConversation<Msg>({
-    body: (t, fileIds) => ({ text: t, ...(threadRef.current ? { threadId: threadRef.current } : {}), taskId, ...(fileIds.length ? { fileIds } : {}) }),
+    body: (t, fileIds) => ({ text: t, ...(threadRef.current ? { threadId: threadRef.current } : {}), taskId, ...(space ? { space } : {}), ...(fileIds.length ? { fileIds } : {}) }),
     onReply: (r) => {
       if (r.threadId && r.threadId !== threadRef.current) { setThreadId(r.threadId); router.replace(`/assistant?${new URLSearchParams({ ...(taskId ? { task: taskId } : {}), thread: r.threadId })}`); }
       status.reload(); threads.reload();

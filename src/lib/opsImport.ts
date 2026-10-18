@@ -28,9 +28,17 @@ async function signed(pathQuery: string) {
   if (!r.ok || !j?.ok) throw new HttpError(502, 'ops_export', `운영실 내보내기 오류 ${r.status}: ${String(j?.error ?? j?.message ?? text).slice(0, 160)}`);
   return j;
 }
+/** 대표 결정(10/18): 전화번호는 가린 채(뒤 4자리만) 옮김. 운영실이 가려서 보내지만, 원본 번호가 섞여 오면 워크인이 저장 전에 가림 */
+const PHONE = /(?<!\d)(0\d{1,2})[-.\s]?(\d{3,4})[-.\s]?(\d{4})(?!\d)/g;
+export function maskPhones(v: unknown, n = { count: 0 }): unknown {
+  if (typeof v === 'string') return v.replace(PHONE, (_m, _a, _b, last) => { n.count++; return `***-****-${last}`; });
+  if (Array.isArray(v)) return v.map((x) => maskPhones(x, n));
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, maskPhones(x, n)]));
+  return v;
+}
 const sha = (v: unknown) => createHash('sha256').update(typeof v === 'string' ? v : JSON.stringify(v)).digest('hex');
 
-type KeyResult = { key: string; kind: string; expectedCount: number; expectedSha: string; count: number; sha: string; pageSha: boolean; countOk: boolean; shaOk: boolean; sample?: string[] };
+type KeyResult = { key: string; kind: string; expectedCount: number; expectedSha: string; count: number; sha: string; pageSha: boolean; countOk: boolean; shaOk: boolean; sample?: string[]; unmaskedPhones?: number };
 async function fetchKey(key: string, m: { kind: string; count: number; sha256: string }) {
   let value: any = null; let cursor: number | null = 0; let pageSha = true;
   for (let page = 0; cursor !== null && page < 400; page++) {
@@ -46,6 +54,8 @@ async function fetchKey(key: string, m: { kind: string; count: number; sha256: s
   const first = Array.isArray(value) ? value[0] : value;
   const sample = first && typeof first === 'object' ? Object.keys(first).slice(0, 30) : undefined;
   const res: KeyResult = { key, kind: m.kind, expectedCount: m.count, expectedSha: m.sha256, count, sha: got, pageSha, countOk: count === m.count, shaOk: got === m.sha256, sample };
+  // 해시는 받은 그대로 대조하고, 저장할 값은 전화번호를 가림(가려야 했던 개수를 알려 줌 — 0 이 정상)
+  if (PII_KEYS.has(key)) { const n = { count: 0 }; value = maskPhones(value, n); res.unmaskedPhones = n.count; }
   return { res, value };
 }
 
