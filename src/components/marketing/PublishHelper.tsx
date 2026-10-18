@@ -1,5 +1,6 @@
 'use client';
 import { Button, toast } from '@/components/ui';
+import { layoutBody, publishTitle } from '@/lib/mktText';
 
 const NAVER_WRITE = 'https://blog.naver.com/GoBlogWrite.naver';
 /** 본문을 네이버 편집기에 붙여 넣을 때 문단이 유지되도록 HTML(문단) + 일반 글자 둘 다 복사 */
@@ -18,14 +19,15 @@ const paragraphs = (body: string) => body.split(/\n{2,}/).map((p) => `<p>${esc(p
  * 상용화 ⑤-1 게시 도우미: 승인된 최신 버전을 사람이 직접 올리도록 돕는다(네이버 블로그는 공식 쓰기 API 가 없고 자동 게시는 약관 위반 위험).
  * 제목·본문 복사 → 사진 순서대로 내려받기 → 글쓰기 열기 → 사람이 [발행] → 게시 주소를 붙여 넣어 [게시 확인].
  */
-export function PublishHelper({ channel, title, body, media }: { channel: string; title: string; body: string; media: { id: string; title: string }[] }) {
+export function PublishHelper({ channel, title, body: raw, media }: { channel: string; title: string; body: string; media: { id: string; title: string }[] }) {
   const naver = channel === 'blog';
+  const body = layoutBody(channel, raw); // 블로그: 소제목·문단 사이 빈 줄(예전 원고도 복사할 때 정리)
   return (
     <div className="space-y-2 rounded-input border border-emerald-200 bg-emerald-50/40 p-3 text-xs" data-testid="publish-helper">
       <p className="font-semibold text-emerald-900">{naver ? '네이버 블로그 게시 도우미' : '게시 도우미'}</p>
       <ol className="list-decimal space-y-1.5 pl-4">
         <li className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => copy(title)} data-testid="ph-copy-title">제목 복사</Button>
+          <Button size="sm" variant="secondary" onClick={() => copy(publishTitle(title))} data-testid="ph-copy-title">제목 복사</Button>
           <Button size="sm" variant="secondary" onClick={() => copy(body, paragraphs(body))} data-testid="ph-copy-body">본문 복사</Button>
         </li>
         <li>{media.length ? <span className="flex flex-wrap gap-1.5">사진 순서대로 내려받기:{media.map((m, k) => <a key={m.id} href={`/api/library/${m.id}/download`} className="rounded-full bg-white px-2 py-0.5 underline" data-testid="ph-media">{k + 1}. {m.title}</a>)}</span> : <span className="text-amber-700">붙일 사진이 없습니다</span>}</li>

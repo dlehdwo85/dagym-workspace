@@ -6,6 +6,7 @@ import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
 import { notify } from './notifications';
 import { zUuid } from './api';
+import { layoutBody } from './mktText';
 import { tenantOf, type SessionUser } from './types';
 
 /**
@@ -172,7 +173,7 @@ const fillName = (t: string, name: string) => (name ? t.replace(/\[(브랜드|�
 async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?: { prev: string; comment: string }) {
   const m = await materialOf(c, brand, rule);
   const P = await import('./ai/provider');
-  const kindRule = { feed: '인스타그램 피드 캡션 4~6줄', blog: '블로그 원고(제목 1줄 + 본문 10~15문장, 소제목 2~3개)', reels: '릴스·쇼츠 자막 대본(5~7컷, 컷마다 한 줄)과 캡션 3줄', video: '15~20초 광고 영상 컷 구성(4~5컷)과 캡션 3줄' }[c.kind as Kind] ?? '게시물 글';
+  const kindRule = { feed: '인스타그램 피드 캡션 4~6줄', blog: '블로그 원고(제목 1줄 + 본문 10~15문장, 소제목 2~3개 — 소제목은 "■ 소제목" 한 줄로 따로, 문단은 2~3문장씩 빈 줄로 나눔)', reels: '릴스·쇼츠 자막 대본(5~7컷, 컷마다 한 줄)과 캡션 3줄', video: '15~20초 광고 영상 컷 구성(4~5컷)과 캡션 3줄' }[c.kind as Kind] ?? '게시물 글';
   if (!P.aiEnabled()) return { title: c.title, body: extra ? extra.prev : `[AI 비서 꺼짐] ${rule?.topic_hint ?? c.title}`, brief: '' };
   await assertMktAi(c.tenant);
   const p = P.anthropicProvider({ tier: 'fast' });
@@ -190,7 +191,7 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
     values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_produce')`;
   const raw = (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('');
   const strip = (t: string) => fillName(t.replace(/^\s*\[시험\]\s*/, ''), m.name);
-  try { const o = JSON.parse(raw); return { title: strip(String(o.title || c.title)).slice(0, 200), body: fillName(String(o.body ?? ''), m.name), brief: fillName(String(o.brief ?? ''), m.name) }; }
+  try { const o = JSON.parse(raw); return { title: strip(String(o.title || c.title)).slice(0, 200), body: layoutBody(c.kind, fillName(String(o.body ?? ''), m.name)), brief: fillName(String(o.brief ?? ''), m.name) }; }
   catch { return { title: c.title, body: fillName(raw, m.name), brief: '' }; }
 }
 

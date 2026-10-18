@@ -189,3 +189,17 @@ test('상용화 ⑦ 마케팅 AI 월 한도: 넘으면 제작 멈춤·하루 한
   const ok = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.ok(ok.produced.some((p) => !p.error), JSON.stringify(ok));
 });
+
+test('로컬 검수 10/19: 블로그 원고 한 덩어리 → 소제목·문단 빈 줄, 피드는 줄바꿈 그대로', async () => {
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { aiMonthlyUsd: 100 });
+  const b = (await ctx.owner.ok('POST', '/api/marketing/auto/brands', { name: '문단 브랜드' })).brand;
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b.id}`, { intro: '문단 시험' });
+  const r = await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: b.id, channel: 'blog', kind: 'blog', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '13:00' });
+  await sql`update mkt_contents set produce_at = case when id = (select id from mkt_contents where rule_id = ${r.id} order by scheduled_at limit 1) then now() else now() + interval '30 days' end where rule_id = ${r.id}`;
+  await sql`update mkt_contents set produce_at = now() + interval '30 days' where rule_id <> ${r.id} and produced_at is null`;
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 소식', body: '첫 문장입니다. 둘째 문장입니다. ■ 소제목 하나 셋째 문장입니다. 넷째 문장입니다. 다섯째 문장입니다. 여섯째 문장입니다.', brief: '실사' })] });
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const [v] = await sql`select v.body from mkt_versions v join mkt_contents c on c.id = v.content_id where c.rule_id = ${r.id}`;
+  assert.ok(v, '제작됨');
+  assert.match(v.body, /^첫 문장입니다\. 둘째 문장입니다\.\n\n■ 소제목 하나 셋째 문장입니다\.\n\n넷째 문장입니다\. 다섯째 문장입니다\.\n\n여섯째 문장입니다\./, JSON.stringify(v.body));
+});
