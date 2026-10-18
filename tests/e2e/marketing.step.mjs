@@ -54,6 +54,13 @@ export async function marketing({ owner, BASE }) {
   await owner.getByTestId('ads-add-naver').click();
   await owner.getByTestId('naver-form').waitFor();
   await owner.keyboard.press('Escape');
+  // V41 4-3 자동 제작: 사용량 카드 4·요금제 3·규칙 추가(화·목 10:00)
+  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.getByTestId('auto-usage').first().waitFor();
+  assert.equal(await owner.getByTestId('auto-usage').count(), 4);
+  await owner.getByTestId('auto-plan-standard').waitFor();
+  await owner.getByTestId('auto-rule-add').click();
+  await owner.getByTestId('auto-rule').first().waitFor();
   // 원래대로
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
   await owner.goto(`${BASE}/admin/users`);

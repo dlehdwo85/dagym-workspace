@@ -13,8 +13,8 @@ export const CHANNELS = { instagram: '인스타그램', facebook: '페이스북'
 const zChannel = z.enum(Object.keys(CHANNELS) as [keyof typeof CHANNELS, ...(keyof typeof CHANNELS)[]]);
 const uuidOr404 = (id: string) => { if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('찾을 수 없습니다'); };
 const seoulDate = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
-/** 승인 마감 = 게시일 09:00(서울) */
-export const approvalDeadline = (scheduledAt: Date | string | null) => scheduledAt ? new Date(`${seoulDate(new Date(scheduledAt))}T09:00:00+09:00`) : null;
+/** 승인 마감 = 게시일 HH:00(서울, 회사 설정 — 기본 09:00) */
+export const approvalDeadline = (scheduledAt: Date | string | null, hour = 9) => scheduledAt ? new Date(`${seoulDate(new Date(scheduledAt))}T${String(hour).padStart(2, '0')}:00:00+09:00`) : null;
 
 async function mediaOk(u: SessionUser, ids: string[]) {
   const { loadLibraryFile } = await import('./library');
@@ -56,7 +56,8 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
       and (${q.from ?? ''} = '' or c.scheduled_at >= ${q.from || '1970-01-01'}::date)
       and (${q.to ?? ''} = '' or c.scheduled_at < (${q.to || '2999-01-01'}::date + 1))
     order by c.scheduled_at nulls last, c.created_at desc limit 300`;
-  return { contents: rows.map((r) => ({ ...r, deadline: approvalDeadline(r.scheduled_at) })) };
+  const st = await (await import('./mktAuto')).settingsOf(t);
+  return { contents: rows.map((r) => ({ ...r, deadline: r.scheduled_at ? (approvalDeadline(r.scheduled_at, st.approval_hour)) : null })) };
 }
 
 export async function getContent(u: SessionUser, id: string) {
@@ -69,7 +70,8 @@ export async function getContent(u: SessionUser, id: string) {
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
   const media = ids.length ? await sql`select id, title, file_name, mime_type from library_files where id = any(${ids}::uuid[]) and tenant = ${tenantOf(u)} and deleted_at is null` : [];
   const decisions = await sql`select d.version, d.decision, d.comment, d.decided_at, u.name as decided_by_name from mkt_decisions d left join users u on u.id = d.decided_by where d.content_id = ${id} order by d.decided_at desc`;
-  return { content: { ...c, deadline: approvalDeadline(c.scheduled_at) }, versions, media, decisions, canDecide: isAdmin(u) };
+  const st = await (await import('./mktAuto')).settingsOf(tenantOf(u));
+  return { content: { ...c, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, canDecide: isAdmin(u) };
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };
@@ -117,7 +119,7 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
   if (!isAdmin(u)) throw forbidden('승인은 관리자가 합니다');
   if (i.decision !== 'approve' && !i.comment?.trim()) throw badRequest(i.decision === 'changes' ? '무엇을 고칠지 적어 주세요' : '보류 이유를 적어 주세요');
   const sql = db();
-  return sql.begin(async (tx) => {
+  const res = await sql.begin(async (tx) => {
     const [c] = await tx<any[]>`select id, title, current_version, status, created_by from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (i.version !== c.current_version) throw new HttpError(409, 'stale_version', `최신 버전(v${c.current_version})이 아닙니다 — 새로 고쳐 보고 결정해 주세요`);
@@ -133,6 +135,12 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
     await audit(tx as never, u.id, 'mkt.decide', 'mkt_content', id, { version: i.version, decision: i.decision }, ip);
     return { status };
   });
+  // V41 4-3/V43 5: 자동 제작 콘텐츠의 수정 요청 = 분류 → 글자·배치는 AI 가 새 버전, 재생성은 제작 요청 카드(한도 확인)
+  if (i.decision === 'changes' && i.comment) {
+    const r = await (await import('./mktAuto')).onChangesRequested(id, i.comment).catch((e) => ({ error: String(e?.message ?? e).slice(0, 200) }));
+    if (r) return { ...res, revision: r };
+  }
+  return res;
 }
 
 /** 게시 확인(수동 게시 — 공식 쓰기 API 없는 채널 포함): 승인된 최신 버전만, 게시 주소(증거) 필수 */
