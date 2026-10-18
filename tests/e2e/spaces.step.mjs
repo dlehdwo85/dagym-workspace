@@ -38,9 +38,9 @@ export async function spaces({ browser, desk, owner, staff, BASE }) {
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
   // 대표 제보(10/18): 휴대폰에서도 공간 메뉴로 — 첫 화면 위 칩 · 더보기 시트의 '영업 메뉴'
   const chips = m.getByTestId('space-chips');
-  await chips.getByRole('link', { name: '영업기회' }).tap();
+  await chips.getByRole('link', { name: '공공데이터' }).tap();
   await m.waitForURL(/\/s\/sales\/prospects$/);
-  assert.equal(await chips.locator('a[aria-current="page"]').textContent(), '영업기회');
+  assert.equal(await chips.locator('a[aria-current="page"]').textContent(), '공공데이터');
   await m.getByRole('button', { name: '메뉴 더보기' }).tap();
   await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap();
   await m.waitForURL(/\/s\/sales\/sources$/);

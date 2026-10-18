@@ -5,6 +5,7 @@ import { isSpace, userSpaces } from '@/lib/spaces';
 import { SPACE_META } from '@/components/spaceMeta';
 import { ssoConfigured } from '@/lib/sso';
 import { MarketingHome } from '@/components/marketing/Marketing';
+import { SalesHome } from '@/components/sales/SalesSrc';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +16,7 @@ export default async function SpaceHome({ params }: { params: Promise<{ space: s
   if (!u || !isSpace(space) || space === 'work' || !(await userSpaces(u)).includes(space)) notFound();
   const m = SPACE_META[space];
   const marketingUrl = process.env.MARKETING_URL || 'https://dazim-hilink-integration.vercel.app/marketing';
+  if (space === 'sales') return <SalesHome />;
   if (space === 'marketing') return <MarketingHome ssoHref={ssoConfigured() ? '/api/sso/marketing' : marketingUrl} />;
   return (
     <div className="mx-auto max-w-3xl space-y-4" data-testid={`space-home-${space}`}>

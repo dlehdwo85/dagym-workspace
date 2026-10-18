@@ -104,8 +104,15 @@ export function Automation() {
         </form>}
       </section>
 
-      {ed && !!data.brands.length && <section className="rounded-card border border-line bg-white p-4 shadow-card">
+      {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-brands">
         <h2 className="text-sm font-semibold">브랜드 키트</h2>
+        <form className="mt-2 flex flex-wrap gap-2" onSubmit={async (e) => { e.preventDefault(); const f = e.currentTarget; const name = (f.elements.namedItem('bname') as HTMLInputElement).value.trim(); const test = (f.elements.namedItem('btest') as HTMLInputElement).checked;
+          if (!name) return; try { const b = await api<{ id: string }>('/api/marketing/brands', { body: { name } }); if (test) await api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { testMode: true } }); f.reset(); toast.ok('브랜드를 추가했습니다'); reload(); } catch (er: any) { toast.error(er.message); } }}>
+          <input name="bname" className={cx(inputCls, 'w-48')} placeholder="새 브랜드 이름" maxLength={40} aria-label="새 브랜드 이름" data-testid="auto-brand-name" />
+          <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" name="btest" />시험 모드로</label>
+          <Button type="submit" size="sm" data-testid="auto-brand-add">브랜드 추가</Button>
+        </form>
+        {!data.brands.length && <p className="mt-2 text-xs text-ink-3">브랜드가 없습니다 — 추가하면 말투·금지어·시험 모드를 정하고 주간 규칙에서 고를 수 있습니다.</p>}
         <ul className="mt-2 space-y-2">{data.brands.map((b) => (
           <li key={b.id} className="grid gap-2 sm:grid-cols-[8rem_1fr_1fr_auto]"><span className="pt-2 text-sm font-medium">{b.name}</span>
             <input className={inputCls} defaultValue={b.tone ?? ''} placeholder="말투(예: 친근·전문적)" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { tone: e.target.value || null } }).then(reload)} aria-label={`${b.name} 말투`} />

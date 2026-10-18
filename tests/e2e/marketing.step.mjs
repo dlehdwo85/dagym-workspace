@@ -59,6 +59,9 @@ export async function marketing({ owner, BASE }) {
   await owner.getByTestId('auto-usage').first().waitFor();
   assert.equal(await owner.getByTestId('auto-usage').count(), 4);
   await owner.getByTestId('auto-plan-standard').waitFor();
+  await owner.getByTestId('auto-brand-name').fill('E2E 시험 브랜드');
+  await owner.getByTestId('auto-brand-add').click();
+  await owner.getByTestId('auto-brands').getByText('E2E 시험 브랜드', { exact: true }).waitFor();
   await owner.getByTestId('auto-rule-add').click();
   await owner.getByTestId('auto-rule').first().waitFor();
   // 원래대로

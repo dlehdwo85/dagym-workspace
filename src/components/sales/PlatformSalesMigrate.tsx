@@ -40,7 +40,7 @@ export function PlatformSalesMigrate() {
             <tbody>{(ap?.results ?? st.data?.sync ?? []).map((t: any) => (
               <tr key={t.tbl} className="border-t border-line"><td className="p-1 font-mono">{t.tbl}</td><td className="p-1">{t.scope === 'global' ? '공용' : t.scope === 'tenant' ? '회사별' : ''}{t.progress ? ` · 진행 칸 ${t.progress}` : ''}</td>
                 <td className="p-1 text-right tabular-nums">{t.src ?? t.src_count ?? '—'}</td><td className="p-1 text-right tabular-nums">{t.dst ?? t.dst_count ?? '—'}</td>
-                <td className={cx('p-1', t.error ? 'text-red-700' : (t.ok ?? t.src_count === t.dst_count) ? 'text-emerald-700' : 'font-semibold text-red-700')}>{t.error ?? ((t.ok ?? t.src_count === t.dst_count) ? '일치' : '다름')}</td></tr>))}</tbody></table></div>
+                <td className={cx('p-1', t.error && /PGRST205|표 없음/.test(t.error) ? 'text-ink-3' : t.error ? 'text-red-700' : (t.ok ?? t.src_count === t.dst_count) ? 'text-emerald-700' : 'font-semibold text-red-700')}>{t.error && /PGRST205|표 없음/.test(t.error) ? '원본에 없음' : t.error ?? ((t.ok ?? t.src_count === t.dst_count) ? '일치' : '다름')}</td></tr>))}</tbody></table></div>
       )}
       {r && (
         <>
