@@ -746,6 +746,14 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 하루 한 번 tick 에서 최근 7일 다시 읽기(전환 늦게 잡힘), 관리자 [지금 다시 불러오기]. 마케팅 메뉴 '광고 성과'(합계 4·날짜별 광고비·캠페인 표·연결 관리).
 - KV 이전: 운영실 읽기 전용 내보내기 API(서명 토큰) 사양을 받으면 가져오기 작업을 만듦 — 대기.
 
+## 2026-10-18: V41 4-2 운영실 데이터 이관 가져오기 (클라우드)
+- 085: ops_import_runs(회사·미리보기/적용·상태·동결 여부·키별 결과) · ops_import_items(회사×키×순번 원본 JSON, 멱등).
+- 플랫폼 운영 화면 '마케팅 운영실 데이터 이관': 회사 ID → [미리보기](건수·해시 대조, 저장 없음, 칸 이름만) → [적용](18개 키가 모두 일치할 때만 저장, 같은 키는 통째로 바꿈).
+- env: OPS_EXPORT_URL(운영실 주소), OPS_EXPORT_TOKEN(운영실과 같은 값), 선택 OPS_CALL_RETENTION_DAYS(전화 기록 보관, 기본 365·최소 30).
+- 해시 계산 가정: 키 전체 값(list = 배열, object = 객체)을 JSON.stringify(공백 없음) 한 UTF-8 의 SHA-256, string 은 그대로 — 운영실 구현과 다르면 '다름(계산 방식 확인)'으로 보이고 적용 막힘. 마케팅 세션과 맞출 것.
+- 다음: 미리보기에서 칸 이름을 보고 게시물·일정 → mkt_contents, 전화 기록 → mkt_calls 등 표 매핑.
+- APP_URL = https://www.work-in.dev (대표 결정): 코드 기본값도 work-in.dev 로. mobile/capacitor.config.ts 기본값(vercel.app)은 로컬 담당 — 앱 다음 빌드 때 정리.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
