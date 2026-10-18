@@ -48,3 +48,17 @@ export async function srcCount(table: string, filter = '') {
   const total = (r.headers.get('content-range') ?? '').split('/')[1];
   return total && total !== '*' ? Number(total) : null;
 }
+
+/** 한 표 전체 읽기(1000건씩). id 로 정렬이 안 되는 표는 정렬 없이 */
+export async function srcAll(table: string, pageSize = 1000, maxRows = 50000) {
+  const out: any[] = [];
+  let order = '&order=id.asc';
+  for (let off = 0; off < maxRows; off += pageSize) {
+    let page: any[];
+    try { page = await srcGet(`/rest/v1/${encodeURIComponent(table)}?select=*${order}&limit=${pageSize}&offset=${off}`); }
+    catch (e: any) { if (order && off === 0 && /\b400\b/.test(String(e?.message))) { order = ''; off -= pageSize; continue; } throw e; }
+    out.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return out;
+}

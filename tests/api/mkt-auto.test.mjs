@@ -66,3 +66,27 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   assert.equal((await sql`select count(*)::int n from mkt_contents where status = 'draft' and produced_at is null`)[0].n, 0);
   assert.ok((await sql`select count(*)::int n from mkt_contents where produced_at is not null`)[0].n >= 2, '만든 것은 남음');
 });
+
+test('알림 받는 사람 고르기 · 브랜드 시험 모드', async () => {
+  // 받는 사람 = 이직원만 → 일반 브랜드 수동 콘텐츠 승인 요청 알림은 이직원에게만
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { notifyUserIds: [ctx.staffA.id] });
+  const plain = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '일반 브랜드' });
+  const c1 = await ctx.staffB.client.req('POST', '/api/marketing/contents', { title: 'x', channel: 'instagram', body: 'x', mediaIds: [] });
+  assert.equal(c1.status, 404, '공간 밖 직원');
+  const made = await ctx.owner.ok('POST', '/api/marketing/contents', { title: '받는 사람 시험', channel: 'instagram', brandId: plain.id, body: '본문', mediaIds: [] });
+  const to = (await sql`select user_id from notifications where entity_id = ${made.id}`).map((r) => r.user_id);
+  assert.deepEqual(to, [ctx.staffA.id]);
+  // 시험 모드 브랜드: [시험] 표시·알림은 실행한 사람(대표)만·게시 확인 안 됨
+  const test = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '[시험] 워크인' });
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${test.id}`, { testMode: true });
+  await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: test.id, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '23:30' });
+  await ctl({ anthropicReset: true });
+  const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const tc = await sql`select id, title, is_test, status from mkt_contents where brand_id = ${test.id} and produced_at is not null`;
+  assert.ok(tc.length >= 1, JSON.stringify(run));
+  assert.ok(tc.every((c) => c.is_test && c.title.startsWith('[시험]')));
+  const tn = await sql`select distinct user_id from notifications where entity_id = any(${tc.map((c) => c.id)}::uuid[])`;
+  assert.deepEqual(tn.map((r) => r.user_id), [ctx.ownerId], '시험 알림은 실행한 사람에게만');
+  await sql`update mkt_contents set status = 'approved', approved_version = current_version where id = ${tc[0].id}`;
+  assert.equal((await ctx.owner.req('POST', `/api/marketing/contents/${tc[0].id}/publish`, { url: 'https://instagram.com/p/t' })).status, 400, '시험은 게시 확인 안 됨');
+});

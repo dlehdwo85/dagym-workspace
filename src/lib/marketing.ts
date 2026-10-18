@@ -80,13 +80,16 @@ export async function createContent(u: SessionUser, i: z.infer<typeof contentInp
   await assertSpace(u, 'marketing');
   await mediaOk(u, i.mediaIds);
   const sql = db(); const t = tenantOf(u);
-  if (i.brandId && !(await sql`select 1 from mkt_brands where id = ${i.brandId} and tenant = ${t}`).length) throw notFound('브랜드를 찾을 수 없습니다');
+  const [br] = i.brandId ? await sql<{ test_mode: boolean }[]>`select test_mode from mkt_brands where id = ${i.brandId} and tenant = ${t}` : [];
+  if (i.brandId && !br) throw notFound('브랜드를 찾을 수 없습니다');
+  const isTest = !!br?.test_mode; // 시험 모드 브랜드: [시험] 표시·알림은 올린 사람에게만·게시 확인 안 됨
+  const title = isTest && !i.title.startsWith('[시험]') ? `[시험] ${i.title}` : i.title;
   return sql.begin(async (tx) => {
-    const [c] = await tx<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by)
-      values (${t}, ${i.brandId ?? null}, ${i.title}, ${i.channel}, ${i.scheduledAt ?? null}, 'pending', 1, ${u.id}) returning id`;
+    const [c] = await tx<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, is_test)
+      values (${t}, ${i.brandId ?? null}, ${title}, ${i.channel}, ${i.scheduledAt ?? null}, 'pending', 1, ${u.id}, ${isTest}) returning id`;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
-    const admins = (await tx<{ id: string }[]>`select id from users where tenant = ${t} and role in ('owner', 'admin') and status = 'active'`).map((r) => r.id);
-    await notify(tx, { userIds: admins, type: 'review_requested', title: `승인 대기: ${i.title}`, body: `${u.name} · ${CHANNELS[i.channel]}`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, actorId: u.id, dedupeKey: `mkt:${c.id}:1` });
+    const admins = isTest ? [] : await (await import('./mktAuto')).approvers(t);
+    await notify(tx, { userIds: admins, type: 'review_requested', title: `승인 대기: ${title}`, body: `${u.name} · ${CHANNELS[i.channel]}`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, actorId: u.id, dedupeKey: `mkt:${c.id}:1` });
     return { id: c.id, version: 1 };
   });
 }
@@ -99,13 +102,13 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
   await mediaOk(u, i.mediaIds);
   const sql = db();
   return sql.begin(async (tx) => {
-    const [c] = await tx<any[]>`select id, title, current_version, status from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
+    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
     const v = c.current_version + 1;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${id}, ${v}, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
     await tx`update mkt_contents set current_version = ${v}, status = 'pending', updated_at = now() where id = ${id}`;
-    const admins = (await tx<{ id: string }[]>`select id from users where tenant = ${tenantOf(u)} and role in ('owner', 'admin') and status = 'active'`).map((r) => r.id);
+    const admins = c.is_test ? [c.created_by] : await (await import('./mktAuto')).approvers(tenantOf(u));
     await notify(tx, { userIds: admins, type: 'review_requested', title: `재승인 대기(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
     return { version: v };
   });
@@ -149,8 +152,9 @@ export async function markPublished(u: SessionUser, id: string, i: z.infer<typeo
   await assertSpace(u, 'marketing');
   uuidOr404(id);
   const sql = db();
-  const [c] = await sql<any[]>`select current_version, approved_version, status from mkt_contents where id = ${id} and tenant = ${tenantOf(u)}`;
+  const [c] = await sql<any[]>`select current_version, approved_version, status, is_test from mkt_contents where id = ${id} and tenant = ${tenantOf(u)}`;
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
+  if (c.is_test) throw badRequest('시험 콘텐츠는 게시 확인 단계로 넘어가지 않습니다');
   if (c.status !== 'approved' || c.approved_version !== c.current_version) throw new HttpError(409, 'not_approved', '승인된 최신 버전만 게시 확인할 수 있습니다');
   await sql`update mkt_contents set status = 'published', published_url = ${i.url}, published_at = now(), published_by = ${u.id}, updated_at = now() where id = ${id}`;
   return { ok: true };

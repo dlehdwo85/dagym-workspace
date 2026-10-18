@@ -2,7 +2,8 @@ import { db } from '../db';
 import { HttpError, notFound } from '../errors';
 import { audit } from '../log';
 import type { SessionUser } from '../types';
-import { srcConfigured, srcCount, srcGet } from './supabaseSrc';
+import { createHash } from 'node:crypto';
+import { srcAll, srcConfigured, srcCount, srcGet } from './supabaseSrc';
 
 /**
  * V41 단계 2 영업관리(Supabase) → 워크인 이전 — 1) 미리보기: 원본은 읽기만, 저장 없음.
@@ -41,4 +42,108 @@ export async function salesMigratePreview(u: SessionUser) {
     on conflict (key) do update set value = excluded.value, updated_at = now()`;
   if (tables.every((t) => t.error)) throw new HttpError(502, 'sales_src_unreachable', `원본을 읽지 못했습니다 — ${specError ?? tables[0]?.error ?? '알 수 없음'}`);
   return { at: new Date().toISOString(), base: (await import('./supabaseSrc')).srcBase().replace(/^(https?:\/\/[^.]{4})[^.]*/, '$1…'), specError, tables, related, relatedExpected: 654 };
+}
+
+// ---------------- 2) 적용 ----------------
+/** V39 C: 공용 표(수집 데이터) — 회사별 진행 칸은 떼어 회사 쪽 '<표>__progress' 로 */
+const GLOBAL: Record<string, string[]> = {
+  procurement_notices: ['classification', 'representative_judgment', 'qualification_gap', 'sales_point', 'lead_id'],
+  operating_facility_prospects: ['contact_status', 'contact_updated_at', 'next_action', 'next_action_date', 'lead_id', 'notes'],
+  vendor_registrations: ['status', 'memo', 'next_date'],
+  building_sales_pipeline: [], data_source_master: [], data_source_run: [], kapt_vendor_selection: [],
+};
+/** 회사별 표(진행 기록) */
+const TENANT = ['leads', 'lead_business_interests', 'sales_activities', 'proposals', 'contracts', 'schedules', 'tasks', 'task_subtasks', 'lead_opportunity_timing', 'opportunity_work',
+  'sales_costs', 'regions', 'business_categories', 'user_saved_filters'];
+/** 옮기지 않음(V39 D·E): 관측·실행 이력·백업·AI 사용 기록 */
+export const NOT_MOVED = ['procurement_notice_observations', 'data_source_observation', 'procurement_monitoring_runs', 'ai_usage', 'ai_proposals'];
+const idOf = (r: any) => (r?.id != null ? String(r.id) : createHash('sha256').update(JSON.stringify(r)).digest('hex').slice(0, 32));
+
+async function upsertRows(scope: string, tbl: string, rows: any[]) {
+  const sql = db(); const now = new Date();
+  for (let n = 0; n < rows.length; n += 500) {
+    const chunk = rows.slice(n, n + 500).map((r) => ({ scope, tbl, src_id: idOf(r), row: sql.json(r), gone: false, synced_at: now }));
+    await sql`insert into sales_src_rows ${sql(chunk as never)} on conflict (scope, tbl, src_id) do update set row = excluded.row, gone = false, synced_at = excluded.synced_at`;
+  }
+  // 이번에 안 보인 행 = 원본에서 사라짐(지우지 않고 표시)
+  await sql`update sales_src_rows set gone = true where scope = ${scope} and tbl = ${tbl} and synced_at < ${now}`;
+}
+
+/** 원본 → 워크인(멱등). 끝나면 표별 '원본 건수 = 워크인 건수' 대조 */
+export async function salesMigrateApply(u: SessionUser | null, tenant: string) {
+  if (u && (!u.platformAdmin || u.support)) throw notFound();
+  if (!srcConfigured()) throw new HttpError(409, 'sales_src_not_configured', 'SALES_SRC_URL·SALES_SRC_SERVICE_KEY(Secret key) 설정이 필요합니다');
+  const sql = db();
+  const [t] = await sql`select id from tenants where id = ${tenant}`;
+  if (!t) throw new HttpError(400, 'bad_request', '그런 회사가 없습니다');
+  const started = Date.now();
+  const results: { tbl: string; scope: 'global' | 'tenant'; src: number | null; dst: number; ok: boolean; error?: string; progress?: number }[] = [];
+  const doTable = async (tbl: string, scope: 'global' | 'tenant') => {
+    try {
+      const rows = await srcAll(tbl);
+      if (scope === 'global') {
+        const own = GLOBAL[tbl];
+        await upsertRows('global', tbl, rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !own.includes(k)))));
+        const prog = own.length ? rows.map((r) => ({ id: r.id, ...Object.fromEntries(own.filter((k) => r[k] !== null && r[k] !== undefined).map((k) => [k, r[k]])) })).filter((p) => Object.keys(p).length > 1) : [];
+        if (own.length) await upsertRows(tenant, `${tbl}__progress`, prog);
+        results.push({ tbl, scope, src: rows.length, dst: 0, ok: false, progress: prog.length });
+      } else {
+        await upsertRows(tenant, tbl, rows);
+        results.push({ tbl, scope, src: rows.length, dst: 0, ok: false });
+      }
+    } catch (e: any) { results.push({ tbl, scope, src: null, dst: 0, ok: false, error: String(e?.message ?? e).slice(0, 200) }); }
+  };
+  for (const tbl of Object.keys(GLOBAL)) await doTable(tbl, 'global');
+  for (const tbl of TENANT) await doTable(tbl, 'tenant');
+  // 사용자 연결: profiles → 워크인(이메일 일치, 없으면 대표)
+  let users = { total: 0, matched: 0 };
+  try {
+    const profiles = await srcAll('profiles');
+    const [owner] = await sql<{ id: string }[]>`select id from users where tenant = ${tenant} and role = 'owner' and status = 'active' order by created_at limit 1`;
+    for (const p of profiles) {
+      const email = String(p.email ?? '').trim().toLowerCase() || null;
+      const [m] = email ? await sql<{ id: string }[]>`select id from users where tenant = ${tenant} and lower(email) = ${email} and status = 'active' limit 1` : [];
+      await sql`insert into sales_user_map (tenant, src_user_id, user_id, email, name, matched) values (${tenant}, ${String(p.id)}, ${m?.id ?? owner?.id ?? null}, ${email}, ${p.full_name ?? p.name ?? null}, ${!!m})
+        on conflict (tenant, src_user_id) do update set user_id = excluded.user_id, email = excluded.email, name = excluded.name, matched = excluded.matched`;
+      users.total++; if (m) users.matched++;
+    }
+  } catch (e: any) { results.push({ tbl: 'profiles', scope: 'tenant', src: null, dst: 0, ok: false, error: String(e?.message ?? e).slice(0, 200) }); }
+  // 대조: 워크인 쪽 건수(사라짐 제외)
+  for (const r of results) {
+    if (r.src === null) continue;
+    const [c] = await sql<{ n: number }[]>`select count(*)::int as n from sales_src_rows where scope = ${r.scope === 'global' ? 'global' : tenant} and tbl = ${r.tbl} and not gone`;
+    r.dst = c.n; r.ok = r.dst === r.src;
+    await sql`insert into sales_src_sync (tenant, tbl, src_count, dst_count, error) values (${tenant}, ${r.tbl}, ${r.src}, ${r.dst}, null)
+      on conflict (tenant, tbl) do update set src_count = excluded.src_count, dst_count = excluded.dst_count, error = null, synced_at = now()`;
+  }
+  for (const r of results.filter((x) => x.error)) await sql`insert into sales_src_sync (tenant, tbl, error) values (${tenant}, ${r.tbl}, ${r.error!}) on conflict (tenant, tbl) do update set error = excluded.error, synced_at = now()`;
+  const [rel] = await sql<{ n: number }[]>`select count(*)::int as n from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and (row->>'related')::boolean is true`;
+  const out = { tenant, at: new Date().toISOString(), seconds: Math.round((Date.now() - started) / 1000), results, users, related: rel?.n ?? 0, notMoved: NOT_MOVED };
+  await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant, at: out.at, daily: true } as never)})
+    on conflict (key) do update set value = jsonb_set(excluded.value, '{daily}', coalesce(app_settings.value->'daily', 'true'::jsonb)), updated_at = now()`;
+  if (u) await audit(sql, u.id, 'sales_migrate.apply', 'tenant', null, { tenant, tables: results.length, ok: results.filter((r) => r.ok).length }).catch(() => {});
+  return out;
+}
+
+/** 전환일까지 매일 차이분 다시 가져오기(멱등) — 플랫폼 화면에서 끌 수 있음 */
+export async function salesSyncDaily() {
+  const sql = db();
+  const [s] = await sql<{ value: any; updated_at: Date }[]>`select value, updated_at from app_settings where key = 'sales_migrate_applied'`;
+  if (!s?.value?.daily || !srcConfigured()) return null;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  if (new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(s.updated_at)) === today) return null; // 오늘 이미 함
+  const r = await salesMigrateApply(null, s.value.tenant);
+  return { tables: r.results.length, ok: r.results.filter((x) => x.ok).length };
+}
+export async function salesSyncToggle(u: SessionUser, daily: boolean) {
+  if (!u.platformAdmin || u.support) throw notFound();
+  await db()`update app_settings set value = jsonb_set(value, '{daily}', to_jsonb(${daily}::boolean)), updated_at = updated_at where key = 'sales_migrate_applied'`;
+  return { daily };
+}
+export async function salesMigrateStatus(u: SessionUser) {
+  if (!u.platformAdmin || u.support) throw notFound();
+  const sql = db();
+  const [s] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
+  return { applied: s?.value ?? null, sync: await sql`select tenant, tbl, src_count, dst_count, error, synced_at from sales_src_sync order by tenant, tbl`,
+    users: await sql`select m.src_user_id, m.email, m.name, m.matched, u.name as user_name from sales_user_map m left join users u on u.id = m.user_id order by m.matched desc, m.name` };
 }

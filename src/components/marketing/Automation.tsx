@@ -11,7 +11,7 @@ const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const REQ: Record<string, string> = { image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성' };
 type View = { settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null };
   usage: { weekCredits: number; monthCredits: number; monthVideos: number; monthRegens: number }; plans: Record<string, { label: string; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; price: number | null }>;
-  rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; banned_words: string[] }[]; canEdit: boolean };
+  rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; banned_words: string[]; test_mode: boolean }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean };
 const lim = (used: number, max: number | null) => (max === null ? `${used} (한도 없음)` : `${used} / ${max}`);
 
 /** V41 4-3 + V43: 자동 제작 — 요금제·한도·사용량, 일정·마감·알림, 브랜드 키트, 주간 규칙, 제작 요청 카드, 크레딧 원장 */
@@ -58,6 +58,15 @@ export function Automation() {
         </div>}
       </section>
 
+      {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-recipients">
+        <h2 className="text-sm font-semibold">알림·승인 받는 사람</h2>
+        <p className="mt-1 text-xs text-ink-2">고르지 않으면 관리자 전원. 시험 모드 브랜드는 여기와 상관없이 실행한 사람에게만 갑니다.</p>
+        <div className="mt-2 flex flex-wrap gap-1.5">{data.people.map((p) => { const on = (s.notify_user_ids ?? []).includes(p.id); return (
+          <button key={p.id} type="button" aria-pressed={on} data-testid="auto-recipient" onClick={() => save({ notifyUserIds: on ? (s.notify_user_ids ?? []).filter((x: string) => x !== p.id) : [...(s.notify_user_ids ?? []), p.id] })}
+            className={cx('rounded-full border px-3 py-1 text-xs', on ? 'border-violet-500 bg-violet-50 font-semibold text-violet-800' : 'border-line')}>{p.name}</button>); })}
+          {!!s.notify_user_ids?.length && <button type="button" className="text-xs underline" onClick={() => save({ notifyUserIds: null })}>관리자 전원으로</button>}</div>
+      </section>}
+
       {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-schedule">
         <h2 className="text-sm font-semibold">제작·마감·알림</h2>
         <div className="mt-2 grid gap-2 sm:grid-cols-4">
@@ -98,9 +107,10 @@ export function Automation() {
       {ed && !!data.brands.length && <section className="rounded-card border border-line bg-white p-4 shadow-card">
         <h2 className="text-sm font-semibold">브랜드 키트</h2>
         <ul className="mt-2 space-y-2">{data.brands.map((b) => (
-          <li key={b.id} className="grid gap-2 sm:grid-cols-[8rem_1fr_1fr]"><span className="pt-2 text-sm font-medium">{b.name}</span>
+          <li key={b.id} className="grid gap-2 sm:grid-cols-[8rem_1fr_1fr_auto]"><span className="pt-2 text-sm font-medium">{b.name}</span>
             <input className={inputCls} defaultValue={b.tone ?? ''} placeholder="말투(예: 친근·전문적)" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { tone: e.target.value || null } }).then(reload)} aria-label={`${b.name} 말투`} />
-            <input className={inputCls} defaultValue={b.banned_words.join(', ')} placeholder="금지어(쉼표)" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { bannedWords: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) } }).then(reload)} aria-label={`${b.name} 금지어`} /></li>))}</ul>
+            <input className={inputCls} defaultValue={b.banned_words.join(', ')} placeholder="금지어(쉼표)" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { bannedWords: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) } }).then(reload)} aria-label={`${b.name} 금지어`} />
+            <label className="flex items-center gap-1.5 text-xs" title="알림은 실행한 사람에게만, 승인함에 [시험] 표시, 게시 확인 안 됨"><input type="checkbox" checked={b.test_mode} onChange={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { testMode: e.target.checked } }).then(reload)} data-testid="auto-brand-test" />시험 모드</label></li>))}</ul>
       </section>}
 
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-requests">

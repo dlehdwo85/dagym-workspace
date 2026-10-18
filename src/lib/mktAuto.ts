@@ -32,9 +32,9 @@ const hourKst = (d: Date) => Number(new Intl.DateTimeFormat('en-GB', { timeZone:
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export type MktSettings = { plan_code: keyof typeof MKT_PLANS | null; monthly_credits: number | null; weekly_credits: number | null; video_monthly: number | null; regen_monthly: number | null;
-  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string };
+  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
-  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다' };
+  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null };
 export async function settingsOf(tenant: string): Promise<MktSettings> {
   const [s] = await db()<any[]>`select * from mkt_settings where tenant = ${tenant}`;
   if (!s) return { ...DEFAULTS };
@@ -87,7 +87,7 @@ export function qualityCheck(body: string, brief: string, s: MktSettings, banned
 /** 규칙 → 앞으로 14일 게시 칸(초안) 만들기 — 같은 규칙·시각은 한 번만 */
 export async function planSlots(tenant: string, days = 14) {
   const sql = db(); const s = await settingsOf(tenant);
-  const rules = await sql<any[]>`select r.*, b.name as brand from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${tenant} and r.active`;
+  const rules = await sql<any[]>`select r.*, b.name as brand, coalesce(b.test_mode, false) as test from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${tenant} and r.active`;
   let made = 0;
   for (const r of rules) for (let k = 0; k <= days; k++) {
     const date = ymd(new Date(Date.now() + k * DAY));
@@ -97,18 +97,23 @@ export async function planSlots(tenant: string, days = 14) {
     if (deadlineOf(at, s).getTime() <= Date.now()) continue; // 승인 마감이 이미 지난 칸은 만들지 않음
     let produce = kst(ymd(new Date(at.getTime() - s.lead_days * DAY)), `${pad(s.lead_hour)}:00`);
     if (produce.getTime() < Date.now()) produce = new Date();
-    const title = `${r.brand ? r.brand + ' ' : ''}${KIND_LABEL[r.kind as Kind]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
-    const ins = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, rule_id, kind, auto, produce_at)
-      values (${tenant}, ${r.brand_id}, ${title}, ${r.channel}, ${at}, 'draft', 0, ${r.created_by}, ${r.id}, ${r.kind}, true, ${produce})
+    const title = `${r.test ? '[시험] ' : ''}${r.brand ? r.brand + ' ' : ''}${KIND_LABEL[r.kind as Kind]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
+    const ins = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, rule_id, kind, auto, produce_at, is_test)
+      values (${tenant}, ${r.brand_id}, ${title}, ${r.channel}, ${at}, 'draft', 0, ${r.created_by}, ${r.id}, ${r.kind}, true, ${produce}, ${!!r.test})
       on conflict (rule_id, scheduled_at) where rule_id is not null do nothing returning id`;
     made += ins.length;
   }
   return made;
 }
 
-async function approvers(tenant: string) {
+/** 알림·승인 받는 사람: 설정에서 고른 사람(회사 안·활성) — 없으면 관리자 전원 */
+export async function approvers(tenant: string) {
+  const s = await settingsOf(tenant);
+  if (s.notify_user_ids?.length) return (await db()<{ id: string }[]>`select id from users where tenant = ${tenant} and status = 'active' and id = any(${s.notify_user_ids}::uuid[])`).map((r) => r.id);
   return (await db()<{ id: string }[]>`select id from users where tenant = ${tenant} and role in ('owner', 'admin') and status = 'active'`).map((r) => r.id);
 }
+/** 시험 콘텐츠는 실행한 사람(없으면 규칙 만든 사람)에게만 */
+const audience = async (c: any, actorId?: string | null) => (c.is_test ? [actorId ?? c.created_by].filter(Boolean) as string[] : approvers(c.tenant));
 
 /** 제작: Claude 원고(+ 이미지/영상은 제작 요청 카드) → 품질 검사 → 통과본 승인함 · 실패본 '수정 요청'(사유) */
 async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?: { prev: string; comment: string }) {
@@ -141,11 +146,11 @@ async function requestCard(c: any, version: number, kind: 'image' | 'video' | 'r
   else if (est > 0 && lim.weeklyCredits !== null && use.weekCredits + est > lim.weeklyCredits) reason = `이번 주 크레딧 한도(${lim.weeklyCredits}) 초과 예상 — 약 ${est}크레딧`;
   const [q] = await sql<{ id: string }[]>`insert into mkt_production_requests (tenant, content_id, version, kind, brief, est_credits, status, reason)
     values (${c.tenant}, ${c.id}, ${version}, ${kind}, ${brief.slice(0, 4000)}, ${est}, ${reason ? 'needs_approval' : 'open'}, ${reason}) returning id`;
-  if (reason) await notify(sql, { userIds: await approvers(c.tenant), type: 'review_requested', title: `제작 전 승인 필요: ${c.title}`, body: reason, link: '/s/marketing/automation', entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktreq:${q.id}` });
+  if (reason) await notify(sql, { userIds: await audience(c), type: 'review_requested', title: `제작 전 승인 필요: ${c.title}`, body: reason, link: '/s/marketing/automation', entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktreq:${q.id}` });
   return { id: q.id, reason };
 }
 
-export async function produceContent(c: any) {
+export async function produceContent(c: any, actorId?: string | null) {
   const sql = db(); const s = await settingsOf(c.tenant);
   const [brand] = c.brand_id ? await sql<any[]>`select * from mkt_brands where id = ${c.brand_id}` : [];
   const [rule] = c.rule_id ? await sql<any[]>`select * from mkt_rules where id = ${c.rule_id}` : [];
@@ -154,13 +159,13 @@ export async function produceContent(c: any) {
   const deadline = deadlineOf(c.scheduled_at, s);
   await sql.begin(async (tx) => {
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${q.body}, ${[]}, ${'AI 자동 제작'}, ${c.created_by})`;
-    await tx`update mkt_contents set title = ${d.title}, current_version = 1, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief } as never)}, updated_at = now() where id = ${c.id}`;
+    await tx`update mkt_contents set title = ${(c.is_test && !d.title.startsWith('[시험]') ? '[시험] ' : '') + d.title}, current_version = 1, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief } as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note) values (${c.tenant}, ${c.id}, 1, 'text', 0, '원고(Claude) — 크레딧 0')`;
   });
   // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임)
   const kind = c.kind as Kind;
   if (kind !== 'blog' || d.brief) await requestCard(c, 1, kind === 'video' || kind === 'reels' ? 'video' : 'image', d.brief || '실사 사진 + 글자 렌더', kind === 'video' ? EST.video : kind === 'reels' ? EST.video_reels : EST.image);
-  if (!isQuiet(new Date(), s)) await notify(sql, { userIds: await approvers(c.tenant), type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${d.title}` : `품질 검사 미통과: ${d.title}`,
+  if (!isQuiet(new Date(), s)) await notify(sql, { userIds: await audience(c, actorId), type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${d.title}` : `품질 검사 미통과: ${d.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:1` });
   return { id: c.id, passed: q.passed, issues: q.issues };
 }
@@ -168,7 +173,7 @@ export async function produceContent(c: any) {
 /** 마감 N시간 전 알림(야간이면 직전 저녁) · 마감 지난 자동 시안 정리 */
 export async function remindAndExpire(tenant: string) {
   const sql = db(); const s = await settingsOf(tenant);
-  const rows = await sql<any[]>`select id, title, scheduled_at, status, auto, reminded_at from mkt_contents where tenant = ${tenant} and status in ('pending', 'changes', 'draft') and scheduled_at is not null and scheduled_at > now() - interval '2 days'`;
+  const rows = await sql<any[]>`select id, tenant, title, scheduled_at, status, auto, reminded_at, is_test, created_by from mkt_contents where tenant = ${tenant} and status in ('pending', 'changes', 'draft') and scheduled_at is not null and scheduled_at > now() - interval '2 days'`;
   let reminded = 0, expired = 0;
   for (const c of rows) {
     const dl = deadlineOf(c.scheduled_at, s);
@@ -177,18 +182,18 @@ export async function remindAndExpire(tenant: string) {
       expired++; continue;
     }
     if (c.status !== 'pending' || c.reminded_at || Date.now() < remindAtOf(dl, s).getTime() || isQuiet(new Date(), s)) continue;
-    await notify(sql, { userIds: await approvers(tenant), type: 'review_requested', title: `승인 마감 ${s.remind_hours}시간 전: ${c.title}`, body: `마감 ${Number(ymd(dl).slice(5, 7))}/${Number(ymd(dl).slice(8))} ${pad(s.approval_hour)}:00`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktr:${c.id}` });
+    await notify(sql, { userIds: await audience(c), type: 'review_requested', title: `승인 마감 ${s.remind_hours}시간 전: ${c.title}`, body: `마감 ${Number(ymd(dl).slice(5, 7))}/${Number(ymd(dl).slice(8))} ${pad(s.approval_hour)}:00`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktr:${c.id}` });
     await sql`update mkt_contents set reminded_at = now() where id = ${c.id}`;
     reminded++;
   }
   return { reminded, expired };
 }
 
-export async function runTenant(tenant: string) {
+export async function runTenant(tenant: string, actorId?: string) {
   const planned = await planSlots(tenant);
   const due = await db()<any[]>`select * from mkt_contents where tenant = ${tenant} and auto and status = 'draft' and produced_at is null and produce_at <= now() order by produce_at limit 5`;
   const produced = [];
-  for (const c of due) produced.push(await produceContent(c).catch((e) => ({ id: c.id, error: String(e?.message ?? e).slice(0, 200) })));
+  for (const c of due) produced.push(await produceContent(c, actorId).catch((e) => ({ id: c.id, error: String(e?.message ?? e).slice(0, 200) })));
   return { planned, produced, ...(await remindAndExpire(tenant)) };
 }
 /** tick: 규칙이 있는 회사만(한 번에 3곳) */
@@ -231,33 +236,35 @@ export async function automationView(u: SessionUser) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const s = await settingsOf(t);
-  const [rules, requests, ledger, brands] = await Promise.all([
+  const [rules, requests, ledger, brands, people] = await Promise.all([
     sql`select r.id, r.brand_id, b.name as brand, r.channel, r.kind, r.weekdays, r.post_time, r.topic_hint, r.active from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${t} order by r.created_at`,
     sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
     sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, c.title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
-    sql`select id, name, tone, banned_words from mkt_brands where tenant = ${t} order by name`,
+    sql`select id, name, tone, banned_words, test_mode from mkt_brands where tenant = ${t} order by name`,
+    sql`select id, name, role from users where tenant = ${t} and status = 'active' and not is_demo order by name`,
   ]);
-  return { settings: s, limits: limitsOf(s), usage: await usageOf(t), plans: MKT_PLANS, rules, requests, ledger, brands, canEdit: isAdmin(u) };
+  return { settings: s, limits: limitsOf(s), usage: await usageOf(t), plans: MKT_PLANS, rules, requests, ledger, brands, people, canEdit: isAdmin(u) };
 }
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 제작 설정은 관리자가 합니다'); }
 
 const nInt = (a: number, b: number) => z.number().int().min(a).max(b);
 export const settingsInput = z.object({ planCode: z.enum(['basic', 'standard', 'pro']).nullable().optional(), monthlyCredits: z.number().min(0).max(100000).nullable().optional(), weeklyCredits: z.number().min(0).max(100000).nullable().optional(),
   videoMonthly: nInt(0, 1000).nullable().optional(), regenMonthly: nInt(0, 1000).nullable().optional(), approvalHour: nInt(0, 23).optional(), leadDays: nInt(0, 14).optional(), leadHour: nInt(0, 23).optional(),
-  remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional() });
+  remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional() });
 export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const cur = await settingsOf(tenantOf(u));
   const v = { plan_code: i.planCode !== undefined ? i.planCode : cur.plan_code, monthly_credits: i.monthlyCredits !== undefined ? i.monthlyCredits : cur.monthly_credits, weekly_credits: i.weeklyCredits !== undefined ? i.weeklyCredits : cur.weekly_credits,
     video_monthly: i.videoMonthly !== undefined ? i.videoMonthly : cur.video_monthly, regen_monthly: i.regenMonthly !== undefined ? i.regenMonthly : cur.regen_monthly, approval_hour: i.approvalHour ?? cur.approval_hour,
     lead_days: i.leadDays ?? cur.lead_days, lead_hour: i.leadHour ?? cur.lead_hour, remind_hours: i.remindHours ?? cur.remind_hours, quiet_start: i.quietStart ?? cur.quiet_start, quiet_end: i.quietEnd ?? cur.quiet_end,
-    allow_generated_people: i.allowGeneratedPeople ?? cur.allow_generated_people, allow_slideshow: i.allowSlideshow ?? cur.allow_slideshow, ai_label: i.aiLabel ?? cur.ai_label };
+    allow_generated_people: i.allowGeneratedPeople ?? cur.allow_generated_people, allow_slideshow: i.allowSlideshow ?? cur.allow_slideshow, ai_label: i.aiLabel ?? cur.ai_label,
+    notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids };
   const sql = db();
   await sql`insert into mkt_settings ${sql({ tenant: tenantOf(u), ...v, updated_by: u.id } as never)}
     on conflict (tenant) do update set plan_code = excluded.plan_code, monthly_credits = excluded.monthly_credits, weekly_credits = excluded.weekly_credits, video_monthly = excluded.video_monthly,
       regen_monthly = excluded.regen_monthly, approval_hour = excluded.approval_hour, lead_days = excluded.lead_days, lead_hour = excluded.lead_hour, remind_hours = excluded.remind_hours,
-      quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label,
+      quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids,
       updated_by = excluded.updated_by, updated_at = now()`;
   return { ok: true };
 }
@@ -316,12 +323,12 @@ export async function actRequest(u: SessionUser, id: string, i: z.infer<typeof r
   return { status: 'done', credits };
 }
 
-export const brandKitInput = z.object({ tone: z.string().max(200).nullable().optional(), bannedWords: z.array(z.string().trim().min(1).max(30)).max(50).optional() });
+export const brandKitInput = z.object({ tone: z.string().max(200).nullable().optional(), bannedWords: z.array(z.string().trim().min(1).max(30)).max(50).optional(), testMode: z.boolean().optional() });
 export async function saveBrandKit(u: SessionUser, id: string, i: z.infer<typeof brandKitInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
-  const [b] = await db()`update mkt_brands set tone = ${i.tone === undefined ? db()`tone` : i.tone}, banned_words = coalesce(${i.bannedWords ?? null}::text[], banned_words) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
+  const [b] = await db()`update mkt_brands set tone = ${i.tone === undefined ? db()`tone` : i.tone}, banned_words = coalesce(${i.bannedWords ?? null}::text[], banned_words), test_mode = coalesce(${i.testMode ?? null}, test_mode) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!b) throw notFound();
   return { ok: true };
 }
-export async function runNow(u: SessionUser) { await assertSpace(u, 'marketing'); adminOnly(u); return runTenant(tenantOf(u)); }
+export async function runNow(u: SessionUser) { await assertSpace(u, 'marketing'); adminOnly(u); return runTenant(tenantOf(u), u.id); }
