@@ -111,7 +111,7 @@ export async function listProspects(u: SessionUser, q: { status?: string; source
   await assertSpace(u, 'sales');
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select p.id, p.name, p.address, p.sido, p.status as biz_status, to_char(p.opened_on, 'YYYY-MM-DD') as opened_on, to_char(p.closed_on, 'YYYY-MM-DD') as closed_on,
-      p.category, to_char(coalesce(p.base_date, p.fetched_at::date), 'YYYY-MM-DD') as base_date, s.code as source_code, s.name as source_name, s.provider, s.license,
+      p.category, p.detail, to_char(coalesce(p.base_date, p.fetched_at::date), 'YYYY-MM-DD') as base_date, s.code as source_code, s.name as source_name, s.provider, s.license,
       coalesce(tp.status, 'new') as status, tp.memo
     from prospects p join data_sources s on s.code = p.source_code
     join tenant_data_sources ts on ts.source_code = p.source_code and ts.tenant = ${t} and ts.enabled

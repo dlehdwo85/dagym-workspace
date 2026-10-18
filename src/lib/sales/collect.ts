@@ -21,7 +21,9 @@ function itemsOf(j: any): any[] {
   return Array.isArray(c) ? c : c && typeof c === 'object' ? [c] : [];
 }
 
-export async function collectSource(code: string, opt: { maxPages?: number; fetchImpl?: typeof fetch } = {}) {
+export async function collectSource(code: string, opt: { maxPages?: number; days?: number; fetchImpl?: typeof fetch } = {}) {
+  // 청약홈 분양정보는 응답 모양·기간 조건이 달라 전용 수집기(세 종류·모집공고일 기준)
+  if (code === '15098547') return (await import('./applyhome')).collectApplyhome({ days: opt.days, fetchImpl: opt.fetchImpl });
   const sql = db();
   const [s] = await sql<any[]>`select code, endpoint, params, field_map from data_sources where code = ${code}`;
   if (!s?.endpoint) return { code, count: 0, error: '수집 주소(endpoint)가 아직 없습니다' };
