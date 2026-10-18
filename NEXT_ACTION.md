@@ -777,6 +777,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 영업 이전 미리보기: SALES_SRC_URL 정규화, 설명서(OpenAPI) 막히면 표 27개 목록으로 건수, 원인 화면에.
 - 다음: V41 4-3 주간 제작 규칙·리드타임·승인 마감·알림·AI 크레딧 상한·품질 검사(대표 방향 10/18).
 
+## 2026-10-18: V41 4-3 + V43 마케팅 자동 제작·상업화 준비 (클라우드)
+- 088: mkt_settings(요금제·월/주 크레딧·생성 영상·재생성·제작 리드타임·승인 마감·알림·무알림·생성 인물/슬라이드쇼·AI 표기) · mkt_rules(브랜드·채널·종류·요일·시각·주제) · mkt_credit_ledger(고객·게시물·버전) · mkt_production_requests(이미지·영상·재생성 카드) · mkt_brands 말투·금지어 · mkt_contents 자동 칸(rule_id·kind·produce_at·quality).
+- 흐름: tick(mktAuto) → 2주 칸 → 제작 시각에 Claude 원고 → 품질 검사 → 통과본 승인함 + 알림 → 마감 N시간 전 알림(야간이면 직전 저녁) → 마감 지난 자동 시안 취소.
+- 수정 요청(관리자 '수정 요청' 사유): 글자·배치 = AI 새 버전(0크레딧) / 사진·영상 다시 = 재생성 카드(재생성 횟수·크레딧 넘으면 제작 전 승인).
+- 대표 결정 대기: 요금제 가격(빈칸), Higgsfield API 계약(이미지·영상 자동 생성 — 지금은 카드에 사람이 만들어 붙이고 실제 크레딧 기록), 크레딧 원화 단가.
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
