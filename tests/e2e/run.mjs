@@ -1510,8 +1510,8 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   await owner.getByTestId('detail-repeat').getByLabel('반복 규칙').selectOption('__custom');
   const cr = owner.getByTestId('custom-recur');
   await cr.getByLabel('반복 단위').selectOption('WEEKLY');
-  await cr.getByRole('group', { name: '반복 요일' }).getByRole('button', { name: '월' }).click();
-  await cr.getByRole('group', { name: '반복 요일' }).getByRole('button', { name: '금' }).click();
+  // 오늘 요일이 기본 선택이라(월요일에 돌리면 '월'이 이미 켜져 있음) 켜져 있지 않을 때만 누름
+  for (const day of ['월', '금']) { const btn = cr.getByRole('group', { name: '반복 요일' }).getByRole('button', { name: day }); if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click(); }
   await cr.getByLabel('종료 횟수').fill('8');
   await cr.getByRole('button', { name: '완료' }).click();
   await owner.waitForTimeout(800);

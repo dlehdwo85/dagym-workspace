@@ -593,6 +593,9 @@ describe('Asana 이상 P2 (B-14~B-17)', () => {
   test('B-15 주간 보고: 정기 실행이 주 1회만 만들고 관리자에게 알림, 관리자만 열람', async () => {
     await tick(); await tick();
     const { reports } = await ctx.owner.ok('GET', '/api/reports');
+    // 정기 실행은 월요일 08:00(서울) 전에는 지난주 보고를 만들지 않음 — 그 시각에 돌리면 0건이 맞음
+    const k = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(new Date());
+    if (k.find((x) => x.type === 'weekday').value === 'Mon' && Number(k.find((x) => x.type === 'hour').value) % 24 < 8) { assert.equal(reports.length, 0, '월요일 8시 전에는 만들지 않음'); return; }
     assert.equal(reports.length, 1, '여러 번 실행해도 1건');
     const rep = (await ctx.owner.ok('GET', `/api/reports/${reports[0].id}`)).report;
     assert.ok(rep.data.weekStart && Array.isArray(rep.data.sites) && Array.isArray(rep.data.issues));
