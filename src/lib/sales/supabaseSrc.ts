@@ -22,25 +22,29 @@ export function srcHeaders(key = process.env.SALES_SRC_SERVICE_KEY): Record<stri
   if (kind === 'legacy_jwt') return { apikey: key!.trim(), authorization: `Bearer ${key!.trim()}` };
   throw new Error(kind === 'missing' ? 'SALES_SRC_SERVICE_KEY 가 없습니다' : kind === 'publishable' ? 'Publishable/anon 키로는 이관할 수 없습니다 — Secret key(sb_secret_…)를 넣어 주세요' : 'SALES_SRC_SERVICE_KEY 형식을 알 수 없습니다');
 }
+/** SALES_SRC_URL 정규화: 끝 '/'·'/rest/v1' 를 떼어 프로젝트 주소만(https://xxxx.supabase.co) — 잘못 붙여 넣어도 /rest/v1/rest/v1 이 안 되게 */
+export function srcBase(raw = process.env.SALES_SRC_URL) {
+  return (raw ?? '').trim().replace(/\/+$/, '').replace(/\/rest\/v1$/i, '').replace(/\/+$/, '');
+}
 export const srcConfigured = () => !!process.env.SALES_SRC_URL && ['secret', 'legacy_jwt'].includes(srcKeyKind());
 
 /** PostgREST 읽기(GET) — 이관 작업이 씀. path 예: '/rest/v1/leads?select=*&limit=1000&offset=0' */
 export async function srcGet(path: string) {
-  const base = (process.env.SALES_SRC_URL ?? '').replace(/\/$/, '');
+  const base = srcBase();
   if (!base.startsWith('https://') && !process.env.SALES_SRC_TEST) throw new Error('SALES_SRC_URL 이 없습니다');
   const r = await fetch(`${base}${path}`, { headers: { ...srcHeaders(), accept: 'application/json' }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
   const text = await r.text();
-  if (!r.ok) throw new Error(`영업관리 원본 읽기 오류 ${r.status}: ${text.slice(0, 160)}`);
+  if (!r.ok) throw new Error(`영업관리 원본 읽기 오류 ${r.status} (${path.split('?')[0]}): ${text.slice(0, 200)}`);
   return JSON.parse(text);
 }
 
 /** 건수만(본문 없이): Prefer count=exact + Range 0-0 → Content-Range "0-0/21" */
 export async function srcCount(table: string, filter = '') {
-  const base = (process.env.SALES_SRC_URL ?? '').replace(/\/$/, '');
+  const base = srcBase();
   const r = await fetch(`${base}/rest/v1/${encodeURIComponent(table)}?select=*${filter ? `&${filter}` : ''}`, {
     headers: { ...srcHeaders(), prefer: 'count=exact', range: '0-0', 'range-unit': 'items' }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
   await r.text().catch(() => '');
-  if (!r.ok && r.status !== 206 && r.status !== 416) throw new Error(`${table} 건수 읽기 오류 ${r.status}`);
+  if (!r.ok && r.status !== 206 && r.status !== 416) throw new Error(`${table} 건수 읽기 오류 ${r.status}${r.status === 401 || r.status === 403 ? '(키 권한)' : r.status === 404 ? '(표 없음·경로)' : ''}`);
   const total = (r.headers.get('content-range') ?? '').split('/')[1];
   return total && total !== '*' ? Number(total) : null;
 }
