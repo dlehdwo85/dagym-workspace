@@ -146,6 +146,8 @@ test('제작 시점 바꾸면 안 만든 칸 다시 계산 · AI 다시 만들�
   assert.deepEqual([after.status, after.current_version, after.title], ['pending', 2, '헬스장 가을 소식']);
   const cards = await sql`select version, status from mkt_production_requests where content_id = ${c.id} and kind = 'image' order by version`;
   assert.deepEqual(cards.map((x) => `${x.version}:${x.status}`), ['1:canceled', '2:open']);
+  const led = (await ctx.owner.ok('GET', '/api/marketing/auto')).ledger.filter((l) => l.kind === 'text' && ['헬스장 소식', '헬스장 가을 소식'].includes(l.title));
+  assert.deepEqual(led.map((l) => `v${l.version} ${l.title}`).sort(), ['v1 헬스장 소식', 'v2 헬스장 가을 소식'], '원장 = 기록 당시 제목');
   await ctx.owner.ok('POST', `/api/marketing/auto/contents/${c.id}`, { action: 'archive' });
   assert.equal((await sql`select status from mkt_contents where id = ${c.id}`)[0].status, 'canceled', '보관 = 취소 상태(행은 남음)');
   assert.equal((await sql`select count(*)::int n from mkt_production_requests where content_id = ${c.id} and status = 'open'`)[0].n, 0);

@@ -15,7 +15,7 @@ import { tenantOf, type SessionUser } from './types';
  * - 플랫폼 운영자만 실행(회사 지정). 회사 안 조회는 마케팅 공간 관리자만, 전화 기록은 보관 기간(OPS_CALL_RETENTION_DAYS, 기본 365일) 뒤 삭제.
  */
 export const OPS_KEYS = ['mkt:daily:decisions:v1', 'mkt:revisions:v1', 'mkt:requests:v1', 'mkt:posts:v1', 'mkt:schedule:v1', 'mkt:production:v1', 'mkt:media-outputs:v1', 'mkt:media-approval:v1', 'mkt:media:v1',
-  'mkt:ads:structure-decision:v1', 'mkt:ads:apply-log:v1', 'mkt:call-records:v1', 'mkt:call-clicks:v1', 'mkt:library:v1', 'mkt:owner:actions:done:v1', 'mkt:plan-state:v1', 'mkt:plan:active:v1', 'mkt:approvals:dynamic:v1'] as const;
+  'mkt:ads:structure-decision:v1', 'mkt:ads:apply-log:v1', 'mkt:call-records:v1', 'mkt:call-clicks:v1', 'mkt:call-clicks:first-seen:v1', 'mkt:library:v1', 'mkt:owner:actions:done:v1', 'mkt:plan-state:v1', 'mkt:plan:active:v1', 'mkt:approvals:dynamic:v1'] as const;
 export const PII_KEYS = new Set(['mkt:call-records:v1']);
 const configured = () => !!(process.env.OPS_EXPORT_URL && process.env.OPS_EXPORT_TOKEN);
 
@@ -36,6 +36,7 @@ export function maskPhones(v: unknown, n = { count: 0 }): unknown {
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, maskPhones(x, n)]));
   return v;
 }
+/** 문자열 값(kind=string)은 운영실 해시 방식이 원문/JSON 어느 쪽이어도 대조되게 shaOk 에서 둘 다 확인 */
 const sha = (v: unknown) => createHash('sha256').update(typeof v === 'string' ? v : JSON.stringify(v)).digest('hex');
 
 type KeyResult = { key: string; kind: string; expectedCount: number; expectedSha: string; count: number; sha: string; pageSha: boolean; countOk: boolean; shaOk: boolean; sample?: string[]; unmaskedPhones?: number };
@@ -53,9 +54,10 @@ async function fetchKey(key: string, m: { kind: string; count: number; sha256: s
   // 미리보기 표본: 칸 이름만(값 없이) — 실제 매핑을 정하려고. 개인정보 키도 칸 이름만.
   const first = Array.isArray(value) ? value[0] : value;
   const sample = first && typeof first === 'object' ? Object.keys(first).slice(0, 30) : undefined;
-  const res: KeyResult = { key, kind: m.kind, expectedCount: m.count, expectedSha: m.sha256, count, sha: got, pageSha, countOk: count === m.count, shaOk: got === m.sha256, sample };
+  const res: KeyResult = { key, kind: m.kind, expectedCount: m.count, expectedSha: m.sha256, count, sha: got, pageSha, countOk: count === m.count, shaOk: got === m.sha256 || (typeof value === 'string' && JSON.stringify(value) !== value && sha(JSON.stringify(value)) === m.sha256), sample };
   // 해시는 받은 그대로 대조하고, 저장할 값은 전화번호를 가림(가려야 했던 개수를 알려 줌 — 0 이 정상)
-  if (PII_KEYS.has(key)) { const n = { count: 0 }; value = maskPhones(value, n); res.unmaskedPhones = n.count; }
+  // 운영실 10/18: 모든 키에서 전화번호를 가려 보냄(대표번호 제외) — 워크인도 모든 키를 저장 전에 한 번 더 가림(가린 값·대표번호 15xx 는 그대로)
+  { const n = { count: 0 }; value = maskPhones(value, n); if (n.count || PII_KEYS.has(key)) res.unmaskedPhones = n.count; }
   return { res, value };
 }
 

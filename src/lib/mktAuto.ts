@@ -204,7 +204,7 @@ export async function produceContent(c: any, actorId?: string | null) {
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${[]}, ${v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기'}, ${c.created_by})`;
     if (v > 1) await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('image', 'video') and status in ('open', 'needs_approval')`;
     await tx`update mkt_contents set title = ${(c.is_test && !d.title.startsWith('[시험]') ? '[시험] ' : '') + d.title}, current_version = ${v}, reminded_at = null, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief } as never)}, updated_at = now() where id = ${c.id}`;
-    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'})`;
+    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임)
     if (kind !== 'blog' || d.brief) await requestCard(c, v, kind === 'video' || kind === 'reels' ? 'video' : 'image', d.brief || '실사 사진 + 글자 렌더', kind === 'video' ? EST.video : kind === 'reels' ? EST.video_reels : EST.image, tx);
   });
@@ -282,7 +282,7 @@ export async function onChangesRequested(contentId: string, comment: string) {
   await sql.begin(async (tx) => {
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${old?.media_ids ?? []}, ${`수정 요청 반영(글자·배치, 0크레딧): ${comment.slice(0, 200)}`}, ${c.created_by})`;
     await tx`update mkt_contents set current_version = ${v}, status = ${q.passed ? 'pending' : 'changes'}, quality = ${tx.json({ passed: q.passed, issues: q.issues } as never)}, reminded_at = null, updated_at = now() where id = ${c.id}`;
-    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, '수정 요청 — 글자·배치')`;
+    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, '수정 요청 — 글자·배치', (select title from mkt_contents where id = ${c.id}))`;
   });
   return { kind, version: v };
 }
@@ -296,7 +296,7 @@ export async function automationView(u: SessionUser) {
     sql`select r.id, r.brand_id, b.name as brand, r.channel, r.kind, r.weekdays, r.post_time, r.topic_hint, r.active from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${t} order by r.created_at`,
     sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
-    sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, c.title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
+    sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, coalesce(l.title, c.title) as title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
     sql`select id, name, tone, intro, products, weekly_topic, banned_words, test_mode from mkt_brands where tenant = ${t} order by name`,
     sql`select id, name, role from users where tenant = ${t} and status = 'active' and not is_demo order by name`,
   ]);
@@ -394,7 +394,7 @@ export async function actRequest(u: SessionUser, id: string, i: z.infer<typeof r
     await addVersion(u, q.content_id, { body: prev?.body ?? '', mediaIds: i.mediaIds, note: `제작 요청 완료(${{ image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성' }[q.kind as 'image']})` }); }
   await sql.begin(async (tx) => {
     await tx`update mkt_production_requests set status = 'done', decided_by = ${u.id}, decided_at = now() where id = ${id}`;
-    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, created_by) values (${t}, ${q.content_id}, ${q.version}, ${kind}, ${credits}, ${'제작 요청 완료'}, ${u.id})`;
+    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, created_by, title) values (${t}, ${q.content_id}, ${q.version}, ${kind}, ${credits}, ${'제작 요청 완료'}, ${u.id}, (select title from mkt_contents where id = ${q.content_id}))`;
   });
   return { status: 'done', credits };
 }
