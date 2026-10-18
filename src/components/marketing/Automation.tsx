@@ -8,10 +8,10 @@ import { MediaPick } from './MediaPick';
 const C = '#7C3AED';
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스·쇼츠', video: '생성 영상' };
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
-const REQ: Record<string, string> = { image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성' };
+const REQ: Record<string, string> = { image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성', topic: '주제 필요' };
 type View = { settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null };
   usage: { weekCredits: number; monthCredits: number; monthVideos: number; monthRegens: number }; plans: Record<string, { label: string; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; price: number | null }>;
-  rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; banned_words: string[]; test_mode: boolean }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean };
+  rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; intro: string | null; products: string | null; weekly_topic: string | null; banned_words: string[]; test_mode: boolean }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean };
 const lim = (used: number, max: number | null) => (max === null ? `${used} (한도 없음)` : `${used} / ${max}`);
 
 /** V41 4-3 + V43: 자동 제작 — 요금제·한도·사용량, 일정·마감·알림, 브랜드 키트, 주간 규칙, 제작 요청 카드, 크레딧 원장 */
@@ -19,6 +19,7 @@ export function Automation() {
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '' });
   const [done, setDone] = useState<Record<string, { credits: string; media: { id: string; title: string }[] }>>({});
+  const [topics, setTopics] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [nb, setNb] = useState({ name: '', test: false });
   async function addBrand() {
@@ -34,9 +35,10 @@ export function Automation() {
   async function addRule(e: React.FormEvent) { e.preventDefault(); try { const r = await api<{ planned: number }>('/api/marketing/auto/rules', { body: { ...rule, brandId: rule.brandId || null, topicHint: rule.topicHint || undefined } }); toast.ok(`규칙 추가 — 앞으로 2주 ${r.planned}칸`); reload(); } catch (er: any) { toast.error(er.message); } }
   async function act(id: string, action: string) {
     const d = done[id];
-    try { await api(`/api/marketing/auto/requests/${id}`, { method: 'PATCH', body: { action, ...(action === 'done' && d ? { credits: d.credits === '' ? undefined : Number(d.credits), mediaIds: d.media.map((m) => m.id) } : {}) } }); reload(); } catch (e: any) { toast.error(e.message); }
+    try { await api(`/api/marketing/auto/requests/${id}`, { method: 'PATCH', body: { action, ...(topics[id] ? { topic: topics[id] } : {}), ...(action === 'done' && d ? { credits: d.credits === '' ? undefined : Number(d.credits), mediaIds: d.media.map((m) => m.id) } : {}) } }); reload(); } catch (e: any) { toast.error(e.message); }
   }
-  async function runNow() { setBusy(true); try { const r = await api<any>('/api/marketing/auto/run', { body: {} }); toast.ok(`칸 ${r.planned} · 제작 ${r.produced.length} · 알림 ${r.reminded} · 정리 ${r.expired}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
+  async function runNow() { setBusy(true); try { const r = await api<any>('/api/marketing/auto/run', { body: {} }); const bad = r.produced.filter((p: any) => p.error); const ask = r.produced.filter((p: any) => p.needsTopic).length;
+    toast.ok(`칸 ${r.planned} · 제작 ${r.produced.length - bad.length - ask}${ask ? ` · 주제 필요 ${ask}` : ''} · 알림 ${r.reminded} · 정리 ${r.expired}`); if (bad.length) toast.error(`제작 실패 ${bad.length}건: ${bad[0].error}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
   const num = (v: string) => (v === '' ? null : Number(v));
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="mkt-automation">
@@ -123,22 +125,31 @@ export function Automation() {
           <li key={b.id} className="grid gap-2 sm:grid-cols-[8rem_1fr_1fr_auto]"><span className="pt-2 text-sm font-medium">{b.name}</span>
             <input className={inputCls} defaultValue={b.tone ?? ''} placeholder="말투(예: 친근·전문적)" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { tone: e.target.value || null } }).then(reload)} aria-label={`${b.name} 말투`} />
             <input className={inputCls} defaultValue={b.banned_words.join(', ')} placeholder="금지어(쉼표)" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { bannedWords: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) } }).then(reload)} aria-label={`${b.name} 금지어`} />
-            <label className="flex items-center gap-1.5 text-xs" title="알림은 실행한 사람에게만, 승인함에 [시험] 표시, 게시 확인 안 됨"><input type="checkbox" checked={b.test_mode} onChange={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { testMode: e.target.checked } }).then(reload)} data-testid="auto-brand-test" />시험 모드</label></li>))}</ul>
+            <label className="flex items-center gap-1.5 text-xs" title="알림은 실행한 사람에게만, 승인함에 [시험] 표시, 게시 확인 안 됨"><input type="checkbox" checked={b.test_mode} onChange={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { testMode: e.target.checked } }).then(reload)} data-testid="auto-brand-test" />시험 모드</label>
+            <div className="grid gap-2 sm:col-span-4 sm:grid-cols-3 sm:pl-[8.5rem]">
+              <textarea className={cx(inputCls, 'min-h-16')} defaultValue={b.intro ?? ''} placeholder="브랜드 소개(무엇을 하는 곳인지)" maxLength={1000} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { intro: e.target.value } }).then(reload)} aria-label={`${b.name} 소개`} data-testid="auto-brand-intro" />
+              <textarea className={cx(inputCls, 'min-h-16')} defaultValue={b.products ?? ''} placeholder="주력 상품·서비스" maxLength={1000} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { products: e.target.value } }).then(reload)} aria-label={`${b.name} 주력 상품`} />
+              <textarea className={cx(inputCls, 'min-h-16')} defaultValue={b.weekly_topic ?? ''} placeholder="이번 주 주제(선택)" maxLength={300} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { weeklyTopic: e.target.value } }).then(reload)} aria-label={`${b.name} 이번 주 주제`} />
+            </div></li>))}</ul>
+        <p className="mt-2 text-xs text-ink-3">원고 재료: 브랜드 소개·주력 상품·이번 주 주제 + 회사 AI 프로필 + 마케팅 자료실 사진 설명. 재료가 없으면 시안 대신 “주제 필요” 카드로 묻습니다.</p>
       </section>}
 
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-requests">
         <h2 className="text-sm font-semibold">제작 요청 카드</h2>
         <ul className="mt-2 space-y-2">{data.requests.map((q) => (
           <li key={q.id} className={cx('rounded-input border p-3 text-sm', q.status === 'needs_approval' ? 'border-amber-300 bg-amber-50' : 'border-line')} data-testid="auto-request">
-            <div className="flex flex-wrap items-center gap-2"><b>{REQ[q.kind]}</b><span className="text-xs text-ink-2">{q.title} · {q.scheduled_at ? fmtDateTime(q.scheduled_at) : ''} · 예상 {q.est_credits}크레딧</span>
+            <div className="flex flex-wrap items-center gap-2"><b>{REQ[q.kind]}</b><span className="text-xs text-ink-2">{q.title} · {q.scheduled_at ? fmtDateTime(q.scheduled_at) : ''}{q.kind !== 'topic' && ` · 예상 ${q.est_credits}크레딧`}</span>
               {q.status === 'needs_approval' && <span className="text-xs font-semibold text-amber-800">{q.reason}</span>}</div>
             {q.brief && <p className="mt-1 whitespace-pre-wrap text-xs text-ink-2">{q.brief}</p>}
             <div className="mt-2 flex flex-wrap items-end gap-2">
-              {q.status === 'needs_approval' ? (ed && <Button size="sm" onClick={() => act(q.id, 'approve')} data-testid="auto-req-approve">제작 승인</Button>) : (<>
+              {q.kind === 'topic' ? (<>
+                <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1 text-xs')} value={topics[q.id] ?? ''} onChange={(e) => setTopics({ ...topics, [q.id]: e.target.value })} placeholder="이번 글 주제(예: 10월 신규 회원 이벤트)" maxLength={300} aria-label="주제" data-testid="auto-topic" />
+                <Button size="sm" onClick={() => act(q.id, 'done')} disabled={(topics[q.id] ?? '').trim().length < 2} data-testid="auto-topic-send">주제 보내기</Button></>)
+              : q.status === 'needs_approval' ? (ed && <Button size="sm" onClick={() => act(q.id, 'approve')} data-testid="auto-req-approve">제작 승인</Button>) : (<>
                 <MediaPick value={done[q.id]?.media ?? []} onChange={(m) => setDone({ ...done, [q.id]: { credits: done[q.id]?.credits ?? '', media: m } })} />
                 <input className={cx(inputCls, 'h-8 w-28 py-1 text-xs')} type="number" placeholder={`사용 ${q.est_credits}`} value={done[q.id]?.credits ?? ''} onChange={(e) => setDone({ ...done, [q.id]: { media: done[q.id]?.media ?? [], credits: e.target.value } })} aria-label="실제 사용 크레딧" />
                 <Button size="sm" onClick={() => act(q.id, 'done')} data-testid="auto-req-done">제작 완료</Button></>)}
-              <Button size="sm" variant="secondary" onClick={() => act(q.id, 'cancel')}>취소</Button>
+              <Button size="sm" variant="secondary" onClick={() => act(q.id, 'cancel')}>{q.kind === 'topic' ? '이번 칸 건너뛰기' : '취소'}</Button>
             </div>
           </li>))}{!data.requests.length && <li className="text-xs text-ink-3">열린 제작 요청이 없습니다</li>}</ul>
       </section>

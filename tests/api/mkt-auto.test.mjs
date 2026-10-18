@@ -83,10 +83,33 @@ test('알림 받는 사람 고르기 · 브랜드 시험 모드', async () => {
   assert.equal((await ctx.staffA.client.req('POST', '/api/marketing/auto/brands', { name: '직원 브랜드' })).status, 403);
   assert.ok((await ctx.owner.ok('GET', '/api/marketing/auto')).brands.some((b) => b.name === '[시험] 워크인' && b.test_mode), '목록에 보임');
   await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: test.id, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '23:30' });
+  // 재료(주제·브랜드 소개·회사 소개)가 없으면 원고 대신 '주제 필요' 카드(대표 확인 10/18)
   await ctl({ anthropicReset: true });
+  const ask = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  assert.ok(ask.produced.length >= 1 && ask.produced.every((p) => p.needsTopic), JSON.stringify(ask));
+  assert.equal((await sql`select count(*)::int n from mkt_contents where brand_id = ${test.id} and produced_at is not null`)[0].n, 0, '시안 안 만듦');
+  let v = await ctx.owner.ok('GET', '/api/marketing/auto');
+  const topicCards = v.requests.filter((q) => q.kind === 'topic');
+  assert.equal(topicCards.length, ask.produced.length, '칸마다 한 장');
+  assert.equal((await ctx.owner.ok('POST', '/api/marketing/auto/run', {})).produced.length, 0, '답 전에는 다시 묻지 않음');
+  assert.equal((await ctx.owner.req('PATCH', `/api/marketing/auto/requests/${topicCards[0].id}`, { action: 'done' })).status, 400, '주제 없이 완료 불가');
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/requests/${topicCards[0].id}`, { action: 'done', topic: '10월 신규 회원 이벤트' });
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${test.id}`, { intro: '운동 기록 앱', products: 'PT 일정 관리' });
+  assert.equal((await ctx.owner.ok('GET', '/api/marketing/auto')).requests.filter((q) => q.kind === 'topic').length, 0, '브랜드 재료가 생기면 질문 닫힘');
+  assert.equal((await ctx.owner.ok('GET', '/api/marketing/auto')).brands.find((b) => b.id === test.id).intro, '운동 기록 앱');
+  // 원고: 남은 [브랜드] 는 이름으로 채움 · 피드에 '슬라이드쇼' 가 있어도 영상 유형이 아니면 통과 · [확인 필요] 는 미통과
+  await ctl({ anthropicReset: true, anthropicQueue: [
+    say({ title: '[시험] [브랜드] 이번 주 소식', body: '[브랜드]에서 10월 이벤트를 엽니다', brief: '실사 사진 슬라이드쇼 느낌의 피드' }),
+    say({ title: '가격 안내', body: '월 [확인 필요]원', brief: '실사' })] });
   const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
-  const tc = await sql`select id, title, is_test, status from mkt_contents where brand_id = ${test.id} and produced_at is not null`;
-  assert.ok(tc.length >= 1, JSON.stringify(run));
+  const tc = await sql`select id, title, is_test, status, quality from mkt_contents where brand_id = ${test.id} and produced_at is not null order by produced_at`;
+  assert.ok(tc.length >= 2, JSON.stringify(run));
+  assert.equal(tc[0].title, '[시험] 워크인 이번 주 소식', '자리표시 채움 · [시험] 한 번');
+  assert.equal(tc[0].status, 'pending', JSON.stringify(tc[0].quality));
+  assert.match((await sql`select body from mkt_versions where content_id = ${tc[0].id}`)[0].body, /^워크인에서/);
+  assert.ok(tc[1].quality.issues.some((x) => x.includes('자리표시')), JSON.stringify(tc[1].quality));
+  v = await ctx.owner.ok('GET', '/api/marketing/auto');
+  assert.ok(tc.every((c) => v.requests.some((q) => q.content_id === c.id && q.kind === 'image')), '시안마다 이미지 제작 요청 카드');
   assert.ok(tc.every((c) => c.is_test && c.title.startsWith('[시험]')));
   const tn = await sql`select distinct user_id from notifications where entity_id = any(${tc.map((c) => c.id)}::uuid[])`;
   assert.deepEqual(tn.map((r) => r.user_id), [ctx.ownerId], '시험 알림은 실행한 사람에게만');
