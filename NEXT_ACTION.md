@@ -851,7 +851,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 사용량 화면 기능별 이름을 한 곳(src/components/aiPurpose.ts)에서 같이 씀: 마케팅 자동 원고·마케팅 캡션 초안 추가, 이름 없는 기능은 '기타 AI 기능' 한 줄로 합침(로컬 검수 지적).
 - 다음: ⑤ 고객 게시 경로 설계(Meta OAuth 앱 심사 자료 먼저·YouTube 업로드·네이버 블로그 게시 도우미).
 
+## 2026-10-18 상용화 ⑤ 고객 게시 경로 설계 초안
+- docs/research/MKT_PUBLISHING_DESIGN.md: 공통 구조(연결 계정·게시 작업·verify 후 재시도·감사·삭제), Meta(권한·심사 준비물·화면 녹화 시나리오), YouTube(upload 범위·감사 전 비공개·할당량), 네이버 블로그(공식 API 없음 → 게시 도우미 + 위험 고지), 단계 5-1~5-4.
+- 바로 할 수 있는 것: 5-1(공통 구조 + 네이버 게시 도우미). 대표 결정: Meta 앱 새로 만들지/운영실 앱 옮길지, 비즈니스 인증 주체.
+
 ## 대표 결정이 필요한 것
+- (10/18) 게시 경로: Meta 앱(워크인 전용 새 앱 / 운영실 앱 이전)·비즈니스 인증 주체 — docs/research/MKT_PUBLISHING_DESIGN.md
 - (10/18) 마케팅 AI 월 한도 요금제 기본값(베이직 $3 · 스탠다드 $6 · 프로 $15)은 임시 — 요금제 금액과 같이 정해 주세요.
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
