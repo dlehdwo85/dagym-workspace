@@ -33,3 +33,14 @@ export async function srcGet(path: string) {
   if (!r.ok) throw new Error(`영업관리 원본 읽기 오류 ${r.status}: ${text.slice(0, 160)}`);
   return JSON.parse(text);
 }
+
+/** 건수만(본문 없이): Prefer count=exact + Range 0-0 → Content-Range "0-0/21" */
+export async function srcCount(table: string, filter = '') {
+  const base = (process.env.SALES_SRC_URL ?? '').replace(/\/$/, '');
+  const r = await fetch(`${base}/rest/v1/${encodeURIComponent(table)}?select=*${filter ? `&${filter}` : ''}`, {
+    headers: { ...srcHeaders(), prefer: 'count=exact', range: '0-0', 'range-unit': 'items' }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
+  await r.text().catch(() => '');
+  if (!r.ok && r.status !== 206 && r.status !== 416) throw new Error(`${table} 건수 읽기 오류 ${r.status}`);
+  const total = (r.headers.get('content-range') ?? '').split('/')[1];
+  return total && total !== '*' ? Number(total) : null;
+}

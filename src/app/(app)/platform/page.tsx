@@ -9,6 +9,7 @@ import { fmtBytes, lim, won } from '@/components/usage';
 import { PlatformPayments } from '@/components/Billing';
 import { PayTest } from '@/components/PayTest';
 import { PlatformSalesSources } from '@/components/sales/PlatformSalesSources';
+import { PlatformSalesMigrate } from '@/components/sales/PlatformSalesMigrate';
 import { PlatformOpsImport } from '@/components/marketing/PlatformOpsImport';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -54,6 +55,7 @@ export default function PlatformPage() {
       {/* V12 3번: 문의 접수함 */}
       <PlatformFunnel />
       <AiForecast />
+      <PlatformSalesMigrate />
       <PlatformSalesSources />
       <PlatformOpsImport />
       <section id="support" className="rounded-card border border-line bg-white shadow-card" data-testid="support-inbox">
