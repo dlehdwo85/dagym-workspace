@@ -57,7 +57,7 @@ export async function marketing({ owner, BASE, sql }) {
   // V41 4-3 자동 제작: 사용량 카드 4·요금제 3·규칙 추가(화·목 10:00)
   await owner.goto(`${BASE}/s/marketing/automation`);
   await owner.getByTestId('auto-usage').first().waitFor();
-  assert.equal(await owner.getByTestId('auto-usage').count(), 4);
+  assert.equal(await owner.getByTestId('auto-usage').count(), 5);
   await owner.getByTestId('auto-plan-standard').waitFor();
   await owner.getByTestId('auto-brand-name').fill('E2E 시험 브랜드');
   await owner.getByTestId('auto-brand-add').click();

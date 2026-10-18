@@ -209,6 +209,7 @@ export async function captionAssist(u: SessionUser, i: z.infer<typeof captionInp
   await G.assertAiCredit();
   await G.assertUserBudget(u);
   await (await import('./plans')).assertAiRequest(u);
+  await (await import('./mktAuto')).assertMktAi(tenantOf(u)); // 상용화 ⑦ 마케팅 월 한도
   const sql = db();
   const [brand] = i.brandId ? await sql<{ name: string }[]>`select name from mkt_brands where id = ${i.brandId} and tenant = ${tenantOf(u)}` : [];
   const Pn = await import('./ai/persona');

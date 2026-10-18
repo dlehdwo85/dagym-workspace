@@ -24,7 +24,7 @@ export function PlatformOpsImport() {
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="platform-ops-import">
       <h2 className="text-sm font-semibold">마케팅 운영실 데이터 이관(V41 4-2)</h2>
-      <p className="mt-1 text-xs text-ink-2">운영실 내보내기 API(OPS_EXPORT_URL·OPS_EXPORT_TOKEN, 서명 요청)로 18개 키를 읽어 건수·해시를 대조합니다. 전화 기록은 개인정보 — 회사 안에서는 마케팅 관리자만 보고, 보관 기간이 지나면 지웁니다. 표 매핑(게시물 → 콘텐츠 등)은 아래 칸 이름을 보고 다음 단계에서.</p>
+      <p className="mt-1 text-xs text-ink-2">운영실 내보내기 API(OPS_EXPORT_URL·OPS_EXPORT_TOKEN, 서명 요청)로 19개 키를 읽어 건수·해시를 대조합니다. 전화 기록은 개인정보 — 회사 안에서는 마케팅 관리자만 보고, 보관 기간이 지나면 지웁니다. 표 매핑(게시물 → 콘텐츠 등)은 아래 칸 이름을 보고 다음 단계에서.</p>
       {!data.configured ? <p className="mt-2 text-xs text-amber-800">OPS_EXPORT_URL·OPS_EXPORT_TOKEN 설정 전입니다(대표 입력).</p> : (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input className={cx(inputCls, 'h-8 w-40 py-1 text-xs')} value={tenant} onChange={(e) => setTenant(e.target.value.trim())} aria-label="가져올 회사 ID" />

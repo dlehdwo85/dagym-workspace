@@ -154,3 +154,30 @@ test('제작 시점 바꾸면 안 만든 칸 다시 계산 · AI 다시 만들�
   assert.ok(!(await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals')).contents.some((x) => x.id === c.id), '승인 대기에서 숨김');
   assert.equal((await ctx.owner.req('POST', `/api/marketing/auto/contents/${c.id}`, { action: 'regen' })).status, 400);
 });
+
+test('상용화 ⑦ 마케팅 AI 월 한도: 넘으면 제작 멈춤·하루 한 번 알림·캡션도 막힘', async () => {
+  const b = (await ctx.owner.ok('POST', '/api/marketing/auto/brands', { name: '한도 브랜드' })).brand;
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b.id}`, { intro: '한도 시험' });
+  const r = await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: b.id, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '12:00' });
+  await sql`update mkt_contents set produce_at = now() where rule_id = ${r.id} and produced_at is null`;
+  await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+    values ('default', ${ctx.ownerId}, gen_random_uuid(), 'anthropic', 'x', 0, 0, 0, 0, 2, 'marketing_produce')`;
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { aiMonthlyUsd: 2 });
+  let v = await ctx.owner.ok('GET', '/api/marketing/auto');
+  assert.equal(v.limits.aiMonthlyUsd, 2); assert.ok(v.usage.ai.usd >= 2, JSON.stringify(v.usage));
+  for (let k = 0; k < 2; k++) {
+    const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+    const mine = run.produced.filter((p) => p.error);
+    assert.equal(run.produced.length, 1, '첫 칸에서 멈춤'); assert.match(mine[0].error, /마케팅 AI 한도/);
+  }
+  assert.equal((await sql`select count(*)::int n from notifications where title = '마케팅 자동 제작 멈춤(AI 한도)'`)[0].n, 1, '알림은 하루 한 번');
+  assert.equal((await sql`select count(*)::int n from mkt_contents where rule_id = ${r.id} and produced_at is not null`)[0].n, 0);
+  const cap = await ctx.owner.req('POST', '/api/marketing/assist', { channel: 'instagram', topic: '가을' });
+  assert.equal(cap.status, 429, '캡션 초안도 같은 한도');
+  // 한도를 비우면(요금제 프로 기본 $15) 다시 제작
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { aiMonthlyUsd: null });
+  assert.equal((await ctx.owner.ok('GET', '/api/marketing/auto')).limits.aiMonthlyUsd, 15);
+  await ctl({ anthropicReset: true });
+  const ok = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  assert.ok(ok.produced.some((p) => !p.error), JSON.stringify(ok));
+});

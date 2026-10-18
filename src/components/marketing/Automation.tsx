@@ -9,8 +9,8 @@ const C = '#7C3AED';
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스·쇼츠', video: '생성 영상' };
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const REQ: Record<string, string> = { image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성', topic: '주제 필요' };
-type View = { settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null };
-  usage: { weekCredits: number; monthCredits: number; monthVideos: number; monthRegens: number }; plans: Record<string, { label: string; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; price: number | null }>;
+type View = { settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null; aiMonthlyUsd: number | null };
+  usage: { weekCredits: number; monthCredits: number; monthVideos: number; monthRegens: number; ai: { usd: number; requests: number }; companyAiUsd: number; companyAiLimitUsd: number }; plans: Record<string, { label: string; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; price: number | null }>;
   rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; intro: string | null; products: string | null; weekly_topic: string | null; banned_words: string[]; test_mode: boolean }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean };
 const lim = (used: number, max: number | null) => (max === null ? `${used} (한도 없음)` : `${used} / ${max}`);
 
@@ -44,10 +44,12 @@ export function Automation() {
     <div className="mx-auto max-w-5xl space-y-4" data-testid="mkt-automation">
       <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>자동 제작</h1>
         {ed && <Button size="sm" variant="secondary" className="ml-auto" onClick={runNow} disabled={busy} data-testid="auto-run">{busy ? '도는 중…' : '지금 한 번 돌리기'}</Button>}</div>
+      <p className="text-xs text-ink-2" data-testid="auto-ai-note">AI 원고는 회사 AI 한도(이번 달 ${data.usage.companyAiUsd} / ${data.usage.companyAiLimitUsd})와 마케팅 AI 월 한도 중 먼저 닿는 쪽에서 멈추고, 받는 사람에게 하루 한 번 알립니다. 회사 전체 AI 사용은 <a className="underline" href="/admin/usage">관리 → 사용량·요금제</a>(기능별 “마케팅”).</p>
       <p className="text-xs text-ink-2">주간 규칙대로 게시 {s.lead_days}일 전 {s.lead_hour}:00 에 AI 비서가 원고를 쓰고 품질 검사를 통과하면 승인 대기에 올립니다. 이미지·영상은 제작 요청 카드로(실사 사진 + 글자 렌더 우선, 생성 엔진은 계약 후 연결). 승인 마감 = 게시 당일 {s.approval_hour}:00, 알림 = 제작 완료 즉시 + 마감 {s.remind_hours}시간 전({s.quiet_start}~{s.quiet_end}시는 무알림 → 직전 저녁).</p>
 
-      <section className="grid gap-3 sm:grid-cols-4">{([['이번 주 크레딧', lim(data.usage.weekCredits, data.limits.weeklyCredits)], ['이번 달 크레딧', lim(data.usage.monthCredits, data.limits.monthlyCredits)],
-        ['이번 달 생성 영상', lim(data.usage.monthVideos, data.limits.videoMonthly)], ['이번 달 재생성', lim(data.usage.monthRegens, data.limits.regenMonthly)]] as [string, string][]).map(([l, v]) => (
+      <section className="grid gap-3 sm:grid-cols-5">{([['이번 주 크레딧', lim(data.usage.weekCredits, data.limits.weeklyCredits)], ['이번 달 크레딧', lim(data.usage.monthCredits, data.limits.monthlyCredits)],
+        ['이번 달 생성 영상', lim(data.usage.monthVideos, data.limits.videoMonthly)], ['이번 달 재생성', lim(data.usage.monthRegens, data.limits.regenMonthly)],
+        ['이번 달 마케팅 AI($)', lim(data.usage.ai.usd, data.limits.aiMonthlyUsd)]] as [string, string][]).map(([l, v]) => (
         <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="auto-usage"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div></div>))}</section>
 
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
@@ -85,6 +87,7 @@ export function Automation() {
           <Field label="마감 몇 시간 전 알림"><input className={inputCls} type="number" min={0} max={72} defaultValue={s.remind_hours} onBlur={(e) => save({ remindHours: Number(e.target.value) })} /></Field>
           <Field label="무알림 시작(시)"><input className={inputCls} type="number" min={0} max={23} defaultValue={s.quiet_start} onBlur={(e) => save({ quietStart: Number(e.target.value) })} /></Field>
           <Field label="무알림 끝(시)"><input className={inputCls} type="number" min={0} max={23} defaultValue={s.quiet_end} onBlur={(e) => save({ quietEnd: Number(e.target.value) })} /></Field>
+          <Field label="마케팅 AI 월 한도($, 비우면 요금제)"><input className={inputCls} type="number" min={0} step="0.5" defaultValue={s.ai_monthly_usd ?? ''} onBlur={(e) => save({ aiMonthlyUsd: e.target.value === '' ? null : Number(e.target.value) })} data-testid="auto-ai-limit" /></Field>
           <Field label="AI 표기 문구"><input className={inputCls} defaultValue={s.ai_label} onBlur={(e) => e.target.value.trim() && save({ aiLabel: e.target.value.trim() })} /></Field>
           <div className="space-y-1 pt-5 text-xs">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_generated_people} onChange={(e) => save({ allowGeneratedPeople: e.target.checked })} />생성 인물 허용</label>

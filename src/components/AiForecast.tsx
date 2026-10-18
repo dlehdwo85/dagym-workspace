@@ -5,7 +5,7 @@ import { Button, cx, fmtDateTime, inputCls, toast } from './ui';
 
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 const usd = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
-const PURPOSE: Record<string, string> = { assistant: '대화 1건', doc_job: '문서 1건', doc_engine: '문서 엔진', library_organize: '자료 정리 1건', revenue: '매출 분석 1건', revenue_extract: '매출 입력 1건',
+const PURPOSE: Record<string, string> = { marketing_produce: '마케팅 원고 1건', marketing_caption: '마케팅 캡션 1건', assistant: '대화 1건', doc_job: '문서 1건', doc_engine: '문서 엔진', library_organize: '자료 정리 1건', revenue: '매출 분석 1건', revenue_extract: '매출 입력 1건',
   voice: '음성 보정 1건', classify: '질문 분류 1건', summary: '대화 요약 1건', fill: '자료로 채우기 1건', chat_to_task: '메시지→업무 1건' };
 
 /** V23 5장: 플랫폼 운영자 "AI 원가 전망" — 이번 달 예상·단가 실측·사용자 유형·소진 예상일·무료 운영 가능 업체 수·충전 권장액·요금 역산·콘솔 대조 */

@@ -18,9 +18,9 @@ export const KIND_LABEL = { feed: '피드', blog: '블로그', reels: '릴스·�
 type Kind = keyof typeof KIND_LABEL;
 /** 요금제(V43 3 안). price 는 대표 결정 전이라 null — 화면에 '결정 전' */
 export const MKT_PLANS = {
-  basic: { label: '베이직', weekly: { feed: 2, blog: 1 }, monthlyCredits: 30, videoMonthly: 0, regenMonthly: 2, price: null },
-  standard: { label: '스탠다드', weekly: { feed: 3, blog: 1, reels: 1 }, monthlyCredits: 80, videoMonthly: 0, regenMonthly: 6, price: null },
-  pro: { label: '프로', weekly: { feed: 5, blog: 2, reels: 2 }, monthlyCredits: 250, videoMonthly: 2, regenMonthly: 10, price: null },
+  basic: { label: '베이직', weekly: { feed: 2, blog: 1 }, monthlyCredits: 30, videoMonthly: 0, regenMonthly: 2, aiMonthlyUsd: 3, price: null },
+  standard: { label: '스탠다드', weekly: { feed: 3, blog: 1, reels: 1 }, monthlyCredits: 80, videoMonthly: 0, regenMonthly: 6, aiMonthlyUsd: 6, price: null },
+  pro: { label: '프로', weekly: { feed: 5, blog: 2, reels: 2 }, monthlyCredits: 250, videoMonthly: 2, regenMonthly: 10, aiMonthlyUsd: 15, price: null },
 } as const;
 /** 제작 요청 카드 예상 크레딧(V43 1 실측): 실사 + 글자 렌더 0, 실사 릴스 0.5~3, 생성 영상 약 80, 재생성 이미지 6.5·영상 컷 7~22.5 */
 const EST = { image: 0, video_reels: 3, video: 80, regen_image: 6.5, regen_video: 15 };
@@ -32,20 +32,38 @@ const hourKst = (d: Date) => Number(new Intl.DateTimeFormat('en-GB', { timeZone:
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export type MktSettings = { plan_code: keyof typeof MKT_PLANS | null; monthly_credits: number | null; weekly_credits: number | null; video_monthly: number | null; regen_monthly: number | null;
-  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null };
+  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null; ai_monthly_usd: number | null };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
-  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null };
+  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null };
 export async function settingsOf(tenant: string): Promise<MktSettings> {
   const [s] = await db()<any[]>`select * from mkt_settings where tenant = ${tenant}`;
   if (!s) return { ...DEFAULTS };
   const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
-  return { ...DEFAULTS, ...s, monthly_credits: num(s.monthly_credits), weekly_credits: num(s.weekly_credits) };
+  return { ...DEFAULTS, ...s, monthly_credits: num(s.monthly_credits), weekly_credits: num(s.weekly_credits), ai_monthly_usd: num(s.ai_monthly_usd) };
 }
 export function limitsOf(s: MktSettings) {
   const p = s.plan_code ? MKT_PLANS[s.plan_code] : null;
   const monthly = s.monthly_credits ?? p?.monthlyCredits ?? null;
   return { monthlyCredits: monthly, weeklyCredits: s.weekly_credits ?? (monthly === null ? null : Math.round((monthly / 4.3) * 10) / 10),
-    videoMonthly: s.video_monthly ?? p?.videoMonthly ?? null, regenMonthly: s.regen_monthly ?? p?.regenMonthly ?? null };
+    videoMonthly: s.video_monthly ?? p?.videoMonthly ?? null, regenMonthly: s.regen_monthly ?? p?.regenMonthly ?? null, aiMonthlyUsd: s.ai_monthly_usd ?? p?.aiMonthlyUsd ?? null };
+}
+/** 이번 달 마케팅 AI 비용($) — 자동 원고·캡션 초안 등 purpose 'marketing_%' */
+export async function mktAiUsd(tenant: string) {
+  const start = kst(`${ymd(new Date()).slice(0, 7)}-01`, '00:00');
+  const [r] = await db()<{ usd: number; n: number }[]>`select coalesce(sum(cost_usd), 0)::float8 usd, count(*)::int n from ai_usage where tenant = ${tenant} and purpose like 'marketing%' and created_at >= ${start}`;
+  return { usd: Math.round(r.usd * 10000) / 10000, requests: r.n };
+}
+/** 상용화 ⑦: 마케팅 AI 호출 전 한도 확인 — 크레딧 소진 차단 · 회사 요금제 월 AI 요청 수 · 회사 AI 월 한도($) · 마케팅 월 한도($). 넘으면 429(정기 실행은 그 회사 제작을 멈추고 하루 한 번 알림) */
+export async function assertMktAi(tenant: string) {
+  const { HttpError } = await import('./errors');
+  await (await import('./ai/guard')).assertAiCredit();
+  const Pl = await import('./plans');
+  const { limits } = await Pl.effectiveLimits(tenant);
+  if (limits.aiRequests !== null && (await Pl.currentUsage(tenant)).aiRequests >= limits.aiRequests) throw new HttpError(429, 'ai_quota', `이번 달 회사 AI 요청 ${limits.aiRequests}회를 모두 써 마케팅 자동 제작을 멈췄습니다 — 관리 → 사용량·요금제`);
+  const co = await (await import('./ai/assistant')).usageThisMonth(tenant);
+  if (co.limitUsd > 0 && co.costUsd >= co.limitUsd) throw new HttpError(429, 'ai_quota', `이번 달 회사 AI 한도($${co.limitUsd})에 닿아 마케팅 자동 제작을 멈췄습니다 — 관리 → 사용량·요금제`);
+  const cap = limitsOf(await settingsOf(tenant)).aiMonthlyUsd;
+  if (cap !== null && (await mktAiUsd(tenant)).usd >= cap) throw new HttpError(429, 'mkt_ai_quota', `이번 달 마케팅 AI 한도($${cap})를 다 썼습니다 — 자동 제작 설정에서 한도를 올리거나 다음 달 1일에 다시 만듭니다`);
 }
 /** 이번 주(월요일 시작)·이번 달(서울) 사용량 */
 export async function usageOf(tenant: string) {
@@ -156,6 +174,7 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
   const P = await import('./ai/provider');
   const kindRule = { feed: '인스타그램 피드 캡션 4~6줄', blog: '블로그 원고(제목 1줄 + 본문 10~15문장, 소제목 2~3개)', reels: '릴스·쇼츠 자막 대본(5~7컷, 컷마다 한 줄)과 캡션 3줄', video: '15~20초 광고 영상 컷 구성(4~5컷)과 캡션 3줄' }[c.kind as Kind] ?? '게시물 글';
   if (!P.aiEnabled()) return { title: c.title, body: extra ? extra.prev : `[AI 비서 꺼짐] ${rule?.topic_hint ?? c.title}`, brief: '' };
+  await assertMktAi(c.tenant);
   const p = P.anthropicProvider({ tier: 'fast' });
   const r = await p.chat({
     system: `회사 마케팅 담당 AI 비서입니다. ${kindRule}를 씁니다. JSON 만.
@@ -249,7 +268,14 @@ export async function runTenant(tenant: string, actorId?: string) {
   const due = await db()<any[]>`select * from mkt_contents where tenant = ${tenant} and auto and status = 'draft' and produced_at is null and produce_at <= now()
     and not exists (select 1 from mkt_production_requests q where q.content_id = mkt_contents.id and q.kind = 'topic' and q.status = 'open') order by produce_at limit 5`;
   const produced = [];
-  for (const c of due) produced.push(await produceContent(c, actorId).catch((e) => ({ id: c.id, error: String(e?.message ?? e).slice(0, 200) })));
+  for (const c of due) {
+    const r: any = await produceContent(c, actorId).catch((e) => ({ id: c.id, error: String(e?.message ?? e).slice(0, 200), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' }));
+    produced.push(r);
+    if (r.quota) { // 한도·크레딧: 남은 칸도 같은 이유로 실패하므로 멈추고, 받는 사람에게 하루 한 번 알림
+      await notify(db(), { userIds: await approvers(tenant), type: 'usage_alert', title: '마케팅 자동 제작 멈춤(AI 한도)', body: r.error, link: '/s/marketing/automation', dedupeKey: `mktquota:${tenant}:${ymd(new Date())}` }).catch(() => {});
+      break;
+    }
+  }
   return { planned, produced, ...(await remindAndExpire(tenant)) };
 }
 /** tick: 규칙이 있는 회사만(한 번에 3곳) */
@@ -300,14 +326,15 @@ export async function automationView(u: SessionUser) {
     sql`select id, name, tone, intro, products, weekly_topic, banned_words, test_mode from mkt_brands where tenant = ${t} order by name`,
     sql`select id, name, role from users where tenant = ${t} and status = 'active' and not is_demo order by name`,
   ]);
-  return { settings: s, limits: limitsOf(s), usage: await usageOf(t), plans: MKT_PLANS, rules, requests, ledger, brands, people, canEdit: isAdmin(u) };
+  const co = await (await import('./ai/assistant')).usageThisMonth(t);
+  return { settings: s, limits: limitsOf(s), usage: { ...(await usageOf(t)), ai: await mktAiUsd(t), companyAiUsd: co.costUsd, companyAiLimitUsd: co.limitUsd }, plans: MKT_PLANS, rules, requests, ledger, brands, people, canEdit: isAdmin(u) };
 }
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 제작 설정은 관리자가 합니다'); }
 
 const nInt = (a: number, b: number) => z.number().int().min(a).max(b);
 export const settingsInput = z.object({ planCode: z.enum(['basic', 'standard', 'pro']).nullable().optional(), monthlyCredits: z.number().min(0).max(100000).nullable().optional(), weeklyCredits: z.number().min(0).max(100000).nullable().optional(),
   videoMonthly: nInt(0, 1000).nullable().optional(), regenMonthly: nInt(0, 1000).nullable().optional(), approvalHour: nInt(0, 23).optional(), leadDays: nInt(0, 14).optional(), leadHour: nInt(0, 23).optional(),
-  remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional() });
+  remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional(), aiMonthlyUsd: z.number().min(0).max(10000).nullable().optional() });
 export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const cur = await settingsOf(tenantOf(u));
@@ -315,12 +342,12 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
     video_monthly: i.videoMonthly !== undefined ? i.videoMonthly : cur.video_monthly, regen_monthly: i.regenMonthly !== undefined ? i.regenMonthly : cur.regen_monthly, approval_hour: i.approvalHour ?? cur.approval_hour,
     lead_days: i.leadDays ?? cur.lead_days, lead_hour: i.leadHour ?? cur.lead_hour, remind_hours: i.remindHours ?? cur.remind_hours, quiet_start: i.quietStart ?? cur.quiet_start, quiet_end: i.quietEnd ?? cur.quiet_end,
     allow_generated_people: i.allowGeneratedPeople ?? cur.allow_generated_people, allow_slideshow: i.allowSlideshow ?? cur.allow_slideshow, ai_label: i.aiLabel ?? cur.ai_label,
-    notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids };
+    notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids, ai_monthly_usd: i.aiMonthlyUsd !== undefined ? i.aiMonthlyUsd : cur.ai_monthly_usd };
   const sql = db();
   await sql`insert into mkt_settings ${sql({ tenant: tenantOf(u), ...v, updated_by: u.id } as never)}
     on conflict (tenant) do update set plan_code = excluded.plan_code, monthly_credits = excluded.monthly_credits, weekly_credits = excluded.weekly_credits, video_monthly = excluded.video_monthly,
       regen_monthly = excluded.regen_monthly, approval_hour = excluded.approval_hour, lead_days = excluded.lead_days, lead_hour = excluded.lead_hour, remind_hours = excluded.remind_hours,
-      quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids,
+      quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids, ai_monthly_usd = excluded.ai_monthly_usd,
       updated_by = excluded.updated_by, updated_at = now()`;
   // 제작 시점(게시 D-n·시각)이 바뀌면 아직 만들지 않은 자동 칸도 다시 계산(지난 시각이면 지금)
   const re = v.lead_days !== cur.lead_days || v.lead_hour !== cur.lead_hour

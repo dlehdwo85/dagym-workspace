@@ -3,7 +3,7 @@ import { api, useApi } from './client';
 import { Button, cx, fmtDateTime, toast } from './ui';
 
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
-const PURPOSE: Record<string, string> = { assistant: '대화', doc_engine: '문서 작업', voice: '음성 보정', classify: '분류', summary: '요약', fill: '자료로 채우기', revenue: '매출 분석', revenue_extract: '매출 입력', library_organize: '자료 정리', chat_to_task: '메시지→업무' };
+const PURPOSE: Record<string, string> = { assistant: '대화', doc_engine: '문서 작업', voice: '음성 보정', classify: '분류', summary: '요약', fill: '자료로 채우기', revenue: '매출 분석', revenue_extract: '매출 입력', library_organize: '자료 정리', chat_to_task: '메시지→업무', marketing_produce: '마케팅 자동 원고', marketing_caption: '마케팅 캡션 초안' };
 
 /**
  * V23 4장·4.3: 관리 > 사용량 — 사람별 이번 달 AI 사용액·남은 한도·건수(대화/문서)·오늘, 대표는 사람별 월 한도 바꾸기,
