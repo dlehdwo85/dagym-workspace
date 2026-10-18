@@ -4,7 +4,7 @@ android {
     namespace = "kr.co.dagym.workos"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        manifestPlaceholders = [appHost: (System.getenv('APP_HOST') ?: 'dagym-workspace.vercel.app')]
+        manifestPlaceholders = [appHost: (System.getenv('APP_HOST') ?: 'www.work-in.dev')]
         applicationId "kr.co.dagym.workos"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
