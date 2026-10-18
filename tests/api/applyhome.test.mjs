@@ -16,13 +16,13 @@ before(async () => {
   fake = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x'); hits.push({ path: u.pathname, q: Object.fromEntries(u.searchParams) });
     res.setHeader('content-type', 'application/json');
-    if (u.searchParams.get('serviceKey') !== 'test-key') { res.statusCode = 401; return res.end(JSON.stringify({ code: -4, msg: '등록되지 않은 인증키' })); }
+    if (u.searchParams.get('serviceKey') !== 'test+key==' || req.headers.authorization !== 'Infuser test+key==') { res.statusCode = 401; return res.end(JSON.stringify({ code: -4, msg: '등록되지 않은 인증키' })); }
     const page = Number(u.searchParams.get('page'));
     if (u.pathname.endsWith('/getAPTLttotPblancDetail')) return res.end(JSON.stringify({ page, perPage: 100, matchCount: APT.length, data: APT.slice((page - 1) * 100, page * 100) }));
     if (u.pathname.endsWith('/getUrbtyOfctlLttotPblancDetail')) return res.end(JSON.stringify({ page, matchCount: 1, data: [{ HOUSE_MANAGE_NO: 'O1', PBLANC_NO: 'O1', HOUSE_NM: '강남 오피스텔', HOUSE_DTL_SECD_NM: '오피스텔', HSSPLY_ADRES: '서울특별시 강남구 테헤란로 5', TOT_SUPLY_HSHLDCO: 80, RCRIT_PBLANC_DE: today }] }));
     res.statusCode = 500; return res.end(JSON.stringify({ code: -1, msg: '시험용 오류' })); // 공공지원민간임대는 실패
   }).listen(PORT);
-  await resetDb(); srv = await startServer({ DATA_GO_KR_SERVICE_KEY: 'test-key', SALES_SRC_SERVICE_KEY: 'sb_secret_abcdefghijklmnop123' }); sql = testDb(); ctx = await bootstrap();
+  await resetDb(); srv = await startServer({ DATA_GO_KR_SERVICE_KEY: 'test%2Bkey%3D%3D', /* 포털 Encoding 키를 넣은 경우 */ SALES_SRC_SERVICE_KEY: 'sb_secret_abcdefghijklmnop123' }); sql = testDb(); ctx = await bootstrap();
   await sql`update data_sources set endpoint = ${`http://localhost:${PORT}/api/ApplyhomeInfoDetailSvc/v1`} where code = '15098547'`;
 });
 after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });

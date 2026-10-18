@@ -49,7 +49,8 @@ export function mapApplyhome(kind: (typeof KINDS)[number], it: any) {
 export async function collectApplyhome(opt: { days?: number; maxPages?: number; fetchImpl?: typeof fetch } = {}) {
   const sql = db();
   const [s] = await sql<{ endpoint: string | null }[]>`select endpoint from data_sources where code = ${APPLYHOME_CODE}`;
-  const key = process.env.DATA_GO_KR_SERVICE_KEY;
+  const { dataGoKey } = await import('./collect');
+  const key = dataGoKey();
   if (!key) return { code: APPLYHOME_CODE, count: 0, error: 'DATA_GO_KR_SERVICE_KEY 없음' };
   const base = (s?.endpoint || 'https://api.odcloud.kr/api/ApplyhomeInfoDetailSvc/v1').replace(/\/$/, '');
   const days = Math.min(Math.max(opt.days ?? 30, 1), 400);
@@ -63,7 +64,7 @@ export async function collectApplyhome(opt: { days?: number; maxPages?: number; 
         u.searchParams.set('page', String(page)); u.searchParams.set('perPage', '100'); u.searchParams.set('returnType', 'JSON');
         u.searchParams.set('cond[RCRIT_PBLANC_DE::GTE]', since);
         u.searchParams.set('serviceKey', key);
-        const r = await (opt.fetchImpl ?? fetch)(u, { signal: AbortSignal.timeout(20_000) });
+        const r = await (opt.fetchImpl ?? fetch)(u, { headers: { Authorization: `Infuser ${key}` }, signal: AbortSignal.timeout(20_000) }); // odcloud 는 헤더 인증도 받음
         const text = await r.text();
         let j: any; try { j = JSON.parse(text); } catch { throw new Error(`JSON 이 아닌 응답(${r.status}): ${text.slice(0, 120)}`); }
         if (!r.ok || (j?.code !== undefined && Number(j.code) < 0)) throw new Error(`HTTP ${r.status} ${j?.code ?? ''} ${String(j?.msg ?? j?.message ?? '').slice(0, 100)}`);

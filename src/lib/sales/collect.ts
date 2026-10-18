@@ -21,13 +21,21 @@ function itemsOf(j: any): any[] {
   return Array.isArray(c) ? c : c && typeof c === 'object' ? [c] : [];
 }
 
+/** data.go.kr 키: 포털의 'Encoding' 키(%2B·%3D…)를 넣으면 URL 에 다시 인코딩돼 '-4 등록되지 않은 인증키' → '%' 가 있으면 한 번 풀어 둔다(Decoding 키는 그대로) */
+export function dataGoKey(raw = process.env.DATA_GO_KR_SERVICE_KEY) {
+  const k = (raw ?? '').trim();
+  if (!k) return null;
+  if (!k.includes('%')) return k;
+  try { return decodeURIComponent(k); } catch { return k; }
+}
+
 export async function collectSource(code: string, opt: { maxPages?: number; days?: number; fetchImpl?: typeof fetch } = {}) {
   // 청약홈 분양정보는 응답 모양·기간 조건이 달라 전용 수집기(세 종류·모집공고일 기준)
   if (code === '15098547') return (await import('./applyhome')).collectApplyhome({ days: opt.days, fetchImpl: opt.fetchImpl });
   const sql = db();
   const [s] = await sql<any[]>`select code, endpoint, params, field_map from data_sources where code = ${code}`;
   if (!s?.endpoint) return { code, count: 0, error: '수집 주소(endpoint)가 아직 없습니다' };
-  const key = process.env.DATA_GO_KR_SERVICE_KEY;
+  const key = dataGoKey();
   if (!key) return { code, count: 0, error: 'DATA_GO_KR_SERVICE_KEY 없음' };
   const fm = { ...PICK, ...Object.fromEntries(Object.entries(s.field_map ?? {}).map(([k, v]) => [k, Array.isArray(v) ? v : [String(v)]])) } as Record<string, string[]>;
   const { maxPages = 3, ...params } = { ...(s.params ?? {}), ...(opt.maxPages ? { maxPages: opt.maxPages } : {}) } as Record<string, any>;
