@@ -20,6 +20,13 @@ export function Automation() {
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '' });
   const [done, setDone] = useState<Record<string, { credits: string; media: { id: string; title: string }[] }>>({});
   const [busy, setBusy] = useState(false);
+  const [nb, setNb] = useState({ name: '', test: false });
+  async function addBrand() {
+    const name = nb.name.trim(); if (!name) return;
+    setBusy(true);
+    try { const r = await api<{ brand: { name: string; test_mode: boolean } }>('/api/marketing/auto/brands', { body: { name, testMode: nb.test } }); setNb({ name: '', test: false }); toast.ok(`브랜드 '${r.brand.name}' 추가${r.brand.test_mode ? '(시험 모드)' : ''}`); reload(); }
+    catch (er: any) { toast.error(`브랜드 추가 실패: ${er.message}`); } finally { setBusy(false); }
+  }
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={6} />;
   const s = data.settings; const ed = data.canEdit;
@@ -106,12 +113,11 @@ export function Automation() {
 
       {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-brands">
         <h2 className="text-sm font-semibold">브랜드 키트</h2>
-        <form className="mt-2 flex flex-wrap gap-2" onSubmit={async (e) => { e.preventDefault(); const f = e.currentTarget; const name = (f.elements.namedItem('bname') as HTMLInputElement).value.trim(); const test = (f.elements.namedItem('btest') as HTMLInputElement).checked;
-          if (!name) return; try { const b = await api<{ id: string }>('/api/marketing/brands', { body: { name } }); if (test) await api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { testMode: true } }); f.reset(); toast.ok('브랜드를 추가했습니다'); reload(); } catch (er: any) { toast.error(er.message); } }}>
-          <input name="bname" className={cx(inputCls, 'w-48')} placeholder="새 브랜드 이름" maxLength={40} aria-label="새 브랜드 이름" data-testid="auto-brand-name" />
-          <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" name="btest" />시험 모드로</label>
-          <Button type="submit" size="sm" data-testid="auto-brand-add">브랜드 추가</Button>
-        </form>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input className={cx(inputCls, 'w-48')} value={nb.name} onChange={(e) => setNb({ ...nb, name: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addBrand(); } }} placeholder="새 브랜드 이름" maxLength={40} aria-label="새 브랜드 이름" data-testid="auto-brand-name" />
+          <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={nb.test} onChange={(e) => setNb({ ...nb, test: e.target.checked })} />시험 모드로</label>
+          <Button type="button" size="sm" onClick={addBrand} disabled={!nb.name.trim() || busy} data-testid="auto-brand-add">브랜드 추가</Button>
+        </div>
         {!data.brands.length && <p className="mt-2 text-xs text-ink-3">브랜드가 없습니다 — 추가하면 말투·금지어·시험 모드를 정하고 주간 규칙에서 고를 수 있습니다.</p>}
         <ul className="mt-2 space-y-2">{data.brands.map((b) => (
           <li key={b.id} className="grid gap-2 sm:grid-cols-[8rem_1fr_1fr_auto]"><span className="pt-2 text-sm font-medium">{b.name}</span>

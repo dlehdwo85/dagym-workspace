@@ -37,7 +37,9 @@ export function SalesHome() {
       <div className="grid gap-3 lg:grid-cols-2">
         <section className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">다가오는 연락</h2>
           <ul className="divide-y divide-line text-sm">{data.due.map((l: any) => <li key={l.id} className="flex items-center gap-2 py-1.5"><Link href={`/s/sales/leads?id=${encodeURIComponent(l.id)}`} className="min-w-0 flex-1 truncate hover:underline">{l.name}</Link>{chip(l.status)}<span className={cx('text-xs tabular-nums', l.next < new Date().toISOString().slice(0, 10) ? 'font-semibold text-red-600' : 'text-ink-2')}>{l.next}</span></li>)}
-            {!data.due.length && <li className="py-2 text-xs text-ink-3">7일 안에 연락할 리드가 없습니다</li>}</ul></section>
+            {!data.due.length && <li className="py-2 text-xs text-ink-3">오늘부터 7일 안에 연락할 리드가 없습니다</li>}</ul></section>
+        {!!data.overdueList?.length && <section className="rounded-card border border-red-200 bg-white p-3 shadow-card" data-testid="sales-overdue"><h2 className="mb-2 text-sm font-semibold text-red-700">연락 지남 <span className="font-normal text-ink-3">{data.kpi.overdue}</span></h2>
+          <ul className="divide-y divide-line text-sm">{data.overdueList.map((l: any) => <li key={l.id} className="flex items-center gap-2 py-1.5"><Link href={`/s/sales/leads?id=${encodeURIComponent(l.id)}`} className="min-w-0 flex-1 truncate hover:underline">{l.name}</Link>{chip(l.status)}<span className="text-xs tabular-nums text-red-600">{l.next}</span></li>)}</ul></section>}
         <section className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">단계 분포</h2>
           <ul className="space-y-1 text-sm">{data.statuses.map(([s, n]: [string, number]) => <li key={s} className="flex items-center gap-2"><span className="w-24 truncate text-xs">{s}</span><span className="h-2 rounded-full" style={{ width: `${Math.max(4, (n / Math.max(1, data.kpi.leads)) * 100)}%`, background: C }} /><span className="text-xs tabular-nums">{n}</span></li>)}</ul></section>
       </div>
@@ -111,16 +113,18 @@ export function Deals() {
 }
 
 export function Bids({ initialTab }: { initialTab?: string }) {
-  const [tab, setTab] = useState(initialTab ?? 'all'); const [s, setS] = useState('');
+  const [tab, setTab] = useState(initialTab ?? 'open'); const [s, setS] = useState('');
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'bids', tab, q: s })}`, [tab, s]);
   if (error) return <ErrorBox error={error} retry={reload} />;
   return (
     <div className="space-y-3" data-testid="sales-bids">
       <Head title="입찰·공고 모니터링" meta={data}><Search value={s} onChange={setS} /></Head>
-      <div className="flex gap-1.5">{[['all', '관련 공고 전체'], ['open', '마감 전'], ['working', '진행 중']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
+      <div className="flex gap-1.5">{[['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => (
-        <li key={n.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-bid"><div className="flex flex-wrap items-center gap-2">{n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">{n.title}</a> : <span className="font-medium">{n.title}</span>}{chip(n.work)}{chip(n.classification)}</div>
-          <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.source, n.posted && `공고 ${n.posted}`, n.close && `마감 ${n.close}`, n.status].filter(Boolean).join(' · ')}</div></li>))}
+        <li key={n.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-bid"><div className="flex flex-wrap items-center gap-2">{n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">{n.title}</a> : <span className="font-medium">{n.title}</span>}{chip(n.work)}{chip(n.classification)}{n.fit !== null && n.fit !== undefined && <span className="text-[11px] text-ink-3">적합 {String(n.fit)}</span>}</div>
+          <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.region, n.source, n.deadline && `마감 ${String(n.deadline).slice(0, 16).replace('T', ' ')}`, n.status].filter(Boolean).join(' · ')}</div>
+          {n.judgment && <div className="mt-0.5 text-xs text-ink-2">판단: {n.judgment}</div>}
+          {!!n.attachments?.length && <div className="mt-1 flex flex-wrap gap-2 text-[11px]">{n.attachments.slice(0, 5).map((a: any, k: number) => <a key={k} href={typeof a === 'string' ? a : a?.url} target="_blank" rel="noopener noreferrer" className="underline">첨부 {k + 1}</a>)}</div>}</li>))}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
     </div>
   );
@@ -138,8 +142,8 @@ export function Hub() {
         <li key={r.id}><button type="button" onClick={() => setRaw(r.raw)} className="w-full rounded-card border border-line bg-white p-3 text-left text-sm hover:border-blue-300" data-testid="sales-hub-item">
           <span className="block truncate font-medium">{r.name}</span>
           <span className="block truncate text-xs text-ink-2">{tab === 'buildings' ? [r.address, r.households && `${r.households}세대`, r.start && `공고 ${r.start}`, r.status].filter(Boolean).join(' · ')
-            : tab === 'facilities' ? [r.address, r.lane, r.score !== null && `점수 ${r.score}`, r.date, r.contact && `연락 ${r.contact}`].filter(Boolean).join(' · ')
-            : [r.division, r.rank && `${r.rank}위`, r.notice, r.status && `진행 ${r.status}`, r.next && `다음 ${r.next}`].filter(Boolean).join(' · ')}</span></button></li>))}
+            : tab === 'facilities' ? [r.lane, r.region, r.address, r.operating, r.score !== null && `점수 ${r.score}`, r.contact && `연락 ${r.contact}`, r.next && `다음 ${r.next}`].filter(Boolean).join(' · ')
+            : [r.division, r.rank, r.notice, r.status && `진행 ${r.status}`, r.memo, r.next && `다음 ${r.next}`].filter(Boolean).join(' · ')}</span></button></li>))}
         {!data.items.length && <li className="text-sm text-ink-3">없습니다</li>}</ul>}
       {raw && <Modal open onClose={() => setRaw(null)} title="원본 정보" wide><Raw row={raw} /></Modal>}
     </div>

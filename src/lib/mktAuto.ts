@@ -331,4 +331,13 @@ export async function saveBrandKit(u: SessionUser, id: string, i: z.infer<typeof
   if (!b) throw notFound();
   return { ok: true };
 }
+export const brandCreateInput = z.object({ name: z.string().trim().min(1).max(40), testMode: z.boolean().optional() });
+/** 브랜드 추가(이름이 같으면 그 브랜드를 씀) + 시험 모드 — 한 번에 */
+export async function createBrandWithKit(u: SessionUser, i: z.infer<typeof brandCreateInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const sql = db();
+  const [b] = await sql<{ id: string; name: string; test_mode: boolean }[]>`insert into mkt_brands (tenant, name, test_mode) values (${tenantOf(u)}, ${i.name}, ${!!i.testMode})
+    on conflict (tenant, name) do update set test_mode = case when ${i.testMode === undefined} then mkt_brands.test_mode else excluded.test_mode end returning id, name, test_mode`;
+  return { brand: b };
+}
 export async function runNow(u: SessionUser) { await assertSpace(u, 'marketing'); adminOnly(u); return runTenant(tenantOf(u), u.id); }

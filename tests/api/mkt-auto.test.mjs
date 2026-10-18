@@ -77,8 +77,11 @@ test('알림 받는 사람 고르기 · 브랜드 시험 모드', async () => {
   const to = (await sql`select user_id from notifications where entity_id = ${made.id}`).map((r) => r.user_id);
   assert.deepEqual(to, [ctx.staffA.id]);
   // 시험 모드 브랜드: [시험] 표시·알림은 실행한 사람(대표)만·게시 확인 안 됨
-  const test = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '[시험] 워크인' });
-  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${test.id}`, { testMode: true });
+  const { brand: test } = await ctx.owner.ok('POST', '/api/marketing/auto/brands', { name: '[시험] 워크인', testMode: true });
+  assert.equal(test.test_mode, true);
+  assert.equal((await ctx.owner.ok('POST', '/api/marketing/auto/brands', { name: '[시험] 워크인', testMode: true })).brand.id, test.id, '같은 이름은 한 브랜드');
+  assert.equal((await ctx.staffA.client.req('POST', '/api/marketing/auto/brands', { name: '직원 브랜드' })).status, 403);
+  assert.ok((await ctx.owner.ok('GET', '/api/marketing/auto')).brands.some((b) => b.name === '[시험] 워크인' && b.test_mode), '목록에 보임');
   await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: test.id, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '23:30' });
   await ctl({ anthropicReset: true });
   const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
