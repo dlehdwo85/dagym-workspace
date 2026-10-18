@@ -771,6 +771,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 기준 숫자 표 이름은 추정(leads·lead_business_interests·sales_activities·tasks·task_subtasks·lead_timepoints·opportunity_work·building_sales_pipeline·vendor_registrations·procurement_notices·operating_facility_prospects) — 실제 이름이 다르면 미리보기 칸 이름을 보고 맞춤.
 - 다음: 로컬 대조 → 대표 확인 → 2) 적용(공용 표·회사별 진행 기록 분리, V39 C) → 3) 화면(V39 B).
 
+## 2026-10-18: 공간별 자료실·운영실 자료 파일 복사·영업 이전 미리보기 수정 (클라우드)
+- 087: library_files.space(work·sales·marketing, 기본 work)·ext_ref·meta. 저장소는 그대로 하나(S3). 공간 사이드바 '자료실' = 그 공간 + [전체] 탭, 공간 밖 사람은 목록·주소 모두 404.
+- 운영실 이관 [적용] 시 mkt:library:v1 파일을 Blob 주소에서 내려받아 워크인 저장소로(마케팅 공간 '운영실 자료/브랜드', 원본 id 로 한 번만, 총 500MB·파일당 100MB, 시간 넘으면 다음 적용에서 이어서, usedIn·메모 = meta).
+- 영업 이전 미리보기: SALES_SRC_URL 정규화, 설명서(OpenAPI) 막히면 표 27개 목록으로 건수, 원인 화면에.
+- 다음: V41 4-3 주간 제작 규칙·리드타임·승인 마감·알림·AI 크레딧 상한·품질 검사(대표 방향 10/18).
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
