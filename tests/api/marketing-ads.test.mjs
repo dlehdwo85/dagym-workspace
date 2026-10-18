@@ -26,6 +26,9 @@ before(async () => {
     if (u.pathname === '/graph/me/adaccounts') return send(200, { data: [{ account_id: '998877', name: '우리 메타 광고' }] });
     if (u.pathname === '/graph/act_998877/insights') return send(200, { data: [{ date_start: today, campaign_id: '55', campaign_name: '가을 리드', impressions: '2000', clicks: '40', spend: '30000', account_currency: 'KRW', actions: [{ action_type: 'lead', value: '3' }, { action_type: 'link_click', value: '40' }] }] });
     if (u.pathname === '/goauth/token') return send(200, { access_token: 'g-access', refresh_token: 'g-refresh', expires_in: 3600 });
+    // 종료된 버전(v24·v23 가정)은 구글처럼 HTML 404 → 수집기가 다음 버전을 찾아야 함
+    if (/^\/gads\/v2[34]\//.test(u.pathname)) { res.setHeader('content-type', 'text/html'); res.statusCode = 404; return res.end('<!DOCTYPE html><html>Error 404 (Not Found)!!1</html>'); }
+    if (u.pathname.startsWith('/gads/')) u.pathname = u.pathname.replace(/^\/gads\/v\d+/, '/gads');
     if (u.pathname === '/gads/customers:listAccessibleCustomers') return send(200, { resourceNames: ['customers/1112223333'] });
     if (u.pathname === '/gads/customers/1112223333/googleAds:search') return send(200, { results: [{ segments: { date: today }, campaign: { id: '77', name: '검색 캠페인' }, metrics: { impressions: '500', clicks: '10', costMicros: '12000000000', conversions: 1.5 }, customer: { currencyCode: 'KRW' } }] });
     send(404, { error: { message: 'nope' } });
@@ -75,6 +78,7 @@ test('Meta·Google OAuth 연결 → 계정 등록·성과', async () => {
   const gcb = await ctx.owner.get(`/api/marketing/ads/callback/google?code=g1&state=${g.searchParams.get('state')}`);
   assert.match(gcb.headers.get('location'), /connected=google&count=1/);
   assert.equal(hits.find((h) => h.path.endsWith('googleAds:search')).h['developer-token'], 'dev-token');
+  assert.match(hits.find((h) => h.path.endsWith('googleAds:search')).path, /^\/gads\/v22\//, '종료 버전(HTML 404)을 건너뛰고 v22 사용');
   const ov = await ctx.owner.ok('GET', '/api/marketing/ads?days=7');
   assert.equal(ov.accounts.length, 3);
   const by = Object.fromEntries(ov.campaigns.map((c) => [c.campaign_name, c]));

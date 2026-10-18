@@ -23,7 +23,10 @@ const T = () => process.env.ADS_TEST_BASE?.replace(/\/$/, '');
 const NAVER = () => (T() ? `${T()}/naver` : 'https://api.searchad.naver.com');
 const GRAPH = () => (T() ? `${T()}/graph` : 'https://graph.facebook.com/v21.0');
 const FB_DIALOG = () => (T() ? `${T()}/fbdialog` : 'https://www.facebook.com/v21.0/dialog/oauth');
-const GADS = () => (T() ? `${T()}/gads` : 'https://googleads.googleapis.com/v17');
+// Google Ads API 버전: 종료된 버전은 HTML 404 → 상수 하나(env GOOGLE_ADS_API_VERSION 로 바꿀 수 있음), 404 면 최신→예전 순서로 찾아 기억
+const GADS_VERSIONS = ['v24', 'v23', 'v22', 'v21', 'v20'];
+let gadsVersion: string | null = null;
+const GADS = (v = gadsVersion ?? process.env.GOOGLE_ADS_API_VERSION ?? GADS_VERSIONS[0]) => (T() ? `${T()}/gads/${v}` : `https://googleads.googleapis.com/${v}`);
 const G_AUTH = () => (T() ? `${T()}/goauth/auth` : 'https://accounts.google.com/o/oauth2/v2/auth');
 const G_TOKEN = () => (T() ? `${T()}/goauth/token` : 'https://oauth2.googleapis.com/token');
 export const providerReady = (p: AdProvider) => p === 'naver' ? true
@@ -38,7 +41,12 @@ async function getJson(url: string, init?: RequestInit) {
   const r = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) });
   const text = await r.text();
   let j: any = null; try { j = JSON.parse(text); } catch { /* 본문이 JSON 이 아님 */ }
-  if (!r.ok) throw new HttpError(502, 'ads_upstream', `광고 API 오류 ${r.status}: ${String(j?.error?.message ?? j?.title ?? j?.message ?? text).slice(0, 200)}`);
+  if (!r.ok) {
+    // HTML 오류 페이지는 그대로 보이지 않고 상태·경로만(토큰·쿼리 제외)
+    const path = (() => { try { const x = new URL(url); return `${x.host}${x.pathname}`; } catch { return ''; } })();
+    const msg = j ? String(j?.error?.message ?? j?.error?.status ?? j?.title ?? j?.message ?? '').slice(0, 200) : (/<html|<!doctype/i.test(text) ? '(HTML 오류 페이지 — 주소·API 버전 확인)' : text.slice(0, 120));
+    throw new HttpError(502, 'ads_upstream', `광고 API 오류 ${r.status} ${path} ${msg}`.trim(), { status: r.status });
+  }
   return j;
 }
 
@@ -85,8 +93,19 @@ async function googleAccess(refresh: string) {
 }
 const gHeaders = (access: string) => ({ authorization: `Bearer ${access}`, 'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN!, 'content-type': 'application/json',
   ...(process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID ? { 'login-customer-id': process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/\D/g, '') } : {}) });
+/** listAccessibleCustomers(GET) — 버전이 종료돼 404 면 다른 버전으로 다시(찾은 버전은 이 서버 동안 기억) */
+async function gadsList(access: string) {
+  const tried = gadsVersion ? [gadsVersion] : [...new Set([process.env.GOOGLE_ADS_API_VERSION, ...GADS_VERSIONS].filter(Boolean) as string[])];
+  let last: unknown;
+  for (const v of tried) {
+    try { const r = await getJson(`${GADS(v)}/customers:listAccessibleCustomers`, { headers: gHeaders(access) }); gadsVersion = v; return r; }
+    catch (e: any) { last = e; if ((e as HttpError)?.detail && (e.detail as any).status !== 404) throw e; if (!(e instanceof HttpError)) throw e; }
+  }
+  throw last;
+}
 async function googleStats(cid: string, refresh: string, days: string[]) {
   const access = await googleAccess(refresh);
+  if (!gadsVersion) await gadsList(access).catch(() => {}); // 쓸 수 있는 버전 먼저 찾기
   const rows = [];
   const query = `SELECT segments.date, campaign.id, campaign.name, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, customer.currency_code FROM campaign WHERE segments.date BETWEEN '${days[0]}' AND '${days.at(-1)}'`;
   let pageToken: string | undefined;
@@ -218,7 +237,7 @@ export async function oauthCallback(u: SessionUser, p: string, code: string, sta
       const tok = await getJson(G_TOKEN(), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: callback('google'), client_id: process.env.GOOGLE_ADS_CLIENT_ID!, client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET! }) });
       if (!tok.refresh_token) throw badRequest('Google 에서 갱신 토큰을 받지 못했습니다. 다시 연결해 주세요');
-      const list = await getJson(`${GADS()}/customers:listAccessibleCustomers`, { headers: gHeaders(String(tok.access_token)) });
+      const list = await gadsList(String(tok.access_token));
       for (const rn of list?.resourceNames ?? []) { const id = String(rn).split('/')[1]; if (id) found.push({ id, name: `Google Ads ${id.replace(/(\d{3})(\d{3})(\d+)/, '$1-$2-$3')}`, secret: { refresh: tok.refresh_token } }); }
     }
   } catch (e) { await logError('mkt-ads-oauth', e, { provider: p }).catch(() => {}); throw e instanceof HttpError ? e : badRequest('연결에 실패했습니다'); }
