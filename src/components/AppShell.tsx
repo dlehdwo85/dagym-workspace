@@ -357,6 +357,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
               </span>
             </div>
           </header>
+          {/* 대표 제보(10/18): 휴대폰(사이드바 없음)에서도 영업·마케팅 공간 메뉴로 갈 수 있게 — 공간 메뉴 가로 칩 */}
+          {space !== 'work' && (
+            <nav className="flex gap-1.5 overflow-x-auto border-b border-line bg-white px-3 py-2 [scrollbar-width:none] lg:hidden" aria-label={`${sm.short} 메뉴`} data-testid="space-chips">
+              {spaceNav.map((n) => { const on = active(n.href); return (
+                <Link key={n.href} href={n.href} aria-current={on ? 'page' : undefined} className={cx('inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-[13px] font-medium', on ? 'border-transparent text-white' : 'border-line bg-white text-ink-2')}
+                  style={on ? { background: sm.color } : undefined}><n.icon className="size-3.5" aria-hidden />{n.label}</Link>); })}
+            </nav>
+          )}
           <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>
 
@@ -443,6 +451,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
                       {sp !== space && !!spaceInfo.data?.summary[sp]?.badge && <span className="min-w-[22px] rounded-full bg-red-600 px-1.5 text-center text-xs font-bold leading-[22px] text-white">{spaceInfo.data.summary[sp].badge}</span>}
                     </button>
                   ))}
+                </div>
+              )}
+              {space !== 'work' && (
+                <div className="border-t border-line px-1 pb-1 pt-2" data-testid="mobile-space-menu">
+                  <div className="px-2 text-xs text-ink-3">{sm.short} 메뉴</div>
+                  <div className="mt-1 grid grid-cols-2 gap-1.5">{spaceNav.map((n) => (
+                    <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
+                      <n.icon className="size-4 shrink-0" style={{ color: sm.color }} aria-hidden /><span className="truncate">{n.label}</span></Link>))}</div>
                 </div>
               )}
               <div className="my-1 border-t border-line" />

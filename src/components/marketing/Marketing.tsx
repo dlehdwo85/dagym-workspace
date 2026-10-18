@@ -22,7 +22,7 @@ export function MarketingHome({ ssoHref }: { ssoHref: string }) {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, n, h]) => (
         <Link key={l} href={h} className="rounded-card border border-line bg-white p-4 shadow-card hover:border-violet-300" data-testid="mkt-card"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-2xl font-bold tabular-nums" style={{ color: C }}>{n ?? '—'}</div></Link>))}</div>
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
-        <p className="text-sm text-ink-2">광고 성과·게시 실행은 아직 마케팅 운영실에 있습니다(이전 중).</p>
+        <p className="text-sm text-ink-2">게시 실행(예약 업로드)은 아직 마케팅 운영실에서 합니다. 승인·캘린더·자동 제작·광고 성과·전화 문의는 워크인에서 바로 쓰세요.</p>
         <a href={ssoHref} target="_blank" rel="noopener" data-testid="marketing-open" className="mt-3 inline-block rounded-input px-4 py-2 text-sm font-medium text-white" style={{ background: C }}>마케팅 운영실 열기</a>
       </section>
     </div>
