@@ -10,9 +10,9 @@ export function layoutBody(kind: string | null | undefined, body: string) {
       const b = block.trim();
       if (b.includes('\n')) return b; // 이미 줄을 나눠 온 것(소제목 줄 + 본문)은 그대로
       const sents = b.match(/[^.!?。]+[.!?。]+["”’)]*\s*|[^.!?。]+$/g) ?? [b];
-      if (sents.length <= 3) return b;
-      // 소제목(■)에 문장이 붙어 온 경우: 첫 문장은 소제목 줄에 두고 나머지를 2문장씩
-      const head = b.startsWith('■') ? [sents.shift()!.trim()] : [];
+      // 소제목(■)에 문장이 붙어 온 경우: 문장 수와 상관없이 첫 문장은 소제목 줄로 떼고 나머지를 2문장씩
+      const head = b.startsWith('■') && sents.length > 1 ? [sents.shift()!.trim()] : [];
+      if (!head.length && sents.length <= 3) return b;
       const out: string[] = [];
       for (let k = 0; k < sents.length; k += 2) out.push(sents.slice(k, k + 2).join('').trim());
       return [...head, ...out].join('\n\n');

@@ -201,5 +201,7 @@ test('로컬 검수 10/19: 블로그 원고 한 덩어리 → 소제목·문단 
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const [v] = await sql`select v.body from mkt_versions v join mkt_contents c on c.id = v.content_id where c.rule_id = ${r.id}`;
   assert.ok(v, '제작됨');
+  const { layoutBody } = await import('../../src/lib/mktText.ts'); // Node 22 형식 제거로 .ts 직접 불러옴
+  assert.equal(layoutBody('blog', '앞 문장. ■ 소제목 첫 문장입니다. 둘째. 셋째.'), '앞 문장.\n\n■ 소제목 첫 문장입니다.\n\n둘째. 셋째.', '짧은 소제목 블록도 첫 문장을 뗌');
   assert.match(v.body, /^첫 문장입니다\. 둘째 문장입니다\.\n\n■ 소제목 하나 셋째 문장입니다\.\n\n넷째 문장입니다\. 다섯째 문장입니다\.\n\n여섯째 문장입니다\./, JSON.stringify(v.body));
 });
