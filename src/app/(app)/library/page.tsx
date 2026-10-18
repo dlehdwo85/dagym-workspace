@@ -15,7 +15,7 @@ type F = { id: string; folder: string; title: string; file_name: string; mime_ty
   organized_by: 'ai' | 'rule' | null; ai_confidence: number | null; needs_review: boolean; can_undo: boolean; level: string; organize_status: string | null; organize_error: string | null;
   security: Sec; security_suggested: Sec | null; security_confirmed: boolean; effective_security: Sec };
 type Fo = { folder: string; n: number; security: Sec; level: string };
-type Data = { files: F[]; folders: Fo[]; review: number; level: string; aiOrganize: boolean; confEdit: boolean };
+type Data = { files: F[]; folders: Fo[]; review: number; level: string; aiOrganize: boolean; confEdit: boolean; spaces?: string[]; spaceCounts?: Record<string, number> };
 const RANK: Record<string, number> = { none: 0, view: 1, edit: 2, delete: 3 };
 const SEC: Record<Sec, { label: string; cls: string }> = {
   public: { label: '일반', cls: 'bg-green-50 text-green-700' }, internal: { label: '내부', cls: 'bg-slate-100 text-ink-2' }, confidential: { label: '기밀', cls: 'bg-red-50 text-red-700' } };
@@ -41,7 +41,9 @@ export default function LibraryPage() {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [review, setReview] = useState(false);
-  const url = `/api/library?${new URLSearchParams({ limit: '500', ...(query ? { q: query } : {}), ...(review ? { review: '1' } : {}) })}`;
+  // 대표 지시(10/18): 공간별 자료실(저장소는 하나) — 사이드바에서 온 공간이 기본, [전체]로 모두
+  const [libSpace, setLibSpace] = useState(['work', 'sales', 'marketing', 'all'].includes(sp.get('space') ?? '') ? sp.get('space')! : 'work');
+  const url = `/api/library?${new URLSearchParams({ limit: '500', space: libSpace, ...(query ? { q: query } : {}), ...(review ? { review: '1' } : {}) })}`;
   const { data, error, loading, reload } = useApi<Data>(url);
   const [view, setView] = useState<'list' | 'grid'>('list');
   const [sort, setSort] = useState('name');
@@ -91,7 +93,7 @@ export default function LibraryPage() {
     for (const [n, file] of list.entries()) {
       setBusy(`${list.length > 1 ? `${n + 1}/${list.length} ` : ''}${file.name} 올리는 중…`);
       try {
-        const meta = { fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, folder, contentHash: await fileHash(file) };
+        const meta = { fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, folder, contentHash: await fileHash(file), space: libSpace === 'all' ? 'work' : libSpace };
         const r = await api('/api/library', { body: meta }).catch(async (e: any) => {
           if (e.code !== 'duplicate' || !confirm(`${e.message}\n그래도 한 번 더 올릴까요?`)) throw e;
           return api('/api/library', { body: { ...meta, allowDuplicate: true } });
@@ -220,6 +222,15 @@ export default function LibraryPage() {
           {canUpload && admin && <Button variant="secondary" onClick={previewAll} disabled={!!allBusy} data-testid="library-organize-all">{allBusy ? <><Loader2 className="animate-spin" />{allBusy}</> : <><Sparkles />전체 정리</>}</Button>}
           {canUpload && <Button onClick={() => fileRef.current?.click()} disabled={!!busy} data-testid="library-upload">{busy ? <Loader2 className="animate-spin" /> : <Upload />}올리기</Button>}
         </>} />
+      {(data?.spaces?.length ?? 0) > 1 && (
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="공간별 자료실" data-testid="library-spaces">
+          {[...(data!.spaces as string[]), 'all'].map((k) => (
+            <button key={k} role="tab" aria-selected={libSpace === k} onClick={() => { setLibSpace(k); setCur(''); }} data-testid={`library-space-${k}`}
+              className={cx('rounded-full border px-3 py-1 text-xs font-medium', libSpace === k ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>
+              {{ work: '업무', sales: '영업', marketing: '마케팅', all: '전체' }[k as 'work']}{k !== 'all' && data!.spaceCounts?.[k] ? ` ${data!.spaceCounts[k]}` : ''}
+            </button>))}
+        </div>
+      )}
       <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="library-file" />
       <div className="flex gap-4">
         {/* PC 폴더 나무 */}

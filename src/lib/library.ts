@@ -28,7 +28,8 @@ export const libraryInput = z.object({
   description: z.string().max(2000).optional(),
   contentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), // V13 3번 중복 감지
   allowDuplicate: z.boolean().optional(),
-  purpose: z.enum(['revenue', 'ai_attach']).optional(), // revenue: 매출 근거 폴더 / ai_attach: AI 에게 줄 첨부(자동 정리 생략 — AI 요청 1회 아낌)
+  purpose: z.enum(['revenue', 'ai_attach']).optional(),
+  space: z.enum(['work', 'sales', 'marketing']).optional(), // 대표 지시(10/18): 공간별 자료실(저장소는 하나) // revenue: 매출 근거 폴더 / ai_attach: AI 에게 줄 첨부(자동 정리 생략 — AI 요청 1회 아낌)
 });
 export const libraryPatch = z.object({
   title: z.string().trim().min(1).max(200).optional(),
@@ -134,8 +135,13 @@ async function requireFolder(u: SessionUser, folder: string, need: 'view' | 'edi
   throw forbidden(`"${folder || '최상위'}" 폴더: ${need === 'delete' ? '삭제' : '올리기·수정'} 권한이 없습니다`);
 }
 
-export async function listLibrary(u: SessionUser, q: { q?: string; folder?: string; limit?: number; review?: boolean }) {
+/** 대표 지시(10/18): 공간별 자료실 — 볼 수 있는 공간(업무 + 배정된 영업·마케팅)의 자료만, space 를 고르면 그 공간만 */
+export async function librarySpaces(u: SessionUser) { return (await (await import('./spaces')).userSpaces(u)) as string[]; }
+export async function listLibrary(u: SessionUser, q: { q?: string; folder?: string; limit?: number; review?: boolean; space?: string }) {
   denyDemo(u);
+  const mySpaces = await librarySpaces(u);
+  if (q.space && q.space !== 'all' && !mySpaces.includes(q.space)) throw notFound();
+  const spaceList = q.space && q.space !== 'all' ? [q.space] : mySpaces;
   const base = await requireMenu(u, 'library', 'view'); // V13 메뉴 권한
   const sql = db();
   // 폴더 권한: 볼 수 있는 폴더만 (올린 사람 본인 파일은 항상 보임)
@@ -149,7 +155,7 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
   const secFolders = allFolders.map((f) => f.folder).filter((f) => secAllowed(sc, folderSec(sc, f)));
   const units = await accessibleUnitIds(u, sql);
   // V38 4: 업무 첨부에서 온 파일은 그 업무를 볼 수 있는 사람에게만(올린 사람 본인은 항상)
-  const secCond = sql`(f.created_by = ${u.id} or (f.security = any(${secs}::text[]) and f.folder = any(${secFolders}::text[])
+  const secCond = sql`f.space = any(${spaceList}::text[]) and (f.created_by = ${u.id} or (f.security = any(${secs}::text[]) and f.folder = any(${secFolders}::text[])
     and (f.task_id is null or exists (select 1 from tasks t where t.id = f.task_id and t.deleted_at is null and ${taskVisibleSql(sql, u, units)}))))`;
   const counts = new Map((await sql<{ folder: string; n: number }[]>`select folder, count(*)::int n from library_files f where f.tenant = ${tenantOf(u)} and f.deleted_at is null
     and f.upload_status = 'ready' and ${secCond} group by folder`).map((r) => [r.folder, r.n]));
@@ -174,7 +180,8 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
   const [{ review }] = await sql<{ review: number }[]>`select count(*)::int review from library_files f where f.tenant = ${tenantOf(u)} and f.deleted_at is null
     and f.upload_status = 'ready' and f.needs_review and (f.folder = any(${visibleNames}::text[]) or f.created_by = ${u.id}) and ${secCond}`;
   return { secLevels: secs, confEdit: sc.confEdit, files: rows.map((r: any) => ({ ...r, effective_security: effSec(sc, r), level: r.created_by === u.id && folderLevelOf(u.role, base, perms, r.folder) === 'none' ? 'view' : folderLevelOf(u.role, base, perms, r.folder) })),
-    folders: visible, review, level: base, aiOrganize: (await import('./ai/provider')).aiEnabled() };
+    folders: visible, review, level: base, spaces: mySpaces, spaceCounts: Object.fromEntries((await sql<{ space: string; n: number }[]>`select space, count(*)::int n from library_files f
+      where f.tenant = ${tenantOf(u)} and f.deleted_at is null and f.upload_status = 'ready' and f.space = any(${mySpaces}::text[]) group by space`).map((r) => [r.space, r.n])), aiOrganize: (await import('./ai/provider')).aiEnabled() };
 }
 
 export async function createLibraryFile(u: SessionUser, i: z.infer<typeof libraryInput>) {
@@ -183,6 +190,8 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   const revenue = i.purpose === 'revenue' && RANK[await menuLevel(u, 'revenue')] >= RANK.edit;
   const folder = revenue ? '매출 근거' : cleanFolder(i.folder);
   if (!revenue) { await requireMenu(u, 'library', 'edit'); await requireFolder(u, folder, 'edit'); }
+  const space = i.space ?? 'work';
+  if (space !== 'work' && !(await librarySpaces(u)).includes(space)) throw notFound();
   if (i.size > MAX_UPLOAD_BYTES) throw badRequest(`파일은 ${MAX_UPLOAD_BYTES / 1024 / 1024}MB 까지 올릴 수 있습니다`);
   if (BLOCKED_EXT.test(i.fileName)) throw badRequest('실행 파일은 올릴 수 없습니다');
   await (await import('./plans')).assertStorage(u, i.size); // V10 회사 저장공간 한도
@@ -198,8 +207,8 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   }
   // V14 15번: 매출 근거는 기밀(확정), 그 외는 내부(대표 지시: 확인 전 기본값) — 이름이 기밀 후보면 "기밀 제안"으로 표시해 확인을 받는다
   const ruled = revenue ? 'confidential' : ruleSecurity(`${i.fileName} ${i.title ?? ''} ${(i.tags ?? []).join(' ')}`, await confWords(tenantOf(u)));
-  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, tags, description, created_by, content_hash, source, security, security_suggested, security_confirmed)
-    values (${tenantOf(u)}, ${folder}, ${i.title || i.fileName.replace(/\.[^.]+$/, '')}, ${i.fileName}, ${mime}, ${i.size}, ${i.tags ?? []}, ${i.description ?? null}, ${u.id},
+  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, space, folder, title, file_name, mime_type, size_bytes, tags, description, created_by, content_hash, source, security, security_suggested, security_confirmed)
+    values (${tenantOf(u)}, ${space}, ${folder}, ${i.title || i.fileName.replace(/\.[^.]+$/, '')}, ${i.fileName}, ${mime}, ${i.size}, ${i.tags ?? []}, ${i.description ?? null}, ${u.id},
       ${i.contentHash ?? null}, ${revenue ? 'revenue' : i.purpose === 'ai_attach' ? 'ai_attach' : 'upload'}, ${revenue ? 'confidential' : 'internal'}, ${ruled}, ${revenue}) returning id`;
   const safe = i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120);
   const key = `lib/${tenantOf(u)}/${f.id}/${safe}`;
@@ -208,11 +217,11 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
 }
 
 /** 서버가 만든 파일(AI 보고서 등)을 자료실에 바로 저장 */
-export async function saveGeneratedFile(u: SessionUser, p: { fileName: string; mime: string; data: Buffer; title: string; folder: string; tags?: string[]; description?: string; source?: string; security?: Security }) {
+export async function saveGeneratedFile(u: SessionUser, p: { fileName: string; mime: string; data: Buffer; title: string; folder: string; tags?: string[]; description?: string; source?: string; security?: Security; space?: 'work' | 'sales' | 'marketing'; extRef?: string; meta?: unknown }) {
   await (await import('./plans')).assertStorage(u, p.data.length);
   const sql = db();
-  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, folder, title, file_name, mime_type, size_bytes, tags, description, source, created_by, upload_status, security, security_confirmed)
-    values (${tenantOf(u)}, ${cleanFolder(p.folder)}, ${p.title}, ${p.fileName}, ${p.mime}, ${p.data.length}, ${p.tags ?? []}, ${p.description ?? null}, ${p.source ?? 'ai'}, ${u.id}, 'pending',
+  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, space, ext_ref, meta, folder, title, file_name, mime_type, size_bytes, tags, description, source, created_by, upload_status, security, security_confirmed)
+    values (${tenantOf(u)}, ${p.space ?? 'work'}, ${p.extRef ?? null}, ${p.meta ? sql.json(p.meta as never) : null}, ${cleanFolder(p.folder)}, ${p.title}, ${p.fileName}, ${p.mime}, ${p.data.length}, ${p.tags ?? []}, ${p.description ?? null}, ${p.source ?? 'ai'}, ${u.id}, 'pending',
       ${p.security ?? 'internal'}, ${p.security === 'confidential'}) returning id`;
   const key = `lib/${tenantOf(u)}/${f.id}/${p.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
   await putObject(key, p.data, p.mime);
@@ -228,6 +237,7 @@ export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open
   if (!f) throw notFound('자료가 없습니다'); // 다른 회사 자료는 없는 것처럼
   const sc = await secCtx(u);
   f.effective_security = effSec(sc, f);
+  if (f.created_by !== u.id && f.space !== 'work' && !(await librarySpaces(u)).includes(f.space)) throw notFound('자료가 없습니다'); // 공간 밖 자료는 존재도 숨김
   if (f.created_by !== u.id) { // 올린 사람 본인 (매출 근거처럼 다른 경로로 올린 파일 포함)은 항상
     await requireMenu(u, 'library', 'view');
     await requireFolder(u, f.folder, 'view'); // 폴더 권한 — 서명 주소 발급·AI 읽기 전에

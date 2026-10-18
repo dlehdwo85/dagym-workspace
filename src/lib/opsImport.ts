@@ -92,6 +92,13 @@ export async function runOpsImport(u: SessionUser, i: z.infer<typeof runInput>) 
         }
       });
     }
+    // 대표 지시(10/18): 운영실 자료실은 파일까지 워크인 저장소로 복사(마케팅 공간), 같은 파일 두 번 복사 안 함
+    let library: Awaited<ReturnType<typeof copyOpsLibrary>> | null = null;
+    if (i.mode === 'apply' && allOk && values.has('mkt:library:v1')) {
+      const items = values.get('mkt:library:v1');
+      library = await copyOpsLibrary(u, i.tenant, Array.isArray(items) ? items : []);
+      results.push({ key: 'library-files', ...library } as never);
+    }
     const status = allOk ? 'ok' : 'mismatch';
     await sql`update ops_import_runs set status = ${status}, frozen = ${!!man.frozen}, generated_at = ${man.generatedAt ?? null}, results = ${sql.json(results as never)}, finished_at = now() where id = ${run.id}`;
     await audit(sql, u.id, `ops_import.${i.mode}`, 'tenant', null, { tenant: i.tenant, status, keys: results.length }).catch(() => {});
@@ -109,6 +116,49 @@ export async function opsImportStatus(u: SessionUser) {
     from ops_import_runs r left join users u on u.id = r.started_by order by r.created_at desc limit 10`;
   const stored = await sql`select tenant, key, count(*)::int as count, max(imported_at) as imported_at from ops_import_items group by tenant, key order by tenant, key`;
   return { configured: configured(), keys: OPS_KEYS, runs, stored };
+}
+
+/** 운영실 자료실(mkt:library:v1) → 워크인 자료실(마케팅 공간, '운영실 자료/<브랜드>' 폴더). Blob 주소만 받음·총 500MB·파일당 100MB·시간 안에 못 끝내면 다음 [적용]에서 이어서 */
+const LIB_TOTAL = 500 * 1024 * 1024, LIB_EACH = 100 * 1024 * 1024;
+async function copyOpsLibrary(u: SessionUser, tenant: string, items: any[]) {
+  const sql = db();
+  const { putObject } = await import('./storage');
+  const { extractText } = await import('./textExtract');
+  const started = Date.now();
+  const out = { total: items.length, copied: 0, skipped: 0, failed: 0, left: 0, bytes: 0, errors: [] as string[] };
+  for (const it of items) {
+    const id = String(it?.id ?? '').trim(); const url = String(it?.url ?? '');
+    if (!id || !url) { out.failed++; out.errors.push(`id·url 없음`); continue; }
+    const ref = `ops-library:${id}`;
+    const [have] = await sql`select 1 from library_files where tenant = ${tenant} and ext_ref = ${ref}`;
+    if (have) { out.skipped++; continue; }
+    if (Date.now() - started > 240_000 || out.bytes >= LIB_TOTAL) { out.left++; continue; }
+    let host = '';
+    try { const p = new URL(url); host = p.hostname; if (p.protocol !== 'https:' && process.env.OPS_BLOB_TEST !== '1') throw new Error(); } catch { out.failed++; out.errors.push(`${id}: 주소 형식`); continue; }
+    if (!host.endsWith('.blob.vercel-storage.com') && process.env.OPS_BLOB_TEST !== '1') { out.failed++; out.errors.push(`${id}: Blob 주소가 아님(${host})`); continue; }
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = Buffer.from(await r.arrayBuffer());
+      if (data.length > LIB_EACH) throw new Error('100MB 초과');
+      if (out.bytes + data.length > LIB_TOTAL) { out.left++; continue; }
+      const name = String(it.name ?? url.split('/').pop() ?? 'file').slice(0, 200);
+      const mime = String(it.type ?? r.headers.get('content-type') ?? 'application/octet-stream').slice(0, 100);
+      const brand = it.brand ? String(it.brand).trim().slice(0, 40) : null;
+      if (brand) await sql`insert into mkt_brands (tenant, name) values (${tenant}, ${brand}) on conflict (tenant, name) do nothing`;
+      const folder = brand ? `운영실 자료/${brand}` : '운영실 자료';
+      const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, space, ext_ref, meta, folder, title, file_name, mime_type, size_bytes, tags, description, source, created_by, upload_status, security, content_hash)
+        values (${tenant}, 'marketing', ${ref}, ${sql.json({ opsId: id, brand, note: it.note ?? null, usedIn: it.usedIn ?? [], createdAt: it.createdAt ?? null } as never)}, ${folder},
+          ${name.replace(/\.[^.]+$/, '')}, ${name}, ${mime}, ${data.length}, ${brand ? [brand] : []}, ${it.note ? String(it.note).slice(0, 2000) : null}, 'ops_import', ${u.id}, 'pending', 'internal',
+          ${createHash('sha256').update(data).digest('hex')}) returning id`;
+      const key = `lib/${tenant}/${f.id}/${name.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
+      await putObject(key, data, mime);
+      await sql`update library_files set storage_key = ${key}, upload_status = 'ready', text_content = ${extractText(data, name, mime)} where id = ${f.id}`;
+      out.copied++; out.bytes += data.length;
+    } catch (e: any) { out.failed++; out.errors.push(`${id}: ${String(e?.message ?? e).slice(0, 80)}`); }
+  }
+  out.errors = out.errors.slice(0, 20);
+  return out;
 }
 
 /** 회사 안 조회(마케팅 공간 관리자만): 키별 건수, 키 하나의 원본(페이지) */

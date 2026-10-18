@@ -9,13 +9,15 @@ import { bootstrap, resetDb, startServer, testDb, tick } from '../helpers.mjs';
 const PORT = 3219, TOKEN = 'ops-export-test-token-123';
 const DATA = {
   'mkt:posts:v1': { kind: 'list', value: [{ id: 'p1', title: '가을 행사', status: 'published' }, { id: 'p2', title: '신규 회원' }, { id: 'p3', title: '리뷰' }] },
+  'mkt:library:v1': { kind: 'list', value: [{ id: 'L1', name: '가을 포스터.png', url: 'http://localhost:3219/blob/library/poster.png', size: 8, type: 'image/png', brand: '다짐', note: '메인 시안', usedIn: ['p1'], createdAt: '2026-10-01' }] },
   'mkt:plan-state:v1': { kind: 'object', value: { week: '2026-W42', locked: false } },
   'mkt:call-records:v1': { kind: 'list', value: [{ phone: '010-1111-2222', at: '2026-10-10T01:00:00Z', source: 'ads', memo: '02 555 3344 로 다시 전화' }] },
 };
 const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
-let srv, ctx, sql, fake, tamper = false, seen = [];
+let srv, ctx, sql, fake, tamper = false, seen = [], blobHits = 0;
 before(async () => {
   fake = http.createServer((req, res) => {
+    if (req.url === '/blob/library/poster.png') { blobHits++; res.setHeader('content-type', 'image/png'); return res.end(Buffer.from('PNGDATA!')); }
     res.setHeader('content-type', 'application/json');
     const ts = req.headers['x-export-ts'], sig = req.headers['x-export-sig'];
     const want = createHmac('sha256', TOKEN).update(`${ts}\n${req.url}`).digest('hex');
@@ -32,7 +34,7 @@ before(async () => {
     return res.end(JSON.stringify({ ok: true, key, kind: 'list', total: d.value.length, cursor: cur, next: cur + 2 < d.value.length ? cur + 2 : null, items, sha256: sha(d.value) }));
   }).listen(PORT);
   await resetDb();
-  srv = await startServer({ OPS_EXPORT_URL: `http://localhost:${PORT}`, OPS_EXPORT_TOKEN: TOKEN });
+  srv = await startServer({ OPS_EXPORT_URL: `http://localhost:${PORT}`, OPS_EXPORT_TOKEN: TOKEN, OPS_BLOB_TEST: '1' });
   sql = testDb(); ctx = await bootstrap();
 });
 after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
@@ -50,7 +52,7 @@ test('미리보기·대조·적용·권한·보관 기간', async () => {
   assert.deepEqual([posts.count, posts.countOk, posts.shaOk], [3, true, true]);
   assert.deepEqual(posts.sample, ['id', 'title', 'status'], '칸 이름만');
   assert.ok(!JSON.stringify(pv).includes('010-1111-2222'), '미리보기에 전화번호 없음');
-  assert.equal(pv.results.filter((r) => r.missing).length, 15);
+  assert.equal(pv.results.filter((r) => r.missing).length, 14);
   assert.equal(seen.filter((x) => x.includes('mkt%3Aposts%3Av1')).length, 2, '페이지 2번');
   assert.equal((await sql`select count(*)::int n from ops_import_items`)[0].n, 0, '미리보기는 저장 없음');
   // 불일치 → 적용 안 함
@@ -62,13 +64,19 @@ test('미리보기·대조·적용·권한·보관 기간', async () => {
   // 적용 두 번 = 같은 결과
   for (let k = 0; k < 2; k++) assert.equal((await ctx.owner.ok('POST', '/api/platform/ops-import', { tenant: 'default', mode: 'apply' })).applied, true);
   const rows = await sql`select key, count(*)::int n from ops_import_items where tenant = 'default' group by key order by key`;
-  assert.deepEqual(rows.map((r) => [r.key, r.n]), [['mkt:call-records:v1', 1], ['mkt:plan-state:v1', 1], ['mkt:posts:v1', 3]]);
+  assert.deepEqual(rows.map((r) => [r.key, r.n]), [['mkt:call-records:v1', 1], ['mkt:library:v1', 1], ['mkt:plan-state:v1', 1], ['mkt:posts:v1', 3]]);
+  // 자료실 파일은 워크인 저장소로 한 번만 복사(마케팅 공간·브랜드 폴더·usedIn 유지), 두 번째 적용은 건너뜀
+  const lib = await sql`select space, folder, file_name, size_bytes, upload_status, meta, tags from library_files where ext_ref = 'ops-library:L1'`;
+  assert.equal(lib.length, 1); assert.equal(blobHits, 1, '파일은 한 번만 내려받음');
+  assert.deepEqual([lib[0].space, lib[0].folder, lib[0].size_bytes, lib[0].upload_status], ['marketing', '운영실 자료/다짐', '8', 'ready']);
+  assert.deepEqual(lib[0].meta.usedIn, ['p1']); assert.deepEqual(lib[0].tags, ['다짐']);
+  assert.equal((await sql`select count(*)::int n from mkt_brands where tenant = 'default' and name = '다짐'`)[0].n, 1, '브랜드 = 회사별 브랜드 표');
   assert.equal((await ctx.owner.req('POST', '/api/platform/ops-import', { tenant: 'nope', mode: 'preview' })).status, 400, '없는 회사');
   // 회사 안 조회: 마케팅 공간·관리자만, 전화 기록 조회는 감사 기록
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   assert.equal((await ctx.staffA.client.req('GET', '/api/marketing/imported')).status, 403, '직원은 못 봄');
-  assert.equal((await ctx.owner.ok('GET', '/api/marketing/imported')).keys.length, 3);
+  assert.equal((await ctx.owner.ok('GET', '/api/marketing/imported')).keys.length, 4);
   const calls = await ctx.owner.ok('GET', '/api/marketing/imported?key=mkt%3Acall-records%3Av1');
   assert.equal(calls.items[0].item.phone, '***-****-2222', '가리지 않고 온 번호는 뒤 4자리만 저장');
   assert.equal(calls.items[0].item.memo, '***-****-3344 로 다시 전화', '글 안의 번호도 가림');
@@ -78,5 +86,5 @@ test('미리보기·대조·적용·권한·보관 기간', async () => {
   await sql`update ops_import_items set imported_at = now() - interval '400 days'`;
   await tick();
   const left = await sql`select key from ops_import_items group by key order by key`;
-  assert.deepEqual(left.map((r) => r.key), ['mkt:plan-state:v1', 'mkt:posts:v1']);
+  assert.deepEqual(left.map((r) => r.key), ['mkt:library:v1', 'mkt:plan-state:v1', 'mkt:posts:v1']);
 });
