@@ -74,6 +74,16 @@ export async function marketing({ owner, BASE, sql }) {
   await owner.getByTestId('mkt-detail').getByText('자동 본문').waitFor();
   await owner.getByTestId('mkt-decide').waitFor();
   await owner.keyboard.press('Escape');
+  // ⑤-1 게시 도우미: 승인된 시험 블로그 글(사진 없음)에도 보임 — 복사·글쓰기 열기·위험 고지
+  const [bc] = await sql`insert into mkt_contents (tenant, title, channel, scheduled_at, status, current_version, approved_version, created_by, is_test)
+    values (${tenant}, '[시험] E2E 블로그', 'blog', now() + interval '2 days', 'approved', 1, 1, ${created_by}, true) returning id`;
+  await sql`insert into mkt_versions (content_id, version, body, media_ids, created_by) values (${bc.id}, 1, '첫 문단', ${[]}, ${created_by})`;
+  await owner.goto(`${BASE}/s/marketing/approvals?c=${bc.id}`);
+  await owner.getByTestId('publish-helper').waitFor();
+  await owner.getByTestId('ph-open-naver').waitFor();
+  await owner.getByTestId('ph-risk').waitFor();
+  await owner.getByTestId('ph-copy-body').waitFor();
+  await owner.keyboard.press('Escape');
   // 상용화 ⑧ 월간 보고(관리자 메뉴): 카드 6·PDF 저장 버튼
   await owner.locator('aside').getByRole('link', { name: '월간 보고' }).click();
   await owner.getByTestId('mkt-report').waitFor();

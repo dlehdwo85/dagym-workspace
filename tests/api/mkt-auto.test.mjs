@@ -114,7 +114,15 @@ test('알림 받는 사람 고르기 · 브랜드 시험 모드', async () => {
   const tn = await sql`select distinct user_id from notifications where entity_id = any(${tc.map((c) => c.id)}::uuid[])`;
   assert.deepEqual(tn.map((r) => r.user_id), [ctx.ownerId], '시험 알림은 실행한 사람에게만');
   await sql`update mkt_contents set status = 'approved', approved_version = current_version where id = ${tc[0].id}`;
-  assert.equal((await ctx.owner.req('POST', `/api/marketing/contents/${tc[0].id}/publish`, { url: 'https://instagram.com/p/t' })).status, 400, '시험은 게시 확인 안 됨');
+  // 로컬 검수 10/18: 시험 콘텐츠도 수동 게시 확인(도우미 검수용) — 게시 기록에 시험 표시
+  await ctx.owner.ok('POST', `/api/marketing/contents/${tc[0].id}/publish`, { url: 'https://instagram.com/p/t' });
+  assert.deepEqual((await ctx.owner.ok('GET', `/api/marketing/contents/${tc[0].id}`)).publishJobs.map((j) => [j.provider, j.is_test]), [['manual', true]]);
+  // 칸 제목에 [시험] 이 두 번 붙지 않음 + 예전에 겹쳐 만든 칸은 다음 실행에 정리
+  const drafts = await sql`select title from mkt_contents where brand_id = ${test.id} and produced_at is null`;
+  assert.ok(drafts.length && drafts.every((d) => d.title.startsWith('[시험] 워크인 피드') && !d.title.includes('[시험] [시험]')), JSON.stringify(drafts.slice(0, 2)));
+  const [old] = await sql`update mkt_contents set title = '[시험] [시험] 워크인 피드 10/22' where id = (select id from mkt_contents where brand_id = ${test.id} and produced_at is null order by scheduled_at desc limit 1) returning id`;
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  assert.equal((await sql`select title from mkt_contents where id = ${old.id}`)[0].title, '[시험] 워크인 피드 10/22');
 });
 
 test('제작 시점 바꾸면 안 만든 칸 다시 계산 · AI 다시 만들기 · 보관', async () => {

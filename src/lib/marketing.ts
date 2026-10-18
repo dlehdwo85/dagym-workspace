@@ -69,7 +69,7 @@ export async function getContent(u: SessionUser, id: string) {
   const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
   const media = ids.length ? await sql`select id, title, file_name, mime_type from library_files where id = any(${ids}::uuid[]) and tenant = ${tenantOf(u)} and deleted_at is null` : [];
-  const publishJobs = await sql`select j.provider, j.status, j.version, j.permalink, j.last_error, j.created_at, u.name as requested_by_name from mkt_publish_jobs j left join users u on u.id = j.requested_by where j.content_id = ${id} order by j.created_at desc`;
+  const publishJobs = await sql`select j.provider, j.status, j.version, j.permalink, j.is_test, j.last_error, j.created_at, u.name as requested_by_name from mkt_publish_jobs j left join users u on u.id = j.requested_by where j.content_id = ${id} order by j.created_at desc`;
   const decisions = await sql`select d.version, d.decision, d.comment, d.decided_at, u.name as decided_by_name from mkt_decisions d left join users u on u.id = d.decided_by where d.content_id = ${id} order by d.decided_at desc`;
   const st = await (await import('./mktAuto')).settingsOf(tenantOf(u));
   return { content: { ...c, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u) };
@@ -124,11 +124,11 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
   if (i.decision !== 'approve' && !i.comment?.trim()) throw badRequest(i.decision === 'changes' ? '무엇을 고칠지 적어 주세요' : '보류 이유를 적어 주세요');
   const sql = db();
   const res = await sql.begin(async (tx) => {
-    const [c] = await tx<any[]>`select id, title, current_version, status, created_by from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
+    const [c] = await tx<any[]>`select id, title, current_version, status, created_by, channel from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (i.version !== c.current_version) throw new HttpError(409, 'stale_version', `최신 버전(v${c.current_version})이 아닙니다 — 새로 고쳐 보고 결정해 주세요`);
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
-    if (i.decision === 'approve') {
+    if (i.decision === 'approve' && c.channel !== 'blog') { // 블로그는 글만으로도 승인(사진은 선택)
       const [v] = await tx<{ n: number }[]>`select cardinality(media_ids) as n from mkt_versions where content_id = ${id} and version = ${i.version}`;
       if (!v?.n) throw badRequest('시안 이미지가 없어 승인할 수 없습니다 — 시안을 붙인 뒤 다시');
     }
@@ -155,14 +155,13 @@ export async function markPublished(u: SessionUser, id: string, i: z.infer<typeo
   const sql = db();
   const [c] = await sql<any[]>`select current_version, approved_version, status, is_test, channel from mkt_contents where id = ${id} and tenant = ${tenantOf(u)}`;
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
-  if (c.is_test) throw badRequest('시험 콘텐츠는 게시 확인 단계로 넘어가지 않습니다');
   if (c.status !== 'approved' || c.approved_version !== c.current_version) throw new HttpError(409, 'not_approved', '승인된 최신 버전만 게시 확인할 수 있습니다');
-  // ⑤-1: 수동 게시(네이버 블로그 도우미·직접 올림)도 게시 작업 기록으로 남김 — 같은 콘텐츠·버전은 한 번만
+  // ⑤-1: 수동 게시(네이버 블로그 도우미·직접 올림)도 게시 작업 기록으로 남김 — 같은 콘텐츠·버전은 한 번만. 시험 콘텐츠도 수동 게시 확인은 됨(기록에 시험 표시, 월간 보고·서버 게시에서는 빠짐)
   const provider = c.channel === 'blog' && /(^|\.)blog\.naver\.com$/.test(new URL(i.url).hostname) ? 'naver_blog' : 'manual';
   await sql.begin(async (tx) => {
     await tx`update mkt_contents set status = 'published', published_url = ${i.url}, published_at = now(), published_by = ${u.id}, updated_at = now() where id = ${id}`;
-    await tx`insert into mkt_publish_jobs (tenant, content_id, version, provider, status, idempotency_key, permalink, requested_by)
-      values (${tenantOf(u)}, ${id}, ${c.current_version}, ${provider}, 'done', ${`${id}:${c.current_version}:${provider}`}, ${i.url}, ${u.id}) on conflict (idempotency_key) do nothing`;
+    await tx`insert into mkt_publish_jobs (tenant, content_id, version, provider, status, idempotency_key, permalink, requested_by, is_test)
+      values (${tenantOf(u)}, ${id}, ${c.current_version}, ${provider}, 'done', ${`${id}:${c.current_version}:${provider}`}, ${i.url}, ${u.id}, ${!!c.is_test}) on conflict (idempotency_key) do nothing`;
   });
   return { ok: true, provider };
 }

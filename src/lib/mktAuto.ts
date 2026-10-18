@@ -119,7 +119,7 @@ export async function planSlots(tenant: string, days = 14) {
     if (deadlineOf(at, s).getTime() <= Date.now()) continue; // 승인 마감이 이미 지난 칸은 만들지 않음
     let produce = kst(ymd(new Date(at.getTime() - s.lead_days * DAY)), `${pad(s.lead_hour)}:00`);
     if (produce.getTime() < Date.now()) produce = new Date();
-    const title = `${r.test ? '[시험] ' : ''}${r.brand ? r.brand + ' ' : ''}${KIND_LABEL[r.kind as Kind]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
+    const title = `${r.test ? '[시험] ' : ''}${r.brand ? brandName({ name: r.brand }) + ' ' : ''}${KIND_LABEL[r.kind as Kind]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
     const ins = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, rule_id, kind, auto, produce_at, is_test)
       values (${tenant}, ${r.brand_id}, ${title}, ${r.channel}, ${at}, 'draft', 0, ${r.created_by}, ${r.id}, ${r.kind}, true, ${produce}, ${!!r.test})
       on conflict (rule_id, scheduled_at) where rule_id is not null do nothing returning id`;
@@ -264,6 +264,8 @@ export async function remindAndExpire(tenant: string) {
 }
 
 export async function runTenant(tenant: string, actorId?: string) {
+  // 예전 칸 제목의 '[시험] [시험] ' 겹침 정리(브랜드 이름에 [시험]이 들어 있던 때 만든 아직 안 만든 칸)
+  await db()`update mkt_contents set title = regexp_replace(title, '^\\[시험\\]\\s*\\[시험\\]\\s*', '[시험] ') where tenant = ${tenant} and title like '[시험]%[시험]%' and produced_at is null`;
   const planned = await planSlots(tenant);
   const due = await db()<any[]>`select * from mkt_contents where tenant = ${tenant} and auto and status = 'draft' and produced_at is null and produce_at <= now()
     and not exists (select 1 from mkt_production_requests q where q.content_id = mkt_contents.id and q.kind = 'topic' and q.status = 'open') order by produce_at limit 5`;
