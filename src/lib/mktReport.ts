@@ -40,7 +40,7 @@ export async function monthlyReport(tenant: string, month: string) {
   ]);
   const adTotal = ads.reduce((a, r) => ({ impressions: a.impressions + r.impressions, clicks: a.clicks + r.clicks, cost_krw: a.cost_krw + r.cost_krw, conversions: a.conversions + r.conversions }), { impressions: 0, clicks: 0, cost_krw: 0, conversions: 0 });
   return { month, posts: { ...posts[0], byChannel }, approvals: approvals[0], auto: auto[0], ads: { byProvider: ads, total: { ...adTotal, ctr: adTotal.impressions ? Math.round((adTotal.clicks / adTotal.impressions) * 10000) / 100 : 0, cpc: adTotal.clicks ? Math.round(adTotal.cost_krw / adTotal.clicks) : 0 } },
-    calls: calls[0], credits: { byKind: credits, total: Math.round(credits.reduce((a, r) => a + r.credits, 0) * 100) / 100 }, ai: { usd: Math.round(ai[0].usd * 100) / 100, requests: ai[0].n, krw: Math.round(ai[0].usd * (Number(process.env.USD_KRW) || 1400)) } };
+    calls: calls[0], credits: { byKind: credits, total: Math.round(credits.reduce((a, r) => a + r.credits, 0) * 100) / 100 }, ai: { usd: Math.round(ai[0].usd * 10000) / 10000, requests: ai[0].n, krw: Math.round(ai[0].usd * (Number(process.env.USD_KRW) || 1400)) } };
 }
 
 export const reportQuery = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional() });
@@ -53,6 +53,8 @@ export async function reportView(u: SessionUser, q: z.infer<typeof reportQuery>)
   return { company: co?.name ?? '', ...(await monthlyReport(t, q.month ?? prevMonth())), thisMonth: thisMonth() };
 }
 
+/** 1달러 미만은 소수 넷째 자리까지($0.0028), 그 이상은 둘째 자리 */
+export const usd = (v: number) => (v > 0 && v < 1 ? String(Math.round(v * 10000) / 10000) : (Math.round(v * 100) / 100).toFixed(2));
 function summaryText(company: string, r: Awaited<ReturnType<typeof monthlyReport>>, link: string) {
   const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
   return [`${company} ${r.month} 마케팅 월간 보고`, '',
@@ -61,7 +63,7 @@ function summaryText(company: string, r: Awaited<ReturnType<typeof monthlyReport
     `자동 제작 ${r.auto.produced}건(품질 검사 미통과 ${r.auto.quality_failed})`,
     `광고 노출 ${r.ads.total.impressions.toLocaleString('ko-KR')} · 클릭 ${r.ads.total.clicks.toLocaleString('ko-KR')}(CTR ${r.ads.total.ctr}%) · 비용 ${won(r.ads.total.cost_krw)} · 전환 ${r.ads.total.conversions}`,
     `전화 문의 ${r.calls.total}건(영업 리드 ${r.calls.leads})`,
-    `크레딧 ${r.credits.total} · 마케팅 AI 약 ${won(r.ai.krw)}($${r.ai.usd}, ${r.ai.requests}회)`, '', `자세히: ${link}`].join('\n');
+    `크레딧 ${r.credits.total} · 마케팅 AI 약 ${won(r.ai.krw)}($${usd(r.ai.usd)}, ${r.ai.requests}회)`, '', `자세히: ${link}`].join('\n');
 }
 
 /** 매월 1일 9시(서울) 이후 tick 1회: 지난달에 마케팅 활동이 있던 회사 → 받는 사람에게 알림 + 메일(설정 시). 회사·달마다 한 번 */

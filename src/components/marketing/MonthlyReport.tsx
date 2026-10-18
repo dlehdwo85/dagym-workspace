@@ -8,6 +8,7 @@ import { CHANNELS } from './Marketing';
 const C = '#7C3AED';
 const PROVIDER: Record<string, string> = { naver: '네이버', google: 'Google', meta: 'Meta' };
 const LEDGER: Record<string, string> = { text: '원고', generate_image: '이미지', generate_video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성', adjust: '조정' };
+const usd = (v: number) => (v > 0 && v < 1 ? String(Math.round(v * 10000) / 10000) : (Math.round(v * 100) / 100).toFixed(2));
 const n = (v: number) => Math.round(v).toLocaleString('ko-KR');
 const shift = (m: string, d: number) => { const [y, mo] = m.split('-').map(Number); const t = new Date(Date.UTC(y, mo - 1 + d, 1)); return t.toISOString().slice(0, 7); };
 
@@ -51,7 +52,7 @@ export function MonthlyReport() {
         <section className="rounded-card border border-line bg-white p-4 shadow-card print:shadow-none"><h2 className="text-sm font-semibold">크레딧 원장(종류별)</h2>
           <ul className="mt-2 space-y-1 text-sm">{r.credits.byKind.map((k: any) => <li key={k.kind} className="flex justify-between"><span>{LEDGER[k.kind] ?? k.kind} <span className="text-xs text-ink-3">{k.n}건</span></span><b className="tabular-nums">{k.credits}</b></li>)}
             {!r.credits.byKind.length && <li className="text-xs text-ink-3">기록 없음</li>}</ul>
-          <p className="mt-2 text-xs text-ink-3">마케팅 AI ${r.ai.usd} (원 환산 약 {n(r.ai.krw)}원)</p></section>
+          <p className="mt-2 text-xs text-ink-3">마케팅 AI ${usd(r.ai.usd)} (원 환산 약 {n(r.ai.krw)}원)</p></section>
       </div>
       <p className="text-xs text-ink-3">시험 모드 브랜드 콘텐츠는 빠집니다. 승인 소요 = 그 버전이 올라온 때부터 승인까지. 매월 1일 오전 지난달 보고를 받는 사람에게 알림(메일 설정 시 메일도)으로 보냅니다.</p>
     </div>

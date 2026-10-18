@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
 
 const C = '#7C3AED';
@@ -121,11 +122,13 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
             <div className="flex gap-2"><Button onClick={newVersion} data-testid="mkt-version-save">수정본 올리기</Button><Button variant="secondary" onClick={() => setVer(null)}>취소</Button></div>
           </div>
         ) : <Button variant="secondary" onClick={() => setVer({ body: v.body, media: v.media_ids.map((m: string) => ({ id: m, title: titleOf(m) })), note: '' })} data-testid="mkt-version-open">수정본 올리기</Button>)}
+        {c.status === 'approved' && c.approved_version === c.current_version && !c.is_test && <PublishHelper channel={c.channel} title={c.title} body={v.body} media={v.media_ids.map((m: string) => ({ id: m, title: titleOf(m) }))} />}
         {c.status === 'approved' && (
           <div className="flex gap-2"><input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="게시한 글 주소(https://…)" aria-label="게시 주소" /><Button onClick={publish} disabled={!url} data-testid="mkt-publish">게시 확인</Button></div>
         )}
         </>}
         {c.published_url && <p className="text-xs">게시됨: <a className="underline" href={c.published_url} target="_blank" rel="noopener">{c.published_url}</a></p>}
+        {!!data.publishJobs?.length && <ul className="space-y-0.5 border-t border-line pt-2 text-xs text-ink-2" data-testid="mkt-publish-jobs">{data.publishJobs.map((j: any, i: number) => <li key={i}>게시 기록 v{j.version} · {({ naver_blog: '네이버 블로그(도우미)', manual: '직접 게시' } as any)[j.provider] ?? j.provider} · {({ done: '완료', queued: '대기', running: '진행 중', verify: '확인 중', failed: '실패', canceled: '취소' } as any)[j.status]} · {j.requested_by_name ?? ''} · {fmtDateTime(j.created_at)}</li>)}</ul>}
         {!!data.decisions.length && <ul className="space-y-0.5 border-t border-line pt-2 text-xs text-ink-2">{data.decisions.map((d: any, i: number) => <li key={i}>v{d.version} {({ approve: '승인', changes: '수정 요청', hold: '보류' } as any)[d.decision]} · {d.decided_by_name} · {fmtDateTime(d.decided_at)}{d.comment ? ` — ${d.comment}` : ''}</li>)}</ul>}
       </div>
     </Modal>
