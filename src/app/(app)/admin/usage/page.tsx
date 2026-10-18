@@ -6,14 +6,13 @@ import { api, useApi } from '@/components/client';
 import { Meter, fmtBytes, won } from '@/components/usage';
 import { BillingSection } from '@/components/Billing';
 import { AiPeopleBudgets } from '@/components/AiPeopleBudgets';
+import { byPurposeRows } from '@/components/aiPurpose';
 import { TaskQuota } from '@/components/TaskQuota';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const GB = 1024 ** 3;
 const lim = (v: number | null, unit: string) => (v === null ? '한도 미설정' : `${v.toLocaleString('ko-KR')}${unit}`);
 /** V14 4번 기능 이름 */
-const PURPOSE: Record<string, string> = { assistant: 'AI 비서', library_organize: '자료실 자동 정리', revenue: '매출 AI 분석', revenue_extract: '매출 자료로 입력', classify: '질문 분류(업무 여부)', summary: '긴 대화 요약', chat_to_task: '메시지 → 업무', fill: '자료로 채우기', doc_engine: '문서 작업(파일 만들기·분석)', doc_job: '문서 작업(파일 만들기·분석)',
-  task_assist: '업무 AI 도우미', inquiry_summary: '문의 요약', voice: '말로 등록 정리', mail_draft: '메일·문자 초안', briefing: '아침 브리핑', weekly_report: '주간 보고 초안', meeting: '회의 메모 정리' };
 // 로컬 검수 10/17: 고객 화면은 한국어 기능명·원화만(내부 키·달러·운영자 문구는 /platform)
 const krw = (usd: number, rate: number) => won(Math.round(usd * rate));
 
@@ -57,7 +56,7 @@ export default function UsagePage() {
           <span className="text-xs text-ink-2" data-testid="ai-usage-pct">회사 월 한도 약 {krw(ai.limitUsd, ai.usdKrw)} 중 <b className={cx(ai.pct >= 100 ? 'text-red-600' : ai.pct >= 80 ? 'text-amber-700' : 'text-ink')}>{ai.pct}%</b> · 남은 약 {krw(ai.leftUsd, ai.usdKrw)} · 요청 {ai.requests.toLocaleString('ko-KR')}회{ai.blocked ? ` · 차단 ${ai.blocked}건` : ''}</span>
         </div>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
-          {([['사람별', ai.byUser.map((x: any) => ({ k: x.user_id, label: x.name, cost: x.cost, n: x.requests }))], ['기능별', ai.byPurpose.map((x: any) => ({ k: x.purpose, label: PURPOSE[x.purpose] ?? '기타 AI 기능', cost: x.cost, n: x.requests }))]] as const).map(([title, rows]) => {
+          {([['사람별', ai.byUser.map((x: any) => ({ k: x.user_id, label: x.name, cost: x.cost, n: x.requests }))], ['기능별', byPurposeRows(ai.byPurpose)]] as const).map(([title, rows]) => {
             const max = Math.max(0.0001, ...rows.map((r: any) => r.cost));
             return (
               <div key={title}>

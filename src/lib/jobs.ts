@@ -173,6 +173,7 @@ export async function runTick(trigger: string) {
   await step('adsSync', async () => (await import('./marketingAds')).adsSyncDue()); // V41 4-2 광고 성과(회사별 연결, 하루 한 번 최근 7일)
   await step('salesSync', async () => (await import('./sales/migrate')).salesSyncDaily()); // V41 단계 2 전환일까지 매일 영업관리 차이분
   await step('mktAuto', async () => (await import('./mktAuto')).mktAutoTick()); // V41 4-3 마케팅 주간 규칙 → 제작 → 승인함 → 알림
+  await step('mktReport', async () => (await import('./mktReport')).monthlyReportJob()); // 상용화 ⑧ 매월 1일 지난달 마케팅 보고 알림·메일
   await step('opsPii', async () => (await import('./opsImport')).purgeOpsPii()); // V41 4-2 가져온 전화 기록 보관 기간
   await step('aiRetention', async () => ({ purged: await (await import('./ai/threads')).purgeOldThreads() })); // V14 2번 AI 대화 보관 기간
   await step('outbox', async () => (await import('./mailbox')).outboxTick()); // V21 메일 보관함 재시도(서울 지역)

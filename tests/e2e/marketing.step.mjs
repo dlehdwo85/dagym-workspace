@@ -74,6 +74,11 @@ export async function marketing({ owner, BASE, sql }) {
   await owner.getByTestId('mkt-detail').getByText('자동 본문').waitFor();
   await owner.getByTestId('mkt-decide').waitFor();
   await owner.keyboard.press('Escape');
+  // 상용화 ⑧ 월간 보고(관리자 메뉴): 카드 6·PDF 저장 버튼
+  await owner.locator('aside').getByRole('link', { name: '월간 보고' }).click();
+  await owner.getByTestId('mkt-report').waitFor();
+  assert.equal(await owner.getByTestId('report-card').count(), 6);
+  await owner.getByTestId('report-print').waitFor();
   // 원래대로
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
   await owner.goto(`${BASE}/admin/users`);
