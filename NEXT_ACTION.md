@@ -754,6 +754,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음: 미리보기에서 칸 이름을 보고 게시물·일정 → mkt_contents, 전화 기록 → mkt_calls 등 표 매핑.
 - APP_URL = https://www.work-in.dev (대표 결정): 코드 기본값도 work-in.dev 로. mobile/capacitor.config.ts 기본값(vercel.app)은 로컬 담당 — 앱 다음 빌드 때 정리.
 
+## 2026-10-18: 청약홈 분양정보 신규단지 수집기 (클라우드, 영업관리 세션에서 이식)
+- 086: prospects.detail(원천별 핵심 칸 정리본) · 15098547 기본 주소 https://api.odcloud.kr/api/ApplyhomeInfoDetailSvc/v1.
+- 수집: 아파트(/getAPTLttotPblancDetail) · 오피스텔·도시형·민간임대·생활숙박(/getUrbtyOfctlLttotPblancDetail) · 공공지원민간임대(/getPblPvtRentLttotPblancDetail), 100건 페이지, 모집공고일 ≥ 기간 시작(YYYY-MM-DD) + 받은 뒤 다시 거름. 매일(수집 켜면 tick) 최근 30일, 플랫폼 운영 화면 [처음 채우기 365일].
+- 업종 중립 공용 표. 영업 시작일 = 모집공고일(공식 값). 우선순위(1000세대 이상 high 등)는 회사별 파이프라인 단계 2 에서.
+- 확인 필요(운영): 키 입력 뒤 [시험 수집] → 세 종류 건수·오류, 아파트 날짜 조건 형식이 먹는지(안 먹어도 기간 재필터로 결과는 맞음, 호출 수만 늘어남).
+
 ## 대표 결정이 필요한 것
 - ✅ (V12 ②) 회사별 데이터 분리 — 15차에서 진행 완료(위 표)
 - ✅ `main` 생성·병합 완료(2026-10-13). **남은 1분 작업**: GitHub → Settings → General → Default branch 를 `main` 으로 변경 (https://github.com/dlehdwo85/dagym-workspace/settings) — 정기 실행(tick) 예약과 새 clone 이 main 을 쓰게 됨
