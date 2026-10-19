@@ -83,10 +83,12 @@ export async function verifyCutover(tenant: string) {
   for (const r of await sql<{ src_tbl: string; n: number }[]>`select src_tbl, count(*)::int n from sales_work_records where tenant = ${tenant} group by src_tbl`) formal[r.src_tbl] = r.n;
   const mismatches: { item: string; source: number | null; copied: number; formal?: number }[] = [];
   for (const [tbl, n] of Object.entries(c.src_counts as Record<string, number | null>)) {
-    if (tbl === 'related') { if (n !== rel.n) mismatches.push({ item: '관련 공고', source: n, copied: rel.n }); continue; }
+    // 공용 수집 표(공고 등)는 원본 동결 뒤에도 수집이 계속돼 늘 수 있음 → 기준보다 적을 때만 불일치. 회사별 표는 정확히 같아야 함
+    if (tbl === 'related') { if (rel.n < (n ?? 0)) mismatches.push({ item: '관련 공고', source: n, copied: rel.n }); continue; }
     const got = copied[tbl] ?? 0;
     const f = tbl === 'leads' || RECORD_KINDS.includes(tbl) || WORK_TBLS.includes(tbl) ? formal[tbl] ?? 0 : undefined;
-    if ((n ?? 0) !== got || (f !== undefined && f !== got)) mismatches.push({ item: tbl, source: n, copied: got, ...(f !== undefined ? { formal: f } : {}) });
+    const short = tbl in GLOBAL ? got < (n ?? 0) : (n ?? 0) !== got;
+    if (short || (f !== undefined && f !== got)) mismatches.push({ item: tbl, source: n, copied: got, ...(f !== undefined ? { formal: f } : {}) });
   }
   // 원본 건수로 셀 수 없는 '<표>__progress'(옮길 때 떼어 낸 것)는 옮긴 행 = 정식 표만 대조
   for (const tbl of WORK_TBLS.filter((t) => t.endsWith('__progress'))) if ((copied[tbl] ?? 0) !== (formal[tbl] ?? 0)) mismatches.push({ item: tbl, source: null, copied: copied[tbl] ?? 0, formal: formal[tbl] ?? 0 });
@@ -96,8 +98,14 @@ export async function verifyCutover(tenant: string) {
   return { tenant, ok, mismatches, srcCounts: c.src_counts, dstCounts: dst };
 }
 
+export async function writesOpen(tenant: string) {
+  const [c] = await db()<{ writes_open: boolean }[]>`select writes_open from sales_cutover where tenant = ${tenant}`;
+  return !!c?.writes_open;
+}
 export async function convertAndVerify(u: SessionUser, tenant: string) {
   platformOnly(u);
+  // 쓰기를 연 뒤 다시 변환하면 워크인에서 고친 내용을 원본 값으로 덮어씀 → 막음(닫고 나서만)
+  if (await writesOpen(tenant)) throw new HttpError(409, 'cutover_open', '쓰기가 열린 뒤에는 다시 변환하지 않습니다(워크인 수정분 보호) — 필요하면 먼저 쓰기를 닫으세요');
   await convertToFormal(tenant);
   const r = await verifyCutover(tenant);
   await audit(db(), u.id, 'sales_cutover.convert', 'tenant', null, { tenant, ok: r.ok, mismatches: r.mismatches.length }).catch(() => {});
@@ -120,8 +128,7 @@ export async function cutoverStatus(u: SessionUser) {
 }
 
 async function assertWritesOpen(tenant: string) {
-  const [c] = await db()<{ writes_open: boolean }[]>`select writes_open from sales_cutover where tenant = ${tenant}`;
-  if (!c?.writes_open) throw new HttpError(409, 'sales_read_only', '영업관리 전환 전이라 워크인에서는 고칠 수 없습니다 — 전환일까지는 영업관리에서 수정해 주세요');
+  if (!(await writesOpen(tenant))) throw new HttpError(409, 'sales_read_only', '영업관리 전환 전이라 워크인에서는 고칠 수 없습니다 — 전환일까지는 영업관리에서 수정해 주세요');
 }
 
 // ---------------- 쓰기(전환 뒤) — V39 D: 보류·실패는 사유 필수, 담당 변경 권한은 서버 검사 ----------------
@@ -146,4 +153,32 @@ export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof l
     if (i.status && i.status !== l.status) await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${id}, ${l.status}, ${i.status}, ${i.reason ?? null}, ${u.id})`;
   });
   return { ok: true };
+}
+
+export const leadCreate = z.object({ name: z.string().trim().min(1).max(300), status: z.enum(STAGES as [string, ...string[]]).default('신규리드'), priority: z.enum(['urgent', 'high', 'medium', 'low']).optional(),
+  facilityType: z.string().max(100).optional(), region: z.string().max(50).optional(), contactName: z.string().max(100).optional(), phone: z.string().max(40).optional(),
+  nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), memo: z.string().max(5000).optional() });
+/** 새 리드(전환 뒤) — 담당 = 만든 사람 */
+export async function createLead(u: SessionUser, i: z.infer<typeof leadCreate>) {
+  await assertSpace(u, 'sales');
+  const t = tenantOf(u); await assertWritesOpen(t);
+  const [r] = await db()<{ id: string }[]>`insert into sales_leads (tenant, name, status, priority, facility_type, region, owner_id, next_contact_date, contact_name, phone, memo)
+    values (${t}, ${i.name}, ${i.status}, ${i.priority ?? null}, ${i.facilityType ?? null}, ${i.region ?? null}, ${u.id}, ${i.nextContactDate ?? null}, ${i.contactName ?? null}, ${i.phone ?? null}, ${i.memo ?? null}) returning id`;
+  return { id: r.id };
+}
+export const activityInput = z.object({ type: z.enum(['전화', '방문', '미팅', '메일', '문자', '기타']).default('전화'), content: z.string().trim().min(1).max(5000), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
+/** 상담(활동) 기록 추가 — 담당자·관리자 */
+export async function addActivity(u: SessionUser, leadId: string, i: z.infer<typeof activityInput>) {
+  await assertSpace(u, 'sales');
+  if (!/^[0-9a-f-]{36}$/i.test(leadId)) throw notFound();
+  const t = tenantOf(u); const sql = db();
+  const [l] = await sql<{ owner_id: string | null }[]>`select owner_id from sales_leads where id = ${leadId} and tenant = ${t}`;
+  if (!l) throw notFound();
+  await assertWritesOpen(t);
+  if (!['owner', 'admin'].includes(u.role) && l.owner_id && l.owner_id !== u.id) throw new HttpError(403, 'forbidden', '담당 리드만 기록할 수 있습니다');
+  const day = i.date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const [r] = await sql<{ id: string }[]>`insert into sales_lead_records (tenant, kind, lead_id, occurred_at, data) values (${t}, 'sales_activities', ${leadId}, ${new Date(`${day}T12:00:00+09:00`)},
+    ${sql.json({ activity_type: i.type, content: i.content, activity_date: day, created_by: u.id, created_by_name: u.name })}) returning id`;
+  await sql`update sales_leads set updated_at = now() where id = ${leadId}`;
+  return { id: r.id };
 }

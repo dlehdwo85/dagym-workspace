@@ -1,17 +1,17 @@
 'use client';
 import Link from 'next/link';
 import { useState } from 'react';
-import { useApi } from '@/components/client';
-import { ErrorBox, Modal, Skeleton, cx, fmtDateTime, inputCls } from '@/components/ui';
+import { api, useApi } from '@/components/client';
+import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
 const C = '#2563EB';
 const q = (o: Record<string, string | undefined>) => new URLSearchParams(Object.entries(o).filter(([, v]) => v) as [string, string][]).toString();
-function Head({ title, meta, children }: { title: string; meta?: { syncedAt: string | null; imported: boolean }; children?: React.ReactNode }) {
+function Head({ title, meta, children }: { title: string; meta?: { syncedAt: string | null; imported: boolean; readOnly?: boolean }; children?: React.ReactNode }) {
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>{title}</h1><span className="ml-auto flex flex-wrap gap-2">{children}</span></div>
-      {meta && <p className="text-[11px] text-ink-3" data-testid="sales-readonly">{meta.imported ? `영업관리에서 옮긴 자료 · ${meta.syncedAt ? fmtDateTime(meta.syncedAt) : ''} 기준 · 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴)` : '아직 영업관리 자료를 옮기지 않았습니다(플랫폼 운영 › 영업관리 이전).'}</p>}
+      {meta && meta.readOnly === false ? <p className="text-[11px] text-ink-3" data-testid="sales-live">영업관리에서 옮긴 자료 · 이제 워크인에서 고칩니다(영업관리는 보기 전용)</p> : meta && <p className="text-[11px] text-ink-3" data-testid="sales-readonly">{meta.imported ? `영업관리에서 옮긴 자료 · ${meta.syncedAt ? fmtDateTime(meta.syncedAt) : ''} 기준 · 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴)` : '아직 영업관리 자료를 옮기지 않았습니다(플랫폼 운영 › 영업관리 이전).'}</p>}
     </div>
   );
 }
@@ -47,8 +47,39 @@ export function SalesHome() {
   );
 }
 
-function LeadDetail({ id, onClose }: { id: string; onClose: () => void }) {
-  const { data, error } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`);
+/** 전환 뒤: 단계(보류·실패는 사유 필수)·다음 연락일·메모·담당(관리자) 고치기 + 상담 기록 추가 */
+function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () => void }) {
+  const l = data.lead;
+  const [f, setF] = useState({ status: l.status ?? '신규리드', reason: '', next: l.next ?? '', memo: l.memo ?? '', owner: l.ownerId ?? '' });
+  const [act, setAct] = useState({ type: '전화', content: '' });
+  const needReason = (f.status === '보류' || f.status === '실패') && f.status !== l.status;
+  async function save() {
+    try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body: { ...(f.status !== l.status ? { status: f.status, reason: f.reason || undefined } : {}), nextContactDate: f.next || null, memo: f.memo || null, ...(data.canAssign && f.owner !== (l.ownerId ?? '') ? { ownerId: f.owner || null } : {}) } });
+      toast.ok('저장했습니다'); setF({ ...f, reason: '' }); onSaved(); } catch (e: any) { toast.error(e.message); }
+  }
+  async function addAct() { try { await api(`/api/sales/leads/${id}/activities`, { body: act }); setAct({ ...act, content: '' }); toast.ok('상담 기록을 남겼습니다'); onSaved(); } catch (e: any) { toast.error(e.message); } }
+  return (
+    <div className="space-y-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm" data-testid="sales-lead-edit">
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Field label="단계"><select className={inputCls} value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} data-testid="lead-status">{data.stages.map((s: string) => <option key={s}>{s}</option>)}</select></Field>
+        <Field label="다음 연락일"><input type="date" className={inputCls} value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} data-testid="lead-next" /></Field>
+        {data.canAssign && <Field label="담당"><select className={inputCls} value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}><option value="">없음</option>{data.people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>}
+      </div>
+      {needReason && <Field label={`${f.status} 사유(필수)`}><input className={inputCls} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} maxLength={500} data-testid="lead-reason" /></Field>}
+      <Field label="메모"><textarea className={inputCls} rows={2} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} maxLength={5000} /></Field>
+      <div className="flex justify-end"><Button size="sm" onClick={save} disabled={needReason && !f.reason.trim()} data-testid="lead-save">저장</Button></div>
+      <div className="flex flex-wrap items-end gap-2 border-t border-blue-100 pt-2">
+        <select className={cx(inputCls, 'h-8 w-24 py-1')} value={act.type} onChange={(e) => setAct({ ...act, type: e.target.value })} aria-label="상담 종류">{['전화', '방문', '미팅', '메일', '문자', '기타'].map((x) => <option key={x}>{x}</option>)}</select>
+        <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={act.content} onChange={(e) => setAct({ ...act, content: e.target.value })} placeholder="상담 내용" aria-label="상담 내용" data-testid="lead-act" />
+        <Button size="sm" variant="secondary" onClick={addAct} disabled={!act.content.trim()} data-testid="lead-act-add">상담 기록</Button>
+      </div>
+      {!!data.statusLog?.length && <ul className="space-y-0.5 text-[11px] text-ink-2">{data.statusLog.map((g: any, i: number) => <li key={i}>{fmtDateTime(g.changed_at)} · {g.by ?? ''} · {g.from_status ?? '—'} → {g.to_status}{g.reason ? ` (${g.reason})` : ''}</li>)}</ul>}
+    </div>
+  );
+}
+
+function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange?: () => void }) {
+  const { data, error, reload } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`);
   const [tab, setTab] = useState('info');
   const tabs: [string, string, any[] | null][] = data ? [['info', '정보', null], ['acts', `상담 ${data.activities.length}`, data.activities], ['timing', `시점 ${data.timing.length}`, data.timing], ['tasks', `업무 ${data.tasks.length}`, data.tasks],
     ['props', `제안 ${data.proposals.length}`, data.proposals], ['cons', `계약 ${data.contracts.length}`, data.contracts], ['work', `입찰 ${data.work.length}`, data.work], ['int', `관심사업 ${data.interests.length}`, data.interests]] : [];
@@ -58,7 +89,7 @@ function LeadDetail({ id, onClose }: { id: string; onClose: () => void }) {
         <div className="space-y-3" data-testid="sales-lead-detail">
           <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {data.lead.next}</span>}</div>
           <div className="flex flex-wrap gap-1 border-b border-line">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined}>{l}</button>)}</div>
-          {tab === 'info' ? <Raw row={data.raw} /> : <ul className="space-y-2">{(tabs.find((t) => t[0] === tab)?.[2] ?? []).map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Raw row={r} /></li>)}
+          {tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}<Raw row={data.raw} /></> : <ul className="space-y-2">{(tabs.find((t) => t[0] === tab)?.[2] ?? []).map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Raw row={r} /></li>)}
             {!(tabs.find((t) => t[0] === tab)?.[2] ?? []).length && <li className="text-xs text-ink-3">없음</li>}</ul>}
         </div>
       )}
@@ -69,17 +100,18 @@ function LeadDetail({ id, onClose }: { id: string; onClose: () => void }) {
 export function Leads({ initialId }: { initialId?: string }) {
   const [s, setS] = useState(''); const [status, setStatus] = useState(''); const [open, setOpen] = useState<string | null>(initialId ?? null);
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, status })}`, [s, status]);
+  async function newLead() { const name = prompt('새 리드(거래처) 이름'); if (!name?.trim()) return; try { const r = await api<{ id: string }>('/api/sales/leads', { body: { name: name.trim() } }); reload(); setOpen(r.id); } catch (e: any) { toast.error(e.message); } }
   if (error) return <ErrorBox error={error} retry={reload} />;
   const statuses = [...new Set((data?.leads ?? []).map((l: any) => String(l.status ?? '미정')))] as string[];
   return (
     <div className="space-y-3" data-testid="sales-leads">
-      <Head title="리드·거래처" meta={data}><Search value={s} onChange={setS} /><select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
+      <Head title="리드·거래처" meta={data}>{data?.readOnly === false && <Button size="sm" onClick={newLead} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} /><select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
       {!data ? <Skeleton rows={5} /> : (
         <div className="overflow-x-auto rounded-card border border-line bg-white shadow-card"><table className="w-full min-w-[720px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr><th className="p-2">이름</th><th className="p-2">단계</th><th className="p-2">우선</th><th className="p-2">시설</th><th className="p-2">지역</th><th className="p-2">담당</th><th className="p-2">다음 연락</th></tr></thead>
           <tbody>{data.leads.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={() => setOpen(l.id)} data-testid="sales-lead-row"><td className="p-2 font-medium">{l.name}</td><td className="p-2">{chip(l.status)}</td><td className="p-2 text-xs">{l.priority ?? ''}</td><td className="p-2 text-xs">{l.facility ?? ''}</td><td className="p-2 text-xs">{l.region ?? ''}</td><td className="p-2 text-xs">{l.owner ?? ''}</td><td className="p-2 text-xs tabular-nums">{l.next ?? ''}</td></tr>)}
             {!data.leads.length && <tr><td colSpan={7} className="p-6 text-center text-ink-3">리드가 없습니다</td></tr>}</tbody></table></div>
       )}
-      {open && <LeadDetail id={open} onClose={() => setOpen(null)} />}
+      {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
     </div>
   );
 }
@@ -94,7 +126,7 @@ export function Pipeline() {
       {!data ? <Skeleton rows={5} /> : <div className="flex gap-3 overflow-x-auto pb-2">{data.columns.map((c: any) => (
         <section key={c.status} className="w-60 shrink-0 rounded-card border border-line bg-slate-50 p-2"><h2 className="mb-2 text-xs font-semibold">{c.status} <span className="text-ink-3">{c.items.length}</span></h2>
           <ul className="space-y-1.5">{c.items.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-input border border-line bg-white p-2 text-left text-sm hover:border-blue-300"><span className="block truncate font-medium">{l.name}</span><span className="block truncate text-[11px] text-ink-2">{[l.owner, l.next && `연락 ${l.next}`].filter(Boolean).join(' · ')}</span></button></li>)}</ul></section>))}</div>}
-      {open && <LeadDetail id={open} onClose={() => setOpen(null)} />}
+      {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
     </div>
   );
 }

@@ -54,7 +54,7 @@ async function fetchKey(key: string, m: { kind: string; count: number; sha256: s
   // 미리보기 표본: 칸 이름만(값 없이) — 실제 매핑을 정하려고. 개인정보 키도 칸 이름만.
   const first = Array.isArray(value) ? value[0] : value;
   const sample = first && typeof first === 'object' ? Object.keys(first).slice(0, 30) : undefined;
-  const res: KeyResult = { key, kind: m.kind, expectedCount: m.count, expectedSha: m.sha256, count, sha: got, pageSha, countOk: count === m.count, shaOk: got === m.sha256 || (typeof value === 'string' && JSON.stringify(value) !== value && sha(JSON.stringify(value)) === m.sha256), sample };
+  const res: KeyResult = { key, kind: m.kind, expectedCount: m.count, expectedSha: m.sha256, count, sha: got, pageSha, countOk: count === m.count, shaOk: got === m.sha256 || (m.kind === 'missing' && count === 0 && m.sha256 === sha('')) /* 운영실은 빈 키를 sha256("") 로 보냄 */ || (typeof value === 'string' && JSON.stringify(value) !== value && sha(JSON.stringify(value)) === m.sha256), sample };
   // 해시는 받은 그대로 대조하고, 저장할 값은 전화번호를 가림(가려야 했던 개수를 알려 줌 — 0 이 정상)
   // 운영실 10/18: 모든 키에서 전화번호를 가려 보냄(대표번호 제외) — 워크인도 모든 키를 저장 전에 한 번 더 가림(가린 값·대표번호 15xx 는 그대로)
   { const n = { count: 0 }; value = maskPhones(value, n); if (n.count || PII_KEYS.has(key)) res.unmaskedPhones = n.count; }

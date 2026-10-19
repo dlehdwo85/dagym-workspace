@@ -11,6 +11,7 @@ const DATA = {
   'mkt:posts:v1': { kind: 'list', value: [{ id: 'p1', title: '가을 행사', status: 'published' }, { id: 'p2', title: '신규 회원' }, { id: 'p3', title: '리뷰 010-7777-8888 문의' }] },
   'mkt:library:v1': { kind: 'list', value: [{ id: 'L1', name: '가을 포스터.png', url: 'http://localhost:3219/blob/library/poster.png', size: 8, type: 'image/png', brand: '다짐', note: '메인 시안', usedIn: ['p1'], createdAt: '2026-10-01' }] },
   'mkt:call-clicks:first-seen:v1': { kind: 'string', value: '2026-10-01T00:00:00.000Z' },
+  'mkt:owner:actions:done:v1': { kind: 'missing', value: null, emptySha: true },
   'mkt:plan-state:v1': { kind: 'object', value: { week: '2026-W42', locked: false } },
   'mkt:call-records:v1': { kind: 'list', value: [{ phone: '010-1111-2222', at: '2026-10-10T01:00:00Z', source: 'ads', memo: '02 555 3344 로 다시 전화' }] },
 };
@@ -26,10 +27,10 @@ before(async () => {
     seen.push(req.url);
     const u = new URL(req.url, 'http://x');
     if (u.pathname === '/api/marketing/export/manifest') return res.end(JSON.stringify({ ok: true, generatedAt: '2026-10-18T01:00:00.000Z', frozen: false,
-      keys: Object.entries(DATA).map(([key, d]) => ({ key, kind: d.kind, count: Array.isArray(d.value) ? d.value.length : 1, bytes: 10, sha256: sha(d.value) })) }));
+      keys: Object.entries(DATA).map(([key, d]) => ({ key, kind: d.kind, count: d.kind === 'missing' ? 0 : Array.isArray(d.value) ? d.value.length : 1, bytes: 10, sha256: d.emptySha ? createHash('sha256').update('').digest('hex') : sha(d.value) })) }));
     const key = u.searchParams.get('key'), d = DATA[key], cur = Number(u.searchParams.get('cursor'));
     if (!d) { res.statusCode = 404; return res.end(JSON.stringify({ ok: false })); }
-    if (d.kind !== 'list') return res.end(JSON.stringify({ ok: true, key, kind: d.kind, items: d.value, sha256: sha(d.value) }));
+    if (d.kind !== 'list') return res.end(JSON.stringify({ ok: true, key, kind: d.kind, items: d.value, sha256: d.emptySha ? createHash('sha256').update('').digest('hex') : sha(d.value) }));
     let items = d.value.slice(cur, cur + 2);
     if (tamper && key === 'mkt:posts:v1' && cur === 0) items = items.slice(0, 1); // 한 건 빠짐
     return res.end(JSON.stringify({ ok: true, key, kind: 'list', total: d.value.length, cursor: cur, next: cur + 2 < d.value.length ? cur + 2 : null, items, sha256: sha(d.value) }));
@@ -53,7 +54,8 @@ test('미리보기·대조·적용·권한·보관 기간', async () => {
   assert.deepEqual([posts.count, posts.countOk, posts.shaOk], [3, true, true]);
   assert.deepEqual(posts.sample, ['id', 'title', 'status'], '칸 이름만');
   assert.ok(!JSON.stringify(pv).includes('010-1111-2222'), '미리보기에 전화번호 없음');
-  assert.equal(pv.results.filter((r) => r.missing).length, 14);
+  assert.equal(pv.results.filter((r) => r.missing).length, 13);
+  assert.deepEqual((({ count, shaOk }) => [count, shaOk])(pv.results.find((r) => r.key === 'mkt:owner:actions:done:v1')), [0, true], '빈 키(kind=missing) = sha256("") 도 일치');
   assert.deepEqual((({ count, countOk, shaOk }) => [count, countOk, shaOk])(pv.results.find((r) => r.key === 'mkt:call-clicks:first-seen:v1')), [1, true, true], '19번째 키(문자열)');
   assert.equal(seen.filter((x) => x.includes('mkt%3Aposts%3Av1')).length, 2, '페이지 2번');
   assert.equal((await sql`select count(*)::int n from ops_import_items`)[0].n, 0, '미리보기는 저장 없음');

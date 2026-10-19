@@ -129,3 +129,30 @@ test('전환 T-1: 동결 시점 원본 건수 → 정식 표 변환·대조 → 
   await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'close', tenant: 'default' });
   assert.equal((await ctx.owner.req('PATCH', `/api/sales/leads/${lead.id}`, { memo: 'x' })).status, 409, '닫으면 다시 잠김');
 });
+
+test('전환 T-5: 쓰기 열면 화면이 정식 표를 읽음 · 새 리드·상담 기록 · 다시 변환 막힘 · 적용은 공용 표만', async () => {
+  await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'convert', tenant: 'default' });
+  await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'open', tenant: 'default' });
+  assert.equal((await ctx.owner.req('POST', '/api/platform/sales-cutover', { action: 'convert', tenant: 'default' })).status, 409, '연 뒤 다시 변환 = 워크인 수정분 덮어쓰기 → 막음');
+  let L = await ctx.owner.ok('GET', '/api/sales/src?view=leads');
+  assert.equal(L.readOnly, false);
+  const created = await ctx.owner.ok('POST', '/api/sales/leads', { name: '새 거래처', region: '서울' });
+  L = await ctx.owner.ok('GET', '/api/sales/src?view=leads');
+  assert.ok(L.leads.some((l) => l.id === created.id && l.name === '새 거래처' && l.status === '신규리드'), '새 리드가 목록에');
+  await ctx.owner.ok('POST', `/api/sales/leads/${created.id}/activities`, { type: '방문', content: '현장 확인', date: '2026-10-19' });
+  await ctx.owner.ok('PATCH', `/api/sales/leads/${created.id}`, { status: '실패', reason: '경쟁사 계약' });
+  const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${created.id}`);
+  assert.equal(d.lead.status, '실패'); assert.equal(d.activities[0].content, '현장 확인');
+  assert.equal(d.statusLog[0].reason, '경쟁사 계약'); assert.ok(d.stages.includes('보류')); assert.equal(d.canAssign, true);
+  // 옮긴 리드(원본 id 기준)도 정식 id 로 열림 · 원본 담당 이름 유지
+  const old = L.leads.find((l) => l.name === '거래처 3');
+  assert.ok(old && /^[0-9a-f-]{36}$/.test(old.id), JSON.stringify(old));
+  // 적용(매일 가져오기)은 공용 표만 — 회사별 리드는 원본으로 덮이지 않음
+  leadsN = 25;
+  const ap = await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'apply', tenant: 'default' });
+  assert.ok(!ap.results.some((r) => r.tbl === 'leads'), '회사별 표는 건너뜀');
+  assert.equal((await sql`select count(*)::int n from sales_leads where tenant = 'default'`)[0].n, 21, '원본 20 + 새 1(원본이 25로 늘어도 회사별 표는 안 가져옴)');
+  await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'close', tenant: 'default' });
+  assert.equal((await ctx.owner.req('POST', '/api/sales/leads', { name: 'x' })).status, 409);
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=leads')).readOnly, true, '닫으면 다시 원본(옮긴 행) 읽기 전용');
+});

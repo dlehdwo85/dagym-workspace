@@ -16,6 +16,13 @@ const plus = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/S
 async function rows(scope: string, tbl: string, limit = 5000) {
   return (await db()<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = ${scope} and tbl = ${tbl} and not gone limit ${limit}`).map((r) => ({ ...r.row, __id: r.src_id }));
 }
+/** 전환 뒤(쓰기 열림): 리드는 정식 표(sales_leads)가 정본 — 원본 행 칸 이름으로 맞춰 돌려줌(화면 코드 그대로) */
+async function formalLeads(tenant: string, id?: string) {
+  const r = await db()<any[]>`select l.*, u.name as owner_name from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} ${id ? db()`and l.id = ${id}` : db()``} order by l.updated_at desc limit 5000`;
+  return r.map((l) => ({ ...(l.src ?? {}), __id: l.id, __src_id: l.src_id, __owner: l.owner_name ?? '', __owner_id: l.owner_id, name: l.name, sales_status: l.status, priority: l.priority, facility_type: l.facility_type, region: l.region,
+    next_contact_date: l.next_contact_date ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(l.next_contact_date) : null, contact_name: l.contact_name, phone: l.phone, expected_revenue: l.expected_revenue,
+    memo: l.memo, updated_at: l.updated_at }));
+}
 async function userNames(tenant: string) {
   const m = await db()<{ src_user_id: string; name: string | null }[]>`select m.src_user_id, coalesce(u.name, m.name) as name from sales_user_map m left join users u on u.id = m.user_id where m.tenant = ${tenant}`;
   return new Map(m.map((x) => [x.src_user_id, x.name ?? '']));
@@ -31,7 +38,7 @@ const lead = (r: any, names: Map<string, string>) => ({
   id: r.__id, name: pick(r, 'name', 'company_name', 'facility_name', 'title', 'organization') ?? '(이름 없음)', status: pick(r, 'sales_status', 'status', 'stage'),
   priority: PRIORITY[String(pick(r, 'priority') ?? '').toLowerCase()] ?? pick(r, 'priority'),
   facility: pick(r, 'facility_type', 'type', 'category'), region: pick(r, 'region', 'sido', 'area'), next: day(pick(r, 'next_contact_date', 'next_contact_at', 'next_action_date')),
-  owner: names.get(String(pick(r, 'owner_id', 'assigned_to', 'sales_owner_id', 'user_id') ?? '')) ?? null, revenue: pick(r, 'expected_revenue', 'expected_amount', 'estimated_revenue'),
+  owner: r.__owner !== undefined ? r.__owner || null : names.get(String(pick(r, 'owner_id', 'assigned_to', 'sales_owner_id', 'user_id') ?? '')) ?? null, ownerId: r.__owner_id ?? null, memo: r.__id && r.__owner !== undefined ? r.memo ?? null : undefined, revenue: pick(r, 'expected_revenue', 'expected_amount', 'estimated_revenue'),
   updated: day(pick(r, 'updated_at', 'created_at')), phone: pick(r, 'phone', 'contact_phone'), contact: pick(r, 'contact_name', 'manager_name'),
 });
 const notice = (r: any) => ({ id: r.__id, title: pick(r, 'title', 'notice_title', 'bid_name', 'name') ?? '(제목 없음)', agency: pick(r, 'issuer', 'agency', 'org_name', 'demand_agency', 'organization', 'buyer'),
@@ -44,13 +51,16 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
   const [applied] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
-  const meta = { readOnly: true, syncedAt: applied?.value?.tenant === t ? applied.value.at : null, imported: applied?.value?.tenant === t };
+  const { writesOpen } = await import('./cutover');
+  const formal = await writesOpen(t);
+  const meta = { readOnly: !formal, syncedAt: applied?.value?.tenant === t ? applied.value.at : null, imported: applied?.value?.tenant === t };
+  const leadRows = () => (formal ? formalLeads(t) : rows(t, 'leads'));
   const names = await userNames(t);
   const term = (q.q ?? '').trim().toLowerCase();
   const hit = (o: any) => !term || JSON.stringify(o).toLowerCase().includes(term);
 
   if (view === 'summary') {
-    const L = (await rows(t, 'leads')).map((r) => lead(r, names));
+    const L = (await leadRows()).map((r) => lead(r, names));
     const W = await rows(t, 'opportunity_work');
     const N = (await rows('global', 'procurement_notices', 20000)).map(notice).filter((n) => n.related);
     const live = L.filter((l) => !CLOSED.has(String(l.status))); // 종결(계약완료·보류·실패) 제외
@@ -62,11 +72,26 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       relatedNotices: N.length, newNotices7d: N.filter((n) => n.posted && n.posted >= plus(-7)).length }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses };
   }
   if (view === 'leads') {
-    const L = (await rows(t, 'leads')).map((r) => ({ ...lead(r, names), raw: r })).filter((l) => hit(l.raw) && (!q.status || String(l.status) === q.status));
+    const L = (await leadRows()).map((r) => ({ ...lead(r, names), raw: r })).filter((l) => hit(l.raw) && (!q.status || String(l.status) === q.status));
     return { ...meta, leads: L.map(({ raw: _, ...l }) => l).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
   }
   if (view === 'lead') {
     if (!q.id) throw badRequest('id 가 필요합니다');
+    if (formal) {
+      if (!/^[0-9a-f-]{36}$/i.test(q.id)) throw notFound();
+      const [r] = await formalLeads(t, q.id);
+      if (!r) throw notFound();
+      const srcId = r.__src_id as string | null;
+      const lid = q.id;
+      const recs = async (kind: string) => (await sql<any[]>`select id, data, occurred_at from sales_lead_records where tenant = ${t} and lead_id = ${lid} and kind = ${kind} order by occurred_at desc nulls last`).map((x) => ({ ...x.data, __id: x.id }));
+      const relSrc = async (tbl: string) => (srcId ? (await rows(t, tbl)).filter((x) => String(pick(x, 'lead_id')) === srcId) : []);
+      const log = await sql`select g.from_status, g.to_status, g.reason, g.changed_at, u.name as by from sales_status_log g left join users u on u.id = g.changed_by where g.lead_id = ${lid} order by g.changed_at desc limit 50`;
+      const people = await sql`select id, name from users where tenant = ${t} and status = 'active' and not is_demo order by name`;
+      const { src: _s, ...raw } = r;
+      return { ...meta, lead: lead(r, names), raw: Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith('__'))), activities: await recs('sales_activities'), timing: await recs('lead_opportunity_timing'),
+        interests: await recs('lead_business_interests'), tasks: await relSrc('tasks'), proposals: await recs('proposals'), contracts: await recs('contracts'), work: await relSrc('opportunity_work'),
+        statusLog: log, stages: STAGES, people, canAssign: ['owner', 'admin'].includes(u.role) };
+    }
     const [r] = await sql<{ row: any }[]>`select row from sales_src_rows where scope = ${t} and tbl = 'leads' and src_id = ${q.id}`;
     if (!r) throw notFound();
     const rel = async (tbl: string) => (await rows(t, tbl)).filter((x) => String(pick(x, 'lead_id')) === q.id);
@@ -74,7 +99,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       tasks: await rel('tasks'), proposals: await rel('proposals'), contracts: await rel('contracts'), work: await rel('opportunity_work') };
   }
   if (view === 'pipeline') {
-    const L = (await rows(t, 'leads')).map((r) => lead(r, names));
+    const L = (await leadRows()).map((r) => lead(r, names));
     const cols = new Map<string, typeof L>();
     for (const l of L) { const k = String(l.status ?? '미정'); cols.set(k, [...(cols.get(k) ?? []), l]); }
     const order = [...STAGES, ...[...cols.keys()].filter((k) => !STAGES.includes(k))];
@@ -115,7 +140,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     throw notFound();
   }
   if (view === 'regions') {
-    const L = (await rows(t, 'leads')).map((r) => lead(r, names));
+    const L = (await leadRows()).map((r) => lead(r, names));
     const m = new Map<string, { region: string; total: number; byStatus: Record<string, number> }>();
     for (const l of L) { const k = regionOf(l.region); const e = m.get(k) ?? { region: k, total: 0, byStatus: {} }; e.total++; e.byStatus[String(l.status ?? '미정')] = (e.byStatus[String(l.status ?? '미정')] ?? 0) + 1; m.set(k, e); }
     return { ...meta, regions: [...m.values()].sort((a, b) => (a.region === '지역 미정' ? 1 : b.region === '지역 미정' ? -1 : b.total - a.total)) };

@@ -94,7 +94,9 @@ export async function salesMigrateApply(u: SessionUser | null, tenant: string) {
     } catch (e: any) { results.push({ tbl, scope, src: null, dst: 0, ok: false, error: String(e?.message ?? e).slice(0, 200) }); }
   };
   for (const tbl of Object.keys(GLOBAL)) await doTable(tbl, 'global');
-  for (const tbl of TENANT) await doTable(tbl, 'tenant');
+  // 전환(쓰기 열림) 뒤에는 회사별 표를 다시 가져오지 않음 — 워크인이 정본. 공용 수집 표는 계속(원본 수집기가 계속 돎)
+  const open = !!(await sql<{ o: boolean }[]>`select writes_open as o from sales_cutover where tenant = ${tenant}`)[0]?.o;
+  if (!open) for (const tbl of TENANT) await doTable(tbl, 'tenant');
   // 사용자 연결: profiles → 워크인(이메일 일치, 없으면 대표)
   let users = { total: 0, matched: 0 };
   try {
