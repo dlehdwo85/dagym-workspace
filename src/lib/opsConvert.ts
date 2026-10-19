@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from './db';
 import { isAdmin } from './access';
 import { assertSpace } from './spaces';
-import { forbidden } from './errors';
+import { badRequest, forbidden } from './errors';
 import { audit } from './log';
 import { tenantOf, type SessionUser } from './types';
 
@@ -73,7 +73,8 @@ async function load(tenant: string) {
 }
 
 // ---------------- 운영실 자산 → 워크인 저장소 → 콘텐츠 버전 media (로컬 10/19: 승인 대기 전부 '시안 없음') ----------------
-const ASSET_KEYS = ['mkt:library:v1', 'mkt:media:v1', 'mkt:media-outputs:v1'];
+const ASSET_MAP_KEY = 'mkt:asset-map:v1';
+const ASSET_KEYS = ['mkt:library:v1', 'mkt:media:v1', 'mkt:media-outputs:v1', ASSET_MAP_KEY];
 type Asset = { id: string | null; url: string; name: string | null; type: string | null; cover: boolean; owner: string | null; libRef: string | null };
 const URL_KEYS = ['url', 'blobUrl', 'publicUrl', 'downloadUrl', 'fileUrl', 'src', 'href', 'path'];
 const MEDIA_EXT = /\.(jpe?g|png|gif|webp|heic|avif|mp4|mov|m4v|webm)(\?|#|$)/i;
@@ -84,7 +85,7 @@ function safeUrl(raw: string): string | null {
   const origin = opsOrigin();
   let u: URL;
   try { u = raw.startsWith('/') && origin ? new URL(raw, origin) : new URL(raw); } catch { return null; }
-  if (process.env.OPS_BLOB_TEST === '1') return u.href;
+  if (process.env.OPS_BLOB_TEST === '1') return /^https?:$/.test(u.protocol) ? u.href : null;
   if (u.protocol !== 'https:') return null;
   const hosts = [origin ? new URL(origin).hostname : '', ...String(process.env.OPS_ASSET_HOSTS ?? '').split(',').map((x) => x.trim())].filter(Boolean);
   return u.hostname.endsWith('.blob.vercel-storage.com') || hosts.includes(u.hostname) ? u.href : null;
@@ -107,8 +108,13 @@ function scanAssets(v: unknown, out: Asset[], owner: string | null, libKey: bool
 }
 function assetPlan(d: Awaited<ReturnType<typeof load>>, contents: Content[]) {
   const all: Asset[] = [];
-  for (const r of d.assetRows) if (r.key !== 'mkt:posts:v1') scanAssets(r.item, all, null, r.key === 'mkt:library:v1');
-  const byId = new Map<string, Asset>(); for (const a of all) if (a.id && !byId.has(a.id)) byId.set(a.id, a);
+  const byId = new Map<string, Asset>();
+  // 운영실 마케팅 세션이 준 'id → 주소' 목록(관리자가 올림)이 먼저 — 확장자·형식 검사 없이 주소만 허용 도메인 확인
+  for (const r of d.assetRows) if (r.key === ASSET_MAP_KEY) for (const m of normMap(r.item)) {
+    const url = safeUrl(m.url); if (url && !byId.has(m.id)) byId.set(m.id, { id: m.id, url, name: m.name, type: m.type, cover: m.cover, owner: null, libRef: null });
+  }
+  for (const r of d.assetRows) if (r.key !== 'mkt:posts:v1' && r.key !== ASSET_MAP_KEY) scanAssets(r.item, all, null, r.key === 'mkt:library:v1');
+  for (const a of all) if (a.id && !byId.has(a.id)) byId.set(a.id, a);
   const postsById = new Map((d.posts as Raw[]).filter((p) => p?.id).map((p) => [String(p.id), p]));
   const plan = new Map<string, Asset[]>(); const missing = new Set<string>();
   for (const c of contents) {
@@ -129,6 +135,36 @@ function assetPlan(d: Awaited<ReturnType<typeof load>>, contents: Content[]) {
     if (list.length) plan.set(`${c.srcKey}|${c.srcRef}`, list.slice(0, 20));
   }
   return { plan, missing: [...missing], found: all.length };
+}
+/** 'id → 주소' 목록 형식: { id: "주소" } · { id: { url, name, type } } · [{ id, url, name?, type? }] · { assets: [...] } */
+function normMap(v: unknown): { id: string; url: string; name: string | null; type: string | null; cover: boolean }[] {
+  const out: { id: string; url: string; name: string | null; type: string | null; cover: boolean }[] = [];
+  const one = (id: unknown, x: any) => {
+    const url = typeof x === 'string' ? x : URL_KEYS.map((k) => x?.[k]).find((y) => typeof y === 'string');
+    if (id != null && String(id).trim() && typeof url === 'string') out.push({ id: String(id).trim().slice(0, 200), url: url.trim(), name: typeof x === 'object' && x ? String(x.name ?? x.fileName ?? '') || null : null, type: typeof x === 'object' && x ? String(x.type ?? x.mimeType ?? '') || null : null, cover: !!(x && typeof x === 'object' && (x.cover || x.role === 'cover')) });
+  };
+  const arr = Array.isArray(v) ? v : Array.isArray((v as Raw)?.assets) ? (v as Raw).assets : null;
+  if (arr) for (const x of arr) one(x?.id ?? x?.assetId, x);
+  else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v as Raw)) one(k, x);
+  return out;
+}
+export const assetMapInput = z.object({ map: z.unknown() });
+/** 운영실 자산 'id → 주소' 목록 올리기(관리자, 바꾸면 통째로 교체) — 다음 [미리보기]·[옮기기]가 이 목록으로 자산을 찾음 */
+export async function saveAssetMap(u: SessionUser, i: z.infer<typeof assetMapInput>) {
+  await assertSpace(u, 'marketing');
+  if (!isAdmin(u)) throw forbidden('운영실 기록 변환은 관리자가 합니다');
+  const list = normMap(i.map);
+  if (!list.length) throw badRequest('id → 주소 목록을 찾지 못했습니다. { "자산id": "https://…" } 또는 [{ "id": "…", "url": "…" }] 형식으로 올려 주세요');
+  if (list.length > 5000) throw badRequest('한 번에 5,000개까지 올릴 수 있습니다');
+  const t = tenantOf(u); const sql = db();
+  await sql.begin(async (tx) => {
+    await tx`delete from ops_import_items where tenant = ${t} and key = ${ASSET_MAP_KEY}`;
+    await tx`insert into ops_import_items (tenant, key, idx, item) values (${t}, ${ASSET_MAP_KEY}, 0, ${tx.json(list as never)})`;
+  });
+  const bad = list.filter((m) => !safeUrl(m.url));
+  const hosts = [...new Set(bad.map((m) => { try { return new URL(m.url).hostname; } catch { return '(주소 형식 아님)'; } }))].slice(0, 5);
+  await audit(sql, u.id, 'ops_import.asset_map', 'tenant', null, { count: list.length, rejected: bad.length }).catch(() => {});
+  return { count: list.length, usable: list.length - bad.length, rejected: bad.length, rejectedHosts: hosts };
 }
 const FILE_EACH = 100 * 1024 * 1024;
 async function copyAssets(u: SessionUser, t: string, d: Awaited<ReturnType<typeof load>>, contents: Content[]) {

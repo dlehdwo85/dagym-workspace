@@ -192,13 +192,22 @@ async function ensureKeywords(a: NaverAcc, adgroupId: string, keywords: string[]
   const byKw = new Map<string, string>();
   for (const k of await list()) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
   const missing = keywords.filter((k) => !byKw.has(norm(k)));
+  // 운영 10/19: 200 응답인데 키워드가 하나도 안 생김 → 응답을 그대로 믿지 않고, 만든 뒤 그룹 목록으로 확인. 안 생긴 키워드는 하나씩 다시 보내 이유를 받음
+  // 네이버 키워드는 띄어쓰기를 구분하지 않음 → 보낼 때는 띄어 쓴 그대로 대신 붙여 씀(목록 비교도 띄어쓰기 무시)
+  const body = (ks: string[]) => ks.map((k) => ({ nccAdgroupId: adgroupId, keyword: k.replace(/\s+/g, ''), useGroupBidAmt: true, userLock: false }));
+  const take = (r: any) => { for (const k of (Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : [r])) if (kwId(k) && k?.keyword) byKw.set(norm(String(k.keyword)), kwId(k)); };
+  const why: string[] = [];
   if (missing.length) {
-    const made = await naverReq(a, 'POST', '/ncc/keywords', q, missing.map((k) => ({ nccAdgroupId: adgroupId, keyword: k, useGroupBidAmt: true, userLock: false })));
-    for (const k of (Array.isArray(made) ? made : Array.isArray(made?.data) ? made.data : [])) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
+    try { take(await naverReq(a, 'POST', '/ncc/keywords', q, body(missing))); } catch (e: any) { why.push(String(e?.message ?? e).slice(0, 200)); }
+    for (const k of await list()) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
+    for (const k of missing.filter((x) => !byKw.has(norm(x)))) {
+      try { const r = await naverReq(a, 'POST', '/ncc/keywords', q, body([k])); take(r); if (!byKw.has(norm(k))) why.push(`${k}: 응답에 키워드 id 없음 ${JSON.stringify(r).slice(0, 160)}`); }
+      catch (e: any) { why.push(`${k}: ${String(e?.message ?? e).slice(0, 200)}`); }
+    }
     if (missing.some((k) => !byKw.has(norm(k)))) for (const k of await list()) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
   }
   const ids = keywords.map((k) => byKw.get(norm(k)) ?? '');
-  if (!validIds(ids)) throw new HttpError(502, 'naver_keywords', `키워드 id 를 읽지 못했습니다: ${keywords.filter((_, i) => !ids[i]).join(', ')}`);
+  if (!validIds(ids)) throw new HttpError(502, 'naver_keywords', `네이버에 키워드를 만들지 못했습니다(${keywords.filter((_, i) => !ids[i]).join(', ')})${why.length ? ` — ${[...new Set(why)].slice(0, 3).join(' / ')}` : ''}`);
   return ids;
 }
 /** [키워드 다시 읽기]: 만든 뒤 키워드 id 가 비었으면 네이버에서 다시 읽어 저장(없으면 만듦) — 켜기·예산은 바꾸지 않음 */
@@ -209,9 +218,20 @@ export async function syncPlanKeywords(u: SessionUser, id: string) {
   if (!['created', 'active', 'paused'].includes(p.status) || !p.external?.adgroupId) throw new HttpError(409, 'plan_not_created', '네이버에 만든 뒤에 다시 읽을 수 있습니다');
   const a = await naverAcc(t, p.account_id);
   const before = p.external.keywordIds ?? null;
-  const keywordIds = await ensureKeywords(a, String(p.external.adgroupId), p.plan.keywords);
+  // 한 번 누름에 요청 2번(운영 10/19) — 2분 안에 진행 중인 다시 읽기가 있으면 409
+  const [lock] = await sql`update mkt_ad_plans set external = external || ${sql.json({ syncingAt: new Date().toISOString() } as never)}
+    where id = ${id} and coalesce((external->>'syncingAt')::timestamptz, 'epoch') < now() - interval '2 minutes' returning id`;
+  if (!lock) throw new HttpError(409, 'plan_busy', '이미 다시 읽는 중입니다 — 잠시 뒤 새로 고쳐 확인해 주세요');
+  let keywordIds: string[];
+  try { keywordIds = await ensureKeywords(a, String(p.external.adgroupId), p.plan.keywords); }
+  catch (e: any) {
+    const msg = String(e?.message ?? e).slice(0, 300);
+    await sql`update mkt_ad_plans set external = external - 'syncingAt', error = ${msg}, updated_at = now() where id = ${id}`;
+    await sql`insert into mkt_ad_changes (tenant, plan_id, kind, before, status, error, actor_id) values (${t}, ${id}, 'sync', ${sql.json({ keywordIds: before } as never)}, 'failed', ${msg}, ${u.id})`;
+    throw e;
+  }
   await sql.begin(async (tx) => {
-    await tx`update mkt_ad_plans set external = ${tx.json({ ...p.external, keywordIds } as never)}, updated_at = now() where id = ${id}`;
+    await tx`update mkt_ad_plans set external = ${tx.json({ ...p.external, keywordIds, syncingAt: undefined } as never)}, error = null, updated_at = now() where id = ${id}`;
     await tx`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up, actor_id) values (${t}, ${id}, 'sync', ${tx.json({ keywordIds: before } as never)}, ${tx.json({ keywordIds } as never)}, false, ${u.id})`;
   });
   return { ok: true, keywordIds };

@@ -92,7 +92,21 @@ function ConvertPanel() {
     <section className="rounded-card border border-violet-200 bg-violet-50/40 p-3 text-sm" data-testid="ops-convert">
       <div className="flex flex-wrap items-center gap-2"><h2 className="font-semibold">워크인 화면으로 옮기기</h2>
         <span className="text-xs text-ink-2">게시물·일일 항목 → 콘텐츠 캘린더(결정 기록 포함), 요청 → 승인 대기 아래 &lsquo;이전 요청 기록&rsquo;</span>
-        <span className="ml-auto flex gap-2"><Button size="sm" variant="secondary" onClick={() => run('preview')} disabled={busy} data-testid="ops-convert-preview">미리보기</Button>
+        <span className="ml-auto flex gap-2">
+          {/* 로컬 10/19: 게시물 assetIds 는 id 뿐 → 운영실 마케팅 세션이 준 'id → 주소' JSON 을 올리면 그걸로 시안 파일을 찾음 */}
+          <label className="inline-flex cursor-pointer items-center rounded-input border border-line bg-white px-2.5 py-1 text-xs font-medium hover:bg-slate-50" data-testid="ops-asset-map">
+            자산 주소 목록(JSON)
+            <input type="file" accept=".json,application/json" className="sr-only" disabled={busy} onChange={async (e) => {
+              const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+              setBusy(true);
+              try {
+                const x = await api<{ count: number; usable: number; rejected: number; rejectedHosts: string[] }>('/api/marketing/imported/asset-map', { body: { map: JSON.parse(await f.text()) } });
+                toast.ok(`자산 주소 ${x.count}개를 올렸습니다${x.rejected ? ` — 받을 수 없는 주소 ${x.rejected}개(${x.rejectedHosts.join(', ')})` : ''}`);
+                setR(await api<Conv>('/api/marketing/imported/convert', { body: { mode: 'preview' } }));
+              } catch (er: any) { toast.error(er instanceof SyntaxError ? 'JSON 형식이 아닙니다' : er.message); } finally { setBusy(false); }
+            }} />
+          </label>
+          <Button size="sm" variant="secondary" onClick={() => run('preview')} disabled={busy} data-testid="ops-convert-preview">미리보기</Button>
           <Button size="sm" onClick={() => run('apply')} disabled={busy || !r || (r.newContents + r.requests === 0 && !r.assets?.contents)} data-testid="ops-convert-apply">옮기기</Button></span></div>
       {r && (
         <div className="mt-2 space-y-1 text-xs" data-testid="ops-convert-result">

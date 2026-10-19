@@ -7,7 +7,7 @@ import { createHmac } from 'node:crypto';
 import { bootstrap, resetDb, startServer, testDb, tick } from '../helpers.mjs';
 
 const PORT = 3223;
-let srv, ctx, sql, fake, calls = [], seq = 0, failGroup = false;
+let srv, ctx, sql, fake, calls = [], seq = 0, failGroup = false, kwBroken = false;
 const kwStore = new Map(); // 그룹 → 키워드(가짜 네이버에 실제로 생긴 것)
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 before(async () => {
@@ -29,6 +29,9 @@ before(async () => {
       return send(200, { nccAdgroupId: 'grp-1', ...j });
     }
     // 운영 10/19: 생성 응답에서 id 를 못 읽어 'undefined' 저장 → 응답에 id 를 빼서 GET 으로 다시 읽는 길을 시험
+    // 운영 10/19 실계정: 200 인데 키워드가 안 생김(빈 응답) → 실패로 다루고 이유를 남겨야 함. 여러 개를 한 번에 보내면 안 생기고 하나씩은 생기는 경우도 흉내
+    if (req.method === 'POST' && path === '/ncc/keywords' && kwBroken === 'all') return send(200, []);
+    if (req.method === 'POST' && path === '/ncc/keywords' && kwBroken === 'bulk' && j.length > 1) return send(200, []);
     if (req.method === 'POST' && path === '/ncc/keywords') { const g = kwStore.get(u.searchParams.get('nccAdgroupId')) ?? []; for (const k of j) g.push({ nccKeywordId: `kw-${g.length + 1}`, keyword: k.keyword }); kwStore.set(u.searchParams.get('nccAdgroupId'), g); return send(200, j.map((k) => ({ keyword: k.keyword }))); }
     if (req.method === 'GET' && path === '/ncc/keywords') return send(200, kwStore.get(u.searchParams.get('nccAdgroupId')) ?? []);
     if (req.method === 'POST' && path === '/ncc/ads') return send(200, { nccAdId: `ad-${++seq}`, ...j });
@@ -92,7 +95,7 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   assert.ok(camp.after.campaignId);
   assert.equal(calls.find((c) => c.path === '/ncc/adgroups').body.adgroupType, 'WEB_SITE');
   assert.equal(calls.find((c) => c.path === '/ncc/adgroups').body.userLock, true);
-  assert.deepEqual(calls.find((c) => c.method === 'POST' && c.path === '/ncc/keywords').body.map((k) => k.keyword), ['동네 헬스장', 'PT 가격']);
+  assert.deepEqual(calls.find((c) => c.method === 'POST' && c.path === '/ncc/keywords').body.map((k) => k.keyword), ['동네헬스장', 'PT가격'], '네이버 키워드는 띄어쓰기 없이');
   assert.deepEqual(ok.external.keywordIds, ['kw-1', 'kw-2'], '생성 응답에 id 가 없어도 그룹에서 다시 읽음');
   assert.equal(calls.filter((c) => c.path === '/ncc/ads').length, 1);
   // 이미 'undefined' 로 저장된 세팅안 → [키워드 다시 읽기] = id 만 읽어 저장, 키워드 다시 안 만듦, 켜기 상태 그대로
@@ -104,6 +107,22 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   assert.equal(calls.filter((c) => c.method === 'PUT').length, 0, '켜기·예산 안 바꿈');
   assert.deepEqual((await sql`select external->'keywordIds' k, status from mkt_ad_plans where id = ${p.id}`).map((r) => [r.k, r.status])[0], [['kw-1', 'kw-2'], 'created']);
   assert.equal((await ctx.staffA.client.req('POST', `/api/marketing/ad-ops/plans/${p.id}/action`, { action: 'sync' })).status, 403);
+  // 운영 10/19: 키워드가 그룹에 하나도 없음 + 생성 200 빈 응답 → 502·이유·실패 기록, 하나씩은 되면 그걸로 채움, 동시 두 번은 한 번만
+  const grp = (await sql`select external->>'adgroupId' g from mkt_ad_plans where id = ${p.id}`)[0].g;
+  const saved = kwStore.get(grp); kwStore.set(grp, []);
+  await sql`update mkt_ad_plans set external = external || '{"keywordIds":["undefined"]}'::jsonb where id = ${p.id}`;
+  kwBroken = 'all';
+  const badSync = await ctx.owner.req('POST', `/api/marketing/ad-ops/plans/${p.id}/action`, { action: 'sync' });
+  assert.equal(badSync.status, 502); assert.match(badSync.body.error.message, /키워드를 만들지 못했습니다\(동네 헬스장, PT 가격\).*응답에 키워드 id 없음/);
+  const [fl] = await sql`select status, error from mkt_ad_changes where plan_id = ${p.id} and kind = 'sync' order by created_at desc limit 1`;
+  assert.equal(fl.status, 'failed'); assert.match(fl.error, /동네 헬스장/);
+  kwBroken = 'bulk';
+  const two = await Promise.all([1, 2].map(() => ctx.owner.req('POST', `/api/marketing/ad-ops/plans/${p.id}/action`, { action: 'sync' })));
+  assert.deepEqual(two.map((r) => r.status).sort(), [200, 409], JSON.stringify(two.map((r) => r.body)));
+  assert.equal(two.find((r) => r.status === 200).body.keywordIds.length, 2, '하나씩 보내서 만듦');
+  kwBroken = false; kwStore.set(grp, saved);
+  await sql`update mkt_ad_plans set external = external || '{"keywordIds":["kw-1","kw-2"]}'::jsonb where id = ${p.id}`;
+  await sql`delete from mkt_ad_changes where plan_id = ${p.id} and kind = 'sync' and created_at > now() - interval '1 minute' and status = 'failed'`;
   assert.equal((await ctx.owner.req('POST', `/api/marketing/ad-ops/plans/${p.id}/approve`, {})).status, 409, '두 번 만들지 않음');
   // 켜기(상한 안) → 끄기 → 예산 올림 → 되돌리기
   calls = [];
@@ -118,7 +137,7 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   assert.equal(calls.at(-1).body.dailyBudget, 10000, '되돌리기 = 전 값');
   ov = await ctx.owner.ok('GET', '/api/marketing/ad-ops');
   assert.equal(ov.plans.find((x) => x.id === p.id).status, 'active');
-  assert.deepEqual(ov.changes.map((c) => c.kind).slice(0, 6), ['budget', 'budget', 'enable', 'sync', 'create', 'create']);
+  assert.deepEqual(ov.changes.map((c) => c.kind).slice(0, 7), ['budget', 'budget', 'enable', 'sync', 'sync', 'create', 'create']);
   assert.equal(ov.changes[0].revert_of, budget.id);
   assert.equal((await ctx.staffA.client.ok('GET', '/api/marketing/ad-ops')).canEdit, false, '직원은 보기만');
   // 이번 달 광고비가 상한을 넘으면 tick 이 자동 중지 + 알림 1번, 켜기도 막힘

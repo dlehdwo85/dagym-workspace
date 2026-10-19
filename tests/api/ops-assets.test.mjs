@@ -53,4 +53,17 @@ test('자산 복사·표지 먼저·이어 붙이기·멱등·못 찾은 id 안�
   await ctx.owner.ok('POST', '/api/marketing/imported/convert', { mode: 'apply' });
   assert.deepEqual((await media('가을 행사', 'instagram')).media_ids, [own.id], '사람이 바꾼 시안은 덮어쓰지 않음');
   assert.equal((await sql`select count(*)::int n from library_files where ext_ref like 'ops-%'`)[0].n, 4, '파일은 한 번만 복사');
+  // 운영 10/19: posts.assetIds 가 id 뿐(68개 못 찾음) → 'id → 주소' JSON 올리기 → 찾아서 연결
+  await put('mkt:posts:v1', 1, { id: 'p2', brand: 'hl', title: '소개 1', status: 'pending', channels: ['INSTAGRAM'], assetIds: ['post-intro-1-01', 'post-intro-1-02'] });
+  let pv2 = await ctx.owner.ok('POST', '/api/marketing/imported/convert', { mode: 'preview' });
+  assert.ok(pv2.assets.missing.includes('post-intro-1-01'));
+  assert.equal((await ctx.staffA.client.req('POST', '/api/marketing/imported/asset-map', { map: {} })).status, 404, '공간 밖 직원');
+  assert.equal((await ctx.owner.req('POST', '/api/marketing/imported/asset-map', { map: 'x' })).status, 400);
+  const up = await ctx.owner.ok('POST', '/api/marketing/imported/asset-map', { map: { 'post-intro-1-01': `${B}/blob/intro1.png`, 'post-intro-1-02': { url: `${B}/blob/intro2.png`, name: '소개2.png' }, zz: 'ftp://nope/x.png' } });
+  assert.deepEqual([up.count, up.usable, up.rejected], [3, 2, 1]);
+  pv2 = await ctx.owner.ok('POST', '/api/marketing/imported/convert', { mode: 'preview' });
+  assert.ok(!pv2.assets.missing.includes('post-intro-1-01'));
+  const ap2 = await ctx.owner.ok('POST', '/api/marketing/imported/convert', { mode: 'apply' });
+  assert.equal(ap2.made, 1);
+  assert.deepEqual((await media('소개 1', 'instagram')).names, ['intro1.png', '소개2.png'], '목록의 주소로 복사·연결(원본 순서)');
 });

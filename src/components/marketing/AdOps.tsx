@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -27,10 +27,11 @@ export function AdOps() {
   const [capIn, setCapIn] = useState('');
   const [form, setForm] = useState<false | true | Plan>(false); // true = 새 세팅안, Plan = 고치기
   const [busy, setBusy] = useState<string | null>(null);
+  const running = useRef(false); // 두 번 눌러도 요청 한 번(운영 10/19 — 다시 읽기 요청 2번)
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={6} />;
   const pct = data.cap ? Math.min(100, (data.monthSpend / data.cap.monthlyCap) * 100) : 0;
-  async function run(key: string, fn: () => Promise<unknown>, ok: string) { setBusy(key); try { await fn(); toast.ok(ok); reload(); } catch (e: any) { toast.error(e.message); reload(); } finally { setBusy(null); } }
+  async function run(key: string, fn: () => Promise<unknown>, ok: string) { if (running.current) return; running.current = true; setBusy(key); try { await fn(); toast.ok(ok); reload(); } catch (e: any) { toast.error(e.message); reload(); } finally { setBusy(null); running.current = false; } }
   const saveCap = () => run('cap', () => api('/api/marketing/ad-ops/cap', { method: 'PUT', body: { monthlyCap: Number(capIn.replace(/\D/g, '')) } }), '월 광고비 상한을 저장했습니다');
   const reverted = new Set(data.changes.map((c) => c.revert_of).filter(Boolean));
   return (
