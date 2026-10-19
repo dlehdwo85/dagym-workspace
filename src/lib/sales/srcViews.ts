@@ -17,10 +17,12 @@ async function rows(scope: string, tbl: string, limit = 5000) {
   return (await db()<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = ${scope} and tbl = ${tbl} and not gone limit ${limit}`).map((r) => ({ ...r.row, __id: r.src_id }));
 }
 /** 전환 뒤(쓰기 열림): 리드는 정식 표(sales_leads)가 정본 — 원본 행 칸 이름으로 맞춰 돌려줌(화면 코드 그대로) */
+/** date 칸: 운영 DB 연결은 date 를 'YYYY-MM-DD' 문자열로, 시험 DB 는 Date 로 줄 수 있음 — 둘 다(핫픽스 10/19: 문자열을 format 해 500) */
+const ymdOf = (v: unknown) => (v == null || v === '' ? null : typeof v === 'string' ? v.slice(0, 10) : v instanceof Date && !Number.isNaN(v.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(v) : null);
 async function formalLeads(tenant: string, id?: string) {
   const r = await db()<any[]>`select l.*, u.name as owner_name from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} ${id ? db()`and l.id = ${id}` : db()``} order by l.updated_at desc limit 5000`;
   return r.map((l) => ({ ...(l.src ?? {}), __id: l.id, __src_id: l.src_id, __owner: l.owner_name ?? '', __owner_id: l.owner_id, name: l.name, sales_status: l.status, priority: l.priority, facility_type: l.facility_type, region: l.region,
-    next_contact_date: l.next_contact_date ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(l.next_contact_date) : null, contact_name: l.contact_name, phone: l.phone, expected_revenue: l.expected_revenue,
+    next_contact_date: ymdOf(l.next_contact_date), contact_name: l.contact_name, phone: l.phone, expected_revenue: l.expected_revenue,
     memo: l.memo, updated_at: l.updated_at }));
 }
 async function userNames(tenant: string) {

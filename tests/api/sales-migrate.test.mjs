@@ -141,6 +141,10 @@ test('전환 T-5: 쓰기 열면 화면이 정식 표를 읽음 · 새 리드·�
   assert.ok(L.leads.some((l) => l.id === created.id && l.name === '새 거래처' && l.status === '신규리드'), '새 리드가 목록에');
   await ctx.owner.ok('POST', `/api/sales/leads/${created.id}/activities`, { type: '방문', content: '현장 확인', date: '2026-10-19' });
   await ctx.owner.ok('PATCH', `/api/sales/leads/${created.id}`, { status: '실패', reason: '경쟁사 계약' });
+  // 핫픽스 10/19: 다음 연락일(date 칸)이 있는 리드가 있으면 현황·리드·파이프라인·지역이 500 이던 문제
+  await ctx.owner.ok('PATCH', `/api/sales/leads/${created.id}`, { nextContactDate: '2026-10-25' });
+  for (const view of ['summary', 'leads', 'pipeline', 'regions']) assert.equal((await ctx.owner.req('GET', `/api/sales/src?view=${view}`)).status, 200, view);
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads.find((l) => l.id === created.id).next, '2026-10-25');
   const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${created.id}`);
   assert.equal(d.lead.status, '실패'); assert.equal(d.activities[0].content, '현장 확인');
   assert.equal(d.statusLog[0].reason, '경쟁사 계약'); assert.ok(d.stages.includes('보류')); assert.equal(d.canAssign, true);
