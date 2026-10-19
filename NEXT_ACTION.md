@@ -1108,6 +1108,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - ③ 홈 '최근 활동' 카드 삭제 → 알림 화면 '활동' 탭(/api/notifications/activity, src/lib/activity.ts 공용). 그 자리에 월 미니 캘린더(src/components/HomeMonth.tsx): 날짜 점(일정 청록·업무 회색·지난 업무 빨강·영업/마케팅 공간 색), 누르면 그날 목록, 한 번 더 누르면/더블클릭 캘린더. PC 는 이번 주 오른쪽, 휴대폰은 이번 주 다음 접힌 '월' 줄(이번 주 7칸 → 펼치면 전체 월). 데이터는 캘린더와 같은 API(/api/events·/api/tasks·/api/spaces/agenda).
 - 다음: 대기열 ② AI 기밀 도구(list_confidential_suggestions·propose_set_confidential·propose_update_company_settings·현재 설정 보여 주기·안내 문구) → ④ 자료실 공동 편집 1단계.
 
+## 2026-10-19 클라우드 — 대기열 ② AI 비서 기밀·회사 설정 도구 (배포)
+- AI 비서 도구 4개(src/lib/ai/assistant.ts, 묶음 낱말 기밀·보안 등급·회사 설정·기밀 단어·업종·말투·자동 저장): `list_confidential_suggestions`(이름·본문 규칙이 기밀 후보로 표시했지만 미확정인 자료 — 기밀 편집 권한만, src/lib/library.ts listConfidentialSuggestions) · `propose_set_confidential`(파일 등급 기밀/내부/일반 제안 → [확인] 시 updateLibraryFile — 권한 규칙 그대로: 기밀 열람 없으면 남의 파일 기밀 지정 불가, 내리기는 기밀 편집 권한) · `get_company_settings`(관리자: 첨부 자동 저장·기밀 단어·AI 회사 정보) · `propose_update_company_settings`(바꿀 항목만, 기밀 단어는 전체 목록·빈 목록 = 기본값, 견적·제안서·소개서 같은 고객 문서 단어는 "보낼 때마다 한 번 확인" 경고 → [확인] 시 setAttachToLibrary·saveAiProfile). 제안 카드는 기존 목록·경고 칸을 그대로 씀.
+- 회사 설정 › 기밀 단어 안내 문구: "넣지 마세요" → "넣으면 보낼 때마다 한 번 확인하게 되니 꼭 필요할 때만" + AI 비서로 추가 가능 안내.
+- 시험 tests/api/ai-confidential.test.mjs(5건): 후보 목록·직원 403·제안→확인→기밀 확정·같은 등급 제안 없음·기록, 남의 파일 기밀 지정 403·기밀 내리기 403, 설정 보기(직원 403)·단어 추가+경고·자동 저장 끔·말투 → 반영, 기본값 복원·빈 제안 오류·직원 제안 차단.
+- 다음: ④ 자료실 공동 편집 1단계(Yjs+Tiptap, 유료 실시간 서비스 없이) → 미결 #47·#51·#62~66·#69·#71·#72.
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md

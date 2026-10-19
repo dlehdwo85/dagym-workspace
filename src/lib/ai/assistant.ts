@@ -9,7 +9,8 @@ import { listTasks, listQuery, getTaskDetail, createTask, updateTask, addComment
 import { listEvents, eventInput, createEvent, updateEvent, deleteEvent, findConflicts, loadEvent } from '../events';
 import { canSeeRevenue } from '../revenue';
 import { directory } from '../admin';
-import { listLibrary, loadLibraryFile, attachLibraryToTask, saveGeneratedFile, tenantOf, folderLevel, updateLibraryFile, organizeLibraryFile, cleanFolder } from '../library';
+import { listLibrary, loadLibraryFile, attachLibraryToTask, saveGeneratedFile, tenantOf, folderLevel, updateLibraryFile, organizeLibraryFile, cleanFolder, listConfidentialSuggestions, getAttachToLibrary, setAttachToLibrary, SEC_LABEL } from '../library';
+import { getAiProfile, saveAiProfile } from './persona';
 import { RANK } from '../menuPerms';
 import { writeXlsx } from '../xlsx';
 import { anthropicProvider, aiEnabled, modelFor, costUsd, usdKrw, type AiMessage, type AiProvider, type AiTool } from './provider';
@@ -183,6 +184,16 @@ const TOOLS: AiTool[] = [
 ];
 
 const WEB_TOOLS: AiTool[] = [
+  // 대기열 ②(2026-10-19): 기밀 후보 확인·기밀 지정 제안·회사 설정 보기/바꾸기 제안 — 모두 [확인] 뒤 반영, 권한은 서버가 검사
+  { name: 'list_confidential_suggestions', description: '자료실에서 이름·본문 규칙이 "기밀 후보"로 표시했지만 아직 기밀로 확정되지 않은 자료 목록(기밀 관리자만). "기밀로 해야 할 자료 있어?"·"기밀 후보 보여줘"에 쓴다.',
+    input_schema: { type: 'object', properties: { limit: { type: 'number', description: '최대 건수(기본 50)' } } } },
+  { name: 'propose_set_confidential', description: '자료실 파일의 보안 등급을 기밀(또는 내부·일반)로 바꾸기를 제안한다. 파일 id 는 list_confidential_suggestions 또는 search_library 로 찾는다. [확인] 후 실행.',
+    input_schema: { type: 'object', properties: { fileIds: { type: 'array', items: { type: 'string' }, description: '파일 id 목록(최대 50)' }, security: { type: 'string', enum: ['confidential', 'internal', 'public'], description: '바꿀 등급(기본 confidential)' } }, required: ['fileIds'] } },
+  { name: 'get_company_settings', description: '회사 설정 중 AI 가 바꿀 수 있는 항목의 현재 값(관리자만): 업무 첨부 자료실 자동 저장, 기밀 단어, AI 회사 정보(업종·사업·고객·말투·주의). 바꾸기 전에 먼저 본다.',
+    input_schema: { type: 'object', properties: {} } },
+  { name: 'propose_update_company_settings', description: '회사 설정 바꾸기를 제안한다(관리자만). 바꿀 항목만 넣는다: attachToLibrary(업무 첨부 자료실 자동 저장 켜기/끄기), confWords(기밀 단어 전체 목록 — 기존 목록에 더할 때는 get_company_settings 값에 추가해 전체를 보낸다, 빈 배열 = 기본값), industry·business·customers·tone·cautions(AI 회사 정보). [확인] 후 반영.',
+    input_schema: { type: 'object', properties: { attachToLibrary: { type: 'boolean', description: '업무 첨부를 자료실에도 자동 저장' }, confWords: { type: 'array', items: { type: 'string' }, description: '기밀로 분류할 파일 이름 단어 전체 목록' },
+      industry: str('업종'), business: str('사업 내용·방향'), customers: str('주요 고객'), tone: str('말투'), cautions: str('AI 가 주의할 점') } } },
   { type: 'web_search_20260209', name: 'web_search', max_uses: 5 } as never,
   { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 } as never,
 ];
@@ -194,6 +205,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 [할 수 있는 일 — 아래 도구로 되는 일을 "안 된다·화면에서 직접 하세요"라고 답하지 마세요(대표 지적 10/19 ②). 되는지 모르겠으면 도구 목록을 먼저 보고, 정말 도구가 없을 때만 안 된다고 하세요]
 - 업무: 찾기 search_tasks · 상세 get_task · 만들기 propose_create_task(한 사람)·propose_create_tasks(여러 사람 각각) · 고치기 propose_update_task(담당자 변경·마감일·마감 시각·상태·우선순위·제목) · 댓글 propose_comment · 자료 첨부 propose_attach_file
 - 일정: 보기 list_events · 빈 시간 find_free_time · 만들기 propose_create_event · 시간 변경·취소 propose_update_event
+- 기밀·회사 설정(관리자): 기밀 후보 list_confidential_suggestions · 등급 바꾸기 propose_set_confidential · 설정 보기 get_company_settings · 설정 바꾸기 propose_update_company_settings(기밀 단어·첨부 자동 저장·AI 회사 정보)
 - 자료실: 찾기 search_library · 읽기 read_library_file · 폴더 list_library_folders · 정리 propose_organize_files · 문서·엑셀 propose_create_document·propose_xlsx_report·run_file_task·fill_template
 - 사람·조직 list_people · 매출 revenue_summary(대표·본사)
 [지시 해석 — 대표 지적 10/19 ①] "○○한테/에게 ~하라고 해줘·시켜줘·전달해줘·맡겨줘·부탁해줘"는 기본이 업무 배정입니다: 담당 = ○○(list_people 로 id), 지시자 = 말한 사람, 마감은 말에서 해석(예: "다음주 금요일까지"), 제목은 시킬 일. propose_create_task 로 제안하세요. "메시지로·문자로·카톡으로·메일로"라고 분명히 말할 때만 메시지 전달로 봅니다(메시지 보내기 도구는 없으니 그때는 보낼 문구를 써 주세요).
@@ -629,6 +641,47 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       }
       return propose(c, 'organize_files', `자료실 정리: ${items.length}개 — ${moves[0]}${items.length > 1 ? ` 외 ${items.length - 1}개` : ''}`, { items }, { moves });
     }
+    case 'list_confidential_suggestions': {
+      const files = await listConfidentialSuggestions(u, Math.min(Math.max(Number(input.limit) || 50, 1), 100));
+      return { files: files.map((f) => ({ ...f, security: SEC_LABEL[f.security] })), note: files.length ? '기밀로 바꾸려면 propose_set_confidential 로 제안' : '기밀 후보가 없습니다' };
+    }
+    case 'propose_set_confidential': {
+      const i = z.object({ fileIds: z.array(z.string().uuid()).min(1).max(50), security: z.enum(['confidential', 'internal', 'public']).default('confidential') }).parse(input);
+      const lines: string[] = []; const items: { fileId: string; title: string; from: string }[] = [];
+      for (const id of [...new Set(i.fileIds)]) {
+        const f = await loadLibraryFile(u, id, 'meta'); // 볼 수 없는 자료면 404
+        if (f.security === i.security) continue;
+        items.push({ fileId: id, title: f.title, from: f.security });
+        lines.push(`${f.title} (${f.folder || '폴더 없음'}): ${SEC_LABEL[f.security as keyof typeof SEC_LABEL]} → ${SEC_LABEL[i.security]}`);
+      }
+      if (!items.length) return { ok: true, note: '이미 그 등급입니다 — 바꿀 것이 없습니다' };
+      return propose(c, 'set_security', `보안 등급 ${SEC_LABEL[i.security]}로: ${items.length}개 — ${items[0].title}${items.length > 1 ? ` 외 ${items.length - 1}개` : ''}`, { items, security: i.security }, { moves: lines });
+    }
+    case 'get_company_settings': {
+      const [a, p] = await Promise.all([getAttachToLibrary(u), getAiProfile(u)]); // 관리자(회사 정보 보기)만 — 아니면 403
+      return { attachToLibrary: a.on, confWords: a.confWords, confWordsDefault: a.confWordsDefault, industry: p.industry, business: p.business, customers: p.customers, tone: p.tone, cautions: p.cautions };
+    }
+    case 'propose_update_company_settings': {
+      const i = z.object({ attachToLibrary: z.boolean().optional(), confWords: z.array(z.string().trim().min(1).max(50)).max(200).optional(),
+        industry: z.string().max(200).optional(), business: z.string().max(4000).optional(), customers: z.string().max(4000).optional(), tone: z.string().max(1000).optional(), cautions: z.string().max(4000).optional() }).parse(input);
+      const { requireAnyMenu } = await import('../menuPerms');
+      await requireAnyMenu(u, ['company', 'ops'], 'edit'); // 제안 단계에서 먼저 막는다(실행 때 다시 검사)
+      const lines: string[] = []; const warnings: string[] = [];
+      const cur = await getAttachToLibrary(u);
+      if (i.attachToLibrary !== undefined) lines.push(`업무 첨부 자료실 자동 저장: ${cur.on ? '켬' : '끔'} → ${i.attachToLibrary ? '켬' : '끔'}`);
+      if (i.confWords) {
+        const next = [...new Set(i.confWords.map((x) => x.trim()).filter(Boolean))];
+        const added = next.filter((w) => !cur.confWords.includes(w)); const removed = cur.confWords.filter((w) => !next.includes(w));
+        lines.push(`기밀 단어: ${next.length ? `${next.length}개` : '기본값'}${added.length ? ` (+ ${added.join(', ')})` : ''}${removed.length ? ` (− ${removed.join(', ')})` : ''}`);
+        const outbound = added.filter((w) => /견적|제안서|회사 ?소개|소개서|안내문|카탈로그/.test(w));
+        if (outbound.length) warnings.push(`${outbound.join(', ')}: 고객에게 보내는 문서 단어라 이 단어가 든 파일을 밖으로 보낼 때마다 한 번 확인하게 됩니다`);
+        i.confWords = next;
+      }
+      const L: Record<string, string> = { industry: '업종', business: '사업 내용', customers: '주요 고객', tone: '말투', cautions: '주의할 점' };
+      for (const k of Object.keys(L) as (keyof typeof L)[]) if ((i as any)[k] !== undefined) lines.push(`AI 회사 정보 · ${L[k]}: ${clip(String((i as any)[k]), 120) || '(비움)'}`);
+      if (!lines.length) throw badRequest('바꿀 항목이 없습니다');
+      return propose(c, 'company_settings', `회사 설정 바꾸기: ${lines[0]}${lines.length > 1 ? ` 외 ${lines.length - 1}건` : ''}`, i, { moves: lines, warnings: warnings.length ? warnings : undefined });
+    }
   }
   throw badRequest(`모르는 도구: ${name}`);
 }
@@ -711,6 +764,7 @@ const BUNDLES: [RegExp, string[]][] = [
   [/일정|회의|미팅|약속|캘린더|시간|잡아|빈 ?시간|취소|연차|출장|방문/, ['find_free_time', 'propose_create_event', 'propose_update_event']],
   [/자료|파일|문서|엑셀|보고서|견적|양식|정리|폴더|PPT|피피티|워드|PDF|표|안내문|제안서|만들어/i, ['list_library_folders', 'propose_organize_files', 'propose_create_document', 'propose_xlsx_report', 'run_file_task', 'list_templates', 'read_template_layout', 'fill_template']],
   [/매출|지출|회원 ?수|실적/, ['revenue_summary']],
+  [/기밀|보안 ?등급|회사 ?설정|기밀 ?단어|업종|말투|사업 ?방향|고객층|주의 ?사항|자동 ?저장|설정/, ['list_confidential_suggestions', 'propose_set_confidential', 'get_company_settings', 'propose_update_company_settings']],
 ];
 const MORE_TOOLS: AiTool = { name: 'more_tools', description: '이번 질문에는 자주 쓰는 도구만 붙어 있다. 일정·자료·문서·매출 등 필요한 도구가 목록에 없으면 먼저 이 도구를 불러 모든 도구를 받는다("안 된다"고 답하기 전에 반드시).',
   input_schema: { type: 'object', properties: { reason: { type: 'string', description: '필요한 일' } } } } as AiTool;
@@ -932,6 +986,19 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
           await sql`update library_files set source = 'upload' where id = ${it.fileId} and source = 'ai_attach'`;
         }
         result = { files: done, link: done.length === 1 ? `/library?file=${done[0].id}` : `/library${done[0]?.folder ? `?folder=${encodeURIComponent(done[0].folder)}` : ''}` };
+        break;
+      }
+      case 'set_security': {
+        const done: string[] = [];
+        for (const it of x.items as { fileId: string }[]) { await updateLibraryFile(u, it.fileId, { security: x.security }); done.push(it.fileId); } // 등급 올리기·내리기 권한은 updateLibraryFile 이 검사
+        result = { files: done, security: x.security, link: done.length === 1 ? `/library?file=${done[0]}` : '/library' };
+        break;
+      }
+      case 'company_settings': {
+        const { attachToLibrary, confWords, ...profile } = x as { attachToLibrary?: boolean; confWords?: string[]; industry?: string; business?: string; customers?: string; tone?: string; cautions?: string };
+        if (attachToLibrary !== undefined || confWords !== undefined) await setAttachToLibrary(u, { on: attachToLibrary, confWords });
+        if (Object.values(profile).some((v) => v !== undefined)) await saveAiProfile(u, profile);
+        result = { link: '/admin/company' };
         break;
       }
       case 'create_event': { const r = await createEvent(u, eventInput.parse(x)); result = { eventId: r.id, link: `/calendar?event=${r.id}` }; break; }

@@ -297,6 +297,18 @@ export async function updateLibraryFile(u: SessionUser, id: string, i: z.infer<t
     await sql`insert into library_rules (tenant, file_name, mime_type, folder, tags, created_by) values (${tenantOf(u)}, ${f.file_name}, ${f.mime_type}, ${folder}, ${tags}, ${u.id})`;
   return { ok: true };
 }
+/** 대기열 ②(AI 기밀 도구): 이름·본문 규칙이 "기밀 후보"로 표시했지만 아직 기밀로 확정되지 않은 자료 — 기밀 편집 권한(기밀 관리자)만 본다 */
+export async function listConfidentialSuggestions(u: SessionUser, limit = 50) {
+  const sc = await secCtx(u);
+  if (!sc.confEdit) throw forbidden('"기밀 자료" 편집 권한이 있어야 기밀 후보를 볼 수 있습니다');
+  const base = await menuLevel(u, 'library'); const perms = await folderPerms(u);
+  const rows = await db()<{ id: string; title: string; folder: string; file_name: string; security: Security; created_by: string; created_at: Date; tags: string[] }[]>`
+    select id, title, folder, file_name, security, created_by, created_at, tags from library_files
+    where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready' and security_suggested = 'confidential'
+      and (security <> 'confidential' or security_confirmed = false) order by created_at desc limit ${limit * 2}`;
+  return rows.filter((f) => folderLevelOf(u.role, base, perms, f.folder) !== 'none' && canSeeSec(sc, u, f)).slice(0, limit)
+    .map((f) => ({ id: f.id, title: f.title, folder: f.folder, fileName: f.file_name, security: f.security, tags: f.tags, createdAt: f.created_at }));
+}
 export async function deleteLibraryFile(u: SessionUser, id: string) {
   const f = await loadLibraryFile(u, id);
   // 삭제 단계 권한이 있으면 누구 파일이든, 올리기·수정 단계면 내가 올린 파일만

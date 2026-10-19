@@ -426,6 +426,8 @@ await step('④ 캘린더 화면에서 매주 반복 일정 등록 → 주 보�
   const ev = owner.locator('.fc-timegrid-event', { hasText: '주간 운영 회의' }).first();
   await ev.waitFor();
   await ev.scrollIntoViewIfNeeded(); // 시간 보기 첫 위치 = 지금 - 1시간(대표 지적 10/19) → 10:00 일정이 칸 밖일 수 있음
+  await ev.evaluate((el) => el.scrollIntoView({ block: 'center' })); // 자정 직후엔 첫 위치가 맨 아래라 일정이 스크롤 칸 가장자리에 걸려 아래로 끌면 칸 밖 → 가운데로
+  await owner.waitForTimeout(200);
   await owner.screenshot({ path: `${SHOTS}/10-calendar-week.png` });
   const box = await ev.boundingBox();
   await owner.mouse.move(box.x + box.width / 2, box.y + 8); await owner.mouse.down();

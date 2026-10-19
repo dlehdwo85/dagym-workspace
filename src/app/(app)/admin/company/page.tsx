@@ -108,7 +108,7 @@ function AttachToLibrary() {
     {/* V38 4: 기밀 이름 규칙 — 내부 민감 단어만. 견적서·제안서처럼 고객에게 보내는 문서는 넣지 않는다(보낼 때마다 경고가 뜸) */}
     <div className="border-t border-line pt-3" data-testid="conf-words">
       <p className="font-semibold">기밀로 분류할 파일 이름 단어 {st.data.confWordsDefault && <span className="text-xs font-normal text-ink-3">(기본값)</span>}</p>
-      <p className="mt-0.5 text-xs text-ink-2">이 단어가 이름에 있으면 자료실에서 기밀로 분류되고, 밖으로 보낼 때 한 번 확인합니다. 견적서·제안서·회사소개처럼 고객에게 보내는 문서 단어는 넣지 마세요.</p>
+      <p className="mt-0.5 text-xs text-ink-2">이 단어가 이름에 있으면 자료실에서 기밀로 분류되고, 밖으로 보낼 때 한 번 확인합니다. 견적서·제안서·회사소개처럼 고객에게 보내는 문서 단어를 넣으면 보낼 때마다 한 번 확인하게 되니 꼭 필요할 때만 넣으세요. AI 비서에게 &ldquo;기밀 단어에 ○○ 추가해줘&rdquo;라고 해도 됩니다(확인 뒤 반영).</p>
       <textarea className={cx(inputCls, 'mt-2 min-h-20')} value={words ?? st.data.confWords.join(', ')} onChange={(e) => setWords(e.target.value)} aria-label="기밀 단어" />
       <div className="mt-2 flex gap-2">
         <Button size="sm" disabled={busy || words === null} onClick={() => saveWords((words ?? '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean))} data-testid="conf-words-save">저장</Button>
