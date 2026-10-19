@@ -27,6 +27,7 @@ import { quotesFlow } from './quotes.step.mjs';
 import { noticesFlow } from './notices.step.mjs';
 import { attendanceFlow } from './attendance.step.mjs';
 import { approvalsFlow } from './approvals.step.mjs';
+import { usageStatsFlow } from './usage-stats.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -2285,6 +2286,8 @@ await step('V30 ② 공지: 쓰기(중요·고정) → 직원 홈 카드 → 열
 await step('V30 ③ 출퇴근: 현장 등록 → 직원 홈 출근(위치 동의) 현장 안 → 퇴근 현장 밖 사유 → 관리자 표·월 요약·현장', () => attendanceFlow({ browser, owner, ctx, BASE, SHOTS, login }));
 
 await step('V30 ④ 결재 양식: 직원 휴가 신청 → 대표 결재 업무 승인 → 승인·연차 캘린더 자동 등록 → 양식 편집', () => approvalsFlow({ owner, staff, ctx, sql, BASE, SHOTS, addDays, today }));
+
+await step('V30 ⑤ 이용 현황: 사용량·요금제 → 이용 현황 탭(요약·날짜별·사용자 표·기간·엑셀)', () => usageStatsFlow({ owner, ctx, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

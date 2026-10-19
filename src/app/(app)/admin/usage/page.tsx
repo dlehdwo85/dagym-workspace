@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Gauge, HardDrive, Sparkles, Users } from 'lucide-react';
 import { api, useApi } from '@/components/client';
@@ -8,6 +8,7 @@ import { BillingSection } from '@/components/Billing';
 import { AiPeopleBudgets } from '@/components/AiPeopleBudgets';
 import { byPurposeRows } from '@/components/aiPurpose';
 import { TaskQuota } from '@/components/TaskQuota';
+import { UsageStats } from '@/components/UsageStats';
 import { IN_APP_BILLING_NOTE, useInApp } from '@/components/inApp';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -21,6 +22,8 @@ const krw = (usd: number, rate: number) => won(Math.round(usd * rate));
 export default function UsagePage() {
   const { data, error, loading, reload } = useApi<any>('/api/usage');
   const [req, setReq] = useState<{ planCode: string; addons: Record<string, number>; note: string } | null>(null);
+  const [tab, setTab] = useState<'plan' | 'stats'>('plan'); // V30 ⑤ 이용 현황 탭(?tab=stats)
+  useEffect(() => { if (new URLSearchParams(location.search).get('tab') === 'stats') setTab('stats'); }, []);
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 가입·변경·팩·결제창·가격을 보이지 않음(사용량만)
   async function send(e: React.FormEvent) {
     e.preventDefault(); if (!req) return;
@@ -35,7 +38,11 @@ export default function UsagePage() {
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <PageHeader title={inApp ? '사용량' : '사용량·요금제'} icon={Gauge} sub="회사 전체 저장공간·AI 요청·사용자 수. 한도를 넘어도 업무·일정은 그대로 쓰고, 새 파일 올리기·AI·초대만 멈춥니다."
-        actions={canEdit && !inApp && <Button onClick={() => setReq({ planCode: '', addons: {}, note: '' })} data-testid="plan-request">요금제 변경 요청</Button>} />
+        actions={canEdit && !inApp && tab === 'plan' && <Button onClick={() => setReq({ planCode: '', addons: {}, note: '' })} data-testid="plan-request">요금제 변경 요청</Button>} />
+      <div className="flex gap-1.5" role="tablist">
+        {([['plan', inApp ? '사용량' : '사용량·요금제'], ['stats', '이용 현황']] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs font-medium', tab === k ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2')} data-testid={`usage-tab-${k}`}>{l}</button>)}
+      </div>
+      {tab === 'stats' ? <UsageStats /> : <>
       {inApp && <p className="rounded-card border border-line bg-white p-4 text-sm text-ink-2 shadow-card" data-testid="in-app-billing-note">{IN_APP_BILLING_NOTE}</p>}
       {!inApp && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="current-plan">
         <div className="text-sm text-ink-2">현재 요금제</div>
@@ -139,6 +146,7 @@ export default function UsagePage() {
           </ul>
         )}
       </section>}
+      </>}
       <Modal open={!!req && !inApp} onClose={() => setReq(null)} title="요금제 변경 요청">
         {req && (
           <form onSubmit={send} className="space-y-3">
