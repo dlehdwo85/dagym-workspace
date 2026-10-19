@@ -4,12 +4,15 @@ import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const C = '#7C3AED';
+/** 네이버 소재 허용 문자(서버 검사와 같은 규칙) — 저장 전에 바로 표시 */
+const NAVER_OK = /^[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9 .,!?%&()+\-/:'"~@#*\[\]]$/;
+const badChars = (t: string) => [...new Set([...t].filter((c) => !NAVER_OK.test(c)))].join(' ');
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 type Plan = { id: string; account_id: string; kind: string; name: string; plan: { dailyBudget: number; bidAmt: number; channelId: string; keywords: string[]; ads: { headline: string; description: string; url: string }[] };
   status: string; external: Record<string, unknown>; error: string | null; created_at: string; approved_at: string | null; account_label: string; approved_by_name: string | null; issues: string[] };
 type Change = { id: string; plan_id: string | null; kind: string; before: any; after: any; money_up: boolean; status: string; error: string | null; revert_of: string | null; created_at: string; actor_name: string | null };
 type Data = { canEdit: boolean; cap: { monthlyCap: number; stoppedMonth: string | null } | null; monthSpend: number; month: string; accounts: { id: string; label: string; external_id: string }[]; plans: Plan[]; changes: Change[] };
-const STATUS: Record<string, [string, string]> = { draft: ['세팅안', 'bg-slate-100 text-ink-2'], created: ['만듦 · 꺼짐', 'bg-sky-50 text-sky-800'], active: ['켜짐', 'bg-emerald-50 text-emerald-800'],
+const STATUS: Record<string, [string, string]> = { draft: ['세팅안', 'bg-slate-100 text-ink-2'], creating: ['만드는 중', 'bg-sky-50 text-sky-800'], created: ['만듦 · 꺼짐', 'bg-sky-50 text-sky-800'], active: ['켜짐', 'bg-emerald-50 text-emerald-800'],
   paused: ['꺼짐', 'bg-amber-50 text-amber-800'], failed: ['만들기 실패', 'bg-red-50 text-red-800'] };
 const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable: '켜기', pause: '끄기', budget: '하루 예산 변경', auto_pause: '상한 도달 자동 중지' };
 const desc = (c: Change) => c.kind === 'budget' ? `${won(c.before?.dailyBudget)} → ${won(c.after?.dailyBudget)}` : c.kind === 'auto_pause' && c.after?.spend ? `이번 달 ${won(c.after.spend)} / 상한 ${won(c.after.cap)}` : '';
@@ -21,7 +24,7 @@ const desc = (c: Change) => c.kind === 'budget' ? `${won(c.before?.dailyBudget)}
 export function AdOps() {
   const { data, error, reload } = useApi<Data>('/api/marketing/ad-ops');
   const [capIn, setCapIn] = useState('');
-  const [form, setForm] = useState(false);
+  const [form, setForm] = useState<false | true | Plan>(false); // true = 새 세팅안, Plan = 고치기
   const [busy, setBusy] = useState<string | null>(null);
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={6} />;
@@ -62,6 +65,7 @@ export function AdOps() {
               {p.error && <p className="mt-1 break-words text-xs text-red-700">{p.error}</p>}
               {data.canEdit && (
                 <div className="mt-2 flex flex-wrap gap-2">
+                  {(p.status === 'draft' || p.status === 'failed') && <Button size="sm" variant="secondary" onClick={() => setForm(p)} data-testid="ad-plan-edit">수정</Button>}
                   {(p.status === 'draft' || p.status === 'failed') && <Button size="sm" disabled={!!p.issues.length || !data.cap || busy === p.id} data-testid="ad-plan-approve"
                     onClick={() => confirm(`'${p.name}' 을(를) 네이버에 꺼진 상태로 만들까요? 켜기 전에는 광고비가 나가지 않습니다.`) && run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/approve`, { body: {} }), '네이버에 꺼진 상태로 만들었습니다')}>승인하고 시작</Button>}
                   {(p.status === 'created' || p.status === 'paused') && <Button size="sm" disabled={busy === p.id} data-testid="ad-plan-enable"
@@ -89,20 +93,22 @@ export function AdOps() {
             </li>);
         })}{!data.changes.length && <li className="py-1.5 text-ink-3">아직 변경이 없습니다</li>}</ul>
       </section>
-      {form && <PlanForm accounts={data.accounts} onClose={() => setForm(false)} onDone={reload} />}
+      {form && <PlanForm accounts={data.accounts} edit={form === true ? undefined : form} onClose={() => setForm(false)} onDone={reload} />}
     </div>
   );
 }
 
-function PlanForm({ accounts, onClose, onDone }: { accounts: Data['accounts']; onClose: () => void; onDone: () => void }) {
-  const [f, setF] = useState({ accountId: accounts[0]?.id ?? '', name: '', dailyBudget: '10000', bidAmt: '300', channelId: '', keywords: '', ads: [{ headline: '', description: '', url: 'https://' }] });
+function PlanForm({ accounts, edit, onClose, onDone }: { accounts: Data['accounts']; edit?: Plan; onClose: () => void; onDone: () => void }) {
+  const [f, setF] = useState(edit
+    ? { accountId: edit.account_id, name: edit.name, dailyBudget: String(edit.plan.dailyBudget), bidAmt: String(edit.plan.bidAmt), channelId: edit.plan.channelId, keywords: edit.plan.keywords.join(', '), ads: edit.plan.ads.map((a) => ({ ...a })) }
+    : { accountId: accounts[0]?.id ?? '', name: '', dailyBudget: '10000', bidAmt: '300', channelId: '', keywords: '', ads: [{ headline: '', description: '', url: 'https://' }] });
   const ch = useApi<{ channels: { id: string; name: string; url: string | null; type: string }[] }>(f.accountId ? `/api/marketing/ad-ops/channels?accountId=${f.accountId}` : null, [f.accountId]);
   const [busy, setBusy] = useState(false);
   const setAd = (k: number, patch: Partial<(typeof f.ads)[number]>) => setF({ ...f, ads: f.ads.map((a, i) => (i === k ? { ...a, ...patch } : a)) });
   async function save(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
     try {
-      const r = await api<{ issues: string[] }>('/api/marketing/ad-ops/plans', { body: { accountId: f.accountId, name: f.name, dailyBudget: Number(f.dailyBudget), bidAmt: Number(f.bidAmt), channelId: f.channelId,
+      const r = await api<{ issues: string[] }>(edit ? `/api/marketing/ad-ops/plans/${edit.id}` : '/api/marketing/ad-ops/plans', { method: edit ? 'PUT' : 'POST', body: { accountId: f.accountId, name: f.name, dailyBudget: Number(f.dailyBudget), bidAmt: Number(f.bidAmt), channelId: f.channelId,
         keywords: f.keywords.split(/[\n,]/).map((s) => s.trim()).filter(Boolean), ads: f.ads } });
       r.issues.length ? toast.error(`저장했습니다 — 검사 ${r.issues.length}건을 고쳐야 시작할 수 있습니다`) : toast.ok('세팅안을 저장했습니다');
       onDone(); onClose();
@@ -110,7 +116,7 @@ function PlanForm({ accounts, onClose, onDone }: { accounts: Data['accounts']; o
   }
   const len = (s: string) => [...s].length;
   return (
-    <Modal open onClose={onClose} title="네이버 파워링크 세팅안">
+    <Modal open onClose={onClose} title={edit ? '세팅안 고치기' : '네이버 파워링크 세팅안'}>
       <form onSubmit={save} className="grid gap-3 text-sm" data-testid="ad-plan-form">
         <Field label="광고 계정"><select className={inputCls} value={f.accountId} onChange={(e) => setF({ ...f, accountId: e.target.value, channelId: '' })}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></Field>
         <Field label="캠페인 이름"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={60} data-testid="ad-plan-name" /></Field>
@@ -130,7 +136,7 @@ function PlanForm({ accounts, onClose, onDone }: { accounts: Data['accounts']; o
             <input className={inputCls} value={a.headline} onChange={(e) => setAd(k, { headline: e.target.value })} placeholder={`제목(15자) ${len(a.headline)}/15`} aria-label={`소재 ${k + 1} 제목`} required data-testid="ad-plan-headline" />
             <input className={inputCls} value={a.description} onChange={(e) => setAd(k, { description: e.target.value })} placeholder={`설명(45자) ${len(a.description)}/45`} aria-label={`소재 ${k + 1} 설명`} required data-testid="ad-plan-desc" />
             <input className={inputCls} value={a.url} onChange={(e) => setAd(k, { url: e.target.value })} aria-label={`소재 ${k + 1} 연결 주소`} required data-testid="ad-plan-url" />
-            <span className={cx('text-[11px]', len(a.headline) > 15 || len(a.description) > 45 ? 'text-red-700' : 'text-ink-3')}>제목 {len(a.headline)}/15 · 설명 {len(a.description)}/45</span>
+            <span className={cx('text-[11px]', len(a.headline) > 15 || len(a.description) > 45 || badChars(a.headline + a.description) ? 'text-red-700' : 'text-ink-3')} data-testid="ad-plan-len">제목 {len(a.headline)}/15 · 설명 {len(a.description)}/45{badChars(a.headline + a.description) ? ` · 쓸 수 없는 문자 ${badChars(a.headline + a.description)}` : ''}</span>
           </fieldset>))}
         {f.ads.length < 3 && <Button type="button" size="sm" variant="secondary" className="justify-self-start" onClick={() => setF({ ...f, ads: [...f.ads, { headline: '', description: '', url: f.ads[0].url }] })}>소재 추가(3개까지)</Button>}
         <p className="text-[11px] text-ink-3">저장해도 네이버에는 아직 만들지 않습니다. 목록에서 검사 결과를 확인하고 [승인하고 시작]을 누르면 꺼진 상태로 만들어집니다.</p>

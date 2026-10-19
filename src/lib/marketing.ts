@@ -14,11 +14,40 @@ const zChannel = z.enum(Object.keys(CHANNELS) as [keyof typeof CHANNELS, ...(key
 const uuidOr404 = (id: string) => { if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('찾을 수 없습니다'); };
 const seoulDate = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 /** 승인 마감 = 게시일 HH:00(서울, 회사 설정 — 기본 09:00) */
-export const approvalDeadline = (scheduledAt: Date | string | null, hour = 9) => scheduledAt ? new Date(`${seoulDate(new Date(scheduledAt))}T${String(hour).padStart(2, '0')}:00:00+09:00`) : null;
+/** 승인 마감 = 게시 당일 HH:00 KST(기본 09:00), 게시 시각이 더 이르면 게시 시각(운영실 규칙, OPS_ROOM_SCREEN_SPEC 3-2) */
+export const approvalDeadline = (scheduledAt: Date | string | null, hour = 9) => {
+  if (!scheduledAt) return null;
+  const at = new Date(scheduledAt);
+  const d = new Date(`${seoulDate(at)}T${String(hour).padStart(2, '0')}:00:00+09:00`);
+  return at < d ? at : d;
+};
+/** 승인 대기 숫자 — 메뉴 배지·현황 머리줄·승인함이 같은 계산: 승인 대기 + 마감 안 지남 + 시험 아님 */
+export const APPROVABLE_SQL = (hour: number) => db()`status = 'pending' and not is_test and (scheduled_at is null or least(scheduled_at, ((scheduled_at at time zone 'Asia/Seoul')::date + make_interval(hours => ${hour})) at time zone 'Asia/Seoul') >= now())`;
+export async function approvableCount(tenant: string) {
+  const st = await (await import('./mktAuto')).settingsOf(tenant);
+  const [r] = await db()<{ n: number }[]>`select count(*)::int as n from mkt_contents where tenant = ${tenant} and ${APPROVABLE_SQL(st.approval_hour)}`;
+  return r.n;
+}
 
 async function mediaOk(u: SessionUser, ids: string[]) {
   const { loadLibraryFile } = await import('./library');
   for (const id of ids) await loadLibraryFile(u, id, 'meta'); // 볼 수 없는 자료는 404
+}
+
+/** 현황 머리줄·오늘 게시(운영실 홈 2-1): 승인할 시안(오늘 게시 먼저 → 게시 시각순) · 오늘 게시(예정·승인 대기·게시됨·지연) · 없으면 다음 게시 */
+async function homeNow(t: string) {
+  const sql = db();
+  const st = await (await import('./mktAuto')).settingsOf(t);
+  const cols = sql`c.id, c.title, c.channel, c.kind, c.status, c.scheduled_at, c.current_version, c.published_url, b.name as brand, b.color as brand_color`;
+  const queue = await sql<any[]>`select ${cols}, ((c.scheduled_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date) as today
+    from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.tenant = ${t} and ${APPROVABLE_SQL(st.approval_hour)}
+    order by ((c.scheduled_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date) desc nulls last, c.scheduled_at nulls last limit 50`;
+  const todayPosts = await sql<any[]>`select ${cols} from mkt_contents c left join mkt_brands b on b.id = c.brand_id
+    where c.tenant = ${t} and not c.is_test and c.status in ('pending', 'changes', 'approved', 'published') and (c.scheduled_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date order by c.scheduled_at`;
+  const [next] = todayPosts.length ? [null] : await sql<any[]>`select ${cols} from mkt_contents c left join mkt_brands b on b.id = c.brand_id
+    where c.tenant = ${t} and not c.is_test and c.status in ('pending', 'approved') and c.scheduled_at > now() order by c.scheduled_at limit 1`;
+  const dl = (r: any) => ({ ...r, deadline: approvalDeadline(r.scheduled_at, st.approval_hour) });
+  return { queue: queue.map(dl), todayPosts: todayPosts.map(dl), next: next ? dl(next) : null, approvalHour: st.approval_hour };
 }
 
 export async function overview(u: SessionUser) {
@@ -38,7 +67,7 @@ export async function overview(u: SessionUser) {
       count(*) filter (where status = 'approved' and (scheduled_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date)::int as post_today,
       count(*) filter (where status = 'published' and (published_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date)::int as posted_today
     from mkt_contents where tenant = ${t} and not is_test`;
-  return { ...c, calls: k.calls, todayRow: d };
+  return { ...c, pending: await approvableCount(t), calls: k.calls, todayRow: d, home: await homeNow(t) };
 }
 
 export async function listBrands(u: SessionUser) { await assertSpace(u, 'marketing'); return { brands: await db()`select id, name, color from mkt_brands where tenant = ${tenantOf(u)} order by name` }; }
@@ -53,8 +82,11 @@ export async function createBrand(u: SessionUser, i: z.infer<typeof brandInput>)
 export async function listContents(u: SessionUser, q: { view?: string; from?: string; to?: string; day?: string }) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
-  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, b.name as brand, b.color as brand_color,
-      v.body, cardinality(v.media_ids) as media_count, u.name as created_by_name, c.updated_at
+  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.is_test, b.name as brand, b.color as brand_color,
+      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, u.name as created_by_name, c.updated_at,
+      (select max(d.version) from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version) as reapprove_from,
+      (select json_build_object('decision', d.decision, 'comment', d.comment, 'at', d.decided_at, 'version', d.version, 'by', du.name) from mkt_decisions d left join users du on du.id = d.decided_by
+        where d.content_id = c.id order by d.decided_at desc limit 1) as last_decision
     from mkt_contents c left join mkt_brands b on b.id = c.brand_id
     left join mkt_versions v on v.content_id = c.id and v.version = c.current_version
     left join users u on u.id = c.created_by
@@ -71,7 +103,9 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
       and (${q.to ?? ''} = '' or c.scheduled_at < (${q.to || '2999-01-01'}::date + 1))
     order by c.scheduled_at nulls last, c.created_at desc limit 300`;
   const st = await (await import('./mktAuto')).settingsOf(t);
-  return { contents: rows.map((r) => ({ ...r, deadline: r.scheduled_at ? (approvalDeadline(r.scheduled_at, st.approval_hour)) : null })) };
+  const now = Date.now();
+  return { approvalHour: st.approval_hour, canDecide: isAdmin(u), contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st.approval_hour) : null;
+    return { ...r, deadline, late: !!deadline && deadline.getTime() < now && ['pending', 'changes'].includes(r.status) }; }) };
 }
 
 export async function getContent(u: SessionUser, id: string) {
@@ -135,7 +169,7 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
   await assertSpace(u, 'marketing');
   uuidOr404(id);
   if (!isAdmin(u)) throw forbidden('승인은 관리자가 합니다');
-  if (i.decision !== 'approve' && !i.comment?.trim()) throw badRequest(i.decision === 'changes' ? '무엇을 고칠지 적어 주세요' : '보류 이유를 적어 주세요');
+  if (i.decision !== 'approve' && (i.comment?.trim().length ?? 0) < 2) throw badRequest(i.decision === 'changes' ? '무엇을 고칠지 두 글자 이상 적어 주세요' : '보류 이유를 두 글자 이상 적어 주세요');
   const sql = db();
   const res = await sql.begin(async (tx) => {
     const [c] = await tx<any[]>`select id, title, current_version, status, created_by, channel from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;

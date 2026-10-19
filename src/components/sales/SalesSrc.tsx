@@ -42,7 +42,7 @@ export function SalesHome() {
   const k = data.kpi;
   const bids = data.bidsOn !== false; // 입찰·공고 끈 회사는 입찰 카드 숨김
   const cards: [string, number, string][] = [['리드', k.leads, '/s/sales/leads'], ['7일 안 연락', k.dueSoon, '/s/sales/leads'], ['연락 지남', k.overdue, '/s/sales/leads'],
-    ...(bids ? [['진행 중 입찰', k.bidsWorking, '/s/sales/bids?tab=working'], ['관련 공고', k.relatedNotices, '/s/sales/bids'], ['새 공고(7일)', k.newNotices7d, '/s/sales/bids']] as [string, number, string][] : [])];
+    ...(bids ? [['진행 중 입찰', k.bidsWorking, '/s/sales/bids?tab=working'], ['관련 공고', k.relatedNotices, '/s/sales/bids'], ['최근 7일 공고(공고일)', k.newNotices7d, '/s/sales/bids?tab=all']] as [string, number, string][] : [])];
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="space-home-sales">
       <Head title="워크인 · 영업" meta={data} />

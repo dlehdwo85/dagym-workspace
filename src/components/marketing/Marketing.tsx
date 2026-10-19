@@ -7,6 +7,7 @@ import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, to
 import { PublishHelper } from './PublishHelper';
 import { TodayRow } from '@/components/sales/SalesSrc';
 import { MediaPick } from './MediaPick';
+import { ApprovalCard, BrandChip, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent } from './ApprovalCard';
 
 const C = '#7C3AED';
 export const CHANNELS: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
@@ -16,11 +17,36 @@ type Content = { id: string; title: string; channel: string; status: string; sch
 
 /** V41 4-2 마케팅 개요: 숫자 카드 4개 + 운영실(SSO) */
 export function MarketingHome({ ssoHref }: { ssoHref: string }) {
-  const { data } = useApi<{ pending: number; today: number; week: number; changes: number; calls: number; todayRow?: { date: string; produced: number; approve_soon: number; post_today: number; posted_today: number } }>('/api/marketing/overview');
+  const { data, reload } = useApi<{ pending: number; today: number; week: number; changes: number; calls: number; todayRow?: { date: string; produced: number; approve_soon: number; post_today: number; posted_today: number };
+    home?: { queue: CardContent[]; todayPosts: CardContent[]; next: CardContent | null } }>('/api/marketing/overview');
+  const [allRows, setAllRows] = useState(false);
   const cards: [string, number | undefined, string][] = [['승인 대기', data?.pending, '/s/marketing/approvals'], ['오늘 게시', data?.today, '/s/marketing/calendar'], ['이번 주 예약', data?.week, '/s/marketing/calendar'], ['새 전화 문의', data?.calls, '/s/marketing/calls']];
   return (
     <div className="mx-auto max-w-4xl space-y-4" data-testid="space-home-marketing">
       <h1 className="text-xl font-bold" style={{ color: C }}>워크인 · 마케팅</h1>
+      {data?.home && (
+        <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-now">
+          <p className="text-xs text-ink-2">{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short' }).format(new Date())}</p>
+          <h2 className="text-lg font-bold" data-testid="mkt-home-head">{data.pending ? <>승인할 시안 <span className="text-orange-700">{data.pending}건</span></> : '지금 대표가 할 일 없음 ✓'}</h2>
+          {data.home.queue.length > 0 && <ul className="mt-2 divide-y divide-line">{(allRows ? data.home.queue : data.home.queue.slice(0, 7)).map((c) => (
+            <li key={c.id} className="flex flex-wrap items-center gap-1.5 py-2 text-sm" data-testid="mkt-home-row">
+              <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-800">승인</span>
+              <Link href={`/s/marketing/approvals?c=${c.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{c.title}</Link>
+              <span className="w-full text-xs text-ink-2">{[c.brand, formatLabel(c.channel, c.kind)].filter(Boolean).join(' ')} · {whenLabel(c.scheduled_at)} 게시{c.deadline ? ` · ${deadlineLabel(c.deadline, c.scheduled_at)?.split('까지')[0]}까지 승인` : ''}{c.current_version > 1 ? ` · 수정본 v${c.current_version}` : ''}</span>
+            </li>))}</ul>}
+          {data.home.queue.length > 7 && !allRows && <button type="button" className="mt-1 text-xs underline" onClick={() => setAllRows(true)}>나머지 {data.home.queue.length - 7}건 펼치기</button>}
+          {data.home.queue.length > 0 ? <Link href="/s/marketing/approvals" className="mt-2 block text-xs font-medium" style={{ color: C }}>승인 {data.pending}건 모두 보기 →</Link>
+            : <p className="mt-1 text-xs text-ink-3">✓ 지금 승인할 시안이 없습니다. 새 시안이 올라오면 여기에 바로 보입니다.</p>}
+        </section>)}
+      {data?.home && (
+        <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-today">
+          <h2 className="text-sm font-semibold">오늘 게시 {data.home.todayPosts.length}건 <span className="font-normal text-ink-3">· 게시됨 {data.home.todayPosts.filter((c) => c.status === 'published').length}</span></h2>
+          {data.home.todayPosts.length ? <ul className="mt-1 divide-y divide-line">{data.home.todayPosts.map((c) => {
+            const st = c.status === 'published' ? 'published' : c.status === 'approved' ? 'planned' : c.deadline && new Date(c.deadline).getTime() < Date.now() ? 'late' : 'pending';
+            return <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5 text-sm" data-testid="mkt-today-row"><span className="w-12 tabular-nums text-ink-2">{whenLabel(c.scheduled_at).replace('오늘 ', '')}</span>
+              <span className="text-xs text-ink-2">{[c.brand, formatLabel(c.channel, c.kind)].filter(Boolean).join(' ')}</span><span className="min-w-0 flex-1 truncate">{c.title}</span><StatusChip s={st} /></li>; })}</ul>
+            : <p className="mt-1 text-xs text-ink-3" data-testid="mkt-next-post">오늘 예정된 게시가 없습니다.{data.home.next ? ` 다음 게시: ${whenLabel(data.home.next.scheduled_at)} · ${[data.home.next.brand, formatLabel(data.home.next.channel, data.home.next.kind)].filter(Boolean).join(' ')} · ${data.home.next.title}` : ''}</p>}
+        </section>)}
       {data?.todayRow && <TodayRow date={data.todayRow.date} color={C} cards={[['오늘 제작된 시안', data.todayRow.produced, '/s/marketing/approvals?day=produced'],
         ['오늘 승인할 것', data.todayRow.approve_soon, '/s/marketing/approvals?day=soon', '내일까지 게시 예정'], ['오늘 게시 예정', data.todayRow.post_today, '/s/marketing/approvals?day=today'], ['오늘 게시됨', data.todayRow.posted_today, '/s/marketing/approvals?day=published']]} />}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, n, h]) => (
@@ -149,17 +175,40 @@ export function Approvals() {
   return (
     <div className="space-y-3" data-testid="mkt-approvals">
       <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>{DAY_LABEL[day] ?? '승인 대기'}</h1>{DAY_LABEL[day] && <Link href="/s/marketing/approvals" className="text-xs underline" data-testid="mkt-day-clear">승인 대기 전체</Link>}<Button className="ml-auto" onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></div>
-      {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : !data.contents.length ? <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3">승인할 콘텐츠가 없습니다</p> : (
-        <ul className="space-y-2">{data.contents.map((c) => (
-          <li key={c.id}><button type="button" onClick={() => setOpen(c.id)} className="flex w-full items-center gap-3 rounded-card border border-line bg-white p-3 text-left shadow-card hover:border-violet-300" data-testid="mkt-row">
-            <span className="size-2.5 shrink-0 rounded-full" style={{ background: CH_COLOR[c.channel] }} />
-            <span className="min-w-0 flex-1"><span className="block truncate font-medium">{c.title}</span><span className="block truncate text-xs text-ink-2">{CHANNELS[c.channel]} · {c.scheduled_at ? fmtDateTime(c.scheduled_at) : '게시일 미정'} · v{c.current_version}{!c.media_count && ' · 시안 없음'}</span></span>
-            <span className={cx('shrink-0 rounded-full px-2 py-0.5 text-xs font-medium', c.status === 'pending' ? 'bg-violet-50 text-violet-800' : c.status === 'changes' ? 'bg-amber-50 text-amber-800' : 'bg-slate-100 text-ink-2')}>{STATUS[c.status]}</span>
-          </button></li>))}</ul>
-      )}
+      {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reload} />}
       <OpsRequests />
       {open && <ContentDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
       {nw && <NewContent onClose={() => setNw(false)} onDone={reload} />}
+    </div>
+  );
+}
+
+/**
+ * 승인함(운영실 명세 2-2): 게시 시각순 한 목록 · 처음 3장 펼침 + 'N건 더 보기' · 브랜드 탭 · 마감 지난 것은 숫자에서 빼고 접힌 '일정 재배치 필요'로.
+ * 승인 가능 = 승인 대기·마감 안 지남. 수정 요청·보류는 아래 '수정·보류' 묶음(새 버전 기다림)
+ */
+function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents: CardContent[]; canDecide: boolean; plain: boolean; onOpen: (id: string) => void; onDone: () => void }) {
+  const [brand, setBrand] = useState(''); const [more, setMore] = useState(false);
+  const brands = [...new Set(contents.map((c) => c.brand).filter(Boolean) as string[])];
+  const list = contents.filter((c) => !brand || c.brand === brand);
+  const ready = plain ? list : list.filter((c) => c.status === 'pending' && !c.late);
+  const waiting = plain ? [] : list.filter((c) => (c.status === 'changes' || c.status === 'hold') && !c.late);
+  const late = plain ? [] : list.filter((c) => c.late);
+  const shown = more ? ready : ready.slice(0, 3);
+  return (
+    <div className="space-y-3">
+      {brands.length > 1 && <div className="flex flex-wrap gap-1.5" data-testid="mkt-brand-tabs">{['', ...brands].map((b) => (
+        <button key={b || 'all'} type="button" onClick={() => setBrand(b)} className={cx('rounded-full border px-3 py-1 text-xs', brand === b ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white')}>
+          {b || '전체'} {contents.filter((c) => (!b || c.brand === b) && c.status === 'pending' && !c.late).length}</button>))}</div>}
+      {!plain && <p className="text-sm" data-testid="mkt-approvable-count">승인할 시안 <b className="text-orange-700">{ready.length}건</b></p>}
+      {!ready.length ? <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3">{plain ? '해당 콘텐츠가 없습니다' : '지금 승인할 최종 시안이 없습니다.'}</p> : (
+        <div className="space-y-2">{shown.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}
+          {!more && ready.length > 3 && <Button variant="secondary" className="w-full" onClick={() => setMore(true)} data-testid="mkt-more">{ready.length - 3}건 더 보기</Button>}</div>
+      )}
+      {waiting.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
+        <div className="mt-2 space-y-2">{waiting.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+      {late.length > 0 && <details className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" data-testid="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>
+        <div className="mt-2 space-y-2">{late.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
     </div>
   );
 }

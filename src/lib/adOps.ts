@@ -44,6 +44,7 @@ const RISKY: [RegExp, string][] = [
   [/완치|치료|효능|부작용\s?없/, '의료 효능 표현은 의료광고 심의 대상입니다'],
   [/원금|수익\s?보장|고수익/, '금융 수익 보장 표현은 쓸 수 없습니다'],
 ];
+const NAVER_OK = /^[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9 .,!?%&()+\-/:'"~@#*\[\]]$/;
 export const planInput = z.object({
   accountId: z.string().uuid(),
   name: z.string().trim().min(1).max(60),
@@ -60,6 +61,9 @@ export function precheck(p: z.infer<typeof planInput>) {
     if ([...a.description].length > 45) issues.push(`소재 ${i + 1} 설명은 45자 이내(지금 ${[...a.description].length}자)`);
     for (const [re, msg] of RISKY) if (re.test(`${a.headline} ${a.description}`)) issues.push(`소재 ${i + 1}: ${msg}`);
   });
+  // 네이버 소재 허용 문자(운영 10/19: 가운데점 '·' 으로 400 code 1030) — 한글·영문·숫자·공백·일부 기호만
+  p.ads.forEach((a, i) => { const bad = [...new Set([...`${a.headline}${a.description}`].filter((ch) => !NAVER_OK.test(ch)))];
+    if (bad.length) issues.push(`소재 ${i + 1}: 네이버에서 쓸 수 없는 문자 ${bad.map((c) => `'${c}'`).join(' ')} — 빼거나 바꿔 주세요(예: · → ,)`); });
   const dup = p.keywords.filter((k, i) => p.keywords.indexOf(k) !== i);
   if (dup.length) issues.push(`겹치는 키워드: ${[...new Set(dup)].join(', ')}`);
   return issues;
@@ -130,6 +134,16 @@ export async function createPlan(u: SessionUser, i: z.infer<typeof planInput>) {
   return { id: p.id, issues: precheck(i) };
 }
 
+/** 세팅안 고치기(만들기 전·실패 뒤) — 이미 네이버에 만든 부분(캠페인·그룹)은 그대로, 남은 단계에 새 값 사용 */
+export async function updatePlan(u: SessionUser, id: string, i: z.infer<typeof planInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const p = await planOf(tenantOf(u), id);
+  if (p.status !== 'draft' && p.status !== 'failed') throw new HttpError(409, 'plan_locked', '네이버에 만든 뒤에는 세팅안을 고칠 수 없습니다 — 끄기·하루 예산만 바꿀 수 있습니다');
+  const { accountId: _a, name, ...plan } = i;
+  await db()`update mkt_ad_plans set name = ${name}, plan = ${db().json(plan as never)}, updated_at = now() where id = ${id}`;
+  return { id, issues: precheck(i) };
+}
+
 /** [승인하고 시작]: 상한 필수 → 검사 통과 → 네이버에 캠페인·그룹·키워드·소재를 모두 꺼진 상태로 생성 */
 export async function approvePlan(u: SessionUser, id: string) {
   await assertSpace(u, 'marketing'); adminOnly(u);
@@ -140,6 +154,9 @@ export async function approvePlan(u: SessionUser, id: string) {
   const issues = precheck(p.plan);
   if (issues.length) throw new HttpError(409, 'precheck_failed', `세팅안 검사를 통과하지 못했습니다: ${issues.join(' · ')}`);
   const a = await naverAcc(t, p.account_id);
+  // 같은 세팅안을 동시에 두 번 만들지 않게(운영 10/19: 한 번 눌렀는데 요청 3번) — 만드는 중으로 바꾼 요청만 진행, 나머지는 409
+  const [lock] = await sql`update mkt_ad_plans set status = 'creating', updated_at = now() where id = ${id} and status in ('draft', 'failed') returning id`;
+  if (!lock) throw new HttpError(409, 'plan_busy', '이미 만드는 중입니다 — 잠시 뒤 새로 고쳐 확인해 주세요');
   const ext: Record<string, unknown> = { ...(p.external ?? {}) };
   try {
     // 실패하면 거기서 멈추고, 이미 만든 id 는 external 에 남김(다시 시도하면 이어서 만듦)

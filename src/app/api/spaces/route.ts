@@ -13,8 +13,8 @@ export const GET = handler(async ({ user }) => {
   const summary: Record<string, { text: string; badge: number }> = { work: { text: `내 업무 ${w.open} · 오늘까지 ${w.today}`, badge: 0 } };
   if (spaces.includes('sales')) summary.sales = { text: '영업관리 이전 준비 중', badge: 0 };
   if (spaces.includes('marketing')) { // 앱 하단 탭 '승인 대기' 배지
-    const [m] = await sql<{ n: number }[]>`select count(*)::int as n from mkt_contents where tenant = ${tenantOf(user)} and status = 'pending' and not is_test`;
-    summary.marketing = { text: m.n ? `승인 대기 ${m.n}` : '마케팅 운영실', badge: m.n };
+    const n = await (await import('@/lib/marketing')).approvableCount(tenantOf(user)); // 승인함·현황과 같은 계산(마감 지남 제외)
+    summary.marketing = { text: n ? `승인할 시안 ${n}` : '마케팅 운영실', badge: n };
   }
   return { spaces, summary };
 });

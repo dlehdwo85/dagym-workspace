@@ -51,6 +51,12 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   const bad = await ctx.owner.ok('POST', '/api/marketing/ad-ops/plans', plan(acc.id, { name: '검사 걸림', ads: [{ headline: '무조건 효과 보장하는 가을 PT 특가', description: '설명', url: 'https://example.com' }] }));
   assert.equal(bad.issues.length >= 2, true, JSON.stringify(bad.issues));
   assert.equal((await ctx.staffA.client.req('POST', '/api/marketing/ad-ops/plans', plan(acc.id))).status, 403, '직원은 못 만듦');
+  // 네이버 허용 문자(운영 10/19 '·' 으로 400 1030) — 저장 때 바로 검사, [수정]으로 고치면 통과
+  const dot = await ctx.owner.ok('POST', '/api/marketing/ad-ops/plans', plan(acc.id, { name: '가운데점', ads: [{ headline: '가을 PT', description: '상담·체험 가능 😀', url: 'https://example.com' }] }));
+  assert.ok(dot.issues.some((x) => x.includes("'·'") && x.includes("'😀'")), JSON.stringify(dot.issues));
+  const fixed = await ctx.owner.ok('PUT', `/api/marketing/ad-ops/plans/${dot.id}`, plan(acc.id, { name: '가운데점 고침', ads: [{ headline: '가을 PT', description: '상담, 체험 가능', url: 'https://example.com' }] }));
+  assert.deepEqual(fixed.issues, []);
+  assert.equal((await sql`select name from mkt_ad_plans where id = ${dot.id}`)[0].name, '가운데점 고침');
   const p = await ctx.owner.ok('POST', '/api/marketing/ad-ops/plans', plan(acc.id));
   assert.deepEqual(p.issues, []);
   // 상한 없으면 시작 409
@@ -69,9 +75,13 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   const fc = ov0.changes.find((c) => c.plan_id === p.id && c.kind === 'create');
   assert.equal(fc?.status, 'failed', JSON.stringify(ov0.changes)); assert.match(fc.error, /3734/); assert.equal(fc.after.campaignId, fp.external.campaignId);
   failGroup = false;
-  // 시작 = 네이버에 꺼진 상태로 생성
+  // 시작 = 네이버에 꺼진 상태로 생성 — 한 번에 세 번 눌려도 하나만 진행(나머지 409 plan_busy)
   calls = [];
-  const ok = await ctx.owner.ok('POST', `/api/marketing/ad-ops/plans/${p.id}/approve`, {});
+  const tries = await Promise.all([1, 2, 3].map(() => ctx.owner.req('POST', `/api/marketing/ad-ops/plans/${p.id}/approve`, {})));
+  assert.deepEqual(tries.map((r) => r.status).sort(), [200, 409, 409], JSON.stringify(tries.map((r) => r.body)));
+  const ok = tries.find((r) => r.status === 200).body;
+  assert.equal(tries.find((r) => r.status === 409).body.error.code, 'plan_busy');
+  assert.equal((await ctx.owner.req('PUT', `/api/marketing/ad-ops/plans/${p.id}`, plan(acc.id))).status, 409, '만든 뒤에는 세팅안 고치기 막힘');
   assert.ok(ok.external.campaignId && ok.external.adgroupId);
   assert.equal(calls.filter((c) => c.method === 'POST' && c.path === '/ncc/campaigns').length, 0, '이어서 만들기 — 캠페인 다시 안 만듦');
   assert.equal(ok.external.campaignId, fp.external.campaignId);
