@@ -21,8 +21,46 @@ export const RULES: { key: string; label: string; words: string[]; sources: stri
   { key: 'medical', label: '의료기기·의료소모품', words: ['의료', '병원', '의원', '요양', '약국'], sources: ['15001698', '15051043', '15059029', '15058856', '15154874', '15154458'], keywords: ['의료기기', '의료소모품'] },
   { key: 'factory', label: '부품·원료·포장재 납품', words: ['제조', '부품', '원료', '포장', '공장'], sources: ['15087611', '15155150'], keywords: ['부품', '원료', '포장재'] },
   { key: 'lodging', label: '숙박 린넨·어메니티·숙박 솔루션', words: ['숙박', '호텔', '모텔', '린넨', '어메니티', '펜션'], sources: ['15155124'], keywords: ['숙박', '린넨', '어메니티'] },
+  // 로컬 10/19 예시: 아파트 커뮤니티 = 나라장터 입찰·입주 예정 단지·관리사무소 / 헬스장 = 지역 기업·학교·신규 오피스
+  { key: 'apartment', label: '아파트 커뮤니티·관리 서비스', words: ['아파트', '커뮤니티', '입주', '관리사무소', '공동주택', '단지'], sources: ['15057332', '15058453', '15098547', '15057999'], keywords: ['커뮤니티 위탁', '입주자대표회의', '관리사무소'] },
+  { key: 'gym', label: '헬스장·피트니스(기업·학교 제휴)', words: ['헬스장', 'PT', '필라테스', '요가', '짐'], sources: ['3046071', '15158963', '15134735'], keywords: ['기업 제휴', '임직원 복지', '신규 오피스'] },
   { key: 'logistics', label: '물류·창고 설비·운송', words: ['물류', '창고', '운송', '택배', '지게차'], sources: ['3048029', '15155066'], keywords: ['물류', '운송', '창고'] },
 ];
+/** 원천마다 '왜 쓰는지' 한 줄(추천 근거) — 화면에 그대로 */
+const WHY: Record<string, string> = {
+  '15081808': '휴·폐업한 거래처를 걸러 목록을 깨끗하게',
+  '3046071': '직원 수로 지역 기업 규모를 보고 제휴·영업 우선순위를 정함',
+  '15129462': '공공기관이 올해 살 계획(발주계획)을 미리 봄',
+  '15129427': '누가 어떤 계약을 얼마에 땄는지 — 경쟁·단가 참고',
+  '15129468': '기관의 조달 요청 — 입찰 전 단계',
+  '15057332': '관리사무소·입주자대표회의에 직접 제안할 단지 목록',
+  '15058453': '단지 규모·세대수·관리 방식 — 큰 단지부터',
+  '15098547': '입주 예정·신규 분양 단지 — 입주 전 미리 제안',
+  '15057999': 'LH 분양·임대 공고 — 새로 생기는 단지',
+  '15134735': '새로 준공·용도변경된 건물(신규 오피스·상가)',
+  '15061362': '건설업체 목록 — 협력사·하도급 영업',
+  '15154949': '건물위생관리업 등록 업체 — 경쟁·협력사',
+  '15154982': '소독업 등록 업체',
+  '15155077': '체력단련장(헬스장) 인허가 — 새로 연 곳·폐업한 곳',
+  '15155071': '종합체육시설 — 위탁 운영 대상',
+  '15155038': '수영장 — 위탁·관리 대상',
+  '15154948': '대규모 점포 — 보안·시설 영업',
+  '15155066': '물류창고업체 — 설비·보안·운송',
+  '3048029': '물류창고 등록 정보',
+  '15155168': '집단급식소 — 식자재 납품처',
+  '15155159': '위탁급식 영업 — 식자재·급식 협력',
+  '15154916': '일반음식점 인허가 — 신규 개업',
+  '15154921': '휴게음식점(카페) 인허가 — 신규 개업',
+  '15001698': '병원 목록 — 의료기기·소모품',
+  '15051043': '요양기관 개·폐업 — 새로 연 곳',
+  '15059029': '장기요양기관 — 요양 시설 영업',
+  '15058856': '장기요양기관 상세(정원·규모)',
+  '15154874': '의원 인허가', '15154458': '병원 인허가',
+  '15087611': '공장 등록 — 부품·원료 납품처',
+  '15155150': '식품 제조·가공업',
+  '15155124': '숙박업 인허가 — 린넨·어메니티',
+  '15158963': '학교(대학) 목록 — 학생·교직원 제휴',
+};
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
 const SIDO_LONG: Record<string, string> = { 서울특별시: '서울', 부산광역시: '부산', 대구광역시: '대구', 인천광역시: '인천', 광주광역시: '광주', 대전광역시: '대전', 울산광역시: '울산', 세종특별자치시: '세종', 경기도: '경기', 강원도: '강원', 강원특별자치도: '강원', 충청북도: '충북', 충청남도: '충남', 전라북도: '전북', 전북특별자치도: '전북', 전라남도: '전남', 경상북도: '경북', 경상남도: '경남', 제주특별자치도: '제주' };
 export const sidoOf = (addr?: string | null) => { const w = String(addr ?? '').trim().split(/\s+/)[0] ?? ''; return SIDO_LONG[w] ?? SIDO.find((s) => w.startsWith(s)) ?? null; };
@@ -37,7 +75,11 @@ export async function listSources(u: SessionUser) {
     from data_sources s left join tenant_data_sources ts on ts.source_code = s.code and ts.tenant = ${t}
     where s.license <> 'noncommercial' order by s.grp, s.name`;
   const [st] = await sql<any[]>`select industry, region, setup_done_at from sales_settings where tenant = ${t}`;
-  return { sources: rows.map((r) => ({ ...r, common: COMMON.includes(r.code), attribution: attribution(r) })), settings: st ?? null, canEdit: isAdmin(u), rules: RULES.map((r) => ({ key: r.key, label: r.label })) };
+  const [pf] = await sql<any[]>`select industry, ai_business, ai_customers from tenants where id = ${t}`;
+  const custom = await sql<any[]>`select id, kind, label, value, note, created_at from sales_custom_sources where tenant = ${t} order by created_at`;
+  return { sources: rows.map((r) => ({ ...r, common: COMMON.includes(r.code), attribution: attribution(r), why: WHY[r.code] ?? null })), settings: st ?? null, canEdit: isAdmin(u), rules: RULES.map((r) => ({ key: r.key, label: r.label })),
+    // 회사 정보(업종·사업 소개·주요 고객)로 추천 칸을 미리 채움
+    profile: { industry: pf?.industry ?? null, business: pf?.ai_business ?? null, customers: pf?.ai_customers ?? null }, custom };
 }
 
 const words = z.array(z.string().trim().min(1).max(40)).max(30);
@@ -55,7 +97,7 @@ export async function setSource(u: SessionUser, code: string, i: z.infer<typeof 
 }
 
 /** AI 자동 세팅: 업태·종목(또는 업종 키워드)·지역 → 켤 원천·검색어 추천. AI 가 없으면 규칙표 낱말 일치로. 맞는 행이 없으면 공통만 + 키워드 3개 질문 */
-export const suggestInput = z.object({ industry: z.string().trim().min(1, '업태·종목이나 하는 일을 적어 주세요').max(200), region: z.string().trim().max(40).optional() });
+export const suggestInput = z.object({ industry: z.string().trim().min(1, '업태·종목이나 하는 일을 적어 주세요').max(200), region: z.string().trim().max(40).optional(), product: z.string().trim().max(200).optional() });
 export async function suggestSources(u: SessionUser, i: z.infer<typeof suggestInput>) {
   await assertSpace(u, 'sales');
   if (!isAdmin(u)) throw forbidden('자동 세팅은 관리자만 할 수 있습니다');
@@ -64,7 +106,8 @@ export async function suggestSources(u: SessionUser, i: z.infer<typeof suggestIn
     const rs = RULES.filter((r) => keys.includes(r.key));
     return { rules: rs.map((r) => r.label), sources: [...new Set([...COMMON, ...rs.flatMap((r) => r.sources)])], keywords: [...new Set(rs.flatMap((r) => r.keywords))].slice(0, 8) };
   };
-  let keys = RULES.filter((r) => r.words.some((w) => i.industry.toLowerCase().includes(w.toLowerCase()))).map((r) => r.key);
+  const text = `${i.industry} ${i.product ?? ''}`.toLowerCase();
+  let keys = RULES.filter((r) => r.words.some((w) => text.includes(w.toLowerCase()))).map((r) => r.key);
   let extra: string[] = []; let via = 'rules';
   if (aiEnabled()) {
     const p = anthropicProvider({ tier: 'fast' });
@@ -72,7 +115,7 @@ export async function suggestSources(u: SessionUser, i: z.infer<typeof suggestIn
       const r = await p.chat({
         system: `영업 공공데이터 자동 세팅. 회사의 업태·종목 설명을 보고 아래 규칙 중 맞는 것(0~3개)과, 공고·목록 검색에 쓸 짧은 검색어(최대 6개, 회사가 파는 것)를 고릅니다. 맞는 규칙이 없으면 빈 배열. JSON 만.
 규칙: ${RULES.map((x) => `${x.key}=${x.label}`).join(' / ')}`,
-        tools: [], messages: [{ role: 'user', content: i.industry }],
+        tools: [], messages: [{ role: 'user', content: [i.industry, i.product ? `주력 상품: ${i.product}` : ''].filter(Boolean).join('\n') }],
         format: { type: 'object', additionalProperties: false, required: ['rules', 'keywords'], properties: { rules: { type: 'array', items: { type: 'string', enum: RULES.map((x) => x.key) } }, keywords: { type: 'array', items: { type: 'string' } } } },
       });
       await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
@@ -85,12 +128,18 @@ export async function suggestSources(u: SessionUser, i: z.infer<typeof suggestIn
     } catch { /* AI 실패 → 규칙표 */ }
   }
   const s = byRule(keys);
-  const out = { ...s, keywords: [...new Set([...extra, ...s.keywords])].slice(0, 8), regions: region ? [region] : [], via, askKeywords: keys.length === 0 };
+  // 로컬 10/19: 추천마다 근거 한 줄 + 체크로 고름(모두 선택형). 입찰·공고도 쓰는 업종만 추천(아파트·시설·체육 위탁 등)
+  const names = new Map((await db()<{ code: string; name: string }[]>`select code, name from data_sources where code = any(${s.sources})`).map((r) => [r.code, r.name]));
+  const ruleOf = (code: string) => RULES.find((r) => keys.includes(r.key) && r.sources.includes(code));
+  const items = s.sources.map((code) => ({ code, name: names.get(code) ?? code, why: `${WHY[code] ?? '업종에 맞는 공공데이터'}${ruleOf(code) ? ` (${ruleOf(code)!.label})` : COMMON.includes(code) ? ' (모든 업종 공통)' : ''}`, common: COMMON.includes(code) }));
+  const bidsRec = keys.some((k) => ['facility', 'sports', 'apartment', 'mep', 'security', 'food', 'medical'].includes(k));
+  const out = { ...s, items, bids: { recommend: bidsRec, why: bidsRec ? '이 업종은 공공기관·단지 입찰로 일감이 나옵니다(나라장터)' : '이 업종은 입찰이 드물어 꺼 두기를 권합니다(나중에 켤 수 있음)' },
+    keywords: [...new Set([...extra, ...s.keywords])].slice(0, 8), regions: region ? [region] : [], via, askKeywords: keys.length === 0 };
   await db()`insert into sales_settings (tenant, industry, region, last_suggestion) values (${tenantOf(u)}, ${i.industry}, ${region}, ${db().json(out as never)})
     on conflict (tenant) do update set industry = excluded.industry, region = excluded.region, last_suggestion = excluded.last_suggestion, updated_at = now()`;
   return out;
 }
-export const applyInput = z.object({ sources: z.array(z.string().max(20)).min(1).max(40), keywords: words, regions: z.array(z.string().max(10)).max(17) });
+export const applyInput = z.object({ sources: z.array(z.string().max(20)).min(1).max(40), keywords: words, regions: z.array(z.string().max(10)).max(17), bids: z.boolean().optional() });
 export async function applySuggestion(u: SessionUser, i: z.infer<typeof applyInput>) {
   await assertSpace(u, 'sales');
   if (!isAdmin(u)) throw forbidden('자동 세팅은 관리자만 할 수 있습니다');
@@ -103,7 +152,28 @@ export async function applySuggestion(u: SessionUser, i: z.infer<typeof applyInp
       on conflict (tenant, source_code) do update set enabled = true, keywords = excluded.keywords, regions = excluded.regions, updated_by = excluded.updated_by, updated_at = now()`;
   }
   await sql`insert into sales_settings (tenant, setup_done_at) values (${t}, now()) on conflict (tenant) do update set setup_done_at = now(), updated_at = now()`;
+  if (i.bids !== undefined) await sql`update tenants set sales_bids = ${i.bids} where id = ${t}`; // 입찰·공고 사용 여부도 같이(체크로 고른 대로)
   return { enabled: [...known] };
+}
+
+/** 로컬 10/19: 목록 밖 출처(사이트·키워드·엑셀) 직접 추가 — 관리자만, 자동 수집은 아님(영업 출처 기록) */
+export const customSourceInput = z.object({ kind: z.enum(['site', 'keyword', 'excel']), label: z.string().trim().min(1, '이름을 적어 주세요').max(80), value: z.string().trim().max(500).optional(), note: z.string().trim().max(300).optional() });
+export async function addCustomSource(u: SessionUser, i: z.infer<typeof customSourceInput>) {
+  await assertSpace(u, 'sales');
+  if (!isAdmin(u)) throw forbidden('영업 출처는 관리자가 추가합니다');
+  if (i.kind === 'site' && i.value && !/^https?:\/\/\S+$/.test(i.value)) throw badRequest('사이트 주소는 https:// 로 시작해야 합니다');
+  const sql = db();
+  if ((await sql`select count(*)::int n from sales_custom_sources where tenant = ${tenantOf(u)}`)[0].n >= 100) throw badRequest('직접 추가한 출처는 100개까지입니다');
+  const [r] = await sql<{ id: string }[]>`insert into sales_custom_sources (tenant, kind, label, value, note, created_by) values (${tenantOf(u)}, ${i.kind}, ${i.label}, ${i.value ?? null}, ${i.note ?? null}, ${u.id}) returning id`;
+  return { id: r.id };
+}
+export async function removeCustomSource(u: SessionUser, id: string) {
+  await assertSpace(u, 'sales');
+  if (!isAdmin(u)) throw forbidden('영업 출처는 관리자가 지웁니다');
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
+  const r = await db()`delete from sales_custom_sources where id = ${id} and tenant = ${tenantOf(u)} returning id`;
+  if (!r.length) throw notFound();
+  return { ok: true };
 }
 
 /** 영업기회 목록: 회사가 켠 원천 × (지역·검색어·제외어) — 원천 데이터는 공용, 진행 상태·메모는 회사별 */

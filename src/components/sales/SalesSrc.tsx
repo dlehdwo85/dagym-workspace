@@ -46,6 +46,12 @@ export function SalesHome() {
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="space-home-sales">
       <Head title="워크인 · 영업" meta={data} />
+      {data.setupNeeded && (
+        <section className="rounded-card border-2 border-[#93C5FD] bg-[#EFF6FF] p-4" data-testid="sales-setup-prompt">
+          <h2 className="text-base font-bold text-[#1D4ED8]">영업 출처부터 고르세요</h2>
+          <p className="mt-1 text-sm text-ink-2">회사 업종·지역·주력 상품을 보고 AI 가 맞는 출처(공공데이터·입찰 등)를 근거와 함께 추천합니다. 체크로 고르고, 목록 밖 사이트·키워드·엑셀도 직접 넣을 수 있어요.</p>
+          <Link href="/s/sales/sources" className="mt-2 inline-block rounded-input bg-[#2563EB] px-4 py-2 text-sm font-medium text-white" data-testid="sales-setup-go">출처 추천받기</Link>
+        </section>)}
       {data.today && <TodayRow date={data.today.date} cards={[
         ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/bids?tab=today'] as [string, number, string]] : []),
         ['오늘 새 영업 DB', data.today.newDb.buildings + data.today.newDb.facilities + data.today.newDb.vendors, `/s/sales/hub?day=today&tab=${data.today.newDb.facilities >= data.today.newDb.buildings && data.today.newDb.facilities >= data.today.newDb.vendors ? 'facilities' : data.today.newDb.vendors > data.today.newDb.buildings ? 'vendors' : 'buildings'}`,

@@ -1,5 +1,6 @@
 'use client';
 import { IN_APP_BILLING_NOTE, useInApp } from '@/components/inApp';
+import { CompanyAiProfile } from '@/components/CompanyAiProfile';
 import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -120,6 +121,8 @@ export function Automation() {
 
       {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-brands">
         <h2 className="text-sm font-semibold">브랜드 키트</h2>
+        {/* 로컬 10/19: 회사 정보(사업 소개·고객·말투·주의할 점)와 같은 칸 + 'AI 로 정리' — 한 번 정리하면 마케팅 원고·메일 시안·영업 제안서가 함께 씀 */}
+        <details className="mt-2 rounded-input border border-line p-2" data-testid="brand-company-ai"><summary className="cursor-pointer text-xs font-medium">회사 소개·말투·주의할 점(모든 브랜드 공통) — AI 로 정리</summary><div className="mt-2"><CompanyAiProfile compact /></div></details>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input className={cx(inputCls, 'w-48')} value={nb.name} onChange={(e) => setNb({ ...nb, name: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addBrand(); } }} placeholder="새 브랜드 이름" maxLength={40} aria-label="새 브랜드 이름" data-testid="auto-brand-name" />
           <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={nb.test} onChange={(e) => setNb({ ...nb, test: e.target.checked })} />시험 모드로</label>

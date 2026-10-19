@@ -45,6 +45,7 @@ async function step(name, fn) {
   try { await fn(); results.push({ name, ok: true, ms: Date.now() - t0 }); console.log('✔', name); }
   catch (e) {
     results.push({ name, ok: false, error: e.message.split('\n')[0] }); console.log('✖', name, '\n   ', e.message.split('\n').slice(0, 14).join('\n    '));
+    if (process.env.E2E_STACK) console.log(String(e.stack ?? '').split('\n').slice(0, 12).join('\n')); // 개발용: 어느 줄에서 멈췄는지
     // 실패 순간 화면을 남긴다 (원인 분석용, 저장소에는 올리지 않음)
     for (const [k, pg] of Object.entries(globalThis.__pages ?? {})) await pg.screenshot({ path: `test-results/fail-${results.length}-${k}.png`, fullPage: true }).catch(() => {});
   }
@@ -925,6 +926,17 @@ await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머
 await step('V32 4 마감 연장: 휴대폰 담당자 목록 마감 칩 → 연장 요청(사유 필수, 뒤 날짜는 요청 창) → PC 지시자 "연장 요청" 칩·행 표시 → 머리에서 승인 → 마감 변경·연장 1회', () => dueExtend({ staff, owner, ctx, sql, BASE }));
 await step('V38 3 음성 모드(운전 중): 메시지방 새 메시지 읽어 주기·말로 보내기("보내" 확인·"취소")·AI 비서 말로 묻고 답 읽어 주기', () => voiceMode({ browser, desk, ctx, sql, BASE, FAKE }));
 await step('로컬 검수 10/17: 홈 최근 활동 멘션 @이름 · 월 보기 요일 머리 · 휴대폰 일정 시트 닫기 버튼 화면 안 · 휴대폰 업무 둘째 줄 한 줄', () => verify1017({ owner, staff, ctx, sql, BASE }));
+await step('로컬 10/19 회사 정보 AI 로 정리: 오른쪽 도우미·질문으로 시작 5문항·주의할 점 칸', async () => {
+  await owner.setViewportSize({ width: 1366, height: 900 });
+  await owner.goto(`${BASE}/admin/company`);
+  await owner.getByTestId('ai-helper').waitFor();
+  await owner.getByTestId('ai-cautions').waitFor();
+  await owner.getByTestId('ai-helper-interview').click();
+  await owner.getByTestId('ai-helper-questions').waitFor();
+  assert.equal(await owner.getByTestId('ai-helper-answer').count(), 5);
+  const h = await owner.getByTestId('ai-helper').boundingBox(), f = await owner.getByTestId('ai-business').boundingBox();
+  assert.ok(h.x > f.x + f.width, 'PC: 도우미는 오른쪽');
+});
 await step('스토어 심사 10/19: 앱 안에서는 요금제·결제·가격 숨김(사용량만), 웹은 그대로', () => inApp({ browser, BASE, devices, owner }));
 await step('대표 지적 10/19 캘린더: 겹친 일정 나란히·누른 일정 미리보기, 자동 저장 뒤 [완료] 409 없음, 일정 색·캘린더 색 점, 월 보기 +N개', () => cal1019({ owner, ctx, sql, BASE }));
 await step('V37 8 미팅 일정: 업무 상세 [미팅 일정 만들기] → 목록 📍장소·시간 칩 · 등록 창 "방문" → 미팅 일정 제안 → 연결 일정', () => meeting({ owner, ctx, sql, BASE }));

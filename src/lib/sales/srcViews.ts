@@ -1,3 +1,4 @@
+import { isAdmin } from '../access';
 import { db } from '../db';
 import { assertSpace } from '../spaces';
 import { badRequest, notFound } from '../errors';
@@ -144,7 +145,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const overdue = live.filter((l) => l.next && l.next < today()).sort((a, b) => String(b.next).localeCompare(String(a.next)));
     const cnt = L.reduce((m: Record<string, number>, l) => { const k = String(l.status ?? '미정'); m[k] = (m[k] ?? 0) + 1; return m; }, {});
     const statuses = [...STAGES.filter((k) => cnt[k]), ...Object.keys(cnt).filter((k) => !STAGES.includes(k))].map((k) => [k, cnt[k]]);
-    return { ...meta, bidsOn, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
+    // 로컬 10/19: 영업 공간을 처음 켠 회사(관리자) — 출처 고르기 안내(다짐·하이링크처럼 이미 켠 출처가 있으면 안 보임)
+    const [st] = await sql<{ n: number; done: boolean }[]>`select (select count(*)::int from tenant_data_sources where tenant = ${t} and enabled) as n, exists (select 1 from sales_settings where tenant = ${t} and setup_done_at is not null) as done`;
+    const setupNeeded = isAdmin(u) && !st.done && st.n === 0;
+    return { ...meta, bidsOn, setupNeeded, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
       bidsOpen: NR.filter((r) => isOpenBid(notice(r), workOf.get(String(r.id ?? r.__id)), today())).length,
       relatedNotices: N.length, newNotices7d: N.filter((n) => n.noticeDate && n.noticeDate >= plus(-7) && n.noticeDate <= today()).length /* 로컬 10/19: 원본 초기 적재(10/13 3,343건) 때문에 first_seen 7일은 부풀려짐 → 공고일 기준 */ }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses,
       // 대표(10/19): 첫 화면 맨 위 '오늘' — 새 공고·새 영업 DB(신규단지·시설·협력사)·오늘 연락할 리드·오늘 마감 입찰

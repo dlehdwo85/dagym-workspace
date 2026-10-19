@@ -4,6 +4,7 @@ import { Building2, ImagePlus, Plus, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Field, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { uploadToLibrary } from '@/components/libraryUpload';
+import { CompanyAiProfile } from '@/components/CompanyAiProfile';
 
 type P = { id?: string; key: string; name: string; ceo: string | null; biz_no: string | null; address: string | null; phone: string | null; fax: string | null; email: string | null;
   website: string | null; bank: string | null; logo_file_id: string | null; brand_color: string | null; font: string | null; note: string | null; is_default: boolean };
@@ -82,32 +83,7 @@ export default function CompanyPage() {
 
 /** V38 4 회사 설정: 업무 첨부를 자료실에 자동 등록(같은 파일·업무를 볼 수 있는 사람만) */
 /** 상용화: AI 비서가 알아야 할 우리 회사 — 메일·문자 초안·AI 비서 답이 이 회사의 업종·방향·말투를 따른다 */
-function AiProfile() {
-  type P = { name: string; industry: string | null; business: string | null; customers: string | null; tone: string | null; industries: string[] };
-  const st = useApi<P>('/api/org/ai-profile');
-  const [f, setF] = useState<Partial<P> | null>(null);
-  const [busy, setBusy] = useState(false);
-  if (!st.data) return null;
-  const v = { ...st.data, ...(f ?? {}) };
-  const save = async () => {
-    setBusy(true);
-    try { await api('/api/org/ai-profile', { method: 'PUT', body: { industry: v.industry || null, business: v.business ?? null, customers: v.customers ?? null, tone: v.tone ?? null } }); setF(null); st.reload(); toast.ok('AI 비서에게 회사 정보를 알려 줬습니다'); }
-    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
-  };
-  return (
-    <div className="space-y-3 rounded-card border border-line bg-white p-4 text-sm shadow-card" data-testid="ai-profile">
-      <div><p className="font-semibold">AI 비서가 알아야 할 우리 회사</p>
-        <p className="mt-0.5 text-xs text-ink-2">AI 비서 답·메일·문자 초안이 이 내용과 쓰는 사람의 이름·직책에 맞춰 작성됩니다. 우리 회사 정보만 쓰고 다른 회사 내용은 섞이지 않습니다.</p></div>
-      <Field label="업종"><select className={inputCls} value={v.industry ?? ''} onChange={(e) => setF({ ...f, industry: e.target.value || null })} data-testid="ai-industry">
-        <option value="">선택 안 함</option>{st.data.industries.map((x) => <option key={x}>{x}</option>)}</select></Field>
-      <Field label="사업 소개·방향"><textarea className={cx(inputCls, 'min-h-20')} maxLength={1000} value={v.business ?? ''} onChange={(e) => setF({ ...f, business: e.target.value })}
-        placeholder="예: 강남·분당에서 PT 전문 센터 3곳 운영. 1:1 맞춤 관리와 재등록 상담을 중요하게 생각합니다." data-testid="ai-business" /></Field>
-      <Field label="주요 고객"><input className={inputCls} maxLength={500} value={v.customers ?? ''} onChange={(e) => setF({ ...f, customers: e.target.value })} placeholder="예: 30~50대 직장인 회원, 기업 복지 담당자" data-testid="ai-customers" /></Field>
-      <Field label="말투·주의할 점"><input className={inputCls} maxLength={500} value={v.tone ?? ''} onChange={(e) => setF({ ...f, tone: e.target.value })} placeholder="예: 친근하지만 정중하게, 할인·효과를 약속하지 않기" data-testid="ai-tone" /></Field>
-      <Button size="sm" disabled={busy || !f} onClick={save} data-testid="ai-profile-save">저장</Button>
-    </div>
-  );
-}
+const AiProfile = () => <CompanyAiProfile />; // 로컬 10/19: 오른쪽 'AI 로 정리' 도우미 포함(마케팅 브랜드 키트와 같은 칸)
 
 function AttachToLibrary() {
   const st = useApi<{ on: boolean; confWords: string[]; confWordsDefault: boolean; defaults: string[] }>('/api/org/attach-library');

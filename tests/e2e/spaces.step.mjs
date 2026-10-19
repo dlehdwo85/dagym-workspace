@@ -45,6 +45,7 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql, SHOTS }) 
   await m.getByRole('button', { name: '메뉴 더보기' }).tap();
   await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap();
   await m.waitForURL(/\/s\/sales\/sources$/);
+  await m.getByTestId('sales-custom').waitFor(); // 로컬 10/19: 직접 추가한 출처(사이트·키워드·엑셀) 칸
   await m.getByRole('button', { name: '메뉴 더보기' }).tap();
   await m.getByTestId('mobile-space-work').tap(); // 마지막 공간 = 업무로 돌려 둠
   await m.waitForURL(/\/$/);
@@ -98,9 +99,10 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql, SHOTS }) 
   const nameCell = owner.getByTestId('sales-lead-row').getByTestId('cell-name').and(owner.locator('[value="E2E 새 거래처"]'));
   await nameCell.waitFor();
   await nameCell.fill('E2E 새 거래처2'); await owner.keyboard.press('Enter'); // 고친 뒤엔 value 가 바뀌어 같은 locator 로 못 찾음
-  await owner.getByText('저장했습니다').first().waitFor();
-  await owner.getByTestId('sales-lead-row').getByTestId('cell-name').and(owner.locator('[value="E2E 새 거래처2"]')).waitFor();
-  assert.equal((await sql`select count(*)::int n from sales_leads where name = 'E2E 새 거래처2'`)[0]?.n ?? 0, 1, '표 안 수정 저장');
+  // 입력칸 값은 바로 바뀌므로 저장 완료는 DB 로 확인(최대 10초)
+  let saved = 0;
+  for (let k = 0; k < 40 && !saved; k++) { saved = (await sql`select count(*)::int n from sales_leads where name = 'E2E 새 거래처2'`)[0].n; if (!saved) await owner.waitForTimeout(250); }
+  assert.equal(saved, 1, '표 안 수정 저장');
   for (const [path, id] of [['/s/sales', 'space-home-sales'], ['/s/sales/pipeline', 'sales-pipeline']]) { await owner.goto(`${BASE}${path}`); await owner.getByTestId(id).waitFor(); }
   await sql`update sales_cutover set writes_open = false where tenant = 'default'`;
   // 원래대로(다른 시험에 영향 없게): 업무 공간으로·영업 끄기

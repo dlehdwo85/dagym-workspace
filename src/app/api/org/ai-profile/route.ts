@@ -8,5 +8,5 @@ export const GET = handler(async ({ user }) => ({ ...(await getAiProfile(user)),
 const txt = (n: number) => z.string().max(n).nullable().optional();
 export const PUT = handler(async ({ req, user }) => saveAiProfile(user, await body(req, z.object({
   industry: z.string().max(40).refine((x) => !x || INDUSTRIES.includes(x), '업종 목록에서 고르세요').nullable().optional(),
-  business: txt(1000), customers: txt(500), tone: txt(500),
+  business: txt(1000), customers: txt(500), tone: txt(500), cautions: txt(500),
 }))));
