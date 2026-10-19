@@ -880,9 +880,21 @@ await step('W-2 업무 화면: 기본 전체·담당자별 묶음, "+ 업무 추
 await step('W-3 홈: 오늘 할 일(내 것/전체) · 이번 주 일정 · 이달의 일정(미니 달력) · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동', async () => {
   await owner.goto(BASE + '/');
   // 대표 확정(10/19): '오늘'·'이달' 칸 없이 '이번 주 일정' 하나(오늘 칸 강조·업무 포함)
-  for (const id of ['home-week', 'home-people', 'home-alerts', 'home-activity']) await owner.getByTestId(id).waitFor();
+  for (const id of ['home-week', 'home-people', 'home-alerts', 'home-month']) await owner.getByTestId(id).waitFor(); // 로컬 10/19(대표 확정): 최근 활동 → 월 미니 캘린더
   for (const id of ['home-today', 'home-month-card']) assert.equal(await owner.getByTestId(id).count(), 0, `${id} 없음`);
-  await owner.getByTestId('home-activity').getByText('강남점 전단 배포').waitFor();
+  // 최근 활동은 알림 화면 '활동' 탭으로
+  await owner.goto(BASE + '/notifications');
+  await owner.getByTestId('notif-activity').click();
+  await owner.getByTestId('activity-list').getByText('강남점 전단 배포').first().waitFor();
+  await owner.goto(BASE + '/');
+  // 월 미니 캘린더: PC 는 오른쪽(이번 주 옆), 날짜를 누르면 그날 목록, 두 번 누르면 캘린더
+  const wk = await owner.getByTestId('home-week').boundingBox(), mo = await owner.getByTestId('home-month').boundingBox();
+  assert.ok(mo.x > wk.x + wk.width - 5 && Math.abs(mo.y - wk.y) < 40, `월 캘린더는 이번 주 오른쪽 (${JSON.stringify([wk, mo])})`);
+  await owner.getByTestId('home-month').locator(`[data-day="${today}"]`).click();
+  await owner.getByTestId('home-month-list').waitFor();
+  await owner.getByTestId('home-month').locator(`[data-day="${today}"]`).click();
+  await owner.waitForURL(/\/calendar\?view=dayGridMonth&date=/);
+  await owner.goto(BASE + '/');
   await owner.screenshot({ path: `${SHOTS}/59-home-dashboard.png`, fullPage: true });
 });
 await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없음), "할 일로도 만들기" = 누른 시각이 마감인 연결 업무 · 홈 미니 캘린더 그날 업무 + [＋업무][＋일정]', async () => {
@@ -2105,10 +2117,16 @@ await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 �
   await owner.getByLabel('최매니저 팀원').check();
   await owner.getByTestId('team-save').click();
   await owner.getByTestId('team-card').filter({ hasText: '운영팀 E2E' }).waitFor();
-  const [tm] = await sql`select id from teams where name = '운영팀 E2E'`;
+  // 대기열 ①(10/19): 부서 › 팀 — 첫 번째는 부서, 카드에 '부서' 표시
+  await owner.getByTestId('team-card').filter({ hasText: '운영팀 E2E' }).getByText('부서', { exact: true }).waitFor();
+  const [tm] = await sql`select id, kind from teams where name = '운영팀 E2E'`;
+  assert.equal(tm.kind, 'dept');
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '팀 보드 시험 업무', orgUnitId: ctx.siteA, teamId: tm.id, teamMode: 'lead', assigneeId: null })).id;
   await owner.goto(`${BASE}/teams/${tm.id}`);
   await owner.getByTestId('team-board').getByText('팀 보드 시험 업무').waitFor();
+  await owner.getByTestId('team-back').click(); // 하위 화면 뒤로가기
+  await owner.waitForURL(/\/admin\/users/);
+  await owner.getByTestId('teams-tab').waitFor(); // ?tab=teams 로 돌아오면 팀 탭
   await owner.screenshot({ path: `${SHOTS}/67-team-board.png`, fullPage: true });
   await owner.goto(`${BASE}/tasks?teamId=${tm.id}`);
   await owner.getByTestId('team-chip').first().getByText('운영팀 E2E').waitFor();

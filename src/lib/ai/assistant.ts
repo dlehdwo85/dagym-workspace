@@ -408,7 +408,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         taskId: input.taskId || undefined, isPrivate: input.isPrivate ? true : undefined, kind: input.taskId ? 'normal' : undefined,
         ...(taskWho.length ? { alsoTask: true, taskAssigneeIds: taskWho, taskRequestedById: u.id } : {}) });
       const { calendarPerms } = await import('../access');
-      const [cal] = await db()<any[]>`select id, type, org_unit_id, owner_user_id, tenant from calendars where id = ${calendarId}`;
+      const [cal] = await db()<any[]>`select id, type, org_unit_id, owner_user_id, team_id, tenant from calendars where id = ${calendarId}`;
       if (!(await calendarPerms(u, cal)).edit) throw new HttpError(403, 'forbidden', `${calName}에 일정을 만들 권한이 없습니다 — 내 캘린더(personal)로 만드세요`);
       const warnings = await eventWarnings(u, ids, s.toJSDate(), e.toJSDate(), allDay);
       const when = fmtWhen(s, e, allDay) + (rrule ? ` · 반복 ${({ daily: '매일', weekdays: '평일', weekly: '매주', biweekly: '격주', monthly: '매월' } as Record<string, string>)[input.repeat]}` : '');

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
-import { ensurePersonalCalendar, accessibleUnitIds, isAdmin } from './access';
+import { ensurePersonalCalendar, accessibleUnitIds, isAdmin, teamScope } from './access';
 import { revokeAllSessions } from './auth';
 import { newToken, sha256, hashPassword } from './crypto';
 import { badRequest, conflict, forbidden, notFound } from './errors';
@@ -14,6 +14,9 @@ export const inviteInput = z.object({
   role: z.enum(['owner', 'admin', 'dept_lead', 'site_manager', 'staff']),
   orgUnitIds: z.array(zUuid).max(20).default([]),
   title: z.string().max(50).optional(),
+  /** 로컬 10/19: 초대하면서 부서·팀에 넣기 + 공간(비우면 그 부서·팀의 기본 공간) */
+  teamIds: z.array(zUuid).max(10).default([]),
+  spaces: z.array(z.enum(['work', 'sales', 'marketing'])).max(3).optional(),
 });
 
 function assertCanGrant(actor: SessionUser, role: Role) {
@@ -55,6 +58,20 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
       returning id`;
     await tx`delete from memberships where user_id = ${userId}`;
     for (const o of i.orgUnitIds) await tx`insert into memberships (user_id, org_unit_id) values (${userId}, ${o})`;
+    // 부서·팀 소속(팀원으로) + 팀 대화방 + 공간(초대 때 고른 것, 없으면 부서·팀 기본 공간의 합)
+    const teamIds = i.teamIds ?? []; // 심사용 계정처럼 코드에서 바로 부르는 경우(zod 기본값 없음)
+    if (teamIds.length) {
+      const teams = await tx<{ id: string; default_spaces: string[] }[]>`select id, default_spaces from teams where id = any(${teamIds}::uuid[]) and tenant = ${tn} and not archived`;
+      if (teams.length !== new Set(teamIds).size) throw badRequest('없는 부서·팀이 포함되어 있습니다');
+      for (const t of teams) {
+        await tx`insert into team_members (team_id, user_id, is_lead) values (${t.id}, ${userId}, false) on conflict (team_id, user_id) do nothing`;
+        await tx`insert into chat_members (room_id, user_id) select id, ${userId} from chat_rooms where team_id = ${t.id} on conflict do nothing`;
+      }
+      const spaces = i.spaces ?? [...new Set(teams.flatMap((t) => t.default_spaces))];
+      if (spaces.length) await tx`insert into space_members (user_id, tenant, spaces, role) values (${userId}, ${tn}, ${spaces}, ${i.role}) on conflict (user_id, tenant) do update set spaces = excluded.spaces, updated_at = now()`;
+    } else if (i.spaces?.length) {
+      await tx`insert into space_members (user_id, tenant, spaces, role) values (${userId}, ${tn}, ${i.spaces}, ${i.role}) on conflict (user_id, tenant) do update set spaces = excluded.spaces, updated_at = now()`;
+    }
     await syncDemoFlag(tx, [userId]);
     await audit(tx, actor.id, 'user.invite', 'user', userId, { email: i.email, role: i.role, orgUnitIds: i.orgUnitIds }, ip);
     return { invitationId: inv.id, userId, token, path: `/invite/${token}` };
@@ -240,13 +257,15 @@ export async function updateOrgUnit(actor: SessionUser, id: string, i: Partial<z
 /** 조직·사용자 디렉터리 (배정 후보). 관리자는 전체, 그 외는 접근 가능한 조직의 구성원 + 관리자 */
 export async function directory(u: SessionUser, sql: Sql = db()) {
   const units = await accessibleUnitIds(u, sql);
+  const sc = await teamScope(u, sql); // 로컬 10/19: 격리 팀 구성원에게 사람 = 같은 팀 + 대표·관리자 + 본인
   const orgUnits = await sql`select id, parent_id, brand_id, type, name, active, sort from org_units
     where id = any(${units ?? []}::uuid[]) order by sort, name`;
   const users = await sql`
     select u.id, u.name, u.title, u.title_short, u.role, u.email,
       coalesce(array_agg(m.org_unit_id) filter (where m.org_unit_id is not null), '{}') as org_unit_ids
     from users u left join memberships m on m.user_id = u.id
-    where u.status = 'active' and u.tenant = ${tenantOf(u)} and (u.role in ('owner','admin') or exists (select 1 from memberships mm where mm.user_id = u.id and mm.org_unit_id = any(${units ?? []}::uuid[])))
+    where u.status = 'active' and u.tenant = ${tenantOf(u)} and (u.role in ('owner','admin') or u.id = ${u.id} or u.id = any(${sc.mates}::uuid[])
+      or exists (select 1 from memberships mm where mm.user_id = u.id and mm.org_unit_id = any(${units ?? []}::uuid[])))
     group by u.id order by u.name`;
   // 브랜드(다짐·하이링크·바디랩)는 기존 회사 전용 — 다른 회사에는 보이지 않게(AI·음성 단어에도 섞이지 않음)
   const brands = tenantOf(u) === 'default' ? await sql`select id, name, color from brands order by sort` : [];

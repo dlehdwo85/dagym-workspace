@@ -17,7 +17,7 @@ before(async () => {
     D[k] = { c, id: (await c.ok('GET', '/api/auth/me')).user.id };
   }
   D.hqTeam = (await ctx.owner.ok('POST', '/api/teams', { name: '본사팀', members: [{ userId: D.hqA.id, lead: true }] })).id;
-  D.opsTeam = (await ctx.owner.ok('POST', '/api/teams', { name: '운영관리팀', parentId: D.hqTeam, members: [{ userId: D.opsA.id, lead: true }, { userId: ctx.staffA.id, lead: false }] })).id;
+  D.opsTeam = (await ctx.owner.ok('POST', '/api/teams', { name: '운영관리팀', parentId: D.hqTeam, isolated: false /* R-16 계층만 시험(격리는 team-isolation.test) */, members: [{ userId: D.opsA.id, lead: true }, { userId: ctx.staffA.id, lead: false }] })).id;
 });
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 

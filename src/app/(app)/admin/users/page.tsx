@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SpacesTab } from '@/components/SpacesTab';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
@@ -27,7 +27,11 @@ function UnitChecks({ value, onChange }: { value: string[]; onChange: (v: string
 
 export default function UsersPage() {
   const { user } = useSession();
-  const [tab, setTab] = useState<'users' | 'teams' | 'menus' | 'spaces'>('users');
+  const [tab, setTabState] = useState<'users' | 'teams' | 'menus' | 'spaces'>('users');
+  // 탭을 주소(?tab=)에도 남김 → 팀 보드 등 하위 화면에서 뒤로 오면 그 탭이 다시 열림
+  const setTab = (t: 'users' | 'teams' | 'menus' | 'spaces') => { setTabState(t); try { const u = new URL(window.location.href); if (t === 'users') u.searchParams.delete('tab'); else u.searchParams.set('tab', t); window.history.replaceState(window.history.state, '', u.toString()); } catch {} };
+  // 대기열 ①(10/19): 팀 보드 뒤로가기 등 ?tab=teams 로 오면 그 탭
+  useEffect(() => { const t = new URLSearchParams(window.location.search).get('tab'); if (t === 'teams' || t === 'menus' || t === 'spaces') setTabState(t); }, []);
   const list = useApi<{ users: any[] }>(user.role === 'owner' ? '/api/admin/users' : null);
   const tabs = [['users', '사용자'], ['teams', '부서·팀'], ...(user.role === 'owner' ? [['menus', '메뉴 권한']] : []), ...(['owner', 'admin'].includes(user.role) ? [['spaces', '공간']] : [])] as ['users' | 'teams' | 'menus' | 'spaces', string][];
   return (
@@ -48,6 +52,9 @@ function Users() {
   const canEdit = (menus?.admin_users ?? 'none') === 'edit'; // V14 7번: 조회만이면 읽기 전용
   const { data, error, loading, reload } = useApi<{ users: any[] }>('/api/admin/users');
   const [inv, setInv] = useState<any>(null);
+  const [invKey, setInvKey] = useState(0); // 초대 창을 열 때마다 조직·팀 목록 새로 읽기(새로 만든 조직·팀이 바로 보이게)
+  const teamsList = useApi<{ teams: any[] }>('/api/teams');
+  const spaceInfo = useApi<{ spaces: string[] }>('/api/spaces');
   const [link, setLink] = useState('');
   const [edit, setEdit] = useState<any>(null);
   const [review, setReview] = useState<{ email: string; name: string } | null>(null);
@@ -88,7 +95,7 @@ function Users() {
         <h1 className="text-lg font-bold">사용자·권한</h1>
         <span className="flex flex-wrap gap-2">
           {user.role === 'owner' && <Button variant="secondary" onClick={() => setReview({ email: '', name: '앱 심사 담당자' })} data-testid="review-account">심사용 체험 계정</Button>}
-          {canEdit ? <Button onClick={() => setInv({ email: '', name: '', role: 'staff', orgUnitIds: [] })}>+ 직원 초대</Button> : <span className="text-xs text-ink-3" data-testid="users-readonly">조회 권한 — 바꾸려면 대표에게 &ldquo;편집&rdquo;을 요청하세요</span>}
+          {canEdit ? <Button onClick={() => { setInvKey((k) => k + 1); allUnits.reload(); teamsList.reload(); setInv({ email: '', name: '', role: 'staff', orgUnitIds: [], teamIds: [] }); }} data-testid="invite-open">+ 직원 초대</Button> : <span className="text-xs text-ink-3" data-testid="users-readonly">조회 권한 — 바꾸려면 대표에게 &ldquo;편집&rdquo;을 요청하세요</span>}
         </span>
       </div>
       {demoN > 0 && <button type="button" className="text-xs text-ink-2 underline" onClick={() => setShowDemo((x) => !x)} data-testid="demo-toggle">{showDemo ? '심사용 체험 계정 숨기기' : `심사용 체험 계정 ${demoN}개 보기`}</button>}
@@ -121,8 +128,20 @@ function Users() {
             <Field label="권한"><select className={inputCls} value={inv.role} onChange={(e) => setInv({ ...inv, role: e.target.value })}>{roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></Field>
             <Field label="직책 (선택)"><input className={inputCls} value={inv.title ?? ''} onChange={(e) => setInv({ ...inv, title: e.target.value })} /></Field>
           </div>
-          <fieldset><legend className="mb-1 text-xs font-medium text-slate-600">소속 (접근 가능한 조직)</legend><UnitChecks value={inv.orgUnitIds} onChange={(v) => setInv({ ...inv, orgUnitIds: v })} />
+          <fieldset><legend className="mb-1 text-xs font-medium text-slate-600">소속 (접근 가능한 조직)</legend><UnitChecks key={invKey} value={inv.orgUnitIds} onChange={(v) => setInv({ ...inv, orgUnitIds: v })} />
             <p className="mt-1 text-xs text-slate-500">선택한 조직과 그 하위 조직의 업무·일정만 볼 수 있습니다. 대표·본사 관리자는 전체를 봅니다.</p></fieldset>
+          {/* 대기열 ①(10/19): 부서·팀에 넣기(팀원으로) + 그 부서·팀 기본 공간을 제안 */}
+          <fieldset data-testid="invite-teams"><legend className="mb-1 text-xs font-medium text-slate-600">부서·팀</legend>
+            <div className="max-h-36 space-y-1 overflow-y-auto rounded border p-2">
+              {(teamsList.data?.teams ?? []).map((t: any) => <label key={t.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={(inv.teamIds ?? []).includes(t.id)}
+                onChange={(e) => { const teamIds = e.target.checked ? [...(inv.teamIds ?? []), t.id] : (inv.teamIds ?? []).filter((x: string) => x !== t.id); const chosen = (teamsList.data?.teams ?? []).filter((x: any) => teamIds.includes(x.id));
+                  setInv({ ...inv, teamIds, spaces: chosen.length ? [...new Set<string>(chosen.flatMap((x: any) => x.default_spaces ?? ['work']))] : inv.spaces }); }} data-testid="invite-team" />
+                {t.kind === 'team' && t.parent_name ? <span className="text-ink-3">{t.parent_name} / </span> : null}{t.name}<span className="text-[11px] text-ink-3">{t.kind === 'dept' ? '부서' : '팀'}{t.isolated ? ' · 격리' : ''}</span></label>)}
+              {!(teamsList.data?.teams ?? []).length && <p className="text-xs text-ink-3">아직 부서·팀이 없습니다 — 팀 탭에서 만들 수 있습니다</p>}
+            </div></fieldset>
+          <fieldset data-testid="invite-spaces"><legend className="mb-1 text-xs font-medium text-slate-600">공간 {inv.teamIds?.length ? <span className="font-normal text-ink-3">(고른 부서·팀의 기본 공간을 제안)</span> : null}</legend>
+            <div className="flex gap-3 text-sm">{([['work', '업무'], ['sales', '영업'], ['marketing', '마케팅']] as const).filter(([k]) => k === 'work' || (spaceInfo.data?.spaces ?? []).includes(k)).map(([k, l]) => (
+              <label key={k} className="flex items-center gap-1.5"><input type="checkbox" checked={(inv.spaces ?? ['work']).includes(k)} onChange={(e) => { const cur = inv.spaces ?? ['work']; setInv({ ...inv, spaces: e.target.checked ? [...cur, k] : cur.filter((x: string) => x !== k) }); }} data-testid={`invite-space-${k}`} />{l}</label>))}</div></fieldset>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setInv(null)}>취소</Button><Button type="submit">초대 링크 만들기</Button></div>
         </form>}
       </Modal>

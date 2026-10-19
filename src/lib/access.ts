@@ -14,8 +14,46 @@ export function requireAdmin(u: SessionUser) {
  * V15: 대표·본사 관리자도 "전체"(null)가 아니라 **자기 회사(tenant)의 조직 전체** 목록 — 공개 가입한 다른 회사 데이터가 절대 섞이지 않게.
  * (반환 타입의 null 은 예전 호출부 호환용으로만 남겨 둠 — 이제 돌려주지 않는다)
  */
+/**
+ * 로컬 10/19(대표) 팀 격리: 격리 팀(teams.isolated) 구성원(대표·관리자 제외)은 '회사 안의 작은 회사' —
+ * 자기 팀(하위 팀 포함)과 자기에게 배정·지시·참여한 것만 보고, 본사(다른 부서)의 업무·일정·사람·자료는 404. mates = 같은 격리 팀 사람들.
+ * 업무·일정·사람·자료·메시지·AI 도구가 모두 이 함수와 accessibleUnitIds(격리면 빈 목록)를 거친다.
+ */
+export type TeamScope = { isolated: boolean; teamIds: string[]; mates: string[] };
+export async function teamScope(u: SessionUser, sql: Sql = db()): Promise<TeamScope> {
+  if (isAdmin(u) || u.isDemo) return { isolated: false, teamIds: [], mates: [] };
+  const teams = await sql<{ id: string }[]>`with recursive d as (
+      select t.id from teams t join team_members m on m.team_id = t.id where m.user_id = ${u.id} and t.isolated and not t.archived and t.tenant = ${tenantOf(u)}
+      union select c.id from teams c join d on c.parent_id = d.id where not c.archived
+    ) select id from d`;
+  if (!teams.length) return { isolated: false, teamIds: [], mates: [] };
+  const ids = teams.map((r) => r.id);
+  const mates = await sql<{ id: string }[]>`select distinct m.user_id as id from team_members m join users us on us.id = m.user_id
+    where m.team_id = any(${ids}::uuid[]) and us.status = 'active' and us.id <> ${u.id}`;
+  return { isolated: true, teamIds: ids, mates: mates.map((r) => r.id) };
+}
+/** 내가 속한 팀 + 하위 팀(관리자는 회사 모든 팀) — 팀 캘린더·팀 대화방 조건 */
+export function myTeamsSql(sql: Sql, u: SessionUser) {
+  if (isAdmin(u)) return sql`select id from teams where tenant = ${tenantOf(u)} and not archived`;
+  // union 뒤에 with recursive 를 바로 쓸 수 없어 하위 팀은 괄호 안 서브쿼리로
+  return sql`select m.team_id as id from team_members m join teams t0 on t0.id = m.team_id where m.user_id = ${u.id} and not t0.archived and t0.tenant = ${tenantOf(u)} union select s.id from (${subTeamsSql(sql, u)}) s`;
+}
+
+/** 소속 조직(하위 포함) — 쓰기(업무 만들 조직) 판단용. 격리와 무관 */
+export async function membershipUnitIds(u: SessionUser, sql: Sql = db()): Promise<string[] | null> {
+  if (isAdmin(u)) return (await sql<{ id: string }[]>`select id from org_units where tenant = ${tenantOf(u)}`).map((r) => r.id);
+  const rows = await sql<{ id: string }[]>`
+    with recursive t as (
+      select o.id from org_units o join memberships m on m.org_unit_id = o.id where m.user_id = ${u.id} and o.tenant = ${tenantOf(u)}
+      union
+      select c.id from org_units c join t on c.parent_id = t.id where c.tenant = ${tenantOf(u)}
+    ) select id from t`;
+  return rows.map((r) => r.id);
+}
+/** 보이는 조직 — 격리 팀 구성원은 빈 목록(조직 단위로는 아무것도 안 보임, 팀·본인 것만) */
 export async function accessibleUnitIds(u: SessionUser, sql: Sql = db()): Promise<string[] | null> {
   if (isAdmin(u)) return (await sql<{ id: string }[]>`select id from org_units where tenant = ${tenantOf(u)}`).map((r) => r.id);
+  if ((await teamScope(u, sql)).isolated) return [];
   const rows = await sql<{ id: string }[]>`
     with recursive t as (
       select o.id from org_units o join memberships m on m.org_unit_id = o.id where m.user_id = ${u.id} and o.tenant = ${tenantOf(u)}
@@ -139,34 +177,39 @@ export async function loadTaskForUser(u: SessionUser, taskId: string, sql: Sql =
 }
 
 export async function assertUnitAccess(u: SessionUser, unitId: string, sql: Sql = db()) {
-  const units = await accessibleUnitIds(u, sql);
+  const units = await membershipUnitIds(u, sql); // 격리 팀 구성원도 자기 소속 조직에 업무는 만든다
   if (units !== null && !units.includes(unitId)) throw forbidden('해당 조직에 대한 권한이 없습니다');
 }
 
 /** 캘린더 접근: 회사(전원 조회, 관리자 편집) / 조직(소속 조회, 소속 관리자 이상 또는 소속원 편집) / 개인(본인) */
 export interface CalendarRow {
   id: string;
-  type: 'company' | 'org_unit' | 'personal';
+  type: 'company' | 'org_unit' | 'personal' | 'team';
   org_unit_id: string | null;
   owner_user_id: string | null;
+  team_id?: string | null;
 }
 
 export async function calendarPerms(u: SessionUser, c: CalendarRow, units?: string[] | null) {
   units = units === undefined ? await accessibleUnitIds(u) : units;
   if (c.type === 'company') { const mine = ((c as any).tenant ?? 'default') === tenantOf(u); return { view: mine, edit: mine && atLeast(u, 'dept_lead') }; }
   if (c.type === 'personal') return { view: c.owner_user_id === u.id, edit: c.owner_user_id === u.id };
+  // 팀 일정(로컬 10/19): 팀장·부서(상위) 구성원·본사 = 편집, 팀원 = 조회
+  if (c.type === 'team') { const lvl = c.team_id ? await teamTaskLevel(u, c.team_id) : 'none'; return { view: lvl !== 'none', edit: lvl === 'edit' }; }
   const inUnit = units === null || (c.org_unit_id !== null && units.includes(c.org_unit_id));
   return { view: inUnit, edit: inUnit };
 }
 
 export async function visibleCalendars(u: SessionUser, sql: Sql = db()) {
   const units = await accessibleUnitIds(u, sql);
+  const sc = await teamScope(u, sql);
   const rows = await sql<(CalendarRow & { name: string; color: string; unit_name: string | null; brand_id: string | null })[]>`
-    select c.id, c.type, c.org_unit_id, c.owner_user_id, c.name, c.color, o.name as unit_name, o.brand_id, c.tenant
-    from calendars c left join org_units o on o.id = c.org_unit_id
-    where (c.type = 'company' and c.tenant = ${tenantOf(u)})
+    select c.id, c.type, c.org_unit_id, c.owner_user_id, c.team_id, c.name, c.color, coalesce(o.name, tm.name) as unit_name, o.brand_id, c.tenant
+    from calendars c left join org_units o on o.id = c.org_unit_id left join teams tm on tm.id = c.team_id
+    where (c.type = 'company' and c.tenant = ${tenantOf(u)} and ${sc.isolated ? sql`false` : sql`true`})
        or (c.type = 'personal' and c.owner_user_id = ${u.id})
        or (c.type = 'org_unit' and ${units === null ? sql`not exists (select 1 from org_units dz where dz.id = c.org_unit_id and dz.is_demo)` : sql`c.org_unit_id = any(${units}::uuid[])`})
+       or (c.type = 'team' and c.team_id in (${myTeamsSql(sql, u)}))
     order by case c.type when 'personal' then 0 when 'company' then 1 else 2 end, c.name`;
   return Promise.all(rows.map(async (c) => ({ ...c, perms: await calendarPerms(u, c, units) })));
 }

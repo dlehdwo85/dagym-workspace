@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db } from './db';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
-import { isAdmin, denyDemo, accessibleUnitIds, taskVisibleSql } from './access';
+import { isAdmin, denyDemo, accessibleUnitIds, taskVisibleSql, teamScope } from './access';
 import { activity } from './log';
 import { MAX_UPLOAD_BYTES, downloadUrl, getObject, objectSize, putObject, uploadTarget } from './storage';
 import { extractText } from './textExtract';
@@ -154,8 +154,10 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
   const secs = (['public', 'internal', 'confidential'] as Security[]).filter((s) => secAllowed(sc, s));
   const secFolders = allFolders.map((f) => f.folder).filter((f) => secAllowed(sc, folderSec(sc, f)));
   const units = await accessibleUnitIds(u, sql);
+  const ts = await teamScope(u, sql); // 로컬 10/19: 격리 팀 구성원은 같은 팀 사람이 올린 자료·볼 수 있는 업무의 첨부만
   // V38 4: 업무 첨부에서 온 파일은 그 업무를 볼 수 있는 사람에게만(올린 사람 본인은 항상)
   const secCond = sql`f.space = any(${spaceList}::text[]) and (f.created_by = ${u.id} or (f.security = any(${secs}::text[]) and f.folder = any(${secFolders}::text[])
+    and ${ts.isolated ? sql`(f.created_by = any(${ts.mates}::uuid[]) or f.task_id is not null)` : sql`true`}
     and (f.task_id is null or exists (select 1 from tasks t where t.id = f.task_id and t.deleted_at is null and ${taskVisibleSql(sql, u, units)}))))`;
   const counts = new Map((await sql<{ folder: string; n: number }[]>`select folder, count(*)::int n from library_files f where f.tenant = ${tenantOf(u)} and f.deleted_at is null
     and f.upload_status = 'ready' and ${secCond} group by folder`).map((r) => [r.folder, r.n]));
@@ -239,6 +241,8 @@ export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open
   f.effective_security = effSec(sc, f);
   if (f.created_by !== u.id && f.space !== 'work' && !(await librarySpaces(u)).includes(f.space)) throw notFound('자료가 없습니다'); // 공간 밖 자료는 존재도 숨김
   if (f.created_by !== u.id) { // 올린 사람 본인 (매출 근거처럼 다른 경로로 올린 파일 포함)은 항상
+    const ts = await teamScope(u);
+    if (ts.isolated && !ts.mates.includes(f.created_by) && !f.task_id) throw notFound('자료가 없습니다'); // 격리 팀: 본사 자료는 존재도 숨김
     await requireMenu(u, 'library', 'view');
     await requireFolder(u, f.folder, 'view'); // 폴더 권한 — 서명 주소 발급·AI 읽기 전에
     if (!canSeeSec(sc, u, f)) throw notFound('자료가 없습니다'); // V14 15번: 등급 밖이면 존재도 숨김

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
 import { badRequest, forbidden, notFound } from './errors';
-import { loadTaskForUser } from './access';
+import { loadTaskForUser, teamScope } from './access';
 import { notify } from './notifications';
 import { audit } from './log';
 import { MAX_UPLOAD_BYTES, downloadUrl, objectSize, uploadTarget } from './storage';
@@ -21,7 +21,10 @@ async function companyRoom(u: SessionUser, sql: Sql) {
   await sql`insert into chat_rooms (tenant, kind, name) values (${t}, 'company', '회사 전체') on conflict do nothing`;
   const [r] = await sql<{ id: string }[]>`select id from chat_rooms where tenant = ${t} and kind = 'company'`;
   // V14 14번: 회사 전체방은 모든 직원이 자동 참여 (한 번도 메시지 화면을 안 연 사람도)
-  await sql`insert into chat_members (room_id, user_id) select ${r.id}, id from users where status = 'active' and tenant = ${t} on conflict do nothing`;
+  // 로컬 10/19: 격리 팀 구성원(대표·관리자 제외)은 회사 전체방에 없음('회사 안의 작은 회사')
+  const isolatedSql = sql`(exists (select 1 from team_members tm join teams tt on tt.id = tm.team_id where tm.user_id = users.id and tt.isolated and not tt.archived) and users.role not in ('owner', 'admin'))`; // 괄호: not ... and 우선순위
+  await sql`insert into chat_members (room_id, user_id) select ${r.id}, id from users where status = 'active' and tenant = ${t} and not ${isolatedSql} on conflict do nothing`;
+  await sql`delete from chat_members cm using users where users.id = cm.user_id and cm.room_id = ${r.id} and ${isolatedSql}`;
   return r.id;
 }
 
@@ -81,6 +84,11 @@ export const roomInput = z.discriminatedUnion('kind', [
 async function sameTenantUsers(u: SessionUser, ids: string[], sql: Sql) {
   const rows = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and status = 'active' and tenant = ${tenantOf(u)}`;
   if (rows.length !== new Set(ids).size) throw badRequest('초대할 수 없는 사람이 있습니다');
+  const sc = await teamScope(u, sql); // 격리 팀 구성원: 같은 팀 사람·대표·관리자에게만
+  if (sc.isolated) {
+    const ok = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and (id = any(${sc.mates}::uuid[]) or role in ('owner', 'admin'))`;
+    if (ok.length !== new Set(ids).size) throw badRequest('초대할 수 없는 사람이 있습니다');
+  }
   return rows.map((r) => r.id);
 }
 export async function openRoom(u: SessionUser, i: z.infer<typeof roomInput>) {

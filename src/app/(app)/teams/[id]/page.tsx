@@ -1,6 +1,8 @@
 'use client';
 import { use } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
 import { Crown, MessageCircle, UsersRound } from 'lucide-react';
 import { useApi } from '@/components/client';
 import { Avatar, DueChip, Empty, PageHeader, Skeleton, StatusBadge, cx } from '@/components/ui';
@@ -9,6 +11,7 @@ import type { Team } from '@/components/Teams';
 /** V14 8번 팀 보드: 팀원별 열 + 담당자 미정(팀장이 지정할 업무) */
 export default function TeamBoard({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const teams = useApi<{ teams: Team[] }>('/api/teams');
   const tasks = useApi<any[]>(`/api/tasks?teamId=${id}&includeDone=recent&limit=500`);
   const team = teams.data?.teams.find((t) => t.id === id);
@@ -18,7 +21,9 @@ export default function TeamBoard({ params }: { params: Promise<{ id: string }> 
   const cols = [{ id: null as string | null, name: '담당자 미정', lead: false }, ...team.members.map((m) => ({ id: m.id as string | null, name: m.name, lead: m.lead }))];
   return (
     <div className="space-y-3">
-      <PageHeader title={team.name} icon={UsersRound} sub={`팀원 ${team.members.length}명 · 열린 업무 ${list.filter((t) => t.status !== 'done').length}건`}
+      {/* 대기열 ①(10/19): 하위 화면 뒤로가기 — 기록이 있으면 뒤로, 없으면 부서·팀 목록 */}
+      <button type="button" onClick={() => (window.history.length > 1 ? router.back() : router.push('/admin/users?tab=teams'))} className="inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink" data-testid="team-back"><ArrowLeft className="size-4" />뒤로</button>
+      <PageHeader title={team.kind === 'team' && team.parent_name ? `${team.parent_name} / ${team.name}` : team.name} icon={UsersRound} sub={`팀원 ${team.members.length}명 · 열린 업무 ${list.filter((t) => t.status !== 'done').length}건`}
         actions={team.room_id ? <Link href={`/messages?room=${team.room_id}`} className="inline-flex h-9 items-center gap-1.5 rounded-input border border-line px-3 text-sm hover:bg-slate-50"><MessageCircle className="size-4" />팀 대화방</Link> : null} />
       <div className="scrollbar-thin -mx-3 flex gap-3 overflow-x-auto px-3 pb-3" data-testid="team-board">
         {cols.map((c) => {

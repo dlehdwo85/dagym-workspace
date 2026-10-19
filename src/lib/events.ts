@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
-import { accessibleUnitIds, calendarPerms, type CalendarRow } from './access';
+import { accessibleUnitIds, calendarPerms, myTeamsSql, teamScope, type CalendarRow } from './access';
 import { badRequest, conflict, forbidden, notFound } from './errors';
 import { activity } from './log';
 import { notify } from './notifications';
@@ -64,7 +64,7 @@ interface EventRow {
 
 async function loadCalendar(sql: Sql, id: string) {
   const [c] = await sql<(CalendarRow & { name: string; color: string })[]>`
-    select id, type, org_unit_id, owner_user_id, name, color, tenant from calendars where id = ${id}`;
+    select id, type, org_unit_id, owner_user_id, team_id, name, color, tenant from calendars where id = ${id}`;
   if (!c) throw notFound('캘린더가 없습니다');
   return c;
 }
@@ -97,17 +97,19 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
   const sql = db();
   const units = await accessibleUnitIds(u, sql);
   const calFilter = calendarIds?.length ? sql`and c.id = any(${calendarIds}::uuid[])` : sql``;
-  const mates = await hqColleagues(u, sql);
+  const sc = await teamScope(u, sql);
+  const mates = sc.isolated ? sc.mates : await hqColleagues(u, sql); // 격리 팀: 같은 팀 사람 일정만(본사 동료 일정 없음)
   const rows = await sql<(EventRow & { ev_color: string | null; cal_name: string; color: string; cal_type: string; owner_id: string; owner_name: string | null; is_private: boolean })[]>`
     select e.*, e.color as ev_color, c.name as cal_name, c.color, c.type as cal_type, coalesce(c.owner_user_id, e.created_by) as owner_id, ow.name as owner_name
     from events e join calendars c on c.id = e.calendar_id left join users ow on ow.id = coalesce(c.owner_user_id, e.created_by)
     where e.deleted_at is null and e.recurring_event_id is null
       and (e.rrule is not null or (e.start_at < ${to} and e.end_at > ${from}))
       and (
-        (c.type = 'company' and c.tenant = ${tenantOf(u)})
+        (c.type = 'company' and c.tenant = ${tenantOf(u)} and ${sc.isolated ? sql`false` : sql`true`})
         or (c.type = 'personal' and c.owner_user_id = ${u.id})
         or (c.type = 'personal' and c.owner_user_id = any(${mates}::uuid[]))
         or (c.type = 'org_unit' and ${units === null ? sql`not exists (select 1 from org_units dz where dz.id = c.org_unit_id and dz.is_demo)` : sql`c.org_unit_id = any(${units}::uuid[])`})
+        or (c.type = 'team' and c.team_id in (${myTeamsSql(sql, u)}))
         or exists (select 1 from event_attendees a where a.event_id = e.id and a.user_id = ${u.id})
       ) ${calFilter}`;
   const ids = rows.map((r) => r.id);
