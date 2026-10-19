@@ -8,7 +8,7 @@ const TZ = 'Asia/Seoul';
 const hm = (d: Date) => DateTime.fromJSDate(d).setZone(TZ).toFormat('HH:mm');
 
 /** 그날 이 사람의 일정(내 개인 캘린더 + 참석) — 반복 일정 회차 포함, 시작 순 */
-async function eventsOfDay(sql: Sql, userId: string, day: string) {
+export async function eventsOfDay(sql: Sql, userId: string, day: string) {
   const from = DateTime.fromISO(day, { zone: TZ }).toJSDate(), to = DateTime.fromISO(day, { zone: TZ }).plus({ days: 1 }).toJSDate();
   const rows = await sql<{ id: string; title: string; start_at: Date; end_at: Date; all_day: boolean; rrule: string | null; exdates: Date[]; kind: string }[]>`
     select e.id, e.title, e.start_at, e.end_at, e.all_day, e.rrule, e.exdates, e.kind from events e join calendars c on c.id = e.calendar_id

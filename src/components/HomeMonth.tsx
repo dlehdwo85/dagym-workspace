@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { CalendarRange, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react';
+import { CalendarRange, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useApi } from './client';
 import { Card, cx } from './ui';
 import { SPACE_META } from './spaceMeta';
@@ -24,13 +24,12 @@ const C = { event: '#0F766E', task: '#64748B', overdue: '#DC2626' };
 
 /**
  * 로컬 10/19(대표 확정) 홈 개편: '최근 활동' 자리에 월 미니 캘린더. 날짜마다 점(일정 청록·업무 회색·영업/마케팅 공간 색·지난 업무 빨강),
- * 날짜를 누르면 그날 목록이 아래 펼쳐지고, 두 번 누르면 캘린더 화면. 휴대폰은 접힌 '월' 줄(이번 주 7칸) → 펼치면 전체 월. 데이터는 캘린더와 같은 API.
+ * 날짜를 누르면 그날 목록이 아래 펼쳐지고, 두 번 누르면 캘린더 화면. 대표 검수 10/20: 휴대폰도 접지 않고 월 전체 격자(접으면 이번 주와 같아 의미 없음). 데이터는 캘린더와 같은 API.
  */
 export function HomeMonth({ today, className }: { today: string; className?: string }) {
   const router = useRouter();
   const [month, setMonth] = useState(monthOf(today));
   const [sel, setSel] = useState<string | null>(null);
-  const [open, setOpen] = useState(false); // 휴대폰: 전체 월 펼침
   const from = `${month}-01`, to = `${nextMonth(month)}-01`;
   const ev = useApi<{ events: any[] }>(`/api/events?from=${encodeURIComponent(`${from}T00:00:00+09:00`)}&to=${encodeURIComponent(`${to}T00:00:00+09:00`)}`, [month]);
   const tk = useApi<{ tasks: any[] }>(`/api/tasks?view=all&includeDone=1&from=${from}&to=${addDays(to, -1)}&limit=500`, [month]);
@@ -48,15 +47,13 @@ export function HomeMonth({ today, className }: { today: string; className?: str
     return m;
   }, [ev.data, tk.data, ag.data, today]);
   const days: string[] = []; for (let d = from; d < to; d = addDays(d, 1)) days.push(d);
-  const week: string[] = Array.from({ length: 7 }, (_, i) => addDays(today, i));
   const dots = (d: string) => { const list = byDay.get(d) ?? []; const cs: string[] = []; for (const it of list) if (!cs.includes(it.color)) cs.push(it.color); return cs.slice(0, 4); };
   const pick = (d: string) => { if (sel === d) { router.push(`/calendar?view=dayGridMonth&date=${d}`); return; } setSel(d); };
-  const Cell = ({ d, small }: { d: string; small?: boolean }) => (
+  const Cell = ({ d }: { d: string }) => (
     <button type="button" onClick={() => pick(d)} onDoubleClick={() => router.push(`/calendar?view=dayGridMonth&date=${d}`)} aria-label={`${Number(d.slice(5, 7))}월 ${Number(d.slice(8))}일`} aria-pressed={sel === d} data-day={d} data-testid="home-month-day"
-      className={cx('relative mx-auto flex flex-col items-center rounded-lg tabular-nums', small ? 'h-12 w-full' : 'my-0.5 h-10 w-10',
+      className={cx('relative mx-auto my-0.5 flex h-10 w-10 flex-col items-center rounded-lg tabular-nums',
         sel === d ? 'bg-brand-600 text-white' : d === today ? 'font-bold text-brand-700 ring-1 ring-brand-500' : dow(d) === 0 ? 'text-red-600 hover:bg-slate-100' : 'hover:bg-slate-100')}>
-      <span className={cx('mt-1 text-sm', small && 'text-[11px] text-ink-3')}>{small ? '일월화수목금토'[dow(d)] : ''}</span>
-      <span className={cx(small ? 'text-sm' : '-mt-1 text-sm')}>{Number(d.slice(8))}</span>
+      <span className="mt-1.5 text-sm">{Number(d.slice(8))}</span>
       <span className="mt-0.5 flex h-1.5 gap-0.5">{dots(d).map((c) => <span key={c} className="size-1.5 rounded-full" style={{ background: sel === d ? '#fff' : c }} data-dot={c} />)}</span>
     </button>
   );
@@ -69,12 +66,9 @@ export function HomeMonth({ today, className }: { today: string; className?: str
           <button type="button" onClick={() => setMonth(prevMonth(month))} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label="이전 달"><ChevronLeft className="size-4" /></button>
           <button type="button" onClick={() => { setMonth(monthOf(today)); setSel(today); }} className="rounded px-1.5 text-xs text-ink-2 hover:bg-slate-100">오늘</button>
           <button type="button" onClick={() => setMonth(nextMonth(month))} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label="다음 달"><ChevronRight className="size-4" /></button>
-          <button type="button" onClick={() => setOpen((v) => !v)} className="ml-1 rounded p-1 text-ink-2 hover:bg-slate-100 lg:hidden" aria-label={open ? '월 접기' : '월 펼치기'} data-testid="home-month-toggle">{open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}</button>
         </span>
       </div>
-      {/* 휴대폰 접힌 상태: 이번 주 7칸 */}
-      {!open && <div className="grid grid-cols-7 px-2 pb-1 lg:hidden" data-testid="home-month-week">{week.map((d) => <Cell key={d} d={d} small />)}</div>}
-      <div className={cx('px-2', !open && 'hidden lg:block')} data-testid="home-month-grid">
+      <div className="px-2" data-testid="home-month-grid">
         <div className="grid grid-cols-7 text-center text-[11px] text-ink-3">{['일', '월', '화', '수', '목', '금', '토'].map((d, i) => <span key={d} className={cx('py-1', i === 0 && 'text-red-400')}>{d}</span>)}</div>
         <div className="grid grid-cols-7 text-center">
           {Array.from({ length: dow(from) }, (_, i) => <span key={'p' + i} />)}

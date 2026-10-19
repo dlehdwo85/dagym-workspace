@@ -524,14 +524,11 @@ await step('B-2 내 업무 자동 묶음 (새로 배정됨→확인·기한 지�
 await step('모바일 대시보드·캘린더·하단 메뉴 화면', async () => {
   await staff.goto(BASE + '/');
   await staff.getByText('님의 업무 현황').waitFor();
-  // 로컬 10/19(대표 확정) 홈 개편: 휴대폰은 '이번 주' 다음에 접힌 '월' 줄(이번 주 7칸) → 펼치면 전체 월, 월 격자는 접혀 있음
+  // 대표 검수 10/20: 휴대폰은 '이번 주' 다음에 월 전체 격자(접지 않음)
   const wkBox = await staff.getByTestId('home-week').boundingBox(), moBox = await staff.getByTestId('home-month').boundingBox();
   assert.ok(moBox.y > wkBox.y, '휴대폰: 이번 주 일정이 먼저');
-  assert.equal(await staff.getByTestId('home-month-week').locator('[data-day]').count(), 7, '접힌 월 줄 = 이번 주 7칸');
-  assert.equal(await staff.getByTestId('home-month-grid').isVisible(), false, '월 격자는 접힘');
-  await staff.getByTestId('home-month-toggle').tap();
-  await staff.getByTestId('home-month-grid').waitFor();
-  await staff.getByTestId('home-month-toggle').tap();
+  assert.ok((await staff.getByTestId('home-month-grid').locator('[data-day]').count()) >= 28, '대표 검수 10/20: 휴대폰도 월 전체 격자(접지 않음)');
+  assert.equal(await staff.getByTestId('home-month-grid').isVisible(), true, '월 격자 항상 펼침');
   await staff.screenshot({ path: `${SHOTS}/17-mobile-home.png` });
   await staff.goto(BASE + '/calendar');
   await staff.getByTestId('calendar').waitFor();

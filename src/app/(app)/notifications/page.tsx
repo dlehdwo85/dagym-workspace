@@ -11,6 +11,7 @@ export default function Notifications() {
   const [showAll, setShowAll] = useState(false);
   // 로컬 10/19(대표) 홈 개편: 홈 '최근 활동' 카드가 여기 '활동' 탭으로
   const [tab, setTab] = useState<'list' | 'activity'>('list');
+  const [doneIds, setDoneIds] = useState<string[]>([]); // 이 화면에서 방금 처리한 알림 — 다시 불러와도 안 읽음 탭에 "…함 ✓"로 남김
   const act = useApi<{ items: any[] }>(tab === 'activity' ? '/api/notifications/activity' : null);
   /** 로컬 10/20 알림에서 바로 처리: 서버가 준 버튼(승인/수정 요청·연장 승인/거절·답글/확인·배정 확인/오늘 할 일·10분 뒤) → 처리되면 그 자리에 "승인함 ✓" */
   async function runAction(n: any, a: { id: string; label: string; input?: 'text' }) {
@@ -18,7 +19,8 @@ export default function Notifications() {
     if (a.input === 'text') { const t = prompt(`${a.label} 내용`); if (t === null) return; text = t.trim(); if (!text) { toast.error(`${a.label} 내용을 적어 주세요`); return; } }
     try {
       const r = await api<{ label: string; unread: number }>(`/api/notifications/${n.id}/action`, { body: { action: a.id, text } });
-      setData((d: any) => d && { ...d, unread: r.unread, items: d.items.map((x: any) => (x.id === n.id ? { ...x, action_done: r.label, read_at: x.read_at ?? new Date().toISOString(), actions: [], justDone: true } : x)) }); // 방금 처리한 줄은 안 읽음 탭에 그대로 두고 "…함 ✓" 표시
+      setData((d: any) => d && { ...d, unread: r.unread, items: d.items.map((x: any) => (x.id === n.id ? { ...x, action_done: r.label, read_at: x.read_at ?? new Date().toISOString(), actions: [] } : x)) });
+      setDoneIds((d) => [...d, n.id]);
       window.dispatchEvent(new CustomEvent('wos-unread', { detail: { value: r.unread } }));
       toast.ok(`${r.label} ✓`); broadcastRefresh();
     } catch (e: any) { toast.error(e.message); }
@@ -65,11 +67,11 @@ export default function Notifications() {
                 </div>
               </li>))}
           </ul>)
-      ) : error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !(showAll ? data.items : data.items.filter((n: any) => !n.read_at || n.justDone)).length ? (
+      ) : error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !(showAll ? data.items : data.items.filter((n: any) => !n.read_at || doneIds.includes(n.id))).length ? (
         <Empty title={showAll ? '알림이 없습니다' : '새 알림이 없습니다'}>{!showAll && data.items.length > 0 && <button className="text-sm text-brand-600 underline" onClick={() => setShowAll(true)}>읽은 알림 보기</button>}</Empty>
       ) : (
         <ul className="divide-y rounded-lg border bg-white" data-testid="notifications">
-          {(showAll ? data.items : data.items.filter((n: any) => !n.read_at || n.justDone)).map((n: any) => (
+          {(showAll ? data.items : data.items.filter((n: any) => !n.read_at || doneIds.includes(n.id))).map((n: any) => (
             <li key={n.id} className={cx('flex gap-3 px-4 py-3', !n.read_at && 'bg-brand-50/50')}>
               <span className={cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', n.read_at ? 'bg-transparent' : 'bg-brand-600')} />
               <Link href={n.link} onClick={() => !n.read_at && read([n.id])} className="min-w-0 flex-1">

@@ -1,7 +1,11 @@
 // V41 단계 1 공간 틀: 관리 › 사용자 › 공간에서 영업 켜기 → PC 공간 카드 드롭다운으로 영업(파란 강조) → Ctrl+1 로 업무 →
 // 휴대폰 프로필 시트 공간 전환 → 뒤로가기 = 업무 · 영업 미배정 직원은 공간 카드 없음·주소 404 → 끄기
 import assert from 'node:assert/strict';
-export async function spaces({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
+export async function spaces(ctx) {
+  try { await spacesMain(ctx); } finally { await spacesTeardown(ctx).catch(() => {}); }
+}
+
+async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
@@ -63,7 +67,7 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql, SHOTS }) 
   for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/sales-${w}.png` }); }
   // 대표 결정(10/19): 하단 탭 = 공간마다 같은 크기 5칸(+ 버튼 없음)
   const tabs = async () => (await m.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-  assert.deepEqual(await tabs(), ['현황', '리드', '파이프라인', '영업기회', '더보기']);
+  assert.deepEqual(await tabs(), ['홈', '리드', '파이프라인', '영업기회', '더보기']); // 대표 검수 10/20: '영업 현황' → '홈'
   const w = await m.getByTestId('mobile-tabs').locator(':scope > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
   assert.ok(Math.max(...w) - Math.min(...w) <= 1, `5칸 같은 폭 ${w}`);
   await m.getByTestId('tab-more').tap();
@@ -105,7 +109,10 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql, SHOTS }) 
   assert.equal(saved, 1, '표 안 수정 저장');
   for (const [path, id] of [['/s/sales', 'space-home-sales'], ['/s/sales/pipeline', 'sales-pipeline']]) { await owner.goto(`${BASE}${path}`); await owner.getByTestId(id).waitFor(); }
   await sql`update sales_cutover set writes_open = false where tenant = 'default'`;
-  // 원래대로(다른 시험에 영향 없게): 업무 공간으로·영업 끄기
+}
+
+/** 원래대로(다른 시험에 영향 없게): 업무 공간으로·영업 끄기 — 중간에 실패해도 실행(뒤 단계 연쇄 실패 방지) */
+async function spacesTeardown({ owner, BASE }) {
   await owner.keyboard.press('Control+1').catch(() => {});
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
   await owner.goto(`${BASE}/admin/users`);
