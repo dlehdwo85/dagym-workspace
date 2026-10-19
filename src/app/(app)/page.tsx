@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, MessageSquare, PlusCircle, Sparkles, Users, Activity as ActivityIcon } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, Megaphone, MessageSquare, PlusCircle, Sparkles, Users, Activity as ActivityIcon } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
@@ -47,6 +47,19 @@ function Section({ title, count, children, href, icon: Icon, className, actions,
 }
 
 /** 오늘의 일정 한 줄 — 줄을 누르면 상세. 대표(10/16): 왼쪽 완료 동그라미 없앰(업무 목록 V14 43·이번 주 V14 37 과 같게, 완료는 업무 안에서) */
+/** V30 ② 안 읽은 공지 카드 — 없으면 안 보임 */
+function NoticeCard() {
+  const st = useApi<{ notices: { id: string; title: string; important: boolean; pinned: boolean; created_by_name: string }[]; unread: number }>('/api/notices?unread=1&limit=3');
+  if (!st.data?.unread) return null;
+  return (
+    <section className="rounded-card border border-amber-200 bg-amber-50/60 p-3 shadow-card" data-testid="home-notices">
+      <div className="mb-1 flex items-center gap-2"><Megaphone className="size-4 text-amber-700" /><h2 className="text-sm font-semibold">안 읽은 공지 {st.data.unread}건</h2><Link href="/notices?unread=1" className="ml-auto text-xs font-medium text-amber-800 underline">모두 보기</Link></div>
+      <ul className="divide-y divide-amber-100 text-sm">
+        {st.data.notices.map((n) => <li key={n.id}><Link href={`/notices/${n.id}`} className="flex items-center gap-1.5 py-1.5 hover:underline">{n.important && <span className="rounded bg-red-100 px-1.5 text-[11px] font-semibold text-red-700">중요</span>}<span className="min-w-0 flex-1 truncate">{n.title}</span><span className="shrink-0 text-xs text-ink-3">{n.created_by_name}</span></Link></li>)}
+      </ul>
+    </section>
+  );
+}
 function TodayRow({ t, className }: { t: any; className?: string }) {
   const router = useRouter();
   const rowOpen = useRowOpen(t.id, (id) => router.push(`/tasks/${id}`)); // 줄 아무 곳이나 눌러 상세
@@ -224,6 +237,7 @@ export default function Dashboard() {
           <button type="submit" className="shrink-0 rounded-input bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50" disabled={!aiQ.trim()}>요청</button>
         </form>
       )}
+      <NoticeCard />
       {/* V14 8번: 우리 팀 오늘의 일정 (팀에 속해 있을 때만) */}
       {(myTeams.data?.teams.length ?? 0) > 0 && (
         <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="home-team">

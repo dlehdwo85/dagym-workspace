@@ -62,5 +62,6 @@ export const NOTIFICATION_TYPES = {
   mail_status: '메일 발송 실패·고객 자료 열람',
   account_request: '직원 계정 삭제 요청',
   library_organized: '자료실 자동 정리 결과(올린 파일이 간 폴더)',
+  announcement: '공지(새 공지·다시 알림)',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;
