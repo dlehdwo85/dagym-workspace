@@ -23,15 +23,35 @@ function Raw({ row }: { row: any }) {
 }
 const chip = (s: unknown) => s ? <span className="rounded-full bg-[#EFF6FF] px-1.5 text-[11px] text-[#1D4ED8]">{String(s)}</span> : null;
 
+/** 대표(10/19): 영업·마케팅 현황 맨 위 '오늘' 카드 줄 — 누르면 그 목록(필터 적용) */
+export function TodayRow({ date, cards, color = C }: { date: string; cards: [string, number, string, string?][]; color?: string }) {
+  return (
+    <section className="rounded-card border bg-white p-3 shadow-card" style={{ borderColor: color }} data-testid="today-row">
+      <h2 className="mb-2 text-sm font-semibold">오늘 <span className="font-normal text-ink-3">{date}</span></h2>
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">{cards.map(([l, n, h, sub]) => (
+        <Link key={l} href={h} className="rounded-input border border-line p-2.5 hover:bg-slate-50" data-testid="today-card"><div className="text-xs text-ink-2">{l}</div>
+          <div className="mt-0.5 text-xl font-bold tabular-nums" style={{ color: n ? color : undefined }}>{n}</div>{sub && <div className="truncate text-[11px] text-ink-3">{sub}</div>}</Link>))}</div>
+    </section>
+  );
+}
+
 export function SalesHome() {
   const { data, error, reload } = useApi<any>('/api/sales/src?view=summary');
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={4} />;
   const k = data.kpi;
-  const cards: [string, number, string][] = [['리드', k.leads, '/s/sales/leads'], ['7일 안 연락', k.dueSoon, '/s/sales/leads'], ['연락 지남', k.overdue, '/s/sales/leads'], ['진행 중 입찰', k.bidsWorking, '/s/sales/bids?tab=working'], ['관련 공고', k.relatedNotices, '/s/sales/bids'], ['새 공고(7일)', k.newNotices7d, '/s/sales/bids']];
+  const bids = data.bidsOn !== false; // 입찰·공고 끈 회사는 입찰 카드 숨김
+  const cards: [string, number, string][] = [['리드', k.leads, '/s/sales/leads'], ['7일 안 연락', k.dueSoon, '/s/sales/leads'], ['연락 지남', k.overdue, '/s/sales/leads'],
+    ...(bids ? [['진행 중 입찰', k.bidsWorking, '/s/sales/bids?tab=working'], ['관련 공고', k.relatedNotices, '/s/sales/bids'], ['새 공고(7일)', k.newNotices7d, '/s/sales/bids']] as [string, number, string][] : [])];
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="space-home-sales">
       <Head title="워크인 · 영업" meta={data} />
+      {data.today && <TodayRow date={data.today.date} cards={[
+        ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/bids?tab=today'] as [string, number, string]] : []),
+        ['오늘 새 영업 DB', data.today.newDb.buildings + data.today.newDb.facilities + data.today.newDb.vendors, `/s/sales/hub?day=today&tab=${data.today.newDb.facilities >= data.today.newDb.buildings && data.today.newDb.facilities >= data.today.newDb.vendors ? 'facilities' : data.today.newDb.vendors > data.today.newDb.buildings ? 'vendors' : 'buildings'}`,
+          `신규단지 ${data.today.newDb.buildings} · 시설 ${data.today.newDb.facilities} · 협력사 ${data.today.newDb.vendors}`],
+        ['오늘 연락할 리드', data.today.contact, '/s/sales/leads?day=today'],
+        ...(bids ? [['오늘 마감 입찰', data.today.closing, '/s/sales/bids?tab=closing'] as [string, number, string]] : [])]} />}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">{cards.map(([l, n, h]) => (
         <Link key={l} href={h} className="rounded-card border border-line bg-white p-3 shadow-card hover:border-blue-300" data-testid="sales-kpi"><div className="text-xs text-ink-2">{l}</div><div className={cx('mt-1 text-2xl font-bold tabular-nums', l === '연락 지남' && n ? 'text-red-600' : '')} style={l === '연락 지남' && n ? undefined : { color: C }}>{n}</div></Link>))}</div>
       <div className="grid gap-3 lg:grid-cols-2">
@@ -97,9 +117,10 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
   );
 }
 
-export function Leads({ initialId }: { initialId?: string }) {
+export function Leads({ initialId, initialDay }: { initialId?: string; initialDay?: string }) {
   const [s, setS] = useState(''); const [status, setStatus] = useState(''); const [open, setOpen] = useState<string | null>(initialId ?? null);
-  const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, status })}`, [s, status]);
+  const [day, setDay] = useState(initialDay === 'today' ? 'today' : ''); // 영업 현황 '오늘 연락할 리드'
+  const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, status, day })}`, [s, status, day]);
   // 로컬 검수 10/19: prompt() 는 브라우저·자동화 환경에서 막힐 수 있어 입력 창으로
   const [nl, setNl] = useState<{ name: string; region: string; contactName: string; phone: string } | null>(null);
   // 앱 더보기 › 만들기 › 새 리드(?new=1): 쓰기 열린 회사면 입력 창 바로
@@ -112,7 +133,7 @@ export function Leads({ initialId }: { initialId?: string }) {
   const statuses = [...new Set((data?.leads ?? []).map((l: any) => String(l.status ?? '미정')))] as string[];
   return (
     <div className="space-y-3" data-testid="sales-leads">
-      <Head title="리드·거래처" meta={data}>{data?.readOnly === false && <Button size="sm" onClick={() => setNl({ name: '', region: '', contactName: '', phone: '' })} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} /><select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
+      <Head title="리드·거래처" meta={data}>{data?.readOnly === false && <Button size="sm" onClick={() => setNl({ name: '', region: '', contactName: '', phone: '' })} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} />{day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="leads-day-today">오늘 연락할 리드 ✕</button>}<select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
       {!data ? <Skeleton rows={5} /> : (
         <div className="overflow-x-auto rounded-card border border-line bg-white shadow-card"><table className="w-full min-w-[720px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr><th className="p-2">이름</th><th className="p-2">단계</th><th className="p-2">우선</th><th className="p-2">시설</th><th className="p-2">지역</th><th className="p-2">담당</th><th className="p-2">다음 연락</th></tr></thead>
           <tbody>{data.leads.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={() => setOpen(l.id)} data-testid="sales-lead-row"><td className="p-2 font-medium">{l.name}</td><td className="p-2">{chip(l.status)}</td><td className="p-2 text-xs">{l.priority ?? ''}</td><td className="p-2 text-xs">{l.facility ?? ''}</td><td className="p-2 text-xs">{l.region ?? ''}</td><td className="p-2 text-xs">{l.owner ?? ''}</td><td className="p-2 text-xs tabular-nums">{l.next ?? ''}</td></tr>)}
@@ -171,7 +192,7 @@ export function Bids({ initialTab }: { initialTab?: string }) {
   return (
     <div className="space-y-3" data-testid="sales-bids">
       <Head title="입찰·공고 모니터링" meta={data}><Search value={s} onChange={setS} /></Head>
-      <div className="flex gap-1.5">{[['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
+      <div className="flex flex-wrap gap-1.5">{[['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => (
         <li key={n.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-bid"><div className="flex flex-wrap items-center gap-2">{n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">{n.title}</a> : <span className="font-medium">{n.title}</span>}{chip(n.work)}{chip(n.classification)}{n.fit !== null && n.fit !== undefined && <span className="text-[11px] text-ink-3">적합 {String(n.fit)}</span>}</div>
           <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.region, n.source, n.deadline && `마감 ${String(n.deadline).slice(0, 16).replace('T', ' ')}`, n.status].filter(Boolean).join(' · ')}</div>
@@ -182,13 +203,15 @@ export function Bids({ initialTab }: { initialTab?: string }) {
   );
 }
 
-export function Hub() {
-  const [tab, setTab] = useState('buildings'); const [s, setS] = useState(''); const [raw, setRaw] = useState<any>(null);
-  const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'hub', tab, q: s })}`, [tab, s]);
+export function Hub({ initialTab, initialDay }: { initialTab?: string; initialDay?: string }) {
+  const [tab, setTab] = useState(['buildings', 'facilities', 'vendors'].includes(initialTab ?? '') ? initialTab! : 'buildings'); const [s, setS] = useState(''); const [raw, setRaw] = useState<any>(null);
+  const [day, setDay] = useState(initialDay === 'today' ? 'today' : ''); // 영업 현황 '오늘 새 영업 DB'
+  const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'hub', tab, q: s, day })}`, [tab, s, day]);
   if (error) return <ErrorBox error={error} retry={reload} />;
   return (
     <div className="space-y-3" data-testid="sales-hub">
-      <Head title="영업기회 허브" meta={data}><Search value={s} onChange={setS} /><Link href="/s/sales/prospects" className="text-xs underline" style={{ color: C }}>공공데이터 영업기회 →</Link></Head>
+      <Head title="영업기회 허브" meta={data}><Search value={s} onChange={setS} /><Link href="/s/sales/prospects" className="text-xs underline" style={{ color: C }}>공공데이터 영업기회 →</Link>
+        {day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="hub-day-today">오늘 새로 들어온 것만 ✕</button>}</Head>
       <div className="flex gap-1.5">{[['buildings', '신규단지'], ['facilities', '준공·입주 시설'], ['vendors', '협력사 등록']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-hub-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}</div>
       {!data ? <Skeleton rows={6} /> : <ul className="grid gap-2 lg:grid-cols-2">{data.items.map((r: any) => (
         <li key={r.id}><button type="button" onClick={() => setRaw(r.raw)} className="w-full rounded-card border border-line bg-white p-3 text-left text-sm hover:border-blue-300" data-testid="sales-hub-item">

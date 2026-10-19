@@ -7,7 +7,7 @@ import { createHmac } from 'node:crypto';
 import { bootstrap, resetDb, startServer, testDb, tick } from '../helpers.mjs';
 
 const PORT = 3223;
-let srv, ctx, sql, fake, calls = [], seq = 0;
+let srv, ctx, sql, fake, calls = [], seq = 0, failGroup = false;
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 before(async () => {
   fake = http.createServer(async (req, res) => {
@@ -23,7 +23,10 @@ before(async () => {
     if (req.method === 'GET' && path === '/stats') return send(200, { data: [] });
     if (req.method === 'GET' && path === '/ncc/channels') return send(200, [{ nccBusinessChannelId: 'bsn-1', name: '우리 홈페이지', channelTp: 'SITE', channelKey: 'https://example.com' }, { nccBusinessChannelId: 'bsn-2', name: '플레이스', channelTp: 'PLACE' }]);
     if (req.method === 'POST' && path === '/ncc/campaigns') return send(200, { nccCampaignId: `cmp-${++seq}`, ...j });
-    if (req.method === 'POST' && path === '/ncc/adgroups') return send(200, { nccAdgroupId: 'grp-1', ...j });
+    if (req.method === 'POST' && path === '/ncc/adgroups') {
+      if (failGroup || j.adgroupType !== 'WEB_SITE') return send(400, { title: 'Invalid type of ad group.', code: 3734 }); // 운영 10/19: adgroupType 없으면 3734
+      return send(200, { nccAdgroupId: 'grp-1', ...j });
+    }
     if (req.method === 'POST' && path === '/ncc/keywords') return send(200, j.map((k, i) => ({ nccKeywordId: `kw-${i + 1}`, ...k })));
     if (req.method === 'POST' && path === '/ncc/ads') return send(200, { nccAdId: `ad-${++seq}`, ...j });
     if (req.method === 'PUT' && path.startsWith('/ncc/campaigns/')) return send(200, { ...j });
@@ -56,12 +59,25 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   assert.equal((await ctx.staffA.client.req('PUT', '/api/marketing/ad-ops/cap', { monthlyCap: 300000 })).status, 403);
   await ctx.owner.ok('PUT', '/api/marketing/ad-ops/cap', { monthlyCap: 300000 });
   assert.equal((await ctx.owner.req('POST', `/api/marketing/ad-ops/plans/${bad.id}/approve`, {})).status, 409, '검사 걸린 세팅안은 시작 못 함');
+  // 중간 실패(광고그룹 400) → 캠페인 id 는 세팅안에 남고 변경 기록에 '생성 실패 + 사유', 다시 누르면 그 캠페인에 이어서(캠페인 중복 생성 없음)
+  failGroup = true;
+  const half = await ctx.owner.req('POST', `/api/marketing/ad-ops/plans/${p.id}/approve`, {});
+  assert.equal(half.status, 502); assert.match(half.body.error.message, /3734/);
+  let ov0 = await ctx.owner.ok('GET', '/api/marketing/ad-ops');
+  const fp = ov0.plans.find((x) => x.id === p.id);
+  assert.equal(fp.status, 'failed'); assert.ok(fp.external.campaignId, '만든 캠페인 id 기록');
+  const fc = ov0.changes.find((c) => c.plan_id === p.id && c.kind === 'create');
+  assert.equal(fc?.status, 'failed', JSON.stringify(ov0.changes)); assert.match(fc.error, /3734/); assert.equal(fc.after.campaignId, fp.external.campaignId);
+  failGroup = false;
   // 시작 = 네이버에 꺼진 상태로 생성
   calls = [];
   const ok = await ctx.owner.ok('POST', `/api/marketing/ad-ops/plans/${p.id}/approve`, {});
   assert.ok(ok.external.campaignId && ok.external.adgroupId);
-  const camp = calls.find((c) => c.method === 'POST' && c.path === '/ncc/campaigns');
-  assert.deepEqual([camp.body.campaignTp, camp.body.userLock, camp.body.dailyBudget], ['WEB_SITE', true, 10000], '꺼진 상태로 생성');
+  assert.equal(calls.filter((c) => c.method === 'POST' && c.path === '/ncc/campaigns').length, 0, '이어서 만들기 — 캠페인 다시 안 만듦');
+  assert.equal(ok.external.campaignId, fp.external.campaignId);
+  const camp = (await sql`select after from mkt_ad_changes where plan_id = ${p.id} and kind = 'create' and status = 'failed'`)[0];
+  assert.ok(camp.after.campaignId);
+  assert.equal(calls.find((c) => c.path === '/ncc/adgroups').body.adgroupType, 'WEB_SITE');
   assert.equal(calls.find((c) => c.path === '/ncc/adgroups').body.userLock, true);
   assert.deepEqual(calls.find((c) => c.path === '/ncc/keywords').body.map((k) => k.keyword), ['동네 헬스장', 'PT 가격']);
   assert.equal(calls.filter((c) => c.path === '/ncc/ads').length, 1);
@@ -79,7 +95,7 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   assert.equal(calls.at(-1).body.dailyBudget, 10000, '되돌리기 = 전 값');
   ov = await ctx.owner.ok('GET', '/api/marketing/ad-ops');
   assert.equal(ov.plans.find((x) => x.id === p.id).status, 'active');
-  assert.deepEqual(ov.changes.map((c) => c.kind).slice(0, 4), ['budget', 'budget', 'enable', 'create']);
+  assert.deepEqual(ov.changes.map((c) => c.kind).slice(0, 5), ['budget', 'budget', 'enable', 'create', 'create']);
   assert.equal(ov.changes[0].revert_of, budget.id);
   assert.equal((await ctx.staffA.client.ok('GET', '/api/marketing/ad-ops')).canEdit, false, '직원은 보기만');
   // 이번 달 광고비가 상한을 넘으면 tick 이 자동 중지 + 알림 1번, 켜기도 막힘

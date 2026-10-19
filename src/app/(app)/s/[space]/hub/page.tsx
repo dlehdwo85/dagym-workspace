@@ -6,5 +6,5 @@ import { Hub } from '@/components/sales/SalesSrc';
 export default async function Page({ params, searchParams }: { params: Promise<{ space: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   if ((await params).space !== 'sales') notFound();
   const sp = await searchParams;
-  return <Suspense><Hub {...({ initialId: sp.id, initialTab: sp.tab } as any)} /></Suspense>;
+  return <Suspense><Hub {...({ initialId: sp.id, initialTab: sp.tab, initialDay: sp.day } as any)} /></Suspense>;
 }

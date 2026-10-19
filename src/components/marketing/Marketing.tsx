@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PublishHelper } from './PublishHelper';
+import { TodayRow } from '@/components/sales/SalesSrc';
 import { MediaPick } from './MediaPick';
 
 const C = '#7C3AED';
@@ -15,11 +16,13 @@ type Content = { id: string; title: string; channel: string; status: string; sch
 
 /** V41 4-2 마케팅 개요: 숫자 카드 4개 + 운영실(SSO) */
 export function MarketingHome({ ssoHref }: { ssoHref: string }) {
-  const { data } = useApi<{ pending: number; today: number; week: number; changes: number; calls: number }>('/api/marketing/overview');
+  const { data } = useApi<{ pending: number; today: number; week: number; changes: number; calls: number; todayRow?: { date: string; produced: number; approve_soon: number; post_today: number; posted_today: number } }>('/api/marketing/overview');
   const cards: [string, number | undefined, string][] = [['승인 대기', data?.pending, '/s/marketing/approvals'], ['오늘 게시', data?.today, '/s/marketing/calendar'], ['이번 주 예약', data?.week, '/s/marketing/calendar'], ['새 전화 문의', data?.calls, '/s/marketing/calls']];
   return (
     <div className="mx-auto max-w-4xl space-y-4" data-testid="space-home-marketing">
       <h1 className="text-xl font-bold" style={{ color: C }}>워크인 · 마케팅</h1>
+      {data?.todayRow && <TodayRow date={data.todayRow.date} color={C} cards={[['오늘 제작된 시안', data.todayRow.produced, '/s/marketing/approvals?day=produced'],
+        ['오늘 승인할 것', data.todayRow.approve_soon, '/s/marketing/approvals?day=soon', '내일까지 게시 예정'], ['오늘 게시 예정', data.todayRow.post_today, '/s/marketing/approvals?day=today'], ['오늘 게시됨', data.todayRow.posted_today, '/s/marketing/approvals?day=published']]} />}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, n, h]) => (
         <Link key={l} href={h} className="rounded-card border border-line bg-white p-4 shadow-card hover:border-violet-300" data-testid="mkt-card"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-2xl font-bold tabular-nums" style={{ color: C }}>{n ?? '—'}</div></Link>))}</div>
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
@@ -140,10 +143,12 @@ export function Approvals() {
   const sp = useSearchParams();
   const [open, setOpen] = useState<string | null>(sp.get('c'));
   const [nw, setNw] = useState(sp.get('new') === '1'); // 앱 더보기 › 만들기 › 새 콘텐츠
-  const { data, error, reload } = useApi<{ contents: Content[] }>('/api/marketing/contents?view=approvals');
+  const day = sp.get('day') ?? ''; // 현황 '오늘' 카드: produced·soon·today·published
+  const DAY_LABEL: Record<string, string> = { produced: '오늘 제작된 시안', soon: '오늘 승인할 것(내일까지 게시 예정)', today: '오늘 게시 예정', published: '오늘 게시됨' };
+  const { data, error, reload } = useApi<{ contents: Content[] }>(`/api/marketing/contents?view=approvals${DAY_LABEL[day] ? `&day=${day}` : ''}`);
   return (
     <div className="space-y-3" data-testid="mkt-approvals">
-      <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>승인 대기</h1><Button className="ml-auto" onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></div>
+      <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>{DAY_LABEL[day] ?? '승인 대기'}</h1>{DAY_LABEL[day] && <Link href="/s/marketing/approvals" className="text-xs underline" data-testid="mkt-day-clear">승인 대기 전체</Link>}<Button className="ml-auto" onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></div>
       {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : !data.contents.length ? <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3">승인할 콘텐츠가 없습니다</p> : (
         <ul className="space-y-2">{data.contents.map((c) => (
           <li key={c.id}><button type="button" onClick={() => setOpen(c.id)} className="flex w-full items-center gap-3 rounded-card border border-line bg-white p-3 text-left shadow-card hover:border-violet-300" data-testid="mkt-row">

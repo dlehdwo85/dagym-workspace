@@ -106,7 +106,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const nav: NavItem[] = [...NAV, ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
-  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '영업 현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드·거래처', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }, { href: '/s/sales/hub', label: '영업기회 허브', icon: Building2 }, { href: '/s/sales/prospects', label: '공공데이터', icon: Search }, { href: '/s/sales/regions', label: '지역별', icon: Network }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '마케팅 현황', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
+  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '영업 현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드·거래처', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, ...(session.features.salesBids !== false ? [{ href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }] : []), { href: '/s/sales/hub', label: '영업기회 허브', icon: Building2 }, { href: '/s/sales/prospects', label: '공공데이터', icon: Search }, { href: '/s/sales/regions', label: '지역별', icon: Network }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '마케팅 현황', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
     { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' },
     { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 운영', icon: Rocket, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []), { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' },
     { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '설정' }, ...(admin ? [{ href: '/s/marketing/history', label: '운영실 기록', icon: History, group: '설정' }] : [])] : [];
@@ -183,9 +183,11 @@ export function AppShell({ session, children }: { session: Sess; children: React
   }, [path, hasUnread]);
 
   // 공간별 하단 탭 4개(+ 더보기) — 배지: 메시지 안 읽음 · 마케팅 승인 대기
-  const mobileTabs: (NavItem & { badge?: number })[] = space === 'sales'
-    ? [{ href: '/s/sales', label: '현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }]
-    : space === 'marketing'
+  // 로컬 검수 10/19: 하단 탭은 마지막 공간이 아니라 지금 주소의 공간 기준(/tasks 등 공통 화면 = 업무)
+  const tabSpace = path.startsWith('/s/sales') ? 'sales' : path.startsWith('/s/marketing') ? 'marketing' : 'work';
+  const mobileTabs: (NavItem & { badge?: number })[] = tabSpace === 'sales'
+    ? [{ href: '/s/sales', label: '현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, session.features.salesBids !== false ? { href: '/s/sales/bids', label: '입찰·공고', icon: Stamp } : { href: '/s/sales/deals', label: '제안·계약', icon: FileText }]
+    : tabSpace === 'marketing'
       ? [{ href: '/s/marketing', label: '현황', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
       : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
@@ -422,7 +424,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         )}
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         {/* 대표 결정(10/19): 가운데 + 버튼 없이 공간마다 같은 크기 5칸 — 4개 메뉴 + 더보기(그 공간 나머지 메뉴·공통·공간 전환·만들기) */}
-        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={space}>
+        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
           {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.badge} />)}
           <button type="button" onClick={() => setMore(true)} aria-label="더보기" data-testid="tab-more" className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs', more ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
             <Ellipsis className="size-6" strokeWidth={more ? 2.4 : 1.8} aria-hidden />더보기
@@ -461,9 +463,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
               {/* 대표 결정(10/19): + 버튼 대신 더보기 › 만들기(공간 맥락) */}
               <div className="border-t border-line px-1 pb-1 pt-2" role="menu" aria-label="만들기" data-testid="more-create">
                 <div className="px-2 text-xs text-ink-3">만들기</div>
-                {space === 'sales' ? (
+                {tabSpace === 'sales' ? (
                   <Link href="/s/sales/leads?new=1" onClick={() => setMore(false)} role="menuitem" className="mt-1 flex min-h-[48px] items-center gap-2 rounded-xl bg-brand-600 px-3 text-sm font-semibold text-white" data-testid="more-new-lead"><Plus className="size-5" />새 리드</Link>
-                ) : space === 'marketing' ? (
+                ) : tabSpace === 'marketing' ? (
                   <Link href="/s/marketing/approvals?new=1" onClick={() => setMore(false)} role="menuitem" className="mt-1 flex min-h-[48px] items-center gap-2 rounded-xl bg-brand-600 px-3 text-sm font-semibold text-white" data-testid="more-new-content"><Plus className="size-5" />새 콘텐츠</Link>
                 ) : (
                   <div className="mt-1 grid grid-cols-3 gap-1.5">

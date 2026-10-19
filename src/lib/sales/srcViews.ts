@@ -43,13 +43,21 @@ const lead = (r: any, names: Map<string, string>) => ({
   owner: r.__owner !== undefined ? r.__owner || null : names.get(String(pick(r, 'owner_id', 'assigned_to', 'sales_owner_id', 'user_id') ?? '')) ?? null, ownerId: r.__owner_id ?? null, memo: r.__id && r.__owner !== undefined ? r.memo ?? null : undefined, revenue: pick(r, 'expected_revenue', 'expected_amount', 'estimated_revenue'),
   updated: day(pick(r, 'updated_at', 'created_at')), phone: pick(r, 'phone', 'contact_phone'), contact: pick(r, 'contact_name', 'manager_name'),
 });
+/** 영업관리 기준(SALES_SCREEN_INVENTORY 10/19): '오늘 등록'·'새 공고'는 원본 first_seen_at 하나만(KST 날짜). posted_date·created_at 은 쓰지 않음.
+ * 옮긴 행은 원본 first_seen_at 을 그대로 가져오므로 옮긴 날로 바뀌지 않는다(값이 없으면 신규 판단에서 빠짐) */
+const firstSeen = (r: any) => {
+  const v = r?.first_seen_at;
+  if (!v) return null;
+  const d = new Date(String(v));
+  return /T|\s\d{2}:/.test(String(v)) && !Number.isNaN(d.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d) : String(v).slice(0, 10);
+};
 const notice = (r: any) => ({ id: r.__id, title: pick(r, 'title', 'notice_title', 'bid_name', 'name') ?? '(제목 없음)', agency: pick(r, 'issuer', 'agency', 'org_name', 'demand_agency', 'organization', 'buyer'),
-  region: pick(r, 'region'), posted: day(pick(r, 'first_seen_at', 'posted_at', 'notice_date', 'published_at', 'created_at')), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'),
+  region: pick(r, 'region'), posted: firstSeen(r), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'),
   close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')), source: pick(r, 'source', 'source_code'), url: pick(r, 'source_url', 'url', 'detail_url', 'link'),
   attachments: (() => { const a = pick(r, 'attachment_urls'); return Array.isArray(a) ? a : typeof a === 'string' && a.startsWith('[') ? (() => { try { return JSON.parse(a); } catch { return []; } })() : a ? [a] : []; })(),
   fit: pick(r, 'fit_score'), status: pick(r, 'current_status', 'status'), amount: pick(r, 'amount', 'budget', 'estimated_price'), related: r.related === true || r.related === 'true' });
 
-export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string }) {
+export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string }) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
   const [applied] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
@@ -61,6 +69,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   const term = (q.q ?? '').trim().toLowerCase();
   const hit = (o: any) => !term || JSON.stringify(o).toLowerCase().includes(term);
 
+  const bidsOn = await (await import('./options')).salesBidsOn(t); // 입찰·공고 선택 기능
+  if (view === 'bids' && !bidsOn) throw notFound('입찰·공고를 쓰지 않는 회사입니다');
   if (view === 'summary') {
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await rows(t, 'opportunity_work');
@@ -70,11 +80,15 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const overdue = live.filter((l) => l.next && l.next < today()).sort((a, b) => String(b.next).localeCompare(String(a.next)));
     const cnt = L.reduce((m: Record<string, number>, l) => { const k = String(l.status ?? '미정'); m[k] = (m[k] ?? 0) + 1; return m; }, {});
     const statuses = [...STAGES.filter((k) => cnt[k]), ...Object.keys(cnt).filter((k) => !STAGES.includes(k))].map((k) => [k, cnt[k]]);
-    return { ...meta, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
-      relatedNotices: N.length, newNotices7d: N.filter((n) => n.posted && n.posted >= plus(-7)).length }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses };
+    return { ...meta, bidsOn, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
+      relatedNotices: N.length, newNotices7d: N.filter((n) => n.posted && n.posted >= plus(-7)).length }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses,
+      // 대표(10/19): 첫 화면 맨 위 '오늘' — 새 공고·새 영업 DB(신규단지·시설·협력사)·오늘 연락할 리드·오늘 마감 입찰
+      today: await (async () => { const td = today();
+        const db3 = await Promise.all((['building_sales_pipeline', 'operating_facility_prospects', 'vendor_registrations'] as const).map(async (tb) => (await rows('global', tb, 20000)).filter((r) => firstSeen(r) === td).length));
+        return { date: td, newNotices: N.filter((n) => n.posted === td).length, newDb: { buildings: db3[0], facilities: db3[1], vendors: db3[2] }, contact: live.filter((l) => l.next === td).length, closing: N.filter((n) => n.close === td).length }; })() };
   }
   if (view === 'leads') {
-    const L = (await leadRows()).map((r) => ({ ...lead(r, names), raw: r })).filter((l) => hit(l.raw) && (!q.status || String(l.status) === q.status));
+    const L = (await leadRows()).map((r) => ({ ...lead(r, names), raw: r })).filter((l) => hit(l.raw) && (!q.status || String(l.status) === q.status) && (q.day !== 'today' || l.next === today()));
     return { ...meta, leads: L.map(({ raw: _, ...l }) => l).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
   }
   if (view === 'lead') {
@@ -116,17 +130,19 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     let N = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true' || byNotice.has(String(r.id ?? r.__id)));
     const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id);
       return { ...notice(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment') }; })
-      .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || ((!n.close || n.close >= today()) && (!n.status || /공고중|정정/.test(String(n.status))))))
+      .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || ((!n.close || n.close >= today()) && (!n.status || /공고중|정정/.test(String(n.status)))))
+        && (tab !== 'today' || n.posted === today()) && (tab !== 'closing' || n.close === today()))
       .sort((a, b) => tab === 'open' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
     return { ...meta, tab, total: N.length, items };
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings';
-    if (tab === 'buildings') return { ...meta, tab, items: (await rows('global', 'building_sales_pipeline')).filter(hit).map((r) => ({ id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
+    const dayOk = (r: any) => q.day !== 'today' || firstSeen(r) === today(); // 오늘 새 영업 DB
+    if (tab === 'buildings') return { ...meta, tab, items: (await rows('global', 'building_sales_pipeline')).filter((r) => hit(r) && dayOk(r)).map((r) => ({ id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
       address: pick(r, 'address', 'location'), households: pick(r, 'households', 'total_households', 'units'), start: day(pick(r, 'sales_start_date', 'start_date', 'notice_date')), status: pick(r, 'status', 'stage'), raw: r })) };
     if (tab === 'facilities') {
       const P = new Map((await rows(t, 'operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
-      const items = (await rows('global', 'operating_facility_prospects', 20000)).filter(hit).map((r) => { const p = P.get(String(r.id ?? r.__id));
+      const items = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)', address: pick(r, 'address', 'road_address'), score: Number(pick(r, 'score', 'priority_score') ?? 0) || null,
           lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'use_approval_date', 'completed_at', 'move_in_date')),
           contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null), raw: r }; })
@@ -135,7 +151,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     }
     if (tab === 'vendors') {
       const P = new Map((await rows(t, 'vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
-      return { ...meta, tab, items: (await rows('global', 'vendor_registrations')).filter(hit).map((r) => { const p = P.get(String(r.id ?? r.__id));
+      return { ...meta, tab, items: (await rows('global', 'vendor_registrations')).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)', division: pick(r, 'category', 'division', 'kind'), rank: pick(r, 'rank_label', 'rank'), notice: pick(r, 'notice_title', 'title', 'notice'),
           url: pick(r, 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null), raw: r }; }) };
     }

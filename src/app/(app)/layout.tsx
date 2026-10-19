@@ -28,7 +28,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     user: { id: user.id, name: user.name, email: user.email, role: user.role, platformAdmin: !!user.platformAdmin },
     support: user.support ?? null, // V28-3 지원 모드 빨간 띠
     dir: JSON.parse(JSON.stringify(dir)),
-    features: { googleSync: googleSyncEnabled(), ai: aiEnabled() && !user.isDemo && menus.assistant === 'use', library: !user.isDemo && menus.library !== 'none' },
+    features: { googleSync: googleSyncEnabled(), ai: aiEnabled() && !user.isDemo && menus.assistant === 'use', library: !user.isDemo && menus.library !== 'none',
+      salesBids: (spaces as string[]).includes('sales') ? await (await import('@/lib/sales/options')).salesBidsOn(tenantOf(user)) : false },
     menus,
     spaces, // V41 공간
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)

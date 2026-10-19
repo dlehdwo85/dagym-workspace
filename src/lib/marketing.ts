@@ -31,7 +31,14 @@ export async function overview(u: SessionUser) {
       count(*) filter (where status = 'changes')::int as changes
     from mkt_contents where tenant = ${t}`;
   const [k] = await sql<any[]>`select count(*) filter (where status = 'new')::int as calls from mkt_calls where tenant = ${t}`;
-  return { ...c, calls: k.calls };
+  // 대표(10/19): 첫 화면 맨 위 '오늘' — 오늘 제작된 시안·오늘 승인할 것(내일까지 게시 예정인 승인 대기)·오늘 게시 예정·오늘 게시됨(시험 제외)
+  const [d] = await sql<any[]>`select (now() at time zone 'Asia/Seoul')::date::text as date,
+      count(*) filter (where (produced_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date)::int as produced,
+      count(*) filter (where status in ('pending', 'changes') and (scheduled_at at time zone 'Asia/Seoul')::date <= (now() at time zone 'Asia/Seoul')::date + 1)::int as approve_soon,
+      count(*) filter (where status = 'approved' and (scheduled_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date)::int as post_today,
+      count(*) filter (where status = 'published' and (published_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date)::int as posted_today
+    from mkt_contents where tenant = ${t} and not is_test`;
+  return { ...c, calls: k.calls, todayRow: d };
 }
 
 export async function listBrands(u: SessionUser) { await assertSpace(u, 'marketing'); return { brands: await db()`select id, name, color from mkt_brands where tenant = ${tenantOf(u)} order by name` }; }
@@ -43,7 +50,7 @@ export async function createBrand(u: SessionUser, i: z.infer<typeof brandInput>)
   return { id: b.id };
 }
 
-export async function listContents(u: SessionUser, q: { view?: string; from?: string; to?: string }) {
+export async function listContents(u: SessionUser, q: { view?: string; from?: string; to?: string; day?: string }) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select c.id, c.title, c.channel, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, b.name as brand, b.color as brand_color,
@@ -52,7 +59,14 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
     left join mkt_versions v on v.content_id = c.id and v.version = c.current_version
     left join users u on u.id = c.created_by
     where c.tenant = ${t} and c.status <> 'canceled'
-      and (${q.view ?? ''} <> 'approvals' or c.status in ('pending', 'changes', 'hold'))
+      and (${q.view ?? ''} <> 'approvals' or ${q.day ?? ''} <> '' or c.status in ('pending', 'changes', 'hold'))
+      -- 현황 '오늘' 카드에서 들어온 목록(시험 제외)
+      and (${q.day ?? ''} = '' or (not c.is_test and case ${q.day ?? ''}
+        when 'produced' then (c.produced_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date
+        when 'soon' then c.status in ('pending', 'changes') and (c.scheduled_at at time zone 'Asia/Seoul')::date <= (now() at time zone 'Asia/Seoul')::date + 1
+        when 'today' then c.status = 'approved' and (c.scheduled_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date
+        when 'published' then c.status = 'published' and (c.published_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date
+        else true end))
       and (${q.from ?? ''} = '' or c.scheduled_at >= ${q.from || '1970-01-01'}::date)
       and (${q.to ?? ''} = '' or c.scheduled_at < (${q.to || '2999-01-01'}::date + 1))
     order by c.scheduled_at nulls last, c.created_at desc limit 300`;

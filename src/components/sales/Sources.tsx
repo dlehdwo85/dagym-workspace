@@ -30,6 +30,7 @@ export function Sources() {
   return (
     <div className="space-y-4" data-testid="sales-sources">
       <h1 className="text-xl font-bold text-[#2563EB]">데이터 설정</h1>
+      <SalesOptions />
       {data.canEdit && (
         <section className="rounded-card border border-[#BFDBFE] bg-[#EFF6FF] p-4" data-testid="sales-ai-setup">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#1D4ED8]"><Sparkles className="size-4" />AI 자동 세팅</h2>
@@ -72,5 +73,26 @@ export function Sources() {
       ))}
       <p className="text-[11px] text-ink-3">공공데이터는 워크인이 하루 한 번 모아 모든 회사가 같이 씁니다(출처: 각 기관, 공공데이터포털). 회사마다 다른 것은 켠 원천·검색어·지역과 진행 상태·메모뿐입니다. 광고성 문자·메일 일괄 발송 기능은 없습니다.</p>
     </div>
+  );
+}
+
+/** 대표(10/19): 입찰·공고는 회사 선택 기능 — 끄면 입찰·공고 메뉴·카드·하단 탭(→ 제안·계약)·화면을 숨김 */
+function SalesOptions() {
+  const { data, reload } = useApi<{ bids: boolean; bidsAuto: boolean; canEdit: boolean }>('/api/sales/options');
+  if (!data) return null;
+  async function set(v: boolean | null) {
+    try { await api('/api/sales/options', { method: 'PUT', body: { bids: v } }); toast.ok(v === false ? '입찰·공고를 껐습니다 — 메뉴·카드·하단 탭에서 숨깁니다' : '입찰·공고를 켰습니다'); reload(); setTimeout(() => window.location.reload(), 600); }
+    catch (e: any) { toast.error(e.message); }
+  }
+  return (
+    <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="sales-options">
+      <h2 className="text-sm font-semibold">쓰는 기능</h2>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-medium">입찰·공고</span>
+        <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', data.bids ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-ink-3')} data-testid="sales-bids-state">{data.bids ? '사용 중' : '사용 안 함'}{data.bidsAuto ? ' (기본값)' : ''}</span>
+        {data.canEdit && <Button size="sm" variant={data.bids ? 'secondary' : 'primary'} onClick={() => set(!data.bids)} data-testid="sales-bids-toggle">{data.bids ? '끄기' : '켜기'}</Button>}
+      </div>
+      <p className="mt-1 text-xs text-ink-2">입찰을 하지 않는 회사는 꺼 두세요. 입찰·공고 메뉴와 현황 카드가 사라지고, 휴대폰 하단 탭의 입찰·공고 자리는 &lsquo;제안·계약&rsquo;이 됩니다. 공용으로 모으는 공고 데이터는 다른 회사에 영향이 없습니다.</p>
+    </section>
   );
 }

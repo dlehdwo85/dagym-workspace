@@ -6,5 +6,5 @@ import { Leads } from '@/components/sales/SalesSrc';
 export default async function Page({ params, searchParams }: { params: Promise<{ space: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   if ((await params).space !== 'sales') notFound();
   const sp = await searchParams;
-  return <Suspense><Leads {...({ initialId: sp.id, initialTab: sp.tab } as any)} /></Suspense>;
+  return <Suspense><Leads {...({ initialId: sp.id, initialTab: sp.tab, initialDay: sp.day } as any)} /></Suspense>;
 }

@@ -144,7 +144,7 @@ export async function approvePlan(u: SessionUser, id: string) {
   try {
     // 실패하면 거기서 멈추고, 이미 만든 id 는 external 에 남김(다시 시도하면 이어서 만듦)
     if (!ext.campaignId) ext.campaignId = String((await naverReq(a, 'POST', '/ncc/campaigns', '', { customerId: Number(a.external_id), name: p.name, campaignTp: 'WEB_SITE', dailyBudget: p.plan.dailyBudget, useDailyBudget: true, userLock: true })).nccCampaignId);
-    if (!ext.adgroupId) ext.adgroupId = String((await naverReq(a, 'POST', '/ncc/adgroups', '', { nccCampaignId: ext.campaignId, name: `${p.name} 그룹`, pcChannelId: p.plan.channelId, mobileChannelId: p.plan.channelId, bidAmt: p.plan.bidAmt, useDailyBudget: false, userLock: true })).nccAdgroupId);
+    if (!ext.adgroupId) ext.adgroupId = String((await naverReq(a, 'POST', '/ncc/adgroups', '', { nccCampaignId: ext.campaignId, adgroupType: 'WEB_SITE', name: `${p.name} 그룹`, pcChannelId: p.plan.channelId, mobileChannelId: p.plan.channelId, bidAmt: p.plan.bidAmt, useDailyBudget: false, userLock: true })).nccAdgroupId);
     if (!ext.keywordIds) {
       const kws: any[] = await naverReq(a, 'POST', '/ncc/keywords', `?nccAdgroupId=${encodeURIComponent(String(ext.adgroupId))}`, p.plan.keywords.map((k: string) => ({ nccAdgroupId: ext.adgroupId, keyword: k, useGroupBidAmt: true, userLock: false })));
       ext.keywordIds = (kws ?? []).map((k) => String(k.nccKeywordId));
