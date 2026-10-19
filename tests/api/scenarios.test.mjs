@@ -1508,10 +1508,30 @@ describe('WORKIN_V7 캘린더 색 (개인/회사 두 가지)', () => {
     assert.equal((await ctx.staffA.client.ok('GET', '/api/calendar-colors')).colors.personal, '#d50000');
     assert.equal((await ctx.owner.ok('GET', '/api/calendar-colors')).colors.personal, '#039be5', '남의 색은 그대로');
     assert.equal((await ctx.staffA.client.req('PUT', '/api/calendar-colors', { personal: '#8e24aa', company: '#0b8043', asDefault: true })).status, 403, '기본값은 대표만');
-    assert.equal((await ctx.staffA.client.req('PUT', '/api/calendar-colors', { personal: '#123456', company: '#0b8043' })).status, 400);
+    assert.equal((await ctx.staffA.client.req('PUT', '/api/calendar-colors', { personal: '#12345', company: '#0b8043' })).status, 400, '색 형식(#rrggbb) 아니면 400 — 10/19부터 직접 고른 색 허용');
     await ctx.owner.ok('PUT', '/api/calendar-colors', { personal: '#8e24aa', company: '#f4511e', asDefault: true });
     assert.equal((await ctx.staffB.client.ok('GET', '/api/calendar-colors').catch(async () => ctx.managerA.client.ok('GET', '/api/calendar-colors'))).colors.company, '#f4511e', '안 바꾼 사람은 새 기본값');
     assert.equal((await ctx.staffA.client.ok('GET', '/api/calendar-colors')).colors.personal, '#d50000', '바꾼 사람은 자기 색 유지');
+  });
+  test('대표 지적 10/19 ②: 캘린더별·사람별 색(직접 고른 색)·색 점·일정별 색', async () => {
+    const cals = (await ctx.staffA.client.ok('GET', '/api/calendars')).calendars;
+    const company = cals.find((c) => c.type === 'company');
+    await ctx.staffA.client.ok('PUT', '/api/calendar-colors', { cals: { [company.id]: '#123abc' }, people: { [ctx.ownerId]: '#8e24aa' }, whoDot: true });
+    let c = (await ctx.staffA.client.ok('GET', '/api/calendar-colors')).colors;
+    assert.deepEqual([c.cals[company.id], c.people[ctx.ownerId], c.whoDot, c.personal], ['#123abc', '#8e24aa', true, '#d50000'], '앞서 고른 개인 색은 그대로');
+    await ctx.staffA.client.ok('PUT', '/api/calendar-colors', { cals: { [company.id]: null } });
+    c = (await ctx.staffA.client.ok('GET', '/api/calendar-colors')).colors;
+    assert.deepEqual([c.cals[company.id], c.people[ctx.ownerId]], [undefined, '#8e24aa'], 'null = 기본으로, 나머지 유지');
+    assert.equal(Object.keys((await ctx.owner.ok('GET', '/api/calendar-colors')).colors.people).length, 0, '사람마다 따로 저장');
+    // 일정별 색: 만들 때·고칠 때, 목록에 eventColor
+    const personal = cals.find((x) => x.type === 'personal');
+    const ev = await ctx.staffA.client.ok('POST', '/api/events', { calendarId: personal.id, title: '색 시험', start: '2026-11-03T10:00:00+09:00', end: '2026-11-03T11:00:00+09:00', color: '#f6bf26' });
+    const list = async () => (await ctx.staffA.client.ok('GET', '/api/events?from=2026-11-03T00:00:00%2B09:00&to=2026-11-04T00:00:00%2B09:00')).events.find((x) => x.id === ev.id);
+    assert.equal((await list()).eventColor, '#f6bf26');
+    const got = await ctx.staffA.client.ok('GET', `/api/events/${ev.id}`);
+    await ctx.staffA.client.ok('PATCH', `/api/events/${ev.id}`, { color: null, version: got.event.version });
+    assert.equal((await list()).eventColor, null, '기본(캘린더 색)으로');
+    assert.equal((await ctx.staffA.client.req('PATCH', `/api/events/${ev.id}`, { color: 'red' })).status, 400);
   });
 });
 

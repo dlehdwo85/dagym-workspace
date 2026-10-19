@@ -189,7 +189,16 @@ const WEB_TOOLS: AiTool[] = [
 
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 아래 [우리 회사] 직원을 돕습니다. 그 회사의 업종·사업 방향·말투에 맞춰 답하고, 다른 회사 이야기를 지어내지 마세요.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
-- 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다. 실행됐다고 말하지 말고 "확인을 누르면 반영됩니다"라고 안내하세요.
+- 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다.
+- 실행 상태는 도구 결과·대화 기록 표시 그대로 말하세요(대표 지적 10/19 ④): 이번 답에서 만든 제안 = "확인을 누르면 반영됩니다". 대화 기록의 [실행됨] = 이미 반영된 것 → "만들었습니다/바꿨습니다(화면의 [열기])"라고 하고 다시 확인을 안내하지 마세요. [취소됨] = 반영 안 됨. 도구 오류 = "하지 못했습니다: 이유".
+[할 수 있는 일 — 아래 도구로 되는 일을 "안 된다·화면에서 직접 하세요"라고 답하지 마세요(대표 지적 10/19 ②). 되는지 모르겠으면 도구 목록을 먼저 보고, 정말 도구가 없을 때만 안 된다고 하세요]
+- 업무: 찾기 search_tasks · 상세 get_task · 만들기 propose_create_task(한 사람)·propose_create_tasks(여러 사람 각각) · 고치기 propose_update_task(담당자 변경·마감일·마감 시각·상태·우선순위·제목) · 댓글 propose_comment · 자료 첨부 propose_attach_file
+- 일정: 보기 list_events · 빈 시간 find_free_time · 만들기 propose_create_event · 시간 변경·취소 propose_update_event
+- 자료실: 찾기 search_library · 읽기 read_library_file · 폴더 list_library_folders · 정리 propose_organize_files · 문서·엑셀 propose_create_document·propose_xlsx_report·run_file_task·fill_template
+- 사람·조직 list_people · 매출 revenue_summary(대표·본사)
+[지시 해석 — 대표 지적 10/19 ①] "○○한테/에게 ~하라고 해줘·시켜줘·전달해줘·맡겨줘·부탁해줘"는 기본이 업무 배정입니다: 담당 = ○○(list_people 로 id), 지시자 = 말한 사람, 마감은 말에서 해석(예: "다음주 금요일까지"), 제목은 시킬 일. propose_create_task 로 제안하세요. "메시지로·문자로·카톡으로·메일로"라고 분명히 말할 때만 메시지 전달로 봅니다(메시지 보내기 도구는 없으니 그때는 보낼 문구를 써 주세요).
+[중복 막기 — 대표 지적 10/19 ③] 새 업무를 제안하기 전에 search_tasks 로 비슷한 제목의 열린 업무를 확인하세요. 있으면 그 업무 이름·담당·마감을 보여 주고 "이 업무에 붙일까요, 새로 만들까요?"를 한 번만 물으세요(둘 다 제안하지 않기). 사용자가 요청하지 않은 일(다른 업무에 첨부 등)을 먼저 제안하지 마세요.
+[근거 — 대표 지적 10/19 ⑤⑥] 첨부·자료실 파일 내용(담당자 이름·금액·날짜 등)은 이번 대화에서 파일 내용을 실제로 받았거나 read_library_file 로 읽은 경우에만 말하고 "(파일명, n쪽/시트)"처럼 근거를 붙이세요. 앞선 차례에 올린 파일은 이름만 기록에 있으니 내용이 필요하면 read_library_file 로 다시 읽고, 못 읽었으면 "아직 열어 보지 않았습니다"라고 하세요. 기존 업무의 담당·마감·상태는 search_tasks·get_task 결과로만 말하세요(기억·추측 금지).
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
 - 일정과 업무를 함께 요청하면(예: "회의 잡고 참석자들 업무로도") propose_create_event 하나에 taskAssigneeIds 를 넣어 "일정 1 + 연결 업무"로 제안하세요. 업무 마감은 일정 시작과 같고 날짜가 연동됩니다. 같은 내용의 propose_create_task(s) 를 따로 만들지 마세요(사용자가 다른 마감을 지시한 경우만 예외). 일정 주인 본인에게는 업무를 또 만들지 않습니다.
 - 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
@@ -206,6 +215,18 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 type Ctx = { u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean; threadId?: string; docJobs?: { id: string; title: string; kind: string; version: number; status: string }[] };
 const clip = (s: unknown, n = 400) => (typeof s === 'string' ? (s.length > n ? s.slice(0, n) + '…' : s) : s);
 const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+/** 대표 지적(10/19 ①): "○○한테 ~하라고 해줘" = 업무 배정 — 규칙으로 의도 힌트(추가 AI 호출 없음). 메시지·문자·메일로 라고 하면 전달 */
+export function intentHint(text: string): string {
+  const t = text.replace(/\s+/g, ' ');
+  if (/(메시지|문자|카톡|카카오톡|메일|이메일|DM)\s*(로|으로)/.test(t)) return '';
+  const m = t.match(/([가-힣A-Za-z]{2,10})\s*(?:[가-힣]{2,4}님?)?\s*(?:한테|에게|께)\s/);
+  if (m && /(라고|하게|도록)\s*(해\s*줘|해\s*주세요|해라|시켜|전달|맡겨|부탁)|시켜\s*(줘|주세요)|맡겨\s*(줘|주세요)/.test(t)) {
+    const who = m[1].replace(/(부사장|사장|대표|본부장|부장|차장|과장|팀장|실장|이사|대리|주임|매니저|선생)$/, '') || m[1];
+    return `\n의도 힌트(규칙): "${who}" 에게 일을 시키는 요청 — 업무 배정으로 처리(list_people → search_tasks 로 비슷한 업무 확인 → propose_create_task, 지시자 = 사용자). 메시지 전달로 해석하지 마세요.`;
+  }
+  return '';
+}
 
 async function propose(c: Ctx, kind: string, summary: string, payload: unknown, preview?: unknown) {
   const [p] = await db()<{ id: string }[]>`insert into ai_proposals (tenant, user_id, kind, summary, payload, confidential) values (${tenantOf(c.u)}, ${c.u.id}, ${kind}, ${summary}, ${db().json(payload as never)}, ${!!c.confidential}) returning id`;
@@ -725,7 +746,9 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   const hist = i.threadId ? await T.threadHistory(i.threadId) : null;
   const settings = await T.aiSettings(tenant);
   // 문서 요청이면 가벼운 모델·문서 도구만(부록 2 ⑥) — 문서 작업이 꺼져 있으면 보통 경로
-  const docMode = !providerArg && settings.doc_engine && isDocRequest(userText);
+  // 대표 지적(10/19 ①): "○○한테 보고서 만들라고 해줘" 는 문서 만들기가 아니라 업무 배정 — 문서 경로(업무 도구 없음)로 보내지 않음
+  const assignHint = intentHint(userText);
+  const docMode = !providerArg && settings.doc_engine && !assignHint && isDocRequest(userText);
   const provider: AiProvider = providerArg ?? anthropicProvider(docMode ? { tier: 'fast' } : {});
 
   let context = '';
@@ -735,6 +758,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   if (i.context && !i.taskId) context += await pageContext(u, i.context);
   if (i.space) context += await spaceContext(u, i.space);
+  context += assignHint;
   const Pn = await import('./persona');
   const [co, me] = await Promise.all([Pn.companyAi(u), Pn.writerOf(u)]);
   const system = `${docMode ? DOC_SYSTEM : SYSTEM}\n\n${Pn.companyBlock(co)}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}${me.title ? ` ${me.title}` : ''}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}`;

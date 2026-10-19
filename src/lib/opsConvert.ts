@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { db } from './db';
 import { isAdmin } from './access';
@@ -64,10 +65,122 @@ type Dec = { decision: 'approve' | 'changes' | 'hold'; at: string | null; commen
 type Content = { srcKey: string; srcRef: string; title: string; brand: string | null; channel: string; kind: string | null; status: string; rawStatus: string; url: string | null; publishedAt: string | null; createdAt: string | null; body: string; note: string; decisions: Dec[] };
 
 async function load(tenant: string) {
-  const rows = await db()<{ key: string; idx: number; item: any }[]>`select key, idx, item from ops_import_items where tenant = ${tenant} and key = any(${['mkt:posts:v1', 'mkt:daily:decisions:v1', 'mkt:production:v1', 'mkt:requests:v1', 'mkt:revisions:v1']}) order by key, idx`;
+  const rows = await db()<{ key: string; idx: number; item: any }[]>`select key, idx, item from ops_import_items where tenant = ${tenant} and key = any(${['mkt:posts:v1', 'mkt:daily:decisions:v1', 'mkt:production:v1', 'mkt:requests:v1', 'mkt:revisions:v1', ...ASSET_KEYS]}) order by key, idx`;
   const list = (k: string) => rows.filter((r) => r.key === k).map((r) => r.item);
   const obj = (k: string) => { const r = rows.find((x) => x.key === k); return r && r.item && typeof r.item === 'object' && !Array.isArray(r.item) ? r.item : null; };
-  return { posts: list('mkt:posts:v1'), daily: obj('mkt:daily:decisions:v1'), production: obj('mkt:production:v1'), requests: list('mkt:requests:v1'), revisions: list('mkt:revisions:v1') };
+  return { posts: list('mkt:posts:v1'), daily: obj('mkt:daily:decisions:v1'), production: obj('mkt:production:v1'), requests: list('mkt:requests:v1'), revisions: list('mkt:revisions:v1'),
+    assetRows: rows.filter((r) => r.key !== 'mkt:requests:v1' && r.key !== 'mkt:revisions:v1') };
+}
+
+// ---------------- 운영실 자산 → 워크인 저장소 → 콘텐츠 버전 media (로컬 10/19: 승인 대기 전부 '시안 없음') ----------------
+const ASSET_KEYS = ['mkt:library:v1', 'mkt:media:v1', 'mkt:media-outputs:v1'];
+type Asset = { id: string | null; url: string; name: string | null; type: string | null; cover: boolean; owner: string | null; libRef: string | null };
+const URL_KEYS = ['url', 'blobUrl', 'publicUrl', 'downloadUrl', 'fileUrl', 'src', 'href', 'path'];
+const MEDIA_EXT = /\.(jpe?g|png|gif|webp|heic|avif|mp4|mov|m4v|webm)(\?|#|$)/i;
+const DAILY_ID = /^d\d{8}-[a-z]+-[a-z]+$/i;
+function opsOrigin() { try { return process.env.OPS_EXPORT_URL ? new URL(process.env.OPS_EXPORT_URL).origin : null; } catch { return null; } }
+/** 받아도 되는 주소: Vercel Blob · 운영실 주소(OPS_EXPORT_URL) · OPS_ASSET_HOSTS. 운영실 상대 경로('/…')는 운영실 주소에 붙임 */
+function safeUrl(raw: string): string | null {
+  const origin = opsOrigin();
+  let u: URL;
+  try { u = raw.startsWith('/') && origin ? new URL(raw, origin) : new URL(raw); } catch { return null; }
+  if (process.env.OPS_BLOB_TEST === '1') return u.href;
+  if (u.protocol !== 'https:') return null;
+  const hosts = [origin ? new URL(origin).hostname : '', ...String(process.env.OPS_ASSET_HOSTS ?? '').split(',').map((x) => x.trim())].filter(Boolean);
+  return u.hostname.endsWith('.blob.vercel-storage.com') || hosts.includes(u.hostname) ? u.href : null;
+}
+/** 원본 JSON 을 훑어 id·주소가 있는 미디어를 모음(칸 이름이 조금 달라도) — 일일 항목 id(dYYYYMMDD-…) 아래에 있으면 그 항목 것 */
+function scanAssets(v: unknown, out: Asset[], owner: string | null, libKey: boolean, depth = 0) {
+  if (depth > 8 || v == null) return;
+  if (Array.isArray(v)) { for (const x of v) scanAssets(x, out, owner, libKey, depth + 1); return; }
+  if (typeof v !== 'object') return;
+  const o = v as Raw;
+  const own = String(o.itemId ?? o.dailyItemId ?? o.contentItemId ?? o.dailyId ?? '') || owner;
+  const rawUrl = URL_KEYS.map((k) => o[k]).find((x) => typeof x === 'string' && (/^https?:\/\//.test(x) || x.startsWith('/')));
+  const type = String(o.type ?? o.mimeType ?? o.mime ?? o.contentType ?? '') || null;
+  if (rawUrl && (MEDIA_EXT.test(rawUrl) || /^(image|video)\//.test(type ?? '') || /\.blob\.vercel-storage\.com/.test(rawUrl))) {
+    const url = safeUrl(rawUrl);
+    if (url) out.push({ id: o.id != null ? String(o.id) : o.assetId != null ? String(o.assetId) : null, url, name: String(o.name ?? o.fileName ?? o.filename ?? o.title ?? '') || null, type,
+      cover: !!(o.cover || o.isCover || o.role === 'cover' || o.kind === 'cover' || o.slot === 'cover'), owner: own, libRef: libKey && o.id != null ? `ops-library:${o.id}` : null });
+  }
+  for (const [k, x] of Object.entries(o)) if (x && typeof x === 'object') scanAssets(x, out, DAILY_ID.test(k) ? k : own, libKey, depth + 1);
+}
+function assetPlan(d: Awaited<ReturnType<typeof load>>, contents: Content[]) {
+  const all: Asset[] = [];
+  for (const r of d.assetRows) if (r.key !== 'mkt:posts:v1') scanAssets(r.item, all, null, r.key === 'mkt:library:v1');
+  const byId = new Map<string, Asset>(); for (const a of all) if (a.id && !byId.has(a.id)) byId.set(a.id, a);
+  const postsById = new Map((d.posts as Raw[]).filter((p) => p?.id).map((p) => [String(p.id), p]));
+  const plan = new Map<string, Asset[]>(); const missing = new Set<string>();
+  for (const c of contents) {
+    let list: Asset[] = [];
+    if (c.srcKey === SRC_POSTS) {
+      const p = postsById.get(c.srcRef.split(':')[0]);
+      const inline: Asset[] = []; if (p) scanAssets({ ...p, results: undefined }, inline, null, false);
+      const ids: string[] = Array.isArray(p?.assetIds) ? p!.assetIds.map(String) : [];
+      const cover = p?.coverAssetId != null ? String(p.coverAssetId) : null;
+      for (const id of cover ? [cover, ...ids.filter((x) => x !== cover)] : ids) { const a = byId.get(id) ?? inline.find((x) => x.id === id); if (a) list.push(a); else missing.add(id); }
+      for (const a of inline) if (!list.some((x) => x.url === a.url)) list.push(a);
+    } else {
+      list = all.filter((a) => a.owner === c.srcRef);
+      for (const id of (Array.isArray(((d.daily ?? {}) as Raw)[c.srcRef]?.assetIds) ? ((d.daily as Raw)[c.srcRef].assetIds as unknown[]).map(String) : [])) { const a = byId.get(id); if (a) list.push(a); else missing.add(id); }
+    }
+    const seen = new Set<string>(); list = list.filter((a) => (seen.has(a.url) ? false : (seen.add(a.url), true)));
+    list.sort((a, b) => Number(b.cover) - Number(a.cover)); // 표지 먼저(나머지는 원본 순서)
+    if (list.length) plan.set(`${c.srcKey}|${c.srcRef}`, list.slice(0, 20));
+  }
+  return { plan, missing: [...missing], found: all.length };
+}
+const FILE_EACH = 100 * 1024 * 1024;
+async function copyAssets(u: SessionUser, t: string, d: Awaited<ReturnType<typeof load>>, contents: Content[]) {
+  const sql = db();
+  const { plan, missing } = assetPlan(d, contents);
+  const { putObject } = await import('./storage');
+  const started = Date.now();
+  const out = { contents: plan.size, linked: 0, copied: 0, reused: 0, failed: 0, left: 0, missing: missing.slice(0, 30), missingCount: missing.length, errors: [] as string[] };
+  const fileOf = new Map<string, string>();
+  const rows = plan.size ? await sql<{ id: string; k: string; brand: string | null; version: number; media_ids: string[] }[]>`
+    select c.id, c.src_key || '|' || c.src_ref as k, b.name as brand, v.version, v.media_ids from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version
+    left join mkt_brands b on b.id = c.brand_id where c.tenant = ${t} and c.src_ref is not null` : [];
+  for (const r of rows) {
+    const list = plan.get(r.k); if (!list) continue;
+    const ids: string[] = [];
+    for (const a of list) {
+      const ref = a.libRef ?? `ops-asset:${a.id ?? createHash('sha1').update(a.url).digest('hex').slice(0, 20)}`;
+      let fid = fileOf.get(ref);
+      if (!fid) {
+        const [have] = await sql<{ id: string }[]>`select id from library_files where tenant = ${t} and (ext_ref = ${ref} or ext_ref = ${a.id ? `ops-library:${a.id}` : ref}) and upload_status = 'ready' limit 1`;
+        if (have) { fid = have.id; out.reused++; }
+        else if (Date.now() - started > 240_000) { out.left++; continue; }
+        else {
+          try {
+            const res = await fetch(a.url, { signal: AbortSignal.timeout(60_000) });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = Buffer.from(await res.arrayBuffer());
+            if (data.length > FILE_EACH) throw new Error('100MB 초과');
+            const name = (a.name || decodeURIComponent(new URL(a.url).pathname.split('/').pop() || 'asset')).slice(0, 200);
+            const mime = (a.type && /\//.test(a.type) ? a.type : res.headers.get('content-type') ?? 'application/octet-stream').slice(0, 100);
+            const folder = r.brand ? `운영실 자료/${r.brand}` : '운영실 자료';
+            const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, space, ext_ref, meta, folder, title, file_name, mime_type, size_bytes, tags, source, created_by, upload_status, security, content_hash)
+              values (${t}, 'marketing', ${ref}, ${sql.json({ opsId: a.id, opsUrl: a.url, cover: a.cover } as never)}, ${folder}, ${name.replace(/\.[^.]+$/, '')}, ${name}, ${mime}, ${data.length}, ${r.brand ? [r.brand] : []},
+                'ops_import', ${u.id}, 'pending', 'internal', ${createHash('sha256').update(data).digest('hex')}) returning id`;
+            const key = `lib/${t}/${f.id}/${name.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
+            await putObject(key, data, mime);
+            await sql`update library_files set storage_key = ${key}, upload_status = 'ready' where id = ${f.id}`;
+            fid = f.id; out.copied++;
+          } catch (e: any) { out.failed++; if (out.errors.length < 20) out.errors.push(`${a.id ?? a.url.slice(-40)}: ${String(e?.message ?? e).slice(0, 80)}`); continue; }
+        }
+        fileOf.set(ref, fid);
+      }
+      ids.push(fid);
+    }
+    // 멱등: 이미 붙은 것은 그대로, 빠진 것만 더함(사람이 바꾼 media 는 건드리지 않음 — 기존 것이 모두 운영실 자산일 때만)
+    const cur = r.media_ids ?? [];
+    if (ids.length && cur.every((x) => ids.includes(x)) && ids.some((x) => !cur.includes(x))) {
+      await sql`update mkt_versions set media_ids = ${ids} where content_id = ${r.id} and version = ${r.version}`;
+      out.linked++;
+    }
+  }
+  return out;
 }
 
 function build(d: Awaited<ReturnType<typeof load>>) {
@@ -133,7 +246,7 @@ export async function convertOps(u: SessionUser, i: z.infer<typeof convertInput>
     decisions: fresh.reduce((n, c) => n + c.decisions.length, 0), withUrl: contents.filter((c) => c.url).length, mapping, channels,
     brands: Object.fromEntries([...new Set(contents.map((c) => c.brand ?? '(없음)'))].map((b) => [b, contents.filter((c) => (c.brand ?? '(없음)') === b).length])),
     unknownBrands: [...new Set(contents.map((c) => c.brand).filter((b) => b && !Object.values(BRAND_CODE).includes(b)))], sample: contents.slice(0, 8).map((c) => ({ title: c.title, brand: c.brand, channel: c.channel, status: c.status, url: !!c.url })) };
-  if (i.mode === 'preview') return { mode: 'preview', ...summary };
+  if (i.mode === 'preview') { const ap = assetPlan(d, contents); return { mode: 'preview', ...summary, assets: { contents: ap.plan.size, files: [...ap.plan.values()].reduce((n, l) => n + l.length, 0), missingCount: ap.missing.length, missing: ap.missing.slice(0, 30) } }; }
   let made = 0, reqs = 0;
   await sql.begin(async (tx) => {
     const brandIds = new Map<string, string>();
@@ -159,8 +272,9 @@ export async function convertOps(u: SessionUser, i: z.infer<typeof convertInput>
       reqs += x.length;
     }
   });
-  await audit(sql, u.id, 'ops_import.convert', 'tenant', null, { contents: made, requests: reqs }).catch(() => {});
-  return { mode: 'apply', ...summary, made, requestsMade: reqs };
+  const assets = await copyAssets(u, t, d, contents);
+  await audit(sql, u.id, 'ops_import.convert', 'tenant', null, { contents: made, requests: reqs, assets: { copied: assets.copied, linked: assets.linked, failed: assets.failed } }).catch(() => {});
+  return { mode: 'apply', ...summary, made, requestsMade: reqs, assets };
 }
 
 /** 승인 대기 화면 아래 '운영실 이전 요청 기록' */

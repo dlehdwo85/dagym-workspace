@@ -32,6 +32,8 @@ export const eventInput = z.object({
   taskRequestedById: zUuid.nullable().optional(),
   taskPriority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
   version: z.number().int().optional(),
+  /** 대표 지적(10/19 ②): 일정별 색(#rrggbb). null = 캘린더 색 */
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, '색은 #rrggbb').nullable().optional(),
 });
 export type EventInput = z.infer<typeof eventInput>;
 
@@ -96,8 +98,8 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
   const units = await accessibleUnitIds(u, sql);
   const calFilter = calendarIds?.length ? sql`and c.id = any(${calendarIds}::uuid[])` : sql``;
   const mates = await hqColleagues(u, sql);
-  const rows = await sql<(EventRow & { cal_name: string; color: string; cal_type: string; owner_id: string; owner_name: string | null; is_private: boolean })[]>`
-    select e.*, c.name as cal_name, c.color, c.type as cal_type, coalesce(c.owner_user_id, e.created_by) as owner_id, ow.name as owner_name
+  const rows = await sql<(EventRow & { ev_color: string | null; cal_name: string; color: string; cal_type: string; owner_id: string; owner_name: string | null; is_private: boolean })[]>`
+    select e.*, e.color as ev_color, c.name as cal_name, c.color, c.type as cal_type, coalesce(c.owner_user_id, e.created_by) as owner_id, ow.name as owner_name
     from events e join calendars c on c.id = e.calendar_id left join users ow on ow.id = coalesce(c.owner_user_id, e.created_by)
     where e.deleted_at is null and e.recurring_event_id is null
       and (e.rrule is not null or (e.start_at < ${to} and e.end_at > ${from}))
@@ -143,7 +145,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
     const masked = e.is_private && e.owner_id !== u.id && e.created_by !== u.id && !att.some((a) => a.user_id === u.id);
     if (masked) { e.title = '바쁨'; e.location = ''; e.description = ''; }
     const base = {
-      calendarId: e.calendar_id, calendarName: masked ? '' : e.cal_name, color: e.color, calendarType: e.cal_type,
+      calendarId: e.calendar_id, calendarName: masked ? '' : e.cal_name, color: e.color, eventColor: masked ? null : e.ev_color ?? null, calendarType: e.cal_type,
       kind: e.kind, taskId: masked ? null : e.task_id, attendees: masked ? [] : att, createdBy: e.created_by,
       ownerId: e.owner_id, ownerName: e.owner_name, isPrivate: e.is_private, masked,
       linkedTask: lt && !masked ? { id: lt.id, status: e.rrule ? null : lt.status } : null,
@@ -170,7 +172,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
       if (x.cancelled || x.start_at >= to || x.end_at <= from) continue;
       out.push({ ...base, id: x.id, seriesId: e.id, title: base.masked ? '바쁨' : x.title, location: base.masked ? '' : x.location, description: base.masked ? '' : x.description,
         start: x.start_at, end: x.end_at, allDay: x.all_day, recurring: true, exception: true, rrule: e.rrule,
-        version: x.version, originalStart: x.original_start, kind: x.kind });
+        version: x.version, originalStart: x.original_start, kind: x.kind, eventColor: base.masked ? null : (x as any).color ?? base.eventColor });
     }
   }
   out.sort((a, b) => +new Date(a.start) - +new Date(b.start));
@@ -241,9 +243,9 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   }
   const out: { id: string; taskId?: string } = await sql.begin(async (tx) => {
     const [ev] = await tx<{ id: string }[]>`
-      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private)
+      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private, color)
       values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
-        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)}, ${i.isPrivate ?? false})
+        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)}, ${i.isPrivate ?? false}, ${i.color ?? null})
       returning id`;
     if (i.taskId) await tx`insert into event_tasks (event_id, task_id, role, created_by) values (${ev.id}, ${i.taskId}, 'block', ${u.id}) on conflict do nothing`;
     if (i.attendeeIds?.length) {
@@ -267,7 +269,7 @@ export async function createEvent(u: SessionUser, i: EventInput) {
 }
 
 const EDIT_FIELDS: [keyof EventInput, string][] = [
-  ['title', 'title'], ['description', 'description'], ['location', 'location'], ['kind', 'kind'], ['allDay', 'all_day'], ['isPrivate', 'is_private'],
+  ['title', 'title'], ['description', 'description'], ['location', 'location'], ['kind', 'kind'], ['allDay', 'all_day'], ['isPrivate', 'is_private'], ['color', 'color'],
 ];
 
 /**
@@ -325,12 +327,12 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
       const times = i.start && i.end ? validateTimes({ start: i.start, end: i.end }) : { s: occ, e: new Date(occ.getTime() + dur) };
       const [x] = await tx<{ id: string }[]>`
         insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at,
-          recurring_event_id, original_start, task_id, created_by)
+          recurring_event_id, original_start, task_id, created_by, color)
         values (${i.calendarId ?? master.calendar_id}, ${i.title ?? master.title}, ${i.description ?? master.description},
           ${i.location ?? master.location}, ${i.kind ?? master.kind}, ${i.allDay ?? master.all_day}, ${times.s}, ${times.e},
-          ${master.id}, ${occ}, ${master.task_id}, ${u.id})
+          ${master.id}, ${occ}, ${master.task_id}, ${u.id}, ${i.color !== undefined ? i.color : (master as any).color ?? null})
         on conflict (recurring_event_id, original_start) where recurring_event_id is not null and deleted_at is null
-        do update set title = excluded.title, description = excluded.description, location = excluded.location,
+        do update set title = excluded.title, color = excluded.color, description = excluded.description, location = excluded.location,
           kind = excluded.kind, all_day = excluded.all_day, start_at = excluded.start_at, end_at = excluded.end_at,
           version = events.version + 1, updated_at = now()
         returning id`;

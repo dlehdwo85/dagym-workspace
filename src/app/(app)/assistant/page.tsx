@@ -13,7 +13,7 @@ import { VoiceButton } from '@/components/voice';
 import { hearOnce, keepScreenOn, speak, stopSpeaking, yesNo } from '@/components/speak';
 import { AiBudgetBar, costLine, type Budget } from '@/components/AiBudget';
 import { DocJobCard } from '@/components/DocJobCard';
-import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
+import { ChatComposer, DoneSummary, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
 
 type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; tasks?: string[]; taskDue?: string; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
 type Msg = Omit<ChatMsg, 'proposals'> & { proposals?: Proposal[] };
@@ -230,6 +230,7 @@ export default function AssistantPage() {
                 </div>
               )}
             </div>
+            {m.role === 'assistant' && <DoneSummary proposals={m.proposals as any} />}
             {m.docJobs?.map((id) => <DocJobCard key={id} id={id} onRefine={(t) => { setText(t); inputRef.current?.focus(); }} />)}
             {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
             {m.role === 'assistant' && costLine(m.costKrw) && <span className="mt-0.5 text-[10.5px] text-ink-3" data-testid="ai-cost">{costLine(m.costKrw)}</span>}

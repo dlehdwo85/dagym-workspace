@@ -14,7 +14,8 @@ type Change = { id: string; plan_id: string | null; kind: string; before: any; a
 type Data = { canEdit: boolean; cap: { monthlyCap: number; stoppedMonth: string | null } | null; monthSpend: number; month: string; accounts: { id: string; label: string; external_id: string }[]; plans: Plan[]; changes: Change[] };
 const STATUS: Record<string, [string, string]> = { draft: ['세팅안', 'bg-slate-100 text-ink-2'], creating: ['만드는 중', 'bg-sky-50 text-sky-800'], created: ['만듦 · 꺼짐', 'bg-sky-50 text-sky-800'], active: ['켜짐', 'bg-emerald-50 text-emerald-800'],
   paused: ['꺼짐', 'bg-amber-50 text-amber-800'], failed: ['만들기 실패', 'bg-red-50 text-red-800'] };
-const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable: '켜기', pause: '끄기', budget: '하루 예산 변경', auto_pause: '상한 도달 자동 중지' };
+const kwOk = (x: unknown) => Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === 'string' && v && v !== 'undefined');
+const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable: '켜기', pause: '끄기', budget: '하루 예산 변경', auto_pause: '상한 도달 자동 중지', sync: '키워드 다시 읽기' };
 const desc = (c: Change) => c.kind === 'budget' ? `${won(c.before?.dailyBudget)} → ${won(c.after?.dailyBudget)}` : c.kind === 'auto_pause' && c.after?.spend ? `이번 달 ${won(c.after.spend)} / 상한 ${won(c.after.cap)}` : '';
 
 /**
@@ -71,6 +72,9 @@ export function AdOps() {
                   {(p.status === 'created' || p.status === 'paused') && <Button size="sm" disabled={busy === p.id} data-testid="ad-plan-enable"
                     onClick={() => confirm(`광고를 켭니다. 하루 최대 ${won(p.plan.dailyBudget)} 이 나갈 수 있습니다(이번 달 ${won(data.monthSpend)} / 상한 ${data.cap ? won(data.cap.monthlyCap) : '없음'}). 켤까요?`) && run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'enable' } }), '광고를 켰습니다')}>켜기</Button>}
                   {p.status === 'active' && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-pause" onClick={() => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'pause' } }), '광고를 껐습니다')}>끄기</Button>}
+                  {/* 운영 10/19: 키워드 id 가 비어 있으면(생성 응답 파싱 실패) 네이버에서 다시 읽기 — 켜기·예산은 그대로 */}
+                  {['created', 'active', 'paused'].includes(p.status) && !kwOk(p.external?.keywordIds) && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-sync"
+                    onClick={() => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'sync' } }), '키워드 id 를 다시 읽었습니다')}>키워드 다시 읽기</Button>}
                   {['created', 'active', 'paused'].includes(p.status) && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-budget"
                     onClick={() => { const v = Number(prompt('새 하루 예산(원)', String(p.plan.dailyBudget))?.replace(/\D/g, '')); if (v) run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'budget', dailyBudget: v } }), '하루 예산을 바꿨습니다'); }}>하루 예산</Button>}
                 </div>)}

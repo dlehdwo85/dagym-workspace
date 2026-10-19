@@ -23,7 +23,7 @@ import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
 import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
-import { CalColorsDialog, isPersonalEvent, isPersonalTask, useCalColors } from '@/components/calColors';
+import { CalColorsDialog, ColorDot, PALETTE_NAMES, eventColorOf, isPersonalTask, saveColorPart, useCalColors } from '@/components/calColors';
 
 type Scope = 'this' | 'following' | 'all';
 const seoulDate = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
@@ -177,6 +177,8 @@ function CalendarPage() {
   const blockedDay = new Set(events.filter((e) => e.kind === 'task_block' && e.blockTask?.id).map((e) => `${e.blockTask.id}|${seoulDate(e.start)}`));
   const dupTasks = new Map<string, number>();
   for (const t of tasks) if (t.due_date && !syncedIds.has(t.id) && evKey.has(`${t.due_date}|${normT(t.title)}`)) dupTasks.set(`${t.due_date}|${normT(t.title)}`, (dupTasks.get(`${t.due_date}|${normT(t.title)}`) ?? 0) + 1);
+  // 다른 사람 표시: 약칭 '민수 · ' 또는(설정) 색 점 — 점 색은 그 사람 색(없으면 사람 고유색)
+  const whoOf = (id: string | null | undefined, name?: string | null) => (!id ? { who: '' } : calColors.whoDot ? { who: '', whoDot: calColors.people?.[id] ?? avatarColor(id), whoName: name ?? '' } : { who: `${initials(name ?? '')} · ` });
   const fcEvents = useMemo(() => [
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
@@ -185,9 +187,10 @@ function CalendarPage() {
       classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(!e.masked && e.location?.trim() ? ['is-travel'] : []), /* V36 4: 장소 있음 = 이동 일정 */ ...(e.linkedTask ? ['has-task'] : []), ...((e.linkedTask ?? e.blockTask)?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
       // V7 4번: 색은 개인/회사 두 가지만(사람 구분은 제목 앞 머리글자)
-      backgroundColor: isPersonalEvent(e) ? calColors.personal : calColors.company, borderColor: 'transparent', textColor: '#ffffff',
+      // 대표 지적(10/19 ②): 일정별 색 → 사람 색 → 캘린더 색 → 개인/회사 기본
+      backgroundColor: eventColorOf(e, calColors, user.id), borderColor: 'transparent', textColor: '#ffffff',
       // V14 41번: 사람 머리글자는 제목이 아니라 따로 — 휴대폰 주·3일 보기에선 빼고(색·필터로 구분), 일 보기·PC 에선 앞에 붙인다
-      extendedProps: { type: 'event', ev: e, who: e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? `${initials(e.ownerName ?? '')} · ` : '' }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
+      extendedProps: { type: 'event', ev: e, ...whoOf(e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? e.ownerId : null, e.ownerName) }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
     ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id) && !dupTasks.has(`${t.due_date}|${normT(t.title)}`) && !(t.due_time && blockedDay.has(`${t.id}|${t.due_date}`))).map((t) => ({
@@ -197,9 +200,9 @@ function CalendarPage() {
       start: t.due_time ? new Date(Math.max(new Date(`${t.due_date}T${t.due_time}:00+09:00`).getTime() - 60 * 60000, new Date(`${t.due_date}T00:00:00+09:00`).getTime())).toISOString() : t.due_date, // 자정 넘지 않게
       end: t.due_time ? `${t.due_date}T${t.due_time}:00+09:00` : undefined, // 검수 11: 주석 안에 있던 end 를 살림
       allDay: !t.due_time, backgroundColor: isPersonalTask(t) ? calColors.personal : calColors.company, borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#ef4444' : 'rgba(15,23,42,0.35)', // V14 37번: 왼쪽 굵은 선 = 업무
-      textColor: '#ffffff', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t, who: t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? `${initials(t.assignee_name)} · ` : '' }, durationEditable: false,
+      textColor: '#ffffff', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t, ...whoOf(t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? t.assignee_id : null, t.assignee_name) }, durationEditable: false,
     })) : []),
-  ], [events, tasks, hidden, showTasks, showDone, hol.data, who, calColors.personal, calColors.company]); // eslint-disable-line react-hooks/exhaustive-deps
+  ], [events, tasks, hidden, showTasks, showDone, hol.data, who, JSON.stringify(calColors)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function completeTask(t: any) {
     const to = t.status === 'done' ? 'in_progress' : t.status === 'review' ? 'done' : t.approval_line_id || (t.approval_required && user.role === 'staff') ? 'review' : 'done';
@@ -241,7 +244,7 @@ function CalendarPage() {
     try {
       await api(`/api/events/${e.id}`, { method: 'PATCH', body: { start, end, allDay, scope, occurrenceStart: e.originalStart ?? undefined } });
       toast.ok('일정을 이동했습니다'); broadcastRefresh();
-    } catch (er: any) { toast.error(er.message); info.revert(); }
+    } catch (er: any) { toast.error(saveError(er)); info.revert(); }
     load();
   }
 
@@ -324,11 +327,13 @@ function CalendarPage() {
             <p className="mb-1.5 flex items-center px-1 text-xs font-semibold text-ink-2">내 캘린더<button type="button" onClick={() => setColorDlg(true)} className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-accent-700 hover:bg-slate-100" data-testid="cal-colors-open"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button></p>
             <ul className="space-y-0.5" data-testid="calendar-list">
               {cals.data?.calendars.map((c) => (
-                <li key={c.id}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-input px-1.5 py-1 text-sm hover:bg-slate-100">
-                    <input type="checkbox" className="size-4 rounded" style={{ accentColor: c.type === 'personal' ? calColors.personal : calColors.company }} checked={!hidden.includes(c.id)} onChange={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} />
+                <li key={c.id} className="flex items-center gap-1 rounded-input pr-1.5 hover:bg-slate-100">
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-1.5 py-1 text-sm">
+                    <input type="checkbox" className="size-4 rounded" style={{ accentColor: calColors.cals?.[c.id] ?? (c.type === 'personal' ? calColors.personal : calColors.company) }} checked={!hidden.includes(c.id)} onChange={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} />
                     <span className="truncate">{c.type === 'personal' ? '내 일정' : c.name}</span>
                   </label>
+                  {/* 대표 지적(10/19 ②): 색 점을 누르면 그 캘린더 색 바꾸기(나만) */}
+                  <ColorDot color={calColors.cals?.[c.id] ?? (c.type === 'personal' ? calColors.personal : calColors.company)} label={c.type === 'personal' ? '내 일정' : c.name} onPick={(v) => saveColorPart({ cals: { [c.id]: v } })} testId={`cal-color-${c.type}`} />
                 </li>
               ))}
               <li>
@@ -345,6 +350,19 @@ function CalendarPage() {
               </li>
             </ul>
           </div>
+          {people.length > 1 && (
+            <div data-testid="cal-people-colors">
+              <p className="mb-1.5 px-1 text-xs font-semibold text-ink-2">다른 사람 캘린더</p>
+              <ul className="space-y-0.5">
+                {people.filter((p) => p.id !== user.id).map((p) => (
+                  <li key={p.id} className="flex items-center gap-2 rounded-input px-1.5 py-1 text-sm hover:bg-slate-100">
+                    <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                    <ColorDot color={calColors.people?.[p.id] ?? calColors.personal} label={`${p.name} 일정`} onPick={(v) => saveColorPart({ people: { [p.id]: v } })} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </aside>
         <div className="-mx-3 min-w-0 flex-1 border-y border-line bg-white px-1 py-1.5 sm:mx-0 sm:rounded-card sm:border sm:p-3 sm:shadow-card" data-testid="calendar">
           <div className="-mx-1 mb-2 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-sm" role="group" aria-label="누구의 일정" data-testid="people-filter">
@@ -352,7 +370,7 @@ function CalendarPage() {
             <PeopleChip on={who === 'mine'} onClick={() => setWho('mine')}>내 일정</PeopleChip>
             {people.filter((p) => p.id !== user.id).map((p) => (
               <PeopleChip key={p.id} on={Array.isArray(who) && who.includes(p.id)} onClick={() => pickPerson(p.id)} label={`${p.name} 일정`}>
-                <span className="size-2.5 rounded-full" style={{ background: avatarColor(p.id) }} />{p.name}
+                <span className="size-2.5 rounded-full" style={{ background: calColors.people?.[p.id] ?? avatarColor(p.id) }} />{p.name}
               </PeopleChip>
             ))}
           </div>
@@ -366,7 +384,7 @@ function CalendarPage() {
             {cals.data?.calendars.map((c) => (
               <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} aria-pressed={!hidden.includes(c.id)}
                 className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(c.id) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
-                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : c.type === 'personal' ? calColors.personal : calColors.company }} />{c.type === 'personal' ? '내 일정' : c.name}
+                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : calColors.cals?.[c.id] ?? (c.type === 'personal' ? calColors.personal : calColors.company) }} />{c.type === 'personal' ? '내 일정' : c.name}
               </button>
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
@@ -403,7 +421,7 @@ function CalendarPage() {
             initialView={urlView ?? savedView ?? (mobile ? 'timeGrid3' : 'timeGridWeek')}
             initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
             headerToolbar={mobile ? false : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
-            views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' } }}
+            views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' }, dayGridMonth: { dayMaxEvents: mobile ? 4 : 6 } }}
             // Google 형 날짜 머리: 요일 한 줄 + 날짜 숫자(오늘은 동그라미), 시간 칸 글자 작게
             dayHeaderContent={(a) => { if (!a.view.type.startsWith('timeGrid')) return a.text; // 월·목록 보기는 기본 요일 글자(undefined 를 돌려주면 빈칸 — 로컬 검수 10/17)
               // 날짜는 서울 기준으로 읽는다(a.date 는 서울 0시 = UTC 전날 15시)
@@ -418,8 +436,11 @@ function CalendarPage() {
             // V14 41번: 휴대폰 축은 "오전/오후 n시"를 두 줄로 좁게(날짜 칸을 넓게)
             slotLabelContent={mobile ? (a) => { const h = Number(seoulTime(a.date).slice(0, 2)); return <span className="block text-center text-[10px] leading-[1.1]" data-axis-label><span className="block text-ink-3">{h < 12 ? '오전' : '오후'}</span>{h % 12 || 12}시</span>; } : undefined}
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
-            allDayText="종일" noEventsText="일정이 없습니다" dayMaxEvents={4} slotMinTime={slotMin} scrollTime="08:00:00"
-            slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap eventMinHeight={mobile ? 34 : 28} eventShortHeight={30}
+            allDayText="종일" noEventsText="일정이 없습니다" slotMinTime={slotMin} scrollTime="08:00:00"
+            // 대표 지적(10/19 ③): 월 보기는 칸 안에 최대한(PC 6·휴대폰 4줄), 넘치면 '+N개' — 높이 자동이라 true(칸 높이 맞춤)는 제한이 걸리지 않음
+            dayMaxEvents={4} moreLinkContent={(a) => `+${a.num}개`}
+            // 대표 지적(10/19 ① d): 겹친 일정·업무는 나란히(겹쳐 그리면 위에 깔린 항목이 눌려 다른 상세가 열림)
+            slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap={false} eventMinHeight={mobile ? 34 : 28} eventShortHeight={30}
             editable selectable selectMirror droppable longPressDelay={350}
             events={fcEvents}
             datesSet={(a: DatesSetArg) => { setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view2', a.view.type); } catch {} keepInUrl({ view: a.view.type, date: seoulDate(a.view.calendar.getDate()) }); }}
@@ -446,34 +467,44 @@ function CalendarPage() {
               const narrow = mobile && (arg.view.type === 'timeGridWeek' || arg.view.type === 'timeGrid3'); // V14 41번: 휴대폰 주·3일
               const when = loc && !narrow && !month ? [when0, loc, depart].filter(Boolean).join(' · ') : when0;
               const label = `${narrow ? '' : p.who ?? ''}${arg.event.title}`;
+              // 대표 지적(10/19 ③): 사람 약칭 대신 색 점(설정) — 좁은 칸에서도 보임
+              const dot = p.whoDot ? <span className="mr-1 inline-block size-2 shrink-0 rounded-full align-[1px] ring-1 ring-white/90" style={{ background: p.whoDot }} title={p.whoName} data-who-dot /> : null;
               const attrs = { ...(isTask ? { 'data-task-item': t.id, title: label } : { 'data-ev-block': '1', title: label, ...(lt ? { 'data-linked-task': lt.id } : {}) }), 'data-done': done ? '1' : undefined, ...(loc ? { 'data-travel': '1' } : {}) };
               // V14 41번(Google 앱 주 보기): 휴대폰 주·3일 — 종일 칩은 2줄까지 줄바꿈 11px, 시간 블록은 제목만 블록 높이만큼 줄바꿈(단어 중간 허용), 시각은 1시간 이상 블록만
               if (narrow && arg.event.allDay) return (
-                <div className="line-clamp-2 min-w-0 whitespace-normal break-all px-0.5 text-[11px] font-semibold leading-[1.2]" data-allday-chip="1" {...attrs}>{icon}{label}</div>
+                <div className="line-clamp-2 min-w-0 whitespace-normal break-all px-0.5 text-[11px] font-semibold leading-[1.2]" data-allday-chip="1" {...attrs}>{dot}{icon}{label}</div>
               );
               if (narrow && timed) return (
                 // V36 6: 제목 먼저(12px·두 줄, 긴 블록은 세 줄), 시각은 1시간 30분 이상 블록에서만 아래 작게 — 짧은 블록에서 시각이 제목을 가리지 않게
                 <div className="flex h-full min-w-0 flex-col overflow-hidden text-[12px] leading-[1.2]" data-narrow-block="1" {...attrs}>
-                  <span className={cx('min-h-0 overflow-hidden whitespace-normal break-all font-semibold', mins >= 90 ? 'line-clamp-3' : 'line-clamp-2', done && 'line-through opacity-80')}>{icon}{label}</span>
+                  <span className={cx('min-h-0 overflow-hidden whitespace-normal break-all font-semibold', mins >= 90 ? 'line-clamp-3' : 'line-clamp-2', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
                   {mins >= 90 && when && <span className="mt-auto shrink-0 truncate text-[10px] font-normal opacity-85" data-block-time>{when}</span>}
                 </div>
               );
               // V36 6: 휴대폰 일 보기 짧은 블록 — 시각은 제목 옆 작게(아래 줄로 내려 제목을 가리지 않음)
               if (mobile && timed && mins < 90) return (
-                <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-all px-1 text-[12px] leading-[1.25]" {...attrs}>
-                  <span className={cx('font-semibold', done && 'line-through opacity-80')}>{icon}{label}</span>{when && <span className="ml-1 text-[11px] font-normal opacity-85" data-block-time>{when}</span>}
+                <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-all px-[3px] text-[12px] leading-[1.2]" {...attrs}>
+                  <span className={cx('font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>{when && <span className="ml-1 text-[10.5px] font-normal opacity-85" data-block-time>{when}</span>}
                 </div>
               );
+              // 대표 지적(10/19 ③ 글자 표시량): 안쪽 여백 3px·줄간 1.2 — 제목 먼저 블록 높이만큼 줄바꿈, 시간은 뒤에 작게
               if (timed && mins >= 45) return (
-                <div className="flex h-full min-w-0 flex-col overflow-hidden px-1 text-[12px] leading-[1.25]" {...attrs}>
-                  <span className={cx('min-h-0 shrink overflow-hidden break-all font-semibold', done && 'line-through opacity-80')}>{icon}{label}</span>
-                  {when && <span className="shrink-0 truncate text-[11px] font-normal opacity-85">{when}</span>}
+                <div className="flex h-full min-w-0 flex-col overflow-hidden px-[3px] text-[12px] leading-[1.2]" {...attrs} data-chip-dense="1">
+                  <span className={cx('min-h-0 shrink overflow-hidden whitespace-normal break-all font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
+                  {when && <span className="shrink-0 truncate text-[10.5px] font-normal opacity-85">{when}</span>}
+                </div>
+              );
+              // 짧은 블록(45분 미만)도 2줄까지 — 시간은 제목 뒤 작게
+              if (timed) return (
+                <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-all px-[3px] text-[12px] leading-[1.15]" {...attrs} data-chip-dense="1">
+                  <span className={cx('font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
+                  {when && <span className="ml-1 text-[10.5px] font-normal opacity-85">{when}</span>}
                 </div>
               );
               return (
-                <div className="min-w-0 overflow-hidden truncate px-1 text-[12px] leading-[1.25]" {...attrs}>
-                  <span className={cx('font-semibold', done && 'line-through opacity-80')}>{icon}{label}</span>
-                  {!month && when && <span className="font-normal opacity-85">{timed ? ', ' : ' '}{when}</span>}
+                <div className="min-w-0 overflow-hidden truncate px-[3px] text-[12px] leading-[1.25]" {...attrs}>
+                  <span className={cx('font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
+                  {!month && when && <span className="font-normal opacity-85"> {when}</span>}
                 </div>
               );
             }}
@@ -722,11 +753,11 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const en = new Date(s.getTime() + dur);
       setF({ title: e.title, calendarId: e.calendar_id, allDay: e.all_day, date: seoulDate(s), start: seoulTime(s),
         endDate: e.all_day ? addDays(seoulDate(en), -1) : seoulDate(en), end: seoulTime(en), rrule: e.rrule, location: e.location,
-        description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version, reminders: e.reminder_minutes ?? null, isPrivate: !!e.is_private });
+        description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version, reminders: e.reminder_minutes ?? null, isPrivate: !!e.is_private, color: e.color ?? null });
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
       setF({ title: draft?.title ?? '', calendarId: draft?.calendarId ?? personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
-        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, alsoTask: !!draft?.alsoTask });
+        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, color: null, alsoTask: !!draft?.alsoTask });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -743,7 +774,11 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
 
   // 처음 불러온 값(변경 여부 비교용)과 자동 저장 상태
   const baseRef = useRef<string | null>(null);
+  // 대표 지적(10/19 ① 수정 실패): 자동 저장이 서버 버전을 올린 뒤 [완료]가 처음 버전을 보내 409 가 나던 문제 — 버전은 저장할 때마다 따라감, 진행 중 자동 저장은 기다림
+  const verRef = useRef<number | undefined>(undefined);
+  const autoRun = useRef<Promise<unknown> | null>(null);
   const [autoState, setAutoState] = useState<'' | 'saving' | 'saved' | 'error'>('');
+  useEffect(() => { if (existing.data?.event) verRef.current = existing.data.event.version; }, [existing.data]);
   useEffect(() => { if (f && baseRef.current === null) baseRef.current = JSON.stringify(f); }, [f]);
   useEffect(() => {
     if (!id || !f || !baseRef.current || !existing.data?.perms.edit) return;
@@ -755,10 +790,13 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const t = times();
       if (t.end < t.start) return;
       setAutoState('saving');
+      const run = api(`/api/events/${id}`, { method: 'PATCH', body: { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, isPrivate: !!f.isPrivate, color: f.color ?? null, scope: 'all', version: verRef.current } });
+      autoRun.current = run.catch(() => {});
       try {
-        await api(`/api/events/${id}`, { method: 'PATCH', body: { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, isPrivate: !!f.isPrivate, scope: 'all' } });
+        const r = await run;
+        if (typeof r?.version === 'number') verRef.current = r.version;
         baseRef.current = cur; setAutoState('saved'); onSaved();
-      } catch (er: any) { setAutoState('error'); toast.error(`자동 저장 실패: ${er.message}`); }
+      } catch (er: any) { setAutoState('error'); toast.error(`자동 저장 실패: ${saveError(er)}`); }
     }, 1000);
     return () => clearTimeout(h);
   }, [f]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -774,8 +812,9 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     const t = times();
     if (t.end < t.start) return toast.error('종료가 시작보다 빠릅니다');
     setBusy(true);
+    await autoRun.current;
     try {
-      const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, isPrivate: !!f.isPrivate };
+      const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, isPrivate: !!f.isPrivate, color: f.color ?? null };
       if (!id) {
         await api('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } });
       } else {
@@ -783,10 +822,10 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
         if (d.event.recurring_event_id) scope = 'this';
         else if (d.event.rrule) { const s = await askScope(); if (!s) { setBusy(false); return; } scope = s; }
         const { rrule, ...rest } = body;
-        await api(`/api/events/${id}`, { method: 'PATCH', body: { ...rest, ...(scope !== 'this' ? { rrule } : {}), scope, occurrenceStart, version: scope === 'all' || !isRecurring ? f.version : undefined } });
+        await api(`/api/events/${id}`, { method: 'PATCH', body: { ...rest, ...(scope !== 'this' ? { rrule } : {}), scope, occurrenceStart, version: scope === 'all' || !isRecurring ? verRef.current : undefined } });
       }
       toast.ok('저장했습니다'); onSaved(); onClose();
-    } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+    } catch (er: any) { toast.error(saveError(er)); if (er?.status === 409) api(`/api/events/${id}`).then((x) => { verRef.current = x.event.version; }).catch(() => {}); } finally { setBusy(false); }
   }
   async function remove() {
     let scope: Scope = 'all';
@@ -834,6 +873,18 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
             {(f.allDay || (f.endDate && f.endDate !== f.date)) ? <DateField label="종료일" value={f.endDate || f.date} min={f.date} onChange={set('endDate')} />
               : <button type="button" className="text-xs text-ink-2 underline" onClick={() => set('endDate')(addDays(f.date, 1))}>다음 날까지</button>}
           </div>
+          {/* 대표 지적(10/19 ②): 일정별 색 덮어쓰기(Google 일정 색) — 비우면 캘린더 색 */}
+          {canEdit && (
+            <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="일정 색" data-testid="event-color">
+              <span className="mr-1 text-xs text-ink-2">색</span>
+              <button type="button" role="radio" aria-checked={!f.color} onClick={() => set('color')(null)} className={cx('rounded-full border border-line px-2 py-0.5 text-xs', !f.color ? 'bg-slate-800 text-white' : 'text-ink-2')}>캘린더 색</button>
+              {Object.keys(PALETTE_NAMES).map((c) => (
+                <button key={c} type="button" role="radio" aria-checked={f.color === c} aria-label={PALETTE_NAMES[c]} title={PALETTE_NAMES[c]} onClick={() => set('color')(c)}
+                  className={cx('flex size-5 items-center justify-center rounded-full', f.color === c && 'ring-2 ring-ink ring-offset-1')} style={{ background: c }}>{f.color === c && <Check className="size-3 text-white" strokeWidth={3} />}</button>
+              ))}
+              <input type="color" value={f.color ?? '#039be5'} onChange={(e) => set('color')(e.target.value)} className="size-5 cursor-pointer border-0 bg-transparent p-0" aria-label="직접 선택" title="직접 선택" />
+            </div>
+          )}
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!f.isPrivate} onChange={(e) => set('isPrivate')(e.target.checked)} />비공개 — 다른 사람에게는 시간만 &ldquo;바쁨&rdquo;으로 보입니다</label>
           {/* V5 일정 ↔ 업무 연동 */}
           {!id ? (
@@ -888,6 +939,16 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       </form>
     </Modal>
   );
+}
+
+/** 대표 지적(10/19 ①): 저장 실패 이유를 화면에 — 권한·버전 충돌·입력 오류를 사람 말로 */
+function saveError(er: any): string {
+  const st = er?.status;
+  if (st === 409) return '다른 곳에서 먼저 바뀌었습니다. 지금 고친 내용으로 덮어쓰려면 [완료]를 한 번 더 눌러 주세요.';
+  if (st === 403) return `${er.message || '이 일정을 고칠 권한이 없습니다'} (일정 주인이나 캘린더 관리자만 고칠 수 있습니다)`;
+  if (st === 404) return '일정을 찾을 수 없습니다(삭제되었거나 볼 수 없는 일정).';
+  if (st === 400) return `입력을 확인해 주세요: ${er.message}`;
+  return er?.message || '저장하지 못했습니다';
 }
 
 /** 업무 시간 블록 제목의 옛 접두어 정리 ("[업무] …") — 화면에서는 아이콘으로 구분 */

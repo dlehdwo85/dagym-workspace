@@ -8,7 +8,7 @@ import { DocJobCard } from '@/components/DocJobCard';
 import { VoiceButton } from './voice';
 import { dockHideCls, useDockHide } from './useDockHide';
 import { AiBudgetBar, costLine, type Budget } from './AiBudget';
-import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from './aiChat';
+import { ChatComposer, DoneSummary, MsgTools, useAiConversation, type ChatMsg } from './aiChat';
 import { AI_ACCEPT } from './libraryUpload';
 import { DropZone } from './upload';
 import { api, broadcastRefresh, useApi } from './client';
@@ -150,6 +150,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
                       </div>
                     ))}
                   </div>
+                  {m.role === 'assistant' && <DoneSummary proposals={m.proposals as any} />}
                   {m.docJobs?.map((id) => <DocJobCard key={id} id={id} onRefine={(t) => { setText(t); inputRef.current?.focus(); }} />)}
                   {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
                   {m.role === 'assistant' && costLine(m.costKrw) && <span className="mt-0.5 text-[10.5px] text-ink-3" data-testid="ai-cost">{costLine(m.costKrw)}</span>}

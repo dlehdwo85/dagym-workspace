@@ -162,10 +162,7 @@ export async function approvePlan(u: SessionUser, id: string) {
     // 실패하면 거기서 멈추고, 이미 만든 id 는 external 에 남김(다시 시도하면 이어서 만듦)
     if (!ext.campaignId) ext.campaignId = String((await naverReq(a, 'POST', '/ncc/campaigns', '', { customerId: Number(a.external_id), name: p.name, campaignTp: 'WEB_SITE', dailyBudget: p.plan.dailyBudget, useDailyBudget: true, userLock: true })).nccCampaignId);
     if (!ext.adgroupId) ext.adgroupId = String((await naverReq(a, 'POST', '/ncc/adgroups', '', { nccCampaignId: ext.campaignId, adgroupType: 'WEB_SITE', name: `${p.name} 그룹`, pcChannelId: p.plan.channelId, mobileChannelId: p.plan.channelId, bidAmt: p.plan.bidAmt, useDailyBudget: false, userLock: true })).nccAdgroupId);
-    if (!ext.keywordIds) {
-      const kws: any[] = await naverReq(a, 'POST', '/ncc/keywords', `?nccAdgroupId=${encodeURIComponent(String(ext.adgroupId))}`, p.plan.keywords.map((k: string) => ({ nccAdgroupId: ext.adgroupId, keyword: k, useGroupBidAmt: true, userLock: false })));
-      ext.keywordIds = (kws ?? []).map((k) => String(k.nccKeywordId));
-    }
+    if (!validIds(ext.keywordIds)) ext.keywordIds = await ensureKeywords(a, String(ext.adgroupId), p.plan.keywords);
     if (!ext.adIds) {
       const ids: string[] = [];
       for (const ad of p.plan.ads) ids.push(String((await naverReq(a, 'POST', '/ncc/ads', '', { nccAdgroupId: ext.adgroupId, type: 'TEXT_45', userLock: false, ad: { headline: ad.headline, description: ad.description, pc: { final: ad.url }, mobile: { final: ad.url } } })).nccAdId));
@@ -184,6 +181,42 @@ export async function approvePlan(u: SessionUser, id: string) {
   return { ok: true, external: ext };
 }
 
+/** 운영 10/19: 키워드 생성 응답에서 id 를 못 읽어 'undefined' 로 저장된 일 — id 는 문자열 배열이고 'undefined'·빈 값이 없어야 함 */
+const validIds = (x: unknown): x is string[] => Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === 'string' && v && v !== 'undefined' && v !== 'null');
+const kwId = (k: any) => String(k?.nccKeywordId ?? k?.nccKeywordID ?? k?.id ?? '');
+const norm = (k: string) => k.replace(/\s+/g, '').toLowerCase();
+/** 키워드 멱등 생성: 그룹에 이미 있는 키워드는 id 만 읽고, 없는 것만 만든 뒤 다시 읽어 세팅안 순서대로 id 를 돌려줌 */
+async function ensureKeywords(a: NaverAcc, adgroupId: string, keywords: string[]): Promise<string[]> {
+  const q = `?nccAdgroupId=${encodeURIComponent(adgroupId)}`;
+  const list = async () => { const r = await naverReq(a, 'GET', '/ncc/keywords', q); return (Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as any[]; };
+  const byKw = new Map<string, string>();
+  for (const k of await list()) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
+  const missing = keywords.filter((k) => !byKw.has(norm(k)));
+  if (missing.length) {
+    const made = await naverReq(a, 'POST', '/ncc/keywords', q, missing.map((k) => ({ nccAdgroupId: adgroupId, keyword: k, useGroupBidAmt: true, userLock: false })));
+    for (const k of (Array.isArray(made) ? made : Array.isArray(made?.data) ? made.data : [])) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
+    if (missing.some((k) => !byKw.has(norm(k)))) for (const k of await list()) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
+  }
+  const ids = keywords.map((k) => byKw.get(norm(k)) ?? '');
+  if (!validIds(ids)) throw new HttpError(502, 'naver_keywords', `키워드 id 를 읽지 못했습니다: ${keywords.filter((_, i) => !ids[i]).join(', ')}`);
+  return ids;
+}
+/** [키워드 다시 읽기]: 만든 뒤 키워드 id 가 비었으면 네이버에서 다시 읽어 저장(없으면 만듦) — 켜기·예산은 바꾸지 않음 */
+export async function syncPlanKeywords(u: SessionUser, id: string) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db();
+  const p = await planOf(t, id);
+  if (!['created', 'active', 'paused'].includes(p.status) || !p.external?.adgroupId) throw new HttpError(409, 'plan_not_created', '네이버에 만든 뒤에 다시 읽을 수 있습니다');
+  const a = await naverAcc(t, p.account_id);
+  const before = p.external.keywordIds ?? null;
+  const keywordIds = await ensureKeywords(a, String(p.external.adgroupId), p.plan.keywords);
+  await sql.begin(async (tx) => {
+    await tx`update mkt_ad_plans set external = ${tx.json({ ...p.external, keywordIds } as never)}, updated_at = now() where id = ${id}`;
+    await tx`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up, actor_id) values (${t}, ${id}, 'sync', ${tx.json({ keywordIds: before } as never)}, ${tx.json({ keywordIds } as never)}, false, ${u.id})`;
+  });
+  return { ok: true, keywordIds };
+}
+
 // ---------------- 켜기·끄기·예산 + 되돌리기 ----------------
 async function setLock(a: NaverAcc, campaignId: string, lock: boolean) {
   await naverReq(a, 'PUT', `/ncc/campaigns/${campaignId}`, '?fields=userLock', { nccCampaignId: campaignId, userLock: lock });
@@ -195,8 +228,9 @@ async function guardMoneyUp(t: string, addDaily = 0) {
   if (spend >= cap.monthlyCap) throw new HttpError(409, 'cap_reached', `이번 달 광고비 ${won(spend)} 가 상한 ${won(cap.monthlyCap)} 에 닿아 켤 수 없습니다 — 상한을 올리거나 다음 달에 켜 주세요`);
   return { cap: cap.monthlyCap, spend, addDaily };
 }
-export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget']), dailyBudget: z.number().int().min(50).max(10_000_000).optional() });
+export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync']), dailyBudget: z.number().int().min(50).max(10_000_000).optional() });
 export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null = null) {
+  if (i.action === 'sync') return syncPlanKeywords(u, id);
   await assertSpace(u, 'marketing'); adminOnly(u);
   const t = tenantOf(u); const sql = db();
   const p = await planOf(t, id);

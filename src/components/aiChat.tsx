@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Copy, Pencil, RotateCw, Send, Square } from 'lucide-react';
+import Link from 'next/link';
 import { api } from './client';
 import { Button, cx, inputCls, toast } from './ui';
 
@@ -130,6 +131,18 @@ export function MsgTools({ text, onEdit, onRegenerate, right }: { text: string; 
       <button type="button" className={btn} onClick={() => { navigator.clipboard?.writeText(text).then(() => toast.ok('복사했습니다'), () => toast.error('복사하지 못했습니다')); }} aria-label="복사"><Copy className="size-3" />복사</button>
       {onEdit && <button type="button" className={btn} onClick={onEdit} aria-label="수정" data-testid="ai-edit-last"><Pencil className="size-3" />수정</button>}
       {onRegenerate && <button type="button" className={btn} onClick={onRegenerate} aria-label="다시 답하기" data-testid="ai-regenerate"><RotateCw className="size-3" />다시 답하기</button>}
+    </div>
+  );
+}
+
+/** 대표 지적(10/19): 답변 아래 '실행한 작업' 요약 — 확인을 눌러 실제로 반영된 것만, [열기] 링크로 바로 확인 */
+export function DoneSummary({ proposals }: { proposals?: { id: string; summary: string; state?: string; link?: string }[] }) {
+  const done = (proposals ?? []).filter((p) => p.state === 'done');
+  if (!done.length) return null;
+  return (
+    <div className="mt-1 max-w-[90%] rounded-input border border-green-200 bg-green-50 px-2.5 py-1.5 text-xs text-green-900" data-testid="ai-done-summary">
+      <div className="font-semibold">실행한 작업 {done.length}건</div>
+      <ul className="mt-0.5 space-y-0.5">{done.map((p) => <li key={p.id}>✓ {p.summary}{p.link && <> · <Link href={p.link} className="underline">열기</Link></>}</li>)}</ul>
     </div>
   );
 }

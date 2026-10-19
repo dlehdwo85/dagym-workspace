@@ -75,7 +75,8 @@ export function OpsHistory() {
 }
 
 type Conv = { mode: string; posts: number; daily: number; requests: number; revisions: number; newContents: number; existing: number; decisions: number; withUrl: number;
-  mapping: Record<string, number>; channels: Record<string, number>; brands: Record<string, number>; unknownBrands: string[]; sample: { title: string; brand: string | null; channel: string; status: string; url: boolean }[]; made?: number; requestsMade?: number };
+  mapping: Record<string, number>; channels: Record<string, number>; brands: Record<string, number>; unknownBrands: string[]; sample: { title: string; brand: string | null; channel: string; status: string; url: boolean }[]; made?: number; requestsMade?: number;
+  assets?: { contents: number; files?: number; linked?: number; copied?: number; reused?: number; failed?: number; left?: number; missingCount: number; missing: string[]; errors?: string[] } };
 const ST: Record<string, string> = { published: '게시됨', approved: '승인', pending: '승인 대기', changes: '수정 요청', hold: '보류', canceled: '취소', draft: '초안' };
 /** 운영실 기록 → 워크인 콘텐츠·결정·요청 기록(미리보기로 상태 매핑 확인 → 적용, 같은 원본은 한 번만) */
 function ConvertPanel() {
@@ -84,7 +85,7 @@ function ConvertPanel() {
   async function run(mode: 'preview' | 'apply') {
     if (mode === 'apply' && !confirm('미리보기대로 콘텐츠·결정 기록·요청 기록을 만들까요? 같은 원본은 다시 만들지 않습니다.')) return;
     setBusy(true);
-    try { const x = await api<Conv>('/api/marketing/imported/convert', { body: { mode } }); setR(x); if (mode === 'apply') toast.ok(`콘텐츠 ${x.made}건 · 요청 기록 ${x.requestsMade}건을 만들었습니다`); }
+    try { const x = await api<Conv>('/api/marketing/imported/convert', { body: { mode } }); setR(x); if (mode === 'apply') toast.ok(`콘텐츠 ${x.made}건 · 요청 기록 ${x.requestsMade}건 · 시안 연결 ${x.assets?.linked ?? 0}건`); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   return (
@@ -92,11 +93,15 @@ function ConvertPanel() {
       <div className="flex flex-wrap items-center gap-2"><h2 className="font-semibold">워크인 화면으로 옮기기</h2>
         <span className="text-xs text-ink-2">게시물·일일 항목 → 콘텐츠 캘린더(결정 기록 포함), 요청 → 승인 대기 아래 &lsquo;이전 요청 기록&rsquo;</span>
         <span className="ml-auto flex gap-2"><Button size="sm" variant="secondary" onClick={() => run('preview')} disabled={busy} data-testid="ops-convert-preview">미리보기</Button>
-          <Button size="sm" onClick={() => run('apply')} disabled={busy || !r || r.newContents + r.requests === 0} data-testid="ops-convert-apply">옮기기</Button></span></div>
+          <Button size="sm" onClick={() => run('apply')} disabled={busy || !r || (r.newContents + r.requests === 0 && !r.assets?.contents)} data-testid="ops-convert-apply">옮기기</Button></span></div>
       {r && (
         <div className="mt-2 space-y-1 text-xs" data-testid="ops-convert-result">
           <p>원본: 게시물 {r.posts} · 일일 항목 {r.daily} · 요청 {r.requests} · 수정 이력 {r.revisions}(원본 화면에서만) — 새로 만들 콘텐츠 <b>{r.newContents}</b>건(이미 옮김 {r.existing}) · 결정 기록 {r.decisions}건 · 게시 주소 있음 {r.withUrl}건
             {r.mode === 'apply' && <> · <b className="text-emerald-800">만듦 {r.made} · 요청 기록 {r.requestsMade}</b></>}</p>
+          {/* 로컬 10/19: 운영실 자산(시안 사진·영상) → 워크인 저장소 → 콘텐츠 버전에 표지 먼저 연결, 이미 옮긴 콘텐츠도 [옮기기]로 이어 붙임 */}
+          {r.assets && <p data-testid="ops-convert-assets">시안 자산: 연결할 콘텐츠 <b>{r.assets.contents}</b>건{r.assets.files != null && <> · 파일 {r.assets.files}개</>}
+            {r.mode === 'apply' && <> · <b className="text-emerald-800">연결 {r.assets.linked} · 복사 {r.assets.copied} · 재사용 {r.assets.reused}</b>{!!r.assets.failed && <span className="text-red-700"> · 실패 {r.assets.failed}</span>}{!!r.assets.left && <> · 남음 {r.assets.left}(한 번 더 [옮기기])</>}</>}
+            {r.assets.missingCount > 0 && <span className="text-amber-800"> · 주소를 못 찾은 자산 id {r.assets.missingCount}개({r.assets.missing.slice(0, 5).join(', ')}{r.assets.missingCount > 5 ? ' …' : ''})</span>}</p>}
           <p className="font-medium">상태 매핑(원본 값 → 워크인)</p>
           <ul className="grid gap-x-4 sm:grid-cols-2">{Object.entries(r.mapping).map(([k, n]) => <li key={k}>{k.replace(/→ (\w+)$/, (_m, x) => `→ ${ST[x] ?? x}`)} · {n}건</li>)}</ul>
           <p>채널: {Object.entries(r.channels).map(([k, n]) => `${k} ${n}`).join(' · ')}</p>
