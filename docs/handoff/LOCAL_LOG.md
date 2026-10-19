@@ -479,3 +479,4 @@
 - 2026-10-20 [로컬] 네이티브 준비(클라우드 요청): mobile npm install(@aparajita/capacitor-biometric-auth 10.0.0) + cap sync, iOS Info.plist NSFaceIDUsageDescription·NSLocationWhenInUseUsageDescription 추가, Android ACCESS_FINE/COARSE_LOCATION 추가 → 다음 앱 빌드부터 생체 잠금·출퇴근 위치 동작. capacitor.config appendUserAgent 'WorkInApp' 은 이미 있음.
 - 2026-10-20 [로컬] 대표 요청: 후이즈 판매 네이버웍스 분석 → COMPETITOR_NAVERWORKS_WHOIS_2026-10-20.md (리셀러, 1인 3,000~11,000원 + 결재·근태 별매, 워크인 대비 강점·약점·요금 시사점). 알림 과다·알림에서 바로 처리 → 클라우드 요청(접수). 앱 로고 2차(W 없음)·3차(세 원 방향) 시안 전달.
 - 2026-10-20 [로컬] Play Console: 카테고리 비즈니스·연락처(dagym-in@naver.com·work-in.dev) 저장, 데이터 보안 설문 16개 유형 입력 중. 로그인 세부정보는 저장 안 된 상태(대표 비밀번호 입력 다시 필요).
+- 2026-10-20 [로컬] 대표 "폴시아 레퍼런스(중요)" = Polsia Inc.(SF, AI 가 회사를 밤마다 자동 운영) → REFERENCE_POLSIA_2026-10-20.md(회사 채팅·AI 작업 큐·밤사이 비서·다음 할 일 제안·카드 편집, 외부 집행 자동은 안 가져옴) → 클라우드 홈 시안에 반영 요청. 위젯(바탕화면) API·딥링크·디자인은 클라우드, 네이티브는 로컬. 브랜드 소개 4종은 마케팅 5a06b94 → 워크인 브랜드 키트에 반영.
