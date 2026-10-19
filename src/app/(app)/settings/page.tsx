@@ -80,10 +80,16 @@ export default function Settings() {
               <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={!!s.briefingWeekend} onChange={(e) => setS({ ...s, briefingWeekend: e.target.checked })} />주말·공휴일에도</label>
             </span>
           </Field>
-          <Field label="푸시 받지 않는 시간 시작"><input type="time" className={inputCls} value={s.quietStart ?? ''} onChange={(e) => setS({ ...s, quietStart: e.target.value || null })} /></Field>
-          <Field label="끝"><input type="time" className={inputCls} value={s.quietEnd ?? ''} onChange={(e) => setS({ ...s, quietEnd: e.target.value || null })} /></Field>
+          <Field label="조용한 시간 (기본 22:00~07:00)">
+            <span className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={!s.quietOff} onChange={(e) => setS({ ...s, quietOff: !e.target.checked })} aria-label="조용한 시간 쓰기" data-testid="quiet-on" />쓰기</label>
+              <input type="time" className={cx(inputCls, '!w-32')} value={s.quietStart ?? ''} onChange={(e) => setS({ ...s, quietStart: e.target.value || null })} disabled={!!s.quietOff} aria-label="조용한 시간 시작" />
+              <span className="text-ink-3">~</span>
+              <input type="time" className={cx(inputCls, '!w-32')} value={s.quietEnd ?? ''} onChange={(e) => setS({ ...s, quietEnd: e.target.value || null })} disabled={!!s.quietOff} aria-label="조용한 시간 끝" />
+            </span>
+          </Field>
         </div>
-        <p className="mt-1 text-xs text-slate-500">방해 금지 시간에 생긴 푸시는 끝나는 시각에 발송됩니다. 앱 내 알림은 바로 쌓입니다.</p>
+        <p className="mt-1 text-xs text-slate-500">조용한 시간에 생긴 푸시는 모아서 끝나는 시각(아침)에 보냅니다. 앱 안 알림은 바로 쌓입니다. 종류별 푸시 기본값: 나에게 온 요청·내 일정·지시한 업무 완료는 켬, 내가 보낸 결과·자동 정리 결과는 끔(위 표에서 바꿀 수 있음).</p>
         <Button className="mt-3" onClick={save}>저장</Button>
       </section>
       <section className="rounded-lg border bg-white p-4">

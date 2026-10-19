@@ -76,7 +76,8 @@ async function notifyAudience(sql: Sql, tenant: string, a: { id: string; title: 
   const { notify } = await import('./notifications');
   let ids = await audienceUsers(sql, tenant, a.audience);
   if (opt.remind) { const read = (await sql<{ user_id: string }[]>`select user_id from announcement_reads where announcement_id = ${a.id}`).map((r) => r.user_id); ids = ids.filter((x) => !read.includes(x)); }
-  return notify(sql, { userIds: ids, type: 'announcement', title: `${opt.remind ? '[다시 알림] ' : ''}${a.important ? '[중요] ' : ''}공지: ${a.title}`, body: opt.remind ? '아직 읽지 않은 공지입니다. 열어서 확인해 주세요.' : '새 공지가 올라왔습니다.',
+  // 로컬 10/20 알림 다이어트: 공지 푸시는 중요 공지·다시 알림만, 일반 공지는 목록·홈 카드
+  return notify(sql, { push: !!(a.important || opt.remind), userIds: ids, type: 'announcement', title: `${opt.remind ? '[다시 알림] ' : ''}${a.important ? '[중요] ' : ''}공지: ${a.title}`, body: opt.remind ? '아직 읽지 않은 공지입니다. 열어서 확인해 주세요.' : '새 공지가 올라왔습니다.',
     link: `/notices/${a.id}`, entityType: 'announcement', entityId: a.id, actorId: a.created_by, dedupeKey: opt.remind ? `notice-remind:${a.id}:${Date.now()}` : `notice:${a.id}` });
 }
 export async function createNotice(u: SessionUser, i: z.infer<typeof noticeInput>, ip: string | null) {

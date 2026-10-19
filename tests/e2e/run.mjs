@@ -30,6 +30,7 @@ import { approvalsFlow } from './approvals.step.mjs';
 import { usageStatsFlow } from './usage-stats.step.mjs';
 import { contactsFlow } from './contacts.step.mjs';
 import { settlementFlow } from './settlement.step.mjs';
+import { notifActionsFlow } from './notif-actions.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -1842,7 +1843,8 @@ await step('V12: PC 상세 패널 — 다른 업무 클릭 시 교체·바깥/Es
   await owner.goto(BASE + '/notifications');
   const li = owner.getByTestId('notifications').locator('li', { hasText: '검토 요청: V12 검토 승인 업무' });
   await li.getByTestId('review-actions').getByRole('button', { name: '승인' }).click();
-  await owner.getByText('승인했습니다 (완료)').waitFor();
+  await li.getByTestId('notif-done').waitFor(); // 로컬 10/20: 알림에서 바로 처리 → 그 자리에 "승인함 ✓"
+  assert.match(await li.getByTestId('notif-done').innerText(), /승인함/);
   assert.equal((await sql`select status from tasks where id = ${t}`)[0].status, 'done');
   await owner.setViewportSize({ width: 1366, height: 900 });
 });
@@ -2294,6 +2296,8 @@ await step('V30 ⑤ 이용 현황: 사용량·요금제 → 이용 현황 탭(�
 await step('V31 연락처: 등록·검색·상세 → 업무 메일/문자 시안 받는 사람 자동 완성', () => contactsFlow({ owner, ctx, BASE, SHOTS, sql }));
 
 await step('V32 2 정산: 플랫폼 정산 집계·장부 [정산 완료] → 고객 결제 내역 [세금계산서] 요청 → 운영자 발행 체크', () => settlementFlow({ owner, ctx, BASE, SHOTS, sql }));
+
+await step('로컬 10/20 알림 바로 처리: 배정 알림 [오늘 할 일에 넣기] → 처리 표시·버튼 사라짐 → 설정 조용한 시간 칸', () => notifActionsFlow({ staff, ctx, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

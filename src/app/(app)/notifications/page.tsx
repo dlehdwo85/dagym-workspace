@@ -12,13 +12,15 @@ export default function Notifications() {
   // 로컬 10/19(대표) 홈 개편: 홈 '최근 활동' 카드가 여기 '활동' 탭으로
   const [tab, setTab] = useState<'list' | 'activity'>('list');
   const act = useApi<{ items: any[] }>(tab === 'activity' ? '/api/notifications/activity' : null);
-  async function decide(n: any, approve: boolean) {
-    const note = approve ? undefined : prompt('반려 사유 (담당자에게 전달)') ?? undefined;
-    if (!approve && note === undefined) return;
+  /** 로컬 10/20 알림에서 바로 처리: 서버가 준 버튼(승인/수정 요청·연장 승인/거절·답글/확인·배정 확인/오늘 할 일·10분 뒤) → 처리되면 그 자리에 "승인함 ✓" */
+  async function runAction(n: any, a: { id: string; label: string; input?: 'text' }) {
+    let text: string | undefined;
+    if (a.input === 'text') { const t = prompt(`${a.label} 내용`); if (t === null) return; text = t.trim(); if (!text) { toast.error(`${a.label} 내용을 적어 주세요`); return; } }
     try {
-      await api(`/api/tasks/${n.entity_id}`, { method: 'PATCH', body: { status: approve ? 'done' : 'in_progress', version: n.task_version, ...(note ? { reviewNote: note } : {}) } });
-      if (!n.read_at) await api('/api/notifications/read', { body: { ids: [n.id] } });
-      toast.ok(approve ? '승인했습니다 (완료)' : '반려했습니다 — 담당자에게 알렸습니다'); reload(); broadcastRefresh();
+      const r = await api<{ label: string; unread: number }>(`/api/notifications/${n.id}/action`, { body: { action: a.id, text } });
+      setData((d: any) => d && { ...d, unread: r.unread, items: d.items.map((x: any) => (x.id === n.id ? { ...x, action_done: r.label, read_at: x.read_at ?? new Date().toISOString(), actions: [], justDone: true } : x)) }); // 방금 처리한 줄은 안 읽음 탭에 그대로 두고 "…함 ✓" 표시
+      window.dispatchEvent(new CustomEvent('wos-unread', { detail: { value: r.unread } }));
+      toast.ok(`${r.label} ✓`); broadcastRefresh();
     } catch (e: any) { toast.error(e.message); }
   }
   async function read(ids?: string[]) {
@@ -63,11 +65,11 @@ export default function Notifications() {
                 </div>
               </li>))}
           </ul>)
-      ) : error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !(showAll ? data.items : data.items.filter((n: any) => !n.read_at)).length ? (
+      ) : error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !(showAll ? data.items : data.items.filter((n: any) => !n.read_at || n.justDone)).length ? (
         <Empty title={showAll ? '알림이 없습니다' : '새 알림이 없습니다'}>{!showAll && data.items.length > 0 && <button className="text-sm text-brand-600 underline" onClick={() => setShowAll(true)}>읽은 알림 보기</button>}</Empty>
       ) : (
         <ul className="divide-y rounded-lg border bg-white" data-testid="notifications">
-          {(showAll ? data.items : data.items.filter((n: any) => !n.read_at)).map((n: any) => (
+          {(showAll ? data.items : data.items.filter((n: any) => !n.read_at || n.justDone)).map((n: any) => (
             <li key={n.id} className={cx('flex gap-3 px-4 py-3', !n.read_at && 'bg-brand-50/50')}>
               <span className={cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', n.read_at ? 'bg-transparent' : 'bg-brand-600')} />
               <Link href={n.link} onClick={() => !n.read_at && read([n.id])} className="min-w-0 flex-1">
@@ -75,10 +77,10 @@ export default function Notifications() {
                 <div className="text-sm font-medium">{n.title}</div>
                 {n.body && <div className="truncate text-sm text-slate-600">{n.body}</div>}
               </Link>
-              {n.type === 'review_requested' && n.task_status === 'review' && (
-                <span className="flex shrink-0 flex-col gap-1 sm:flex-row" data-testid="review-actions">
-                  <Button size="sm" onClick={() => decide(n, true)}>승인</Button>
-                  <Button size="sm" variant="secondary" onClick={() => decide(n, false)}>반려</Button>
+              {n.action_done ? <span className="shrink-0 self-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700" data-testid="notif-done">{n.action_done} ✓</span>
+                : !!n.actions?.length && (
+                <span className="flex shrink-0 flex-col gap-1 self-center sm:flex-row" data-testid={n.type === 'review_requested' ? 'review-actions' : 'notif-actions'}>
+                  {n.actions.map((a: any, i: number) => <Button key={a.id} size="sm" variant={i === 0 ? 'primary' : 'secondary'} onClick={() => runAction(n, a)} data-testid={`na-${a.id}`}>{a.label}</Button>)}
                 </span>
               )}
             </li>
