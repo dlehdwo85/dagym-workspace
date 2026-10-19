@@ -485,7 +485,7 @@ export async function processOutbox(id: string): Promise<string> {
       await crmSteps(sql, o.task_id, o.subject, o.files as any[]);
     }
     // 예약 메일은 보낸 사람에게 결과 알림(바로 보낸 메일은 화면에서 바로 보임)
-    if (o.scheduled_at) await notify(sql, { userIds: [o.created_by], type: 'mail_status', title: `예약 메일을 보냈습니다: ${o.subject}`, body: `받는 사람 ${(o.to_addrs as string[]).join(', ')}`,
+    if (o.scheduled_at) await notify(sql, { userIds: [o.created_by], type: 'mail_sent', title: `예약 메일을 보냈습니다: ${o.subject}`, body: `받는 사람 ${(o.to_addrs as string[]).join(', ')}`,
       link: o.task_id ? `/tasks/${o.task_id}` : '/admin/mail', entityType: 'task', entityId: o.task_id ?? undefined, dedupeKey: `mail_sched_sent:${id}` });
     return 'sent';
   } catch (e: any) {
@@ -606,7 +606,7 @@ export async function openShare(token: string, ip: string | null, ua: string | n
     const [first] = await sql`update share_links set first_opened_at = now() where id = ${s.id} and first_opened_at is null returning id`;
     if (first && s.task_id) {
       await activity(sql, 'task', s.task_id, null, 'share_opened', { files: (s.files as any[]).map((f) => f.name) });
-      await notify(sql, { userIds: [s.created_by], type: 'mail_status', title: '고객이 보낸 자료를 열어 봤습니다', body: (s.files as any[]).map((f) => f.name).join(', ').slice(0, 200),
+      await notify(sql, { userIds: [s.created_by], type: 'mail_sent', title: '고객이 보낸 자료를 열어 봤습니다', body: (s.files as any[]).map((f) => f.name).join(', ').slice(0, 200),
         link: `/tasks/${s.task_id}`, entityType: 'task', entityId: s.task_id, dedupeKey: `share_opened:${s.id}` });
     }
   }

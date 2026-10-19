@@ -78,7 +78,7 @@ export async function startApprovalRound(sql: Sql, taskId: string, lineId: strin
   const who = await stepApprovers(sql, orgUnitId, first as any);
   if (!who.length) throw badRequest(`결재선 1단계(${first.label}) 결재자가 없습니다. 결재선이나 조직 구성을 확인하세요.`);
   await notify(sql, { userIds: who, type: 'review_requested', title: `결재 요청 (${first.label}): ${title}`, body: `1/${line.steps.length} 단계`,
-    link: `/tasks/${taskId}`, entityType: 'task', entityId: taskId, actorId, dedupeKey: `appr:${taskId}:${r}:1` });
+    link: `/tasks/${taskId}`, entityType: 'task', entityId: taskId, actorId, dedupeKey: `appr:${taskId}:${r}:1`, meta: { kind: 'approval' } });
   return r;
 }
 
@@ -126,16 +126,17 @@ export async function decide(u: SessionUser, taskId: string, decision: 'approve'
       const nextWho = await stepApprovers(tx, task.org_unit_id, next);
       await activity(tx, 'task', taskId, u.id, 'approval_step', { step: cur.label, next: next.label });
       await notify(tx, { userIds: nextWho, type: 'review_requested', title: `결재 요청 (${next.label}): ${t.title}`, body: `${cur.step + 1}/${total} 단계 · 이전 단계 ${cur.label} 승인`,
-        link: `/tasks/${taskId}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `appr:${taskId}:${cur.round}:${cur.step + 1}` });
+        link: `/tasks/${taskId}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `appr:${taskId}:${cur.round}:${cur.step + 1}`, meta: { kind: 'approval' } });
       return { status: 'next', step: cur.step + 1 };
     }
     // 마지막 단계 승인 → 최종 완료
     await tx`update tasks set status = 'done', completed_at = now(), approved_at = now(), approved_by = ${u.id}, version = version + 1, updated_at = now() where id = ${taskId}`;
     await activity(tx, 'task', taskId, u.id, 'approved', { status: { from: 'review', to: 'done' }, step: cur.label });
     await (await import('./approvalForms')).onApprovalTaskDecided(tx, taskId, 'approved', u.id); // V30 ④ 휴가면 부재 일정 자동 등록
-    await notify(tx, { userIds: [t.assignee_id, t.review_requested_by], type: 'review_result', title: `최종 결재 완료: ${t.title}`,
-      body: `${cur.label} 승인으로 완료되었습니다`, link: `/tasks/${taskId}`, entityType: 'task', entityId: taskId, actorId: u.id,
-      dedupeKey: `apprdone:${taskId}:${cur.round}` });
+    // 로컬 10/20 알림 다이어트: 최종 완료는 결재를 올린 사람에게 푸시, 담당자(올린 사람이 아니면)는 목록에만
+    const base = { type: 'review_result' as const, title: `최종 결재 완료: ${t.title}`, body: `${cur.label} 승인으로 완료되었습니다`, link: `/tasks/${taskId}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `apprdone:${taskId}:${cur.round}` };
+    await notify(tx, { ...base, userIds: [t.review_requested_by] });
+    if (t.assignee_id !== t.review_requested_by) await notify(tx, { ...base, userIds: [t.assignee_id], push: false });
     const { spawnNextRecurrence } = await import('./tasks');
     await spawnNextRecurrence(tx, taskId, u.id);
     const { runAutomations } = await import('./automation');

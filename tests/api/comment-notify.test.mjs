@@ -18,7 +18,7 @@ describe('댓글 알림 묶기', () => {
     const c3 = await ctx.owner.ok('POST', `/api/tasks/${id}/comments`, { body: '세 번째 댓글' });
     assert.deepEqual([c2.notified, c3.notified], [[], []], '안 읽은 알림이 있으면 새로 안 보냄');
     let ns = await mine(id);
-    assert.equal(ns.length, 1, '알림 1개'); assert.match(ns[0].body, /세 번째 댓글/); assert.match(ns[0].title, /여러 개/);
+    assert.equal(ns.length, 1, '알림 1개'); assert.match(ns[0].body, /세 번째 댓글/); assert.match(ns[0].title, /새 댓글 3개/);
     await sql`update notifications set read_at = now() where id = ${ns[0].id}`; // 확인함
     const c4 = await ctx.owner.ok('POST', `/api/tasks/${id}/comments`, { body: '읽은 뒤 댓글' });
     assert.deepEqual(c4.notified, [ctx.staffA.id], '읽은 뒤엔 다시 알림');

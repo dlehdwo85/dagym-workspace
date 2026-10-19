@@ -1,6 +1,7 @@
 import webpush from 'web-push';
 import { importPKCS8, SignJWT } from 'jose';
 import { db } from './db';
+import { actionsFor } from './notifActions';
 import { logError } from './log';
 
 const MAX_ATTEMPTS = 5;
@@ -35,7 +36,7 @@ async function fcmAccessToken(sa: { client_email: string; private_key: string; t
   return j.access_token;
 }
 
-interface Payload { title: string; body: string; link: string; notificationId: string }
+interface Payload { title: string; body: string; link: string; notificationId: string; type?: string; taskId?: string | null; actions?: { id: string; label: string; input?: 'text' }[]; tag?: string }
 
 class PermanentError extends Error {}
 
@@ -63,11 +64,12 @@ async function sendFcm(token: string, p: Payload) {
       message: {
         token,
         notification: { title: p.title, body: p.body },
-        data: { link: p.link, notificationId: p.notificationId },
+        // 로컬 10/20 알림에서 바로 처리: 앱이 액션 버튼(Android)·카테고리(iOS)를 그릴 수 있게 종류·버튼·업무 id 를 data 로(값은 문자열만)
+        data: { link: p.link, notificationId: p.notificationId, type: p.type ?? '', taskId: p.taskId ?? '', actions: JSON.stringify(p.actions ?? []) },
         // click_action 없음: 기본(앱 실행 activity)으로 열려야 data(link·notificationId)가 앱의 notificationActionPerformed 로 전달된다
         // V37 5: 안드로이드 상태바 단색 아이콘(앱 res/drawable/ic_stat_workin, 로컬 48806da)·강조색
-        android: { priority: 'HIGH', notification: { channel_id: 'work', icon: 'ic_stat_workin', color: '#0F766E' } },
-        apns: { payload: { aps: { sound: 'default' } } },
+        android: { priority: 'HIGH', notification: { channel_id: 'work', icon: 'ic_stat_workin', color: '#0F766E', tag: p.tag ?? p.notificationId } },
+        apns: { payload: { aps: { sound: 'default', category: p.type ?? 'default', 'thread-id': p.taskId || p.notificationId } } },
       },
     }),
   });
@@ -87,7 +89,7 @@ async function sendFcm(token: string, p: Payload) {
 export async function dispatchPending(limit = 50) {
   const sql = db();
   const claimed = await sql<
-    { id: number; channel: string; endpoint: string; keys: any; sub_id: string; title: string; body: string; link: string; nid: string; attempts: number }[]
+    { id: number; channel: string; endpoint: string; keys: any; sub_id: string; title: string; body: string; link: string; nid: string; attempts: number; type: string; entity_type: string | null; entity_id: string | null; meta: any; action_done: string | null }[]
   >`
     with c as (
       select d.id from notification_deliveries d
@@ -97,13 +99,15 @@ export async function dispatchPending(limit = 50) {
     update notification_deliveries d set attempts = d.attempts + 1, next_attempt_at = now() + interval '5 minutes'
     from c, push_subscriptions p, notifications n
     where d.id = c.id and p.id = d.subscription_id and n.id = d.notification_id
-    returning d.id, d.channel, p.endpoint, p.keys, p.id as sub_id, n.title, n.body, n.link, n.id as nid, d.attempts`;
+    returning d.id, d.channel, p.endpoint, p.keys, p.id as sub_id, n.title, n.body, n.link, n.id as nid, d.attempts, n.type, n.entity_type, n.entity_id, n.meta, n.action_done`;
   // 구독이 삭제된 행 정리
   await sql`update notification_deliveries set status = 'skipped', error = '구독 없음' where status = 'pending' and subscription_id is null`;
 
   let sent = 0, failed = 0;
   for (const d of claimed) {
-    const payload = { title: d.title, body: d.body, link: d.link, notificationId: d.nid };
+    if (d.action_done) { await sql`update notification_deliveries set status = 'skipped', error = '이미 처리됨' where id = ${d.id}`; continue; } // 처리된 알림은 다시 푸시하지 않음
+    const payload: Payload = { title: d.title, body: d.body, link: d.link, notificationId: d.nid, type: d.type, taskId: d.entity_type === 'task' ? d.entity_id : null, tag: d.nid,
+      actions: actionsFor({ id: d.nid, type: d.type, link: d.link, entity_type: d.entity_type, entity_id: d.entity_id, meta: d.meta, action_done: d.action_done }) };
     try {
       if (d.channel === 'webpush') await sendWebPush({ endpoint: d.endpoint, keys: d.keys }, payload);
       else await sendFcm(d.endpoint, payload);

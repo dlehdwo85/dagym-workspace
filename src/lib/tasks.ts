@@ -690,7 +690,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       const reviewTo = reqr && reqr !== u.id ? [reqr] : await approverIds(tx, cur.org_unit_id, cur.project_id);
       await notify(tx, { userIds: reviewTo, type: 'review_requested',
         title: `검토 요청: ${title}`, body: `${u.name}님이 검토를 요청했습니다 — 승인 또는 반려해 주세요`, link: `/tasks/${id}`,
-        entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `review:${id}:${upd.version}` });
+        entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `review:${id}:${upd.version}`, meta: { kind: 'review' } });
     }
     if (statusEvent === 'approved' || statusEvent === 'review_rejected') {
       await notify(tx, { userIds: [cur.assignee_id, cur.review_requested_by], type: 'review_result',
@@ -902,11 +902,12 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
       where user_id = any(${canSee}::uuid[]) and type = 'comment' and entity_type = 'task' and entity_id = ${taskId} and read_at is null`) : [];
     const waiting = new Set(pending.map((r) => r.user_id));
     for (const r of pending) {
-      await tx`update notifications set title = ${`새 댓글 여러 개: ${t.title}`}, body = ${`${u.name}: ${preview}`}, link = ${`/tasks/${taskId}#c-${c.id}`}, actor_id = ${u.id} where id = ${r.id}`;
+      // 로컬 10/20: 같은 업무 알림 1개로 갱신 — "새 댓글 n개"
+      await tx`update notifications set count = count + 1, title = ${`새 댓글 `} || (count + 1)::text || ${`개: ${t.title}`}, body = ${`${u.name}: ${preview}`}, link = ${`/tasks/${taskId}#c-${c.id}`}, actor_id = ${u.id}, created_at = now(), meta = meta || ${tx.json({ kind: 'comment', commentId: c.id })} where id = ${r.id}`;
     }
     const send = canSee.filter((x) => !waiting.has(x));
     await notify(tx, { userIds: send, type: 'comment', title: parent ? `답글: ${t.title}` : `새 댓글: ${t.title}`, body: `${u.name}: ${preview}`,
-      link: `/tasks/${taskId}#c-${c.id}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `comment:${c.id}` });
+      link: `/tasks/${taskId}#c-${c.id}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `comment:${c.id}`, meta: { kind: 'comment', commentId: c.id } });
     return { id: c.id, createdAt: c.created_at, mentions: visibleMentions, parentId: parent?.id ?? null, notified: send };
   });
 }
@@ -1143,7 +1144,7 @@ export async function requestExtension(u: SessionUser, taskId: string, i: z.infe
       values (${task.id}, ${u.id}, ${cur.due_date}, ${i.toDate}, ${i.reason}) returning id`;
     await activity(tx as unknown as Sql, 'task', task.id, u.id, 'due_extension_requested', { from: cur.due_date, to: i.toDate, reason: i.reason });
     await notify(tx as unknown as Sql, { userIds: [boss], type: 'review_requested', title: `마감 연장 요청: ${cur.title}`,
-      body: `${u.name}: ${md(cur.due_date!)} → ${md(i.toDate)} · ${i.reason}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `extend:${x.id}` });
+      body: `${u.name}: ${md(cur.due_date!)} → ${md(i.toDate)} · ${i.reason}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `extend:${x.id}`, meta: { kind: 'extension', extensionId: x.id } });
     return x.id;
   });
   return { applied: false, id };

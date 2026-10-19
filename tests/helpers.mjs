@@ -50,6 +50,7 @@ export function serverEnv() {
     LOCAL_UPLOAD_DIR: path.join(TMP, 'uploads'),
     OPENAI_API_KEY: 'sk-fake-test',
     PIGGYBACK_TICK: '0', // 요청 편승 정기 실행은 tests/api/piggyback.test.mjs 에서만 켬 (다른 시험의 실행 횟수가 흔들리지 않게)
+    QUIET_DEFAULT: 'off', // 로컬 10/20 조용한 시간 기본 22~07 — 시험은 밤에도 돌아 끔(기본값 자체는 notif-diet.test 에서 확인)
     DUE_DIGEST_HOUR: '0', // 기한 지남·오늘 마감 하루 1회 알림을 시험 시각과 무관하게
     OPENAI_BASE_URL: `${FAKE}/openai/v1`,
     ANTHROPIC_API_KEY: 'sk-ant-fake-test',

@@ -1200,6 +1200,24 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 시험: tests/api/settlement.test.mjs 4건(장부 계산·D+5 영업일·시험 제외/포함·전월·404·엑셀 / 대사 CSV 맞음·차이·없음·거래일+금액·기록·직접 표시 / 미수·회사 상세 / 세금계산서 요청·정리·중복·직원 거절·발행) · E2E 'V32 2 정산'.
 - 로컬 확인: /platform 정산 칸 이번 달(실결제 시험 100원 건은 [시험 결제 포함]을 켜야 보임) → 엑셀 → 나이스페이 가맹점 관리자에서 정산 내역 엑셀 1개 받아 [입금 내역 올리기] → 맞음/차이 수. 수수료 실제 계약값(%)을 알려 주시면 환경변수 기본값을 맞추겠습니다.
 
+## 2026-10-20 클라우드 — 로컬 10/20 알림 다이어트 + 알림에서 바로 처리 (배포)
+대표 지적: 하루에 알림이 너무 많음(예약 메일 보냄·배정·승인 마감·1시간 뒤 일정/마감·연장 요청·댓글·최종 완료 확인) + '알림에서 바로 가벼운 처리'가 없음.
+### 1) 알림 다이어트 (기본값, 알림 설정에서 바꿀 수 있음)
+- **종류별 푸시 기본값**(src/lib/notifications.ts `PUSH_OFF_DEFAULT`): 끔 = 내가 보낸 결과(새 종류 `mail_sent`: 예약 메일 발송·고객 자료 열람)·자료실 자동 정리 결과·반복 업무 생성·월 마감 기록·주간 보고 초안. 켬 = 배정·검토/결재/연장 요청·멘션·댓글·메시지·내 일정·지시한 업무 완료·메일 실패·한도·계정 요청.
+- **알림마다 푸시 끔**(`notify({ push: false })`, 설정과 무관하게 목록에만): 오늘 마감·기한 지남·[지시] 마감 예고(아침 브리핑이 모아서 알림) · 최종 결재 완료는 올린 사람에게만 푸시(담당자가 다르면 목록만) · 일반 공지는 목록·홈 카드만(중요 공지·다시 알림은 푸시).
+- **개별 '1시간 뒤 마감'·'마감 임박' 푸시는 높음·긴급 업무만**(보통·낮음은 목록만). 아침 브리핑 본문에 오늘 마감·기한 지남 업무 이름(우선순위 순 최대 3개 + 외 n건).
+- **같은 업무 알림 1개로 갱신**: 안 읽은 댓글 알림이 있으면 새 알림 대신 그 알림을 "새 댓글 n개: 업무명"으로(count 열), 최신 댓글 본문·시각으로 올림. 푸시도 다시 안 보냄.
+- **조용한 시간 기본 22:00~07:00**(`QUIET_DEFAULT`, user_settings.quiet_off 로 끔): 그 사이 푸시는 끝나는 시각(아침)에 모아서. 설정 › 알림에 "조용한 시간 (기본 22:00~07:00) [쓰기] 시작~끝". 시험 서버는 QUIET_DEFAULT=off.
+### 2) 알림에서 바로 처리 (웹 알림 센터 + 푸시)
+- 서버가 알림마다 버튼을 정함(src/lib/notifActions.ts `actionsFor`): 검토 요청 → [승인] [수정 요청(글)] · 결재선 업무면 결재 승인/반려 · 마감 연장 요청 → [승인] [거절] · 댓글·멘션 → [답글(글)] [확인] · 배정 → [확인] [오늘 할 일에 넣기](시작일=오늘) · 일정 알림 → [10분 뒤 다시](푸시 10분 뒤 재발송).
+- API `POST /api/notifications/[id]/action {action, text?}`: 알림 주인이 아니면 404, 권한은 기존 업무 함수가 검사(남의 업무 → 403), 처리되면 `action_done`("승인함")·읽음, 대기 중이던 푸시는 건너뜀(재푸시 없음). 이미 처리된 알림은 `already:true`.
+- 웹 알림 센터(/notifications): 줄마다 버튼(data-testid na-*), 처리되면 그 자리에 "승인함 ✓". 기존 검토 승인/반려는 같은 API 로 통합(반려 → 수정 요청 글).
+- 푸시 payload: FCM data 에 `type·taskId·actions(JSON)·notificationId`, Android `tag`(같은 알림 갱신), iOS `aps.category=type`·`thread-id`. 웹 푸시(sw.js): 버튼 2개(글 입력은 Chrome text action) → 서비스워커가 서버 처리 → "승인함 ✓" 알림으로 바꿈.
+- **로컬(네이티브) 할 일**: Android — FirebaseMessaging 수신 시 data.actions 로 액션 버튼(백그라운드 서비스/BroadcastReceiver 가 `POST /api/notifications/{id}/action` 호출, 쿠키/토큰 포함, 답글은 RemoteInput) · iOS — UNNotificationCategory 등록(category = 알림 type: review_requested·comment·mention·task_assigned·event_reminder, 액션 id = 위 action id, 답글은 UNTextInputNotificationAction) → 앱이 같은 API 호출. 기존 탭 처리(notificationActionPerformed → link 이동·읽음)는 그대로.
+- 마이그레이션 119(notifications.count·action_done·action_done_at·meta, user_settings.quiet_off — 추가만).
+- 시험: tests/api/notif-diet.test.mjs 7건(기본값·조용한 시간 미룸/끔·마감 예고 높음만·브리핑 이름·댓글 묶음 count·배정 확인/오늘·404/400/403·처리된 알림 푸시 건너뜀·검토 승인/수정 요청·연장 승인·멘션 답글) · comment-notify 제목 "새 댓글 3개" · E2E '알림 바로 처리'.
+- 로컬 확인: 운영에서 직원 계정 알림 센터 → 배정 알림에 [확인][오늘 할 일에 넣기] → 누르면 "…함 ✓". 설정 › 알림 › 조용한 시간 기본 22:00~07:00 표시. 밤 10시 이후 푸시가 아침 7시에 오는지(배포 뒤 첫날).
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md
