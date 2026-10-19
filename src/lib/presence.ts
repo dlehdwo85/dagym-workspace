@@ -9,8 +9,8 @@ import { tenantOf, type SessionUser } from './types';
  * 같은 회사 사람에게만, 상태와 끝나는 시각만 돌려준다(일정 제목·사유·장소는 주지 않음).
  * 반복 일정의 회차는 아직 보지 않는다(연차·출장은 보통 반복이 아님).
  */
-export type Presence = { s: 'leave' | 'trip' | 'out'; label: string; until: string };
-const RANK = { leave: 3, trip: 2, out: 1 } as const;
+export type Presence = { s: 'leave' | 'trip' | 'out' | 'before' | 'done'; label: string; until: string };
+const RANK = { leave: 3, trip: 2, out: 1, before: 0, done: 0 } as const;
 
 export async function presenceMap(u: SessionUser, now = new Date(), sql: Sql = db()): Promise<Record<string, Presence>> {
   const rows = await sql<{ user_id: string; kind: string; all_day: boolean; end_at: Date; has_loc: boolean }[]>`
@@ -39,5 +39,10 @@ export async function presenceMap(u: SessionUser, now = new Date(), sql: Sql = d
     const cur = out[r.user_id];
     if (!cur || RANK[s] > RANK[cur.s] || (RANK[s] === RANK[cur.s] && p.until > cur.until)) out[r.user_id] = p;
   }
+  // V30 ③ 출퇴근(기능을 쓰는 회사만): 다른 상태가 없을 때 출근 전(빈 점)·퇴근(회색 빈 점) — 오늘 자정까지
+  const { clockStates } = await import('./attendance');
+  const clocks = await clockStates(sql, tenantOf(u)).catch(() => ({} as Record<string, 'before' | 'done'>));
+  const midnight = new Date(new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).setHours(24, 0, 0, 0) - (new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getTime() - now.getTime())).toISOString();
+  for (const [id, st] of Object.entries(clocks)) if (!out[id]) out[id] = { s: st, label: st === 'before' ? '출근 전' : '퇴근', until: midnight };
   return out;
 }

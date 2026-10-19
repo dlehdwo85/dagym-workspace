@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, Megaphone, MessageSquare, PlusCircle, Sparkles, Users, Activity as ActivityIcon } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
+import { ClockCard } from '@/components/ClockCard';
 import { useSession } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
 import { InlineAddTask } from '@/components/TaskQuick';
@@ -237,6 +238,7 @@ export default function Dashboard() {
           <button type="submit" className="shrink-0 rounded-input bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50" disabled={!aiQ.trim()}>요청</button>
         </form>
       )}
+      <ClockCard />
       <NoticeCard />
       {/* V14 8번: 우리 팀 오늘의 일정 (팀에 속해 있을 때만) */}
       {(myTeams.data?.teams.length ?? 0) > 0 && (

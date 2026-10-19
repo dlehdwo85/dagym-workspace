@@ -18,6 +18,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   { href: '/admin/mail', label: '메일 계정·명함', menu: 'mail_settings', sidebar: true },
   { href: '/admin/usage', label: '사용량·요금제', menu: 'usage', sidebar: true },
   { href: '/admin/ai-logs', label: 'AI 사용 내역', menu: 'ai_logs', sidebar: true },
+  { href: '/admin/attendance', label: '근태(출퇴근)', menu: 'attendance_admin', sidebar: true }, // V30 ③
 ];
 /** 주소에 해당하는 관리 화면(가장 긴 앞부분 일치) */
 export function adminPageFor(path: string): AdminPage | null {

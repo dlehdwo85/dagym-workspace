@@ -194,7 +194,7 @@ function loadBadges() {
 }
 export function refreshBadges() { badgeCache = null; badgeLoading = false; loadBadges(); }
 /** V35 2·V36 1 근무 상태(휴가·출장·외근·미팅) — 5분마다 새로 받음. 근무 중은 점 없음 */
-type Pres = { s: 'leave' | 'trip' | 'out'; label: string; until: string };
+type Pres = { s: 'leave' | 'trip' | 'out' | 'before' | 'done'; label: string; until: string };
 let presCache: Record<string, Pres> | null = null;
 let presAt = 0;
 let presLoading = false;
@@ -217,7 +217,7 @@ export function usePresence(id: string | null | undefined): Pres | null {
   const p = id ? presCache?.[id] ?? null : null;
   return p && new Date(p.until).getTime() > Date.now() ? p : null;
 }
-export const PRESENCE_DOT = { leave: 'bg-slate-400', trip: 'bg-sky-500', out: 'bg-sky-500' } as const;
+export const PRESENCE_DOT = { leave: 'bg-slate-400', trip: 'bg-sky-500', out: 'bg-sky-500', before: 'bg-white border border-slate-400', done: 'bg-slate-200 border border-slate-400' } as const; // V30 ③ 출근 전·퇴근은 빈 점
 function useBadge(id: string | null | undefined) {
   const [, force] = useState(0);
   useEffect(() => {

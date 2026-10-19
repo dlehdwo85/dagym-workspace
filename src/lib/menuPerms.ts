@@ -34,6 +34,8 @@ export const MENUS = {
   reassign_handoff: { label: '담당자가 다른 사람에게 넘기기(지시자 승인)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V21 메일·문자 보내기: 실제 발송([보내기])은 기본 대표만, 사용자 관리에서 사람별로 켬. 메일 계정·명함 설정은 대표·본사 관리자
   send_external: { label: '외부 발송(메일·문자 보내기)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  // V30 ③ 근태 관리(출퇴근표·현장·설정) — 조회 / 편집
+  attendance_admin: { label: '근태 관리(출퇴근표·현장)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'view', site_manager: 'view', staff: 'none' } },
   // V30 ② 공지 쓰기(읽기는 대상 모두)
   notices: { label: '공지 쓰기', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'none' } },
   mail_settings: { label: '메일 계정·명함 설정', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
