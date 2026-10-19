@@ -61,12 +61,12 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
   return (
     <div className="space-y-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm" data-testid="sales-lead-edit">
       <div className="grid gap-2 sm:grid-cols-3">
-        <Field label="단계"><select className={inputCls} value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} data-testid="lead-status">{data.stages.map((s: string) => <option key={s}>{s}</option>)}</select></Field>
-        <Field label="다음 연락일"><input type="date" className={inputCls} value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} data-testid="lead-next" /></Field>
-        {data.canAssign && <Field label="담당"><select className={inputCls} value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}><option value="">없음</option>{data.people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>}
+        <Field label="단계"><select className={inputCls} value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} aria-label="단계" data-testid="lead-status">{data.stages.map((s: string) => <option key={s}>{s}</option>)}</select></Field>
+        <Field label="다음 연락일"><input type="date" className={inputCls} value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} aria-label="다음 연락일" data-testid="lead-next" /></Field>
+        {data.canAssign && <Field label="담당"><select className={inputCls} value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })} aria-label="담당"><option value="">없음</option>{data.people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>}
       </div>
-      {needReason && <Field label={`${f.status} 사유(필수)`}><input className={inputCls} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} maxLength={500} data-testid="lead-reason" /></Field>}
-      <Field label="메모"><textarea className={inputCls} rows={2} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} maxLength={5000} /></Field>
+      {needReason && <Field label={`${f.status} 사유(필수)`}><input className={inputCls} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} maxLength={500} aria-label="사유" data-testid="lead-reason" /></Field>}
+      <Field label="메모"><textarea className={inputCls} rows={2} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} maxLength={5000} aria-label="메모" /></Field>
       <div className="flex justify-end"><Button size="sm" onClick={save} disabled={needReason && !f.reason.trim()} data-testid="lead-save">저장</Button></div>
       <div className="flex flex-wrap items-end gap-2 border-t border-blue-100 pt-2">
         <select className={cx(inputCls, 'h-8 w-24 py-1')} value={act.type} onChange={(e) => setAct({ ...act, type: e.target.value })} aria-label="상담 종류">{['전화', '방문', '미팅', '메일', '문자', '기타'].map((x) => <option key={x}>{x}</option>)}</select>
@@ -100,18 +100,36 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
 export function Leads({ initialId }: { initialId?: string }) {
   const [s, setS] = useState(''); const [status, setStatus] = useState(''); const [open, setOpen] = useState<string | null>(initialId ?? null);
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, status })}`, [s, status]);
-  async function newLead() { const name = prompt('새 리드(거래처) 이름'); if (!name?.trim()) return; try { const r = await api<{ id: string }>('/api/sales/leads', { body: { name: name.trim() } }); reload(); setOpen(r.id); } catch (e: any) { toast.error(e.message); } }
+  // 로컬 검수 10/19: prompt() 는 브라우저·자동화 환경에서 막힐 수 있어 입력 창으로
+  const [nl, setNl] = useState<{ name: string; region: string; contactName: string; phone: string } | null>(null);
+  async function newLead(e: React.FormEvent) {
+    e.preventDefault(); if (!nl?.name.trim()) return;
+    try { const r = await api<{ id: string }>('/api/sales/leads', { body: { name: nl.name.trim(), region: nl.region || undefined, contactName: nl.contactName || undefined, phone: nl.phone || undefined } }); setNl(null); reload(); setOpen(r.id); } catch (er: any) { toast.error(er.message); }
+  }
   if (error) return <ErrorBox error={error} retry={reload} />;
   const statuses = [...new Set((data?.leads ?? []).map((l: any) => String(l.status ?? '미정')))] as string[];
   return (
     <div className="space-y-3" data-testid="sales-leads">
-      <Head title="리드·거래처" meta={data}>{data?.readOnly === false && <Button size="sm" onClick={newLead} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} /><select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
+      <Head title="리드·거래처" meta={data}>{data?.readOnly === false && <Button size="sm" onClick={() => setNl({ name: '', region: '', contactName: '', phone: '' })} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} /><select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
       {!data ? <Skeleton rows={5} /> : (
         <div className="overflow-x-auto rounded-card border border-line bg-white shadow-card"><table className="w-full min-w-[720px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr><th className="p-2">이름</th><th className="p-2">단계</th><th className="p-2">우선</th><th className="p-2">시설</th><th className="p-2">지역</th><th className="p-2">담당</th><th className="p-2">다음 연락</th></tr></thead>
           <tbody>{data.leads.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={() => setOpen(l.id)} data-testid="sales-lead-row"><td className="p-2 font-medium">{l.name}</td><td className="p-2">{chip(l.status)}</td><td className="p-2 text-xs">{l.priority ?? ''}</td><td className="p-2 text-xs">{l.facility ?? ''}</td><td className="p-2 text-xs">{l.region ?? ''}</td><td className="p-2 text-xs">{l.owner ?? ''}</td><td className="p-2 text-xs tabular-nums">{l.next ?? ''}</td></tr>)}
             {!data.leads.length && <tr><td colSpan={7} className="p-6 text-center text-ink-3">리드가 없습니다</td></tr>}</tbody></table></div>
       )}
       {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
+      {nl && (
+        <Modal open onClose={() => setNl(null)} title="새 리드">
+          <form onSubmit={newLead} className="grid gap-3 text-sm" data-testid="lead-new-form">
+            <Field label="거래처(리드) 이름"><input className={inputCls} value={nl.name} onChange={(e) => setNl({ ...nl, name: e.target.value })} required maxLength={300} autoFocus aria-label="거래처 이름" data-testid="lead-new-name" /></Field>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="지역"><input className={inputCls} value={nl.region} onChange={(e) => setNl({ ...nl, region: e.target.value })} maxLength={50} aria-label="지역" /></Field>
+              <Field label="담당자(고객)"><input className={inputCls} value={nl.contactName} onChange={(e) => setNl({ ...nl, contactName: e.target.value })} maxLength={100} aria-label="고객 담당자" /></Field>
+              <Field label="연락처"><input className={inputCls} value={nl.phone} onChange={(e) => setNl({ ...nl, phone: e.target.value })} maxLength={40} inputMode="tel" aria-label="연락처" /></Field>
+            </div>
+            <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setNl(null)}>취소</Button><Button type="submit" disabled={!nl.name.trim()} data-testid="lead-new-save">만들기</Button></div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }

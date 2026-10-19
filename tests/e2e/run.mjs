@@ -951,7 +951,7 @@ await step('V32 4 마감 연장: 휴대폰 담당자 목록 마감 칩 → 연�
 await step('V38 3 음성 모드(운전 중): 메시지방 새 메시지 읽어 주기·말로 보내기("보내" 확인·"취소")·AI 비서 말로 묻고 답 읽어 주기', () => voiceMode({ browser, desk, ctx, sql, BASE, FAKE }));
 await step('로컬 검수 10/17: 홈 최근 활동 멘션 @이름 · 월 보기 요일 머리 · 휴대폰 일정 시트 닫기 버튼 화면 안 · 휴대폰 업무 둘째 줄 한 줄', () => verify1017({ owner, staff, ctx, sql, BASE }));
 await step('V37 8 미팅 일정: 업무 상세 [미팅 일정 만들기] → 목록 📍장소·시간 칩 · 등록 창 "방문" → 미팅 일정 제안 → 연결 일정', () => meeting({ owner, ctx, sql, BASE }));
-await step('V41 단계 1 공간: 영업 켜기 → PC 공간 카드로 영업(파란 강조)·Ctrl+1/2·뒤로가기 → 휴대폰 프로필 시트 전환 → 미배정 직원 카드 없음·주소 404', () => spaces({ browser, desk, owner, staff, BASE }));
+await step('V41 단계 1 공간: 영업 켜기 → PC 공간 카드로 영업(파란 강조)·Ctrl+1/2·뒤로가기 → 휴대폰 프로필 시트 전환 → 미배정 직원 카드 없음·주소 404', () => spaces({ browser, desk, owner, staff, BASE, sql }));
 await step('V41 4-2 마케팅: 개요 카드 → 새 콘텐츠 → 시안 없으면 승인 거절 → 수정 요청(이유) → 캘린더 칩 → 전화 문의 → 영업 리드(업무)', () => marketing({ owner, BASE, sql }));
 await step('홈 오늘의 일정: 오늘 일정도 함께(시간순)', () => homeTodayEvents({ owner, ctx, BASE }));
 await step('업무 등록 창 AI 비서: 편하게 적고 [AI로 채우기] → 업무명·담당·마감·설명·체크리스트 채움 → 저장', () => quickAi({ owner, ctx, sql, BASE, FAKE }));
@@ -1091,7 +1091,7 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   // 정렬·열 머리·내가 지시한 업무
   await owner.getByTestId('sort-by').selectOption('due');
   assert.equal(await mine.getByTestId('drag-handle').count(), 0, '직접 순서가 아니면 손잡이 없음');
-  await owner.getByTestId('list-header').getByRole('button', { name: /우선순위/ }).click();
+  await owner.getByTestId('group-col-header').first().getByRole('button', { name: /우선순위/ }).click();
   assert.equal(await owner.getByTestId('sort-by').inputValue(), 'priority');
   await owner.getByTestId('sort-by').selectOption('manual');
   await owner.getByRole('button', { name: '내가 지시한 업무' }).click();

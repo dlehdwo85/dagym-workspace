@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api, useApi } from '@/components/client';
@@ -15,31 +15,57 @@ const n0 = (v: number) => Math.round(v).toLocaleString('ko-KR');
 const won = (v: number, cur = 'KRW') => (cur === 'KRW' ? `${n0(v)}원` : `${v.toLocaleString('ko-KR', { maximumFractionDigits: 2 })} ${cur}`);
 const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(2)}%` : '—');
 
+const NAVER_API_PAGE = 'https://manage.searchad.naver.com/';
+/** 3단계 안내 그림(실제 화면 모양을 단순화한 그림 — 실제 캡처로 바꿀 자리: public/guide/naver-ads-{1,2,3}.png) */
+function Shot({ step, children }: { step: number; children: React.ReactNode }) {
+  return <div className="rounded-input border border-line bg-slate-50 p-2 text-[11px] text-ink-2" aria-hidden data-testid={`naver-shot-${step}`}>{children}</div>;
+}
 function NaverForm({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const brands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
   const [f, setF] = useState({ label: '', customerId: '', apiKey: '', secretKey: '', brandId: '' });
   const [busy, setBusy] = useState(false);
-  async function save(e: React.FormEvent) {
-    e.preventDefault(); setBusy(true);
-    try { await api('/api/marketing/ads/accounts', { body: { ...f, brandId: f.brandId || null } }); toast.ok('연결했습니다 — 최근 7일 성과를 불러왔습니다'); onDone(); onClose(); }
-    catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+  const [err, setErr] = useState('');
+  const tried = useRef('');
+  async function save(e?: React.FormEvent) {
+    e?.preventDefault(); setBusy(true); setErr('');
+    tried.current = `${f.customerId}|${f.apiKey}|${f.secretKey}`;
+    try { await api('/api/marketing/ads/accounts', { body: { ...f, label: f.label.trim() || '네이버 검색광고', brandId: f.brandId || null } }); toast.ok('확인했습니다 — 연결하고 최근 7일 성과를 불러왔습니다'); onDone(); onClose(); }
+    catch (er: any) { setErr(er.message); } finally { setBusy(false); }
   }
+  // 대표(10/19): 세 값을 붙여 넣으면 바로 검증(같은 값은 한 번만 시도)
+  useEffect(() => {
+    const key = `${f.customerId}|${f.apiKey}|${f.secretKey}`;
+    if (busy || !/^\d{4,}$/.test(f.customerId) || f.apiKey.length < 10 || f.secretKey.length < 10 || tried.current === key) return;
+    const t = setTimeout(() => save(), 500);
+    return () => clearTimeout(t);
+  }, [f.customerId, f.apiKey, f.secretKey]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Modal open onClose={onClose} title="네이버 검색광고 연결">
       <form onSubmit={save} className="grid gap-3 text-sm" data-testid="naver-form">
-        <p className="text-xs text-ink-2">네이버 광고 시스템 › 도구 › API 사용 관리에서 발급한 값을 넣어 주세요. 비밀키는 암호화해 보관하고 다시 보여 주지 않습니다. 성과 <b>읽기</b>만 하며 광고를 바꾸지 않습니다.</p>
-        <Field label="이름(예: 본점 검색광고)"><input className={inputCls} value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} required maxLength={60} data-testid="naver-label" /></Field>
-        <Field label="CUSTOMER_ID"><input className={inputCls} value={f.customerId} onChange={(e) => setF({ ...f, customerId: e.target.value.trim() })} required inputMode="numeric" data-testid="naver-cid" /></Field>
-        <Field label="액세스 라이선스"><input className={inputCls} value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} required autoComplete="off" data-testid="naver-key" /></Field>
-        <Field label="비밀키"><input type="password" className={inputCls} value={f.secretKey} onChange={(e) => setF({ ...f, secretKey: e.target.value })} required autoComplete="new-password" data-testid="naver-secret" /></Field>
-        <Field label="브랜드(선택)"><select className={inputCls} value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value })}><option value="">(없음)</option>{(brands.data?.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
-        <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy} data-testid="naver-save">{busy ? '확인 중…' : '연결 확인 후 저장'}</Button></div>
+        <ol className="grid gap-2 text-xs sm:grid-cols-3" data-testid="naver-steps">
+          <li className="space-y-1"><b>1. 광고 관리 화면 열기</b><Shot step={1}><span className="font-semibold text-[#03C75A]">NAVER</span> 검색광고 · 로그인 후 오른쪽 위 <b>도구</b></Shot></li>
+          <li className="space-y-1"><b>2. API 사용 관리</b><Shot step={2}>도구 ▾ › <b className="text-ink">API 사용 관리</b> › [네이버 검색광고 API 서비스 신청]</Shot></li>
+          <li className="space-y-1"><b>3. 세 값 복사</b><Shot step={3}>CUSTOMER_ID · 액세스 라이선스 · 비밀키(보기) → 아래 칸에 붙여 넣기</Shot></li>
+        </ol>
+        <a href={NAVER_API_PAGE} target="_blank" rel="noopener" className="inline-flex h-9 items-center justify-center rounded-input border border-[#03C75A] px-3 text-sm font-medium text-[#03892f] hover:bg-emerald-50" data-testid="naver-open-api">네이버 광고 API 페이지 열기 ↗</a>
+        <Field label="CUSTOMER_ID"><input className={inputCls} value={f.customerId} onChange={(e) => setF({ ...f, customerId: e.target.value.replace(/\D/g, '') })} required inputMode="numeric" data-testid="naver-cid" /></Field>
+        <Field label="액세스 라이선스"><input className={inputCls} value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value.trim() })} required autoComplete="off" data-testid="naver-key" /></Field>
+        <Field label="비밀키"><input type="password" className={inputCls} value={f.secretKey} onChange={(e) => setF({ ...f, secretKey: e.target.value.trim() })} required autoComplete="new-password" data-testid="naver-secret" /></Field>
+        {busy && <p className="text-xs text-ink-2" role="status">네이버에 확인하는 중…</p>}
+        {err && <p className="rounded-input bg-red-50 px-3 py-2 text-xs text-red-800" role="alert" data-testid="naver-error">{err}</p>}
+        <details className="text-xs"><summary className="cursor-pointer text-ink-2">이름·브랜드(선택)</summary>
+          <div className="mt-2 grid gap-2">
+            <Field label="이름(예: 본점 검색광고)"><input className={inputCls} value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} maxLength={60} data-testid="naver-label" /></Field>
+            <Field label="브랜드"><select className={inputCls} value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value })}><option value="">(없음)</option>{(brands.data?.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
+          </div></details>
+        <p className="text-[11px] text-ink-3">비밀키는 암호화해 보관하고 다시 보여 주지 않습니다. 성과 <b>읽기</b>만 하며 광고를 바꾸지 않습니다.</p>
+        <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy} data-testid="naver-save">{busy ? '확인 중…' : '확인 후 연결'}</Button></div>
       </form>
     </Modal>
   );
 }
 
-const connectMsg = (sp: URLSearchParams) => (sp.get('connected') ? `${sp.get('connected') === 'meta' ? 'Meta' : 'Google Ads'} 광고 계정 ${sp.get('count') ?? ''}개를 연결했습니다` : sp.get('error') ? `연결 실패: ${sp.get('error')}` : null);
+const connectMsg = (sp: URLSearchParams) => (sp.get('published') ? `인스타그램 ${sp.get('ig') ?? 0}개·페이스북 페이지 ${sp.get('pages') ?? 0}개를 연결했습니다${Number(sp.get('warn')) ? ' — 아래 확인할 항목을 봐 주세요' : ''}` : sp.get('connected') ? `${sp.get('connected') === 'meta' ? 'Meta' : 'Google Ads'} 광고 계정 ${sp.get('count') ?? ''}개를 연결했습니다` : sp.get('error') ? `연결 실패: ${sp.get('error')}` : null);
 
 /** V41 4-2 광고 성과(읽기 전용) — 회사별로 직접 연결한 네이버·Google·Meta 광고 계정 */
 export function Ads() {
@@ -92,15 +118,12 @@ export function Connections() {
   async function remove(a: Acc) { if (!confirm(`${a.label} 연결을 끊을까요? 모은 성과도 함께 지워집니다.`)) return; try { await api(`/api/marketing/ads/accounts/${a.id}`, { method: 'DELETE' }); reload(); } catch (e: any) { toast.error(e.message); } }
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={5} />;
-  const CHANNELS: [string, string, string][] = [['인스타그램', '준비 중', '게시 연동 방식(통합 게시 API / Meta 직접) 결정 후 연결 — 그 전에는 승인 후 직접 올리고 [게시 확인]'],
-    ['페이스북 페이지', '준비 중', '인스타그램과 같은 방식으로 연결 예정'], ['유튜브', '준비 중', '업로드 연동 결정 후 연결'],
-    ['네이버 블로그', '게시 도우미', '공식 쓰기 API 가 없어 승인된 글 상세의 게시 도우미(복사·사진·글쓰기 열기)로 직접 발행']];
   return (
     <div className="space-y-4" data-testid="mkt-connections">
       <h1 className="text-xl font-bold" style={{ color: C }}>연결 계정</h1>
       {msg && <p className={cx('rounded-input px-3 py-2 text-sm', sp.get('error') ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800')} role="status">{msg}</p>}
       <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ads-accounts">
-        <div className="mb-2 flex items-center gap-2"><h2 className="text-sm font-semibold">광고 계정</h2>{data.canEdit && !!data.accounts.length && <Button size="sm" variant="secondary" className="ml-auto" onClick={sync} disabled={busy} data-testid="ads-sync">{busy ? '불러오는 중…' : '다시 불러오기'}</Button>}</div>
+        <div className="mb-2 flex items-center gap-2"><h2 className="text-sm font-semibold">광고 계정(성과 읽기)</h2>{data.canEdit && !!data.accounts.length && <Button size="sm" variant="secondary" className="ml-auto" onClick={sync} disabled={busy} data-testid="ads-sync">{busy ? '불러오는 중…' : '다시 불러오기'}</Button>}</div>
         <ul className="divide-y divide-line text-sm">{data.accounts.map((a) => (
           <li key={a.id} className="flex flex-wrap items-center gap-2 py-2" data-testid="ads-account"><span className="size-2 rounded-full" style={{ background: P_COLOR[a.provider] }} /><span className="font-medium">{a.label}</span>
             <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', a.status === 'error' ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800')}>{a.status === 'error' ? '읽기 실패' : '연결됨'}</span>
@@ -118,13 +141,7 @@ export function Connections() {
         ) : <p className="mt-2 text-xs text-ink-3">광고 계정 연결은 관리자가 합니다.</p>}
         <p className="mt-2 text-[11px] text-ink-3">성과는 각 광고 플랫폼에서 하루 한 번 읽기만 합니다(최근 7일을 다시 읽어 늦게 잡힌 전환까지 반영). 예산·입찰은 바꾸지 않습니다.</p>
       </section>
-      <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="publish-channels">
-        <h2 className="text-sm font-semibold">게시 채널</h2>
-        <ul className="mt-2 divide-y divide-line text-sm">{CHANNELS.map(([name, st, note]) => (
-          <li key={name} className="flex flex-wrap items-center gap-2 py-2"><span className="font-medium">{name}</span>
-            <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', st === '게시 도우미' ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-ink-2')}>{st}</span>
-            <span className="w-full text-xs text-ink-2">{note}</span></li>))}</ul>
-      </section>
+      <PublishChannels />
       {data.callbacks && (
         <details className="rounded-card border border-line bg-white p-3 text-xs text-ink-2 shadow-card" data-testid="ads-callbacks"><summary className="cursor-pointer font-medium">관리자: Google·Meta 콘솔에 등록할 콜백 주소</summary>
           <ul className="mt-1 space-y-0.5">{(['google', 'meta'] as const).map((k) => <li key={k}><span className="inline-block w-14">{k === 'google' ? 'Google' : 'Meta'}</span><code className="select-all break-all rounded bg-slate-100 px-1">{data.callbacks![k]}</code></li>)}</ul>
@@ -132,5 +149,75 @@ export function Connections() {
       )}
       {naver && <NaverForm onClose={() => setNaver(false)} onDone={reload} />}
     </div>
+  );
+}
+
+type Ch = { key: string; label: string; note: string; kind: string; enabled: boolean; connectable: boolean; ready: boolean; mode: 'helper' | 'auto' | 'later';
+  accounts: { id: string; provider: string; label: string; status: string; lastError: string | null; warnings: string[] }[] };
+type ChData = { canEdit: boolean; channels: Ch[]; tech: { metaCallback: string; metaDeletion: string; metaScopes: string[]; metaReady: boolean; metaLive: boolean } | null };
+const CONNECT_URL: Record<string, string> = { meta: '/api/marketing/publish/connect/meta' };
+
+/**
+ * ⑤-2 게시 채널(대표 결정 10/19: 모든 채널 직접 연동, 구독형 미사용). 채널마다 켜기/끄기 + [연결] 하나.
+ * 심사 통과 전에는 연결해도 '게시 도우미'로 운영(사람이 올리고 [게시 확인]). 기술 단계는 플랫폼 관리자에게만.
+ */
+function PublishChannels() {
+  const { data: raw, error, reload } = useApi<ChData>('/api/marketing/publish/channels');
+  const [over, setOver] = useState<Record<string, boolean>>({}); // 켜기/끄기는 바로 반영(실패하면 되돌림)
+  if (error) return <ErrorBox error={error} retry={reload} />;
+  if (!raw) return <Skeleton rows={4} />;
+  const data = { ...raw, channels: raw.channels.map((c) => (c.key in over ? { ...c, enabled: over[c.key] } : c)) };
+  async function toggle(c: Ch) {
+    const next = !c.enabled; setOver((o) => ({ ...o, [c.key]: next }));
+    try { await api('/api/marketing/publish/channels', { method: 'PUT', body: { channel: c.key, enabled: next } }); }
+    catch (e: any) { setOver((o) => ({ ...o, [c.key]: !next })); toast.error(e.message); }
+  }
+  async function remove(id: string, label: string) { if (!confirm(`${label} 연결을 끊을까요? 저장된 권한(토큰)을 바로 지웁니다.`)) return; try { await api(`/api/marketing/publish/accounts/${id}`, { method: 'DELETE' }); reload(); } catch (e: any) { toast.error(e.message); } }
+  const metaNone = !data.channels.some((c) => c.kind === 'meta' && c.accounts.length);
+  return (
+    <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="publish-channels">
+      <h2 className="text-sm font-semibold">게시 채널</h2>
+      <p className="mt-0.5 text-[11px] text-ink-3">쓰는 채널만 켜 두세요. 지금은 모든 채널을 <b>게시 도우미</b>(글 복사·사진 내려받기·앱 열기 → 올린 뒤 주소 붙여 [게시 확인])로 올립니다. 연결해 두면 플랫폼 심사가 끝나는 대로 워크인에서 바로 게시됩니다.</p>
+      <ul className="mt-2 divide-y divide-line text-sm">{data.channels.map((c) => (
+        <li key={c.key} className={cx('py-2', !c.enabled && 'opacity-60')} data-testid="publish-channel" data-channel={c.key}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{c.label}</span>
+            <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', !c.enabled ? 'bg-slate-100 text-ink-3' : c.mode === 'auto' ? 'bg-violet-50 text-violet-800' : c.mode === 'later' ? 'bg-slate-100 text-ink-2' : 'bg-emerald-50 text-emerald-800')} data-testid="publish-channel-mode">
+              {!c.enabled ? '꺼짐' : c.mode === 'auto' ? '자동 게시' : c.mode === 'later' ? '준비 중' : '게시 도우미'}</span>
+            {c.accounts.length > 0 && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800">연결됨 {c.accounts.length}</span>}
+            <span className="ml-auto flex items-center gap-2">
+              {data.canEdit && c.enabled && c.connectable && (c.ready && CONNECT_URL[c.kind]
+                ? <a href={CONNECT_URL[c.kind]} className="inline-flex h-8 items-center rounded-input border border-line px-3 text-sm hover:bg-slate-50" data-testid={`publish-connect-${c.key}`}>{c.accounts.length ? '다시 연결' : '연결'}</a>
+                : <span className="inline-flex h-8 items-center rounded-input border border-dashed border-line px-3 text-xs text-ink-3" title="곧 열립니다 — 그동안은 게시 도우미로 올려 주세요" data-testid={`publish-connect-${c.key}`}>연결 곧 열림</span>)}
+              {data.canEdit && <label className="inline-flex cursor-pointer items-center gap-1 text-xs text-ink-2"><input type="checkbox" className="accent-violet-600" checked={c.enabled} onChange={() => toggle(c)} aria-label={`${c.label} 사용`} data-testid="publish-channel-toggle" />사용</label>}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-ink-3">{c.note}</p>
+          {c.accounts.map((a) => (
+            <div key={a.id} className="mt-1 rounded-input bg-slate-50 px-2 py-1 text-xs" data-testid="publish-account">
+              <div className="flex items-center gap-2"><span className="font-medium">{a.label}</span>{a.status === 'error' && <span className="text-red-700">{a.lastError}</span>}
+                {data.canEdit && <button type="button" className="ml-auto text-ink-3 underline hover:text-red-700" onClick={() => remove(a.id, a.label)}>끊기</button>}</div>
+              {a.warnings.map((w, k) => <p key={k} className="mt-0.5 text-amber-800" data-testid="publish-warning">확인 필요: {w}</p>)}
+            </div>))}
+        </li>))}</ul>
+      {data.canEdit && metaNone && (
+        <details className="mt-2 rounded-input border border-line p-2 text-xs text-ink-2" data-testid="meta-precheck"><summary className="cursor-pointer font-medium text-ink">인스타그램·페이스북 연결 전 확인할 것 3가지</summary>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+            <li>인스타그램이 <b>비즈니스</b> 또는 <b>크리에이터</b> 계정 — 인스타 앱 › 설정 › 계정 유형 및 도구</li>
+            <li>인스타그램이 <b>페이스북 페이지와 연결</b>됨 — 페이지 설정 › 연결된 계정 › Instagram</li>
+            <li>연결하는 사람이 그 페이지의 <b>관리자</b>(전체 권한)</li>
+          </ol>
+          <p className="mt-1 text-ink-3">연결한 뒤 안 된 항목이 있으면 그 항목만 이곳에 안내합니다.</p></details>
+      )}
+      {data.tech && (
+        <details className="mt-2 rounded-input bg-slate-50 p-2 text-[11px] text-ink-2" data-testid="publish-tech"><summary className="cursor-pointer font-medium">플랫폼 관리자: Meta 앱 설정 값</summary>
+          <ul className="mt-1 space-y-0.5">
+            <li>상태: 앱 ID {data.tech.metaReady ? '있음' : '없음(META_APP_ID/SECRET 넣으면 [연결] 열림)'} · 자동 게시 {data.tech.metaLive ? '켜짐' : '꺼짐(앱 심사 통과 후 META_PUBLISH_LIVE=1)'}</li>
+            <li>OAuth 리디렉션 URI <code className="select-all break-all rounded bg-white px-1">{data.tech.metaCallback}</code></li>
+            <li>데이터 삭제 콜백 <code className="select-all break-all rounded bg-white px-1">{data.tech.metaDeletion}</code></li>
+            <li>권한 {data.tech.metaScopes.join(', ')}</li>
+          </ul></details>
+      )}
+    </section>
   );
 }

@@ -359,7 +359,7 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
   return { ok: true, rescheduled: re.length };
 }
 
-export const ruleInput = z.object({ brandId: zUuid.nullable().optional(), channel: z.enum(['instagram', 'facebook', 'blog', 'youtube', 'naver_place', 'other']), kind: z.enum(['feed', 'blog', 'reels', 'video']),
+export const ruleInput = z.object({ brandId: zUuid.nullable().optional(), channel: z.enum(['instagram', 'facebook', 'threads', 'blog', 'youtube', 'naver_place', 'other']), kind: z.enum(['feed', 'blog', 'reels', 'video']),
   weekdays: z.array(nInt(0, 6)).min(1).max(7), postTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), topicHint: z.string().max(300).optional(), active: z.boolean().optional() });
 export async function createRule(u: SessionUser, i: z.infer<typeof ruleInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);

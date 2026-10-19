@@ -8,8 +8,8 @@ import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
 
 const C = '#7C3AED';
-export const CHANNELS: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
-const CH_COLOR: Record<string, string> = { instagram: '#DB2777', facebook: '#2563EB', blog: '#16A34A', youtube: '#DC2626', naver_place: '#059669', other: '#64748B' };
+export const CHANNELS: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
+const CH_COLOR: Record<string, string> = { instagram: '#DB2777', facebook: '#2563EB', threads: '#111827', blog: '#16A34A', youtube: '#DC2626', naver_place: '#059669', other: '#64748B' };
 const STATUS: Record<string, string> = { pending: '승인 대기', approved: '승인됨', changes: '수정 요청', hold: '보류', published: '게시됨', draft: '초안' };
 type Content = { id: string; title: string; channel: string; status: string; scheduled_at: string | null; current_version: number; approved_version: number | null; brand: string | null; body: string; media_count: number; created_by_name: string; deadline: string | null; published_url: string | null };
 
@@ -101,7 +101,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         {c.auto && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">품질 검사: {c.quality.issues.join(' · ')}</p>}
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' ? '사진 없음 — 블로그는 글만으로도 승인됩니다' : '시안 없음 — 승인 불가'}</span>}</div></div>
+          <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div></div>
         {data.canDecide && !['published', 'canceled'].includes(c.status) && (
           <div className="space-y-2 rounded-input border border-violet-200 p-3" data-testid="mkt-decide">
             <input className={inputCls} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="수정 요청·보류는 이유를 적어 주세요" aria-label="결정 메모" />

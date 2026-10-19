@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createHmac } from 'node:crypto';
-import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { BASE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
 const PORT = 3218;
 let srv, ctx, sql, fake, hits = [], gads403 = false;
@@ -23,6 +23,11 @@ before(async () => {
       if (path === '/stats') { const day = JSON.parse(u.searchParams.get('timeRange')).since; return send(200, { data: day === today ? [{ id: 'cmp-a', impCnt: 1000, clkCnt: 50, salesAmt: 25000, ccnt: 2 }] : [] }); }
     }
     if (u.pathname === '/graph/oauth/access_token') return send(200, { access_token: u.searchParams.get('grant_type') ? 'meta-long' : 'meta-short' });
+    if (u.pathname === '/graph/me') return send(200, { id: 'fb-user-77' });
+    if (u.pathname === '/graph/me/permissions') return send(200, { data: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'instagram_basic', 'instagram_content_publish', 'business_management'].map((permission) => ({ permission, status: 'granted' })) });
+    if (u.pathname === '/graph/me/accounts') return send(200, { data: [
+      { id: 'page-1', name: '다짐 본점', access_token: 'page-token-secret-1', tasks: ['MANAGE', 'CREATE_CONTENT'], instagram_business_account: { id: 'ig-1', username: 'dagym_main' } },
+      { id: 'page-2', name: '다짐 2호점', access_token: 'page-token-secret-2', tasks: ['ANALYZE'] }] });
     if (u.pathname === '/graph/me/adaccounts') return send(200, { data: [{ account_id: '998877', name: '우리 메타 광고' }] });
     if (u.pathname === '/graph/act_998877/insights') return send(200, { data: [{ date_start: today, campaign_id: '55', campaign_name: '가을 리드', impressions: '2000', clicks: '40', spend: '30000', account_currency: 'KRW', actions: [{ action_type: 'lead', value: '3' }, { action_type: 'link_click', value: '40' }] }] });
     if (u.pathname === '/goauth/token') return send(200, { access_token: 'g-access', refresh_token: 'g-refresh', expires_in: 3600 });
@@ -57,6 +62,9 @@ test('네이버 라이선스 연결·읽기·합계·권한', async () => {
   const ov = await ctx.staffA.client.ok('GET', '/api/marketing/ads?days=7');
   assert.deepEqual([ov.totals.impressions, ov.totals.clicks, ov.totals.cost, ov.totals.conversions], [1000, 50, 25000, 2]);
   assert.equal(ov.campaigns[0].campaign_name, '파워링크 본점'); assert.equal(ov.canEdit, false); assert.equal(ov.callbacks, null, '직원은 콜백 주소 없음');
+  await sql`update users set platform_admin = false where id = ${ctx.ownerId}`;
+  assert.equal((await ctx.owner.ok('GET', '/api/marketing/ads')).callbacks, null, '플랫폼 관리자가 아닌 회사 관리자에게는 콘솔 값 숨김');
+  await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
   assert.match((await ctx.owner.ok('GET', '/api/marketing/ads')).callbacks.google, /\/api\/marketing\/ads\/callback\/google$/);
   assert.ok(!JSON.stringify(ov).includes('naver-secret') && !JSON.stringify(ov).includes('naver-license'), '비밀값 미노출');
   // 다시 읽어도 덮어쓰기(중복 없음)
@@ -99,3 +107,47 @@ test('Meta·Google OAuth 연결 → 계정 등록·성과', async () => {
   await ctx.owner.ok('DELETE', `/api/marketing/ads/accounts/${meta.id}`);
   assert.equal((await sql`select count(*)::int n from mkt_ad_stats where account_id = ${meta.id}`)[0].n, 0);
 });
+
+test('게시 채널: 켜기/끄기·Meta [연결](페이지+인스타)·점검 안내·토큰 비노출·끊기·데이터 삭제 콜백', async () => {
+  const ch = await ctx.staffA.client.ok('GET', '/api/marketing/publish/channels');
+  assert.equal(ch.canEdit, false); assert.equal(ch.tech, null);
+  const ig0 = ch.channels.find((c) => c.key === 'instagram');
+  assert.deepEqual([ig0.enabled, ig0.mode, ig0.ready], [true, 'helper', true], '심사 전에는 도우미');
+  assert.equal(ch.channels.find((c) => c.key === 'threads').enabled, false);
+  assert.equal((await ctx.staffA.client.req('PUT', '/api/marketing/publish/channels', { channel: 'threads', enabled: true })).status, 403);
+  await ctx.owner.ok('PUT', '/api/marketing/publish/channels', { channel: 'threads', enabled: true });
+  assert.equal((await ctx.owner.ok('GET', '/api/marketing/publish/channels')).channels.find((c) => c.key === 'threads').enabled, true);
+  assert.equal((await ctx.staffA.client.get('/api/marketing/publish/connect/meta')).status, 403, '직원은 연결 못 함');
+  const go = new URL((await ctx.owner.get('/api/marketing/publish/connect/meta')).headers.get('location'));
+  assert.match(go.searchParams.get('scope'), /instagram_content_publish/);
+  assert.match(go.searchParams.get('redirect_uri'), /\/api\/marketing\/publish\/callback\/meta$/);
+  const cb = await ctx.owner.get(`/api/marketing/publish/callback/meta?code=p1&state=${go.searchParams.get('state')}`);
+  assert.match(cb.headers.get('location'), /published=meta&pages=2&ig=1&warn=2/);
+  const rows = await sql`select provider, external_id, token_enc, owner_ext_id, info from mkt_publish_accounts order by provider, external_id`;
+  assert.deepEqual(rows.map((r) => `${r.provider}:${r.external_id}`), ['meta_fb:page-1', 'meta_fb:page-2', 'meta_ig:ig-1']);
+  assert.ok(rows.every((r) => r.token_enc.startsWith('v1.') && !r.token_enc.includes('page-token')), '토큰 암호화');
+  await sql`update users set platform_admin = false where id = ${ctx.ownerId}`;
+  const ch2 = await ctx.owner.ok('GET', '/api/marketing/publish/channels');
+  assert.ok(!JSON.stringify(ch2).includes('page-token'), '토큰 비노출');
+  const fb = ch2.channels.find((c) => c.key === 'facebook');
+  const p2 = fb.accounts.find((a) => a.label === '다짐 2호점');
+  assert.equal(p2.warnings.length, 2, '관리자 아님 + 인스타 없음'); assert.match(p2.warnings.join(), /관리자/); assert.match(p2.warnings.join(), /비즈니스/);
+  assert.equal(fb.accounts.find((a) => a.label === '다짐 본점').warnings.length, 0);
+  assert.equal(ch2.channels.find((c) => c.key === 'instagram').accounts[0].label, '@dagym_main');
+  assert.equal(ch2.tech, null, '회사 관리자에게도 기술 값 숨김');
+  await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
+  assert.match((await ctx.owner.ok('GET', '/api/marketing/publish/channels')).tech.metaDeletion, /\/api\/marketing\/publish\/meta\/data-deletion$/);
+  // 끊기 = 토큰 삭제
+  await ctx.owner.ok('DELETE', `/api/marketing/publish/accounts/${p2.id}`);
+  assert.equal((await sql`select count(*)::int n from mkt_publish_accounts where external_id = 'page-2'`)[0].n, 0);
+  // Meta 데이터 삭제 콜백: 서명 틀리면 400, 맞으면 그 사용자 연결 전부 삭제
+  const b64 = (b) => Buffer.from(b).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const payload = b64(JSON.stringify({ algorithm: 'HMAC-SHA256', user_id: 'fb-user-77' }));
+  const post = (sr) => fetch(`${BASE}/api/marketing/publish/meta/data-deletion`, { method: 'POST', body: new URLSearchParams({ signed_request: sr }) });
+  assert.equal((await post(`${b64('bad')}.${payload}`)).status, 400);
+  const ok = await post(`${b64(createHmac('sha256', 'meta-secret').update(payload).digest())}.${payload}`);
+  assert.equal(ok.status, 200); const j = await ok.json();
+  assert.ok(j.confirmation_code && j.url.includes(j.confirmation_code));
+  assert.equal((await sql`select count(*)::int n from mkt_publish_accounts`)[0].n, 0);
+});
+

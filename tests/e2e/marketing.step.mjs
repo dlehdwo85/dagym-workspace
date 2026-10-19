@@ -54,10 +54,23 @@ export async function marketing({ owner, BASE, sql }) {
   assert.deepEqual(await owner.locator('aside').getByTestId('nav-group').allInnerTexts(), ['운영', '제작', '성과', '설정']);
   await owner.getByTestId('ads-accounts-link').getByRole('link', { name: /연결 계정/ }).click();
   await owner.getByTestId('mkt-connections').waitFor();
-  await owner.getByTestId('publish-channels').getByText('게시 도우미', { exact: true }).waitFor();
+  // ⑤-2(대표 10/19): 채널마다 사용·[연결] 하나, 심사 전에는 게시 도우미
+  const igRow = owner.getByTestId('publish-channel').and(owner.locator('[data-channel="instagram"]'));
+  await igRow.getByTestId('publish-channel-mode').filter({ hasText: '게시 도우미' }).waitFor();
+  await igRow.getByTestId('publish-connect-instagram').waitFor();
+  await owner.getByTestId('meta-precheck').waitFor();
+  // 대표(첫 설치 계정)는 플랫폼 관리자 → 콘솔 등록 값이 보임(고객 회사 관리자에게는 숨김 — API 시험)
   await owner.getByTestId('ads-callbacks').getByText(/\/api\/marketing\/ads\/callback\/meta/).waitFor({ state: 'attached' });
+  await owner.getByTestId('publish-tech').getByText(/\/api\/marketing\/publish\/meta\/data-deletion/).waitFor({ state: 'attached' });
+  const thRow = owner.getByTestId('publish-channel').and(owner.locator('[data-channel="threads"]'));
+  await thRow.getByTestId('publish-channel-mode').filter({ hasText: '꺼짐' }).waitFor();
+  await thRow.getByTestId('publish-channel-toggle').check();
+  await thRow.getByTestId('publish-channel-mode').filter({ hasText: '게시 도우미' }).waitFor();
+  await thRow.getByTestId('publish-channel-toggle').uncheck();
   await owner.getByTestId('ads-add-naver').click();
   await owner.getByTestId('naver-form').waitFor();
+  assert.equal(await owner.getByTestId('naver-steps').locator('li').count(), 3);
+  assert.equal(await owner.getByTestId('naver-open-api').getAttribute('target'), '_blank');
   await owner.keyboard.press('Escape');
   // V41 4-3 자동 제작: 사용량 카드 4·요금제 3·규칙 추가(화·목 10:00)
   await owner.goto(`${BASE}/s/marketing/automation`);

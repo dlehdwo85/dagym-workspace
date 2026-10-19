@@ -9,7 +9,7 @@ import { tenantOf, type SessionUser } from './types';
 import { zUuid } from './api';
 
 /** V41 단계 4-2 마케팅 공간 핵심: 콘텐츠·버전·승인함(버전 단위, 승인·수정 요청·보류)·콘텐츠 캘린더·전화 문의 → 영업 업무 */
-export const CHANNELS = { instagram: '인스타그램', facebook: '페이스북', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' } as const;
+export const CHANNELS = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' } as const;
 const zChannel = z.enum(Object.keys(CHANNELS) as [keyof typeof CHANNELS, ...(keyof typeof CHANNELS)[]]);
 const uuidOr404 = (id: string) => { if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('찾을 수 없습니다'); };
 const seoulDate = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
@@ -128,7 +128,7 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (i.version !== c.current_version) throw new HttpError(409, 'stale_version', `최신 버전(v${c.current_version})이 아닙니다 — 새로 고쳐 보고 결정해 주세요`);
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
-    if (i.decision === 'approve' && c.channel !== 'blog') { // 블로그는 글만으로도 승인(사진은 선택)
+    if (i.decision === 'approve' && c.channel !== 'blog' && c.channel !== 'threads') { // 블로그·스레드는 글만으로도 승인(사진은 선택)
       const [v] = await tx<{ n: number }[]>`select cardinality(media_ids) as n from mkt_versions where content_id = ${id} and version = ${i.version}`;
       if (!v?.n) throw badRequest('시안 이미지가 없어 승인할 수 없습니다 — 시안을 붙인 뒤 다시');
     }
@@ -204,7 +204,7 @@ export async function convertCall(u: SessionUser, id: string, i: z.infer<typeof 
 
 // ---------------- V41 4-2 마케팅 AI 비서: 캡션·해시태그 초안(게시는 승인 대기를 거쳐 사람이) ----------------
 export const captionInput = z.object({ channel: zChannel, topic: z.string().trim().min(2, '무엇을 알릴지 적어 주세요').max(1000), brandId: zUuid.nullable().optional(), tone: z.string().max(40).optional() });
-const CAPTION_LEN: Record<string, string> = { instagram: '3~6줄, 첫 줄은 눈길을 끄는 한 문장', facebook: '3~5문장', blog: '제목 1줄 + 본문 8~12문장', youtube: '제목 1줄 + 설명 3~5줄', naver_place: '소식 2~4문장', other: '3~5문장' };
+const CAPTION_LEN: Record<string, string> = { instagram: '3~6줄, 첫 줄은 눈길을 끄는 한 문장', facebook: '3~5문장', threads: '1~4줄(500자 이내), 대화하듯', blog: '제목 1줄 + 본문 8~12문장', youtube: '제목 1줄 + 설명 3~5줄', naver_place: '소식 2~4문장', other: '3~5문장' };
 export async function captionAssist(u: SessionUser, i: z.infer<typeof captionInput>) {
   await assertSpace(u, 'marketing');
   const { requireMenu } = await import('./menuPerms');

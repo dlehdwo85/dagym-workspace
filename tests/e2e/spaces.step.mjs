@@ -1,7 +1,7 @@
 // V41 단계 1 공간 틀: 관리 › 사용자 › 공간에서 영업 켜기 → PC 공간 카드 드롭다운으로 영업(파란 강조) → Ctrl+1 로 업무 →
 // 휴대폰 프로필 시트 공간 전환 → 뒤로가기 = 업무 · 영업 미배정 직원은 공간 카드 없음·주소 404 → 끄기
 import assert from 'node:assert/strict';
-export async function spaces({ browser, desk, owner, staff, BASE }) {
+export async function spaces({ browser, desk, owner, staff, BASE, sql }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
@@ -53,6 +53,20 @@ export async function spaces({ browser, desk, owner, staff, BASE }) {
   assert.equal(await staff.getByTestId('mobile-space-chip').count(), 0);
   const r = await staff.goto(`${BASE}/s/sales`);
   assert.equal(r.status(), 404);
+  // 영업 전환 T-5(로컬 검수 10/19): 쓰기 열린 회사 — [새 리드] 입력 창 → 상세 수정(다음 연락일 있는 리드로 현황·파이프라인·지역 정상)
+  await sql`insert into sales_cutover (tenant, ok, writes_open) values ('default', true, true) on conflict (tenant) do update set ok = true, writes_open = true`;
+  await owner.goto(`${BASE}/s/sales/leads`);
+  await owner.getByTestId('lead-new').click();
+  await owner.getByTestId('lead-new-name').fill('E2E 새 거래처');
+  await owner.getByTestId('lead-new-save').click();
+  await owner.getByTestId('sales-lead-edit').waitFor();
+  await owner.getByTestId('lead-next').fill('2026-12-01');
+  await owner.getByTestId('lead-save').click();
+  await owner.getByText('저장했습니다').waitFor();
+  await owner.keyboard.press('Escape');
+  await owner.getByTestId('sales-lead-row').filter({ hasText: 'E2E 새 거래처' }).waitFor();
+  for (const [path, id] of [['/s/sales', 'space-home-sales'], ['/s/sales/pipeline', 'sales-pipeline']]) { await owner.goto(`${BASE}${path}`); await owner.getByTestId(id).waitFor(); }
+  await sql`update sales_cutover set writes_open = false where tenant = 'default'`;
   // 원래대로(다른 시험에 영향 없게): 업무 공간으로·영업 끄기
   await owner.keyboard.press('Control+1').catch(() => {});
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
