@@ -63,6 +63,18 @@ const notice = (r: any) => ({ id: r.__id, title: pick(r, 'title', 'notice_title'
   keywords: (() => { const k = pick(r, 'matched_keywords', 'keywords', 'keyword_hits'); return Array.isArray(k) ? k.join(', ') : k; })(), phone: pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone'),
   todayNew: firstSeen(r) === new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()) });
 const SOURCE_LABEL: Record<string, string> = { kapt: 'K-apt', 'k-apt': 'K-apt', g2b: '나라장터', nara: '나라장터', g2b_pre: '나라장터 사전규격', nuri: '누리장터', lh: 'LH', lh_pre: 'LH 사전규격', defense: '국방', d2b: '국방', onbid: '온비드 임대', vendor: '협력사 모집' };
+/** 진행 중 입찰(SALES_SCREEN_INVENTORY 2-5·143행) — 현황 숫자와 입찰 '진행 중' 탭이 같은 기준: 관련 공고 · 마감·취소·낙찰·유찰 아님 · KST 마감일 ≥ 오늘(마감일 없으면 진행으로)
+ * · 사전규격(입찰 예정)은 빼고 · 작업 상태 미참여·대상아님은 뺀다. 원본 상태 문구가 '공고중'만이 아니어서(운영 10/19 진행 중 0건) 닫힌 상태만 거른다 */
+const CLOSED_NOTICE = /마감|종료|취소|낙찰|유찰|개찰완료|closed|cancel|award|expired|done/i;
+const SKIP_WORK = /미참여|대상아님|not[_\s-]?target|skip/i;
+export function isOpenBid(n: { related?: boolean; status?: unknown; close?: string | null; source?: unknown }, work: unknown, td: string) {
+  if (!n.related) return false;
+  if (n.status && CLOSED_NOTICE.test(String(n.status))) return false;
+  if (n.close && n.close < td) return false;
+  if (/pre|사전/i.test(String(n.source ?? ''))) return false;
+  if (work && SKIP_WORK.test(String(work))) return false;
+  return true;
+}
 /** 사업 배지: 다짐(보라)·하이링크(파랑)·둘 다(진파랑) — 원본 칸(business_line·related_business·target_business 등)에서 */
 function businessOf(r: any) {
   const v = JSON.stringify([pick(r, 'business', 'business_line', 'related_business', 'target_business', 'brand', 'business_categories')]).toLowerCase();
@@ -87,13 +99,16 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   if (view === 'summary') {
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await rows(t, 'opportunity_work');
-    const N = (await rows('global', 'procurement_notices', 20000)).map(notice).filter((n) => n.related);
+    const NR = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true');
+    const N = NR.map(notice);
+    const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
     const live = L.filter((l) => !CLOSED.has(String(l.status))); // 종결(계약완료·보류·실패) 제외
     const due = live.filter((l) => l.next && l.next >= today() && l.next <= plus(7)).sort((a, b) => String(a.next).localeCompare(String(b.next)));
     const overdue = live.filter((l) => l.next && l.next < today()).sort((a, b) => String(b.next).localeCompare(String(a.next)));
     const cnt = L.reduce((m: Record<string, number>, l) => { const k = String(l.status ?? '미정'); m[k] = (m[k] ?? 0) + 1; return m; }, {});
     const statuses = [...STAGES.filter((k) => cnt[k]), ...Object.keys(cnt).filter((k) => !STAGES.includes(k))].map((k) => [k, cnt[k]]);
     return { ...meta, bidsOn, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
+      bidsOpen: NR.filter((r) => isOpenBid(notice(r), workOf.get(String(r.id ?? r.__id)), today())).length,
       relatedNotices: N.length, newNotices7d: N.filter((n) => n.noticeDate && n.noticeDate >= plus(-7) && n.noticeDate <= today()).length /* 로컬 10/19: 원본 초기 적재(10/13 3,343건) 때문에 first_seen 7일은 부풀려짐 → 공고일 기준 */ }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses,
       // 대표(10/19): 첫 화면 맨 위 '오늘' — 새 공고·새 영업 DB(신규단지·시설·협력사)·오늘 연락할 리드·오늘 마감 입찰
       today: await (async () => { const td = today();
@@ -146,7 +161,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     let N = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true' || byNotice.has(String(r.id ?? r.__id)));
     const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id);
       return { ...notice(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment') }; })
-      .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || ((!n.close || n.close >= today()) && (!n.status || /공고중|정정/.test(String(n.status)))))
+      .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
         && (tab !== 'today' || n.posted === today()) && (tab !== 'closing' || n.close === today()))
       .sort((a, b) => tab === 'open' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
     return { ...meta, tab, total: N.length, items };

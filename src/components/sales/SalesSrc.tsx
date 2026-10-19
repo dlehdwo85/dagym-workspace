@@ -42,7 +42,7 @@ export function SalesHome() {
   const k = data.kpi;
   const bids = data.bidsOn !== false; // 입찰·공고 끈 회사는 입찰 카드 숨김
   const cards: [string, number, string][] = [['리드', k.leads, '/s/sales/leads'], ['7일 안 연락', k.dueSoon, '/s/sales/leads'], ['연락 지남', k.overdue, '/s/sales/leads'],
-    ...(bids ? [['진행 중 입찰', k.bidsWorking, '/s/sales/bids?tab=working'], ['관련 공고', k.relatedNotices, '/s/sales/bids'], ['최근 7일 공고(공고일)', k.newNotices7d, '/s/sales/bids?tab=all']] as [string, number, string][] : [])];
+    ...(bids ? [['진행 중 입찰', k.bidsOpen ?? k.bidsWorking, '/s/sales/bids?tab=open'], ['작업 중 입찰', k.bidsWorking, '/s/sales/bids?tab=working'], ['관련 공고', k.relatedNotices, '/s/sales/bids'], ['최근 7일 공고(공고일)', k.newNotices7d, '/s/sales/bids?tab=all']] as [string, number, string][] : [])];
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="space-home-sales">
       <Head title="워크인 · 영업" meta={data} />
@@ -262,27 +262,30 @@ function BidCard({ n }: { n: any }) {
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', st[1])} data-testid="bid-status">{st[0]}</span>
         {biz && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold text-white', biz[1])} data-testid="bid-business">{biz[0]}</span>}
-        {cat && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', CAT_CLS[String(cat)] ?? 'bg-slate-100 text-ink-2')}>{String(cat)}</span>}
-        {n.sourceLabel && <span className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-2">{String(n.sourceLabel)}</span>}
+        {cat && <span className={cx('hidden rounded-full px-2 py-0.5 text-[11px] font-medium md:inline', CAT_CLS[String(cat)] ?? 'bg-slate-100 text-ink-2')}>{String(cat)}</span>}
+        {n.sourceLabel && <span className="hidden rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-2 md:inline">{String(n.sourceLabel)}</span>}
         {n.work && chip(n.work)}
-        {n.fit !== null && n.fit !== undefined && <span className="text-[11px] text-ink-3">적합 {String(n.fit)}</span>}
+        {n.fit !== null && n.fit !== undefined && <span className="hidden text-[11px] text-ink-3 md:inline">적합 {String(n.fit)}</span>}
       </div>
       <div className="mt-1">{n.complex && <b className="mr-1">{n.complex}</b>}{n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">{n.title}</a> : <span className="font-medium">{n.title}</span>}</div>
-      <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.region, n.households && `${n.households}세대`, n.industry].filter(Boolean).join(' · ') || '기관·지역 미확인'}</div>
-      {(n.amount || n.winner) && <div className="mt-0.5 text-xs text-ink-2">{n.amount && <>금액 {Number(n.amount) ? `${Number(n.amount).toLocaleString('ko-KR')}원` : String(n.amount)}</>}{n.winner && <> · 낙찰 {n.winner}{n.awardAmount ? ` · ${Number(n.awardAmount) ? Number(n.awardAmount).toLocaleString('ko-KR') + '원' : n.awardAmount}` : ''}{n.awardDate ? ` (${n.awardDate})` : ''}</>}</div>}
-      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3" data-testid="bid-dates">{[n.noticeDate && `공고 ${n.noticeDate}`, n.posted && `DB 등록 ${n.posted}`].filter(Boolean).join(' · ')}{n.todayNew && <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white" data-testid="bid-today">오늘 등록</span>}</div>
-      {n.keywords && <div className="mt-0.5 text-xs text-ink-3">키워드: {n.keywords}</div>}
-      {n.judgment && <div className="mt-0.5 text-xs text-ink-2">판단: {n.judgment}</div>}
+      <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.region, n.households && `${n.households}세대`, n.industry].filter(Boolean).join(' · ')}</div>
+      {(n.amount || n.winner) && <div className="mt-0.5 hidden text-xs text-ink-2 md:block">{n.amount && <>금액 {Number(n.amount) ? `${Number(n.amount).toLocaleString('ko-KR')}원` : String(n.amount)}</>}{n.winner && <> · 낙찰 {n.winner}{n.awardAmount ? ` · ${Number(n.awardAmount) ? Number(n.awardAmount).toLocaleString('ko-KR') + '원' : n.awardAmount}` : ''}{n.awardDate ? ` (${n.awardDate})` : ''}</>}</div>}
+      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3" data-testid="bid-dates"><span className="hidden md:inline">{[n.noticeDate && `공고 ${n.noticeDate}`, n.posted && `DB 등록 ${n.posted}`].filter(Boolean).join(' · ')}</span>{n.todayNew && <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white" data-testid="bid-today">오늘 등록</span>}</div>
+      {n.keywords && <div className="mt-0.5 hidden text-xs text-ink-3 md:block">키워드: {n.keywords}</div>}
+      {n.judgment && <div className="mt-0.5 hidden text-xs text-ink-2 md:block">판단: {n.judgment}</div>}
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
         {n.phone && <a href={`tel:${String(n.phone).replace(/[^0-9+]/g, '')}`} className="rounded-input border border-line px-2 py-1">전화 {n.phone}</a>}
-        {n.url && <a href={n.url} target="_blank" rel="noopener noreferrer" className="rounded-input border border-line px-2 py-1">원문</a>}
-        {!!n.attachments?.length && <a href={typeof n.attachments[0] === 'string' ? n.attachments[0] : n.attachments[0]?.url} target="_blank" rel="noopener noreferrer" className="rounded-input border border-line px-2 py-1">첨부 {n.attachments.length}건</a>}
+        {n.url && <a href={n.url} target="_blank" rel="noopener noreferrer" className="hidden rounded-input border border-line px-2 py-1 md:inline">원문</a>}
+        {!!n.attachments?.length && <a href={typeof n.attachments[0] === 'string' ? n.attachments[0] : n.attachments[0]?.url} target="_blank" rel="noopener noreferrer" className="hidden rounded-input border border-line px-2 py-1 md:inline">첨부 {n.attachments.length}건</a>}
         <span className="ml-auto font-medium text-ink" data-testid="bid-deadline">{n.deadline ? `마감 ${String(n.deadline).slice(0, 16).replace('T', ' ')}` : '마감일 미확인'}</span>
       </div>
     </li>
   );
 }
 const UNK = <span className="text-ink-3">미확인 · 후속조사</span>;
+const keyDates = (dates?: [string, unknown][]) => { const has = (dates ?? []).filter(([, v]) => D(v));
+  const pick3 = [...has.filter(([k]) => /준공|세대|입주/.test(k)), ...has.filter(([k]) => !/준공|세대|입주/.test(k))].slice(0, 3);
+  return pick3.map(([k, v]) => (k === '세대수' ? `${D(v)}세대` : `${k.replace('(예정)', '')} ${D(v)}`)).join(' · '); };
 /** 허브 카드(영업관리 2-7 신규단지 · 2-8 준공·입주 시설 · 2-9 협력사) — 칸 순서 그대로 */
 function HubCard({ tab, r, onRaw }: { tab: string; r: any; onRaw: () => void }) {
   const today0 = today();
@@ -292,21 +295,23 @@ function HubCard({ tab, r, onRaw }: { tab: string; r: any; onRaw: () => void }) 
         <div className="flex flex-wrap items-center gap-1.5">{r.status && chip(r.status)}{r.kind && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px]">{r.kind}</span>}{r.priority && !/보통|medium/i.test(r.priority) && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">{r.priority}</span>}</div>
         <button type="button" onClick={onRaw} className="mt-1 block text-left font-semibold hover:underline">{r.name}</button>
         <p className="text-xs text-ink-2">{[r.region, r.address].filter(Boolean).join(' · ')}</p>
-        <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs sm:grid-cols-5">{(r.dates ?? []).map(([k, v]: [string, unknown]) => <div key={k}><dt className="text-ink-3">{k}</dt><dd>{D(v) ?? UNK}</dd></div>)}</dl>
+        {/* 대표(10/19 앱): 휴대폰 카드는 값이 있는 핵심 2~3개만(준공·세대수·입주 먼저), 빈 값('미확인')은 숨김 — 전체 10칸은 PC·상세 */}
+        <p className="mt-0.5 text-xs text-ink-2 md:hidden" data-testid="hub-key">{keyDates(r.dates)}</p>
+        <dl className="mt-1 hidden grid-cols-2 gap-x-3 gap-y-0.5 text-xs md:grid md:grid-cols-5">{(r.dates ?? []).map(([k, v]: [string, unknown]) => <div key={k}><dt className="text-ink-3">{k}</dt><dd>{D(v) ?? UNK}</dd></div>)}</dl>
       </>) : tab === 'facilities' ? (<>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" onClick={onRaw} className="text-left font-semibold hover:underline">{r.name}</button>{r.verdict && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800">{r.verdict}</span>}{r.contact && chip(r.contact)}</div>
         <p className="text-xs text-ink-2">{[r.lane, r.region, r.households && `${r.households}세대`, r.scale, r.operator && `현 위탁 ${r.operator}`].filter(Boolean).join(' · ')}</p>
-        {r.address && <p className="text-xs text-ink-3">{r.address}</p>}
-        <p className="mt-0.5 text-xs">{r.phone ? <a href={`tel:${String(r.phone).replace(/[^0-9+]/g, '')}`} className="underline">관리사무소 {r.phone}</a> : <span className="text-ink-3">관리사무소 번호 미확인</span>}</p>
-        {r.amenities && <p className="text-xs text-ink-3">부대시설: {String(r.amenities)}</p>}
+        {r.address && <p className="hidden text-xs text-ink-3 md:block">{r.address}</p>}
+        <p className="mt-0.5 text-xs">{r.phone ? <a href={`tel:${String(r.phone).replace(/[^0-9+]/g, '')}`} className="underline">관리사무소 {r.phone}</a> : <span className="hidden text-ink-3 md:inline">관리사무소 번호 미확인</span>}</p>
+        {r.amenities && <p className="hidden text-xs text-ink-3 md:block">부대시설: {String(r.amenities)}</p>}
         <p className="flex flex-wrap items-center gap-1.5 text-xs text-ink-3">{r.firstSeen && <>DB 등록 {r.firstSeen}</>}{r.firstSeen === today0 && <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-semibold text-white">오늘 등록</span>}
           {r.date && <> · 준공(사용승인) {r.date}</>}{r.moveIn && <> · 입주 {r.moveIn}</>}</p>
-        {r.next && <p className="text-xs">다음 연락 {r.next}</p>}{r.lastNote && <p className="text-xs text-ink-2">최근 기록: {r.lastNote}</p>}{r.nextAction && <p className="text-xs text-ink-2">다음 조치: {r.nextAction}</p>}
+        {r.next && <p className="text-xs">다음 연락 {r.next}</p>}{r.lastNote && <p className="hidden text-xs text-ink-2 md:block">최근 기록: {r.lastNote}</p>}{r.nextAction && <p className="hidden text-xs text-ink-2 md:block">다음 조치: {r.nextAction}</p>}
       </>) : (<>
         <div className="flex flex-wrap items-center gap-1.5">{r.division && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px]">{r.division}</span>}<button type="button" onClick={onRaw} className="text-left font-semibold hover:underline">{r.name}</button>{r.rank && <span className="text-xs text-ink-3">{r.rank}위</span>}{r.status && chip(r.status)}</div>
-        <p className="text-xs text-ink-2">{[r.open != null && `모집 공지 ${r.open === true || r.open === 'true' ? '공개' : '비공개'}`, r.period && `모집 ${r.period}`, r.requirement && `요건 ${r.requirement}`, r.cert && `공동인증서 ${r.cert}`, r.note].filter(Boolean).join(' · ') || '모집 정보 미확인'}</p>
-        {r.notice && <p className="text-xs">공지: {r.url ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="underline">{r.notice}</a> : r.notice}</p>}
-        <p className="mt-1 flex flex-wrap gap-1.5 text-xs">{[[r.applyUrl, '등록 신청 ↗'], [r.portalUrl, '협력사 포털 ↗'], [r.homepage, '홈페이지 ↗']].filter(([u]) => u).map(([u, l]) => <a key={l} href={u} target="_blank" rel="noopener noreferrer" className="rounded-input border border-line px-2 py-0.5">{l}</a>)}</p>
+        <p className="text-xs text-ink-2">{[r.open != null && `모집 공지 ${r.open === true || r.open === 'true' ? '공개' : '비공개'}`, r.period && `모집 ${r.period}`, r.requirement && `요건 ${r.requirement}`, r.cert && `공동인증서 ${r.cert}`, r.note].filter(Boolean).join(' · ') }</p>
+        {r.notice && <p className="hidden text-xs md:block">공지: {r.url ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="underline">{r.notice}</a> : r.notice}</p>}
+        <p className="mt-1 hidden flex-wrap gap-1.5 text-xs md:flex">{[[r.applyUrl, '등록 신청 ↗'], [r.portalUrl, '협력사 포털 ↗'], [r.homepage, '홈페이지 ↗']].filter(([u]) => u).map(([u, l]) => <a key={l} href={u} target="_blank" rel="noopener noreferrer" className="rounded-input border border-line px-2 py-0.5">{l}</a>)}</p>
         {(r.memo || r.next) && <p className="text-xs text-ink-2">{[r.memo, r.next && `다음 ${r.next}`].filter(Boolean).join(' · ')}</p>}
       </>)}
     </div>

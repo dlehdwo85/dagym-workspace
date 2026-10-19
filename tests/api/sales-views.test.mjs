@@ -21,6 +21,11 @@ before(async () => {
   await put('global', 'procurement_notices', { id: 14, title: '예전 공고(first_seen 30일 전)', related: true, first_seen_at: `${plus(-30)}T01:00:00+09:00`, notice_date: today, created_at: today, deadline_at: `${plus(3)}T10:00:00`, current_status: '공고중' });
   await put('global', 'procurement_notices', { id: 13, title: '낙찰된 공고', related: true, first_seen_at: plus(-30), deadline_at: `${plus(-10)}T10:00:00`, current_status: '낙찰' });
   await put('global', 'procurement_notices', { id: 12, title: '관계없는 공고', related: false, posted_at: today });
+  // 운영 10/19: 진행 중 탭 0건(현황은 31) — 원본 상태 문구가 '공고중'이 아닌 진행 공고, 미참여로 정리한 공고, 사전규격
+  await put('global', 'procurement_notices', { id: 15, title: '상태 문구 다른 진행 공고', related: true, first_seen_at: plus(-2), deadline_at: `${plus(8)}T10:00:00`, current_status: '입찰진행' });
+  await put('global', 'procurement_notices', { id: 16, title: '미참여로 정리한 공고', related: true, first_seen_at: plus(-2), deadline_at: `${plus(9)}T10:00:00`, current_status: '공고중' });
+  await put('default', 'opportunity_work', { id: 'W2', notice_id: '16', status: '미참여' });
+  await put('global', 'procurement_notices', { id: 17, title: '사전규격 공고', related: true, source: 'g2b_pre', first_seen_at: plus(-2), deadline_at: `${plus(10)}T10:00:00` });
   await put('default', 'procurement_notices__progress', { id: 11, classification: '적합' });
   await put('global', 'building_sales_pipeline', { id: 'B1', name: '판교 새단지', households: 1200, address: '경기 성남' });
   await put('global', 'operating_facility_prospects', { id: 'F1', name: '수원 아파트 커뮤니티', score: 88 });
@@ -36,7 +41,7 @@ test('영업 공간 화면', async () => {
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   const s = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
   assert.equal(s.readOnly, true); assert.equal(s.imported, true);
-  assert.deepEqual([s.kpi.leads, s.kpi.dueSoon, s.kpi.overdue, s.kpi.bidsWorking, s.kpi.relatedNotices, s.kpi.newNotices7d], [4, 1, 1, 1, 3, 1], JSON.stringify(s.kpi));
+  assert.deepEqual([s.kpi.leads, s.kpi.dueSoon, s.kpi.overdue, s.kpi.bidsWorking, s.kpi.relatedNotices, s.kpi.newNotices7d], [4, 1, 1, 1, 6, 1], JSON.stringify(s.kpi));
   assert.equal(s.today.newNotices, 1, '오늘 새 공고 = first_seen_at 이 오늘(KST)');
   assert.equal(s.today.date, today); assert.equal(s.bidsOn, true);
   assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today')).items.map((n) => n.title), ['체육시설 위탁운영']);
@@ -55,10 +60,11 @@ test('영업 공간 화면', async () => {
   assert.equal(p.columns[0].status, '신규리드'); assert.equal(p.columns.find((c) => c.status === '미팅예정').items.length, 2);
   const b = await ctx.owner.ok('GET', '/api/sales/src?view=bids');
   assert.deepEqual(b.items.find((n) => n.title === '체육시설 위탁운영') && [b.items[1].work, b.items[1].agency, b.items[1].fit], ['검토 중', '성남시', 82], '기본 = 진행 중(낙찰 제외)');
-  assert.deepEqual(b.items.map((n) => n.title), ['예전 공고(first_seen 30일 전)', '체육시설 위탁운영'], '마감 임박순');
+  assert.deepEqual(b.items.map((n) => n.title), ['예전 공고(first_seen 30일 전)', '체육시설 위탁운영', '상태 문구 다른 진행 공고'], '마감 임박순 · 낙찰·미참여·사전규격 제외 · 상태 문구 달라도 진행');
+  assert.equal(s.kpi.bidsOpen, b.items.length, '현황 진행 중 입찰 = 진행 중 탭 건수');
   assert.deepEqual(b.items[1].classification, '적합');
-  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.length, 3);
-  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.length, 1);
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.length, 6);
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.length, 2);
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).items[0].households, 1200);
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities')).items[0].contact, '연락함');
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=vendors')).items[0].rank, 3);

@@ -36,11 +36,12 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql }) {
   await m.getByTestId('mobile-space-sales').tap();
   await m.waitForURL(/\/s\/sales$/);
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
-  // 대표 제보(10/18): 휴대폰에서도 공간 메뉴로 — 첫 화면 위 칩 · 더보기 시트의 '영업 메뉴'
-  const chips = m.getByTestId('space-chips');
-  await chips.getByRole('link', { name: '공공데이터' }).tap();
+  // 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄 없음 — 공간 메뉴는 더보기 시트의 '영업 메뉴'(입찰·공고 포함)
+  assert.equal(await m.getByTestId('space-chips').count(), 0, '상단 칩 줄 없음');
+  await m.getByRole('button', { name: '메뉴 더보기' }).tap();
+  await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).waitFor();
+  await m.getByTestId('mobile-space-menu').getByRole('link', { name: '공공데이터' }).tap();
   await m.waitForURL(/\/s\/sales\/prospects$/);
-  assert.equal(await chips.locator('a[aria-current="page"]').textContent(), '공공데이터');
   await m.getByRole('button', { name: '메뉴 더보기' }).tap();
   await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap();
   await m.waitForURL(/\/s\/sales\/sources$/);
@@ -56,7 +57,7 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql }) {
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
   // 대표 결정(10/19): 하단 탭 = 공간마다 같은 크기 5칸(+ 버튼 없음)
   const tabs = async () => (await m.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-  assert.deepEqual(await tabs(), ['현황', '리드', '파이프라인', '입찰·공고', '더보기']);
+  assert.deepEqual(await tabs(), ['현황', '리드', '파이프라인', '영업기회', '더보기']);
   const w = await m.getByTestId('mobile-tabs').locator(':scope > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
   assert.ok(Math.max(...w) - Math.min(...w) <= 1, `5칸 같은 폭 ${w}`);
   await m.getByTestId('tab-more').tap();

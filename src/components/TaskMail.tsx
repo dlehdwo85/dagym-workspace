@@ -331,7 +331,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
                 {schedOpen && <SchedulePicker value={sched} onPick={(v) => { setSched(v); setSchedOpen(false); }} onClose={() => setSchedOpen(false)} />}
                 <Button variant="secondary" onClick={() => setSchedOpen(!schedOpen)} disabled={busy || !d.channel || !d.canSend} aria-expanded={schedOpen} data-testid="mail-schedule-open">{sched ? `예약 ${fmtKst(sched)}` : '예약 ▾'}</Button>
                 {sched && <button type="button" className="text-xs text-ink-3 underline" onClick={() => setSched(null)} data-testid="mail-schedule-clear">바로 보내기로</button>}
-                <Button onClick={send} disabled={busy || !d.channel || !d.canSend} data-testid="mail-send"><Send />{busy ? '보관함에 넣는 중…' : sched ? '예약 보내기' : '보내기'}</Button>
+                <Button onClick={send} disabled={busy || !d.channel || !d.canSend} data-testid="mail-send"><Send />{busy ? '보관함에 넣는 중…' : sched ? '예약 보내기' : '바로 보내기'}</Button>
               </span>
             : channel === 'kakao' ? (kakao.trim() ? <KakaoSend taskId={taskId} body={kakao} onLogged={onSent} /> : <span className="text-xs text-ink-3">내용을 넣어 주세요</span>)
             : <Button onClick={openSms} disabled={!d.canSend} data-testid="sms-open"><MessageSquare />문자앱으로 보내기</Button>}

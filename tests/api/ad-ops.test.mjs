@@ -31,6 +31,9 @@ before(async () => {
     // 운영 10/19: 생성 응답에서 id 를 못 읽어 'undefined' 저장 → 응답에 id 를 빼서 GET 으로 다시 읽는 길을 시험
     // 운영 10/19 실계정: 200 인데 키워드가 안 생김(빈 응답) → 실패로 다루고 이유를 남겨야 함. 여러 개를 한 번에 보내면 안 생기고 하나씩은 생기는 경우도 흉내
     if (req.method === 'POST' && path === '/ncc/keywords' && kwBroken === 'all') return send(200, []);
+    // 운영 10/19 실계정: 항목마다 resultStatus code 3916 + 긴 사유 → 자르지 않고 보여야 함
+    if (req.method === 'POST' && path === '/ncc/keywords' && kwBroken === '3916') return send(200, j.map((k) => ({ keyword: k.keyword, resultStatus: { code: 3916, message: `등록할 수 없는 키워드입니다(시험 사유 — 이 문구 끝까지 보여야 함: ${k.keyword})` } })));
+    if (req.method === 'GET' && path === '/keywordstool') return send(200, { keywordList: [{ relKeyword: u.searchParams.get('hintKeywords').split(',')[0], monthlyPcQcCnt: '< 10', monthlyMobileQcCnt: 20 }, { relKeyword: '동네헬스장추천', monthlyPcQcCnt: 300, monthlyMobileQcCnt: 2100 }, { relKeyword: '아주드문말', monthlyPcQcCnt: '< 10', monthlyMobileQcCnt: '< 10' }] });
     if (req.method === 'POST' && path === '/ncc/keywords' && kwBroken === 'bulk' && j.length > 1) return send(200, []);
     if (req.method === 'POST' && path === '/ncc/keywords') { const g = kwStore.get(u.searchParams.get('nccAdgroupId')) ?? []; for (const k of j) g.push({ nccKeywordId: `kw-${g.length + 1}`, keyword: k.keyword }); kwStore.set(u.searchParams.get('nccAdgroupId'), g); return send(200, j.map((k) => ({ keyword: k.keyword }))); }
     if (req.method === 'GET' && path === '/ncc/keywords') return send(200, kwStore.get(u.searchParams.get('nccAdgroupId')) ?? []);
@@ -116,6 +119,14 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   assert.equal(badSync.status, 502); assert.match(badSync.body.error.message, /키워드를 만들지 못했습니다\(동네 헬스장, PT 가격\).*응답에 키워드 id 없음/);
   const [fl] = await sql`select status, error from mkt_ad_changes where plan_id = ${p.id} and kind = 'sync' order by created_at desc limit 1`;
   assert.equal(fl.status, 'failed'); assert.match(fl.error, /동네 헬스장/);
+  kwBroken = '3916';
+  const b3916 = await ctx.owner.req('POST', `/api/marketing/ad-ops/plans/${p.id}/action`, { action: 'sync' });
+  assert.equal(b3916.status, 502);
+  assert.match(b3916.body.error.message, /\[code 3916\] 등록할 수 없는 키워드입니다\(시험 사유 — 이 문구 끝까지 보여야 함: 동네헬스장\)/, '사유 전체');
+  assert.match(b3916.body.error.message, /월 검색량\(PC\/모바일\): 동네 헬스장 5\/20.*연관 키워드: 동네헬스장추천\(2400\)/, b3916.body.error.message);
+  assert.doesNotMatch(b3916.body.error.message, /아주드문말/, '검색량 적은 연관 키워드는 안 권함');
+  const [f3916] = await sql`select error from mkt_ad_changes where plan_id = ${p.id} and kind = 'sync' order by created_at desc limit 1`;
+  assert.match(f3916.error, /이 문구 끝까지 보여야 함: PT가격\)/, '변경 기록에도 전체');
   kwBroken = 'bulk';
   const two = await Promise.all([1, 2].map(() => ctx.owner.req('POST', `/api/marketing/ad-ops/plans/${p.id}/action`, { action: 'sync' })));
   assert.deepEqual(two.map((r) => r.status).sort(), [200, 409], JSON.stringify(two.map((r) => r.body)));

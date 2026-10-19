@@ -32,7 +32,7 @@ async function naverReq(a: NaverAcc, method: 'GET' | 'POST' | 'PUT', path: strin
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   const text = await r.text();
   let j: any = null; try { j = JSON.parse(text); } catch { /* JSON 아님 */ }
-  if (!r.ok) throw new HttpError(502, 'naver_upstream', `네이버 검색광고 API 오류 ${r.status} ${method} ${path} ${String(j?.title ?? j?.message ?? '').slice(0, 200)}${j?.code ? ` [code ${j.code}]` : ''}`.trim());
+  if (!r.ok) throw new HttpError(502, 'naver_upstream', `네이버 검색광고 API 오류 ${r.status} ${method} ${path} ${String(j?.title ?? j?.message ?? '').slice(0, 1000)}${j?.code ? ` [code ${j.code}]` : ''}${j?.detail ? ` ${String(j.detail).slice(0, 1000)}` : ''}`.trim());
   return j;
 }
 
@@ -169,8 +169,8 @@ export async function approvePlan(u: SessionUser, id: string) {
       ext.adIds = ids;
     }
   } catch (e: any) {
-    await sql`update mkt_ad_plans set status = 'failed', external = ${sql.json(ext as never)}, error = ${String(e?.message ?? e).slice(0, 300)}, updated_at = now() where id = ${id}`;
-    await sql`insert into mkt_ad_changes (tenant, plan_id, kind, after, status, error, actor_id) values (${t}, ${id}, 'create', ${sql.json(ext as never)}, 'failed', ${String(e?.message ?? e).slice(0, 300)}, ${u.id})`;
+    await sql`update mkt_ad_plans set status = 'failed', external = ${sql.json(ext as never)}, error = ${String(e?.message ?? e).slice(0, 4000)}, updated_at = now() where id = ${id}`;
+    await sql`insert into mkt_ad_changes (tenant, plan_id, kind, after, status, error, actor_id) values (${t}, ${id}, 'create', ${sql.json(ext as never)}, 'failed', ${String(e?.message ?? e).slice(0, 4000)}, ${u.id})`;
     throw e instanceof HttpError ? e : badRequest('네이버에 만들지 못했습니다');
   }
   await sql.begin(async (tx) => {
@@ -195,20 +195,46 @@ async function ensureKeywords(a: NaverAcc, adgroupId: string, keywords: string[]
   // 운영 10/19: 200 응답인데 키워드가 하나도 안 생김 → 응답을 그대로 믿지 않고, 만든 뒤 그룹 목록으로 확인. 안 생긴 키워드는 하나씩 다시 보내 이유를 받음
   // 네이버 키워드는 띄어쓰기를 구분하지 않음 → 보낼 때는 띄어 쓴 그대로 대신 붙여 씀(목록 비교도 띄어쓰기 무시)
   const body = (ks: string[]) => ks.map((k) => ({ nccAdgroupId: adgroupId, keyword: k.replace(/\s+/g, ''), useGroupBidAmt: true, userLock: false }));
+  // 운영 10/19: 네이버가 항목마다 resultStatus {code, message} 로 거절(3916 등) — 사유 문구를 자르지 않고 그대로 모음
+  const statusOf = (r: any) => (Array.isArray(r) ? r : [r]).map((k: any) => k?.resultStatus ?? k?.status).filter((x: any) => x && (x.code || x.message))
+    .map((x: any) => `[code ${x.code ?? '?'}] ${x.message ?? x.title ?? ''}`.trim());
   const take = (r: any) => { for (const k of (Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : [r])) if (kwId(k) && k?.keyword) byKw.set(norm(String(k.keyword)), kwId(k)); };
   const why: string[] = [];
   if (missing.length) {
-    try { take(await naverReq(a, 'POST', '/ncc/keywords', q, body(missing))); } catch (e: any) { why.push(String(e?.message ?? e).slice(0, 200)); }
+    try { const r = await naverReq(a, 'POST', '/ncc/keywords', q, body(missing)); take(r); why.push(...statusOf(r)); } catch (e: any) { why.push(String(e?.message ?? e)); }
     for (const k of await list()) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
     for (const k of missing.filter((x) => !byKw.has(norm(x)))) {
-      try { const r = await naverReq(a, 'POST', '/ncc/keywords', q, body([k])); take(r); if (!byKw.has(norm(k))) why.push(`${k}: 응답에 키워드 id 없음 ${JSON.stringify(r).slice(0, 160)}`); }
-      catch (e: any) { why.push(`${k}: ${String(e?.message ?? e).slice(0, 200)}`); }
+      try { const r = await naverReq(a, 'POST', '/ncc/keywords', q, body([k])); take(r); if (!byKw.has(norm(k))) { const st = statusOf(r); why.push(`${k}: ${st.length ? st.join(' ') : `응답에 키워드 id 없음 ${JSON.stringify(r).slice(0, 1000)}`}`); } }
+      catch (e: any) { why.push(`${k}: ${String(e?.message ?? e)}`); }
     }
     if (missing.some((k) => !byKw.has(norm(k)))) for (const k of await list()) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
   }
   const ids = keywords.map((k) => byKw.get(norm(k)) ?? '');
-  if (!validIds(ids)) throw new HttpError(502, 'naver_keywords', `네이버에 키워드를 만들지 못했습니다(${keywords.filter((_, i) => !ids[i]).join(', ')})${why.length ? ` — ${[...new Set(why)].slice(0, 3).join(' / ')}` : ''}`);
+  if (!validIds(ids)) {
+    const failed = keywords.filter((_, i) => !ids[i]);
+    // 검색량·연관 키워드(네이버 키워드 도구 /keywordstool, 공식 RelKwdStat) — 사유를 사람이 판단하고 바꿀 키워드를 고르게
+    const vol = await keywordVolumes(a, failed).catch(() => null);
+    const volText = vol ? ` · 월 검색량(PC/모바일): ${failed.map((k) => { const v = vol.get(norm(k)); return `${k} ${v ? `${v.pc}/${v.mobile}` : '자료 없음'}`; }).join(', ')}` + (vol.related.length ? ` · 검색량 있는 연관 키워드: ${vol.related.slice(0, 8).map((r) => `${r.keyword}(${r.total})`).join(', ')}` : '') : '';
+    throw new HttpError(502, 'naver_keywords', `네이버에 키워드를 만들지 못했습니다(${failed.join(', ')})${why.length ? ` — ${[...new Set(why)].join(' / ')}` : ''}${volText}`, { why: [...new Set(why)], volumes: vol ? Object.fromEntries(vol) : null, related: vol?.related ?? [] });
+  }
   return ids;
+}
+/** 네이버 키워드 도구(RelKwdStat): 힌트 키워드(띄어쓰기 없이, 한 번에 5개)의 월 검색량과 연관 키워드. '< 10' 은 5 로 셈 */
+export async function keywordVolumes(a: NaverAcc, keywords: string[]) {
+  const num = (v: unknown) => (typeof v === 'number' ? v : /</.test(String(v)) ? 5 : Number(v) || 0);
+  const out = new Map<string, { pc: number; mobile: number }>() as Map<string, { pc: number; mobile: number }> & { related: { keyword: string; total: number }[] };
+  out.related = [];
+  const asked = new Set(keywords.map(norm));
+  for (let i = 0; i < keywords.length; i += 5) {
+    const hint = keywords.slice(i, i + 5).map((k) => k.replace(/\s+/g, '')).join(',');
+    const r = await naverReq(a, 'GET', '/keywordstool', `?hintKeywords=${encodeURIComponent(hint)}&showDetail=1`);
+    for (const k of (r?.keywordList ?? []) as any[]) {
+      const key = norm(String(k.relKeyword ?? '')); const v = { pc: num(k.monthlyPcQcCnt), mobile: num(k.monthlyMobileQcCnt) };
+      if (asked.has(key)) out.set(key, v); else if (v.pc + v.mobile >= 30) out.related.push({ keyword: String(k.relKeyword), total: v.pc + v.mobile });
+    }
+  }
+  out.related.sort((x, y) => y.total - x.total);
+  return out;
 }
 /** [키워드 다시 읽기]: 만든 뒤 키워드 id 가 비었으면 네이버에서 다시 읽어 저장(없으면 만듦) — 켜기·예산은 바꾸지 않음 */
 export async function syncPlanKeywords(u: SessionUser, id: string) {
@@ -225,7 +251,7 @@ export async function syncPlanKeywords(u: SessionUser, id: string) {
   let keywordIds: string[];
   try { keywordIds = await ensureKeywords(a, String(p.external.adgroupId), p.plan.keywords); }
   catch (e: any) {
-    const msg = String(e?.message ?? e).slice(0, 300);
+    const msg = String(e?.message ?? e).slice(0, 4000);
     await sql`update mkt_ad_plans set external = external - 'syncingAt', error = ${msg}, updated_at = now() where id = ${id}`;
     await sql`insert into mkt_ad_changes (tenant, plan_id, kind, before, status, error, actor_id) values (${t}, ${id}, 'sync', ${sql.json({ keywordIds: before } as never)}, 'failed', ${msg}, ${u.id})`;
     throw e;

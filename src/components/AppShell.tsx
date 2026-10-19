@@ -186,7 +186,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // 로컬 검수 10/19: 하단 탭은 마지막 공간이 아니라 지금 주소의 공간 기준(/tasks 등 공통 화면 = 업무)
   const tabSpace = path.startsWith('/s/sales') ? 'sales' : path.startsWith('/s/marketing') ? 'marketing' : 'work';
   const mobileTabs: (NavItem & { badge?: number })[] = tabSpace === 'sales'
-    ? [{ href: '/s/sales', label: '현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, session.features.salesBids !== false ? { href: '/s/sales/bids', label: '입찰·공고', icon: Stamp } : { href: '/s/sales/deals', label: '제안·계약', icon: FileText }]
+    ? [{ href: '/s/sales', label: '현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/hub', label: '영업기회', icon: Building2 }] // 대표(10/19): 입찰은 안 쓰는 회사도 있어 하단 탭에서 뺌 — 더보기·PC 사이드바(켠 회사만)
     : tabSpace === 'marketing'
       ? [{ href: '/s/marketing', label: '현황', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
@@ -376,14 +376,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               </span>
             </div>
           </header>
-          {/* 대표 제보(10/18): 휴대폰(사이드바 없음)에서도 영업·마케팅 공간 메뉴로 갈 수 있게 — 공간 메뉴 가로 칩 */}
-          {space !== 'work' && (
-            <nav className="flex gap-1.5 overflow-x-auto border-b border-line bg-white px-3 py-2 [scrollbar-width:none] lg:hidden" aria-label={`${sm.short} 메뉴`} data-testid="space-chips">
-              {spaceNav.map((n) => { const on = active(n.href); return (
-                <Link key={n.href} href={n.href} aria-current={on ? 'page' : undefined} className={cx('inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-[13px] font-medium', on ? 'border-transparent text-white' : 'border-line bg-white text-ink-2')}
-                  style={on ? { background: sm.color } : undefined}><n.icon className="size-3.5" aria-hidden />{n.label}</Link>); })}
-            </nav>
-          )}
+          {/* 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄은 없앰 — 하단 탭 + 더보기 › 공간 메뉴로(하단 탭과 겹치고 깔끔하지 않음) */}
           <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>
 

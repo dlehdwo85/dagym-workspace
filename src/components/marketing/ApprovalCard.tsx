@@ -68,8 +68,9 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
             </button>))}</div>
           <p className="mt-0.5 text-[11px] text-ink-3">{media.length}장 — 옆으로 넘겨 보기</p>
         </div>)}
-      {c.body && <details className="mt-2"><summary className="line-clamp-4 cursor-pointer whitespace-pre-wrap text-xs text-ink">{c.body}</summary><p className="mt-1 whitespace-pre-wrap text-xs">{c.body}</p></details>}
-      {c.version_note && <p className="mt-1 text-xs text-ink-2">제작 메모: {c.version_note}</p>}
+      {/* 대표(10/19 앱): 휴대폰 카드는 핵심만 — 본문·제작 메모는 제목을 눌러 상세에서 */}
+      {c.body && <details className="mt-2 hidden md:block"><summary className="line-clamp-4 cursor-pointer whitespace-pre-wrap text-xs text-ink">{c.body}</summary><p className="mt-1 whitespace-pre-wrap text-xs">{c.body}</p></details>}
+      {c.version_note && <p className="mt-1 hidden text-xs text-ink-2 md:block">제작 메모: {c.version_note}</p>}
       {d && d.version === c.current_version && <p className="mt-1 text-[11px] text-ink-3" data-testid="mkt-decision-line">{({ approve: '승인', changes: '수정 요청', hold: '보류' } as Record<string, string>)[d.decision] ?? d.decision} · {kst(d.at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })} KST{d.by ? ` · ${d.by}` : ''}{d.comment ? ` · 메모: ${d.comment}` : ''}{c.published_url ? <> · <a href={c.published_url} target="_blank" rel="noopener" className="underline">게시물 열기</a></> : null}</p>}
       {canAct && !late && (mode === 'idle' ? (
         <div className="mt-2 flex flex-wrap gap-2">
@@ -80,7 +81,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         <div className="mt-2 flex flex-wrap gap-2"><input className={cx(inputCls, 'min-w-0 flex-1')} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="무엇을 고칠지(두 글자 이상)" aria-label="수정 요청 메모" data-testid="card-changes-memo" />
           <Button size="sm" disabled={memo.trim().length < 2} onClick={() => decide('changes')} data-testid="card-changes-send">수정 요청 보내기</Button><Button size="sm" variant="secondary" onClick={() => setMode('idle')}>취소</Button></div>
       ))}
-      {canAct && !late && c.status !== 'approved' && <p className="mt-1 text-[11px] text-ink-3">승인해도 바로 공개되지 않습니다 — 게시 시각에 게시(도우미 또는 연결된 채널)합니다.</p>}
+      {canAct && !late && c.status !== 'approved' && <p className="mt-1 hidden text-[11px] text-ink-3 md:block">승인해도 바로 공개되지 않습니다 — 게시 시각에 게시(도우미 또는 연결된 채널)합니다.</p>}
       {full && media.length > 0 && (
         <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center bg-black/90 p-4" onClick={() => setFull(false)} data-testid="media-viewer">
           <img src={`/api/library/${media[idx]}/download?inline=1`} alt="" className="max-h-[80vh] max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
