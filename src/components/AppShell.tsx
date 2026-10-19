@@ -1,4 +1,5 @@
 'use client';
+import { IN_APP_BILLING_NOTE, useInApp } from './inApp';
 import { ADMIN_PAGES } from '@/lib/adminPages';
 import Link from 'next/link';
 import { Suspense } from 'react';
@@ -54,6 +55,7 @@ function writePref(k: string, v: string) { try { localStorage.setItem(k, v); } c
 
 export function AppShell({ session, children }: { session: Sess; children: ReactNode }) {
   const path = usePathname();
+  const inApp = useInApp(); // 스토어 심사: 앱 안에서는 결제 링크·버튼 없음
   const router = useRouter();
   const [unread, setUnread] = useState(0);
   const [chatUnread, setChatUnread] = useState(0);
@@ -88,6 +90,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
   const space: SpaceKey = pathSpace !== 'work' ? pathSpace : common && spaces.includes(ctxSpace) ? ctxSpace : 'work';
   const sm = SPACE_META[space];
+  // 로컬 10/19(대표): 공간 강조색을 화면 전체(머리줄·하단 탭·강조 버튼·모달)에 — html[data-space] 로 brand 색 변수를 바꿈. 공간을 바꾸면 바로 바뀜
+  useEffect(() => { const h = document.documentElement; h.dataset.space = space; return () => { delete h.dataset.space; }; }, [space]);
   const [spaceMenu, setSpaceMenu] = useState(false);
   const [spaceSheet, setSpaceSheet] = useState(false); // 휴대폰 머리줄 로고·공간 이름 → 공간 전환 시트
   const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number }> }>(spaces.length > 1 && (spaceMenu || more || spaceSheet || space === 'marketing') ? '/api/spaces' : null, [space]);
@@ -102,14 +106,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // V9: 자료실(체험 계정 제외) · AI 비서(플랫폼 API 키가 있을 때만)
   // V13 메뉴 권한: 매출·주간 보고는 권한 있는 사람만(관리 묶음이 없는 사람도 매출 권한이 있으면 주 메뉴에)
   const menus = session.menus ?? {};
-  const adminMenu = ADMIN_MENU.filter((n) => (menus[ADMIN_KEY[n.href]] ?? 'none') !== 'none');
+  const adminMenu = ADMIN_MENU.filter((n) => (menus[ADMIN_KEY[n.href]] ?? 'none') !== 'none').map((n) => (inApp && n.href === '/admin/usage' ? { ...n, label: '사용량' } : n)); // 앱 안: 요금제 글자 없이
   const nav: NavItem[] = [...NAV, ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
-  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '영업 현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드·거래처', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, ...(session.features.salesBids !== false ? [{ href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }] : []), { href: '/s/sales/hub', label: '영업기회 허브', icon: Building2 }, { href: '/s/sales/prospects', label: '공공데이터', icon: Search }, { href: '/s/sales/regions', label: '지역별', icon: Network }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '마케팅 현황', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
+  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '영업 현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드·거래처', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, ...(session.features.salesBids !== false ? [{ href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }] : []), { href: '/s/sales/hub', label: '영업기회 허브', icon: Building2 }, { href: '/s/sales/prospects', label: '공공데이터', icon: Search }, { href: '/s/sales/regions', label: '지역별', icon: Network }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '홈', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
     { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' },
     { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 운영', icon: Rocket, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []), { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' },
-    { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '설정' }, ...(admin ? [{ href: '/s/marketing/history', label: '운영실 기록', icon: History, group: '설정' }] : [])] : [];
+    { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '설정' }, ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '운영실 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
 
   const commonNav: NavItem[] = [{ href: '/tasks', label: '업무', icon: CircleCheck }, { href: '/calendar', label: '캘린더', icon: CalendarDays }, { href: '/messages', label: '메시지', icon: MessageCircle },
     ...(session.features.library ? [{ href: `/library?space=${space}`, label: '자료실', icon: Library }] : []), ...(session.features.ai ? [{ href: `/assistant?space=${space}`, label: 'AI 비서', icon: Sparkles }] : [])];
@@ -188,7 +192,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const mobileTabs: (NavItem & { badge?: number })[] = tabSpace === 'sales'
     ? [{ href: '/s/sales', label: '현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/hub', label: '영업기회', icon: Building2 }] // 대표(10/19): 입찰은 안 쓰는 회사도 있어 하단 탭에서 뺌 — 더보기·PC 사이드바(켠 회사만)
     : tabSpace === 'marketing'
-      ? [{ href: '/s/marketing', label: '현황', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
+      ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
       : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
   const active = (href: string) => {
@@ -362,7 +366,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               {/* 대표(10/19): 앱도 PC 처럼 로고·공간 이름을 누르면 공간 전환 시트 */}
               {spaces.length > 1 ? (
                 <button type="button" onClick={() => setSpaceSheet(true)} aria-haspopup="dialog" aria-label={`공간 전환 — 지금 ${sm.label}`} data-testid="mobile-space-switch"
-                  className="-ml-1 flex min-h-[44px] items-center gap-2 rounded-xl px-1 text-[15px] font-bold text-brand-700 active:bg-slate-100"><img src="/icon.svg" alt="" className="size-7" /><span className="max-[380px]:sr-only">워크인</span>
+                  className="-ml-1 flex min-h-[44px] items-center gap-2 rounded-xl px-1 text-[15px] font-bold text-brand-700 active:bg-slate-100">{space === 'work' ? <img src="/icon.svg" alt="" className="size-7" /> : <span className="flex size-7 items-center justify-center rounded-[8px] text-white" style={{ background: sm.color }} data-testid="mobile-space-logo"><SpaceIcon s={space} /></span>}<span className="max-[380px]:sr-only" style={{ color: sm.color }}>워크인</span>
                   <span className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-xs font-medium" style={{ color: sm.color, background: sm.soft, borderColor: sm.border }} data-testid="mobile-space-chip">{sm.short}<ChevronDown className="size-3.5" aria-hidden /></span></button>
               ) : <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon.svg" alt="" className="size-7" />워크인</span>}
               {/* 대표(10/19): 아이콘마다 44px·사이 8px, 알림 배지는 아이콘 칸 안에서(프로필과 겹치지 않게) */}
@@ -395,15 +399,15 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* V28 B2 미납: 7일 읽기 전용 띠 · 30일 이용 중지(결제 안내만) */}
         {session.tenant?.billingLock === 'read_only' && (
           <div className="fixed inset-x-0 top-0 z-[36] bg-red-600 px-3 py-1 text-center text-xs font-medium text-white" data-testid="billing-ro-banner">
-            결제가 7일 넘게 밀려 읽기 전용입니다 — <a href="/admin/usage" className="underline">결제하면 바로 복구</a> (30일 미납이면 이용 중지)
+            결제가 7일 넘게 밀려 읽기 전용입니다 — {inApp ? IN_APP_BILLING_NOTE : <><a href="/admin/usage" className="underline">결제하면 바로 복구</a> (30일 미납이면 이용 중지)</>}
           </div>
         )}
         {session.tenant?.billingLock === 'suspended' && path !== '/admin/usage' && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/70 p-4" data-testid="billing-suspended">
             <div className="max-w-sm rounded-card bg-white p-5 text-center shadow-pop">
               <p className="text-lg font-bold">워크인 이용이 중지되었습니다</p>
-              <p className="mt-2 text-sm text-ink-2">결제가 30일 넘게 밀렸습니다. {['owner', 'admin'].includes(session.user.role) ? '결제하면 바로 다시 쓸 수 있어요. 데이터는 그대로 남아 있습니다.' : '회사 관리자에게 결제를 요청해 주세요. 데이터는 그대로 남아 있습니다.'}</p>
-              {['owner', 'admin'].includes(session.user.role) && <a href="/admin/usage" className="mt-4 inline-block rounded-input bg-brand-600 px-4 py-2 text-sm font-medium text-white">결제하러 가기</a>}
+              <p className="mt-2 text-sm text-ink-2">{inApp ? `데이터는 그대로 남아 있습니다. ${IN_APP_BILLING_NOTE}` : <>결제가 30일 넘게 밀렸습니다. {['owner', 'admin'].includes(session.user.role) ? '결제하면 바로 다시 쓸 수 있어요. 데이터는 그대로 남아 있습니다.' : '회사 관리자에게 결제를 요청해 주세요. 데이터는 그대로 남아 있습니다.'}</>}</p>
+              {!inApp && ['owner', 'admin'].includes(session.user.role) && <a href="/admin/usage" className="mt-4 inline-block rounded-input bg-brand-600 px-4 py-2 text-sm font-medium text-white">결제하러 가기</a>}
             </div>
           </div>
         )}
@@ -412,7 +416,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <div className={cx('fixed inset-x-0 top-0 z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',
             session.tenant.trial.readOnly ? 'bg-red-600 text-white' : session.tenant.trial.daysLeft <= 3 ? 'bg-warm-500 text-white' : 'bg-brand-50 text-brand-800')} data-testid="trial-banner">
             {session.tenant.trial.readOnly ? '무료 체험이 끝나 읽기 전용입니다' : session.tenant.trial.daysLeft === 0 ? '무료 체험 오늘 종료' : `무료 체험 D-${session.tenant.trial.daysLeft}`}
-            <Link href="/admin/usage" className="underline">요금제 선택</Link>
+            {inApp ? <span className="font-normal">· {IN_APP_BILLING_NOTE}</span> : <Link href="/admin/usage" className="underline">요금제 선택</Link>}
           </div>
         )}
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}

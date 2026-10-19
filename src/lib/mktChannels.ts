@@ -176,3 +176,46 @@ export async function metaDataDeletion(signedRequest: string) {
   await audit(db(), null, 'mkt_publish.meta_data_deletion', 'mkt_publish_account', null, { removed: rows.length, code }).catch(() => {});
   return { url: `${appUrl()}/data-deletion?code=${code}`, confirmation_code: code };
 }
+
+/**
+ * 로컬 10/19(대표): 마케팅 홈 '연결된 채널' — 게시 채널 + 광고 계정을 한 줄로. 상태 = 연결됨(계정 이름)·끊김·연결 안 함(·도우미).
+ * connect = 홈에서 바로 누르는 [연결]: href(OAuth 시작) · 'naver_form'(입력 창) · null(준비 중 — 그동안 게시 도우미). 기술 값은 없음.
+ * signup = 계정이 없을 때 만들기 안내 주소(채널 연결 3단계 카드).
+ */
+export type HomeChannel = { key: string; label: string; kind: 'publish' | 'ads' | 'helper'; state: 'connected' | 'broken' | 'none' | 'helper'; account: string | null; error: string | null;
+  connect: string | null; pending: string | null; signup: string; ask: string };
+const SIGNUP: Record<string, [string, string]> = {
+  instagram: ['https://www.instagram.com/accounts/emailsignup/', '인스타그램 비즈니스(또는 크리에이터) 계정이 있나요?'],
+  facebook: ['https://www.facebook.com/pages/create', '페이스북 페이지가 있나요?'],
+  threads: ['https://www.threads.net/', '스레드 계정이 있나요?(인스타그램 계정으로 만듭니다)'],
+  youtube: ['https://www.youtube.com/create_channel', '유튜브 채널이 있나요?'],
+  naver_blog: ['https://section.blog.naver.com/', '네이버 블로그가 있나요?'],
+  kakao_channel: ['https://center-pf.kakao.com/', '카카오톡 채널이 있나요?'],
+  ads_naver: ['https://searchad.naver.com/', '네이버 검색광고 계정이 있나요?'],
+  ads_google: ['https://ads.google.com/', 'Google Ads 계정이 있나요?'],
+};
+export async function homeChannels(u: SessionUser): Promise<HomeChannel[]> {
+  const sql = db(); const t = tenantOf(u);
+  const { AD_PROVIDERS, providerReady } = await import('./marketingAds');
+  const sets = new Map((await sql<{ channel: string; enabled: boolean }[]>`select channel, enabled from mkt_channel_settings where tenant = ${t}`).map((r) => [r.channel, r.enabled]));
+  const pubs = await sql<{ provider: string; label: string; status: string; last_error: string | null }[]>`select provider, label, status, last_error from mkt_publish_accounts where tenant = ${t} and status <> 'disconnected' order by created_at`;
+  const ads = await sql<{ provider: string; label: string; status: string; last_error: string | null }[]>`select provider, label, status, last_error from mkt_ad_accounts where tenant = ${t} and status <> 'disconnected' order by created_at`;
+  const pick = (rows: typeof pubs, providers: string[]) => { const r = rows.filter((a) => providers.includes(a.provider)); const bad = r.find((a) => a.status === 'error');
+    return { state: (bad ? 'broken' : r.length ? 'connected' : 'none') as HomeChannel['state'], account: (bad ?? r[0])?.label ?? null, error: bad?.last_error ?? null }; };
+  const out: HomeChannel[] = [];
+  for (const k of ['instagram', 'facebook', 'threads', 'youtube'] as ChannelKey[]) {
+    const c = PUBLISH_CHANNELS.find((x) => x.key === k)!;
+    const ready = kindReady(c.kind);
+    out.push({ key: k, label: c.label, kind: 'publish', ...pick(pubs, c.providers), connect: ready && c.kind === 'meta' ? '/api/marketing/publish/connect/meta' : null,
+      pending: ready ? null : c.kind === 'meta' ? '심사 후 열림 — 그동안 게시 도우미' : '준비 중 — 그동안 게시 도우미', signup: SIGNUP[k][0], ask: SIGNUP[k][1] });
+  }
+  for (const k of ['naver_blog', 'kakao_channel'] as ChannelKey[]) {
+    const c = PUBLISH_CHANNELS.find((x) => x.key === k)!;
+    out.push({ key: k, label: c.label, kind: 'helper', state: (sets.get(k) ?? c.on) ? 'helper' : 'none', account: null, error: null, connect: null, pending: '공식 쓰기 API 없음 — 게시 도우미(복사·열기)', signup: SIGNUP[k][0], ask: SIGNUP[k][1] });
+  }
+  for (const p of ['naver', 'google'] as const) {
+    out.push({ key: `ads_${p}`, label: AD_PROVIDERS[p], kind: 'ads', ...pick(ads, [p]), connect: p === 'naver' ? 'naver_form' : providerReady(p) ? `/api/marketing/ads/connect/${p}` : null,
+      pending: providerReady(p) ? null : '준비 중(워크인 앱 등록·심사 대기)', signup: SIGNUP[`ads_${p}`][0], ask: SIGNUP[`ads_${p}`][1] });
+  }
+  return out;
+}

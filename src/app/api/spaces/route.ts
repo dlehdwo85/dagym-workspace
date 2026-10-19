@@ -14,7 +14,7 @@ export const GET = handler(async ({ user }) => {
   if (spaces.includes('sales')) summary.sales = { text: '영업관리 이전 준비 중', badge: 0 };
   if (spaces.includes('marketing')) { // 앱 하단 탭 '승인 대기' 배지
     const n = await (await import('@/lib/marketing')).approvableCount(tenantOf(user)); // 승인함·현황과 같은 계산(마감 지남 제외)
-    summary.marketing = { text: n ? `승인할 시안 ${n}` : '마케팅 운영실', badge: n };
+    summary.marketing = { text: n ? `승인할 시안 ${n}` : '승인할 시안 없음', badge: n };
   }
   return { spaces, summary };
 });

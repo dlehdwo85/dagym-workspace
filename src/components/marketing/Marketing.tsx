@@ -1,12 +1,13 @@
 'use client';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PublishHelper } from './PublishHelper';
 import { TodayRow } from '@/components/sales/SalesSrc';
 import { MediaPick } from './MediaPick';
+import { NaverForm } from './Ads';
 import { ApprovalCard, BrandChip, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent } from './ApprovalCard';
 
 const C = '#7C3AED';
@@ -15,49 +16,128 @@ const CH_COLOR: Record<string, string> = { instagram: '#DB2777', facebook: '#256
 const STATUS: Record<string, string> = { pending: '승인 대기', approved: '승인됨', changes: '수정 요청', hold: '보류', published: '게시됨', draft: '초안' };
 type Content = { id: string; title: string; channel: string; status: string; scheduled_at: string | null; current_version: number; approved_version: number | null; brand: string | null; body: string; media_count: number; created_by_name: string; deadline: string | null; published_url: string | null };
 
-/** V41 4-2 마케팅 개요: 숫자 카드 4개 + 운영실(SSO) */
-export function MarketingHome({ ssoHref }: { ssoHref: string }) {
-  const { data, reload } = useApi<{ pending: number; today: number; week: number; changes: number; calls: number; todayRow?: { date: string; produced: number; approve_soon: number; post_today: number; posted_today: number };
-    home?: { queue: CardContent[]; todayPosts: CardContent[]; next: CardContent | null } }>('/api/marketing/overview');
-  const [allRows, setAllRows] = useState(false);
-  const cards: [string, number | undefined, string][] = [['승인 대기', data?.pending, '/s/marketing/approvals'], ['오늘 게시', data?.today, '/s/marketing/calendar'], ['이번 주 예약', data?.week, '/s/marketing/calendar'], ['새 전화 문의', data?.calls, '/s/marketing/calls']];
+type HomeCh = { key: string; label: string; kind: 'publish' | 'ads' | 'helper'; state: 'connected' | 'broken' | 'none' | 'helper'; account: string | null; error: string | null; connect: string | null; pending: string | null; signup: string; ask: string };
+type WeekPost = { id: string; title: string; channel: string; kind: string | null; status: string; scheduled_at: string; brand: string | null; failed: boolean; late: boolean };
+const CH_DOT: Record<HomeCh['state'], string> = { connected: '#16A34A', helper: '#16A34A', broken: '#DC2626', none: '#94A3B8' };
+const CH_STATE: Record<HomeCh['state'], string> = { connected: '연결됨', helper: '게시 도우미', broken: '끊김', none: '연결 안 함' };
+
+/** 채널 [연결] 하나: OAuth 주소면 이동, 네이버 검색광고는 입력 창, 준비 중이면 사유 */
+function ConnectButton({ ch, onNaver, label }: { ch: HomeCh; onNaver: () => void; label?: string }) {
+  if (ch.connect === 'naver_form') return <Button size="sm" onClick={onNaver} data-testid={`home-connect-${ch.key}`}>{label ?? '연결'}</Button>;
+  if (ch.connect) return <a href={ch.connect} className="rounded-input px-3 py-1.5 text-xs font-medium text-white" style={{ background: C }} data-testid={`home-connect-${ch.key}`}>{label ?? '연결'}</a>;
+  return <span className="text-[11px] text-ink-3" data-testid={`home-connect-${ch.key}`}>{ch.pending}</span>;
+}
+
+/** 처음 가입한 회사: 채널 고르기 → ① 계정 있나요? → ② 없으면 만들기 → ③ [연결] (연결 계정 화면으로 가지 않고 여기서) */
+function ChannelSetup({ channels, onNaver }: { channels: HomeCh[]; onNaver: () => void }) {
+  const list = channels.filter((c) => c.kind !== 'helper');
+  const [key, setKey] = useState(list[0]?.key ?? ''); const [has, setHas] = useState<boolean | null>(null);
+  const ch = list.find((c) => c.key === key);
+  return (
+    <section className="rounded-card border-2 border-violet-300 bg-white p-4 shadow-card" data-testid="mkt-channel-setup">
+      <h2 className="text-base font-bold">채널 연결 3단계</h2>
+      <p className="text-xs text-ink-2">연결한 채널은 승인한 시안을 워크인에서 바로 게시하고, 연결 전에는 게시 도우미(복사·열기)로 올립니다.</p>
+      <div className="mt-2 flex flex-wrap gap-1.5">{list.map((c) => <button key={c.key} type="button" onClick={() => { setKey(c.key); setHas(null); }} className={cx('rounded-full border px-2.5 py-1 text-xs', key === c.key ? 'border-violet-500 bg-violet-50 font-semibold text-violet-800' : 'border-line')} data-testid="setup-channel">{c.label}</button>)}</div>
+      {ch && <ol className="mt-3 space-y-2 text-sm">
+        <li data-testid="setup-step-1"><span className="font-semibold">1.</span> {ch.ask}
+          <span className="ml-2 inline-flex gap-1"><Button size="sm" variant={has === true ? 'primary' : 'secondary'} onClick={() => setHas(true)} data-testid="setup-yes">있어요</Button><Button size="sm" variant={has === false ? 'primary' : 'secondary'} onClick={() => setHas(false)} data-testid="setup-no">없어요</Button></span></li>
+        {has === false && <li data-testid="setup-step-2"><span className="font-semibold">2.</span> 먼저 계정을 만드세요 — <a href={ch.signup} target="_blank" rel="noopener" className="font-medium underline" style={{ color: C }} data-testid="setup-signup">{ch.label} 계정 만들기 ↗</a> <span className="text-xs text-ink-3">(만든 뒤 아래 [연결])</span></li>}
+        {has !== null && <li className="flex flex-wrap items-center gap-2" data-testid="setup-step-3"><span className="font-semibold">{has ? '2.' : '3.'}</span> <ConnectButton ch={ch} onNaver={onNaver} label={`${ch.label} 연결`} /></li>}
+      </ol>}
+    </section>
+  );
+}
+
+/** 지금 승인할 것 한 줄: 마감 시각 + 카드 안 [승인]/[수정 요청] */
+function ApproveRow({ c, canDecide, onDone }: { c: CardContent; canDecide: boolean; onDone: () => void }) {
+  const [mode, setMode] = useState<'idle' | 'changes'>('idle'); const [memo, setMemo] = useState(''); const [busy, setBusy] = useState(false);
+  async function decide(decision: 'approve' | 'changes') {
+    setBusy(true);
+    try { await api(`/api/marketing/contents/${c.id}/decide`, { body: { version: c.current_version, decision, comment: decision === 'changes' ? memo.trim() : undefined } }); toast.ok(decision === 'approve' ? '승인했습니다' : '수정을 요청했습니다'); onDone(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <li className="py-2 text-sm" data-testid="mkt-home-row">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Link href={`/s/marketing/approvals?c=${c.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{c.title}</Link>
+        {c.deadline && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-800" data-testid="mkt-home-deadline">{whenLabel(c.deadline)}까지</span>}
+      </div>
+      <p className="text-xs text-ink-2">{[c.brand, channelLabel(c.channel, c.kind)].filter(Boolean).join(' · ')} · {whenLabel(c.scheduled_at)} 게시{c.current_version > 1 ? ` · 수정본 v${c.current_version}` : ''}</p>
+      {!canDecide ? null : mode === 'idle' ? <div className="mt-1 flex gap-1.5"><Button size="sm" disabled={busy} onClick={() => decide('approve')} data-testid="home-approve">승인</Button><Button size="sm" variant="secondary" onClick={() => setMode('changes')} data-testid="home-changes">수정 요청</Button></div>
+        : <div className="mt-1 flex flex-wrap gap-1.5"><input className={cx(inputCls, 'min-w-0 flex-1')} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="무엇을 고칠지(두 글자 이상)" aria-label="수정 요청 메모" data-testid="home-changes-memo" />
+          <Button size="sm" disabled={busy || memo.trim().length < 2} onClick={() => decide('changes')} data-testid="home-changes-send">보내기</Button><Button size="sm" variant="secondary" onClick={() => setMode('idle')}>취소</Button></div>}
+    </li>
+  );
+}
+
+/**
+ * 마케팅 홈(로컬 10/19 대표): 상황에 따라 순서가 바뀜.
+ * 채널 0개 → '채널 연결 3단계' 맨 위 · 끊긴 채널 → 빨간 띠 한 줄 · 평소 ① 지금 승인할 것 ② 오늘·이번 주 게시 일정 ③ 성과 요약 ④ 채널 상태 한 줄(휴대폰은 ③④ 접힘).
+ * 게시 실행은 워크인 안에서(연결 채널 자동·그 밖은 게시 도우미) — 예전 운영실 사이트로 가는 버튼 없음.
+ */
+export function MarketingHome() {
+  const { data, reload } = useApi<{ pending: number; calls: number; home?: { queue: CardContent[] }; week?: WeekPost[]; perf?: { cost: number; clicks: number; calls: number }; channels?: HomeCh[]; canEdit?: boolean }>('/api/marketing/overview');
+  const [allRows, setAllRows] = useState(false); const [naver, setNaver] = useState(false);
+  const [wide, setWide] = useState(true);
+  useEffect(() => { const f = () => setWide(window.innerWidth >= 768); f(); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f); }, []);
+  if (!data) return <div className="mx-auto max-w-4xl" data-testid="space-home-marketing"><Skeleton className="h-40" /></div>;
+  const chs = data.channels ?? [];
+  const linked = chs.filter((c) => c.kind !== 'helper' && (c.state === 'connected' || c.state === 'broken')).length;
+  const broken = chs.filter((c) => c.state === 'broken');
+  const queue = data.home?.queue ?? [];
+  const week = data.week ?? [];
+  const days = [...new Set(week.map((w) => ymdK(w.scheduled_at)))];
+  const p = data.perf ?? { cost: 0, clicks: 0, calls: 0 };
   return (
     <div className="mx-auto max-w-4xl space-y-4" data-testid="space-home-marketing">
-      <h1 className="text-xl font-bold" style={{ color: C }}>워크인 · 마케팅</h1>
-      {data?.home && (
-        <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-now">
-          <p className="text-xs text-ink-2">{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short' }).format(new Date())}</p>
-          <h2 className="text-lg font-bold" data-testid="mkt-home-head">{data.pending ? <>승인할 시안 <span className="text-orange-700">{data.pending}건</span></> : '지금 대표가 할 일 없음 ✓'}</h2>
-          {data.home.queue.length > 0 && <ul className="mt-2 divide-y divide-line">{(allRows ? data.home.queue : data.home.queue.slice(0, 7)).map((c) => (
-            <li key={c.id} className="flex flex-wrap items-center gap-1.5 py-2 text-sm" data-testid="mkt-home-row">
-              <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-800">승인</span>
-              <Link href={`/s/marketing/approvals?c=${c.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{c.title}</Link>
-              <span className="w-full text-xs text-ink-2">{[c.brand, formatLabel(c.channel, c.kind)].filter(Boolean).join(' ')} · {whenLabel(c.scheduled_at)} 게시{c.deadline ? ` · ${deadlineLabel(c.deadline, c.scheduled_at)?.split('까지')[0]}까지 승인` : ''}{c.current_version > 1 ? ` · 수정본 v${c.current_version}` : ''}</span>
-            </li>))}</ul>}
-          {data.home.queue.length > 7 && !allRows && <button type="button" className="mt-1 text-xs underline" onClick={() => setAllRows(true)}>나머지 {data.home.queue.length - 7}건 펼치기</button>}
-          {data.home.queue.length > 0 ? <Link href="/s/marketing/approvals" className="mt-2 block text-xs font-medium" style={{ color: C }}>승인 {data.pending}건 모두 보기 →</Link>
-            : <p className="mt-1 text-xs text-ink-3">✓ 지금 승인할 시안이 없습니다. 새 시안이 올라오면 여기에 바로 보입니다.</p>}
-        </section>)}
-      {data?.home && (
-        <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-today">
-          <h2 className="text-sm font-semibold">오늘 게시 {data.home.todayPosts.length}건 <span className="font-normal text-ink-3">· 게시됨 {data.home.todayPosts.filter((c) => c.status === 'published').length}</span></h2>
-          {data.home.todayPosts.length ? <ul className="mt-1 divide-y divide-line">{data.home.todayPosts.map((c) => {
-            const st = c.status === 'published' ? 'published' : c.status === 'approved' ? 'planned' : c.deadline && new Date(c.deadline).getTime() < Date.now() ? 'late' : 'pending';
-            return <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5 text-sm" data-testid="mkt-today-row"><span className="w-12 tabular-nums text-ink-2">{whenLabel(c.scheduled_at).replace('오늘 ', '')}</span>
-              <span className="text-xs text-ink-2">{[c.brand, formatLabel(c.channel, c.kind)].filter(Boolean).join(' ')}</span><span className="min-w-0 flex-1 truncate">{c.title}</span><StatusChip s={st} /></li>; })}</ul>
-            : <p className="mt-1 text-xs text-ink-3" data-testid="mkt-next-post">오늘 예정된 게시가 없습니다.{data.home.next ? ` 다음 게시: ${whenLabel(data.home.next.scheduled_at)} · ${[data.home.next.brand, formatLabel(data.home.next.channel, data.home.next.kind)].filter(Boolean).join(' ')} · ${data.home.next.title}` : ''}</p>}
-        </section>)}
-      {data?.todayRow && <TodayRow date={data.todayRow.date} color={C} cards={[['오늘 제작된 시안', data.todayRow.produced, '/s/marketing/approvals?day=produced'],
-        ['오늘 승인할 것', data.todayRow.approve_soon, '/s/marketing/approvals?day=soon', '내일까지 게시 예정'], ['오늘 게시 예정', data.todayRow.post_today, '/s/marketing/approvals?day=today'], ['오늘 게시됨', data.todayRow.posted_today, '/s/marketing/approvals?day=published']]} />}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, n, h]) => (
-        <Link key={l} href={h} className="rounded-card border border-line bg-white p-4 shadow-card hover:border-violet-300" data-testid="mkt-card"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-2xl font-bold tabular-nums" style={{ color: C }}>{n ?? '—'}</div></Link>))}</div>
-      <section className="rounded-card border border-line bg-white p-4 shadow-card">
-        <p className="text-sm text-ink-2">게시 실행(예약 업로드)은 아직 마케팅 운영실에서 합니다. 승인·캘린더·자동 제작·광고 성과·전화 문의는 워크인에서 바로 쓰세요.</p>
-        <a href={ssoHref} target="_blank" rel="noopener" data-testid="marketing-open" className="mt-3 inline-block rounded-input px-4 py-2 text-sm font-medium text-white" style={{ background: C }}>마케팅 운영실 열기</a>
+      <h1 className="text-xl font-bold" style={{ color: C }}>홈</h1>
+      {broken.map((c) => (
+        <div key={c.key} className="flex flex-wrap items-center gap-2 rounded-card border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800" data-testid="mkt-broken-banner">
+          <span className="min-w-0 flex-1"><b>{c.label}</b> 연결이 끊겼습니다{c.account ? ` (${c.account})` : ''}</span>
+          {data.canEdit && <ConnectButton ch={c} onNaver={() => setNaver(true)} label="다시 연결" />}
+        </div>))}
+      {linked === 0 && data.canEdit && <ChannelSetup channels={chs} onNaver={() => setNaver(true)} />}
+      <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-now">
+        <h2 className="text-base font-bold" data-testid="mkt-home-head">{data.pending ? <>① 지금 승인할 것 <span className="text-orange-700">{data.pending}건</span></> : '① 지금 승인할 것 없음 ✓'}</h2>
+        {queue.length > 0 ? <ul className="divide-y divide-line">{(allRows ? queue : queue.slice(0, 5)).map((c) => <ApproveRow key={c.id} c={c} canDecide={!!data.canEdit} onDone={reload} />)}</ul>
+          : <p className="mt-1 text-xs text-ink-3">새 시안이 올라오면 마감 임박 순으로 여기에 보입니다.</p>}
+        {queue.length > 5 && !allRows && <button type="button" className="mt-1 text-xs underline" onClick={() => setAllRows(true)}>나머지 {queue.length - 5}건 펼치기</button>}
+        {queue.length > 0 && <Link href="/s/marketing/approvals" className="mt-2 block text-xs font-medium" style={{ color: C }}>승인 대기 전체 →</Link>}
       </section>
+      <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-week">
+        <h2 className="text-base font-bold">② 오늘·이번 주 게시 일정 <span className="text-sm font-normal text-ink-3">{week.length}건</span></h2>
+        {days.length ? days.map((d) => (
+          <div key={d} className="mt-2"><div className="text-xs font-semibold text-ink-2">{dayK(d)}</div>
+            <ul className="divide-y divide-line">{week.filter((w) => ymdK(w.scheduled_at) === d).map((w) => { const bad = w.failed || w.late;
+              return <li key={w.id} className={cx('flex flex-wrap items-center gap-2 py-1.5 text-sm', bad && 'text-red-700')} data-testid="mkt-week-row" data-bad={bad || undefined}>
+                <span className="w-11 tabular-nums">{whenLabel(w.scheduled_at).split(' ').pop()}</span>
+                <span className="text-xs text-ink-2">{[w.brand, channelLabel(w.channel, w.kind)].filter(Boolean).join(' ')}</span>
+                <Link href={`/s/marketing/approvals?c=${w.id}`} className="min-w-0 flex-1 truncate hover:underline">{w.title}</Link>
+                <StatusChip s={w.failed ? 'failed' : w.late ? 'late' : w.status === 'approved' ? 'planned' : w.status} /></li>; })}</ul></div>))
+          : <p className="mt-1 text-xs text-ink-3">이번 주 예정된 게시가 없습니다.</p>}
+        <Link href="/s/marketing/calendar" className="mt-2 block text-xs font-medium" style={{ color: C }}>콘텐츠 캘린더 →</Link>
+      </section>
+      <details open={wide} className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-perf">
+        <summary className="cursor-pointer text-base font-bold">③ 성과 요약 <span className="text-sm font-normal text-ink-3">최근 7일</span></summary>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+          {([['광고비', `${Math.round(p.cost).toLocaleString('ko-KR')}원`], ['클릭', p.clicks.toLocaleString('ko-KR')], ['전화·문의', `${p.calls}건`], ['문의 1건당', p.calls ? `${Math.round(p.cost / p.calls).toLocaleString('ko-KR')}원` : '—']] as [string, string][]).map(([l, v]) => (
+            <div key={l} className="rounded-input bg-slate-50 p-2" data-testid="mkt-perf-card"><div className="text-[11px] text-ink-2">{l}</div><div className="text-lg font-bold tabular-nums">{v}</div></div>))}
+        </div>
+        <Link href="/s/marketing/ads" className="mt-2 block text-xs font-medium" style={{ color: C }}>광고 성과 자세히 →</Link>
+      </details>
+      <details open={wide} className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-channels">
+        <summary className="cursor-pointer text-base font-bold">④ 채널 상태</summary>
+        <Link href="/s/marketing/connections" className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-xs" data-testid="mkt-channel-line">
+          {chs.map((c) => <span key={c.key} className="inline-flex items-center gap-1" data-testid="mkt-channel-dot" data-state={c.state} title={`${c.label}: ${CH_STATE[c.state]}${c.account ? ` (${c.account})` : ''}`}>
+            <span className="size-2 rounded-full" style={{ background: CH_DOT[c.state] }} />{c.label}{c.state === 'connected' && c.account ? <span className="text-ink-3">· {c.account}</span> : c.state !== 'connected' ? <span className="text-ink-3">· {CH_STATE[c.state]}</span> : null}</span>)}
+        </Link>
+      </details>
+      {naver && <NaverForm onClose={() => setNaver(false)} onDone={() => { setNaver(false); reload(); }} />}
     </div>
   );
 }
+const ymdK = (d: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
+const dayK = (d: string) => { const t = ymdK(new Date().toISOString()); if (d === t) return '오늘'; const x = new Date(`${d}T00:00:00Z`); return `${x.getUTCMonth() + 1}/${x.getUTCDate()}(${'일월화수목금토'[x.getUTCDay()]})`; };
 
 function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: () => void; date?: string }) {
   const brands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');

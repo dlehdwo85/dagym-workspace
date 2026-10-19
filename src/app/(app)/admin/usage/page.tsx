@@ -8,6 +8,7 @@ import { BillingSection } from '@/components/Billing';
 import { AiPeopleBudgets } from '@/components/AiPeopleBudgets';
 import { byPurposeRows } from '@/components/aiPurpose';
 import { TaskQuota } from '@/components/TaskQuota';
+import { IN_APP_BILLING_NOTE, useInApp } from '@/components/inApp';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const GB = 1024 ** 3;
@@ -20,6 +21,7 @@ const krw = (usd: number, rate: number) => won(Math.round(usd * rate));
 export default function UsagePage() {
   const { data, error, loading, reload } = useApi<any>('/api/usage');
   const [req, setReq] = useState<{ planCode: string; addons: Record<string, number>; note: string } | null>(null);
+  const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 가입·변경·팩·결제창·가격을 보이지 않음(사용량만)
   async function send(e: React.FormEvent) {
     e.preventDefault(); if (!req) return;
     try {
@@ -32,16 +34,17 @@ export default function UsagePage() {
   const { subscription: s, limits, usage, plans, addons, topFiles, requests, ai, canEdit } = data;
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <PageHeader title="사용량·요금제" icon={Gauge} sub="회사 전체 저장공간·AI 요청·사용자 수. 한도를 넘어도 업무·일정은 그대로 쓰고, 새 파일 올리기·AI·초대만 멈춥니다."
-        actions={canEdit && <Button onClick={() => setReq({ planCode: '', addons: {}, note: '' })} data-testid="plan-request">요금제 변경 요청</Button>} />
-      <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="current-plan">
+      <PageHeader title={inApp ? '사용량' : '사용량·요금제'} icon={Gauge} sub="회사 전체 저장공간·AI 요청·사용자 수. 한도를 넘어도 업무·일정은 그대로 쓰고, 새 파일 올리기·AI·초대만 멈춥니다."
+        actions={canEdit && !inApp && <Button onClick={() => setReq({ planCode: '', addons: {}, note: '' })} data-testid="plan-request">요금제 변경 요청</Button>} />
+      {inApp && <p className="rounded-card border border-line bg-white p-4 text-sm text-ink-2 shadow-card" data-testid="in-app-billing-note">{IN_APP_BILLING_NOTE}</p>}
+      {!inApp && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="current-plan">
         <div className="text-sm text-ink-2">현재 요금제</div>
         <div className="text-xl font-bold">{s.planName} <span className="text-base font-normal text-ink-2">{s.monthlyKrw === null ? '별도 협의' : s.perUserKrw ? `1인 월 ${won(s.perUserKrw)} · 이번 달 약 ${won(s.monthlyKrw)}` : `월 ${won(s.monthlyKrw)}`}</span></div>
         <div className="mt-1 text-xs text-ink-3">
           {Object.entries(s.addons ?? {}).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${addons.find((a: any) => a.code === k)?.name ?? k} ×${v}`).join(' · ') || '추가 옵션 없음'}
           {s.periodEnd && ` · 다음 갱신일 ${fmtDate(s.periodEnd)}`}{s.status !== 'active' && ` · ${s.status === 'trial' ? '체험 중' : '일시 중지'}`}
         </div>
-      </section>
+      </section>}
       <div className="grid gap-3 sm:grid-cols-3">
         <Meter label="저장공간" icon={HardDrive} used={usage.storageBytes / GB} limit={limits.storageGb} usedLabel={fmtBytes(usage.storageBytes)} limitLabel={lim(limits.storageGb, 'GB')} testid="meter-storage" />
         <Meter label="이번 달 AI 비용" icon={Sparkles} used={ai.costUsd} limit={ai.limitUsd} usedLabel={`약 ${krw(ai.costUsd, ai.usdKrw)}`} limitLabel={`약 ${krw(ai.limitUsd, ai.usdKrw)}`} testid="meter-ai" />
@@ -49,7 +52,7 @@ export default function UsagePage() {
       </div>
       {limits.tasksTotal != null && <TaskQuota used={usage.tasks} limit={limits.tasksTotal} canEdit={canEdit} onChanged={reload} />}
       {/* V14 4번: 이번 달 AI 사용 — 사람별·기능별, 한도 대비 % */}
-      <BillingSection />
+      {!inApp && <BillingSection />}
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-usage">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">이번 달 AI 사용</h2>
@@ -112,7 +115,7 @@ export default function UsagePage() {
           {!topFiles.length && <li className="py-2 text-ink-3">아직 파일이 없습니다</li>}
         </ul>
       </section>
-      <section className="rounded-card border border-line bg-white p-4 shadow-card">
+      {!inApp && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="plan-table">
         <h2 className="text-sm font-semibold">요금제 (VAT 별도 · 1인 월 · 최소 3인 · 30인 이상 10% 할인)</h2>
         <div className="mt-2 overflow-x-auto">
           <table className="w-full min-w-[480px] text-sm">
@@ -135,8 +138,8 @@ export default function UsagePage() {
             {requests.map((r: any) => <li key={r.id}>{fmtDateTime(r.created_at)} · {r.requested_by_name} · {r.plan_code ? plans.find((p: any) => p.code === r.plan_code)?.name ?? r.plan_code : '추가 옵션'} · <b>{{ pending: '검토 중', approved: '반영됨', rejected: '반려' }[r.status as 'pending']}</b></li>)}
           </ul>
         )}
-      </section>
-      <Modal open={!!req} onClose={() => setReq(null)} title="요금제 변경 요청">
+      </section>}
+      <Modal open={!!req && !inApp} onClose={() => setReq(null)} title="요금제 변경 요청">
         {req && (
           <form onSubmit={send} className="space-y-3">
             <Field label="요금제">

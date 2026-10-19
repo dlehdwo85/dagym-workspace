@@ -9,7 +9,19 @@ export async function marketing({ owner, BASE, sql }) {
   await owner.getByTestId('space-switch').waitFor();
   await owner.goto(`${BASE}/s/marketing`);
   await owner.getByTestId('space-home-marketing').waitFor();
-  assert.equal(await owner.getByTestId('mkt-card').count(), 4);
+  // 로컬 10/19(대표): 홈 — 연결 0개면 '채널 연결 3단계'(계정 있나요? → 없으면 만들기 → [연결]), ① 승인 ② 게시 일정 ③ 성과 ④ 채널, 운영실 버튼 없음
+  await owner.getByTestId('mkt-channel-setup').waitFor();
+  assert.equal(await owner.getByTestId('marketing-open').count(), 0, '예전 운영실로 가는 버튼 없음');
+  await owner.getByTestId('mkt-channel-setup').getByTestId('setup-channel').filter({ hasText: '네이버 검색광고' }).click();
+  await owner.getByTestId('setup-no').click();
+  assert.equal(await owner.getByTestId('setup-signup').getAttribute('target'), '_blank');
+  await owner.getByTestId('home-connect-ads_naver').click();
+  await owner.getByTestId('naver-form').waitFor(); // 연결 계정 화면으로 가지 않고 홈에서 바로 입력 창
+  await owner.keyboard.press('Escape');
+  for (const id of ['mkt-home-now', 'mkt-home-week', 'mkt-home-perf', 'mkt-home-channels']) await owner.getByTestId(id).waitFor();
+  assert.equal(await owner.getByTestId('mkt-channel-dot').count(), 8);
+  assert.equal(await owner.locator('aside a[aria-current="page"]').first().innerText(), '홈');
+  assert.equal(await owner.evaluate(() => document.documentElement.dataset.space), 'marketing', '공간 강조색 = 마케팅 보라(버튼·모달 공통)');
   await owner.getByRole('link', { name: '승인 대기' }).first().click();
   await owner.waitForURL(/\/s\/marketing\/approvals$/);
   await owner.getByTestId('mkt-new-open').click();

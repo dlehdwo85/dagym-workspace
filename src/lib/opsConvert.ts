@@ -110,13 +110,17 @@ function assetPlan(d: Awaited<ReturnType<typeof load>>, contents: Content[]) {
   const all: Asset[] = [];
   const byId = new Map<string, Asset>();
   // 운영실 마케팅 세션이 준 'id → 주소' 목록(관리자가 올림)이 먼저 — 확장자·형식 검사 없이 주소만 허용 도메인 확인
+  const mapDaily: (Asset & { order: number })[] = [];
   for (const r of d.assetRows) if (r.key === ASSET_MAP_KEY) for (const m of normMap(r.item)) {
-    const url = safeUrl(m.url); if (url && !byId.has(m.id)) byId.set(m.id, { id: m.id, url, name: m.name, type: m.type, cover: m.cover, owner: null, libRef: null });
+    const url = safeUrl(m.url); if (!url) continue;
+    if (m.owner) { mapDaily.push({ id: m.id, url, name: m.name, type: m.type, cover: m.cover, owner: m.owner, libRef: null, order: m.order ?? 99 }); continue; }
+    if (!byId.has(m.id)) byId.set(m.id, { id: m.id, url, name: m.name, type: m.type, cover: m.cover, owner: null, libRef: null });
   }
+  mapDaily.sort((a, b) => a.order - b.order);
   for (const r of d.assetRows) if (r.key !== 'mkt:posts:v1' && r.key !== ASSET_MAP_KEY) scanAssets(r.item, all, null, r.key === 'mkt:library:v1');
   for (const a of all) if (a.id && !byId.has(a.id)) byId.set(a.id, a);
   const postsById = new Map((d.posts as Raw[]).filter((p) => p?.id).map((p) => [String(p.id), p]));
-  const plan = new Map<string, Asset[]>(); const missing = new Set<string>();
+  const plan = new Map<string, Asset[]>(); const missing = new Set<string>(); const dailyNoFiles: string[] = [];
   for (const c of contents) {
     let list: Asset[] = [];
     if (c.srcKey === SRC_POSTS) {
@@ -127,25 +131,41 @@ function assetPlan(d: Awaited<ReturnType<typeof load>>, contents: Content[]) {
       for (const id of cover ? [cover, ...ids.filter((x) => x !== cover)] : ids) { const a = byId.get(id) ?? inline.find((x) => x.id === id); if (a) list.push(a); else missing.add(id); }
       for (const a of inline) if (!list.some((x) => x.url === a.url)) list.push(a);
     } else {
-      list = all.filter((a) => a.owner === c.srcRef);
+      list = [...mapDaily.filter((a) => a.owner === c.srcRef), ...all.filter((a) => a.owner === c.srcRef)]; // 올린 목록(media-map daily) 먼저
       for (const id of (Array.isArray(((d.daily ?? {}) as Raw)[c.srcRef]?.assetIds) ? ((d.daily as Raw)[c.srcRef].assetIds as unknown[]).map(String) : [])) { const a = byId.get(id); if (a) list.push(a); else missing.add(id); }
     }
     const seen = new Set<string>(); list = list.filter((a) => (seen.has(a.url) ? false : (seen.add(a.url), true)));
     list.sort((a, b) => Number(b.cover) - Number(a.cover)); // 표지 먼저(나머지는 원본 순서)
     if (list.length) plan.set(`${c.srcKey}|${c.srcRef}`, list.slice(0, 20));
+    else if (c.srcKey === SRC_DAILY) dailyNoFiles.push(c.srcRef); // 로컬 10/19: 그림 기록이 없는 일일 항목 — 마케팅에 다시 물을 목록
   }
-  return { plan, missing: [...missing], found: all.length };
+  return { plan, missing: [...missing], dailyNoFiles, found: all.length };
 }
-/** 'id → 주소' 목록 형식: { id: "주소" } · { id: { url, name, type } } · [{ id, url, name?, type? }] · { assets: [...] } */
-function normMap(v: unknown): { id: string; url: string; name: string | null; type: string | null; cover: boolean }[] {
-  const out: { id: string; url: string; name: string | null; type: string | null; cover: boolean }[] = [];
-  const one = (id: unknown, x: any) => {
+/**
+ * 'id → 주소' 목록 형식: { id: "주소" } · { id: { url, name|title, type } } · [{ id, url, … }] · { assets: [...] | { id: {...} } }
+ * 로컬 10/19 media-map.json: { assets: {...}, daily: { 'dYYYYMMDD-브랜드-종류': { files: [{ url, order, … }] } } } — 일일 항목 파일은 그 항목 것(order 1 = 표지)
+ */
+type MapRow = { id: string; url: string; name: string | null; type: string | null; cover: boolean; owner?: string | null; order?: number };
+function normMap(v: unknown): MapRow[] {
+  const out: MapRow[] = [];
+  const meta = (x: any) => (x && typeof x === 'object' ? x : null);
+  const one = (id: unknown, x: any, owner: string | null = null, order?: number) => {
     const url = typeof x === 'string' ? x : URL_KEYS.map((k) => x?.[k]).find((y) => typeof y === 'string');
-    if (id != null && String(id).trim() && typeof url === 'string') out.push({ id: String(id).trim().slice(0, 200), url: url.trim(), name: typeof x === 'object' && x ? String(x.name ?? x.fileName ?? '') || null : null, type: typeof x === 'object' && x ? String(x.type ?? x.mimeType ?? '') || null : null, cover: !!(x && typeof x === 'object' && (x.cover || x.role === 'cover')) });
+    const m = meta(x);
+    if (id != null && String(id).trim() && typeof url === 'string') out.push({ id: String(id).trim().slice(0, 200), url: url.trim(), name: m ? String(m.name ?? m.fileName ?? m.title ?? '') || null : null,
+      type: m ? String(m.type ?? m.mimeType ?? m.mime ?? '') || null : null, cover: !!(m && (m.cover || m.role === 'cover' || Number(m.order) === 1)) || order === 1, owner, order });
   };
-  const arr = Array.isArray(v) ? v : Array.isArray((v as Raw)?.assets) ? (v as Raw).assets : null;
-  if (arr) for (const x of arr) one(x?.id ?? x?.assetId, x);
-  else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v as Raw)) one(k, x);
+  const V = v as Raw;
+  const assets = Array.isArray(v) ? v : V && typeof V === 'object' && 'assets' in V ? V.assets : V && typeof V === 'object' && 'daily' in V ? null : v;
+  if (Array.isArray(assets)) for (const x of assets) one(x?.id ?? x?.assetId, x, typeof x?.owner === 'string' ? x.owner : null, Number(x?.order) || undefined); // 저장된 목록을 다시 읽을 때도 일일 항목·순서 유지
+  else if (assets && typeof assets === 'object') for (const [k, x] of Object.entries(assets as Raw)) one(k, x);
+  const daily = V && typeof V === 'object' && !Array.isArray(V) ? V.daily : null;
+  const dailyEntries: [string, any][] = Array.isArray(daily) ? daily.map((x: any) => [String(x?.id ?? x?.itemId ?? ''), x]) : daily && typeof daily === 'object' ? Object.entries(daily) : [];
+  for (const [item, x] of dailyEntries) {
+    if (!DAILY_ID.test(item)) continue;
+    const files: any[] = Array.isArray(x) ? x : Array.isArray(x?.files) ? x.files : [];
+    files.forEach((f, k) => { const order = Number(f?.order) || k + 1; one(f?.id ?? f?.assetId ?? `${item}#${order}`, f, item, order); });
+  }
   return out;
 }
 export const assetMapInput = z.object({ map: z.unknown() });
@@ -169,10 +189,10 @@ export async function saveAssetMap(u: SessionUser, i: z.infer<typeof assetMapInp
 const FILE_EACH = 100 * 1024 * 1024;
 async function copyAssets(u: SessionUser, t: string, d: Awaited<ReturnType<typeof load>>, contents: Content[]) {
   const sql = db();
-  const { plan, missing } = assetPlan(d, contents);
+  const { plan, missing, dailyNoFiles } = assetPlan(d, contents);
   const { putObject } = await import('./storage');
   const started = Date.now();
-  const out = { contents: plan.size, linked: 0, copied: 0, reused: 0, failed: 0, left: 0, missing: missing.slice(0, 30), missingCount: missing.length, errors: [] as string[] };
+  const out = { contents: plan.size, linked: 0, copied: 0, reused: 0, failed: 0, left: 0, missing: missing.slice(0, 200), missingCount: missing.length, dailyNoFiles, errors: [] as string[] };
   const fileOf = new Map<string, string>();
   const rows = plan.size ? await sql<{ id: string; k: string; brand: string | null; version: number; media_ids: string[] }[]>`
     select c.id, c.src_key || '|' || c.src_ref as k, b.name as brand, v.version, v.media_ids from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version
@@ -282,7 +302,7 @@ export async function convertOps(u: SessionUser, i: z.infer<typeof convertInput>
     decisions: fresh.reduce((n, c) => n + c.decisions.length, 0), withUrl: contents.filter((c) => c.url).length, mapping, channels,
     brands: Object.fromEntries([...new Set(contents.map((c) => c.brand ?? '(없음)'))].map((b) => [b, contents.filter((c) => (c.brand ?? '(없음)') === b).length])),
     unknownBrands: [...new Set(contents.map((c) => c.brand).filter((b) => b && !Object.values(BRAND_CODE).includes(b)))], sample: contents.slice(0, 8).map((c) => ({ title: c.title, brand: c.brand, channel: c.channel, status: c.status, url: !!c.url })) };
-  if (i.mode === 'preview') { const ap = assetPlan(d, contents); return { mode: 'preview', ...summary, assets: { contents: ap.plan.size, files: [...ap.plan.values()].reduce((n, l) => n + l.length, 0), missingCount: ap.missing.length, missing: ap.missing.slice(0, 30) } }; }
+  if (i.mode === 'preview') { const ap = assetPlan(d, contents); return { mode: 'preview', ...summary, assets: { contents: ap.plan.size, files: [...ap.plan.values()].reduce((n, l) => n + l.length, 0), missingCount: ap.missing.length, missing: ap.missing.slice(0, 200), dailyNoFiles: ap.dailyNoFiles } }; }
   let made = 0, reqs = 0;
   await sql.begin(async (tx) => {
     const brandIds = new Map<string, string>();

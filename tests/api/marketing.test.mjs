@@ -26,6 +26,33 @@ describe('V41 4-2 마케팅', () => {
     await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   });
 
+  test('로컬 10/19 마케팅 홈: 채널 상태(연결 안 함·끊김·연결됨)·이번 주 게시(지연)·성과 7일·운영실 버튼 없음', async () => {
+    const [{ tenant }] = await sql`select tenant from users where id = ${ctx.ownerId}`;
+    let ov = await ctx.owner.ok('GET', '/api/marketing/overview');
+    const keys = ov.channels.map((c) => c.key);
+    assert.deepEqual(keys, ['instagram', 'facebook', 'threads', 'youtube', 'naver_blog', 'kakao_channel', 'ads_naver', 'ads_google']);
+    assert.ok(ov.channels.filter((c) => c.kind !== 'helper').every((c) => c.state === 'none'), '처음엔 연결 0개');
+    assert.equal(ov.channels.find((c) => c.key === 'ads_naver').connect, 'naver_form');
+    assert.ok(ov.channels.every((c) => c.signup.startsWith('https://') && c.ask), '계정 만들기 주소·질문');
+    assert.equal(ov.channels.find((c) => c.key === 'naver_blog').state, 'helper', '블로그는 게시 도우미');
+    assert.equal(ov.canEdit, true);
+    const [acc] = await sql`insert into mkt_ad_accounts (tenant, provider, external_id, label, status, last_error) values (${tenant}, 'naver', '1234', '다짐 검색광고', 'error', '키 만료') returning id`;
+    await sql`insert into mkt_ad_stats (account_id, day, campaign_id, campaign_name, impressions, clicks, cost_krw) values (${acc.id}, (now() at time zone 'Asia/Seoul')::date - 1, 'c1', '캠페인', 100, 12, 36000)`;
+    await sql`insert into mkt_calls (tenant, phone, created_by) values (${tenant}, '010-1111-2222', ${ctx.ownerId}), (${tenant}, '010-1111-3333', ${ctx.ownerId})`;
+    const [late] = await sql`insert into mkt_contents (tenant, title, channel, scheduled_at, status, current_version, created_by) values (${tenant}, '지난 게시', 'instagram', now() - interval '1 hour', 'approved', 1, ${ctx.ownerId}) returning id`;
+    ov = await ctx.owner.ok('GET', '/api/marketing/overview');
+    const nv = ov.channels.find((c) => c.key === 'ads_naver');
+    assert.deepEqual([nv.state, nv.account, nv.error], ['broken', '다짐 검색광고', '키 만료']);
+    assert.deepEqual([ov.perf.cost, ov.perf.clicks, ov.perf.calls], [36000, 12, 2]);
+    const w = ov.week.find((x) => x.id === late.id);
+    assert.ok(w && w.late && !w.failed, '지난 시각인데 게시 안 됨 = 지연');
+    const st = await ctx.staffA.client.ok('GET', '/api/marketing/overview');
+    assert.equal(st.canEdit, false, '직원은 [연결]·승인 버튼 없음');
+    const html = String((await ctx.owner.get('/s/marketing')).body);
+    assert.ok(!html.includes('marketing-open') && !html.includes('마케팅 운영실 열기'), '운영실로 가는 버튼 없음');
+    await sql`delete from mkt_contents where id = ${late.id}`; await sql`delete from mkt_ad_accounts where id = ${acc.id}`; await sql`delete from mkt_calls where tenant = ${tenant}`;
+  });
+
   test('버전 승인 규칙·게시 확인', async () => {
     const st = ctx.staffA.client;
     const at = new Date(Date.now() + 3 * 864e5).toISOString();

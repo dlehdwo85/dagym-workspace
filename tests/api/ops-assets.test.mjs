@@ -66,4 +66,19 @@ test('자산 복사·표지 먼저·이어 붙이기·멱등·못 찾은 id 안�
   const ap2 = await ctx.owner.ok('POST', '/api/marketing/imported/convert', { mode: 'apply' });
   assert.equal(ap2.made, 1);
   assert.deepEqual((await media('소개 1', 'instagram')).names, ['intro1.png', '소개2.png'], '목록의 주소로 복사·연결(원본 순서)');
+  // 로컬 10/19 media-map.json 형식: { assets: { id: { url, kind, title } }, daily: { 일일 id: { files: [{ url, order }] } } } — order 1 = 표지, 그림 없는 일일 항목은 목록으로
+  await sql`update ops_import_items set item = item || ${sql.json({ 'd20261021-dg-feed': { status: 'pending', version: 1, history: [] }, 'd20261022-dg-feed': { status: 'pending', version: 1, history: [] } })} where tenant = ${tenant} and key = 'mkt:daily:decisions:v1'`;
+  await put('mkt:posts:v1', 2, { id: 'p3', brand: 'dg', title: '소개 2', status: 'pending', channels: ['INSTAGRAM'], assetIds: ['m1', 'm-none'] });
+  const up3 = await ctx.owner.ok('POST', '/api/marketing/imported/asset-map', { map: { assets: { m1: { url: `${B}/blob/m1.png`, kind: 'image', title: '소개 사진.png', group: 'intro', aiGenerated: false } },
+    daily: { 'd20261021-dg-feed': { files: [{ url: `${B}/blob/f2.png`, order: 2, title: '둘째.png' }, { url: `${B}/blob/f1.png`, order: 1, title: '표지컷.png' }] } } } });
+  assert.equal(up3.count, 3, '자산 1 + 일일 파일 2');
+  const pv3 = await ctx.owner.ok('POST', '/api/marketing/imported/convert', { mode: 'preview' });
+  assert.ok(pv3.assets.missing.includes('m-none') && !pv3.assets.missing.includes('m1'));
+  assert.ok(pv3.assets.dailyNoFiles.includes('d20261022-dg-feed') && !pv3.assets.dailyNoFiles.includes('d20261021-dg-feed'), `그림 없는 일일 항목 목록 ${JSON.stringify(pv3.assets)}`);
+  const ap3 = await ctx.owner.ok('POST', '/api/marketing/imported/convert', { mode: 'apply' });
+  assert.ok(ap3.assets.dailyNoFiles.includes('d20261022-dg-feed'));
+  assert.deepEqual((await media('소개 2', 'instagram')).names, ['소개 사진.png']);
+  assert.deepEqual((await media('10/21 다짐 피드', 'instagram')).names, ['표지컷.png', '둘째.png'], 'order 1 = 표지 먼저');
+  const again3 = await ctx.owner.ok('POST', '/api/marketing/imported/convert', { mode: 'apply' });
+  assert.deepEqual([again3.made, again3.assets.copied, again3.assets.linked], [0, 0, 0], '두 번 적용해도 한 번만');
 });

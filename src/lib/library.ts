@@ -138,7 +138,7 @@ async function requireFolder(u: SessionUser, folder: string, need: 'view' | 'edi
 /** 대표 지시(10/18): 공간별 자료실 — 볼 수 있는 공간(업무 + 배정된 영업·마케팅)의 자료만, space 를 고르면 그 공간만 */
 export async function librarySpaces(u: SessionUser) { return (await (await import('./spaces')).userSpaces(u)) as string[]; }
 export async function listLibrary(u: SessionUser, q: { q?: string; folder?: string; limit?: number; review?: boolean; space?: string }) {
-  denyDemo(u);
+  // 스토어 심사(10/19): 체험 계정도 자료실 보기는 됨(예시 파일) — 올리기·폴더 바꾸기는 막음
   const mySpaces = await librarySpaces(u);
   if (q.space && q.space !== 'all' && !mySpaces.includes(q.space)) throw notFound();
   const spaceList = q.space && q.space !== 'all' ? [q.space] : mySpaces;
@@ -231,7 +231,7 @@ export async function saveGeneratedFile(u: SessionUser, p: { fileName: string; m
 
 /** purpose: open(보기·고치기) · download(내려받기) · ai(AI 가 읽음) — 기밀이면 누가·언제를 감사 기록에 남긴다 */
 export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open' | 'download' | 'ai' | 'meta' = 'open') {
-  denyDemo(u);
+  if (purpose === 'ai') denyDemo(u); // 체험 계정: 보기·내려받기는 됨, AI 읽기는 막음
   if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('자료가 없습니다');
   const [f] = await db()<any[]>`select * from library_files where id = ${id} and tenant = ${tenantOf(u)} and deleted_at is null`;
   if (!f) throw notFound('자료가 없습니다'); // 다른 회사 자료는 없는 것처럼

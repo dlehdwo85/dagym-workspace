@@ -20,7 +20,7 @@ const NAVER_API_PAGE = 'https://manage.searchad.naver.com/';
 function Shot({ step, children }: { step: number; children: React.ReactNode }) {
   return <div className="rounded-input border border-line bg-slate-50 p-2 text-[11px] text-ink-2" aria-hidden data-testid={`naver-shot-${step}`}>{children}</div>;
 }
-function NaverForm({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+export function NaverForm({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const brands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
   const [f, setF] = useState({ label: '', customerId: '', apiKey: '', secretKey: '', brandId: '' });
   const [busy, setBusy] = useState(false);

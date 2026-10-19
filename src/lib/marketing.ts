@@ -67,7 +67,18 @@ export async function overview(u: SessionUser) {
       count(*) filter (where status = 'approved' and (scheduled_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date)::int as post_today,
       count(*) filter (where status = 'published' and (published_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date)::int as posted_today
     from mkt_contents where tenant = ${t} and not is_test`;
-  return { ...c, pending: await approvableCount(t), calls: k.calls, todayRow: d, home: await homeNow(t) };
+  // 로컬 10/19(대표): 홈 = 채널 상태(연결 0개면 3단계·끊김이면 빨간 띠) · 이번 주 게시 일정(지연 빨강) · 성과 요약(최근 7일 광고비 대비 전화·문의)
+  const week = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.status, c.scheduled_at, b.name as brand,
+      exists (select 1 from mkt_publish_jobs j where j.content_id = c.id and j.status = 'failed') as failed,
+      (c.status <> 'published' and c.scheduled_at < now()) as late
+    from mkt_contents c left join mkt_brands b on b.id = c.brand_id
+    where c.tenant = ${t} and not c.is_test and c.status in ('pending', 'changes', 'approved', 'published', 'hold')
+      and (c.scheduled_at at time zone 'Asia/Seoul')::date between (now() at time zone 'Asia/Seoul')::date and (now() at time zone 'Asia/Seoul')::date + 6 order by c.scheduled_at limit 60`;
+  const [perf] = await sql<any[]>`select coalesce((select sum(s.cost_krw) from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.day >= (now() at time zone 'Asia/Seoul')::date - 6), 0)::float8 as cost,
+      coalesce((select sum(s.clicks) from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.day >= (now() at time zone 'Asia/Seoul')::date - 6), 0)::float8 as clicks,
+      (select count(*) from mkt_calls where tenant = ${t} and called_at >= now() - interval '7 days')::int as calls`;
+  const { homeChannels } = await import('./mktChannels');
+  return { ...c, pending: await approvableCount(t), calls: k.calls, todayRow: d, home: await homeNow(t), week, perf, channels: await homeChannels(u), canEdit: isAdmin(u) };
 }
 
 export async function listBrands(u: SessionUser) { await assertSpace(u, 'marketing'); return { brands: await db()`select id, name, color from mkt_brands where tenant = ${tenantOf(u)} order by name` }; }

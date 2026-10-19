@@ -76,7 +76,7 @@ export function OpsHistory() {
 
 type Conv = { mode: string; posts: number; daily: number; requests: number; revisions: number; newContents: number; existing: number; decisions: number; withUrl: number;
   mapping: Record<string, number>; channels: Record<string, number>; brands: Record<string, number>; unknownBrands: string[]; sample: { title: string; brand: string | null; channel: string; status: string; url: boolean }[]; made?: number; requestsMade?: number;
-  assets?: { contents: number; files?: number; linked?: number; copied?: number; reused?: number; failed?: number; left?: number; missingCount: number; missing: string[]; errors?: string[] } };
+  assets?: { contents: number; files?: number; linked?: number; copied?: number; reused?: number; failed?: number; left?: number; missingCount: number; missing: string[]; dailyNoFiles?: string[]; errors?: string[] } };
 const ST: Record<string, string> = { published: '게시됨', approved: '승인', pending: '승인 대기', changes: '수정 요청', hold: '보류', canceled: '취소', draft: '초안' };
 /** 운영실 기록 → 워크인 콘텐츠·결정·요청 기록(미리보기로 상태 매핑 확인 → 적용, 같은 원본은 한 번만) */
 function ConvertPanel() {
@@ -115,7 +115,11 @@ function ConvertPanel() {
           {/* 로컬 10/19: 운영실 자산(시안 사진·영상) → 워크인 저장소 → 콘텐츠 버전에 표지 먼저 연결, 이미 옮긴 콘텐츠도 [옮기기]로 이어 붙임 */}
           {r.assets && <p data-testid="ops-convert-assets">시안 자산: 연결할 콘텐츠 <b>{r.assets.contents}</b>건{r.assets.files != null && <> · 파일 {r.assets.files}개</>}
             {r.mode === 'apply' && <> · <b className="text-emerald-800">연결 {r.assets.linked} · 복사 {r.assets.copied} · 재사용 {r.assets.reused}</b>{!!r.assets.failed && <span className="text-red-700"> · 실패 {r.assets.failed}</span>}{!!r.assets.left && <> · 남음 {r.assets.left}(한 번 더 [옮기기])</>}</>}
-            {r.assets.missingCount > 0 && <span className="text-amber-800"> · 주소를 못 찾은 자산 id {r.assets.missingCount}개({r.assets.missing.slice(0, 5).join(', ')}{r.assets.missingCount > 5 ? ' …' : ''})</span>}</p>}
+            {r.assets.missingCount > 0 && <span className="text-amber-800"> · 주소를 못 찾은 자산 id {r.assets.missingCount}개</span>}</p>}
+          {/* 로컬 10/19: 남는 미매칭 목록 전체 — 마케팅에 다시 물을 수 있게 복사 가능한 글로 */}
+          {r.assets && (r.assets.missingCount > 0 || !!r.assets.dailyNoFiles?.length) && (
+            <details className="text-amber-900" data-testid="ops-convert-missing"><summary className="cursor-pointer">미매칭 목록 보기(자산 {r.assets.missingCount} · 그림 없는 일일 항목 {r.assets.dailyNoFiles?.length ?? 0})</summary>
+              <textarea readOnly className="mt-1 h-32 w-full rounded border border-line p-1 font-mono text-[11px]" value={[...(r.assets.missing.length ? ['# 자산 id', ...r.assets.missing] : []), ...(r.assets.dailyNoFiles?.length ? ['# 일일 항목', ...r.assets.dailyNoFiles] : [])].join('\n')} aria-label="미매칭 목록" /></details>)}
           <p className="font-medium">상태 매핑(원본 값 → 워크인)</p>
           <ul className="grid gap-x-4 sm:grid-cols-2">{Object.entries(r.mapping).map(([k, n]) => <li key={k}>{k.replace(/→ (\w+)$/, (_m, x) => `→ ${ST[x] ?? x}`)} · {n}건</li>)}</ul>
           <p>채널: {Object.entries(r.channels).map(([k, n]) => `${k} ${n}`).join(' · ')}</p>

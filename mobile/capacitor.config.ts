@@ -14,6 +14,8 @@ const config: CapacitorConfig = {
     allowNavigation: [new URL(appUrl).host],
     errorPath: 'offline.html',
   },
+  // 스토어 심사(10/19): 웹이 앱 안인지 알아보는 표시(결제 화면 숨김) — isNativePlatform 과 함께 씀
+  appendUserAgent: 'WorkInApp',
   android: { allowMixedContent: false },
   // V14 51: 끌어당김 때 상단 흰/검정 띠 방지 — 웹이 safe-area 만큼 머리줄을 내리므로 네이티브 inset 은 끈다
   ios: { contentInset: 'never', backgroundColor: '#ffffff', limitsNavigationsToAppBoundDomains: false },

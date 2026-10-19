@@ -1,7 +1,7 @@
 // V41 단계 1 공간 틀: 관리 › 사용자 › 공간에서 영업 켜기 → PC 공간 카드 드롭다운으로 영업(파란 강조) → Ctrl+1 로 업무 →
 // 휴대폰 프로필 시트 공간 전환 → 뒤로가기 = 업무 · 영업 미배정 직원은 공간 카드 없음·주소 404 → 끄기
 import assert from 'node:assert/strict';
-export async function spaces({ browser, desk, owner, staff, BASE, sql }) {
+export async function spaces({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
@@ -55,6 +55,11 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql }) {
   await m.getByTestId('sheet-space-sales').tap();
   await m.waitForURL(/\/s\/sales$/);
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
+  // 로컬 10/19(대표): 앱도 공간 색 — 머리줄 로고(공간 아이콘)·하단 탭 선택 색·강조 버튼이 영업 파랑, 공간 바꾸면 바로
+  await m.getByTestId('mobile-space-logo').waitFor();
+  const onColor = () => m.getByTestId('mobile-tabs').locator('a.font-bold').first().evaluate((el) => getComputedStyle(el).color);
+  assert.equal(await onColor(), 'rgb(29, 78, 216)', '영업 하단 탭 선택 = 파랑');
+  for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/sales-${w}.png` }); }
   // 대표 결정(10/19): 하단 탭 = 공간마다 같은 크기 5칸(+ 버튼 없음)
   const tabs = async () => (await m.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
   assert.deepEqual(await tabs(), ['현황', '리드', '파이프라인', '영업기회', '더보기']);
@@ -68,6 +73,9 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql }) {
   await m.getByTestId('sheet-space-work').tap(); // 업무로 돌려 둠
   await m.waitForURL(/\/$/);
   assert.deepEqual(await tabs(), ['홈', '업무', '캘린더', '메시지', '더보기']);
+  assert.equal(await onColor(), 'rgb(17, 94, 89)', '업무로 돌아오면 바로 청록');
+  assert.equal(await m.getByTestId('mobile-space-logo').count(), 0, '업무는 워크인 로고');
+  for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/work-${w}.png` }); }
   assert.equal(await m.getByTestId('fab').count(), 0, '가운데 + 버튼 없음');
   await mc.close();
   // 영업 미배정 직원: 공간 카드 없음 · 주소 직접 입력 404

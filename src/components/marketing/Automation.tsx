@@ -1,4 +1,5 @@
 'use client';
+import { IN_APP_BILLING_NOTE, useInApp } from '@/components/inApp';
 import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -17,6 +18,7 @@ const lim = (used: number, max: number | null) => (max === null ? `${used} (한�
 /** V41 4-3 + V43: 자동 제작 — 요금제·한도·사용량, 일정·마감·알림, 브랜드 키트, 주간 규칙, 제작 요청 카드, 크레딧 원장 */
 export function Automation() {
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
+  const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 고르기 없음
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '' });
   const [done, setDone] = useState<Record<string, { credits: string; media: { id: string; title: string }[] }>>({});
   const [topics, setTopics] = useState<Record<string, string>>({});
@@ -53,14 +55,14 @@ export function Automation() {
         <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="auto-usage"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div></div>))}</section>
 
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
-        <h2 className="text-sm font-semibold">요금제·한도</h2>
-        <div className="mt-2 grid gap-2 sm:grid-cols-3">{Object.entries(data.plans).map(([k, p]) => (
+        <h2 className="text-sm font-semibold">{inApp ? '한도' : '요금제·한도'}</h2>
+        {inApp ? <p className="mt-1 text-xs text-ink-2" data-testid="in-app-billing-note">{IN_APP_BILLING_NOTE}</p> : <div className="mt-2 grid gap-2 sm:grid-cols-3">{Object.entries(data.plans).map(([k, p]) => (
           <button key={k} type="button" disabled={!ed} onClick={() => save({ planCode: s.plan_code === k ? null : k })} data-testid={`auto-plan-${k}`}
             className={cx('rounded-input border p-3 text-left text-xs', s.plan_code === k ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
             <div className="text-sm font-semibold">{p.label} <span className="font-normal text-ink-3">· 가격 {p.price ?? '결정 전'}</span></div>
             <div className="mt-1 text-ink-2">주간 {Object.entries(p.weekly).map(([kk, n]) => `${KIND[kk]} ${n}`).join(' · ')}</div>
             <div className="text-ink-2">월 크레딧 {p.monthlyCredits} · 생성 영상 {p.videoMonthly}편 · 재생성 {p.regenMonthly}회</div>
-          </button>))}</div>
+          </button>))}</div>}
         {ed && <div className="mt-2 grid gap-2 sm:grid-cols-4">
           <Field label="월 크레딧(비우면 요금제)"><input className={inputCls} type="number" defaultValue={s.monthly_credits ?? ''} onBlur={(e) => save({ monthlyCredits: num(e.target.value) })} /></Field>
           <Field label="주 크레딧(비우면 월÷4.3)"><input className={inputCls} type="number" defaultValue={s.weekly_credits ?? ''} onBlur={(e) => save({ weeklyCredits: num(e.target.value) })} /></Field>

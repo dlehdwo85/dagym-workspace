@@ -1259,7 +1259,7 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
     assert.equal((await ctx.owner.req('POST', '/api/admin/review-account', { email: ctx.staffA.email })).status, 400, '회사 계정 이메일 불가');
     const r = await ctx.owner.ok('POST', '/api/admin/review-account', { email: 'review@workin.test' });
     assert.ok(r.invitePath.startsWith('/invite/'));
-    assert.equal(r.sample.tasks, 7);
+    assert.deepEqual([r.sample.tasks, r.sample.events, r.sample.rooms, r.sample.files, r.sample.leads, r.sample.marketing], [12, 7, 2, 4, 5, 2], '스토어 스크린샷용 예시(로컬 10/19)');
     const c = new Client('review');
     await c.ok('POST', `/api/invitations/${r.invitePath.split('/').pop()}/accept`, { password: 'review-pass-1234' }); // 비밀번호는 대표가 링크에서 직접
     const me = await c.ok('GET', '/api/auth/me');
@@ -1267,11 +1267,19 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
     const list = await c.ok('GET', '/api/tasks?limit=500');
     assert.ok(list.tasks.length >= 7 && list.tasks.every((t) => t.org_unit_id === r.unitId), '예시 업무만');
     assert.ok(list.tasks.some((t) => t.assignee_id === me.user.id), '심사 계정에게 배정된 예시');
+    assert.deepEqual([...new Set(list.tasks.map((t) => t.status))].sort(), ['done', 'in_progress', 'on_hold', 'review', 'todo'], '진행·검토·완료 섞임');
+    assert.ok((await c.ok('GET', '/api/chat/rooms')).rooms.length >= 2, '메시지방');
+    assert.ok((await c.ok('GET', '/api/ai/threads')).threads.some((x) => x.title.startsWith('[예시]')), 'AI 비서 대화 예시');
+    assert.ok((await c.ok('GET', '/api/library')).files.length >= 4, '자료실 파일');
+    assert.equal((await c.ok('GET', '/api/sales/src?view=leads')).leads.length, 5, '영업 리드 5(공간 켜짐·배정)');
+    assert.equal((await c.ok('GET', '/api/marketing/contents')).contents.length, 2, '마케팅 시안 2');
+    const csv = (await c.ok('GET', '/api/library')).files.find((f) => f.file_name === '근무표(예시).csv');
+    assert.equal((await c.get(`/api/library/${csv.id}/download`)).status < 400, true, '파일 내려받기 됨');
     const other = (await ctx.owner.ok('POST', '/api/tasks', { title: '회사 비밀 업무', orgUnitId: ctx.hq })).id;
     assert.equal((await c.get(`/api/tasks/${other}`)).status, 404);
     assert.ok(!(await c.ok('GET', '/api/org')).users.some((u) => u.role === 'owner'));
     for (const path of ['/api/admin/users', '/api/admin/ops', '/api/revenue', '/api/reports']) assert.ok([403, 404].includes((await c.get(path)).status), path);
-    const t = list.tasks.find((x) => x.assignee_id === me.user.id && x.status !== 'done');
+    const t = list.tasks.find((x) => x.assignee_id === me.user.id && ['todo', 'in_progress'].includes(x.status));
     await c.ok('PATCH', `/api/tasks/${t.id}`, { status: 'done', version: t.version });
     const add = await c.ok('POST', '/api/tasks', { title: '심사 중 추가', orgUnitId: r.unitId });
     assert.ok(add.id);
@@ -1709,8 +1717,10 @@ describe('WORKIN_V9 회사 자료실 · AI 비서 (가짜 Anthropic 서버)', ()
     assert.equal((await ctx.staffA.client.req('GET', '/api/library/00000000-0000-4000-8000-000000000000')).status, 404);
     demo = new Client('iso');
     await demo.ok('POST', '/api/auth/login', { email: 'iso@dagym.test', password: 'iso-pass-1234' });
-    assert.equal((await demo.req('GET', '/api/library')).status, 403, '체험 계정은 자료실 없음');
-    assert.equal((await demo.req('GET', `/api/library/${logo}`)).status, 403);
+    // 스토어 심사(10/19): 체험 계정도 체험 조직 자료는 봄 — 회사 자료는 404, 올리기는 403
+    assert.ok(!(await demo.ok('GET', '/api/library')).files.some((f) => f.id === logo || f.id === price), '체험 계정에 회사 자료 없음');
+    assert.equal((await demo.req('GET', `/api/library/${logo}`)).status, 404);
+    assert.equal((await demo.req('POST', '/api/library', { fileName: 'x.txt', mimeType: 'text/plain', size: 1 })).status, 403, '체험 계정은 올리기 못 함');
     // 다른 회사(tenant) 자료는 없는 것처럼
     await sql`update library_files set tenant = 'other-co' where id = ${price}`;
     assert.equal((await ctx.owner.req('GET', `/api/library/${price}`)).status, 404);

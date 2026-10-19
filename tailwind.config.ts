@@ -6,7 +6,8 @@ export default {
     extend: {
       colors: {
         // V14 31번(D안): 로고 청록. 600 = 기본(#0F766E)
-        brand: { DEFAULT: '#0F766E', 50: '#F0FDFA', 100: '#CCFBF1', 200: '#99F6E4', 300: '#5EEAD4', 400: '#2DD4BF', 500: '#0D9488', 600: '#0F766E', 700: '#115E59', 800: '#134E4A', 900: '#134E4A' },
+        // 로컬 10/19(대표): 공간마다 강조색(업무 청록·영업 파랑·마케팅 보라) — globals.css :root[data-space] 변수, 기본은 청록
+        brand: { DEFAULT: 'rgb(var(--brand-600) / <alpha-value>)', 50: 'rgb(var(--brand-50) / <alpha-value>)', 100: 'rgb(var(--brand-100) / <alpha-value>)', 200: 'rgb(var(--brand-200) / <alpha-value>)', 300: 'rgb(var(--brand-300) / <alpha-value>)', 400: 'rgb(var(--brand-400) / <alpha-value>)', 500: 'rgb(var(--brand-500) / <alpha-value>)', 600: 'rgb(var(--brand-600) / <alpha-value>)', 700: 'rgb(var(--brand-700) / <alpha-value>)', 800: 'rgb(var(--brand-800) / <alpha-value>)', 900: 'rgb(var(--brand-900) / <alpha-value>)' },
         accent: { DEFAULT: '#0D9488', 50: '#F0FDFA', 100: '#CCFBF1', 500: '#14B8A6', 600: '#0D9488', 700: '#0F766E' },
         warm: { DEFAULT: '#F59E0B', 50: '#FFFBEB', 500: '#F59E0B', 600: '#D97706' }, // 보조 강조(소량)
         canvas: 'var(--canvas)',
