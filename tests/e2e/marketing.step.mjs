@@ -67,6 +67,18 @@ export async function marketing({ owner, BASE, sql }) {
   await thRow.getByTestId('publish-channel-toggle').check();
   await thRow.getByTestId('publish-channel-mode').filter({ hasText: '게시 도우미' }).waitFor();
   await thRow.getByTestId('publish-channel-toggle').uncheck();
+  // 운영실 기록(관리자): 설정 묶음 메뉴 → 빈 안내
+  await owner.locator('aside').getByRole('link', { name: '운영실 기록' }).click();
+  await owner.getByTestId('ops-history').getByText('옮겨 온 기록이 없습니다').waitFor();
+  await owner.goBack(); await owner.getByTestId('mkt-connections').waitFor();
+  // V44 ① 광고 운영: 상한 없으면 안내 → 상한 저장 → 막대 표시(네이버 계정 없으면 새 세팅안 잠김)
+  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.getByTestId('ad-cap-required').waitFor();
+  await owner.getByTestId('ad-cap-input').fill('500000');
+  await owner.getByTestId('ad-cap-save').click();
+  await owner.getByTestId('ad-cap').getByText('500,000원').waitFor();
+  assert.equal(await owner.getByTestId('ad-plan-new').isDisabled(), true);
+  await owner.goto(`${BASE}/s/marketing/connections`); await owner.getByTestId('mkt-connections').waitFor();
   await owner.getByTestId('ads-add-naver').click();
   await owner.getByTestId('naver-form').waitFor();
   assert.equal(await owner.getByTestId('naver-steps').locator('li').count(), 3);

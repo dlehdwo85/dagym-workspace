@@ -40,6 +40,8 @@ export const META_PUBLISH_SCOPES = ['pages_show_list', 'pages_read_engagement', 
 const metaReady = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET);
 const kindReady = (k: Kind) => (k === 'meta' ? metaReady() : false); // Google(유튜브)·틱톡은 다음 단계(별도 클라이언트·감사 자료 준비 중)
 const metaLive = () => process.env.META_PUBLISH_LIVE === '1';
+// Meta 앱이 개발 모드면 앱 역할(개발자·테스터)에 등록된 Facebook 계정만 연결됨 — 라이브 전환 후 META_APP_LIVE_MODE=1
+const metaDevMode = () => process.env.META_APP_LIVE_MODE !== '1';
 const callback = () => `${appUrl()}/api/marketing/publish/callback/meta`;
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('게시 채널 연결은 관리자가 합니다'); }
 
@@ -63,6 +65,7 @@ export async function listChannels(u: SessionUser) {
   const admin = isAdmin(u);
   return {
     canEdit: admin,
+    metaDevMode: metaReady() && metaDevMode(),
     channels: PUBLISH_CHANNELS.map((c) => {
       const accounts = accs.filter((a) => c.providers.includes(a.provider)).map((a) => ({ id: a.id, provider: a.provider, label: a.label, status: a.status, lastError: a.last_error, warnings: (a.info?.warnings ?? []) as string[] }));
       // 운영 방식: 도우미(사람이 올리고 [게시 확인]) / 자동(심사 통과 + 연결됨)
@@ -171,5 +174,5 @@ export async function metaDataDeletion(signedRequest: string) {
   const rows = await db()`delete from mkt_publish_accounts where provider like 'meta_%' and owner_ext_id = ${String(p.user_id)} returning id`;
   const code = sha256(`${p.user_id}:${Date.now()}`).slice(0, 16);
   await audit(db(), null, 'mkt_publish.meta_data_deletion', 'mkt_publish_account', null, { removed: rows.length, code }).catch(() => {});
-  return { url: `${appUrl()}/privacy?deletion=${code}#data-deletion`, confirmation_code: code };
+  return { url: `${appUrl()}/data-deletion?code=${code}`, confirmation_code: code };
 }

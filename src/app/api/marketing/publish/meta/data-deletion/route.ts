@@ -10,3 +10,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { message: String(e?.message ?? 'error') } }, { status: e?.status ?? 400 });
   }
 }
+
+/** GET(Meta 앱 설정의 주소 확인·사람이 연 경우): 405 대신 안내 페이지로 */
+export async function GET(req: NextRequest) {
+  const base = (process.env.APP_URL ?? req.nextUrl.origin).replace(/\/$/, '');
+  return NextResponse.redirect(`${base}/data-deletion`, 302);
+}

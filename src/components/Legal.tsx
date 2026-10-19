@@ -18,7 +18,7 @@ export function LegalDoc({ title, children }: { title: string; children: React.R
   const b = biz();
   return (
     <main className="mx-auto max-w-2xl space-y-4 bg-white p-6 text-sm leading-relaxed text-slate-800">
-      <nav className="flex gap-3 text-xs text-slate-500"><Link href="/" className="font-semibold text-slate-700">워크인</Link><Link href="/terms">이용약관</Link><Link href="/privacy">개인정보 처리방침</Link><Link href="/ai-notice">AI 이용 안내</Link><Link href="/account-deletion">계정 삭제</Link></nav>
+      <nav className="flex gap-3 text-xs text-slate-500"><Link href="/" className="font-semibold text-slate-700">워크인</Link><Link href="/terms">이용약관</Link><Link href="/privacy">개인정보 처리방침</Link><Link href="/ai-notice">AI 이용 안내</Link><Link href="/account-deletion">계정 삭제</Link><Link href="/data-deletion">Meta 데이터 삭제</Link></nav>
       <h1 className="text-xl font-bold">{title}</h1>
       {children}
       <footer className="border-t pt-3 text-xs text-slate-500">

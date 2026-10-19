@@ -171,6 +171,7 @@ export async function runTick(trigger: string) {
   await step('aiCreditAlerts', async () => (await import('./ai/forecast')).aiCreditAlertsJob()); // V23 5장 확보 크레딧 70·90% 알림
   await step('salesCollect', async () => (await import('./sales/collect')).collectDue()); // V41 단계 3 공공데이터(하루 한 번, 원천 하나씩)
   await step('adsSync', async () => (await import('./marketingAds')).adsSyncDue()); // V41 4-2 광고 성과(회사별 연결, 하루 한 번 최근 7일)
+  await step('adCapGuard', async () => (await import('./adOps')).adCapGuard()); // V44 ① 월 광고비 상한 넘으면 워크인이 켠 광고 자동 중지
   await step('salesSync', async () => (await import('./sales/migrate')).salesSyncDaily()); // V41 단계 2 전환일까지 매일 영업관리 차이분
   await step('mktAuto', async () => (await import('./mktAuto')).mktAutoTick()); // V41 4-3 마케팅 주간 규칙 → 제작 → 승인함 → 알림
   await step('mktReport', async () => (await import('./mktReport')).monthlyReportJob()); // 상용화 ⑧ 매월 1일 지난달 마케팅 보고 알림·메일

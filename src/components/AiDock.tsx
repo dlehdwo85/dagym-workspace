@@ -6,6 +6,7 @@ import { ArrowLeft, Check, Loader2, Maximize2, Menu, Paperclip, Pin, Plus, Searc
 import { AttachChips, DEFAULT_FILE_ASK, useAiAttach } from './aiAttach';
 import { DocJobCard } from '@/components/DocJobCard';
 import { VoiceButton } from './voice';
+import { dockHideCls, useDockHide } from './useDockHide';
 import { AiBudgetBar, costLine, type Budget } from './AiBudget';
 import { ChatComposer, MsgTools, useAiConversation, type ChatMsg } from './aiChat';
 import { AI_ACCEPT } from './libraryUpload';
@@ -48,6 +49,7 @@ const SUGGEST: Record<Ctx['page'], string[]> = {
 
 /** V14 11번: 모든 화면의 AI 비서 — PC 오른쪽 아래 ✨ 패널, 휴대폰은 상단 ✨ → 아래 시트. 대화는 AI 비서 화면과 같은 보관 구조 */
 export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const dockHidden = useDockHide();
   const ctx = useCtx();
   const path = usePathname();
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -103,7 +105,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
     <>
       {!open && !hideFab && (
         <button onClick={() => onOpenChange(true)} aria-label="AI 비서 열기" data-testid="ai-dock-open"
-          className="fixed bottom-6 right-6 z-40 hidden size-12 items-center justify-center rounded-full bg-violet-600 text-white shadow-pop hover:bg-violet-700 sm:flex"><Sparkles className="size-6" /></button>
+          className={`fixed bottom-6 right-6 z-40 hidden size-12 items-center justify-center rounded-full bg-violet-600 text-white shadow-pop transition-[transform,opacity] duration-200 hover:bg-violet-700 sm:flex ${dockHideCls(dockHidden)}`}><Sparkles className="size-6" /></button>
       )}
       {open && (
         <div className="fixed inset-0 z-50 bg-slate-900/30 sm:inset-auto sm:bottom-6 sm:right-6 sm:bg-transparent" onClick={() => onOpenChange(false)}>

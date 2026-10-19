@@ -4,9 +4,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Maximize2, MessageCircle, X } from 'lucide-react';
 import { useApi } from './client';
 import { ChatRoom, RoomList, useLive } from './messenger/Messenger';
+import { dockHideCls, useDockHide } from './useDockHide';
 
 /** R-16 2번 · V14 25번: PC 오른쪽 아래 메신저 패널(380×560) — /messages 와 같은 목록·대화방 컴포넌트, 목록↔방 전환, 크게 보기. 휴대폰은 하단 탭의 메시지로 */
 export function MessengerDock({ aiOpen }: { aiOpen: boolean }) {
+  const dockHidden = useDockHide();
   const path = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -20,7 +22,7 @@ export function MessengerDock({ aiOpen }: { aiOpen: boolean }) {
     <>
       {!open && !aiOpen && (
         <button onClick={() => setOpen(true)} aria-label={`메신저 열기${n ? ` (안 읽은 ${n})` : ''}`} data-testid="msg-dock-open"
-          className="fixed bottom-6 right-[5.5rem] z-40 hidden size-12 items-center justify-center rounded-full bg-teal-700 text-white shadow-pop hover:bg-teal-800 sm:flex">
+          className={`fixed bottom-6 right-[5.5rem] z-40 hidden size-12 items-center justify-center rounded-full bg-teal-700 text-white shadow-pop transition-[transform,opacity] duration-200 hover:bg-teal-800 sm:flex ${dockHideCls(dockHidden)}`}>
           <MessageCircle className="size-6" />
           {n > 0 && <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-red-500 px-1 text-center text-[11px] font-bold leading-5 text-white" data-testid="msg-dock-badge">{n > 99 ? '99+' : n}</span>}
         </button>

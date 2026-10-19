@@ -176,6 +176,20 @@ export async function importedData(u: SessionUser, q: { key?: string; offset?: n
   return { key: q.key, items };
 }
 
+/** 가져온 항목의 칸 구조(이름·채워진 수·값 종류) — 값은 내보내지 않음. 표 매핑(게시물 → 콘텐츠 등)을 정하는 근거 */
+export async function importedFields(u: SessionUser) {
+  await assertSpace(u, 'marketing');
+  if (!isAdmin(u)) throw forbidden('가져온 운영실 데이터는 관리자만 볼 수 있습니다');
+  const rows = await db()<{ key: string; name: string; filled: number; types: string[] }[]>`
+    select i.key, f.name, count(*)::int as filled, array_agg(distinct jsonb_typeof(f.value)) as types
+    from ops_import_items i cross join lateral jsonb_each(case when jsonb_typeof(i.item) = 'object' then i.item else '{}'::jsonb end) as f(name, value)
+    where i.tenant = ${tenantOf(u)} and jsonb_typeof(f.value) <> 'null'
+    group by i.key, f.name order by i.key, count(*) desc, f.name`;
+  const counts = await db()<{ key: string; count: number; objects: number }[]>`select key, count(*)::int as count, count(*) filter (where jsonb_typeof(item) = 'object')::int as objects
+    from ops_import_items where tenant = ${tenantOf(u)} group by key order by key`;
+  return { keys: counts.map((c) => ({ ...c, fields: rows.filter((r) => r.key === c.key).map(({ name, filled, types }) => ({ name, filled, types })) })) };
+}
+
 /** tick: 전화 기록(개인정보) 보관 기간 지나면 삭제 */
 export async function purgeOpsPii() {
   const days = Math.max(30, Number(process.env.OPS_CALL_RETENTION_DAYS) || 365);

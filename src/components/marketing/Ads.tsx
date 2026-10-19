@@ -154,7 +154,7 @@ export function Connections() {
 
 type Ch = { key: string; label: string; note: string; kind: string; enabled: boolean; connectable: boolean; ready: boolean; mode: 'helper' | 'auto' | 'later';
   accounts: { id: string; provider: string; label: string; status: string; lastError: string | null; warnings: string[] }[] };
-type ChData = { canEdit: boolean; channels: Ch[]; tech: { metaCallback: string; metaDeletion: string; metaScopes: string[]; metaReady: boolean; metaLive: boolean } | null };
+type ChData = { canEdit: boolean; metaDevMode: boolean; channels: Ch[]; tech: { metaCallback: string; metaDeletion: string; metaScopes: string[]; metaReady: boolean; metaLive: boolean } | null };
 const CONNECT_URL: Record<string, string> = { meta: '/api/marketing/publish/connect/meta' };
 
 /**
@@ -200,6 +200,7 @@ function PublishChannels() {
               {a.warnings.map((w, k) => <p key={k} className="mt-0.5 text-amber-800" data-testid="publish-warning">확인 필요: {w}</p>)}
             </div>))}
         </li>))}</ul>
+      {data.canEdit && data.metaDevMode && <p className="mt-2 rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="meta-dev-mode">개발 모드: 워크인 Meta 앱의 앱 역할(개발자·테스터)에 등록된 Facebook 계정만 인스타그램·페이스북을 연결할 수 있습니다. 심사를 마치면 모든 계정이 연결됩니다.</p>}
       {data.canEdit && metaNone && (
         <details className="mt-2 rounded-input border border-line p-2 text-xs text-ink-2" data-testid="meta-precheck"><summary className="cursor-pointer font-medium text-ink">인스타그램·페이스북 연결 전 확인할 것 3가지</summary>
           <ol className="mt-1 list-decimal space-y-0.5 pl-4">

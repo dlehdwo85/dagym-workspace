@@ -113,6 +113,7 @@ test('게시 채널: 켜기/끄기·Meta [연결](페이지+인스타)·점검 �
   assert.equal(ch.canEdit, false); assert.equal(ch.tech, null);
   const ig0 = ch.channels.find((c) => c.key === 'instagram');
   assert.deepEqual([ig0.enabled, ig0.mode, ig0.ready], [true, 'helper', true], '심사 전에는 도우미');
+  assert.equal(ch.metaDevMode, true, '라이브 전환 전에는 개발 모드 안내');
   assert.equal(ch.channels.find((c) => c.key === 'threads').enabled, false);
   assert.equal((await ctx.staffA.client.req('PUT', '/api/marketing/publish/channels', { channel: 'threads', enabled: true })).status, 403);
   await ctx.owner.ok('PUT', '/api/marketing/publish/channels', { channel: 'threads', enabled: true });
@@ -149,5 +150,13 @@ test('게시 채널: 켜기/끄기·Meta [연결](페이지+인스타)·점검 �
   assert.equal(ok.status, 200); const j = await ok.json();
   assert.ok(j.confirmation_code && j.url.includes(j.confirmation_code));
   assert.equal((await sql`select count(*)::int n from mkt_publish_accounts`)[0].n, 0);
+  // 삭제 상태 확인 주소(처리방침 #data-deletion)에 확인 코드 표시
+  assert.match(j.url, /\/data-deletion\?code=/);
+  const page = await (await fetch(j.url.replace(/^https?:\/\/[^/]+/, BASE))).text();
+  assert.ok(page.includes('처리 완료') && page.includes(j.confirmation_code), '확인 코드로 상태 조회');
+  assert.ok((await (await fetch(`${BASE}/data-deletion?code=deadbeef`)).text()).includes('찾지 못했습니다'));
+  const g = await fetch(`${BASE}/api/marketing/publish/meta/data-deletion`, { redirect: 'manual' });
+  assert.equal(g.status, 302); assert.match(g.headers.get('location'), /\/data-deletion$/);
+  assert.equal((await fetch(`${BASE}/data-deletion`)).status, 200, '로그인 없이 200');
 });
 

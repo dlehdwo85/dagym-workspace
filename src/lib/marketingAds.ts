@@ -50,6 +50,9 @@ const ADS_HINT: Record<string, string> = {
   CUSTOMER_NOT_ENABLED: '광고 계정이 사용 중이 아닙니다(해지·미설정)',
   DEVELOPER_TOKEN_INVALID: '개발자 토큰 값이 틀렸습니다',
   NOT_ADS_USER: '이 Google 계정은 Google Ads 사용자가 아닙니다',
+  // 2026-09-09 개발자 토큰 폐지 후 접근 등급은 OAuth 클라이언트의 Cloud 프로젝트 기준(docs/research/AI_ADS_API_SURVEY.md) — 운영 10/19 실제 발생
+  ACTION_NOT_PERMITTED: '이 Google Cloud 프로젝트의 Google Ads API 접근 등급으로는 할 수 없는 요청입니다 — Cloud 콘솔 › Google Ads API › 액세스 수준에서 Explorer(운영 계정) 이상 신청',
+  CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION: 'Cloud 프로젝트가 시험 등급이라 운영 광고 계정은 못 읽습니다 — Cloud 콘솔에서 Explorer 등급 신청',
 };
 async function getJson(url: string, init?: RequestInit) {
   const r = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) });

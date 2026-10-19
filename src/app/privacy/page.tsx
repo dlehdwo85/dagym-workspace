@@ -1,9 +1,11 @@
 import { H, LegalDoc, biz } from '@/components/Legal';
+import { META_PRIVACY_PARAGRAPHS } from '@/components/legalMeta';
 export const metadata = { title: '개인정보 처리방침' };
 export const dynamic = 'force-dynamic';
 
-export default function Privacy() {
+export default async function Privacy({ searchParams }: { searchParams: Promise<{ deletion?: string }> }) {
   const b = biz();
+  const deletion = String((await searchParams).deletion ?? '').replace(/[^0-9a-f]/g, '').slice(0, 32); // Meta 데이터 삭제 콜백이 돌려준 확인 코드
   return (
     <LegalDoc title="개인정보 처리방침">
       <p>{b.name}(이하 “회사”)는 업무·일정 관리 서비스 “워크인”(웹·Android·iOS 앱, 이하 “서비스”)을 운영하며 「개인정보 보호법」에 따라 다음과 같이 개인정보를 처리합니다.</p>
@@ -39,6 +41,10 @@ export default function Privacy() {
       <p className="text-xs text-slate-500">국외 이전 항목: 위 2번 항목 중 해당 기능 처리에 필요한 정보 · 이전 시기: 서비스 이용 시 네트워크로 전송 · 보유 기간: 위탁 계약 종료 또는 탈퇴 시까지.</p>
       <H>6. Google 사용자 데이터</H>
       <p>Google Calendar 데이터는 사용자가 고른 캘린더를 워크인 캘린더와 동기화하는 목적으로만 쓰며, 광고·판매 등 다른 목적으로 쓰지 않습니다. 설정 화면에서 언제든 연결을 끊을 수 있습니다.</p>
+      {META_PRIVACY_PARAGRAPHS.length > 0 && <><H>6-2. Meta(페이스북·인스타그램) 연동 시 처리하는 정보</H>{META_PRIVACY_PARAGRAPHS.map((t, i) => <p key={i}>{t}</p>)}</>}
+      <div id="data-deletion">
+        {deletion && <p className="rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-900" data-testid="deletion-status">Meta 연동 데이터 삭제 요청을 처리했습니다. 확인 코드: <b>{deletion}</b> — 해당 계정으로 연결된 페이지·인스타그램 연결 정보와 토큰을 삭제했습니다.</p>}
+      </div>
       <H>7. 정보주체의 권리</H>
       <p>이용자는 설정 화면에서 본인 정보를 열람·정정하고, 데이터를 내려받거나 탈퇴할 수 있습니다. 처리정지·삭제 요청은 아래 연락처로도 할 수 있습니다.</p>
       <H>8. 안전성 확보 조치</H>

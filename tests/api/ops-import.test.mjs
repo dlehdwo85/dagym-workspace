@@ -81,6 +81,12 @@ test('미리보기·대조·적용·권한·보관 기간', async () => {
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   assert.equal((await ctx.staffA.client.req('GET', '/api/marketing/imported')).status, 403, '직원은 못 봄');
   assert.equal((await ctx.owner.ok('GET', '/api/marketing/imported')).keys.length, 5);
+  // 칸 구조(값 없이 이름·채워진 수·종류) — 표 매핑 근거
+  const fs = await ctx.owner.ok('GET', '/api/marketing/imported?view=fields');
+  const pf = fs.keys.find((k) => k.key === 'mkt:posts:v1');
+  assert.equal(pf.count, 3); assert.deepEqual(pf.fields.map((f) => `${f.name}:${f.filled}`), ['id:3', 'title:3', 'status:1']);
+  assert.ok(!JSON.stringify(fs).includes('가을 행사'), '값은 내보내지 않음');
+  assert.equal((await ctx.staffA.client.req('GET', '/api/marketing/imported?view=fields')).status, 403);
   const calls = await ctx.owner.ok('GET', '/api/marketing/imported?key=mkt%3Acall-records%3Av1');
   assert.equal(calls.items[0].item.phone, '***-****-2222', '가리지 않고 온 번호는 뒤 4자리만 저장');
   assert.equal(calls.items[0].item.memo, '***-****-3344 로 다시 전화', '글 안의 번호도 가림');
