@@ -8,6 +8,7 @@ import { PlatformTenants } from '@/components/PlatformTenants';
 import { fmtBytes, lim, won } from '@/components/usage';
 import { PlatformPayments } from '@/components/Billing';
 import { PayTest } from '@/components/PayTest';
+import { PlatformSettlement } from '@/components/PlatformSettlement';
 import { PlatformSalesSources } from '@/components/sales/PlatformSalesSources';
 import { PlatformSalesMigrate } from '@/components/sales/PlatformSalesMigrate';
 import { PlatformOpsImport } from '@/components/marketing/PlatformOpsImport';
@@ -50,6 +51,7 @@ export default function PlatformPage() {
       <PlatformTenants />
       <Signups />
       <PlatformPayments />
+      <PlatformSettlement />
       <Suspense><PayTest /></Suspense>
       <InquiryLink />
       {/* V12 3번: 문의 접수함 */}

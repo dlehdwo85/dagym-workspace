@@ -166,6 +166,7 @@ export async function runTick(trigger: string) {
   await step('usage', async () => (await import('./plans')).usageJob());
   await step('trial', async () => (await import('./plans')).trialJob());
   await step('billing', async () => (await import('./billing')).billingJob()); // 18차 정기 결제·재시도
+  await step('settlement', async () => (await import('./billing/settlement')).fillExpected()); // V32 2 정산 예정일 채우기
   await step('docJobs', async () => (await import('./ai/docEngine')).docJobsJob()); // V22 끊긴 문서 작업 다시
   await step('monthClose', async () => (await import('./monthClose')).monthCloseJob()); // V20 월 마감 기록(매월 1일)
   await step('aiCreditAlerts', async () => (await import('./ai/forecast')).aiCreditAlertsJob()); // V23 5장 확보 크레딧 70·90% 알림

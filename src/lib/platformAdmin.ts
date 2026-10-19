@@ -47,7 +47,8 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
     P.effectiveLimits(tenant, sql), P.currentUsage(tenant, sql),
     sql`select id, name, email, role, status, last_login_at, (totp_enabled_at is not null) as totp, platform_admin, created_at from users where tenant = ${tenant} and deleted_at is null order by (role = 'owner') desc, name`,
     sql`select s.created_at, s.expires_at, s.ended_at, s.reason, a.name as admin_name from support_sessions s join users a on a.id = s.admin_id where s.tenant = ${tenant} order by s.created_at desc limit 10`,
-    sql`select id, kind, plan_code, amount, status, canceled_amount, result_msg, paid_at, created_at from payments where tenant = ${tenant} order by created_at desc limit 12`,
+    sql`select p.id, p.kind, p.plan_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.paid_at, p.created_at, s.status as settlement, to_char(s.expected_on, 'YYYY-MM-DD') as expected_on, to_char(s.settled_on, 'YYYY-MM-DD') as settled_on
+      from payments p left join payment_settlements s on s.payment_id = p.id where p.tenant = ${tenant} order by p.created_at desc limit 12`, // V32 2 정산 상태 같이
   ]);
   // V28 B2: 이번 달 청구 예정(정기 결제 금액, VAT 포함)·미납·AI 원가율
   const [b] = await sql<any[]>`select billing_cycle, next_billing_on, billing_amount, past_due_since, billing_lock, billing_grace_until from tenant_subscriptions where tenant = ${tenant}`;

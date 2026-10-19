@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { CreditCard } from 'lucide-react';
 import { api, useApi } from './client';
 import { Button, Field, cx, fmtDateTime, inputCls, toast } from './ui';
+import { TaxInvoiceButton } from './PlatformSettlement';
 
 const won = (n: number | null | undefined) => (n == null ? '-' : `${n.toLocaleString('ko-KR')}원`);
 const STATUS: Record<string, string> = { pending: '대기', paid: '결제 완료', failed: '실패', canceled: '환불', partial_canceled: '부분 환불' };
@@ -120,7 +121,7 @@ export function BillingSection() {
                     <span className="w-28 shrink-0 text-ink-3">{fmtDateTime(p.paid_at ?? p.created_at)}</span>
                     <span className="flex-1">{KIND[p.kind]} {p.plan_code ?? p.addon_code ?? ''} · {won(p.amount)}{p.pay_method && p.pay_method !== 'CARD' ? ` · ${p.pay_method === 'BANK' ? '계좌이체' : '가상계좌'}` : ''}{p.card_no ? ` · ${p.card_name ?? ''} ${p.card_no}` : ''}
                       {p.status === 'pending' && p.vbank && <span className="block text-amber-700" data-testid="billing-vbank">입금 대기: {p.vbank.bank} {p.vbank.num}{p.vbank.exp ? ` · ${String(p.vbank.exp).slice(0, 4)}-${String(p.vbank.exp).slice(4, 6)}-${String(p.vbank.exp).slice(6, 8)}까지` : ''}</span>}
-                      {p.status === 'paid' && p.tid && <a className="ml-1 text-brand-700 underline" href={`https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0`} target="_blank" rel="noreferrer">영수증</a>}</span>
+                      {p.status === 'paid' && p.tid && <a className="ml-1 text-brand-700 underline" href={`https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0`} target="_blank" rel="noreferrer">영수증</a>}{' '}<TaxInvoiceButton payment={p} /></span>
                     <span className={cx('rounded-full px-1.5', p.status === 'paid' ? 'bg-green-50 text-green-700' : p.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2')} title={p.result_msg ?? ''}>{STATUS[p.status]}</span>
                   </li>
                 ))}

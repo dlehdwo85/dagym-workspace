@@ -98,7 +98,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             )}
             {!!d.data.payments?.length && (
               <ul className="mt-2 max-h-32 overflow-y-auto text-xs text-ink-2">
-                {d.data.payments.map((p: any) => <li key={p.id}>{String(p.paid_at ?? p.created_at).slice(0, 16).replace('T', ' ')} · {p.kind} {p.plan_code ?? ''} · {Number(p.amount).toLocaleString()}원 · <b className={p.status === 'paid' ? 'text-emerald-700' : p.status === 'failed' ? 'text-red-600' : ''}>{p.status}</b>{p.result_msg && ` · ${p.result_msg}`}</li>)}
+                {d.data.payments.map((p: any) => <li key={p.id}>{String(p.paid_at ?? p.created_at).slice(0, 16).replace('T', ' ')} · {p.kind} {p.plan_code ?? ''} · {Number(p.amount).toLocaleString()}원{p.settlement && <span className={p.settlement === 'settled' ? 'text-emerald-700' : p.settlement === 'mismatch' ? 'text-red-600' : 'text-ink-3'}> · 정산 {p.settlement === 'settled' ? `완료 ${p.settled_on ?? ''}` : p.settlement === 'mismatch' ? '차이' : `예정 ${p.expected_on ?? ''}`}</span>} · <b className={p.status === 'paid' ? 'text-emerald-700' : p.status === 'failed' ? 'text-red-600' : ''}>{p.status}</b>{p.result_msg && ` · ${p.result_msg}`}</li>)}
               </ul>
             )}
           </div>
