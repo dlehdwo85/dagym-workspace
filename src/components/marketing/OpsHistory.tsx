@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { useApi } from '@/components/client';
-import { Button, ErrorBox, Skeleton, cx } from '@/components/ui';
+import { api, useApi } from '@/components/client';
+import { Button, ErrorBox, Skeleton, cx, toast } from '@/components/ui';
 
 const C = '#7C3AED';
 /** 운영실 키 → 이름 · 워크인에서 보여 줄 자리(매핑 제안 — docs/research/OPS_DATA_MAPPING.md) */
@@ -44,6 +44,7 @@ export function OpsHistory() {
     <div className="space-y-4" data-testid="ops-history">
       <div><h1 className="text-xl font-bold" style={{ color: C }}>운영실 기록</h1>
         <p className="text-xs text-ink-2">예전 마케팅 운영실에서 옮겨 온 원본입니다. 워크인 화면(콘텐츠·승인·전화 문의 등)으로 정식 연결하기 전까지 여기서 봅니다. 전화번호는 가려서 옮겼습니다.</p></div>
+      {data.keys.length > 0 && <ConvertPanel />}
       {!data.keys.length ? <p className="rounded-card border border-line bg-white p-4 text-sm text-ink-3">옮겨 온 기록이 없습니다</p> : (
         <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{data.keys.map((k) => (
           <li key={k.key}><button type="button" onClick={() => { setKey(k.key); setOffset(0); }} data-testid="ops-key"
@@ -70,5 +71,38 @@ export function OpsHistory() {
         </section>
       )}
     </div>
+  );
+}
+
+type Conv = { mode: string; posts: number; daily: number; requests: number; revisions: number; newContents: number; existing: number; decisions: number; withUrl: number;
+  mapping: Record<string, number>; channels: Record<string, number>; unknownBrands: string[]; sample: { title: string; channel: string; status: string; url: boolean }[]; made?: number; requestsMade?: number };
+const ST: Record<string, string> = { published: '게시됨', approved: '승인', pending: '승인 대기', changes: '수정 요청', hold: '보류', canceled: '취소', draft: '초안' };
+/** 운영실 기록 → 워크인 콘텐츠·결정·요청 기록(미리보기로 상태 매핑 확인 → 적용, 같은 원본은 한 번만) */
+function ConvertPanel() {
+  const [r, setR] = useState<Conv | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function run(mode: 'preview' | 'apply') {
+    if (mode === 'apply' && !confirm('미리보기대로 콘텐츠·결정 기록·요청 기록을 만들까요? 같은 원본은 다시 만들지 않습니다.')) return;
+    setBusy(true);
+    try { const x = await api<Conv>('/api/marketing/imported/convert', { body: { mode } }); setR(x); if (mode === 'apply') toast.ok(`콘텐츠 ${x.made}건 · 요청 기록 ${x.requestsMade}건을 만들었습니다`); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <section className="rounded-card border border-violet-200 bg-violet-50/40 p-3 text-sm" data-testid="ops-convert">
+      <div className="flex flex-wrap items-center gap-2"><h2 className="font-semibold">워크인 화면으로 옮기기</h2>
+        <span className="text-xs text-ink-2">게시물·일일 항목 → 콘텐츠 캘린더(결정 기록 포함), 요청 → 승인 대기 아래 &lsquo;이전 요청 기록&rsquo;</span>
+        <span className="ml-auto flex gap-2"><Button size="sm" variant="secondary" onClick={() => run('preview')} disabled={busy} data-testid="ops-convert-preview">미리보기</Button>
+          <Button size="sm" onClick={() => run('apply')} disabled={busy || !r || r.newContents + r.requests === 0} data-testid="ops-convert-apply">옮기기</Button></span></div>
+      {r && (
+        <div className="mt-2 space-y-1 text-xs" data-testid="ops-convert-result">
+          <p>원본: 게시물 {r.posts} · 일일 항목 {r.daily} · 요청 {r.requests} · 수정 이력 {r.revisions}(원본 화면에서만) — 새로 만들 콘텐츠 <b>{r.newContents}</b>건(이미 옮김 {r.existing}) · 결정 기록 {r.decisions}건 · 게시 주소 있음 {r.withUrl}건
+            {r.mode === 'apply' && <> · <b className="text-emerald-800">만듦 {r.made} · 요청 기록 {r.requestsMade}</b></>}</p>
+          <p className="font-medium">상태 매핑(원본 값 → 워크인)</p>
+          <ul className="grid gap-x-4 sm:grid-cols-2">{Object.entries(r.mapping).map(([k, n]) => <li key={k}>{k.replace(/→ (\w+)$/, (_m, x) => `→ ${ST[x] ?? x}`)} · {n}건</li>)}</ul>
+          <p>채널: {Object.entries(r.channels).map(([k, n]) => `${k} ${n}`).join(' · ')}</p>
+          {r.unknownBrands.length > 0 && <p className="text-amber-800">브랜드 코드 확인 필요: {r.unknownBrands.join(', ')} (그대로 브랜드 이름으로 만들어짐)</p>}
+          <ul className="text-ink-2">{r.sample.map((x, k) => <li key={k}>· {x.title} — {x.channel} · {ST[x.status] ?? x.status}{x.url ? ' · 주소 있음' : ''}</li>)}</ul>
+        </div>)}
+    </section>
   );
 }

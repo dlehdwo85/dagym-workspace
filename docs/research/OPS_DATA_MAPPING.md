@@ -46,3 +46,35 @@
 - 모르는 값은 pending 으로 넣고 원본 상태를 note 에 남긴다.
 - 채널: instagram·facebook·blog(네이버)·youtube·threads, 그 밖은 other.
 - 날짜는 Asia/Seoul 기준으로 해석한다(시각이 없으면 10:00).
+
+## 4. 변환 구현(2026-10-19, 로컬이 보낸 운영 칸 구조 기준)
+
+- 화면: 마케팅 › 설정 › 운영실 기록 › **워크인 화면으로 옮기기**. [미리보기]는 아무것도 쓰지 않고 다음을 보여 준다.
+  - 건수
+  - 원본 상태 값 → 워크인 상태 매핑표
+  - 채널별 건수
+  - 확인이 필요한 브랜드 코드
+  - 표본 8건
+- [옮기기]를 누르면 만든다. 같은 원본은 `mkt_contents (tenant, src_key, src_ref)` 고유 조건으로 한 번만 만든다(100 마이그레이션). 알림은 보내지 않는다.
+- posts(28) → 콘텐츠:
+  - 채널은 channels[0] 기준이고, 나머지 채널은 버전 메모에 적는다.
+  - 본문 = instagramCaption(페이스북이면 facebookText) + hashtags.
+  - 게시 주소는 results 안의 첫 permalink/url.
+  - 캘린더 날짜는 게시일 또는 만든 날.
+  - assetIds 는 개수만 메모에 남긴다(원본 화면에서 확인).
+- daily:decisions(42 항목) → 콘텐츠:
+  - 제목 '10/15 하이링크 피드'. 브랜드 코드는 hl=하이링크, dg=다짐이고, **그 밖의 코드(bl 등)는 대문자 그대로 — 확인 필요**.
+  - 종류 → 채널: feed·photo·collage·reels → 인스타그램, blog → 블로그, shorts → 유튜브.
+  - history[] 와 production.history·decisions(itemId 같은 것)을 결정 기록(승인·수정 요청·보류)으로 옮긴다.
+  - url 이 있으면 게시 주소로 쓴다.
+- requests(43) → `mkt_ops_requests` → 승인 대기 화면 아래 '이전 요청 기록(운영실)'(접힘). 마케팅 공간 사람이면 누구나 본다.
+- revisions(35)·approvals:dynamic·ads:apply-log·plan·schedule·media 는 원본 화면에서만 본다(전후 값이 콘텐츠 버전과 1:1 이 아님). ads:apply-log 는 V44 변경 기록 표가 생긴 뒤 옮길지 정한다.
+- 상태 매핑(원본 값 문자열 기준):
+  - publish/posted/live/done/complete → 게시됨
+  - approv/confirm/ok/schedul/ready → 승인
+  - change/revis/reject → 수정 요청
+  - hold/pause → 보류
+  - cancel/delet/archiv/skip → 취소
+  - draft → 초안
+  - 그 밖은 승인 대기
+  - **운영에서 미리보기 매핑표를 확인한 뒤 옮길 것**

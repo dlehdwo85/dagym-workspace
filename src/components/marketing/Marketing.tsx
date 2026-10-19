@@ -152,9 +152,24 @@ export function Approvals() {
             <span className={cx('shrink-0 rounded-full px-2 py-0.5 text-xs font-medium', c.status === 'pending' ? 'bg-violet-50 text-violet-800' : c.status === 'changes' ? 'bg-amber-50 text-amber-800' : 'bg-slate-100 text-ink-2')}>{STATUS[c.status]}</span>
           </button></li>))}</ul>
       )}
+      <OpsRequests />
       {open && <ContentDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
       {nw && <NewContent onClose={() => setNw(false)} onDone={reload} />}
     </div>
+  );
+}
+
+/** 운영실에서 옮겨 온 이전 요청 기록(대표 요청 문장·처리 상태·결과) — 있을 때만, 접어서 */
+function OpsRequests() {
+  const { data } = useApi<{ requests: { id: string; text: string; route: string | null; status: string; status_note: string | null; result_summary: string | null; created_at: string | null; delivered_at: string | null }[] }>('/api/marketing/ops-requests');
+  if (!data?.requests.length) return null;
+  return (
+    <details className="rounded-card border border-line bg-white p-3 text-sm shadow-card" data-testid="ops-requests"><summary className="cursor-pointer font-medium">이전 요청 기록(운영실) · {data.requests.length}건</summary>
+      <ul className="mt-2 divide-y divide-line text-xs">{data.requests.map((r) => (
+        <li key={r.id} className="space-y-0.5 py-1.5" data-testid="ops-request"><p className="whitespace-pre-wrap break-words text-ink">{r.text}</p>
+          <p className="text-ink-3">{r.created_at ? fmtDateTime(r.created_at) : ''} · <b>{r.status}</b>{r.route ? ` · ${r.route}` : ''}{r.delivered_at ? ` · 전달 ${fmtDateTime(r.delivered_at)}` : ''}</p>
+          {(r.status_note || r.result_summary) && <p className="break-words text-ink-2">{[r.status_note, r.result_summary].filter(Boolean).join(' — ')}</p>}</li>))}</ul>
+    </details>
   );
 }
 
