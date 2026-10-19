@@ -21,7 +21,7 @@ before(async () => {
     calls.push({ method: req.method, path, q: Object.fromEntries(u.searchParams), body: j });
     if (req.method === 'GET' && path === '/ncc/campaigns') return send(200, [{ nccCampaignId: 'cmp-a', name: '기존' }]);
     if (req.method === 'GET' && path === '/stats') return send(200, { data: [] });
-    if (req.method === 'GET' && path === '/ncc/channels') return send(200, [{ nccBusinessChannelId: 'bsn-1', name: '우리 홈페이지', channelTp: 'WEB_SITE', channelKey: 'https://example.com' }, { nccBusinessChannelId: 'bsn-2', name: '플레이스', channelTp: 'PLACE' }]);
+    if (req.method === 'GET' && path === '/ncc/channels') return send(200, [{ nccBusinessChannelId: 'bsn-1', name: '우리 홈페이지', channelTp: 'SITE', channelKey: 'https://example.com' }, { nccBusinessChannelId: 'bsn-2', name: '플레이스', channelTp: 'PLACE' }]);
     if (req.method === 'POST' && path === '/ncc/campaigns') return send(200, { nccCampaignId: `cmp-${++seq}`, ...j });
     if (req.method === 'POST' && path === '/ncc/adgroups') return send(200, { nccAdgroupId: 'grp-1', ...j });
     if (req.method === 'POST' && path === '/ncc/keywords') return send(200, j.map((k, i) => ({ nccKeywordId: `kw-${i + 1}`, ...k })));

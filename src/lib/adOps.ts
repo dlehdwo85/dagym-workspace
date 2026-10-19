@@ -103,7 +103,10 @@ export async function naverChannels(u: SessionUser, accountId: string) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const a = await naverAcc(tenantOf(u), accountId);
   const rows: any[] = (await naverReq(a, 'GET', '/ncc/channels')) ?? [];
-  return { channels: rows.filter((c) => !c.channelTp || c.channelTp === 'WEB_SITE').map((c) => ({ id: String(c.nccBusinessChannelId), name: String(c.name ?? c.channelKey ?? c.nccBusinessChannelId), url: c.channelKey ?? null })) };
+  // 운영 10/19: 실제 계정에서 빈 목록 — 웹사이트 비즈채널 종류 값은 'SITE'(문서·계정마다 'WEB_SITE' 표기도 있음). 웹사이트를 먼저, 없으면 모든 채널(종류 표시)
+  const all = (Array.isArray(rows) ? rows : []).map((c) => ({ id: String(c.nccBusinessChannelId ?? c.id ?? ''), name: String(c.name ?? c.channelKey ?? c.nccBusinessChannelId ?? ''), url: c.channelKey ?? c.businessInfo?.site ?? null, type: String(c.channelTp ?? c.type ?? '') })).filter((c) => c.id);
+  const sites = all.filter((c) => /^(SITE|WEB_SITE)$/i.test(c.type) || (!c.type && /^https?:/i.test(String(c.url ?? ''))));
+  return { channels: sites.length ? sites : all, total: all.length };
 }
 async function naverAcc(tenant: string, id: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();

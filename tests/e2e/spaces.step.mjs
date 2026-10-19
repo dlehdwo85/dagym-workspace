@@ -54,10 +54,20 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql }) {
   await m.getByTestId('sheet-space-sales').tap();
   await m.waitForURL(/\/s\/sales$/);
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
+  // 대표 결정(10/19): 하단 탭 = 공간마다 같은 크기 5칸(+ 버튼 없음)
+  const tabs = async () => (await m.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
+  assert.deepEqual(await tabs(), ['현황', '리드', '파이프라인', '입찰·공고', '더보기']);
+  const w = await m.getByTestId('mobile-tabs').locator(':scope > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+  assert.ok(Math.max(...w) - Math.min(...w) <= 1, `5칸 같은 폭 ${w}`);
+  await m.getByTestId('tab-more').tap();
+  await m.getByTestId('more-new-lead').waitFor(); // 더보기 › 만들기 = 그 공간 맥락
+  await m.getByTestId('more-sheet').getByLabel('닫기').tap();
   await m.getByTestId('mobile-space-switch').tap();
   await m.getByTestId('sheet-space-sales').getByLabel('지금 공간').waitFor();
   await m.getByTestId('sheet-space-work').tap(); // 업무로 돌려 둠
   await m.waitForURL(/\/$/);
+  assert.deepEqual(await tabs(), ['홈', '업무', '캘린더', '메시지', '더보기']);
+  assert.equal(await m.getByTestId('fab').count(), 0, '가운데 + 버튼 없음');
   await mc.close();
   // 영업 미배정 직원: 공간 카드 없음 · 주소 직접 입력 404
   await staff.goto(`${BASE}/tasks`);

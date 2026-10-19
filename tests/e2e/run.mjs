@@ -512,7 +512,7 @@ await step('모바일 대시보드·캘린더·하단 메뉴 화면', async () =
   await staff.getByTestId('calendar').waitFor();
   await staff.waitForTimeout(500);
   await staff.screenshot({ path: `${SHOTS}/18-mobile-calendar.png` });
-  await staff.getByTestId('fab').click(); // + → 업무 · 일정 메뉴
+  await staff.getByTestId('tab-more').click(); // 대표 결정(10/19): + 대신 더보기 › 만들기(업무·일정·음성)
   await staff.getByRole('menuitem', { name: '업무 등록' }).click();
   await staff.getByRole('dialog', { name: '업무 등록' }).waitFor();
   await staff.screenshot({ path: `${SHOTS}/19-mobile-quick-add.png` });
@@ -1446,8 +1446,8 @@ await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에
   await m.getByText('삭제했습니다').waitFor();
   assert.ok(msgs.some((x) => x.includes('연결된 업무')), '연결 업무 삭제 확인을 물음');
   assert.equal((await sql`select deleted_at is not null as del from tasks where id = ${t.id}`)[0].del, true, '연결 업무도 삭제');
-  // + 버튼 메뉴에 업무·일정 둘 다
-  await m.getByTestId('fab').click();
+  // 더보기 › 만들기에 업무·일정 둘 다
+  await m.getByTestId('tab-more').click();
   await m.getByRole('menuitem', { name: '일정 등록' }).waitFor();
   await m.getByRole('menuitem', { name: '업무 등록' }).waitFor();
   await mc.close();
@@ -1735,7 +1735,7 @@ await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 �
   assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '390 넘침 없음');
   await m.screenshot({ path: `${SHOTS}/81-v11-tasks-390.png` });
   // 음성 등록 (텍스트로 대체 시험)
-  await m.getByTestId('fab').tap();
+  await m.getByTestId('tab-more').tap();
   await m.getByTestId('fab-voice').tap();
   const dlg = m.getByRole('dialog', { name: '음성으로 업무 등록' });
   await dlg.getByTestId('voice-guide').getByText('마감(언제까지)').waitFor();
@@ -2055,14 +2055,14 @@ await step('V14 19번·R-15·R-16: 업무 상세 머리 요약·D-day·다음 �
   assert.ok(bar.height <= 60, `휴대폰 댓글줄은 한 줄 (높이 ${bar.height})`);
   assert.equal(await form.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)', '불투명 배경');
   // V14 30번: 업무 상세에서는 하단 탭·+ 버튼을 숨기고 입력줄이 맨 아래
-  assert.equal(await staff.getByTestId('fab').isVisible(), false, '업무 상세에서 + 버튼 숨김');
+  assert.equal(await staff.getByTestId('mobile-tabs').isVisible(), false, '업무 상세에서 하단 탭 숨김');
   assert.ok(Math.abs((await form.boundingBox()).y + (await form.boundingBox()).height - (staff.viewportSize().height)) <= 2, '입력줄이 화면 맨 아래');
   await staff.screenshot({ path: `${SHOTS}/94-mobile-comment-bar.png` });
   const vp0 = staff.viewportSize();
   for (const w of [360, 390]) { await staff.setViewportSize({ width: w, height: 780 }); await staff.waitForTimeout(300); await staff.screenshot({ path: `${SHOTS}/94-mobile-comment-bar-${w}.png` }); }
   await staff.setViewportSize(vp0);
   await staff.goto(`${BASE}/tasks`);
-  await staff.getByTestId('fab').waitFor(); // 상세를 벗어나면 하단 탭 다시 보임
+  await staff.getByTestId('mobile-tabs').waitFor(); // 상세를 벗어나면 하단 탭 다시 보임
 });
 await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 질문) / 사용자 관리 "팀" 탭 → 팀 만들기 → 팀 업무 등록 → 팀 보드·업무 칩', async () => {
   await owner.goto(BASE + '/calendar');

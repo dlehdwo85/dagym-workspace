@@ -96,7 +96,7 @@ export function AdOps() {
 
 function PlanForm({ accounts, onClose, onDone }: { accounts: Data['accounts']; onClose: () => void; onDone: () => void }) {
   const [f, setF] = useState({ accountId: accounts[0]?.id ?? '', name: '', dailyBudget: '10000', bidAmt: '300', channelId: '', keywords: '', ads: [{ headline: '', description: '', url: 'https://' }] });
-  const ch = useApi<{ channels: { id: string; name: string; url: string | null }[] }>(f.accountId ? `/api/marketing/ad-ops/channels?accountId=${f.accountId}` : null, [f.accountId]);
+  const ch = useApi<{ channels: { id: string; name: string; url: string | null; type: string }[] }>(f.accountId ? `/api/marketing/ad-ops/channels?accountId=${f.accountId}` : null, [f.accountId]);
   const [busy, setBusy] = useState(false);
   const setAd = (k: number, patch: Partial<(typeof f.ads)[number]>) => setF({ ...f, ads: f.ads.map((a, i) => (i === k ? { ...a, ...patch } : a)) });
   async function save(e: React.FormEvent) {
@@ -119,8 +119,10 @@ function PlanForm({ accounts, onClose, onDone }: { accounts: Data['accounts']; o
           <Field label="기본 입찰가(원, 70~)"><input className={inputCls} inputMode="numeric" value={f.bidAmt} onChange={(e) => setF({ ...f, bidAmt: e.target.value.replace(/\D/g, '') })} required data-testid="ad-plan-bid" /></Field>
         </div>
         <Field label="광고할 웹사이트(네이버에 등록된 비즈채널)">
-          {ch.data?.channels.length ? <select className={inputCls} value={f.channelId} onChange={(e) => setF({ ...f, channelId: e.target.value })} required data-testid="ad-plan-channel"><option value="">고르기</option>{ch.data.channels.map((c) => <option key={c.id} value={c.id}>{c.name}{c.url ? ` (${c.url})` : ''}</option>)}</select>
-            : <input className={inputCls} value={f.channelId} onChange={(e) => setF({ ...f, channelId: e.target.value })} required placeholder={ch.error ? '목록을 못 읽었습니다 — 비즈채널 id 입력' : '불러오는 중…'} data-testid="ad-plan-channel" />}
+          {ch.data?.channels.length ? <select className={inputCls} value={f.channelId} onChange={(e) => setF({ ...f, channelId: e.target.value })} required data-testid="ad-plan-channel"><option value="">고르기</option>{ch.data.channels.map((c) => <option key={c.id} value={c.id}>{c.name}{c.url ? ` (${c.url})` : ''}{c.type && !/SITE/i.test(c.type) ? ` · ${c.type}` : ''}</option>)}</select>
+            : <><input className={inputCls} value={f.channelId} onChange={(e) => setF({ ...f, channelId: e.target.value })} required data-testid="ad-plan-channel"
+                placeholder={!ch.data && !ch.error ? '불러오는 중…' : '비즈채널 id(bsn-…) 직접 입력'} />
+              {(ch.error || ch.data) && <span className="mt-1 block text-[11px] text-amber-800" data-testid="ad-plan-channel-hint">{ch.error ? `목록을 못 읽었습니다: ${ch.error.message}` : '이 계정에서 웹사이트 비즈채널을 찾지 못했습니다'} — 네이버 광고 시스템 › 도구 › 비즈채널 관리에서 id 를 복사해 넣어 주세요.</span>}</>}
         </Field>
         <Field label="키워드(쉼표·줄바꿈으로 구분, 50개까지)"><textarea className={inputCls} rows={3} value={f.keywords} onChange={(e) => setF({ ...f, keywords: e.target.value })} required data-testid="ad-plan-keywords" /></Field>
         {f.ads.map((a, k) => (

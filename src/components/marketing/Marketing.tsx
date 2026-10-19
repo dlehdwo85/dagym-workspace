@@ -139,7 +139,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
 export function Approvals() {
   const sp = useSearchParams();
   const [open, setOpen] = useState<string | null>(sp.get('c'));
-  const [nw, setNw] = useState(false);
+  const [nw, setNw] = useState(sp.get('new') === '1'); // 앱 더보기 › 만들기 › 새 콘텐츠
   const { data, error, reload } = useApi<{ contents: Content[] }>('/api/marketing/contents?view=approvals');
   return (
     <div className="space-y-3" data-testid="mkt-approvals">
