@@ -9,7 +9,8 @@ import { tenantOf, type SessionUser } from '../types';
  * 칸 이름은 원본마다 다를 수 있어 후보를 차례로 시도(pick). 상세는 원본 칸 전부를 그대로 보여 줌.
  */
 const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = o?.[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return null; };
-const day = (v: unknown) => (v ? String(v).slice(0, 10) : null);
+// 로컬 10/19: 전환 뒤 리드(DB)의 날짜는 Date 객체 → String() 하면 'Wed Sep 09' 가 됨 — 서울 날짜(YYYY-MM-DD)로
+const day = (v: unknown) => (!v ? null : v instanceof Date ? (Number.isNaN(v.getTime()) ? null : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(v)) : String(v).slice(0, 10));
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 const plus = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
 
@@ -38,7 +39,7 @@ const PRIORITY: Record<string, string> = { urgent: '긴급', high: '높음', med
 const regionOf = (v: unknown) => { const r = String(v ?? '').trim(); return !r || r.length > 8 || /\s/.test(r) ? '지역 미정' : r; };
 const lead = (r: any, names: Map<string, string>) => ({
   id: r.__id, name: pick(r, 'name', 'company_name', 'facility_name', 'title', 'organization') ?? '(이름 없음)', status: pick(r, 'sales_status', 'status', 'stage'),
-  priority: PRIORITY[String(pick(r, 'priority') ?? '').toLowerCase()] ?? pick(r, 'priority'),
+  priority: PRIORITY[String(pick(r, 'priority') ?? '').toLowerCase()] ?? pick(r, 'priority'), priorityCode: pick(r, 'priority'),
   facility: pick(r, 'facility_type', 'type', 'category'), region: pick(r, 'region', 'sido', 'area'), next: day(pick(r, 'next_contact_date', 'next_contact_at', 'next_action_date')),
   owner: r.__owner !== undefined ? r.__owner || null : names.get(String(pick(r, 'owner_id', 'assigned_to', 'sales_owner_id', 'user_id') ?? '')) ?? null, ownerId: r.__owner_id ?? null, memo: r.__id && r.__owner !== undefined ? r.memo ?? null : undefined, revenue: pick(r, 'expected_revenue', 'expected_amount', 'estimated_revenue'),
   updated: day(pick(r, 'updated_at', 'created_at')), phone: pick(r, 'phone', 'contact_phone'), contact: pick(r, 'contact_name', 'manager_name'),
@@ -156,7 +157,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 영업관리 2-13 표 칸: 관심 사업(배지 2개 + n) — 원본 lead_business_interests
     const I = new Map<string, string[]>();
     for (const x of await rows(t, 'lead_business_interests', 20000)) { const k = String(pick(x, 'lead_id') ?? ''); const n = pick(x, 'category_name', 'business_category', 'category', 'name'); if (k && n) I.set(k, [...(I.get(k) ?? []), String(n)]); }
-    return { ...meta, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [] })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
+    // 대표 요청(영업관리 거래처 장): 표 안에서 단계·우선·다음 연락·거래처명·담당(관리자) 바로 고치기 — 전환 뒤(쓰기 열림)만
+    const canAssign = ['owner', 'admin'].includes(u.role);
+    const people = !meta.readOnly && canAssign ? await sql`select id, name from users where tenant = ${t} and status = 'active' and not is_demo order by name` : [];
+    return { ...meta, stages: STAGES, canAssign, people, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [] })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
   }
   if (view === 'lead') {
     if (!q.id) throw badRequest('id 가 필요합니다');

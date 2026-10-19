@@ -423,6 +423,7 @@ await step('④ 캘린더 화면에서 매주 반복 일정 등록 → 주 보�
   if (new Date(d + 'T00:00:00Z').getUTCDay() === 0) await owner.locator('.fc-next-button').click(); // 일요일 시작 주: 내일이 일요일이면 다음 주
   const ev = owner.locator('.fc-timegrid-event', { hasText: '주간 운영 회의' }).first();
   await ev.waitFor();
+  await ev.scrollIntoViewIfNeeded(); // 시간 보기 첫 위치 = 지금 - 1시간(대표 지적 10/19) → 10:00 일정이 칸 밖일 수 있음
   await owner.screenshot({ path: `${SHOTS}/10-calendar-week.png` });
   const box = await ev.boundingBox();
   await owner.mouse.move(box.x + box.width / 2, box.y + 8); await owner.mouse.down();
@@ -790,6 +791,7 @@ await step('S-5 오늘·이번 주: 업무를 시간표로 끌어 놓아 실행 
   await card.waitFor();
   await staff.locator('.fc-timegrid-slot').first().waitFor();
   const slot = staff.locator('td.fc-timegrid-slot-lane[data-time="15:00:00"]').first();
+  await slot.scrollIntoViewIfNeeded(); // 첫 위치 = 지금 - 1시간 → 15:00 칸이 위로 밀려 있을 수 있음
   const b = await card.boundingBox(); const sb = await slot.boundingBox();
   const col = await staff.locator('.fc-timegrid-col.fc-day-today').boundingBox().catch(() => null) ?? await staff.locator('.fc-timegrid-col').nth(2).boundingBox();
   await staff.mouse.move(b.x + 30, b.y + 15); await staff.mouse.down();
@@ -1181,6 +1183,7 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   await owner.getByTestId('mini-month').waitFor();
   await owner.getByTestId('calendar-list').getByLabel('업무 숨기기').waitFor();
   await owner.waitForLoadState('networkidle'); // 일정을 불러온 뒤(이른 시각 일정이 있으면 시간 칸이 늘어남) 위치 측정
+  await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().scrollIntoViewIfNeeded(); // 첫 위치 = 지금 - 1시간(10/19)
   const col = await owner.locator(`.fc-timegrid-col[data-date="${d}"]`).boundingBox();
   const slot = await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().boundingBox();
   await owner.mouse.click(col.x + col.width / 2, slot.y + 4);

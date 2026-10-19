@@ -38,6 +38,26 @@ describe('AI 비서 대화 규칙(대표 지적 10/19)', () => {
     assert.ok(up.assigneeId && up.dueTime && up.dueDate, '담당·마감 시각 바꾸기 도구 있음');
   });
 
+  test('V45 원가(대표 지적 10/19): 고정부 캐시 구간·의도별 도구 묶음·조회는 빠른 모델·more_tools 로 전체 도구', async () => {
+    const send = async (text) => { const n0 = (await fakeState()).anthropic.length; await queue([say('네')]); await ctx.owner.ok('POST', '/api/ai/chat', { text }); return (await fakeState()).anthropic.slice(n0)[0]; };
+    const a = await send('오늘 내 업무 뭐 남았어?');
+    assert.equal(a.body.model, 'claude-haiku-5-5', '조회 = 빠른 모델');
+    assert.ok(Array.isArray(a.body.system) && a.body.system[0].cache_control?.type === 'ephemeral', '고정부(규칙·회사) 캐시 구간');
+    assert.doesNotMatch(a.body.system[0].text, /오늘: \d{4}/, '날짜·사용자는 고정부 밖');
+    const names = (r) => r.body.tools.map((t) => t.name).filter(Boolean);
+    assert.ok(names(a).includes('search_tasks') && names(a).includes('more_tools'));
+    assert.ok(!names(a).includes('run_file_task') && !names(a).includes('propose_create_event'), '필요 없는 묶음은 안 보냄');
+    const b = await send('내일 오후에 이직원이랑 회의 잡아줘');
+    assert.equal(b.body.model, 'claude-sonnet-5-5', '만들기·잡기 = 기본 모델');
+    assert.ok(names(b).includes('propose_create_event') && names(b).includes('find_free_time'));
+    // 도구가 없을 때 more_tools → 다음 단계에 모든 도구
+    const n0 = (await fakeState()).anthropic.length;
+    await queue([toolUse('m1', 'more_tools', { reason: '매출 보기' }), say('네')]);
+    await ctx.owner.ok('POST', '/api/ai/chat', { text: '이거 좀 봐줘' });
+    const two = (await fakeState()).anthropic.slice(n0);
+    assert.ok(!names(two[0]).includes('revenue_summary') && names(two[1]).includes('revenue_summary') && names(two[1]).includes('run_file_task'), 'more_tools 뒤 전체');
+  });
+
   test('① 메시지로 라고 하면 배정 힌트 없음 · 다른 표현(시켜줘·맡겨줘)', async () => {
     const cases = [['민수에게 메시지로 내일 회의 취소라고 전해줘', false], ['이직원에게 견적서 정리 시켜줘', true], ['최매니저한테 현장 점검 맡겨줘', true], ['이번 주 내 업무 정리해줘', false]];
     for (const [text, hint] of cases) {

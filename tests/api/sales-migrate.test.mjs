@@ -123,6 +123,16 @@ test('전환 T-1: 동결 시점 원본 건수 → 정식 표 변환·대조 → 
   const [log] = await sql`select from_status, to_status, reason from sales_status_log where lead_id = ${lead.id}`;
   assert.deepEqual([log.to_status, log.reason], ['보류', '예산 확정 전']);
   assert.equal((await ctx.owner.req('PATCH', `/api/sales/leads/${lead.id}`, { status: '없는단계' })).status, 400);
+  // 대표 요청(거래처 장): 표 안 편집 — 거래처명·우선순위, 목록은 단계·사람 목록·한국어 날짜(Date 객체가 'Wed Sep 09' 로 나오지 않게)
+  await ctx.owner.ok('PATCH', `/api/sales/leads/${lead.id}`, { name: '표에서 고친 이름', priority: 'high' });
+  const [ed] = await sql`select name, priority from sales_leads where id = ${lead.id}`;
+  assert.deepEqual([ed.name, ed.priority], ['표에서 고친 이름', 'high']);
+  const lv = await ctx.owner.ok('GET', '/api/sales/src?view=leads');
+  const row = lv.leads.find((l) => l.id === lead.id);
+  assert.deepEqual([row.name, row.priority, row.priorityCode], ['표에서 고친 이름', '높음', 'high']);
+  assert.match(String(row.updated), /^\d{4}-\d{2}-\d{2}$/, `날짜 형식 ${row.updated}`);
+  assert.ok(lv.stages.length && lv.canAssign && lv.people.length, '표 안 편집에 쓰는 단계·담당 목록');
+  assert.equal((await ctx.owner.req('PATCH', `/api/sales/leads/${lead.id}`, { priority: 'nope' })).status, 400);
   assert.equal((await ctx.owner.req('PATCH', '/api/sales/leads/00000000-0000-0000-0000-000000000000', { memo: 'x' })).status, 404);
   const st = await ctx.owner.ok('GET', '/api/platform/sales-cutover');
   assert.ok(st.cutovers.some((c) => c.tenant === 'default' && c.writes_open && c.ok));

@@ -109,7 +109,14 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
         <div className="space-y-3" data-testid="sales-lead-detail">
           <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {data.lead.next}</span>}</div>
           <div className="flex flex-wrap gap-1 border-b border-line">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined}>{l}</button>)}</div>
-          {tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}<Raw row={data.raw} /></> : <ul className="space-y-2">{(tabs.find((t) => t[0] === tab)?.[2] ?? []).map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Raw row={r} /></li>)}
+          {tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}
+            {/* 로컬 10/19: 사람이 보는 칸만 한국어로 — 내부 id·원본 키는 숨기고, 원본 전체는 관리자만 접힘 안에 */}
+            <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1 text-sm" data-testid="lead-info">
+              {([['거래처명', data.lead.name], ['단계', data.lead.status], ['우선순위', data.lead.priority], ['시설', data.lead.facility], ['지역', data.lead.region], ['담당', data.lead.owner], ['다음 연락', data.lead.next && kd(data.lead.next)],
+                ['연락처', [data.lead.contact, data.lead.phone].filter(Boolean).join(' · ')], ['예상매출', won(data.lead.revenue)], ['최근 활동', data.lead.updated && kd(data.lead.updated)], ['메모', data.lead.memo]] as [string, unknown][])
+                .filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + ':v'} className="whitespace-pre-wrap break-words">{String(v)}</dd>])}
+            </dl>
+            {data.canAssign && <details className="text-xs" data-testid="lead-raw"><summary className="cursor-pointer text-ink-3">원본 보기(관리자)</summary><div className="mt-1"><Raw row={data.raw} /></div></details>}</> : <ul className="space-y-2">{(tabs.find((t) => t[0] === tab)?.[2] ?? []).map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Raw row={r} /></li>)}
             {!(tabs.find((t) => t[0] === tab)?.[2] ?? []).length && <li className="text-xs text-ink-3">없음</li>}</ul>}
         </div>
       )}
@@ -124,6 +131,9 @@ export function Leads({ initialId, initialDay }: { initialId?: string; initialDa
   // 로컬 검수 10/19: prompt() 는 브라우저·자동화 환경에서 막힐 수 있어 입력 창으로
   const [nl, setNl] = useState<{ name: string; region: string; contactName: string; phone: string } | null>(null);
   // 앱 더보기 › 만들기 › 새 리드(?new=1): 쓰기 열린 회사면 입력 창 바로
+  async function patchLead(id: string, body: Record<string, unknown>) {
+    try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body }); toast.ok('저장했습니다'); reload(); } catch (e: any) { toast.error(e.message); reload(); }
+  }
   useEffect(() => { if (data?.readOnly === false && new URLSearchParams(window.location.search).get('new') === '1') setNl({ name: '', region: '', contactName: '', phone: '' }); }, [data?.readOnly]);
   async function newLead(e: React.FormEvent) {
     e.preventDefault(); if (!nl?.name.trim()) return;
@@ -138,10 +148,16 @@ export function Leads({ initialId, initialDay }: { initialId?: string; initialDa
         <>
         {/* 영업관리 2-13 표 칸: 거래처명(담당·최근 활동·금액) · 관심 사업 · 시설 · 지역 · 단계 · 우선 · 예상매출 · 다음 연락 · 최근 활동 · 담당 — 휴대폰은 카드 */}
         <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block"><table className="w-full min-w-[960px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>{['거래처명', '관심 사업', '시설', '지역', '단계', '우선', '예상매출', '다음 연락', '최근 활동', '담당'].map((h) => <th key={h} className="whitespace-nowrap p-2">{h}</th>)}</tr></thead>
-          <tbody>{data.leads.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={() => setOpen(l.id)} data-testid="sales-lead-row">
-            <td className="p-2 font-medium">{l.name}{l.contact && <span className="block text-[11px] font-normal text-ink-3">{l.contact}{l.phone ? ` · ${l.phone}` : ''}</span>}</td>
-            <td className="p-2">{interests(l.interests)}</td><td className="p-2 text-xs">{l.facility ?? ''}</td><td className="p-2 text-xs">{l.region ?? ''}</td><td className="p-2">{chip(l.status)}</td><td className="p-2 text-xs">{l.priority ?? ''}</td>
-            <td className="p-2 text-xs tabular-nums">{won(l.revenue)}</td><td className={cx('p-2 text-xs tabular-nums', l.next && l.next < today() ? 'font-semibold text-red-600' : '')}>{l.next ?? ''}</td><td className="p-2 text-xs tabular-nums text-ink-3">{l.updated ?? ''}</td><td className="p-2 text-xs">{l.owner ?? ''}</td></tr>)}
+          <tbody>{data.leads.map((l: any) => { const ed = data.readOnly === false; return <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={(e) => { if (!(e.target as HTMLElement).closest('input,select,button')) setOpen(l.id); }} data-testid="sales-lead-row">
+            {/* 대표 요청(영업관리 거래처 장): 표 안에서 바로 고치기 — 거래처명·단계·우선·다음 연락·담당(관리자). 바뀌면 바로 저장 */}
+            <td className="p-2 font-medium">{ed ? <CellInput value={l.name} onSave={(v) => patchLead(l.id, { name: v })} label="거래처명" testId="cell-name" /> : l.name}{l.contact && <span className="block text-[11px] font-normal text-ink-3">{l.contact}{l.phone ? ` · ${l.phone}` : ''}</span>}</td>
+            <td className="p-2">{interests(l.interests)}</td><td className="p-2 text-xs">{l.facility ?? ''}</td><td className="p-2 text-xs">{l.region ?? ''}</td>
+            <td className="p-2">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.status ?? ''} aria-label="단계" data-testid="cell-status" onChange={(e) => { const v = e.target.value; const reason = ['보류', '실패'].includes(v) ? prompt(`'${v}' 사유`) ?? '' : undefined; if (reason === '') return; void patchLead(l.id, { status: v, ...(reason ? { reason } : {}) }); }}>{(data.stages ?? []).map((s: string) => <option key={s}>{s}</option>)}</select> : chip(l.status)}</td>
+            <td className="p-2 text-xs">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.priorityCode ?? ''} aria-label="우선" data-testid="cell-priority" onChange={(e) => patchLead(l.id, { priority: e.target.value || null })}><option value="">—</option>{[['urgent', '긴급'], ['high', '높음'], ['medium', '보통'], ['low', '낮음']].map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> : l.priority ?? ''}</td>
+            <td className="p-2 text-xs tabular-nums">{won(l.revenue) || '-'}</td>
+            <td className={cx('p-2 text-xs tabular-nums', l.next && l.next < today() ? 'font-semibold text-red-600' : '')}>{ed ? <input type="date" className="rounded border border-line bg-white px-1 py-0.5 text-xs" defaultValue={l.next ?? ''} aria-label="다음 연락" data-testid="cell-next" onChange={(e) => patchLead(l.id, { nextContactDate: e.target.value || null })} /> : l.next ?? ''}</td>
+            <td className="p-2 text-xs tabular-nums text-ink-3">{kd(l.updated)}</td>
+            <td className="p-2 text-xs">{ed && data.canAssign ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.ownerId ?? ''} aria-label="담당" data-testid="cell-owner" onChange={(e) => patchLead(l.id, { ownerId: e.target.value || null })}><option value="">없음</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select> : l.owner ?? ''}</td></tr>; })}
             {!data.leads.length && <tr><td colSpan={10} className="p-6 text-center text-ink-3">리드가 없습니다</td></tr>}</tbody></table></div>
         <ul className="space-y-2 md:hidden" data-testid="sales-lead-cards">{data.leads.map((l: any) => (
           <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-card border border-line bg-white p-3 text-left text-sm" data-testid="sales-lead-card">
@@ -243,7 +259,17 @@ export function Regions() {
   );
 }
 
-const won = (v: unknown) => (v == null || v === '' ? '' : Number(v) ? `${Number(v).toLocaleString('ko-KR')}원` : String(v));
+// 로컬 10/19: 예상매출 0.00 → 빈칸('-'), 날짜는 10. 9.(수) 형식
+const won = (v: unknown) => (v == null || v === '' || Number(v) === 0 ? '' : Number(v) ? `${Number(v).toLocaleString('ko-KR')}원` : String(v));
+const kd = (v: unknown) => { const s = String(v ?? ''); if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return s; const d = new Date(`${s.slice(0, 10)}T00:00:00Z`); return `${d.getUTCMonth() + 1}. ${d.getUTCDate()}.(${'일월화수목금토'[d.getUTCDay()]})`; };
+/** 표 칸 글 고치기: 엔터·밖 누르면 저장, Esc 취소 */
+function CellInput({ value, onSave, label, testId }: { value: string; onSave: (v: string) => void; label: string; testId: string }) {
+  const [v, setV] = useState(value ?? '');
+  useEffect(() => setV(value ?? ''), [value]);
+  return <input className="w-full min-w-[8rem] rounded border border-transparent bg-transparent px-1 py-0.5 font-medium hover:border-line focus:border-line focus:bg-white" value={v} aria-label={label} data-testid={testId}
+    onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setV(value ?? ''); }}
+    onBlur={() => { if (v.trim() && v.trim() !== value) onSave(v.trim()); else setV(value ?? ''); }} />;
+}
 const interests = (a?: string[]) => (a?.length ? <span className="inline-flex flex-wrap gap-1">{a.slice(0, 2).map((x) => <span key={x} className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-800">{x}</span>)}{a.length > 2 && <span className="text-[10px] text-ink-3">+{a.length - 2}</span>}</span> : null);
 const D = (v: unknown) => (v == null || v === '' ? null : String(v));
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());

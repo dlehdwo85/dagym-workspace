@@ -15,7 +15,7 @@ after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); })
 describe('V23 AI 비용·한도', () => {
   test('정가 원가: 대화 1건 비용(원)을 답에 돌려주고 ai_usage 에 원 환산·대화 표시, 남은 한도 막대 값', async () => {
     await ctl({ anthropicReset: true, anthropicQueue: [say('안녕하세요', { input_tokens: 10000, output_tokens: 1000, cache_read_input_tokens: 20000, cache_creation_input_tokens: 4000 })] });
-    const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '이번 주 일정 알려줘' });
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '이번 주 일정 정리해줘' });
     // Sonnet 5.5: (10000×2 + 4000×2×1.25 + 20000×0.2 + 1000×10)/1e6 = $0.044 → 61.6원
     const [u] = await sql`select cost_usd::float8 usd, cost_krw::float8 krw, purpose from ai_usage where user_id = ${ctx.ownerId} order by created_at desc limit 1`;
     assert.ok(Math.abs(u.usd - 0.044) < 1e-6, String(u.usd)); assert.equal(u.krw, 61.6); assert.equal(u.purpose, 'assistant');
@@ -30,11 +30,11 @@ describe('V23 AI 비용·한도', () => {
     await ctx.owner.ok('PUT', '/api/ai/user-limits', { userId: ctx.staffA.id, monthlyKrw: 1000 });
     const big = { input_tokens: 300000, output_tokens: 0 }; // Sonnet $0.6 = 840원
     await ctl({ anthropicReset: true, anthropicQueue: [say('첫 답', big)] });
-    await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '내 업무 알려줘' });
+    await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '내 업무 정리해줘' });
     const n80 = await sql`select user_id from notifications where title like 'AI 한도 80%%' order by created_at`;
     assert.ok(n80.some((n) => n.user_id === ctx.staffA.id) && n80.some((n) => n.user_id === ctx.ownerId), '80% 알림 본인·대표');
     // 하루 한도(200원)도 넘었음 → 오늘 막힘
-    const day = await ctx.staffA.client.req('POST', '/api/ai/chat', { text: '또 알려줘' });
+    const day = await ctx.staffA.client.req('POST', '/api/ai/chat', { text: '또 정리해줘' });
     assert.equal(day.status, 429); assert.match(day.body.error?.message ?? '', /오늘/);
     await sql`update ai_usage set created_at = created_at - interval '1 day' where user_id = ${ctx.staffA.id} and created_at > date_trunc('month', now()) + interval '1 day'`;
     await ctl({ anthropicReset: true, anthropicQueue: [say('둘째 답', { input_tokens: 100000, output_tokens: 0 })] }); // 280원 → 1,120원

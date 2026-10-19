@@ -86,7 +86,13 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql }) {
   await owner.getByTestId('lead-save').click();
   await owner.getByText('저장했습니다').waitFor();
   await owner.keyboard.press('Escape');
-  await owner.getByTestId('sales-lead-row').filter({ hasText: 'E2E 새 거래처' }).waitFor();
+  // 로컬 10/19: 쓰기 열린 회사는 표 안에서 바로 고침(거래처명 칸 = 입력칸) → 엔터로 저장
+  const nameCell = owner.getByTestId('sales-lead-row').getByTestId('cell-name').and(owner.locator('[value="E2E 새 거래처"]'));
+  await nameCell.waitFor();
+  await nameCell.fill('E2E 새 거래처2'); await owner.keyboard.press('Enter'); // 고친 뒤엔 value 가 바뀌어 같은 locator 로 못 찾음
+  await owner.getByText('저장했습니다').first().waitFor();
+  await owner.getByTestId('sales-lead-row').getByTestId('cell-name').and(owner.locator('[value="E2E 새 거래처2"]')).waitFor();
+  assert.equal((await sql`select count(*)::int n from sales_leads where name = 'E2E 새 거래처2'`)[0]?.n ?? 0, 1, '표 안 수정 저장');
   for (const [path, id] of [['/s/sales', 'space-home-sales'], ['/s/sales/pipeline', 'sales-pipeline']]) { await owner.goto(`${BASE}${path}`); await owner.getByTestId(id).waitFor(); }
   await sql`update sales_cutover set writes_open = false where tenant = 'default'`;
   // 원래대로(다른 시험에 영향 없게): 업무 공간으로·영업 끄기

@@ -73,6 +73,7 @@ export async function v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDa
   await m.screenshot({ path: `${SHOTS}/v14-38-mobile-3day.png` });
   // ㊱ 왼쪽으로 밀기 → 다음 3일, 오른쪽 → 되돌아옴
   const cdp = await mc.newCDPSession(m);
+  await m.locator('.fc-timegrid-slot-lane[data-time="08:00:00"]').first().evaluate((el) => el.scrollIntoView({ block: 'center' })); // 첫 위치는 시각마다 다름(10/19)
   const lane = await m.locator('.fc-timegrid-slot-lane[data-time="08:00:00"]').first().boundingBox();
   const swipe = async (from, to) => {
     const y = lane.y + lane.height / 2;
@@ -92,11 +93,15 @@ export async function v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDa
   await swipe(200, 170); // 짧게 밀면 제자리
   assert.equal(await first(), d);
   // ㊴ 다른 화면에 갔다가 뒤로 오면 보기·날짜·스크롤 그대로
-  await m.evaluate(() => window.scrollTo(0, 700));
-  await m.waitForTimeout(600);
+  // 대표 지적(10/19): 시간 보기는 높이 고정·달력 안에서 스크롤 → 그 칸의 위치를 복원
+  const sc = () => m.evaluate(() => document.querySelector('.fc-timegrid-body')?.closest('.fc-scroller')?.scrollTop ?? 0);
+  await m.evaluate(() => { const el = document.querySelector('.fc-timegrid-body')?.closest('.fc-scroller'); if (el) el.scrollTop = 300; });
+  await m.waitForTimeout(700);
+  const before = await sc();
+  assert.ok(before > 200, `달력 칸 안 스크롤 (${before})`);
   await m.goto(BASE + '/tasks');
   await m.goBack();
-  await m.waitForFunction(() => window.scrollY > 500, null, { timeout: 8000 });
+  await m.waitForFunction(() => (document.querySelector('.fc-timegrid-body')?.closest('.fc-scroller')?.scrollTop ?? 0) > 200, null, { timeout: 8000 });
   assert.equal(await first(), d, '돌아와도 같은 날짜');
   await mc.close();
 }

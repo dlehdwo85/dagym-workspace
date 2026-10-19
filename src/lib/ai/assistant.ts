@@ -212,7 +212,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 답은 한국어로 짧고 분명하게. 2~3문장마다 빈 줄로 단락을 나누고, 여러 항목은 줄머리표(-)로 한 줄씩.`;
 
 /** confidential: 이번 차례에 기밀 자료(기밀 파일·매출)를 읽었는지 — 결과물·제안이 같은 등급을 따른다(V14 15번) */
-type Ctx = { u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean; threadId?: string; docJobs?: { id: string; title: string; kind: string; version: number; status: string }[] };
+type Ctx = { allTools?: boolean; u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean; threadId?: string; docJobs?: { id: string; title: string; kind: string; version: number; status: string }[] };
 const clip = (s: unknown, n = 400) => (typeof s === 'string' ? (s.length > n ? s.slice(0, n) + '…' : s) : s);
 const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
@@ -328,6 +328,7 @@ async function personalCalendarId(u: SessionUser) {
 async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
   const u = c.u;
   switch (name) {
+    case 'more_tools': { c.allTools = true; return { ok: true, note: '모든 도구를 붙였습니다 — 다음 단계에서 필요한 도구를 쓰세요' }; }
     case 'search_library': {
       const r = await listLibrary(u, { q: String(input.query ?? ''), folder: input.folder, limit: 10 }); // 등급·폴더 권한 밖 파일은 여기서 이미 빠짐
       if (r.files.some((f: any) => f.effective_security === 'confidential')) c.confidential = true;
@@ -703,6 +704,28 @@ async function fileBlocks(u: SessionUser, ids: string[]) {
 const DOC_NOUN = /(견적서|거래\s*명세서|명세서|공문|안내문|보고서|제안서|계약서|문서|엑셀|워드|ppt|피피티|파워포인트|pdf|양식|발주서|청구서|영수증|xlsx|docx)/i;
 const DOC_VERB = /(만들|작성|채워|채우|바꿔|고쳐|다듬|수정|뽑아|써\s*줘|생성|디자인)/;
 export const isDocRequest = (text: string) => (DOC_NOUN.test(text) && DOC_VERB.test(text)) || /^「[^」]+」\s*v\d+을/.test(text.trim());
+// ---- V45 원가(대표 지적 10/19: 질문 1번 중앙 73원) — 의도별 도구 묶음·빠른 모델·고정부 캐시 ----
+/** 늘 붙는 도구(업무·사람·자료 찾기) + 의도 낱말이 있을 때만 붙는 묶음. 묶음은 몇 가지로 고정돼 같은 회사 안에서 캐시가 다시 쓰임 */
+const CORE_TOOLS = new Set(['search_tasks', 'get_task', 'list_people', 'list_events', 'search_library', 'read_library_file', 'propose_create_task', 'propose_create_tasks', 'propose_update_task', 'propose_comment', 'propose_attach_file', 'more_tools']);
+const BUNDLES: [RegExp, string[]][] = [
+  [/일정|회의|미팅|약속|캘린더|시간|잡아|빈 ?시간|취소|연차|출장|방문/, ['find_free_time', 'propose_create_event', 'propose_update_event']],
+  [/자료|파일|문서|엑셀|보고서|견적|양식|정리|폴더|PPT|피피티|워드|PDF|표|안내문|제안서|만들어/i, ['list_library_folders', 'propose_organize_files', 'propose_create_document', 'propose_xlsx_report', 'run_file_task', 'list_templates', 'read_template_layout', 'fill_template']],
+  [/매출|지출|회원 ?수|실적/, ['revenue_summary']],
+];
+const MORE_TOOLS: AiTool = { name: 'more_tools', description: '이번 질문에는 자주 쓰는 도구만 붙어 있다. 일정·자료·문서·매출 등 필요한 도구가 목록에 없으면 먼저 이 도구를 불러 모든 도구를 받는다("안 된다"고 답하기 전에 반드시).',
+  input_schema: { type: 'object', properties: { reason: { type: 'string', description: '필요한 일' } } } } as AiTool;
+export function toolsFor(text: string, hasFiles: boolean, all = false) {
+  if (all) return [...TOOLS, MORE_TOOLS].filter((t) => t.name !== 'more_tools');
+  const want = new Set(CORE_TOOLS);
+  for (const [re, names] of BUNDLES) if (hasFiles && names.includes('propose_organize_files') ? true : re.test(text)) names.forEach((n) => want.add(n));
+  return [...TOOLS.filter((t) => want.has(t.name)), MORE_TOOLS];
+}
+/** 조회만 하는 짧은 질문(만들기·바꾸기·배정 낱말 없음)은 빠른 모델 — 도구 여러 단계·문서·첨부는 기본 모델 */
+export function lightQuestion(text: string, hasFiles: boolean) {
+  if (hasFiles || text.length > 80) return false;
+  if (/만들|추가|바꿔|바꾸|변경|배정|시켜|맡겨|보내|정리|등록|잡아|취소|삭제|수정|작성|분석|요약해|제안|계획|비교/.test(text)) return false;
+  return /알려|보여|뭐|무엇|몇|언제|어디|누구|있어|있나|찾아|목록|조회|확인|남았|했어|됐어/.test(text);
+}
 const DOC_TOOL_NAMES = new Set(['run_file_task', 'list_templates', 'read_template_layout', 'fill_template', 'search_library', 'read_library_file', 'list_library_folders',
   'propose_create_document', 'propose_xlsx_report', 'propose_organize_files', 'propose_attach_file', 'search_tasks', 'get_task']);
 const DOC_SYSTEM = `당신은 사내 서비스 "워크인"의 문서 담당 AI 입니다. 이번 요청은 문서·파일 만들기입니다.
@@ -749,7 +772,8 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   // 대표 지적(10/19 ①): "○○한테 보고서 만들라고 해줘" 는 문서 만들기가 아니라 업무 배정 — 문서 경로(업무 도구 없음)로 보내지 않음
   const assignHint = intentHint(userText);
   const docMode = !providerArg && settings.doc_engine && !assignHint && isDocRequest(userText);
-  const provider: AiProvider = providerArg ?? anthropicProvider(docMode ? { tier: 'fast' } : {});
+  const light = !docMode && !assignHint && lightQuestion(userText, !!i.fileIds?.length); // V45: 조회 질문은 빠른 모델
+  const provider: AiProvider = providerArg ?? anthropicProvider(docMode || light ? { tier: 'fast' } : {});
 
   let context = '';
   if (i.taskId) {
@@ -761,7 +785,11 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   context += assignHint;
   const Pn = await import('./persona');
   const [co, me] = await Promise.all([Pn.companyAi(u), Pn.writerOf(u)]);
-  const system = `${docMode ? DOC_SYSTEM : SYSTEM}\n\n${Pn.companyBlock(co)}\n\n오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}${me.title ? ` ${me.title}` : ''}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}`;
+  // V45 원가: 고정부(규칙 + 회사 정보)는 캐시 구간으로 따로 — 날짜·사용자·화면 문맥·요약은 그 뒤(매번 바뀌어도 고정부 캐시는 다시 씀)
+  const system: { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }[] = [
+    { type: 'text', text: `${docMode ? DOC_SYSTEM : SYSTEM}\n\n${Pn.companyBlock(co)}`, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: `오늘: ${todaySeoul()} (${DateTime.now().setZone(TZ).toFormat('cccc', { locale: 'ko' })}), 사용자: ${u.name}${me.title ? ` ${me.title}` : ''}(id=${u.id}, 역할=${u.role}).${context}${hist?.summary ? `\n\n이 대화의 앞부분 요약:\n${hist.summary}` : ''}\n답은 꼭 필요한 만큼만 짧게(보통 5줄 이내).` },
+  ];
   // 문맥: 보관된 대화면 최근 20개 + 요약, 예전 방식이면 화면이 보낸 것
   const recent = hist ? (docMode ? hist.messages.slice(-6) : hist.messages) : [];
   while (docMode && recent[0]?.role === 'assistant') recent.shift(); // 대화는 사용자 말로 시작
@@ -776,7 +804,8 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   const c: Ctx = { u, proposals: [], confidential: false, threadId, docJobs: [] };
   // V22 웹 검색·페이지 읽기 (회사 설정으로 끄기)
-  const tools = docMode ? TOOLS.filter((t) => DOC_TOOL_NAMES.has(t.name)) : settings.web_tools ? [...TOOLS, ...WEB_TOOLS] : TOOLS;
+  const pick = () => { const base = docMode ? TOOLS.filter((t) => DOC_TOOL_NAMES.has(t.name)) : toolsFor(userText, !!i.fileIds?.length, c.allTools); return !docMode && settings.web_tools ? [...base, ...WEB_TOOLS] : base; };
+  let tools = pick();
   if (i.fileIds?.length && fbConf) c.confidential = true;
   const sql = db();
   const steps: string[] = [];
@@ -784,6 +813,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   let turnCost = 0, inTok = 0, outTok = 0;
   for (let step = 0; step < MAX_STEPS; step++) {
     if (signal?.aborted) break;
+    tools = pick(); // more_tools 를 부르면 다음 단계부터 모든 도구
     const r = await provider.chat({ system, messages, tools, signal }).catch((e: any) => {
       if (signal?.aborted) return null; // 부록 A2: 사용자가 멈춤
       if (e instanceof HttpError) throw e; // V23-1: 크레딧 부족·요청 한도·일시 장애 문구

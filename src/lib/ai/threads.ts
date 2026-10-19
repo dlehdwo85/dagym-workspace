@@ -34,7 +34,7 @@ export async function startThread(u: SessionUser, firstText: string, taskId: str
 /** 문맥: 앞부분 요약 + 최근 20개(차단·오류 제외). 제안은 처리 결과와 함께 */
 export async function threadHistory(threadId: string, sql: Sql = db()) {
   const rows = await sql<{ id: string; role: 'user' | 'assistant'; text: string; proposal_ids: string[]; file_ids: string[] | null; file_names: string[] | null; doc_job_ids: string[] | null }[]>`
-    select id::text, role, text, proposal_ids, file_ids, file_names, doc_job_ids from ai_messages m where thread_id = ${threadId} and status = 'ok' order by m.id desc limit 20`;
+    select id::text, role, text, proposal_ids, file_ids, file_names, doc_job_ids from ai_messages m where thread_id = ${threadId} and status = 'ok' order by m.id desc limit 12`; // V45 원가: 최근 6턴만, 그 앞은 요약
   rows.reverse();
   const pids = rows.flatMap((r) => r.proposal_ids);
   const props = pids.length ? await sql<{ id: string; summary: string; status: string }[]>`select id, summary, status from ai_proposals where id = any(${pids}::uuid[])` : [];
@@ -54,11 +54,11 @@ export async function threadHistory(threadId: string, sql: Sql = db()) {
 export async function maybeSummarize(u: SessionUser, threadId: string) {
   const sql = db();
   const [t] = await sql<{ summary: string | null; upto: string }[]>`select summary, summarized_upto::text upto from ai_threads where id = ${threadId}`;
-  const keep = await sql<{ id: string }[]>`select id::text from ai_messages m where thread_id = ${threadId} and status = 'ok' order by m.id desc limit 1 offset 19`;
+  const keep = await sql<{ id: string }[]>`select id::text from ai_messages m where thread_id = ${threadId} and status = 'ok' order by m.id desc limit 1 offset 11`;
   if (!keep[0]) return;
   const old = await sql<{ id: string; role: string; text: string }[]>`select id::text, role, text from ai_messages m where thread_id = ${threadId} and status = 'ok'
     and id > ${t.upto}::bigint and id < ${keep[0].id}::bigint order by m.id`;
-  if (old.length < 10) return;
+  if (old.length < 4) return; // V45: 6턴 넘으면 바로 요약(입력 토큰 줄이기)
   const { anthropicProvider, costUsd } = await import('./provider');
   const p = anthropicProvider({ tier: 'fast' });
   try {

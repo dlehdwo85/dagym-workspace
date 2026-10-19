@@ -10,6 +10,12 @@ export async function cal1019({ owner, ctx, sql, BASE }) {
   const a = await mk('E2E 겹침 가', '10:00', '11:00');
   await mk('E2E 겹침 나', '10:00', '11:00');
   await owner.goto(`${BASE}/calendar?view=timeGridWeek&date=${day}`);
+  // 대표 지적(10/19 휴대폰): 오늘이 없는 주는 07:00 부터 보임(높이 고정·칸 안 스크롤), 새벽도 위로 올리면 보임(00:00 부터)
+  await owner.locator('td.fc-timegrid-slot[data-time="00:00:00"]').first().waitFor({ state: 'attached' });
+  await owner.waitForTimeout(300);
+  const pos = await owner.evaluate(() => { const sc = document.querySelector('.fc-timegrid-body')?.closest('.fc-scroller'); const row = document.querySelector('td.fc-timegrid-slot[data-time="07:00:00"]');
+    return sc && row ? { top: sc.scrollTop, row: row.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop } : null; });
+  assert.ok(pos && Math.abs(pos.top - pos.row) < 8, `첫 스크롤 = 07:00 (${JSON.stringify(pos)})`);
   const ga = owner.locator('[data-ev-block]').filter({ hasText: 'E2E 겹침 가' }), gb = owner.locator('[data-ev-block]').filter({ hasText: 'E2E 겹침 나' });
   await ga.waitFor(); await gb.waitFor();
   const [ba, bb] = [await ga.boundingBox(), await gb.boundingBox()];
@@ -46,6 +52,12 @@ export async function cal1019({ owner, ctx, sql, BASE }) {
   await owner.getByTestId('color-pop').getByRole('button', { name: '기본으로' }).click();
   // ③ 월 보기: 한 날짜에 일정 9건 → '+N개'
   for (let i = 0; i < 9; i++) await ctx.owner.ok('POST', '/api/events', { calendarId: personal.id, title: `E2E 월 ${i}`, start: '2026-11-25T00:00:00+09:00', end: '2026-11-26T00:00:00+09:00', allDay: true });
+  await ctx.owner.ok('POST', '/api/events', { calendarId: personal.id, title: 'E2E 월 시각 일정', start: '2026-11-26T10:00:00+09:00', end: '2026-11-26T11:00:00+09:00' });
   await owner.goto(`${BASE}/calendar?view=dayGridMonth&date=2026-11-25`);
   await owner.locator('.fc-more-link').filter({ hasText: /^\+\d+개$/ }).first().waitFor();
+  // 월 보기: 시각 있는 일정도 색 배경 + 흰 글자, 시각을 앞에
+  const mev = owner.locator('.fc-event').filter({ hasText: 'E2E 월 시각 일정' }).first();
+  await mev.getByText('10:00').waitFor();
+  const bgm = await mev.evaluate((el) => getComputedStyle(el).backgroundColor);
+  assert.ok(bgm !== 'rgba(0, 0, 0, 0)' && bgm !== 'transparent', `월 보기 일정 배경색 (${bgm})`);
 }

@@ -123,6 +123,7 @@ function CalendarPage() {
   // V14 39번: 보기·날짜·스크롤은 주소(URL)에 — 뒤로가기로 돌아와도 그대로. V14 38번: 휴대폰 기본 보기 = 3일(7일은 선택, 기억 키를 새로)
   const urlView = VIEWS.includes(sp.get('view') ?? '') ? sp.get('view') : null;
   const savedView = !mobile ? null : (() => { try { const v = localStorage.getItem('wos_cal_view2'); return v && ['timeGridDay', 'timeGrid3', 'timeGridWeek', 'dayGridMonth', 'listWeek'].includes(v) ? v : null; } catch { return null; } })();
+  const initView = urlView ?? savedView ?? (mobile ? 'timeGrid3' : 'timeGridWeek');
   const [monthPicker, setMonthPicker] = useState(false);
   const touch = typeof window !== 'undefined' && (window.innerWidth < 640 || !!window.matchMedia?.('(pointer: coarse)').matches);
   useCalendarSwipe(swipeWrap, calApi, touch);
@@ -157,6 +158,15 @@ function CalendarPage() {
     }
   }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
   const [preview, setPreview] = useState<{ ev: any; x: number; y: number } | null>(null);
+  // 시간 보기 높이 = 화면 높이 - 달력 위쪽 - (휴대폰 하단 탭) → FullCalendar 가 시간 칸 안에서 스크롤해 scrollTime 이 먹음
+  const calBox = useRef<HTMLDivElement>(null);
+  const [calH, setCalH] = useState(640);
+  useEffect(() => {
+    const fit = () => { const top = calBox.current?.getBoundingClientRect().top ?? 160; setCalH(Math.max(420, Math.round(window.innerHeight - Math.max(0, top) - (window.innerWidth < 1024 ? 76 : 24)))); };
+    fit(); window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit);
+  }, []);
+  const firstScroll = () => { const n = new Date(); const td = seoulDate(n); const inView = range && seoulDate(range.from) <= td && td < seoulDate(range.to);
+    const h = inView ? Math.max(0, Number(seoulTime(n).slice(0, 2)) - 1) : 7; return `${String(h).padStart(2, '0')}:00:00`; };
   function openMeeting() { const v = calRef.current?.getApi().getDate(); const d = v ? seoulDate(v) : seoulDate(new Date()); const h = nextHour(); setEditor({ draft: { date: d, start: h.start, end: h.end, title: '미팅 · ', meeting: true } }); }
   useBackClose(!!preview, () => setPreview(null));
 
@@ -174,7 +184,8 @@ function CalendarPage() {
   useEffect(() => { const h = () => load(); window.addEventListener('wos-refresh', h); return () => window.removeEventListener('wos-refresh', h); });
 
   // 시간 칸은 6시부터, 그보다 이른 일정·업무가 보이는 기간이면 그 시각부터(새벽 일정이 안 보이던 문제)
-  const earliest = Math.min(6, ...events.filter((e) => !e.allDay).map((e) => Number(seoulTime(e.start).slice(0, 2))), ...tasks.filter((t) => t.due_time).map((t) => Number(t.due_time.slice(0, 2))));
+  // 대표 지적(10/19): 시간 칸은 00:00 부터(새벽 일정은 위로 스크롤), 처음 보이는 곳은 지금 시각 - 1시간(오늘이 없으면 07:00) — 높이 고정·칸 안 스크롤
+  const earliest = Math.min(0, ...events.filter((e) => !e.allDay).map((e) => Number(seoulTime(e.start).slice(0, 2))), ...tasks.filter((t) => t.due_time).map((t) => Number(t.due_time.slice(0, 2))));
   const slotMin = `${String(earliest).padStart(2, '0')}:00:00`;
   const syncedIds = new Set(events.flatMap((e) => [e.linkedTask?.id, ...(e.linkedTaskIds ?? [])]).filter(Boolean));
   // V14 47: 연결 안 됐어도 같은 날·같은 제목의 일정이 있으면 업무는 따로 그리지 않고 일정 줄에 "업무 n" 으로 묶는다
@@ -274,6 +285,30 @@ function CalendarPage() {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => { window.removeEventListener('scroll', onScroll); clearTimeout(t); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // 높이를 고정한 시간 보기는 달력 안 칸이 스크롤 → 그 위치도 주소에 두고 돌아오면 복원
+  const scroller = () => calBox.current?.querySelector<HTMLElement>('.fc-timegrid-body')?.closest<HTMLElement>('.fc-scroller') ?? null;
+  useEffect(() => {
+    const el = calBox.current; if (!el) return;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const on = (e: Event) => { const sc = scroller(); if (!sc || e.target !== sc) return; clearTimeout(t); t = setTimeout(() => keepInUrl({ st: String(Math.round(sc.scrollTop)) }), 300); };
+    el.addEventListener('scroll', on, true);
+    return () => { el.removeEventListener('scroll', on, true); clearTimeout(t); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // 시간 보기로 처음 들어오거나 보기를 바꿀 때 한 번: 지금 - 1시간(오늘이 없으면 07:00). 날짜만 넘기면 위치 유지, 주소에 st 가 있으면 그 복원이 우선
+  const firstScrolled = useRef('');
+  useEffect(() => {
+    const v = range?.view; if (!v?.startsWith('timeGrid') || firstScrolled.current === v) return;
+    const restoring = !firstScrolled.current && Number(sp.get('st')) > 0;
+    firstScrolled.current = v;
+    if (!restoring) requestAnimationFrame(() => calRef.current?.getApi().scrollToTime(firstScroll()));
+  }, [range?.view, calH]); // eslint-disable-line react-hooks/exhaustive-deps
+  const stDone = useRef(false);
+  useEffect(() => {
+    const st = Number(sp.get('st'));
+    if (stDone.current || !st || !events.length) return;
+    stDone.current = true;
+    requestAnimationFrame(() => { const sc = scroller(); if (sc) sc.scrollTop = st; });
+  }, [events.length]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { // 돌아왔을 때 스크롤 위치 복원(일정을 불러와 높이가 잡힌 뒤 한 번)
     const y = Number(sp.get('y'));
     if (scrolled.current || !y || !events.length) return;
@@ -387,7 +422,7 @@ function CalendarPage() {
             </div>
           )}
         </aside>
-        <div className="-mx-3 min-w-0 flex-1 border-y border-line bg-white px-1 py-1.5 sm:mx-0 sm:rounded-card sm:border sm:p-3 sm:shadow-card" data-testid="calendar">
+        <div className="-mx-3 min-w-0 flex-1 border-y border-line bg-white px-1 py-1.5 sm:mx-0 sm:rounded-card sm:border sm:p-3 sm:shadow-card" data-testid="calendar" ref={calBox}>
           <div className="-mx-1 mb-2 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-sm" role="group" aria-label="누구의 일정" data-testid="people-filter">
             <PeopleChip on={who === 'all'} onClick={() => setWho('all')}>전체</PeopleChip>
             <PeopleChip on={who === 'mine'} onClick={() => setWho('mine')}>내 일정</PeopleChip>
@@ -446,11 +481,11 @@ function CalendarPage() {
           <FullCalendar
             ref={calRef}
             plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
-            timeZone="Asia/Seoul" locale={koLocale} firstDay={0} height="auto" nowIndicator
-            initialView={urlView ?? savedView ?? (mobile ? 'timeGrid3' : 'timeGridWeek')}
+            timeZone="Asia/Seoul" locale={koLocale} firstDay={0} height={(range?.view ?? initView).startsWith('timeGrid') ? calH : 'auto'} nowIndicator
+            initialView={initView}
             initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
             headerToolbar={mobile ? false : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
-            views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' }, dayGridMonth: { dayMaxEvents: mobile ? 4 : 6 } }}
+            views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' }, dayGridMonth: { dayMaxEvents: mobile ? 4 : 6 } }} eventDisplay="block" // 대표 지적(10/19): 월 보기도 시각 있는 일정을 색 배경 + 흰 글자로(점 모양 대신 블록 — 보기별 옵션은 먹지 않아 전체에)
             // Google 형 날짜 머리: 요일 한 줄 + 날짜 숫자(오늘은 동그라미), 시간 칸 글자 작게
             dayHeaderContent={(a) => { if (!a.view.type.startsWith('timeGrid')) return a.text; // 월·목록 보기는 기본 요일 글자(undefined 를 돌려주면 빈칸 — 로컬 검수 10/17)
               // 날짜는 서울 기준으로 읽는다(a.date 는 서울 0시 = UTC 전날 15시)
@@ -465,7 +500,7 @@ function CalendarPage() {
             // V14 41번: 휴대폰 축은 "오전/오후 n시"를 두 줄로 좁게(날짜 칸을 넓게)
             slotLabelContent={mobile ? (a) => { const h = Number(seoulTime(a.date).slice(0, 2)); return <span className="block text-center text-[10px] leading-[1.1]" data-axis-label><span className="block text-ink-3">{h < 12 ? '오전' : '오후'}</span>{h % 12 || 12}시</span>; } : undefined}
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
-            allDayText="종일" noEventsText="일정이 없습니다" slotMinTime={slotMin} scrollTime="08:00:00"
+            allDayText="종일" noEventsText="일정이 없습니다" slotMinTime={slotMin} scrollTime={firstScroll()} scrollTimeReset={false}
             // 대표 지적(10/19 ③): 월 보기는 칸 안에 최대한(PC 6·휴대폰 4줄), 넘치면 '+N개' — 높이 자동이라 true(칸 높이 맞춤)는 제한이 걸리지 않음
             dayMaxEvents={4} moreLinkContent={(a) => `+${a.num}개`}
             // 대표 지적(10/19 ① d): 겹친 일정·업무는 나란히(겹쳐 그리면 위에 깔린 항목이 눌려 다른 상세가 열림)
@@ -532,6 +567,7 @@ function CalendarPage() {
               );
               return (
                 <div className="min-w-0 overflow-hidden truncate px-[3px] text-[12px] leading-[1.25]" {...attrs}>
+                  {month && !arg.event.allDay && arg.event.start && <span className="mr-1 font-normal opacity-90" data-month-time>{hm(arg.event.start)}</span>}
                   <span className={cx('font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
                   {!month && when && <span className="font-normal opacity-85"> {when}</span>}
                 </div>

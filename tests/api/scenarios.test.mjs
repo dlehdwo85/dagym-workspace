@@ -1735,7 +1735,8 @@ describe('WORKIN_V9 회사 자료실 · AI 비서 (가짜 Anthropic 서버)', ()
     assert.equal(reqs[0].key, 'sk-ant-fake-test');
     assert.match(reqs[0].beta ?? '', /server-side-fallback-2026-07-01/);
     assert.equal(reqs[0].body.model, 'claude-sonnet-5-5', '기본 모델'); assert.equal(reqs[0].body.fallbacks, 'default');
-    assert.match(reqs[0].body.system, /이직원/); assert.match(reqs[0].body.system, new RegExp(task), '보고 있는 업무 맥락');
+    const sysText = JSON.stringify(reqs[0].body.system); // V45: 시스템 = 고정부(캐시)·바뀌는 부분 블록 목록
+    assert.match(sysText, /이직원/); assert.match(sysText, new RegExp(task), '보고 있는 업무 맥락');
     assert.ok(reqs[0].body.tools.some((t) => t.name === 'propose_create_task'));
     const tr = reqs[1].body.messages.at(-1).content[0];
     assert.equal(tr.type, 'tool_result'); assert.ok(tr.content.includes(logo), '검색 결과에 로고 id');
@@ -2594,7 +2595,7 @@ describe('V14 10번 마감 알림 중복 없음', () => {
 
 describe('V14 11번 모든 화면 AI 비서 — 화면 맥락은 id 만, 서버가 권한 안에서', () => {
   const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
-  const lastSystem = async () => (await (await fetch(`${FAKE}/__state`)).json()).anthropic.at(-1).body.system;
+  const lastSystem = async () => { const s = (await (await fetch(`${FAKE}/__state`)).json()).anthropic.at(-1).body.system; return typeof s === 'string' ? s : s.map((b) => b.text).join('\n'); };
   test('메시지 방 맥락은 최근 대화를, 볼 수 없는 방·자료는 맥락 없이', async () => {
     const room = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.managerA.id })).id;
     await ctx.owner.ok('POST', `/api/chat/rooms/${room}/messages`, { body: '금요일까지 간판 시안 받아 주세요' });

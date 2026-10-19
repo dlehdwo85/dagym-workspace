@@ -132,7 +132,7 @@ async function assertWritesOpen(tenant: string) {
 }
 
 // ---------------- 쓰기(전환 뒤) — V39 D: 보류·실패는 사유 필수, 담당 변경 권한은 서버 검사 ----------------
-export const leadPatch = z.object({ status: z.enum(STAGES as [string, ...string[]]).optional(), reason: z.string().trim().max(500).optional(),
+export const leadPatch = z.object({ name: z.string().trim().min(1).max(300).optional(), priority: z.enum(['urgent', 'high', 'medium', 'low']).nullable().optional(), status: z.enum(STAGES as [string, ...string[]]).optional(), reason: z.string().trim().max(500).optional(),
   nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), memo: z.string().max(5000).nullable().optional(), ownerId: z.string().uuid().nullable().optional() });
 export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof leadPatch>) {
   await assertSpace(u, 'sales');
@@ -147,7 +147,7 @@ export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof l
   if (!admin && l.owner_id && l.owner_id !== u.id) throw new HttpError(403, 'forbidden', '담당 리드만 고칠 수 있습니다');
   if (i.ownerId && !(await sql`select 1 from users where id = ${i.ownerId} and tenant = ${t} and status = 'active'`).length) throw badRequest('그 사람을 찾을 수 없습니다');
   await sql.begin(async (tx) => {
-    await tx`update sales_leads set status = coalesce(${i.status ?? null}, status),
+    await tx`update sales_leads set status = coalesce(${i.status ?? null}, status), name = coalesce(${i.name ?? null}, name), priority = ${i.priority === undefined ? tx`priority` : i.priority},
       next_contact_date = ${i.nextContactDate === undefined ? tx`next_contact_date` : i.nextContactDate}, memo = ${i.memo === undefined ? tx`memo` : i.memo},
       owner_id = ${i.ownerId === undefined ? tx`owner_id` : i.ownerId}, updated_at = now() where id = ${id}`;
     if (i.status && i.status !== l.status) await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${id}, ${l.status}, ${i.status}, ${i.reason ?? null}, ${u.id})`;

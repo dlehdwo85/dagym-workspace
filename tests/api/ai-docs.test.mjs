@@ -257,7 +257,7 @@ describe('V22 문서 엔진', () => {
     await ctl({ anthropicReset: true, anthropicQueue: [say('안녕하세요')] });
     await ctx.owner.ok('POST', '/api/ai/chat', { text: '이번 주 내 일정 알려줘' });
     const plainReq = (await fakeState()).anthropic.slice(n0b)[0];
-    assert.equal(plainReq.body.model, 'claude-sonnet-5-5');
+    assert.equal(plainReq.body.model, 'claude-haiku-5-5', 'V45 원가: 조회만 하는 짧은 질문은 빠른 모델');
     assert.ok(plainReq.body.tools.some((t) => t.type === 'web_search_20260209') && plainReq.body.tools.some((t) => t.type === 'web_fetch_20260209'), '웹 도구 기본 켜짐');
     await ctx.owner.ok('PUT', '/api/ai/settings', { webTools: false, docEngine: false });
     const n0 = (await fakeState()).anthropic.length;

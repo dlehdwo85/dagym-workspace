@@ -13,7 +13,7 @@ export type AiResponse = Anthropic.Beta.BetaMessage;
 export interface AiProvider {
   name: string;
   model: string;
-  chat(p: { system: string; messages: AiMessage[]; tools: AiTool[]; format?: Record<string, unknown>; signal?: AbortSignal }): Promise<AiResponse>;
+  chat(p: { system: string | Anthropic.Beta.BetaTextBlockParam[]; messages: AiMessage[]; tools: AiTool[]; format?: Record<string, unknown>; signal?: AbortSignal }): Promise<AiResponse>;
 }
 
 /**
