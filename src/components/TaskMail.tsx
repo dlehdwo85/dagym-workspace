@@ -19,7 +19,31 @@ type Ctx = {
   attachments: { id: string; name: string; size: number; mime: string }[]; linkThresholdBytes: number; taskTitle: string;
 };
 type Item = { id: string; channel: string; preview: string | null; status: string; to_addrs: string[]; subject: string; files: { name: string }[]; as_link: boolean; attempts: number; last_error: string | null;
-  error_kind: string | null; sent_at: string | null; created_at: string; next_attempt_at: string; sender_name: string; first_opened_at: string | null };
+  error_kind: string | null; sent_at: string | null; created_at: string; next_attempt_at: string; sender_name: string; first_opened_at: string | null; scheduled_at?: string | null; created_by?: string };
+
+// ---- 대표 요청(10/19) 예약 보내기: KST 날짜·시각 → ISO(+09:00), 빠른 선택, 밤·주말 경고 ----
+const kstParts = (d = new Date()) => { const f = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' }).formatToParts(d);
+  const g = (t: string) => f.find((x) => x.type === t)?.value ?? ''; return { date: `${g('year')}-${g('month')}-${g('day')}`, hm: `${g('hour').replace('24', '00')}:${g('minute')}`, wd: g('weekday') }; };
+const addDaysKst = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00+09:00`) + n * 86400000);
+export const kstIso = (date: string, hm: string) => `${date}T${hm}:00+09:00`;
+export function quickSendTimes(now = new Date()) {
+  const k = kstParts(now); const out: { label: string; iso: string }[] = [];
+  if (k.hm < '17:50') out.push({ label: '오늘 오후 6시', iso: kstIso(k.date, '18:00') });
+  out.push({ label: '내일 오전 9시', iso: kstIso(kstParts(addDaysKst(k.date, 1)).date, '09:00') });
+  const wd = new Date(Date.UTC(+k.date.slice(0, 4), +k.date.slice(5, 7) - 1, +k.date.slice(8, 10))).getUTCDay(); // 서울 날짜의 요일
+  out.push({ label: '월요일 오전 9시', iso: kstIso(kstParts(addDaysKst(k.date, ((8 - wd) % 7) || 7)).date, '09:00') });
+  return out;
+}
+/** 받는 사람 쪽에서 불편할 수 있는 시각: 밤 9시~아침 8시·주말 */
+export function sendTimeWarning(iso: string) {
+  const k = kstParts(new Date(iso));
+  const wd = new Date(Date.UTC(+k.date.slice(0, 4), +k.date.slice(5, 7) - 1, +k.date.slice(8, 10))).getUTCDay();
+  if (wd === 0 || wd === 6) return '주말에 보내집니다';
+  if (k.hm >= '21:00' || k.hm < '08:00') return '밤·이른 아침(21~08시)에 보내집니다';
+  return '';
+}
+const fmtKst = (iso: string) => { const k = kstParts(new Date(iso)); return `${+k.date.slice(5, 7)}/${+k.date.slice(8, 10)}(${({ Sun: '일', Mon: '월', Tue: '화', Wed: '수', Thu: '목', Fri: '금', Sat: '토' } as Record<string, string>)[k.wd] ?? ''}) ${k.hm}`; };
+const isScheduled = (i: Item) => i.status === 'queued' && !!i.scheduled_at && Date.parse(i.scheduled_at) > Date.now();
 
 const mb = (b: number) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)}MB` : `${Math.max(1, Math.round(b / 1024))}KB`);
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -33,8 +57,11 @@ const STATUS: Record<string, [string, string]> = {
 export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: string; onChange: () => void; draft?: AssistDraft | null; onDraftUsed?: () => void }) {
   const hist = useApi<{ items: Item[]; canSend: boolean }>(`/api/tasks/${taskId}/mail?history=1`, [taskId]);
   const [open, setOpen] = useState(false);
-  const busy = hist.data?.items.some((i) => ['queued', 'sending', 'retry'].includes(i.status));
+  const busy = hist.data?.items.some((i) => ['queued', 'sending', 'retry'].includes(i.status) && !isScheduled(i));
   useEffect(() => { if (!busy) return; const t = setInterval(hist.reload, 3000); return () => clearInterval(t); }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function reschedule(id: string, body: { sendAt?: string; cancel?: boolean }) {
+    try { await api(`/api/mail/outbox/${id}/schedule`, { body }); toast.ok(body.cancel ? '예약을 취소했습니다' : `${fmtKst(body.sendAt!)}에 보내도록 바꿨습니다`); hist.reload(); } catch (e: any) { toast.error(e.message); }
+  }
   async function retry(id: string) {
     try { await api(`/api/mail/outbox/${id}/retry`, { body: {} }); hist.reload(); } catch (e: any) { toast.error(e.message); }
   }
@@ -53,17 +80,19 @@ export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: str
       {hist.data.items.length > 0 && (
         <ul className="space-y-1 text-sm" data-testid="mail-history">
           {hist.data.items.map((i) => {
-            const [label, tone] = STATUS[i.status] ?? [i.status, 'bg-slate-100'];
+            const sch = isScheduled(i);
+            const [label, tone] = sch ? [`예약 · ${fmtKst(i.scheduled_at!)}`, 'bg-violet-50 text-violet-700'] : STATUS[i.status] ?? [i.status, 'bg-slate-100'];
             return (
               <li key={i.id} className="rounded-input border border-line px-3 py-2" data-status={i.status}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', tone)} data-testid="mail-status">
-                    {['queued', 'sending'].includes(i.status) ? <Loader2 className="size-3 animate-spin" /> : i.status === 'sent' ? <CheckCircle2 className="size-3" /> : i.status === 'failed' ? <AlertTriangle className="size-3" /> : null}{label}</span>
+                    {sch ? null : ['queued', 'sending'].includes(i.status) ? <Loader2 className="size-3 animate-spin" /> : i.status === 'sent' ? <CheckCircle2 className="size-3" /> : i.status === 'failed' ? <AlertTriangle className="size-3" /> : null}{label}</span>
                   <b className="min-w-0 flex-1 truncate">{i.channel === 'sms:handoff' ? `문자 · ${i.preview ?? ''}` : i.channel === 'kakao:handoff' ? `카카오톡 · ${i.preview ?? ''}` : i.subject}</b>
                   <span className="text-xs text-ink-3">{i.sender_name} · {fmtDateTime(i.sent_at ?? i.created_at)}</span>
                 </div>
                 <p className="mt-0.5 truncate text-xs text-ink-2">받는 사람 {i.to_addrs.join(', ')}{i.files.length > 0 && ` · 첨부 ${i.files.length}개${i.as_link ? '(링크)' : ''}`}</p>
                 {i.first_opened_at && <p className="mt-0.5 flex items-center gap-1 text-xs text-emerald-700" data-testid="mail-opened"><Eye className="size-3" />고객이 자료를 열어봄 · {fmtDateTime(i.first_opened_at)}</p>}
+                {sch && hist.data!.canSend && <ScheduleEdit at={i.scheduled_at!} onChange={(iso) => reschedule(i.id, { sendAt: iso })} onCancel={() => confirm('예약을 취소할까요?') && reschedule(i.id, { cancel: true })} />}
                 {i.status === 'retry' && <p className="mt-0.5 text-xs text-amber-800">{i.last_error} — {fmtDateTime(i.next_attempt_at)}에 자동으로 다시 보냅니다</p>}
                 {i.status === 'failed' && <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-red-700" data-testid="mail-error">{i.last_error}
                   {i.error_kind === 'auth' && <Link href="/admin/mail" className="underline">메일 계정 확인</Link>}
@@ -83,6 +112,8 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   const d = ctx.data;
   const [f, setF] = useState<{ company: string; kind: string; to: string; cc: string; bcc: string; fromName: string; replyTo: string; more: boolean; subject: string; body: string; files: string[]; title: string; phone: string; workEmail: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sched, setSched] = useState<string | null>(null); // 예약 시각 ISO(+09:00)
+  const [schedOpen, setSchedOpen] = useState(false);
   // 대표 실기기: 카카오톡 보내기 버튼이 안 보임(AI 카카오 초안에만 있었음) → 메일·문자 옆에 [카카오톡] 탭
   const [channel, setChannel] = useState<'email' | 'sms' | 'kakao'>(initial?.channel === 'sms' ? 'sms' : initial?.channel === 'kakao' ? 'kakao' : 'email');
   const [kakao, setKakao] = useState(initial?.channel === 'kakao' ? [initial.subject, initial.body].filter(Boolean).join('\n\n') : '');
@@ -178,9 +209,9 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     setBusy(true);
     try {
       const r = await withConfidentialConfirm((ok) => api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), bcc: splitAddrs(f!.bcc), fromName: f!.fromName.trim() || undefined, replyTo: f!.replyTo.trim() || undefined, subject: f!.subject, body: f!.body, attachmentIds: f!.files, libraryFileIds: libIds(),
-        senderTitle: f!.title || undefined, senderPhone: f!.phone || undefined, senderWorkEmail: f!.workEmail.trim() || undefined, ...(ok ? { confirmConfidential: true } : {}) } }));
+        senderTitle: f!.title || undefined, senderPhone: f!.phone || undefined, senderWorkEmail: f!.workEmail.trim() || undefined, ...(sched ? { sendAt: sched } : {}), ...(ok ? { confirmConfidential: true } : {}) } }));
       if (!r) return; // 기밀 경고에서 [취소]
-      toast.ok(r.asLink ? '보관함에 넣었습니다 — 첨부는 다운로드 링크로 보냅니다' : '보관함에 넣었습니다 — 곧 발송됩니다');
+      toast.ok(r.scheduledAt ? `${fmtKst(r.scheduledAt)}에 보내도록 예약했습니다 — 보낸 뒤 알림을 드립니다` : r.asLink ? '보관함에 넣었습니다 — 첨부는 다운로드 링크로 보냅니다' : '보관함에 넣었습니다 — 곧 발송됩니다');
       onSent();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
@@ -296,7 +327,12 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
         <div className="sticky bottom-0 z-10 -mx-5 -mb-[calc(var(--sab)+20px)] flex items-center justify-end gap-2 border-t border-line bg-white px-5 pb-[calc(var(--sab)+12px)] pt-3 sm:-mb-5 sm:pb-4" data-testid="compose-actions">
           <Button variant="secondary" onClick={onClose}>닫기</Button>
           {channel === 'email'
-            ? <Button onClick={send} disabled={busy || !d.channel || !d.canSend} data-testid="mail-send"><Send />{busy ? '보관함에 넣는 중…' : '보내기'}</Button>
+            ? <span className="relative flex items-center gap-1.5">
+                {schedOpen && <SchedulePicker value={sched} onPick={(v) => { setSched(v); setSchedOpen(false); }} onClose={() => setSchedOpen(false)} />}
+                <Button variant="secondary" onClick={() => setSchedOpen(!schedOpen)} disabled={busy || !d.channel || !d.canSend} aria-expanded={schedOpen} data-testid="mail-schedule-open">{sched ? `예약 ${fmtKst(sched)}` : '예약 ▾'}</Button>
+                {sched && <button type="button" className="text-xs text-ink-3 underline" onClick={() => setSched(null)} data-testid="mail-schedule-clear">바로 보내기로</button>}
+                <Button onClick={send} disabled={busy || !d.channel || !d.canSend} data-testid="mail-send"><Send />{busy ? '보관함에 넣는 중…' : sched ? '예약 보내기' : '보내기'}</Button>
+              </span>
             : channel === 'kakao' ? (kakao.trim() ? <KakaoSend taskId={taskId} body={kakao} onLogged={onSent} /> : <span className="text-xs text-ink-3">내용을 넣어 주세요</span>)
             : <Button onClick={openSms} disabled={!d.canSend} data-testid="sms-open"><MessageSquare />문자앱으로 보내기</Button>}
         </div>
@@ -337,4 +373,41 @@ async function withConfidentialConfirm<T>(run: (confirmed: boolean) => Promise<T
     if (!window.confirm(e.message)) return null;
     return await run(true);
   }
+}
+
+/** 예약 시각 고르기: 빠른 선택 3개 + 날짜·시각 직접(KST), 밤·주말이면 경고 */
+function SchedulePicker({ value, onPick, onClose, down }: { value: string | null; onPick: (iso: string) => void; onClose: () => void; down?: boolean }) {
+  const k0 = value ? kstParts(new Date(value)) : kstParts(new Date(Date.now() + 3600000));
+  const [date, setDate] = useState(k0.date); const [hm, setHm] = useState(value ? k0.hm : `${k0.hm.slice(0, 2)}:00`);
+  const iso = kstIso(date, hm); const warn = sendTimeWarning(iso); const past = Date.parse(iso) < Date.now() + 60000;
+  return (
+    <>
+      <span className="fixed inset-0 z-40" onClick={onClose} />
+      <span className={cx('absolute z-50 w-72', down ? 'left-0 top-5' : 'bottom-11 right-0')}><span className="block rounded-card border border-line bg-white p-3 text-sm shadow-pop" role="dialog" aria-label="예약 시각" data-testid="mail-schedule">
+        <span className="mb-2 block font-semibold">예약 보내기 <span className="text-xs font-normal text-ink-3">(한국 시간)</span></span>
+        <span className="flex flex-col gap-1">{quickSendTimes().map((q) => (
+          <button key={q.label} type="button" className="rounded-input px-2 py-1.5 text-left hover:bg-slate-100" onClick={() => onPick(q.iso)} data-testid="mail-schedule-quick">{q.label}<span className="ml-2 text-xs text-ink-3">{fmtKst(q.iso)}</span>{sendTimeWarning(q.iso) && <span className="ml-1 text-xs text-amber-700">⚠</span>}</button>
+        ))}</span>
+        <span className="mt-2 flex items-center gap-1.5 border-t border-line pt-2">
+          <input type="date" className={cx(inputCls, 'h-8 flex-1 px-2')} value={date} onChange={(e) => setDate(e.target.value)} aria-label="예약 날짜" />
+          <input type="time" step={300} className={cx(inputCls, 'h-8 w-24 px-2')} value={hm} onChange={(e) => setHm(e.target.value)} aria-label="예약 시각" />
+        </span>
+        {warn && <span className="mt-1.5 block text-xs text-amber-800" data-testid="mail-schedule-warn">⚠ {warn} — 받는 분께 불편할 수 있어요</span>}
+        {past && <span className="mt-1.5 block text-xs text-red-700">지금보다 뒤 시각을 골라 주세요</span>}
+        <span className="mt-2 flex justify-end"><Button size="sm" disabled={past} onClick={() => onPick(iso)} data-testid="mail-schedule-set">이 시각으로</Button></span>
+      </span></span>
+    </>
+  );
+}
+/** 보낸 기록의 예약 줄: 시각 바꾸기·취소 */
+function ScheduleEdit({ at, onChange, onCancel }: { at: string; onChange: (iso: string) => void; onCancel: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <p className="relative mt-1 flex flex-wrap items-center gap-2 text-xs text-violet-800" data-testid="mail-scheduled">
+      {fmtKst(at)}에 보냅니다{sendTimeWarning(at) && <span className="text-amber-700">⚠ {sendTimeWarning(at)}</span>}
+      <button type="button" className="font-medium underline" onClick={() => setOpen(!open)} data-testid="mail-reschedule">시간 바꾸기</button>
+      <button type="button" className="font-medium underline" onClick={onCancel} data-testid="mail-schedule-cancel">예약 취소</button>
+      {open && <SchedulePicker down value={at} onPick={(v) => { setOpen(false); onChange(v); }} onClose={() => setOpen(false)} />}
+    </p>
+  );
 }

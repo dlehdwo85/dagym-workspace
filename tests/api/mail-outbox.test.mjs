@@ -174,6 +174,48 @@ describe('V21 보관함 발송', () => {
     assert.equal((await fetch(`${BASE}/api/mail/run`, { method: 'POST' })).status, 401);
   });
 
+  test('대표 요청 10/19 예약 보내기: 그 시각 전에는 안 보냄 → 시각 바꾸기·취소 → 시각이 되면 첨부와 함께 1통 + 보낸 사람 알림, 일시 오류는 1번만 다시', async () => {
+    box.mails = [];
+    await sql`update outbox set status = 'canceled' where status in ('queued', 'retry')`;
+    const later = (min) => new Date(Date.now() + min * 60000).toISOString();
+    assert.equal((await ctx.owner.req('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '과거 예약', body: '본문', sendAt: new Date(Date.now() - 60000).toISOString() })).status, 400);
+    const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '예약 시험', body: '본문', attachmentIds: [attId], sendAt: later(10) });
+    assert.ok(r.scheduledAt);
+    await tick(); await new Promise((x) => setTimeout(x, 800));
+    assert.equal((await sql`select status from outbox where id = ${r.id}`)[0].status, 'queued', '예약 시각 전에는 안 보냄');
+    assert.equal(box.mails.filter((m) => m.subject === '예약 시험').length, 0);
+    const h = await ctx.owner.ok('GET', `/api/tasks/${taskId}/mail?history=1`);
+    assert.ok(h.items.find((i) => i.id === r.id).scheduled_at);
+    assert.notEqual((await ctx.staffA.client.post(`/api/mail/outbox/${r.id}/schedule`, { cancel: true })).status, 200, '남의 예약은 못 바꿈');
+    assert.equal((await ctx.owner.req('POST', `/api/mail/outbox/${r.id}/schedule`, { sendAt: new Date(Date.now() - 1000).toISOString() })).status, 400);
+    const re = await ctx.owner.ok('POST', `/api/mail/outbox/${r.id}/schedule`, { sendAt: later(30) });
+    assert.ok(Date.parse(re.scheduledAt) > Date.now() + 20 * 60000);
+    // 시각이 됨(정기 실행)
+    await sql`update outbox set next_attempt_at = now() where id = ${r.id}`;
+    await tick();
+    await waitStatus(r.id, ['sent']);
+    const got = box.mails.filter((m) => m.subject === '예약 시험');
+    assert.equal(got.length, 1); assert.equal(got[0].attachments.length, 1, '첨부 포함');
+    assert.equal((await sql`select count(*)::int n from notifications where user_id = ${ctx.ownerId} and title like '예약 메일을 보냈습니다%'`)[0].n, 1);
+    assert.ok((await sql`select 1 from activities where entity_id = ${taskId} and action = 'mail_scheduled'`).length, '업무 기록에 예약');
+    // 취소 → 정기 실행이 와도 안 보냄, 다시 취소는 409
+    const c = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '취소될 예약', body: '본문', sendAt: later(5) });
+    await ctx.owner.ok('POST', `/api/mail/outbox/${c.id}/schedule`, { cancel: true });
+    await sql`update outbox set next_attempt_at = now() where id = ${c.id}`; await tick();
+    assert.equal((await sql`select status from outbox where id = ${c.id}`)[0].status, 'canceled');
+    assert.equal((await ctx.owner.req('POST', `/api/mail/outbox/${c.id}/schedule`, { cancel: true })).status, 409);
+    // 일시 오류 2번 → 1번 다시 보내고 실패 + '예약 메일 발송 실패' 알림
+    box.mode = ['drop', 'drop'];
+    const f = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '예약 실패 시험', body: '본문', sendAt: later(5) });
+    await sql`update outbox set next_attempt_at = now() where id = ${f.id}`; await tick();
+    await waitStatus(f.id, ['retry']);
+    await sql`update outbox set next_attempt_at = now() where id = ${f.id}`; await tick();
+    const fo = await waitStatus(f.id, ['failed']);
+    assert.equal(fo.attempts, 2);
+    assert.equal((await sql`select count(*)::int n from notifications where user_id = ${ctx.ownerId} and title like '예약 메일 발송 실패%'`)[0].n, 1);
+    box.mode = [];
+  });
+
   test('인증 실패(535) → 재시도 없이 즉시 실패 + 알림 + 다시 보내기', async () => {
     box.pass = 'changed';
     const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '인증 실패 시험', body: '본문' });

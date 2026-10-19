@@ -312,7 +312,7 @@ export async function mailContext(u: SessionUser, taskId: string) {
 }
 async function taskOutbox(taskId: string, sql: Sql) {
   return sql`select o.id, o.channel, o.status, o.to_addrs, o.cc_addrs, o.bcc_addrs, o.from_name, o.reply_to, o.subject, left(o.body_text, 200) as preview, o.files, o.as_link, o.attempts, o.last_error, o.error_kind, o.sent_at, o.created_at,
-      o.next_attempt_at, u.name as sender_name, s.first_opened_at
+      o.next_attempt_at, o.scheduled_at, o.created_by, u.name as sender_name, s.first_opened_at
     from outbox o join users u on u.id = o.created_by left join share_links s on s.id = o.share_id
     where o.task_id = ${taskId} order by o.created_at desc limit 50`;
 }
@@ -345,7 +345,16 @@ export const sendInput = z.object({
   senderTitle: z.string().trim().max(50).optional(),
   senderPhone: z.string().trim().max(40).optional(),
   senderWorkEmail: z.string().trim().email('업무 이메일 형식이 아닙니다').max(200).optional(),
+  /** 대표 요청(10/19): 예약 보내기 — 이 시각(KST 로 고른 값, 오프셋 포함)에 정기 실행이 보냄. 비우면 바로 */
+  sendAt: z.string().datetime({ offset: true }).optional(),
 });
+/** 예약 시각 검사: 1분 뒤 ~ 60일 안 */
+function checkSendAt(v: string) {
+  const at = new Date(v);
+  if (at.getTime() < Date.now() + 60_000) throw badRequest('예약 시각은 지금보다 뒤여야 합니다');
+  if (at.getTime() > Date.now() + 60 * 86400_000) throw badRequest('예약은 60일 안으로만 할 수 있습니다');
+  return at;
+}
 
 export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip: string | null) {
   if (!(await canSend(u))) throw forbidden('메일 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
@@ -389,14 +398,38 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   // V32 6: 회사가 막았으면 직원 회신 주소는 늘 본인 업무 이메일
   const replyTo = ((await replyToEditable(u, sql)) && i.replyTo) || me.workEmail || account?.from_email || u.email;
   const id = randomUUID();
-  await sql`insert into outbox (id, tenant, channel, status, task_id, company_key, created_by, from_email, from_name, reply_to, to_addrs, cc_addrs, bcc_addrs, subject, body_text, body_html, files, as_link, share_id, message_id)
+  const at = i.sendAt ? checkSendAt(i.sendAt) : null;
+  await sql`insert into outbox (id, tenant, channel, status, task_id, company_key, created_by, from_email, from_name, reply_to, to_addrs, cc_addrs, bcc_addrs, subject, body_text, body_html, files, as_link, share_id, message_id, scheduled_at, next_attempt_at)
     values (${id}, ${t}, ${channel}, 'queued', ${i.taskId}, ${i.company}, ${u.id}, ${fromEmail}, ${fromName}, ${replyTo}, ${i.to}, ${i.cc ?? []}, ${i.bcc ?? []}, ${i.subject}, ${text}, ${html},
-      ${sql.json(list as never)}, ${asLink}, ${shareId}, ${`<${id}@${domain}>`})`;
-  await activity(sql, 'task', i.taskId, u.id, 'mail_queued', { to: i.to, subject: i.subject, files: list.map((f) => f.name), asLink });
-  await audit(sql, u.id, 'mail.queue', 'task', i.taskId, { outboxId: id, to: i.to, files: list.length, asLink }, ip);
-  return { id, status: 'queued', asLink, taskTitle: task.title, channel };
+      ${sql.json(list as never)}, ${asLink}, ${shareId}, ${`<${id}@${domain}>`}, ${at}, ${at ?? new Date()})`;
+  await activity(sql, 'task', i.taskId, u.id, at ? 'mail_scheduled' : 'mail_queued', { to: i.to, subject: i.subject, files: list.map((f) => f.name), asLink, ...(at ? { sendAt: at.toISOString() } : {}) });
+  await audit(sql, u.id, at ? 'mail.schedule' : 'mail.queue', 'task', i.taskId, { outboxId: id, to: i.to, files: list.length, asLink, sendAt: at?.toISOString() ?? null }, ip);
+  return { id, status: 'queued', asLink, taskTitle: task.title, channel, scheduledAt: at?.toISOString() ?? null };
 }
 export const defaultFromName = (me: { name: string; title: string | null }, company: string) => `${me.name}${me.title ? ` ${me.title}` : ''} (${company})`;
+
+/** 예약 바꾸기·취소(보낸 사람·대표만, 아직 보내기 전인 예약만) */
+export const scheduleInput = z.object({ sendAt: z.string().datetime({ offset: true }).optional(), cancel: z.boolean().optional() });
+export async function rescheduleOutbox(u: SessionUser, id: string, i: z.infer<typeof scheduleInput>) {
+  const sql = db();
+  const [o] = await sql<{ task_id: string | null; status: string; created_by: string; scheduled_at: Date | null; subject: string }[]>`select task_id, status, created_by, scheduled_at, subject from outbox where id = ${id} and tenant = ${tenantOf(u)}`;
+  if (!o) throw notFound();
+  if (o.task_id) await loadTaskForMail(u, o.task_id);
+  if (o.created_by !== u.id && u.role !== 'owner') throw forbidden('예약은 보낸 사람이나 대표만 바꿀 수 있습니다');
+  if (!o.scheduled_at) throw badRequest('예약 메일이 아닙니다');
+  if (i.cancel) {
+    const r = await sql`update outbox set status = 'canceled' where id = ${id} and status = 'queued' and (locked_until is null or locked_until < now()) returning id`;
+    if (!r.length) throw new HttpError(409, 'not_scheduled', '이미 보내는 중이거나 보낸 메일이라 취소할 수 없습니다');
+    if (o.task_id) await activity(sql, 'task', o.task_id, u.id, 'mail_schedule_canceled', { subject: o.subject });
+    return { ok: true, status: 'canceled' };
+  }
+  if (!i.sendAt) throw badRequest('바꿀 시각을 넣어 주세요');
+  const at = checkSendAt(i.sendAt);
+  const r = await sql`update outbox set scheduled_at = ${at}, next_attempt_at = ${at} where id = ${id} and status = 'queued' and (locked_until is null or locked_until < now()) returning id`;
+  if (!r.length) throw new HttpError(409, 'not_scheduled', '이미 보내는 중이거나 보낸 메일이라 바꿀 수 없습니다');
+  if (o.task_id) await activity(sql, 'task', o.task_id, u.id, 'mail_rescheduled', { subject: o.subject, sendAt: at.toISOString() });
+  return { ok: true, scheduledAt: at.toISOString() };
+}
 
 /** 실패 행 다시 보내기 (같은 Message-ID — 받는 쪽 중복 판별 가능) */
 export async function retryOutbox(u: SessionUser, id: string) {
@@ -444,10 +477,14 @@ export async function processOutbox(id: string): Promise<string> {
       await activity(sql, 'task', o.task_id, o.created_by, 'mail_sent', { to: o.to_addrs, subject: o.subject, files: (o.files as any[]).map((f) => f.name), asLink: o.as_link });
       await crmSteps(sql, o.task_id, o.subject, o.files as any[]);
     }
+    // 예약 메일은 보낸 사람에게 결과 알림(바로 보낸 메일은 화면에서 바로 보임)
+    if (o.scheduled_at) await notify(sql, { userIds: [o.created_by], type: 'mail_status', title: `예약 메일을 보냈습니다: ${o.subject}`, body: `받는 사람 ${(o.to_addrs as string[]).join(', ')}`,
+      link: o.task_id ? `/tasks/${o.task_id}` : '/admin/mail', entityType: 'task', entityId: o.task_id ?? undefined, dedupeKey: `mail_sched_sent:${id}` });
     return 'sent';
   } catch (e: any) {
     const c = e?.code === 'NOACCOUNT' || e?.code === 'NOFILE' ? { kind: 'config' as const, message: e.message } : e?.kind ? { kind: e.kind as SendErrKind, message: e.message as string } : classifySmtpError(e);
-    const retry = c.kind === 'transient' && o.attempts <= RETRY_MIN.length;
+    // 예약 메일: 일시 오류는 1번만 다시(대표 요청 10/19), 그다음 실패 알림
+    const retry = c.kind === 'transient' && o.attempts <= (o.scheduled_at ? 1 : RETRY_MIN.length);
     await sql`update outbox set status = ${retry ? 'retry' : 'failed'}, locked_until = null, last_error = ${c.message}, error_kind = ${c.kind},
       next_attempt_at = now() + make_interval(mins => ${retry ? RETRY_MIN[o.attempts - 1] : 0}) where id = ${id}`;
     if (c.kind === 'auth' && o.channel === 'email:smtp') await sql`update mail_accounts set last_error = ${c.message} where tenant = ${o.tenant}`;
@@ -455,7 +492,7 @@ export async function processOutbox(id: string): Promise<string> {
       if (o.task_id) await activity(sql, 'task', o.task_id, o.created_by, 'mail_failed', { to: o.to_addrs, subject: o.subject, error: c.message });
       // 보낸 사람 + 대표에게 알림 (다시 보내기는 업무 화면)
       const owners = (await sql<{ id: string }[]>`select id from users where tenant = ${o.tenant} and role = 'owner' and status = 'active' and not is_demo`).map((r) => r.id);
-      await notify(sql, { userIds: [o.created_by, ...owners], type: 'mail_status', title: `메일 발송 실패: ${o.subject}`, body: c.message,
+      await notify(sql, { userIds: [o.created_by, ...owners], type: 'mail_status', title: `${o.scheduled_at ? '예약 ' : ''}메일 발송 실패: ${o.subject}`, body: c.message,
         link: o.task_id ? `/tasks/${o.task_id}` : '/admin/mail', entityType: 'task', entityId: o.task_id ?? undefined, dedupeKey: `mail_failed:${id}:${o.attempts}` });
     }
     if (c.kind === 'config') await logError('outbox', e);
