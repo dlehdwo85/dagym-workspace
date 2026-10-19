@@ -660,7 +660,7 @@ function ListHeader({ sortBy, onSort, compact, stuck }: { sortBy: SortKey; onSor
       data-testid={compact ? 'group-col-header' : 'list-header'} aria-hidden={(!compact && !stuck) || undefined}>
       <span className="w-4" /><span className="w-[22px]" />
       <H k="title" className="flex-1">업무 이름</H>
-      <H k="requester" className="hidden w-[104px] shrink-0 xl:block">지시자</H>
+      <H k="requester" className="hidden w-[104px] shrink-0 text-right xl:block">지시자</H>
       <H k="priority" className="w-[60px] shrink-0 text-right">우선순위</H>
       <H k="status" className="w-[112px] shrink-0">상태</H>
       <H k="due" className="w-[132px] shrink-0 text-right">마감일</H>
@@ -1113,7 +1113,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
           <span className="min-w-0 max-lg:flex-1 lg:contents"><Meta t={t} onPatch={onPatch} /></span>
         </div>
         {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
-        <span className="hidden w-[104px] min-w-0 xl:flex"><AssigneePicker role="지시자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
+        <span className="hidden w-[104px] min-w-0 justify-end xl:flex" data-testid="requester-cell"><AssigneePicker role="지시자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
         <span className="hidden w-[60px] justify-end lg:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>
         <span className="hidden w-[112px] shrink-0 overflow-hidden lg:inline-flex"><StatusChip t={t} onPatch={onPatch} /></span>
         <DueEdit t={t} onPatch={onPatch} />

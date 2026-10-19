@@ -114,7 +114,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const nav: NavItem[] = [...NAV, ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
-  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '영업 현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드·거래처', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, ...(session.features.salesBids !== false ? [{ href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }] : []), { href: '/s/sales/hub', label: '영업기회 허브', icon: Building2 }, { href: '/s/sales/prospects', label: '공공데이터', icon: Search }, { href: '/s/sales/regions', label: '지역별', icon: Network }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '홈', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
+  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드·거래처', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, ...(session.features.salesBids !== false ? [{ href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }] : []), { href: '/s/sales/hub', label: '영업기회 허브', icon: Building2 }, { href: '/s/sales/prospects', label: '공공데이터', icon: Search }, { href: '/s/sales/regions', label: '지역별', icon: Network }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '홈', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
     { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' },
     { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 운영', icon: Rocket, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []), { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' },
     { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '설정' }, ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '운영실 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
@@ -194,7 +194,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // 로컬 검수 10/19: 하단 탭은 마지막 공간이 아니라 지금 주소의 공간 기준(/tasks 등 공통 화면 = 업무)
   const tabSpace = path.startsWith('/s/sales') ? 'sales' : path.startsWith('/s/marketing') ? 'marketing' : 'work';
   const mobileTabs: (NavItem & { badge?: number })[] = tabSpace === 'sales'
-    ? [{ href: '/s/sales', label: '현황', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/hub', label: '영업기회', icon: Building2 }] // 대표(10/19): 입찰은 안 쓰는 회사도 있어 하단 탭에서 뺌 — 더보기·PC 사이드바(켠 회사만)
+    ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/hub', label: '영업기회', icon: Building2 }] // 대표(10/19): 입찰은 안 쓰는 회사도 있어 하단 탭에서 뺌 — 더보기·PC 사이드바(켠 회사만)
     : tabSpace === 'marketing'
       ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
@@ -202,7 +202,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const active = (href: string) => {
     const [p, q] = href.split('?');
     if (p === '/') return path === '/';
-    if (/^\/s\/[a-z]+$/.test(p)) return path === p; // 로컬 검수 10/17: 공간 첫 화면(영업 현황 등)은 하위 메뉴에 있을 때 같이 강조하지 않음
+    if (/^\/s\/[a-z]+$/.test(p)) return path === p; // 로컬 검수 10/17: 공간 첫 화면(영업 홈 등)은 하위 메뉴에 있을 때 같이 강조하지 않음
     if (q) return path === p && typeof window !== 'undefined' && window.location.search.includes(q);
     return path.startsWith(p);
   };

@@ -348,6 +348,17 @@ function CalendarPage() {
   const goto = (d: string) => calRef.current?.getApi().gotoDate(d);
   const visibleStart = range ? seoulDate(range.start) : seoulDate(new Date());
 
+  const peopleFilter = (
+          <div className={cx('-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-sm', mobile ? 'sticky bottom-0 z-10 mt-2 border-t border-line bg-white pt-2' : 'mb-2')} role="group" aria-label="누구의 일정" data-testid="people-filter">
+            <PeopleChip on={who === 'all'} onClick={() => setWho('all')}>전체</PeopleChip>
+            <PeopleChip on={who === 'mine'} onClick={() => setWho('mine')}>내 일정</PeopleChip>
+            {people.filter((p) => p.id !== user.id).map((p) => (
+              <PeopleChip key={p.id} on={Array.isArray(who) && who.includes(p.id)} onClick={() => pickPerson(p.id)} label={`${p.name} 일정`}>
+                <span className="size-2.5 rounded-full" style={{ background: calColors.people?.[p.id] ?? avatarColor(p.id) }} />{p.name}
+              </PeopleChip>
+            ))}
+          </div>
+  );
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -423,15 +434,8 @@ function CalendarPage() {
           )}
         </aside>
         <div className="-mx-3 min-w-0 flex-1 border-y border-line bg-white px-1 py-1.5 sm:mx-0 sm:rounded-card sm:border sm:p-3 sm:shadow-card" data-testid="calendar" ref={calBox}>
-          <div className="-mx-1 mb-2 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-sm" role="group" aria-label="누구의 일정" data-testid="people-filter">
-            <PeopleChip on={who === 'all'} onClick={() => setWho('all')}>전체</PeopleChip>
-            <PeopleChip on={who === 'mine'} onClick={() => setWho('mine')}>내 일정</PeopleChip>
-            {people.filter((p) => p.id !== user.id).map((p) => (
-              <PeopleChip key={p.id} on={Array.isArray(who) && who.includes(p.id)} onClick={() => pickPerson(p.id)} label={`${p.name} 일정`}>
-                <span className="size-2.5 rounded-full" style={{ background: calColors.people?.[p.id] ?? avatarColor(p.id) }} />{p.name}
-              </PeopleChip>
-            ))}
-          </div>
+          {/* 대표 검수 10/20: 휴대폰은 내 일정/다른 사람 전환을 화면 아래(하단 탭 바로 위)로 — 위는 날짜·일정만 */}
+          {!mobile && peopleFilter}
           <div className="mb-2 flex flex-wrap gap-1.5 text-xs lg:hidden" aria-label="표시할 캘린더">
             {/* V36 4 범례: 일정 = 꽉 찬 블록, 업무 = 왼쪽 굵은 선, 이동(장소 있음) = 📍·진한 테두리 */}
             <span className="flex basis-full items-center gap-2 px-1 text-[11px] text-ink-3" data-testid="cal-legend-m">
@@ -592,6 +596,7 @@ function CalendarPage() {
             }}
           />
           </div>
+          {mobile && peopleFilter}
         </div>
         {sidePanel && <UnscheduledPanel onClose={() => setSidePanel(false)} onOpen={setOpenTask} />}
       </div>
