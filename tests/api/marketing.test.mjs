@@ -39,7 +39,7 @@ describe('V41 4-2 마케팅', () => {
     const [acc] = await sql`insert into mkt_ad_accounts (tenant, provider, external_id, label, status, last_error) values (${tenant}, 'naver', '1234', '다짐 검색광고', 'error', '키 만료') returning id`;
     await sql`insert into mkt_ad_stats (account_id, day, campaign_id, campaign_name, impressions, clicks, cost_krw) values (${acc.id}, (now() at time zone 'Asia/Seoul')::date - 1, 'c1', '캠페인', 100, 12, 36000)`;
     await sql`insert into mkt_calls (tenant, phone, created_by) values (${tenant}, '010-1111-2222', ${ctx.ownerId}), (${tenant}, '010-1111-3333', ${ctx.ownerId})`;
-    const [late] = await sql`insert into mkt_contents (tenant, title, channel, scheduled_at, status, current_version, created_by) values (${tenant}, '지난 게시', 'instagram', now() - interval '1 hour', 'approved', 1, ${ctx.ownerId}) returning id`;
+    const [late] = await sql`insert into mkt_contents (tenant, title, channel, scheduled_at, status, current_version, created_by) values (${tenant}, '지난 게시', 'instagram', greatest(now() - interval '1 hour', date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul'), 'approved', 1, ${ctx.ownerId}) returning id`; // 자정 직후에도 '오늘' 안의 지난 시각
     ov = await ctx.owner.ok('GET', '/api/marketing/overview');
     const nv = ov.channels.find((c) => c.key === 'ads_naver');
     assert.deepEqual([nv.state, nv.account, nv.error], ['broken', '다짐 검색광고', '키 만료']);

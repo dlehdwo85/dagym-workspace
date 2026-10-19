@@ -21,6 +21,7 @@ import { dueExtend } from './dueExtend.step.mjs';
 import { quickAi, homeTodayEvents } from './quickAi.step.mjs';
 import { voiceMode } from './voiceMode.step.mjs';
 import { verify1017 } from './verify1017.step.mjs';
+import { docsCoedit } from './docs.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -2266,6 +2267,8 @@ await step('V36 1·2 근무 상태: 휴가 중인 사람 아바타에 회색 점
   await dot.waitFor();
   assert.match(await dot.getAttribute('title'), /휴가 ~/);
 });
+await step('10/19 자료실 문서 공동 편집: PC·휴대폰 동시 편집 같은 글·아바타·오프라인 합침·보기 전용 입력 막힘·편집 공유·기록·되돌리기·Word', () => docsCoedit({ browser, owner, staff, ctx, sql, BASE, SHOTS, login }));
+
 await browser.close();
 srv.proc.kill();
 fake.server.close();

@@ -1114,6 +1114,14 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 시험 tests/api/ai-confidential.test.mjs(5건): 후보 목록·직원 403·제안→확인→기밀 확정·같은 등급 제안 없음·기록, 남의 파일 기밀 지정 403·기밀 내리기 403, 설정 보기(직원 403)·단어 추가+경고·자동 저장 끔·말투 → 반영, 기본값 복원·빈 제안 오류·직원 제안 차단.
 - 다음: ④ 자료실 공동 편집 1단계(Yjs+Tiptap, 유료 실시간 서비스 없이) → 미결 #47·#51·#62~66·#69·#71·#72.
 
+## 2026-10-19 클라우드 — ④ 자료실 문서 공동 편집 1차 (배포)
+- 설계(docs/research/LIBRARY_DOC_COEDIT_DESIGN.md)대로: 자료실 '워크인 문서'(mime application/x-workin-doc, 저장 파일 없음) — Tiptap + Yjs(CRDT), **워크인 API 짧은 폴링**(`POST /api/library/docs/:id/sync` 한 번의 왕복으로 내 조각·커서 보내고 남의 것 받기, 고치는 중 1초·조용하면 3초·화면 숨으면 멈춤), 외부 유료 실시간 서비스 없음. migration 110: lib_docs(snapshot)·lib_doc_updates(추가형 조각)·lib_doc_versions(변경 기록)·lib_doc_shares(보기/편집)·lib_doc_presence(커서, 20초).
+- 서버 src/lib/libDocs.ts: 권한 = 자료실 규칙(loadLibraryFile) 또는 문서 공유, canEdit = 올린 사람·관리자·편집 공유·폴더 편집 권한, 보기 권한의 조각은 403, 다른 회사 404. 조각 200개 넘으면 합침, 10분마다·모두 나가면(정기 실행 docVersions) 변경 기록 + 글자 추출 → library_files.text_content(자료실 검색·AI 비서 그대로). 내보내기 .docx/.md/.txt(`/api/library/docs/:id/export`), 자료실 내려받기 주소는 .docx 로 넘김.
+- 화면 /library/doc/:id (src/app/(app)/library/doc/[id]/page.tsx, src/components/docs/pollProvider.ts): 제목·상태(실시간 저장/연결 끊김/보기 전용)·보는 사람 아바타·공유(사람별 없음/보기/편집)·기록(보기·되돌리기 = 새 변경으로 반영·지금 기록)·Word. 도구 막대(제목·굵게·기울임·목록·번호·인용·구분선·표 +행/+열/−행/−열), 다른 사람 커서·이름, 오프라인 조각은 IndexedDB 에 남아 다시 연결되면 합쳐짐. 자료실 '새 문서' 버튼, 문서 행은 편집 화면으로.
+- 휴대폰·앱: 같은 화면(도구 막대 줄바꿈), 배경이면 폴링 멈춤.
+- 시험: tests/api/lib-docs.test.mjs 5건(만들기·다른 회사 404·두 사람 동시 편집 합침·커서·보기 403·공유·회사 밖 400·합침·기록·검색 글자·정기 실행·내보내기), E2E docs.step.mjs(PC 대표·휴대폰 직원 동시 편집 같은 글·아바타·오프라인 합침·보기 전용 입력 막힘·편집 공유·기록·되돌리기·Word).
+- 남은 것(2차): 표 문서(셀 격자·xlsx), 링크 넣기, 댓글, 문서 안 이미지. Vercel·Neon 사용량 확인은 로컬.
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md

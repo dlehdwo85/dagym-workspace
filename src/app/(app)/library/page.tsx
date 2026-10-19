@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { ChevronRight, Download, FileSpreadsheet, FileText, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock,
+import { useRouter, useSearchParams } from 'next/navigation';
+import { ChevronRight, Download, FilePenLine, FileSpreadsheet, FileText, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock,
   Pencil, Search, ShieldAlert, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
@@ -21,6 +21,9 @@ const SEC: Record<Sec, { label: string; cls: string }> = {
   public: { label: '일반', cls: 'bg-green-50 text-green-700' }, internal: { label: '내부', cls: 'bg-slate-100 text-ink-2' }, confidential: { label: '기밀', cls: 'bg-red-50 text-red-700' } };
 const fmtSize = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n >= 1024 ? `${Math.round(n / 1024)}KB` : `${n}B`);
 const isImg = (f: F) => /^image\/(png|jpe?g|gif|webp)$/.test(f.mime_type);
+// 10/19 워크인 문서(공동 편집): 저장 파일 없이 Yjs 상태로 — 열면 편집 화면, 내려받기는 .docx 내보내기
+const isDoc = (f: F) => f.mime_type === 'application/x-workin-doc';
+const openHref = (f: F) => (isDoc(f) ? `/library/doc/${f.id}` : `/api/library/${f.id}/download${isImg(f) ? '?inline=1' : ''}`);
 const parentOf = (p: string) => p.split('/').slice(0, -1).join('/');
 const nameOf = (p: string) => p.split('/').pop() || '최상위';
 const DRAG = 'application/x-workin-files';
@@ -52,7 +55,8 @@ export default function LibraryPage() {
   const [recent, setRecent] = useState<Set<string>>(new Set()); // 방금 올린 파일은 AI 가 다른 폴더로 정리해도 이 화면에 남겨 "→ ○○로 정리됨 · 바꾸기"를 보여 준다
   const [busy, setBusy] = useState('');
   const [edit, setEdit] = useState<F | null>(null);
-  const [dlg, setDlg] = useState<null | { kind: 'new' | 'rename' | 'move'; value: string }>(null);
+  const [dlg, setDlg] = useState<null | { kind: 'new' | 'rename' | 'move' | 'doc'; value: string }>(null);
+  const router = useRouter();
   const [permFolder, setPermFolder] = useState<string | null>(null);
   const [preview, setPreview] = useState<any[] | null>(null);
   const [logOpen, setLogOpen] = useState(false);
@@ -143,6 +147,7 @@ export default function LibraryPage() {
       if (dlg.kind === 'new') { const p = cur ? `${cur}/${v}` : v; await api('/api/library/folders', { body: { path: p } }); setCur(p); }
       if (dlg.kind === 'rename') { const to = parentOf(cur) ? `${parentOf(cur)}/${v}` : v; const r = await api('/api/library/folders', { method: 'PATCH', body: { from: cur, to } }); setCur(to); toast.ok(`이름을 바꿨습니다 (자료 ${r.moved}개)`); }
       if (dlg.kind === 'move') await move([...sel], v);
+      if (dlg.kind === 'doc') { const r = await api('/api/library/docs', { body: { title: dlg.value.trim(), folder: cur, space: libSpace === 'all' ? 'work' : libSpace } }); setDlg(null); router.push(r.link); return; }
       setDlg(null); reload();
     } catch (er: any) { toast.error(er.message); }
   }
@@ -220,6 +225,7 @@ export default function LibraryPage() {
         actions={<>
           {data?.confEdit && <Button variant="ghost" onClick={() => setLogOpen(true)} data-testid="conf-log-open"><ShieldAlert />기밀 열람 기록</Button>}
           {canUpload && admin && <Button variant="secondary" onClick={previewAll} disabled={!!allBusy} data-testid="library-organize-all">{allBusy ? <><Loader2 className="animate-spin" />{allBusy}</> : <><Sparkles />전체 정리</>}</Button>}
+          {canUpload && <Button variant="secondary" onClick={() => setDlg({ kind: 'doc', value: '' })} data-testid="library-new-doc"><FilePenLine />새 문서</Button>}
           {canUpload && <Button onClick={() => fileRef.current?.click()} disabled={!!busy} data-testid="library-upload">{busy ? <Loader2 className="animate-spin" /> : <Upload />}올리기</Button>}
         </>} />
       {(data?.spaces?.length ?? 0) > 1 && (
@@ -324,7 +330,7 @@ export default function LibraryPage() {
                     {files.map((f) => (
                       <li key={f.id} draggable onDragStart={dragFile(f)} className={cx('group relative overflow-hidden rounded-card border bg-white shadow-card', sel.has(f.id) ? 'border-brand-600 ring-1 ring-brand-600' : 'border-line', hi === f.id && 'ring-2 ring-amber-400')}>
                         <input type="checkbox" checked={sel.has(f.id)} onChange={() => toggle(f.id)} className="absolute left-2 top-2 z-10" aria-label={`${f.title} 선택`} />
-                        <a href={`/api/library/${f.id}/download${isImg(f) ? '?inline=1' : ''}`} target="_blank" rel="noreferrer" className="flex aspect-[4/3] items-center justify-center bg-slate-50">
+                        <a href={openHref(f)} target={isDoc(f) ? undefined : '_blank'} rel="noreferrer" className="flex aspect-[4/3] items-center justify-center bg-slate-50">
                           {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : <FileIcon f={f} big />}
                         </a>
                         <div className="p-2"><div className="flex items-center gap-1 text-sm font-medium"><span className="min-w-0 flex-1 truncate">{f.title}</span>{f.effective_security !== 'internal' && <SecBadge s={f.effective_security} />}</div>
@@ -340,12 +346,15 @@ export default function LibraryPage() {
         </section>
       </div>
 
-      <Modal open={!!dlg} onClose={() => setDlg(null)} title={dlg?.kind === 'new' ? `새 폴더 — ${cur || '자료실'} 안에` : dlg?.kind === 'rename' ? '폴더 이름 바꾸기' : `${sel.size}개 옮기기`}>
+      <Modal open={!!dlg} onClose={() => setDlg(null)} title={dlg?.kind === 'new' ? `새 폴더 — ${cur || '자료실'} 안에` : dlg?.kind === 'doc' ? `새 문서 — ${cur || '자료실'} 안에` : dlg?.kind === 'rename' ? '폴더 이름 바꾸기' : `${sel.size}개 옮기기`}>
         {dlg && (
           <form onSubmit={folderDialog} className="space-y-3">
             {dlg.kind === 'move' ? (
               <Field label="옮길 폴더"><select className={inputCls} value={dlg.value} onChange={(e) => setDlg({ ...dlg, value: e.target.value })} aria-label="옮길 폴더">
                 <option value="">자료실(최상위)</option>{allPaths.map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
+            ) : dlg.kind === 'doc' ? (
+              <Field label="문서 제목" hint="여러 명이 동시에 고칠 수 있는 워크인 문서(워드 대체). 자료실 검색·AI 비서·Word 내보내기가 됩니다">
+                <input className={inputCls} value={dlg.value} onChange={(e) => setDlg({ ...dlg, value: e.target.value })} autoFocus required maxLength={200} aria-label="문서 제목" /></Field>
             ) : (
               <Field label="폴더 이름" hint={dlg.kind === 'rename' ? '하위 폴더·자료·권한·등급이 함께 옮겨집니다' : '/ 로 하위 폴더까지 한 번에 (예: 브랜드/로고)'}>
                 <input className={inputCls} value={dlg.value} onChange={(e) => setDlg({ ...dlg, value: e.target.value })} autoFocus required aria-label="폴더 이름" /></Field>
@@ -394,7 +403,7 @@ export default function LibraryPage() {
 
 function FileIcon({ f, big }: { f: F; big?: boolean }) {
   const c = big ? 'size-8' : 'size-5';
-  return /sheet|excel|csv/.test(f.mime_type + f.file_name) ? <FileSpreadsheet className={cx(c, 'text-green-600')} /> : /^image\//.test(f.mime_type) ? <ImageIcon className={cx(c, 'text-ink-3')} /> : <FileText className={cx(c, 'text-ink-3')} />;
+  return isDoc(f) ? <FilePenLine className={cx(c, 'text-brand-600')} /> : /sheet|excel|csv/.test(f.mime_type + f.file_name) ? <FileSpreadsheet className={cx(c, 'text-green-600')} /> : /^image\//.test(f.mime_type) ? <ImageIcon className={cx(c, 'text-ink-3')} /> : <FileText className={cx(c, 'text-ink-3')} />;
 }
 
 function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder, onEdit, onRemove, onOrganize, onSec, onOpenFolder }: {
@@ -405,11 +414,11 @@ function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder,
   return (
     <li draggable onDragStart={onDrag} className={cx('flex items-center gap-3 px-3 py-2.5', hi && 'bg-amber-50', sel && 'bg-brand-50/60')} data-file={f.id}>
       <input type="checkbox" checked={sel} onChange={onSel} aria-label={`${f.title} 선택`} />
-      <a href={`/api/library/${f.id}/download${isImg(f) ? '?inline=1' : ''}`} target="_blank" rel="noreferrer" className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-input border border-line bg-slate-50">
+      <a href={openHref(f)} target={isDoc(f) ? undefined : '_blank'} rel="noreferrer" className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-input border border-line bg-slate-50">
         {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : <FileIcon f={f} />}
       </a>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-sm font-medium"><span className="min-w-0 truncate">{f.title}</span>
+        <div className="flex items-center gap-1.5 text-sm font-medium">{isDoc(f) ? <a href={openHref(f)} className="min-w-0 truncate hover:underline" data-testid="doc-open">{f.title}</a> : <span className="min-w-0 truncate">{f.title}</span>}
           {f.effective_security !== 'internal' && <SecBadge s={f.effective_security} />}
           {f.organized_by && <span className={cx('inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 text-[11px] font-semibold', f.needs_review ? 'bg-amber-100 text-amber-800' : 'bg-violet-100 text-violet-700')}
             title={f.ai_confidence !== null ? `확신 ${Math.round(f.ai_confidence * 100)}%` : undefined} data-testid="ai-organized"><Sparkles className="size-3" />{f.organized_by === 'ai' ? 'AI 정리됨' : '규칙 정리'}{f.needs_review && ' · 확인 필요'}</span>}
