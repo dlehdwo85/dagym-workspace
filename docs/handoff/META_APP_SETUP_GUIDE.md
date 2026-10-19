@@ -20,3 +20,11 @@
 - 대표 보호 조치가 풀리면 대표를 앱 관리자로 추가 → 소유권 이전
 - 리디렉션 URI·개인정보처리방침·데이터 삭제 URL·권한(인스타 게시·페이지 관리·스레드)·비즈니스 인증(하이링크)·앱 심사 제출은 로컬이 안내
 - 대표가 Vercel(dagym-workspace) 에 META_APP_ID·META_APP_SECRET 입력 → 재배포
+
+## 4. 진행 기록
+- 2026-10-19 김소담 부사장 계정으로 개발자 등록·앱 생성 완료. 앱 ID 1116805710803016 (공개값) → 워크인 Vercel META_APP_ID 입력(로컬). META_APP_SECRET 은 대표 입력 대기.
+- 김소담 부사장이 앱 대시보드에 넣을 값:
+  - 앱 설정 › 기본 설정: 앱 도메인 `work-in.dev` · 개인정보처리방침 URL `https://www.work-in.dev/privacy` · 사용자 데이터 삭제 → 콜백 `https://www.work-in.dev/api/marketing/publish/meta/data-deletion` · 카테고리 "비즈니스 및 페이지"
+  - 로그인 설정(Facebook 로그인 for Business/Instagram) › 유효한 OAuth 리디렉션 URI `https://www.work-in.dev/api/marketing/publish/callback/meta`
+  - 이용 사례 추가: Threads API
+  - 앱 역할 › 역할: 대표 계정 보호 조치가 풀리면 관리자로 추가
