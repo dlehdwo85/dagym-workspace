@@ -86,3 +86,40 @@ test('적용: 공용/회사별·진행 칸 분리·멱등·사라진 행·사용
   await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'daily', daily: false });
   assert.equal((await ctx.owner.ok('GET', '/api/platform/sales-migrate')).applied.daily, false);
 });
+
+test('전환 T-1: 동결 시점 원본 건수 → 정식 표 변환·대조 → 쓰기 잠금 409 → 대조 맞으면 열기(보류·실패 사유 필수)', async () => {
+  assert.equal((await ctx.staffA.client.req('POST', '/api/platform/sales-cutover', { action: 'snapshot' })).status, 404, '플랫폼 운영자만');
+  const snap = await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'snapshot', tenant: 'default' });
+  assert.deepEqual([snap.srcCounts.leads, snap.srcCounts.procurement_notices, snap.srcCounts.related, snap.srcCounts.proposals], [20, 4356, 654, null], '기준 = 그때 원본 실제 건수(없는 표 null)');
+  // 쓰기는 열기 전 409, 대조 전에는 열 수 없음
+  assert.equal((await ctx.owner.req('POST', '/api/platform/sales-cutover', { action: 'open', tenant: 'default' })).status, 409);
+  const v = await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'convert', tenant: 'default' });
+  assert.equal(v.ok, true, JSON.stringify(v.mismatches));
+  assert.deepEqual([v.dstCounts.formal.leads, v.dstCounts.formal.procurement_notices__progress, v.dstCounts.related], [20, 436, 654]);
+  const [lead] = await sql`select id, owner_id, status from sales_leads where tenant = 'default' and src_id = 'L3'`;
+  assert.equal(lead.owner_id, ctx.ownerId, '원본 담당자 → 워크인 사용자');
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
+  const ro = await ctx.owner.req('PATCH', `/api/sales/leads/${lead.id}`, { status: '미팅예정' });
+  assert.equal(ro.status, 409, '전환 전에는 영업관리에서'); assert.equal(ro.body.error.code, 'sales_read_only');
+  // 원본 건수와 다르면(옮긴 행이 하나 빠짐) 대조 실패 → 열 수 없음
+  await sql`update sales_src_rows set gone = true where scope = 'default' and tbl = 'leads' and src_id = 'L0'`;
+  const bad = await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'convert', tenant: 'default' });
+  assert.equal(bad.ok, false); assert.ok(bad.mismatches.some((m) => m.item === 'leads' && m.source === 20 && m.copied === 19), JSON.stringify(bad.mismatches));
+  assert.equal((await ctx.owner.req('POST', '/api/platform/sales-cutover', { action: 'open', tenant: 'default' })).status, 409);
+  await sql`update sales_src_rows set gone = false where scope = 'default' and tbl = 'leads' and src_id = 'L0'`;
+  assert.equal((await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'convert', tenant: 'default' })).ok, true);
+  await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'open', tenant: 'default' });
+  // 열린 뒤: 보류·실패는 사유 필수, 상태 기록, 담당 변경은 관리자, 다른 회사 404
+  assert.equal((await ctx.owner.req('PATCH', `/api/sales/leads/${lead.id}`, { status: '보류' })).status, 400, '사유 없이 보류 불가');
+  await ctx.owner.ok('PATCH', `/api/sales/leads/${lead.id}`, { status: '보류', reason: '예산 확정 전', nextContactDate: '2026-11-02' });
+  const [after] = await sql`select status, next_contact_date::text d from sales_leads where id = ${lead.id}`;
+  assert.deepEqual([after.status, after.d], ['보류', '2026-11-02']);
+  const [log] = await sql`select from_status, to_status, reason from sales_status_log where lead_id = ${lead.id}`;
+  assert.deepEqual([log.to_status, log.reason], ['보류', '예산 확정 전']);
+  assert.equal((await ctx.owner.req('PATCH', `/api/sales/leads/${lead.id}`, { status: '없는단계' })).status, 400);
+  assert.equal((await ctx.owner.req('PATCH', '/api/sales/leads/00000000-0000-0000-0000-000000000000', { memo: 'x' })).status, 404);
+  const st = await ctx.owner.ok('GET', '/api/platform/sales-cutover');
+  assert.ok(st.cutovers.some((c) => c.tenant === 'default' && c.writes_open && c.ok));
+  await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'close', tenant: 'default' });
+  assert.equal((await ctx.owner.req('PATCH', `/api/sales/leads/${lead.id}`, { memo: 'x' })).status, 409, '닫으면 다시 잠김');
+});

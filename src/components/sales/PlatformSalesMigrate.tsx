@@ -53,6 +53,35 @@ export function PlatformSalesMigrate() {
                 <td className="p-1 text-right tabular-nums text-ink-3">{t.expected ?? ''}</td><td className="p-1 text-ink-3">{t.columns.join(', ')}</td></tr>))}</tbody></table></div>
         </>
       )}
+      <SalesCutover />
     </section>
+  );
+}
+
+/** V41 단계 2 전환(T-1·T-3·T-5): 동결 시점 원본 건수 기록 → 정식 표 변환·대조 → (대표 결정 뒤) 쓰기 열기 */
+function SalesCutover() {
+  const st = useApi<{ cutovers: any[] }>('/api/platform/sales-cutover');
+  const [busy, setBusy] = useState(false);
+  const c = st.data?.cutovers.find((x) => x.tenant === 'default');
+  async function run(action: string) {
+    if (action === 'open' && !confirm('영업 쓰기를 엽니다. 원본 영업관리가 읽기 전용(동결)인지, 대표가 전환을 결정했는지 확인하셨나요?')) return;
+    setBusy(true);
+    try { const r = await api<any>('/api/platform/sales-cutover', { body: { action, tenant: 'default' } });
+      toast.ok(action === 'snapshot' ? '동결 시점 원본 건수를 기록했습니다' : action === 'convert' ? (r.ok ? '대조 일치' : `대조 불일치 ${r.mismatches.length}건`) : action === 'open' ? '쓰기를 열었습니다' : '쓰기를 닫았습니다'); st.reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="mt-4 border-t border-line pt-3" data-testid="sales-cutover">
+      <h3 className="text-sm font-semibold">전환(쓰기) — 우리 회사</h3>
+      <p className="mt-1 text-xs text-ink-2">순서: 원본 영업관리 동결 → [동결 시점 원본 건수 기록] → [적용] → [변환·대조] → 일치하면 대표 결정 뒤 [쓰기 열기]. 대조 기준은 그때 원본의 실제 건수입니다.</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => run('snapshot')} data-testid="cutover-snapshot">동결 시점 원본 건수 기록</Button>
+        <Button size="sm" variant="secondary" disabled={busy || !c?.src_counts} onClick={() => run('convert')} data-testid="cutover-convert">변환·대조</Button>
+        {c?.writes_open ? <Button size="sm" variant="secondary" disabled={busy} onClick={() => run('close')}>쓰기 닫기</Button>
+          : <Button size="sm" disabled={busy || !c?.ok} onClick={() => run('open')} data-testid="cutover-open">쓰기 열기</Button>}
+      </div>
+      {c && <p className={cx('mt-2 text-xs', c.ok ? 'text-emerald-700' : 'text-amber-800')}>기준 기록 {c.frozen_at ? new Date(c.frozen_at).toLocaleString('ko-KR') : '—'} · 대조 {c.converted_at ? (c.ok ? '일치' : `불일치 ${c.mismatches?.length ?? 0}건`) : '안 함'} · 쓰기 {c.writes_open ? '열림' : '잠김'}</p>}
+      {!!c?.mismatches?.length && <ul className="mt-1 space-y-0.5 text-xs text-red-700">{c.mismatches.map((m: any) => <li key={m.item}>{m.item}: 원본 {m.source ?? '없음'} · 옮김 {m.copied}{m.formal !== undefined ? ` · 정식 표 ${m.formal}` : ''}</li>)}</ul>}
+    </div>
   );
 }

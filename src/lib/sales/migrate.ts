@@ -46,14 +46,14 @@ export async function salesMigratePreview(u: SessionUser) {
 
 // ---------------- 2) 적용 ----------------
 /** V39 C: 공용 표(수집 데이터) — 회사별 진행 칸은 떼어 회사 쪽 '<표>__progress' 로 */
-const GLOBAL: Record<string, string[]> = {
+export const GLOBAL: Record<string, string[]> = {
   procurement_notices: ['classification', 'representative_judgment', 'qualification_gap', 'sales_point', 'lead_id'],
   operating_facility_prospects: ['contact_status', 'contact_updated_at', 'next_action', 'next_action_date', 'lead_id', 'notes'],
   vendor_registrations: ['status', 'memo', 'next_date'],
   building_sales_pipeline: [], data_source_master: [], data_source_run: [], kapt_vendor_selection: [],
 };
 /** 회사별 표(진행 기록) */
-const TENANT = ['leads', 'lead_business_interests', 'sales_activities', 'proposals', 'contracts', 'schedules', 'tasks', 'task_subtasks', 'lead_opportunity_timing', 'opportunity_work',
+export const TENANT = ['leads', 'lead_business_interests', 'sales_activities', 'proposals', 'contracts', 'schedules', 'tasks', 'task_subtasks', 'lead_opportunity_timing', 'opportunity_work',
   'sales_costs', 'regions', 'business_categories', 'user_saved_filters'];
 /** 옮기지 않음(V39 D·E): 관측·실행 이력·백업·AI 사용 기록 */
 export const NOT_MOVED = ['procurement_notice_observations', 'data_source_observation', 'procurement_monitoring_runs', 'ai_usage', 'ai_proposals'];
