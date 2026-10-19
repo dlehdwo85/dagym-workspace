@@ -90,6 +90,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const space: SpaceKey = pathSpace !== 'work' ? pathSpace : common && spaces.includes(ctxSpace) ? ctxSpace : 'work';
   const sm = SPACE_META[space];
   const [spaceMenu, setSpaceMenu] = useState(false);
+  const [spaceSheet, setSpaceSheet] = useState(false); // 휴대폰 머리줄 로고·공간 이름 → 공간 전환 시트
   const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number }> }>(spaces.length > 1 && (spaceMenu || more) ? '/api/spaces' : null);
   const goSpace = (sp: SpaceKey) => { setSpaceMenu(false); try { localStorage.setItem('wos_space', sp); } catch {} router.push(SPACE_META[sp].home); };
   useEffect(() => { // 앱을 처음 열 때 마지막으로 쓴 공간으로
@@ -351,8 +352,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
           {/* 머리줄은 상태바 높이만큼 아래로 (고정 높이 안에서 눌리지 않게 높이는 내용 줄에만) */}
           <header className="sticky top-0 z-30 border-b border-line bg-white/95 pt-[var(--sat)] backdrop-blur sm:hidden" data-testid="mobile-header">
             <div className="flex h-12 items-center justify-between px-3">
-              <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon.svg" alt="" className="size-7" />워크인
-                {spaces.length > 1 && <span className="rounded-full border px-2 py-0.5 text-xs font-medium" style={{ color: sm.color, background: sm.soft, borderColor: sm.border }} data-testid="mobile-space-chip">{sm.short}</span>}</span>
+              {/* 대표(10/19): 앱도 PC 처럼 로고·공간 이름을 누르면 공간 전환 시트 */}
+              {spaces.length > 1 ? (
+                <button type="button" onClick={() => setSpaceSheet(true)} aria-haspopup="dialog" aria-label={`공간 전환 — 지금 ${sm.label}`} data-testid="mobile-space-switch"
+                  className="-ml-1 flex min-h-[44px] items-center gap-2 rounded-xl px-1 text-[15px] font-bold text-brand-700 active:bg-slate-100"><img src="/icon.svg" alt="" className="size-7" />워크인
+                  <span className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-xs font-medium" style={{ color: sm.color, background: sm.soft, borderColor: sm.border }} data-testid="mobile-space-chip">{sm.short}<ChevronDown className="size-3.5" aria-hidden /></span></button>
+              ) : <span className="flex items-center gap-2 text-[15px] font-bold text-brand-700"><img src="/icon.svg" alt="" className="size-7" />워크인</span>}
               <span className="flex items-center">
                 <button onClick={() => setPalette(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-[22px]" /></button>
                 {session.features.ai && <button onClick={() => setAiDock(true)} className="inline-flex size-11 items-center justify-center rounded-full text-violet-600 active:bg-violet-50" aria-label="AI 비서" data-testid="mobile-ai"><Sparkles className="size-[22px]" /></button>}
@@ -434,6 +439,24 @@ export function AppShell({ session, children }: { session: Sess; children: React
           </div>
         )}
 
+        {spaceSheet && spaces.length > 1 && (
+          <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setSpaceSheet(false)}>
+            <div role="dialog" aria-label="공간 전환" className="absolute bottom-0 left-0 right-0 max-h-[90dvh] animate-fade-up overflow-y-auto overscroll-contain rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()} data-testid="space-sheet">
+              <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
+              <div className="flex items-center gap-2 px-2 pb-2"><div className="min-w-0 flex-1"><div className="text-base font-bold">공간 전환</div><div className="truncate text-xs text-ink-2">{session.tenant?.name ?? '워크인'}</div></div>
+                <button onClick={() => setSpaceSheet(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button></div>
+              <div className="space-y-1">{spaces.map((sp) => (
+                <button key={sp} onClick={() => { setSpaceSheet(false); goSpace(sp); }} data-testid={`sheet-space-${sp}`} className="flex min-h-[60px] w-full items-center gap-3 rounded-xl border-[1.5px] px-3 py-2 text-left"
+                  style={sp === space ? { background: SPACE_META[sp].soft, borderColor: SPACE_META[sp].color } : { borderColor: 'transparent' }}>
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-white" style={{ background: SPACE_META[sp].color }}><SpaceIcon s={sp} /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-xs text-ink-2">{spaceInfo.data.summary[sp].text}</span>}</span>
+                  {sp === space && <Check className="size-5" style={{ color: SPACE_META[sp].color }} aria-label="지금 공간" />}
+                  {sp !== space && !!spaceInfo.data?.summary[sp]?.badge && <span className="min-w-[22px] rounded-full bg-red-600 px-1.5 text-center text-xs font-bold leading-[22px] text-white">{spaceInfo.data.summary[sp].badge}</span>}
+                </button>))}</div>
+              <p className="px-2 pt-2 text-[11px] text-ink-3">{admin ? '관리자는 켠 공간을 모두 봅니다' : '배정된 공간만 보입니다'}</p>
+            </div>
+          </div>
+        )}
         {/* V14 51: 메뉴 항목을 누르면 화면이 바뀔 때(경로 변경 effect) 닫는다 — 누르는 순간 닫으면 iOS 가 눌림 효과를 뒤 화면 요소에 남긴다 */}
         {more && (
           <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setMore(false)}>

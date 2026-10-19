@@ -47,6 +47,17 @@ export async function spaces({ browser, desk, owner, staff, BASE, sql }) {
   await m.getByRole('button', { name: '메뉴 더보기' }).tap();
   await m.getByTestId('mobile-space-work').tap(); // 마지막 공간 = 업무로 돌려 둠
   await m.waitForURL(/\/$/);
+  // 대표(10/19): 앱 머리줄 로고·공간 이름 → PC 와 같은 공간 전환 시트(회사 이름·지금 공간 체크)
+  await m.getByTestId('mobile-space-switch').tap();
+  await m.getByTestId('space-sheet').waitFor();
+  await m.getByTestId('sheet-space-work').getByLabel('지금 공간').waitFor();
+  await m.getByTestId('sheet-space-sales').tap();
+  await m.waitForURL(/\/s\/sales$/);
+  assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
+  await m.getByTestId('mobile-space-switch').tap();
+  await m.getByTestId('sheet-space-sales').getByLabel('지금 공간').waitFor();
+  await m.getByTestId('sheet-space-work').tap(); // 업무로 돌려 둠
+  await m.waitForURL(/\/$/);
   await mc.close();
   // 영업 미배정 직원: 공간 카드 없음 · 주소 직접 입력 404
   await staff.goto(`${BASE}/tasks`);
