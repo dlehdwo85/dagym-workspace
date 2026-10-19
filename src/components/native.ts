@@ -6,6 +6,16 @@ type L = (e: any) => void;
 interface AppPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; exitApp(): Promise<void> }
 interface FcmPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; requestPermissions(): Promise<{ receive: string }>; checkPermissions(): Promise<{ receive: string }>; getToken(): Promise<{ token: string }> }
 const App = registerPlugin<AppPlugin>('App');
+// 로컬 10/19(대표) 앱 생체 인증 잠금: @aparajita/capacitor-biometric-auth(네이티브 이름 BiometricAuthNative). 앱에 설치되지 않았으면 기능을 숨긴다
+interface BioPlugin { checkBiometry(): Promise<{ isAvailable: boolean; biometryType: number; reason?: string }>; authenticate(o: { reason?: string; cancelTitle?: string; allowDeviceCredential?: boolean; androidTitle?: string }): Promise<void> }
+const BiometricAuth = registerPlugin<BioPlugin>('BiometricAuthNative');
+export const bioAvailable = async () => { if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('BiometricAuthNative')) return false; try { return (await BiometricAuth.checkBiometry()).isAvailable; } catch { return false; } };
+/** 지문·얼굴(또는 기기 잠금 번호)로 확인 — 성공 true */
+export async function bioAuthenticate(reason = '워크인 잠금 해제') {
+  try { await BiometricAuth.authenticate({ reason, cancelTitle: '취소', allowDeviceCredential: true, androidTitle: '워크인' }); return true; } catch { return false; }
+}
+export const BIO_KEY = 'wos_bio_lock';
+export const onAppActive = (fn: () => void) => { if (!Capacitor.isNativePlatform()) return; App.addListener('appStateChange', ({ isActive }: any) => { if (isActive) fn(); }); };
 const FirebaseMessaging = registerPlugin<FcmPlugin>('FirebaseMessaging');
 interface LocalPlugin {
   addListener(ev: string, fn: L): Promise<PluginListenerHandle>;

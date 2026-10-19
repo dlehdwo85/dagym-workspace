@@ -1102,6 +1102,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 화면: 사용자 관리 › 팀 탭 '부서·팀 만들기'(종류·부서·격리·기본 공간), 카드 '부서 / 팀'·'격리' 표시, 팀 보드 [뒤로] → 팀 탭, 초대 창 조직·팀 목록 새로 읽기 + 부서·팀 체크 + 공간 제안.
 - 다음: ② 자동 로그인(로그인 유지·기기별 로그아웃·앱 생체 인증) → ③ 홈 개편(월 미니 캘린더·알림 활동 탭) — 코드 작성 완료, 시험 뒤 배포.
 
+## 2026-10-19 클라우드 — ② 자동 로그인 · ③ 홈 개편(월 미니 캘린더·알림 활동 탭) (배포)
+- ② 웹 로그인 창 '로그인 유지'(기본 켬, 30일 + 하루 한 번 자동 연장). 끄면 브라우저 세션 쿠키(Max-Age 없음)·서버 1일·연장 없음(migration 109 sessions.persistent). 앱(android·ios)은 항상 유지. 설정 › 보안 › 로그인한 기기에서 기기별 [로그아웃](지금 기기는 400) + 기존 '다른 기기 모두 로그아웃'. 비밀번호 재설정·관리자 비활성화·탈퇴 = 모든 기기 만료(기존 revokeAllSessions).
+- ② 앱 생체 인증 잠금: 설정 › 보안 '생체 인증 잠금(이 앱)' — 앱을 열거나 1분 넘게 뒤에 있다 돌아올 때 지문·얼굴. 플러그인 @aparajita/capacitor-biometric-auth(mobile/package.json 추가) — **로컬: mobile/ npm install → npx cap sync, iOS Info.plist NSFaceIDUsageDescription 필요**. 없는 빌드는 자동 숨김.
+- ③ 홈 '최근 활동' 카드 삭제 → 알림 화면 '활동' 탭(/api/notifications/activity, src/lib/activity.ts 공용). 그 자리에 월 미니 캘린더(src/components/HomeMonth.tsx): 날짜 점(일정 청록·업무 회색·지난 업무 빨강·영업/마케팅 공간 색), 누르면 그날 목록, 한 번 더 누르면/더블클릭 캘린더. PC 는 이번 주 오른쪽, 휴대폰은 이번 주 다음 접힌 '월' 줄(이번 주 7칸 → 펼치면 전체 월). 데이터는 캘린더와 같은 API(/api/events·/api/tasks·/api/spaces/agenda).
+- 다음: 대기열 ② AI 기밀 도구(list_confidential_suggestions·propose_set_confidential·propose_update_company_settings·현재 설정 보여 주기·안내 문구) → ④ 자료실 공동 편집 1단계.
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md

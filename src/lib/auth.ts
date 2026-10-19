@@ -6,14 +6,20 @@ import type { Role, SessionUser } from './types';
 export const SESSION_COOKIE = 'wos_session';
 const SESSION_DAYS = 30;
 
-export async function createSession(userId: string, client: string, userAgent: string | null, opts: { ip?: string | null; mfaPending?: boolean } = {}) {
+/**
+ * 로컬 10/19(대표) 자동 로그인: persistent(로그인 유지) = 30일 + 하루 한 번 갱신(슬라이딩). 끄면 브라우저를 닫으면 끝(세션 쿠키) + 서버 1일, 갱신 없음.
+ * 앱(android·ios)은 항상 유지. 비밀번호 변경·관리자 비활성화는 revokeAllSessions 로 모든 기기 만료.
+ */
+export async function createSession(userId: string, client: string, userAgent: string | null, opts: { ip?: string | null; mfaPending?: boolean; persistent?: boolean } = {}) {
   const token = newToken();
   const sql = db();
+  const persistent = client !== 'web' || opts.persistent !== false;
   await sql`
-    insert into sessions (id, user_id, client, user_agent, expires_at, ip, mfa_pending)
-    values (${sha256(token)}, ${userId}, ${client}, ${userAgent?.slice(0, 300) ?? null}, ${opts.mfaPending ? sql`now() + interval '10 minutes'` : sql`now() + ${SESSION_DAYS + ' days'}::interval`}, ${opts.ip ?? null}, ${!!opts.mfaPending})`;
+    insert into sessions (id, user_id, client, user_agent, expires_at, ip, mfa_pending, persistent)
+    values (${sha256(token)}, ${userId}, ${client}, ${userAgent?.slice(0, 300) ?? null}, ${opts.mfaPending ? sql`now() + interval '10 minutes'` : persistent ? sql`now() + ${SESSION_DAYS + ' days'}::interval` : sql`now() + interval '1 day'`}, ${opts.ip ?? null}, ${!!opts.mfaPending}, ${persistent})`;
+
   if (!opts.mfaPending) await sql`update users set last_login_at = now() where id = ${userId}`;
-  return { token, maxAge: SESSION_DAYS * 86400 };
+  return { token, maxAge: persistent ? SESSION_DAYS * 86400 : 0, persistent }; // maxAge 0 = 브라우저 세션 쿠키
 }
 
 export function sessionCookie(token: string, maxAge: number) {
@@ -25,7 +31,7 @@ export function sessionCookie(token: string, maxAge: number) {
     sameSite: 'lax' as const,
     secure,
     path: '/',
-    maxAge,
+    ...(maxAge > 0 ? { maxAge } : {}), // 로그인 유지 끔 = Max-Age 없는 세션 쿠키
   };
 }
 
@@ -35,15 +41,15 @@ export async function userFromToken(token: string | undefined | null): Promise<S
   const sql = db();
   const id = sha256(token);
   const rows = await sql<
-    { id: string; email: string; name: string; role: Role; status: string; timezone: string; last_seen_at: Date; is_demo: boolean; platform_admin: boolean; tenant: string; kind: string; tstatus: string }[]
+    { id: string; email: string; name: string; role: Role; status: string; timezone: string; last_seen_at: Date; is_demo: boolean; platform_admin: boolean; tenant: string; kind: string; tstatus: string; persistent: boolean }[]
   >`
-    select u.id, u.email, u.name, u.role, u.status, u.timezone, s.last_seen_at, u.is_demo, u.platform_admin, u.tenant, t.kind, t.status as tstatus
+    select u.id, u.email, u.name, u.role, u.status, u.timezone, s.last_seen_at, u.is_demo, u.platform_admin, u.tenant, t.kind, t.status as tstatus, s.persistent
     from sessions s join users u on u.id = s.user_id join tenants t on t.id = u.tenant
     where s.id = ${id} and s.revoked_at is null and s.expires_at > now() and u.status = 'active' and not s.mfa_pending and t.status = 'active'`;
   const r = rows[0];
   if (!r) return null;
-  // 슬라이딩 만료: 하루 한 번만 갱신
-  if (Date.now() - new Date(r.last_seen_at).getTime() > 86400_000) {
+  // 슬라이딩 만료: 하루 한 번만 갱신 — '로그인 유지'를 끈 세션은 갱신하지 않음
+  if (r.persistent && Date.now() - new Date(r.last_seen_at).getTime() > 86400_000) {
     await sql`update sessions set last_seen_at = now(), expires_at = now() + ${SESSION_DAYS + ' days'}::interval where id = ${id}`;
   }
   markActiveDay(sql, r.id, r.tenant);
@@ -84,6 +90,13 @@ export async function currentUser(): Promise<SessionUser | null> {
 
 export async function revokeSession(sessionId: string) {
   await db()`update sessions set revoked_at = now() where id = ${sessionId}`;
+}
+/** 기기 목록의 짧은 id(앞 8자)로 그 기기만 로그아웃 — 지금 쓰는 기기는 /api/auth/logout 으로 */
+export async function revokeSessionByPrefix(userId: string, prefix: string, currentId: string) {
+  if (!/^[0-9a-f]{8}$/.test(prefix)) return 0;
+  if (currentId.startsWith(prefix)) return -1;
+  const r = await db()`update sessions set revoked_at = now() where user_id = ${userId} and id like ${prefix + '%'} and revoked_at is null returning id`;
+  return r.length;
 }
 
 export async function revokeAllSessions(userId: string) {

@@ -11,6 +11,7 @@ import { SPACE_META } from '@/components/spaceMeta';
 import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
 import { useRowOpen } from '@/components/rowOpen';
 import { ConnectCard } from '@/components/ConnectCard';
+import { HomeMonth } from '@/components/HomeMonth';
 import { useRouter } from 'next/navigation';
 
 const seoulDay = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
@@ -58,42 +59,6 @@ function TodayRow({ t, className }: { t: any; className?: string }) {
       <PriorityTag p={t.priority} label={false} />
       <DueChip due={t.due_date} status={t.status} />
     </li>
-  );
-}
-
-function MonthCalendar({ month, setMonth, events, taskDays, selected, setSelected, today }: {
-  month: string; setMonth: (m: string) => void; events: any[]; taskDays?: string[]; selected: string; setSelected: (d: string) => void; today: string;
-}) {
-  const first = month + '-01';
-  const startPad = dow(first); // 일요일 시작(큰 캘린더와 같게)
-  const nextMonth = (() => { const [y, m] = month.split('-').map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`; })();
-  const prevMonth = (() => { const [y, m] = month.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; })();
-  const days: string[] = [];
-  for (let d = first; d < nextMonth + '-01'; d = addDays(d, 1)) days.push(d);
-  const has = new Set([...events.flatMap(eventDays), ...(taskDays ?? [])]);
-  return (
-    <div className="px-2" data-testid="home-month">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-sm font-semibold tabular-nums">{Number(month.slice(0, 4))}년 {Number(month.slice(5))}월</span>
-        <span className="flex">
-          <button onClick={() => setMonth(prevMonth)} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label="이전 달"><ChevronLeft className="size-4" /></button>
-          <button onClick={() => { setMonth(today.slice(0, 7)); setSelected(today); }} className="rounded px-1.5 text-xs text-ink-2 hover:bg-slate-100">오늘</button>
-          <button onClick={() => setMonth(nextMonth)} className="rounded p-1 text-ink-2 hover:bg-slate-100" aria-label="다음 달"><ChevronRight className="size-4" /></button>
-        </span>
-      </div>
-      <div className="grid grid-cols-7 text-center text-[11px] text-ink-3">{['일', '월', '화', '수', '목', '금', '토'].map((d, i) => <span key={d} className={cx('py-1', i === 0 && 'text-red-400')}>{d}</span>)}</div>
-      <div className="grid grid-cols-7 text-center text-sm">
-        {Array.from({ length: startPad }, (_, i) => <span key={'p' + i} />)}
-        {days.map((d) => (
-          <button key={d} onClick={() => setSelected(d)} aria-label={`${fmtDate(d)} 일정`} aria-pressed={selected === d}
-            className={cx('relative mx-auto my-0.5 flex size-8 items-center justify-center rounded-full tabular-nums',
-              selected === d ? 'bg-brand-600 font-semibold text-white' : d === today ? 'font-bold text-accent-600 ring-1 ring-accent-500' : dow(d) === 0 ? 'text-red-600 hover:bg-slate-100' : 'hover:bg-slate-100')}>
-            {Number(d.slice(8))}
-            {has.has(d) && <span className={cx('absolute bottom-0.5 size-1 rounded-full', selected === d ? 'bg-white' : 'bg-accent-500')} />}
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -299,6 +264,8 @@ export default function Dashboard() {
           </ul>
           <div className="border-t border-line px-1 pt-1"><InlineAddTask muted defaultDue={data.today} onCreated={() => { mine.reload(); myOpen.reload(); reload(); }} placeholder="할 일 추가" /></div>
         </Section>
+        {/* 로컬 10/19(대표 확정): 최근 활동 → 알림 '활동' 탭, 그 자리에 월 미니 캘린더(PC 오른쪽 위, 휴대폰은 이번 주 다음 접힌 줄) */}
+        <HomeMonth today={today} className="lg:col-start-3 lg:row-start-1" />
 
         {scope === 'mine' && freshNoDue.length > 0 && (
           <Section title="새로 받은 업무 (48시간, 마감 없음)" count={freshNoDue.length} icon={CheckCircle2} className="lg:col-span-2" testid="home-fresh">
@@ -346,22 +313,6 @@ export default function Dashboard() {
           )}
         </Section>
 
-        <Section title="최근 활동" icon={ActivityIcon} className="lg:col-start-3" testid="home-activity">
-          {!data.activity?.length ? <p className="px-2 py-6 text-center text-sm text-ink-3">최근 활동이 없습니다</p> : (
-            <ul>
-              {data.activity.map((a: any, i: number) => (
-                <li key={i} className="flex min-w-0 items-start gap-2 rounded-input px-2 py-1.5 text-sm">
-                  <span className="mt-0.5 shrink-0">{a.kind === 'done' ? <CheckCircle2 className="size-4 text-green-500" /> : a.kind === 'comment' ? <MessageSquare className="size-4 text-accent-500" /> : <PlusCircle className="size-4 text-ink-3" />}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate"><b className="font-semibold">{a.actor_name ?? '시스템'}</b> {a.kind === 'done' ? '완료' : a.kind === 'comment' ? '댓글' : '등록'} · <Link href={`/tasks/${a.task_id}`} className="hover:underline">{a.title}</Link></p>
-                    {a.body && <p className="truncate text-xs text-ink-2">{a.body}</p>}
-                    <p className="text-[11px] text-ink-3">{fmtDateTime(a.at)}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
       </div>
     </div>
   );

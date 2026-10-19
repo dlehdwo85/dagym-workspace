@@ -9,6 +9,9 @@ export default function Notifications() {
   const { data, error, loading, reload, setData } = useApi<any>('/api/notifications');
   /** V32 0: 기본은 안 읽은 알림만 — 누르면 바로 읽음(목록에서 빠지고 배지 감소), 서버 실패 때만 되돌림. [읽은 알림도 보기]로 전체 */
   const [showAll, setShowAll] = useState(false);
+  // 로컬 10/19(대표) 홈 개편: 홈 '최근 활동' 카드가 여기 '활동' 탭으로
+  const [tab, setTab] = useState<'list' | 'activity'>('list');
+  const act = useApi<{ items: any[] }>(tab === 'activity' ? '/api/notifications/activity' : null);
   async function decide(n: any, approve: boolean) {
     const note = approve ? undefined : prompt('반려 사유 (담당자에게 전달)') ?? undefined;
     if (!approve && note === undefined) return;
@@ -41,11 +44,26 @@ export default function Notifications() {
       </div>
       <div className="flex gap-1 text-sm" role="tablist" aria-label="알림 보기">
         {([[false, '안 읽음'], [true, '전체']] as const).map(([all, l]) => (
-          <button key={l} role="tab" aria-selected={showAll === all} onClick={() => setShowAll(all)} data-testid={all ? 'notif-all' : 'notif-unread'}
-            className={cx('rounded-full px-3 py-1', showAll === all ? 'bg-brand-600 text-white' : 'bg-white text-ink-2 ring-1 ring-line')}>{l}{!all && data?.unread ? ` ${data.unread}` : ''}</button>
+          <button key={l} role="tab" aria-selected={tab === 'list' && showAll === all} onClick={() => { setTab('list'); setShowAll(all); }} data-testid={all ? 'notif-all' : 'notif-unread'}
+            className={cx('rounded-full px-3 py-1', tab === 'list' && showAll === all ? 'bg-brand-600 text-white' : 'bg-white text-ink-2 ring-1 ring-line')}>{l}{!all && data?.unread ? ` ${data.unread}` : ''}</button>
         ))}
+        <button role="tab" aria-selected={tab === 'activity'} onClick={() => setTab('activity')} data-testid="notif-activity"
+          className={cx('rounded-full px-3 py-1', tab === 'activity' ? 'bg-brand-600 text-white' : 'bg-white text-ink-2 ring-1 ring-line')}>활동</button>
       </div>
-      {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !(showAll ? data.items : data.items.filter((n: any) => !n.read_at)).length ? (
+      {tab === 'activity' ? (
+        act.error ? <ErrorBox error={act.error} retry={act.reload} /> : !act.data ? <Loading /> : !act.data.items.length ? <Empty title="최근 활동이 없습니다">최근 30일 동안 내가 볼 수 있는 업무의 등록·완료·댓글이 여기에 보입니다.</Empty> : (
+          <ul className="divide-y rounded-lg border bg-white" data-testid="activity-list">
+            {act.data.items.map((a: any, i: number) => (
+              <li key={i} className="flex min-w-0 items-start gap-3 px-4 py-2.5 text-sm">
+                <span className={cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', a.kind === 'done' ? 'bg-green-500' : a.kind === 'comment' ? 'bg-accent-500' : 'bg-slate-300')} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate"><b className="font-semibold">{a.actor_name ?? '시스템'}</b> {a.kind === 'done' ? '완료' : a.kind === 'comment' ? '댓글' : '등록'} · <Link href={`/tasks/${a.task_id}`} className="hover:underline">{a.title}</Link></p>
+                  {a.body && <p className="truncate text-xs text-ink-2">{a.body}</p>}
+                  <p className="text-[11px] text-ink-3">{fmtDateTime(a.at)}</p>
+                </div>
+              </li>))}
+          </ul>)
+      ) : error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !(showAll ? data.items : data.items.filter((n: any) => !n.read_at)).length ? (
         <Empty title={showAll ? '알림이 없습니다' : '새 알림이 없습니다'}>{!showAll && data.items.length > 0 && <button className="text-sm text-brand-600 underline" onClick={() => setShowAll(true)}>읽은 알림 보기</button>}</Empty>
       ) : (
         <ul className="divide-y rounded-lg border bg-white" data-testid="notifications">

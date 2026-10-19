@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 export async function verify1017({ owner, staff, ctx, sql, BASE }) {
   const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '검수 10/17 멘션 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
   await ctx.owner.ok('POST', `/api/tasks/${id}/comments`, { body: `다음주 월요일 연락주신다 함 @[이직원](${ctx.staffA.id})` });
-  await owner.goto(`${BASE}/`);
-  const act = owner.getByTestId('home-activity');
+  // 로컬 10/19(대표 확정): 홈 '최근 활동' 카드 → 알림 화면 '활동' 탭
+  await owner.goto(`${BASE}/notifications`);
+  await owner.getByTestId('notif-activity').click();
+  const act = owner.getByTestId('activity-list');
   await act.getByText('다음주 월요일 연락주신다 함').first().waitFor();
   const text = await act.textContent();
   assert.ok(!/@\[/.test(text) && !text.includes(ctx.staffA.id), '멘션 원문·id 안 보임');

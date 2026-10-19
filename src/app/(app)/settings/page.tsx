@@ -5,6 +5,7 @@ import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, cx, Field, Loading, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { enableNativePush, isNativeApp, subscribeWebPush } from '@/components/native';
+import { BioLockSetting } from '@/components/BioLock';
 import { ROLE_LABEL } from '@/lib/types';
 
 export default function Settings() {
@@ -187,11 +188,12 @@ function TwoFactor() {
           </div>
         )}
       </div>
+      <BioLockSetting />
       <div className="mt-4">
         <div className="flex items-center justify-between"><b className="font-medium">로그인한 기기</b><Button size="sm" variant="secondary" onClick={logoutOthers}>다른 기기 모두 로그아웃</Button></div>
         <ul className="mt-1 divide-y divide-line text-xs" data-testid="sessions">
           {ss.data?.sessions.map((x) => (
-            <li key={x.id} className="flex justify-between gap-2 py-1.5"><span className="min-w-0 truncate">{x.client === 'web' ? '웹' : x.client === 'android' ? 'Android 앱' : 'iPhone 앱'} · {(x.user_agent ?? '').replace(/\(.*?\)/g, '').slice(0, 40)}{x.ip ? ` · ${x.ip}` : ''}{x.current && <b className="ml-1 text-green-700">지금 이 기기</b>}</span><span className="shrink-0 text-ink-3">{fmtDateTime(x.last_seen_at)}</span></li>
+            <li key={x.id} className="flex justify-between gap-2 py-1.5"><span className="min-w-0 truncate">{x.client === 'web' ? '웹' : x.client === 'android' ? 'Android 앱' : 'iPhone 앱'} · {(x.user_agent ?? '').replace(/\(.*?\)/g, '').slice(0, 40)}{x.ip ? ` · ${x.ip}` : ''}{x.current && <b className="ml-1 text-green-700">지금 이 기기</b>}</span><span className="shrink-0 text-ink-3">{fmtDateTime(x.last_seen_at)}</span>{!x.current && <button type="button" className="shrink-0 text-red-600 underline" onClick={async () => { if (!confirm('이 기기에서 로그아웃할까요?')) return; try { await api(`/api/auth/sessions/${x.id}`, { method: 'DELETE' }); ss.reload(); toast.ok('그 기기에서 로그아웃했습니다'); } catch (e: any) { toast.error(e.message); } }} data-testid="session-revoke">로그아웃</button>}</li>
           ))}
         </ul>
       </div>

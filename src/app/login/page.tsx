@@ -37,6 +37,7 @@ function LoginForm() {
   const oauthErr = sp.get('oauth_error');
   const [social, setSocial] = useState(0);
   const [otp, setOtp] = useState('');
+  const [remember, setRemember] = useState(true);
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     setBusy(true); setErr(null);
@@ -44,7 +45,7 @@ function LoginForm() {
       const client = Capacitor.isNativePlatform() ? Capacitor.getPlatform() : 'web';
       if (mfa) await api('/api/auth/2fa/verify', { body: { code: otp } });
       else {
-        const r = await api('/api/auth/login', { body: { email, password, client } });
+        const r = await api('/api/auth/login', { body: { email, password, client, remember } });
         // V12 3번: 2단계 인증을 켠 계정은 OTP 6자리 한 번 더
         if (r?.mfaRequired) { setMfa(true); setOtp(''); return; }
       }
@@ -71,6 +72,8 @@ function LoginForm() {
       ) : <>
       <Field label="이메일"><input className={inputCls + ' h-11'} type="email" inputMode="email" autoComplete="username" placeholder="name@company.co.kr" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></Field>
       <Field label="비밀번호"><PasswordInput value={password} onChange={setPassword} /></Field>
+      {/* 로컬 10/19(대표): 웹은 '로그인 유지'(30일, 쓰면 자동 연장). 앱은 항상 유지라 보이지 않음 */}
+      {!Capacitor.isNativePlatform() && <label className="flex items-center gap-2 text-sm text-ink-2"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} data-testid="login-remember" />로그인 유지 <span className="text-xs text-ink-3">(30일 · 끄면 브라우저를 닫을 때 로그아웃)</span></label>}
       </>}
       {err && (
         <div className={err.network ? 'flex gap-2.5 rounded-input border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900' : 'flex gap-2.5 rounded-input border border-red-200 bg-red-50 p-3 text-sm text-red-800'} role="alert">

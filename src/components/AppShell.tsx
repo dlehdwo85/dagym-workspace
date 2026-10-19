@@ -4,6 +4,7 @@ import { ADMIN_PAGES } from '@/lib/adminPages';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { AiDock } from './AiDock';
+import { BioLock } from './BioLock';
 import { MessengerDock } from './MessengerDock';
 import { VersionWatch } from './VersionWatch';
 import { Onboarding } from './Onboarding';
@@ -385,6 +386,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         </div>
 
         {session.tenant?.onboarding && <Onboarding />}
+        <BioLock />
         {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} /></Suspense>}
         <MessengerDock aiOpen={aiDock} />
         <VersionWatch />

@@ -512,6 +512,14 @@ await step('B-2 내 업무 자동 묶음 (새로 배정됨→확인·기한 지�
 await step('모바일 대시보드·캘린더·하단 메뉴 화면', async () => {
   await staff.goto(BASE + '/');
   await staff.getByText('님의 업무 현황').waitFor();
+  // 로컬 10/19(대표 확정) 홈 개편: 휴대폰은 '이번 주' 다음에 접힌 '월' 줄(이번 주 7칸) → 펼치면 전체 월, 월 격자는 접혀 있음
+  const wkBox = await staff.getByTestId('home-week').boundingBox(), moBox = await staff.getByTestId('home-month').boundingBox();
+  assert.ok(moBox.y > wkBox.y, '휴대폰: 이번 주 일정이 먼저');
+  assert.equal(await staff.getByTestId('home-month-week').locator('[data-day]').count(), 7, '접힌 월 줄 = 이번 주 7칸');
+  assert.equal(await staff.getByTestId('home-month-grid').isVisible(), false, '월 격자는 접힘');
+  await staff.getByTestId('home-month-toggle').tap();
+  await staff.getByTestId('home-month-grid').waitFor();
+  await staff.getByTestId('home-month-toggle').tap();
   await staff.screenshot({ path: `${SHOTS}/17-mobile-home.png` });
   await staff.goto(BASE + '/calendar');
   await staff.getByTestId('calendar').waitFor();
@@ -882,7 +890,8 @@ await step('W-3 홈: 오늘 할 일(내 것/전체) · 이번 주 일정 · 이�
   // 대표 확정(10/19): '오늘'·'이달' 칸 없이 '이번 주 일정' 하나(오늘 칸 강조·업무 포함)
   for (const id of ['home-week', 'home-people', 'home-alerts', 'home-month']) await owner.getByTestId(id).waitFor(); // 로컬 10/19(대표 확정): 최근 활동 → 월 미니 캘린더
   for (const id of ['home-today', 'home-month-card']) assert.equal(await owner.getByTestId(id).count(), 0, `${id} 없음`);
-  // 최근 활동은 알림 화면 '활동' 탭으로
+  // 최근 활동은 알림 화면 '활동' 탭으로 (E2E_ONLY 로 이 단계만 돌릴 때는 앞 단계의 업무가 없어 하나 만들어 둔다)
+  if (!(await sql`select 1 from tasks where title = '강남점 전단 배포' and deleted_at is null`).length) await ctx.owner.ok('POST', '/api/tasks', { title: '강남점 전단 배포', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false });
   await owner.goto(BASE + '/notifications');
   await owner.getByTestId('notif-activity').click();
   await owner.getByTestId('activity-list').getByText('강남점 전단 배포').first().waitFor();
@@ -890,9 +899,10 @@ await step('W-3 홈: 오늘 할 일(내 것/전체) · 이번 주 일정 · 이�
   // 월 미니 캘린더: PC 는 오른쪽(이번 주 옆), 날짜를 누르면 그날 목록, 두 번 누르면 캘린더
   const wk = await owner.getByTestId('home-week').boundingBox(), mo = await owner.getByTestId('home-month').boundingBox();
   assert.ok(mo.x > wk.x + wk.width - 5 && Math.abs(mo.y - wk.y) < 40, `월 캘린더는 이번 주 오른쪽 (${JSON.stringify([wk, mo])})`);
-  await owner.getByTestId('home-month').locator(`[data-day="${today}"]`).click();
+  const cell = () => owner.getByTestId('home-month-grid').locator(`[data-day="${today}"]`); // 휴대폰용 접힌 주 줄(PC 숨김)에도 같은 날짜가 있어 월 격자로 한정
+  await cell().click();
   await owner.getByTestId('home-month-list').waitFor();
-  await owner.getByTestId('home-month').locator(`[data-day="${today}"]`).click();
+  await cell().click();
   await owner.waitForURL(/\/calendar\?view=dayGridMonth&date=/);
   await owner.goto(BASE + '/');
   await owner.screenshot({ path: `${SHOTS}/59-home-dashboard.png`, fullPage: true });
@@ -948,6 +958,23 @@ await step('로컬 10/19 회사 정보 AI 로 정리: 오른쪽 도우미·질�
   assert.equal(await owner.getByTestId('ai-helper-answer').count(), 5);
   const h = await owner.getByTestId('ai-helper').boundingBox(), f = await owner.getByTestId('ai-business').boundingBox();
   assert.ok(h.x > f.x + f.width, 'PC: 도우미는 오른쪽');
+});
+await step('로컬 10/19 자동 로그인: 로그인 창 [로그인 유지] 기본 켬, 끄면 브라우저 세션 쿠키(만료 없음)·켜면 30일 쿠키', async () => {
+  const c = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const p = await c.newPage();
+  await p.goto(BASE + '/login');
+  const box = p.getByTestId('login-remember');
+  assert.equal(await box.isChecked(), true, '기본 켬');
+  await box.uncheck();
+  await p.getByLabel('이메일', { exact: true }).fill('ceo@dagym.test');
+  await p.getByLabel('비밀번호').fill('owner-pass-1234');
+  await p.getByRole('button', { name: '로그인' }).click();
+  await p.waitForURL(BASE + '/');
+  const ck = (await c.cookies()).find((x) => x.name === 'wos_session');
+  assert.ok(ck && ck.expires === -1, `끄면 세션 쿠키(expires -1): ${ck?.expires}`);
+  await c.close();
+  const ck2 = (await desk.cookies()).find((x) => x.name === 'wos_session');
+  assert.ok(ck2 && ck2.expires > Date.now() / 1000 + 29 * 86400, '기본 로그인은 30일 쿠키');
 });
 await step('스토어 심사 10/19: 앱 안에서는 요금제·결제·가격 숨김(사용량만), 웹은 그대로', () => inApp({ browser, BASE, devices, owner }));
 await step('대표 지적 10/19 캘린더: 겹친 일정 나란히·누른 일정 미리보기, 자동 저장 뒤 [완료] 409 없음, 일정 색·캘린더 색 점, 월 보기 +N개', () => cal1019({ owner, ctx, sql, BASE }));

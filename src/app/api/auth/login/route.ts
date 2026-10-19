@@ -11,6 +11,8 @@ const schema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1).max(200),
   client: z.enum(['web', 'android', 'ios']).default('web'),
+  /** 로컬 10/19: 웹 '로그인 유지'(기본 켬). 앱은 늘 유지 */
+  remember: z.boolean().default(true),
 });
 
 export const POST = handler(async ({ req }) => {
@@ -40,14 +42,14 @@ export const POST = handler(async ({ req }) => {
   }
   // V12 3번: 2단계 인증을 켠 사람은 10분짜리 "코드 대기" 세션 → /api/auth/2fa/verify 로 확인해야 로그인 완료
   if (u.totp_enabled_at) {
-    const { token } = await createSession(u.id, i.client, req.headers.get('user-agent'), { ip, mfaPending: true });
+    const { token } = await createSession(u.id, i.client, req.headers.get('user-agent'), { ip, mfaPending: true, persistent: i.remember });
     await audit(sql, u.id, 'auth.login_mfa_pending', 'user', u.id, { client: i.client }, ip);
     const res = NextResponse.json({ mfaRequired: true });
     res.cookies.set(sessionCookie(token, 600));
     return res;
   }
-  const { token, maxAge } = await createSession(u.id, i.client, req.headers.get('user-agent'), { ip });
-  await audit(sql, u.id, 'auth.login', 'user', u.id, { client: i.client }, ip);
+  const { token, maxAge, persistent } = await createSession(u.id, i.client, req.headers.get('user-agent'), { ip, persistent: i.remember });
+  await audit(sql, u.id, 'auth.login', 'user', u.id, { client: i.client, persistent }, ip);
   const res = NextResponse.json({ user: { id: u.id, name: u.name, role: u.role } });
   res.cookies.set(sessionCookie(token, maxAge));
   return res;
