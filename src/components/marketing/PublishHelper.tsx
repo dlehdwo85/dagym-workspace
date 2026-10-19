@@ -1,5 +1,5 @@
 'use client';
-import { Button, toast } from '@/components/ui';
+import { Button, btnCls, toast } from '@/components/ui';
 import { layoutBody, publishTitle } from '@/lib/mktText';
 
 const NAVER_WRITE = 'https://blog.naver.com/GoBlogWrite.naver';
@@ -66,8 +66,8 @@ export function PublishHelper({ channel, title, body: raw, media, published = fa
         <li>{media.length ? <span className="flex flex-wrap items-center gap-1.5">사진·영상 순서대로:{media.map((m, k) => <a key={m.id} href={`/api/library/${m.id}/download`} className="rounded-full bg-white px-2 py-0.5 underline" data-testid="ph-media">{k + 1}. {m.title}</a>)}
           {media.length > 1 && <button type="button" className="rounded-full border border-emerald-300 bg-white px-2 py-0.5 font-medium text-emerald-800" onClick={() => downloadAll(media)} data-testid="ph-download-all">모두 내려받기</button>}</span>
           : <span className="text-amber-700">붙일 사진이 없습니다</span>}</li>
-        {!published && social && media.length > 0 && isPhone() && <li><button type="button" className="font-medium text-emerald-800 underline" onClick={() => shareToApp(body, media)} data-testid="ph-share">{NAME[channel]} 앱으로 공유</button> — 글은 자동으로 복사됩니다. 앱에서 붙여 넣고 올리기</li>}
-        {!published && w && <li><a href={w.url} target="_blank" rel="noopener" className="font-medium text-emerald-800 underline" data-testid={naver ? 'ph-open-naver' : 'ph-open-write'}>{w.label}</a> — 붙여 넣고 사진·영상을 순서대로 올린 뒤 직접 게시</li>}
+        {!published && social && media.length > 0 && isPhone() && <li><Button size="sm" onClick={() => shareToApp(body, media)} data-testid="ph-share">{NAME[channel]} 앱으로 공유</Button> — 글은 자동으로 복사됩니다. 앱에서 붙여 넣고 올리기</li>}
+        {!published && w && <li><a href={w.url} target="_blank" rel="noopener" className={btnCls('primary', 'sm')} data-testid={naver ? 'ph-open-naver' : 'ph-open-write'}>{w.label}</a> — 붙여 넣고 사진·영상을 순서대로 올린 뒤 직접 게시</li>}
         {!published && <li>올린 글 주소를 아래에 붙여 넣고 [게시 확인]</li>}
       </ol>
       {naver && !published && <p className="text-amber-800" data-testid="ph-risk">네이버는 자동 게시를 허용하지 않아 직접 올립니다(프로그램이 대신 로그인·발행하면 약관 위반으로 게재 제한될 수 있음). 같은 글을 여러 블로그에 반복해 올리면 저품질 판정 위험이 있습니다.</p>}

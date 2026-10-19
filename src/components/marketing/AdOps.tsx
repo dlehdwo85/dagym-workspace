@@ -48,7 +48,7 @@ export function AdOps() {
 
       <section className="rounded-card border border-line bg-white p-3 shadow-card">
         <div className="flex items-center gap-2"><h2 className="text-sm font-semibold">네이버 파워링크 세팅안</h2>
-          {data.canEdit && <Button size="sm" className="ml-auto" onClick={() => setForm(true)} disabled={!data.accounts.length} data-testid="ad-plan-new">새 세팅안</Button>}</div>
+          {data.canEdit && <Button size="sm" className="ml-auto" onClick={() => setForm(true)} disabled={!data.accounts.length} title={data.accounts.length ? undefined : '네이버 검색광고 연결 후'} data-testid="ad-plan-new">새 세팅안</Button>}</div>
         {!data.accounts.length && <p className="mt-1 text-xs text-ink-3">먼저 설정 › 연결 계정에서 네이버 검색광고를 연결해 주세요.</p>}
         <ul className="mt-2 space-y-2">{data.plans.map((p) => {
           const [label, cls] = STATUS[p.status] ?? [p.status, 'bg-slate-100'];
@@ -85,7 +85,7 @@ export function AdOps() {
               <span>{plan?.name ?? ''} {desc(c)}</span><span className="text-ink-3">{c.actor_name ?? (c.kind === 'auto_pause' ? '워크인 자동' : '')}</span>
               {c.status === 'failed' && <span className="break-words text-red-700">실패: {c.error}</span>}
               {c.revert_of && <span className="text-ink-3">(되돌림)</span>}
-              {canRevert && <button type="button" className="ml-auto underline" onClick={() => confirm('이 변경 전으로 되돌릴까요?') && run(c.id, () => api(`/api/marketing/ad-ops/changes/${c.id}/revert`, { body: {} }), '되돌렸습니다')} data-testid="ad-change-revert">되돌리기</button>}
+              {canRevert && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => confirm('이 변경 전으로 되돌릴까요?') && run(c.id, () => api(`/api/marketing/ad-ops/changes/${c.id}/revert`, { body: {} }), '되돌렸습니다')} data-testid="ad-change-revert">되돌리기</Button>}
             </li>);
         })}{!data.changes.length && <li className="py-1.5 text-ink-3">아직 변경이 없습니다</li>}</ul>
       </section>
@@ -130,7 +130,7 @@ function PlanForm({ accounts, onClose, onDone }: { accounts: Data['accounts']; o
             <input className={inputCls} value={a.url} onChange={(e) => setAd(k, { url: e.target.value })} aria-label={`소재 ${k + 1} 연결 주소`} required data-testid="ad-plan-url" />
             <span className={cx('text-[11px]', len(a.headline) > 15 || len(a.description) > 45 ? 'text-red-700' : 'text-ink-3')}>제목 {len(a.headline)}/15 · 설명 {len(a.description)}/45</span>
           </fieldset>))}
-        {f.ads.length < 3 && <button type="button" className="justify-self-start text-xs underline" onClick={() => setF({ ...f, ads: [...f.ads, { headline: '', description: '', url: f.ads[0].url }] })}>소재 추가(3개까지 — 3안 비교는 다음 단계)</button>}
+        {f.ads.length < 3 && <Button type="button" size="sm" variant="secondary" className="justify-self-start" onClick={() => setF({ ...f, ads: [...f.ads, { headline: '', description: '', url: f.ads[0].url }] })}>소재 추가(3개까지)</Button>}
         <p className="text-[11px] text-ink-3">저장해도 네이버에는 아직 만들지 않습니다. 목록에서 검사 결과를 확인하고 [승인하고 시작]을 누르면 꺼진 상태로 만들어집니다.</p>
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy} data-testid="ad-plan-save">세팅안 저장</Button></div>
       </form>

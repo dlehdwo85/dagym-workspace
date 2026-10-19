@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api, useApi } from '@/components/client';
-import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { Button, ErrorBox, Field, Modal, PendingButton, Skeleton, btnCls, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const C = '#7C3AED';
 const P_COLOR: Record<string, string> = { naver: '#03C75A', google: '#4285F4', meta: '#1877F2' };
@@ -135,8 +135,8 @@ export function Connections() {
           <div className="mt-3 flex flex-wrap gap-2">
             <Button size="sm" onClick={() => setNaver(true)} data-testid="ads-add-naver">네이버 검색광고 연결</Button>
             {data.providers.filter((p) => p.key !== 'naver').map((p) => p.ready
-              ? <a key={p.key} href={`/api/marketing/ads/connect/${p.key}`} className="inline-flex h-8 items-center rounded-input border border-line px-3 text-sm hover:bg-slate-50" data-testid={`ads-add-${p.key}`}>{p.label} 연결</a>
-              : <span key={p.key} className="inline-flex h-8 items-center rounded-input border border-dashed border-line px-3 text-xs text-ink-3" title="워크인 앱 등록·심사 후 열립니다">{p.label} — 준비 중</span>)}
+              ? <a key={p.key} href={`/api/marketing/ads/connect/${p.key}`} className={btnCls('primary', 'sm')} data-testid={`ads-add-${p.key}`}>{p.label} 연결</a>
+              : <PendingButton key={p.key} label={`${p.label} 연결`} reason="심사 후 열림" />)}
           </div>
         ) : <p className="mt-2 text-xs text-ink-3">광고 계정 연결은 관리자가 합니다.</p>}
         <p className="mt-2 text-[11px] text-ink-3">성과는 각 광고 플랫폼에서 하루 한 번 읽기만 합니다(최근 7일을 다시 읽어 늦게 잡힌 전환까지 반영). 예산·입찰은 바꾸지 않습니다.</p>
@@ -184,19 +184,21 @@ function PublishChannels() {
             <span className="font-medium">{c.label}</span>
             <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', !c.enabled ? 'bg-slate-100 text-ink-3' : c.mode === 'auto' ? 'bg-violet-50 text-violet-800' : c.mode === 'later' ? 'bg-slate-100 text-ink-2' : 'bg-emerald-50 text-emerald-800')} data-testid="publish-channel-mode">
               {!c.enabled ? '꺼짐' : c.mode === 'auto' ? '자동 게시' : c.mode === 'later' ? '준비 중' : '게시 도우미'}</span>
-            {c.accounts.length > 0 && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800">연결됨 {c.accounts.length}</span>}
+            {c.accounts.length > 0 && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">연결됨 {c.accounts.length}</span>}
             <span className="ml-auto flex items-center gap-2">
               {data.canEdit && c.enabled && c.connectable && (c.ready && CONNECT_URL[c.kind]
-                ? <a href={CONNECT_URL[c.kind]} className="inline-flex h-8 items-center rounded-input border border-line px-3 text-sm hover:bg-slate-50" data-testid={`publish-connect-${c.key}`}>{c.accounts.length ? '다시 연결' : '연결'}</a>
-                : <span className="inline-flex h-8 items-center rounded-input border border-dashed border-line px-3 text-xs text-ink-3" title="곧 열립니다 — 그동안은 게시 도우미로 올려 주세요" data-testid={`publish-connect-${c.key}`}>연결 곧 열림</span>)}
-              {data.canEdit && <label className="inline-flex cursor-pointer items-center gap-1 text-xs text-ink-2"><input type="checkbox" className="accent-violet-600" checked={c.enabled} onChange={() => toggle(c)} aria-label={`${c.label} 사용`} data-testid="publish-channel-toggle" />사용</label>}
+                ? <a href={CONNECT_URL[c.kind]} className={btnCls(c.accounts.length ? 'secondary' : 'primary', 'sm')} data-testid={`publish-connect-${c.key}`}>{c.accounts.length ? '다시 연결' : '연결'}</a>
+                : <PendingButton label="연결" reason={c.kind === 'meta' ? '심사 후 열림 — 그동안 게시 도우미' : '준비 중 — 그동안 게시 도우미'} testId={`publish-connect-${c.key}`} />)}
+              {data.canEdit && <label className={cx('inline-flex min-h-[32px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium', c.enabled ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-line bg-white text-ink-3')}>
+                <input type="checkbox" className="size-4 accent-brand-600" checked={c.enabled} onChange={() => toggle(c)} aria-label={`${c.label} 사용`} data-testid="publish-channel-toggle" />{c.enabled ? '사용 중' : '사용 안 함'}</label>}
             </span>
           </div>
           <p className="mt-0.5 text-xs text-ink-3">{c.note}</p>
           {c.accounts.map((a) => (
             <div key={a.id} className="mt-1 rounded-input bg-slate-50 px-2 py-1 text-xs" data-testid="publish-account">
               <div className="flex items-center gap-2"><span className="font-medium">{a.label}</span>{a.status === 'error' && <span className="text-red-700">{a.lastError}</span>}
-                {data.canEdit && <button type="button" className="ml-auto text-ink-3 underline hover:text-red-700" onClick={() => remove(a.id, a.label)}>끊기</button>}</div>
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">연결됨</span>
+                {data.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => remove(a.id, a.label)}>끊기</Button>}</div>
               {a.warnings.map((w, k) => <p key={k} className="mt-0.5 text-amber-800" data-testid="publish-warning">확인 필요: {w}</p>)}
             </div>))}
         </li>))}</ul>

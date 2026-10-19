@@ -8,20 +8,34 @@ import { STATUS_LABEL, PRIORITY_LABEL, type TaskStatus, type Priority } from '@/
 
 export const cx = clsx;
 
-export function Button({ variant = 'primary', size = 'md', className, ...p }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'accent'; size?: 'sm' | 'md' }) {
+type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'accent';
+/** 버튼 모양(링크 <a> 에도 같은 모양을 쓰려고 분리) — 대표(10/19): 누를 수 있는 연결 = 주 버튼(초록), 보조 = 테두리, 준비 중 = 회색 비활성 */
+export function btnCls(variant: BtnVariant = 'primary', size: 'sm' | 'md' = 'md', className?: string) {
+  return clsx(
+    'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-input font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-1 [&_svg]:size-4',
+    size === 'sm' ? 'h-8 px-2.5 text-sm' : 'h-9 px-3.5 text-sm',
+    variant === 'primary' && 'bg-brand-600 text-white shadow-card hover:bg-brand-700 active:bg-brand-800',
+    variant === 'accent' && 'bg-accent-600 text-white shadow-card hover:bg-accent-700',
+    variant === 'secondary' && 'border border-line bg-white text-slate-800 shadow-card hover:bg-slate-50 active:bg-slate-100',
+    variant === 'ghost' && 'text-slate-700 hover:bg-slate-100 active:bg-slate-200',
+    variant === 'danger' && 'bg-red-600 text-white shadow-card hover:bg-red-700',
+    className,
+  );
+}
+/** 준비 중·심사 대기: 회색 비활성 버튼 + 이유 한 줄 */
+export function PendingButton({ label, reason, testId }: { label: string; reason: string; testId?: string }) {
+  return (
+    <span className="inline-flex flex-col items-start gap-0.5" data-testid={testId}>
+      <button type="button" disabled aria-disabled className="inline-flex h-8 cursor-not-allowed items-center rounded-input bg-slate-100 px-2.5 text-sm font-medium text-slate-400">{label}</button>
+      <span className="text-[11px] text-ink-3">{reason}</span>
+    </span>
+  );
+}
+export function Button({ variant = 'primary', size = 'md', className, ...p }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: BtnVariant; size?: 'sm' | 'md' }) {
   return (
     <button
       {...p}
-      className={clsx(
-        'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-input font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-1 [&_svg]:size-4',
-        size === 'sm' ? 'h-8 px-2.5 text-sm' : 'h-9 px-3.5 text-sm',
-        variant === 'primary' && 'bg-brand-600 text-white shadow-card hover:bg-brand-700 active:bg-brand-800',
-        variant === 'accent' && 'bg-accent-600 text-white shadow-card hover:bg-accent-700',
-        variant === 'secondary' && 'border border-line bg-white text-slate-800 shadow-card hover:bg-slate-50 active:bg-slate-100',
-        variant === 'ghost' && 'text-slate-700 hover:bg-slate-100 active:bg-slate-200',
-        variant === 'danger' && 'bg-red-600 text-white shadow-card hover:bg-red-700',
-        className,
-      )}
+      className={btnCls(variant, size, className)}
     />
   );
 }

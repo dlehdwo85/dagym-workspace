@@ -56,7 +56,7 @@ export function Automation() {
         <h2 className="text-sm font-semibold">요금제·한도</h2>
         <div className="mt-2 grid gap-2 sm:grid-cols-3">{Object.entries(data.plans).map(([k, p]) => (
           <button key={k} type="button" disabled={!ed} onClick={() => save({ planCode: s.plan_code === k ? null : k })} data-testid={`auto-plan-${k}`}
-            className={cx('rounded-input border p-3 text-left text-xs', s.plan_code === k ? 'border-violet-500 bg-violet-50' : 'border-line hover:bg-slate-50')}>
+            className={cx('rounded-input border p-3 text-left text-xs', s.plan_code === k ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
             <div className="text-sm font-semibold">{p.label} <span className="font-normal text-ink-3">· 가격 {p.price ?? '결정 전'}</span></div>
             <div className="mt-1 text-ink-2">주간 {Object.entries(p.weekly).map(([kk, n]) => `${KIND[kk]} ${n}`).join(' · ')}</div>
             <div className="text-ink-2">월 크레딧 {p.monthlyCredits} · 생성 영상 {p.videoMonthly}편 · 재생성 {p.regenMonthly}회</div>
@@ -74,8 +74,8 @@ export function Automation() {
         <p className="mt-1 text-xs text-ink-2">고르지 않으면 관리자 전원. 시험 모드 브랜드는 여기와 상관없이 실행한 사람에게만 갑니다.</p>
         <div className="mt-2 flex flex-wrap gap-1.5">{data.people.map((p) => { const on = (s.notify_user_ids ?? []).includes(p.id); return (
           <button key={p.id} type="button" aria-pressed={on} data-testid="auto-recipient" onClick={() => save({ notifyUserIds: on ? (s.notify_user_ids ?? []).filter((x: string) => x !== p.id) : [...(s.notify_user_ids ?? []), p.id] })}
-            className={cx('rounded-full border px-3 py-1 text-xs', on ? 'border-violet-500 bg-violet-50 font-semibold text-violet-800' : 'border-line')}>{p.name}</button>); })}
-          {!!s.notify_user_ids?.length && <button type="button" className="text-xs underline" onClick={() => save({ notifyUserIds: null })}>관리자 전원으로</button>}</div>
+            className={cx('rounded-full border px-3 py-1 text-xs', on ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line bg-white')}>{p.name}</button>); })}
+          {!!s.notify_user_ids?.length && <Button size="sm" variant="secondary" onClick={() => save({ notifyUserIds: null })}>관리자 전원으로</Button>}</div>
       </section>}
 
       {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-schedule">
@@ -109,7 +109,7 @@ export function Automation() {
           <select className={inputCls} value={rule.channel} onChange={(e) => setRule({ ...rule, channel: e.target.value })} aria-label="채널">{Object.entries(CHANNELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           <select className={inputCls} value={rule.kind} onChange={(e) => setRule({ ...rule, kind: e.target.value })} aria-label="종류" data-testid="auto-rule-kind">{Object.entries(KIND).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           <span className="flex flex-wrap items-center gap-1">{DOW.map((d, k) => <button key={d} type="button" onClick={() => setRule({ ...rule, weekdays: rule.weekdays.includes(k) ? rule.weekdays.filter((x) => x !== k) : [...rule.weekdays, k] })}
-            className={cx('size-7 rounded-full border text-xs', rule.weekdays.includes(k) ? 'border-violet-500 bg-violet-500 text-white' : 'border-line')} aria-pressed={rule.weekdays.includes(k)} aria-label={`${d}요일`}>{d}</button>)}</span>
+            className={cx('size-7 rounded-full border text-xs', rule.weekdays.includes(k) ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white')} aria-pressed={rule.weekdays.includes(k)} aria-label={`${d}요일`}>{d}</button>)}</span>
           <input type="time" className={inputCls} value={rule.postTime} onChange={(e) => setRule({ ...rule, postTime: e.target.value })} aria-label="게시 시각" />
           <Button type="submit" disabled={!rule.weekdays.length} data-testid="auto-rule-add">규칙 추가</Button>
           <input className={cx(inputCls, 'sm:col-span-6')} value={rule.topicHint} onChange={(e) => setRule({ ...rule, topicHint: e.target.value })} placeholder="주제 힌트(선택) — 예: 신규 회원 이벤트, 시설 소개" aria-label="주제 힌트" />
