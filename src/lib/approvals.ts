@@ -114,6 +114,7 @@ export async function decide(u: SessionUser, taskId: string, decision: 'approve'
       await tx`update tasks set status = 'in_progress', version = version + 1, updated_at = now() where id = ${taskId}`;
       await tx`insert into comments (task_id, author_id, body) values (${taskId}, ${u.id}, ${`[반려 · ${cur.label}] ${comment!.trim()}`})`;
       await activity(tx, 'task', taskId, u.id, 'review_rejected', { status: { from: 'review', to: 'in_progress' }, note: comment, step: cur.label });
+      await (await import('./approvalForms')).onApprovalTaskDecided(tx, taskId, 'rejected', u.id); // V30 ④ 결재 양식 요청이면 반려로
       await notify(tx, { userIds: [t.assignee_id, t.review_requested_by], type: 'review_result', title: `결재 반려 (${cur.label}): ${t.title}`,
         body: comment!.trim().slice(0, 120), link: `/tasks/${taskId}`, entityType: 'task', entityId: taskId, actorId: u.id,
         dedupeKey: `apprrej:${taskId}:${cur.round}:${cur.step}` });
@@ -131,6 +132,7 @@ export async function decide(u: SessionUser, taskId: string, decision: 'approve'
     // 마지막 단계 승인 → 최종 완료
     await tx`update tasks set status = 'done', completed_at = now(), approved_at = now(), approved_by = ${u.id}, version = version + 1, updated_at = now() where id = ${taskId}`;
     await activity(tx, 'task', taskId, u.id, 'approved', { status: { from: 'review', to: 'done' }, step: cur.label });
+    await (await import('./approvalForms')).onApprovalTaskDecided(tx, taskId, 'approved', u.id); // V30 ④ 휴가면 부재 일정 자동 등록
     await notify(tx, { userIds: [t.assignee_id, t.review_requested_by], type: 'review_result', title: `최종 결재 완료: ${t.title}`,
       body: `${cur.label} 승인으로 완료되었습니다`, link: `/tasks/${taskId}`, entityType: 'task', entityId: taskId, actorId: u.id,
       dedupeKey: `apprdone:${taskId}:${cur.round}` });

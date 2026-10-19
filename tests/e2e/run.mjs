@@ -26,6 +26,7 @@ import { libraryOrganizeNotice } from './library-organize.step.mjs';
 import { quotesFlow } from './quotes.step.mjs';
 import { noticesFlow } from './notices.step.mjs';
 import { attendanceFlow } from './attendance.step.mjs';
+import { approvalsFlow } from './approvals.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -904,7 +905,9 @@ await step('W-3 홈: 오늘 할 일(내 것/전체) · 이번 주 일정 · 이�
   await owner.getByTestId('activity-list').getByText('강남점 전단 배포').first().waitFor();
   await owner.goto(BASE + '/');
   // 월 미니 캘린더: PC 는 오른쪽(이번 주 옆), 날짜를 누르면 그날 목록, 두 번 누르면 캘린더
-  const wk = await owner.getByTestId('home-week').boundingBox(), mo = await owner.getByTestId('home-month').boundingBox();
+  await owner.getByTestId('home-clock').waitFor(); // V30 ③ 출퇴근 카드가 뒤늦게 붙으면서 아래 칸이 밀리므로 다 그려진 뒤 잰다
+  await owner.waitForLoadState('networkidle');
+  const [wk, mo] = await Promise.all([owner.getByTestId('home-week').boundingBox(), owner.getByTestId('home-month').boundingBox()]);
   assert.ok(mo.x > wk.x + wk.width - 5 && Math.abs(mo.y - wk.y) < 40, `월 캘린더는 이번 주 오른쪽 (${JSON.stringify([wk, mo])})`);
   const cell = () => owner.getByTestId('home-month-grid').locator(`[data-day="${today}"]`); // 휴대폰용 접힌 주 줄(PC 숨김)에도 같은 날짜가 있어 월 격자로 한정
   await cell().click();
@@ -2280,6 +2283,8 @@ await step('V19 AI 비서 문자 시안(번호·본문 고치기·QR·보냈어�
 await step('V30 ② 공지: 쓰기(중요·고정) → 직원 홈 카드 → 열면 읽음 → 읽음 현황 → 다시 알림', () => noticesFlow({ owner, staff, ctx, sql, BASE, SHOTS }));
 
 await step('V30 ③ 출퇴근: 현장 등록 → 직원 홈 출근(위치 동의) 현장 안 → 퇴근 현장 밖 사유 → 관리자 표·월 요약·현장', () => attendanceFlow({ browser, owner, ctx, BASE, SHOTS, login }));
+
+await step('V30 ④ 결재 양식: 직원 휴가 신청 → 대표 결재 업무 승인 → 승인·연차 캘린더 자동 등록 → 양식 편집', () => approvalsFlow({ owner, staff, ctx, sql, BASE, SHOTS, addDays, today }));
 
 await browser.close();
 srv.proc.kill();

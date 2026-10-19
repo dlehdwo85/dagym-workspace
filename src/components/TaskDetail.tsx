@@ -496,7 +496,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </ol>
             {perms.decide && (
               <div className="mt-3 flex gap-2">
-                <Button size="sm" onClick={() => decide('approve')}><Check />승인</Button>
+                <Button size="sm" onClick={() => decide('approve')} data-testid="appr-approve"><Check />승인</Button>
                 <Button size="sm" variant="secondary" className="text-red-600" onClick={() => decide('reject')}>반려</Button>
               </div>
             )}

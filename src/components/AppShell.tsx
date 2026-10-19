@@ -40,6 +40,7 @@ const NAV: NavItem[] = [
   { href: '/notifications', label: '알림', icon: Bell },
   { href: '/reports/mine', label: '내 주간 보고', icon: FileText },
   { href: '/notices', label: '공지', icon: Megaphone }, // V30 ② 공지(게시판)
+  { href: '/approvals', label: '결재', icon: Stamp }, // V30 ④ 결재 양식(휴가·지출결의·품의)
 ];
 /** 사이드바 "관리" 묶음 — 주소·이름·메뉴 키는 lib/adminPages(V36 3 한 곳), 여기는 아이콘만 */
 const ADMIN_ICON: Record<string, NavItem['icon']> = { '/reports': FileBarChart, '/revenue': BarChart3, '/admin/users': Users, '/admin/ops': Activity, '/admin/company': Building2, '/admin/mail': Mail, '/admin/usage': Gauge, '/admin/ai-logs': Sparkles };
