@@ -16,11 +16,14 @@ import { tenantOf, type SessionUser } from './types';
  */
 type Raw = Record<string, any>;
 const SRC_POSTS = 'mkt:posts:v1', SRC_DAILY = 'mkt:daily:decisions:v1';
-const BRAND_CODE: Record<string, string> = { hl: '하이링크', dg: '다짐' }; // 그 밖의 코드(bl 등)는 코드 그대로 — 로컬 확인 필요
+// 로컬 10/19: 운영실 브랜드 표기(코드·영문 대문자) → 워크인 브랜드 이름. 그 밖의 값은 원문 그대로
+const BRAND_CODE: Record<string, string> = { hl: '하이링크', hilink: '하이링크', dg: '다짐', dagym: '다짐', bl: '바디랩', bodylab: '바디랩' };
+export const brandName = (raw: unknown) => { const v = String(raw ?? '').trim(); return v ? BRAND_CODE[v.toLowerCase().replace(/[\s_-]/g, '')] ?? v : null; };
 const KIND_LABEL: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', shorts: '쇼츠', photo: '사진', collage: '콜라주' };
 
 export function statusOf(raw: unknown): string {
   const s = String(raw ?? '').toLowerCase();
+  if (/fail|error|실패/.test(s)) return 'draft'; // 로컬 10/19: 오래된 게시 실패 건을 승인함에 다시 올리지 않음(메모 '운영실 게시 실패')
   if (/publish|posted|live|done|complete|게시/.test(s)) return 'published';
   if (/cancel|delet|archiv|skip|drop|취소|삭제/.test(s)) return 'canceled';
   if (/hold|pause|보류/.test(s)) return 'hold';
@@ -69,17 +72,25 @@ async function load(tenant: string) {
 
 function build(d: Awaited<ReturnType<typeof load>>) {
   const contents: Content[] = [];
+  const HOST: Record<string, RegExp> = { instagram: /instagram\.com|instagram/i, facebook: /facebook\.com|fb\.com|fb\.me|facebook/i, threads: /threads\.(net|com)|threads/i, youtube: /youtube\.com|youtu\.be|youtube/i, blog: /blog\.naver|blog/i, naver_place: /place|smartplace/i };
   for (const p of d.posts as Raw[]) {
     if (!p?.id) continue;
-    const chans: string[] = (Array.isArray(p.channels) ? p.channels : [p.channels]).filter(Boolean).map(String);
-    const channel = channelOf(chans[0] ?? p.category);
-    const caption = String((channel === 'facebook' ? p.facebookText ?? p.instagramCaption : p.instagramCaption ?? p.facebookText) ?? '');
-    const tags = Array.isArray(p.hashtags) && p.hashtags.length ? `\n\n${p.hashtags.map((h: string) => (String(h).startsWith('#') ? h : `#${h}`)).join(' ')}` : '';
+    const raw: string[] = (Array.isArray(p.channels) ? p.channels : [p.channels]).filter(Boolean).map(String);
+    // 로컬 10/19: 채널마다 콘텐츠 1건(같은 원본 id + 채널로 중복 방지), 인스타그램을 맨 앞
+    const chans = [...new Set((raw.length ? raw : [p.category]).map(channelOf))].sort((x, y) => (x === 'instagram' ? -1 : y === 'instagram' ? 1 : 0));
+    const results: unknown[] = Array.isArray(p.results) ? p.results : p.results ? [p.results] : [];
     const st = statusOf(p.status);
-    contents.push({ srcKey: SRC_POSTS, srcRef: String(p.id), title: String(p.title ?? p.id).slice(0, 200), brand: p.brand ? String(p.brand) : null, channel, kind: null, status: st, rawStatus: String(p.status ?? ''),
-      url: firstUrl(p.results), publishedAt: st === 'published' ? timeOf(p.updatedAt) : null, createdAt: timeOf(p.createdAt), body: caption + tags,
-      note: [`운영실 게시물 ${p.id}`, chans.length > 1 ? `채널: ${chans.join(', ')}` : null, p.category ? `분류: ${p.category}` : null, p.assetHint ? `소재: ${short(p.assetHint, 120)}` : null,
-        Array.isArray(p.assetIds) && p.assetIds.length ? `운영실 자산 ${p.assetIds.length}개(원본 화면)` : null].filter(Boolean).join(' · '), decisions: [] });
+    const tags = Array.isArray(p.hashtags) && p.hashtags.length ? `\n\n${p.hashtags.map((h: string) => (String(h).startsWith('#') ? h : `#${h}`)).join(' ')}` : '';
+    for (const channel of chans) {
+      // 그 채널 결과(채널 이름·주소 도메인이 맞는 것) → 게시 주소. 채널이 하나뿐이면 첫 주소
+      const mine = results.find((r) => HOST[channel]?.test(JSON.stringify(r ?? '')));
+      const url = firstUrl(mine) ?? (chans.length === 1 ? firstUrl(results) : null);
+      const caption = String((channel === 'facebook' ? p.facebookText ?? p.instagramCaption : p.instagramCaption ?? p.facebookText) ?? '');
+      contents.push({ srcKey: SRC_POSTS, srcRef: chans.length > 1 ? `${p.id}:${channel}` : String(p.id), title: String(p.title ?? p.id).slice(0, 200), brand: brandName(p.brand), channel, kind: null, status: st, rawStatus: String(p.status ?? ''),
+        url, publishedAt: st === 'published' ? timeOf(p.updatedAt) : null, createdAt: timeOf(p.createdAt), body: caption + tags,
+        note: [`운영실 게시물 ${p.id}`, /fail|error|실패/i.test(String(p.status ?? '')) ? '운영실 게시 실패' : null, chans.length > 1 ? `같은 게시물의 채널: ${chans.join(', ')}` : null, p.category ? `분류: ${p.category}` : null, p.assetHint ? `소재: ${short(p.assetHint, 120)}` : null,
+          Array.isArray(p.assetIds) && p.assetIds.length ? `운영실 자산 ${p.assetIds.length}개(원본 화면)` : null].filter(Boolean).join(' · '), decisions: [] });
+    }
   }
   const prodHist: Raw[] = Array.isArray(d.production?.history) ? d.production!.history : [];
   const prodDec: Raw = d.production?.decisions && typeof d.production.decisions === 'object' ? d.production.decisions : {};
@@ -87,7 +98,7 @@ function build(d: Awaited<ReturnType<typeof load>>) {
     const m = /^d(\d{4})(\d{2})(\d{2})-([a-z]+)-([a-z]+)$/i.exec(key);
     const item = (v ?? {}) as Raw;
     const [y, mo, da, bc, kd] = m ? [m[1], m[2], m[3], m[4].toLowerCase(), m[5].toLowerCase()] : ['', '', '', '', ''];
-    const brand = bc ? BRAND_CODE[bc] ?? bc.toUpperCase() : null;
+    const brand = bc ? brandName(bc) : null;
     const st = statusOf(item.status);
     const ver = Number(item.version) || 1;
     const decs: Dec[] = [];
@@ -120,13 +131,16 @@ export async function convertOps(u: SessionUser, i: z.infer<typeof convertInput>
   const fresh = contents.filter((c) => !already.has(`${c.srcKey}|${c.srcRef}`));
   const summary = { posts: d.posts.length, daily: Object.keys(d.daily ?? {}).length, requests: requests.length, revisions: d.revisions.length, newContents: fresh.length, existing: contents.length - fresh.length,
     decisions: fresh.reduce((n, c) => n + c.decisions.length, 0), withUrl: contents.filter((c) => c.url).length, mapping, channels,
-    unknownBrands: [...new Set(contents.map((c) => c.brand).filter((b) => b && /^[A-Z]+$/.test(b)))], sample: contents.slice(0, 8).map((c) => ({ title: c.title, channel: c.channel, status: c.status, url: !!c.url })) };
+    brands: Object.fromEntries([...new Set(contents.map((c) => c.brand ?? '(없음)'))].map((b) => [b, contents.filter((c) => (c.brand ?? '(없음)') === b).length])),
+    unknownBrands: [...new Set(contents.map((c) => c.brand).filter((b) => b && !Object.values(BRAND_CODE).includes(b)))], sample: contents.slice(0, 8).map((c) => ({ title: c.title, brand: c.brand, channel: c.channel, status: c.status, url: !!c.url })) };
   if (i.mode === 'preview') return { mode: 'preview', ...summary };
   let made = 0, reqs = 0;
   await sql.begin(async (tx) => {
     const brandIds = new Map<string, string>();
     for (const b of [...new Set(fresh.map((c) => c.brand).filter(Boolean) as string[])]) {
-      const [r] = await tx<{ id: string }[]>`insert into mkt_brands (tenant, name) values (${t}, ${b.slice(0, 60)}) on conflict (tenant, name) do update set name = excluded.name returning id`;
+      // 기존 브랜드(대소문자·공백 무시)에 붙이고, 없을 때만 새로 만듦
+      const [ex] = await tx<{ id: string }[]>`select id from mkt_brands where tenant = ${t} and lower(replace(name, ' ', '')) = lower(replace(${b}, ' ', '')) limit 1`;
+      const [r] = ex ? [ex] : await tx<{ id: string }[]>`insert into mkt_brands (tenant, name) values (${t}, ${b.slice(0, 60)}) on conflict (tenant, name) do update set name = excluded.name returning id`;
       brandIds.set(b, r.id);
     }
     for (const c of fresh) {

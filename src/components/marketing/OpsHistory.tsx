@@ -75,7 +75,7 @@ export function OpsHistory() {
 }
 
 type Conv = { mode: string; posts: number; daily: number; requests: number; revisions: number; newContents: number; existing: number; decisions: number; withUrl: number;
-  mapping: Record<string, number>; channels: Record<string, number>; unknownBrands: string[]; sample: { title: string; channel: string; status: string; url: boolean }[]; made?: number; requestsMade?: number };
+  mapping: Record<string, number>; channels: Record<string, number>; brands: Record<string, number>; unknownBrands: string[]; sample: { title: string; brand: string | null; channel: string; status: string; url: boolean }[]; made?: number; requestsMade?: number };
 const ST: Record<string, string> = { published: '게시됨', approved: '승인', pending: '승인 대기', changes: '수정 요청', hold: '보류', canceled: '취소', draft: '초안' };
 /** 운영실 기록 → 워크인 콘텐츠·결정·요청 기록(미리보기로 상태 매핑 확인 → 적용, 같은 원본은 한 번만) */
 function ConvertPanel() {
@@ -100,8 +100,9 @@ function ConvertPanel() {
           <p className="font-medium">상태 매핑(원본 값 → 워크인)</p>
           <ul className="grid gap-x-4 sm:grid-cols-2">{Object.entries(r.mapping).map(([k, n]) => <li key={k}>{k.replace(/→ (\w+)$/, (_m, x) => `→ ${ST[x] ?? x}`)} · {n}건</li>)}</ul>
           <p>채널: {Object.entries(r.channels).map(([k, n]) => `${k} ${n}`).join(' · ')}</p>
-          {r.unknownBrands.length > 0 && <p className="text-amber-800">브랜드 코드 확인 필요: {r.unknownBrands.join(', ')} (그대로 브랜드 이름으로 만들어짐)</p>}
-          <ul className="text-ink-2">{r.sample.map((x, k) => <li key={k}>· {x.title} — {x.channel} · {ST[x.status] ?? x.status}{x.url ? ' · 주소 있음' : ''}</li>)}</ul>
+          <p data-testid="ops-convert-brands">브랜드: {Object.entries(r.brands).map(([k, n]) => `${k} ${n}`).join(' · ')} (같은 이름 브랜드가 있으면 거기에 붙임)</p>
+          {r.unknownBrands.length > 0 && <p className="text-amber-800">처음 보는 브랜드 표기: {r.unknownBrands.join(', ')} (그대로 브랜드 이름으로 만들어짐)</p>}
+          <ul className="text-ink-2">{r.sample.map((x, k) => <li key={k}>· {x.title} — {x.brand ?? '브랜드 없음'} · {x.channel} · {ST[x.status] ?? x.status}{x.url ? ' · 주소 있음' : ''}</li>)}</ul>
         </div>)}
     </section>
   );
