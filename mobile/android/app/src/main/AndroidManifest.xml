@@ -62,6 +62,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- 음성 등록·AI 비서 음성 입력: 마이크 + 휴대폰 음성 인식 서비스(Android 11+ 는 queries 로 서비스 조회 허용) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <queries>
