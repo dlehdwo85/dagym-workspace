@@ -6,6 +6,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import QRCode from 'qrcode';
 import { Check, FileText, MessageSquare, X } from 'lucide-react';
+import { SuggestInput } from './contacts/RecipientSuggest';
 import { api } from './client';
 import { Button, Modal, cx, inputCls, toast } from './ui';
 
@@ -59,7 +60,7 @@ function SmsDraft({ p, sms, onDecided }: { p: ProposalLike; sms: NonNullable<Pro
       {sms.taskTitle && <div className="text-xs text-ink-3">업무: {sms.taskTitle}</div>}
       {done ? <div className="mt-1 text-sm">{body}</div> : <>
         <label className="mt-1 block text-[11px] text-ink-3">받는 번호(쉼표로 여러 명)
-          <input className={cx(inputCls, 'mt-0.5 py-1 text-sm')} value={to} onChange={(e) => setTo(e.target.value)} placeholder="010-0000-0000" disabled={cancelled} aria-label="문자 받는 번호" data-testid="ai-sms-to" /></label>
+          <SuggestInput className="mt-0.5 py-1 text-sm" value={to} onChange={setTo} kind="phone" multi placeholder="010-0000-0000 · 이름을 치면 회사 연락처에서" disabled={cancelled} ariaLabel="문자 받는 번호" testId="ai-sms-to" /></label>
         <label className="mt-1 block text-[11px] text-ink-3">내용 <span className={cx('tabular-nums', bytes > 90 ? 'text-amber-700' : '')}>{bytes}바이트{bytes > 90 ? ' · 장문(LMS)' : ''}</span>
           <textarea className={cx(inputCls, 'mt-0.5 min-h-20 py-1 text-sm')} value={body} onChange={(e) => setBody(e.target.value)} disabled={cancelled} aria-label="문자 내용" data-testid="ai-sms-body" /></label>
       </>}

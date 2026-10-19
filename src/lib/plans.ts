@@ -14,7 +14,7 @@ import type { SessionUser } from './types';
  */
 const TZ = 'Asia/Seoul';
 const GB = 1024 ** 3;
-export type Limits = { users: number | null; storageGb: number | null; aiRequests: number | null; tasksTotal?: number | null };
+export type Limits = { users: number | null; storageGb: number | null; aiRequests: number | null; tasksTotal?: number | null; contactsTotal?: number | null /* V31 연락처 수 */ };
 export const tenantOfUser = (u: { tenant?: string | null; isDemo?: boolean | null }) => u.tenant ?? (u.isDemo ? 'demo' : 'default');
 const monthStart = () => DateTime.now().setZone(TZ).startOf('month');
 
@@ -31,7 +31,7 @@ export async function subscription(tenant: string, sql: Sql = db()) {
 export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<{ limits: Limits; sub: any }> {
   const sub = await subscription(tenant, sql);
   const base = sub.limits as Limits & { perUserStorageGb?: number; perUserAi?: number };
-  const limits: Limits = { users: base.users ?? null, storageGb: base.storageGb ?? null, aiRequests: base.aiRequests ?? null, tasksTotal: base.tasksTotal ?? null };
+  const limits: Limits = { users: base.users ?? null, storageGb: base.storageGb ?? null, aiRequests: base.aiRequests ?? null, tasksTotal: base.tasksTotal ?? null, contactsTotal: base.contactsTotal ?? null };
   // V12 1번 베이직: 1인 한도 × 활성 사용자 수(회사 합산, 최소 1명)
   if (base.perUserStorageGb || base.perUserAi) {
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from users where status = 'active' and tenant = ${tenant}`;
@@ -41,7 +41,7 @@ export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<
   }
   // V28-3 플랫폼 운영자가 회사별로 정한 한도(있으면 요금제 한도 대신, null = 무제한)
   const ov = (sub.limit_overrides ?? {}) as Partial<Limits>;
-  for (const k of ['users', 'storageGb', 'aiRequests', 'tasksTotal'] as const) if (k in ov) limits[k] = ov[k] ?? null;
+  for (const k of ['users', 'storageGb', 'aiRequests', 'tasksTotal', 'contactsTotal'] as const) if (k in ov) limits[k] = ov[k] ?? null;
   const counts = (sub.addons ?? {}) as Record<string, number>;
   const codes = Object.keys(counts).filter((k) => counts[k] > 0);
   if (codes.length) {

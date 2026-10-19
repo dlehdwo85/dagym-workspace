@@ -23,7 +23,7 @@ export async function logError(source: string, err: unknown, context: Record<str
 
 export async function activity(
   sql: Sql,
-  entityType: 'task' | 'event' | 'attachment' | 'project',
+  entityType: 'task' | 'event' | 'attachment' | 'project' | 'contact',
   entityId: string,
   actorId: string | null,
   action: string,

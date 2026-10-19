@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { AlertTriangle, MessageCircle, CheckCircle2, Eye, Library, Loader2, Mail, MessageSquare, Paperclip, RotateCcw, Search, Send, Sparkles, Upload } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api, broadcastRefresh, useApi } from './client';
-import { useSession } from './session';
+import { SuggestInput, SuggestList, useRecipientSuggest } from './contacts/RecipientSuggest';
 import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
 import { uploadTaskFiles } from './Attachments';
 import type { AssistDraft } from './TaskAssist';
@@ -251,7 +251,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
         ) : channel === 'sms' ? (
           <div className="grid gap-2 text-sm" data-testid="sms-pane">
             <p className="text-ink-2">내 휴대폰 문자앱으로 넘겨서 <b>내 번호로</b> 보냅니다. 첨부를 고르면 14일 다운로드 링크가 들어갑니다.</p>
-            <Field label="받는 사람 전화번호 (여러 명은 쉼표)"><input className={inputCls} value={sms.to} onChange={(e) => setSms({ ...sms, to: e.target.value })} inputMode="tel" data-testid="sms-to" /></Field>
+            <Field label="받는 사람 전화번호 (여러 명은 쉼표)"><SuggestInput value={sms.to} onChange={(v) => setSms({ ...sms, to: v })} kind="phone" multi taskId={taskId} testId="sms-to" placeholder="이름·회사·번호를 치면 회사 연락처에서 찾습니다" /></Field>
             <Field label="문자 내용"><textarea className={inputCls} rows={4} value={sms.body} onChange={(e) => setSms({ ...sms, body: e.target.value })} data-testid="sms-body" /></Field>
             {(() => { const b = smsBytes([sms.body.trim(), smsLine].filter(Boolean).join('\n\n')); return (
               <p className={cx('-mt-1 flex flex-wrap items-center gap-2 text-xs', b > 2000 ? 'text-red-700' : 'text-ink-3')} data-testid="sms-bytes">
@@ -275,7 +275,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
               <Field label="숨은 참조"><AddrChips value={f.bcc} onChange={(v) => set({ bcc: v })} testId="mail-bcc" /></Field>
             </div>
           )}
-          <Field label="받는 사람"><AddrChips value={f.to} onChange={(v) => set({ to: v })} placeholder="고객 메일 주소 — 스페이스·엔터·쉼표로 여러 명" testId="mail-to" warn={!f.to.trim()} /></Field>
+          <Field label="받는 사람"><AddrChips value={f.to} onChange={(v) => set({ to: v })} placeholder="고객 메일 주소 — 이름·회사를 치면 회사 연락처에서 찾습니다" testId="mail-to" warn={!f.to.trim()} taskId={taskId} /></Field>
           {!f.to.trim() && <p className="-mt-1 flex items-center gap-1 text-xs font-medium text-amber-700" data-testid="mail-to-missing"><AlertTriangle className="size-3.5" />받는 사람 이메일이 없습니다{d.contact ? ' (문의에 이메일 없음)' : ''} — 고객 메일 주소를 입력해 주세요</p>}
           <Field label="참조"><AddrChips value={f.cc} onChange={(v) => set({ cc: v })} testId="mail-cc" /></Field>
           <Field label="제목"><input className={inputCls} value={f.subject} onChange={(e) => set({ subject: e.target.value })} maxLength={200} data-testid="mail-subject" /></Field>
@@ -435,8 +435,8 @@ export function fitBytes(s: string, max: number) {
 }
 const plainOf = (html: string) => html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 /** 받는 사람 입력: 스페이스·엔터·쉼표·세미콜론·붙여넣기 → 칩, 칩마다 형식 검사(틀리면 빨강), 빈 칸에서 백스페이스 = 마지막 칩 지우기, 직원·고객 주소 자동 완성 */
-function AddrChips({ value, onChange, testId, placeholder, warn }: { value: string; onChange: (v: string) => void; testId: string; placeholder?: string; warn?: boolean }) {
-  const { dir } = useSession();
+function AddrChips({ value, onChange, testId, placeholder, warn, taskId }: { value: string; onChange: (v: string) => void; testId: string; placeholder?: string; warn?: boolean; taskId?: string | null }) {
+  const [focus, setFocus] = useState(false);
   const [chips, setChips] = useState<string[]>(() => splitAddrs(value));
   const [draft, setDraft] = useState('');
   const last = useRef(value);
@@ -447,21 +447,24 @@ function AddrChips({ value, onChange, testId, placeholder, warn }: { value: stri
     if (!parts.length) return;
     const next = [...chips, ...parts.filter((p) => !chips.includes(p))]; setChips(next); setDraft(''); emit(next, '');
   };
-  const listId = `${testId}-list`;
+  // V31 ② 회사 연락처·직원 자동 완성(이름·회사·이메일 일부)
+  const sug = useRecipientSuggest(draft, 'email', taskId, focus && draft.trim().length >= 1);
+  const pickSug = (s: { email: string | null }) => { if (!s.email) return; const next = chips.includes(s.email) ? chips : [...chips, s.email]; setChips(next); setDraft(''); emit(next, ''); };
   return (
-    <div className={cx(inputCls, 'flex h-auto min-h-10 flex-wrap items-center gap-1 py-1', warn && 'border-amber-400 bg-amber-50/40')} data-testid={`${testId}-chips`}>
+    <div className={cx(inputCls, 'relative flex h-auto min-h-10 flex-wrap items-center gap-1 py-1', warn && 'border-amber-400 bg-amber-50/40')} data-testid={`${testId}-chips`}>
       {chips.map((c, i) => (
-        <span key={c} className={cx('inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs', EMAIL_RE.test(c) ? 'bg-slate-100 text-ink' : 'bg-red-50 text-red-700 ring-1 ring-red-300')} data-testid="addr-chip" data-bad={EMAIL_RE.test(c) ? undefined : '1'} title={EMAIL_RE.test(c) ? c : '메일 주소 형식이 아닙니다'}>
+        <span key={c} className={cx('inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs', EMAIL_RE.test(c) ? 'bg-slate-100 text-ink' : 'bg-red-50 text-red-700 ring-1 ring-red-300')} data-testid="addr-chip" data-bad={EMAIL_RE.test(c) ? undefined : '1'} title={EMAIL_RE.test(c) ? c : '메일 주소 형식이 아닙니다'} onClick={(e) => e.preventDefault()}>
           <span className="truncate">{c}</span>
           <button type="button" className="text-ink-3 hover:text-ink" aria-label={`${c} 빼기`} onClick={() => { const next = chips.filter((_, k) => k !== i); setChips(next); emit(next, draft); }}>×</button>
         </span>
       ))}
-      <input className="min-w-[8rem] flex-1 bg-transparent py-0.5 text-sm outline-none" value={draft} placeholder={chips.length ? '' : placeholder} list={listId} data-testid={testId} inputMode="email" autoCapitalize="off"
+      <input className="min-w-[8rem] flex-1 bg-transparent py-0.5 text-sm outline-none" value={draft} placeholder={chips.length ? '' : placeholder} data-testid={testId} inputMode="email" autoCapitalize="off" autoComplete="off"
+        onFocus={() => setFocus(true)}
         onChange={(e) => { const v = e.target.value; if (/[\s,;]$/.test(v)) commit(v); else { setDraft(v); emit(chips, v); } }}
         onKeyDown={(e) => { if (e.key === 'Enter' && draft.trim()) { e.preventDefault(); commit(draft); } else if (e.key === 'Backspace' && !draft && chips.length) { const next = chips.slice(0, -1); setChips(next); emit(next, ''); } }}
         onPaste={(e) => { const t = e.clipboardData.getData('text'); if (/[\s,;]/.test(t.trim())) { e.preventDefault(); commit(`${draft} ${t}`); } }}
-        onBlur={() => draft.trim() && commit(draft)} />
-      <datalist id={listId}>{dir.users.filter((u) => u.email).map((u) => <option key={u.id} value={u.email}>{u.name}</option>)}</datalist>
+        onBlur={() => { setTimeout(() => setFocus(false), 120); if (draft.trim()) commit(draft); }} />
+      {focus && <SuggestList items={sug} kind="email" onPick={pickSug} testId={`${testId}-suggest`} />}
     </div>
   );
 }

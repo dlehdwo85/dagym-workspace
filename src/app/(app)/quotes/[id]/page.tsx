@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 import { ArrowLeft, Download, Mail, MessageSquare, Share2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { shareServerFile } from '@/components/native';
+import { SuggestInput } from '@/components/contacts/RecipientSuggest';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 type Q = { id: string; company_key: string; company_name: string; quote_no: string; to_name: string; to_contact: string | null; to_phone: string | null; to_email: string | null; items: { name: string; spec?: string; qty: number; unitPrice: number; amount: number }[];
@@ -74,7 +75,7 @@ function MailModal({ id, q, onClose, onSent }: { id: string; q: Q; onClose: () =
   return (
     <Modal open onClose={onClose} title="견적서 메일로 보내기 (PDF 첨부)">
       <div className="space-y-2">
-        <Field label="받는 사람"><input className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} placeholder="customer@example.com" aria-label="받는 사람" data-testid="quote-mail-to" /></Field>
+        <Field label="받는 사람"><SuggestInput value={to} onChange={setTo} kind="email" taskId={q.task_id} placeholder="customer@example.com · 이름을 치면 회사 연락처에서" ariaLabel="받는 사람" testId="quote-mail-to" /></Field>
         <Field label="제목"><input className={inputCls} value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="제목" /></Field>
         <Field label="내용"><textarea className={cx(inputCls, 'min-h-32')} value={body} onChange={(e) => setBody(e.target.value)} aria-label="내용" /></Field>
         <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>취소</Button><Button onClick={send} disabled={busy || !to.trim()} data-testid="quote-mail-send">보내기</Button></div>

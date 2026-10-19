@@ -290,6 +290,7 @@ export async function markQuoteSent(u: SessionUser, id: string, i: z.infer<typeo
     values (${oid}, ${tenantOf(u)}, ${`quote:${i.via}`}, 'sent', ${quote.task_id}, ${u.id}, ${[to]}, ${`견적서 ${quote.quote_no}`}, ${`${quote.to_name} · 합계 ${won(Number(quote.total))}원`}, ${`quote-${oid}`}, now())`;
   if (quote.task_id) await activity(sql, 'task', quote.task_id, u.id, 'quote_sent', { no: quote.quote_no, via: i.via, to });
   await audit(sql, u.id, 'quote.sent', 'quote', id, { via: i.via }, ip);
+  try { await (await import('./contacts')).rememberContacts(sql, tenantOf(u), u.id, [{ name: quote.to_contact || quote.to_name, organization: quote.to_contact ? quote.to_name : null, phone: quote.to_phone, email: quote.to_email }], { source: 'quote', taskId: quote.task_id }); } catch {} // V31 ① 견적 받는 사람 → 연락처
   return { ok: true, via: i.via };
 }
 /** 문자 시안: 업무에 연결돼 있으면 14일 보기 링크를 넣는다(없으면 링크 없이, PDF 는 파일로) */

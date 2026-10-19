@@ -174,6 +174,8 @@ async function insertInquiry(sql: ReturnType<typeof db>, a: { site: Site; type: 
       await runAutomations(tx, { trigger: 'task_created', taskId: t.id, actorId: null });
     }
     await tx`update inquiries set task_id = ${taskIds[0]} where id = ${ins.id}`;
+    // V31 ① 문의자(이름·연락처·이메일·기관) → 회사 연락처 자동 등록 + 업무 연결
+    try { await (await import('./contacts')).rememberContacts(tx, INQUIRY_TENANT, a.actorId, [{ name: i.name, organization: i.organization, phone: i.phone, email: i.email }], { source: 'inquiry', taskId: taskIds[0] }); } catch (e) { console.warn('[contacts] inquiry remember failed', (e as Error).message); }
     return { ok: true, duplicate: false, taskId: taskIds[0], taskIds, ceoId: ceo.id };
   });
   return out;

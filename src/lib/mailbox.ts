@@ -410,6 +410,7 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
       ${sql.json(list as never)}, ${asLink}, ${shareId}, ${`<${id}@${domain}>`}, ${at}, ${at ?? new Date()})`;
   await activity(sql, 'task', i.taskId, u.id, at ? 'mail_scheduled' : 'mail_queued', { to: i.to, subject: i.subject, files: list.map((f) => f.name), asLink, ...(at ? { sendAt: at.toISOString() } : {}) });
   await audit(sql, u.id, at ? 'mail.schedule' : 'mail.queue', 'task', i.taskId, { outboxId: id, to: i.to, files: list.length, asLink, sendAt: at?.toISOString() ?? null }, ip);
+  await rememberSent(sql, t, u.id, i.taskId, [...i.to, ...(i.cc ?? [])].map((email) => ({ email })));
   return { id, status: 'queued', asLink, taskTitle: task.title, channel, scheduledAt: at?.toISOString() ?? null };
 }
 export const defaultFromName = (me: { name: string; title: string | null }, company: string) => `${me.name}${me.title ? ` ${me.title}` : ''} (${company})`;
@@ -727,6 +728,7 @@ export async function logSms(u: SessionUser, i: z.infer<typeof smsLogInput>, ip:
     values (${id}, ${tenantOf(u)}, 'sms:handoff', 'sent', ${i.taskId}, ${u.id}, ${i.to}, ${'문자'}, ${i.body}, ${shareId}, ${`sms-${id}`}, now())`;
   await activity(sql, 'task', i.taskId, u.id, 'sms_sent', { to: i.to, subject: i.body.slice(0, 40) });
   await audit(sql, u.id, 'sms.handoff', 'task', i.taskId, { outboxId: id, to: i.to.length }, ip);
+  await rememberSent(sql, tenantOf(u), u.id, i.taskId, i.to.map((phone) => ({ phone })));
   if (shareId) await crmSteps(sql, i.taskId, i.body, [{ name: 'link' }]);
   return { id };
 }
@@ -751,4 +753,17 @@ export async function saveMyCard(u: SessionUser, i: z.infer<typeof myCardInput>,
     work_email = case when ${i.workEmail === undefined} then work_email else ${i.workEmail || null} end, updated_at = now() where id = ${u.id}`;
   await audit(sql, u.id, 'user.card', 'user', u.id, { title: i.title !== undefined, phone: i.phone !== undefined, workEmail: i.workEmail !== undefined }, ip);
   return myCard(u);
+}
+
+/** V31 ① 보낸 받는 사람을 회사 연락처에(문의 업무면 문의자 이름·기관으로). 실패해도 보내기는 그대로 */
+async function rememberSent(sql: Sql, tenant: string, actorId: string, taskId: string, people: { email?: string; phone?: string }[]) {
+  try {
+    const c = await inquiryContact(taskId, sql);
+    const { rememberContacts, normPhone } = await import('./contacts');
+    const list = people.map((p) => {
+      const same = c && ((p.email && c.email && p.email.toLowerCase() === c.email.toLowerCase()) || (p.phone && c.phone && normPhone(p.phone) === normPhone(c.phone)));
+      return same ? { ...p, name: c!.name, organization: c!.organization } : p;
+    });
+    await rememberContacts(sql, tenant, actorId, list, { source: 'send', taskId });
+  } catch (e) { console.warn('[contacts] remember failed', (e as Error).message); }
 }
