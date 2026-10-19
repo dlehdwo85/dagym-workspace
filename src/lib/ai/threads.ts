@@ -140,7 +140,8 @@ export async function listThreads(u: SessionUser, q: { q?: string; taskId?: stri
 }
 export async function threadMessages(threadId: string, sql: Sql = db()) {
   const msgs = await sql`select m.id::text, m.role, m.text, m.file_names, m.status, m.block_reason, m.cost_usd::float8 cost_usd, m.created_at,
-      coalesce((select json_agg(json_build_object('id', p.id, 'kind', p.kind, 'summary', p.summary, 'status', p.status, 'result', p.result) order by p.created_at)
+      coalesce((select json_agg(json_build_object('id', p.id, 'kind', p.kind, 'summary', p.summary, 'status', p.status, 'result', p.result,
+        'preview', case when p.kind in ('draft_sms', 'draft_quote') then p.payload end) order by p.created_at)
         from ai_proposals p where p.id = any(m.proposal_ids)), '[]') as proposals,
       coalesce((select json_agg(json_build_object('id', j.id, 'title', j.title, 'kind', j.kind, 'version', j.version, 'status', j.status) order by j.created_at)
         from ai_doc_jobs j where j.id = any(m.doc_job_ids)), '[]') as doc_jobs

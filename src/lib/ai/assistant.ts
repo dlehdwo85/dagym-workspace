@@ -11,6 +11,8 @@ import { canSeeRevenue } from '../revenue';
 import { directory } from '../admin';
 import { listLibrary, loadLibraryFile, attachLibraryToTask, saveGeneratedFile, tenantOf, folderLevel, updateLibraryFile, organizeLibraryFile, cleanFolder, listConfidentialSuggestions, getAttachToLibrary, setAttachToLibrary, SEC_LABEL } from '../library';
 import { getAiProfile, saveAiProfile } from './persona';
+import { quoteInput, previewQuote, createQuote, saveTemplate, templateInput, listTemplates, won } from '../quotes';
+import { companyProfiles } from '../companyProfiles';
 import { RANK } from '../menuPerms';
 import { writeXlsx } from '../xlsx';
 import { anthropicProvider, aiEnabled, modelFor, costUsd, usdKrw, type AiMessage, type AiProvider, type AiTool } from './provider';
@@ -194,6 +196,21 @@ const WEB_TOOLS: AiTool[] = [
   { name: 'propose_update_company_settings', description: '회사 설정 바꾸기를 제안한다(관리자만). 바꿀 항목만 넣는다: attachToLibrary(업무 첨부 자료실 자동 저장 켜기/끄기), confWords(기밀 단어 전체 목록 — 기존 목록에 더할 때는 get_company_settings 값에 추가해 전체를 보낸다, 빈 배열 = 기본값), industry·business·customers·tone·cautions(AI 회사 정보). [확인] 후 반영.',
     input_schema: { type: 'object', properties: { attachToLibrary: { type: 'boolean', description: '업무 첨부를 자료실에도 자동 저장' }, confWords: { type: 'array', items: { type: 'string' }, description: '기밀로 분류할 파일 이름 단어 전체 목록' },
       industry: str('업종'), business: str('사업 내용·방향'), customers: str('주요 고객'), tone: str('말투'), cautions: str('AI 가 주의할 점') } } },
+  // V19(2026-10-15 대표 지시): 문자·견적서는 AI 가 초안만 — 카드에서 사람이 고치고 [보내기]/[만들기]를 누른다. AI 가 직접 보내는 경로는 없다
+  { name: 'propose_draft_sms', description: '고객·직원에게 보낼 문자(SMS) 초안을 제안한다. 받는 번호는 업무의 문의 연락처·영업 리드·사용자가 말한 번호에서만 쓰고, 모르면 비워 둔다(지어내지 않음). 사용자가 카드에서 고친 뒤 자기 휴대폰 문자앱으로 보낸다. 90바이트 넘으면 장문.',
+    input_schema: { type: 'object', properties: { body: str('문자 내용(존댓말, 회사명·연락처 포함, 짧게)'), to: { type: 'array', items: { type: 'string' }, description: '받는 전화번호(사용자가 말했거나 도구 결과에 있는 것만)' },
+      taskId: str('관련 업무 id(문의 업무면 연락처를 여기서 찾음, 선택)'), leadId: str('영업 리드 id(선택)') }, required: ['body'] } },
+  { name: 'list_quote_companies', description: '견적서 공급자로 쓸 수 있는 우리 회사 정보(회사 키·상호)와 저장된 견적서 양식 목록. 견적서를 만들기 전에 먼저 본다.',
+    input_schema: { type: 'object', properties: {} } },
+  { name: 'propose_draft_quote', description: '견적서 초안을 제안한다(회사 양식, A4 1페이지 PDF). 금액(공급가액·부가세 10%·합계)은 서버가 다시 계산한다. 품목·수량·단가는 사용자가 준 것·자료에서 읽은 것만. [견적서 만들기] 후 PDF 가 자료실 "견적서" 폴더에 저장되고 업무가 있으면 첨부된다.',
+    input_schema: { type: 'object', properties: { company: str('공급자 회사 키(list_quote_companies 의 key)'), templateId: str('양식 id(선택, 없으면 기본)'),
+      to: { type: 'object', properties: { name: str('받는 곳(회사·고객 이름)'), contact: str('담당자(선택)'), phone: str('전화(선택)'), email: str('이메일(선택)') }, required: ['name'] },
+      items: { type: 'array', items: { type: 'object', properties: { name: str('품목'), spec: str('규격(선택)'), qty: { type: 'number' }, unitPrice: { type: 'number', description: '단가(원, 부가세 별도)' } }, required: ['name', 'qty', 'unitPrice'] } },
+      validDays: { type: 'number', description: '유효기간 일수(기본 30)' }, note: str('비고·결제조건 등(선택)'), taskId: str('관련 업무 id(선택)'), leadId: str('영업 리드 id(선택)') }, required: ['company', 'to', 'items'] } },
+  { name: 'propose_create_quote_template', description: '회사별 견적서 양식 만들기를 제안한다. 기존 양식 파일(자료실)을 read_library_file 로 읽고 항목 구성(열·조건 문구·맺음말)을 따라 하되, 공급자 정보는 양식에 넣지 않는다(회사 정보에서 자동). [확인] 후 저장.',
+    input_schema: { type: 'object', properties: { company: str('회사 키'), name: str('양식 이름(예: 다짐 기본 견적서)'), sourceFileId: str('참고한 자료실 파일 id(선택)'),
+      layout: { type: 'object', properties: { title: str('제목(기본 견 적 서)'), columns: { type: 'array', items: { type: 'object', properties: { key: { type: 'string', enum: ['name', 'spec', 'qty', 'unitPrice', 'amount'] }, label: str('열 이름'), width: { type: 'number', description: '너비 비율 0.05~0.8' } }, required: ['key', 'label', 'width'] } },
+        terms: { type: 'array', items: { type: 'string' }, description: '조건 문구들({validUntil} 치환)' }, footer: str('맺음말'), accent: str('강조색 #rrggbb(선택)') } }, isDefault: { type: 'boolean' } }, required: ['company', 'name'] } },
   { type: 'web_search_20260209', name: 'web_search', max_uses: 5 } as never,
   { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 } as never,
 ];
@@ -205,6 +222,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 [할 수 있는 일 — 아래 도구로 되는 일을 "안 된다·화면에서 직접 하세요"라고 답하지 마세요(대표 지적 10/19 ②). 되는지 모르겠으면 도구 목록을 먼저 보고, 정말 도구가 없을 때만 안 된다고 하세요]
 - 업무: 찾기 search_tasks · 상세 get_task · 만들기 propose_create_task(한 사람)·propose_create_tasks(여러 사람 각각) · 고치기 propose_update_task(담당자 변경·마감일·마감 시각·상태·우선순위·제목) · 댓글 propose_comment · 자료 첨부 propose_attach_file
 - 일정: 보기 list_events · 빈 시간 find_free_time · 만들기 propose_create_event · 시간 변경·취소 propose_update_event
+- 문자·견적서(V19): 문자 초안 propose_draft_sms(보내기는 사람이 휴대폰 문자앱에서) · 견적서 list_quote_companies → propose_draft_quote(금액은 서버 재계산, A4 1장) · 양식 propose_create_quote_template. 전화번호·금액·품목을 지어내지 마세요.
 - 기밀·회사 설정(관리자): 기밀 후보 list_confidential_suggestions · 등급 바꾸기 propose_set_confidential · 설정 보기 get_company_settings · 설정 바꾸기 propose_update_company_settings(기밀 단어·첨부 자동 저장·AI 회사 정보)
 - 자료실: 찾기 search_library · 읽기 read_library_file · 폴더 list_library_folders · 정리 propose_organize_files · 문서·엑셀 propose_create_document·propose_xlsx_report·run_file_task·fill_template
 - 사람·조직 list_people · 매출 revenue_summary(대표·본사)
@@ -682,6 +700,50 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       if (!lines.length) throw badRequest('바꿀 항목이 없습니다');
       return propose(c, 'company_settings', `회사 설정 바꾸기: ${lines[0]}${lines.length > 1 ? ` 외 ${lines.length - 1}건` : ''}`, i, { moves: lines, warnings: warnings.length ? warnings : undefined });
     }
+    case 'propose_draft_sms': {
+      const i = z.object({ body: z.string().trim().min(1).max(2000), to: z.array(z.string().trim().max(40)).max(20).optional(), taskId: z.string().uuid().optional(), leadId: z.string().uuid().optional() }).parse(input);
+      const sql = db();
+      const found: string[] = []; const warnings: string[] = []; let taskTitle: string | undefined;
+      if (i.taskId) {
+        const d = await getTaskDetail(u, i.taskId); taskTitle = (d.task as any).title;
+        const [q] = await sql<{ phone: string | null }[]>`select payload->>'phone' as phone from inquiries where task_id = ${i.taskId} and tenant = ${tenantOf(u)} order by created_at desc limit 1`;
+        if (q?.phone) found.push(q.phone);
+      }
+      if (i.leadId) {
+        const [l] = await sql<{ phone: string | null }[]>`select phone from sales_leads where id = ${i.leadId} and tenant = ${tenantOf(u)}`;
+        if (l?.phone) found.push(l.phone);
+      }
+      // 사용자가 말한 번호만(모양이 전화번호인 것) — 이름·추측은 버린다
+      const said = (i.to ?? []).map((x) => x.replace(/[^0-9+\-]/g, '')).filter((x) => /^(\+?82|0)\d{8,10}$|^\d{3,4}-\d{3,4}-\d{4}$/.test(x));
+      const to = [...new Set([...said, ...found])];
+      if (!to.length) warnings.push('받는 번호를 찾지 못했습니다 — 카드에서 번호를 넣어 주세요(AI 는 번호를 지어내지 않습니다)');
+      const bytes = [...i.body].reduce((n, ch) => n + (ch.charCodeAt(0) > 127 ? 2 : 1), 0);
+      return propose(c, 'draft_sms', `문자 시안: ${to.length ? to.join(', ') : '(번호 확인 필요)'} — ${clip(i.body, 60)}`, { to, body: i.body, taskId: i.taskId ?? null, leadId: i.leadId ?? null },
+        { sms: { to, body: i.body, bytes, long: bytes > 90, taskTitle }, warnings: warnings.length ? warnings : undefined });
+    }
+    case 'list_quote_companies': {
+      const [profiles, t] = await Promise.all([companyProfiles(tenantOf(u)), listTemplates(u)]);
+      if (!profiles.length) return { companies: [], templates: [], note: '회사 정보(공급자)가 없습니다 — 관리자가 회사 정보·디자인에서 상호·사업자번호·주소를 등록해야 견적서를 만들 수 있습니다' };
+      return { companies: profiles.map((p) => ({ key: p.key, name: p.name, isDefault: p.is_default, hasBizInfo: !!(p.biz_no && p.address) })), templates: t.templates.map((x) => ({ id: x.id, company: x.company, name: x.name, isDefault: x.isDefault })) };
+    }
+    case 'propose_draft_quote': {
+      const i = quoteInput.parse({ ...input, to: input.to ?? {}, items: input.items ?? [] });
+      const pv = await previewQuote(u, i); // 회사·양식·업무 권한 확인 + 금액 재계산 + 1페이지 검사(저장 없음)
+      const warnings: string[] = [];
+      if (pv.overflow) warnings.push('A4 1페이지를 넘습니다 — 품목을 묶거나 줄여 주세요');
+      if (!i.to.phone && !i.to.email) warnings.push('받는 곳 연락처가 없어 만든 뒤 PDF 를 직접 전달해야 합니다');
+      const payload = { ...i, items: pv.items, supply: pv.supply, vat: pv.vat, total: pv.total, validUntil: pv.validUntil };
+      return propose(c, 'draft_quote', `견적서 시안: ${pv.profile.name} → ${i.to.name} · ${i.items.length}개 품목 · 합계 ${won(pv.total)}원(VAT 포함)`, payload,
+        { quote: { company: pv.profile.key, companyName: pv.profile.name, to: i.to, items: pv.items, supply: pv.supply, vat: pv.vat, total: pv.total, validUntil: pv.validUntil, overflow: pv.overflow, template: pv.template?.name ?? null }, warnings: warnings.length ? warnings : undefined });
+    }
+    case 'propose_create_quote_template': {
+      const i = templateInput.parse({ ...input, layout: input.layout ?? {} });
+      const { requireAnyMenu } = await import('../menuPerms');
+      await requireAnyMenu(u, ['company', 'ops'], 'edit');
+      if (i.sourceFileId) await loadLibraryFile(u, i.sourceFileId, 'meta');
+      const cols = (i.layout.columns ?? []).map((x) => x.label).join(' · ') || '기본 열(품목·규격·수량·단가·공급가액)';
+      return propose(c, 'quote_template', `견적서 양식 만들기: ${i.company} "${i.name}"${i.isDefault ? ' (기본)' : ''}`, i, { moves: [`열: ${cols}`, ...(i.layout.terms?.length ? [`조건: ${i.layout.terms.join(' / ')}`] : []), ...(i.layout.footer ? [`맺음말: ${i.layout.footer}`] : [])] });
+    }
   }
   throw badRequest(`모르는 도구: ${name}`);
 }
@@ -764,6 +826,7 @@ const BUNDLES: [RegExp, string[]][] = [
   [/일정|회의|미팅|약속|캘린더|시간|잡아|빈 ?시간|취소|연차|출장|방문/, ['find_free_time', 'propose_create_event', 'propose_update_event']],
   [/자료|파일|문서|엑셀|보고서|견적|양식|정리|폴더|PPT|피피티|워드|PDF|표|안내문|제안서|만들어/i, ['list_library_folders', 'propose_organize_files', 'propose_create_document', 'propose_xlsx_report', 'run_file_task', 'list_templates', 'read_template_layout', 'fill_template']],
   [/매출|지출|회원 ?수|실적/, ['revenue_summary']],
+  [/문자|SMS|견적|양식|발송/i, ['propose_draft_sms', 'list_quote_companies', 'propose_draft_quote', 'propose_create_quote_template']],
   [/기밀|보안 ?등급|회사 ?설정|기밀 ?단어|업종|말투|사업 ?방향|고객층|주의 ?사항|자동 ?저장|설정/, ['list_confidential_suggestions', 'propose_set_confidential', 'get_company_settings', 'propose_update_company_settings']],
 ];
 const MORE_TOOLS: AiTool = { name: 'more_tools', description: '이번 질문에는 자주 쓰는 도구만 붙어 있다. 일정·자료·문서·매출 등 필요한 도구가 목록에 없으면 먼저 이 도구를 불러 모든 도구를 받는다("안 된다"고 답하기 전에 반드시).',
@@ -913,7 +976,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
 }
 
 // ---------------- 제안 실행 (사람이 [확인]) ----------------
-export async function decideProposal(u: SessionUser, id: string, accept: boolean) {
+export async function decideProposal(u: SessionUser, id: string, accept: boolean, patch?: Record<string, unknown>) {
   denyDemo(u);
   const sql = db();
   const [p] = await sql<any[]>`select * from ai_proposals where id = ${id} and user_id = ${u.id}`;
@@ -923,7 +986,8 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
     await sql`update ai_proposals set status = 'cancelled', decided_at = now() where id = ${id}`;
     return { ok: true, status: 'cancelled' };
   }
-  const x = p.payload;
+  // V19: 문자 시안은 카드에서 고친 받는 번호·본문을 함께 받는다(그 종류만)
+  const x = p.kind === 'draft_sms' && patch ? { ...p.payload, ...(Array.isArray(patch.to) ? { to: patch.to } : {}), ...(typeof patch.body === 'string' ? { body: patch.body } : {}) } : p.payload;
   let result: Record<string, unknown>;
   try {
     // V14 15번: 기밀 자료(기밀 파일·매출)를 근거로 만든 제안 — 받는 사람도 기밀 열람 권한이 있어야 한다(서버 강제)
@@ -1001,6 +1065,21 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
         result = { link: '/admin/company' };
         break;
       }
+      case 'draft_sms': { // 사람이 휴대폰 문자앱으로 보낸 뒤 [보냈어요] → 기록(외부 발송 권한)
+        const { logSms, canSend } = await import('../mailbox');
+        const to = z.array(z.string().trim().regex(/^[0-9+\-\s()]{8,20}$/, '전화번호 형식이 아닙니다')).min(1, '받는 번호가 없습니다').max(20).parse(x.to);
+        const body = z.string().trim().min(1).max(2000).parse(x.body);
+        if (x.taskId) { const r = await logSms(u, { taskId: x.taskId, to, body }, null); result = { outboxId: r.id, link: `/tasks/${x.taskId}` }; }
+        else {
+          if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+          const oid = crypto.randomUUID();
+          await sql`insert into outbox (id, tenant, channel, status, created_by, to_addrs, subject, body_text, message_id, sent_at) values (${oid}, ${tenantOf(u)}, 'sms:handoff', 'sent', ${u.id}, ${to}, '문자', ${body}, ${`sms-${oid}`}, now())`;
+          result = { outboxId: oid, link: '/mail/outbox' };
+        }
+        break;
+      }
+      case 'draft_quote': { const r = await createQuote(u, quoteInput.parse(x), null); result = { quoteId: r.id, no: r.no, fileId: r.fileId, link: r.link }; break; }
+      case 'quote_template': { const r = await saveTemplate(u, templateInput.parse(x), null); result = { templateId: r.id, link: '/quotes' }; break; }
       case 'create_event': { const r = await createEvent(u, eventInput.parse(x)); result = { eventId: r.id, link: `/calendar?event=${r.id}` }; break; }
       case 'update_event': { await updateEvent(u, x.eventId, eventInput.partial().parse(x.patch), x.scope); result = { eventId: x.eventId, link: `/calendar?event=${x.eventId}` }; break; }
       case 'cancel_event': { await deleteEvent(u, x.eventId, x.scope); result = { eventId: x.eventId, link: '/calendar' }; break; }
@@ -1067,4 +1146,13 @@ async function pageContext(u: SessionUser, c: { page: string; id?: string }) {
     if (c.page === 'revenue' && !(await canSeeRevenue(u))) return '';
   } catch { return ''; }
   return PAGE[c.page] ? `\n지금 사용자가 보고 있는 화면: ${PAGE[c.page]}.` : '';
+}
+
+/** V19 견적서 제안 카드 [PDF 미리보기] — 제안 주인만, 저장 없이 그린다 */
+export async function proposalQuotePdf(u: SessionUser, id: string) {
+  const [p] = await db()<any[]>`select payload, kind from ai_proposals where id = ${id} and user_id = ${u.id}`;
+  if (!p || p.kind !== 'draft_quote') throw notFound('견적서 제안이 없습니다');
+  const pv = await previewQuote(u, quoteInput.parse(p.payload));
+  if (pv.overflow || !pv.pdf) throw badRequest('1페이지 초과 — 품목을 묶어 주세요');
+  return pv.pdf;
 }

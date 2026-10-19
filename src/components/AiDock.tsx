@@ -13,9 +13,10 @@ import { AI_ACCEPT } from './libraryUpload';
 import { DropZone } from './upload';
 import { api, broadcastRefresh, useApi } from './client';
 import { Button, cx, inputCls, toast } from './ui';
+import { SpecialProposal } from './ProposalCard';
 
 type Ctx = { page: 'home' | 'tasks' | 'task' | 'calendar' | 'library' | 'revenue' | 'reports' | 'messages' | 'other'; id?: string; taskId?: string };
-type P = { id: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { warnings?: string[]; moves?: string[]; folder?: string } };
+type P = { id: string; kind?: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { warnings?: string[]; moves?: string[]; folder?: string } & Record<string, any> };
 type M = Omit<ChatMsg, 'proposals'> & { proposals?: P[] };
 
 /** 지금 화면 → 맥락(id 만) */
@@ -91,14 +92,14 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
       const r = await api(`/api/ai/threads/${id}`);
       conv.cancelEdit();
       setMsgs(r.messages.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'assistant', text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text || (m.status === 'error' ? '(오류)' : ''), stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked', docJobs: m.doc_jobs?.length ? m.doc_jobs.map((j: any) => j.id) : undefined, error: m.status === 'error',
-        proposals: (m.proposals ?? []).map((p: any) => ({ id: p.id, summary: p.summary, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) })));
+        proposals: (m.proposals ?? []).map((p: any) => ({ id: p.id, kind: p.kind, summary: p.summary, preview: p.preview ?? undefined, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) })));
       setThreadId(id); setView('chat');
     } catch (e: any) { toast.error(e.message); }
   }
-  async function decide(mi: number, p: P, accept: boolean) {
+  async function decide(mi: number, p: P, accept: boolean, patch?: Record<string, unknown>) {
     const set = (patch: Partial<P>) => setMsgs((m) => m.map((x, i) => (i === mi ? { ...x, proposals: x.proposals!.map((y) => (y.id === p.id ? { ...y, ...patch } : y)) } : x)));
     set({ state: 'busy' });
-    try { const r = await api(`/api/ai/proposals/${p.id}`, { body: { accept } }); set({ state: accept ? 'done' : 'cancelled', link: r.link }); if (accept) { toast.ok('반영했습니다'); broadcastRefresh(); } }
+    try { const r = await api(`/api/ai/proposals/${p.id}`, { body: { accept, ...(patch ? { patch } : {}) } }); set({ state: accept ? 'done' : 'cancelled', link: r.link }); if (accept) { toast.ok('반영했습니다'); broadcastRefresh(); } }
     catch (e: any) { set({ state: undefined }); toast.error(e.message); }
   }
   return (
@@ -138,7 +139,7 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
                   <div className={cx('max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.role === 'user' ? 'ai-user-msg' : 'ai-answer'}>
                     {m.files && <div className="mb-0.5 text-xs opacity-80">📎 {m.files.join(', ')}</div>}
                     {m.text}
-                    {m.proposals?.map((p) => (
+                    {m.proposals?.map((p) => (p.kind === 'draft_sms' || p.kind === 'draft_quote') ? <SpecialProposal key={p.id} p={p} onDecided={(a, patch) => decide(i, p, a, patch)} /> : (
                       <div key={p.id} className="mt-1.5 rounded-input border border-amber-200 bg-white p-2 text-ink">
                         <div className="text-xs font-semibold text-amber-700">✨ AI 제안</div><div className="text-sm">{p.summary}</div>
                         {!!p.preview?.moves?.length && <ul className="mt-1 ml-4 list-disc text-xs text-ink-2" data-testid="ai-dock-organize">{p.preview.moves.map((x, k) => <li key={k}>{x}</li>)}</ul>}

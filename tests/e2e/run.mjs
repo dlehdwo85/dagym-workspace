@@ -23,6 +23,7 @@ import { voiceMode } from './voiceMode.step.mjs';
 import { verify1017 } from './verify1017.step.mjs';
 import { docsCoedit } from './docs.step.mjs';
 import { libraryOrganizeNotice } from './library-organize.step.mjs';
+import { quotesFlow } from './quotes.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -2271,6 +2272,8 @@ await step('V36 1·2 근무 상태: 휴가 중인 사람 아바타에 회색 점
 await step('10/19 자료실 문서 공동 편집: PC·휴대폰 동시 편집 같은 글·아바타·오프라인 합침·보기 전용 입력 막힘·편집 공유·기록·되돌리기·Word', () => docsCoedit({ browser, owner, staff, ctx, sql, BASE, SHOTS, login }));
 
 await step('V14 32-보정 자료실 올린 직후 안내: "○○ → 폴더로 정리했어요 · 열기" 토스트·진행 목록, 여러 개 요약', () => libraryOrganizeNotice({ owner, BASE, FAKE, SHOTS }));
+
+await step('V19 AI 비서 문자 시안(번호·본문 고치기·QR·보냈어요 기록) · 견적서 시안(합계·만들기) → 견적서 화면(PDF·문자 시안·보냄)', () => quotesFlow({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

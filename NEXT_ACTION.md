@@ -1130,6 +1130,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 시험: tests/api/library-text.test.mjs 6건(HWP 글자·검색·기존 폴더·기밀 제안, 배포용 null, HWPX, PDF/스캔, 재추출 정기 실행·시도 기록, 알림 묶음·실패 시 없음), E2E library-organize.step(토스트·열기·진행 목록·3개 요약).
 - 남은 것(#47 뒤 묶음 — AUDIT_2026-10-14 9~26 중 아직 안 된 것 로컬과 선별): 9 AI 한도 알림(V23 로 처리됨 확인) · 10 타임라인 묶기·자료실 빠른 보기 · 13 조회 권한자 저장 버튼 숨김 · 14 문의 연락처 마스킹 · 15 개인 공간 메뉴·탈퇴 실삭제 · 16 팀 범위 프로젝트/일정/자료실(① 격리로 처리) · 17 끌어다 놓기 안내 · 18 낮음 · 19 프로젝트 진행률 바 · 21 일정↔업무 알림 공유 · 22 로컬 알림 탭 읽음 · 23 일·주·월 보기 · 24 터치 44px · 25 팀 범위 대화방(① 격리로 처리) · 26 낮음.
 
+## 2026-10-20 클라우드 — V19 AI 비서 문자·견적서 시안 → 대표 확인 → 대표가 보내기 (배포)
+- 원칙 그대로: AI 는 **초안만**(ai_proposals `draft_sms`·`draft_quote`·`quote_template`), 보내기·만들기는 사람이 카드에서 누른다. AI 가 직접 보내는 경로 없음. 보낸 것은 outbox(sms:handoff·quote:*)·업무 활동에 기록, [보냈어요]를 눌렀을 때만.
+- 문자(A 방식, 비용 0): `propose_draft_sms` — 번호는 사용자가 말한 것·업무 문의 연락처·영업 리드에서만(없으면 "번호 확인 필요", 지어내지 않음). 카드(src/components/ProposalCard.tsx)에서 번호·본문 고치기, 바이트(90 넘으면 장문), [문자 보내기] → 휴대폰은 `sms:` 링크(iOS `&body=`·Android `?body=`), PC 는 QR → "보내셨나요?" [보냈어요] → 기록(외부 발송 권한 send_external, 기본 대표). 고친 내용은 `POST /api/ai/proposals/:id {accept, patch}` 로 함께.
+- 견적서: migration 112 quote_templates·quotes, 113 outbox 채널. src/lib/quotes.ts — 공급자 = 회사 정보·디자인(company_profiles, 다른 회사 정보 섞이지 않음), 양식 = JSON 배치(열·조건 문구·맺음말·강조색, 회사별 기본), **A4 1페이지 고정 PDF**(pdf-lib + Noto Sans KR OFL, assets/fonts, 글자 9.5→8.5→7.5 줄여 보고 그래도 넘치면 400 "품목을 묶어 주세요"), 금액은 서버 재계산(공급가액·부가세 10%·합계, 일금 한글), 견적번호 `Q-YYYYMMDD-001`(회사별·날짜별). PDF 는 자료실 "견적서" 폴더(본문 글자 추출 → 검색) + 업무 첨부.
+- AI 도구: `list_quote_companies`(회사·양식, 사업자 정보 유무) → `propose_draft_quote`(카드: 표·합계·[PDF 미리보기]·[견적서 만들기]) → `/quotes/:id` 화면: PDF 보기·내려받기, (앱) 공유창 → "보내셨나요?", (업무 연결) 메일 첨부 발송(기존 보관함), 문자 시안(14일 보기 링크) → 문자앱 → [보냈어요]. `propose_create_quote_template`(기존 양식 파일 읽고 열 구성 따라 하기, 회사 정보 편집 권한). `/quotes` 목록 + 직접 만들기 폼.
+- API: /api/quotes(목록·만들기)·preview·templates·[id]·pdf·sent·sms·mail, /api/ai/proposals/[id]/quote-pdf. 보관된 대화를 다시 열어도 카드 모양 유지(threads preview).
+- 시험: tests/api/quotes.test.mjs 5건(양식 기본·직원 404, 서버 계산·60개 넘침·PDF, 번호 001/002·자료실·첨부·다른 회사 404, 보내기 403/기록/문자 링크/메일 업무 필수, AI 문자 시안 번호 규칙·patch 기록·직원 403, 견적 시안·PDF 미리보기·만들기·넘침 400·양식 저장·다른 회사), E2E quotes.step(문자 카드 QR·보냈어요 기록, 견적 카드 합계·만들기 → 견적서 화면 PDF·문자 시안·보냄).
+- 남은 것(V19): PC 에서 "휴대폰에서 보내기" 푸시 딥링크(지금은 QR), 문자 발송 서비스(B 방식, 과금) 미연동, 견적서 2차(표 문서 양식 xlsx 참고 자동 변환).
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md

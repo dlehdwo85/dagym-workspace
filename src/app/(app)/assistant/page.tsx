@@ -14,8 +14,9 @@ import { hearOnce, keepScreenOn, speak, stopSpeaking, yesNo } from '@/components
 import { AiBudgetBar, costLine, type Budget } from '@/components/AiBudget';
 import { DocJobCard } from '@/components/DocJobCard';
 import { ChatComposer, DoneSummary, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
+import { SpecialProposal } from '@/components/ProposalCard';
 
-type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; tasks?: string[]; taskDue?: string; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
+type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: Record<string, any> & { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; tasks?: string[]; taskDue?: string; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
 type Msg = Omit<ChatMsg, 'proposals'> & { proposals?: Proposal[] };
 type Thread = { id: string; title: string; task_id: string | null; task_title: string | null; pinned: boolean; updated_at: string; turns: number };
 const EXAMPLES = ['회사 로고 찾아서 이 업무에 첨부해줘', '이번 주 내 마감 업무 정리해줘', '내일 3시 회의 준비 업무 만들어줘', '3분기 매출 현장별로 엑셀 만들어줘'];
@@ -42,7 +43,7 @@ export default function AssistantPage() {
       const r = await api(`/api/ai/threads/${id}`);
       conv.cancelEdit();
       setMsgs(r.messages.map((m: any) => ({ role: m.role, text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text, stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked', docJobs: m.doc_jobs?.length ? m.doc_jobs.map((j: any) => j.id) : undefined,
-        proposals: m.proposals?.length ? m.proposals.map((p: any) => ({ id: p.id, kind: p.kind, summary: p.summary, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) : undefined })));
+        proposals: m.proposals?.length ? m.proposals.map((p: any) => ({ id: p.id, kind: p.kind, summary: p.summary, preview: p.preview ?? undefined, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) : undefined })));
     } catch (e: any) { toast.error(e.message); setThreadId(null); }
   }
   useEffect(() => { if (threadId && !msgs.length) openThread(threadId); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -91,11 +92,11 @@ export default function AssistantPage() {
     if (q0 && !started.current && status.data?.enabled) { started.current = true; send(q0); }
   }, [status.data?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function decide(mi: number, p: Proposal, accept: boolean) {
+  async function decide(mi: number, p: Proposal, accept: boolean, patch?: Record<string, unknown>) {
     const set = (patch: Partial<Proposal>) => setMsgs((m) => m.map((x, i) => (i === mi ? { ...x, proposals: x.proposals!.map((y) => (y.id === p.id ? { ...y, ...patch } : y)) } : x)));
     set({ state: 'busy' });
     try {
-      const r = await api(`/api/ai/proposals/${p.id}`, { body: { accept } });
+      const r = await api(`/api/ai/proposals/${p.id}`, { body: { accept, ...(patch ? { patch } : {}) } });
       set({ state: accept ? 'done' : 'cancelled', link: r.link });
       if (accept) { toast.ok('반영했습니다'); broadcastRefresh(); }
     } catch (e: any) { set({ state: undefined }); toast.error(e.message); }
@@ -203,7 +204,7 @@ export default function AssistantPage() {
               {m.text}
               {!!m.proposals?.length && (
                 <div className="mt-2 space-y-1.5">
-                  {m.proposals.map((p) => (
+                  {m.proposals.map((p) => (p.kind === 'draft_sms' || p.kind === 'draft_quote') ? <SpecialProposal key={p.id} p={p} onDecided={(a, patch) => decide(i, p, a, patch)} /> : (
                     <div key={p.id} className="rounded-input border border-amber-200 bg-white p-2 text-ink" data-testid="ai-proposal">
                       <div className="text-xs font-semibold text-amber-700">✨ AI 제안</div>
                       <div className="text-sm">{p.summary}</div>

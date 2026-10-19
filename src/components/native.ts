@@ -220,3 +220,17 @@ export function takeOAuthVerifier() {
   try { const v = localStorage.getItem('wos_oauth_v'); localStorage.removeItem('wos_oauth_v'); return v; } catch { return null; }
 }
 export function closeSystemBrowser() { if (hasBrowser()) Browser.close().catch(() => {}); }
+
+/** V19 견적서: 앱에서 PDF 를 공유창으로(카카오톡·문자 등) — 서버 주소를 쿠키 포함으로 받아 임시 저장 후 Share. 웹이면 false(내려받기로) */
+export async function shareServerFile(path: string, title = '파일'): Promise<boolean> {
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('Filesystem') || !Capacitor.isPluginAvailable('Share')) return false;
+  const r = await fetch(path, { credentials: 'include' });
+  if (!r.ok) throw new Error('파일을 받지 못했습니다');
+  const cd = r.headers.get('content-disposition') ?? '';
+  const name = decodeURIComponent(/filename\*=UTF-8''([^;]+)/i.exec(cd)?.[1] ?? /filename="?([^";]+)/i.exec(cd)?.[1] ?? 'file.pdf').replace(/[\\/:*?"<>|]/g, '_');
+  const buf = new Uint8Array(await r.arrayBuffer());
+  let b64 = ''; for (let i = 0; i < buf.length; i += 0x8000) b64 += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  const w = await Filesystem.writeFile({ path: name, data: btoa(b64), directory: 'CACHE' });
+  await Share.share({ title, files: [w.uri], dialogTitle: title });
+  return true;
+}

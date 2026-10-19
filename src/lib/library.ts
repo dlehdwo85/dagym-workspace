@@ -227,7 +227,7 @@ export async function saveGeneratedFile(u: SessionUser, p: { fileName: string; m
       ${p.security ?? 'internal'}, ${p.security === 'confidential'}) returning id`;
   const key = `lib/${tenantOf(u)}/${f.id}/${p.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
   await putObject(key, p.data, p.mime);
-  await sql`update library_files set storage_key = ${key}, upload_status = 'ready', text_content = ${extractText(p.data, p.fileName, p.mime)} where id = ${f.id}`;
+  await sql`update library_files set storage_key = ${key}, upload_status = 'ready', text_content = ${await extractTextDeep(p.data, p.fileName, p.mime)}, text_tried_at = now() where id = ${f.id}`; // V19 견적서 PDF 도 본문 검색
   return { id: f.id, storageKey: key };
 }
 
