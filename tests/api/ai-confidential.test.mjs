@@ -38,14 +38,14 @@ describe('AI 비서 기밀 후보 · 기밀 지정 제안', () => {
   let pay, plain;
   test('이름 규칙으로 기밀 후보가 된 파일만 목록에 — 기밀 관리자(대표)만, 직원은 권한 오류', async () => {
     pay = await up(ctx.owner, '10월 급여 명세.txt', '인사');
-    plain = await up(ctx.owner, '10월 행사 안내.txt', '인사');
+    plain = await up(ctx.owner, '10월 행사 안내.txt', '행사'); // V14 32-4: 인사·재무 폴더는 폴더만으로도 기밀 후보가 되므로 일반 파일은 다른 폴더에
     const [f] = await sql`select security, security_suggested, security_confirmed from library_files where id = ${pay}`;
     assert.deepEqual([f.security, f.security_suggested, f.security_confirmed], ['internal', 'confidential', false], '올릴 때는 내부 + 기밀 제안');
     const { reqs, results } = await chat(ctx.owner, { text: '기밀로 해야 할 자료 있어?' }, [toolUse('c1', 'list_confidential_suggestions', {}), say('1건 있습니다.')]);
     assert.ok(reqs[0].body.tools.some((t) => t.name === 'list_confidential_suggestions') && reqs[0].body.tools.some((t) => t.name === 'propose_set_confidential'), '기밀 낱말 → 기밀 도구 묶음');
     assert.ok(!results.c1.is_error, results.c1.content);
     const out = parse(results.c1);
-    assert.deepEqual(out.files.map((x) => [x.id, x.security]), [[pay, '내부']], '후보만·현재 등급 한글');
+    assert.deepEqual(out.files.map((x) => [x.id, x.security]), [[pay, '내부']], '후보만(급여 이름 규칙 + 인사 폴더)·현재 등급 한글');
     const s = await chat(ctx.staffA.client, { text: '기밀 후보 보여줘' }, [toolUse('c2', 'list_confidential_suggestions', {}), say('못 봅니다.')]);
     assert.ok(s.results.c2.is_error); assert.match(String(s.results.c2.content), /기밀 자료.*편집 권한/);
   });

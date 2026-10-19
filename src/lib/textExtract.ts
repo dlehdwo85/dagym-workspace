@@ -2,7 +2,7 @@ import { inflateRawSync } from 'node:zlib';
 
 /**
  * V9 자료실 검색·AI 읽기용 글자 추출 (외부 서비스·추가 패키지 없음).
- * 텍스트·CSV·MD·JSON, Word(.docx)·Excel(.xlsx)·PowerPoint(.pptx). PDF·한글(.hwp)·이미지는 아직 제목·태그로만 찾는다.
+ * 텍스트·CSV·MD·JSON, Word(.docx)·Excel(.xlsx)·PowerPoint(.pptx) 는 동기, 한글(.hwp/.hwpx)·PDF 는 extractTextDeep(비동기). 이미지·스캔 PDF 는 제목·태그 + 정리 때 AI 비전.
  */
 export const MAX_EXTRACT_BYTES = 15 * 1024 * 1024;
 const MAX_CHARS = 300_000;
@@ -56,6 +56,23 @@ function xlsx(z: Map<string, () => Buffer>) {
     }).join('\t'));
     return `[시트 ${names[i] ?? i + 1}]\n${rows.join('\n')}`;
   }).join('\n\n');
+}
+
+/** V14 32: 동기 추출 + HWP·HWPX·PDF(비동기). 스캔 PDF·이미지는 null(정리 때 AI 비전) */
+export async function extractTextDeep(buf: Buffer, fileName: string, mime: string): Promise<string | null> {
+  const sync = extractText(buf, fileName, mime);
+  if (sync) return sync;
+  if (buf.length > MAX_EXTRACT_BYTES) return null;
+  const ext = fileName.toLowerCase().split('.').pop() ?? '';
+  try {
+    let t: string | null = null;
+    if (ext === 'hwp' || mime === 'application/x-hwp' || mime === 'application/haansofthwp') t = (await import('./hwp')).hwpText(buf);
+    else if (ext === 'hwpx' || mime === 'application/hwp+zip' || mime === 'application/haansofthwpx') t = (await import('./hwp')).hwpxText(buf);
+    else if (ext === 'pdf' || mime === 'application/pdf') t = await (await import('./pdfText')).pdfText(buf);
+    return t ? t.replace(/\u0000/g, '').slice(0, MAX_CHARS) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function extractText(buf: Buffer, fileName: string, mime: string): string | null {

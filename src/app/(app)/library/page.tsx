@@ -87,13 +87,14 @@ export default function LibraryPage() {
   const crumbs = cur ? cur.split('/').map((_, i, a) => a.slice(0, i + 1).join('/')) : [];
 
   // ---- 올리기 (현재 폴더 또는 놓은 폴더) ----
-  const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
+  const [prog, setProg] = useState<{ name: string; pct: number; error?: string; note?: string; onOpen?: () => void }[]>([]);
   async function upload(list0: FileList | File[] | null, folder = cur) {
     if (!list0 || !list0.length) return;
     const list = Array.from(list0);
     setProg(list.map((f) => ({ name: f.name, pct: 0 })));
-    const upd = (i: number, patch: Partial<{ pct: number; error: string }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
+    const upd = (i: number, patch: Partial<{ pct: number; error: string; note: string; onOpen: () => void }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
     let ok = 0;
+    const went: Record<string, number> = {}; // V14 32-보정: 여러 개면 "5개 정리: 근로계약 3 · 업무 보고 2"
     for (const [n, file] of list.entries()) {
       setBusy(`${list.length > 1 ? `${n + 1}/${list.length} ` : ''}${file.name} 올리는 중…`);
       try {
@@ -106,14 +107,24 @@ export default function LibraryPage() {
         setBusy(`${file.name} AI 정리 중…`);
         const c = await api(`/api/library/${r.id}/complete`, { body: {} });
         setRecent((s) => new Set(s).add(r.id));
-        if (c.organized?.by === 'ai') toast.ok(`AI 정리됨 → ${c.organized.folder || '최상위'}`);
-        else if (c.organized?.error) toast.error(`AI 정리 못 함 — ${c.organized.error} (파일명 규칙으로 정리)`);
-        upd(n, { pct: 100 }); ok++;
+        const dest = c.organized?.folder ?? folder;
+        const open = () => { setQ(''); setReview(false); setCur(dest); history.replaceState(null, '', `/library?folder=${encodeURIComponent(dest)}&file=${r.id}`); };
+        if (c.organized?.by === 'ai') {
+          went[dest || '최상위'] = (went[dest || '최상위'] ?? 0) + 1;
+          if (list.length === 1) toast.ok(`${file.name} → ${dest || '최상위'} 으로 정리했어요`, { label: '열기', run: open });
+          upd(n, { pct: 100, note: `→ ${dest || '최상위'} 으로 정리했어요`, onOpen: open });
+        } else {
+          if (c.organized?.error) toast.error(`AI 정리 못 함 — ${c.organized.error} (파일명 규칙으로 정리)`);
+          upd(n, { pct: 100, note: c.organized?.error ? undefined : `→ ${dest || '최상위'}` });
+        }
+        ok++;
       } catch (e: any) { upd(n, { error: e.message }); toast.error(`${file.name}: ${e.message}`); }
     }
     setBusy(''); if (fileRef.current) fileRef.current.value = '';
-    if (ok) toast.ok(`${ok}개 올렸습니다${folder ? ` — ${folder}` : ''}`);
-    if (ok === list.length) setTimeout(() => setProg([]), 1500);
+    const kinds = Object.entries(went).sort((a, b) => b[1] - a[1]);
+    if (list.length > 1 && kinds.length) toast.ok(`${ok}개 정리: ${kinds.slice(0, 4).map(([k, n]) => `${nameOf(k)} ${n}`).join(' · ')}`, { label: '열기', run: () => { setQ(''); setReview(false); setCur(kinds[0][0] === '최상위' ? '' : kinds[0][0]); } });
+    else if (ok && list.length > 1) toast.ok(`${ok}개 올렸습니다${folder ? ` — ${folder}` : ''}`);
+    if (ok === list.length) setTimeout(() => setProg([]), kinds.length ? 8000 : 1500); // 어디로 갔는지 읽을 시간
     reload();
   }
   // ---- 옮기기 (파일을 폴더 위에 끌어 놓기 / 여러 개 선택) ----

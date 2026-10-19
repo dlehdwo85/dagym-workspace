@@ -4,7 +4,7 @@ import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { isAdmin, denyDemo, accessibleUnitIds, taskVisibleSql, teamScope } from './access';
 import { activity } from './log';
 import { MAX_UPLOAD_BYTES, downloadUrl, getObject, objectSize, putObject, uploadTarget } from './storage';
-import { extractText } from './textExtract';
+import { extractText, extractTextDeep } from './textExtract';
 import type { Role, SessionUser } from './types';
 import { RANK, menuLevel, requireMenu } from './menuPerms';
 
@@ -262,14 +262,46 @@ export async function completeLibraryFile(u: SessionUser, id: string) {
   if (f.upload_status === 'ready') return { ok: true, id };
   const size = await objectSize(f.storage_key);
   if (size === null) throw badRequest('업로드된 파일을 찾을 수 없습니다. 다시 올려 주세요.');
-  const text = await getObject(f.storage_key).then((b) => extractText(b, f.file_name, f.mime_type)).catch(() => null);
-  await db()`update library_files set upload_status = 'ready', size_bytes = ${size}, text_content = ${text}, updated_at = now() where id = ${id}`;
+  const text = await getObject(f.storage_key).then((b) => extractTextDeep(b, f.file_name, f.mime_type)).catch(() => null); // V14 32: HWP·HWPX·PDF 본문도
+  await db()`update library_files set upload_status = 'ready', size_bytes = ${size}, text_content = ${text}, text_tried_at = now(), updated_at = now() where id = ${id}`;
   // V13 3번: 올리자마자 자동 정리(AI, 한도 소진·AI 꺼짐이면 파일명 규칙). 정리 실패는 올리기 성공에 영향 없음
   const organized = f.source === 'revenue' || f.source === 'ai_attach' ? null : await organizeLibraryFile(u, id, { keepFolder: !!f.folder }).catch(async (e: any) => {
     await db()`update library_files set organize_status = 'failed', organize_error = ${String(e?.message ?? '정리 오류').slice(0, 200)} where id = ${id}`;
     return { by: 'rule' as const, error: String(e?.message ?? '정리 오류') };
   });
+  // V14 32-보정: 올린 직후 "○○ → 폴더로 정리했어요" — 알림 센터에는 한 시간에 1건으로 묶음(건수·마지막 파일 갱신)
+  if (organized && 'folder' in organized && !organized.error && f.source !== 'revenue') await organizedNotice(u, id, organized.folder).catch(() => {});
   return { ok: true, id, hasText: !!text, organized };
+}
+async function organizedNotice(u: SessionUser, id: string, folder: string) {
+  const sql = db();
+  const [f] = await sql<{ title: string }[]>`select title from library_files where id = ${id}`;
+  const hour = new Date().toISOString().slice(0, 13);
+  const key = `library_organized:${u.id}:${hour}`;
+  const { notify } = await import('./notifications');
+  const made = await notify(sql, { userIds: [u.id], type: 'library_organized', title: `자료 정리: ${f.title} → ${folder || '최상위'}`, body: '올린 파일을 AI 가 정리했습니다. 폴더가 맞지 않으면 자료실에서 바꿔 주세요.',
+    link: `/library?folder=${encodeURIComponent(folder)}&file=${id}`, entityType: 'library_file', entityId: id, dedupeKey: key });
+  if (!made.length) { // 같은 시간대 두 번째부터는 건수만 올린다
+    const [n] = await sql<{ body: string }[]>`select body from notifications where user_id = ${u.id} and dedupe_key = ${key}`;
+    const cnt = (Number(/^(\d+)개/.exec(n?.body ?? '')?.[1]) || 1) + 1;
+    await sql`update notifications set title = ${`자료 정리 ${cnt}개 — 마지막: ${f.title} → ${folder || '최상위'}`}, body = ${`${cnt}개를 올렸고 AI 가 폴더를 정했습니다. 맞지 않으면 자료실에서 바꿔 주세요.`},
+      link = ${`/library?folder=${encodeURIComponent(folder)}&file=${id}`}, read_at = null, created_at = now() where user_id = ${u.id} and dedupe_key = ${key}`;
+  }
+}
+/** V14 32: 기존 파일 일괄 재추출 — 본문이 없고 아직 시도 안 한 HWP·HWPX·PDF 를 정기 실행마다 15개씩 */
+export async function textExtractJob(limit = 15) {
+  const sql = db();
+  const rows = await sql<{ id: string; file_name: string; mime_type: string; storage_key: string | null }[]>`select id, file_name, mime_type, storage_key from library_files
+    where deleted_at is null and upload_status = 'ready' and text_content is null and text_tried_at is null and storage_key is not null
+      and (lower(file_name) ~ '\\.(hwp|hwpx|pdf)$' or mime_type in ('application/pdf', 'application/x-hwp', 'application/haansofthwp', 'application/hwp+zip'))
+    order by created_at desc limit ${limit}`;
+  let got = 0;
+  for (const r of rows) {
+    const text = await getObject(r.storage_key!).then((b) => extractTextDeep(b, r.file_name, r.mime_type)).catch(() => null);
+    await sql`update library_files set text_content = ${text}, text_tried_at = now() where id = ${r.id}`;
+    if (text) got++;
+  }
+  return { tried: rows.length, got };
 }
 
 export async function updateLibraryFile(u: SessionUser, id: string, i: z.infer<typeof libraryPatch>) {
@@ -357,7 +389,8 @@ function ruleGuess(fileName: string, rules: { file_name: string; folder: string;
   return best && score > 0 ? { folder: best.folder, tags: best.tags, confidence: Math.min(0.9, 0.4 + score * 0.2) } : null;
 }
 const ORG_SYSTEM = `회사 자료실 정리 담당입니다. 파일 하나의 이름·종류·본문 일부(또는 이미지)를 보고 폴더·태그·제목·한 줄 요약을 정해 JSON 으로 답하세요.
-- 폴더는 "상위/하위" 형식, 가능하면 이미 있는 폴더를 쓰고 없을 때만 새로 만드세요. 예: 회사명_로고_가로형.png → 브랜드자료/회사명, 태그 로고·회사명·가로형.
+- 폴더는 "상위/하위" 형식. **이미 있는 폴더 목록에서 먼저 고르고**(같은 종류 문서는 늘 같은 폴더 — 손익분기점·관리비는 재무/…, 근로계약·프리랜서 계약은 인사/…, 업무 보고·회의록은 운영/…), 정말 맞는 폴더가 없을 때만 새로 만드세요. 예: 회사명_로고_가로형.png → 브랜드자료/회사명, 태그 로고·회사명·가로형.
+- 본문이 있으면 파일명보다 본문을 믿으세요(파일명이 '업무보고'여도 본문이 근로계약이면 인사/근로계약).
 - 회사가 직접 고친 예시가 있으면 그 규칙(같은 종류는 같은 폴더)을 우선 따르세요.
 - 태그는 3~6개, # 없이 짧게. 제목은 사람이 읽기 좋게(확장자 없이). 요약은 한 문장.
 - confidence 는 0~1, 내용을 확인하지 못했거나 애매하면 0.5 이하.
@@ -369,7 +402,8 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   const prev = { folder: f.folder, title: f.title, tags: f.tags, description: f.description };
   const [rules, folders] = await Promise.all([
     sql<{ file_name: string; folder: string; tags: string[] }[]>`select file_name, folder, tags from library_rules where tenant = ${tenantOf(u)} order by created_at desc limit 40`,
-    sql<{ folder: string }[]>`select distinct folder from library_files where tenant = ${tenantOf(u)} and deleted_at is null and folder <> '' order by folder limit 80`,
+    sql<{ folder: string }[]>`select folder from (select distinct folder from library_files where tenant = ${tenantOf(u)} and deleted_at is null and folder <> ''
+      union select path from library_folders where tenant = ${tenantOf(u)}) x order by folder limit 120`, // V14 32: 빈 폴더도 '이미 있는 폴더'
   ]);
   let out: { folder: string; tags: string[]; title?: string; summary?: string; confidence: number; security?: Security } | null = null;
   let by: 'ai' | 'rule' = 'rule';
@@ -425,7 +459,9 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   const description = f.description || (out.summary || '').trim().slice(0, 500) || null;
   const confidence = Math.max(0, Math.min(1, out.confidence));
   // V14 15번 등급 제안: AI 답 + 이름·본문 규칙 중 높은 쪽. 등급 자체는 기밀 관리자가 확인할 때까지 그대로(기본 내부) — 화면에 "기밀 제안" 표시
-  const suggested: Security = maxSec(out.security ?? 'internal', ruleSecurity(`${f.file_name} ${title} ${tags.join(' ')} ${String(f.text_content ?? '').slice(0, 3000)}`, await confWords(tenantOf(u))) ?? 'public');
+  // V14 32-4: 인사·재무(급여·계약·손익) 폴더로 가면 기밀 제안(기밀 관리자 확인 뒤 적용)
+  const hrFin = /^(인사|재무|급여|계약|회계|HR|finance)(\/|$)/i.test(folder);
+  const suggested: Security = maxSec(maxSec(out.security ?? 'internal', hrFin ? 'confidential' : 'public'), ruleSecurity(`${f.file_name} ${title} ${tags.join(' ')} ${String(f.text_content ?? '').slice(0, 3000)}`, await confWords(tenantOf(u))) ?? 'public');
   const security: Security = f.security;
   const result = { by, folder, tags, title, description, confidence, reason, suggested };
   if (opt.preview) { // V14 18번: 관리자 전체 정리 미리보기 — 적용 전까지 아무것도 바꾸지 않는다

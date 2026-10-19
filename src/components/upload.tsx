@@ -63,14 +63,15 @@ export function DropZone({ onFiles, children, className, label = '여기에 놓�
 }
 
 /** 여러 파일 진행률 줄 */
-export function UploadProgress({ items }: { items: { name: string; pct: number; error?: string }[] }) {
+export function UploadProgress({ items }: { items: { name: string; pct: number; error?: string; note?: string; onOpen?: () => void }[] }) {
   if (!items.length) return null;
   return (
     <ul className="mt-2 space-y-1 text-xs" data-testid="upload-progress" aria-live="polite">
       {items.map((it, i) => (
         <li key={i}>
           <div className="flex justify-between gap-2"><span className="truncate">{it.name}</span><span className={it.error ? 'text-red-600' : 'tabular-nums text-ink-2'}>{it.error ? '실패' : `${it.pct}%`}</span></div>
-          {it.error ? <p className="text-red-600" role="alert">{it.error}</p> : <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-accent-500 transition-[width]" style={{ width: `${it.pct}%` }} /></div>}
+          {it.error ? <p className="text-red-600" role="alert">{it.error}</p> : it.note ? <p className="text-violet-700" data-testid="upload-note">{it.note}{it.onOpen && <button type="button" className="ml-1.5 font-semibold underline" onClick={it.onOpen}>열기</button>}</p>
+            : <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-accent-500 transition-[width]" style={{ width: `${it.pct}%` }} /></div>}
         </li>
       ))}
     </ul>
