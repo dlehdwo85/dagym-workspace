@@ -37,6 +37,20 @@ const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seou
 const daysBack = (n: number) => Array.from({ length: n }, (_, k) => ymd(new Date(Date.now() - (n - 1 - k) * 864e5)));
 const num = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
 
+/** Google Ads 오류 상세(errors[].errorCode: 종류=값) — 403 원인 구분용(로컬 검수 10/19). 토큰·요청 내용은 넣지 않음 */
+export function adsErrorCodes(j: any): string[] {
+  const out: string[] = [];
+  for (const d of j?.error?.details ?? []) for (const e of d?.errors ?? []) for (const [k, v] of Object.entries(e?.errorCode ?? {})) out.push(`${k}=${v}`);
+  return [...new Set(out)].slice(0, 5);
+}
+const ADS_HINT: Record<string, string> = {
+  DEVELOPER_TOKEN_NOT_APPROVED: '개발자 토큰이 시험(Test) 등급이라 실제 계정은 못 읽습니다 — MCC API 센터에서 기본(Basic) 액세스 신청',
+  DEVELOPER_TOKEN_PROHIBITED: '이 개발자 토큰은 이 Google Cloud 프로젝트에서 쓸 수 없습니다 — 토큰을 발급한 MCC·프로젝트 확인',
+  USER_PERMISSION_DENIED: '로그인한 Google 계정에 이 광고 계정 권한이 없습니다 — 광고 계정 사용자 추가 또는 관리자 계정(login-customer-id) 지정',
+  CUSTOMER_NOT_ENABLED: '광고 계정이 사용 중이 아닙니다(해지·미설정)',
+  DEVELOPER_TOKEN_INVALID: '개발자 토큰 값이 틀렸습니다',
+  NOT_ADS_USER: '이 Google 계정은 Google Ads 사용자가 아닙니다',
+};
 async function getJson(url: string, init?: RequestInit) {
   const r = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) });
   const text = await r.text();
@@ -45,7 +59,9 @@ async function getJson(url: string, init?: RequestInit) {
     // HTML 오류 페이지는 그대로 보이지 않고 상태·경로만(토큰·쿼리 제외)
     const path = (() => { try { const x = new URL(url); return `${x.host}${x.pathname}`; } catch { return ''; } })();
     const msg = j ? String(j?.error?.message ?? j?.error?.status ?? j?.title ?? j?.message ?? '').slice(0, 200) : (/<html|<!doctype/i.test(text) ? '(HTML 오류 페이지 — 주소·API 버전 확인)' : text.slice(0, 120));
-    throw new HttpError(502, 'ads_upstream', `광고 API 오류 ${r.status} ${path} ${msg}`.trim(), { status: r.status });
+    const codes = adsErrorCodes(j);
+    const hint = codes.map((c) => ADS_HINT[c.split('=')[1]]).find(Boolean);
+    throw new HttpError(502, 'ads_upstream', `광고 API 오류 ${r.status} ${path} ${msg}${codes.length ? ` [${codes.join(', ')}]` : ''}${hint ? ` — ${hint}` : ''}`.trim(), { status: r.status, codes });
   }
   return j;
 }

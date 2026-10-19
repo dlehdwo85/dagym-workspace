@@ -13,7 +13,7 @@ export function PlatformSalesMigrate() {
     setBusy(true);
     try { setR(await api('/api/platform/sales-migrate', { body: {} })); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
-  const st = useApi<{ applied: { tenant: string; at: string; daily: boolean } | null; sync: any[]; users: any[] }>('/api/platform/sales-migrate');
+  const st = useApi<{ applied: { tenant: string; at: string; daily: boolean } | null; sync: any[]; users: any[]; people: { id: string; name: string; tenant: string }[] }>('/api/platform/sales-migrate');
   const [tenant, setTenant] = useState('default');
   const [ap, setAp] = useState<any>(null);
   async function apply() {
@@ -52,6 +52,21 @@ export function PlatformSalesMigrate() {
                 <td className={cx('p-1 text-right tabular-nums', t.expected !== null && t.count !== t.expected && 'font-semibold text-red-700')}>{t.error ? <span className="text-red-700">{t.error}</span> : t.count ?? '—'}</td>
                 <td className="p-1 text-right tabular-nums text-ink-3">{t.expected ?? ''}</td><td className="p-1 text-ink-3">{t.columns.join(', ')}</td></tr>))}</tbody></table></div>
         </>
+      )}
+      {!!st.data?.users.length && (
+        <div className="mt-4 border-t border-line pt-3" data-testid="sales-user-map">
+          <h3 className="text-sm font-semibold">원본 사용자 → 워크인 사용자</h3>
+          <p className="mt-1 text-xs text-ink-2">이메일로 짝을 못 찾은 사람은 대표에게 연결됩니다. 직접 고르면 다시 가져와도 그대로이고, 그 사람 담당 리드도 바뀝니다.</p>
+          <ul className="mt-2 divide-y divide-line text-xs">{st.data.users.map((m: any) => (
+            <li key={`${m.tenant}:${m.src_user_id}`} className="flex flex-wrap items-center gap-2 py-1.5">
+              <span className="w-40 truncate font-medium">{m.name ?? m.src_user_id}</span><span className="w-48 truncate text-ink-3">{m.email ?? ''}</span>
+              <span className={cx('rounded-full px-1.5', m.manual ? 'bg-blue-50 text-blue-800' : m.matched ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800')}>{m.manual ? '직접 연결' : m.matched ? '이메일 일치' : '대표에게 연결됨'}</span>
+              <select className="h-7 rounded-input border border-line px-1" value={m.manual ? m.user_id : ''} aria-label={`${m.name ?? m.src_user_id} 워크인 사용자`} data-testid="sales-user-select"
+                onChange={async (e) => { try { await api('/api/platform/sales-migrate', { body: { action: 'map', tenant: m.tenant, srcUserId: m.src_user_id, userId: e.target.value || null } }); toast.ok('연결했습니다'); st.reload(); } catch (er: any) { toast.error(er.message); } }}>
+                <option value="">{m.manual ? '직접 연결 풀기' : `(자동) ${m.user_name ?? ''}`}</option>
+                {(st.data?.people ?? []).filter((p) => p.tenant === m.tenant).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select></li>))}</ul>
+        </div>
       )}
       <SalesCutover />
     </section>

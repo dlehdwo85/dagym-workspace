@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -38,16 +39,14 @@ function NaverForm({ onClose, onDone }: { onClose: () => void; onDone: () => voi
   );
 }
 
+const connectMsg = (sp: URLSearchParams) => (sp.get('connected') ? `${sp.get('connected') === 'meta' ? 'Meta' : 'Google Ads'} 광고 계정 ${sp.get('count') ?? ''}개를 연결했습니다` : sp.get('error') ? `연결 실패: ${sp.get('error')}` : null);
+
 /** V41 4-2 광고 성과(읽기 전용) — 회사별로 직접 연결한 네이버·Google·Meta 광고 계정 */
 export function Ads() {
   const sp = useSearchParams();
   const [days, setDays] = useState(7);
-  const [naver, setNaver] = useState(false);
-  const [busy, setBusy] = useState(false);
   const { data, error, reload } = useApi<Data>(`/api/marketing/ads?days=${days}`, [days]);
-  const msg = sp.get('connected') ? `${sp.get('connected') === 'meta' ? 'Meta' : 'Google Ads'} 광고 계정 ${sp.get('count') ?? ''}개를 연결했습니다` : sp.get('error') ? `연결 실패: ${sp.get('error')}` : null;
-  async function sync() { setBusy(true); try { const r = await api<{ results: { error?: string }[] }>('/api/marketing/ads/sync', { body: {} }); const bad = r.results.filter((x) => x.error).length; bad ? toast.error(`${bad}개 계정을 읽지 못했습니다`) : toast.ok('최근 7일 성과를 다시 불러왔습니다'); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
-  async function remove(a: Acc) { if (!confirm(`${a.label} 연결을 끊을까요? 모은 성과도 함께 지워집니다.`)) return; try { await api(`/api/marketing/ads/accounts/${a.id}`, { method: 'DELETE' }); reload(); } catch (e: any) { toast.error(e.message); } }
+  const msg = connectMsg(sp);
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={5} />;
   const t = data.totals;
@@ -73,14 +72,42 @@ export function Ads() {
               <td className="p-2 text-right tabular-nums">{won(c.cost, c.currency)}</td><td className="p-2 text-right tabular-nums">{c.clicks ? won(c.cost / c.clicks, c.currency) : '—'}</td><td className="p-2 text-right tabular-nums">{n0(c.conversions)}</td></tr>))}
             {!data.campaigns.length && <tr><td colSpan={6} className="p-6 text-center text-ink-3">{data.accounts.length ? '이 기간 성과가 없습니다' : '광고 계정을 연결하면 매일 아침 성과가 들어옵니다'}</td></tr>}</tbody></table>
       </section>
+      {/* 로컬 검수 10/19: 계정 연결은 설정 › 연결 계정으로 — 여기는 숫자만 */}
+      <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2" data-testid="ads-accounts-link">
+        <span>연결된 광고 계정 {data.accounts.length}개{data.accounts.some((a) => a.status === 'error') && <b className="ml-1 text-red-700">· 읽기 실패 {data.accounts.filter((a) => a.status === 'error').length}개</b>}</span>
+        <Link href="/s/marketing/connections" className="font-medium underline" style={{ color: C }}>계정 연결은 설정 › 연결 계정</Link>
+      </p>
+    </div>
+  );
+}
+
+/** 로컬 검수 10/19: 마케팅 설정 › 연결 계정 — 광고 계정(네이버·Google·Meta)과 게시 채널을 한 화면에 */
+export function Connections() {
+  const sp = useSearchParams();
+  const [naver, setNaver] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const { data, error, reload } = useApi<Data>('/api/marketing/ads?days=7');
+  const msg = connectMsg(sp);
+  async function sync() { setBusy(true); try { const r = await api<{ results: { error?: string }[] }>('/api/marketing/ads/sync', { body: {} }); const bad = r.results.filter((x) => x.error).length; bad ? toast.error(`${bad}개 계정을 읽지 못했습니다`) : toast.ok('최근 7일 성과를 다시 불러왔습니다'); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
+  async function remove(a: Acc) { if (!confirm(`${a.label} 연결을 끊을까요? 모은 성과도 함께 지워집니다.`)) return; try { await api(`/api/marketing/ads/accounts/${a.id}`, { method: 'DELETE' }); reload(); } catch (e: any) { toast.error(e.message); } }
+  if (error) return <ErrorBox error={error} retry={reload} />;
+  if (!data) return <Skeleton rows={5} />;
+  const CHANNELS: [string, string, string][] = [['인스타그램', '준비 중', '게시 연동 방식(통합 게시 API / Meta 직접) 결정 후 연결 — 그 전에는 승인 후 직접 올리고 [게시 확인]'],
+    ['페이스북 페이지', '준비 중', '인스타그램과 같은 방식으로 연결 예정'], ['유튜브', '준비 중', '업로드 연동 결정 후 연결'],
+    ['네이버 블로그', '게시 도우미', '공식 쓰기 API 가 없어 승인된 글 상세의 게시 도우미(복사·사진·글쓰기 열기)로 직접 발행']];
+  return (
+    <div className="space-y-4" data-testid="mkt-connections">
+      <h1 className="text-xl font-bold" style={{ color: C }}>연결 계정</h1>
+      {msg && <p className={cx('rounded-input px-3 py-2 text-sm', sp.get('error') ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800')} role="status">{msg}</p>}
       <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ads-accounts">
-        <div className="mb-2 flex items-center gap-2"><h2 className="text-sm font-semibold">연결된 광고 계정</h2>{data.canEdit && !!data.accounts.length && <Button size="sm" variant="secondary" className="ml-auto" onClick={sync} disabled={busy} data-testid="ads-sync">{busy ? '불러오는 중…' : '지금 다시 불러오기'}</Button>}</div>
+        <div className="mb-2 flex items-center gap-2"><h2 className="text-sm font-semibold">광고 계정</h2>{data.canEdit && !!data.accounts.length && <Button size="sm" variant="secondary" className="ml-auto" onClick={sync} disabled={busy} data-testid="ads-sync">{busy ? '불러오는 중…' : '다시 불러오기'}</Button>}</div>
         <ul className="divide-y divide-line text-sm">{data.accounts.map((a) => (
           <li key={a.id} className="flex flex-wrap items-center gap-2 py-2" data-testid="ads-account"><span className="size-2 rounded-full" style={{ background: P_COLOR[a.provider] }} /><span className="font-medium">{a.label}</span>
+            <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', a.status === 'error' ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800')}>{a.status === 'error' ? '읽기 실패' : '연결됨'}</span>
             <span className="text-xs text-ink-2">{data.providers.find((p) => p.key === a.provider)?.label} · {a.external_id}{a.brand ? ` · ${a.brand}` : ''} · {a.last_sync_at ? `읽은 시각 ${fmtDateTime(a.last_sync_at)}` : '아직 안 읽음'}</span>
-            {a.status === 'error' && <span className="w-full text-xs text-red-700">읽기 실패: {a.last_error}</span>}
-            {data.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => remove(a)}>연결 끊기</Button>}</li>))}
-          {!data.accounts.length && <li className="py-2 text-xs text-ink-3">연결된 계정이 없습니다</li>}</ul>
+            {a.status === 'error' && <span className="w-full break-words text-xs text-red-700" data-testid="ads-account-error">{a.last_error}</span>}
+            {data.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => remove(a)}>끊기</Button>}</li>))}
+          {!data.accounts.length && <li className="py-2 text-xs text-ink-3">연결된 광고 계정이 없습니다</li>}</ul>
         {data.canEdit ? (
           <div className="mt-3 flex flex-wrap gap-2">
             <Button size="sm" onClick={() => setNaver(true)} data-testid="ads-add-naver">네이버 검색광고 연결</Button>
@@ -89,13 +116,20 @@ export function Ads() {
               : <span key={p.key} className="inline-flex h-8 items-center rounded-input border border-dashed border-line px-3 text-xs text-ink-3" title="워크인 앱 등록·심사 후 열립니다">{p.label} — 준비 중</span>)}
           </div>
         ) : <p className="mt-2 text-xs text-ink-3">광고 계정 연결은 관리자가 합니다.</p>}
-        {data.callbacks && (
-          <details className="mt-2 text-xs text-ink-2" data-testid="ads-callbacks"><summary className="cursor-pointer">Google·Meta 콘솔에 등록할 콜백 주소</summary>
-            <ul className="mt-1 space-y-0.5">{(['google', 'meta'] as const).map((k) => <li key={k}><span className="inline-block w-14">{k === 'google' ? 'Google' : 'Meta'}</span><code className="select-all break-all rounded bg-slate-100 px-1">{data.callbacks![k]}</code></li>)}</ul>
-            <p className="mt-1 text-[11px] text-ink-3">운영 주소(APP_URL)를 바꾸면 이 주소도 바뀌니 콘솔에도 다시 등록해야 합니다.</p></details>
-        )}
-        <p className="mt-2 text-[11px] text-ink-3">성과는 각 광고 플랫폼에서 직접 읽습니다(하루 한 번, 최근 7일을 다시 읽어 늦게 잡힌 전환까지 반영). 광고 예산·입찰을 바꾸는 기능은 없습니다.</p>
+        <p className="mt-2 text-[11px] text-ink-3">성과는 각 광고 플랫폼에서 하루 한 번 읽기만 합니다(최근 7일을 다시 읽어 늦게 잡힌 전환까지 반영). 예산·입찰은 바꾸지 않습니다.</p>
       </section>
+      <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="publish-channels">
+        <h2 className="text-sm font-semibold">게시 채널</h2>
+        <ul className="mt-2 divide-y divide-line text-sm">{CHANNELS.map(([name, st, note]) => (
+          <li key={name} className="flex flex-wrap items-center gap-2 py-2"><span className="font-medium">{name}</span>
+            <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', st === '게시 도우미' ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-ink-2')}>{st}</span>
+            <span className="w-full text-xs text-ink-2">{note}</span></li>))}</ul>
+      </section>
+      {data.callbacks && (
+        <details className="rounded-card border border-line bg-white p-3 text-xs text-ink-2 shadow-card" data-testid="ads-callbacks"><summary className="cursor-pointer font-medium">관리자: Google·Meta 콘솔에 등록할 콜백 주소</summary>
+          <ul className="mt-1 space-y-0.5">{(['google', 'meta'] as const).map((k) => <li key={k}><span className="inline-block w-14">{k === 'google' ? 'Google' : 'Meta'}</span><code className="select-all break-all rounded bg-slate-100 px-1">{data.callbacks![k]}</code></li>)}</ul>
+          <p className="mt-1 text-[11px] text-ink-3">운영 주소(APP_URL)를 바꾸면 이 주소도 바뀌니 콘솔에도 다시 등록해야 합니다.</p></details>
+      )}
       {naver && <NaverForm onClose={() => setNaver(false)} onDone={reload} />}
     </div>
   );

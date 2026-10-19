@@ -81,6 +81,12 @@ test('적용: 공용/회사별·진행 칸 분리·멱등·사라진 행·사용
   const l2 = r2.results.find((t) => t.tbl === 'leads');
   assert.deepEqual([l2.src, l2.dst, l2.ok], [20, 20, true]);
   assert.equal((await sql`select count(*)::int n from sales_src_rows where tbl = 'leads'`)[0].n, 21, '지우지 않고 사라짐 표시');
+  // 로컬 요청 10/19: 이메일로 못 찾은 원본 사용자(P2)를 워크인 사용자에 직접 연결 → 다시 적용해도 유지(멱등)
+  assert.equal((await ctx.owner.req('POST', '/api/platform/sales-migrate', { action: 'map', tenant: 'default', srcUserId: 'P2', userId: '00000000-0000-0000-0000-000000000000' })).status, 400, '그 회사 사용자만');
+  await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'map', tenant: 'default', srcUserId: 'P2', userId: ctx.staffA.id });
+  await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'apply', tenant: 'default' });
+  const [p2] = await sql`select user_id, manual, matched from sales_user_map where src_user_id = 'P2'`;
+  assert.deepEqual([p2.user_id, p2.manual, p2.matched], [ctx.staffA.id, true, true], '다시 적용해도 직접 연결 유지');
   const st = await ctx.owner.ok('GET', '/api/platform/sales-migrate');
   assert.equal(st.applied.daily, true); assert.ok(st.sync.find((x) => x.tbl === 'leads' && x.dst_count === 20));
   await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'daily', daily: false });

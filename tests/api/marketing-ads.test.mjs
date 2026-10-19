@@ -7,7 +7,7 @@ import { createHmac } from 'node:crypto';
 import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
 const PORT = 3218;
-let srv, ctx, sql, fake, hits = [];
+let srv, ctx, sql, fake, hits = [], gads403 = false;
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 before(async () => {
   fake = http.createServer(async (req, res) => {
@@ -30,6 +30,8 @@ before(async () => {
     if (/^\/gads\/v2[34]\//.test(u.pathname)) { res.setHeader('content-type', 'text/html'); res.statusCode = 404; return res.end('<!DOCTYPE html><html>Error 404 (Not Found)!!1</html>'); }
     if (u.pathname.startsWith('/gads/')) u.pathname = u.pathname.replace(/^\/gads\/v\d+/, '/gads');
     if (u.pathname === '/gads/customers:listAccessibleCustomers') return send(200, { resourceNames: ['customers/1112223333'] });
+    if (u.pathname === '/gads/customers/1112223333/googleAds:search' && gads403) return send(403, { error: { code: 403, message: 'The caller does not have permission', status: 'PERMISSION_DENIED',
+      details: [{ '@type': 'type.googleapis.com/google.ads.googleads.v22.errors.GoogleAdsFailure', errors: [{ errorCode: { authorizationError: 'DEVELOPER_TOKEN_NOT_APPROVED' }, message: 'The developer token is only approved for use with test accounts.' }] }] } });
     if (u.pathname === '/gads/customers/1112223333/googleAds:search') return send(200, { results: [{ segments: { date: today }, campaign: { id: '77', name: '검색 캠페인' }, metrics: { impressions: '500', clicks: '10', costMicros: '12000000000', conversions: 1.5 }, customer: { currencyCode: 'KRW' } }] });
     send(404, { error: { message: 'nope' } });
   }).listen(PORT);
@@ -72,7 +74,7 @@ test('Meta·Google OAuth 연결 → 계정 등록·성과', async () => {
   const bad = await ctx.owner.get('/api/marketing/ads/callback/meta?code=c&state=wrong');
   assert.match(bad.headers.get('location'), /error=/);
   const cb = await ctx.owner.get(`/api/marketing/ads/callback/meta?code=c1&state=${loc.searchParams.get('state')}`);
-  assert.match(cb.headers.get('location'), /\/s\/marketing\/ads\?connected=meta&count=1/);
+  assert.match(cb.headers.get('location'), /\/s\/marketing\/connections\?connected=meta&count=1/);
   const g = new URL((await ctx.owner.get('/api/marketing/ads/connect/google')).headers.get('location'));
   assert.equal(g.searchParams.get('access_type'), 'offline');
   const gcb = await ctx.owner.get(`/api/marketing/ads/callback/google?code=g1&state=${g.searchParams.get('state')}`);
@@ -85,6 +87,13 @@ test('Meta·Google OAuth 연결 → 계정 등록·성과', async () => {
   assert.equal(by['가을 리드'].conversions, 3, 'Meta 전환 = 리드만(링크 클릭 제외)');
   assert.equal(by['검색 캠페인'].cost, 12000, 'Google 비용 = micros / 1,000,000');
   assert.equal(ov.totals.cost, 25000 + 30000 + 12000);
+  // 로컬 검수 10/19: Google 403 은 오류 상세(errorCode 종류=값)와 원인 안내를 계정 줄에 남김
+  gads403 = true;
+  await ctx.owner.ok('POST', '/api/marketing/ads/sync', {});
+  gads403 = false;
+  const [gerr] = await sql`select status, last_error from mkt_ad_accounts where provider = 'google'`;
+  assert.match(gerr.last_error ?? '', /authorizationError=DEVELOPER_TOKEN_NOT_APPROVED/, JSON.stringify(gerr));
+  assert.match(gerr.last_error, /기본\(Basic\) 액세스/);
   // 연결 끊기 = 성과도 삭제
   const meta = ov.accounts.find((a) => a.provider === 'meta');
   await ctx.owner.ok('DELETE', `/api/marketing/ads/accounts/${meta.id}`);

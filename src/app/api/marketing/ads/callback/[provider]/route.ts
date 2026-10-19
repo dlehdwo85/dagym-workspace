@@ -6,9 +6,9 @@ import { oauthCallback } from '@/lib/marketingAds';
 export async function GET(req: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
   const base = (process.env.APP_URL ?? req.nextUrl.origin).replace(/\/$/, '');
-  const back = (q: string) => NextResponse.redirect(`${base}/s/marketing/ads?${q}`, 302);
+  const back = (q: string) => NextResponse.redirect(`${base}/s/marketing/connections?${q}`, 302);
   const u = await currentUser();
-  if (!u) return NextResponse.redirect(`${base}/login?next=/s/marketing/ads`, 302);
+  if (!u) return NextResponse.redirect(`${base}/login?next=/s/marketing/connections`, 302);
   const p = req.nextUrl.searchParams;
   if (p.get('error')) return back(`error=${encodeURIComponent(p.get('error_description') ?? p.get('error')!)}`);
   try {

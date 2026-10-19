@@ -104,8 +104,9 @@ export async function salesMigrateApply(u: SessionUser | null, tenant: string) {
       const email = String(p.email ?? '').trim().toLowerCase() || null;
       const [m] = email ? await sql<{ id: string }[]>`select id from users where tenant = ${tenant} and lower(email) = ${email} and status = 'active' limit 1` : [];
       await sql`insert into sales_user_map (tenant, src_user_id, user_id, email, name, matched) values (${tenant}, ${String(p.id)}, ${m?.id ?? owner?.id ?? null}, ${email}, ${p.full_name ?? p.name ?? null}, ${!!m})
-        on conflict (tenant, src_user_id) do update set user_id = excluded.user_id, email = excluded.email, name = excluded.name, matched = excluded.matched`;
-      users.total++; if (m) users.matched++;
+        on conflict (tenant, src_user_id) do update set user_id = case when sales_user_map.manual then sales_user_map.user_id else excluded.user_id end, email = excluded.email, name = excluded.name,
+          matched = sales_user_map.manual or excluded.matched`; // 직접 연결한 사람은 다시 가져와도 그대로
+      users.total++; if (m || (await sql`select 1 from sales_user_map where tenant = ${tenant} and src_user_id = ${String(p.id)} and manual`).length) users.matched++;
     }
   } catch (e: any) { results.push({ tbl: 'profiles', scope: 'tenant', src: null, dst: 0, ok: false, error: String(e?.message ?? e).slice(0, 200) }); }
   // 대조: 워크인 쪽 건수(사라짐 제외)
@@ -145,5 +146,19 @@ export async function salesMigrateStatus(u: SessionUser) {
   const sql = db();
   const [s] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
   return { applied: s?.value ?? null, sync: await sql`select tenant, tbl, src_count, dst_count, error, synced_at from sales_src_sync order by tenant, tbl`,
-    users: await sql`select m.src_user_id, m.email, m.name, m.matched, u.name as user_name from sales_user_map m left join users u on u.id = m.user_id order by m.matched desc, m.name` };
+    users: await sql`select m.tenant, m.src_user_id, m.email, m.name, m.matched, m.manual, m.user_id, u.name as user_name from sales_user_map m left join users u on u.id = m.user_id order by m.matched desc, m.name`,
+    people: await sql`select id, name, tenant from users where status = 'active' and not is_demo order by name` };
+}
+
+/** 원본 사용자 → 워크인 사용자 직접 연결(그 회사 사용자만). null = 직접 연결 풀기(다음 적용 때 이메일 짝·없으면 대표) */
+export async function salesMapUser(u: SessionUser, tenant: string, srcUserId: string, userId: string | null) {
+  if (!u.platformAdmin || u.support) throw notFound();
+  const sql = db();
+  if (userId && !(await sql`select 1 from users where id = ${userId} and tenant = ${tenant} and status = 'active'`).length) throw new HttpError(400, 'bad_request', '그 회사의 활성 사용자가 아닙니다');
+  const [r] = await sql`update sales_user_map set user_id = coalesce(${userId}, user_id), manual = ${!!userId}, matched = ${!!userId} or matched where tenant = ${tenant} and src_user_id = ${srcUserId} returning src_user_id`;
+  if (!r) throw notFound('원본 사용자를 찾을 수 없습니다 — 먼저 [적용]');
+  // 정식 표(전환 준비)에 이미 옮긴 리드 담당도 바로 바꿈
+  if (userId) await sql`update sales_leads set owner_id = ${userId}, updated_at = now() where tenant = ${tenant} and coalesce(src->>'owner_id', src->>'assigned_to', src->>'sales_owner_id', src->>'user_id') = ${srcUserId}`;
+  await audit(sql, u.id, 'sales_migrate.map_user', 'tenant', null, { tenant, srcUserId, userId }).catch(() => {});
+  return { ok: true };
 }

@@ -50,6 +50,11 @@ export async function marketing({ owner, BASE, sql }) {
   await owner.getByTestId('ads-card').first().waitFor();
   assert.equal(await owner.getByTestId('ads-card').count(), 4);
   await owner.getByText('광고 계정을 연결하면 매일 아침 성과가 들어옵니다').waitFor();
+  // 로컬 검수 10/19: 사이드바 묶음(운영·제작·성과·설정)·계정 연결은 설정 › 연결 계정
+  assert.deepEqual(await owner.locator('aside').getByTestId('nav-group').allInnerTexts(), ['운영', '제작', '성과', '설정']);
+  await owner.getByTestId('ads-accounts-link').getByRole('link', { name: /연결 계정/ }).click();
+  await owner.getByTestId('mkt-connections').waitFor();
+  await owner.getByTestId('publish-channels').getByText('게시 도우미', { exact: true }).waitFor();
   await owner.getByTestId('ads-callbacks').getByText(/\/api\/marketing\/ads\/callback\/meta/).waitFor({ state: 'attached' });
   await owner.getByTestId('ads-add-naver').click();
   await owner.getByTestId('naver-form').waitFor();
