@@ -18,6 +18,12 @@ export async function marketing({ owner, BASE, sql }) {
   await owner.getByTestId('mkt-date').fill(today);
   await owner.getByTestId('mkt-body').fill('가을 행사 안내 캡션');
   await owner.getByTestId('mkt-save').click();
+  // 운영실 규칙: 오늘 10:00 게시는 09:00 마감 — 시험 시각이 09시 넘으면 '마감 지남' 접힌 묶음에 있음(빨간 테두리·숫자에서 뺌)
+  await owner.getByTestId('mkt-approvals').getByText('E2E 가을 행사 게시물').first().waitFor({ state: 'attached' });
+  if (await owner.getByTestId('mkt-late').count()) {
+    await owner.getByTestId('mkt-late').locator(':scope > summary').click();
+    assert.equal(await owner.getByTestId('mkt-late').getByTestId('approval-card').first().getAttribute('data-late'), 'true');
+  }
   await owner.getByTestId('mkt-row').filter({ hasText: 'E2E 가을 행사 게시물' }).click();
   await owner.getByTestId('mkt-decide').waitFor();
   await owner.getByTestId('mkt-approve').click();
@@ -100,6 +106,7 @@ export async function marketing({ owner, BASE, sql }) {
     values (${tenant}, '[시험] E2E 자동 시안', 'instagram', now() + interval '3 days', 'changes', 1, ${created_by}, 'feed', true, now(), true, ${sql.json({ passed: false, issues: ['채우지 않은 자리표시'], brief: '실사' })}) returning id`;
   await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${ac.id}, 1, '자동 본문', ${[]}, 'AI 자동 제작', ${created_by})`;
   await owner.goto(`${BASE}/s/marketing/approvals`);
+  await owner.getByTestId('mkt-waiting').locator(':scope > summary').click(); // 수정 요청·보류는 '새 버전 기다림' 접힌 묶음(승인 숫자에서 뺌)
   await owner.getByTestId('mkt-row').filter({ hasText: 'E2E 자동 시안' }).click();
   await owner.getByTestId('mkt-detail').getByText('자동 본문').waitFor();
   await owner.getByTestId('mkt-decide').waitFor();

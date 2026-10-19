@@ -135,9 +135,22 @@ export function Leads({ initialId, initialDay }: { initialId?: string; initialDa
     <div className="space-y-3" data-testid="sales-leads">
       <Head title="리드·거래처" meta={data}>{data?.readOnly === false && <Button size="sm" onClick={() => setNl({ name: '', region: '', contactName: '', phone: '' })} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} />{day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="leads-day-today">오늘 연락할 리드 ✕</button>}<select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
       {!data ? <Skeleton rows={5} /> : (
-        <div className="overflow-x-auto rounded-card border border-line bg-white shadow-card"><table className="w-full min-w-[720px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr><th className="p-2">이름</th><th className="p-2">단계</th><th className="p-2">우선</th><th className="p-2">시설</th><th className="p-2">지역</th><th className="p-2">담당</th><th className="p-2">다음 연락</th></tr></thead>
-          <tbody>{data.leads.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={() => setOpen(l.id)} data-testid="sales-lead-row"><td className="p-2 font-medium">{l.name}</td><td className="p-2">{chip(l.status)}</td><td className="p-2 text-xs">{l.priority ?? ''}</td><td className="p-2 text-xs">{l.facility ?? ''}</td><td className="p-2 text-xs">{l.region ?? ''}</td><td className="p-2 text-xs">{l.owner ?? ''}</td><td className="p-2 text-xs tabular-nums">{l.next ?? ''}</td></tr>)}
-            {!data.leads.length && <tr><td colSpan={7} className="p-6 text-center text-ink-3">리드가 없습니다</td></tr>}</tbody></table></div>
+        <>
+        {/* 영업관리 2-13 표 칸: 거래처명(담당·최근 활동·금액) · 관심 사업 · 시설 · 지역 · 단계 · 우선 · 예상매출 · 다음 연락 · 최근 활동 · 담당 — 휴대폰은 카드 */}
+        <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block"><table className="w-full min-w-[960px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>{['거래처명', '관심 사업', '시설', '지역', '단계', '우선', '예상매출', '다음 연락', '최근 활동', '담당'].map((h) => <th key={h} className="whitespace-nowrap p-2">{h}</th>)}</tr></thead>
+          <tbody>{data.leads.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={() => setOpen(l.id)} data-testid="sales-lead-row">
+            <td className="p-2 font-medium">{l.name}{l.contact && <span className="block text-[11px] font-normal text-ink-3">{l.contact}{l.phone ? ` · ${l.phone}` : ''}</span>}</td>
+            <td className="p-2">{interests(l.interests)}</td><td className="p-2 text-xs">{l.facility ?? ''}</td><td className="p-2 text-xs">{l.region ?? ''}</td><td className="p-2">{chip(l.status)}</td><td className="p-2 text-xs">{l.priority ?? ''}</td>
+            <td className="p-2 text-xs tabular-nums">{won(l.revenue)}</td><td className={cx('p-2 text-xs tabular-nums', l.next && l.next < today() ? 'font-semibold text-red-600' : '')}>{l.next ?? ''}</td><td className="p-2 text-xs tabular-nums text-ink-3">{l.updated ?? ''}</td><td className="p-2 text-xs">{l.owner ?? ''}</td></tr>)}
+            {!data.leads.length && <tr><td colSpan={10} className="p-6 text-center text-ink-3">리드가 없습니다</td></tr>}</tbody></table></div>
+        <ul className="space-y-2 md:hidden" data-testid="sales-lead-cards">{data.leads.map((l: any) => (
+          <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-card border border-line bg-white p-3 text-left text-sm" data-testid="sales-lead-card">
+            <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(l.status)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
+            <span className="mt-0.5 block text-xs text-ink-2">{[l.facility, l.region, l.owner && `담당 ${l.owner}`].filter(Boolean).join(' · ')}</span>
+            <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">{interests(l.interests)}{l.next && <span className={l.next < today() ? 'font-semibold text-red-600' : 'text-ink-2'}>다음 연락 {l.next}</span>}{l.revenue ? <span className="text-ink-3">{won(l.revenue)}</span> : null}</span>
+          </button>{l.phone && <a href={`tel:${String(l.phone).replace(/[^0-9+]/g, '')}`} className="mt-1 inline-block rounded-input border border-line px-2 py-1 text-xs">전화 {l.phone}</a>}</li>))}
+          {!data.leads.length && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
+        </>
       )}
       {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
       {nl && (
@@ -193,11 +206,7 @@ export function Bids({ initialTab }: { initialTab?: string }) {
     <div className="space-y-3" data-testid="sales-bids">
       <Head title="입찰·공고 모니터링" meta={data}><Search value={s} onChange={setS} /></Head>
       <div className="flex flex-wrap gap-1.5">{[['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
-      {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => (
-        <li key={n.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-bid"><div className="flex flex-wrap items-center gap-2">{n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">{n.title}</a> : <span className="font-medium">{n.title}</span>}{chip(n.work)}{chip(n.classification)}{n.fit !== null && n.fit !== undefined && <span className="text-[11px] text-ink-3">적합 {String(n.fit)}</span>}</div>
-          <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.region, n.source, n.deadline && `마감 ${String(n.deadline).slice(0, 16).replace('T', ' ')}`, n.status].filter(Boolean).join(' · ')}</div>
-          {n.judgment && <div className="mt-0.5 text-xs text-ink-2">판단: {n.judgment}</div>}
-          {!!n.attachments?.length && <div className="mt-1 flex flex-wrap gap-2 text-[11px]">{n.attachments.slice(0, 5).map((a: any, k: number) => <a key={k} href={typeof a === 'string' ? a : a?.url} target="_blank" rel="noopener noreferrer" className="underline">첨부 {k + 1}</a>)}</div>}</li>))}
+      {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => <BidCard key={n.id} n={n} />)}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
     </div>
   );
@@ -214,11 +223,7 @@ export function Hub({ initialTab, initialDay }: { initialTab?: string; initialDa
         {day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="hub-day-today">오늘 새로 들어온 것만 ✕</button>}</Head>
       <div className="flex gap-1.5">{[['buildings', '신규단지'], ['facilities', '준공·입주 시설'], ['vendors', '협력사 등록']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-hub-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}</div>
       {!data ? <Skeleton rows={6} /> : <ul className="grid gap-2 lg:grid-cols-2">{data.items.map((r: any) => (
-        <li key={r.id}><button type="button" onClick={() => setRaw(r.raw)} className="w-full rounded-card border border-line bg-white p-3 text-left text-sm hover:border-blue-300" data-testid="sales-hub-item">
-          <span className="block truncate font-medium">{r.name}</span>
-          <span className="block truncate text-xs text-ink-2">{tab === 'buildings' ? [r.address, r.households && `${r.households}세대`, r.start && `공고 ${r.start}`, r.status].filter(Boolean).join(' · ')
-            : tab === 'facilities' ? [r.lane, r.region, r.address, r.operating, r.score !== null && `점수 ${r.score}`, r.contact && `연락 ${r.contact}`, r.next && `다음 ${r.next}`].filter(Boolean).join(' · ')
-            : [r.division, r.rank, r.notice, r.status && `진행 ${r.status}`, r.memo, r.next && `다음 ${r.next}`].filter(Boolean).join(' · ')}</span></button></li>))}
+        <li key={r.id}><HubCard tab={tab} r={r} onRaw={() => setRaw(r.raw)} /></li>))}
         {!data.items.length && <li className="text-sm text-ink-3">없습니다</li>}</ul>}
       {raw && <Modal open onClose={() => setRaw(null)} title="원본 정보" wide><Raw row={raw} /></Modal>}
     </div>
@@ -234,6 +239,76 @@ export function Regions() {
       {!data ? <Skeleton rows={4} /> : <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{data.regions.map((r: any) => (
         <li key={r.region} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="sales-region"><div className="flex items-center"><span className="font-semibold">{r.region}</span><span className="ml-auto text-lg font-bold tabular-nums" style={{ color: C }}>{r.total}</span></div>
           <div className="mt-1 flex flex-wrap gap-1">{Object.entries(r.byStatus).map(([s, n]) => <span key={s} className="rounded-full bg-slate-100 px-1.5 text-[11px]">{s} {String(n)}</span>)}</div></li>))}</ul>}
+    </div>
+  );
+}
+
+const won = (v: unknown) => (v == null || v === '' ? '' : Number(v) ? `${Number(v).toLocaleString('ko-KR')}원` : String(v));
+const interests = (a?: string[]) => (a?.length ? <span className="inline-flex flex-wrap gap-1">{a.slice(0, 2).map((x) => <span key={x} className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-800">{x}</span>)}{a.length > 2 && <span className="text-[10px] text-ink-3">+{a.length - 2}</span>}</span> : null);
+const D = (v: unknown) => (v == null || v === '' ? null : String(v));
+const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+const BIZ: Record<string, [string, string]> = { dagym: ['다짐', 'bg-purple-600'], hilink: ['하이링크', 'bg-blue-600'], both: ['다짐·하이링크', 'bg-blue-900'] };
+const CAT_CLS: Record<string, string> = { '즉시 검토': 'bg-rose-50 text-rose-800', '협력사 필요': 'bg-amber-50 text-amber-800' };
+/** 입찰 카드(영업관리 2-5, PC·휴대폰 같음): 상태 → 사업 → 분류 → 출처 → 단지·공고명 → 기관·지역·세대·업종 → 낙찰 → 공고·DB 등록(오늘 등록) → 키워드 → [전화][원문][첨부]·마감 */
+function BidCard({ n }: { n: any }) {
+  const td = today();
+  const dd = n.close ? Math.round((Date.parse(n.close) - Date.parse(td)) / 864e5) : null;
+  const st = /정정/.test(String(n.status ?? '')) ? ['정정 전 공고', 'bg-slate-100 text-ink-2'] : /낙찰/.test(String(n.status ?? '')) ? ['낙찰', 'bg-emerald-50 text-emerald-800'] : /사전|예정/.test(String(n.status ?? '')) ? ['입찰 예정', 'bg-sky-50 text-sky-800']
+    : /취소|마감/.test(String(n.status ?? '')) || (dd !== null && dd < 0) ? ['마감·취소', 'bg-slate-100 text-ink-3'] : dd === 0 ? [`오늘 마감 ${String(n.deadline ?? '').slice(11, 16)}`, 'bg-red-600 text-white'] : dd !== null ? [`D-${dd}`, dd <= 3 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2'] : ['진행중', 'bg-slate-100 text-ink-2'];
+  const biz = n.business ? BIZ[n.business] : null;
+  const cat = n.classification ?? n.category;
+  return (
+    <li className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-bid">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', st[1])} data-testid="bid-status">{st[0]}</span>
+        {biz && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold text-white', biz[1])} data-testid="bid-business">{biz[0]}</span>}
+        {cat && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', CAT_CLS[String(cat)] ?? 'bg-slate-100 text-ink-2')}>{String(cat)}</span>}
+        {n.sourceLabel && <span className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-2">{String(n.sourceLabel)}</span>}
+        {n.work && chip(n.work)}
+        {n.fit !== null && n.fit !== undefined && <span className="text-[11px] text-ink-3">적합 {String(n.fit)}</span>}
+      </div>
+      <div className="mt-1">{n.complex && <b className="mr-1">{n.complex}</b>}{n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">{n.title}</a> : <span className="font-medium">{n.title}</span>}</div>
+      <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.region, n.households && `${n.households}세대`, n.industry].filter(Boolean).join(' · ') || '기관·지역 미확인'}</div>
+      {(n.amount || n.winner) && <div className="mt-0.5 text-xs text-ink-2">{n.amount && <>금액 {Number(n.amount) ? `${Number(n.amount).toLocaleString('ko-KR')}원` : String(n.amount)}</>}{n.winner && <> · 낙찰 {n.winner}{n.awardAmount ? ` · ${Number(n.awardAmount) ? Number(n.awardAmount).toLocaleString('ko-KR') + '원' : n.awardAmount}` : ''}{n.awardDate ? ` (${n.awardDate})` : ''}</>}</div>}
+      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3" data-testid="bid-dates">{[n.noticeDate && `공고 ${n.noticeDate}`, n.posted && `DB 등록 ${n.posted}`].filter(Boolean).join(' · ')}{n.todayNew && <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white" data-testid="bid-today">오늘 등록</span>}</div>
+      {n.keywords && <div className="mt-0.5 text-xs text-ink-3">키워드: {n.keywords}</div>}
+      {n.judgment && <div className="mt-0.5 text-xs text-ink-2">판단: {n.judgment}</div>}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+        {n.phone && <a href={`tel:${String(n.phone).replace(/[^0-9+]/g, '')}`} className="rounded-input border border-line px-2 py-1">전화 {n.phone}</a>}
+        {n.url && <a href={n.url} target="_blank" rel="noopener noreferrer" className="rounded-input border border-line px-2 py-1">원문</a>}
+        {!!n.attachments?.length && <a href={typeof n.attachments[0] === 'string' ? n.attachments[0] : n.attachments[0]?.url} target="_blank" rel="noopener noreferrer" className="rounded-input border border-line px-2 py-1">첨부 {n.attachments.length}건</a>}
+        <span className="ml-auto font-medium text-ink" data-testid="bid-deadline">{n.deadline ? `마감 ${String(n.deadline).slice(0, 16).replace('T', ' ')}` : '마감일 미확인'}</span>
+      </div>
+    </li>
+  );
+}
+const UNK = <span className="text-ink-3">미확인 · 후속조사</span>;
+/** 허브 카드(영업관리 2-7 신규단지 · 2-8 준공·입주 시설 · 2-9 협력사) — 칸 순서 그대로 */
+function HubCard({ tab, r, onRaw }: { tab: string; r: any; onRaw: () => void }) {
+  const today0 = today();
+  return (
+    <div className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-hub-item">
+      {tab === 'buildings' ? (<>
+        <div className="flex flex-wrap items-center gap-1.5">{r.status && chip(r.status)}{r.kind && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px]">{r.kind}</span>}{r.priority && !/보통|medium/i.test(r.priority) && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">{r.priority}</span>}</div>
+        <button type="button" onClick={onRaw} className="mt-1 block text-left font-semibold hover:underline">{r.name}</button>
+        <p className="text-xs text-ink-2">{[r.region, r.address].filter(Boolean).join(' · ')}</p>
+        <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs sm:grid-cols-5">{(r.dates ?? []).map(([k, v]: [string, unknown]) => <div key={k}><dt className="text-ink-3">{k}</dt><dd>{D(v) ?? UNK}</dd></div>)}</dl>
+      </>) : tab === 'facilities' ? (<>
+        <div className="flex flex-wrap items-center gap-1.5"><button type="button" onClick={onRaw} className="text-left font-semibold hover:underline">{r.name}</button>{r.verdict && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800">{r.verdict}</span>}{r.contact && chip(r.contact)}</div>
+        <p className="text-xs text-ink-2">{[r.lane, r.region, r.households && `${r.households}세대`, r.scale, r.operator && `현 위탁 ${r.operator}`].filter(Boolean).join(' · ')}</p>
+        {r.address && <p className="text-xs text-ink-3">{r.address}</p>}
+        <p className="mt-0.5 text-xs">{r.phone ? <a href={`tel:${String(r.phone).replace(/[^0-9+]/g, '')}`} className="underline">관리사무소 {r.phone}</a> : <span className="text-ink-3">관리사무소 번호 미확인</span>}</p>
+        {r.amenities && <p className="text-xs text-ink-3">부대시설: {String(r.amenities)}</p>}
+        <p className="flex flex-wrap items-center gap-1.5 text-xs text-ink-3">{r.firstSeen && <>DB 등록 {r.firstSeen}</>}{r.firstSeen === today0 && <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-semibold text-white">오늘 등록</span>}
+          {r.date && <> · 준공(사용승인) {r.date}</>}{r.moveIn && <> · 입주 {r.moveIn}</>}</p>
+        {r.next && <p className="text-xs">다음 연락 {r.next}</p>}{r.lastNote && <p className="text-xs text-ink-2">최근 기록: {r.lastNote}</p>}{r.nextAction && <p className="text-xs text-ink-2">다음 조치: {r.nextAction}</p>}
+      </>) : (<>
+        <div className="flex flex-wrap items-center gap-1.5">{r.division && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px]">{r.division}</span>}<button type="button" onClick={onRaw} className="text-left font-semibold hover:underline">{r.name}</button>{r.rank && <span className="text-xs text-ink-3">{r.rank}위</span>}{r.status && chip(r.status)}</div>
+        <p className="text-xs text-ink-2">{[r.open != null && `모집 공지 ${r.open === true || r.open === 'true' ? '공개' : '비공개'}`, r.period && `모집 ${r.period}`, r.requirement && `요건 ${r.requirement}`, r.cert && `공동인증서 ${r.cert}`, r.note].filter(Boolean).join(' · ') || '모집 정보 미확인'}</p>
+        {r.notice && <p className="text-xs">공지: {r.url ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="underline">{r.notice}</a> : r.notice}</p>}
+        <p className="mt-1 flex flex-wrap gap-1.5 text-xs">{[[r.applyUrl, '등록 신청 ↗'], [r.portalUrl, '협력사 포털 ↗'], [r.homepage, '홈페이지 ↗']].filter(([u]) => u).map(([u, l]) => <a key={l} href={u} target="_blank" rel="noopener noreferrer" className="rounded-input border border-line px-2 py-0.5">{l}</a>)}</p>
+        {(r.memo || r.next) && <p className="text-xs text-ink-2">{[r.memo, r.next && `다음 ${r.next}`].filter(Boolean).join(' · ')}</p>}
+      </>)}
     </div>
   );
 }

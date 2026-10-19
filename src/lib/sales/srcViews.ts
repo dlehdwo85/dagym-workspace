@@ -55,7 +55,20 @@ const notice = (r: any) => ({ id: r.__id, title: pick(r, 'title', 'notice_title'
   region: pick(r, 'region'), posted: firstSeen(r), noticeDate: day(pick(r, 'posted_date', 'posted_at', 'notice_date', 'published_at', 'bid_notice_date')), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'),
   close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')), source: pick(r, 'source', 'source_code'), url: pick(r, 'source_url', 'url', 'detail_url', 'link'),
   attachments: (() => { const a = pick(r, 'attachment_urls'); return Array.isArray(a) ? a : typeof a === 'string' && a.startsWith('[') ? (() => { try { return JSON.parse(a); } catch { return []; } })() : a ? [a] : []; })(),
-  fit: pick(r, 'fit_score'), status: pick(r, 'current_status', 'status'), amount: pick(r, 'amount', 'budget', 'estimated_price'), related: r.related === true || r.related === 'true' });
+  fit: pick(r, 'fit_score'), status: pick(r, 'current_status', 'status'), amount: pick(r, 'amount', 'budget', 'estimated_price', 'base_amount', 'presumed_price'), related: r.related === true || r.related === 'true',
+  // 영업관리 입찰 카드 칸(SALES_SCREEN_INVENTORY 2-5): 사업·분류·출처·단지·세대·업종·낙찰·키워드·전화·DB 등록·오늘 등록
+  business: businessOf(r), category: pick(r, 'classification', 'category_label', 'lead_class'), sourceLabel: SOURCE_LABEL[String(pick(r, 'source', 'source_code') ?? '').toLowerCase()] ?? pick(r, 'source', 'source_code'),
+  complex: pick(r, 'complex_name', 'facility_name', 'apartment_name'), households: pick(r, 'households', 'total_households', 'units'), industry: pick(r, 'industry', 'business_type', 'work_type'),
+  winner: pick(r, 'winner_name', 'award_company', 'successful_bidder'), awardAmount: pick(r, 'award_amount', 'winning_amount', 'contract_amount'), awardDate: day(pick(r, 'award_date', 'opened_at')),
+  keywords: (() => { const k = pick(r, 'matched_keywords', 'keywords', 'keyword_hits'); return Array.isArray(k) ? k.join(', ') : k; })(), phone: pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone'),
+  todayNew: firstSeen(r) === new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()) });
+const SOURCE_LABEL: Record<string, string> = { kapt: 'K-apt', 'k-apt': 'K-apt', g2b: '나라장터', nara: '나라장터', g2b_pre: '나라장터 사전규격', nuri: '누리장터', lh: 'LH', lh_pre: 'LH 사전규격', defense: '국방', d2b: '국방', onbid: '온비드 임대', vendor: '협력사 모집' };
+/** 사업 배지: 다짐(보라)·하이링크(파랑)·둘 다(진파랑) — 원본 칸(business_line·related_business·target_business 등)에서 */
+function businessOf(r: any) {
+  const v = JSON.stringify([pick(r, 'business', 'business_line', 'related_business', 'target_business', 'brand', 'business_categories')]).toLowerCase();
+  const dg = /dagym|다짐/.test(v), hl = /hilink|hi-link|하이링크/.test(v);
+  return dg && hl ? 'both' : dg ? 'dagym' : hl ? 'hilink' : null;
+}
 
 export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string }) {
   await assertSpace(u, 'sales');
@@ -89,7 +102,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   }
   if (view === 'leads') {
     const L = (await leadRows()).map((r) => ({ ...lead(r, names), raw: r })).filter((l) => hit(l.raw) && (!q.status || String(l.status) === q.status) && (q.day !== 'today' || l.next === today()));
-    return { ...meta, leads: L.map(({ raw: _, ...l }) => l).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
+    // 영업관리 2-13 표 칸: 관심 사업(배지 2개 + n) — 원본 lead_business_interests
+    const I = new Map<string, string[]>();
+    for (const x of await rows(t, 'lead_business_interests', 20000)) { const k = String(pick(x, 'lead_id') ?? ''); const n = pick(x, 'category_name', 'business_category', 'category', 'name'); if (k && n) I.set(k, [...(I.get(k) ?? []), String(n)]); }
+    return { ...meta, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [] })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
   }
   if (view === 'lead') {
     if (!q.id) throw badRequest('id 가 필요합니다');
@@ -139,21 +155,34 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const tab = q.tab ?? 'buildings';
     const dayOk = (r: any) => q.day !== 'today' || firstSeen(r) === today(); // 오늘 새 영업 DB
     if (tab === 'buildings') return { ...meta, tab, items: (await rows('global', 'building_sales_pipeline')).filter((r) => hit(r) && dayOk(r)).map((r) => ({ id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
-      address: pick(r, 'address', 'location'), households: pick(r, 'households', 'total_households', 'units'), start: day(pick(r, 'sales_start_date', 'start_date', 'notice_date')), status: pick(r, 'status', 'stage'), raw: r })) };
+      address: pick(r, 'address', 'location'), households: pick(r, 'households', 'total_households', 'units'), start: day(pick(r, 'sales_start_date', 'start_date', 'notice_date')), status: pick(r, 'status', 'stage'),
+      // 영업관리 2-7 칸 순서: 승인일·착공·준공(예정)·입주(예정)·세대수·시행사·시공사·영업 시작·제안 시작·운영사 선정 예상
+      kind: pick(r, 'building_type', 'type', 'kind'), region: pick(r, 'region', 'sido'), priority: pick(r, 'priority'),
+      dates: [['승인일', day(pick(r, 'approval_date', 'approved_at'))], ['착공', day(pick(r, 'construction_start_date', 'start_construction_date'))], ['준공(예정)', day(pick(r, 'completion_date', 'expected_completion_date'))],
+        ['입주(예정)', day(pick(r, 'move_in_date', 'expected_move_in_date'))], ['세대수', pick(r, 'households', 'total_households', 'units')], ['시행사', pick(r, 'developer', 'executor')], ['시공사', pick(r, 'builder', 'constructor', 'contractor')],
+        ['영업 시작', day(pick(r, 'sales_start_date', 'start_date'))], ['제안 시작', day(pick(r, 'proposal_start_date'))], ['운영사 선정 예상', day(pick(r, 'operator_selection_date', 'expected_operator_selection'))]],
+      firstSeen: firstSeen(r), raw: r })) };
     if (tab === 'facilities') {
       const P = new Map((await rows(t, 'operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
       const items = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)', address: pick(r, 'address', 'road_address'), score: Number(pick(r, 'score', 'priority_score') ?? 0) || null,
           lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'use_approval_date', 'completed_at', 'move_in_date')),
-          contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null), raw: r }; })
-        .sort((a, b) => (b.score ?? -1) - (a.score ?? -1)).slice(0, 300);
+          contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null),
+          // 영업관리 2-8 한 줄 순서: 판정 · 유형·지역·세대·규모·현 위탁사 · 주소 · 관리사무소 전화 · 부대시설 · DB 등록 · 준공·입주 · 다음 연락 · 최근 기록 · 다음 조치
+          verdict: pick(r, 'verdict', 'judgment', 'stage_label', 'opportunity_label'), households: pick(r, 'households', 'total_households', 'units'), scale: pick(r, 'scale', 'size', 'area'),
+          operator: pick(r, 'current_operator', 'operator', 'management_company'), phone: pick(r, 'office_phone', 'management_phone', 'phone'), amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
+          firstSeen: firstSeen(r), moveIn: day(pick(r, 'move_in_date', 'move_in_start')), lastNote: p?.last_note ?? p?.memo ?? null, nextAction: pick(r, 'next_action', 'recommended_action'), raw: r }; })
+        .sort((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))).slice(0, 300);
       return { ...meta, tab, items };
     }
     if (tab === 'vendors') {
       const P = new Map((await rows(t, 'vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
       return { ...meta, tab, items: (await rows('global', 'vendor_registrations')).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)', division: pick(r, 'category', 'division', 'kind'), rank: pick(r, 'rank_label', 'rank'), notice: pick(r, 'notice_title', 'title', 'notice'),
-          url: pick(r, 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null), raw: r }; }) };
+          url: pick(r, 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null),
+          // 영업관리 2-9 카드: 모집 공지 공개 여부·모집 시기·등록 요건·공동인증서·비고·링크
+          open: pick(r, 'recruit_open', 'notice_open', 'is_open'), period: pick(r, 'recruit_period', 'period'), requirement: pick(r, 'requirements', 'registration_requirements'), cert: pick(r, 'certificate', 'joint_certificate'),
+          note: pick(r, 'note', 'remark'), applyUrl: pick(r, 'apply_url', 'registration_url'), portalUrl: pick(r, 'portal_url'), homepage: pick(r, 'homepage', 'website'), firstSeen: firstSeen(r), raw: r }; }) };
     }
     throw notFound();
   }
