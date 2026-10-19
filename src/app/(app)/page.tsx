@@ -6,8 +6,8 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
 import { InlineAddTask } from '@/components/TaskQuick';
-import { QuickAddTask } from '@/components/QuickAddTask';
-import { useCalColors } from '@/components/calColors';
+import { useCalColors, type CalColors } from '@/components/calColors';
+import { SPACE_META } from '@/components/spaceMeta';
 import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
 import { useRowOpen } from '@/components/rowOpen';
 import { ConnectCard } from '@/components/ConnectCard';
@@ -110,7 +110,7 @@ function EventRow({ e, withDate }: { e: any; withDate?: boolean }) {
   );
 }
 
-type WeekItem = { key: string; time: string; title: string; personal: boolean; tag: string; href: string; task: any | null; kind?: 'event' | 'task' };
+type WeekItem = { key: string; time: string; title: string; personal: boolean; tag: string; href: string; task: any | null; kind?: 'event' | 'task' | 'space' | 'overdue'; space?: 'sales' | 'marketing' };
 /** V14 47: 같은 날·같은 제목의 일정과 업무(연결 안 된 것 포함)는 한 줄로 — 시각은 일정 기준, 꼬리표 "업무 n · 일정 m" */
 function mergeSameTitle(items: WeekItem[]): WeekItem[] {
   const norm = (t: string) => t.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -127,8 +127,16 @@ function mergeSameTitle(items: WeekItem[]): WeekItem[] {
   return out;
 }
 /** 이번 주 한 줄: [시간/종일] [색 점·업무는 색 막대] 제목 [꼬리표] */
-function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: { personal: string; company: string }; onDone: (t: any) => void }) {
+function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: CalColors; onDone: (t: any) => void }) {
   const done = r.task?.status === 'done';
+  // 대표 확정(10/19): 영업·마케팅 주요 일정은 공간 색 점 + 공간 칩(캘린더 '영업'·'마케팅' 색과 같게)
+  if (r.space) { const sm = SPACE_META[r.space]; const c = colors.cals?.[`space:${r.space}`] ?? sm.color; return (
+    <li className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50" data-week-item={r.tag} data-week-space={r.space}>
+      <span className="w-10 shrink-0 text-xs tabular-nums text-ink-2">{r.time || '종일'}</span>
+      <span className="size-2.5 shrink-0 rounded-full" style={{ background: c }} aria-hidden />
+      <Link href={r.href} className="min-w-0 flex-1 truncate font-medium hover:underline">{r.title}</Link>
+      <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: sm.soft, color: sm.color }}>{sm.short}</span>
+    </li>); }
   return (
     <li className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50" data-week-item={r.tag} {...(r.task ? { 'data-week-task': r.task.id } : {})}>
       <span className="w-10 shrink-0 text-xs tabular-nums text-ink-2">{r.time || '종일'}</span>
@@ -137,7 +145,7 @@ function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: { personal: strin
         ? <span className="h-3.5 w-1 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden data-week-bar />
         : <span className="size-2.5 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden />}
       <Link href={r.href} className={cx('min-w-0 flex-1 truncate font-medium hover:underline', done && 'text-ink-3 line-through')}>{r.title}</Link>
-      <span className="shrink-0 rounded-full bg-slate-100 px-1.5 text-[10px] font-medium text-ink-2">{r.tag}</span>
+      <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', r.kind === 'overdue' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2')}>{r.tag}</span>
     </li>
   );
 }
@@ -154,23 +162,12 @@ export default function Dashboard() {
   // 내 미완료 업무 전체: 이번 주 마감(요일별 표시)·마감 없는 새 업무(48시간)
   const myOpen = useApi<{ tasks: any[] }>('/api/tasks?view=my&limit=300');
   const today = data?.today ?? seoulDay(new Date());
-  const [month, setMonth] = useState(() => seoulDay(new Date()).slice(0, 7));
-  const [selected, setSelected] = useState(() => seoulDay(new Date()));
-  const monthRange = useMemo(() => {
-    const [y, m] = month.split('-').map(Number);
-    const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
-    return { from: `${month}-01T00:00:00+09:00`, to: `${next}T00:00:00+09:00` };
-  }, [month]);
-  const monthEvents = useApi<{ events: any[] }>(`/api/events?from=${encodeURIComponent(monthRange.from)}&to=${encodeURIComponent(monthRange.to)}`, [monthRange.from]);
-  // V14 35번: 미니 캘린더에 그달 마감인 내 업무(담당·참여 + 내가 지시)도 — 날짜를 누르면 일정과 함께
-  const monthLast = addDays(monthRange.to.slice(0, 10), -1);
-  const monthMy = useApi<{ tasks: any[] }>(`/api/tasks?view=my&from=${month}-01&to=${monthLast}&limit=500`, [month]);
-  const monthReq = useApi<{ tasks: any[] }>(`/api/tasks?view=requested&includeDone=0&from=${month}-01&to=${monthLast}&limit=500`, [month]);
-  const [quickTask, setQuickTask] = useState<{ dueDate: string } | null>(null);
-  const [reqOpen, setReqOpen] = useState(false);
+  // 대표 확정(10/19): 홈은 '이번 주 일정' 하나(오늘 칸 강조·업무 포함) — '오늘'·'이달' 칸 없앰
   // V7: "이번 주 일정" = 오늘부터 7일
   const d0 = seoulDay(new Date());
   const hol = useApi<{ holidays: { date: string; name: string }[] }>('/api/holidays');
+  // 영업·마케팅 주요 일정(공간에 들어갈 수 있을 때만, 하나하나가 아니라 묶음)
+  const agenda = useApi<{ items: { date: string; time: string | null; title: string; kind: string; space: 'sales' | 'marketing'; href: string }[] }>(`/api/spaces/agenda?from=${d0}&to=${addDays(d0, 6)}`, [d0]);
   const week7 = useApi<{ events: any[] }>(`/api/events?from=${encodeURIComponent(`${d0}T00:00:00+09:00`)}&to=${encodeURIComponent(`${addDays(d0, 7)}T00:00:00+09:00`)}`, [d0]);
 
   if (error) return <ErrorBox error={error} retry={reload} />;
@@ -223,34 +220,18 @@ export default function Dashboard() {
         tag: e.linkedTask ? '일정·업무' : (ABSENCE_KINDS as readonly string[]).includes(e.kind) ? EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL] : '일정', href: `/calendar?date=${d}&event=${e.id}`, task: e.linkedTask ? { id: e.linkedTask.id, status: e.linkedTask.status } : null, kind: e.kind === 'task_block' ? undefined : ('event' as const) })),
       ...(tasksByDay.get(d) ?? []).filter((t) => !linked.has(t.id)).map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id,
         tag: '업무', href: `/tasks/${t.id}`, task: t, kind: 'task' as const })),
+      ...(agenda.data?.items ?? []).filter((x) => x.date === d).map((x, i) => ({ key: `s${x.space}${i}${x.title}`, time: x.time ?? '', title: x.title, personal: false, tag: x.space, href: x.href, task: null, kind: 'space' as const, space: x.space })),
     ];
     // V14 20번(대표 결정): 완료된 업무·일정은 이번 주 목록에서 숨김
     return [d, mergeSameTitle(items.filter((x) => x.task?.status !== 'done')).sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'))] as [string, WeekItem[]];
   }));
-  // 대표(10/16): "오늘의 일정" = 오늘 일정(시간순) + 오늘 마감·지난 업무 — 일정에 연결된 업무는 일정 줄 하나로
-  const todayEvents = (weekRows.get(today) ?? []).filter((r) => r.key.startsWith('e'));
-  const evTaskIds = new Set(todayEvents.map((r) => r.task?.id).filter(Boolean));
-  const todayList = todayTasks.filter((t) => !evTaskIds.has(t.id));
-  const todayCount = todayEvents.length + todayList.length;
+  // 오늘 칸 맨 위: 기한 지난 내 업무(예전 '오늘의 일정'에 있던 것) — 빨간 '지남' 꼬리표
+  const overdue: WeekItem[] = todayTasks.filter((t) => t.due_date && t.due_date < today && t.status !== 'done')
+    .map((t) => ({ key: `o${t.id}`, time: '', title: t.title, personal: !t.project_id, tag: `지남 ${fmtDate(t.due_date)}`, href: `/tasks/${t.id}`, task: t, kind: 'overdue' as const }));
+  weekRows.set(today, [...overdue, ...(weekRows.get(today) ?? [])]);
   const holName = (d: string) => hol.data?.holidays.find((h) => h.date === d)?.name ?? null;
   const weekCount = [...weekRows.values()].reduce((n, x) => n + x.length, 0);
   const freshNoDue = (myOpen.data?.tasks ?? []).filter((t) => !t.due_date && Date.now() - new Date(t.assigned_at ?? t.created_at).getTime() < 48 * 3600000);
-  // 이달의 일정: 선택한 날 목록, 오늘이면 다가오는 일정
-  const mEvents = (monthEvents.data?.events ?? []).filter((e) => !blockDone(e));
-  const mTasks = [...new Map([...(monthMy.data?.tasks ?? []), ...(monthReq.data?.tasks ?? [])].filter((t) => t.due_date).map((t) => [t.id, t])).values()];
-  const roleOf = (t: any) => t.assignee_id === user.id ? '담당' : t.requested_by === user.id ? '지시' : '참여';
-  // V37 1: 그날 마감 — 내가 담당(참여)인 것만 한 줄씩, 내가 지시만 한 것은 "내가 지시한 업무 n건" 한 줄로 묶고(펼치기) 같은 원본에서 나눈 사본은 한 줄
-  const dayAll = mTasks.filter((t) => t.due_date === selected);
-  const onlyRequested = (t: any) => t.requested_by === user.id && t.assignee_id !== user.id;
-  const dayTasks: WeekItem[] = dayAll.filter((t) => !onlyRequested(t))
-    .map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id, tag: roleOf(t), href: `/tasks/${t.id}`, task: t }))
-    .sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'));
-  const reqGroups = [...dayAll.filter(onlyRequested).reduce((m, t) => m.set(t.batch_id ?? t.id, [...(m.get(t.batch_id ?? t.id) ?? []), t]), new Map<string, any[]>()).values()]
-    .map((g) => ({ key: g[0].batch_id ?? g[0].id, title: g[0].title, href: `/tasks/${g[0].id}`, done: g.filter((x: any) => x.status === 'done').length, n: g.length,
-      who: g[0].assignee_name ? `${g[0].assignee_name}${g.length > 1 ? ` 외 ${g.length - 1}` : ''}` : '담당 없음' }));
-  const dayList = selected === today
-    ? mEvents.filter((e) => eventDays(e).some((d) => d >= today)).sort((a, b) => +new Date(a.start) - +new Date(b.start)).slice(0, 6)
-    : mEvents.filter((e) => eventDays(e).includes(selected));
   // 담당자별 현황: 본사 사람(없으면 업무가 많은 순 6명)
   const hqIds = new Set(dir.orgUnits.filter((o) => o.type === 'hq').map((o) => o.id));
   const hqPeople = dir.users.filter((u) => u.org_unit_ids?.some((id) => hqIds.has(id)));
@@ -297,21 +278,6 @@ export default function Dashboard() {
       )}
       {/* WORKIN_V2 홈: 오늘의 일정 · 이번 주 일정 · 이달의 일정 · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동 (모바일은 위에서부터 이 순서) */}
       <div className="grid min-w-0 gap-4 lg:grid-flow-dense lg:grid-cols-3">
-        <Section title="오늘의 일정" count={todayCount} href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} icon={CheckCircle2} className="lg:col-span-2" testid="home-today"
-          actions={(
-            <div className="flex rounded-full border border-line p-0.5 text-xs" role="group" aria-label="오늘의 일정 범위">
-              {([['mine', '내 것'], ['all', '전체']] as const).map(([k, l]) => (
-                <button key={k} onClick={() => setScope(k)} aria-pressed={scope === k} className={cx('hit rounded-full px-2.5 py-0.5 font-medium', scope === k ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{l}</button>
-              ))}
-            </div>
-          )}>
-          {todayEvents.length > 0 && <ul data-testid="home-today-events" className={cx(todayList.length > 0 && 'mb-1 border-b border-line pb-1')}>{todayEvents.map((r) => <WeekRow key={r.key} r={r} colors={calColors} onDone={done} />)}</ul>}
-          {!todayCount ? <p className="flex items-center justify-center gap-1.5 px-2 py-6 text-center text-sm text-ink-3"><CheckCircle2 className="size-4" />{scope === 'mine' ? '오늘 일정과 오늘 마감이거나 지난 내 업무가 없습니다' : '오늘 일정과 오늘 마감·지난 업무가 없습니다'}</p>
-            : todayList.length > 0 && <ul>{todayList.slice(0, 10).map((t, i) => <TodayRow key={t.id} t={t} className={i >= 6 ? 'max-sm:hidden' : undefined} />)}</ul>}
-          {todayList.length > 6 && <Link href={scope === 'mine' ? '/tasks?view=my' : '/tasks?view=overdue'} className="block px-2 py-1 text-xs font-medium text-accent-700 sm:hidden">업무 {todayList.length - 6}건 더 보기</Link>}
-          <div className="border-t border-line px-1 pt-1"><InlineAddTask muted defaultDue={data.today} onCreated={() => { mine.reload(); myOpen.reload(); reload(); }} placeholder="할 일 추가" /></div>
-        </Section>
-
         <Section title="이번 주 일정" count={weekCount} href="/calendar" icon={CalendarDays} className="lg:col-span-2" testid="home-week">
           <ul className="divide-y divide-line">
             {weekDays.map((d) => {
@@ -331,6 +297,7 @@ export default function Dashboard() {
               );
             })}
           </ul>
+          <div className="border-t border-line px-1 pt-1"><InlineAddTask muted defaultDue={data.today} onCreated={() => { mine.reload(); myOpen.reload(); reload(); }} placeholder="할 일 추가" /></div>
         </Section>
 
         {scope === 'mine' && freshNoDue.length > 0 && (
@@ -338,37 +305,6 @@ export default function Dashboard() {
             <ul>{freshNoDue.slice(0, 5).map((t) => <TodayRow key={t.id} t={t} />)}</ul>
           </Section>
         )}
-        <Section title="이달의 일정" icon={CalendarRange} className="lg:col-start-3 lg:row-span-2 lg:row-start-1" testid="home-month-card">
-          <MonthCalendar month={month} setMonth={setMonth} events={mEvents} taskDays={mTasks.map((t) => t.due_date)} selected={selected} setSelected={setSelected} today={today} />
-          <div className="mt-2 border-t border-line pt-2">
-            <p className="px-2 pb-1 text-xs font-semibold text-ink-2">{selected === today ? '다가오는 일정' : `${fmtDate(selected)} 일정`}</p>
-            {!dayList.length ? <p className="px-2 py-4 text-center text-sm text-ink-3">일정이 없습니다</p>
-              : <ul data-testid="home-day-list">{dayList.map((e) => <EventRow key={e.id + e.start} e={e} withDate={selected === today} />)}</ul>}
-            {(dayTasks.length > 0 || reqGroups.length > 0) && <>
-              <p className="mt-1 px-2 pb-1 text-xs font-semibold text-ink-2">{selected === today ? '오늘 마감 업무' : `${fmtDate(selected)} 마감 업무`}</p>
-              <ul data-testid="home-day-tasks">{dayTasks.map((r) => <WeekRow key={r.key} r={r} colors={calColors} onDone={done} />)}</ul>
-              {reqGroups.length > 0 && (
-                <div className="px-2" data-testid="home-day-requested">
-                  <button type="button" onClick={() => setReqOpen(!reqOpen)} aria-expanded={reqOpen} className="flex w-full items-center gap-1 rounded-input py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50">
-                    {reqOpen ? <ChevronLeft className="size-3.5 -rotate-90" /> : <ChevronRight className="size-3.5" />}
-                    내가 지시한 업무 {reqGroups.length}건 <span className="text-xs text-ink-3">— 진행 {reqGroups.filter((g) => g.done < g.n).length}·완료 {reqGroups.filter((g) => g.done === g.n).length}</span>
-                  </button>
-                  {reqOpen && <ul>{reqGroups.map((g) => (
-                    <li key={g.key} className="flex min-w-0 items-center gap-2 rounded-input py-1 pl-5 text-sm hover:bg-slate-50" data-req-group={g.n}>
-                      <Link href={g.href} className={cx('min-w-0 flex-1 truncate', g.done === g.n && 'text-ink-3 line-through')}>{g.title}</Link>
-                      <span className="shrink-0 text-xs text-ink-3">{g.who}{g.n > 1 ? ` · ${g.done}/${g.n} 완료` : ''}</span>
-                    </li>))}</ul>}
-                </div>
-              )}
-            </>}
-            {/* V14 35번: 고른 날짜로 바로 등록 */}
-            <div className="mt-2 flex gap-2 px-2 pb-1">
-              <button type="button" onClick={() => setQuickTask({ dueDate: selected })} className="inline-flex min-h-9 flex-1 items-center justify-center gap-1 rounded-input border border-line text-sm font-medium text-ink hover:bg-slate-50" data-testid="home-day-add-task"><PlusCircle className="size-4" />업무</button>
-              <button type="button" onClick={() => router.push(`/calendar?quick=1&date=${selected}`)} className="inline-flex min-h-9 flex-1 items-center justify-center gap-1 rounded-input border border-line text-sm font-medium text-ink hover:bg-slate-50" data-testid="home-day-add-event"><CalendarPlus className="size-4" />일정</button>
-            </div>
-          </div>
-        </Section>
-
         <Section title="담당자별 현황" icon={Users} href="/tasks" className="lg:col-span-2 lg:row-span-2" testid="home-people">
           <div className="grid gap-2 px-1 sm:grid-cols-2 xl:grid-cols-3">
             {people.map((p) => (
@@ -427,8 +363,6 @@ export default function Dashboard() {
           )}
         </Section>
       </div>
-      <QuickAddTask open={!!quickTask} defaults={quickTask ?? undefined} onClose={() => setQuickTask(null)}
-        onCreated={() => { setQuickTask(null); monthMy.reload(); monthReq.reload(); myOpen.reload(); reload(); broadcastRefresh(); }} />
     </div>
   );
 }

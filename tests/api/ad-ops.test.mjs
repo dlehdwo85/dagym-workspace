@@ -35,6 +35,8 @@ before(async () => {
     if (req.method === 'POST' && path === '/ncc/keywords' && kwBroken === '3916') return send(200, j.map((k) => ({ keyword: k.keyword, resultStatus: { code: 3916, message: `등록할 수 없는 키워드입니다(시험 사유 — 이 문구 끝까지 보여야 함: ${k.keyword})` } })));
     if (req.method === 'GET' && path === '/keywordstool') return send(200, { keywordList: [{ relKeyword: u.searchParams.get('hintKeywords').split(',')[0], monthlyPcQcCnt: '< 10', monthlyMobileQcCnt: 20 }, { relKeyword: '동네헬스장추천', monthlyPcQcCnt: 300, monthlyMobileQcCnt: 2100 }, { relKeyword: '아주드문말', monthlyPcQcCnt: '< 10', monthlyMobileQcCnt: '< 10' }] });
     if (req.method === 'POST' && path === '/ncc/keywords' && kwBroken === 'bulk' && j.length > 1) return send(200, []);
+    // 운영 10/19 실계정: 그룹 기본 입찰가가 없으면 useGroupBidAmt 키워드는 3916 으로 거절
+    if (req.method === 'POST' && path === '/ncc/keywords' && j.some((k) => k.useGroupBidAmt !== false || !k.bidAmt)) return send(200, j.map((k) => ({ keyword: k.keyword, resultStatus: { code: 3916, message: 'No value is entered in the default bid or bid amount field.' } })));
     if (req.method === 'POST' && path === '/ncc/keywords') { const g = kwStore.get(u.searchParams.get('nccAdgroupId')) ?? []; for (const k of j) g.push({ nccKeywordId: `kw-${g.length + 1}`, keyword: k.keyword }); kwStore.set(u.searchParams.get('nccAdgroupId'), g); return send(200, j.map((k) => ({ keyword: k.keyword }))); }
     if (req.method === 'GET' && path === '/ncc/keywords') return send(200, kwStore.get(u.searchParams.get('nccAdgroupId')) ?? []);
     if (req.method === 'POST' && path === '/ncc/ads') return send(200, { nccAdId: `ad-${++seq}`, ...j });
@@ -99,6 +101,7 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   assert.equal(calls.find((c) => c.path === '/ncc/adgroups').body.adgroupType, 'WEB_SITE');
   assert.equal(calls.find((c) => c.path === '/ncc/adgroups').body.userLock, true);
   assert.deepEqual(calls.find((c) => c.method === 'POST' && c.path === '/ncc/keywords').body.map((k) => k.keyword), ['동네헬스장', 'PT가격'], '네이버 키워드는 띄어쓰기 없이');
+  assert.deepEqual(calls.find((c) => c.method === 'POST' && c.path === '/ncc/keywords').body.map((k) => [k.useGroupBidAmt, k.bidAmt]), [[false, 300], [false, 300]], '키워드마다 세팅안 입찰가(그룹 기본 입찰가에 기대지 않음)');
   assert.deepEqual(ok.external.keywordIds, ['kw-1', 'kw-2'], '생성 응답에 id 가 없어도 그룹에서 다시 읽음');
   assert.equal(calls.filter((c) => c.path === '/ncc/ads').length, 1);
   // 이미 'undefined' 로 저장된 세팅안 → [키워드 다시 읽기] = id 만 읽어 저장, 키워드 다시 안 만듦, 켜기 상태 그대로

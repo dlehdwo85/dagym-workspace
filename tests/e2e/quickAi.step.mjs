@@ -31,5 +31,5 @@ export async function homeTodayEvents({ owner, ctx, BASE }) {
   const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'personal').id;
   await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '오늘 홈 일정 시험', start: `${today}T23:00:00+09:00`, end: `${today}T23:30:00+09:00` });
   await owner.goto(BASE + '/');
-  await owner.getByTestId('home-today').getByTestId('home-today-events').getByText('오늘 홈 일정 시험').waitFor();
+  await owner.getByTestId('home-week').locator(`[data-day="${today}"]`).getByText('오늘 홈 일정 시험').waitFor(); // 대표 확정(10/19): 이번 주 안 오늘 칸
 }

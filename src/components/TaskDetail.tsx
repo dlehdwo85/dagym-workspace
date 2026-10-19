@@ -15,7 +15,7 @@ import {
   Sparkles,
   MessageCircle,
   Lock as LockIcon,
-} from 'lucide-react';
+MapPin, } from 'lucide-react';
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, FileKindIcon, uploadTaskFiles } from '@/components/Attachments';
@@ -719,7 +719,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         </section>
         <div className={cx('min-w-0 space-y-6', wide && 'lg:col-start-1 lg:row-start-4')}>
         {/* V37 8: 업무에 장소 칸 대신 장소 있는 미팅 일정 */}
-        {perms.edit && t.status !== 'done' && <button type="button" onClick={() => setMeetOpen(true)} className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-white px-2.5 py-1 text-xs font-medium text-rose-800 hover:bg-rose-50" data-testid="meeting-open">📍 미팅 일정 만들기</button>}
+        {perms.edit && t.status !== 'done' && <button type="button" onClick={() => setMeetOpen(true)} className="inline-flex min-h-9 items-center gap-1.5 rounded-input bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-rose-700" data-testid="meeting-open"><MapPin className="size-4" />미팅 일정 만들기</button>}
         {meetOpen && <MeetingDialog taskId={id} title={t.title} defaultDate={t.due_date} onClose={() => setMeetOpen(false)} onDone={() => { reload(); events.reload?.(); }} />}
         {/* V14 27번: 연결 일정은 있을 때만 한 줄씩 (실행 시간 배정은 ⋯ 메뉴) */}
         {(events.data?.events.length ?? 0) > 0 && (

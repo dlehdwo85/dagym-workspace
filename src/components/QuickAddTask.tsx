@@ -144,6 +144,8 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
         r = await api('/api/tasks', {
           queueOffline: `업무 등록: ${finalTitle()}`,
           body: {
+            // 대표 확정(10/19): 영업·마케팅 화면에서 만든 업무는 그 공간 표시(같은 업무 표, 복사 없음)
+            ...(typeof window !== 'undefined' && /^\/s\/(sales|marketing)/.test(window.location.pathname) ? { space: window.location.pathname.split('/')[2] } : {}),
             title: finalTitle(), assigneeId: f.assigneeId || null, requestedById: user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
             priority: f.priority ?? 'normal', recurrenceRule: f.rrule ?? null, reminderMinutes: f.remind ?? null,
             ...(f.description ? { description: f.description } : {}), ...(f.checklist?.length ? { checklist: f.checklist } : {}),

@@ -875,15 +875,10 @@ await step('W-2 업무 화면: 기본 전체·담당자별 묶음, "+ 업무 추
 });
 await step('W-3 홈: 오늘 할 일(내 것/전체) · 이번 주 일정 · 이달의 일정(미니 달력) · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동', async () => {
   await owner.goto(BASE + '/');
-  for (const id of ['home-today', 'home-week', 'home-month-card', 'home-people', 'home-alerts', 'home-activity']) await owner.getByTestId(id).waitFor();
-  await owner.getByTestId('home-today').getByRole('button', { name: '전체' }).click();
+  // 대표 확정(10/19): '오늘'·'이달' 칸 없이 '이번 주 일정' 하나(오늘 칸 강조·업무 포함)
+  for (const id of ['home-week', 'home-people', 'home-alerts', 'home-activity']) await owner.getByTestId(id).waitFor();
+  for (const id of ['home-today', 'home-month-card']) assert.equal(await owner.getByTestId(id).count(), 0, `${id} 없음`);
   await owner.getByTestId('home-activity').getByText('강남점 전단 배포').waitFor();
-  const d = addDays(today, 1);
-  if (d.slice(0, 7) === today.slice(0, 7)) {
-    await owner.getByTestId('home-month').locator('button[aria-pressed]', { hasText: new RegExp(`^${Number(d.slice(8))}$`) }).click();
-    await owner.waitForTimeout(200);
-    assert.equal(await owner.getByText('다가오는 일정').count(), 0, '날짜를 누르면 그날 목록');
-  }
   await owner.screenshot({ path: `${SHOTS}/59-home-dashboard.png`, fullPage: true });
 });
 await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없음), "할 일로도 만들기" = 누른 시각이 마감인 연결 업무 · 홈 미니 캘린더 그날 업무 + [＋업무][＋일정]', async () => {
@@ -913,31 +908,6 @@ await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없
   assert.deepEqual((await sql`select reminder_minutes from events where title = '캘린더 빈칸 업무' and deleted_at is null`)[0].reminder_minutes, [30], '고른 알림 30분 전');
   assert.equal(t.due, d); assert.equal(t.tm, '10:00');
   await owner.screenshot({ path: `${SHOTS}/v14-35-calendar-task.png` });
-  // 홈 미니 캘린더: 내가 지시한 업무도 그날 목록에
-  const d2 = addDays(today, 1).slice(0, 7) === today.slice(0, 7) ? addDays(today, 1) : today;
-  await ctx.owner.ok('POST', '/api/tasks', { title: '미니달력 지시 업무', assigneeId: ctx.staffA.id, requestedById: ctx.ownerId, dueDate: d2, approvalRequired: false });
-  // V37 1: 여러 명에게 나눠 만든 사본은 지시 묶음에서 한 줄
-  await ctx.owner.ok('POST', '/api/tasks', { title: '미니달력 나눠 지시', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: d2, approvalRequired: false });
-  await owner.goto(BASE + '/');
-  await owner.getByTestId('home-month').locator('button[aria-pressed]', { hasText: new RegExp(`^${Number(d2.slice(8))}$`) }).click();
-  const list = owner.getByTestId('home-day-tasks');
-  const req = owner.getByTestId('home-day-requested');
-  await req.getByRole('button', { name: /내가 지시한 업무 \d+건/ }).click();
-  await req.getByText('미니달력 지시 업무').waitFor();
-  assert.equal(await req.locator('li', { hasText: '미니달력 나눠 지시' }).count(), 1, '사본은 한 줄');
-  await req.locator('li', { hasText: '미니달력 나눠 지시' }).getByText(/외 1/).waitFor();
-  assert.equal(await list.getByText('미니달력 지시 업무').count(), 0, '지시한 업무는 내 줄에 따로 안 나옴');
-  await owner.getByTestId('home-day-add-task').click();
-  const hd = owner.getByRole('dialog', { name: '업무 등록' });
-  assert.equal(await hd.getByLabel('마감일').inputValue(), d2, '고른 날짜가 마감일');
-  await hd.getByLabel('제목').fill('홈 달력에서 만든 업무');
-  await hd.getByRole('button', { name: '저장' }).click();
-  // V37 1: 담당이 나면 내 줄, 마지막에 고른 담당자가 다른 사람이면 지시 묶음(펼쳐 둔 상태)
-  await owner.locator('[data-testid="home-day-tasks"], [data-testid="home-day-requested"]').getByText('홈 달력에서 만든 업무').first().waitFor();
-  await owner.screenshot({ path: `${SHOTS}/v14-35-home-day.png` });
-  await owner.getByTestId('home-day-add-event').click();
-  await owner.getByTestId('quick-create').waitFor();
-  assert.ok(owner.url().includes(`date=${d2}`), '일정 등록도 그 날짜');
 });
 await step('V14 36~39 캘린더: 업무 동그라미 없음·블록 12px 여러 줄·계단 겹침·휴대폰 3일·좌우 밀어 이동·뒤로가기는 상세만 닫고 날짜·보기·스크롤 유지', () => v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDays, today }));
 await step('V19 부록 A: AI 비서 PC Enter 보내기·Shift+Enter 줄바꿈, 휴대폰 Enter 줄바꿈·자동 높이, [수정]·[다시 답하기]·[복사]·[멈춤], 패널 같은 동작 / 보기 칩 다시 누르면 해제', () => v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }));
@@ -1532,10 +1502,9 @@ await step('V7: 홈 첫 화면에 오늘 할 일·이번 주(업무·일정 같�
     await m.goto(BASE + '/');
     await m.getByTestId('home-week').waitFor();
     assert.equal(await m.getByTestId('achievement').count(), 0, '달성률 카드 없음');
-    const tb = await m.getByTestId('home-today').boundingBox();
     const wb = await m.getByTestId('home-week').boundingBox();
-    assert.ok(tb.y < h && wb.y < h, `첫 화면에 두 카드 시작이 보임 (오늘 ${Math.round(tb.y)}, 이번 주 ${Math.round(wb.y)}, 화면 ${h})`);
-    assert.ok(tb.y < wb.y, '오늘 할 일이 먼저');
+    assert.ok(wb.y < h, `첫 화면에 이번 주 일정이 보임 (${Math.round(wb.y)}, 화면 ${h})`);
+    assert.equal(await m.getByTestId('home-today').count(), 0, '오늘 칸은 이번 주 안(강조)');
     assert.ok(!(await m.getByTestId('home-week').innerText()).includes('마감:'), '"마감:" 접두어 없음 — 업무·일정 같은 한 줄');
     await m.screenshot({ path: `${SHOTS}/72-home-first-screen-${w}.png` });
     await m.goto(BASE + '/tasks');

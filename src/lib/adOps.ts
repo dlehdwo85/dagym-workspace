@@ -162,7 +162,7 @@ export async function approvePlan(u: SessionUser, id: string) {
     // 실패하면 거기서 멈추고, 이미 만든 id 는 external 에 남김(다시 시도하면 이어서 만듦)
     if (!ext.campaignId) ext.campaignId = String((await naverReq(a, 'POST', '/ncc/campaigns', '', { customerId: Number(a.external_id), name: p.name, campaignTp: 'WEB_SITE', dailyBudget: p.plan.dailyBudget, useDailyBudget: true, userLock: true })).nccCampaignId);
     if (!ext.adgroupId) ext.adgroupId = String((await naverReq(a, 'POST', '/ncc/adgroups', '', { nccCampaignId: ext.campaignId, adgroupType: 'WEB_SITE', name: `${p.name} 그룹`, pcChannelId: p.plan.channelId, mobileChannelId: p.plan.channelId, bidAmt: p.plan.bidAmt, useDailyBudget: false, userLock: true })).nccAdgroupId);
-    if (!validIds(ext.keywordIds)) ext.keywordIds = await ensureKeywords(a, String(ext.adgroupId), p.plan.keywords);
+    if (!validIds(ext.keywordIds)) ext.keywordIds = await ensureKeywords(a, String(ext.adgroupId), p.plan.keywords, Number(p.plan.bidAmt) || undefined);
     if (!ext.adIds) {
       const ids: string[] = [];
       for (const ad of p.plan.ads) ids.push(String((await naverReq(a, 'POST', '/ncc/ads', '', { nccAdgroupId: ext.adgroupId, type: 'TEXT_45', userLock: false, ad: { headline: ad.headline, description: ad.description, pc: { final: ad.url }, mobile: { final: ad.url } } })).nccAdId));
@@ -186,7 +186,7 @@ const validIds = (x: unknown): x is string[] => Array.isArray(x) && x.length > 0
 const kwId = (k: any) => String(k?.nccKeywordId ?? k?.nccKeywordID ?? k?.id ?? '');
 const norm = (k: string) => k.replace(/\s+/g, '').toLowerCase();
 /** 키워드 멱등 생성: 그룹에 이미 있는 키워드는 id 만 읽고, 없는 것만 만든 뒤 다시 읽어 세팅안 순서대로 id 를 돌려줌 */
-async function ensureKeywords(a: NaverAcc, adgroupId: string, keywords: string[]): Promise<string[]> {
+async function ensureKeywords(a: NaverAcc, adgroupId: string, keywords: string[], bidAmt?: number): Promise<string[]> {
   const q = `?nccAdgroupId=${encodeURIComponent(adgroupId)}`;
   const list = async () => { const r = await naverReq(a, 'GET', '/ncc/keywords', q); return (Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as any[]; };
   const byKw = new Map<string, string>();
@@ -194,7 +194,8 @@ async function ensureKeywords(a: NaverAcc, adgroupId: string, keywords: string[]
   const missing = keywords.filter((k) => !byKw.has(norm(k)));
   // 운영 10/19: 200 응답인데 키워드가 하나도 안 생김 → 응답을 그대로 믿지 않고, 만든 뒤 그룹 목록으로 확인. 안 생긴 키워드는 하나씩 다시 보내 이유를 받음
   // 네이버 키워드는 띄어쓰기를 구분하지 않음 → 보낼 때는 띄어 쓴 그대로 대신 붙여 씀(목록 비교도 띄어쓰기 무시)
-  const body = (ks: string[]) => ks.map((k) => ({ nccAdgroupId: adgroupId, keyword: k.replace(/\s+/g, ''), useGroupBidAmt: true, userLock: false }));
+  // 운영 10/19 실계정 3916 "No value is entered in the default bid or bid amount field" — 그룹 기본 입찰가가 비어 있어 useGroupBidAmt 가 실패 → 키워드마다 세팅안 입찰가를 직접 넣음
+  const body = (ks: string[]) => ks.map((k) => ({ nccAdgroupId: adgroupId, keyword: k.replace(/\s+/g, ''), ...(bidAmt ? { useGroupBidAmt: false, bidAmt } : { useGroupBidAmt: true }), userLock: false }));
   // 운영 10/19: 네이버가 항목마다 resultStatus {code, message} 로 거절(3916 등) — 사유 문구를 자르지 않고 그대로 모음
   const statusOf = (r: any) => (Array.isArray(r) ? r : [r]).map((k: any) => k?.resultStatus ?? k?.status).filter((x: any) => x && (x.code || x.message))
     .map((x: any) => `[code ${x.code ?? '?'}] ${x.message ?? x.title ?? ''}`.trim());
@@ -249,7 +250,7 @@ export async function syncPlanKeywords(u: SessionUser, id: string) {
     where id = ${id} and coalesce((external->>'syncingAt')::timestamptz, 'epoch') < now() - interval '2 minutes' returning id`;
   if (!lock) throw new HttpError(409, 'plan_busy', '이미 다시 읽는 중입니다 — 잠시 뒤 새로 고쳐 확인해 주세요');
   let keywordIds: string[];
-  try { keywordIds = await ensureKeywords(a, String(p.external.adgroupId), p.plan.keywords); }
+  try { keywordIds = await ensureKeywords(a, String(p.external.adgroupId), p.plan.keywords, Number(p.plan.bidAmt) || undefined); }
   catch (e: any) {
     const msg = String(e?.message ?? e).slice(0, 4000);
     await sql`update mkt_ad_plans set external = external - 'syncingAt', error = ${msg}, updated_at = now() where id = ${id}`;

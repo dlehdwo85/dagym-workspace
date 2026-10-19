@@ -15,7 +15,7 @@ import {
   MessageCircle, Mail,
   TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon, Phone, ClipboardCheck, Link2,
   History, Rocket, Ellipsis,
-} from 'lucide-react';
+MapPin, } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
@@ -456,6 +456,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
               {/* 대표 결정(10/19): + 버튼 대신 더보기 › 만들기(공간 맥락) */}
               <div className="border-t border-line px-1 pb-1 pt-2" role="menu" aria-label="만들기" data-testid="more-create">
                 <div className="px-2 text-xs text-ink-3">만들기</div>
+                {/* 대표 지적(10/19): '미팅 일정 만들기'가 잘 안 보임 — 만들기 맨 위 */}
+                <Link href="/calendar?meeting=1" onClick={() => setMore(false)} role="menuitem" className="mt-1 flex min-h-[48px] items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-800" data-testid="more-new-meeting"><MapPin className="size-5" />미팅 일정 만들기</Link>
                 {tabSpace === 'sales' ? (
                   <Link href="/s/sales/leads?new=1" onClick={() => setMore(false)} role="menuitem" className="mt-1 flex min-h-[48px] items-center gap-2 rounded-xl bg-brand-600 px-3 text-sm font-semibold text-white" data-testid="more-new-lead"><Plus className="size-5" />새 리드</Link>
                 ) : tabSpace === 'marketing' ? (

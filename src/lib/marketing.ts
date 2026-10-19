@@ -245,7 +245,7 @@ export async function convertCall(u: SessionUser, id: string, i: z.infer<typeof 
   if (c.task_id) return { taskId: c.task_id };
   const { createTask } = await import('./tasks');
   const r = await createTask(u, { title: `[전화 문의] ${c.phone}${c.brand ? ` · ${c.brand}` : ''}`, description: [`전화 시각: ${new Date(c.called_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`, c.source ? `들어온 곳: ${c.source}` : '', c.memo ?? ''].filter(Boolean).join('\n'),
-    assigneeId: i.assigneeId ?? u.id, requestedById: u.id, approvalRequired: false } as never);
+    assigneeId: i.assigneeId ?? u.id, requestedById: u.id, approvalRequired: false, space: 'marketing' } as never);
   await sql`update mkt_calls set status = 'lead', task_id = ${(r as any).id} where id = ${id}`;
   return { taskId: (r as any).id };
 }

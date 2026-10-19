@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { AlertTriangle, MessageCircle, CheckCircle2, Eye, Library, Loader2, Mail, MessageSquare, Paperclip, RotateCcw, Search, Send, Sparkles, Upload } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api, broadcastRefresh, useApi } from './client';
+import { useSession } from './session';
 import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
 import { uploadTaskFiles } from './Attachments';
 import type { AssistDraft } from './TaskAssist';
@@ -225,7 +226,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           <div className="mr-2 flex rounded-input border border-line p-0.5 text-sm" role="tablist" aria-label="보내는 방법">
             {([['email', '메일', Mail], ['sms', '문자', MessageSquare], ['kakao', '카카오톡', MessageCircle]] as const).map(([k, l, I]) => (
               <button key={k} type="button" role="tab" aria-selected={channel === k} data-testid={`mail-channel-${k}`}
-                onClick={() => { setChannel(k); if (k === 'sms' && !sms.to && !sms.body) setSms({ to: d!.contact?.phone ?? '', body: '' }); if (k === 'kakao' && !kakao) setKakao(sms.body || f.body.replace(/<[^>]+>/g, '').slice(0, 1000)); }}
+                onClick={() => { setChannel(k); if (k === 'sms' && !sms.body.trim()) setSms({ to: sms.to || (d!.contact?.phone ?? ''), body: plainOf(f.body) }); /* 대표 지적(10/19): 문자도 메일 시안 본문을 그대로 넣음 */ if (k === 'kakao' && !kakao) setKakao(sms.body || f.body.replace(/<[^>]+>/g, '').slice(0, 1000)); }}
                 className={cx('inline-flex items-center gap-1 rounded-md px-2.5 py-1', channel === k ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}><I className="size-4" />{l}</button>
             ))}
           </div>
@@ -252,22 +253,31 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
             <p className="text-ink-2">내 휴대폰 문자앱으로 넘겨서 <b>내 번호로</b> 보냅니다. 첨부를 고르면 14일 다운로드 링크가 들어갑니다.</p>
             <Field label="받는 사람 전화번호 (여러 명은 쉼표)"><input className={inputCls} value={sms.to} onChange={(e) => setSms({ ...sms, to: e.target.value })} inputMode="tel" data-testid="sms-to" /></Field>
             <Field label="문자 내용"><textarea className={inputCls} rows={4} value={sms.body} onChange={(e) => setSms({ ...sms, body: e.target.value })} data-testid="sms-body" /></Field>
+            {(() => { const b = smsBytes([sms.body.trim(), smsLine].filter(Boolean).join('\n\n')); return (
+              <p className={cx('-mt-1 flex flex-wrap items-center gap-2 text-xs', b > 2000 ? 'text-red-700' : 'text-ink-3')} data-testid="sms-bytes">
+                {b}바이트 · {b <= 90 ? 'SMS(90바이트)' : b <= 2000 ? 'LMS(2,000바이트)' : '2,000바이트 넘음 — 줄여 주세요'}
+                {b > 2000 && <button type="button" className="font-medium underline" onClick={() => setSms({ ...sms, body: fitBytes(sms.body, 2000 - smsBytes(smsLine) - 4) })} data-testid="sms-fit">요약본 넣기(앞부분만)</button>}
+              </p>); })()}
             <p className="whitespace-pre-wrap rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="sms-preview">{[sms.body.trim() || '(내용)', fileCount ? '자료 내려받기(14일): https://…/d/…' : '', smsLine].filter(Boolean).join('\n\n')}</p>
           </div>
         ) : (
         <div className="grid gap-2 text-sm">
-          <p className="text-ink-2">보내는 주소 <b className="text-ink" data-testid="mail-from-line">{from ?? '연결 안 됨'}</b>{d.channel === 'email:workin' && <span className="ml-1 text-xs text-ink-3">(워크인 발송 — 답장은 회신 주소로)</span>}
-            {d.channel && <button type="button" className="ml-2 text-xs text-brand-700 underline" onClick={() => set({ more: !f.more })} data-testid="mail-more">{f.more ? '접기' : '보내는 이름·회신 주소·숨은 참조'}</button>}</p>
+          {/* 대표 지적(10/19): '보내는 주소'는 이름 <주소> 한 줄(길면 …), 설명·버튼은 그 아래 */}
+          <div className="min-w-0 text-ink-2">
+            <p className="flex min-w-0 items-baseline gap-2"><span className="shrink-0">보내는 주소</span><b className="min-w-0 truncate whitespace-nowrap text-ink" data-testid="mail-from-line" title={from ?? undefined}>{from ?? '연결 안 됨'}</b></p>
+            <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-3">{d.channel === 'email:workin' && <span>워크인 발송 — 답장은 회신 주소로</span>}
+              {d.channel && <button type="button" className="text-brand-700 underline" onClick={() => set({ more: !f.more })} data-testid="mail-more">{f.more ? '접기' : '보내는 이름·회신 주소·숨은 참조'}</button>}</p>
+          </div>
           {f.more && (
             <div className="grid gap-2 rounded-input bg-slate-50 p-2 sm:grid-cols-2" data-testid="mail-more-fields">
               <Field label="보내는 이름"><input className={inputCls} value={f.fromName} onChange={(e) => set({ fromName: e.target.value })} maxLength={80} data-testid="mail-from-name" /></Field>
               <Field label="회신 주소(Reply-To) — 답장이 오는 곳"><input className={inputCls} type="email" value={f.replyTo} onChange={(e) => set({ replyTo: e.target.value })} disabled={d.replyToEditable === false} title={d.replyToEditable === false ? '회사 설정으로 바꿀 수 없습니다(관리자에게 요청)' : undefined} data-testid="mail-reply-to" /></Field>
-              <Field label="숨은 참조"><input className={inputCls} value={f.bcc} onChange={(e) => set({ bcc: e.target.value })} data-testid="mail-bcc" /></Field>
+              <Field label="숨은 참조"><AddrChips value={f.bcc} onChange={(v) => set({ bcc: v })} testId="mail-bcc" /></Field>
             </div>
           )}
-          <Field label="받는 사람 (여러 명은 쉼표)"><input className={cx(inputCls, !f.to.trim() && 'border-amber-400 bg-amber-50/40')} value={f.to} onChange={(e) => set({ to: e.target.value })} placeholder="고객 메일 주소" data-testid="mail-to" /></Field>
+          <Field label="받는 사람"><AddrChips value={f.to} onChange={(v) => set({ to: v })} placeholder="고객 메일 주소 — 스페이스·엔터·쉼표로 여러 명" testId="mail-to" warn={!f.to.trim()} /></Field>
           {!f.to.trim() && <p className="-mt-1 flex items-center gap-1 text-xs font-medium text-amber-700" data-testid="mail-to-missing"><AlertTriangle className="size-3.5" />받는 사람 이메일이 없습니다{d.contact ? ' (문의에 이메일 없음)' : ''} — 고객 메일 주소를 입력해 주세요</p>}
-          <Field label="참조"><input className={inputCls} value={f.cc} onChange={(e) => set({ cc: e.target.value })} data-testid="mail-cc" /></Field>
+          <Field label="참조"><AddrChips value={f.cc} onChange={(v) => set({ cc: v })} testId="mail-cc" /></Field>
           <Field label="제목"><input className={inputCls} value={f.subject} onChange={(e) => set({ subject: e.target.value })} maxLength={200} data-testid="mail-subject" /></Field>
           <Field label="본문"><textarea className={inputCls} rows={7} value={f.body} onChange={(e) => set({ body: e.target.value })} data-testid="mail-body" /></Field>
         </div>
@@ -409,5 +419,49 @@ function ScheduleEdit({ at, onChange, onCancel }: { at: string; onChange: (iso: 
       <button type="button" className="font-medium underline" onClick={onCancel} data-testid="mail-schedule-cancel">예약 취소</button>
       {open && <SchedulePicker down value={at} onPick={(v) => { setOpen(false); onChange(v); }} onClose={() => setOpen(false)} />}
     </p>
+  );
+}
+
+// ---- 대표 지적(10/19) 받는 사람 칩·문자 시안 ----
+const EMAIL_RE = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
+/** 문자 바이트(한글 등 2, 영문·숫자 1 — 통신사 SMS 90·LMS 2,000 기준) */
+export const smsBytes = (s: string) => [...s].reduce((n, ch) => n + (ch.charCodeAt(0) > 127 ? 2 : 1), 0);
+/** 바이트 한도 안으로 앞부분만(문장 끝에서 자름) */
+export function fitBytes(s: string, max: number) {
+  let n = 0, out = '';
+  for (const ch of s) { const w = ch.charCodeAt(0) > 127 ? 2 : 1; if (n + w > max) break; n += w; out += ch; }
+  const cut = Math.max(out.lastIndexOf('.\n'), out.lastIndexOf('다.'), out.lastIndexOf('\n\n'));
+  return (cut > out.length * 0.5 ? out.slice(0, cut + 2) : out).trim();
+}
+const plainOf = (html: string) => html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+/** 받는 사람 입력: 스페이스·엔터·쉼표·세미콜론·붙여넣기 → 칩, 칩마다 형식 검사(틀리면 빨강), 빈 칸에서 백스페이스 = 마지막 칩 지우기, 직원·고객 주소 자동 완성 */
+function AddrChips({ value, onChange, testId, placeholder, warn }: { value: string; onChange: (v: string) => void; testId: string; placeholder?: string; warn?: boolean }) {
+  const { dir } = useSession();
+  const [chips, setChips] = useState<string[]>(() => splitAddrs(value));
+  const [draft, setDraft] = useState('');
+  const last = useRef(value);
+  useEffect(() => { if (value !== last.current) { last.current = value; setChips(splitAddrs(value)); setDraft(''); } }, [value]);
+  const emit = (c: string[], d: string) => { const v = [...c, d.trim()].filter(Boolean).join(', '); last.current = v; onChange(v); };
+  const commit = (text: string) => {
+    const parts = text.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+    if (!parts.length) return;
+    const next = [...chips, ...parts.filter((p) => !chips.includes(p))]; setChips(next); setDraft(''); emit(next, '');
+  };
+  const listId = `${testId}-list`;
+  return (
+    <div className={cx(inputCls, 'flex h-auto min-h-10 flex-wrap items-center gap-1 py-1', warn && 'border-amber-400 bg-amber-50/40')} data-testid={`${testId}-chips`}>
+      {chips.map((c, i) => (
+        <span key={c} className={cx('inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs', EMAIL_RE.test(c) ? 'bg-slate-100 text-ink' : 'bg-red-50 text-red-700 ring-1 ring-red-300')} data-testid="addr-chip" data-bad={EMAIL_RE.test(c) ? undefined : '1'} title={EMAIL_RE.test(c) ? c : '메일 주소 형식이 아닙니다'}>
+          <span className="truncate">{c}</span>
+          <button type="button" className="text-ink-3 hover:text-ink" aria-label={`${c} 빼기`} onClick={() => { const next = chips.filter((_, k) => k !== i); setChips(next); emit(next, draft); }}>×</button>
+        </span>
+      ))}
+      <input className="min-w-[8rem] flex-1 bg-transparent py-0.5 text-sm outline-none" value={draft} placeholder={chips.length ? '' : placeholder} list={listId} data-testid={testId} inputMode="email" autoCapitalize="off"
+        onChange={(e) => { const v = e.target.value; if (/[\s,;]$/.test(v)) commit(v); else { setDraft(v); emit(chips, v); } }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && draft.trim()) { e.preventDefault(); commit(draft); } else if (e.key === 'Backspace' && !draft && chips.length) { const next = chips.slice(0, -1); setChips(next); emit(next, ''); } }}
+        onPaste={(e) => { const t = e.clipboardData.getData('text'); if (/[\s,;]/.test(t.trim())) { e.preventDefault(); commit(`${draft} ${t}`); } }}
+        onBlur={() => draft.trim() && commit(draft)} />
+      <datalist id={listId}>{dir.users.filter((u) => u.email).map((u) => <option key={u.id} value={u.email}>{u.name}</option>)}</datalist>
+    </div>
   );
 }

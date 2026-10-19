@@ -1,4 +1,5 @@
 'use client';
+import { SPACE_META } from './spaceMeta';
 import { PhoneInquiryButton } from './PhoneInquiry';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -24,6 +25,7 @@ import { QuickAddTask } from './QuickAddTask';
 import { CarriedBadge } from './carried';
 
 export type Task = {
+  space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
   team_id?: string | null; team_name?: string | null; team_color?: string | null;
   org_unit_id: string; org_unit_name: string; brand_id: string | null; assignee_id: string | null; assignee_name: string | null;
@@ -83,7 +85,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [q, setQ] = useState(sp.get('q') ?? '');
   const [filters, setFilters] = useState<Record<string, string>>(() => {
     const f: Record<string, string> = {};
-    for (const k of ['brandId', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId', 'hasAttach']) { const v = sp.get(k); if (v) f[k] = v; }
+    for (const k of ['brandId', 'space', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId', 'hasAttach']) { const v = sp.get(k); if (v) f[k] = v; }
     const v = cleanView(sp.get('view')); if (v) f.view = v;
     return f;
   });
@@ -247,6 +249,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [filterOpen, setFilterOpen] = useState(false);
   const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
   const chips: [string, string][] = [
+    ...(filters.space ? [['space', `공간: ${({ work: '업무', sales: '영업', marketing: '마케팅' } as Record<string, string>)[filters.space] ?? filters.space}`]] : []),
     ...(filters.brandId ? [['brandId', `브랜드: ${dir.brands.find((b) => b.id === filters.brandId)?.name ?? filters.brandId}`]] : []),
     ...(filters.orgUnitId ? [['orgUnitId', `소속: ${unitName(filters.orgUnitId)}`]] : []),
     ...(filters.assigneeId ? [['assigneeId', `담당: ${dir.users.find((u) => u.id === filters.assigneeId)?.name ?? ''}`]] : []),
@@ -373,6 +376,11 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
 {dir.brands.length > 0 && (
           <select className={inputCls} value={filters.brandId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, brandId: e.target.value }))} aria-label="브랜드">
             <option value="">모든 브랜드</option>{dir.brands.filter((b) => !HIDDEN_BRANDS.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>)}
+          {/* 대표 확정(10/19): 영업·마케팅에서 만든 업무도 같은 목록 — 공간으로 거르기 */}
+          {(sess.spaces?.length ?? 0) > 1 && (
+          <select className={inputCls} value={filters.space ?? ''} onChange={(e) => setFilters((f) => ({ ...f, space: e.target.value }))} aria-label="공간" data-testid="filter-space">
+            <option value="">모든 공간</option><option value="work">업무</option>{sess.spaces!.includes('sales') && <option value="sales">영업</option>}{sess.spaces!.includes('marketing') && <option value="marketing">마케팅</option>}
           </select>)}
           <UnitSelect value={filters.orgUnitId ?? ''} onChange={(v) => setFilters((f) => ({ ...f, orgUnitId: v }))} allowEmpty="모든 현장·부서" />
           <select className={inputCls} value={filters.assigneeId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, assigneeId: e.target.value }))} aria-label="담당자">
@@ -1100,6 +1108,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
             {/* 대표(10/16): 제목은 한 줄 전체 폭·길면 … (두 줄은 목록이 길어져 눈이 피로) — 전체 제목은 줄을 눌러 상세에서 */}
             <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
+            {t.space && SPACE_META[t.space as 'sales' | 'marketing'] && <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: SPACE_META[t.space as 'sales' | 'marketing'].soft, color: SPACE_META[t.space as 'sales' | 'marketing'].color }} data-testid="row-space">{SPACE_META[t.space as 'sales' | 'marketing'].short}</span>}
           </span>
           <span className="min-w-0 max-lg:flex-1 lg:contents"><Meta t={t} onPatch={onPatch} /></span>
         </div>

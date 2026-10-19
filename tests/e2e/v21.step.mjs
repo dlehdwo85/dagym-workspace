@@ -26,7 +26,14 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   await c.waitFor();
   assert.match(await c.getByTestId('mail-from-line').innerText(), /office@mail\.test/);
   await c.getByTestId('mail-company-hilink').click();
-  await c.getByTestId('mail-to').fill('customer@client.test');
+  // 대표 지적(10/19): 받는 사람 칩 — 스페이스·쉼표로 나눠 칩, 틀린 주소는 빨간 칩, 빈 칸에서 백스페이스 = 마지막 칩 지우기
+  await c.getByTestId('mail-to').pressSequentially('customer@client.test second@client.test,잘못된주소 ');
+  assert.deepEqual(await c.getByTestId('mail-to-chips').getByTestId('addr-chip').allInnerTexts().then((x) => x.map((t) => t.replace('×', '').trim())), ['customer@client.test', 'second@client.test', '잘못된주소']);
+  assert.equal(await c.getByTestId('mail-to-chips').locator('[data-bad="1"]').count(), 1, '틀린 주소는 빨간 칩');
+  await c.getByTestId('mail-to').press('Backspace'); await c.getByTestId('mail-to').press('Backspace');
+  assert.equal(await c.getByTestId('mail-to-chips').getByTestId('addr-chip').count(), 1);
+  const fromBox = await c.getByTestId('mail-from-line').boundingBox();
+  assert.ok(fromBox.height < 30, `보내는 주소 한 줄 (${fromBox.height}px)`);
   await c.getByTestId('mail-body').fill('안녕하세요.\n\n제안서를 보내 드립니다.');
   const pv = owner.frameLocator('[data-testid="mail-preview"]');
   await pv.getByText('제안서를 보내 드립니다.').waitFor();
@@ -37,6 +44,9 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   await owner.screenshot({ path: `${SHOTS}/v21-mail-compose.png` });
   // 문자 탭: 받는 번호·내용·서명 한 줄(이름 / 회사 / 대표번호) 미리보기
   await c.getByTestId('mail-channel-sms').click();
+  // 대표 지적(10/19): 문자도 메일 시안 본문이 자동으로 들어가고 바이트·SMS/LMS 표시
+  assert.match(await c.getByTestId('sms-body').inputValue(), /제안서를 보내 드립니다\./);
+  await c.getByTestId('sms-bytes').getByText(/바이트 · (SMS|LMS)/).waitFor();
   await c.getByTestId('sms-to').fill('010-0000-0000');
   await c.getByTestId('sms-body').fill('제안서 보내 드립니다.');
   assert.match(await c.getByTestId('sms-preview').innerText(), /제안서 보내 드립니다\.[\s\S]*HI-LINK 시험 \/ 1555-0000/);

@@ -23,6 +23,7 @@ import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
 import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
+import { SPACE_META } from '@/components/spaceMeta';
 import { CalColorsDialog, ColorDot, PALETTE_NAMES, eventColorOf, isPersonalTask, saveColorPart, useCalColors } from '@/components/calColors';
 
 type Scope = 'this' | 'following' | 'all';
@@ -70,6 +71,10 @@ function CalendarPage() {
   const sp = useSearchParams();
   const router = useRouter();
   const cals = useApi<{ calendars: any[] }>('/api/calendars');
+  // 대표 확정(10/19): 영업·마케팅 '주요 일정'(리드 다음 연락·작업 중 입찰 마감·오늘 승인 필요 N건) — 보기만, 왼쪽 '내 캘린더'에서 켜기/끄기·색
+  const [agRange, setAgRange] = useState<{ from: string; to: string } | null>(null);
+  const agenda = useApi<{ spaces: string[]; items: { date: string; time: string | null; title: string; kind: string; space: 'sales' | 'marketing'; href: string }[] }>(agRange ? `/api/spaces/agenda?from=${agRange.from}&to=${agRange.to}` : null, [agRange?.from, agRange?.to]);
+  const spaceCals = (agenda.data?.spaces ?? []).filter((x): x is 'sales' | 'marketing' => x === 'sales' || x === 'marketing');
   const [hidden, setHidden] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('wos_cal_hidden') ?? '[]'); } catch { return []; } });
   const [showTasks, setShowTasks] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_tasks') !== '0'; } catch { return true; } });
   // V14 20번(대표 결정): 완료된 업무·일정은 기본으로 숨기고 "완료 보기"로만 (이 기기 기억)
@@ -143,6 +148,7 @@ function CalendarPage() {
   }, []);
   useEffect(() => {
     const id = sp.get('event'); if (id) setEditor({ id });
+    if (sp.get('meeting') === '1') { openMeeting(); router.replace('/calendar'); }
     if (sp.get('new') === '1') { setEditor({ draft: { date: seoulDate(new Date()) } }); router.replace('/calendar'); }
     // V5 홈·+ 버튼의 "일정": 다음 정각 1시간으로 빠른 등록 시트
     if (sp.get('quick') === '1') {
@@ -151,6 +157,7 @@ function CalendarPage() {
     }
   }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
   const [preview, setPreview] = useState<{ ev: any; x: number; y: number } | null>(null);
+  function openMeeting() { const v = calRef.current?.getApi().getDate(); const d = v ? seoulDate(v) : seoulDate(new Date()); const h = nextHour(); setEditor({ draft: { date: d, start: h.start, end: h.end, title: '미팅 · ', meeting: true } }); }
   useBackClose(!!preview, () => setPreview(null));
 
   async function load() {
@@ -179,7 +186,11 @@ function CalendarPage() {
   for (const t of tasks) if (t.due_date && !syncedIds.has(t.id) && evKey.has(`${t.due_date}|${normT(t.title)}`)) dupTasks.set(`${t.due_date}|${normT(t.title)}`, (dupTasks.get(`${t.due_date}|${normT(t.title)}`) ?? 0) + 1);
   // 다른 사람 표시: 약칭 '민수 · ' 또는(설정) 색 점 — 점 색은 그 사람 색(없으면 사람 고유색)
   const whoOf = (id: string | null | undefined, name?: string | null) => (!id ? { who: '' } : calColors.whoDot ? { who: '', whoDot: calColors.people?.[id] ?? avatarColor(id), whoName: name ?? '' } : { who: `${initials(name ?? '')} · ` });
+  const spaceColor = (k: 'sales' | 'marketing') => calColors.cals?.[`space:${k}`] ?? SPACE_META[k].color;
   const fcEvents = useMemo(() => [
+    ...(agenda.data?.items ?? []).filter((x) => !hidden.includes(`space:${x.space}`)).map((x, i) => ({ id: `space|${x.space}|${i}`, title: `${SPACE_META[x.space].short} · ${x.title}`,
+      start: x.time ? `${x.date}T${x.time}:00+09:00` : x.date, ...(x.time ? { end: new Date(Date.parse(`${x.date}T${x.time}:00+09:00`) + 30 * 60000).toISOString() } : {}), allDay: !x.time,
+      editable: false, durationEditable: false, backgroundColor: spaceColor(x.space), borderColor: 'transparent', textColor: '#ffffff', classNames: ['space-item'], extendedProps: { type: 'space', item: x } })),
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e) && (showDone || (e.linkedTask ?? e.blockTask)?.status !== 'done')).map((e) => ({ // 완료된 업무의 일정·업무 시간 블록은 "완료 보기"를 켤 때만
@@ -202,7 +213,7 @@ function CalendarPage() {
       allDay: !t.due_time, backgroundColor: isPersonalTask(t) ? calColors.personal : calColors.company, borderColor: t.status !== 'done' && t.due_date < seoulDate(new Date()) ? '#ef4444' : 'rgba(15,23,42,0.35)', // V14 37번: 왼쪽 굵은 선 = 업무
       textColor: '#ffffff', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t, ...whoOf(t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? t.assignee_id : null, t.assignee_name) }, durationEditable: false,
     })) : []),
-  ], [events, tasks, hidden, showTasks, showDone, hol.data, who, JSON.stringify(calColors)]); // eslint-disable-line react-hooks/exhaustive-deps
+  ], [events, tasks, hidden, showTasks, showDone, hol.data, who, JSON.stringify(calColors), agenda.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function completeTask(t: any) {
     const to = t.status === 'done' ? 'in_progress' : t.status === 'review' ? 'done' : t.approval_line_id || (t.approval_required && user.role === 'staff') ? 'review' : 'done';
@@ -274,6 +285,7 @@ function CalendarPage() {
     i.jsEvent.preventDefault();
     const p = i.event.extendedProps;
     if (p.type === 'holiday') return;
+    if (p.type === 'space') { router.push(p.item.href); return; }
     if (p.type === 'task') {
       if ((i.jsEvent.target as HTMLElement).closest('[data-task-check]')) return;
       setOpenTask(p.task.id); return;
@@ -310,6 +322,8 @@ function CalendarPage() {
           {/* V6 6번 엑셀: 지금 보이는 기간·사람 필터 (남의 비공개 일정은 "바쁨"만) */}
           {range && <a href={`/api/export/calendar?start=${seoulDate(range.from)}&end=${addDays(seoulDate(range.to), -1)}${who === 'mine' ? `&who=${user.id}` : Array.isArray(who) ? `&who=${who.join(',')}` : ''}`}
             className="inline-flex h-9 items-center gap-1.5 rounded-input border border-line bg-white px-3 text-sm font-medium text-ink-2 hover:bg-slate-50" data-testid="cal-export"><FileSpreadsheet className="size-4 text-green-700" /><span className="hidden sm:inline">엑셀</span></a>}
+          {/* 대표 지적(10/19): 미팅 일정 만들기를 눈에 띄게(장소 칸 먼저 채우게 '미팅 · ' 제목) */}
+          <Button variant="secondary" className="border-rose-200 text-rose-800 hover:bg-rose-50" onClick={() => openMeeting()} data-testid="cal-new-meeting"><MapPin />미팅 일정</Button>
           <Button onClick={() => { const v = calRef.current?.getApi().getDate(); const d = v ? seoulDate(v) : seoulDate(new Date()); const h = nextHour(); setEditor({ draft: { date: d, start: h.start, end: h.end } }); }}><CalendarPlus />일정 등록</Button>
         </div>
       </div>
@@ -334,6 +348,15 @@ function CalendarPage() {
                   </label>
                   {/* 대표 지적(10/19 ②): 색 점을 누르면 그 캘린더 색 바꾸기(나만) */}
                   <ColorDot color={calColors.cals?.[c.id] ?? (c.type === 'personal' ? calColors.personal : calColors.company)} label={c.type === 'personal' ? '내 일정' : c.name} onPick={(v) => saveColorPart({ cals: { [c.id]: v } })} testId={`cal-color-${c.type}`} />
+                </li>
+              ))}
+              {spaceCals.map((k) => (
+                <li key={k} className="flex items-center gap-1 rounded-input pr-1.5 hover:bg-slate-100" data-testid={`cal-space-${k}`}>
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-1.5 py-1 text-sm">
+                    <input type="checkbox" className="size-4 rounded" style={{ accentColor: spaceColor(k) }} checked={!hidden.includes(`space:${k}`)} onChange={() => setHidden(hidden.includes(`space:${k}`) ? hidden.filter((x) => x !== `space:${k}`) : [...hidden, `space:${k}`])} aria-label={`${SPACE_META[k].short} 주요 일정`} />
+                    <span className="truncate">{SPACE_META[k].short}<span className="ml-1 text-xs text-ink-3">주요 일정</span></span>
+                  </label>
+                  <ColorDot color={spaceColor(k)} label={SPACE_META[k].short} onPick={(v) => saveColorPart({ cals: { [`space:${k}`]: v } })} />
                 </li>
               ))}
               <li>
@@ -385,6 +408,12 @@ function CalendarPage() {
               <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} aria-pressed={!hidden.includes(c.id)}
                 className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(c.id) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
                 <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : calColors.cals?.[c.id] ?? (c.type === 'personal' ? calColors.personal : calColors.company) }} />{c.type === 'personal' ? '내 일정' : c.name}
+              </button>
+            ))}
+            {spaceCals.map((k) => (
+              <button key={k} onClick={() => setHidden(hidden.includes(`space:${k}`) ? hidden.filter((x) => x !== `space:${k}`) : [...hidden, `space:${k}`])} aria-pressed={!hidden.includes(`space:${k}`)}
+                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(`space:${k}`) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
+                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(`space:${k}`) ? '#e2e8f0' : spaceColor(k) }} />{SPACE_META[k].short}
               </button>
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
@@ -443,7 +472,7 @@ function CalendarPage() {
             slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap={false} eventMinHeight={mobile ? 34 : 28} eventShortHeight={30}
             editable selectable selectMirror droppable longPressDelay={350}
             events={fcEvents}
-            datesSet={(a: DatesSetArg) => { setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view2', a.view.type); } catch {} keepInUrl({ view: a.view.type, date: seoulDate(a.view.calendar.getDate()) }); }}
+            datesSet={(a: DatesSetArg) => { setAgRange({ from: seoulDate(a.start), to: seoulDate(new Date(a.end.getTime() - 1)) }); setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view2', a.view.type); } catch {} keepInUrl({ view: a.view.type, date: seoulDate(a.view.calendar.getDate()) }); }}
             eventClick={onClick}
             eventReceive={receive}
             eventContent={(arg) => {
@@ -532,6 +561,8 @@ function CalendarPage() {
       </div>
       <p className="text-xs text-ink-2">빈 칸을 누르거나 끌면 빠른 입력, 업무는 체크로 완료합니다. 오른쪽 “미배정 업무”를 시간 칸으로 끌어 놓으면 업무 시간이 잡힙니다. 단축키 D·W·M·A·T·C</p>
       <ScopeDialog />
+      {/* 휴대폰: 캘린더 오른쪽 아래 미팅 일정 버튼(하단 탭 위) */}
+      <button type="button" onClick={() => openMeeting()} className="fixed bottom-[calc(var(--sab)+76px)] right-4 z-30 inline-flex h-12 items-center gap-1.5 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white shadow-pop lg:hidden" data-testid="cal-meeting-fab"><MapPin className="size-5" />미팅</button>
       {colorDlg && <CalColorsDialog onClose={() => setColorDlg(false)} />}
       {/* 대표 결정(10/16): 캘린더에서는 일정만 등록 — 업무는 업무 화면·홈 [+업무]. 일정과 함께 할 일이 필요하면 "업무 리스트에도 추가" */}
       {quick && <QuickCreate {...quick} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}

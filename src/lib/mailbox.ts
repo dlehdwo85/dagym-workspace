@@ -219,6 +219,12 @@ export async function signatureList(u: SessionUser) {
 type Sender = { name: string; title: string | null; phone: string | null; email: string };
 type SigProfile = CompanyProfile & { sig_intro?: string | null; sig_disclaimer?: string | null; sig_disclaimer_en?: string | null };
 /** 메일 명함: 표(table)+인라인 스타일(메일 프로그램 호환). 이름·직급·연락처·이메일 = 보내는 사람, 나머지 = 회사 설정 */
+/** 대표 지적(10/19): 명함·서명 주소는 'n층'까지만(호수 등 상세 뺌). 층이 없으면 그대로. 회사 정보의 원래 주소는 바꾸지 않음 */
+export function cardAddress(a: string | null | undefined) {
+  if (!a) return a ?? null;
+  const m = a.match(/^(.*?(?:지하\s*)?\d+\s*층)/);
+  return m ? m[1].trim() : a;
+}
 export function signatureHtml(p: SigProfile, s: Sender) {
   const color = p.brand_color ?? '#0F766E';
   const logo = logoUrl(p);
@@ -232,14 +238,14 @@ export function signatureHtml(p: SigProfile, s: Sender) {
 <div style="font-size:13px;font-weight:bold;color:${color};margin:2px 0 6px">${esc(p.name)}</div>
 <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
 ${line('T', p.phone, p.phone ? `tel:${p.phone.replace(/[^0-9+]/g, '')}` : undefined)}${line('M', s.phone, s.phone ? `tel:${s.phone.replace(/[^0-9+]/g, '')}` : undefined)}${line('F', p.fax)}
-${s.email ? line('E', s.email, `mailto:${s.email}`) : ''}${line('W', p.website, web ?? undefined)}${line('A', p.address)}
+${s.email ? line('E', s.email, `mailto:${s.email}`) : ''}${line('W', p.website, web ?? undefined)}${line('A', cardAddress(p.address))}
 </table></td></tr>
 ${p.sig_intro ? `<tr><td colspan="2" style="padding:10px 0 0;font-size:12px;color:#475569">${esc(p.sig_intro)}</td></tr>` : ''}
 ${p.sig_disclaimer || p.sig_disclaimer_en ? `<tr><td colspan="2" style="padding:10px 0 0;font-size:10px;line-height:1.5;color:#94a3b8">${esc(p.sig_disclaimer)}${p.sig_disclaimer && p.sig_disclaimer_en ? '<br>' : ''}${esc(p.sig_disclaimer_en)}</td></tr>` : ''}
 </table>`;
 }
 export function signatureText(p: SigProfile, s: Sender) {
-  return ['--', `${s.name}${s.title ? ' ' + s.title : ''}`, p.name, [p.phone && `T ${p.phone}`, s.phone && `M ${s.phone}`].filter(Boolean).join(' · '), s.email, p.website, p.address]
+  return ['--', `${s.name}${s.title ? ' ' + s.title : ''}`, p.name, [p.phone && `T ${p.phone}`, s.phone && `M ${s.phone}`].filter(Boolean).join(' · '), s.email, p.website, cardAddress(p.address)]
     .filter(Boolean).join('\n');
 }
 /** 문자 끝 한 줄: "이름 직급 / 회사 / 대표번호" */

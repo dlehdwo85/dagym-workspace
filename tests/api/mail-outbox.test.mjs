@@ -62,7 +62,7 @@ const account = (extra = {}) => ({ provider: 'custom', host: '127.0.0.1', port: 
 before(async () => {
   await resetDb(); smtp = await startSmtp(); fake = await startFakeGoogle(); srv = await startServer({ RESEND_API_KEY: 're_test_key', MAIL_FROM_DOMAIN: 'mail.work-in.test', RESEND_API_BASE: `http://localhost:${RESEND_PORT}` }); resendSrv = startResend(); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'dagym', name: '시험상호 다짐', phone: '02-000-0000', isDefault: true });
-  await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'hilink', name: 'HI-LINK 시험', phone: '1555-0000', address: '시험시 시험로 36, 8층', website: 'www.hilink.test' });
+  await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'hilink', name: 'HI-LINK 시험', phone: '1555-0000', address: '시험시 시험로 36, 8층 801호', website: 'www.hilink.test' });
   taskId = (await ctx.owner.ok('POST', '/api/tasks', { title: '[하이링크 문의] 시험아파트', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
   await sql`insert into inquiries (tenant, lead_id, site, inquiry_type, organization, task_id, payload)
     values ('default', 'lead-mail-1', 'hilink', '위탁운영', '시험아파트', ${taskId}, ${sql.json({ name: '고객', email: 'customer@client.test', phone: '010-0000-0000' })})`;
@@ -103,6 +103,7 @@ describe('V21 메일 계정·명함', () => {
     assert.equal(c.company, 'hilink'); assert.deepEqual(c.to, ['customer@client.test']); assert.equal(c.canSend, true);
     const sig = c.companies.find((x) => x.key === 'hilink').html;
     for (const s of ['김대표', 'HI-LINK 시험', '시험시 시험로 36, 8층', 'www.hilink.test', '시험 소개 한 줄', 'Confidential', 'office@mail.test']) assert.ok(sig.includes(s), s);
+    assert.ok(!sig.includes('801호'), '대표 지적(10/19): 명함 주소는 층까지만');
     assert.ok(!sig.includes('ceo@dagym.test'), '로그인 이메일(개인 메일일 수 있음)은 명함에 안 나감');
     assert.ok(!/APART/i.test(sig));
     // 직원은 볼 수는 있어도 보내기 권한 없음(서버 403)

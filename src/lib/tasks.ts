@@ -16,6 +16,8 @@ export const taskInput = z.object({
   parentId: zUuid.nullable().optional(),
   orgUnitId: zUuid.optional(),
   brandId: z.enum(['dagym', 'hilink', 'bodylab']).nullable().optional(),
+  /** 대표 확정(10/19): 만든 공간(영업·마케팅). 비우면 업무 공간 */
+  space: z.enum(['sales', 'marketing']).nullable().optional(),
   assigneeId: zUuid.nullable().optional(),
   /** WORKIN_V3 지시자(업무를 부여한 사람). 기본 = 만든 사람 */
   requestedById: zUuid.nullable().optional(),
@@ -52,7 +54,7 @@ export const taskInput = z.object({
 export type TaskInput = z.infer<typeof taskInput>;
 
 export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
-  t.id, t.title, t.description, t.status, t.priority, t.project_id, t.parent_id, t.org_unit_id, t.brand_id,
+  t.id, t.title, t.description, t.status, t.priority, t.project_id, t.parent_id, t.org_unit_id, t.brand_id, t.space,
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id, t.review_of,
@@ -98,6 +100,7 @@ export const listQuery = z.object({
   projectId: zUuid.optional(),
   orgUnitId: zUuid.optional(),
   brandId: z.string().optional(),
+  space: z.enum(['work', 'sales', 'marketing']).optional().catch(undefined),
   assigneeId: zUuid.optional(),
   requestedById: zUuid.optional(),
   status: z.string().optional(), // 콤마 구분
@@ -152,6 +155,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
       union select c.id from org_units c join s on c.parent_id = s.id) select id from s)`);
   }
   if (q.brandId) conds.push(sql`t.brand_id = ${q.brandId}`);
+  if (q.space) conds.push(q.space === 'work' ? sql`t.space is null` : sql`t.space = ${q.space}`); // 대표 확정(10/19) 업무 목록 '공간' 필터
   if (q.teamId) conds.push(sql`t.team_id = ${q.teamId}`); // V14 8번
   if (q.assigneeId) conds.push(sql`t.assignee_id = ${q.assigneeId}`);
   if (q.requestedById) conds.push(sql`t.requested_by = ${q.requestedById}`);
@@ -354,12 +358,12 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
     const [t] = await tx<{ id: string }[]>`
       insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
         start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at,
-        task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id, reminder_minutes, team_id)
+        task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id, reminder_minutes, team_id, space)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
         ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
         ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null},
-        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null}, ${i.reminderMinutes ?? null}, ${i.teamId ?? null})
+        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null}, ${i.reminderMinutes ?? null}, ${i.teamId ?? null}, ${i.space ?? null})
       returning id`;
     if (i.teamId && i.teamMode === 'lead' && !i.assigneeId) { // 팀에 배정 → 팀장이 담당자를 정한다
       const leads = await tx<{ user_id: string }[]>`select user_id from team_members where team_id = ${i.teamId} and is_lead`;

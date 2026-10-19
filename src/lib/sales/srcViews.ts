@@ -67,10 +67,20 @@ const SOURCE_LABEL: Record<string, string> = { kapt: 'K-apt', 'k-apt': 'K-apt', 
  * · 사전규격(입찰 예정)은 빼고 · 작업 상태 미참여·대상아님은 뺀다. 원본 상태 문구가 '공고중'만이 아니어서(운영 10/19 진행 중 0건) 닫힌 상태만 거른다 */
 const CLOSED_NOTICE = /마감|종료|취소|낙찰|유찰|개찰완료|closed|cancel|award|expired|done/i;
 const SKIP_WORK = /미참여|대상아님|not[_\s-]?target|skip/i;
-export function isOpenBid(n: { related?: boolean; status?: unknown; close?: string | null; source?: unknown }, work: unknown, td: string) {
+/** 마감 시각(KST) → epoch ms. 시각이 없거나 읽을 수 없으면 null. 오프셋 없는 'YYYY-MM-DD HH:MM' 은 서울 시각으로 */
+function deadlineAt(v: unknown): number | null {
+  const s = String(v ?? '').trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return null;
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) { const t = Date.parse(s); return Number.isNaN(t) ? null : t; }
+  return Date.parse(`${m[1]}T${m[2]}:${m[3]}:00+09:00`);
+}
+export function isOpenBid(n: { related?: boolean; status?: unknown; close?: string | null; source?: unknown; deadline?: unknown }, work: unknown, td: string) {
   if (!n.related) return false;
   if (n.status && CLOSED_NOTICE.test(String(n.status))) return false;
   if (n.close && n.close < td) return false;
+  // 로컬 10/19: 오늘 09:00·14:59 처럼 이미 지난 마감 — 시각이 있으면 지금 시각과 비교(시각 없으면 날짜만)
+  if (n.close === td && n.deadline) { const at = deadlineAt(n.deadline); if (at !== null && at <= Date.now()) return false; }
   if (/pre|사전/i.test(String(n.source ?? ''))) return false;
   if (work && SKIP_WORK.test(String(work))) return false;
   return true;
@@ -82,7 +92,7 @@ function businessOf(r: any) {
   return dg && hl ? 'both' : dg ? 'dagym' : hl ? 'hilink' : null;
 }
 
-export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string }) {
+export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string }) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
   const [applied] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
@@ -96,6 +106,32 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
 
   const bidsOn = await (await import('./options')).salesBidsOn(t); // 입찰·공고 선택 기능
   if (view === 'bids' && !bidsOn) throw notFound('입찰·공고를 쓰지 않는 회사입니다');
+  // 대표 확정(10/19): 홈 '이번 주'·캘린더에 영업 주요 일정만 — 리드 다음 연락(미팅·방문·제안 등 다음 조치 이름), 작업 중인 입찰 마감. 공고 하나하나는 안 넣음
+  if (view === 'agenda') {
+    const ok = (d: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(d ?? ''));
+    const from = ok(q.from) ? q.from! : today(), to = ok(q.to) ? q.to! : plus(7);
+    const raw = await leadRows();
+    const items: { date: string; time: string | null; title: string; kind: string; owner: string | null; href: string }[] = [];
+    for (const r of raw) {
+      const l = lead(r, names);
+      if (!l.next || l.next < from || l.next > to || CLOSED.has(String(l.status))) continue;
+      const act = pick(r, 'next_action', 'next_step', 'next_action_type');
+      const tm = String(pick(r, 'next_contact_at', 'next_action_at') ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null;
+      items.push({ date: l.next, time: tm, title: `${act ? String(act).slice(0, 20) : '연락'} · ${l.name}`, kind: 'lead', owner: l.owner ?? null, href: `/s/sales/leads?q=${encodeURIComponent(String(l.name))}` });
+    }
+    if (bidsOn) {
+      const W = (await rows(t, 'opportunity_work')).filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? '')));
+      const ids = new Set(W.map((w) => String(pick(w, 'notice_id', 'procurement_notice_id') ?? '')));
+      if (ids.size) for (const r of await rows('global', 'procurement_notices', 20000)) {
+        if (!ids.has(String(r.id ?? r.__id))) continue;
+        const n = notice(r);
+        if (!n.close || n.close < from || n.close > to) continue;
+        items.push({ date: n.close, time: String(n.deadline ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null, title: `입찰 마감 · ${String(n.complex ? `${n.complex} ` : '')}${n.title}`.slice(0, 80), kind: 'bid', owner: null, href: '/s/sales/bids?tab=working' });
+      }
+    }
+    items.sort((a, b) => (a.date + (a.time ?? '')).localeCompare(b.date + (b.time ?? '')));
+    return { from, to, items: items.slice(0, 100) };
+  }
   if (view === 'summary') {
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await rows(t, 'opportunity_work');
