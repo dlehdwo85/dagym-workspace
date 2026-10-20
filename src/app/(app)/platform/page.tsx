@@ -5,6 +5,7 @@ import { Building2, Check, Copy, KeyRound, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { AiForecast } from '@/components/AiForecast';
 import { PlatformTenants } from '@/components/PlatformTenants';
+import { PlatformHiggsfield } from '@/components/PlatformHiggsfield';
 import { fmtBytes, lim, won } from '@/components/usage';
 import { PlatformPayments } from '@/components/Billing';
 import { PayTest } from '@/components/PayTest';
@@ -57,6 +58,7 @@ export default function PlatformPage() {
       {/* V12 3번: 문의 접수함 */}
       <PlatformFunnel />
       <AiForecast />
+      <PlatformHiggsfield />
       <PlatformSalesMigrate />
       <PlatformSalesSources />
       <PlatformOpsImport />

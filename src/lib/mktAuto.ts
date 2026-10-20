@@ -172,13 +172,17 @@ export async function materialOf(c: any, brand: any, rule: any) {
   const gweek = goal && goal.status !== 'pending' ? G.weekOf(goal.weekly ?? [], day) : null;
   const topic = String(c.quality?.topic ?? '').trim() || String(gweek?.topic ?? '').trim() || String(brand?.weekly_topic ?? '').trim() || String(rule?.topic_hint ?? '').trim();
   const about = [brand?.intro, brand?.products, co.business].map((x) => String(x ?? '').trim()).filter(Boolean);
+  // 로컬 21:45 버그: 다짐 스토리에 하이링크 주제 — 브랜드 글은 그 브랜드 재료만(브랜드 키트가 있으면 회사 공통 소개는 빼고, 다른 브랜드 이름은 금지)
+  const others = brand ? (await sql<{ name: string }[]>`select name from mkt_brands where tenant = ${c.tenant} and id <> ${brand.id}`).map((b) => brandName(b)).filter(Boolean) : [];
+  const brandOnly = !!brand && !!(brand.intro || brand.products);
   const lines = [
     `브랜드 이름: ${brandName(brand) || co.name || '(없음)'}`,
     co.name ? `회사: ${co.name}${co.industries?.length ? ` (${co.industries.join('·')})` : ''}` : '',
     brand?.intro ? `브랜드 소개: ${brand.intro}` : '',
     brand?.products ? `주력 상품·서비스: ${brand.products}` : '',
-    co.business ? `회사 사업 소개: ${co.business}` : '',
-    co.customers ? `주요 고객: ${co.customers}` : '',
+    co.business && !brandOnly ? `회사 사업 소개: ${co.business}` : '',
+    co.customers && !brandOnly ? `주요 고객: ${co.customers}` : '',
+    brand ? `이 글은 '${brandName(brand)}' 브랜드 전용 — ${others.length ? `다른 브랜드(${others.join(', ')})의 상품·소식·이름은 쓰지 않음` : '다른 브랜드 이야기는 쓰지 않음'}` : '',
     topic ? `이번 글 주제: ${topic}` : '',
     goal && goal.status !== 'pending' ? `이달 운영 목표: ${(goal.goals?.objectives ?? []).join(' / ')}${goal.goals?.message ? ` · 핵심 메시지: ${goal.goals.message}` : ''}` : '',
     photos.length ? `쓸 수 있는 실사 사진(자료실):\n${photos.map((p) => `- ${p.title}${p.description ? `: ${p.description.slice(0, 120)}` : ''}`).join('\n')}` : '',
@@ -217,7 +221,7 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
 }
 
 /** 제작 요청 카드 — 한도를 넘으면 needs_approval(제작 전 승인 요청) */
-async function requestCard(c: any, version: number, kind: 'image' | 'video' | 'regen_image' | 'regen_video', brief: string, est: number, tx?: any) {
+export async function requestCard(c: any, version: number, kind: 'image' | 'video' | 'regen_image' | 'regen_video', brief: string, est: number, tx?: any) {
   const sql = tx ?? db(); const s = await settingsOf(c.tenant); const lim = limitsOf(s); const use = await usageOf(c.tenant);
   let reason: string | null = null;
   if (kind === 'video' && est >= EST.video && lim.videoMonthly !== null && use.monthVideos >= lim.videoMonthly) reason = `이번 달 생성 영상 ${lim.videoMonthly}편을 다 썼습니다`;
@@ -349,7 +353,7 @@ export async function automationView(u: SessionUser) {
   const s = await settingsOf(t);
   const [rules, requests, ledger, brands, people] = await Promise.all([
     sql`select r.id, r.brand_id, b.name as brand, r.channel, r.kind, r.weekdays, r.post_time, r.topic_hint, r.active, r.interval_days, r.anchor_date::text as anchor_date, r.cross_channels, r.bundle_key, r.skip_weekend from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${t} order by r.created_at`,
-    sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
+    sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, q.brief_id, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
     sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, coalesce(l.title, c.title) as title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
     sql`select id, name, tone, intro, products, weekly_topic, banned_words, test_mode from mkt_brands where tenant = ${t} order by name`,
@@ -481,7 +485,7 @@ export async function actRequest(u: SessionUser, id: string, i: z.infer<typeof r
     });
     return { status: 'canceled' };
   }
-  if (i.action === 'cancel') { await sql`update mkt_production_requests set status = 'canceled', decided_by = ${u.id}, decided_at = now() where id = ${id}`; return { status: 'canceled' }; }
+  if (i.action === 'cancel') { await sql`update mkt_production_requests set status = 'canceled', decided_by = ${u.id}, decided_at = now() where id = ${id}`; await (await import('./mktStudio')).onRequestSettled(id, 'canceled'); return { status: 'canceled' }; }
   if (q.kind === 'topic') { // 주제 답 → 다음 실행(또는 지금 한 번 돌리기)에 그 주제로 제작
     if (q.status !== 'open') throw badRequest('이미 끝난 요청입니다');
     if (!i.topic) throw badRequest('주제를 적어 주세요');
@@ -500,6 +504,7 @@ export async function actRequest(u: SessionUser, id: string, i: z.infer<typeof r
     await tx`update mkt_production_requests set status = 'done', decided_by = ${u.id}, decided_at = now() where id = ${id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, created_by, title) values (${t}, ${q.content_id}, ${q.version}, ${kind}, ${credits}, ${'제작 요청 완료'}, ${u.id}, (select title from mkt_contents where id = ${q.content_id}))`;
   });
+  await (await import('./mktStudio')).onRequestSettled(id, 'done'); // 제작의뢰실 의뢰 → 승인 대기
   return { status: 'done', credits };
 }
 

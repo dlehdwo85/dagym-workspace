@@ -1,0 +1,111 @@
+'use client';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Copy } from 'lucide-react';
+import { api, useApi } from '@/components/client';
+import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { MediaPick } from './MediaPick';
+
+/**
+ * 대표 10/20 19:00 제작의뢰실: 의뢰 폼(브랜드·채널/종류·목적·핵심 메시지·참고·톤·수량·마감) → AI 30년차 마케터 프롬프트(영문 + 한글 요약 + 참고 사진 + 자막) → [수정]/[생성]
+ * → 생성(Higgsfield 연동 전엔 제작 요청 카드로 로컬 도우미에) → 승인 대기. 월 운영 목표 주간 달력에서 오면(?brand=&message=&kind=) 의뢰가 미리 채워짐.
+ */
+const C = '#7C3AED';
+type Brief = { id: string; brand: string | null; brand_id: string | null; channel: string; kind: string; purpose: string; message: string; refs: any; tone: string | null; quantity: number; due_date: string | null; status: string; prompt: any; content_id: string | null; est_credits: number; result: any; error: string | null; created_by_name: string | null; created_at: string; content_status: string | null; open_requests: number };
+type View = { briefs: Brief[]; brands: { id: string; name: string; tone: string | null }[]; recent: { id: string; title: string; channel: string }[]; kinds: Record<string, { label: string; aspect: string; px: string; media: string }>; purposes: Record<string, string>; canGenerate: boolean; provider: 'higgsfield' | 'card'; models: { id: string; kind: string; name: string; credits: number }[] };
+const STATUS: Record<string, [string, string]> = { queued: ['대기', 'bg-slate-100 text-ink-2'], prompting: ['프롬프트 작성 중', 'bg-sky-50 text-sky-800'], ready: ['프롬프트 준비', 'bg-violet-50 text-violet-800'], generating: ['생성 중', 'bg-amber-50 text-amber-800'], review: ['승인 대기', 'bg-orange-50 text-orange-800'], published: ['게시됨', 'bg-emerald-50 text-emerald-800'], rejected: ['반려', 'bg-red-50 text-red-800'], failed: ['실패', 'bg-red-50 text-red-800'] };
+const labelOf = (b: Brief) => (b.content_status === 'published' ? STATUS.published : b.content_status === 'changes' && b.status === 'review' ? ['수정 요청', 'bg-slate-100 text-ink-2'] : STATUS[b.status] ?? [b.status, 'bg-slate-100 text-ink-2']);
+
+export function Studio() {
+  const sp = useSearchParams();
+  const { data, error, reload } = useApi<View>('/api/marketing/studio');
+  const [f, setF] = useState({ brandId: sp.get('brand') ?? '', kind: sp.get('kind') ?? 'feed', purpose: sp.get('purpose') ?? 'inquiry', message: sp.get('message') ?? '', tone: '', quantity: 1, dueDate: sp.get('due') ?? '', links: '', contentIds: [] as string[], goalWeek: sp.get('week') ? Number(sp.get('week')) : undefined });
+  const [media, setMedia] = useState<{ id: string; title: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (data && !f.brandId && data.brands.length === 1) setF((x) => ({ ...x, brandId: data.brands[0].id })); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); if (f.message.trim().length < 2) return; setBusy(true);
+    try {
+      const r = await api<{ id: string; prompt: any }>('/api/marketing/studio', { body: { brandId: f.brandId || null, kind: f.kind, purpose: f.purpose, message: f.message.trim(), tone: f.tone || null, quantity: f.quantity, dueDate: f.dueDate || null, goalWeek: f.goalWeek,
+        refs: { mediaIds: media.map((m) => m.id), contentIds: f.contentIds, links: f.links.split(/\s+/).filter((x) => /^https?:\/\//.test(x)).slice(0, 5) } } });
+      toast.ok(r.prompt?.error ? '의뢰했습니다 — 프롬프트는 [다시 쓰기]로' : r.prompt?.source === 'ai' ? '의뢰했습니다 — AI 마케터가 프롬프트를 썼습니다' : '의뢰했습니다 — AI 없이 기본 프롬프트');
+      setF({ ...f, message: '', links: '', contentIds: [] }); setMedia([]); reload();
+    } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+  }
+  if (error) return <ErrorBox error={error} retry={reload} />;
+  if (!data) return <Skeleton rows={5} />;
+  const spec = data.kinds[f.kind];
+  const model = data.models.find((m) => m.kind === spec?.media);
+  return (
+    <div className="space-y-4" data-testid="mkt-studio">
+      <p className="text-xs text-ink-2">의도를 적으면 AI 비서가 <b>경력 30년 마케터·아트디렉터</b>로 생성 프롬프트(영문)·한글 의도 요약·참고 사진·자막을 씁니다. 확인한 뒤 [생성]을 누르면 {data.provider === 'higgsfield' ? 'Higgsfield 로 만들어 자료실에 저장하고' : '제작 요청 카드(프롬프트·참고 사진 포함)로 넘어가 만든 뒤'} 승인 대기에 올라갑니다. 크레딧은 월 한도 안에서.</p>
+      <form onSubmit={submit} className="space-y-3 rounded-card border border-violet-200 bg-violet-50/30 p-4" data-testid="studio-form">
+        <div className="grid gap-2 sm:grid-cols-4">
+          <Field label="브랜드"><select className={inputCls} value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value, tone: '' })} aria-label="브랜드" data-testid="studio-brand"><option value="">(없음)</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
+          <Field label="채널 · 종류"><select className={inputCls} value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })} aria-label="종류" data-testid="studio-kind">{Object.entries(data.kinds).map(([k, v]) => <option key={k} value={k}>{v.label} ({v.px})</option>)}</select></Field>
+          <Field label="수량"><input className={inputCls} type="number" min={1} max={5} value={f.quantity} onChange={(e) => setF({ ...f, quantity: Math.max(1, Math.min(5, Number(e.target.value) || 1)) })} aria-label="수량" /></Field>
+          <Field label="마감(게시 예정일)"><input className={inputCls} type="date" value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} aria-label="마감" /></Field>
+        </div>
+        <Field label="목적"><div className="flex flex-wrap gap-1.5">{Object.entries(data.purposes).map(([k, l]) => <button key={k} type="button" onClick={() => setF({ ...f, purpose: k })} className={cx('rounded-full border px-3 py-1 text-xs', f.purpose === k ? 'border-transparent text-white' : 'border-line bg-white')} style={f.purpose === k ? { background: C } : undefined} aria-pressed={f.purpose === k} data-testid={`studio-purpose-${k}`}>{l}</button>)}</div></Field>
+        <Field label="핵심 메시지 1줄"><input className={inputCls} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} maxLength={300} placeholder="예: 가을 신규 회원 PT 10회 30% 할인 — 10월 말까지" required aria-label="핵심 메시지" data-testid="studio-message" /></Field>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Field label="참고 사진(자료실)"><MediaPick value={media} onChange={setMedia} /></Field>
+          <Field label="기존 게시물 참고"><select className={inputCls} multiple size={3} value={f.contentIds} onChange={(e) => setF({ ...f, contentIds: [...e.target.selectedOptions].map((o) => o.value).slice(0, 5) })} aria-label="기존 게시물">{data.recent.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}</select></Field>
+          <Field label="레퍼런스 링크(공백으로 구분)"><input className={inputCls} value={f.links} onChange={(e) => setF({ ...f, links: e.target.value })} placeholder="https://…" aria-label="레퍼런스 링크" /></Field>
+          <Field label="톤(비우면 브랜드 키트)"><input className={inputCls} value={f.tone} onChange={(e) => setF({ ...f, tone: e.target.value })} maxLength={200} placeholder={data.brands.find((b) => b.id === f.brandId)?.tone ?? '친절하고 담백하게'} aria-label="톤" /></Field>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-2"><span>{spec ? `${spec.label} ${spec.aspect} · ${spec.px}` : ''}{model ? ` · 모델 ${model.name} · 예상 ${model.credits * f.quantity}크레딧` : ''}</span><Button disabled={busy || f.message.trim().length < 2} data-testid="studio-submit">{busy ? 'AI 마케터가 쓰는 중…' : '의뢰하기'}</Button></div>
+      </form>
+      <ul className="space-y-2" data-testid="studio-list">{data.briefs.map((b) => <BriefCard key={b.id} b={b} view={data} onChange={reload} />)}{!data.briefs.length && <li className="text-sm text-ink-3">아직 의뢰가 없습니다</li>}</ul>
+    </div>
+  );
+}
+
+function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () => void }) {
+  const [edit, setEdit] = useState(false); const [p, setP] = useState({ promptEn: b.prompt?.promptEn ?? '', negativeEn: b.prompt?.negativeEn ?? '', summaryKo: b.prompt?.summaryKo ?? '', caption: b.prompt?.caption ?? '', model: b.prompt?.model ?? '' });
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setP({ promptEn: b.prompt?.promptEn ?? '', negativeEn: b.prompt?.negativeEn ?? '', summaryKo: b.prompt?.summaryKo ?? '', caption: b.prompt?.caption ?? '', model: b.prompt?.model ?? '' }), [b]);
+  async function act(body: Record<string, unknown>, msg: string) {
+    setBusy(true);
+    try { const r = await api<any>(`/api/marketing/studio/${b.id}`, { method: 'PATCH', body }); toast.ok(r?.status === 'generating' && r.requestIds ? `제작 요청 카드 ${r.requestIds.length}건으로 넘겼습니다` : r?.status === 'review' ? '시안을 만들어 승인 대기에 올렸습니다' : r?.status === 'failed' ? `생성 실패: ${(r.errors ?? []).join(' / ')}` : msg); setEdit(false); onChange(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  const [sl, sc] = labelOf(b); const spec = view.kinds[b.kind]; const pr = b.prompt;
+  const copy = (t: string) => { navigator.clipboard?.writeText(t).then(() => toast.ok('복사했습니다')).catch(() => toast.error('복사 실패')); };
+  return (
+    <li className="rounded-card border border-line bg-white p-3 text-sm shadow-card" data-testid="studio-brief" data-status={b.status}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', sc)} data-testid="studio-status">{sl}</span>
+        {b.brand && <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-semibold text-white">{b.brand}</span>}
+        <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800">{spec?.label ?? b.kind} · {view.purposes[b.purpose] ?? b.purpose}</span>
+        <b className="min-w-0 flex-1 truncate">{b.message}</b>
+        <span className="text-[11px] text-ink-3">{b.created_by_name ?? ''} · {fmtDateTime(b.created_at)}{b.quantity > 1 ? ` · ${b.quantity}장` : ''}{b.due_date ? ` · 마감 ${b.due_date}` : ''}{b.est_credits ? ` · 예상 ${b.est_credits}크레딧` : ''}</span>
+      </div>
+      {b.error && <p className="mt-1 text-xs text-red-700">{b.error}</p>}
+      {pr && !edit && <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs" data-testid="studio-prompt">
+        <div className="rounded-input bg-slate-50 p-2"><div className="flex items-center justify-between font-semibold text-ink-2">생성 프롬프트(EN){pr.source === 'ai' ? <span className="font-normal text-ink-3">AI 마케터</span> : pr.source === 'user' ? <span className="font-normal text-ink-3">직접 고침</span> : <span className="font-normal text-ink-3">기본</span>}<button type="button" onClick={() => copy(pr.promptEn)} className="inline-flex items-center gap-0.5 text-violet-700" aria-label="프롬프트 복사"><Copy size={12} />복사</button></div>
+          <p className="mt-1 whitespace-pre-wrap text-ink" data-testid="studio-prompt-en">{pr.promptEn}</p>{pr.negativeEn && <p className="mt-1 text-ink-3">피할 것: {pr.negativeEn}</p>}{pr.model && <p className="mt-1 text-ink-3">모델 {pr.model} · {pr.aspect}</p>}</div>
+        <div className="space-y-1.5"><div className="rounded-input bg-violet-50/50 p-2"><div className="font-semibold text-violet-800">한글 의도 요약</div><p className="mt-0.5 whitespace-pre-wrap">{pr.summaryKo || '—'}</p></div>
+          <div className="rounded-input border border-line p-2"><div className="font-semibold text-ink-2">자막·카피</div><p className="mt-0.5 whitespace-pre-wrap">{pr.caption || '—'}</p></div>
+          {!!pr.refMediaIds?.length && <div className="flex gap-1.5">{pr.refMediaIds.map((m: string) => <img key={m} src={`/api/library/${m}/download?inline=1`} alt="" className="size-14 rounded-input object-cover" loading="lazy" />)}</div>}</div>
+      </div>}
+      {edit && <div className="mt-2 space-y-2 text-xs" data-testid="studio-edit">
+        <Field label="생성 프롬프트(EN)"><textarea className={inputCls} rows={5} value={p.promptEn} onChange={(e) => setP({ ...p, promptEn: e.target.value })} aria-label="프롬프트" data-testid="studio-edit-prompt" /></Field>
+        <div className="grid gap-2 sm:grid-cols-2"><Field label="피할 것(EN)"><input className={inputCls} value={p.negativeEn} onChange={(e) => setP({ ...p, negativeEn: e.target.value })} aria-label="피할 것" /></Field>
+          <Field label="모델"><select className={inputCls} value={p.model} onChange={(e) => setP({ ...p, model: e.target.value })} aria-label="모델"><option value="">자동</option>{view.models.filter((m) => m.kind === spec?.media).map((m) => <option key={m.id} value={m.id}>{m.name} · {m.credits}크레딧</option>)}</select></Field></div>
+        <Field label="한글 의도 요약"><textarea className={inputCls} rows={2} value={p.summaryKo} onChange={(e) => setP({ ...p, summaryKo: e.target.value })} aria-label="요약" /></Field>
+        <Field label="자막·카피"><textarea className={inputCls} rows={2} value={p.caption} onChange={(e) => setP({ ...p, caption: e.target.value })} aria-label="자막" /></Field>
+        <div className="flex gap-1.5"><Button size="sm" onClick={() => act({ action: 'update', promptEn: p.promptEn, negativeEn: p.negativeEn, summaryKo: p.summaryKo, caption: p.caption, model: p.model || null }, '저장했습니다')} disabled={busy || p.promptEn.trim().length < 5} data-testid="studio-edit-save">저장</Button><Button size="sm" variant="secondary" onClick={() => setEdit(false)}>취소</Button></div>
+      </div>}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {['ready', 'failed'].includes(b.status) && !edit && <><Button size="sm" variant="secondary" onClick={() => setEdit(true)} data-testid="studio-edit-open">수정</Button><Button size="sm" variant="secondary" onClick={() => act({ action: 'prompt' }, '프롬프트를 다시 썼습니다')} disabled={busy}>AI 다시 쓰기</Button>
+          {view.canGenerate && <Button size="sm" onClick={() => act({ action: 'generate' }, '생성했습니다')} disabled={busy} data-testid="studio-generate">{view.provider === 'higgsfield' ? '생성' : '제작 요청 카드로 보내기'}</Button>}</>}
+        {b.status === 'queued' && <Button size="sm" variant="secondary" onClick={() => act({ action: 'prompt' }, '프롬프트를 썼습니다')} disabled={busy} data-testid="studio-prompt-retry">프롬프트 쓰기</Button>}
+        {b.status === 'generating' && <span className="text-xs text-ink-2">{view.provider === 'higgsfield' ? '생성 중…' : `제작 요청 카드 ${b.open_requests}건 — 로컬 도우미가 만들어 붙이면 승인 대기로`} <Link href="/s/marketing/automation#requests" className="underline">카드 보기</Link></span>}
+        {b.content_id && ['review', 'published'].includes(b.status) && <Link href={`/s/marketing/approvals?c=${b.content_id}`} className="rounded-input border border-line px-2.5 py-1 text-xs" data-testid="studio-open-content">승인함에서 보기</Link>}
+        {!['review', 'published'].includes(b.status) && <Button size="sm" variant="secondary" onClick={() => act({ action: 'cancel' }, '취소했습니다')} disabled={busy}>취소</Button>}
+      </div>
+    </li>
+  );
+}
