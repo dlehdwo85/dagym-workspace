@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, broadcastRefresh } from './client';
 import { Camera, Download, Eye, FileText, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload } from 'lucide-react';
 import { isNativeApp } from './native';
+import { MediaFull } from './MediaView';
 import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
 
@@ -45,6 +46,7 @@ export async function uploadTaskFiles(list: File[], target: { taskId?: string; e
 }
 
 const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '');
+const isVideo = (a: any) => a.kind === 'file' && /^video\//.test(a.mime_type ?? ''); // 대표 10/21 02:00: 영상은 보기 창에서 재생
 
 const SOURCE_LABEL: Record<string, string> = { upload: '업로드', google_drive: 'Google Drive', chatgpt: 'ChatGPT 결과물', notion: 'Notion', web: '웹 링크', other: '기타', library: '자료실' };
 
@@ -140,6 +142,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
               </div>
             </div>
             {/* V14 49: 업무를 볼 수 있는 사람 누구나 미리보기(PDF·사진)·내려받기 — 앱은 서명 주소를 받아 기기 브라우저/공유로 넘김 */}
+            {isVideo(a) && <button type="button" onClick={() => setView(a)} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 재생`} title="재생" data-testid="att-play"><Eye className="size-4" /></button>}
             {a.kind === 'file' && /^(image\/|application\/pdf)/.test(a.mime_type ?? '') && (
               <button type="button" onClick={() => openFile(a.id, true)} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 미리보기`} title="미리보기" data-testid="att-preview"><Eye className="size-4" /></button>
             )}
@@ -175,7 +178,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
             <button type="button" className="rounded px-2 py-1 text-white/90" aria-label="사진 닫기" onClick={() => setView(null)}>닫기</button>
           </div>
           <div className="relative flex min-h-0 flex-1 items-center justify-center" onClick={(e) => e.stopPropagation()}>
-            <img src={`/api/attachments/${view.id}/download?inline=1`} alt={view.file_name} className="max-h-full max-w-full object-contain" />
+            <MediaFull src={`/api/attachments/${view.id}/download?inline=1`} mime={view.mime_type} alt={view.file_name} className="max-h-full max-w-full object-contain" />
             {photos.length > 1 && <>
               <button type="button" aria-label="이전 사진" className="absolute left-2 rounded-full bg-white/20 px-3 py-2 text-2xl text-white" onClick={() => setView(photos[(photos.indexOf(photos.find((p) => p.id === view.id)) - 1 + photos.length) % photos.length])}>‹</button>
               <button type="button" aria-label="다음 사진" className="absolute right-2 rounded-full bg-white/20 px-3 py-2 text-2xl text-white" onClick={() => setView(photos[(photos.indexOf(photos.find((p) => p.id === view.id)) + 1) % photos.length])}>›</button>

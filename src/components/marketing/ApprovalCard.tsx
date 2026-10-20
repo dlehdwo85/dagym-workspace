@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { MediaFull, MediaThumb, isVideoMime, mimeOf, posterFrom } from '@/components/MediaView';
 import { api } from '@/components/client';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -33,7 +34,7 @@ export function whenLabel(at: string | null) {
 export const deadlineLabel = (deadline: string | null, at: string | null) => deadline && at ? `${whenLabel(deadline).replace(/^(오늘|내일) /, '$1 ')}까지 승인하면 ${hm(at)} 게시` : null;
 
 export type CardContent = { id: string; title: string; channel: string; kind?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null;
-  body?: string; media_ids?: string[]; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
+  body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
   auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[] } | null; production?: { kind: string; status: string } | null;
   rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; week?: number | null } | null;
   last_decision?: { decision: string; comment: string | null; at: string; version: number; by: string | null } | null };
@@ -79,7 +80,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         <div className="mt-2">
           <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:thin]">{media.map((m, k) => (
             <button key={m} type="button" onClick={() => { setIdx(k); setFull(true); }} className={cx('relative size-20 shrink-0 overflow-hidden rounded-input border', k === 0 ? 'border-violet-400' : 'border-line')} aria-label={`시안 ${k + 1} 크게 보기`}>
-              <img src={`/api/library/${m}/download?inline=1`} alt="" className="size-full object-cover" loading="lazy" />{k === 0 && <span className="absolute left-0 top-0 rounded-br bg-violet-600 px-1 text-[10px] text-white">표지</span>}
+              <MediaThumb src={`/api/library/${m}/download?inline=1`} mime={mimeOf(c.media_info, m)} poster={isVideoMime(mimeOf(c.media_info, m)) && posterFrom(c.media_info, m) ? `/api/library/${posterFrom(c.media_info, m)}/download?inline=1` : null} className="size-full object-cover" />{k === 0 && <span className="absolute left-0 top-0 rounded-br bg-violet-600 px-1 text-[10px] text-white">표지</span>}
             </button>))}</div>
           <p className="mt-0.5 text-[11px] text-ink-3">{media.length}장 — 옆으로 넘겨 보기</p>
         </div>)}
@@ -109,7 +110,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
       {canAct && !late && c.status !== 'approved' && <p className="mt-1 hidden text-[11px] text-ink-3 md:block">승인해도 바로 공개되지 않습니다 — 게시 시각에 게시(도우미 또는 연결된 채널)합니다.</p>}
       {full && media.length > 0 && (
         <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center bg-black/90 p-4" onClick={() => setFull(false)} data-testid="media-viewer">
-          <img src={`/api/library/${media[idx]}/download?inline=1`} alt="" className="max-h-[80vh] max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
+          <MediaFull src={`/api/library/${media[idx]}/download?inline=1`} mime={mimeOf(c.media_info, media[idx])} poster={posterFrom(c.media_info, media[idx]) ? `/api/library/${posterFrom(c.media_info, media[idx])}/download?inline=1` : null} className="max-h-[80vh] max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
           <div className="mt-3 flex items-center gap-4 text-white" onClick={(e) => e.stopPropagation()}>
             <button type="button" onClick={() => setIdx((idx - 1 + media.length) % media.length)} aria-label="이전" className="px-3 text-2xl">‹</button><span>{idx + 1} / {media.length}</span>
             <button type="button" onClick={() => setIdx((idx + 1) % media.length)} aria-label="다음" className="px-3 text-2xl">›</button></div>

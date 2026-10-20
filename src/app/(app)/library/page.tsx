@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { MediaThumb } from '@/components/MediaView';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ChevronRight, Download, FilePenLine, FileSpreadsheet, FileText, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock,
   Pencil, Search, ShieldAlert, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react';
@@ -21,9 +22,10 @@ const SEC: Record<Sec, { label: string; cls: string }> = {
   public: { label: '일반', cls: 'bg-green-50 text-green-700' }, internal: { label: '내부', cls: 'bg-slate-100 text-ink-2' }, confidential: { label: '기밀', cls: 'bg-red-50 text-red-700' } };
 const fmtSize = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n >= 1024 ? `${Math.round(n / 1024)}KB` : `${n}B`);
 const isImg = (f: F) => /^image\/(png|jpe?g|gif|webp)$/.test(f.mime_type);
+const isVid = (f: F) => /^video\//.test(f.mime_type); // 대표 10/21 02:00: 영상은 미리보기(첫 프레임)·브라우저 재생
 // 10/19 워크인 문서(공동 편집): 저장 파일 없이 Yjs 상태로 — 열면 편집 화면, 내려받기는 .docx 내보내기
 const isDoc = (f: F) => f.mime_type === 'application/x-workin-doc';
-const openHref = (f: F) => (isDoc(f) ? `/library/doc/${f.id}` : `/api/library/${f.id}/download${isImg(f) ? '?inline=1' : ''}`);
+const openHref = (f: F) => (isDoc(f) ? `/library/doc/${f.id}` : `/api/library/${f.id}/download${isImg(f) || isVid(f) ? '?inline=1' : ''}`);
 const parentOf = (p: string) => p.split('/').slice(0, -1).join('/');
 const nameOf = (p: string) => p.split('/').pop() || '최상위';
 const DRAG = 'application/x-workin-files';
@@ -342,7 +344,7 @@ export default function LibraryPage() {
                       <li key={f.id} draggable onDragStart={dragFile(f)} className={cx('group relative overflow-hidden rounded-card border bg-white shadow-card', sel.has(f.id) ? 'border-brand-600 ring-1 ring-brand-600' : 'border-line', hi === f.id && 'ring-2 ring-amber-400')}>
                         <input type="checkbox" checked={sel.has(f.id)} onChange={() => toggle(f.id)} className="absolute left-2 top-2 z-10" aria-label={`${f.title} 선택`} />
                         <a href={openHref(f)} target={isDoc(f) ? undefined : '_blank'} rel="noreferrer" className="flex aspect-[4/3] items-center justify-center bg-slate-50">
-                          {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : <FileIcon f={f} big />}
+                          {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : isVid(f) ? <MediaThumb src={`/api/library/${f.id}/download?inline=1`} mime={f.mime_type} className="size-full" /> : <FileIcon f={f} big />}
                         </a>
                         <div className="p-2"><div className="flex items-center gap-1 text-sm font-medium"><span className="min-w-0 flex-1 truncate">{f.title}</span>{f.effective_security !== 'internal' && <SecBadge s={f.effective_security} />}</div>
                           <div className="truncate text-[11px] text-ink-3">{fmtSize(Number(f.size_bytes))} · {f.created_by_name}</div></div>
@@ -426,7 +428,7 @@ function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder,
     <li draggable onDragStart={onDrag} className={cx('flex items-center gap-3 px-3 py-2.5', hi && 'bg-amber-50', sel && 'bg-brand-50/60')} data-file={f.id}>
       <input type="checkbox" checked={sel} onChange={onSel} aria-label={`${f.title} 선택`} />
       <a href={openHref(f)} target={isDoc(f) ? undefined : '_blank'} rel="noreferrer" className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-input border border-line bg-slate-50">
-        {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : <FileIcon f={f} />}
+        {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : isVid(f) ? <MediaThumb src={`/api/library/${f.id}/download?inline=1`} mime={f.mime_type} className="size-full" /> : <FileIcon f={f} />}
       </a>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-sm font-medium">{isDoc(f) ? <a href={openHref(f)} className="min-w-0 truncate hover:underline" data-testid="doc-open">{f.title}</a> : <span className="min-w-0 truncate">{f.title}</span>}

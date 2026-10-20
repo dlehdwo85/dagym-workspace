@@ -97,7 +97,8 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.is_test, b.name as brand, b.color as brand_color,
-      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality, c.rationale,
+      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note,
+      (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality, c.rationale,
       (select json_build_object('kind', p.kind, 'status', p.status) from mkt_production_requests p where p.content_id = c.id and p.kind in ('image', 'video', 'regen_image', 'regen_video') and p.status in ('open', 'needs_approval') order by p.created_at desc limit 1) as production,
       (select max(d.version) from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version) as reapprove_from,
       (select json_build_object('decision', d.decision, 'comment', d.comment, 'at', d.decided_at, 'version', d.version, 'by', du.name) from mkt_decisions d left join users du on du.id = d.decided_by
@@ -131,7 +132,8 @@ export async function getContent(u: SessionUser, id: string) {
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
   const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
-  const media = ids.length ? await sql`select id, title, file_name, mime_type from library_files where id = any(${ids}::uuid[]) and tenant = ${tenantOf(u)} and deleted_at is null` : [];
+  // 로컬 10/21 02:10: media 는 버전의 media_ids 순서(표지 → 영상)로
+  const media = ids.length ? await sql`select id, title, file_name, mime_type from library_files where id = any(${ids}::uuid[]) and tenant = ${tenantOf(u)} and deleted_at is null order by array_position(${ids}::uuid[], id)` : [];
   const publishJobs = await sql`select j.id, j.provider, j.status, j.version, j.permalink, j.is_test, j.last_error, j.attempts, j.run_after, j.created_at, u.name as requested_by_name, a.label as account from mkt_publish_jobs j left join mkt_publish_accounts a on a.id = j.account_id left join users u on u.id = j.requested_by where j.content_id = ${id} order by j.created_at desc`;
   const decisions = await sql`select d.version, d.decision, d.comment, d.decided_at, u.name as decided_by_name from mkt_decisions d left join users u on u.id = d.decided_by where d.content_id = ${id} order by d.decided_at desc`;
   const st = await (await import('./mktAuto')).settingsOf(tenantOf(u));

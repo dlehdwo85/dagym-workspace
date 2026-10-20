@@ -42,9 +42,9 @@ export async function homeView(u: SessionUser) {
   const { homeChannels } = await import('./mktChannels');
   const now = await homeNow(t);
   const queueIds = now.queue.slice(0, 3).map((c: any) => c.id);
-  const thumbs = queueIds.length ? await sql<{ content_id: string; media: string | null }[]>`select v.content_id, v.media_ids[1]::text as media from mkt_versions v join mkt_contents c on c.id = v.content_id and c.current_version = v.version where v.content_id = any(${queueIds}::uuid[])` : [];
-  const thumb = new Map(thumbs.map((r) => [r.content_id, r.media]));
-  const approve = now.queue.slice(0, 3).map((c: any) => ({ ...c, media: thumb.get(c.id) ?? null }));
+  const thumbs = queueIds.length ? await sql<{ content_id: string; media: string | null; media_mime: string | null }[]>`select v.content_id, (select f.id::text from library_files f where f.id = any(v.media_ids) and f.deleted_at is null order by (f.mime_type like 'image/%') desc, array_position(v.media_ids, f.id) limit 1) as media, (select f.mime_type from library_files f where f.id = any(v.media_ids) and f.deleted_at is null order by (f.mime_type like 'image/%') desc, array_position(v.media_ids, f.id) limit 1) as media_mime from mkt_versions v join mkt_contents c on c.id = v.content_id and c.current_version = v.version where v.content_id = any(${queueIds}::uuid[])` : [];
+  const thumb = new Map(thumbs.map((r) => [r.content_id, r.media])); const thumbMime = new Map(thumbs.map((r) => [r.content_id, r.media_mime]));
+  const approve = now.queue.slice(0, 3).map((c: any) => ({ ...c, media: thumb.get(c.id) ?? null, mediaMime: thumbMime.get(c.id) ?? null }));
   // 1 숫자 4칸
   const [adp] = await sql<{ n: number }[]>`select count(*)::int as n from mkt_ad_plans where tenant = ${t} and status = 'draft'`;
   const [wk] = await sql<{ done: number; planned: number }[]>`select count(*) filter (where status = 'published')::int as done, count(*) filter (where status in ('approved', 'pending', 'changes'))::int as planned
@@ -106,7 +106,9 @@ export async function homeView(u: SessionUser) {
   const ads = ad.accounts > 0 ? { accounts: ad.accounts, on: plansOn.on, off: plansOn.off, monthlyCap: cap ? Number(cap.monthly_cap) : null, stopped: !!cap?.stopped_month, today: ad.today, suggestions: adp.n,
     campaigns: camps.map((c) => ({ id: c.campaign_id, name: c.name || c.campaign_id, ctr: c.imp ? Math.round((c.clicks / c.imp) * 10000) / 100 : null, cpc: c.clicks ? Math.round(c.cost / c.clicks) : null, cost: c.cost })) } : null;
   // 6 최근 게시물 6(썸네일) + 다음 할 일 제안 5
-  const recent = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.published_at, c.published_url, v.media_ids[1]::text as media from mkt_contents c
+  const recent = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.published_at, c.published_url,
+    (select f.id::text from library_files f where f.id = any(v.media_ids) and f.deleted_at is null order by (f.mime_type like 'image/%') desc, array_position(v.media_ids, f.id) limit 1) as media,
+    (select f.mime_type from library_files f where f.id = any(v.media_ids) and f.deleted_at is null order by (f.mime_type like 'image/%') desc, array_position(v.media_ids, f.id) limit 1) as "mediaMime" from mkt_contents c
     left join mkt_versions v on v.content_id = c.id and v.version = coalesce(c.approved_version, c.current_version)
     where c.tenant = ${t} and not c.is_test and c.status = 'published' order by c.published_at desc nulls last limit 6`;
   const [nomedia] = await sql<{ n: number }[]>`select count(*)::int as n from mkt_contents c left join mkt_versions v on v.content_id = c.id and v.version = c.current_version

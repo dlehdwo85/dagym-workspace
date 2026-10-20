@@ -1352,6 +1352,13 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 핫픽스 영상 시안 안 보임(대표 02:00 #125) [배포확인요청]
+- 원인: 승인함 카드·상세 미리보기·홈 썸네일·자료실·업무 첨부가 모든 미디어를 `<img>` 로 그려 mp4 는 빈 칸. 수정: 공용 `MediaView`(src/components/MediaView.tsx) — mime 이 video/* 면 카드·목록은 첫 프레임 정지(#t=0.1) + ▶ 배지, 크게 보기·상세 미리보기는 `<video controls playsinline preload=metadata>`(세로 9:16 그대로). 같은 버전에 이미지(-thumb)가 있으면 포스터·썸네일로. 캔버스 캡처는 안 함(브라우저가 첫 프레임을 그림).
+- 데이터: 목록(승인함) 행에 `media_info[{id,mime}]`(media_ids 순) · 상세 `media` 는 media_ids 순서(로컬 02:10: 전엔 생성순) · 홈 승인/최근 썸네일은 이미지 우선 + `mediaMime` · 자료실·업무 첨부 inline 내려받기에 video/* 허용(브라우저 재생).
+- M1 게시 실행기(로컬 02:10): 릴스·쇼츠에 표지 이미지가 섞여 있으면 **영상 1개 + 표지(cover_url/thumb)** — 표지를 사진·캐러셀로 올리지 않음(인스타·페북·스레드).
+- 자료실: 영상 썸네일 첫 프레임 + 열기 = 브라우저 재생. 업무 첨부: 영상 줄 [재생] → 보기 창에서 재생.
+- 시험: tests/api/mkt-media.test.mjs 1건 + mkt-publish 릴스+표지 1건 추가, E2E 'V41 4-2 마케팅' 회귀.
+
 ## 2026-10-20 로고 S3 전체 적용(대표 확정 #124) + 소개 사이트 히어로 배경(대표 22:30 ③ #119) + Higgsfield 달러 종량제(로컬 ⑤ #120) [배포확인요청]
 - 로고(자산 docs/handoff/brand/workin-s3 → public/): icon.svg(벡터 S3)·icon-192/512·icon-maskable-512(manifest purpose maskable 그대로)·apple-touch-icon·favicon-48/32·favicon.ico·icon-1024(JSON-LD logo)·landing/og.png(og-1200x630)·splash-2732(PWA iOS 시작 화면 `apple-touch-startup-image`)·badge-96(웹 푸시 badge, 흰 실루엣)·brand/lockup-light·lockup-dark·wordmark·wordmark-white.
   - 바뀐 화면: 탭 파비콘·홈 화면 아이콘·PWA, 소개 사이트 헤더(가로 록업)·푸터(록업)·OG·JSON-LD, 로그인 왼쪽 판(다크 록업)·휴대폰 로그인 머리(S3 아이콘), 앱 셸 상단·마케팅/영업/운영실 상단(icon.svg 공용), 공개 링크(/r) 페이지, 웹 푸시 아이콘·배지. `tests/e2e/landing-shots.mjs` 는 더 이상 og.png 를 덮어쓰지 않음.

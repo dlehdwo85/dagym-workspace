@@ -28,6 +28,7 @@ before(async () => {
     // 페이스북 페이지
     if (req.method === 'POST' && p === '/graph/page-1/photos') return send(200, { id: `ph-${++seq}`, post_id: `page-1_${seq}` });
     if (req.method === 'POST' && p === '/graph/page-1/feed') return send(200, { id: `page-1_${++seq}` });
+    if (req.method === 'POST' && p === '/graph/page-1/videos') return send(200, { id: `page-1_${++seq}` }); // 로컬 02:10: 릴스 → 페북 영상(+thumb)
     if (req.method === 'GET' && /^\/graph\/page-1_\d+$/.test(p)) return send(200, { permalink_url: `https://www.facebook.com/${p.split('/').pop()}` });
     // 스레드 OAuth + 게시
     if (p === '/threads/oauth/access_token') return send(200, { access_token: 'th-short', user_id: 'th-9' });
@@ -125,6 +126,18 @@ test('여러 채널 한 번(인스타 2장 캐러셀 + 페북 + 스레드) → �
   const thr = calls.filter((c) => c.path === '/threads/th-9/threads'); assert.equal(thr.at(-1).q.media_type, 'CAROUSEL'); assert.equal(thr.at(-1).q.text, '두 장 캐러셀 글');
   const d = await ctx.owner.ok('GET', `/api/marketing/contents/${id}`);
   assert.equal(d.content.status, 'published'); assert.equal(d.publishJobs.filter((j) => j.status === 'done').length, 3);
+});
+
+test('로컬 02:10: 릴스에 표지 이미지가 섞여 있으면 영상 1개 + 표지(cover_url) — 표지를 사진 게시물로 올리지 않음', async () => {
+  const vid = await upload('릴스.mp4', 'video/mp4', Buffer.from('mp4-bytes-reels'));
+  const id = await approved({ kind: 'reels', mediaIds: [P.img, vid], body: '표지 + 영상', crossChannels: ['facebook'] });
+  calls = [];
+  const r = await ctx.owner.ok('POST', `/api/marketing/contents/${id}/publish/server`, {});
+  assert.deepEqual(r.ran.map((x) => [x.provider, x.status]).sort(), [['meta_fb', 'done'], ['meta_ig', 'done']], JSON.stringify(r.ran));
+  const ig = calls.filter((c) => c.path === '/graph/ig-1/media');
+  assert.equal(ig.length, 1, '컨테이너 1개(캐러셀·사진 아님)'); assert.equal(ig[0].q.media_type, 'REELS'); assert.ok(ig[0].q.video_url && ig[0].q.cover_url, '영상 + 표지');
+  assert.equal(calls.filter((c) => c.path === '/graph/page-1/photos').length, 0, '페북도 사진 게시 안 함');
+  const fb = calls.find((c) => c.path === '/graph/page-1/videos'); assert.ok(fb && fb.q.thumb, '페북 영상 + 썸네일');
 });
 
 test('유튜브: 영상 재개 업로드(토큰 refresh → 세션 → PUT) → youtu.be 주소 · 영상 없으면 실패(최종)', async () => {

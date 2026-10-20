@@ -1,5 +1,6 @@
 'use client';
 import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
+import { MediaFull, mimeOf, posterFrom } from '@/components/MediaView';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -128,9 +129,10 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
 
 /** 콘텐츠 상세: 버전·시안·결정 기록 + (관리자) 승인·수정 요청·보류 + 수정본 올리기 + 게시 확인 */
 /** 대표 10/20 ②: 상세 첫 화면에 실제 게시 화면처럼 미리보기 — 인스타·페북·스레드는 카드(사진 + 캡션), 블로그는 제목·표지·본문(둘째 사진은 첫 문단 뒤), 유튜브는 16:9 표지 + 제목 */
-function PostPreview({ channel, kind, brand, title, body, media }: { channel: string; kind?: string | null; brand: string | null; title: string; body: string; media: string[] }) {
+function PostPreview({ channel, kind, brand, title, body, media, info }: { channel: string; kind?: string | null; brand: string | null; title: string; body: string; media: string[]; info?: { id: string; mime: string | null }[] }) {
   const [more, setMore] = useState(false);
-  const img = (id: string, cls: string) => <img src={`/api/library/${id}/download?inline=1`} alt="" className={cls} loading="lazy" />;
+  // 대표 10/21 02:00: 영상(릴스·쇼츠)은 재생 가능한 <video>(세로 그대로), 같은 버전의 이미지는 포스터
+  const img = (id: string, cls: string) => <MediaFull src={`/api/library/${id}/download?inline=1`} mime={mimeOf(info, id)} poster={posterFrom(info, id) ? `/api/library/${posterFrom(info, id)}/download?inline=1` : null} className={cls} />;
   const none = (cls: string) => <div className={cx(cls, 'flex items-center justify-center bg-slate-200 text-xs text-ink-2')}>시안 제작 중</div>;
   const paras = body.split(/\n{2,}/).filter(Boolean);
   const blog = channel === 'blog'; const yt = channel === 'youtube'; const vertical = kind === 'reels' || kind === 'shorts' || kind === 'story';
@@ -185,7 +187,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b> · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
         {c.quality?.passed === false && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">{c.auto ? '품질 검사: ' : ''}{c.quality.issues.join(' · ')}</p>}
         <WhyBox r={c.rationale} />
-        {v && <PostPreview channel={c.channel} kind={c.kind} brand={c.brand} title={c.title} body={v.body} media={v.media_ids} />}
+        {v && <PostPreview channel={c.channel} kind={c.kind} brand={c.brand} title={c.title} body={v.body} media={v.media_ids} info={(data.media ?? []).map((m: any) => ({ id: m.id, mime: m.mime_type }))} />}
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div></div>
