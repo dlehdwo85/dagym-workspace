@@ -7,7 +7,7 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
   const ids = ['E2E-APP-L1', 'E2E-APP-N1', 'E2E-APP-W1', 'E2E-APP-F1'];
   await sql`delete from sales_src_rows where src_id = any(${ids})`;
   await put('default', 'leads', { id: ids[0], name: 'E2E 앱 거래처', sales_status: '미팅예정', region: '경기', next_contact_date: ymd(2), phone: '031-123-4567', contact_name: '김소장', homepage: 'https://example.com/e2e', expected_revenue: '0.00', updated_at: `${ymd(0)}T01:00:00Z` });
-  await put('global', 'procurement_notices', { id: ids[1], title: 'E2E 앱 체육시설 위탁운영', issuer: '성남시청', region: '경기', related: true, first_seen_at: `${ymd(0)}T00:30:00+09:00`, deadline_at: `${ymd(5)}T10:00:00`, current_status: '공고중', source: 'g2b', source_url: 'https://example.com/notice/1', attachment_urls: ['https://example.com/files/notice.hwp'], budget: '385000000.00', office_phone: '031-729-2600', complex_name: '분당 스포츠센터' });
+  await put('global', 'procurement_notices', { id: ids[1], title: 'E2E 앱 체육시설 위탁운영', issuer: '성남시청', region: '경기', related: true, first_seen_at: `${ymd(0)}T00:30:00+09:00`, deadline_at: `${ymd(5)}T10:00:00`, current_status: '공고중', source: 'g2b', source_url: 'https://example.com/notice/1', attachment_urls: ['https://www.g2b.go.kr/files/notice.hwp'], budget: '385000000.00', office_phone: '031-729-2600', complex_name: '분당 스포츠센터' });
   await put('default', 'opportunity_work', { id: ids[2], notice_id: ids[1], status: '검토 중', memo: '현장 설명회 10/25', next_action_date: ymd(3) });
   await put('global', 'operating_facility_prospects', { id: ids[3], name: 'E2E 앱 시설', address: '경기 수원시', households: 1500, facility_type: '아파트', region: '경기', office_phone: '031-222-3333', use_approval_date: '2024-05-13', first_seen_at: ymd(0) });
   await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant: 'default', at: new Date().toISOString(), daily: true })}) on conflict (key) do nothing`;
@@ -47,6 +47,10 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     const dt = await d.innerText();
     for (const k of ['공고명', '단지', '발주처', '마감', '예산', '문서', '연락처', '상태', '메모', '다음 조치']) assert.ok(dt.includes(k), `상세 칸 ${k}`);
     assert.ok(!/source_url|office_phone|deadline_at/.test(dt), '영문 키 노출 없음(원본은 접힘)');
+    // S1-4: 값 없는 정보 칸은 '후속조사 필요', 접힘 '과업·참가자격·요건 상세', 첨부는 같은 도메인 중계로
+    assert.ok(/추정가격[\s\S]*후속조사 필요/.test(dt), '추정가격 없으면 후속조사 필요');
+    assert.equal(await d.getByTestId('bid-detail-more').count(), 1);
+    assert.match(await d.getByTestId('bid-doc-file').first().getAttribute('href'), /^\/api\/bids\/file\?u=https%3A%2F%2Fwww\.g2b\.go\.kr/, '공공 사이트 첨부는 같은 도메인 중계');
     assert.equal(await d.getByTestId('bid-raw').count(), 1, '관리자 원본 보기 접힘');
     assert.equal(await d.getByTestId('bid-raw').evaluate((el) => el.open), false);
     await p.screenshot({ path: `${SHOTS}/140-sales-app-bid-detail.png` });

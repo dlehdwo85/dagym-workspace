@@ -35,6 +35,7 @@ import { salesAppFlow } from './sales-app.step.mjs';
 import { checklistAppFlow } from './checklist-app.step.mjs';
 import { alarmFlow } from './alarm.step.mjs';
 import { salesWorkFlow } from './sales-work.step.mjs';
+import { calEditFlow } from './cal-edit.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -2309,6 +2310,8 @@ await step('대표 검수 10/20 체크리스트(360): 항목별 미팅 버튼 �
 await step('로컬 10/20 알람처럼 울리기(웹): 설정 기본값 3칸 → 업무 상세 알람 선택 → 알람 알림 띠([해제][10분 뒤][열기]) → 해제 → 활동 탭 기록', () => alarmFlow({ staff, ctx, sql, BASE, SHOTS }));
 
 await step('S1-2 진행 기록 쓰기(390): 입찰 상세 원본 상태 버튼·메모·다음 연락일 저장 → 카드 칩 → 진행영업으로 넘기기 → 리드 상세·전환됨', () => salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }));
+
+await step('로컬 10/20 캘린더 재발: 빠른 입력 첫 화면 색 줄 → 생성 직후 편집(새로고침 신호에도 입력 유지·저장) → 다른 기기 충돌 뒤 [완료] 자동 재시도', () => calEditFlow({ browser, desk, owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();
