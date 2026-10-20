@@ -14,7 +14,7 @@ import { SignupSteps } from '@/components/SignupSteps';
 export default function SignupPage() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [mode, setMode] = useState<'personal' | 'team'>('personal');
-  const [f, setF] = useState({ name: '', email: '', password: '', company: '', size: '', industry: '', website: '' });
+  const [f, setF] = useState({ name: '', email: '', password: '', company: '', size: '', industry: '', industries: [] as string[], website: '' });
   const [social, setSocial] = useState(0);
   const [agree, setAgree] = useState({ terms: false, privacy: false, ai: false, marketing: false });
   const [ads, setAds] = useState(false);
@@ -41,7 +41,7 @@ export default function SignupPage() {
     setBusy(true);
     try {
       setAdsConsent(ads);
-      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, mode, agree: { ...agree, ads }, openedAt: opened.current, utm: readUtm() } });
+      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, mode, agree: { ...agree, ads }, openedAt: opened.current, utm: readUtm() } });
       setDone(r);
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
   }

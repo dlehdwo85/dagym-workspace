@@ -49,7 +49,7 @@ export async function companyDraft(u: SessionUser, i: z.infer<typeof draftInput>
   await (await import('../plans')).assertAiRequest(u);
   await (await import('./guard')).assertAiCredit();
   const sql = db(); const t = tenantOf(u);
-  const [cur] = await sql<any[]>`select name, industry, ai_business, ai_customers, ai_tone, ai_cautions from tenants where id = ${t}`;
+  const [cur] = await sql<any[]>`select name, industry, industries, ai_business, ai_customers, ai_tone, ai_cautions from tenants where id = ${t}`;
   const p = anthropicProvider({ tier: 'fast' });
   const r = await p.chat({
     system: `회사 정보 정리 도우미. 아래 자료만 보고 회사 소개 칸 초안을 한국어로 씁니다. 자료에 없는 사실(숫자·수상·가격)은 만들지 않습니다.
@@ -59,7 +59,7 @@ export async function companyDraft(u: SessionUser, i: z.infer<typeof draftInput>
 - cautions(주의할 점: 쓰면 안 되는 표현·과장 금지·업종 광고 규정(예: 의료·건강기능식품·금융·부동산이면 해당 규정), 불릿 없이 쉼표로)
 ${i.field ? `이번에는 ${i.field} 칸만 새로 씁니다(다른 칸은 빈 문자열).` : ''} JSON 만.`,
     tools: [],
-    messages: [{ role: 'user', content: `[회사] ${cur?.name ?? ''}${cur?.industry ? ` · 업종 ${cur.industry}` : ''}\n${parts.join('\n\n')}` }],
+    messages: [{ role: 'user', content: `[회사] ${cur?.name ?? ''}${cur?.industries?.length ? ` · 업종 ${cur.industries.join('·')}` : cur?.industry ? ` · 업종 ${cur.industry}` : ''}\n${parts.join('\n\n')}` }],
     format: { type: 'object', additionalProperties: false, required: [...FIELDS], properties: Object.fromEntries(FIELDS.map((f) => [f, { type: 'string' }])) },
   });
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)

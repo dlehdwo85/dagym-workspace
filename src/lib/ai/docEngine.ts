@@ -217,8 +217,8 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
 
 /** 정기 실행 안전망: 응답 뒤 처리가 끊겼던 작업을 다시 */
 export async function docJobsJob() {
-  const rows = await db()<{ id: string }[]>`select id from ai_doc_jobs where (status = 'queued' and created_at < now() - interval '1 minute')
-    or (status = 'running' and started_at < now() - interval '10 minutes') order by created_at limit 3`;
+  const rows = await db()<{ id: string }[]>`select id from ai_doc_jobs where ((status = 'queued' and created_at < now() - interval '1 minute')
+    or (status = 'running' and started_at < now() - interval '10 minutes')) and (run_after is null or run_after <= now()) order by created_at limit 3`; // ⑥ [밤에] 미룬 작업은 run_after 뒤에
   for (const r of rows) await processDocJob(r.id);
   return { processed: rows.length };
 }

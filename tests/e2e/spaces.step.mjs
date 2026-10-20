@@ -10,15 +10,28 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
   await owner.getByTestId('space-toggle-sales').click(); // 저장 → 화면 새로고침(사이드바에 공간 카드)
-  await owner.getByTestId('space-switch').waitFor();
+  await owner.getByTestId('space-tabs').waitFor();
   await owner.goto(`${BASE}/`);
-  await owner.getByTestId('space-switch').click();
-  await owner.getByTestId('space-menu').getByText(/내 업무 \d+/).waitFor();
-  await owner.getByTestId('space-go-sales').click();
+  // ⑦ 사이드바 3구역(대표 승인 10/20 오후): ① 맨 위 공간 전환 탭(요약은 title) ② '업무 메뉴'(홈·업무·프로젝트·내 주간 보고·결재) ③ '공통'(캘린더·알림·메시지·자료실·연락처·공지·AI 비서) + 관리(접힘)
+  await owner.getByTestId('space-tabs').waitFor();
+  await owner.waitForFunction(() => /내 업무 \d+/.test(document.querySelector('[data-testid="space-tab-work"]')?.getAttribute('title') ?? '')); // 요약은 /api/spaces 가 온 뒤
+  const navLabels = async (tid) => (await owner.getByTestId(tid).getByRole('link').allInnerTexts()).map((x) => x.replace(/\d+$/, '').trim());
+  assert.equal(await owner.getByTestId('nav-space-head').innerText(), '업무 메뉴');
+  const side = owner.getByRole('navigation', { name: '주 메뉴' });
+  const sideLabels = async () => (await side.getByRole('link').allInnerTexts()).map((x) => x.replace(/\d+$/, '').trim());
+  const workLabels = await sideLabels();
+  assert.deepEqual(workLabels.slice(0, 5), ['홈', '업무', '프로젝트', '내 주간 보고', '결재'], `업무 메뉴 ${workLabels}`);
+  const commonWork = await navLabels('nav-common-v3');
+  assert.deepEqual(commonWork.slice(0, 4), ['캘린더', '알림', '메시지', '자료실'].filter((l) => commonWork.includes(l)).slice(0, 4), `공통 ${commonWork}`);
+  assert.ok(commonWork.includes('연락처') && commonWork.includes('공지'), `공통에 연락처·공지 ${commonWork}`);
+  await owner.getByTestId('space-tab-sales').click();
   await owner.waitForURL(/\/s\/sales$/);
   await owner.getByTestId('space-home-sales').waitFor();
   assert.equal(await owner.getByTestId('space-current').textContent(), '워크인 · 영업');
   assert.equal(await owner.locator('.app-shell').getAttribute('data-space'), 'sales');
+  assert.equal(await owner.getByTestId('nav-space-head').innerText(), '영업 메뉴');
+  const commonSales = await navLabels('nav-common-v3');
+  assert.deepEqual(commonSales, ['업무', ...commonWork], '공통은 어느 공간에서나 같은 자리(영업·마케팅은 맨 위 업무만 더)');
   await owner.keyboard.press('Control+1');
   await owner.waitForURL(`${BASE}/`);
   assert.equal(await owner.getByTestId('space-current').textContent(), '워크인 · 업무');
@@ -77,7 +90,12 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await m.getByTestId('sheet-space-sales').getByLabel('지금 공간').waitFor();
   await m.getByTestId('sheet-space-work').tap(); // 업무로 돌려 둠
   await m.waitForURL(/\/$/);
-  assert.deepEqual(await tabs(), ['홈', '업무', '캘린더', '메시지', '더보기']);
+  assert.deepEqual(await tabs(), ['홈', '업무', '프로젝트', '결재', '더보기']); // ⑦ 시안: 업무 공간 하단 5칸, 캘린더·메시지는 더보기 › 공통
+  await m.getByTestId('tab-more').tap();
+  await m.getByTestId('mobile-common').getByRole('link', { name: '캘린더' }).waitFor();
+  await m.getByTestId('mobile-common').getByRole('link', { name: '메시지' }).waitFor();
+  await m.getByTestId('mobile-space-menu').getByRole('link', { name: '프로젝트' }).waitFor(); // 업무 공간도 '업무 메뉴' 묶음
+  await m.getByTestId('more-sheet').getByLabel('닫기').tap();
   assert.equal(await onColor(), 'rgb(17, 94, 89)', '업무로 돌아오면 바로 청록');
   assert.equal(await m.getByTestId('mobile-space-logo').count(), 0, '업무는 워크인 로고');
   for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/work-${w}.png` }); }

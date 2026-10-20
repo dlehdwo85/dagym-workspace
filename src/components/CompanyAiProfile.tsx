@@ -6,7 +6,7 @@ import { Button, Field, cx, inputCls, toast } from '@/components/ui';
 import { uploadToLibrary } from '@/components/libraryUpload';
 
 type F = 'business' | 'customers' | 'tone' | 'cautions';
-type P = { name: string; industry: string | null; business: string | null; customers: string | null; tone: string | null; cautions: string | null; industries: string[] };
+type P = { name: string; industry: string | null; industries: string[]; business: string | null; customers: string | null; tone: string | null; cautions: string | null; industryOptions: string[] };
 const LABEL: Record<F, string> = { business: '사업 소개·방향', customers: '주요 고객', tone: '말투', cautions: '주의할 점(금지어·과장 금지·업종 광고 규정)' };
 
 /**
@@ -21,7 +21,7 @@ export function CompanyAiProfile({ compact = false }: { compact?: boolean }) {
   const v = { ...st.data, ...(f ?? {}) };
   const save = async () => {
     setBusy(true);
-    try { await api('/api/org/ai-profile', { method: 'PUT', body: { industry: v.industry || null, business: v.business ?? null, customers: v.customers ?? null, tone: v.tone ?? null, cautions: v.cautions ?? null } }); setF(null); st.reload(); toast.ok('회사 정보를 저장했습니다 — AI 비서·메일 시안·마케팅·영업 제안서에 함께 반영됩니다'); }
+    try { await api('/api/org/ai-profile', { method: 'PUT', body: { industries: v.industries ?? [], business: v.business ?? null, customers: v.customers ?? null, tone: v.tone ?? null, cautions: v.cautions ?? null } }); setF(null); st.reload(); toast.ok('회사 정보를 저장했습니다 — AI 비서·메일 시안·마케팅·영업 제안서에 함께 반영됩니다'); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   };
   const set = (k: F, x: string) => setF({ ...(f ?? {}), [k]: x });
@@ -30,8 +30,13 @@ export function CompanyAiProfile({ compact = false }: { compact?: boolean }) {
       <div className="space-y-3 rounded-card border border-line bg-white p-4 text-sm shadow-card">
         <div><p className="font-semibold">AI 비서가 알아야 할 우리 회사</p>
           <p className="mt-0.5 text-xs text-ink-2">AI 비서 답·메일·문자 시안·마케팅 원고·영업 제안서가 이 내용에 맞춰 작성됩니다. 우리 회사 정보만 쓰고 다른 회사 내용은 섞이지 않습니다.</p></div>
-        <Field label="업종"><select className={inputCls} value={v.industry ?? ''} onChange={(e) => setF({ ...(f ?? {}), industry: e.target.value || null })} data-testid="ai-industry">
-          <option value="">선택 안 함</option>{st.data.industries.map((x) => <option key={x}>{x}</option>)}</select></Field>
+        {/* 대표 10/20 10:50: 업종 여러 개(소프트웨어 + 시설 위탁운영 같은 회사) — 칩 토글, 첫 번째가 주 업종 */}
+        <div><p className="mb-1 text-sm font-medium text-ink-2">업종 <span className="text-xs font-normal text-ink-3">(여러 개 가능 · 첫 번째가 주 업종)</span></p>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="업종" data-testid="ai-industry">
+            {st.data.industryOptions.map((x) => { const on = (v.industries ?? []).includes(x); return (
+              <button key={x} type="button" aria-pressed={on} onClick={() => setF({ ...(f ?? {}), industries: on ? (v.industries ?? []).filter((y) => y !== x) : [...(v.industries ?? []), x] })}
+                className={cx('rounded-full border px-2.5 py-1 text-xs', on ? 'border-transparent bg-brand-600 font-semibold text-white' : 'border-line bg-white hover:bg-slate-50')} data-testid="ai-industry-chip">{x}{on && (v.industries ?? [])[0] === x ? ' · 주' : ''}</button>); })}
+          </div></div>
         <Field label={LABEL.business}><textarea className={cx(inputCls, 'min-h-20')} maxLength={1000} value={v.business ?? ''} onChange={(e) => set('business', e.target.value)}
           placeholder="예: 강남·분당에서 PT 전문 센터 3곳 운영. 1:1 맞춤 관리와 재등록 상담을 중요하게 생각합니다." data-testid="ai-business" /></Field>
         <Field label={LABEL.customers}><input className={inputCls} maxLength={500} value={v.customers ?? ''} onChange={(e) => set('customers', e.target.value)} placeholder="예: 30~50대 직장인 회원, 기업 복지 담당자" data-testid="ai-customers" /></Field>
@@ -63,9 +68,12 @@ function AiHelper({ values, onApply }: { values: Partial<Record<F, string | null
       <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="홈페이지 주소 https://…" aria-label="홈페이지 주소" data-testid="ai-helper-url" />
       <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2"><span className="rounded-input border border-line bg-white px-2 py-1">회사소개서 파일</span>{file ? file.name : 'PDF·워드·한글·텍스트'}
         <input type="file" className="hidden" accept=".pdf,.doc,.docx,.hwp,.hwpx,.txt,.md" onChange={async (e) => { const x = e.target.files?.[0]; if (!x) return; try { setFile(await uploadToLibrary(x, '회사 소개', undefined, ['회사 소개'])); } catch (er: any) { toast.error(er.message); } }} data-testid="ai-helper-file" /></label>
-      {!qs ? <button type="button" className="text-xs font-medium text-violet-700 underline" onClick={async () => { try { setQs((await api<{ questions: string[] }>('/api/org/ai-profile/draft')).questions); } catch (e: any) { toast.error(e.message); } }} data-testid="ai-helper-interview">질문으로 시작</button>
-        : <ol className="space-y-1.5" data-testid="ai-helper-questions">{qs.map((q, k) => <li key={q}><label className="block text-xs font-medium">{k + 1}. {q}<input className={cx(inputCls, 'mt-0.5')} value={ans[k]} onChange={(e) => setAns(ans.map((a, j) => (j === k ? e.target.value : a)))} data-testid="ai-helper-answer" /></label></li>)}</ol>}
-      <Button size="sm" disabled={!!busy} onClick={() => run()} data-testid="ai-helper-run">{busy === 'all' ? '정리하는 중…' : '초안 만들기'}</Button>
+      {qs && <ol className="space-y-1.5" data-testid="ai-helper-questions">{qs.map((q, k) => <li key={q}><label className="block text-xs font-medium">{k + 1}. {q}<input className={cx(inputCls, 'mt-0.5')} value={ans[k]} onChange={(e) => setAns(ans.map((a, j) => (j === k ? e.target.value : a)))} data-testid="ai-helper-answer" /></label></li>)}</ol>}
+      {/* 대표 10/20 10:50: [질문으로 시작]·[초안 만들기]가 붙어 보임 → 한 줄 flex + 간격(휴대폰은 줄 바꿈) */}
+      <div className="flex flex-wrap items-center gap-3" data-testid="ai-helper-actions">
+        <Button size="sm" disabled={!!busy} onClick={() => run()} data-testid="ai-helper-run">{busy === 'all' ? '정리하는 중…' : '초안 만들기'}</Button>
+        {!qs && <button type="button" className="text-xs font-medium text-violet-700 underline" onClick={async () => { try { setQs((await api<{ questions: string[] }>('/api/org/ai-profile/draft')).questions); } catch (e: any) { toast.error(e.message); } }} data-testid="ai-helper-interview">질문으로 시작</button>}
+      </div>
       {draft && (Object.keys(LABEL) as F[]).filter((k) => draft[k] !== undefined).map((k) => (
         <div key={k} className="rounded-input border border-line bg-white p-2 text-xs" data-testid={`ai-draft-${k}`}>
           <p className="font-semibold">{LABEL[k]}</p>

@@ -678,7 +678,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
     }
     case 'get_company_settings': {
       const [a, p] = await Promise.all([getAttachToLibrary(u), getAiProfile(u)]); // 관리자(회사 정보 보기)만 — 아니면 403
-      return { attachToLibrary: a.on, confWords: a.confWords, confWordsDefault: a.confWordsDefault, industry: p.industry, business: p.business, customers: p.customers, tone: p.tone, cautions: p.cautions };
+      return { attachToLibrary: a.on, confWords: a.confWords, confWordsDefault: a.confWordsDefault, industry: p.industry, industries: p.industries, business: p.business, customers: p.customers, tone: p.tone, cautions: p.cautions };
     }
     case 'propose_update_company_settings': {
       const i = z.object({ attachToLibrary: z.boolean().optional(), confWords: z.array(z.string().trim().min(1).max(50)).max(200).optional(),

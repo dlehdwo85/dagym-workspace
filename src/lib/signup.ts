@@ -30,18 +30,21 @@ export const signupInput = z.object({
   /** V29 가입 2단계: 인원 규모·업종(선택) */
   size: z.enum(['1', '2-10', '11-30', '31-100', '100+']).optional(),
   industry: z.string().trim().max(40).optional(),
+  /** 대표 10/20: 추가 업종(여러 개) */
+  industries: z.array(z.string().trim().max(40)).max(5).optional(),
 });
 export const SIZE_LABEL: Record<string, string> = { '1': '혼자', '2-10': '2~10명', '11-30': '11~30명', '31-100': '31~100명', '100+': '100명 넘게' };
 
-type OwnerSpace = { email: string; name: string; mode: 'personal' | 'team'; company?: string; size?: string; industry?: string; utm?: Record<string, string | undefined>;
+type OwnerSpace = { email: string; name: string; mode: 'personal' | 'team'; company?: string; size?: string; industry?: string; industries?: string[]; utm?: Record<string, string | undefined>;
   agree: Record<string, boolean>; passwordHash: string | null; pending: boolean; ip: string | null; workEmail?: string | null };
 /** 새 회사(또는 개인 공간) + 대표 계정 + 기본 조직·달력·동의 기록 — 이메일 가입·소셜 가입 공통 */
 export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
   const tenant = `t_${newToken(9).replace(/[^A-Za-z0-9]/g, '').toLowerCase().slice(0, 12)}`;
   const orgName = i.mode === 'personal' ? `${i.name}의 공간` : i.company!;
   const utm = i.utm && Object.values(i.utm).some(Boolean) ? i.utm : null;
-  await tx`insert into tenants (id, name, kind, created_ip, signup_utm, size_band, industry) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${i.ip},
-    ${utm ? tx.json(utm as never) : null}, ${i.size ?? null}, ${i.industry || null})`;
+  const inds = [...new Set([i.industry, ...(i.industries ?? [])].map((x) => (x ?? '').trim()).filter(Boolean))];
+  await tx`insert into tenants (id, name, kind, created_ip, signup_utm, size_band, industry, industries) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${i.ip},
+    ${utm ? tx.json(utm as never) : null}, ${i.size ?? null}, ${inds[0] ?? null}, ${inds})`;
   // 17차: 무료 요금제 대신 14일 무료 체험(비즈니스 기능 전부, 카드 없음)
   await tx`insert into tenant_subscriptions (tenant, plan_code, status, trial_ends_at, period_end)
     values (${tenant}, 'trial', 'trial', now() + interval '14 days', (now() + interval '14 days')::date)`;
@@ -101,7 +104,7 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
     return { ok: true, message: GENERIC, ...(devLink ? { devLink } : {}) };
   }
   const hash = await hashPassword(i.password);
-  const userId = await sql.begin((tx) => createOwnerSpace(tx, { email: i.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, utm: i.utm, agree: i.agree, passwordHash: hash, pending: true, ip }));
+  const userId = await sql.begin((tx) => createOwnerSpace(tx, { email: i.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, industries: i.industries, utm: i.utm, agree: i.agree, passwordHash: hash, pending: true, ip }));
   await attempt(sql, ip, i.email, true, null);
   const { recordStep } = await import('./funnel');
   const [{ tenant }] = await sql<{ tenant: string }[]>`select tenant from users where id = ${userId}`;

@@ -198,7 +198,7 @@ export async function pendingInfo(token: string) {
   const r = await loadPending(token);
   return { provider: r.provider, providerLabel: PROVIDER_LABEL[r.provider], email: r.email, name: r.name };
 }
-export const completeInput = signupInput.pick({ name: true, mode: true, company: true, agree: true, size: true, industry: true, utm: true }).extend({ token: z.string().min(10).max(200) });
+export const completeInput = signupInput.pick({ name: true, mode: true, company: true, agree: true, size: true, industry: true, industries: true, utm: true }).extend({ token: z.string().min(10).max(200) });
 export async function completeSocialSignup(i: z.infer<typeof completeInput>, ip: string | null) {
   if (!signupEnabled()) throw notFound();
   if (i.mode === 'team' && !i.company) throw badRequest('회사(팀) 이름을 입력하세요');
@@ -210,7 +210,7 @@ export async function completeSocialSignup(i: z.infer<typeof completeInput>, ip:
     const del = await tx`delete from oauth_pending where token_hash = ${sha256(i.token)} returning 1`;
     if (!del.length) throw badRequest('이미 처리된 가입입니다. 로그인해 주세요.');
     if ((await tx`select 1 from users where lower(email) = ${pend.email}`).length) throw badRequest('이미 가입된 이메일입니다. 로그인해 주세요.');
-    const id = await createOwnerSpace(tx, { email: pend.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry,
+    const id = await createOwnerSpace(tx, { email: pend.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, industries: i.industries,
       utm: i.utm ?? pend.utm ?? undefined, agree: i.agree, passwordHash: null, pending: false, ip, workEmail: pend.email });
     await tx`insert into user_identities (provider, subject, user_id, email, last_login_at) values (${pend.provider}, ${pend.subject}, ${id}, ${pend.email}, now())`;
     return id;

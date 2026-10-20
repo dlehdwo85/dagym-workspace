@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { currentUser } from '@/lib/auth';
 import { isSpace, userSpaces } from '@/lib/spaces';
-import { MarketingHome } from '@/components/marketing/Marketing';
+import { MarketingHome } from '@/components/marketing/Home';
 import { SalesHome } from '@/components/sales/SalesSrc';
 
 export const dynamic = 'force-dynamic';

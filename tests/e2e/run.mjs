@@ -969,6 +969,10 @@ await step('로컬 10/19 회사 정보 AI 로 정리: 오른쪽 도우미·질�
   await owner.goto(`${BASE}/admin/company`);
   await owner.getByTestId('ai-helper').waitFor();
   await owner.getByTestId('ai-cautions').waitFor();
+  // 대표 10/20 10:50: [초안 만들기]·[질문으로 시작]이 붙어 보임 → 간격(1366·390)
+  for (const w of [1366, 390]) { await owner.setViewportSize({ width: w, height: 900 }); const a = await owner.getByTestId('ai-helper-run').boundingBox(), b = await owner.getByTestId('ai-helper-interview').boundingBox();
+    assert.ok(b.x >= a.x + a.width + 8 || b.y >= a.y + a.height, `${w}: 두 버튼 사이 간격 (${JSON.stringify([a, b])})`); }
+  await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.getByTestId('ai-helper-interview').click();
   await owner.getByTestId('ai-helper-questions').waitFor();
   assert.equal(await owner.getByTestId('ai-helper-answer').count(), 5);
@@ -996,7 +1000,7 @@ await step('스토어 심사 10/19: 앱 안에서는 요금제·결제·가격 �
 await step('대표 지적 10/19 캘린더: 겹친 일정 나란히·누른 일정 미리보기, 자동 저장 뒤 [완료] 409 없음, 일정 색·캘린더 색 점, 월 보기 +N개', () => cal1019({ owner, ctx, sql, BASE }));
 await step('V37 8 미팅 일정: 업무 상세 [미팅 일정 만들기] → 목록 📍장소·시간 칩 · 등록 창 "방문" → 미팅 일정 제안 → 연결 일정', () => meeting({ owner, ctx, sql, BASE }));
 await step('V41 단계 1 공간: 영업 켜기 → PC 공간 카드로 영업(파란 강조)·Ctrl+1/2·뒤로가기 → 휴대폰 프로필 시트 전환 → 미배정 직원 카드 없음·주소 404', () => spaces({ browser, desk, owner, staff, BASE, sql, SHOTS }));
-await step('V41 4-2 마케팅: 개요 카드 → 새 콘텐츠 → 시안 없으면 승인 거절 → 수정 요청(이유) → 캘린더 칩 → 전화 문의 → 영업 리드(업무)', () => marketing({ owner, BASE, sql }));
+await step('V41 4-2 마케팅: 개요 카드 → 새 콘텐츠 → 시안 없으면 승인 거절 → 수정 요청(이유) → 캘린더 칩 → 전화 문의 → 영업 리드(업무)', () => marketing({ owner, BASE, sql, SHOTS }));
 await step('홈 오늘의 일정: 오늘 일정도 함께(시간순)', () => homeTodayEvents({ owner, ctx, BASE }));
 await step('업무 등록 창 AI 비서: 편하게 적고 [AI로 채우기] → 업무명·담당·마감·설명·체크리스트 채움 → 저장', () => quickAi({ owner, ctx, sql, BASE, FAKE }));
 await step('V38 1 메시지방 흔들림: 휴대폰 위로 올려 보는 중 새 메시지 → 자리 유지·"새 메시지 n ↓", 맨 아래면 따라감, 화면 전체는 그대로', () => chatScroll({ browser, desk, ctx, BASE }));

@@ -2,7 +2,7 @@
 import { IN_APP_BILLING_NOTE, useInApp } from './inApp';
 import { ADMIN_PAGES } from '@/lib/adminPages';
 import Link from 'next/link';
-import { Suspense } from 'react';
+import { Fragment, Suspense } from 'react';
 import { AiDock } from './AiDock';
 import { AlarmBar, type AlarmItem } from './AlarmBar';
 import { BioLock } from './BioLock';
@@ -100,7 +100,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   useEffect(() => { const h = document.documentElement; h.dataset.space = space; return () => { delete h.dataset.space; }; }, [space]);
   const [spaceMenu, setSpaceMenu] = useState(false);
   const [spaceSheet, setSpaceSheet] = useState(false); // 휴대폰 머리줄 로고·공간 이름 → 공간 전환 시트
-  const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number }> }>(spaces.length > 1 && (spaceMenu || more || spaceSheet || space === 'marketing') ? '/api/spaces' : null, [space]);
+  const v3 = session.features.sidebar3 !== false; // ⑦ 사이드바 3구역(대표 승인 10/20 오후). FEATURE_SIDEBAR3=0 → 예전 모양
+  const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number }> }>(spaces.length > 1 && (v3 || spaceMenu || more || spaceSheet || space === 'marketing') ? '/api/spaces' : null, [space]);
   const goSpace = (sp: SpaceKey) => { setSpaceMenu(false); try { localStorage.setItem('wos_space', sp); } catch {} router.push(SPACE_META[sp].home); };
   useEffect(() => { // 앱을 처음 열 때 마지막으로 쓴 공간으로
     if (path !== '/') return;
@@ -123,6 +124,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
   const commonNav: NavItem[] = [{ href: '/tasks', label: '업무', icon: CircleCheck }, { href: '/calendar', label: '캘린더', icon: CalendarDays }, { href: '/messages', label: '메시지', icon: MessageCircle },
     ...(session.features.library ? [{ href: `/library?space=${space}`, label: '자료실', icon: Library }] : []), ...(session.features.ai ? [{ href: `/assistant?space=${space}`, label: 'AI 비서', icon: Sparkles }] : [])];
+
+  // ⑦ 사이드바 3구역(시안 DESIGN_HOME_SIDEBAR 10/20, 대표 승인): ① 공간 전환 탭 ② '○○ 메뉴'(공간마다 바뀜 — 업무: 홈·업무·프로젝트·내 주간 보고·결재(·매출)) ③ '공통'(캘린더·알림·메시지·자료실·연락처·공지·AI 비서 — 어느 공간에서나 같은 자리) + 관리(접힘)
+  // 영업·마케팅에서는 공통 맨 위에 '업무'(대표 지적 10/18: 공통 메뉴로 가도 그 공간에 머묾)
+  const byHref = (h: string) => NAV.find((n) => n.href === h)!;
+  const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
+  const sp_ = space === 'work' ? '' : `?space=${space}`;
+  const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'),
+    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: 'AI 비서', icon: Sparkles }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);
@@ -201,7 +210,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     : tabSpace === 'marketing'
       ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
-      : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
+      : v3 ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/approvals')] /* ⑦ 시안: 캘린더·메시지는 더보기 › 공통 */ : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
   const active = (href: string) => {
     const [p, q] = href.split('?');
     if (p === '/') return path === '/';
@@ -241,7 +250,20 @@ export function AppShell({ session, children }: { session: Sess; children: React
       <div className="app-shell min-h-screen bg-canvas text-ink sm:flex" data-space={space} style={sm.bg ? { background: sm.bg } : undefined}>
         {/* 사이드바 (데스크톱) */}
         <aside className={cx('hidden shrink-0 flex-col border-r border-line bg-white text-slate-700 transition-[width] duration-150 sm:sticky sm:top-0 sm:flex sm:h-screen', collapsed ? 'w-[60px]' : 'w-60')} aria-label="사이드바">
-          {spaces.length > 1 ? (
+          {spaces.length > 1 && v3 ? (
+            // ⑦ ① 공간 전환 탭(공간 색) — 요약은 title, 다른 공간 배지
+            <div className={cx('px-2 pt-2', collapsed && 'px-1')} data-testid="space-tabs">
+              <div className={cx('grid gap-1 rounded-[10px] bg-slate-100 p-1', collapsed ? 'grid-cols-1' : spaces.length >= 3 ? 'grid-cols-3' : 'grid-cols-2')} role="tablist" aria-label="공간 전환">
+                {spaces.map((sp, i) => { const on = sp === space; const info = spaceInfo.data?.summary[sp]; return (
+                  <button key={sp} role="tab" aria-selected={on} onClick={() => goSpace(sp)} data-testid={`space-tab-${sp}`} title={`${SPACE_META[sp].label}${info?.text ? ` · ${info.text}` : ''} (Ctrl ${i + 1})`}
+                    className={cx('relative flex h-8 items-center justify-center gap-1 rounded-[8px] text-xs font-semibold transition-colors', on ? 'text-white shadow-sm' : 'text-slate-500 hover:text-ink')} style={on ? { background: SPACE_META[sp].color } : undefined}>
+                    <SpaceIcon s={sp} />{!collapsed && <span>{SPACE_META[sp].short}</span>}
+                    {!on && !!info?.badge && <span className="absolute -right-0.5 -top-1 min-w-[16px] rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{info.badge}</span>}
+                  </button>); })}
+              </div>
+              {!collapsed && <div className="truncate px-1 pt-1.5 text-[11px] text-slate-500"><span data-testid="space-current">{sm.label}</span>{session.tenant?.name && session.tenant.name !== '워크인' && <span> · {session.tenant.name}</span>}</div>}
+            </div>
+          ) : spaces.length > 1 ? (
             // V41 공간 카드 → 드롭다운(공간·요약·단축키)
             <div className="relative px-2 pt-2">
               <button onClick={() => setSpaceMenu((v) => !v)} aria-haspopup="menu" aria-expanded={spaceMenu} aria-label="공간 전환" data-testid="space-switch"
@@ -273,12 +295,13 @@ export function AppShell({ session, children }: { session: Sess; children: React
           </div>
           )}
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
-            {space !== 'work' && !collapsed && <div className="px-2.5 pb-1 pt-0.5 text-[11px] font-semibold text-slate-400">{sm.short}</div>}
-            {(space === 'work' ? nav : [...spaceNav, ...commonNav]).map((n, k) => (
+            {v3 ? <div className={cx('mb-0.5 flex items-center gap-1.5 px-2.5 pb-1 pt-1 text-[11px] font-semibold text-slate-500', collapsed && 'sr-only')} data-testid="nav-space-head"><span className="h-3 w-1 shrink-0 rounded-full" style={{ background: sm.color }} aria-hidden />{sm.short} 메뉴</div>
+              : space !== 'work' && !collapsed && <div className="px-2.5 pb-1 pt-0.5 text-[11px] font-semibold text-slate-400">{sm.short}</div>}
+            {(v3 ? spaceMenuV3 : space === 'work' ? nav : [...spaceNav, ...commonNav]).map((n, k) => (
               <div key={n.href}>
                 {/* 로컬 검수 10/19: 마케팅 메뉴 묶음(운영·제작·성과·설정) */}
                 {k < spaceNav.length && n.group && n.group !== spaceNav[k - 1]?.group && <div className={cx('px-2.5 pb-1 pt-2.5 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-group">{n.group}</div>}
-                {space !== 'work' && k === spaceNav.length && <div className={cx('px-2.5 pb-1 pt-3 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-common">공통</div>}
+                {!v3 && space !== 'work' && k === spaceNav.length && <div className={cx('px-2.5 pb-1 pt-3 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-common">공통</div>}
                 {navLink(n, n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0)}
                 {/* 즐겨찾는 프로젝트는 "프로젝트" 바로 아래 */}
                 {n.href === '/projects' && !collapsed && favorites.length > 0 && (
@@ -292,6 +315,11 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 )}
               </div>
             ))}
+            {v3 && (<div className="pt-2" data-testid="nav-common-v3">
+              <div className="my-1.5 border-t border-line" />
+              <div className={cx('px-2.5 pb-1 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-common">공통</div>
+              {commonV3.map((n) => <div key={n.href}>{navLink(n, n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0)}</div>)}
+            </div>)}
             {(adminMenu.length > 0 || session.user.platformAdmin) && (
               <div className="pt-3" data-testid="nav-admin">
                 <div className="my-2 border-t border-line" />
@@ -434,6 +462,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.badge} />)}
           <button type="button" onClick={() => setMore(true)} aria-label="더보기" data-testid="tab-more" className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs', more ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
             <Ellipsis className="size-6" strokeWidth={more ? 2.4 : 1.8} aria-hidden />더보기
+            {v3 && chatUnread + unread > 0 && <span className="absolute right-[18%] top-1 min-w-[18px] rounded-full bg-red-500 px-1 text-center text-[10px] font-bold leading-[18px] text-white" data-testid="tab-more-badge">{chatUnread + unread > 99 ? '99+' : chatUnread + unread}</span>}
           </button>
         </nav>
 
@@ -497,20 +526,31 @@ export function AppShell({ session, children }: { session: Sess; children: React
                   ))}
                 </div>
               )}
-              {space !== 'work' && (
+              {v3 && (
+                <div className="border-t border-line px-1 pb-1 pt-2" data-testid="mobile-common">
+                  <div className="px-2 text-xs text-ink-3">공통</div>
+                  <div className="mt-1 grid grid-cols-2 gap-1.5">{[...commonV3, { href: '/settings', label: '설정·알림', icon: Settings }].map((n) => { const b = n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0; return (
+                    <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
+                      <n.icon className="size-4 shrink-0 text-ink-2" aria-hidden /><span className="truncate">{n.label}</span>{!!b && <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[10px] font-semibold leading-4 text-white">{b}</span>}</Link>); })}</div>
+                </div>
+              )}
+              {(v3 || space !== 'work') && (
                 <div className="border-t border-line px-1 pb-1 pt-2" data-testid="mobile-space-menu">
                   <div className="px-2 text-xs text-ink-3">{sm.short} 메뉴</div>
-                  <div className="mt-1 grid grid-cols-2 gap-1.5">{spaceNav.map((n) => (
+                  <div className="mt-1 grid grid-cols-2 gap-1.5">{(v3 ? spaceMenuV3 : spaceNav).map((n) => (
                     <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
                       <n.icon className="size-4 shrink-0" style={{ color: sm.color }} aria-hidden /><span className="truncate">{n.label}</span></Link>))}</div>
                 </div>
               )}
               <div className="my-1 border-t border-line" />
-              {([['/projects', '프로젝트', FolderKanban], ...nav.filter((n) => n.href === '/library' || n.href === '/assistant').map((n) => [n.href, n.label, n.icon]), ['/settings', '설정·알림', Settings], ['/help', '도움말·문의', HelpCircle],
+              {(v3 ? [['/help', '도움말·문의', HelpCircle], ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)', CalendarDays]] : []),
+                ...(admin ? adminMenu.map((n) => [n.href, n.label, n.icon]) : nav.filter((n) => n.href === '/revenue').map((n) => [n.href, n.label, n.icon])), ...(session.user.platformAdmin ? [['/platform', '플랫폼 운영', Building2]] : [])] as [string, string, LucideIcon][]
+              : [['/projects', '프로젝트', FolderKanban], ...nav.filter((n) => n.href === '/library' || n.href === '/assistant').map((n) => [n.href, n.label, n.icon]), ['/settings', '설정·알림', Settings], ['/help', '도움말·문의', HelpCircle],
                 ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)', CalendarDays]] : []),
-                ...(admin ? adminMenu.map((n) => [n.href, n.label, n.icon]) : nav.filter((n) => n.href === '/revenue').map((n) => [n.href, n.label, n.icon])), ...(session.user.platformAdmin ? [['/platform', '플랫폼 운영', Building2]] : [])] as [string, string, LucideIcon][]).map(([h, l, I]) => (
-                <Link key={h} href={h} onClick={() => { if (path === h) setMore(false); }} className="flex items-center gap-3 rounded-input px-3 py-3 text-sm active:bg-slate-100"><I className="size-5 text-ink-2" />{l}</Link>
-              ))}
+                ...(admin ? adminMenu.map((n) => [n.href, n.label, n.icon]) : nav.filter((n) => n.href === '/revenue').map((n) => [n.href, n.label, n.icon])), ...(session.user.platformAdmin ? [['/platform', '플랫폼 운영', Building2]] : [])] as [string, string, LucideIcon][]).map(([h, l, I], i) => (<Fragment key={h}>
+                {v3 && admin && i === 1 + (session.features.googleSync ? 1 : 0) && adminMenu.length > 0 && <div className="px-3 pt-2 text-xs text-ink-3" data-testid="mobile-admin-head">관리</div>}
+                <Link href={h} onClick={() => { if (path === h) setMore(false); }} className="flex items-center gap-3 rounded-input px-3 py-3 text-sm active:bg-slate-100"><I className="size-5 text-ink-2" />{l}</Link>
+              </Fragment>))}
               <button onClick={logout} className="flex w-full items-center gap-3 rounded-input px-3 py-3 text-left text-sm text-red-600 active:bg-red-50"><LogOut className="size-5" />로그아웃</button>
             </div>
           </div>

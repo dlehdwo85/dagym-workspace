@@ -11,10 +11,10 @@ import type { SessionUser } from '../types';
  * - 업무와 무관한 질문·하루 한도·긴 입력·같은 질문 반복은 비싼 모델 호출 전에 막고 "차단됨"으로 남긴다.
  */
 import { tenantOf } from '../types';
-export type AiSettings = { retention_days: number; daily_limit: number; input_max: number; topic_filter: boolean; console_note: string | null; web_tools: boolean; doc_engine: boolean };
+export type AiSettings = { retention_days: number; daily_limit: number; input_max: number; topic_filter: boolean; console_note: string | null; web_tools: boolean; doc_engine: boolean; /** ⑥ 밤사이 비서 범위(draft·lead_next·bid_summary·report, 기본 모두 끔) */ night_scope: Record<string, boolean> };
 export async function aiSettings(tenant: string, sql: Sql = db()): Promise<AiSettings> {
-  const [s] = await sql<AiSettings[]>`select retention_days, daily_limit, input_max, topic_filter, console_note, web_tools, doc_engine from ai_settings where tenant = ${tenant}`;
-  return s ?? { retention_days: 90, daily_limit: Number(process.env.AI_DAILY_LIMIT) || 50, input_max: 4000, topic_filter: process.env.AI_TOPIC_FILTER !== '0', console_note: null, web_tools: true, doc_engine: true };
+  const [s] = await sql<AiSettings[]>`select retention_days, daily_limit, input_max, topic_filter, console_note, web_tools, doc_engine, night_scope from ai_settings where tenant = ${tenant}`;
+  return s ? { ...s, night_scope: s.night_scope ?? {} } : { retention_days: 90, daily_limit: Number(process.env.AI_DAILY_LIMIT) || 50, input_max: 4000, topic_filter: process.env.AI_TOPIC_FILTER !== '0', console_note: null, web_tools: true, doc_engine: true, night_scope: {} };
 }
 
 /** 대화 하나 열기(본인 것만). 없으면 404 */
@@ -207,7 +207,8 @@ export async function logDelete(u: SessionUser, id: string, ip: string | null) {
 }
 export const aiSettingsInput = z.object({ retentionDays: z.number().int().min(0).max(3650).optional(), dailyLimit: z.number().int().min(1).max(1000).optional(),
   inputMax: z.number().int().min(200).max(20000).optional(), topicFilter: z.boolean().optional(), consoleNote: z.string().max(500).nullable().optional(),
-  webTools: z.boolean().optional(), docEngine: z.boolean().optional() }); // V22 웹 검색·페이지 읽기 / 문서 작업 켜기·끄기
+  webTools: z.boolean().optional(), docEngine: z.boolean().optional(), // V22 웹 검색·페이지 읽기 / 문서 작업 켜기·끄기
+  nightScope: z.record(z.enum(['draft', 'lead_next', 'bid_summary', 'report']), z.boolean()).optional() }); // ⑥ 밤사이 비서 범위
 export async function setAiSettings(u: SessionUser, i: z.infer<typeof aiSettingsInput>, ip: string | null) {
   const { requireMenu } = await import('../menuPerms');
   await requireMenu(u, 'ai_logs', 'edit');
@@ -216,11 +217,11 @@ export async function setAiSettings(u: SessionUser, i: z.infer<typeof aiSettings
   const cur = await aiSettings(t, sql);
   const next = { retention_days: i.retentionDays ?? cur.retention_days, daily_limit: i.dailyLimit ?? cur.daily_limit, input_max: i.inputMax ?? cur.input_max,
     topic_filter: i.topicFilter ?? cur.topic_filter, console_note: i.consoleNote !== undefined ? i.consoleNote : cur.console_note,
-    web_tools: i.webTools ?? cur.web_tools, doc_engine: i.docEngine ?? cur.doc_engine };
-  await sql`insert into ai_settings (tenant, retention_days, daily_limit, input_max, topic_filter, console_note, web_tools, doc_engine, updated_by)
-    values (${t}, ${next.retention_days}, ${next.daily_limit}, ${next.input_max}, ${next.topic_filter}, ${next.console_note}, ${next.web_tools}, ${next.doc_engine}, ${u.id})
+    web_tools: i.webTools ?? cur.web_tools, doc_engine: i.docEngine ?? cur.doc_engine, night_scope: i.nightScope ?? cur.night_scope ?? {} };
+  await sql`insert into ai_settings (tenant, retention_days, daily_limit, input_max, topic_filter, console_note, web_tools, doc_engine, night_scope, updated_by)
+    values (${t}, ${next.retention_days}, ${next.daily_limit}, ${next.input_max}, ${next.topic_filter}, ${next.console_note}, ${next.web_tools}, ${next.doc_engine}, ${sql.json(next.night_scope as never)}, ${u.id})
     on conflict (tenant) do update set retention_days = excluded.retention_days, daily_limit = excluded.daily_limit, input_max = excluded.input_max,
-      topic_filter = excluded.topic_filter, console_note = excluded.console_note, web_tools = excluded.web_tools, doc_engine = excluded.doc_engine, updated_by = excluded.updated_by, updated_at = now()`;
+      topic_filter = excluded.topic_filter, console_note = excluded.console_note, web_tools = excluded.web_tools, doc_engine = excluded.doc_engine, night_scope = excluded.night_scope, updated_by = excluded.updated_by, updated_at = now()`;
   await audit(sql, u.id, 'ai.settings', null, null, next, ip);
   return { ok: true, settings: next };
 }
