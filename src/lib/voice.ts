@@ -167,7 +167,7 @@ export async function structureVoice(u: SessionUser, i: z.infer<typeof structure
   const p = anthropicProvider({ tier: 'fast' });
   try {
     const r = await p.chat({
-      system: `음성으로 말한 업무 지시를 업무 카드로 정리합니다. JSON 만.
+      system: `음성으로 말한 업무 요청을 업무 카드로 정리합니다. JSON 만.
 - title: 해야 할 일만 짧게(30자 이내, "~하기"·명사형). 받아쓰기 반복·말더듬("다음 다음 주", "푸르지오 푸르지오")은 한 번만, 지시 문구("업무 배정해 줘", "나 지금", "~할 것")·담당자·마감 표현은 빼고, 고유명사(현장·아파트·거래처 이름)는 그대로.
 - assignee: 일을 맡을 사람. 아래 [사람] 목록의 이름 그대로. 이름이 잘못 들렸어도 직책이 목록에서 한 사람뿐이면 그 사람. 모르면 null(지어내지 않음).
 - dueDate: YYYY-MM-DD(오늘 ${today} ${dow} 기준, "다음 주 금요일" = 다음 주의 금요일). 말하지 않았으면 null. dueTime: HH:MM 또는 null.

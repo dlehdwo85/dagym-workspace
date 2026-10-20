@@ -16,7 +16,7 @@ export function requireAdmin(u: SessionUser) {
  */
 /**
  * 로컬 10/19(대표) 팀 격리: 격리 팀(teams.isolated) 구성원(대표·관리자 제외)은 '회사 안의 작은 회사' —
- * 자기 팀(하위 팀 포함)과 자기에게 배정·지시·참여한 것만 보고, 본사(다른 부서)의 업무·일정·사람·자료는 404. mates = 같은 격리 팀 사람들.
+ * 자기 팀(하위 팀 포함)과 자기에게 배정·요청·참여한 것만 보고, 본사(다른 부서)의 업무·일정·사람·자료는 404. mates = 같은 격리 팀 사람들.
  * 업무·일정·사람·자료·메시지·AI 도구가 모두 이 함수와 accessibleUnitIds(격리면 빈 목록)를 거친다.
  */
 export type TeamScope = { isolated: boolean; teamIds: string[]; mates: string[] };
@@ -70,7 +70,7 @@ function menuLevelSql(sql: Sql, u: SessionUser, menu: string, def: string) {
 const TEAM_DEF: Record<string, [string, string]> = { owner: ['edit', 'edit'], admin: ['edit', 'edit'], dept_lead: ['view', 'none'], site_manager: ['view', 'none'], staff: ['view', 'none'] };
 
 /** 업무 조회 가능 조건 (tasks 별칭 t 기준)
- * V14 8번: 팀 업무(team_id)는 소속(현장)이 아니라 팀으로 — 팀원("팀 업무" 조회 이상) · "다른 팀 업무 보기" 권한자만. 본인이 담당·지시·만든·참여한 업무는 항상 */
+ * V14 8번: 팀 업무(team_id)는 소속(현장)이 아니라 팀으로 — 팀원("팀 업무" 조회 이상) · "다른 팀 업무 보기" 권한자만. 본인이 담당·요청·만든·참여한 업무는 항상 */
 export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null) {
   // 대표·본사 관리자(전체)에게도 앱 심사용 데모 조직 업무는 섞지 않는다
   if (units === null) return sql`not exists (select 1 from org_units dz where dz.id = t.org_unit_id and dz.is_demo)`;
@@ -95,7 +95,7 @@ export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null)
 export function isolatedSql(sql: Sql, u: SessionUser) {
   return sql`exists (select 1 from teams ti join team_members mi on mi.team_id = ti.id where mi.user_id = ${u.id} and ti.isolated and not ti.archived and ti.tenant = ${tenantOf(u)})`;
 }
-/** 부서(팀) 업무 환경(대표 10/16): 부서장(팀장)은 자기 부서원(하위 부서 포함)이 담당·지시한 업무를 본다 — 부서 간 협업 업무는 참여자와 양쪽 부서장에게만 */
+/** 부서(팀) 업무 환경(대표 10/16): 부서장(팀장)은 자기 부서원(하위 부서 포함)이 담당·요청한 업무를 본다 — 부서 간 협업 업무는 참여자와 양쪽 부서장에게만 */
 export function leadOfInvolvedSql(sql: Sql, u: SessionUser) {
   return sql`exists (
     with recursive lt as (
@@ -152,12 +152,12 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
     (await sql`select 1 from task_collaborators where task_id = ${t.id} and user_id = ${u.id}`).length > 0
     || (await sql`select 1 from task_checklist_items where task_id = ${t.id} and assignee_id = ${u.id} limit 1`).length > 0; // R-15 6번 항목 담당자도 참여자
   const involved = t.assignee_id === u.id || t.created_by === u.id || isCollab || (!!t.requested_by && t.requested_by === u.id);
-  // V14 50(대표 결정): 내용·일정 수정 = 지시자(없으면 만든 사람)·담당자 2명만(대표·관리자·협업자·같은 팀은 보기·댓글·첨부 올리기만),
-  // 담당자 변경·삭제 = 지시자만, 상태·검토 승인은 tasks.updateTask 에서 담당자(검토는 검토 담당자)만
+  // V14 50(대표 결정): 내용·일정 수정 = 요청자(없으면 만든 사람)·담당자 2명만(대표·관리자·협업자·같은 팀은 보기·댓글·첨부 올리기만),
+  // 담당자 변경·삭제 = 요청자만, 상태·검토 승인은 tasks.updateTask 에서 담당자(검토는 검토 담당자)만
   const requester = t.requested_by ?? t.created_by;
   const edit = t.assignee_id === u.id || requester === u.id;
   const del = requester === u.id;
-  // 부서장: 자기 부서원이 담당·지시한 업무(부서 간 협업 포함)
+  // 부서장: 자기 부서원이 담당·요청한 업무(부서 간 협업 포함)
   const deptLead = (await sql`select 1 from tasks t where t.id = ${t.id} and ${leadOfInvolvedSql(sql, u)}`).length > 0;
   if (t.team_id) { // V14 8번 팀 업무: 보기는 팀 권한, 수정은 위 규칙
     const lv = await teamTaskLevel(u, t.team_id, sql);

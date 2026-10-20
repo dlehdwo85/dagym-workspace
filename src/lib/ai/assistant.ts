@@ -75,7 +75,7 @@ const TOOLS: AiTool[] = [
   { name: 'search_tasks', description: '사용자가 볼 수 있는 업무를 찾는다.',
     input_schema: { type: 'object', properties: {
       query: str('제목 검색어 (선택)'),
-      view: { type: 'string', enum: ['all', 'my', 'today', 'overdue', 'week', 'review', 'requested', 'done'], description: 'my=내 담당, requested=내가 지시한 업무, done=완료' },
+      view: { type: 'string', enum: ['all', 'my', 'today', 'overdue', 'week', 'review', 'requested', 'done'], description: 'my=내 담당, requested=내가 요청한 업무, done=완료' },
       assigneeId: str('담당자 id (선택)'), from: str('마감일 시작 YYYY-MM-DD (선택)'), to: str('마감일 끝 YYYY-MM-DD (선택)'),
     } } },
   { name: 'get_task', description: '업무 하나의 상세(설명·체크리스트·댓글·첨부 이름)를 본다.',
@@ -92,12 +92,12 @@ const TOOLS: AiTool[] = [
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }, projectId: str('프로젝트 id (선택)'), orgUnitId: str('조직 id (선택)'),
       checklist: { type: 'array', items: { type: 'string' }, description: '체크리스트 (선택). 고객에게 보여 주는 단계는 "데모" 대신 "시연"(예: 플랫폼 시연 일정 잡기) — "데모"는 체험 계정과 헷갈림' },
     }, required: ['title'] } },
-  { name: 'propose_create_tasks', description: '같은 업무를 여러 담당자에게 각각 1건씩 만들기를 제안한다(첨부 자료를 읽고 정리할 때). 체크리스트·설명(메모)·마감 시각·지시자·첨부 자료를 함께. [확인] 후 생성.',
+  { name: 'propose_create_tasks', description: '같은 업무를 여러 담당자에게 각각 1건씩 만들기를 제안한다(첨부 자료를 읽고 정리할 때). 체크리스트·설명(메모)·마감 시각·요청자·첨부 자료를 함께. [확인] 후 생성.',
     input_schema: { type: 'object', properties: {
       title: str('업무 제목'), description: str('설명·메모 (자료 요약, 촬영 팁 등)'),
       assigneeIds: { type: 'array', items: { type: 'string' }, description: '담당자 id 목록 (list_people 로 찾기)' },
       dueDate: str('마감일 YYYY-MM-DD'), dueTime: str('마감 시각 HH:MM (선택)'), priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
-      requestedById: str('지시자 id (기본: 요청한 사람)'),
+      requestedById: str('요청자 id (기본: 요청한 사람)'),
       checklist: { type: 'array', items: { type: 'string' }, description: '체크리스트 항목 (예: 자료 표의 각 줄)' },
       attachFileIds: { type: 'array', items: { type: 'string' }, description: '만든 업무마다 붙일 첨부 자료 id' },
     }, required: ['title', 'assigneeIds'] } },
@@ -227,11 +227,11 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 기밀·회사 설정(관리자): 기밀 후보 list_confidential_suggestions · 등급 바꾸기 propose_set_confidential · 설정 보기 get_company_settings · 설정 바꾸기 propose_update_company_settings(기밀 단어·첨부 자동 저장·AI 회사 정보)
 - 자료실: 찾기 search_library · 읽기 read_library_file · 폴더 list_library_folders · 정리 propose_organize_files · 문서·엑셀 propose_create_document·propose_xlsx_report·run_file_task·fill_template
 - 사람·조직 list_people · 매출 revenue_summary(대표·본사)
-[지시 해석 — 대표 지적 10/19 ①] "○○한테/에게 ~하라고 해줘·시켜줘·전달해줘·맡겨줘·부탁해줘"는 기본이 업무 배정입니다: 담당 = ○○(list_people 로 id), 지시자 = 말한 사람, 마감은 말에서 해석(예: "다음주 금요일까지"), 제목은 시킬 일. propose_create_task 로 제안하세요. "메시지로·문자로·카톡으로·메일로"라고 분명히 말할 때만 메시지 전달로 봅니다(메시지 보내기 도구는 없으니 그때는 보낼 문구를 써 주세요).
+[지시 해석 — 대표 지적 10/19 ①] "○○한테/에게 ~하라고 해줘·시켜줘·전달해줘·맡겨줘·부탁해줘"는 기본이 업무 배정입니다: 담당 = ○○(list_people 로 id), 요청자 = 말한 사람, 마감은 말에서 해석(예: "다음주 금요일까지"), 제목은 시킬 일. propose_create_task 로 제안하세요. "메시지로·문자로·카톡으로·메일로"라고 분명히 말할 때만 메시지 전달로 봅니다(메시지 보내기 도구는 없으니 그때는 보낼 문구를 써 주세요).
 [중복 막기 — 대표 지적 10/19 ③] 새 업무를 제안하기 전에 search_tasks 로 비슷한 제목의 열린 업무를 확인하세요. 있으면 그 업무 이름·담당·마감을 보여 주고 "이 업무에 붙일까요, 새로 만들까요?"를 한 번만 물으세요(둘 다 제안하지 않기). 사용자가 요청하지 않은 일(다른 업무에 첨부 등)을 먼저 제안하지 마세요.
 [근거 — 대표 지적 10/19 ⑤⑥] 첨부·자료실 파일 내용(담당자 이름·금액·날짜 등)은 이번 대화에서 파일 내용을 실제로 받았거나 read_library_file 로 읽은 경우에만 말하고 "(파일명, n쪽/시트)"처럼 근거를 붙이세요. 앞선 차례에 올린 파일은 이름만 기록에 있으니 내용이 필요하면 read_library_file 로 다시 읽고, 못 읽었으면 "아직 열어 보지 않았습니다"라고 하세요. 기존 업무의 담당·마감·상태는 search_tasks·get_task 결과로만 말하세요(기억·추측 금지).
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
-- 일정과 업무를 함께 요청하면(예: "회의 잡고 참석자들 업무로도") propose_create_event 하나에 taskAssigneeIds 를 넣어 "일정 1 + 연결 업무"로 제안하세요. 업무 마감은 일정 시작과 같고 날짜가 연동됩니다. 같은 내용의 propose_create_task(s) 를 따로 만들지 마세요(사용자가 다른 마감을 지시한 경우만 예외). 일정 주인 본인에게는 업무를 또 만들지 않습니다.
+- 일정과 업무를 함께 요청하면(예: "회의 잡고 참석자들 업무로도") propose_create_event 하나에 taskAssigneeIds 를 넣어 "일정 1 + 연결 업무"로 제안하세요. 업무 마감은 일정 시작과 같고 날짜가 연동됩니다. 같은 내용의 propose_create_task(s) 를 따로 만들지 마세요(사용자가 다른 마감을 요청한 경우만 예외). 일정 주인 본인에게는 업무를 또 만들지 않습니다.
 - 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
 - 문서 비용을 아끼세요: 우리 회사 양식(자료실 "양식")에 **값만 바꾸면 되는** 요청은 list_templates(또는 첨부·참고 xlsx/docx) → read_template_layout → fill_template 로 바로 만드세요(거의 무료, 서식 그대로). 양식이 없거나, **다른 회사 양식을 "참고해서" 만드는 요청**, 구조·디자인을 새로 해야 할 때는 run_file_task(참고 파일은 referenceFileIds).
 - 서식·디자인이 중요한 문서(견적서·보고서·제안서·안내문·PPT)나 "참고해서 만들어/더 세련되게/색 바꿔" 같은 요청, 엑셀·CSV 계산·차트 분석은 run_file_task 를 쓰세요(실제 파일·미리보기). 앞서 만든 파일을 고칠 때는 대화 기록의 [파일 작업: id=…] 를 baseJobId 로 mode=edit. run_file_task 를 부른 뒤에는 "만들기 시작했습니다(1~3분, 아래 카드에 미리보기가 나옵니다)"처럼 시작했다고만 말하고, "~했습니다·~뺐습니다·~맞췄습니다" 같은 완료형으로 결과를 설명하지 마세요(아직 만들지 않았음). 간단한 글 문서는 propose_create_document, 단순 데이터 표는 propose_xlsx_report.
@@ -254,7 +254,7 @@ export function intentHint(text: string): string {
   const m = t.match(/([가-힣A-Za-z]{2,10})\s*(?:[가-힣]{2,4}님?)?\s*(?:한테|에게|께)\s/);
   if (m && /(라고|하게|도록)\s*(해\s*줘|해\s*주세요|해라|시켜|전달|맡겨|부탁)|시켜\s*(줘|주세요)|맡겨\s*(줘|주세요)/.test(t)) {
     const who = m[1].replace(/(부사장|사장|대표|본부장|부장|차장|과장|팀장|실장|이사|대리|주임|매니저|선생)$/, '') || m[1];
-    return `\n의도 힌트(규칙): "${who}" 에게 일을 시키는 요청 — 업무 배정으로 처리(list_people → search_tasks 로 비슷한 업무 확인 → propose_create_task, 지시자 = 사용자). 메시지 전달로 해석하지 마세요.`;
+    return `\n의도 힌트(규칙): "${who}" 에게 일을 시키는 요청 — 업무 배정으로 처리(list_people → search_tasks 로 비슷한 업무 확인 → propose_create_task, 요청자 = 사용자). 메시지 전달로 해석하지 마세요.`;
   }
   return '';
 }
@@ -517,11 +517,11 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       const patch = taskInput.partial().parse({ title: input.title || undefined, status: input.status || undefined, dueDate: isDate(input.dueDate) ? input.dueDate : undefined,
         dueTime: /^\d{2}:\d{2}$/.test(input.dueTime ?? '') ? input.dueTime : undefined, assigneeId: input.assigneeId || undefined, priority: input.priority || undefined });
       if (!Object.values(patch).some((v) => v !== undefined)) throw badRequest('바꿀 내용이 없습니다');
-      // V14 50: 제안 단계에서 권한 확인 — 상태는 담당자만, 내용·일정은 지시자·담당자만, 담당자 변경은 지시자만
+      // V14 50: 제안 단계에서 권한 확인 — 상태는 담당자만, 내용·일정은 요청자·담당자만, 담당자 변경은 요청자만
       const tk = d.task as any; const req = tk.requested_by ?? tk.created_by;
       if (patch.status && (tk.assignee_id ?? req) !== u.id && tk.status !== 'review') throw new HttpError(403, 'forbidden', '상태는 담당자만 바꿀 수 있습니다 — 담당자에게 요청하세요');
-      if (!(d.perms as any).edit) throw new HttpError(403, 'forbidden', '이 업무의 내용·일정은 지시자·담당자만 바꿀 수 있습니다 — 댓글로 요청하세요');
-      if (patch.assigneeId && req !== u.id) throw new HttpError(403, 'forbidden', '담당자 변경은 지시자만 할 수 있습니다 — 담당자는 "넘기기 요청"을 쓰세요');
+      if (!(d.perms as any).edit) throw new HttpError(403, 'forbidden', '이 업무의 내용·일정은 요청자·담당자만 바꿀 수 있습니다 — 댓글로 요청하세요');
+      if (patch.assigneeId && req !== u.id) throw new HttpError(403, 'forbidden', '담당자 변경은 요청자만 할 수 있습니다 — 담당자는 "넘기기 요청"을 쓰세요');
       return propose(c, 'update_task', `업무 고치기: ${(d.task as any).title} — ${Object.entries(patch).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${v}`).join(', ')}`, { taskId: input.taskId, patch });
     }
     case 'propose_comment': {

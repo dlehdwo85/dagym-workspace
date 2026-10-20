@@ -792,7 +792,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
         {alsoTask && (
           <div className="mt-2 grid grid-cols-2 gap-1.5 rounded-input bg-slate-50 p-2 text-xs" data-testid="quick-task-fields">
             <label className="col-span-2 flex items-center gap-2"><span className="w-10 shrink-0 text-ink-2">담당</span><UserSelect className="h-8 flex-1" value={taskWho ?? user.id} onChange={setTaskWho} ariaLabel="업무 담당자" /></label>
-            <label className="col-span-2 flex items-center gap-2"><span className="w-10 shrink-0 text-ink-2">지시</span><UserSelect className="h-8 flex-1" value={taskReq ?? user.id} onChange={setTaskReq} ariaLabel="업무 지시자" /></label>
+            <label className="col-span-2 flex items-center gap-2"><span className="w-10 shrink-0 text-ink-2">지시</span><UserSelect className="h-8 flex-1" value={taskReq ?? user.id} onChange={setTaskReq} ariaLabel="업무 요청자" /></label>
             <label className="col-span-2 flex items-center gap-2"><span className="w-10 shrink-0 text-ink-2">우선</span>
               <select className="h-8 flex-1 rounded-input border border-line bg-white px-2" value={taskPrio} onChange={(e) => setTaskPrio(e.target.value as typeof taskPrio)} aria-label="업무 우선순위">
                 <option value="low">낮음</option><option value="normal">보통</option><option value="high">높음</option><option value="urgent">긴급</option>

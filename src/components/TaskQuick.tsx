@@ -104,7 +104,7 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
         {value ? <span className="inline-flex items-center gap-1"><DueChip due={value} status={status} />{time && <span className="text-xs font-medium text-ink-2 tabular-nums">{timeLabel(time)}</span>}</span> : <><CalendarDays className="size-3.5" />{compact ? '' : emptyText ?? '마감일'}</>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={label} width={260}>
-        {/* V32 4: 마감 연장(담당자 = 지시자에게 요청, 지시자 = 바로) — 목록에서도 상세에 들어가지 않고 */}
+        {/* V32 4: 마감 연장(담당자 = 요청자에게 요청, 요청자 = 바로) — 목록에서도 상세에 들어가지 않고 */}
         {onExtend && <button type="button" onClick={() => { setOpen(false); onExtend(); }} data-testid="due-extend-open"
           className="mb-1 flex w-full items-center gap-2 rounded-input bg-amber-50 px-2.5 py-2 text-left text-sm font-semibold text-amber-900 hover:bg-amber-100"><CalendarDays className="size-4" />{extendLabel ?? '마감 연장'}</button>}
         {quickDues().map(([l, d]) => (
@@ -123,8 +123,8 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
   );
 }
 
-/** 담당자 칩: 아바타를 누르면 사람 선택. role="지시자"면 지시자(업무를 부여한 사람) 선택 — 이름이 함께 보이는 작은 칩 */
-export function AssigneePicker({ value, name, onChange, size = 24, role = '담당자', withName }: { value: string | null | undefined; name?: string | null; onChange: (id: string | null) => void; size?: number; role?: '담당자' | '지시자'; withName?: boolean }) {
+/** 담당자 칩: 아바타를 누르면 사람 선택. role="요청자"면 요청자(업무를 부여한 사람) 선택 — 이름이 함께 보이는 작은 칩 */
+export function AssigneePicker({ value, name, onChange, size = 24, role = '담당자', withName }: { value: string | null | undefined; name?: string | null; onChange: (id: string | null) => void; size?: number; role?: '담당자' | '요청자'; withName?: boolean }) {
   const { dir, user } = useSession();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -135,7 +135,7 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); setQ(''); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${role}: ${cur?.name ?? name ?? '없음'}`} aria-haspopup="dialog" aria-expanded={open}
-        className={withName ? 'hit inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100' : 'hit rounded-full hover:ring-2 hover:ring-accent-500/30'} data-testid={role === '지시자' ? 'requester-picker' : 'assignee-picker'}>
+        className={withName ? 'hit inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-xs text-ink-2 hover:bg-slate-100' : 'hit rounded-full hover:ring-2 hover:ring-accent-500/30'} data-testid={role === '요청자' ? 'requester-picker' : 'assignee-picker'}>
         <Avatar id={value} name={cur?.name ?? name ?? null} size={size} />{withName && <span className="truncate">{cur?.name ?? name ?? '없음'}{cur?.title && <span className="hidden text-ink-3 sm:inline"> · {cur.title}</span>}</span>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={`${role} 선택`}>
@@ -315,7 +315,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const [touched, setTouched] = useState(false);
   const showChips = !!(touched || title || due !== (defaultDue ?? null) || rrule || assignees.join() !== (initAssignee ?? '') || autoFocus);
   // 업무 "생성"은 저장 버튼·Enter 로만 (WORKIN_SAVE_AND_SPEED, 대표 지시). 바깥을 눌러도 저장하지 않고 입력한 초안은 남긴다.
-  // 칩(마감·담당·지시·반복)을 고른 뒤에는 입력칸으로 돌아온다
+  // 칩(마감·담당·요청·반복)을 고른 뒤에는 입력칸으로 돌아온다
   const back = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setTimeout(() => input.current?.focus(), 0); };
   // V8 4번 · 검수 20: 문장 속 날짜·시각·담당자·!우선순위·#프로젝트·반복을 바로 칩에 반영(적용 버튼 없음). 저장할 때 제목에서 그 말을 뺀다
   const parsed = title.trim().length > 3 ? parseTaskText(title, dir.users, todayStr(), projList.data?.projects ?? []) : null;
@@ -362,7 +362,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
       {showChips && (
         // V11 4번: 글자 있는 칩, 길면 2줄로 감김(가로 스크롤 없음)
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 pl-12" data-testid="inline-chips">
-          {/* 대표(10/16): 지시자 = 로그인한 사람 고정 — 만들 때 고르는 칸 없음(바꾸려면 업무 상세에서) */}
+          {/* 대표(10/16): 요청자 = 로그인한 사람 고정 — 만들 때 고르는 칸 없음(바꾸려면 업무 상세에서) */}
           <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" time={dueTime} onTime={setDueTime} emptyText="마감 없음" />
           <span className="inline-flex items-center gap-1"><span className="text-[11px] text-ink-3">담당</span><MultiAssigneePicker values={assignees} onChange={setAssignees} /></span>
           <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
@@ -427,7 +427,7 @@ export function OrderMenu({ title, onMove }: { title: string; onMove: (to: 'top'
 }
 
 
-/** V32 4 마감 연장 대화창: +1일·+3일·+1주·날짜 고르기 + 사유(필수). 지시자는 바로 연장, 담당자는 지시자에게 요청 */
+/** V32 4 마감 연장 대화창: +1일·+3일·+1주·날짜 고르기 + 사유(필수). 요청자는 바로 연장, 담당자는 요청자에게 요청 */
 export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { task: { id: string; title: string; due_date: string | null }; boss: boolean; open: boolean; onClose: () => void; initial?: string | null; onDone?: () => void }) {
   const base = task.due_date ?? todayStr();
   const [to, setTo] = useState<string>(initial ?? addDays(base, 1));
@@ -440,7 +440,7 @@ export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { t
     setBusy(true);
     try {
       const r = await api<{ applied: boolean }>(`/api/tasks/${task.id}/extend`, { body: { toDate: to, reason: reason.trim() } });
-      toast.ok(r.applied ? `마감을 ${Number(to.slice(5, 7))}/${Number(to.slice(8))}로 연장했습니다` : '지시자에게 연장 요청을 보냈습니다');
+      toast.ok(r.applied ? `마감을 ${Number(to.slice(5, 7))}/${Number(to.slice(8))}로 연장했습니다` : '요청자에게 연장 요청을 보냈습니다');
       broadcastRefresh(); onDone?.(); onClose();
     } catch (err: any) { toast.error(err.message); } finally { setBusy(false); }
   };
@@ -459,14 +459,14 @@ export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { t
           <input type="date" className={cx(inputCls, 'h-11')} min={addDays(base, 1)} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} aria-label="연장할 마감일" /></label>
         <label className="block"><span className="text-ink-2">연장 사유 <span className="text-red-600">*</span></span>
           <input className={cx(inputCls, 'mt-1 h-11')} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="예: 거래처 자료 회신이 늦어짐" aria-label="연장 사유" data-testid="extend-reason" /></label>
-        {!boss && <p className="text-xs text-ink-3">지시자가 승인하면 마감이 바뀝니다. 지시자에게 알림이 갑니다.</p>}
+        {!boss && <p className="text-xs text-ink-3">요청자가 승인하면 마감이 바뀝니다. 요청자에게 알림이 갑니다.</p>}
         <Button type="submit" className="h-11 w-full" disabled={busy || to <= base} data-testid="extend-submit">{boss ? '연장하기' : '연장 요청 보내기'}</Button>
       </form>
     </Modal>
   );
 }
 
-/** V32 4: 연장 가능 — 지시자(없으면 만든 사람) = 바로 'boss', 담당자 = 'request'. 마감 있고 미완료일 때만 */
+/** V32 4: 연장 가능 — 요청자(없으면 만든 사람) = 바로 'boss', 담당자 = 'request'. 마감 있고 미완료일 때만 */
 export function extendRole(t: { due_date: string | null; status: string; assignee_id: string | null; requested_by?: string | null; created_by?: string }, uid: string): 'boss' | 'request' | null {
   if (!t.due_date || t.status === 'done') return null;
   if ((t.requested_by ?? t.created_by) === uid) return 'boss';

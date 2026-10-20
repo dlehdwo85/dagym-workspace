@@ -41,7 +41,7 @@ export async function achievement(u: SessionUser, period: 'week' | 'month') {
       select p.id, p.name, p.color, count(t.id)::int as total, count(t.id) filter (where t.status = 'done')::int as done
       from projects p join tasks t on t.project_id = p.id and t.deleted_at is null and t.parent_id is null
       where not p.archived and ${vis} group by p.id, p.name, p.color order by p.name limit 20`,
-    // 내가 지시한 업무 현황
+    // 내가 요청한 업무 현황
     sql<{ open: number; late: number; done_period: number }[]>`
       select count(*) filter (where t.status <> 'done')::int as open,
         count(*) filter (where t.status <> 'done' and t.due_date < ${today})::int as late,

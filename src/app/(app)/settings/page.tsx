@@ -68,9 +68,9 @@ export default function Settings() {
               {[[10, '10분 전'], [30, '30분 전'], [60, '1시간 전'], [120, '2시간 전'], [1440, '하루 전']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </Field>
-          {/* V13 6번 내가 지시한 업무도 마감 알림 */}
-          <Field label="내가 지시한 업무의 마감 알림">
-            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.requesterDueAlerts ?? false} onChange={(e) => setS({ ...s, requesterDueAlerts: e.target.checked })} aria-label="내가 지시한 업무의 마감 알림" data-testid="requester-due-alerts" />받기 (담당자 이름·상태 표시)</label>
+          {/* V13 6번 내가 요청한 업무도 마감 알림 */}
+          <Field label="내가 요청한 업무의 마감 알림">
+            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.requesterDueAlerts ?? false} onChange={(e) => setS({ ...s, requesterDueAlerts: e.target.checked })} aria-label="내가 요청한 업무의 마감 알림" data-testid="requester-due-alerts" />받기 (담당자 이름·상태 표시)</label>
           </Field>
           {/* V8 1번 아침 브리핑 */}
           <Field label="아침 브리핑 (오늘의 일정·일정 요약 알림)">
@@ -97,7 +97,7 @@ export default function Settings() {
             </span>
           </Field>
         </div>
-        <p className="mt-1 text-xs text-slate-500">조용한 시간에 생긴 푸시는 모아서 끝나는 시각(아침)에 보냅니다. 앱 안 알림은 바로 쌓입니다. 종류별 푸시 기본값: 나에게 온 요청·내 일정·지시한 업무 완료는 켬, 내가 보낸 결과·자동 정리 결과는 끔(위 표에서 바꿀 수 있음).</p>
+        <p className="mt-1 text-xs text-slate-500">조용한 시간에 생긴 푸시는 모아서 끝나는 시각(아침)에 보냅니다. 앱 안 알림은 바로 쌓입니다. 종류별 푸시 기본값: 나에게 온 요청·내 일정·요청한 업무 완료는 켬, 내가 보낸 결과·자동 정리 결과는 끔(위 표에서 바꿀 수 있음).</p>
         <Button className="mt-3" onClick={save}>저장</Button>
       </section>
       <section className="rounded-lg border bg-white p-4">

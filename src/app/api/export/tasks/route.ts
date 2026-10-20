@@ -24,7 +24,7 @@ export const GET = handler(async ({ req, user }) => {
   if (x.start || x.end) tasks = tasks.filter((t: any) => { const k = key(t); return !!k && (!x.start || k >= x.start) && (!x.end || k <= x.end); });
   const subs = tasks.length ? await db()`select parent_id, count(*)::int n from tasks where parent_id = any(${tasks.map((t: any) => t.id)}::uuid[]) and deleted_at is null group by parent_id` : [];
   const origin = req.nextUrl.origin;
-  const head: Cell[] = ['번호', '업무명', '담당자', '지시자', '상태', '우선순위', '시작일', '마감일', '마감 시각', '완료일', '기한 준수', '프로젝트', '태그', '설명', '하위 업무 수', '링크'];
+  const head: Cell[] = ['번호', '업무명', '담당자', '요청자', '상태', '우선순위', '시작일', '마감일', '마감 시각', '완료일', '기한 준수', '프로젝트', '태그', '설명', '하위 업무 수', '링크'];
   const row = (t: any, i: number): Cell[] => {
     const done = seoulDay(t.completed_at);
     const onTime = t.status === 'done' && t.due_date ? (done <= t.due_date ? '예' : '아니오') : '';

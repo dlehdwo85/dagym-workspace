@@ -442,7 +442,7 @@ export async function cleanupCsv(u: SessionUser, before: string) {
     from tasks t left join projects p on p.id = t.project_id left join users a on a.id = t.assignee_id left join users r on r.id = coalesce(t.requested_by, t.created_by)
     where ${cleanupWhere(sql, tenant, before)} order by t.completed_at`;
   const esc = (v: unknown) => { const x = v === null || v === undefined ? '' : String(v); return /[",\n\r]/.test(x) || /^[=+\-@]/.test(x) ? `"${(/^[=+\-@]/.test(x) ? "'" : '') + x.replace(/"/g, '""')}"` : x; };
-  const head = ['제목', '프로젝트', '담당', '지시자', '마감', '완료', '만든 날', '설명'];
+  const head = ['제목', '프로젝트', '담당', '요청자', '마감', '완료', '만든 날', '설명'];
   return '\uFEFF' + [head, ...rows.map((r) => [r.title, r.project, r.assignee, r.requester, r.due, r.done_at, r.created, r.description])].map((l) => l.map(esc).join(',')).join('\r\n');
 }
 /** 정리: 셈·화면·휴지통에서 빠짐(기록은 남김, 되살리기 없음). 보관 파일을 먼저 내려받았는지는 화면에서 확인 */

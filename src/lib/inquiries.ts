@@ -85,7 +85,7 @@ export function describeInquiry(site: Site, type: InquiryType, i: InquiryInput, 
   const contact: [string, unknown][] = [['담당자', i.name], ['연락처', i.phone], ['이메일', i.email]];
   return [
     '| 항목 | 내용 |', '|---|---|', ...rows.map(([k, v]) => `| ${k} | ${cellText(v)} |`),
-    '', '**연락처 (보안 등급: 내부 — 업무 담당자·지시자·관리자만 볼 수 있습니다)**',
+    '', '**연락처 (보안 등급: 내부 — 업무 담당자·요청자·관리자만 볼 수 있습니다)**',
     '| 항목 | 내용 |', '|---|---|', ...contact.map(([k, v]) => `| ${k} | ${cellText(v)} |`),
     '', '**문의 내용 원문**', (i.message ?? '').trim() || '-',
   ].join('\n');

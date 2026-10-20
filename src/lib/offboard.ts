@@ -9,7 +9,7 @@ import { zUuid } from './api';
 /**
  * 대표 10/20 오후 7) 사용자 관리 — 퇴사 처리 / 계정 인수인계
  * [퇴사 처리] 날짜 지정 → 로그인 차단·세션 만료·푸시 끔·초대 취소·Google 연동 멈춤·팀·대화방에서 빠짐(메신저 자동 제거), 라이선스 인원 제외(status 'left' 는 활성 수에 안 들어감), 알림 수신 중지(notify 는 active 만).
- * [인수인계] 담당 업무·내가 지시한 업무·참여 업무·리드·일정·결재선·반복 업무·연락처·프로젝트를 항목별로(웹 문의는 업무로 연결되어 업무 이전에 포함) 골라 한 사람에게 일괄 이전. 자료실 파일은 회사 소유 그대로(지우지 않음), 메일·문자 발송 기록 보존.
+ * [인수인계] 담당 업무·내가 요청한 업무·참여 업무·리드·일정·결재선·반복 업무·연락처·프로젝트를 항목별로(웹 문의는 업무로 연결되어 업무 이전에 포함) 골라 한 사람에게 일괄 이전. 자료실 파일은 회사 소유 그대로(지우지 않음), 메일·문자 발송 기록 보존.
  * [복직] 퇴사일부터 30일 안. 모든 동작 감사 기록.
  */
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
@@ -56,7 +56,7 @@ export async function leaveUser(actor: SessionUser, id: string, i: z.infer<typeo
 const ITEMS: Record<string, { label: string; count: (sql: ReturnType<typeof db>, id: string) => Promise<number>; move: (sql: ReturnType<typeof db>, id: string, to: string) => Promise<number> }> = {
   tasks: { label: '담당 업무(진행 중)', count: async (sql, id) => n(await sql`select count(*)::int as n from tasks where assignee_id = ${id} and status <> 'done' and deleted_at is null`),
     move: async (sql, id, to) => n(await sql`with u as (update tasks set assignee_id = ${to}, updated_at = now() where assignee_id = ${id} and status <> 'done' and deleted_at is null returning 1) select count(*)::int as n from u`) },
-  requested: { label: '내가 지시한 업무(진행 중)', count: async (sql, id) => n(await sql`select count(*)::int as n from tasks where requested_by = ${id} and status <> 'done' and deleted_at is null`),
+  requested: { label: '내가 요청한 업무(진행 중)', count: async (sql, id) => n(await sql`select count(*)::int as n from tasks where requested_by = ${id} and status <> 'done' and deleted_at is null`),
     move: async (sql, id, to) => n(await sql`with u as (update tasks set requested_by = ${to}, updated_at = now() where requested_by = ${id} and status <> 'done' and deleted_at is null returning 1) select count(*)::int as n from u`) },
   collab: { label: '참여 중인 업무', count: async (sql, id) => n(await sql`select count(*)::int as n from task_collaborators c join tasks t on t.id = c.task_id where c.user_id = ${id} and t.status <> 'done' and t.deleted_at is null`),
     move: async (sql, id, to) => n(await sql`with d as (delete from task_collaborators c using tasks t where t.id = c.task_id and c.user_id = ${id} and t.status <> 'done' and t.deleted_at is null returning c.task_id),

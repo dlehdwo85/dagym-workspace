@@ -1,6 +1,6 @@
 // V32 4 마감 연장(대표 10/16: "연장 신청이 안 보이고 마감 조정은 상세에 들어가야 해서 찾기 어려움"):
 // 휴대폰 담당자 — 목록 마감 칩 → [마감 연장 요청] → +3일·사유 → 보냄(마감은 그대로), 날짜를 뒤로 고르면 바로 안 바뀌고 요청 창
-// PC 지시자 — "연장 요청" 칩에 1건·행에 "연장 요청 → m/d" → 업무 머리의 [승인] → 마감 변경·"연장 1회"
+// PC 요청자 — "연장 요청" 칩에 1건·행에 "연장 요청 → m/d" → 업무 머리의 [승인] → 마감 변경·"연장 1회"
 import assert from 'node:assert/strict';
 const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 const md = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
@@ -39,7 +39,7 @@ export async function dueExtend({ staff, owner, ctx, sql, BASE }) {
   assert.ok(clip >= -1, `연장 칩이 둘째 줄 밖으로 ${-clip}px 잘림`);
   assert.equal((await row.getByTestId('ext-chip').innerText()).trim(), `연장 → ${md(addDays(due, 3))}`);
   assert.equal((await sql`select to_char(due_date, 'YYYY-MM-DD') d from tasks where id = ${id}`)[0].d, due);
-  // 지시자(PC): 연장 요청 칩 → 행 → 머리에서 승인
+  // 요청자(PC): 연장 요청 칩 → 행 → 머리에서 승인
   await owner.goto(`${BASE}/tasks`);
   const chip = owner.getByTestId('view-chips').locator('[data-count="extend"]');
   await chip.waitFor();

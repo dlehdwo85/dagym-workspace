@@ -11,7 +11,7 @@ import { syncedEventIds } from '@/lib/eventtasks';
 
 export const GET = handler<{ id: string }>(async ({ user, params }) => {
   const d = await getTaskDetail(user, params.id);
-  // V12 6번: 담당자가 업무를 열면 자동으로 "확인 완료" + 지시자 알림
+  // V12 6번: 담당자가 업무를 열면 자동으로 "확인 완료" + 요청자 알림
   if ((d.task as any).assignee_id === user.id && !(d.task as any).assignee_ack_at && await markAcked(user, params.id)) {
     (d.task as any).assignee_ack_at = new Date().toISOString();
     after(() => dispatchPending().catch(() => {}));

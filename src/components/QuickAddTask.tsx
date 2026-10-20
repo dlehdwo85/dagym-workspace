@@ -28,7 +28,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
   const teams = useApi<{ teams: { id: string; name: string; mine: boolean; members: { id: string }[] }[] }>(open ? '/api/teams' : null); // V14 8번
   const lastSrv = useApi<{ last: any }>(open ? '/api/me/quick-last' : null); // 검수 20: 사용자 단위 기억
   const templates = useApi<{ templates: any[] }>(open && !defaults?.parentId ? '/api/templates' : null);
-  // V8 3번: 위쪽 "템플릿에서 만들기" — 고르면 제목·마감(오프셋)·기본 담당·지시가 채워지고 체크리스트·하위 업무까지 만들어진다
+  // V8 3번: 위쪽 "템플릿에서 만들기" — 고르면 제목·마감(오프셋)·기본 담당·요청가 채워지고 체크리스트·하위 업무까지 만들어진다
   const pickTpl = (id: string) => {
     setTpl(id);
     const t = templates.data?.templates.find((x) => x.id === id);
@@ -74,7 +74,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
     const opening = open && !wasOpen.current;
     wasOpen.current = open;
     if (opening) {
-      // V8 9번 · 검수 20: 마지막에 쓴 담당·지시·우선순위·프로젝트·알림을 사용자 단위로 기억(서버). 서버 값이 오기 전엔 이 기기 값
+      // V8 9번 · 검수 20: 마지막에 쓴 담당·요청·우선순위·프로젝트·알림을 사용자 단위로 기억(서버). 서버 값이 오기 전엔 이 기기 값
       let last: any = lastSrv.data?.last ?? {};
       if (!lastSrv.data?.last) try { last = JSON.parse(localStorage.getItem('wos_quick_last') ?? '{}'); } catch {}
       setF({ title: defaults?.title ?? '', ...(defaults?.description ? { description: defaults.description } : {}), multi: false, more: [], dueTime: defaults?.dueTime ?? '', assigneeId: defaults?.assigneeId ?? last.assigneeId ?? user.id, requestedById: last.requestedById ?? user.id,
@@ -267,11 +267,11 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
           <select className="min-h-8 rounded-md border border-line bg-white px-2 text-xs" value={f.priority ?? 'normal'} onChange={(e) => set('priority')(e.target.value)} aria-label="우선순위">
             {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
-          {/* 검수 20: 마감·담당·지시도 같은 칩 줄에 */}
+          {/* 검수 20: 마감·담당·요청도 같은 칩 줄에 */}
           <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">마감<input type="date" className="min-h-8 rounded-md border border-line bg-white px-1.5 text-xs text-ink" value={f.dueDate ?? ''} onChange={(e) => set('dueDate')(e.target.value)} aria-label="마감일" /></label>
           {f.dueDate && <TimePick className="min-h-8 rounded-md border border-line bg-white px-1.5 text-xs" value={f.dueTime} onChange={(v) => set('dueTime')(v ?? '')} ariaLabel="마감 시각" />}
           <label className="inline-flex items-center gap-1 text-[11px] text-ink-3">담당<UserSelect className="min-h-8 max-w-[8.5rem] rounded-md border border-line bg-white px-1.5 text-xs text-ink" ariaLabel="담당자" value={f.assigneeId} onChange={set('assigneeId')} /></label>
-          {/* 대표(10/16): 지시자 = 로그인한 사람 고정(고르는 칸 없음) */}
+          {/* 대표(10/16): 요청자 = 로그인한 사람 고정(고르는 칸 없음) */}
           <RepeatChip value={f.rrule ?? null} anchorDate={f.dueDate || null} onChange={set('rrule')} />
           <BellChip value={f.remind ?? null} onChange={set('remind')} />
         </div>

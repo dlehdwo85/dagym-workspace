@@ -43,7 +43,7 @@ describe('V15 공개 가입 → 이메일 확인 → 로그인', () => {
     // 같은 링크 재사용 불가
     assert.equal((await new Client().post('/api/auth/verify', { token: link.split('/').pop() })).status, 400);
     assert.equal((await c.get('/api/admin/users')).status, 404, '개인 공간: 사용자 관리 메뉴 없음');
-    // 업무 만들기: 지시자 = 본인
+    // 업무 만들기: 요청자 = 본인
     const t = await c.ok('POST', '/api/tasks', { title: '내 첫 업무', orgUnitId: me.orgUnits[0].id });
     const got = await c.ok('GET', `/api/tasks/${t.id}`);
     assert.equal((got.task ?? got).requested_by ?? (got.task ?? got).created_by, me.user.id);

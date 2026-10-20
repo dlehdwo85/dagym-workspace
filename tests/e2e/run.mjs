@@ -177,7 +177,7 @@ await step('② 대표가 + 버튼으로 업무 등록·담당자 배정', async
   taskId = owner.url().split('/').pop();
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${taskId}`)).task.approval_required, false, '관리자 최종 확인 기본 꺼짐');
   // 이 시나리오(현장 관리자 최종 확인)는 확인 필요·현장 소속으로 바꿔 진행
-  await ctx.owner.ok('PATCH', `/api/tasks/${taskId}`, { approvalRequired: true, orgUnitId: ctx.siteA, requestedById: ctx.managerA.id }); // V12-11: 검토 승인 = 지시자
+  await ctx.owner.ok('PATCH', `/api/tasks/${taskId}`, { approvalRequired: true, orgUnitId: ctx.siteA, requestedById: ctx.managerA.id }); // V12-11: 검토 승인 = 요청자
   await owner.reload();
   await owner.getByTestId('task-title').waitFor();
   await owner.screenshot({ path: `${SHOTS}/04-task-detail-owner.png`, fullPage: true });
@@ -500,7 +500,7 @@ await step('⑥ 다른 현장 직원은 화면에서도 접근 불가 안내', a
 });
 
 await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 조회)', async () => {
-  // V14 50: 일정 수정은 지시자·담당자만 — 직원이 담당인 업무로 시험
+  // V14 50: 일정 수정은 요청자·담당자만 — 직원이 담당인 업무로 시험
   // V32 4: 담당자는 마감을 미루면 연장 요청 → 여기서는 앞당기기(바로 반영)
   const t7 = (await ctx.owner.ok('POST', '/api/tasks', { title: '모바일 수정 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 8) })).id;
   await staff.goto(`${BASE}/tasks/${t7}`);
@@ -637,7 +637,7 @@ await step('B-9 결재선 화면에서 2단계 결재선 만들기 → 업무에
   await owner.goto(`${BASE}/tasks/${id}`);
   // V14 27번: 상세 화면에서 결재선 칸은 뺌(데이터는 유지) — 결재선 지정은 API/업무 생성 때
   const line = (await ctx.owner.ok('GET', '/api/approval-lines')).lines.find((l) => l.name === '계약 결재');
-  await ctx.managerA.client.ok('PATCH', `/api/tasks/${id}`, { approvalLineId: line.id }); // V14 50: 지시자가 결재선 지정
+  await ctx.managerA.client.ok('PATCH', `/api/tasks/${id}`, { approvalLineId: line.id }); // V14 50: 요청자가 결재선 지정
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
   const c = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const m = await login(c, ctx.managerA.email, ctx.managerA.password);
@@ -964,7 +964,7 @@ await step('V24 음성 등록: AI 비서 화면·패널 마이크 → 실시간 
 await step('V14 42 업무 보기 칩: 412px 에서 7개 모두 보임(4칸 2줄)·건수 = API·0건 숨김·사람 칩 둘째 줄·PC 한 줄', () => v1442({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('V14 43 업무 목록: 왼쪽 동그라미 없음·상태 칩 버튼(테두리·▾·32px)·메뉴 맨 위 완료 → 되돌리기·남의 업무 잠김·"확인 완료" 문구 없음', () => v1443({ browser, desk, ctx, BASE, SHOTS, sql }));
 await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머리줄·목록·상대에게 새 이름, Esc 취소, 1:1 은 버튼 없음', () => chatRename({ owner, ctx, BASE }));
-await step('V32 4 마감 연장: 휴대폰 담당자 목록 마감 칩 → 연장 요청(사유 필수, 뒤 날짜는 요청 창) → PC 지시자 "연장 요청" 칩·행 표시 → 머리에서 승인 → 마감 변경·연장 1회', () => dueExtend({ staff, owner, ctx, sql, BASE }));
+await step('V32 4 마감 연장: 휴대폰 담당자 목록 마감 칩 → 연장 요청(사유 필수, 뒤 날짜는 요청 창) → PC 요청자 "연장 요청" 칩·행 표시 → 머리에서 승인 → 마감 변경·연장 1회', () => dueExtend({ staff, owner, ctx, sql, BASE }));
 await step('V38 3 음성 모드(운전 중): 메시지방 새 메시지 읽어 주기·말로 보내기("보내" 확인·"취소")·AI 비서 말로 묻고 답 읽어 주기', () => voiceMode({ browser, desk, ctx, sql, BASE, FAKE }));
 await step('로컬 검수 10/17: 홈 최근 활동 멘션 @이름 · 월 보기 요일 머리 · 휴대폰 일정 시트 닫기 버튼 화면 안 · 휴대폰 업무 둘째 줄 한 줄', () => verify1017({ owner, staff, ctx, sql, BASE }));
 await step('로컬 10/19 회사 정보 AI 로 정리: 오른쪽 도우미·질문으로 시작 5문항·주의할 점 칸', async () => {
@@ -1091,7 +1091,7 @@ await step('V13 메뉴 권한: 대표만 "메뉴 권한" 탭 → 현장 관리�
   assert.equal((await ctx.managerA.client.get('/api/revenue')).status, 404);
   await c.close();
 });
-await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 행에서 지시자·우선순위 변경, 손잡이로 끌어 순서 → 새로고침해도 유지, 정렬·내가 지시한 업무', async () => {
+await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 행에서 요청자·우선순위 변경, 손잡이로 끌어 순서 → 새로고침해도 유지, 정렬·내가 요청한 업무', async () => {
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'minsu@dagym.test', name: '김민수', role: 'staff', orgUnitIds: [ctx.hq] });
   const c = new Client('minsu');
   await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'minsu-pass-1234' });
@@ -1107,10 +1107,10 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   await add.press('Enter');
   await g.getByText('신규 회원 이벤트 기획').waitFor();
   const [t] = await sql`select id, assignee_id, requested_by from tasks where title = '신규 회원 이벤트 기획'`;
-  assert.equal(t.assignee_id, minsu); assert.equal(t.requested_by, ctx.ownerId, '지시자 = 나(만든 사람)');
-  // 행에서 지시자·우선순위
+  assert.equal(t.assignee_id, minsu); assert.equal(t.requested_by, ctx.ownerId, '요청자 = 나(만든 사람)');
+  // 행에서 요청자·우선순위
   const row = owner.locator(`[data-row="${t.id}"]`);
-  // V14 50: 지시자를 넘기면 나는 더 고칠 수 없으므로 우선순위 먼저
+  // V14 50: 요청자를 넘기면 나는 더 고칠 수 없으므로 우선순위 먼저
   await row.getByTestId('priority-picker').click();
   await owner.getByRole('dialog').getByRole('button', { name: /긴급/ }).click();
   await owner.waitForTimeout(500);
@@ -1139,15 +1139,15 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   await mine.locator('[data-row] a[data-open-task]').first().waitFor();
   assert.equal((await mine.locator('[data-row] a[data-open-task]').first().textContent()).trim(), lastTitle, '새로고침 후에도 끌어 놓은 순서');
   await owner.screenshot({ path: `${SHOTS}/61-tasks-v3.png` });
-  // 정렬·열 머리·내가 지시한 업무
+  // 정렬·열 머리·내가 요청한 업무
   await owner.getByTestId('sort-by').selectOption('due');
   assert.equal(await mine.getByTestId('drag-handle').count(), 0, '직접 순서가 아니면 손잡이 없음');
   await owner.getByTestId('group-col-header').first().getByRole('button', { name: /우선순위/ }).click();
   assert.equal(await owner.getByTestId('sort-by').inputValue(), 'priority');
   await owner.getByTestId('sort-by').selectOption('manual');
-  await owner.getByRole('button', { name: '내가 지시한 업무' }).click();
+  await owner.getByRole('button', { name: '내가 요청한 업무' }).click();
   await owner.waitForTimeout(600);
-  assert.equal(await groups.getByText('신규 회원 이벤트 기획').count(), 0, '지시자를 최매니저로 바꿨으니 빠짐');
+  assert.equal(await groups.getByText('신규 회원 이벤트 기획').count(), 0, '요청자를 최매니저로 바꿨으니 빠짐');
 });
 await step('V3-6 휴대폰: 다른 사람 묶음에서 입력 후 바깥 누르면 자동 추가 → 안내·강조·그 묶음에 표시, 순서 메뉴로 위로, 홈 기한 지남 경고 띠', async () => {
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
@@ -1266,7 +1266,7 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   const q = owner.getByTestId('quick-create');
   assert.equal(await q.getByRole('tab').count(), 0, '탭 없이 일정 양식 하나(V6)');
   await q.getByLabel('빠른 입력 제목').fill('계약서 최종본 확인');
-  await q.getByTestId('quick-also-task').check({ force: true }); // 업무에도 추가 스위치 → 담당·지시·우선 칸
+  await q.getByTestId('quick-also-task').check({ force: true }); // 업무에도 추가 스위치 → 담당·요청·우선 칸
   await q.getByTestId('quick-task-fields').getByLabel('업무 우선순위').selectOption('high');
   await q.getByLabel('빠른 입력 제목').press('Enter');
   await owner.getByText(/업무에도 추가했습니다/).first().waitFor();

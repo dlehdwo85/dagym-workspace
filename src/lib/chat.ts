@@ -252,7 +252,7 @@ export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typ
   const mentionIds = [...body.matchAll(/@\[[^\]]{1,50}\]\(([0-9a-f-]{36})\)/g)].map((m) => m[1]);
   const members = (await sql<{ user_id: string; muted: boolean }[]>`select user_id, muted from chat_members where room_id = ${r.id}`);
   const memberIds = members.map((m) => m.user_id);
-  // 업무 방은 업무를 볼 수 있지만 아직 방을 연 적 없는 담당·지시자에게도 알린다
+  // 업무 방은 업무를 볼 수 있지만 아직 방을 연 적 없는 담당·요청자에게도 알린다
   if (r.kind === 'task') {
     const [t] = await sql<{ assignee_id: string | null; requested_by: string | null; created_by: string }[]>`select assignee_id, requested_by, created_by from tasks where id = ${r.task_id}`;
     for (const id of [t?.assignee_id, t?.requested_by, t?.created_by]) if (id && !memberIds.includes(id)) {
