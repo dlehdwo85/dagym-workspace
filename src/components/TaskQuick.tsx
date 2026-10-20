@@ -87,7 +87,7 @@ function TimeGrid({ value, onChange, label }: { value: string | null | undefined
         ))}
       </div>
       <label className="mt-1.5 flex items-center gap-2 text-sm"><span className="shrink-0 text-xs text-ink-2">직접</span>
-        <TimePick className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-sm" value={value} onChange={onChange} ariaLabel={`${label} 시각`} />
+        <TimePick className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-sm" value={value} onChange={onChange} ariaLabel={`${label} 직접 시각`} />
       </label>
     </div>
   );
