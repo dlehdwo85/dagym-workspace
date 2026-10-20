@@ -75,11 +75,11 @@ export async function listSources(u: SessionUser) {
     from data_sources s left join tenant_data_sources ts on ts.source_code = s.code and ts.tenant = ${t}
     where s.license <> 'noncommercial' order by s.grp, s.name`;
   const [st] = await sql<any[]>`select industry, region, setup_done_at from sales_settings where tenant = ${t}`;
-  const [pf] = await sql<any[]>`select industry, ai_business, ai_customers from tenants where id = ${t}`;
+  const [pf] = await sql<any[]>`select industry, industries, ai_business, ai_customers from tenants where id = ${t}`;
   const custom = await sql<any[]>`select id, kind, label, value, note, created_at from sales_custom_sources where tenant = ${t} order by created_at`;
   return { sources: rows.map((r) => ({ ...r, common: COMMON.includes(r.code), attribution: attribution(r), why: WHY[r.code] ?? null })), settings: st ?? null, canEdit: isAdmin(u), rules: RULES.map((r) => ({ key: r.key, label: r.label })),
     // 회사 정보(업종·사업 소개·주요 고객)로 추천 칸을 미리 채움
-    profile: { industry: pf?.industry ?? null, business: pf?.ai_business ?? null, customers: pf?.ai_customers ?? null }, custom };
+    profile: { industry: (pf?.industries?.length ? pf.industries.join('·') : pf?.industry) ?? null, industries: pf?.industries ?? [], business: pf?.ai_business ?? null, customers: pf?.ai_customers ?? null }, custom };
 }
 
 const words = z.array(z.string().trim().min(1).max(40)).max(30);

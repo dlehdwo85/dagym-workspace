@@ -155,7 +155,7 @@ export async function materialOf(c: any, brand: any, rule: any) {
   const about = [brand?.intro, brand?.products, co.business].map((x) => String(x ?? '').trim()).filter(Boolean);
   const lines = [
     `브랜드 이름: ${brandName(brand) || co.name || '(없음)'}`,
-    co.name ? `회사: ${co.name}${co.industry ? ` (${co.industry})` : ''}` : '',
+    co.name ? `회사: ${co.name}${co.industries?.length ? ` (${co.industries.join('·')})` : ''}` : '',
     brand?.intro ? `브랜드 소개: ${brand.intro}` : '',
     brand?.products ? `주력 상품·서비스: ${brand.products}` : '',
     co.business ? `회사 사업 소개: ${co.business}` : '',

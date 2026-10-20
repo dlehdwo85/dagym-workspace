@@ -35,7 +35,7 @@ async function mediaOk(u: SessionUser, ids: string[]) {
 }
 
 /** 현황 머리줄·오늘 게시(운영실 홈 2-1): 승인할 시안(오늘 게시 먼저 → 게시 시각순) · 오늘 게시(예정·승인 대기·게시됨·지연) · 없으면 다음 게시 */
-async function homeNow(t: string) {
+export async function homeNow(t: string) {
   const sql = db();
   const st = await (await import('./mktAuto')).settingsOf(t);
   const cols = sql`c.id, c.title, c.channel, c.kind, c.status, c.scheduled_at, c.current_version, c.published_url, b.name as brand, b.color as brand_color`;

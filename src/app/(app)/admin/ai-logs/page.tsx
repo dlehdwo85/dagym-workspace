@@ -25,7 +25,7 @@ export default function AiLogsPage() {
   }
   async function saveSettings(e: React.FormEvent) {
     e.preventDefault();
-    try { await api('/api/ai/settings', { method: 'PUT', body: { retentionDays: Number(set.retention_days), dailyLimit: Number(set.daily_limit), inputMax: Number(set.input_max), topicFilter: !!set.topic_filter, webTools: !!set.web_tools, docEngine: !!set.doc_engine } }); setSet(null); reload(); toast.ok('저장했습니다'); }
+    try { await api('/api/ai/settings', { method: 'PUT', body: { retentionDays: Number(set.retention_days), dailyLimit: Number(set.daily_limit), inputMax: Number(set.input_max), topicFilter: !!set.topic_filter, webTools: !!set.web_tools, docEngine: !!set.doc_engine, nightScope: set.night_scope ?? {} } }); setSet(null); reload(); toast.ok('저장했습니다'); }
     catch (er: any) { toast.error(er.message); }
   }
   if (error) return <ErrorBox error={error} retry={reload} />;
@@ -85,6 +85,11 @@ export default function AiLogsPage() {
             {/* V22 */}
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!set.web_tools} onChange={(e) => setSet({ ...set, web_tools: e.target.checked })} data-testid="ai-web-tools" />웹 검색·페이지 읽기 (출처 링크 표시)</label>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!set.doc_engine} onChange={(e) => setSet({ ...set, doc_engine: e.target.checked })} data-testid="ai-doc-engine" />문서 작업 (엑셀·워드·PPT·PDF 만들기·디자인·데이터 분석 — 코드 실행, 사용량 더 듦)</label>
+            {/* ⑥ 밤사이 비서(대표 승인 10/20 오후): 22시~06시에 승인된 범위만 — 기본 모두 끔. 돈·외부 발송은 절대 자동 아님 */}
+            <fieldset className="rounded-input border border-line p-2" data-testid="ai-night-scope"><legend className="px-1 text-xs text-ink-2">🌙 밤사이 비서 (22시~06시, 기본 끔 — 결과는 아침 마케팅 홈·브리핑에)</legend>
+              {([['draft', '원고 초안 — 3일 안 게시할 자동 제작 시안을 밤에 미리'], ['lead_next', '리드 다음 연락 제안 (준비 중)'], ['bid_summary', '입찰 요약 (준비 중)'], ['report', '보고서 초안 (준비 중)']] as [string, string][]).map(([k, l]) => (
+                <label key={k} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!set.night_scope?.[k]} onChange={(e) => setSet({ ...set, night_scope: { ...(set.night_scope ?? {}), [k]: e.target.checked } })} data-testid={`ai-night-${k}`} />{l}</label>))}
+            </fieldset>
             <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setSet(null)}>취소</Button><Button type="submit">저장</Button></div>
           </form>
         )}

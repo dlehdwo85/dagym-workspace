@@ -6,7 +6,9 @@ import { INDUSTRIES } from '@/lib/industries';
 export { INDUSTRIES };
 
 /** V29 가입 2단계 "회사 만들기": 회사 이름·인원 규모·업종(규모·업종은 선택 — 맞춤 안내용) */
-export function CompanyFields({ v, onChange }: { v: { company: string; size: string; industry: string }; onChange: (v: { company: string; size: string; industry: string }) => void }) {
+type CF = { company: string; size: string; industry: string; industries?: string[] };
+export function CompanyFields({ v, onChange }: { v: CF; onChange: (v: CF) => void }) {
+  const extra = (v.industries ?? []).filter((x) => x !== v.industry);
   return (
     <div className="space-y-3">
       <Field label="회사(팀) 이름"><input className={inputCls + ' h-11'} value={v.company} onChange={(e) => onChange({ ...v, company: e.target.value })} required maxLength={60} placeholder="예: 우리상사" aria-label="회사 이름" /></Field>
@@ -23,6 +25,13 @@ export function CompanyFields({ v, onChange }: { v: { company: string; size: str
       {/* 상용화: 업종에 맞춰 AI 비서·시작 템플릿을 준비 — 필수 */}
       <Field label="업종"><select className={inputCls + ' h-11'} value={v.industry} onChange={(e) => onChange({ ...v, industry: e.target.value })} aria-label="업종" data-testid="signup-industry" required>
         <option value="">업종을 고르세요</option>{INDUSTRIES.map((x) => <option key={x}>{x}</option>)}</select></Field>
+      {/* 대표 10/20 10:50: 주 업종 1개 + 추가 업종(여러 개) */}
+      {v.industry && <div><p className="mb-1 text-xs text-ink-2">추가 업종 <span className="text-ink-3">(선택 · 여러 개)</span></p>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="추가 업종" data-testid="signup-industries">
+          {INDUSTRIES.filter((x) => x !== v.industry).map((x) => { const on = extra.includes(x); return (
+            <button key={x} type="button" aria-pressed={on} onClick={() => onChange({ ...v, industries: on ? extra.filter((y) => y !== x) : [...extra, x] })}
+              className={'rounded-full border px-2.5 py-1 text-xs ' + (on ? 'border-transparent bg-brand-600 font-semibold text-white' : 'border-line bg-white hover:bg-slate-50')}>{x}</button>); })}
+        </div></div>}
       <p className="-mt-1 text-xs text-ink-3">AI 비서가 이 업종에 맞춰 처음부터 준비됩니다. 회사 소개·말투는 나중에 [관리 › 회사 정보]에서 더 알려 줄 수 있어요.</p>
     </div>
   );

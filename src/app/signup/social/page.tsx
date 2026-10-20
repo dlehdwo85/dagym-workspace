@@ -16,7 +16,7 @@ function SocialSignup() {
   const [info, setInfo] = useState<{ providerLabel: string; email: string; name: string | null } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<'personal' | 'team'>('team');
-  const [f, setF] = useState({ name: '', company: '', size: '', industry: '' });
+  const [f, setF] = useState({ name: '', company: '', size: '', industry: '', industries: [] as string[] });
   const [agree, setAgree] = useState({ terms: false, privacy: false, ai: false, marketing: false });
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -28,7 +28,7 @@ function SocialSignup() {
     try {
       setAdsConsent(ads);
       await api('/api/auth/oauth/complete', { body: { token: t, name: f.name, mode, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined,
-        industry: mode === 'team' && f.industry ? f.industry : undefined, agree: { ...agree, ads }, utm: readUtm() } });
+        industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, agree: { ...agree, ads }, utm: readUtm() } });
       await fireSignupConversion();
       location.href = '/';
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); setBusy(false); }

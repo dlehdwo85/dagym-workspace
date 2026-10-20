@@ -14,7 +14,7 @@ before(async () => {
   srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1' }); sql = testDb(); ctx = await bootstrap();
   defTpl = (await ctx.owner.ok('POST', '/api/templates', { name: '기본회사 전사 템플릿', payload: { title: '전사', checklist: ['비밀 단계'] } })).id;
   const c = new Client('fit@other.test');
-  const r = await c.ok('POST', '/api/auth/signup', { email: 'fit@other.test', password: 'signup-pass-1234', name: '박대표', mode: 'team', company: '튼튼짐', industry: '운동·피트니스', agree: { terms: true, privacy: true, ai: true } });
+  const r = await c.ok('POST', '/api/auth/signup', { email: 'fit@other.test', password: 'signup-pass-1234', name: '박대표', mode: 'team', company: '튼튼짐', industry: '운동·피트니스', industries: ['IT·소프트웨어'], agree: { terms: true, privacy: true, ai: true } });
   await c.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
   const me = await c.ok('GET', '/api/auth/me');
   await sql`update users set title = '대표이사' where id = ${me.user.id}`;
@@ -45,9 +45,15 @@ describe('상용화: 회사별 AI 비서', () => {
   });
   test('회사 정보 화면에서 AI 에게 회사 소개·고객·말투 알려 주기(직원은 못 바꿈)', async () => {
     const g = await T.c.ok('GET', '/api/org/ai-profile');
-    assert.equal(g.industry, '운동·피트니스'); assert.ok(g.industries.includes('제조'));
+    assert.equal(g.industry, '운동·피트니스'); assert.deepEqual(g.industries, ['운동·피트니스', 'IT·소프트웨어'], '가입 때 주 업종 + 추가 업종'); assert.ok(g.industryOptions.includes('제조'));
     await T.c.ok('PUT', '/api/org/ai-profile', { business: '판교 PT 전문 센터 2곳 운영, 재등록 상담 중시', customers: '30~40대 직장인', tone: '친근하지만 정중하게' });
     assert.equal((await T.c.req('PUT', '/api/org/ai-profile', { industry: '없는 업종' })).status, 400);
+    // 대표 10/20: 업종 여러 개 — industries[] 가 정본, industry 는 첫 값(주 업종), 목록 밖 400
+    const m = await T.c.ok('PUT', '/api/org/ai-profile', { industries: ['운동·피트니스', 'IT·소프트웨어'] });
+    assert.deepEqual([m.industry, m.industries], ['운동·피트니스', ['운동·피트니스', 'IT·소프트웨어']]);
+    assert.equal((await T.c.req('PUT', '/api/org/ai-profile', { industries: ['운동·피트니스', '없는 업종'] })).status, 400);
+    const [tr] = await sql`select t.industry, t.industries from tenants t join users u on u.tenant = t.id where u.id = ${T.me.user.id}`;
+    assert.deepEqual([tr.industry, tr.industries], ['운동·피트니스', ['운동·피트니스', 'IT·소프트웨어']]);
     assert.ok([403, 404].includes((await ctx.staffA.client.req('PUT', '/api/org/ai-profile', { business: 'x' })).status));
   });
   test('AI 비서·업무 비서 프롬프트 = 우리 회사(이름·업종·소개·말투) + 쓰는 사람 이름·직책, 다짐·하이링크는 없음', async () => {

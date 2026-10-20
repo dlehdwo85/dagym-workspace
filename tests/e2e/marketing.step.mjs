@@ -1,12 +1,12 @@
 // V41 4-2 마케팅 공간: 켜기 → 개요 카드 → 승인 대기에서 새 콘텐츠(시안 없음) → 상세에서 승인하면 거절 안내 → 수정 요청(이유) →
 // 캘린더에 칩 → 전화 문의 추가 → [영업 리드로] → 업무 보기 링크 → 끄기
 import assert from 'node:assert/strict';
-export async function marketing({ owner, BASE, sql }) {
+export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
   await owner.getByTestId('space-toggle-marketing').click();
-  await owner.getByTestId('space-switch').waitFor();
+  await owner.getByTestId('space-tabs').waitFor();
   await owner.goto(`${BASE}/s/marketing`);
   await owner.getByTestId('space-home-marketing').waitFor();
   // 로컬 10/19(대표): 홈 — 연결 0개면 '채널 연결 3단계'(계정 있나요? → 없으면 만들기 → [연결]), ① 승인 ② 게시 일정 ③ 성과 ④ 채널, 운영실 버튼 없음
@@ -21,6 +21,28 @@ export async function marketing({ owner, BASE, sql }) {
   for (const id of ['mkt-home-now', 'mkt-home-week', 'mkt-home-perf', 'mkt-home-channels']) await owner.getByTestId(id).waitFor();
   assert.equal(await owner.getByTestId('mkt-channel-dot').count(), 8);
   assert.equal(await owner.locator('aside a[aria-current="page"]').first().innerText(), '홈');
+  // ⑥ 마케팅 홈 디벨롭(대표 승인 10/20 오후): AI 비서 입력창(라벨 'AI 비서') → 숫자 4칸 → 승인 3 → AI 작업 큐 → 이번 주 7칸 → 성과·광고 → 최근·제안 → 채널. ⚙ 카드 구성으로 끄기·순서
+  await owner.getByTestId('mkt-home-chat').waitFor();
+  assert.equal(await owner.getByTestId('mkt-home-ask').getAttribute('aria-label'), 'AI 비서');
+  assert.equal(await owner.getByTestId('mkt-kpi').count(), 4);
+  assert.equal(await owner.getByTestId('mkt-week-day').count(), 7);
+  for (const id of ['mkt-home-queue', 'mkt-home-ads', 'mkt-home-recent', 'mkt-home-suggest']) await owner.getByTestId(id).waitFor();
+  await owner.getByTestId('mkt-home-config').click();
+  await owner.getByTestId('mkt-card-recent').uncheck();
+  await owner.getByTestId('mkt-cards-save').click();
+  await owner.getByTestId('mkt-home-recent').waitFor({ state: 'detached' });
+  await owner.getByTestId('mkt-home-config').click();
+  await owner.getByTestId('mkt-card-recent').check();
+  await owner.getByTestId('mkt-cards-save').click();
+  await owner.getByTestId('mkt-home-recent').waitFor();
+  await owner.setViewportSize({ width: 390, height: 800 });
+  await owner.getByTestId('mkt-home-chat').waitFor();
+  assert.ok((await owner.getByTestId('mkt-home-kpi').boundingBox()).y > (await owner.getByTestId('mkt-home-chat').boundingBox()).y, '앱: 입력창 → 숫자 순서 한 열');
+  assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, '가로 넘침 없음');
+  await owner.screenshot({ path: `${SHOTS}/145-mkt-home-mobile.png` });
+  await owner.setViewportSize({ width: 1366, height: 900 });
+  await owner.goto(`${BASE}/s/marketing`);
+  await owner.screenshot({ path: `${SHOTS}/146-mkt-home.png` });
   assert.equal(await owner.evaluate(() => document.documentElement.dataset.space), 'marketing', '공간 강조색 = 마케팅 보라(버튼·모달 공통)');
   await owner.getByRole('link', { name: '승인 대기' }).first().click();
   await owner.waitForURL(/\/s\/marketing\/approvals$/);
@@ -143,5 +165,5 @@ export async function marketing({ owner, BASE, sql }) {
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
   await owner.getByTestId('space-toggle-marketing').click();
-  await owner.getByTestId('space-switch').waitFor({ state: 'detached' });
+  await owner.getByTestId('space-tabs').waitFor({ state: 'detached' });
 }
