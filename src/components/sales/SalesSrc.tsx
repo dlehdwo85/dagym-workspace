@@ -46,9 +46,68 @@ function KoDl({ rows, testId }: { rows: [string, React.ReactNode][]; testId?: st
   const R = rows.filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== false);
   return <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1 text-sm" data-testid={testId}>{R.map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + ':v'} className="min-w-0 whitespace-pre-wrap break-words">{typeof v === 'string' || typeof v === 'number' ? String(v) : v}</dd>])}</dl>;
 }
+/* S1-2(로컬 10/20 최우선): 진행 기록 쓰기 — 원본 영업관리 상태 버튼 그대로(입찰·신규단지 2-10 / 시설 2-8 / 협력사 2-9) + 메모·다음 연락일 + [진행영업으로 넘기기](비슷한 리드 확인). 전환 전(readOnly)에는 안 보임 */
+const WORK_STATUS: Record<string, string[]> = { bid: ['미검토', '검토중', '연락중', '보류', '미참여', '대상아님'], building: ['미검토', '검토중', '연락중', '보류', '대상아님'], facility: ['미연락', '연락중', '영업완료', '대상아님'], vendor: ['미등록', '신청 준비', '신청 완료', '등록 완료', '대상 아님'] };
+const DONE_STATUS = new Set(['미참여', '대상아님', '영업완료', '등록 완료', '대상 아님']);
+function WorkPanel({ kind, id, cur, onSaved }: { kind: 'bid' | 'building' | 'facility' | 'vendor'; id: string; cur: { status?: string | null; memo?: string | null; next?: string | null; leadId?: string | null }; onSaved: () => void }) {
+  const [status, setStatus] = useState<string>(cur.status ?? WORK_STATUS[kind][0]);
+  const [memo, setMemo] = useState(cur.memo ?? ''); const [next, setNext] = useState(cur.next ?? ''); const [busy, setBusy] = useState(false);
+  const [similar, setSimilar] = useState<{ id: string; name: string; status: string | null }[] | null>(null);
+  const converted = cur.status === '진행영업 전환' || !!cur.leadId;
+  async function save(st = status) {
+    setBusy(true);
+    try { const r = await api<{ status: string }>('/api/sales/work', { body: { kind, id, status: st, memo: memo.trim() || null, nextDate: next || null } }); setStatus(r.status); toast.ok(DONE_STATUS.has(st) ? '완료 목록으로 옮깁니다' : '저장했습니다'); onSaved(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  async function convert(force = false) {
+    setBusy(true);
+    try { const r = await api<{ leadId?: string; similar?: { id: string; name: string; status: string | null }[] }>('/api/sales/work/convert', { body: { kind, id, force } });
+      if (r.similar) { setSimilar(r.similar); return; }
+      toast.ok('진행영업(리드)으로 넘겼습니다'); setSimilar(null); onSaved(); if (r.leadId) window.location.assign(`/s/sales/leads?id=${r.leadId}`);
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  if (converted) return <div className="rounded-input border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800" data-testid="work-converted">진행영업 전환됨{cur.leadId && <> · <Link href={`/s/sales/leads?id=${cur.leadId}`} className="underline">리드 열기</Link></>}</div>;
+  return (
+    <div className="space-y-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm" data-testid="work-panel">
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="진행 상태">{WORK_STATUS[kind].map((s) => (
+        <button key={s} type="button" disabled={busy} onClick={() => { setStatus(s); void save(s); }} className={cx('rounded-full border px-2.5 py-1 text-xs', status === s ? 'border-transparent text-white' : 'border-line bg-white', DONE_STATUS.has(s) && status !== s && 'text-ink-3')} style={status === s ? { background: C } : undefined} data-testid={`work-status-${s}`}>{s}</button>))}</div>
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <textarea className={cx(inputCls, 'min-h-[60px]')} value={memo} onChange={(e) => setMemo(e.target.value)} maxLength={2000} placeholder="메모 (처음 메모를 남기면 검토중으로)" aria-label="진행 메모" data-testid="work-memo" />
+        <div className="flex flex-col gap-1.5"><input type="date" className={cx(inputCls, 'h-9')} value={next} onChange={(e) => setNext(e.target.value)} aria-label="다음 연락일" data-testid="work-next" />
+          <Button size="sm" onClick={() => save()} disabled={busy} data-testid="work-save">저장</Button></div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-blue-100 pt-2">
+        <Button size="sm" variant="secondary" onClick={() => convert(false)} disabled={busy} data-testid="work-convert">진행영업으로 넘기기</Button>
+        <span className="text-[11px] text-ink-3">리드를 만들고 이 건을 연결합니다 (이름이 비슷한 거래처가 있으면 먼저 보여 줌)</span>
+      </div>
+      {similar && (
+        <div className="rounded-input border border-amber-200 bg-amber-50 p-2 text-xs" data-testid="work-similar">
+          <p className="mb-1 font-medium text-amber-900">이름이 비슷한 거래처가 있습니다</p>
+          <ul className="space-y-0.5">{similar.map((s) => <li key={s.id}><Link href={`/s/sales/leads?id=${s.id}`} className="underline">{s.name}</Link>{s.status && <span className="ml-1 text-ink-3">{s.status}</span>}</li>)}</ul>
+          <div className="mt-1.5 flex gap-1.5"><Button size="sm" onClick={() => convert(true)} disabled={busy} data-testid="work-convert-force">그래도 새로 만들기</Button><Button size="sm" variant="ghost" onClick={() => setSimilar(null)}>닫기</Button></div>
+        </div>)}
+    </div>
+  );
+}
+/** S1-2 제안·계약 등록(전환 뒤): 리드 고르기 · 제목 · 금액 · 날짜 · 메모 */
+function RecordForm({ kind, leads, onSaved }: { kind: 'proposals' | 'contracts'; leads: { id: string; name: string }[]; onSaved: () => void }) {
+  const [f, setF] = useState({ leadId: '', title: '', amount: '', date: '', memo: '' }); const [busy, setBusy] = useState(false);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); if (!f.leadId || !f.title.trim()) return; setBusy(true);
+    try { await api(`/api/sales/leads/${f.leadId}/records`, { body: { kind, title: f.title.trim(), amount: f.amount ? Number(f.amount.replace(/[,\s]/g, '')) : null, date: f.date || null, memo: f.memo || undefined } }); toast.ok('등록했습니다'); setF({ leadId: '', title: '', amount: '', date: '', memo: '' }); onSaved(); } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+  }
+  return (
+    <form onSubmit={submit} className="grid gap-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm sm:grid-cols-[1fr_1fr_8rem_9rem_auto]" data-testid={`record-form-${kind}`}>
+      <select className={inputCls} value={f.leadId} onChange={(e) => setF({ ...f, leadId: e.target.value })} aria-label="거래처(리드)" required data-testid="record-lead"><option value="">거래처(리드) 고르기</option>{leads.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select>
+      <input className={inputCls} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={kind === 'proposals' ? '제안·견적 제목' : '계약 제목'} maxLength={300} required aria-label="제목" data-testid="record-title" />
+      <input className={inputCls} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} placeholder="금액(원)" inputMode="numeric" aria-label="금액" data-testid="record-amount" />
+      <input type="date" className={inputCls} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} aria-label="날짜" />
+      <Button size="sm" disabled={busy || !f.leadId || !f.title.trim()} data-testid="record-save">{kind === 'proposals' ? '제안 등록' : '계약 등록'}</Button>
+    </form>
+  );
+}
 /** 관리자만: 원본 키·값 전체(접힘) */
 const RawFold = ({ row, admin, testId }: { row: any; admin?: boolean; testId?: string }) => admin ? <details className="text-xs" data-testid={testId}><summary className="cursor-pointer text-ink-3">원본 보기(관리자)</summary><div className="mt-1"><Raw row={row} /></div></details> : null;
-const KEY_KO: Record<string, string> = { kind: '종류', type: '종류', activity_type: '종류', content: '내용', memo: '메모', note: '비고', notes: '비고', title: '제목', name: '이름', status: '상태', stage: '단계', amount: '금액', total_amount: '총액', price: '금액', created_at: '등록', updated_at: '수정', date: '날짜', activity_date: '일시', due_date: '마감', deadline: '마감', deadline_at: '마감', start_date: '시작', end_date: '종료', sent_at: '발송', signed_at: '체결', contract_date: '계약일', period: '기간', description: '설명', summary: '요약', result: '결과', next_action: '다음 조치', next_action_date: '다음 조치일', next_contact_date: '다음 연락', owner: '담당', owner_name: '담당', user_name: '작성자', author: '작성자', business: '사업', interest: '관심 사업', business_name: '관심 사업', priority: '우선순위', probability: '가능성', expected_close_date: '예상 체결', notice_title: '공고명', region: '지역', phone: '전화', contact_name: '담당자', url: '링크', file_url: '파일', attachment_url: '첨부', version: '버전', timing: '시점', expected_at: '예상 시점', reason: '사유', channel: '경로' };
+const KEY_KO: Record<string, string> = { kind: '종류', type: '종류', activity_type: '종류', content: '내용', memo: '메모', note: '비고', notes: '비고', title: '제목', name: '이름', status: '상태', stage: '단계', amount: '금액', total_amount: '총액', price: '금액', created_at: '등록', updated_at: '수정', date: '날짜', activity_date: '일시', due_date: '마감', deadline: '마감', deadline_at: '마감', start_date: '시작', end_date: '종료', sent_at: '발송', signed_at: '체결', contract_date: '계약일', period: '기간', description: '설명', summary: '요약', result: '결과', next_action: '다음 조치', next_action_date: '다음 조치일', next_contact_date: '다음 연락', owner: '담당', owner_name: '담당', user_name: '작성자', author: '작성자', business: '사업', interest: '관심 사업', business_name: '관심 사업', priority: '우선순위', probability: '가능성', expected_close_date: '예상 체결', notice_title: '공고명', region: '지역', phone: '전화', contact_name: '담당자', url: '링크', file_url: '파일', attachment_url: '첨부', version: '버전', timing: '시점', expected_at: '예상 시점', reason: '사유', channel: '경로', lead_name: '거래처', proposal_date: '제안일', notice_id: '공고', source_id: '단지', source_type: '출처 종류', next_date: '다음 연락', last_note: '최근 기록', contact_status: '연락 상태', converted_at: '전환 시각' };
 const HIDE_KEY = /(^|_)id$|^__|^tenant$|^scope$|^src$|^raw$/;
 const fmtVal = (k: string, v: unknown) => { if (typeof v === 'object') return JSON.stringify(v); const s = String(v); if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return fmtDateTime(s); if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return kd(s); if (/amount|price|revenue|total/.test(k) && Number(s)) return `${Number(s).toLocaleString('ko-KR')}원`; if (/^-?\d+\.\d+$/.test(s) && Number.isInteger(Number(s))) return String(Number(s)); return s; };
 /** 원본 기록 한 건: 아는 칸은 한국어로, id·내부 키 숨김, 모르는 칸은 '그 밖' 접힘, 관리자는 원본 전체 접힘 */
@@ -275,6 +334,7 @@ export function Deals() {
       <Head title="제안·계약" meta={data} />
       {!data ? <Skeleton rows={3} /> : (['proposals', 'contracts'] as const).map((k) => (
         <section key={k} className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">{k === 'proposals' ? '제안·견적' : '계약'} <span className="text-ink-3">{data[k].length}</span></h2>
+          {data.readOnly === false && <div className="mb-2"><RecordForm kind={k} leads={data.leads ?? []} onSaved={reload} /></div>}
           <ul className="space-y-2">{data[k].map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Rec row={r} admin={data.canAssign} /></li>)}{!data[k].length && <li className="text-xs text-ink-3">아직 없습니다</li>}</ul></section>))}
     </div>
   );
@@ -290,12 +350,12 @@ export function Bids({ initialTab }: { initialTab?: string }) {
       <div className="flex flex-wrap gap-1.5">{[['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => <BidCard key={n.id} n={n} onOpen={() => setOpen(n)} />)}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
-      {open && <BidDetail n={open} admin={data?.canAssign} onClose={() => setOpen(null)} />}
+      {open && <BidDetail n={data?.items.find((x: any) => x.id === open.id) ?? open} admin={data?.canAssign} canWrite={data?.readOnly === false} onChange={reload} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 /** 대표 검수 10/20 ②: 입찰 상세 — 한국어 칸만(공고명·단지·발주처·마감·예산·문서·연락처·상태·메모·다음 조치), 관리자 '원본 보기' 접힘 */
-function BidDetail({ n, admin, onClose }: { n: any; admin?: boolean; onClose: () => void }) {
+function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
   const docs = [n.url && <a key="u" href={n.url} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-url"><ExternalLink className="size-3.5" aria-hidden />원문 보기</a>,
     ...(n.attachments ?? []).map((a: any, i: number) => attUrl(a) && <a key={i} href={attUrl(a)} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-file"><Download className="size-3.5" aria-hidden />{attName(a, i)}</a>)].filter(Boolean);
   return (
@@ -306,6 +366,7 @@ function BidDetail({ n, admin, onClose }: { n: any; admin?: boolean; onClose: ()
           ['낙찰', n.winner && [n.winner, won(n.awardAmount), n.awardDate && kd(n.awardDate)].filter(Boolean).join(' · ')],
           ['문서', docs.length ? <span className="flex flex-wrap gap-1.5">{docs}</span> : null], ['연락처', n.phone && <ContactRow phone={n.phone} />],
           ['상태', n.work], ['메모', n.workMemo], ['다음 조치', n.workNext && kd(n.workNext)]]} />
+        {canWrite && <WorkPanel kind="bid" id={String(n.id)} cur={{ status: n.work, memo: n.workMemo, next: n.workNext, leadId: n.workLeadId }} onSaved={() => onChange?.()} />}
         <RawFold row={n.raw} admin={admin} testId="bid-raw" />
       </div>
     </Modal>
@@ -325,12 +386,12 @@ export function Hub({ initialTab, initialDay }: { initialTab?: string; initialDa
       {!data ? <Skeleton rows={6} /> : <ul className="grid gap-2 lg:grid-cols-2">{data.items.map((r: any) => (
         <li key={r.id}><HubCard tab={tab} r={r} onRaw={() => setDetail({ tab, r })} /></li>))}
         {!data.items.length && <li className="text-sm text-ink-3">없습니다</li>}</ul>}
-      {detail && <HubDetail tab={detail.tab} r={detail.r} admin={data?.canAssign} onClose={() => setDetail(null)} />}
+      {detail && <HubDetail tab={detail.tab} r={data?.items.find((x: any) => x.id === detail.r.id) ?? detail.r} admin={data?.canAssign} canWrite={data?.readOnly === false} onChange={reload} onClose={() => setDetail(null)} />}
     </div>
   );
 }
 /** 대표 검수 10/20 ②: 허브 상세 — 원본 키 덤프 대신 한국어 칸(값 없는 칸은 '미확인'), 관리자 '원본 보기' 접힘 */
-function HubDetail({ tab, r, admin, onClose }: { tab: string; r: any; admin?: boolean; onClose: () => void }) {
+function HubDetail({ tab, r, admin, canWrite, onChange, onClose }: { tab: string; r: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
   const rows: [string, React.ReactNode][] = tab === 'buildings'
     ? [['단지명', r.name], ['상태', r.status], ['유형', r.kind], ['우선순위', r.priority], ['지역', r.region], ['주소', r.address], ...(r.dates ?? []).map(([k, v]: [string, unknown]) => [k, k === '세대수' ? (D(v) ? `${D(v)}세대` : UNK) : (D(v) ? kd(D(v)) : UNK)] as [string, React.ReactNode]), ['DB 등록', r.firstSeen && kd(r.firstSeen)]]
     : tab === 'facilities'
@@ -340,7 +401,11 @@ function HubDetail({ tab, r, admin, onClose }: { tab: string; r: any; admin?: bo
         ['링크', <ContactRow key="l" links={[[r.url, '공지 원문'], [r.applyUrl, '등록 신청'], [r.portalUrl, '협력사 포털'], [r.homepage, '홈페이지']]} />], ['메모', r.memo], ['다음', r.next && kd(r.next)], ['DB 등록', r.firstSeen && kd(r.firstSeen)]];
   return (
     <Modal open onClose={onClose} title={r.name} wide>
-      <div className="space-y-3" data-testid="hub-detail"><KoDl rows={rows} /><RawFold row={r.raw} admin={admin} testId="hub-raw" /></div>
+      <div className="space-y-3" data-testid="hub-detail"><KoDl rows={rows} />
+        {canWrite && (tab === 'buildings' ? <WorkPanel kind="building" id={String(r.id)} cur={{ status: r.work?.status, memo: r.work?.memo, next: r.work?.next, leadId: r.work?.leadId }} onSaved={() => onChange?.()} />
+          : tab === 'facilities' ? <WorkPanel kind="facility" id={String(r.id)} cur={{ status: r.contact, memo: r.lastNote, next: r.next, leadId: r.leadId }} onSaved={() => onChange?.()} />
+            : <WorkPanel kind="vendor" id={String(r.id)} cur={{ status: r.status, memo: r.memo, next: r.next, leadId: r.leadId }} onSaved={() => onChange?.()} />)}
+        <RawFold row={r.raw} admin={admin} testId="hub-raw" /></div>
     </Modal>
   );
 }

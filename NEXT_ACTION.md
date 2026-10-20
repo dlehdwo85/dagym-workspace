@@ -1253,6 +1253,13 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 시험: tests/api/alarm.test.mjs 4건 · E2E alarm.step.mjs(설정 3칸·업무 상세 선택·띠·해제·활동) 캡처 142.
 - **[로컬 네이티브 할 일]** Android: 채널 `alarm` 전체 화면(USE_FULL_SCREEN_INTENT + 알람 카테고리) 액티비티·[해제]/[10분 뒤] 액션(actionTypeId 'alarm'), FCM data.alarm==='true' 도 같은 처리, Android 14+ 전체 화면 알림 권한 안내 화면, 결과 POST /api/reminders/alarm(로컬 예약)·POST /api/notifications/{id}/action(푸시), 10분 뒤는 기기 재예약. iOS: 카테고리 `alarm`(UNNotificationCategory 해제/10분 뒤), time-sensitive 권한, 반복 소리(alarm.wav 30초).
 
+## 2026-10-20 클라우드 — 로컬 최우선 S1-2 진행 기록 쓰기 API+화면 (배포)
+- 원본 영업관리 상태 버튼 그대로: 입찰·신규단지 미검토/검토중/연락중/보류/미참여(입찰만)/대상아님 · 시설 미연락/연락중/영업완료/대상아님 · 협력사 미등록/신청 준비/신청 완료/등록 완료/대상 아님 (SALES_SCREEN_INVENTORY 2-10·2-8·2-9). 메모 2000자·다음 연락일. 처음 메모를 남기면 미검토 → 검토중. '진행영업 전환'은 [진행영업으로 넘기기]로만(비슷한 리드 최대 5곳 안내 → 그래도 새로 만들기).
+- API: `POST /api/sales/work {kind: bid|building|facility|vendor, id, status?, memo?, nextDate?}` · `POST /api/sales/work/convert {kind,id,force?}` → {leadId}|{similar} · `POST /api/sales/leads/{id}/records {kind: proposals|contracts, title, amount?, date?, memo?}`. 전환 전(writes_open=false) 409 — 리드 쓰기와 같음. 정식 표 sales_work_records(096)·sales_lead_records 에 원본 칸 이름(status/memo/next_date, contact_status/last_note/next_action_date)으로 저장 → 전환 뒤 bids·hub·deals·리드 상세 '입찰' 탭이 이 표를 읽음(src/lib/sales/work.ts · srcViews prog()).
+- 화면: 입찰 상세·허브 상세(신규단지·시설·협력사)에 WorkPanel(상태 칩·메모·다음 연락일·저장·[진행영업으로 넘기기]), 제안·계약 화면에 등록 폼(리드 고르기·제목·금액·날짜). 전환 전에는 안 보임(원본 잠금 안내 그대로).
+- 시험: tests/api/sales-work.test.mjs 5건 · E2E sales-work.step.mjs(390, 캡처 143).
+- 남은 S1: S1-1 수집기 12개 이식(원본 코드 필요 — docs/sales-src 또는 add_repo) · S1-3 pick() 칸 이름 원본 스키마 1:1(원본 0001~0037 스키마 필요) · S1-4 입찰 상세 칸(예산·추정가·계약방식·참가자격·과업·첨부 개별)+/api/bids/file·kapt-file 중계. 감사 문서(AUDIT_SALES_MIGRATION 등)가 origin/main 에 오르면 그 근거로.
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md
