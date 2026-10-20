@@ -1,0 +1,50 @@
+// S1-2(로컬 10/20 최우선) 진행 기록 쓰기 화면(390): 전환 뒤 입찰 상세에 원본 상태 버튼(미검토~대상아님)·메모·다음 연락일 → [연락중] 누르면 카드 칩 → 메모 저장 → [진행영업으로 넘기기] → 리드 상세 열림·'진행영업 전환됨'
+import assert from 'node:assert/strict';
+
+export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
+  const ymd = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
+  const id = 'E2E-WORK-N1';
+  await sql`delete from sales_src_rows where src_id = ${id}`;
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row) values ('global', 'procurement_notices', ${id}, ${sql.json({ id, title: 'E2E 진행 기록 공고', complex_name: 'E2E 단지', issuer: '수원시청', region: '경기', related: true, first_seen_at: ymd(0), deadline_at: `${ymd(4)}T10:00:00`, current_status: '공고중' })})`;
+  await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant: 'default', at: new Date().toISOString(), daily: true })}) on conflict (key) do nothing`;
+  await sql`insert into sales_cutover (tenant, writes_open, ok) values ('default', true, true) on conflict (tenant) do update set writes_open = true, ok = true`;
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
+  const m = await browser.newContext({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  try {
+    const p = await m.newPage();
+    await p.goto(`${BASE}/s/sales/bids`);
+    const bid = p.getByTestId('sales-bid').filter({ hasText: 'E2E 진행 기록 공고' }); await bid.waitFor();
+    await bid.getByTestId('bid-open').tap();
+    const panel = p.getByTestId('work-panel'); await panel.waitFor();
+    assert.deepEqual(await panel.getByRole('group', { name: '진행 상태' }).getByRole('button').allInnerTexts(), ['미검토', '검토중', '연락중', '보류', '미참여', '대상아님'], '원본 상태 버튼 그대로');
+    await panel.getByTestId('work-status-연락중').tap();
+    await p.getByText('저장했습니다').first().waitFor();
+    let w = null;
+    for (let k = 0; k < 40 && w?.status !== '연락중'; k++) { [w] = await sql`select status from sales_work_records where tenant = 'default' and ref_id = ${id}`; if (w?.status !== '연락중') await p.waitForTimeout(250); }
+    assert.equal(w?.status, '연락중');
+    await panel.getByTestId('work-memo').fill('현장 설명회 10/25 참석');
+    await panel.getByTestId('work-next').fill(ymd(3));
+    await panel.getByTestId('work-save').tap();
+    await p.getByText('저장했습니다').nth(1).waitFor().catch(() => {});
+    for (let k = 0; k < 40; k++) { [w] = await sql`select data from sales_work_records where tenant = 'default' and ref_id = ${id}`; if (w?.data?.memo === '현장 설명회 10/25 참석') break; await p.waitForTimeout(250); }
+    assert.equal(w?.data?.memo, '현장 설명회 10/25 참석'); assert.equal(w?.data?.next_date, ymd(3));
+    await p.screenshot({ path: `${SHOTS}/143-sales-work-panel.png` });
+    await p.getByRole('dialog').getByLabel('닫기').tap();
+    await bid.getByText('연락중').waitFor(); // 카드 상태 칩
+    // 진행영업으로 넘기기 → 리드 생성·상세 열림
+    await bid.getByTestId('bid-open').tap();
+    await p.getByTestId('work-convert').tap();
+    await p.waitForURL(/\/s\/sales\/leads\?id=/);
+    await p.getByTestId('sales-lead-detail').waitFor();
+    assert.match(await p.getByRole('dialog').innerText(), /E2E 단지/);
+    const [l] = await sql`select l.name, w.status from sales_work_records w join sales_leads l on l.id = w.lead_id where w.ref_id = ${id}`;
+    assert.deepEqual([l.name, l.status], ['E2E 단지', '진행영업 전환']);
+  } finally {
+    await m.close().catch(() => {});
+    await sql`update sales_cutover set writes_open = false where tenant = 'default'`.catch(() => {});
+    await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: false }).catch(() => {});
+    await sql`delete from sales_work_records where tenant = 'default' and ref_id = ${id}`.catch(() => {});
+    await sql`delete from sales_leads where tenant = 'default' and name = 'E2E 단지'`.catch(() => {});
+    await sql`delete from sales_src_rows where src_id = ${id}`.catch(() => {});
+  }
+}

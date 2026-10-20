@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
 import { badRequest, notFound } from './errors';
+import { activity } from './log';
 import { todaySeoul } from './time';
 import type { SessionUser } from './types';
 
@@ -25,7 +26,12 @@ export function actionsFor(n: NotifRow): NotifAction[] {
       if (n.task_status === 'done') return [];
       return [{ id: 'ack', label: '확인', done: '확인함' }, { id: 'today', label: '오늘 할 일에 넣기', done: '오늘 할 일에 넣음' }];
     case 'event_reminder':
+      // 로컬 10/20(대표): 알람처럼 울리는 알림은 [해제][10분 뒤]
+      if (n.meta?.alarm) return [{ id: 'dismiss', label: '해제', done: '알람 해제' }, { id: 'snooze', label: '10분 뒤', done: '10분 뒤 다시 알림' }];
       return [{ id: 'snooze', label: '10분 뒤 다시', done: '10분 뒤 다시 알림' }];
+    case 'due_soon':
+      if (n.meta?.alarm && n.task_status !== 'done') return [{ id: 'dismiss', label: '해제', done: '알람 해제' }, { id: 'snooze', label: '10분 뒤', done: '10분 뒤 다시 알림' }];
+      return [];
     default: return [];
   }
 }
@@ -92,7 +98,12 @@ export async function performAction(u: SessionUser, notificationId: string, i: z
       label = act.done!;
       // 다시 울리게 두되 읽음으로는 두지 않음
       await sql`update notifications set action_done = null, meta = meta || '{"snoozed": true}' where id = ${n.id}`;
+      if (n.meta?.alarm && n.entity_id && (n.entity_type === 'task' || n.entity_type === 'event')) await activity(sql, n.entity_type, n.entity_id, u.id, 'alarm_snoozed', { minutes: 10, from: 'notification' }); // 알림 '활동' 탭
       return { ok: true, label, unread: await unread(sql, u.id) };
+    }
+    case 'dismiss': { // 로컬 10/20(대표): 알람 해제 — 기록만 남기고 처리 완료(재푸시 없음)
+      if (n.entity_id && (n.entity_type === 'task' || n.entity_type === 'event')) await activity(sql, n.entity_type, n.entity_id, u.id, 'alarm_dismissed', { from: 'notification' });
+      break;
     }
     default: throw badRequest('알 수 없는 처리');
   }

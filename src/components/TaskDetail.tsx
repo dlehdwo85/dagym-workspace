@@ -233,6 +233,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const checkDone = data.checklist.filter((c: any) => c.done).length;
   const subDone = data.subtasks.filter((x: any) => x.status === 'done').length;
   const planEmpty = !planOpen && !data.checklist.length && !data.subtasks.length && !data.dependencies.length;
+  // 대표 검수 10/20(체크리스트): 담당자가 한 명이면 항목별 담당 칩 숨기고 그 사람 몫으로. 담당 2명 이상(함께 하는 사람)·하위 업무로 나뉜 업무만 항목별 담당 선택
+  const multiAssignee = (data.collaborators?.length ?? 0) > 0 || data.subtasks.length > 0;
+  const itemOwner = (c: any) => c.assignee_id ?? (!multiAssignee ? t.assignee_id : null);
   // V14 19번 ③ 진행률: 체크리스트 + 하위 업무
   const progTotal = data.checklist.length + data.subtasks.length, progDone = checkDone + subDone;
 
@@ -562,19 +565,18 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                   try { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { done } }); } catch (er: any) { toast.error(er.message); }
                   reload();
                 }} />
-                <span className={cx('flex-1', c.done && 'text-ink-3 line-through', !c.done && c.assignee_id === user.id && 'font-semibold')}>{c.text}{!c.done && c.assignee_id === user.id && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">내 몫</span>}</span>
-                {/* V37 8: 문의 체크리스트 "미팅 일정" 단계에서 바로 만들기 */}
-                {!c.done && perms.edit && /미팅|방문|실사|현장/.test(c.text) && <button type="button" onClick={() => setMeetOpen(true)} className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100" data-testid="checklist-meeting">📍 미팅 일정 만들기</button>}
-                {perms.edit ? <UserSelect className="h-7 w-auto max-w-[7.5rem] rounded-full border border-line bg-white px-1.5 text-[11px] text-ink-2" placeholder="담당 없음" value={c.assignee_id}
+                <span className={cx('min-w-0 flex-1 break-words', c.done && 'text-ink-3 line-through', !c.done && itemOwner(c) === user.id && multiAssignee && 'font-semibold')}>{c.text}{!c.done && c.assignee_id === user.id && multiAssignee && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">내 몫</span>}</span>
+                {/* 대표 검수 10/20: 항목마다 붙던 '미팅 일정 만들기' 버튼 제거(글자 깨짐·아래 큰 [미팅 일정] 버튼과 중복) · 담당 칩은 담당 여럿일 때만, 이미 다른 사람이 지정된 항목은 이름만 */}
+                {multiAssignee && perms.edit ? <UserSelect className="h-7 w-auto max-w-[7.5rem] rounded-full border border-line bg-white px-1.5 text-[11px] text-ink-2" placeholder="담당 없음" value={c.assignee_id}
                   ariaLabel={`${c.text} 담당`} onChange={async (v) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { assigneeId: v } }).catch((er) => toast.error(er.message)); reload(); broadcastRefresh(); }} />
-                  : c.assignee_name && <span className="text-[11px] text-ink-3">{c.assignee_name}</span>}
+                  : c.assignee_name && (multiAssignee || c.assignee_id !== t.assignee_id) && <span className="shrink-0 text-[11px] text-ink-3" data-testid="checklist-assignee-name">{c.assignee_name}</span>}
                 <button className="rounded p-0.5 text-ink-3 opacity-0 hover:text-red-600 group-hover:opacity-100 focus:opacity-100" onClick={async () => { await api(`/api/checklist/${c.id}`, { method: 'DELETE' }); reload(); }} aria-label="항목 삭제"><X className="size-3.5" /></button>
               </li>
             ))}
           </ul>
-          <form className="mt-1.5 flex gap-1.5" onSubmit={async (e) => { e.preventDefault(); if (!newItem.trim()) return; await api(`/api/tasks/${id}/checklist`, { body: { text: newItem, assigneeId: itemAssignee } }).catch((er) => toast.error(er.message)); setNewItem(''); reload(); }}>
-            <input autoFocus={planOpen === 'check'} className={cx(inputCls, 'h-8')} placeholder="+ 단계 추가" value={newItem} onChange={(e) => setNewItem(e.target.value)} aria-label="체크리스트 항목 추가" />
-            <UserSelect className="h-8 w-auto max-w-[8rem] rounded-input border border-line bg-white px-1.5 text-xs" placeholder="담당(선택)" value={itemAssignee} onChange={setItemAssignee} ariaLabel="새 항목 담당" />
+          <form className="mt-1.5 flex gap-1.5" onSubmit={async (e) => { e.preventDefault(); if (!newItem.trim()) return; await api(`/api/tasks/${id}/checklist`, { body: { text: newItem, assigneeId: multiAssignee ? itemAssignee : (t.assignee_id ?? null) } }).catch((er) => toast.error(er.message)); setNewItem(''); reload(); }}>
+            <input autoFocus={planOpen === 'check'} className={cx(inputCls, 'h-8 min-w-0 flex-1')} placeholder="+ 단계 추가" value={newItem} onChange={(e) => setNewItem(e.target.value)} aria-label="체크리스트 항목 추가" />
+            {multiAssignee && <UserSelect className="h-8 w-auto max-w-[8rem] rounded-input border border-line bg-white px-1.5 text-xs" placeholder="담당(선택)" value={itemAssignee} onChange={setItemAssignee} ariaLabel="새 항목 담당" />}
             <Button size="sm" variant="secondary">추가</Button>
           </form>
           </>}
@@ -682,7 +684,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </Prop>
             {/* R-15 4번: 담당자의 처리 속도로 예상 처리 기간 */}
             {showSpeed && t.status !== 'done' && <p className="px-2 pb-1 text-xs text-ink-3" data-testid="speed-detail">예상 처리 기간: {t.assignee_name}님은 보통 {data.speed.median_days}일(최근 90일 {data.speed.done}건{data.speed.late_rate != null ? ` · 지연 ${data.speed.late_rate}%` : ''})</p>}
-            <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span></span></Prop>
+            <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span>
+              {/* 로컬 10/20(대표): 마감 알림을 알람처럼(전체 화면·소리·[해제]) — 기본값은 설정(높음·긴급은 켬) */}
+              {perms.edit && <select className="ml-2 rounded-full border border-line bg-white px-1.5 py-0.5 text-[11px] text-ink-2" value={t.alarm === true ? 'on' : t.alarm === false ? 'off' : 'default'} onChange={(e) => patch({ alarm: e.target.value === 'on' ? true : e.target.value === 'off' ? false : null })} aria-label="알람처럼 울리기" data-testid="task-alarm">
+                <option value="default">알람 기본{(t.priority === 'high' || t.priority === 'urgent') ? '(중요 → 켬)' : ''}</option><option value="on">알람처럼 울림</option><option value="off">알람 끔</option></select>}</span></Prop>
             {/* R-15 5번: 우선순위는 마감일·미리 알림과 같은 묶음 */}
             <Prop icon={Flag} label="우선순위">
               <select className={ghostCls} value={t.priority} onChange={(e) => patch({ priority: e.target.value })} aria-label="우선순위">
@@ -1035,11 +1040,13 @@ function DepsModal({ open, onClose, taskId, current, onSave }: { open: boolean; 
 /** V13 12번: 제목 옆 (?) — 누르면 설명이 펼쳐짐 */
 function HelpTip({ children, testid }: { children: React.ReactNode; testid?: string }) {
   const [open, setOpen] = useState(false);
+  const [shift, setShift] = useState(0); // 대표 검수 10/20: 휴대폰에서 (?) 가 화면 가운데쯤이면 안내가 오른쪽으로 넘침 → 넘치는 만큼 왼쪽으로
   return (
     <span className="relative inline-flex font-normal">
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-label="도움말" data-testid={testid}
+      <button type="button" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setShift(Math.min(0, window.innerWidth - 16 - (r.left + 256))); setOpen(!open); }} aria-expanded={open} aria-label="도움말" data-testid={testid}
         className="inline-flex size-[18px] items-center justify-center rounded-full border border-line text-[11px] font-semibold text-ink-3 hover:border-slate-400 hover:text-ink">?</button>
-      {open && <span role="note" className="absolute left-0 top-6 z-20 w-64 rounded-card border border-line bg-white p-2.5 text-xs leading-relaxed text-ink-2 shadow-pop">{children}</span>}
+      {/* 대표 검수 10/20: 휴대폰은 탭으로 열고(길게 누르기 아님) 화면 폭 안에 — 왼쪽 여백 기준 폭 제한 */}
+      {open && <span role="note" className="absolute top-6 z-20 w-64 max-w-[calc(100vw-2rem)] rounded-card border border-line bg-white p-2.5 text-xs leading-relaxed text-ink-2 shadow-pop" style={{ left: shift }}>{children}</span>}
     </span>
   );
 }

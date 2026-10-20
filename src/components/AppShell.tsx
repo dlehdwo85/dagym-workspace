@@ -4,6 +4,7 @@ import { ADMIN_PAGES } from '@/lib/adminPages';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { AiDock } from './AiDock';
+import { AlarmBar, type AlarmItem } from './AlarmBar';
 import { BioLock } from './BioLock';
 import { MessengerDock } from './MessengerDock';
 import { VersionWatch } from './VersionWatch';
@@ -62,6 +63,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 결제 링크·버튼 없음
   const router = useRouter();
   const [unread, setUnread] = useState(0);
+  const [alarms, setAlarms] = useState<AlarmItem[]>([]); // 로컬 10/20(대표): 웹 알람 띠(알람처럼 울리는 알림, 해제 전)
   const [chatUnread, setChatUnread] = useState(0);
   const [aiDock, setAiDock] = useState(false); // V14 11번 모든 화면 AI 비서
   // 메시지 화면을 오가면 메시지 배지를 바로 새로
@@ -147,7 +149,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   useEffect(() => {
     let alive = true;
     const poll = async () => {
-      try { const r = await api('/api/notifications?unread=1'); if (alive) setUnread(r.unread); } catch {}
+      try { const r = await api('/api/notifications?unread=1'); if (alive) { setUnread(r.unread); setAlarms(r.alarms ?? []); } } catch {}
       try { const c = await api('/api/chat/unread'); if (alive) setChatUnread(c.unread); } catch {}
     };
     poll();
@@ -194,7 +196,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // 로컬 검수 10/19: 하단 탭은 마지막 공간이 아니라 지금 주소의 공간 기준(/tasks 등 공통 화면 = 업무)
   const tabSpace = path.startsWith('/s/sales') ? 'sales' : path.startsWith('/s/marketing') ? 'marketing' : 'work';
   const mobileTabs: (NavItem & { badge?: number })[] = tabSpace === 'sales'
-    ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/hub', label: '영업기회', icon: Building2 }] // 대표(10/19): 입찰은 안 쓰는 회사도 있어 하단 탭에서 뺌 — 더보기·PC 사이드바(켠 회사만)
+    // 대표 검수 10/20 ②: 앱에서 파이프라인(칸반) 탭 제거 → 입찰(켠 회사) 또는 제안·계약(끈 회사). 파이프라인은 더보기 › 영업 메뉴(휴대폰은 단계 칩 목록)·PC 사이드바
+    ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, session.features.salesBids !== false ? { href: '/s/sales/bids', label: '입찰', icon: Stamp } : { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/hub', label: '영업기회', icon: Building2 }]
     : tabSpace === 'marketing'
       ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
@@ -385,6 +388,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
             </div>
           </header>
           {/* 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄은 없앰 — 하단 탭 + 더보기 › 공간 메뉴로(하단 탭과 겹치고 깔끔하지 않음) */}
+          <AlarmBar items={alarms} onChange={(id) => { setAlarms((a) => a.filter((x) => x.id !== id)); window.dispatchEvent(new Event('wos-refresh')); }} />
           <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>
 

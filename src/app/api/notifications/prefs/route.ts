@@ -8,7 +8,7 @@ export const GET = handler(async ({ user }) => {
   const sql = db();
   const prefs = await sql<{ type: string; in_app: boolean; push: boolean }[]>`select type, in_app, push from notification_prefs where user_id = ${user.id}`;
   const [s] = await sql`select due_soon_hours, event_reminder_minutes, to_char(quiet_start,'HH24:MI') quiet_start, to_char(quiet_end,'HH24:MI') quiet_end, quiet_off,
-    to_char(briefing_time,'HH24:MI') briefing_time, briefing_enabled, briefing_weekend, task_reminder_minutes, requester_due_alerts from user_settings where user_id = ${user.id}`;
+    to_char(briefing_time,'HH24:MI') briefing_time, briefing_enabled, briefing_weekend, task_reminder_minutes, requester_due_alerts, alarm_events, alarm_tasks, alarm_important from user_settings where user_id = ${user.id}`;
   const subs = await sql`select id, kind, platform, created_at, last_success_at, disabled_at from push_subscriptions where user_id = ${user.id} order by created_at desc`;
   return {
     types: Object.entries(NOTIFICATION_TYPES).map(([type, label]) => {
@@ -16,7 +16,9 @@ export const GET = handler(async ({ user }) => {
       return { type, label, inApp: p?.in_app ?? true, push: p?.push ?? defaultPush(type), pushDefault: defaultPush(type) };
     }),
     settings: { dueSoonHours: s?.due_soon_hours ?? 0, eventReminderMinutes: s?.event_reminder_minutes ?? 60, taskReminderMinutes: s?.task_reminder_minutes ?? 60, quietStart: s?.quiet_start ?? QUIET_DEFAULT?.start ?? null, quietEnd: s?.quiet_end ?? QUIET_DEFAULT?.end ?? null, quietOff: s?.quiet_off ?? false, quietDefault: QUIET_DEFAULT,
-      briefingTime: s?.briefing_time ?? '08:30', briefingEnabled: s?.briefing_enabled ?? true, briefingWeekend: s?.briefing_weekend ?? false, requesterDueAlerts: s?.requester_due_alerts ?? false },
+      briefingTime: s?.briefing_time ?? '08:30', briefingEnabled: s?.briefing_enabled ?? true, briefingWeekend: s?.briefing_weekend ?? false, requesterDueAlerts: s?.requester_due_alerts ?? false,
+      // 로컬 10/20(대표): 알람처럼 울리기 기본값 — 일정 끔·업무 마감 끔·중요(높음·긴급) 켬
+      alarmEvents: s?.alarm_events ?? false, alarmTasks: s?.alarm_tasks ?? false, alarmImportant: s?.alarm_important ?? true },
     subscriptions: subs,
   };
 });
@@ -26,7 +28,8 @@ export const PUT = handler(async ({ req, user }) => {
     types: z.array(z.object({ type: z.string(), inApp: z.boolean(), push: z.boolean() })).optional(),
     settings: z.object({ dueSoonHours: z.number().int().min(0).max(168), eventReminderMinutes: z.number().int().min(0).max(1440).optional(), quietStart: zTime.nullable(), quietEnd: zTime.nullable(),
       briefingTime: zTime.optional(), briefingEnabled: z.boolean().optional(), briefingWeekend: z.boolean().optional(),
-      taskReminderMinutes: z.number().int().min(0).max(10080).optional(), requesterDueAlerts: z.boolean().optional(), quietOff: z.boolean().optional() }).optional(),
+      taskReminderMinutes: z.number().int().min(0).max(10080).optional(), requesterDueAlerts: z.boolean().optional(), quietOff: z.boolean().optional(),
+      alarmEvents: z.boolean().optional(), alarmTasks: z.boolean().optional(), alarmImportant: z.boolean().optional() }).optional(),
   }));
   const sql = db();
   for (const t of i.types ?? []) {
@@ -39,6 +42,10 @@ export const PUT = handler(async ({ req, user }) => {
     await sql`insert into user_settings (user_id, due_soon_hours, event_reminder_minutes, quiet_start, quiet_end) values (${user.id}, ${i.settings.dueSoonHours}, ${rem}, ${i.settings.quietStart}, ${i.settings.quietEnd})
       on conflict (user_id) do update set due_soon_hours = excluded.due_soon_hours, event_reminder_minutes = excluded.event_reminder_minutes, quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, updated_at = now()`;
     if (i.settings.quietOff !== undefined) await sql`update user_settings set quiet_off = ${i.settings.quietOff} where user_id = ${user.id}`; // 로컬 10/20 조용한 시간 끄기
+    // 로컬 10/20(대표): 알람처럼 울리기 기본값(일정·업무 마감·중요 표시)
+    if (i.settings.alarmEvents !== undefined) await sql`update user_settings set alarm_events = ${i.settings.alarmEvents} where user_id = ${user.id}`;
+    if (i.settings.alarmTasks !== undefined) await sql`update user_settings set alarm_tasks = ${i.settings.alarmTasks} where user_id = ${user.id}`;
+    if (i.settings.alarmImportant !== undefined) await sql`update user_settings set alarm_important = ${i.settings.alarmImportant} where user_id = ${user.id}`;
     if (i.settings.requesterDueAlerts !== undefined) await sql`update user_settings set requester_due_alerts = ${i.settings.requesterDueAlerts} where user_id = ${user.id}`; // V13 6번
     if (i.settings.taskReminderMinutes !== undefined) await sql`update user_settings set task_reminder_minutes = ${i.settings.taskReminderMinutes} where user_id = ${user.id}`;
     // V8 1번 아침 브리핑 (시각·끄기·주말/공휴일에도)

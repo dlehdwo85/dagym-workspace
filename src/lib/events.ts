@@ -21,6 +21,8 @@ export const eventInput = z.object({
   attendeeIds: z.array(zUuid).max(100).optional(),
   /** 일정별 알림(분). null = 사용자 기본 설정. 시리즈(반복 전체) 단위로 저장 */
   reminderMinutes: z.array(z.number().int().min(0).max(40320)).max(5).nullable().optional(),
+  /** 로컬 10/20(대표): 알람처럼 울리기(전체 화면·소리·[해제]). null = 설정 기본값(일정 기본 끔). 시리즈 단위 */
+  alarm: z.boolean().nullable().optional(),
   taskId: zUuid.nullable().optional(),
   /** 비공개: 주인·참석자 외에는 제목 없이 "바쁨" */
   isPrivate: z.boolean().optional(),
@@ -245,9 +247,9 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   }
   const out: { id: string; taskId?: string } = await sql.begin(async (tx) => {
     const [ev] = await tx<{ id: string }[]>`
-      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private, color)
+      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private, color, alarm)
       values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
-        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)}, ${i.isPrivate ?? false}, ${i.color ?? null})
+        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)}, ${i.isPrivate ?? false}, ${i.color ?? null}, ${i.alarm ?? null})
       returning id`;
     if (i.taskId) await tx`insert into event_tasks (event_id, task_id, role, created_by) values (${ev.id}, ${i.taskId}, 'block', ${u.id}) on conflict do nothing`;
     if (i.attendeeIds?.length) {
@@ -348,10 +350,10 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
       const cutRule = ruleUntilBefore(master.rrule!, occ);
       await tx`update events set rrule = ${cutRule}, version = version + 1, updated_at = now() where id = ${master.id}`;
       const [n] = await tx<{ id: string }[]>`
-        insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes)
+        insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, alarm)
         values (${i.calendarId ?? master.calendar_id}, ${i.title ?? master.title}, ${i.description ?? master.description},
           ${i.location ?? master.location}, ${i.kind ?? master.kind}, ${i.allDay ?? master.all_day}, ${times.s}, ${times.e},
-          ${newRule}, ${master.task_id}, ${u.id}, ${(master as any).reminder_minutes ?? null})
+          ${newRule}, ${master.task_id}, ${u.id}, ${(master as any).reminder_minutes ?? null}, ${(master as any).alarm ?? null})
         returning id`;
       await tx`insert into event_attendees (event_id, user_id, response) select ${n.id}, user_id, response from event_attendees where event_id = ${master.id}`;
       // 분할 지점 이후 예외 행은 새 시리즈로 이동
@@ -408,6 +410,10 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
     if (i.reminderMinutes !== undefined) {
       const seriesId = (result.newSeriesId as string | undefined) ?? master.id;
       await tx`update events set reminder_minutes = ${normReminders(i.reminderMinutes)}, updated_at = now() where id = ${seriesId}`;
+    }
+    if (i.alarm !== undefined) { // 로컬 10/20: 알람처럼 울리기(시리즈 단위)
+      const seriesId = (result.newSeriesId as string | undefined) ?? master.id;
+      await tx`update events set alarm = ${i.alarm}, updated_at = now() where id = ${seriesId}`;
     }
     const [after] = await tx<{ version: number }[]>`select version from events where id = ${target}`;
     const attendeeIds = (await tx<{ user_id: string }[]>`select user_id from event_attendees where event_id = ${master.id}`).map((r) => r.user_id);

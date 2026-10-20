@@ -42,7 +42,8 @@ export async function usageThisMonth(tenant: string) {
 
 export async function aiStatus(u: SessionUser) {
   const { menuLevel } = await import('../menuPerms');
-  const enabled = aiEnabled() && !u.isDemo && (await menuLevel(u, 'assistant')) === 'use';
+  // 로컬 10/20(심사): 체험 조직(심사 계정)도 AI 비서를 봄 — 플랫폼 키, 'demo' 회사 월 한도·하루 횟수는 review.ts 가 작게 잡아 둠
+  const enabled = aiEnabled() && (await menuLevel(u, 'assistant')) === 'use';
   if (!enabled) return { enabled: false };
   const usage = await usageThisMonth(tenantOf(u));
   // V10 요금제 월 AI 요청 수
@@ -854,7 +855,7 @@ const DOC_SYSTEM = `당신은 사내 서비스 "워크인"의 문서 담당 AI �
 - 답은 한국어로 짧게.`;
 
 export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, providerArg?: AiProvider, signal?: AbortSignal) {
-  denyDemo(u);
+  // 로컬 10/20(심사): 체험 계정도 대화는 됨(체험 조직 한도 안) — 제안 확인·자료로 채우기 등 바깥에 영향 주는 것은 그대로 막음(denyDemo)
   if (!aiEnabled()) throw notFound();
   await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use'); // V13 메뉴 권한
   const tenant = tenantOf(u);

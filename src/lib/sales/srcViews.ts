@@ -44,6 +44,7 @@ const lead = (r: any, names: Map<string, string>) => ({
   facility: pick(r, 'facility_type', 'type', 'category'), region: pick(r, 'region', 'sido', 'area'), next: day(pick(r, 'next_contact_date', 'next_contact_at', 'next_action_date')),
   owner: r.__owner !== undefined ? r.__owner || null : names.get(String(pick(r, 'owner_id', 'assigned_to', 'sales_owner_id', 'user_id') ?? '')) ?? null, ownerId: r.__owner_id ?? null, memo: r.__id && r.__owner !== undefined ? r.memo ?? null : undefined, revenue: pick(r, 'expected_revenue', 'expected_amount', 'estimated_revenue'),
   updated: day(pick(r, 'updated_at', 'created_at')), phone: pick(r, 'phone', 'contact_phone'), contact: pick(r, 'contact_name', 'manager_name'),
+  homepage: pick(r, 'homepage', 'website', 'url'), // 대표 검수 10/20 ②: 앱 목록 홈페이지 칩
 });
 /** 영업관리 기준(SALES_SCREEN_INVENTORY 10/19): '오늘 등록'·'새 공고'는 원본 first_seen_at 하나만(KST 날짜). posted_date·created_at 은 쓰지 않음.
  * 옮긴 행은 원본 first_seen_at 을 그대로 가져오므로 옮긴 날로 바뀌지 않는다(값이 없으면 신규 판단에서 빠짐) */
@@ -100,8 +101,12 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   const [applied] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
   const { writesOpen } = await import('./cutover');
   const formal = await writesOpen(t);
-  const meta = { readOnly: !formal, syncedAt: applied?.value?.tenant === t ? applied.value.at : null, imported: applied?.value?.tenant === t };
+  // 대표 검수 10/20 ②: 앱 상세는 한국어 칸만, 원본 전체는 관리자만 접힘 안에 — 모든 화면 공통
+  const meta = { readOnly: !formal, syncedAt: applied?.value?.tenant === t ? applied.value.at : null, imported: applied?.value?.tenant === t, canAssign: ['owner', 'admin'].includes(u.role) };
   const leadRows = () => (formal ? formalLeads(t) : rows(t, 'leads'));
+  // S1-2(로컬 10/20): 전환 뒤에는 회사별 진행 기록(입찰·신규단지·시설·협력사)을 정식 표 sales_work_records 에서 — 원본 행 모양으로 돌려줘 아래 읽기 코드는 그대로
+  const { workRows } = await import('./work');
+  const prog = (tbl: string, limit = 5000) => (formal ? workRows(sql, t, tbl) : rows(t, tbl, limit));
   const names = await userNames(t);
   const term = (q.q ?? '').trim().toLowerCase();
   const hit = (o: any) => !term || JSON.stringify(o).toLowerCase().includes(term);
@@ -180,7 +185,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       const people = await sql`select id, name from users where tenant = ${t} and status = 'active' and not is_demo order by name`;
       const { src: _s, ...raw } = r;
       return { ...meta, lead: lead(r, names), raw: Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith('__'))), activities: await recs('sales_activities'), timing: await recs('lead_opportunity_timing'),
-        interests: await recs('lead_business_interests'), tasks: await relSrc('tasks'), proposals: await recs('proposals'), contracts: await recs('contracts'), work: await relSrc('opportunity_work'),
+        interests: await recs('lead_business_interests'), tasks: await relSrc('tasks'), proposals: await recs('proposals'), contracts: await recs('contracts'),
+        work: (await sql<any[]>`select src_id, src_tbl, status, data from sales_work_records where tenant = ${t} and lead_id = ${lid} order by updated_at desc`).map((w) => ({ ...w.data, status: w.status, __id: w.src_id })), // S1-2: 넘겨 온 공고·단지·시설·협력사
         statusLog: log, stages: STAGES, people, canAssign: ['owner', 'admin'].includes(u.role) };
     }
     const [r] = await sql<{ row: any }[]>`select row from sales_src_rows where scope = ${t} and tbl = 'leads' and src_id = ${q.id}`;
@@ -196,15 +202,23 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const order = [...STAGES, ...[...cols.keys()].filter((k) => !STAGES.includes(k))];
     return { ...meta, columns: order.map((status) => ({ status, items: cols.get(status) ?? [] })) };
   }
-  if (view === 'deals') return { ...meta, proposals: (await rows(t, 'proposals')).filter(hit), contracts: (await rows(t, 'contracts')).filter(hit) };
+  if (view === 'deals') {
+    // S1-2: 전환 뒤에는 정식 표(sales_lead_records)에서 — 리드 이름·연결 id 포함
+    const fr = async (kind: string) => (await sql<any[]>`select r.id, r.lead_id, r.occurred_at, r.data, l.name as lead_name from sales_lead_records r left join sales_leads l on l.id = r.lead_id where r.tenant = ${t} and r.kind = ${kind} order by r.occurred_at desc nulls last limit 500`)
+      .map((x) => ({ ...x.data, lead_name: x.data?.lead_name ?? x.lead_name ?? null, __id: x.id, __lead_id: x.lead_id }));
+    const leads = formal ? (await sql<{ id: string; name: string }[]>`select id, name from sales_leads where tenant = ${t} order by name limit 2000`) : [];
+    return { ...meta, proposals: (formal ? await fr('proposals') : await rows(t, 'proposals')).filter(hit), contracts: (formal ? await fr('contracts') : await rows(t, 'contracts')).filter(hit), leads };
+  }
   if (view === 'bids') {
     const tab = q.tab ?? 'open'; // 기본 = 진행 중(마감 전·공고중/정정), 마감 임박순
-    const W = await rows(t, 'opportunity_work');
-    const P = new Map((await rows(t, 'procurement_notices__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
+    const W = await prog('opportunity_work');
+    const P = new Map((await prog('procurement_notices__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
     const byNotice = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), w]));
     let N = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true' || byNotice.has(String(r.id ?? r.__id)));
     const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id);
-      return { ...notice(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment') }; })
+      return { ...notice(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
+        // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본)
+        workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, raw: r }; })
       .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
         && (tab !== 'today' || n.posted === today()) && (tab !== 'closing' || n.close === today()))
       .sort((a, b) => tab === 'open' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
@@ -213,7 +227,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings';
     const dayOk = (r: any) => q.day !== 'today' || firstSeen(r) === today(); // 오늘 새 영업 DB
+    // S1-2: 신규단지 진행(opportunity_work · source_id = 단지 id)
+    const BW = new Map((await prog('opportunity_work')).filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w]));
     if (tab === 'buildings') return { ...meta, tab, items: (await rows('global', 'building_sales_pipeline')).filter((r) => hit(r) && dayOk(r)).map((r) => ({ id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
+      work: BW.get(String(r.id ?? r.__id)) ? { status: pick(BW.get(String(r.id ?? r.__id)), 'status'), memo: pick(BW.get(String(r.id ?? r.__id)), 'memo', 'note'), next: day(pick(BW.get(String(r.id ?? r.__id)), 'next_date', 'next_action_date')), leadId: BW.get(String(r.id ?? r.__id))?.lead_id ?? null } : null,
       address: pick(r, 'address', 'location'), households: pick(r, 'households', 'total_households', 'units'), start: day(pick(r, 'sales_start_date', 'start_date', 'notice_date')), status: pick(r, 'status', 'stage'),
       // 영업관리 2-7 칸 순서: 승인일·착공·준공(예정)·입주(예정)·세대수·시행사·시공사·영업 시작·제안 시작·운영사 선정 예상
       kind: pick(r, 'building_type', 'type', 'kind'), region: pick(r, 'region', 'sido'), priority: pick(r, 'priority'),
@@ -222,11 +239,11 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         ['영업 시작', day(pick(r, 'sales_start_date', 'start_date'))], ['제안 시작', day(pick(r, 'proposal_start_date'))], ['운영사 선정 예상', day(pick(r, 'operator_selection_date', 'expected_operator_selection'))]],
       firstSeen: firstSeen(r), raw: r })) };
     if (tab === 'facilities') {
-      const P = new Map((await rows(t, 'operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
+      const P = new Map((await prog('operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
       const items = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)', address: pick(r, 'address', 'road_address'), score: Number(pick(r, 'score', 'priority_score') ?? 0) || null,
           lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'use_approval_date', 'completed_at', 'move_in_date')),
-          contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null),
+          contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null), leadId: p?.lead_id ?? null,
           // 영업관리 2-8 한 줄 순서: 판정 · 유형·지역·세대·규모·현 위탁사 · 주소 · 관리사무소 전화 · 부대시설 · DB 등록 · 준공·입주 · 다음 연락 · 최근 기록 · 다음 조치
           verdict: pick(r, 'verdict', 'judgment', 'stage_label', 'opportunity_label'), households: pick(r, 'households', 'total_households', 'units'), scale: pick(r, 'scale', 'size', 'area'),
           operator: pick(r, 'current_operator', 'operator', 'management_company'), phone: pick(r, 'office_phone', 'management_phone', 'phone'), amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
@@ -235,10 +252,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       return { ...meta, tab, items };
     }
     if (tab === 'vendors') {
-      const P = new Map((await rows(t, 'vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
+      const P = new Map((await prog('vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
       return { ...meta, tab, items: (await rows('global', 'vendor_registrations')).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)', division: pick(r, 'category', 'division', 'kind'), rank: pick(r, 'rank_label', 'rank'), notice: pick(r, 'notice_title', 'title', 'notice'),
-          url: pick(r, 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null),
+          url: pick(r, 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null), leadId: p?.lead_id ?? null,
           // 영업관리 2-9 카드: 모집 공지 공개 여부·모집 시기·등록 요건·공동인증서·비고·링크
           open: pick(r, 'recruit_open', 'notice_open', 'is_open'), period: pick(r, 'recruit_period', 'period'), requirement: pick(r, 'requirements', 'registration_requirements'), cert: pick(r, 'certificate', 'joint_certificate'),
           note: pick(r, 'note', 'remark'), applyUrl: pick(r, 'apply_url', 'registration_url'), portalUrl: pick(r, 'portal_url'), homepage: pick(r, 'homepage', 'website'), firstSeen: firstSeen(r), raw: r }; }) };

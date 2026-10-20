@@ -80,6 +80,14 @@ export default function Settings() {
               <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={!!s.briefingWeekend} onChange={(e) => setS({ ...s, briefingWeekend: e.target.checked })} />주말·공휴일에도</label>
             </span>
           </Field>
+          {/* 로컬 10/20(대표): 휴대폰 알람처럼(전체 화면·소리·[해제][10분 뒤]) 울릴 기본값 — 일정·업무마다 따로 켤 수도 있음 */}
+          <Field label="알람처럼 울리기 (기본값 — 일정·업무마다 바꿀 수 있음)">
+            <span className="flex flex-wrap items-center gap-3" data-testid="alarm-defaults">
+              <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={!!s.alarmEvents} onChange={(e) => setS({ ...s, alarmEvents: e.target.checked })} aria-label="일정 알람" data-testid="alarm-events" />일정</label>
+              <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={!!s.alarmTasks} onChange={(e) => setS({ ...s, alarmTasks: e.target.checked })} aria-label="업무 마감 알람" data-testid="alarm-tasks" />업무 마감</label>
+              <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.alarmImportant ?? true} onChange={(e) => setS({ ...s, alarmImportant: e.target.checked })} aria-label="중요 업무 알람" data-testid="alarm-important" />높음·긴급 업무</label>
+            </span>
+          </Field>
           <Field label="조용한 시간 (기본 22:00~07:00)">
             <span className="flex flex-wrap items-center gap-2">
               <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={!s.quietOff} onChange={(e) => setS({ ...s, quietOff: !e.target.checked })} aria-label="조용한 시간 쓰기" data-testid="quiet-on" />쓰기</label>

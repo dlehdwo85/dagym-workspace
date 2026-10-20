@@ -1270,6 +1270,10 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
     assert.deepEqual([...new Set(list.tasks.map((t) => t.status))].sort(), ['done', 'in_progress', 'on_hold', 'review', 'todo'], '진행·검토·완료 섞임');
     assert.ok((await c.ok('GET', '/api/chat/rooms')).rooms.length >= 2, '메시지방');
     assert.ok((await c.ok('GET', '/api/ai/threads')).threads.some((x) => x.title.startsWith('[예시]')), 'AI 비서 대화 예시');
+    // 로컬 10/20(심사): 체험 조직도 AI 비서 켬 — 플랫폼 키, 월 $1.5(≈2,000원)·하루 30회
+    const ai = await c.ok('GET', '/api/ai/status');
+    assert.equal(ai.enabled, true, '심사 계정 AI 비서 켬'); assert.equal(ai.usage.limitUsd, 1.5, '체험 조직 월 한도');
+    assert.equal((await sql`select daily_limit from ai_settings where tenant = 'demo'`)[0].daily_limit, 30);
     assert.ok((await c.ok('GET', '/api/library')).files.length >= 4, '자료실 파일');
     assert.equal((await c.ok('GET', '/api/sales/src?view=leads')).leads.length, 5, '영업 리드 5(공간 켜짐·배정)');
     assert.equal((await c.ok('GET', '/api/marketing/contents')).contents.length, 2, '마케팅 시안 2');
@@ -1731,8 +1735,9 @@ describe('WORKIN_V9 회사 자료실 · AI 비서 (가짜 Anthropic 서버)', ()
   test('AI 비서: 도구로 자료 찾기 → 첨부 제안 → [확인]해야 첨부, 사용량 기록, 남의 제안·두 번 실행 불가', async () => {
     const st0 = await ctx.staffA.client.ok('GET', '/api/ai/status');
     assert.equal(st0.enabled, true); assert.equal(st0.usage.costUsd, undefined, '직원에게 비용은 안 보임');
-    assert.equal((await demo.ok('GET', '/api/ai/status')).enabled, false, '체험 계정은 AI 숨김');
-    assert.equal((await demo.req('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '안녕' }] })).status, 403);
+    // 로컬 10/20(심사): 체험 계정도 AI 비서 켬(체험 조직 월 $1.5·하루 30회) — 전에는 숨김(403)
+    assert.equal((await demo.ok('GET', '/api/ai/status')).enabled, true, '체험 계정 AI 비서 켬');
+    assert.notEqual((await demo.req('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '안녕' }] })).status, 403, '체험 계정도 AI 대화 가능');
     const task = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: 'V9 홍보물 제작', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
     const before = (await fakeState()).anthropic.length;
     await queue([toolUse('tu1', 'search_library', { query: '다짐 로고' }), toolUse('tu2', 'propose_attach_file', { taskId: task, fileId: logo }), say('로고를 찾았습니다. 확인을 누르면 첨부됩니다.')]);

@@ -27,6 +27,9 @@ async function ensureUnit(tx: Sql) {
     [u] = await tx<{ id: string }[]>`insert into org_units (parent_id, brand_id, type, name, sort, is_demo, tenant) values (null, null, 'branch', ${UNIT_NAME}, 999, true, 'demo') returning id`;
     await tx`insert into calendars (type, org_unit_id, name, color) values ('org_unit', ${u.id}, ${UNIT_NAME + ' 일정'}, '#0d9488')`;
   }
+  // 로컬 10/20(심사): 심사관이 AI 비서를 볼 수 있게 체험 조직은 AI 기본 켬(플랫폼 키) — 월 한도 $1.5(≈2,000원)·1인 하루 30회·업무 무관 질문 거르기 끔(심사관 질문이 막히지 않게). 버튼을 다시 눌러도 유지(없을 때만 넣음)
+  await tx`insert into ai_limits (tenant, monthly_usd) values ('demo', 1.5) on conflict (tenant) do nothing`;
+  await tx`insert into ai_settings (tenant, daily_limit, topic_filter) values ('demo', 30, false) on conflict (tenant) do nothing`;
   // 예시 담당자(로그인 불가: 비밀번호 없음·이름만)
   const mates: string[] = [];
   for (const [email, name, title] of MATES) {

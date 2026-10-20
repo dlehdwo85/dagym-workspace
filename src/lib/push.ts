@@ -36,7 +36,8 @@ async function fcmAccessToken(sa: { client_email: string; private_key: string; t
   return j.access_token;
 }
 
-interface Payload { title: string; body: string; link: string; notificationId: string; type?: string; taskId?: string | null; actions?: { id: string; label: string; input?: 'text' }[]; tag?: string }
+/** alarm(로컬 10/20 대표): 앱이 전체 화면·알람 채널로 띄움(Android USE_FULL_SCREEN_INTENT / iOS Time-Sensitive), 웹은 알림 센터 띠 + 소리 */
+interface Payload { title: string; body: string; link: string; notificationId: string; type?: string; taskId?: string | null; actions?: { id: string; label: string; input?: 'text' }[]; tag?: string; alarm?: boolean; snoozeMinutes?: number }
 
 class PermanentError extends Error {}
 
@@ -65,11 +66,12 @@ async function sendFcm(token: string, p: Payload) {
         token,
         notification: { title: p.title, body: p.body },
         // 로컬 10/20 알림에서 바로 처리: 앱이 액션 버튼(Android)·카테고리(iOS)를 그릴 수 있게 종류·버튼·업무 id 를 data 로(값은 문자열만)
-        data: { link: p.link, notificationId: p.notificationId, type: p.type ?? '', taskId: p.taskId ?? '', actions: JSON.stringify(p.actions ?? []) },
+        data: { link: p.link, notificationId: p.notificationId, type: p.type ?? '', taskId: p.taskId ?? '', actions: JSON.stringify(p.actions ?? []), alarm: p.alarm ? 'true' : '', snoozeMinutes: String(p.snoozeMinutes ?? '') },
         // click_action 없음: 기본(앱 실행 activity)으로 열려야 data(link·notificationId)가 앱의 notificationActionPerformed 로 전달된다
         // V37 5: 안드로이드 상태바 단색 아이콘(앱 res/drawable/ic_stat_workin, 로컬 48806da)·강조색
-        android: { priority: 'HIGH', notification: { channel_id: 'work', icon: 'ic_stat_workin', color: '#0F766E', tag: p.tag ?? p.notificationId } },
-        apns: { payload: { aps: { sound: 'default', category: p.type ?? 'default', 'thread-id': p.taskId || p.notificationId } } },
+        // 알람이면 알람 채널(앱이 전체 화면·소리·진동) · iOS 는 time-sensitive 로 집중 모드 통과
+        android: { priority: 'HIGH', notification: { channel_id: p.alarm ? 'alarm' : 'work', icon: 'ic_stat_workin', color: '#0F766E', tag: p.tag ?? p.notificationId } },
+        apns: { payload: { aps: { sound: 'default', category: p.alarm ? 'alarm' : p.type ?? 'default', 'thread-id': p.taskId || p.notificationId, ...(p.alarm ? { 'interruption-level': 'time-sensitive' } : {}) } } },
       },
     }),
   });
@@ -107,7 +109,8 @@ export async function dispatchPending(limit = 50) {
   for (const d of claimed) {
     if (d.action_done) { await sql`update notification_deliveries set status = 'skipped', error = '이미 처리됨' where id = ${d.id}`; continue; } // 처리된 알림은 다시 푸시하지 않음
     const payload: Payload = { title: d.title, body: d.body, link: d.link, notificationId: d.nid, type: d.type, taskId: d.entity_type === 'task' ? d.entity_id : null, tag: d.nid,
-      actions: actionsFor({ id: d.nid, type: d.type, link: d.link, entity_type: d.entity_type, entity_id: d.entity_id, meta: d.meta, action_done: d.action_done }) };
+      actions: actionsFor({ id: d.nid, type: d.type, link: d.link, entity_type: d.entity_type, entity_id: d.entity_id, meta: d.meta, action_done: d.action_done }),
+      ...(d.meta?.alarm ? { alarm: true, snoozeMinutes: 10 } : {}) };
     try {
       if (d.channel === 'webpush') await sendWebPush({ endpoint: d.endpoint, keys: d.keys }, payload);
       else await sendFcm(d.endpoint, payload);

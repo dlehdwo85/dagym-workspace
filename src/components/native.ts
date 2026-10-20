@@ -23,7 +23,7 @@ interface LocalPlugin {
   getPending(): Promise<{ notifications: { id: number }[] }>;
   cancel(o: { notifications: { id: number }[] }): Promise<void>;
   schedule(o: { notifications: any[] }): Promise<unknown>;
-  createChannel(c: { id: string; name: string; description?: string; importance?: number; visibility?: number; vibration?: boolean }): Promise<void>;
+  createChannel(c: { id: string; name: string; description?: string; importance?: number; visibility?: number; vibration?: boolean; sound?: string }): Promise<void>;
 }
 const LocalNotifications = registerPlugin<LocalPlugin>('LocalNotifications');
 // 52ec734(로컬): filesystem·share·browser 플러그인 — 이 플러그인이 없는 예전 앱은 지금처럼 동작
@@ -139,15 +139,17 @@ export function resyncReminders(): Promise<void> {
       if ((await LocalNotifications.checkPermissions()).display !== 'granted') return;
       if (!channel && Capacitor.getPlatform() === 'android') {
         await LocalNotifications.createChannel({ id: 'reminders', name: '미리 알림', description: '일정·마감·아침 브리핑', importance: 4, visibility: 1, vibration: true }).catch(() => {});
+        await LocalNotifications.createChannel({ id: 'alarm', name: '알람', description: '알람처럼 울리는 일정·마감(전체 화면·소리)', importance: 5, visibility: 1, vibration: true, sound: 'alarm.wav' }).catch(() => {});
         channel = true;
       }
       const { reminders } = await api('/api/reminders/upcoming');
       const pending = await LocalNotifications.getPending();
       if (pending.notifications.length) await LocalNotifications.cancel({ notifications: pending.notifications.map((n) => ({ id: n.id })) });
-      const list = (reminders as { id: number; fireAt: string; title: string; body: string; link: string }[]).filter((r) => new Date(r.fireAt).getTime() > Date.now()).slice(0, 64);
+      const list = (reminders as { id: number; key: string; fireAt: string; title: string; body: string; link: string; kind?: string; entityId?: string; alarm?: boolean; snoozeMinutes?: number; actions?: { id: string; label: string }[] }[]).filter((r) => new Date(r.fireAt).getTime() > Date.now()).slice(0, 64);
+      // 로컬 10/20(대표): alarm 이면 알람 채널(전체 화면·소리·[해제][10분 뒤] — 네이티브가 extra 를 보고 처리, 결과는 POST /api/reminders/alarm)
       if (list.length) await LocalNotifications.schedule({ notifications: list.map((r) => ({
-        id: r.id, title: r.title, body: r.body, channelId: 'reminders',
-        schedule: { at: new Date(r.fireAt), allowWhileIdle: true }, extra: { link: r.link },
+        id: r.id, title: r.title, body: r.body, channelId: r.alarm ? 'alarm' : 'reminders', ...(r.alarm ? { actionTypeId: 'alarm', ongoing: true } : {}),
+        schedule: { at: new Date(r.fireAt), allowWhileIdle: true }, extra: { link: r.link, key: r.key, kind: r.kind, entityId: r.entityId, alarm: !!r.alarm, snoozeMinutes: r.snoozeMinutes ?? 10, actions: r.actions ?? [] },
       })) });
     } catch { /* 오프라인 등: 기존 예약 유지 */ } finally {
       syncing = null;
