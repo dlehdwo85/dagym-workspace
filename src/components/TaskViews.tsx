@@ -26,6 +26,7 @@ import { CarriedBadge } from './carried';
 
 export type Task = {
   space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
+  sales_ref?: { kind: string; id: string; name?: string } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
   team_id?: string | null; team_name?: string | null; team_color?: string | null;
   org_unit_id: string; org_unit_name: string; brand_id: string | null; assignee_id: string | null; assignee_name: string | null;
@@ -1122,6 +1123,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
             {/* 대표(10/16): 제목은 한 줄 전체 폭·길면 … (두 줄은 목록이 길어져 눈이 피로) — 전체 제목은 줄을 눌러 상세에서 */}
             <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
+            {t.sales_ref?.kind && <span className="shrink-0 rounded-full bg-blue-50 px-1.5 text-[10px] font-medium text-blue-800" title={t.sales_ref.name ?? ''} data-testid="row-sales-ref">{({ bid: '입찰', building: '신규단지', facility: '시설', vendor: '협력사', lead: '리드' } as Record<string, string>)[t.sales_ref.kind] ?? t.sales_ref.kind}</span>}
             {t.space && SPACE_META[t.space as 'sales' | 'marketing'] && <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: SPACE_META[t.space as 'sales' | 'marketing'].soft, color: SPACE_META[t.space as 'sales' | 'marketing'].color }} data-testid="row-space">{SPACE_META[t.space as 'sales' | 'marketing'].short}</span>}
           </span>
           <span className="min-w-0 max-lg:flex-1 lg:contents"><Meta t={t} onPatch={onPatch} /></span>

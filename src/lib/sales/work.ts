@@ -18,6 +18,7 @@ export const WORK_STATUS: Record<WorkKind, string[]> = {
   vendor: ['미등록', '신청 준비', '신청 완료', '등록 완료', '대상 아님'],
 };
 export const CONVERTED = '진행영업 전환';
+const KIND_NAME: Record<WorkKind, string> = { bid: '입찰 공고', building: '신규단지', facility: '시설', vendor: '협력사' };
 const SRC_TBL: Record<WorkKind, string> = { bid: 'opportunity_work', building: 'opportunity_work', facility: 'operating_facility_prospects__progress', vendor: 'vendor_registrations__progress' };
 const ITEM_TBL: Record<WorkKind, string> = { bid: 'procurement_notices', building: 'building_sales_pipeline', facility: 'operating_facility_prospects', vendor: 'vendor_registrations' };
 const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = o?.[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return null; };
@@ -65,7 +66,12 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>) {
   const srcId = cur?.src_id ?? (SRC_TBL[i.kind] === 'opportunity_work' ? `w:${i.kind}:${i.id}` : i.id);
   await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, lead_id, data) values (${t}, ${SRC_TBL[i.kind]}, ${srcId}, ${i.id}, ${status}, ${cur?.lead_id ?? null}, ${sql.json(data)})
     on conflict (tenant, src_tbl, src_id) do update set status = excluded.status, data = excluded.data, updated_at = now()`;
-  return { ok: true, status, memo, nextDate: next };
+  // 대표 10/20 14:15: 영업 진행(연락중 등)으로 바뀌면 업무 자동 생성, 보류·미참여·완료면 업무도 함께
+  const r = await item(sql, i.kind, i.id);
+  const bidName = [pick(r, 'complex_name', 'facility_name'), pick(r, 'title', 'notice_title', 'bid_name')].filter(Boolean).join(' '); // 입찰은 '단지 공고명'
+  const task = await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: i.kind, id: i.id, name: (i.kind === 'bid' ? bidName : String(pick(r, 'name', 'complex_name', 'company', 'company_name', 'facility_name', 'title') ?? '')) || KIND_NAME[i.kind], status, nextDate: next,
+    deadline: i.kind === 'bid' ? (String(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date') ?? '').slice(0, 10) || null) : null, nextAction: pick(cur?.data, 'next_action') });
+  return { ok: true, status, memo, nextDate: next, task };
 }
 const norm = (s: string) => s.replace(/[\s()（）·\-_,.]/g, '').toLowerCase();
 /** [진행영업으로 넘기기]: 비슷한 이름의 리드가 있으면 최대 5곳을 먼저(force 로 그래도 새로 만들기) → 리드 생성·연결·상태 '진행영업 전환' */
@@ -94,7 +100,20 @@ export async function convertToLead(u: SessionUser, i: z.infer<typeof convertInp
       on conflict (tenant, src_tbl, src_id) do update set status = excluded.status, lead_id = excluded.lead_id, data = excluded.data, updated_at = now()`;
     return l.id;
   });
+  // 대표 10/20 14:15: 전환된 원천 건의 열린 업무는 완료, 리드에 '첫 연락' 업무
+  const { syncSalesTask } = await import('./autoTasks');
+  await syncSalesTask(sql, u, { kind: i.kind, id: i.id, name, status: '영업완료' });
+  await syncSalesTask(sql, u, { kind: 'lead', id: leadId, name, status: '신규리드', nextAction: '첫 연락', leadId });
   return { leadId };
+}
+/** 대표 10/20 14:15 ④ 허브·입찰 목록에서 여러 건 체크 → [영업 진행으로] — 한 번에 상태 바꾸고 업무 n건 */
+export async function bulkWork(u: SessionUser, i: { kind: WorkKind; ids: string[]; status: string; nextDate?: string | null }) {
+  const out: { id: string; ok: boolean; taskId?: string | null; error?: string }[] = [];
+  for (const id of [...new Set(i.ids)].slice(0, 100)) {
+    try { const r = await saveWork(u, { kind: i.kind, id, status: i.status, nextDate: i.nextDate ?? undefined }); out.push({ id, ok: true, taskId: r.task?.taskId ?? null }); }
+    catch (e: any) { out.push({ id, ok: false, error: e?.message ?? String(e) }); }
+  }
+  return { ok: true, results: out, tasks: out.filter((x) => x.taskId).length };
 }
 /** 제안·계약 등록(리드에 딸린 기록) */
 export async function addLeadRecord(u: SessionUser, leadId: string, i: z.infer<typeof recordInput>) {

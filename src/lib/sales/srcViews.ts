@@ -156,7 +156,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   }
   if (view === 'summary') {
     const L = (await leadRows()).map((r) => lead(r, names));
-    const W = await rows(t, 'opportunity_work');
+    const W = await prog('opportunity_work'); // S2-5: 전환 뒤에는 정식 진행 기록 표(원본 행 모양)
     const NR = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true');
     const N = NR.map(notice);
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
@@ -168,13 +168,66 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 로컬 10/19: 영업 공간을 처음 켠 회사(관리자) — 출처 고르기 안내(다짐·하이링크처럼 이미 켠 출처가 있으면 안 보임)
     const [st] = await sql<{ n: number; done: boolean }[]>`select (select count(*)::int from tenant_data_sources where tenant = ${t} and enabled) as n, exists (select 1 from sales_settings where tenant = ${t} and setup_done_at is not null) as done`;
     const setupNeeded = isAdmin(u) && !st.done && st.n === 0;
-    return { ...meta, bidsOn, setupNeeded, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
+    // 대표 10/20 S2-5 홈 '오늘 할 일' 7묶음(영업관리 2-2): ① 입찰·신규단지 후속(next_date ≤ 오늘) ② 준공시설 연락 ③ 협력사 할 일 ④ 지난 영업 업무(자동 업무 포함) ⑤ 지금 영업 상위 5(작업 중 입찰 마감 임박순) ⑥ 리드 연락(지남·오늘) ⑦ 입찰 오늘·내일 마감(즉시 검토·검토중·연락중)
+    const td = today(), tm = plus(1);
+    const notDone = (st: unknown) => !/완료|미참여|대상아님|대상 아님|전환|done|closed/i.test(String(st ?? ''));
+    const byNoticeId = new Map(NR.map((r) => [String(r.id ?? r.__id), notice(r)]));
+    const buildings = new Map((await rows('global', 'building_sales_pipeline', 20000)).map((r) => [String(r.id ?? r.__id), pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)']));
+    const nextOf = (w: any) => day(pick(w, 'next_date', 'next_action_date'));
+    const followUp = W.filter((w) => notDone(pick(w, 'status')) && nextOf(w) && nextOf(w)! <= td).map((w) => {
+      const nid = String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''); const bid = String(pick(w, 'source_id', 'building_id') ?? '');
+      const n = byNoticeId.get(nid); const isBid = !!n && !(String(pick(w, 'source_type') ?? '') === 'building');
+      return { id: isBid ? nid : bid, kind: isBid ? 'bid' : 'building', name: isBid ? `${n!.complex ? n!.complex + ' ' : ''}${n!.title}` : buildings.get(bid) ?? '(이름 없음)', status: pick(w, 'status'), next: nextOf(w), memo: pick(w, 'memo', 'note'), href: isBid ? '/s/sales/bids?tab=working' : '/s/sales/hub?tab=buildings' };
+    }).sort((a, b) => String(a.next).localeCompare(String(b.next)));
+    const FPall = await prog('operating_facility_prospects__progress', 20000);
+    const FP = FPall.filter((p) => notDone(pick(p, 'contact_status', 'status')) && day(pick(p, 'next_action_date', 'next_date')) && day(pick(p, 'next_action_date', 'next_date'))! <= td);
+    const facNames = FP.length ? new Map((await rows('global', 'operating_facility_prospects', 20000)).map((r) => [String(r.id ?? r.__id), pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)'])) : new Map<string, string>();
+    const facilities = FP.map((p) => ({ id: String(p.id ?? p.__id), kind: 'facility', name: facNames.get(String(p.id ?? p.__id)) ?? '(이름 없음)', status: pick(p, 'contact_status', 'status'), next: day(pick(p, 'next_action_date', 'next_date')), memo: pick(p, 'last_note', 'memo'), href: '/s/sales/hub?tab=facilities' })).sort((a, b) => String(a.next).localeCompare(String(b.next)));
+    const VPall = await prog('vendor_registrations__progress', 20000);
+    const VP = VPall.filter((p) => notDone(pick(p, 'status')) && day(pick(p, 'next_date')) && day(pick(p, 'next_date'))! <= td);
+    const venNames = VP.length ? new Map((await rows('global', 'vendor_registrations', 20000)).map((r) => [String(r.id ?? r.__id), pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)'])) : new Map<string, string>();
+    const vendors = VP.map((p) => ({ id: String(p.id ?? p.__id), kind: 'vendor', name: venNames.get(String(p.id ?? p.__id)) ?? '(이름 없음)', status: pick(p, 'status'), next: day(pick(p, 'next_date')), memo: pick(p, 'memo'), href: '/s/sales/hub?tab=vendors' })).sort((a, b) => String(a.next).localeCompare(String(b.next)));
+    // ④ 지난 영업 업무(space=sales, 자동 업무 포함) — 업무 공간과 같은 표(한쪽에서 완료하면 양쪽 반영)
+    const pastTasks = await sql<{ id: string; title: string; due_date: string | null; status: string; assignee: string | null; sales_ref: any }[]>`select t.id, t.title, t.due_date::text, t.status, au.name as assignee, t.sales_ref from tasks t join users cu on cu.id = t.created_by left join users au on au.id = t.assignee_id
+      where cu.tenant = ${t} and t.deleted_at is null and t.space = 'sales' and t.status <> 'done' and t.due_date is not null and t.due_date < ${td}::date order by t.due_date limit 30`;
+    const nameOfNotice = (n: ReturnType<typeof notice>) => `${n.complex ? n.complex + ' ' : ''}${n.title}`;
+    const nowSales = NR.filter((r) => { const w = workOf.get(String(r.id ?? r.__id)); return w && /검토중|연락중|즉시/.test(String(w)) && isOpenBid(notice(r), w, td); }).map(notice)
+      .sort((a, b) => String(a.deadline ?? a.close ?? '9999').localeCompare(String(b.deadline ?? b.close ?? '9999'))).slice(0, 5)
+      .map((n) => ({ id: n.id, kind: 'bid', name: nameOfNotice(n), status: workOf.get(String(n.id)) ?? null, next: n.close, memo: null, href: '/s/sales/bids?tab=working' }));
+    const closingSoon = NR.map(notice).filter((n) => { const w = workOf.get(String(n.id)); return (n.close === td || n.close === tm) && isOpenBid(n, w, td) && (!w || /미검토|검토중|연락중|즉시/.test(String(w))); })
+      .sort((a, b) => String(a.deadline ?? '').localeCompare(String(b.deadline ?? '')))
+      .map((n) => ({ id: n.id, kind: 'bid', name: nameOfNotice(n), status: n.close === td ? '오늘 마감' : '내일 마감', next: n.close, memo: String(n.deadline ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null, href: '/s/sales/bids?tab=closing' }));
+    const todo = { followUp, facilities, vendors, pastTasks, nowSales, leads: [...overdue, ...live.filter((l) => l.next === td)].map((l) => ({ id: l.id, kind: 'lead', name: l.name, status: l.status, next: l.next, memo: null, href: `/s/sales/leads?id=${encodeURIComponent(String(l.id))}` })), closingSoon };
+    // S2-6 영업기회 요약 타일 6 + 목록별 진행 현황표(4행 × 상태)
+    const endOf = (r: any) => day(pick(r, 'contract_end_date', 'contract_end', 'service_end_date', 'contract_expiry_date'));
+    const tiles = { nowSales: W.filter((w) => notDone(pick(w, 'status')) && /검토중|연락중/.test(String(pick(w, 'status') ?? ''))).length, bidsOpen: NR.filter((r) => isOpenBid(notice(r), workOf.get(String(r.id ?? r.__id)), td)).length,
+      contracts: NR.map(endOf).filter((e) => !!e && e >= td && e <= plus(365)).length, buildings: buildings.size, facilities: (await rows('global', 'operating_facility_prospects', 20000)).length, vendors: (await rows('global', 'vendor_registrations', 20000)).length };
+    const tally = (arr: any[], key: (x: any) => unknown) => arr.reduce((m: Record<string, number>, x) => { const k = String(key(x) ?? '미검토'); m[k] = (m[k] ?? 0) + 1; return m; }, {} as Record<string, number>);
+    const isBuildingWork = (w: any) => String(pick(w, 'source_type') ?? '') === 'building' || !!pick(w, 'building_id'); // 정식 표는 notice_id 에 ref_id 가 들어가므로 source_type 으로 구분
+    const progress: [string, Record<string, number>][] = [['입찰', tally(W.filter((w: any) => !isBuildingWork(w)), (w) => pick(w, 'status'))], ['신규단지', tally(W.filter(isBuildingWork), (w) => pick(w, 'status'))],
+      ['준공·입주 시설', tally(FPall, (p) => pick(p, 'contact_status', 'status'))], ['협력사', tally(VPall, (p) => pick(p, 'status'))]];
+    return { ...meta, bidsOn, setupNeeded, todo, tiles, progress, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
       bidsOpen: NR.filter((r) => isOpenBid(notice(r), workOf.get(String(r.id ?? r.__id)), today())).length,
       relatedNotices: N.length, newNotices7d: N.filter((n) => n.noticeDate && n.noticeDate >= plus(-7) && n.noticeDate <= today()).length /* 로컬 10/19: 원본 초기 적재(10/13 3,343건) 때문에 first_seen 7일은 부풀려짐 → 공고일 기준 */ }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses,
       // 대표(10/19): 첫 화면 맨 위 '오늘' — 새 공고·새 영업 DB(신규단지·시설·협력사)·오늘 연락할 리드·오늘 마감 입찰
       today: await (async () => { const td = today();
         const db3 = await Promise.all((['building_sales_pipeline', 'operating_facility_prospects', 'vendor_registrations'] as const).map(async (tb) => (await rows('global', tb, 20000)).filter((r) => firstSeen(r) === td).length));
         return { date: td, newNotices: N.filter((n) => n.posted === td).length, newDb: { buildings: db3[0], facilities: db3[1], vendors: db3[2] }, contact: live.filter((l) => l.next === td).length, closing: N.filter((n) => n.close === td).length }; })() };
+  }
+  // S2-6 계약만료·재입찰(영업관리 2-6): 타 업체 계약 종료일이 있는 공고 → 영업 시작(−12·−9개월)·제안(−6)·재입찰(−3) 역산, 단계 5, 요약 4(90/180/365일 내·지남)
+  if (view === 'contracts') {
+    const W = await prog('opportunity_work'); const td = today();
+    const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
+    const endOf = (r: any) => day(pick(r, 'contract_end_date', 'contract_end', 'service_end_date', 'contract_expiry_date'));
+    const shift = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x); };
+    const items = (await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && endOf(r)).map((r) => { const n = notice(r); const end = endOf(r)!;
+      const start = shift(end, -12), start2 = shift(end, -9), propose = shift(end, -6), rebid = shift(end, -3);
+      const stage = td < start ? '영업 전' : td < propose ? '영업 시작' : td < rebid ? '제안' : td <= end ? '재입찰' : '종료';
+      const daysLeft = Math.round((Date.parse(end) - Date.parse(td)) / 864e5);
+      return { id: n.id, name: `${n.complex ? n.complex + ' ' : ''}${n.title}`, agency: n.agency, region: n.region, winner: n.winner, amount: n.awardAmount ?? n.amount, end, start, start2, propose, rebid, stage, daysLeft, work: workOf.get(String(n.id)) ?? null, url: n.url, href: '/s/sales/bids?tab=all&q=' + encodeURIComponent(String(n.title)) }; })
+      .filter(hit).sort((a, b) => a.end.localeCompare(b.end));
+    const within = (n: number) => items.filter((x) => x.daysLeft >= 0 && x.daysLeft <= n).length;
+    return { ...meta, bidsOn, items: items.slice(0, 500), summary: { d90: within(90), d180: within(180), d365: within(365), past: items.filter((x) => x.daysLeft < 0).length }, stages: (['영업 전', '영업 시작', '제안', '재입찰', '종료'] as const).map((s) => [s, items.filter((x) => x.stage === s).length]) };
   }
   if (view === 'leads') {
     const L = (await leadRows()).map((r) => ({ ...lead(r, names), raw: r })).filter((l) => hit(l.raw) && (!q.status || String(l.status) === q.status) && (q.day !== 'today' || l.next === today()));
