@@ -1352,6 +1352,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-20 로고 S3 전체 적용(대표 확정 #124) + 소개 사이트 히어로 배경(대표 22:30 ③ #119) + Higgsfield 달러 종량제(로컬 ⑤ #120) [배포확인요청]
+- 로고(자산 docs/handoff/brand/workin-s3 → public/): icon.svg(벡터 S3)·icon-192/512·icon-maskable-512(manifest purpose maskable 그대로)·apple-touch-icon·favicon-48/32·favicon.ico·icon-1024(JSON-LD logo)·landing/og.png(og-1200x630)·splash-2732(PWA iOS 시작 화면 `apple-touch-startup-image`)·badge-96(웹 푸시 badge, 흰 실루엣)·brand/lockup-light·lockup-dark·wordmark·wordmark-white.
+  - 바뀐 화면: 탭 파비콘·홈 화면 아이콘·PWA, 소개 사이트 헤더(가로 록업)·푸터(록업)·OG·JSON-LD, 로그인 왼쪽 판(다크 록업)·휴대폰 로그인 머리(S3 아이콘), 앱 셸 상단·마케팅/영업/운영실 상단(icon.svg 공용), 공개 링크(/r) 페이지, 웹 푸시 아이콘·배지. `tests/e2e/landing-shots.mjs` 는 더 이상 og.png 를 덮어쓰지 않음.
+  - 워크인 로고가 **없는** 곳(교체 대상 아님): 메일 서명·명함은 회사 로고(logo_file_id)만 씀 — 워크인 브랜드 미노출. 메일 본문 머리도 글자뿐. Android 상태바 아이콘·네이티브 스플래시는 로컬(완료).
+  - 2.4초 모션(mp4)은 아직 안 씀 — 로그인/스플래시에 넣으려면 팩에 추가해 주세요(191KB, 자동 재생·소리 없음·prefers-reduced-motion 이면 정지 이미지).
+- 히어로(#119): 첫 화면을 전체 폭 어두운 배경 + 실제 앱 화면 콜라주(home 중앙, tasks·marketing 양옆 기울임, lg 이상) + 그라데이션 오버레이 + 흰 글자. 휴대폰도 배경 유지(home 1장). 생성 인물 없음. 홈 캡처 카드가 히어로 아래로 겹쳐 올라옴.
+- Higgsfield(#120): 모델 표에 USD 열(이미지 장당·영상 초당) + 표시 단위(크레딧/건 | 달러 종량제) + 환율(원/$) — 제작의뢰실 예상 비용이 '약 $0.09 (≈126원)' 식으로. 기본 단가 gpt_image 0.006·recraft 0.003·kling 0.09/초·seedance 0.07/초(console.higgsfield.ai 선불 기준, 대표가 숫자만 고침). 크레딧 원장은 그대로.
+- 시험: E2E '소개 사이트'·'제작의뢰실', API mkt-studio·platform-admin 회귀.
+
 ## 2026-10-20 주 도메인 work-in.dev(대표 22:30 ① 결정, 로컬 요청 a·b·c #117) [배포확인요청]
 - (a) 앱: `mobile/capacitor.config.ts` appUrl 기본값 `https://work-in.dev`(APP_URL 로 바꿀 수 있음) + allowNavigation 에 `work-in.dev`·`www.work-in.dev` 둘 다 → **다음 앱 빌드부터** apex 로드. 설치된 앱(www)은 Vercel 에서 www→apex 308 을 걸어도 allowNavigation 에 둘 다 있어 그대로 동작(기존 빌드는 allowNavigation 이 www 뿐이라 308 뒤 apex 가 외부로 열릴 수 있음 → 새 빌드 배포 뒤에 308).
 - (b) 서버: 세션 쿠키는 호스트 전용(domain 없음) — www·apex 각각 로그인하면 각각 유지(한쪽 로그인이 다른 쪽으로 넘어가진 않음, 308 로 한 호스트만 남으면 문제 없음). API 출처 검사 = 요청 호스트와 같거나 APP_URL 호스트 → 두 호스트 모두 정상. 푸시 등록(FCM/APNs 토큰)은 호스트와 무관, 알림 링크는 상대 경로(앱이 appUrl 로 엶).

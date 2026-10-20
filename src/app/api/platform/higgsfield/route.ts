@@ -9,6 +9,7 @@ export const GET = handler(async ({ user }) => { guard(user); const { apiKey: _k
 export const PUT = handler(async ({ req, user }) => {
   guard(user);
   const i = await body(req, z.object({ apiKey: z.string().max(400).nullable().optional(), enabled: z.boolean().optional(), base: z.string().url().max(200).nullable().optional(),
-    models: z.array(z.object({ id: z.string().trim().min(1).max(40), kind: z.enum(['image', 'video']), name: z.string().trim().min(1).max(80), credits: z.number().min(0).max(10000), enabled: z.boolean(), note: z.string().max(200).optional() })).max(20).optional() }));
+    models: z.array(z.object({ id: z.string().trim().min(1).max(40), kind: z.enum(['image', 'video']), name: z.string().trim().min(1).max(80), credits: z.number().min(0).max(10000), usd: z.number().min(0).max(1000).nullable().optional(), enabled: z.boolean(), note: z.string().max(200).optional() })).max(20).optional(),
+    pricing: z.enum(['credits', 'usd']).optional(), usdKrw: z.number().min(100).max(10000).optional() }));
   const { apiKey: _k, ...s } = await saveHfSettings(i, user.id); void _k; return s;
 });

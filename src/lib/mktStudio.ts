@@ -39,7 +39,7 @@ export async function listBriefs(u: SessionUser) {
   const brands = await sql<{ id: string; name: string; tone: string | null }[]>`select id, name, tone from mkt_brands where tenant = ${t} order by name`;
   const recent = await sql<{ id: string; title: string; channel: string }[]>`select id, title, channel from mkt_contents where tenant = ${t} and not is_test and status in ('published', 'approved') order by coalesce(published_at, scheduled_at) desc nulls last limit 12`;
   const hf = await hfSettings();
-  return { briefs, brands, recent, kinds: KIND_SPEC, purposes: PURPOSE, canGenerate: isAdmin(u), provider: hf.enabled ? 'higgsfield' : 'card', models: hf.models.filter((m) => m.enabled).map(({ id, kind, name, credits }) => ({ id, kind, name, credits })) };
+  return { briefs, brands, recent, kinds: KIND_SPEC, purposes: PURPOSE, canGenerate: isAdmin(u), provider: hf.enabled ? 'higgsfield' : 'card', models: hf.models.filter((m) => m.enabled).map(({ id, kind, name, credits, usd }) => ({ id, kind, name, credits, usd: usd ?? null })), pricing: hf.pricing, usdKrw: hf.usdKrw };
 }
 export async function createBrief(u: SessionUser, i: z.infer<typeof briefInput>) {
   await assertSpace(u, 'marketing');

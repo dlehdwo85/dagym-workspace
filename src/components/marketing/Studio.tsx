@@ -12,8 +12,13 @@ import { MediaPick } from './MediaPick';
  * → 생성(Higgsfield 연동 전엔 제작 요청 카드로 로컬 도우미에) → 승인 대기. 월 운영 목표 주간 달력에서 오면(?brand=&message=&kind=) 의뢰가 미리 채워짐.
  */
 const C = '#7C3AED';
+/** 로컬 10/20 22:30 ⑤: 표시 단위가 달러면 장당·초당 USD × 수량(영상 15초) + 원 환산 */
+function estLabel(m: { kind: string; credits: number; usd?: number | null }, quantity: number, v: { pricing?: string; usdKrw?: number }) {
+  if (v.pricing === 'usd' && m.usd != null) { const usd = Math.round(m.usd * (m.kind === 'video' ? 15 : 1) * quantity * 1000) / 1000; return `약 $${usd} (≈${Math.round(usd * (v.usdKrw ?? 1400)).toLocaleString('ko-KR')}원)`; }
+  return `${m.credits * quantity}크레딧`;
+}
 type Brief = { id: string; brand: string | null; brand_id: string | null; channel: string; kind: string; purpose: string; message: string; refs: any; tone: string | null; quantity: number; due_date: string | null; status: string; prompt: any; content_id: string | null; est_credits: number; result: any; error: string | null; created_by_name: string | null; created_at: string; content_status: string | null; open_requests: number };
-type View = { briefs: Brief[]; brands: { id: string; name: string; tone: string | null }[]; recent: { id: string; title: string; channel: string }[]; kinds: Record<string, { label: string; aspect: string; px: string; media: string }>; purposes: Record<string, string>; canGenerate: boolean; provider: 'higgsfield' | 'card'; models: { id: string; kind: string; name: string; credits: number }[] };
+type View = { briefs: Brief[]; brands: { id: string; name: string; tone: string | null }[]; recent: { id: string; title: string; channel: string }[]; kinds: Record<string, { label: string; aspect: string; px: string; media: string }>; purposes: Record<string, string>; canGenerate: boolean; pricing?: 'credits' | 'usd'; usdKrw?: number; provider: 'higgsfield' | 'card'; models: { id: string; kind: string; name: string; credits: number }[] };
 const STATUS: Record<string, [string, string]> = { queued: ['대기', 'bg-slate-100 text-ink-2'], prompting: ['프롬프트 작성 중', 'bg-sky-50 text-sky-800'], ready: ['프롬프트 준비', 'bg-violet-50 text-violet-800'], generating: ['생성 중', 'bg-amber-50 text-amber-800'], review: ['승인 대기', 'bg-orange-50 text-orange-800'], published: ['게시됨', 'bg-emerald-50 text-emerald-800'], rejected: ['반려', 'bg-red-50 text-red-800'], failed: ['실패', 'bg-red-50 text-red-800'] };
 const labelOf = (b: Brief) => (b.content_status === 'published' ? STATUS.published : b.content_status === 'changes' && b.status === 'review' ? ['수정 요청', 'bg-slate-100 text-ink-2'] : STATUS[b.status] ?? [b.status, 'bg-slate-100 text-ink-2']);
 
@@ -55,7 +60,7 @@ export function Studio() {
           <Field label="레퍼런스 링크(공백으로 구분)"><input className={inputCls} value={f.links} onChange={(e) => setF({ ...f, links: e.target.value })} placeholder="https://…" aria-label="레퍼런스 링크" /></Field>
           <Field label="톤(비우면 브랜드 키트)"><input className={inputCls} value={f.tone} onChange={(e) => setF({ ...f, tone: e.target.value })} maxLength={200} placeholder={data.brands.find((b) => b.id === f.brandId)?.tone ?? '친절하고 담백하게'} aria-label="톤" /></Field>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-2"><span>{spec ? `${spec.label} ${spec.aspect} · ${spec.px}` : ''}{model ? ` · 모델 ${model.name} · 예상 ${model.credits * f.quantity}크레딧` : ''}</span><Button disabled={busy || f.message.trim().length < 2} data-testid="studio-submit">{busy ? 'AI 마케터가 쓰는 중…' : '의뢰하기'}</Button></div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-2"><span>{spec ? `${spec.label} ${spec.aspect} · ${spec.px}` : ''}{model ? ` · 모델 ${model.name} · 예상 ${estLabel(model, f.quantity, data)}` : ''}</span><Button disabled={busy || f.message.trim().length < 2} data-testid="studio-submit">{busy ? 'AI 마케터가 쓰는 중…' : '의뢰하기'}</Button></div>
       </form>
       <ul className="space-y-2" data-testid="studio-list">{data.briefs.map((b) => <BriefCard key={b.id} b={b} view={data} onChange={reload} />)}{!data.briefs.length && <li className="text-sm text-ink-3">아직 의뢰가 없습니다</li>}</ul>
     </div>
@@ -80,7 +85,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
         {b.brand && <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-semibold text-white">{b.brand}</span>}
         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800">{spec?.label ?? b.kind} · {view.purposes[b.purpose] ?? b.purpose}</span>
         <b className="min-w-0 flex-1 truncate">{b.message}</b>
-        <span className="text-[11px] text-ink-3">{b.created_by_name ?? ''} · {fmtDateTime(b.created_at)}{b.quantity > 1 ? ` · ${b.quantity}장` : ''}{b.due_date ? ` · 마감 ${b.due_date}` : ''}{b.est_credits ? ` · 예상 ${b.est_credits}크레딧` : ''}</span>
+        <span className="text-[11px] text-ink-3">{b.created_by_name ?? ''} · {fmtDateTime(b.created_at)}{b.quantity > 1 ? ` · ${b.quantity}장` : ''}{b.due_date ? ` · 마감 ${b.due_date}` : ''}{b.est_credits ? ` · 예상 ${view.pricing === 'usd' && view.models.find((m) => m.id === (b.prompt?.model ?? '')) ? estLabel(view.models.find((m) => m.id === b.prompt?.model)!, b.quantity, view) : `${b.est_credits}크레딧`}` : ''}</span>
       </div>
       {b.error && <p className="mt-1 text-xs text-red-700">{b.error}</p>}
       {pr && !edit && <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs" data-testid="studio-prompt">

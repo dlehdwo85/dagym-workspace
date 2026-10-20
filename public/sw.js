@@ -8,7 +8,7 @@ self.addEventListener('push', (event) => {
   const actions = (Array.isArray(d.actions) ? d.actions : []).slice(0, 2).map((a) => (a.input === 'text' ? { action: a.id, title: a.label, type: 'text', placeholder: a.label } : { action: a.id, title: a.label }));
   // 로컬 10/20(대표): 알람처럼 울리는 알림은 닫을 때까지 남고 진동 — [해제][10분 뒤] 버튼. 소리·띠는 열린 창(AlarmBar)이 맡는다
   event.waitUntil(self.registration.showNotification(d.title || '업무 알림', {
-    body: d.body || '', tag: d.tag || d.notificationId, renotify: true, data: { link: d.link || '/', notificationId: d.notificationId, actions, alarm: !!d.alarm }, icon: '/icon-192.png', badge: '/icon-192.png', actions,
+    body: d.body || '', tag: d.tag || d.notificationId, renotify: true, data: { link: d.link || '/', notificationId: d.notificationId, actions, alarm: !!d.alarm }, icon: '/icon-192.png', badge: '/badge-96.png', actions,
     ...(d.alarm ? { requireInteraction: true, vibrate: [300, 150, 300, 150, 600] } : {}),
   }));
 });
