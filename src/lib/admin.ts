@@ -16,6 +16,8 @@ export const inviteInput = z.object({
   title: z.string().max(50).optional(),
   /** 로컬 10/19: 초대하면서 부서·팀에 넣기 + 공간(비우면 그 부서·팀의 기본 공간) */
   teamIds: z.array(zUuid).max(10).default([]),
+  /** 재정비(10/20): 주 소속(teamIds 중 하나, 비우면 첫 번째) */
+  primaryTeamId: zUuid.nullable().optional(),
   spaces: z.array(z.enum(['work', 'sales', 'marketing'])).max(3).optional(),
 });
 
@@ -28,7 +30,12 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
   await (await import('./menuPerms')).requireMenu(actor, 'admin_users', 'edit');
   assertCanGrant(actor, i.role);
   const sql = db();
-  if (i.role !== 'owner' && i.role !== 'admin' && i.orgUnitIds.length === 0) throw badRequest('소속 조직을 1개 이상 선택하세요');
+  // 재정비(10/20): 접근 가능한 조직(org_units)은 소속에서 자동 — 비우면 본사(hq). 고급 설정으로 직접 고를 수도 있음
+  if (i.role !== 'owner' && i.role !== 'admin' && i.orgUnitIds.length === 0) {
+    const [hq] = await sql<{ id: string }[]>`select id from org_units where tenant = ${tenantOf(actor)} and type = 'hq' and active and not is_demo order by sort limit 1`;
+    if (!hq) throw badRequest('소속 조직을 1개 이상 선택하세요');
+    i = { ...i, orgUnitIds: [hq.id] };
+  }
   const existing = await sql<{ id: string; status: string }[]>`select id, status from users where lower(email) = ${i.email}`;
   if (existing[0] && existing[0].status === 'active') throw conflict('이미 활성 사용자입니다');
   const tn = tenantOf(actor);
@@ -63,10 +70,7 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
     if (teamIds.length) {
       const teams = await tx<{ id: string; default_spaces: string[] }[]>`select id, default_spaces from teams where id = any(${teamIds}::uuid[]) and tenant = ${tn} and not archived`;
       if (teams.length !== new Set(teamIds).size) throw badRequest('없는 부서·팀이 포함되어 있습니다');
-      for (const t of teams) {
-        await tx`insert into team_members (team_id, user_id, is_lead) values (${t.id}, ${userId}, false) on conflict (team_id, user_id) do nothing`;
-        await tx`insert into chat_members (room_id, user_id) select id, ${userId} from chat_rooms where team_id = ${t.id} on conflict do nothing`;
-      }
+      await (await import('./teams')).setUserTeams(tx, tn, userId, teamIds, i.primaryTeamId ?? null); // 재정비: 주 소속 + 겸직, 팀 대화방
       const spaces = i.spaces ?? [...new Set(teams.flatMap((t) => t.default_spaces))];
       if (spaces.length) await tx`insert into space_members (user_id, tenant, spaces, role) values (${userId}, ${tn}, ${spaces}, ${i.role}) on conflict (user_id, tenant) do update set spaces = excluded.spaces, updated_at = now()`;
     } else if (i.spaces?.length) {
@@ -112,6 +116,9 @@ export const userPatch = z.object({
   role: z.enum(['owner', 'admin', 'dept_lead', 'site_manager', 'staff']).optional(),
   status: z.enum(['active', 'disabled', 'left']).optional(),
   orgUnitIds: z.array(zUuid).max(20).optional(),
+  /** 재정비(10/20): 소속(주 소속 + 겸직) 바꾸기 */
+  teamIds: z.array(zUuid).max(10).optional(),
+  primaryTeamId: zUuid.nullable().optional(),
 });
 
 export async function updateUser(actor: SessionUser, id: string, p: z.infer<typeof userPatch>, ip: string | null) {
@@ -147,6 +154,7 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
       await tx`delete from memberships where user_id = ${id}`;
       for (const o of new Set(p.orgUnitIds)) await tx`insert into memberships (user_id, org_unit_id) values (${id}, ${o})`;
     }
+    if (p.teamIds) await (await import('./teams')).setUserTeams(tx, tenantOf(actor), id, p.teamIds, p.primaryTeamId ?? null);
     if (p.orgUnitIds || p.role) await syncDemoFlag(tx, [id]);
     // 비활성·퇴사·권한 변경 시 기존 세션 즉시 차단
     if ((p.status && p.status !== 'active') || p.role || p.orgUnitIds) {

@@ -222,7 +222,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     return (hq.length ? hq : dir.users).slice(0, 5);
   })();
   const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 요청한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['extend', '연장 요청'], ['done', '완료']];
-  const teamList = useApi<{ teams: { id: string; name: string; color?: string; kind?: string; parent_name?: string | null; visible?: boolean }[] }>('/api/teams'); // V14 8번 팀 필터
+  const teamList = useApi<{ teams: { id: string; name: string; color?: string; kind?: string; parent_path?: string | null; parent_name?: string | null; visible?: boolean }[] }>('/api/teams'); // V14 8번 팀 필터
   const teamChips = (teamList.data?.teams ?? []).filter((t) => t.visible !== false); // 대표 10/20 4): 팀별 보기 칩 — 볼 수 있는 팀만
   // V14 12번 다중 선택
   const [selOn, setSelOn] = useState(false);
@@ -306,7 +306,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
               <ViewChip on={!filters.teamId} onClick={() => setFilters((f) => ({ ...f, teamId: '' }))} label="모든 팀">전체</ViewChip>
               {teamChips.map((t) => (
                 <ViewChip key={t.id} on={filters.teamId === t.id} onClick={() => setFilters((f) => ({ ...f, teamId: f.teamId === t.id ? '' : t.id }))} label={`팀 ${t.name}`}>
-                  <span className="size-2 shrink-0 rounded-full" style={{ background: t.color ?? '#0F766E' }} aria-hidden />{t.kind === 'team' && t.parent_name ? <span className="hidden text-ink-3 sm:inline">{t.parent_name} ›&nbsp;</span> : null}{t.name}
+                  <span className="size-2 shrink-0 rounded-full" style={{ background: t.color ?? '#0F766E' }} aria-hidden />{t.parent_path ? <span className="hidden text-ink-3 sm:inline">{t.parent_path} ›&nbsp;</span> : null}{t.name}
                 </ViewChip>))}
             </div>
           </div>

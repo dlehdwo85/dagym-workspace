@@ -75,7 +75,7 @@ export function MenuPermsTab({ users }: { users: { id: string; name: string; rol
 
 /** 대표 10/20 4): 사람별 '팀 업무 보기' — 전체(다른 팀 전체 예외 조회) / 자기 팀만(예외·지정 없음) / 지정 팀(team_view_grants). 격리 팀원은 무엇을 골라도 자기 팀만 */
 function TeamView({ d, users, reload }: { d: M; users: { id: string; name: string; role: Role; status: string }[]; reload: () => void }) {
-  const teams = useApi<{ teams: { id: string; name: string; kind: string; parent_name: string | null }[] }>('/api/teams');
+  const teams = useApi<{ teams: { id: string; name: string; kind: string; parent_name: string | null; parent_path?: string | null }[] }>('/api/teams');
   const [userId, setUserId] = useState(''); const [busy, setBusy] = useState(false); const [pickMode, setPickMode] = useState(false); // '지정 팀'을 골랐지만 아직 팀을 안 고른 상태
   const list = (teams.data?.teams ?? []);
   const allLv = d.overrides.find((o) => o.menu === 'team_tasks_all' && o.user_id === userId)?.level;
@@ -108,7 +108,7 @@ function TeamView({ d, users, reload }: { d: M; users: { id: string; name: strin
       </div>
       {userId && mode === 'pick' && <div className="mt-2 flex flex-wrap gap-1.5" data-testid="team-view-teams">
         {list.map((t) => <label key={t.id} className={cx('inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs', picked.has(t.id) ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-line')}>
-          <input type="checkbox" className="sr-only" checked={picked.has(t.id)} disabled={busy} onChange={() => toggle(t.id)} />{t.kind === 'team' && t.parent_name ? `${t.parent_name} › ` : ''}{t.name}</label>)}
+          <input type="checkbox" className="sr-only" checked={picked.has(t.id)} disabled={busy} onChange={() => toggle(t.id)} />{t.parent_path ? `${t.parent_path} › ` : ''}{t.name}</label>)}
         {!list.length && <span className="text-xs text-ink-3">부서·팀이 없습니다</span>}
       </div>}
       {userId && mode === 'pick' && !picked.size && <p className="mt-1 text-xs text-ink-3">팀을 하나 이상 고르세요 — 고르지 않으면 ‘자기 팀만’과 같습니다.</p>}

@@ -4,6 +4,7 @@ import { SpacesTab } from '@/components/SpacesTab';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, refreshBadges, toast } from '@/components/ui';
+import { TeamPath, TeamPicker } from '@/components/TeamPicker';
 import { ROLE_LABEL, type Role } from '@/lib/types';
 import { MenuPermsTab } from '@/components/MenuPerms';
 import { TeamsTab } from '@/components/Teams';
@@ -78,7 +79,7 @@ function Users() {
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    try { await api(`/api/admin/users/${edit.id}`, { method: 'PATCH', body: { name: edit.name, title: edit.title, titleShort: edit.title_short ?? null, role: edit.role, status: edit.status === 'invited' ? undefined : edit.status, orgUnitIds: edit.org_unit_ids } }); toast.ok('저장했습니다'); setEdit(null); reload(); refreshBadges(); } catch (er: any) { toast.error(er.message); }
+    try { await api(`/api/admin/users/${edit.id}`, { method: 'PATCH', body: { name: edit.name, title: edit.title, titleShort: edit.title_short ?? null, role: edit.role, status: edit.status === 'invited' ? undefined : edit.status, orgUnitIds: edit.org_unit_ids , ...(edit.teamIds ? { teamIds: edit.teamIds, primaryTeamId: edit.primaryTeamId ?? null } : {})} }); toast.ok('저장했습니다'); setEdit(null); reload(); refreshBadges(); } catch (er: any) { toast.error(er.message); }
   }
   async function reset(u: any) {
     try { const r = await api(`/api/admin/users/${u.id}/reset-password`, { body: {} }); setLink(location.origin + r.path); } catch (er: any) { toast.error(er.message); }
@@ -115,7 +116,7 @@ function Users() {
               <tr key={u.id} className={cx(u.status !== 'active' && u.status !== 'invited' && 'text-slate-400')}>
                 <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}{u.title_short ? ` (${u.title_short})` : ''}</div></td>
                 <td className="p-2">{ROLE_LABEL[u.role as Role]}</td>
-                <td className="p-2 text-xs">{u.org_unit_ids.map(unitName).join(', ') || '-'}</td>
+                <td className="p-2 text-xs">{(u.teams ?? []).length ? (u.teams as any[]).map((t, i) => <span key={t.id} className="mr-1.5 inline-flex items-center gap-0.5"><TeamPath path={t.path} />{t.primary && (u.teams as any[]).length > 1 && <span className="rounded bg-brand-50 px-1 text-[10px] text-brand-700">주</span>}{t.lead && <span className="text-[10px] text-amber-700">장</span>}{i < (u.teams as any[]).length - 1 ? '' : ''}</span>) : <span className="text-ink-3">{u.org_unit_ids.map(unitName).join(', ') || '-'}</span>}</td>
                 <td className="p-2" data-testid="user-status">{u.status === 'left' && u.left_at ? `퇴사(${u.left_at.slice(5).replace('-', '/')})` : STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}{u.status === 'left' && u.rejoin_until && u.rejoin_until >= todayK && <div className="text-xs text-slate-400">복직 가능 ~{u.rejoin_until.slice(5).replace('-', '/')}</div>}</td>
                 <td className="p-2 text-xs">{u.last_login_at ? fmtDateTime(u.last_login_at) : '-'}</td>
                 <td className="p-2 text-right whitespace-nowrap">{canEdit && <>
@@ -139,17 +140,13 @@ function Users() {
             <Field label="권한"><select className={inputCls} value={inv.role} onChange={(e) => setInv({ ...inv, role: e.target.value })}>{roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></Field>
             <Field label="직책 (선택)"><input className={inputCls} value={inv.title ?? ''} onChange={(e) => setInv({ ...inv, title: e.target.value })} /></Field>
           </div>
-          <fieldset><legend className="mb-1 text-xs font-medium text-slate-600">소속 (접근 가능한 조직)</legend><UnitChecks key={invKey} value={inv.orgUnitIds} onChange={(v) => setInv({ ...inv, orgUnitIds: v })} />
-            <p className="mt-1 text-xs text-slate-500">선택한 조직과 그 하위 조직의 업무·일정만 볼 수 있습니다. 대표·본사 관리자는 전체를 봅니다.</p></fieldset>
-          {/* 대기열 ①(10/19): 부서·팀에 넣기(팀원으로) + 그 부서·팀 기본 공간을 제안 */}
-          <fieldset data-testid="invite-teams"><legend className="mb-1 text-xs font-medium text-slate-600">부서·팀</legend>
-            <div className="max-h-36 space-y-1 overflow-y-auto rounded border p-2">
-              {(teamsList.data?.teams ?? []).map((t: any) => <label key={t.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={(inv.teamIds ?? []).includes(t.id)}
-                onChange={(e) => { const teamIds = e.target.checked ? [...(inv.teamIds ?? []), t.id] : (inv.teamIds ?? []).filter((x: string) => x !== t.id); const chosen = (teamsList.data?.teams ?? []).filter((x: any) => teamIds.includes(x.id));
-                  setInv({ ...inv, teamIds, spaces: chosen.length ? [...new Set<string>(chosen.flatMap((x: any) => x.default_spaces ?? ['work']))] : inv.spaces }); }} data-testid="invite-team" />
-                {t.kind === 'team' && t.parent_name ? <span className="text-ink-3">{t.parent_name} / </span> : null}{t.name}<span className="text-[11px] text-ink-3">{t.kind === 'dept' ? '부서' : '팀'}{t.isolated ? ' · 격리' : ''}</span></label>)}
-              {!(teamsList.data?.teams ?? []).length && <p className="text-xs text-ink-3">아직 부서·팀이 없습니다 — 팀 탭에서 만들 수 있습니다</p>}
-            </div></fieldset>
+          {/* 대표 10/20 15:15 재정비: '소속' 하나(부서 › 팀 트리, 주 소속 + 겸직) — 접근 범위는 자동, 예전 '접근 가능한 조직' 체크는 고급 */}
+          <fieldset data-testid="invite-teams"><legend className="mb-1 text-xs font-medium text-slate-600">소속</legend>
+            <TeamPicker key={invKey} teamIds={inv.teamIds ?? []} primaryTeamId={inv.primaryTeamId ?? null}
+              onChange={({ teamIds, primaryTeamId, teams }) => setInv({ ...inv, teamIds, primaryTeamId, spaces: teams.length ? [...new Set<string>(teams.flatMap((x) => x.default_spaces ?? ['work']))] : inv.spaces })} /></fieldset>
+          <details className="text-xs" data-testid="invite-advanced"><summary className="cursor-pointer text-slate-600">고급 — 접근 가능한 조직(비우면 소속에서 자동)</summary>
+            <div className="mt-1"><UnitChecks key={invKey} value={inv.orgUnitIds} onChange={(v) => setInv({ ...inv, orgUnitIds: v })} />
+              <p className="mt-1 text-slate-500">직접 고르면 그 조직과 하위 조직의 업무·일정만 봅니다. 비우면 본사 기준으로 소속 부서·팀 규칙을 따릅니다.</p></div></details>
           <fieldset data-testid="invite-spaces"><legend className="mb-1 text-xs font-medium text-slate-600">공간 {inv.teamIds?.length ? <span className="font-normal text-ink-3">(고른 부서·팀의 기본 공간을 제안)</span> : null}</legend>
             <div className="flex gap-3 text-sm">{([['work', '업무'], ['sales', '영업'], ['marketing', '마케팅']] as const).filter(([k]) => k === 'work' || (spaceInfo.data?.spaces ?? []).includes(k)).map(([k, l]) => (
               <label key={k} className="flex items-center gap-1.5"><input type="checkbox" checked={(inv.spaces ?? ['work']).includes(k)} onChange={(e) => { const cur = inv.spaces ?? ['work']; setInv({ ...inv, spaces: e.target.checked ? [...cur, k] : cur.filter((x: string) => x !== k) }); }} data-testid={`invite-space-${k}`} />{l}</label>))}</div></fieldset>
@@ -181,7 +178,10 @@ function Users() {
             <Field label="상태"><select className={inputCls} value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })} disabled={edit.status === 'invited'}>
               {edit.status === 'invited' && <option value="invited">초대됨</option>}<option value="active">사용 중</option><option value="disabled">사용 중지</option><option value="left">퇴사</option></select></Field>
           </div>
-          <fieldset><legend className="mb-1 text-xs font-medium text-slate-600">소속</legend><UnitChecks value={edit.org_unit_ids} onChange={(v) => setEdit({ ...edit, org_unit_ids: v })} /></fieldset>
+          <fieldset data-testid="edit-teams"><legend className="mb-1 text-xs font-medium text-slate-600">소속</legend>
+            <TeamPicker testid="edit-team" teamIds={edit.teamIds ?? (edit.teams ?? []).map((t: any) => t.id)} primaryTeamId={edit.primaryTeamId ?? (edit.teams ?? []).find((t: any) => t.primary)?.id ?? null}
+              onChange={({ teamIds, primaryTeamId }) => setEdit({ ...edit, teamIds, primaryTeamId })} /></fieldset>
+          <details className="text-xs"><summary className="cursor-pointer text-slate-600">고급 — 접근 가능한 조직</summary><div className="mt-1"><UnitChecks value={edit.org_unit_ids} onChange={(v) => setEdit({ ...edit, org_unit_ids: v })} /></div></details>
           <p className="text-xs text-slate-500">사용 중지·퇴사로 바꾸면 모든 기기에서 즉시 로그아웃되고 푸시·Google 동기화도 멈춥니다. 작성한 업무 기록은 남습니다.</p>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEdit(null)}>취소</Button><Button type="submit">저장</Button></div>
         </form>}
