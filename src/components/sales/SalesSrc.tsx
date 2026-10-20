@@ -41,6 +41,11 @@ function ContactRow({ phone, links, className }: { phone?: unknown; links?: [unk
 }
 const attUrl = (a: any) => (typeof a === 'string' ? a : a?.url ?? a?.href ?? '');
 const attName = (a: any, i: number) => (typeof a === 'object' && a?.name ? String(a.name) : `공고문 ${i + 1} 내려받기`);
+/** S1-4: 공공 사이트 첨부는 같은 도메인 중계(/api/bids/file, K-apt 는 /api/bids/kapt-file)로 — 앱 WebView 에서도 내려받기, 30MB·허용 사이트만 */
+const FILE_HOSTS = ['g2b.go.kr', 'ebid.lh.or.kr', 'apply.lh.or.kr', 'onbid.co.kr', 'nuri.go.kr', 'd2b.go.kr', 'k-apt.go.kr'];
+const fileHref = (url: string, name?: string) => { try { const h = new URL(url).hostname.toLowerCase(); if (!FILE_HOSTS.some((d) => h === d || h.endsWith('.' + d))) return url; const q = `u=${encodeURIComponent(url)}${name ? `&n=${encodeURIComponent(name)}` : ''}`; return h.endsWith('k-apt.go.kr') ? `/api/bids/kapt-file?${q}` : `/api/bids/file?${q}`; } catch { return url; } };
+const attHref = (a: any, i: number) => fileHref(attUrl(a), typeof a === 'object' && a?.name ? String(a.name) : undefined) || attUrl(a);
+const UNK2 = '후속조사 필요';
 /** 한국어 칸 표(값 없는 칸은 숨김) */
 function KoDl({ rows, testId }: { rows: [string, React.ReactNode][]; testId?: string }) {
   const R = rows.filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== false);
@@ -356,16 +361,23 @@ export function Bids({ initialTab }: { initialTab?: string }) {
 }
 /** 대표 검수 10/20 ②: 입찰 상세 — 한국어 칸만(공고명·단지·발주처·마감·예산·문서·연락처·상태·메모·다음 조치), 관리자 '원본 보기' 접힘 */
 function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
-  const docs = [n.url && <a key="u" href={n.url} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-url"><ExternalLink className="size-3.5" aria-hidden />원문 보기</a>,
-    ...(n.attachments ?? []).map((a: any, i: number) => attUrl(a) && <a key={i} href={attUrl(a)} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-file"><Download className="size-3.5" aria-hidden />{attName(a, i)}</a>)].filter(Boolean);
+  // S1-4: 원본 상세 그대로 — [공식 원문][공고문][첨부 각각], 정보 칸(마감·예산·낙찰·추정가격·계약방식·계약기간·공고일·DB 등록)은 값이 없으면 '후속조사 필요', 접힘 '과업·참가자격·요건 상세'
+  const docs = [n.url && <a key="u" href={n.url} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-url"><ExternalLink className="size-3.5" aria-hidden />공식 원문</a>,
+    ...(n.attachments ?? []).map((a: any, i: number) => attUrl(a) && <a key={i} href={attHref(a, i)} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-file"><Download className="size-3.5" aria-hidden />{attName(a, i)}</a>)].filter(Boolean);
+  const unk = (v: unknown) => (v === null || v === undefined || v === '' ? <span className="text-ink-3">{UNK2}</span> : v as React.ReactNode);
+  const D8: [string, unknown][] = [['주요 과업', n.detail?.tasks], ['참가 자격', n.detail?.qualification], ['실적 요건', n.detail?.performance], ['지역 제한', n.detail?.regionLimit], ['면허·등록', n.detail?.license], ['공동수급·하도급', n.detail?.joint], ['현장설명회', n.detail?.briefing], ['제안 발표', n.detail?.presentation]];
   return (
     <Modal open onClose={onClose} title={n.title} wide>
       <div className="space-y-3" data-testid="bid-detail">
-        <KoDl rows={[['공고명', n.title], ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['마감', n.deadline ? kdt(n.deadline) : '미확인'], ['예산', won(n.amount) || (n.amount ? String(n.amount) : null)],
-          ['공고일', n.noticeDate && kd(n.noticeDate)], ['DB 등록', n.posted && kd(n.posted)], ['출처', n.sourceLabel], ['분류', n.classification ?? n.category], ['판단', n.judgment], ['세대수', n.households && `${n.households}세대`], ['업종', n.industry], ['키워드', n.keywords],
-          ['낙찰', n.winner && [n.winner, won(n.awardAmount), n.awardDate && kd(n.awardDate)].filter(Boolean).join(' · ')],
-          ['문서', docs.length ? <span className="flex flex-wrap gap-1.5">{docs}</span> : null], ['연락처', n.phone && <ContactRow phone={n.phone} />],
+        <div className="flex flex-wrap gap-1.5 text-[11px]">{[n.classification ?? n.category, n.business && BIZ[n.business]?.[0], n.status, n.fit !== null && n.fit !== undefined && `적합 ${n.fit}`, n.sourceLabel && `${n.sourceLabel}${n.noticeNo ? ` ${n.noticeNo}` : ''}`].filter(Boolean).map((b, i) => <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">{String(b)}</span>)}</div>
+        <KoDl rows={[['공고명', n.title], ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.fitBusiness],
+          ['마감', n.deadline ? kdt(n.deadline) : unk(null)], ['예산', won(n.amount) || (n.amount ? String(n.amount) : unk(null))], ['낙찰', n.winner ? [n.winner, won(n.awardAmount), n.awardDate && kd(n.awardDate)].filter(Boolean).join(' · ') : unk(null)],
+          ['추정가격', won(n.estimated) || unk(n.estimated)], ['계약방식', unk(n.contractMethod)], ['계약기간', unk(n.contractPeriod)], ['공고일', n.noticeDate ? kd(n.noticeDate) : unk(null)], ['DB 등록', n.posted ? kd(n.posted) : unk(null)],
+          ['세대수', n.households && `${n.households}세대`], ['업종', n.industry], ['키워드', n.keywords], ['대표 판단', n.judgment && `${n.judgment}${n.salesPoint ? ` · 영업 포인트: ${n.salesPoint}` : ''}`], ['부족 자격', n.qualificationGap],
+          ['문서', docs.length ? <span className="flex flex-wrap gap-1.5">{docs}</span> : null], ['연락처', (n.phone || n.address || n.fax) && <span className="space-y-1"><ContactRow phone={n.phone} />{n.address && <span className="block text-xs text-ink-2">{String(n.address)}</span>}{n.fax && <span className="block text-xs text-ink-3">팩스 {String(n.fax)}</span>}</span>],
           ['상태', n.work], ['메모', n.workMemo], ['다음 조치', n.workNext && kd(n.workNext)]]} />
+        <details className="rounded-input border border-line p-2 text-sm" data-testid="bid-detail-more"><summary className="cursor-pointer text-ink-2">과업 · 참가자격 · 요건 상세{D8.some(([, v]) => v) ? '' : ' (아직 없음 — 후속조사)'}</summary>
+          <dl className="mt-2 grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1">{D8.map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="whitespace-pre-wrap break-words">{v ? String(v) : <span className="text-ink-3">{UNK2}</span>}</dd>])}</dl></details>
         {canWrite && <WorkPanel kind="bid" id={String(n.id)} cur={{ status: n.work, memo: n.workMemo, next: n.workNext, leadId: n.workLeadId }} onSaved={() => onChange?.()} />}
         <RawFold row={n.raw} admin={admin} testId="bid-raw" />
       </div>
@@ -467,7 +479,7 @@ function BidCard({ n, onOpen }: { n: any; onOpen?: () => void }) {
       {n.keywords && <div className="mt-0.5 hidden text-xs text-ink-3 md:block">키워드: {n.keywords}</div>}
       {n.judgment && <div className="mt-0.5 hidden text-xs text-ink-2 md:block">판단: {n.judgment}</div>}
       <div className="mt-1.5 flex flex-wrap items-end gap-1.5 text-xs">
-        <ContactRow phone={n.phone} links={[[n.url, '원문'], [attUrl(n.attachments?.[0]), n.attachments?.length > 1 ? `공고문 내려받기 ${n.attachments.length}건` : '공고문 내려받기']]} />
+        <ContactRow phone={n.phone} links={[[n.url, '원문'], [n.attachments?.length ? attHref(n.attachments[0], 0) : null, n.attachments?.length > 1 ? `공고문 내려받기 ${n.attachments.length}건` : '공고문 내려받기']]} />
         <span className="ml-auto font-medium text-ink" data-testid="bid-deadline">{n.deadline ? `마감 ${kdt(n.deadline)}` : '마감일 미확인'}</span>
       </div>
     </li>

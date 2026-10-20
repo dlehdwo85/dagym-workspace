@@ -64,7 +64,13 @@ const notice = (r: any) => ({ id: r.__id, title: pick(r, 'title', 'notice_title'
   complex: pick(r, 'complex_name', 'facility_name', 'apartment_name'), households: pick(r, 'households', 'total_households', 'units'), industry: pick(r, 'industry', 'business_type', 'work_type'),
   winner: pick(r, 'winner_name', 'award_company', 'successful_bidder'), awardAmount: pick(r, 'award_amount', 'winning_amount', 'contract_amount'), awardDate: day(pick(r, 'award_date', 'opened_at')),
   keywords: (() => { const k = pick(r, 'matched_keywords', 'keywords', 'keyword_hits'); return Array.isArray(k) ? k.join(', ') : k; })(), phone: pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone'),
-  todayNew: firstSeen(r) === new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()) });
+  todayNew: firstSeen(r) === new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()),
+  // S1-4(로컬 10/20): 원본 상세 화면 정보 칸(SALES_SCREEN_INVENTORY 2-5 상세) — 추정가격·계약방식·계약기간·공고번호·주소·팩스, 대표 판단·영업 포인트·부족 자격, 접힘 '과업·참가자격·요건 상세' 8칸. 칸 이름은 원본 스키마 1:1(S1-3)에서 다시 맞춤
+  noticeNo: pick(r, 'source_external_id', 'notice_no', 'bid_no', 'external_id'), noticeType: pick(r, 'notice_type', 'bid_category'), fitBusiness: pick(r, 'fit_business'),
+  estimated: pick(r, 'estimated_amount', 'estimated_price', 'presumed_price', 'base_amount'), contractMethod: pick(r, 'contract_method', 'award_method', 'bid_system', 'contract_type'), contractPeriod: pick(r, 'contract_period', 'contract_term', 'service_period'),
+  address: pick(r, 'office_address', 'address'), fax: pick(r, 'office_fax', 'fax'), salesPoint: pick(r, 'sales_point'), qualificationGap: pick(r, 'qualification_gap'),
+  detail: { tasks: pick(r, 'main_tasks', 'scope_of_work', 'tasks'), qualification: pick(r, 'qualification', 'participation_requirements', 'bid_qualification'), performance: pick(r, 'performance_requirements', 'track_record'),
+    regionLimit: pick(r, 'region_restriction', 'region_limit'), license: pick(r, 'license_requirements', 'license'), joint: pick(r, 'joint_bid', 'subcontract', 'consortium'), briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting'), presentation: pick(r, 'proposal_presentation', 'presentation') } });
 const SOURCE_LABEL: Record<string, string> = { kapt: 'K-apt', 'k-apt': 'K-apt', g2b: '나라장터', nara: '나라장터', g2b_pre: '나라장터 사전규격', nuri: '누리장터', lh: 'LH', lh_pre: 'LH 사전규격', defense: '국방', d2b: '국방', onbid: '온비드 임대', vendor: '협력사 모집' };
 /** 진행 중 입찰(SALES_SCREEN_INVENTORY 2-5·143행) — 현황 숫자와 입찰 '진행 중' 탭이 같은 기준: 관련 공고 · 마감·취소·낙찰·유찰 아님 · KST 마감일 ≥ 오늘(마감일 없으면 진행으로)
  * · 사전규격(입찰 예정)은 빼고 · 작업 상태 미참여·대상아님은 뺀다. 원본 상태 문구가 '공고중'만이 아니어서(운영 10/19 진행 중 0건) 닫힌 상태만 거른다 */

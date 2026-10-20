@@ -1260,6 +1260,12 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 시험: tests/api/sales-work.test.mjs 5건 · E2E sales-work.step.mjs(390, 캡처 143).
 - 남은 S1: S1-1 수집기 12개 이식(원본 코드 필요 — docs/sales-src 또는 add_repo) · S1-3 pick() 칸 이름 원본 스키마 1:1(원본 0001~0037 스키마 필요) · S1-4 입찰 상세 칸(예산·추정가·계약방식·참가자격·과업·첨부 개별)+/api/bids/file·kapt-file 중계. 감사 문서(AUDIT_SALES_MIGRATION 등)가 origin/main 에 오르면 그 근거로.
 
+## 2026-10-20 클라우드 — 로컬 최우선 S1-4 입찰 상세 칸 + 첨부 중계 (배포)
+- 입찰 상세(앱·PC 같은 모달): 배지(분류·사업·상태·적합도·출처/공고번호) · 정보 칸 마감·예산·낙찰·추정가격·계약방식·계약기간·공고일·DB 등록(값 없으면 **'후속조사 필요'**) · 대표 판단(+영업 포인트)·부족 자격 · 접힘 "과업 · 참가자격 · 요건 상세" 8칸(주요 과업/참가 자격/실적 요건/지역 제한/면허·등록/공동수급·하도급/현장설명회/제안 발표) · 문서 [공식 원문][첨부 각각] · 연락처(전화·문자·주소·팩스). 원본 2-5 상세 그대로. notice() 에 noticeNo·noticeType·fitBusiness·estimated·contractMethod·contractPeriod·address·fax·salesPoint·qualificationGap·detail{8} 추가(칸 이름 후보 — S1-3 에서 원본 스키마 1:1 로 다시 맞춤).
+- 첨부 중계(원본 /api/bids/file?u=&n= · /api/bids/kapt-file?bid=&seq=|u= 그대로, src/lib/sales/files.ts): 로그인+영업 공간 · 허용 공공 사이트만(g2b·LH ebid/apply·온비드·누리·국방 d2b·k-apt, SALES_FILE_HOSTS 로 추가; 아니면 403) · https 만 · 리다이렉트 안 따라감(502) · 30MB 상한(413, 길이 없어도 30MB 에서 끊음) · octet-stream 강제 내려받기(한글 이름 filename*) · 저장 안 함. 화면은 허용 사이트 첨부만 중계 주소로 바꾸고(fileHref) 그 밖은 직접 링크. K-apt 세션 확인은 수집기 이식(S1-1)과 함께.
+- 시험: tests/api/bids-file.test.mjs 4건(401/403/400·octet-stream·이름 인코딩·리다이렉트 502·413·길이 없음·K-apt 400·공간 없는 직원 404) · E2E ② 앱 영업 단계에 후속조사 필요·접힘·중계 href 확인 추가.
+- 남은 S1: S1-1 수집기 12개 이식 · S1-3 칸 이름 1:1 — 원본 코드·스키마(0001~0037) 필요(로컬이 docs/sales-src 로 복사 또는 add_repo). 그동안 S2(홈 7묶음·영업기회 요약·제안/계약 ROI·리드 폼/상세·AI 영업 도구)로.
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md
