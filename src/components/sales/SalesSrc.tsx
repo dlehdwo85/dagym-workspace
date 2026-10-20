@@ -95,19 +95,48 @@ function WorkPanel({ kind, id, cur, onSaved }: { kind: 'bid' | 'building' | 'fac
   );
 }
 /** S1-2 제안·계약 등록(전환 뒤): 리드 고르기 · 제목 · 금액 · 날짜 · 메모 */
-function RecordForm({ kind, leads, onSaved }: { kind: 'proposals' | 'contracts'; leads: { id: string; name: string }[]; onSaved: () => void }) {
-  const [f, setF] = useState({ leadId: '', title: '', amount: '', date: '', memo: '' }); const [busy, setBusy] = useState(false);
+/** S2 2차(감사 1-16): 제안 = 제목·버전·제안금액·최종금액·월 운영비·제안일·계약 예상일·상태·사업·메모 / 계약 = 제목·금액·계약일·시작·종료·PM·재계약 단계·상태·사업·메모 */
+const REC_EMPTY = { leadId: '', title: '', amount: '', date: '', memo: '', version: 'v1', finalAmount: '', monthlyFee: '', expectedContractDate: '', startDate: '', endDate: '', pm: '', renewStage: '', business: '', status: '' };
+const PROPOSAL_STATUS = ['제안', '검토중', '수정 요청', '채택', '탈락'];
+const CONTRACT_STATUS = ['계약', '진행중', '종료', '해지'];
+const RENEW_STAGE = ['영업 전', '영업 시작', '제안', '재입찰', '종료'];
+const numOf = (v: string) => (v.trim() ? Number(v.replace(/[,\s원]/g, '')) : null);
+function RecordForm({ kind, leads, onSaved, leadId }: { kind: 'proposals' | 'contracts'; leads: { id: string; name: string }[]; onSaved: () => void; leadId?: string }) {
+  const [f, setF] = useState({ ...REC_EMPTY, leadId: leadId ?? '' }); const [busy, setBusy] = useState(false); const [more, setMore] = useState(false);
+  const set = (k: keyof typeof REC_EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   async function submit(e: React.FormEvent) {
     e.preventDefault(); if (!f.leadId || !f.title.trim()) return; setBusy(true);
-    try { await api(`/api/sales/leads/${f.leadId}/records`, { body: { kind, title: f.title.trim(), amount: f.amount ? Number(f.amount.replace(/[,\s]/g, '')) : null, date: f.date || null, memo: f.memo || undefined } }); toast.ok('등록했습니다'); setF({ leadId: '', title: '', amount: '', date: '', memo: '' }); onSaved(); } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+    const base = { kind, title: f.title.trim(), amount: numOf(f.amount), date: f.date || null, memo: f.memo || undefined, status: f.status || undefined, business: f.business || undefined };
+    const body = kind === 'proposals' ? { ...base, version: f.version || undefined, finalAmount: numOf(f.finalAmount), monthlyFee: numOf(f.monthlyFee), expectedContractDate: f.expectedContractDate || null }
+      : { ...base, startDate: f.startDate || null, endDate: f.endDate || null, pm: f.pm || undefined, renewStage: f.renewStage || undefined };
+    try { await api(`/api/sales/leads/${f.leadId}/records`, { body }); toast.ok('등록했습니다'); setF({ ...REC_EMPTY, leadId: leadId ?? '' }); onSaved(); } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
+  const P = kind === 'proposals';
   return (
-    <form onSubmit={submit} className="grid gap-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm sm:grid-cols-[1fr_1fr_8rem_9rem_auto]" data-testid={`record-form-${kind}`}>
-      <select className={inputCls} value={f.leadId} onChange={(e) => setF({ ...f, leadId: e.target.value })} aria-label="거래처(리드)" required data-testid="record-lead"><option value="">거래처(리드) 고르기</option>{leads.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select>
-      <input className={inputCls} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={kind === 'proposals' ? '제안·견적 제목' : '계약 제목'} maxLength={300} required aria-label="제목" data-testid="record-title" />
-      <input className={inputCls} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} placeholder="금액(원)" inputMode="numeric" aria-label="금액" data-testid="record-amount" />
-      <input type="date" className={inputCls} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} aria-label="날짜" />
-      <Button size="sm" disabled={busy || !f.leadId || !f.title.trim()} data-testid="record-save">{kind === 'proposals' ? '제안 등록' : '계약 등록'}</Button>
+    <form onSubmit={submit} className="grid gap-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm" data-testid={`record-form-${kind}`}>
+      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_8rem_9rem_auto]">
+        {leadId ? null : <select className={inputCls} value={f.leadId} onChange={set('leadId')} aria-label="거래처(리드)" required data-testid="record-lead"><option value="">거래처(리드) 고르기</option>{leads.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select>}
+        <input className={inputCls} value={f.title} onChange={set('title')} placeholder={P ? '제안·견적 제목' : '계약 제목'} maxLength={300} required aria-label="제목" data-testid="record-title" />
+        <input className={inputCls} value={f.amount} onChange={set('amount')} placeholder={P ? '제안 금액(원)' : '계약 금액(원)'} inputMode="numeric" aria-label="금액" data-testid="record-amount" />
+        <input type="date" className={inputCls} value={f.date} onChange={set('date')} aria-label={P ? '제안일' : '계약일'} />
+        <div className="flex gap-1"><Button size="sm" disabled={busy || !f.leadId || !f.title.trim()} data-testid="record-save">{P ? '제안 등록' : '계약 등록'}</Button><Button type="button" size="sm" variant="secondary" onClick={() => setMore(!more)} data-testid="record-more">{more ? '간단히' : '칸 더'}</Button></div>
+      </div>
+      {more && <div className="grid gap-2 sm:grid-cols-4" data-testid="record-more-fields">
+        {P ? <>
+          <Field label="버전"><input className={inputCls} value={f.version} onChange={set('version')} maxLength={20} aria-label="버전" /></Field>
+          <Field label="최종 금액(원)"><input className={inputCls} value={f.finalAmount} onChange={set('finalAmount')} inputMode="numeric" aria-label="최종 금액" data-testid="record-final" /></Field>
+          <Field label="월 운영비(원)"><input className={inputCls} value={f.monthlyFee} onChange={set('monthlyFee')} inputMode="numeric" aria-label="월 운영비" /></Field>
+          <Field label="계약 예상일"><input type="date" className={inputCls} value={f.expectedContractDate} onChange={set('expectedContractDate')} aria-label="계약 예상일" /></Field>
+        </> : <>
+          <Field label="시작일"><input type="date" className={inputCls} value={f.startDate} onChange={set('startDate')} aria-label="시작일" /></Field>
+          <Field label="종료일"><input type="date" className={inputCls} value={f.endDate} onChange={set('endDate')} aria-label="종료일" data-testid="record-end" /></Field>
+          <Field label="PM(담당)"><input className={inputCls} value={f.pm} onChange={set('pm')} maxLength={60} aria-label="PM" /></Field>
+          <Field label="재계약 단계"><select className={inputCls} value={f.renewStage} onChange={set('renewStage')} aria-label="재계약 단계"><option value="">—</option>{RENEW_STAGE.map((x) => <option key={x}>{x}</option>)}</select></Field>
+        </>}
+        <Field label="상태"><select className={inputCls} value={f.status} onChange={set('status')} aria-label="상태">{(P ? PROPOSAL_STATUS : CONTRACT_STATUS).map((x) => <option key={x}>{x}</option>)}</select></Field>
+        <Field label="사업"><input className={inputCls} value={f.business} onChange={set('business')} maxLength={60} placeholder="예: 커뮤니티 운영" aria-label="사업" /></Field>
+        <Field label="메모" className="sm:col-span-2"><input className={inputCls} value={f.memo} onChange={set('memo')} maxLength={2000} aria-label="메모" /></Field>
+      </div>}
     </form>
   );
 }
@@ -261,30 +290,82 @@ function BulkBar({ kind, ids, onDone, onClear }: { kind: 'bid' | 'building' | 'f
 /** 전환 뒤: 단계(보류·실패는 사유 필수)·다음 연락일·메모·담당(관리자) 고치기 + 상담 기록 추가 */
 function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () => void }) {
   const l = data.lead;
-  const [f, setF] = useState({ status: l.status ?? '신규리드', reason: '', next: l.next ?? '', memo: l.memo ?? '', owner: l.ownerId ?? '' });
-  const [act, setAct] = useState({ type: '전화', content: '' });
+  const [f, setF] = useState({ status: l.status ?? '신규리드', reason: '', next: l.next ?? '', memo: l.memo ?? '', owner: l.ownerId ?? '',
+    facility: l.facility ?? '', region: l.region ?? '', scale: l.scale ?? '', revenue: l.revenue ? String(l.revenue) : '', contact: l.contact ?? '', phone: l.phone ?? '', email: l.email ?? '', homepage: l.homepage ?? '' });
+  const [act, setAct] = useState({ type: '전화', content: '', nextDate: '', nextAction: '', request: '' });
   const needReason = (f.status === '보류' || f.status === '실패') && f.status !== l.status;
+  const S = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   async function save() {
-    try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body: { ...(f.status !== l.status ? { status: f.status, reason: f.reason || undefined } : {}), nextContactDate: f.next || null, memo: f.memo || null, ...(data.canAssign && f.owner !== (l.ownerId ?? '') ? { ownerId: f.owner || null } : {}) } });
+    try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body: { ...(f.status !== l.status ? { status: f.status, reason: f.reason || undefined } : {}), nextContactDate: f.next || null, memo: f.memo || null, ...(data.canAssign && f.owner !== (l.ownerId ?? '') ? { ownerId: f.owner || null } : {}),
+      facilityType: f.facility || null, region: f.region || null, scale: f.scale || null, expectedRevenue: numOf(f.revenue), contactName: f.contact || null, phone: f.phone || null, email: f.email || null, homepage: f.homepage || null } });
       toast.ok('저장했습니다'); setF({ ...f, reason: '' }); onSaved(); } catch (e: any) { toast.error(e.message); }
   }
-  async function addAct() { try { await api(`/api/sales/leads/${id}/activities`, { body: act }); setAct({ ...act, content: '' }); toast.ok('상담 기록을 남겼습니다'); onSaved(); } catch (e: any) { toast.error(e.message); } }
+  async function addAct() {
+    try { await api(`/api/sales/leads/${id}/activities`, { body: { type: act.type, content: act.content, nextDate: act.nextDate || null, nextAction: act.nextAction || undefined, request: act.request || undefined } }); setAct({ type: act.type, content: '', nextDate: '', nextAction: '', request: '' }); toast.ok(act.nextDate ? '상담 기록을 남기고 다음 연락일을 바꿨습니다' : '상담 기록을 남겼습니다'); onSaved(); } catch (e: any) { toast.error(e.message); }
+  }
   return (
     <div className="space-y-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm" data-testid="sales-lead-edit">
       <div className="grid gap-2 sm:grid-cols-3">
-        <Field label="단계"><select className={inputCls} value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} aria-label="단계" data-testid="lead-status">{data.stages.map((s: string) => <option key={s}>{s}</option>)}</select></Field>
-        <Field label="다음 연락일"><input type="date" className={inputCls} value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} aria-label="다음 연락일" data-testid="lead-next" /></Field>
-        {data.canAssign && <Field label="담당"><select className={inputCls} value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })} aria-label="담당"><option value="">없음</option>{data.people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>}
+        <Field label="단계"><select className={inputCls} value={f.status} onChange={S('status')} aria-label="단계" data-testid="lead-status">{data.stages.map((s: string) => <option key={s}>{s}</option>)}</select></Field>
+        <Field label="다음 연락일"><input type="date" className={inputCls} value={f.next} onChange={S('next')} aria-label="다음 연락일" data-testid="lead-next" /></Field>
+        {data.canAssign && <Field label="담당"><select className={inputCls} value={f.owner} onChange={S('owner')} aria-label="담당" data-testid="lead-owner"><option value="">없음</option>{data.people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>}
       </div>
-      {needReason && <Field label={`${f.status} 사유(필수)`}><input className={inputCls} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} maxLength={500} aria-label="사유" data-testid="lead-reason" /></Field>}
-      <Field label="메모"><textarea className={inputCls} rows={2} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} maxLength={5000} aria-label="메모" /></Field>
+      {needReason && <Field label={`${f.status} 사유(필수)`}><input className={inputCls} value={f.reason} onChange={S('reason')} maxLength={500} aria-label="사유" data-testid="lead-reason" /></Field>}
+      {/* S2 2차(감사 1-13): 리드 폼 칸 — 시설·지역·규모·예상매출·고객 담당자·연락처·이메일·홈페이지 */}
+      <details className="rounded-input border border-blue-100 bg-white/60 p-2" data-testid="lead-info-edit"><summary className="cursor-pointer text-xs text-ink-2">정보 수정 — 시설·지역·규모·예상매출·연락처·이메일·홈페이지</summary>
+        <div className="mt-2 grid gap-2 sm:grid-cols-4">
+          <Field label="시설 유형"><input className={inputCls} value={f.facility} onChange={S('facility')} maxLength={100} aria-label="시설 유형" data-testid="lead-facility" /></Field>
+          <Field label="지역"><input className={inputCls} value={f.region} onChange={S('region')} maxLength={50} aria-label="지역" /></Field>
+          <Field label="규모"><input className={inputCls} value={f.scale} onChange={S('scale')} maxLength={60} placeholder="예: 1,200세대" aria-label="규모" data-testid="lead-scale" /></Field>
+          <Field label="예상매출(원)"><input className={inputCls} value={f.revenue} onChange={S('revenue')} inputMode="numeric" aria-label="예상매출" data-testid="lead-revenue" /></Field>
+          <Field label="고객 담당자"><input className={inputCls} value={f.contact} onChange={S('contact')} maxLength={100} aria-label="고객 담당자" /></Field>
+          <Field label="연락처"><input className={inputCls} value={f.phone} onChange={S('phone')} maxLength={40} inputMode="tel" aria-label="연락처" /></Field>
+          <Field label="이메일"><input className={inputCls} value={f.email} onChange={S('email')} maxLength={200} inputMode="email" aria-label="이메일" data-testid="lead-email" /></Field>
+          <Field label="홈페이지"><input className={inputCls} value={f.homepage} onChange={S('homepage')} maxLength={300} inputMode="url" aria-label="홈페이지" /></Field>
+        </div></details>
+      <Field label="메모"><textarea className={inputCls} rows={2} value={f.memo} onChange={S('memo')} maxLength={5000} aria-label="메모" /></Field>
       <div className="flex justify-end"><Button size="sm" onClick={save} disabled={needReason && !f.reason.trim()} data-testid="lead-save">저장</Button></div>
-      <div className="flex flex-wrap items-end gap-2 border-t border-blue-100 pt-2">
-        <select className={cx(inputCls, 'h-8 w-24 py-1')} value={act.type} onChange={(e) => setAct({ ...act, type: e.target.value })} aria-label="상담 종류">{['전화', '방문', '미팅', '메일', '문자', '기타'].map((x) => <option key={x}>{x}</option>)}</select>
-        <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={act.content} onChange={(e) => setAct({ ...act, content: e.target.value })} placeholder="상담 내용" aria-label="상담 내용" data-testid="lead-act" />
-        <Button size="sm" variant="secondary" onClick={addAct} disabled={!act.content.trim()} data-testid="lead-act-add">상담 기록</Button>
+      {/* S2 2차(감사 1-14): 상담 입력 = 종류·내용 + 다음 연락 예정일·다음 액션·고객 요청 → 다음 연락일·영업 업무 마감이 같이 바뀜 */}
+      <div className="space-y-1.5 border-t border-blue-100 pt-2" data-testid="lead-act-form">
+        <div className="flex flex-wrap items-end gap-2">
+          <select className={cx(inputCls, 'h-8 w-24 py-1')} value={act.type} onChange={(e) => setAct({ ...act, type: e.target.value })} aria-label="상담 종류">{['전화', '방문', '미팅', '메일', '문자', '기타'].map((x) => <option key={x}>{x}</option>)}</select>
+          <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={act.content} onChange={(e) => setAct({ ...act, content: e.target.value })} placeholder="상담 내용" aria-label="상담 내용" data-testid="lead-act" />
+          <Button size="sm" variant="secondary" onClick={addAct} disabled={!act.content.trim()} data-testid="lead-act-add">상담 기록</Button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <input type="date" className={cx(inputCls, 'h-8 py-1 text-xs')} value={act.nextDate} onChange={(e) => setAct({ ...act, nextDate: e.target.value })} aria-label="다음 연락 예정일" title="다음 연락 예정일" data-testid="lead-act-next" />
+          <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={act.nextAction} onChange={(e) => setAct({ ...act, nextAction: e.target.value })} placeholder="다음 액션(예: 제안서 발송)" maxLength={200} aria-label="다음 액션" data-testid="lead-act-action" />
+          <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={act.request} onChange={(e) => setAct({ ...act, request: e.target.value })} placeholder="고객 요청 사항" maxLength={2000} aria-label="고객 요청" />
+        </div>
       </div>
       {!!data.statusLog?.length && <ul className="space-y-0.5 text-[11px] text-ink-2">{data.statusLog.map((g: any, i: number) => <li key={i}>{fmtDateTime(g.changed_at)} · {g.by ?? ''} · {g.from_status ?? '—'} → {g.to_status}{g.reason ? ` (${g.reason})` : ''}</li>)}</ul>}
+    </div>
+  );
+}
+
+const TL_ICON: Record<string, string> = { act: '💬', status: '🔁', task: '✅', proposal: '📄', contract: '🤝' };
+/** S2 2차: 업무 탭 — 워크인 업무(lead_id) 목록 + 추가, 아래에 옮겨 온 원본 업무 */
+function LeadTasks({ id, data, onSaved }: { id: string; data: any; onSaved: () => void }) {
+  const [t, setT] = useState({ title: '', due: '', assignee: '' });
+  async function add(e: React.FormEvent) {
+    e.preventDefault(); if (!t.title.trim()) return;
+    try { await api(`/api/sales/leads/${id}/tasks`, { body: { title: t.title.trim(), dueDate: t.due || null, assigneeId: t.assignee || undefined } }); setT({ title: '', due: '', assignee: '' }); toast.ok('업무를 만들었습니다'); onSaved(); } catch (er: any) { toast.error(er.message); }
+  }
+  return (
+    <div className="space-y-2" data-testid="lead-tasks">
+      {data.readOnly === false && <form onSubmit={add} className="grid gap-2 rounded-input border border-blue-200 bg-blue-50/40 p-2 text-sm sm:grid-cols-[1fr_9rem_8rem_auto]">
+        <input className={cx(inputCls, 'h-8 py-1')} value={t.title} onChange={(e) => setT({ ...t, title: e.target.value })} placeholder="업무 제목(예: 제안서 보내기)" maxLength={200} aria-label="업무 제목" data-testid="lead-task-title" />
+        <input type="date" className={cx(inputCls, 'h-8 py-1 text-xs')} value={t.due} onChange={(e) => setT({ ...t, due: e.target.value })} aria-label="마감" />
+        {data.canAssign ? <select className={cx(inputCls, 'h-8 py-1 text-xs')} value={t.assignee} onChange={(e) => setT({ ...t, assignee: e.target.value })} aria-label="담당"><option value="">담당(리드 담당)</option>{data.people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select> : <span />}
+        <Button size="sm" disabled={!t.title.trim()} data-testid="lead-task-add">업무 추가</Button>
+      </form>}
+      <ul className="divide-y divide-line rounded-input border border-line text-sm">{(data.wTasks ?? []).map((x: any) => <li key={x.id} className="flex flex-wrap items-center gap-2 p-2" data-testid="lead-task">
+        <Link href={`/tasks/${x.id}`} className={cx('min-w-0 flex-1 truncate font-medium', x.status === 'done' && 'text-ink-3 line-through')}>{x.title}</Link>
+        {x.sales_ref?.manual ? null : <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-ink-2">자동</span>}
+        <span className="text-xs text-ink-2">{x.assignee ?? ''}</span><span className={cx('text-xs tabular-nums', x.status !== 'done' && x.due_date && x.due_date < today() ? 'font-semibold text-red-600' : 'text-ink-3')}>{kd(x.due_date)}</span>
+        <span className="text-[11px] text-ink-3">{x.status === 'done' ? '완료' : x.status === 'on_hold' ? '보류' : x.status === 'in_progress' ? '진행' : '할 일'}</span></li>)}
+        {!(data.wTasks ?? []).length && <li className="p-3 text-xs text-ink-3">아직 업무가 없습니다 — 상태를 바꾸거나 다음 연락일을 적으면 자동으로 생깁니다</li>}</ul>
+      {!!data.tasks?.length && <details className="text-xs"><summary className="cursor-pointer text-ink-3">옮겨 온 원본 업무 {data.tasks.length}</summary><ul className="mt-1 space-y-2">{data.tasks.map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Rec row={r} admin={data.canAssign} /></li>)}</ul></details>}
     </div>
   );
 }
@@ -292,88 +373,208 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
 function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange?: () => void }) {
   const { data, error, reload } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`);
   const [tab, setTab] = useState('info');
-  const tabs: [string, string, any[] | null][] = data ? [['info', '정보', null], ['acts', `상담 ${data.activities.length}`, data.activities], ['timing', `시점 ${data.timing.length}`, data.timing], ['tasks', `업무 ${data.tasks.length}`, data.tasks],
-    ['props', `제안 ${data.proposals.length}`, data.proposals], ['cons', `계약 ${data.contracts.length}`, data.contracts], ['work', `입찰 ${data.work.length}`, data.work], ['int', `관심사업 ${data.interests.length}`, data.interests]] : [];
+  const [del, setDel] = useState<string | null>(null);
+  const tabs: [string, string, any[] | null][] = data ? [['info', '정보', null], ['acts', `상담 ${data.activities.length}`, data.activities], ['tasks', `업무 ${(data.wTasks ?? []).length + data.tasks.length}`, null], ['timeline', `타임라인 ${(data.timeline ?? []).length}`, null],
+    ['props', `제안 ${data.proposals.length}`, data.proposals], ['cons', `계약 ${data.contracts.length}`, data.contracts], ['timing', `시점 ${data.timing.length}`, data.timing], ['work', `입찰 ${data.work.length}`, data.work], ['int', `관심사업 ${data.interests.length}`, data.interests]] : [];
+  async function remove() {
+    if (!del?.trim()) return;
+    try { await api(`/api/sales/leads/${id}`, { method: 'DELETE', body: { reason: del.trim() } }); toast.ok('리드를 지웠습니다'); onChange?.(); onClose(); } catch (e: any) { toast.error(e.message); }
+  }
+  const list = tabs.find((t) => t[0] === tab)?.[2];
   return (
     <Modal open onClose={onClose} title={data?.lead.name ?? '리드'} wide>
       {error ? <ErrorBox error={error} /> : !data ? <Skeleton rows={4} /> : (
         <div className="space-y-3" data-testid="sales-lead-detail">
           <AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesLead} subject={`거래처 ${data.lead.name}`} compact testId="ai-ask-lead" />
           <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {kd(data.lead.next)}</span>}</div>
-          <div className="flex flex-wrap gap-1 border-b border-line">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined}>{l}</button>)}</div>
-          {tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}
+          <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-line px-1">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('shrink-0 px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`lead-tab-${k}`}>{l}</button>)}</div>
+          {tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '') + (data.lead.updated ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}
             {/* 로컬 10/19: 사람이 보는 칸만 한국어로 — 내부 id·원본 키는 숨기고, 원본 전체는 관리자만 접힘 안에 */}
             <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1 text-sm" data-testid="lead-info">
-              {([['거래처명', data.lead.name], ['단계', data.lead.status], ['우선순위', data.lead.priority], ['시설', data.lead.facility], ['지역', data.lead.region], ['담당', data.lead.owner], ['다음 연락', data.lead.next && kd(data.lead.next)],
-                ['연락처', [data.lead.contact, data.lead.phone].filter(Boolean).join(' · ')], ['홈페이지', data.lead.homepage && <a href={data.lead.homepage} target="_blank" rel="noopener noreferrer" className="underline" style={{ color: C }}>{String(data.lead.homepage).replace(/^https?:\/\//, '')}</a>], ['예상매출', won(data.lead.revenue)], ['최근 활동', data.lead.updated && kd(data.lead.updated)], ['메모', data.lead.memo]] as [string, unknown][])
+              {([['거래처명', data.lead.name], ['단계', data.lead.status], ['우선순위', data.lead.priority], ['시설', data.lead.facility], ['지역', data.lead.region], ['규모', data.lead.scale], ['담당', data.lead.owner], ['다음 연락', data.lead.next && kd(data.lead.next)],
+                ['연락처', [data.lead.contact, data.lead.phone].filter(Boolean).join(' · ')], ['이메일', data.lead.email && <a href={`mailto:${data.lead.email}`} className="underline" style={{ color: C }}>{data.lead.email}</a>], ['홈페이지', data.lead.homepage && <a href={data.lead.homepage} target="_blank" rel="noopener noreferrer" className="underline" style={{ color: C }}>{String(data.lead.homepage).replace(/^https?:\/\//, '')}</a>], ['예상매출', won(data.lead.revenue)], ['최근 활동', data.lead.lastActivity && kd(data.lead.lastActivity)], ['등록일', data.lead.created && kd(data.lead.created)], ['메모', data.lead.memo]] as [string, unknown][])
                 .filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + ':v'} className="whitespace-pre-wrap break-words">{typeof v === 'string' || typeof v === 'number' ? String(v) : (v as React.ReactNode)}</dd>])}
             </dl>
             <ContactRow phone={data.lead.phone} />
-            <RawFold row={data.raw} admin={data.canAssign} testId="lead-raw" /></> : <ul className="space-y-2">{(tabs.find((t) => t[0] === tab)?.[2] ?? []).map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Rec row={r} admin={data.canAssign} /></li>)}
-            {!(tabs.find((t) => t[0] === tab)?.[2] ?? []).length && <li className="text-xs text-ink-3">없음</li>}</ul>}
+            <RawFold row={data.raw} admin={data.canAssign} testId="lead-raw" />
+            {/* S2 2차(감사 1-14): 삭제 — 사유 필수, 감사 기록, 열린 영업 업무 완료 처리 */}
+            {data.readOnly === false && data.canDelete && (del === null ? <div className="flex justify-end"><button type="button" onClick={() => setDel('')} className="text-xs text-red-600 underline" data-testid="lead-delete">리드 삭제</button></div>
+              : <div className="flex flex-wrap items-center gap-2 rounded-input border border-red-200 bg-red-50 p-2 text-xs" data-testid="lead-delete-box"><span className="text-red-700">삭제 사유(필수) — 기록이 남고 목록에서 사라집니다</span><input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={del} onChange={(e) => setDel(e.target.value)} maxLength={500} aria-label="삭제 사유" data-testid="lead-delete-reason" autoFocus />
+                <Button size="sm" variant="danger" onClick={remove} disabled={!del.trim()} data-testid="lead-delete-go">삭제</Button><Button size="sm" variant="secondary" onClick={() => setDel(null)}>취소</Button></div>)}</>
+            : tab === 'tasks' ? <LeadTasks id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />
+            : tab === 'timeline' ? <ol className="space-y-1.5 text-sm" data-testid="lead-timeline">{(data.timeline ?? []).map((x: any) => <li key={x.kind + x.id} className="flex gap-2 rounded-input border border-line p-2"><span aria-hidden>{TL_ICON[x.kind] ?? '•'}</span><span className="min-w-0 flex-1">{x.href ? <Link href={x.href} className="underline">{x.title}</Link> : x.title}{x.by && <span className="ml-1 text-xs text-ink-3">{x.by}</span>}</span><span className="shrink-0 text-xs tabular-nums text-ink-3">{kdt(x.at)}</span></li>)}{!(data.timeline ?? []).length && <li className="text-xs text-ink-3">아직 기록이 없습니다</li>}</ol>
+            : <ul className="space-y-2">{(tab === 'props' || tab === 'cons') && data.readOnly === false && <li><RecordForm kind={tab === 'props' ? 'proposals' : 'contracts'} leads={[]} leadId={id} onSaved={() => { reload(); onChange?.(); }} /></li>}
+              {(list ?? []).map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Rec row={r} admin={data.canAssign} /></li>)}
+              {!(list ?? []).length && <li className="text-xs text-ink-3">없음</li>}</ul>}
         </div>
       )}
     </Modal>
   );
 }
 
+/** S2 2차(감사 1-13·1-15): 거래처 보기 4(표·카드·단계별·간단) · 빠른 칩 6 · 정렬 5 · 필터(단계·우선·담당·지역) · 단계 요약 · CSV 내보내기/가져오기 · 새 리드 13칸(비슷한 거래처 경고) */
+const LEAD_VIEWS: [string, string][] = [['table', '표'], ['cards', '카드'], ['stages', '단계별'], ['compact', '간단']];
+const LEAD_CHIPS: [string, string][] = [['mine', '내 담당'], ['today', '오늘 연락'], ['overdue', '연락 지남'], ['week', '이번 주 연락'], ['stale', '30일 조용함'], ['high', '우선 높음']];
+const LEAD_SORTS: [string, string][] = [['activity', '최근 활동순'], ['next', '다음 연락순'], ['name', '이름순'], ['revenue', '예상매출순'], ['created', '등록순']];
+const PRI_KO: Record<string, string> = { urgent: '긴급', high: '높음', medium: '보통', low: '낮음' };
+const CSV_COLS: [string, string][] = [['name', '거래처명'], ['status', '단계'], ['priority', '우선순위'], ['facility', '시설'], ['region', '지역'], ['scale', '규모'], ['owner', '담당'], ['contact', '고객 담당자'], ['phone', '연락처'], ['email', '이메일'], ['homepage', '홈페이지'], ['revenue', '예상매출'], ['next', '다음 연락일'], ['lastActivity', '최근 활동'], ['created', '등록일'], ['memo', '메모']];
+const csvCell = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+/** CSV 한 줄씩(따옴표·줄바꿈 처리) */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = []; let row: string[] = []; let cell = ''; let q = false;
+  for (let i = 0; i < text.length; i++) { const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true; else if (c === ',') { row.push(cell); cell = ''; } else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; } else cell += c; }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((x) => x.trim()));
+}
+/** UTF-8(BOM 포함) 먼저, 깨지면 CP949(euc-kr) — 엑셀 저장 CSV */
+async function readCsvFile(file: File) {
+  const buf = await file.arrayBuffer();
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^﻿/, ''); } catch { return new TextDecoder('euc-kr').decode(buf); }
+}
+const IMPORT_MAP: [RegExp, string][] = [[/거래처|회사|이름|^name$|company/i, 'name'], [/단계|상태|status|stage/i, 'status'], [/우선|priority/i, 'priority'], [/시설|유형|facility|type/i, 'facilityType'], [/지역|region|area/i, 'region'], [/규모|scale|size|세대/i, 'scale'],
+  [/고객.?담당|담당자|contact.?name|manager/i, 'contactName'], [/연락처|전화|phone|tel/i, 'phone'], [/이메일|e-?mail/i, 'email'], [/홈페이지|website|url|homepage/i, 'homepage'], [/매출|금액|revenue|amount/i, 'expectedRevenue'], [/다음.?연락|next/i, 'nextContactDate'], [/메모|비고|memo|note/i, 'memo']];
 export function Leads({ initialId, initialDay }: { initialId?: string; initialDay?: string }) {
   const [s, setS] = useState(''); const [status, setStatus] = useState(''); const [open, setOpen] = useState<string | null>(initialId ?? null);
   const [day, setDay] = useState(initialDay === 'today' ? 'today' : ''); // 영업 현황 '오늘 연락할 리드'
+  const [view, setView] = useState('table'); const [chips, setChips] = useState<string[]>([]); const [sort, setSort] = useState('activity');
+  const [fPri, setFPri] = useState(''); const [fOwner, setFOwner] = useState(''); const [fRegion, setFRegion] = useState('');
+  const [imp, setImp] = useState<{ rows: Record<string, unknown>[]; file: string; skipped: string[]; done?: { created: number; skipped: string[] } } | null>(null);
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, status, day })}`, [s, status, day]);
+  useEffect(() => { try { const v = localStorage.getItem('sales-leads-view'); if (v && LEAD_VIEWS.some(([k]) => k === v)) setView(v); } catch { /* 없음 */ } }, []);
+  const pickView = (v: string) => { setView(v); try { localStorage.setItem('sales-leads-view', v); } catch { /* 없음 */ } };
   // 로컬 검수 10/19: prompt() 는 브라우저·자동화 환경에서 막힐 수 있어 입력 창으로
-  const [nl, setNl] = useState<{ name: string; region: string; contactName: string; phone: string } | null>(null);
+  const [nl, setNl] = useState<Record<string, string> | null>(null);
+  const [similar, setSimilar] = useState<{ id: string; name: string; status: string | null; region: string | null }[] | null>(null); // 비슷한 거래처(미리 보기 + 만들기 때 경고)
+  const [forceNew, setForceNew] = useState(false);
+  const EMPTY_NL = { name: '', status: '신규리드', priority: '', facilityType: '', region: '', scale: '', expectedRevenue: '', contactName: '', phone: '', email: '', homepage: '', nextContactDate: '', memo: '', ownerId: '' };
   // 앱 더보기 › 만들기 › 새 리드(?new=1): 쓰기 열린 회사면 입력 창 바로
   async function patchLead(id: string, body: Record<string, unknown>) {
     try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body }); toast.ok('저장했습니다'); reload(); } catch (e: any) { toast.error(e.message); reload(); }
   }
-  useEffect(() => { if (data?.readOnly === false && new URLSearchParams(window.location.search).get('new') === '1') setNl({ name: '', region: '', contactName: '', phone: '' }); }, [data?.readOnly]);
+  useEffect(() => { if (data?.readOnly === false && new URLSearchParams(window.location.search).get('new') === '1') setNl({ ...EMPTY_NL }); }, [data?.readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { // 이름을 치면 비슷한 거래처 미리 보기(0.4초 뒤)
+    if (!nl || nl.name.trim().length < 2) { setSimilar(null); return; }
+    const h = setTimeout(() => { api<{ similar: any[] }>(`/api/sales/leads/similar?name=${encodeURIComponent(nl.name.trim())}`).then((r) => setSimilar(r.similar)).catch(() => setSimilar(null)); }, 400);
+    return () => clearTimeout(h);
+  }, [nl?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   async function newLead(e: React.FormEvent) {
     e.preventDefault(); if (!nl?.name.trim()) return;
-    try { const r = await api<{ id: string }>('/api/sales/leads', { body: { name: nl.name.trim(), region: nl.region || undefined, contactName: nl.contactName || undefined, phone: nl.phone || undefined } }); setNl(null); reload(); setOpen(r.id); } catch (er: any) { toast.error(er.message); }
+    const body: Record<string, unknown> = { name: nl.name.trim(), status: nl.status, force: forceNew };
+    for (const k of ['priority', 'facilityType', 'region', 'scale', 'contactName', 'phone', 'email', 'homepage', 'nextContactDate', 'memo', 'ownerId'] as const) if (nl[k]) body[k] = nl[k];
+    if (nl.expectedRevenue) body.expectedRevenue = numOf(nl.expectedRevenue);
+    try { const r = await api<{ id?: string; similar?: any[] }>('/api/sales/leads', { body });
+      if (r.similar) { setSimilar(r.similar); setForceNew(true); toast.error(`비슷한 거래처가 ${r.similar.length}곳 있습니다 — 확인한 뒤 [그래도 만들기]`); return; }
+      setNl(null); setForceNew(false); setSimilar(null); reload(); if (r.id) setOpen(r.id); } catch (er: any) { toast.error(er.message); }
+  }
+  function exportCsv() {
+    const rows = [CSV_COLS.map(([, h]) => h).join(','), ...shown.map((l: any) => CSV_COLS.map(([k]) => csvCell(k === 'priority' ? l.priority : k === 'revenue' ? (l.revenue ? Number(l.revenue) : '') : l[k])).join(','))];
+    const blob = new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `거래처_${today()}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+  async function pickCsv(file: File) {
+    const grid = parseCsv(await readCsvFile(file)); if (grid.length < 2) { toast.error('머리줄과 자료가 있는 CSV 가 필요합니다'); return; }
+    const head = grid[0].map((h) => IMPORT_MAP.find(([re]) => re.test(h.trim()))?.[1] ?? null);
+    if (!head.includes('name')) { toast.error("'거래처명' 열을 찾지 못했습니다"); return; }
+    const PRI_CODE: Record<string, string> = { 긴급: 'urgent', 높음: 'high', 보통: 'medium', 낮음: 'low', urgent: 'urgent', high: 'high', medium: 'medium', low: 'low' };
+    const rows: Record<string, unknown>[] = []; const skipped: string[] = [];
+    for (const r of grid.slice(1)) { const o: Record<string, unknown> = {};
+      head.forEach((k, idx) => { const v = (r[idx] ?? '').trim(); if (!k || !v || o[k] !== undefined) return;
+        if (k === 'status') { if ((data?.stages ?? []).includes(v)) o.status = v; } else if (k === 'priority') { if (PRI_CODE[v]) o.priority = PRI_CODE[v]; } else if (k === 'expectedRevenue') { const n = numOf(v); if (n !== null && Number.isFinite(n)) o.expectedRevenue = n; }
+        else if (k === 'nextContactDate') { const m = v.match(/(\d{4})[.\-/]\s?(\d{1,2})[.\-/]\s?(\d{1,2})/); if (m) o.nextContactDate = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; } else o[k] = v; });
+      if (typeof o.name === 'string' && o.name) rows.push(o); else skipped.push(r.join(',').slice(0, 40)); }
+    setImp({ rows, file: file.name, skipped });
+  }
+  async function runImport() {
+    if (!imp) return;
+    try { const r = await api<{ created: number; skipped: string[] }>('/api/sales/leads/import', { body: { rows: imp.rows } }); setImp({ ...imp, done: r }); toast.ok(`${r.created}건 가져왔습니다`); reload(); } catch (e: any) { toast.error(e.message); }
   }
   if (error) return <ErrorBox error={error} retry={reload} />;
-  const statuses = [...new Set((data?.leads ?? []).map((l: any) => String(l.status ?? '미정')))] as string[];
+  const all: any[] = data?.leads ?? []; const td = today(); const me = data?.me;
+  const stageCount = new Map<string, number>(); for (const l of all) stageCount.set(String(l.status ?? '미정'), (stageCount.get(String(l.status ?? '미정')) ?? 0) + 1);
+  const statuses = [...new Set(all.map((l: any) => String(l.status ?? '미정')))] as string[];
+  const owners = [...new Map(all.filter((l) => l.ownerId).map((l) => [l.ownerId, l.owner])).entries()] as [string, string][]; const regions = [...new Set(all.map((l) => l.region).filter(Boolean))] as string[];
+  const d7 = new Date(`${td}T00:00:00+09:00`); d7.setDate(d7.getDate() + 7); const wk = d7.toISOString().slice(0, 10); const d30 = new Date(`${td}T00:00:00+09:00`); d30.setDate(d30.getDate() - 30); const stale = d30.toISOString().slice(0, 10);
+  const CHIP_FN: Record<string, (l: any) => boolean> = { mine: (l) => !!me && l.ownerId === me, today: (l) => l.next === td, overdue: (l) => !!l.next && l.next < td, week: (l) => !!l.next && l.next >= td && l.next <= wk, stale: (l) => !l.lastActivity || l.lastActivity < stale, high: (l) => ['urgent', 'high'].includes(String(l.priorityCode)) };
+  const PRI_ORD: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+  const SORT_FN: Record<string, (a: any, b: any) => number> = { activity: (a, b) => String(b.lastActivity ?? '').localeCompare(String(a.lastActivity ?? '')), next: (a, b) => String(a.next ?? '9999').localeCompare(String(b.next ?? '9999')), name: (a, b) => String(a.name).localeCompare(String(b.name), 'ko'), revenue: (a, b) => (Number(b.revenue) || 0) - (Number(a.revenue) || 0), created: (a, b) => String(b.created ?? '').localeCompare(String(a.created ?? '')) };
+  const shown = all.filter((l) => chips.every((c) => CHIP_FN[c]?.(l)) && (!fPri || l.priorityCode === fPri) && (!fOwner || l.ownerId === fOwner) && (!fRegion || l.region === fRegion)).sort(SORT_FN[sort] ?? SORT_FN.activity);
+  const ed = data?.readOnly === false;
+  const card = (l: any) => (
+    <li key={l.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-lead-card"><button type="button" onClick={() => setOpen(l.id)} className="block w-full text-left" data-testid="sales-lead-open">
+      <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(l.status)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
+      <span className="mt-0.5 block text-xs text-ink-2">{[l.facility, l.region, l.scale, l.contact, l.owner && `담당 ${l.owner}`].filter(Boolean).join(' · ')}</span>
+      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">{interests(l.interests)}{l.next && <span className={l.next < td ? 'font-semibold text-red-600' : 'text-ink-2'}>다음 연락 {kd(l.next)}</span>}{l.revenue ? <span className="text-ink-3">{won(l.revenue)}</span> : null}{l.lastActivity && <span className="text-ink-3">활동 {kd(l.lastActivity)}</span>}</span>
+    </button><ContactRow phone={l.phone} links={[[l.homepage, '홈페이지']]} className="mt-2" /></li>);
+  const NLF = (k: string, label: string, extra: Record<string, unknown> = {}) => <Field label={label}><input className={inputCls} value={nl?.[k] ?? ''} onChange={(e) => setNl({ ...nl!, [k]: e.target.value })} aria-label={label} data-testid={`lead-new-${k}`} {...extra} /></Field>;
   return (
     <div className="space-y-3" data-testid="sales-leads">
-      <Head title="리드·거래처" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesLeads} compact />{data?.readOnly === false && <Button size="sm" onClick={() => setNl({ name: '', region: '', contactName: '', phone: '' })} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} />{day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="leads-day-today">오늘 연락할 리드 ✕</button>}<select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
+      <Head title="리드·거래처" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesLeads} compact />{ed && <Button size="sm" onClick={() => { setNl({ ...EMPTY_NL }); setForceNew(false); setSimilar(null); }} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} />{day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="leads-day-today">오늘 연락할 리드 ✕</button>}
+        <select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
       {!data ? <Skeleton rows={5} /> : (
         <>
+        {/* 단계 요약 줄(누르면 단계 필터) + 빠른 칩 6 + 보기 4·정렬 5·필터(우선·담당·지역)·CSV */}
+        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-xs" data-testid="leads-stage-summary">{(data.stages ?? statuses).filter((st: string) => stageCount.get(st)).map((st: string) => <button key={st} type="button" onClick={() => setStatus(status === st ? '' : st)} className={cx('shrink-0 rounded-full border px-2.5 py-0.5', status === st ? 'border-transparent text-white' : 'border-line bg-white')} style={status === st ? { background: C } : undefined} data-testid="leads-stage-chip">{st} <b>{stageCount.get(st)}</b></button>)}</div>
+        <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="leads-toolbar">
+          {LEAD_CHIPS.map(([k, l]) => { const on = chips.includes(k); return <button key={k} type="button" onClick={() => setChips(on ? chips.filter((x) => x !== k) : [...chips, k])} className={cx('rounded-full border px-2.5 py-0.5', on ? 'border-blue-300 bg-blue-50 font-semibold text-blue-800' : 'border-line bg-white text-ink-2')} aria-pressed={on} data-testid={`leads-chip-${k}`}>{l}</button>; })}
+          <span className="mx-1 hidden h-4 w-px bg-line sm:block" />
+          <select className={cx(inputCls, 'h-7 w-auto py-0 text-xs')} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" data-testid="leads-sort">{LEAD_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+          <select className={cx(inputCls, 'h-7 w-auto py-0 text-xs')} value={fPri} onChange={(e) => setFPri(e.target.value)} aria-label="우선순위 필터" data-testid="leads-f-priority"><option value="">우선 전체</option>{Object.entries(PRI_KO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          {owners.length > 0 && <select className={cx(inputCls, 'h-7 w-auto py-0 text-xs')} value={fOwner} onChange={(e) => setFOwner(e.target.value)} aria-label="담당 필터" data-testid="leads-f-owner"><option value="">담당 전체</option>{owners.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>}
+          {regions.length > 0 && <select className={cx(inputCls, 'h-7 w-auto py-0 text-xs')} value={fRegion} onChange={(e) => setFRegion(e.target.value)} aria-label="지역 필터" data-testid="leads-f-region"><option value="">지역 전체</option>{regions.map((r) => <option key={r}>{r}</option>)}</select>}
+          <span className="hidden gap-0.5 rounded-input border border-line bg-white p-0.5 md:inline-flex" role="group" aria-label="보기">{LEAD_VIEWS.map(([k, l]) => <button key={k} type="button" onClick={() => pickView(k)} className={cx('rounded px-2 py-0.5', view === k ? 'text-white' : 'text-ink-2')} style={view === k ? { background: C } : undefined} aria-pressed={view === k} data-testid={`leads-view-${k}`}>{l}</button>)}</span>
+          <span className="ml-auto flex items-center gap-1.5"><span className="text-ink-3" data-testid="leads-count">{shown.length}건</span>
+            <button type="button" onClick={exportCsv} className={linkCls} data-testid="leads-csv-export"><Download size={12} /> CSV</button>
+            {ed && data.canAssign && <label className={cx(linkCls, 'cursor-pointer')} data-testid="leads-csv-import">CSV 가져오기<input type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pickCsv(f); }} aria-label="CSV 파일" data-testid="leads-csv-file" /></label>}</span>
+        </div>
         {/* 영업관리 2-13 표 칸: 거래처명(담당·최근 활동·금액) · 관심 사업 · 시설 · 지역 · 단계 · 우선 · 예상매출 · 다음 연락 · 최근 활동 · 담당 — 휴대폰은 카드 */}
-        <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block"><table className="w-full min-w-[960px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>{['거래처명', '관심 사업', '시설', '지역', '단계', '우선', '예상매출', '다음 연락', '최근 활동', '담당'].map((h) => <th key={h} className="whitespace-nowrap p-2">{h}</th>)}</tr></thead>
-          <tbody>{data.leads.map((l: any) => { const ed = data.readOnly === false; return <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={(e) => { if (!(e.target as HTMLElement).closest('input,select,button')) setOpen(l.id); }} data-testid="sales-lead-row">
+        {view === 'table' && <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block"><table className="w-full min-w-[960px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>{['거래처명', '관심 사업', '시설', '지역', '단계', '우선', '예상매출', '다음 연락', '최근 활동', '담당'].map((h) => <th key={h} className="whitespace-nowrap p-2">{h}</th>)}</tr></thead>
+          <tbody>{shown.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={(e) => { if (!(e.target as HTMLElement).closest('input,select,button')) setOpen(l.id); }} data-testid="sales-lead-row">
             {/* 대표 요청(영업관리 거래처 장): 표 안에서 바로 고치기 — 거래처명·단계·우선·다음 연락·담당(관리자). 바뀌면 바로 저장 */}
             <td className="p-2 font-medium">{ed ? <CellInput value={l.name} onSave={(v) => patchLead(l.id, { name: v })} label="거래처명" testId="cell-name" /> : l.name}{l.contact && <span className="block text-[11px] font-normal text-ink-3">{l.contact}{l.phone ? ` · ${l.phone}` : ''}</span>}</td>
             <td className="p-2">{interests(l.interests)}</td><td className="p-2 text-xs">{l.facility ?? ''}</td><td className="p-2 text-xs">{l.region ?? ''}</td>
             <td className="p-2">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.status ?? ''} aria-label="단계" data-testid="cell-status" onChange={(e) => { const v = e.target.value; const reason = ['보류', '실패'].includes(v) ? prompt(`'${v}' 사유`) ?? '' : undefined; if (reason === '') return; void patchLead(l.id, { status: v, ...(reason ? { reason } : {}) }); }}>{(data.stages ?? []).map((s: string) => <option key={s}>{s}</option>)}</select> : chip(l.status)}</td>
-            <td className="p-2 text-xs">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.priorityCode ?? ''} aria-label="우선" data-testid="cell-priority" onChange={(e) => patchLead(l.id, { priority: e.target.value || null })}><option value="">—</option>{[['urgent', '긴급'], ['high', '높음'], ['medium', '보통'], ['low', '낮음']].map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> : l.priority ?? ''}</td>
+            <td className="p-2 text-xs">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.priorityCode ?? ''} aria-label="우선" data-testid="cell-priority" onChange={(e) => patchLead(l.id, { priority: e.target.value || null })}><option value="">—</option>{Object.entries(PRI_KO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> : l.priority ?? ''}</td>
             <td className="p-2 text-xs tabular-nums">{won(l.revenue) || '-'}</td>
-            <td className={cx('p-2 text-xs tabular-nums', l.next && l.next < today() ? 'font-semibold text-red-600' : '')}>{ed ? <input type="date" className="rounded border border-line bg-white px-1 py-0.5 text-xs" defaultValue={l.next ?? ''} aria-label="다음 연락" data-testid="cell-next" onChange={(e) => patchLead(l.id, { nextContactDate: e.target.value || null })} /> : kd(l.next)}</td>
-            <td className="p-2 text-xs tabular-nums text-ink-3">{kd(l.updated)}</td>
-            <td className="p-2 text-xs">{ed && data.canAssign ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.ownerId ?? ''} aria-label="담당" data-testid="cell-owner" onChange={(e) => patchLead(l.id, { ownerId: e.target.value || null })}><option value="">없음</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select> : l.owner ?? ''}</td></tr>; })}
-            {!data.leads.length && <tr><td colSpan={10} className="p-6 text-center text-ink-3">리드가 없습니다</td></tr>}</tbody></table></div>
-        {/* 대표 검수 10/20 ②: 전화·문자 줄과 홈페이지 칩을 카드 안에(전에는 카드 밖에 전화만 떠 있었음), 날짜 10. 22.(목) */}
-        <ul className="space-y-2 md:hidden" data-testid="sales-lead-cards">{data.leads.map((l: any) => (
-          <li key={l.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-lead-card"><button type="button" onClick={() => setOpen(l.id)} className="block w-full text-left" data-testid="sales-lead-open">
-            <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(l.status)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
-            <span className="mt-0.5 block text-xs text-ink-2">{[l.facility, l.region, l.contact, l.owner && `담당 ${l.owner}`].filter(Boolean).join(' · ')}</span>
-            <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">{interests(l.interests)}{l.next && <span className={l.next < today() ? 'font-semibold text-red-600' : 'text-ink-2'}>다음 연락 {kd(l.next)}</span>}{l.revenue ? <span className="text-ink-3">{won(l.revenue)}</span> : null}</span>
-          </button><ContactRow phone={l.phone} links={[[l.homepage, '홈페이지']]} className="mt-2" /></li>))}
-          {!data.leads.length && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
+            <td className={cx('p-2 text-xs tabular-nums', l.next && l.next < td ? 'font-semibold text-red-600' : '')}>{ed ? <input type="date" className="rounded border border-line bg-white px-1 py-0.5 text-xs" defaultValue={l.next ?? ''} aria-label="다음 연락" data-testid="cell-next" onChange={(e) => patchLead(l.id, { nextContactDate: e.target.value || null })} /> : kd(l.next)}</td>
+            <td className="p-2 text-xs tabular-nums text-ink-3" data-testid="cell-activity">{kd(l.lastActivity ?? l.updated)}</td>
+            <td className="p-2 text-xs">{ed && data.canAssign ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.ownerId ?? ''} aria-label="담당" data-testid="cell-owner" onChange={(e) => patchLead(l.id, { ownerId: e.target.value || null })}><option value="">없음</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select> : l.owner ?? ''}</td></tr>)}
+            {!shown.length && <tr><td colSpan={10} className="p-6 text-center text-ink-3">리드가 없습니다</td></tr>}</tbody></table></div>}
+        {view === 'stages' && <div className="hidden gap-3 overflow-x-auto pb-2 md:flex" data-testid="leads-stages">{(data.stages ?? statuses).filter((st: string) => shown.some((l) => l.status === st)).map((st: string) => <section key={st} className="w-64 shrink-0 rounded-card border border-line bg-slate-50 p-2"><h2 className="mb-2 text-xs font-semibold">{st} <span className="text-ink-3">{shown.filter((l) => l.status === st).length}</span></h2><ul className="space-y-1.5">{shown.filter((l) => l.status === st).map(card)}</ul></section>)}</div>}
+        {view === 'compact' && <ul className="hidden divide-y divide-line rounded-card border border-line bg-white text-sm shadow-card md:block" data-testid="leads-compact">{shown.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50"><span className="min-w-0 flex-1 truncate font-medium">{l.name}</span>{chip(l.status)}<span className="w-28 truncate text-xs text-ink-2">{l.owner ?? ''}</span><span className={cx('w-24 text-xs tabular-nums', l.next && l.next < td ? 'font-semibold text-red-600' : 'text-ink-3')}>{kd(l.next)}</span><span className="hidden w-24 text-right text-xs tabular-nums text-ink-3 lg:block">{won(l.revenue) || '-'}</span></button></li>)}{!shown.length && <li className="p-6 text-center text-ink-3">리드가 없습니다</li>}</ul>}
+        {/* 대표 검수 10/20 ②: 전화·문자 줄과 홈페이지 칩을 카드 안에, 날짜 10. 22.(목). 휴대폰은 늘 카드 */}
+        <ul className={cx('space-y-2', view === 'cards' ? 'md:grid md:grid-cols-2 md:gap-2 md:space-y-0 xl:grid-cols-3' : 'md:hidden')} data-testid="sales-lead-cards">{shown.map(card)}{!shown.length && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
         </>
       )}
       {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
       {nl && (
-        <Modal open onClose={() => setNl(null)} title="새 리드">
+        <Modal open onClose={() => setNl(null)} title="새 리드" wide>
           <form onSubmit={newLead} className="grid gap-3 text-sm" data-testid="lead-new-form">
-            <Field label="거래처(리드) 이름"><input className={inputCls} value={nl.name} onChange={(e) => setNl({ ...nl, name: e.target.value })} required maxLength={300} autoFocus aria-label="거래처 이름" data-testid="lead-new-name" /></Field>
+            {NLF('name', '거래처(리드) 이름', { required: true, maxLength: 300, autoFocus: true })}
+            {!!similar?.length && <div className="rounded-input border border-amber-300 bg-amber-50 p-2 text-xs" data-testid="lead-new-similar"><b className="text-amber-800">비슷한 거래처 {similar.length}곳</b> — 이미 있으면 그 거래처를 열어 이어서 적으세요
+              <ul className="mt-1 space-y-0.5">{similar.map((x) => <li key={x.id}><button type="button" onClick={() => { setNl(null); setOpen(x.id); }} className="underline">{x.name}</button> {x.status ? chip(x.status) : null} <span className="text-ink-3">{x.region ?? ''}</span></li>)}</ul></div>}
             <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="지역"><input className={inputCls} value={nl.region} onChange={(e) => setNl({ ...nl, region: e.target.value })} maxLength={50} aria-label="지역" /></Field>
-              <Field label="담당자(고객)"><input className={inputCls} value={nl.contactName} onChange={(e) => setNl({ ...nl, contactName: e.target.value })} maxLength={100} aria-label="고객 담당자" /></Field>
-              <Field label="연락처"><input className={inputCls} value={nl.phone} onChange={(e) => setNl({ ...nl, phone: e.target.value })} maxLength={40} inputMode="tel" aria-label="연락처" /></Field>
+              <Field label="단계"><select className={inputCls} value={nl.status} onChange={(e) => setNl({ ...nl, status: e.target.value })} aria-label="단계" data-testid="lead-new-status">{(data?.stages ?? ['신규리드']).map((x: string) => <option key={x}>{x}</option>)}</select></Field>
+              <Field label="우선순위"><select className={inputCls} value={nl.priority} onChange={(e) => setNl({ ...nl, priority: e.target.value })} aria-label="우선순위"><option value="">—</option>{Object.entries(PRI_KO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+              {data?.canAssign ? <Field label="담당"><select className={inputCls} value={nl.ownerId} onChange={(e) => setNl({ ...nl, ownerId: e.target.value })} aria-label="담당"><option value="">나</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field> : NLF('nextContactDate', '다음 연락일', { type: 'date' })}
             </div>
-            <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setNl(null)}>취소</Button><Button type="submit" disabled={!nl.name.trim()} data-testid="lead-new-save">만들기</Button></div>
+            <div className="grid gap-3 sm:grid-cols-4">{NLF('facilityType', '시설 유형', { maxLength: 100, placeholder: '아파트·오피스텔…' })}{NLF('region', '지역', { maxLength: 50 })}{NLF('scale', '규모', { maxLength: 60, placeholder: '1,200세대' })}{NLF('expectedRevenue', '예상매출(원)', { inputMode: 'numeric' })}</div>
+            <div className="grid gap-3 sm:grid-cols-4">{NLF('contactName', '고객 담당자', { maxLength: 100 })}{NLF('phone', '연락처', { maxLength: 40, inputMode: 'tel' })}{NLF('email', '이메일', { maxLength: 200, inputMode: 'email' })}{NLF('homepage', '홈페이지', { maxLength: 300, inputMode: 'url' })}</div>
+            {data?.canAssign && NLF('nextContactDate', '다음 연락일', { type: 'date' })}
+            <Field label="메모"><textarea className={inputCls} rows={2} value={nl.memo} onChange={(e) => setNl({ ...nl, memo: e.target.value })} maxLength={5000} aria-label="메모" /></Field>
+            <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setNl(null)}>취소</Button><Button type="submit" disabled={!nl.name.trim()} data-testid="lead-new-save">{forceNew && similar?.length ? '그래도 만들기' : '만들기'}</Button></div>
           </form>
+        </Modal>
+      )}
+      {imp && (
+        <Modal open onClose={() => setImp(null)} title="CSV 가져오기">
+          <div className="space-y-2 text-sm" data-testid="leads-import">
+            {imp.done ? <p data-testid="leads-import-done"><b>{imp.done.created}건</b> 가져왔습니다{imp.done.skipped.length ? ` · 같은 이름이라 건너뜀 ${imp.done.skipped.length}건` : ''}</p>
+              : <><p>{imp.file} — <b>{imp.rows.length}건</b>을 새 리드로 만듭니다{imp.skipped.length ? ` (거래처명이 없는 ${imp.skipped.length}줄은 건너뜀)` : ''}. 같은 이름(공백·괄호 무시)이 이미 있으면 건너뜁니다.</p>
+              <ul className="max-h-40 overflow-y-auto rounded-input border border-line p-2 text-xs">{imp.rows.slice(0, 30).map((r, i) => <li key={i}>{String(r.name)}{r.region ? ` · ${r.region}` : ''}{r.phone ? ` · ${r.phone}` : ''}</li>)}{imp.rows.length > 30 && <li className="text-ink-3">… 외 {imp.rows.length - 30}건</li>}</ul></>}
+            {imp.done?.skipped.length ? <details className="text-xs"><summary className="cursor-pointer text-ink-3">건너뛴 이름</summary><p className="mt-1">{imp.done.skipped.join(', ')}</p></details> : null}
+            <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setImp(null)}>{imp.done ? '닫기' : '취소'}</Button>{!imp.done && <Button onClick={runImport} data-testid="leads-import-go">{imp.rows.length}건 가져오기</Button>}</div>
+          </div>
         </Modal>
       )}
     </div>
@@ -409,19 +610,58 @@ export function Pipeline() {
   );
 }
 
-export function Deals() {
-  const { data, error, reload } = useApi<any>('/api/sales/src?view=deals');
+/** S2 2차(감사 1-16): 제안·계약 표(칸 보강) + 계약 종료 KPI + ROI(기간 3/6/12개월: 계약금액·영업비용·ROI·전환율·출처별) + 영업비용 입력(관리자) */
+const g = (r: any, ...keys: string[]) => { for (const k of keys) { const v = r?.[k]; if (v !== null && v !== undefined && v !== '') return v; } return null; };
+const pct = (v: number | null) => (v === null ? '-' : `${v}%`);
+function Deals() {
+  const [months, setMonths] = useState('6');
+  const { data, error, reload } = useApi<any>(`/api/sales/src?view=deals&status=${months}`, [months]);
+  const [cost, setCost] = useState({ month: today().slice(0, 7), business: '', item: '', amount: '', memo: '' });
+  async function addCost(e: React.FormEvent) {
+    e.preventDefault(); if (!cost.item.trim() || !cost.amount) return;
+    try { await api('/api/sales/costs', { body: { month: cost.month, business: cost.business || undefined, item: cost.item.trim(), amount: numOf(cost.amount) ?? 0, memo: cost.memo || undefined } }); toast.ok('비용을 적었습니다'); setCost({ ...cost, item: '', amount: '', memo: '' }); reload(); } catch (er: any) { toast.error(er.message); }
+  }
+  async function del(id: string) { try { await api(`/api/sales/records/${id}`, { method: 'DELETE' }); toast.ok('지웠습니다'); reload(); } catch (e: any) { toast.error(e.message); } }
   if (error) return <ErrorBox error={error} retry={reload} />;
+  const ed = data?.readOnly === false; const roi = data?.roi; const kpi = data?.kpi;
+  const Tbl = ({ kind, cols, rows }: { kind: 'proposals' | 'contracts'; cols: [string, (r: any) => React.ReactNode][]; rows: any[] }) => (
+    <>
+      <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[800px] text-sm" data-testid={`deals-table-${kind}`}><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>{cols.map(([h]) => <th key={h} className="whitespace-nowrap p-2">{h}</th>)}{ed && <th className="p-2" />}</tr></thead>
+        <tbody>{rows.map((r) => <tr key={r.__id} className="border-t border-line" data-testid={`deals-row-${kind}`}>{cols.map(([h, f]) => <td key={h} className="p-2 text-xs">{f(r)}</td>)}{ed && <td className="p-2 text-right">{/^[0-9a-f-]{36}$/i.test(String(r.__id)) && <button type="button" onClick={() => del(r.__id)} className="text-[11px] text-ink-3 underline" aria-label={`${g(r, 'title')} 삭제`} data-testid="deals-del">삭제</button>}</td>}</tr>)}
+          {!rows.length && <tr><td colSpan={cols.length + 1} className="p-4 text-center text-xs text-ink-3">아직 없습니다</td></tr>}</tbody></table></div>
+      <ul className="space-y-2 md:hidden">{rows.map((r) => <li key={r.__id} className="rounded-input border border-line p-2 text-sm"><b>{g(r, 'title')}</b> <span className="text-xs text-ink-2">{g(r, 'lead_name')}</span><div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-ink-2">{cols.slice(2, 6).map(([h, f]) => { const v = f(r); return v ? <span key={h}>{h} {v}</span> : null; })}</div></li>)}{!rows.length && <li className="text-xs text-ink-3">아직 없습니다</li>}</ul>
+    </>);
+  const money = (v: unknown) => won(v) || '-';
+  const PCOLS: [string, (r: any) => React.ReactNode][] = [['거래처', (r) => g(r, 'lead_name', 'company')], ['제목', (r) => <b>{g(r, 'title')}</b>], ['버전', (r) => g(r, 'version')], ['제안 금액', (r) => money(g(r, 'amount'))], ['최종 금액', (r) => money(g(r, 'final_amount'))], ['월 운영비', (r) => money(g(r, 'monthly_fee'))], ['제안일', (r) => kd(g(r, 'proposal_date', 'date'))], ['계약 예상', (r) => kd(g(r, 'expected_contract_date', 'expected_close_date'))], ['상태', (r) => chip(g(r, 'status'))], ['사업', (r) => g(r, 'business')], ['메모', (r) => <span className="line-clamp-1 max-w-[12rem]">{g(r, 'memo')}</span>]];
+  const CCOLS: [string, (r: any) => React.ReactNode][] = [['거래처', (r) => g(r, 'lead_name', 'company')], ['제목', (r) => <b>{g(r, 'title')}</b>], ['금액', (r) => money(g(r, 'amount'))], ['계약일', (r) => kd(g(r, 'contract_date', 'date', 'signed_at'))], ['시작', (r) => kd(g(r, 'start_date'))], ['종료', (r) => { const e = g(r, 'end_date', 'contract_end_date'); return e ? <span className={String(e) < today() ? 'text-ink-3' : ''}>{kd(e)}</span> : '-'; }], ['PM', (r) => g(r, 'pm')], ['재계약', (r) => g(r, 'renew_stage')], ['상태', (r) => chip(g(r, 'status'))], ['사업', (r) => g(r, 'business')]];
   return (
     <div className="space-y-3" data-testid="sales-deals">
       <Head title="제안·계약" meta={data} />
-      {!data ? <Skeleton rows={3} /> : (['proposals', 'contracts'] as const).map((k) => (
-        <section key={k} className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">{k === 'proposals' ? '제안·견적' : '계약'} <span className="text-ink-3">{data[k].length}</span></h2>
-          {data.readOnly === false && <div className="mb-2"><RecordForm kind={k} leads={data.leads ?? []} onSaved={reload} /></div>}
-          <ul className="space-y-2">{data[k].map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Rec row={r} admin={data.canAssign} /></li>)}{!data[k].length && <li className="text-xs text-ink-3">아직 없습니다</li>}</ul></section>))}
+      {!data ? <Skeleton rows={3} /> : <>
+        {kpi && <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="deals-kpi">{([['90일 내 종료', kpi.d90], ['180일 내', kpi.d180], ['1년 내', kpi.d365], ['기간 지남', kpi.past]] as [string, number][]).map(([l, n]) => <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card"><div className="text-xs text-ink-2">{l}</div><div className="text-xl font-bold tabular-nums">{n}<span className="text-xs font-normal text-ink-3"> 건</span></div></div>)}</div>}
+        <section className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">제안·견적 <span className="text-ink-3">{data.proposals.length}</span></h2>
+          {ed && <div className="mb-2"><RecordForm kind="proposals" leads={data.leads ?? []} onSaved={reload} /></div>}<Tbl kind="proposals" cols={PCOLS} rows={data.proposals} /></section>
+        <section className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">계약 <span className="text-ink-3">{data.contracts.length}</span> <Link href="/s/sales/contracts" className="ml-2 text-xs font-normal underline" style={{ color: C }}>계약만료·재입찰 보기</Link></h2>
+          {ed && <div className="mb-2"><RecordForm kind="contracts" leads={data.leads ?? []} onSaved={reload} /></div>}<Tbl kind="contracts" cols={CCOLS} rows={data.contracts} /></section>
+        {roi && <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="deals-roi">
+          <div className="mb-2 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">영업 ROI</h2><select className={cx(inputCls, 'h-7 w-auto py-0 text-xs')} value={months} onChange={(e) => setMonths(e.target.value)} aria-label="기간" data-testid="roi-months">{[['3', '최근 3개월'], ['6', '최근 6개월'], ['12', '최근 12개월']].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select><span className="text-xs text-ink-3">{kd(roi.from)} ~ 오늘 · 계약일 기준</span></div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 text-sm">{([['계약 금액', money(roi.contractAmount)], ['영업비용', money(roi.cost)], ['ROI', pct(roi.roi)], ['새 리드', `${roi.newLeads}건`], ['계약한 거래처', `${roi.wonLeads}곳`], ['전환율', pct(roi.conversion)]] as [string, string][]).map(([l, v]) => <div key={l} className="rounded-input border border-line p-2"><div className="text-[11px] text-ink-2">{l}</div><div className="font-semibold tabular-nums" data-testid={`roi-${l}`}>{v}</div></div>)}</div>
+          {!!Object.keys(roi.bySource ?? {}).length && <table className="mt-2 w-full text-xs" data-testid="roi-sources"><thead className="text-left text-ink-2"><tr><th className="p-1">출처</th><th className="p-1">리드</th><th className="p-1">계약</th><th className="p-1">전환율</th></tr></thead><tbody>{Object.entries(roi.bySource as Record<string, { leads: number; won: number }>).map(([k, v]) => <tr key={k} className="border-t border-line"><td className="p-1">{k}</td><td className="p-1 tabular-nums">{v.leads}</td><td className="p-1 tabular-nums">{v.won}</td><td className="p-1 tabular-nums">{v.leads ? Math.round((v.won / v.leads) * 1000) / 10 : 0}%</td></tr>)}</tbody></table>}
+          <p className="mt-1 text-[11px] text-ink-3">ROI = (계약 금액 − 영업비용) ÷ 영업비용. 비용이 없으면 계산하지 않습니다.</p>
+          {ed && data.canAssign && <form onSubmit={addCost} className="mt-2 grid gap-2 rounded-input border border-blue-200 bg-blue-50/40 p-2 text-sm sm:grid-cols-[8rem_8rem_1fr_8rem_1fr_auto]" data-testid="cost-form">
+            <input type="month" className={cx(inputCls, 'h-8 py-1 text-xs')} value={cost.month} onChange={(e) => setCost({ ...cost, month: e.target.value })} aria-label="월" />
+            <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={cost.business} onChange={(e) => setCost({ ...cost, business: e.target.value })} placeholder="사업" maxLength={60} aria-label="사업" />
+            <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={cost.item} onChange={(e) => setCost({ ...cost, item: e.target.value })} placeholder="항목(광고·출장·인건비…)" maxLength={100} aria-label="항목" data-testid="cost-item" />
+            <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={cost.amount} onChange={(e) => setCost({ ...cost, amount: e.target.value })} placeholder="금액(원)" inputMode="numeric" aria-label="금액" data-testid="cost-amount" />
+            <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={cost.memo} onChange={(e) => setCost({ ...cost, memo: e.target.value })} placeholder="메모" maxLength={500} aria-label="메모" />
+            <Button size="sm" disabled={!cost.item.trim() || !cost.amount} data-testid="cost-save">비용 적기</Button></form>}
+          {!!roi.costs?.length && <ul className="mt-2 divide-y divide-line rounded-input border border-line text-xs" data-testid="cost-list">{roi.costs.map((c: any) => <li key={c.__id} className="flex items-center gap-2 p-1.5"><span className="tabular-nums text-ink-2">{c.month}</span><span className="min-w-0 flex-1 truncate">{c.item}{c.business ? ` · ${c.business}` : ''}{c.memo ? <span className="text-ink-3"> — {c.memo}</span> : null}</span><span className="tabular-nums">{money(c.amount)}</span>{ed && data.canAssign && <button type="button" onClick={() => del(c.__id)} className="text-ink-3 underline" aria-label={`${c.item} 삭제`}>삭제</button>}</li>)}</ul>}
+        </section>}
+      </>}
     </div>
   );
 }
+export { Deals };
 
 export function Bids({ initialTab }: { initialTab?: string }) {
   const [tab, setTab] = useState(initialTab ?? 'open'); const [s, setS] = useState(''); const [open, setOpen] = useState<any>(null);

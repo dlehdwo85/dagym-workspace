@@ -25,7 +25,10 @@ const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = 
 
 export const workInput = z.object({ kind: z.enum(WORK_KINDS), id: z.string().min(1).max(100), status: z.string().max(30).optional(), memo: z.string().trim().max(2000).nullable().optional(), nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional() });
 export const convertInput = z.object({ kind: z.enum(WORK_KINDS), id: z.string().min(1).max(100), force: z.boolean().optional(), name: z.string().trim().min(1).max(300).optional() });
-export const recordInput = z.object({ kind: z.enum(['proposals', 'contracts']), title: z.string().trim().min(1).max(300), amount: z.number().min(0).max(1e13).nullable().optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), status: z.string().max(30).optional(), memo: z.string().trim().max(2000).optional() });
+export const recordInput = z.object({ kind: z.enum(['proposals', 'contracts']), title: z.string().trim().min(1).max(300), amount: z.number().min(0).max(1e13).nullable().optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), status: z.string().max(30).optional(), memo: z.string().trim().max(2000).optional() ,
+  // S2 2차(감사 1-16): 제안 13칸·계약 9칸 중 핵심 — 버전·최종금액·월 운영비·계약 예상일 / 시작·종료·PM·재계약 단계·사업
+  version: z.string().trim().max(20).optional(), finalAmount: z.number().min(0).max(1e13).nullable().optional(), monthlyFee: z.number().min(0).max(1e13).nullable().optional(), expectedContractDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), pm: z.string().trim().max(60).optional(), renewStage: z.string().trim().max(40).optional(), business: z.string().trim().max(60).optional() });
 
 async function assertWritesOpen(tenant: string) {
   if (!(await writesOpen(tenant))) throw new HttpError(409, 'sales_read_only', '영업관리 전환 전이라 워크인에서는 고칠 수 없습니다 — 전환일까지는 영업관리에서 수정해 주세요');
@@ -125,8 +128,8 @@ export async function addLeadRecord(u: SessionUser, leadId: string, i: z.infer<t
   await assertWritesOpen(t);
   if (!['owner', 'admin'].includes(u.role) && l.owner_id && l.owner_id !== u.id) throw new HttpError(403, 'forbidden', '담당 리드만 기록할 수 있습니다');
   const day = i.date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-  const data = i.kind === 'proposals' ? { title: i.title, amount: i.amount ?? null, proposal_date: day, status: i.status ?? '제안', memo: i.memo ?? null, lead_name: l.name, created_by: u.id }
-    : { title: i.title, amount: i.amount ?? null, contract_date: day, status: i.status ?? '계약', memo: i.memo ?? null, lead_name: l.name, created_by: u.id };
+  const data = i.kind === 'proposals' ? { title: i.title, amount: i.amount ?? null, proposal_date: day, status: i.status ?? '제안', memo: i.memo ?? null, lead_name: l.name, created_by: u.id, version: i.version ?? 'v1', final_amount: i.finalAmount ?? null, monthly_fee: i.monthlyFee ?? null, expected_contract_date: i.expectedContractDate ?? null, business: i.business ?? null }
+    : { title: i.title, amount: i.amount ?? null, contract_date: day, status: i.status ?? '계약', memo: i.memo ?? null, lead_name: l.name, created_by: u.id, start_date: i.startDate ?? day, end_date: i.endDate ?? null, pm: i.pm ?? null, renew_stage: i.renewStage ?? null, business: i.business ?? null };
   const [r] = await sql<{ id: string }[]>`insert into sales_lead_records (tenant, kind, lead_id, occurred_at, data) values (${t}, ${i.kind}, ${leadId}, ${`${day}T00:00:00+09:00`}, ${sql.json(data)}) returning id`;
   return { id: r.id };
 }
@@ -134,4 +137,25 @@ export async function addLeadRecord(u: SessionUser, leadId: string, i: z.infer<t
 export async function workRows(sql: Sql, tenant: string, srcTbl: string) {
   return (await sql<any[]>`select src_id, ref_id, status, lead_id, data from sales_work_records where tenant = ${tenant} and src_tbl = ${srcTbl}`)
     .map((w) => ({ ...w.data, id: w.src_id, __id: w.src_id, status: w.status ?? w.data?.status ?? null, lead_id: w.lead_id ?? w.data?.lead_id ?? null, ...(srcTbl === 'opportunity_work' ? { notice_id: w.data?.notice_id ?? w.ref_id } : {}) }));
+}
+
+/** S2 2차(감사 1-16 ROI): 영업비용 입력(월·사업·항목·금액·메모) — sales_lead_records kind 'sales_costs' */
+export const costInput = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), business: z.string().trim().max(60).optional(), item: z.string().trim().min(1).max(100), amount: z.number().min(0).max(1e13), memo: z.string().max(500).optional() });
+export async function addCost(u: SessionUser, i: z.infer<typeof costInput>) {
+  await assertSpace(u, 'sales');
+  if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden', '영업비용은 관리자만 적습니다');
+  const t = tenantOf(u); await assertWritesOpen(t);
+  const [r] = await db()<{ id: string }[]>`insert into sales_lead_records (tenant, kind, lead_id, occurred_at, data) values (${t}, 'sales_costs', null, ${`${i.month}-01T00:00:00+09:00`}, ${db().json({ month: i.month, business: i.business ?? null, item: i.item, amount: i.amount, memo: i.memo ?? null, created_by: u.id })}) returning id`;
+  return { id: r.id };
+}
+/** 제안·계약·비용 기록 삭제(관리자 또는 적은 사람) */
+export async function deleteRecord(u: SessionUser, id: string) {
+  await assertSpace(u, 'sales');
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
+  const t = tenantOf(u); const sql = db();
+  const [r] = await sql<{ data: any; kind: string }[]>`select data, kind from sales_lead_records where id = ${id} and tenant = ${t} and kind in ('proposals', 'contracts', 'sales_costs')`;
+  if (!r) throw notFound();
+  if (!['owner', 'admin'].includes(u.role) && r.data?.created_by !== u.id) throw new HttpError(403, 'forbidden', '본인이 적은 것만 지울 수 있습니다');
+  await sql`delete from sales_lead_records where id = ${id}`;
+  return { ok: true };
 }

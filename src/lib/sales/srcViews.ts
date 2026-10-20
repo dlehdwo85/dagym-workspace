@@ -22,10 +22,10 @@ async function rows(scope: string, tbl: string, limit = 5000) {
 /** date 칸: 운영 DB 연결은 date 를 'YYYY-MM-DD' 문자열로, 시험 DB 는 Date 로 줄 수 있음 — 둘 다(핫픽스 10/19: 문자열을 format 해 500) */
 const ymdOf = (v: unknown) => (v == null || v === '' ? null : typeof v === 'string' ? v.slice(0, 10) : v instanceof Date && !Number.isNaN(v.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(v) : null);
 async function formalLeads(tenant: string, id?: string) {
-  const r = await db()<any[]>`select l.*, u.name as owner_name from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} ${id ? db()`and l.id = ${id}` : db()``} order by l.updated_at desc limit 5000`;
+  const r = await db()<any[]>`select l.*, u.name as owner_name, (select max(x.occurred_at) from sales_lead_records x where x.lead_id = l.id and x.kind in ('sales_activities', 'proposals', 'contracts')) as last_activity_at from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} and l.deleted_at is null ${id ? db()`and l.id = ${id}` : db()``} order by l.updated_at desc limit 5000`;
   return r.map((l) => ({ ...(l.src ?? {}), __id: l.id, __src_id: l.src_id, __owner: l.owner_name ?? '', __owner_id: l.owner_id, name: l.name, sales_status: l.status, priority: l.priority, facility_type: l.facility_type, region: l.region,
-    next_contact_date: ymdOf(l.next_contact_date), contact_name: l.contact_name, phone: l.phone, expected_revenue: l.expected_revenue,
-    memo: l.memo, updated_at: l.updated_at }));
+    next_contact_date: ymdOf(l.next_contact_date), contact_name: l.contact_name, phone: l.phone, expected_revenue: l.expected_revenue, email: l.email, scale: l.scale, homepage: l.homepage ?? l.src?.homepage ?? null,
+    memo: l.memo, updated_at: l.updated_at, created_at: l.created_at, last_activity_at: l.last_activity_at }));
 }
 async function userNames(tenant: string) {
   const m = await db()<{ src_user_id: string; name: string | null }[]>`select m.src_user_id, coalesce(u.name, m.name) as name from sales_user_map m left join users u on u.id = m.user_id where m.tenant = ${tenant}`;
@@ -45,6 +45,8 @@ const lead = (r: any, names: Map<string, string>) => ({
   owner: r.__owner !== undefined ? r.__owner || null : names.get(String(pick(r, 'owner_id', 'assigned_to', 'sales_owner_id', 'user_id') ?? '')) ?? null, ownerId: r.__owner_id ?? null, memo: r.__id && r.__owner !== undefined ? r.memo ?? null : undefined, revenue: pick(r, 'expected_revenue', 'expected_amount', 'estimated_revenue'),
   updated: day(pick(r, 'updated_at', 'created_at')), phone: pick(r, 'phone', 'contact_phone'), contact: pick(r, 'contact_name', 'manager_name'),
   homepage: pick(r, 'homepage', 'website', 'url'), // 대표 검수 10/20 ②: 앱 목록 홈페이지 칩
+  // S2 2차: 이메일·규모·등록일·최근 활동(상담·제안·계약 최신, 없으면 수정일)
+  email: pick(r, 'email', 'contact_email'), scale: pick(r, 'scale', 'facility_scale', 'size'), created: day(pick(r, 'created_at')), lastActivity: day(pick(r, 'last_activity_at', 'last_activity_date', 'last_contact_at')) ?? day(pick(r, 'updated_at', 'created_at')),
 });
 /** 영업관리 기준(SALES_SCREEN_INVENTORY 10/19): '오늘 등록'·'새 공고'는 원본 first_seen_at 하나만(KST 날짜). posted_date·created_at 은 쓰지 않음.
  * 옮긴 행은 원본 first_seen_at 을 그대로 가져오므로 옮긴 날로 바뀌지 않는다(값이 없으면 신규 판단에서 빠짐) */
@@ -237,7 +239,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 대표 요청(영업관리 거래처 장): 표 안에서 단계·우선·다음 연락·거래처명·담당(관리자) 바로 고치기 — 전환 뒤(쓰기 열림)만
     const canAssign = ['owner', 'admin'].includes(u.role);
     const people = !meta.readOnly && canAssign ? await sql`select id, name from users where tenant = ${t} and status = 'active' and not is_demo order by name` : [];
-    return { ...meta, stages: STAGES, canAssign, people, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [] })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
+    return { ...meta, stages: STAGES, canAssign, people, me: u.id, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [] })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
   }
   if (view === 'lead') {
     if (!q.id) throw badRequest('id 가 필요합니다');
@@ -252,10 +254,19 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       const log = await sql`select g.from_status, g.to_status, g.reason, g.changed_at, u.name as by from sales_status_log g left join users u on u.id = g.changed_by where g.lead_id = ${lid} order by g.changed_at desc limit 50`;
       const people = await sql`select id, name from users where tenant = ${t} and status = 'active' and not is_demo order by name`;
       const { src: _s, ...raw } = r;
-      return { ...meta, lead: lead(r, names), raw: Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith('__'))), activities: await recs('sales_activities'), timing: await recs('lead_opportunity_timing'),
-        interests: await recs('lead_business_interests'), tasks: await relSrc('tasks'), proposals: await recs('proposals'), contracts: await recs('contracts'),
+      // S2 2차: 업무 탭 = 워크인 업무(lead_id) + 옮겨 온 원본 업무, 타임라인 = 상담·상태 변경·업무·제안·계약 통합(최신순)
+      const wTasks = await sql<any[]>`select t.id, t.title, t.status, t.due_date::text as due_date, t.created_at, t.completed_at, au.name as assignee, t.sales_ref from tasks t left join users au on au.id = t.assignee_id where t.lead_id = ${lid} and t.deleted_at is null order by (t.status = 'done'), t.due_date nulls last limit 100`;
+      const acts = await recs('sales_activities'), props = await recs('proposals'), cons = await recs('contracts');
+      const timeline = [...acts.map((a: any) => ({ kind: 'act', at: a.activity_date ?? a.created_at, title: `${a.activity_type ?? '상담'} · ${String(a.content ?? '').slice(0, 80)}`, by: a.created_by_name ?? null, id: a.__id })),
+        ...log.map((g: any) => ({ kind: 'status', at: g.changed_at, title: `${g.from_status ?? '—'} → ${g.to_status}${g.reason ? ` (${g.reason})` : ''}`, by: g.by ?? null, id: String(g.changed_at) })),
+        ...wTasks.map((x: any) => ({ kind: 'task', at: x.completed_at ?? x.created_at, title: `${x.status === 'done' ? '완료' : '업무'} · ${x.title}`, by: x.assignee ?? null, id: x.id, href: `/tasks/${x.id}` })),
+        ...props.map((p: any) => ({ kind: 'proposal', at: p.proposal_date, title: `제안 · ${p.title}${p.amount ? ` ${Number(p.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: p.__id })),
+        ...cons.map((c: any) => ({ kind: 'contract', at: c.contract_date ?? c.start_date, title: `계약 · ${c.title}${c.amount ? ` ${Number(c.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: c.__id }))]
+        .filter((x) => x.at).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+      return { ...meta, lead: lead(r, names), raw: Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith('__'))), activities: acts, timing: await recs('lead_opportunity_timing'),
+        interests: await recs('lead_business_interests'), tasks: await relSrc('tasks'), wTasks, timeline, proposals: props, contracts: cons,
         work: (await sql<any[]>`select src_id, src_tbl, status, data from sales_work_records where tenant = ${t} and lead_id = ${lid} order by updated_at desc`).map((w) => ({ ...w.data, status: w.status, __id: w.src_id })), // S1-2: 넘겨 온 공고·단지·시설·협력사
-        statusLog: log, stages: STAGES, people, canAssign: ['owner', 'admin'].includes(u.role) };
+        statusLog: log, stages: STAGES, people, canAssign: ['owner', 'admin'].includes(u.role), canDelete: ['owner', 'admin'].includes(u.role) || r.__owner_id === u.id, me: u.id };
     }
     const [r] = await sql<{ row: any }[]>`select row from sales_src_rows where scope = ${t} and tbl = 'leads' and src_id = ${q.id}`;
     if (!r) throw notFound();
@@ -274,8 +285,28 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // S1-2: 전환 뒤에는 정식 표(sales_lead_records)에서 — 리드 이름·연결 id 포함
     const fr = async (kind: string) => (await sql<any[]>`select r.id, r.lead_id, r.occurred_at, r.data, l.name as lead_name from sales_lead_records r left join sales_leads l on l.id = r.lead_id where r.tenant = ${t} and r.kind = ${kind} order by r.occurred_at desc nulls last limit 500`)
       .map((x) => ({ ...x.data, lead_name: x.data?.lead_name ?? x.lead_name ?? null, __id: x.id, __lead_id: x.lead_id }));
-    const leads = formal ? (await sql<{ id: string; name: string }[]>`select id, name from sales_leads where tenant = ${t} order by name limit 2000`) : [];
-    return { ...meta, proposals: (formal ? await fr('proposals') : await rows(t, 'proposals')).filter(hit), contracts: (formal ? await fr('contracts') : await rows(t, 'contracts')).filter(hit), leads };
+    const leads = formal ? (await sql<{ id: string; name: string }[]>`select id, name from sales_leads where tenant = ${t} and deleted_at is null order by name limit 2000`) : [];
+    const proposals = (formal ? await fr('proposals') : await rows(t, 'proposals')).filter(hit), contracts = (formal ? await fr('contracts') : await rows(t, 'contracts')).filter(hit);
+    // S2 2차(감사 1-16): 계약 KPI(90/180/365일 내 종료·기간 경과) + ROI(기간 3/6/12개월: 계약금액·영업비용·ROI·전환율·출처별)
+    const td = today(); const endOf = (c: any) => day(pick(c, 'end_date', 'contract_end_date', 'contract_end'));
+    const within = (n: number) => contracts.filter((c) => { const e = endOf(c); return e && e >= td && e <= plus(n); }).length;
+    const kpi = { d90: within(90), d180: within(180), d365: within(365), past: contracts.filter((c) => { const e = endOf(c); return e && e < td; }).length };
+    const months = [3, 6, 12].includes(Number(q.status)) ? Number(q.status) : 6; // ?status=3|6|12 (기간)
+    const from = plus(-30 * months);
+    const costs = formal ? await fr('sales_costs') : [];
+    const inPeriod = (d: unknown) => { const x = day(d); return !!x && x >= from && x <= td; };
+    const cAmt = contracts.filter((c) => inPeriod(pick(c, 'contract_date', 'start_date'))).reduce((n, c) => n + (Number(pick(c, 'amount')) || 0), 0);
+    const cost = costs.filter((c) => inPeriod(`${pick(c, 'month')}-01`)).reduce((n, c) => n + (Number(pick(c, 'amount')) || 0), 0);
+    const newLeads = formal ? Number((await sql<{ n: number }[]>`select count(*)::int n from sales_leads where tenant = ${t} and deleted_at is null and created_at >= ${from}::date`)[0].n) : 0;
+    const wonLeads = new Set(contracts.filter((c) => inPeriod(pick(c, 'contract_date', 'start_date'))).map((c) => c.__lead_id ?? c.lead_id).filter(Boolean)).size;
+    // 출처별 전환(운영시설 DB/입찰 DB/신규단지/협력사/직접): 리드가 어느 원천에서 넘어왔는지(sales_work_records.lead_id)
+    const srcOf = formal ? new Map((await sql<{ lead_id: string; src_tbl: string }[]>`select lead_id, src_tbl from sales_work_records where tenant = ${t} and lead_id is not null`).map((x) => [x.lead_id, x.src_tbl])) : new Map();
+    const SRC_KO: Record<string, string> = { opportunity_work: '입찰·신규단지 DB', operating_facility_prospects__progress: '운영시설 DB', vendor_registrations__progress: '협력사 DB' };
+    const bySource: Record<string, { leads: number; won: number }> = {};
+    if (formal) for (const l of await sql<{ id: string }[]>`select id from sales_leads where tenant = ${t} and deleted_at is null`) { const k = SRC_KO[srcOf.get(l.id) ?? ''] ?? '직접'; (bySource[k] ??= { leads: 0, won: 0 }).leads++; }
+    for (const c of contracts) { const lid = c.__lead_id ?? c.lead_id; if (!lid) continue; const k = SRC_KO[srcOf.get(lid) ?? ''] ?? '직접'; (bySource[k] ??= { leads: 0, won: 0 }).won++; }
+    const roi = { months, from, contractAmount: cAmt, cost, roi: cost ? Math.round(((cAmt - cost) / cost) * 1000) / 10 : null, newLeads, wonLeads, conversion: newLeads ? Math.round((wonLeads / newLeads) * 1000) / 10 : null, bySource, costs: costs.sort((a, b) => String(b.month).localeCompare(String(a.month))) };
+    return { ...meta, proposals, contracts, leads, kpi, roi };
   }
   if (view === 'bids') {
     const tab = q.tab ?? 'open'; // 기본 = 진행 중(마감 전·공고중/정정), 마감 임박순
