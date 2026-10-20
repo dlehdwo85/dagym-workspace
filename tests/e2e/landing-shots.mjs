@@ -71,6 +71,6 @@ try {
   await og.setContent(`<html><body style="margin:0;font-family:Pretendard,system-ui,sans-serif;background:linear-gradient(135deg,#0F766E 0%,#2563EB 55%,#7C3AED 100%);color:#fff;width:1200px;height:630px;display:flex;flex-direction:column;justify-content:center;padding:0 80px;box-sizing:border-box">
     <div style="font-size:28px;font-weight:600;opacity:.9">워크인</div><div style="font-size:72px;font-weight:800;line-height:1.15;margin-top:12px">업무도, 영업도,<br>마케팅도 한 화면에서</div>
     <div style="font-size:30px;margin-top:28px;opacity:.95">5명까지 무료 · 카드 등록 없음 · 웹 · Android · iOS</div></body></html>`);
-  await og.screenshot({ path: 'public/landing/og.png' });
+  await og.screenshot({ path: '/tmp/landing-og-preview.png' }); // 로고 S3 확정: public/landing/og.png 는 docs/handoff/brand/workin-s3/og-1200x630.png 고정본(덮어쓰지 않음)
   console.log('랜딩 그림 저장: public/landing/{home,tasks,calendar,sales,marketing,approvals,og}.png');
 } finally { await browser.close(); srv.proc.kill(); await sql.end(); }

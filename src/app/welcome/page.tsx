@@ -34,7 +34,7 @@ const AI_DEMO = [['내일 3시 거래처 미팅 잡아 줘', '내일 15:00 “�
 export default function Welcome() {
   const ld = {
     '@context': 'https://schema.org', '@graph': [
-      { '@type': 'Organization', name: '워크인', url: SITE, logo: `${SITE}/icon-512.png`, email: CONTACT_MAIL },
+      { '@type': 'Organization', name: '워크인', url: SITE, logo: `${SITE}/icon-1024.png`, email: CONTACT_MAIL },
       { '@type': 'SoftwareApplication', name: '워크인', applicationCategory: 'BusinessApplication', operatingSystem: 'Web, Android, iOS', url: SITE, description: DESC,
         offers: { '@type': 'Offer', price: '0', priceCurrency: 'KRW', description: '5명까지 무료' }, featureList: '업무·일정·메신저·결재, 영업(리드·입찰·제안·계약), 마케팅(시안 승인·자동 제작·광고), AI 비서' },
     ],
@@ -44,7 +44,7 @@ export default function Welcome() {
       <LandingEvents />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
       <header className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-4">
-        <img src="/icon.svg" alt="" className="size-8" /><span className="text-lg font-bold">워크인</span>
+        <Link href="/" aria-label="워크인"><img src="/brand/lockup-light.svg" alt="WorkIn 워크인" className="h-8 w-auto" width={160} height={48} /></Link>
         <nav className="ml-auto flex items-center gap-1.5 text-sm">
           <a href="#spaces" className="hidden px-2 text-ink-2 hover:text-ink sm:inline">기능</a>
           <a href="#pricing" className="hidden px-2 text-ink-2 hover:text-ink sm:inline">요금</a>
@@ -53,16 +53,27 @@ export default function Welcome() {
           <Link href="/signup" className="rounded-input bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700" data-track="start-top">무료로 시작</Link>
         </nav>
       </header>
-      <section className="mx-auto max-w-6xl px-4 pb-8 pt-6 text-center sm:pt-14">
-        <p className="text-sm font-semibold text-brand-700">5명까지 무료 · 카드 등록 없음</p>
+      {/* 대표 10/20 22:30 ③: 첫 화면 전체 폭 배경(실제 앱 화면 콜라주 + 어두운 오버레이 + 흰 글자, 휴대폰도 유지). 생성 인물 없음 */}
+      <section className="relative overflow-hidden bg-slate-900 text-white" data-testid="landing-hero">
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          <img src="/landing/home.png" alt="" className="absolute left-1/2 top-0 w-[1100px] max-w-none -translate-x-1/2 rounded-xl opacity-40 sm:w-[1400px]" width={1280} height={960} />
+          <img src="/landing/tasks.png" alt="" className="absolute -left-24 top-24 hidden w-[620px] -rotate-6 rounded-xl opacity-30 lg:block" width={1280} height={960} />
+          <img src="/landing/marketing.png" alt="" className="absolute -right-24 top-32 hidden w-[620px] rotate-6 rounded-xl opacity-30 lg:block" width={1280} height={960} />
+          <div className="absolute inset-0 bg-gradient-to-b from-slate-900/85 via-slate-900/75 to-slate-900/95" />
+        </div>
+        <div className="relative mx-auto max-w-6xl px-4 pb-12 pt-10 text-center sm:pb-16 sm:pt-20">
+        <p className="text-sm font-semibold text-teal-300">5명까지 무료 · 카드 등록 없음</p>
         <h1 className="mt-2 text-3xl font-bold leading-tight tracking-tight sm:text-5xl" data-testid="landing-title">업무도, 영업도, 마케팅도<br className="sm:hidden" /> 한 화면에서</h1>
-        <p className="mx-auto mt-4 max-w-2xl text-base text-ink-2 sm:text-lg">직원은 업무와 일정을, 영업팀은 리드와 입찰을, 마케팅은 시안 승인과 광고를 — 회사마다 켜고 끄는 세 공간을 한 계정으로. AI 비서가 등록·요약·초안을 돕습니다.</p>
+        <p className="mx-auto mt-4 max-w-2xl text-base text-slate-200 sm:text-lg">직원은 업무와 일정을, 영업팀은 리드와 입찰을, 마케팅은 시안 승인과 광고를 — 회사마다 켜고 끄는 세 공간을 한 계정으로. AI 비서가 등록·요약·초안을 돕습니다.</p>
         <div className="mt-7 flex flex-wrap justify-center gap-2">
           <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-testid="landing-start" data-track="start">무료로 시작<ArrowRight className="size-4" /></Link>
-          <a href="#app" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input border border-line px-6 py-3 text-base font-semibold hover:bg-slate-50" data-testid="landing-app" data-track="app">앱 다운로드<Download className="size-4" /></a>
+          <a href="#app" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input border border-white/40 px-6 py-3 text-base font-semibold text-white hover:bg-white/10" data-testid="landing-app" data-track="app">앱 다운로드<Download className="size-4" /></a>
         </div>
-        <p className="mt-3 text-xs text-ink-3">웹 · Android · iOS · 시간대 Asia/Seoul · 한국어</p>
-        <figure className="mx-auto mt-10 max-w-5xl overflow-hidden rounded-card border border-line shadow-card"><img src="/landing/home.png" alt="워크인 홈 — 이번 주 일정·업무·영업·마케팅 요약" className="w-full" width={1280} height={960} /></figure>
+        <p className="mt-3 text-xs text-slate-300">웹 · Android · iOS · 시간대 Asia/Seoul · 한국어</p>
+        </div>
+      </section>
+      <section className="mx-auto max-w-6xl px-4 pb-8 pt-8">
+        <figure className="mx-auto -mt-16 max-w-5xl overflow-hidden rounded-card border border-line bg-white shadow-card sm:-mt-20"><img src="/landing/home.png" alt="워크인 홈 — 이번 주 일정·업무·영업·마케팅 요약" className="w-full" width={1280} height={960} /></figure>
         <ul className="mx-auto mt-8 grid max-w-4xl gap-3 text-left sm:grid-cols-4">
           {([[Mic, '말로 등록', '“내일 3시 미팅” 한마디면 끝'], [BellRing, '정확한 알림', '앱·웹 푸시, 알람처럼 울리기'], [Users, '권한·부서', '부서 › 팀, 격리 팀, 결재선'], [Sparkles, 'AI 비서', '요약·초안·리드 제안']] as [typeof Mic, string, string][]).map(([I, t, d]) => (
             <li key={t} className="rounded-card border border-line p-3"><I className="size-5 text-brand-700" /><div className="mt-1.5 font-semibold">{t}</div><div className="text-sm text-ink-2">{d}</div></li>))}

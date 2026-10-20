@@ -11,9 +11,9 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
       <section className="relative hidden w-[44%] max-w-xl flex-col justify-between overflow-hidden bg-brand-800 p-10 text-white lg:flex" aria-hidden>
         <div className="absolute -right-24 -top-24 size-80 rounded-full bg-accent-500/20 blur-3xl" />
         <div className="absolute -bottom-32 -left-16 size-96 rounded-full bg-orange-500/10 blur-3xl" />
-        <div className="relative flex items-center gap-3">
-          <img src="/icon.svg" alt="" className="size-10" />
-          <div><div className="text-lg font-bold">워크인</div><div className="text-xs text-slate-400">업무 · 일정 · 알림을 한 곳에</div></div>
+        <div className="relative">{/* 대표 10/20 로고 S3 확정: 어두운 판엔 다크 록업 */}
+          <img src="/brand/lockup-dark.svg" alt="WorkIn 워크인" className="h-12 w-auto" width={160} height={48} />
+          <div className="mt-1 text-xs text-slate-400">업무 · 일정 · 알림을 한 곳에</div>
         </div>
         <div className="relative">
           <h2 className="text-[28px] font-bold leading-snug tracking-tight">음성으로 등록하고,<br />정확한 시간에 알림 받기.</h2>
