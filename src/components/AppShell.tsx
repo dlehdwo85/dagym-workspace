@@ -336,7 +336,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
           </div>
         </aside>
 
-        <div className="min-w-0 flex-1 pb-[calc(6rem+var(--sab))] sm:pb-0">
+        {/* 대표 16:30 핫픽스: 휴대폰 대화방(?room=)이 열려 있으면(html[data-chat-room]) 하단 탭·아래 여백을 없애 키보드가 열려도 입력창이 보이게 */}
+        <div className="min-w-0 flex-1 pb-[calc(6rem+var(--sab))] sm:pb-0 [[data-chat-room]_&]:pb-0">
           {/* 상단 바 (데스크톱) */}
           <header className="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b border-line bg-white/90 px-5 backdrop-blur sm:flex">
             <button onClick={() => setPalette(true)} data-testid="open-palette"
@@ -458,7 +459,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         )}
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         {/* 대표 결정(10/19): 가운데 + 버튼 없이 공간마다 같은 크기 5칸 — 4개 메뉴 + 더보기(그 공간 나머지 메뉴·공통·공간 전환·만들기) */}
-        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden" aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
+        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden [[data-chat-room]_&]:hidden" aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
           {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.badge} />)}
           <button type="button" onClick={() => setMore(true)} aria-label="더보기" data-testid="tab-more" className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs', more ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
             <Ellipsis className="size-6" strokeWidth={more ? 2.4 : 1.8} aria-hidden />더보기

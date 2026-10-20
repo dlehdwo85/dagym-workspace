@@ -1337,6 +1337,11 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 드래그로 옮기기는 안 넣음(상위 부서 선택으로 대체) — 필요하면 다음 회차
 - 시험: tests/api/org-tree.test.mjs 3건, team-isolation(부서 아래 부서 허용으로 기대 변경), tests/e2e/orgTree.step.mjs(캡처 154·155·155-390)
 
+## 2026-10-20 (클라우드) — 대표 16:30 긴급 핫픽스: 휴대폰 대화방 키보드 열면 입력창 가림 — [배포확인요청]
+- 원인: /messages 칸이 `min-h-440px` 라 키보드로 뷰포트가 줄면(안드로이드 adjustResize) 입력창이 하단 탭 아래로 밀림
+- 고침: 대화방(?room=)이 열리면 `html[data-chat-room]` → 휴대폰 하단 탭·아래 여백 숨김(AppShell), 칸 높이 = 뷰포트 − 머리줄(min-h 없음), 입력창에 safe-area 아래 여백, 입력창 focus 시 목록 맨 아래·입력창 보이게(visualViewport resize 는 기존 keep 로직). 목록으로 돌아가면 탭 복귀. AI 비서·메신저 떠 있는 버튼은 원래 휴대폰에 없음
+- 시험: tests/e2e/chatKeyboard.step.mjs — 390×844 → 500(키보드 흉내)에서 입력창이 화면 안·보내기, 탭 숨김/복귀(캡처 156)
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md
