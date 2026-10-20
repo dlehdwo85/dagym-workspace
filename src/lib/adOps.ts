@@ -47,6 +47,7 @@ const RISKY: [RegExp, string][] = [
 const NAVER_OK = /^[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9 .,!?%&()+\-/:'"~@#*\[\]]$/;
 export const planInput = z.object({
   accountId: z.string().uuid(),
+  brandId: z.string().uuid().nullable().optional(),                   // 대표 02:30 ③ 브랜드별 세팅안 — 예산 승인 때 브랜드 몫을 이 캠페인에
   name: z.string().trim().min(1).max(60),
   dailyBudget: z.number().int().min(50).max(10_000_000),          // 원, 캠페인 하루 예산
   channelId: z.string().trim().min(1).max(60),                     // 비즈채널(웹사이트) id — 네이버에 먼저 등록된 것
@@ -95,11 +96,12 @@ export async function adOpsOverview(u: SessionUser) {
   const t = tenantOf(u); const sql = db();
   const [cap, spend] = await Promise.all([capOf(t), monthSpend(t)]);
   const accounts = await sql`select id, label, external_id from mkt_ad_accounts where tenant = ${t} and provider = 'naver' and status <> 'disconnected' order by created_at`;
-  const plans = await sql<any[]>`select p.id, p.account_id, p.kind, p.name, p.plan, p.status, p.external, p.error, p.created_at, p.approved_at, a.label as account_label, ab.name as approved_by_name
-    from mkt_ad_plans p join mkt_ad_accounts a on a.id = p.account_id left join users ab on ab.id = p.approved_by where p.tenant = ${t} and p.status <> 'archived' order by p.created_at desc limit 50`;
+  const plans = await sql<any[]>`select p.id, p.account_id, p.brand_id, br.name as brand, p.kind, p.name, p.plan, p.status, p.external, p.error, p.created_at, p.approved_at, a.label as account_label, ab.name as approved_by_name
+    from mkt_ad_plans p join mkt_ad_accounts a on a.id = p.account_id left join mkt_brands br on br.id = p.brand_id left join users ab on ab.id = p.approved_by where p.tenant = ${t} and p.status <> 'archived' order by p.created_at desc limit 50`;
+  const brands = await sql<{ id: string; name: string }[]>`select id, name from mkt_brands where tenant = ${t} order by ad_priority nulls last, name`;
   const changes = await sql<any[]>`select c.id, c.plan_id, c.kind, c.before, c.after, c.money_up, c.status, c.error, c.revert_of, c.created_at, u.name as actor_name
     from mkt_ad_changes c left join users u on u.id = c.actor_id where c.tenant = ${t} order by c.created_at desc limit 100`;
-  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan) })), changes };
+  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan) })), changes };
 }
 
 /** 비즈채널(웹사이트) 목록 — 세팅안에서 고르기 */
@@ -129,8 +131,8 @@ async function planOf(tenant: string, id: string) {
 export async function createPlan(u: SessionUser, i: z.infer<typeof planInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   await naverAcc(tenantOf(u), i.accountId);
-  const { accountId, name, ...plan } = i;
-  const [p] = await db()`insert into mkt_ad_plans (tenant, account_id, provider, kind, name, plan, created_by) values (${tenantOf(u)}, ${accountId}, 'naver', 'powerlink', ${name}, ${db().json(plan as never)}, ${u.id}) returning id`;
+  const { accountId, name, brandId, ...plan } = i;
+  const [p] = await db()`insert into mkt_ad_plans (tenant, account_id, provider, kind, name, plan, created_by, brand_id) values (${tenantOf(u)}, ${accountId}, 'naver', 'powerlink', ${name}, ${db().json(plan as never)}, ${u.id}, ${brandId ?? null}) returning id`;
   return { id: p.id, issues: precheck(i) };
 }
 
@@ -139,8 +141,8 @@ export async function updatePlan(u: SessionUser, id: string, i: z.infer<typeof p
   await assertSpace(u, 'marketing'); adminOnly(u);
   const p = await planOf(tenantOf(u), id);
   if (p.status !== 'draft' && p.status !== 'failed') throw new HttpError(409, 'plan_locked', '네이버에 만든 뒤에는 세팅안을 고칠 수 없습니다 — 끄기·하루 예산만 바꿀 수 있습니다');
-  const { accountId: _a, name, ...plan } = i;
-  await db()`update mkt_ad_plans set name = ${name}, plan = ${db().json(plan as never)}, updated_at = now() where id = ${id}`;
+  const { accountId: _a, name, brandId, ...plan } = i;
+  await db()`update mkt_ad_plans set name = ${name}, plan = ${db().json(plan as never)}, brand_id = ${brandId === undefined ? p.brand_id : brandId}, updated_at = now() where id = ${id}`;
   return { id, issues: precheck(i) };
 }
 

@@ -20,7 +20,7 @@ const BUNDLE_KINDS = ['feed', 'shorts', 'reels', 'blog', 'story'];
 const REQ: Record<string, string> = { image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성', topic: '주제 필요' };
 type View = { settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null; aiMonthlyUsd: number | null };
   usage: { weekCredits: number; monthCredits: number; monthVideos: number; monthRegens: number; ai: { usd: number; requests: number }; companyAiUsd: number; companyAiLimitUsd: number }; plans: Record<string, { label: string; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; price: number | null }>;
-  rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; intro: string | null; products: string | null; weekly_topic: string | null; banned_words: string[]; test_mode: boolean }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean };
+  rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; intro: string | null; products: string | null; weekly_topic: string | null; banned_words: string[]; test_mode: boolean; ad_priority?: number | null; ad_share?: number | null; ad_note?: string | null }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean };
 const lim = (used: number, max: number | null) => (max === null ? `${used} (한도 없음)` : `${used} / ${max}`);
 
 /** V41 4-3 + V43: 자동 제작 — 요금제·한도·사용량, 일정·마감·알림, 브랜드 키트, 주간 규칙, 제작 요청 카드, 크레딧 원장 */
@@ -172,7 +172,12 @@ export function Automation() {
               <textarea className={cx(inputCls, 'min-h-16')} defaultValue={b.intro ?? ''} placeholder="브랜드 소개(무엇을 하는 곳인지)" maxLength={1000} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { intro: e.target.value } }).then(reload)} aria-label={`${b.name} 소개`} data-testid="auto-brand-intro" />
               <textarea className={cx(inputCls, 'min-h-16')} defaultValue={b.products ?? ''} placeholder="주력 상품·서비스" maxLength={1000} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { products: e.target.value } }).then(reload)} aria-label={`${b.name} 주력 상품`} />
               <textarea className={cx(inputCls, 'min-h-16')} defaultValue={b.weekly_topic ?? ''} placeholder="이번 주 주제(선택)" maxLength={300} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { weeklyTopic: e.target.value } }).then(reload)} aria-label={`${b.name} 이번 주 주제`} />
-            </div></li>))}</ul>
+            </div>
+            {/* 대표 02:30 ③ 광고 예산 브랜드 축: 우선순위(1 = 최우선)·비중(%)·메모(바디랩 지역 한정 등). 비워 두면 이름 기본값(하이링크 40·워크인 35·바디랩 15·다짐 10, 그 외 균등) */}
+            <div className="flex flex-wrap items-center gap-1.5 text-xs sm:col-span-4 sm:pl-[8.5rem]" data-testid={`brand-ad-${b.name}`}><span className="text-ink-3">광고 예산</span>
+              <input className={cx(inputCls, 'h-8 w-20 py-0 text-xs')} defaultValue={b.ad_priority ?? ''} placeholder="우선순위" inputMode="numeric" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { adPriority: e.target.value ? Number(e.target.value) : null } }).then(reload)} aria-label={`${b.name} 광고 우선순위`} data-testid="brand-ad-priority" />
+              <input className={cx(inputCls, 'h-8 w-20 py-0 text-xs')} defaultValue={b.ad_share ?? ''} placeholder="비중 %" inputMode="decimal" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { adShare: e.target.value ? Number(e.target.value) : null } }).then(reload)} aria-label={`${b.name} 광고 비중`} data-testid="brand-ad-share" />
+              <input className={cx(inputCls, 'h-8 min-w-48 flex-1 py-0 text-xs')} defaultValue={b.ad_note ?? ''} placeholder="메모(예: 지역 한정 천안 두정·성정)" maxLength={300} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { adNote: e.target.value } }).then(reload)} aria-label={`${b.name} 광고 메모`} data-testid="brand-ad-note" /></div></li>))}</ul>
         <p className="mt-2 text-xs text-ink-3">원고 재료: 브랜드 소개·주력 상품·이번 주 주제 + 회사 AI 프로필 + 마케팅 자료실 사진 설명. 재료가 없으면 시안 대신 “주제 필요” 카드로 묻습니다.</p>
       </section>}
 

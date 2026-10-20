@@ -124,7 +124,7 @@ test('② 광고 예산 계획: AI 초안(채널 4·연결 표시·하루 예산
   assert.equal((await ctx.staffA.client.req('PATCH', `/api/marketing/ops/budget/${P.budget}`, { action: 'approve' })).status, 403);
   const ap = await ctx.owner.ok('PATCH', `/api/marketing/ops/budget/${P.budget}`, { action: 'approve' });
   assert.equal(ap.status, 'approved');
-  const nvx = ap.executed.find((e) => e.provider === 'naver');
+  const nvx = ap.executed.find((e) => e.provider === 'naver' && e.planId); // 대표 02:30 ③: 세팅안 없는 브랜드('다짐')는 '세팅안 필요' 줄이 앞에 붙음
   assert.ok(nvx && nvx.planId === plan.id && nvx.dailyBudget > 0, JSON.stringify(ap.executed));
   assert.ok(ap.executed.find((e) => e.provider === 'meta')?.note?.includes('직접 설정'), '연결 없는 매체는 안내');
   assert.equal(nvx.ok, true, JSON.stringify(nvx));

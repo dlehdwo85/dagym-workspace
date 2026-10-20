@@ -8,10 +8,10 @@ const C = '#7C3AED';
 const NAVER_OK = /^[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9 .,!?%&()+\-/:'"~@#*\[\]]$/;
 const badChars = (t: string) => [...new Set([...t].filter((c) => !NAVER_OK.test(c)))].join(' ');
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
-type Plan = { id: string; account_id: string; kind: string; name: string; plan: { dailyBudget: number; bidAmt: number; channelId: string; keywords: string[]; ads: { headline: string; description: string; url: string }[] };
+type Plan = { id: string; account_id: string; brand_id?: string | null; brand?: string | null; kind: string; name: string; plan: { dailyBudget: number; bidAmt: number; channelId: string; keywords: string[]; ads: { headline: string; description: string; url: string }[] };
   status: string; external: Record<string, unknown>; error: string | null; created_at: string; approved_at: string | null; account_label: string; approved_by_name: string | null; issues: string[] };
 type Change = { id: string; plan_id: string | null; kind: string; before: any; after: any; money_up: boolean; status: string; error: string | null; revert_of: string | null; created_at: string; actor_name: string | null };
-type Data = { canEdit: boolean; cap: { monthlyCap: number; stoppedMonth: string | null } | null; monthSpend: number; month: string; accounts: { id: string; label: string; external_id: string }[]; plans: Plan[]; changes: Change[] };
+type Data = { canEdit: boolean; cap: { monthlyCap: number; stoppedMonth: string | null } | null; monthSpend: number; month: string; accounts: { id: string; label: string; external_id: string }[]; brands: { id: string; name: string }[]; plans: Plan[]; changes: Change[] };
 const STATUS: Record<string, [string, string]> = { draft: ['세팅안', 'bg-slate-100 text-ink-2'], creating: ['만드는 중', 'bg-sky-50 text-sky-800'], created: ['만듦 · 꺼짐', 'bg-sky-50 text-sky-800'], active: ['켜짐', 'bg-emerald-50 text-emerald-800'],
   paused: ['꺼짐', 'bg-amber-50 text-amber-800'], failed: ['만들기 실패', 'bg-red-50 text-red-800'] };
 const kwOk = (x: unknown) => Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === 'string' && v && v !== 'undefined');
@@ -59,7 +59,7 @@ export function AdOps() {
           const [label, cls] = STATUS[p.status] ?? [p.status, 'bg-slate-100'];
           return (
             <li key={p.id} className="rounded-input border border-line p-2 text-sm" data-testid="ad-plan">
-              <div className="flex flex-wrap items-center gap-2"><b>{p.name}</b><span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', cls)} data-testid="ad-plan-status">{label}</span>
+              <div className="flex flex-wrap items-center gap-2"><b>{p.name}</b>{p.brand && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="ad-plan-brand">{p.brand}</span>}<span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', cls)} data-testid="ad-plan-status">{label}</span>
                 <span className="text-xs text-ink-2">{p.account_label} · 하루 {won(p.plan.dailyBudget)} · 입찰 {won(p.plan.bidAmt)} · 키워드 {p.plan.keywords.length}개</span></div>
               <p className="mt-0.5 text-xs text-ink-2">키워드: {p.plan.keywords.join(', ')}</p>
               {p.plan.ads.map((a, k) => <p key={k} className="mt-0.5 text-xs"><b className="text-emerald-800">{a.headline}</b> {a.description} <span className="text-ink-3">{a.url}</span></p>)}
@@ -98,22 +98,22 @@ export function AdOps() {
             </li>);
         })}{!data.changes.length && <li className="py-1.5 text-ink-3">아직 변경이 없습니다</li>}</ul>
       </section>
-      {form && <PlanForm accounts={data.accounts} edit={form === true ? undefined : form} onClose={() => setForm(false)} onDone={reload} />}
+      {form && <PlanForm accounts={data.accounts} brands={data.brands ?? []} edit={form === true ? undefined : form} onClose={() => setForm(false)} onDone={reload} />}
     </div>
   );
 }
 
-function PlanForm({ accounts, edit, onClose, onDone }: { accounts: Data['accounts']; edit?: Plan; onClose: () => void; onDone: () => void }) {
+function PlanForm({ accounts, brands, edit, onClose, onDone }: { accounts: Data['accounts']; brands: Data['brands']; edit?: Plan; onClose: () => void; onDone: () => void }) {
   const [f, setF] = useState(edit
-    ? { accountId: edit.account_id, name: edit.name, dailyBudget: String(edit.plan.dailyBudget), bidAmt: String(edit.plan.bidAmt), channelId: edit.plan.channelId, keywords: edit.plan.keywords.join(', '), ads: edit.plan.ads.map((a) => ({ ...a })) }
-    : { accountId: accounts[0]?.id ?? '', name: '', dailyBudget: '10000', bidAmt: '300', channelId: '', keywords: '', ads: [{ headline: '', description: '', url: 'https://' }] });
+    ? { accountId: edit.account_id, brandId: edit.brand_id ?? '', name: edit.name, dailyBudget: String(edit.plan.dailyBudget), bidAmt: String(edit.plan.bidAmt), channelId: edit.plan.channelId, keywords: edit.plan.keywords.join(', '), ads: edit.plan.ads.map((a) => ({ ...a })) }
+    : { accountId: accounts[0]?.id ?? '', brandId: '', name: '', dailyBudget: '10000', bidAmt: '300', channelId: '', keywords: '', ads: [{ headline: '', description: '', url: 'https://' }] });
   const ch = useApi<{ channels: { id: string; name: string; url: string | null; type: string }[] }>(f.accountId ? `/api/marketing/ad-ops/channels?accountId=${f.accountId}` : null, [f.accountId]);
   const [busy, setBusy] = useState(false);
   const setAd = (k: number, patch: Partial<(typeof f.ads)[number]>) => setF({ ...f, ads: f.ads.map((a, i) => (i === k ? { ...a, ...patch } : a)) });
   async function save(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
     try {
-      const r = await api<{ issues: string[] }>(edit ? `/api/marketing/ad-ops/plans/${edit.id}` : '/api/marketing/ad-ops/plans', { method: edit ? 'PUT' : 'POST', body: { accountId: f.accountId, name: f.name, dailyBudget: Number(f.dailyBudget), bidAmt: Number(f.bidAmt), channelId: f.channelId,
+      const r = await api<{ issues: string[] }>(edit ? `/api/marketing/ad-ops/plans/${edit.id}` : '/api/marketing/ad-ops/plans', { method: edit ? 'PUT' : 'POST', body: { accountId: f.accountId, brandId: f.brandId || null, name: f.name, dailyBudget: Number(f.dailyBudget), bidAmt: Number(f.bidAmt), channelId: f.channelId,
         keywords: f.keywords.split(/[\n,]/).map((s) => s.trim()).filter(Boolean), ads: f.ads } });
       r.issues.length ? toast.error(`저장했습니다 — 검사 ${r.issues.length}건을 고쳐야 시작할 수 있습니다`) : toast.ok('세팅안을 저장했습니다');
       onDone(); onClose();
@@ -124,6 +124,7 @@ function PlanForm({ accounts, edit, onClose, onDone }: { accounts: Data['account
     <Modal open onClose={onClose} title={edit ? '세팅안 고치기' : '네이버 파워링크 세팅안'}>
       <form onSubmit={save} className="grid gap-3 text-sm" data-testid="ad-plan-form">
         <Field label="광고 계정"><select className={inputCls} value={f.accountId} onChange={(e) => setF({ ...f, accountId: e.target.value, channelId: '' })}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></Field>
+        {brands.length > 0 && <Field label="브랜드(예산 집행 단위)"><select className={inputCls} value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value })} aria-label="세팅안 브랜드" data-testid="plan-brand"><option value="">브랜드 없음</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>}
         <Field label="캠페인 이름"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={60} data-testid="ad-plan-name" /></Field>
         <div className="grid grid-cols-2 gap-2">
           <Field label="하루 예산(원)"><input className={inputCls} inputMode="numeric" value={f.dailyBudget} onChange={(e) => setF({ ...f, dailyBudget: e.target.value.replace(/\D/g, '') })} required data-testid="ad-plan-budget-input" /></Field>
