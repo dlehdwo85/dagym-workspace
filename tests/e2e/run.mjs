@@ -41,6 +41,7 @@ import { offboardFlow } from './offboard.step.mjs';
 import { messengerV3 } from './messengerV3.step.mjs';
 import { platformAdd } from './platformAdd.step.mjs';
 import { orgTree } from './orgTree.step.mjs';
+import { chatKeyboard } from './chatKeyboard.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -1009,6 +1010,7 @@ await step('V41 4-2 마케팅: 개요 카드 → 새 콘텐츠 → 시안 없으
 await step('홈 오늘의 일정: 오늘 일정도 함께(시간순)', () => homeTodayEvents({ owner, ctx, BASE }));
 await step('업무 등록 창 AI 비서: 편하게 적고 [AI로 채우기] → 업무명·담당·마감·설명·체크리스트 채움 → 저장', () => quickAi({ owner, ctx, sql, BASE, FAKE }));
 await step('V38 1 메시지방 흔들림: 휴대폰 위로 올려 보는 중 새 메시지 → 자리 유지·"새 메시지 n ↓", 맨 아래면 따라감, 화면 전체는 그대로', () => chatScroll({ browser, desk, ctx, BASE }));
+await step('대표 16:30 핫픽스 휴대폰 대화방 키보드: 대화방 열리면 하단 탭 숨김, 뷰포트 500 에서도 입력창 보임·보내기, 목록으로 돌아가면 탭 복귀', () => chatKeyboard({ browser, desk, ctx, BASE, SHOTS }));
 await step('V14 44 PC 업무 줄 선택 체크박스: 왼쪽 고정 홈·세로 가운데·올려도 제목 그대로·간격 좁게', () => v1444({ owner, ctx, BASE, SHOTS }));
 await step('V14 45 업무 추가 줄 마감 선택 창: 칩 바로 아래/위·칩 왼쪽 맞춤·화면 안·시각 버튼 닿음', () => v1445({ owner, BASE, SHOTS }));
 await step('V14 47 홈 이번 주: 같은 날·같은 제목 업무·일정 한 줄(업무 1 · 일정 1, 시각은 일정)', () => v1447({ owner, BASE, SHOTS }));

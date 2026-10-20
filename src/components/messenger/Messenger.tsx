@@ -576,7 +576,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
             <p className="text-sm font-medium text-ink-2" data-testid="chat-voice-state">{vPhase === 'listen' ? '듣고 있어요… 말을 멈추면 읽어 드려요' : vPhase === 'confirm' ? '“보내” 또는 “취소”라고 말하거나 눌러 주세요' : vPhase === 'sending' ? '보내는 중…' : '새 메시지를 읽어 드려요 · 마이크를 누르고 말하세요'}</p>
           </div>
         )}
-        <form onSubmit={send} className="relative flex items-end gap-1 border-t border-line bg-white p-2">
+        <form onSubmit={send} className="relative flex items-end gap-1 border-t border-line bg-white p-2 pb-[calc(0.5rem+var(--sab))] sm:pb-2">
           {mentionList.length > 0 && (
             <ul role="listbox" aria-label="멘션 자동완성" className="absolute bottom-full left-2 z-20 mb-1 w-56 overflow-hidden rounded-card border border-line bg-white shadow-pop">
               {mentionList.map((m) => {
@@ -597,6 +597,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           <VoiceButton small value={text} onChange={(v) => onType(v)} label="말로 입력" />
           <textarea ref={inputRef} rows={1} className={cx(inputCls, 'max-h-32 min-h-9 min-w-0 flex-1 resize-none py-1.5')} placeholder="메시지 입력" title="Enter 보내기 · Shift+Enter 줄바꿈 · @ 멘션 · 이미지 붙여넣기" value={text}
             onChange={(e) => onType(e.target.value)} aria-label="메시지" data-testid="chat-input"
+            onFocus={() => { setTimeout(() => { toBottom(); inputRef.current?.scrollIntoView({ block: 'nearest' }); }, 80); }} // 핫픽스: 키보드가 열리며 칸이 줄어들면 맨 아래·입력창이 보이게
             onPaste={(e) => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); upload(fs); } }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } if (e.key === 'Escape') setReplyTo(null); }} />
           <button type="button" className={cx(iconBtn, compact && 'hidden')} onClick={() => setEmojiOpen((v) => !v)} aria-label="이모지" title="이모지"><SmilePlus className="size-[18px]" /></button>
