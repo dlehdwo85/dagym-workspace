@@ -71,7 +71,12 @@ export async function draftGoal(tenant: string, month: string, brandId: string |
   const rules = await sql<{ channel: string }[]>`select distinct channel from mkt_rules where tenant = ${tenant} and active ${brandId ? sql`and brand_id = ${brandId}` : sql``}`;
   const connected = await sql<{ channel: string }[]>`select distinct channel from mkt_channel_settings where tenant = ${tenant} and enabled`;
   const channels = [...new Set([...rules.map((r) => r.channel), ...connected.map((r) => r.channel)])].filter((c) => c !== 'other');
+  const today = ymd(new Date()); const cur = await numbersOf(tenant, `${month}-01`, lastDayOf(month), brandId); // 이달 예정(묶음 규칙 칸)·지금까지 실적
   const base = templateGoal(month, brand, co, prev, channels.length ? channels : ['instagram', 'blog']);
+  base.goals.targets.posts = Math.max(base.goals.targets.posts ?? 0, cur.planned, cur.posts + 1); base.goals.targets.inquiries = Math.max(base.goals.targets.inquiries ?? 0, cur.inquiries + 1);
+  if (cur.adCost > 0) base.goals.targets.adBudget = Math.max(base.goals.targets.adBudget ?? 0, Math.round(cur.adCost * 1.1));
+  const remaining = base.weekly.filter((w) => w.to >= today);
+  for (const w of base.weekly) if (w.to < today) { w.topic = '(지난 주)'; w.note = ''; }
   let goals = base.goals, weekly = base.weekly, source: 'ai' | 'template' = 'template';
   const P = await import('./ai/provider');
   if (P.aiEnabled()) {
@@ -80,7 +85,7 @@ export async function draftGoal(tenant: string, month: string, brandId: string |
       const p = P.anthropicProvider({ tier: 'fast' });
       const r = await p.chat({
         system: `회사 마케팅 담당 AI 비서입니다. 다음 달 마케팅 운영 목표와 주간 주제 달력을 JSON 으로만 씁니다. 한국어. 사실은 [재료]에 있는 것만, 숫자 목표는 지난달 실적을 바탕으로 현실적으로(지난달 +10~30%). 과장·최상급 금지. 돈을 쓰거나 밖으로 보내는 계획은 '대표 승인 뒤'라고 씁니다.`,
-        tools: [], messages: [{ role: 'user', content: `[재료]\n달: ${month}\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}\n${brand?.intro ? `소개: ${brand.intro}\n` : ''}${brand?.products ? `주력 상품: ${brand.products}\n` : ''}${brand?.weekly_topic ? `이번 주 주제(참고): ${brand.weekly_topic}\n` : ''}${co?.business ? `회사 사업: ${co.business}\n` : ''}${co?.customers ? `주요 고객: ${co.customers}\n` : ''}채널: ${goals.channels.join(', ')}\n지난달 실적: 게시 ${prev.posts}건(${Object.entries(prev.byChannel).map(([k, v]) => `${k} ${v}`).join(', ') || '없음'}), 전화 문의 ${prev.inquiries}건, 광고비 ${prev.adCost.toLocaleString('ko-KR')}원\n주 블록: ${weeksOf(month).map((w) => `${w.week}주 ${w.from}~${w.to}`).join(' / ')}\n\nobjectives 3개(한 줄씩), message(핵심 메시지 한 줄), targets{posts, inquiries, adBudget(원, 지난달 없으면 null)}, weeks(주 블록 수만큼: topic 한 줄, channels, kinds(feed/reels/blog/shorts/story 중), note 한 줄)` }],
+        tools: [], messages: [{ role: 'user', content: `[재료]\n달: ${month}\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}\n${brand?.intro ? `소개: ${brand.intro}\n` : ''}${brand?.products ? `주력 상품: ${brand.products}\n` : ''}${brand?.weekly_topic ? `이번 주 주제(참고): ${brand.weekly_topic}\n` : ''}${co?.business ? `회사 사업: ${co.business}\n` : ''}${co?.customers ? `주요 고객: ${co.customers}\n` : ''}채널: ${goals.channels.join(', ')}\n지난달 실적: 게시 ${prev.posts}건(${Object.entries(prev.byChannel).map(([k, v]) => `${k} ${v}`).join(', ') || '없음'}), 전화 문의 ${prev.inquiries}건, 광고비 ${prev.adCost.toLocaleString('ko-KR')}원\n이달 현황: 묶음 규칙으로 예정된 게시 ${cur.planned}건, 지금까지 게시 ${cur.posts}건·문의 ${cur.inquiries}건·광고비 ${cur.adCost.toLocaleString('ko-KR')}원(실적) → 목표 수치는 예정·실적보다 높게\n주 블록(남은 주만 주제를 배정): ${remaining.map((w) => `${w.week}주 ${w.from}~${w.to}`).join(' / ') || '(남은 주 없음)'}\n\nobjectives 3개(한 줄씩), message(핵심 메시지 한 줄), targets{posts, inquiries, adBudget(원, 광고비 실적 없으면 null)}, weeks(남은 주 블록 수만큼 순서대로: topic 한 줄, channels, kinds(feed/reels/blog/shorts/story 중), note 한 줄)` }],
         format: { type: 'object', additionalProperties: false, required: ['objectives', 'message', 'targets', 'weeks'], properties: { objectives: { type: 'array', items: { type: 'string' } }, message: { type: 'string' },
           targets: { type: 'object', additionalProperties: false, required: ['posts', 'inquiries', 'adBudget'], properties: { posts: { type: ['integer', 'null'] }, inquiries: { type: ['integer', 'null'] }, adBudget: { type: ['integer', 'null'] } } },
           weeks: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['topic', 'channels', 'kinds', 'note'], properties: { topic: { type: 'string' }, channels: { type: 'array', items: { type: 'string' } }, kinds: { type: 'array', items: { type: 'string' } }, note: { type: 'string' } } } } } },
@@ -89,7 +94,9 @@ export async function draftGoal(tenant: string, month: string, brandId: string |
         values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_goal')`;
       const o = JSON.parse((r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join(''));
       goals = { objectives: (o.objectives ?? []).slice(0, 5).map(String), message: String(o.message ?? goals.message).slice(0, 200), targets: { posts: o.targets?.posts ?? goals.targets.posts, inquiries: o.targets?.inquiries ?? goals.targets.inquiries, adBudget: o.targets?.adBudget ?? goals.targets.adBudget }, channels: goals.channels };
-      weekly = weeksOf(month).map((w, i) => ({ ...w, topic: String(o.weeks?.[i]?.topic ?? base.weekly[i].topic).slice(0, 120), channels: (o.weeks?.[i]?.channels ?? base.weekly[i].channels).map(String), kinds: (o.weeks?.[i]?.kinds ?? base.weekly[i].kinds).map(String), note: String(o.weeks?.[i]?.note ?? '').slice(0, 200) }));
+      let k = 0;
+      weekly = base.weekly.map((w) => { if (w.to < today) return w; const ow = o.weeks?.[k++]; return { ...w, topic: String(ow?.topic ?? w.topic).slice(0, 120), channels: (ow?.channels ?? w.channels).map(String), kinds: (ow?.kinds ?? w.kinds).map(String), note: String(ow?.note ?? '').slice(0, 200) }; });
+      goals.targets = { posts: Math.max(goals.targets.posts ?? 0, cur.planned, cur.posts + 1) || null, inquiries: Math.max(goals.targets.inquiries ?? 0, cur.inquiries + 1) || null, adBudget: goals.targets.adBudget };
       source = 'ai';
     } catch { /* AI 실패·한도 → 기본 초안 */ }
   }

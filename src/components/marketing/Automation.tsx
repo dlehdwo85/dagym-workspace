@@ -6,6 +6,9 @@ import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { CHANNELS } from './Marketing';
 import { MediaPick } from './MediaPick';
+import { Studio } from './Studio';
+import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 
 const C = '#7C3AED';
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', shorts: '쇼츠', story: '스토리', video: '생성 영상' };
@@ -22,6 +25,7 @@ const lim = (used: number, max: number | null) => (max === null ? `${used} (한�
 
 /** V41 4-3 + V43: 자동 제작 — 요금제·한도·사용량, 일정·마감·알림, 브랜드 키트, 주간 규칙, 제작 요청 카드, 크레딧 원장 */
 export function Automation() {
+  const tab = useSearchParams().get('tab') === 'studio' ? 'studio' : 'rules'; // 대표 10/20 19:00: '제작의뢰실' 탭
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 고르기 없음
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '' });
@@ -58,6 +62,8 @@ export function Automation() {
   const num = (v: string) => (v === '' ? null : Number(v));
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="mkt-automation">
+      <div className="flex gap-1 border-b border-line" role="tablist">{([['rules', '자동 제작'], ['studio', '제작의뢰실']] as [string, string][]).map(([k, l]) => <Link key={k} href={k === 'studio' ? '/s/marketing/automation?tab=studio' : '/s/marketing/automation'} role="tab" aria-selected={tab === k} className={cx('px-3 py-1.5 text-sm', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`auto-tab-${k}`}>{l}</Link>)}</div>
+      {tab === 'studio' ? <><h1 className="text-xl font-bold" style={{ color: C }}>제작의뢰실</h1><Studio /></> : <>
       <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>자동 제작</h1>
         {ed && <Button size="sm" variant="secondary" className="ml-auto" onClick={runNow} disabled={busy} data-testid="auto-run">{busy ? '도는 중…' : '지금 한 번 돌리기'}</Button>}</div>
       <p className="text-xs text-ink-2" data-testid="auto-ai-note">AI 원고는 회사 AI 한도(이번 달 ${data.usage.companyAiUsd} / ${data.usage.companyAiLimitUsd})와 마케팅 AI 월 한도 중 먼저 닿는 쪽에서 멈추고, 받는 사람에게 하루 한 번 알립니다. 회사 전체 AI 사용은 <a className="underline" href="/admin/usage">관리 → 사용량·요금제</a>(기능별 “마케팅”).</p>
@@ -169,12 +175,13 @@ export function Automation() {
         <p className="mt-2 text-xs text-ink-3">원고 재료: 브랜드 소개·주력 상품·이번 주 주제 + 회사 AI 프로필 + 마케팅 자료실 사진 설명. 재료가 없으면 시안 대신 “주제 필요” 카드로 묻습니다.</p>
       </section>}
 
-      <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-requests">
+      <section id="requests" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-requests">
         <h2 className="text-sm font-semibold">제작 요청 카드</h2>
         <ul className="mt-2 space-y-2">{data.requests.map((q) => (
           <li key={q.id} className={cx('rounded-input border p-3 text-sm', q.status === 'needs_approval' ? 'border-amber-300 bg-amber-50' : 'border-line')} data-testid="auto-request">
             <div className="flex flex-wrap items-center gap-2"><b>{REQ[q.kind]}</b><span className="text-xs text-ink-2">{q.title} · {q.scheduled_at ? fmtDateTime(q.scheduled_at) : ''}{q.kind !== 'topic' && ` · 예상 ${q.est_credits}크레딧`}</span>
               {q.status === 'needs_approval' && <span className="text-xs font-semibold text-amber-800">{q.reason}</span>}</div>
+            {q.brief_id && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800" data-testid="auto-req-brief">제작의뢰실</span>}
             {q.brief && <p className="mt-1 whitespace-pre-wrap text-xs text-ink-2">{q.brief}</p>}
             <div className="mt-2 flex flex-wrap items-end gap-2">
               {q.kind === 'topic' ? (<>
@@ -195,6 +202,7 @@ export function Automation() {
           <li key={k} className="flex gap-2 py-1"><span className="w-28 shrink-0 text-ink-3">{fmtDateTime(l.created_at)}</span><span className="flex-1 truncate">{l.title ?? '—'}{l.version ? ` v${l.version}` : ''} · {l.note}</span><span className="tabular-nums font-medium">{l.credits}</span></li>))}
           {!data.ledger.length && <li className="py-1 text-ink-3">기록 없음</li>}</ul>
       </section>
+      </>}
     </div>
   );
 }

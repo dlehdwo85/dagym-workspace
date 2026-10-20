@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -101,7 +102,8 @@ function GoalCard({ g, canEdit, today, onChange }: { g: Goal; canEdit: boolean; 
             <div className="mt-1 flex flex-wrap gap-1">{KINDS.map((k) => <label key={k} className={cx('rounded-full border px-1.5 py-0.5', w.kinds.includes(k) ? 'border-violet-300 bg-violet-50 text-violet-800' : 'border-line text-ink-3')}><input type="checkbox" className="sr-only" checked={w.kinds.includes(k)} onChange={(e) => setWeek(i, { kinds: e.target.checked ? [...w.kinds, k] : w.kinds.filter((x) => x !== k) })} />{k}</label>)}</div>
             <input className={cx(inputCls, 'mt-1 h-8 py-1 text-xs')} value={w.note ?? ''} onChange={(e) => setWeek(i, { note: e.target.value })} placeholder="메모" maxLength={300} aria-label={`${w.week}주 메모`} /></>
             : <><p className="mt-1 font-medium">{w.topic}</p>{!!w.kinds?.length && <p className="text-[11px] text-ink-3">{w.kinds.join(' · ')}</p>}{w.note && <p className="text-[11px] text-ink-2">{w.note}</p>}
-              {rv && <p className="mt-1 rounded bg-slate-50 p-1 text-[11px] text-ink-2" data-testid="goal-week-review">리뷰: {rv.summary}</p>}</>}
+              {rv && <p className="mt-1 rounded bg-slate-50 p-1 text-[11px] text-ink-2" data-testid="goal-week-review">리뷰: {rv.summary}</p>}
+              {g.status === 'approved' && w.to >= today && <Link href={`/s/marketing/automation?tab=studio&message=${encodeURIComponent(w.topic)}&kind=${encodeURIComponent((w.kinds ?? [])[0] === 'blog' ? 'blog_cover' : (w.kinds ?? [])[0] ?? 'feed')}&week=${w.week}${g.brand_id ? `&brand=${g.brand_id}` : ''}&due=${w.from}`} className="mt-1 inline-block text-[11px] font-medium text-violet-700 underline" data-testid="goal-week-brief">제작 의뢰 →</Link>}</>}
         </li>; })}</ol>
       {g.closing && <p className="mt-3 rounded-input border border-emerald-200 bg-emerald-50/50 px-3 py-2 text-sm" data-testid="goal-closing"><b className="text-emerald-800">월말 결산</b> {g.closing.summary}</p>}
     </section>
