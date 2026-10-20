@@ -38,6 +38,7 @@ export async function mktOps({ owner, ctx, sql, BASE, SHOTS }) {
     await budget.getByTestId('budget-status').filter({ hasText: '승인됨' }).waitFor();
   }
   await budget.getByTestId('budget-executed').waitFor();
+  await budget.getByTestId('budget-draft').waitFor(); // 로컬 00:10: 승인 뒤에도 [AI 다시 계획] 버튼이 보임(승인 대기 상태에서도 같은 버튼)
   assert.notEqual((await budget.getByTestId('budget-total').innerText()).trim(), '0원', '로컬 23:55: 계획 금액이 0원이면 안 됨'); // 기본 배분(실적 비례)도 금액이 들어감
   // 월 매출 목표 적기 → 막대
   const rg = owner.getByTestId('revenue-goal').first();

@@ -1352,6 +1352,14 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-20 주 도메인 work-in.dev(대표 22:30 ① 결정, 로컬 요청 a·b·c #117) [배포확인요청]
+- (a) 앱: `mobile/capacitor.config.ts` appUrl 기본값 `https://work-in.dev`(APP_URL 로 바꿀 수 있음) + allowNavigation 에 `work-in.dev`·`www.work-in.dev` 둘 다 → **다음 앱 빌드부터** apex 로드. 설치된 앱(www)은 Vercel 에서 www→apex 308 을 걸어도 allowNavigation 에 둘 다 있어 그대로 동작(기존 빌드는 allowNavigation 이 www 뿐이라 308 뒤 apex 가 외부로 열릴 수 있음 → 새 빌드 배포 뒤에 308).
+- (b) 서버: 세션 쿠키는 호스트 전용(domain 없음) — www·apex 각각 로그인하면 각각 유지(한쪽 로그인이 다른 쪽으로 넘어가진 않음, 308 로 한 호스트만 남으면 문제 없음). API 출처 검사 = 요청 호스트와 같거나 APP_URL 호스트 → 두 호스트 모두 정상. 푸시 등록(FCM/APNs 토큰)은 호스트와 무관, 알림 링크는 상대 경로(앱이 appUrl 로 엶).
+- (c) 절대 URL: 소개 사이트 canonical·OG·JSON-LD·sitemap·robots 는 `NEXT_PUBLIC_SITE_URL`(기본 apex, robots.txt 의 Sitemap 줄은 apex 고정) · 메일 링크·OAuth 콜백·ICS·공개 API 주소는 `APP_URL`. **APP_URL 은 Meta/Google/네이버 콘솔에 등록된 콜백 호스트와 같아야 하므로** 콘솔을 apex 로 바꾼 뒤에 APP_URL 도 apex 로(그 전엔 www 유지). 코드에 도메인 방향(308)은 넣지 않음(Vercel 설정).
+- 남은 것(로컬): 운영 env NEXT_PUBLIC_SITE_URL=https://work-in.dev(됨)·APP_URL(콘솔 변경 뒤)·새 앱 빌드 → 그다음 Vercel www→apex 308.
+- 시험: E2E '소개 사이트'(og:image apex) 통과.
+- 같이 고침(로컬 00:10 🔧): 운영실 예산 박스에 **[AI 다시 계획]** 버튼이 승인 대기 상태에서 없었음(만들기 뒤 사라짐) → 고치기 중이 아니면 항상 보임(승인된 계획은 확인 창 뒤 새 초안·대기로). 기존 0원 계획도 이 버튼으로 다시 만들면 금액이 들어감.
+
 ## 2026-10-20 핫픽스 마감일 버튼(대표 23:40) + 업무 첨부 [자료실에서 가져오기](대표 23:55 즉시) [배포확인요청] (migration 137)
 - 마감일 고르기(업무 상세·목록·휴대폰 공용 `DuePicker`): 날짜 버튼을 최소 높이 32px(터치 40px)·달력 아이콘 + 날짜로, 비어 있으면 테두리 버튼. 선택 창은 빠른 선택 칩 그대로 + **날짜(넓게)·시각(좁게) 한 줄 두 칸(높이 40px)**, 시각 격자는 아래 그대로. 목록 칸(compact)은 아이콘 36px 버튼.
 - 자료·첨부 › [자료실에서](업무 상세, 새 업무 폼 '📁 자료실에서 첨부', 휴대폰 동일): 검색(이름·폴더·내용)·공간·폴더·최근 올린 순 목록·여러 개 체크 → [첨부] = 같은 저장 파일을 업무에 연결(복사 아님, 자료실 폴더 권한·등급 그대로, 기밀은 참여자 전원 기밀 권한 필요 — 기존 규칙). 출처 '자료실'(attachments.source 'library', 137) · 타임라인 '파일 첨부 [자료실에서]'. 반대 방향(업무 첨부 → 자료실 자동 등록)은 그대로.

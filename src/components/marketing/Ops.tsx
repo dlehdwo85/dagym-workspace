@@ -104,7 +104,8 @@ function BudgetCard({ b, month, canEdit, busy, onDraft, onChange }: { b: Budget 
           {b?.status === 'pending' && !edit && <Button size="sm" onClick={() => { if (!confirm(`총 ${won(b.total)} 계획을 승인하고 연결된 네이버 캠페인 하루 예산을 바꿀까요?`)) return; act({ action: 'approve' }, '승인 — 연결된 네이버 캠페인 하루 예산을 맞췄습니다'); }} disabled={w || !b.total} title={!b.total ? '예산이 0원이면 집행할 수 없습니다 — [고치기]로 금액을 넣어 주세요' : undefined} data-testid="budget-approve">승인·집행</Button>}
           {b?.status === 'pending' && (!edit ? <Button size="sm" variant="secondary" onClick={() => { setPlan(Object.fromEntries(b.plan.map((p) => [p.provider, String(p.monthly)]))); setEdit(true); }} data-testid="budget-edit">고치기</Button>
             : <><Button size="sm" onClick={() => act({ action: 'update', plan: b.plan.map((p) => ({ provider: p.provider, monthly: Number(String(plan[p.provider] ?? p.monthly).replace(/[^\d]/g, '')) || 0 })) }, '저장했습니다')} disabled={w} data-testid="budget-save">저장</Button><Button size="sm" variant="secondary" onClick={() => setEdit(false)}>취소</Button></>)}
-          {(!b || b.status !== 'pending') && <Button size="sm" variant={b ? 'secondary' : 'primary'} onClick={onDraft} disabled={busy} data-testid="budget-draft">{b ? 'AI 다시 계획' : 'AI 예산 계획 만들기'}</Button>}
+          {/* 로컬 00:10: 승인 대기 상태에서도 [AI 다시 계획] 가능(덮어씀, 승인된 계획은 새 초안으로 대기로 돌아감 — 확인 창) */}
+          {!edit && <Button size="sm" variant={b ? 'secondary' : 'primary'} onClick={() => { if (b?.status === 'approved' && !confirm('승인된 계획을 새 초안으로 바꿀까요? 다시 승인해야 합니다(집행된 하루 예산은 그대로).')) return; onDraft(); }} disabled={busy} data-testid="budget-draft">{b ? 'AI 다시 계획' : 'AI 예산 계획 만들기'}</Button>}
         </span>}
       </div>
       {!b ? <p className="mt-2 text-xs text-ink-2" data-testid="budget-empty">이 달 계획이 없습니다. 매월 25일 다음 달 계획 초안이 올라옵니다(광고 계정이 연결된 회사).</p> : <>
