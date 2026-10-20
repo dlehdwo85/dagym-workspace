@@ -67,33 +67,104 @@ export function NaverForm({ onClose, onDone }: { onClose: () => void; onDone: ()
 
 const connectMsg = (sp: URLSearchParams) => (sp.get('published') ? `인스타그램 ${sp.get('ig') ?? 0}개·페이스북 페이지 ${sp.get('pages') ?? 0}개를 연결했습니다${Number(sp.get('warn')) ? ' — 아래 확인할 항목을 봐 주세요' : ''}` : sp.get('connected') ? `${sp.get('connected') === 'meta' ? 'Meta' : 'Google Ads'} 광고 계정 ${sp.get('count') ?? ''}개를 연결했습니다` : sp.get('error') ? `연결 실패: ${sp.get('error')}` : null);
 
-/** V41 4-2 광고 성과(읽기 전용) — 회사별로 직접 연결한 네이버·Google·Meta 광고 계정 */
+type Sum = { impressions: number; clicks: number; cost: number; conversions: number };
+type Analysis = { month: string; summary: string; good: string[]; bad: string[]; proposals: { title: string; detail: string; expected: string }[]; source: 'ai' | 'template'; generatedAt: string; cardId?: string | null };
+type MonthData = Data & { month: string; prevMonth: string; prev: Sum; byProvider: (Sum & { provider: string })[]; byBrand: (Sum & { brand: string })[]; months: string[]; analysis: Analysis | null };
+const thisMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7);
+const monthLabel = (m: string) => `${m.slice(0, 4)}년 ${Number(m.slice(5, 7))}월`;
+/** 전월 대비 — 비용·클릭은 ±%, 0 이면 '신규'/'—' */
+function Delta({ now, prev, invert }: { now: number; prev: number; invert?: boolean }) {
+  if (!prev) return <span className="text-ink-3">{now ? '전월 0' : '—'}</span>;
+  const r = Math.round(((now - prev) / prev) * 100); const up = r > 0; const good = invert ? !up : up;
+  return <span className={cx('tabular-nums', r === 0 ? 'text-ink-3' : good ? 'text-emerald-700' : 'text-red-700')} data-testid="ads-delta">{r > 0 ? '+' : ''}{r}% <span className="text-ink-3">전월 대비</span></span>;
+}
+function SumTable({ rows, head, testid, label }: { rows: Sum[]; head: string; testid: string; label: (r: any) => string }) {
+  return (
+    <section className="overflow-x-auto rounded-card border border-line bg-white shadow-card">
+      <table className="w-full min-w-[520px] text-sm" data-testid={testid}><thead className="bg-slate-50 text-xs text-ink-2"><tr><th className="p-2 text-left">{head}</th><th className="p-2 text-right">노출</th><th className="p-2 text-right">클릭(CTR)</th><th className="p-2 text-right">광고비</th><th className="p-2 text-right">CPC</th><th className="p-2 text-right">전환</th></tr></thead>
+        <tbody>{rows.map((r, i) => (
+          <tr key={i} className="border-t border-line"><td className="p-2">{label(r)}</td><td className="p-2 text-right tabular-nums">{n0(r.impressions)}</td><td className="p-2 text-right tabular-nums">{n0(r.clicks)} <span className="text-ink-3">({pct(r.clicks, r.impressions)})</span></td>
+            <td className="p-2 text-right tabular-nums">{won(r.cost)}</td><td className="p-2 text-right tabular-nums">{r.clicks ? won(r.cost / r.clicks) : '—'}</td><td className="p-2 text-right tabular-nums">{n0(r.conversions)}</td></tr>))}
+          {!rows.length && <tr><td colSpan={6} className="p-4 text-center text-xs text-ink-3">이달 기록이 없습니다</td></tr>}</tbody></table>
+    </section>
+  );
+}
+
+/** 대표 10/21 ①: 월마다 AI 마케터(30년차) 분석 — 좋았던 점·나빴던 점·다음 달 제안 3개 → [승인 요청 카드로 보내기] */
+function MonthAnalysis({ month, analysis, canEdit, onChange }: { month: string; analysis: Analysis | null; canEdit: boolean; onChange: (a: Analysis) => void }) {
+  const [busy, setBusy] = useState<'' | 'run' | 'card'>('');
+  async function run(force = false) { setBusy('run'); try { onChange(await api<Analysis>('/api/marketing/ads/analysis', { body: { month, force } })); } catch (e: any) { toast.error(e.message); } finally { setBusy(''); } }
+  async function card() { setBusy('card'); try { const r = await api<{ id: string; created: boolean }>('/api/marketing/ads/analysis/card', { body: { month } }); toast.ok(r.created ? '승인함에 분석 카드를 보냈습니다' : '이미 승인 대기 중인 카드가 있습니다'); if (analysis) onChange({ ...analysis, cardId: r.id }); } catch (e: any) { toast.error(e.message); } finally { setBusy(''); } }
+  return (
+    <section className="rounded-card border border-violet-200 bg-violet-50/40 p-3 shadow-card" data-testid="ads-analysis">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-sm font-semibold" style={{ color: C }}>AI 마케터 월 분석 · {monthLabel(month)}</h2>
+        {analysis && <span className="text-[11px] text-ink-3">{analysis.source === 'ai' ? 'AI 분석' : '숫자 기준 기본 분석'} · {fmtDateTime(analysis.generatedAt)}</span>}
+        <span className="ml-auto flex flex-wrap gap-1">
+          {!analysis && <Button size="sm" onClick={() => run(false)} disabled={!!busy} data-testid="ads-analysis-run">{busy === 'run' ? '분석 중…' : 'AI 분석 만들기'}</Button>}
+          {analysis && canEdit && <Button size="sm" variant="secondary" onClick={() => run(true)} disabled={!!busy} data-testid="ads-analysis-rerun">{busy === 'run' ? '분석 중…' : '다시 분석'}</Button>}
+          {analysis && canEdit && (analysis.cardId
+            ? <Link href="/s/marketing/approvals?tab=proposals" className={btnCls('secondary', 'sm')} data-testid="ads-analysis-card-link">승인함에서 보기</Link>
+            : <Button size="sm" onClick={card} disabled={!!busy} data-testid="ads-analysis-card">{busy === 'card' ? '보내는 중…' : '승인 요청 카드로 보내기'}</Button>)}
+        </span>
+      </div>
+      {!analysis ? <p className="mt-2 text-xs text-ink-2">이달 숫자(매체·브랜드·캠페인·전월 대비)를 읽고 좋았던 점·나빴던 점·다음 달 제안 3개를 씁니다. 제안은 승인 요청 카드로 보내 대표 승인 뒤 실행합니다.</p> : (
+        <div className="mt-2 grid gap-3 text-sm md:grid-cols-3">
+          <p className="md:col-span-3 text-ink" data-testid="ads-analysis-summary">{analysis.summary}</p>
+          <div><h3 className="text-xs font-semibold text-emerald-800">좋았던 점</h3><ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">{analysis.good.map((g, i) => <li key={i}>{g}</li>)}</ul></div>
+          <div><h3 className="text-xs font-semibold text-red-800">나빴던 점</h3><ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">{analysis.bad.map((g, i) => <li key={i}>{g}</li>)}</ul></div>
+          <div><h3 className="text-xs font-semibold" style={{ color: C }}>다음 달 제안 3개</h3><ol className="mt-1 list-decimal space-y-1 pl-4 text-xs" data-testid="ads-analysis-proposals">{analysis.proposals.map((p, i) => <li key={i}><b>{p.title}</b> — {p.detail}<span className="block text-ink-3">기대: {p.expected}</span></li>)}</ol></div>
+        </div>)}
+    </section>
+  );
+}
+
+/** V41 4-2 광고 성과(읽기 전용) — 회사별로 직접 연결한 네이버·Google·Meta 광고 계정. 대표 10/21 ①: 월별 보기 기본(전월 대비·매체/캠페인/브랜드·AI 월 분석) */
 export function Ads() {
   const sp = useSearchParams();
-  const [days, setDays] = useState(7);
-  const { data, error, reload } = useApi<Data>(`/api/marketing/ads?days=${days}`, [days]);
+  const [month, setMonth] = useState<string | null>(() => (sp.get('days') ? null : (/^\d{4}-\d{2}$/.test(sp.get('month') ?? '') ? sp.get('month')! : thisMonth())));
+  const [days, setDays] = useState(Number(sp.get('days')) || 7);
+  const query = month ? `month=${month}` : `days=${days}`;
+  const { data, error, reload, setData } = useApi<MonthData>(`/api/marketing/ads?${query}`, [query]);
   const msg = connectMsg(sp);
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={5} />;
-  const t = data.totals;
-  const cards: [string, string][] = [['노출', n0(t.impressions)], ['클릭', `${n0(t.clicks)} · ${pct(t.clicks, t.impressions)}`], ['광고비', won(t.cost)], ['전환', `${n0(t.conversions)}${t.conversions ? ` · ${won(t.cost / t.conversions)}/건` : ''}`]];
+  const t = data.totals; const p = data.month ? data.prev : null;
+  const cards: [string, string, React.ReactNode][] = [
+    ['노출', n0(t.impressions), p && <Delta now={t.impressions} prev={p.impressions} />],
+    ['클릭', `${n0(t.clicks)} · ${pct(t.clicks, t.impressions)}`, p && <Delta now={t.clicks} prev={p.clicks} />],
+    ['광고비', won(t.cost), p && <Delta now={t.cost} prev={p.cost} invert />],
+    ['전환', `${n0(t.conversions)}${t.conversions ? ` · ${won(t.cost / t.conversions)}/건` : ''}`, p && <Delta now={t.conversions} prev={p.conversions} />]];
   const max = Math.max(1, ...data.daily.map((d) => d.cost));
+  const months = data.months ?? [thisMonth()];
   return (
     <div className="space-y-4" data-testid="mkt-ads">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold" style={{ color: C }}>광고 성과</h1>
-        <span className="ml-auto flex gap-1">{[7, 30, 90].map((d) => <Button key={d} size="sm" variant={days === d ? 'primary' : 'secondary'} onClick={() => setDays(d)} data-testid={`ads-days-${d}`}>최근 {d}일</Button>)}</span>
+        <span className="text-xs text-ink-2">{data.month ? `${monthLabel(data.month)} · 전월(${monthLabel(data.prevMonth)}) 대비` : `최근 ${data.days}일`}</span>
+        <span className="ml-auto flex flex-wrap items-center gap-1">
+          <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={month ?? ''} onChange={(e) => setMonth(e.target.value || null)} aria-label="월 선택" data-testid="ads-month">
+            {!month && <option value="">기간 보기</option>}{months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</select>
+          {[7, 30, 90].map((d) => <Button key={d} size="sm" variant={!month && days === d ? 'primary' : 'secondary'} onClick={() => { setMonth(null); setDays(d); }} data-testid={`ads-days-${d}`}>최근 {d}일</Button>)}
+        </span>
       </div>
       {msg && <p className={cx('rounded-input px-3 py-2 text-sm', sp.get('error') ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800')} role="status">{msg}</p>}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, v]) => <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ads-card"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div></div>)}</div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, v, d]) => <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ads-card"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div>{d && <div className="mt-0.5 text-[11px]">{d}</div>}</div>)}</div>
+      {data.month && <MonthAnalysis month={data.month} analysis={data.analysis} canEdit={data.canEdit} onChange={(a) => setData({ ...data, analysis: a })} />}
+      {data.month && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <SumTable rows={data.byProvider} head="매체" testid="ads-by-provider" label={(r) => <><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[r.provider] }} />{data.providers.find((x) => x.key === r.provider)?.label ?? r.provider}</> as unknown as string} />
+          <SumTable rows={data.byBrand} head="브랜드" testid="ads-by-brand" label={(r) => r.brand} />
+        </div>)}
       {!!data.daily.length && (
         <section className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">날짜별 광고비</h2>
-          <div className="flex h-24 items-end gap-1">{data.daily.map((d) => <div key={d.day} className="flex-1 rounded-t" style={{ height: `${Math.max(3, (d.cost / max) * 100)}%`, background: C, opacity: 0.75 }} title={`${d.day} · ${won(d.cost)} · 클릭 ${n0(d.clicks)} · 전환 ${n0(d.conversions)}`} />)}</div></section>
+          <div className="flex h-24 items-end gap-1">{data.daily.map((d) => <div key={d.day} className="flex-1 rounded-t" style={{ height: `${Math.max(3, (d.cost / max) * 100)}%`, background: C, opacity: 0.75 }} title={`${d.day} · ${won(d.cost)} · 클릭 ${n0(d.clicks)} · 전환 ${n0(d.conversions)}`} />)}</div>
+          <div className="mt-1 flex justify-between text-[10px] text-ink-3"><span>{data.daily[0].day}</span><span>{data.daily[data.daily.length - 1].day}</span></div></section>
       )}
       <section className="overflow-x-auto rounded-card border border-line bg-white shadow-card">
         <table className="w-full min-w-[640px] text-sm" data-testid="ads-table"><thead className="bg-slate-50 text-xs text-ink-2"><tr><th className="p-2 text-left">캠페인</th><th className="p-2 text-right">노출</th><th className="p-2 text-right">클릭(CTR)</th><th className="p-2 text-right">광고비</th><th className="p-2 text-right">CPC</th><th className="p-2 text-right">전환</th></tr></thead>
           <tbody>{data.campaigns.map((c) => (
-            <tr key={`${c.account_id}:${c.campaign_id}`} className="border-t border-line"><td className="p-2"><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[c.provider] }} />{c.campaign_name || c.campaign_id}<span className="block text-[11px] text-ink-3">{c.label}</span></td>
+            <tr key={`${c.account_id}:${c.campaign_id}`} className="border-t border-line"><td className="p-2"><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[c.provider] }} />{c.campaign_name || c.campaign_id}<span className="ml-1 text-xs text-ink-3">{c.label}{(c as any).brand ? ` · ${(c as any).brand}` : ''}</span></td>
               <td className="p-2 text-right tabular-nums">{n0(c.impressions)}</td><td className="p-2 text-right tabular-nums">{n0(c.clicks)} <span className="text-ink-3">({pct(c.clicks, c.impressions)})</span></td>
               <td className="p-2 text-right tabular-nums">{won(c.cost, c.currency)}</td><td className="p-2 text-right tabular-nums">{c.clicks ? won(c.cost / c.clicks, c.currency) : '—'}</td><td className="p-2 text-right tabular-nums">{n0(c.conversions)}</td></tr>))}
             {!data.campaigns.length && <tr><td colSpan={6} className="p-6 text-center text-ink-3">{data.accounts.length ? '이 기간 성과가 없습니다' : '광고 계정을 연결하면 매일 아침 성과가 들어옵니다'}</td></tr>}</tbody></table>
@@ -102,6 +173,7 @@ export function Ads() {
       <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2" data-testid="ads-accounts-link">
         <span>연결된 광고 계정 {data.accounts.length}개{data.accounts.some((a) => a.status === 'error') && <b className="ml-1 text-red-700">· 읽기 실패 {data.accounts.filter((a) => a.status === 'error').length}개</b>}</span>
         <Link href="/s/marketing/connections" className="font-medium underline" style={{ color: C }}>계정 연결은 설정 › 연결 계정</Link>
+        {data.month && <Link href={`/s/marketing/report?month=${data.month}`} className="ml-auto font-medium underline" style={{ color: C }} data-testid="ads-report-link">{monthLabel(data.month)} 월간 보고 →</Link>}
       </p>
     </div>
   );
@@ -153,7 +225,7 @@ export function Connections() {
 }
 
 type Ch = { key: string; label: string; note: string; kind: string; enabled: boolean; connectable: boolean; ready: boolean; mode: 'helper' | 'auto' | 'later';
-  accounts: { id: string; provider: string; label: string; status: string; lastError: string | null; warnings: string[] }[] };
+  accounts: { id: string; provider: string; label: string; status: string; lastError: string | null; warnings: string[]; brandId: string | null; brand: string | null; shared: boolean }[] };
 type ChData = { canEdit: boolean; metaDevMode: boolean; channels: Ch[]; tech: { metaCallback: string; metaDeletion: string; metaScopes: string[]; metaReady: boolean; metaLive: boolean } | null };
 const CONNECT_URL: Record<string, string> = { meta: '/api/marketing/publish/connect/meta', threads: '/api/marketing/publish/connect/threads', google: '/api/marketing/publish/connect/youtube' };
 
@@ -163,7 +235,13 @@ const CONNECT_URL: Record<string, string> = { meta: '/api/marketing/publish/conn
  */
 function PublishChannels() {
   const { data: raw, error, reload } = useApi<ChData>('/api/marketing/publish/channels');
+  const brands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
   const [over, setOver] = useState<Record<string, boolean>>({}); // 켜기/끄기는 바로 반영(실패하면 되돌림)
+  // 로컬 10/21 08:10: 계정마다 브랜드(또는 공용) — 게시 대상은 브랜드 계정 + 공용 계정만, 미지정 계정은 제외
+  async function setBrand(id: string, v: string) {
+    try { await api(`/api/marketing/publish/accounts/${id}`, { method: 'PATCH', body: v === 'shared' ? { shared: true, brandId: null } : { shared: false, brandId: v || null } }); toast.ok(v === 'shared' ? '공용 계정으로 표시했습니다' : v ? '브랜드를 지정했습니다' : '미지정으로 바꿨습니다 — 게시 대상에서 빠집니다'); reload(); }
+    catch (e: any) { toast.error(e.message); }
+  }
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!raw) return <Skeleton rows={4} />;
   const data = { ...raw, channels: raw.channels.map((c) => (c.key in over ? { ...c, enabled: over[c.key] } : c)) };
@@ -196,8 +274,13 @@ function PublishChannels() {
           <p className="mt-0.5 text-xs text-ink-3">{c.note}</p>
           {c.accounts.map((a) => (
             <div key={a.id} className="mt-1 rounded-input bg-slate-50 px-2 py-1 text-xs" data-testid="publish-account">
-              <div className="flex items-center gap-2"><span className="font-medium">{a.label}</span>{a.status === 'error' && <span className="text-red-700">{a.lastError}</span>}
+              <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{a.label}</span>{a.status === 'error' && <span className="text-red-700">{a.lastError}</span>}
                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">연결됨</span>
+                {data.canEdit ? <label className="inline-flex items-center gap-1 text-[11px] text-ink-2">브랜드
+                  <select className={cx(inputCls, 'h-7 w-auto py-0 text-[11px]', !a.shared && !a.brandId && 'border-amber-400 bg-amber-50')} value={a.shared ? 'shared' : (a.brandId ?? '')} onChange={(e) => setBrand(a.id, e.target.value)} aria-label={`${a.label} 브랜드`} data-testid="publish-account-brand">
+                    <option value="">미지정(게시 안 함)</option><option value="shared">공용(모든 브랜드)</option>{(brands.data?.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+                  : <span className="text-[11px] text-ink-3">{a.shared ? '공용' : a.brand ?? '브랜드 미지정'}</span>}
+                {!a.shared && !a.brandId && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="publish-account-unassigned">브랜드를 지정하세요 — 지정 전엔 게시 대상에서 제외</span>}
                 {data.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => remove(a.id, a.label)}>끊기</Button>}</div>
               {a.warnings.map((w, k) => <p key={k} className="mt-0.5 text-amber-800" data-testid="publish-warning">확인 필요: {w}</p>)}
             </div>))}

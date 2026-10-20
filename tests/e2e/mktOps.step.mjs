@@ -49,9 +49,9 @@ export async function mktOps({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.screenshot({ path: `${SHOTS}/168-mkt-ops-budget.png`, fullPage: true });
   // 마케팅 홈·영업 홈 막대
   await owner.goto(`${BASE}/s/marketing`);
-  await owner.getByTestId('revenue-goal').getByText(/10,000,000원/).waitFor();
+  await owner.getByTestId('revenue-goal').getByText(/10,000,000원/).first().waitFor(); // 실적 내역 줄(계약 1건 10,000,000원)과 겹칠 수 있음
   await owner.goto(`${BASE}/s/sales`);
-  await owner.getByTestId('revenue-goal').getByText(/10,000,000원/).waitFor();
+  await owner.getByTestId('revenue-goal').getByText(/10,000,000원/).first().waitFor();
   // 월간 보고 CAC·ROI 칸
   await owner.goto(`${BASE}/s/marketing/report?month=${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7)}`);
   await owner.getByTestId('report-roi').getByText('ROI').waitFor();

@@ -45,7 +45,7 @@ async function material(tenant: string) {
   return { last30, byProvider, campaigns, brands, co, goal: goal[0] ?? null, text };
 }
 
-async function aiJson(tenant: string, actorId: string | null, system: string, user: string, format: any, purpose: string) {
+export async function aiJson(tenant: string, actorId: string | null, system: string, user: string, format: any, purpose: string) {
   const P = await import('./ai/provider');
   if (!P.aiEnabled()) return null;
   const { assertMktAi } = await import('./mktAuto'); await assertMktAi(tenant);

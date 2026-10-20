@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton } from '@/components/ui';
@@ -31,6 +32,7 @@ export function MonthlyReport() {
           <Button size="sm" variant="secondary" onClick={() => setMonth(shift(r.month, -1))} aria-label="이전 달">‹</Button>
           <Button size="sm" variant="secondary" onClick={() => setMonth(shift(r.month, 1))} disabled={r.month >= r.thisMonth} aria-label="다음 달">›</Button>
           <Button size="sm" onClick={() => window.print()} data-testid="report-print">PDF 저장(인쇄)</Button>
+          <Link href={`/s/marketing/ads?month=${r.month}`} className="ml-1 text-xs font-medium underline" style={{ color: C }} data-testid="report-ads-link">광고 성과 월별 →</Link>
         </span>
       </div>
       <section className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">

@@ -189,13 +189,16 @@ export async function publishTargets(tenant: string, c: { channel: string; cross
   const chans = [c.channel, ...((c.cross_channels ?? []) as string[])].filter((k, i, arr) => AUTO_CHANNELS[k] && arr.indexOf(k) === i);
   if (!chans.length) return [];
   const sets = new Map((await sql<{ channel: string; enabled: boolean }[]>`select channel, enabled from mkt_channel_settings where tenant = ${tenant}`).map((r) => [r.channel, r.enabled]));
-  const accs = await sql<{ id: string; provider: string; label: string; brand_id: string | null; status: string }[]>`select id, provider, label, brand_id, status from mkt_publish_accounts where tenant = ${tenant} and status <> 'disconnected' order by created_at`;
+  const accs = await sql<{ id: string; provider: string; label: string; brand_id: string | null; shared: boolean; status: string; brand: string | null }[]>`select a.id, a.provider, a.label, a.brand_id, a.shared, a.status, b.name as brand from mkt_publish_accounts a left join mkt_brands b on b.id = a.brand_id where a.tenant = ${tenant} and a.status <> 'disconnected' order by a.label`;
+  // 로컬 10/21 08:10: 브랜드 계정 + 명시적 '공용' 계정만. 미지정 계정은 제외(전 계정으로 나가던 사고 방지) — 브랜드 없는 콘텐츠는 공용 계정만
   return chans.map((ch) => {
     const provider = AUTO_CHANNELS[ch];
     const all = accs.filter((a) => a.provider === provider);
-    const mine = all.filter((a) => a.brand_id && a.brand_id === c.brand_id);
-    const pick = mine.length ? mine : all.filter((a) => !a.brand_id).length ? all.filter((a) => !a.brand_id) : all; // 브랜드 지정 계정 → 공용 → 전부
-    return { channel: ch, provider, label: PROVIDER_LABEL[provider], enabled: sets.get(ch) ?? (ch !== 'threads' && ch !== 'youtube'), accounts: pick.map((a) => ({ id: a.id, label: a.label, status: a.status })) };
+    const pick = all.filter((a) => a.shared || (!!c.brand_id && a.brand_id === c.brand_id));
+    const unassigned = all.filter((a) => !a.shared && !a.brand_id);
+    const reason = pick.length ? null : !all.length ? 'none' : unassigned.length ? 'unassigned' : 'other_brand';
+    return { channel: ch, provider, label: PROVIDER_LABEL[provider], enabled: sets.get(ch) ?? (ch !== 'threads' && ch !== 'youtube'),
+      accounts: pick.map((a) => ({ id: a.id, label: a.label, status: a.status, brand: a.brand, shared: a.shared })), reason, unassigned: unassigned.map((a) => a.label) };
   });
 }
 /** [서버로 게시](관리자): 승인된 최신 버전 → 채널마다 연결 계정에 작업(대기). atSchedule=true 면 예정 시각 뒤에 실행 */
@@ -219,7 +222,11 @@ export async function queuePublish(u: SessionUser, contentId: string, opts: { ac
       jobs.push({ id: j.id, provider: tg.provider, account: a.label });
     }
   }
-  if (!jobs.length) throw new HttpError(409, 'no_account', `${missing.join('·') || '이 채널'}에 연결된 계정이 없습니다 — 연결 계정 화면에서 [연결] 뒤 다시, 그동안은 게시 도우미`);
+  if (!jobs.length) {
+    const un = targets.flatMap((tg) => tg.unassigned);
+    throw new HttpError(409, 'no_account', un.length ? `계정에 브랜드를 지정하세요 — 연결 계정 화면에서 ${un.join('·')} 의 브랜드(또는 공용)를 고른 뒤 다시 누르세요`
+      : `${missing.join('·') || '이 채널'}에 이 브랜드 계정이 없습니다 — 연결 계정 화면에서 [연결]·브랜드 지정 뒤 다시, 그동안은 게시 도우미`);
+  }
   await audit(sql, u.id, 'mkt_publish.queue', 'mkt_content', c.id, { jobs: jobs.length, providers: jobs.map((j) => j.provider) }).catch(() => {});
   // 바로 실행(시간이 됐으면) — 사람이 기다리지 않게. 실패해도 tick 이 다시
   const ran = opts.atSchedule ? null : await runJobs(jobs.map((j) => j.id)).catch(() => null);

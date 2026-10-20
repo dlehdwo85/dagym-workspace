@@ -61,7 +61,7 @@ async function upload(name, mime, bytes) {
   return lf.id;
 }
 async function approved(over = {}) {
-  const { id } = await ctx.owner.ok('POST', '/api/marketing/contents', { title: over.title ?? '가을 행사', channel: over.channel ?? 'instagram', kind: over.kind, scheduledAt: over.scheduledAt ?? new Date(Date.now() + 36e5).toISOString(), body: over.body ?? '가을 이벤트 안내 — 첫 상담 무료', mediaIds: over.mediaIds ?? [] });
+  const { id } = await ctx.owner.ok('POST', '/api/marketing/contents', { title: over.title ?? '가을 행사', channel: over.channel ?? 'instagram', kind: over.kind, brandId: over.brandId ?? null, scheduledAt: over.scheduledAt ?? new Date(Date.now() + 36e5).toISOString(), body: over.body ?? '가을 이벤트 안내 — 첫 상담 무료', mediaIds: over.mediaIds ?? [] });
   if (over.crossChannels) await sql`update mkt_contents set cross_channels = ${over.crossChannels} where id = ${id}`;
   if (over.kind) await sql`update mkt_contents set kind = ${over.kind} where id = ${id}`; // 콘텐츠 만들기 API 는 종류를 받지 않음(규칙·의뢰에서 정함)
   if (over.isTest) await sql`update mkt_contents set is_test = true where id = ${id}`;
@@ -89,9 +89,47 @@ test('연결: 메타(기존) + 스레드(Threads OAuth·장기 토큰·@username
   assert.equal(home.channels.find((c) => c.key === 'youtube').state, 'connected');
 });
 
-test('인스타 1장 [지금 게시] → 컨테이너·게시·permalink → 콘텐츠 게시됨 · 같은 버전 두 번 안 올림 · 직원 403 · 시험 409 · 승인 전 409', async () => {
+test('로컬 10/21 08:10 브랜드 지정 전엔 게시 안 나감: 미지정 계정 제외(409 "브랜드를 지정하세요") → 계정 브랜드/공용 PATCH → 브랜드 계정 + 공용만 · 콘텐츠 브랜드 바로잡기 · 승인함에 승인됨 포함', async () => {
   P.img = await upload('시안.png', 'image/png', Buffer.from('png-bytes'));
   P.img2 = await upload('시안2.png', 'image/png', Buffer.from('png-bytes-2'));
+  P.hilink = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '하이링크' })).id;
+  P.dagym = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '다짐' })).id;
+  const accs = await sql`select id, provider, label, brand_id, shared from mkt_publish_accounts order by provider`;
+  assert.ok(accs.every((a) => a.brand_id === null && a.shared === false), '연결 때 브랜드가 없었으니 미지정');
+  const id = await approved({ mediaIds: [P.img], brandId: P.hilink });
+  let d = await ctx.owner.ok('GET', `/api/marketing/contents/${id}`);
+  assert.equal(d.publish.canServer, false); assert.equal(d.publish.targets[0].reason, 'unassigned'); assert.deepEqual(d.publish.targets[0].unassigned, ['@dagym_main']);
+  const blocked = await ctx.owner.req('POST', `/api/marketing/contents/${id}/publish/server`, {});
+  assert.equal(blocked.status, 409); assert.match(blocked.body.error.message, /브랜드를 지정하세요/);
+  const ig = accs.find((a) => a.provider === 'meta_ig');
+  assert.equal((await ctx.staffA.client.req('PATCH', `/api/marketing/publish/accounts/${ig.id}`, { brandId: P.dagym })).status, 403);
+  await ctx.owner.ok('PATCH', `/api/marketing/publish/accounts/${ig.id}`, { brandId: P.dagym });
+  d = await ctx.owner.ok('GET', `/api/marketing/contents/${id}`);
+  assert.equal(d.publish.targets[0].reason, 'other_brand', '다른 브랜드 계정으로는 안 나감'); assert.equal(d.publish.canServer, false);
+  assert.match((await ctx.owner.req('POST', `/api/marketing/contents/${id}/publish/server`, {})).body.error.message, /이 브랜드 계정이 없습니다/);
+  // 콘텐츠 브랜드가 틀렸으면 바로잡기(승인 유지)
+  assert.equal((await ctx.staffA.client.req('PATCH', `/api/marketing/contents/${id}`, { brandId: P.dagym })).status, 403);
+  const fixed = await ctx.owner.ok('PATCH', `/api/marketing/contents/${id}`, { brandId: P.dagym });
+  assert.equal(fixed.status, 'approved'); assert.equal(fixed.brandId, P.dagym);
+  d = await ctx.owner.ok('GET', `/api/marketing/contents/${id}`);
+  assert.equal(d.publish.canServer, true); assert.deepEqual(d.publish.targets[0].accounts.map((a) => [a.label, a.brand, a.shared]), [['@dagym_main', '다짐', false]]);
+  // 공용 계정은 모든 브랜드에 — 명시적으로만
+  const ch = (await ctx.owner.ok('GET', '/api/marketing/publish/channels')).channels.find((c) => c.key === 'instagram');
+  assert.deepEqual(ch.accounts.map((a) => [a.label, a.brand, a.shared]), [['@dagym_main', '다짐', false]], '연결 계정 화면에 브랜드');
+  await ctx.owner.ok('PATCH', `/api/marketing/publish/accounts/${ig.id}`, { shared: true });
+  const other = await approved({ mediaIds: [P.img], brandId: P.hilink, title: '하이링크 글' });
+  assert.deepEqual((await ctx.owner.ok('GET', `/api/marketing/contents/${other}`)).publish.targets[0].accounts.map((a) => a.shared), [true]);
+  // 승인함 목록에 승인됨(게시 전)도 포함
+  const inbox = await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals');
+  assert.ok(inbox.contents.some((c) => c.id === other && c.status === 'approved'), '승인됨 · 게시 전 묶음');
+  await ctx.owner.ok('PATCH', `/api/marketing/publish/accounts/${ig.id}`, { brandId: P.dagym, shared: false });
+  await sql`update mkt_contents set brand_id = ${P.dagym} where id = ${other}`;
+  // 아래 시험들은 계정 전부 공용으로(브랜드 규칙은 위에서 확인)
+  await Promise.all(accs.map((a) => ctx.owner.ok('PATCH', `/api/marketing/publish/accounts/${a.id}`, { shared: true })));
+  await sql`delete from mkt_contents where id in (${id}, ${other})`;
+});
+
+test('인스타 1장 [지금 게시] → 컨테이너·게시·permalink → 콘텐츠 게시됨 · 같은 버전 두 번 안 올림 · 직원 403 · 시험 409 · 승인 전 409', async () => {
   const id = await approved({ mediaIds: [P.img] });
   const d = await ctx.owner.ok('GET', `/api/marketing/contents/${id}`);
   assert.equal(d.publish.canServer, true); assert.deepEqual(d.publish.targets.map((t) => [t.channel, t.accounts.map((a) => a.label)]), [['instagram', ['@dagym_main']]]);
