@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
-  await owner.goto(`${BASE}/admin/users`);
+  // 전체 실행에서 앞 단계가 남긴 공간 자동 이동(router.replace)과 겹치면 goto 가 ERR_ABORTED → 한 번 더
+  for (let k = 0; k < 2; k++) { try { await owner.goto(`${BASE}/admin/users`); break; } catch (e) { if (k) throw e; await owner.waitForTimeout(800); } }
   await owner.getByTestId('tab-spaces').click();
   await owner.getByTestId('space-toggle-marketing').click();
   await owner.getByTestId('space-tabs').waitFor();
@@ -46,6 +47,7 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   assert.equal(await owner.evaluate(() => document.documentElement.dataset.space), 'marketing', '공간 강조색 = 마케팅 보라(버튼·모달 공통)');
   await owner.getByRole('link', { name: '승인 대기' }).first().click();
   await owner.waitForURL(/\/s\/marketing\/approvals$/);
+  if (await owner.getByTestId('ai-ask').count()) assert.equal(await owner.getByTestId('ai-ask').innerText(), 'AI에게 요청', '대표 10/20 5): 콘텐츠 목록 상단 AI 요청 진입점'); // AI 켜진 회사만
   await owner.getByTestId('mkt-new-open').click();
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
   await owner.getByTestId('mkt-title').fill('E2E 가을 행사 게시물');

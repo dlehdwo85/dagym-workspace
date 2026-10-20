@@ -93,7 +93,7 @@ export async function createBrand(u: SessionUser, i: z.infer<typeof brandInput>)
 export async function listContents(u: SessionUser, q: { view?: string; from?: string; to?: string; day?: string }) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
-  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.is_test, b.name as brand, b.color as brand_color,
+  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.is_test, b.name as brand, b.color as brand_color,
       v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, u.name as created_by_name, c.updated_at,
       (select max(d.version) from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version) as reapprove_from,
       (select json_build_object('decision', d.decision, 'comment', d.comment, 'at', d.decided_at, 'version', d.version, 'by', du.name) from mkt_decisions d left join users du on du.id = d.decided_by
@@ -135,7 +135,9 @@ export async function getContent(u: SessionUser, id: string) {
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };
-export const contentInput = z.object({ title: z.string().trim().min(1).max(200), channel: zChannel, brandId: zUuid.nullable().optional(), scheduledAt: z.string().datetime({ offset: true }).nullable().optional(), ...versionFields });
+export const contentInput = z.object({ title: z.string().trim().min(1).max(200), channel: zChannel, brandId: zUuid.nullable().optional(), scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
+  /** 대표 10/20 11:40 ②·6): 같은 글을 함께 올릴 채널('페이스북에도'·'스레드에도') — 승인 1건, M1 게시 실행기가 채널마다 올림 */
+  crossChannels: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional(), ...versionFields });
 export async function createContent(u: SessionUser, i: z.infer<typeof contentInput>) {
   await assertSpace(u, 'marketing');
   await mediaOk(u, i.mediaIds);
@@ -145,8 +147,8 @@ export async function createContent(u: SessionUser, i: z.infer<typeof contentInp
   const isTest = !!br?.test_mode; // 시험 모드 브랜드: [시험] 표시·알림은 올린 사람에게만·게시 확인 안 됨
   const title = isTest && !i.title.startsWith('[시험]') ? `[시험] ${i.title}` : i.title;
   return sql.begin(async (tx) => {
-    const [c] = await tx<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, is_test)
-      values (${t}, ${i.brandId ?? null}, ${title}, ${i.channel}, ${i.scheduledAt ?? null}, 'pending', 1, ${u.id}, ${isTest}) returning id`;
+    const [c] = await tx<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, is_test, cross_channels)
+      values (${t}, ${i.brandId ?? null}, ${title}, ${i.channel}, ${i.scheduledAt ?? null}, 'pending', 1, ${u.id}, ${isTest}, ${(i.crossChannels ?? []).filter((x) => x !== i.channel)}) returning id`;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
     const admins = isTest ? [] : await (await import('./mktAuto')).approvers(t);
     await notify(tx, { userIds: admins, type: 'review_requested', title: `승인 대기: ${title}`, body: `${u.name} · ${CHANNELS[i.channel]}`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, actorId: u.id, dedupeKey: `mkt:${c.id}:1` });

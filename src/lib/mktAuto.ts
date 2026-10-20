@@ -15,7 +15,11 @@ import { tenantOf, type SessionUser } from './types';
  * 상업화(V43): 회사 요금제(금액 칸은 대표 결정 전 빈칸)·월/주 크레딧·생성 영상 편수·재생성 횟수, 고객·게시물·버전별 크레딧 원장, 수정 요청 분류(글자·배치 0 / 이미지·영상 재생성).
  * 이미지·영상 생성 엔진(Higgsfield API)은 계약(대표 결정) 뒤 — 지금은 카드에 실제 사용 크레딧을 기록하며 사람이 제작해 붙임.
  */
-export const KIND_LABEL = { feed: '피드', blog: '블로그', reels: '릴스·쇼츠', video: '생성 영상' } as const;
+export const KIND_LABEL = { feed: '피드', blog: '블로그', reels: '릴스', video: '생성 영상', shorts: '쇼츠', story: '스토리' } as const; // 대표 10/20 6): 쇼츠(유튜브 세로 영상)·스토리(세로 1080×1920·24시간) 추가
+/** 대표 10/20 6) 기본 묶음 — 2~3일에 한 번: 유튜브 쇼츠 · 인스타 릴스 · 블로그 · 인스타+페이스북 게시물(같은 글) · 인스타+페이스북 스토리 */
+export const BUNDLE: { channel: string; kind: Kind; postTime: string; cross: string[] }[] = [
+  { channel: 'instagram', kind: 'feed', postTime: '10:00', cross: ['facebook'] }, { channel: 'youtube', kind: 'shorts', postTime: '11:00', cross: [] }, { channel: 'instagram', kind: 'reels', postTime: '12:00', cross: [] },
+  { channel: 'blog', kind: 'blog', postTime: '13:00', cross: [] }, { channel: 'instagram', kind: 'story', postTime: '18:00', cross: ['facebook'] }];
 type Kind = keyof typeof KIND_LABEL;
 /** 요금제(V43 3 안). price 는 대표 결정 전이라 null — 화면에 '결정 전' */
 export const MKT_PLANS = {
@@ -27,6 +31,7 @@ export const MKT_PLANS = {
 const EST = { image: 0, video_reels: 3, video: 80, regen_image: 6.5, regen_video: 15 };
 
 const DAY = 864e5;
+const CROSS_LABEL: Record<string, string> = { facebook: '페이스북', instagram: '인스타그램', threads: '스레드' };
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 const kst = (date: string, hhmm: string) => new Date(`${date}T${hhmm.length === 5 ? hhmm : hhmm.padStart(2, '0') + ':00'}:00+09:00`);
 const hourKst = (d: Date) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false }).format(d)) % 24;
@@ -101,7 +106,7 @@ export function qualityCheck(body: string, brief: string, s: MktSettings, banned
   if (ph) issues.push(`채우지 않은 자리표시 '${ph[0]}'`);
   for (const w of banned) if (w && body.includes(w)) issues.push(`금지어 '${w}'`);
   if (!s.allow_generated_people && /(실제\s*(고객|회원)|고객\s*후기|회원\s*후기|체험담|"[^"]{5,}"\s*[-—]\s*\S+\s*(님|회원))/.test(body)) issues.push('생성 인물·후기를 실제 고객처럼 씀');
-  if (!s.allow_slideshow && (kind === 'reels' || kind === 'video') && /슬라이드\s*쇼|사진\s*넘기기|느린\s*줌/.test(brief)) issues.push('슬라이드쇼(사진 + 느린 줌) 금지');
+  if (!s.allow_slideshow && (kind === 'reels' || kind === 'video' || kind === 'shorts') && /슬라이드\s*쇼|사진\s*넘기기|느린\s*줌/.test(brief)) issues.push('슬라이드쇼(사진 + 느린 줌) 금지');
   const fixed = body.includes(s.ai_label) ? body : `${body.trim()}\n\n${s.ai_label}`;
   return { passed: issues.length === 0, issues, body: fixed };
 }
@@ -114,15 +119,22 @@ export async function planSlots(tenant: string, days = 14) {
   let made = 0;
   for (const r of rules) for (let k = 0; k <= days; k++) {
     const date = ymd(new Date(Date.now() + k * DAY));
-    const dow = new Date(`${date}T12:00:00+09:00`).getUTCDay();
-    if (!(r.weekdays as number[]).includes(dow)) continue;
+    if (r.interval_days) { // 대표 10/20 6): n일마다(시작일부터) — 요일 대신
+      const anchor = r.anchor_date ? ymd(new Date(`${String(r.anchor_date).slice(0, 10)}T12:00:00+09:00`)) : ymd(new Date(r.created_at));
+      const diff = Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${anchor}T00:00:00Z`)) / DAY);
+      if (diff < 0 || diff % Number(r.interval_days) !== 0) continue;
+    } else {
+      const dow = new Date(`${date}T12:00:00+09:00`).getUTCDay();
+      if (!(r.weekdays as number[]).includes(dow)) continue;
+    }
     const at = kst(date, r.post_time);
     if (deadlineOf(at, s).getTime() <= Date.now()) continue; // 승인 마감이 이미 지난 칸은 만들지 않음
     let produce = kst(ymd(new Date(at.getTime() - s.lead_days * DAY)), `${pad(s.lead_hour)}:00`);
     if (produce.getTime() < Date.now()) produce = new Date();
-    const title = `${r.test ? '[시험] ' : ''}${r.brand ? brandName({ name: r.brand }) + ' ' : ''}${KIND_LABEL[r.kind as Kind]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
-    const ins = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, rule_id, kind, auto, produce_at, is_test)
-      values (${tenant}, ${r.brand_id}, ${title}, ${r.channel}, ${at}, 'draft', 0, ${r.created_by}, ${r.id}, ${r.kind}, true, ${produce}, ${!!r.test})
+    const cross = (r.cross_channels ?? []) as string[];
+    const title = `${r.test ? '[시험] ' : ''}${r.brand ? brandName({ name: r.brand }) + ' ' : ''}${KIND_LABEL[r.kind as Kind]}${cross.length ? '(함께 ' + cross.map((c) => CROSS_LABEL[c] ?? c).join('·') + ')' : ''} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
+    const ins = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, rule_id, kind, auto, produce_at, is_test, cross_channels)
+      values (${tenant}, ${r.brand_id}, ${title}, ${r.channel}, ${at}, 'draft', 0, ${r.created_by}, ${r.id}, ${r.kind}, true, ${produce}, ${!!r.test}, ${cross})
       on conflict (rule_id, scheduled_at) where rule_id is not null do nothing returning id`;
     made += ins.length;
   }
@@ -173,7 +185,7 @@ const fillName = (t: string, name: string) => (name ? t.replace(/\[(브랜드|�
 async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?: { prev: string; comment: string }) {
   const m = await materialOf(c, brand, rule);
   const P = await import('./ai/provider');
-  const kindRule = { feed: '인스타그램 피드 캡션 4~6줄', blog: '블로그 원고(제목 1줄 + 본문 10~15문장, 소제목 2~3개 — 소제목은 "■ 소제목" 한 줄로 따로, 문단은 2~3문장씩 빈 줄로 나눔)', reels: '릴스·쇼츠 자막 대본(5~7컷, 컷마다 한 줄)과 캡션 3줄', video: '15~20초 광고 영상 컷 구성(4~5컷)과 캡션 3줄' }[c.kind as Kind] ?? '게시물 글';
+  const kindRule = { feed: '인스타그램 피드 캡션 4~6줄', blog: '블로그 원고(제목 1줄 + 본문 10~15문장, 소제목 2~3개 — 소제목은 "■ 소제목" 한 줄로 따로, 문단은 2~3문장씩 빈 줄로 나눔)', reels: '릴스 자막 대본(5~7컷, 컷마다 한 줄)과 캡션 3줄', video: '15~20초 광고 영상 컷 구성(4~5컷)과 캡션 3줄', shorts: '유튜브 쇼츠(세로 영상 15~45초) 자막 대본(5~8컷, 컷마다 한 줄)과 제목 1줄·설명 2줄', story: '인스타·페이스북 스토리(세로 1080×1920, 24시간) 한 장 문구 1~2줄 + 스티커/질문 제안 1줄' }[c.kind as Kind] ?? '게시물 글';
   if (!P.aiEnabled()) return { title: c.title, body: extra ? extra.prev : `[AI 비서 꺼짐] ${rule?.topic_hint ?? c.title}`, brief: '' };
   await assertMktAi(c.tenant);
   const p = P.anthropicProvider({ tier: 'fast' });
@@ -226,7 +238,7 @@ export async function produceContent(c: any, actorId?: string | null) {
     await tx`update mkt_contents set title = ${(c.is_test && !d.title.startsWith('[시험]') ? '[시험] ' : '') + d.title}, current_version = ${v}, reminded_at = null, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief } as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임)
-    if (kind !== 'blog' || d.brief) await requestCard(c, v, kind === 'video' || kind === 'reels' ? 'video' : 'image', d.brief || '실사 사진 + 글자 렌더', kind === 'video' ? EST.video : kind === 'reels' ? EST.video_reels : EST.image, tx);
+    if (kind !== 'blog' || d.brief) await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', d.brief || (kind === 'story' ? '세로 1080×1920 실사 + 글자 렌더(24시간 스토리)' : '실사 사진 + 글자 렌더'), kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
   });
   if (!isQuiet(new Date(), s)) await notify(sql, { userIds: await audience(c, actorId), type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${d.title}` : `품질 검사 미통과: ${d.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
@@ -322,7 +334,7 @@ export async function automationView(u: SessionUser) {
   const sql = db(); const t = tenantOf(u);
   const s = await settingsOf(t);
   const [rules, requests, ledger, brands, people] = await Promise.all([
-    sql`select r.id, r.brand_id, b.name as brand, r.channel, r.kind, r.weekdays, r.post_time, r.topic_hint, r.active from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${t} order by r.created_at`,
+    sql`select r.id, r.brand_id, b.name as brand, r.channel, r.kind, r.weekdays, r.post_time, r.topic_hint, r.active, r.interval_days, r.anchor_date::text as anchor_date, r.cross_channels, r.bundle_key from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${t} order by r.created_at`,
     sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
     sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, coalesce(l.title, c.title) as title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
@@ -359,22 +371,40 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
   return { ok: true, rescheduled: re.length };
 }
 
-export const ruleInput = z.object({ brandId: zUuid.nullable().optional(), channel: z.enum(['instagram', 'facebook', 'threads', 'blog', 'youtube', 'naver_place', 'other']), kind: z.enum(['feed', 'blog', 'reels', 'video']),
-  weekdays: z.array(nInt(0, 6)).min(1).max(7), postTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), topicHint: z.string().max(300).optional(), active: z.boolean().optional() });
+const ruleBase = z.object({ brandId: zUuid.nullable().optional(), channel: z.enum(['instagram', 'facebook', 'threads', 'blog', 'youtube', 'naver_place', 'other']), kind: z.enum(['feed', 'blog', 'reels', 'video', 'shorts', 'story']),
+  weekdays: z.array(nInt(0, 6)).max(7).default([]), postTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), topicHint: z.string().max(300).optional(), active: z.boolean().optional(),
+  /** 대표 10/20 6): n일마다(요일 대신)·시작일·같은 글을 함께 올릴 채널 */
+  intervalDays: nInt(1, 30).nullable().optional(), anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), crossChannels: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional() })
+export const ruleInput = ruleBase.refine((i) => i.intervalDays || i.weekdays.length, { message: '요일을 고르거나 n일마다를 정하세요' });
 export async function createRule(u: SessionUser, i: z.infer<typeof ruleInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const sql = db(); const t = tenantOf(u);
   if (i.brandId && !(await sql`select 1 from mkt_brands where id = ${i.brandId} and tenant = ${t}`).length) throw notFound('브랜드를 찾을 수 없습니다');
-  const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by)
-    values (${t}, ${i.brandId ?? null}, ${i.channel}, ${i.kind}, ${[...new Set(i.weekdays)].sort()}, ${i.postTime}, ${i.topicHint ?? null}, ${i.active ?? true}, ${u.id}) returning id`;
+  const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by, interval_days, anchor_date, cross_channels)
+    values (${t}, ${i.brandId ?? null}, ${i.channel}, ${i.kind}, ${[...new Set(i.weekdays)].sort()}, ${i.postTime}, ${i.topicHint ?? null}, ${i.active ?? true}, ${u.id}, ${i.intervalDays ?? null}, ${i.anchorDate ?? null}, ${(i.crossChannels ?? []).filter((c) => c !== i.channel)}) returning id`;
   return { id: r.id, planned: await planSlots(t) };
 }
-export const rulePatch = ruleInput.partial();
+export const bundleInput = z.object({ brandId: zUuid.nullable().optional(), intervalDays: nInt(2, 3).default(3), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), topicHint: z.string().max(300).optional() });
+/** 대표 10/20 6): 기본 묶음 규칙 5개를 한 번에(브랜드마다, 2~3일에 한 번) — 같은 bundle_key, 요일 대신 n일마다 */
+export async function createBundle(u: SessionUser, i: z.infer<typeof bundleInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const sql = db(); const t = tenantOf(u);
+  if (i.brandId && !(await sql`select 1 from mkt_brands where id = ${i.brandId} and tenant = ${t}`).length) throw notFound('브랜드를 찾을 수 없습니다');
+  const key = randomUUID(); const start = i.startDate ?? ymd(new Date());
+  const ids: string[] = [];
+  for (const b of BUNDLE) {
+    const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by, interval_days, anchor_date, cross_channels, bundle_key)
+      values (${t}, ${i.brandId ?? null}, ${b.channel}, ${b.kind}, ${[]}, ${b.postTime}, ${i.topicHint ?? null}, true, ${u.id}, ${i.intervalDays}, ${start}, ${b.cross}, ${key}) returning id`;
+    ids.push(r.id);
+  }
+  return { bundleKey: key, ids, planned: await planSlots(t) };
+}
+export const rulePatch = ruleBase.partial();
 export async function updateRule(u: SessionUser, id: string, i: z.infer<typeof rulePatch>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
   const sql = db();
-  const [r] = await sql`update mkt_rules set channel = coalesce(${i.channel ?? null}, channel), kind = coalesce(${i.kind ?? null}, kind), weekdays = coalesce(${i.weekdays ? [...new Set(i.weekdays)].sort() : null}::int[], weekdays),
+  const [r] = await sql`update mkt_rules set channel = coalesce(${i.channel ?? null}, channel), kind = coalesce(${i.kind ?? null}, kind), weekdays = coalesce(${i.weekdays ? ([...new Set(i.weekdays)].sort() as number[]) : null}::int[], weekdays), interval_days = coalesce(${i.intervalDays ?? null}, interval_days), anchor_date = coalesce(${i.anchorDate ?? null}, anchor_date),
     post_time = coalesce(${i.postTime ?? null}, post_time), topic_hint = coalesce(${i.topicHint ?? null}, topic_hint), active = coalesce(${i.active ?? null}, active) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!r) throw notFound();
   return { ok: true };

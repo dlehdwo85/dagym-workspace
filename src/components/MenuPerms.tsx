@@ -6,7 +6,7 @@ import { Button, ErrorBox, Skeleton, cx, inputCls, toast } from '@/components/ui
 import { ROLE_LABEL, type Role } from '@/lib/types';
 
 type Level = { value: string; label: string };
-type M = { menus: { key: string; label: string; levels: Level[] }[]; roles: Role[]; matrix: Record<string, Record<string, string>>; overrides: { menu: string; user_id: string; level: string; name: string }[] };
+type M = { teamGrants: { user_id: string; name: string; team_id: string; team_name: string }[]; menus: { key: string; label: string; levels: Level[] }[]; roles: Role[]; matrix: Record<string, Record<string, string>>; overrides: { menu: string; user_id: string; level: string; name: string }[] };
 
 /** V13 2·4번 메뉴 권한 (대표만): 행 = 메뉴, 열 = 등급, 칸 = 단계. 아래에 사람별 예외 */
 export function MenuPermsTab({ users }: { users: { id: string; name: string; role: Role; status: string }[] }) {
@@ -67,8 +67,53 @@ export function MenuPermsTab({ users }: { users: { id: string; name: string; rol
           <Button size="sm" disabled={!add.userId || busy === 'add'} onClick={() => put({ menu: add.menu, userId: add.userId, level: add.level }, 'add')}>예외 추가</Button>
         </div>
       </section>
+      <TeamView d={d} users={users} reload={reload} />
       <p className="text-xs text-ink-3">자료실 행을 펼치면 보안 등급(내부·기밀)별 열람과 폴더별 권한·등급을 같은 화면에서 정합니다. 폴더 설정은 하위 폴더에 그대로 이어집니다.</p>
     </div>
+  );
+}
+
+/** 대표 10/20 4): 사람별 '팀 업무 보기' — 전체(다른 팀 전체 예외 조회) / 자기 팀만(예외·지정 없음) / 지정 팀(team_view_grants). 격리 팀원은 무엇을 골라도 자기 팀만 */
+function TeamView({ d, users, reload }: { d: M; users: { id: string; name: string; role: Role; status: string }[]; reload: () => void }) {
+  const teams = useApi<{ teams: { id: string; name: string; kind: string; parent_name: string | null }[] }>('/api/teams');
+  const [userId, setUserId] = useState(''); const [busy, setBusy] = useState(false); const [pickMode, setPickMode] = useState(false); // '지정 팀'을 골랐지만 아직 팀을 안 고른 상태
+  const list = (teams.data?.teams ?? []);
+  const allLv = d.overrides.find((o) => o.menu === 'team_tasks_all' && o.user_id === userId)?.level;
+  const picked = new Set(d.teamGrants.filter((g) => g.user_id === userId).map((g) => g.team_id));
+  const mode = allLv && allLv !== 'none' ? 'all' : picked.size || pickMode ? 'pick' : 'own';
+  async function setMode(m: 'all' | 'own' | 'pick') {
+    setPickMode(m === 'pick'); setBusy(true);
+    try {
+      await api('/api/admin/menu-perms', { method: 'PUT', body: { menu: 'team_tasks_all', userId, level: m === 'all' ? 'view' : 'none' } });
+      if (m !== 'pick') await api('/api/admin/menu-perms', { body: { userId, teamIds: [] } });
+      reload(); toast.ok('바꿨습니다');
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  async function toggle(teamId: string) {
+    const next = new Set(picked); if (next.has(teamId)) next.delete(teamId); else next.add(teamId);
+    setBusy(true);
+    try { await api('/api/admin/menu-perms', { body: { userId, teamIds: [...next] } }); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <section className="rounded-card border border-line bg-white p-3" data-testid="team-view-perm">
+      <h2 className="text-sm font-semibold">팀 업무 보기 <span className="font-normal text-ink-3">— 사람마다 전체 / 자기 팀만 / 지정 팀 (업무 화면 ‘팀별’ 칩에 그 팀만 보임, 격리 팀원은 자기 팀만)</span></h2>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select className={cx(inputCls, 'h-9 !w-auto')} value={userId} onChange={(e) => { setUserId(e.target.value); setPickMode(false); }} aria-label="팀 업무 보기 사람" data-testid="team-view-user">
+          <option value="">사람 선택</option>{users.filter((u) => u.role !== 'owner' && u.status !== 'disabled').map((u) => <option key={u.id} value={u.id}>{u.name} ({ROLE_LABEL[u.role]})</option>)}
+        </select>
+        {userId && <div className="flex rounded-input border border-line p-0.5 text-xs" role="radiogroup" aria-label="팀 업무 보기 범위">
+          {([['all', '전체'], ['own', '자기 팀만'], ['pick', '지정 팀']] as const).map(([k, l]) => (
+            <button key={k} type="button" role="radio" aria-checked={mode === k} disabled={busy} onClick={() => setMode(k)} className={cx('rounded-[6px] px-2.5 py-1', mode === k ? 'bg-brand-600 font-semibold text-white' : 'hover:bg-slate-50')} data-testid={`team-view-${k}`}>{l}</button>))}
+        </div>}
+      </div>
+      {userId && mode === 'pick' && <div className="mt-2 flex flex-wrap gap-1.5" data-testid="team-view-teams">
+        {list.map((t) => <label key={t.id} className={cx('inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs', picked.has(t.id) ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-line')}>
+          <input type="checkbox" className="sr-only" checked={picked.has(t.id)} disabled={busy} onChange={() => toggle(t.id)} />{t.kind === 'team' && t.parent_name ? `${t.parent_name} › ` : ''}{t.name}</label>)}
+        {!list.length && <span className="text-xs text-ink-3">부서·팀이 없습니다</span>}
+      </div>}
+      {userId && mode === 'pick' && !picked.size && <p className="mt-1 text-xs text-ink-3">팀을 하나 이상 고르세요 — 고르지 않으면 ‘자기 팀만’과 같습니다.</p>}
+      {d.teamGrants.length > 0 && <ul className="mt-2 divide-y divide-line text-xs text-ink-2" data-testid="team-view-list">{Object.entries(d.teamGrants.reduce<Record<string, string[]>>((a, g) => { (a[g.name] ??= []).push(g.team_name); return a; }, {})).map(([n, ts]) => <li key={n} className="py-1">{n}: 지정 팀 {ts.join(' · ')}</li>)}</ul>}
+    </section>
   );
 }
 

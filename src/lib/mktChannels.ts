@@ -207,7 +207,10 @@ export async function homeChannels(u: SessionUser): Promise<HomeChannel[]> {
     const c = PUBLISH_CHANNELS.find((x) => x.key === k)!;
     const ready = kindReady(c.kind);
     out.push({ key: k, label: c.label, kind: 'publish', ...pick(pubs, c.providers), connect: ready && c.kind === 'meta' ? '/api/marketing/publish/connect/meta' : null,
-      pending: ready ? null : c.kind === 'meta' ? '심사 후 열림 — 그동안 게시 도우미' : '준비 중 — 그동안 게시 도우미', signup: SIGNUP[k][0], ask: SIGNUP[k][1] });
+      // 대표 10/20 6): 준비 중이면 무엇이 막는지 한 줄(로컬이 대표에게 전달)
+      pending: ready ? null : k === 'threads' ? (metaReady() ? 'Meta 앱 심사 필요: threads_basic·threads_content_publish(화면 녹화 제출) — 심사 후 열림, 그동안 게시 도우미' : 'Meta 앱 ID/시크릿 없음 → 앱 심사(threads_basic·threads_content_publish) 전 — 그동안 게시 도우미')
+        : k === 'youtube' ? 'Google OAuth 클라이언트 + YouTube Data API 업로드 범위(youtube.upload) 심사 필요 — 준비 중, 그동안 게시 도우미'
+        : c.kind === 'meta' ? '심사 후 열림 — 그동안 게시 도우미' : '준비 중 — 그동안 게시 도우미', signup: SIGNUP[k][0], ask: SIGNUP[k][1] });
   }
   for (const k of ['naver_blog', 'kakao_channel'] as ChannelKey[]) {
     const c = PUBLISH_CHANNELS.find((x) => x.key === k)!;

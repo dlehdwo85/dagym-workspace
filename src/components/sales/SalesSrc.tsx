@@ -1,4 +1,5 @@
 'use client';
+import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
@@ -221,6 +222,7 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
     <Modal open onClose={onClose} title={data?.lead.name ?? '리드'} wide>
       {error ? <ErrorBox error={error} /> : !data ? <Skeleton rows={4} /> : (
         <div className="space-y-3" data-testid="sales-lead-detail">
+          <AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesLead} subject={`거래처 ${data.lead.name}`} compact testId="ai-ask-lead" />
           <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {kd(data.lead.next)}</span>}</div>
           <div className="flex flex-wrap gap-1 border-b border-line">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined}>{l}</button>)}</div>
           {tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}
@@ -258,7 +260,7 @@ export function Leads({ initialId, initialDay }: { initialId?: string; initialDa
   const statuses = [...new Set((data?.leads ?? []).map((l: any) => String(l.status ?? '미정')))] as string[];
   return (
     <div className="space-y-3" data-testid="sales-leads">
-      <Head title="리드·거래처" meta={data}>{data?.readOnly === false && <Button size="sm" onClick={() => setNl({ name: '', region: '', contactName: '', phone: '' })} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} />{day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="leads-day-today">오늘 연락할 리드 ✕</button>}<select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
+      <Head title="리드·거래처" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesLeads} compact />{data?.readOnly === false && <Button size="sm" onClick={() => setNl({ name: '', region: '', contactName: '', phone: '' })} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} />{day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="leads-day-today">오늘 연락할 리드 ✕</button>}<select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
       {!data ? <Skeleton rows={5} /> : (
         <>
         {/* 영업관리 2-13 표 칸: 거래처명(담당·최근 활동·금액) · 관심 사업 · 시설 · 지역 · 단계 · 우선 · 예상매출 · 다음 연락 · 최근 활동 · 담당 — 휴대폰은 카드 */}
@@ -351,7 +353,7 @@ export function Bids({ initialTab }: { initialTab?: string }) {
   if (error) return <ErrorBox error={error} retry={reload} />;
   return (
     <div className="space-y-3" data-testid="sales-bids">
-      <Head title="입찰·공고 모니터링" meta={data}><Search value={s} onChange={setS} /></Head>
+      <Head title="입찰·공고 모니터링" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBids} compact /><Search value={s} onChange={setS} /></Head>
       <div className="flex flex-wrap gap-1.5">{[['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감'], ['recruit', '협력사 모집']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => <BidCard key={n.id} n={n} onOpen={() => setOpen(n)} />)}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
@@ -369,6 +371,7 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
   return (
     <Modal open onClose={onClose} title={n.title} wide>
       <div className="space-y-3" data-testid="bid-detail">
+        <AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBid} subject={`공고 ${String(n.title).slice(0, 40)}`} compact testId="ai-ask-bid" />
         <div className="flex flex-wrap gap-1.5 text-[11px]">{[n.classification ?? n.category, n.business && BIZ[n.business]?.[0], n.status, n.fit !== null && n.fit !== undefined && `적합 ${n.fit}`, n.sourceLabel && `${n.sourceLabel}${n.noticeNo ? ` ${n.noticeNo}` : ''}`].filter(Boolean).map((b, i) => <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">{String(b)}</span>)}</div>
         <KoDl rows={[['공고명', n.title], ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.fitBusiness],
           ['마감', n.deadline ? kdt(n.deadline) : unk(null)], ['예산', won(n.amount) || (n.amount ? String(n.amount) : unk(null))], ['낙찰', n.winner ? [n.winner, won(n.awardAmount), n.awardDate && kd(n.awardDate)].filter(Boolean).join(' · ') : unk(null)],

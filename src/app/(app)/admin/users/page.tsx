@@ -7,6 +7,7 @@ import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, ref
 import { ROLE_LABEL, type Role } from '@/lib/types';
 import { MenuPermsTab } from '@/components/MenuPerms';
 import { TeamsTab } from '@/components/Teams';
+import { OffboardModal } from '@/components/admin/Offboard';
 
 const STATUS: Record<string, string> = { invited: '초대됨', active: '사용 중', disabled: '사용 중지', left: '퇴사' };
 
@@ -61,6 +62,12 @@ function Users() {
   const [reviewMsg, setReviewMsg] = useState('');
   // 로컬 검수 10/17: 심사용 체험 계정은 직원 목록에 섞지 않고 접어 둠
   const [showDemo, setShowDemo] = useState(false);
+  // 대표 10/20 7): 퇴사 처리·인수인계·복직 + 목록 필터(사용 중 / 퇴사)
+  const [off, setOff] = useState<{ id: string; mode: 'leave' | 'handover' } | null>(null);
+  const [showLeft, setShowLeft] = useState(false);
+  const leftN = data?.users.filter((u: any) => u.status === 'left').length ?? 0;
+  const todayK = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  async function rejoin(u: any) { if (!confirm(`${u.name}님을 복직 처리할까요? (퇴사일부터 30일 안)`)) return; try { await api(`/api/admin/users/${u.id}/rejoin`, { body: {} }); toast.ok('복직 처리했습니다'); reload(); } catch (e: any) { toast.error(e.message); } }
   const demoN = data?.users.filter((u: any) => u.is_demo).length ?? 0;
   const allUnits = useApi<{ units: any[] }>('/api/admin/org-units');
   const roles = (Object.keys(ROLE_LABEL) as Role[]).filter((r) => r !== 'owner' || user.role === 'owner');
@@ -99,21 +106,25 @@ function Users() {
         </span>
       </div>
       {demoN > 0 && <button type="button" className="text-xs text-ink-2 underline" onClick={() => setShowDemo((x) => !x)} data-testid="demo-toggle">{showDemo ? '심사용 체험 계정 숨기기' : `심사용 체험 계정 ${demoN}개 보기`}</button>}
+      {leftN > 0 && <button type="button" className="ml-3 text-xs text-ink-2 underline" onClick={() => setShowLeft((x) => !x)} data-testid="left-toggle">{showLeft ? '퇴사자 숨기기' : `퇴사자 ${leftN}명 보기`}</button>}
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : (
         <div className="overflow-x-auto rounded-lg border bg-white">
           <table className="w-full text-sm" data-testid="users">
             <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="p-2">이름</th><th className="p-2">권한</th><th className="p-2">소속</th><th className="p-2">상태</th><th className="p-2">최근 로그인</th><th className="p-2"></th></tr></thead>
-            <tbody className="divide-y">{data!.users.filter((u: any) => showDemo || !u.is_demo).map((u) => (
+            <tbody className="divide-y">{data!.users.filter((u: any) => (showDemo || !u.is_demo) && (showLeft || u.status !== 'left')).map((u) => (
               <tr key={u.id} className={cx(u.status !== 'active' && u.status !== 'invited' && 'text-slate-400')}>
                 <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}{u.title_short ? ` (${u.title_short})` : ''}</div></td>
                 <td className="p-2">{ROLE_LABEL[u.role as Role]}</td>
                 <td className="p-2 text-xs">{u.org_unit_ids.map(unitName).join(', ') || '-'}</td>
-                <td className="p-2">{STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}</td>
+                <td className="p-2" data-testid="user-status">{u.status === 'left' && u.left_at ? `퇴사(${u.left_at.slice(5).replace('-', '/')})` : STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}{u.status === 'left' && u.rejoin_until && u.rejoin_until >= todayK && <div className="text-xs text-slate-400">복직 가능 ~{u.rejoin_until.slice(5).replace('-', '/')}</div>}</td>
                 <td className="p-2 text-xs">{u.last_login_at ? fmtDateTime(u.last_login_at) : '-'}</td>
                 <td className="p-2 text-right whitespace-nowrap">{canEdit && <>
                   <Button size="sm" variant="ghost" onClick={() => setEdit({ ...u })}>편집</Button>
                   {u.status === 'active' && <Button size="sm" variant="ghost" onClick={() => reset(u)}>비번 재설정 링크</Button>}
                   {u.status === 'invited' && <Button size="sm" variant="ghost" onClick={() => reinvite(u)}>초대 링크 재발급</Button>}
+                  {u.status === 'active' && u.id !== user.id && <Button size="sm" variant="ghost" onClick={() => setOff({ id: u.id, mode: 'leave' })} data-testid="user-leave">퇴사 처리</Button>}
+                  {u.status === 'left' && <Button size="sm" variant="ghost" onClick={() => setOff({ id: u.id, mode: 'handover' })} data-testid="user-handover">인수인계</Button>}
+                  {u.status === 'left' && u.rejoin_until && u.rejoin_until >= todayK && <Button size="sm" variant="ghost" onClick={() => rejoin(u)} data-testid="user-rejoin">복직</Button>}
                 </>}</td>
               </tr>))}
             </tbody>
@@ -159,6 +170,7 @@ function Users() {
         <input readOnly className={cx(inputCls, 'mt-2 font-mono text-xs')} value={link} onFocus={(e) => e.target.select()} data-testid="invite-link" />
         <div className="mt-3 flex justify-end"><Button onClick={() => { navigator.clipboard?.writeText(link); toast.ok('복사했습니다'); }}>복사</Button></div>
       </Modal>
+      {off && <OffboardModal userId={off.id} mode={off.mode} onClose={() => setOff(null)} onDone={() => { setOff(null); reload(); }} />}
       <Modal open={!!edit} onClose={() => setEdit(null)} title="사용자 편집">
         {edit && <form onSubmit={save} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
