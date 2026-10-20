@@ -231,6 +231,7 @@ export async function produceContent(c: any, actorId?: string | null) {
   const d = await writeDraft(c, s, brand, rule);
   const kind = c.kind as Kind;
   const q = qualityCheck(d.body, d.brief, s, brand?.banned_words ?? [], kind, d.title);
+  if (kind === 'blog') { q.passed = false; q.issues = [...q.issues, (await import('./marketing')).BLOG_PHOTO_RULE]; } // 대표 10/20 18:45 ③: 블로그는 표지+본문 사진이 붙어야 승인 대기
   const deadline = deadlineOf(c.scheduled_at, s);
   const v = (c.current_version ?? 0) + 1; // 처음 제작 = v1, 다시 만들기 = 다음 버전
   // 원고·원장·제작 요청 카드를 한 번에(중간에 끊겨 원고만 남고 카드가 빠지는 일이 없게)
@@ -240,9 +241,9 @@ export async function produceContent(c: any, actorId?: string | null) {
     await tx`update mkt_contents set title = ${(c.is_test && !d.title.startsWith('[시험]') ? '[시험] ' : '') + d.title}, current_version = ${v}, reminded_at = null, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief } as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임)
-    if (kind !== 'blog' || d.brief) await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', d.brief || (kind === 'story' ? '세로 1080×1920 실사 + 글자 렌더(24시간 스토리)' : '실사 사진 + 글자 렌더'), kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
+    await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', (kind === 'blog' ? `표지 1장 + 본문 사진 1장 이상(실사). ${d.brief ?? ''}`.trim() : d.brief) || (kind === 'story' ? '세로 1080×1920 실사 + 글자 렌더(24시간 스토리)' : '실사 사진 + 글자 렌더'), kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
   });
-  if (!isQuiet(new Date(), s)) await notify(sql, { userIds: await audience(c, actorId), type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${d.title}` : `품질 검사 미통과: ${d.title}`,
+  if (!isQuiet(new Date(), s)) await notify(sql, { userIds: await audience(c, actorId), type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${d.title}` : kind === 'blog' && q.issues.length === 1 ? `원고 완료 — 표지·본문 사진을 붙여 주세요: ${d.title}` : `품질 검사 미통과: ${d.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
   return { id: c.id, passed: q.passed, issues: q.issues };
 }
@@ -322,6 +323,7 @@ export async function onChangesRequested(contentId: string, comment: string) {
   const q = qualityCheck(d.body, d.brief, s, brand?.banned_words ?? [], c.kind);
   const v = c.current_version + 1;
   const [old] = await sql<{ media_ids: string[] }[]>`select media_ids from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
+  if ((await import('./marketing')).needsPhotos(c.channel, old?.media_ids?.length ?? 0)) { q.passed = false; q.issues = [...q.issues, (await import('./marketing')).BLOG_PHOTO_RULE]; }
   await sql.begin(async (tx) => {
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${old?.media_ids ?? []}, ${`수정 요청 반영(글자·배치, 0크레딧): ${comment.slice(0, 200)}`}, ${c.created_by})`;
     await tx`update mkt_contents set current_version = ${v}, status = ${q.passed ? 'pending' : 'changes'}, quality = ${tx.json({ passed: q.passed, issues: q.issues } as never)}, reminded_at = null, updated_at = now() where id = ${c.id}`;

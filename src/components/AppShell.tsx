@@ -210,7 +210,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
     : tabSpace === 'marketing'
       ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
-      : v3 ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/approvals')] /* ⑦ 시안: 캘린더·메시지는 더보기 › 공통 */ : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
+      // 대표 핫픽스 10/20 19:10(앱 캡처): 업무 공간 하단 = 홈 · 업무 · 캘린더 · 결재 · 더보기 — 프로젝트는 더보기 › 업무 메뉴로. 탭 구성 변경은 앞으로 대표 확인 뒤에만
+      : v3 ? [byHref('/'), byHref('/tasks'), byHref('/calendar'), byHref('/approvals')] : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
   const active = (href: string) => {
     const [p, q] = href.split('?');
     if (p === '/') return path === '/';

@@ -90,7 +90,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await m.getByTestId('sheet-space-sales').getByLabel('지금 공간').waitFor();
   await m.getByTestId('sheet-space-work').tap(); // 업무로 돌려 둠
   await m.waitForURL(/\/$/);
-  assert.deepEqual(await tabs(), ['홈', '업무', '프로젝트', '결재', '더보기']); // ⑦ 시안: 업무 공간 하단 5칸, 캘린더·메시지는 더보기 › 공통
+  assert.deepEqual(await tabs(), ['홈', '업무', '캘린더', '결재', '더보기']); // 대표 핫픽스 10/20 19:10: 프로젝트 대신 캘린더(프로젝트는 더보기 › 업무 메뉴)
   await m.getByTestId('tab-more').tap();
   await m.getByTestId('mobile-common').getByRole('link', { name: '캘린더' }).waitFor();
   await m.getByTestId('mobile-common').getByRole('link', { name: '메시지' }).waitFor();

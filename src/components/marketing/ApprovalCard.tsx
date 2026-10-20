@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
 import { api } from '@/components/client';
-import { Button, cx, inputCls, toast } from '@/components/ui';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 /** 운영실 화면 명세(OPS_ROOM_SCREEN_SPEC 2-2·5절)에 맞춘 승인 카드·라벨 — 승인함·현황이 같이 씀 */
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', video: '생성 영상', shorts: '쇼츠', story: '스토리' };
@@ -33,13 +34,15 @@ export const deadlineLabel = (deadline: string | null, at: string | null) => dea
 
 export type CardContent = { id: string; title: string; channel: string; kind?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null;
   body?: string; media_ids?: string[]; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
+  auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[] } | null; production?: { kind: string; status: string } | null;
   last_decision?: { decision: string; comment: string | null; at: string; version: number; by: string | null } | null };
 
 /** 승인 카드: 머리 칩(브랜드·채널+형식·제목·상태·vN·재승인) · 게시 시각·마감 · 미디어 넘겨 보기 · 문안 · 제작 메모 · 결정 기록 · [승인]/[수정 요청] */
 export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent; canDecide: boolean; onDone: () => void; onOpen?: () => void }) {
   const [mode, setMode] = useState<'idle' | 'changes'>('idle'); const [memo, setMemo] = useState(''); const [done, setDone] = useState<string | null>(null);
-  const [full, setFull] = useState(false); const [idx, setIdx] = useState(0);
+  const [full, setFull] = useState(false); const [idx, setIdx] = useState(0); const [bodyOpen, setBodyOpen] = useState(false);
   const media = c.media_ids ?? [];
+  const issues = c.quality?.passed === false ? c.quality.issues ?? [] : [];
   const late = !!c.late;
   async function decide(decision: 'approve' | 'changes') {
     try { await api(`/api/marketing/contents/${c.id}/decide`, { body: { version: c.current_version, decision, comment: decision === 'changes' ? memo.trim() : undefined } });
@@ -68,9 +71,18 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
             </button>))}</div>
           <p className="mt-0.5 text-[11px] text-ink-3">{media.length}장 — 옆으로 넘겨 보기</p>
         </div>)}
-      {/* 대표(10/19 앱): 휴대폰 카드는 핵심만 — 본문·제작 메모는 제목을 눌러 상세에서 */}
-      {c.body && <details className="mt-2 hidden md:block"><summary className="line-clamp-4 cursor-pointer whitespace-pre-wrap text-xs text-ink">{c.body}</summary><p className="mt-1 whitespace-pre-wrap text-xs">{c.body}</p></details>}
-      {c.version_note && <p className="mt-1 hidden text-xs text-ink-2 md:block">제작 메모: {c.version_note}</p>}
+      {/* 대표 재지적 10/20 18:45 ②: 시안이 없어도 카드 첫 화면에 자리(회색 상자)를 늘 보여 승인할 수 있게 — 제작 중이면 예정 시각 */}
+      {media.length === 0 && <div className="mt-2 flex items-center gap-3 rounded-input border border-dashed border-line bg-slate-50 p-2" data-testid="approval-no-media">
+        <div className="flex size-20 shrink-0 items-center justify-center rounded-input bg-slate-200 text-center text-[11px] leading-tight text-ink-2">{c.production || (c.auto && !c.produced_at) ? '시안\n제작 중'.split('\n').map((t, i) => <span key={i} className="block">{t}</span>) : '시안 없음'}</div>
+        <p className="text-xs text-ink-2">{c.production ? `${c.production.kind.includes('video') ? '영상' : '이미지'} 제작 요청이 열려 있습니다${c.production.status === 'needs_approval' ? ' (한도 승인 대기)' : ''} — 붙으면 여기에 보입니다` : c.auto && !c.produced_at && c.produce_at ? `AI 제작 예정 ${fmtDateTime(c.produce_at)}` : '아직 시안이 없습니다 — 상세에서 수정본에 사진을 붙여 주세요'}</p>
+      </div>}
+      {issues.length > 0 && <p className="mt-1 rounded-input bg-amber-50 px-2 py-1 text-[11px] text-amber-800" data-testid="approval-issues">{issues.join(' · ')}</p>}
+      {/* 대표 재지적 10/20 18:45 ①: 본문은 2줄(PC 4줄)만 보이고 [더보기] 글자 버튼(아이콘+글자)으로 펼침 — 전에는 줄임표(…)만 보여 누를 수 있는지 몰랐음 */}
+      {c.body && <div className="mt-2 text-xs">
+        <p className={cx('whitespace-pre-wrap text-ink', !bodyOpen && 'line-clamp-2 md:line-clamp-4')} data-testid="approval-body">{c.body}</p>
+        <button type="button" onClick={() => setBodyOpen(!bodyOpen)} className="mt-0.5 inline-flex items-center gap-0.5 font-medium text-violet-700" aria-expanded={bodyOpen} data-testid="approval-body-more">{bodyOpen ? <><ChevronUp size={14} aria-hidden />접기</> : <><ChevronDown size={14} aria-hidden />더보기</>}</button>
+      </div>}
+      {c.version_note && bodyOpen && <p className="mt-1 text-xs text-ink-2">제작 메모: {c.version_note}</p>}
       {d && d.version === c.current_version && <p className="mt-1 text-[11px] text-ink-3" data-testid="mkt-decision-line">{({ approve: '승인', changes: '수정 요청', hold: '보류' } as Record<string, string>)[d.decision] ?? d.decision} · {kst(d.at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })} KST{d.by ? ` · ${d.by}` : ''}{d.comment ? ` · 메모: ${d.comment}` : ''}{c.published_url ? <> · <a href={c.published_url} target="_blank" rel="noopener" className="underline">게시물 열기</a></> : null}</p>}
       {canAct && !late && (mode === 'idle' ? (
         <div className="mt-2 flex flex-wrap gap-2">
