@@ -31,6 +31,8 @@ import { usageStatsFlow } from './usage-stats.step.mjs';
 import { contactsFlow } from './contacts.step.mjs';
 import { settlementFlow } from './settlement.step.mjs';
 import { notifActionsFlow } from './notif-actions.step.mjs';
+import { salesAppFlow } from './sales-app.step.mjs';
+import { checklistAppFlow } from './checklist-app.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -2055,7 +2057,9 @@ await step('V14 19번·R-15·R-16: 업무 상세 머리 요약·D-day·다음 �
   await owner.getByTestId('history').locator('li').first().waitFor();
   await owner.getByRole('tab', { name: /댓글/ }).click();
   assert.equal(await owner.getByTestId('more-fields').count(), 0, '필드 더보기 없음');
-  await owner.getByLabel('자료 모으기 담당').waitFor();
+  // 대표 검수 10/20: 담당자 1명인 업무는 항목별 담당 선택을 숨기고, 다른 사람이 지정된 항목은 이름만
+  await owner.getByTestId('checklist-assignee-name').waitFor();
+  assert.equal(await owner.getByLabel('자료 모으기 담당').count(), 0, '담당 1명 → 항목 담당 선택 숨김');
   await owner.screenshot({ path: `${SHOTS}/92-task-detail-v19.png`, fullPage: true });
   await owner.getByTestId('next-action').click();
   await owner.getByText('완료 처리했습니다').first().waitFor();
@@ -2295,6 +2299,10 @@ await step('V31 연락처: 등록·검색·상세 → 업무 메일/문자 시�
 await step('V32 2 정산: 플랫폼 정산 집계·장부 [정산 완료] → 고객 결제 내역 [세금계산서] 요청 → 운영자 발행 체크', () => settlementFlow({ owner, ctx, BASE, SHOTS, sql }));
 
 await step('로컬 10/20 알림 바로 처리: 배정 알림 [오늘 할 일에 넣기] → 처리 표시·버튼 사라짐 → 설정 조용한 시간 칸', () => notifActionsFlow({ staff, ctx, BASE, SHOTS }));
+
+await step('대표 검수 10/20 ② 앱 영업 정리(390): 리드 전화·문자·홈페이지 → 파이프라인 단계 칩 목록 → 입찰 원문·공고문·한국어 상세·관리자 원본 접힘 → 허브 시설 전화 줄', () => salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }));
+
+await step('대표 검수 10/20 체크리스트(360): 항목별 미팅 버튼 제거 · 담당 1명 → 담당 칩 숨김·새 항목 자동 배정 · 담당 여럿 → 선택 노출 · (?) 안내 탭 · 가로 넘침 0', () => checklistAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

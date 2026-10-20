@@ -1,0 +1,70 @@
+// 대표 검수 10/20 ② 앱 영업 공간 정리(390): 리드 카드 전화·문자 줄·홈페이지 칩·한국어 날짜 → 파이프라인은 칸반 대신 단계 칩 목록 → 입찰 카드 원문·공고문 내려받기·마감 한국어 → 입찰 상세 한국어 칸 + 관리자 원본 접힘(영문 키 없음) → 허브 시설 전화 줄·상세
+import assert from 'node:assert/strict';
+
+export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
+  const ymd = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
+  const put = (scope, tbl, row) => sql`insert into sales_src_rows (scope, tbl, src_id, row) values (${scope}, ${tbl}, ${String(row.id)}, ${sql.json(row)})`;
+  const ids = ['E2E-APP-L1', 'E2E-APP-N1', 'E2E-APP-W1', 'E2E-APP-F1'];
+  await sql`delete from sales_src_rows where src_id = any(${ids})`;
+  await put('default', 'leads', { id: ids[0], name: 'E2E 앱 거래처', sales_status: '미팅예정', region: '경기', next_contact_date: ymd(2), phone: '031-123-4567', contact_name: '김소장', homepage: 'https://example.com/e2e', expected_revenue: '0.00', updated_at: `${ymd(0)}T01:00:00Z` });
+  await put('global', 'procurement_notices', { id: ids[1], title: 'E2E 앱 체육시설 위탁운영', issuer: '성남시청', region: '경기', related: true, first_seen_at: `${ymd(0)}T00:30:00+09:00`, deadline_at: `${ymd(5)}T10:00:00`, current_status: '공고중', source: 'g2b', source_url: 'https://example.com/notice/1', attachment_urls: ['https://example.com/files/notice.hwp'], budget: '385000000.00', office_phone: '031-729-2600', complex_name: '분당 스포츠센터' });
+  await put('default', 'opportunity_work', { id: ids[2], notice_id: ids[1], status: '검토 중', memo: '현장 설명회 10/25', next_action_date: ymd(3) });
+  await put('global', 'operating_facility_prospects', { id: ids[3], name: 'E2E 앱 시설', address: '경기 수원시', households: 1500, facility_type: '아파트', region: '경기', office_phone: '031-222-3333', use_approval_date: '2024-05-13', first_seen_at: ymd(0) });
+  await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant: 'default', at: new Date().toISOString(), daily: true })}) on conflict (key) do nothing`;
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
+  const m = await browser.newContext({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  try {
+    const p = await m.newPage();
+    // 리드 카드: 전화·문자·홈페이지가 카드 안에, 날짜 10. 22.(목)
+    await p.goto(`${BASE}/s/sales/leads`);
+    const card = p.getByTestId('sales-lead-card').filter({ hasText: 'E2E 앱 거래처' });
+    await card.waitFor();
+    assert.match(await card.getByTestId('contact-call').innerText(), /전화 031-123-4567/);
+    assert.equal(await card.getByTestId('contact-sms').count(), 1);
+    assert.match(await card.getByTestId('contact-link').innerText(), /홈페이지/);
+    assert.match(await card.innerText(), /다음 연락 \d{1,2}\. \d{1,2}\.\([일월화수목금토]\)/, '날짜 한국어');
+    assert.ok(!/0\.00|2026-/.test(await card.innerText()), '0.00·ISO 날짜 없음');
+    const tabs = (await p.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
+    assert.deepEqual(tabs, ['홈', '리드', '입찰', '영업기회', '더보기'], '앱 하단 탭에 파이프라인 없음');
+    await p.screenshot({ path: `${SHOTS}/139-sales-app-leads.png` });
+    // 파이프라인: 휴대폰은 단계 칩 + 목록
+    await p.goto(`${BASE}/s/sales/pipeline`);
+    await p.getByTestId('pipeline-list').waitFor();
+    assert.ok((await p.getByTestId('pipeline-stage').count()) >= 2, '전체 + 단계 칩');
+    assert.ok((await p.getByTestId('pipeline-item').count()) >= 1);
+    await p.getByTestId('pipeline-stage').filter({ hasText: '미팅예정' }).first().tap();
+    await p.getByTestId('pipeline-item').filter({ hasText: 'E2E 앱 거래처' }).waitFor();
+    assert.equal(await p.locator('section.w-60').evaluateAll((els) => els.filter((e) => e.offsetParent !== null).length), 0, '칸반은 PC 에서만');
+    // 입찰 카드: 원문·공고문 내려받기·전화, 마감 한국어 → 상세 한국어 칸 + 관리자 원본 접힘
+    await p.goto(`${BASE}/s/sales/bids`);
+    const bid = p.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 체육시설' });
+    await bid.waitFor();
+    assert.deepEqual(await bid.getByTestId('contact-link').allInnerTexts(), ['원문', '공고문 내려받기']);
+    assert.match(await bid.getByTestId('bid-deadline').innerText(), /^마감 \d{1,2}\. \d{1,2}\.\([일월화수목금토]\) 10:00$/);
+    assert.match(await bid.innerText(), /예산 385,000,000원/);
+    await bid.getByTestId('bid-open').tap();
+    const d = p.getByTestId('bid-detail'); await d.waitFor();
+    const dt = await d.innerText();
+    for (const k of ['공고명', '단지', '발주처', '마감', '예산', '문서', '연락처', '상태', '메모', '다음 조치']) assert.ok(dt.includes(k), `상세 칸 ${k}`);
+    assert.ok(!/source_url|office_phone|deadline_at/.test(dt), '영문 키 노출 없음(원본은 접힘)');
+    assert.equal(await d.getByTestId('bid-raw').count(), 1, '관리자 원본 보기 접힘');
+    assert.equal(await d.getByTestId('bid-raw').evaluate((el) => el.open), false);
+    await p.screenshot({ path: `${SHOTS}/140-sales-app-bid-detail.png` });
+    await p.getByRole('dialog').getByLabel('닫기').tap().catch(() => p.keyboard.press('Escape'));
+    // 허브 시설: 전화·문자 줄, 상세 한국어
+    await p.goto(`${BASE}/s/sales/hub?tab=facilities`);
+    const f = p.getByTestId('sales-hub-item').filter({ hasText: 'E2E 앱 시설' });
+    await f.waitFor();
+    assert.match(await f.getByTestId('contact-call').innerText(), /전화 031-222-3333/);
+    assert.ok(!(await f.innerText()).split('\n').some((l) => /^\s*·/.test(l)), '앞에 점으로 시작하는 줄(· 준공…) 없음');
+    assert.match(await f.innerText(), /DB 등록 \d{1,2}\. \d{1,2}\.\(.\) · 준공\(사용승인\) 2024\. 5\. 13\.\(월\)/, '날짜 한국어(올해 아니면 연도)');
+    await f.getByRole('button', { name: 'E2E 앱 시설' }).tap();
+    const hd = p.getByTestId('hub-detail'); await hd.waitFor();
+    assert.match(await hd.innerText(), /관리사무소[\s\S]*전화 031-222-3333/);
+    assert.equal(await hd.getByTestId('hub-raw').count(), 1);
+  } finally {
+    await m.close().catch(() => {});
+    await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: false }).catch(() => {});
+    await sql`delete from sales_src_rows where src_id = any(${ids})`.catch(() => {});
+  }
+}

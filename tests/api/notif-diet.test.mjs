@@ -36,11 +36,16 @@ describe('알림 다이어트', () => {
     assert.ok(new Date(d1.next_attempt_at).getTime() > Date.now() + 30 * 60_000, '끝나는 시각(1시간 이상 뒤)으로 미뤄짐');
     await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...p.settings, quietStart: hh(h - 1), quietEnd: hh(h + 2), quietOff: true } });
     const t2 = (await ctx.owner.ok('POST', '/api/tasks', { title: '조용한 시간 끔 배정', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
-    const [d2] = await sql`select d.next_attempt_at from notification_deliveries d join notifications n on n.id = d.notification_id where n.entity_id = ${t2} and n.user_id = ${ctx.staffA.id}`;
-    assert.ok(new Date(d2.next_attempt_at).getTime() <= Date.now() + 60_000, '끄면 바로');
+    // 업무 POST 직후 after(dispatchPending) 가 바로 보낼 행을 선점(attempts+1, 5분 뒤 재시도)할 수 있어 — '바로' = 아직 안 미뤄졌거나 이미 발송 시도됨
+    const [d2] = await sql`select d.next_attempt_at, d.attempts from notification_deliveries d join notifications n on n.id = d.notification_id where n.entity_id = ${t2} and n.user_id = ${ctx.staffA.id}`;
+    assert.ok(d2.attempts > 0 || new Date(d2.next_attempt_at).getTime() <= Date.now() + 60_000, `끄면 바로 (attempts ${d2.attempts}, next ${d2.next_attempt_at})`);
     await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...p.settings, quietStart: null, quietEnd: null, quietOff: true } });
   });
   test('마감 예고: 보통 업무는 목록만(푸시 없음), 높음 업무는 푸시 · 오늘 마감·기한 지남은 목록만 · 아침 브리핑에 마감 업무 이름', async () => {
+    // 기본 브리핑 시각(08:30) 뒤에 돌면 첫 tick 이 업무 만들기 전에 브리핑을 보내 버림 → 끝까지 꺼 두었다가 00:00 으로 켜고 tick
+    const p0 = await ctx.staffA.client.ok('GET', '/api/notifications/prefs');
+    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...p0.settings, briefingEnabled: false } });
+    await sql`delete from notifications where user_id = ${ctx.staffA.id} and type = 'briefing'`;
     const soon = new Date(Date.now() + 50 * 60_000); // 50분 뒤 마감 → 기본 60분 전 알림 대상
     const kst = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(soon);
     const g = (t) => kst.find((x) => x.type === t).value;

@@ -67,7 +67,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/sales-${w}.png` }); }
   // 대표 결정(10/19): 하단 탭 = 공간마다 같은 크기 5칸(+ 버튼 없음)
   const tabs = async () => (await m.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-  assert.deepEqual(await tabs(), ['홈', '리드', '파이프라인', '영업기회', '더보기']); // 대표 검수 10/20: '영업 현황' → '홈'
+  assert.deepEqual(await tabs(), ['홈', '리드', '입찰', '영업기회', '더보기']); // 대표 검수 10/20: '영업 현황' → '홈', ② 앱 파이프라인 탭 → 입찰(끈 회사는 제안·계약)
   const w = await m.getByTestId('mobile-tabs').locator(':scope > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
   assert.ok(Math.max(...w) - Math.min(...w) <= 1, `5칸 같은 폭 ${w}`);
   await m.getByTestId('tab-more').tap();
