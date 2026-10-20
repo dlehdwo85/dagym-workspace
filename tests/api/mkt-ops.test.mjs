@@ -109,6 +109,13 @@ test('② 광고 예산 계획: AI 초안(채널 4·연결 표시·하루 예산
   await ctl({ anthropicReset: true, anthropicQueue: [say({ plan: [{ provider: 'naver', monthly: '14,000원', note: '' }, { provider: 'google', monthly: 3000, note: '' }, { provider: 'meta', monthly: 3000, note: '' }, { provider: 'youtube', monthly: 0, note: '' }], rationale: '총액 20,000원 안에서 네이버 비중 크게' })] });
   const small = await ctx.owner.ok('POST', '/api/marketing/ops/budget', { month, total: 20000 });
   assert.deepEqual(small.plan.map((p) => [p.provider, p.monthly]), [['naver', 14000], ['google', 3000], ['youtube', 0], ['meta', 3000]], JSON.stringify(small.plan));
+  // 로컬 23:20: '1만원 단위' 숫자(1 = 1만원)·'약 1만원' 글자·숫자 0 + 비고 '약 2천원' 도 원 단위로 복구
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ plan: [{ provider: 'naver', monthly: 1, note: '1만원 단위 기준 약 1만원' }, { provider: 'google', monthly: 0.5, note: '' }, { provider: 'meta', monthly: 0, note: '' }, { provider: 'youtube', monthly: 0, note: '' }], rationale: '만원 단위' })] });
+  const man = await ctx.owner.ok('POST', '/api/marketing/ops/budget', { month, total: 20000 });
+  assert.deepEqual(man.plan.map((p) => [p.provider, p.monthly]), [['naver', 10000], ['google', 5000], ['youtube', 0], ['meta', 0]], JSON.stringify(man.plan));
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ plan: [{ provider: 'naver', monthly: '약 1.5만원', note: '' }, { provider: 'google', monthly: 0, note: '시작은 약 2천원 정도' }, { provider: 'meta', monthly: 0, note: '연결 없음' }, { provider: 'youtube', monthly: 0, note: '' }], rationale: '글자' })] });
+  const txt = await ctx.owner.ok('POST', '/api/marketing/ops/budget', { month, total: 20000 });
+  assert.deepEqual(txt.plan.map((p) => [p.provider, p.monthly]), [['naver', 15000], ['google', 2000], ['youtube', 0], ['meta', 0]], JSON.stringify(txt.plan));
   await ctx.owner.ok('PATCH', `/api/marketing/ops/budget/${P.budget}`, { action: 'update', plan: [{ provider: 'naver', monthly: 200000 }, { provider: 'meta', monthly: 100000 }, { provider: 'google', monthly: 0 }, { provider: 'youtube', monthly: 0 }] });
   // 네이버 세팅안(활성) 하나 → 승인 시 하루 예산 집행(가짜 네이버: actPlan budget)
   const [plan] = await sql`insert into mkt_ad_plans (tenant, account_id, provider, name, plan, status, external, created_by) values ('default', ${P.acc}, 'naver', '가을 회원 모집', ${sql.json({ dailyBudget: 5000 })}, 'active', ${sql.json({ campaignId: 'cmp-1', adgroupId: 'ag-1' })}, ${ctx.ownerId}) returning id`;

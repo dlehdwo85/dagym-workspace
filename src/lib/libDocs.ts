@@ -122,7 +122,7 @@ export async function syncDoc(u: SessionUser, id: string, i: z.infer<typeof sync
   };
 }
 
-async function loadYDoc(id: string, upToSeq?: number) {
+export async function loadYDoc(id: string, upToSeq?: number) {
   const sql = db();
   const [d] = await sql<{ snapshot: Buffer; snapshot_seq: string }[]>`select snapshot, snapshot_seq from lib_docs where library_file_id = ${id}`;
   if (!d) throw notFound('문서가 없습니다');

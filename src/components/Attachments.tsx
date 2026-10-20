@@ -1,7 +1,7 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, broadcastRefresh } from './client';
-import { Camera, Download, Eye, FileText, Image as ImageIcon, Link2, Loader2, Paperclip, Trash2 } from 'lucide-react';
+import { Camera, Download, Eye, FileText, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Table2, Trash2, Upload } from 'lucide-react';
 import { isNativeApp } from './native';
 import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
@@ -55,6 +55,20 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   const [linkOpen, setLinkOpen] = useState(false);
   const [link, setLink] = useState<any>({});
   const [view, setView] = useState<any | null>(null); // 사진 크게 보기
+  // 대표 10/20 23:05: 첨부를 업무 안에서 열어 고치고 저장 — docx 는 워크인 문서(공동 편집), xlsx 는 칸 고치기, 나머지는 새 버전 올리기. 버전 기록·되돌리기
+  const [versionsOf, setVersionsOf] = useState<any | null>(null);
+  const [sheetOf, setSheetOf] = useState<any | null>(null);
+  const verRef = useRef<HTMLInputElement>(null); const [verTarget, setVerTarget] = useState<any | null>(null);
+  const editKind = (a: any) => (/\.docx$/i.test(a.file_name ?? '') ? 'doc' : /\.xlsx$/i.test(a.file_name ?? '') ? 'sheet' : 'file');
+  async function openDoc(a: any) {
+    try { const r = await api<{ link: string; created: boolean }>(`/api/attachments/${a.id}/doc`, { body: {} }); if (r.created) toast.ok('워크인 문서로 바꿨습니다 — 같이 고친 뒤 [업무로 저장]'); window.location.href = r.link; } catch (e: any) { toast.error(e.message); }
+  }
+  async function uploadVersion(a: any, file: File | undefined) {
+    if (!file) return; setBusy('새 버전 올리는 중…');
+    try { const st = await api<any>(`/api/attachments/${a.id}/versions`, { body: { fileName: file.name, mimeType: file.type || a.mime_type, size: file.size } });
+      await putFile(st.upload, file); const r = await api<{ version: number }>(`/api/attachments/${a.id}/versions/complete`, { body: { key: st.key, fileName: file.name, mimeType: file.type || a.mime_type } });
+      toast.ok(`v${r.version} 으로 저장했습니다(이전 버전 보관)`); onChange(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } finally { setBusy(''); if (verRef.current) verRef.current.value = ''; }
+  }
   const photos = items.filter(isImage);
   const albumRef = useRef<HTMLInputElement>(null);
 
@@ -131,6 +145,10 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
             {a.kind === 'file' && (
               <button type="button" onClick={() => openFile(a.id, false)} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 내려받기`} title="내려받기" data-testid="att-download"><Download className="size-4" /></button>
             )}
+            {a.kind === 'file' && editKind(a) === 'doc' && canEdit && <button type="button" onClick={() => openDoc(a)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-input border border-accent-200 bg-accent-50 px-2 text-xs font-medium text-accent-700 hover:bg-accent-100" title="Word 파일을 워크인 문서로 열어 요청자·담당자가 같이 고치고 [업무로 저장]" data-testid="att-edit-doc"><PenLine className="size-3.5" />{a.doc_id ? '편집 계속' : '열어서 편집'}</button>}
+            {a.kind === 'file' && editKind(a) === 'sheet' && canEdit && <button type="button" onClick={() => setSheetOf(a)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-input border border-accent-200 bg-accent-50 px-2 text-xs font-medium text-accent-700 hover:bg-accent-100" title="Excel 칸 값을 고쳐 새 버전으로(서식·수식 그대로)" data-testid="att-edit-sheet"><Table2 className="size-3.5" />칸 고치기</button>}
+            {a.kind === 'file' && canEdit && <button type="button" onClick={() => { setVerTarget(a); verRef.current?.click(); }} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 새 버전 올리기`} title="내려받아 고친 파일을 새 버전으로(이전 버전 보관)" data-testid="att-new-version"><Upload className="size-4" /></button>}
+            {a.kind === 'file' && (Number(a.version ?? 1) > 1 || a.doc_id) && <button type="button" onClick={() => setVersionsOf(a)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold text-ink-2 hover:bg-slate-200" title="버전 기록·되돌리기" data-testid="att-versions"><History className="size-3" />v{a.version ?? 1}</button>}
             {(a.created_by === meId || canEdit) && <button onClick={() => remove(a.id)} className="rounded p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" aria-label="첨부 삭제"><Trash2 className="size-4" /></button>}
           </li>
         ))}
@@ -184,7 +202,62 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
         </form>
       </Modal>
       <UploadProgress items={prog} />
+      <input ref={verRef} type="file" className="hidden" onChange={(e) => uploadVersion(verTarget, e.target.files?.[0])} aria-label="새 버전 파일" data-testid="att-version-file" />
+      {versionsOf && <VersionsModal a={versionsOf} canEdit={canEdit} onClose={() => setVersionsOf(null)} onChange={() => { onChange(); broadcastRefresh(); }} />}
+      {sheetOf && <SheetEditModal a={sheetOf} onClose={() => setSheetOf(null)} onSaved={() => { setSheetOf(null); onChange(); broadcastRefresh(); }} />}
     </DropZone>
+  );
+}
+
+const VKIND: Record<string, string> = { original: '원본', upload: '새 파일 올림', doc: '문서 편집 저장', sheet: '칸 고침', restore: '되돌림' };
+function VersionsModal({ a, canEdit, onClose, onChange }: { a: any; canEdit: boolean; onClose: () => void; onChange: () => void }) {
+  const [data, setData] = useState<any | null>(null);
+  const load = () => api<any>(`/api/attachments/${a.id}/versions`).then(setData).catch((e) => toast.error(e.message));
+  useEffect(() => { load(); }, [a.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function restore(v: any) {
+    if (!confirm(`v${v.version}(${v.file_name})으로 되돌릴까요? 지금 파일은 이전 버전으로 남습니다.`)) return;
+    try { await api(`/api/attachments/${a.id}/versions/${v.id}/restore`, { body: {} }); toast.ok('되돌렸습니다'); load(); onChange(); } catch (e: any) { toast.error(e.message); }
+  }
+  return (
+    <Modal open onClose={onClose} title={`버전 기록 — ${a.file_name}`}>
+      {!data ? <p className="text-sm text-ink-2">불러오는 중…</p> : <div className="space-y-2 text-sm" data-testid="att-version-list">
+        <p className="text-xs text-ink-2">현재 v{data.current}. 이전 버전은 그대로 보관되고, 되돌리면 새 버전으로 쌓입니다.{data.docId && <> · <a className="underline" href={`/library/doc/${data.docId}?att=${a.id}`}>워크인 문서 열기</a></>}</p>
+        <ul className="divide-y divide-line">{data.versions.map((v: any) => <li key={v.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="att-version" data-version={v.version}>
+          <b className={cx('tabular-nums', v.version === data.current && 'text-accent-700')}>v{v.version}</b><span className="truncate">{v.file_name}</span>
+          <span className="text-xs text-ink-3">{VKIND[v.kind] ?? v.kind}{v.note ? ` · ${v.note}` : ''} · {v.created_by_name ?? ''} · {fmtDateTime(v.created_at)}</span>
+          <span className="ml-auto flex gap-1"><a href={`/api/attachments/${a.id}/versions/${v.id}/download`} className="rounded-input border border-line px-2 py-0.5 text-xs hover:bg-slate-50">내려받기</a>
+            {canEdit && v.version !== data.current && <button type="button" onClick={() => restore(v)} className="rounded-input border border-line px-2 py-0.5 text-xs hover:bg-slate-50" data-testid="att-version-restore">이 버전으로</button>}</span></li>)}
+          {!data.versions.length && <li className="py-2 text-xs text-ink-3">아직 고친 기록이 없습니다</li>}</ul>
+      </div>}
+    </Modal>
+  );
+}
+/** xlsx 칸 고치기: 값 있는 칸만 표로(수식 칸은 잠금), 바꾼 칸만 저장 → 서식·수식·병합 그대로 새 버전 */
+function SheetEditModal({ a, onClose, onSaved }: { a: any; onClose: () => void; onSaved: () => void }) {
+  const [lay, setLay] = useState<any | null>(null); const [sheet, setSheet] = useState(0); const [edits, setEdits] = useState<Record<string, string>>({}); const [busy, setBusy] = useState(false);
+  useEffect(() => { api<any>(`/api/attachments/${a.id}/sheet`).then(setLay).catch((e) => { toast.error(e.message); onClose(); }); }, [a.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!lay) return <Modal open onClose={onClose} title={a.file_name}><p className="text-sm text-ink-2">불러오는 중…</p></Modal>;
+  const sh = lay.sheets[sheet]; const cells: [string, any][] = Object.entries(sh?.cells ?? {});
+  const keyOf = (ref: string) => `${sh.name}\u0000${ref}`;
+  async function save() {
+    const list = Object.entries(edits).map(([k, value]) => { const [sheetName, cell] = k.split('\u0000'); return { sheet: sheetName, cell, value: value === '' ? null : (Number.isFinite(Number(value)) && value.trim() !== '' && !/^0\d/.test(value) ? Number(value) : value) }; });
+    if (!list.length) { toast.error('바꾼 칸이 없습니다'); return; }
+    setBusy(true);
+    try { const r = await api<any>(`/api/attachments/${a.id}/sheet`, { body: { edits: list } }); toast.ok(`v${r.version} 으로 저장했습니다${r.warnings?.length ? ` (${r.warnings[0]})` : ''}`); onSaved(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title={`칸 고치기 — ${a.file_name}`} wide>
+      <div className="space-y-2 text-sm" data-testid="sheet-edit">
+        <div className="flex flex-wrap items-center gap-2 text-xs">{lay.sheets.map((s: any, i: number) => <button key={s.name} type="button" onClick={() => setSheet(i)} className={cx('rounded-full border px-2 py-0.5', i === sheet ? 'border-accent-300 bg-accent-50 text-accent-700' : 'border-line')}>{s.name}</button>)}
+          <span className="ml-auto text-ink-3">값이 있는 칸만 보입니다. 수식(=) 칸은 바꾸지 않습니다. 서식·병합·인쇄 설정은 그대로.</span></div>
+        <div className="max-h-[60vh] overflow-auto rounded-input border border-line"><table className="w-full text-xs"><thead className="sticky top-0 bg-slate-50 text-left text-ink-3"><tr><th className="px-2 py-1">칸</th><th className="px-2 py-1">값</th></tr></thead>
+          <tbody>{cells.map(([ref, v]) => { const formula = typeof v === 'string' && v.startsWith('='); const k = keyOf(ref); const cur = k in edits ? edits[k] : String(v);
+            return <tr key={ref} className="border-t border-line"><td className="px-2 py-1 font-mono text-ink-2">{ref}</td><td className="px-2 py-0.5">{formula ? <span className="text-ink-3">{String(v)}</span>
+              : lay.canEdit ? <input className={cx(inputCls, 'h-7 py-0 text-xs', k in edits && 'border-accent-400 bg-accent-50/40')} value={cur} onChange={(e) => setEdits({ ...edits, [k]: e.target.value })} aria-label={`${sh.name} ${ref}`} data-testid={`cell-${ref}`} /> : String(v)}</td></tr>; })}
+            {!cells.length && <tr><td colSpan={2} className="px-2 py-3 text-ink-3">값이 있는 칸이 없습니다</td></tr>}</tbody></table></div>
+        {lay.canEdit && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>취소</Button><Button onClick={save} disabled={busy || !Object.keys(edits).length} data-testid="sheet-save">새 버전으로 저장{Object.keys(edits).length ? ` (${Object.keys(edits).length}칸)` : ''}</Button></div>}
+      </div>
+    </Modal>
   );
 }
 

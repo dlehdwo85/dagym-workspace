@@ -2,7 +2,7 @@
 // 대표 결정 10/19: 자료실 '워크인 문서' 공동 편집 1차 — Tiptap + Yjs, 워크인 API 짧은 폴링(외부 유료 서비스 없음),
 // 다른 사람 커서·이름, 보는 사람, 보기/편집 공유, 변경 기록·되돌리기, .docx 내보내기. 휴대폰(앱)도 같은 화면.
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Collaboration from '@tiptap/extension-collaboration';
@@ -22,6 +22,8 @@ type Person = { id: string; name: string; color: string; clientId: number };
 export default function DocPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const att = useSearchParams().get('att'); // 대표 10/20 23:05: 업무 첨부(docx)에서 연 문서 → [업무로 저장] = Word 로 첨부 새 버전
+  const [saving, setSaving] = useState(false);
   const { user } = useSession();
   const [open, setOpen] = useState<Open | null>(null);
   const [err, setErr] = useState<{ status?: number; message: string } | null>(null);
@@ -75,6 +77,7 @@ export default function DocPage() {
         </span>
         <div className="ml-auto flex items-center gap-1">
           {open.canShare && <Button size="sm" variant="secondary" onClick={() => setPanel('share')} data-testid="doc-share"><Share2 />공유</Button>}
+          {att && canEdit && <Button size="sm" onClick={async () => { setSaving(true); try { const r = await api<any>(`/api/attachments/${att}/doc/save`, { body: {} }); toast.ok(`업무 첨부 v${r.version}(${r.fileName})으로 저장했습니다`); } catch (e: any) { toast.error(e.message); } finally { setSaving(false); } }} disabled={saving} title="지금 내용을 Word 파일로 써서 업무 첨부의 새 버전으로 저장(이전 버전 보관)" data-testid="doc-save-task">업무로 저장</Button>}
           <Button size="sm" variant="secondary" onClick={() => setPanel('history')} data-testid="doc-history"><History />기록</Button>
           <a href={`/api/library/docs/${id}/export?format=docx`} className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-sm text-ink-2 hover:bg-slate-50" data-testid="doc-export"><Download className="size-4" />Word</a>
         </div>
