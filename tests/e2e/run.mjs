@@ -39,6 +39,7 @@ import { calEditFlow } from './cal-edit.step.mjs';
 import { teamChipsFlow } from './team-chips.step.mjs';
 import { offboardFlow } from './offboard.step.mjs';
 import { messengerV3 } from './messengerV3.step.mjs';
+import { platformAdd } from './platformAdd.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -2322,6 +2323,7 @@ await step('로컬 10/20 캘린더 재발: 빠른 입력 첫 화면 색 줄 → 
 await step('대표 10/20 4) 팀별 보기: 업무 화면 팀 칩(볼 수 있는 팀만) → 칩으로 그 팀 업무만 → 메뉴 권한 \'팀 업무 보기\' 지정 팀 → 직원 화면에 그 팀 칩', () => teamChipsFlow({ browser, owner, ctx, sql, BASE, SHOTS, login }));
 await step('대표 10/20 7) 퇴사 처리·인수인계: 창에서 퇴사일·받을 사람·항목 개수 → 퇴사(날짜)·접힘·인수인계·복직 버튼 → 로그인 차단·업무 이전', () => offboardFlow({ owner, ctx, BASE, SHOTS }));
 await step('메신저 1차(대표 10/20): 새 대화 다중 선택·그룹 자동 이름·방 정보(초대·내보내기)·시스템 메시지·안 읽은 수(이름)·공지 바·전달', () => messengerV3({ owner, ctx, BASE, SHOTS }));
+await step('대표 10/20 ① 플랫폼 운영 [고객사 추가]: 회사명·업종 여러 개·규모·체험 기간·시작 공간·대표 → 초대 링크 → 회사 관리 초대 대기·공간·메모·감사 기록', () => platformAdd({ owner, BASE, SHOTS, sql }));
 
 await browser.close();
 srv.proc.kill();

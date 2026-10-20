@@ -1,9 +1,12 @@
 'use client';
 import { useState } from 'react';
-import { Eye, KeyRound, Lock, LockOpen, Search, ShieldOff, Trash2 } from 'lucide-react';
+import { Eye, KeyRound, Lock, LockOpen, Plus, Search, ShieldOff, Trash2 } from 'lucide-react';
+import { INDUSTRIES } from '@/lib/industries';
 import { api, useApi } from './client';
 import { fmtBytes } from './usage';
-import { Button, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
+import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
+const SIZE_LABEL: Record<string, string> = { '1': '혼자', '2-10': '2~10명', '11-30': '11~30명', '31-100': '31~100명', '100+': '100명 넘게' };
+const SPACE_LABEL: Record<string, string> = { sales: '영업', marketing: '마케팅' };
 
 const cell = 'px-2 py-1.5';
 const STATUS: Record<string, string> = { active: '사용 중', blocked: '정지', deleted: '삭제' };
@@ -16,10 +19,12 @@ export function PlatformTenants() {
   const [status, setStatus] = useState('');
   const list = useApi<{ tenants: any[] }>(`/api/platform/tenants?q=${encodeURIComponent(query)}&status=${status}`, [query, status]);
   const [open, setOpen] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false); // 대표 10/20 ① [고객사 추가]
   return (
     <section className="rounded-card border border-line bg-white shadow-card" data-testid="platform-company-list">
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <h2 className="text-sm font-semibold">회사 관리 {list.data && <span className="text-xs font-normal text-ink-3">{list.data.tenants.length}곳</span>}</h2>
+        <Button size="sm" onClick={() => setAdding(true)} data-testid="platform-add-company"><Plus />고객사 추가</Button>
         <form className="ml-auto flex gap-1.5" onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }}>
           <input className={cx(inputCls, 'h-8 w-48 py-1 text-xs')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="회사·대표 이메일·id" aria-label="회사 찾기" />
           <Button size="sm" type="submit" variant="secondary"><Search />찾기</Button>
@@ -54,6 +59,7 @@ export function PlatformTenants() {
         </table>
       </div>
       {open && <TenantDetail id={open} onClose={() => { setOpen(null); list.reload(); }} />}
+      {adding && <NewTenant onClose={() => setAdding(false)} onDone={(id) => { setAdding(false); list.reload(); setOpen(id); }} />}
     </section>
   );
 }
@@ -127,6 +133,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             ))}
           </ul>
         </div>
+        {!internal && <TenantOps id={id} t={t} ownerInvite={d.data.ownerInvite} run={run} />}
         {!internal && (
           <div className="flex flex-wrap items-center gap-2 rounded-input border border-line p-3">
             <span className="min-w-0 flex-1 text-xs text-ink-2">지원 모드(읽기 전용 30분, 모든 조회 기록) — {t.support_consent_at ? <b className="text-emerald-700">고객 허용됨</b> : <b>고객이 허용하지 않음</b>}</span>
@@ -149,6 +156,89 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
         )}
       </div>
+    </Modal>
+  );
+}
+
+/** 대표 10/20 ① 고객사 상세 — 대표 초대 상태·공간·메모·감사 기록 (대신 보기 없음) */
+function TenantOps({ id, t, ownerInvite, run }: { id: string; t: any; ownerInvite: { pending: boolean; expiresAt?: string | null; expired?: boolean }; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+  const [memo, setMemo] = useState<string>(t.platform_memo ?? '');
+  const [showAudit, setShowAudit] = useState(false);
+  const audit = useApi<{ logs: any[] }>(showAudit ? `/api/platform/tenants/${id}/audit` : null, [showAudit]);
+  const spaces: string[] = (t.spaces ?? []).filter((x: string) => x !== 'work');
+  const [link, setLink] = useState<string | null>(null);
+  return (
+    <div className="space-y-2 rounded-input border border-line p-3" data-testid="company-ops">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-ink-2">업종 {(t.industries ?? []).length ? (t.industries as string[]).join('·') : '-'} · 규모 {SIZE_LABEL[t.size_band] ?? '-'}</span>
+        {ownerInvite.pending && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-800" data-testid="company-invite-pending">대표 초대 대기{ownerInvite.expired ? '(기한 지남)' : ownerInvite.expiresAt ? ` ~${String(ownerInvite.expiresAt).slice(0, 10)}` : ''}</span>}
+        {ownerInvite.pending && <Button size="sm" variant="secondary" data-testid="company-reinvite" onClick={async () => { const r = await run(() => api(`/api/platform/tenants/${id}/reinvite`, { body: {} }), '새 초대 링크를 만들었습니다'); if (r?.inviteLink) setLink(r.inviteLink); }}>초대 메일 다시 보내기</Button>}
+        {link && <a className="underline" href={link} data-testid="company-invite-link">{link}</a>}
+      </div>
+      <div className="flex flex-wrap items-center gap-3 text-xs" data-testid="company-spaces">
+        <span className="text-ink-2">공간: 업무(항상)</span>
+        {(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={spaces.includes(sp)} data-testid={`company-space-${sp}`}
+          onChange={(e) => run(() => api(`/api/platform/tenants/${id}/spaces`, { method: 'PUT', body: { spaces: e.target.checked ? [...spaces, sp] : spaces.filter((x) => x !== sp) } }), `${SPACE_LABEL[sp]} 공간을 ${e.target.checked ? '켰' : '껐'}습니다`)} />{SPACE_LABEL[sp]}</label>)}
+      </div>
+      <div className="flex items-start gap-2">
+        <textarea className={cx(inputCls, 'min-h-[56px] flex-1 text-xs')} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="운영 메모(계약·담당자·특이사항) — 운영자만 봅니다" aria-label="운영 메모" data-testid="company-memo" />
+        <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/platform/tenants/${id}/memo`, { method: 'PUT', body: { memo } }), '메모를 저장했습니다')} data-testid="company-memo-save">메모 저장</Button>
+      </div>
+      <div>
+        <button type="button" className="text-xs text-ink-2 underline" onClick={() => setShowAudit((v) => !v)} data-testid="company-audit-toggle">{showAudit ? '감사 기록 닫기' : '감사 기록 보기(최근 100건)'}</button>
+        {showAudit && (
+          <ul className="mt-1 max-h-48 divide-y divide-line overflow-y-auto rounded-input border border-line text-xs" data-testid="company-audit">
+            {(audit.data?.logs ?? []).map((l) => <li key={l.id} className="flex gap-2 px-2 py-1"><span className="shrink-0 text-ink-3">{fmtDateTime(l.created_at)}</span><span className="shrink-0 font-medium">{l.actor_name ?? '-'}{l.by_platform ? '(운영)' : ''}</span><span className="min-w-0 flex-1 truncate">{l.action}{l.target_type ? ` · ${l.target_type}` : ''}{l.detail && Object.keys(l.detail).length ? ` · ${JSON.stringify(l.detail).slice(0, 120)}` : ''}</span></li>)}
+            {audit.data && !audit.data.logs.length && <li className="px-2 py-2 text-ink-3">기록이 없습니다</li>}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 대표 10/20 ① [고객사 추가]: 회사명·업종(여러 개)·규모·대표 이름/이메일 → 대표에게 초대 메일, 요금제(비우면 체험)·체험 기간·시작 공간·메모 */
+function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
+  const plans = useApi<{ plans: { code: string; name: string; active: boolean }[] }>('/api/platform');
+  const [f, setF] = useState({ company: '', industries: [] as string[], size: '2-10', ownerName: '', ownerEmail: '', planCode: 'trial', trialDays: 14, spaces: [] as string[], memo: '' });
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ tenant: string; inviteLink: string; mail: 'sent' | 'dev' | 'failed' } | null>(null);
+  const toggle = (k: 'industries' | 'spaces', v: string) => setF({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] });
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setBusy(true);
+    try {
+      const r = await api('/api/platform/tenants', { body: { ...f, planCode: f.planCode || 'trial', trialDays: f.planCode === 'trial' ? f.trialDays : undefined, memo: f.memo || undefined } });
+      setResult(r); toast.ok(r.mail === 'sent' ? `${f.company} 회사를 만들고 ${f.ownerEmail} 로 초대 메일을 보냈습니다` : `${f.company} 회사를 만들었습니다 — 초대 링크를 직접 전달하세요`);
+    } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title="고객사 추가">
+      {result ? (
+        <div className="space-y-2 text-sm" data-testid="new-company-done">
+          <p><b>{f.company}</b> 회사가 만들어졌습니다 (id {result.tenant}). 대표 {f.ownerName}({f.ownerEmail})이 초대 링크에서 비밀번호를 정하면 바로 시작합니다 — 운영자가 대신 로그인하는 기능은 없습니다.</p>
+          <p className="text-xs">{result.mail === 'sent' ? '초대 메일을 보냈습니다. 같은 링크를 직접 전달해도 됩니다: ' : result.mail === 'failed' ? '초대 메일 발송에 실패했습니다(메일 설정 확인) — 아래 링크를 직접 전달하세요: ' : '메일이 설정되지 않아 링크를 직접 전달해야 합니다: '}<a className="underline" href={result.inviteLink} data-testid="new-company-link">{result.inviteLink}</a></p>
+          <div className="flex justify-end"><Button onClick={() => onDone(result.tenant)} data-testid="new-company-open">회사 관리 열기</Button></div>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="space-y-3 text-sm" data-testid="new-company">
+          <Field label="회사명"><input className={inputCls} value={f.company} onChange={(e) => setF({ ...f, company: e.target.value })} required maxLength={60} data-testid="new-company-name" /></Field>
+          <Field label="업종(여러 개 가능 · 첫 번째가 주 업종)">
+            <div className="flex flex-wrap gap-1" data-testid="new-company-industries">{INDUSTRIES.map((k) => <button key={k} type="button" onClick={() => toggle('industries', k)} aria-pressed={f.industries.includes(k)}
+              className={cx('rounded-full border px-2.5 py-0.5 text-xs', f.industries.includes(k) ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2')}>{k}{f.industries[0] === k && f.industries.length > 1 ? ' · 주' : ''}</button>)}</div>
+          </Field>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="규모"><select className={inputCls} value={f.size} onChange={(e) => setF({ ...f, size: e.target.value })} data-testid="new-company-size">{Object.entries(SIZE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+            <Field label="요금제"><select className={inputCls} value={f.planCode} onChange={(e) => setF({ ...f, planCode: e.target.value })} data-testid="new-company-plan"><option value="trial">체험(카드 없음)</option>{(plans.data?.plans ?? []).filter((p) => p.active && p.code !== 'trial').map((p) => <option key={p.code} value={p.code}>{p.name}({p.code})</option>)}</select></Field>
+            {f.planCode === 'trial' && <Field label="체험 기간(일)"><input type="number" min={1} max={90} className={inputCls} value={f.trialDays} onChange={(e) => setF({ ...f, trialDays: Number(e.target.value) })} data-testid="new-company-trial-days" /></Field>}
+            <Field label="시작 공간(업무는 항상)"><div className="flex items-center gap-3 py-2 text-xs">{(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={f.spaces.includes(sp)} onChange={() => toggle('spaces', sp)} data-testid={`new-company-space-${sp}`} />{SPACE_LABEL[sp]}</label>)}</div></Field>
+            <Field label="대표 이름"><input className={inputCls} value={f.ownerName} onChange={(e) => setF({ ...f, ownerName: e.target.value })} required maxLength={50} data-testid="new-company-owner" /></Field>
+            <Field label="대표 이메일(초대 메일 받을 주소)"><input type="email" className={inputCls} value={f.ownerEmail} onChange={(e) => setF({ ...f, ownerEmail: e.target.value })} required data-testid="new-company-email" /></Field>
+          </div>
+          <Field label="운영 메모(선택)"><textarea className={cx(inputCls, 'min-h-[56px]')} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} maxLength={2000} data-testid="new-company-memo" /></Field>
+          <p className="text-xs text-ink-3">만들면 대표에게 초대 메일(7일 유효)이 갑니다. 비밀번호는 대표가 직접 정하고, 운영자가 대신 들어가 보는 기능은 없습니다(지원 모드는 고객사가 허용한 때만).</p>
+          <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy} data-testid="new-company-go">회사 만들기 · 초대 메일</Button></div>
+        </form>
+      )}
     </Modal>
   );
 }
