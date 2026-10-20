@@ -1,2 +1,11 @@
 User-agent: *
+Allow: /$
+Allow: /welcome
+Allow: /signup
+Allow: /login
+Allow: /terms
+Allow: /privacy
+Allow: /account-deletion
+Allow: /landing/
 Disallow: /
+Sitemap: https://work-in.dev/sitemap.xml

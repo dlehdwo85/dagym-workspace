@@ -14,7 +14,7 @@ export async function BizFooter({ className }: { className?: string }) {
     <footer className={['border-t border-line bg-white px-4 py-6 text-center text-[11px] leading-5 text-ink-3', className].filter(Boolean).join(' ')} data-testid="biz-footer">
       <p className="mx-auto max-w-3xl">{items.filter(([, v]) => v).map(([k, v], n) => <span key={k}>{n > 0 && <span aria-hidden> · </span>}{k} {v}</span>)}</p>
       <p className="mt-1.5">
-        <Link href="/terms" className="underline">이용약관</Link> · <Link href="/privacy" className="font-semibold underline">개인정보처리방침</Link> · <Link href="/ai-notice" className="underline">AI 이용 안내</Link>
+        <Link href="/terms" className="underline">이용약관</Link> · <Link href="/privacy" className="font-semibold underline">개인정보처리방침</Link> · <Link href="/account-deletion" className="underline">계정 삭제</Link> · <Link href="/ai-notice" className="underline">AI 이용 안내</Link>
       </p>
     </footer>
   );

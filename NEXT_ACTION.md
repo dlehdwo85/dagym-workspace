@@ -1352,6 +1352,13 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-20 워크인 소개 사이트(대표 16:45) [배포확인요청]
+- `/`(로그인 전, 앱 아님) = 새 랜딩 `src/app/welcome/page.tsx`: H1 "업무도, 영업도, 마케팅도 한 화면에서" · "5명까지 무료 · 카드 등록 없음" · [무료로 시작](/signup) · [앱 다운로드](#app: Google Play 링크, App Store 는 `NEXT_PUBLIC_APPSTORE_URL` 넣기 전까지 '심사 중') · 홈 그림 · 특징 4 · 세 공간(업무·영업·마케팅, 그림 + 핵심 3줄) · AI 비서(예시 대화 3) · 도입 3단계 · 요금(5명 무료 카드 하나, 6명 이상은 문의) · 앱 · 문의(dagym-in@naver.com, `COMPANY_PHONE` 있으면 전화 버튼) · 푸터(사업자 정보 + 이용약관·개인정보·계정 삭제·AI 안내).
+- 검색·공유: JSON-LD(Organization + SoftwareApplication, 무료), OG/Twitter(`/landing/og.png` 1200×630, `NEXT_PUBLIC_SITE_URL` 기본 https://work-in.dev), 랜딩만 `robots index` (앱은 noindex 그대로), `public/robots.txt` 공개 화면만 허용, `/sitemap.xml`.
+- 이벤트: UTM 첫 방문 30일 기억(가입 회사에 남음, 기존) · GA4 설정돼 있으면 랜딩 페이지 보기 + 버튼 클릭(`landing_cta`: start/app/play/mail, `tel`) · 가입 완료 sign_up/CompleteRegistration 은 가입 화면 동의 브라우저만(기존) · 전화 클릭 Meta Contact 는 광고 동의 있을 때만. 업무 화면엔 태그 없음.
+- `www.work-in.dev` → `work-in.dev` 308(middleware). 도메인 연결·DNS·Vercel 도메인 추가는 로컬.
+- 그림: `node tests/e2e/landing-shots.mjs`(빌드 뒤) — 샘플 회사(실제 데이터 아님)로 홈·업무·캘린더·영업 홈·마케팅 홈·OG 를 `public/landing/` 에 다시 만든다. site-v2 사진이 비공개 저장소에 있으면 로컬이 같은 이름으로 바꿔 넣으면 됨.
+
 ## 2026-10-20 영업 S2 2차 — 리드 폼·상세·목록·제안·계약·ROI (감사 1-13~1-16) [배포확인요청] (migration 131)
 - 새 리드 13칸(거래처명·단계·우선순위·시설·지역·규모·예상매출·고객 담당자·연락처·이메일·홈페이지·다음 연락일·메모 + 관리자는 담당 지정). 이름을 치면 비슷한 거래처(앞 4자, 공백·괄호 무시) 미리 보기, 만들 때 있으면 한 번 막고 [그래도 만들기]. `GET /api/sales/leads/similar?name=`.
 - 상세: 탭 = 정보·상담·업무·타임라인·제안·계약·시점·입찰·관심사업. 정보 수정(시설·지역·규모·예상매출·연락처·이메일·홈페이지) 접힘, 상담 입력에 다음 연락 예정일·다음 액션·고객 요청 → 리드 다음 연락일·영업 업무 마감이 같이 바뀜. 업무 탭 = 워크인 업무(lead_id, 자동 표시) + [업무 추가](`POST /api/sales/leads/{id}/tasks`, 수동 업무는 자동 동기화가 건드리지 않음) + 원본 업무 접힘. 타임라인 = 상담·상태 변경·업무·제안·계약 최신순. 제안·계약 탭에서 바로 등록. 리드 삭제 = 사유 필수·소프트(deleted_at)·감사(sales.lead_delete)·열린 영업 업무 완료, 관리자 또는 담당만(`DELETE /api/sales/leads/{id}`). 담당 변경은 감사(sales.lead_owner).
