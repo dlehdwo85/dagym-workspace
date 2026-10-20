@@ -54,24 +54,33 @@ const firstSeen = (r: any) => {
   const d = new Date(String(v));
   return /T|\s\d{2}:/.test(String(v)) && !Number.isNaN(d.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d) : String(v).slice(0, 10);
 };
+const attachmentsOf = (r: any) => { const a = pick(r, 'attachment_urls', 'attachments'); return Array.isArray(a) ? a : typeof a === 'string' && a.startsWith('[') ? (() => { try { return JSON.parse(a); } catch { return []; } })() : a ? [a] : []; };
+/** S1-3: 시설 규모 facility_scale + facility_scale_unit(㎡·평·세대 등) */
+const scaleOf = (r: any) => { const v = pick(r, 'facility_scale', 'scale', 'size', 'area'); if (v === null || v === undefined || v === '') return null; const u = pick(r, 'facility_scale_unit', 'scale_unit'); return u ? `${v}${u}` : v; };
+/** 입주·준공 뒤 지난 날수(KST 오늘 기준, 미래면 null) */
+const daysSince = (d: string | null) => { if (!d) return null; const n = Math.floor((Date.parse(today()) - Date.parse(d)) / 864e5); return Number.isFinite(n) && n >= 0 ? n : null; };
 const notice = (r: any) => ({ id: r.__id, title: pick(r, 'title', 'notice_title', 'bid_name', 'name') ?? '(제목 없음)', agency: pick(r, 'issuer', 'agency', 'org_name', 'demand_agency', 'organization', 'buyer'),
   region: pick(r, 'region'), posted: firstSeen(r), noticeDate: day(pick(r, 'posted_date', 'posted_at', 'notice_date', 'published_at', 'bid_notice_date')), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'),
-  close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')), source: pick(r, 'source', 'source_code'), url: pick(r, 'source_url', 'url', 'detail_url', 'link'),
-  attachments: (() => { const a = pick(r, 'attachment_urls'); return Array.isArray(a) ? a : typeof a === 'string' && a.startsWith('[') ? (() => { try { return JSON.parse(a); } catch { return []; } })() : a ? [a] : []; })(),
+  close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')), source: pick(r, 'source_type', 'source', 'source_code'), url: pick(r, 'source_url', 'url', 'detail_url', 'link'),
+  attachments: attachmentsOf(r),
   fit: pick(r, 'fit_score'), status: pick(r, 'current_status', 'status'), amount: pick(r, 'amount', 'budget', 'estimated_price', 'base_amount', 'presumed_price'), related: r.related === true || r.related === 'true',
   // 영업관리 입찰 카드 칸(SALES_SCREEN_INVENTORY 2-5): 사업·분류·출처·단지·세대·업종·낙찰·키워드·전화·DB 등록·오늘 등록
-  business: businessOf(r), category: pick(r, 'classification', 'category_label', 'lead_class'), sourceLabel: SOURCE_LABEL[String(pick(r, 'source', 'source_code') ?? '').toLowerCase()] ?? pick(r, 'source', 'source_code'),
-  complex: pick(r, 'complex_name', 'facility_name', 'apartment_name'), households: pick(r, 'households', 'total_households', 'units'), industry: pick(r, 'industry', 'business_type', 'work_type'),
-  winner: pick(r, 'winner_name', 'award_company', 'successful_bidder'), awardAmount: pick(r, 'award_amount', 'winning_amount', 'contract_amount'), awardDate: day(pick(r, 'award_date', 'opened_at')),
+  business: businessOf(r), category: pick(r, 'classification', 'category_label', 'lead_class'), sourceLabel: SOURCE_LABEL[String(pick(r, 'source_type', 'source', 'source_code') ?? '').toLowerCase()] ?? pick(r, 'source_type', 'source', 'source_code'),
+  complex: pick(r, 'complex_name', 'facility_name', 'apartment_name'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), industry: pick(r, 'industry', 'business_type', 'work_type', 'notice_type', 'bid_category'),
+  winner: pick(r, 'winner_name', 'award_company', 'successful_bidder'), awardAmount: pick(r, 'winner_amount', 'award_amount', 'winning_amount', 'contract_amount'), awardDate: day(pick(r, 'award_date', 'opened_at')),
   keywords: (() => { const k = pick(r, 'matched_keywords', 'keywords', 'keyword_hits'); return Array.isArray(k) ? k.join(', ') : k; })(), phone: pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone'),
   todayNew: firstSeen(r) === new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()),
-  // S1-4(로컬 10/20): 원본 상세 화면 정보 칸(SALES_SCREEN_INVENTORY 2-5 상세) — 추정가격·계약방식·계약기간·공고번호·주소·팩스, 대표 판단·영업 포인트·부족 자격, 접힘 '과업·참가자격·요건 상세' 8칸. 칸 이름은 원본 스키마 1:1(S1-3)에서 다시 맞춤
+  // S1-4(로컬 10/20): 원본 상세 화면 정보 칸(SALES_SCREEN_INVENTORY 2-5 상세) — 추정가격·계약방식·계약기간·공고번호·주소·팩스, 대표 판단·영업 포인트·부족 자격, 접힘 '과업·참가자격·요건 상세' 8칸
+  // S1-3(로컬 10/20): 감사(AUDIT_SALES_MIGRATION)에 적힌 원본 실제 칸을 후보 맨 앞에 — source_type(9값)·household_count·winner_amount·notice_type·fit_business. 나머지 추측 칸은 원본 스키마 복사(docs/sales-src)가 오면 다시 맞춤
+  vendorRecruit: /vendor_recruit|협력사/.test(String(pick(r, 'source_type', 'notice_type', 'bid_category', 'source') ?? '')),
   noticeNo: pick(r, 'source_external_id', 'notice_no', 'bid_no', 'external_id'), noticeType: pick(r, 'notice_type', 'bid_category'), fitBusiness: pick(r, 'fit_business'),
   estimated: pick(r, 'estimated_amount', 'estimated_price', 'presumed_price', 'base_amount'), contractMethod: pick(r, 'contract_method', 'award_method', 'bid_system', 'contract_type'), contractPeriod: pick(r, 'contract_period', 'contract_term', 'service_period'),
   address: pick(r, 'office_address', 'address'), fax: pick(r, 'office_fax', 'fax'), salesPoint: pick(r, 'sales_point'), qualificationGap: pick(r, 'qualification_gap'),
   detail: { tasks: pick(r, 'main_tasks', 'scope_of_work', 'tasks'), qualification: pick(r, 'qualification', 'participation_requirements', 'bid_qualification'), performance: pick(r, 'performance_requirements', 'track_record'),
     regionLimit: pick(r, 'region_restriction', 'region_limit'), license: pick(r, 'license_requirements', 'license'), joint: pick(r, 'joint_bid', 'subcontract', 'consortium'), briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting'), presentation: pick(r, 'proposal_presentation', 'presentation') } });
-const SOURCE_LABEL: Record<string, string> = { kapt: 'K-apt', 'k-apt': 'K-apt', g2b: '나라장터', nara: '나라장터', g2b_pre: '나라장터 사전규격', nuri: '누리장터', lh: 'LH', lh_pre: 'LH 사전규격', defense: '국방', d2b: '국방', onbid: '온비드 임대', vendor: '협력사 모집' };
+// S1-3: 원본 source_type 9값(kapt_bid·g2b_bid·nuri_bid·g2b_prespec·lh_bid·lh_prespec·d2b_bid·onbid_lease·vendor_recruit) + 예전 짧은 코드
+const SOURCE_LABEL: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집',
+  kapt: 'K-apt', 'k-apt': 'K-apt', g2b: '나라장터', nara: '나라장터', g2b_pre: '나라장터 사전규격', nuri: '누리장터', lh: 'LH', lh_pre: 'LH 사전규격', defense: '국방', d2b: '국방', onbid: '온비드 임대', vendor: '협력사 모집' };
 /** 진행 중 입찰(SALES_SCREEN_INVENTORY 2-5·143행) — 현황 숫자와 입찰 '진행 중' 탭이 같은 기준: 관련 공고 · 마감·취소·낙찰·유찰 아님 · KST 마감일 ≥ 오늘(마감일 없으면 진행으로)
  * · 사전규격(입찰 예정)은 빼고 · 작업 상태 미참여·대상아님은 뺀다. 원본 상태 문구가 '공고중'만이 아니어서(운영 10/19 진행 중 0건) 닫힌 상태만 거른다 */
 const CLOSED_NOTICE = /마감|종료|취소|낙찰|유찰|개찰완료|closed|cancel|award|expired|done/i;
@@ -96,8 +105,8 @@ export function isOpenBid(n: { related?: boolean; status?: unknown; close?: stri
 }
 /** 사업 배지: 다짐(보라)·하이링크(파랑)·둘 다(진파랑) — 원본 칸(business_line·related_business·target_business 등)에서 */
 function businessOf(r: any) {
-  const v = JSON.stringify([pick(r, 'business', 'business_line', 'related_business', 'target_business', 'brand', 'business_categories')]).toLowerCase();
-  const dg = /dagym|다짐/.test(v), hl = /hilink|hi-link|하이링크/.test(v);
+  const v = JSON.stringify([pick(r, 'fit_business', 'business', 'business_line', 'related_business', 'target_business', 'brand', 'business_categories')]).toLowerCase(); // S1-3: 원본 칸 fit_business
+  const dg = /dagym|다짐|both|all/.test(v), hl = /hilink|hi-link|하이링크|both|all/.test(v);
   return dg && hl ? 'both' : dg ? 'dagym' : hl ? 'hilink' : null;
 }
 
@@ -226,7 +235,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본)
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, raw: r }; })
       .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
-        && (tab !== 'today' || n.posted === today()) && (tab !== 'closing' || n.close === today()))
+        && (tab !== 'today' || n.posted === today()) && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit))
       .sort((a, b) => tab === 'open' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
     return { ...meta, tab, total: N.length, items };
   }
@@ -237,23 +246,28 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const BW = new Map((await prog('opportunity_work')).filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w]));
     if (tab === 'buildings') return { ...meta, tab, items: (await rows('global', 'building_sales_pipeline')).filter((r) => hit(r) && dayOk(r)).map((r) => ({ id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
       work: BW.get(String(r.id ?? r.__id)) ? { status: pick(BW.get(String(r.id ?? r.__id)), 'status'), memo: pick(BW.get(String(r.id ?? r.__id)), 'memo', 'note'), next: day(pick(BW.get(String(r.id ?? r.__id)), 'next_date', 'next_action_date')), leadId: BW.get(String(r.id ?? r.__id))?.lead_id ?? null } : null,
-      address: pick(r, 'address', 'location'), households: pick(r, 'households', 'total_households', 'units'), start: day(pick(r, 'sales_start_date', 'start_date', 'notice_date')), status: pick(r, 'status', 'stage'),
+      // S1-3: 원본 칸 current_stage·sales_priority·household_count·source_url·attachment_urls 먼저
+      address: pick(r, 'address', 'location'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), start: day(pick(r, 'sales_start_date', 'start_date', 'notice_date')), status: pick(r, 'current_stage', 'status', 'stage'),
+      url: pick(r, 'source_url', 'url', 'detail_url'), attachments: attachmentsOf(r), estimated: pick(r, 'is_estimated', 'date_estimated', 'estimated') === true || pick(r, 'is_estimated', 'date_estimated', 'estimated') === 'true',
       // 영업관리 2-7 칸 순서: 승인일·착공·준공(예정)·입주(예정)·세대수·시행사·시공사·영업 시작·제안 시작·운영사 선정 예상
-      kind: pick(r, 'building_type', 'type', 'kind'), region: pick(r, 'region', 'sido'), priority: pick(r, 'priority'),
+      kind: pick(r, 'building_type', 'type', 'kind'), region: pick(r, 'region', 'sido'), priority: pick(r, 'sales_priority', 'priority'),
       dates: [['승인일', day(pick(r, 'approval_date', 'approved_at'))], ['착공', day(pick(r, 'construction_start_date', 'start_construction_date'))], ['준공(예정)', day(pick(r, 'completion_date', 'expected_completion_date'))],
-        ['입주(예정)', day(pick(r, 'move_in_date', 'expected_move_in_date'))], ['세대수', pick(r, 'households', 'total_households', 'units')], ['시행사', pick(r, 'developer', 'executor')], ['시공사', pick(r, 'builder', 'constructor', 'contractor')],
+        ['입주(예정)', day(pick(r, 'move_in_date', 'expected_move_in_date'))], ['세대수', pick(r, 'household_count', 'households', 'total_households', 'units')], ['시행사', pick(r, 'developer', 'executor')], ['시공사', pick(r, 'builder', 'constructor', 'contractor')],
         ['영업 시작', day(pick(r, 'sales_start_date', 'start_date'))], ['제안 시작', day(pick(r, 'proposal_start_date'))], ['운영사 선정 예상', day(pick(r, 'operator_selection_date', 'expected_operator_selection'))]],
       firstSeen: firstSeen(r), raw: r })) };
     if (tab === 'facilities') {
       const P = new Map((await prog('operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
       const items = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)', address: pick(r, 'address', 'road_address'), score: Number(pick(r, 'score', 'priority_score') ?? 0) || null,
-          lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'use_approval_date', 'completed_at', 'move_in_date')),
+          lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'completion_date', 'use_approval_date', 'completed_at', 'move_in_date')),
           contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null), leadId: p?.lead_id ?? null,
           // 영업관리 2-8 한 줄 순서: 판정 · 유형·지역·세대·규모·현 위탁사 · 주소 · 관리사무소 전화 · 부대시설 · DB 등록 · 준공·입주 · 다음 연락 · 최근 기록 · 다음 조치
-          verdict: pick(r, 'verdict', 'judgment', 'stage_label', 'opportunity_label'), households: pick(r, 'households', 'total_households', 'units'), scale: pick(r, 'scale', 'size', 'area'),
+          // S1-3: 원본 칸 household_count·facility_scale(+facility_scale_unit)·completion_date, 다음 조치는 회사 진행(__progress.next_action) → 수집기 제안(etl_suggested_next_action) 순, 최근 기록 notes
+          verdict: pick(r, 'verdict', 'judgment', 'stage_label', 'opportunity_label'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), scale: scaleOf(r),
           operator: pick(r, 'current_operator', 'operator', 'management_company'), phone: pick(r, 'office_phone', 'management_phone', 'phone'), amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
-          firstSeen: firstSeen(r), moveIn: day(pick(r, 'move_in_date', 'move_in_start')), lastNote: p?.last_note ?? p?.memo ?? null, nextAction: pick(r, 'next_action', 'recommended_action'), raw: r }; })
+          firstSeen: firstSeen(r), moveIn: day(pick(r, 'move_in_date', 'move_in_start')), lastNote: p?.notes ?? p?.last_note ?? p?.memo ?? null,
+          nextAction: p?.next_action ?? pick(r, 'etl_suggested_next_action', 'next_action', 'recommended_action'), nextActionFrom: p?.next_action ? '진행 기록' : pick(r, 'etl_suggested_next_action') ? '수집기 제안' : null,
+          elapsedDays: daysSince(day(pick(r, 'move_in_date', 'move_in_start')) ?? day(pick(r, 'completion_date', 'use_approval_date', 'completed_at'))), raw: r }; })
         .sort((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))).slice(0, 300);
       return { ...meta, tab, items };
     }
@@ -261,10 +275,11 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       const P = new Map((await prog('vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
       return { ...meta, tab, items: (await rows('global', 'vendor_registrations')).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)', division: pick(r, 'category', 'division', 'kind'), rank: pick(r, 'rank_label', 'rank'), notice: pick(r, 'notice_title', 'title', 'notice'),
-          url: pick(r, 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null), leadId: p?.lead_id ?? null,
+          url: pick(r, 'recruit_url', 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null), leadId: p?.lead_id ?? null,
           // 영업관리 2-9 카드: 모집 공지 공개 여부·모집 시기·등록 요건·공동인증서·비고·링크
-          open: pick(r, 'recruit_open', 'notice_open', 'is_open'), period: pick(r, 'recruit_period', 'period'), requirement: pick(r, 'requirements', 'registration_requirements'), cert: pick(r, 'certificate', 'joint_certificate'),
-          note: pick(r, 'note', 'remark'), applyUrl: pick(r, 'apply_url', 'registration_url'), portalUrl: pick(r, 'portal_url'), homepage: pick(r, 'homepage', 'website'), firstSeen: firstSeen(r), raw: r }; }) };
+          // S1-3: 원본 칸 recruit_visibility·recruit_timing·cert_required·register_url·recruit_url 먼저
+          open: pick(r, 'recruit_visibility', 'recruit_open', 'notice_open', 'is_open'), period: pick(r, 'recruit_timing', 'recruit_period', 'period'), requirement: pick(r, 'requirements', 'registration_requirements', 'register_requirements'), cert: pick(r, 'cert_required', 'certificate', 'joint_certificate'),
+          note: pick(r, 'notes', 'note', 'remark'), applyUrl: pick(r, 'register_url', 'apply_url', 'registration_url'), portalUrl: pick(r, 'portal_url'), homepage: pick(r, 'homepage', 'website'), firstSeen: firstSeen(r), raw: r }; }) };
     }
     throw notFound();
   }
