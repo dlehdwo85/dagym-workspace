@@ -87,8 +87,19 @@ describe('V41 4-2 마케팅', () => {
     assert.deepEqual(pub.publishJobs.map((j) => [j.provider, j.status, j.version, j.permalink]), [['manual', 'done', 3, 'https://instagram.com/p/x']], '⑤-1 수동 게시도 게시 기록');
     assert.equal((await st.req('POST', `/api/marketing/contents/${id}/publish`, { url: 'https://instagram.com/p/y' })).status, 409, '게시 확인은 한 번');
     // 블로그 채널 + 네이버 블로그 주소 = 도우미 게시 기록
-    const blog = await ctx.owner.ok('POST', '/api/marketing/contents', { title: '블로그 글', channel: 'blog', body: '첫 문단\n\n둘째 문단', mediaIds: [] }); // 블로그는 사진 없이도 승인
-    await ctx.owner.ok('POST', `/api/marketing/contents/${blog.id}/decide`, { version: 1, decision: 'approve' });
+    // 대표 10/20 18:45 ③: 블로그는 표지+본문 사진(2장 이상) 없으면 승인 요청(대기)도 승인도 안 됨 → '수정 요청' 상태 + 사유, 사진 2장 붙이면 승인 대기
+    const blog = await ctx.owner.ok('POST', '/api/marketing/contents', { title: '블로그 글', channel: 'blog', body: '첫 문단\n\n둘째 문단', mediaIds: [] });
+    assert.equal(blog.needsPhotos, true);
+    const bl0 = await ctx.owner.ok('GET', `/api/marketing/contents/${blog.id}`);
+    assert.equal(bl0.content.status, 'changes'); assert.match(bl0.content.quality.issues[0], /표지 1장 \+ 본문 사진/);
+    assert.equal((await ctx.owner.req('POST', `/api/marketing/contents/${blog.id}/decide`, { version: 1, decision: 'approve' })).status, 400, '블로그 사진 없이 승인 불가');
+    assert.equal((await ctx.owner.ok('POST', `/api/marketing/contents/${blog.id}/versions`, { body: '첫 문단\n\n둘째 문단', mediaIds: [img] })).needsPhotos, true, '1장도 부족');
+    await ctx.owner.ok('POST', `/api/marketing/contents/${blog.id}/versions`, { body: '첫 문단\n\n둘째 문단', mediaIds: [img, img] });
+    const bl1 = await ctx.owner.ok('GET', `/api/marketing/contents/${blog.id}`);
+    assert.equal(bl1.content.status, 'pending'); assert.equal(bl1.content.quality, null, '사진 붙이면 안내 사라짐');
+    const lst = await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals');
+    assert.ok(lst.contents.find((c) => c.id === blog.id && 'production' in c && 'produce_at' in c), '카드용 제작 상태 칸');
+    await ctx.owner.ok('POST', `/api/marketing/contents/${blog.id}/decide`, { version: 3, decision: 'approve' });
     assert.equal((await ctx.owner.ok('POST', `/api/marketing/contents/${blog.id}/publish`, { url: 'https://blog.naver.com/dagym/223' })).provider, 'naver_blog');
     assert.equal((await sql`select count(*)::int n from mkt_publish_jobs where content_id = ${blog.id} and provider = 'naver_blog' and status = 'done'`)[0].n, 1);
     const appr = await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals');

@@ -118,6 +118,25 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
 }
 
 /** 콘텐츠 상세: 버전·시안·결정 기록 + (관리자) 승인·수정 요청·보류 + 수정본 올리기 + 게시 확인 */
+/** 대표 10/20 ②: 상세 첫 화면에 실제 게시 화면처럼 미리보기 — 인스타·페북·스레드는 카드(사진 + 캡션), 블로그는 제목·표지·본문(둘째 사진은 첫 문단 뒤), 유튜브는 16:9 표지 + 제목 */
+function PostPreview({ channel, kind, brand, title, body, media }: { channel: string; kind?: string | null; brand: string | null; title: string; body: string; media: string[] }) {
+  const [more, setMore] = useState(false);
+  const img = (id: string, cls: string) => <img src={`/api/library/${id}/download?inline=1`} alt="" className={cls} loading="lazy" />;
+  const none = (cls: string) => <div className={cx(cls, 'flex items-center justify-center bg-slate-200 text-xs text-ink-2')}>시안 제작 중</div>;
+  const paras = body.split(/\n{2,}/).filter(Boolean);
+  const blog = channel === 'blog'; const yt = channel === 'youtube'; const vertical = kind === 'reels' || kind === 'shorts' || kind === 'story';
+  return (
+    <div className="mx-auto w-full max-w-sm overflow-hidden rounded-card border border-line bg-white text-sm shadow-card" data-testid="mkt-preview">
+      <div className="flex items-center gap-2 border-b border-line px-3 py-2"><span className="size-7 rounded-full" style={{ background: '#7C3AED' }} aria-hidden /><b className="truncate text-xs">{brand ?? '브랜드'}</b><span className="ml-auto text-[11px] text-ink-3">{channelLabel(channel, kind)} 미리보기</span></div>
+      {blog ? <div className="space-y-2 p-3"><h3 className="text-base font-bold">{title}</h3>{media[0] ? img(media[0], 'w-full rounded-input object-cover') : none('aspect-video w-full rounded-input')}
+        {(more ? paras : paras.slice(0, 2)).map((p, i) => <div key={i}><p className="whitespace-pre-wrap text-xs">{p}</p>{i === 0 && (media[1] ? img(media[1], 'mt-2 w-full rounded-input object-cover') : none('mt-2 aspect-video w-full rounded-input'))}</div>)}</div>
+      : <>{media[0] ? img(media[0], cx('w-full object-cover', vertical ? 'aspect-[9/16] max-h-80' : yt ? 'aspect-video' : 'aspect-square')) : none(vertical ? 'aspect-[9/16] max-h-80 w-full' : yt ? 'aspect-video w-full' : 'aspect-square w-full')}
+        {media.length > 1 && <p className="px-3 pt-1 text-[11px] text-ink-3">사진 {media.length}장</p>}
+        <p className={cx('whitespace-pre-wrap px-3 py-2 text-xs', !more && 'line-clamp-3')}><b className="mr-1">{brand ?? ''}</b>{yt ? title : body}</p></>}
+      {(blog ? paras.length > 2 : body.length > 80) && <button type="button" onClick={() => setMore(!more)} className="px-3 pb-2 text-xs font-medium text-violet-700" data-testid="mkt-preview-more">{more ? '접기' : '더보기'}</button>}
+    </div>
+  );
+}
 function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange: () => void }) {
   const { data, error, reload } = useApi<any>(`/api/marketing/contents/${id}`);
   const [comment, setComment] = useState(''); const [ver, setVer] = useState<{ body: string; media: { id: string; title: string }[]; note: string } | null>(null); const [url, setUrl] = useState('');
@@ -143,7 +162,8 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
       <div className="space-y-3 text-sm" data-testid="mkt-detail">
         <AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContent} subject={`시안 ${String(c.title).slice(0, 40)}`} compact testId="ai-ask-content" />
         <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b> · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
-        {c.auto && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">품질 검사: {c.quality.issues.join(' · ')}</p>}
+        {c.quality?.passed === false && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">{c.auto ? '품질 검사: ' : ''}{c.quality.issues.join(' · ')}</p>}
+        {v && <PostPreview channel={c.channel} kind={c.kind} brand={c.brand} title={c.title} body={v.body} media={v.media_ids} />}
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div></div>

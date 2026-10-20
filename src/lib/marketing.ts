@@ -90,11 +90,15 @@ export async function createBrand(u: SessionUser, i: z.infer<typeof brandInput>)
   return { id: b.id };
 }
 
+/** 대표 재지적 10/20 18:45 ③: 블로그는 표지 1장 + 본문 사진 1장 이상이 있어야 승인 요청(승인 대기)·승인이 됩니다 — 없으면 '수정 요청' 상태로 사진을 기다림 */
+export const BLOG_PHOTO_RULE = '블로그는 표지 1장 + 본문 사진 1장 이상을 붙여야 승인 요청됩니다';
+export const needsPhotos = (channel: string, mediaCount: number) => channel === 'blog' && mediaCount < 2;
 export async function listContents(u: SessionUser, q: { view?: string; from?: string; to?: string; day?: string }) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.is_test, b.name as brand, b.color as brand_color,
-      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, u.name as created_by_name, c.updated_at,
+      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality,
+      (select json_build_object('kind', p.kind, 'status', p.status) from mkt_production_requests p where p.content_id = c.id and p.kind in ('image', 'video', 'regen_image', 'regen_video') and p.status in ('open', 'needs_approval') order by p.created_at desc limit 1) as production,
       (select max(d.version) from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version) as reapprove_from,
       (select json_build_object('decision', d.decision, 'comment', d.comment, 'at', d.decided_at, 'version', d.version, 'by', du.name) from mkt_decisions d left join users du on du.id = d.decided_by
         where d.content_id = c.id order by d.decided_at desc limit 1) as last_decision
@@ -148,8 +152,9 @@ export async function createContent(u: SessionUser, i: z.infer<typeof contentInp
   const title = isTest && !i.title.startsWith('[시험]') ? `[시험] ${i.title}` : i.title;
   return sql.begin(async (tx) => {
     const [c] = await tx<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, is_test, cross_channels)
-      values (${t}, ${i.brandId ?? null}, ${title}, ${i.channel}, ${i.scheduledAt ?? null}, 'pending', 1, ${u.id}, ${isTest}, ${(i.crossChannels ?? []).filter((x) => x !== i.channel)}) returning id`;
+      values (${t}, ${i.brandId ?? null}, ${title}, ${i.channel}, ${i.scheduledAt ?? null}, ${needsPhotos(i.channel, i.mediaIds.length) ? 'changes' : 'pending'}, 1, ${u.id}, ${isTest}, ${(i.crossChannels ?? []).filter((x) => x !== i.channel)}) returning id`;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
+    if (needsPhotos(i.channel, i.mediaIds.length)) { await tx`update mkt_contents set quality = ${tx.json({ passed: false, issues: [BLOG_PHOTO_RULE] } as never)} where id = ${c.id}`; return { id: c.id, version: 1, needsPhotos: true }; }
     const admins = isTest ? [] : await (await import('./mktAuto')).approvers(t);
     await notify(tx, { userIds: admins, type: 'review_requested', title: `승인 대기: ${title}`, body: `${u.name} · ${CHANNELS[i.channel]}`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, actorId: u.id, dedupeKey: `mkt:${c.id}:1` });
     return { id: c.id, version: 1 };
@@ -164,12 +169,13 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
   await mediaOk(u, i.mediaIds);
   const sql = db();
   return sql.begin(async (tx) => {
-    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
+    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by, channel from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
     const v = c.current_version + 1;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${id}, ${v}, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
-    await tx`update mkt_contents set current_version = ${v}, status = 'pending', updated_at = now() where id = ${id}`;
+    if (needsPhotos(c.channel, i.mediaIds.length)) { await tx`update mkt_contents set current_version = ${v}, status = 'changes', quality = ${tx.json({ passed: false, issues: [BLOG_PHOTO_RULE] } as never)}, updated_at = now() where id = ${id}`; return { version: v, needsPhotos: true }; }
+    await tx`update mkt_contents set current_version = ${v}, status = 'pending', quality = case when quality->>'passed' = 'false' and quality->'issues' @> ${tx.json([BLOG_PHOTO_RULE] as never)} then null else quality end, updated_at = now() where id = ${id}`;
     const admins = c.is_test ? [c.created_by] : await (await import('./mktAuto')).approvers(tenantOf(u));
     await notify(tx, { userIds: admins, type: 'review_requested', title: `재승인 대기(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
     return { version: v };
@@ -189,8 +195,9 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (i.version !== c.current_version) throw new HttpError(409, 'stale_version', `최신 버전(v${c.current_version})이 아닙니다 — 새로 고쳐 보고 결정해 주세요`);
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
-    if (i.decision === 'approve' && c.channel !== 'blog' && c.channel !== 'threads') { // 블로그·스레드는 글만으로도 승인(사진은 선택)
+    if (i.decision === 'approve' && c.channel !== 'threads') { // 스레드는 글만으로도 승인(사진은 선택). 블로그는 표지+본문 사진(2장 이상) — 대표 10/20 18:45
       const [v] = await tx<{ n: number }[]>`select cardinality(media_ids) as n from mkt_versions where content_id = ${id} and version = ${i.version}`;
+      if (needsPhotos(c.channel, v?.n ?? 0)) throw badRequest(`${BLOG_PHOTO_RULE} — 지금 ${v?.n ?? 0}장`);
       if (!v?.n) throw badRequest('시안 이미지가 없어 승인할 수 없습니다 — 시안을 붙인 뒤 다시');
     }
     const status = { approve: 'approved', changes: 'changes', hold: 'hold' }[i.decision];

@@ -143,8 +143,15 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${ac.id}, 1, '자동 본문', ${[]}, 'AI 자동 제작', ${created_by})`;
   await owner.goto(`${BASE}/s/marketing/approvals`);
   await owner.getByTestId('mkt-waiting').locator(':scope > summary').click(); // 수정 요청·보류는 '새 버전 기다림' 접힌 묶음(승인 숫자에서 뺌)
+  // 대표 재지적 10/20 18:45: 시안 없는 카드에도 회색 '시안 제작 중' 자리 + 본문 [더보기] 글자 버튼, 상세 첫 화면에 게시 화면 미리보기
+  const acCard = owner.getByTestId('approval-card').filter({ hasText: 'E2E 자동 시안' });
+  await acCard.getByTestId('approval-no-media').waitFor();
+  assert.match(await acCard.getByTestId('approval-body-more').innerText(), /더보기/);
+  await acCard.getByTestId('approval-body-more').click();
+  assert.match(await acCard.getByTestId('approval-body-more').innerText(), /접기/);
   await owner.getByTestId('mkt-row').filter({ hasText: 'E2E 자동 시안' }).click();
-  await owner.getByTestId('mkt-detail').getByText('자동 본문').waitFor();
+  await owner.getByTestId('mkt-preview').getByText('시안 제작 중').waitFor();
+  await owner.getByTestId('mkt-detail').getByText('자동 본문').first().waitFor();
   await owner.getByTestId('mkt-decide').waitFor();
   await owner.keyboard.press('Escape');
   // ⑤-1 게시 도우미: 승인된 시험 블로그 글(사진 없음)에도 보임 — 복사·글쓰기 열기·위험 고지
