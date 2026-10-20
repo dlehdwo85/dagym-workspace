@@ -16,8 +16,8 @@ export const HOME_CARDS = ['chat', 'kpi', 'approve', 'queue', 'week', 'perf', 'r
 export type HomeCard = (typeof HOME_CARDS)[number];
 export const HOME_CARD_LABEL: Record<HomeCard, string> = { chat: 'AI 비서 입력창', kpi: '숫자 4칸', approve: '지금 승인할 것', queue: 'AI 작업 큐 · 밤사이 결과', week: '이번 주 게시 캘린더', perf: '성과 7일 · 광고', recent: '최근 게시물 · 다음 할 일 제안', channels: '채널 상태' };
 /** 밤사이 비서 범위 4개(기본 모두 끔 → 대표가 켬). draft 만 지금 실행기가 처리, 나머지 셋은 저장만(다음 단계) */
-export const NIGHT_SCOPE = ['draft', 'lead_next', 'bid_summary', 'report'] as const;
-export const NIGHT_LABEL: Record<(typeof NIGHT_SCOPE)[number], string> = { draft: '원고 초안(자동 제작 시안을 밤에 미리)', lead_next: '리드 다음 연락 제안', bid_summary: '입찰 요약', report: '보고서 초안' };
+export const NIGHT_SCOPE = ['draft', 'lead_next', 'bid_summary', 'report', 'goal'] as const;
+export const NIGHT_LABEL: Record<(typeof NIGHT_SCOPE)[number], string> = { draft: '원고 초안(자동 제작 시안을 밤에 미리)', lead_next: '리드 다음 연락 제안', bid_summary: '입찰 요약', report: '보고서 초안', goal: '목표 설정·주간 계획·리뷰(밤에도)' };
 
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 const hourKst = (d = new Date()) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false }).format(d)) % 24;
@@ -73,6 +73,11 @@ export async function homeView(u: SessionUser) {
     ...plans.map((p): Q => ({ kind: 'adplan', id: p.id, title: `광고 세팅안: ${p.name}`, href: '/s/marketing/ad-ops', night: false, state: p.status === 'draft' ? 'waiting' : 'done', at: p.created_at, canRun: false, canNight: false, note: p.status === 'draft' ? '대표 승인 필요' : undefined })),
     ...props.map((p): Q => ({ kind: 'proposal', id: p.id, title: p.summary, href: '/assistant?space=marketing', night: false, state: 'waiting', at: p.created_at, canRun: false, canNight: false, note: '사람이 [보내기]' })),
   ];
+  // 대표 10/20 18:00 ③: 목표 설정·주간 계획·리뷰도 큐 종류 — 승인 대기 목표는 '대표 승인 필요', 승인된 이달 목표는 주간 리뷰 상태
+  const { goalProgress } = await import('./mktGoals');
+  const goal = await goalProgress(t).catch(() => null);
+  const gq = await sql<any[]>`select id, month, status, updated_at, reviews, brand_id from mkt_goals where tenant = ${t} and (status = 'pending' or (status = 'approved' and month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM'))) order by month desc limit 3`;
+  for (const g of gq) q.push({ kind: 'goal' as any, id: g.id, title: `${g.month.replace('-', '년 ')}월 운영 목표${g.status === 'pending' ? ' 초안' : ` · 주간 리뷰 ${(g.reviews ?? []).length}회`}`, href: '/s/marketing/goals', night: false, state: g.status === 'pending' ? 'waiting' : 'done', at: g.updated_at, canRun: false, canNight: false, note: g.status === 'pending' ? '대표 승인 필요' : undefined });
   const order = { running: 0, waiting: 1, done: 2 };
   const queue = q.sort((a, b) => order[a.state] - order[b.state] || String(b.at ?? '').localeCompare(String(a.at ?? ''))).slice(0, 8);
   // 🌙 밤사이 결과: 어젯밤 22시 ~ 오늘 08시 사이에 만들어진 자동 시안·문서
@@ -118,7 +123,7 @@ export async function homeView(u: SessionUser) {
   if (topic.n) suggestions.push({ key: 'topic', title: `자동 제작 주제 필요 ${topic.n}건`, detail: '재료가 없어 시안을 만들지 못했습니다 — 주제를 적어 주세요', href: '/s/marketing/automation' });
   const { aiSettings } = await import('./ai/threads');
   const nightScope = (await aiSettings(t)).night_scope ?? {};
-  return { canEdit: admin, cards: await cardsOf(u), kpi, approve, approvalHour: now.approvalHour, queue, night, nightScope, week, perf, ads, recent, suggestions: suggestions.slice(0, 5), channels, cardLabels: HOME_CARD_LABEL };
+  return { canEdit: admin, cards: await cardsOf(u), kpi, goal, approve, approvalHour: now.approvalHour, queue, night, nightScope, week, perf, ads, recent, suggestions: suggestions.slice(0, 5), channels, cardLabels: HOME_CARD_LABEL };
 }
 
 export const homeAction = z.discriminatedUnion('action', [

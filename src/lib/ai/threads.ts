@@ -208,7 +208,7 @@ export async function logDelete(u: SessionUser, id: string, ip: string | null) {
 export const aiSettingsInput = z.object({ retentionDays: z.number().int().min(0).max(3650).optional(), dailyLimit: z.number().int().min(1).max(1000).optional(),
   inputMax: z.number().int().min(200).max(20000).optional(), topicFilter: z.boolean().optional(), consoleNote: z.string().max(500).nullable().optional(),
   webTools: z.boolean().optional(), docEngine: z.boolean().optional(), // V22 웹 검색·페이지 읽기 / 문서 작업 켜기·끄기
-  nightScope: z.record(z.enum(['draft', 'lead_next', 'bid_summary', 'report']), z.boolean()).optional() }); // ⑥ 밤사이 비서 범위
+  nightScope: z.record(z.enum(['draft', 'lead_next', 'bid_summary', 'report', 'goal']), z.boolean()).optional() }); // ⑥ 밤사이 비서 범위
 export async function setAiSettings(u: SessionUser, i: z.infer<typeof aiSettingsInput>, ip: string | null) {
   const { requireMenu } = await import('../menuPerms');
   await requireMenu(u, 'ai_logs', 'edit');
