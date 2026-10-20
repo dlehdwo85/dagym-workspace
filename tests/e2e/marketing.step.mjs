@@ -167,7 +167,7 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   // 상용화 ⑧ 월간 보고(관리자 메뉴): 카드 6·PDF 저장 버튼
   await owner.locator('aside').getByRole('link', { name: '월간 보고' }).click();
   await owner.getByTestId('mkt-report').waitFor();
-  assert.equal(await owner.getByTestId('report-card').count(), 6);
+  assert.equal(await owner.getByTestId('report-card').count(), 10); // 대표 10/20 20:00 ③: 매출 실적·계약 등록·CAC·ROI 4칸 추가
   await owner.getByTestId('report-print').waitFor();
   // 원래대로
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));

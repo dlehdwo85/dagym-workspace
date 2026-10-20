@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { RevenueGoal } from './RevenueGoal';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ArrowDown, Moon, Play, Settings2, Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
@@ -145,6 +146,8 @@ export function MarketingHome() {
           <div key={l}><div className="flex justify-between"><span className="text-ink-2">{l}</span><span className="tabular-nums" data-testid={`mkt-goal-${l}`}>{u === '원' ? d.toLocaleString('ko-KR') : d}{t ? `/${u === '원' ? t.toLocaleString('ko-KR') : t}` : ''}{u}</span></div>
             <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${t ? Math.min(100, Math.round((d / t) * 100)) : 0}%`, background: C }} /></div></div>))}</div>
       </Link> : data.canEdit ? <Link href="/s/marketing/goals" className="block rounded-card border border-dashed border-line p-3 text-center text-xs text-ink-2 hover:border-violet-300" data-testid="mkt-home-goal-none">이번 달 운영 목표가 없습니다 — AI 초안 만들기 →</Link> : null}
+      {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적(영업 계약 + 워크인 결제) */}
+      <RevenueGoal canEdit={data.canEdit} />
     </div>,
     approve: <section key="approve" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-now">
       <h2 className="flex items-center justify-between text-base font-bold" data-testid="mkt-home-head"><span>{data.kpi.approvalsDetail.contents ? <>① 지금 승인할 것 <span className="text-orange-700">{data.kpi.approvalsDetail.contents}건</span></> : '① 지금 승인할 것 없음 ✓'}</span>

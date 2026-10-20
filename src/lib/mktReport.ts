@@ -39,7 +39,9 @@ export async function monthlyReport(tenant: string, month: string) {
     sql<any[]>`select coalesce(sum(cost_usd), 0)::float8 usd, count(*)::int n from ai_usage where tenant = ${tenant} and purpose like 'marketing%' and created_at >= ${from} and created_at < ${to}`,
   ]);
   const adTotal = ads.reduce((a, r) => ({ impressions: a.impressions + r.impressions, clicks: a.clicks + r.clicks, cost_krw: a.cost_krw + r.cost_krw, conversions: a.conversions + r.conversions }), { impressions: 0, clicks: 0, cost_krw: 0, conversions: 0 });
-  return { month, posts: { ...posts[0], byChannel }, approvals: approvals[0], auto: auto[0], ads: { byProvider: ads, total: { ...adTotal, ctr: adTotal.impressions ? Math.round((adTotal.clicks / adTotal.impressions) * 10000) / 100 : 0, cpc: adTotal.clicks ? Math.round(adTotal.cost_krw / adTotal.clicks) : 0 } },
+  // 대표 10/20 20:00 ③ CAC·ROI: 광고비 ÷ 새 리드(없으면 문의), (매출 − 광고비) ÷ 광고비 — 매출 = 영업 계약 등록 금액(+플랫폼 회사 워크인 결제는 화면에서)
+  const roi = await (await import('./mktOps')).cacRoi(tenant, month, adTotal.cost_krw, false).catch(() => null);
+  return { month, posts: { ...posts[0], byChannel }, approvals: approvals[0], auto: auto[0], roi, ads: { byProvider: ads, total: { ...adTotal, ctr: adTotal.impressions ? Math.round((adTotal.clicks / adTotal.impressions) * 10000) / 100 : 0, cpc: adTotal.clicks ? Math.round(adTotal.cost_krw / adTotal.clicks) : 0 } },
     calls: calls[0], credits: { byKind: credits, total: Math.round(credits.reduce((a, r) => a + r.credits, 0) * 100) / 100 }, ai: { usd: Math.round(ai[0].usd * 10000) / 10000, requests: ai[0].n, krw: Math.round(ai[0].usd * (Number(process.env.USD_KRW) || 1400)) } };
 }
 
