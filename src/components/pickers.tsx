@@ -249,10 +249,14 @@ export function fmtReminder(m: number) {
 }
 
 /** 일정별 알림: null = 각자 기본 설정, 배열 = 이 일정만의 알림(최대 5개, 빈 배열 = 알림 없음) */
-export function ReminderEditor({ value, onChange }: { value: number[] | null; onChange: (v: number[] | null) => void }) {
+export function ReminderEditor({ value, onChange, alarm, onAlarm }: { value: number[] | null; onChange: (v: number[] | null) => void; alarm?: boolean | null; onAlarm?: (v: boolean | null) => void }) {
   return (
     <div className="space-y-1.5 text-sm" data-testid="reminder-editor">
       <label className="flex items-center gap-2"><input type="checkbox" checked={value === null} onChange={(e) => onChange(e.target.checked ? null : [30])} />각자 기본 알림 설정 따르기</label>
+      {/* 로컬 10/20(대표): 알람처럼 울리기 — 기본(설정)·켬·끔 */}
+      {onAlarm && <label className="flex items-center gap-2"><span className="text-ink-2">알람처럼 울리기</span>
+        <select className="rounded-md border border-slate-300 px-2 py-0.5 text-xs" value={alarm === true ? 'on' : alarm === false ? 'off' : 'default'} onChange={(e) => onAlarm(e.target.value === 'on' ? true : e.target.value === 'off' ? false : null)} aria-label="알람처럼 울리기" data-testid="reminder-alarm">
+          <option value="default">기본(설정 따름)</option><option value="on">켬 — 전체 화면·소리·[해제]</option><option value="off">끔</option></select></label>}
       {value !== null && (
         <div className="flex flex-wrap items-center gap-1.5">
           {value.map((m) => (

@@ -1243,6 +1243,16 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 로컬 확인: 심사 계정으로 /assistant 열어 대화 목록·예시 대화·입력창 보이는지(스토어 스크린샷), 질문 1개 보내 답 오는지(플랫폼 키 과금 ≤ $1.5/월).
 - 다음(로컬 10/20 요청 순서): ③ '알람처럼 울리기'(일정·업무 알림 토글 + 기본값 설정, 로컬 예약·FCM payload alarm/snoozeMinutes/actions, 해제·미루기 서버 기록, 웹 상단 띠+소리) → V32-5 투어 → V33.
 
+## 2026-10-20 클라우드 — 로컬 10/20 ③ '알람처럼 울리기' 서버 쪽 (배포)
+- 규칙(src/lib/alarm.ts): 항목별 `alarm`(events·tasks 열, null = 기본값) → 사람별 기본값 user_settings.alarm_events(끔)·alarm_tasks(끔)·alarm_important(켬: 높음·긴급 업무). 마이그레이션 120(추가만).
+- 설정 › 알림 "알람처럼 울리기" 3칸(일정·업무 마감·높음·긴급 업무), prefs API alarmEvents/alarmTasks/alarmImportant. 일정 편집 알림 칸 "알람처럼 울리기 기본/켬/끔", 업무 상세 미리 알림 옆 알람 선택(중요 업무는 '기본(중요 → 켬)').
+- 로컬 예약 알림(/api/reminders/upcoming): 알람이면 `alarm:true·snoozeMinutes:10·actions[dismiss/snooze/open]·kind·entityId`. 앱(native.ts)은 채널 `alarm`(importance 5·sound alarm.wav)·actionTypeId 'alarm'·ongoing 으로 예약하고 extra 에 같은 값.
+- 정기 실행 마감·일정 알림: meta.alarm (중요 업무 기본 켬·업무별 alarm 우선·일정별 alarm 또는 사람별 기본). 알람이면 보통 업무도 푸시. FCM data `alarm:'true'·snoozeMinutes`, android channel_id `alarm`, iOS category `alarm`·interruption-level time-sensitive. 웹 푸시(sw.js) requireInteraction·진동.
+- 알림 액션: 알람 알림(due_soon·event_reminder)은 [해제][10분 뒤] — 해제 = 처리 완료(재푸시 없음)+activities alarm_dismissed, 10분 뒤 = 재푸시 예약+alarm_snoozed. 기기 로컬 알람 결과는 `POST /api/reminders/alarm {kind,id,action,minutes,key}`(남의 것 404, snooze 는 minutes 필수) → 알림 '활동' 탭에 '알람 해제/알람 미룸'.
+- 웹: 알람 알림이 해제 전이면 화면 맨 위 고정 띠(AlarmBar: 제목·[해제][10분 뒤][열기]·소리 끄기) + 1.5초마다 삐-삐(Web Audio). `/api/notifications?unread=1` 이 `alarms`(3시간 안·최대 3) 를 함께 줌.
+- 시험: tests/api/alarm.test.mjs 4건 · E2E alarm.step.mjs(설정 3칸·업무 상세 선택·띠·해제·활동) 캡처 142.
+- **[로컬 네이티브 할 일]** Android: 채널 `alarm` 전체 화면(USE_FULL_SCREEN_INTENT + 알람 카테고리) 액티비티·[해제]/[10분 뒤] 액션(actionTypeId 'alarm'), FCM data.alarm==='true' 도 같은 처리, Android 14+ 전체 화면 알림 권한 안내 화면, 결과 POST /api/reminders/alarm(로컬 예약)·POST /api/notifications/{id}/action(푸시), 10분 뒤는 기기 재예약. iOS: 카테고리 `alarm`(UNNotificationCategory 해제/10분 뒤), time-sensitive 권한, 반복 소리(alarm.wav 30초).
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md

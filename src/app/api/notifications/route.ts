@@ -15,5 +15,8 @@ export const GET = handler(async ({ req, user }) => {
     order by (n.read_at is null) desc, n.created_at desc limit 150`;
   const [c] = await sql`select count(*)::int c from notifications where user_id = ${user.id} and read_at is null and type <> 'chat'`; // 메신저는 메시지 화면 배지로
   // 로컬 10/20: 알림에서 바로 처리할 버튼(종류·상태로 정함) — 처리된 알림은 action_done("승인함")만
-  return { items: items.map((n) => ({ ...n, actions: actionsFor(n as NotifRow) })), unread: c.c };
+  // 로컬 10/20(대표): 웹 알람 띠 — 알람처럼 울리는 알림 중 아직 해제·읽음 전(3시간 안) 을 함께 돌려 상단 고정 띠 + 소리
+  const alarms = unreadOnly ? items.filter((n) => n.meta?.alarm && !n.action_done && !n.read_at && Date.now() - new Date(n.created_at).getTime() < 3 * 3600e3).slice(0, 3)
+    .map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, link: n.link, actions: actionsFor(n as NotifRow) })) : undefined;
+  return { items: items.map((n) => ({ ...n, actions: actionsFor(n as NotifRow) })), unread: c.c, ...(alarms ? { alarms } : {}) };
 });

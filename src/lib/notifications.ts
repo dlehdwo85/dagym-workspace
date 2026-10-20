@@ -80,7 +80,10 @@ export async function queuePush(sql: Sql, userId: string, notificationId: string
     from push_subscriptions p where p.user_id = ${userId} and p.disabled_at is null
       -- 미리 알림을 기기에서 직접 예약하는 앱에는 같은 알림을 다시 보내지 않음(중복 방지)
       and not (p.local_reminders and ${LOCAL_TYPES.includes(n?.type ?? '')})
-    on conflict do nothing`;
+    on conflict (notification_id, subscription_id) do ${opts.delayMinutes
+      // 미루기(10분 뒤): 이미 보낸 행을 다시 대기로 — 전엔 do nothing 이라 재푸시가 안 됐음(로컬 10/20 알람)
+      ? sql`update set status = 'pending', next_attempt_at = excluded.next_attempt_at, attempts = 0, error = null, sent_at = null`
+      : sql`nothing`}`;
 }
 
 export async function unreadCount(userId: string) {

@@ -23,5 +23,11 @@ export async function recentActivity(u: SessionUser, o: { limit?: number; brand?
       union all
       select 'comment', t.id, t.title, c.created_at, cu.id, cu.name, left(regexp_replace(c.body, ${MENTION_RE}, ${'@\\1'}, 'g'), 80) from comments c join tasks t on t.id = c.task_id left join users cu on cu.id = c.author_id left join org_units o on o.id = t.org_unit_id
         where c.deleted_at is null and t.deleted_at is null and ${vis} ${bf} and c.created_at > ${since}
+      union all
+      -- 로컬 10/20(대표): 알람 해제·미루기 기록(내 것만 — 업무 알람)
+      select case when a.action = 'alarm_snoozed' then 'alarm_snoozed' else 'alarm_dismissed' end, t.id, t.title, a.created_at, au.id, au.name,
+        case when a.action = 'alarm_snoozed' then coalesce(a.changes->>'minutes', '10') || '분 뒤 다시' else null end
+        from activities a join tasks t on t.id = a.entity_id left join users au on au.id = a.actor_id
+        where a.entity_type = 'task' and a.action in ('alarm_dismissed', 'alarm_snoozed') and a.actor_id = ${u.id} and t.deleted_at is null ${bf} and a.created_at > ${since}
     ) a order by at desc limit ${Math.min(Math.max(o.limit ?? 30, 1), 100)}`;
 }

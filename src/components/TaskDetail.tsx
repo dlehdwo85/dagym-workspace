@@ -684,7 +684,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </Prop>
             {/* R-15 4번: 담당자의 처리 속도로 예상 처리 기간 */}
             {showSpeed && t.status !== 'done' && <p className="px-2 pb-1 text-xs text-ink-3" data-testid="speed-detail">예상 처리 기간: {t.assignee_name}님은 보통 {data.speed.median_days}일(최근 90일 {data.speed.done}건{data.speed.late_rate != null ? ` · 지연 ${data.speed.late_rate}%` : ''})</p>}
-            <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span></span></Prop>
+            <Prop icon={Bell} label="미리 알림" asDiv><span className="pl-1" data-testid="detail-remind"><BellChip value={t.reminder_minutes ?? null} onChange={(v) => patch({ reminderMinutes: v })} /><span className="ml-1 text-xs text-ink-3">{t.reminder_minutes?.length ? '' : t.due_time ? '기본(설정의 업무 알림)' : '기본(마감일 09시)'}</span>
+              {/* 로컬 10/20(대표): 마감 알림을 알람처럼(전체 화면·소리·[해제]) — 기본값은 설정(높음·긴급은 켬) */}
+              {perms.edit && <select className="ml-2 rounded-full border border-line bg-white px-1.5 py-0.5 text-[11px] text-ink-2" value={t.alarm === true ? 'on' : t.alarm === false ? 'off' : 'default'} onChange={(e) => patch({ alarm: e.target.value === 'on' ? true : e.target.value === 'off' ? false : null })} aria-label="알람처럼 울리기" data-testid="task-alarm">
+                <option value="default">알람 기본{(t.priority === 'high' || t.priority === 'urgent') ? '(중요 → 켬)' : ''}</option><option value="on">알람처럼 울림</option><option value="off">알람 끔</option></select>}</span></Prop>
             {/* R-15 5번: 우선순위는 마감일·미리 알림과 같은 묶음 */}
             <Prop icon={Flag} label="우선순위">
               <select className={ghostCls} value={t.priority} onChange={(e) => patch({ priority: e.target.value })} aria-label="우선순위">

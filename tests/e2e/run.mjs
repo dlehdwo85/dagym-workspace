@@ -33,6 +33,7 @@ import { settlementFlow } from './settlement.step.mjs';
 import { notifActionsFlow } from './notif-actions.step.mjs';
 import { salesAppFlow } from './sales-app.step.mjs';
 import { checklistAppFlow } from './checklist-app.step.mjs';
+import { alarmFlow } from './alarm.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -2303,6 +2304,8 @@ await step('로컬 10/20 알림 바로 처리: 배정 알림 [오늘 할 일에 
 await step('대표 검수 10/20 ② 앱 영업 정리(390): 리드 전화·문자·홈페이지 → 파이프라인 단계 칩 목록 → 입찰 원문·공고문·한국어 상세·관리자 원본 접힘 → 허브 시설 전화 줄', () => salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }));
 
 await step('대표 검수 10/20 체크리스트(360): 항목별 미팅 버튼 제거 · 담당 1명 → 담당 칩 숨김·새 항목 자동 배정 · 담당 여럿 → 선택 노출 · (?) 안내 탭 · 가로 넘침 0', () => checklistAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }));
+
+await step('로컬 10/20 알람처럼 울리기(웹): 설정 기본값 3칸 → 업무 상세 알람 선택 → 알람 알림 띠([해제][10분 뒤][열기]) → 해제 → 활동 탭 기록', () => alarmFlow({ staff, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

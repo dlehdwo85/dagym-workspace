@@ -61,7 +61,7 @@ export default function Notifications() {
               <li key={i} className="flex min-w-0 items-start gap-3 px-4 py-2.5 text-sm">
                 <span className={cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', a.kind === 'done' ? 'bg-green-500' : a.kind === 'comment' ? 'bg-accent-500' : 'bg-slate-300')} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate"><b className="font-semibold">{a.actor_name ?? '시스템'}</b> {a.kind === 'done' ? '완료' : a.kind === 'comment' ? '댓글' : '등록'} · <Link href={`/tasks/${a.task_id}`} className="hover:underline">{a.title}</Link></p>
+                  <p className="truncate"><b className="font-semibold">{a.actor_name ?? '시스템'}</b> {a.kind === 'done' ? '완료' : a.kind === 'comment' ? '댓글' : a.kind === 'alarm_dismissed' ? '알람 해제' : a.kind === 'alarm_snoozed' ? '알람 미룸' : '등록'} ·<Link href={`/tasks/${a.task_id}`} className="hover:underline">{a.title}</Link></p>
                   {a.body && <p className="truncate text-xs text-ink-2">{a.body}</p>}
                   <p className="text-[11px] text-ink-3">{fmtDateTime(a.at)}</p>
                 </div>

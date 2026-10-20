@@ -5,7 +5,8 @@ import { todaySeoul, addDays } from './time';
 import type { SessionUser } from './types';
 
 const TZ = 'Asia/Seoul';
-export type Upcoming = { id: number; key: string; fireAt: string; title: string; body: string; link: string };
+/** 로컬 10/20(대표): alarm 이면 앱이 전체 화면·알람 채널로 띄우고 [해제][10분 뒤][열기] — 결과는 POST /api/reminders/alarm 로 기록(미루기 재예약은 기기) */
+export type Upcoming = { id: number; key: string; fireAt: string; title: string; body: string; link: string; kind?: 'event' | 'task'; entityId?: string; alarm?: true; snoozeMinutes?: number; actions?: { id: string; label: string }[] };
 
 /** 알림 키 → 기기 로컬 알림 id(양의 32비트 정수, 같은 알림은 늘 같은 id) */
 export function reminderId(key: string) {
@@ -34,14 +35,16 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     from user_settings where user_id = ${u.id}`;
   const st = s ?? { ev: 60, task: 60, soon: 0, btime: '08:30', bon: true, bweekend: false, req: false };
   const out: Upcoming[] = [];
-  const push = (key: string, at: DateTime, title: string, body: string, link: string) => {
+  const { alarmDefaults, alarmOn, alarmFields } = await import('./alarm');
+  const ad = await alarmDefaults(sql, u.id);
+  const push = (key: string, at: DateTime, title: string, body: string, link: string, al?: { kind: 'event' | 'task'; entityId: string; on: boolean }) => {
     if (at <= now || at > until) return;
-    out.push({ id: reminderId(key), key, fireAt: at.toUTC().toISO()!, title, body, link });
+    out.push({ id: reminderId(key), key, fireAt: at.toUTC().toISO()!, title, body, link, ...(al ? { kind: al.kind, entityId: al.entityId, ...alarmFields(al.on) } : {}) });
   };
 
   // 일정 (내 개인 캘린더 + 참석, 불참 제외)
-  const evs = await sql<{ id: string; title: string; start_at: Date; all_day: boolean; rrule: string | null; exdates: Date[]; reminder_minutes: number[] | null }[]>`
-    select e.id, e.title, e.start_at, e.all_day, e.rrule, e.exdates, e.reminder_minutes from events e join calendars c on c.id = e.calendar_id
+  const evs = await sql<{ id: string; title: string; start_at: Date; all_day: boolean; rrule: string | null; exdates: Date[]; reminder_minutes: number[] | null; alarm: boolean | null }[]>`
+    select e.id, e.title, e.start_at, e.all_day, e.rrule, e.exdates, e.reminder_minutes, e.alarm from events e join calendars c on c.id = e.calendar_id
     where e.deleted_at is null and e.recurring_event_id is null and e.kind <> 'task_block'
       and (e.rrule is not null or (e.start_at > ${now.toJSDate()} and e.start_at < ${until.plus({ days: 1 }).toJSDate()}))
       and ((c.type = 'personal' and c.owner_user_id = ${u.id})
@@ -62,25 +65,26 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     for (const o of starts) {
       const at0 = DateTime.fromJSDate(o.s).setZone(TZ);
       for (const m of leads) push(`ev:${e.id}:${o.s.toISOString()}:${m}`, e.all_day ? at0.set({ hour: 9 }).minus({ minutes: m }) : at0.minus({ minutes: m }),
-        `${m ? `${leftLabel(m)} 일정` : '지금 일정'}: ${o.title}`, e.all_day ? '종일' : at0.toFormat('HH:mm'), `/calendar?event=${e.id}`);
+        `${m ? `${leftLabel(m)} 일정` : '지금 일정'}: ${o.title}`, e.all_day ? '종일' : at0.toFormat('HH:mm'), `/calendar?event=${e.id}`, { kind: 'event', entityId: e.id, on: alarmOn('event', e.alarm, ad) });
     }
   }
 
   // 업무 (내가 담당, 미완료·보류 아님, 삭제 제외)
-  const tasks = await sql<{ id: string; title: string; due_date: string; due_time: string | null; reminder_minutes: number[] | null }[]>`
-    select id, title, to_char(due_date,'YYYY-MM-DD') due_date, to_char(due_time,'HH24:MI') due_time, reminder_minutes from tasks
+  const tasks = await sql<{ id: string; title: string; due_date: string; due_time: string | null; reminder_minutes: number[] | null; alarm: boolean | null; priority: string }[]>`
+    select id, title, to_char(due_date,'YYYY-MM-DD') due_date, to_char(due_time,'HH24:MI') due_time, reminder_minutes, alarm, priority from tasks
     where deleted_at is null and assignee_id = ${u.id} and status not in ('done','on_hold') and due_date between ${today} and ${addDays(today, days + 1)}`;
   for (const t of tasks) {
     const due = kst(t.due_date, t.due_time ?? '09:00');
     const ms = t.reminder_minutes ?? (t.due_time ? [st.task] : []);
+    const al = { kind: 'task' as const, entityId: t.id, on: alarmOn('task', t.alarm, ad, t.priority) };
     for (const m of ms) push(`task:${t.id}:${t.due_date}:${t.due_time ?? ''}:${m}`, due.minus({ minutes: m }), `${leftLabel(m)} 마감: ${t.title}`,
-      `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), `/tasks/${t.id}`);
+      `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), `/tasks/${t.id}`, al);
     // 2026-10-15 대표: 날짜만 있는 업무도 기본 1시간 전 — 18시(퇴근) 기준(서버 정기 실행과 같은 키)
     if (!t.due_time && !t.reminder_minutes) push(`task:${t.id}:${t.due_date}::${st.task}`, kst(t.due_date, '18:00').minus({ minutes: st.task }), `${leftLabel(st.task)} 마감: ${t.title}`,
-      `${t.due_date === today ? '오늘' : t.due_date}까지`, `/tasks/${t.id}`);
+      `${t.due_date === today ? '오늘' : t.due_date}까지`, `/tasks/${t.id}`, al);
     // V14 10번(검수 3): 마감 당일에 울리는 시각 알림이 있으면 "오늘 마감"은 생략(하루 1건)
     if (!ms.some((m) => due.minus({ minutes: m }).toISODate() === t.due_date))
-      push(`today:${t.id}:${t.due_date}`, kst(t.due_date, '09:00'), `오늘 마감: ${t.title}`, t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', `/tasks/${t.id}`);
+      push(`today:${t.id}:${t.due_date}`, kst(t.due_date, '09:00'), `오늘 마감: ${t.title}`, t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', `/tasks/${t.id}`, al);
     // V14 10번: 마감 당일에 울리는 "마감 임박"은 "오늘 마감"과 겹치므로 빼고, 업무별 🔔 를 정했으면 그것만
     const soonAt = kst(t.due_date, t.due_time ?? '23:59').minus({ hours: st.soon });
     if (st.soon > 0 && !t.reminder_minutes && soonAt.toISODate()! < t.due_date) push(`soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, soonAt, `마감 임박: ${t.title}`, `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, `/tasks/${t.id}`);
