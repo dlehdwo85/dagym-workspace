@@ -25,7 +25,7 @@ export const GET = handler<{ id: string }>(async ({ req, user, params }) => {
     const { userSeesConfidential } = await import('@/lib/library');
     if (!(await userSeesConfidential(user.id))) throw forbidden('기밀 자료입니다 — 기밀 열람 권한이 있어야 내려받을 수 있습니다');
   }
-  const inline = req.nextUrl.searchParams.get('inline') === '1' && /^(image\/|application\/pdf)/.test(a.mime_type ?? '');
+  const inline = req.nextUrl.searchParams.get('inline') === '1' && /^(image\/|video\/|application\/pdf)/.test(a.mime_type ?? '');
   if (!inline && a.task_id) {
     const [recent] = await sql`select 1 from activities where entity_type = 'task' and entity_id = ${a.task_id} and actor_id = ${user.id} and action = 'file_downloaded'
       and changes->>'attachmentId' = ${a.id} and created_at > now() - interval '10 minutes' limit 1`;

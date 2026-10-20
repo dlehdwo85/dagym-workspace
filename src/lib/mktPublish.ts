@@ -71,15 +71,19 @@ async function waitContainer(url: string, tries = 8) {
 }
 
 // ---------------- 매체별 ----------------
-async function publishIg(a: Acc, c: any, media: Awaited<ReturnType<typeof mediaOf>>, job: Job) {
+async function publishIg(a: Acc, c: any, mediaIn: Awaited<ReturnType<typeof mediaOf>>, job: Job) {
+  let media = mediaIn;
   const ig = a.external_id; const tk = token(a); const caption = String(c.body ?? '').slice(0, 2200);
   const p = { ...(job.payload ?? {}) };
   if (!p.container) {
     if (!media.length) throw new Error('인스타그램은 사진·영상이 필요합니다');
-    const story = c.kind === 'story'; const video = media[0].video || ['reels', 'shorts', 'video'].includes(c.kind);
+    // 로컬 10/21 02:10: 릴스·쇼츠에 표지 이미지가 섞여 있으면 '영상 1개 + 표지' — 표지를 사진 게시물로 올리지 않음
+    const vid = media.find((m) => m.video); const cover = media.find((m) => !m.video);
+    if (vid) media = [vid];
+    const story = c.kind === 'story'; const video = !!vid || ['reels', 'shorts', 'video'].includes(c.kind);
     let r;
     if (story) r = await call('POST', `${GRAPH()}/${ig}/media?${q({ media_type: 'STORIES', ...(media[0].video ? { video_url: media[0].url } : { image_url: media[0].url }), access_token: tk })}`);
-    else if (video) r = await call('POST', `${GRAPH()}/${ig}/media?${q({ media_type: 'REELS', video_url: media[0].url, caption, share_to_feed: true, access_token: tk })}`);
+    else if (video) r = await call('POST', `${GRAPH()}/${ig}/media?${q({ media_type: 'REELS', video_url: media[0].url, caption, share_to_feed: true, ...(cover ? { cover_url: cover.url } : {}), access_token: tk })}`);
     else if (media.length === 1) r = await call('POST', `${GRAPH()}/${ig}/media?${q({ image_url: media[0].url, caption, access_token: tk })}`);
     else {
       const children: string[] = [];
@@ -99,7 +103,8 @@ async function publishIg(a: Acc, c: any, media: Awaited<ReturnType<typeof mediaO
 async function publishFb(a: Acc, c: any, media: Awaited<ReturnType<typeof mediaOf>>) {
   const page = a.external_id; const tk = token(a); const message = String(c.body ?? '').slice(0, 60000);
   let id: string;
-  if (media[0]?.video) id = String((await call('POST', `${GRAPH()}/${page}/videos?${q({ file_url: media[0].url, description: message, access_token: tk })}`)).j.id);
+  const vid = media.find((m) => m.video); const cover = media.find((m) => !m.video);
+  if (vid) id = String((await call('POST', `${GRAPH()}/${page}/videos?${q({ file_url: vid.url, description: message, ...(cover ? { thumb: cover.url } : {}), access_token: tk })}`)).j.id);
   else if (media.length === 1) { const { j } = await call('POST', `${GRAPH()}/${page}/photos?${q({ url: media[0].url, message, access_token: tk })}`); id = String(j.post_id ?? j.id); }
   else if (media.length > 1) {
     const ids: string[] = [];
@@ -110,11 +115,13 @@ async function publishFb(a: Acc, c: any, media: Awaited<ReturnType<typeof mediaO
   const link = await call('GET', `${GRAPH()}/${id}?${q({ fields: 'permalink_url', access_token: tk })}`).then((x) => String(x.j.permalink_url ?? '')).catch(() => '');
   return { externalId: id, permalink: link || `https://www.facebook.com/${id}` };
 }
-async function publishThreads(a: Acc, c: any, media: Awaited<ReturnType<typeof mediaOf>>, job: Job) {
+async function publishThreads(a: Acc, c: any, mediaIn: Awaited<ReturnType<typeof mediaOf>>, job: Job) {
+  let media = mediaIn;
   const user = a.external_id; const tk = token(a); const text = String(c.body ?? '').slice(0, 500);
   const p = { ...(job.payload ?? {}) };
   if (!p.container) {
     let r;
+    const vid0 = media.find((m) => m.video); if (vid0) media = [vid0]; // 표지는 올리지 않음
     if (!media.length) r = await call('POST', `${THREADS()}/${user}/threads?${q({ media_type: 'TEXT', text, access_token: tk })}`);
     else if (media.length === 1) r = await call('POST', `${THREADS()}/${user}/threads?${q({ media_type: media[0].video ? 'VIDEO' : 'IMAGE', ...(media[0].video ? { video_url: media[0].url } : { image_url: media[0].url }), text, access_token: tk })}`);
     else {

@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { RevenueGoal } from './RevenueGoal';
+import { MediaThumb } from '@/components/MediaView';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ArrowDown, Moon, Play, Settings2, Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
@@ -98,8 +99,8 @@ function CardSettings({ home, onClose, onDone }: { home: Home; onClose: () => vo
   );
 }
 
-const Thumb = ({ media, channel, size = 'size-14' }: { media: string | null; channel: string; size?: string }) => media
-  ? <img src={`/api/library/${media}/download?inline=1`} alt="" className={cx(size, 'shrink-0 rounded-input object-cover')} loading="lazy" />
+const Thumb = ({ media, mime, channel, size = 'size-14' }: { media: string | null; mime?: string | null; channel: string; size?: string }) => media
+  ? <MediaThumb src={`/api/library/${media}/download?inline=1`} mime={mime} className={cx(size, 'shrink-0 rounded-input object-cover')} />
   : <span className={cx(size, 'flex shrink-0 items-center justify-center rounded-input text-[10px] font-bold text-white')} style={{ background: CH_COLOR[channel] ?? CH_COLOR.other }}>{channelLabel(channel).slice(0, 4)}</span>;
 
 const STATE: Record<string, [string, string]> = { waiting: ['대기', 'bg-slate-100 text-ink-2'], running: ['실행 중', 'bg-sky-50 text-sky-800'], done: ['완료', 'bg-emerald-50 text-emerald-800'] };
@@ -154,7 +155,7 @@ export function MarketingHome() {
         {data.kpi.approvalsDetail.contents > 0 && <Link href="/s/marketing/approvals" className="text-xs font-medium" style={{ color: C }}>전체 →</Link>}</h2>
       {data.approve.length ? <ul className="divide-y divide-line">{data.approve.map((c) => (
         <li key={c.id} className="flex gap-3 py-2" data-testid="mkt-home-approve">
-          <Thumb media={c.media} channel={c.channel} />
+          <Thumb media={c.media} mime={(c as any).mediaMime} channel={c.channel} />
           <div className="min-w-0 flex-1"><ApproveRow c={c} canDecide={data.canEdit} onDone={reload} />
             <Link href={`/s/marketing/approvals?c=${c.id}`} className="text-xs underline" data-testid="mkt-home-preview">미리보기</Link></div>
         </li>))}</ul>
@@ -210,7 +211,7 @@ export function MarketingHome() {
     recent: <section key="recent" className="grid gap-3 md:grid-cols-2" data-testid="mkt-home-recent">
       <div className="rounded-card border border-line bg-white p-4 shadow-card">
         <h2 className="text-base font-bold">④ 최근 게시물</h2>
-        {data.recent.length ? <div className="mt-2 grid grid-cols-3 gap-1.5">{data.recent.map((r) => <a key={r.id} href={r.published_url ?? `/s/marketing/approvals?c=${r.id}`} target={r.published_url ? '_blank' : undefined} rel="noopener noreferrer" className="block" title={r.title} data-testid="mkt-recent"><Thumb media={r.media} channel={r.channel} size="aspect-square w-full" /><div className="mt-0.5 truncate text-[11px] text-ink-2">{r.title}</div></a>)}</div>
+        {data.recent.length ? <div className="mt-2 grid grid-cols-3 gap-1.5">{data.recent.map((r) => <a key={r.id} href={r.published_url ?? `/s/marketing/approvals?c=${r.id}`} target={r.published_url ? '_blank' : undefined} rel="noopener noreferrer" className="block" title={r.title} data-testid="mkt-recent"><Thumb media={r.media} mime={(r as any).mediaMime} channel={r.channel} size="aspect-square w-full" /><div className="mt-0.5 truncate text-[11px] text-ink-2">{r.title}</div></a>)}</div>
           : <p className="mt-1 text-xs text-ink-3">아직 게시한 글이 없습니다.</p>}
       </div>
       <div className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-suggest">

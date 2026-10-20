@@ -353,7 +353,7 @@ export async function deleteLibraryFile(u: SessionUser, id: string) {
 export async function libraryDownload(u: SessionUser, id: string, inline: boolean) {
   const f = await loadLibraryFile(u, id, 'download');
   if (f.upload_status !== 'ready') throw notFound();
-  return downloadUrl(f.storage_key, f.file_name, inline && /^(image\/(png|jpe?g|gif|webp)|application\/pdf)$/.test(f.mime_type));
+  return downloadUrl(f.storage_key, f.file_name, inline && /^(image\/(png|jpe?g|gif|webp)|video\/.+|application\/pdf)$/.test(f.mime_type));
 }
 
 /** 자료를 업무에 첨부 (같은 저장 파일을 가리킴 — 복사하지 않음) */
