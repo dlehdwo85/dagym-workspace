@@ -1328,6 +1328,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - **대신 보기 없음**: 운영자가 고객사로 로그인하는 기능은 만들지 않음 — 지원 모드(고객사 대표 허용·읽기 전용 30분·감사)만
 - 시험: tests/api/platform-admin.test.mjs +2건(추가·초대 수락·다시 보내기·409/400/404·요금제 지정 active·공간·메모·감사), tests/e2e/platformAdd.step.mjs(캡처 152·153)
 
+## 2026-10-20 (클라우드) — 대표 15:15 부서·팀 재정비 (migration 129 team_members.is_primary) — [배포확인요청]
+- 조직 = 트리: 본사 › 부서 › (하위 부서) › 팀. 종류는 부서/팀 2가지, 부서 아래 부서·팀 모두 가능(영업부 › 수도권영업부 › 수도권1팀), 팀 아래는 못 만듦. `GET /api/teams` 에 `path`("영업부 › 영업1팀")·`depth`·`parent_path`, 경로순 정렬. 부서·팀 탭은 들여쓰기 트리(`team-tree`, 카드 `data-depth`), 편집 폼 '상위 부서'(부서는 비우면 최상위, 팀은 필수, 자기 하위는 제외 — 순환 방지)
+- 사람의 소속 = **주 소속 1개 + 겸직 n개**(team_members.is_primary, 기존 사람은 장인 곳 우선 첫 소속을 주 소속으로 이전). 초대·편집 폼의 '소속' 하나(src/components/TeamPicker.tsx: 트리 체크 + '주 소속' 라디오) — 예전 '소속(접근 가능한 조직)'은 '고급 — 접근 가능한 조직' 접힘으로, 비우면 **본사(hq) 자동**. `POST /api/admin/users {teamIds, primaryTeamId}`·`PATCH /api/admin/users/{id} {teamIds, primaryTeamId}` → src/lib/teams.ts `setUserTeams`(팀 대화방 멤버도 맞춤). users GET 에 `teams[{path, primary, lead}]`
+- 단위마다 '장' 1명: 편집 폼 라디오(부서장/팀장). 서버는 '1명 이상' 규칙 그대로(기존 데이터 호환) — 영어 배지(Lead)는 15:05 건에서
+- 표기: 목록·칩·프로필 경로(PC "영업부 › 영업1팀", 휴대폰은 마지막 단위만 — `TeamPath`), 업무 '팀별' 칩·메뉴 권한 지정 팀·팀 화면 제목
+- 접근 범위·격리·팀별 보기·메뉴 권한은 이미 트리(재귀)를 따름(access.ts subTeamsSql·teamScope) — 하위 부서가 생겨도 같은 규칙. 담당자 지정·주간 보고 묶음은 15:00 담당자 지정 건에서 이 트리를 씀
+- 드래그로 옮기기는 안 넣음(상위 부서 선택으로 대체) — 필요하면 다음 회차
+- 시험: tests/api/org-tree.test.mjs 3건, team-isolation(부서 아래 부서 허용으로 기대 변경), tests/e2e/orgTree.step.mjs(캡처 154·155·155-390)
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md

@@ -23,16 +23,18 @@ before(async () => {
 after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); });
 
 describe('부서 › 팀 2단 + 격리', () => {
-  test('종류 규칙: 상위 없으면 부서·있으면 팀, 팀은 부서 아래만, 부서는 상위 없음', async () => {
+  test('종류 규칙: 상위 없으면 부서·있으면 팀, 팀은 부서 아래만, 부서 아래 부서(하위 부서)도 됨', async () => {
     assert.equal((await ctx.owner.req('POST', '/api/teams', { name: 'x', kind: 'team', members: [{ userId: P.opsLead.id, lead: true }] })).status, 400, '팀은 부서 필요');
     P.dept = (await ctx.owner.ok('POST', '/api/teams', { name: '본사운영부', members: [{ userId: ctx.ownerId, lead: true }], defaultSpaces: ['work', 'sales'] })).id;
-    assert.equal((await ctx.owner.req('POST', '/api/teams', { name: 'y', kind: 'dept', parentId: P.dept, members: [{ userId: P.opsLead.id, lead: true }] })).status, 400, '부서는 상위 없음');
+    P.sub = (await ctx.owner.ok('POST', '/api/teams', { name: 'y하위부', kind: 'dept', parentId: P.dept, members: [{ userId: P.opsLead.id, lead: true }] })).id; // 재정비(10/20): 부서 아래 부서 가능
     P.team = (await ctx.owner.ok('POST', '/api/teams', { name: '운영팀', parentId: P.dept, members: [{ userId: P.opsLead.id, lead: true }, { userId: P.ops1.id, lead: false }] })).id;
     assert.equal((await ctx.owner.req('POST', '/api/teams', { name: 'z', parentId: P.team, members: [{ userId: P.opsLead.id, lead: true }] })).status, 400, '팀 아래 팀 불가');
     const list = (await ctx.owner.ok('GET', '/api/teams')).teams;
     const d = list.find((t) => t.id === P.dept), t = list.find((t) => t.id === P.team);
     assert.deepEqual([d.kind, d.isolated, d.default_spaces], ['dept', false, ['work', 'sales']]);
-    assert.deepEqual([t.kind, t.isolated, t.parent_name], ['team', true, '본사운영부'], '팀은 기본 격리·부서 이름');
+    assert.deepEqual([t.kind, t.isolated, t.parent_name, t.path, t.depth], ['team', true, '본사운영부', '본사운영부 › 운영팀', 1], '팀은 기본 격리·부서 이름·경로');
+    assert.equal(list.find((x) => x.id === P.sub).path, '본사운영부 › y하위부');
+    await ctx.owner.ok('PATCH', `/api/teams/${P.sub}`, { archived: true });
     assert.ok((await sql`select 1 from calendars where type = 'team' and team_id = ${P.team}`).length, '팀 일정 캘린더');
   });
 

@@ -23,7 +23,7 @@ export default function TeamBoard({ params }: { params: Promise<{ id: string }> 
     <div className="space-y-3">
       {/* 대기열 ①(10/19): 하위 화면 뒤로가기 — 기록이 있으면 뒤로, 없으면 부서·팀 목록 */}
       <button type="button" onClick={() => (window.history.length > 1 ? router.back() : router.push('/admin/users?tab=teams'))} className="inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink" data-testid="team-back"><ArrowLeft className="size-4" />뒤로</button>
-      <PageHeader title={team.kind === 'team' && team.parent_name ? `${team.parent_name} / ${team.name}` : team.name} icon={UsersRound} sub={`팀원 ${team.members.length}명 · 열린 업무 ${list.filter((t) => t.status !== 'done').length}건`}
+      <PageHeader title={team.path ?? team.name} icon={UsersRound} sub={`팀원 ${team.members.length}명 · 열린 업무 ${list.filter((t) => t.status !== 'done').length}건`}
         actions={team.room_id ? <Link href={`/messages?room=${team.room_id}`} className="inline-flex h-9 items-center gap-1.5 rounded-input border border-line px-3 text-sm hover:bg-slate-50"><MessageCircle className="size-4" />팀 대화방</Link> : null} />
       <div className="scrollbar-thin -mx-3 flex gap-3 overflow-x-auto px-3 pb-3" data-testid="team-board">
         {cols.map((c) => {

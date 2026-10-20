@@ -15,12 +15,17 @@ import { tenantOf } from './types';
 
 export async function listTeams(u: SessionUser) {
   const sql = db();
-  const teams = await sql`select t.id, t.name, t.color, t.parent_id, t.kind, t.isolated, t.default_spaces, (select p.name from teams p where p.id = t.parent_id) as parent_name,
-      coalesce(json_agg(json_build_object('id', us.id, 'name', us.name, 'title', us.title, 'lead', m.is_lead) order by m.is_lead desc, us.name) filter (where us.id is not null), '[]') as members,
+  // 대표 10/20 15:15 재정비: 트리(부서 › 하위 부서 › 팀) — path(경로 "영업부 › 영업1팀")·depth 로 들여쓰기, 경로순 정렬
+  const teams = await sql`with recursive tr as (
+      select t.id, t.name::text as path, 0 as depth, t.name::text as sort_key from teams t where t.tenant = ${tenantOf(u)} and not t.archived and t.parent_id is null
+      union all select c.id, tr.path || ' › ' || c.name, tr.depth + 1, tr.sort_key || '/' || c.name from teams c join tr on c.parent_id = tr.id where not c.archived)
+    select t.id, t.name, t.color, t.parent_id, t.kind, t.isolated, t.default_spaces, (select p.name from teams p where p.id = t.parent_id) as parent_name, tr.path, tr.depth,
+      nullif(left(tr.path, greatest(length(tr.path) - length(t.name) - 3, 0)), '') as parent_path,
+      coalesce(json_agg(json_build_object('id', us.id, 'name', us.name, 'title', us.title, 'lead', m.is_lead, 'primary', m.is_primary) order by m.is_lead desc, us.name) filter (where us.id is not null), '[]') as members,
       bool_or(m.user_id = ${u.id}) as mine, bool_or(m.user_id = ${u.id} and m.is_lead) as i_lead,
       (select id from chat_rooms r where r.team_id = t.id) as room_id
-    from teams t left join team_members m on m.team_id = t.id left join users us on us.id = m.user_id and us.status = 'active'
-    where t.tenant = ${tenantOf(u)} and not t.archived group by t.id order by (t.kind = 'team'), t.name`;
+    from teams t join tr on tr.id = t.id left join team_members m on m.team_id = t.id left join users us on us.id = m.user_id and us.status = 'active'
+    where t.tenant = ${tenantOf(u)} and not t.archived group by t.id, tr.path, tr.depth, tr.sort_key order by tr.sort_key`;
   // 대표 10/20 4): 업무 화면 팀 칩 — 이 사람이 업무를 볼 수 있는 팀(관리자 전체 · 자기 팀(팀 업무 조회 이상) · 하위 팀 · 격리 아니면 다른 팀 전체 권한 또는 지정 팀)
   const { isAdmin } = await import('./access');
   let visible: Set<string> | null = null;
@@ -40,7 +45,7 @@ export const teamInput = z.object({
   name: z.string().trim().min(1).max(40),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#0F766E'),
   members: z.array(z.object({ userId: z.string().uuid(), lead: z.boolean().default(false) })).max(200),
-  /** R-16 상위(부서): 그 부서 구성원은 이 팀 업무 전체를 보고·고치고·배정 */
+  /** R-16 상위(부서): 그 부서 구성원은 이 팀 업무 전체를 보고·고치고·배정. 재정비(10/20): 부서 아래 부서도 됨 */
   parentId: z.string().uuid().nullable().optional(),
   /** 로컬 10/19: dept(부서, 상위 없음) · team(팀, 부서 아래). 비우면 상위가 있으면 팀, 없으면 부서 */
   kind: z.enum(['dept', 'team']).optional(),
@@ -53,11 +58,10 @@ const kindOf = (i: { kind?: 'dept' | 'team'; parentId?: string | null }) => i.ki
 /** 상위 팀 검사: 같은 회사, 자기 자신·자기 하위 팀은 안 됨(순환 방지) */
 async function checkParent(sql: Sql, u: SessionUser, teamId: string | null, parentId: string | null | undefined, kind?: 'dept' | 'team') {
   if (kind === 'team' && !parentId) throw badRequest('팀은 부서 아래에 만듭니다 — 먼저 부서를 만들거나 부서를 고르세요');
-  if (kind === 'dept' && parentId) throw badRequest('부서에는 상위가 없습니다(팀으로 만들면 부서 아래에 들어갑니다)');
-  if (!parentId) return;
+  if (!parentId) return; // 부서는 상위 없이(최상위) 또는 다른 부서 아래(영업부 › 영업1팀처럼 하위 부서)
   const [p] = await sql<{ kind: string }[]>`select kind from teams where id = ${parentId} and tenant = ${tenantOf(u)} and not archived`;
   if (!p) throw badRequest('상위 부서가 없습니다');
-  if (p.kind !== 'dept') throw badRequest('팀의 상위는 부서만 됩니다');
+  if (p.kind !== 'dept') throw badRequest('상위는 부서만 됩니다(팀 아래에는 만들 수 없습니다)');
   if (!teamId) return;
   const cyc = await sql`with recursive d as (select id from teams where id = ${teamId} union select c.id from teams c join d on c.parent_id = d.id) select 1 from d where id = ${parentId}`;
   if (cyc.length) throw badRequest('자기 자신이나 하위 팀을 상위 팀으로 정할 수 없습니다');
@@ -70,6 +74,8 @@ async function syncMembers(sql: Sql, u: SessionUser, teamId: string, members: z.
   await sql`delete from team_members where team_id = ${teamId} and not (user_id = any(${ids}::uuid[]))`;
   for (const m of members) await sql`insert into team_members (team_id, user_id, is_lead) values (${teamId}, ${m.userId}, ${m.lead})
     on conflict (team_id, user_id) do update set is_lead = excluded.is_lead`;
+  // 재정비: 소속이 하나뿐인 사람은 그곳이 주 소속
+  await sql`update team_members m set is_primary = true where m.team_id = ${teamId} and not exists (select 1 from team_members x where x.user_id = m.user_id and x.is_primary)`;
   // 팀 대화방: 없으면 만들고 멤버를 팀원과 같게
   await sql`insert into chat_rooms (tenant, kind, name, team_id, created_by) select ${tenantOf(u)}, 'team', t.name, t.id, ${u.id} from teams t where t.id = ${teamId}
     on conflict (team_id) where team_id is not null do update set name = excluded.name`;
@@ -128,4 +134,24 @@ export async function myTeamToday(u: SessionUser) {
     for (const x of r) if (!x.due_date || x.due_date <= today || x.status === 'in_progress') out.push(x);
   }
   return { teams, tasks: out.slice(0, 50) };
+}
+
+/**
+ * 대표 10/20 15:15 재정비: 사람의 소속 = 주 소속 1개 + 겸직 n개 (초대·사용자 편집에서 '소속' 하나로). 팀 대화방 멤버도 맞춘다.
+ * primaryTeamId 를 비우면 첫 번째(기존 주 소속이 남아 있으면 그것)가 주 소속.
+ */
+export async function setUserTeams(sql: Sql, tenant: string, userId: string, teamIds: string[], primaryTeamId?: string | null) {
+  const ids = [...new Set(teamIds)];
+  if (primaryTeamId && !ids.includes(primaryTeamId)) ids.unshift(primaryTeamId);
+  if (ids.length) {
+    const ok = await sql<{ id: string }[]>`select id from teams where id = any(${ids}::uuid[]) and tenant = ${tenant} and not archived`;
+    if (ok.length !== ids.length) throw badRequest('없는 부서·팀이 포함되어 있습니다');
+  }
+  const removed = await sql<{ team_id: string }[]>`delete from team_members where user_id = ${userId} and not (team_id = any(${ids}::uuid[])) returning team_id`;
+  for (const id of ids) await sql`insert into team_members (team_id, user_id, is_lead) values (${id}, ${userId}, false) on conflict (team_id, user_id) do nothing`;
+  const primary = primaryTeamId ?? (await sql<{ team_id: string }[]>`select team_id from team_members where user_id = ${userId} and is_primary`)[0]?.team_id ?? ids[0] ?? null;
+  await sql`update team_members set is_primary = (team_id = ${primary}) where user_id = ${userId}`;
+  for (const r of removed) await sql`delete from chat_members cm using chat_rooms r where cm.room_id = r.id and r.team_id = ${r.team_id} and cm.user_id = ${userId}`;
+  if (ids.length) await sql`insert into chat_members (room_id, user_id) select id, ${userId} from chat_rooms where team_id = any(${ids}::uuid[]) on conflict do nothing`;
+  return { teamIds: ids, primaryTeamId: primary };
 }
