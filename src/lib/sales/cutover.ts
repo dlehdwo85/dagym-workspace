@@ -132,13 +132,15 @@ async function assertWritesOpen(tenant: string) {
 }
 
 // ---------------- 쓰기(전환 뒤) — V39 D: 보류·실패는 사유 필수, 담당 변경 권한은 서버 검사 ----------------
-export const leadPatch = z.object({ name: z.string().trim().min(1).max(300).optional(), priority: z.enum(['urgent', 'high', 'medium', 'low']).nullable().optional(), status: z.enum(STAGES as [string, ...string[]]).optional(), reason: z.string().trim().max(500).optional(),
+const leadFields = { facilityType: z.string().trim().max(100).nullable().optional(), region: z.string().trim().max(50).nullable().optional(), scale: z.string().trim().max(60).nullable().optional(), expectedRevenue: z.number().min(0).max(1e13).nullable().optional(),
+  contactName: z.string().trim().max(100).nullable().optional(), phone: z.string().trim().max(40).nullable().optional(), email: z.string().trim().max(200).nullable().optional(), homepage: z.string().trim().max(300).nullable().optional() }; // S2 2차 리드 폼 13칸
+export const leadPatch = z.object({ ...leadFields, name: z.string().trim().min(1).max(300).optional(), priority: z.enum(['urgent', 'high', 'medium', 'low']).nullable().optional(), status: z.enum(STAGES as [string, ...string[]]).optional(), reason: z.string().trim().max(500).optional(),
   nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), memo: z.string().max(5000).nullable().optional(), ownerId: z.string().uuid().nullable().optional() });
 export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof leadPatch>) {
   await assertSpace(u, 'sales');
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
   const t = tenantOf(u); const sql = db();
-  const [l] = await sql<any[]>`select id, status, owner_id from sales_leads where id = ${id} and tenant = ${t}`;
+  const [l] = await sql<any[]>`select id, status, owner_id from sales_leads where id = ${id} and tenant = ${t} and deleted_at is null`;
   if (!l) throw notFound();
   await assertWritesOpen(t);
   if (i.status && ['보류', '실패'].includes(i.status) && !i.reason) throw badRequest(`'${i.status}'(으)로 바꿀 때는 사유가 필요합니다`);
@@ -149,8 +151,12 @@ export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof l
   await sql.begin(async (tx) => {
     await tx`update sales_leads set status = coalesce(${i.status ?? null}, status), name = coalesce(${i.name ?? null}, name), priority = ${i.priority === undefined ? tx`priority` : i.priority},
       next_contact_date = ${i.nextContactDate === undefined ? tx`next_contact_date` : i.nextContactDate}, memo = ${i.memo === undefined ? tx`memo` : i.memo},
-      owner_id = ${i.ownerId === undefined ? tx`owner_id` : i.ownerId}, updated_at = now() where id = ${id}`;
+      owner_id = ${i.ownerId === undefined ? tx`owner_id` : i.ownerId},
+      facility_type = ${i.facilityType === undefined ? tx`facility_type` : i.facilityType}, region = ${i.region === undefined ? tx`region` : i.region}, scale = ${i.scale === undefined ? tx`scale` : i.scale},
+      expected_revenue = ${i.expectedRevenue === undefined ? tx`expected_revenue` : i.expectedRevenue}, contact_name = ${i.contactName === undefined ? tx`contact_name` : i.contactName},
+      phone = ${i.phone === undefined ? tx`phone` : i.phone}, email = ${i.email === undefined ? tx`email` : i.email}, homepage = ${i.homepage === undefined ? tx`homepage` : i.homepage}, updated_at = now() where id = ${id}`;
     if (i.status && i.status !== l.status) await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${id}, ${l.status}, ${i.status}, ${i.reason ?? null}, ${u.id})`;
+    if (i.ownerId !== undefined && i.ownerId !== l.owner_id) await audit(tx, u.id, 'sales.lead_owner', 'sales_lead', id, { from: l.owner_id, to: i.ownerId }, null); // 담당자 변경 로그
   });
   // 대표 10/20 14:15: 보류·실패·계약완료 → 열린 영업 업무 보류·완료, 다음 연락일 바꾸면 업무 마감도
   if (i.status || i.nextContactDate !== undefined) {
@@ -160,32 +166,93 @@ export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof l
   return { ok: true };
 }
 
-export const leadCreate = z.object({ name: z.string().trim().min(1).max(300), status: z.enum(STAGES as [string, ...string[]]).default('신규리드'), priority: z.enum(['urgent', 'high', 'medium', 'low']).optional(),
-  facilityType: z.string().max(100).optional(), region: z.string().max(50).optional(), contactName: z.string().max(100).optional(), phone: z.string().max(40).optional(),
-  nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), memo: z.string().max(5000).optional() });
-/** 새 리드(전환 뒤) — 담당 = 만든 사람 */
+export const leadCreate = z.object({ ...leadFields, name: z.string().trim().min(1).max(300), status: z.enum(STAGES as [string, ...string[]]).default('신규리드'), priority: z.enum(['urgent', 'high', 'medium', 'low']).optional(),
+  nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), memo: z.string().max(5000).optional(), ownerId: z.string().uuid().optional(), reason: z.string().max(500).optional(),
+  force: z.boolean().optional() /* 비슷한 거래처가 있어도 새로 */ });
+const normName = (s: string) => s.replace(/[\s()（）·\-_,.]/g, '').toLowerCase();
+/** S2 2차: 비슷한 이름의 거래처(앞 4자, 최대 5곳) — 새 리드 중복 경고·[진행영업으로 넘기기]와 같은 규칙 */
+export async function similarLeads(sql: ReturnType<typeof db>, tenant: string, name: string, excludeId?: string) {
+  const key = normName(name).slice(0, 4);
+  if (key.length < 2) return [];
+  return sql<{ id: string; name: string; status: string | null; region: string | null }[]>`select id, name, status, region from sales_leads where tenant = ${tenant} and deleted_at is null and id is distinct from ${excludeId ?? null}
+    and replace(replace(replace(lower(name), ' ', ''), '(', ''), ')', '') like ${'%' + key + '%'} order by updated_at desc limit 5`;
+}
+/** 새 리드(전환 뒤) — 담당 = 만든 사람(관리자는 지정 가능). 비슷한 거래처가 있으면 먼저 알려 주고(force 로 그래도 새로) */
 export async function createLead(u: SessionUser, i: z.infer<typeof leadCreate>) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); await assertWritesOpen(t);
-  const [r] = await db()<{ id: string }[]>`insert into sales_leads (tenant, name, status, priority, facility_type, region, owner_id, next_contact_date, contact_name, phone, memo)
-    values (${t}, ${i.name}, ${i.status}, ${i.priority ?? null}, ${i.facilityType ?? null}, ${i.region ?? null}, ${u.id}, ${i.nextContactDate ?? null}, ${i.contactName ?? null}, ${i.phone ?? null}, ${i.memo ?? null}) returning id`;
+  if (!i.force) { const similar = await similarLeads(db(), t, i.name); if (similar.length) return { similar }; }
+  const owner = i.ownerId && ['owner', 'admin'].includes(u.role) ? i.ownerId : u.id;
+  const [r] = await db()<{ id: string }[]>`insert into sales_leads (tenant, name, status, priority, facility_type, region, scale, expected_revenue, owner_id, next_contact_date, contact_name, phone, email, homepage, memo)
+    values (${t}, ${i.name}, ${i.status}, ${i.priority ?? null}, ${i.facilityType ?? null}, ${i.region ?? null}, ${i.scale ?? null}, ${i.expectedRevenue ?? null}, ${owner}, ${i.nextContactDate ?? null}, ${i.contactName ?? null}, ${i.phone ?? null}, ${i.email ?? null}, ${i.homepage ?? null}, ${i.memo ?? null}) returning id`;
+  if (i.reason || i.status !== '신규리드') await db()`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${r.id}, null, ${i.status}, ${i.reason ?? null}, ${u.id})`;
   // 대표 10/20 14:15(원본 규칙 '[첫 연락]' 업무 자동): 새 리드 → 담당자 업무
-  await (await import('./autoTasks')).syncSalesTask(db(), u, { kind: 'lead', id: r.id, name: i.name, status: i.status, nextDate: i.nextContactDate ?? null, nextAction: '첫 연락', leadId: r.id });
+  await (await import('./autoTasks')).syncSalesTask(db(), u, { kind: 'lead', id: r.id, name: i.name, status: i.status, nextDate: i.nextContactDate ?? null, nextAction: '첫 연락', leadId: r.id, assigneeId: owner });
   return { id: r.id };
 }
-export const activityInput = z.object({ type: z.enum(['전화', '방문', '미팅', '메일', '문자', '기타']).default('전화'), content: z.string().trim().min(1).max(5000), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
+/** S2 2차: 리드 삭제(사유·감사, 소프트) — 관리자 또는 담당자. 열린 영업 업무는 완료 처리 */
+export async function deleteLead(u: SessionUser, id: string, reason: string, ip: string | null) {
+  await assertSpace(u, 'sales');
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
+  const t = tenantOf(u); const sql = db();
+  const [l] = await sql<{ owner_id: string | null; name: string }[]>`select owner_id, name from sales_leads where id = ${id} and tenant = ${t} and deleted_at is null`;
+  if (!l) throw notFound();
+  await assertWritesOpen(t);
+  if (!['owner', 'admin'].includes(u.role) && l.owner_id !== u.id) throw new HttpError(403, 'forbidden', '담당 리드만 지울 수 있습니다');
+  await sql`update sales_leads set deleted_at = now(), deleted_reason = ${reason}, updated_at = now() where id = ${id}`;
+  await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: 'lead', id, name: l.name, status: '대상아님' });
+  await audit(sql, u.id, 'sales.lead_delete', 'sales_lead', id, { name: l.name, reason }, ip);
+  return { ok: true };
+}
+/** S2 2차: 리드 상세 '업무' 탭 — 사람이 맡는 업무 추가(space sales, lead_id·sales_ref 연결) */
+export const leadTaskInput = z.object({ title: z.string().trim().min(1).max(200), dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), assigneeId: z.string().uuid().optional() });
+export async function addLeadTask(u: SessionUser, leadId: string, i: z.infer<typeof leadTaskInput>) {
+  await assertSpace(u, 'sales');
+  if (!/^[0-9a-f-]{36}$/i.test(leadId)) throw notFound();
+  const t = tenantOf(u); const sql = db();
+  const [l] = await sql<{ owner_id: string | null; name: string }[]>`select owner_id, name from sales_leads where id = ${leadId} and tenant = ${t} and deleted_at is null`;
+  if (!l) throw notFound();
+  await assertWritesOpen(t);
+  const { createTask } = await import('../tasks');
+  const r = await createTask(u, { title: i.title, description: `거래처 ${l.name} — /s/sales/leads?id=${leadId}`, space: 'sales', assigneeId: i.assigneeId ?? l.owner_id ?? u.id, requestedById: u.id, dueDate: i.dueDate ?? null, approvalRequired: false, tags: ['영업', '리드'] }, { quiet: false, skipQuota: true });
+  await sql`update tasks set sales_ref = ${sql.json({ kind: 'lead', id: leadId, name: l.name, manual: true })}, lead_id = ${leadId} where id = ${r.id}`;
+  await sql`update sales_leads set updated_at = now() where id = ${leadId}`;
+  return { id: r.id };
+}
+/** S2 2차: CSV 가져오기(관리자) — 같은 이름(공백·괄호 무시)이 있으면 건너뜀 */
+export const importInput = z.object({ rows: z.array(leadCreate.omit({ force: true, ownerId: true, reason: true })).min(1).max(2000) });
+export async function importLeads(u: SessionUser, i: z.infer<typeof importInput>) {
+  await assertSpace(u, 'sales');
+  if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden', 'CSV 가져오기는 관리자만');
+  const t = tenantOf(u); await assertWritesOpen(t); const sql = db();
+  const have = new Set((await sql<{ name: string }[]>`select name from sales_leads where tenant = ${t} and deleted_at is null`).map((x) => normName(x.name)));
+  let created = 0; const skipped: string[] = [];
+  for (const r of i.rows) {
+    const k = normName(r.name);
+    if (!k || have.has(k)) { skipped.push(r.name); continue; }
+    have.add(k);
+    await createLead(u, { ...r, force: true });
+    created++;
+  }
+  await audit(sql, u.id, 'sales.lead_import', 'sales_lead', null, { created, skipped: skipped.length }, null);
+  return { ok: true, created, skipped };
+}
+export const activityInput = z.object({ type: z.enum(['전화', '방문', '미팅', '메일', '문자', '기타']).default('전화'), content: z.string().trim().min(1).max(5000), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), nextAction: z.string().trim().max(200).optional(), request: z.string().trim().max(2000).optional() /* S2 2차: 다음 연락 예정일·다음 액션·고객 요청 */ });
 /** 상담(활동) 기록 추가 — 담당자·관리자 */
 export async function addActivity(u: SessionUser, leadId: string, i: z.infer<typeof activityInput>) {
   await assertSpace(u, 'sales');
   if (!/^[0-9a-f-]{36}$/i.test(leadId)) throw notFound();
   const t = tenantOf(u); const sql = db();
-  const [l] = await sql<{ owner_id: string | null }[]>`select owner_id from sales_leads where id = ${leadId} and tenant = ${t}`;
+  const [l] = await sql<{ owner_id: string | null; name: string; status: string }[]>`select owner_id, name, status from sales_leads where id = ${leadId} and tenant = ${t} and deleted_at is null`;
   if (!l) throw notFound();
   await assertWritesOpen(t);
   if (!['owner', 'admin'].includes(u.role) && l.owner_id && l.owner_id !== u.id) throw new HttpError(403, 'forbidden', '담당 리드만 기록할 수 있습니다');
   const day = i.date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
   const [r] = await sql<{ id: string }[]>`insert into sales_lead_records (tenant, kind, lead_id, occurred_at, data) values (${t}, 'sales_activities', ${leadId}, ${new Date(`${day}T12:00:00+09:00`)},
-    ${sql.json({ activity_type: i.type, content: i.content, activity_date: day, created_by: u.id, created_by_name: u.name })}) returning id`;
-  await sql`update sales_leads set updated_at = now() where id = ${leadId}`;
+    ${sql.json({ activity_type: i.type, content: i.content, activity_date: day, next_contact_date: i.nextDate ?? null, next_action: i.nextAction ?? null, customer_request: i.request ?? null, created_by: u.id, created_by_name: u.name })}) returning id`;
+  // 상담에서 다음 연락 예정일을 적으면 리드의 다음 연락일·영업 업무 마감도 같이
+  if (i.nextDate) { await sql`update sales_leads set next_contact_date = ${i.nextDate}, updated_at = now() where id = ${leadId}`; await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: 'lead', id: leadId, name: l.name, status: l.status, nextDate: i.nextDate, nextAction: i.nextAction ?? null, assigneeId: l.owner_id, leadId }); }
+  else await sql`update sales_leads set updated_at = now() where id = ${leadId}`;
   return { id: r.id };
 }

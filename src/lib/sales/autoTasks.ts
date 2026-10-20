@@ -21,7 +21,7 @@ export type SyncInput = { kind: SalesKind; id: string; name: string; status: str
 /** 열린(완료 아님) 자동 업무 찾기 */
 async function openTask(sql: Sql, tenant: string, kind: SalesKind, id: string) {
   const [t] = await sql<{ id: string; status: string; due_date: string | null }[]>`select t.id, t.status, t.due_date::text from tasks t join users cu on cu.id = t.created_by
-    where cu.tenant = ${tenant} and t.deleted_at is null and t.sales_ref->>'kind' = ${kind} and t.sales_ref->>'id' = ${id} and t.status <> 'done' order by t.created_at desc limit 1`;
+    where cu.tenant = ${tenant} and t.deleted_at is null and t.sales_ref->>'kind' = ${kind} and t.sales_ref->>'id' = ${id} and coalesce(t.sales_ref->>'manual', '') <> 'true' and t.status <> 'done' order by t.created_at desc limit 1`;
   return t ?? null;
 }
 /**
