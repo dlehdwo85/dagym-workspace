@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { api, broadcastRefresh } from './client';
-import { Camera, Download, Eye, FileText, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Table2, Trash2, Upload } from 'lucide-react';
+import { Camera, Download, Eye, FileText, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload } from 'lucide-react';
 import { isNativeApp } from './native';
 import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
@@ -46,7 +46,7 @@ export async function uploadTaskFiles(list: File[], target: { taskId?: string; e
 
 const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '');
 
-const SOURCE_LABEL: Record<string, string> = { upload: '업로드', google_drive: 'Google Drive', chatgpt: 'ChatGPT 결과물', notion: 'Notion', web: '웹 링크', other: '기타' };
+const SOURCE_LABEL: Record<string, string> = { upload: '업로드', google_drive: 'Google Drive', chatgpt: 'ChatGPT 결과물', notion: 'Notion', web: '웹 링크', other: '기타', library: '자료실' };
 
 export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }: { items: any[]; taskId?: string; eventId?: string; canEdit: boolean; onChange: () => void; meId: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -58,6 +58,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   // 대표 10/20 23:05: 첨부를 업무 안에서 열어 고치고 저장 — docx 는 워크인 문서(공동 편집), xlsx 는 칸 고치기, 나머지는 새 버전 올리기. 버전 기록·되돌리기
   const [versionsOf, setVersionsOf] = useState<any | null>(null);
   const [sheetOf, setSheetOf] = useState<any | null>(null);
+  const [libOpen, setLibOpen] = useState(false); // 대표 10/20 23:55: [자료실에서 가져오기]
   const verRef = useRef<HTMLInputElement>(null); const [verTarget, setVerTarget] = useState<any | null>(null);
   const editKind = (a: any) => (/\.docx$/i.test(a.file_name ?? '') ? 'doc' : /\.xlsx$/i.test(a.file_name ?? '') ? 'sheet' : 'file');
   async function openDoc(a: any) {
@@ -160,6 +161,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
         <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
         <input ref={albumRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="album-input" />
         <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={!!busy}><Paperclip />파일 첨부</Button>
+        {taskId && <Button size="sm" variant="secondary" onClick={() => setLibOpen(true)} disabled={!!busy} title="자료실에 있는 파일을 이 업무에 연결(복사 아님, 자료실 권한 그대로)" data-testid="att-from-library"><FolderOpen />자료실에서</Button>}
         <Button size="sm" variant="secondary" onClick={() => camRef.current?.click()} disabled={!!busy}><Camera />사진 촬영</Button>
         <Button size="sm" variant="secondary" onClick={() => albumRef.current?.click()} disabled={!!busy}><ImageIcon />사진 여러 장</Button>
         <Button size="sm" variant="secondary" onClick={() => setLinkOpen(true)}><Link2 />문서 링크 연결</Button>
@@ -205,6 +207,9 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       <input ref={verRef} type="file" className="hidden" onChange={(e) => uploadVersion(verTarget, e.target.files?.[0])} aria-label="새 버전 파일" data-testid="att-version-file" />
       {versionsOf && <VersionsModal a={versionsOf} canEdit={canEdit} onClose={() => setVersionsOf(null)} onChange={() => { onChange(); broadcastRefresh(); }} />}
       {sheetOf && <SheetEditModal a={sheetOf} onClose={() => setSheetOf(null)} onSaved={() => { setSheetOf(null); onChange(); broadcastRefresh(); }} />}
+      {libOpen && taskId && <LibraryPickModal onClose={() => setLibOpen(false)} onPick={async (files) => {
+        let ok = 0; for (const f of files) { try { await api(`/api/library/${f.id}/attach`, { body: { taskId } }); ok++; } catch (e: any) { toast.error(`${f.title}: ${e.message}`); } }
+        if (ok) toast.ok(`자료실 파일 ${ok}건을 첨부했습니다`); setLibOpen(false); onChange(); broadcastRefresh(); }} />}
     </DropZone>
   );
 }
@@ -288,4 +293,45 @@ export function fmtSize(b: number) {
   if (b < 1024) return `${b}B`;
   if (b < 1024 * 1024) return `${Math.max(1, Math.round(b / 1024))}KB`;
   return `${(b / 1024 / 1024).toFixed(1)}MB`;
+}
+
+/** 대표 10/20 23:55: 자료실에서 가져오기 — 검색(이름·폴더·내용)·공간·폴더·최근 파일·여러 개 체크. 같은 파일을 업무에 연결(복사 아님), 권한은 자료실 폴더 권한 그대로 */
+export type LibPicked = { id: string; title: string; file_name: string; size_bytes?: number };
+export function LibraryPickModal({ onClose, onPick, title = '자료실에서 가져오기', confirmLabel = '첨부' }: { onClose: () => void; onPick: (files: LibPicked[]) => void | Promise<void>; title?: string; confirmLabel?: string }) {
+  const [q, setQ] = useState(''); const [query, setQuery] = useState(''); const [space, setSpace] = useState('all'); const [folder, setFolder] = useState('*');
+  const [sel, setSel] = useState<Record<string, LibPicked>>({}); const [busy, setBusy] = useState(false);
+  const [data, setData] = useState<any | null>(null); const [err, setErr] = useState('');
+  useEffect(() => { let on = true; setData(null);
+    api<any>(`/api/library?limit=60&space=${encodeURIComponent(space)}&folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(query)}`).then((d) => { if (on) setData(d); }).catch((e) => { if (on) setErr(e.message); });
+    return () => { on = false; }; }, [query, space, folder]);
+  const files: any[] = (data?.files ?? []).filter((f: any) => f.mime_type !== 'application/x-workin-doc');
+  const n = Object.keys(sel).length;
+  const SP: Record<string, string> = { all: '전체', work: '업무', sales: '영업', marketing: '마케팅' };
+  return (
+    <Modal open onClose={onClose} title={title} wide>
+      <div className="space-y-2 text-sm" data-testid="lib-pick">
+        <form onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }} className="flex flex-wrap items-center gap-1.5">
+          <input className={cx(inputCls, 'h-9 min-w-0 flex-1')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="파일 이름·폴더·내용으로 찾기" aria-label="자료 검색" data-testid="lib-pick-q" />
+          <Button size="sm" type="submit" variant="secondary"><Search />찾기</Button>
+          {(data?.spaces?.length ?? 0) > 1 && <select className={cx(inputCls, 'h-9 w-auto py-0')} value={space} onChange={(e) => { setSpace(e.target.value); setFolder('*'); }} aria-label="공간"><option value="all">모든 공간</option>{(data?.spaces ?? []).map((s: string) => <option key={s} value={s}>{SP[s] ?? s}</option>)}</select>}
+          <select className={cx(inputCls, 'h-9 max-w-[12rem] py-0')} value={folder} onChange={(e) => setFolder(e.target.value)} aria-label="폴더" data-testid="lib-pick-folder"><option value="*">모든 폴더</option>{(data?.folders ?? []).map((f: any) => <option key={f.folder} value={f.folder}>{f.folder || '(최상위)'}{f.n ? ` (${f.n})` : ''}</option>)}</select>
+        </form>
+        {err && <p className="text-xs text-red-700">{err}</p>}
+        <p className="text-[11px] text-ink-3">{query ? `"${query}" 검색 결과` : '최근 올린 순'} · 체크한 파일을 이 업무에 연결합니다(복사 아님 — 자료실에서 지우거나 등급을 바꾸면 업무에서도 같이 적용).</p>
+        <ul className="max-h-[50vh] divide-y divide-line overflow-y-auto rounded-input border border-line" data-testid="lib-pick-list">
+          {!data && !err && <li className="px-3 py-3 text-xs text-ink-3">불러오는 중…</li>}
+          {files.map((f) => { const on = !!sel[f.id]; return (
+            <li key={f.id}><label className={cx('flex cursor-pointer items-center gap-2.5 px-2.5 py-2 hover:bg-slate-50', on && 'bg-accent-50/50')} data-testid="lib-pick-item">
+              <input type="checkbox" className="size-4 accent-brand-600" checked={on} onChange={() => setSel((s) => { const c = { ...s }; if (c[f.id]) delete c[f.id]; else c[f.id] = { id: f.id, title: f.title || f.file_name, file_name: f.file_name, size_bytes: Number(f.size_bytes) }; return c; })} aria-label={`${f.title || f.file_name} 선택`} />
+              <FileKindIcon a={{ kind: 'file', mime_type: f.mime_type, file_name: f.file_name }} small />
+              <span className="min-w-0 flex-1"><span className="block truncate font-medium">{f.title || f.file_name}</span><span className="block truncate text-[11px] text-ink-3">{f.folder || '최상위'}{f.security === 'confidential' ? ' · 기밀' : ''} · {f.created_by_name ?? ''} · {fmtDate(f.updated_at ?? f.created_at)}</span></span>
+              <span className="text-xs tabular-nums text-ink-3">{f.size_bytes ? fmtSize(Number(f.size_bytes)) : ''}</span>
+            </label></li>); })}
+          {data && !files.length && <li className="px-3 py-3 text-xs text-ink-3">{query ? '찾는 자료가 없습니다' : '자료실에 파일이 없습니다'}</li>}
+        </ul>
+        <div className="flex items-center justify-end gap-2"><span className="mr-auto text-xs text-ink-2">{n ? `${n}개 선택` : ''}</span><Button variant="secondary" onClick={onClose}>취소</Button>
+          <Button onClick={async () => { setBusy(true); try { await onPick(Object.values(sel)); } finally { setBusy(false); } }} disabled={!n || busy} data-testid="lib-pick-go">{confirmLabel}{n ? ` (${n})` : ''}</Button></div>
+      </div>
+    </Modal>
+  );
 }

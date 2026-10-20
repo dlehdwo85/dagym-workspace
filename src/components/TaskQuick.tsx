@@ -100,10 +100,11 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
   return (
     <span className="relative inline-flex">
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={label} aria-haspopup="dialog" aria-expanded={open} data-testid="due-picker"
-        className={cx('hit inline-flex items-center rounded-md hover:bg-slate-100', !value && 'gap-1 px-1.5 py-0.5 text-xs text-ink-3', !value && emptyText && 'h-8 rounded-input border border-line bg-white px-2.5 text-sm')}>
-        {value ? <span className="inline-flex items-center gap-1"><DueChip due={value} status={status} />{time && <span className="text-xs font-medium text-ink-2 tabular-nums">{timeLabel(time)}</span>}</span> : <><CalendarDays className="size-3.5" />{compact ? '' : emptyText ?? '마감일'}</>}
+        /* 대표 10/20 23:40: 날짜 버튼이 시각 칩보다 작음 → 최소 높이 32px(터치 40px), 달력 아이콘 + 날짜, 비어 있으면 테두리 버튼 */
+        className={cx('hit inline-flex min-h-8 items-center rounded-input hover:bg-slate-100', !value && 'gap-1.5 border border-line bg-white text-sm text-ink-2', !value && (compact ? 'w-9 justify-center px-0' : 'px-2.5'), value && 'gap-1 px-1.5')}>
+        {value ? <span className="inline-flex items-center gap-1"><CalendarDays className="size-4 text-ink-3" /><DueChip due={value} status={status} />{time && <span className="text-xs font-medium text-ink-2 tabular-nums">{timeLabel(time)}</span>}</span> : <><CalendarDays className="size-4" />{compact ? '' : emptyText ?? '마감일'}</>}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={label} width={260}>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={label} width={onTime ? 300 : 260}>
         {/* V32 4: 마감 연장(담당자 = 요청자에게 요청, 요청자 = 바로) — 목록에서도 상세에 들어가지 않고 */}
         {onExtend && <button type="button" onClick={() => { setOpen(false); onExtend(); }} data-testid="due-extend-open"
           className="mb-1 flex w-full items-center gap-2 rounded-input bg-amber-50 px-2.5 py-2 text-left text-sm font-semibold text-amber-900 hover:bg-amber-100"><CalendarDays className="size-4" />{extendLabel ?? '마감 연장'}</button>}
@@ -112,9 +113,12 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
             <span>{l}</span><span className="text-xs text-ink-3 tabular-nums">{Number(d.slice(5, 7))}/{Number(d.slice(8))}</span>
           </button>
         ))}
-        <label className="flex items-center gap-2 px-2.5 py-1.5 text-sm"><span className="shrink-0 text-ink-2">날짜</span>
-          <input type="date" className="min-w-0 flex-1 rounded border border-line px-1.5 py-0.5 text-sm" value={value ?? ''} onChange={(e) => { onChange(e.target.value || null); if (!onTime) setOpen(false); }} aria-label={`${label} 날짜 선택`} />
-        </label>
+        {/* 대표 10/20 23:40: 날짜(넓게)·시각(좁게) 한 줄 두 칸, 둘 다 높이 40px */}
+        <div className="flex items-center gap-1.5 px-1.5 py-1.5" data-testid="due-date-row">
+          <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-input border border-line bg-white px-2.5 text-sm hover:border-slate-300 focus-within:border-brand-500"><CalendarDays className="size-4 shrink-0 text-ink-3" />
+            <input type="date" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none" value={value ?? ''} onChange={(e) => { onChange(e.target.value || null); if (!onTime) setOpen(false); }} aria-label={`${label} 날짜 선택`} data-testid="due-date-input" /></label>
+          {onTime && <TimePick className="h-10 w-24 shrink-0 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={time ?? ''} onChange={onTime} ariaLabel={`${label} 시각`} emptyLabel="시각" />}
+        </div>
         {/* V6 10번: 날짜 다음에 시각(15분, 기본 없음) */}
         {value && onTime && <TimeGrid value={time} onChange={onTime} label={label} />}
         {value && <button type="button" onClick={() => { onChange(null); onTime?.(null); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded-input px-2.5 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><X className="size-3.5" />마감일 지우기</button>}

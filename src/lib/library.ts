@@ -365,8 +365,8 @@ export async function attachLibraryToTask(u: SessionUser, fileId: string, taskId
   const sql = db();
   if (f.effective_security === 'confidential') await assertConfidentialAudience(taskId); // V14 15번
   const [a] = await sql<{ id: string }[]>`insert into attachments (task_id, kind, storage_key, file_name, mime_type, size_bytes, upload_status, doc_title, source, created_by)
-    values (${taskId}, 'file', ${f.storage_key}, ${f.file_name}, ${f.mime_type}, ${f.size_bytes}, 'ready', ${f.title}, 'other', ${u.id}) returning id`;
-  await activity(sql, 'task', taskId, u.id, 'file_attached', { name: f.file_name, size: Number(f.size_bytes), from: 'library' });
+    values (${taskId}, 'file', ${f.storage_key}, ${f.file_name}, ${f.mime_type}, ${f.size_bytes}, 'ready', ${f.title}, 'library', ${u.id}) returning id`; // 대표 10/20 23:55: 출처 자료실
+  await activity(sql, 'task', taskId, u.id, 'file_attached', { name: f.file_name, size: Number(f.size_bytes), from: 'library', folder: f.folder });
   return { id: a.id };
 }
 

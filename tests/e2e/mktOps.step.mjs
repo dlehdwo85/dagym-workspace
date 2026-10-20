@@ -38,6 +38,7 @@ export async function mktOps({ owner, ctx, sql, BASE, SHOTS }) {
     await budget.getByTestId('budget-status').filter({ hasText: '승인됨' }).waitFor();
   }
   await budget.getByTestId('budget-executed').waitFor();
+  assert.notEqual((await budget.getByTestId('budget-total').innerText()).trim(), '0원', '로컬 23:55: 계획 금액이 0원이면 안 됨'); // 기본 배분(실적 비례)도 금액이 들어감
   // 월 매출 목표 적기 → 막대
   const rg = owner.getByTestId('revenue-goal').first();
   await rg.getByTestId('revenue-edit').click();
