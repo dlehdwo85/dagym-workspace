@@ -150,3 +150,51 @@ describe('V28-3 슈퍼 계정', () => {
     assert.equal((await ctx.owner.post('/api/platform/tenants/default/delete', { action: 'schedule', confirmName: 'x' })).status, 400);
   });
 });
+
+// 대표 10/20 11:40 ① 플랫폼 운영 [고객사 추가]·공간·메모·감사·초대 다시 보내기 (대신 보기 없음)
+describe('플랫폼 운영 고객사 추가', () => {
+  const N = {};
+  test('[고객사 추가]: 회사·대표 계정(초대 대기)·업종 여러 개·규모·시작 공간·메모·체험 기간 → 초대 링크로 비밀번호 정하면 대표로 로그인, 운영자만', async () => {
+    const body = { company: '새고객사', industries: ['운동·피트니스', '교육'], size: '11-30', ownerName: '신대표', ownerEmail: 'new@cust.test', trialDays: 30, spaces: ['marketing'], memo: '10/20 대표 소개' };
+    assert.equal((await ctx.staffA.client.req('POST', '/api/platform/tenants', body)).status, 404, '플랫폼 운영자만');
+    const r = await ctx.owner.ok('POST', '/api/platform/tenants', body);
+    N.tenant = r.tenant; assert.ok(r.inviteLink && r.mail === 'dev', '초대 링크 + 메일 상태');
+    const [t] = await sql`select name, industries, industry, size_band, spaces, platform_memo, owner_user_id from tenants where id = ${r.tenant}`;
+    assert.deepEqual([t.name, t.industries, t.industry, t.size_band, t.spaces, t.platform_memo], ['새고객사', ['운동·피트니스', '교육'], '운동·피트니스', '11-30', ['work', 'marketing'], '10/20 대표 소개']);
+    const [sub] = await sql`select plan_code, status, (trial_ends_at::date - current_date) as days from tenant_subscriptions where tenant = ${r.tenant}`;
+    assert.equal(sub.status, 'trial'); assert.ok(Number(sub.days) >= 29 && Number(sub.days) <= 30, `체험 30일 (${sub.days})`);
+    const d = await ctx.owner.ok('GET', `/api/platform/tenants/${r.tenant}/detail`);
+    assert.equal(d.ownerInvite.pending, true); assert.equal(d.users[0].status, 'invited');
+    assert.equal((await ctx.owner.req('POST', '/api/platform/tenants', body)).status, 409, '같은 이메일 두 번 안 됨');
+    assert.equal((await ctx.owner.req('POST', '/api/platform/tenants', { ...body, ownerEmail: 'x@cust.test', planCode: 'nope' })).status, 400, '없는 요금제');
+    // 초대 다시 보내기 → 이전 링크 무효, 새 링크로 수락 → 대표 로그인·회사 소속
+    const re = await ctx.owner.ok('POST', `/api/platform/tenants/${r.tenant}/reinvite`, {});
+    const c = new Client('newboss');
+    assert.equal((await c.req('POST', `/api/invitations/${r.inviteLink.split('/').pop()}/accept`, { password: 'new-boss-pass-1234' })).status, 400, '이전 링크 무효');
+    await c.ok('POST', `/api/invitations/${re.inviteLink.split('/').pop()}/accept`, { password: 'new-boss-pass-1234' });
+    const me = await c.ok('GET', '/api/auth/me');
+    assert.deepEqual([me.user.tenant, me.user.role, me.user.name], [r.tenant, 'owner', '신대표']);
+    assert.equal((await ctx.owner.ok('GET', `/api/platform/tenants/${r.tenant}/detail`)).ownerInvite.pending, false);
+    assert.equal((await ctx.owner.req('POST', `/api/platform/tenants/${r.tenant}/reinvite`, {})).status, 400, '이미 받은 초대');
+    assert.ok((await ctx.owner.ok('GET', `/api/platform/tenants?q=${encodeURIComponent('새고객')}`)).tenants.some((x) => x.id === r.tenant), '목록');
+    N.c = c;
+  });
+  test('요금제 지정으로 만들면 바로 사용(active) / 공간·메모 바꾸기 / 감사 기록(운영자 행동 + 회사 사람 행동)', async () => {
+    const [plan] = await sql`select code from plans where active and code <> 'trial' order by sort limit 1`;
+    const r = await ctx.owner.ok('POST', '/api/platform/tenants', { company: '유료고객', ownerName: '유대표', ownerEmail: 'paid@cust.test', planCode: plan.code });
+    const [sub] = await sql`select plan_code, status, trial_ends_at from tenant_subscriptions where tenant = ${r.tenant}`;
+    assert.deepEqual([sub.plan_code, sub.status, sub.trial_ends_at], [plan.code, 'active', null]);
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${N.tenant}/spaces`, { spaces: ['sales', 'marketing'] });
+    assert.deepEqual((await sql`select spaces from tenants where id = ${N.tenant}`)[0].spaces, ['work', 'sales', 'marketing']);
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${N.tenant}/spaces`, { spaces: [] });
+    assert.deepEqual((await sql`select spaces from tenants where id = ${N.tenant}`)[0].spaces, ['work']);
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${N.tenant}/memo`, { memo: '  계약 11월  ' });
+    assert.equal((await ctx.owner.ok('GET', `/api/platform/tenants/${N.tenant}/detail`)).tenant.platform_memo, '계약 11월');
+    const a = await ctx.owner.ok('GET', `/api/platform/tenants/${N.tenant}/audit`);
+    const acts = a.logs.map((l) => l.action);
+    for (const k of ['platform.tenant_create', 'platform.tenant_reinvite', 'platform.tenant_spaces', 'platform.tenant_memo', 'user.accept_invite']) assert.ok(acts.includes(k), `${k} in ${acts}`);
+    assert.ok(a.logs.find((l) => l.action === 'platform.tenant_create').by_platform);
+    assert.equal((await N.c.get(`/api/platform/tenants/${N.tenant}/audit`)).status, 404, '고객사 대표는 운영 API 없음');
+    assert.equal((await ctx.owner.get('/api/platform/tenants/nope/audit')).status, 404);
+  });
+});

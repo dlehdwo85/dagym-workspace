@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db } from './db';
 import { newToken, sha256 } from './crypto';
-import { HttpError, badRequest, forbidden, notFound } from './errors';
+import { HttpError, badRequest, conflict, forbidden, notFound } from './errors';
 import { audit } from './log';
 import { appUrl, sendMail } from './mail';
 import { tenantOf, type SessionUser } from './types';
@@ -55,7 +55,10 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   const [{ krw }] = await sql<{ krw: number }[]>`select coalesce(sum(cost_krw), 0)::float8 krw from ai_usage where tenant = ${tenant} and created_at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul'`;
   const monthly = b?.billing_amount ? (b.billing_cycle === 'annual' ? Math.round(b.billing_amount / 12) : b.billing_amount) : 0;
   const billing = { ...(b ?? {}), expectedThisMonth: monthly, unpaid: b?.past_due_since ? b.billing_amount : 0, aiCostKrw: Math.round(krw), aiCostRate: monthly ? Math.round((krw / (monthly / 1.1)) * 1000) / 10 : null };
-  return { billing, payments, tenant: t, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support };
+  // 대표 10/20 ① 고객사 추가로 만든 회사: 대표가 아직 초대를 안 받았으면 '초대 대기'(다시 보내기)
+  const [inv] = await sql<{ expires_at: Date; created_at: Date }[]>`select expires_at, created_at from invitations where user_id = ${t.owner_user_id} and accepted_at is null and revoked_at is null order by created_at desc limit 1`;
+  const ownerInvite = t.owner_user_id && users.find((x: any) => x.id === t.owner_user_id)?.status === 'invited' ? { pending: true, expiresAt: inv?.expires_at ?? null, expired: !inv || new Date(inv.expires_at) < new Date() } : { pending: false };
+  return { ownerInvite, billing, payments, tenant: t, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support };
 }
 
 export const overrideInput = z.object({
@@ -181,4 +184,87 @@ export async function supportFromToken(token: string, admin: SessionUser) {
 export async function endSupport(token: string | undefined) {
   if (token) await db()`update support_sessions set ended_at = now() where id = ${sha256(token)} and ended_at is null`;
   return { ok: true };
+}
+
+// ---------------- 대표 10/20 11:40 ① 플랫폼 운영 [고객사 추가]·공간·메모·감사 (대신 보기 없음 — 지원 모드는 고객사 동의가 있을 때만) ----------------
+export const newTenantInput = z.object({
+  company: z.string().trim().min(1, '회사명을 적어 주세요').max(60), industries: z.array(z.string().trim().min(1).max(30)).max(8).default([]), size: z.enum(['1', '2-10', '11-30', '31-100', '100+']).optional(),
+  ownerName: z.string().trim().min(1, '대표 이름을 적어 주세요').max(50), ownerEmail: z.string().trim().toLowerCase().email('대표 이메일을 확인해 주세요').max(200),
+  planCode: z.string().trim().max(40).optional(), // 비우거나 'trial' = 14일 체험(trialDays 로 조정)
+  trialDays: z.number().int().min(1).max(90).optional(), spaces: z.array(z.enum(['sales', 'marketing'])).max(2).default([]), memo: z.string().max(2000).optional() });
+const inviteMail = (company: string, ownerName: string, link: string) => `${ownerName}님, 워크인에 "${company}" 회사가 만들어졌습니다.\n아래 링크에서 비밀번호를 정하면 대표 계정으로 바로 시작할 수 있습니다 (7일 유효).\n\n${link}\n\n모르는 초대라면 이 메일을 무시해 주세요.`;
+/** 메일이 안 가도(미설정·발송 실패) 회사 만들기는 성공 — 운영자가 링크를 직접 전달한다 */
+async function tryMail(to: string, subject: string, text: string): Promise<'sent' | 'dev' | 'failed'> { try { return await sendMail(to, subject, text); } catch { return 'failed'; } }
+/** [고객사 추가]: 회사(+대표 계정·본사 조직·달력·업종 템플릿) 만들고 대표에게 초대 메일 — 비밀번호는 대표가 직접 정한다 */
+export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof newTenantInput>, ip: string | null) {
+  requirePlatform(u);
+  const sql = db();
+  if ((await sql`select 1 from users where lower(email) = ${i.ownerEmail}`).length) throw conflict('이미 쓰는 이메일입니다 — 다른 회사의 계정이거나 이미 가입한 사람입니다');
+  const plan = i.planCode && i.planCode !== 'trial' ? i.planCode : null;
+  if (plan && !(await sql`select 1 from plans where code = ${plan} and active`).length) throw badRequest('없는 요금제 코드입니다');
+  const { createOwnerSpace } = await import('./signup');
+  const token = newToken();
+  const inds = [...new Set(i.industries.map((x) => x.trim()).filter(Boolean))];
+  const r = await sql.begin(async (tx) => {
+    const userId = await createOwnerSpace(tx, { email: i.ownerEmail, name: i.ownerName, mode: 'team', company: i.company, size: i.size, industry: inds[0], industries: inds, agree: {}, passwordHash: null, pending: false, ip });
+    const [{ tenant }] = await tx<{ tenant: string }[]>`select tenant from users where id = ${userId}`;
+    await tx`update users set status = 'invited', updated_at = now() where id = ${userId}`; // 초대를 받으면 active
+    await tx`update tenants set spaces = ${['work', ...new Set(i.spaces)]}, platform_memo = ${i.memo?.trim() || null} where id = ${tenant}`;
+    if (plan) await tx`update tenant_subscriptions set plan_code = ${plan}, status = 'active', trial_ends_at = null, period_end = null where tenant = ${tenant}`;
+    else if (i.trialDays) await tx`update tenant_subscriptions set trial_ends_at = now() + ${i.trialDays} * interval '1 day', period_end = (now() + ${i.trialDays} * interval '1 day')::date where tenant = ${tenant}`;
+    const [hq] = await tx<{ id: string }[]>`select id from org_units where tenant = ${tenant} and type = 'hq' order by sort limit 1`;
+    await tx`insert into invitations (email, name, role, org_unit_ids, token_hash, invited_by, user_id, expires_at) values (${i.ownerEmail}, ${i.ownerName}, 'owner', ${hq ? [hq.id] : []}, ${sha256(token)}, ${u.id}, ${userId}, now() + interval '7 days')`;
+    await audit(tx, u.id, 'platform.tenant_create', 'tenant', tenant, { company: i.company, ownerEmail: i.ownerEmail, plan: plan ?? `trial${i.trialDays ? `(${i.trialDays}d)` : ''}`, spaces: i.spaces, industries: inds }, ip);
+    return { tenant, userId };
+  });
+  const m = await tryMail(i.ownerEmail, `[워크인] ${i.company} 대표 계정 초대`, inviteMail(i.company, i.ownerName, `${appUrl()}/invite/${token}`));
+  return { ok: true, tenant: r.tenant, ownerUserId: r.userId, mail: m, inviteLink: `/invite/${token}` }; // 링크는 직원 초대와 같이 운영자에게도 보여 직접 전달 가능
+}
+/** 대표가 아직 초대를 안 받았을 때 초대 메일 다시 보내기(새 링크, 이전 링크는 무효) */
+export async function reinviteOwner(u: SessionUser, tenant: string, ip: string | null) {
+  requirePlatform(u);
+  const sql = db();
+  const [t] = await sql<{ owner_user_id: string | null; name: string }[]>`select owner_user_id, name from tenants where id = ${tenant}`;
+  if (!t?.owner_user_id) throw notFound('없는 회사입니다');
+  const [ow] = await sql<{ id: string; email: string; name: string; status: string }[]>`select id, email, name, status from users where id = ${t.owner_user_id}`;
+  if (!ow || ow.status !== 'invited') throw badRequest('이미 초대를 받은 대표입니다');
+  const token = newToken();
+  const [hq] = await sql<{ id: string }[]>`select id from org_units where tenant = ${tenant} and type = 'hq' order by sort limit 1`;
+  await sql.begin(async (tx) => {
+    await tx`update invitations set revoked_at = now() where user_id = ${ow.id} and accepted_at is null and revoked_at is null`;
+    await tx`insert into invitations (email, name, role, org_unit_ids, token_hash, invited_by, user_id, expires_at) values (${ow.email}, ${ow.name}, 'owner', ${hq ? [hq.id] : []}, ${sha256(token)}, ${u.id}, ${ow.id}, now() + interval '7 days')`;
+    await audit(tx, u.id, 'platform.tenant_reinvite', 'tenant', tenant, { ownerEmail: ow.email }, ip);
+  });
+  const m = await tryMail(ow.email, `[워크인] ${t.name} 대표 계정 초대`, inviteMail(t.name, ow.name, `${appUrl()}/invite/${token}`));
+  return { ok: true, mail: m, inviteLink: `/invite/${token}` };
+}
+export const tenantSpacesInput = z.object({ spaces: z.array(z.enum(['sales', 'marketing'])).max(2) });
+/** 고객사 공간(영업·마케팅) 켜기/끄기 — 업무 공간은 항상 */
+export async function setTenantSpacesByPlatform(u: SessionUser, tenant: string, i: z.infer<typeof tenantSpacesInput>, ip: string | null) {
+  requirePlatform(u);
+  const sql = db();
+  const r = await sql`update tenants set spaces = ${['work', ...new Set(i.spaces)]} where id = ${tenant} returning id`;
+  if (!r.length) throw notFound('없는 회사입니다');
+  await audit(sql, u.id, 'platform.tenant_spaces', 'tenant', tenant, { spaces: i.spaces }, ip);
+  return { ok: true };
+}
+export const tenantMemoInput = z.object({ memo: z.string().max(2000) });
+export async function setTenantMemo(u: SessionUser, tenant: string, i: z.infer<typeof tenantMemoInput>, ip: string | null) {
+  requirePlatform(u);
+  const sql = db();
+  const r = await sql`update tenants set platform_memo = ${i.memo.trim() || null} where id = ${tenant} returning id`;
+  if (!r.length) throw notFound('없는 회사입니다');
+  await audit(sql, u.id, 'platform.tenant_memo', 'tenant', tenant, {}, ip);
+  return { ok: true };
+}
+/** 고객사 감사 기록: 운영자가 이 회사에 한 일 + 이 회사 사람들의 주요 기록(최근 100건) */
+export async function tenantAuditLog(u: SessionUser, tenant: string) {
+  requirePlatform(u);
+  const sql = db();
+  if (!(await sql`select 1 from tenants where id = ${tenant}`).length) throw notFound('없는 회사입니다');
+  const rows = await sql`select a.id::text as id, a.action, a.target_type, a.target_id, a.detail, a.created_at, ac.name as actor_name, ac.platform_admin as by_platform
+    from audit_logs a left join users ac on ac.id = a.actor_id
+    where (a.target_type = 'tenant' and a.target_id = ${tenant}) or ac.tenant = ${tenant}
+    order by a.created_at desc limit 100`;
+  return { logs: rows };
 }
