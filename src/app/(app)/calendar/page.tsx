@@ -715,6 +715,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
   const [rrule, setRrule] = useState<string | null>(null);
   const [alsoTask, setAlsoTask] = useState(false);
   const [remind, setRemind] = useState<string>('default'); // 대표: 빠른 입력에 알림 설정이 안 보임 → 기본·없음·10분·30분·1시간·하루 전
+  const [color, setColor] = useState<string | null>(null); // 로컬 10/20(대표): 색 고르기를 첫 화면에
   const quickForm = useRef<HTMLFormElement>(null);
   const { user } = useSession();
   const [taskWho, setTaskWho] = useState<string | null>(null);
@@ -735,9 +736,10 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
       // 하나의 일정 양식 + "업무에도 추가" 스위치 (V6 3번)
       const s = allDay ? `${date}T00:00:00+09:00` : `${date}T${start}:00+09:00`;
       const en = allDay ? `${addDays(endDate ?? date, 1)}T00:00:00+09:00` : `${endDate ?? date}T${end}:00+09:00`;
-      await api('/api/events', { body: { calendarId, title: title.trim(), start: s, end: en, allDay, isPrivate: priv, rrule, alsoTask,
+      await api('/api/events', { body: { calendarId, title: title.trim(), start: s, end: en, allDay, isPrivate: priv, rrule, alsoTask, color,
         ...(remind !== 'default' ? { reminderMinutes: remind === 'none' ? [] : [Number(remind)] } : {}),
         ...(alsoTask ? { taskAssigneeId: taskWho ?? user.id, taskRequestedById: taskReq ?? user.id, taskPriority: taskPrio } : {}) } });
+      pushRecentColor(color);
       toast.ok(alsoTask ? `일정을 저장하고 업무에도 추가했습니다${(taskWho ?? user.id) === user.id ? ' — 본인 업무는 마감 때 알려 드립니다' : ' — 담당자에게 알림을 보냈습니다'}` : '일정을 저장했습니다');
       onSaved();
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
@@ -772,6 +774,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
         <select className={cx(inputCls, 'mt-2 h-9')} value={calendarId} onChange={(e) => setCalendarId(e.target.value)} aria-label="캘린더">
           {editable.map((c) => <option key={c.id} value={c.id}>{c.type === 'personal' ? '내 일정' : c.name}</option>)}
         </select>
+        <div className="mt-2"><ColorRow value={color} onChange={setColor} testId="quick-color" /></div>
         {/* V5 반복(일정·업무 모두) — 반복 일정 + 업무에도 추가 = 같은 규칙의 반복 업무 */}
         <div className="mt-2" data-testid="quick-repeat"><RecurSelect value={rrule} onChange={setRrule} anchorDate={date} /></div>
         {!allDay && (
@@ -798,7 +801,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
         )}
         {<label className="mt-2 flex items-center gap-2 text-sm text-ink-2"><input type="checkbox" className="size-4" checked={priv} onChange={(e) => setPriv(e.target.checked)} />비공개 (다른 사람에게는 &ldquo;바쁨&rdquo;으로만)</label>}
         <div className="mt-4 flex items-center justify-between">
-          {<button type="button" className="text-sm font-medium text-ink-2 hover:text-ink" onClick={() => onMore({ date, allDay, start: start ?? '09:00', end: end ?? '10:00', endDate: endDate ?? date, title, calendarId, isPrivate: priv, rrule, alsoTask })}>옵션 더보기</button>}
+          {<button type="button" className="text-sm font-medium text-ink-2 hover:text-ink" onClick={() => onMore({ date, allDay, start: start ?? '09:00', end: end ?? '10:00', endDate: endDate ?? date, title, calendarId, isPrivate: priv, rrule, alsoTask, color })}>옵션 더보기</button>}
           <Button type="submit" size="sm" disabled={busy || !title.trim()} data-testid="quick-save">{busy ? '저장 중…' : '저장'}</Button>
         </div>
       </form>
@@ -806,6 +809,29 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
   );
 }
 const fmtDateK = (d: string) => { const dt = new Date(d + 'T00:00:00Z'); return `${dt.getUTCMonth() + 1}월 ${dt.getUTCDate()}일 (${'일월화수목금토'[dt.getUTCDay()]})`; };
+
+/** 로컬 10/20(대표): 색 고르기를 '옵션 더보기' 안이 아니라 일정 만들기·편집 첫 화면에 — 캘린더 색 · 최근 쓴 색 6 · 팔레트 · 직접 선택. 최근 색은 이 기기(localStorage) */
+const RECENT_KEY = 'wos_recent_event_colors';
+const recentColors = (): string[] => { try { return (JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') as string[]).slice(0, 6); } catch { return []; } };
+const pushRecentColor = (c?: string | null) => { if (!c) return; try { localStorage.setItem(RECENT_KEY, JSON.stringify([c, ...recentColors().filter((x) => x !== c)].slice(0, 6))); } catch {} };
+function ColorRow({ value, onChange, testId }: { value: string | null; onChange: (v: string | null) => void; testId: string }) {
+  const [recent] = useState(recentColors);
+  const extra = recent.filter((c) => !(c in PALETTE_NAMES));
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="일정 색" data-testid={testId}>
+      <span className="mr-1 text-xs text-ink-2">색</span>
+      <button type="button" role="radio" aria-checked={!value} onClick={() => onChange(null)} className={cx('rounded-full border border-line px-2 py-0.5 text-xs', !value ? 'bg-slate-800 text-white' : 'text-ink-2')}>캘린더 색</button>
+      {extra.map((c) => (
+        <button key={c} type="button" role="radio" aria-checked={value === c} aria-label={`최근 색 ${c}`} title={`최근 ${c}`} onClick={() => onChange(c)}
+          className={cx('flex size-5 items-center justify-center rounded-full ring-1 ring-line', value === c && 'ring-2 ring-ink ring-offset-1')} style={{ background: c }}>{value === c && <Check className="size-3 text-white" strokeWidth={3} />}</button>))}
+      {Object.keys(PALETTE_NAMES).map((c) => (
+        <button key={c} type="button" role="radio" aria-checked={value === c} aria-label={PALETTE_NAMES[c]} title={PALETTE_NAMES[c]} onClick={() => onChange(c)}
+          className={cx('flex size-5 items-center justify-center rounded-full', value === c && 'ring-2 ring-ink ring-offset-1')} style={{ background: c }}>{value === c && <Check className="size-3 text-white" strokeWidth={3} />}</button>
+      ))}
+      <input type="color" value={value ?? '#039be5'} onChange={(e) => onChange(e.target.value)} className="size-5 cursor-pointer border-0 bg-transparent p-0" aria-label="직접 선택" title="직접 선택" />
+    </div>
+  );
+}
 
 function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }: { id?: string; occurrenceStart?: string; draft?: any; calendars: any[]; onClose: () => void; onSaved: () => void; dirUsers: any[] }) {
   const { user } = useSession();
@@ -815,10 +841,15 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
   const [busy, setBusy] = useState(false);
   const editable = calendars.filter((c) => c.perms.edit);
 
+  // 로컬 10/20(대표 재발 "생성 후 편집이 안 됨"): 다른 곳(빠른 입력 저장·자동 저장·알림·다른 탭)의 wos-refresh 로 /api/events/{id} 가 다시 올 때마다 폼을 서버 값으로 되돌려
+  // 입력 중인 글이 사라지고, 자동 저장이 올린 버전을 옛 응답이 덮어써 [완료]가 409 가 나던 문제 — 폼은 일정 하나당 한 번만 채우고, 다시 온 응답은 버전(더 큰 값)만 따라간다
+  const initedFor = useRef<string | null>(null);
   useEffect(() => {
     if (id) {
       const d = existing.data;
       if (!d) return;
+      if (initedFor.current === id) return;
+      initedFor.current = id;
       const e = d.event;
       const dur = new Date(e.end_at).getTime() - new Date(e.start_at).getTime();
       const s = occurrenceStart && !e.recurring_event_id ? new Date(occurrenceStart) : new Date(e.start_at);
@@ -829,7 +860,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
       setF({ title: draft?.title ?? '', calendarId: draft?.calendarId ?? personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
-        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, color: null, alsoTask: !!draft?.alsoTask });
+        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, color: draft?.color ?? null, alsoTask: !!draft?.alsoTask });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -850,7 +881,17 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
   const verRef = useRef<number | undefined>(undefined);
   const autoRun = useRef<Promise<unknown> | null>(null);
   const [autoState, setAutoState] = useState<'' | 'saving' | 'saved' | 'error'>('');
-  useEffect(() => { if (existing.data?.event) verRef.current = existing.data.event.version; }, [existing.data]);
+  useEffect(() => { if (existing.data?.event) verRef.current = Math.max(verRef.current ?? 0, existing.data.event.version); }, [existing.data]);
+  /** 409(다른 곳에서 먼저 바뀜)면 최신 버전을 다시 불러와 지금 고친 내용으로 한 번 더 저장 — 로컬 10/20: "다시 불러와 적용" 자동 재시도 1회 */
+  const patchWithRetry = async (body: Record<string, unknown>) => {
+    try { return await api(`/api/events/${id}`, { method: 'PATCH', body: { ...body, version: verRef.current } }); }
+    catch (er: any) {
+      if (er?.status !== 409) throw er;
+      const cur = (er?.detail?.currentVersion as number | undefined) ?? (await api(`/api/events/${id}`).then((x) => x.event.version as number));
+      verRef.current = cur;
+      return api(`/api/events/${id}`, { method: 'PATCH', body: { ...body, version: cur } });
+    }
+  };
   useEffect(() => { if (f && baseRef.current === null) baseRef.current = JSON.stringify(f); }, [f]);
   useEffect(() => {
     if (!id || !f || !baseRef.current || !existing.data?.perms.edit) return;
@@ -862,7 +903,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const t = times();
       if (t.end < t.start) return;
       setAutoState('saving');
-      const run = api(`/api/events/${id}`, { method: 'PATCH', body: { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null, scope: 'all', version: verRef.current } });
+      const run = patchWithRetry({ title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null, scope: 'all' });
       autoRun.current = run.catch(() => {});
       try {
         const r = await run;
@@ -888,13 +929,15 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     try {
       const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
       if (!id) {
-        await api('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } });
+        await api('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } }); pushRecentColor(f.color);
       } else {
         let scope: Scope = 'all';
         if (d.event.recurring_event_id) scope = 'this';
         else if (d.event.rrule) { const s = await askScope(); if (!s) { setBusy(false); return; } scope = s; }
         const { rrule, ...rest } = body;
-        await api(`/api/events/${id}`, { method: 'PATCH', body: { ...rest, ...(scope !== 'this' ? { rrule } : {}), scope, occurrenceStart, version: scope === 'all' || !isRecurring ? verRef.current : undefined } });
+        const pb = { ...rest, ...(scope !== 'this' ? { rrule } : {}), scope, occurrenceStart };
+        if (scope === 'all' || !isRecurring) { const r = await patchWithRetry(pb); if (typeof r?.version === 'number') verRef.current = r.version; pushRecentColor(f.color); }
+        else await api(`/api/events/${id}`, { method: 'PATCH', body: { ...pb, version: undefined } });
       }
       toast.ok('저장했습니다'); onSaved(); onClose();
     } catch (er: any) { toast.error(saveError(er)); if (er?.status === 409) api(`/api/events/${id}`).then((x) => { verRef.current = x.event.version; }).catch(() => {}); } finally { setBusy(false); }
@@ -945,18 +988,8 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
             {(f.allDay || (f.endDate && f.endDate !== f.date)) ? <DateField label="종료일" value={f.endDate || f.date} min={f.date} onChange={set('endDate')} />
               : <button type="button" className="text-xs text-ink-2 underline" onClick={() => set('endDate')(addDays(f.date, 1))}>다음 날까지</button>}
           </div>
-          {/* 대표 지적(10/19 ②): 일정별 색 덮어쓰기(Google 일정 색) — 비우면 캘린더 색 */}
-          {canEdit && (
-            <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="일정 색" data-testid="event-color">
-              <span className="mr-1 text-xs text-ink-2">색</span>
-              <button type="button" role="radio" aria-checked={!f.color} onClick={() => set('color')(null)} className={cx('rounded-full border border-line px-2 py-0.5 text-xs', !f.color ? 'bg-slate-800 text-white' : 'text-ink-2')}>캘린더 색</button>
-              {Object.keys(PALETTE_NAMES).map((c) => (
-                <button key={c} type="button" role="radio" aria-checked={f.color === c} aria-label={PALETTE_NAMES[c]} title={PALETTE_NAMES[c]} onClick={() => set('color')(c)}
-                  className={cx('flex size-5 items-center justify-center rounded-full', f.color === c && 'ring-2 ring-ink ring-offset-1')} style={{ background: c }}>{f.color === c && <Check className="size-3 text-white" strokeWidth={3} />}</button>
-              ))}
-              <input type="color" value={f.color ?? '#039be5'} onChange={(e) => set('color')(e.target.value)} className="size-5 cursor-pointer border-0 bg-transparent p-0" aria-label="직접 선택" title="직접 선택" />
-            </div>
-          )}
+          {/* 대표 지적(10/19 ②): 일정별 색 덮어쓰기(Google 일정 색) — 비우면 캘린더 색. 로컬 10/20: 첫 화면에 바로(빠른 입력에도 같은 줄) */}
+          {canEdit && <ColorRow value={f.color ?? null} onChange={set('color')} testId="event-color" />}
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!f.isPrivate} onChange={(e) => set('isPrivate')(e.target.checked)} />비공개 — 다른 사람에게는 시간만 &ldquo;바쁨&rdquo;으로 보입니다</label>
           {/* V5 일정 ↔ 업무 연동 */}
           {!id ? (

@@ -1266,6 +1266,11 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 시험: tests/api/bids-file.test.mjs 4건(401/403/400·octet-stream·이름 인코딩·리다이렉트 502·413·길이 없음·K-apt 400·공간 없는 직원 404) · E2E ② 앱 영업 단계에 후속조사 필요·접힘·중계 href 확인 추가.
 - 남은 S1: S1-1 수집기 12개 이식 · S1-3 칸 이름 1:1 — 원본 코드·스키마(0001~0037) 필요(로컬이 docs/sales-src 로 복사 또는 add_repo). 그동안 S2(홈 7묶음·영업기회 요약·제안/계약 ROI·리드 폼/상세·AI 영업 도구)로.
 
+## 2026-10-20 클라우드 — 로컬 10/20 버그(대표 재발) 캘린더 생성 직후 편집 실패·색 고르기 (배포)
+- 원인(코드로 확인): EventEditor 가 `/api/events/{id}` 를 useApi 로 읽는데, useApi 는 `wos-refresh`(빠른 입력 저장 뒤 broadcastRefresh · 자동 저장 뒤 onSaved · 다른 탭 BroadcastChannel · 서비스워커 알림 처리 · AlarmBar)마다 다시 불러온다. 응답이 올 때마다 폼 초기화 effect(`[existing.data, id]`)가 `setF(서버 값)` 을 다시 실행 → **입력 중인 글이 서버 값으로 되돌아감**("편집이 안 됨"). 같은 때 `verRef = 응답.version` 도 다시 설정 → 자동 저장이 올린 버전을 **옛 응답(이전 버전)이 덮어써** [완료]가 409("다른 곳에서 먼저 바뀌었습니다…")가 남. 생성 직후가 특히 잘 재현되는 이유: 빠른 입력 저장 → broadcastRefresh 와 미리보기 → [편집] 열기가 거의 동시에 일어나서. 반복·종일·회사 캘린더는 같은 경로(차이 없음).
+- 고침: ① 폼은 일정 하나당 한 번만 채움(initedFor), 다시 온 응답은 버전만 `max()` 로 ② 저장·자동 저장 PATCH 409 → 최신 버전(응답 detail.currentVersion 또는 다시 읽기)으로 지금 고친 내용 그대로 **1회 자동 재시도**(patchWithRetry) ③ 색 고르기 줄(ColorRow: 캘린더 색 · 최근 쓴 색 6(이 기기 localStorage) · 팔레트 11 · 직접 선택)을 **빠른 입력 첫 화면(quick-color)** 과 편집 첫 화면(event-color) 에 — '옵션 더보기' 안이 아님. 빠른 입력 색은 POST color 로 바로 저장, 옵션 더보기로 넘겨도 유지.
+- 시험: E2E cal-edit.step.mjs — 휴대폰 390 빠른 입력 색 줄·저장 색 확인 → 미리보기 → [편집] → 제목 입력 중 wos-refresh 발생 → 입력 유지·자동 저장·색 변경·닫기 저장 / PC 다른 기기가 먼저 고친 뒤(DB version+1) [완료] → 409 문구 없이 저장. 기존 '대표 지적 10/19 캘린더'·'V4 캘린더'·'V37 2' 단계 재실행.
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md
