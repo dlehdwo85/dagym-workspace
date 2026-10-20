@@ -186,7 +186,8 @@ export async function runTick(trigger: string) {
   await step('contacts', async () => (await import('./contacts')).contactsJob()); // V31 연락처 휴지통 30일 정리
   await step('docVersions', async () => (await import('./libDocs')).docVersionsJob()); // 10/19 공동 편집 문서: 10분·모두 나가면 변경 기록·조각 합치기·검색 글자
   await step('mktAuto', async () => (await import('./mktAuto')).mktAutoTick()); // V41 4-3 마케팅 주간 규칙 → 제작 → 승인함 → 알림
-  await step('mktGoals', async () => (await import('./mktGoals')).goalTickAll()); // 대표 10/20 18:00 ②: 25일 다음 달 목표 초안 · 월요일 주간 리뷰 · 월초 결산
+  await step('mktGoals', async () => (await import('./mktGoals')).goalTickAll());
+  await step('mktOps', async () => (await import('./mktOps')).opsTickAll()); // 대표 10/20 20:00 ①②: 월요일 AI 마케터 분석·방향 카드 · 매일 광고 소진율 '충전 필요' · 25일 다음 달 예산 초안 // 대표 10/20 18:00 ②: 25일 다음 달 목표 초안 · 월요일 주간 리뷰 · 월초 결산
   await step('nightAssistant', async () => (await import('./mktHome')).nightAssistantTick()); // ⑥ 밤사이 비서(22~06시, 회사 AI 설정에서 켠 범위만 — 지금은 원고 초안)
   await step('mktReport', async () => (await import('./mktReport')).monthlyReportJob()); // 상용화 ⑧ 매월 1일 지난달 마케팅 보고 알림·메일
   await step('opsPii', async () => (await import('./opsImport')).purgeOpsPii()); // V41 4-2 가져온 전화 기록 보관 기간

@@ -41,6 +41,13 @@ export function MonthlyReport() {
         {card('전화 문의', `${r.calls.total}건`, `영업 리드 ${r.calls.leads}`)}
         {card('크레딧·AI', `${r.credits.total}`, `마케팅 AI 약 ${n(r.ai.krw)}원 · ${r.ai.requests}회`)}
       </section>
+      {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적 + CAC·ROI */}
+      {r.roi && <section className="grid gap-3 sm:grid-cols-4" data-testid="report-roi">
+        {card('매출 실적', `${n(r.roi.revenue.actual)}원`, r.roi.revenue.target ? `목표 ${n(r.roi.revenue.target)}원 · ${r.roi.revenue.rate}%` : '목표 없음(운영실에서 적기)')}
+        {card('계약 등록', `${r.roi.revenue.contracts.n}건`, `${n(r.roi.revenue.contracts.amount)}원`)}
+        {card('CAC', r.roi.cac !== null ? `${n(r.roi.cac)}원` : '—', `새 리드 ${r.roi.newLeads} · 문의 ${r.roi.inquiries} · 광고비 ÷ 획득`)}
+        {card('ROI', r.roi.roi !== null ? `${r.roi.roi}%` : '—', '(매출 − 광고비) ÷ 광고비')}
+      </section>}
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="rounded-card border border-line bg-white p-4 shadow-card print:shadow-none"><h2 className="text-sm font-semibold">채널별 게시</h2>
           <ul className="mt-2 space-y-1 text-sm">{r.posts.byChannel.map((c: any) => <li key={c.channel} className="flex justify-between"><span>{CHANNELS[c.channel as keyof typeof CHANNELS] ?? c.channel}</span><b className="tabular-nums">{c.n}</b></li>)}

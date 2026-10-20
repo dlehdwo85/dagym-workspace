@@ -78,6 +78,11 @@ export async function homeView(u: SessionUser) {
   const goal = await goalProgress(t).catch(() => null);
   const gq = await sql<any[]>`select id, month, status, updated_at, reviews, brand_id from mkt_goals where tenant = ${t} and (status = 'pending' or (status = 'approved' and month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM'))) order by month desc limit 3`;
   for (const g of gq) q.push({ kind: 'goal' as any, id: g.id, title: `${g.month.replace('-', '년 ')}월 운영 목표${g.status === 'pending' ? ' 초안' : ` · 주간 리뷰 ${(g.reviews ?? []).length}회`}`, href: '/s/marketing/goals', night: false, state: g.status === 'pending' ? 'waiting' : 'done', at: g.updated_at, canRun: false, canNight: false, note: g.status === 'pending' ? '대표 승인 필요' : undefined });
+  // 대표 10/20 20:00 ①②: 운영실 승인 요청 카드·광고 예산 계획(승인 대기)도 큐에
+  const ops = await sql<any[]>`select id, kind, title, created_at from mkt_proposals where tenant = ${t} and status = 'pending' order by created_at desc limit 5`;
+  for (const o of ops) q.push({ kind: 'ops' as any, id: o.id, title: `AI 마케터 제안: ${o.title}`, href: '/s/marketing/ops', night: false, state: 'waiting', at: o.created_at, canRun: false, canNight: false, note: '대표 승인 필요' });
+  const [bud] = await sql<any[]>`select id, month, total, updated_at from mkt_ad_budgets where tenant = ${t} and status = 'pending' order by month desc limit 1`;
+  if (bud) q.push({ kind: 'ops' as any, id: bud.id, title: `${bud.month.replace('-', '년 ')}월 광고 예산 계획 ${Math.round(Number(bud.total)).toLocaleString('ko-KR')}원`, href: '/s/marketing/ops', night: false, state: 'waiting', at: bud.updated_at, canRun: false, canNight: false, note: '대표 승인 필요' });
   const order = { running: 0, waiting: 1, done: 2 };
   const queue = q.sort((a, b) => order[a.state] - order[b.state] || String(b.at ?? '').localeCompare(String(a.at ?? ''))).slice(0, 8);
   // 🌙 밤사이 결과: 어젯밤 22시 ~ 오늘 08시 사이에 만들어진 자동 시안·문서

@@ -1,5 +1,6 @@
 'use client';
 import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
+import { RevenueGoal } from '@/components/marketing/RevenueGoal';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
@@ -196,6 +197,8 @@ export function SalesHome() {
           `신규단지 ${data.today.newDb.buildings} · 시설 ${data.today.newDb.facilities} · 협력사 ${data.today.newDb.vendors}`],
         ['오늘 연락할 리드', data.today.contact, '/s/sales/leads?day=today'],
         ...(bids ? [['오늘 마감 입찰', data.today.closing, '/s/sales/bids?tab=closing'] as [string, number, string]] : [])]} />}
+      {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적(계약 등록 금액) — 마케팅 홈과 같은 막대 */}
+      <RevenueGoal color={C} canEdit={!!data.canEdit} />
       {/* S2-5 오늘 할 일 7묶음(영업관리 2-2) — 업무 공간과 같은 업무 표(자동 업무 포함), 누르면 그 화면으로 */}
       {data.todo && <TodoGroups todo={data.todo} bids={bids} />}
       {/* S2-6 영업기회 요약 타일 6 + 목록별 진행 현황표 */}
