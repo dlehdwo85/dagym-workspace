@@ -149,6 +149,7 @@ await step('① 대표가 화면에서 직원 초대 → 초대 링크 발급', 
   const dlg = owner.getByRole('dialog', { name: '직원 초대' });
   await dlg.getByLabel('이름').fill('정신입');
   await dlg.getByLabel('회사 이메일').fill('newbie@dagym.test');
+  await dlg.getByTestId('invite-advanced').locator('summary').click(); // 재정비(10/20 15:15): 조직 체크는 '고급' 안
   await dlg.getByRole('checkbox', { name: '다짐 강남점', exact: true }).check();
   await dlg.getByRole('button', { name: '초대 링크 만들기' }).click();
   inviteLink = await owner.getByTestId('invite-link').inputValue();

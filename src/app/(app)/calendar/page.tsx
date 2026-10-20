@@ -784,8 +784,8 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
               <option value="60">알림: 1시간 전</option><option value="1440">알림: 하루 전</option><option value="none">알림 없음</option>
             </select></label>
         )}
-        <label className="mt-2 flex cursor-pointer items-center gap-2.5 text-sm font-medium text-ink">
-          <input type="checkbox" role="switch" className="peer sr-only" checked={alsoTask} onChange={(e) => setAlsoTask(e.target.checked)} data-testid="quick-also-task" aria-label="업무 리스트에도 추가" />
+        <label className="relative mt-2 flex cursor-pointer items-center gap-2.5 text-sm font-medium text-ink">
+          <input type="checkbox" role="switch" className="peer absolute left-0 top-0.5 size-5 cursor-pointer opacity-0" checked={alsoTask} onChange={(e) => setAlsoTask(e.target.checked)} data-testid="quick-also-task" aria-label="업무 리스트에도 추가" />
           <span aria-hidden className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:bg-brand-600 peer-checked:after:translate-x-4" />
           <span className="min-w-0"><span className="whitespace-nowrap">업무 리스트에도 추가</span><span className="block text-xs font-normal text-ink-3">날짜를 바꾸면 서로 따라갑니다</span></span>
         </label>
