@@ -1352,6 +1352,40 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-20 업무 첨부 파일 열어서 편집·저장(대표 23:05 재요청 #121) [배포확인요청] (migration 136)
+- 업무 상세 › 자료·첨부 줄마다(요청자·담당자·협업자·검토자·관리자, 그 외는 보기만):
+  - **Word(.docx) [열어서 편집]** → 첫 번에 워크인 문서(Tiptap+Yjs 공동 편집)로 바꿔 열고(제목·문단·글머리/번호·표·굵게/기울임 옮김, 원본은 첨부에 그대로), 업무 참여자에게 편집 공유 자동 → 같이 고친 뒤 문서 화면 **[업무로 저장]** = Word 로 다시 써서 첨부 **새 버전**(v2…), 이전 버전 보관. 두 번째부터는 [편집 계속](같은 문서). 자료실 '업무 첨부/달' 폴더에 task_id 로 연결.
+  - **Excel(.xlsx) [칸 고치기]** → 값이 있는 칸만 표로 보여 주고 바꾼 칸만 저장(서식·수식·병합·인쇄 설정 그대로, 수식 칸은 잠금) → 새 버전.
+  - **그 밖(hwp·pdf·이미지·pptx…) [새 버전 올리기](↑)** → 내려받아 고친 파일을 올리면 v2… 로 쌓이고 이전 버전 보관.
+  - **v{n} 배지** → 버전 기록(종류·메모·누가·언제) · 이전 버전 내려받기 · [이 버전으로] 되돌리기(새 버전으로 쌓임).
+- 저장할 때마다 업무 타임라인 '파일 수정 — 이름 v3' + 요청자·담당자(본인 제외) 알림(업무 댓글 종류, 업무 링크). 첫 편집 때 원본이 v1 로 보관됨.
+- 표: attachments(version·doc_id·updated_at/by) · attachment_versions(원본/올림/문서 저장/칸 고침/되돌림). API `/api/attachments/[id]/versions`(GET·POST·complete·[vid]/restore·[vid]/download) · `/doc`(열기) · `/doc/save` · `/sheet`(GET·POST).
+- 제외(1차): 외부 유료 편집기(OnlyOffice·Collabora·MS/Google 계정) 없음. pptx·hwp 는 새 버전 올리기만. docx 변환은 글·표 위주(그림·머리글/바닥글·복잡한 서식은 Word 로 다시 쓸 때 빠짐 — 원본 v1 은 남음).
+- 같이 고침(로컬 23:20 🔧 예산 여전히 0원): 원인 = 프롬프트가 '숫자는 1만원 단위'라 AI 가 monthly=1(=1만원)·'약 1만원' 글자로 줌 → 프롬프트를 '원 단위 정수'로 바꾸고, 응답은 원 단위 복구 파서(만원 단위 작은 숫자 ×1만, '약 1.5만원'·'15,000원'·'2천원' 글자, 비고 문장 금액)로 읽음, 그래도 0이면 실적 비례 기본 배분.
+- 시험: tests/api/attach-edit.test.mjs 3건(docx 변환·공유·저장·알림 / 새 버전·되돌리기 / xlsx 칸 고치기) + attach-library·lib-docs 회귀. 화면은 로컬 확인 부탁(E2E 는 다음 커밋).
+
+## 2026-10-20 M1 서버 게시 실행기(대표 22:30 ② — "인스타 게시를 왜 사람이 직접 하나") [배포확인요청] (migration 135)
+- 승인된 최신 버전을 **워크인 서버가 연결 계정으로 게시**: 인스타그램(Graph: 컨테이너 → FINISHED → media_publish → permalink, 1장·캐러셀(최대 10)·릴스(영상/릴스·쇼츠 종류)·스토리) · 페이스북 페이지(photos / 여러 장 attached_media / videos / 글만 feed) · 스레드(Threads API: threads → threads_publish, 글만·사진·영상·캐러셀, 500자) · 유튜브(재개 가능 업로드 videos.insert, 쇼츠는 제목 #Shorts, 공개).
+- 두 길: ① 콘텐츠 상세 [지금 게시] / [예정 시각에 게시](관리자, 연결 계정이 있을 때만 보임) ② 자동 제작 설정 **"승인되면 예정 시각에 자동 게시(연결 채널)"**(회사 설정, 기본 꺼짐) → tick 이 예정 시각 지난 승인 글을 올림. 승인이 곧 게시 결정 — 승인은 사람.
+- 같은 콘텐츠·버전·계정은 한 번(idempotency). 시험 콘텐츠·승인 전·게시됨은 409. 여러 채널(cross_channels)은 작업 여러 개, 첫 성공이 게시 주소, 나머지는 게시 기록 줄에(계정 이름·열기·오류).
+- 실패: 일시 오류(5xx·429·연결)는 5·10·15분 뒤 재시도 3번, 영구 오류는 바로 '실패' + 요청자·작성자·승인자 알림(sync_error) + 기록 줄 [다시 시도](관리자). 게시 호출 자체가 모호하면(예: media_publish 500) '확인 중' → 최근 게시물에서 같은 글(앞 60자)을 찾으면 완료, 못 찾으면 실패(중복 게시 금지, 다시 올리지 않음). 토큰 오류(190·만료)는 계정 '끊김' 표시.
+- 연결: 메타(기존) + **스레드**(`/api/marketing/publish/connect/threads`, env THREADS_APP_ID/SECRET, threads_basic·threads_content_publish, 장기 토큰 60일 → tick 이 7일 전 갱신) + **유튜브**(`/connect/youtube`, env YT_CLIENT_ID/SECRET — 로그인용과 다른 클라이언트, youtube.upload·readonly, offline refresh token, 채널 1개). env 없으면 [연결 곧 열림]. 연결되면 채널 모드 '자동 게시'(META_PUBLISH_LIVE 는 개발 모드 안내용으로만 남김 — 개발 모드 앱은 앱 역할 계정만 연결됨).
+- 미디어 공개 주소: 자료실 파일 서명 URL 1시간(S3/R2 presigned, 로컬은 서명 내부 URL) — Meta 가 가져감. 유튜브는 서버가 파일을 읽어 올림.
+- 표: mkt_publish_jobs(run_after·payload·verify_until) · mkt_publish_accounts.refresh_enc · mkt_settings.auto_publish. jobs step `mktPublish`.
+- **로컬·대표가 할 외부 준비(체크리스트 — LOCAL_LOG 에도)**: 아래 "M1 외부 준비" 참고. 준비 전까지는 게시 도우미 그대로.
+- 같이 고침(로컬 23:00 🟡): 광고 예산 계획 표가 전부 0원 — AI 숫자('14,000원')를 못 읽거나 작은 총액(2만원)을 1만 원 단위로 반올림해 0 → 숫자만 추려 읽고 총액 50만 미만은 1천 원 단위, 읽은 결과가 0이면 기본 배분. 0원 계획은 [승인·집행] 비활성 + 경고, 서버도 400. 승인 전 총액 확인 창.
+- 시험: tests/api/mkt-publish.test.mjs 6건(가짜 Graph·Threads·Google — **구조 시험**, 실연동 완료 아님. 실제 계정 게시 확인 뒤에만 완료로 적음).
+
+### M1 외부 준비 체크리스트(로컬 ↔ 대표)
+1. **Meta 앱**(김소담 부사장 계정, META_APP_REVIEW_PLAN.md): 앱 유형 비즈니스 · 제품 "Facebook 로그인"·"Instagram Graph API" 추가 · 설정 › 기본: 앱 도메인 work-in.dev, 개인정보처리방침 `https://work-in.dev/legal/privacy`, 데이터 삭제 콜백 `https://work-in.dev/api/marketing/publish/meta/data-deletion`, 앱 아이콘 · Facebook 로그인 › 유효한 OAuth 리디렉션 URI `https://work-in.dev/api/marketing/publish/callback/meta`(www 도 함께) · 운영 env META_APP_ID/META_APP_SECRET.
+2. **인스타 계정**: 프로페셔널(비즈니스 또는 크리에이터) 전환 → 페이스북 페이지와 연결(인스타 앱 › 설정 › 계정 센터, 또는 페이지 설정 › 연결된 계정). 페이지 관리자 = 연결하는 Facebook 계정(전체 권한).
+3. **개발 모드로 먼저 실연동**: 앱 역할 › 테스터에 연결할 Facebook 계정 추가 → 워크인 연결 계정에서 [연결] → 콘텐츠 1건 [지금 게시] → 인스타·페이지에 올라가는지 확인(이 녹화가 심사 자료).
+4. **앱 심사 제출**: 권한 instagram_basic · instagram_content_publish · pages_show_list · pages_read_engagement · pages_manage_posts · business_management — 권한별 사용 설명 + 화면 녹화(연결 → 승인 → [지금 게시] → 결과 → 끊기) + 검수자용 시험 계정. 비즈니스 인증(사업자등록증) 대표 진행. 통과 후 앱 라이브 모드 → 운영 env META_APP_LIVE_MODE=1.
+5. **토큰**: 장기 사용자 토큰으로 받은 페이지 토큰은 만료 없음(비밀번호 변경·권한 변경 시 무효 → 계정 '끊김' 표시 → 다시 [연결]). 인스타 하루 게시 한도 25건(API 기준).
+6. **스레드**: Meta 개발자 › 같은 앱에 "Threads API" 제품 추가(별도 앱 ID/시크릿이 발급됨) · 리디렉션 URI `https://work-in.dev/api/marketing/publish/callback/threads` · 권한 threads_basic·threads_content_publish 심사(화면 녹화) · 운영 env THREADS_APP_ID/THREADS_APP_SECRET · 테스터 계정은 Threads 앱 › 설정 › 웹사이트 권한에서 초대 수락.
+7. **유튜브**: Google Cloud 새 프로젝트(캘린더 동기화와 분리) › YouTube Data API v3 사용 › OAuth 동의 화면(외부, 앱 이름 워크인, 개인정보 URL, 도메인 work-in.dev 소유 확인) › 범위 youtube.upload·youtube.readonly(민감 범위 → 검증 제출: 시연 영상) › 클라이언트(웹) 리디렉션 `https://work-in.dev/api/marketing/publish/callback/youtube` · 운영 env YT_CLIENT_ID/YT_CLIENT_SECRET. 검증 전: 테스트 사용자 100명까지 가능, **API 서비스 감사 전 업로드 영상은 비공개로 잠김**(확인 필요) · 할당량 하루 10,000(업로드 1건 ≈1,600).
+8. **운영 확인 순서**: env 넣고 재배포 → 연결 계정 [연결] → 시험 아닌 콘텐츠 1건 승인 → [지금 게시] → 게시 기록 '완료' + 매체 확인 → 자동 게시 켜기(회사 설정) 여부 대표 결정.
+
 ## 2026-10-20 마케팅 운영실·광고 예산·월 매출 목표(대표 20:00 ①②③ #115) [배포확인요청] (migration 134)
 - ① `/s/marketing/ops`(사이드바 운영 › 운영실): AI 마케터(30년차) 승인 요청 카드 5종 = 게시 방향·협업 제안·인플루언서·광고 효과 분석·향후 계획. [AI 마케터 제안 받기](관리자) → 종류별 카드 1장(대기 중인 종류는 안 만듦) — 제목·요약·항목(기대 효과·비용)·근거, 재료 = 회사·브랜드·채널·지난 30일 게시/문의/광고비·매체별 CPC·캠페인 상위·이달 목표. AI 없으면 숫자로 만든 기본 카드. 매주 월요일 09시 뒤 분석·방향 카드 자동(6일 안에 만든 게 없을 때, 밤은 night_scope.goal). 승인자 알림 + 마케팅 홈 AI 작업 큐 '대표 승인 필요' 줄.
 - 카드 [승인] → 실행: 계획·게시 방향 = 항목마다 제작의뢰실 의뢰(대기, 최대 3) / 협업·인플루언서·분석 = 마케팅 공간 업무([마케팅] 제목, 승인한 사람 담당). [반려]는 사유 필수, [실행 완료]. 감사 `mkt.proposal_approve`. 돈·외부 발송은 사람이(카드에도 그렇게 씀).

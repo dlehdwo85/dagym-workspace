@@ -132,14 +132,35 @@ export async function draftBudget(tenant: string, month: string, actorId: string
   // 기본 배분: 연결된 매체 실적 비례, 연결 없으면 네이버 50 · 메타 30 · 구글 20
   const base: Record<string, number> = { naver: 0.5, meta: 0.3, google: 0.15, youtube: 0.05 };
   const sum = Object.values(spend).reduce((a, b) => a + b, 0);
-  let plan = Object.entries(AD_CH).map(([k, ch]) => { const share = sum > 0 && ch.provider && spend[ch.provider] ? (k === 'youtube' ? 0.05 : spend[ch.provider] / sum * (ch.provider === 'google' ? 0.75 : 1)) : base[k]; return { provider: k, label: ch.label, monthly: Math.round(total * share / 10000) * 10000, note: '', connected: !!ch.provider && connected.has(ch.provider) }; });
+  const unit = total >= 500000 ? 10000 : 1000; const roundU = (n: number) => Math.max(0, Math.round((Number.isFinite(n) ? n : 0) / unit) * unit);
+  const num = (v: unknown) => { const n = Number(String(v ?? '').replace(/[^\d.]/g, '')); return Number.isFinite(n) ? n : 0; };
+  // 로컬 23:00·23:20 🟡 전부 0원: AI 가 '약 1만원'·'15,000원'·'1.5만 원' 처럼 글로 쓰거나 '1만원 단위' 숫자(1 = 1만원)로 줌 → 원 단위로 복구
+  const krw = (v: unknown): number | null => {
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    const t = String(v ?? '').replace(/\s+/g, '').replace(/,/g, '');
+    const m = /(\d+(?:\.\d+)?)(억|만|천)?원?/.exec(t); if (!m) return null;
+    const n = Number(m[1]) * (m[2] === '억' ? 1e8 : m[2] === '만' ? 1e4 : m[2] === '천' ? 1e3 : 1);
+    const rest = /(?:억|만)(\d+)천?원?/.exec(t); return Number.isFinite(n) ? n + (rest && m[2] === '만' ? Number(rest[1]) * 1e3 : 0) : null;
+  };
+  void num;
+  const baseline = () => Object.entries(AD_CH).map(([k, ch]) => { const share = sum > 0 && ch.provider && spend[ch.provider] ? (k === 'youtube' ? 0.05 : spend[ch.provider] / sum * (ch.provider === 'google' ? 0.75 : 1)) : base[k]; return { provider: k, label: ch.label, monthly: roundU(total * share), note: '', connected: !!ch.provider && connected.has(ch.provider) }; });
+  let plan = baseline();
   let rationale = `지난 30일 매체별 실적(${m.byProvider.map((p) => `${p.provider} ${won(p.cost)}`).join(', ') || '없음'})과 이달 목표 광고비${goalBudget ? `(${won(goalBudget)})` : '(없음)'}를 기준으로 배분. 연결 안 된 매체는 안내만.`;
   let source: 'ai' | 'template' = 'template';
   try {
-    const o = await aiJson(tenant, actorId, `당신은 경력 30년의 퍼포먼스 마케터입니다. 채널별 월 광고 예산 계획을 JSON 으로 씁니다. 총액은 주어진 값 안에서, 실적(CPC·전환)이 좋은 매체에 더, 연결 안 된 매체는 0 또는 작게(시작 제안). 숫자는 1만원 단위. rationale 에 근거 한 문단(실적 숫자 인용).`,
+    const o = await aiJson(tenant, actorId, `당신은 경력 30년의 퍼포먼스 마케터입니다. 채널별 월 광고 예산 계획을 JSON 으로 씁니다. 총액은 주어진 값 안에서, 실적(CPC·전환)이 좋은 매체에 더, 연결 안 된 매체는 0 또는 작게(시작 제안). monthly 는 반드시 원 단위 정수(예: 15000 — '1만원' 같은 글자·만원 단위 숫자 금지). rationale 에 근거 한 문단(실적 숫자 인용).`,
       `[재료]\n${m.text}\n총액(원): ${total}\n매체: ${Object.entries(AD_CH).map(([k, c]) => `${k}=${c.label}${c.provider && connected.has(c.provider) ? '(연결됨)' : '(연결 없음)'}`).join(', ')}`,
       { type: 'object', additionalProperties: false, required: ['plan', 'rationale'], properties: { rationale: { type: 'string' }, plan: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['provider', 'monthly', 'note'], properties: { provider: { type: 'string' }, monthly: { type: 'integer' }, note: { type: 'string' } } } } } }, 'marketing_ops');
-    if (o?.plan?.length) { plan = plan.map((p) => { const ai = o.plan.find((x: any) => x.provider === p.provider); return ai ? { ...p, monthly: Math.max(0, Math.round(Number(ai.monthly) / 10000) * 10000), note: String(ai.note ?? '').slice(0, 200) } : p; }); rationale = String(o.rationale ?? rationale).slice(0, 1000); source = 'ai'; }
+    if (o?.plan?.length) {
+      const vals = o.plan.map((x: any) => krw(x.monthly) ?? 0);
+      const unitMan = vals.every((v: number) => v < 1000) && vals.some((v: number) => v > 0); // 전부 작은 숫자면 '만원 단위'로 준 것
+      plan = plan.map((p) => { const ai = o.plan.find((x: any) => x.provider === p.provider); if (!ai) return p;
+        let won = krw(ai.monthly) ?? 0; if (unitMan) won *= 10000;
+        if (!won) won = krw(/(\d[\d,.]*\s*(?:억|만|천)?\s*원)/.exec(String(ai.note ?? ''))?.[1]) ?? 0; // 비고 문장의 금액으로 복구
+        return { ...p, monthly: roundU(won), note: String(ai.note ?? '').slice(0, 200) }; });
+      rationale = String(o.rationale ?? rationale).slice(0, 1000); source = 'ai';
+    }
+    if (total > 0 && plan.reduce((a, p) => a + p.monthly, 0) === 0) plan = baseline(); // AI 숫자를 못 읽었으면 기본 배분
   } catch { /* 기본 배분 */ }
   const tot = plan.reduce((a, p) => a + p.monthly, 0);
   const days = Number(lastDayOf(month).slice(8));
@@ -164,6 +185,7 @@ export async function actBudget(u: SessionUser, id: string, i: z.infer<typeof bu
   }
   if (i.action === 'reject') { await sql`update mkt_ad_budgets set status = 'rejected', rationale = ${`${b.rationale ?? ''}\n\n반려: ${i.note}`}, updated_at = now() where id = ${id}`; return { status: 'rejected' }; }
   if (b.status !== 'pending') throw badRequest('승인 대기 계획만');
+  if (!Number(b.total)) throw badRequest('예산이 0원인 계획은 집행할 수 없습니다 — [고치기]로 금액을 넣어 주세요'); // 로컬 23:00: 0원 승인 → 캠페인 예산 0 위험
   // 집행(연결된 계정 범위): 네이버 — 만들어진 활성/일시정지 캠페인의 하루 예산을 계획값으로(돈이 늘면 adOps 상한 검사). 다른 매체는 안내만.
   const executed: any[] = [];
   const { actPlan } = await import('./adOps');

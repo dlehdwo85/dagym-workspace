@@ -114,6 +114,7 @@ export function Automation() {
           <div className="space-y-1 pt-5 text-xs">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_generated_people} onChange={(e) => save({ allowGeneratedPeople: e.target.checked })} />생성 인물 허용</label>
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_slideshow} onChange={(e) => save({ allowSlideshow: e.target.checked })} />슬라이드쇼 허용</label>
+            <label className="flex items-center gap-1.5" title="승인된 최신 버전이 예정 시각이 되면 연결된 계정(인스타·페북·스레드·유튜브)에 워크인 서버가 올립니다. 승인이 곧 게시 결정입니다."><input type="checkbox" checked={!!s.auto_publish} onChange={(e) => save({ autoPublish: e.target.checked })} data-testid="auto-publish" />승인되면 예정 시각에 자동 게시(연결 채널)</label>
           </div>
         </div>
       </section>}

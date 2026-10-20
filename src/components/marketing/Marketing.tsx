@@ -148,7 +148,7 @@ function PostPreview({ channel, kind, brand, title, body, media }: { channel: st
 }
 function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange: () => void }) {
   const { data, error, reload } = useApi<any>(`/api/marketing/contents/${id}`);
-  const [comment, setComment] = useState(''); const [ver, setVer] = useState<{ body: string; media: { id: string; title: string }[]; note: string } | null>(null); const [url, setUrl] = useState('');
+  const [comment, setComment] = useState(''); const [ver, setVer] = useState<{ body: string; media: { id: string; title: string }[]; note: string } | null>(null); const [url, setUrl] = useState(''); const [pubBusy, setPubBusy] = useState(false);
   if (error) return <Modal open onClose={onClose} title="콘텐츠"><ErrorBox error={error} retry={reload} /></Modal>;
   if (!data) return <Modal open onClose={onClose} title="콘텐츠"><Skeleton rows={4} /></Modal>;
   const c = data.content, v = data.versions[0];
@@ -166,6 +166,18 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
       if (action === 'archive') { onChange(); onClose(); } else { reload(); onChange(); } } catch (e: any) { toast.error(e.message); }
   }
   async function publish() { try { await api(`/api/marketing/contents/${id}/publish`, { body: { url } }); toast.ok('게시 확인했습니다'); reload(); onChange(); } catch (e: any) { toast.error(e.message); } }
+  // 대표 10/20 22:30 ② M1: [서버로 게시] — 연결 계정으로 워크인 서버가 올림(승인된 최신 버전, 시험 제외). 결과는 게시 기록 줄에
+  async function serverPublish(atSchedule = false) {
+    const tg = data?.publish?.targets ?? [];
+    const names = tg.filter((t: any) => t.accounts.length).map((t: any) => `${t.label} ${t.accounts.map((a: any) => a.label).join('·')}`).join(' / ');
+    if (!confirm(`${names} 에 ${atSchedule ? '예정 시각에' : '지금'} 게시할까요? 게시 뒤에는 워크인에서 지울 수 없습니다.`)) return;
+    setPubBusy(true);
+    try { const r = await api<any>(`/api/marketing/contents/${id}/publish/server`, { body: { atSchedule } });
+      const done = (r.ran ?? []).filter((x: any) => x.status === 'done').length, bad = (r.ran ?? []).filter((x: any) => ['failed', 'error'].includes(x.status));
+      toast.ok(atSchedule ? `예정 시각에 게시합니다(${r.jobs.length}건)` : bad.length ? `게시 실패 ${bad.length}건: ${bad[0].error ?? ''}` : done ? `게시했습니다(${done}건)` : `게시 작업 ${r.jobs.length}건 — 처리 중`);
+      reload(); onChange(); } catch (e: any) { toast.error(e.message); } finally { setPubBusy(false); }
+  }
+  async function retryJob(jobId: string) { try { await api(`/api/marketing/publish/jobs/${jobId}/retry`, { body: {} }); toast.ok('다시 시도했습니다'); reload(); onChange(); } catch (e: any) { toast.error(e.message); } }
   return (
     <Modal open onClose={onClose} title={c.title} wide>
       <div className="space-y-3 text-sm" data-testid="mkt-detail">
@@ -198,12 +210,21 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
           </div>
         ) : <Button variant="secondary" onClick={() => setVer({ body: v.body, media: v.media_ids.map((m: string) => ({ id: m, title: titleOf(m) })), note: '' })} data-testid="mkt-version-open">수정본 올리기</Button>)}
         {((c.status === 'approved' && c.approved_version === c.current_version) || c.status === 'published') && <PublishHelper published={c.status === 'published'} channel={c.channel} title={c.title} body={v.body} media={v.media_ids.map((m: string) => ({ id: m, title: titleOf(m) }))} />}
+        {c.status === 'approved' && c.approved_version === c.current_version && data.publish?.canServer && (
+          <div className="rounded-input border border-violet-200 bg-violet-50/40 p-3" data-testid="mkt-server-publish">
+            <p className="text-xs text-ink-2">연결된 계정으로 워크인 서버가 올립니다: {data.publish.targets.filter((t: any) => t.accounts.length).map((t: any) => `${t.label}(${t.accounts.map((a: any) => a.label).join('·')})`).join(' · ')}{data.publish.targets.some((t: any) => !t.accounts.length) && <span className="text-ink-3"> · 연결 없음: {data.publish.targets.filter((t: any) => !t.accounts.length).map((t: any) => t.label).join('·')} → 도우미</span>}</p>
+            <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={() => serverPublish(false)} disabled={pubBusy} data-testid="mkt-server-publish-now">지금 게시</Button>
+              {c.scheduled_at && new Date(c.scheduled_at) > new Date() && <Button size="sm" variant="secondary" onClick={() => serverPublish(true)} disabled={pubBusy} data-testid="mkt-server-publish-at">예정 시각에 게시</Button>}
+              {data.publish.autoPublish && <span className="self-center text-[11px] text-emerald-800">자동 게시 켜짐 — 예정 시각이 되면 올라갑니다</span>}</div>
+          </div>
+        )}
         {c.status === 'approved' && (
-          <div className="flex gap-2"><input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="게시한 글 주소(https://…)" aria-label="게시 주소" /><Button onClick={publish} disabled={!url} data-testid="mkt-publish">게시 확인</Button></div>
+          <div className="flex gap-2"><input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="직접 올렸다면 게시한 글 주소(https://…)" aria-label="게시 주소" /><Button onClick={publish} disabled={!url} data-testid="mkt-publish">게시 확인</Button></div>
         )}
         </>}
         {c.published_url && <p className="text-xs">게시됨: <a className="underline" href={c.published_url} target="_blank" rel="noopener">{c.published_url}</a></p>}
-        {!!data.publishJobs?.length && <ul className="space-y-0.5 border-t border-line pt-2 text-xs text-ink-2" data-testid="mkt-publish-jobs">{data.publishJobs.map((j: any, i: number) => <li key={i}>게시 기록{j.is_test ? ' [시험]' : ''} v{j.version} · {({ naver_blog: '네이버 블로그(도우미)', manual: '직접 게시' } as any)[j.provider] ?? j.provider} · {({ done: '완료', queued: '대기', running: '진행 중', verify: '확인 중', failed: '실패', canceled: '취소' } as any)[j.status]} · {j.requested_by_name ?? ''} · {fmtDateTime(j.created_at)}</li>)}</ul>}
+        {!!data.publishJobs?.length && <ul className="space-y-0.5 border-t border-line pt-2 text-xs text-ink-2" data-testid="mkt-publish-jobs">{data.publishJobs.map((j: any, i: number) => <li key={i} data-testid="mkt-publish-job" data-status={j.status}>게시 기록{j.is_test ? ' [시험]' : ''} v{j.version} · {({ naver_blog: '네이버 블로그(도우미)', manual: '직접 게시', meta_ig: '인스타그램', meta_fb: '페이스북 페이지', meta_threads: '스레드', youtube: '유튜브' } as any)[j.provider] ?? j.provider}{j.account ? ` ${j.account}` : ''} · <b className={j.status === 'failed' ? 'text-red-700' : j.status === 'done' ? 'text-emerald-800' : ''}>{({ done: '완료', queued: '대기', running: '진행 중', verify: '확인 중', failed: '실패', canceled: '취소' } as any)[j.status]}</b>{j.permalink && j.provider !== 'manual' && <> · <a className="underline" href={j.permalink} target="_blank" rel="noopener">열기</a></>}{j.last_error && <span className="text-red-700"> · {j.last_error}</span>} · {j.requested_by_name ?? '자동'} · {fmtDateTime(j.created_at)}
+          {data.canDecide && j.status === 'failed' && j.id && <button type="button" className="ml-1 underline" onClick={() => retryJob(j.id)} data-testid="mkt-publish-retry">다시 시도</button>}</li>)}</ul>}
         {!!data.decisions.length && <ul className="space-y-0.5 border-t border-line pt-2 text-xs text-ink-2">{data.decisions.map((d: any, i: number) => <li key={i}>v{d.version} {({ approve: '승인', changes: '수정 요청', hold: '보류' } as any)[d.decision]} · {d.decided_by_name} · {fmtDateTime(d.decided_at)}{d.comment ? ` — ${d.comment}` : ''}</li>)}</ul>}
       </div>
     </Modal>

@@ -90,12 +90,12 @@ export async function objectSize(key: string): Promise<number | null> {
 }
 
 /** 권한 확인 후 발급하는 짧은 수명의 다운로드 URL */
-export async function downloadUrl(key: string, fileName: string, inline: boolean) {
+export async function downloadUrl(key: string, fileName: string, inline: boolean, ttlSec = 120) {
   const disp = `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(fileName)}`;
   if (s3Configured()) {
-    return getSignedUrl(s3(), new GetObjectCommand({ Bucket: s3Env().bucket, Key: key, ResponseContentDisposition: disp }), { expiresIn: 120 });
+    return getSignedUrl(s3(), new GetObjectCommand({ Bucket: s3Env().bucket, Key: key, ResponseContentDisposition: disp }), { expiresIn: ttlSec });
   }
-  const exp = Date.now() + 120_000;
+  const exp = Date.now() + ttlSec * 1000;
   return `/api/files/local?key=${encodeURIComponent(key)}&exp=${exp}&sig=${hmac(`get:${key}:${exp}`)}&name=${encodeURIComponent(fileName)}&inline=${inline ? 1 : 0}`;
 }
 
