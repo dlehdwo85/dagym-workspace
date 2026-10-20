@@ -33,7 +33,8 @@ export async function inbox({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.getByTestId('mkt-inbox-tab-budget').click();
   const budget = owner.getByTestId('ops-budget'); await budget.waitFor();
   await budget.getByTestId('budget-brands').waitFor();
-  assert.equal(await budget.getByTestId('budget-brands').locator('tbody tr').count(), 4, '브랜드 4줄');
+  const nBrands = (await sql`select count(*)::int n from mkt_brands where tenant = 'default'`)[0].n; // 앞 단계가 브랜드를 더 만들었을 수 있음(전체 실행)
+  assert.equal(await budget.getByTestId('budget-brands').locator('tbody tr').count(), nBrands, `브랜드 ${nBrands}줄`);
   await budget.getByTestId('budget-brand-needs-바디랩').waitFor();
   assert.match(await budget.getByTestId('budget-brand-바디랩').innerText(), /천안/);
   assert.match(await budget.getByTestId('budget-total').innerText(), /2,000,000원/, '대표 입력 총액 2,000,000');

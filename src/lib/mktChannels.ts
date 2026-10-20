@@ -7,6 +7,7 @@ import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { encrypt, newToken, sha256 } from './crypto';
 import { audit, logError } from './log';
 import { appUrl } from './mail';
+import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
 
 /**
@@ -71,13 +72,13 @@ export async function listChannels(u: SessionUser) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const sets = new Map((await sql<{ channel: string; enabled: boolean }[]>`select channel, enabled from mkt_channel_settings where tenant = ${t}`).map((r) => [r.channel, r.enabled]));
-  const accs = await sql<any[]>`select id, provider, external_id, label, status, last_error, info, created_at from mkt_publish_accounts where tenant = ${t} and status <> 'disconnected' order by created_at`;
+  const accs = await sql<any[]>`select a.id, a.provider, a.external_id, a.label, a.status, a.last_error, a.info, a.created_at, a.brand_id, a.shared, b.name as brand from mkt_publish_accounts a left join mkt_brands b on b.id = a.brand_id where a.tenant = ${t} and a.status <> 'disconnected' order by a.created_at`;
   const admin = isAdmin(u);
   return {
     canEdit: admin,
     metaDevMode: metaReady() && metaDevMode(),
     channels: PUBLISH_CHANNELS.map((c) => {
-      const accounts = accs.filter((a) => c.providers.includes(a.provider)).map((a) => ({ id: a.id, provider: a.provider, label: a.label, status: a.status, lastError: a.last_error, warnings: (a.info?.warnings ?? []) as string[] }));
+      const accounts = accs.filter((a) => c.providers.includes(a.provider)).map((a) => ({ id: a.id, provider: a.provider, label: a.label, status: a.status, lastError: a.last_error, warnings: (a.info?.warnings ?? []) as string[], brandId: a.brand_id as string | null, brand: a.brand as string | null, shared: !!a.shared }));
       // 운영 방식: 도우미(사람이 올리고 [게시 확인]) / 자동(심사 통과 + 연결됨)
       const mode = ['meta', 'threads', 'google'].includes(c.kind) && accounts.length ? 'auto' : c.kind === 'later' ? 'later' : 'helper'; // M1: 연결되면 서버 게시(개발 모드 앱은 앱 역할 계정만)
       return { key: c.key, label: c.label, note: c.note, kind: c.kind, enabled: sets.get(c.key) ?? c.on, connectable: c.kind !== 'helper' && c.kind !== 'later', ready: kindReady(c.kind), mode, accounts };
@@ -157,9 +158,10 @@ export async function publishConnectCallback(u: SessionUser, provider: string, c
   if (!found.length) throw badRequest(META_HINT.noPages);
   for (const f of found.slice(0, 40)) {
     const warnings = [...general, ...f.warnings];
-    await sql`insert into mkt_publish_accounts (tenant, provider, external_id, label, token_enc, scopes, status, last_error, created_by, owner_ext_id, info)
-      values (${tenantOf(u)}, ${f.provider}, ${f.id}, ${f.label}, ${f.token ? encrypt(f.token) : null}, ${META_PUBLISH_SCOPES}, 'active', null, ${u.id}, ${ownerId || null}, ${sql.json({ ...f.info, warnings } as never)})
-      on conflict (tenant, provider, external_id) do update set label = excluded.label, token_enc = excluded.token_enc, scopes = excluded.scopes, status = 'active', last_error = null, owner_ext_id = excluded.owner_ext_id, info = excluded.info`;
+    await sql`insert into mkt_publish_accounts (tenant, provider, external_id, label, token_enc, scopes, status, last_error, created_by, owner_ext_id, info, brand_id)
+      values (${tenantOf(u)}, ${f.provider}, ${f.id}, ${f.label}, ${f.token ? encrypt(f.token) : null}, ${META_PUBLISH_SCOPES}, 'active', null, ${u.id}, ${ownerId || null}, ${sql.json({ ...f.info, warnings } as never)}, ${await guessBrandId(tenantOf(u), f.label)})
+      on conflict (tenant, provider, external_id) do update set label = excluded.label, token_enc = excluded.token_enc, scopes = excluded.scopes, status = 'active', last_error = null, owner_ext_id = excluded.owner_ext_id, info = excluded.info,
+        brand_id = coalesce(mkt_publish_accounts.brand_id, excluded.brand_id)`;
   }
   const ig = found.filter((f) => f.provider === 'meta_ig').length, fb = found.filter((f) => f.provider === 'meta_fb').length;
   await audit(sql, u.id, 'mkt_publish.connect', 'mkt_publish_account', null, { provider: 'meta', pages: fb, instagram: ig }).catch(() => {});
@@ -181,8 +183,8 @@ async function connectCallbackOther(u: SessionUser, provider: 'threads' | 'youtu
       const tk = String(long?.access_token ?? short.access_token); const exp = new Date(Date.now() + Number(long?.expires_in ?? 3600) * 1000).toISOString();
       const me = await getJson(`${THREADS_API()}/v1.0/me?${new URLSearchParams({ fields: 'id,username', access_token: tk })}`);
       const id = String(me?.id ?? short.user_id); const label = `@${String(me?.username ?? id)}`.slice(0, 60);
-      await sql`insert into mkt_publish_accounts (tenant, provider, external_id, label, token_enc, scopes, expires_at, status, last_error, created_by, owner_ext_id, info)
-        values (${tenantOf(u)}, 'meta_threads', ${id}, ${label}, ${encrypt(tk)}, ${THREADS_SCOPES}, ${exp}, 'active', null, ${u.id}, ${id}, ${sql.json({ warnings: [] } as never)})
+      await sql`insert into mkt_publish_accounts (tenant, provider, external_id, label, token_enc, scopes, expires_at, status, last_error, created_by, owner_ext_id, info, brand_id)
+        values (${tenantOf(u)}, 'meta_threads', ${id}, ${label}, ${encrypt(tk)}, ${THREADS_SCOPES}, ${exp}, 'active', null, ${u.id}, ${id}, ${sql.json({ warnings: [] } as never)}, ${await guessBrandId(tenantOf(u), label)})
         on conflict (tenant, provider, external_id) do update set label = excluded.label, token_enc = excluded.token_enc, scopes = excluded.scopes, expires_at = excluded.expires_at, status = 'active', last_error = null, owner_ext_id = excluded.owner_ext_id, info = excluded.info`;
       await audit(sql, u.id, 'mkt_publish.connect', 'mkt_publish_account', null, { provider: 'threads', account: label }).catch(() => {});
       return { pages: 0, instagram: 0, threads: 1, youtube: 0, warnings: 0 };
@@ -204,6 +206,27 @@ async function connectCallbackOther(u: SessionUser, provider: 'threads' | 'youtu
 }
 
 /** 연결 끊기 — 토큰을 바로 지움(행 삭제). 게시 기록(mkt_publish_jobs)은 account_id 만 비워져 남음 */
+/** 로컬 10/21 08:10: 연결 직후 라벨로 브랜드 추정(@hi_link_official → 하이링크, dagym → 다짐, work_in → 워크인, body_lab → 바디랩, 브랜드 이름 포함) — 못 맞추면 미지정(게시 대상에서 제외) */
+const BRAND_HINTS: Record<string, string[]> = { '하이링크': ['hi_link', 'hilink', 'hi-link'], '다짐': ['dagym'], '워크인': ['work_in', 'workin', 'work-in'], '바디랩': ['body_lab', 'bodylab', 'body-lab'] };
+export async function guessBrandId(tenant: string, label: string) {
+  const brands = await db()<{ id: string; name: string }[]>`select id, name from mkt_brands where tenant = ${tenant}`;
+  const l = label.toLowerCase();
+  const hit = brands.find((b) => l.includes(b.name.toLowerCase()) || (BRAND_HINTS[b.name] ?? []).some((h) => l.includes(h)));
+  return hit?.id ?? null;
+}
+export const accountBrandInput = z.object({ brandId: zUuid.nullable().optional(), shared: z.boolean().optional() });
+/** 연결 계정의 브랜드(또는 공용) 지정 — 관리자. 공용이면 brand_id 비움 */
+export async function setPublishAccountBrand(u: SessionUser, id: string, i: { brandId?: string | null; shared?: boolean }) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
+  const sql = db();
+  if (i.brandId) { const [b] = await sql`select id from mkt_brands where id = ${i.brandId} and tenant = ${tenantOf(u)}`; if (!b) throw badRequest('브랜드를 찾을 수 없습니다'); }
+  const shared = i.shared === undefined ? (i.brandId ? false : undefined) : i.shared;
+  const [a] = await sql`update mkt_publish_accounts set brand_id = ${shared ? null : (i.brandId ?? null)}, shared = ${shared === undefined ? sql`shared` : shared} where id = ${id} and tenant = ${tenantOf(u)} returning id, brand_id, shared, label`;
+  if (!a) throw notFound('연결 계정을 찾을 수 없습니다');
+  await audit(sql, u.id, 'mkt_publish.brand', 'mkt_publish_account', id, { brandId: a.brand_id, shared: a.shared }).catch(() => {});
+  return { id: a.id, brandId: a.brand_id, shared: a.shared };
+}
 export async function removePublishAccount(u: SessionUser, id: string) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();

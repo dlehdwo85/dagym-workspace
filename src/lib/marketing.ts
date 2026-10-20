@@ -107,7 +107,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
     left join mkt_versions v on v.content_id = c.id and v.version = c.current_version
     left join users u on u.id = c.created_by
     where c.tenant = ${t} and c.status <> 'canceled'
-      and (${q.view ?? ''} <> 'approvals' or ${q.day ?? ''} <> '' or c.status in ('pending', 'changes', 'hold'))
+      and (${q.view ?? ''} <> 'approvals' or ${q.day ?? ''} <> '' or c.status in ('pending', 'changes', 'hold', 'approved'))
       -- 현황 '오늘' 카드에서 들어온 목록(시험 제외)
       and (${q.day ?? ''} = '' or (not c.is_test and case ${q.day ?? ''}
         when 'produced' then (c.produced_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date
@@ -124,6 +124,19 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
     return { ...r, deadline, late: !!deadline && deadline.getTime() < now && ['pending', 'changes'].includes(r.status) }; }) };
 }
 
+/** 로컬 10/21 08:10: 브랜드·게시 예정 시각 바로잡기(관리자) — 승인 상태는 그대로(게시 계정 선택·마감 재배치용) */
+export const contentPatchInput = z.object({ brandId: zUuid.nullable().optional(), scheduledAt: z.string().datetime({ offset: true }).nullable().optional() });
+export async function patchContent(u: SessionUser, id: string, i: z.infer<typeof contentPatchInput>) {
+  await assertSpace(u, 'marketing'); if (!isAdmin(u)) throw forbidden('관리자만');
+  uuidOr404(id);
+  const sql = db(); const t = tenantOf(u);
+  if (i.brandId) { const [b] = await sql`select id from mkt_brands where id = ${i.brandId} and tenant = ${t}`; if (!b) throw badRequest('브랜드를 찾을 수 없습니다'); }
+  const [c] = await sql<any[]>`update mkt_contents set brand_id = ${i.brandId === undefined ? sql`brand_id` : i.brandId}, scheduled_at = ${i.scheduledAt === undefined ? sql`scheduled_at` : i.scheduledAt}, updated_at = now()
+    where id = ${id} and tenant = ${t} and status <> 'published' returning id, brand_id, scheduled_at, status`;
+  if (!c) throw notFound('콘텐츠를 찾을 수 없습니다(게시된 콘텐츠는 못 바꿈)');
+  await audit(sql, u.id, 'mkt_content.patch', 'mkt_content', id, { brandId: i.brandId, scheduledAt: i.scheduledAt }).catch(() => {});
+  return { id: c.id, brandId: c.brand_id, scheduledAt: c.scheduled_at, status: c.status };
+}
 export async function getContent(u: SessionUser, id: string) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);

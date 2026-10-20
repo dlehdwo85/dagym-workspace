@@ -92,6 +92,19 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.getByTestId('ads-card').first().waitFor();
   assert.equal(await owner.getByTestId('ads-card').count(), 4);
   await owner.getByText('광고 계정을 연결하면 매일 아침 성과가 들어옵니다').waitFor();
+  // 대표 10/21 06:30 ①: 월별 보기 기본(월 선택·전월 대비) + AI 마케터 월 분석 블록 → [승인 요청 카드로 보내기] → 승인함 링크
+  assert.ok(await owner.getByTestId('ads-month').inputValue(), '이달이 기본');
+  await owner.getByTestId('ads-by-provider').waitFor(); await owner.getByTestId('ads-by-brand').waitFor();
+  await owner.getByTestId('ads-analysis-run').click();
+  await owner.getByTestId('ads-analysis-proposals').waitFor();
+  assert.equal(await owner.getByTestId('ads-analysis-proposals').locator('li').count(), 3, '다음 달 제안 3개');
+  await owner.screenshot({ path: `${SHOTS}/173-mkt-ads-month.png`, fullPage: true });
+  await owner.getByTestId('ads-analysis-card').click();
+  await owner.getByTestId('ads-analysis-card-link').waitFor();
+  await owner.getByTestId('ads-report-link').waitFor();
+  await sql`update mkt_proposals set status = 'rejected', decision_note = 'E2E 정리' where kind = 'analysis' and body->>'adsMonth' is not null`; // 운영실 단계가 빈 보드에서 시작하도록
+  await owner.getByTestId('ads-days-7').click();
+  await owner.getByText('최근 7일', { exact: true }).first().waitFor();
   // 로컬 검수 10/19: 사이드바 묶음(운영·제작·성과·설정)·계정 연결은 설정 › 연결 계정
   assert.deepEqual(await owner.locator('aside').getByTestId('nav-group').allInnerTexts(), ['운영', '제작', '성과', '설정']);
   await owner.getByTestId('ads-accounts-link').getByRole('link', { name: /연결 계정/ }).click();

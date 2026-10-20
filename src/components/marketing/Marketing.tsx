@@ -153,10 +153,17 @@ function PostPreview({ channel, kind, brand, title, body, media, info }: { chann
 function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange: () => void }) {
   const { data, error, reload } = useApi<any>(`/api/marketing/contents/${id}`);
   const [comment, setComment] = useState(''); const [ver, setVer] = useState<{ body: string; media: { id: string; title: string }[]; note: string } | null>(null); const [url, setUrl] = useState(''); const [pubBusy, setPubBusy] = useState(false);
+  const [picked, setPicked] = useState<Record<string, boolean>>({}); const [fixOpen, setFixOpen] = useState(false); const [fixBrand, setFixBrand] = useState(''); const [fixAt, setFixAt] = useState('');
+  const brandsQ = useApi<{ brands: { id: string; name: string }[] }>(fixOpen ? '/api/marketing/brands' : null, [fixOpen]);
   if (error) return <Modal open onClose={onClose} title="콘텐츠"><ErrorBox error={error} retry={reload} /></Modal>;
   if (!data) return <Modal open onClose={onClose} title="콘텐츠"><Skeleton rows={4} /></Modal>;
   const c = data.content, v = data.versions[0];
   const titleOf = (mid: string) => data.media.find((m: any) => m.id === mid)?.title ?? '자료';
+  const targetAccs: { id: string; label: string; channel: string; brand: string | null; shared: boolean }[] = (data.publish?.targets ?? []).flatMap((t: any) => t.accounts.map((a: any) => ({ ...a, channel: t.label })));
+  const pickedIds = targetAccs.filter((a) => !(a.id in picked) || picked[a.id]).map((a) => a.id);
+  async function fix(body: { brandId?: string | null; scheduledAt?: string | null }) {
+    try { await api(`/api/marketing/contents/${id}`, { method: 'PATCH', body }); toast.ok('바로잡았습니다'); setFixOpen(false); reload(); onChange(); } catch (e: any) { toast.error(e.message); }
+  }
   async function act(decision: 'approve' | 'changes' | 'hold') {
     try { await api(`/api/marketing/contents/${id}/decide`, { body: { version: c.current_version, decision, comment: comment || undefined } }); toast.ok({ approve: '승인했습니다', changes: '수정을 요청했습니다', hold: '보류했습니다' }[decision]); setComment(''); reload(); onChange(); } catch (e: any) { toast.error(e.message); reload(); }
   }
@@ -172,11 +179,12 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   async function publish() { try { await api(`/api/marketing/contents/${id}/publish`, { body: { url } }); toast.ok('게시 확인했습니다'); reload(); onChange(); } catch (e: any) { toast.error(e.message); } }
   // 대표 10/20 22:30 ② M1: [서버로 게시] — 연결 계정으로 워크인 서버가 올림(승인된 최신 버전, 시험 제외). 결과는 게시 기록 줄에
   async function serverPublish(atSchedule = false) {
-    const tg = data?.publish?.targets ?? [];
-    const names = tg.filter((t: any) => t.accounts.length).map((t: any) => `${t.label} ${t.accounts.map((a: any) => a.label).join('·')}`).join(' / ');
+    const chosen = targetAccs.filter((a) => pickedIds.includes(a.id));
+    if (!chosen.length) { toast.error('게시할 계정을 하나 이상 고르세요'); return; }
+    const names = chosen.map((a) => `${a.channel} ${a.label}`).join(' · ');
     if (!confirm(`${names} 에 ${atSchedule ? '예정 시각에' : '지금'} 게시할까요? 게시 뒤에는 워크인에서 지울 수 없습니다.`)) return;
     setPubBusy(true);
-    try { const r = await api<any>(`/api/marketing/contents/${id}/publish/server`, { body: { atSchedule } });
+    try { const r = await api<any>(`/api/marketing/contents/${id}/publish/server`, { body: { atSchedule, accountIds: pickedIds } });
       const done = (r.ran ?? []).filter((x: any) => x.status === 'done').length, bad = (r.ran ?? []).filter((x: any) => ['failed', 'error'].includes(x.status));
       toast.ok(atSchedule ? `예정 시각에 게시합니다(${r.jobs.length}건)` : bad.length ? `게시 실패 ${bad.length}건: ${bad[0].error ?? ''}` : done ? `게시했습니다(${done}건)` : `게시 작업 ${r.jobs.length}건 — 처리 중`);
       reload(); onChange(); } catch (e: any) { toast.error(e.message); } finally { setPubBusy(false); }
@@ -187,6 +195,14 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
       <div className="space-y-3 text-sm" data-testid="mkt-detail">
         <AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContent} subject={`시안 ${String(c.title).slice(0, 40)}`} compact testId="ai-ask-content" />
         <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b> · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
+        {data.canDecide && c.status !== 'published' && (fixOpen ? (
+          <div className="flex flex-wrap items-end gap-2 rounded-input border border-line p-2 text-xs" data-testid="mkt-fix">
+            <label className="grid gap-0.5">브랜드<select className={cx(inputCls, 'h-8 py-0 text-xs')} value={fixBrand} onChange={(e) => setFixBrand(e.target.value)} data-testid="mkt-fix-brand"><option value="">(없음)</option>{(brandsQ.data?.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+            <label className="grid gap-0.5">게시 예정<input type="datetime-local" className={cx(inputCls, 'h-8 py-0 text-xs')} value={fixAt} onChange={(e) => setFixAt(e.target.value)} data-testid="mkt-fix-at" /></label>
+            <Button size="sm" onClick={() => fix({ brandId: fixBrand || null, scheduledAt: fixAt ? new Date(fixAt).toISOString() : null })} data-testid="mkt-fix-save">저장</Button><Button size="sm" variant="secondary" onClick={() => setFixOpen(false)}>취소</Button>
+            <span className="text-ink-3">승인 상태는 그대로 — 브랜드가 틀렸거나 마감이 지난 건을 바로잡을 때</span>
+          </div>
+        ) : <button type="button" className="text-xs underline text-ink-2" onClick={() => { setFixBrand(c.brand_id ?? ''); setFixAt(c.scheduled_at ? new Date(new Date(c.scheduled_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''); setFixOpen(true); }} data-testid="mkt-fix-open">브랜드·게시 예정 바로잡기</button>)}
         {c.quality?.passed === false && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">{c.auto ? '품질 검사: ' : ''}{c.quality.issues.join(' · ')}</p>}
         <WhyBox r={c.rationale} />
         {v && <PostPreview channel={c.channel} kind={c.kind} brand={c.brand} title={c.title} body={v.body} media={v.media_ids} info={(data.media ?? []).map((m: any) => ({ id: m.id, mime: m.mime_type }))} />}
@@ -216,11 +232,18 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         {((c.status === 'approved' && c.approved_version === c.current_version) || c.status === 'published') && <PublishHelper published={c.status === 'published'} channel={c.channel} title={c.title} body={v.body} media={v.media_ids.map((m: string) => ({ id: m, title: titleOf(m) }))} />}
         {c.status === 'approved' && c.approved_version === c.current_version && data.publish?.canServer && (
           <div className="rounded-input border border-violet-200 bg-violet-50/40 p-3" data-testid="mkt-server-publish">
-            <p className="text-xs text-ink-2">연결된 계정으로 워크인 서버가 올립니다: {data.publish.targets.filter((t: any) => t.accounts.length).map((t: any) => `${t.label}(${t.accounts.map((a: any) => a.label).join('·')})`).join(' · ')}{data.publish.targets.some((t: any) => !t.accounts.length) && <span className="text-ink-3"> · 연결 없음: {data.publish.targets.filter((t: any) => !t.accounts.length).map((t: any) => t.label).join('·')} → 도우미</span>}</p>
+            <p className="text-xs text-ink-2">연결된 계정으로 워크인 서버가 올립니다 — 대상 계정(기본: 이 브랜드 계정 + 공용){data.publish.targets.some((t: any) => !t.accounts.length) && <span className="ml-1 text-amber-800">· {data.publish.targets.filter((t: any) => !t.accounts.length).map((t: any) => t.label).join('·')}은 계정 없음</span>}</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="mkt-publish-targets">{targetAccs.map((a) => <label key={a.id} className={cx('inline-flex min-h-[32px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs', pickedIds.includes(a.id) ? 'border-violet-400 bg-white font-medium' : 'border-line bg-white text-ink-3')}>
+              <input type="checkbox" className="size-4 accent-violet-600" checked={pickedIds.includes(a.id)} onChange={(e) => setPicked({ ...picked, [a.id]: e.target.checked })} data-testid="mkt-publish-target" />{a.channel} {a.label}{a.shared ? ' · 공용' : a.brand ? ` · ${a.brand}` : ''}</label>)}</div>
             <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={() => serverPublish(false)} disabled={pubBusy} data-testid="mkt-server-publish-now">지금 게시</Button>
               {c.scheduled_at && new Date(c.scheduled_at) > new Date() && <Button size="sm" variant="secondary" onClick={() => serverPublish(true)} disabled={pubBusy} data-testid="mkt-server-publish-at">예정 시각에 게시</Button>}
               {data.publish.autoPublish && <span className="self-center text-[11px] text-emerald-800">자동 게시 켜짐 — 예정 시각이 되면 올라갑니다</span>}</div>
           </div>
+        )}
+        {c.status === 'approved' && c.approved_version === c.current_version && data.canDecide && !c.is_test && !data.publish?.canServer && (data.publish?.targets ?? []).some((t: any) => t.reason && t.reason !== 'none') && (
+          <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="mkt-publish-blocked">
+            {(data.publish.targets as any[]).some((t) => t.reason === 'unassigned') ? `계정에 브랜드를 지정하세요 — ${(data.publish.targets as any[]).flatMap((t) => t.unassigned).join('·')} 은 브랜드 미지정이라 게시 대상에서 빠져 있습니다.` : `이 브랜드(${c.brand ?? '브랜드 없음'})에 지정된 계정이 없습니다 — 다른 브랜드 계정으로는 나가지 않습니다.`}
+            <Link href="/s/marketing/connections" className="ml-1 font-medium underline">연결 계정에서 지정 →</Link></p>
         )}
         {c.status === 'approved' && (
           <div className="flex gap-2"><input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="직접 올렸다면 게시한 글 주소(https://…)" aria-label="게시 주소" /><Button onClick={publish} disabled={!url} data-testid="mkt-publish">게시 확인</Button></div>
@@ -313,6 +336,7 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
   const ready = plain ? list : list.filter((c) => c.status === 'pending' && !c.late);
   const waiting = plain ? [] : list.filter((c) => (c.status === 'changes' || c.status === 'hold') && !c.late);
   const late = plain ? [] : list.filter((c) => c.late);
+  const approvedWait = plain ? [] : list.filter((c) => c.status === 'approved'); // 로컬 10/21 08:10: 승인됐지만 아직 게시 전 — 서버 게시는 열어서
   const shown = more ? ready : ready.slice(0, 3);
   return (
     <div className="space-y-3">
@@ -324,6 +348,9 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
         <div className="space-y-2">{shown.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}
           {!more && ready.length > 3 && <Button variant="secondary" className="w-full" onClick={() => setMore(true)} data-testid="mkt-more">{ready.length - 3}건 더 보기</Button>}</div>
       )}
+      {approvedWait.length > 0 && <details open className="rounded-card border border-emerald-200 bg-emerald-50/30 p-3 text-sm" data-testid="mkt-approved-wait"><summary className="cursor-pointer font-medium text-emerald-900">승인됨 · 게시 전 {approvedWait.length}건 — 열어서 [지금 게시] 또는 예정 시각에 자동</summary>
+        <div className="mt-2 space-y-2">{approvedWait.map((c) => <div key={c.id} className="space-y-1"><ApprovalCard c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />
+          {canDecide && <Button size="sm" variant="secondary" onClick={() => onOpen(c.id)} data-testid="mkt-approved-publish">열어서 게시 →</Button>}</div>)}</div></details>}
       {waiting.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
         <div className="mt-2 space-y-2">{waiting.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {late.length > 0 && <details className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" data-testid="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>

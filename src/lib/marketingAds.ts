@@ -169,23 +169,38 @@ export async function adsSyncDue() {
 // ---------------- 화면·API ----------------
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('광고 계정 연결은 관리자가 합니다'); }
 
-export async function adsOverview(u: SessionUser, q: { days?: number }) {
+/** 대표 10/21 06:30 ①: 월별 보기(기본) — 월 선택·전월 대비·매체/캠페인/브랜드 월 집계. days 는 홈·옛 호출 호환 */
+const lastDayOf = (m: string) => { const [y, mo] = m.split('-').map(Number); return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10); };
+const monthShift = (m: string, k: number) => { const [y, mo] = m.split('-').map(Number); return new Date(Date.UTC(y, mo - 1 + k, 1)).toISOString().slice(0, 7); };
+export async function adsOverview(u: SessionUser, q: { days?: number; month?: string }) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(q.month ?? '') ? String(q.month) : null;
   const n = [7, 14, 30, 90].includes(Number(q.days)) ? Number(q.days) : 7;
-  const from = daysBack(n)[0];
+  const today = ymd(new Date());
+  const from = month ? `${month}-01` : daysBack(n)[0]; const to = month ? lastDayOf(month) : today;
   const accounts = await sql`select a.id, a.provider, a.external_id, a.label, a.status, a.last_sync_at, a.last_error, b.name as brand from mkt_ad_accounts a left join mkt_brands b on b.id = a.brand_id
     where a.tenant = ${t} order by a.provider, a.label`;
-  const base = () => sql`from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.day >= ${from}`;
-  const [tot] = await sql`select coalesce(sum(impressions), 0)::float8 impressions, coalesce(sum(clicks), 0)::float8 clicks, coalesce(sum(cost_krw), 0)::float8 cost, coalesce(sum(conversions), 0)::float8 conversions ${base()}`;
-  const campaigns = await sql`select a.id as account_id, a.provider, a.label, s.campaign_id, max(s.campaign_name) campaign_name, max(s.currency) currency,
+  const base = (f = from, tt = to) => sql`from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id left join mkt_brands b on b.id = a.brand_id where a.tenant = ${t} and s.day between ${f}::date and ${tt}::date`;
+  const SUM = sql`coalesce(sum(impressions), 0)::float8 impressions, coalesce(sum(clicks), 0)::float8 clicks, coalesce(sum(cost_krw), 0)::float8 cost, coalesce(sum(conversions), 0)::float8 conversions`;
+  const [tot] = await sql`select ${SUM} ${base()}`;
+  const campaigns = await sql`select a.id as account_id, a.provider, a.label, b.name as brand, s.campaign_id, max(s.campaign_name) campaign_name, max(s.currency) currency,
       sum(impressions)::float8 impressions, sum(clicks)::float8 clicks, sum(cost_krw)::float8 cost, sum(conversions)::float8 conversions ${base()}
-    group by a.id, a.provider, a.label, s.campaign_id order by sum(cost_krw) desc limit 200`;
+    group by a.id, a.provider, a.label, b.name, s.campaign_id order by sum(cost_krw) desc limit 200`;
   const daily = await sql`select to_char(s.day, 'YYYY-MM-DD') as day, sum(clicks)::float8 clicks, sum(cost_krw)::float8 cost, sum(conversions)::float8 conversions ${base()} group by s.day order by s.day`;
-  return { days: n, from, accounts, totals: tot, campaigns, daily, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
+  const common = { accounts, totals: tot, campaigns, daily, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
     // 로컬 검수: 콘솔에 등록할 콜백 주소를 화면에 그대로(APP_URL 기준 — 도메인 바꾸면 이 주소도 바뀜)
     callbacks: u.platformAdmin ? { meta: callback('meta'), google: callback('google') } : null }; // 콘솔 등록 값은 플랫폼 관리자에게만(고객 화면에서 기술 단계 숨김)
+  if (!month) return { days: n, from, to, month: null, ...common };
+  const prevM = monthShift(month, -1);
+  const [prev] = await sql`select ${SUM} ${base(`${prevM}-01`, lastDayOf(prevM))}`;
+  const byProvider = await sql`select a.provider, ${SUM} ${base()} group by a.provider order by sum(cost_krw) desc`;
+  const byBrand = await sql`select coalesce(b.name, '(브랜드 없음)') as brand, ${SUM} ${base()} group by b.name order by sum(cost_krw) desc`;
+  const months = [...new Set([month, ...Array.from({ length: 6 }, (_, i) => monthShift(today.slice(0, 7), -i))])].sort().reverse();
+  const [an] = await sql<{ value: any }[]>`select value from app_settings where key = ${`mkt_ads_analysis:${t}:${month}`}`;
+  return { days: null, from, to, month, prevMonth: prevM, prev, byProvider, byBrand, months, analysis: an?.value ?? null, ...common };
 }
+export { lastDayOf as adsLastDayOf, monthShift as adsMonthShift };
 
 export const naverInput = z.object({ customerId: z.string().trim().regex(/^\d{3,12}$/, 'CUSTOMER_ID 는 숫자입니다(광고 시스템 › 도구 › API 사용 관리)'), apiKey: z.string().trim().min(10).max(200), secretKey: z.string().trim().min(10).max(200),
   label: z.string().trim().min(1).max(60), brandId: zUuid.nullable().optional() });
