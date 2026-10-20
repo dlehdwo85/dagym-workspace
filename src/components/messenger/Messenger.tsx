@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, AtSign, Headphones, Mic, Pencil, Bell, BellOff, Camera, CornerUpLeft, Download, FileText, Hash, Loader2, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Users, X } from 'lucide-react';
+import { ArrowLeft, AtSign, Headphones, Mic, Pencil, Bell, BellOff, Camera, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { DropZone, UploadProgress, putFile } from '@/components/upload';
@@ -19,7 +19,8 @@ export type RoomRow = { id: string; kind: 'dm' | 'group' | 'company' | 'task' | 
 type Reaction = { emoji: string; n: number; mine: boolean; names: string[] };
 export type Msg = { id: string; room_id: string; author_id: string | null; author_name: string | null; created_at: string; edited_at: string | null; pinned_at: string | null;
   body: string; deleted: boolean; file_name: string | null; file_mime: string | null; file_size: number | null; task_id: string | null; mine: boolean;
-  reply_to?: string | null; reply?: { author: string | null; body: string; file: string | null; deleted: boolean } | null; reactions?: Reaction[] };
+  reply_to?: string | null; reply?: { author: string | null; body: string; file: string | null; deleted: boolean } | null; reactions?: Reaction[];
+  kind?: 'text' | 'system' | 'forward'; forward_of?: string | null; unread?: number };
 export const KIND_LABEL = { dm: '1:1', group: '그룹', company: '회사 전체', task: '업무', team: '팀' } as const;
 const EMOJI = ['👍', '❤️', '😂', '😮', '🙏', '✅'];
 const INSERT_EMOJI = ['😀', '😂', '😊', '😍', '🙏', '👍', '👏', '🎉', '🔥', '✅', '❗', '❓', '💪', '😢', '😅', '🙌'];
@@ -181,7 +182,8 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
   );
 }
 
-type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean; canRename?: boolean }; messages: Msg[]; members: { id: string; name: string; last_read_id: string }[]; pinned: Msg[] };
+type Member = { id: string; name: string; title?: string | null; phone?: string | null; role?: string; last_read_id: string; is_owner?: boolean; joined_at?: string };
+type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean; canRename?: boolean; ownerId?: string | null; canManage?: boolean; historyVisible?: boolean }; messages: Msg[]; members: Member[]; pinned: Msg[] };
 
 /** 대화방 */
 export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose, backAlways }: { id: string; live: Live; onRead: () => void; onBack: () => void; compact?: boolean; onExpand?: () => void; onClose?: () => void; backAlways?: boolean }) {
@@ -200,6 +202,11 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const [menu, setMenu] = useState<{ id: string; kind: 'react' | 'more' } | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [older, setOlder] = useState(false);
+  // 메신저 1차(10/20): 방 정보·전달·공지 바 펼침·안 읽은 사람 이름
+  const [info, setInfo] = useState(false);
+  const [fwd, setFwd] = useState<Msg | null>(null);
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [whoUnread, setWhoUnread] = useState<{ id: string; names: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -385,6 +392,12 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const other = room.kind === 'dm' ? members.find((x) => x.id !== user.id) : null;
   const readBy = (m: Msg) => members.filter((x) => x.id !== m.author_id && BigInt(reads[x.id] ?? '0') >= BigInt(m.id)).length;
   const others = members.filter((x) => x.id !== user.id).length;
+  // B7: 카톡처럼 '안 읽은 수'(실시간 읽음 반영) — 누르면 안 읽은 사람 이름
+  const unreadOf = (m: Msg) => Math.max(0, others - readBy(m));
+  async function showUnread(m: Msg) {
+    if (whoUnread?.id === m.id) { setWhoUnread(null); return; }
+    try { const r = await api(`/api/chat/messages/${m.id}/unread`); setWhoUnread({ id: m.id, names: r.names }); } catch (e: any) { toast.error(e.message); }
+  }
   const mention = /(^|\s)@([^\s@]*)$/.exec(text);
   const mentionList = mention ? members.filter((m) => m.id !== user.id && m.name.includes(mention[2])).slice(0, 6) : [];
   const iconBtn = 'inline-flex size-8 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100';
@@ -416,14 +429,23 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
         </div>
         <button className={cx(iconBtn, voice && 'bg-accent-600 text-white hover:bg-accent-700')} onClick={toggleVoice} aria-pressed={voice} aria-label={voice ? '음성 모드 끄기' : '음성 모드(운전 중) 켜기'} title={voice ? '음성 모드 끄기' : '음성 모드 — 새 메시지 읽어 주기·말로 보내기'} data-testid="chat-voice"><Headphones className="size-4" /></button>
         <button className={iconBtn} onClick={toggleMute} aria-label={room.muted ? '알림 켜기' : '알림 끄기'} title={room.muted ? '알림 켜기' : '알림 끄기'} data-testid="chat-mute">{room.muted ? <BellOff className="size-4" /> : <Bell className="size-4" />}</button>
+        <button className={iconBtn} onClick={() => setInfo(true)} aria-label="방 정보" title="방 정보 — 참여자·초대·사진/파일/링크" data-testid="chat-info"><Info className="size-4" /></button>
         {!compact && user.role === 'owner' && <a className={iconBtn} href={`/api/chat/rooms/${id}/export`} aria-label="대화 내보내기(감사용)" title="대화 내보내기(감사용, 기록 남음)"><Download className="size-4" /></a>}
         {onExpand && <button className={iconBtn} onClick={onExpand} aria-label="크게 보기" title="크게 보기"><Maximize2 className="size-4" /></button>}
         {onClose && <button className={iconBtn} onClick={onClose} aria-label="닫기"><X className="size-4" /></button>}
       </header>
       {data!.pinned.length > 0 && (
-        <div className="flex items-center gap-2 border-b border-line bg-amber-50 px-3 py-1.5 text-xs text-amber-900" data-testid="chat-pinned">
-          <Pin className="size-3.5 shrink-0" /><span className="min-w-0 flex-1 truncate"><b>{data!.pinned[0].author_name}</b>: {plain(data!.pinned[0].body) || data!.pinned[0].file_name}</span>
-          {data!.pinned.length > 1 && <span className="shrink-0">외 {data!.pinned.length - 1}개</span>}
+        <div className="border-b border-line bg-amber-50 text-xs text-amber-900" data-testid="chat-pinned">
+          <button type="button" className="flex w-full items-center gap-2 px-3 py-1.5 text-left" onClick={() => setNoticeOpen((v) => !v)} aria-expanded={noticeOpen} data-testid="chat-notice-toggle">
+            <Pin className="size-3.5 shrink-0" /><span className={cx('min-w-0 flex-1', noticeOpen ? 'whitespace-pre-wrap break-words' : 'truncate')}><b>공지</b> · {data!.pinned[0].author_name}: {plain(data!.pinned[0].body) || data!.pinned[0].file_name}</span>
+            {data!.pinned.length > 1 && !noticeOpen && <span className="shrink-0">외 {data!.pinned.length - 1}개</span>}
+            {noticeOpen ? <ChevronUp className="size-3.5 shrink-0" /> : <ChevronDown className="size-3.5 shrink-0" />}
+          </button>
+          {noticeOpen && data!.pinned.length > 1 && (
+            <ul className="space-y-1 border-t border-amber-200/70 px-3 py-1.5" data-testid="chat-notice-history">
+              {data!.pinned.slice(1).map((p) => <li key={p.id} className="truncate text-amber-800/80">{p.author_name}: {plain(p.body) || p.file_name} <span className="text-amber-700/60">· {shortTime(p.created_at)}</span></li>)}
+            </ul>
+          )}
         </div>
       )}
       <DropZone onFiles={upload} label="놓으면 이 대화방에 보냅니다" testid="chat-drop" className="flex min-h-0 flex-1 flex-col">
@@ -437,8 +459,14 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
             const head = newDay || prev.author_id !== m.author_id || new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() > 5 * 60_000;
             const tail = !next || next.author_id !== m.author_id || dayKey(next.created_at) !== dayKey(m.created_at) || timeOf(next.created_at) !== timeOf(m.created_at);
             const img = m.file_name && /^image\/(png|jpe?g|gif|webp)$/.test(m.file_mime ?? '');
-            const n = readBy(m);
             const showMenu = active === m.id || menu?.id === m.id;
+            if (m.kind === 'system') return (
+              <div key={m.id}>
+                {newDay && <div className="my-3 flex items-center gap-2 text-[11px] text-ink-3" data-testid="chat-date"><span className="h-px flex-1 bg-line" />{dayLabel(m.created_at)}<span className="h-px flex-1 bg-line" /></div>}
+                <div className="my-1.5 text-center"><span className="inline-block rounded-full bg-slate-200/70 px-3 py-0.5 text-[11px] text-ink-2" data-testid="chat-system">{m.body}</span></div>
+              </div>
+            );
+            const un = unreadOf(m);
             return (
               <div key={m.id}>
                 {newDay && <div className="my-3 flex items-center gap-2 text-[11px] text-ink-3" data-testid="chat-date"><span className="h-px flex-1 bg-line" />{dayLabel(m.created_at)}<span className="h-px flex-1 bg-line" /></div>}
@@ -452,6 +480,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                       ) : m.deleted ? <span className="rounded-2xl bg-slate-100 px-3 py-1.5 text-sm italic text-ink-3">삭제된 메시지</span> : (
                         <div onClick={(e) => { e.stopPropagation(); setActive(active === m.id ? null : m.id); }}
                           className={cx('min-w-0 whitespace-pre-wrap break-words text-left text-sm', img && !m.body ? '' : cx('rounded-2xl px-3 py-1.5', m.mine ? 'rounded-tr-md bg-teal-700 text-white' : 'rounded-tl-md border border-line bg-white text-ink'), m.pinned_at && 'ring-2 ring-amber-300')}>
+                          {m.kind === 'forward' && <div className={cx('mb-0.5 flex items-center gap-1 text-[11px]', m.mine ? 'text-white/75' : 'text-ink-3')} data-testid="chat-forwarded"><Forward className="size-3" />전달된 메시지</div>}
                           {m.reply && (
                             <div className={cx('mb-1 border-l-2 pl-2 text-xs', m.mine ? 'border-white/60 text-white/80' : 'border-teal-600 text-ink-2')} data-testid="chat-reply-quote">
                               <b>{m.reply.author ?? '알 수 없음'}</b><div className="line-clamp-2">{m.reply.deleted ? '삭제된 메시지' : plain(m.reply.body) || `📎 ${m.reply.file}`}</div>
@@ -466,9 +495,11 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                           {m.body && render(m.body)}
                         </div>
                       )}
-                      {tail || (m.mine && others > 0) ? (
+                      {tail || (others > 0 && (un > 0 || m.mine)) ? (
                         <span className="shrink-0 text-[10px] leading-tight text-ink-3">
-                          {m.mine && others > 0 && !m.deleted && (n >= others ? <span className="block text-teal-700">읽음</span> : room.kind !== 'dm' && n > 0 ? <span className="block">{n}명 읽음</span> : <span className="block text-amber-600">{others - n}</span>)}
+                          {others > 0 && !m.deleted && (un > 0 ? (
+                            <button type="button" className="relative z-20 block text-amber-600 hover:underline" onClick={(e) => { e.stopPropagation(); showUnread(m); }} title="안 읽은 사람 보기" data-testid="msg-unread">{un}</button>
+                          ) : m.mine ? <span className="block text-teal-700">읽음</span> : null)}
                           {tail && timeOf(m.created_at)}{m.edited_at && !m.deleted && ' · 수정'}
                         </span>
                       ) : null}
@@ -481,6 +512,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                         ))}
                       </div>
                     )}
+                    {whoUnread?.id === m.id && <div className="mt-0.5 rounded-input border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-900" data-testid="msg-unread-names">안 읽음: {whoUnread.names.length ? whoUnread.names.join(', ') : '없음'}</div>}
                     {m.task_id && <Link href={`/tasks/${m.task_id}`} className="mt-0.5 inline-block text-xs text-accent-600 underline">→ 업무로 만듦</Link>}
                   </div>
                   {/* hover(휴대폰은 누르면) 메뉴 — 메시지마다 글자 링크를 늘어놓지 않는다 */}
@@ -497,8 +529,9 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                       )}
                       {menu?.id === m.id && menu.kind === 'more' && (
                         <ul className={cx('absolute top-full z-20 mt-1 w-40 overflow-hidden rounded-card border border-line bg-white py-1 text-sm shadow-pop', m.mine ? 'right-0' : 'left-0')} role="menu">
+                          <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { setFwd(m); setMenu(null); setActive(null); }} data-testid="msg-forward">전달</button></li>
                           <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, 'task')} data-testid="msg-to-task">업무로 만들기</button></li>
-                          <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, m.pinned_at ? 'unpin' : 'pin')}>{m.pinned_at ? '고정 해제' : '공지로 고정'}</button></li>
+                          <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, m.pinned_at ? 'unpin' : 'pin')} data-testid="msg-notice">{m.pinned_at ? '공지 해제' : '공지 등록'}</button></li>
                           {m.body && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { navigator.clipboard?.writeText(plain(m.body)); setMenu(null); toast.ok('복사했습니다'); }}>복사</button></li>}
                           {m.mine && m.body && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { setEditing({ id: m.id, body: plain(m.body) }); setMenu(null); setActive(null); }}>수정</button></li>}
                           {m.mine && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-red-50" onClick={() => act(m, 'delete')}>삭제</button></li>}
@@ -572,45 +605,174 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
         </form>
       </DropZone>
       {toTask && <ToTask s={toTask} roomName={room.name} onClose={() => setToTask(null)} onDone={() => { setToTask(null); reload(); }} />}
+      {info && <RoomInfo data={data!} onClose={() => setInfo(false)} onChanged={() => { reload(); broadcastRefresh(); onRead(); }} onLeft={() => { setInfo(false); broadcastRefresh(); onBack(); }} />}
+      {fwd && <ForwardModal msg={fwd} fromRoom={id} onClose={() => setFwd(null)} />}
     </div>
   );
 }
 
 export function NewRoom({ open, onClose, onOpen }: { open: boolean; onClose: () => void; onOpen: (id: string) => void }) {
   const { user, dir } = useSession();
-  const [kind, setKind] = useState<'dm' | 'group'>('dm');
   const [name, setName] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
   const [q, setQ] = useState('');
-  const people = dir.users.filter((u) => u.id !== user.id && (!q || u.name.includes(q) || (u.title ?? '').includes(q)));
+  // A1: 최근 대화 상대(1:1 방이 있는 사람)를 먼저, 나머지는 부서별로 묶어서. 이름·부서·직급으로 찾기
+  const { data: recent } = useApi<{ rooms: RoomRow[] }>(open ? '/api/chat/rooms' : null);
+  const recentIds = useMemo(() => (recent?.rooms ?? []).filter((r) => r.kind === 'dm' && r.other_id).map((r) => r.other_id as string), [recent]);
+  const unitName = (id: string) => dir.orgUnits.find((o) => o.id === id)?.name ?? '';
+  const unitsOf = (u: { org_unit_ids: string[] }) => u.org_unit_ids.map(unitName).filter(Boolean);
+  const needle = q.trim();
+  const people = dir.users.filter((u) => u.id !== user.id && (!needle || u.name.includes(needle) || (u.title ?? '').includes(needle) || unitsOf(u).some((n) => n.includes(needle))));
+  const groups = useMemo(() => {
+    const out: { label: string; users: typeof people }[] = [];
+    const rec = people.filter((u) => recentIds.includes(u.id)).sort((a, b) => recentIds.indexOf(a.id) - recentIds.indexOf(b.id));
+    if (rec.length) out.push({ label: '최근 대화', users: rec });
+    const byUnit = new Map<string, typeof people>();
+    for (const u of people) { const k = unitsOf(u)[0] || '부서 없음'; byUnit.set(k, [...(byUnit.get(k) ?? []), u]); }
+    for (const [label, users] of [...byUnit.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ko'))) out.push({ label, users });
+    return out;
+  }, [people, recentIds]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const pickedUsers = picked.map((id) => dir.users.find((u) => u.id === id)).filter(Boolean) as typeof dir.users;
+  const autoName = [user.name, ...pickedUsers.map((u) => u.name)];
+  const preview = autoName.length <= 3 ? autoName.join(', ') : `${autoName.slice(0, 3).join(', ')} 외 ${autoName.length - 3}`;
   async function go(userId?: string) {
     try {
-      const r = kind === 'dm' || userId ? await api('/api/chat/rooms', { body: { kind: 'dm', userId: userId ?? picked[0] } })
-        : await api('/api/chat/rooms', { body: { kind: 'group', name: name.trim() || dir.users.filter((u) => picked.includes(u.id)).map((u) => u.name).slice(0, 3).join(', '), userIds: picked } });
+      const ids = userId ? [userId] : picked;
+      const r = ids.length === 1 ? await api('/api/chat/rooms', { body: { kind: 'dm', userId: ids[0] } })
+        : await api('/api/chat/rooms', { body: { kind: 'group', name: name.trim() || undefined, userIds: ids } });
       setPicked([]); setName(''); setQ(''); onOpen(r.id);
     } catch (e: any) { toast.error(e.message); }
   }
   return (
     <Modal open={open} onClose={onClose} title="새 대화">
       <div className="space-y-3" data-testid="chat-new-modal">
-        <div className="flex gap-1.5" role="tablist">
-          {(['dm', 'group'] as const).map((k) => <button key={k} role="tab" aria-selected={kind === k} onClick={() => { setKind(k); setPicked([]); }} className={cx('rounded-full border px-3 py-1 text-sm', kind === k ? 'border-teal-700 bg-teal-50 font-semibold text-teal-800' : 'border-line text-ink-2')}>{k === 'dm' ? '1:1 대화' : '그룹 대화'}</button>)}
-        </div>
-        {kind === 'group' && <Field label="대화방 이름"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 강남점 오픈 준비" /></Field>}
-        <input className={inputCls} placeholder="이름·직책으로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="사람 찾기" />
-        <ul className="max-h-72 divide-y divide-line overflow-y-auto rounded-input border border-line">
-          {people.map((u) => (
-            <li key={u.id}>
-              <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50">
-                {kind === 'group' && <input type="checkbox" checked={picked.includes(u.id)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, u.id] : p.filter((x) => x !== u.id)))} />}
-                <Avatar id={u.id} name={u.name} size={28} badge={false} />
-                <span className="flex-1">{u.name}{u.title && <span className="text-ink-3"> · {u.title}</span>}</span>
-                {kind === 'dm' && <Button size="sm" variant="secondary" onClick={() => go(u.id)} aria-label={`${u.name}와 대화`}>대화</Button>}
-              </label>
+        <input className={inputCls} placeholder="이름·부서·직급으로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="사람 찾기" data-testid="chat-new-q" />
+        {picked.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1" data-testid="chat-new-picked">
+            {pickedUsers.map((u) => <button key={u.id} type="button" onClick={() => toggle(u.id)} className="inline-flex items-center gap-1 rounded-full border border-teal-700 bg-teal-50 px-2 py-0.5 text-xs text-teal-800" aria-label={`${u.name} 빼기`}>{u.name}<X className="size-3" /></button>)}
+          </div>
+        )}
+        <ul className="max-h-72 overflow-y-auto rounded-input border border-line" data-testid="chat-new-list">
+          {groups.map((g) => (
+            <li key={g.label}>
+              <div className="sticky top-0 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-ink-3">{g.label}</div>
+              <ul className="divide-y divide-line">
+                {g.users.map((u) => (
+                  <li key={`${g.label}-${u.id}`}>
+                    <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50">
+                      <input type="checkbox" checked={picked.includes(u.id)} onChange={() => toggle(u.id)} aria-label={`${u.name} 선택`} />
+                      <Avatar id={u.id} name={u.name} size={28} badge={false} />
+                      <span className="flex-1 truncate">{u.name}{u.title && <span className="text-ink-3"> · {u.title}</span>}{unitsOf(u)[0] && <span className="text-ink-3"> · {unitsOf(u)[0]}</span>}</span>
+                      <Button size="sm" variant="secondary" onClick={(e) => { e.preventDefault(); go(u.id); }} aria-label={`${u.name}와 대화`}>대화</Button>
+                    </label>
+                  </li>
+                ))}
+              </ul>
             </li>
           ))}
+          {!people.length && <li className="px-3 py-6 text-center text-sm text-ink-3">찾는 사람이 없습니다</li>}
         </ul>
-        {kind === 'group' && <div className="flex justify-end"><Button disabled={!picked.length} onClick={() => go()} data-testid="chat-group-create">{picked.length}명과 대화 시작</Button></div>}
+        {picked.length >= 2 && <Field label="대화방 이름(비우면 자동)"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder={preview} data-testid="chat-new-name" /></Field>}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-ink-3">{picked.length === 0 ? '사람을 고르세요 — 1명은 1:1, 2명 이상은 그룹' : picked.length === 1 ? '1:1 대화' : `그룹 대화 · ${picked.length + 1}명`}</span>
+          <Button disabled={!picked.length} onClick={() => go()} data-testid="chat-group-create">{picked.length <= 1 ? '대화 시작' : `${picked.length}명과 대화 시작`}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** A2 방 정보: 이름·참여자(직급·1:1)·[초대]·[내보내기](방장/관리자)·[나가기]·알림·고정·이전 대화 공개·사진/파일/링크 모아보기 */
+function RoomInfo({ data, onClose, onChanged, onLeft }: { data: RoomData; onClose: () => void; onChanged: () => void; onLeft: () => void }) {
+  const { user, dir } = useSession();
+  const { room, members } = data;
+  const [tab, setTab] = useState<'members' | 'media'>('members');
+  const [inviting, setInviting] = useState(false);
+  const [pick, setPick] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const { data: media } = useApi<{ images: { id: string; file_name: string }[]; files: { id: string; file_name: string; file_size: number | null; author_name: string | null }[]; links: { id: string; url: string; author_name: string | null }[] }>(tab === 'media' ? `/api/chat/rooms/${room.id}/media` : null);
+  const { data: list } = useApi<{ rooms: RoomRow[] }>('/api/chat/rooms');
+  const row = list?.rooms.find((r) => r.id === room.id);
+  const isGroup = room.kind === 'group';
+  const candidates = dir.users.filter((u) => u.id !== user.id && !members.some((m) => m.id === u.id));
+  async function run(f: () => Promise<unknown>, done?: string) { setBusy(true); try { await f(); if (done) toast.ok(done); onChanged(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
+  async function dmWith(id: string) { try { const r = await api('/api/chat/rooms', { body: { kind: 'dm', userId: id } }); window.location.href = `/messages?room=${r.id}`; } catch (e: any) { toast.error(e.message); } }
+  return (
+    <Modal open onClose={onClose} title="방 정보">
+      <div className="space-y-3 text-sm" data-testid="chat-room-info">
+        <div className="flex items-center gap-3">
+          <RoomIcon r={{ kind: room.kind, other_id: room.kind === 'dm' ? members.find((m) => m.id !== user.id)?.id ?? null : null, name: room.name }} size={44} />
+          <div className="min-w-0 flex-1"><div className="truncate font-semibold">{room.name}</div><div className="text-xs text-ink-3">{KIND_LABEL[room.kind]} · {members.length}명{room.ownerId && <> · 방장 {members.find((m) => m.id === room.ownerId)?.name ?? ''}</>}</div></div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { muted: !room.muted } }))} disabled={busy} data-testid="info-mute">{room.muted ? <Bell /> : <BellOff />}{room.muted ? '알림 켜기' : '알림 끄기'}</Button>
+          <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { pinned: !row?.pinned } }))} disabled={busy || !row} data-testid="info-pin">{row?.pinned ? <PinOff /> : <Pin />}{row?.pinned ? '목록 고정 해제' : '목록 맨 위 고정'}</Button>
+          {isGroup && <Button size="sm" variant="secondary" onClick={() => setInviting((v) => !v)} data-testid="info-invite"><UserPlus />초대</Button>}
+          {isGroup && room.canManage && <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { historyVisible: !room.historyVisible } }), room.historyVisible ? '앞으로 초대되는 사람은 초대 뒤 대화만 봅니다' : '이전 대화를 공개했습니다')} disabled={busy} data-testid="info-history" aria-pressed={!!room.historyVisible}>{room.historyVisible ? '이전 대화 공개 중' : '이전 대화 공개'}</Button>}
+          {isGroup && <Button size="sm" variant="secondary" className="text-red-600" onClick={() => { if (confirm('이 대화방에서 나갈까요?')) run(() => api(`/api/chat/rooms/${room.id}`, { method: 'DELETE' })).then(onLeft); }} disabled={busy} data-testid="info-leave"><LogOut />나가기</Button>}
+        </div>
+        {isGroup && !room.historyVisible && <p className="text-xs text-ink-3">초대된 사람은 초대 시점 이후 메시지만 봅니다(회사 보안). 방장이 [이전 대화 공개]를 켜면 처음부터 봅니다.</p>}
+        {inviting && (
+          <div className="rounded-input border border-line p-2" data-testid="info-invite-box">
+            <div className="mb-1 text-xs font-semibold text-ink-2">초대할 사람</div>
+            <ul className="max-h-40 overflow-y-auto">
+              {candidates.map((u) => <li key={u.id}><label className="flex items-center gap-2 px-1 py-1 text-sm"><input type="checkbox" checked={pick.includes(u.id)} onChange={(e) => setPick((p) => (e.target.checked ? [...p, u.id] : p.filter((x) => x !== u.id)))} aria-label={`${u.name} 초대 선택`} />{u.name}{u.title && <span className="text-ink-3"> · {u.title}</span>}</label></li>)}
+              {!candidates.length && <li className="px-1 py-2 text-xs text-ink-3">초대할 사람이 없습니다</li>}
+            </ul>
+            <div className="mt-1 flex justify-end"><Button size="sm" disabled={!pick.length || busy} onClick={() => run(() => api(`/api/chat/rooms/${room.id}/members`, { body: { userIds: pick } }), `${pick.length}명을 초대했습니다`).then(() => { setPick([]); setInviting(false); })} data-testid="info-invite-go">{pick.length}명 초대</Button></div>
+          </div>
+        )}
+        <div className="flex gap-1.5" role="tablist">
+          {(['members', 'media'] as const).map((k) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-teal-700 bg-teal-50 font-semibold text-teal-800' : 'border-line text-ink-2')} data-testid={`info-tab-${k}`}>{k === 'members' ? `참여자 ${members.length}` : '사진·파일·링크'}</button>)}
+        </div>
+        {tab === 'members' ? (
+          <ul className="max-h-64 divide-y divide-line overflow-y-auto rounded-input border border-line" data-testid="info-members">
+            {members.map((m) => (
+              <li key={m.id} className="flex items-center gap-2 px-3 py-2">
+                <Avatar id={m.id} name={m.name} size={28} badge={false} />
+                <span className="min-w-0 flex-1 truncate">{m.name}{m.id === user.id && <span className="text-ink-3"> (나)</span>}{m.title && <span className="text-ink-3"> · {m.title}</span>}{m.is_owner && <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800">방장</span>}</span>
+                {m.id !== user.id && <button type="button" className="rounded-input px-1.5 py-0.5 text-xs text-teal-700 hover:bg-teal-50" onClick={() => dmWith(m.id)} aria-label={`${m.name}와 1:1 대화`}>1:1</button>}
+                {isGroup && room.canManage && m.id !== user.id && <button type="button" className="rounded-input p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" onClick={() => { if (confirm(`${m.name}님을 내보낼까요?`)) run(() => api(`/api/chat/rooms/${room.id}/members`, { method: 'DELETE', body: { userId: m.id } }), `${m.name}님을 내보냈습니다`); }} aria-label={`${m.name} 내보내기`} title="내보내기" data-testid={`info-remove-${m.id}`}><UserMinus className="size-4" /></button>}
+              </li>
+            ))}
+          </ul>
+        ) : !media ? <Skeleton rows={3} /> : (
+          <div className="space-y-2" data-testid="info-media">
+            <div><div className="mb-1 text-xs font-semibold text-ink-2">사진 {media.images.length}</div>
+              {media.images.length ? <div className="grid grid-cols-4 gap-1">{media.images.map((f) => <a key={f.id} href={`/api/chat/messages/${f.id}/file?inline=1`} target="_blank" rel="noreferrer"><img src={`/api/chat/messages/${f.id}/file?inline=1`} alt={f.file_name} loading="lazy" className="aspect-square w-full rounded-lg border border-line object-cover" /></a>)}</div> : <p className="text-xs text-ink-3">없음</p>}</div>
+            <div><div className="mb-1 text-xs font-semibold text-ink-2">파일 {media.files.length}</div>
+              {media.files.length ? <ul className="divide-y divide-line rounded-input border border-line">{media.files.map((f) => <li key={f.id}><a href={`/api/chat/messages/${f.id}/file`} className="flex items-center gap-2 px-2 py-1.5 text-xs no-underline"><FileText className="size-4 shrink-0 text-teal-700" /><span className="min-w-0 flex-1 truncate">{f.file_name}</span><span className="text-ink-3">{fmtSize(f.file_size)} · {f.author_name}</span></a></li>)}</ul> : <p className="text-xs text-ink-3">없음</p>}</div>
+            <div><div className="mb-1 text-xs font-semibold text-ink-2">링크 {media.links.length}</div>
+              {media.links.length ? <ul className="divide-y divide-line rounded-input border border-line">{media.links.map((l, i) => <li key={`${l.id}-${i}`}><a href={l.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-2 py-1.5 text-xs"><Link2 className="size-4 shrink-0 text-ink-3" /><span className="min-w-0 flex-1 truncate">{l.url}</span><span className="shrink-0 text-ink-3">{l.author_name}</span></a></li>)}</ul> : <p className="text-xs text-ink-3">없음</p>}</div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/** B5 전달: 여러 방을 골라 한 번에 */
+function ForwardModal({ msg, fromRoom, onClose }: { msg: Msg; fromRoom: string; onClose: () => void }) {
+  const { data } = useApi<{ rooms: RoomRow[] }>('/api/chat/rooms');
+  const [q, setQ] = useState('');
+  const [pick, setPick] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const rooms = (data?.rooms ?? []).filter((r) => r.id !== fromRoom && (!q || (r.name ?? '').includes(q)));
+  async function go() {
+    setBusy(true);
+    try { const r = await api(`/api/chat/messages/${msg.id}/forward`, { body: { roomIds: pick } }); toast.ok(`${r.sent.length}개 방에 전달했습니다`); broadcastRefresh(); onClose(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title="전달">
+      <div className="space-y-3 text-sm" data-testid="chat-forward">
+        <div className="rounded-input border border-line bg-slate-50 px-3 py-2 text-xs"><b>{msg.author_name}</b>: <span className="line-clamp-2">{plain(msg.body) || `📎 ${msg.file_name}`}</span></div>
+        <input className={inputCls} placeholder="방 이름으로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="방 찾기" />
+        <ul className="max-h-64 divide-y divide-line overflow-y-auto rounded-input border border-line">
+          {rooms.map((r) => <li key={r.id}><label className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-slate-50"><input type="checkbox" checked={pick.includes(r.id)} onChange={(e) => setPick((p) => (e.target.checked ? [...p, r.id] : p.filter((x) => x !== r.id)))} aria-label={`${r.name ?? ''} 선택`} /><RoomIcon r={r} size={28} /><span className="flex-1 truncate">{r.name}</span><span className="text-xs text-ink-3">{KIND_LABEL[r.kind]}</span></label></li>)}
+          {!data && <li className="p-3"><Skeleton rows={3} /></li>}
+        </ul>
+        <div className="flex justify-end"><Button disabled={!pick.length || busy} onClick={go} data-testid="chat-forward-go">{pick.length}개 방에 전달</Button></div>
       </div>
     </Modal>
   );
