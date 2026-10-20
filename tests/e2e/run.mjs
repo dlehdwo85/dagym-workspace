@@ -42,6 +42,7 @@ import { messengerV3 } from './messengerV3.step.mjs';
 import { platformAdd } from './platformAdd.step.mjs';
 import { orgTree } from './orgTree.step.mjs';
 import { chatKeyboard } from './chatKeyboard.step.mjs';
+import { salesTodo } from './salesTodo.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -2328,6 +2329,7 @@ await step('대표 10/20 7) 퇴사 처리·인수인계: 창에서 퇴사일·�
 await step('메신저 1차(대표 10/20): 새 대화 다중 선택·그룹 자동 이름·방 정보(초대·내보내기)·시스템 메시지·안 읽은 수(이름)·공지 바·전달', () => messengerV3({ owner, ctx, BASE, SHOTS }));
 await step('대표 10/20 ① 플랫폼 운영 [고객사 추가]: 회사명·업종 여러 개·규모·체험 기간·시작 공간·대표 → 초대 링크 → 회사 관리 초대 대기·공간·메모·감사 기록', () => platformAdd({ owner, BASE, SHOTS, sql }));
 await step('대표 10/20 15:15 부서·팀 재정비: 트리(들여쓰기·경로 "영업부 › 영업1팀")·상위 부서·장 1명 → 초대 \'소속\' 하나(주 소속 + 겸직, 고급 접힘) → 목록 경로·접근 조직 자동', () => orgTree({ owner, ctx, BASE, SHOTS }));
+await step('영업 S2 1차(대표 14:15): 허브 일괄 [영업 진행으로] → 업무 자동 → 홈 오늘 할 일 7묶음·요약 타일·진행표 → 업무 영업 원천 배지 → 계약만료·재입찰', () => salesTodo({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

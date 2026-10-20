@@ -152,6 +152,11 @@ export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof l
       owner_id = ${i.ownerId === undefined ? tx`owner_id` : i.ownerId}, updated_at = now() where id = ${id}`;
     if (i.status && i.status !== l.status) await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${id}, ${l.status}, ${i.status}, ${i.reason ?? null}, ${u.id})`;
   });
+  // 대표 10/20 14:15: 보류·실패·계약완료 → 열린 영업 업무 보류·완료, 다음 연락일 바꾸면 업무 마감도
+  if (i.status || i.nextContactDate !== undefined) {
+    const [cur] = await sql<{ name: string; status: string; next: string | null; owner_id: string | null }[]>`select name, status, next_contact_date::text as next, owner_id from sales_leads where id = ${id}`;
+    await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: 'lead', id, name: cur.name, status: cur.status, nextDate: cur.next, assigneeId: cur.owner_id, leadId: id });
+  }
   return { ok: true };
 }
 
@@ -164,6 +169,8 @@ export async function createLead(u: SessionUser, i: z.infer<typeof leadCreate>) 
   const t = tenantOf(u); await assertWritesOpen(t);
   const [r] = await db()<{ id: string }[]>`insert into sales_leads (tenant, name, status, priority, facility_type, region, owner_id, next_contact_date, contact_name, phone, memo)
     values (${t}, ${i.name}, ${i.status}, ${i.priority ?? null}, ${i.facilityType ?? null}, ${i.region ?? null}, ${u.id}, ${i.nextContactDate ?? null}, ${i.contactName ?? null}, ${i.phone ?? null}, ${i.memo ?? null}) returning id`;
+  // 대표 10/20 14:15(원본 규칙 '[첫 연락]' 업무 자동): 새 리드 → 담당자 업무
+  await (await import('./autoTasks')).syncSalesTask(db(), u, { kind: 'lead', id: r.id, name: i.name, status: i.status, nextDate: i.nextContactDate ?? null, nextAction: '첫 연락', leadId: r.id });
   return { id: r.id };
 }
 export const activityInput = z.object({ type: z.enum(['전화', '방문', '미팅', '메일', '문자', '기타']).default('전화'), content: z.string().trim().min(1).max(5000), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
