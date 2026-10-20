@@ -15,7 +15,7 @@ import { tenantOf, type SessionUser } from './types';
  */
 export type Rationale = { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; source?: 'goal' | 'rule' | 'ai' | 'user' | 'backfill'; goalId?: string | null; week?: number | null; topic?: string | null };
 export type GoalWeek = { week: number; from: string; to: string; topic: string; channels: string[]; kinds: string[]; note?: string };
-export type Goals = { objectives: string[]; message: string; targets: { posts: number | null; inquiries: number | null; adBudget: number | null }; channels: string[] };
+export type Goals = { objectives: string[]; message: string; targets: { posts: number | null; inquiries: number | null; adBudget: number | null; revenue?: number | null }; channels: string[] };
 
 const KST = 'Asia/Seoul';
 export const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: KST }).format(d);
@@ -53,13 +53,13 @@ function templateGoal(month: string, brand: any, co: any, prev: Awaited<ReturnTy
   const topics = [brand?.weekly_topic, brand?.products && `${brand.products} 소개`, '고객 후기·현장 이야기', '이벤트·혜택 안내', '운영 팁·자주 묻는 질문'].filter(Boolean) as string[];
   const weeks = weeksOf(month).map((w, i) => ({ ...w, topic: topics[i % topics.length], channels, kinds: channels.flatMap((c) => DEFAULT_KINDS[c] ?? ['feed']).filter((v, i2, a) => a.indexOf(v) === i2), note: '' }));
   return { goals: { objectives: [`${name} 인지도 — 지난달보다 게시 꾸준히(${Math.max(prev.posts, 8)}건)`, `문의 ${Math.max(prev.inquiries + 2, 5)}건 — 글마다 전화·문의 유도 한 줄`, '브랜드 말투 통일 — 금지어 0건'],
-    message: brand?.intro ? String(brand.intro).slice(0, 80) : `${name}, 가까운 곳에서 믿고 맡기세요`, targets: { posts: Math.max(prev.posts, 8), inquiries: Math.max(prev.inquiries + 2, 5), adBudget: prev.adCost || null }, channels }, weekly: weeks };
+    message: brand?.intro ? String(brand.intro).slice(0, 80) : `${name}, 가까운 곳에서 믿고 맡기세요`, targets: { posts: Math.max(prev.posts, 8), inquiries: Math.max(prev.inquiries + 2, 5), adBudget: prev.adCost || null, revenue: null }, channels }, weekly: weeks };
 }
 
 async function approversOf(tenant: string) { return (await import('./mktAuto')).approvers(tenant); }
 
 /** 월 운영 목표 초안(AI 25일 정기 또는 [초안 만들기]) → 승인 대기(pending) + 승인자 알림. 같은 달·브랜드가 있으면 pending/draft 일 때만 덮어씀 */
-export async function draftGoal(tenant: string, month: string, brandId: string | null, actorId: string | null, opt: { force?: boolean } = {}) {
+export async function draftGoal(tenant: string, month: string, brandId: string | null, actorId: string | null, opt: { force?: boolean; revise?: { note: string; prev: any } } = {}) {
   const sql = db();
   const [ex] = await sql<any[]>`select id, status from mkt_goals where tenant = ${tenant} and coalesce(brand_id::text, '') = ${brandId ?? ''} and month = ${month}`;
   if (ex && !['pending', 'draft'].includes(ex.status) && !opt.force) return { id: ex.id, status: ex.status, skipped: true };
@@ -73,38 +73,40 @@ export async function draftGoal(tenant: string, month: string, brandId: string |
   const channels = [...new Set([...rules.map((r) => r.channel), ...connected.map((r) => r.channel)])].filter((c) => c !== 'other');
   const today = ymd(new Date()); const cur = await numbersOf(tenant, `${month}-01`, lastDayOf(month), brandId); // 이달 예정(묶음 규칙 칸)·지금까지 실적
   const base = templateGoal(month, brand, co, prev, channels.length ? channels : ['instagram', 'blog']);
+  if (!brandId) { const [rg] = await sql<{ target: string; suggest: any }[]>`select target, suggest from mkt_revenue_goals where tenant = ${tenant} and month = ${month}`; base.goals.targets.revenue = rg && Number(rg.target) ? Number(rg.target) : rg?.suggest?.options?.find((o: any) => o.key === 'base')?.target ?? null; } // 대표 03:00 ①: 매출 목표(적은 값 → AI 추천 기본안)
   base.goals.targets.posts = Math.max(base.goals.targets.posts ?? 0, cur.planned, cur.posts + 1); base.goals.targets.inquiries = Math.max(base.goals.targets.inquiries ?? 0, cur.inquiries + 1);
   if (cur.adCost > 0) base.goals.targets.adBudget = Math.max(base.goals.targets.adBudget ?? 0, Math.round(cur.adCost * 1.1));
   const remaining = base.weekly.filter((w) => w.to >= today);
   for (const w of base.weekly) if (w.to < today) { w.topic = '(지난 주)'; w.note = ''; }
-  let goals = base.goals, weekly = base.weekly, source: 'ai' | 'template' = 'template';
+  let goals = base.goals, weekly = base.weekly, source: 'ai' | 'template' = 'template'; let revisionNote: string | null = null;
+  const version = opt.revise ? Number(opt.revise.prev?.version ?? 1) + 1 : 1;
   const P = await import('./ai/provider');
   if (P.aiEnabled()) {
     try {
       const { assertMktAi } = await import('./mktAuto'); await assertMktAi(tenant);
       const p = P.anthropicProvider({ tier: 'fast' });
       const r = await p.chat({
-        system: `회사 마케팅 담당 AI 비서입니다. 다음 달 마케팅 운영 목표와 주간 주제 달력을 JSON 으로만 씁니다. 한국어. 사실은 [재료]에 있는 것만, 숫자 목표는 지난달 실적을 바탕으로 현실적으로(지난달 +10~30%). 과장·최상급 금지. 돈을 쓰거나 밖으로 보내는 계획은 '대표 승인 뒤'라고 씁니다.`,
-        tools: [], messages: [{ role: 'user', content: `[재료]\n달: ${month}\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}\n${brand?.intro ? `소개: ${brand.intro}\n` : ''}${brand?.products ? `주력 상품: ${brand.products}\n` : ''}${brand?.weekly_topic ? `이번 주 주제(참고): ${brand.weekly_topic}\n` : ''}${co?.business ? `회사 사업: ${co.business}\n` : ''}${co?.customers ? `주요 고객: ${co.customers}\n` : ''}채널: ${goals.channels.join(', ')}\n지난달 실적: 게시 ${prev.posts}건(${Object.entries(prev.byChannel).map(([k, v]) => `${k} ${v}`).join(', ') || '없음'}), 전화 문의 ${prev.inquiries}건, 광고비 ${prev.adCost.toLocaleString('ko-KR')}원\n이달 현황: 묶음 규칙으로 예정된 게시 ${cur.planned}건, 지금까지 게시 ${cur.posts}건·문의 ${cur.inquiries}건·광고비 ${cur.adCost.toLocaleString('ko-KR')}원(실적) → 목표 수치는 예정·실적보다 높게\n주 블록(남은 주만 주제를 배정): ${remaining.map((w) => `${w.week}주 ${w.from}~${w.to}`).join(' / ') || '(남은 주 없음)'}\n\nobjectives 3개(한 줄씩), message(핵심 메시지 한 줄), targets{posts, inquiries, adBudget(원, 광고비 실적 없으면 null)}, weeks(남은 주 블록 수만큼 순서대로: topic 한 줄, channels, kinds(feed/reels/blog/shorts/story 중), note 한 줄)` }],
-        format: { type: 'object', additionalProperties: false, required: ['objectives', 'message', 'targets', 'weeks'], properties: { objectives: { type: 'array', items: { type: 'string' } }, message: { type: 'string' },
-          targets: { type: 'object', additionalProperties: false, required: ['posts', 'inquiries', 'adBudget'], properties: { posts: { type: ['integer', 'null'] }, inquiries: { type: ['integer', 'null'] }, adBudget: { type: ['integer', 'null'] } } },
+        system: `회사 마케팅 담당 AI 비서입니다. 다음 달 마케팅 운영 목표와 주간 주제 달력을 JSON 으로만 씁니다.${opt.revise ? ' 이전 초안이 반려되었습니다 — 반려 사유를 반영해 고치고 changes 에 "반려 사유 → 반영한 점"을 2~3문장으로 씁니다.' : ''} 한국어. 사실은 [재료]에 있는 것만, 숫자 목표는 지난달 실적을 바탕으로 현실적으로(지난달 +10~30%). 과장·최상급 금지. 돈을 쓰거나 밖으로 보내는 계획은 '대표 승인 뒤'라고 씁니다.`,
+        tools: [], messages: [{ role: 'user', content: `[재료]\n달: ${month}\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}\n${brand?.intro ? `소개: ${brand.intro}\n` : ''}${brand?.products ? `주력 상품: ${brand.products}\n` : ''}${brand?.weekly_topic ? `이번 주 주제(참고): ${brand.weekly_topic}\n` : ''}${co?.business ? `회사 사업: ${co.business}\n` : ''}${co?.customers ? `주요 고객: ${co.customers}\n` : ''}채널: ${goals.channels.join(', ')}\n지난달 실적: 게시 ${prev.posts}건(${Object.entries(prev.byChannel).map(([k, v]) => `${k} ${v}`).join(', ') || '없음'}), 전화 문의 ${prev.inquiries}건, 광고비 ${prev.adCost.toLocaleString('ko-KR')}원\n이달 현황: 묶음 규칙으로 예정된 게시 ${cur.planned}건, 지금까지 게시 ${cur.posts}건·문의 ${cur.inquiries}건·광고비 ${cur.adCost.toLocaleString('ko-KR')}원(실적) → 목표 수치는 예정·실적보다 높게\n주 블록(남은 주만 주제를 배정): ${remaining.map((w) => `${w.week}주 ${w.from}~${w.to}`).join(' / ') || '(남은 주 없음)'}\n\nobjectives 3개(한 줄씩), message(핵심 메시지 한 줄), targets{posts, inquiries, adBudget(원, 광고비 실적 없으면 null)}, weeks(남은 주 블록 수만큼 순서대로: topic 한 줄, channels, kinds(feed/reels/blog/shorts/story 중), note 한 줄)${opt.revise ? `\n\n[이전 초안 v${opt.revise.prev?.version ?? 1}]\n목표: ${(opt.revise.prev?.goals?.objectives ?? []).join(' / ')}\n핵심 메시지: ${opt.revise.prev?.goals?.message ?? ''}\n주간: ${(opt.revise.prev?.weekly ?? []).map((w: any) => `${w.week}주 ${w.topic}`).join(' / ')}\n[반려 사유] ${opt.revise.note}` : ''}` }],
+        format: { type: 'object', additionalProperties: false, required: ['objectives', 'message', 'targets', 'weeks', 'changes'], properties: { objectives: { type: 'array', items: { type: 'string' } }, message: { type: 'string' }, changes: { type: 'string' },
+          targets: { type: 'object', additionalProperties: false, required: ['posts', 'inquiries', 'adBudget', 'revenue'], properties: { posts: { type: ['integer', 'null'] }, inquiries: { type: ['integer', 'null'] }, adBudget: { type: ['integer', 'null'] }, revenue: { type: ['integer', 'null'] } } },
           weeks: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['topic', 'channels', 'kinds', 'note'], properties: { topic: { type: 'string' }, channels: { type: 'array', items: { type: 'string' } }, kinds: { type: 'array', items: { type: 'string' } }, note: { type: 'string' } } } } } },
       });
       await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
         values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_goal')`;
       const o = JSON.parse((r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join(''));
-      goals = { objectives: (o.objectives ?? []).slice(0, 5).map(String), message: String(o.message ?? goals.message).slice(0, 200), targets: { posts: o.targets?.posts ?? goals.targets.posts, inquiries: o.targets?.inquiries ?? goals.targets.inquiries, adBudget: o.targets?.adBudget ?? goals.targets.adBudget }, channels: goals.channels };
+      goals = { objectives: (o.objectives ?? []).slice(0, 5).map(String), message: String(o.message ?? goals.message).slice(0, 200), targets: { posts: o.targets?.posts ?? goals.targets.posts, inquiries: o.targets?.inquiries ?? goals.targets.inquiries, adBudget: o.targets?.adBudget ?? goals.targets.adBudget, revenue: o.targets?.revenue ?? goals.targets.revenue ?? null }, channels: goals.channels };
       let k = 0;
       weekly = base.weekly.map((w) => { if (w.to < today) return w; const ow = o.weeks?.[k++]; return { ...w, topic: String(ow?.topic ?? w.topic).slice(0, 120), channels: (ow?.channels ?? w.channels).map(String), kinds: (ow?.kinds ?? w.kinds).map(String), note: String(ow?.note ?? '').slice(0, 200) }; });
-      goals.targets = { posts: Math.max(goals.targets.posts ?? 0, cur.planned, cur.posts + 1) || null, inquiries: Math.max(goals.targets.inquiries ?? 0, cur.inquiries + 1) || null, adBudget: goals.targets.adBudget };
-      source = 'ai';
+      goals.targets = { posts: Math.max(goals.targets.posts ?? 0, cur.planned, cur.posts + 1) || null, inquiries: Math.max(goals.targets.inquiries ?? 0, cur.inquiries + 1) || null, adBudget: goals.targets.adBudget, revenue: goals.targets.revenue ?? null };
+      source = 'ai'; if (opt.revise) revisionNote = String(o.changes ?? '').slice(0, 600) || null;
     } catch { /* AI 실패·한도 → 기본 초안 */ }
   }
-  const [g] = await sql<{ id: string }[]>`insert into mkt_goals (tenant, brand_id, month, status, goals, weekly, source, created_by)
-    values (${tenant}, ${brandId}, ${month}, 'pending', ${sql.json(goals as never)}, ${sql.json(weekly as never)}, ${source}, ${actorId})
-    on conflict (tenant, coalesce(brand_id::text, ''), month) do update set goals = excluded.goals, weekly = excluded.weekly, source = excluded.source, status = 'pending', approved_by = null, approved_at = null, updated_at = now() returning id`;
-  await notify(sql, { userIds: await approversOf(tenant), type: 'review_requested', title: `${month.replace('-', '년 ')}월 운영 목표 초안 — 승인해 주세요${brand ? ` (${brand.name})` : ''}`, body: goals.objectives[0] ?? '', link: '/s/marketing/goals', entityType: 'mkt_goal', entityId: g.id, dedupeKey: `mktgoal:${g.id}:${source}` }).catch(() => {});
-  return { id: g.id, status: 'pending', source, goals, weekly };
+  const [g] = await sql<{ id: string }[]>`insert into mkt_goals (tenant, brand_id, month, status, goals, weekly, source, created_by, version, revision_note, reject_note)
+    values (${tenant}, ${brandId}, ${month}, 'pending', ${sql.json(goals as never)}, ${sql.json(weekly as never)}, ${source}, ${actorId}, ${version}, ${revisionNote}, ${opt.revise?.note ?? null})
+    on conflict (tenant, coalesce(brand_id::text, ''), month) do update set goals = excluded.goals, weekly = excluded.weekly, source = excluded.source, status = 'pending', approved_by = null, approved_at = null, version = excluded.version, revision_note = excluded.revision_note, reject_note = excluded.reject_note, updated_at = now() returning id`;
+  await notify(sql, { userIds: await approversOf(tenant), type: 'review_requested', title: `${month.replace('-', '년 ')}월 운영 목표 초안${version > 1 ? ` v${version}(반려 반영)` : ''} — 승인해 주세요${brand ? ` (${brand.name})` : ''}`, body: goals.objectives[0] ?? '', link: '/s/marketing/goals', entityType: 'mkt_goal', entityId: g.id, dedupeKey: `mktgoal:${g.id}:${source}` }).catch(() => {});
+  return { id: g.id, status: 'pending', source, goals, weekly, version, revisionNote };
 }
 
 export async function goalFor(tenant: string, brandId: string | null, month: string, sql = db()) {
@@ -136,10 +138,10 @@ export function rationaleFrom(opts: { goal?: any; day: string; rule?: any; brand
   return { purpose: objective, metric, message: goal?.goals?.message ?? null, why, source: opts.source, goalId: goal?.id ?? null, week: week?.week ?? null, topic };
 }
 
-export const goalInput = z.object({ goals: z.object({ objectives: z.array(z.string().trim().max(200)).max(6), message: z.string().trim().max(200), targets: z.object({ posts: z.number().int().min(0).nullable(), inquiries: z.number().int().min(0).nullable(), adBudget: z.number().int().min(0).nullable() }), channels: z.array(z.string()).max(8) }).optional(),
+export const goalInput = z.object({ goals: z.object({ objectives: z.array(z.string().trim().max(200)).max(6), message: z.string().trim().max(200), targets: z.object({ posts: z.number().int().min(0).nullable(), inquiries: z.number().int().min(0).nullable(), adBudget: z.number().int().min(0).nullable(), revenue: z.number().int().min(0).nullable().optional() }), channels: z.array(z.string()).max(8) }).optional(),
   weekly: z.array(z.object({ week: z.number().int(), from: z.string(), to: z.string(), topic: z.string().trim().max(200), channels: z.array(z.string()).max(8), kinds: z.array(z.string()).max(8), note: z.string().max(300).optional() })).max(6).optional() });
 export const goalAction = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('update'), ...goalInput.shape }), z.object({ action: z.literal('approve') }), z.object({ action: z.literal('redraft') }),
+  z.object({ action: z.literal('update'), ...goalInput.shape }), z.object({ action: z.literal('approve') }), z.object({ action: z.literal('redraft') }), z.object({ action: z.literal('reject'), note: z.string().trim().min(1).max(500) }),
   z.object({ action: z.literal('review'), week: z.number().int().min(1).max(6).optional() }), z.object({ action: z.literal('close') })]);
 export const goalCreate = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), brandId: zUuid.nullable().optional() });
 
@@ -171,10 +173,23 @@ export async function actGoal(u: SessionUser, id: string, i: z.infer<typeof goal
   if (i.action === 'approve') {
     if (g.status === 'closed') throw badRequest('결산이 끝난 달입니다');
     await sql`update mkt_goals set status = 'approved', approved_by = ${u.id}, approved_at = now(), updated_at = now() where id = ${id}`;
+    if (!g.brand_id && Number(g.goals?.targets?.revenue) > 0) await sql`insert into mkt_revenue_goals (tenant, month, target, updated_by) values (${t}, ${g.month}, ${Number(g.goals.targets.revenue)}, ${u.id}) on conflict (tenant, month) do update set target = excluded.target, updated_by = excluded.updated_by, updated_at = now() where mkt_revenue_goals.target = 0`; // 대표 03:00 ①: 승인된 월 목표의 매출 목표 → 매출 목표(없을 때만)
     await audit(sql as never, u.id, 'mkt.goal_approve', 'mkt_goal', id, { month: g.month }, ip);
     return { ok: true };
   }
   if (i.action === 'redraft') return draftGoal(t, g.month, g.brand_id, u.id, { force: true });
+  if (i.action === 'reject') {
+    // 대표 02:30 ②: 반려 사유 → AI 가 고친 초안(v2) 으로 다시 승인 요청(최대 3회, 승인자 알림 1회). AI 없거나 3회 넘으면 반려로 끝
+    if (g.status !== 'pending') throw badRequest('승인 대기 초안만 반려할 수 있습니다');
+    const ver = Number(g.version ?? 1); const P = await import('./ai/provider');
+    if (ver < 3 && P.aiEnabled()) {
+      const r = await draftGoal(t, g.month, g.brand_id, u.id, { force: true, revise: { note: i.note, prev: g } }).catch(() => null);
+      if (r && r.source === 'ai') { await audit(sql as never, u.id, 'mkt.goal_reject_revise', 'mkt_goal', id, { note: i.note, version: ver + 1 }, ip); return { status: 'revised', version: ver + 1, revisionNote: (r as any).revisionNote ?? null }; }
+    }
+    await sql`update mkt_goals set status = 'rejected', reject_note = ${i.note}, updated_at = now() where id = ${id}`;
+    await audit(sql as never, u.id, 'mkt.goal_reject', 'mkt_goal', id, { note: i.note }, ip);
+    return { status: 'rejected', version: ver, final: ver >= 3 };
+  }
   if (i.action === 'review') return reviewWeek(t, id, i.week, u.id);
   return closeGoal(t, id, u.id);
 }

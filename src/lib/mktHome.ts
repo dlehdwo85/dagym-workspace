@@ -79,12 +79,16 @@ export async function homeView(u: SessionUser) {
   const gq = await sql<any[]>`select id, month, status, updated_at, reviews, brand_id from mkt_goals where tenant = ${t} and (status = 'pending' or (status = 'approved' and month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM'))) order by month desc limit 3`;
   for (const g of gq) q.push({ kind: 'goal' as any, id: g.id, title: `${g.month.replace('-', '년 ')}월 운영 목표${g.status === 'pending' ? ' 초안' : ` · 주간 리뷰 ${(g.reviews ?? []).length}회`}`, href: '/s/marketing/goals', night: false, state: g.status === 'pending' ? 'waiting' : 'done', at: g.updated_at, canRun: false, canNight: false, note: g.status === 'pending' ? '대표 승인 필요' : undefined });
   // 대표 10/20 20:00 ①②: 운영실 승인 요청 카드·광고 예산 계획(승인 대기)도 큐에
+  // 대표 03:00 ②: 아침 한 줄 브리핑(07시 이후 하루 1번, AI 마케터 상시 운영) — 큐 맨 위 '완료' 줄
+  const [brief] = await sql<any[]>`select day::text, brief, brief_at, status from mkt_ops_daily where tenant = ${t} and brief is not null order by day desc limit 1`;
+  if (brief && brief.day === ymd(new Date())) q.push({ kind: 'ops' as any, id: `brief-${brief.day}`, title: `아침 브리핑: ${brief.brief}`, href: '/s/marketing/ops', night: false, state: 'done', at: brief.brief_at, canRun: false, canNight: false, note: brief.status === 'ok' ? '정상' : brief.status === 'warn' ? '주의' : '조치 필요' });
   const ops = await sql<any[]>`select id, kind, title, created_at from mkt_proposals where tenant = ${t} and status = 'pending' order by created_at desc limit 5`;
   for (const o of ops) q.push({ kind: 'ops' as any, id: o.id, title: `AI 마케터 제안: ${o.title}`, href: '/s/marketing/ops', night: false, state: 'waiting', at: o.created_at, canRun: false, canNight: false, note: '대표 승인 필요' });
   const [bud] = await sql<any[]>`select id, month, total, updated_at from mkt_ad_budgets where tenant = ${t} and status = 'pending' order by month desc limit 1`;
   if (bud) q.push({ kind: 'ops' as any, id: bud.id, title: `${bud.month.replace('-', '년 ')}월 광고 예산 계획 ${Math.round(Number(bud.total)).toLocaleString('ko-KR')}원`, href: '/s/marketing/ops', night: false, state: 'waiting', at: bud.updated_at, canRun: false, canNight: false, note: '대표 승인 필요' });
   const order = { running: 0, waiting: 1, done: 2 };
-  const queue = q.sort((a, b) => order[a.state] - order[b.state] || String(b.at ?? '').localeCompare(String(a.at ?? ''))).slice(0, 8);
+  const briefRow = q.find((x) => String(x.id).startsWith('brief-')); // 대표 03:00 ②: 아침 브리핑은 큐 맨 위에 고정(완료 줄이라도 8줄에서 밀리지 않게)
+  const queue = [...(briefRow ? [briefRow] : []), ...q.filter((x) => x !== briefRow).sort((a, b) => order[a.state] - order[b.state] || String(b.at ?? '').localeCompare(String(a.at ?? '')))].slice(0, 8);
   // 🌙 밤사이 결과: 어젯밤 22시 ~ 오늘 08시 사이에 만들어진 자동 시안·문서
   const nightFrom = new Date(`${ymd(new Date(Date.now() - 864e5))}T22:00:00+09:00`), nightTo = new Date(`${ymd(new Date())}T08:00:00+09:00`);
   const night = await sql<any[]>`select id, title, 'content' as kind from mkt_contents where tenant = ${t} and auto and not is_test and produced_at between ${nightFrom} and ${nightTo}

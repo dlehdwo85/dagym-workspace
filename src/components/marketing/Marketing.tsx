@@ -9,6 +9,8 @@ import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, to
 import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
 import { ApprovalCard, BrandChip, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, WhyBox } from './ApprovalCard';
+import { ProposalCard, BudgetCard } from './Ops';
+import { GoalCard, type Goal } from './Goals';
 
 const C = '#7C3AED';
 export const CHANNELS: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
@@ -233,22 +235,70 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   );
 }
 
-/** 승인 대기(승인 대기·수정 요청·보류) */
+/**
+ * 승인함(대표 02:30 ①): 콘텐츠 시안 + 운영실 승인 요청(운영 제안·광고 예산·월 목표·제작 의뢰)을 종류별 탭으로 한곳에. 탭마다 건수, 카드에서 바로 승인·반려.
+ * 반려 사유를 적으면 AI 가 사유를 반영한 v2 를 다시 올림(최대 3회). 콘텐츠 탭은 기존 승인함 그대로(승인 대기·수정 요청·보류).
+ */
+type Inbox = { counts: { contents: number; proposals: number; budget: number; goals: number; briefs: number }; total: number; proposals: any[]; budgets: any[]; goals: Goal[]; briefs: InboxBrief[]; kinds: Record<string, string>; canEdit: boolean; today: string; maxRevisions: number };
+type InboxBrief = { id: string; kind: string; channel: string; purpose: string; message: string; status: string; quantity: number; due_date: string | null; created_at: string; brand: string | null; created_by_name: string | null; summary_ko: string | null; model: string | null };
+const INBOX_TABS: [string, string][] = [['contents', '콘텐츠'], ['proposals', '운영 제안'], ['budget', '광고 예산'], ['goals', '월 목표'], ['briefs', '제작 의뢰']];
 export function Approvals() {
   const sp = useSearchParams();
   const [open, setOpen] = useState<string | null>(sp.get('c'));
   const [nw, setNw] = useState(sp.get('new') === '1'); // 앱 더보기 › 만들기 › 새 콘텐츠
   const day = sp.get('day') ?? ''; // 현황 '오늘' 카드: produced·soon·today·published
+  const [tab, setTab] = useState(() => (INBOX_TABS.some(([k]) => k === sp.get('tab')) ? String(sp.get('tab')) : 'contents'));
   const DAY_LABEL: Record<string, string> = { produced: '오늘 제작된 시안', soon: '오늘 승인할 것(내일까지 게시 예정)', today: '오늘 게시 예정', published: '오늘 게시됨' };
   const { data, error, reload } = useApi<{ contents: Content[] }>(`/api/marketing/contents?view=approvals${DAY_LABEL[day] ? `&day=${day}` : ''}`);
+  const inbox = useApi<Inbox>('/api/marketing/inbox');
+  const reloadAll = () => { reload(); inbox.reload(); };
+  const counts = inbox.data?.counts;
   return (
     <div className="space-y-3" data-testid="mkt-approvals">
-      <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>{DAY_LABEL[day] ?? '승인 대기'}</h1>{DAY_LABEL[day] && <Link href="/s/marketing/approvals" className="text-xs underline" data-testid="mkt-day-clear">승인 대기 전체</Link>}<span className="ml-auto flex flex-wrap items-center gap-2"><AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContents} compact /><Button onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></span></div>
-      {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reload} />}
-      <OpsRequests />
-      {open && <ContentDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
-      {nw && <NewContent onClose={() => setNw(false)} onDone={reload} />}
+      <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>{DAY_LABEL[day] ?? '승인함'}</h1>{DAY_LABEL[day] && <Link href="/s/marketing/approvals" className="text-xs underline" data-testid="mkt-day-clear">승인함 전체</Link>}
+        <span className="ml-auto flex flex-wrap items-center gap-2">{inbox.data && <span className="text-xs text-ink-2" data-testid="mkt-inbox-total">승인할 것 <b className="text-orange-700">{inbox.data.total}건</b></span>}<AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContents} compact /><Button onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></span></div>
+      {!DAY_LABEL[day] && <div className="flex gap-1 overflow-x-auto pb-0.5" role="tablist" data-testid="mkt-inbox-tabs">{INBOX_TABS.map(([k, l]) => { const n = counts ? counts[k as keyof Inbox['counts']] : 0; return (
+        <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-testid={`mkt-inbox-tab-${k}`} data-count={n}
+          className={cx('shrink-0 rounded-full border px-3 py-1 text-xs', tab === k ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white text-ink-2')}>{l}{n ? <span className={cx('ml-1 rounded-full px-1.5 text-[10px] font-semibold', tab === k ? 'bg-violet-600 text-white' : 'bg-orange-100 text-orange-800')} data-testid={`mkt-inbox-count-${k}`}>{n}</span> : null}</button>); })}</div>}
+      {(tab === 'contents' || DAY_LABEL[day]) && <>
+        {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reloadAll} />}
+        <OpsRequests />
+      </>}
+      {!DAY_LABEL[day] && tab !== 'contents' && (inbox.error ? <ErrorBox error={inbox.error} retry={inbox.reload} /> : !inbox.data ? <Skeleton rows={4} /> : <InboxTab tab={tab} d={inbox.data} onChange={reloadAll} />)}
+      {open && <ContentDetail id={open} onClose={() => setOpen(null)} onChange={reloadAll} />}
+      {nw && <NewContent onClose={() => setNw(false)} onDone={reloadAll} />}
     </div>
+  );
+}
+function InboxTab({ tab, d, onChange }: { tab: string; d: Inbox; onChange: () => void }) {
+  const empty = (t: string, href: string, label: string) => <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3" data-testid="mkt-inbox-empty">{t} <Link href={href} className="underline">{label}</Link></p>;
+  if (tab === 'proposals') return d.proposals.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-proposals">{d.proposals.map((p) => <ProposalCard key={p.id} p={p} kinds={d.kinds} canEdit={d.canEdit} onChange={onChange} />)}</div>
+    : empty('대기 중인 운영 제안 카드가 없습니다.', '/s/marketing/ops', '운영실에서 [AI 마케터 제안 받기] →');
+  if (tab === 'budget') return d.budgets.length ? <div className="space-y-3" data-testid="mkt-inbox-budget">{d.budgets.map((b) => <BudgetCard key={b.id} b={b} month={b.month} canEdit={d.canEdit} busy={false} onDraft={() => {}} onChange={onChange} compact />)}</div>
+    : empty('승인 대기 중인 광고 예산 계획이 없습니다.', '/s/marketing/ops', '운영실에서 계획 만들기 →');
+  if (tab === 'goals') return d.goals.length ? <div className="space-y-3" data-testid="mkt-inbox-goals">{d.goals.map((g) => <GoalCard key={g.id} g={g} canEdit={d.canEdit} today={d.today} onChange={onChange} />)}</div>
+    : empty('승인 대기 중인 월 운영 목표 초안이 없습니다.', '/s/marketing/goals', '월 운영 목표 →');
+  return d.briefs.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-briefs">{d.briefs.map((b) => <BriefDecisionCard key={b.id} b={b} canEdit={d.canEdit} onChange={onChange} />)}</div>
+    : empty('생성 결정을 기다리는 제작 의뢰가 없습니다.', '/s/marketing/automation?tab=studio', '제작의뢰실 →');
+}
+/** 제작 의뢰(프롬프트 준비됨): 관리자가 [생성](크레딧) 또는 [취소]. 프롬프트 수정은 제작의뢰실에서 */
+function BriefDecisionCard({ b, canEdit, onChange }: { b: InboxBrief; canEdit: boolean; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function act(action: 'generate' | 'cancel', msg: string) {
+    setBusy(true);
+    try { await api(`/api/marketing/studio/${b.id}`, { method: 'PATCH', body: { action } }); toast.ok(msg); onChange(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <article className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="inbox-brief" data-status={b.status}>
+      <div className="flex flex-wrap items-center gap-1.5 text-[11px]"><span className="rounded-full bg-violet-50 px-2 py-0.5 font-semibold text-violet-800">{b.status === 'failed' ? '생성 실패 — 다시' : '프롬프트 준비'}</span>{b.brand && <span className="text-ink-2">{b.brand}</span>}<span className="text-ink-3">{channelLabel(b.channel)} · {b.kind} · {b.quantity}건{b.due_date ? ` · 마감 ${b.due_date}` : ''} · {b.created_by_name ?? ''} {fmtDateTime(b.created_at)}</span></div>
+      <h3 className="mt-1.5 text-sm font-bold">{b.message}</h3>
+      {b.summary_ko && <p className="mt-1 whitespace-pre-wrap text-xs text-ink-2">{b.summary_ko.slice(0, 300)}</p>}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <Link href={`/s/marketing/automation?tab=studio&brief=${b.id}`} className="text-xs underline">프롬프트 보기·고치기 →</Link>
+        {canEdit && <span className="ml-auto flex gap-1.5"><Button size="sm" onClick={() => act('generate', '생성을 시작했습니다 — 시안이 나오면 승인 대기로 올라옵니다')} disabled={busy} data-testid="inbox-brief-generate">생성</Button>
+          <Button size="sm" variant="secondary" onClick={() => { if (confirm('이 의뢰를 취소할까요?')) void act('cancel', '취소했습니다'); }} disabled={busy} data-testid="inbox-brief-cancel">취소</Button></span>}
+      </div>
+    </article>
   );
 }
 

@@ -91,7 +91,7 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   const tries = await Promise.all([1, 2, 3].map(() => ctx.owner.req('POST', `/api/marketing/ad-ops/plans/${p.id}/approve`, {})));
   assert.deepEqual(tries.map((r) => r.status).sort(), [200, 409, 409], JSON.stringify(tries.map((r) => r.body)));
   const ok = tries.find((r) => r.status === 200).body;
-  assert.equal(tries.find((r) => r.status === 409).body.error.code, 'plan_busy');
+  assert.ok(tries.filter((r) => r.status === 409).every((r) => ['plan_busy', 'plan_not_draft'].includes(r.body.error.code)), '동시에 눌린 나머지는 만드는 중(plan_busy) 또는 이미 만든 뒤 도착(plan_not_draft)'); // 세 요청이 순서대로 처리되면 뒤의 것은 plan_not_draft
   assert.equal((await ctx.owner.req('PUT', `/api/marketing/ad-ops/plans/${p.id}`, plan(acc.id))).status, 409, '만든 뒤에는 세팅안 고치기 막힘');
   assert.ok(ok.external.campaignId && ok.external.adgroupId);
   assert.equal(calls.filter((c) => c.method === 'POST' && c.path === '/ncc/campaigns').length, 0, '이어서 만들기 — 캠페인 다시 안 만듦');

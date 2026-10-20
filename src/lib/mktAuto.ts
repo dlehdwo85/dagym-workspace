@@ -356,7 +356,7 @@ export async function automationView(u: SessionUser) {
     sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, q.brief_id, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
     sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, coalesce(l.title, c.title) as title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
-    sql`select id, name, tone, intro, products, weekly_topic, banned_words, test_mode from mkt_brands where tenant = ${t} order by name`,
+    sql`select id, name, tone, intro, products, weekly_topic, banned_words, test_mode, ad_priority, ad_share::float8 as ad_share, ad_note from mkt_brands where tenant = ${t} order by name`,
     sql`select id, name, role from users where tenant = ${t} and status = 'active' and not is_demo order by name`,
   ]);
   const co = await (await import('./ai/assistant')).usageThisMonth(t);
@@ -529,12 +529,15 @@ export async function actContent(u: SessionUser, id: string, i: z.infer<typeof c
   return produceContent(c, u.id);
 }
 
-export const brandKitInput = z.object({ tone: z.string().max(200).nullable().optional(), intro: z.string().max(1000).nullable().optional(), products: z.string().max(1000).nullable().optional(), weeklyTopic: z.string().max(300).nullable().optional(), bannedWords: z.array(z.string().trim().min(1).max(30)).max(50).optional(), testMode: z.boolean().optional() });
+export const brandKitInput = z.object({ tone: z.string().max(200).nullable().optional(), intro: z.string().max(1000).nullable().optional(), products: z.string().max(1000).nullable().optional(), weeklyTopic: z.string().max(300).nullable().optional(), bannedWords: z.array(z.string().trim().min(1).max(30)).max(50).optional(),
+  adPriority: z.number().int().min(1).max(99).nullable().optional(), adShare: z.number().min(0).max(100).nullable().optional(), adNote: z.string().max(300).nullable().optional(), // 대표 02:30 ③ 광고 예산 브랜드 축
+  testMode: z.boolean().optional() });
 export async function saveBrandKit(u: SessionUser, id: string, i: z.infer<typeof brandKitInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
   const [b] = await db()`update mkt_brands set tone = ${i.tone === undefined ? db()`tone` : i.tone}, intro = ${i.intro === undefined ? db()`intro` : i.intro || null}, products = ${i.products === undefined ? db()`products` : i.products || null},
-    weekly_topic = ${i.weeklyTopic === undefined ? db()`weekly_topic` : i.weeklyTopic || null}, banned_words = coalesce(${i.bannedWords ?? null}::text[], banned_words), test_mode = coalesce(${i.testMode ?? null}, test_mode) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
+    weekly_topic = ${i.weeklyTopic === undefined ? db()`weekly_topic` : i.weeklyTopic || null}, banned_words = coalesce(${i.bannedWords ?? null}::text[], banned_words), test_mode = coalesce(${i.testMode ?? null}, test_mode),
+    ad_priority = ${i.adPriority === undefined ? db()`ad_priority` : i.adPriority}, ad_share = ${i.adShare === undefined ? db()`ad_share` : i.adShare}, ad_note = ${i.adNote === undefined ? db()`ad_note` : i.adNote || null} where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!b) throw notFound();
   // 재료(소개·상품·주제)가 생기면 이 브랜드의 열린 '주제 필요' 질문은 닫고 다음 실행에 제작
   if (i.intro || i.products || i.weeklyTopic) await db()`update mkt_production_requests q set status = 'done', brief = q.brief || ${'\n\n브랜드 키트 재료로 대신함'}, decided_by = ${u.id}, decided_at = now()
