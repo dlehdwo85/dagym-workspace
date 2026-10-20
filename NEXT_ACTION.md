@@ -1271,6 +1271,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 고침: ① 폼은 일정 하나당 한 번만 채움(initedFor), 다시 온 응답은 버전만 `max()` 로 ② 저장·자동 저장 PATCH 409 → 최신 버전(응답 detail.currentVersion 또는 다시 읽기)으로 지금 고친 내용 그대로 **1회 자동 재시도**(patchWithRetry) ③ 색 고르기 줄(ColorRow: 캘린더 색 · 최근 쓴 색 6(이 기기 localStorage) · 팔레트 11 · 직접 선택)을 **빠른 입력 첫 화면(quick-color)** 과 편집 첫 화면(event-color) 에 — '옵션 더보기' 안이 아님. 빠른 입력 색은 POST color 로 바로 저장, 옵션 더보기로 넘겨도 유지.
 - 시험: E2E cal-edit.step.mjs — 휴대폰 390 빠른 입력 색 줄·저장 색 확인 → 미리보기 → [편집] → 제목 입력 중 wos-refresh 발생 → 입력 유지·자동 저장·색 변경·닫기 저장 / PC 다른 기기가 먼저 고친 뒤(DB version+1) [완료] → 409 문구 없이 저장. 기존 '대표 지적 10/19 캘린더'·'V4 캘린더'·'V37 2' 단계 재실행.
 
+## 2026-10-20 클라우드 — 로컬 최우선 S1-3 칸 이름 1:1 (감사 문서에 적힌 실제 칸부터) (배포)
+- 감사(AUDIT_SALES_MIGRATION) 에 적힌 원본 실제 칸 이름을 `pick()` 후보 맨 앞에 — 원본 스키마 복사(docs/sales-src)가 아직 없으므로 감사에 적힌 칸만. 나머지 추측 칸(날짜 칸 등)은 스키마가 오면 다시 맞춤.
+- 입찰(procurement_notices): 출처 `source_type` 9값(kapt_bid·g2b_bid·nuri_bid·g2b_prespec·lh_bid·lh_prespec·d2b_bid·onbid_lease·vendor_recruit) → 라벨 K-apt·나라장터·누리장터·나라장터 사전규격·LH·LH 사전규격·국방·온비드 임대·협력사 모집(예전 짧은 코드도 유지) · 사업 배지 `fit_business`(dagym/hilink/both) · 세대 `household_count` · 업종 `notice_type`/`bid_category`(공고 종류와 같은 값이면 상세에 한 번만) · 낙찰 금액 `winner_amount` · `vendor_recruit` 는 카드 배지(휴대폰)+입찰 탭 '협력사 모집'(`tab=recruit`).
+- 신규단지(building_sales_pipeline): 단계 `current_stage` · 우선순위 `sales_priority` · 세대 `household_count` · [공식 승인 원문] `source_url` · 첨부 `attachment_urls`(공공 사이트는 중계) · `is_estimated` 면 '시점 추정치' 배지.
+- 시설(operating_facility_prospects): 세대 `household_count` · 규모 `facility_scale`+`facility_scale_unit` · 준공 `completion_date` · 최근 기록 `__progress.notes` · 다음 조치 = 회사 진행 `__progress.next_action` 먼저, 없으면 수집기 제안 `etl_suggested_next_action`(출처 표기 '진행 기록'/'수집기 제안') · 입주(없으면 준공) 뒤 n일 경과.
+- 협력사(vendor_registrations): 공개 여부 `recruit_visibility`(글자 그대로) · 시기 `recruit_timing` · 인증서 `cert_required` · [등록 신청] `register_url` · [모집 공지] `recruit_url` · 비고 `notes`.
+- 시험: tests/api/sales-views.test.mjs 씨앗을 실제 칸 이름으로 바꿈(출처 라벨·사업·세대·업종·낙찰 금액·협력사 탭·신규단지 5칸·시설 8칸·협력사 6칸) · E2E ② 앱 영업 단계에 fit_business 배지·household_count 확인.
+- 남은 S1: S1-1 수집기 12개 이식 · S1-3 나머지(날짜·추측 칸) — 원본 코드·스키마(0001~0037) 복사가 오면. 다음은 S2.
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md

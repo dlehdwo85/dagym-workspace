@@ -16,10 +16,12 @@ before(async () => {
   await put('other', 'leads', { id: 'X1', name: '다른 회사 리드', status: '상담' });
   await put('default', 'sales_activities', { id: 'A1', lead_id: 'L1', kind: '전화', memo: '견적 요청' });
   await put('default', 'opportunity_work', { id: 'W1', notice_id: '11', status: '검토 중', lead_id: 'L1' });
-  await put('global', 'procurement_notices', { id: 11, title: '체육시설 위탁운영', issuer: '성남시', related: true, first_seen_at: today, created_at: today, deadline_at: `${plus(5)}T10:00:00`, current_status: '공고중', fit_score: 82 });
+  // S1-3(로컬 10/20): 감사에 적힌 원본 실제 칸 이름으로 심음 — source_type(9값)·fit_business·household_count·notice_type·winner_amount
+  await put('global', 'procurement_notices', { id: 11, title: '체육시설 위탁운영', issuer: '성남시', related: true, first_seen_at: today, created_at: today, deadline_at: `${plus(5)}T10:00:00`, current_status: '공고중', fit_score: 82, source_type: 'g2b_bid', fit_business: 'dagym', household_count: 500, notice_type: '용역' });
   // 영업관리 기준(10/19): 신규 판단은 first_seen_at 하나만 — 공고일·created_at 이 오늘이어도 first_seen 이 30일 전이면 새 공고 아님
   await put('global', 'procurement_notices', { id: 14, title: '예전 공고(first_seen 30일 전)', related: true, first_seen_at: `${plus(-30)}T01:00:00+09:00`, notice_date: today, created_at: today, deadline_at: `${plus(3)}T10:00:00`, current_status: '공고중' });
-  await put('global', 'procurement_notices', { id: 13, title: '낙찰된 공고', related: true, first_seen_at: plus(-30), deadline_at: `${plus(-10)}T10:00:00`, current_status: '낙찰' });
+  await put('global', 'procurement_notices', { id: 13, title: '낙찰된 공고', related: true, first_seen_at: plus(-30), deadline_at: `${plus(-10)}T10:00:00`, current_status: '낙찰', source_type: 'kapt_bid', winner_name: '좋은업체', winner_amount: 123000000 });
+  await put('global', 'procurement_notices', { id: 19, title: '협력사 모집 공고', related: true, first_seen_at: plus(-1), deadline_at: `${plus(12)}T10:00:00`, current_status: '공고중', source_type: 'vendor_recruit', fit_business: 'both' });
   await put('global', 'procurement_notices', { id: 12, title: '관계없는 공고', related: false, posted_at: today });
   // 운영 10/19: 진행 중 탭 0건(현황은 31) — 원본 상태 문구가 '공고중'이 아닌 진행 공고, 미참여로 정리한 공고, 사전규격
   await put('global', 'procurement_notices', { id: 15, title: '상태 문구 다른 진행 공고', related: true, first_seen_at: plus(-2), deadline_at: `${plus(8)}T10:00:00`, current_status: '입찰진행' });
@@ -28,10 +30,11 @@ before(async () => {
   await put('global', 'procurement_notices', { id: 18, title: '오늘 이미 지난 마감', related: true, first_seen_at: plus(-2), deadline_at: `${today} 00:01`, current_status: '공고중' });
   await put('global', 'procurement_notices', { id: 17, title: '사전규격 공고', related: true, source: 'g2b_pre', first_seen_at: plus(-2), deadline_at: `${plus(10)}T10:00:00` });
   await put('default', 'procurement_notices__progress', { id: 11, classification: '적합' });
-  await put('global', 'building_sales_pipeline', { id: 'B1', name: '판교 새단지', households: 1200, address: '경기 성남' });
-  await put('global', 'operating_facility_prospects', { id: 'F1', name: '수원 아파트 커뮤니티', score: 88 });
-  await put('default', 'operating_facility_prospects__progress', { id: 'F1', contact_status: '연락함' });
-  await put('global', 'vendor_registrations', { id: 'V1', company: '좋은관리', rank: 3 });
+  await put('global', 'building_sales_pipeline', { id: 'B1', name: '판교 새단지', household_count: 1200, address: '경기 성남', current_stage: '착공', sales_priority: '높음', source_url: 'https://example.com/approval/1', attachment_urls: ['https://www.g2b.go.kr/files/b1.pdf'], is_estimated: true });
+  await put('global', 'operating_facility_prospects', { id: 'F1', name: '수원 아파트 커뮤니티', score: 88, household_count: 900, facility_scale: 1500, facility_scale_unit: '㎡', completion_date: '2024-05-13', move_in_date: plus(-10), etl_suggested_next_action: '관리사무소 전화' });
+  await put('default', 'operating_facility_prospects__progress', { id: 'F1', contact_status: '연락함', notes: '통화 완료', next_action: '견적 보내기' });
+  await put('global', 'operating_facility_prospects', { id: 'F2', name: '수집기 제안만 있는 시설', score: 10, household_count: 100, completion_date: plus(-3), etl_suggested_next_action: '관리사무소 전화' });
+  await put('global', 'vendor_registrations', { id: 'V1', company: '좋은관리', rank: 3, recruit_visibility: '회원 공개', recruit_timing: '연중', cert_required: '필요', register_url: 'https://example.com/register', recruit_url: 'https://example.com/recruit' });
   await sql`insert into sales_user_map (tenant, src_user_id, user_id, name, matched) values ('default', 'P1', ${ctx.ownerId}, '대표', true)`;
   await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant: 'default', at: new Date().toISOString(), daily: true })})`;
 });
@@ -42,7 +45,7 @@ test('영업 공간 화면', async () => {
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   const s = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
   assert.equal(s.readOnly, true); assert.equal(s.imported, true);
-  assert.deepEqual([s.kpi.leads, s.kpi.dueSoon, s.kpi.overdue, s.kpi.bidsWorking, s.kpi.relatedNotices, s.kpi.newNotices7d], [4, 1, 1, 1, 7, 1], JSON.stringify(s.kpi));
+  assert.deepEqual([s.kpi.leads, s.kpi.dueSoon, s.kpi.overdue, s.kpi.bidsWorking, s.kpi.relatedNotices, s.kpi.newNotices7d], [4, 1, 1, 1, 8, 1], JSON.stringify(s.kpi));
   assert.equal(s.today.newNotices, 1, '오늘 새 공고 = first_seen_at 이 오늘(KST)');
   assert.equal(s.today.date, today); assert.equal(s.bidsOn, true);
   assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today')).items.map((n) => n.title), ['체육시설 위탁운영']);
@@ -61,7 +64,11 @@ test('영업 공간 화면', async () => {
   assert.equal(p.columns[0].status, '신규리드'); assert.equal(p.columns.find((c) => c.status === '미팅예정').items.length, 2);
   const b = await ctx.owner.ok('GET', '/api/sales/src?view=bids');
   assert.deepEqual(b.items.find((n) => n.title === '체육시설 위탁운영') && [b.items[1].work, b.items[1].agency, b.items[1].fit], ['검토 중', '성남시', 82], '기본 = 진행 중(낙찰 제외)');
-  assert.deepEqual(b.items.map((n) => n.title), ['예전 공고(first_seen 30일 전)', '체육시설 위탁운영', '상태 문구 다른 진행 공고'], '마감 임박순 · 낙찰·미참여·사전규격 제외 · 상태 문구 달라도 진행');
+  assert.deepEqual(b.items.map((n) => n.title), ['예전 공고(first_seen 30일 전)', '체육시설 위탁운영', '상태 문구 다른 진행 공고', '협력사 모집 공고'], '마감 임박순 · 낙찰·미참여·사전규격 제외 · 상태 문구 달라도 진행');
+  // S1-3: 원본 칸 이름 그대로 읽힘 — 출처 라벨(source_type)·사업 배지(fit_business)·세대(household_count)·업종(notice_type)·낙찰 금액(winner_amount)·협력사 모집 배지/탭
+  assert.deepEqual([b.items[1].sourceLabel, b.items[1].business, b.items[1].households, b.items[1].industry, b.items[1].vendorRecruit], ['나라장터', 'dagym', 500, '용역', false]);
+  assert.deepEqual([b.items[3].sourceLabel, b.items[3].business, b.items[3].vendorRecruit], ['협력사 모집', 'both', true]);
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=recruit')).items.map((n) => n.title), ['협력사 모집 공고']);
   assert.equal(s.kpi.bidsOpen, b.items.length, '현황 진행 중 입찰 = 진행 중 탭 건수');
   assert.ok(!b.items.some((n) => n.title === '오늘 이미 지난 마감'), '오늘이라도 마감 시각이 지났으면 진행 중 아님');
   // 대표 확정(10/19): 홈·캘린더 영업 주요 일정 — 리드 다음 연락·작업 중 입찰 마감만(공고 하나하나·미참여 공고는 없음)
@@ -73,11 +80,19 @@ test('영업 공간 화면', async () => {
   assert.ok(ag.items.every((x) => x.space === 'sales'));
   assert.deepEqual((await ctx.staffA.client.ok('GET', '/api/spaces/agenda')).items, [], '공간 없는 직원은 빈 목록');
   assert.deepEqual(b.items[1].classification, '적합');
-  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.length, 7);
+  const all = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all');
+  assert.equal(all.items.length, 8);
+  assert.deepEqual([all.items.find((n) => n.title === '낙찰된 공고').sourceLabel, all.items.find((n) => n.title === '낙찰된 공고').winner, all.items.find((n) => n.title === '낙찰된 공고').awardAmount], ['K-apt', '좋은업체', 123000000]);
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.length, 2);
-  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).items[0].households, 1200);
-  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities')).items[0].contact, '연락함');
-  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=vendors')).items[0].rank, 3);
+  // S1-3: 신규단지 current_stage·sales_priority·household_count·source_url·첨부·추정치, 시설 facility_scale(+unit)·completion_date·__progress.next_action/notes·etl_suggested_next_action·경과일, 협력사 recruit_visibility/timing·cert_required·register_url·recruit_url
+  const bd = (await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).items[0];
+  assert.deepEqual([bd.households, bd.status, bd.priority, bd.url, bd.attachments, bd.estimated, bd.dates.find(([k]) => k === '세대수')[1]], [1200, '착공', '높음', 'https://example.com/approval/1', ['https://www.g2b.go.kr/files/b1.pdf'], true, 1200]);
+  const fc = (await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities')).items;
+  const f1 = fc.find((x) => x.name === '수원 아파트 커뮤니티'), f2 = fc.find((x) => x.name === '수집기 제안만 있는 시설');
+  assert.deepEqual([f1.contact, f1.households, f1.scale, f1.date, f1.lastNote, f1.nextAction, f1.nextActionFrom, f1.elapsedDays], ['연락함', 900, '1500㎡', '2024-05-13', '통화 완료', '견적 보내기', '진행 기록', 10], '회사 진행 기록이 수집기 제안보다 먼저');
+  assert.deepEqual([f2.nextAction, f2.nextActionFrom, f2.elapsedDays], ['관리사무소 전화', '수집기 제안', 3]);
+  const vd = (await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=vendors')).items[0];
+  assert.deepEqual([vd.rank, vd.open, vd.period, vd.cert, vd.applyUrl, vd.url], [3, '회원 공개', '연중', '필요', 'https://example.com/register', 'https://example.com/recruit']);
   const r = await ctx.owner.ok('GET', '/api/sales/src?view=regions');
   assert.deepEqual(r.regions.map((x) => x.region), ['경기', '서울', '부산', '지역 미정'].filter(Boolean).sort((a, b) => (a === '지역 미정' ? 1 : b === '지역 미정' ? -1 : 0)), JSON.stringify(r.regions));
   assert.equal((await ctx.staffA.client.req('GET', '/api/sales/src?view=leads')).status, 404, '공간 미배정 직원');

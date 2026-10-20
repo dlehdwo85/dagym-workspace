@@ -7,9 +7,9 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
   const ids = ['E2E-APP-L1', 'E2E-APP-N1', 'E2E-APP-W1', 'E2E-APP-F1'];
   await sql`delete from sales_src_rows where src_id = any(${ids})`;
   await put('default', 'leads', { id: ids[0], name: 'E2E 앱 거래처', sales_status: '미팅예정', region: '경기', next_contact_date: ymd(2), phone: '031-123-4567', contact_name: '김소장', homepage: 'https://example.com/e2e', expected_revenue: '0.00', updated_at: `${ymd(0)}T01:00:00Z` });
-  await put('global', 'procurement_notices', { id: ids[1], title: 'E2E 앱 체육시설 위탁운영', issuer: '성남시청', region: '경기', related: true, first_seen_at: `${ymd(0)}T00:30:00+09:00`, deadline_at: `${ymd(5)}T10:00:00`, current_status: '공고중', source: 'g2b', source_url: 'https://example.com/notice/1', attachment_urls: ['https://www.g2b.go.kr/files/notice.hwp'], budget: '385000000.00', office_phone: '031-729-2600', complex_name: '분당 스포츠센터' });
+  await put('global', 'procurement_notices', { id: ids[1], title: 'E2E 앱 체육시설 위탁운영', issuer: '성남시청', region: '경기', related: true, first_seen_at: `${ymd(0)}T00:30:00+09:00`, deadline_at: `${ymd(5)}T10:00:00`, current_status: '공고중', source_type: 'g2b_bid', fit_business: 'hilink', household_count: 800, source_url: 'https://example.com/notice/1', attachment_urls: ['https://www.g2b.go.kr/files/notice.hwp'], budget: '385000000.00', office_phone: '031-729-2600', complex_name: '분당 스포츠센터' });
   await put('default', 'opportunity_work', { id: ids[2], notice_id: ids[1], status: '검토 중', memo: '현장 설명회 10/25', next_action_date: ymd(3) });
-  await put('global', 'operating_facility_prospects', { id: ids[3], name: 'E2E 앱 시설', address: '경기 수원시', households: 1500, facility_type: '아파트', region: '경기', office_phone: '031-222-3333', use_approval_date: '2024-05-13', first_seen_at: ymd(0) });
+  await put('global', 'operating_facility_prospects', { id: ids[3], name: 'E2E 앱 시설', address: '경기 수원시', household_count: 1500, facility_type: '아파트', region: '경기', office_phone: '031-222-3333', completion_date: '2024-05-13', first_seen_at: ymd(0) }); // S1-3: 원본 칸 이름(household_count·completion_date)
   await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant: 'default', at: new Date().toISOString(), daily: true })}) on conflict (key) do nothing`;
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   const m = await browser.newContext({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
@@ -42,6 +42,8 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.deepEqual(await bid.getByTestId('contact-link').allInnerTexts(), ['원문', '공고문 내려받기']);
     assert.match(await bid.getByTestId('bid-deadline').innerText(), /^마감 \d{1,2}\. \d{1,2}\.\([일월화수목금토]\) 10:00$/);
     assert.match(await bid.innerText(), /예산 385,000,000원/);
+    assert.equal(await bid.getByTestId('bid-business').innerText(), '하이링크', 'S1-3: fit_business 로 사업 배지');
+    assert.match(await bid.innerText(), /800세대/, 'S1-3: household_count');
     await bid.getByTestId('bid-open').tap();
     const d = p.getByTestId('bid-detail'); await d.waitFor();
     const dt = await d.innerText();
