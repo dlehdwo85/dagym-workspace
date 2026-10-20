@@ -11,6 +11,9 @@ const C = '#7C3AED';
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', shorts: '쇼츠', story: '스토리', video: '생성 영상' };
 const CROSS: Record<string, string> = { facebook: '페이스북', instagram: '인스타그램', threads: '스레드' };
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+/** 묶음 기본 시각(src/lib/mktAuto BUNDLE 과 같음) — 로컬 10/20 보완 ②: 브랜드별로 한 번에 바꿀 수 있음 */
+const BUNDLE_TIMES: Record<string, string> = { feed: '10:00', shorts: '11:00', reels: '12:00', blog: '13:00', story: '18:00' };
+const BUNDLE_KINDS = ['feed', 'shorts', 'reels', 'blog', 'story'];
 const REQ: Record<string, string> = { image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성', topic: '주제 필요' };
 type View = { settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null; aiMonthlyUsd: number | null };
   usage: { weekCredits: number; monthCredits: number; monthVideos: number; monthRegens: number; ai: { usd: number; requests: number }; companyAiUsd: number; companyAiLimitUsd: number }; plans: Record<string, { label: string; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; price: number | null }>;
@@ -22,8 +25,15 @@ export function Automation() {
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 고르기 없음
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '' });
-  const [bundle, setBundle] = useState({ brandId: '', intervalDays: 3, startDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()) });
-  async function addBundle(e: React.FormEvent) { e.preventDefault(); try { const r = await api<{ planned: number }>('/api/marketing/auto/bundle', { body: { ...bundle, brandId: bundle.brandId || null } }); toast.ok(`묶음 규칙 5개 추가 — 앞으로 2주 칸 ${r.planned}개`); reload(); } catch (er: any) { toast.error(er.message); } }
+  // 로컬 10/20 보완: 묶음은 n일마다(+주말 건너뛰기) 또는 요일 지정(월·수·금), 종류별 시각 한 번에
+  const [bundle, setBundle] = useState({ brandId: '', mode: 'interval' as 'interval' | 'weekdays', intervalDays: 3, skipWeekend: true, weekdays: [1, 3, 5] as number[], startDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), times: { ...BUNDLE_TIMES } });
+  async function addBundle(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const body = bundle.mode === 'weekdays' ? { brandId: bundle.brandId || null, weekdays: bundle.weekdays, times: bundle.times } : { brandId: bundle.brandId || null, intervalDays: bundle.intervalDays, startDate: bundle.startDate, skipWeekend: bundle.skipWeekend, times: bundle.times };
+      const r = await api<{ planned: number }>('/api/marketing/auto/bundle', { body }); toast.ok(`묶음 규칙 5개 추가 — 앞으로 2주 칸 ${r.planned}개`); reload();
+    } catch (er: any) { toast.error(er.message); }
+  }
   const [done, setDone] = useState<Record<string, { credits: string; media: { id: string; title: string }[] }>>({});
   const [topics, setTopics] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -107,13 +117,20 @@ export function Automation() {
         {ed && <form onSubmit={addBundle} className="mt-2 flex flex-wrap items-center gap-2 rounded-input border border-violet-200 bg-violet-50/40 p-2 text-sm" data-testid="auto-bundle-form">
           <span className="text-xs font-medium text-violet-800">묶음 규칙 만들기</span>
           <select className={cx(inputCls, 'h-8 !w-auto')} value={bundle.brandId} onChange={(e) => setBundle({ ...bundle, brandId: e.target.value })} aria-label="묶음 브랜드"><option value="">브랜드 없음</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
-          <select className={cx(inputCls, 'h-8 !w-auto')} value={bundle.intervalDays} onChange={(e) => setBundle({ ...bundle, intervalDays: Number(e.target.value) })} aria-label="묶음 주기" data-testid="auto-bundle-interval"><option value={2}>2일마다</option><option value={3}>3일마다</option></select>
-          <input type="date" className={cx(inputCls, 'h-8 !w-auto')} value={bundle.startDate} onChange={(e) => setBundle({ ...bundle, startDate: e.target.value })} aria-label="시작일" />
+          <select className={cx(inputCls, 'h-8 !w-auto')} value={bundle.mode} onChange={(e) => setBundle({ ...bundle, mode: e.target.value as 'interval' | 'weekdays' })} aria-label="묶음 방식" data-testid="auto-bundle-mode"><option value="interval">n일마다</option><option value="weekdays">요일 지정</option></select>
+          {bundle.mode === 'interval' ? <>
+            <select className={cx(inputCls, 'h-8 !w-auto')} value={bundle.intervalDays} onChange={(e) => setBundle({ ...bundle, intervalDays: Number(e.target.value) })} aria-label="묶음 주기" data-testid="auto-bundle-interval"><option value={2}>2일마다</option><option value={3}>3일마다</option></select>
+            <input type="date" className={cx(inputCls, 'h-8 !w-auto')} value={bundle.startDate} onChange={(e) => setBundle({ ...bundle, startDate: e.target.value })} aria-label="시작일" />
+            <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={bundle.skipWeekend} onChange={(e) => setBundle({ ...bundle, skipWeekend: e.target.checked })} data-testid="auto-bundle-skip-weekend" />주말 건너뛰기(다음 평일)</label>
+          </> : <span className="flex flex-wrap items-center gap-1">{DOW.map((d, k) => <button key={d} type="button" onClick={() => setBundle({ ...bundle, weekdays: bundle.weekdays.includes(k) ? bundle.weekdays.filter((x) => x !== k) : [...bundle.weekdays, k].sort() })}
+            className={cx('size-7 rounded-full border text-xs', bundle.weekdays.includes(k) ? 'border-violet-600 bg-violet-600 text-white' : 'border-line bg-white')} aria-pressed={bundle.weekdays.includes(k)} data-testid={`auto-bundle-dow-${k}`}>{d}</button>)}</span>}
+          <span className="flex flex-wrap items-center gap-1 text-xs" data-testid="auto-bundle-times">{BUNDLE_KINDS.map((k) => <label key={k} className="flex items-center gap-0.5">{KIND[k]}<input type="time" className={cx(inputCls, 'h-7 !w-auto px-1')} value={bundle.times[k]} onChange={(e) => setBundle({ ...bundle, times: { ...bundle.times, [k]: e.target.value } })} aria-label={`${KIND[k]} 시각`} data-testid={`auto-bundle-time-${k}`} /></label>)}</span>
           <Button type="submit" size="sm" data-testid="auto-bundle-add">묶음 5개 추가</Button>
         </form>}
+        {ed && bundleGroups(data.rules).map((g) => <BundleTimes key={g.key} bundleKey={g.key} brand={g.brand} rules={g.rules} onDone={reload} />)}
         <ul className="mt-2 divide-y divide-line text-sm">{data.rules.map((r) => (
           <li key={r.id} className={cx('flex flex-wrap items-center gap-2 py-2', !r.active && 'opacity-50')} data-testid="auto-rule">
-            <span className="font-medium">{r.brand ?? '브랜드 없음'}</span><span className="text-xs text-ink-2">{CHANNELS[r.channel as keyof typeof CHANNELS]}{(r.cross_channels ?? []).length ? `+${(r.cross_channels as string[]).map((c) => CROSS[c] ?? c).join('·')}` : ''} · {KIND[r.kind]} · {r.interval_days ? `${r.interval_days}일마다(${r.anchor_date ?? ''}부터)` : (r.weekdays as number[]).map((d) => DOW[d]).join('·')} {r.post_time}{r.topic_hint ? ` · ${r.topic_hint}` : ''}{r.bundle_key && <span className="ml-1 rounded-full bg-violet-50 px-1.5 text-[10px] text-violet-700">묶음</span>}</span>
+            <span className="font-medium">{r.brand ?? '브랜드 없음'}</span><span className="text-xs text-ink-2">{CHANNELS[r.channel as keyof typeof CHANNELS]}{(r.cross_channels ?? []).length ? `+${(r.cross_channels as string[]).map((c) => CROSS[c] ?? c).join('·')}` : ''} · {KIND[r.kind]} · {r.interval_days ? `${r.interval_days}일마다(${r.anchor_date ?? ''}부터${r.skip_weekend ? '·주말 건너뜀' : ''})` : (r.weekdays as number[]).map((d) => DOW[d]).join('·')} {r.post_time}{r.topic_hint ? ` · ${r.topic_hint}` : ''}{r.bundle_key && <span className="ml-1 rounded-full bg-violet-50 px-1.5 text-[10px] text-violet-700">묶음</span>}</span>
             {ed && <span className="ml-auto flex gap-1.5"><Button size="sm" variant="secondary" onClick={async () => { await api(`/api/marketing/auto/rules/${r.id}`, { method: 'PATCH', body: { active: !r.active } }); reload(); }}>{r.active ? '멈춤' : '켜기'}</Button>
               <Button size="sm" variant="secondary" onClick={async () => { if (!confirm('규칙을 지울까요? 아직 제작 안 한 칸도 같이 지워집니다.')) return; await api(`/api/marketing/auto/rules/${r.id}`, { method: 'DELETE' }); reload(); }}>지우기</Button></span>}
           </li>))}{!data.rules.length && <li className="py-2 text-xs text-ink-3">규칙이 없습니다 — 예: 인스타그램 피드 화·목 10:00</li>}</ul>
@@ -178,6 +195,51 @@ export function Automation() {
           <li key={k} className="flex gap-2 py-1"><span className="w-28 shrink-0 text-ink-3">{fmtDateTime(l.created_at)}</span><span className="flex-1 truncate">{l.title ?? '—'}{l.version ? ` v${l.version}` : ''} · {l.note}</span><span className="tabular-nums font-medium">{l.credits}</span></li>))}
           {!data.ledger.length && <li className="py-1 text-ink-3">기록 없음</li>}</ul>
       </section>
+    </div>
+  );
+}
+
+/** 로컬 10/20 보완 ②: 이미 만든 묶음(브랜드별)의 종류별 게시 시각·요일/주기·주말 건너뛰기를 한 번에 */
+function bundleGroups(rules: any[]) {
+  const m = new Map<string, { key: string; brand: string; rules: any[] }>();
+  for (const r of rules) if (r.bundle_key) { const g = m.get(r.bundle_key) ?? { key: r.bundle_key, brand: r.brand ?? '브랜드 없음', rules: [] as any[] }; g.rules.push(r); m.set(r.bundle_key, g); }
+  return [...m.values()];
+}
+function BundleTimes({ bundleKey, brand, rules, onDone }: { bundleKey: string; brand: string; rules: any[]; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const first = rules[0];
+  const [times, setTimes] = useState<Record<string, string>>(Object.fromEntries(BUNDLE_KINDS.map((k) => [k, (rules.find((r) => r.kind === k)?.post_time ?? BUNDLE_TIMES[k]).slice(0, 5)])));
+  const [mode, setMode] = useState<'interval' | 'weekdays'>(first.interval_days ? 'interval' : 'weekdays');
+  const [weekdays, setWeekdays] = useState<number[]>(first.interval_days ? [1, 3, 5] : (first.weekdays as number[]));
+  const [intervalDays, setIntervalDays] = useState<number>(first.interval_days ?? 3);
+  const [skipWeekend, setSkipWeekend] = useState<boolean>(!!first.skip_weekend);
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    try {
+      const body = mode === 'weekdays' ? { bundleKey, times, weekdays } : { bundleKey, times, intervalDays, skipWeekend, weekdays: [] };
+      const r = await api<{ planned: number }>('/api/marketing/auto/bundle', { method: 'PATCH', body }); toast.ok(`${brand} 묶음을 바꿨습니다 — 앞으로 2주 칸 ${r.planned}개`); setOpen(false); onDone();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="mt-2 rounded-input border border-line p-2 text-xs" data-testid="bundle-group" data-brand={brand}>
+      <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open} data-testid="bundle-group-toggle">
+        <span className="rounded-full bg-violet-50 px-1.5 text-[10px] text-violet-700">묶음</span><b>{brand}</b>
+        <span className="text-ink-2">{first.interval_days ? `${first.interval_days}일마다${first.skip_weekend ? '·주말 건너뜀' : ''}` : (first.weekdays as number[]).map((d) => DOW[d]).join('·')} · {BUNDLE_KINDS.map((k) => `${KIND[k]} ${(rules.find((r) => r.kind === k)?.post_time ?? '').slice(0, 5)}`).join(' · ')}</span>
+        <span className="ml-auto text-violet-700">{open ? '닫기' : '시각·요일 한 번에 바꾸기'}</span>
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="bundle-edit">
+          <select className={cx(inputCls, 'h-7 !w-auto')} value={mode} onChange={(e) => setMode(e.target.value as 'interval' | 'weekdays')} aria-label="묶음 방식"><option value="interval">n일마다</option><option value="weekdays">요일 지정</option></select>
+          {mode === 'interval' ? <>
+            <select className={cx(inputCls, 'h-7 !w-auto')} value={intervalDays} onChange={(e) => setIntervalDays(Number(e.target.value))} aria-label="주기"><option value={2}>2일마다</option><option value={3}>3일마다</option></select>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={skipWeekend} onChange={(e) => setSkipWeekend(e.target.checked)} data-testid="bundle-skip-weekend" />주말 건너뛰기</label>
+          </> : <span className="flex flex-wrap items-center gap-1">{DOW.map((d, k) => <button key={d} type="button" onClick={() => setWeekdays(weekdays.includes(k) ? weekdays.filter((x) => x !== k) : [...weekdays, k].sort())}
+            className={cx('size-6 rounded-full border text-[11px]', weekdays.includes(k) ? 'border-violet-600 bg-violet-600 text-white' : 'border-line bg-white')} aria-pressed={weekdays.includes(k)} data-testid={`bundle-dow-${k}`}>{d}</button>)}</span>}
+          {BUNDLE_KINDS.map((k) => <label key={k} className="flex items-center gap-0.5">{KIND[k]}<input type="time" className={cx(inputCls, 'h-7 !w-auto px-1')} value={times[k]} onChange={(e) => setTimes({ ...times, [k]: e.target.value })} aria-label={`${KIND[k]} 시각`} data-testid={`bundle-time-${k}`} /></label>)}
+          <Button size="sm" onClick={save} disabled={busy} data-testid="bundle-save">저장(제작 전 칸도 옮김)</Button>
+        </div>
+      )}
     </div>
   );
 }
