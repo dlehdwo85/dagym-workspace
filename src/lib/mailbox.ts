@@ -290,6 +290,27 @@ async function inquiryContact(taskId: string, sql: Sql) {
   return { name: p.name ?? null, email: typeof p.email === 'string' && /@/.test(p.email) ? p.email : null, phone: p.phone ?? null, organization: q.organization, site: q.site };
 }
 
+/** 대표 05:20 ②: 받는 사람 자동 채움 후보 — 문의자 → 업무에 연결된 연락처 → 리드 → 업무 설명에 적힌 이메일·전화 순. 첫 값을 채우고 나머지는 제안 칩 */
+export type Candidate = { value: string; label: string; source: 'inquiry' | 'contact' | 'lead' | 'description' };
+async function recipientCandidates(taskId: string, contact: Awaited<ReturnType<typeof inquiryContact>>, sql: Sql) {
+  const emails: Candidate[] = []; const phones: Candidate[] = [];
+  const seenE = new Set<string>(); const seenP = new Set<string>();
+  const addE = (v: string | null | undefined, label: string, source: Candidate['source']) => { const x = String(v ?? '').trim().toLowerCase(); if (!x || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x) || seenE.has(x)) return; seenE.add(x); emails.push({ value: x, label, source }); };
+  const addP = (v: string | null | undefined, label: string, source: Candidate['source']) => { const d = String(v ?? '').replace(/\D/g, ''); if (d.length < 9 || d.length > 12 || seenP.has(d)) return; seenP.add(d); phones.push({ value: d.length === 11 ? `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}` : String(v).trim(), label, source }); };
+  if (contact) { addE(contact.email, `문의자${contact.name ? ` ${contact.name}` : ''}`, 'inquiry'); addP(contact.phone, `문의자${contact.name ? ` ${contact.name}` : ''}`, 'inquiry'); }
+  const linked = await sql<{ name: string; organization: string | null; email: string | null; phone: string | null }[]>`select c.name, c.organization, c.email, c.phone from contacts c join contact_tasks ct on ct.contact_id = c.id where ct.task_id = ${taskId} and c.deleted_at is null order by ct.linked_at`;
+  for (const c of linked) { const l = `연락처 ${c.name}${c.organization ? `(${c.organization})` : ''}`; addE(c.email, l, 'contact'); addP(c.phone, l, 'contact'); }
+  const [task] = await sql<{ description: string | null; lead_id: string | null }[]>`select description, lead_id from tasks where id = ${taskId}`;
+  if (task?.lead_id) {
+    const [lead] = await sql<{ name: string; contact_name: string | null; email: string | null; phone: string | null }[]>`select name, contact_name, email, phone from sales_leads where id = ${task.lead_id}`;
+    if (lead) { const l = `리드 ${lead.name}${lead.contact_name ? ` · ${lead.contact_name}` : ''}`; addE(lead.email, l, 'lead'); addP(lead.phone, l, 'lead'); }
+  }
+  const desc = String(task?.description ?? '');
+  for (const m of desc.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) ?? []) addE(m, '업무 설명', 'description');
+  for (const m of desc.match(/0\d{1,2}[-. ]?\d{3,4}[-. ]?\d{4}/g) ?? []) addP(m, '업무 설명', 'description');
+  return { emails: emails.slice(0, 6), phones: phones.slice(0, 6) };
+}
+
 /** 업무의 메일 시안 기본값 + 보낼 수 있는 첨부 + 이 업무 발송 기록 */
 export async function mailContext(u: SessionUser, taskId: string) {
   const { task } = await loadTaskForMail(u, taskId);
@@ -297,9 +318,10 @@ export async function mailContext(u: SessionUser, taskId: string) {
   const [profiles, account, contact, me, atts, history] = await Promise.all([
     companyProfiles(t, sql) as Promise<SigProfile[]>,
     loadAccount(t, sql), inquiryContact(taskId, sql), sender(u.id, sql),
-    sql`select id, file_name, mime_type, size_bytes, doc_title, storage_key from attachments where task_id = ${taskId} and kind = 'file' and deleted_at is null and upload_status = 'ready' order by created_at`,
+    sql`select id, file_name, mime_type, size_bytes, doc_title, storage_key, source from attachments where task_id = ${taskId} and kind = 'file' and deleted_at is null and upload_status = 'ready' order by created_at`,
     taskOutbox(taskId, sql),
   ]);
+  const candidates = await recipientCandidates(taskId, contact, sql);
   const sigs = await Promise.all(profiles.map(async (p) => ({ key: p.key, name: p.name, isDefault: p.is_default, html: signatureHtml(p, me), smsLine: smsSignLine(p, me) })));
   // 문의 사이트에 맞는 회사(하이링크 문의 → hilink)가 있으면 그 회사, 아니면 기본 회사
   const guess = contact?.site && profiles.some((p) => p.key === contact.site) ? contact.site : (profiles.find((p) => p.is_default) ?? profiles[0])?.key ?? null;
@@ -309,10 +331,10 @@ export async function mailContext(u: SessionUser, taskId: string) {
     defaults: { fromName: defaultFromName(me, (profiles.find((p) => p.key === guess) ?? profiles[0])?.name ?? ''), replyTo: me.workEmail || account?.from_email || u.email },
     replyToEditable: await replyToEditable(u, sql),
     kinds: Object.entries(MAIL_KINDS).map(([k, v]) => ({ key: k, ...v })), companies: sigs, company: guess,
-    to: contact?.email ? [contact.email] : [], contact, me: { name: me.name, title: me.title, phone: me.phone, email: me.email, workEmail: me.workEmail },
-    // V34 C1: 기밀·자료실에서 지운 첨부는 외부 발송 목록에서 뺀다
-    attachments: (await Promise.all(atts.map(async (a: any) => { const sec = await (await import('./library')).storageSecurity(t, a.storage_key); return sec?.deleted || sec?.security === 'confidential' ? null : a; })))
-      .filter(Boolean).map((a: any) => ({ id: a.id, name: a.file_name, size: Number(a.size_bytes), mime: a.mime_type, title: a.doc_title })),
+    to: candidates.emails[0] ? [candidates.emails[0].value] : [], phone: candidates.phones[0]?.value ?? null, candidates, contact, me: { name: me.name, title: me.title, phone: me.phone, email: me.email, workEmail: me.workEmail },
+    // V34 C1: 기밀·자료실에서 지운 첨부는 외부 발송 불가 — 대표 05:20 ①: 목록에서 조용히 빼지 않고 '왜 못 보내는지'와 함께 보여 준다(자료실 연결 첨부는 출처 '자료실' 배지)
+    attachments: (await Promise.all(atts.map(async (a: any) => { const sec = await (await import('./library')).storageSecurity(t, a.storage_key); const blocked = sec?.deleted ? 'deleted' : sec?.security === 'confidential' ? 'confidential' : null;
+      return { id: a.id, name: a.file_name, size: Number(a.size_bytes), mime: a.mime_type, title: a.doc_title, source: a.source ?? 'upload', blocked }; }))),
     linkThresholdBytes: LINK_THRESHOLD, history, taskTitle: task.title,
   };
 }

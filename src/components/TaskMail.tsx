@@ -10,14 +10,15 @@ import { uploadTaskFiles } from './Attachments';
 import type { AssistDraft } from './TaskAssist';
 import { KakaoSend } from './KakaoSend';
 
+type Cand = { value: string; label: string; source: 'inquiry' | 'contact' | 'lead' | 'description' }; // 대표 05:20 ②
 type Ctx = {
   canSend: boolean; account: { fromEmail: string; fromName: string | null } | null;
   channel: 'email:smtp' | 'email:workin' | null; workinFrom: string | null; defaults: { fromName: string; replyTo: string }; replyToEditable?: boolean;
   kinds: { key: string; label: string; subject: string; body: string }[];
   companies: { key: string; name: string; isDefault: boolean; html: string; smsLine: string }[]; company: string | null;
-  to: string[]; contact: { name: string | null; email: string | null; phone: string | null; organization: string | null } | null;
+  to: string[]; phone?: string | null; candidates?: { emails: Cand[]; phones: Cand[] }; contact: { name: string | null; email: string | null; phone: string | null; organization: string | null } | null;
   me: { name: string; title: string | null; phone: string | null; email: string; workEmail: string | null };
-  attachments: { id: string; name: string; size: number; mime: string }[]; linkThresholdBytes: number; taskTitle: string;
+  attachments: { id: string; name: string; size: number; mime: string; source?: string; blocked?: 'deleted' | 'confidential' | null }[]; linkThresholdBytes: number; taskTitle: string;
 };
 type Item = { id: string; channel: string; preview: string | null; status: string; to_addrs: string[]; subject: string; files: { name: string }[]; as_link: boolean; attempts: number; last_error: string | null;
   error_kind: string | null; sent_at: string | null; created_at: string; next_attempt_at: string; sender_name: string; first_opened_at: string | null; scheduled_at?: string | null; created_by?: string };
@@ -131,11 +132,11 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   useEffect(() => {
     if (!d || f) return;
     const k = d.kinds[d.kinds.length - 1];
-    const okFiles = (initial?.attachmentIds ?? []).filter((id) => d.attachments.some((a) => a.id === id));
+    const okFiles = (initial?.attachmentIds ?? []).filter((id) => d.attachments.some((a) => a.id === id && !a.blocked));
     setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: d.to.join(', '), cc: '', bcc: '', fromName: d.defaults?.fromName ?? '', replyTo: d.defaults?.replyTo ?? '', more: false,
       subject: initial?.channel === 'email' && initial.subject ? initial.subject : `${k.subject}${d.contact?.organization ? ` — ${d.contact.organization}` : ''}`,
       body: initial?.channel === 'email' && initial.body ? initial.body : k.body, files: okFiles, title: '', phone: '', workEmail: '' });
-    if (initial?.channel === 'sms') setSms({ to: d.contact?.phone ?? '', body: initial.body });
+    if (initial?.channel === 'sms') setSms({ to: d.phone ?? d.contact?.phone ?? '', body: initial.body });
   }, [d, f]);
   const sig = d?.companies.find((c) => c.key === f?.company);
   const total = useMemo(() => (d && f ? d.attachments.filter((a) => f.files.includes(a.id)).reduce((s, a) => s + a.size, 0) + libFiles.reduce((s, a) => s + a.size, 0) : 0), [d, f, libFiles]);
@@ -226,7 +227,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           <div className="mr-2 flex rounded-input border border-line p-0.5 text-sm" role="tablist" aria-label="보내는 방법">
             {([['email', '메일', Mail], ['sms', '문자', MessageSquare], ['kakao', '카카오톡', MessageCircle]] as const).map(([k, l, I]) => (
               <button key={k} type="button" role="tab" aria-selected={channel === k} data-testid={`mail-channel-${k}`}
-                onClick={() => { setChannel(k); if (k === 'sms' && !sms.body.trim()) setSms({ to: sms.to || (d!.contact?.phone ?? ''), body: plainOf(f.body) }); /* 대표 지적(10/19): 문자도 메일 시안 본문을 그대로 넣음 */ if (k === 'kakao' && !kakao) setKakao(sms.body || f.body.replace(/<[^>]+>/g, '').slice(0, 1000)); }}
+                onClick={() => { setChannel(k); if (k === 'sms' && !sms.body.trim()) setSms({ to: sms.to || d!.phone || (d!.contact?.phone ?? ''), body: plainOf(f.body) }); /* 대표 지적(10/19): 문자도 메일 시안 본문을 그대로 넣음 */ if (k === 'kakao' && !kakao) setKakao(sms.body || f.body.replace(/<[^>]+>/g, '').slice(0, 1000)); }}
                 className={cx('inline-flex items-center gap-1 rounded-md px-2.5 py-1', channel === k ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}><I className="size-4" />{l}</button>
             ))}
           </div>
@@ -252,6 +253,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           <div className="grid gap-2 text-sm" data-testid="sms-pane">
             <p className="text-ink-2">내 휴대폰 문자앱으로 넘겨서 <b>내 번호로</b> 보냅니다. 첨부를 고르면 14일 다운로드 링크가 들어갑니다.</p>
             <Field label="받는 사람 전화번호 (여러 명은 쉼표)"><SuggestInput value={sms.to} onChange={(v) => setSms({ ...sms, to: v })} kind="phone" multi taskId={taskId} testId="sms-to" placeholder="이름·회사·번호를 치면 회사 연락처에서 찾습니다" /></Field>
+            <CandChips items={d.candidates?.phones ?? []} current={sms.to} onPick={(v) => setSms({ ...sms, to: [sms.to, v].filter((x) => x.trim()).join(', ') })} testId="sms-to-cand" />
             <Field label="문자 내용"><textarea className={inputCls} rows={4} value={sms.body} onChange={(e) => setSms({ ...sms, body: e.target.value })} data-testid="sms-body" /></Field>
             {(() => { const b = smsBytes([sms.body.trim(), smsLine].filter(Boolean).join('\n\n')); return (
               <p className={cx('-mt-1 flex flex-wrap items-center gap-2 text-xs', b > 2000 ? 'text-red-700' : 'text-ink-3')} data-testid="sms-bytes">
@@ -275,6 +277,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
               <Field label="숨은 참조"><AddrChips value={f.bcc} onChange={(v) => set({ bcc: v })} testId="mail-bcc" /></Field>
             </div>
           )}
+          <CandChips items={d.candidates?.emails ?? []} current={f.to} onPick={(v) => set({ to: [f.to, v].filter((x) => x.trim()).join(', ') })} testId="mail-to-cand" />
           <Field label="받는 사람"><AddrChips value={f.to} onChange={(v) => set({ to: v })} placeholder="고객 메일 주소 — 이름·회사를 치면 회사 연락처에서 찾습니다" testId="mail-to" warn={!f.to.trim()} taskId={taskId} /></Field>
           {!f.to.trim() && <p className="-mt-1 flex items-center gap-1 text-xs font-medium text-amber-700" data-testid="mail-to-missing"><AlertTriangle className="size-3.5" />받는 사람 이메일이 없습니다{d.contact ? ' (문의에 이메일 없음)' : ''} — 고객 메일 주소를 입력해 주세요</p>}
           <Field label="참조"><AddrChips value={f.cc} onChange={(v) => set({ cc: v })} testId="mail-cc" /></Field>
@@ -305,9 +308,9 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           {d.attachments.length === 0 ? (!libFiles.length && <p className="text-xs text-ink-3">이 업무에 첨부가 없습니다.</p>) : (
             <ul className="grid gap-1 sm:grid-cols-2" data-testid="mail-files">
               {d.attachments.map((a) => (
-                <li key={a.id}><label className="flex items-center gap-2 rounded-input border border-line px-2 py-1 text-sm hover:bg-slate-50">
-                  <input type="checkbox" checked={f.files.includes(a.id)} onChange={(e) => set({ files: e.target.checked ? [...f.files, a.id] : f.files.filter((x) => x !== a.id) })} />
-                  <span className="min-w-0 flex-1 truncate">{a.name}</span><span className="text-xs tabular-nums text-ink-3">{mb(a.size)}</span></label></li>
+                <li key={a.id} data-testid="mail-file" data-source={a.source ?? 'upload'} data-blocked={a.blocked ?? undefined}><label className={cx('flex items-center gap-2 rounded-input border border-line px-2 py-1 text-sm', a.blocked ? 'opacity-60' : 'hover:bg-slate-50')} title={a.blocked === 'confidential' ? '기밀 자료는 메일·문자로 보낼 수 없습니다(자료실 폴더·이름 규칙)' : a.blocked === 'deleted' ? '자료실에서 지워진 파일' : undefined}>
+                  <input type="checkbox" checked={f.files.includes(a.id)} disabled={!!a.blocked} onChange={(e) => set({ files: e.target.checked ? [...f.files, a.id] : f.files.filter((x) => x !== a.id) })} />
+                  <span className="min-w-0 flex-1 truncate">{a.name}</span>{a.source === 'library' && <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-ink-3">자료실</span>}{a.blocked && <span className="rounded-full bg-red-50 px-1.5 text-[10px] text-red-700">{a.blocked === 'confidential' ? '기밀 — 발송 불가' : '자료실에서 지워짐'}</span>}<span className="text-xs tabular-nums text-ink-3">{mb(a.size)}</span></label></li>
               ))}
             </ul>
           )}
@@ -435,6 +438,16 @@ export function fitBytes(s: string, max: number) {
 }
 const plainOf = (html: string) => html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 /** 받는 사람 입력: 스페이스·엔터·쉼표·세미콜론·붙여넣기 → 칩, 칩마다 형식 검사(틀리면 빨강), 빈 칸에서 백스페이스 = 마지막 칩 지우기, 직원·고객 주소 자동 완성 */
+/** 대표 05:20 ②: 자동 채움 후보(문의자·연락처·리드·업무 설명) — 아직 안 들어간 값만 칩으로, 누르면 받는 사람에 추가 */
+function CandChips({ items, current, onPick, testId }: { items: Cand[]; current: string; onPick: (v: string) => void; testId: string }) {
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9@.+]/g, '');
+  const have = new Set(current.split(/[\s,;]+/).map(norm).filter(Boolean));
+  const rest = items.filter((c) => !have.has(norm(c.value)));
+  if (!rest.length) return null;
+  const SRC: Record<Cand['source'], string> = { inquiry: '문의자', contact: '연락처', lead: '리드', description: '업무 설명' };
+  return <div className="-mb-1 flex flex-wrap items-center gap-1 text-[11px]" data-testid={testId}><span className="text-ink-3">제안:</span>
+    {rest.map((c) => <button key={c.value} type="button" onClick={() => onPick(c.value)} className="rounded-full border border-line bg-white px-2 py-0.5 hover:bg-slate-50" title={c.label} data-testid={`${testId}-chip`}>{c.value} <span className="text-ink-3">{c.source === 'description' ? SRC[c.source] : c.label.startsWith(SRC[c.source]) ? c.label : `${SRC[c.source]} ${c.label}`}</span></button>)}</div>;
+}
 function AddrChips({ value, onChange, testId, placeholder, warn, taskId }: { value: string; onChange: (v: string) => void; testId: string; placeholder?: string; warn?: boolean; taskId?: string | null }) {
   const [focus, setFocus] = useState(false);
   const [chips, setChips] = useState<string[]>(() => splitAddrs(value));
