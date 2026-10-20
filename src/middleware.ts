@@ -8,9 +8,7 @@ function isApp(ua: string) {
 
 /** V15: 로그인 안 한 사람이 첫 주소(/)로 오면 소개(랜딩) 화면. 로그인한 사람은 홈, 앱은 지금처럼 로그인 화면 */
 export function middleware(req: NextRequest) {
-  // 소개 사이트(대표 10/20 16:45): www.work-in.dev → work-in.dev (주소 하나로)
-  const host = req.headers.get('host') ?? '';
-  if (/^www\.work-in\.dev$/i.test(host)) { const u = new URL(req.url); u.host = 'work-in.dev'; u.protocol = 'https:'; return NextResponse.redirect(u, 308); }
+  // 도메인 방향(www ↔ apex)은 코드가 아니라 Vercel 도메인 설정에서만 정한다 — 10/20 20:40 양방향 308 루프 롤백(28ce95f)
   if (req.nextUrl.pathname === '/' && !req.cookies.get('wos_session')?.value && !req.headers.get('authorization') && !isApp(req.headers.get('user-agent') ?? '')) {
     return NextResponse.rewrite(new URL('/welcome', req.url));
   }
@@ -21,4 +19,4 @@ export function middleware(req: NextRequest) {
   }
   return NextResponse.next();
 }
-export const config = { matcher: ['/', '/s/:path*', '/welcome', '/login', '/signup'] };
+export const config = { matcher: ['/', '/s/:path*'] };

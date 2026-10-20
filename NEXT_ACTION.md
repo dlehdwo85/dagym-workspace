@@ -1356,7 +1356,7 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - `/`(로그인 전, 앱 아님) = 새 랜딩 `src/app/welcome/page.tsx`: H1 "업무도, 영업도, 마케팅도 한 화면에서" · "5명까지 무료 · 카드 등록 없음" · [무료로 시작](/signup) · [앱 다운로드](#app: Google Play 링크, App Store 는 `NEXT_PUBLIC_APPSTORE_URL` 넣기 전까지 '심사 중') · 홈 그림 · 특징 4 · 세 공간(업무·영업·마케팅, 그림 + 핵심 3줄) · AI 비서(예시 대화 3) · 도입 3단계 · 요금(5명 무료 카드 하나, 6명 이상은 문의) · 앱 · 문의(dagym-in@naver.com, `COMPANY_PHONE` 있으면 전화 버튼) · 푸터(사업자 정보 + 이용약관·개인정보·계정 삭제·AI 안내).
 - 검색·공유: JSON-LD(Organization + SoftwareApplication, 무료), OG/Twitter(`/landing/og.png` 1200×630, `NEXT_PUBLIC_SITE_URL` 기본 https://work-in.dev), 랜딩만 `robots index` (앱은 noindex 그대로), `public/robots.txt` 공개 화면만 허용, `/sitemap.xml`.
 - 이벤트: UTM 첫 방문 30일 기억(가입 회사에 남음, 기존) · GA4 설정돼 있으면 랜딩 페이지 보기 + 버튼 클릭(`landing_cta`: start/app/play/mail, `tel`) · 가입 완료 sign_up/CompleteRegistration 은 가입 화면 동의 브라우저만(기존) · 전화 클릭 Meta Contact 는 광고 동의 있을 때만. 업무 화면엔 태그 없음.
-- `www.work-in.dev` → `work-in.dev` 308(middleware). 도메인 연결·DNS·Vercel 도메인 추가는 로컬.
+- 도메인 방향(www ↔ apex)은 코드에 두지 않는다(10/20 20:40 Vercel 의 apex→www 와 코드의 www→apex 가 맞물려 ERR_TOO_MANY_REDIRECTS → 운영 26273ed 로 되돌림 → 리다이렉트 제거). 지금 주 도메인 = www.work-in.dev, 사이트 주소 기본값도 www(`NEXT_PUBLIC_SITE_URL` 로 변경). 도메인 연결·DNS·주 도메인 결정은 로컬·대표.
 - 그림: `node tests/e2e/landing-shots.mjs`(빌드 뒤) — 샘플 회사(실제 데이터 아님)로 홈·업무·캘린더·영업 홈·마케팅 홈·OG 를 `public/landing/` 에 다시 만든다. site-v2 사진이 비공개 저장소에 있으면 로컬이 같은 이름으로 바꿔 넣으면 됨.
 
 ## 2026-10-20 영업 S2 2차 — 리드 폼·상세·목록·제안·계약·ROI (감사 1-13~1-16) [배포확인요청] (migration 131)
