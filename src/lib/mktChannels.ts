@@ -18,11 +18,11 @@ import { tenantOf, type SessionUser } from './types';
  * - 토큰은 암호화해서만 저장, 화면·API 응답에 내보내지 않음. 연결 끊기 = 행 삭제(토큰 즉시 삭제). Meta 데이터 삭제 콜백도 같은 처리.
  */
 export type ChannelKey = 'instagram' | 'facebook' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'linkedin' | 'pinterest' | 'naver_blog' | 'kakao_channel' | 'naver_place';
-type Kind = 'meta' | 'google' | 'tiktok' | 'later' | 'helper';
+type Kind = 'meta' | 'threads' | 'google' | 'tiktok' | 'later' | 'helper';
 export const PUBLISH_CHANNELS: { key: ChannelKey; label: string; kind: Kind; providers: string[]; note: string; on: boolean }[] = [
   { key: 'instagram', label: '인스타그램', kind: 'meta', providers: ['meta_ig'], note: '비즈니스·크리에이터 계정 + 페이스북 페이지 연결 필요', on: true },
   { key: 'facebook', label: '페이스북 페이지', kind: 'meta', providers: ['meta_fb'], note: '페이지 관리자 권한 필요', on: true },
-  { key: 'threads', label: '스레드', kind: 'meta', providers: ['meta_threads'], note: '인스타그램 계정으로 쓰는 스레드', on: false },
+  { key: 'threads', label: '스레드', kind: 'threads', providers: ['meta_threads'], note: '인스타그램 계정으로 쓰는 스레드(별도 [연결])', on: false },
   { key: 'youtube', label: '유튜브', kind: 'google', providers: ['youtube'], note: '쇼츠·영상 업로드(Google 계정)', on: false },
   { key: 'tiktok', label: '틱톡', kind: 'tiktok', providers: ['tiktok'], note: '감사 통과 전에는 비공개로만 올라감', on: false },
   { key: 'x', label: 'X(트위터)', kind: 'later', providers: [], note: '후순위', on: false },
@@ -38,11 +38,21 @@ const FB_DIALOG = () => (T() ? `${T()}/fbdialog` : 'https://www.facebook.com/v21
 // 페이지 목록·인스타 연결 확인·게시에 필요한 권한(제출 직전 Meta 문서로 다시 확인 — MKT_PUBLISHING_DESIGN.md)
 export const META_PUBLISH_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'instagram_basic', 'instagram_content_publish', 'business_management'];
 const metaReady = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET);
-const kindReady = (k: Kind) => (k === 'meta' ? metaReady() : false); // Google(유튜브)·틱톡은 다음 단계(별도 클라이언트·감사 자료 준비 중)
+// 대표 10/20 22:30 ② M1: 스레드(Threads API 앱)·유튜브(로그인용과 다른 Google 클라이언트, youtube.upload) 연결 — env 가 들어오면 [연결] 열림. 틱톡은 다음 단계
+const threadsReady = () => !!(process.env.THREADS_APP_ID && process.env.THREADS_APP_SECRET);
+const ytReady = () => !!(process.env.YT_CLIENT_ID && process.env.YT_CLIENT_SECRET);
+const kindReady = (k: Kind) => (k === 'meta' ? metaReady() : k === 'threads' ? threadsReady() : k === 'google' ? ytReady() : false);
+const THREADS_SCOPES = ['threads_basic', 'threads_content_publish'];
+const YT_SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly'];
+const THREADS_API = () => (T() ? `${T()}/threads` : 'https://graph.threads.net');
+const THREADS_AUTH = () => (T() ? `${T()}/threadsauth` : 'https://threads.net/oauth/authorize');
+const GOOGLE_AUTH = () => (T() ? `${T()}/goauth/auth` : 'https://accounts.google.com/o/oauth2/v2/auth');
+const GOOGLE_TOKEN = () => (T() ? `${T()}/goauth/token` : 'https://oauth2.googleapis.com/token');
+const YT_API = () => (T() ? `${T()}/yt` : 'https://www.googleapis.com/youtube/v3');
 const metaLive = () => process.env.META_PUBLISH_LIVE === '1';
 // Meta 앱이 개발 모드면 앱 역할(개발자·테스터)에 등록된 Facebook 계정만 연결됨 — 라이브 전환 후 META_APP_LIVE_MODE=1
 const metaDevMode = () => process.env.META_APP_LIVE_MODE !== '1';
-const callback = () => `${appUrl()}/api/marketing/publish/callback/meta`;
+const callback = (p = 'meta') => `${appUrl()}/api/marketing/publish/callback/${p}`;
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('게시 채널 연결은 관리자가 합니다'); }
 
 async function getJson(url: string) {
@@ -69,7 +79,7 @@ export async function listChannels(u: SessionUser) {
     channels: PUBLISH_CHANNELS.map((c) => {
       const accounts = accs.filter((a) => c.providers.includes(a.provider)).map((a) => ({ id: a.id, provider: a.provider, label: a.label, status: a.status, lastError: a.last_error, warnings: (a.info?.warnings ?? []) as string[] }));
       // 운영 방식: 도우미(사람이 올리고 [게시 확인]) / 자동(심사 통과 + 연결됨)
-      const mode = c.kind === 'meta' && metaLive() && accounts.length ? 'auto' : c.kind === 'later' ? 'later' : 'helper';
+      const mode = ['meta', 'threads', 'google'].includes(c.kind) && accounts.length ? 'auto' : c.kind === 'later' ? 'later' : 'helper'; // M1: 연결되면 서버 게시(개발 모드 앱은 앱 역할 계정만)
       return { key: c.key, label: c.label, note: c.note, kind: c.kind, enabled: sets.get(c.key) ?? c.on, connectable: c.kind !== 'helper' && c.kind !== 'later', ready: kindReady(c.kind), mode, accounts };
     }),
     // 기술 정보는 플랫폼 관리자(슈퍼 계정)에게만 — 고객 화면에는 숨김
@@ -88,9 +98,19 @@ export async function setChannel(u: SessionUser, i: z.infer<typeof channelToggle
 /** [연결] 시작 — 지금은 Meta(페이스북 페이지 + 인스타 비즈니스 한 번에)만. 앱 ID 가 없으면 409 + 쉬운 안내 */
 export async function publishConnectStart(u: SessionUser, provider: string) {
   await assertSpace(u, 'marketing'); adminOnly(u);
-  if (provider !== 'meta') throw notFound();
-  if (!metaReady()) throw new HttpError(409, 'publish_not_ready', '인스타그램·페이스북 연결은 곧 열립니다. 그동안은 게시 도우미로 올려 주세요');
+  if (!['meta', 'threads', 'youtube'].includes(provider)) throw notFound();
   const state = newToken(24);
+  if (provider === 'threads') {
+    if (!threadsReady()) throw new HttpError(409, 'publish_not_ready', '스레드 연결은 곧 열립니다(Threads 앱 심사). 그동안은 게시 도우미로 올려 주세요');
+    await db()`insert into mkt_ad_oauth_states (state, user_id, tenant, provider) values (${state}, ${u.id}, ${tenantOf(u)}, 'threads_publish')`;
+    return `${THREADS_AUTH()}?${new URLSearchParams({ client_id: process.env.THREADS_APP_ID!, redirect_uri: callback('threads'), state, scope: THREADS_SCOPES.join(','), response_type: 'code' })}`;
+  }
+  if (provider === 'youtube') {
+    if (!ytReady()) throw new HttpError(409, 'publish_not_ready', '유튜브 연결은 곧 열립니다(Google 동의 화면 검증). 그동안은 게시 도우미로 올려 주세요');
+    await db()`insert into mkt_ad_oauth_states (state, user_id, tenant, provider) values (${state}, ${u.id}, ${tenantOf(u)}, 'youtube_publish')`;
+    return `${GOOGLE_AUTH()}?${new URLSearchParams({ client_id: process.env.YT_CLIENT_ID!, redirect_uri: callback('youtube'), state, scope: YT_SCOPES.join(' '), response_type: 'code', access_type: 'offline', prompt: 'consent', include_granted_scopes: 'false' })}`;
+  }
+  if (!metaReady()) throw new HttpError(409, 'publish_not_ready', '인스타그램·페이스북 연결은 곧 열립니다. 그동안은 게시 도우미로 올려 주세요');
   await db()`insert into mkt_ad_oauth_states (state, user_id, tenant, provider) values (${state}, ${u.id}, ${tenantOf(u)}, 'meta_publish')`;
   return `${FB_DIALOG()}?${new URLSearchParams({ client_id: process.env.META_APP_ID!, redirect_uri: callback(), state, scope: META_PUBLISH_SCOPES.join(','), response_type: 'code' })}`;
 }
@@ -104,6 +124,7 @@ const META_HINT = {
 
 /** 콜백: 코드 → 사용자 토큰(장기) → 관리하는 페이지(+ 연결된 인스타) 등록. 안 된 항목은 쉬운 안내로 warnings 에 */
 export async function publishConnectCallback(u: SessionUser, provider: string, code: string, state: string) {
+  if (provider === 'threads' || provider === 'youtube') return connectCallbackOther(u, provider, code, state);
   if (provider !== 'meta') throw notFound();
   const sql = db();
   const [st] = await sql`delete from mkt_ad_oauth_states where state = ${state} and created_at > now() - interval '15 minutes' returning user_id, tenant, provider`;
@@ -143,6 +164,43 @@ export async function publishConnectCallback(u: SessionUser, provider: string, c
   const ig = found.filter((f) => f.provider === 'meta_ig').length, fb = found.filter((f) => f.provider === 'meta_fb').length;
   await audit(sql, u.id, 'mkt_publish.connect', 'mkt_publish_account', null, { provider: 'meta', pages: fb, instagram: ig }).catch(() => {});
   return { pages: fb, instagram: ig, warnings: found.reduce((n, f) => n + f.warnings.length, general.length) };
+}
+
+/** 스레드(Threads API, 장기 토큰 60일 → tick 갱신) · 유튜브(refresh token, 채널 1개) 콜백 */
+async function connectCallbackOther(u: SessionUser, provider: 'threads' | 'youtube', code: string, state: string) {
+  const sql = db();
+  const [st] = await sql`delete from mkt_ad_oauth_states where state = ${state} and created_at > now() - interval '15 minutes' returning user_id, tenant, provider`;
+  if (!st || st.user_id !== u.id || st.provider !== `${provider}_publish` || st.tenant !== tenantOf(u)) throw badRequest('연결 요청이 만료됐습니다. 다시 시도해 주세요');
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const form = async (url: string, body: Record<string, string>) => { const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body), signal: AbortSignal.timeout(20000) }); const j: any = await r.json().catch(() => ({})); if (!r.ok) throw new HttpError(502, 'publish_upstream', `${provider} 토큰 오류 ${r.status} ${String(j?.error_message ?? j?.error_description ?? j?.error ?? '').slice(0, 200)}`); return j; };
+  try {
+    if (provider === 'threads') {
+      if (!threadsReady()) throw new HttpError(409, 'publish_not_ready', '연결이 아직 열리지 않았습니다');
+      const short = await form(`${THREADS_API()}/oauth/access_token`, { client_id: process.env.THREADS_APP_ID!, client_secret: process.env.THREADS_APP_SECRET!, grant_type: 'authorization_code', redirect_uri: callback('threads'), code });
+      const long = await getJson(`${THREADS_API()}/access_token?${new URLSearchParams({ grant_type: 'th_exchange_token', client_secret: process.env.THREADS_APP_SECRET!, access_token: String(short.access_token) })}`).catch(() => null);
+      const tk = String(long?.access_token ?? short.access_token); const exp = new Date(Date.now() + Number(long?.expires_in ?? 3600) * 1000).toISOString();
+      const me = await getJson(`${THREADS_API()}/v1.0/me?${new URLSearchParams({ fields: 'id,username', access_token: tk })}`);
+      const id = String(me?.id ?? short.user_id); const label = `@${String(me?.username ?? id)}`.slice(0, 60);
+      await sql`insert into mkt_publish_accounts (tenant, provider, external_id, label, token_enc, scopes, expires_at, status, last_error, created_by, owner_ext_id, info)
+        values (${tenantOf(u)}, 'meta_threads', ${id}, ${label}, ${encrypt(tk)}, ${THREADS_SCOPES}, ${exp}, 'active', null, ${u.id}, ${id}, ${sql.json({ warnings: [] } as never)})
+        on conflict (tenant, provider, external_id) do update set label = excluded.label, token_enc = excluded.token_enc, scopes = excluded.scopes, expires_at = excluded.expires_at, status = 'active', last_error = null, owner_ext_id = excluded.owner_ext_id, info = excluded.info`;
+      await audit(sql, u.id, 'mkt_publish.connect', 'mkt_publish_account', null, { provider: 'threads', account: label }).catch(() => {});
+      return { pages: 0, instagram: 0, threads: 1, youtube: 0, warnings: 0 };
+    }
+    if (!ytReady()) throw new HttpError(409, 'publish_not_ready', '연결이 아직 열리지 않았습니다');
+    const tok = await form(GOOGLE_TOKEN(), { client_id: process.env.YT_CLIENT_ID!, client_secret: process.env.YT_CLIENT_SECRET!, grant_type: 'authorization_code', redirect_uri: callback('youtube'), code });
+    const granted = String(tok.scope ?? '').split(/\s+/);
+    if (!granted.includes(YT_SCOPES[0])) throw badRequest('연결 화면에서 "YouTube 동영상 업로드" 권한을 끄셨습니다 — 다시 [연결]을 눌러 허용해 주세요');
+    const r = await fetch(`${YT_API()}/channels?${new URLSearchParams({ part: 'snippet', mine: 'true' })}`, { headers: { authorization: `Bearer ${tok.access_token}` }, signal: AbortSignal.timeout(20000) });
+    const ch: any = await r.json().catch(() => ({})); const item = ch?.items?.[0];
+    if (!r.ok || !item) throw badRequest('이 Google 계정에 유튜브 채널이 없습니다 — 채널을 만든 계정으로 다시 연결해 주세요');
+    const exp = new Date(Date.now() + Number(tok.expires_in ?? 3600) * 1000).toISOString();
+    await sql`insert into mkt_publish_accounts (tenant, provider, external_id, label, token_enc, refresh_enc, scopes, expires_at, status, last_error, created_by, info)
+      values (${tenantOf(u)}, 'youtube', ${String(item.id)}, ${String(item.snippet?.title ?? item.id).slice(0, 60)}, ${encrypt(String(tok.access_token))}, ${tok.refresh_token ? encrypt(String(tok.refresh_token)) : null}, ${YT_SCOPES}, ${exp}, 'active', null, ${u.id}, ${sql.json({ warnings: tok.refresh_token ? [] : ['갱신 토큰을 받지 못했습니다 — Google 계정 › 보안 › 제3자 앱에서 워크인을 지우고 다시 연결하면 받습니다'] } as never)})
+      on conflict (tenant, provider, external_id) do update set label = excluded.label, token_enc = excluded.token_enc, refresh_enc = coalesce(excluded.refresh_enc, mkt_publish_accounts.refresh_enc), scopes = excluded.scopes, expires_at = excluded.expires_at, status = 'active', last_error = null, info = excluded.info`;
+    await audit(sql, u.id, 'mkt_publish.connect', 'mkt_publish_account', null, { provider: 'youtube', channel: item.id }).catch(() => {});
+    return { pages: 0, instagram: 0, threads: 0, youtube: 1, warnings: tok.refresh_token ? 0 : 1 };
+  } catch (e) { await logError('mkt-publish-oauth', e, { provider }).catch(() => {}); throw e instanceof HttpError ? e : badRequest('연결에 실패했습니다'); }
 }
 
 /** 연결 끊기 — 토큰을 바로 지움(행 삭제). 게시 기록(mkt_publish_jobs)은 account_id 만 비워져 남음 */
@@ -206,7 +264,7 @@ export async function homeChannels(u: SessionUser): Promise<HomeChannel[]> {
   for (const k of ['instagram', 'facebook', 'threads', 'youtube'] as ChannelKey[]) {
     const c = PUBLISH_CHANNELS.find((x) => x.key === k)!;
     const ready = kindReady(c.kind);
-    out.push({ key: k, label: c.label, kind: 'publish', ...pick(pubs, c.providers), connect: ready && c.kind === 'meta' ? '/api/marketing/publish/connect/meta' : null,
+    out.push({ key: k, label: c.label, kind: 'publish', ...pick(pubs, c.providers), connect: ready ? `/api/marketing/publish/connect/${c.kind === 'meta' ? 'meta' : c.kind === 'threads' ? 'threads' : 'youtube'}` : null,
       // 대표 10/20 6): 준비 중이면 무엇이 막는지 한 줄(로컬이 대표에게 전달)
       pending: ready ? null : k === 'threads' ? (metaReady() ? 'Meta 앱 심사 필요: threads_basic·threads_content_publish(화면 녹화 제출) — 심사 후 열림, 그동안 게시 도우미' : 'Meta 앱 ID/시크릿 없음 → 앱 심사(threads_basic·threads_content_publish) 전 — 그동안 게시 도우미')
         : k === 'youtube' ? 'Google OAuth 클라이언트 + YouTube Data API 업로드 범위(youtube.upload) 심사 필요 — 준비 중, 그동안 게시 도우미'

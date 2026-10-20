@@ -38,9 +38,9 @@ const hourKst = (d: Date) => Number(new Intl.DateTimeFormat('en-GB', { timeZone:
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export type MktSettings = { plan_code: keyof typeof MKT_PLANS | null; monthly_credits: number | null; weekly_credits: number | null; video_monthly: number | null; regen_monthly: number | null;
-  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null; ai_monthly_usd: number | null };
+  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null; ai_monthly_usd: number | null; auto_publish: boolean };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
-  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null };
+  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false };
 export async function settingsOf(tenant: string): Promise<MktSettings> {
   const [s] = await db()<any[]>`select * from mkt_settings where tenant = ${tenant}`;
   if (!s) return { ...DEFAULTS };
@@ -367,7 +367,7 @@ function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 �
 const nInt = (a: number, b: number) => z.number().int().min(a).max(b);
 export const settingsInput = z.object({ planCode: z.enum(['basic', 'standard', 'pro']).nullable().optional(), monthlyCredits: z.number().min(0).max(100000).nullable().optional(), weeklyCredits: z.number().min(0).max(100000).nullable().optional(),
   videoMonthly: nInt(0, 1000).nullable().optional(), regenMonthly: nInt(0, 1000).nullable().optional(), approvalHour: nInt(0, 23).optional(), leadDays: nInt(0, 14).optional(), leadHour: nInt(0, 23).optional(),
-  remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional(), aiMonthlyUsd: z.number().min(0).max(10000).nullable().optional() });
+  remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional(), aiMonthlyUsd: z.number().min(0).max(10000).nullable().optional(), autoPublish: z.boolean().optional() });
 export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const cur = await settingsOf(tenantOf(u));
@@ -375,12 +375,12 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
     video_monthly: i.videoMonthly !== undefined ? i.videoMonthly : cur.video_monthly, regen_monthly: i.regenMonthly !== undefined ? i.regenMonthly : cur.regen_monthly, approval_hour: i.approvalHour ?? cur.approval_hour,
     lead_days: i.leadDays ?? cur.lead_days, lead_hour: i.leadHour ?? cur.lead_hour, remind_hours: i.remindHours ?? cur.remind_hours, quiet_start: i.quietStart ?? cur.quiet_start, quiet_end: i.quietEnd ?? cur.quiet_end,
     allow_generated_people: i.allowGeneratedPeople ?? cur.allow_generated_people, allow_slideshow: i.allowSlideshow ?? cur.allow_slideshow, ai_label: i.aiLabel ?? cur.ai_label,
-    notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids, ai_monthly_usd: i.aiMonthlyUsd !== undefined ? i.aiMonthlyUsd : cur.ai_monthly_usd };
+    notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids, ai_monthly_usd: i.aiMonthlyUsd !== undefined ? i.aiMonthlyUsd : cur.ai_monthly_usd, auto_publish: i.autoPublish ?? cur.auto_publish };
   const sql = db();
   await sql`insert into mkt_settings ${sql({ tenant: tenantOf(u), ...v, updated_by: u.id } as never)}
     on conflict (tenant) do update set plan_code = excluded.plan_code, monthly_credits = excluded.monthly_credits, weekly_credits = excluded.weekly_credits, video_monthly = excluded.video_monthly,
       regen_monthly = excluded.regen_monthly, approval_hour = excluded.approval_hour, lead_days = excluded.lead_days, lead_hour = excluded.lead_hour, remind_hours = excluded.remind_hours,
-      quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids, ai_monthly_usd = excluded.ai_monthly_usd,
+      quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids, ai_monthly_usd = excluded.ai_monthly_usd, auto_publish = excluded.auto_publish,
       updated_by = excluded.updated_by, updated_at = now()`;
   // 제작 시점(게시 D-n·시각)이 바뀌면 아직 만들지 않은 자동 칸도 다시 계산(지난 시각이면 지금)
   const re = v.lead_days !== cur.lead_days || v.lead_hour !== cur.lead_hour

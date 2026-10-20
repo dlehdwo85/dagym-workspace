@@ -155,7 +155,7 @@ export function Connections() {
 type Ch = { key: string; label: string; note: string; kind: string; enabled: boolean; connectable: boolean; ready: boolean; mode: 'helper' | 'auto' | 'later';
   accounts: { id: string; provider: string; label: string; status: string; lastError: string | null; warnings: string[] }[] };
 type ChData = { canEdit: boolean; metaDevMode: boolean; channels: Ch[]; tech: { metaCallback: string; metaDeletion: string; metaScopes: string[]; metaReady: boolean; metaLive: boolean } | null };
-const CONNECT_URL: Record<string, string> = { meta: '/api/marketing/publish/connect/meta' };
+const CONNECT_URL: Record<string, string> = { meta: '/api/marketing/publish/connect/meta', threads: '/api/marketing/publish/connect/threads', google: '/api/marketing/publish/connect/youtube' };
 
 /**
  * ⑤-2 게시 채널(대표 결정 10/19: 모든 채널 직접 연동, 구독형 미사용). 채널마다 켜기/끄기 + [연결] 하나.
@@ -177,7 +177,7 @@ function PublishChannels() {
   return (
     <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="publish-channels">
       <h2 className="text-sm font-semibold">게시 채널</h2>
-      <p className="mt-0.5 text-[11px] text-ink-3">쓰는 채널만 켜 두세요. 지금은 모든 채널을 <b>게시 도우미</b>(글 복사·사진 내려받기·앱 열기 → 올린 뒤 주소 붙여 [게시 확인])로 올립니다. 연결해 두면 플랫폼 심사가 끝나는 대로 워크인에서 바로 게시됩니다.</p>
+      <p className="mt-0.5 text-[11px] text-ink-3">쓰는 채널만 켜 두세요. 연결한 채널은 승인된 글을 <b>워크인 서버가 게시</b>합니다(콘텐츠 상세 [지금 게시] 또는 자동 제작 설정 “자동 게시”). 연결 전에는 <b>게시 도우미</b>(글 복사·사진 내려받기·앱 열기 → 올린 뒤 주소 붙여 [게시 확인])로 올립니다. 연결해 두면 플랫폼 심사가 끝나는 대로 워크인에서 바로 게시됩니다.</p>
       <ul className="mt-2 divide-y divide-line text-sm">{data.channels.map((c) => (
         <li key={c.key} className={cx('py-2', !c.enabled && 'opacity-60')} data-testid="publish-channel" data-channel={c.key}>
           <div className="flex flex-wrap items-center gap-2">
@@ -188,7 +188,7 @@ function PublishChannels() {
             <span className="ml-auto flex items-center gap-2">
               {data.canEdit && c.enabled && c.connectable && (c.ready && CONNECT_URL[c.kind]
                 ? <a href={CONNECT_URL[c.kind]} className={btnCls(c.accounts.length ? 'secondary' : 'primary', 'sm')} data-testid={`publish-connect-${c.key}`}>{c.accounts.length ? '다시 연결' : '연결'}</a>
-                : <PendingButton label="연결" reason={c.kind === 'meta' ? '심사 후 열림 — 그동안 게시 도우미' : '준비 중 — 그동안 게시 도우미'} testId={`publish-connect-${c.key}`} />)}
+                : <PendingButton label="연결" reason={c.kind === 'meta' ? '심사 후 열림 — 그동안 게시 도우미' : c.kind === 'threads' ? 'Threads 앱 등록·심사 뒤 열림 — 그동안 게시 도우미' : c.kind === 'google' ? 'Google 동의 화면 검증 뒤 열림 — 그동안 게시 도우미' : '준비 중 — 그동안 게시 도우미'} testId={`publish-connect-${c.key}`} />)}
               {data.canEdit && <label className={cx('inline-flex min-h-[32px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium', c.enabled ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-line bg-white text-ink-3')}>
                 <input type="checkbox" className="size-4 accent-brand-600" checked={c.enabled} onChange={() => toggle(c)} aria-label={`${c.label} 사용`} data-testid="publish-channel-toggle" />{c.enabled ? '사용 중' : '사용 안 함'}</label>}
             </span>

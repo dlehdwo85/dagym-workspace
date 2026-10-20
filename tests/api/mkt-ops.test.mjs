@@ -103,6 +103,13 @@ test('② 광고 예산 계획: AI 초안(채널 4·연결 표시·하루 예산
   await ctx.owner.ok('PATCH', `/api/marketing/ops/budget/${P.budget}`, { action: 'update', plan: [{ provider: 'naver', monthly: 200000 }] });
   const v2 = (await ctx.owner.ok('GET', `/api/marketing/ops?month=${month}`)).budget;
   assert.deepEqual([v2.status, v2.source, v2.total, v2.plan.find((p) => p.provider === 'naver').rate], ['pending', 'user', 300000, 45]);
+  // 로컬 23:00 🟡: 0원 계획은 승인·집행 불가(캠페인 예산 0 위험) + AI 숫자 '14,000원' 도 읽음·작은 총액은 1천 원 단위
+  await ctx.owner.ok('PATCH', `/api/marketing/ops/budget/${P.budget}`, { action: 'update', plan: [{ provider: 'naver', monthly: 0 }, { provider: 'meta', monthly: 0 }, { provider: 'google', monthly: 0 }, { provider: 'youtube', monthly: 0 }] });
+  assert.equal((await ctx.owner.req('PATCH', `/api/marketing/ops/budget/${P.budget}`, { action: 'approve' })).status, 400, '0원 승인 불가');
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ plan: [{ provider: 'naver', monthly: '14,000원', note: '' }, { provider: 'google', monthly: 3000, note: '' }, { provider: 'meta', monthly: 3000, note: '' }, { provider: 'youtube', monthly: 0, note: '' }], rationale: '총액 20,000원 안에서 네이버 비중 크게' })] });
+  const small = await ctx.owner.ok('POST', '/api/marketing/ops/budget', { month, total: 20000 });
+  assert.deepEqual(small.plan.map((p) => [p.provider, p.monthly]), [['naver', 14000], ['google', 3000], ['youtube', 0], ['meta', 3000]], JSON.stringify(small.plan));
+  await ctx.owner.ok('PATCH', `/api/marketing/ops/budget/${P.budget}`, { action: 'update', plan: [{ provider: 'naver', monthly: 200000 }, { provider: 'meta', monthly: 100000 }, { provider: 'google', monthly: 0 }, { provider: 'youtube', monthly: 0 }] });
   // 네이버 세팅안(활성) 하나 → 승인 시 하루 예산 집행(가짜 네이버: actPlan budget)
   const [plan] = await sql`insert into mkt_ad_plans (tenant, account_id, provider, name, plan, status, external, created_by) values ('default', ${P.acc}, 'naver', '가을 회원 모집', ${sql.json({ dailyBudget: 5000 })}, 'active', ${sql.json({ campaignId: 'cmp-1', adgroupId: 'ag-1' })}, ${ctx.ownerId}) returning id`;
   await ctx.owner.ok('PUT', '/api/marketing/ad-ops/cap', { monthlyCap: 1000000 }); // 돈이 늘면 상한 검사 — 상한 없으면 집행이 막힘

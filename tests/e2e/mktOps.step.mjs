@@ -33,6 +33,7 @@ export async function mktOps({ owner, ctx, sql, BASE, SHOTS }) {
     await budget.getByTestId('budget-save').click();
     await owner.getByText('저장했습니다').waitFor();
     await budget.getByTestId('budget-row-naver').getByText('250,000원').waitFor();
+    owner.once('dialog', (d) => d.accept()); // 승인·집행 확인 창(로컬 23:00: 금액 확인)
     await budget.getByTestId('budget-approve').click();
     await budget.getByTestId('budget-status').filter({ hasText: '승인됨' }).waitFor();
   }

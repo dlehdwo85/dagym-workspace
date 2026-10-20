@@ -132,10 +132,12 @@ export async function getContent(u: SessionUser, id: string) {
   const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
   const media = ids.length ? await sql`select id, title, file_name, mime_type from library_files where id = any(${ids}::uuid[]) and tenant = ${tenantOf(u)} and deleted_at is null` : [];
-  const publishJobs = await sql`select j.provider, j.status, j.version, j.permalink, j.is_test, j.last_error, j.created_at, u.name as requested_by_name from mkt_publish_jobs j left join users u on u.id = j.requested_by where j.content_id = ${id} order by j.created_at desc`;
+  const publishJobs = await sql`select j.id, j.provider, j.status, j.version, j.permalink, j.is_test, j.last_error, j.attempts, j.run_after, j.created_at, u.name as requested_by_name, a.label as account from mkt_publish_jobs j left join mkt_publish_accounts a on a.id = j.account_id left join users u on u.id = j.requested_by where j.content_id = ${id} order by j.created_at desc`;
   const decisions = await sql`select d.version, d.decision, d.comment, d.decided_at, u.name as decided_by_name from mkt_decisions d left join users u on u.id = d.decided_by where d.content_id = ${id} order by d.decided_at desc`;
   const st = await (await import('./mktAuto')).settingsOf(tenantOf(u));
-  return { content: { ...c, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u) };
+  // 대표 10/20 22:30 ② M1: 서버 게시 가능 채널·계정(관리자 [서버로 게시] 버튼) + 회사 자동 게시 설정
+  const targets = await (await import('./mktPublish')).publishTargets(tenantOf(u), c).catch(() => []);
+  return { content: { ...c, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };
