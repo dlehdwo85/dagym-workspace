@@ -5,6 +5,7 @@ import { api, broadcastRefresh, useApi } from './client';
 import { Button, Field, Modal, cx, fmtMinutes, inputCls, toast, todayStr } from './ui';
 import { UserSelect } from './pickers';
 import { BellChip, RepeatChip, noteAway, quickDues, voiceInput } from './TaskQuick';
+import { LibraryPickModal } from './Attachments';
 import { VoiceButton } from './voice';
 import { parseTaskText } from '@/lib/nlparse';
 import { PRIORITY_LABEL } from '@/lib/types';
@@ -54,6 +55,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
   const { features } = useSession();
   // V12 8번 "📎 자료로 채우기": 자료를 올리면 AI 가 제목·설명·체크리스트·마감을 채우고, 저장하면 그 자료가 업무에 첨부된다
   const fillRef = useRef<HTMLInputElement>(null);
+  const [libOpen, setLibOpen] = useState(false);
   const [filling, setFilling] = useState('');
   async function fillFrom(files: FileList | null) {
     if (!files?.length) return;
@@ -204,6 +206,14 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
           </DropZone>
           <input ref={fillRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => fillFrom(e.target.files)} data-testid="quick-fill-input" />
         </>
+      )}
+      {/* 대표 10/20 23:55: 새 업무에도 자료실 파일을 바로 연결(저장하면 첨부) */}
+      {!defaults?.parentId && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+          <button type="button" onClick={() => setLibOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-sm text-ink-2 hover:bg-slate-50" data-testid="quick-from-library">📁 자료실에서 첨부</button>
+          {(f.fileNames?.length ?? 0) > 0 && <span className="text-ink-2">📎 {f.fileNames.length}개 — 저장하면 업무에 첨부</span>}
+          {libOpen && <LibraryPickModal onClose={() => setLibOpen(false)} onPick={(files) => { setF((x: any) => ({ ...x, fileIds: [...new Set([...(x.fileIds ?? []), ...files.map((p) => p.id)])], fileNames: [...(x.fileNames ?? []), ...files.filter((p) => !(x.fileIds ?? []).includes(p.id)).map((p) => p.title)] })); setLibOpen(false); }} />}
+        </div>
       )}
       <form ref={formRef} onSubmit={submit} className="space-y-3" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget as HTMLFormElement).requestSubmit(); } }}>
         {!defaults?.parentId && (templates.data?.templates.length ?? 0) > 0 && (
