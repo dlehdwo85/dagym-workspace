@@ -8,7 +8,8 @@ import { CHANNELS } from './Marketing';
 import { MediaPick } from './MediaPick';
 
 const C = '#7C3AED';
-const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스·쇼츠', video: '생성 영상' };
+const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', shorts: '쇼츠', story: '스토리', video: '생성 영상' };
+const CROSS: Record<string, string> = { facebook: '페이스북', instagram: '인스타그램', threads: '스레드' };
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const REQ: Record<string, string> = { image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성', topic: '주제 필요' };
 type View = { settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null; aiMonthlyUsd: number | null };
@@ -21,6 +22,8 @@ export function Automation() {
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 고르기 없음
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '' });
+  const [bundle, setBundle] = useState({ brandId: '', intervalDays: 3, startDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()) });
+  async function addBundle(e: React.FormEvent) { e.preventDefault(); try { const r = await api<{ planned: number }>('/api/marketing/auto/bundle', { body: { ...bundle, brandId: bundle.brandId || null } }); toast.ok(`묶음 규칙 5개 추가 — 앞으로 2주 칸 ${r.planned}개`); reload(); } catch (er: any) { toast.error(er.message); } }
   const [done, setDone] = useState<Record<string, { credits: string; media: { id: string; title: string }[] }>>({});
   const [topics, setTopics] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -100,10 +103,17 @@ export function Automation() {
       </section>}
 
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-rules">
-        <h2 className="text-sm font-semibold">주간 규칙</h2>
+        <h2 className="text-sm font-semibold">게시 규칙 <span className="font-normal text-ink-3">— 기본값(대표 10/20): 브랜드마다 2~3일에 한 묶음(유튜브 쇼츠 1 · 인스타 릴스 1 · 블로그 1 · 인스타+페이스북 게시물 1 · 인스타+페이스북 스토리 1)</span></h2>
+        {ed && <form onSubmit={addBundle} className="mt-2 flex flex-wrap items-center gap-2 rounded-input border border-violet-200 bg-violet-50/40 p-2 text-sm" data-testid="auto-bundle-form">
+          <span className="text-xs font-medium text-violet-800">묶음 규칙 만들기</span>
+          <select className={cx(inputCls, 'h-8 !w-auto')} value={bundle.brandId} onChange={(e) => setBundle({ ...bundle, brandId: e.target.value })} aria-label="묶음 브랜드"><option value="">브랜드 없음</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
+          <select className={cx(inputCls, 'h-8 !w-auto')} value={bundle.intervalDays} onChange={(e) => setBundle({ ...bundle, intervalDays: Number(e.target.value) })} aria-label="묶음 주기" data-testid="auto-bundle-interval"><option value={2}>2일마다</option><option value={3}>3일마다</option></select>
+          <input type="date" className={cx(inputCls, 'h-8 !w-auto')} value={bundle.startDate} onChange={(e) => setBundle({ ...bundle, startDate: e.target.value })} aria-label="시작일" />
+          <Button type="submit" size="sm" data-testid="auto-bundle-add">묶음 5개 추가</Button>
+        </form>}
         <ul className="mt-2 divide-y divide-line text-sm">{data.rules.map((r) => (
           <li key={r.id} className={cx('flex flex-wrap items-center gap-2 py-2', !r.active && 'opacity-50')} data-testid="auto-rule">
-            <span className="font-medium">{r.brand ?? '브랜드 없음'}</span><span className="text-xs text-ink-2">{CHANNELS[r.channel as keyof typeof CHANNELS]} · {KIND[r.kind]} · {(r.weekdays as number[]).map((d) => DOW[d]).join('·')} {r.post_time}{r.topic_hint ? ` · ${r.topic_hint}` : ''}</span>
+            <span className="font-medium">{r.brand ?? '브랜드 없음'}</span><span className="text-xs text-ink-2">{CHANNELS[r.channel as keyof typeof CHANNELS]}{(r.cross_channels ?? []).length ? `+${(r.cross_channels as string[]).map((c) => CROSS[c] ?? c).join('·')}` : ''} · {KIND[r.kind]} · {r.interval_days ? `${r.interval_days}일마다(${r.anchor_date ?? ''}부터)` : (r.weekdays as number[]).map((d) => DOW[d]).join('·')} {r.post_time}{r.topic_hint ? ` · ${r.topic_hint}` : ''}{r.bundle_key && <span className="ml-1 rounded-full bg-violet-50 px-1.5 text-[10px] text-violet-700">묶음</span>}</span>
             {ed && <span className="ml-auto flex gap-1.5"><Button size="sm" variant="secondary" onClick={async () => { await api(`/api/marketing/auto/rules/${r.id}`, { method: 'PATCH', body: { active: !r.active } }); reload(); }}>{r.active ? '멈춤' : '켜기'}</Button>
               <Button size="sm" variant="secondary" onClick={async () => { if (!confirm('규칙을 지울까요? 아직 제작 안 한 칸도 같이 지워집니다.')) return; await api(`/api/marketing/auto/rules/${r.id}`, { method: 'DELETE' }); reload(); }}>지우기</Button></span>}
           </li>))}{!data.rules.length && <li className="py-2 text-xs text-ink-3">규칙이 없습니다 — 예: 인스타그램 피드 화·목 10:00</li>}</ul>

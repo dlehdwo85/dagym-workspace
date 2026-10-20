@@ -1,4 +1,5 @@
 'use client';
+import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -72,7 +73,7 @@ export function ApproveRow({ c, canDecide, onDone }: { c: CardContent; canDecide
 
 function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: () => void; date?: string }) {
   const brands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
-  const [f, setF] = useState({ title: '', channel: 'instagram', brandId: '', date: date ?? '', time: '10:00', body: '' });
+  const [f, setF] = useState({ title: '', channel: 'instagram', brandId: '', date: date ?? '', time: '10:00', body: '', cross: [] as string[] }); // cross: 대표 10/20 '페이스북에도'·'스레드에도'(승인 1건)
   const [media, setMedia] = useState<{ id: string; title: string }[]>([]);
   const [ai, setAi] = useState<{ captions: string[]; hashtags: string[] } | null>(null); const [aiBusy, setAiBusy] = useState(false);
   async function draft() {
@@ -84,7 +85,7 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
   async function save(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api('/api/marketing/contents', { body: { title: f.title, channel: f.channel, brandId: f.brandId || null, scheduledAt: f.date ? `${f.date}T${f.time}:00+09:00` : null, body: f.body, mediaIds: media.map((m) => m.id) } });
+      await api('/api/marketing/contents', { body: { title: f.title, channel: f.channel, brandId: f.brandId || null, scheduledAt: f.date ? `${f.date}T${f.time}:00+09:00` : null, body: f.body, mediaIds: media.map((m) => m.id), crossChannels: f.cross } });
       toast.ok('승인 대기에 올렸습니다'); onDone(); onClose();
     } catch (er: any) { toast.error(er.message); }
   }
@@ -93,7 +94,10 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
       <form onSubmit={save} className="grid gap-3" data-testid="mkt-new">
         <Field label="제목"><input className={inputCls} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required maxLength={200} data-testid="mkt-title" /></Field>
         <div className="grid gap-2 sm:grid-cols-4">
-          <Field label="채널"><select className={inputCls} value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })} data-testid="mkt-channel">{Object.entries(CHANNELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+          <Field label="채널"><select className={inputCls} value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value, cross: [] })} data-testid="mkt-channel">{Object.entries(CHANNELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+            {/* 대표 10/20 11:40 ②: 인스타 게시물에서 '페이스북에도'·'스레드에도' 체크 = 같은 승인 1건(M1 게시 실행기가 채널마다 올림) */}
+            {['instagram', 'facebook', 'threads'].includes(f.channel) && <span className="mt-1 flex flex-wrap gap-3 text-xs" data-testid="mkt-cross">{(['facebook', 'threads', 'instagram'] as const).filter((k) => k !== f.channel).map((k) => (
+              <label key={k} className="inline-flex items-center gap-1"><input type="checkbox" checked={f.cross.includes(k)} onChange={(e) => setF({ ...f, cross: e.target.checked ? [...f.cross, k] : f.cross.filter((x) => x !== k) })} data-testid={`mkt-cross-${k}`} />{CHANNELS[k]}에도</label>))}</span>}</Field>
           <Field label="브랜드"><select className={inputCls} value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value })}><option value="">(없음)</option>{(brands.data?.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
           <Field label="게시일"><input type="date" className={inputCls} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} data-testid="mkt-date" /></Field>
           <Field label="시각"><input type="time" className={inputCls} value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
@@ -137,6 +141,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   return (
     <Modal open onClose={onClose} title={c.title} wide>
       <div className="space-y-3 text-sm" data-testid="mkt-detail">
+        <AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContent} subject={`시안 ${String(c.title).slice(0, 40)}`} compact testId="ai-ask-content" />
         <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b> · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
         {c.auto && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">품질 검사: {c.quality.issues.join(' · ')}</p>}
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
@@ -185,7 +190,7 @@ export function Approvals() {
   const { data, error, reload } = useApi<{ contents: Content[] }>(`/api/marketing/contents?view=approvals${DAY_LABEL[day] ? `&day=${day}` : ''}`);
   return (
     <div className="space-y-3" data-testid="mkt-approvals">
-      <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>{DAY_LABEL[day] ?? '승인 대기'}</h1>{DAY_LABEL[day] && <Link href="/s/marketing/approvals" className="text-xs underline" data-testid="mkt-day-clear">승인 대기 전체</Link>}<Button className="ml-auto" onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></div>
+      <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>{DAY_LABEL[day] ?? '승인 대기'}</h1>{DAY_LABEL[day] && <Link href="/s/marketing/approvals" className="text-xs underline" data-testid="mkt-day-clear">승인 대기 전체</Link>}<span className="ml-auto flex flex-wrap items-center gap-2"><AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContents} compact /><Button onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></span></div>
       {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reload} />}
       <OpsRequests />
       {open && <ContentDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}

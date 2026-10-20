@@ -80,7 +80,8 @@ export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null)
     or (t.team_id is not null and exists (select 1 from teams tt where tt.id = t.team_id and tt.tenant = ${tenantOf(u)}) and (
       (${menuLevelSql(sql, u, 'team_tasks', dTeam)} <> 'none' and exists (select 1 from team_members tm where tm.team_id = t.team_id and tm.user_id = ${u.id}))
       or t.team_id in (${subTeamsSql(sql, u)})
-      or ${menuLevelSql(sql, u, 'team_tasks_all', dAll)} <> 'none'))
+      -- 대표 10/20 4): '팀 업무 보기' 전체(team_tasks_all) 또는 지정 팀(team_view_grants) — 격리 팀원은 자기 팀만(넓어지지 않음)
+      or (not ${isolatedSql(sql, u)} and (${menuLevelSql(sql, u, 'team_tasks_all', dAll)} <> 'none' or t.team_id in (select g.team_id from team_view_grants g where g.user_id = ${u.id})))))
     or t.assignee_id = ${u.id}
     or t.created_by = ${u.id}
     or ${leadOfInvolvedSql(sql, u)}
@@ -90,6 +91,10 @@ export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null)
   )`;
 }
 
+/** 격리 팀('회사 안의 작은 회사') 구성원인지 — 동기 SQL 조건용 */
+export function isolatedSql(sql: Sql, u: SessionUser) {
+  return sql`exists (select 1 from teams ti join team_members mi on mi.team_id = ti.id where mi.user_id = ${u.id} and ti.isolated and not ti.archived and ti.tenant = ${tenantOf(u)})`;
+}
 /** 부서(팀) 업무 환경(대표 10/16): 부서장(팀장)은 자기 부서원(하위 부서 포함)이 담당·지시한 업무를 본다 — 부서 간 협업 업무는 참여자와 양쪽 부서장에게만 */
 export function leadOfInvolvedSql(sql: Sql, u: SessionUser) {
   return sql`exists (
@@ -116,8 +121,11 @@ export async function teamTaskLevel(u: SessionUser, teamId: string, sql: Sql = d
   const rank: Record<string, number> = { none: 0, view: 1, edit: 2 };
   const own = m ? await menuLevel(u, 'team_tasks', sql) : 'none';
   const mine = m?.is_lead && rank[own] >= 1 ? 'edit' : own; // 팀장은 조회 이상이면 자기 팀 편집
+  if ((await teamScope(u, sql)).isolated) return mine; // 격리 팀원은 자기 팀만
   const all = await menuLevel(u, 'team_tasks_all', sql);
-  return rank[all] > rank[mine] ? all : mine;
+  const granted = (await sql`select 1 from team_view_grants where user_id = ${u.id} and team_id = ${teamId}`).length ? 'view' : 'none'; // 지정 팀은 조회
+  const wide = rank[all] > rank[granted] ? all : granted;
+  return rank[wide] > rank[mine] ? wide : mine;
 }
 
 export interface TaskAccessRow {

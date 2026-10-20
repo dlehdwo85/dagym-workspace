@@ -27,6 +27,14 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     const tabs = (await p.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
     assert.deepEqual(tabs, ['홈', '리드', '입찰', '영업기회', '더보기'], '앱 하단 탭에 파이프라인 없음');
     await p.screenshot({ path: `${SHOTS}/139-sales-app-leads.png` });
+    // 대표 10/20 5): 영업 목록 상단 'AI에게 요청' → 예시 칩 → AI 비서(영업 맥락)로
+    if (await p.getByTestId('ai-ask').count()) {
+      await p.getByTestId('ai-ask').tap();
+      await p.getByTestId('ai-ask-examples').getByRole('button', { name: '미팅 예정 리드 요약' }).tap();
+      await p.waitForURL(/\/assistant\?space=sales&q=/);
+      await p.goto(`${BASE}/s/sales/leads`);
+      await p.getByTestId('sales-lead-card').filter({ hasText: 'E2E 앱 거래처' }).waitFor();
+    }
     // 파이프라인: 휴대폰은 단계 칩 + 목록
     await p.goto(`${BASE}/s/sales/pipeline`);
     await p.getByTestId('pipeline-list').waitFor();

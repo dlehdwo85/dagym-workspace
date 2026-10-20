@@ -57,6 +57,10 @@ describe('V41 4-2 마케팅', () => {
     const st = ctx.staffA.client;
     const at = new Date(Date.now() + 3 * 864e5).toISOString();
     const { id } = await st.ok('POST', '/api/marketing/contents', { title: '가을 행사', channel: 'instagram', scheduledAt: at, body: '캡션 1', mediaIds: [] });
+    // 대표 10/20 11:40 ②: '페이스북에도'·'스레드에도' = 같은 승인 1건(cross_channels, 자기 채널은 뺌)
+    const cross = await st.ok('POST', '/api/marketing/contents', { title: '함께 올릴 글', channel: 'instagram', body: '캡션', mediaIds: [], crossChannels: ['facebook', 'threads', 'instagram'] });
+    assert.deepEqual((await sql`select cross_channels from mkt_contents where id = ${cross.id}`)[0].cross_channels, ['facebook', 'threads']);
+    await sql`update mkt_contents set status = 'canceled' where id = ${cross.id}`;
     const n = await sql`select count(*)::int as n from notifications where user_id = ${ctx.ownerId} and type = 'review_requested'`;
     assert.ok(n[0].n >= 1, '관리자에게 승인 요청 알림');
     assert.equal((await st.req('POST', `/api/marketing/contents/${id}/decide`, { version: 1, decision: 'approve' })).status, 403, '직원은 승인 못 함');

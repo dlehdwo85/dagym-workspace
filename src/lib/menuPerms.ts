@@ -27,7 +27,7 @@ export const MENUS = {
   ai_logs: { label: 'AI 사용 내역', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V14 8번 팀 업무: 자기 팀(팀원은 이 단계, 팀장은 조회 이상이면 편집까지) / 다른 팀 업무
   team_tasks: { label: '팀 업무(자기 팀)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'view', site_manager: 'view', staff: 'view' } },
-  team_tasks_all: { label: '다른 팀 업무 보기', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  team_tasks_all: { label: '팀 업무 보기(다른 팀 전체)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V14 1번 담당자 재배정: 아무 업무나 / 지시자는 자기가 지시한 업무만 / 담당자 본인의 넘기기(지시자 승인)
   reassign: { label: '업무 담당자 재배정', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   reassign_requester: { label: '지시자는 자기 업무 재배정 가능', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
@@ -92,8 +92,25 @@ export async function menuMatrix(u: SessionUser) {
     matrix[m] = {};
     for (const r of ROLES) matrix[m][r] = r === 'owner' ? topLevel(m as MenuKey) : roles.find((x) => x.menu === m && x.role === r)?.level ?? (def.defaults as Record<string, string>)[r];
   }
+  // 대표 10/20 4): 사람별 '지정 팀'(team_view_grants) — 다른 팀 전체가 꺼진 사람에게 특정 팀만 조회
+  const grants = await sql<{ user_id: string; name: string; team_id: string; team_name: string }[]>`select g.user_id, u.name, g.team_id, t.name as team_name from team_view_grants g
+    join users u on u.id = g.user_id join teams t on t.id = g.team_id where u.tenant = ${tenantOf(u)} and not t.archived order by u.name, t.name`;
   return { menus: Object.entries(MENUS).map(([k, v]) => ({ key: k, label: v.label, levels: v.levels.map((l) => ({ value: l, label: levelLabel(k, l) })) })),
-    roles: ROLES, matrix, overrides: users };
+    roles: ROLES, matrix, overrides: users, teamGrants: grants };
+}
+export const teamGrantInput = z.object({ userId: z.string().uuid(), teamIds: z.array(z.string().uuid()).max(100) });
+/** 대표 10/20 4): 사람별 지정 팀 저장(목록 통째로 바꿈 — 빈 목록 = 지우기). 격리 팀원에게 줘도 자기 팀만 보임(access.ts) */
+export async function setTeamGrants(u: SessionUser, i: z.infer<typeof teamGrantInput>, ip: string | null) {
+  requireOwner(u);
+  const sql = db();
+  const [t] = await sql<{ role: string }[]>`select role from users where id = ${i.userId} and tenant = ${tenantOf(u)}`;
+  if (!t) throw notFound();
+  const ok = await sql<{ id: string }[]>`select id from teams where id = any(${i.teamIds}::uuid[]) and tenant = ${tenantOf(u)} and not archived`;
+  if (ok.length !== new Set(i.teamIds).size) throw forbidden('없는 팀이 있습니다');
+  await sql`delete from team_view_grants where user_id = ${i.userId} and not (team_id = any(${i.teamIds}::uuid[]))`;
+  for (const id of ok) await sql`insert into team_view_grants (user_id, team_id, updated_by) values (${i.userId}, ${id.id}, ${u.id}) on conflict (user_id, team_id) do update set updated_by = excluded.updated_by, updated_at = now()`;
+  await audit(sql, u.id, 'menu_perm.team_grants', 'user', i.userId, { teamIds: i.teamIds }, ip);
+  return { ok: true };
 }
 export const menuPermInput = z.object({
   menu: z.enum(Object.keys(MENUS) as [MenuKey, ...MenuKey[]]),

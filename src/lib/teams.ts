@@ -21,7 +21,19 @@ export async function listTeams(u: SessionUser) {
       (select id from chat_rooms r where r.team_id = t.id) as room_id
     from teams t left join team_members m on m.team_id = t.id left join users us on us.id = m.user_id and us.status = 'active'
     where t.tenant = ${tenantOf(u)} and not t.archived group by t.id order by (t.kind = 'team'), t.name`;
-  return { teams };
+  // 대표 10/20 4): 업무 화면 팀 칩 — 이 사람이 업무를 볼 수 있는 팀(관리자 전체 · 자기 팀(팀 업무 조회 이상) · 하위 팀 · 격리 아니면 다른 팀 전체 권한 또는 지정 팀)
+  const { isAdmin } = await import('./access');
+  let visible: Set<string> | null = null;
+  if (!isAdmin(u)) {
+    const { menuLevel } = await import('./menuPerms');
+    const { teamScope, subTeamsSql } = await import('./access');
+    const sc = await teamScope(u, sql);
+    const own = await menuLevel(u, 'team_tasks', sql), all = sc.isolated ? 'none' : await menuLevel(u, 'team_tasks_all', sql);
+    const sub = new Set((await sql<{ id: string }[]>`select id from (${subTeamsSql(sql, u)}) s`).map((r) => r.id));
+    const grants = sc.isolated ? new Set<string>() : new Set((await sql<{ team_id: string }[]>`select team_id from team_view_grants where user_id = ${u.id}`).map((r) => r.team_id));
+    visible = new Set(teams.filter((t: any) => all !== 'none' || sub.has(t.id) || grants.has(t.id) || (t.mine && own !== 'none')).map((t: any) => t.id));
+  }
+  return { teams: teams.map((t: any) => ({ ...t, visible: visible ? visible.has(t.id) : true })) };
 }
 
 export const teamInput = z.object({

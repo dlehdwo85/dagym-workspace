@@ -222,7 +222,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     return (hq.length ? hq : dir.users).slice(0, 5);
   })();
   const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 지시한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['extend', '연장 요청'], ['done', '완료']];
-  const teamList = useApi<{ teams: { id: string; name: string }[] }>('/api/teams'); // V14 8번 팀 필터
+  const teamList = useApi<{ teams: { id: string; name: string; color?: string; kind?: string; parent_name?: string | null; visible?: boolean }[] }>('/api/teams'); // V14 8번 팀 필터
+  const teamChips = (teamList.data?.teams ?? []).filter((t) => t.visible !== false); // 대표 10/20 4): 팀별 보기 칩 — 볼 수 있는 팀만
   // V14 12번 다중 선택
   const [selOn, setSelOn] = useState(false);
   const [selTip, setSelTip] = useState(false);
@@ -297,6 +298,19 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           <span className="contents sm:block" data-testid="done-chip"><ViewChip on={filters.view === 'done' && !filters.assigneeId} onClick={() => setView("done")} label="완료" grid><CircleCheck className="size-3.5 shrink-0" />완료</ViewChip></span>
           {!views.some(([v]) => v === (filters.view ?? '')) && <ViewChip on onClick={() => setView('')} grid>{({ today: '오늘의 일정', risk: '마감 위험' } as Record<string, string>)[filters.view ?? ''] ?? filters.view}</ViewChip>}
         </div>
+        {/* 대표 10/20 4): 팀별 보기 — 전체 · 부서 › 팀 칩(볼 수 있는 팀만), 누르면 그 팀 업무만(목록·보드 같은 필터). 권한은 사용자 관리 › 메뉴 권한 '팀 업무 보기' */}
+        {!fixed?.teamId && teamChips.length > 0 && (
+          <div className="flex items-center gap-2 border-t border-line pt-2" data-testid="team-chips">
+            <span className="shrink-0 text-xs font-medium text-ink-3">팀별</span>
+            <div className="scrollbar-none flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
+              <ViewChip on={!filters.teamId} onClick={() => setFilters((f) => ({ ...f, teamId: '' }))} label="모든 팀">전체</ViewChip>
+              {teamChips.map((t) => (
+                <ViewChip key={t.id} on={filters.teamId === t.id} onClick={() => setFilters((f) => ({ ...f, teamId: f.teamId === t.id ? '' : t.id }))} label={`팀 ${t.name}`}>
+                  <span className="size-2 shrink-0 rounded-full" style={{ background: t.color ?? '#0F766E' }} aria-hidden />{t.kind === 'team' && t.parent_name ? <span className="hidden text-ink-3 sm:inline">{t.parent_name} ›&nbsp;</span> : null}{t.name}
+                </ViewChip>))}
+            </div>
+          </div>
+        )}
         {/* 대표(10/16): 보기 버튼과 직원 이름이 섞여 보임 → 직원 줄은 구분선·"직원별" 머리·둥근 이름표로 따로 */}
         {people.length > 0 && (
           <div className="flex items-center gap-2 border-t border-line pt-2" data-testid="people-row">
