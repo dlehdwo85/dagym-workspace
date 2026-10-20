@@ -14,7 +14,16 @@ import type { SessionUser } from './types';
  *   볼 수 없는 방은 404 (있는 줄도 모르게).
  */
 import { tenantOf } from './types';
-type Room = { id: string; tenant: string; kind: 'dm' | 'group' | 'company' | 'task' | 'team'; name: string | null; task_id: string | null; dm_key: string | null; team_id?: string | null };
+type Room = { id: string; tenant: string; kind: 'dm' | 'group' | 'company' | 'task' | 'team'; name: string | null; task_id: string | null; dm_key: string | null; team_id?: string | null; owner_id?: string | null; history_visible?: boolean };
+/** 메신저 1차(10/20): 초대·나감·내보냄 같은 시스템 메시지 — 글쓴이 없음, 알림 없음 */
+async function systemMessage(sql: Sql, roomId: string, text: string) {
+  const [m] = await sql<{ id: string }[]>`insert into chat_messages (room_id, author_id, body, kind) values (${roomId}, null, ${text}, 'system') returning id::text`;
+  await sql`update chat_rooms set last_message_at = now() where id = ${roomId}`;
+  return m.id;
+}
+/** 방장(만든 사람)·대표·관리자만 방을 관리(내보내기·이전 대화 공개) */
+const canManage = (u: SessionUser, r: Room) => r.owner_id === u.id || u.role === 'owner' || u.role === 'admin';
+const autoName = (names: string[]) => (names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} 외 ${names.length - 3}`);
 
 async function companyRoom(u: SessionUser, sql: Sql) {
   const t = tenantOf(u);
@@ -31,7 +40,7 @@ async function companyRoom(u: SessionUser, sql: Sql) {
 /** 방 접근 확인 (+ 회사·업무 방은 자동 가입). 못 보면 404 */
 export async function loadRoom(u: SessionUser, roomId: string, sql: Sql = db()): Promise<Room> {
   if (!/^[0-9a-f-]{36}$/.test(roomId)) throw notFound('대화방이 없습니다');
-  const [r] = await sql<Room[]>`select id, tenant, kind, name, task_id, dm_key, team_id from chat_rooms where id = ${roomId}`;
+  const [r] = await sql<Room[]>`select id, tenant, kind, name, task_id, dm_key, team_id, owner_id, history_visible from chat_rooms where id = ${roomId}`;
   if (!r || r.tenant !== tenantOf(u)) throw notFound('대화방이 없습니다');
   if (r.kind === 'task') {
     await loadTaskForUser(u, r.task_id!, sql).catch(() => { throw notFound('대화방이 없습니다'); });
@@ -58,7 +67,7 @@ export async function listRooms(u: SessionUser) {
            when r.kind = 'task' then coalesce(r.name, t.title) else r.name end as name,
       case when r.kind = 'dm' then (select om.user_id from chat_members om where om.room_id = r.id and om.user_id <> ${u.id} limit 1) end as other_id,
       (select count(*)::int from chat_members cm where cm.room_id = r.id) as member_count,
-      (select count(*)::int from chat_messages x where x.room_id = r.id and x.id > m.last_read_id and x.deleted_at is null and x.author_id is distinct from ${u.id}) as unread,
+      (select count(*)::int from chat_messages x where x.room_id = r.id and x.id > greatest(m.last_read_id, m.joined_after_id) and x.deleted_at is null and x.kind <> 'system' and x.author_id is distinct from ${u.id}) as unread,
       lm.body as last_body, lm.file_name as last_file, lu.name as last_author, lm.deleted_at is not null as last_deleted
     from chat_members m join chat_rooms r on r.id = m.room_id
       left join tasks t on t.id = r.task_id
@@ -77,7 +86,7 @@ export async function unreadTotal(u: SessionUser) {
 
 export const roomInput = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('dm'), userId: z.string().uuid() }),
-  z.object({ kind: z.literal('group'), name: z.string().trim().min(1).max(60), userIds: z.array(z.string().uuid()).min(1).max(100) }),
+  z.object({ kind: z.literal('group'), name: z.string().trim().max(60).optional(), userIds: z.array(z.string().uuid()).min(1).max(100) }),
   z.object({ kind: z.literal('task'), taskId: z.string().uuid() }),
 ]);
 /** 같은 회사의 활동 중인 사람만 초대할 수 있다 */
@@ -105,9 +114,13 @@ export async function openRoom(u: SessionUser, i: z.infer<typeof roomInput>) {
   }
   if (i.kind === 'group') {
     const ids = await sameTenantUsers(u, i.userIds.filter((x) => x !== u.id), sql);
-    const [r] = await sql<{ id: string }[]>`insert into chat_rooms (tenant, kind, name, created_by) values (${t}, 'group', ${i.name}, ${u.id}) returning id`;
+    // 메신저 1차: 2명 이상 고르면 그룹 — 이름 비우면 "홍길동, 김철수 외 2" 자동(바로 바꿀 수 있음), 만든 사람이 방장
+    const names = (await sql<{ name: string }[]>`select name from users where id = any(${ids}::uuid[]) order by name`).map((x) => x.name);
+    const name = (i.name ?? '').trim() || autoName([u.name, ...names]);
+    const [r] = await sql<{ id: string }[]>`insert into chat_rooms (tenant, kind, name, created_by, owner_id) values (${t}, 'group', ${name}, ${u.id}, ${u.id}) returning id`;
     for (const id of [u.id, ...ids]) await sql`insert into chat_members (room_id, user_id) values (${r.id}, ${id}) on conflict do nothing`;
-    return { id: r.id };
+    await systemMessage(sql, r.id, `${u.name}님이 ${names.join(', ')}님을 초대했습니다`);
+    return { id: r.id, name };
   }
   const { task } = await loadTaskForUser(u, i.taskId, sql);
   await sql`insert into chat_rooms (tenant, kind, task_id, created_by) values (${t}, 'task', ${task.id}, ${u.id}) on conflict do nothing`;
@@ -120,7 +133,40 @@ export async function addMembers(u: SessionUser, roomId: string, userIds: string
   const sql = db();
   const r = await loadRoom(u, roomId, sql);
   if (r.kind !== 'group') throw badRequest('그룹 대화에만 사람을 더할 수 있습니다');
-  for (const id of await sameTenantUsers(u, userIds, sql)) await sql`insert into chat_members (room_id, user_id) values (${r.id}, ${id}) on conflict do nothing`;
+  const ids = await sameTenantUsers(u, userIds, sql);
+  const already = new Set((await sql<{ user_id: string }[]>`select user_id from chat_members where room_id = ${r.id}`).map((x) => x.user_id));
+  const fresh = ids.filter((x) => !already.has(x));
+  if (!fresh.length) return { ok: true, added: 0 };
+  // 메신저 1차: 초대된 사람은 초대 시점 이후 메시지만(회사 보안) — 방장이 '이전 대화 공개'를 켠 방은 처음부터
+  const [{ last }] = await sql<{ last: string }[]>`select coalesce(max(id), 0)::text as last from chat_messages where room_id = ${r.id}`;
+  for (const id of fresh) await sql`insert into chat_members (room_id, user_id, joined_after_id, last_read_id) values (${r.id}, ${id}, ${r.history_visible ? 0 : last}::bigint, ${last}::bigint) on conflict do nothing`;
+  const names = (await sql<{ name: string }[]>`select name from users where id = any(${fresh}::uuid[]) order by name`).map((x) => x.name);
+  await systemMessage(sql, r.id, `${u.name}님이 ${names.join(', ')}님을 초대했습니다`);
+  return { ok: true, added: fresh.length };
+}
+/** 메신저 1차: 내보내기 — 방장·대표·관리자만, 본인은 '나가기'로 */
+export async function removeMember(u: SessionUser, roomId: string, userId: string) {
+  const sql = db();
+  const r = await loadRoom(u, roomId, sql);
+  if (r.kind !== 'group') throw badRequest('그룹 대화에서만 내보낼 수 있습니다');
+  if (!canManage(u, r)) throw forbidden('방장이나 관리자만 내보낼 수 있습니다');
+  if (userId === u.id) throw badRequest('본인은 [나가기]로 나갑니다');
+  const [m] = await sql<{ name: string }[]>`select us.name from chat_members cm join users us on us.id = cm.user_id where cm.room_id = ${r.id} and cm.user_id = ${userId}`;
+  if (!m) throw notFound('이 방에 없는 사람입니다');
+  await sql`delete from chat_members where room_id = ${r.id} and user_id = ${userId}`;
+  await systemMessage(sql, r.id, `${u.name}님이 ${m.name}님을 내보냈습니다`);
+  await audit(sql, u.id, 'chat.member_removed', 'chat_room', r.id, { userId }, null);
+  return { ok: true };
+}
+/** 메신저 1차: 방장이 '이전 대화 공개'를 켜면 앞으로 초대되는 사람도 처음부터 본다(이미 들어온 사람도 공개) */
+export async function setHistoryVisible(u: SessionUser, roomId: string, on: boolean) {
+  const sql = db();
+  const r = await loadRoom(u, roomId, sql);
+  if (r.kind !== 'group') throw badRequest('그룹 대화에서만 정할 수 있습니다');
+  if (!canManage(u, r)) throw forbidden('방장이나 관리자만 바꿀 수 있습니다');
+  await sql`update chat_rooms set history_visible = ${on} where id = ${r.id}`;
+  if (on) await sql`update chat_members set joined_after_id = 0 where room_id = ${r.id}`;
+  await systemMessage(sql, r.id, on ? `${u.name}님이 이전 대화를 공개했습니다` : `${u.name}님이 이전 대화 공개를 껐습니다(앞으로 초대되는 사람은 초대 뒤 대화만 봅니다)`);
   return { ok: true };
 }
 export async function leaveRoom(u: SessionUser, roomId: string) {
@@ -128,6 +174,8 @@ export async function leaveRoom(u: SessionUser, roomId: string) {
   const r = await loadRoom(u, roomId, sql);
   if (r.kind !== 'group') throw badRequest('그룹 대화만 나갈 수 있습니다');
   await sql`delete from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
+  await systemMessage(sql, r.id, `${u.name}님이 나갔습니다`);
+  if (r.owner_id === u.id) await sql`update chat_rooms set owner_id = (select user_id from chat_members where room_id = ${r.id} order by joined_at limit 1) where id = ${r.id}`; // 방장이 나가면 가장 오래된 사람에게
   return { ok: true };
 }
 /** 대화방 이름 바꾸기: 그룹·업무 대화는 참여자 누구나, 회사 전체방은 대표·관리자. 1:1(상대 이름)·팀(팀 이름을 따름)은 안 됨.
@@ -156,7 +204,8 @@ export async function setMuted(u: SessionUser, roomId: string, muted: boolean) {
   return { ok: true };
 }
 
-const MSG_COLS = (sql: Sql, u: SessionUser) => sql`m.id::text as id, m.room_id, m.author_id, au.name as author_name, m.created_at, m.edited_at, m.pinned_at,
+const MSG_COLS = (sql: Sql, u: SessionUser) => sql`m.id::text as id, m.room_id, m.author_id, au.name as author_name, m.created_at, m.edited_at, m.pinned_at, m.kind, m.forward_of::text as forward_of,
+  (select count(*)::int from chat_members ux where ux.room_id = m.room_id and ux.user_id is distinct from m.author_id and ux.last_read_id < m.id and ux.joined_after_id < m.id) as unread,
   case when m.deleted_at is null then m.body else '' end as body, (m.deleted_at is not null) as deleted,
   case when m.deleted_at is null then m.file_name end as file_name, case when m.deleted_at is null then m.file_mime end as file_mime,
   case when m.deleted_at is null then m.file_size end as file_size, m.task_id, (m.author_id = ${u.id}) as mine,
@@ -171,16 +220,18 @@ export async function roomDetail(u: SessionUser, roomId: string, q: { before?: s
   const sql = db();
   const r = await loadRoom(u, roomId, sql);
   const like = q.q ? '%' + q.q.replace(/[%_\\]/g, (c) => '\\' + c) + '%' : null;
+  const [me0] = await sql<{ joined_after_id: string }[]>`select joined_after_id::text from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
+  const after = me0?.joined_after_id ?? '0';
   const messages = (await sql`select ${MSG_COLS(sql, u)} from chat_messages m left join users au on au.id = m.author_id
-    where m.room_id = ${r.id} ${q.before ? sql`and m.id < ${q.before}::bigint` : sql``} ${like ? sql`and m.deleted_at is null and (m.body ilike ${like} or m.file_name ilike ${like})` : sql``}
+    where m.room_id = ${r.id} and m.id > ${after}::bigint ${q.before ? sql`and m.id < ${q.before}::bigint` : sql``} ${like ? sql`and m.deleted_at is null and (m.body ilike ${like} or m.file_name ilike ${like})` : sql``}
     order by m.id desc limit 60`).reverse();
-  const members = await sql`select cm.user_id as id, us.name, cm.last_read_id::text as last_read_id from chat_members cm join users us on us.id = cm.user_id where cm.room_id = ${r.id} order by us.name`;
+  const members = await sql`select cm.user_id as id, us.name, us.title, us.phone, us.role, cm.last_read_id::text as last_read_id, (cm.user_id = ${r.owner_id ?? null}) as is_owner, cm.joined_at from chat_members cm join users us on us.id = cm.user_id where cm.room_id = ${r.id} order by (cm.user_id = ${r.owner_id ?? null}) desc, us.name`;
   const pinned = await sql`select ${MSG_COLS(sql, u)} from chat_messages m left join users au on au.id = m.author_id where m.room_id = ${r.id} and m.pinned_at is not null and m.deleted_at is null order by m.pinned_at desc limit 10`;
   const [me] = await sql<{ muted: boolean }[]>`select muted from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
   let name = r.name;
   if (r.kind === 'dm') name = (members as any[]).find((m) => m.id !== u.id)?.name ?? '대화';
   if (r.kind === 'task' && !r.name) name = (await sql<{ title: string }[]>`select title from tasks where id = ${r.task_id}`)[0]?.title ?? '업무';
-  return { room: { id: r.id, kind: r.kind, name, taskId: r.task_id, muted: me?.muted ?? false, canRename: canRenameRoom(u, r.kind) }, messages, members, pinned };
+  return { room: { id: r.id, kind: r.kind, name, taskId: r.task_id, muted: me?.muted ?? false, canRename: canRenameRoom(u, r.kind), ownerId: r.owner_id ?? null, canManage: canManage(u, r), historyVisible: !!r.history_visible, joinedAfter: after }, messages, members, pinned };
 }
 
 export const messageInput = z.object({
@@ -302,7 +353,7 @@ export async function changesSince(u: SessionUser, since: string, sinceTime: Dat
   const sql = db();
   const rows = await sql`select ${MSG_COLS(sql, u)} from chat_messages m join chat_members cm on cm.room_id = m.room_id and cm.user_id = ${u.id}
     left join users au on au.id = m.author_id
-    where m.id > ${since}::bigint or (m.edited_at > ${sinceTime} or m.deleted_at > ${sinceTime} or m.pinned_at > ${sinceTime} or m.reacted_at > ${sinceTime})
+    where m.id > cm.joined_after_id and (m.id > ${since}::bigint or (m.edited_at > ${sinceTime} or m.deleted_at > ${sinceTime} or m.pinned_at > ${sinceTime} or m.reacted_at > ${sinceTime}))
     order by m.id limit 200`;
   const typing = await sql`select t.room_id, us.name from chat_typing t join chat_members cm on cm.room_id = t.room_id and cm.user_id = ${u.id}
     join users us on us.id = t.user_id where t.user_id <> ${u.id} and t.at > now() - interval '6 seconds'`;
@@ -320,7 +371,7 @@ export async function searchMessages(u: SessionUser, q: string) {
   const like = '%' + q.replace(/[%_\\]/g, (c) => '\\' + c) + '%';
   return { results: await sql`select ${MSG_COLS(sql, u)}, r.kind as room_kind, coalesce(r.name, t.title) as room_name
     from chat_messages m join chat_members cm on cm.room_id = m.room_id and cm.user_id = ${u.id} join chat_rooms r on r.id = m.room_id left join tasks t on t.id = r.task_id
-    left join users au on au.id = m.author_id where m.deleted_at is null and (m.body ilike ${like} or m.file_name ilike ${like}) order by m.id desc limit 50` };
+    left join users au on au.id = m.author_id where m.id > cm.joined_after_id and m.deleted_at is null and (m.body ilike ${like} or m.file_name ilike ${like}) order by m.id desc limit 50` };
 }
 
 /** "업무로 만들기": 메시지에서 제목·마감·담당 제안(AI 가 켜져 있으면 AI, 아니면 첫 줄). 실제 생성은 사람이 확인 후 업무 등록 창에서 */
@@ -368,4 +419,47 @@ export async function exportRoom(u: SessionUser, roomId: string, ip: string | nu
   await audit(sql, u.id, 'chat.export', 'chat_room', roomId, { count: rows.length }, ip);
   const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
   return ['시각,보낸 사람,내용,파일,삭제', ...rows.map((x) => [x.created_at.toISOString(), x.author ?? '', x.body, x.file_name ?? '', x.deleted_at ? '삭제됨' : ''].map((v) => esc(String(v))).join(','))].join('\n');
+}
+
+/** 메신저 1차 B5: 전달 — 여러 방에 같은 내용(파일은 같은 저장 키를 가리킴)을 보낸다. 시스템 메시지·삭제된 메시지는 못 보냄 */
+export async function forwardMessage(u: SessionUser, id: string, roomIds: string[]) {
+  const sql = db();
+  const m = await ownMessage(u, id, sql);
+  if (m.deleted_at) throw badRequest('삭제된 메시지는 전달할 수 없습니다');
+  const [src] = await sql<{ body: string; file_key: string | null; file_name: string | null; file_mime: string | null; file_size: number | null; kind: string; author_name: string | null }[]>`select m.body, m.file_key, m.file_name, m.file_mime, m.file_size, m.kind, au.name as author_name from chat_messages m left join users au on au.id = m.author_id where m.id = ${id}::bigint`;
+  if (src.kind === 'system') throw badRequest('안내 메시지는 전달할 수 없습니다');
+  const sent: string[] = [];
+  for (const roomId of [...new Set(roomIds)].slice(0, 10)) {
+    const r = await loadRoom(u, roomId, sql);
+    const [n] = await sql<{ id: string }[]>`insert into chat_messages (room_id, author_id, body, file_key, file_name, file_mime, file_size, kind, forward_of)
+      values (${r.id}, ${u.id}, ${src.body}, ${src.file_key}, ${src.file_name}, ${src.file_mime}, ${src.file_size}, 'forward', ${id}::bigint) returning id::text`;
+    await sql`update chat_rooms set last_message_at = now() where id = ${r.id}`;
+    await sql`update chat_members set last_read_id = ${n.id}::bigint where room_id = ${r.id} and user_id = ${u.id}`;
+    const members = await sql<{ user_id: string; muted: boolean }[]>`select user_id, muted from chat_members where room_id = ${r.id}`;
+    const roomName = r.kind === 'dm' ? u.name : r.name ?? '대화';
+    await notify(sql, { userIds: members.filter((x) => x.user_id !== u.id && !x.muted).map((x) => x.user_id), type: 'chat', title: roomName, body: `${u.name}: (전달) ${(src.body || `📎 ${src.file_name}`).slice(0, 100)}`,
+      link: `/messages?room=${r.id}`, entityType: 'chat_room', entityId: r.id, actorId: u.id, dedupeKey: `chat:${n.id}` });
+    sent.push(n.id);
+  }
+  return { ok: true, sent };
+}
+/** 메신저 1차 B7: 이 메시지를 아직 안 읽은 사람 이름 */
+export async function unreadNames(u: SessionUser, id: string) {
+  const sql = db();
+  const m = await ownMessage(u, id, sql);
+  const rows = await sql<{ name: string }[]>`select us.name from chat_members cm join users us on us.id = cm.user_id where cm.room_id = ${m.room_id} and cm.user_id is distinct from ${m.author_id} and cm.last_read_id < ${id}::bigint and cm.joined_after_id < ${id}::bigint order by us.name`;
+  return { names: rows.map((r) => r.name) };
+}
+/** 메신저 1차 A2: 방 정보 — 사진·파일·링크 모아보기(초대 이후 것만) */
+export async function roomMedia(u: SessionUser, roomId: string) {
+  const sql = db();
+  const r = await loadRoom(u, roomId, sql);
+  const [me] = await sql<{ joined_after_id: string }[]>`select joined_after_id::text from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
+  const after = me?.joined_after_id ?? '0';
+  const files = await sql`select m.id::text as id, m.file_name, m.file_mime, m.file_size, m.created_at, au.name as author_name from chat_messages m left join users au on au.id = m.author_id
+    where m.room_id = ${r.id} and m.id > ${after}::bigint and m.deleted_at is null and m.file_key is not null order by m.id desc limit 200`;
+  const linkRows = await sql<{ id: string; body: string; created_at: Date; author_name: string | null }[]>`select m.id::text as id, m.body, m.created_at, au.name as author_name from chat_messages m left join users au on au.id = m.author_id
+    where m.room_id = ${r.id} and m.id > ${after}::bigint and m.deleted_at is null and m.body ~ 'https?://' order by m.id desc limit 200`;
+  const links = linkRows.flatMap((x) => (x.body.match(/https?:\/\/[^\s<]+/g) ?? []).map((url) => ({ id: x.id, url, created_at: x.created_at, author_name: x.author_name })));
+  return { images: files.filter((f: any) => /^image\//.test(f.file_mime ?? '')), files: files.filter((f: any) => !/^image\//.test(f.file_mime ?? '')), links };
 }

@@ -1299,6 +1299,17 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 7) 사용자 관리 **퇴사 처리 / 계정 인수인계**(src/lib/offboard.ts, migration 125 users.left_at·left_by·rejoin_until·handover_to): 목록 [퇴사 처리] → 창에서 퇴사일 + (선택) 받을 사람·항목 체크(개수) → `POST /api/admin/users/{id}/leave {date, toUserId?, items?}`: 상태 퇴사(날짜)·세션 즉시 만료·푸시 끔·초대 취소·Google 연동 멈춤·**부서·팀·대화방에서 자동 제거**(기록은 남음)·요금제 인원 제외(사용 중 수에 안 들어감)·알림 수신 중지(notify 는 사용 중만). 자료실 파일은 회사 소유 그대로, 메일·문자 발송 기록 보존(지우지 않음). [인수인계] `GET/POST /api/admin/users/{id}/handover`: 담당 업무(진행 중)·내가 지시한 업무·참여 업무·반복 업무·결재선(대기 단계)·영업 리드·앞으로의 일정·연락처·프로젝트 책임·웹 문의 — 항목별 체크 → 한 사람에게 일괄 이전(개수 응답). [복직] `POST …/rejoin` 퇴사일부터 30일(요금제 인원 안에서). 목록은 퇴사자 접힘('퇴사자 n명 보기'), 상태 칸 '퇴사(10/20)'·'복직 가능 ~11/19'. 모두 감사 기록(user.leave·user.handover·user.rejoin). 본인·마지막 대표는 불가.
 - 시험: tests/api/offboard.test.mjs 3건(요약 개수·퇴사+인수인계·세션 401·팀/방 제거·완료 업무 보존·감사 / 받을 사람·항목 검증·복직 기한·복직 로그인) · tests/api/mkt-bundle.test.mjs 2건(묶음 5개·3일 간격 칸·cross_channels·shorts/story·요일도 n일도 없으면 400 / 유튜브·스레드 사유) · tests/api/team-view.test.mjs 4건(기본 자기 팀·지정 팀 조회/목록/칩/403/빈 목록·전체·격리 우선) · E2E team-chips.step.mjs(대표 칩·칩 필터·직원 칩 → 메뉴 권한 지정 팀 → 직원 칩 생김 → 자기 팀만으로 되돌림, 캡처 147).
 
+## 2026-10-20 (클라우드) — 메신저 카톡 수준 1차 (docs/handoff/MESSENGER_KAKAO_LEVEL_2026-10-20.md A1~3 + B5·6·7) — [배포확인요청]
+- migration 126_chat_v3: chat_messages.kind(text/system/forward)·forward_of, chat_rooms.owner_id(방장, 기존 그룹은 만든 사람)·history_visible, chat_members.joined_after_id(초대 시점 이후만)
+- A1 [새 대화] 한 화면 다중 선택(src/components/messenger/Messenger.tsx NewRoom): 이름·부서·직급 검색, '최근 대화' 먼저 + 부서별 묶음, 선택 칩, 1명 = 1:1 / 2명+ = 그룹(이름 비우면 "김대표, 박직원, 이직원" 또는 "… 외 n" 자동, 서버 `autoName`)
+- A2 방 정보(머리줄 ⓘ `chat-info` → RoomInfo): 참여자(직급·방장 배지·1:1 열기)·[초대]·[내보내기 방장/대표/관리자만 `DELETE /api/chat/rooms/{id}/members {userId}`]·[나가기]·알림·목록 고정·[이전 대화 공개](방장)·사진/파일/링크 모아보기(`GET /api/chat/rooms/{id}/media`, 초대 이후 것만). 방 사진·부서 방 자동(A4)은 2차 이후
+- A3 초대: 시스템 메시지(`kind='system'`, 글쓴이 없음·알림 없음) "○○님이 △△님을 초대했습니다/내보냈습니다/나갔습니다/이전 대화를 공개했습니다", 초대된 사람은 **초대 시점 이후 메시지만**(목록 안 읽은 수·검색·모아보기도 같은 기준). 방장이 [이전 대화 공개]를 켜면 모두 처음부터. 방장이 나가면 가장 오래된 참여자에게 방장
+- B5 전달(`POST /api/chat/messages/{id}/forward {roomIds[] ≤10}`): 여러 방 한 번에, `kind='forward'`·`forward_of`(파일은 같은 저장 키), 말풍선에 "전달된 메시지", 받는 쪽 알림 "(전달)". 더보기 메뉴 통일: 전달·업무로 만들기·공지 등록/해제·복사·수정·삭제
+- B6 공지: '공지로 고정' → '공지 등록' — 방 상단 접힘 바(`chat-pinned`/`chat-notice-toggle`, 누르면 전문 + 이전 공지 이력)
+- B7 읽음: 메시지 옆 **안 읽은 수**(`msg-unread`, 초대 전 사람 제외·실시간 읽음 반영) → 누르면 안 읽은 사람 이름(`GET /api/chat/messages/{id}/unread`). 내 메시지를 모두 읽으면 '읽음'
+- 시험: tests/api/chat-v3.test.mjs 6건, tests/e2e/messengerV3.step.mjs(캡처 149~151)
+- 다음: 플랫폼 운영 [고객사 추가] → 메신저 2차(B8~11 + C13: 사진 묶음·투표·일정·스티커·휴대폰 입력창) → 3차(C12 + D: 알림 설정·방장 권한 확장·검색 이동)
+
 ## 대표 결정이 필요한 것
 - (10/19) 영업 전환: 원본 동결 날짜·시각, 읽기 전용 기간·백업 보관, 계정 없는 영업 사용자 — docs/research/SALES_CUTOVER_PLAN.md
 - (10/18) 인스타·페북 게시: 통합 게시 API 업체(Upload-Post/Zernio)·결제 명의(하이링크), Meta 직접 연동은 뒤로 미룰지 — docs/research/MKT_PUBLISH_DIRECT_VS_RELAY.md

@@ -39,6 +39,10 @@ export async function leaveUser(actor: SessionUser, id: string, i: z.infer<typeo
     await tx`update invitations set revoked_at = now() where user_id = ${id} and accepted_at is null and revoked_at is null`;
     await tx`update google_calendar_links set status = 'paused' where user_id = ${id}`;
     // 메신저·팀에서 자동 제거(대화 기록은 남음). 팀장이었으면 팀은 그대로 두고 사람만 빠짐 — 새 팀장은 부서·팀 화면에서
+    for (const r of await tx<{ room_id: string }[]>`select cm.room_id from chat_members cm join chat_rooms r on r.id = cm.room_id where cm.user_id = ${id} and r.kind in ('group', 'team', 'company')`) {
+      await tx`insert into chat_messages (room_id, author_id, body, kind) values (${r.room_id}, null, ${`${cur.name}님이 퇴사하여 나갔습니다`}, 'system')`; // 메신저 1차 시스템 메시지
+      await tx`update chat_rooms set owner_id = (select user_id from chat_members where room_id = ${r.room_id} and user_id <> ${id} order by joined_at limit 1) where id = ${r.room_id} and owner_id = ${id}`;
+    }
     await tx`delete from chat_members where user_id = ${id}`;
     await tx`delete from team_members where user_id = ${id}`;
     await tx`delete from team_view_grants where user_id = ${id}`;

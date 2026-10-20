@@ -10,6 +10,7 @@ before(async () => {
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'gone@dagym.test', name: '퇴사예정', role: 'staff', orgUnitIds: [ctx.hq] });
   const c = new Client('gone'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'gone-pass-1234' });
   P.gone = { id: inv.userId, c };
+  P.room = (await P.gone.c.ok('POST', '/api/chat/rooms', { kind: 'group', name: '퇴사자 방', userIds: [ctx.ownerId] })).id; // 퇴사자가 방장
   P.team = (await ctx.owner.ok('POST', '/api/teams', { name: '본사팀', members: [{ userId: ctx.ownerId, lead: true }, { userId: P.gone.id, lead: false }] })).id;
   P.t1 = (await ctx.owner.ok('POST', '/api/tasks', { title: '퇴사자 담당 업무', assigneeId: P.gone.id, orgUnitId: ctx.hq, approvalRequired: false })).id;
   P.t2 = (await P.gone.c.ok('POST', '/api/tasks', { title: '퇴사자가 지시한 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.hq, approvalRequired: false })).id;
@@ -38,6 +39,8 @@ describe('퇴사 처리·인수인계·복직', () => {
     assert.deepEqual([u.status, u.left_at, u.rejoin_until, u.handover_to], ['left', '2026-10-20', '2026-11-19', ctx.staffA.id]);
     assert.equal((await sql`select 1 from team_members where user_id = ${P.gone.id}`).length, 0, '팀에서 빠짐');
     assert.equal((await sql`select 1 from chat_members where user_id = ${P.gone.id}`).length, 0, '대화방에서 빠짐(메신저 자동 제거)');
+    assert.ok((await sql`select 1 from chat_messages where room_id = ${P.room} and kind = 'system' and body like '%퇴사예정님이 퇴사하여 나갔습니다%'`).length, '방에 시스템 메시지');
+    assert.equal((await sql`select owner_id from chat_rooms where id = ${P.room}`)[0].owner_id, ctx.ownerId, '방장이 퇴사하면 남은 사람에게');
     const [t1] = await sql`select assignee_id from tasks where id = ${P.t1}`; const [t2] = await sql`select requested_by from tasks where id = ${P.t2}`; const [t3] = await sql`select assignee_id from tasks where id = ${P.t3}`;
     assert.deepEqual([t1.assignee_id, t2.requested_by, t3.assignee_id], [ctx.staffA.id, ctx.staffA.id, P.gone.id], '진행 중만 이전, 완료 업무는 그대로(기록 보존)');
     assert.equal((await sql`select count(*)::int as n from users where tenant = 'default' and status = 'active' and not is_demo`)[0].n, 4, '요금제 인원(사용 중)에서 제외 — 대표·직원 2·매니저');

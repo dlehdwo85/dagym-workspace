@@ -38,6 +38,7 @@ import { salesWorkFlow } from './sales-work.step.mjs';
 import { calEditFlow } from './cal-edit.step.mjs';
 import { teamChipsFlow } from './team-chips.step.mjs';
 import { offboardFlow } from './offboard.step.mjs';
+import { messengerV3 } from './messengerV3.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
@@ -1969,7 +1970,7 @@ await step('V13 10번 메신저: 1:1 대화 → 상대 화면에 실시간 도�
   await owner.getByTestId('chat-input').press('Enter');
   // 상대: 목록에 안 읽은 수 → 열면 메시지
   await a.getByTestId('room-unread').first().waitFor({ timeout: 15000 });
-  await a.getByTestId('chat-rooms').getByText('김대표').click();
+  await a.getByTestId('chat-rooms').getByText('김대표', { exact: true }).click(); // 그룹방 미리보기 '김대표님이 …초대했습니다' 와 구분
   await a.getByTestId('chat-messages').getByText('내일 오전에 현장 사진 부탁해요').waitFor();
   await a.getByTestId('chat-input').fill('네 알겠습니다');
   await a.getByTestId('chat-send').click();
@@ -2320,6 +2321,7 @@ await step('S1-2 진행 기록 쓰기(390): 입찰 상세 원본 상태 버튼·
 await step('로컬 10/20 캘린더 재발: 빠른 입력 첫 화면 색 줄 → 생성 직후 편집(새로고침 신호에도 입력 유지·저장) → 다른 기기 충돌 뒤 [완료] 자동 재시도', () => calEditFlow({ browser, desk, owner, ctx, sql, BASE, SHOTS }));
 await step('대표 10/20 4) 팀별 보기: 업무 화면 팀 칩(볼 수 있는 팀만) → 칩으로 그 팀 업무만 → 메뉴 권한 \'팀 업무 보기\' 지정 팀 → 직원 화면에 그 팀 칩', () => teamChipsFlow({ browser, owner, ctx, sql, BASE, SHOTS, login }));
 await step('대표 10/20 7) 퇴사 처리·인수인계: 창에서 퇴사일·받을 사람·항목 개수 → 퇴사(날짜)·접힘·인수인계·복직 버튼 → 로그인 차단·업무 이전', () => offboardFlow({ owner, ctx, BASE, SHOTS }));
+await step('메신저 1차(대표 10/20): 새 대화 다중 선택·그룹 자동 이름·방 정보(초대·내보내기)·시스템 메시지·안 읽은 수(이름)·공지 바·전달', () => messengerV3({ owner, ctx, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();
