@@ -24,7 +24,7 @@ export const draftInput = z.object({
 async function pageText(raw: string) {
   let u: URL; try { u = new URL(raw); } catch { throw badRequest('홈페이지 주소 형식이 아닙니다'); }
   if (u.protocol !== 'https:' || /^(localhost|.*\.local|.*\.internal)$/i.test(u.hostname) || /^[\d.]+$|^\[|:/.test(u.hostname)) throw badRequest('https:// 로 시작하는 공개 홈페이지 주소만 읽을 수 있습니다');
-  const res = await fetch(u.href, { signal: AbortSignal.timeout(8000), redirect: 'follow', headers: { 'user-agent': 'WorkIn/1.0 (+https://www.work-in.dev)' } }).catch(() => null);
+  const res = await fetch(u.href, { signal: AbortSignal.timeout(8000), redirect: 'follow', headers: { 'user-agent': 'WorkIn/1.0 (+https://work-in.dev)' } }).catch(() => null);
   if (!res?.ok) throw badRequest('홈페이지를 읽지 못했습니다 — 주소를 확인하거나 소개 글을 붙여 넣어 주세요');
   const html = (await res.text()).slice(0, 500_000);
   return html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&amp;|&lt;|&gt;|&quot;/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 8000);

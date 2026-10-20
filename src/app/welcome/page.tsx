@@ -8,7 +8,7 @@ import { ArrowRight, BellRing, Briefcase, Check, Download, Mail, Megaphone, Mic,
  * 워크인 소개 사이트(대표 10/20 16:45): work-in.dev 루트(로그인 전) — 로그인하면 홈(middleware). 앱은 로그인 화면.
  * H1 "업무도, 영업도, 마케팅도 한 화면에서" · 5명 무료 · [무료로 시작]/[앱 다운로드] · 세 공간 소개 · AI 비서 · 도입 3단계 · 요금(5명 무료만) · 문의 · 푸터(개인정보·계정 삭제·운영사) · JSON-LD·OG · UTM·sign_up/CompleteRegistration/tel 이벤트 · 390px.
  */
-const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.work-in.dev'; // 주 도메인은 Vercel 설정(지금 www) — 바뀌면 env 로
+const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://work-in.dev'; // 대표 10/20 22:30: 주 도메인 = work-in.dev(apex). 방향(308)은 코드가 아니라 Vercel 설정 — 바뀌면 env 로
 const PLAY = process.env.NEXT_PUBLIC_PLAY_URL || ''; // 정식 출시 전엔 스토어 주소가 404 — 로컬이 출시 뒤 env 로(내부 테스트 링크도 가능)
 const APPSTORE = process.env.NEXT_PUBLIC_APPSTORE_URL || '';
 const CONTACT_MAIL = 'dagym-in@naver.com';
