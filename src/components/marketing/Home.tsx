@@ -21,6 +21,7 @@ type Home = {
   canEdit: boolean; cards: { cards: string[]; mine: boolean; company: string[] | null }; cardLabels: Record<string, string>;
   kpi: { approvals: number; approvalsDetail: { contents: number; adPlans: number }; today: { id: string; channel: string; kind: string | null; at: string; status: string }[]; week: { done: number; planned: number }; ads: { cost7: number; clicks7: number; today: number } | null; calls7: number };
   approve: (CardContent & { media: string | null })[]; approvalHour: number;
+  goal: { id: string; month: string; status: string; posts: { done: number; planned: number; target: number | null }; inquiries: { done: number; target: number | null }; adCost: { spent: number; budget: number | null }; objectives: string[]; message: string | null; weekTopic: string | null; week: number | null } | null;
   queue: { kind: string; id: string; title: string; state: 'waiting' | 'running' | 'done'; at: string | null; href: string; night: boolean; canRun: boolean; canNight: boolean; note?: string }[];
   night: { id: string; title: string; kind: string }[]; nightScope: Record<string, boolean>;
   week: { day: string; posts: { id: string; channel: string; status: string; title: string }[] }[];
@@ -132,9 +133,19 @@ export function MarketingHome() {
   ];
   const sections: Record<string, React.ReactNode> = {
     chat: <HomeChat key="chat" />,
-    kpi: <section key="kpi" className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="mkt-home-kpi">
-      {kpi.map(([l, v, sub, href]) => <Link key={l} href={href} className="rounded-card border border-line bg-white p-3 shadow-card hover:border-violet-300" data-testid="mkt-kpi"><div className="text-[11px] text-ink-2">{l}</div><div className="text-xl font-bold tabular-nums" style={{ color: C }}>{v}</div><div className="truncate text-[11px] text-ink-3">{sub}</div></Link>)}
-    </section>,
+    kpi: <div key="kpi" className="space-y-2"><section className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="mkt-home-kpi">
+      {kpi.map(([l, v, sub, href]) => <Link key={l} href={href} className="rounded-card border border-line bg-white p-3 shadow-card hover:border-violet-300" data-testid="mkt-kpi"><div className="text-[11px] text-ink-2">{l}</div>
+<div className="text-xl font-bold tabular-nums" style={{ color: C }}>{v}</div><div className="truncate text-[11px] text-ink-3">{sub}</div></Link>)}
+    </section>
+      {/* 대표 10/20 18:00 ②: 이번 달 목표 n/m 막대(승인된 목표) — 없으면 [목표 만들기] */}
+      {data.goal ? <Link href="/s/marketing/goals" className="block rounded-card border border-line bg-white p-3 shadow-card hover:border-violet-300" data-testid="mkt-home-goal">
+        <div className="flex flex-wrap items-center gap-2 text-sm"><b>이번 달 목표</b>{data.goal.status === 'pending' && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-800">초안 — 승인 필요</span>}
+          <span className="text-xs text-ink-2">{data.goal.objectives[0] ?? ''}</span>{data.goal.weekTopic && <span className="ml-auto text-xs text-ink-3">{data.goal.week}주 주제 · {data.goal.weekTopic}</span>}</div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3 text-xs">{([['게시', data.goal.posts.done, data.goal.posts.target, '건'], ['문의', data.goal.inquiries.done, data.goal.inquiries.target, '건'], ['광고비', data.goal.adCost.spent, data.goal.adCost.budget, '원']] as [string, number, number | null, string][]).map(([l, d, t, u]) => (
+          <div key={l}><div className="flex justify-between"><span className="text-ink-2">{l}</span><span className="tabular-nums" data-testid={`mkt-goal-${l}`}>{u === '원' ? d.toLocaleString('ko-KR') : d}{t ? `/${u === '원' ? t.toLocaleString('ko-KR') : t}` : ''}{u}</span></div>
+            <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${t ? Math.min(100, Math.round((d / t) * 100)) : 0}%`, background: C }} /></div></div>))}</div>
+      </Link> : data.canEdit ? <Link href="/s/marketing/goals" className="block rounded-card border border-dashed border-line p-3 text-center text-xs text-ink-2 hover:border-violet-300" data-testid="mkt-home-goal-none">이번 달 운영 목표가 없습니다 — AI 초안 만들기 →</Link> : null}
+    </div>,
     approve: <section key="approve" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-now">
       <h2 className="flex items-center justify-between text-base font-bold" data-testid="mkt-home-head"><span>{data.kpi.approvalsDetail.contents ? <>① 지금 승인할 것 <span className="text-orange-700">{data.kpi.approvalsDetail.contents}건</span></> : '① 지금 승인할 것 없음 ✓'}</span>
         {data.kpi.approvalsDetail.contents > 0 && <Link href="/s/marketing/approvals" className="text-xs font-medium" style={{ color: C }}>전체 →</Link>}</h2>

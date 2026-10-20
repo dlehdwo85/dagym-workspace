@@ -7,7 +7,7 @@ import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
-import { ApprovalCard, BrandChip, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent } from './ApprovalCard';
+import { ApprovalCard, BrandChip, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, WhyBox } from './ApprovalCard';
 
 const C = '#7C3AED';
 export const CHANNELS: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
@@ -73,7 +73,7 @@ export function ApproveRow({ c, canDecide, onDone }: { c: CardContent; canDecide
 
 function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: () => void; date?: string }) {
   const brands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
-  const [f, setF] = useState({ title: '', channel: 'instagram', brandId: '', date: date ?? '', time: '10:00', body: '', cross: [] as string[] }); // cross: 대표 10/20 '페이스북에도'·'스레드에도'(승인 1건)
+  const [f, setF] = useState({ title: '', channel: 'instagram', brandId: '', date: date ?? '', time: '10:00', body: '', cross: [] as string[], purpose: '', metric: '', message: '', why: '' }); // cross: 대표 10/20 '페이스북에도'·'스레드에도'(승인 1건) · purpose~why: 근거(대표 18:00 ①)
   const [media, setMedia] = useState<{ id: string; title: string }[]>([]);
   const [ai, setAi] = useState<{ captions: string[]; hashtags: string[] } | null>(null); const [aiBusy, setAiBusy] = useState(false);
   async function draft() {
@@ -85,7 +85,8 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
   async function save(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api('/api/marketing/contents', { body: { title: f.title, channel: f.channel, brandId: f.brandId || null, scheduledAt: f.date ? `${f.date}T${f.time}:00+09:00` : null, body: f.body, mediaIds: media.map((m) => m.id), crossChannels: f.cross } });
+      await api('/api/marketing/contents', { body: { title: f.title, channel: f.channel, brandId: f.brandId || null, scheduledAt: f.date ? `${f.date}T${f.time}:00+09:00` : null, body: f.body, mediaIds: media.map((m) => m.id), crossChannels: f.cross,
+        rationale: { purpose: f.purpose || undefined, metric: f.metric || undefined, message: f.message || undefined, why: f.why || undefined } } });
       toast.ok('승인 대기에 올렸습니다'); onDone(); onClose();
     } catch (er: any) { toast.error(er.message); }
   }
@@ -111,6 +112,14 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
             <li className="text-[11px] text-ink-3">초안을 누르면 본문에 넣습니다(해시태그 포함). 사실·가격은 꼭 확인하세요.</li></ul>}
         </div>
         <Field label="시안(승인하려면 1개 이상)"><MediaPick value={media} onChange={setMedia} /></Field>
+        {/* 대표 10/20 18:00 ①: 근거 칸 — 승인함 카드·상세 '왜 이 글인가'에 보임 */}
+        <details className="rounded-input border border-line p-2" data-testid="mkt-new-why"><summary className="cursor-pointer text-xs text-ink-2">근거 — 목적·목표 지표·핵심 메시지·왜 이 글인가(선택)</summary>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <Field label="목적"><input className={inputCls} value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })} maxLength={200} placeholder="예: 신규 회원 문의" data-testid="mkt-why-purpose" /></Field>
+            <Field label="목표 지표"><input className={inputCls} value={f.metric} onChange={(e) => setF({ ...f, metric: e.target.value })} maxLength={200} placeholder="예: 전화 문의 5건" /></Field>
+            <Field label="핵심 메시지"><input className={inputCls} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} maxLength={200} placeholder="예: 가을 이벤트 30% 할인" /></Field>
+          </div>
+          <Field label="왜 이 글인가" className="mt-2"><input className={inputCls} value={f.why} onChange={(e) => setF({ ...f, why: e.target.value })} maxLength={300} placeholder="예: 이달 목표 신규 문의 — 2주 주제 이벤트 안내" data-testid="mkt-why-why" /></Field></details>
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" data-testid="mkt-save">승인 요청</Button></div>
       </form>
     </Modal>
@@ -163,6 +172,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         <AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContent} subject={`시안 ${String(c.title).slice(0, 40)}`} compact testId="ai-ask-content" />
         <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b> · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
         {c.quality?.passed === false && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">{c.auto ? '품질 검사: ' : ''}{c.quality.issues.join(' · ')}</p>}
+        <WhyBox r={c.rationale} />
         {v && <PostPreview channel={c.channel} kind={c.kind} brand={c.brand} title={c.title} body={v.body} media={v.media_ids} />}
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>

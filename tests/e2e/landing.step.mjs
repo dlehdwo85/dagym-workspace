@@ -19,7 +19,7 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   assert.equal(await p.evaluate(() => JSON.parse(localStorage.getItem('wos_utm') ?? '{}').source), 'naver', 'UTM 기억');
   const fired = await p.evaluate(() => new Promise((r) => { document.addEventListener('wos:landing', (e) => r(e.detail.kind), { once: true }); document.querySelector('[data-testid="landing-app"]').click(); }));
   assert.equal(fired, 'app', '앱 다운로드 클릭 이벤트');
-  await p.getByTestId('landing-stores').getByText('Google Play').waitFor();
+  await p.getByTestId('landing-stores').getByText(/Google Play/).waitFor();
   await p.screenshot({ path: `${SHOTS}/163-landing.png`, fullPage: true });
   await p.setViewportSize({ width: 390, height: 844 }); await p.goto(`${BASE}/`);
   await p.getByTestId('landing-title').waitFor();

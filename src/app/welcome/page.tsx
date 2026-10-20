@@ -9,7 +9,7 @@ import { ArrowRight, BellRing, Briefcase, Check, Download, Mail, Megaphone, Mic,
  * H1 "업무도, 영업도, 마케팅도 한 화면에서" · 5명 무료 · [무료로 시작]/[앱 다운로드] · 세 공간 소개 · AI 비서 · 도입 3단계 · 요금(5명 무료만) · 문의 · 푸터(개인정보·계정 삭제·운영사) · JSON-LD·OG · UTM·sign_up/CompleteRegistration/tel 이벤트 · 390px.
  */
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.work-in.dev'; // 주 도메인은 Vercel 설정(지금 www) — 바뀌면 env 로
-const PLAY = 'https://play.google.com/store/apps/details?id=kr.co.dagym.workos';
+const PLAY = process.env.NEXT_PUBLIC_PLAY_URL || ''; // 정식 출시 전엔 스토어 주소가 404 — 로컬이 출시 뒤 env 로(내부 테스트 링크도 가능)
 const APPSTORE = process.env.NEXT_PUBLIC_APPSTORE_URL || '';
 const CONTACT_MAIL = 'dagym-in@naver.com';
 const TITLE = '워크인 — 업무도, 영업도, 마케팅도 한 화면에서';
@@ -75,7 +75,7 @@ export default function Welcome() {
           <p className="mt-1 text-center text-sm text-ink-2">업무는 기본. 영업·마케팅은 관리자가 켜면 사이드바와 휴대폰 탭이 그 공간 메뉴로 바뀝니다.</p>
           <div className="mt-8 space-y-8" data-testid="landing-spaces">{SPACES.map((s, i) => (
             <article key={s.key} className={'grid items-center gap-5 md:grid-cols-2 ' + (i % 2 ? 'md:[&>figure]:order-2' : '')} data-testid={`landing-space-${s.key}`}>
-              <figure className="overflow-hidden rounded-card border border-line bg-white shadow-card"><img src={s.img} alt={`${s.name} 공간 화면`} className="aspect-[4/3] w-full object-cover object-left-top" loading="lazy" width={1280} height={960} /></figure>
+              <figure className="overflow-hidden rounded-card border border-line bg-white shadow-card"><img src={s.img} alt={`${s.name} 공간 화면`} className="aspect-[4/3] w-full object-cover object-left-top" width={1280} height={960} /></figure>
               <div>
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-white" style={{ background: s.color }}><s.icon className="size-3.5" />{s.name}</span>
                 <h3 className="mt-2 text-xl font-bold">{s.t}</h3><p className="mt-1 text-sm text-ink-2">{s.d}</p>
@@ -114,7 +114,8 @@ export default function Welcome() {
       <section id="app" className="bg-slate-50 py-12">
         <div className="mx-auto max-w-6xl px-4 text-center"><h2 className="text-2xl font-bold">앱으로도</h2><p className="mt-1 text-sm text-ink-2">푸시 알림·말로 등록·바탕화면 위젯은 앱에서. 계정은 웹과 같습니다.</p>
           <div className="mt-5 flex flex-wrap justify-center gap-2" data-testid="landing-stores">
-            <a href={PLAY} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[48px] items-center gap-2 rounded-input bg-ink px-5 py-3 font-semibold text-white" data-track="play">Google Play</a>
+            {PLAY ? <a href={PLAY} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[48px] items-center gap-2 rounded-input bg-ink px-5 py-3 font-semibold text-white" data-track="play">Google Play</a>
+              : <span className="inline-flex min-h-[48px] items-center rounded-input border border-line px-5 py-3 text-sm text-ink-2">Google Play 심사 중</span>}
             {APPSTORE ? <a href={APPSTORE} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[48px] items-center gap-2 rounded-input bg-ink px-5 py-3 font-semibold text-white" data-track="appstore">App Store</a>
               : <span className="inline-flex min-h-[48px] items-center rounded-input border border-line px-5 py-3 text-sm text-ink-2">App Store 심사 중</span>}
           </div></div>

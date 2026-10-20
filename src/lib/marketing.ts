@@ -97,7 +97,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.is_test, b.name as brand, b.color as brand_color,
-      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality,
+      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality, c.rationale,
       (select json_build_object('kind', p.kind, 'status', p.status) from mkt_production_requests p where p.content_id = c.id and p.kind in ('image', 'video', 'regen_image', 'regen_video') and p.status in ('open', 'needs_approval') order by p.created_at desc limit 1) as production,
       (select max(d.version) from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version) as reapprove_from,
       (select json_build_object('decision', d.decision, 'comment', d.comment, 'at', d.decided_at, 'version', d.version, 'by', du.name) from mkt_decisions d left join users du on du.id = d.decided_by
@@ -141,7 +141,9 @@ export async function getContent(u: SessionUser, id: string) {
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };
 export const contentInput = z.object({ title: z.string().trim().min(1).max(200), channel: zChannel, brandId: zUuid.nullable().optional(), scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
   /** 대표 10/20 11:40 ②·6): 같은 글을 함께 올릴 채널('페이스북에도'·'스레드에도') — 승인 1건, M1 게시 실행기가 채널마다 올림 */
-  crossChannels: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional(), ...versionFields });
+  crossChannels: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional(), ...versionFields,
+  /** 대표 10/20 18:00 ①: 근거 — 목적·목표 지표·핵심 메시지·왜 이 글인가(선택) */
+  rationale: z.object({ purpose: z.string().trim().max(200).optional(), metric: z.string().trim().max(200).optional(), message: z.string().trim().max(200).optional(), why: z.string().trim().max(300).optional() }).optional() });
 export async function createContent(u: SessionUser, i: z.infer<typeof contentInput>) {
   await assertSpace(u, 'marketing');
   await mediaOk(u, i.mediaIds);
@@ -151,8 +153,9 @@ export async function createContent(u: SessionUser, i: z.infer<typeof contentInp
   const isTest = !!br?.test_mode; // 시험 모드 브랜드: [시험] 표시·알림은 올린 사람에게만·게시 확인 안 됨
   const title = isTest && !i.title.startsWith('[시험]') ? `[시험] ${i.title}` : i.title;
   return sql.begin(async (tx) => {
-    const [c] = await tx<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, is_test, cross_channels)
-      values (${t}, ${i.brandId ?? null}, ${title}, ${i.channel}, ${i.scheduledAt ?? null}, ${needsPhotos(i.channel, i.mediaIds.length) ? 'changes' : 'pending'}, 1, ${u.id}, ${isTest}, ${(i.crossChannels ?? []).filter((x) => x !== i.channel)}) returning id`;
+    const rat = i.rationale && Object.values(i.rationale).some(Boolean) ? { ...i.rationale, source: 'user' } : null;
+    const [c] = await tx<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, is_test, cross_channels, rationale)
+      values (${t}, ${i.brandId ?? null}, ${title}, ${i.channel}, ${i.scheduledAt ?? null}, ${needsPhotos(i.channel, i.mediaIds.length) ? 'changes' : 'pending'}, 1, ${u.id}, ${isTest}, ${(i.crossChannels ?? []).filter((x) => x !== i.channel)}, ${rat ? tx.json(rat as never) : null}) returning id`;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
     if (needsPhotos(i.channel, i.mediaIds.length)) { await tx`update mkt_contents set quality = ${tx.json({ passed: false, issues: [BLOG_PHOTO_RULE] } as never)} where id = ${c.id}`; return { id: c.id, version: 1, needsPhotos: true }; }
     const admins = isTest ? [] : await (await import('./mktAuto')).approvers(t);
