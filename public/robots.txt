@@ -8,4 +8,4 @@ Allow: /privacy
 Allow: /account-deletion
 Allow: /landing/
 Disallow: /
-Sitemap: https://work-in.dev/sitemap.xml
+Sitemap: https://www.work-in.dev/sitemap.xml

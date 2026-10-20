@@ -14,7 +14,7 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   await p.getByTestId('biz-footer').getByRole('link', { name: '계정 삭제' }).waitFor();
   const ld = JSON.parse(await p.locator('script[type="application/ld+json"]').first().innerHTML());
   assert.ok(ld['@graph'].some((x) => x['@type'] === 'SoftwareApplication' && x.offers.price === '0'), 'JSON-LD');
-  assert.equal(await p.locator('meta[property="og:image"]').getAttribute('content'), 'https://work-in.dev/landing/og.png');
+  assert.equal(await p.locator('meta[property="og:image"]').getAttribute('content'), 'https://www.work-in.dev/landing/og.png');
   assert.equal(await p.locator('meta[name="robots"]').getAttribute('content'), 'index, follow');
   assert.equal(await p.evaluate(() => JSON.parse(localStorage.getItem('wos_utm') ?? '{}').source), 'naver', 'UTM 기억');
   const fired = await p.evaluate(() => new Promise((r) => { document.addEventListener('wos:landing', (e) => r(e.detail.kind), { once: true }); document.querySelector('[data-testid="landing-app"]').click(); }));
