@@ -37,7 +37,7 @@ const ACTION_LABEL: Record<string, string> = {
   file_attached: '파일 첨부', file_downloaded: '파일 내려받음', mail_queued: '메일 보내기 요청', mail_sent: '메일 보냄', mail_failed: '메일 발송 실패', share_created: '다운로드 링크 만듦', share_opened: '고객이 자료를 열어봄', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
 const FIELD_LABEL: Record<string, string> = {
-  title: '제목', description: '설명', assigneeId: '담당자', requestedById: '지시자', priority: '우선순위', startDate: '시작일', dueDate: '마감일', dueTime: '마감 시각', status: '상태',
+  title: '제목', description: '설명', assigneeId: '담당자', requestedById: '요청자', priority: '우선순위', startDate: '시작일', dueDate: '마감일', dueTime: '마감 시각', status: '상태',
   tags: '태그', projectId: '프로젝트', sectionId: '섹션', brandId: '브랜드', orgUnitId: '소속', collaborators: '협업자', approvalRequired: '검토 필요', recurrenceRule: '반복', dependsOn: '선행 업무',
 };
 
@@ -157,7 +157,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const perms = data.perms;
   const userName = (uid: string | null) => dir.users.find((u) => u.id === uid)?.name ?? '';
 
-  // V32 4 마감 연장: 지시자 = 바로, 담당자 = 요청(사유 필수)
+  // V32 4 마감 연장: 요청자 = 바로, 담당자 = 요청(사유 필수)
   const extRole = extendRole(t, user.id);
   const md = (d: string | null) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '-');
   async function decideExt(approve: boolean) {
@@ -202,7 +202,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     if (!confirm(`이 업무를 삭제할까요?${subs ? `\n하위 업무 ${subs}개도 함께 삭제됩니다.` : ''}\n삭제한 업무는 30일 동안 휴지통에서 되살릴 수 있습니다.`)) return;
     // V5 "업무에도 추가"로 연결된 일정: 함께 지울지 묻는다 (반복 업무는 일정 시리즈 전체가 지워지므로 묻지 않고 남김)
     const alsoEvent = synced.length > 0 && !data?.task?.recurrence_rule && confirm(`연결된 일정 '${synced[0].title}'도 함께 삭제할까요?\n취소를 누르면 업무만 삭제하고 일정은 남깁니다.`);
-    // V6 13번: 담당자별로 같이 만든 묶음은 지시자가 한 번에 지울 수 있음
+    // V6 13번: 담당자별로 같이 만든 묶음은 요청자가 한 번에 지울 수 있음
     const t0 = data?.task;
     const batchAll = !!t0?.batch_id && (t0.batch?.total ?? 0) > 1 && (t0.requested_by === user.id || t0.created_by === user.id) && confirm(`같이 만든 ${t0.batch.total}건(담당자별)을 모두 삭제할까요?\n취소를 누르면 이 업무만 삭제합니다.`);
     try {
@@ -258,16 +258,16 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     try { await api(`/api/tasks/${id}/fields/${fid}`, { method: 'PUT', body: { value } }); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); }
   }
 
-  // V14 20번: 상태는 담당자(없으면 만든 사람)만 — 지시자는 검토 요청 승인·반려와 완료 해지만
+  // V14 20번: 상태는 담당자(없으면 만든 사람)만 — 요청자는 검토 요청 승인·반려와 완료 해지만
   // V14 50 + 점검 2026-10-16 ③: 검토 중에는 서버가 정한 검토 담당자(data.reviewer)가 있으면 담당자도 단계 변경 불가(검토 요청 취소만) — 서버와 같은 기준
   const statusOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id && !(t.status === 'review' && data.reviewer && data.reviewer.id !== user.id);
   const isRequester = !!t.requested_by && t.requested_by === user.id;
-  // 대표 피드백(10/15): 검토 중 — 승인·반려는 검토 담당자([검토] 업무 담당, 없으면 지시자), 담당자는 [검토 요청 취소]만. 막힐 땐 실제 권한자 이름
+  // 대표 피드백(10/15): 검토 중 — 승인·반려는 검토 담당자([검토] 업무 담당, 없으면 요청자), 담당자는 [검토 요청 취소]만. 막힐 땐 실제 권한자 이름
   const reviewer: { id: string; name: string } | null = data.reviewer ?? null;
   const isReviewer = t.status === 'review' && !!reviewer && reviewer.id === user.id;
   const isTaskOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id;
-  const reviewerLabel = reviewer ? `${reviewer.id === t.requested_by ? '지시자' : '검토 담당'} ${reviewer.name}님` : '검토자';
-  const ownerLabel = t.assignee_id ? `담당자 ${t.assignee_name}님` : t.requested_by ? `지시자 ${t.requested_by_name}님` : `만든 사람 ${t.created_by_name}님`;
+  const reviewerLabel = reviewer ? `${reviewer.id === t.requested_by ? '요청자' : '검토 담당'} ${reviewer.name}님` : '검토자';
+  const ownerLabel = t.assignee_id ? `담당자 ${t.assignee_name}님` : t.requested_by ? `요청자 ${t.requested_by_name}님` : `만든 사람 ${t.created_by_name}님`;
   const lockMsg = statusOwner ? null : t.status === 'review'
     ? (isReviewer ? '검토 중인 업무는 아래 [승인]·[반려]로 처리하세요' : isTaskOwner ? `검토 중에는 ${reviewerLabel}의 승인·반려를 기다립니다 — 고칠 게 있으면 [검토 요청 취소]` : `검토 중 — ${reviewerLabel}이 승인·반려합니다`)
     : `상태는 ${ownerLabel}만 바꿀 수 있어요`;
@@ -406,7 +406,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 <Button size="sm" variant="secondary" onClick={() => patch({ status: 'in_progress' }, '검토 요청을 취소했습니다 — 다시 진행 중')} data-testid="review-cancel">검토 요청 취소</Button>
               </div>
             )}
-            {/* V32 4: 마감 연장 요청 — 세부 정보를 펼치지 않아도 머리에 보이고, 지시자는 바로 승인·반려 */}
+            {/* V32 4: 마감 연장 요청 — 세부 정보를 펼치지 않아도 머리에 보이고, 요청자는 바로 승인·반려 */}
             {t.ext_pending && (
               <div className="flex flex-wrap items-center gap-2 rounded-input border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="ext-pending">
                 <CalendarDays className="size-4 shrink-0" />
@@ -414,7 +414,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 {extRole === 'boss' ? <span className="flex gap-1.5">
                   <Button size="sm" onClick={() => decideExt(true)} data-testid="ext-approve">승인</Button>
                   <Button size="sm" variant="secondary" onClick={() => decideExt(false)} data-testid="ext-reject">반려</Button>
-                </span> : <span className="text-xs">지시자 승인을 기다리는 중</span>}
+                </span> : <span className="text-xs">요청자 승인을 기다리는 중</span>}
               </div>
             )}
           </div>
@@ -444,10 +444,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
  {t.status !== 'done' && t.status !== 'review' && !primary && (
             <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">{t.assignee_name ? `담당자 ${t.assignee_name}님이 진행합니다` : `만든 사람 ${t.created_by_name}님이 진행합니다`}</p>
           )}
-          {t.status === 'done' && !(statusOwner || isRequester) && <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">완료됨 — 다시 진행은 담당자·지시자만 할 수 있습니다</p>}
+          {t.status === 'done' && !(statusOwner || isRequester) && <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">완료됨 — 다시 진행은 담당자·요청자만 할 수 있습니다</p>}
           {/* V14 19번 ②: 상태별 다음 행동 — 큰 버튼 하나 */}
-          {/* 검토 요청을 받은 지시자: 최종 완료 확인 */}
-          {/* 검토 담당자(지시자 또는 [검토] 업무 담당): 승인·반려를 바로 */}
+          {/* 검토 요청을 받은 요청자: 최종 완료 확인 */}
+          {/* 검토 담당자(요청자 또는 [검토] 업무 담당): 승인·반려를 바로 */}
           {primary && t.status === 'review' && (
             <div className="mt-3 flex flex-wrap gap-2" data-testid="review-decide">
               <Button onClick={primary.run} data-testid="next-action" className="h-11 flex-1 text-base sm:flex-none sm:px-6"><CircleCheck />{primary.label}</Button>
@@ -520,7 +520,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <button type="button" className="mt-2 text-xs font-medium text-violet-800 underline" data-testid="batch-apply"
                 onClick={async () => { if (!confirm('이 업무의 제목·마감·우선순위·설명을 같이 받은 모든 업무에 똑같이 적용할까요?')) return;
                   try { const r = await api(`/api/tasks/batch/${t.batch_id}`, { method: 'PATCH', body: { title: t.title, dueDate: t.due_date, dueTime: t.due_time, priority: t.priority, description: t.description } }); toast.ok(`${r.updated}건에 적용했습니다`); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } }}>
-                같은 묶음 모두에 적용 (지시자)</button>
+                같은 묶음 모두에 적용 (요청자)</button>
             )}
           </section>
         )}
@@ -637,7 +637,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             className={cx('flex w-full items-center gap-2 rounded-input border border-line bg-white px-3 py-2 text-left text-sm', wide && 'lg:hidden', details && 'mb-1')}>
             <span className="shrink-0 font-semibold">세부 정보</span>
             {/* 검수(10/16): 머리 요약 칩(담당·마감)과 같은 내용을 반복하던 이모지 줄 대신 무엇이 있는지만 */}
-            <span className="min-w-0 flex-1 truncate text-xs text-ink-3">담당·지시·마감·알림·반복</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-ink-3">담당·요청·마감·알림·반복</span>
             <ChevronRight className={cx('size-4 shrink-0 transition-transform', details && 'rotate-90')} />
           </button>
           <div className={cx(!details && 'hidden', wide && 'lg:block')}>
@@ -650,7 +650,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 <Button size="sm" onClick={async () => { try { await api(`/api/tasks/${id}/handoff/${data.handoff.id}`, { body: { approve: true } }); toast.ok('넘기기를 승인했습니다'); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } }}>승인</Button>
                 <Button size="sm" variant="secondary" onClick={async () => { try { await api(`/api/tasks/${id}/handoff/${data.handoff.id}`, { body: { approve: false } }); reload(); } catch (e: any) { toast.error(e.message); } }}>거절</Button>
               </div>
-            ) : <p className="mt-1 text-xs text-sky-800">지시자의 승인을 기다리는 중입니다</p>}
+            ) : <p className="mt-1 text-xs text-sky-800">요청자의 승인을 기다리는 중입니다</p>}
           </section>
         )}
         {/* 속성 */}
@@ -660,15 +660,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {perms.reassign ? <UserSelect className={ghostCls} ariaLabel="담당자" value={t.assignee_id} onChange={(v) => { patch({ assigneeId: v }); if (v && v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }} />
                 : perms.handoff ? <UserSelect className={ghostCls} value={t.assignee_id} ariaLabel="다른 사람에게 넘기기" onChange={async (v) => {
                     if (!v || v === t.assignee_id) return;
-                    const note = prompt(`${dir.users.find((x) => x.id === v)?.name ?? ''}님에게 넘기기를 지시자에게 요청할까요? (사유, 선택)`);
+                    const note = prompt(`${dir.users.find((x) => x.id === v)?.name ?? ''}님에게 넘기기를 요청자에게 요청할까요? (사유, 선택)`);
                     if (note === null) return;
-                    try { await api(`/api/tasks/${id}/handoff`, { body: { toUserId: v, note: note || undefined } }); toast.ok('지시자에게 넘기기 요청을 보냈습니다'); reload(); } catch (e: any) { toast.error(e.message); }
+                    try { await api(`/api/tasks/${id}/handoff`, { body: { toUserId: v, note: note || undefined } }); toast.ok('요청자에게 넘기기 요청을 보냈습니다'); reload(); } catch (e: any) { toast.error(e.message); }
                   }} />
                 : <span className="px-2 text-sm" title="담당자를 바꿀 권한이 없습니다" data-testid="assignee-locked">{t.assignee_name ? personLabel(dir.users.find((x) => x.id === t.assignee_id) ?? { name: t.assignee_name }) : '담당자 없음'}</span>}</span>
             </Prop>
             {/* R-15 6번: 1명 배정 뒤에도 협업자 추가 */}
             <Prop icon={Users} label="협업자" asDiv><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
-            <Prop icon={Megaphone} label="지시자">
+            <Prop icon={Megaphone} label="요청자">
               <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
             </Prop>
             <Prop icon={CalendarDays} label="마감일">
@@ -834,7 +834,7 @@ function StatusSteps({ status, reviewStep, canChange, canReopen, locked, finish,
   const goesToReview = !!finish && finish.label !== '완료'; // 검토 요청·결재 올리기
   function click(s: TaskStatus) {
     if (s === status) return;
-    if (status === 'done') { if (!canReopen) return toast.info('다시 진행은 담당자·지시자만 할 수 있어요'); if (s === 'todo' || s === 'in_progress') return onSet(s, s === 'in_progress' ? '다시 진행 중으로 바꿨습니다' : '진행 전으로 바꿨습니다'); return; }
+    if (status === 'done') { if (!canReopen) return toast.info('다시 진행은 담당자·요청자만 할 수 있어요'); if (s === 'todo' || s === 'in_progress') return onSet(s, s === 'in_progress' ? '다시 진행 중으로 바꿨습니다' : '진행 전으로 바꿨습니다'); return; }
     if (locked) return toast.info(locked);
     if (s === 'todo') return onSet('todo', '진행 전으로 바꿨습니다');
     if (s === 'in_progress') return onSet('in_progress', '시작했습니다');

@@ -215,13 +215,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   // V14 34-보정: 기본 묶기는 PC·휴대폰 모두 담당자별(각 묶음 안은 마감 일시 오름차순 — 기본 정렬 'due'), 마감별은 묶기 메뉴에서 선택
   const group: GroupBy = groupPick || (curView === 'my' ? 'due' : 'assignee');
   const pickGroup = (g: GroupBy) => { setGroupPick(g); try { localStorage.setItem('wos_task_group', g); } catch {} };
-  // 상단 칩: 전체 · 내 업무 · 사람별 · 내가 지시한 업무 · 지연 · 이번 주 · 검토 대기. 사람 칩은 본사 사람(없으면 앞쪽 5명)
+  // 상단 칩: 전체 · 내 업무 · 사람별 · 내가 요청한 업무 · 지연 · 이번 주 · 검토 대기. 사람 칩은 본사 사람(없으면 앞쪽 5명)
   const hqIds = new Set(dir.orgUnits.filter((o) => o.type === 'hq').map((o) => o.id));
   const people = (() => {
     const hq = dir.users.filter((u) => u.org_unit_ids?.some((id) => hqIds.has(id)));
     return (hq.length ? hq : dir.users).slice(0, 5);
   })();
-  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 지시한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['extend', '연장 요청'], ['done', '완료']];
+  const views: [string, string][] = [['', '전체'], ['my', '내 업무'], ['requested', '내가 요청한 업무'], ['overdue', '지연'], ['week', '이번 주'], ['review', '검토 대기'], ['extend', '연장 요청'], ['done', '완료']];
   const teamList = useApi<{ teams: { id: string; name: string; color?: string; kind?: string; parent_name?: string | null; visible?: boolean }[] }>('/api/teams'); // V14 8번 팀 필터
   const teamChips = (teamList.data?.teams ?? []).filter((t) => t.visible !== false); // 대표 10/20 4): 팀별 보기 칩 — 볼 수 있는 팀만
   // V14 12번 다중 선택
@@ -289,7 +289,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             return (
               <ViewChip key={v} on={(filters.view ?? '') === v && !filters.assigneeId} onClick={() => setView(v)} label={l} grid>
                 {(v === 'overdue' || v === 'review' || v === 'extend') && n > 0 && <span className={cx('size-1.5 shrink-0 rounded-full', v === 'overdue' ? 'bg-red-500' : 'bg-amber-500')} aria-hidden />}
-                <span className="truncate">{v === 'requested' || v === 'review' ? <><span className="sm:hidden">{v === 'review' ? '검토' : '내가 지시'}</span><span className="hidden sm:inline">{l}</span></> : l}</span>
+                <span className="truncate">{v === 'requested' || v === 'review' ? <><span className="sm:hidden">{v === 'review' ? '검토' : '내가 요청'}</span><span className="hidden sm:inline">{l}</span></> : l}</span>
                 {n > 0 && <span className={cx('absolute -right-1 -top-1.5 min-w-[18px] rounded-full border px-1 text-center text-[10px] font-bold leading-4 tabular-nums sm:static sm:min-w-0 sm:border-0 sm:bg-transparent sm:px-0 sm:text-[11px] sm:font-semibold sm:opacity-80', (filters.view ?? '') === v && !filters.assigneeId ? 'border-white bg-brand-700 text-white' : v === 'overdue' ? 'border-red-200 bg-red-50 text-red-700 sm:text-inherit' : 'border-line bg-white text-ink-2')} data-count={v}>{n}</span>}
               </ViewChip>
             );
@@ -367,7 +367,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         {mode === 'list' && !projectId && (
           <label className={cx('inline-flex h-9 items-center gap-1.5 text-sm text-ink-2', !filterOpen && 'max-sm:hidden')}>묶기
             <select className="h-9 rounded-input border border-line bg-white px-2 text-sm" value={group} onChange={(e) => pickGroup(e.target.value as GroupBy)} aria-label="묶기 기준" data-testid="group-by">
-              <option value="assignee">담당자별</option><option value="requester">지시자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="status">상태별</option><option value="team">팀별</option><option value="none">묶지 않음</option>
+              <option value="assignee">담당자별</option><option value="requester">요청자별</option><option value="due">마감일</option><option value="project">프로젝트</option><option value="status">상태별</option><option value="team">팀별</option><option value="none">묶지 않음</option>
             </select>
           </label>
         )}
@@ -501,12 +501,12 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {/* 로컬 검수 10/17: 휴대폰 둘째 줄은 상태·연장 요청·열람·첨부·경고만, 프로젝트·하위·체크리스트·댓글 수는 숨김(상세에 있음). 2차: 그래도 넘치면 잘리지 않게 줄바꿈 */}
       {/* V11 1번: 휴대폰은 제목 아래 줄에 상태 칩(누르면 바로 변경) — PC 는 상태 열 */}
       {onPatch && <span className="shrink-0 lg:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
-      {/* V32 4: 연장 요청 대기(지시자가 목록에서 바로 알아봄). 로컬 검수 10/17: 휴대폰 둘째 줄이 넘치면 잘리므로 상태 칩 바로 다음·짧게("연장→10/20") */}
+      {/* V32 4: 연장 요청 대기(요청자가 목록에서 바로 알아봄). 로컬 검수 10/17: 휴대폰 둘째 줄이 넘치면 잘리므로 상태 칩 바로 다음·짧게("연장→10/20") */}
       {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장<span className="max-lg:hidden"> 요청</span> → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
       {t.team_name && <span className="inline-flex min-w-0 max-w-[6rem] truncate items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
       {t.project_name && <span className="inline-flex min-w-0 items-center gap-1 max-lg:hidden"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
-      {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 지시자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
-      {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate max-lg:hidden xl:hidden" title="지시자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
+      {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 요청자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
+      {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate max-lg:hidden xl:hidden" title="요청자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
       {!compact && <span className={cx('truncate max-lg:hidden', onPatch && hq && 'hidden lg:inline')}>{t.org_unit_name}</span>}
       {!compact && <span className="max-lg:hidden"><BrandDot brand={t.brand_id} /></span>}
       {t.subtask_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
@@ -526,7 +526,7 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
   );
 }
 
-/** V14 50(대표 결정): 상태는 담당자만(없으면 지시자·만든 사람). 검토 중인 업무의 승인·반려는 검토 담당자(지시자)만 — 서버와 같은 규칙 */
+/** V14 50(대표 결정): 상태는 담당자만(없으면 요청자·만든 사람). 검토 중인 업무의 승인·반려는 검토 담당자(요청자)만 — 서버와 같은 규칙 */
 export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
   if (to === t.status) return true;
   const owner = t.assignee_id ?? t.requested_by ?? t.created_by;
@@ -641,7 +641,7 @@ type GroupBy = 'assignee' | 'requester' | 'due' | 'project' | 'status' | 'team' 
 const GROUPS: GroupBy[] = ['assignee', 'requester', 'due', 'project', 'status', 'team', 'none'];
 type SortKey = 'manual' | 'due' | 'priority' | 'created' | 'title' | 'assignee' | 'requester' | 'status';
 const SORTS: SortKey[] = ['manual', 'due', 'priority', 'created', 'title', 'assignee', 'requester', 'status'];
-const SORT_LABEL: Record<SortKey, string> = { manual: '직접 순서', due: '마감일순', priority: '우선순위순', created: '최근 생성순', title: '이름순', assignee: '담당자순', requester: '지시자순', status: '상태순' };
+const SORT_LABEL: Record<SortKey, string> = { manual: '직접 순서', due: '마감일순', priority: '우선순위순', created: '최근 생성순', title: '이름순', assignee: '담당자순', requester: '요청자순', status: '상태순' };
 const PRI_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 const ko = (a?: string | null, b?: string | null) => (a ?? '\uffff').localeCompare(b ?? '\uffff', 'ko');
 /** 마감 일시 오름차순: 기한 지남 → 오늘 → 이후, 시간 없는 마감은 그날 끝, 마감 없는 업무는 맨 아래 */
@@ -664,7 +664,7 @@ function sortTasks(ts: Task[], k: SortKey) {
 /** PC 열 머리: 누르면 그 기준으로 정렬 */
 function ListHeader({ sortBy, onSort, compact, stuck }: { sortBy: SortKey; onSort: (k: SortKey) => void; compact?: boolean; stuck?: boolean }) {
   // V14 48: 맨 위 줄은 스크롤해도 붙어 있음(정렬 버튼). 로컬 검수 10/19: 모든 묶음이 같은 자리(묶음 이름 아래)에 열 제목 — 맨 위 줄은 스크롤해 묶음 제목이 가려질 때만 보임.
-  // 열 폭은 줄(TaskRow)과 같은 값: 지시자 104·우선순위 60·상태 112·마감일 132·담당 48
+  // 열 폭은 줄(TaskRow)과 같은 값: 요청자 104·우선순위 60·상태 112·마감일 132·담당 48
   const H = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => (
     <button type="button" onClick={() => onSort(sortBy === k ? 'due' : k)} aria-pressed={sortBy === k}
       className={cx('truncate text-left hover:text-ink', sortBy === k ? 'font-semibold text-accent-600' : '', className)}>{children}{sortBy === k ? ' ↓' : ''}</button>
@@ -674,7 +674,7 @@ function ListHeader({ sortBy, onSort, compact, stuck }: { sortBy: SortKey; onSor
       data-testid={compact ? 'group-col-header' : 'list-header'} aria-hidden={(!compact && !stuck) || undefined}>
       <span className="w-4" /><span className="w-[22px]" />
       <H k="title" className="flex-1">업무 이름</H>
-      <H k="requester" className="hidden w-[104px] shrink-0 text-right xl:block">지시자</H>
+      <H k="requester" className="hidden w-[104px] shrink-0 text-right xl:block">요청자</H>
       <H k="priority" className="w-[60px] shrink-0 text-right">우선순위</H>
       <H k="status" className="w-[112px] shrink-0">상태</H>
       <H k="due" className="w-[132px] shrink-0 text-right">마감일</H>
@@ -694,9 +694,9 @@ function ViewChip({ on, onClick, children, label, grid }: { on: boolean; onClick
 }
 
 /**
- * 업무 화면 목록 (Asana "팀 작업"): 담당자별(기본)·지시자별·마감일·프로젝트로 묶고, 묶음마다 끝에 "업무 추가" 줄 — 그 묶음 값이 자동으로 들어간다.
+ * 업무 화면 목록 (Asana "팀 작업"): 담당자별(기본)·요청자별·마감일·프로젝트로 묶고, 묶음마다 끝에 "업무 추가" 줄 — 그 묶음 값이 자동으로 들어간다.
  * 담당자별은 본사 사람 전원을 업무 0건이어도 묶음으로 보여 준다(바로 그 사람에게 배정).
- * 직접 순서일 때는 손잡이로 끌어 순서를 바꾸고, 다른 묶음으로 끌면 그 묶음 값(담당자·지시자·마감·프로젝트)으로 바뀐다.
+ * 직접 순서일 때는 손잡이로 끌어 순서를 바꾸고, 다른 묶음으로 끌면 그 묶음 값(담당자·요청자·마감·프로젝트)으로 바뀐다.
  */
 function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, top, people, sortBy, onSort, onReorder, keepIds }: {
   tasks: Task[]; group: GroupBy | 'month'; view: string; keepIds?: Set<string>; assigneeFilter: string | null; onPatch: (t: Task, b: any) => any; onAcked: () => void; top: React.ReactNode;
@@ -725,7 +725,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     const ensure = (id: string | null, name: string | null) => {
       const k = id ?? 'none';
       if (!m.has(k)) {
-        const nm = id ? (name ?? nameOf(id) ?? '알 수 없음') : isReq ? '지시자 없음' : '담당자 없음';
+        const nm = id ? (name ?? nameOf(id) ?? '알 수 없음') : isReq ? '요청자 없음' : '담당자 없음';
         m.set(k, { key: k, label: nm, head: <Avatar id={id} name={id ? nm : null} size={24} />, items: [], add: isReq ? { defaultRequester: id } : { defaultAssignee: id } });
       }
       return m.get(k)!;
@@ -836,7 +836,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
           const isFolded = folded[x.key];
           const who = x.label === '담당자 없음' ? '담당자 없이' : `${x.label}님에게`;
           const addRow = <InlineAddTask key={x.key} muted defaultAssignee={x.add.defaultAssignee} defaultRequester={x.add.defaultRequester} defaultDue={x.add.defaultDue} projectId={x.add.projectId}
-            placeholder={group === 'assignee' ? `${who} 업무 추가` : group === 'requester' ? `${x.label} 지시로 업무 추가` : x.label ? `${x.label}에 업무 추가` : '업무 추가'} />;
+            placeholder={group === 'assignee' ? `${who} 업무 추가` : group === 'requester' ? `${x.label} 요청으로 업무 추가` : x.label ? `${x.label}에 업무 추가` : '업무 추가'} />;
           return (
             <GroupDrop key={x.key} id={`group:${x.key}`} groupKey={x.key}>
               {x.label && (
@@ -1127,7 +1127,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
           <span className="min-w-0 max-lg:flex-1 lg:contents"><Meta t={t} onPatch={onPatch} /></span>
         </div>
         {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
-        <span className="hidden w-[104px] min-w-0 justify-end xl:flex" data-testid="requester-cell"><AssigneePicker role="지시자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
+        <span className="hidden w-[104px] min-w-0 justify-end xl:flex" data-testid="requester-cell"><AssigneePicker role="요청자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
         <span className="hidden w-[60px] justify-end lg:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>
         <span className="hidden w-[112px] shrink-0 overflow-hidden lg:inline-flex"><StatusChip t={t} onPatch={onPatch} /></span>
         <DueEdit t={t} onPatch={onPatch} />

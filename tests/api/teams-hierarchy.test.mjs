@@ -22,12 +22,12 @@ before(async () => {
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 
 describe('R-16 팀 권한 계층', () => {
-  test('상위 팀(본사팀)은 하위 팀 업무를 보기만(V14 50: 수정·배정은 지시자·담당자), 하위 팀은 상위 팀 업무 404', async () => {
+  test('상위 팀(본사팀)은 하위 팀 업무를 보기만(V14 50: 수정·배정은 요청자·담당자), 하위 팀은 상위 팀 업무 404', async () => {
     const tOps = (await D.opsA.c.ok('POST', '/api/tasks', { title: '운영 점검 업무', orgUnitId: ctx.siteA, teamId: D.opsTeam, teamMode: 'tag', assigneeId: D.opsA.id, approvalRequired: false })).id;
     const tHq = (await D.hqA.c.ok('POST', '/api/tasks', { title: '본사 기획 업무', orgUnitId: ctx.hq, teamId: D.hqTeam, teamMode: 'tag', assigneeId: D.hqA.id, approvalRequired: false })).id;
     assert.equal((await D.hqA.c.ok('GET', `/api/tasks/${tOps}`)).task.title, '운영 점검 업무');
     const d = await D.hqA.c.ok('GET', `/api/tasks/${tOps}`);
-    assert.equal((await D.hqA.c.req('PATCH', `/api/tasks/${tOps}`, { title: '운영 점검 업무(본사 수정)', version: d.task.version })).status, 403, '상위 팀이라도 지시자·담당자가 아니면 수정 불가');
+    assert.equal((await D.hqA.c.req('PATCH', `/api/tasks/${tOps}`, { title: '운영 점검 업무(본사 수정)', version: d.task.version })).status, 403, '상위 팀이라도 요청자·담당자가 아니면 수정 불가');
     assert.equal((await D.hqA.c.req('PATCH', `/api/tasks/${tOps}`, { assigneeId: ctx.staffA.id, version: d.task.version })).status, 403);
     await D.opsA.c.ok('PATCH', `/api/tasks/${tOps}`, { title: '운영 점검 업무(담당 수정)', version: d.task.version });
     assert.ok((await D.hqA.c.ok('GET', `/api/tasks?teamId=${D.opsTeam}`)).tasks.some((t) => t.id === tOps));
@@ -85,27 +85,27 @@ describe('R-15 체크리스트 항목 담당 · 처리 속도', () => {
 });
 
 describe('V14 20번 완료 해지', () => {
-  test('V14 50: 완료를 다시 진행으로 = 담당자만(지시자·그 외 403)', async () => {
+  test('V14 50: 완료를 다시 진행으로 = 담당자만(요청자·그 외 403)', async () => {
     const tk = (await ctx.owner.ok('POST', '/api/tasks', { title: '해지 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
     let v = (await ctx.staffA.client.ok('GET', `/api/tasks/${tk}`)).task.version;
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${tk}`, { status: 'done', version: v });
     v = (await ctx.owner.ok('GET', `/api/tasks/${tk}`)).task.version;
-    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${tk}`, { status: 'in_progress', version: v })).status, 403, '지시자도 담당자도 아니면 불가');
-    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${tk}`, { status: 'in_progress', version: v })).status, 403, '지시자(만든 대표)도 상태 변경 불가');
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${tk}`, { status: 'in_progress', version: v })).status, 403, '요청자도 담당자도 아니면 불가');
+    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${tk}`, { status: 'in_progress', version: v })).status, 403, '요청자(만든 대표)도 상태 변경 불가');
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${tk}`, { status: 'in_progress', version: v }); // 담당자
   });
 });
 
-describe('V14 28번 검토 요청 → 지시자 검토 업무', () => {
+describe('V14 28번 검토 요청 → 요청자 검토 업무', () => {
   const rv = async (id) => (await sql`select id, title, status, assignee_id, due_date, deleted_at from tasks where review_of = ${id}`)[0];
-  test('생성·승인으로 자동 완료·다시 요청하면 다시 열기(중복 없음)·반려·삭제 정리·지시자=담당자면 없음', async () => {
+  test('생성·승인으로 자동 완료·다시 요청하면 다시 열기(중복 없음)·반려·삭제 정리·요청자=담당자면 없음', async () => {
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '계약서 정리', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
     let r = await rv(t);
     assert.equal(r.title, '[검토] 계약서 정리'); assert.equal(r.assignee_id, ctx.ownerId); assert.equal(r.status, 'todo');
     const d = await ctx.owner.ok('GET', `/api/tasks/${r.id}`);
     assert.equal(d.reviewTarget.id, t); assert.equal(d.reviewTarget.status, 'review');
-    assert.ok((await ctx.owner.ok('GET', '/api/tasks?view=my')).tasks.some((x) => x.id === r.id), '지시자의 내 업무에 보임');
+    assert.ok((await ctx.owner.ok('GET', '/api/tasks?view=my')).tasks.some((x) => x.id === r.id), '요청자의 내 업무에 보임');
     // 반려 → 검토 업무 자동 완료
     await ctx.owner.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress', reviewNote: '서명란 확인' });
     assert.equal((await rv(t)).status, 'done');
@@ -122,7 +122,7 @@ describe('V14 28번 검토 요청 → 지시자 검토 업무', () => {
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t2}`, { status: 'review' });
     await ctx.owner.ok('DELETE', `/api/tasks/${t2}`);
     assert.ok((await rv(t2)).deleted_at, '검토 업무도 정리');
-    // 지시자 = 담당자 → 만들지 않음
+    // 요청자 = 담당자 → 만들지 않음
     const t3 = (await ctx.owner.ok('POST', '/api/tasks', { title: '내가 할 일', assigneeId: ctx.ownerId, approvalRequired: false })).id;
     await ctx.owner.ok('PATCH', `/api/tasks/${t3}`, { status: 'review' });
     assert.equal(await rv(t3), undefined);
@@ -135,7 +135,7 @@ describe('V14 28번 검토 요청 → 지시자 검토 업무', () => {
 });
 
 describe('검수 3·12번 알림 정리', () => {
-  test('검토 요청 알림은 지시자에게만(승인권 있는 관리자 제외)', async () => {
+  test('검토 요청 알림은 요청자에게만(승인권 있는 관리자 제외)', async () => {
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '알림 대상 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: true })).id;
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
     const to = (await sql`select user_id from notifications where entity_id = ${t} and type = 'review_requested'`).map((r) => r.user_id);

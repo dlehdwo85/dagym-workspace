@@ -1,5 +1,5 @@
 // 로컬 10/20 알림 다이어트 + 알림에서 바로 처리:
-// 기본값(종류별 푸시: 내가 보낸 결과·자동 정리 결과는 끔, 요청·일정·지시 완료는 켬 / 조용한 시간 기본 22~07·끄기) · push:false 는 설정과 무관하게 목록만 · 마감 예고 개별 푸시는 높음·긴급만 ·
+// 기본값(종류별 푸시: 내가 보낸 결과·자동 정리 결과는 끔, 요청·일정·요청 완료는 켬 / 조용한 시간 기본 22~07·끄기) · push:false 는 설정과 무관하게 목록만 · 마감 예고 개별 푸시는 높음·긴급만 ·
 // 댓글 묶음 "새 댓글 n개" · 액션 API(배정 확인·오늘 할 일·검토 승인/수정 요청·연장 승인·답글, 처리되면 "…함 ✓"·재푸시 없음, 남의 알림 404, 권한 없는 처리 403) · GET 알림에 actions
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,7 +15,7 @@ after(async () => { srv?.proc.kill(); await sql?.end(); });
 const deliveries = (userId, type) => sql`select d.next_attempt_at, d.status from notification_deliveries d join notifications n on n.id = d.notification_id where n.user_id = ${userId} and n.type = ${type}`;
 
 describe('알림 다이어트', () => {
-  test('종류별 푸시 기본값: 보낸 결과·자료실 정리·반복 생성은 끔, 배정·검토·멘션·일정·지시 완료는 켬 · 조용한 시간 기본 22~07(시험 서버는 QUIET_DEFAULT=off 라 null)·끄기 저장', async () => {
+  test('종류별 푸시 기본값: 보낸 결과·자료실 정리·반복 생성은 끔, 배정·검토·멘션·일정·요청 완료는 켬 · 조용한 시간 기본 22~07(시험 서버는 QUIET_DEFAULT=off 라 null)·끄기 저장', async () => {
     const p = await ctx.staffA.client.ok('GET', '/api/notifications/prefs');
     const push = Object.fromEntries(p.types.map((t) => [t.type, t.push]));
     assert.deepEqual([push.mail_sent, push.library_organized, push.recurring_created, push.month_close], [false, false, false, false]);

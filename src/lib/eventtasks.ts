@@ -276,7 +276,7 @@ const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + 'T00:00:00Z
 
 /**
  * 일정과 같은 내용의 업무를 만들고 날짜 동기화 연결(sync)한다.
- * 마감 = 일정 날짜(종일이 아니면 시작 시각), 담당 = 지정한 사람(없으면 나), 지시자 = 나.
+ * 마감 = 일정 날짜(종일이 아니면 시작 시각), 담당 = 지정한 사람(없으면 나), 요청자 = 나.
  * 반복 일정이면 같은 규칙의 반복 업무 하나로 연결한다(회차마다 따로 만들지 않음).
  */
 export async function createSyncTask(u: SessionUser, eventId: string, assigneeId?: string | null, opt: { requestedById?: string | null; priority?: string } = {}) {
@@ -351,10 +351,10 @@ export const meetingInput = z.object({
   end: z.string().datetime({ offset: true }),
   title: z.string().trim().max(200).optional(),
 });
-/** 업무 → 미팅 일정(내 개인 캘린더, 담당·지시자 참석, 30분 전 알림) + 업무와 연결. 캘린더에는 이 일정 블록 하나(장소 = 이동 강조·출발 권장) */
+/** 업무 → 미팅 일정(내 개인 캘린더, 담당·요청자 참석, 30분 전 알림) + 업무와 연결. 캘린더에는 이 일정 블록 하나(장소 = 이동 강조·출발 권장) */
 export async function createMeeting(u: SessionUser, taskId: string, i: z.infer<typeof meetingInput>) {
   const { perms } = await loadTaskForUser(u, taskId);
-  if (!perms.edit) throw forbidden('미팅 일정은 지시자·담당자만 만들 수 있습니다');
+  if (!perms.edit) throw forbidden('미팅 일정은 요청자·담당자만 만들 수 있습니다');
   const sql = db();
   const [t] = await sql<{ title: string; assignee_id: string | null; requested_by: string | null }[]>`select title, assignee_id, requested_by from tasks where id = ${taskId}`;
   const { ensurePersonalCalendar } = await import('./access');

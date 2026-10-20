@@ -41,7 +41,7 @@ export function PhoneInquiryButton({ className }: { className?: string }) {
             <Field label="지역"><input className={inputCls} value={f.region} onChange={(e) => set({ region: e.target.value })} /></Field>
           </div>
           <Field label="문의 내용"><textarea className={inputCls} rows={4} required value={f.message} onChange={(e) => set({ message: e.target.value })} data-testid="pi-message" /></Field>
-          <p className="text-xs text-ink-3">등록하면 웹사이트 문의처럼 유형별 담당자에게 업무(1차 연락 ~ 결과 기록 단계)가 만들어집니다. 연락처는 업무 담당·지시자·관리자만 봅니다.</p>
+          <p className="text-xs text-ink-3">등록하면 웹사이트 문의처럼 유형별 담당자에게 업무(1차 연락 ~ 결과 기록 단계)가 만들어집니다. 연락처는 업무 담당·요청자·관리자만 봅니다.</p>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setOpen(false)}>취소</Button><Button type="submit" disabled={busy} data-testid="pi-save">등록</Button></div>
         </form>
       </Modal>

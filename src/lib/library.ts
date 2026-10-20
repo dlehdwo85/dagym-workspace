@@ -370,7 +370,7 @@ export async function attachLibraryToTask(u: SessionUser, fileId: string, taskId
   return { id: a.id };
 }
 
-/** 기밀 자료·기밀 근거 결과물: 업무에 관계된 모든 사람(담당·지시·만든 사람·협업자)이 기밀 열람 권한이 있어야 한다 */
+/** 기밀 자료·기밀 근거 결과물: 업무에 관계된 모든 사람(담당·요청·만든 사람·협업자)이 기밀 열람 권한이 있어야 한다 */
 export async function assertConfidentialAudience(taskId: string, extraUserIds: string[] = []) {
   const sql = db();
   const [t] = await sql<any[]>`select assignee_id, requested_by, created_by from tasks where id = ${taskId}`;

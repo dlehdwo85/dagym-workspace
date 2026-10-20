@@ -28,10 +28,10 @@ export const MENUS = {
   // V14 8번 팀 업무: 자기 팀(팀원은 이 단계, 팀장은 조회 이상이면 편집까지) / 다른 팀 업무
   team_tasks: { label: '팀 업무(자기 팀)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'view', site_manager: 'view', staff: 'view' } },
   team_tasks_all: { label: '팀 업무 보기(다른 팀 전체)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
-  // V14 1번 담당자 재배정: 아무 업무나 / 지시자는 자기가 지시한 업무만 / 담당자 본인의 넘기기(지시자 승인)
+  // V14 1번 담당자 재배정: 아무 업무나 / 요청자는 자기가 요청한 업무만 / 담당자 본인의 넘기기(요청자 승인)
   reassign: { label: '업무 담당자 재배정', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
-  reassign_requester: { label: '지시자는 자기 업무 재배정 가능', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
-  reassign_handoff: { label: '담당자가 다른 사람에게 넘기기(지시자 승인)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  reassign_requester: { label: '요청자는 자기 업무 재배정 가능', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
+  reassign_handoff: { label: '담당자가 다른 사람에게 넘기기(요청자 승인)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V21 메일·문자 보내기: 실제 발송([보내기])은 기본 대표만, 사용자 관리에서 사람별로 켬. 메일 계정·명함 설정은 대표·본사 관리자
   send_external: { label: '외부 발송(메일·문자 보내기)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'none', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // V30 ③ 근태 관리(출퇴근표·현장·설정) — 조회 / 편집

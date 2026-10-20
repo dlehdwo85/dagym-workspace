@@ -35,7 +35,7 @@ async function dueNotifications() {
       body: `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
       dedupeKey: `due_soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, push: important(t.priority) || alarmOn('task', t.alarm, adOf(t.assignee_id), t.priority), meta: { kind: 'due', ...alarmMeta(t) } })).length;
   }
-  // 매일 오전 9시(서울) 이후 첫 실행에서 하루 1회: 기한 지남 → 담당자·지시자, 오늘 마감 → 담당자 (완료·보류되면 멈춤)
+  // 매일 오전 9시(서울) 이후 첫 실행에서 하루 1회: 기한 지남 → 담당자·요청자, 오늘 마감 → 담당자 (완료·보류되면 멈춤)
   const now = new Date();
   const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(now));
   const today = todaySeoul(now);
@@ -80,7 +80,7 @@ async function dueNotifications() {
       body: `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
       dedupeKey: `due_rem:${t.id}:${t.due_date}:${t.due_time ?? ''}:${t.m}`, push: important(t.priority) || alarmOn('task', t.alarm, adOf(t.assignee_id), t.priority), meta: { kind: 'due', ...alarmMeta(t) } })).length;
   }
-  // V13 6번: 같은 알림을 지시자에게도 (담당자 이름·상태로 구분, 지시자 = 담당자면 생략, 일괄 업무는 묶음 1건)
+  // V13 6번: 같은 알림을 요청자에게도 (담당자 이름·상태로 구분, 요청자 = 담당자면 생략, 일괄 업무는 묶음 1건)
   const kinds = [
     ...soon.map((t) => ({ id: t.id, kind: 'soon', label: '마감 임박', when: `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, key: `${t.due_date}:${t.due_time ?? ''}` })),
     ...dueToday.map((t) => ({ id: t.id, kind: 'today', label: '오늘 마감', when: t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지', key: today })),
@@ -104,7 +104,7 @@ async function dueNotifications() {
       const t = ts[0];
       const who = ts.length > 1 ? `${t.assignee_name} 외 ${ts.length - 1}명` : t.assignee_name;
       const states = ts.length > 1 ? Object.entries(ts.reduce((a, x) => ({ ...a, [STATUS_LABEL[x.status]]: (a[STATUS_LABEL[x.status]] ?? 0) + 1 }), {} as Record<string, number>)).map(([s, c]) => `${s} ${c}`).join('·') : STATUS_LABEL[t.status];
-      n += (await notify(sql, { userIds: [t.requested_by], type: 'due_soon', title: `[지시] ${k.label}: ${t.title}`,
+      n += (await notify(sql, { userIds: [t.requested_by], type: 'due_soon', title: `[요청] ${k.label}: ${t.title}`,
         body: `담당 ${who} · ${states} · ${k.when}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
         dedupeKey: `req_${g.split('|').slice(1).join(':')}`, push: false, meta: { kind: 'due' } })).length;
     }

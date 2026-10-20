@@ -11,7 +11,7 @@ export async function v1442({ browser, desk, ctx, BASE, SHOTS, addDays, today })
     await m.goto(`${BASE}/tasks`);
     const chips = m.getByTestId('view-chips');
     await chips.locator('[data-count="overdue"]').waitFor();
-    for (const name of ['전체', '내 업무', '내가 지시한 업무', '지연', '이번 주', '검토 대기', '완료']) {
+    for (const name of ['전체', '내 업무', '내가 요청한 업무', '지연', '이번 주', '검토 대기', '완료']) {
       const b = await chips.getByRole('button', { name, exact: true }).boundingBox();
       assert.ok(b && b.x >= 0 && b.x + b.width <= 412 + 0.5, `${name} 칩 화면 안 (${b?.x}+${b?.width})`);
     }

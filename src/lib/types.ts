@@ -54,7 +54,7 @@ export const NOTIFICATION_TYPES = {
   sync_error: '동기화 오류',
   event_reminder: '일정 시작 전',
   weekly_report: '주간 보고',
-  task_done_for_requester: '지시한 업무 완료·보류',
+  task_done_for_requester: '요청한 업무 완료·보류',
   briefing: '아침 브리핑(오늘의 일정·일정)',
   usage_alert: '사용량 한도(저장공간·AI·사용자) 80%·100%',
   chat: '메신저 새 메시지',

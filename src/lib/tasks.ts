@@ -19,7 +19,7 @@ export const taskInput = z.object({
   /** 대표 확정(10/19): 만든 공간(영업·마케팅). 비우면 업무 공간 */
   space: z.enum(['sales', 'marketing']).nullable().optional(),
   assigneeId: zUuid.nullable().optional(),
-  /** WORKIN_V3 지시자(업무를 부여한 사람). 기본 = 만든 사람 */
+  /** WORKIN_V3 요청자(업무를 부여한 사람). 기본 = 만든 사람 */
   requestedById: zUuid.nullable().optional(),
   collaboratorIds: z.array(zUuid).max(30).optional(),
   status: z.enum(['todo', 'in_progress', 'review', 'on_hold', 'done']).optional(),
@@ -186,7 +186,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
     case 'done': // V6 5번 완료 보관: 완료일 기준 (화면에서 월별로 묶음)
       conds.push(sql`t.status = 'done'`);
       break;
-    case 'requested': // 내가 지시한 업무 (Asana "내가 배정한 작업")
+    case 'requested': // 내가 요청한 업무 (Asana "내가 배정한 작업")
       conds.push(sql`t.requested_by = ${u.id}`);
       break;
     case 'today':
@@ -205,7 +205,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
       if (units !== null) conds.push(sql`t.org_unit_id = any(${units}::uuid[])`);
       if (!atLeast(u, 'site_manager')) conds.push(sql`false`);
       break;
-    case 'extend': // V32 4: 마감 연장 요청 — 내가 승인할 것(지시자)·내가 보낸 것(담당자)
+    case 'extend': // V32 4: 마감 연장 요청 — 내가 승인할 것(요청자)·내가 보낸 것(담당자)
       conds.push(sql`exists (select 1 from task_due_extensions x where x.task_id = t.id and x.status = 'pending'
         and (x.requested_by = ${u.id} or coalesce(t.requested_by, t.created_by) = ${u.id}))`);
       break;
@@ -281,7 +281,7 @@ export async function getTaskDetail(u: SessionUser, id: string) {
   const speed = t.assignee_id && t.status !== 'done' ? (await (await import('./insights')).speedStats(u, [t.assignee_id]).catch(() => []))[0] ?? null : null;
   // V14 28번: 검토 업무면 원 업무(제목·상태·담당), 원 업무면 자기 검토 업무
   const [reviewTarget] = t.review_of ? await sql`select r.id, r.title, r.status, r.requested_by, r.created_by, au.name as assignee_name from tasks r left join users au on au.id = r.assignee_id where r.id = ${t.review_of} and r.deleted_at is null` : [];
-  // 대표 피드백(10/15): 검토 중이면 누가 승인·반려하는지(이름) — 서버 권한 규칙과 같은 순서([검토] 업무 담당 → 지시자)
+  // 대표 피드백(10/15): 검토 중이면 누가 승인·반려하는지(이름) — 서버 권한 규칙과 같은 순서([검토] 업무 담당 → 요청자)
   let reviewer: { id: string; name: string } | null = null;
   if (t.status === 'review' && !t.approval_line_id) {
     const [rv] = await sql<{ id: string; name: string }[]>`select u2.id, u2.name from tasks r join users u2 on u2.id = r.assignee_id where r.review_of = ${id} and r.deleted_at is null and r.status <> 'done' limit 1`;
@@ -344,7 +344,7 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
   const status = i.status ?? 'todo';
   if (status === 'done') throw badRequest('새 업무를 완료 상태로 만들 수 없습니다');
   // 부서(팀) 업무 환경(대표 10/16): 부서를 고르지 않으면 하위 업무는 상위 업무의 부서, 아니면 담당자와 같은 내 부서 → 내 첫 부서.
-  // 부서 업무는 그 부서원·상위 부서·부서장·대표/본사 관리자만 보고, 담당·지시·협업자는 늘 본다(다른 부서원에게는 안 보임). teamId: null = 부서 없이
+  // 부서 업무는 그 부서원·상위 부서·부서장·대표/본사 관리자만 보고, 담당·요청·협업자는 늘 본다(다른 부서원에게는 안 보임). teamId: null = 부서 없이
   if (i.teamId === undefined) {
     if (i.parentId) i.teamId = (await sql<{ team_id: string | null }[]>`select team_id from tasks where id = ${i.parentId}`)[0]?.team_id ?? undefined;
     else {
@@ -450,13 +450,13 @@ async function awayOf(u: SessionUser, ids: string[]) {
   return hit.map((x) => ({ id: x, name: names.get(x) ?? '', label: pm[x].label }));
 }
 
-/** 묶음 전체에 적용 (지시자·만든 사람·관리자만): 제목·마감·우선순위·설명 */
+/** 묶음 전체에 적용 (요청자·만든 사람·관리자만): 제목·마감·우선순위·설명 */
 export async function updateBatch(u: SessionUser, batchId: string, i: Pick<Partial<TaskInput>, 'title' | 'dueDate' | 'dueTime' | 'priority' | 'description'>) {
   const sql = db();
   const rows = await sql<{ id: string; requested_by: string | null; created_by: string }[]>`select id, requested_by, created_by from tasks where batch_id = ${batchId} and deleted_at is null`;
   if (!rows.length) throw notFound('묶음이 없습니다');
   await loadTaskForUser(u, rows[0].id, sql);
-  if (!(rows[0].requested_by === u.id || rows[0].created_by === u.id || atLeast(u, 'admin'))) throw forbidden('묶음 전체 수정은 지시자만 할 수 있습니다');
+  if (!(rows[0].requested_by === u.id || rows[0].created_by === u.id || atLeast(u, 'admin'))) throw forbidden('묶음 전체 수정은 요청자만 할 수 있습니다');
   for (const r of rows) await updateTask(u, r.id, i);
   return { updated: rows.length };
 }
@@ -465,7 +465,7 @@ export async function deleteBatch(u: SessionUser, batchId: string) {
   const rows = await sql<{ id: string; requested_by: string | null; created_by: string }[]>`select id, requested_by, created_by from tasks where batch_id = ${batchId} and deleted_at is null`;
   if (!rows.length) throw notFound('묶음이 없습니다');
   await loadTaskForUser(u, rows[0].id, sql);
-  if (!(rows[0].requested_by === u.id || rows[0].created_by === u.id || atLeast(u, 'admin'))) throw forbidden('묶음 전체 삭제는 지시자만 할 수 있습니다');
+  if (!(rows[0].requested_by === u.id || rows[0].created_by === u.id || atLeast(u, 'admin'))) throw forbidden('묶음 전체 삭제는 요청자만 할 수 있습니다');
   await sql.begin(async (tx) => {
     await tx`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where batch_id = ${batchId} and deleted_at is null`;
     await hideTaskBlocks(tx, rows.map((r) => r.id));
@@ -496,13 +496,13 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if (i.version !== undefined && i.version !== cur.version) {
       throw conflict('다른 사용자가 먼저 수정했습니다. 새로고침 후 다시 시도하세요.', { currentVersion: cur.version });
     }
-    // V14 8번 팀장 배정(팀 업무 "팀장이 담당 지정"): 담당이 비어 있는 팀 업무는 팀장이 처음 담당을 정할 수 있다(그 뒤 변경은 지시자만)
+    // V14 8번 팀장 배정(팀 업무 "팀장이 담당 지정"): 담당이 비어 있는 팀 업무는 팀장이 처음 담당을 정할 수 있다(그 뒤 변경은 요청자만)
     const onlyAssign = Object.entries(i).every(([k, v]) => v === undefined || k === 'assigneeId' || k === 'version');
     const leadFirstAssign = !perms.edit && onlyAssign && !!i.assigneeId && !cur.assignee_id && !!cur.team_id
       && (await tx`select 1 from team_members where team_id = ${cur.team_id} and user_id = ${u.id} and is_lead`).length > 0;
     if (!perms.edit && !leadFirstAssign) {
       const onlyStatus = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote'].includes(k));
-      throw forbidden(onlyStatus ? '상태는 담당자만 바꿀 수 있어요' : '이 업무를 수정할 권한이 없습니다 — 업무 내용·일정은 지시자·담당자만 바꿀 수 있습니다');
+      throw forbidden(onlyStatus ? '상태는 담당자만 바꿀 수 있어요' : '이 업무를 수정할 권한이 없습니다 — 업무 내용·일정은 요청자·담당자만 바꿀 수 있습니다');
     }
     const changes: Record<string, { from: unknown; to: unknown }> = {};
     const set: Record<string, unknown> = {};
@@ -524,10 +524,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       set.due_time = i.dueTime;
       changes.dueTime = { from: cur.due_time_s, to: i.dueTime };
     }
-    // V32 4(대표 결정): 담당자는 마감을 뒤로 미루거나 지울 수 없다 — 지시자에게 [마감 연장] 요청(앞당기기는 됨). 지시자 = 본인이면 제한 없음
+    // V32 4(대표 결정): 담당자는 마감을 뒤로 미루거나 지울 수 없다 — 요청자에게 [마감 연장] 요청(앞당기기는 됨). 요청자 = 본인이면 제한 없음
     if ('due_date' in set && cur.due_date && cur.status !== 'done' && cur.assignee_id === u.id && (cur.requested_by ?? cur.created_by) !== u.id
       && (!set.due_date || String(set.due_date).slice(0, 10) > dstr(cur.due_date))) {
-      throw new HttpError(403, 'extend_required', '마감을 미루려면 지시자에게 [마감 연장]을 요청하세요');
+      throw new HttpError(403, 'extend_required', '마감을 미루려면 요청자에게 [마감 연장]을 요청하세요');
     }
     if (i.recurrenceRule !== undefined) {
       const rule = normalizeRule(i.recurrenceRule);
@@ -551,7 +551,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if (reassigned && !(await canReassign(u, cur, tx))) {
       const { menuLevel } = await import('./menuPerms');
       if (cur.assignee_id === u.id && (await menuLevel(u, 'reassign_handoff', tx)) === 'use')
-        throw new HttpError(403, 'handoff_required', '다른 사람에게 넘기려면 지시자 승인이 필요합니다 — "넘기기 요청"을 보내 주세요');
+        throw new HttpError(403, 'handoff_required', '다른 사람에게 넘기려면 요청자 승인이 필요합니다 — "넘기기 요청"을 보내 주세요');
       throw forbidden('담당자를 바꿀 권한이 없습니다 — 대표가 메뉴 권한에서 열 수 있습니다');
     }
     if ('approval_required' in set && !perms.approve) throw forbidden('검토 필요 여부는 관리자만 바꿀 수 있습니다');
@@ -568,11 +568,11 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if ((set.task_type ?? cur.task_type) === 'milestone' && (set.start_date ?? cur.start_date)) set.start_date = null;
     const lineId = ('approval_line_id' in set ? set.approval_line_id : cur.approval_line_id) as string | null;
 
-    // V12 11번: 상태는 담당자만(대표·관리자도 예외 없음). 예외는 하나 — 검토 요청된 업무를 그 업무의 지시자가 승인(완료)·반려(진행 중).
+    // V12 11번: 상태는 담당자만(대표·관리자도 예외 없음). 예외는 하나 — 검토 요청된 업무를 그 업무의 요청자가 승인(완료)·반려(진행 중).
     // 담당자가 없는 업무는 만든 사람만. (결재선 업무의 결재는 approvals 의 결재 API 로 따로)
     if (i.status && i.status !== cur.status) {
-      // V14 50(대표 결정): 상태는 배정된 담당자만(대표·관리자·지시자·협업자 모두 불가). 담당자가 없는 업무는 지시자(없으면 만든 사람).
-      // 검토 중인 업무의 승인(완료)·반려(진행 중)는 검토 담당자만 — "[검토]" 업무가 있으면 그 담당자, 없으면 지시자. 담당자 본인은 자기 검토를 승인할 수 없다.
+      // V14 50(대표 결정): 상태는 배정된 담당자만(대표·관리자·요청자·협업자 모두 불가). 담당자가 없는 업무는 요청자(없으면 만든 사람).
+      // 검토 중인 업무의 승인(완료)·반려(진행 중)는 검토 담당자만 — "[검토]" 업무가 있으면 그 담당자, 없으면 요청자. 담당자 본인은 자기 검토를 승인할 수 없다.
       const owner = cur.assignee_id ?? cur.requested_by ?? cur.created_by;
       if (cur.status === 'review' && !lineId) {
         const [rv] = await tx<{ assignee_id: string | null }[]>`select assignee_id from tasks where review_of = ${id} and deleted_at is null and status <> 'done' limit 1`;
@@ -587,7 +587,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         if (!reviewer && owner !== u.id) throw forbidden('상태는 담당자만 바꿀 수 있어요');
       } else if (owner !== u.id) {
         const [nm] = cur.assignee_id ? await tx<{ name: string }[]>`select name from users where id = ${cur.assignee_id}` : [];
-        throw forbidden(cur.assignee_id ? `상태는 담당자만 바꿀 수 있어요(담당 ${nm?.name ?? ''})` : '담당자가 없는 업무의 상태는 지시자(만든 사람)만 바꿀 수 있어요');
+        throw forbidden(cur.assignee_id ? `상태는 담당자만 바꿀 수 있어요(담당 ${nm?.name ?? ''})` : '담당자가 없는 업무의 상태는 요청자(만든 사람)만 바꿀 수 있어요');
       }
     }
     // 상태 변경
@@ -686,9 +686,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       const { startApprovalRound } = await import('./approvals');
       await startApprovalRound(tx, id, lineId, cur.org_unit_id, u.id, title);
     } else if (statusEvent === 'review_requested') {
-      // V12 7번: 지시자(없으면 만든 사람)에게도 즉시 — 알림에서 바로 승인·반려
+      // V12 7번: 요청자(없으면 만든 사람)에게도 즉시 — 알림에서 바로 승인·반려
       const reqr = (set.requested_by ?? cur.requested_by ?? cur.created_by) as string | null;
-      // 검수 12: 지시자(없으면 만든 사람)에게만. 지시자가 없고 만든 사람이 본인이면 승인권자에게
+      // 검수 12: 요청자(없으면 만든 사람)에게만. 요청자가 없고 만든 사람이 본인이면 승인권자에게
       const reviewTo = reqr && reqr !== u.id ? [reqr] : await approverIds(tx, cur.org_unit_id, cur.project_id);
       await notify(tx, { userIds: reviewTo, type: 'review_requested',
         title: `검토 요청: ${title}`, body: `${u.name}님이 검토를 요청했습니다 — 승인 또는 반려해 주세요`, link: `/tasks/${id}`,
@@ -700,9 +700,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         body: statusEvent === 'approved' ? `${u.name}님이 완료를 확인했습니다` : `${u.name}님이 보완을 요청했습니다${i.reviewNote ? `: ${i.reviewNote}` : ''}`,
         link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reviewres:${id}:${upd.version}` });
     }
-    // WORKIN_V3 지시자에게: 담당자가 완료하거나 검토를 요청하면 알림 (지시자 본인이 한 변경은 제외)
+    // WORKIN_V3 요청자에게: 담당자가 완료하거나 검토를 요청하면 알림 (요청자 본인이 한 변경은 제외)
     const requester = (set.requested_by ?? cur.requested_by) as string | null;
-    // 2026-10-15 대표: 알림은 중요한 것만 — 지시자에게는 완료·보류만(검토 요청은 위에서 따로). 시작·다시 진행·되돌림은 보내지 않음
+    // 2026-10-15 대표: 알림은 중요한 것만 — 요청자에게는 완료·보류만(검토 요청은 위에서 따로). 시작·다시 진행·되돌림은 보내지 않음
     if (requester && requester !== u.id && set.status && set.status !== cur.status && statusEvent !== 'review_requested' && (set.status === 'done' || set.status === 'on_hold')) {
       const verb = set.status === 'done' ? '완료했습니다' : '보류했습니다';
       const head = set.status === 'done' ? '완료' : '보류';
@@ -722,8 +722,8 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
 }
 
 /**
- * V14 28번: 검토 요청 → 지시자(없으면 만든 사람)에게 "[검토] 원 업무" 업무. 원 업무당 하나 — 다시 요청하면 다시 연다.
- * 원 업무가 검토에서 벗어나면(승인·반려·되돌림) 자동 완료, 삭제되면 같이 삭제. 지시자 = 담당자, 결재선 업무, 검토 업무 자체는 만들지 않는다.
+ * V14 28번: 검토 요청 → 요청자(없으면 만든 사람)에게 "[검토] 원 업무" 업무. 원 업무당 하나 — 다시 요청하면 다시 연다.
+ * 원 업무가 검토에서 벗어나면(승인·반려·되돌림) 자동 완료, 삭제되면 같이 삭제. 요청자 = 담당자, 결재선 업무, 검토 업무 자체는 만들지 않는다.
  */
 export async function syncReviewTask(sql: Sql, id: string, actorId: string | null) {
   const [o] = await sql<any[]>`select t.id, t.title, t.status, t.assignee_id, t.requested_by, t.created_by, t.org_unit_id, t.brand_id, t.due_date, t.deleted_at,
@@ -817,7 +817,7 @@ export async function deleteTask(u: SessionUser, id: string) {
   return { ok: true };
 }
 
-/** V6 11번 휴지통: 삭제 후 30일까지, 삭제 권한이 있었던 사람(만든 사람·지시자·관리자)에게 보임 */
+/** V6 11번 휴지통: 삭제 후 30일까지, 삭제 권한이 있었던 사람(만든 사람·요청자·관리자)에게 보임 */
 export async function listTrash(u: SessionUser) {
   const sql = db();
   const units = await accessibleUnitIds(u, sql);
@@ -835,7 +835,7 @@ export async function restoreTask(u: SessionUser, id: string) {
     select id, deleted_at, created_by, requested_by, org_unit_id from tasks where id = ${id} and purged_at is null`;
   if (!t || !t.deleted_at) throw notFound('휴지통에 없는 업무입니다');
   await assertUnitAccess(u, t.org_unit_id, sql);
-  if (!(t.created_by === u.id || t.requested_by === u.id || atLeast(u, 'admin'))) throw forbidden('만든 사람·지시자·관리자만 되살릴 수 있습니다');
+  if (!(t.created_by === u.id || t.requested_by === u.id || atLeast(u, 'admin'))) throw forbidden('만든 사람·요청자·관리자만 되살릴 수 있습니다');
   if (Date.now() - t.deleted_at.getTime() > 30 * 86400000) throw badRequest('30일이 지나 되살릴 수 없습니다');
   await sql.begin(async (tx) => {
     const back = await tx<{ id: string }[]>`update tasks set deleted_at = null, updated_at = now(), version = version + 1 where id = ${id} or (parent_id = ${id} and deleted_at = ${t.deleted_at}) returning id`;
@@ -882,7 +882,7 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
       await notify(tx, { userIds: visibleMentions, type: 'mention', title: `${u.name}님이 댓글에서 회원님을 언급했습니다`, body: `${t.title} — ${preview}`,
         link: `/tasks/${taskId}#c-${c.id}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `mention:${c.id}` });
     }
-    // V13 8번 알림 대상 — 새 댓글: 담당·지시·만든 사람·협업자·이 업무에 댓글 단 사람 / 답글: 원 댓글 작성자 + 그 스레드 참여자. 멘션된 사람은 멘션 알림 1건만
+    // V13 8번 알림 대상 — 새 댓글: 담당·요청·만든 사람·협업자·이 업무에 댓글 단 사람 / 답글: 원 댓글 작성자 + 그 스레드 참여자. 멘션된 사람은 멘션 알림 1건만
     let followers: string[];
     if (parent) {
       followers = [parent.author_id, ...(await tx<{ author_id: string }[]>`select distinct author_id from comments where parent_id = ${parent.id} and deleted_at is null`).map((r) => r.author_id)];
@@ -958,7 +958,7 @@ export async function ackTask(u: SessionUser, id: string) {
   await markAcked(u, id);
   return { ok: true };
 }
-/** V12 6번 "확인 완료": 담당자가 업무를 열거나 [확인]을 누르면 한 번만 기록하고 지시자(없으면 만든 사람)에게 알림 */
+/** V12 6번 "확인 완료": 담당자가 업무를 열거나 [확인]을 누르면 한 번만 기록하고 요청자(없으면 만든 사람)에게 알림 */
 export async function markAcked(u: SessionUser, id: string) {
   const sql = db();
   const [t] = await sql<{ title: string; requested_by: string | null; created_by: string }[]>`update tasks set assignee_ack_at = now()
@@ -1044,9 +1044,9 @@ export async function reorderTasks(u: SessionUser, ids: string[]) {
 }
 
 // ---------------- V14 1번 담당자 재배정 권한 ----------------
-/** 재배정 가능: 메뉴 권한 "업무 담당자 재배정" 또는 (내가 지시자 + "지시자는 자기 업무 재배정 가능") */
+/** 재배정 가능: 메뉴 권한 "업무 담당자 재배정" 또는 (내가 요청자 + "요청자는 자기 업무 재배정 가능") */
 export async function canReassign(u: SessionUser, t: { requested_by?: string | null; created_by?: string | null; team_id?: string | null }, _sql: Sql = db()) {
-  // V14 50(대표 결정): 담당자 변경은 지시자(없으면 만든 사람)만 — 대표·관리자·팀장도 예외 없음. 담당자는 "넘기기 요청"
+  // V14 50(대표 결정): 담당자 변경은 요청자(없으면 만든 사람)만 — 대표·관리자·팀장도 예외 없음. 담당자는 "넘기기 요청"
   return (t.requested_by ?? t.created_by ?? null) === u.id;
 }
 async function notifyReassign(tx: Sql, u: SessionUser, p: { id: string; title: string; from: string; to: string | null; requestedBy: string | null; version: number }) {
@@ -1057,7 +1057,7 @@ async function notifyReassign(tx: Sql, u: SessionUser, p: { id: string; title: s
     entityType: 'task', entityId: p.id, actorId: u.id, dedupeKey: `reassign:${p.id}:${p.version}` });
 }
 export const handoffInput = z.object({ toUserId: zUuid, note: z.string().trim().max(500).optional() });
-/** 담당자 본인 → 지시자에게 "넘기기 요청" */
+/** 담당자 본인 → 요청자에게 "넘기기 요청" */
 export async function requestHandoff(u: SessionUser, taskId: string, i: z.infer<typeof handoffInput>) {
   const sql = db();
   const { task } = await loadTaskForUser(u, taskId, sql);
@@ -1076,7 +1076,7 @@ export async function requestHandoff(u: SessionUser, taskId: string, i: z.infer<
     body: `${u.name} → ${to?.name ?? ''}${i.note ? ` · ${i.note}` : ''}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `handoff:${h.id}` });
   return { id: h.id };
 }
-/** 지시자(또는 재배정 권한자)가 넘기기 요청을 승인·거절 */
+/** 요청자(또는 재배정 권한자)가 넘기기 요청을 승인·거절 */
 export async function decideHandoff(u: SessionUser, taskId: string, handoffId: string, approve: boolean) {
   const sql = db();
   const { task } = await loadTaskForUser(u, taskId, sql);
@@ -1086,7 +1086,7 @@ export async function decideHandoff(u: SessionUser, taskId: string, handoffId: s
   const [cur] = await sql<{ title: string; assignee_id: string | null; requested_by: string | null; created_by: string; version: number }[]>`
     select title, assignee_id, requested_by, created_by, version from tasks where id = ${task.id}`;
   const decider = (cur.requested_by ?? cur.created_by) === u.id || (await canReassign(u, cur, sql));
-  if (!decider) throw forbidden('지시자만 승인할 수 있습니다');
+  if (!decider) throw forbidden('요청자만 승인할 수 있습니다');
   return sql.begin(async (tx) => {
     await tx`update task_handoffs set status = ${approve ? 'approved' : 'rejected'}, decided_by = ${u.id}, decided_at = now() where id = ${h.id}`;
     if (!approve) {
@@ -1118,7 +1118,7 @@ async function assertTeamAssign(u: SessionUser, teamId: string, sql: Sql = db())
 // ---------------- V32 4 마감 연장 ----------------
 const dstr = (d: unknown) => (d instanceof Date ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d) : String(d ?? '').slice(0, 10));
 export const extendInput = z.object({ toDate: zDate, reason: z.string().trim().min(1, '연장 사유를 적어 주세요').max(300) });
-/** 지시자(없으면 만든 사람) = 바로 연장, 담당자 = 지시자에게 연장 요청(이전 요청은 취소) */
+/** 요청자(없으면 만든 사람) = 바로 연장, 담당자 = 요청자에게 연장 요청(이전 요청은 취소) */
 export async function requestExtension(u: SessionUser, taskId: string, i: z.infer<typeof extendInput>) {
   const sql = db();
   const { task } = await loadTaskForUser(u, taskId, sql);
@@ -1139,7 +1139,7 @@ export async function requestExtension(u: SessionUser, taskId: string, i: z.infe
     });
     return { applied: true };
   }
-  if (cur.assignee_id !== u.id) throw forbidden('마감 연장은 담당자(요청)·지시자(바로 연장)만 할 수 있습니다');
+  if (cur.assignee_id !== u.id) throw forbidden('마감 연장은 담당자(요청)·요청자(바로 연장)만 할 수 있습니다');
   const id = await sql.begin(async (tx) => {
     await tx`update task_due_extensions set status = 'cancelled' where task_id = ${task.id} and status = 'pending'`;
     const [x] = await tx<{ id: string }[]>`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason)
@@ -1152,7 +1152,7 @@ export async function requestExtension(u: SessionUser, taskId: string, i: z.infe
   return { applied: false, id };
 }
 const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
-/** 지시자가 연장 요청 승인(마감 변경) · 반려 */
+/** 요청자가 연장 요청 승인(마감 변경) · 반려 */
 export async function decideExtension(u: SessionUser, taskId: string, extId: string, approve: boolean) {
   const sql = db();
   const { task } = await loadTaskForUser(u, taskId, sql);
@@ -1161,7 +1161,7 @@ export async function decideExtension(u: SessionUser, taskId: string, extId: str
   if (!x) throw notFound('요청이 없습니다');
   if (x.status !== 'pending') throw conflict('이미 처리된 요청입니다');
   const [cur] = await sql<{ title: string; requested_by: string | null; created_by: string }[]>`select title, requested_by, created_by from tasks where id = ${task.id}`;
-  if ((cur.requested_by ?? cur.created_by) !== u.id) throw forbidden('지시자만 승인할 수 있습니다');
+  if ((cur.requested_by ?? cur.created_by) !== u.id) throw forbidden('요청자만 승인할 수 있습니다');
   if (approve) await updateTask(u, task.id, { dueDate: x.to_date });
   await sql.begin(async (tx) => {
     await tx`update task_due_extensions set status = ${approve ? 'approved' : 'rejected'}, decided_by = ${u.id}, decided_at = now() where id = ${x.id}`;

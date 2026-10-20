@@ -33,7 +33,7 @@ describe('부서별 업무 환경', () => {
   });
   test('부서 간 협업: 마케팅 → 영업사원 배정 = 담당자·양쪽 부서장 보임, 영업부 다른 직원·마케팅 다른 직원은 부서 규칙대로', async () => {
     const t = (await P.mkLead.c.ok('POST', '/api/tasks', { title: '영업 자료 요청', assigneeId: P.sl1.id, approvalRequired: false })).id;
-    assert.equal((await sql`select team_id from tasks where id = ${t}`)[0].team_id, P.mk, '지시한 쪽 부서');
+    assert.equal((await sql`select team_id from tasks where id = ${t}`)[0].team_id, P.mk, '요청한 쪽 부서');
     assert.ok(await sees(P.sl1.c, t), '담당자'); assert.ok(await sees(P.slLead.c, t), '담당자의 부서장'); assert.ok(await inList(P.slLead.c, t));
     assert.ok(await sees(P.mk1.c, t), '마케팅 부서원(부서 업무)');
   });

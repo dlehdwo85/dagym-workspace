@@ -32,7 +32,7 @@ export const POST = handler(async ({ req, user }) => {
     const subs = await sql<{ title: string }[]>`select title from tasks where parent_id = ${i.fromTaskId} and deleted_at is null order by sort_order`;
     payload = { title: t.title, description: t.description, priority: t.priority, approvalRequired: t.approval_required, tags: t.tags,
       checklist: cl.map((c) => c.text), subtasks: subs.map((s) => s.title), recurrence: t.recurrence_rule ?? undefined,
-      // 마감 오프셋 = 원래 업무의 (마감 - 만든 날), 기본 담당·지시자 그대로
+      // 마감 오프셋 = 원래 업무의 (마감 - 만든 날), 기본 담당·요청자 그대로
       dueInDays: t.due_date ? Math.max(0, Math.round((Date.parse(t.due_date) - Date.parse(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(t.created_at)))) / 86400000)) : 7,
       assigneeId: t.assignee_id ?? null, requestedById: t.requested_by ?? null };
   }

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
 let srv, ctx, sql, brand;
+const P = {};
 before(async () => {
   await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
@@ -43,5 +44,47 @@ describe('⑥ 게시 주기 묶음', () => {
     const yt = ov.channels.find((c) => c.key === 'youtube'), th = ov.channels.find((c) => c.key === 'threads');
     assert.match(yt.pending, /YouTube Data API/);
     assert.match(th.pending, /threads_basic·threads_content_publish/);
+  });
+});
+
+describe('로컬 10/20 묶음 보완 ①② (주말 건너뛰기·요일 지정·시각 한 번에)', () => {
+  const nextDow = (dow, from = new Date()) => { const d = new Date(from.getTime() + 864e5); while (new Date(`${ymd(d)}T12:00:00+09:00`).getUTCDay() !== dow) d.setTime(d.getTime() + 864e5); return ymd(d); };
+  test('① skipWeekend: 토요일 시작 2일마다 → 토·일 칸이 월요일로(같은 날 하나만), 요일 지정 묶음은 그 요일에만 + 종류별 시각', async () => {
+    const sat = nextDow(6);
+    const r = await ctx.owner.ok('POST', '/api/marketing/auto/bundle', { brandId: brand.id, intervalDays: 2, startDate: sat, skipWeekend: true, times: { blog: '10:00', feed: '12:00', story: '12:00', shorts: '18:00', reels: '18:00' } });
+    const rules = (await ctx.owner.ok('GET', '/api/marketing/auto')).rules.filter((x) => x.bundle_key === r.bundleKey);
+    assert.ok(rules.every((x) => x.skip_weekend === true && x.interval_days === 2));
+    assert.deepEqual(Object.fromEntries(rules.map((x) => [x.kind, x.post_time.slice(0, 5)])), { blog: '10:00', feed: '12:00', story: '12:00', shorts: '18:00', reels: '18:00' }, '종류별 시각');
+    const days = (await sql`select distinct (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = any(${r.ids}::uuid[]) order by 1`).map((x) => x.d);
+    assert.ok(days.length >= 3);
+    assert.ok(days.every((d) => ![0, 6].includes(new Date(`${d}T12:00:00+09:00`).getUTCDay())), `주말 없음 ${days}`);
+    assert.equal(days[0], nextDow(1, new Date(Date.parse(`${sat}T12:00:00+09:00`) - 864e5)), '토요일 시작 → 첫 칸은 다음 월요일');
+    const n = await sql`select count(*)::int n from mkt_contents where rule_id = ${rules[0].id} and (scheduled_at at time zone 'Asia/Seoul')::date::text = ${days[0]}`;
+    assert.equal(n[0].n, 1, '토·일 둘 다 월요일로 밀려도 한 칸');
+    const w = await ctx.owner.ok('POST', '/api/marketing/auto/bundle', { brandId: brand.id, weekdays: [1, 3, 5] });
+    const wr = (await ctx.owner.ok('GET', '/api/marketing/auto')).rules.filter((x) => x.bundle_key === w.bundleKey);
+    assert.ok(wr.every((x) => x.interval_days === null && JSON.stringify(x.weekdays) === '[1,3,5]' && x.skip_weekend === false), '요일 지정은 n일마다 대신');
+    const wd = (await sql`select distinct (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = any(${w.ids}::uuid[])`).map((x) => new Date(`${x.d}T12:00:00+09:00`).getUTCDay());
+    assert.ok(wd.length && wd.every((d) => [1, 3, 5].includes(d)), `월·수·금만 ${wd}`);
+    P.key = w.bundleKey; P.ids = w.ids;
+  });
+  test('② PATCH 묶음: 시각을 바꾸면 규칙 + 제작 전 초안이 같은 날 새 시각으로, 요일을 바꾸면 제작 전 초안을 지우고 다시 계획, 다른 회사·없는 묶음 404', async () => {
+    const rules0 = (await ctx.owner.ok('GET', '/api/marketing/auto')).rules.filter((x) => x.bundle_key === P.key);
+    const blogId0 = rules0.find((x) => x.kind === 'blog').id;
+    const before = (await sql`select (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = ${blogId0} and status = 'draft' order by scheduled_at`).map((x) => x.d);
+    assert.ok(before.length);
+    const r = await ctx.owner.ok('PATCH', '/api/marketing/auto/bundle', { bundleKey: P.key, times: { blog: '09:30', feed: '14:00' } });
+    assert.equal(typeof r.planned, 'number');
+    const rules = (await ctx.owner.ok('GET', '/api/marketing/auto')).rules.filter((x) => x.bundle_key === P.key);
+    assert.equal(rules.find((x) => x.kind === 'blog').post_time.slice(0, 5), '09:30'); assert.equal(rules.find((x) => x.kind === 'story').post_time.slice(0, 5), '18:00', '안 바꾼 종류는 그대로');
+    const blogId = rules.find((x) => x.kind === 'blog').id;
+    const moved = await sql`select to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24:MI') as t, (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = ${blogId} order by scheduled_at`;
+    assert.ok(moved.length && moved.every((x) => x.t === '09:30'), `초안도 새 시각 ${JSON.stringify(moved)}`);
+    assert.deepEqual(moved.map((x) => x.d), before, '날짜는 그대로, 시각만');
+    await ctx.owner.ok('PATCH', '/api/marketing/auto/bundle', { bundleKey: P.key, weekdays: [2, 4, 6] });
+    const wd = (await sql`select distinct (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = any(${P.ids}::uuid[])`).map((x) => new Date(`${x.d}T12:00:00+09:00`).getUTCDay());
+    assert.ok(wd.length && wd.every((d) => [2, 4, 6].includes(d)), `화·목·토로 다시 계획 ${wd}`);
+    assert.equal((await ctx.owner.req('PATCH', '/api/marketing/auto/bundle', { bundleKey: '00000000-0000-4000-8000-000000000000', times: { blog: '09:00' } })).status, 404);
+    assert.equal((await ctx.staffA.client.req('PATCH', '/api/marketing/auto/bundle', { bundleKey: P.key, times: { blog: '09:00' } })).status, 403, '관리자만');
   });
 });

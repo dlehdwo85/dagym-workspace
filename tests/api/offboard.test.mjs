@@ -13,7 +13,7 @@ before(async () => {
   P.room = (await P.gone.c.ok('POST', '/api/chat/rooms', { kind: 'group', name: '퇴사자 방', userIds: [ctx.ownerId] })).id; // 퇴사자가 방장
   P.team = (await ctx.owner.ok('POST', '/api/teams', { name: '본사팀', members: [{ userId: ctx.ownerId, lead: true }, { userId: P.gone.id, lead: false }] })).id;
   P.t1 = (await ctx.owner.ok('POST', '/api/tasks', { title: '퇴사자 담당 업무', assigneeId: P.gone.id, orgUnitId: ctx.hq, approvalRequired: false })).id;
-  P.t2 = (await P.gone.c.ok('POST', '/api/tasks', { title: '퇴사자가 지시한 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.hq, approvalRequired: false })).id;
+  P.t2 = (await P.gone.c.ok('POST', '/api/tasks', { title: '퇴사자가 요청한 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.hq, approvalRequired: false })).id;
   P.t3 = (await ctx.owner.ok('POST', '/api/tasks', { title: '완료된 업무', assigneeId: P.gone.id, orgUnitId: ctx.hq, approvalRequired: false })).id;
   await sql`update tasks set status = 'done', completed_at = now() where id = ${P.t3}`;
   await sql`insert into contacts (tenant, name, phone, owner_id, created_by) values ('default', '거래처 김', '010-0000-0001', ${P.gone.id}, ${ctx.ownerId})`.catch(async () => sql`insert into contacts (tenant, name, owner_id, created_by) values ('default', '거래처 김', ${P.gone.id}, ${ctx.ownerId})`);

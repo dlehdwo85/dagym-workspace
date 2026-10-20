@@ -90,7 +90,7 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     if (st.soon > 0 && !t.reminder_minutes && soonAt.toISODate()! < t.due_date) push(`soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, soonAt, `마감 임박: ${t.title}`, `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, `/tasks/${t.id}`);
   }
 
-  // V13 6번: 내가 지시한 업무(담당자가 다른 사람) — 서버 알림과 같은 키(묶음 업무는 묶음 1건)
+  // V13 6번: 내가 요청한 업무(담당자가 다른 사람) — 서버 알림과 같은 키(묶음 업무는 묶음 1건)
   if (st.req) {
     const mine = await sql<{ id: string; title: string; due_date: string; due_time: string | null; reminder_minutes: number[] | null; batch_id: string | null; assignee_name: string; atask: number | null }[]>`
       select t.id, t.title, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time, t.reminder_minutes, t.batch_id, a.name assignee_name, s.task_reminder_minutes atask
@@ -106,10 +106,10 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
       const due = kst(t.due_date, t.due_time ?? '09:00');
       const rms = t.reminder_minutes ?? (t.due_time ? [t.atask ?? 60] : []);
       for (const m of rms)
-        push(`req:${g}:rem${m}:${t.due_date}:${t.due_time ?? ''}`, due.minus({ minutes: m }), `[지시] ${leftLabel(m)} 마감: ${t.title}`, `담당 ${who}`, link);
-      if (!t.due_time && !t.reminder_minutes) { const m = t.atask ?? 60; push(`req:${g}:rem${m}:${t.due_date}:`, kst(t.due_date, '18:00').minus({ minutes: m }), `[지시] ${leftLabel(m)} 마감: ${t.title}`, `담당 ${who}`, link); }
+        push(`req:${g}:rem${m}:${t.due_date}:${t.due_time ?? ''}`, due.minus({ minutes: m }), `[요청] ${leftLabel(m)} 마감: ${t.title}`, `담당 ${who}`, link);
+      if (!t.due_time && !t.reminder_minutes) { const m = t.atask ?? 60; push(`req:${g}:rem${m}:${t.due_date}:`, kst(t.due_date, '18:00').minus({ minutes: m }), `[요청] ${leftLabel(m)} 마감: ${t.title}`, `담당 ${who}`, link); }
       if (!rms.some((m) => due.minus({ minutes: m }).toISODate() === t.due_date))
-        push(`req:${g}:today:${t.due_date}`, kst(t.due_date, '09:00'), `[지시] 오늘 마감: ${t.title}`, `담당 ${who}`, link);
+        push(`req:${g}:today:${t.due_date}`, kst(t.due_date, '09:00'), `[요청] 오늘 마감: ${t.title}`, `담당 ${who}`, link);
     }
   }
 

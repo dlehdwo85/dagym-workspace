@@ -118,11 +118,13 @@ export async function planSlots(tenant: string, days = 14) {
   const rules = await sql<any[]>`select r.*, b.name as brand, coalesce(b.test_mode, false) as test from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${tenant} and r.active`;
   let made = 0;
   for (const r of rules) for (let k = 0; k <= days; k++) {
-    const date = ymd(new Date(Date.now() + k * DAY));
+    let date = ymd(new Date(Date.now() + k * DAY));
     if (r.interval_days) { // 대표 10/20 6): n일마다(시작일부터) — 요일 대신
       const anchor = r.anchor_date ? ymd(new Date(`${String(r.anchor_date).slice(0, 10)}T12:00:00+09:00`)) : ymd(new Date(r.created_at));
       const diff = Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${anchor}T00:00:00Z`)) / DAY);
       if (diff < 0 || diff % Number(r.interval_days) !== 0) continue;
+      // 로컬 10/20 보완 ①: 주말 건너뛰기 — 토·일에 걸리면 다음 월요일(같은 날 두 칸은 (rule_id, scheduled_at) 로 하나만)
+      if (r.skip_weekend) { const dow = new Date(`${date}T12:00:00+09:00`).getUTCDay(); if (dow === 6) date = ymd(new Date(Date.parse(`${date}T12:00:00+09:00`) + 2 * DAY)); else if (dow === 0) date = ymd(new Date(Date.parse(`${date}T12:00:00+09:00`) + DAY)); }
     } else {
       const dow = new Date(`${date}T12:00:00+09:00`).getUTCDay();
       if (!(r.weekdays as number[]).includes(dow)) continue;
@@ -334,7 +336,7 @@ export async function automationView(u: SessionUser) {
   const sql = db(); const t = tenantOf(u);
   const s = await settingsOf(t);
   const [rules, requests, ledger, brands, people] = await Promise.all([
-    sql`select r.id, r.brand_id, b.name as brand, r.channel, r.kind, r.weekdays, r.post_time, r.topic_hint, r.active, r.interval_days, r.anchor_date::text as anchor_date, r.cross_channels, r.bundle_key from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${t} order by r.created_at`,
+    sql`select r.id, r.brand_id, b.name as brand, r.channel, r.kind, r.weekdays, r.post_time, r.topic_hint, r.active, r.interval_days, r.anchor_date::text as anchor_date, r.cross_channels, r.bundle_key, r.skip_weekend from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${t} order by r.created_at`,
     sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
     sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, coalesce(l.title, c.title) as title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
@@ -374,30 +376,60 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
 const ruleBase = z.object({ brandId: zUuid.nullable().optional(), channel: z.enum(['instagram', 'facebook', 'threads', 'blog', 'youtube', 'naver_place', 'other']), kind: z.enum(['feed', 'blog', 'reels', 'video', 'shorts', 'story']),
   weekdays: z.array(nInt(0, 6)).max(7).default([]), postTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), topicHint: z.string().max(300).optional(), active: z.boolean().optional(),
   /** 대표 10/20 6): n일마다(요일 대신)·시작일·같은 글을 함께 올릴 채널 */
-  intervalDays: nInt(1, 30).nullable().optional(), anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), crossChannels: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional() })
+  intervalDays: nInt(1, 30).nullable().optional(), anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), crossChannels: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional(), skipWeekend: z.boolean().optional() })
 export const ruleInput = ruleBase.refine((i) => i.intervalDays || i.weekdays.length, { message: '요일을 고르거나 n일마다를 정하세요' });
 export async function createRule(u: SessionUser, i: z.infer<typeof ruleInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const sql = db(); const t = tenantOf(u);
   if (i.brandId && !(await sql`select 1 from mkt_brands where id = ${i.brandId} and tenant = ${t}`).length) throw notFound('브랜드를 찾을 수 없습니다');
-  const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by, interval_days, anchor_date, cross_channels)
-    values (${t}, ${i.brandId ?? null}, ${i.channel}, ${i.kind}, ${[...new Set(i.weekdays)].sort()}, ${i.postTime}, ${i.topicHint ?? null}, ${i.active ?? true}, ${u.id}, ${i.intervalDays ?? null}, ${i.anchorDate ?? null}, ${(i.crossChannels ?? []).filter((c) => c !== i.channel)}) returning id`;
+  const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by, interval_days, anchor_date, cross_channels, skip_weekend)
+    values (${t}, ${i.brandId ?? null}, ${i.channel}, ${i.kind}, ${[...new Set(i.weekdays)].sort()}, ${i.postTime}, ${i.topicHint ?? null}, ${i.active ?? true}, ${u.id}, ${i.intervalDays ?? null}, ${i.anchorDate ?? null}, ${(i.crossChannels ?? []).filter((c) => c !== i.channel)}, ${i.skipWeekend ?? false}) returning id`;
   return { id: r.id, planned: await planSlots(t) };
 }
-export const bundleInput = z.object({ brandId: zUuid.nullable().optional(), intervalDays: nInt(2, 3).default(3), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), topicHint: z.string().max(300).optional() });
-/** 대표 10/20 6): 기본 묶음 규칙 5개를 한 번에(브랜드마다, 2~3일에 한 번) — 같은 bundle_key, 요일 대신 n일마다 */
+const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+/** 로컬 10/20 보완 ②: 묶음의 종류별 게시 시각을 한 번에(피드·쇼츠·릴스·블로그·스토리) — 비우면 기본 BUNDLE 시각 */
+const bundleTimes = z.object({ feed: HHMM.optional(), shorts: HHMM.optional(), reels: HHMM.optional(), blog: HHMM.optional(), story: HHMM.optional() });
+export const bundleInput = z.object({ brandId: zUuid.nullable().optional(), intervalDays: nInt(2, 3).default(3), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), topicHint: z.string().max(300).optional(),
+  weekdays: z.array(nInt(0, 6)).max(7).optional(), skipWeekend: z.boolean().optional(), times: bundleTimes.optional() }); // 로컬 10/20 보완: 요일 지정(월·수·금)·주말 건너뛰기·시각
+/** 대표 10/20 6): 기본 묶음 규칙 5개를 한 번에(브랜드마다, 2~3일에 한 번) — 같은 bundle_key, 요일 대신 n일마다(또는 요일 지정) */
 export async function createBundle(u: SessionUser, i: z.infer<typeof bundleInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const sql = db(); const t = tenantOf(u);
   if (i.brandId && !(await sql`select 1 from mkt_brands where id = ${i.brandId} and tenant = ${t}`).length) throw notFound('브랜드를 찾을 수 없습니다');
   const key = randomUUID(); const start = i.startDate ?? ymd(new Date());
+  const byDow = !!i.weekdays?.length; // 요일을 고르면 n일마다 대신 그 요일에(마케팅 계획: 워크인 월·수·금, 하이링크·다짐 화·목·토)
   const ids: string[] = [];
   for (const b of BUNDLE) {
-    const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by, interval_days, anchor_date, cross_channels, bundle_key)
-      values (${t}, ${i.brandId ?? null}, ${b.channel}, ${b.kind}, ${[]}, ${b.postTime}, ${i.topicHint ?? null}, true, ${u.id}, ${i.intervalDays}, ${start}, ${b.cross}, ${key}) returning id`;
+    const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by, interval_days, anchor_date, cross_channels, bundle_key, skip_weekend)
+      values (${t}, ${i.brandId ?? null}, ${b.channel}, ${b.kind}, ${byDow ? [...new Set(i.weekdays)].sort() : []}, ${i.times?.[b.kind as keyof typeof i.times] ?? b.postTime}, ${i.topicHint ?? null}, true, ${u.id}, ${byDow ? null : i.intervalDays}, ${byDow ? null : start}, ${b.cross}, ${key}, ${!byDow && !!i.skipWeekend}) returning id`;
     ids.push(r.id);
   }
   return { bundleKey: key, ids, planned: await planSlots(t) };
+}
+export const bundlePatch = z.object({ bundleKey: zUuid, times: bundleTimes.optional(), weekdays: z.array(nInt(0, 6)).max(7).optional(), intervalDays: nInt(1, 30).optional(), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), skipWeekend: z.boolean().optional() });
+/** 로컬 10/20 보완: 이미 만든 묶음의 시각·요일/주기·주말 건너뛰기를 한 번에 — 아직 제작 안 한 초안은 새 시각으로 옮기고(요일·주기를 바꾸면 지우고 다시 계획) */
+export async function updateBundle(u: SessionUser, i: z.infer<typeof bundlePatch>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const sql = db(); const t = tenantOf(u);
+  const rules = await sql<{ id: string; kind: string }[]>`select id, kind from mkt_rules where tenant = ${t} and bundle_key = ${i.bundleKey}`;
+  if (!rules.length) throw notFound('묶음을 찾을 수 없습니다');
+  const ids = rules.map((r) => r.id);
+  for (const r of rules) {
+    const tm = i.times?.[r.kind as keyof typeof i.times];
+    if (!tm) continue;
+    await sql`update mkt_rules set post_time = ${tm} where id = ${r.id}`;
+    // 제작 전 초안은 같은 날 새 시각으로
+    await sql`update mkt_contents set scheduled_at = ((scheduled_at at time zone 'Asia/Seoul')::date::text || ' ' || ${tm})::timestamp at time zone 'Asia/Seoul' where rule_id = ${r.id} and status = 'draft' and produced_at is null and scheduled_at > now()`;
+  }
+  const reschedule = i.weekdays !== undefined || i.intervalDays !== undefined || i.skipWeekend !== undefined || i.startDate !== undefined;
+  if (reschedule) {
+    const byDow = !!i.weekdays?.length;
+    await sql`update mkt_rules set weekdays = case when ${byDow} then ${byDow ? [...new Set(i.weekdays)].sort() : []}::int[] else weekdays end,
+      interval_days = case when ${byDow} then null else coalesce(${i.intervalDays ?? null}, interval_days) end, anchor_date = case when ${byDow} then null else coalesce(${i.startDate ?? null}, anchor_date) end,
+      skip_weekend = case when ${byDow} then false else coalesce(${i.skipWeekend ?? null}, skip_weekend) end where id = any(${ids}::uuid[])`;
+    await sql`delete from mkt_contents where rule_id = any(${ids}::uuid[]) and tenant = ${t} and status = 'draft' and produced_at is null and scheduled_at > now()`;
+  }
+  return { ok: true, planned: await planSlots(t) };
 }
 export const rulePatch = ruleBase.partial();
 export async function updateRule(u: SessionUser, id: string, i: z.infer<typeof rulePatch>) {
@@ -405,7 +437,7 @@ export async function updateRule(u: SessionUser, id: string, i: z.infer<typeof r
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
   const sql = db();
   const [r] = await sql`update mkt_rules set channel = coalesce(${i.channel ?? null}, channel), kind = coalesce(${i.kind ?? null}, kind), weekdays = coalesce(${i.weekdays ? ([...new Set(i.weekdays)].sort() as number[]) : null}::int[], weekdays), interval_days = coalesce(${i.intervalDays ?? null}, interval_days), anchor_date = coalesce(${i.anchorDate ?? null}, anchor_date),
-    post_time = coalesce(${i.postTime ?? null}, post_time), topic_hint = coalesce(${i.topicHint ?? null}, topic_hint), active = coalesce(${i.active ?? null}, active) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
+    post_time = coalesce(${i.postTime ?? null}, post_time), topic_hint = coalesce(${i.topicHint ?? null}, topic_hint), active = coalesce(${i.active ?? null}, active), skip_weekend = coalesce(${i.skipWeekend ?? null}, skip_weekend) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!r) throw notFound();
   return { ok: true };
 }
