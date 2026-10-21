@@ -629,3 +629,4 @@
   - 81f4d36 콘텐츠 캘린더 주 보기: 브랜드 행·썸네일 43·오늘 열·채널 행 전환 ✅, ✎ 옮기기 10:00→10:05→10:00 승인 상태 유지 ✅, 390px 가로 스크롤 880px·행 머리 고정 ✅ (끌어서 이동은 눈 확인 생략).
   - 835cf7e #100 담당자 지정: 탭 표시·입찰 주 담당 저장·지우기 ✅, 넘기기 기본 선택 이동재 ✅(규칙 없을 때와 구분은 다중 계정 필요). 3·4항목은 다른 직원 계정 필요 → 로컬 불가.
   - 클라우드에 결과 전달 완료. ASC 세션은 로그아웃됨(심사 추적 작업은 재로그인 필요).
+  - 19:40 #133 PDF 본문 추출: 운영 자료실 PDF 9건 모두 text_error "Setting up fake worker failed: Cannot find module /var/task/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs" — Vercel 번들에 worker 파일 누락. outputFileTracingIncludes 또는 정적 import 제안, 배포 뒤 재추출 확인 예정. 클라우드 전달.
