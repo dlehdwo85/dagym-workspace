@@ -9,7 +9,8 @@ const C = '#7C3AED';
 const P_COLOR: Record<string, string> = { naver: '#03C75A', google: '#4285F4', meta: '#1877F2' };
 type Acc = { id: string; provider: string; external_id: string; label: string; status: string; last_sync_at: string | null; last_error: string | null; brand: string | null };
 type Camp = { account_id: string; provider: string; label: string; campaign_id: string; campaign_name: string; currency: string; impressions: number; clicks: number; cost: number; conversions: number };
-type Data = { days: number; accounts: Acc[]; totals: { impressions: number; clicks: number; cost: number; conversions: number }; campaigns: Camp[];
+type Balance = { id: string; provider: string; label: string; balance: number; currency: string; source: 'manual' | 'api'; checked_at: string; pace: number; days: number | null; level: 'ok' | 'warn' | 'action'; link: string; how: string };
+type Data = { days: number; accounts: Acc[]; balances?: Balance[]; totals: { impressions: number; clicks: number; cost: number; conversions: number }; campaigns: Camp[];
   daily: { day: string; clicks: number; cost: number; conversions: number }[]; providers: { key: string; label: string; ready: boolean }[]; canEdit: boolean; callbacks: { meta: string; google: string } | null };
 const n0 = (v: number) => Math.round(v).toLocaleString('ko-KR');
 const won = (v: number, cur = 'KRW') => (cur === 'KRW' ? `${n0(v)}원` : `${v.toLocaleString('ko-KR', { maximumFractionDigits: 2 })} ${cur}`);
@@ -238,6 +239,7 @@ export function Connections() {
               : <PendingButton key={p.key} label={`${p.label} 연결`} reason="심사 후 열림" />)}
           </div>
         ) : <p className="mt-2 text-xs text-ink-3">광고 계정 연결은 관리자가 합니다.</p>}
+        <Balances rows={data.balances ?? []} canEdit={data.canEdit} onChange={reload} />
         <p className="mt-2 text-[11px] text-ink-3">성과는 각 광고 플랫폼에서 하루 한 번 읽기만 합니다(최근 7일을 다시 읽어 늦게 잡힌 전환까지 반영). 예산·입찰은 바꾸지 않습니다.</p>
       </section>
       <PublishChannels />
@@ -332,5 +334,36 @@ function PublishChannels() {
           </ul></details>
       )}
     </section>
+  );
+}
+
+/** 대표 10/21 14:30 #411: 매체 잔액 — API 로 읽히는 매체(네이버 비즈머니·Meta 상한)는 자동, 구글 선불·Higgsfield 는 직접 입력. 페이스 기준 n일분 아래면 운영실 '충전 필요' 카드 */
+const B_LABEL: Record<string, string> = { google: 'Google Ads', naver: '네이버 검색광고', meta: 'Meta 광고', higgsfield: 'Higgsfield' };
+function Balances({ rows, canEdit, onChange }: { rows: Balance[]; canEdit: boolean; onChange: () => void }) {
+  const [f, setF] = useState<{ provider: string; label: string; balanceKrw: string } | null>(null); const [busy, setBusy] = useState(false);
+  async function save() {
+    if (!f) return; setBusy(true);
+    try { await api('/api/marketing/ads/balances', { method: 'PUT', body: { provider: f.provider, label: f.label.trim(), balanceKrw: Number(f.balanceKrw.replace(/[^\d.]/g, '')) || 0 } }); toast.ok('잔액을 적었습니다 — 페이스 기준으로 충전 필요 여부를 바로 확인합니다'); setF(null); onChange(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="mt-4 border-t border-line pt-3" data-testid="ads-balances">
+      <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">매체 잔액</h3><span className="text-xs text-ink-3">최근 7일 하루 평균 지출 기준 7일분 미만이면 운영실에 [충전 필요] 카드 · 충전은 매체 화면에서(API 불가)</span>
+        {canEdit && !f && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setF({ provider: 'google', label: '', balanceKrw: '' })} data-testid="ads-balance-add">잔액 직접 입력</Button>}</div>
+      {f && <div className="mt-2 flex flex-wrap items-end gap-2 rounded-input border border-line bg-slate-50 p-2" data-testid="ads-balance-form">
+        <select className={cx(inputCls, 'h-9 w-auto')} value={f.provider} onChange={(e) => setF({ ...f, provider: e.target.value })} aria-label="매체">{Object.entries(B_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <input className={cx(inputCls, 'h-9 w-40')} value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} placeholder="계정·브랜드 이름(선택)" aria-label="라벨" maxLength={80} />
+        <input className={cx(inputCls, 'h-9 w-36')} value={f.balanceKrw} onChange={(e) => setF({ ...f, balanceKrw: e.target.value })} placeholder="잔액(원)" aria-label="잔액(원)" inputMode="numeric" data-testid="ads-balance-input" />
+        <Button size="sm" onClick={save} disabled={busy} data-testid="ads-balance-save">저장</Button><Button size="sm" variant="secondary" onClick={() => setF(null)}>취소</Button></div>}
+      {rows.length ? <ul className="mt-2 divide-y divide-line text-sm">{rows.map((b) => (
+        <li key={b.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="ads-balance" data-level={b.level}>
+          <span className="size-2 rounded-full" style={{ background: P_COLOR[b.provider] ?? '#6B7280' }} /><span className="font-medium">{B_LABEL[b.provider] ?? b.provider}{b.label ? ` · ${b.label}` : ''}</span>
+          <b data-testid="ads-balance-amount">{won(b.balance, b.currency)}</b>
+          <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', b.level === 'action' ? 'bg-red-50 text-red-800' : b.level === 'warn' ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800')} data-testid="ads-balance-days">{b.days === null ? '지출 기록 없음' : `약 ${b.days}일분`}{b.pace ? ` · 하루 ${n0(b.pace)}원` : ''}</span>
+          <span className="text-xs text-ink-3">{b.source === 'api' ? '매체 조회' : '직접 입력'} {fmtDateTime(b.checked_at)}</span>
+          {b.link && <a href={b.link} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{ color: C }}>충전 페이지</a>}
+          {canEdit && <button type="button" className="text-xs text-ink-3 underline" onClick={() => setF({ provider: b.provider, label: b.label, balanceKrw: String(Math.round(b.balance)) })}>고치기</button>}</li>))}</ul>
+        : <p className="mt-2 text-xs text-ink-3" data-testid="ads-balance-empty">아직 잔액 기록이 없습니다 — 네이버·Meta 는 다음 동기화 때 자동으로 읽고, 구글 선불·Higgsfield 는 직접 입력하세요.</p>}
+    </div>
   );
 }

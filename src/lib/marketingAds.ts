@@ -157,6 +157,37 @@ export async function syncAccount(a: Acc, days = daysBack(7)) {
     return { id: a.id, error: String(e?.message ?? e).slice(0, 200) };
   }
 }
+/** #411: 매체 잔액 읽기 — 네이버 비즈머니(GET /billing/bizmoney), Meta 는 지출 상한(spend_cap)이 있을 때 상한−지출, 구글은 API 로 선불 잔액을 읽을 수 없어 null(직접 입력) */
+export async function readBalance(a: Acc): Promise<{ balance: number; currency: string } | null> {
+  const sec = a.secret_enc ? JSON.parse(decrypt(a.secret_enc)) : {};
+  if (a.provider === 'naver') {
+    const r: any = await naver('/billing/bizmoney', sec, a.external_id);
+    const v = Number(r?.bizmoney ?? r?.totalBizmoney ?? r?.balance ?? NaN);
+    return Number.isFinite(v) ? { balance: v, currency: 'KRW' } : null;
+  }
+  if (a.provider === 'meta') {
+    const r: any = await getJson(`${GRAPH()}/act_${a.external_id}?${new URLSearchParams({ fields: 'spend_cap,amount_spent,currency', access_token: String(sec.token ?? '') })}`);
+    const cap = Number(r?.spend_cap ?? 0), spent = Number(r?.amount_spent ?? 0); if (!cap) return null;
+    const cur = String(r?.currency ?? 'KRW'); const div = cur === 'KRW' || cur === 'JPY' ? 1 : 100; // Meta 는 소수 통화를 센트 단위로
+    return { balance: Math.max(0, (cap - spent) / div), currency: cur };
+  }
+  return null;
+}
+/** 회사 광고 계정의 잔액을 읽어 mkt_ad_balances 에 적는다(API 로 읽히는 매체만, 6시간마다) */
+export async function syncBalances(tenant: string, force = false) {
+  const sql = db();
+  const accs = await sql<(Acc & { label: string; last_balance_at: string | null })[]>`select a.id, a.tenant, a.provider, a.external_id, a.secret_enc, a.label, b.checked_at as last_balance_at
+    from mkt_ad_accounts a left join mkt_ad_balances b on b.account_id = a.id where a.tenant = ${tenant} and a.status <> 'disconnected'`;
+  let read = 0;
+  for (const a of accs) {
+    if (!force && a.last_balance_at && Date.now() - new Date(a.last_balance_at).getTime() < 6 * 3600e3) continue;
+    const r = await readBalance(a).catch(() => null); if (!r) continue;
+    await sql`insert into mkt_ad_balances (tenant, provider, label, account_id, balance_krw, currency, source, checked_at) values (${tenant}, ${a.provider}, ${a.label}, ${a.id}, ${r.balance}, ${r.currency}, 'api', now())
+      on conflict (tenant, provider, label) do update set account_id = excluded.account_id, balance_krw = excluded.balance_krw, currency = excluded.currency, source = 'api', checked_at = now()`;
+    read++;
+  }
+  return { read };
+}
 /** tick: 오늘(서울) 아직 안 읽은 계정 5개씩 */
 export async function adsSyncDue() {
   const due = await db()<Acc[]>`select id, tenant, provider, external_id, secret_enc from mkt_ad_accounts
@@ -197,7 +228,8 @@ export async function adsOverview(u: SessionUser, q: { days?: number; month?: st
   const brandList = await sql`select b.id, b.name from mkt_brands b where b.tenant = ${t} order by b.name`;
   const prevFrom = month ? null : daysBack(n * 2)[0]; const prevTo = month ? null : ymd(new Date(Date.parse(`${from}T12:00:00+09:00`) - 864e5));
   const [prevDays] = prevFrom && prevTo ? await sql`select ${SUM} ${base(prevFrom, prevTo)}` : [null];
-  const common = { accounts, totals: tot, campaigns, daily, campaignDaily, byProvider: byProviderAll, brands: brandList, filter: { brand, provider }, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
+  const balances = await (await import('./mktRecharge')).balancesView(t);
+  const common = { accounts, balances, totals: tot, campaigns, daily, campaignDaily, byProvider: byProviderAll, brands: brandList, filter: { brand, provider }, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
     // 로컬 검수: 콘솔에 등록할 콜백 주소를 화면에 그대로(APP_URL 기준 — 도메인 바꾸면 이 주소도 바뀜)
     callbacks: u.platformAdmin ? { meta: callback('meta'), google: callback('google') } : null }; // 콘솔 등록 값은 플랫폼 관리자에게만(고객 화면에서 기술 단계 숨김)
   if (!month) return { days: n, from, to, month: null, prev: prevDays, prevFrom, prevTo, ...common };
