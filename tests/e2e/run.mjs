@@ -1273,6 +1273,8 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   await owner.getByTestId('calendar-list').getByLabel('업무 숨기기').waitFor();
   await owner.waitForLoadState('networkidle'); // 일정을 불러온 뒤(이른 시각 일정이 있으면 시간 칸이 늘어남) 위치 측정
   await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().scrollIntoViewIfNeeded(); // 첫 위치 = 지금 - 1시간(10/19)
+  // #148: 오늘이 목요일이면 d(오늘+2) 가 토요일 = 맨 오른쪽 열 → 가운데가 메신저 독 버튼(오른쪽 아래) 위에 와서 클릭이 독을 열었음. 클릭 전에 독 버튼을 숨김
+  await owner.evaluate(() => { const b = document.querySelector('[data-testid="msg-dock-open"]'); if (b) b.style.visibility = 'hidden'; });
   const col = await owner.locator(`.fc-timegrid-col[data-date="${d}"]`).boundingBox();
   const slot = await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().boundingBox();
   await owner.mouse.click(col.x + col.width / 2, slot.y + 4);
