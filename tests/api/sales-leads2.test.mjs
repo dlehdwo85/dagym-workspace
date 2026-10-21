@@ -62,6 +62,28 @@ describe('S2 2차 리드 폼·상세', () => {
     await ctx.owner.ok('PATCH', `/api/sales/leads/${P.lead}`, { status: '미팅예정' });
     assert.equal((await ctx.staffA.client.req('POST', `/api/sales/leads/${P.lead}/tasks`, { title: 'x' })).status, 200, '공간 멤버는 업무 추가 가능');
   });
+  test('영업 재편 5) 진행 한 화면: 리드 일정 추가(회사 캘린더·lead_id·참석 = 담당) → 상세 events·타임라인 event, 단계 이동 기록 → 단계별 보기 전환율(funnel)', async () => {
+    const ev = await ctx.owner.ok('POST', `/api/sales/leads/${P.lead}/events`, { title: '현장 미팅', date: addDays(today, 2), time: '14:00', durationMin: 90 });
+    const [row] = await sql`select e.title, e.lead_id, e.all_day, c.type, (select count(*)::int from event_attendees a where a.event_id = e.id) as att from events e join calendars c on c.id = e.calendar_id where e.id = ${ev.id}`;
+    assert.deepEqual([row.lead_id, row.all_day, row.type, row.att], [P.lead, false, 'company', 1]); assert.match(row.title, /^\[영업\] 현장 미팅 · /);
+    const allDay = await ctx.owner.ok('POST', `/api/sales/leads/${P.lead}/events`, { title: '개찰', date: addDays(today, 9) });
+    const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${P.lead}`);
+    assert.equal(d.events.length, 2); assert.ok(d.events.some((x) => x.id === allDay.id && x.all_day === true));
+    assert.ok(d.timeline.some((x) => x.kind === 'event' && x.id === ev.id && x.href === `/calendar?event=${ev.id}`), '타임라인에 일정');
+    assert.equal((await ctx.staffB.client.req('POST', `/api/sales/leads/${P.lead}/events`, { title: 'x', date: today })).status, 403, '담당 아닌 직원은 못 만듦');
+    assert.equal((await ctx.owner.req('POST', `/api/sales/leads/${P.lead}/events`, { title: 'x', date: '2026-13-01' })).status, 400);
+    // 단계 이동(상세 '진행' 띠 = PATCH status) → 전환율: 거쳐 간 단계 수 ≥ 지금 수, 계약완료 전환율
+    await ctx.owner.ok('PATCH', `/api/sales/leads/${P.lead}`, { status: '제안서발송완료' });
+    await ctx.owner.ok('PATCH', `/api/sales/leads/${P.lead}`, { status: '계약완료' });
+    const pl = await ctx.owner.ok('GET', '/api/sales/src?view=pipeline');
+    assert.ok(Array.isArray(pl.stages) && pl.funnel && pl.funnel.total >= 1);
+    const st = Object.fromEntries(pl.funnel.stages.map((f) => [f.status, f]));
+    assert.ok(!('보류' in st) && !('실패' in st), '닫힌 단계는 깔때기에서 뺌');
+    assert.ok(st['제안서발송완료'].reached >= 1 && st['계약완료'].reached >= 1 && st['계약완료'].now >= 1, JSON.stringify(st['계약완료']));
+    assert.ok(st['미팅예정'].reached >= 1, '지나간 단계도 거쳐 간 수에 포함(상태 기록)');
+    assert.equal(pl.funnel.won >= 1, true); assert.equal(pl.funnel.conversion, Math.round((pl.funnel.won / pl.funnel.total) * 1000) / 10);
+    await ctx.owner.ok('PATCH', `/api/sales/leads/${P.lead}`, { status: '미팅예정' });
+  });
   test('삭제: 사유 필수, 담당 아닌 직원 403, 관리자 삭제 → 목록·상세에서 사라짐(404)·열린 영업 업무 완료·감사', async () => {
     assert.equal((await ctx.owner.req('DELETE', `/api/sales/leads/${P.lead2}`, {})).status, 400, '사유 필수');
     assert.equal((await ctx.staffA.client.req('DELETE', `/api/sales/leads/${P.lead2}`, { reason: '중복' })).status, 403, '담당 아닌 직원');

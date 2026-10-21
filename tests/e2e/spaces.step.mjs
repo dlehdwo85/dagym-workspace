@@ -113,6 +113,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await owner.getByTestId('lead-new').click();
   await owner.getByTestId('lead-new-name').fill('E2E 새 거래처');
   await owner.getByTestId('lead-new-save').click();
+  await owner.getByTestId('sales-lead-detail').waitFor(); await owner.getByTestId('lead-tab-info').click(); // 영업 재편 5): 첫 탭은 '진행', 정보 수정은 '정보' 탭
   await owner.getByTestId('sales-lead-edit').waitFor();
   await owner.getByTestId('lead-next').fill('2026-12-01');
   await owner.getByTestId('lead-save').click();

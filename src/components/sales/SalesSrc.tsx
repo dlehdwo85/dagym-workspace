@@ -322,7 +322,6 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
   const l = data.lead;
   const [f, setF] = useState({ status: l.status ?? '신규리드', reason: '', next: l.next ?? '', memo: l.memo ?? '', owner: l.ownerId ?? '',
     facility: l.facility ?? '', region: l.region ?? '', scale: l.scale ?? '', revenue: l.revenue ? String(l.revenue) : '', contact: l.contact ?? '', phone: l.phone ?? '', email: l.email ?? '', homepage: l.homepage ?? '' });
-  const [act, setAct] = useState({ type: '전화', content: '', nextDate: '', nextAction: '', request: '' });
   const needReason = (f.status === '보류' || f.status === '실패') && f.status !== l.status;
   const S = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   async function save() {
@@ -330,9 +329,7 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
       facilityType: f.facility || null, region: f.region || null, scale: f.scale || null, expectedRevenue: numOf(f.revenue), contactName: f.contact || null, phone: f.phone || null, email: f.email || null, homepage: f.homepage || null } });
       toast.ok('저장했습니다'); setF({ ...f, reason: '' }); onSaved(); } catch (e: any) { toast.error(e.message); }
   }
-  async function addAct() {
-    try { await api(`/api/sales/leads/${id}/activities`, { body: { type: act.type, content: act.content, nextDate: act.nextDate || null, nextAction: act.nextAction || undefined, request: act.request || undefined } }); setAct({ type: act.type, content: '', nextDate: '', nextAction: '', request: '' }); toast.ok(act.nextDate ? '상담 기록을 남기고 다음 연락일을 바꿨습니다' : '상담 기록을 남겼습니다'); onSaved(); } catch (e: any) { toast.error(e.message); }
-  }
+
   return (
     <div className="space-y-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm" data-testid="sales-lead-edit">
       <div className="grid gap-2 sm:grid-cols-3">
@@ -355,25 +352,12 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
         </div></details>
       <Field label="메모"><textarea className={inputCls} rows={2} value={f.memo} onChange={S('memo')} maxLength={5000} aria-label="메모" /></Field>
       <div className="flex justify-end"><Button size="sm" onClick={save} disabled={needReason && !f.reason.trim()} data-testid="lead-save">저장</Button></div>
-      {/* S2 2차(감사 1-14): 상담 입력 = 종류·내용 + 다음 연락 예정일·다음 액션·고객 요청 → 다음 연락일·영업 업무 마감이 같이 바뀜 */}
-      <div className="space-y-1.5 border-t border-blue-100 pt-2" data-testid="lead-act-form">
-        <div className="flex flex-wrap items-end gap-2">
-          <select className={cx(inputCls, 'h-8 w-24 py-1')} value={act.type} onChange={(e) => setAct({ ...act, type: e.target.value })} aria-label="상담 종류">{['전화', '방문', '미팅', '메일', '문자', '기타'].map((x) => <option key={x}>{x}</option>)}</select>
-          <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={act.content} onChange={(e) => setAct({ ...act, content: e.target.value })} placeholder="상담 내용" aria-label="상담 내용" data-testid="lead-act" />
-          <Button size="sm" variant="secondary" onClick={addAct} disabled={!act.content.trim()} data-testid="lead-act-add">상담 기록</Button>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-3">
-          <input type="date" className={cx(inputCls, 'h-8 py-1 text-xs')} value={act.nextDate} onChange={(e) => setAct({ ...act, nextDate: e.target.value })} aria-label="다음 연락 예정일" title="다음 연락 예정일" data-testid="lead-act-next" />
-          <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={act.nextAction} onChange={(e) => setAct({ ...act, nextAction: e.target.value })} placeholder="다음 액션(예: 제안서 발송)" maxLength={200} aria-label="다음 액션" data-testid="lead-act-action" />
-          <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={act.request} onChange={(e) => setAct({ ...act, request: e.target.value })} placeholder="고객 요청 사항" maxLength={2000} aria-label="고객 요청" />
-        </div>
-      </div>
       {!!data.statusLog?.length && <ul className="space-y-0.5 text-[11px] text-ink-2">{data.statusLog.map((g: any, i: number) => <li key={i}>{fmtDateTime(g.changed_at)} · {g.by ?? ''} · {g.from_status ?? '—'} → {g.to_status}{g.reason ? ` (${g.reason})` : ''}</li>)}</ul>}
     </div>
   );
 }
 
-const TL_ICON: Record<string, string> = { act: '💬', status: '🔁', task: '✅', proposal: '📄', contract: '🤝' };
+const TL_ICON: Record<string, string> = { act: '💬', status: '🔁', task: '✅', proposal: '📄', contract: '🤝', event: '📅' };
 /** S2 2차: 업무 탭 — 워크인 업무(lead_id) 목록 + 추가, 아래에 옮겨 온 원본 업무 */
 function LeadTasks({ id, data, onSaved }: { id: string; data: any; onSaved: () => void }) {
   const [t, setT] = useState({ title: '', due: '', assignee: '' });
@@ -400,9 +384,116 @@ function LeadTasks({ id, data, onSaved }: { id: string; data: any; onSaved: () =
   );
 }
 
+
+/** 영업 재편 5): 상담 입력 폼(진행 탭) — 종류·내용 + 다음 연락 예정일·다음 액션·고객 요청 → 다음 연락일·영업 업무 마감이 같이 바뀜 */
+function ActForm({ id, onSaved }: { id: string; onSaved: () => void }) {
+  const [act, setAct] = useState({ type: '전화', content: '', nextDate: '', nextAction: '', request: '' });
+  async function addAct() {
+    try { await api(`/api/sales/leads/${id}/activities`, { body: { type: act.type, content: act.content, nextDate: act.nextDate || null, nextAction: act.nextAction || undefined, request: act.request || undefined } }); setAct({ type: act.type, content: '', nextDate: '', nextAction: '', request: '' }); toast.ok(act.nextDate ? '상담을 기록하고 다음 연락일을 맞췄습니다' : '상담을 기록했습니다'); onSaved(); } catch (e: any) { toast.error(e.message); }
+  }
+  return (
+    <div className="space-y-1.5" data-testid="lead-act-form">
+      <div className="flex flex-wrap items-end gap-2">
+        <select className={cx(inputCls, 'h-8 w-24 py-1')} value={act.type} onChange={(e) => setAct({ ...act, type: e.target.value })} aria-label="상담 종류">{['전화', '방문', '미팅', '메일', '문자', '기타'].map((x) => <option key={x}>{x}</option>)}</select>
+        <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={act.content} onChange={(e) => setAct({ ...act, content: e.target.value })} placeholder="상담 내용" aria-label="상담 내용" data-testid="lead-act" />
+        <Button size="sm" variant="secondary" onClick={addAct} disabled={!act.content.trim()} data-testid="lead-act-add">상담 기록</Button>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <input type="date" className={cx(inputCls, 'h-8 py-1 text-xs')} value={act.nextDate} onChange={(e) => setAct({ ...act, nextDate: e.target.value })} aria-label="다음 연락 예정일" title="다음 연락 예정일" data-testid="lead-act-next" />
+        <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={act.nextAction} onChange={(e) => setAct({ ...act, nextAction: e.target.value })} placeholder="다음 액션(예: 제안서 발송)" maxLength={200} aria-label="다음 액션" data-testid="lead-act-action" />
+        <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={act.request} onChange={(e) => setAct({ ...act, request: e.target.value })} placeholder="고객 요청 사항" maxLength={2000} aria-label="고객 요청" />
+      </div>
+    </div>
+  );
+}
+const CLOSED_STAGES = ['보류', '실패', '되돌림'];
+const plusDays = (n: number) => { const d = new Date(`${today()}T00:00:00+09:00`); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const fmtEv = (e: any) => { const d = new Date(e.start_at); const day = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }).format(d); return e.all_day ? day : `${day} ${new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d)}`; };
+/**
+ * 영업 재편 5) 리드·거래처 '진행' 탭 — 파이프라인 메뉴에서 빠진 단계 이동을 흡수해 한 화면에: 단계 띠(누르면 이동, 보류·실패는 사유) · 다음 연락(날짜 + 오늘/내일/3일/1주 칩) · 메모 · 상담 기록 ·
+ * 열린 업무 · 다가오는 일정(+ 추가). 정보 수정은 '정보' 탭, 전체 목록은 상담·업무·일정 탭.
+ */
+function LeadProgress({ id, data, onSaved, go }: { id: string; data: any; onSaved: () => void; go: (tab: string) => void }) {
+  const l = data.lead; const ed = data.readOnly === false;
+  const [pending, setPending] = useState<string | null>(null); const [reason, setReason] = useState('');
+  const [next, setNext] = useState(l.next ?? ''); const [memo, setMemo] = useState(l.memo ?? ''); const [ev, setEv] = useState({ title: '', date: '', time: '' });
+  const patch = async (body: Record<string, unknown>, msg: string) => { try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body }); toast.ok(msg); onSaved(); } catch (e: any) { toast.error(e.message); } };
+  const move = (st: string) => { if (st === l.status) return; if (st === '보류' || st === '실패') { setPending(st); setReason(''); return; } void patch({ status: st }, `${st}(으)로 옮겼습니다`); };
+  async function addEvent(e: React.FormEvent) {
+    e.preventDefault(); if (!ev.title.trim() || !ev.date) return;
+    try { await api(`/api/sales/leads/${id}/events`, { body: { title: ev.title.trim(), date: ev.date, time: ev.time || null } }); setEv({ title: '', date: '', time: '' }); toast.ok('일정을 만들었습니다'); onSaved(); } catch (er: any) { toast.error(er.message); }
+  }
+  const open = (data.wTasks ?? []).filter((x: any) => x.status !== 'done'); const td = today();
+  const upcoming = (data.events ?? []).filter((x: any) => new Date(x.end_at ?? x.start_at).getTime() >= Date.now() - 86400000).sort((a: any, b: any) => String(a.start_at).localeCompare(String(b.start_at)));
+  const stages: string[] = (data.stages ?? []).filter((x: string) => !CLOSED_STAGES.includes(x)); const idx = stages.indexOf(l.status);
+  return (
+    <div className="space-y-3 text-sm" data-testid="lead-progress">
+      {/* 단계 띠: 지난 단계 채움, 현재 강조, 누르면 이동 */}
+      <div className="rounded-input border border-line p-2">
+        <div className="-mx-1 flex gap-1 overflow-x-auto px-1" role="group" aria-label="단계 이동" data-testid="lead-stage-strip">
+          {stages.map((st, i) => <button key={st} type="button" disabled={!ed} onClick={() => move(st)} className={cx('shrink-0 rounded-full border px-2.5 py-1 text-xs', st === l.status ? 'border-transparent font-semibold text-white' : i < idx ? 'border-transparent bg-blue-100 text-blue-900' : 'border-line bg-white text-ink-2 hover:border-blue-300')} style={st === l.status ? { background: C } : undefined} aria-pressed={st === l.status} data-testid={`lead-stage-${st}`}>{st}</button>)}
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-ink-3">현재 <b className="text-ink">{l.status ?? '미정'}</b>{idx >= 0 && ` · ${idx + 1}/${stages.length} 단계`}</span>
+          {ed && CLOSED_STAGES.filter((x) => x !== '되돌림').map((st) => <button key={st} type="button" onClick={() => move(st)} className={cx('rounded-full border px-2 py-0.5', l.status === st ? 'border-red-300 bg-red-50 font-semibold text-red-700' : 'border-line text-ink-3 hover:text-red-700')} data-testid={`lead-stage-${st}`}>{st}</button>)}
+          {l.status === '되돌림' && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">되돌림</span>}
+        </div>
+        {pending && <div className="mt-2 flex flex-wrap items-center gap-2 rounded-input bg-amber-50 p-2 text-xs" data-testid="lead-stage-reason-box">
+          <span className="text-amber-900">{pending} 사유(필수)</span><input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-stage-reason" />
+          <Button size="sm" disabled={!reason.trim()} onClick={() => { void patch({ status: pending, reason: reason.trim() }, `${pending}(으)로 옮겼습니다`); setPending(null); }} data-testid="lead-stage-reason-go">옮기기</Button><Button size="sm" variant="secondary" onClick={() => setPending(null)}>취소</Button></div>}
+      </div>
+      {/* 다음 연락 + 메모 */}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded-input border border-line p-2" data-testid="lead-next-box">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs"><span className="font-semibold">다음 연락</span>{l.next && <span className={l.next < td ? 'font-semibold text-red-600' : 'text-ink-2'}>{kd(l.next)}{l.next < td ? ' · 지남' : ''}</span>}</div>
+          {ed && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <input type="date" className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={next} onChange={(e) => setNext(e.target.value)} aria-label="다음 연락일" data-testid="lead-next-date" />
+            {([['오늘', 0], ['내일', 1], ['3일 뒤', 3], ['1주 뒤', 7]] as [string, number][]).map(([lb, n]) => <button key={lb} type="button" onClick={() => { setNext(plusDays(n)); void patch({ nextContactDate: plusDays(n) }, `다음 연락 ${lb}`); }} className="rounded-full border border-line px-2 py-0.5 text-xs hover:border-blue-300" data-testid={`lead-next-chip-${n}`}>{lb}</button>)}
+            <Button size="sm" variant="secondary" disabled={(next || '') === (l.next ?? '')} onClick={() => patch({ nextContactDate: next || null }, '다음 연락일을 저장했습니다')} data-testid="lead-next-save">저장</Button>
+          </div>}
+        </div>
+        <div className="rounded-input border border-line p-2" data-testid="lead-memo-box">
+          <div className="text-xs font-semibold">메모</div>
+          {ed ? <><textarea className={cx(inputCls, 'mt-1 text-xs')} rows={2} value={memo} onChange={(e) => setMemo(e.target.value)} maxLength={5000} aria-label="메모" data-testid="lead-memo" />
+            <div className="mt-1 flex justify-end"><Button size="sm" variant="secondary" disabled={memo === (l.memo ?? '')} onClick={() => patch({ memo: memo || null }, '메모를 저장했습니다')} data-testid="lead-memo-save">저장</Button></div></>
+            : <p className="mt-1 whitespace-pre-wrap text-xs text-ink-2">{l.memo || '없음'}</p>}
+        </div>
+      </div>
+      {ed && <div className="rounded-input border border-blue-200 bg-blue-50/40 p-2"><ActForm id={id} onSaved={onSaved} /></div>}
+      {/* 업무 · 일정 요약(열린 것·다가오는 것) */}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded-input border border-line p-2" data-testid="lead-progress-tasks">
+          <div className="flex items-center justify-between text-xs"><span className="font-semibold">열린 업무 {open.length}</span><button type="button" onClick={() => go('tasks')} className="underline" style={{ color: C }}>전체·추가</button></div>
+          <ul className="mt-1 space-y-1 text-xs">{open.slice(0, 5).map((x: any) => <li key={x.id} className="flex items-center gap-2"><Link href={`/tasks/${x.id}`} className="min-w-0 flex-1 truncate">{x.title}</Link><span className={cx('tabular-nums', x.due_date && x.due_date < td ? 'font-semibold text-red-600' : 'text-ink-3')}>{kd(x.due_date)}</span></li>)}{!open.length && <li className="text-ink-3">열린 업무 없음</li>}</ul>
+        </div>
+        <div className="rounded-input border border-line p-2" data-testid="lead-progress-events">
+          <div className="flex items-center justify-between text-xs"><span className="font-semibold">다가오는 일정 {upcoming.length}</span><button type="button" onClick={() => go('events')} className="underline" style={{ color: C }}>전체</button></div>
+          <ul className="mt-1 space-y-1 text-xs">{upcoming.slice(0, 5).map((x: any) => <li key={x.id} className="flex items-center gap-2"><Link href={`/calendar?event=${x.id}`} className="min-w-0 flex-1 truncate">{x.title}</Link><span className="tabular-nums text-ink-3">{fmtEv(x)}</span></li>)}{!upcoming.length && <li className="text-ink-3">다가오는 일정 없음</li>}</ul>
+          {ed && <form onSubmit={addEvent} className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1 text-xs')} value={ev.title} onChange={(e) => setEv({ ...ev, title: e.target.value })} placeholder="일정(예: 현장 미팅)" maxLength={200} aria-label="일정 제목" data-testid="lead-event-title" />
+            <input type="date" className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={ev.date} onChange={(e) => setEv({ ...ev, date: e.target.value })} aria-label="일정 날짜" data-testid="lead-event-date" />
+            <input type="time" className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={ev.time} onChange={(e) => setEv({ ...ev, time: e.target.value })} aria-label="시각(비우면 종일)" data-testid="lead-event-time" />
+            <Button size="sm" variant="secondary" disabled={!ev.title.trim() || !ev.date} data-testid="lead-event-add">일정 추가</Button>
+          </form>}
+        </div>
+      </div>
+    </div>
+  );
+}
+/** 영업 재편 5): 일정 탭 — 리드에 연결된 일정 전체(넘기기 자동 일정 포함) */
+function LeadEvents({ data }: { data: any }) {
+  const evs: any[] = data.events ?? []; const now = Date.now();
+  return (
+    <ul className="divide-y divide-line rounded-input border border-line text-sm" data-testid="lead-events">
+      {evs.map((x) => <li key={x.id} className={cx('flex flex-wrap items-center gap-2 p-2', new Date(x.end_at ?? x.start_at).getTime() < now && 'text-ink-3')} data-testid="lead-event"><Link href={`/calendar?event=${x.id}`} className="min-w-0 flex-1 truncate font-medium">{x.title}</Link><span className="text-xs text-ink-3">{x.calendar}</span><span className="text-xs tabular-nums">{fmtEv(x)}</span></li>)}
+      {!evs.length && <li className="p-3 text-xs text-ink-3">연결된 일정이 없습니다 — 진행 탭에서 추가하거나, 공고를 넘기면 현장설명회·입찰 일정이 자동으로 들어옵니다</li>}
+    </ul>
+  );
+}
+
 function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange?: () => void }) {
   const { data, error, reload } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`);
-  const [tab, setTab] = useState('info');
+  const [tab, setTab] = useState('progress'); // 영업 재편 5): 진행 탭이 첫 화면
   const [del, setDel] = useState<string | null>(null);
   const [rv, setRv] = useState<string | null>(null); // 영업 재편 2) 되돌리기 사유
   async function revert() {
@@ -410,7 +501,7 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
     catch (e: any) { toast.error(e.message); }
   }
   const handoffSrc = data?.raw?.handoff ? data.raw : null; /* 리드 view 의 raw 는 src jsonb 가 펼쳐져 있음 */ const canRevert = !!handoffSrc?.handoff && data?.lead?.status !== '되돌림' && data?.readOnly === false && (data.canAssign || data.me === data.lead?.ownerId || handoffSrc?.by === data.me || (handoffSrc?.assignees ?? []).includes(data.me));
-  const tabs: [string, string, any[] | null][] = data ? [['info', '정보', null], ['acts', `상담 ${data.activities.length}`, data.activities], ['tasks', `업무 ${(data.wTasks ?? []).length + data.tasks.length}`, null], ['timeline', `타임라인 ${(data.timeline ?? []).length}`, null],
+  const tabs: [string, string, any[] | null][] = data ? [['progress', '진행', null], ['info', '정보', null], ['acts', `상담 ${data.activities.length}`, data.activities], ['tasks', `업무 ${(data.wTasks ?? []).length + data.tasks.length}`, null], ['events', `일정 ${(data.events ?? []).length}`, null], ['timeline', `타임라인 ${(data.timeline ?? []).length}`, null],
     ['props', `제안 ${data.proposals.length}`, data.proposals], ['cons', `계약 ${data.contracts.length}`, data.contracts], ['timing', `시점 ${data.timing.length}`, data.timing], ['work', `입찰 ${data.work.length}`, data.work], ['int', `관심사업 ${data.interests.length}`, data.interests]] : [];
   async function remove() {
     if (!del?.trim()) return;
@@ -427,7 +518,9 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
               : <span className="flex flex-1 flex-wrap items-center gap-1.5"><input className={cx(inputCls, 'h-8 min-w-40 flex-1 py-1 text-xs')} value={rv} onChange={(e) => setRv(e.target.value)} placeholder="사유(선택)" aria-label="되돌리기 사유" maxLength={300} data-testid="lead-revert-reason" /><Button size="sm" onClick={revert} data-testid="lead-revert-go">되돌리기</Button><Button size="sm" variant="secondary" onClick={() => setRv(null)}>취소</Button></span>)}</div>}
           <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {kd(data.lead.next)}</span>}</div>
           <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-line px-1">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('shrink-0 px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`lead-tab-${k}`}>{l}</button>)}</div>
-          {tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '') + (data.lead.updated ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}
+          {tab === 'progress' ? <LeadProgress key={data.lead.status} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} go={setTab} />
+            : tab === 'events' ? <LeadEvents data={data} />
+            : tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '') + (data.lead.updated ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}
             {/* 로컬 10/19: 사람이 보는 칸만 한국어로 — 내부 id·원본 키는 숨기고, 원본 전체는 관리자만 접힘 안에 */}
             <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1 text-sm" data-testid="lead-info">
               {([['거래처명', data.lead.name], ['단계', data.lead.status], ['우선순위', data.lead.priority], ['시설', data.lead.facility], ['지역', data.lead.region], ['규모', data.lead.scale], ['담당', data.lead.owner], ['다음 연락', data.lead.next && kd(data.lead.next)],
@@ -621,10 +714,16 @@ export function Leads({ initialId, initialDay, initialView }: { initialId?: stri
   );
 }
 
+const STAGE_FALLBACK = ['신규리드', '1차연락완료', '미팅예정', '현장방문완료', '제안서작성중', '제안서발송완료', '견적협의', '계약검토', '계약완료', '보류', '실패'];
 export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
   const { data, error, reload } = useApi<any>('/api/sales/src?view=pipeline');
   const [open, setOpen] = useState<string | null>(null);
   const [stage, setStage] = useState(''); // 앱 단계 칩
+  // 영업 재편 5) 단계 이동(칸반 카드 select): 보류·실패는 사유가 필요해 상세에서
+  async function moveStage(id: string, st: string) {
+    if (st === '보류' || st === '실패') { toast.error(`${st}(으)로 옮기려면 사유가 필요합니다 — 상세 '진행' 탭에서`); setOpen(id); return; }
+    try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body: { status: st } }); toast.ok(`${st}(으)로 옮겼습니다`); reload(); } catch (e: any) { toast.error(e.message); }
+  }
   if (error) return <ErrorBox error={error} retry={reload} />;
   const cols: any[] = data?.columns ?? []; const used = cols.filter((c) => c.items.length); const total = used.reduce((n, c) => n + c.items.length, 0);
   const shown = stage ? cols.filter((c) => c.status === stage) : used;
@@ -632,6 +731,11 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
     <div className="space-y-3" data-testid="sales-pipeline">
       {!embedded && <Head title="진행 단계" meta={data} />}
       {!data ? <Skeleton rows={5} /> : <>
+        {/* 영업 재편 5) 전환율(파이프라인 메뉴에서 흡수): 단계마다 지금 n · 거쳐 간 n(비율) + 계약 전환율 */}
+        {data.funnel && <div className="rounded-card border border-line bg-white p-2 text-xs" data-testid="pipeline-funnel">
+          <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">전환율</span><span className="text-ink-2">리드 {data.funnel.total} → 계약완료 {data.funnel.won}{data.funnel.conversion !== null && <b className="ml-1" style={{ color: C }}>{data.funnel.conversion}%</b>}</span>{data.funnel.lost > 0 && <span className="text-ink-3">· 실패 {data.funnel.lost}</span>}<span className="ml-auto text-ink-3">막대 = 그 단계를 거쳐 간 리드 비율</span></div>
+          <div className="mt-1.5 grid gap-1" style={{ gridTemplateColumns: `repeat(${data.funnel.stages.length}, minmax(0, 1fr))` }}>{data.funnel.stages.map((f: any) => <div key={f.status} className="min-w-0" title={`${f.status}: 지금 ${f.now} · 거쳐 간 ${f.reached} (${f.pct}%)`} data-testid="funnel-stage"><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${f.pct}%`, background: C }} /></div><div className="mt-0.5 truncate text-[10px] text-ink-2">{f.status}</div><div className="text-[10px] tabular-nums text-ink-3">{f.now}<span className="text-ink-3">/{f.reached}</span></div></div>)}</div>
+        </div>}
         {/* 대표 검수 10/20 ②: 휴대폰은 가로 칸반(빈 칸 많고 좁음) 대신 단계 칩 + 목록, PC 는 칸반 그대로 */}
         <div className="md:hidden" data-testid="pipeline-list">
           <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">{([['', `전체 ${total}`], ...used.map((c) => [c.status, `${c.status} ${c.items.length}`])] as [string, string][]).map(([k, l]) => (
@@ -643,7 +747,7 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
         </div>
         <div className="hidden gap-3 overflow-x-auto pb-2 md:flex">{cols.map((c: any) => (
           <section key={c.status} className="w-60 shrink-0 rounded-card border border-line bg-slate-50 p-2"><h2 className="mb-2 text-xs font-semibold">{c.status} <span className="text-ink-3">{c.items.length}</span></h2>
-            <ul className="space-y-1.5">{c.items.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-input border border-line bg-white p-2 text-left text-sm hover:border-blue-300"><span className="block truncate font-medium">{l.name}</span><span className="block truncate text-[11px] text-ink-2">{[l.owner, l.next && `연락 ${kd(l.next)}`].filter(Boolean).join(' · ')}</span></button></li>)}</ul></section>))}</div>
+            <ul className="space-y-1.5">{c.items.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-input border border-line bg-white p-2 text-left text-sm hover:border-blue-300"><span className="block truncate font-medium">{l.name}</span><span className="block truncate text-[11px] text-ink-2">{[l.owner, l.next && `연락 ${kd(l.next)}`].filter(Boolean).join(' · ')}</span></button>{data.readOnly === false && <select className={cx(inputCls, 'mt-1 h-7 w-full py-0 text-[11px]')} value={c.status} onChange={(e) => moveStage(l.id, e.target.value)} aria-label={`${l.name} 단계 이동`} data-testid="pipeline-move">{(data.stages ?? STAGE_FALLBACK).map((st: string) => <option key={st}>{st}</option>)}</select>}</li>)}</ul></section>))}</div>
       </>}
       {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
     </div>

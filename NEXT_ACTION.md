@@ -1352,6 +1352,13 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 대표 12:00 영업 재편 5) 리드·거래처 진행 과정 한 화면 (#407, migration 149) [배포확인요청]
+- 리드 상세 첫 탭 **'진행'**(`lead-progress`): ① 단계 띠(`lead-stage-<단계>`) — 지난 단계 채움·현재 강조, 누르면 바로 이동(PATCH status), 보류·실패는 사유 칸(`lead-stage-reason`) ② 다음 연락 — 날짜 + 오늘/내일/3일 뒤/1주 뒤 칩(`lead-next-chip-n`) ③ 메모 저장 ④ 상담 기록 폼(정보 탭에서 옮김, 다음 연락일·업무 마감 연동 그대로) ⑤ 열린 업무 5건 요약(전체·추가 → 업무 탭) ⑥ 다가오는 일정 + [일정 추가](제목·날짜·시각, 비우면 종일) → 회사 공용 캘린더에 lead_id 로 연결, 참석 = 리드 담당, 알림 1시간 전/하루 전.
+- 새 탭 **'일정'**(`lead-events`): 리드에 연결된 일정 전체(넘기기 자동 일정도 lead_id 로 들어감 — `events.lead_id`, mig 149). 타임라인에 일정(📅) 합류.
+- 단계별 보기(옛 파이프라인) 흡수분: 머리 **전환율 깔때기**(`pipeline-funnel`: 리드 n → 계약완료 n (전환율 %) · 실패 n, 단계마다 지금 n/거쳐 간 n 막대 — 거쳐 간 수 = 상태 기록 + 현재) + 칸반 카드 **단계 이동 select**(`pipeline-move`, 보류·실패는 상세 진행 탭으로 안내).
+- API: `POST /api/sales/leads/{id}/events` {title,date,time?,durationMin?,memo?,attendeeIds?} · lead view `events` · pipeline view `stages`+`funnel`. 시험: sales-leads2 1건 추가, E2E salesLeads2 진행 탭·일정·깔때기(179 캡처).
+- 로컬 확인 부탁: /s/sales/leads 리드 열기 → '진행' 탭 단계 띠·칩·일정 추가 동작, '단계별' 보기 머리 전환율, 캘린더에서 [영업] 일정 보이는지.
+
 ## 2026-10-21 대표 14:30 — #412 요금제별 AI 한도 통합 화면 [배포확인요청]
 - `src/lib/aiLimits.ts` 한 파일이 세 화면에 같은 데이터: `aiLimitsView(tenant)` = 업무 AI 비서 · 영업 AI 세일즈 · 마케팅 AI 마케터 줄마다 {한도, 쓴 양, 남은 양, %, 체감 환산(feel)}; `aiPlanMatrix()` = 요금제별 기준표(업무 요금제 plans × 마케팅 요금제 mkt_plan_limits, 코드 w_basic→basic 짝 + AI 크레딧 팩). 쓴 양은 ai_usage.purpose 로 구분(marketing* → 마케팅, sales* → 영업, 나머지 → 업무). AI 비서 대화는 호출 공간에 따라 `sales_assistant`·`marketing_assistant` 로 기록(guard 대화 건수도 세 종류 합산).
 - 한도 구조(정직하게 표시): 업무·영업은 **회사 공유 주머니 하나**(요금제 월 요청 수 + 회사 월 AI $) — 영업 줄은 '회사 공유, 영업 사용자 인당 한도는 요금 설계안(대표 결정 전)'. 마케팅은 마케팅 요금제(크레딧·마케팅 AI $·생성 영상 편수).

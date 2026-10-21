@@ -88,7 +88,7 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
     const [cal] = await sql<{ id: string }[]>`select id from calendars where type = 'company' and tenant = ${t} order by created_at limit 1`;
     if (cal) { const { createEvent } = await import('../events');
       for (const [label, w] of future) {
-        try { const ev: any = await createEvent(u, { calendarId: cal.id, title: `[영업] ${label} · ${name}`.slice(0, 200), description: `${KIND_NAME[i.kind]} 일정 — 담당 ${people.map((p) => p.name).join('·')}\n원천: ${link}\n리드: /s/sales/leads?id=${leadId}`, start: w.start, end: w.end, allDay: w.allDay, attendeeIds: ids, reminderMinutes: w.allDay ? [1440] : [1440, 60] } as never); eventIds.push(String(ev?.id ?? ev?.event?.id ?? '')); }
+        try { const ev: any = await createEvent(u, { calendarId: cal.id, title: `[영업] ${label} · ${name}`.slice(0, 200), description: `${KIND_NAME[i.kind]} 일정 — 담당 ${people.map((p) => p.name).join('·')}\n원천: ${link}\n리드: /s/sales/leads?id=${leadId}`, start: w.start, end: w.end, allDay: w.allDay, leadId, attendeeIds: ids, reminderMinutes: w.allDay ? [1440] : [1440, 60] } as never); eventIds.push(String(ev?.id ?? ev?.event?.id ?? '')); }
         catch (e: any) { eventErrors.push(`${label}: ${String(e?.message ?? e).slice(0, 120)}`); }
       }
     } else eventErrors.push('회사 공용 캘린더가 없어 일정은 만들지 않았습니다');

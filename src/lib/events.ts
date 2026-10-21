@@ -36,6 +36,8 @@ export const eventInput = z.object({
   version: z.number().int().optional(),
   /** 대표 지적(10/19 ②): 일정별 색(#rrggbb). null = 캘린더 색 */
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, '색은 #rrggbb').nullable().optional(),
+  /** 영업 재편 5): 리드·거래처 일정(상세 '일정' 탭·타임라인) */
+  leadId: zUuid.nullable().optional(),
 });
 export type EventInput = z.infer<typeof eventInput>;
 
@@ -247,9 +249,9 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   }
   const out: { id: string; taskId?: string } = await sql.begin(async (tx) => {
     const [ev] = await tx<{ id: string }[]>`
-      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private, color, alarm)
+      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private, color, alarm, lead_id)
       values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
-        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)}, ${i.isPrivate ?? false}, ${i.color ?? null}, ${i.alarm ?? null})
+        ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)}, ${i.isPrivate ?? false}, ${i.color ?? null}, ${i.alarm ?? null}, ${i.leadId ?? null})
       returning id`;
     if (i.taskId) await tx`insert into event_tasks (event_id, task_id, role, created_by) values (${ev.id}, ${i.taskId}, 'block', ${u.id}) on conflict do nothing`;
     if (i.attendeeIds?.length) {

@@ -239,6 +239,29 @@ export async function importLeads(u: SessionUser, i: z.infer<typeof importInput>
 }
 export const activityInput = z.object({ type: z.enum(['전화', '방문', '미팅', '메일', '문자', '기타']).default('전화'), content: z.string().trim().min(1).max(5000), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), nextAction: z.string().trim().max(200).optional(), request: z.string().trim().max(2000).optional() /* S2 2차: 다음 연락 예정일·다음 액션·고객 요청 */ });
+/** 영업 재편 5): 리드 일정 — 날짜(+시각·길이) → 회사 공용 캘린더에 lead_id 로 연결, 참석 = 리드 담당(없으면 나). 캘린더가 없으면 409 */
+export const leadEventInput = z.object({ title: z.string().trim().min(1, '제목을 적어 주세요').max(200), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+  durationMin: z.number().int().min(15).max(24 * 60).default(60), memo: z.string().max(2000).optional(), attendeeIds: z.array(z.string().uuid()).max(20).optional() });
+export async function addLeadEvent(u: SessionUser, leadId: string, i: z.infer<typeof leadEventInput>) {
+  await assertSpace(u, 'sales');
+  if (!/^[0-9a-f-]{36}$/i.test(leadId)) throw notFound();
+  const t = tenantOf(u); const sql = db();
+  const [l] = await sql<{ owner_id: string | null; name: string }[]>`select owner_id, name from sales_leads where id = ${leadId} and tenant = ${t} and deleted_at is null`;
+  if (!l) throw notFound();
+  await assertWritesOpen(t);
+  if (!['owner', 'admin'].includes(u.role) && l.owner_id && l.owner_id !== u.id) throw new HttpError(403, 'forbidden', '담당 리드에만 일정을 만들 수 있습니다');
+  const [cal] = await sql<{ id: string }[]>`select id from calendars where type = 'company' and tenant = ${t} order by created_at limit 1`;
+  if (!cal) throw new HttpError(409, 'no_calendar', '회사 공용 캘린더가 없어 일정을 만들 수 없습니다');
+  const start = i.time ? new Date(`${i.date}T${i.time}:00+09:00`) : new Date(`${i.date}T00:00:00+09:00`);
+  if (Number.isNaN(start.getTime()) || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(start) !== i.date) throw badRequest('날짜가 올바르지 않습니다');
+  const end = i.time ? new Date(start.getTime() + i.durationMin * 60000) : new Date(start.getTime() + 86400000);
+  const attendees = [...new Set([...(i.attendeeIds ?? []), l.owner_id ?? u.id])];
+  const { createEvent } = await import('../events');
+  const ev = await createEvent(u, { calendarId: cal.id, title: `[영업] ${i.title} · ${l.name}`.slice(0, 200), description: `${i.memo ?? ''}\n리드: /s/sales/leads?id=${leadId}`.trim(), start: start.toISOString(), end: end.toISOString(), allDay: !i.time,
+    attendeeIds: attendees, reminderMinutes: i.time ? [60] : [1440], leadId });
+  await sql`update sales_leads set updated_at = now() where id = ${leadId}`;
+  return { id: ev.id };
+}
 /** 상담(활동) 기록 추가 — 담당자·관리자 */
 export async function addActivity(u: SessionUser, leadId: string, i: z.infer<typeof activityInput>) {
   await assertSpace(u, 'sales');

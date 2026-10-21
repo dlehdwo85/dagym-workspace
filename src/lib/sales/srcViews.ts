@@ -253,15 +253,19 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       // S2 2차: 업무 탭 = 워크인 업무(lead_id) + 옮겨 온 원본 업무, 타임라인 = 상담·상태 변경·업무·제안·계약 통합(최신순)
       const wTasks = await sql<any[]>`select t.id, t.title, t.status, t.due_date::text as due_date, t.created_at, t.completed_at, au.name as assignee, t.sales_ref from tasks t left join users au on au.id = t.assignee_id where t.lead_id = ${lid} and t.deleted_at is null order by (t.status = 'done'), t.due_date nulls last limit 100`;
       const acts = await recs('sales_activities'), props = await recs('proposals'), cons = await recs('contracts');
+      // 영업 재편 5): 리드 일정(넘기기 자동 일정·리드에서 만든 일정) — 다가오는 것 먼저
+      const events = await sql<any[]>`select e.id, e.title, e.start_at, e.end_at, e.all_day, c.name as calendar from events e join calendars c on c.id = e.calendar_id where e.lead_id = ${lid} and e.deleted_at is null order by e.start_at desc limit 50`;
       const timeline = [...acts.map((a: any) => ({ kind: 'act', at: a.activity_date ?? a.created_at, title: `${a.activity_type ?? '상담'} · ${String(a.content ?? '').slice(0, 80)}`, by: a.created_by_name ?? null, id: a.__id })),
         ...log.map((g: any) => ({ kind: 'status', at: g.changed_at, title: `${g.from_status ?? '—'} → ${g.to_status}${g.reason ? ` (${g.reason})` : ''}`, by: g.by ?? null, id: String(g.changed_at) })),
         ...wTasks.map((x: any) => ({ kind: 'task', at: x.completed_at ?? x.created_at, title: `${x.status === 'done' ? '완료' : '업무'} · ${x.title}`, by: x.assignee ?? null, id: x.id, href: `/tasks/${x.id}` })),
         ...props.map((p: any) => ({ kind: 'proposal', at: p.proposal_date, title: `제안 · ${p.title}${p.amount ? ` ${Number(p.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: p.__id })),
-        ...cons.map((c: any) => ({ kind: 'contract', at: c.contract_date ?? c.start_date, title: `계약 · ${c.title}${c.amount ? ` ${Number(c.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: c.__id }))]
+        ...cons.map((c: any) => ({ kind: 'contract', at: c.contract_date ?? c.start_date, title: `계약 · ${c.title}${c.amount ? ` ${Number(c.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: c.__id })),
+        ...events.map((e: any) => ({ kind: 'event', at: e.start_at, title: `일정 · ${e.title}`, by: null, id: e.id, href: `/calendar?event=${e.id}` }))]
         .filter((x) => x.at).sort((a, b) => String(b.at).localeCompare(String(a.at)));
       return { ...meta, lead: lead(r, names), raw: Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith('__'))), activities: acts, timing: await recs('lead_opportunity_timing'),
         interests: await recs('lead_business_interests'), tasks: await relSrc('tasks'), wTasks, timeline, proposals: props, contracts: cons,
         work: (await sql<any[]>`select src_id, src_tbl, status, data from sales_work_records where tenant = ${t} and lead_id = ${lid} order by updated_at desc`).map((w) => ({ ...w.data, status: w.status, __id: w.src_id })), // S1-2: 넘겨 온 공고·단지·시설·협력사
+        events,
         statusLog: log, stages: STAGES, people, canAssign: ['owner', 'admin'].includes(u.role), canDelete: ['owner', 'admin'].includes(u.role) || r.__owner_id === u.id, me: u.id };
     }
     const [r] = await sql<{ row: any }[]>`select row from sales_src_rows where scope = ${t} and tbl = 'leads' and src_id = ${q.id}`;
@@ -275,7 +279,14 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const cols = new Map<string, typeof L>();
     for (const l of L) { const k = String(l.status ?? '미정'); cols.set(k, [...(cols.get(k) ?? []), l]); }
     const order = [...STAGES, ...[...cols.keys()].filter((k) => !STAGES.includes(k))];
-    return { ...meta, columns: order.map((status) => ({ status, items: cols.get(status) ?? [] })) };
+    // 영업 재편 5) 파이프라인 메뉴에서 흡수한 전환율: 단계마다 '지금 n' + '거쳐 간 n'(상태 기록 + 현재 단계), 비율 = 거쳐 간 수 / 전체 리드. 계약 전환율 = 계약완료 거쳐 간 수 / 전체
+    const reached = new Map<string, Set<string>>(); const add = (st: string, id: string) => { if (!reached.has(st)) reached.set(st, new Set()); reached.get(st)!.add(id); };
+    for (const l of L) if (l.status) add(String(l.status), String(l.id));
+    if (formal) for (const g of await sql<{ lead_id: string; to_status: string }[]>`select g.lead_id, g.to_status from sales_status_log g join sales_leads l on l.id = g.lead_id where l.tenant = ${t} and l.deleted_at is null`) add(g.to_status, g.lead_id);
+    const total = L.length;
+    const funnel = STAGES.filter((st) => !['보류', '실패', '되돌림'].includes(st)).map((st) => { const n = reached.get(st)?.size ?? 0; return { status: st, now: cols.get(st)?.length ?? 0, reached: n, pct: total ? Math.round((n / total) * 100) : 0 }; });
+    const won = reached.get('계약완료')?.size ?? 0; const lost = (reached.get('실패')?.size ?? 0);
+    return { ...meta, stages: STAGES, columns: order.map((status) => ({ status, items: cols.get(status) ?? [] })), funnel: { total, won, lost, conversion: total ? Math.round((won / total) * 1000) / 10 : null, stages: funnel } };
   }
   if (view === 'deals') {
     // S1-2: 전환 뒤에는 정식 표(sales_lead_records)에서 — 리드 이름·연결 id 포함
