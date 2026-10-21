@@ -100,7 +100,7 @@ describe('배정 이전으로 되돌리기', () => {
     assert.equal((await sql`select count(*)::int c from notifications where user_id = ${ctx.ownerId} and title like '영업 배정 취소%'`)[0].c, 0, '되돌린 본인(담당)에게는 없음·넘긴 사람은 담당 아님');
     const b = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working'); const n3 = b.items.find((x) => x.id === 'N3'); assert.equal(n3.workLeadId, null); assert.equal(n3.work, '검토중');
     assert.equal((await ctx.staffA.client.req('POST', '/api/sales/work/handoff/revert', { leadId: r.leadId })).status, 409, '두 번 되돌리기');
-    const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${r.leadId}`); assert.equal(d.lead.status, '되돌림'); assert.equal(d.raw.src.handoff, true);
+    const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${r.leadId}`); assert.equal(d.lead.status, '되돌림'); assert.equal(d.raw.handoff, true, 'raw 에 src 펼쳐짐'); assert.equal(d.raw.reverted.reason, '담당 변경');
     const r2 = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N3', assigneeIds: [ctx.ownerId] }); assert.notEqual(r2.leadId, r.leadId, '다시 넘기면 새 리드');
   });
 });

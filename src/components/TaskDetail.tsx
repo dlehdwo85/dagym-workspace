@@ -282,14 +282,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       if (click) el.click(); else try { (el as HTMLSelectElement).showPicker?.(); } catch { /* 지원 안 하는 브라우저는 초점만 */ }
     }, 50);
   };
+  const reviewerCandidate0 = t.requested_by && t.requested_by !== t.assignee_id ? t.requested_by : (!t.assignee_id || t.created_by !== t.assignee_id) ? t.created_by : null;
   const primary0 = t.status === 'done' ? null
     : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : isReviewer ? { label: '승인(최종 완료)', run: () => patch({ status: 'done' }, '승인했습니다 — 최종 완료') } : null)
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
-    : t.approval_required && !perms.approve ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') }
+    : t.approval_required && reviewerCandidate0 && reviewerCandidate0 !== user.id ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') } // #410 보강: 담당자가 관리자여도 검토자가 따로 있으면 검토 요청
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
   const primary = primary0 && (statusOwner || isReviewer) ? primary0 : null;
   // 대표 10/21 13:50 #410 ①: 모든 업무에서 담당자가 완료 대신 [검토 요청]을 누를 수 있다(요청자·없으면 만든 사람이 검토) — 결재선·검토 필수 업무는 기존 흐름 그대로
-  const reviewerCandidate = t.requested_by && t.requested_by !== t.assignee_id ? t.requested_by : (!t.assignee_id || t.created_by !== t.assignee_id) ? t.created_by : null;
+  const reviewerCandidate = reviewerCandidate0;
   const reviewAsk = !!primary && primary.label === '완료' && (t.status === 'todo' || t.status === 'in_progress') && !t.approval_line_id && !!reviewerCandidate && reviewerCandidate !== user.id
     ? { label: '검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') } : null;
 

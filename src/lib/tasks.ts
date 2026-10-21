@@ -604,8 +604,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       }
       if (to === 'done' && lineId) throw forbidden('결재선이 지정된 업무입니다. "검토 요청"으로 결재를 올려 주세요.');
       if (to === 'done') {
-        if (cur.approval_required && !perms.approve && cur.status !== 'review') { // 검토 승인은 위에서 검토 담당자 확인
-          throw forbidden('이 업무는 관리자 확인이 필요합니다. "검토 요청"으로 바꿔 주세요.');
+        // #410 보강(로컬 14:10): 검토 필수면 담당자가 관리자여도 바로 완료 불가 — 검토자(요청자, 없으면 만든 사람)가 따로 있을 때. 담당자 = 요청자면 자기 승인(바로 완료)
+        const reviewerOf = cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : cur.created_by && cur.created_by !== cur.assignee_id ? cur.created_by : null;
+        if (cur.approval_required && cur.status !== 'review' && reviewerOf && reviewerOf !== u.id) { // 검토 승인은 위에서 검토 담당자 확인
+          throw forbidden('검토 필수 업무입니다. "검토 요청"으로 요청자에게 넘겨 주세요.');
         }
         const blockers = await tx`select 1 from task_dependencies d join tasks dt on dt.id = d.depends_on_id
           where d.task_id = ${id} and dt.status <> 'done' and dt.deleted_at is null`;

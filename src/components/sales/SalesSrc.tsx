@@ -409,7 +409,7 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
     try { const r = await api<{ tasks: number; events: number }>('/api/sales/work/handoff/revert', { body: { leadId: id, reason: rv?.trim() || undefined } }); toast.ok(`배정 이전으로 되돌렸습니다 — 업무 ${r.tasks}건·일정 ${r.events}건 취소`); setRv(null); reload(); onChange?.(); }
     catch (e: any) { toast.error(e.message); }
   }
-  const handoffSrc = data?.raw?.src; const canRevert = !!handoffSrc?.handoff && data?.lead?.status !== '되돌림' && data?.readOnly === false && (data.canAssign || data.me === data.lead?.ownerId || handoffSrc?.by === data.me || (handoffSrc?.assignees ?? []).includes(data.me));
+  const handoffSrc = data?.raw?.handoff ? data.raw : null; /* 리드 view 의 raw 는 src jsonb 가 펼쳐져 있음 */ const canRevert = !!handoffSrc?.handoff && data?.lead?.status !== '되돌림' && data?.readOnly === false && (data.canAssign || data.me === data.lead?.ownerId || handoffSrc?.by === data.me || (handoffSrc?.assignees ?? []).includes(data.me));
   const tabs: [string, string, any[] | null][] = data ? [['info', '정보', null], ['acts', `상담 ${data.activities.length}`, data.activities], ['tasks', `업무 ${(data.wTasks ?? []).length + data.tasks.length}`, null], ['timeline', `타임라인 ${(data.timeline ?? []).length}`, null],
     ['props', `제안 ${data.proposals.length}`, data.proposals], ['cons', `계약 ${data.contracts.length}`, data.contracts], ['timing', `시점 ${data.timing.length}`, data.timing], ['work', `입찰 ${data.work.length}`, data.work], ['int', `관심사업 ${data.interests.length}`, data.interests]] : [];
   async function remove() {

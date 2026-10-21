@@ -2348,7 +2348,7 @@ await step('#410 일반 업무 검토 요청(휴대폰 담당자) → 요청자 
   await owner.goto(`${BASE}/tasks/${id2}`);
   const cb = owner.getByTestId('approval-required');
   if (!(await cb.isVisible().catch(() => false))) await owner.getByRole('button', { name: /세부 정보/ }).first().click().catch(() => {});
-  await cb.check();
+  await cb.click();
   await owner.getByText('검토 필수로 바꿨습니다').waitFor();
   const t2 = (await ctx.staffA.client.ok('GET', `/api/tasks/${id2}`)).task; assert.equal(t2.approval_required, true);
   assert.equal((await ctx.staffA.client.req('PATCH', `/api/tasks/${id2}`, { status: 'done', version: t2.version })).status, 403, '검토 필수 → 담당자 바로 완료 불가');

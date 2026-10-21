@@ -31,7 +31,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.equal(await owner.locator('.app-shell').getAttribute('data-space'), 'sales');
   assert.equal(await owner.getByTestId('nav-space-head').innerText(), '영업 메뉴');
   const commonSales = await navLabels('nav-common-v3');
-  assert.deepEqual(commonSales, ['업무', ...commonWork], '공통은 어느 공간에서나 같은 자리(영업·마케팅은 맨 위 업무만 더)');
+  assert.deepEqual(commonSales, ['업무', ...commonWork.map((l) => (l === 'AI 비서' ? 'AI 세일즈' : l))], '공통은 어느 공간에서나 같은 자리(영업·마케팅은 맨 위 업무만 더) — 대표 10/21 12:20: 영업의 AI 는 AI 세일즈');
   await owner.keyboard.press('Control+1');
   await owner.waitForURL(`${BASE}/`);
   assert.equal(await owner.getByTestId('space-current').textContent(), '워크인 · 업무');
