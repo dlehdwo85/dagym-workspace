@@ -206,10 +206,12 @@ export async function queuePublish(u: SessionUser, contentId: string, opts: { ac
   await assertSpace(u, 'marketing'); if (!isAdmin(u)) throw forbidden('서버 게시는 관리자가 누릅니다');
   if (!/^[0-9a-f-]{36}$/i.test(contentId)) throw notFound();
   const sql = db(); const t = tenantOf(u);
-  const [c] = await sql<any[]>`select id, title, channel, cross_channels, kind, brand_id, status, current_version, approved_version, is_test, scheduled_at from mkt_contents where id = ${contentId} and tenant = ${t}`;
+  const [c] = await sql<any[]>`select id, title, channel, cross_channels, kind, brand_id, status, current_version, approved_version, is_test, scheduled_at, published_deleted_at from mkt_contents where id = ${contentId} and tenant = ${t}`;
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
   if (c.is_test) throw new HttpError(409, 'is_test', '시험 콘텐츠는 서버로 게시하지 않습니다');
-  if (c.status !== 'approved' || c.approved_version !== c.current_version) throw new HttpError(409, 'not_approved', '승인된 최신 버전만 게시할 수 있습니다');
+  // 로컬 10/21 11:45: 매체에서 지워진 글(published_deleted_at)은 승인된 그 버전을 다시 올릴 수 있다
+  const redo = c.status === 'published' && !!c.published_deleted_at && c.approved_version === c.current_version;
+  if (!redo && (c.status !== 'approved' || c.approved_version !== c.current_version)) throw new HttpError(409, 'not_approved', '승인된 최신 버전만 게시할 수 있습니다');
   const targets = await publishTargets(t, c);
   const jobs: { id: string; provider: string; account: string }[] = []; const missing: string[] = [];
   for (const tg of targets) {
@@ -218,7 +220,7 @@ export async function queuePublish(u: SessionUser, contentId: string, opts: { ac
     for (const a of accs) {
       const [j] = await sql<{ id: string }[]>`insert into mkt_publish_jobs (tenant, content_id, version, account_id, provider, status, idempotency_key, requested_by, run_after)
         values (${t}, ${c.id}, ${c.current_version}, ${a.id}, ${tg.provider}, 'queued', ${`${c.id}:${c.current_version}:${a.id}`}, ${u.id}, ${opts.atSchedule && c.scheduled_at && new Date(c.scheduled_at) > new Date() ? c.scheduled_at : new Date().toISOString()})
-        on conflict (idempotency_key) do update set status = case when mkt_publish_jobs.status in ('failed', 'canceled') then 'queued' else mkt_publish_jobs.status end, attempts = case when mkt_publish_jobs.status in ('failed', 'canceled') then 0 else mkt_publish_jobs.attempts end, last_error = null, run_after = excluded.run_after, updated_at = now() returning id`;
+        on conflict (idempotency_key) do update set status = case when mkt_publish_jobs.status in ('failed', 'canceled') or mkt_publish_jobs.deleted_at is not null then 'queued' else mkt_publish_jobs.status end, attempts = case when mkt_publish_jobs.status in ('failed', 'canceled') or mkt_publish_jobs.deleted_at is not null then 0 else mkt_publish_jobs.attempts end, deleted_at = null, external_post_id = case when mkt_publish_jobs.deleted_at is not null then null else mkt_publish_jobs.external_post_id end, last_error = null, run_after = excluded.run_after, updated_at = now() returning id`;
       jobs.push({ id: j.id, provider: tg.provider, account: a.label });
     }
   }
@@ -277,7 +279,7 @@ async function runOne(job: Job) {
   await sql.begin(async (tx) => {
     await tx`update mkt_publish_jobs set status = 'done', external_post_id = ${res!.externalId}, permalink = ${res!.permalink}, attempts = ${job.attempts + 1}, last_error = null, updated_at = now() where id = ${job.id}`;
     // 첫 성공이 게시 주소·게시됨 상태(여러 채널이면 나머지는 게시 기록에)
-    await tx`update mkt_contents set status = 'published', published_url = coalesce(published_url, ${res!.permalink}), published_at = coalesce(published_at, now()), updated_at = now() where id = ${c.id} and status <> 'canceled'`;
+    await tx`update mkt_contents set status = 'published', published_url = case when published_deleted_at is not null then ${res!.permalink} else coalesce(published_url, ${res!.permalink}) end, published_at = case when published_deleted_at is not null then now() else coalesce(published_at, now()) end, published_deleted_at = null, updated_at = now() where id = ${c.id} and status <> 'canceled'`;
   });
   const who = [...new Set([job.requested_by, c.created_by].filter(Boolean))] as string[];
   await notify(sql, { userIds: who, type: 'review_result', title: `게시 완료 — ${PROVIDER_LABEL[a.provider]}: ${String(c.title).slice(0, 40)}`, body: res.permalink, link: res.permalink, entityType: 'mkt_publish_job', entityId: job.id, dedupeKey: `mktpub:done:${job.id}`, push: false }).catch(() => {});
@@ -313,5 +315,43 @@ export async function publishTick() {
     catch (e: any) { await sql`update mkt_publish_accounts set status = 'error', last_error = ${`토큰 갱신 실패: ${String(e?.message ?? e).slice(0, 200)}`} where id = ${a.id}`; }
   }
   return out;
+}
+/**
+ * 로컬 10/21 11:45: 게시 뒤 삭제 감지 — 완료된 메타(인스타·페북·스레드) 작업의 게시물을 매체에서 다시 조회(30일 안, 6시간마다).
+ * 없다고 답하면(404 / code 100 subcode 33 / "does not exist") 작업 deleted_at, 같은 콘텐츠에 살아 있는 게시가 없으면 콘텐츠 published_deleted_at('게시 삭제됨') + 요청자·승인자 알림 1회.
+ * 토큰 오류·일시 오류는 삭제로 보지 않고 다음 점검으로 넘긴다.
+ */
+export async function publishDeletedTick(limit = 20) {
+  const sql = db();
+  const jobs = await sql<any[]>`select j.id, j.tenant, j.content_id, j.external_post_id, j.requested_by, a.id as account_id, a.provider, a.external_id, a.label, a.token_enc, a.refresh_enc, a.expires_at, a.info
+    from mkt_publish_jobs j join mkt_publish_accounts a on a.id = j.account_id
+    where j.status = 'done' and j.deleted_at is null and j.external_post_id is not null and j.provider in ('meta_ig', 'meta_fb', 'meta_threads') and a.status = 'active'
+      and j.updated_at > now() - interval '30 days' and (j.checked_at is null or j.checked_at < now() - interval '6 hours') order by j.checked_at nulls first, j.updated_at limit ${limit}`;
+  let deleted = 0, checked = 0;
+  for (const j of jobs) {
+    const a: Acc = { id: j.account_id, provider: j.provider, external_id: j.external_id, label: j.label, token_enc: j.token_enc, refresh_enc: j.refresh_enc, expires_at: j.expires_at, info: j.info };
+    const base = j.provider === 'meta_threads' ? THREADS() : GRAPH();
+    let gone = false;
+    try { await call('GET', `${base}/${encodeURIComponent(j.external_post_id)}?${q({ fields: 'id', access_token: token(a) })}`); }
+    catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (e instanceof Retry) continue; // 일시 오류 — 다음 점검
+      // 삭제로 보는 것은 Graph 가 '없는 객체'라고 답한 때만(code 100·subcode 33·"does not exist"). 주소 오류 같은 맨 404 는 삭제가 아님
+      if (/does not exist|Unsupported get request|cannot be loaded|subcode.*33|\(#100\)/i.test(msg)) gone = true;
+      else if (/OAuth|access token|190|expired/i.test(msg)) { await sql`update mkt_publish_accounts set status = 'error', last_error = ${msg.slice(0, 300)} where id = ${a.id}`.catch(() => {}); continue; }
+      else { await sql`update mkt_publish_jobs set checked_at = now() where id = ${j.id}`; checked++; continue; }
+    }
+    checked++;
+    if (!gone) { await sql`update mkt_publish_jobs set checked_at = now() where id = ${j.id}`; continue; }
+    deleted++;
+    await sql`update mkt_publish_jobs set deleted_at = now(), checked_at = now(), last_error = '매체에서 게시물이 삭제됨', updated_at = now() where id = ${j.id}`;
+    const [live] = await sql<{ n: number }[]>`select count(*)::int as n from mkt_publish_jobs where content_id = ${j.content_id} and status = 'done' and deleted_at is null and provider <> 'manual'`;
+    const [c] = await sql<any[]>`select id, title, created_by, published_deleted_at from mkt_contents where id = ${j.content_id}`;
+    if (!c) continue;
+    if (!live.n && !c.published_deleted_at) await sql`update mkt_contents set published_deleted_at = now(), updated_at = now() where id = ${c.id}`;
+    const who = [...new Set([j.requested_by, c.created_by, ...(await (await import('./mktAuto')).approvers(j.tenant).catch(() => []))].filter(Boolean))] as string[];
+    await notify(sql, { userIds: who, type: 'sync_error', title: `게시물 삭제됨 — ${PROVIDER_LABEL[j.provider] ?? j.provider}: ${String(c.title ?? '').slice(0, 40)}`, body: live.n ? '다른 채널 게시는 남아 있습니다. 필요하면 다시 게시하세요.' : '매체에서 게시물이 지워졌습니다. 다시 게시하려면 콘텐츠에서 [서버로 게시]를 누르세요.', link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_publish_job', entityId: j.id, dedupeKey: `mkt:deleted:${j.id}` });
+  }
+  return { checked, deleted };
 }
 export { badRequest };

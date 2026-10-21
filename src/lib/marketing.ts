@@ -96,7 +96,7 @@ export const needsPhotos = (channel: string, mediaCount: number) => channel === 
 export async function listContents(u: SessionUser, q: { view?: string; from?: string; to?: string; day?: string }) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
-  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.is_test, b.name as brand, b.color as brand_color,
+  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color,
       v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note,
       (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality, c.rationale,
       (select json_build_object('kind', p.kind, 'status', p.status) from mkt_production_requests p where p.content_id = c.id and p.kind in ('image', 'video', 'regen_image', 'regen_video') and p.status in ('open', 'needs_approval') order by p.created_at desc limit 1) as production,
@@ -147,7 +147,7 @@ export async function getContent(u: SessionUser, id: string) {
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
   // 로컬 10/21 02:10: media 는 버전의 media_ids 순서(표지 → 영상)로
   const media = ids.length ? await sql`select id, title, file_name, mime_type from library_files where id = any(${ids}::uuid[]) and tenant = ${tenantOf(u)} and deleted_at is null order by array_position(${ids}::uuid[], id)` : [];
-  const publishJobs = await sql`select j.id, j.provider, j.status, j.version, j.permalink, j.is_test, j.last_error, j.attempts, j.run_after, j.created_at, u.name as requested_by_name, a.label as account from mkt_publish_jobs j left join mkt_publish_accounts a on a.id = j.account_id left join users u on u.id = j.requested_by where j.content_id = ${id} order by j.created_at desc`;
+  const publishJobs = await sql`select j.id, j.provider, j.status, j.version, j.permalink, j.is_test, j.last_error, j.attempts, j.run_after, j.created_at, j.deleted_at, j.checked_at, u.name as requested_by_name, a.label as account from mkt_publish_jobs j left join mkt_publish_accounts a on a.id = j.account_id left join users u on u.id = j.requested_by where j.content_id = ${id} order by j.created_at desc`;
   const decisions = await sql`select d.version, d.decision, d.comment, d.decided_at, u.name as decided_by_name from mkt_decisions d left join users u on u.id = d.decided_by where d.content_id = ${id} order by d.decided_at desc`;
   const st = await (await import('./mktAuto')).settingsOf(tenantOf(u));
   // 대표 10/20 22:30 ② M1: 서버 게시 가능 채널·계정(관리자 [서버로 게시] 버튼) + 회사 자동 게시 설정

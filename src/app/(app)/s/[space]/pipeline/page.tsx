@@ -1,10 +1,7 @@
-import { Suspense } from 'react';
-import { notFound } from 'next/navigation';
-import { Pipeline } from '@/components/sales/SalesSrc';
+import { notFound, redirect } from 'next/navigation';
 
-/** V41 단계 2 영업 공간 화면(공간 권한은 앱 레이아웃에서 404) */
-export default async function Page({ params, searchParams }: { params: Promise<{ space: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
+/** 대표 10/21 12:00 영업 재편 3): '파이프라인' 메뉴 없음 — 진행 단계는 리드·거래처 안(단계별 보기). 예전 주소는 그리로 */
+export default async function Page({ params }: { params: Promise<{ space: string }> }) {
   if ((await params).space !== 'sales') notFound();
-  const sp = await searchParams;
-  return <Suspense><Pipeline {...({ initialId: sp.id, initialTab: sp.tab } as any)} /></Suspense>;
+  redirect('/s/sales/leads?view=stages');
 }
