@@ -100,7 +100,7 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
   // 되돌리기(영업 재편 2)용으로 만든 업무·일정 id 를 리드에 남김
   await sql`update sales_leads set src = coalesce(src, '{}'::jsonb) || ${sql.json({ taskIds, eventIds: eventIds.filter(Boolean) })} where id = ${leadId}`;
   // ⑤ 배정 알림(넘긴 본인 제외)
-  await notify(sql, { userIds: ids.filter((x) => x !== u.id), type: 'assigned', title: `영업 배정: ${name.slice(0, 60)}`, body: `${u.name}님이 ${KIND_NAME[i.kind]}을(를) 영업 진행으로 넘겼습니다 — 검토·첫 연락 (마감 ${due})`, link: `/s/sales/leads?id=${leadId}`, entityType: 'sales_lead', entityId: leadId, actorId: u.id, push: true, dedupeKey: `sales:handoff:${leadId}` } as never).catch(() => {});
+  await notify(sql, { userIds: ids.filter((x) => x !== u.id), type: 'assigned', space: 'sales', title: `영업 배정: ${name.slice(0, 60)}`, body: `${u.name}님이 ${KIND_NAME[i.kind]}을(를) 영업 진행으로 넘겼습니다 — 검토·첫 연락 (마감 ${due})`, link: `/s/sales/leads?id=${leadId}`, entityType: 'sales_lead', entityId: leadId, actorId: u.id, push: true, dedupeKey: `sales:handoff:${leadId}` } as never).catch(() => {});
   return { leadId, status: HANDOFF_STATUS, taskIds, eventIds: eventIds.filter(Boolean), eventErrors, due, dates: future.map(([l, w]) => ({ label: l, day: w.day })) };
 }
 
@@ -139,7 +139,7 @@ export async function revertHandoff(u: SessionUser, i: z.infer<typeof revertInpu
     await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${l.id}, ${l.status}, ${REVERTED_STATUS}, ${`배정 이전으로 되돌림${i.reason ? ` — ${i.reason}` : ''}`}, ${u.id})`;
     return { tasks: tasks.length, events: events.length, rows: recs.length };
   });
-  await notify(sql, { userIds: assignees.filter((x) => x !== u.id), type: 'task_assigned', title: `영업 배정 취소: ${l.name.slice(0, 60)}`, body: `${u.name}님이 배정 이전으로 되돌렸습니다${i.reason ? ` — ${i.reason}` : ''}. 관련 업무 ${out.tasks}건·일정 ${out.events}건은 취소되었습니다.`, link: `/s/sales/leads?id=${l.id}`, entityType: 'sales_lead', entityId: l.id, actorId: u.id, dedupeKey: `sales:handoff:revert:${l.id}` });
+  await notify(sql, { userIds: assignees.filter((x) => x !== u.id), type: 'task_assigned', space: 'sales', title: `영업 배정 취소: ${l.name.slice(0, 60)}`, body: `${u.name}님이 배정 이전으로 되돌렸습니다${i.reason ? ` — ${i.reason}` : ''}. 관련 업무 ${out.tasks}건·일정 ${out.events}건은 취소되었습니다.`, link: `/s/sales/leads?id=${l.id}`, entityType: 'sales_lead', entityId: l.id, actorId: u.id, dedupeKey: `sales:handoff:revert:${l.id}` });
   return { ok: true, status: REVERTED_STATUS, ...out };
 }
 export type { Sql };

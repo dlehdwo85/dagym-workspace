@@ -26,7 +26,7 @@ describe('V34 기밀 자료 외부 유출 막기', () => {
     const ownTask = (await ctx.owner.ok('POST', '/api/tasks', { title: '대표 기밀 업무', approvalRequired: false })).id;
     const ca = (await ctx.owner.ok('POST', `/api/library/${conf}/attach`, { taskId: ownTask })).id;
     assert.equal((await ctx.owner.req('POST', '/api/mail/share', { taskId: ownTask, attachmentIds: [ca] })).status, 403, '기밀은 링크 불가');
-    assert.ok(!(await ctx.owner.ok('GET', `/api/tasks/${ownTask}/mail`)).attachments.some((a) => a.id === ca), '메일 첨부 목록에서 빠짐');
+    assert.equal((await ctx.owner.ok('GET', `/api/tasks/${ownTask}/mail`)).attachments.find((a) => a.id === ca)?.blocked, 'confidential', '메일 첨부 목록에 "기밀이라 못 보냄" 사유와 함께(대표 10/21 05:20 ①: 조용히 빼지 않음)');
     // 일반 파일 → 링크(보낸 회사 = 고른 회사)
     const pub = await libFile('회사소개서.pdf', '영업자료');
     await sql`update library_files set security = 'public' where id = ${pub}`;

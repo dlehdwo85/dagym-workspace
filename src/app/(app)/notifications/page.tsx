@@ -1,17 +1,26 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Loading, cx, fmtDateTime, toast } from '@/components/ui';
 import { NOTIFICATION_TYPES } from '@/lib/types';
 
+const SPACE_CHIP: Record<string, string> = { sales: '영업', marketing: '마케팅', work: '업무' };
+
 export default function Notifications() {
-  const { data, error, loading, reload, setData } = useApi<any>('/api/notifications');
+  // #104 ⑥: 묶음 알림 링크(/notifications?space=marketing) → 그 공간 알림만
+  const [space, setSpace] = useState<string | null>(null);
+  useEffect(() => { const s = new URLSearchParams(window.location.search).get('space'); if (s && SPACE_CHIP[s]) setSpace(s); }, []);
+  const { data, error, loading, reload, setData } = useApi<any>(`/api/notifications${space ? `?space=${space}` : ''}`);
   /** V32 0: 기본은 안 읽은 알림만 — 누르면 바로 읽음(목록에서 빠지고 배지 감소), 서버 실패 때만 되돌림. [읽은 알림도 보기]로 전체 */
   const [showAll, setShowAll] = useState(false);
   // 로컬 10/19(대표) 홈 개편: 홈 '최근 활동' 카드가 여기 '활동' 탭으로
   const [tab, setTab] = useState<'list' | 'activity'>('list');
   const [doneIds, setDoneIds] = useState<string[]>([]); // 이 화면에서 방금 처리한 알림 — 다시 불러와도 안 읽음 탭에 "…함 ✓"로 남김
+  // #104 ⑥ 종류별 묶음 접기(이 기기 기억)
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  useEffect(() => { try { setCollapsed(JSON.parse(localStorage.getItem('notif-collapsed') ?? '{}')); } catch { /* 무시 */ } }, []);
+  const toggle = (k: string) => setCollapsed((c) => { const n = { ...c, [k]: !c[k] }; try { localStorage.setItem('notif-collapsed', JSON.stringify(n)); } catch { /* 무시 */ } return n; });
   const act = useApi<{ items: any[] }>(tab === 'activity' ? '/api/notifications/activity' : null);
   /** 로컬 10/20 알림에서 바로 처리: 서버가 준 버튼(승인/수정 요청·연장 승인/거절·답글/확인·배정 확인/오늘 할 일·10분 뒤) → 처리되면 그 자리에 "승인함 ✓" */
   async function runAction(n: any, a: { id: string; label: string; input?: 'text' }) {
@@ -40,10 +49,18 @@ export default function Notifications() {
       setData(prev); window.dispatchEvent(new CustomEvent('wos-unread', { detail: { value: prev.unread } })); toast.error(e.message || '읽음 처리를 못 했습니다');
     }
   }
+  const visible: any[] = data ? (showAll ? data.items : data.items.filter((n: any) => !n.read_at || doneIds.includes(n.id))) : [];
+  // #104 ⑥ 종류별 묶음(순서 = 첫 알림 순서) — 머리줄에 건수·안 읽음·[묶음 읽음]·접기
+  const groups: { key: string; label: string; items: any[] }[] = [];
+  for (const n of visible) {
+    let g = groups.find((x) => x.key === n.type);
+    if (!g) { g = { key: n.type, label: NOTIFICATION_TYPES[n.type as keyof typeof NOTIFICATION_TYPES] ?? n.type, items: [] }; groups.push(g); }
+    g.items.push(n);
+  }
   return (
     <div className="mx-auto max-w-3xl space-y-3">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold">알림 {data?.unread ? <span className="text-sm text-red-600">{data.unread}</span> : null}</h1>
+        <h1 className="text-lg font-bold">알림 {data?.unread ? <span className="text-sm text-red-600">{data.unread}</span> : null}{space && <span className="ml-1 rounded-full bg-brand-50 px-2 text-xs font-normal text-brand-700" data-testid="notif-space-filter">{SPACE_CHIP[space]}만 <button type="button" className="underline" onClick={() => { setSpace(null); window.history.replaceState(null, '', '/notifications'); }}>해제</button></span>}</h1>
         <div className="flex gap-2"><Link href="/settings" className="text-sm text-brand-600 hover:underline">알림 설정</Link><Button size="sm" variant="secondary" onClick={() => read()} disabled={!data?.unread} data-testid="read-all">모두 읽음</Button></div>
       </div>
       <div className="flex gap-1 text-sm" role="tablist" aria-label="알림 보기">
@@ -67,27 +84,44 @@ export default function Notifications() {
                 </div>
               </li>))}
           </ul>)
-      ) : error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !(showAll ? data.items : data.items.filter((n: any) => !n.read_at || doneIds.includes(n.id))).length ? (
+      ) : error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !visible.length ? (
         <Empty title={showAll ? '알림이 없습니다' : '새 알림이 없습니다'}>{!showAll && data.items.length > 0 && <button className="text-sm text-brand-600 underline" onClick={() => setShowAll(true)}>읽은 알림 보기</button>}</Empty>
       ) : (
-        <ul className="divide-y rounded-lg border bg-white" data-testid="notifications">
-          {(showAll ? data.items : data.items.filter((n: any) => !n.read_at || doneIds.includes(n.id))).map((n: any) => (
-            <li key={n.id} className={cx('flex gap-3 px-4 py-3', !n.read_at && 'bg-brand-50/50')}>
-              <span className={cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', n.read_at ? 'bg-transparent' : 'bg-brand-600')} />
-              <Link href={n.link} onClick={() => !n.read_at && read([n.id])} className="min-w-0 flex-1">
-                <div className="text-xs text-slate-500">{NOTIFICATION_TYPES[n.type as keyof typeof NOTIFICATION_TYPES] ?? n.type} · <span title={fmtDateTime(n.created_at)}>{relTime(n.created_at)}</span></div>
-                <div className="text-sm font-medium">{n.title}</div>
-                {n.body && <div className="truncate text-sm text-slate-600">{n.body}</div>}
-              </Link>
-              {n.action_done ? <span className="shrink-0 self-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700" data-testid="notif-done">{n.action_done} ✓</span>
-                : !!n.actions?.length && (
-                <span className="flex shrink-0 flex-col gap-1 self-center sm:flex-row" data-testid={n.type === 'review_requested' ? 'review-actions' : 'notif-actions'}>
-                  {n.actions.map((a: any, i: number) => <Button key={a.id} size="sm" variant={i === 0 ? 'primary' : 'secondary'} onClick={() => runAction(n, a)} data-testid={`na-${a.id}`}>{a.label}</Button>)}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-2" data-testid="notifications">
+          {groups.map((g) => { const unread = g.items.filter((n) => !n.read_at).map((n) => n.id); const open = !collapsed[g.key];
+            return (
+              <section key={g.key} className="rounded-lg border bg-white" data-testid={`notif-group-${g.key}`}>
+                <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-ink-2">
+                  <button type="button" className="flex min-w-0 flex-1 items-center gap-1 text-left" onClick={() => toggle(g.key)} aria-expanded={open} data-testid={`notif-group-toggle-${g.key}`}>
+                    <span className={cx('inline-block transition-transform', open ? 'rotate-90' : '')}>▸</span><b className="truncate font-semibold text-ink">{g.label}</b><span>{g.items.length}건{unread.length ? ` · 안 읽음 ${unread.length}` : ''}</span>
+                  </button>
+                  {unread.length > 0 && <button type="button" className="shrink-0 rounded-full border border-line px-2 py-0.5 hover:bg-slate-50" onClick={() => read(unread)} data-testid={`notif-group-read-${g.key}`}>묶음 읽음</button>}
+                </div>
+                {open && <ul className="divide-y border-t">
+                  {g.items.map((n: any) => (
+                    <li key={n.id} className={cx('flex gap-3 px-4 py-3', !n.read_at && 'bg-brand-50/50')} data-testid="notif-item" data-space={n.space ?? ''}>
+                      <span className={cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', n.read_at ? 'bg-transparent' : 'bg-brand-600')} />
+                      <Link href={n.link} onClick={() => !n.read_at && read([n.id])} className="min-w-0 flex-1">
+                        <div className="text-xs text-slate-500">{n.space && SPACE_CHIP[n.space] && <span className="mr-1 rounded-full bg-slate-100 px-1.5 text-[10px] text-ink-2" data-testid="notif-space-chip">{SPACE_CHIP[n.space]}</span>}<span title={fmtDateTime(n.created_at)}>{relTime(n.created_at)}</span>{n.actor_name ? ` · ${n.actor_name}` : ''}</div>
+                        <div className="text-sm font-medium">{n.title}</div>
+                        {n.body && <div className="truncate text-sm text-slate-600">{n.body}</div>}
+                        {/* #104 ② 묶음 알림: 담긴 건을 펼쳐 보여 줌 */}
+                        {Array.isArray(n.meta?.items) && n.meta.items.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-ink-2" data-testid="notif-digest-items">
+                          {n.meta.items.map((it: any, i: number) => <li key={i} className="truncate">· {it.title}</li>)}
+                        </ul>}
+                      </Link>
+                      {n.action_done ? <span className="shrink-0 self-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700" data-testid="notif-done">{n.action_done} ✓</span>
+                        : !!n.actions?.length && (
+                        <span className="flex shrink-0 flex-col gap-1 self-center sm:flex-row" data-testid={n.type === 'review_requested' ? 'review-actions' : 'notif-actions'}>
+                          {n.actions.map((a: any, i: number) => <Button key={a.id} size="sm" variant={i === 0 ? 'primary' : 'secondary'} onClick={() => runAction(n, a)} data-testid={`na-${a.id}`}>{a.label}</Button>)}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>}
+              </section>);
+          })}
+        </div>
       )}
     </div>
   );

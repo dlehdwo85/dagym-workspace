@@ -104,8 +104,9 @@ async function naverItems(customerId: string, s: NaverSecret, days: string[], ca
   const list = items.slice(0, ITEM_LIMIT); if (!list.length) return [];
   const byId = new Map(list.map((i) => [i.id, i]));
   const rows: ItemRow[] = [];
-  for (const day of days) for (let i = 0; i < list.length; i += 100) {
-    const ids = list.slice(i, i + 100).map((x) => x.id);
+  // 로컬 10/21 19:30: /stats 는 한 요청에 같은 타입 id 만(키워드 nkw… 와 소재 nad… 를 섞으면 400 "모든 ID는 동일한 타입이어야 합니다") → 종류별로 나눠 호출
+  for (const day of days) for (const kind of ['keyword', 'ad'] as const) for (let i = 0, sub = list.filter((x) => x.kind === kind); i < sub.length; i += 100) {
+    const ids = sub.slice(i, i + 100).map((x) => x.id);
     const q = `?ids=${encodeURIComponent(ids.join(','))}&fields=${encodeURIComponent('["impCnt","clkCnt","salesAmt","ccnt"]')}&timeRange=${encodeURIComponent(JSON.stringify({ since: day, until: day }))}`;
     const r = await naver('/stats', s, customerId, q);
     for (const d of r?.data ?? []) { const it = byId.get(String(d.id)); if (!it) continue; rows.push({ day, kind: it.kind, item_id: it.id, item_name: it.name, campaign_id: it.campaign_id, campaign_name: names.get(it.campaign_id) ?? '', adgroup_name: it.adgroup_name, impressions: num(d.impCnt), clicks: num(d.clkCnt), cost: num(d.salesAmt), conversions: num(d.ccnt), currency: 'KRW' }); }

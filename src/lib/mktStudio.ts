@@ -4,7 +4,6 @@ import { db } from './db';
 import { isAdmin } from './access';
 import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
-import { notify } from './notifications';
 import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
 import { hfGenerate, hfSettings, modelFor } from './higgsfield';
@@ -174,7 +173,7 @@ async function generateBrief(u: SessionUser, b: any) {
     await sql`update mkt_production_requests set brief_id = ${b.id} where id = ${q.id}`; ids.push(q.id);
   }
   await sql`update mkt_briefs set status = 'generating', content_id = ${contentId}, result = ${sql.json({ provider: 'card', requestIds: ids } as never)}, updated_at = now() where id = ${b.id}`;
-  await notify(sql, { userIds: await (await import('./mktAuto')).approvers(t), type: 'review_requested', title: `제작 요청 카드 ${ids.length}건: ${title}`, body: '제작의뢰실 프롬프트·참고 사진이 카드에 담겨 있습니다 — 만들어 붙이면 승인 대기로', link: '/s/marketing/automation', entityType: 'mkt_content', entityId: contentId, dedupeKey: `mktbrief:${b.id}` }).catch(() => {});
+  await (await import('./mktAuto')).mktNotify(sql, { tenant: t, brand_id: b.brand_id ?? null, is_test: isTest, created_by: u.id }, u.id, { approval: true, type: 'review_requested', title: `제작 요청 카드 ${ids.length}건: ${title}`, body: '제작의뢰실 프롬프트·참고 사진이 카드에 담겨 있습니다 — 만들어 붙이면 승인 대기로', link: '/s/marketing/automation', entityType: 'mkt_content', entityId: contentId, dedupeKey: `mktbrief:${b.id}` }).catch(() => {});
   return { status: 'generating', contentId, requestIds: ids };
 }
 

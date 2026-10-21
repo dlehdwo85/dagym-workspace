@@ -146,7 +146,7 @@ async function cleanup() {
 }
 
 /** 서버 정기 실행 (GitHub Actions 스케줄러가 5~15분마다 호출). 대표 PC 와 무관하게 동작 */
-export async function runTick(trigger: string) {
+export async function runTick(trigger: string, opt: { forceDigest?: boolean } = {}) {
   const sql = db();
   const holder = randomUUID();
   const got = await sql`insert into job_locks (name, locked_until, holder) values ('tick', now() + interval '4 minutes', ${holder})
@@ -197,6 +197,7 @@ export async function runTick(trigger: string) {
   await step('opsPii', async () => (await import('./opsImport')).purgeOpsPii()); // V41 4-2 가져온 전화 기록 보관 기간
   await step('aiRetention', async () => ({ purged: await (await import('./ai/threads')).purgeOldThreads() })); // V14 2번 AI 대화 보관 기간
   await step('outbox', async () => (await import('./mailbox')).outboxTick()); // V21 메일 보관함 재시도(서울 지역)
+  await step('notifDigest', async () => (await import('./spaceNotify')).digestTick(new Date(), { force: !!opt.forceDigest })); // #104 ②: 담당 아닌 사람 1시간 묶음 · 담당 미지정 관리자 1명 하루 묶음
   await step('push', () => dispatchPending(200));
   if (googleConfigured()) await step('google', () => syncAllDue());
   await step('cleanup', cleanup);

@@ -4,7 +4,6 @@ import { db } from './db';
 import { isAdmin } from './access';
 import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
-import { notify } from './notifications';
 import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
 
@@ -105,7 +104,7 @@ export async function draftGoal(tenant: string, month: string, brandId: string |
   const [g] = await sql<{ id: string }[]>`insert into mkt_goals (tenant, brand_id, month, status, goals, weekly, source, created_by, version, revision_note, reject_note)
     values (${tenant}, ${brandId}, ${month}, 'pending', ${sql.json(goals as never)}, ${sql.json(weekly as never)}, ${source}, ${actorId}, ${version}, ${revisionNote}, ${opt.revise?.note ?? null})
     on conflict (tenant, coalesce(brand_id::text, ''), month) do update set goals = excluded.goals, weekly = excluded.weekly, source = excluded.source, status = 'pending', approved_by = null, approved_at = null, version = excluded.version, revision_note = excluded.revision_note, reject_note = excluded.reject_note, updated_at = now() returning id`;
-  await notify(sql, { userIds: await approversOf(tenant), type: 'review_requested', title: `${month.replace('-', '년 ')}월 운영 목표 초안${version > 1 ? ` v${version}(반려 반영)` : ''} — 승인해 주세요${brand ? ` (${brand.name})` : ''}`, body: goals.objectives[0] ?? '', link: '/s/marketing/goals', entityType: 'mkt_goal', entityId: g.id, dedupeKey: `mktgoal:${g.id}:${source}` }).catch(() => {});
+  await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, role: { kind: 'marketing_brand', ref: brandId ?? '' }, type: 'review_requested', title: `${month.replace('-', '년 ')}월 운영 목표 초안${version > 1 ? ` v${version}(반려 반영)` : ''} — 승인해 주세요${brand ? ` (${brand.name})` : ''}`, body: goals.objectives[0] ?? '', link: '/s/marketing/goals', entityType: 'mkt_goal', entityId: g.id, dedupeKey: `mktgoal:${g.id}:${source}` }).catch(() => {});
   return { id: g.id, status: 'pending', source, goals, weekly, version, revisionNote };
 }
 
@@ -220,7 +219,7 @@ export async function reviewWeek(tenant: string, goalId: string, week?: number, 
   }
   const reviews = [...(g.reviews ?? []).filter((x: any) => x.week !== target.week), { week: target.week, at: new Date().toISOString(), numbers: n, summary }].sort((a: any, b: any) => a.week - b.week);
   await sql`update mkt_goals set reviews = ${sql.json(reviews as never)}, updated_at = now() where id = ${goalId}`;
-  await notify(sql, { userIds: await approversOf(tenant), type: 'weekly_report', title: `${g.month.slice(5).replace(/^0/, '')}월 ${target.week}주 마케팅 주간 리뷰`, body: summary.slice(0, 200), link: '/s/marketing/goals', entityType: 'mkt_goal', entityId: goalId, dedupeKey: `mktreview:${goalId}:${target.week}` }).catch(() => {});
+  await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', role: { kind: 'marketing_brand', ref: g.brand_id ?? '' }, type: 'weekly_report', title: `${g.month.slice(5).replace(/^0/, '')}월 ${target.week}주 마케팅 주간 리뷰`, body: summary.slice(0, 200), link: '/s/marketing/goals', entityType: 'mkt_goal', entityId: goalId, dedupeKey: `mktreview:${goalId}:${target.week}` }).catch(() => {});
   return { week: target.week, numbers: n, summary };
 }
 
@@ -234,7 +233,7 @@ export async function closeGoal(tenant: string, goalId: string, actorId: string 
   const closing = { at: new Date().toISOString(), numbers: n, achieved: { posts: rate(n.posts, t.posts), inquiries: rate(n.inquiries, t.inquiries), adBudget: t.adBudget ? Math.round((n.adCost / t.adBudget) * 100) : null },
     summary: `${g.month.replace('-', '년 ')}월 결산 — 게시 ${n.posts}${t.posts ? `/${t.posts}` : ''}건 · 문의 ${n.inquiries}${t.inquiries ? `/${t.inquiries}` : ''}건 · 광고비 ${n.adCost.toLocaleString('ko-KR')}원${t.adBudget ? `/${Number(t.adBudget).toLocaleString('ko-KR')}원` : ''}. 주간 리뷰 ${(g.reviews ?? []).length}회.` };
   await sql`update mkt_goals set closing = ${sql.json(closing as never)}, status = 'closed', updated_at = now() where id = ${goalId}`;
-  await notify(sql, { userIds: await approversOf(tenant), type: 'weekly_report', title: closing.summary.split(' — ')[0], body: closing.summary, link: '/s/marketing/goals', entityType: 'mkt_goal', entityId: goalId, dedupeKey: `mktclose:${goalId}` }).catch(() => {});
+  await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', role: { kind: 'marketing_brand', ref: g.brand_id ?? '' }, type: 'weekly_report', title: closing.summary.split(' — ')[0], body: closing.summary, link: '/s/marketing/goals', entityType: 'mkt_goal', entityId: goalId, dedupeKey: `mktclose:${goalId}` }).catch(() => {});
   void actorId;
   return closing;
 }

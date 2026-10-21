@@ -3,7 +3,6 @@ import { db } from './db';
 import { isAdmin } from './access';
 import { assertSpace } from './spaces';
 import { badRequest, forbidden } from './errors';
-import { notify } from './notifications';
 import { tenantOf, type SessionUser } from './types';
 
 /**
@@ -89,7 +88,7 @@ export async function monthlyReportJob() {
     const [co] = await sql<{ name: string }[]>`select name from tenants where id = ${tenant}`;
     const ids = await approvers(tenant);
     const link = `${appUrl()}/s/marketing/report?month=${month}`;
-    await notify(sql, { userIds: ids, type: 'usage_alert', title: `${month} 마케팅 월간 보고`, body: `게시 ${r.posts.published}건 · 승인 ${r.approvals.approved}건 · 광고 비용 ${Math.round(r.ads.total.cost_krw).toLocaleString('ko-KR')}원`, link: `/s/marketing/report?month=${month}`, dedupeKey: `mktreport:${tenant}:${month}` });
+    await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', userIds: ids, role: { kind: 'marketing_brand', ref: '' }, type: 'usage_alert', title: `${month} 마케팅 월간 보고`, body: `게시 ${r.posts.published}건 · 승인 ${r.approvals.approved}건 · 광고 비용 ${Math.round(r.ads.total.cost_krw).toLocaleString('ko-KR')}원`, link: `/s/marketing/report?month=${month}`, dedupeKey: `mktreport:${tenant}:${month}` });
     let mailed = 0;
     if (mailConfigured()) for (const u of await sql<{ email: string }[]>`select email from users where id = any(${ids}::uuid[]) and email is not null`) {
       await sendMail(u.email, `[워크인] ${month} 마케팅 월간 보고`, summaryText(co?.name ?? '', r, link)).then(() => { mailed++; }).catch(() => {});

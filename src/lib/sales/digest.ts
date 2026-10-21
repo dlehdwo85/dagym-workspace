@@ -95,7 +95,7 @@ export async function sendDigest(tenant: string, opt: { force?: boolean; day?: s
   const rule = p.digest_to.length ? null : await (await import('../assignees')).resolveAssignee(sql, tenant, 'sales_source', 'bid').catch(() => null);
   const to = p.digest_to.length ? await sql<{ id: string; email: string }[]>`select id, email from users where id = any(${p.digest_to}::uuid[]) and tenant = ${tenant} and status = 'active'`
     : rule ? await sql<{ id: string; email: string }[]>`select id, email from users where id = ${rule.userId}`
-    : await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${tenant} and status = 'active' and not is_demo and role in ('owner', 'admin')`;
+    : await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${tenant} and status = 'active' and not is_demo and role in ('owner', 'admin') order by (role = 'owner') desc, created_at asc limit 1`; // #104: 담당 미지정이면 관리자 1명(대표 우선)에게만
   let mailed = 0, notified = 0; let mailError: string | null = null; let mailVia: string | null = null;
   if (d.items.length) {
     const text = digestText(co?.name ?? '', d);
@@ -106,7 +106,7 @@ export async function sendDigest(tenant: string, opt: { force?: boolean; day?: s
       if (q) { mailed = to.length; mailVia = q.channel; }
       else for (const u of to) { try { mailVia = await sendMail(u.email, subject, text); mailed++; } catch (e) { mailError ??= e instanceof Error ? e.message : String(e); /* 메일 경로 없음·실패면 알림만 — 사유는 기록 */ } }
     }
-    notified = (await notify(sql, { userIds: to.map((u) => u.id), type: 'briefing', title: `오늘 새 공고 ${d.counts.total}건 — ${d.items[0].title.slice(0, 40)}${d.items.length > 1 ? ' 외' : ''}`, body: d.items.slice(0, 3).map((i) => `${i.kind === 'cancel' ? '[취소] ' : i.kind === 'amend' ? '[정정] ' : ''}${i.title}${i.dday != null ? ` (D-${i.dday})` : ''}`).join('\n'), link: '/s/sales/bids?tab=today', push: true, dedupeKey: `salesdigest:${tenant}:${day}${opt.force ? `:${Date.now()}` : ''}` }).catch(() => [])).length;
+    notified = (await notify(sql, { userIds: to.map((u) => u.id), type: 'briefing', space: 'sales', title: `오늘 새 공고 ${d.counts.total}건 — ${d.items[0].title.slice(0, 40)}${d.items.length > 1 ? ' 외' : ''}`, body: d.items.slice(0, 3).map((i) => `${i.kind === 'cancel' ? '[취소] ' : i.kind === 'amend' ? '[정정] ' : ''}${i.title}${i.dday != null ? ` (D-${i.dday})` : ''}`).join('\n'), link: '/s/sales/bids?tab=today', push: true, dedupeKey: `salesdigest:${tenant}:${day}${opt.force ? `:${Date.now()}` : ''}` }).catch(() => [])).length;
   }
   await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified) values (${tenant}, ${day}, ${sql.json(d.items as never)}, ${sql.json({ ...d.counts, mailError, mailVia, mailTo: to.length } as never)}, ${mailed}, ${notified}) on conflict (tenant, day) do update set items = excluded.items, counts = excluded.counts, mailed = excluded.mailed, notified = excluded.notified, created_at = now()`;
   if (opt.actorId) await audit(sql, opt.actorId, 'sales_digest.send', 'tenant', null, { day, total: d.counts.total, mailed, notified }).catch(() => {});

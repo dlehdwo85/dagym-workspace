@@ -175,8 +175,8 @@ export async function createContent(u: SessionUser, i: z.infer<typeof contentInp
       values (${t}, ${i.brandId ?? null}, ${title}, ${i.channel}, ${i.scheduledAt ?? null}, ${needsPhotos(i.channel, i.mediaIds.length) ? 'changes' : 'pending'}, 1, ${u.id}, ${isTest}, ${(i.crossChannels ?? []).filter((x) => x !== i.channel)}, ${rat ? tx.json(rat as never) : null}) returning id`;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
     if (needsPhotos(i.channel, i.mediaIds.length)) { await tx`update mkt_contents set quality = ${tx.json({ passed: false, issues: [BLOG_PHOTO_RULE] } as never)} where id = ${c.id}`; return { id: c.id, version: 1, needsPhotos: true }; }
-    const admins = isTest ? [] : await (await import('./mktAuto')).approvers(t);
-    await notify(tx, { userIds: admins, type: 'review_requested', title: `승인 대기: ${title}`, body: `${u.name} · ${CHANNELS[i.channel]}`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, actorId: u.id, dedupeKey: `mkt:${c.id}:1` });
+    // #104: 승인자 + 브랜드 담당에게 바로, 시험 브랜드는 올린 사람에게만
+    await (await import('./mktAuto')).mktNotify(tx, { tenant: t, brand_id: i.brandId ?? null, is_test: isTest, created_by: u.id }, u.id, { approval: true, type: 'review_requested', title: `승인 대기: ${title}`, body: `${u.name} · ${CHANNELS[i.channel]}`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, actorId: u.id, dedupeKey: `mkt:${c.id}:1` });
     return { id: c.id, version: 1 };
   });
 }
@@ -189,15 +189,14 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
   await mediaOk(u, i.mediaIds);
   const sql = db();
   return sql.begin(async (tx) => {
-    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by, channel from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
+    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by, channel, brand_id from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
     const v = c.current_version + 1;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${id}, ${v}, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
     if (needsPhotos(c.channel, i.mediaIds.length)) { await tx`update mkt_contents set current_version = ${v}, status = 'changes', quality = ${tx.json({ passed: false, issues: [BLOG_PHOTO_RULE] } as never)}, updated_at = now() where id = ${id}`; return { version: v, needsPhotos: true }; }
     await tx`update mkt_contents set current_version = ${v}, status = 'pending', quality = case when quality->>'passed' = 'false' and quality->'issues' @> ${tx.json([BLOG_PHOTO_RULE] as never)} then null else quality end, updated_at = now() where id = ${id}`;
-    const admins = c.is_test ? [c.created_by] : await (await import('./mktAuto')).approvers(tenantOf(u));
-    await notify(tx, { userIds: admins, type: 'review_requested', title: `재승인 대기(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
+    await (await import('./mktAuto')).mktNotify(tx, { tenant: tenantOf(u), brand_id: c.brand_id, is_test: c.is_test, created_by: c.created_by }, u.id, { approval: true, type: 'review_requested', title: `재승인 대기(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
     return { version: v };
   });
 }
@@ -223,7 +222,7 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
     const status = { approve: 'approved', changes: 'changes', hold: 'hold' }[i.decision];
     await tx`insert into mkt_decisions (content_id, version, decision, comment, decided_by) values (${id}, ${i.version}, ${i.decision}, ${i.comment ?? null}, ${u.id})`;
     await tx`update mkt_contents set status = ${status}, approved_version = ${i.decision === 'approve' ? i.version : null}, updated_at = now() where id = ${id}`;
-    if (c.created_by) await notify(tx, { userIds: [c.created_by], type: 'review_result', title: `${{ approve: '승인', changes: '수정 요청', hold: '보류' }[i.decision]}: ${c.title}`, body: i.comment ?? `v${i.version}`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mktd:${id}:${i.version}:${i.decision}` });
+    if (c.created_by) await notify(tx, { userIds: [c.created_by], type: 'review_result', title: `${{ approve: '승인', changes: '수정 요청', hold: '보류' }[i.decision]}: ${c.title}`, body: i.comment ?? `v${i.version}`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mktd:${id}:${i.version}:${i.decision}`, space: 'marketing' });
     await audit(tx as never, u.id, 'mkt.decide', 'mkt_content', id, { version: i.version, decision: i.decision }, ip);
     return { status };
   });

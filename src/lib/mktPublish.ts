@@ -4,7 +4,6 @@ import { assertSpace } from './spaces';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { decrypt, encrypt } from './crypto';
 import { audit, logError } from './log';
-import { notify } from './notifications';
 import { appUrl } from './mail';
 import { downloadUrl, getObject } from './storage';
 import { tenantOf, type SessionUser } from './types';
@@ -251,8 +250,8 @@ async function runOne(job: Job) {
     const attempts = job.attempts + 1;
     if (!final && attempts < MAX_ATTEMPTS) { await sql`update mkt_publish_jobs set status = 'queued', attempts = ${attempts}, last_error = ${msg.slice(0, 500)}, run_after = now() + (${attempts * 5} || ' minutes')::interval, updated_at = now() where id = ${job.id}`; return { status: 'retry', error: msg }; }
     await sql`update mkt_publish_jobs set status = 'failed', attempts = ${attempts}, last_error = ${msg.slice(0, 500)}, updated_at = now() where id = ${job.id}`;
-    const who = [...new Set([job.requested_by, c?.created_by, ...(await (await import('./mktAuto')).approvers(job.tenant).catch(() => []))].filter(Boolean))] as string[];
-    await notify(sql, { userIds: who, type: 'sync_error', title: `게시 실패 — ${PROVIDER_LABEL[job.provider] ?? job.provider}: ${String(c?.title ?? '').slice(0, 40)}`, body: msg.slice(0, 200), link: `/s/marketing/approvals?c=${job.content_id}`, entityType: 'mkt_publish_job', entityId: job.id, dedupeKey: `mktpub:fail:${job.id}:${attempts}` }).catch(() => {});
+    // #104: 요청자·만든 사람 + 브랜드 담당(규칙)에게 — 승인자 전원에게는 가지 않음
+    await (await import('./mktAuto')).mktNotify(sql, { tenant: job.tenant, brand_id: c?.brand_id ?? null, is_test: c?.is_test, created_by: c?.created_by }, job.requested_by, { userIds: [job.requested_by, c?.created_by], type: 'sync_error', title: `게시 실패 — ${PROVIDER_LABEL[job.provider] ?? job.provider}: ${String(c?.title ?? '').slice(0, 40)}`, body: msg.slice(0, 200), link: `/s/marketing/approvals?c=${job.content_id}`, entityType: 'mkt_publish_job', entityId: job.id, dedupeKey: `mktpub:fail:${job.id}:${attempts}` }).catch(() => {});
     return { status: 'failed', error: msg };
   };
   if (!c) return fail('콘텐츠·버전이 없습니다', true);
@@ -281,8 +280,7 @@ async function runOne(job: Job) {
     // 첫 성공이 게시 주소·게시됨 상태(여러 채널이면 나머지는 게시 기록에)
     await tx`update mkt_contents set status = 'published', published_url = case when published_deleted_at is not null then ${res!.permalink} else coalesce(published_url, ${res!.permalink}) end, published_at = case when published_deleted_at is not null then now() else coalesce(published_at, now()) end, published_deleted_at = null, updated_at = now() where id = ${c.id} and status <> 'canceled'`;
   });
-  const who = [...new Set([job.requested_by, c.created_by].filter(Boolean))] as string[];
-  await notify(sql, { userIds: who, type: 'review_result', title: `게시 완료 — ${PROVIDER_LABEL[a.provider]}: ${String(c.title).slice(0, 40)}`, body: res.permalink, link: res.permalink, entityType: 'mkt_publish_job', entityId: job.id, dedupeKey: `mktpub:done:${job.id}`, push: false }).catch(() => {});
+  await (await import('./mktAuto')).mktNotify(sql, { tenant: job.tenant, brand_id: c.brand_id, is_test: c.is_test, created_by: c.created_by }, job.requested_by, { userIds: [job.requested_by, c.created_by], type: 'review_result', title: `게시 완료 — ${PROVIDER_LABEL[a.provider]}: ${String(c.title).slice(0, 40)}`, body: res.permalink, link: res.permalink, entityType: 'mkt_publish_job', entityId: job.id, dedupeKey: `mktpub:done:${job.id}`, push: false }).catch(() => {});
   return { status: 'done', permalink: res.permalink };
 }
 async function runJobs(ids: string[]) {
@@ -346,11 +344,10 @@ export async function publishDeletedTick(limit = 20) {
     deleted++;
     await sql`update mkt_publish_jobs set deleted_at = now(), checked_at = now(), last_error = '매체에서 게시물이 삭제됨', updated_at = now() where id = ${j.id}`;
     const [live] = await sql<{ n: number }[]>`select count(*)::int as n from mkt_publish_jobs where content_id = ${j.content_id} and status = 'done' and deleted_at is null and provider <> 'manual'`;
-    const [c] = await sql<any[]>`select id, title, created_by, published_deleted_at from mkt_contents where id = ${j.content_id}`;
+    const [c] = await sql<any[]>`select id, title, created_by, published_deleted_at, brand_id, is_test from mkt_contents where id = ${j.content_id}`;
     if (!c) continue;
     if (!live.n && !c.published_deleted_at) await sql`update mkt_contents set published_deleted_at = now(), updated_at = now() where id = ${c.id}`;
-    const who = [...new Set([j.requested_by, c.created_by, ...(await (await import('./mktAuto')).approvers(j.tenant).catch(() => []))].filter(Boolean))] as string[];
-    await notify(sql, { userIds: who, type: 'sync_error', title: `게시물 삭제됨 — ${PROVIDER_LABEL[j.provider] ?? j.provider}: ${String(c.title ?? '').slice(0, 40)}`, body: live.n ? '다른 채널 게시는 남아 있습니다. 필요하면 다시 게시하세요.' : '매체에서 게시물이 지워졌습니다. 다시 게시하려면 콘텐츠에서 [서버로 게시]를 누르세요.', link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_publish_job', entityId: j.id, dedupeKey: `mkt:deleted:${j.id}` });
+    await (await import('./mktAuto')).mktNotify(sql, { tenant: j.tenant, brand_id: c.brand_id, is_test: c.is_test, created_by: c.created_by }, j.requested_by, { userIds: [j.requested_by, c.created_by], type: 'sync_error', title: `게시물 삭제됨 — ${PROVIDER_LABEL[j.provider] ?? j.provider}: ${String(c.title ?? '').slice(0, 40)}`, body: live.n ? '다른 채널 게시는 남아 있습니다. 필요하면 다시 게시하세요.' : '매체에서 게시물이 지워졌습니다. 다시 게시하려면 콘텐츠에서 [서버로 게시]를 누르세요.', link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_publish_job', entityId: j.id, dedupeKey: `mkt:deleted:${j.id}` });
   }
   return { checked, deleted };
 }

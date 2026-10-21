@@ -4,7 +4,6 @@ import { db } from './db';
 import { isAdmin } from './access';
 import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
-import { notify } from './notifications';
 import { zUuid } from './api';
 import { layoutBody } from './mktText';
 import { tenantOf, type SessionUser } from './types';
@@ -182,13 +181,11 @@ export async function approvers(tenant: string) {
   if (s.notify_user_ids?.length) return (await db()<{ id: string }[]>`select id from users where tenant = ${tenant} and status = 'active' and id = any(${s.notify_user_ids}::uuid[])`).map((r) => r.id);
   return (await db()<{ id: string }[]>`select id from users where tenant = ${tenant} and role in ('owner', 'admin') and status = 'active'`).map((r) => r.id);
 }
-/** 시험 콘텐츠는 실행한 사람(없으면 규칙 만든 사람)에게만 */
-const audience = async (c: any, actorId?: string | null) => {
-  if (c.is_test) return [actorId ?? c.created_by].filter(Boolean) as string[];
-  // #100: 승인자 + 그 브랜드 마케팅 담당(규칙)도 함께
-  const brand = c.brand_id ? await (await import('./assignees')).resolveAssignee(db(), c.tenant, 'marketing_brand', c.brand_id).catch(() => null) : null;
-  return [...new Set([...(await approvers(c.tenant)), ...(brand ? [brand.userId] : [])])];
-};
+/** #104 마케팅 알림 라우팅: 브랜드 담당(#100 규칙)에게 바로 · approval 이면 승인자에게도 · 시험 콘텐츠는 실행한 사람(없으면 규칙 만든 사람)에게만 · 담당 미지정은 관리자 1명 하루 묶음 */
+export async function mktNotify(sql: any, c: { tenant: string; brand_id?: string | null; is_test?: boolean | null; created_by?: string | null }, actorId: string | null | undefined,
+  n: Omit<import('./spaceNotify').SpaceNotifyInput, 'tenant' | 'space' | 'role' | 'test'>) {
+  return (await import('./spaceNotify')).notifySpace(sql, { ...n, tenant: c.tenant, space: 'marketing', role: { kind: 'marketing_brand', ref: c.brand_id ?? '' }, test: c.is_test ? { actorId: actorId ?? c.created_by ?? null } : null });
+}
 
 /** 제작: Claude 원고(+ 이미지/영상은 제작 요청 카드) → 품질 검사 → 통과본 승인함 · 실패본 '수정 요청'(사유) */
 /** 원고 재료(로컬 검수 10/18): 브랜드 키트(소개·주력 상품·이번 주 주제) · 회사 AI 프로필 · 마케팅 자료실 사진 설명 · 최근 게시 제목(겹치지 않게).
@@ -267,7 +264,7 @@ export async function requestCard(c: any, version: number, kind: 'image' | 'vide
   else if (est > 0 && lim.weeklyCredits !== null && use.weekCredits + est > lim.weeklyCredits) reason = `이번 주 크레딧 한도(${lim.weeklyCredits}) 초과 예상 — 약 ${est}크레딧`;
   const [q] = await sql<{ id: string }[]>`insert into mkt_production_requests (tenant, content_id, version, kind, brief, est_credits, status, reason)
     values (${c.tenant}, ${c.id}, ${version}, ${kind}, ${brief.slice(0, 4000)}, ${est}, ${reason ? 'needs_approval' : 'open'}, ${reason}) returning id`;
-  if (reason) await notify(sql, { userIds: await audience(c), type: 'review_requested', title: `제작 전 승인 필요: ${c.title}`, body: reason, link: '/s/marketing/automation', entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktreq:${q.id}` });
+  if (reason) await mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `제작 전 승인 필요: ${c.title}`, body: reason, link: '/s/marketing/automation', entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktreq:${q.id}` });
   return { id: q.id, reason };
 }
 
@@ -295,7 +292,7 @@ export async function produceContent(c: any, actorId?: string | null) {
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임)
     await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', (kind === 'blog' ? `표지 1장 + 본문 사진 1장 이상(실사). ${d.brief ?? ''}`.trim() : d.brief) || (kind === 'story' ? '세로 1080×1920 실사 + 글자 렌더(24시간 스토리)' : '실사 사진 + 글자 렌더'), kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
   });
-  if (!isQuiet(new Date(), s)) await notify(sql, { userIds: await audience(c, actorId), type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${d.title}` : kind === 'blog' && q.issues.length === 1 ? `원고 완료 — 표지·본문 사진을 붙여 주세요: ${d.title}` : `품질 검사 미통과: ${d.title}`,
+  if (!isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${d.title}` : kind === 'blog' && q.issues.length === 1 ? `원고 완료 — 표지·본문 사진을 붙여 주세요: ${d.title}` : `품질 검사 미통과: ${d.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
   return { id: c.id, passed: q.passed, issues: q.issues };
 }
@@ -307,7 +304,7 @@ async function askTopic(c: any, actorId?: string | null) {
   if (!open.length) {
     const [q] = await sql<{ id: string }[]>`insert into mkt_production_requests (tenant, content_id, version, kind, brief, est_credits, status, reason)
       values (${c.tenant}, ${c.id}, 0, 'topic', ${'이번 글에 쓸 주제·소식을 알려 주세요(예: 신규 상품, 이벤트, 현장 사진 이야기). 브랜드 키트의 소개·주력 상품을 채워 두면 다음부터는 묻지 않습니다.'}, 0, 'open', '재료 부족') returning id`;
-    await notify(sql, { userIds: await audience(c, actorId), type: 'review_requested', title: `주제 필요: ${c.title}`, body: '쓸 재료가 없어 시안을 만들지 않았습니다 — 주제를 알려 주세요', link: '/s/marketing/automation', entityType: 'mkt_content', entityId: c.id, dedupeKey: `mkttopic:${q.id}` });
+    await mktNotify(sql, c, actorId, { type: 'review_requested', title: `주제 필요: ${c.title}`, body: '쓸 재료가 없어 시안을 만들지 않았습니다 — 주제를 알려 주세요', link: '/s/marketing/automation', entityType: 'mkt_content', entityId: c.id, dedupeKey: `mkttopic:${q.id}` });
   }
   return { id: c.id, passed: false, issues: ['주제 필요'], needsTopic: true };
 }
@@ -315,7 +312,7 @@ async function askTopic(c: any, actorId?: string | null) {
 /** 마감 N시간 전 알림(야간이면 직전 저녁) · 마감 지난 자동 시안 정리 */
 export async function remindAndExpire(tenant: string) {
   const sql = db(); const s = await settingsOf(tenant);
-  const rows = await sql<any[]>`select id, tenant, title, scheduled_at, status, auto, reminded_at, is_test, created_by from mkt_contents where tenant = ${tenant} and status in ('pending', 'changes', 'draft') and scheduled_at is not null and scheduled_at > now() - interval '2 days'`;
+  const rows = await sql<any[]>`select id, tenant, title, scheduled_at, status, auto, reminded_at, is_test, created_by, brand_id from mkt_contents where tenant = ${tenant} and status in ('pending', 'changes', 'draft') and scheduled_at is not null and scheduled_at > now() - interval '2 days'`;
   let reminded = 0, expired = 0;
   for (const c of rows) {
     const dl = deadlineOf(c.scheduled_at, s);
@@ -324,7 +321,7 @@ export async function remindAndExpire(tenant: string) {
       expired++; continue;
     }
     if (c.status !== 'pending' || c.reminded_at || Date.now() < remindAtOf(dl, s).getTime() || isQuiet(new Date(), s)) continue;
-    await notify(sql, { userIds: await audience(c), type: 'review_requested', title: `승인 마감 ${s.remind_hours}시간 전: ${c.title}`, body: `마감 ${Number(ymd(dl).slice(5, 7))}/${Number(ymd(dl).slice(8))} ${pad(s.approval_hour)}:00`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktr:${c.id}` });
+    await mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `승인 마감 ${s.remind_hours}시간 전: ${c.title}`, body: `마감 ${Number(ymd(dl).slice(5, 7))}/${Number(ymd(dl).slice(8))} ${pad(s.approval_hour)}:00`, link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktr:${c.id}` });
     await sql`update mkt_contents set reminded_at = now() where id = ${c.id}`;
     reminded++;
   }
@@ -342,7 +339,7 @@ export async function runTenant(tenant: string, actorId?: string) {
     const r: any = await produceContent(c, actorId).catch((e) => ({ id: c.id, error: String(e?.message ?? e).slice(0, 200), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' }));
     produced.push(r);
     if (r.quota) { // 한도·크레딧: 남은 칸도 같은 이유로 실패하므로 멈추고, 받는 사람에게 하루 한 번 알림
-      await notify(db(), { userIds: await approvers(tenant), type: 'usage_alert', title: '마케팅 자동 제작 멈춤(AI 한도)', body: r.error, link: '/s/marketing/automation', dedupeKey: `mktquota:${tenant}:${ymd(new Date())}` }).catch(() => {});
+      await (await import('./spaceNotify')).notifySpace(db(), { tenant, space: 'marketing', approval: true, type: 'usage_alert', title: '마케팅 자동 제작 멈춤(AI 한도)', body: r.error, link: '/s/marketing/automation', dedupeKey: `mktquota:${tenant}:${ymd(new Date())}` }).catch(() => {});
       break;
     }
   }

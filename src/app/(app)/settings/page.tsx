@@ -100,6 +100,7 @@ export default function Settings() {
         <p className="mt-1 text-xs text-slate-500">조용한 시간에 생긴 푸시는 모아서 끝나는 시각(아침)에 보냅니다. 앱 안 알림은 바로 쌓입니다. 종류별 푸시 기본값: 나에게 온 요청·내 일정·요청한 업무 완료는 켬, 내가 보낸 결과·자동 정리 결과는 끔(위 표에서 바꿀 수 있음).</p>
         <Button className="mt-3" onClick={save}>저장</Button>
       </section>
+      {data.spaces?.length > 0 && <SpaceNotifyPrefs spaces={data.spaces} modeLabels={data.modeLabels} canSetCompany={data.canSetCompany} reload={reload} />}
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 받는 기기 (앱·브라우저)</h2>
         <ul className="space-y-1 text-sm">
@@ -116,6 +117,48 @@ export default function Settings() {
         </div>
       </section>
     </div>
+  );
+}
+
+/** 대표 10/20 16:00 (#104 ⑤) 공간별(영업·마케팅) 알림 방식 — 담당인 것만(기본)·모두(1시간 묶음)·받지 않음. 관리자는 회사 기본값도 */
+type SpaceRow = { space: string; label: string; mode: 'mine' | 'all' | 'off'; own: boolean; companyDefault: 'mine' | 'all' | 'off' };
+function SpaceNotifyPrefs({ spaces, modeLabels, canSetCompany, reload }: { spaces: SpaceRow[]; modeLabels: Record<string, string>; canSetCompany: boolean; reload: () => void }) {
+  const [rows, setRows] = useState<SpaceRow[]>(spaces);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setRows(spaces); }, [spaces]);
+  const MODES = ['mine', 'all', 'off'] as const;
+  async function save() {
+    setBusy(true);
+    try {
+      const body: any = { spaces: Object.fromEntries(rows.map((r) => [r.space, r.own ? r.mode : null])) };
+      if (canSetCompany) body.companySpaces = Object.fromEntries(rows.map((r) => [r.space, r.companyDefault]));
+      await api('/api/notifications/prefs', { method: 'PUT', body }); toast.ok('공간별 알림 방식을 저장했습니다'); reload();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <section className="rounded-lg border bg-white p-4" data-testid="space-notify">
+      <h2 className="mb-1 text-sm font-semibold">공간별 알림 (영업·마케팅)</h2>
+      <p className="mb-2 text-xs text-ink-3">자동으로 생기는 영업·마케팅 알림은 <b>담당자(담당자 지정 규칙)</b>에게만 바로 갑니다. 승인 요청과 내가 한 일의 결과는 방식과 상관없이 받습니다. 담당이 정해지지 않은 건은 관리자 1명에게 하루 한 번 묶어서 1건.</p>
+      <div className="space-y-2">
+        {rows.map((r, i) => (
+          <div key={r.space} className="grid gap-1 rounded-card border border-line p-2 sm:grid-cols-[6rem_1fr] sm:items-start" data-testid={`space-notify-${r.space}`}>
+            <div className="text-sm font-medium">{r.label}</div>
+            <div className="space-y-1">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm" role="radiogroup" aria-label={`${r.label} 알림 방식`}>
+                {MODES.map((m) => <label key={m} className="flex items-center gap-1"><input type="radio" name={`sp-${r.space}`} checked={r.mode === m} onChange={() => setRows(rows.map((x, j) => (j === i ? { ...x, mode: m, own: true } : x)))} data-testid={`space-mode-${r.space}-${m}`} />{modeLabels[m]}</label>)}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-ink-3">
+                {r.own ? <button type="button" className="underline" onClick={() => setRows(rows.map((x, j) => (j === i ? { ...x, own: false, mode: x.companyDefault } : x)))} data-testid={`space-use-company-${r.space}`}>회사 기본값({modeLabels[r.companyDefault]})으로</button> : <span data-testid={`space-company-${r.space}`}>회사 기본값을 따르는 중</span>}
+                {canSetCompany && <label className="flex items-center gap-1">회사 기본값
+                  <select className={cx(inputCls, 'h-7 !w-auto py-0 text-[11px]')} value={r.companyDefault} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, companyDefault: e.target.value as SpaceRow['mode'], mode: x.own ? x.mode : (e.target.value as SpaceRow['mode']) } : x)))} aria-label={`${r.label} 회사 기본값`} data-testid={`space-company-select-${r.space}`}>
+                    {MODES.map((m) => <option key={m} value={m}>{modeLabels[m]}</option>)}
+                  </select></label>}
+              </div>
+            </div>
+          </div>))}
+      </div>
+      <Button className="mt-3" onClick={save} disabled={busy} data-testid="space-notify-save">저장</Button>
+    </section>
   );
 }
 

@@ -28,7 +28,7 @@ async function handle(req: NextRequest) {
   if (!who) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   try {
     const reason = req.nextUrl.searchParams.get('reason') ?? who;
-    return NextResponse.json(await runTick(reason));
+    return NextResponse.json(await runTick(reason, { forceDigest: req.nextUrl.searchParams.get('digest') === 'force' })); // digest=force 는 시험용(묶음 즉시 발송)
   } catch (e) {
     await logError('tick', e);
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

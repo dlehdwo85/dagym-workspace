@@ -3,6 +3,14 @@ import { handler, body, zTime } from '@/lib/api';
 import { db } from '@/lib/db';
 import { NOTIFICATION_TYPES } from '@/lib/types';
 import { QUIET_DEFAULT, defaultPush } from '@/lib/notifications';
+import { DEFAULT_MODE, SPACE_LABEL, SPACE_MODES, SPACE_MODE_LABEL, type NotifySpace, type SpaceMode } from '@/lib/spaceNotify';
+import { isAdmin } from '@/lib/access';
+import { forbidden } from '@/lib/errors';
+import { tenantOf } from '@/lib/types';
+import { audit } from '@/lib/log';
+
+const SPACES: NotifySpace[] = ['sales', 'marketing'];
+const zMode = z.enum(['mine', 'all', 'off']);
 
 export const GET = handler(async ({ user }) => {
   const sql = db();
@@ -10,8 +18,16 @@ export const GET = handler(async ({ user }) => {
   const [s] = await sql`select due_soon_hours, event_reminder_minutes, to_char(quiet_start,'HH24:MI') quiet_start, to_char(quiet_end,'HH24:MI') quiet_end, quiet_off,
     to_char(briefing_time,'HH24:MI') briefing_time, briefing_enabled, briefing_weekend, task_reminder_minutes, requester_due_alerts, alarm_events, alarm_tasks, alarm_important from user_settings where user_id = ${user.id}`;
   const subs = await sql`select id, kind, platform, created_at, last_success_at, disabled_at from push_subscriptions where user_id = ${user.id} order by created_at desc`;
+  // #104 ⑤ 공간별 알림 방식: 본인 설정 → 회사 기본값 → '담당인 것만'. 회사가 켠 공간만 보여 준다
+  const [sp] = await sql<{ spaces: string[]; notify_defaults: Record<string, string> | null; space_notify: Record<string, string> | null }[]>`select t.spaces, t.notify_defaults, s.space_notify from tenants t left join user_settings s on s.user_id = ${user.id} where t.id = ${tenantOf(user)}`;
+  const modeOf = (v: unknown): SpaceMode | null => (SPACE_MODES.includes(v as SpaceMode) ? (v as SpaceMode) : null);
+  const spaces = SPACES.filter((s) => (sp?.spaces ?? []).includes(s)).map((space) => {
+    const own = modeOf(sp?.space_notify?.[space]); const company = modeOf(sp?.notify_defaults?.[space]) ?? DEFAULT_MODE;
+    return { space, label: SPACE_LABEL[space], mode: own ?? company, own: own !== null, companyDefault: company };
+  });
   return {
-    types: Object.entries(NOTIFICATION_TYPES).map(([type, label]) => {
+    spaces, modeLabels: SPACE_MODE_LABEL, canSetCompany: isAdmin(user),
+    types: Object.entries(NOTIFICATION_TYPES).filter(([type]) => type !== 'server_error' || user.platformAdmin).map(([type, label]) => {
       const p = prefs.find((x) => x.type === type);
       return { type, label, inApp: p?.in_app ?? true, push: p?.push ?? defaultPush(type), pushDefault: defaultPush(type) };
     }),
@@ -30,8 +46,25 @@ export const PUT = handler(async ({ req, user }) => {
       briefingTime: zTime.optional(), briefingEnabled: z.boolean().optional(), briefingWeekend: z.boolean().optional(),
       taskReminderMinutes: z.number().int().min(0).max(10080).optional(), requesterDueAlerts: z.boolean().optional(), quietOff: z.boolean().optional(),
       alarmEvents: z.boolean().optional(), alarmTasks: z.boolean().optional(), alarmImportant: z.boolean().optional() }).optional(),
+    /** #104 ⑤ 공간별 방식(본인). null = 회사 기본값을 따름 */
+    spaces: z.object({ sales: zMode.nullable().optional(), marketing: zMode.nullable().optional() }).optional(),
+    /** #104 ⑤ 회사 기본값(관리자만) */
+    companySpaces: z.object({ sales: zMode.optional(), marketing: zMode.optional() }).optional(),
   }));
   const sql = db();
+  if (i.spaces) {
+    const cur = (await sql<{ space_notify: Record<string, string> | null }[]>`select space_notify from user_settings where user_id = ${user.id}`)[0]?.space_notify ?? {};
+    const next: Record<string, string> = { ...cur };
+    for (const s of SPACES) if (i.spaces[s] !== undefined) { if (i.spaces[s] === null) delete next[s]; else next[s] = i.spaces[s] as string; }
+    await sql`insert into user_settings (user_id, space_notify) values (${user.id}, ${sql.json(next as never)}) on conflict (user_id) do update set space_notify = excluded.space_notify, updated_at = now()`;
+  }
+  if (i.companySpaces) {
+    if (!isAdmin(user)) throw forbidden('회사 기본값은 관리자만 바꿉니다');
+    const patch: Record<string, string> = {};
+    for (const s of SPACES) if (i.companySpaces[s]) patch[s] = i.companySpaces[s] as string;
+    await sql`update tenants set notify_defaults = notify_defaults || ${sql.json(patch as never)} where id = ${tenantOf(user)}`;
+    await audit(sql, user.id, 'notify_defaults.set', 'tenant', null, patch).catch(() => {});
+  }
   for (const t of i.types ?? []) {
     if (!(t.type in NOTIFICATION_TYPES)) continue;
     await sql`insert into notification_prefs (user_id, type, in_app, push) values (${user.id}, ${t.type}, ${t.inApp}, ${t.push})

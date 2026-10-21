@@ -198,7 +198,7 @@ describe('V15 계정 관리·플랫폼 운영', () => {
 describe('V15 첫 주소(/) 비로그인 → 랜딩, 앱은 로그인', () => {
   test('웹 비로그인은 랜딩, 앱(WebView)은 로그인 화면, 로그인한 사람은 홈', async () => {
     const web = await fetch(BASE + '/', { redirect: 'manual', headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/141 Safari/537.36' } });
-    assert.equal(web.status, 200); assert.match(await web.text(), /업무·일정·알림을 한 곳에/);
+    assert.equal(web.status, 200); assert.match(await web.text(), /한 화면에서/); // 대표 10/20 16:45 소개 사이트 H1 "업무도, 영업도, 마케팅도 한 화면에서"
     for (const ua of ['Mozilla/5.0 (Linux; Android 15; SM-S921N Build/AP3A; wv) AppleWebKit/537.36 Chrome/141 Mobile Safari/537.36', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148']) {
       const app = await fetch(BASE + '/', { redirect: 'manual', headers: { 'user-agent': ua } });
       assert.equal(app.status, 307); assert.match(app.headers.get('location'), /\/login/);

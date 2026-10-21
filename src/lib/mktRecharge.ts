@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { db } from './db';
 import { isAdmin } from './access';
 import { forbidden } from './errors';
-import { notify } from './notifications';
 import { assertSpace } from './spaces';
 import { tenantOf, type SessionUser } from './types';
 
@@ -81,7 +80,7 @@ export async function rechargeCheck(tenant: string) {
           { title: '충전 방법', detail: `${RECHARGE_LINKS[r.provider]?.label ?? r.provider} › ${r.how}`, expected: '', cost: '' }],
         rationale: `잔액 ${won(r.balance)}(${r.source === 'api' ? '매체 API 조회' : '직접 입력'}, ${new Date(r.checked_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}) · 하루 평균 지출 ${won(r.pace)}. 충전이 확인되면(다음 동기화에서 잔액 상승) 이 카드는 자동 완료됩니다.` })}, 'ai', ${new Date().toISOString().slice(0, 7)})`;
     cards++;
-    await notify(sql, { userIds: await (await import('./mktAuto')).approvers(tenant), type: 'usage_alert', title, body: `${detail} 승인 뒤 충전 페이지로 이동할 수 있습니다.`, link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', dedupeKey: `mkt:recharge:${tenant}:${key}:${new Date().toISOString().slice(0, 10)}`, push: r.level === 'action' });
+    await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'usage_alert', title, body: `${detail} 승인 뒤 충전 페이지로 이동할 수 있습니다.`, link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', dedupeKey: `mkt:recharge:${tenant}:${key}:${new Date().toISOString().slice(0, 10)}`, push: r.level === 'action' });
   }
   return { cards, done, balances: rows.length };
 }

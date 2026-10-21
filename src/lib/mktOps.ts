@@ -4,7 +4,6 @@ import { db } from './db';
 import { isAdmin } from './access';
 import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
-import { notify } from './notifications';
 import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
 import { monthKst, numbersOf, ymd } from './mktGoals';
@@ -80,7 +79,7 @@ export async function propose(tenant: string, kinds: string[], actorId: string |
     await sql`insert into mkt_proposals (tenant, kind, title, summary, body, source, month, created_by) values (${tenant}, ${c.kind}, ${String(c.title).slice(0, 200)}, ${String(c.summary).slice(0, 1000)}, ${sql.json({ items: (c.items ?? []).slice(0, 6), rationale: c.rationale ?? '', numbers: m.last30 } as never)}, ${c.source ?? 'template'}, ${monthKst()}, ${actorId})`;
     created++;
   }
-  await notify(sql, { userIds: await (await import('./mktAuto')).approvers(tenant), type: 'review_requested', title: `AI 마케터 승인 요청 ${created}건: ${cards.map((c) => PROPOSAL_KIND[c.kind]).join('·')}`, body: cards[0]?.title ?? '', link: '/s/marketing/ops', entityType: 'mkt_proposal', dedupeKey: `mktops:${tenant}:${ymd(new Date())}` }).catch(() => {});
+  await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'review_requested', title: `AI 마케터 승인 요청 ${created}건: ${cards.map((c) => PROPOSAL_KIND[c.kind]).join('·')}`, body: cards[0]?.title ?? '', link: '/s/marketing/ops', entityType: 'mkt_proposal', dedupeKey: `mktops:${tenant}:${ymd(new Date())}` }).catch(() => {});
   return { created, skipped: kinds.filter((k) => !want.includes(k)) };
 }
 function templateCard(kind: string, m: Awaited<ReturnType<typeof material>>) {
@@ -104,7 +103,7 @@ export async function reviseProposal(tenant: string, p: any, note: string, actor
   if (!o?.title) return null;
   const [n] = await sql<{ id: string }[]>`insert into mkt_proposals (tenant, kind, title, summary, body, source, month, created_by, version, revised_from, thread_id, revision_note)
     values (${tenant}, ${p.kind}, ${String(o.title).slice(0, 200)}, ${String(o.summary).slice(0, 1000)}, ${sql.json({ items: (o.items ?? []).slice(0, 6), rationale: o.rationale ?? '', numbers: p.body?.numbers ?? null, rejected: note } as never)}, 'ai', ${p.month ?? monthKst()}, ${actorId}, ${version + 1}, ${p.id}, ${thread}, ${String(o.changes ?? '').slice(0, 600)}) returning id`;
-  await notify(sql, { userIds: await (await import('./mktAuto')).approvers(tenant), type: 'review_requested', title: `AI 마케터 고친 안 v${version + 1}: ${String(o.title).slice(0, 60)}`, body: String(o.changes ?? '').slice(0, 200), link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', entityId: n.id, dedupeKey: `mktops:rev:${n.id}`, push: true });
+  await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'review_requested', title: `AI 마케터 고친 안 v${version + 1}: ${String(o.title).slice(0, 60)}`, body: String(o.changes ?? '').slice(0, 200), link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', entityId: n.id, dedupeKey: `mktops:rev:${n.id}`, push: true });
   return { id: n.id, version: version + 1, changes: String(o.changes ?? '') };
 }
 export const proposalAction = z.object({ action: z.enum(['approve', 'reject', 'done']), note: z.string().trim().max(500).optional() });
@@ -253,7 +252,7 @@ export async function draftBudget(tenant: string, month: string, actorId: string
     values (${tenant}, ${month}, 'pending', ${sql.json(plan as never)}, ${tot}, ${rationale}, ${source}, ${actorId}, ${sql.json(brandPlan as never)}, ${totalSource}, ${version}, ${revisionNote}, ${revise?.note ?? null})
     on conflict (tenant, month) do update set plan = excluded.plan, total = excluded.total, rationale = excluded.rationale, source = excluded.source, status = 'pending', approved_by = null, approved_at = null, executed = null, brand_plan = excluded.brand_plan, total_source = excluded.total_source,
       version = excluded.version, revision_note = excluded.revision_note, reject_note = excluded.reject_note, updated_at = now() returning id`;
-  await notify(sql, { userIds: await (await import('./mktAuto')).approvers(tenant), type: 'review_requested', title: `${month.replace('-', '년 ')}월 광고 예산 계획${version > 1 ? ` v${version}(반려 반영)` : ''} — 승인해 주세요 (${won(tot)})`, body: (revisionNote ?? rationale).slice(0, 200), link: '/s/marketing/approvals?tab=budget', entityType: 'mkt_ad_budget', entityId: b.id, dedupeKey: `mktbudget:${tenant}:${month}:v${version}`, push: true });
+  await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'review_requested', title: `${month.replace('-', '년 ')}월 광고 예산 계획${version > 1 ? ` v${version}(반려 반영)` : ''} — 승인해 주세요 (${won(tot)})`, body: (revisionNote ?? rationale).slice(0, 200), link: '/s/marketing/approvals?tab=budget', entityType: 'mkt_ad_budget', entityId: b.id, dedupeKey: `mktbudget:${tenant}:${month}:v${version}`, push: true });
   return { id: b.id, plan, total: tot, rationale, source, brandPlan, totalSource, version, revisionNote };
 }
 export const budgetAction = z.discriminatedUnion('action', [
@@ -342,7 +341,7 @@ export async function budgetGuard(tenant: string, now = new Date()) {
     alerted[p.provider] = new Date().toISOString();
     const amount = Math.max(0, Math.round((projected - p.monthly) / 10000) * 10000) || Math.round(p.monthly * 0.3 / 10000) * 10000;
     alerts.push({ provider: p.provider, used: u, rate, amount });
-    await notify(sql, { userIds: await (await import('./mktAuto')).approvers(tenant), type: 'usage_alert', title: `충전 필요 — ${ch.label} 소진율 ${Math.round(rate * 100)}%`, body: `이달 예산 ${won(p.monthly)} 중 ${won(u)} 사용(${dayN}일). 예상 ${won(projected)} → 약 ${won(amount)} 충전 권장. 충전: ${ch.charge}`, link: '/s/marketing/ops', entityType: 'mkt_ad_budget', entityId: b.id, dedupeKey: `mktcharge:${b.id}:${p.provider}` }).catch(() => {});
+    await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'usage_alert', title: `충전 필요 — ${ch.label} 소진율 ${Math.round(rate * 100)}%`, body: `이달 예산 ${won(p.monthly)} 중 ${won(u)} 사용(${dayN}일). 예상 ${won(projected)} → 약 ${won(amount)} 충전 권장. 충전: ${ch.charge}`, link: '/s/marketing/ops', entityType: 'mkt_ad_budget', entityId: b.id, dedupeKey: `mktcharge:${b.id}:${p.provider}` }).catch(() => {});
   }
   if (alerts.length) await sql`update mkt_ad_budgets set alerted = ${sql.json(alerted as never)} where id = ${b.id}`;
   return { alerts };
@@ -478,7 +477,7 @@ export async function opsReview(tenant: string, now = new Date(), opts: { force?
       ${sql.json({ signal: sg.key, level: sg.level, items: [{ title: '제안 조치', detail: sg.action, expected: sg.level === 'action' ? '손실 막기' : '기회 확대', cost: '없음(대표 승인 뒤 담당 업무)' }], ...(sg.link ? { link: sg.link } : {}), rationale: `오늘 지표: 게시 ${m.posts}·클릭 ${m.clicks}·CPC ${m.cpc ? won(m.cpc) : '-'}·문의 ${m.inquiries}·가입 ${m.signups}·계약 ${m.contracts}${m.budgetRate !== null ? `·소진율 ${m.budgetRate}%` : ''}`, numbers: m } as never)}, 'template', ${day.slice(0, 7)}, null)`;
     cards++;
   }
-  if (cards) await notify(sql, { userIds: await (await import('./mktAuto')).approvers(tenant), type: 'review_requested', title: `AI 마케터 운영 신호 ${cards}건: ${signals.slice(0, 2).map((s) => s.title).join(' · ')}`, body: '승인하면 담당 업무로 만듭니다', link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', dedupeKey: `mktops:alert:${tenant}:${day}`, push: true });
+  if (cards) await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'review_requested', title: `AI 마케터 운영 신호 ${cards}건: ${signals.slice(0, 2).map((s) => s.title).join(' · ')}`, body: '승인하면 담당 업무로 만듭니다', link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', dedupeKey: `mktops:alert:${tenant}:${day}`, push: true });
   // 아침 브리핑(07시 이후 하루 1번): 어제 숫자 한 줄 + 상태
   const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false }).format(now)) % 24;
   let brief: string | null = null;
@@ -574,7 +573,7 @@ export async function weeklyProposal(tenant: string, actorId: string | null, opt
   const week = `${d7.slice(5)}~${td.slice(5)}`;
   const [n] = await sql<{ id: string }[]>`insert into mkt_proposals (tenant, kind, title, summary, body, source, month, created_by) values (${tenant}, 'weekly', ${`주간 운영 제안 (${week})`}, ${`지난 7일 광고비 ${won(Math.round(cost))} · 클릭 ${Math.round(clicks)}${cpc ? ` · CPC ${won(Math.round(cpc))}` : ''} · 게시 ${posts.n}건. 제안 ${items.length}건 — 승인하면 항목마다 담당 업무로 만듭니다.`},
     ${sql.json({ items: items.slice(0, 6), rationale: `캠페인 ${camps.length}개 · 지난주 광고비 ${won(Math.round(prev.cost))} · 클릭 ${Math.round(prev.clicks)}`, numbers: { cost, clicks, cpc, prevCost: prev.cost, posts: posts.n }, week } as never)}, 'template', ${monthKst()}, ${actorId}) returning id`;
-  await notify(sql, { userIds: await (await import('./mktAuto')).approvers(tenant), type: 'review_requested', title: `AI 마케터 주간 운영 제안 ${items.length}건 (${week})`, body: items[0]?.title ?? '', link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', entityId: n.id, dedupeKey: `mktops:weekly:${tenant}:${td}` }).catch(() => {});
+  await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'review_requested', title: `AI 마케터 주간 운영 제안 ${items.length}건 (${week})`, body: items[0]?.title ?? '', link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', entityId: n.id, dedupeKey: `mktops:weekly:${tenant}:${td}` }).catch(() => {});
   return { created: 1, id: n.id, items: items.length };
 }
 export async function opsTickAll() {

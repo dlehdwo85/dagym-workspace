@@ -3,7 +3,6 @@ import { db } from './db';
 import { isAdmin } from './access';
 import { assertSpace } from './spaces';
 import { forbidden } from './errors';
-import { notify } from './notifications';
 import { tenantOf, type SessionUser } from './types';
 import { AD_PROVIDERS, adsOverview } from './marketingAds';
 import { aiJson } from './mktOps';
@@ -83,6 +82,6 @@ export async function adsAnalysisCard(u: SessionUser, month: string) {
       ${a.source === 'ai' ? 'ai' : 'template'}, ${month}, ${u.id}) returning id`;
   await sql`update app_settings set value = value || ${sql.json({ cardId: row.id } as never)} where key = ${`mkt_ads_analysis:${t}:${month}`}`;
   const { approvers } = await import('./mktAuto');
-  await notify(sql, { userIds: (await approvers(t)).filter((id) => id !== u.id), type: 'review_requested', title: `${month} 광고 성과 분석 — 승인 요청`, body: a.proposals.map((p) => p.title).join(' · '), link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', entityId: row.id, dedupeKey: `mktads:card:${t}:${month}` }).catch(() => {});
+  await (await import('./spaceNotify')).notifySpace(sql, { tenant: t, space: 'marketing', approval: true, actorId: u.id, type: 'review_requested', title: `${month} 광고 성과 분석 — 승인 요청`, body: a.proposals.map((p) => p.title).join(' · '), link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', entityId: row.id, dedupeKey: `mktads:card:${t}:${month}` }).catch(() => {});
   return { id: row.id, created: true };
 }

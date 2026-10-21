@@ -51,6 +51,9 @@ const ok = (s: ImageStats | null): s is Exclude<ImageStats, { error: string }> =
 const sdOf = (xs: number[]) => { const m = xs.reduce((a, b) => a + b, 0) / xs.length; return Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / xs.length); };
 /** 편차 기준(한 단위 = 이 정도면 눈에 띈다): 밝기 40 · 채도 0.15 · 색온도 40 */
 const UNIT = { brightness: 40, saturation: 0.15, warmth: 40 };
+/** 로컬 10/21 19:30 기준 조정: 두 계열(고정 세트·일반 피드)이 섞인 실제 피드에서 매번 신호가 뜨지 않게 — 튀는 장 거리 1.6→2.4, 신호 60점→45점 미만 */
+export const OUTLIER_DIST = 2.4;
+export const SIGNAL_SCORE = 45;
 
 /** 브랜드별 최근 n장 게시 이미지 톤 비교 — 일관성 점수(100 = 고름)·튀는 장 */
 export async function feedConsistency(tenant: string, limit = 9): Promise<{ analyzable: boolean; brands: FeedBrand[] }> {
@@ -64,7 +67,9 @@ export async function feedConsistency(tenant: string, limit = 9): Promise<{ anal
     order by c.published_at desc nulls last, c.created_at desc limit 300`;
   type Row = (typeof rows)[number];
   const byBrand = new Map<string, Row[]>();
-  for (const r of rows) { if (!r.media) continue; const k = r.brand_id ?? ''; const arr = byBrand.get(k) ?? []; if (arr.length < limit) { arr.push(r); byBrand.set(k, arr); } }
+  // 로컬 10/21 19:30: 같은 제목의 중복 이미지(예: '[기능] 회원관리' 2장)는 1장만 비교
+  const seenTitle = new Set<string>();
+  for (const r of rows) { if (!r.media) continue; const k = r.brand_id ?? ''; const tk = `${k}:${r.title.trim()}`; if (seenTitle.has(tk)) continue; seenTitle.add(tk); const arr = byBrand.get(k) ?? []; if (arr.length < limit) { arr.push(r); byBrand.set(k, arr); } }
   const stats = analyzable ? await statsFor(sql, [...byBrand.values()].flat().map((r) => r.media!)) : new Map<string, ImageStats | null>();
   const brands: FeedBrand[] = [];
   for (const [k, list] of byBrand) {
@@ -77,7 +82,7 @@ export async function feedConsistency(tenant: string, limit = 9): Promise<{ anal
       for (const it of items) {
         if (!ok(it.stats)) continue;
         it.dist = r3(Math.sqrt(((it.stats.brightness - m.brightness) / UNIT.brightness) ** 2 + ((it.stats.saturation - m.saturation) / UNIT.saturation) ** 2 + ((it.stats.warmth - m.warmth) / UNIT.warmth) ** 2));
-        it.outlier = it.dist >= 1.6;
+        it.outlier = it.dist >= OUTLIER_DIST;
       }
       score = Math.max(0, 100 - Math.round((d.brightness / UNIT.brightness) * 35 + (d.saturation / UNIT.saturation) * 35 + (d.warmth / UNIT.warmth) * 30));
       mean = { brightness: r0(m.brightness), saturation: r3(m.saturation), warmth: r0(m.warmth) }; sd = { brightness: r0(d.brightness), saturation: r3(d.saturation), warmth: r0(d.warmth) };
@@ -90,14 +95,14 @@ export async function feedConsistency(tenant: string, limit = 9): Promise<{ anal
   return { analyzable, brands };
 }
 
-/** 운영 검토 신호: 튀는 장이 있거나 일관성 60점 미만(4장 이상) → 브랜드마다 한 신호 */
+/** 운영 검토 신호: 튀는 장이 있거나 일관성 45점 미만(4장 이상) → 브랜드마다 한 신호 */
 export async function feedSignals(tenant: string): Promise<{ key: string; level: 'warn'; title: string; detail: string; action: string; link: string }[]> {
   const { brands } = await feedConsistency(tenant);
   const out: { key: string; level: 'warn'; title: string; detail: string; action: string; link: string }[] = [];
   for (const b of brands) {
     if (b.score === null || !b.mean || !b.sd) continue;
     const outs = b.items.filter((it) => it.outlier);
-    const bad = outs.length > 0 || (b.n >= 4 && b.score < 60);
+    const bad = outs.length > 0 || (b.n >= 4 && b.score < SIGNAL_SCORE);
     if (!bad) continue;
     const pct = (x: number) => `${Math.round(x * 100)}%`;
     out.push({ key: `feed_tone:${b.brandId ?? 'none'}`, level: 'warn', title: `피드 톤 불일치 — ${b.name} 최근 ${b.n}장 (일관성 ${b.score}점)`,

@@ -16,6 +16,8 @@ export interface NotifyInput {
   push?: boolean;
   /** 알림에서 바로 처리용(kind: review|approval|extension|comment|assigned|event, extensionId·commentId 등) */
   meta?: Record<string, unknown>;
+  /** #104 어느 공간의 알림인지(목록 묶기·공간별 필터). 영업·마케팅 담당자 라우팅은 spaceNotify.notifySpace() */
+  space?: 'work' | 'sales' | 'marketing' | null;
 }
 
 /**
@@ -47,9 +49,9 @@ export async function notify(sql: Sql, n: NotifyInput): Promise<string[]> {
     const active = await sql`select 1 from users where id = ${userId} and status = 'active'`;
     if (active.length === 0) continue;
     const rows = await sql<{ id: string }[]>`
-      insert into notifications (user_id, type, title, body, link, entity_type, entity_id, actor_id, dedupe_key, read_at, meta)
+      insert into notifications (user_id, type, title, body, link, entity_type, entity_id, actor_id, dedupe_key, read_at, meta, space)
       values (${userId}, ${n.type}, ${n.title}, ${n.body ?? ''}, ${n.link}, ${n.entityType ?? null}, ${n.entityId ?? null},
-              ${n.actorId ?? null}, ${n.dedupeKey}, ${inApp ? null : sql`now()`}, ${sql.json((n.meta ?? {}) as never)})
+              ${n.actorId ?? null}, ${n.dedupeKey}, ${inApp ? null : sql`now()`}, ${sql.json((n.meta ?? {}) as never)}, ${n.space ?? null})
       on conflict (user_id, dedupe_key) do nothing
       returning id`;
     if (!rows[0]) continue;

@@ -167,7 +167,7 @@ async function insertInquiry(sql: ReturnType<typeof db>, a: { site: Site; type: 
         await tx`insert into task_checklist_items (task_id, text, sort, assignee_id) values (${t.id}, ${text}, ${n}, ${n === 0 ? assignee : null})`; n++;
       }
       await activity(tx, 'task', t.id, a.actorId, 'created', { title, source: a.channel === 'phone' ? 'phone_inquiry' : 'website_inquiry', site, leadId: i.lead_id });
-      await notify(tx, { userIds: each ? [assignee] : people, type: 'task_assigned', title: `새 ${a.channel === 'phone' ? '전화' : '웹사이트'} 문의 · ${org}`.slice(0, 120),
+      await notify(tx, { userIds: each ? [assignee] : people, type: 'task_assigned', space: 'sales', title: `새 ${a.channel === 'phone' ? '전화' : '웹사이트'} 문의 · ${org}`.slice(0, 120),
         body: `${SITES[site].label} · ${type}${i.region ? ` · ${i.region}` : ''} · 마감 ${due} 18:00${!each && people.length > 1 ? ` · 주 담당 외 협업 ${people.length - 1}명` : ''}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
         actorId: a.actorId, dedupeKey: `inquiry:${t.id}` });
       const { runAutomations } = await import('./automation');

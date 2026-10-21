@@ -64,5 +64,7 @@ export const NOTIFICATION_TYPES = {
   account_request: '직원 계정 삭제 요청',
   library_organized: '자료실 자동 정리 결과(올린 파일이 간 폴더)',
   announcement: '공지(새 공지·다시 알림)',
+  digest: '영업·마케팅 묶음 알림(담당 아닌 것 1시간마다 1건 · 담당 미지정 하루 1건)',
+  server_error: '서버 오류(플랫폼 운영자만)',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

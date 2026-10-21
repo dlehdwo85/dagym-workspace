@@ -6,7 +6,6 @@ import { assertSpace } from './spaces';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { decrypt } from './crypto';
 import { audit } from './log';
-import { notify } from './notifications';
 import { tenantOf, type SessionUser } from './types';
 
 /**
@@ -338,8 +337,7 @@ export async function adCapGuard() {
     }
     if (c.stopped_month !== month && active.length) {
       await sql`update mkt_ad_caps set stopped_month = ${month} where tenant = ${c.tenant}`;
-      const admins = await (await import('./mktAuto')).approvers(c.tenant);
-      await notify(sql, { userIds: admins, type: 'usage_alert', title: `월 광고비 상한 도달 — 워크인 광고 ${active.length}개 중지`, body: `이번 달 ${won(spend)} / 상한 ${won(Number(c.monthly_cap))}`, link: '/s/marketing/ad-ops', dedupeKey: `adcap:${c.tenant}:${month}` });
+      await (await import('./spaceNotify')).notifySpace(sql, { tenant: c.tenant, space: 'marketing', approval: true, type: 'usage_alert', title: `월 광고비 상한 도달 — 워크인 광고 ${active.length}개 중지`, body: `이번 달 ${won(spend)} / 상한 ${won(Number(c.monthly_cap))}`, link: '/s/marketing/ad-ops', dedupeKey: `adcap:${c.tenant}:${month}` });
     }
   }
   return { stopped };
