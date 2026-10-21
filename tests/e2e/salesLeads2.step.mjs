@@ -45,7 +45,7 @@ export async function salesLeads2({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.getByTestId('leads-chip-week').click();
   await owner.getByTestId('leads-sort').selectOption('name');
   await owner.getByTestId('leads-view-compact').click(); await owner.getByTestId('leads-compact').waitFor();
-  await owner.getByTestId('leads-view-stages').click(); await owner.getByTestId('leads-stages').waitFor();
+  await owner.getByTestId('leads-view-stages').click(); await owner.getByTestId('sales-pipeline').waitFor(); // 대표 10/21 12:00 ③: 단계별 = 예전 파이프라인(칸반)
   await owner.screenshot({ path: `${SHOTS}/161-leads-stages.png`, fullPage: true });
   await owner.getByTestId('leads-view-table').click();
   const [dl] = await Promise.all([owner.waitForEvent('download'), owner.getByTestId('leads-csv-export').click()]);

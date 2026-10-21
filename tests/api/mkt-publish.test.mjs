@@ -6,7 +6,7 @@ import http from 'node:http';
 import { BASE, bootstrap, resetDb, startServer, testDb, tick } from '../helpers.mjs';
 
 const PORT = 3227;
-let srv, ctx, sql, fake, calls = [], seq = 0, failPublish = false, hangPublish = false, recent = [];
+let srv, ctx, sql, fake, calls = [], seq = 0, failPublish = false, hangPublish = false, recent = [], deletedPosts = new Set();
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 before(async () => {
   fake = http.createServer(async (req, res) => {
@@ -24,12 +24,12 @@ before(async () => {
     if (req.method === 'GET' && /^\/graph\/ctn-\d+$/.test(p)) return send(200, { status_code: 'FINISHED' });
     if (req.method === 'POST' && p === '/graph/ig-1/media_publish') { if (failPublish) return send(400, { error: { message: 'The media is not ready', code: 9007 } }); if (hangPublish) return send(500, { error: { message: 'An unknown error occurred', code: 1 } }); const id = `igpost-${++seq}`; recent.push({ id, caption: calls.find((c) => c.path === '/graph/ig-1/media' && c.q.caption)?.q.caption ?? '', permalink: `https://www.instagram.com/p/${id}/` }); return send(200, { id }); }
     if (req.method === 'GET' && p === '/graph/ig-1/media') return send(200, { data: recent });
-    if (req.method === 'GET' && /^\/graph\/igpost-\d+$/.test(p)) return send(200, { permalink: `https://www.instagram.com/p/${p.split('/').pop()}/` });
+    if (req.method === 'GET' && /^\/graph\/igpost-\d+$/.test(p)) { if (deletedPosts.has(p.split('/').pop())) return send(400, { error: { message: `Unsupported get request. Object with ID '${p.split('/').pop()}' does not exist, cannot be loaded due to missing permissions, or does not support this operation`, type: 'GraphMethodException', code: 100, error_subcode: 33 } }); return send(200, { id: p.split('/').pop(), permalink: `https://www.instagram.com/p/${p.split('/').pop()}/` }); }
     // 페이스북 페이지
     if (req.method === 'POST' && p === '/graph/page-1/photos') return send(200, { id: `ph-${++seq}`, post_id: `page-1_${seq}` });
     if (req.method === 'POST' && p === '/graph/page-1/feed') return send(200, { id: `page-1_${++seq}` });
     if (req.method === 'POST' && p === '/graph/page-1/videos') return send(200, { id: `page-1_${++seq}` }); // 로컬 02:10: 릴스 → 페북 영상(+thumb)
-    if (req.method === 'GET' && /^\/graph\/page-1_\d+$/.test(p)) return send(200, { permalink_url: `https://www.facebook.com/${p.split('/').pop()}` });
+    if (req.method === 'GET' && /^\/graph\/page-1_\d+$/.test(p)) { if (deletedPosts.has(p.split('/').pop())) return send(400, { error: { message: 'Unsupported get request. Object does not exist', code: 100, error_subcode: 33 } }); return send(200, { id: p.split('/').pop(), permalink_url: `https://www.facebook.com/${p.split('/').pop()}` }); }
     // 스레드 OAuth + 게시
     if (p === '/threads/oauth/access_token') return send(200, { access_token: 'th-short', user_id: 'th-9' });
     if (p === '/threads/access_token') return send(200, { access_token: 'th-long', expires_in: 5184000 });
@@ -37,7 +37,7 @@ before(async () => {
     if (req.method === 'POST' && p === '/threads/th-9/threads') return send(200, { id: `thc-${++seq}` });
     if (req.method === 'GET' && /^\/threads\/thc-\d+$/.test(p)) return send(200, { status: 'FINISHED' });
     if (req.method === 'POST' && p === '/threads/th-9/threads_publish') return send(200, { id: `thpost-${++seq}` });
-    if (req.method === 'GET' && /^\/threads\/thpost-\d+$/.test(p)) return send(200, { permalink: `https://www.threads.net/@dagym_threads/post/${p.split('/').pop()}` });
+    if (req.method === 'GET' && /^\/threads\/thpost-\d+$/.test(p)) { if (deletedPosts.has(p.split('/').pop())) return send(400, { error: { message: 'Unsupported get request. Object does not exist', code: 100, error_subcode: 33 } }); return send(200, { id: p.split('/').pop(), permalink: `https://www.threads.net/@dagym_threads/post/${p.split('/').pop()}` }); }
     // 구글 OAuth + 유튜브
     if (p === '/goauth/token') { const b = Object.fromEntries(new URLSearchParams(body)); return send(200, { access_token: `yt-access-${++seq}`, refresh_token: b.grant_type === 'authorization_code' ? 'yt-refresh' : undefined, expires_in: 3600, scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly' }); }
     if (p === '/yt/channels') return send(200, { items: [{ id: 'UC-dagym', snippet: { title: '다짐 TV' } }] });
@@ -251,4 +251,32 @@ test('자동 게시(회사 설정): 승인된 글이 예정 시각이 되면 tic
   assert.equal((await sql`select status from mkt_publish_jobs where content_id = ${fut}`)[0].status, 'queued', '시각 전에는 실행 안 함');
   // 다른 회사 404
   assert.equal((await ctx.owner.req('POST', '/api/marketing/contents/00000000-0000-0000-0000-000000000001/publish/server', {})).status, 404);
+});
+
+// 로컬 10/21 11:45: 게시 뒤 매체에서 지워진 글 감지(구조 시험: 가짜 Graph 가 code 100/subcode 33) → 작업 '게시 삭제됨'·콘텐츠 published_deleted_at·알림 1회 → [서버로 게시] 다시 가능 → 새 글로 복구
+test('게시 삭제 감지: tick 이 인스타 게시물 조회 → 없으면 작업 deleted·콘텐츠 게시 삭제됨·알림, 다시 게시하면 복구', async () => {
+  const id = await approved({ mediaIds: [P.img], title: '삭제 감지 글' });
+  const r = await ctx.owner.ok('POST', `/api/marketing/contents/${id}/publish/server`, {});
+  assert.ok(r.ran.length >= 1 && r.ran.every((x) => x.status === 'done'), JSON.stringify(r.ran));
+  const jobs = await sql`select id, external_post_id from mkt_publish_jobs where content_id = ${id} and status = 'done'`;
+  const n = jobs.length;
+  await tick(); // 바로 점검(checked_at 없음) — 살아 있음
+  assert.deepEqual((await sql`select deleted_at, checked_at from mkt_publish_jobs where content_id = ${id}`).map((j) => [j.deleted_at, !!j.checked_at]), Array(n).fill([null, true]), '점검 시각 기록·삭제 아님');
+  for (const j of jobs) deletedPosts.add(j.external_post_id);
+  await sql`update mkt_publish_jobs set checked_at = now() - interval '7 hours' where content_id = ${id}`;
+  await tick();
+  const d = await ctx.owner.ok('GET', `/api/marketing/contents/${id}`);
+  assert.ok(d.content.published_deleted_at, '콘텐츠 게시 삭제됨'); assert.equal(d.content.status, 'published');
+  assert.ok(d.publishJobs.every((j) => j.deleted_at), '작업 deleted_at'); assert.equal(d.publish.canServer, true);
+  const cnt = async () => (await sql`select count(*)::int n from notifications where type = 'sync_error' and title like '게시물 삭제됨%' and user_id = ${ctx.ownerId}`)[0].n;
+  assert.equal(await cnt(), n, '작업마다 알림 1건');
+  await sql`update mkt_publish_jobs set checked_at = now() - interval '7 hours' where content_id = ${id}`; await tick();
+  assert.equal(await cnt(), n, '중복 알림 없음·지워진 작업은 다시 점검 안 함');
+  // 다시 게시 → 새 글 id·주소, 삭제 표시 해제
+  const r2 = await ctx.owner.ok('POST', `/api/marketing/contents/${id}/publish/server`, {});
+  assert.ok(r2.ran.every((x) => x.status === 'done'), JSON.stringify(r2.ran));
+  const d2 = await ctx.owner.ok('GET', `/api/marketing/contents/${id}`);
+  assert.equal(d2.content.published_deleted_at, null); assert.ok(d2.publishJobs.every((j) => !j.deleted_at)); assert.match(d2.content.published_url, /igpost-|facebook/);
+  const after = await sql`select id, external_post_id from mkt_publish_jobs where content_id = ${id} and status = 'done'`;
+  assert.ok(after.every((j) => !deletedPosts.has(j.external_post_id)), '새 게시물 id');
 });

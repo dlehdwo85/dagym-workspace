@@ -3,6 +3,7 @@ import { db } from '../db';
 import { assertSpace } from '../spaces';
 import { badRequest, notFound } from '../errors';
 import { tenantOf, type SessionUser } from '../types';
+import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -61,13 +62,13 @@ const attachmentsOf = (r: any) => { const a = pick(r, 'attachment_urls', 'attach
 const scaleOf = (r: any) => { const v = pick(r, 'facility_scale', 'scale', 'size', 'area'); if (v === null || v === undefined || v === '') return null; const u = pick(r, 'facility_scale_unit', 'scale_unit'); return u ? `${v}${u}` : v; };
 /** 입주·준공 뒤 지난 날수(KST 오늘 기준, 미래면 null) */
 const daysSince = (d: string | null) => { if (!d) return null; const n = Math.floor((Date.parse(today()) - Date.parse(d)) / 864e5); return Number.isFinite(n) && n >= 0 ? n : null; };
-const notice = (r: any) => ({ id: r.__id, title: pick(r, 'title', 'notice_title', 'bid_name', 'name') ?? '(제목 없음)', agency: pick(r, 'issuer', 'agency', 'org_name', 'demand_agency', 'organization', 'buyer'),
+const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); return ({ id: r.__id, title: pick(r, 'title', 'notice_title', 'bid_name', 'name') ?? '(제목 없음)', agency: pick(r, 'issuer', 'agency', 'org_name', 'demand_agency', 'organization', 'buyer'),
   region: pick(r, 'region'), posted: firstSeen(r), noticeDate: day(pick(r, 'posted_date', 'posted_at', 'notice_date', 'published_at', 'bid_notice_date')), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'),
   close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')), source: pick(r, 'source_type', 'source', 'source_code'), url: pick(r, 'source_url', 'url', 'detail_url', 'link'),
   attachments: attachmentsOf(r),
   fit: pick(r, 'fit_score'), status: pick(r, 'current_status', 'status'), amount: pick(r, 'amount', 'budget', 'estimated_price', 'base_amount', 'presumed_price'), related: r.related === true || r.related === 'true',
   // 영업관리 입찰 카드 칸(SALES_SCREEN_INVENTORY 2-5): 사업·분류·출처·단지·세대·업종·낙찰·키워드·전화·DB 등록·오늘 등록
-  business: businessOf(r), category: pick(r, 'classification', 'category_label', 'lead_class'), sourceLabel: SOURCE_LABEL[String(pick(r, 'source_type', 'source', 'source_code') ?? '').toLowerCase()] ?? pick(r, 'source_type', 'source', 'source_code'),
+  business: bizKey(m), businesses: m.map((c) => ({ key: c.key, name: c.name, color: c.color })), category: pick(r, 'classification', 'category_label', 'lead_class'), sourceLabel: SOURCE_LABEL[String(pick(r, 'source_type', 'source', 'source_code') ?? '').toLowerCase()] ?? pick(r, 'source_type', 'source', 'source_code'),
   complex: pick(r, 'complex_name', 'facility_name', 'apartment_name'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), industry: pick(r, 'industry', 'business_type', 'work_type', 'notice_type', 'bid_category'),
   winner: pick(r, 'winner_name', 'award_company', 'successful_bidder'), awardAmount: pick(r, 'winner_amount', 'award_amount', 'winning_amount', 'contract_amount'), awardDate: day(pick(r, 'award_date', 'opened_at')),
   keywords: (() => { const k = pick(r, 'matched_keywords', 'keywords', 'keyword_hits'); return Array.isArray(k) ? k.join(', ') : k; })(), phone: pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone'),
@@ -79,7 +80,7 @@ const notice = (r: any) => ({ id: r.__id, title: pick(r, 'title', 'notice_title'
   estimated: pick(r, 'estimated_amount', 'estimated_price', 'presumed_price', 'base_amount'), contractMethod: pick(r, 'contract_method', 'award_method', 'bid_system', 'contract_type'), contractPeriod: pick(r, 'contract_period', 'contract_term', 'service_period'),
   address: pick(r, 'office_address', 'address'), fax: pick(r, 'office_fax', 'fax'), salesPoint: pick(r, 'sales_point'), qualificationGap: pick(r, 'qualification_gap'),
   detail: { tasks: pick(r, 'main_tasks', 'scope_of_work', 'tasks'), qualification: pick(r, 'qualification', 'participation_requirements', 'bid_qualification'), performance: pick(r, 'performance_requirements', 'track_record'),
-    regionLimit: pick(r, 'region_restriction', 'region_limit'), license: pick(r, 'license_requirements', 'license'), joint: pick(r, 'joint_bid', 'subcontract', 'consortium'), briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting'), presentation: pick(r, 'proposal_presentation', 'presentation') } });
+    regionLimit: pick(r, 'region_restriction', 'region_limit'), license: pick(r, 'license_requirements', 'license'), joint: pick(r, 'joint_bid', 'subcontract', 'consortium'), briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting'), presentation: pick(r, 'proposal_presentation', 'presentation') } }); };
 // S1-3: 원본 source_type 9값(kapt_bid·g2b_bid·nuri_bid·g2b_prespec·lh_bid·lh_prespec·d2b_bid·onbid_lease·vendor_recruit) + 예전 짧은 코드
 const SOURCE_LABEL: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집',
   kapt: 'K-apt', 'k-apt': 'K-apt', g2b: '나라장터', nara: '나라장터', g2b_pre: '나라장터 사전규격', nuri: '누리장터', lh: 'LH', lh_pre: 'LH 사전규격', defense: '국방', d2b: '국방', onbid: '온비드 임대', vendor: '협력사 모집' };
@@ -105,19 +106,14 @@ export function isOpenBid(n: { related?: boolean; status?: unknown; close?: stri
   if (work && SKIP_WORK.test(String(work))) return false;
   return true;
 }
-/** 사업 배지: 다짐(보라)·하이링크(파랑)·둘 다(진파랑) — 원본 칸(business_line·related_business·target_business 등)에서 */
-function businessOf(r: any) {
-  const v = JSON.stringify([pick(r, 'fit_business', 'business', 'business_line', 'related_business', 'target_business', 'brand', 'business_categories')]).toLowerCase(); // S1-3: 원본 칸 fit_business
-  const dg = /dagym|다짐|both|all/.test(v), hl = /hilink|hi-link|하이링크|both|all/.test(v);
-  return dg && hl ? 'both' : dg ? 'dagym' : hl ? 'hilink' : null;
-}
 
-export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string }) {
+export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string; biz?: string }) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
   const [applied] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
   const { writesOpen } = await import('./cutover');
   const formal = await writesOpen(t);
+  const cats = await listBizCats(t); // 대표 10/21 12:00 영업 재편 4): 회사 관심 사업(카테고리) — 공고 사업 배지·탭 근거
   // 대표 검수 10/20 ②: 앱 상세는 한국어 칸만, 원본 전체는 관리자만 접힘 안에 — 모든 화면 공통
   const meta = { readOnly: !formal, syncedAt: applied?.value?.tenant === t ? applied.value.at : null, imported: applied?.value?.tenant === t, canAssign: ['owner', 'admin'].includes(u.role) };
   const leadRows = () => (formal ? formalLeads(t) : rows(t, 'leads'));
@@ -148,7 +144,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       const ids = new Set(W.map((w) => String(pick(w, 'notice_id', 'procurement_notice_id') ?? '')));
       if (ids.size) for (const r of await rows('global', 'procurement_notices', 20000)) {
         if (!ids.has(String(r.id ?? r.__id))) continue;
-        const n = notice(r);
+        const n = notice(r, cats);
         if (!n.close || n.close < from || n.close > to) continue;
         items.push({ date: n.close, time: String(n.deadline ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null, title: `입찰 마감 · ${String(n.complex ? `${n.complex} ` : '')}${n.title}`.slice(0, 80), kind: 'bid', owner: null, href: '/s/sales/bids?tab=working' });
       }
@@ -160,7 +156,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await prog('opportunity_work'); // S2-5: 전환 뒤에는 정식 진행 기록 표(원본 행 모양)
     const NR = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true');
-    const N = NR.map(notice);
+    const N = NR.map((r) => notice(r, cats));
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
     const live = L.filter((l) => !CLOSED.has(String(l.status))); // 종결(계약완료·보류·실패) 제외
     const due = live.filter((l) => l.next && l.next >= today() && l.next <= plus(7)).sort((a, b) => String(a.next).localeCompare(String(b.next)));
@@ -173,7 +169,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 대표 10/20 S2-5 홈 '오늘 할 일' 7묶음(영업관리 2-2): ① 입찰·신규단지 후속(next_date ≤ 오늘) ② 준공시설 연락 ③ 협력사 할 일 ④ 지난 영업 업무(자동 업무 포함) ⑤ 지금 영업 상위 5(작업 중 입찰 마감 임박순) ⑥ 리드 연락(지남·오늘) ⑦ 입찰 오늘·내일 마감(즉시 검토·검토중·연락중)
     const td = today(), tm = plus(1);
     const notDone = (st: unknown) => !/완료|미참여|대상아님|대상 아님|전환|done|closed/i.test(String(st ?? ''));
-    const byNoticeId = new Map(NR.map((r) => [String(r.id ?? r.__id), notice(r)]));
+    const byNoticeId = new Map(NR.map((r) => [String(r.id ?? r.__id), notice(r, cats)]));
     const buildings = new Map((await rows('global', 'building_sales_pipeline', 20000)).map((r) => [String(r.id ?? r.__id), pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)']));
     const nextOf = (w: any) => day(pick(w, 'next_date', 'next_action_date'));
     const followUp = W.filter((w) => notDone(pick(w, 'status')) && nextOf(w) && nextOf(w)! <= td).map((w) => {
@@ -193,10 +189,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const pastTasks = await sql<{ id: string; title: string; due_date: string | null; status: string; assignee: string | null; sales_ref: any }[]>`select t.id, t.title, t.due_date::text, t.status, au.name as assignee, t.sales_ref from tasks t join users cu on cu.id = t.created_by left join users au on au.id = t.assignee_id
       where cu.tenant = ${t} and t.deleted_at is null and t.space = 'sales' and t.status <> 'done' and t.due_date is not null and t.due_date < ${td}::date order by t.due_date limit 30`;
     const nameOfNotice = (n: ReturnType<typeof notice>) => `${n.complex ? n.complex + ' ' : ''}${n.title}`;
-    const nowSales = NR.filter((r) => { const w = workOf.get(String(r.id ?? r.__id)); return w && /검토중|연락중|즉시/.test(String(w)) && isOpenBid(notice(r), w, td); }).map(notice)
+    const nowSales = NR.filter((r) => { const w = workOf.get(String(r.id ?? r.__id)); return w && /검토중|연락중|즉시/.test(String(w)) && isOpenBid(notice(r), w, td); }).map((r) => notice(r, cats))
       .sort((a, b) => String(a.deadline ?? a.close ?? '9999').localeCompare(String(b.deadline ?? b.close ?? '9999'))).slice(0, 5)
       .map((n) => ({ id: n.id, kind: 'bid', name: nameOfNotice(n), status: workOf.get(String(n.id)) ?? null, next: n.close, memo: null, href: '/s/sales/bids?tab=working' }));
-    const closingSoon = NR.map(notice).filter((n) => { const w = workOf.get(String(n.id)); return (n.close === td || n.close === tm) && isOpenBid(n, w, td) && (!w || /미검토|검토중|연락중|즉시/.test(String(w))); })
+    const closingSoon = NR.map((r) => notice(r, cats)).filter((n) => { const w = workOf.get(String(n.id)); return (n.close === td || n.close === tm) && isOpenBid(n, w, td) && (!w || /미검토|검토중|연락중|즉시/.test(String(w))); })
       .sort((a, b) => String(a.deadline ?? '').localeCompare(String(b.deadline ?? '')))
       .map((n) => ({ id: n.id, kind: 'bid', name: nameOfNotice(n), status: n.close === td ? '오늘 마감' : '내일 마감', next: n.close, memo: String(n.deadline ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null, href: '/s/sales/bids?tab=closing' }));
     const todo = { followUp, facilities, vendors, pastTasks, nowSales, leads: [...overdue, ...live.filter((l) => l.next === td)].map((l) => ({ id: l.id, kind: 'lead', name: l.name, status: l.status, next: l.next, memo: null, href: `/s/sales/leads?id=${encodeURIComponent(String(l.id))}` })), closingSoon };
@@ -315,13 +311,14 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const byNotice = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), w]));
     let N = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true' || byNotice.has(String(r.id ?? r.__id)));
     const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id);
-      return { ...notice(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
+      return { ...notice(r, cats), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본)
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, raw: r }; })
       .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
-        && (tab !== 'today' || n.posted === today()) && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit))
+        && (tab !== 'today' || n.posted === today()) && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit)
+        && (!q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz))))
       .sort((a, b) => tab === 'open' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
-    return { ...meta, tab, total: N.length, items };
+    return { ...meta, tab, total: N.length, items, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings';

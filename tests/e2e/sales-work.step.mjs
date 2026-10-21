@@ -6,6 +6,9 @@ export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
   const id = 'E2E-WORK-N1';
   await sql`delete from sales_src_rows where src_id = ${id}`;
   await sql`insert into sales_src_rows (scope, tbl, src_id, row) values ('global', 'procurement_notices', ${id}, ${sql.json({ id, title: 'E2E 진행 기록 공고', complex_name: 'E2E 단지', issuer: '수원시청', region: '경기', related: true, first_seen_at: ymd(0), deadline_at: `${ymd(4)}T10:00:00`, current_status: '공고중' })})`;
+  const id2 = 'E2E-WORK-N2'; // 대표 10/21 12:00 영업 재편 1): [영업 진행으로 넘기기]
+  await sql`delete from sales_src_rows where src_id = ${id2}`;
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row) values ('global', 'procurement_notices', ${id2}, ${sql.json({ id: id2, title: 'E2E 넘기기 공고', complex_name: 'E2E 넘기기 단지', issuer: '성남시청', region: '경기', related: true, first_seen_at: ymd(0), deadline_at: `${ymd(6)}T10:00`, site_briefing_at: `${ymd(2)}T14:00` })})`;
   await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant: 'default', at: new Date().toISOString(), daily: true })}) on conflict (key) do nothing`;
   await sql`insert into sales_cutover (tenant, writes_open, ok) values ('default', true, true) on conflict (tenant) do update set writes_open = true, ok = true`;
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
@@ -31,6 +34,17 @@ export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     await p.screenshot({ path: `${SHOTS}/143-sales-work-panel.png` });
     await p.getByRole('dialog').getByLabel('닫기').tap();
     await bid.getByText('연락중').waitFor(); // 카드 상태 칩
+    // 대표 10/21 12:00 영업 재편 1): 행 [넘기기] → 담당자 선택 창 → 리드·'영업 중'·업무·일정(현장설명회·입찰 마감)·알림
+    const bid2 = p.getByTestId('sales-bid').filter({ hasText: 'E2E 넘기기 공고' }); await bid2.waitFor();
+    await bid2.getByTestId('sales-handoff').tap();
+    const hd = p.getByTestId('sales-handoff-dialog'); await hd.waitFor();
+    await hd.getByTestId('sales-handoff-people').getByRole('checkbox').first().waitFor({ state: 'attached' });
+    await p.screenshot({ path: `${SHOTS}/175-sales-handoff.png` });
+    await hd.getByTestId('sales-handoff-go').tap();
+    await p.getByText('영업 진행으로 넘겼습니다').first().waitFor();
+    await bid2.getByTestId('sales-handoff-lead').waitFor();
+    const [h] = await sql`select w.status, l.name, l.status as ls, (select count(*)::int from tasks t where t.lead_id = l.id) as tasks, (select count(*)::int from events e where e.title like '[영업] %E2E 넘기기%') as events from sales_work_records w join sales_leads l on l.id = w.lead_id where w.ref_id = ${id2}`;
+    assert.deepEqual([h.status, h.name, h.ls, h.tasks >= 1, h.events], ['영업 중', 'E2E 넘기기 단지 E2E 넘기기 공고', '신규리드', true, 2], '리드·영업 중·업무·일정(현장설명회·입찰 마감)');
     // 진행영업으로 넘기기 → 리드 생성·상세 열림
     await bid.getByTestId('bid-open').tap();
     await p.getByTestId('work-convert').tap();
@@ -46,5 +60,10 @@ export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     await sql`delete from sales_work_records where tenant = 'default' and ref_id = ${id}`.catch(() => {});
     await sql`delete from sales_leads where tenant = 'default' and name = 'E2E 단지'`.catch(() => {});
     await sql`delete from sales_src_rows where src_id = ${id}`.catch(() => {});
+    await sql`delete from tasks where lead_id in (select id from sales_leads where tenant = 'default' and name like 'E2E 넘기기%')`.catch(() => {});
+    await sql`delete from events where title like '[영업] %E2E 넘기기%'`.catch(() => {});
+    await sql`delete from sales_work_records where tenant = 'default' and ref_id = ${id2}`.catch(() => {});
+    await sql`delete from sales_leads where tenant = 'default' and name like 'E2E 넘기기%'`.catch(() => {});
+    await sql`delete from sales_src_rows where src_id = ${id2}`.catch(() => {});
   }
 }

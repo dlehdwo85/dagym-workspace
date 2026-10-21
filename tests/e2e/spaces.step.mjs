@@ -57,8 +57,9 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.equal(await m.getByTestId('space-chips').count(), 0, '상단 칩 줄 없음');
   await m.getByRole('button', { name: '메뉴 더보기' }).tap();
   await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).waitFor();
-  await m.getByTestId('mobile-space-menu').getByRole('link', { name: '공공데이터' }).tap();
-  await m.waitForURL(/\/s\/sales\/prospects$/);
+  await m.getByTestId('mobile-space-menu').getByRole('link', { name: '영업 기회 허브' }).tap(); // 대표 10/21 12:00 ③: 공공데이터·지역별·계약만료는 허브 카테고리
+  await m.waitForURL(/\/s\/sales\/hub$/);
+  await m.getByTestId('sales-hub-prospects').tap(); await m.getByTestId('prospects').waitFor();
   await m.getByRole('button', { name: '메뉴 더보기' }).tap();
   await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap();
   await m.waitForURL(/\/s\/sales\/sources$/);

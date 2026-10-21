@@ -38,6 +38,7 @@ export function Sources() {
     <div className="space-y-4" data-testid="sales-sources">
       <h1 className="text-xl font-bold text-[#2563EB]">데이터 설정</h1>
       <SalesOptions />
+      <BizCats canEdit={data.canEdit} />
       <BidPrefs />
       <Collectors />
       {data.canEdit && (
@@ -121,6 +122,38 @@ function SalesOptions() {
         {data.canEdit && <Button size="sm" variant={data.bids ? 'secondary' : 'primary'} onClick={() => set(!data.bids)} data-testid="sales-bids-toggle">{data.bids ? '끄기' : '켜기'}</Button>}
       </div>
       <p className="mt-1 text-xs text-ink-2">입찰을 하지 않는 회사는 꺼 두세요. 입찰·공고 메뉴와 현황 카드가 사라지고, 휴대폰 하단 탭의 입찰·공고 자리는 &lsquo;제안·계약&rsquo;이 됩니다. 공용으로 모으는 공고 데이터는 다른 회사에 영향이 없습니다.</p>
+    </section>
+  );
+}
+
+/** 대표 10/21 12:00 영업 재편 4): 회사 관심 사업(카테고리) — 공고 사업별 탭·필터·적합 배지의 근거. 이름·색·검색어 모두 회사가 정함(코드에 회사 이름 없음) */
+type Biz = { key?: string; name: string; color: string; keywords: string[]; active: boolean };
+function BizCats({ canEdit }: { canEdit: boolean }) {
+  const { data, error, reload } = useApi<{ items: Biz[] }>('/api/sales/business-categories');
+  const [rows, setRows] = useState<Biz[] | null>(null); const [busy, setBusy] = useState(false);
+  const list = rows ?? data?.items ?? [];
+  const set = (i: number, patch: Partial<Biz>) => setRows(list.map((r, n) => (n === i ? { ...r, ...patch } : r)));
+  async function save() {
+    setBusy(true);
+    try { await api('/api/sales/business-categories', { method: 'PUT', body: { items: list.filter((r) => r.name.trim()).map((r) => ({ key: r.key, name: r.name.trim(), color: r.color, keywords: r.keywords, active: r.active })) } }); toast.ok('관심 사업을 저장했습니다 — 공고 사업 탭·배지에 바로 반영됩니다'); setRows(null); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  if (error) return <ErrorBox error={error} retry={reload} />;
+  return (
+    <section id="biz" className="rounded-card border border-line bg-white p-4" data-testid="sales-bizcats">
+      <h2 className="text-sm font-semibold">관심 사업(카테고리)</h2>
+      <p className="mt-1 text-xs text-ink-2">우리 회사가 하는 사업을 적어 두면 입찰·공고를 사업별 탭으로 나누고, 공고마다 맞는 사업 배지를 붙입니다. 검색어는 공고의 사업 칸·제목·단지명·분류에서 찾습니다(쉼표로 구분).</p>
+      {!data ? <Skeleton rows={2} /> : <ul className="mt-2 space-y-1.5">{list.map((r, i) => (
+        <li key={r.key ?? `n${i}`} className="grid gap-1.5 sm:grid-cols-[2.25rem_10rem_1fr_auto] sm:items-center" data-testid="sales-bizcat">
+          <input type="color" className="h-8 w-9 cursor-pointer rounded border border-line" value={r.color} onChange={(e) => set(i, { color: e.target.value })} aria-label="색" disabled={!canEdit} />
+          <input className={inputCls} value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="사업 이름" aria-label="사업 이름" maxLength={40} disabled={!canEdit} data-testid="sales-bizcat-name" />
+          <input className={inputCls} value={r.keywords.join(', ')} onChange={(e) => set(i, { keywords: csv(e.target.value) })} placeholder="검색어(쉼표) 예: 커뮤니티, 위탁운영" aria-label="검색어" disabled={!canEdit} data-testid="sales-bizcat-keywords" />
+          <div className="flex items-center gap-2 text-xs"><label className="inline-flex items-center gap-1"><input type="checkbox" checked={r.active} onChange={(e) => set(i, { active: e.target.checked })} disabled={!canEdit} />쓰기</label>
+            {canEdit && <button type="button" className="text-ink-3 underline" onClick={() => setRows(list.filter((_, n) => n !== i))}>빼기</button>}</div>
+        </li>))}
+        {!list.length && <li className="text-xs text-ink-3">아직 없습니다 — 사업을 하나 이상 적어 두세요.</li>}</ul>}
+      {canEdit && <div className="mt-2 flex gap-2"><Button variant="secondary" onClick={() => setRows([...list, { name: '', color: '#2563EB', keywords: [], active: true }])} data-testid="sales-bizcat-add">사업 추가</Button>
+        <Button onClick={save} disabled={busy || rows === null} data-testid="sales-bizcat-save">{busy ? '저장 중…' : '저장'}</Button></div>}
     </section>
   );
 }
