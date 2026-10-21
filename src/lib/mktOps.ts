@@ -14,7 +14,7 @@ import { monthKst, numbersOf, ymd } from './mktGoals';
  * ② 광고실: 채널별(네이버 검색·파워링크 / Google / 유튜브 / 인스타·메타) 월 예산 계획 → 승인 → 집행(연결된 네이버 캠페인 하루 예산, 나머지는 안내) + 소진율로 '충전 필요' 알림(충전은 대표).
  * ③ 월 매출 목표 vs 실적: 실적 = 영업 계약 등록 금액 + (플랫폼 회사) 워크인 결제. CAC·ROI 는 월간 보고에.
  */
-export const PROPOSAL_KIND: Record<string, string> = { direction: '게시 방향', collab: '협업 제안', influencer: '인플루언서', analysis: '광고 효과 분석', plan: '향후 계획', alert: '운영 신호' };
+export const PROPOSAL_KIND: Record<string, string> = { direction: '게시 방향', collab: '협업 제안', influencer: '인플루언서', analysis: '광고 효과 분석', plan: '향후 계획', alert: '운영 신호', weekly: '주간 운영 제안' };
 export const AD_CH: Record<string, { label: string; charge: string; provider: 'naver' | 'google' | 'meta' | null }> = {
   naver: { label: '네이버 검색·파워링크', charge: 'https://searchad.naver.com/', provider: 'naver' }, google: { label: 'Google 검색·디스플레이', charge: 'https://ads.google.com/aw/billing', provider: 'google' },
   youtube: { label: '유튜브(Google Ads)', charge: 'https://ads.google.com/aw/billing', provider: 'google' }, meta: { label: '인스타·페이스북(Meta)', charge: 'https://business.facebook.com/billing', provider: 'meta' },
@@ -130,6 +130,11 @@ export async function actProposal(u: SessionUser, id: string, i: z.infer<typeof 
       const [b] = await sql<{ id: string }[]>`insert into mkt_briefs (tenant, channel, kind, purpose, message, refs, quantity, status, created_by) values (${t}, 'instagram', 'feed', 'awareness', ${String(it.title ?? p.title).slice(0, 300)}, ${sql.json({ mediaIds: [], contentIds: [], links: [], proposalId: id } as never)}, 1, 'queued', ${u.id}) returning id`;
       executed.briefs.push(b.id);
     }
+  } else if (p.kind === 'weekly') {
+    // 주간 운영 제안: 항목마다 담당 업무 1건(단가 조정·소재 교체·방향·협업) — 돈이 움직이는 변경은 광고 운영 화면에서 사람이 실행
+    try { const { createTask } = await import('./tasks');
+      for (const it of (p.body?.items ?? []).slice(0, 6)) { const r = await createTask(u, { title: `[마케팅 주간] ${String(it.title).slice(0, 120)}`, description: `${it.detail}\n기대: ${it.expected} · 비용: ${it.cost}\n\n주간 운영 제안 카드 /s/marketing/ops${it.action === 'bid_down' || it.action === 'creative' || it.action === 'shift' ? '\n광고 운영: /s/marketing/ad-ops' : ''}`, space: 'marketing', assigneeId: u.id, requestedById: u.id, dueDate: null, approvalRequired: false, tags: ['마케팅', '주간 운영'] } as never); executed.tasks.push(r.id); }
+    } catch (e: any) { executed.taskError = String(e?.message ?? e); }
   } else {
     try { const { createTask } = await import('./tasks');
       const r = await createTask(u, { title: `[마케팅] ${p.title}`, description: `${p.summary}\n\n${(p.body?.items ?? []).map((it: any) => `- ${it.title}: ${it.detail}`).join('\n')}\n\n운영실 카드 /s/marketing/ops`, space: 'marketing', assigneeId: u.id, requestedById: u.id, dueDate: null, approvalRequired: false, tags: ['마케팅', PROPOSAL_KIND[p.kind] ?? p.kind] }, { quiet: false, skipQuota: true });
@@ -533,6 +538,7 @@ export async function opsTick(tenant: string, now = new Date()) {
   if (dow === 1) {
     const [recent] = await sql<{ n: number }[]>`select count(*)::int n from mkt_proposals where tenant = ${tenant} and source <> 'user' and created_at >= now() - interval '6 days'`;
     if (!recent.n) out.proposals = await propose(tenant, ['analysis', 'direction'], null).catch((e) => ({ error: String(e?.message ?? e) }));
+    out.weekly = await weeklyProposal(tenant, null).catch((e) => ({ error: String(e?.message ?? e) })); // 대표 10/20 14:10 ④ 월요일 주간 운영 제안(숫자)
   }
   if (day >= 25) {
     const next = monthKst(now, 1);
@@ -541,6 +547,30 @@ export async function opsTick(tenant: string, now = new Date()) {
     if (!ex && acc.n) out.budget = await draftBudget(tenant, next, null).catch((e) => ({ error: String(e?.message ?? e) }));
   }
   return out;
+}
+/** 대표 10/20 14:10 ④ 주간 운영 제안(월요일 1회, 숫자만·AI 비용 0): 지난 7일 캠페인별 CPC·CTR 로 단가 조정(입찰가 낮추기/소재 교체)·방향(잘 되는 매체 확대)·협업·예산 페이스 → 카드 1장 → 승인하면 항목마다 담당 업무(단가 조정은 광고 운영 화면에서 사람이 실행) */
+export async function weeklyProposal(tenant: string, actorId: string | null, opts: { force?: boolean } = {}) {
+  const sql = db();
+  if (!opts.force) { const [dup] = await sql<{ id: string }[]>`select id from mkt_proposals where tenant = ${tenant} and kind = 'weekly' and created_at >= now() - interval '6 days' limit 1`; if (dup) return { created: 0, skipped: 'recent', id: dup.id }; }
+  const d7 = ymd(new Date(Date.now() - 7 * 864e5)); const d14 = ymd(new Date(Date.now() - 14 * 864e5)); const td = ymd(new Date());
+  const camps = await sql<{ provider: string; campaign_id: string; name: string; cost: number; clicks: number; impressions: number; conversions: number }[]>`select a.provider, s.campaign_id, max(s.campaign_name) name, sum(s.cost_krw)::float8 cost, sum(s.clicks)::float8 clicks, sum(s.impressions)::float8 impressions, sum(s.conversions)::float8 conversions
+    from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${tenant} and s.day > ${d7}::date and s.day <= ${td}::date group by a.provider, s.campaign_id order by sum(s.cost_krw) desc limit 30`;
+  const [prev] = await sql<{ cost: number; clicks: number }[]>`select coalesce(sum(s.cost_krw), 0)::float8 cost, coalesce(sum(s.clicks), 0)::float8 clicks from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${tenant} and s.day > ${d14}::date and s.day <= ${d7}::date`;
+  const cost = camps.reduce((s, c) => s + c.cost, 0), clicks = camps.reduce((s, c) => s + c.clicks, 0); const cpc = clicks ? cost / clicks : 0; const ctrAvg = camps.reduce((s, c) => s + c.impressions, 0) ? clicks / camps.reduce((s, c) => s + c.impressions, 0) : 0;
+  const items: { title: string; detail: string; expected: string; cost: string; action?: string }[] = [];
+  for (const c of camps.filter((c) => c.clicks >= 10 && cpc > 0 && c.cost / c.clicks >= cpc * 1.3).slice(0, 3)) items.push({ title: `단가 조정: ${c.name || c.campaign_id} 입찰가 10% 낮추기`, detail: `지난 7일 CPC ${won(Math.round(c.cost / c.clicks))} — 평균 ${won(Math.round(cpc))}의 1.3배 이상(클릭 ${Math.round(c.clicks)}·광고비 ${won(Math.round(c.cost))}).`, expected: '같은 예산으로 클릭 10% 안팎 늘기', cost: '없음(입찰가 변경은 광고 운영 화면에서 사람이 실행)', action: 'bid_down' });
+  for (const c of camps.filter((c) => c.impressions >= 1000 && ctrAvg > 0 && c.clicks / c.impressions <= ctrAvg * 0.5).slice(0, 2)) items.push({ title: `소재 교체: ${c.name || c.campaign_id}`, detail: `CTR ${((c.clicks / c.impressions) * 100).toFixed(2)}% — 평균 ${(ctrAvg * 100).toFixed(2)}%의 절반 이하(노출 ${Math.round(c.impressions)}).`, expected: 'CTR 회복 → CPC 하락', cost: '제작 크레딧(소재 1~2개)', action: 'creative' });
+  const best = camps.filter((c) => c.clicks >= 10).sort((a, b) => a.cost / a.clicks - b.cost / b.clicks)[0];
+  if (best) items.push({ title: `방향: ${best.name || best.campaign_id}(${best.provider}) 비중 늘리기`, detail: `지난 7일 CPC ${won(Math.round(best.cost / best.clicks))}로 가장 효율이 좋음${best.conversions ? ` · 전환 ${Math.round(best.conversions)}` : ''}.`, expected: '전체 CPC 하락', cost: '예산 재배분(총액 그대로)', action: 'shift' });
+  if (prev.cost > 0 && cost >= prev.cost * 1.3) items.push({ title: `예산 페이스: 이번 주 광고비 ${won(Math.round(cost))} — 지난주 ${won(Math.round(prev.cost))}의 ${Math.round((cost / prev.cost) * 100)}%`, detail: '월 예산 소진이 빨라짐. 남은 기간 하루 예산 점검.', expected: '월 예산 안에서 운영', cost: '없음', action: 'pace' });
+  const [posts] = await sql<{ n: number }[]>`select count(*)::int n from mkt_contents where tenant = ${tenant} and not is_test and status = 'published' and published_at > now() - interval '7 days'`;
+  items.push({ title: '협업·제휴 1건 접촉', detail: `지난 7일 게시 ${posts.n}건. 같은 고객층의 지역 업체·기관 1곳에 공동 이벤트·상호 소개를 제안(대상은 대표 확인).`, expected: '신규 문의 경로', cost: '없음', action: 'collab' });
+  if (!camps.length) items.unshift({ title: '광고 데이터 없음 — 광고 계정 연결·동기화 확인', detail: '지난 7일 광고 성과가 들어오지 않아 단가 조정 제안을 만들 수 없습니다.', expected: '다음 주부터 단가·소재 제안', cost: '없음', action: 'connect' });
+  const week = `${d7.slice(5)}~${td.slice(5)}`;
+  const [n] = await sql<{ id: string }[]>`insert into mkt_proposals (tenant, kind, title, summary, body, source, month, created_by) values (${tenant}, 'weekly', ${`주간 운영 제안 (${week})`}, ${`지난 7일 광고비 ${won(Math.round(cost))} · 클릭 ${Math.round(clicks)}${cpc ? ` · CPC ${won(Math.round(cpc))}` : ''} · 게시 ${posts.n}건. 제안 ${items.length}건 — 승인하면 항목마다 담당 업무로 만듭니다.`},
+    ${sql.json({ items: items.slice(0, 6), rationale: `캠페인 ${camps.length}개 · 지난주 광고비 ${won(Math.round(prev.cost))} · 클릭 ${Math.round(prev.clicks)}`, numbers: { cost, clicks, cpc, prevCost: prev.cost, posts: posts.n }, week } as never)}, 'template', ${monthKst()}, ${actorId}) returning id`;
+  await notify(sql, { userIds: await (await import('./mktAuto')).approvers(tenant), type: 'review_requested', title: `AI 마케터 주간 운영 제안 ${items.length}건 (${week})`, body: items[0]?.title ?? '', link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', entityId: n.id, dedupeKey: `mktops:weekly:${tenant}:${td}` }).catch(() => {});
+  return { created: 1, id: n.id, items: items.length };
 }
 export async function opsTickAll() {
   const ts = await db()<{ tenant: string }[]>`select tenant from mkt_brands union select tenant from mkt_ad_budgets union select tenant from mkt_ad_accounts limit 20`;

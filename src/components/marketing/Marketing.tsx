@@ -331,8 +331,12 @@ function BriefDecisionCard({ b, canEdit, onChange }: { b: InboxBrief; canEdit: b
  */
 function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents: CardContent[]; canDecide: boolean; plain: boolean; onOpen: (id: string) => void; onDone: () => void }) {
   const [brand, setBrand] = useState(''); const [more, setMore] = useState(false);
-  const brands = [...new Set(contents.map((c) => c.brand).filter(Boolean) as string[])];
+  // 대표 10/20 14:10 ②: 브랜드 탭은 회사 브랜드 전체(콘텐츠가 없는 브랜드도) · 예정(초안) 묶음 · 제작 예정이 없는 브랜드 안내
+  const allBrands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
+  const brands = [...new Set([...(allBrands.data?.brands ?? []).map((b) => b.name), ...contents.map((c) => c.brand).filter(Boolean) as string[]])];
   const list = contents.filter((c) => !brand || c.brand === brand);
+  const drafts = plain ? [] : list.filter((c) => c.status === 'draft').sort((a, b) => String(a.scheduled_at ?? '9999').localeCompare(String(b.scheduled_at ?? '9999')));
+  const emptyBrands = plain ? [] : (allBrands.data?.brands ?? []).map((b) => b.name).filter((n) => !contents.some((c) => c.brand === n && ['draft', 'pending', 'changes', 'hold', 'approved'].includes(c.status)));
   const ready = plain ? list : list.filter((c) => c.status === 'pending' && !c.late);
   const waiting = plain ? [] : list.filter((c) => (c.status === 'changes' || c.status === 'hold') && !c.late);
   const late = plain ? [] : list.filter((c) => c.late);
@@ -358,6 +362,9 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
           {!moreApproved && approvedWait.length > 10 && <Button variant="secondary" className="w-full" onClick={() => setMoreApproved(true)} data-testid="mkt-approved-more">{approvedWait.length - 10}건 더 보기</Button>}</div></details>}
       {approvedPast.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-approved-past"><summary className="cursor-pointer font-medium text-ink-2">승인됨 · 예정 지남 {approvedPast.length}건 — 열어서 “브랜드·게시 예정 바로잡기”로 재배치</summary>
         <div className="mt-2 space-y-2">{approvedPast.slice(0, 30).map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+      {drafts.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-drafts"><summary className="cursor-pointer font-medium text-ink-2">예정(초안) {drafts.length}건 — 제작 예정, 시안이 오면 승인 대기로</summary>
+        <ul className="mt-2 divide-y divide-line text-xs">{drafts.slice(0, 30).map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-draft"><button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button><span className="text-ink-3">{[c.brand, channelLabel(c.channel, c.kind), whenLabel(c.scheduled_at), c.auto ? '자동 제작' : null].filter(Boolean).join(' · ')}</span></li>)}</ul></details>}
+      {emptyBrands.length > 0 && <p className="rounded-card border border-dashed border-amber-300 bg-amber-50/40 px-3 py-2 text-xs text-amber-900" data-testid="mkt-brand-empty">제작 예정 없음: <b>{emptyBrands.join(' · ')}</b> — <Link href="/s/marketing/automation" className="font-medium underline">자동 제작 규칙</Link>을 켜거나 <Link href="/s/marketing/ops" className="font-medium underline">운영실</Link>에서 제작을 의뢰하세요.</p>}
       {waiting.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
         <div className="mt-2 space-y-2">{waiting.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {late.length > 0 && <details className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" data-testid="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>

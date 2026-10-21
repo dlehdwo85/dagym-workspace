@@ -103,6 +103,17 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.getByTestId('ads-analysis-card-link').waitFor();
   await owner.getByTestId('ads-report-link').waitFor();
   await sql`update mkt_proposals set status = 'rejected', decision_note = 'E2E 정리' where kind = 'analysis' and body->>'adsMonth' is not null`; // 운영실 단계가 빈 보드에서 시작하도록
+  // 대표 10/20 14:10 ③: 브랜드·매체 필터·CSV·캠페인 추이·날짜 라벨 — 최근 7일로 바꾸면 '이전 7일 대비'
+  await owner.getByTestId('ads-filters').waitFor(); await owner.getByTestId('ads-csv').waitFor();
+  await owner.getByTestId('ads-provider-naver').click(); await owner.getByTestId('ads-by-provider').waitFor();
+  await owner.getByTestId('ads-provider-all').click();
+  await owner.getByTestId('ads-days-7').click(); await owner.getByText('이전 기간(', { exact: false }).first().waitFor(); // 머리줄 '이전 기간(…) 대비' — 숫자가 없어도 보임
+  // ① 사이트별 집계 화면(메뉴 '성과' 묶음) — 요약·표·비콘 안내
+  await owner.locator('aside').getByRole('link', { name: '사이트별 집계' }).click();
+  await owner.getByTestId('mkt-sites').waitFor(); await owner.getByTestId('sites-summary').waitFor(); await owner.getByTestId('sites-snippet').waitFor();
+  await owner.getByTestId('sites-table').waitFor(); // 브랜드가 없으면 빈 표(브랜드 줄은 브랜드를 만든 뒤)
+  await owner.screenshot({ path: `${SHOTS}/174-mkt-sites.png`, fullPage: true });
+  await owner.locator('aside').getByRole('link', { name: '광고 성과' }).click(); await owner.getByTestId('mkt-ads').waitFor(); // 원래 흐름으로
   await owner.getByTestId('ads-days-7').click();
   await owner.getByText('최근 7일', { exact: true }).first().waitFor();
   // 로컬 검수 10/19: 사이드바 묶음(운영·제작·성과·설정)·계정 연결은 설정 › 연결 계정

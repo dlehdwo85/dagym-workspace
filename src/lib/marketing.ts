@@ -107,7 +107,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
     left join mkt_versions v on v.content_id = c.id and v.version = c.current_version
     left join users u on u.id = c.created_by
     where c.tenant = ${t} and c.status <> 'canceled'
-      and (${q.view ?? ''} <> 'approvals' or ${q.day ?? ''} <> '' or c.status in ('pending', 'changes', 'hold', 'approved'))
+      and (${q.view ?? ''} <> 'approvals' or ${q.day ?? ''} <> '' or c.status in ('pending', 'changes', 'hold', 'approved') or (c.status = 'draft' and c.scheduled_at > now())) -- 대표 10/20 14:10 ②: 예정(초안)도 승인함에 묶음으로
       -- 현황 '오늘' 카드에서 들어온 목록(시험 제외)
       and (${q.day ?? ''} = '' or (not c.is_test and case ${q.day ?? ''}
         when 'produced' then (c.produced_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date

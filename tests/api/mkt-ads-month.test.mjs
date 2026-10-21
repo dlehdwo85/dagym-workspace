@@ -43,7 +43,7 @@ test('월별 보기: 합계·전월·매체별·브랜드별·캠페인·월 목
   const pv = await ctx.owner.ok('GET', `/api/marketing/ads?month=${prevM}`);
   assert.equal(pv.totals.cost, 90000); assert.equal(pv.prev.cost, 0);
   const d = await ctx.owner.ok('GET', '/api/marketing/ads?days=7');
-  assert.equal(d.month, null); assert.equal(d.days, 7); assert.equal(d.byProvider, undefined, 'days 모드는 예전 모양 그대로');
+  assert.equal(d.month, null); assert.equal(d.days, 7); assert.ok(Array.isArray(d.byProvider) && d.prev && d.prevFrom, '대표 10/20 14:10 ③: days 모드도 매체별·이전 기간 대비');
   assert.equal((await ctx.owner.req('GET', '/api/marketing/ads?month=2026-13')).status, 200, '잘못된 month 는 days 모드로');
   assert.equal((await ctx.staffA.client.ok('GET', `/api/marketing/ads?month=${month}`)).totals.cost, 75000, '공간 멤버 직원도 읽기');
   assert.equal((await ctx.staffB.client.req('GET', `/api/marketing/ads?month=${month}`)).status, 404, '미배정 직원');

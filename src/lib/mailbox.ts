@@ -435,6 +435,16 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   await rememberSent(sql, t, u.id, i.taskId, [...i.to, ...(i.cc ?? [])].map((email) => ({ email })));
   return { id, status: 'queued', asLink, taskTitle: task.title, channel, scheduledAt: at?.toISOString() ?? null };
 }
+/** 로컬 10/21 11:30: 시스템 메일(영업 다이제스트 등)을 회사 메일 경로(SMTP 계정 → 워크인 발송)로 큐에 넣는다. 경로가 없으면 null(호출 쪽이 다른 길을 씀) */
+export async function queueSystemMail(tenant: string, m: { to: string[]; subject: string; text: string; createdBy: string; fromName?: string }, sql: Sql = db()) {
+  const channel = await pickChannel(tenant, sql); if (!channel) return null;
+  const account = channel === 'email:smtp' ? await loadAccount(tenant, sql) : null;
+  const fromEmail = account ? account.from_email : workinFrom(); const domain = fromEmail.split('@')[1] ?? 'workin';
+  const id = randomUUID();
+  await sql`insert into outbox (id, tenant, channel, status, created_by, from_email, from_name, to_addrs, subject, body_text, body_html, message_id, next_attempt_at)
+    values (${id}, ${tenant}, ${channel}, 'queued', ${m.createdBy}, ${fromEmail}, ${(m.fromName ?? account?.from_name ?? '워크인').slice(0, 80)}, ${m.to}, ${m.subject.slice(0, 200)}, ${m.text}, ${bodyHtml(m.text, '')}, ${`<${id}@${domain}>`}, now())`;
+  return { id, channel };
+}
 export const defaultFromName = (me: { name: string; title: string | null }, company: string) => `${me.name}${me.title ? ` ${me.title}` : ''} (${company})`;
 
 /** 예약 바꾸기·취소(보낸 사람·대표만, 아직 보내기 전인 예약만) */
