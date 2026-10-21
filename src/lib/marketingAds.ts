@@ -76,8 +76,7 @@ async function naver(path: string, s: NaverSecret, customerId: string, query = '
   const sig = createHmac('sha256', s.secretKey).update(`${ts}.GET.${path}`).digest('base64');
   return getJson(`${NAVER()}${path}${query}`, { headers: { 'X-Timestamp': ts, 'X-API-KEY': s.apiKey, 'X-Customer': customerId, 'X-Signature': sig } });
 }
-async function naverStats(customerId: string, s: NaverSecret, days: string[]) {
-  const camps: { nccCampaignId: string; name: string }[] = await naver('/ncc/campaigns', s, customerId);
+async function naverStats(customerId: string, s: NaverSecret, days: string[], camps: { nccCampaignId: string; name: string }[]) {
   if (!camps?.length) return [];
   const names = new Map(camps.map((c) => [c.nccCampaignId, c.name]));
   const rows = [];
@@ -85,6 +84,31 @@ async function naverStats(customerId: string, s: NaverSecret, days: string[]) {
     const q = `?ids=${encodeURIComponent(camps.map((c) => c.nccCampaignId).join(','))}&fields=${encodeURIComponent('["impCnt","clkCnt","salesAmt","ccnt"]')}&timeRange=${encodeURIComponent(JSON.stringify({ since: day, until: day }))}`;
     const r = await naver('/stats', s, customerId, q);
     for (const d of r?.data ?? []) rows.push({ day, campaign_id: String(d.id), campaign_name: names.get(d.id) ?? '', impressions: num(d.impCnt), clicks: num(d.clkCnt), cost: num(d.salesAmt), conversions: num(d.ccnt), currency: 'KRW' });
+  }
+  return rows;
+}
+
+/** #98 ③ 키워드/소재 단위(캠페인 아래) — 네이버 키워드·소재, 구글 키워드·광고, Meta 광고 */
+type ItemRow = { day: string; kind: 'keyword' | 'ad'; item_id: string; item_name: string; campaign_id: string; campaign_name: string; adgroup_name: string; impressions: number; clicks: number; cost: number; conversions: number; currency: string };
+const ITEM_LIMIT = 500; // 계정당 키워드+소재 최대(요청 수 제한)
+async function naverItems(customerId: string, s: NaverSecret, days: string[], camps: { nccCampaignId: string; name: string }[]): Promise<ItemRow[]> {
+  const names = new Map(camps.map((c) => [c.nccCampaignId, c.name]));
+  const groups: { nccAdgroupId: string; name: string; nccCampaignId: string }[] = [];
+  for (const c of camps.slice(0, 50)) groups.push(...(((await naver('/ncc/adgroups', s, customerId, `?nccCampaignId=${encodeURIComponent(c.nccCampaignId)}`)) ?? []) as typeof groups));
+  const items: { kind: 'keyword' | 'ad'; id: string; name: string; campaign_id: string; adgroup_name: string }[] = [];
+  for (const g of groups.slice(0, 100)) {
+    if (items.length >= ITEM_LIMIT) break;
+    for (const k of ((await naver('/ncc/keywords', s, customerId, `?nccAdgroupId=${encodeURIComponent(g.nccAdgroupId)}`)) ?? []) as any[]) items.push({ kind: 'keyword', id: String(k.nccKeywordId), name: String(k.keyword ?? ''), campaign_id: g.nccCampaignId, adgroup_name: g.name });
+    for (const a of ((await naver('/ncc/ads', s, customerId, `?nccAdgroupId=${encodeURIComponent(g.nccAdgroupId)}`)) ?? []) as any[]) items.push({ kind: 'ad', id: String(a.nccAdId), name: String(a.ad?.headline ?? a.ad?.description ?? a.nccAdId ?? ''), campaign_id: g.nccCampaignId, adgroup_name: g.name });
+  }
+  const list = items.slice(0, ITEM_LIMIT); if (!list.length) return [];
+  const byId = new Map(list.map((i) => [i.id, i]));
+  const rows: ItemRow[] = [];
+  for (const day of days) for (let i = 0; i < list.length; i += 100) {
+    const ids = list.slice(i, i + 100).map((x) => x.id);
+    const q = `?ids=${encodeURIComponent(ids.join(','))}&fields=${encodeURIComponent('["impCnt","clkCnt","salesAmt","ccnt"]')}&timeRange=${encodeURIComponent(JSON.stringify({ since: day, until: day }))}`;
+    const r = await naver('/stats', s, customerId, q);
+    for (const d of r?.data ?? []) { const it = byId.get(String(d.id)); if (!it) continue; rows.push({ day, kind: it.kind, item_id: it.id, item_name: it.name, campaign_id: it.campaign_id, campaign_name: names.get(it.campaign_id) ?? '', adgroup_name: it.adgroup_name, impressions: num(d.impCnt), clicks: num(d.clkCnt), cost: num(d.salesAmt), conversions: num(d.ccnt), currency: 'KRW' }); }
   }
   return rows;
 }
@@ -98,6 +122,18 @@ async function metaStats(actId: string, token: string, days: string[]) {
   for (let page = 0; url && page < 20; page++) {
     const r: any = await getJson(url);
     for (const d of r?.data ?? []) rows.push({ day: d.date_start, campaign_id: String(d.campaign_id), campaign_name: d.campaign_name ?? '', impressions: num(d.impressions), clicks: num(d.clicks), cost: num(d.spend),
+      conversions: (d.actions ?? []).filter((a: any) => META_CONV.has(a.action_type)).reduce((s: number, a: any) => s + num(a.value), 0), currency: d.account_currency ?? 'KRW' });
+    url = r?.paging?.next ?? null;
+  }
+  return rows;
+}
+async function metaItems(actId: string, token: string, days: string[]): Promise<ItemRow[]> {
+  const rows: ItemRow[] = [];
+  let url: string | null = `${GRAPH()}/act_${actId}/insights?${new URLSearchParams({ level: 'ad', time_increment: '1', time_range: JSON.stringify({ since: days[0], until: days.at(-1) }),
+    fields: 'ad_id,ad_name,adset_name,campaign_id,campaign_name,impressions,clicks,spend,actions,account_currency', limit: '500', access_token: token })}`;
+  for (let page = 0; url && page < 10; page++) {
+    const r: any = await getJson(url);
+    for (const d of r?.data ?? []) rows.push({ day: d.date_start, kind: 'ad', item_id: String(d.ad_id), item_name: d.ad_name ?? '', campaign_id: String(d.campaign_id ?? ''), campaign_name: d.campaign_name ?? '', adgroup_name: d.adset_name ?? '', impressions: num(d.impressions), clicks: num(d.clicks), cost: num(d.spend),
       conversions: (d.actions ?? []).filter((a: any) => META_CONV.has(a.action_type)).reduce((s: number, a: any) => s + num(a.value), 0), currency: d.account_currency ?? 'KRW' });
     url = r?.paging?.next ?? null;
   }
@@ -136,6 +172,20 @@ async function googleStats(cid: string, refresh: string, days: string[]) {
   }
   return rows;
 }
+async function googleItems(cid: string, refresh: string, days: string[]): Promise<ItemRow[]> {
+  const access = await googleAccess(refresh);
+  const run = async (query: string) => { const out: any[] = []; let pageToken: string | undefined;
+    for (let page = 0; page < 10; page++) { const r: any = await getJson(`${GADS()}/customers/${cid}/googleAds:search`, { method: 'POST', headers: gHeaders(access), body: JSON.stringify({ query, ...(pageToken ? { pageToken } : {}) }) }); out.push(...(r?.results ?? [])); pageToken = r?.nextPageToken; if (!pageToken) break; }
+    return out; };
+  const range = `WHERE segments.date BETWEEN '${days[0]}' AND '${days.at(-1)}'`;
+  const rows: ItemRow[] = [];
+  const common = (d: any) => ({ day: d.segments?.date, campaign_id: String(d.campaign?.id ?? ''), campaign_name: d.campaign?.name ?? '', adgroup_name: d.adGroup?.name ?? '', impressions: num(d.metrics?.impressions), clicks: num(d.metrics?.clicks), cost: num(d.metrics?.costMicros) / 1e6, conversions: num(d.metrics?.conversions), currency: d.customer?.currencyCode ?? 'KRW' });
+  for (const d of await run(`SELECT segments.date, campaign.id, campaign.name, ad_group.name, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, customer.currency_code FROM keyword_view ${range}`))
+    rows.push({ kind: 'keyword', item_id: String(d.adGroupCriterion?.criterionId ?? ''), item_name: d.adGroupCriterion?.keyword?.text ?? '', ...common(d) });
+  for (const d of await run(`SELECT segments.date, campaign.id, campaign.name, ad_group.name, ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, customer.currency_code FROM ad_group_ad ${range}`))
+    rows.push({ kind: 'ad', item_id: String(d.adGroupAd?.ad?.id ?? ''), item_name: d.adGroupAd?.ad?.name || `${d.adGroupAd?.ad?.type ?? '광고'} ${d.adGroupAd?.ad?.id ?? ''}`, ...common(d) });
+  return rows.filter((r) => r.item_id);
+}
 
 // ---------------- 동기화 ----------------
 type Acc = { id: string; tenant: string; provider: AdProvider; external_id: string; secret_enc: string | null };
@@ -143,15 +193,28 @@ export async function syncAccount(a: Acc, days = daysBack(7)) {
   const sql = db();
   try {
     const sec = a.secret_enc ? JSON.parse(decrypt(a.secret_enc)) : {};
-    const rows = a.provider === 'naver' ? await naverStats(a.external_id, sec, days) : a.provider === 'meta' ? await metaStats(a.external_id, sec.token, days) : await googleStats(a.external_id, sec.refresh, days);
+    const camps = a.provider === 'naver' ? ((await naver('/ncc/campaigns', sec, a.external_id)) ?? []) as { nccCampaignId: string; name: string }[] : [];
+    const rows = a.provider === 'naver' ? await naverStats(a.external_id, sec, days, camps) : a.provider === 'meta' ? await metaStats(a.external_id, sec.token, days) : await googleStats(a.external_id, sec.refresh, days);
     for (const r of rows.filter((x) => x.day && x.campaign_id)) {
       await sql`insert into mkt_ad_stats (account_id, day, campaign_id, campaign_name, impressions, clicks, cost_krw, conversions, currency)
         values (${a.id}, ${r.day}, ${r.campaign_id}, ${r.campaign_name}, ${r.impressions}, ${r.clicks}, ${r.cost}, ${r.conversions}, ${r.currency})
         on conflict (account_id, day, campaign_id) do update set campaign_name = excluded.campaign_name, impressions = excluded.impressions, clicks = excluded.clicks,
           cost_krw = excluded.cost_krw, conversions = excluded.conversions, currency = excluded.currency, updated_at = now()`;
     }
+    // #98 ③ 키워드/소재(캠페인 아래) — 실패해도 캠페인 성과는 그대로(계정 줄에는 표시하지 않고 결과에만)
+    let items = 0, itemError: string | null = null;
+    try {
+      const its = a.provider === 'naver' ? await naverItems(a.external_id, sec, days, camps) : a.provider === 'meta' ? await metaItems(a.external_id, sec.token, days) : await googleItems(a.external_id, sec.refresh, days);
+      for (const r of its.filter((x) => x.day && x.item_id)) {
+        await sql`insert into mkt_ad_items (account_id, day, kind, item_id, item_name, campaign_id, campaign_name, adgroup_name, impressions, clicks, cost_krw, conversions, currency)
+          values (${a.id}, ${r.day}, ${r.kind}, ${r.item_id}, ${r.item_name.slice(0, 200)}, ${r.campaign_id}, ${r.campaign_name}, ${r.adgroup_name.slice(0, 200)}, ${r.impressions}, ${r.clicks}, ${r.cost}, ${r.conversions}, ${r.currency})
+          on conflict (account_id, day, kind, item_id) do update set item_name = excluded.item_name, campaign_id = excluded.campaign_id, campaign_name = excluded.campaign_name, adgroup_name = excluded.adgroup_name, impressions = excluded.impressions, clicks = excluded.clicks,
+            cost_krw = excluded.cost_krw, conversions = excluded.conversions, currency = excluded.currency, updated_at = now()`;
+        items++;
+      }
+    } catch (e: any) { itemError = String(e?.message ?? e).slice(0, 200); }
     await sql`update mkt_ad_accounts set status = 'active', last_sync_at = now(), last_error = null where id = ${a.id}`;
-    return { id: a.id, rows: rows.length };
+    return { id: a.id, rows: rows.length, items, ...(itemError ? { itemError } : {}) };
   } catch (e: any) {
     await sql`update mkt_ad_accounts set status = 'error', last_sync_at = now(), last_error = ${String(e?.message ?? e).slice(0, 300)} where id = ${a.id}`;
     return { id: a.id, error: String(e?.message ?? e).slice(0, 200) };
@@ -225,11 +288,18 @@ export async function adsOverview(u: SessionUser, q: { days?: number; month?: st
   const top5 = campaigns.slice(0, 5).map((c: any) => String(c.campaign_id));
   const campaignDaily = top5.length ? await sql`select s.campaign_id, max(s.campaign_name) campaign_name, a.provider, to_char(s.day, 'YYYY-MM-DD') as day, sum(cost_krw)::float8 cost, sum(clicks)::float8 clicks, sum(impressions)::float8 impressions ${base()} and s.campaign_id = any(${top5}) group by s.campaign_id, a.provider, s.day order by s.campaign_id, s.day` : [];
   const byProviderAll = await sql`select a.provider, ${SUM} ${base()} group by a.provider order by sum(cost_krw) desc`;
+  // #98 ③ 키워드/소재 표(캠페인 아래 단위, 같은 기간·브랜드·매체 필터, 광고비 순 150개)
+  const items = (kind: 'keyword' | 'ad') => sql`select a.provider, a.label, b.name as brand, s.item_id, max(s.item_name) item_name, max(s.campaign_name) campaign_name, max(s.adgroup_name) adgroup_name, max(s.currency) currency,
+      sum(impressions)::float8 impressions, sum(clicks)::float8 clicks, sum(cost_krw)::float8 cost, sum(conversions)::float8 conversions
+    from mkt_ad_items s join mkt_ad_accounts a on a.id = s.account_id left join mkt_brands b on b.id = a.brand_id where a.tenant = ${t} and s.kind = ${kind} and s.day between ${from}::date and ${to}::date
+      and (${brand} = '' or (${brand} = 'none' and a.brand_id is null) or a.brand_id::text = ${brand}) and (${provider} = '' or a.provider = ${provider})
+    group by a.id, a.provider, a.label, b.name, s.item_id order by sum(cost_krw) desc, sum(clicks) desc limit 150`;
+  const keywords = await items('keyword'); const creatives = await items('ad');
   const brandList = await sql`select b.id, b.name from mkt_brands b where b.tenant = ${t} order by b.name`;
   const prevFrom = month ? null : daysBack(n * 2)[0]; const prevTo = month ? null : ymd(new Date(Date.parse(`${from}T12:00:00+09:00`) - 864e5));
   const [prevDays] = prevFrom && prevTo ? await sql`select ${SUM} ${base(prevFrom, prevTo)}` : [null];
   const balances = await (await import('./mktRecharge')).balancesView(t);
-  const common = { accounts, balances, totals: tot, campaigns, daily, campaignDaily, byProvider: byProviderAll, brands: brandList, filter: { brand, provider }, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
+  const common = { accounts, balances, totals: tot, campaigns, keywords, creatives, daily, campaignDaily, byProvider: byProviderAll, brands: brandList, filter: { brand, provider }, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
     // 로컬 검수: 콘솔에 등록할 콜백 주소를 화면에 그대로(APP_URL 기준 — 도메인 바꾸면 이 주소도 바뀜)
     callbacks: u.platformAdmin ? { meta: callback('meta'), google: callback('google') } : null }; // 콘솔 등록 값은 플랫폼 관리자에게만(고객 화면에서 기술 단계 숨김)
   if (!month) return { days: n, from, to, month: null, prev: prevDays, prevFrom, prevTo, ...common };

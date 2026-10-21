@@ -35,6 +35,12 @@ export function Ops() {
     if (!data) return; setBusy(true);
     try { const r = await api<{ source: string }>('/api/marketing/ops/budget', { body: { month: data.month } }); toast.ok(r.source === 'ai' ? 'AI 예산 계획 초안 — 승인 대기' : '기본 배분 초안(AI 없이) — 승인 대기'); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
+  // #98 ④ 잔여: 주간 운영 제안 카드 지금 만들기(월요일 자동과 같은 내용, 6일 안 이미 있으면 그 카드)
+  async function weekly() {
+    setBusy(true);
+    try { const r = await api<{ created: number; skipped?: string }>('/api/marketing/ops/weekly', { body: {} }); toast.ok(r.created ? '주간 운영 제안 카드를 만들었습니다 — 승인함에서 확인하세요' : '최근 6일 안에 만든 주간 제안이 있어 그대로 둡니다'); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
   async function reviewNow() {
     setBusy(true);
     try { const r = await api<{ status: string; signals: any[]; cards: number }>('/api/marketing/ops/review', { body: {} }); toast.ok(`검토 완료 — ${REVIEW_STATUS[r.status]?.[0] ?? r.status}${r.cards ? ` · 운영 신호 카드 ${r.cards}장` : ''}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
@@ -47,7 +53,8 @@ export function Ops() {
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold" style={{ color: C }}>운영실 <span className="text-sm font-normal text-ink-2">AI 마케터</span></h1>
         <select className={cx(inputCls, 'h-8 w-auto py-0 text-sm')} value={data?.month ?? ''} onChange={(e) => setMonth(e.target.value)} aria-label="달" data-testid="ops-month">{(data?.months ?? []).map((m) => <option key={m} value={m}>{mk(m)}</option>)}</select>
-        {data?.canEdit && <Button size="sm" className="ml-auto" onClick={propose} disabled={busy} data-testid="ops-propose">AI 마케터 제안 받기</Button>}
+        {data?.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={weekly} disabled={busy} data-testid="ops-weekly">주간 제안 만들기</Button>}
+        {data?.canEdit && <Button size="sm" onClick={propose} disabled={busy} data-testid="ops-propose">AI 마케터 제안 받기</Button>}
       </div>
       {/* 대표 03:00 ② 상시 운영: 지금 상태(정상/주의/조치 필요) · 신호 · 최근 검토 시각 · [지금 검토] — 1시간마다 자동(지표만, AI 비용 0), 신호는 '운영 신호' 카드로 승인 요청 */}
       {data && <div className={cx('flex flex-wrap items-center gap-2 rounded-card border px-3 py-2 text-xs', data.review ? REVIEW_STATUS[data.review.status][1] : 'border-line bg-white text-ink-2')} data-testid="ops-review" data-status={data.review?.status ?? 'none'}>

@@ -1352,6 +1352,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 #98 ③ 잔여 — 광고 성과 키워드/소재 표 + 운영실 [주간 제안 만들기] (migration 152) [배포확인요청]
+- `mkt_ad_items`(계정·날짜·kind keyword/ad·item_id, 이름·캠페인·광고그룹·노출·클릭·비용·전환, 계정 삭제 시 함께 삭제). 동기화(매일 아침 최근 7일·[지금 동기화])에서 캠페인 다음에 읽음 — 실패해도 캠페인 성과는 그대로(결과 itemError 만).
+  - 네이버: `/ncc/adgroups?nccCampaignId` → `/ncc/keywords`·`/ncc/ads?nccAdgroupId` → `/stats?ids=`(키워드·소재 id, 100개씩, 하루씩) — StatReport(파일 작업) 대신 /stats 로 같은 숫자. 계정당 캠페인 50·광고그룹 100·항목 500 상한.
+  - 구글: GAQL `keyword_view`(ad_group_criterion.keyword.text) · `ad_group_ad`(이름 없으면 '종류 id'). Meta: insights `level=ad`(ad_name·adset_name, 전환 = 리드류만).
+- 광고 성과 화면: 표 위 [캠페인 n] [키워드 n] [소재 n] 탭(`ads-tab-*`, 같은 기간·브랜드·매체 필터), 키워드/소재 표(`ads-items`: 이름·계정·브랜드 / 캠페인 › 광고그룹 / 노출·클릭(CTR)·광고비·CPC·전환, 광고비 순 150개), [CSV 내려받기]는 보이는 표 기준(키워드·소재 CSV 는 캠페인·광고그룹 칸 포함).
+- 운영실: [주간 제안 만들기](`ops-weekly`, 관리자) → POST /api/marketing/ops/weekly(6일 안 있으면 그대로 둔다는 안내).
+- 시험: marketing-ads(네이버 키워드 2·소재 1 → 표·광고비 순·매체 필터·덮어쓰기 / 구글 키워드·광고·Meta 광고·연결 끊기 삭제).
+- 로컬 확인 부탁: 운영 네이버 계정(바디랩 등) [지금 동기화] 뒤 광고 성과 '키워드' 탭에 실제 키워드가 들어오는지(네이버 API 응답 모양이 다르면 last_error 없이 비어 보일 수 있음 → sync 결과 itemError 값 공유), CSV 열기.
+
 ## 2026-10-21 대표 12:20 — 피드 일관성 신호 카드 (migration 151) [배포확인요청]
 - 방식(숫자만, AI 비용 0): `src/lib/mktFeed.ts` — 브랜드별 **최근 9장**(인스타 3×3: 게시됨·is_test 아님·instagram/facebook·피드 종류) 이미지를 `sharp`(next 가 함께 설치, serverExternalPackages)로 32×32 로 줄여 밝기·채도·색온도(R−B)·중앙−가장자리 밝기·대비를 재고 `library_files.image_stats` 에 한 번만 저장(151). 편차 단위 = 밝기 40·채도 15%·색온도 40 → 장마다 거리 ≥1.6 이면 '튀는 장', 일관성 점수 = 100 − (편차 합산).
 - 운영실(/s/marketing/ops) '피드 일관성' 블록(`ops-feed`): 브랜드별 점수 배지(70↑ 초록·50↑ 주황·그 아래 빨강)·3×3 미리보기(튀는 장 빨간 테두리 '튐' 배지, 제목·밝기·채도 툴팁, 게시 URL/승인함 링크)·한 줄 메모. sharp 를 못 쓰는 환경이면 '이미지 분석 모듈이 없어 비교하지 못했습니다'(신호 없음).
