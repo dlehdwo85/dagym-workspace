@@ -3,7 +3,7 @@
   "regions": [
     "sin1"
   ],
-  "buildCommand": "node scripts/migrate.mjs && next build",
+  "buildCommand": "node scripts/migrate.mjs --soft-connect && next build",
   "ignoreCommand": "bash scripts/vercel-ignore.sh",
   "crons": [
     {

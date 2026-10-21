@@ -53,6 +53,7 @@ export function BillingSection() {
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState('');
   const [pm, setPm] = useState<'CARD' | 'BANK' | 'VBANK'>('CARD'); // V29 결제창 결제 수단
+  const [renewOk, setRenewOk] = useState(false); // V34-B (#282) 정기결제 별도 동의(체크해야 결제)
   const [pageMode, setPageMode] = useState(false); // #413 레이어가 바로 닫히는 환경 — 같은 탭 이동 방식
   useEffect(() => {
     const sp = new URLSearchParams(location.search);
@@ -74,9 +75,9 @@ export function BillingSection() {
   }
   async function subscribe(code: string) {
     const q = monthly.find((x: any) => x.planCode === code);
-    if (!q || !confirm(`${q.name} 월 ${won(q.amount)}(VAT 포함, ${q.seats}인 기준)을 등록한 카드로 결제하고 매달 자동 결제할까요?`)) return;
+    if (!q || !renewOk) return;
     setBusy(true);
-    try { await api('/api/billing/subscribe', { body: { planCode: code } }); toast.ok('구독을 시작했습니다'); location.reload(); } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+    try { await api('/api/billing/subscribe', { body: { planCode: code, consent: true } }); toast.ok('구독을 시작했습니다'); location.reload(); } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   async function openWindow(body: any) {
     setBusy(true);
@@ -118,9 +119,15 @@ export function BillingSection() {
                 <select className={cx(inputCls, 'w-auto')} value={plan} onChange={(e) => setPlan(e.target.value)} aria-label="구독할 요금제">
                   <option value="">요금제 선택</option>{monthly.map((q: any) => <option key={q.planCode} value={q.planCode}>{q.name} · 월 {won(q.amount)} ({q.seats}인)</option>)}
                 </select>
-                <Button size="sm" disabled={!plan || !data.card || busy} onClick={() => subscribe(plan)} data-testid="billing-subscribe">{data.card ? '등록 카드로 결제·자동 결제' : '카드를 먼저 등록하세요'}</Button>
+                <Button size="sm" disabled={!plan || !data.card || !renewOk || busy} onClick={() => subscribe(plan)} data-testid="billing-subscribe">{data.card ? '등록 카드로 결제·자동 결제' : '카드를 먼저 등록하세요'}</Button>
                 <Button size="sm" variant="secondary" disabled={!plan || busy} onClick={() => openWindow({ kind: 'monthly', planCode: plan })} data-testid="billing-window-monthly">결제창으로 1개월</Button>
               </div>
+              {plan && (() => { const q = monthly.find((x: any) => x.planCode === plan); return q ? (
+                <label className="mt-2 flex items-start gap-2 rounded-input border border-line bg-slate-50 p-2 text-xs text-ink-2" data-testid="billing-consent">
+                  <input type="checkbox" className="mt-0.5" checked={renewOk} onChange={(e) => setRenewOk(e.target.checked)} aria-label="자동 결제 동의" />
+                  <span><b className="text-ink-1">[필수] 정기결제 동의</b> — {q.name} 요금제를 매월 {won(q.amount)}(VAT 포함, 인원이 바뀌면 다음 결제부터 반영)씩 등록한 카드로 자동 결제합니다. 설정에서 언제든 해지를 예약할 수 있고, 해지하면 이미 결제한 기간까지 쓴 뒤 자동 결제가 멈춥니다. 청약철회·환불 기준은 <a href="/terms" target="_blank" className="underline">이용약관 제6조</a>를 따릅니다.</span>
+                </label>) : null; })()}
+              {data.autoRenewConsent && <p className="mt-1 text-[11px] text-ink-3" data-testid="billing-consent-log">정기결제 동의 기록: {fmtDateTime(data.autoRenewConsent.created_at)} · {data.autoRenewConsent.plan_code} · {won(data.autoRenewConsent.amount_krw)}/{data.autoRenewConsent.cycle === 'annual' ? '년' : '월'}</p>}
               <p className="mt-1 text-[11px] text-ink-3">결제창 결제는 카드 등록 없이 이번 1개월만 — 다음 달부터 자동 결제하려면 카드를 등록하세요.</p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-xs" role="radiogroup" aria-label="결제창 결제 수단" data-testid="billing-paymethod">

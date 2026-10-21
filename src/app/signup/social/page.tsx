@@ -17,13 +17,13 @@ function SocialSignup() {
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<'personal' | 'team'>('team');
   const [f, setF] = useState({ name: '', company: '', size: '', industry: '', industries: [] as string[] });
-  const [agree, setAgree] = useState({ terms: false, privacy: false, ai: false, marketing: false });
+  const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false });
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => { api(`/api/auth/oauth/pending?t=${encodeURIComponent(t)}`).then((r) => { setInfo(r); setF((x) => ({ ...x, name: r.name ?? '' })); }).catch((e) => setErr(e.message)); }, [t]);
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setErr(null);
-    if (!agree.terms || !agree.privacy) { setErr('필수 약관에 동의해 주세요'); return; }
+    if (!agree.terms || !agree.privacy || !agree.age14) { setErr('필수 약관에 동의해 주세요'); return; }
     setBusy(true);
     try {
       setAdsConsent(ads);
@@ -54,6 +54,7 @@ function SocialSignup() {
       <div className="space-y-2 rounded-card border border-line p-3">
         {box('terms', <><Link href="/terms" target="_blank" className="underline">이용약관</Link> 동의</>, true)}
         {box('privacy', <><Link href="/privacy" target="_blank" className="underline">개인정보 수집·이용</Link> 동의</>, true)}
+        {box('age14', '만 14세 이상입니다', true)}
         {box('ai', <><Link href="/ai-notice" target="_blank" className="underline">AI 기능 이용</Link>(입력 내용이 AI 처리 업체로 전송) 동의</>, false)}
         {box('marketing', '새 기능·혜택 소식 받기', false)}
         {conversionTagsConfigured() && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" /><span>광고 효과 측정(가입 완료 1회) 동의 <span className="text-ink-3">(선택)</span></span></label>}

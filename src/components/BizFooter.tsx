@@ -9,11 +9,14 @@ export async function BizFooter({ className }: { className?: string }) {
     ['상호', e.COMPANY_NAME], ['대표', e.COMPANY_CEO], ['사업자등록번호', e.COMPANY_BIZNO],
     ['통신판매업 신고번호', e.COMPANY_MAIL_ORDER_NO || '신고 진행 중'], ['주소', e.COMPANY_ADDRESS],
     ['전화', e.COMPANY_PHONE], ['이메일', e.SUPPORT_EMAIL || e.COMPANY_PRIVACY_EMAIL],
+    ['호스팅 서비스', 'Vercel Inc.'], // V34-B (#282) 전자상거래법 표시 항목
   ];
+  const bizNo = (e.COMPANY_BIZNO || '').replace(/\D/g, '');
+  const ftc = bizNo.length === 10 ? `https://www.ftc.go.kr/bizCommPop.do?wrkr_no=${bizNo}` : null; // 공정위 통신판매사업자 정보 확인
   return (
     <footer className={['border-t border-line bg-white px-4 py-6 text-center text-[11px] leading-5 text-ink-3', className].filter(Boolean).join(' ')} data-testid="biz-footer">
       <img src="/brand/lockup-light.svg" alt="WorkIn 워크인" className="mx-auto mb-2 h-6" width={200} height={60} />
-      <p className="mx-auto max-w-3xl">{items.filter(([, v]) => v).map(([k, v], n) => <span key={k}>{n > 0 && <span aria-hidden> · </span>}{k} {v}</span>)}</p>
+      <p className="mx-auto max-w-3xl">{items.filter(([, v]) => v).map(([k, v], n) => <span key={k}>{n > 0 && <span aria-hidden> · </span>}{k} {v}</span>)}{ftc && <span> · <a href={ftc} target="_blank" rel="noreferrer" className="underline" data-testid="biz-ftc">사업자정보 확인</a></span>}</p>
       <p className="mt-1.5">
         <Link href="/terms" className="underline">이용약관</Link> · <Link href="/privacy" className="font-semibold underline">개인정보처리방침</Link> · <Link href="/account-deletion" className="underline">계정 삭제</Link> · <Link href="/ai-notice" className="underline">AI 이용 안내</Link>
       </p>

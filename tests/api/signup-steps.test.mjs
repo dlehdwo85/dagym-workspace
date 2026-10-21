@@ -14,7 +14,7 @@ describe('V32 3 가입 단계', () => {
     assert.equal((await pub.req('POST', '/api/public/signup-step', { anon: 'x', step: 'account_view' })).status, 400);
     assert.equal((await pub.req('POST', '/api/public/signup-step', { anon: 'anon-test-0001', step: 'verified' })).status, 400, '서버 단계는 밖에서 못 넣음');
     const c = new Client('boss');
-    const r = await c.ok('POST', '/api/auth/signup', { email: 'boss@steps.test', name: '대표', password: 'signup-pass-1234', mode: 'team', company: '단계상사', size: '2-10', agree: { terms: true, privacy: true } });
+    const r = await c.ok('POST', '/api/auth/signup', { email: 'boss@steps.test', name: '대표', password: 'signup-pass-1234', mode: 'team', company: '단계상사', size: '2-10', agree: { terms: true, age14: true, privacy: true } });
     await c.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
     const [{ tenant }] = await sql`select tenant from users where email = 'boss@steps.test'`;
     const steps = async () => (await sql`select step from signup_steps where tenant = ${tenant} order by id`).map((x) => x.step);

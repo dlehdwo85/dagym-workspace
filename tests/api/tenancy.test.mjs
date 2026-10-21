@@ -23,7 +23,7 @@ before(async () => {
 });
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 
-const form = (o) => ({ password: 'signup-pass-1234', agree: { terms: true, privacy: true, ai: true, marketing: false }, ...o });
+const form = (o) => ({ password: 'signup-pass-1234', agree: { terms: true, age14: true, privacy: true, ai: true, marketing: false }, ...o });
 async function join(o) {
   const c = new Client(o.email);
   const r = await c.ok('POST', '/api/auth/signup', form(o));
@@ -52,7 +52,9 @@ describe('V15 공개 가입 → 이메일 확인 → 로그인', () => {
   test('팀으로 시작: 회사 이름 필수, 동의 필수, 봇(숨은 칸)은 아무것도 안 만듦', async () => {
     const c = new Client();
     assert.equal((await c.post('/api/auth/signup', form({ email: 'x@example.com', name: 'x', mode: 'team' }))).status, 400);
-    assert.equal((await c.post('/api/auth/signup', { ...form({ email: 'x@example.com', name: 'x', mode: 'personal' }), agree: { terms: true, privacy: false } })).status, 400);
+    assert.equal((await c.post('/api/auth/signup', { ...form({ email: 'x@example.com', name: 'x', mode: 'personal' }), agree: { terms: true, age14: true, privacy: false } })).status, 400);
+    const u14 = await c.post('/api/auth/signup', { ...form({ email: 'kid@example.com', name: 'x', mode: 'personal' }), agree: { terms: true, age14: false, privacy: true } });
+    assert.equal(u14.status, 400, 'V34-B 만 14세 확인 필수'); assert.match(JSON.stringify(u14.body), /만 14세/);
     const bot = await c.ok('POST', '/api/auth/signup', form({ email: 'bot@example.com', name: 'bot', mode: 'personal', website: 'http://spam' }));
     assert.ok(!bot.devLink);
     assert.equal((await sql`select 1 from users where email = 'bot@example.com'`).length, 0);

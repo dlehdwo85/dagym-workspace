@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { Client, bootstrap, resetDb, startServer, testDb, BASE } from '../helpers.mjs';
 
 let srv, sql, ctx, cust, custTenant, custOwnerId;
-const form = (o) => ({ password: 'signup-pass-1234', agree: { terms: true, privacy: true, ai: true, marketing: false }, ...o });
+const form = (o) => ({ password: 'signup-pass-1234', agree: { terms: true, age14: true, privacy: true, ai: true, marketing: false }, ...o });
 
 before(async () => {
   await resetDb(); srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', FUNNEL_STATS_TOKEN: 'funnel-token-0123456789' }); sql = testDb(); ctx = await bootstrap();

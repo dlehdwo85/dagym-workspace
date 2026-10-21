@@ -6,6 +6,7 @@ import { HttpError, badRequest, notFound } from '../errors';
 import { audit, logError } from '../log';
 import { notify } from '../notifications';
 import { tenantOf, type SessionUser } from '../types';
+import { TERMS_VERSION } from '../signup';
 import { approveAuth, approveBilling, cancelPayment, npConf, npLiveConf, npTestConf, parseNiceForm, registerBillKey, removeBillKey, windowParams, type NpConf } from './nicepay';
 
 /**
@@ -50,16 +51,17 @@ export async function billingOverview(u: SessionUser) {
   if (['default', 'demo'].includes(tenantOf(u))) return { enabled: false, internal: true };
   const t = await requireBillingAdmin(u);
   const sql = db();
-  const [[card], [sub], payments, plans, addons] = await Promise.all([
+  const [[card], [sub], payments, plans, addons, [consent]] = await Promise.all([
     sql`select card_name, card_last4, created_at from billing_cards where tenant = ${t} and removed_at is null`,
     sql`select plan_code, status, billing_cycle, next_billing_on, billing_amount, cancel_at_period_end, past_due_since, next_retry_on, trial_ends_at, billing_lock, billing_grace_until from tenant_subscriptions where tenant = ${t}`,
     sql`select id, kind, plan_code, addon_code, amount, status, canceled_amount, result_msg, card_name, card_no, paid_at, created_at, tid, meta->>'payMethod' as pay_method, meta->'vbank' as vbank from payments where tenant = ${t} order by created_at desc limit 30`,
     sql<{ code: string }[]>`select code from plans where public and active and code not in ('trial', 'free', 'team_free', 'w_free') order by sort`,
     sql`select code, name, monthly_krw from plan_addons where active order by sort`,
+    sql`select plan_code, amount_krw, cycle, created_at from billing_consents where tenant = ${t} order by created_at desc limit 1`, // V34-B 마지막 정기결제 동의
   ]);
   const quotes = [];
   for (const p of plans) for (const cy of ['monthly', 'annual'] as const) { const q = await quote(t, p.code, cy, sql); quotes.push({ planCode: p.code, name: q.plan.name, cycle: cy, seats: q.seats, supply: q.supply, amount: q.amount }); }
-  return { enabled: !!npConf(), mode: npConf()?.mode ?? null, card: card ?? null, sub: sub ?? null, payments, quotes, addons: addons.map((a: any) => ({ ...a, amount: Math.round(a.monthly_krw * VAT) })) };
+  return { enabled: !!npConf(), mode: npConf()?.mode ?? null, card: card ?? null, sub: sub ?? null, payments, quotes, autoRenewConsent: consent ?? null, addons: addons.map((a: any) => ({ ...a, amount: Math.round(a.monthly_krw * VAT) })) };
 }
 
 export const cardInput = z.object({
@@ -119,7 +121,11 @@ async function sendReceipt(sql: Sql, paymentId: string) {
   } catch (e) { await logError('billing-receipt', e); }
 }
 
-export const subscribeInput = z.object({ planCode: z.string().max(40) });
+/** V34-B (#282) 정기결제 별도 동의 문구 — 화면과 서버가 같은 문구를 쓰고, 동의 당시 문구·금액·주기를 billing_consents 에 남긴다 */
+export function autoRenewConsentText(planName: string, amount: number, cycle: 'monthly' | 'annual') {
+  return `${planName} 요금제를 ${cycle === 'monthly' ? '매월' : '매년'} ${amount.toLocaleString('ko-KR')}원(VAT 포함, 인원이 바뀌면 다음 결제부터 반영)씩 등록한 카드로 자동 결제합니다. 설정에서 언제든 해지를 예약할 수 있고, 해지하면 이미 결제한 기간까지 쓴 뒤 자동 결제가 멈춥니다.`;
+}
+export const subscribeInput = z.object({ planCode: z.string().max(40), consent: z.literal(true, { errorMap: () => ({ message: '자동 결제 조건에 동의해 주세요' }) }) });
 /** 월 구독 시작(또는 요금제 변경): 등록한 카드로 바로 첫 달 결제 */
 export async function subscribeMonthly(u: SessionUser, i: z.infer<typeof subscribeInput>, ip: string | null) {
   const t = await requireBillingAdmin(u);
@@ -128,7 +134,8 @@ export async function subscribeMonthly(u: SessionUser, i: z.infer<typeof subscri
   const r = await chargeCard(sql, c, t, 'subscription', i.planCode, q.amount, q.goodsName, u.id);
   if (!r.ok) throw badRequest(`결제하지 못했습니다: ${r.msg ?? '카드사 거절'}`);
   await activate(sql, t, i.planCode, 'monthly', q.amount);
-  await audit(sql, u.id, 'billing.subscribed', 'tenant', null, { tenant: t, plan: i.planCode, amount: q.amount }, ip);
+  await sql`insert into billing_consents (tenant, user_id, plan_code, amount_krw, cycle, text, terms_version, ip) values (${t}, ${u.id}, ${i.planCode}, ${q.amount}, 'monthly', ${autoRenewConsentText(q.plan.name, q.amount, 'monthly')}, ${TERMS_VERSION}, ${ip})`;
+  await audit(sql, u.id, 'billing.subscribed', 'tenant', null, { tenant: t, plan: i.planCode, amount: q.amount, consent: true }, ip);
   return { ok: true, amount: q.amount, paymentId: r.paymentId };
 }
 

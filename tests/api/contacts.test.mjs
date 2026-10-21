@@ -9,7 +9,7 @@ const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
 before(async () => {
   await resetDb(); srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1' }); sql = testDb(); ctx = await bootstrap();
   const c = new Client('fit@other.test');
-  const r = await c.ok('POST', '/api/auth/signup', { email: 'fit@other.test', password: 'signup-pass-1234', name: '박대표', mode: 'team', company: '튼튼짐', industry: '운동·피트니스', agree: { terms: true, privacy: true, ai: true } });
+  const r = await c.ok('POST', '/api/auth/signup', { email: 'fit@other.test', password: 'signup-pass-1234', name: '박대표', mode: 'team', company: '튼튼짐', industry: '운동·피트니스', agree: { terms: true, age14: true, privacy: true, ai: true } });
   await c.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
   other = c;
 });

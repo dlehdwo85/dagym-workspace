@@ -13,6 +13,8 @@ export function biz() {
   };
 }
 export const LEGAL_EFFECTIVE = '2026년 10월 21일';
+/** V34-B (#282) 약관 개정일 — 요금·환불·자동결제·해지·SaaS 조항 추가. 이용자에게 불리한 변경은 제3조에 따라 30일 전 공지 뒤 이 값을 올린다 */
+export const TERMS_REVISED = '2026년 10월 21일';
 
 export function LegalDoc({ title, children }: { title: string; children: React.ReactNode }) {
   const b = biz();
@@ -23,6 +25,7 @@ export function LegalDoc({ title, children }: { title: string; children: React.R
       {children}
       <footer className="border-t pt-3 text-xs text-slate-500">
         <p>{b.name} · 대표 {b.ceo} · 사업자등록번호 {b.bizNo}</p><p>{b.address} · 전화 {b.phone} · 문의 {b.email}</p>
+        <p>통신판매업 신고번호 {process.env.COMPANY_MAIL_ORDER_NO || '신고 진행 중'} · 호스팅 서비스 Vercel Inc.</p>
         <p>시행일: {LEGAL_EFFECTIVE} (베타)</p>
       </footer>
     </main>

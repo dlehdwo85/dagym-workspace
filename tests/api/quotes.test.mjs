@@ -28,7 +28,7 @@ before(async () => {
   await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'hilink', name: '하이링크', ceo: '김대표', bizNo: '987-65-43210', address: '성남 분당구 판교로 2', phone: '031-000-0000' });
   taskId = (await ctx.owner.ok('POST', '/api/tasks', { title: '강남점 장비 견적', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
   other = new Client('other');
-  const r = await other.ok('POST', '/api/auth/signup', { email: 'q@other.test', password: 'signup-pass-1234', name: '박대표', mode: 'team', company: '튼튼짐', industry: '운동·피트니스', agree: { terms: true, privacy: true, ai: true } });
+  const r = await other.ok('POST', '/api/auth/signup', { email: 'q@other.test', password: 'signup-pass-1234', name: '박대표', mode: 'team', company: '튼튼짐', industry: '운동·피트니스', agree: { terms: true, age14: true, privacy: true, ai: true } });
   await other.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
 });
 after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); });

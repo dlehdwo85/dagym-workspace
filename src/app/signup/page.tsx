@@ -16,7 +16,7 @@ export default function SignupPage() {
   const [mode, setMode] = useState<'personal' | 'team'>('personal');
   const [f, setF] = useState({ name: '', email: '', password: '', company: '', size: '', industry: '', industries: [] as string[], website: '' });
   const [social, setSocial] = useState(0);
-  const [agree, setAgree] = useState({ terms: false, privacy: false, ai: false, marketing: false });
+  const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false });
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -26,17 +26,17 @@ export default function SignupPage() {
   useEffect(() => { captureUtm(); }, []);
   useEffect(() => { if (enabled) signupStep(step === 1 ? 'account_view' : 'company_view'); }, [step, enabled]);
   useEffect(() => { api('/api/auth/signup').then((r) => setEnabled(!!r.enabled)).catch(() => setEnabled(false)); }, []);
-  const all = agree.terms && agree.privacy && agree.ai && agree.marketing;
+  const all = agree.terms && agree.age14 && agree.privacy && agree.ai && agree.marketing;
 
   function toCompany(e: React.FormEvent) {
     e.preventDefault(); setErr(null);
-    if (!agree.terms || !agree.privacy) { setErr('필수 약관에 동의해 주세요'); return; }
+    if (!agree.terms || !agree.privacy || !agree.age14) { setErr('필수 약관에 동의해 주세요'); return; }
     if (f.password.length < 8) { setErr('비밀번호는 8자 이상이어야 합니다'); return; }
     setStep(2); window.scrollTo({ top: 0 });
   }
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setErr(null);
-    if (!agree.terms || !agree.privacy) { setStep(1); setErr('필수 약관에 동의해 주세요'); return; }
+    if (!agree.terms || !agree.privacy || !agree.age14) { setStep(1); setErr('필수 약관에 동의해 주세요'); return; }
     if (mode === 'team' && !f.company.trim()) { setErr('회사(팀) 이름을 입력하세요'); return; }
     setBusy(true);
     try {
@@ -79,9 +79,10 @@ export default function SignupPage() {
         {/* 봇 방지: 사람에게는 안 보이는 칸 */}
         <div aria-hidden className="absolute -left-[9999px] h-0 overflow-hidden"><label>웹사이트<input tabIndex={-1} autoComplete="off" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} name="website" /></label></div>
         <div className="space-y-2 rounded-card border border-line p-3">
-          <label className="flex items-center gap-2 border-b border-line pb-2 text-sm font-semibold"><input type="checkbox" checked={all} onChange={(e) => setAgree({ terms: e.target.checked, privacy: e.target.checked, ai: e.target.checked, marketing: e.target.checked })} aria-label="전체 동의" />전체 동의</label>
+          <label className="flex items-center gap-2 border-b border-line pb-2 text-sm font-semibold"><input type="checkbox" checked={all} onChange={(e) => setAgree({ terms: e.target.checked, age14: e.target.checked, privacy: e.target.checked, ai: e.target.checked, marketing: e.target.checked })} aria-label="전체 동의" />전체 동의</label>
           {box('terms', <><Link href="/terms" target="_blank" className="underline">이용약관</Link> 동의</>, true)}
           {box('privacy', <><Link href="/privacy" target="_blank" className="underline">개인정보 수집·이용</Link> 동의</>, true)}
+          {box('age14', '만 14세 이상입니다', true)}
           {box('ai', <><Link href="/ai-notice" target="_blank" className="underline">AI 기능 이용</Link>(입력 내용이 AI 처리 업체로 전송) 동의</>, false)}
           {box('marketing', '새 기능·혜택 소식 받기', false)}
           {conversionTagsConfigured() && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" data-testid="agree-ads" /><span>광고 효과 측정(가입 완료 1회 — Meta·Google·네이버 태그) 동의 <span className="text-ink-3">(선택)</span></span></label>}

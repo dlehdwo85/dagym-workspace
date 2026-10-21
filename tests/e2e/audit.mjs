@@ -107,7 +107,7 @@ for (const r of rows.filter((r) => r.w === 360 && r.smallN)) console.log('small'
 if (process.env.LANDING === '1') {
   // 랜딩 캡처: 가입한 샘플 팀 공간(회사 실제 데이터 아님)
   const c = new Client('sample');
-  const sg = await c.ok('POST', '/api/auth/signup', { email: 'sample@workin.test', password: 'sample-pass-1234', name: '김하늘', mode: 'team', company: '샘플상사', agree: { terms: true, privacy: true } });
+  const sg = await c.ok('POST', '/api/auth/signup', { email: 'sample@workin.test', password: 'sample-pass-1234', name: '김하늘', mode: 'team', company: '샘플상사', agree: { terms: true, age14: true, privacy: true } });
   await c.ok('POST', '/api/auth/verify', { token: sg.devLink.split('/').pop() });
   await c.ok('POST', '/api/onboarding', { title: '팀장', done: true });
   const me = await c.ok('GET', '/api/auth/me'); const unit = me.orgUnits[0].id;

@@ -122,7 +122,7 @@ describe('16차 웹사이트 문의 연동', () => {
 
   test('다짐 외 회사(가입한 다른 회사 대표, 슈퍼관리자 표시가 있어도) → 메뉴·API 404', async () => {
     const c = new Client('other');
-    const r = await c.ok('POST', '/api/auth/signup', { email: 'boss@other.test', name: '남사장', mode: 'team', company: '남의상사', password: 'signup-pass-1234', agree: { terms: true, privacy: true, ai: true, marketing: false } });
+    const r = await c.ok('POST', '/api/auth/signup', { email: 'boss@other.test', name: '남사장', mode: 'team', company: '남의상사', password: 'signup-pass-1234', agree: { terms: true, age14: true, privacy: true, ai: true, marketing: false } });
     await c.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
     await c.ok('POST', '/api/auth/login', { email: 'boss@other.test', password: 'signup-pass-1234' });
     await sql`update users set platform_admin = true where email = 'boss@other.test'`;
