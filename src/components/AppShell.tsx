@@ -190,6 +190,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
     return () => { alive = false; clearInterval(t); clearTimeout(rt); window.removeEventListener('focus', onFocus); window.removeEventListener('wos-unread', onUnread); window.removeEventListener('wos-refresh', onRefresh); window.removeEventListener('online', sync); window.removeEventListener('offline', sync); bc?.close(); };
   }, [router]);
+  // #110: 앱 아이콘 숫자(PWA 설치·지원 브라우저) — 안 읽은 알림 수와 같이, 0이면 지움. 네이티브 앱 배지는 앱(로컬) 쪽
+  useEffect(() => { try { const nav = navigator as Navigator & { setAppBadge?: (n: number) => Promise<void>; clearAppBadge?: () => Promise<void> }; if (unread > 0) nav.setAppBadge?.(unread).catch(() => {}); else nav.clearAppBadge?.().catch(() => {}); } catch { /* 미지원 */ } }, [unread]);
   const reloadFavs = favs.reload;
   useEffect(() => { const h = () => reloadFavs(); window.addEventListener('wos-favorites', h); return () => window.removeEventListener('wos-favorites', h); }, [reloadFavs]);
   useEffect(() => { setCreateMenu(false); setUserMenu(false); setMore(false); setSpaceMenu(false); }, [path]);

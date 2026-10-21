@@ -28,4 +28,23 @@ describe('V32 0 알림 읽음', () => {
     assert.equal(all.unread, 0);
     assert.equal((await ctx.staffA.client.req('POST', '/api/notifications/read', { link: 'https://evil.test/x' })).status, 400);
   });
+  // 대표 10/20 17:40 (#110) 건별 읽음·보관: ids 읽음 → 남은 수 바로 · archive = 읽음+보관(기본 목록·전체에서 빠지고 ?archived=1 에만) · unarchive · 남의 알림은 안 바뀜
+  test('#110 ids 읽음 · 보관(archive) · 보관함 목록 · 되돌리기', async () => {
+    const c = (await ctx.owner.ok('POST', '/api/tasks', { title: '알림 보관 C', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
+    const d = (await ctx.owner.ok('POST', '/api/tasks', { title: '알림 보관 D', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
+    const list = await ctx.staffA.client.ok('GET', '/api/notifications');
+    const nc = list.items.find((n) => n.link === `/tasks/${c}`), nd = list.items.find((n) => n.link === `/tasks/${d}`);
+    const r1 = await ctx.staffA.client.ok('POST', '/api/notifications/read', { ids: [nc.id] });
+    assert.equal(r1.changed, 1); assert.equal(r1.unread, list.unread - 1);
+    const r2 = await ctx.staffA.client.ok('POST', '/api/notifications/read', { ids: [nd.id], archive: true });
+    assert.equal(r2.changed, 1); assert.equal(r2.unread, list.unread - 2, '보관은 읽음도 같이');
+    const after = await ctx.staffA.client.ok('GET', '/api/notifications');
+    assert.ok(after.items.some((n) => n.id === nc.id && n.read_at), '읽은 알림은 목록에 남음');
+    assert.ok(!after.items.some((n) => n.id === nd.id), '보관한 알림은 기본 목록에서 빠짐');
+    const arch = await ctx.staffA.client.ok('GET', '/api/notifications?archived=1');
+    assert.ok(arch.items.some((n) => n.id === nd.id && n.archived_at && n.read_at), '보관함에만');
+    assert.equal((await ctx.staffB.client.ok('POST', '/api/notifications/read', { ids: [nc.id, nd.id], archive: true })).changed, 0, '남의 알림은 안 바뀜');
+    assert.equal((await ctx.staffA.client.ok('POST', '/api/notifications/read', { ids: [nd.id], unarchive: true })).changed, 1);
+    assert.ok((await ctx.staffA.client.ok('GET', '/api/notifications')).items.some((n) => n.id === nd.id && !n.archived_at), '되돌리면 목록으로');
+  });
 });
