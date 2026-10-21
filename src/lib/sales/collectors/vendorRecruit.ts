@@ -8,7 +8,7 @@ import { upsertNotices } from './store';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 
 export const RECRUIT_RE = /(협력\s*(업체|회사|사)|파트너사|신규\s*업체|업체\s*등록|정기\s*등록|우수\s*협력)[^<]{0,40}(모집|등록|공개|접수|신청|안내)/;
-export type WatchPage = { company: string; url: string; encoding?: string };
+export type WatchPage = { company: string; url: string; register_url?: string | null; encoding?: string };
 export async function watchPages(): Promise<WatchPage[]> {
   if (process.env.SALES_COLLECT_TEST_BASE) return [{ company: '시험건설', url: `${process.env.SALES_COLLECT_TEST_BASE.replace(/\/$/, '')}/vendor/notice` }];
   const [s] = await db()<{ value: WatchPage[] }[]>`select value from app_settings where key = 'sales_vendor_watch_pages'`;
@@ -32,7 +32,7 @@ export const vendorRecruitWatch: Collector = {
       if (left() < 6000) { errors.push(`시간 한도 근접 — ${p.company} 부터는 다음 실행에서`); break; }
       try { const res = await ctx.fetchImpl(p.url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' }, signal: AbortSignal.timeout(Math.min(10000, left() - 2000)) }); if (!res.ok) { errors.push(`${p.company}: HTTP ${res.status}`); continue; }
         const { text } = decodeKoreanText(new Uint8Array(await res.arrayBuffer()));
-        for (const r of parseRecruit(text, p.url)) items.push({ source_type: 'vendor_recruit', source_external_id: `${h8(p.company)}-${h8(r.title)}`, source_url: r.url, title: `[${p.company}] ${r.title}`, issuer: p.company, notice_type: '협력사 모집', posted_date: today, bid_category: '협력사 모집' });
+        for (const r of parseRecruit(text, p.url)) items.push({ source_type: 'vendor_recruit', source_external_id: `${h8(p.company)}-${h8(r.title)}`, source_url: r.url, title: `[${p.company}] ${r.title}`, issuer: p.company, notice_type: '협력사 모집', register_url: p.register_url && /^https?:\/\//.test(p.register_url) ? p.register_url : null, posted_date: today, bid_category: '협력사 모집' });
       } catch (e) { errors.push(`${p.company}: ${e instanceof Error ? e.message : String(e)}`); }
     }
     const r = items.length ? await upsertNotices(items) : { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0, errorLog: undefined as string | undefined }; if (r.errorLog) errors.push(r.errorLog);

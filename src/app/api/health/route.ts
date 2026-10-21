@@ -1,3 +1,4 @@
+import { mailConfigured } from '@/lib/mail';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { s3Configured, s3EnvWarnings } from '@/lib/storage';
@@ -27,6 +28,7 @@ export async function GET() {
         // 값은 내보내지 않고 형식 이상(공백·줄바꿈·따옴표)만
         storageWarnings: s3EnvWarnings(),
         webPush: webPushConfigured(),
+        mail: mailConfigured(),
         appPush: fcmConfigured(),
         googleCalendar: googleSyncEnabled(), // 선택 기능
         salesSrcKey: (await import('@/lib/sales/supabaseSrc')).srcKeyKind(), // V41 단계 2: 영업관리 원본 키 종류(값은 안 보임)

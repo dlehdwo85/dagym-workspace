@@ -1,22 +1,13 @@
 // 공공기관 입찰 — LH 입찰공고·사전규격, 방위사업청 경쟁입찰, 온비드 공유재산 임대(모두 data.go.kr OpenAPI, 웹 스크래핑 없음). 원본 public_agency_bids 이식(10/21).
 // 서비스 주소는 활용신청 뒤 운영에서 확인해 app_settings 'sales_collector_endpoints' 로 바꿀 수 있다(기본값은 공공데이터포털 명세 기준).
-import { db } from '../../db';
 import { dataGoKey } from '../collect';
 import { callDataGo } from './g2b';
 import { matchFit } from './procurement';
 import { upsertNotices } from './store';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 
-const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
-const DEFAULT_ENDPOINTS: Record<string, string> = {
-  lh_bid: 'https://apis.data.go.kr/B552555/lhBidInfo/getBidInfoList', lh_prespec: 'https://apis.data.go.kr/B552555/lhPreStdInfo/getPreStdInfoList',
-  d2b_bid: 'https://apis.data.go.kr/1290000/cmpetBidInfoService/getCmpetBidInfoList', onbid_lease: 'https://apis.data.go.kr/1360000/OnbidRentalService/getPublicRentalNoticeList',
-};
-export async function endpoints(): Promise<Record<string, string>> {
-  if (T()) return Object.fromEntries(Object.keys(DEFAULT_ENDPOINTS).map((k) => [k, `${T()}/agency/${k}`]));
-  const [s] = await db()<{ value: Record<string, string> }[]>`select value from app_settings where key = 'sales_collector_endpoints'`;
-  return { ...DEFAULT_ENDPOINTS, ...(s?.value ?? {}) };
-}
+export { DEFAULT_ENDPOINTS, endpoints } from './endpoints';
+import { endpoints } from './endpoints';
 const str = (v: unknown) => { if (v == null) return null; const s = String(v).trim(); return s ? s : null; };
 const pick = (it: any, ...keys: string[]) => { for (const k of keys) { const v = str(it?.[k]); if (v) return v; } return null; };
 export const D2B_WORDS = ['체력단련', '헬스', '피트니스', '체육', '수영', '골프', '출입통제', '키오스크', '위탁운영'];
@@ -43,7 +34,7 @@ export const publicAgencyBids: Collector = {
       if (left() < 6000) { errors.push(`시간 한도 근접 — ${sourceType} 건너뜀`); return; }
       const u = new URL(ep[sourceType]); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', '1'); u.searchParams.set('type', 'json'); u.searchParams.set('_type', 'json'); for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
       try { for (const it of await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000))) { const p = agencyPayload(it, sourceType, issuer); if (!p) continue; if (!matchFit(String(p.title), String(p.bid_category ?? ''), String(p.task_scope ?? '')).fit) continue; items.push(p); counts[sourceType] = (counts[sourceType] ?? 0) + 1; } }
-      catch (e) { const m = e instanceof Error ? e.message : String(e); if (/활용신청 필요/.test(m)) { if (!denied.includes(sourceType)) denied.push(sourceType); } if (errors.length < 12) errors.push(`${sourceType}: ${m}`); }
+      catch (e) { const m = e instanceof Error ? e.message : String(e); if (/활용신청 필요|주소 확인 필요/.test(m)) { if (!denied.includes(sourceType)) denied.push(sourceType); } if (errors.length < 12) errors.push(`${sourceType}: ${m}`); }
     };
     const d = (n: number) => new Date(Date.now() + n * 864e5);
     await call('lh_bid', 'LH 한국토지주택공사', { inqryBgnDt: fmt(d(-7)), inqryEndDt: fmt(d(0)), bidNtceBgnDt: fmt(d(-7)), bidNtceEndDt: fmt(d(0)) });
@@ -53,6 +44,6 @@ export const publicAgencyBids: Collector = {
     const seen = new Set<string>(); const uniq = items.filter((p) => { const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) return false; seen.add(k); return true; });
     const r = uniq.length ? await upsertNotices(uniq) : { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0, errorLog: undefined as string | undefined }; if (r.errorLog) errors.push(r.errorLog);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + denied.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
-      summary: `관련 공고 ${uniq.length}건(${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' · ') || '없음'}) · 신규 ${r.inserted} · 갱신 ${r.updated}` + (denied.length ? ` · 활용신청 필요: ${denied.join(', ')}` : '') };
+      summary: `관련 공고 ${uniq.length}건(${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' · ') || '없음'}) · 신규 ${r.inserted} · 갱신 ${r.updated}` + (denied.length ? ` · 활용신청·주소 확인 필요: ${denied.join(', ')} (플랫폼 운영 › 영업 수집기 설정)` : '') };
   },
 };

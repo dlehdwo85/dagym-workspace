@@ -3,6 +3,7 @@
 import { dataGoKey } from '../collect';
 import { matchFit } from './procurement';
 import { upsertNotices } from './store';
+import { endpoints } from './endpoints';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
@@ -10,9 +11,11 @@ const API = () => (T() ? `${T()}/g2b` : 'https://apis.data.go.kr/1230000');
 export const G2B_WORDS = ['피트니스', '헬스', '체력단련', '스포츠센터', '체육센터', '체육시설', '수영장', '골프', '커뮤니티', '주민공동', '위탁운영', '출입통제', '안면인식', '키오스크', '회원관리'];
 /** 나라장터 입찰공고 4대상(용역·물품·공사·외자) — 공고명 검색(bidNtceNm) */
 const BID_OPS = [['ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch', '용역'], ['ad/BidPublicInfoService/getBidPblancListInfoThngPPSSrch', '물품'], ['ad/BidPublicInfoService/getBidPblancListInfoCnstwkPPSSrch', '공사'], ['ad/BidPublicInfoService/getBidPblancListInfoFrgcptPPSSrch', '외자']] as const;
-const NURI_OPS = [['ao/PrvtBidNtceService/getPrvtBidNtceListServc', '용역'], ['ao/PrvtBidNtceService/getPrvtBidNtceListThng', '물품']] as const;
+/** 누리장터는 확인된 주소가 없어 플랫폼 설정(endpoints)으로 — 전체 URL 을 op 자리에 넣는다 */
+const nuriOps = async () => { const ep = await endpoints(); return [[ep.nuri_bid_servc, '용역'], [ep.nuri_bid_thng, '물품']] as const; };
 const PRESPEC_OPS = [['ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServc', '용역'], ['ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoThng', '물품']] as const;
-const AWARD_OPS = [['ao/ScsbidInfoService/getScsbidListSttusServcPPSSrch', '용역'], ['ao/ScsbidInfoService/getScsbidListSttusThngPPSSrch', '물품']] as const;
+// 낙찰정보는 'as/' 접두(2026-10-21 실측: ao/ 는 '서비스 없음', as/ 는 키 오류 = 주소 존재)
+const AWARD_OPS = [['as/ScsbidInfoService/getScsbidListSttusServcPPSSrch', '용역'], ['as/ScsbidInfoService/getScsbidListSttusThngPPSSrch', '물품']] as const;
 const fmt = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d).replace(/-/g, '');
 const str = (v: unknown) => { if (v == null) return null; const s = String(v).trim(); return s ? s : null; };
 export type ApiErr = { denied: boolean; msg: string };
@@ -23,6 +26,8 @@ export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string,
   // data.go.kr 공통 오류(XML): returnReasonCode 20·21·22·30·31·32·33 = 활용신청·키·호출 제한 문제 → '활용신청 필요'(그 서비스는 이번 실행에서 건너뜀)
   let j: any = null; try { j = JSON.parse(txt); } catch { const code = txt.match(/<returnReasonCode>([^<]+)</)?.[1] ?? txt.match(/<resultCode>([^<]+)</)?.[1] ?? ''; const msg = txt.match(/<returnAuthMsg>([^<]+)</)?.[1] ?? txt.match(/<errMsg>([^<]+)</)?.[1] ?? txt.match(/<resultMsg>([^<]+)</)?.[1] ?? ''; const both = `${code} ${msg}`;
     throw new Error(/^(20|21|22|30|31|32|33)\b/.test(code.trim()) || /DENIED|UNREGISTERED|NOT_REGISTERED|LIMITED|FORBIDDEN|EXPIRED/i.test(both) ? `활용신청 필요: ${safe(both.trim())}` : `응답 오류 (HTTP ${res.status}): ${safe(both.trim() || txt.slice(0, 80))}`); }
+  // JSON 형식의 공통 오류(OpenAPI_ServiceResponse): NO_OPENAPI_SERVICE_ERROR(12) = 주소가 틀리거나 폐기된 서비스 → '주소 확인 필요'(그 서비스는 건너뜀)
+  const cm = j?.OpenAPI_ServiceResponse?.cmmMsgHeader; if (cm) { const em = String(cm.errMsg ?? ''); const rc = String(cm.returnReasonCode ?? ''); if (/NO_OPENAPI_SERVICE|^12$/.test(em) || rc === '12') throw new Error(`주소 확인 필요: ${safe(em)} (해당 오픈API 서비스가 없거나 폐기됨 — 플랫폼 운영 › 영업 수집기 설정)`); if (/^(20|21|22|30|31|32|33)$/.test(rc) || /DENIED|UNREGISTERED|NOT_REGISTERED|LIMITED|FORBIDDEN|EXPIRED/i.test(em)) throw new Error(`활용신청 필요: ${safe(`${rc} ${em}`.trim())}`); throw new Error(`응답 오류 (HTTP ${res.status}): ${safe(`${rc} ${em}`.trim())}`); }
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${safe(JSON.stringify(j).slice(0, 120))}`);
   const header = j?.response?.header ?? j?.header; const code = header?.resultCode != null ? String(header.resultCode) : null;
   if (code != null && !['00', '0', 'INFO-000'].includes(code)) throw new Error(/03|04|30|31|32|33/.test(code) ? `활용신청 필요: ${safe(String(header?.resultMsg ?? code))}` : `결과코드 ${code}: ${safe(String(header?.resultMsg ?? ''))}`);
@@ -43,9 +48,9 @@ async function searchAll(ops: readonly (readonly [string, string])[], words: str
   const tasks: [string, string, string][] = []; for (const [op, cat] of ops) for (const w of words) tasks.push([op, cat, w]);
   let next = 0;
   await Promise.all(Array.from({ length: 4 }, async () => { while (next < tasks.length) { const [op, cat, w] = tasks[next++]; if (denied.has(op) || left() < 6000) continue;
-    const u = new URL(`${API()}/${op}`); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', '1'); u.searchParams.set('type', 'json'); for (const [k, v] of Object.entries({ ...windowParams(days), ...extra })) u.searchParams.set(k, v); if (w) u.searchParams.set('bidNtceNm', w);
+    const u = new URL(/^https?:\/\//.test(op) ? op : `${API()}/${op}`); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', '1'); u.searchParams.set('type', 'json'); for (const [k, v] of Object.entries({ ...windowParams(days), ...extra })) u.searchParams.set(k, v); if (w) u.searchParams.set('bidNtceNm', w);
     try { for (const it of await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000))) { const p = map(it, cat); if (!p) continue; const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) continue; seen.add(k); items.push(p); } }
-    catch (e) { const m = e instanceof Error ? e.message : String(e); if (/활용신청 필요/.test(m)) { denied.add(op); errors.push(`${cat}(${op.split('/').slice(-1)[0]}): ${m}`); } else if (errors.length < 12) errors.push(`${cat} '${w}': ${m}`); } } }));
+    catch (e) { const m = e instanceof Error ? e.message : String(e); if (/활용신청 필요|주소 확인 필요/.test(m)) { denied.add(op); errors.push(`${cat}(${op.split('/').slice(-1)[0]}): ${m}`); /* 서비스 단위 오류 — 같은 op 의 남은 검색어는 건너뜀 */ } else if (errors.length < 12) errors.push(`${cat} '${w}': ${m}`); } } }));
   return { items, errors, denied: [...denied] };
 }
 async function write(items: Record<string, unknown>[], errors: string[], opt: { mergeScope?: 'all' | 'award' } = {}) { if (!items.length) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0 }; const r = await upsertNotices(items, opt); if (r.errorLog) errors.push(r.errorLog); return r; }
@@ -56,11 +61,11 @@ export const g2bBidNotices: Collector = {
   async run(ctx: CollectorCtx): Promise<CollectorResult> {
     const key = dataGoKey(); if (!key) return noKey('나라장터');
     const a = await searchAll(BID_OPS, G2B_WORDS, 14, (it, cat) => g2bPayload(it, 'g2b_bid', cat), ctx, key);
-    const b = await searchAll(NURI_OPS, G2B_WORDS, 14, (it, cat) => g2bPayload(it, 'nuri_bid', cat), ctx, key);
+    const b = await searchAll(await nuriOps(), G2B_WORDS, 14, (it, cat) => g2bPayload(it, 'nuri_bid', cat), ctx, key);
     const errors = [...a.errors, ...b.errors]; const items = [...a.items, ...b.items];
     const r = await write(items, errors);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + a.denied.length + b.denied.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
-      summary: `나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건 (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (a.denied.length + b.denied.length ? ` · 활용신청 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
+      summary: `나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건 (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
   },
 };
 export function prespecPayload(it: any, cat: string): Record<string, unknown> | null {
@@ -87,6 +92,6 @@ export const g2bPrespecAwards: Collector = {
     const r2 = await write(awardItems, aw.errors, { mergeScope: 'award' });
     const errors = [...pre.errors, ...aw.errors, ...aw2.errors];
     return { inserted: r1.inserted + r2.inserted, updated: r1.updated + r2.updated, unchanged: r1.unchanged + r2.unchanged, errors: r1.errors + r2.errors + r1.invalid + r2.invalid + pre.denied.length + aw.denied.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
-      summary: `사전규격 관련 ${pre.items.length}건(신규 ${r1.inserted}) · 낙찰 관련 ${awardItems.length}건(병합 ${r2.updated}·신규 ${r2.inserted})` + (pre.denied.length + aw.denied.length ? ` · 활용신청 필요 ${pre.denied.length + aw.denied.length}개 서비스` : '') };
+      summary: `사전규격 관련 ${pre.items.length}건(신규 ${r1.inserted}) · 낙찰 관련 ${awardItems.length}건(병합 ${r2.updated}·신규 ${r2.inserted})` + (pre.denied.length + aw.denied.length ? ` · 활용신청·주소 확인 필요 ${pre.denied.length + aw.denied.length}개 서비스` : '') };
   },
 };

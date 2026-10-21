@@ -4,7 +4,7 @@ import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { isAdmin, denyDemo, accessibleUnitIds, taskVisibleSql, teamScope } from './access';
 import { activity } from './log';
 import { MAX_UPLOAD_BYTES, downloadUrl, getObject, objectSize, putObject, uploadTarget } from './storage';
-import { extractText, extractTextDeep } from './textExtract';
+import { extractText, extractTextDeep, extractTextResult } from './textExtract';
 import type { Role, SessionUser } from './types';
 import { RANK, menuLevel, requireMenu } from './menuPerms';
 
@@ -40,7 +40,7 @@ export const libraryPatch = z.object({
 });
 
 const COLS = `f.id, f.folder, f.security, f.security_suggested, f.security_confirmed, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
-  (f.text_content is not null) as has_text, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error, f.task_id, f.source`;
+  (f.text_content is not null) as has_text, f.text_error, f.text_tried_at, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error, f.task_id, f.source`;
 
 // ---------------- V14 15번 보안 등급 (일반·내부·기밀) ----------------
 export type Security = 'public' | 'internal' | 'confidential';
@@ -227,7 +227,8 @@ export async function saveGeneratedFile(u: SessionUser, p: { fileName: string; m
       ${p.security ?? 'internal'}, ${p.security === 'confidential'}) returning id`;
   const key = `lib/${tenantOf(u)}/${f.id}/${p.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
   await putObject(key, p.data, p.mime);
-  await sql`update library_files set storage_key = ${key}, upload_status = 'ready', text_content = ${await extractTextDeep(p.data, p.fileName, p.mime)}, text_tried_at = now() where id = ${f.id}`; // V19 견적서 PDF 도 본문 검색
+  const tx = await extractTextResult(p.data, p.fileName, p.mime); // V19 견적서 PDF 도 본문 검색
+  await sql`update library_files set storage_key = ${key}, upload_status = 'ready', text_content = ${tx.text}, text_error = ${tx.error}, text_tried_at = now() where id = ${f.id}`;
   return { id: f.id, storageKey: key };
 }
 
@@ -262,8 +263,8 @@ export async function completeLibraryFile(u: SessionUser, id: string) {
   if (f.upload_status === 'ready') return { ok: true, id };
   const size = await objectSize(f.storage_key);
   if (size === null) throw badRequest('업로드된 파일을 찾을 수 없습니다. 다시 올려 주세요.');
-  const text = await getObject(f.storage_key).then((b) => extractTextDeep(b, f.file_name, f.mime_type)).catch(() => null); // V14 32: HWP·HWPX·PDF 본문도
-  await db()`update library_files set upload_status = 'ready', size_bytes = ${size}, text_content = ${text}, text_tried_at = now(), updated_at = now() where id = ${id}`;
+  const tx = await getObject(f.storage_key).then((b) => extractTextResult(b, f.file_name, f.mime_type)).catch((e) => ({ text: null, error: `파일 읽기 실패: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) })); // V14 32: HWP·HWPX·PDF 본문도
+  await db()`update library_files set upload_status = 'ready', size_bytes = ${size}, text_content = ${tx.text}, text_error = ${tx.error}, text_tried_at = now(), updated_at = now() where id = ${id}`;
   // V13 3번: 올리자마자 자동 정리(AI, 한도 소진·AI 꺼짐이면 파일명 규칙). 정리 실패는 올리기 성공에 영향 없음
   const organized = f.source === 'revenue' || f.source === 'ai_attach' ? null : await organizeLibraryFile(u, id, { keepFolder: !!f.folder }).catch(async (e: any) => {
     await db()`update library_files set organize_status = 'failed', organize_error = ${String(e?.message ?? '정리 오류').slice(0, 200)} where id = ${id}`;
@@ -271,7 +272,7 @@ export async function completeLibraryFile(u: SessionUser, id: string) {
   });
   // V14 32-보정: 올린 직후 "○○ → 폴더로 정리했어요" — 알림 센터에는 한 시간에 1건으로 묶음(건수·마지막 파일 갱신)
   if (organized && 'folder' in organized && !organized.error && f.source !== 'revenue') await organizedNotice(u, id, organized.folder).catch(() => {});
-  return { ok: true, id, hasText: !!text, organized };
+  return { ok: true, id, hasText: !!tx.text, textError: tx.error, organized };
 }
 async function organizedNotice(u: SessionUser, id: string, folder: string) {
   const sql = db();
@@ -297,11 +298,27 @@ export async function textExtractJob(limit = 15) {
     order by created_at desc limit ${limit}`;
   let got = 0;
   for (const r of rows) {
-    const text = await getObject(r.storage_key!).then((b) => extractTextDeep(b, r.file_name, r.mime_type)).catch(() => null);
-    await sql`update library_files set text_content = ${text}, text_tried_at = now() where id = ${r.id}`;
-    if (text) got++;
+    const tx = await getObject(r.storage_key!).then((b) => extractTextResult(b, r.file_name, r.mime_type)).catch((e) => ({ text: null, error: `파일 읽기 실패: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) }));
+    await sql`update library_files set text_content = ${tx.text}, text_error = ${tx.error}, text_tried_at = now() where id = ${r.id}`;
+    if (tx.text) got++;
   }
   return { tried: rows.length, got };
+}
+/** 로컬 10/21 11:05: 한 파일 바로 다시 추출(올린 사람·관리자) — 결과와 실패 사유를 돌려준다 */
+export async function retextLibraryFile(u: SessionUser, id: string) {
+  const f = await loadLibraryFile(u, id, 'meta');
+  if (f.created_by !== u.id && !isAdmin(u)) throw forbidden();
+  if (!f.storage_key) throw badRequest('아직 올라가지 않은 파일입니다');
+  const tx = await getObject(f.storage_key).then((b) => extractTextResult(b, f.file_name, f.mime_type)).catch((e) => ({ text: null, error: `파일 읽기 실패: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) }));
+  await db()`update library_files set text_content = ${tx.text}, text_error = ${tx.error}, text_tried_at = now() where id = ${id}`;
+  return { id, hasText: !!tx.text, chars: tx.text?.length ?? 0, error: tx.error };
+}
+/** 관리자: 본문 없는 HWP·HWPX·PDF 를 다시 시도 대기열로(정기 실행마다 15개) */
+export async function resetTextRetry(u: SessionUser, limit = 300) {
+  if (!isAdmin(u)) throw forbidden();
+  const r = await db()`update library_files set text_tried_at = null where id in (select id from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready' and text_content is null and storage_key is not null
+    and (lower(file_name) ~ '\\.(hwp|hwpx|pdf)$' or mime_type in ('application/pdf', 'application/x-hwp', 'application/haansofthwp', 'application/hwp+zip')) order by created_at desc limit ${limit})`;
+  return { queued: r.count };
 }
 
 export async function updateLibraryFile(u: SessionUser, id: string, i: z.infer<typeof libraryPatch>) {

@@ -88,7 +88,7 @@ export function BidPrefs() {
         <span className="ml-auto flex gap-1.5">{data.canEdit && <Button size="sm" onClick={() => save()} disabled={busy} data-testid="prefs-save">저장</Button>}{data.canEdit && <Button size="sm" variant="secondary" onClick={sendNow} disabled={busy} data-testid="prefs-send-now">지금 보내기</Button>}</span>
       </div>
       <div className="mt-2 text-xs"><span className="text-ink-2">받는 사람(비우면 대표·관리자): </span>{data.people.map((u) => <button key={u.id} type="button" disabled={!data.canEdit} onClick={() => togglePerson(u.id)} className={cx('mr-1 rounded-full border px-2 py-0.5', p.digest_to.includes(u.id) ? 'border-[#2563EB] bg-white font-semibold text-[#1D4ED8]' : 'border-line bg-white text-ink-2')}>{u.name}</button>)}</div>
-      {data.last && <p className="mt-2 text-xs text-ink-2" data-testid="prefs-last-digest">마지막 다이제스트 {data.last.day}: 새 공고 {data.last.counts?.new ?? 0} · 정정 {data.last.counts?.amend ?? 0} · 취소 {data.last.counts?.cancel ?? 0} · 메일 {data.last.mailed} · 알림 {data.last.notified}</p>}
+      {data.last && <p className="mt-2 text-xs text-ink-2" data-testid="prefs-last-digest">마지막 다이제스트 {data.last.day}: 새 공고 {data.last.counts?.new ?? 0} · 정정 {data.last.counts?.amend ?? 0} · 취소 {data.last.counts?.cancel ?? 0} · 메일 {data.last.mailed}{data.last.counts?.mailError && <span className="text-red-600" title={String(data.last.counts.mailError)}> (메일 실패: {String(data.last.counts.mailError).slice(0, 60)})</span>} · 알림 {data.last.notified}</p>}
     </section>
   );
 }

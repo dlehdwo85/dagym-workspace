@@ -59,19 +59,25 @@ function xlsx(z: Map<string, () => Buffer>) {
 }
 
 /** V14 32: 동기 추출 + HWP·HWPX·PDF(비동기). 스캔 PDF·이미지는 null(정리 때 AI 비전) */
-export async function extractTextDeep(buf: Buffer, fileName: string, mime: string): Promise<string | null> {
+export async function extractTextDeep(buf: Buffer, fileName: string, mime: string): Promise<string | null> { return (await extractTextResult(buf, fileName, mime)).text; }
+/** 본문 + 실패 사유(운영에서 왜 안 됐는지 파일 상세에 보이게 — 로컬 10/21 11:05) */
+export async function extractTextResult(buf: Buffer, fileName: string, mime: string): Promise<{ text: string | null; error: string | null }> {
   const sync = extractText(buf, fileName, mime);
-  if (sync) return sync;
-  if (buf.length > MAX_EXTRACT_BYTES) return null;
+  if (sync) return { text: sync, error: null };
+  if (buf.length > MAX_EXTRACT_BYTES) return { text: null, error: `파일이 커서 건너뜀(${Math.round(buf.length / 1048576)}MB > ${Math.round(MAX_EXTRACT_BYTES / 1048576)}MB)` };
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
+  const kind = ext === 'hwp' || mime === 'application/x-hwp' || mime === 'application/haansofthwp' ? 'hwp' : ext === 'hwpx' || mime === 'application/hwp+zip' || mime === 'application/haansofthwpx' ? 'hwpx' : ext === 'pdf' || mime === 'application/pdf' ? 'pdf' : null;
+  if (!kind) return { text: null, error: null };
   try {
     let t: string | null = null;
-    if (ext === 'hwp' || mime === 'application/x-hwp' || mime === 'application/haansofthwp') t = (await import('./hwp')).hwpText(buf);
-    else if (ext === 'hwpx' || mime === 'application/hwp+zip' || mime === 'application/haansofthwpx') t = (await import('./hwp')).hwpxText(buf);
-    else if (ext === 'pdf' || mime === 'application/pdf') t = await (await import('./pdfText')).pdfText(buf);
-    return t ? t.replace(/\u0000/g, '').slice(0, MAX_CHARS) : null;
-  } catch {
-    return null;
+    if (kind === 'hwp') t = (await import('./hwp')).hwpText(buf);
+    else if (kind === 'hwpx') t = (await import('./hwp')).hwpxText(buf);
+    else t = await (await import('./pdfText')).pdfText(buf);
+    const text = t ? t.replace(/\u0000/g, '').slice(0, MAX_CHARS) : null;
+    return { text, error: text ? null : kind === 'pdf' ? '글자가 없는 PDF(스캔본·이미지) — AI 정리 때 비전으로 읽음' : '본문을 찾지 못함' };
+  } catch (e) {
+    const m = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    return { text: null, error: `${kind} 추출 오류: ${m.slice(0, 300)}` };
   }
 }
 
