@@ -121,7 +121,9 @@ async function publishThreads(a: Acc, c: any, mediaIn: Awaited<ReturnType<typeof
   if (!p.container) {
     let r;
     const vid0 = media.find((m) => m.video); if (vid0) media = [vid0]; // 표지는 올리지 않음
-    if (!media.length) r = await call('POST', `${THREADS()}/${user}/threads?${q({ media_type: 'TEXT', text, access_token: tk })}`);
+    // #95: 글만 올릴 때 본문의 첫 링크를 link_attachment 로(스레드 글 아래 링크 카드)
+    const link = /https?:\/\/[^\s<>"']+/.exec(text)?.[0];
+    if (!media.length) r = await call('POST', `${THREADS()}/${user}/threads?${q({ media_type: 'TEXT', text, ...(link ? { link_attachment: link } : {}), access_token: tk })}`);
     else if (media.length === 1) r = await call('POST', `${THREADS()}/${user}/threads?${q({ media_type: media[0].video ? 'VIDEO' : 'IMAGE', ...(media[0].video ? { video_url: media[0].url } : { image_url: media[0].url }), text, access_token: tk })}`);
     else {
       const children: string[] = [];

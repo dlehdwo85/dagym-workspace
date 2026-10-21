@@ -106,8 +106,15 @@ describe('알림에서 바로 처리', () => {
     const n3 = (await ctx.staffA.client.ok('GET', '/api/notifications')).items.find((x) => x.type === 'task_assigned' && x.entity_id === id3);
     await sql`update notification_deliveries set status = 'pending', next_attempt_at = now() where notification_id = ${n3.id}`;
     await ctx.staffA.client.ok('POST', `/api/notifications/${n3.id}/action`, { action: 'ack' });
-    await tick();
-    assert.deepEqual([...new Set((await sql`select status from notification_deliveries where notification_id = ${n3.id}`).map((d) => d.status))], ['skipped']);
+    // 전체 스위트에서는 앞 요청의 piggyback tick 이 잠금(4분)을 쥐고 있어 이번 tick 이 '이전 실행이 진행 중'으로 건너뛸 수 있음 → 처리될 때까지 몇 번 더
+    let statuses = [];
+    for (let i = 0; i < 12; i++) {
+      await tick();
+      statuses = [...new Set((await sql`select status from notification_deliveries where notification_id = ${n3.id}`).map((d) => d.status))];
+      if (!statuses.includes('pending')) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    assert.deepEqual(statuses, ['skipped']);
   });
   test('검토 요청 알림 [승인] → 완료 · [수정 요청](글 필수) → 진행 중+보완 요청 알림 · 결재 아닌 사람은 403', async () => {
     const id = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: '검토 바로 승인', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: true })).id;
