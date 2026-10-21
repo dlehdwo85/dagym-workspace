@@ -1,4 +1,5 @@
 'use client';
+import { RoleBadge } from '@/components/RoleBadge';
 import { useMemo, useState } from 'react';
 import { useSession } from './session';
 import { Modal, cx, inputCls } from './ui';
@@ -48,7 +49,7 @@ export function MultiUserSelect({ value, onChange }: { value: string[]; onChange
         const u = dir.users.find((x) => x.id === id);
         return (
           <span key={id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs">
-            {u?.name ?? '알 수 없음'}{u?.title && <span className="hidden text-slate-500 sm:inline"> · {u.title}</span>}
+            {u?.name ?? '알 수 없음'}<RoleBadge role={u?.role} guest={u?.is_demo} />{u?.title && <span className="hidden text-slate-500 sm:inline"> · {u.title}</span>}
             <button type="button" onClick={() => onChange(value.filter((x) => x !== id))} aria-label={`${u?.name} 제거`} className="text-slate-500">✕</button>
           </span>
         );

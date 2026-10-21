@@ -21,7 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (sp && (sp === 'work' || !(spaces as string[]).includes(sp))) notFound();
   const dir = await directory(user);
   const menus = await menuLevels(user); // V13 메뉴 권한
-  const [t] = await db()<{ name: string; kind: string; owner_user_id: string | null; onboarded_at: Date | null; sales_template: string | null; industries: string[] | null; industry: string | null }[]>`select name, kind, owner_user_id, onboarded_at, sales_template, industries, industry from tenants where id = ${tenantOf(user)}`;
+  const [t] = await db()<{ name: string; kind: string; owner_user_id: string | null; onboarded_at: Date | null; sales_template: string | null; industries: string[] | null; industry: string | null; role_badge: string | null }[]>`select name, kind, owner_user_id, onboarded_at, sales_template, industries, industry, role_badge from tenants where id = ${tenantOf(user)}`;
   // #408 업종 중립 문구: 영업 화면 용어는 회사 업종 템플릿(없으면 업종으로 추정) — 코드에 우리 회사 용어를 박지 않음
   const { salesTermsFor, tenantIndustries } = await import('@/lib/sales/terms');
   const { auto: _auto, ...salesTerms } = salesTermsFor(t?.sales_template, tenantIndustries(t));
@@ -38,7 +38,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     menus,
     spaces, // V41 공간
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)
-    tenant: { name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)),
+    tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)),
       trial: trial ? { trial: trial.trial, readOnly: trial.readOnly, daysLeft: trial.daysLeft } : null, billingLock: billingLock as 'read_only' | 'suspended' | null },
   };
   return <AppShell session={session}><Suspense>{children}</Suspense></AppShell>;

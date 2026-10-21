@@ -41,6 +41,7 @@ export default function CompanyPage() {
         actions={<Button onClick={() => setEdit({ ...EMPTY })} data-testid="company-new"><Plus />회사 추가</Button>} />
       <AiProfile />
       <AttachToLibrary />
+      <RoleBadgeSetting />
       {loading && !data ? <Skeleton rows={3} /> : !data?.profiles.length ? <Empty title="아직 회사 정보가 없습니다" icon={Building2}>회사 추가를 눌러 상호·사업자번호·주소·로고·브랜드 색을 넣어 주세요.</Empty> : (
         <ul className="grid gap-3 sm:grid-cols-2" data-testid="company-list">
           {data.profiles.map((p) => (
@@ -84,6 +85,26 @@ export default function CompanyPage() {
 /** V38 4 회사 설정: 업무 첨부를 자료실에 자동 등록(같은 파일·업무를 볼 수 있는 사람만) */
 /** 상용화: AI 비서가 알아야 할 우리 회사 — 메일·문자 초안·AI 비서 답이 이 회사의 업종·방향·말투를 따른다 */
 const AiProfile = () => <CompanyAiProfile />; // 로컬 10/19: 오른쪽 'AI 로 정리' 도우미 포함(마케팅 브랜드 키트와 같은 칸)
+
+/** 대표 10/20 15:05 (#101) 권한 배지: 이름 옆 영어 직책(CEO·Admin·Lead·Ops·Member·Guest) / 한글 / 끄기 — 사용자 관리·담당자 칩·메신저·댓글·프로필·명함에 같이 적용 */
+function RoleBadgeSetting() {
+  const st = useApi<{ mode: 'en' | 'ko' | 'off'; modeLabels: Record<string, string> }>('/api/org/role-badge');
+  const [busy, setBusy] = useState(false);
+  if (!st.data) return null;
+  const set = async (mode: string) => {
+    setBusy(true);
+    try { await api('/api/org/role-badge', { method: 'PUT', body: { mode } }); st.reload(); toast.ok('권한 배지 표시를 바꿨습니다 — 화면을 새로 고치면 적용됩니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="role-badge-setting">
+      <h2 className="text-sm font-semibold">권한 배지</h2>
+      <p className="mb-2 text-xs text-ink-3">이름 옆에 붙는 권한 표시. 사용자 관리·담당자 칩·메신저 참여자·방 정보·댓글·프로필·명함에 같이 적용됩니다. 심사용·체험 계정은 Guest.</p>
+      <div className="flex flex-col gap-1.5 text-sm" role="radiogroup" aria-label="권한 배지 표시">
+        {(['en', 'ko', 'off'] as const).map((m) => <label key={m} className="flex items-center gap-2"><input type="radio" name="role-badge" checked={st.data!.mode === m} disabled={busy} onChange={() => set(m)} data-testid={`role-badge-${m}`} />{st.data!.modeLabels[m]}</label>)}
+      </div>
+    </section>
+  );
+}
 
 function AttachToLibrary() {
   const st = useApi<{ on: boolean; confWords: string[]; confWordsDefault: boolean; defaults: string[] }>('/api/org/attach-library');

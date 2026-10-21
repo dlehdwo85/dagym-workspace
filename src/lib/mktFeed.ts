@@ -84,10 +84,12 @@ export async function feedConsistency(tenant: string, limit = 9): Promise<{ anal
         it.dist = r3(Math.sqrt(((it.stats.brightness - m.brightness) / UNIT.brightness) ** 2 + ((it.stats.saturation - m.saturation) / UNIT.saturation) ** 2 + ((it.stats.warmth - m.warmth) / UNIT.warmth) ** 2));
         it.outlier = it.dist >= OUTLIER_DIST;
       }
-      // 로컬 10/21 20:00: 편차 합산을 그대로 빼면 두 계열인 피드는 늘 0점 → 평균 거리(튀는 장 기준 2.4 대비) 비율로. 고른 피드 90점대 · 두 계열 60점 안팎 · 검은 장 1장 60점대
+      // 로컬 10/21 21:10: 튀는 장을 뺀 평균 거리(2.4 대비) × 50 + 튀는 장 비율 × 50 을 뺀다 — 두 계열 피드(하이링크, 튀는 장 2/9) 50점대 중반·고른 피드 90점대·검은 장 1장 80점 안팎. 편차 합산·전체 평균은 두 계열이면 늘 0~30점이라 신호만 반복됐음
       const dists = items.filter((it) => it.dist !== null).map((it) => it.dist as number);
-      const avgDist = dists.reduce((a, x) => a + x, 0) / Math.max(1, dists.length);
-      score = Math.max(0, 100 - Math.round((avgDist / OUTLIER_DIST) * 80));
+      const inliers = dists.filter((x) => x < OUTLIER_DIST);
+      const avgDist = inliers.length ? inliers.reduce((a, x) => a + x, 0) / inliers.length : OUTLIER_DIST;
+      const outShare = dists.length ? (dists.length - inliers.length) / dists.length : 0;
+      score = Math.max(0, 100 - Math.round((avgDist / OUTLIER_DIST) * 50) - Math.round(outShare * 50));
       mean = { brightness: r0(m.brightness), saturation: r3(m.saturation), warmth: r0(m.warmth) }; sd = { brightness: r0(d.brightness), saturation: r3(d.saturation), warmth: r0(d.warmth) };
       const outs = items.filter((it) => it.outlier);
       note = outs.length ? `튀는 장 ${outs.length}: ${outs.map((o) => o.title).join(', ').slice(0, 120)}` : score >= 70 ? '톤이 고릅니다' : '전체적으로 편차가 큽니다(밝기·채도·색온도)';

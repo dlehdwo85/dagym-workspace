@@ -1,4 +1,5 @@
 'use client';
+import { RoleBadge } from '@/components/RoleBadge';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, AtSign, Headphones, Mic, Pencil, Bell, BellOff, Camera, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, UserMinus, UserPlus, Users, X } from 'lucide-react';
@@ -473,7 +474,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                 <div className={cx('group relative flex gap-2', m.mine && 'flex-row-reverse', head ? 'mt-2.5' : 'mt-0.5')} data-testid="chat-message" data-mine={m.mine ? '1' : '0'}>
                   {!m.mine && (head ? <Avatar id={m.author_id} name={m.author_name} size={compact ? 30 : 34} badge={false} /> : <span className={cx('shrink-0', compact ? 'w-[30px]' : 'w-[34px]')} />)}
                   <div className={cx('flex min-w-0 max-w-[78%] flex-col', m.mine ? 'items-end' : 'items-start')}>
-                    {head && !m.mine && <div className="mb-0.5 text-xs font-medium text-ink-2">{m.author_name}{dir.users.find((x) => x.id === m.author_id)?.title && <span className="ml-1 font-normal text-ink-3">{dir.users.find((x) => x.id === m.author_id)?.title}</span>}</div>}
+                    {head && !m.mine && <div className="mb-0.5 flex items-center gap-1 text-xs font-medium text-ink-2">{m.author_name}<RoleBadge role={dir.users.find((x) => x.id === m.author_id)?.role} guest={dir.users.find((x) => x.id === m.author_id)?.is_demo} />{dir.users.find((x) => x.id === m.author_id)?.title && <span className="font-normal text-ink-3">{dir.users.find((x) => x.id === m.author_id)?.title}</span>}</div>}
                     <div className={cx('flex items-end gap-1.5', m.mine && 'flex-row-reverse')}>
                       {editing?.id === m.id ? (
                         <form onSubmit={saveEdit} className="flex gap-1"><input autoFocus className={cx(inputCls, 'h-8')} value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null); }} aria-label="메시지 고치기" /><Button size="sm">저장</Button></form>
@@ -664,7 +665,7 @@ export function NewRoom({ open, onClose, onOpen }: { open: boolean; onClose: () 
                     <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50">
                       <input type="checkbox" checked={picked.includes(u.id)} onChange={() => toggle(u.id)} aria-label={`${u.name} 선택`} />
                       <Avatar id={u.id} name={u.name} size={28} badge={false} />
-                      <span className="flex-1 truncate">{u.name}{u.title && <span className="text-ink-3"> · {u.title}</span>}{unitsOf(u)[0] && <span className="text-ink-3"> · {unitsOf(u)[0]}</span>}</span>
+                      <span className="flex-1 truncate">{u.name} <RoleBadge role={u.role} guest={u.is_demo} />{u.title && <span className="text-ink-3"> · {u.title}</span>}{unitsOf(u)[0] && <span className="text-ink-3"> · {unitsOf(u)[0]}</span>}</span>
                       <Button size="sm" variant="secondary" onClick={(e) => { e.preventDefault(); go(u.id); }} aria-label={`${u.name}와 대화`}>대화</Button>
                     </label>
                   </li>
@@ -732,7 +733,7 @@ function RoomInfo({ data, onClose, onChanged, onLeft }: { data: RoomData; onClos
             {members.map((m) => (
               <li key={m.id} className="flex items-center gap-2 px-3 py-2">
                 <Avatar id={m.id} name={m.name} size={28} badge={false} />
-                <span className="min-w-0 flex-1 truncate">{m.name}{m.id === user.id && <span className="text-ink-3"> (나)</span>}{m.title && <span className="text-ink-3"> · {m.title}</span>}{m.is_owner && <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800">방장</span>}</span>
+                <span className="min-w-0 flex-1 truncate">{m.name}{m.id === user.id && <span className="text-ink-3"> (나)</span>} <RoleBadge role={dir.users.find((x) => x.id === m.id)?.role} guest={dir.users.find((x) => x.id === m.id)?.is_demo} />{m.title && <span className="text-ink-3"> · {m.title}</span>}{m.is_owner && <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800">방장</span>}</span>
                 {m.id !== user.id && <button type="button" className="rounded-input px-1.5 py-0.5 text-xs text-teal-700 hover:bg-teal-50" onClick={() => dmWith(m.id)} aria-label={`${m.name}와 1:1 대화`}>1:1</button>}
                 {isGroup && room.canManage && m.id !== user.id && <button type="button" className="rounded-input p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" onClick={() => { if (confirm(`${m.name}님을 내보낼까요?`)) run(() => api(`/api/chat/rooms/${room.id}/members`, { method: 'DELETE', body: { userId: m.id } }), `${m.name}님을 내보냈습니다`); }} aria-label={`${m.name} 내보내기`} title="내보내기" data-testid={`info-remove-${m.id}`}><UserMinus className="size-4" /></button>}
               </li>

@@ -1,4 +1,5 @@
 'use client';
+import { RoleBadge } from '@/components/RoleBadge';
 import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
 import { IN_APP_BILLING_NOTE, useInApp } from './inApp';
@@ -384,7 +385,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                   <div role="menu" className="absolute right-0 z-50 mt-1.5 w-60 animate-fade-up rounded-card border border-line bg-white p-1 shadow-pop">
                     <div className="flex items-center gap-2.5 px-2.5 py-2.5">
                       <Avatar id={session.user.id} name={session.user.name} size={36} />
-                      <div className="min-w-0"><div className="truncate text-sm font-semibold">{session.user.name}</div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
+                      <div className="min-w-0"><div className="flex items-center gap-1.5 truncate text-sm font-semibold">{session.user.name}<RoleBadge role={session.user.role} /></div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
                     </div>
                     <div className="my-1 border-t border-line" />
                     <Link role="menuitem" href="/settings" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Settings className="size-4 text-ink-2" />설정·알림</Link>
@@ -500,7 +501,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
               <div className="flex items-center gap-3 px-3 py-2">
                 <Avatar id={session.user.id} name={session.user.name} size={40} />
-                <div className="min-w-0 flex-1"><div className="font-semibold">{session.user.name}</div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
+                <div className="min-w-0 flex-1"><div className="flex items-center gap-1.5 font-semibold">{session.user.name}<RoleBadge role={session.user.role} /></div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
                 <button onClick={() => setMore(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button>
               </div>
               {/* 대표 결정(10/19): + 버튼 대신 더보기 › 만들기(공간 맥락) */}
