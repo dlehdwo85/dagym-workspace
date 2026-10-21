@@ -1352,7 +1352,7 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
-## 2026-10-21 [대표 08:45·S1 맨 앞] 영업 수집기 12개 이식 + 당일 입찰 다이제스트 + 맞춤 설정 + 낙찰 결과 (#131, migration 141) [배포확인요청]
+## 2026-10-21 [대표 08:45·S1 맨 앞] 영업 수집기 12개 이식 + 당일 입찰 다이제스트 + 맞춤 설정 + 낙찰 결과 (#131, migration 141) [배포확인요청] — 배포 de3c2e3
 - 저장 구조: 수집 결과는 기존 공용 복사 표 `sales_src_rows(scope='global')` 에 원본과 같은 JSON 모양으로 쌓는다(`origin='workin'`) → 입찰·허브·홈 화면이 그대로 읽음. 매일 복사(migrate.ts)는 origin='workin' 행을 '사라짐'으로 표시하지 않음. 분류 규칙(matchFit·noticeStatus·planNoticeBatch·planBatch·assessProspect)은 원본 _shared 를 이식(`src/lib/sales/collectors/procurement.ts`·`prospects.ts`), 수동 필드(분류·대표 판단·메모·next_action…)는 수집기가 건드리지 않음.
 - 수집기 12개(`src/lib/sales/collectors/`, 원본 순서·KST 실행 시각): kapt_sa_sun(08, KAPT_SERVICE_KEY) · operating_from_kapt(08, 파생) · kicox(07, CSV) · public_sports(07, XLSX) · tourist_hotels(07, DATA_GO_KR) · reb_recent(07, CSV 40MB) · kapt_bid_notices(06, HTML 목록→관련 상세·첨부) · g2b_bid_notices(06, 나라장터 4대상+누리장터, 검색어 15개) · g2b_prespec_awards(06, 사전규격 matchFit·낙찰 병합) · kapt_bid_results(07, 세션+_csrf, 검색어 18개) · public_agency_bids(06, LH·국방·온비드) · vendor_recruit_watch(07, app_settings `sales_vendor_watch_pages` 목록 — **원본 21곳 URL 은 로컬이 넣어야 함**). tick 에서 시각 지난 것 하루 1회 하나씩(60초 한도), [지금 수집] 은 관리자 40초.
 - 원천 주소: 나라장터·누리장터·사전규격·낙찰은 apis.data.go.kr/1230000 명세 기준, LH·국방·온비드는 `app_settings sales_collector_endpoints` 로 바꿀 수 있음(기본값은 추정 — **활용신청·운영 확인 필요**, 'SERVICE ACCESS DENIED' 등은 실행 이력에 '활용신청 필요'로 남음).
