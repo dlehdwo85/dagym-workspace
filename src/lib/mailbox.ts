@@ -64,6 +64,24 @@ async function loadAccount(tenant: string, sql: Sql = db()) {
   const [a] = await sql<AccountRow[]>`select * from mail_accounts where tenant = ${tenant}`;
   return a ?? null;
 }
+// ---------------- V33 4 (#184) 직원 개인 메일 계정 ----------------
+type UserAccountRow = AccountRow & { user_id: string };
+async function loadUserAccount(userId: string, sql: Sql = db()) {
+  const [a] = await sql<UserAccountRow[]>`select * from user_mail_accounts where user_id = ${userId}`;
+  return a ?? null;
+}
+/** 회사 정책: 직원 개인 메일 계정 연결 허용 여부·허용 도메인(비어 있으면 제한 없음) */
+export async function staffMailPolicy(tenant: string, sql: Sql = db()) {
+  const [t] = await sql<{ staff_mail_accounts: boolean; staff_mail_domains: string[] }[]>`select staff_mail_accounts, staff_mail_domains from tenants where id = ${tenant}`;
+  return { allowed: !!t?.staff_mail_accounts, domains: (t?.staff_mail_domains ?? []).map((d) => d.toLowerCase()) };
+}
+/** 이 사람의 발송에 쓸 개인 계정 — 회사가 허용했고 연결돼 있을 때만(허용을 끄면 회사 기본 방식으로 돌아감) */
+async function personalAccount(u: SessionUser, sql: Sql) {
+  const pol = await staffMailPolicy(tenantOf(u), sql);
+  if (!pol.allowed) return null;
+  const a = await loadUserAccount(u.id, sql);
+  return a && a.tenant === tenantOf(u) ? a : null;
+}
 // ---------------- V29 워크인 발송(설정 없이) ----------------
 /** RESEND_API_KEY + MAIL_FROM_DOMAIN(예: mail.work-in.dev, Resend 에서 인증된 도메인)이 있으면 켜짐 */
 export const workinMailEnabled = () => !!(process.env.RESEND_API_KEY && process.env.MAIL_FROM_DOMAIN);
@@ -80,13 +98,16 @@ export async function pickChannel(tenant: string, sql: Sql): Promise<'email:smtp
   if (mode === 'workin') return workinMailEnabled() ? 'email:workin' : acc ? 'email:smtp' : null;
   return acc ? 'email:smtp' : workinMailEnabled() ? 'email:workin' : null;
 }
-export const mailModeInput = z.object({ mode: z.enum(['auto', 'workin', 'smtp']).optional(), allowStaffReplyTo: z.boolean().optional() });
+export const mailModeInput = z.object({ mode: z.enum(['auto', 'workin', 'smtp']).optional(), allowStaffReplyTo: z.boolean().optional(),
+  staffAccounts: z.boolean().optional(), staffDomains: z.array(z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/, '도메인 형식(예: company.co.kr)')).max(10).optional() });
 export async function setMailMode(u: SessionUser, i: z.infer<typeof mailModeInput>) {
   await requireMenu(u, mailSettingsMenu, 'edit');
   requireMailAdmin(u);
   const sql = db();
   if (i.mode) await sql`update tenants set mail_mode = ${i.mode} where id = ${tenantOf(u)}`;
   if (i.allowStaffReplyTo !== undefined) await sql`update tenants set allow_staff_reply_to = ${i.allowStaffReplyTo} where id = ${tenantOf(u)}`;
+  if (i.staffAccounts !== undefined) await sql`update tenants set staff_mail_accounts = ${i.staffAccounts} where id = ${tenantOf(u)}`;
+  if (i.staffDomains !== undefined) await sql`update tenants set staff_mail_domains = ${[...new Set(i.staffDomains)]} where id = ${tenantOf(u)}`;
   await audit(sql, u.id, 'mail.mode', null, null, { mode: i.mode ?? null, allowStaffReplyTo: i.allowStaffReplyTo ?? null }, null);
   return { ok: true, mode: await mailMode(tenantOf(u), sql), channel: await pickChannel(tenantOf(u), sql) };
 }
@@ -116,7 +137,53 @@ export async function getMailAccount(u: SessionUser) {
   const sql = db(), t = tenantOf(u);
   return { account: publicAccount(await loadAccount(t, sql)), presets: Object.entries(MAIL_PRESETS).map(([k, v]) => ({ key: k, ...v })),
     mode: await mailMode(t, sql), channel: await pickChannel(t, sql), workin: { enabled: workinMailEnabled(), from: workinMailEnabled() ? workinFrom() : null },
-    canEdit: isMailAdmin(u), allowStaffReplyTo: (await sql<{ a: boolean }[]>`select allow_staff_reply_to a from tenants where id = ${t}`)[0]?.a ?? true };
+    canEdit: isMailAdmin(u), allowStaffReplyTo: (await sql<{ a: boolean }[]>`select allow_staff_reply_to a from tenants where id = ${t}`)[0]?.a ?? true,
+    // V33 4: 직원 개인 메일 계정 정책 + 연결 현황(누가 어떤 주소로 — 비밀번호는 없음), 현황은 대표·관리자만
+    staff: { ...(await staffMailPolicy(t, sql)), connections: isMailAdmin(u) ? await sql<{ userId: string; name: string; fromEmail: string; provider: string; lastOkAt: string | null; lastError: string | null }[]>`
+      select a.user_id as "userId", x.name, a.from_email as "fromEmail", a.provider, a.last_ok_at as "lastOkAt", a.last_error as "lastError" from user_mail_accounts a join users x on x.id = a.user_id where a.tenant = ${t} order by x.name` : [] } };
+}
+/** V33 4 내 메일 계정: 설정 › 내 메일 계정 — 회사가 허용했을 때만 연결할 수 있고, 연결되면 내 발송은 이 계정으로(보낸메일함에도 남음) */
+export async function getMyMailAccount(u: SessionUser) {
+  const sql = db(); const t = tenantOf(u);
+  const pol = await staffMailPolicy(t, sql);
+  const a = await loadUserAccount(u.id, sql);
+  return { account: publicAccount(a && a.tenant === t ? a : null), presets: Object.entries(MAIL_PRESETS).map(([k, v]) => ({ key: k, ...v })), allowed: pol.allowed, domains: pol.domains, workEmail: u.email };
+}
+export async function saveMyMailAccount(u: SessionUser, i: z.infer<typeof accountInput>, ip: string | null) {
+  const sql = db(); const t = tenantOf(u);
+  const pol = await staffMailPolicy(t, sql);
+  if (!pol.allowed) throw forbidden('회사 설정에서 직원 개인 메일 계정 연결이 꺼져 있습니다 — 대표·관리자에게 요청하세요(관리 › 메일 계정·명함)');
+  const dom = i.fromEmail.split('@')[1]?.toLowerCase() ?? '';
+  if (pol.domains.length && !pol.domains.includes(dom)) throw badRequest(`회사가 허용한 메일 도메인(${pol.domains.map((d) => '@' + d).join(', ')})만 연결할 수 있습니다`);
+  const prev = await loadUserAccount(u.id, sql);
+  const preset = MAIL_PRESETS[i.provider];
+  const host = (i.provider === 'custom' ? i.host : i.host || preset.host)?.trim();
+  if (!host) throw badRequest('SMTP 서버 주소를 넣어 주세요');
+  const port = i.port ?? preset.port; const secure = i.secure ?? preset.secure;
+  const password = i.password?.length ? i.password : prev ? decrypt(prev.password_enc) : '';
+  if (!password) throw badRequest('앱 비밀번호를 넣어 주세요');
+  const conn: Conn = { host, port, secure, username: i.username, password, provider: i.provider };
+  const to = i.testTo ?? i.fromEmail;
+  try {
+    await transport(conn).sendMail({ from: { name: i.fromName || i.fromEmail, address: i.fromEmail }, to, subject: '[워크인] 내 메일 계정 연결 시험',
+      text: `워크인에서 보낸 연결 시험 메일입니다.\n이 메일이 받은편지함에 왔고 "보낸메일함"에도 남았는지 확인해 주세요.`, messageId: `<test-${randomUUID()}@workin>` });
+  } catch (e) {
+    const c = classifySmtpError(e);
+    await audit(sql, u.id, 'user_mail_account.test_failed', 'user', u.id, { provider: i.provider, host, kind: c.kind }, ip);
+    throw new HttpError(400, 'mail_test_failed', `연결 시험 실패 — ${c.message}. 저장하지 않았습니다.`);
+  }
+  await sql`insert into user_mail_accounts (user_id, tenant, provider, host, port, secure, username, from_email, from_name, password_enc, last_ok_at, last_error)
+    values (${u.id}, ${t}, ${i.provider}, ${host}, ${port}, ${secure}, ${i.username}, ${i.fromEmail}, ${i.fromName ?? null}, ${encrypt(password)}, now(), null)
+    on conflict (user_id) do update set tenant = excluded.tenant, provider = excluded.provider, host = excluded.host, port = excluded.port, secure = excluded.secure, username = excluded.username,
+      from_email = excluded.from_email, from_name = excluded.from_name, password_enc = excluded.password_enc, last_ok_at = now(), last_error = null, updated_at = now()`;
+  await audit(sql, u.id, 'user_mail_account.save', 'user', u.id, { provider: i.provider, host, fromEmail: i.fromEmail }, ip);
+  return { ok: true, testSentTo: to, account: publicAccount(await loadUserAccount(u.id, sql)) };
+}
+export async function deleteMyMailAccount(u: SessionUser, ip: string | null) {
+  const sql = db();
+  await sql`delete from user_mail_accounts where user_id = ${u.id}`;
+  await audit(sql, u.id, 'user_mail_account.delete', 'user', u.id, {}, ip);
+  return { ok: true };
 }
 
 type Conn = { host: string; port: number; secure: boolean; username: string; password: string; provider: string };
@@ -335,14 +402,15 @@ export async function mailContext(u: SessionUser, taskId: string) {
     taskOutbox(taskId, sql),
   ]);
   const candidates = await recipientCandidates(taskId, contact, sql);
+  const mine = await personalAccount(u, sql); // V33 4: 내 계정이 연결돼 있으면 시안의 보내는 주소·회신 주소가 그 계정
   const [tn] = await sql<{ sms_sign_phone: boolean }[]>`select sms_sign_phone from tenants where id = ${t}`;
   const sigs = await Promise.all(profiles.map(async (p) => ({ key: p.key, name: p.name, isDefault: p.is_default, html: signatureHtml(p, me), smsLine: smsSignLine(p, me, !!tn?.sms_sign_phone) })));
   // 문의 사이트에 맞는 회사(하이링크 문의 → hilink)가 있으면 그 회사, 아니면 기본 회사
   const guess = contact?.site && profiles.some((p) => p.key === contact.site) ? contact.site : (profiles.find((p) => p.is_default) ?? profiles[0])?.key ?? null;
   return {
-    canSend: await canSend(u, sql), account: account ? { fromEmail: account.from_email, fromName: account.from_name, lastOkAt: account.last_ok_at } : null,
-    channel: await pickChannel(t, sql), workinFrom: workinMailEnabled() ? workinFrom() : null,
-    defaults: { fromName: defaultFromName(me, (profiles.find((p) => p.key === guess) ?? profiles[0])?.name ?? ''), replyTo: me.workEmail || account?.from_email || u.email },
+    canSend: await canSend(u, sql), account: mine ? { fromEmail: mine.from_email, fromName: mine.from_name, lastOkAt: mine.last_ok_at, mine: true } : account ? { fromEmail: account.from_email, fromName: account.from_name, lastOkAt: account.last_ok_at, mine: false } : null,
+    channel: mine ? 'email:smtp' as const : await pickChannel(t, sql), workinFrom: workinMailEnabled() ? workinFrom() : null,
+    defaults: { fromName: defaultFromName(me, (profiles.find((p) => p.key === guess) ?? profiles[0])?.name ?? ''), replyTo: mine ? mine.from_email : me.workEmail || account?.from_email || u.email },
     replyToEditable: await replyToEditable(u, sql),
     kinds: Object.entries(MAIL_KINDS).map(([k, v]) => ({ key: k, ...v })), companies: sigs, company: guess,
     to: candidates.emails[0] ? [candidates.emails[0].value] : [], phone: candidates.phones[0]?.value ?? null, candidates, contact, me: { name: me.name, title: me.title, phone: me.phone, email: me.email, workEmail: me.workEmail },
@@ -402,9 +470,10 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   if (!(await canSend(u))) throw forbidden('메일 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
   const { task } = await loadTaskForMail(u, i.taskId);
   const sql = db(); const t = tenantOf(u);
-  const channel = await pickChannel(t, sql);
+  const mine = await personalAccount(u, sql); // V33 4: 내 메일 계정이 연결돼 있으면 그걸로(내 보낸메일함에도 남음)
+  const channel = mine ? 'email:smtp' : await pickChannel(t, sql);
   if (!channel) throw new HttpError(409, 'mail_account_missing', '메일을 보낼 방법이 아직 없습니다 — 설정 > 메일에서 회사 메일 계정을 연결하거나 워크인 발송을 켜 주세요');
-  const account = channel === 'email:smtp' ? await loadAccount(t, sql) : null;
+  const account = mine ?? (channel === 'email:smtp' ? await loadAccount(t, sql) : null);
   const [profile] = (await companyProfiles(t, sql)).filter((p) => p.key === i.company) as SigProfile[];
   if (!profile) throw notFound('회사 정보가 없습니다');
   // 명함 학습: 직급·휴대폰이 비어 있으면 이번에 받은 값을 프로필에 저장
@@ -438,12 +507,12 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   // B1 보내는 사람별: 이름 "이름 직급 (회사)", 회신 = 직원 업무 이메일(없으면 회사 계정/로그인 이메일) — 둘 다 시안에서 바꿀 수 있음
   const fromName = (i.fromName || defaultFromName(me, profile.name)).slice(0, 80);
   // V32 6: 회사가 막았으면 직원 회신 주소는 늘 본인 업무 이메일
-  const replyTo = ((await replyToEditable(u, sql)) && i.replyTo) || me.workEmail || account?.from_email || u.email;
+  const replyTo = ((await replyToEditable(u, sql)) && i.replyTo) || (mine ? mine.from_email : me.workEmail || account?.from_email || u.email);
   const id = randomUUID();
   const at = i.sendAt ? checkSendAt(i.sendAt) : null;
-  await sql`insert into outbox (id, tenant, channel, status, task_id, company_key, created_by, from_email, from_name, reply_to, to_addrs, cc_addrs, bcc_addrs, subject, body_text, body_html, files, as_link, share_id, message_id, scheduled_at, next_attempt_at)
+  await sql`insert into outbox (id, tenant, channel, status, task_id, company_key, created_by, from_email, from_name, reply_to, to_addrs, cc_addrs, bcc_addrs, subject, body_text, body_html, files, as_link, share_id, message_id, scheduled_at, next_attempt_at, account_user_id)
     values (${id}, ${t}, ${channel}, 'queued', ${i.taskId}, ${i.company}, ${u.id}, ${fromEmail}, ${fromName}, ${replyTo}, ${i.to}, ${i.cc ?? []}, ${i.bcc ?? []}, ${i.subject}, ${text}, ${html},
-      ${sql.json(list as never)}, ${asLink}, ${shareId}, ${`<${id}@${domain}>`}, ${at}, ${at ?? new Date()})`;
+      ${sql.json(list as never)}, ${asLink}, ${shareId}, ${`<${id}@${domain}>`}, ${at}, ${at ?? new Date()}, ${mine ? u.id : null})`;
   await activity(sql, 'task', i.taskId, u.id, at ? 'mail_scheduled' : 'mail_queued', { to: i.to, subject: i.subject, files: list.map((f) => f.name), asLink, ...(at ? { sendAt: at.toISOString() } : {}) });
   await audit(sql, u.id, at ? 'mail.schedule' : 'mail.queue', 'task', i.taskId, { outboxId: id, to: i.to, files: list.length, asLink, sendAt: at?.toISOString() ?? null }, ip);
   await rememberSent(sql, t, u.id, i.taskId, [...i.to, ...(i.cc ?? [])].map((email) => ({ email })));
@@ -515,7 +584,7 @@ export async function processOutbox(id: string): Promise<string> {
   }
   try {
     const workin = o.channel === 'email:workin';
-    const account = workin ? null : await loadAccount(o.tenant, sql);
+    const account = workin ? null : o.account_user_id ? await loadUserAccount(o.account_user_id, sql) : await loadAccount(o.tenant, sql);
     if (!workin && !account) throw Object.assign(new Error('메일 계정이 연결되지 않았습니다'), { code: 'NOACCOUNT' });
     if (workin && !workinMailEnabled()) throw Object.assign(new Error('워크인 발송이 꺼져 있습니다 — 회사 메일 계정을 연결하세요'), { code: 'NOACCOUNT' });
     const attachments = o.as_link ? [] : await Promise.all((o.files as SendFile[]).map(async (f) => {
@@ -533,7 +602,10 @@ export async function processOutbox(id: string): Promise<string> {
           bcc: o.bcc_addrs?.length ? o.bcc_addrs : undefined, subject: o.subject, text: o.body_text, html: o.body_html ?? undefined, attachments, messageId: o.message_id, replyTo: o.reply_to || account!.from_email });
     }
     await sql`update outbox set status = 'sent', sent_at = now(), locked_until = null, last_error = null, error_kind = null where id = ${id}`;
-    if (!workin) await sql`update mail_accounts set last_ok_at = now(), last_error = null where tenant = ${o.tenant}`;
+    if (!workin) {
+      if (o.account_user_id) await sql`update user_mail_accounts set last_ok_at = now(), last_error = null where user_id = ${o.account_user_id}`;
+      else await sql`update mail_accounts set last_ok_at = now(), last_error = null where tenant = ${o.tenant}`;
+    }
     if (o.task_id) {
       await activity(sql, 'task', o.task_id, o.created_by, 'mail_sent', { to: o.to_addrs, subject: o.subject, files: (o.files as any[]).map((f) => f.name), asLink: o.as_link });
       await crmSteps(sql, o.task_id, o.subject, o.files as any[]);
@@ -548,7 +620,10 @@ export async function processOutbox(id: string): Promise<string> {
     const retry = c.kind === 'transient' && o.attempts <= (o.scheduled_at ? 1 : RETRY_MIN.length);
     await sql`update outbox set status = ${retry ? 'retry' : 'failed'}, locked_until = null, last_error = ${c.message}, error_kind = ${c.kind},
       next_attempt_at = now() + make_interval(mins => ${retry ? RETRY_MIN[o.attempts - 1] : 0}) where id = ${id}`;
-    if (c.kind === 'auth' && o.channel === 'email:smtp') await sql`update mail_accounts set last_error = ${c.message} where tenant = ${o.tenant}`;
+    if (c.kind === 'auth' && o.channel === 'email:smtp') {
+      if (o.account_user_id) await sql`update user_mail_accounts set last_error = ${c.message} where user_id = ${o.account_user_id}`;
+      else await sql`update mail_accounts set last_error = ${c.message} where tenant = ${o.tenant}`;
+    }
     if (!retry) {
       if (o.task_id) await activity(sql, 'task', o.task_id, o.created_by, 'mail_failed', { to: o.to_addrs, subject: o.subject, error: c.message });
       // 보낸 사람 + 대표에게 알림 (다시 보내기는 업무 화면)

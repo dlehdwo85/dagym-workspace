@@ -12,7 +12,7 @@ import { KakaoSend } from './KakaoSend';
 
 type Cand = { value: string; label: string; source: 'inquiry' | 'contact' | 'lead' | 'description' }; // 대표 05:20 ②
 type Ctx = {
-  canSend: boolean; account: { fromEmail: string; fromName: string | null } | null;
+  canSend: boolean; account: { fromEmail: string; fromName: string | null; mine?: boolean } | null;
   channel: 'email:smtp' | 'email:workin' | null; workinFrom: string | null; defaults: { fromName: string; replyTo: string }; replyToEditable?: boolean;
   kinds: { key: string; label: string; subject: string; body: string }[];
   companies: { key: string; name: string; isDefault: boolean; html: string; smsLine: string }[]; company: string | null;
@@ -306,7 +306,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
         <div className="grid gap-2 text-sm">
           {/* 대표 지적(10/19): '보내는 주소'는 이름 <주소> 한 줄(길면 …), 설명·버튼은 그 아래 */}
           <div className="min-w-0 text-ink-2">
-            <p className="flex min-w-0 items-baseline gap-2"><span className="shrink-0">보내는 주소</span><b className="min-w-0 truncate whitespace-nowrap text-ink" data-testid="mail-from-line" title={from ?? undefined}>{from ?? '연결 안 됨'}</b></p>
+            <p className="flex min-w-0 items-baseline gap-2"><span className="shrink-0">보내는 주소</span><b className="min-w-0 truncate whitespace-nowrap text-ink" data-testid="mail-from-line" title={from ?? undefined}>{from ?? '연결 안 됨'}{d.account?.mine ? ' (내 메일 계정)' : ''}</b></p>
             <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-3">{d.channel === 'email:workin' && <span>워크인 발송 — 답장은 회신 주소로</span>}
               {d.channel && <button type="button" className="text-brand-700 underline" onClick={() => set({ more: !f.more })} data-testid="mail-more">{f.more ? '접기' : '보내는 이름·회신 주소·숨은 참조'}</button>}</p>
           </div>

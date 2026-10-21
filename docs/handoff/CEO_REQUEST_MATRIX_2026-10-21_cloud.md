@@ -70,6 +70,7 @@
 | 73 | 대기열 #76·#111·#279 | 부재중 설정(기간·문구·대리인·보류·복귀 요약) · 일정 화상 회의 링크 · 탈퇴 30일 뒤 정리 | ✅ | 설정 › 부재중 설정, events.meeting_url + [회의 참여], tick awayReturn·purgeAccounts, mig 160 |
 | 74 | 대기열 #74 (V30 ⑥) | 녹음 → 회의록 AI 요약(받아쓰기·요약·결정·할 일 → 업무로, 월 한도·원가 표시) | ✅ | 일정 편집 화면 AI 회의록 칸, /api/events/{id}/minutes, mig 161. 운영은 OPENAI_API_KEY 필요 |
 | 75 | 대기열 #177·#183 | 문자 예약 발송(알림 → 문자앱) · V32 7 AI 문자 초안 규칙(빈칸 금지·경고·의도)·명함형 서명(대표번호 토글) | ✅ (7-3 앱 직접 첨부는 로컬) | outbox due + sms_due 알림, draftWarnings, smsSignLine 3줄, /api/org/sms-sign, mig 162 |
+| 76 | 대기열 #184 (V33 4) | 직원이 자기 회사 메일 계정 연결(설정 › 내 메일 계정, 본인 발송은 본인 계정, 관리자 허용·도메인·현황) | ✅ | /api/account/mail, outbox.account_user_id, /api/org/mail-mode staffAccounts·staffDomains, mig 163. OAuth(Gmail/M365)는 심사 뒤 |
 | 58 | 10/20 15:05 대표 #101 | 권한 배지 영어 직책(CEO·Admin·Lead·Ops·Member·Guest), 회사 설정 끄기/한글 | ✅ | mig 156 role_badge · RoleBadge 컴포넌트(사용자 관리·담당자 칩·담당/멘션 목록·댓글·메신저·프로필·명함·계정 메뉴) · /api/org/role-badge · 회사 정보·디자인 라디오 |
 | 57 | 10/20 17:40 대표 #110 | 알림 건별 읽음·스와이프·다중 선택·보관함 | ✅ | mig 155 archived_at·space 채움 · 줄 [읽음]/[보관]·흐림·배지/PWA 앱 배지 · 왼쪽/오른쪽 밀기·길게 누르기 · [선택] 띠 · 보관함 탭·되돌리기 · API archive/unarchive |
 | 56 | 10/20 16:00 대표 #104 | 마케팅·영업 알림 담당자만·1시간/하루 묶음·시험은 실행자만·서버 오류 운영자만·공간별 설정·종류별 접기 | ✅ | mig 154 notifications.space·digest_items·notify_defaults · spaceNotify.notifySpace(승인자=승인만, 브랜드/원천 담당 바로, 모두 받기 1시간 묶음, 미지정 관리자 1명 하루 묶음, 시험 실행자만) · server_error 종류 · 설정 공간별 방식+회사 기본값 · 알림 화면 종류별 묶음·묶음 읽음·공간 칩 |

@@ -49,6 +49,7 @@ export default function Settings() {
       <CalendarFeed />
       <TwoFactor />
       <AwaySection />
+      <MyMailSection />
       <AccountSection />
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 종류별 수신</h2>
@@ -280,6 +281,76 @@ function SupportConsent() {
 }
 
 /** V15 계정: 내 데이터 내려받기 · 회원 탈퇴 · 공간 삭제(가입한 공간 대표) */
+/** V33 4 (#184) 내 메일 계정: 회사가 허용했을 때 내 회사 메일 계정(SMTP)을 연결 — 연결 시험 메일 1통이 성공해야 저장, 이후 내 발송은 이 계정으로(보낸메일함에도 남음) */
+function MyMailSection() {
+  type Preset = { key: string; label: string; host: string; port: number; secure: boolean; help: string; steps?: [string, string][] };
+  type Acc = { provider: string; providerLabel: string; host: string; port: number; secure: boolean; username: string; fromEmail: string; fromName: string | null; lastOkAt: string | null; lastError: string | null };
+  const st = useApi<{ account: Acc | null; presets: Preset[]; allowed: boolean; domains: string[]; workEmail: string }>('/api/account/mail');
+  const [edit, setEdit] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [f, setF] = useState({ provider: 'naver', host: '', port: '465', secure: true, username: '', fromEmail: '', fromName: '', password: '' });
+  const a = st.data?.account ?? null;
+  useEffect(() => { if (a) setF((x) => ({ ...x, provider: a.provider, host: a.host, port: String(a.port), secure: a.secure, username: a.username, fromEmail: a.fromEmail, fromName: a.fromName ?? '' })); }, [a]);
+  if (!st.data) return null;
+  const preset = st.data.presets.find((p) => p.key === f.provider);
+  const pick = (key: string) => { const p = st.data!.presets.find((x) => x.key === key)!; setF({ ...f, provider: key, host: key === 'custom' ? f.host : p.host, port: String(p.port), secure: p.secure }); };
+  async function save(e: React.FormEvent) {
+    e.preventDefault(); setBusy(true);
+    try {
+      const r = await api('/api/account/mail', { method: 'PUT', body: { provider: f.provider, host: f.host || undefined, port: Number(f.port) || undefined, secure: f.secure, username: f.username.trim(), fromEmail: f.fromEmail.trim(), fromName: f.fromName.trim() || null, password: f.password || undefined } });
+      toast.ok(`연결됐습니다 — ${r.testSentTo} 로 시험 메일을 보냈습니다. 받은편지함·보낸메일함을 확인해 주세요.`); setF({ ...f, password: '' }); setEdit(false); st.reload();
+    } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+  }
+  async function remove() {
+    if (!window.confirm('내 메일 계정 연결을 끊을까요? 끊으면 회사 기본 방식으로 보냅니다.')) return;
+    try { await api('/api/account/mail', { method: 'DELETE' }); st.reload(); setEdit(false); } catch (er: any) { toast.error(er.message); }
+  }
+  return (
+    <section className="rounded-lg border bg-white p-4 text-sm" data-testid="my-mail">
+      <h2 className="font-semibold">내 메일 계정</h2>
+      <p className="mt-1 text-ink-2">업무에서 고객에게 보내는 메일을 <b>내 회사 메일 계정</b>(예: 이름@회사도메인)으로 보내고 보낸메일함에도 남기려면 여기서 연결합니다. 연결하지 않으면 회사 기본 방식(워크인 발송 또는 회사 계정, 답장은 내 업무 이메일)으로 나갑니다.</p>
+      {!st.data.allowed ? (
+        <p className="mt-2 rounded-input bg-slate-50 px-2.5 py-1.5 text-xs text-ink-2" data-testid="my-mail-off">회사 설정에서 직원 개인 메일 계정 연결이 꺼져 있습니다 — 필요하면 대표·관리자에게 요청하세요(관리 › 메일 계정·명함).{a && ' 연결해 둔 계정은 허용될 때까지 쓰이지 않습니다.'}</p>
+      ) : (
+        <>
+          {st.data.domains.length > 0 && <p className="mt-1 text-xs text-ink-3">허용 도메인: {st.data.domains.map((d) => '@' + d).join(', ')}</p>}
+          {a && !edit && (
+            <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="my-mail-connected">
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">연결됨</span>
+              <b>{a.fromName ? `${a.fromName} <${a.fromEmail}>` : a.fromEmail}</b><span className="text-xs text-ink-3">{a.providerLabel}{a.lastOkAt ? ` · 마지막 성공 ${fmtDateTime(a.lastOkAt)}` : ''}</span>
+              {a.lastError && <span className="text-xs text-red-600">최근 오류: {a.lastError}</span>}
+              <span className="ml-auto flex gap-1.5"><Button size="sm" variant="secondary" onClick={() => setEdit(true)}>바꾸기·다시 시험</Button><Button size="sm" variant="ghost" className="text-red-600" onClick={remove} data-testid="my-mail-remove">연결 끊기</Button></span>
+            </div>
+          )}
+          {!a && !edit && <div className="mt-2"><Button size="sm" variant="secondary" onClick={() => { setF((x) => ({ ...x, fromEmail: x.fromEmail || st.data!.workEmail, username: x.username || st.data!.workEmail })); setEdit(true); }} data-testid="my-mail-connect">내 메일 계정 연결</Button></div>}
+          {edit && (
+            <form onSubmit={save} className="mt-2 space-y-2" data-testid="my-mail-form">
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="메일 업체">
+                {st.data.presets.map((p) => <button key={p.key} type="button" role="radio" aria-checked={f.provider === p.key} onClick={() => pick(p.key)} className={cx('rounded-full border px-3 py-1 text-sm', f.provider === p.key ? 'border-brand-600 bg-brand-50 font-medium text-brand-700' : 'border-line hover:bg-slate-50')}>{p.label}</button>)}
+              </div>
+              {preset && (preset.steps?.length ? <ol className="list-decimal space-y-1 rounded-input bg-slate-50 py-2 pl-7 pr-3 text-xs text-ink-2">{preset.steps.map(([t, url], k) => <li key={k}>{t}{url && <> — <a href={url} target="_blank" rel="noreferrer" className="underline">열기</a></>}</li>)}</ol>
+                : <p className="rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2">{preset.help}</p>)}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Field label="보내는 주소(내 회사 메일)"><input className={inputCls} type="email" required value={f.fromEmail} onChange={(e) => setF({ ...f, fromEmail: e.target.value, username: f.username || e.target.value })} data-testid="my-mail-from" /></Field>
+                <Field label="보내는 이름"><input className={inputCls} value={f.fromName} onChange={(e) => setF({ ...f, fromName: e.target.value })} placeholder="예: 홍길동 (회사명)" /></Field>
+                <Field label="로그인 아이디"><input className={inputCls} required value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} autoComplete="off" /></Field>
+                <Field label={a ? '앱 비밀번호 (비우면 저장된 값으로 시험)' : '앱 비밀번호'}><input className={inputCls} type="password" required={!a} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" data-testid="my-mail-password" /></Field>
+                {f.provider === 'custom' && <>
+                  <Field label="SMTP 서버"><input className={inputCls} required value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })} placeholder="smtp.example.com" /></Field>
+                  <Field label="포트·암호화"><span className="flex items-center gap-2"><input className={cx(inputCls, 'w-24')} inputMode="numeric" value={f.port} onChange={(e) => setF({ ...f, port: e.target.value })} />
+                    <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={f.secure} onChange={(e) => setF({ ...f, secure: e.target.checked })} />SSL(465)</label></span></Field>
+                </>}
+              </div>
+              <p className="text-xs text-ink-3">[연결 시험]을 누르면 내 주소로 시험 메일 1통을 보내고, 성공해야 저장합니다. 비밀번호는 암호화해 서버에만 두고 화면에 다시 보이지 않습니다.</p>
+              <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEdit(false)}>취소</Button><Button type="submit" disabled={busy} data-testid="my-mail-save">{busy ? '시험 중…' : '연결 시험 후 저장'}</Button></div>
+            </form>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function AccountSection() {
   const { user, tenant } = useSession();
   const [pw, setPw] = useState('');
