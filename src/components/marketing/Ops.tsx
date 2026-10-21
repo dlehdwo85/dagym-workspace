@@ -14,7 +14,9 @@ const C = '#7C3AED';
 type Proposal = { id: string; kind: string; title: string; summary: string; body: { items: { title: string; detail: string; expected?: string; cost?: string }[]; rationale: string; numbers?: any; link?: string }; status: string; source: string; version?: number; revision_note?: string | null; decision_note: string | null; decided_by_name: string | null; decided_at: string | null; executed: any; created_at: string };
 export type BrandRow = { brandId: string; name: string; share: number; monthly: number; priority: number | null; note: string; plans: number; needsPlan: boolean };
 type Budget = { id: string; month: string; status: string; version?: number; revision_note?: string | null; reject_note?: string | null; brand_plan?: BrandRow[]; total_source?: string | null; plan: { provider: string; label: string; monthly: number; daily: number; note: string; connected: boolean; charge: string | null; used: number; rate: number | null }[]; total: number; rationale: string | null; source: string; executed: any[] | null; approved_by_name: string | null; approved_at: string | null };
-type View = { month: string; proposals: Proposal[]; budget: Budget | null; kinds: Record<string, string>; channels: Record<string, { label: string; charge: string }>; canEdit: boolean; months: string[]; ownerTotal?: number | null; totalDefault?: { total: number; source: string }; brands?: { brandId: string; name: string; share: number; priority: number | null; note: string }[]; maxRevisions?: number; review?: { day: string; status: 'ok' | 'warn' | 'action'; signals: { key: string; level: string; title: string; detail: string; action: string }[]; metrics: any; brief: string | null; briefAt: string | null; reviewedAt: string } | null };
+type FeedItem = { id: string; title: string; media: string; url: string | null; stats: { brightness: number; saturation: number; warmth: number } | { error: string } | null; outlier: boolean };
+type FeedBrand = { brandId: string | null; name: string; color: string; n: number; score: number | null; items: FeedItem[]; note: string };
+type View = { month: string; feed?: { analyzable: boolean; brands: FeedBrand[] } | null; proposals: Proposal[]; budget: Budget | null; kinds: Record<string, string>; channels: Record<string, { label: string; charge: string }>; canEdit: boolean; months: string[]; ownerTotal?: number | null; totalDefault?: { total: number; source: string }; brands?: { brandId: string; name: string; share: number; priority: number | null; note: string }[]; maxRevisions?: number; review?: { day: string; status: 'ok' | 'warn' | 'action'; signals: { key: string; level: string; title: string; detail: string; action: string }[]; metrics: any; brief: string | null; briefAt: string | null; reviewedAt: string } | null };
 const REVIEW_STATUS: Record<string, [string, string]> = { ok: ['정상', 'bg-emerald-50 text-emerald-800 border-emerald-200'], warn: ['주의', 'bg-amber-50 text-amber-800 border-amber-200'], action: ['조치 필요', 'bg-red-50 text-red-800 border-red-200'] };
 const TOTAL_SRC: Record<string, string> = { owner: '대표 입력 총액', goal: '월 운영 목표 광고비', last: '지난달 지출 ×1.5', hint: '화면 입력', min: '최소 기준(30만)' };
 const STATUS: Record<string, [string, string]> = { pending: ['승인 대기', 'bg-orange-50 text-orange-800'], approved: ['승인됨', 'bg-emerald-50 text-emerald-800'], rejected: ['반려', 'bg-slate-100 text-ink-2'], done: ['실행 완료', 'bg-slate-100 text-ink-2'] };
@@ -57,6 +59,23 @@ export function Ops() {
       <p className="text-xs text-ink-2">AI 마케터가 숫자(게시·문의·광고비·캠페인)를 보고 분석·게시 방향·협업·인플루언서·향후 계획을 카드로 올립니다. 대표가 [승인]하면 실행됩니다 — 계획·방향은 제작의뢰실 의뢰로, 협업·인플루언서·분석은 담당 업무로. 돈을 쓰거나 밖으로 보내는 일은 사람이 합니다. 매주 월요일 분석·방향 카드가 자동으로 올라옵니다.</p>
       {!data ? <Skeleton rows={5} /> : <>
         <RevenueGoal canEdit={data.canEdit} month={data.month} />
+        {/* 대표 10/21 12:20 피드 일관성: 브랜드별 최근 9장(3×3) 톤(밝기·채도·색온도) — 숫자로만 비교(AI 비용 0), 튀는 장은 빨간 테두리. 신호는 운영 검토 카드로 */}
+        {data.feed && data.feed.brands.length > 0 && <section id="feed" className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ops-feed">
+          <h2 className="text-sm font-semibold">피드 일관성 <span className="font-normal text-ink-2">브랜드별 최근 9장 톤(밝기·채도·색온도) — 숫자로만 비교</span></h2>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{data.feed.brands.map((b) => (
+            <div key={b.brandId ?? 'none'} data-testid="ops-feed-brand" data-score={b.score ?? ''}>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs"><i className="inline-block size-2 rounded-full" style={{ background: b.color }} /><b>{b.name}</b>
+                <span className={cx('rounded-full px-1.5 py-0.5 text-[11px] font-medium', b.score === null ? 'bg-slate-100 text-ink-3' : b.score >= 70 ? 'bg-emerald-50 text-emerald-800' : b.score >= 50 ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-700')} data-testid="ops-feed-score">{b.score === null ? '분석 전' : `일관성 ${b.score}점`}</span>
+                <span className="text-ink-3">{b.n}장</span></div>
+              <div className="mt-1 grid grid-cols-3 gap-0.5">{b.items.map((it) => (
+                <a key={it.id} href={it.url ?? `/s/marketing/approvals?c=${it.id}`} target={it.url ? '_blank' : undefined} rel="noopener noreferrer" className={cx('relative aspect-square overflow-hidden rounded bg-slate-100', it.outlier && 'ring-2 ring-red-500')}
+                  title={`${it.title}${it.stats && !('error' in it.stats) ? ` · 밝기 ${it.stats.brightness} · 채도 ${Math.round(it.stats.saturation * 100)}%` : ''}`} data-testid={it.outlier ? 'ops-feed-outlier' : 'ops-feed-item'}>
+                  <img src={`/api/library/${it.media}/download?inline=1`} alt="" className="size-full object-cover" loading="lazy" />
+                  {it.outlier && <span className="absolute left-0.5 top-0.5 rounded bg-red-600 px-1 text-[10px] font-semibold text-white">튐</span>}
+                </a>))}</div>
+              <p className="mt-1 text-[11px] text-ink-3">{b.note}</p>
+            </div>))}</div>
+        </section>}
         <section data-testid="ops-proposals">
           <h2 className="text-base font-bold">승인 요청 카드 {pending.length ? <span className="text-orange-700">{pending.length}건</span> : <span className="text-sm font-normal text-ink-3">없음</span>}</h2>
           {pending.length === 0 && <div className="mt-2 rounded-card border border-dashed border-line p-6 text-center text-sm text-ink-2" data-testid="ops-empty">대기 중인 카드가 없습니다{data.canEdit ? ' — [AI 마케터 제안 받기]' : ''}</div>}
