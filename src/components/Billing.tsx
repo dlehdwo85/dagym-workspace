@@ -9,17 +9,41 @@ const won = (n: number | null | undefined) => (n == null ? '-' : `${n.toLocaleSt
 const STATUS: Record<string, string> = { pending: '대기', paid: '결제 완료', failed: '실패', canceled: '환불', partial_canceled: '부분 환불' };
 const KIND: Record<string, string> = { subscription: '월 구독', annual: '연간', addon: '팩' };
 
-declare global { interface Window { goPay?: (f: HTMLFormElement) => void; nicepaySubmit?: () => void } }
+declare global { interface Window { goPay?: (f: HTMLFormElement) => void; nicepaySubmit?: () => void; nicepayClose?: () => void } }
 
 /** 18차: 결제 — 카드(빌키) 등록 · 월 구독 · 연간·팩(결제창) · 영수증 · 해지 */
-/** 나이스페이 결제창 띄우기(서버가 만든 서명된 파라미터) — 회사 결제·V32 1 플랫폼 결제 시험 공용 */
-export async function launchNicepay(r: { script: string; params: Record<string, string | number> }) {
-  await new Promise<void>((res, rej) => { if (window.goPay) return res(); const s = document.createElement('script'); s.src = r.script; s.onload = () => res(); s.onerror = () => rej(new Error('결제창을 불러오지 못했습니다')); document.head.appendChild(s); });
+/**
+ * 나이스페이 결제창 띄우기(서버가 만든 서명된 파라미터) — 회사 결제·V32 1 플랫폼 결제 시험 공용.
+ * PC 는 나이스페이 스크립트가 같은 페이지 안에 iframe 레이어(#nice_layer)를 그린다(팝업 창 아님). 나이스페이 쪽이 오류·취소를 보내면
+ * 레이어를 지우고 `nicepayClose()` 를 부르는데, 정의가 없으면 아무 안내 없이 창만 사라진다(#413 — 교차 출처 iframe 의 alert 는 Chrome 이 막음).
+ * 그래서 닫힘 사유(AuthResultCode·AuthResultMsg)를 토스트로 보여 주고, 열자마자 닫히면 '같은 탭에서 열기'를 안내한다.
+ * `page: true` 면 나이스페이의 모바일 방식(MobileYN=Y)으로 iframe 없이 이 탭이 결제창으로 이동한다 — 결제 뒤 ReturnURL 로 돌아온다.
+ */
+export async function launchNicepay(r: { script: string; params: Record<string, string | number> }, opt: { page?: boolean; onClose?: (info: { code: string; message: string; quick: boolean }) => void } = {}) {
+  await new Promise<void>((res, rej) => { if (window.goPay) return res(); const s = document.createElement('script'); s.src = r.script; s.onload = () => res(); s.onerror = () => rej(new Error('결제창 스크립트를 불러오지 못했습니다 — 네트워크·광고 차단기를 확인하세요')); document.head.appendChild(s); });
   const f = document.createElement('form');
   f.method = 'post'; f.action = String(r.params.ReturnURL); f.acceptCharset = 'euc-kr'; f.style.display = 'none';
-  for (const [k, v] of Object.entries(r.params)) { const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = String(v); f.appendChild(i); }
+  f.dataset.testid = 'nicepay-form';
+  const params = { ...r.params, ...(opt.page ? { MobileYN: 'Y' } : {}) };
+  for (const [k, v] of Object.entries(params)) { const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = String(v); f.appendChild(i); }
   document.body.appendChild(f);
-  window.nicepaySubmit = () => f.submit();
+  const openedAt = Date.now();
+  let last: { code: string; message: string } | null = null;
+  // 나이스페이 레이어가 부모 창으로 보내는 결과 메시지({code, message, result}) — 닫힘 사유 기록용(처리는 나이스페이 스크립트가 한다)
+  const onMsg = (e: MessageEvent) => { const d = e.data as { code?: string; message?: string; result?: { AuthResultCode?: string; AuthResultMsg?: string } } | null; if (d && typeof d === 'object' && d.code) last = { code: d.result?.AuthResultCode ?? String(d.code), message: d.result?.AuthResultMsg ?? d.message ?? '' }; };
+  window.addEventListener('message', onMsg);
+  const field = (n: string) => (f.elements.namedItem(n) as HTMLInputElement | null)?.value ?? '';
+  window.nicepaySubmit = () => { window.removeEventListener('message', onMsg); f.submit(); };
+  window.nicepayClose = () => {
+    window.removeEventListener('message', onMsg);
+    const code = field('AuthResultCode') || last?.code || '';
+    const message = field('AuthResultMsg') || last?.message || '';
+    const quick = Date.now() - openedAt < 4000;
+    const why = message ? `${message}${code ? ` (${code})` : ''}` : quick ? '나이스페이가 결제창을 바로 닫았습니다' : '결제를 취소했습니다';
+    toast.error(`결제창이 닫혔습니다 — ${why}${quick ? '. [같은 탭에서 열기]를 켜고 다시 시도해 보세요' : ''}`);
+    opt.onClose?.({ code, message, quick });
+    f.remove();
+  };
   window.goPay!(f);
 }
 
@@ -29,6 +53,7 @@ export function BillingSection() {
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState('');
   const [pm, setPm] = useState<'CARD' | 'BANK' | 'VBANK'>('CARD'); // V29 결제창 결제 수단
+  const [pageMode, setPageMode] = useState(false); // #413 레이어가 바로 닫히는 환경 — 같은 탭 이동 방식
   useEffect(() => {
     const sp = new URLSearchParams(location.search);
     if (sp.get('paid')) toast.ok('결제했습니다'); else if (sp.get('vbank')) toast.ok(`가상계좌를 만들었습니다 — ${sp.get('vbank')}`); else if (sp.get('payfail')) toast.error(`결제하지 못했습니다: ${sp.get('payfail')}`);
@@ -56,7 +81,7 @@ export function BillingSection() {
   async function openWindow(body: any) {
     setBusy(true);
     try {
-      await launchNicepay(await api('/api/billing/window', { body: { ...body, payMethod: pm } }));
+      await launchNicepay(await api('/api/billing/window', { body: { ...body, payMethod: pm } }), { page: pageMode, onClose: (i) => { if (i.quick) setPageMode(true); } });
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   return (
@@ -104,6 +129,9 @@ export function BillingSection() {
                 <button key={k} type="button" role="radio" aria-checked={pm === k} onClick={() => setPm(k)} className={cx('rounded-full border px-2.5 py-0.5', pm === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line text-ink-2')}>{l}</button>
               ))}
               {pm === 'VBANK' && <span className="text-ink-3">계좌를 받은 뒤 3일 안에 입금하면 자동 적용</span>}
+              <label className="ml-auto flex items-center gap-1 text-ink-3" title="결제창이 열리자마자 닫히면 켜세요 — 이 탭이 나이스페이 결제 화면으로 이동했다가 결제 뒤 돌아옵니다">
+                <input type="checkbox" checked={pageMode} onChange={(e) => setPageMode(e.target.checked)} data-testid="billing-pagemode" />같은 탭에서 열기
+              </label>
             </div>
             <div>
               <p className="text-xs font-semibold text-ink-2">연간 결제 (결제창, 할인가)</p>
