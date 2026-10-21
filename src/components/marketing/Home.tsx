@@ -23,6 +23,7 @@ type Home = {
   canEdit: boolean; cards: { cards: string[]; mine: boolean; company: string[] | null }; cardLabels: Record<string, string>;
   kpi: { approvals: number; approvalsDetail: { contents: number; adPlans: number }; today: { id: string; channel: string; kind: string | null; at: string; status: string }[]; week: { done: number; planned: number }; ads: { cost7: number; clicks7: number; today: number } | null; calls7: number };
   approve: (CardContent & { media: string | null })[]; approvalHour: number;
+  production?: { leftCredits: number | null; monthlyCredits: number | null; images: number | null; videos: number | null; over: boolean; overMessage: string | null; planLabel: string | null } | null;
   goal: { id: string; month: string; status: string; posts: { done: number; planned: number; target: number | null }; inquiries: { done: number; target: number | null }; adCost: { spent: number; budget: number | null }; objectives: string[]; message: string | null; weekTopic: string | null; week: number | null } | null;
   queue: { kind: string; id: string; title: string; state: 'waiting' | 'running' | 'done'; at: string | null; href: string; night: boolean; canRun: boolean; canNight: boolean; note?: string }[];
   night: { id: string; title: string; kind: string }[]; nightScope: Record<string, boolean>;
@@ -139,6 +140,10 @@ export function MarketingHome() {
       {kpi.map(([l, v, sub, href]) => <Link key={l} href={href} className="rounded-card border border-line bg-white p-3 shadow-card hover:border-violet-300" data-testid="mkt-kpi"><div className="text-[11px] text-ink-2">{l}</div>
 <div className="text-xl font-bold tabular-nums" style={{ color: C }}>{v}</div><div className="truncate text-[11px] text-ink-3">{sub}</div></Link>)}
     </section>
+      {/* 대표 10/20 15:40 (#103): 이번 달 남은 제작 n건 · 초과 안내 */}
+      {data.production && data.production.leftCredits !== null && <Link href="/s/marketing/automation" className={cx('block rounded-card border p-3 text-sm shadow-card hover:border-violet-300', data.production.over ? 'border-red-200 bg-red-50/40' : 'border-line bg-white')} data-testid="mkt-home-production">
+        <b>이번 달 남은 제작</b> <span className="tabular-nums">이미지 {data.production.images}장 또는 영상 {data.production.videos}편 <span className="text-xs text-ink-3">(크레딧 {data.production.leftCredits}/{data.production.monthlyCredits}{data.production.planLabel ? ` · ${data.production.planLabel}` : ''})</span></span>
+        {data.production.overMessage && <div className="mt-1 text-xs text-red-800">{data.production.overMessage}</div>}</Link>}
       {/* 대표 10/20 18:00 ②: 이번 달 목표 n/m 막대(승인된 목표) — 없으면 [목표 만들기] */}
       {data.goal ? <Link href="/s/marketing/goals" className="block rounded-card border border-line bg-white p-3 shadow-card hover:border-violet-300" data-testid="mkt-home-goal">
         <div className="flex flex-wrap items-center gap-2 text-sm"><b>이번 달 목표</b>{data.goal.status === 'pending' && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-800">초안 — 승인 필요</span>}

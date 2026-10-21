@@ -12,6 +12,7 @@ import { PayTest } from '@/components/PayTest';
 import { PlatformSettlement } from '@/components/PlatformSettlement';
 import { PlatformSalesSources } from '@/components/sales/PlatformSalesSources';
 import { PlatformCollectorSettings } from '@/components/sales/PlatformCollectorSettings';
+import { PlatformMktPlans } from '@/components/platform/PlatformMktPlans';
 import { PlatformSalesMigrate } from '@/components/sales/PlatformSalesMigrate';
 import { PlatformOpsImport } from '@/components/marketing/PlatformOpsImport';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -63,6 +64,7 @@ export default function PlatformPage() {
       <PlatformSalesMigrate />
       <PlatformSalesSources />
       <PlatformCollectorSettings />
+      <PlatformMktPlans />
       <PlatformOpsImport />
       <section id="support" className="rounded-card border border-line bg-white shadow-card" data-testid="support-inbox">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">문의 접수함 {tickets.data && <span className="text-xs font-normal text-ink-3">미답변 {tickets.data.tickets.filter((t) => t.status === 'open').length}건</span>}</h2>

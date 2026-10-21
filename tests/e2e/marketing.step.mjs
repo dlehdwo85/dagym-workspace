@@ -155,6 +155,7 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.getByTestId('auto-usage').first().waitFor();
   assert.equal(await owner.getByTestId('auto-usage').count(), 5);
   await owner.getByTestId('auto-plan-standard').waitFor();
+  await owner.getByTestId('auto-production').waitFor(); // #103 이번 달 남은 제작(요금제 전에는 안내 문구)
   await owner.getByTestId('auto-brand-name').fill('E2E 시험 브랜드');
   await owner.getByTestId('auto-brand-add').click();
   await owner.getByTestId('auto-brands').getByText('E2E 시험 브랜드', { exact: true }).waitFor();
