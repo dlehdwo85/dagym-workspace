@@ -97,7 +97,8 @@ test('영업 공간 화면', async () => {
   assert.deepEqual(r.regions.map((x) => x.region), ['경기', '서울', '부산', '지역 미정'].filter(Boolean).sort((a, b) => (a === '지역 미정' ? 1 : b === '지역 미정' ? -1 : 0)), JSON.stringify(r.regions));
   assert.equal((await ctx.staffA.client.req('GET', '/api/sales/src?view=leads')).status, 404, '공간 미배정 직원');
   // 입찰·공고 선택 기능: 끄면 화면 404·현황 카드 숨김 표시, 직원은 못 바꿈, null = 기본(켜짐)
-  assert.deepEqual(await ctx.owner.ok('GET', '/api/sales/options'), { bids: true, bidsAuto: true, canEdit: true });
+  const opt = await ctx.owner.ok('GET', '/api/sales/options');
+  assert.deepEqual([opt.bids, opt.bidsAuto, opt.canEdit, opt.template.code], [true, true, true, 'facility'], '#408 첫 회사는 시드로 시설 템플릿');
   await ctx.owner.ok('PUT', '/api/sales/options', { bids: false });
   assert.equal((await ctx.owner.req('GET', '/api/sales/src?view=bids')).status, 404);
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=summary')).bidsOn, false);

@@ -115,7 +115,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   const formal = await writesOpen(t);
   const cats = await listBizCats(t); // 대표 10/21 12:00 영업 재편 4): 회사 관심 사업(카테고리) — 공고 사업 배지·탭 근거
   // 대표 검수 10/20 ②: 앱 상세는 한국어 칸만, 원본 전체는 관리자만 접힘 안에 — 모든 화면 공통
-  const meta = { readOnly: !formal, syncedAt: applied?.value?.tenant === t ? applied.value.at : null, imported: applied?.value?.tenant === t, canAssign: ['owner', 'admin'].includes(u.role) };
+  const terms = await (await import('./options')).salesTerms(t); // #408 업종 중립 문구 — 화면 용어는 회사 업종 템플릿
+  const meta = { readOnly: !formal, syncedAt: applied?.value?.tenant === t ? applied.value.at : null, imported: applied?.value?.tenant === t, canAssign: ['owner', 'admin'].includes(u.role), terms };
   const leadRows = () => (formal ? formalLeads(t) : rows(t, 'leads'));
   // S1-2(로컬 10/20): 전환 뒤에는 회사별 진행 기록(입찰·신규단지·시설·협력사)을 정식 표 sales_work_records 에서 — 원본 행 모양으로 돌려줘 아래 읽기 코드는 그대로
   const { workRows } = await import('./work');
@@ -202,8 +203,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       contracts: NR.map(endOf).filter((e) => !!e && e >= td && e <= plus(365)).length, buildings: buildings.size, facilities: (await rows('global', 'operating_facility_prospects', 20000)).length, vendors: (await rows('global', 'vendor_registrations', 20000)).length };
     const tally = (arr: any[], key: (x: any) => unknown) => arr.reduce((m: Record<string, number>, x) => { const k = String(key(x) ?? '미검토'); m[k] = (m[k] ?? 0) + 1; return m; }, {} as Record<string, number>);
     const isBuildingWork = (w: any) => String(pick(w, 'source_type') ?? '') === 'building' || !!pick(w, 'building_id'); // 정식 표는 notice_id 에 ref_id 가 들어가므로 source_type 으로 구분
-    const progress: [string, Record<string, number>][] = [['입찰', tally(W.filter((w: any) => !isBuildingWork(w)), (w) => pick(w, 'status'))], ['신규단지', tally(W.filter(isBuildingWork), (w) => pick(w, 'status'))],
-      ['준공·입주 시설', tally(FPall, (p) => pick(p, 'contact_status', 'status'))], ['협력사', tally(VPall, (p) => pick(p, 'status'))]];
+    const progress: [string, Record<string, number>][] = [['입찰', tally(W.filter((w: any) => !isBuildingWork(w)), (w) => pick(w, 'status'))], [terms.kind.building, tally(W.filter(isBuildingWork), (w) => pick(w, 'status'))],
+      [terms.facilitiesTab, tally(FPall, (p) => pick(p, 'contact_status', 'status'))], [terms.kind.vendor, tally(VPall, (p) => pick(p, 'status'))]];
     return { ...meta, bidsOn, setupNeeded, todo, tiles, progress, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
       bidsOpen: NR.filter((r) => isOpenBid(notice(r), workOf.get(String(r.id ?? r.__id)), today())).length,
       relatedNotices: N.length, newNotices7d: N.filter((n) => n.noticeDate && n.noticeDate >= plus(-7) && n.noticeDate <= today()).length /* 로컬 10/19: 원본 초기 적재(10/13 3,343건) 때문에 first_seen 7일은 부풀려짐 → 공고일 기준 */ }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses,
@@ -308,7 +309,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const wonLeads = new Set(contracts.filter((c) => inPeriod(pick(c, 'contract_date', 'start_date'))).map((c) => c.__lead_id ?? c.lead_id).filter(Boolean)).size;
     // 출처별 전환(운영시설 DB/입찰 DB/신규단지/협력사/직접): 리드가 어느 원천에서 넘어왔는지(sales_work_records.lead_id)
     const srcOf = formal ? new Map((await sql<{ lead_id: string; src_tbl: string }[]>`select lead_id, src_tbl from sales_work_records where tenant = ${t} and lead_id is not null`).map((x) => [x.lead_id, x.src_tbl])) : new Map();
-    const SRC_KO: Record<string, string> = { opportunity_work: '입찰·신규단지 DB', operating_facility_prospects__progress: '운영시설 DB', vendor_registrations__progress: '협력사 DB' };
+    const SRC_KO: Record<string, string> = { opportunity_work: `입찰·${terms.kind.building} DB`, operating_facility_prospects__progress: `${terms.kind.facility} DB`, vendor_registrations__progress: `${terms.kind.vendor} DB` };
     const bySource: Record<string, { leads: number; won: number }> = {};
     if (formal) for (const l of await sql<{ id: string }[]>`select id from sales_leads where tenant = ${t} and deleted_at is null`) { const k = SRC_KO[srcOf.get(l.id) ?? ''] ?? '직접'; (bySource[k] ??= { leads: 0, won: 0 }).leads++; }
     for (const c of contracts) { const lid = c.__lead_id ?? c.lead_id; if (!lid) continue; const k = SRC_KO[srcOf.get(lid) ?? ''] ?? '직접'; (bySource[k] ??= { leads: 0, won: 0 }).won++; }

@@ -8,7 +8,8 @@ import type { SessionUser } from '../types';
 import { tenantOf } from '../types';
 
 export type SalesKind = 'bid' | 'building' | 'facility' | 'vendor' | 'lead';
-export const KIND_LABEL: Record<SalesKind, string> = { bid: '입찰', building: '신규단지', facility: '시설', vendor: '협력사', lead: '리드' };
+/** #408 종류 이름은 회사 업종 템플릿에서 */
+const kindLabels = async (tenant: string): Promise<Record<SalesKind, string>> => (await (await import('./options')).salesTerms(tenant)).kind;
 /** 진행으로 치는 상태(업무 생성) / 멈춤(보류) / 끝(완료) */
 const PROGRESS = new Set(['연락중', '신청 준비', '신청 완료', '검토중']);
 const HOLD = new Set(['보류']);
@@ -53,6 +54,7 @@ export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Pro
   }
   if (!progress) return { taskId: null, action: 'none' };
   const { createTask } = await import('../tasks');
+  const KIND_LABEL = await kindLabels(tenantOf(u));
   const title = `[영업] ${i.name.slice(0, 120)} — ${(i.nextAction ?? (i.kind === 'lead' ? '첫 연락' : st === '검토중' ? '검토' : i.kind === 'vendor' ? '등록 신청' : '다음 조치')).slice(0, 40)}`;
   const desc = `${KIND_LABEL[i.kind]} 건에서 자동으로 만든 영업 업무입니다 — 원천: ${LINK[i.kind](i.id)}${i.deadline ? `\n입찰 마감: ${i.deadline}` : ''}\n(상태를 보류·미참여·대상아님·완료로 바꾸면 이 업무도 함께 보류·완료됩니다)`;
   const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: i.assigneeId ?? u.id, requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', KIND_LABEL[i.kind]] }, { quiet: false, skipQuota: true });

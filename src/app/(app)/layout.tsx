@@ -21,7 +21,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (sp && (sp === 'work' || !(spaces as string[]).includes(sp))) notFound();
   const dir = await directory(user);
   const menus = await menuLevels(user); // V13 메뉴 권한
-  const [t] = await db()<{ name: string; kind: string; owner_user_id: string | null; onboarded_at: Date | null }[]>`select name, kind, owner_user_id, onboarded_at from tenants where id = ${tenantOf(user)}`;
+  const [t] = await db()<{ name: string; kind: string; owner_user_id: string | null; onboarded_at: Date | null; sales_template: string | null; industries: string[] | null; industry: string | null }[]>`select name, kind, owner_user_id, onboarded_at, sales_template, industries, industry from tenants where id = ${tenantOf(user)}`;
+  // #408 업종 중립 문구: 영업 화면 용어는 회사 업종 템플릿(없으면 업종으로 추정) — 코드에 우리 회사 용어를 박지 않음
+  const { salesTermsFor, tenantIndustries } = await import('@/lib/sales/terms');
+  const { auto: _auto, ...salesTerms } = salesTermsFor(t?.sales_template, tenantIndustries(t));
   const trial = ['default', 'demo'].includes(tenantOf(user)) ? null : await (await import('@/lib/plans')).trialInfo(tenantOf(user)).catch(() => null);
   const billingLock = user.support ? null : await (await import('@/lib/plans')).billingLock(tenantOf(user)).catch(() => null); // V28 B2 미납
   const session = {
@@ -30,6 +33,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     dir: JSON.parse(JSON.stringify(dir)),
     features: { googleSync: googleSyncEnabled(), ai: aiEnabled() && menus.assistant === 'use', /* 로컬 10/20(심사): 체험 조직도 AI 비서 켬(한도는 review.ts) */ library: !user.isDemo && menus.library !== 'none',
       salesBids: (spaces as string[]).includes('sales') ? await (await import('@/lib/sales/options')).salesBidsOn(tenantOf(user)) : false,
+      salesTerms,
       sidebar3: process.env.FEATURE_SIDEBAR3 !== '0' /* ⑦ 사이드바 3구역 — 되돌리려면 FEATURE_SIDEBAR3=0 */ },
     menus,
     spaces, // V41 공간

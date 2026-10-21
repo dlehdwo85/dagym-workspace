@@ -1,6 +1,7 @@
 'use client';
 import { createContext, useContext } from 'react';
 import type { Role } from '@/lib/types';
+import { DEFAULT_TERMS, type SalesTerms } from '@/lib/sales/terms';
 
 export interface Dir {
   brands: { id: string; name: string; color: string }[];
@@ -19,13 +20,17 @@ export interface Sess {
   tenant?: { name: string; personal: boolean; internal: boolean; /** V21 문의(웹·전화) 받는 회사 */ inquiries?: boolean; onboarding: boolean; trial?: { trial: boolean; readOnly: boolean; daysLeft: number } | null; /** V28 B2 미납 잠금 */ billingLock?: 'read_only' | 'suspended' | null };
   /** V41 공간: 들어갈 수 있는 공간(업무는 늘) */
   spaces?: ('work' | 'sales' | 'marketing')[];
-  features: { googleSync: boolean; /** V9 AI 비서 (플랫폼 API 키가 있을 때만) */ ai: boolean; /** V9 자료실 (체험 계정 제외) */ library: boolean; /** 영업 입찰·공고 사용(회사 선택) */ salesBids?: boolean; /** ⑦ 사이드바 3구역(대표 승인 10/20 오후) — FEATURE_SIDEBAR3=0 이면 예전 사이드바 */ sidebar3?: boolean };
+  features: { googleSync: boolean; /** V9 AI 비서 (플랫폼 API 키가 있을 때만) */ ai: boolean; /** V9 자료실 (체험 계정 제외) */ library: boolean; /** 영업 입찰·공고 사용(회사 선택) */ salesBids?: boolean; /** #408 회사 업종 템플릿 용어(영업 메뉴·칸 이름·예시) */ salesTerms?: SalesTerms; /** ⑦ 사이드바 3구역(대표 승인 10/20 오후) — FEATURE_SIDEBAR3=0 이면 예전 사이드바 */ sidebar3?: boolean };
 }
 export const SessionCtx = createContext<Sess | null>(null);
 export function useSession() {
   const s = useContext(SessionCtx);
   if (!s) throw new Error('no session');
   return s;
+}
+/** #408 영업 용어(업종 템플릿) — 세션에 없으면 중립('일반') */
+export function useSalesTerms(): SalesTerms {
+  return useSession().features.salesTerms ?? DEFAULT_TERMS;
 }
 export const canManage = (role: Role) => role !== 'staff';
 export const isAdminRole = (role: Role) => role === 'owner' || role === 'admin';

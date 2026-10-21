@@ -18,7 +18,8 @@ export const WORK_STATUS: Record<WorkKind, string[]> = {
   vendor: ['미등록', '신청 준비', '신청 완료', '등록 완료', '대상 아님'],
 };
 export const CONVERTED = '진행영업 전환';
-const KIND_NAME: Record<WorkKind, string> = { bid: '입찰 공고', building: '신규단지', facility: '시설', vendor: '협력사' };
+/** #408 종류 이름은 회사 업종 템플릿에서(입찰은 공통) */
+const kindName = async (tenant: string, k: WorkKind) => (k === 'bid' ? '입찰 공고' : (await (await import('./options')).salesTerms(tenant)).kind[k]);
 const SRC_TBL: Record<WorkKind, string> = { bid: 'opportunity_work', building: 'opportunity_work', facility: 'operating_facility_prospects__progress', vendor: 'vendor_registrations__progress' };
 const ITEM_TBL: Record<WorkKind, string> = { bid: 'procurement_notices', building: 'building_sales_pipeline', facility: 'operating_facility_prospects', vendor: 'vendor_registrations' };
 const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = o?.[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return null; };
@@ -72,7 +73,7 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>) {
   // 대표 10/20 14:15: 영업 진행(연락중 등)으로 바뀌면 업무 자동 생성, 보류·미참여·완료면 업무도 함께
   const r = await item(sql, i.kind, i.id);
   const bidName = [pick(r, 'complex_name', 'facility_name'), pick(r, 'title', 'notice_title', 'bid_name')].filter(Boolean).join(' '); // 입찰은 '단지 공고명'
-  const task = await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: i.kind, id: i.id, name: (i.kind === 'bid' ? bidName : String(pick(r, 'name', 'complex_name', 'company', 'company_name', 'facility_name', 'title') ?? '')) || KIND_NAME[i.kind], status, nextDate: next,
+  const task = await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: i.kind, id: i.id, name: (i.kind === 'bid' ? bidName : String(pick(r, 'name', 'complex_name', 'company', 'company_name', 'facility_name', 'title') ?? '')) || (await kindName(t, i.kind)), status, nextDate: next,
     deadline: i.kind === 'bid' ? (String(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date') ?? '').slice(0, 10) || null) : null, nextAction: pick(cur?.data, 'next_action') });
   return { ok: true, status, memo, nextDate: next, task };
 }
@@ -95,7 +96,7 @@ export async function convertToLead(u: SessionUser, i: z.infer<typeof convertInp
   const leadId = await sql.begin(async (tx) => {
     const [l] = await tx<{ id: string }[]>`insert into sales_leads (tenant, name, status, facility_type, region, owner_id, contact_name, phone, memo, src)
       values (${t}, ${name}, '신규리드', ${pick(r, 'facility_type', 'building_type', 'category') ?? null}, ${pick(r, 'region', 'sido') ?? null}, ${u.id}, ${pick(r, 'contact_name', 'manager_name') ?? null},
-        ${pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone') ?? null}, ${`${i.kind === 'bid' ? '입찰 공고' : i.kind === 'building' ? '신규단지' : i.kind === 'facility' ? '준공·입주 시설' : '협력사'}에서 넘김`}, ${tx.json({ from: i.kind, id: i.id })}) returning id`;
+        ${pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone') ?? null}, ${`${await kindName(t, i.kind)}에서 넘김`}, ${tx.json({ from: i.kind, id: i.id })}) returning id`;
     await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${l.id}, null, '신규리드', ${'진행영업 전환'}, ${u.id})`;
     const d = { ...(cur?.data ?? {}), ...(i.kind === 'facility' ? { contact_status: CONVERTED } : { status: CONVERTED }), lead_id: l.id, converted_by: u.id, converted_at: new Date().toISOString(), ...(i.kind === 'bid' ? { notice_id: i.id } : i.kind === 'building' ? { source_id: i.id, source_type: 'building' } : {}) };
     const srcId = cur?.src_id ?? (SRC_TBL[i.kind] === 'opportunity_work' ? `w:${i.kind}:${i.id}` : i.id);
