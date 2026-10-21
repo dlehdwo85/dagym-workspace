@@ -49,7 +49,7 @@ const SUGGEST: Record<Ctx['page'], string[]> = {
 };
 
 /** V14 11번: 모든 화면의 AI 비서 — PC 오른쪽 아래 ✨ 패널, 휴대폰은 상단 ✨ → 아래 시트. 대화는 AI 비서 화면과 같은 보관 구조 */
-export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boolean; onOpenChange: (v: boolean) => void; /** 공간별 이름(AI 비서·AI 세일즈·AI 마케터) */ name?: string }) {
   const dockHidden = useDockHide();
   const ctx = useCtx();
   const path = usePathname();
@@ -105,18 +105,18 @@ export function AiDock({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   return (
     <>
       {!open && !hideFab && (
-        <button onClick={() => onOpenChange(true)} aria-label="AI 비서 열기" data-testid="ai-dock-open"
+        <button onClick={() => onOpenChange(true)} aria-label={`${name} 열기`} data-testid="ai-dock-open"
           className={`fixed bottom-6 right-6 z-40 hidden size-12 items-center justify-center rounded-full bg-violet-600 text-white shadow-pop transition-[transform,opacity] duration-200 hover:bg-violet-700 sm:flex ${dockHideCls(dockHidden)}`}><Sparkles className="size-6" /></button>
       )}
       {open && (
         <div className="fixed inset-0 z-50 bg-slate-900/30 sm:inset-auto sm:bottom-6 sm:right-6 sm:bg-transparent" onClick={() => onOpenChange(false)}>
-          <section role="dialog" aria-label="AI 비서" onClick={(e) => e.stopPropagation()} data-testid="ai-dock"
+          <section role="dialog" aria-label={name} onClick={(e) => e.stopPropagation()} data-testid="ai-dock"
             className="absolute inset-x-0 bottom-0 flex h-[78dvh] flex-col rounded-t-2xl bg-white pb-[var(--sab)] shadow-pop sm:static sm:h-[560px] sm:w-[380px] sm:rounded-card sm:border sm:border-line sm:pb-0">
             <header className="flex items-center gap-2 border-b border-line px-3 py-2">
               {view === 'list'
                 ? <button onClick={() => setView('chat')} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="대화로 돌아가기"><ArrowLeft className="size-4" /></button>
                 : <button onClick={() => setView('list')} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="대화 목록" title="대화 목록" data-testid="ai-dock-list-open"><Menu className="size-4" /></button>}
-              <Sparkles className="size-4 text-violet-600" /><span className="min-w-0 flex-1 truncate text-sm font-semibold">{view === 'list' ? '대화 목록' : 'AI 비서'}</span>
+              <Sparkles className="size-4 text-violet-600" /><span className="min-w-0 flex-1 truncate text-sm font-semibold">{view === 'list' ? '대화 목록' : name}</span>
               <button onClick={newChat} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="새 대화" title="새 대화" data-testid="ai-dock-new"><Plus className="size-4" /></button>
               <Link href={`/assistant?${new URLSearchParams({ ...(threadId ? { thread: threadId } : {}), ...(ctx.taskId ? { task: ctx.taskId } : {}) })}`} onClick={() => onOpenChange(false)}
                 className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="크게 보기" title="크게 보기"><Maximize2 className="size-4" /></Link>

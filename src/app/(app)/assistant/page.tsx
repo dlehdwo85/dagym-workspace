@@ -1,4 +1,5 @@
 'use client';
+import { aiName } from '@/lib/aiNames';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -177,7 +178,7 @@ export default function AssistantPage() {
       </ul>
     </aside>
     <div className="flex h-[calc(100dvh-9rem)] min-w-0 flex-1 flex-col sm:h-[calc(100dvh-6rem)]">
-      <PageHeader title="AI 비서" icon={Sparkles}
+      <PageHeader title={aiName(space)} icon={Sparkles}
         sub={<>자료실·업무·일정{user.role === 'owner' || user.role === 'admin' ? '·매출' : ''}을 내 권한 안에서 찾아 답합니다. 업무 만들기·첨부·댓글은 <b>[확인]</b>을 눌러야 반영됩니다.
           {u?.costUsd !== undefined && <span className="ml-1 text-xs text-ink-3">회사 전체 이번 달 ${u.costUsd.toFixed(2)} / 회사 한도 ${u.limitUsd}{status.data?.canSetLimit && <button onClick={editLimit} className="ml-1 text-brand-600 underline">한도 바꾸기</button>}</span>}</>} />
       <div className="mb-2"><AiBudgetBar budget={status.data?.budget} creditMessage={status.data?.creditMessage} onChanged={status.reload} /></div>

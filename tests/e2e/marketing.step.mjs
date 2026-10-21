@@ -24,7 +24,7 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   assert.equal(await owner.locator('aside a[aria-current="page"]').first().innerText(), '홈');
   // ⑥ 마케팅 홈 디벨롭(대표 승인 10/20 오후): AI 비서 입력창(라벨 'AI 비서') → 숫자 4칸 → 승인 3 → AI 작업 큐 → 이번 주 7칸 → 성과·광고 → 최근·제안 → 채널. ⚙ 카드 구성으로 끄기·순서
   await owner.getByTestId('mkt-home-chat').waitFor();
-  assert.equal(await owner.getByTestId('mkt-home-ask').getAttribute('aria-label'), 'AI 비서');
+  assert.equal(await owner.getByTestId('mkt-home-ask').getAttribute('aria-label'), 'AI 마케터'); // 대표 10/21 12:20: 마케팅 = AI 마케터
   assert.equal(await owner.getByTestId('mkt-kpi').count(), 4);
   assert.equal(await owner.getByTestId('mkt-week-day').count(), 7);
   for (const id of ['mkt-home-queue', 'mkt-home-ads', 'mkt-home-recent', 'mkt-home-suggest']) await owner.getByTestId(id).waitFor();

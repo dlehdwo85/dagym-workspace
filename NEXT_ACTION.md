@@ -1352,6 +1352,11 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 대표 12:20 — ① AI 명칭 통일 ② 일정 '준비 업무 만들기' 선택 창 [배포확인요청]
+- ① `src/lib/aiNames.ts` `aiName(space)`: work → AI 비서, sales → AI 세일즈, marketing → AI 마케터. AppShell 공통 메뉴·휴대폰 ✨ 버튼·AiDock 머리글(name prop)·/assistant 제목·AiAsk 입력창 문구·마케팅 홈 HOME_AI_LABEL·자동 제작/제작의뢰실 문구. E2E 마케팅 홈 aria-label 'AI 마케터'.
+- ② 캘린더 EventEditor(새 일정): `editor-prep` 체크(기본 꺼짐) + 묶음 select(`/api/events/_/prep` GET 목록) → 저장 뒤 `POST /api/events/{id}/prep {preset}`. 자동 생성은 없음.
+- 남은 12:20 항목: 피드 일관성 신호(최근 9장 색/구도 편차 — 이미지 분석 방식 설계 필요), 스플래시 모션(로컬 소스 뒤), 요금 설계안 문서(영업 사용자 인당 제안값·근거), Higgsfield 영상 모델·스토리보드·검수 라운드.
+
 ## 2026-10-21 대표 12:00 영업 재편 2) 되돌리기(#404) + 대표 13:50 #410 업무 검토 요청 전면 [배포확인요청]
 - 되돌리기: `POST /api/sales/work/handoff/revert {leadId, reason?}` — 담당자·넘긴 사람·관리자. 넘기기 때 리드 src 에 taskIds·eventIds·원 행 data 에 handoff_prev_status 를 남겨 두고, 되돌리면 업무 소프트 삭제 + 활동 'canceled'(reason sales_handoff_revert)·일정 소프트 삭제·원 행 이전 상태 복구(기록이 없었으면 삭제)·리드 상태 '되돌림'(STAGES 끝에 추가, 닫힌 상태로 취급)·sales_status_log·담당자 알림. 리드 상세 머리 상자(`lead-handoff-box`)에 [배정 이전으로 되돌리기].
 - #410: tasks.ts 'approval_required' 변경 = 관리자 또는 요청자(없으면 만든 사람). TaskDetail: 일반 업무도 담당자에게 [검토 요청](`review-ask`, 검토자 후보 = 요청자≠담당자, 없으면 만든 사람≠담당자) · StatusSteps reviewStep 항상 + `reviewSkipped`(검토 없이 완료 → 회색 '검토 생략') · 세부 정보 '검토 필수' 체크(`approval-required`) · TaskQuick 칩 [검토 필수](`inline-review`, 기본 꺼짐). 결재선(approval_line_id)·검토 필수 업무의 기존 흐름(검토 담당자·[검토] 업무)은 그대로.

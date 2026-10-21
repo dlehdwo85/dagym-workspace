@@ -837,6 +837,8 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
   const { user } = useSession();
   const existing = useApi<any>(id ? `/api/events/${id}` : null);
   const [f, setF] = useState<any>(null);
+  const prepList = useApi<{ presets: { id: string; label: string }[] }>(!id ? '/api/events/_/prep' : (null as unknown as string)); // 준비 업무 묶음(새 일정일 때만)
+  const prepPresets = prepList.data?.presets ?? [];
   const [conf, setConf] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const editable = calendars.filter((c) => c.perms.edit);
@@ -860,7 +862,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
       setF({ title: draft?.title ?? '', calendarId: draft?.calendarId ?? personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
-        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, color: draft?.color ?? null, alsoTask: !!draft?.alsoTask });
+        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, prep: '', color: draft?.color ?? null, alsoTask: !!draft?.alsoTask });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -929,7 +931,9 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     try {
       const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
       if (!id) {
-        await api('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } }); pushRecentColor(f.color);
+        const made = await api<{ id?: string }>('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } }); pushRecentColor(f.color);
+        // 대표 10/21 12:20 ②: 준비 업무는 '선택 창(체크, 기본 꺼짐)' — 자동 생성 없음. 체크했을 때만 묶음으로 만든다
+        if (f.prep && made?.id) { try { const pr = await api<{ ids: string[] }>(`/api/events/${made.id}/prep`, { body: { preset: f.prep } }); toast.ok(`준비 업무 ${pr.ids?.length ?? 0}건을 만들었습니다`); } catch (e: any) { toast.error(`준비 업무를 만들지 못했습니다: ${e.message}`); } }
       } else {
         let scope: Scope = 'all';
         if (d.event.recurring_event_id) scope = 'this';
@@ -993,7 +997,11 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!f.isPrivate} onChange={(e) => set('isPrivate')(e.target.checked)} />비공개 — 다른 사람에게는 시간만 &ldquo;바쁨&rdquo;으로 보입니다</label>
           {/* V5 일정 ↔ 업무 연동 */}
           {!id ? (
-            <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!f.alsoTask} onChange={(e) => set('alsoTask')(e.target.checked)} data-testid="editor-also-task" />업무 리스트에도 추가 <span className="text-xs font-normal text-ink-3">— 같은 이름·날짜의 업무(담당 나), 날짜를 바꾸면 서로 따라갑니다{f.rrule ? ' · 반복 업무로' : ''}</span></label>
+            <><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!f.alsoTask} onChange={(e) => set('alsoTask')(e.target.checked)} data-testid="editor-also-task" />업무 리스트에도 추가 <span className="text-xs font-normal text-ink-3">— 같은 이름·날짜의 업무(담당 나), 날짜를 바꾸면 서로 따라갑니다{f.rrule ? ' · 반복 업무로' : ''}</span></label>
+            {/* 대표 10/21 12:20 ②: 준비 업무 만들기 — 선택 창(기본 꺼짐), 묶음 고르면 저장 뒤 D-n 마감 업무로 */}
+            <label className="flex flex-wrap items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!f.prep} onChange={(e) => set('prep')(e.target.checked ? 'contract_meeting' : '')} data-testid="editor-prep" />준비 업무 만들기
+              {f.prep ? <select className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={f.prep} onChange={(e) => set('prep')(e.target.value)} aria-label="준비 업무 묶음" data-testid="editor-prep-preset">{prepPresets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
+                : <span className="text-xs font-normal text-ink-3">— 체크하면 묶음(현장 점검·계약 미팅·행사 등)대로 D-n 마감 업무를 만듭니다. 자동으로 만들지 않습니다</span>}</label></>
           ) : d?.syncTask ? (
             <p className="flex items-center gap-2 text-sm" data-testid="editor-sync-task"><CircleCheck className="size-4 text-green-600" />연결된 업무: <Link href={`/tasks/${d.syncTask.id}`} className="font-medium underline">{d.syncTask.title}</Link><span className="text-xs text-ink-3">날짜 연동</span></p>
           ) : canEdit ? (

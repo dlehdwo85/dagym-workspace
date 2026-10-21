@@ -1,4 +1,5 @@
 'use client';
+import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
 import { IN_APP_BILLING_NOTE, useInApp } from './inApp';
 import { ADMIN_PAGES } from '@/lib/adminPages';
@@ -125,7 +126,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '설정' }, ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '운영실 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
 
   const commonNav: NavItem[] = [{ href: '/tasks', label: '업무', icon: CircleCheck }, { href: '/calendar', label: '캘린더', icon: CalendarDays }, { href: '/messages', label: '메시지', icon: MessageCircle },
-    ...(session.features.library ? [{ href: `/library?space=${space}`, label: '자료실', icon: Library }] : []), ...(session.features.ai ? [{ href: `/assistant?space=${space}`, label: 'AI 비서', icon: Sparkles }] : [])];
+    ...(session.features.library ? [{ href: `/library?space=${space}`, label: '자료실', icon: Library }] : []), ...(session.features.ai ? [{ href: `/assistant?space=${space}`, label: aiName(space), icon: Sparkles }] : [])];
 
   // ⑦ 사이드바 3구역(시안 DESIGN_HOME_SIDEBAR 10/20, 대표 승인): ① 공간 전환 탭 ② '○○ 메뉴'(공간마다 바뀜 — 업무: 홈·업무·프로젝트·내 주간 보고·결재(·매출)) ③ '공통'(캘린더·알림·메시지·자료실·연락처·공지·AI 비서 — 어느 공간에서나 같은 자리) + 관리(접힘)
   // 영업·마케팅에서는 공통 맨 위에 '업무'(대표 지적 10/18: 공통 메뉴로 가도 그 공간에 머묾)
@@ -133,7 +134,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
   const sp_ = space === 'work' ? '' : `?space=${space}`;
   const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'),
-    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: 'AI 비서', icon: Sparkles }] : [])];
+    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: Sparkles }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);
@@ -412,7 +413,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               {/* 대표(10/19): 아이콘마다 44px·사이 8px, 알림 배지는 아이콘 칸 안에서(프로필과 겹치지 않게) */}
               <span className="flex items-center gap-2" data-testid="mobile-header-actions">
                 <button onClick={() => setPalette(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-[22px]" /></button>
-                {session.features.ai && <button onClick={() => setAiDock(true)} className="inline-flex size-11 items-center justify-center rounded-full text-violet-600 active:bg-violet-50" aria-label="AI 비서" data-testid="mobile-ai"><Sparkles className="size-[22px]" /></button>}
+                {session.features.ai && <button onClick={() => setAiDock(true)} className="inline-flex size-11 items-center justify-center rounded-full text-violet-600 active:bg-violet-50" aria-label={aiName(space)} data-testid="mobile-ai"><Sparkles className="size-[22px]" /></button>}
                 <Link href="/notifications" className="relative inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label={`알림${unread ? ` ${unread}건` : ''}`} data-testid="mobile-bell">
                   <Bell className="size-[22px]" />{unread > 0 && <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{unread > 99 ? '99+' : unread}</span>}
                 </Link>
@@ -427,7 +428,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
         {session.tenant?.onboarding && <Onboarding />}
         <BioLock />
-        {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} /></Suspense>}
+        {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} name={aiName(space)} /></Suspense>}
         <MessengerDock aiOpen={aiDock} />
         <VersionWatch />
         {/* V28-3 지원 모드: 빨간 띠(읽기 전용·남은 시간) + 끝내기 */}

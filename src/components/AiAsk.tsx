@@ -1,4 +1,5 @@
 'use client';
+import { aiName } from '@/lib/aiNames';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
@@ -29,7 +30,7 @@ export function AiAsk({ space, examples, subject, compact, testId = 'ai-ask' }: 
     <form onSubmit={(e) => { e.preventDefault(); go(q); }} className={cx('rounded-card border border-violet-200 bg-white px-3 py-2 shadow-card', compact && 'w-full')} data-testid={testId}>
       <div className="flex items-center gap-2">
         <Sparkles className="size-4 shrink-0 text-violet-600" aria-hidden />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`✨ AI에게 요청${subject ? ` — ${subject}` : ''}`} aria-label="AI에게 요청" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3" maxLength={2000} data-testid={`${testId}-input`} autoFocus={compact} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`✨ ${aiName(space)}에게 요청${subject ? ` — ${subject}` : ''}`} aria-label={`${aiName(space)}에게 요청`} className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3" maxLength={2000} data-testid={`${testId}-input`} autoFocus={compact} />
         <button type="submit" className="shrink-0 rounded-input px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ background: space === 'sales' ? '#1D4ED8' : '#7C3AED' }} disabled={!q.trim()} data-testid={`${testId}-send`}>요청</button>
       </div>
       <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid={`${testId}-examples`}>

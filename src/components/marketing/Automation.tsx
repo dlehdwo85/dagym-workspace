@@ -68,7 +68,7 @@ export function Automation() {
       <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>자동 제작</h1>
         {ed && <Button size="sm" variant="secondary" className="ml-auto" onClick={runNow} disabled={busy} data-testid="auto-run">{busy ? '도는 중…' : '지금 한 번 돌리기'}</Button>}</div>
       <p className="text-xs text-ink-2" data-testid="auto-ai-note">AI 원고는 회사 AI 한도(이번 달 ${data.usage.companyAiUsd} / ${data.usage.companyAiLimitUsd})와 마케팅 AI 월 한도 중 먼저 닿는 쪽에서 멈추고, 받는 사람에게 하루 한 번 알립니다. 회사 전체 AI 사용은 <a className="underline" href="/admin/usage">관리 → 사용량·요금제</a>(기능별 “마케팅”).</p>
-      <p className="text-xs text-ink-2">주간 규칙대로 게시 {s.lead_days}일 전 {s.lead_hour}:00 에 AI 비서가 원고를 쓰고 품질 검사를 통과하면 승인 대기에 올립니다. 이미지·영상은 제작 요청 카드로(실사 사진 + 글자 렌더 우선, 생성 엔진은 계약 후 연결). 승인 마감 = 게시 당일 {s.approval_hour}:00, 알림 = 제작 완료 즉시 + 마감 {s.remind_hours}시간 전({s.quiet_start}~{s.quiet_end}시는 무알림 → 직전 저녁).</p>
+      <p className="text-xs text-ink-2">주간 규칙대로 게시 {s.lead_days}일 전 {s.lead_hour}:00 에 AI 마케터가 원고를 쓰고 품질 검사를 통과하면 승인 대기에 올립니다. 이미지·영상은 제작 요청 카드로(실사 사진 + 글자 렌더 우선, 생성 엔진은 계약 후 연결). 승인 마감 = 게시 당일 {s.approval_hour}:00, 알림 = 제작 완료 즉시 + 마감 {s.remind_hours}시간 전({s.quiet_start}~{s.quiet_end}시는 무알림 → 직전 저녁).</p>
 
       <section className="grid gap-3 sm:grid-cols-5">{([['이번 주 크레딧', lim(data.usage.weekCredits, data.limits.weeklyCredits)], ['이번 달 크레딧', lim(data.usage.monthCredits, data.limits.monthlyCredits)],
         ['이번 달 생성 영상', lim(data.usage.monthVideos, data.limits.videoMonthly)], ['이번 달 재생성', lim(data.usage.monthRegens, data.limits.regenMonthly)],

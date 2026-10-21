@@ -44,7 +44,7 @@ export function Studio() {
   const model = data.models.find((m) => m.kind === spec?.media);
   return (
     <div className="space-y-4" data-testid="mkt-studio">
-      <p className="text-xs text-ink-2">의도를 적으면 AI 비서가 <b>경력 30년 마케터·아트디렉터</b>로 생성 프롬프트(영문)·한글 의도 요약·참고 사진·자막을 씁니다. 확인한 뒤 [생성]을 누르면 {data.provider === 'higgsfield' ? 'Higgsfield 로 만들어 자료실에 저장하고' : '제작 요청 카드(프롬프트·참고 사진 포함)로 넘어가 만든 뒤'} 승인 대기에 올라갑니다. 크레딧은 월 한도 안에서.</p>
+      <p className="text-xs text-ink-2">의도를 적으면 AI 마케터가 <b>경력 30년 마케터·아트디렉터</b>로 생성 프롬프트(영문)·한글 의도 요약·참고 사진·자막을 씁니다. 확인한 뒤 [생성]을 누르면 {data.provider === 'higgsfield' ? 'Higgsfield 로 만들어 자료실에 저장하고' : '제작 요청 카드(프롬프트·참고 사진 포함)로 넘어가 만든 뒤'} 승인 대기에 올라갑니다. 크레딧은 월 한도 안에서.</p>
       <form onSubmit={submit} className="space-y-3 rounded-card border border-violet-200 bg-violet-50/30 p-4" data-testid="studio-form">
         <div className="grid gap-2 sm:grid-cols-4">
           <Field label="브랜드"><select className={inputCls} value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value, tone: '' })} aria-label="브랜드" data-testid="studio-brand"><option value="">(없음)</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>

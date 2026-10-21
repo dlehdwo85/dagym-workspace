@@ -12,7 +12,7 @@ import { channelLabel, whenLabel, type CardContent } from './ApprovalCard';
 
 const C = '#7C3AED';
 /** 대표(10/20 오후): 홈 맨 위 입력창 문구는 'AI 비서' — 이름을 붙이는 안은 검토 중이라 라벨 하나만 바꾸면 되게 */
-export const HOME_AI_LABEL = 'AI 비서';
+export const HOME_AI_LABEL = 'AI 마케터'; // 대표 10/21 12:20: 마케팅 = AI 마케터
 const CH_COLOR: Record<string, string> = { instagram: '#DB2777', facebook: '#2563EB', threads: '#111827', blog: '#16A34A', youtube: '#DC2626', naver_place: '#059669', other: '#64748B' };
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 const dayShort = (d: string) => { const x = new Date(`${d}T00:00:00+09:00`); return `${x.getMonth() + 1}/${x.getDate()}`; };
