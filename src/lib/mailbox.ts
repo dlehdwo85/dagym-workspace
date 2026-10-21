@@ -232,7 +232,7 @@ export function signatureHtml(p: SigProfile, s: Sender) {
   const web = p.website ? (/^https?:\/\//.test(p.website) ? p.website : `https://${p.website}`) : null;
   return `<table cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;border-collapse:collapse;font-family:'Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif" data-sig="${esc(p.key)}">
 <tr><td colspan="2" style="border-top:2px solid ${color};padding:0;height:12px;line-height:12px;font-size:0">&nbsp;</td></tr>
-<tr>${logo ? `<td style="vertical-align:top;padding:0 18px 0 0"><img src="${esc(logo)}" alt="${esc(p.name)}" width="96" style="display:block;width:96px;max-width:96px;height:auto;border:0"></td>` : ''}
+<tr>${logo ? `<td style="vertical-align:middle;padding:0 18px 0 0;text-align:center"><img src="${esc(logo)}" alt="${esc(p.name)}" width="96" style="display:inline-block;width:96px;max-width:96px;height:auto;border:0;vertical-align:middle"></td>` : ''}
 <td style="vertical-align:top;padding:0 0 0 ${logo ? 18 : 0}px;${logo ? 'border-left:1px solid #e2e8f0' : ''}">
 <div style="font-size:15px;font-weight:bold;color:#0f172a">${esc(s.name)}${s.title ? ` <span style="font-size:12px;font-weight:normal;color:#475569">${esc(s.title)}</span>` : ''}</div>
 <div style="font-size:13px;font-weight:bold;color:${color};margin:2px 0 6px">${esc(p.name)}</div>

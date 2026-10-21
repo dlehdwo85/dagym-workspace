@@ -88,6 +88,7 @@ export default function Settings() {
             <span className="flex flex-wrap items-center gap-3" data-testid="alarm-defaults">
               <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={!!s.alarmEvents} onChange={(e) => setS({ ...s, alarmEvents: e.target.checked })} aria-label="일정 알람" data-testid="alarm-events" />일정</label>
               <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={!!s.alarmTasks} onChange={(e) => setS({ ...s, alarmTasks: e.target.checked })} aria-label="업무 마감 알람" data-testid="alarm-tasks" />업무 마감</label>
+              <label className="flex items-center gap-1.5 text-sm" title="대표 10/21: 일정 시작·업무 마감 기준 몇 분 전에 알람처럼 울릴지 (배정·검토 요청 같은 알림은 알람으로 울리지 않음)"><input type="number" min={1} max={1440} className={cx(inputCls, 'h-8 w-20 px-2 py-0 text-sm')} value={s.alarmMinutes ?? 10} onChange={(e) => setS({ ...s, alarmMinutes: Math.max(1, Math.min(1440, Number(e.target.value) || 10)) })} aria-label="알람 몇 분 전" data-testid="alarm-minutes" />분 전에</label>
               <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.alarmImportant ?? true} onChange={(e) => setS({ ...s, alarmImportant: e.target.checked })} aria-label="중요 업무 알람" data-testid="alarm-important" />높음·긴급 업무</label>
             </span>
           </Field>

@@ -29,11 +29,11 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
   const now = DateTime.now().setZone(TZ);
   const until = now.plus({ days });
   const today = todaySeoul();
-  const [s] = await sql<{ ev: number; task: number; soon: number; btime: string; bon: boolean; bweekend: boolean; req: boolean }[]>`
-    select coalesce(requester_due_alerts, false) req, coalesce(event_reminder_minutes, 60) ev, coalesce(task_reminder_minutes, 60) task, coalesce(due_soon_hours, 0) soon,
+  const [s] = await sql<{ ev: number; task: number; soon: number; btime: string; bon: boolean; bweekend: boolean; req: boolean; alarmM: number }[]>`
+    select coalesce(requester_due_alerts, false) req, coalesce(event_reminder_minutes, 60) ev, coalesce(task_reminder_minutes, 60) task, coalesce(due_soon_hours, 0) soon, coalesce(alarm_minutes, 10) as "alarmM",
       to_char(coalesce(briefing_time, time '08:30'), 'HH24:MI') btime, coalesce(briefing_enabled, true) bon, coalesce(briefing_weekend, false) bweekend
     from user_settings where user_id = ${u.id}`;
-  const st = s ?? { ev: 60, task: 60, soon: 0, btime: '08:30', bon: true, bweekend: false, req: false };
+  const st = s ?? { ev: 60, task: 60, soon: 0, btime: '08:30', bon: true, bweekend: false, req: false, alarmM: 10 };
   const out: Upcoming[] = [];
   const { alarmDefaults, alarmOn, alarmFields } = await import('./alarm');
   const ad = await alarmDefaults(sql, u.id);
@@ -53,7 +53,9 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     select recurring_event_id, original_start, start_at, title, cancelled from events where recurring_event_id = any(${evs.map((e) => e.id)}::uuid[]) and deleted_at is null` : [];
   for (const e of evs) {
     // 일정별 알림이 있으면 그대로(0 = 시작 시각), 없으면 내 기본값(0 = 끔)
-    const leads = e.reminder_minutes ?? (st.ev > 0 ? [st.ev] : []);
+    // 대표 10/21 22:00 ⑦(#420): 알람이 켜진 일정은 'N분 전'(alarm_minutes) 시점을 더하고, 그 시점만 전체 화면 알람(다른 시점은 보통 알림)
+    const evAlarm = alarmOn('event', e.alarm, ad);
+    const leads = [...new Set([...(e.reminder_minutes ?? (st.ev > 0 ? [st.ev] : [])), ...(evAlarm ? [st.alarmM] : [])])];
     if (!leads.length) continue;
     const starts: { s: Date; title: string }[] = [];
     if (!e.rrule) starts.push({ s: e.start_at, title: e.title });
@@ -65,7 +67,7 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     for (const o of starts) {
       const at0 = DateTime.fromJSDate(o.s).setZone(TZ);
       for (const m of leads) push(`ev:${e.id}:${o.s.toISOString()}:${m}`, e.all_day ? at0.set({ hour: 9 }).minus({ minutes: m }) : at0.minus({ minutes: m }),
-        `${m ? `${leftLabel(m)} 일정` : '지금 일정'}: ${o.title}`, e.all_day ? '종일' : at0.toFormat('HH:mm'), `/calendar?event=${e.id}`, { kind: 'event', entityId: e.id, on: alarmOn('event', e.alarm, ad) });
+        `${m ? `${leftLabel(m)} 일정` : '지금 일정'}: ${o.title}`, e.all_day ? '종일' : at0.toFormat('HH:mm'), `/calendar?event=${e.id}`, { kind: 'event', entityId: e.id, on: evAlarm && m === st.alarmM });
     }
   }
 
@@ -75,13 +77,17 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
     where deleted_at is null and assignee_id = ${u.id} and status not in ('done','on_hold') and due_date between ${today} and ${addDays(today, days + 1)}`;
   for (const t of tasks) {
     const due = kst(t.due_date, t.due_time ?? '09:00');
-    const ms = t.reminder_minutes ?? (t.due_time ? [st.task] : []);
-    const al = { kind: 'task' as const, entityId: t.id, on: alarmOn('task', t.alarm, ad, t.priority) };
+    const tAlarm = alarmOn('task', t.alarm, ad, t.priority);
+    // #420: 알람이 켜진 업무는 'N분 전' 시점을 더하고 그 시점만 알람(마감 시각 기준, 날짜만이면 18시 기준은 아래)
+    const ms = [...new Set([...(t.reminder_minutes ?? (t.due_time ? [st.task] : [])), ...(tAlarm && t.due_time ? [st.alarmM] : [])])];
+    const al = { kind: 'task' as const, entityId: t.id, on: false };
     for (const m of ms) push(`task:${t.id}:${t.due_date}:${t.due_time ?? ''}:${m}`, due.minus({ minutes: m }), `${leftLabel(m)} 마감: ${t.title}`,
-      `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), `/tasks/${t.id}`, al);
+      `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), `/tasks/${t.id}`, { ...al, on: tAlarm && m === st.alarmM });
     // 2026-10-15 대표: 날짜만 있는 업무도 기본 1시간 전 — 18시(퇴근) 기준(서버 정기 실행과 같은 키)
-    if (!t.due_time && !t.reminder_minutes) push(`task:${t.id}:${t.due_date}::${st.task}`, kst(t.due_date, '18:00').minus({ minutes: st.task }), `${leftLabel(st.task)} 마감: ${t.title}`,
-      `${t.due_date === today ? '오늘' : t.due_date}까지`, `/tasks/${t.id}`, al);
+    if (!t.due_time && !t.reminder_minutes) {
+      push(`task:${t.id}:${t.due_date}::${st.task}`, kst(t.due_date, '18:00').minus({ minutes: st.task }), `${leftLabel(st.task)} 마감: ${t.title}`, `${t.due_date === today ? '오늘' : t.due_date}까지`, `/tasks/${t.id}`, { ...al, on: tAlarm && st.task === st.alarmM });
+      if (tAlarm && st.alarmM !== st.task) push(`task:${t.id}:${t.due_date}::${st.alarmM}`, kst(t.due_date, '18:00').minus({ minutes: st.alarmM }), `${leftLabel(st.alarmM)} 마감: ${t.title}`, `${t.due_date === today ? '오늘' : t.due_date}까지`, `/tasks/${t.id}`, { ...al, on: true });
+    }
     // V14 10번(검수 3): 마감 당일에 울리는 시각 알림이 있으면 "오늘 마감"은 생략(하루 1건)
     if (!ms.some((m) => due.minus({ minutes: m }).toISODate() === t.due_date))
       push(`today:${t.id}:${t.due_date}`, kst(t.due_date, '09:00'), `오늘 마감: ${t.title}`, t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', `/tasks/${t.id}`, al);

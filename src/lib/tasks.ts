@@ -716,6 +716,8 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if (set.status || 'requested_by' in set || (cur.status === 'review' && ('title' in set || 'due_date' in set || 'assignee_id' in set))) await syncReviewTask(tx, id, u.id);
     let spawned: string | null = null;
     if (set.status === 'done') spawned = await spawnNextRecurrence(tx, id, u.id);
+    // 대표 10/21 22:00 ⑧(#421) 영업 2차 추적: 리드에서 나온 업무를 완료하면 리드 '다음 연락'으로 자동 이어짐(다음 연락일 → 다음 조치 업무)
+    if (set.status === 'done' && cur.lead_id) await (await import('./sales/autoTasks')).followUpAfterTaskDone(tx, u, { taskId: id, title, leadId: cur.lead_id }).catch(async (e) => { const { logError } = await import('./log'); await logError('sales-followup', e).catch(() => {}); });
     // B-10 자동화 (사람이 한 변경에만 반응, 규칙이 한 변경은 다시 부르지 않음)
     const { runAutomations } = await import('./automation');
     if (set.status) await runAutomations(tx, { trigger: set.status === 'done' ? 'task_completed' : 'status_changed', taskId: id, actorId: u.id, fromStatus: cur.status });

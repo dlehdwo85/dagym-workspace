@@ -1,5 +1,6 @@
 // 로컬 10/20(대표) '알람처럼 울리기': 설정 기본값(일정 끔·업무 끔·중요 켬) 저장 · 로컬 예약 알림(/api/reminders/upcoming) 에 alarm·snoozeMinutes·actions(dismiss/snooze/open)·kind·entityId ·
-// 정기 실행이 만드는 마감 알림 meta.alarm(중요 업무 기본 켬, 보통 업무는 끔, 업무별 alarm 우선) · 알림 액션 [해제]/[10분 뒤](활동 기록·재푸시) · 기기 결과 기록 API(남의 업무 404)
+// 정기 실행이 만드는 마감 알림 meta.alarm(중요 업무 기본 켬, 보통 업무는 끔, 업무별 alarm 우선)
+// 대표 10/21 22:00 ⑦(#420): 알람은 사람별 'N분 전'(alarm_minutes, 기본 10) 시점에만 전체 화면 — 다른 시점(1시간 전 등)은 보통 알림 · 알림 액션 [해제]/[10분 뒤](활동 기록·재푸시) · 기기 결과 기록 API(남의 업무 404)
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { bootstrap, resetDb, startServer, testDb, tick, seoulToday, addDays } from '../helpers.mjs';
@@ -33,17 +34,19 @@ describe('알람처럼 울리기', () => {
     const evDef = (await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '기본 일정', start: s.toISOString(), end: e.toISOString() })).id;
     const { reminders } = await ctx.staffA.client.ok('GET', '/api/reminders/upcoming?days=5');
     const of = (id) => reminders.filter((r) => r.entityId === id);
-    assert.ok(of(high).length && of(high).every((r) => r.alarm === true && r.snoozeMinutes === 10 && r.kind === 'task'), '중요 업무 = 알람 기본 켬');
-    assert.deepEqual(of(high)[0].actions.map((a) => a.id), ['dismiss', 'snooze', 'open']);
-    assert.ok(of(normal).length && of(normal).every((r) => !r.alarm), '보통 업무는 알람 아님');
+    const at = (rs, m) => rs.filter((r) => r.key.endsWith(`:${m}`));
+    assert.ok(at(of(high), 10).length === 1 && at(of(high), 10).every((r) => r.alarm === true && r.snoozeMinutes === 10 && r.kind === 'task'), '중요 업무 = 10분 전 알람 기본 켬');
+    assert.ok(at(of(high), 60).length === 1 && at(of(high), 60).every((r) => !r.alarm && r.kind === 'task'), '1시간 전 알림은 보통 알림');
+    assert.deepEqual(at(of(high), 10)[0].actions.map((a) => a.id), ['dismiss', 'snooze', 'open']);
+    assert.ok(of(normal).length && of(normal).every((r) => !r.alarm) && !at(of(normal), 10).length, '보통 업무는 알람 아님(10분 전 시점도 없음)');
     assert.ok(of(off).length && of(off).every((r) => !r.alarm), '업무별 끔이 우선');
-    assert.ok(of(evOn).length && of(evOn).every((r) => r.alarm === true && r.kind === 'event'), '일정별 켬');
+    assert.ok(at(of(evOn), 10).length === 1 && at(of(evOn), 10)[0].alarm === true && at(of(evOn), 10)[0].kind === 'event' && at(of(evOn), 60).every((r) => !r.alarm), '일정별 켬 = 10분 전만 알람');
     assert.ok(of(evDef).length && of(evDef).every((r) => !r.alarm), '일정 기본은 끔');
     // 업무 상세에 alarm 칸 · PATCH 로 바꿈
     assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${normal}`)).task.alarm, null);
     const v = (await ctx.staffA.client.ok('GET', `/api/tasks/${normal}`)).task.version;
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${normal}`, { alarm: true, version: v });
-    assert.ok((await ctx.staffA.client.ok('GET', '/api/reminders/upcoming?days=5')).reminders.filter((r) => r.entityId === normal).every((r) => r.alarm === true), '업무별 켬');
+    assert.ok((await ctx.staffA.client.ok('GET', '/api/reminders/upcoming?days=5')).reminders.filter((r) => r.entityId === normal && r.key.endsWith(':10')).every((r) => r.alarm === true), '업무별 켬 → 10분 전 알람');
     assert.equal((await ctx.staffA.client.ok('GET', `/api/events/${evOn}`)).event.alarm, true);
   });
   test('정기 실행 마감 알림: 중요 업무는 meta.alarm + 푸시, 알림 액션 [해제]/[10분 뒤] → 활동 기록·10분 뒤 재푸시, 웹 띠(unread=1 alarms)', async () => {
@@ -51,6 +54,9 @@ describe('알람처럼 울리기', () => {
     const dueDate = `${g(k, 'year')}-${g(k, 'month')}-${g(k, 'day')}`, dueTime = `${g(k, 'hour') === '24' ? '00' : g(k, 'hour')}:${g(k, 'minute')}`;
     const high = (await ctx.owner.ok('POST', '/api/tasks', { title: '알람 마감 예고', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false, dueDate, dueTime, priority: 'high' })).id;
     const normal = (await ctx.owner.ok('POST', '/api/tasks', { title: '보통 마감 예고(알람 없음)', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false, dueDate, dueTime })).id;
+    // #420: 알람 시점 = N분 전 — 이 시험은 50분 전에 돌리므로 N 을 60분으로 맞춰 1시간 전 알림이 알람이 되게
+    const pre = await ctx.staffA.client.ok('GET', '/api/notifications/prefs');
+    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...pre.settings, alarmMinutes: 60 } });
     await tick();
     const rows = await sql`select n.id, n.entity_id, n.meta, (select count(*)::int from notification_deliveries d where d.notification_id = n.id) pushes from notifications n where n.user_id = ${ctx.staffA.id} and n.type = 'due_soon' and n.entity_id = any(${[high, normal]}::uuid[])`;
     const rh = rows.find((r) => r.entity_id === high), rn = rows.find((r) => r.entity_id === normal);

@@ -359,6 +359,34 @@ function CalendarPage() {
             ))}
           </div>
   );
+  // 대표 10/21 22:00 ⑥(#419): 휴대폰은 캘린더가 먼저 보이게 — 캘린더·업무 표시 칩 줄을 캘린더 아래로(PC 는 위 그대로)
+  const calChips = (
+          <div className={cx('flex flex-wrap gap-1.5 text-xs lg:hidden', mobile ? 'mt-2 border-t border-line pt-2' : 'mb-2')} aria-label="표시할 캘린더">
+            {/* V36 4 범례: 일정 = 꽉 찬 블록, 업무 = 왼쪽 굵은 선, 이동(장소 있음) = 📍·진한 테두리 */}
+            <span className="flex basis-full items-center gap-2 px-1 text-[11px] text-ink-3" data-testid="cal-legend-m">
+              <span className="inline-flex items-center gap-1"><span className="inline-block size-2.5 rounded-sm" style={{ background: calColors.company }} />일정</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border-l-[3px] border-slate-700 bg-slate-200" />업무</span>
+              <span className="inline-flex items-center gap-0.5"><MapPin className="size-3 text-ink-2" />이동</span>
+            </span>
+            {cals.data?.calendars.map((c) => (
+              <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} aria-pressed={!hidden.includes(c.id)}
+                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(c.id) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
+                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : calColors.cals?.[c.id] ?? (c.type === 'personal' ? calColors.personal : calColors.company) }} />{c.type === 'personal' ? '내 일정' : c.name}
+              </button>
+            ))}
+            {spaceCals.map((k) => (
+              <button key={k} onClick={() => setHidden(hidden.includes(`space:${k}`) ? hidden.filter((x) => x !== `space:${k}`) : [...hidden, `space:${k}`])} aria-pressed={!hidden.includes(`space:${k}`)}
+                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(`space:${k}`) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
+                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(`space:${k}`) ? '#e2e8f0' : spaceColor(k) }} />{SPACE_META[k].short}
+              </button>
+            ))}
+            <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
+            <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
+
+            <button onClick={() => setColorDlg(true)} className="hidden items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:inline-flex" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
+          </div>
+  );
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -436,30 +464,7 @@ function CalendarPage() {
         <div className="-mx-3 min-w-0 flex-1 border-y border-line bg-white px-1 py-1.5 sm:mx-0 sm:rounded-card sm:border sm:p-3 sm:shadow-card" data-testid="calendar" ref={calBox}>
           {/* 대표 검수 10/20: 휴대폰은 내 일정/다른 사람 전환을 화면 아래(하단 탭 바로 위)로 — 위는 날짜·일정만 */}
           {!mobile && peopleFilter}
-          <div className="mb-2 flex flex-wrap gap-1.5 text-xs lg:hidden" aria-label="표시할 캘린더">
-            {/* V36 4 범례: 일정 = 꽉 찬 블록, 업무 = 왼쪽 굵은 선, 이동(장소 있음) = 📍·진한 테두리 */}
-            <span className="flex basis-full items-center gap-2 px-1 text-[11px] text-ink-3" data-testid="cal-legend-m">
-              <span className="inline-flex items-center gap-1"><span className="inline-block size-2.5 rounded-sm" style={{ background: calColors.company }} />일정</span>
-              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border-l-[3px] border-slate-700 bg-slate-200" />업무</span>
-              <span className="inline-flex items-center gap-0.5"><MapPin className="size-3 text-ink-2" />이동</span>
-            </span>
-            {cals.data?.calendars.map((c) => (
-              <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} aria-pressed={!hidden.includes(c.id)}
-                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(c.id) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
-                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : calColors.cals?.[c.id] ?? (c.type === 'personal' ? calColors.personal : calColors.company) }} />{c.type === 'personal' ? '내 일정' : c.name}
-              </button>
-            ))}
-            {spaceCals.map((k) => (
-              <button key={k} onClick={() => setHidden(hidden.includes(`space:${k}`) ? hidden.filter((x) => x !== `space:${k}`) : [...hidden, `space:${k}`])} aria-pressed={!hidden.includes(`space:${k}`)}
-                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(`space:${k}`) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
-                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(`space:${k}`) ? '#e2e8f0' : spaceColor(k) }} />{SPACE_META[k].short}
-              </button>
-            ))}
-            <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
-            <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
-
-            <button onClick={() => setColorDlg(true)} className="hidden items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:inline-flex" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
-          </div>
+          {!mobile && calChips}
           {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}
           <div className="mb-2 sm:hidden" data-testid="cal-mobile-head">
             <div className="flex items-center gap-1">
@@ -596,6 +601,7 @@ function CalendarPage() {
             }}
           />
           </div>
+          {mobile && calChips}
           {mobile && peopleFilter}
         </div>
         {sidePanel && <UnscheduledPanel onClose={() => setSidePanel(false)} onOpen={setOpenTask} />}

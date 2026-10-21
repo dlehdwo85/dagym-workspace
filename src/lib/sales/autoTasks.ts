@@ -63,3 +63,24 @@ export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Pro
   await sql`update tasks set sales_ref = ${sql.json({ kind: i.kind, id: i.id, name: i.name })}, lead_id = ${i.leadId ?? (i.kind === 'lead' ? i.id : null)}, assigned_by_rule = ${rule?.ruleId ?? null} where id = ${r.id}`;
   return { taskId: r.id, action: 'created' };
 }
+
+/**
+ * 대표 10/21 22:00 ⑧(#421) 영업 2차 추적 — 리드에서 나온 업무(tasks.lead_id)를 완료하면 리드의 '다음 연락'으로 자동 이어진다.
+ * 리드가 진행 단계일 때만: 다음 연락일이 없거나 지났으면 오늘 + SALES_FOLLOWUP_DAYS(기본 7)로 잡고, 다음 조치 업무를 다시 만든다(syncSalesTask → 담당자 배정 알림).
+ * 다음 연락일이 아직 앞에 있으면 날짜는 그대로 두고 그 날짜 업무만 다시 만든다. 보류·실패·완료 단계면 아무것도 안 한다.
+ */
+export const FOLLOWUP_DAYS = () => Math.max(1, Number(process.env.SALES_FOLLOWUP_DAYS) || 7);
+export async function followUpAfterTaskDone(sql: Sql, u: SessionUser, i: { taskId: string; title: string; leadId: string }) {
+  const t = tenantOf(u);
+  const [l] = await sql<{ id: string; name: string; status: string; next: string | null; owner_id: string | null }[]>`select id, name, status, next_contact_date::text as next, owner_id from sales_leads where id = ${i.leadId} and tenant = ${t} and deleted_at is null`;
+  if (!l || DONE.has(l.status) || HOLD.has(l.status)) return { action: 'none' as const }; // 리드는 끝·보류 단계가 아니면 진행 중(syncSalesTask 와 같은 규칙)
+  const today = ymd(new Date());
+  const next = l.next && l.next > today ? l.next : ymd(new Date(Date.parse(`${today}T12:00:00+09:00`) + FOLLOWUP_DAYS() * 864e5));
+  if (next !== l.next) {
+    await sql`update sales_leads set next_contact_date = ${next}, updated_at = now() where id = ${l.id}`;
+    const { audit } = await import('../log');
+    await audit(sql, u.id, 'sales.followup', 'sales_lead', l.id, { from: l.next, to: next, taskId: i.taskId, title: i.title }, null).catch(() => {});
+  }
+  const r = await syncSalesTask(sql, u, { kind: 'lead', id: l.id, name: l.name, status: l.status, nextDate: next, nextAction: '다음 연락', assigneeId: l.owner_id ?? u.id, leadId: l.id });
+  return { action: 'followup' as const, next, taskId: r.taskId };
+}
