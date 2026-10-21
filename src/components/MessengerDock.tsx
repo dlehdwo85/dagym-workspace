@@ -14,7 +14,7 @@ export function MessengerDock({ aiOpen }: { aiOpen: boolean }) {
   const [open, setOpen] = useState(false);
   const [room, setRoom] = useState<string | null>(null);
   const unread = useApi<{ unread: number }>('/api/chat/unread');
-  useEffect(() => { const t = setInterval(() => unread.reload(), 30000); return () => clearInterval(t); }, [unread]);
+  useEffect(() => { const t = setInterval(() => { if (document.visibilityState !== 'hidden') unread.reload(); }, 60000); return () => clearInterval(t); }, [unread]); // 10/21: 30초 → 60초, 가려진 탭 제외
   if (path.startsWith('/messages') || path.startsWith('/assistant')) return null; // 메시지·AI 비서 화면은 아래 오른쪽에 보내기 버튼이 있어 겹치지 않게
   const n = unread.data?.unread ?? 0;
   const expand = () => { setOpen(false); router.push(room ? `/messages?room=${room}` : '/messages'); };

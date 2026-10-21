@@ -1,4 +1,5 @@
 'use client';
+import { ChatBubble } from '@/components/ChatBubble';
 import { RoleBadge } from '@/components/RoleBadge';
 import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
@@ -162,11 +163,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
   useEffect(() => {
     let alive = true;
     const poll = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // 10/21 DB 쿼터 장애: 가려진 탭은 폴링하지 않음
       try { const r = await api('/api/notifications?unread=1'); if (alive) { setUnread(r.unread); setAlarms(r.alarms ?? []); } } catch {}
       try { const c = await api('/api/chat/unread'); if (alive) setChatUnread(c.unread); } catch {}
     };
     poll();
-    const t = setInterval(poll, 60_000);
+    const t = setInterval(poll, 120_000); // 10/21: 60초 → 120초(탭 포커스·wos-refresh 때는 바로)
     const onFocus = () => { poll(); };
     window.addEventListener('focus', onFocus);
     // V32 0: 읽음 즉시 배지 반영(알림 화면이 보내는 값) + 다른 화면에서 바뀌면 다시 셈
@@ -474,6 +476,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
             {v3 && chatUnread + unread > 0 && <span className="absolute right-[18%] top-1 min-w-[18px] rounded-full bg-red-500 px-1 text-center text-[10px] font-bold leading-[18px] text-white" data-testid="tab-more-badge">{chatUnread + unread > 99 ? '99+' : chatUnread + unread}</span>}
           </button>
         </nav>
+        {/* 대표 10/20 16:20 (#106) 휴대폰 오른쪽 아래 말풍선 — 최근 대화방 바로·안 읽은 수·길게 누르면 AI 비서, 대화방·키보드·알람 띠에서 숨김 */}
+        <ChatBubble unread={chatUnread} ai={!!session.features.ai} alarm={alarms.length > 0} />
 
         {spaceSheet && spaces.length > 1 && (
           <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setSpaceSheet(false)}>

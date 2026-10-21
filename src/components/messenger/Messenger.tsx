@@ -58,16 +58,21 @@ export function useLive(): Live {
         try { const r = await api(`/api/chat/poll?${new URLSearchParams({ ...(since ? { since } : {}), t: String(t) })}`); since = r.latest; t = r.now; emit(r); } catch { /* 다음 차례에 */ }
       }, 5000);
     };
-    if (typeof EventSource === 'undefined') startPoll();
-    else {
-      es = new EventSource('/api/chat/stream');
+    // 10/21 DB 쿼터 장애: 탭이 가려지면 SSE·폴링을 멈추고(DB 가 잠들 수 있게), 다시 보이면 마지막 id 부터 이어 받는다
+    const openSse = () => {
+      es = new EventSource(`/api/chat/stream${since ? `?since=${since}` : ''}`);
       es.addEventListener('ready', (e) => { fails = 0; since = (e as MessageEvent).lastEventId || since; });
       es.addEventListener('messages', (e) => { const m = JSON.parse((e as MessageEvent).data); since = (e as MessageEvent).lastEventId || since; emit({ messages: m }); });
       es.addEventListener('typing', (e) => emit({ typing: JSON.parse((e as MessageEvent).data) }));
       es.addEventListener('reads', (e) => emit({ reads: JSON.parse((e as MessageEvent).data) }));
       es.onerror = () => { if (++fails >= 3 && es) { es.close(); es = null; startPoll(); } };
-    }
-    return () => { es?.close(); if (timer) clearInterval(timer); };
+    };
+    const stopAll = () => { es?.close(); es = null; if (timer) { clearInterval(timer); timer = null; } };
+    const startAll = () => { if (es || timer) return; if (typeof EventSource === 'undefined') startPoll(); else openSse(); };
+    const onVis = () => { if (document.visibilityState === 'hidden') stopAll(); else startAll(); };
+    if (typeof document === 'undefined' || document.visibilityState !== 'hidden') startAll();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { document.removeEventListener('visibilitychange', onVis); stopAll(); };
   }, []);
   const subscribe = useCallback((f: (e: LiveEvt) => void) => { subs.current.add(f); return () => { subs.current.delete(f); }; }, []);
   return useMemo(() => ({ subscribe, mode }), [subscribe, mode]);

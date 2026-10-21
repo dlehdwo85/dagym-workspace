@@ -1,4 +1,5 @@
 'use client';
+import { ChatBubbleToggle } from '@/components/ChatBubble';
 import { RoleBadge } from '@/components/RoleBadge';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
@@ -43,6 +44,7 @@ export default function Settings() {
         {features.googleSync && <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 (선택 기능) →</Link>}
       </section>
       <SwipeToggle />
+      <section className="rounded-lg border bg-white p-4"><ChatBubbleToggle /></section>
       <CalendarFeed />
       <TwoFactor />
       <AccountSection />

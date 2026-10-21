@@ -158,3 +158,26 @@ export async function roleBadge({ owner, BASE, SHOTS }) {
   await owner.getByTestId('role-badge-en').click();
   await owner.getByText('권한 배지 표시를 바꿨습니다', { exact: false }).waitFor();
 }
+
+/** 대표 10/20 16:20 (#106) 휴대폰 말풍선: 390px 에서 보임·안 읽은 수 배지 → 누르면 최근 대화방 → 대화방 안에서는 숨김 → 설정에서 끄면 사라짐 → 다시 켬 */
+export async function chatBubble({ owner, ctx, BASE, SHOTS }) {
+  await owner.setViewportSize({ width: 390, height: 844 });
+  const room = await ctx.staffA.client.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.ownerId });
+  await ctx.staffA.client.ok('POST', `/api/chat/rooms/${room.id}/messages`, { body: '말풍선 시험 메시지' });
+  await owner.goto(`${BASE}/`);
+  await owner.getByTestId('chat-bubble').waitFor();
+  await owner.getByTestId('chat-bubble-badge').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/185-chat-bubble.png` });
+  await owner.getByTestId('chat-bubble').click();
+  await owner.waitForURL(new RegExp(`/messages\\?room=${room.id}`));
+  await owner.waitForSelector('html[data-chat-room]');
+  assert.equal(await owner.getByTestId('chat-bubble').count(), 0, '대화방 안에서는 숨김');
+  await owner.goto(`${BASE}/settings`);
+  await owner.getByTestId('chat-bubble-toggle').uncheck();
+  await owner.goto(`${BASE}/`);
+  await owner.getByTestId('mobile-tabs').waitFor();
+  assert.equal(await owner.getByTestId('chat-bubble').count(), 0, '설정에서 끄면 없음');
+  await owner.goto(`${BASE}/settings`);
+  await owner.getByTestId('chat-bubble-toggle').check();
+  await owner.setViewportSize({ width: 1366, height: 900 });
+}

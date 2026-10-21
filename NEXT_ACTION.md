@@ -1352,6 +1352,25 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 운영 DB 쿼터 초과 장애 뒤 DB 부하 줄이기 (로컬 긴급 요청) [배포확인요청]
+- 원인(로컬 /api/health "exceeded the quota"): Neon Free 는 월 컴퓨트 시간이 정해져 있는데 운영이 24시간 DB 를 깨워 두고 있었다 — ① 서버 tick 10분마다(GitHub cron)+모든 API 요청에 같이 타는 tick ② 메신저를 연 탭마다 SSE 가 2초마다 changesSince ③ 껍데기 60초·메신저 독 30초 폴링(가려진 탭도). 복구는 **Neon Launch 요금제 올리기(대표 결정)** 또는 11/1 쿼터 초기화.
+- 줄인 것(서버 API·스키마 변경 없음):
+  - `Messenger.tsx` useLive: `document.visibilityState === 'hidden'` 이면 SSE·폴링을 닫고, 다시 보이면 마지막 메시지 id(`?since=`)부터 이어 받는다.
+  - `src/app/api/chat/stream/route.ts`: 확인 간격 2초 → 4초(env `CHAT_STREAM_INTERVAL_MS`).
+  - `AppShell.tsx` 안 읽은 수·알람 폴링 60초 → 120초, 가려진 탭은 건너뜀(탭 포커스·wos-refresh 때는 그대로 바로 새로고침). `MessengerDock.tsx` 30초 → 60초, 가려진 탭 제외.
+  - `.github/workflows/tick.yml`: `*/10` → 낮(KST 07~23) `*/15`, 밤(KST 23~07, UTC 14~21) `*/30`. `src/lib/api.ts` 같이 타기 tick 기준 600초 → 900초(env `PIGGYBACK_MIN_AGE_S`).
+- 효과 어림: 메신저 탭 1개 기준 DB 조회 1,800회/시간 → 900회(보일 때만), 밤에는 tick 6회/시간 → 2회. 기한 알림·반복 업무는 tick 이 15~30분 늦어질 수 있음(마감 임박 알림은 기한 기준이라 영향 없음).
+- 안 한 것: Neon 요금제·compute 자동 중지 설정(대표·로컬) · SSE 를 아예 폴링으로 바꾸기(실시간 체감이 떨어져 보류) · tick 을 Vercel cron 으로 옮기기.
+- 로컬 확인 부탁: DB 복구 뒤 /api/health ok → 메신저 두 창에서 메시지 실시간(4초 안) 도착, 탭을 다른 탭으로 가렸다가 돌아오면 그 사이 메시지가 바로 채워지는지, 설정 · Neon 대시보드에서 다음날 compute hours 가 줄었는지.
+
+## 2026-10-21 대표 10/20 16:20 — 휴대폰 오른쪽 아래 말풍선 버튼 (#106) [배포확인요청]
+- `src/components/ChatBubble.tsx`(AppShell 하단 탭 뒤, 휴대폰만): 오른쪽 아래 56px 말풍선, 위치 `bottom = 52px(탭) + safe-area + 14px`. 누르면 `/api/chat/rooms` 에서 **안 읽은 방 우선 · 마지막 메시지 최근 순** 첫 방으로(`/messages?room=…`), 방이 없으면 메신저 목록. 안 읽은 수 배지(메신저 배지와 같은 수). **길게(0.5초) 누르면 AI 비서**(/assistant) + 옆 작은 보라 AI 버튼(AI 켠 회사만).
+- 숨김: 대화방 안(html[data-chat-room]) · 키보드가 열려 보이는 높이가 150px 넘게 줄 때(visualViewport) · 알람 띠가 떠 있을 때. PC(sm 이상)는 없음.
+- 설정 › **말풍선 버튼 (휴대폰, 이 기기)** 스위치(localStorage `wos_chat_bubble`, 밀어서 완료와 같은 방식) — 끄면 바로 사라짐.
+- 시험: E2E '#106 휴대폰 말풍선' 단계(390px 보임·배지 → 누르면 최근 대화방 → 방 안 숨김 → 설정 끄기 → 다시 켬, 185-chat-bubble.png). 서버 변경 없음.
+- 안 한 것: 끌어서 위치 옮기기 없음(고정) · 네이티브 앱 전체 화면 알람은 앱 화면이라 웹 버튼과 겹치지 않음.
+- 로컬 확인 부탁: 휴대폰(앱·브라우저)에서 말풍선 위치가 하단 탭·홈 인디케이터와 안 겹치는지, 누르면 최근 방, 길게 누르면 AI 비서, 설정에서 끄기.
+
 ## 2026-10-21 대표 10/20 15:05 — 권한 배지 영어 직책 (#101, migration 156) [배포확인요청]
 - `tenants.role_badge`('en' 기본 · 'ko' · 'off') + `src/lib/roleBadge.ts`(`ROLE_BADGE_EN`: owner CEO · admin Admin · dept_lead Lead · site_manager Ops · staff Member, 심사용·체험 계정 Guest) + `GET/PUT /api/org/role-badge`(바꾸기 = 회사 정보·디자인 편집 권한, 감사 role_badge.set). 세션 `tenant.roleBadge`, 사람 목록(dir.users)에 `is_demo`.
 - `<RoleBadge role guest />`(components/RoleBadge.tsx, data-testid role-badge) — 사용자 관리 권한 칸(배지 + 한글 작게) · 담당자 칩(pickers) · 업무 등록 담당자 목록(TaskQuick) · 멘션 목록·댓글 머리줄(TaskDetail) · 메신저 글 작성자·새 대화 참여자·방 정보 구성원 · 설정 프로필·내 명함 머리줄 · 계정 메뉴(PC·휴대폰).
