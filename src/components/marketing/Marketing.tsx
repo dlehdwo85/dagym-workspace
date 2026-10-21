@@ -336,7 +336,11 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
   const ready = plain ? list : list.filter((c) => c.status === 'pending' && !c.late);
   const waiting = plain ? [] : list.filter((c) => (c.status === 'changes' || c.status === 'hold') && !c.late);
   const late = plain ? [] : list.filter((c) => c.late);
-  const approvedWait = plain ? [] : list.filter((c) => c.status === 'approved'); // 로컬 10/21 08:10: 승인됐지만 아직 게시 전 — 서버 게시는 열어서
+  // 로컬 10/21 08:10·09:20: 승인됐지만 아직 게시 전 — 예정 시각 임박·미래 순, 지난 건은 '예정 지남' 접힘, 기본 10건 + 더보기(브랜드 필터 적용)
+  const nowMs = Date.now(); const [moreApproved, setMoreApproved] = useState(false);
+  const approvedAll = plain ? [] : list.filter((c) => c.status === 'approved').sort((a, b) => String(a.scheduled_at ?? '9999').localeCompare(String(b.scheduled_at ?? '9999')));
+  const approvedWait = approvedAll.filter((c) => !c.scheduled_at || new Date(c.scheduled_at).getTime() >= nowMs - 864e5);
+  const approvedPast = approvedAll.filter((c) => c.scheduled_at && new Date(c.scheduled_at).getTime() < nowMs - 864e5);
   const shown = more ? ready : ready.slice(0, 3);
   return (
     <div className="space-y-3">
@@ -349,8 +353,11 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
           {!more && ready.length > 3 && <Button variant="secondary" className="w-full" onClick={() => setMore(true)} data-testid="mkt-more">{ready.length - 3}건 더 보기</Button>}</div>
       )}
       {approvedWait.length > 0 && <details open className="rounded-card border border-emerald-200 bg-emerald-50/30 p-3 text-sm" data-testid="mkt-approved-wait"><summary className="cursor-pointer font-medium text-emerald-900">승인됨 · 게시 전 {approvedWait.length}건 — 열어서 [지금 게시] 또는 예정 시각에 자동</summary>
-        <div className="mt-2 space-y-2">{approvedWait.map((c) => <div key={c.id} className="space-y-1"><ApprovalCard c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />
-          {canDecide && <Button size="sm" variant="secondary" onClick={() => onOpen(c.id)} data-testid="mkt-approved-publish">열어서 게시 →</Button>}</div>)}</div></details>}
+        <div className="mt-2 space-y-2">{(moreApproved ? approvedWait : approvedWait.slice(0, 10)).map((c) => <div key={c.id} className="space-y-1"><ApprovalCard c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />
+          {canDecide && <Button size="sm" variant="secondary" onClick={() => onOpen(c.id)} data-testid="mkt-approved-publish">열어서 게시 →</Button>}</div>)}
+          {!moreApproved && approvedWait.length > 10 && <Button variant="secondary" className="w-full" onClick={() => setMoreApproved(true)} data-testid="mkt-approved-more">{approvedWait.length - 10}건 더 보기</Button>}</div></details>}
+      {approvedPast.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-approved-past"><summary className="cursor-pointer font-medium text-ink-2">승인됨 · 예정 지남 {approvedPast.length}건 — 열어서 “브랜드·게시 예정 바로잡기”로 재배치</summary>
+        <div className="mt-2 space-y-2">{approvedPast.slice(0, 30).map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {waiting.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
         <div className="mt-2 space-y-2">{waiting.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {late.length > 0 && <details className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" data-testid="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>

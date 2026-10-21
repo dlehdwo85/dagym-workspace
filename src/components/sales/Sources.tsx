@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, inputCls, toast } from '@/components/ui';
+import { BidPrefs, Collectors } from './Collectors';
 
 type S = { code: string; name: string; provider: string; grp: string; category: string; refresh: string; enabled: boolean; common: boolean; keywords: string[]; regions: string[]; excludes: string[]; total: number; attribution: string; last_run_at: string | null };
 type Sug = { rules: string[]; sources: string[]; keywords: string[]; regions: string[]; via: string; askKeywords: boolean; items: { code: string; name: string; why: string; common: boolean }[]; bids: { recommend: boolean; why: string } };
@@ -37,6 +38,8 @@ export function Sources() {
     <div className="space-y-4" data-testid="sales-sources">
       <h1 className="text-xl font-bold text-[#2563EB]">데이터 설정</h1>
       <SalesOptions />
+      <BidPrefs />
+      <Collectors />
       {data.canEdit && (
         <section className="rounded-card border border-[#BFDBFE] bg-[#EFF6FF] p-4" data-testid="sales-ai-setup">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#1D4ED8]"><Sparkles className="size-4" />AI 자동 세팅</h2>
