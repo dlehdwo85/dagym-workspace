@@ -1352,6 +1352,13 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 로컬 15:45 — #413 결제 시험 창 즉시 닫힘 [배포확인요청]
+- 원인 분석: 나이스페이 PC 스크립트(`nicepay-pgweb.js`)는 팝업 창이 아니라 **같은 페이지의 iframe 레이어(#nice_layer)** 다 — `window.open` 없음 → 팝업 차단·사용자 제스처 문제가 아님(클라우드 Chromium 재현: 레이어가 뜨고 유지됨). 나이스페이 쪽이 오류/취소 메시지(`{code:'1'|'2', result:{AuthResultCode, AuthResultMsg}}`)를 보내면 스크립트가 레이어를 지우고 `nicepayClose()` 를 부르는데 우리 페이지에 정의가 없었고, 교차 출처 iframe 의 alert 는 Chrome 이 막으므로 **아무 안내 없이 창만 사라짐**. 10/16 로컬 확인 때 같은 버튼이 **W007 "위변조 데이터를 체크하세요"** 를 띄웠으므로(nictest00m 공개 시험 키 서명 불일치 추정) 지금도 같은 오류가 조용히 닫히는 것으로 본다. 결제 코드(nicepay.ts·index.ts·Billing.tsx)는 10/16 이후 변경 없음.
+- 수정 `src/components/Billing.tsx launchNicepay(r, {page, onClose})`: `nicepayClose` 정의 → 폼의 AuthResultCode·AuthResultMsg(또는 message 이벤트에 담긴 사유)를 토스트 "결제창이 닫혔습니다 — <사유> (<코드>)" 로 표시, 4초 안에 닫히면 '같은 탭에서 열기' 안내 + 자동 전환. `page: true` 면 `MobileYN=Y`(나이스페이 모바일 방식) → iframe 없이 이 탭이 결제 화면으로 이동했다가 ReturnURL(`/api/billing/nicepay/return`) 로 돌아온다(서버 쪽은 기존 모바일 경로 그대로). 숨은 폼 `data-testid=nicepay-form` 정리.
+- UI: 플랫폼 결제 시험 — [같은 탭에서 열기] 체크(`pay-test-pagemode`), 닫힘 사유 줄(`pay-test-closed`); 실결제 100원 버튼도 같은 `launch` 경로. 회사 결제(관리 › 사용량·요금제) 결제창 결제 수단 줄에도 같은 체크(`billing-pagemode`).
+- 시험: E2E run.mjs V32 결제 시험 단계에 가짜 나이스페이 스크립트 계약 시험 추가(레이어 → W007 메시지 → 닫힘 사유·자동 전환 → MobileYN=Y 폼) — **구조 시험**. 실제 나이스페이 응답(W007 여부·키)은 로컬이 운영에서 확인.
+- 로컬 확인 부탁: ① /platform › 결제 시험 › [이 회사로 결제창 열기] — 이제 닫힐 때 사유 토스트·줄이 보이는지(W007 이면 시험 키 문제 → 나이스페이 기술지원에 nictest00m 최신 키 문의 또는 Vercel `NICEPAY_TEST_PAY_MID/KEY`) ② [같은 탭에서 열기] 켜고 다시 → 나이스페이 화면으로 이동하는지, 결제/취소 뒤 /platform?tab=paytest 로 돌아오는지 ③ 실결제 100원 버튼도 같은 안내가 뜨는지(실결제는 대표 승인 뒤에만).
+
 ## 2026-10-21 대표 14:30 — #411 광고비 충전 흐름 (migration 148) [배포확인요청]
 - `src/lib/mktRecharge.ts`: `balancesView`(페이스 = 최근 7일 평균 지출, days·level) · `setBalance`(관리자 직접 입력, PUT /api/marketing/ads/balances) · `rechargeCheck`(opsTick 마다: syncBalances → 카드 생성(signal recharge:<provider>:<label>, body.amount·link) → 열린 카드 잔액 상승 감지 자동 done). `marketingAds.readBalance/syncBalances`(네이버 bizmoney·Meta spend_cap).
 - UI: 광고실 '매체 잔액' 표(`ads-balances`, 직접 입력 폼) · 운영실 카드 [충전 페이지 열기](`ops-card-link`). 시험 tests/api/mkt-recharge.test.mjs.

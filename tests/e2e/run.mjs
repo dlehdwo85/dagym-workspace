@@ -1753,6 +1753,39 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await owner.getByTestId('pay-test').screenshot({ path: `${SHOTS}/v32-pay-test.png` });
   const r = await ctx.staffA.client.req('GET', '/api/platform');
   assert.equal(r.status, 404);
+  // #413 결제창이 열리자마자 닫힘: 나이스페이 PC 스크립트는 팝업이 아니라 같은 페이지의 iframe 레이어이고, 오류 때 레이어를 지우고 nicepayClose() 를 부른다.
+  // 가짜 스크립트로 그 계약(goPay → #nice_layer → {code:'1', result:{AuthResultCode, AuthResultMsg}} → 레이어 삭제 → nicepayClose)만 흉내 낸다 — 구조 시험(실제 나이스페이 아님).
+  const FAKE_NP = `window.goPay = function(f){
+    if (f.MobileYN && f.MobileYN.value === 'Y') { window.__npMobile = Object.fromEntries(Array.from(f.elements).map(function(i){ return [i.name, i.value]; })); return false; }
+    var l = document.createElement('div'); l.id = 'nice_layer'; l.innerHTML = '<iframe name="nice_frame" id="nice_frame"></iframe>'; document.body.appendChild(l);
+    var bg = document.createElement('div'); bg.id = 'bg_layer'; document.body.appendChild(bg);
+    function set(n, v){ var i = f.elements.namedItem(n); if (!i) { i = document.createElement('input'); i.type = 'hidden'; i.name = n; f.appendChild(i); } i.value = v; }
+    function on(e){ var o = e.data; if (!o || !o.code) return; window.removeEventListener('message', on);
+      if (o.code === '1' || o.code === '2') { set('AuthResultCode', o.result ? o.result.AuthResultCode : '9999'); set('AuthResultMsg', o.result ? o.result.AuthResultMsg : o.message); l.remove(); bg.remove(); try { nicepayClose(); } catch (err) {} } }
+    window.addEventListener('message', on);
+    setTimeout(function(){ window.postMessage({ code: '1', message: 'fail', result: { AuthResultCode: 'W007', AuthResultMsg: '위변조 데이터를 체크하세요' } }, '*'); }, 300);
+  };`;
+  await owner.route('https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js', (rt) => rt.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_NP }));
+  await owner.goto(`${BASE}/platform?tab=paytest`);
+  await owner.getByTestId('pay-test-tenant').first().waitFor();
+  assert.equal(await owner.getByTestId('pay-test-pagemode').isChecked(), false);
+  await owner.getByTestId('pay-test-open').first().click();
+  await owner.getByTestId('pay-test-closed').waitFor();
+  const closed = await owner.getByTestId('pay-test-closed').textContent();
+  assert.match(closed, /위변조 데이터를 체크하세요 \(W007\)/, '닫힘 사유(AuthResultMsg·코드)를 보여 준다');
+  assert.match(closed, /같은 탭에서 열기를 켰습니다/);
+  await owner.getByText(/결제창이 닫혔습니다 — 위변조 데이터를 체크하세요/).first().waitFor();
+  assert.equal(await owner.getByTestId('pay-test-pagemode').isChecked(), true, '바로 닫히면 같은 탭 방식으로 자동 전환');
+  assert.equal(await owner.locator('#nice_layer').count(), 0);
+  assert.equal(await owner.locator('[data-testid=nicepay-form]').count(), 0, '숨은 폼 정리');
+  await owner.getByTestId('pay-test').screenshot({ path: `${SHOTS}/177-pay-test-closed.png` });
+  await owner.getByTestId('pay-test-open').first().click();
+  await owner.waitForFunction(() => !!window.__npMobile);
+  const mob = await owner.evaluate(() => window.__npMobile);
+  assert.equal(mob.MobileYN, 'Y', '같은 탭 = 나이스페이 모바일 방식(MobileYN=Y)');
+  assert.equal(mob.MID, 'nictest00m'); assert.match(mob.ReturnURL, /\/api\/billing\/nicepay\/return$/); assert.ok(mob.SignData);
+  await owner.unroute('https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js');
+  await owner.evaluate(() => { delete window.goPay; });
 });
 
 await step('V11 휴대폰: 행 상태 칩 → 시트에서 진행 중, 묶기 상태별, 완료 칩 보임·월별 요약, 마감 선택 = 아래 시트(화면 안)·시각 버튼, 글자 칩, 🎤 음성 등록 → 인식 카드(빠진 마감 빨간 표시)', async () => {

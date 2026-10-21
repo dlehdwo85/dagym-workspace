@@ -21,6 +21,10 @@ export function PayTest() {
   const [checkId, setCheckId] = useState<string | null>(sp.get('check'));
   const [busy, setBusy] = useState(false);
   const [pick, setPick] = useState<Record<string, { plan: string; kind: 'monthly' | 'annual'; pm: 'CARD' | 'BANK' | 'VBANK' }>>({});
+  // #413: PC 레이어(iframe)가 열리자마자 닫히는 환경 — 나이스페이 모바일 방식(MobileYN=Y)으로 같은 탭 이동. 바로 닫히면 자동으로 켠다
+  const [pageMode, setPageMode] = useState(false);
+  const [lastClose, setLastClose] = useState<{ code: string; message: string; quick: boolean; at: string } | null>(null);
+  const launch = (r: any) => launchNicepay(r, { page: pageMode, onClose: (i) => { setLastClose({ ...i, at: new Date().toLocaleTimeString('ko-KR') }); if (i.quick) setPageMode(true); } });
   useEffect(() => {
     if (sp.get('tab') === 'paytest') document.getElementById('paytest')?.scrollIntoView({ block: 'start' });
     const f = sp.get('payfail'); if (f) toast.error(`결제 실패: ${f}`);
@@ -36,7 +40,7 @@ export function PayTest() {
     try {
       const r = await api(`/api/platform/pay-test/${t.id}/window`, { body: { kind: o.kind, planCode: o.plan, payMethod: o.pm } });
       if (r.mode !== 'test') throw new Error('시험 상점이 아닙니다 — 결제창을 열지 않습니다');
-      await launchNicepay(r);
+      await launch(r);
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   /** V36 8 실결제 소액 시험(대표 승인) — 실 상점 100원, 1시간 뒤 자동 취소 */
@@ -47,7 +51,7 @@ export function PayTest() {
     try {
       const r = await api(`/api/platform/pay-test/${t.id}/live`, { body: { confirm: c } });
       if (r.mode !== 'live' || Number(r.params.Amt) !== 100) throw new Error('실결제 소액 시험 조건이 아닙니다 — 결제창을 열지 않습니다');
-      await launchNicepay(r);
+      await launch(r);
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   return (
@@ -55,8 +59,17 @@ export function PayTest() {
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold"><FlaskConical className="size-4 text-brand-600" />결제 시험</h2>
         <span className="rounded bg-amber-100 px-1.5 text-[11px] text-amber-800">늘 시험 상점 — 실제로 청구되지 않음</span>
-        <Button size="sm" variant="secondary" className="ml-auto" onClick={create} disabled={busy} data-testid="pay-test-create"><Plus />결제 시험 회사 만들기</Button>
+        <label className="ml-auto flex items-center gap-1 text-xs text-ink-3" title="결제창(레이어)이 열리자마자 닫히면 켜세요 — 이 탭이 나이스페이 결제 화면으로 이동했다가 결제 뒤 자동 확인 화면으로 돌아옵니다">
+          <input type="checkbox" checked={pageMode} onChange={(e) => setPageMode(e.target.checked)} data-testid="pay-test-pagemode" />같은 탭에서 열기
+        </label>
+        <Button size="sm" variant="secondary" onClick={create} disabled={busy} data-testid="pay-test-create"><Plus />결제 시험 회사 만들기</Button>
       </div>
+      {lastClose && (
+        <p className="border-b border-line bg-amber-50 px-3 py-1.5 text-xs text-amber-900" data-testid="pay-test-closed">
+          {lastClose.at} 결제창이 닫혔습니다 — {lastClose.message || (lastClose.quick ? '나이스페이가 바로 닫음(사유 없음)' : '취소')}{lastClose.code ? ` (${lastClose.code})` : ''}
+          {lastClose.quick && ' · 같은 탭에서 열기를 켰습니다. 다시 눌러 보세요'}
+        </p>
+      )}
       {checkId && <CheckPanel id={checkId} onClose={() => setCheckId(null)} onChanged={list.reload} />}
       <ul className="divide-y divide-line text-sm">
         {(list.data?.tenants ?? []).map((t) => {
