@@ -631,3 +631,4 @@
   - 835cf7e #100 담당자 지정: 탭 표시·입찰 주 담당 저장·지우기 ✅, 넘기기 기본 선택 이동재 ✅(규칙 없을 때와 구분은 다중 계정 필요). 3·4항목은 다른 직원 계정 필요 → 로컬 불가.
   - 클라우드에 결과 전달 완료. ASC 세션은 로그아웃됨(심사 추적 작업은 재로그인 필요).
   - 19:40 #133 PDF 본문 추출: 운영 자료실 PDF 9건 모두 text_error "Setting up fake worker failed: Cannot find module /var/task/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs" — Vercel 번들에 worker 파일 누락. outputFileTracingIncludes 또는 정적 import 제안, 배포 뒤 재추출 확인 예정. 클라우드 전달.
+- 20:00 (10/21) 클라우드 39da345(#104 공간별 알림, mig 154) 운영 확인: 설정 '공간별 알림(영업·마케팅)' 라디오·회사 기본값 ✅, 알림 종류별 묶음 머리줄(검토 요청 22건·묶음 읽음) ✅. 기존 알림 150건 space null → ?space=marketing 비어 있음·칩 미표시(backfill 요청) 🔧. 19:30 요청 결과: PDF 재추출 9건 hasText true ✅(#133 종결), 네이버 키워드/소재 동기화 031a777b items 147 ✅, 피드 일관성 튀는 장 6→2 ✅ 그러나 점수 여전히 0점(점수식 조정 요청) 🔧. 클라우드 전달.
