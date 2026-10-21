@@ -272,6 +272,8 @@ export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typ
   const targets = members.filter((x) => x.user_id !== u.id && (!x.muted || mentions.includes(x.user_id))).map((x) => x.user_id);
   await notify(sql, { userIds: targets, type: 'chat', title: roomName, body: r.kind === 'dm' ? preview : `${u.name}: ${preview}`,
     link: `/messages?room=${r.id}`, entityType: 'chat_room', entityId: r.id, actorId: u.id, dedupeKey: `chat:${m.id}` });
+  // V35 2 2차 (#76): 1:1 상대가 부재중이면 안내 메시지(방마다 하루 1번)
+  if (r.kind === 'dm') { const other = members.find((x) => x.user_id !== u.id); if (other) await (await import('./away')).autoReplyIfAway(sql, r.id, other.user_id).catch(() => false); }
   return { id: m.id, createdAt: m.created_at, notified: targets };
 }
 

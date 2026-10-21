@@ -39,6 +39,9 @@ export async function presenceMap(u: SessionUser, now = new Date(), sql: Sql = d
     const cur = out[r.user_id];
     if (!cur || RANK[s] > RANK[cur.s] || (RANK[s] === RANK[cur.s] && p.until > cur.until)) out[r.user_id] = p;
   }
+  // V35 2 2차 (#76): 직접 설정한 부재 — 같은 등급(leave)이면 대리인 정보가 있는 직접 설정을 우선
+  const { manualAwayPresence } = await import('./away');
+  for (const [id, p] of Object.entries(await manualAwayPresence(sql, tenantOf(u), now))) { const cur = out[id]; if (!cur || RANK.leave >= RANK[cur.s]) out[id] = p; }
   // V30 ③ 출퇴근(기능을 쓰는 회사만): 다른 상태가 없을 때 출근 전(빈 점)·퇴근(회색 빈 점) — 오늘 자정까지
   const { clockStates } = await import('./attendance');
   const clocks = await clockStates(sql, tenantOf(u)).catch(() => ({} as Record<string, 'before' | 'done'>));

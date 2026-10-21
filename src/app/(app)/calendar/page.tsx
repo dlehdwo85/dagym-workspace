@@ -14,7 +14,7 @@ import dynamic from 'next/dynamic';
 import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, X, Palette } from 'lucide-react';
+import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, Video, X, Palette } from 'lucide-react';
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
 import { useBackClose, useSheetBack } from '@/components/backClose';
@@ -863,12 +863,12 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const s = occurrenceStart && !e.recurring_event_id ? new Date(occurrenceStart) : new Date(e.start_at);
       const en = new Date(s.getTime() + dur);
       setF({ title: e.title, calendarId: e.calendar_id, allDay: e.all_day, date: seoulDate(s), start: seoulTime(s),
-        endDate: e.all_day ? addDays(seoulDate(en), -1) : seoulDate(en), end: seoulTime(en), rrule: e.rrule, location: e.location,
+        endDate: e.all_day ? addDays(seoulDate(en), -1) : seoulDate(en), end: seoulTime(en), rrule: e.rrule, location: e.location, meetingUrl: e.meetingUrl ?? '',
         description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version, reminders: e.reminder_minutes ?? null, alarm: e.alarm ?? null, isPrivate: !!e.is_private, color: e.color ?? null });
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
       setF({ title: draft?.title ?? '', calendarId: draft?.calendarId ?? personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
-        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, prep: '', color: draft?.color ?? null, alsoTask: !!draft?.alsoTask });
+        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', meetingUrl: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, prep: '', color: draft?.color ?? null, alsoTask: !!draft?.alsoTask });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -911,7 +911,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const t = times();
       if (t.end < t.start) return;
       setAutoState('saving');
-      const run = patchWithRetry({ title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null, scope: 'all' });
+      const run = patchWithRetry({ title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null, scope: 'all' });
       autoRun.current = run.catch(() => {});
       try {
         const r = await run;
@@ -935,7 +935,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     setBusy(true);
     await autoRun.current;
     try {
-      const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
+      const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
       if (!id) {
         const made = await api<{ id?: string }>('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } }); pushRecentColor(f.color);
         // 대표 10/21 12:20 ②: 준비 업무는 '선택 창(체크, 기본 꺼짐)' — 자동 생성 없음. 체크했을 때만 묶음으로 만든다
@@ -1027,6 +1027,8 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           <Field label="장소"><input className={inputCls} value={f.location} onChange={(e) => set('location')(e.target.value)} placeholder="예: 음성 아이파크 — 적으면 이동 일정" /></Field>
           {/* V36 4: 장소를 적으면 이동 일정 — 캘린더에서 📍·진한 테두리, 알림 따로 안 정하면 30분 전 알림이 더해짐 */}
           {f.location?.trim() && <p className="-mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800" data-testid="editor-travel"><MapPin className="size-3" />이동 있음{!f.reminders ? ' · 30분 전 알림 기본' : ''}</p>}
+          {/* V30 ⑪ (#111) 화상 회의 링크 — 적으면 일정 상세에 [회의 참여] */}
+          <Field label="화상 회의 링크 (Zoom·Google Meet 등, 선택)"><input className={inputCls} inputMode="url" value={f.meetingUrl ?? ''} onChange={(e) => set('meetingUrl')(e.target.value)} placeholder="https://meet.google.com/…" data-testid="ev-meeting-url" /></Field>
           <Field label="설명"><textarea className={inputCls} rows={3} value={f.description} onChange={(e) => set('description')(e.target.value)} /></Field>
         </fieldset>
         {myAtt && (
@@ -1121,6 +1123,7 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged }: { 
             <p className="flex items-center gap-1.5 font-semibold leading-snug">{ev.kind === 'task_block' && <Timer className="size-4 shrink-0 text-ink-2" aria-label="업무 시간" />}{cleanTitle(ev.title)}</p>
             <p className="mt-1 text-sm text-ink-2" data-testid="preview-time">{fmtTimeRange(ev.start, ev.end, { allDay: ev.allDay })}</p>
             {ev.location && <p className="mt-0.5 flex items-center gap-1 text-sm text-ink-2"><MapPin className="size-3.5" />{ev.location}</p>}
+            {ev.meetingUrl && <a href={ev.meetingUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex h-8 items-center gap-1 rounded-input bg-brand-600 px-2.5 text-xs font-medium text-white hover:bg-brand-700" data-testid="ev-join"><Video className="size-3.5" />회의 참여</a>}
             <p className="mt-1 text-xs text-ink-3">{ev.calendarType === 'personal' && ev.ownerName ? `${ev.ownerName}님 일정` : calendarName}{ev.recurring ? ' · 반복 일정' : ''}{ev.isPrivate ? ' · 비공개' : ''}</p>
             {ev.masked && <p className="mt-1 text-xs text-ink-2" data-testid="masked-note">비공개 일정이라 시간만 보입니다</p>}
           </div>

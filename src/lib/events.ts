@@ -13,6 +13,8 @@ export const eventInput = z.object({
   title: z.string().trim().min(1, '제목을 입력하세요').max(200),
   description: z.string().max(20000).optional(),
   location: z.string().max(300).optional(),
+  /** V30 ⑪ (#111) 화상 회의 링크(Zoom·Google Meet 등) */
+  meetingUrl: z.string().trim().max(500).optional().refine((v) => !v || /^https?:\/\/\S+$/.test(v), '화상 회의 링크는 http(s) 주소여야 합니다'),
   kind: z.enum(['normal', 'vacation', 'half_day', 'outside', 'business_trip', 'task_block']).optional(),
   allDay: z.boolean().optional(),
   start: z.string().datetime({ offset: true }),
@@ -52,6 +54,7 @@ interface EventRow {
   title: string;
   description: string;
   location: string;
+  meeting_url?: string | null;
   kind: string;
   all_day: boolean;
   start_at: Date;
@@ -149,7 +152,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
     const lt = lts.find((x) => x.assignee_id === u.id) ?? lts[0];
     // 비공개 일정: 주인·만든 사람·참석자가 아니면 제목·장소·설명·참석자 없이 "바쁨"
     const masked = e.is_private && e.owner_id !== u.id && e.created_by !== u.id && !att.some((a) => a.user_id === u.id);
-    if (masked) { e.title = '바쁨'; e.location = ''; e.description = ''; }
+    if (masked) { e.title = '바쁨'; e.location = ''; e.description = ''; e.meeting_url = null; }
     const base = {
       calendarId: e.calendar_id, calendarName: masked ? '' : e.cal_name, color: e.color, eventColor: masked ? null : e.ev_color ?? null, calendarType: e.cal_type,
       kind: e.kind, taskId: masked ? null : e.task_id, attendees: masked ? [] : att, createdBy: e.created_by,
@@ -159,7 +162,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
       blockTask: bt && !masked ? { id: bt.id, status: bt.status } : null,
     };
     if (!e.rrule) {
-      out.push({ ...base, id: e.id, seriesId: null, title: e.title, location: e.location, description: e.description,
+      out.push({ ...base, id: e.id, seriesId: null, title: e.title, location: e.location, meetingUrl: e.meeting_url ?? null, description: e.description,
         start: e.start_at, end: e.end_at, allDay: e.all_day, recurring: false, version: e.version, originalStart: null });
       continue;
     }
@@ -171,12 +174,12 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
       if (skip.has(s.getTime())) continue;
       const end = new Date(s.getTime() + dur);
       if (end <= from && !(s >= from)) continue;
-      out.push({ ...base, id: e.id, seriesId: e.id, title: e.title, location: e.location, description: e.description,
+      out.push({ ...base, id: e.id, seriesId: e.id, title: e.title, location: e.location, meetingUrl: e.meeting_url ?? null, description: e.description,
         start: s, end, allDay: e.all_day, recurring: true, rrule: e.rrule, version: e.version, originalStart: s });
     }
     for (const x of exs) {
       if (x.cancelled || x.start_at >= to || x.end_at <= from) continue;
-      out.push({ ...base, id: x.id, seriesId: e.id, title: base.masked ? '바쁨' : x.title, location: base.masked ? '' : x.location, description: base.masked ? '' : x.description,
+      out.push({ ...base, id: x.id, seriesId: e.id, title: base.masked ? '바쁨' : x.title, location: base.masked ? '' : x.location, meetingUrl: base.masked ? null : x.meeting_url ?? null, description: base.masked ? '' : x.description,
         start: x.start_at, end: x.end_at, allDay: x.all_day, recurring: true, exception: true, rrule: e.rrule,
         version: x.version, originalStart: x.original_start, kind: x.kind, eventColor: base.masked ? null : (x as any).color ?? base.eventColor });
     }
@@ -249,8 +252,8 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   }
   const out: { id: string; taskId?: string } = await sql.begin(async (tx) => {
     const [ev] = await tx<{ id: string }[]>`
-      insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private, color, alarm, lead_id)
-      values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
+      insert into events (calendar_id, title, description, location, meeting_url, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private, color, alarm, lead_id)
+      values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.meetingUrl || null}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
         ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)}, ${i.isPrivate ?? false}, ${i.color ?? null}, ${i.alarm ?? null}, ${i.leadId ?? null})
       returning id`;
     if (i.taskId) await tx`insert into event_tasks (event_id, task_id, role, created_by) values (${ev.id}, ${i.taskId}, 'block', ${u.id}) on conflict do nothing`;
@@ -275,7 +278,7 @@ export async function createEvent(u: SessionUser, i: EventInput) {
 }
 
 const EDIT_FIELDS: [keyof EventInput, string][] = [
-  ['title', 'title'], ['description', 'description'], ['location', 'location'], ['kind', 'kind'], ['allDay', 'all_day'], ['isPrivate', 'is_private'], ['color', 'color'],
+  ['title', 'title'], ['description', 'description'], ['location', 'location'], ['meetingUrl', 'meeting_url'], ['kind', 'kind'], ['allDay', 'all_day'], ['isPrivate', 'is_private'], ['color', 'color'],
 ];
 
 /**
@@ -332,13 +335,13 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
       const dur = master.end_at.getTime() - master.start_at.getTime();
       const times = i.start && i.end ? validateTimes({ start: i.start, end: i.end }) : { s: occ, e: new Date(occ.getTime() + dur) };
       const [x] = await tx<{ id: string }[]>`
-        insert into events (calendar_id, title, description, location, kind, all_day, start_at, end_at,
+        insert into events (calendar_id, title, description, location, meeting_url, kind, all_day, start_at, end_at,
           recurring_event_id, original_start, task_id, created_by, color)
         values (${i.calendarId ?? master.calendar_id}, ${i.title ?? master.title}, ${i.description ?? master.description},
-          ${i.location ?? master.location}, ${i.kind ?? master.kind}, ${i.allDay ?? master.all_day}, ${times.s}, ${times.e},
+          ${i.location ?? master.location}, ${i.meetingUrl !== undefined ? (i.meetingUrl || null) : (master as any).meeting_url ?? null}, ${i.kind ?? master.kind}, ${i.allDay ?? master.all_day}, ${times.s}, ${times.e},
           ${master.id}, ${occ}, ${master.task_id}, ${u.id}, ${i.color !== undefined ? i.color : (master as any).color ?? null})
         on conflict (recurring_event_id, original_start) where recurring_event_id is not null and deleted_at is null
-        do update set title = excluded.title, color = excluded.color, description = excluded.description, location = excluded.location,
+        do update set title = excluded.title, color = excluded.color, description = excluded.description, location = excluded.location, meeting_url = excluded.meeting_url,
           kind = excluded.kind, all_day = excluded.all_day, start_at = excluded.start_at, end_at = excluded.end_at,
           version = events.version + 1, updated_at = now()
         returning id`;

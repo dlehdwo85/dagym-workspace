@@ -123,3 +123,22 @@ export async function requestDeletion(u: SessionUser | null, i: z.infer<typeof d
   }
   return { ok: true, message: DONE_MSG };
 }
+
+/** V15-6 (#279) 탈퇴(익명 처리) 30일 뒤 실제 정리: 전화·회사 메일·설정·알림·세션·푸시·구글 연동까지 지우고 purged_at. 업무·댓글 기록은 '탈퇴한 사용자'로 남긴다 */
+export async function purgeDeletedAccounts(now = new Date()) {
+  const sql = db();
+  const rows = await sql<{ id: string }[]>`select id from users where deleted_at is not null and deleted_at < ${now}::timestamptz - interval '30 days' and purged_at is null and email like 'deleted+%' limit 100`;
+  for (const r of rows) {
+    await sql.begin(async (tx) => {
+      await tx`delete from sessions where user_id = ${r.id}`;
+      await tx`delete from push_subscriptions where user_id = ${r.id}`;
+      await tx`delete from notification_prefs where user_id = ${r.id}`;
+      await tx`delete from notifications where user_id = ${r.id}`;
+      await tx`delete from user_settings where user_id = ${r.id}`;
+      await tx`delete from google_calendar_links where user_id = ${r.id}`;
+      await tx`update users set phone = null, work_email = null, title_short = null, purged_at = ${now}, updated_at = now() where id = ${r.id}`;
+      await audit(tx, null, 'account.purged', 'user', r.id, { after: '30d' }, null);
+    });
+  }
+  return { purged: rows.length };
+}

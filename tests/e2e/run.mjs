@@ -28,6 +28,7 @@ import { noticesFlow } from './notices.step.mjs';
 import { attendanceFlow } from './attendance.step.mjs';
 import { approvalsFlow } from './approvals.step.mjs';
 import { contractsFlow } from './contracts.step.mjs';
+import { awayFlow } from './away.step.mjs';
 import { usageStatsFlow } from './usage-stats.step.mjs';
 import { contactsFlow } from './contacts.step.mjs';
 import { settlementFlow } from './settlement.step.mjs';
@@ -2426,6 +2427,7 @@ await step('대표 23:40·23:55 마감일 버튼 크기 + 업무 첨부 자료�
 await step('대표 02:30·03:00 승인함 통합(종류별 탭·건수·바로 승인/반려) · 예산 브랜드 축(세팅안 필요·총액 적기) · 월 목표 반려 · 매출 목표 AI 추천 · 지금 상태', () => inbox({ owner, ctx, sql, BASE, SHOTS }));
 
 await step('#116 전자계약서: 사용자 줄 [전자계약서] → 근로계약서 보내기 → 링크·접속 코드 → 로그인 없는 서명 화면(코드·본문·그리기·동의) → 서명 → 전자계약서 탭 1/2', () => contractsFlow({ browser, owner, ctx, BASE, SHOTS, sql }));
+await step('대기열 소형 3건: 설정 부재중(기간·문구 → 부재 중 안내·근무 상태 부재 → 해제) · 일정 화상 회의 링크(수정 화면 칸 → 미리보기 [회의 참여])', () => awayFlow({ owner, staff, ctx, BASE, SHOTS, today, addDays }));
 
 await browser.close();
 srv.proc.kill();

@@ -2,13 +2,14 @@
 import { ChatBubbleToggle } from '@/components/ChatBubble';
 import { RoleBadge } from '@/components/RoleBadge';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, cx, Field, Loading, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { enableNativePush, isNativeApp, subscribeWebPush } from '@/components/native';
 import { BioLockSetting } from '@/components/BioLock';
 import { ROLE_LABEL } from '@/lib/types';
+import { UserSelect } from '@/components/pickers';
 
 export default function Settings() {
   const { user, features } = useSession();
@@ -47,6 +48,7 @@ export default function Settings() {
       <section className="rounded-lg border bg-white p-4"><ChatBubbleToggle /></section>
       <CalendarFeed />
       <TwoFactor />
+      <AwaySection />
       <AccountSection />
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 종류별 수신</h2>
@@ -391,6 +393,38 @@ function MyCard() {
         </Field>
         <div className="flex justify-end sm:col-span-3"><Button type="submit" size="sm" data-testid="my-card-save">저장</Button></div>
       </form>
+    </section>
+  );
+}
+
+/** V35 2 2차 (#76) 부재중 설정 — 기간·자동 응답·대리인·알림 보류. 근무 상태 '부재', 담당자 규칙은 부 담당, 1:1 대화 안내, 돌아오면 알림 요약 */
+function AwaySection() {
+  const st = useApi<{ away: { from: string; to: string; note: string; deputyId: string | null; deputyName: string | null; hold: boolean } | null; active: boolean; hold: boolean }>('/api/account/away');
+  const [f, setF] = useState({ from: '', to: '', note: '', deputyId: '' as string | null, hold: true });
+  const [busy, setBusy] = useState(false);
+  const inited = useRef(false); // 처음 불러온 값만 칸에 넣음 — 입력 중에 응답이 늦게 와서 지워지지 않게
+  useEffect(() => { if (st.data && !inited.current) { inited.current = true; const d = st.data; setF((prev) => (prev.from || prev.to || prev.note) ? prev : { from: d.away?.from ?? '', to: d.away?.to ?? '', note: d.away?.note ?? '', deputyId: d.away?.deputyId ?? '', hold: d.away?.hold ?? d.hold }); } }, [st.data]);
+  const save = async () => {
+    setBusy(true);
+    try { await api('/api/account/away', { method: 'PUT', body: { from: f.from, to: f.to, note: f.note || undefined, deputyId: f.deputyId || null, hold: f.hold } }); toast.ok('부재중 설정을 저장했습니다'); st.reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  const clear = async () => { setBusy(true); try { await api('/api/account/away', { method: 'DELETE' }); toast.ok('부재중을 해제했습니다'); setF({ from: '', to: '', note: '', deputyId: '', hold: true }); st.reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } };
+  return (
+    <section className="rounded-lg border bg-white p-4 text-sm" data-testid="away" data-loaded={st.data ? '1' : '0'}>
+      <h2 className="font-semibold">부재중 설정</h2>
+      <p className="mt-1 text-ink-2">기간을 정해 두면 동료에게 <b>부재 ~날짜</b>로 보이고, 자동 배정은 부 담당에게 가며, 1:1 대화에 안내가 뜹니다. 부재(연차 포함) 중 푸시는 보류했다가 돌아온 날 한 번에 알려 드립니다.</p>
+      {st.data?.active && <p className="mt-2 rounded-input bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-900" data-testid="away-active">지금 부재중으로 표시되고 있습니다 (~{st.data.away?.to}{st.data.away?.deputyName ? ` · 대리 ${st.data.away.deputyName}` : ''})</p>}
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <Field label="시작일"><input type="date" className={inputCls} value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} data-testid="away-from" /></Field>
+        <Field label="끝 날짜"><input type="date" className={inputCls} value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} data-testid="away-to" /></Field>
+        <Field label="자동 응답 문구 (1:1 대화에 안내)" className="sm:col-span-2"><input className={inputCls} maxLength={300} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="예: 10/25까지 연차입니다. 급한 일은 김OO 과장에게 연락 주세요" data-testid="away-note" /></Field>
+        <div><div className="mb-1 text-xs font-medium text-slate-600">대리인 (급한 일·자동 배정 대신 받을 사람)</div><UserSelect value={f.deputyId} onChange={(v) => setF({ ...f, deputyId: v })} placeholder="대리인 없음" id="away-deputy" /></div>
+        <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" checked={f.hold} onChange={(e) => setF({ ...f, hold: e.target.checked })} data-testid="away-hold" />부재·연차 중 푸시 보류(돌아오면 요약 1건)</label>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button onClick={save} disabled={busy || !f.from || !f.to} data-testid="away-save">저장</Button>
+        {st.data?.away && <Button variant="secondary" onClick={clear} disabled={busy} data-testid="away-clear">부재 해제</Button>}
+      </div>
     </section>
   );
 }
