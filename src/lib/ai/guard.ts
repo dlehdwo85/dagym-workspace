@@ -67,7 +67,7 @@ export async function userAiBudget(u: { id: string; role: string }, sql: Sql = d
     sql<{ monthly_krw: number }[]>`select monthly_krw from ai_user_limits where user_id = ${u.id}`,
     sql<{ krw: number }[]>`select coalesce(sum(amount_krw), 0)::int krw from ai_limit_requests where user_id = ${u.id} and month = ${month} and status = 'approved'`,
     sql<{ krw: number; chats: number; docs: number }[]>`select coalesce(sum(coalesce(cost_krw, cost_usd * ${usdKrw()})), 0)::float8 krw,
-        count(*) filter (where purpose is null or purpose = 'assistant')::int chats, count(*) filter (where purpose = 'doc_engine')::int docs
+        count(*) filter (where purpose is null or purpose in ('assistant', 'sales_assistant', 'marketing_assistant'))::int chats, count(*) filter (where purpose = 'doc_engine')::int docs
       from ai_usage where user_id = ${u.id} and created_at >= (${month + '-01'}::date::timestamp at time zone 'Asia/Seoul')`,
     sql<{ krw: number }[]>`select coalesce(sum(coalesce(cost_krw, cost_usd * ${usdKrw()})), 0)::float8 krw from ai_usage
       where user_id = ${u.id} and created_at >= ((now() at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul')`,
@@ -76,7 +76,7 @@ export async function userAiBudget(u: { id: string; role: string }, sql: Sql = d
   const dayLimit = Math.round(limit * 0.2);
   // 최근 평균 단가(원): 대화 1건(질문 1번 = 요청 묶음)·문서 1건
   const [avg] = await sql<{ chat: number | null; doc: number | null }[]>`select
-      (select avg(c) from (select sum(coalesce(cost_krw, cost_usd * ${usdKrw()})) c from ai_usage where user_id = ${u.id} and (purpose is null or purpose = 'assistant') group by request_id order by max(created_at) desc limit 30) x)::float8 chat,
+      (select avg(c) from (select sum(coalesce(cost_krw, cost_usd * ${usdKrw()})) c from ai_usage where user_id = ${u.id} and (purpose is null or purpose in ('assistant', 'sales_assistant', 'marketing_assistant')) group by request_id order by max(created_at) desc limit 30) x)::float8 chat,
       (select avg(cost_usd * ${usdKrw()}) from (select cost_usd from ai_doc_jobs where user_id = ${u.id} and status = 'done' order by created_at desc limit 20) y)::float8 doc`;
   const usedKrw = Math.round(used.krw);
   const remaining = Math.max(0, limit - usedKrw);

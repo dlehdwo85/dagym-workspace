@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { LandingEvents } from '@/components/LandingEvents';
+import { LandingAiLine } from '@/components/LandingAiLine';
 import { BizFooter } from '@/components/BizFooter';
 import { ArrowRight, BellRing, Briefcase, Check, Download, Mail, Megaphone, Mic, Phone, Sparkles, TrendingUp, Users } from 'lucide-react';
 
@@ -116,7 +117,7 @@ export default function Welcome() {
         <h2 className="text-2xl font-bold">요금</h2>
         <div className="mx-auto mt-6 max-w-md rounded-card border border-brand-600 p-6 ring-1 ring-brand-600" data-testid="pricing">
           <div className="text-sm font-semibold text-brand-700">무료</div><div className="mt-1 text-4xl font-bold">0원</div><div className="text-sm text-ink-3">5명까지 · 기간 제한 없음 · 카드 등록 없음</div>
-          <ul className="mt-4 space-y-1.5 text-left text-sm">{['업무·일정·캘린더·메신저·결재·자료실 전부', '영업·마케팅 공간 켜기 가능', 'AI 비서(회사 월 한도) · 앱 알림'].map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 text-green-600" />{x}</li>)}</ul>
+          <ul className="mt-4 space-y-1.5 text-left text-sm">{['업무·일정·캘린더·메신저·결재·자료실 전부', '영업·마케팅 공간 켜기 가능', 'ai'].map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 text-green-600" />{x === 'ai' ? <LandingAiLine /> : x}</li>)}</ul>
           <Link href="/signup" className="mt-5 inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white hover:bg-brand-700" data-track="start-pricing">무료로 시작<ArrowRight className="size-4" /></Link>
         </div>
         <p className="mt-3 text-xs text-ink-3">6명 이상·더 큰 저장 공간·AI 한도가 필요하면 아래로 문의해 주세요.</p>

@@ -1352,6 +1352,15 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 대표 14:30 — #412 요금제별 AI 한도 통합 화면 [배포확인요청]
+- `src/lib/aiLimits.ts` 한 파일이 세 화면에 같은 데이터: `aiLimitsView(tenant)` = 업무 AI 비서 · 영업 AI 세일즈 · 마케팅 AI 마케터 줄마다 {한도, 쓴 양, 남은 양, %, 체감 환산(feel)}; `aiPlanMatrix()` = 요금제별 기준표(업무 요금제 plans × 마케팅 요금제 mkt_plan_limits, 코드 w_basic→basic 짝 + AI 크레딧 팩). 쓴 양은 ai_usage.purpose 로 구분(marketing* → 마케팅, sales* → 영업, 나머지 → 업무). AI 비서 대화는 호출 공간에 따라 `sales_assistant`·`marketing_assistant` 로 기록(guard 대화 건수도 세 종류 합산).
+- 한도 구조(정직하게 표시): 업무·영업은 **회사 공유 주머니 하나**(요금제 월 요청 수 + 회사 월 AI $) — 영업 줄은 '회사 공유, 영업 사용자 인당 한도는 요금 설계안(대표 결정 전)'. 마케팅은 마케팅 요금제(크레딧·마케팅 AI $·생성 영상 편수).
+- 체감 환산: 최근 60일 플랫폼 평균 단가(5건 이상일 때, 없으면 기본값 질문 약 70원·메일 초안 약 30원·문서 약 200원·원고 약 40원)로 남은 $ → 질문 n회·메일 초안 n건·문서 n건·원고 n건, 크레딧 → 시안 n장(6.5)·영상 n편(80).
+- 화면: 사용량·요금제 `ai-limits` 표(AI 사용 섹션 위) + `ai-plan-matrix` 기준표(요금제 표 아래, 앱 안에서는 숨김). 플랫폼 운영 회사 목록 AI 칸 '쓴/한도 · 남은 n회 · 마케팅 x/y크레딧' + 머리줄 `platform-ai-margin` "이달 AI 원가(고객사) vs 요금 합계(월 환산·VAT 제외) → 마진(%)" (우리 회사·체험·시험 회사는 고객사에서 제외). 소개 사이트 무료 카드 AI 한 줄은 `/api/public/ai-plans`(로그인 없음) 의 무료 요금제 값 — 요금 카드 자체는 대표 지시대로 '5명 무료만' 유지(전체 기준표를 공개 사이트에 보일지는 대표 결정).
+- health `config.funnelStats`(로컬 16:50 요청): FUNNEL_STATS_TOKEN 설정 여부.
+- 시험: tests/api/ai-limits.test.mjs 4건(공간별 집계·체감 환산·기준표 동일 데이터·공간 태그·플랫폼 잔여/마진), E2E 사용량·플랫폼 단계 보강(178 캡처).
+- 로컬 확인 부탁: ① /admin/usage 'AI 한도 한눈에' 표 세 줄·환산 숫자가 말이 되는지(우리 회사는 요청 무제한이라 $ 기준만) ② 요금제별 기준표의 마케팅 칸이 플랫폼 마케팅 요금제 표와 같은지 ③ /platform 회사 목록 머리줄 원가·마진 한 줄 ④ 소개 사이트 무료 카드 "AI 비서·AI 세일즈 회사 월 20회" ⑤ health funnelStats:true.
+
 ## 2026-10-21 로컬 15:45 — #413 결제 시험 창 즉시 닫힘 [배포확인요청]
 - 원인 분석: 나이스페이 PC 스크립트(`nicepay-pgweb.js`)는 팝업 창이 아니라 **같은 페이지의 iframe 레이어(#nice_layer)** 다 — `window.open` 없음 → 팝업 차단·사용자 제스처 문제가 아님(클라우드 Chromium 재현: 레이어가 뜨고 유지됨). 나이스페이 쪽이 오류/취소 메시지(`{code:'1'|'2', result:{AuthResultCode, AuthResultMsg}}`)를 보내면 스크립트가 레이어를 지우고 `nicepayClose()` 를 부르는데 우리 페이지에 정의가 없었고, 교차 출처 iframe 의 alert 는 Chrome 이 막으므로 **아무 안내 없이 창만 사라짐**. 10/16 로컬 확인 때 같은 버튼이 **W007 "위변조 데이터를 체크하세요"** 를 띄웠으므로(nictest00m 공개 시험 키 서명 불일치 추정) 지금도 같은 오류가 조용히 닫히는 것으로 본다. 결제 코드(nicepay.ts·index.ts·Billing.tsx)는 10/16 이후 변경 없음.
 - 수정 `src/components/Billing.tsx launchNicepay(r, {page, onClose})`: `nicepayClose` 정의 → 폼의 AuthResultCode·AuthResultMsg(또는 message 이벤트에 담긴 사유)를 토스트 "결제창이 닫혔습니다 — <사유> (<코드>)" 로 표시, 4초 안에 닫히면 '같은 탭에서 열기' 안내 + 자동 전환. `page: true` 면 `MobileYN=Y`(나이스페이 모바일 방식) → iframe 없이 이 탭이 결제 화면으로 이동했다가 ReturnURL(`/api/billing/nicepay/return`) 로 돌아온다(서버 쪽은 기존 모바일 경로 그대로). 숨은 폼 `data-testid=nicepay-form` 정리.
