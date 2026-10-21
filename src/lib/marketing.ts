@@ -284,8 +284,10 @@ export async function convertCall(u: SessionUser, id: string, i: z.infer<typeof 
   if (!c) throw notFound();
   if (c.task_id) return { taskId: c.task_id };
   const { createTask } = await import('./tasks');
+  const rule = i.assigneeId ? null : await (await import('./assignees')).resolveAssignee(sql, tenantOf(u), 'marketing_brand', c.brand_id ?? '').catch(() => null); // #100 브랜드별 마케팅 담당
   const r = await createTask(u, { title: `[전화 문의] ${c.phone}${c.brand ? ` · ${c.brand}` : ''}`, description: [`전화 시각: ${new Date(c.called_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`, c.source ? `들어온 곳: ${c.source}` : '', c.memo ?? ''].filter(Boolean).join('\n'),
-    assigneeId: i.assigneeId ?? u.id, requestedById: u.id, approvalRequired: false, space: 'marketing' } as never);
+    assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, approvalRequired: false, space: 'marketing' } as never);
+  if (rule) await sql`update tasks set assigned_by_rule = ${rule.ruleId} where id = ${(r as any).id}`;
   await sql`update mkt_calls set status = 'lead', task_id = ${(r as any).id} where id = ${id}`;
   return { taskId: (r as any).id };
 }

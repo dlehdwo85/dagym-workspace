@@ -55,9 +55,11 @@ export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Pro
   if (!progress) return { taskId: null, action: 'none' };
   const { createTask } = await import('../tasks');
   const KIND_LABEL = await kindLabels(tenantOf(u));
+  // #100 담당자 지정: 담당이 안 정해진 자동 업무는 영업 원천 규칙(주·부 담당, 부재 대체)
+  const rule = i.assigneeId ? null : await (await import('../assignees')).resolveAssignee(sql, tenantOf(u), 'sales_source', i.kind).catch(() => null);
   const title = `[영업] ${i.name.slice(0, 120)} — ${(i.nextAction ?? (i.kind === 'lead' ? '첫 연락' : st === '검토중' ? '검토' : i.kind === 'vendor' ? '등록 신청' : '다음 조치')).slice(0, 40)}`;
   const desc = `${KIND_LABEL[i.kind]} 건에서 자동으로 만든 영업 업무입니다 — 원천: ${LINK[i.kind](i.id)}${i.deadline ? `\n입찰 마감: ${i.deadline}` : ''}\n(상태를 보류·미참여·대상아님·완료로 바꾸면 이 업무도 함께 보류·완료됩니다)`;
-  const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: i.assigneeId ?? u.id, requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', KIND_LABEL[i.kind]] }, { quiet: false, skipQuota: true });
-  await sql`update tasks set sales_ref = ${sql.json({ kind: i.kind, id: i.id, name: i.name })}, lead_id = ${i.leadId ?? (i.kind === 'lead' ? i.id : null)} where id = ${r.id}`;
+  const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', KIND_LABEL[i.kind]] }, { quiet: false, skipQuota: true });
+  await sql`update tasks set sales_ref = ${sql.json({ kind: i.kind, id: i.id, name: i.name })}, lead_id = ${i.leadId ?? (i.kind === 'lead' ? i.id : null)}, assigned_by_rule = ${rule?.ruleId ?? null} where id = ${r.id}`;
   return { taskId: r.id, action: 'created' };
 }

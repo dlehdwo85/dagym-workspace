@@ -91,7 +91,10 @@ export async function sendDigest(tenant: string, opt: { force?: boolean; day?: s
   if (exists && !opt.force) return { sent: false, reason: 'already' };
   const d = await buildDigest(tenant, day);
   const [co] = await sql<{ name: string }[]>`select name from tenants where id = ${tenant}`;
+  // #100: 받는 사람을 따로 안 정했으면 영업 담당 규칙(입찰) → 없으면 대표·관리자
+  const rule = p.digest_to.length ? null : await (await import('../assignees')).resolveAssignee(sql, tenant, 'sales_source', 'bid').catch(() => null);
   const to = p.digest_to.length ? await sql<{ id: string; email: string }[]>`select id, email from users where id = any(${p.digest_to}::uuid[]) and tenant = ${tenant} and status = 'active'`
+    : rule ? await sql<{ id: string; email: string }[]>`select id, email from users where id = ${rule.userId}`
     : await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${tenant} and status = 'active' and not is_demo and role in ('owner', 'admin')`;
   let mailed = 0, notified = 0; let mailError: string | null = null; let mailVia: string | null = null;
   if (d.items.length) {

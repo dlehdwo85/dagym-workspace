@@ -104,6 +104,9 @@ export async function submitForm(token: string, i: z.infer<typeof submitInput>, 
     // 담당자: 양식 기본 담당자 → 없으면 그 현장(및 상위)의 현장 관리자
     let assignee: string | null = f.default_assignee_id;
     if (assignee && !(await tx`select 1 from users where id = ${assignee} and status = 'active'`).length) assignee = null;
+    // #100 담당자 지정: 그 부서·팀의 업무 배정 담당 규칙(주·부 담당, 부재 대체)
+    let ruleId: string | null = null;
+    if (!assignee) { const [ou] = await tx<{ tenant: string }[]>`select tenant from org_units where id = ${f.org_unit_id}`; const rule = ou ? await (await import('./assignees')).resolveAssignee(tx, ou.tenant, 'task_unit', f.org_unit_id).catch(() => null) : null; if (rule) { assignee = rule.userId; ruleId = rule.ruleId; } }
     const managers = (await tx<{ id: string }[]>`with recursive up as (select id, parent_id from org_units where id = ${f.org_unit_id}
         union select o.id, o.parent_id from org_units o join up on o.id = up.parent_id)
       select distinct u.id from users u join memberships m on m.user_id = u.id
@@ -123,6 +126,7 @@ export async function submitForm(token: string, i: z.infer<typeof submitInput>, 
         ${kind === 'complaint' ? 'high' : 'normal'}, ${assignee}, ${addDays(todaySeoul(), KIND_DUE[kind])}, ${['현장신고', KIND_LABEL[kind]]}, ${creator},
         extract(epoch from now()), ${kind === 'facility' ? 'inspection' : 'normal'}, ${kind === 'facility' ? 1 : 0})
       returning id`;
+    if (ruleId) await tx`update tasks set assigned_by_rule = ${ruleId} where id = ${t.id}`;
     let n = 0;
     for (const text of (tpl?.payload?.checklist ?? []) as string[]) await tx`insert into task_checklist_items (task_id, text, sort) values (${t.id}, ${text}, ${n++})`;
     if (photo) {

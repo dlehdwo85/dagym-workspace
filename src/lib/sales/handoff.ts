@@ -31,11 +31,13 @@ function when(v: unknown): { day: string; start: string; end: string; allDay: bo
   const st = new Date(`${m[1]}T00:00:00+09:00`); return { day: m[1], start: st.toISOString(), end: new Date(st.getTime() + 864e5).toISOString(), allDay: true };
 }
 /** 넘길 수 있는 사람: 영업 공간 구성원 + 관리자 */
-export async function handoffPeople(u: SessionUser) {
+export async function handoffPeople(u: SessionUser, kind?: string | null) {
   await assertSpace(u, 'sales'); const t = tenantOf(u);
+  // #100 담당자 지정: 원천별 영업 담당 규칙이 있으면 기본 선택(부재면 부 담당)
+  const rule = await (await import('../assignees')).resolveAssignee(db(), t, 'sales_source', (WORK_KINDS as readonly string[]).includes(String(kind)) ? String(kind) : '').catch(() => null);
   const people = await db()<{ id: string; name: string; role: string; title: string | null }[]>`select u.id, u.name, u.role, u.title from users u left join space_members m on m.user_id = u.id and m.tenant = u.tenant
     where u.tenant = ${t} and u.status = 'active' and not u.is_demo and (u.role in ('owner', 'admin') or 'sales' = any(coalesce(m.spaces, '{}'))) order by (u.id = ${u.id}) desc, u.name`;
-  return { people, me: u.id };
+  return { people, me: u.id, suggested: rule && people.some((p) => p.id === rule.userId) ? rule.userId : null, suggestedByRule: rule?.ruleId ?? null };
 }
 export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
   await assertSpace(u, 'sales'); const t = tenantOf(u); const sql = db();

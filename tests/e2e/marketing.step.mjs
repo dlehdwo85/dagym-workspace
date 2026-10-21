@@ -222,6 +222,15 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   // 원래대로
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
   await owner.goto(`${BASE}/admin/users`);
+  // 대표 10/20 15:00 (#100) 담당자 지정 탭: 영업 원천 '기본' 행에 주 담당 저장 → '지정됨' → 지우기
+  await owner.getByTestId('tab-assignees').click();
+  const ruleRow = owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first();
+  await ruleRow.getByTestId('assignee-primary').selectOption({ index: 1 });
+  await ruleRow.getByTestId('assignee-save').click();
+  await owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first().getByTestId('assignee-set').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/182-assignee-rules.png`, fullPage: true });
+  await owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first().getByTestId('assignee-clear').click();
+  await owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first().getByTestId('assignee-set').waitFor({ state: 'detached' });
   await owner.getByTestId('tab-spaces').click();
   await owner.getByTestId('space-toggle-marketing').click();
   await owner.getByTestId('space-tabs').waitFor({ state: 'detached' });

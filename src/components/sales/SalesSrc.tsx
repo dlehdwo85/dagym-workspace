@@ -47,8 +47,8 @@ const attUrl = (a: any) => (typeof a === 'string' ? a : a?.url ?? a?.href ?? '')
 /** 대표 10/21 12:00 영업 재편 1): 행마다 [영업 진행으로 넘기기] — 담당자 선택 → 리드·'영업 중'·담당 업무·일정·알림 (전화·문자 옆, 체크 선택과 별개) */
 function HandoffButton({ kind, id, name, onDone, compact }: { kind: 'bid' | 'building' | 'facility' | 'vendor'; id: string; name: string; onDone?: () => void; compact?: boolean }) {
   const [open, setOpen] = useState(false); const [sel, setSel] = useState<string[]>([]); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
-  const people = useApi<{ people: { id: string; name: string; role: string; title: string | null }[]; me: string }>(open ? '/api/sales/work/handoff' : (null as unknown as string), [open]);
-  useEffect(() => { if (people.data && !sel.length) setSel([people.data.me]); }, [people.data, sel.length]);
+  const people = useApi<{ people: { id: string; name: string; role: string; title: string | null }[]; me: string; suggested?: string | null }>(open ? `/api/sales/work/handoff?kind=${kind}` : (null as unknown as string), [open, kind]);
+  useEffect(() => { if (people.data && !sel.length) setSel([people.data.suggested ?? people.data.me]); }, [people.data, sel.length]); // #100 원천별 담당 규칙이 있으면 그 사람이 기본
   async function go() {
     setBusy(true);
     try { const r = await api<{ leadId: string; taskIds: string[]; eventIds: string[]; eventErrors: string[]; due: string }>('/api/sales/work/handoff', { body: { kind, id, assigneeIds: sel, note: note || undefined } });
