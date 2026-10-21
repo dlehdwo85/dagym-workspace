@@ -2323,6 +2323,37 @@ await step('V32 2 정산: 플랫폼 정산 집계·장부 [정산 완료] → �
 
 await step('로컬 10/20 알림 바로 처리: 배정 알림 [오늘 할 일에 넣기] → 처리 표시·버튼 사라짐 → 설정 조용한 시간 칸', () => notifActionsFlow({ staff, ctx, BASE, SHOTS }));
 
+// 대표 10/21 13:50 #410: 검토 필수가 아닌 일반 업무에서도 담당자가 [검토 요청] → 요청자가 [반려(보완 요청)]/[승인(최종 완료)] · '검토' 칸 항상 표시 · 요청자 '검토 필수' 토글
+await step('#410 일반 업무 검토 요청(휴대폰 담당자) → 요청자 반려 → 다시 요청 → 승인(PC) · 검토 필수 토글', async () => {
+  const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '#410 검토 흐름 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
+  await staff.goto(`${BASE}/tasks/${id}`);
+  await staff.getByTestId('review-ask').waitFor();
+  assert.equal(await staff.getByTestId('step-review').count(), 1, '검토 칸 항상 표시(일반 업무)');
+  await staff.getByTestId('review-ask').click();
+  await staff.getByTestId('review-wait').waitFor();
+  await staff.screenshot({ path: `${SHOTS}/176-task-review-ask.png`, fullPage: true });
+  await owner.goto(`${BASE}/tasks/${id}`);
+  await owner.getByTestId('review-decide').waitFor();
+  owner.once('dialog', (d) => d.accept('사진 더 붙여 주세요'));
+  await owner.getByTestId('review-reject-here').click();
+  await owner.getByText('보완을 요청했습니다').waitFor();
+  let d = await ctx.staffA.client.ok('GET', `/api/tasks/${id}`); assert.equal(d.task.status, 'in_progress', '반려 → 진행 중');
+  await staff.reload(); await staff.getByTestId('review-ask').waitFor(); await staff.getByTestId('review-ask').click(); await staff.getByTestId('review-wait').waitFor();
+  await owner.reload(); await owner.getByTestId('review-decide').getByTestId('next-action').click();
+  await owner.getByText('승인했습니다').waitFor();
+  d = await ctx.owner.ok('GET', `/api/tasks/${id}`); assert.equal(d.task.status, 'done');
+  assert.ok((await sql`select 1 from activities where entity_type = 'task' and entity_id = ${id} and action = 'approved'`).length, '활동 approved');
+  // 요청자 '검토 필수' 토글(세부 정보 칸) — 켜면 담당자 바로 완료 불가(서버 403)
+  const id2 = (await ctx.owner.ok('POST', '/api/tasks', { title: '#410 검토 필수 토글 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
+  await owner.goto(`${BASE}/tasks/${id2}`);
+  const cb = owner.getByTestId('approval-required');
+  if (!(await cb.isVisible().catch(() => false))) await owner.getByRole('button', { name: /세부 정보/ }).first().click().catch(() => {});
+  await cb.check();
+  await owner.getByText('검토 필수로 바꿨습니다').waitFor();
+  const t2 = (await ctx.staffA.client.ok('GET', `/api/tasks/${id2}`)).task; assert.equal(t2.approval_required, true);
+  assert.equal((await ctx.staffA.client.req('PATCH', `/api/tasks/${id2}`, { status: 'done', version: t2.version })).status, 403, '검토 필수 → 담당자 바로 완료 불가');
+});
+
 await step('대표 검수 10/20 ② 앱 영업 정리(390): 리드 전화·문자·홈페이지 → 파이프라인 단계 칩 목록 → 입찰 원문·공고문·한국어 상세·관리자 원본 접힘 → 허브 시설 전화 줄', () => salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }));
 
 await step('대표 검수 10/20 체크리스트(360): 항목별 미팅 버튼 제거 · 담당 1명 → 담당 칩 숨김·새 항목 자동 배정 · 담당 여럿 → 선택 노출 · (?) 안내 탭 · 가로 넘침 0', () => checklistAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }));

@@ -76,3 +76,31 @@ describe('영업 진행으로 넘기기', () => {
     assert.deepEqual([f.status, f.data.contact_status], ['영업 중', '영업 중']);
   });
 });
+
+// 대표 10/21 12:00 영업 재편 2): [배정 이전으로 되돌리기] — 업무·일정 취소(활동 기록), 원 행 넘기기 전 상태로(lead_id 해제), 리드 '되돌림'·상태 기록·알림, 다시 넘기기 가능 · 권한(담당자·넘긴 사람·관리자)
+describe('배정 이전으로 되돌리기', () => {
+  test('담당자가 되돌림 → 업무·일정 취소, 원 행 복구, 리드 되돌림, 알림 · 관계없는 직원 403 · 다시 넘기기 가능', async () => {
+    const today0 = seoulToday();
+    await put('procurement_notices', { id: 'N3', title: '되돌리기 공고', issuer: '구청', related: true, first_seen_at: today0, deadline_at: `${addDays(today0, 5)}T10:00`, site_briefing_at: `${addDays(today0, 2)}T14:00` });
+    await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N3', status: '검토중', memo: '넘기기 전 메모' });
+    const r = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N3', assigneeIds: [ctx.staffA.id] });
+    assert.equal(r.taskIds.length, 1); assert.equal(r.eventIds.length, 2);
+    const [src] = await sql`select src from sales_leads where id = ${r.leadId}`; assert.deepEqual([src.src.taskIds, src.src.eventIds], [r.taskIds, r.eventIds], '리드에 업무·일정 id 보관');
+    await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffB.id, spaces: ['sales'] });
+    assert.equal((await ctx.staffB.client.req('POST', '/api/sales/work/handoff/revert', { leadId: r.leadId })).status, 403, '관계없는 영업 직원');
+    const v = await ctx.staffA.client.ok('POST', '/api/sales/work/handoff/revert', { leadId: r.leadId, reason: '담당 변경' });
+    assert.deepEqual([v.status, v.tasks, v.events, v.rows], ['되돌림', 1, 2, 1]);
+    assert.equal((await sql`select count(*)::int c from tasks where id = any(${r.taskIds}::uuid[]) and deleted_at is not null`)[0].c, 1, '업무 취소(소프트 삭제)');
+    assert.equal((await sql`select count(*)::int c from activities where entity_type = 'task' and entity_id = any(${r.taskIds}::uuid[]) and action = 'canceled'`)[0].c, 1, '활동 기록');
+    assert.equal((await sql`select count(*)::int c from events where id = any(${r.eventIds}::uuid[]) and deleted_at is not null`)[0].c, 2, '일정 취소');
+    const [w] = await sql`select status, lead_id, data from sales_work_records where tenant = 'default' and src_tbl = 'opportunity_work' and ref_id = 'N3'`;
+    assert.deepEqual([w.status, w.lead_id, w.data.memo, w.data.lead_id ?? null], ['검토중', null, '넘기기 전 메모', null], '원 행 넘기기 전 상태로');
+    const [l] = await sql`select status, src from sales_leads where id = ${r.leadId}`; assert.equal(l.status, '되돌림'); assert.equal(l.src.reverted.reason, '담당 변경');
+    assert.equal((await sql`select count(*)::int c from sales_status_log where lead_id = ${r.leadId} and to_status = '되돌림'`)[0].c, 1);
+    assert.equal((await sql`select count(*)::int c from notifications where user_id = ${ctx.ownerId} and title like '영업 배정 취소%'`)[0].c, 0, '되돌린 본인(담당)에게는 없음·넘긴 사람은 담당 아님');
+    const b = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working'); const n3 = b.items.find((x) => x.id === 'N3'); assert.equal(n3.workLeadId, null); assert.equal(n3.work, '검토중');
+    assert.equal((await ctx.staffA.client.req('POST', '/api/sales/work/handoff/revert', { leadId: r.leadId })).status, 409, '두 번 되돌리기');
+    const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${r.leadId}`); assert.equal(d.lead.status, '되돌림'); assert.equal(d.raw.src.handoff, true);
+    const r2 = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N3', assigneeIds: [ctx.ownerId] }); assert.notEqual(r2.leadId, r.leadId, '다시 넘기면 새 리드');
+  });
+});

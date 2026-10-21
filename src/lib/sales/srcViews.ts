@@ -34,8 +34,8 @@ async function userNames(tenant: string) {
 }
 
 /** 영업관리 11단계(원본 leads.sales_status) · 종결 단계 · 우선순위 한글 */
-export const STAGES = ['신규리드', '1차연락완료', '미팅예정', '현장방문완료', '제안서작성중', '제안서발송완료', '견적협의', '계약검토', '계약완료', '보류', '실패'];
-const CLOSED = new Set(['계약완료', '보류', '실패']);
+export const STAGES = ['신규리드', '1차연락완료', '미팅예정', '현장방문완료', '제안서작성중', '제안서발송완료', '견적협의', '계약검토', '계약완료', '보류', '실패', '되돌림']; // 되돌림 = 영업 재편 2) 배정 이전으로 되돌린 리드
+const CLOSED = new Set(['계약완료', '보류', '실패', '되돌림']);
 const PRIORITY: Record<string, string> = { urgent: '긴급', high: '높음', medium: '보통', low: '낮음' };
 /** 지역 칸에 단지명 같은 값(원본 데이터 오류)은 '지역 미정' 묶음으로 — 값은 고치지 않음 */
 const regionOf = (v: unknown) => { const r = String(v ?? '').trim(); return !r || r.length > 8 || /\s/.test(r) ? '지역 미정' : r; };

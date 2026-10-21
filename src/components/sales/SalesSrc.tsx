@@ -404,6 +404,12 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
   const { data, error, reload } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`);
   const [tab, setTab] = useState('info');
   const [del, setDel] = useState<string | null>(null);
+  const [rv, setRv] = useState<string | null>(null); // 영업 재편 2) 되돌리기 사유
+  async function revert() {
+    try { const r = await api<{ tasks: number; events: number }>('/api/sales/work/handoff/revert', { body: { leadId: id, reason: rv?.trim() || undefined } }); toast.ok(`배정 이전으로 되돌렸습니다 — 업무 ${r.tasks}건·일정 ${r.events}건 취소`); setRv(null); reload(); onChange?.(); }
+    catch (e: any) { toast.error(e.message); }
+  }
+  const handoffSrc = data?.raw?.src; const canRevert = !!handoffSrc?.handoff && data?.lead?.status !== '되돌림' && data?.readOnly === false && (data.canAssign || data.me === data.lead?.ownerId || handoffSrc?.by === data.me || (handoffSrc?.assignees ?? []).includes(data.me));
   const tabs: [string, string, any[] | null][] = data ? [['info', '정보', null], ['acts', `상담 ${data.activities.length}`, data.activities], ['tasks', `업무 ${(data.wTasks ?? []).length + data.tasks.length}`, null], ['timeline', `타임라인 ${(data.timeline ?? []).length}`, null],
     ['props', `제안 ${data.proposals.length}`, data.proposals], ['cons', `계약 ${data.contracts.length}`, data.contracts], ['timing', `시점 ${data.timing.length}`, data.timing], ['work', `입찰 ${data.work.length}`, data.work], ['int', `관심사업 ${data.interests.length}`, data.interests]] : [];
   async function remove() {
@@ -416,6 +422,9 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
       {error ? <ErrorBox error={error} /> : !data ? <Skeleton rows={4} /> : (
         <div className="space-y-3" data-testid="sales-lead-detail">
           <AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesLead} subject={`거래처 ${data.lead.name}`} compact testId="ai-ask-lead" />
+          {handoffSrc?.handoff && <div className="flex flex-wrap items-center gap-2 rounded-input bg-slate-50 px-3 py-2 text-xs" data-testid="lead-handoff-box"><span className="text-ink-2">{data.lead.status === '되돌림' ? `배정 이전으로 되돌린 리드입니다${handoffSrc.reverted?.reason ? ` — ${handoffSrc.reverted.reason}` : ''}` : `넘기기로 만든 리드 — 담당 ${(handoffSrc.assignees ?? []).length}명, 업무 ${(handoffSrc.taskIds ?? []).length}건·일정 ${(handoffSrc.eventIds ?? []).length}건`}</span>
+            {canRevert && (rv === null ? <Button size="sm" variant="secondary" onClick={() => setRv('')} data-testid="lead-revert">배정 이전으로 되돌리기</Button>
+              : <span className="flex flex-1 flex-wrap items-center gap-1.5"><input className={cx(inputCls, 'h-8 min-w-40 flex-1 py-1 text-xs')} value={rv} onChange={(e) => setRv(e.target.value)} placeholder="사유(선택)" aria-label="되돌리기 사유" maxLength={300} data-testid="lead-revert-reason" /><Button size="sm" onClick={revert} data-testid="lead-revert-go">되돌리기</Button><Button size="sm" variant="secondary" onClick={() => setRv(null)}>취소</Button></span>)}</div>}
           <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {kd(data.lead.next)}</span>}</div>
           <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-line px-1">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('shrink-0 px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`lead-tab-${k}`}>{l}</button>)}</div>
           {tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '') + (data.lead.updated ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}

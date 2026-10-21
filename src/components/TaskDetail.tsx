@@ -288,6 +288,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     : t.approval_required && !perms.approve ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') }
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
   const primary = primary0 && (statusOwner || isReviewer) ? primary0 : null;
+  // 대표 10/21 13:50 #410 ①: 모든 업무에서 담당자가 완료 대신 [검토 요청]을 누를 수 있다(요청자·없으면 만든 사람이 검토) — 결재선·검토 필수 업무는 기존 흐름 그대로
+  const reviewerCandidate = t.requested_by && t.requested_by !== t.assignee_id ? t.requested_by : (!t.assignee_id || t.created_by !== t.assignee_id) ? t.created_by : null;
+  const reviewAsk = !!primary && primary.label === '완료' && (t.status === 'todo' || t.status === 'in_progress') && !t.approval_line_id && !!reviewerCandidate && reviewerCandidate !== user.id
+    ? { label: '검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') } : null;
 
   // V14 19번 ④: 휴대폰은 댓글 입력줄을 화면 아래에 고정(📎·📷) — 변형(transform)된 부모 영향 없게 body 로 띄운다
   const autoGrow = (el: HTMLTextAreaElement | null) => { commentRef.current = el; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 112)}px`; } };
@@ -395,11 +399,14 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           )}
           {/* 대표 피드백(10/15): 따로 있던 큰 [완료] 버튼 대신 진행 단계를 한 줄로 크게 — 단계를 눌러 바로 바꾸고, 현재 단계가 색으로 보인다 */}
           <div className="mt-3 space-y-2" data-testid="task-actions">
-            <StatusSteps status={t.status} reviewStep={!!(t.approval_line_id || (t.approval_required && !perms.approve) || t.status === 'review')}
+            {/* #410 ④: '검토' 칸은 항상 — 검토 없이 완료했으면 회색(생략) */}
+            <StatusSteps status={t.status} reviewStep reviewSkipped={t.status === 'done' && !t.approved_at && !t.review_requested_at}
               canChange={statusOwner} canReopen={statusOwner || isRequester}
               locked={lockMsg}
               finish={primary && t.status !== 'review' ? primary : null} finishBlocked={photoShort ? `증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)` : null}
+              onReview={reviewAsk ? () => { if (photoShort) return toast.error(`증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)`); reviewAsk.run(); } : undefined}
               onSet={(v, msg) => patch({ status: v }, msg)} />
+            {reviewAsk && <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2"><span>바로 완료하지 않고 {t.requested_by_name ?? t.created_by_name ?? '요청자'}님에게 확인을 받으려면</span><Button size="sm" variant="secondary" onClick={() => { if (photoShort) return toast.error(`증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)`); reviewAsk.run(); }} data-testid="review-ask">검토 요청</Button></p>}
             {t.status === 'review' && isTaskOwner && !isReviewer && (
               <div className="flex flex-wrap items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="review-wait">
                 <Hourglass className="size-4 shrink-0" /><span className="flex-1">검토 중에는 {reviewerLabel}의 승인·반려를 기다립니다.</span>
@@ -688,6 +695,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {/* 로컬 10/20(대표): 마감 알림을 알람처럼(전체 화면·소리·[해제]) — 기본값은 설정(높음·긴급은 켬) */}
               {perms.edit && <select className="ml-2 rounded-full border border-line bg-white px-1.5 py-0.5 text-[11px] text-ink-2" value={t.alarm === true ? 'on' : t.alarm === false ? 'off' : 'default'} onChange={(e) => patch({ alarm: e.target.value === 'on' ? true : e.target.value === 'off' ? false : null })} aria-label="알람처럼 울리기" data-testid="task-alarm">
                 <option value="default">알람 기본{(t.priority === 'high' || t.priority === 'urgent') ? '(중요 → 켬)' : ''}</option><option value="on">알람처럼 울림</option><option value="off">알람 끔</option></select>}</span></Prop>
+            {/* #410 ②③: 요청자·관리자가 '검토 필수'를 켜면 담당자는 바로 완료하지 못하고 검토 요청으로 넘긴다 */}
+            {(isRequester || perms.approve || t.created_by === user.id) && t.status !== 'done' && <Prop icon={BadgeCheck} label="검토 필수">
+              <label className="inline-flex cursor-pointer items-center gap-2 text-sm"><input type="checkbox" className="size-4" checked={!!t.approval_required} onChange={(e) => patch({ approvalRequired: e.target.checked }, e.target.checked ? '검토 필수로 바꿨습니다 — 담당자는 검토 요청으로 넘깁니다' : '검토 필수를 껐습니다')} aria-label="검토 필수" data-testid="approval-required" /><span className="text-ink-2">{t.approval_required ? '담당자가 완료하면 요청자 확인 뒤 완료' : '담당자가 바로 완료 가능'}</span></label>
+            </Prop>}
             {/* R-15 5번: 우선순위는 마감일·미리 알림과 같은 묶음 */}
             <Prop icon={Flag} label="우선순위">
               <select className={ghostCls} value={t.priority} onChange={(e) => patch({ priority: e.target.value })} aria-label="우선순위">
@@ -825,9 +836,9 @@ function Prop({ icon: Icon, label, children, asDiv, className }: { icon: LucideI
 }
 /** 상태 칩 하나: 누르면 할 일·진행 중·검토·보류·완료 중 선택 (배지·버튼·select 중복 정리) */
 /** 진행 단계: 진행 전 → 진행 중 → (검토) → 완료. 현재 단계는 색으로 채우고, 지난 단계는 ✓. 누르면 그 단계로(완료·검토는 결재·사진 규칙을 따름) */
-function StatusSteps({ status, reviewStep, canChange, canReopen, locked, finish, finishBlocked, onSet }: {
-  status: TaskStatus; reviewStep: boolean; canChange: boolean; canReopen: boolean; locked: string | null;
-  finish: { label: string; run: () => void } | null; finishBlocked: string | null; onSet: (v: TaskStatus, msg?: string) => void;
+function StatusSteps({ status, reviewStep, reviewSkipped, canChange, canReopen, locked, finish, finishBlocked, onReview, onSet }: {
+  status: TaskStatus; reviewStep: boolean; reviewSkipped?: boolean; canChange: boolean; canReopen: boolean; locked: string | null;
+  finish: { label: string; run: () => void } | null; finishBlocked: string | null; onReview?: () => void; onSet: (v: TaskStatus, msg?: string) => void;
 }) {
   const order: TaskStatus[] = reviewStep ? ['todo', 'in_progress', 'review', 'done'] : ['todo', 'in_progress', 'done'];
   const label: Partial<Record<TaskStatus, string>> = { todo: '진행 전', in_progress: '진행 중', review: '검토', done: '완료' };
@@ -842,14 +853,14 @@ function StatusSteps({ status, reviewStep, canChange, canReopen, locked, finish,
     if (s === 'in_progress') return onSet('in_progress', '시작했습니다');
     if (!finish) return;
     if (finishBlocked) return toast.error(finishBlocked);
-    if (s === 'review') return goesToReview ? finish.run() : undefined;
+    if (s === 'review') return goesToReview ? finish.run() : onReview ? onReview() : toast.info('검토 요청은 담당자가 요청자에게 보낼 때 씁니다');
     if (s === 'done') return goesToReview ? toast.info(`완료는 검토를 거쳐야 해요 — [검토]를 눌러 ${finish.label.replace('완료 → ', '')}하세요`) : finish.run();
   }
   return (
     <div data-testid="status-chip" data-status={status}>
       <div className="grid overflow-hidden rounded-card border border-line" style={{ gridTemplateColumns: `repeat(${order.length}, minmax(0, 1fr))` }} role="radiogroup" aria-label="진행 단계">
         {order.map((s, k) => {
-          const isCur = k === cur, past = cur >= 0 && k < cur;
+          const isCur = k === cur, past = cur >= 0 && k < cur && !(s === 'review' && reviewSkipped);
           const finishSeg = (s === 'done' && !goesToReview) || (s === 'review' && goesToReview);
           return (
             <button key={s} type="button" role="radio" aria-checked={isCur} onClick={() => click(s)} data-testid={finishSeg && finish && status !== 'done' ? 'next-action' : `step-${s}`}
@@ -858,7 +869,7 @@ function StatusSteps({ status, reviewStep, canChange, canReopen, locked, finish,
                 isCur ? ON[s] : past ? 'bg-slate-50 text-ink-2' : 'bg-white text-ink-3 hover:bg-slate-50',
                 !isCur && (locked && status !== 'done') && 'cursor-default')}>
               {past ? <Check className="size-4 text-green-600" aria-hidden /> : isCur ? <span className="size-2 rounded-full bg-white/90" aria-hidden /> : null}
-              {s === 'review' && goesToReview && !isCur && !past ? finish!.label.replace('완료 → ', '') : label[s]}
+              {s === 'review' && goesToReview && !isCur && !past ? finish!.label.replace('완료 → ', '') : s === 'review' && reviewSkipped ? '검토 생략' : label[s]}
               {locked && status !== 'done' && isCur && <LockIcon className="size-3.5 opacity-70" aria-hidden />}
             </button>
           );

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db, type Sql } from '../db';
 import { zUuid } from '../api';
-import { HttpError, badRequest, notFound } from '../errors';
+import { HttpError, badRequest, forbidden, notFound } from '../errors';
 import { notify } from '../notifications';
 import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
@@ -15,6 +15,7 @@ import { WORK_KINDS, type WorkKind, workRecord } from './work';
  * 문구·기본값은 업종 중립(회사 고유 표현 없음).
  */
 export const HANDOFF_STATUS = '영업 중';
+export const REVERTED_STATUS = '되돌림';
 export const handoffInput = z.object({ kind: z.enum(WORK_KINDS), id: z.string().min(1).max(100), assigneeIds: z.array(zUuid).min(1).max(10), note: z.string().trim().max(500).optional() });
 const ITEM_TBL: Record<WorkKind, string> = { bid: 'procurement_notices', building: 'building_sales_pipeline', facility: 'operating_facility_prospects', vendor: 'vendor_registrations' };
 const SRC_TBL: Record<WorkKind, string> = { bid: 'opportunity_work', building: 'opportunity_work', facility: 'operating_facility_prospects__progress', vendor: 'vendor_registrations__progress' };
@@ -64,7 +65,7 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
       values (${t}, ${name}, '신규리드', ${pick(r, 'facility_type', 'building_type', 'category') ?? null}, ${pick(r, 'region', 'sido') ?? null}, ${ids[0]}, ${pick(r, 'contact_name', 'manager_name') ?? null},
         ${pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone') ?? null}, ${[`${KIND_NAME[i.kind]}에서 넘김`, i.note].filter(Boolean).join(' — ')}, ${tx.json({ from: i.kind, id: i.id, handoff: true, assignees: ids, by: u.id })}, ${due}) returning id`;
     await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${l.id}, null, '신규리드', ${`영업 진행으로 넘김(담당 ${people.map((p) => p.name).join('·')})`}, ${u.id})`;
-    const d = { ...(cur?.data ?? {}), ...(i.kind === 'facility' ? { contact_status: HANDOFF_STATUS } : { status: HANDOFF_STATUS }), lead_id: l.id, handoff_by: u.id, handoff_at: new Date().toISOString(), assignees: ids,
+    const d = { ...(cur?.data ?? {}), ...(i.kind === 'facility' ? { contact_status: HANDOFF_STATUS } : { status: HANDOFF_STATUS }), lead_id: l.id, handoff_by: u.id, handoff_at: new Date().toISOString(), assignees: ids, handoff_prev_status: cur?.status ?? null,
       ...(i.kind === 'bid' ? { notice_id: i.id } : i.kind === 'building' ? { source_id: i.id, source_type: 'building' } : {}) };
     const srcId = cur?.src_id ?? (SRC_TBL[i.kind] === 'opportunity_work' ? `w:${i.kind}:${i.id}` : i.id);
     await tx`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, lead_id, data) values (${t}, ${SRC_TBL[i.kind]}, ${srcId}, ${i.id}, ${HANDOFF_STATUS}, ${l.id}, ${tx.json(d)})
@@ -92,8 +93,49 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
       }
     } else eventErrors.push('회사 공용 캘린더가 없어 일정은 만들지 않았습니다');
   }
+  // 되돌리기(영업 재편 2)용으로 만든 업무·일정 id 를 리드에 남김
+  await sql`update sales_leads set src = coalesce(src, '{}'::jsonb) || ${sql.json({ taskIds, eventIds: eventIds.filter(Boolean) })} where id = ${leadId}`;
   // ⑤ 배정 알림(넘긴 본인 제외)
   await notify(sql, { userIds: ids.filter((x) => x !== u.id), type: 'assigned', title: `영업 배정: ${name.slice(0, 60)}`, body: `${u.name}님이 ${KIND_NAME[i.kind]}을(를) 영업 진행으로 넘겼습니다 — 검토·첫 연락 (마감 ${due})`, link: `/s/sales/leads?id=${leadId}`, entityType: 'sales_lead', entityId: leadId, actorId: u.id, push: true, dedupeKey: `sales:handoff:${leadId}` } as never).catch(() => {});
   return { leadId, status: HANDOFF_STATUS, taskIds, eventIds: eventIds.filter(Boolean), eventErrors, due, dates: future.map(([l, w]) => ({ label: l, day: w.day })) };
+}
+
+/**
+ * 영업 재편 2) [배정 이전으로 되돌리기] — 배정된 담당자·넘긴 사람·관리자가 리드 상세에서:
+ * 만든 업무는 취소(소프트 삭제 + 활동 기록), 일정은 삭제(소프트), 원 행은 넘기기 전 상태로(lead_id 해제), 리드는 '되돌림'(상태 기록·사유), 담당자에게 알림.
+ */
+export const revertInput = z.object({ leadId: zUuid, reason: z.string().trim().max(300).optional() });
+export async function revertHandoff(u: SessionUser, i: z.infer<typeof revertInput>) {
+  await assertSpace(u, 'sales'); const t = tenantOf(u); const sql = db();
+  const [l] = await sql<{ id: string; name: string; status: string; owner_id: string | null; src: any }[]>`select id, name, status, owner_id, src from sales_leads where id = ${i.leadId} and tenant = ${t} and deleted_at is null`;
+  if (!l || !l.src?.handoff) throw notFound('넘기기로 만든 리드가 아닙니다');
+  if (l.status === REVERTED_STATUS) throw new HttpError(409, 'already', '이미 되돌린 리드입니다');
+  const assignees: string[] = Array.isArray(l.src.assignees) ? l.src.assignees : [];
+  const can = ['owner', 'admin'].includes(u.role) || l.owner_id === u.id || l.src.by === u.id || assignees.includes(u.id);
+  if (!can) throw forbidden('배정된 담당자·넘긴 사람·관리자만 되돌릴 수 있습니다');
+  const taskIds: string[] = Array.isArray(l.src.taskIds) ? l.src.taskIds : [];
+  const eventIds: string[] = Array.isArray(l.src.eventIds) ? l.src.eventIds : [];
+  const { activity } = await import('../log');
+  const out = await sql.begin(async (tx) => {
+    // 업무 취소(끝나지 않은 것만; 이력은 활동 기록으로)
+    const tasks = taskIds.length ? await tx<{ id: string; assignee_id: string | null }[]>`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = any(${taskIds}::uuid[]) and deleted_at is null and status <> 'done' returning id, assignee_id` : [];
+    for (const tk of tasks) await activity(tx, 'task', tk.id, u.id, 'canceled', { reason: 'sales_handoff_revert', leadId: l.id, note: i.reason ?? null });
+    const events = eventIds.length ? await tx<{ id: string }[]>`update events set deleted_at = now(), version = version + 1 where id = any(${eventIds}::uuid[]) and deleted_at is null returning id` : [];
+    for (const ev of events) await activity(tx, 'event', ev.id, u.id, 'canceled', { reason: 'sales_handoff_revert', leadId: l.id });
+    // 원 행: 넘기기 전 상태로, 리드 연결 해제
+    const recs = await tx<{ src_tbl: string; src_id: string; data: any }[]>`select src_tbl, src_id, data from sales_work_records where tenant = ${t} and lead_id = ${l.id}`;
+    for (const w of recs) {
+      const prev = w.data?.handoff_prev_status ?? null; const d = { ...w.data }; delete d.lead_id; delete d.handoff_by; delete d.handoff_at; delete d.assignees; delete d.handoff_prev_status;
+      if (w.src_tbl === 'operating_facility_prospects__progress') d.contact_status = prev; else d.status = prev;
+      d.reverted_at = new Date().toISOString(); d.reverted_by = u.id;
+      if (prev) await tx`update sales_work_records set status = ${prev}, lead_id = null, data = ${tx.json(d)}, updated_at = now() where tenant = ${t} and src_tbl = ${w.src_tbl} and src_id = ${w.src_id}`;
+      else await tx`delete from sales_work_records where tenant = ${t} and src_tbl = ${w.src_tbl} and src_id = ${w.src_id}`;
+    }
+    await tx`update sales_leads set status = ${REVERTED_STATUS}, src = coalesce(src, '{}'::jsonb) || ${tx.json({ reverted: { by: u.id, at: new Date().toISOString(), reason: i.reason ?? null, tasks: tasks.length, events: events.length } })}, updated_at = now() where id = ${l.id}`;
+    await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${l.id}, ${l.status}, ${REVERTED_STATUS}, ${`배정 이전으로 되돌림${i.reason ? ` — ${i.reason}` : ''}`}, ${u.id})`;
+    return { tasks: tasks.length, events: events.length, rows: recs.length };
+  });
+  await notify(sql, { userIds: assignees.filter((x) => x !== u.id), type: 'task_assigned', title: `영업 배정 취소: ${l.name.slice(0, 60)}`, body: `${u.name}님이 배정 이전으로 되돌렸습니다${i.reason ? ` — ${i.reason}` : ''}. 관련 업무 ${out.tasks}건·일정 ${out.events}건은 취소되었습니다.`, link: `/s/sales/leads?id=${l.id}`, entityType: 'sales_lead', entityId: l.id, actorId: u.id, dedupeKey: `sales:handoff:revert:${l.id}` });
+  return { ok: true, status: REVERTED_STATUS, ...out };
 }
 export type { Sql };

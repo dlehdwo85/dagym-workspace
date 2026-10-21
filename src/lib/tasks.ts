@@ -554,7 +554,8 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         throw new HttpError(403, 'handoff_required', '다른 사람에게 넘기려면 요청자 승인이 필요합니다 — "넘기기 요청"을 보내 주세요');
       throw forbidden('담당자를 바꿀 권한이 없습니다 — 대표가 메뉴 권한에서 열 수 있습니다');
     }
-    if ('approval_required' in set && !perms.approve) throw forbidden('검토 필요 여부는 관리자만 바꿀 수 있습니다');
+    // 대표 10/21 13:50 #410 ②: '검토 필수'는 요청자(없으면 만든 사람)도 켜고 끌 수 있다 — 담당자가 바로 완료하지 못하게 강제
+    if ('approval_required' in set && !perms.approve && (cur.requested_by ?? cur.created_by) !== u.id) throw forbidden('검토 필수 여부는 요청자·관리자만 바꿀 수 있습니다');
     const start = (set.start_date ?? cur.start_date) as string | null;
     const due = (set.due_date ?? cur.due_date) as string | null;
     if (start && due && start > due) throw badRequest('시작일이 마감일보다 늦습니다');
