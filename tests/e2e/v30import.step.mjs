@@ -64,11 +64,30 @@ export async function notifRead({ owner, BASE, SHOTS, ctx }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await ctx.owner.ok('POST', '/api/notifications/read', { all: true });
   const mk = async (title) => (await ctx.staffA.client.ok('POST', '/api/tasks', { title, assigneeId: ctx.ownerId, approvalRequired: false })).id;
-  const a = await mk('알림읽음 시험 A'), b = await mk('알림읽음 시험 B');
+  const a = await mk('알림읽음 시험 A'), b = await mk('알림읽음 시험 B'), c = await mk('알림읽음 시험 C'), d = await mk('알림읽음 시험 D');
   await owner.goto(`${BASE}/notifications`);
   const list = owner.getByTestId('notifications');
   await list.getByText('알림읽음 시험 A', { exact: false }).waitFor();
+  await owner.getByTestId('notif-unread').getByText('안 읽음 4').waitFor();
+  // #110 줄마다 [읽음] → 흐리게 남고 배지 즉시 감소
+  const rowC = list.locator('[data-testid="notif-item"]', { hasText: '알림읽음 시험 C' });
+  await rowC.getByTestId('notif-read').click();
+  await owner.getByTestId('notif-unread').getByText('안 읽음 3').waitFor();
+  await list.locator('[data-testid="notif-item"][data-read="1"]', { hasText: '알림읽음 시험 C' }).waitFor(); // 읽은 줄이 흐리게 남음
+  assert.equal(await rowC.getByTestId('notif-read').count(), 0, '읽은 줄에는 [읽음] 버튼 없음');
+  // #110 [선택] → 체크 → 선택 띠 [보관] → 목록에서 빠지고 보관함 탭에
+  await owner.getByTestId('notif-select').click();
+  await list.locator('[data-testid="notif-item"]', { hasText: '알림읽음 시험 D' }).getByTestId('notif-check').check();
+  await owner.getByTestId('notif-sel-bar').getByText('1건 선택').waitFor();
+  await owner.getByTestId('notif-sel-archive').click();
   await owner.getByTestId('notif-unread').getByText('안 읽음 2').waitFor();
+  assert.equal(await list.getByText('알림읽음 시험 D', { exact: false }).count(), 0, '보관한 알림은 목록에서 빠짐');
+  await owner.getByTestId('notif-archived').click();
+  await owner.getByTestId('notifications').getByText('알림읽음 시험 D', { exact: false }).waitFor();
+  await owner.getByTestId('notifications').locator('[data-testid="notif-item"]', { hasText: '알림읽음 시험 D' }).getByTestId('notif-unarchive').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/183-notif-row-read.png` });
+  await owner.getByTestId('notif-unread').click();
+  await list.getByText('알림읽음 시험 A', { exact: false }).waitFor();
   await list.getByText('알림읽음 시험 A', { exact: false }).click();
   await owner.waitForURL(new RegExp(`/tasks/${a}`));
   // 업무 B 를 직접 열면 자동 읽음
@@ -82,7 +101,10 @@ export async function notifRead({ owner, BASE, SHOTS, ctx }) {
   assert.equal(await owner.getByText('알림읽음 시험', { exact: false }).count(), 0, '읽은 알림은 안 읽음 목록에 없음');
   await owner.getByTestId('notif-all').click();
   await owner.getByTestId('notifications').getByText('알림읽음 시험 B', { exact: false }).waitFor();
+  await owner.getByTestId('notifications').getByText('알림읽음 시험 C', { exact: false }).waitFor();
+  assert.equal(await owner.getByTestId('notifications').getByText('알림읽음 시험 D', { exact: false }).count(), 0, '보관한 알림은 전체 탭에도 없음');
   await owner.screenshot({ path: `${SHOTS}/v32-notifications.png` });
+  void c; void d;
 }
 
 /** 로컬 실기기: 휴대폰 업무 상세(알림으로 #c-댓글 주소로 열림)에서 체크리스트를 체크해도 화면이 댓글로 내려가지 않음 */
