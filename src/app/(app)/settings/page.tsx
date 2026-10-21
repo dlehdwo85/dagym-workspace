@@ -1,4 +1,5 @@
 'use client';
+import { RoleBadge } from '@/components/RoleBadge';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api, useApi } from '@/components/client';
@@ -38,7 +39,7 @@ export default function Settings() {
       {(user.role === 'owner' || user.role === 'admin') && <p className="text-sm text-ink-2">관리: <a href="/admin/holidays" className="font-medium text-accent-600 underline">공휴일</a> · <a href="/admin/users" className="font-medium text-accent-600 underline">사용자 관리</a> · <a href="/revenue" className="font-medium text-accent-600 underline">매출</a></p>}
       <section className="rounded-lg border bg-white p-4 text-sm">
         <div className="font-semibold">{user.name}</div>
-        <div className="text-slate-500">{user.email} · {ROLE_LABEL[user.role]}</div>
+        <div className="flex items-center gap-1.5 text-slate-500">{user.email} · {ROLE_LABEL[user.role]}<RoleBadge role={user.role} size="sm" /></div>
         {features.googleSync && <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 (선택 기능) →</Link>}
       </section>
       <SwipeToggle />
@@ -366,6 +367,7 @@ function LinkedAccounts() {
 
 /** V32 6 내 명함·회신 주소: 메일·문자 서명에 들어가는 직급·휴대폰, 내가 보낸 메일의 답장이 오는 업무 이메일 */
 function MyCard() {
+  const { user: me } = useSession(); // #101 명함 머리줄 권한 배지
   const c = useApi<{ title: string; phone: string; workEmail: string; loginEmail: string; replyToEditable: boolean }>('/api/account/card');
   const [f, setF] = useState<{ title: string; phone: string; workEmail: string } | null>(null);
   useEffect(() => { if (c.data) setF({ title: c.data.title, phone: c.data.phone, workEmail: c.data.workEmail }); }, [c.data]);
@@ -376,7 +378,7 @@ function MyCard() {
   }
   return (
     <section className="rounded-lg border bg-white p-4 text-sm" data-testid="my-card">
-      <h2 className="font-semibold">내 명함·회신 주소</h2>
+      <h2 className="flex items-center gap-2 font-semibold">내 명함·회신 주소<RoleBadge role={me.role} size="sm" /></h2>
       <p className="mt-0.5 text-xs text-ink-3">고객에게 보내는 메일·문자 서명에 들어가고, 내가 보낸 메일의 답장은 업무 이메일로 옵니다.</p>
       <form onSubmit={save} className="mt-3 grid gap-2 sm:grid-cols-3">
         <Field label="직급"><input className={inputCls} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} maxLength={50} /></Field>

@@ -40,7 +40,7 @@ test('운영실 피드 일관성: 브랜드 최근 9장 톤 통계(파일별 캐
   const b = v.feed.brands.find((x) => x.brandId === P.brand);
   assert.ok(b, JSON.stringify(v.feed));
   assert.equal(b.n, 9, '게시된 9장만(승인 대기 제외)');
-  assert.ok(b.score !== null && b.score < 70, `편차 큼 → 점수 낮음: ${b.score}`);
+  assert.ok(b.score !== null && b.score < 85, `튀는 장 1장 → 점수 깎임(로컬 21:10 식: 튀는 장 뺀 평균 거리 + 튀는 장 비율): ${b.score}`);
   const outs = b.items.filter((it) => it.outlier);
   assert.deepEqual(outs.map((o) => o.title), ['튀는 글']);
   assert.ok(outs[0].stats.brightness < 60 && b.mean.brightness > 150, '어두운 장 vs 밝은 평균');

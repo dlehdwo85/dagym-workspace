@@ -62,7 +62,7 @@ import { v1447 } from './v1447.step.mjs';
 import { v1448 } from './v1448.step.mjs';
 import { panel1440, listNarrow } from './panel1440.step.mjs';
 import { v283 } from './v283.step.mjs';
-import { v30import, sheetPhone, notifRead, checkScroll } from './v30import.step.mjs';
+import { v30import, sheetPhone, notifRead, checkScroll, roleBadge } from './v30import.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -2319,6 +2319,7 @@ await step('설정·Google 연동·관리자 화면', async () => {
 await step('V30 ① 엑셀·CSV 업무 가져오기(PC 표·담당자 고르기·만들기·되돌리기, 휴대폰 카드)', () => v30import({ owner, BASE, SHOTS }));
 await step('실기기 83: 휴대폰 문자·메일 시안 시트 스크롤·버튼 줄이 댓글 입력줄에 안 가림', () => sheetPhone({ owner, BASE, SHOTS }));
 await step('V32 0 알림 읽음: 안 읽은 것만·누르면 바로 읽음·업무를 열면 자동 읽음·전체 탭', () => notifRead({ owner, BASE, SHOTS, ctx }));
+await step('#101 권한 배지: 사용자 관리 CEO → 회사 설정 한글 → 끄기 → 영어', () => roleBadge({ owner, BASE, SHOTS }));
 await step('실기기: 휴대폰 업무 상세(#댓글 주소)에서 체크리스트 체크해도 화면이 내려가지 않음·포커스 유지', () => checkScroll({ owner, BASE, SHOTS }));
 await step('점검 ①: 태블릿·좁은 창(768·1024·1100) 업무 목록 이름이 눌리지 않음', () => listNarrow({ owner, BASE, SHOTS }));
 await step('V36 3 관리 화면 권한: 직원이 관리 주소로 들어가면 안내(무슨 메뉴·누구에게 요청), 대표가 그 메뉴만 켜 주면 그 화면만 열림', async () => {

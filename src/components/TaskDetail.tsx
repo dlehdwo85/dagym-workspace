@@ -1,4 +1,5 @@
 'use client';
+import { RoleBadge } from '@/components/RoleBadge';
 import Link from 'next/link';
 import { CarriedBadge } from './carried';
 import { useEffect, useRef, useState } from 'react';
@@ -310,7 +311,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                   {list.map((u) => (
                     <li key={u.id}><button type="button" role="option" aria-selected={false} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
                       onClick={() => { setComment((c) => c.replace(/@[^\s@]*$/, `@${u.name} `)); setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }])); }}>
-                      <Avatar id={u.id} name={u.name} size={20} />{u.name}{u.title && <span className="text-xs text-ink-3">{u.title}</span>}</button></li>
+                      <Avatar id={u.id} name={u.name} size={20} />{u.name}<RoleBadge role={dir.users.find((x) => x.id === u.id)?.role} guest={dir.users.find((x) => x.id === u.id)?.is_demo} />{u.title && <span className="text-xs text-ink-3">{u.title}</span>}</button></li>
                   ))}
                 </ul>
               );
@@ -1168,6 +1169,7 @@ function CommentThread({ c, replies, taskId, meId, mentionable, onChange }: { c:
 function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: string; onChange: () => void; onReply: () => void; small?: boolean }) {
   const [edit, setEdit] = useState<string | null>(null);
   const [pick, setPick] = useState(false);
+  const { dir } = useSession(); // #101 댓글 작성자 권한 배지
   const mine = c.author_id === meId;
   async function react(emoji: string) {
     setPick(false);
@@ -1187,7 +1189,7 @@ function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: stri
       <div className="min-w-0">
         {/* 대표 실기기: 이름이 왼쪽(아바타·직책)과 위(이름)에 두 번 → 위 한 줄만: 색 원 + 직책 + 이름 · 시각 (다른 화면의 "동재 대표 이동재"와 같은 모양) */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-2" data-testid="comment-head">
-          <Avatar id={c.author_id} name={c.author_name} size={small ? 20 : 22} /><b className="text-sm text-ink">{c.author_name}</b><span>· {fmtDateTime(c.created_at)}{c.edited_at && ' (수정됨)'}</span>
+          <Avatar id={c.author_id} name={c.author_name} size={small ? 20 : 22} /><b className="text-sm text-ink">{c.author_name}</b><RoleBadge role={dir.users.find((x) => x.id === c.author_id)?.role} guest={dir.users.find((x) => x.id === c.author_id)?.is_demo} /><span>· {fmtDateTime(c.created_at)}{c.edited_at && ' (수정됨)'}</span>
         </div>
         {edit === null ? <div className="mt-0.5 whitespace-pre-wrap leading-relaxed">{renderMentions(c.body)}</div> : (
           <form onSubmit={save} className="mt-1 flex gap-1.5"><input autoFocus className={cx(inputCls, 'h-8')} value={edit} onChange={(e) => setEdit(e.target.value)} aria-label="댓글 수정" onKeyDown={(e) => { if (e.key === 'Escape') setEdit(null); }} /><Button size="sm">저장</Button></form>

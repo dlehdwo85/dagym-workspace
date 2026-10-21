@@ -269,7 +269,7 @@ export async function directory(u: SessionUser, sql: Sql = db()) {
   const orgUnits = await sql`select id, parent_id, brand_id, type, name, active, sort from org_units
     where id = any(${units ?? []}::uuid[]) order by sort, name`;
   const users = await sql`
-    select u.id, u.name, u.title, u.title_short, u.role, u.email,
+    select u.id, u.name, u.title, u.title_short, u.role, u.email, u.is_demo,
       coalesce(array_agg(m.org_unit_id) filter (where m.org_unit_id is not null), '{}') as org_unit_ids
     from users u left join memberships m on m.user_id = u.id
     where u.status = 'active' and u.tenant = ${tenantOf(u)} and (u.role in ('owner','admin') or u.id = ${u.id} or u.id = any(${sc.mates}::uuid[])

@@ -1,4 +1,5 @@
 'use client';
+import { RoleBadge } from '@/components/RoleBadge';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
@@ -147,7 +148,7 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
         <div className="max-h-60 overflow-y-auto">
           {shown.map((u) => (
             <button key={u.id} type="button" onClick={() => { onChange(u.id); setOpen(false); }} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm hover:bg-slate-50">
-              <Avatar id={u.id} name={u.name} size={22} /><span className="flex-1">{u.name}{u.id === user.id ? ' (나)' : ''}{u.title && <span className="text-xs text-ink-3"> · {u.title}</span>}</span>{u.id === value && <Check className="size-4 text-accent-600" />}
+              <Avatar id={u.id} name={u.name} size={22} /><span className="flex-1">{u.name}{u.id === user.id ? ' (나)' : ''} <RoleBadge role={u.role} guest={u.is_demo} />{u.title && <span className="text-xs text-ink-3"> · {u.title}</span>}</span>{u.id === value && <Check className="size-4 text-accent-600" />}
             </button>
           ))}
         </div>
@@ -180,7 +181,7 @@ export function MultiAssigneePicker({ values, onChange }: { values: string[]; on
           {shown.map((u) => { const on = values.includes(u.id); return (
             <button key={u.id} type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => onChange(on ? values.filter((x) => x !== u.id) : [...values, u.id])} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm hover:bg-slate-50">
               <span className={cx('flex size-4 items-center justify-center rounded border', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300')}>{on && <Check className="size-3" />}</span>
-              <Avatar id={u.id} name={u.name} size={22} /><span className="flex-1">{u.name}{u.id === user.id ? ' (나)' : ''}{u.title && <span className="text-xs text-ink-3"> · {u.title}</span>}</span>
+              <Avatar id={u.id} name={u.name} size={22} /><span className="flex-1">{u.name}{u.id === user.id ? ' (나)' : ''} <RoleBadge role={u.role} guest={u.is_demo} />{u.title && <span className="text-xs text-ink-3"> · {u.title}</span>}</span>
             </button>); })}
         </div>
         {values.length > 0 && <button type="button" onClick={() => onChange([])} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><UserRound className="size-4" />담당자 없음</button>}

@@ -1,4 +1,5 @@
 'use client';
+import { RoleBadge } from '@/components/RoleBadge';
 import { useEffect, useState } from 'react';
 import { SpacesTab } from '@/components/SpacesTab';
 import { api, useApi } from '@/components/client';
@@ -116,7 +117,7 @@ function Users() {
             <tbody className="divide-y">{data!.users.filter((u: any) => (showDemo || !u.is_demo) && (showLeft || u.status !== 'left')).map((u) => (
               <tr key={u.id} className={cx(u.status !== 'active' && u.status !== 'invited' && 'text-slate-400')}>
                 <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}{u.title_short ? ` (${u.title_short})` : ''}</div></td>
-                <td className="p-2">{ROLE_LABEL[u.role as Role]}</td>
+                <td className="p-2"><span className="flex items-center gap-1.5"><RoleBadge role={u.role} guest={u.is_demo} size="sm" /><span className="text-xs text-ink-2">{ROLE_LABEL[u.role as Role]}</span></span></td>
                 <td className="p-2 text-xs">{(u.teams ?? []).length ? (u.teams as any[]).map((t, i) => <span key={t.id} className="mr-1.5 inline-flex items-center gap-0.5"><TeamPath path={t.path} />{t.primary && (u.teams as any[]).length > 1 && <span className="rounded bg-brand-50 px-1 text-[10px] text-brand-700">주</span>}{t.lead && <span className="text-[10px] text-amber-700">장</span>}{i < (u.teams as any[]).length - 1 ? '' : ''}</span>) : <span className="text-ink-3">{u.org_unit_ids.map(unitName).join(', ') || '-'}</span>}</td>
                 <td className="p-2" data-testid="user-status">{u.status === 'left' && u.left_at ? `퇴사(${u.left_at.slice(5).replace('-', '/')})` : STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}{u.status === 'left' && u.rejoin_until && u.rejoin_until >= todayK && <div className="text-xs text-slate-400">복직 가능 ~{u.rejoin_until.slice(5).replace('-', '/')}</div>}</td>
                 <td className="p-2 text-xs">{u.last_login_at ? fmtDateTime(u.last_login_at) : '-'}</td>

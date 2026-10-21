@@ -134,3 +134,27 @@ export async function checkScroll({ owner, BASE, SHOTS }) {
   await owner.evaluate(async (id) => { await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); }, t.id);
   await owner.setViewportSize({ width: 1366, height: 900 });
 }
+
+/** 대표 10/20 15:05 (#101) 권한 배지: 사용자 관리 대표 줄 CEO · 회사 정보·디자인에서 한글로 → 새로 고침 뒤 '대표' · 끄기 → 배지 없음 · 영어로 복구 */
+export async function roleBadge({ owner, BASE, SHOTS }) {
+  await owner.setViewportSize({ width: 1366, height: 900 });
+  await owner.goto(`${BASE}/admin/users`);
+  const ceoRow = owner.getByTestId('users').locator('tr', { hasText: 'ceo@dagym.test' });
+  await ceoRow.getByTestId('role-badge').filter({ hasText: 'CEO' }).waitFor();
+  assert.equal(await ceoRow.getByTestId('role-badge').getAttribute('data-role'), 'owner');
+  await owner.screenshot({ path: `${SHOTS}/184-role-badge.png` });
+  await owner.goto(`${BASE}/admin/company`);
+  await owner.getByTestId('role-badge-ko').click(); // 통제 라디오: 저장 뒤 다시 읽어 바뀜 → check() 대신 click()
+  await owner.getByText('권한 배지 표시를 바꿨습니다', { exact: false }).waitFor();
+  await owner.goto(`${BASE}/admin/users`);
+  await owner.getByTestId('users').locator('tr', { hasText: 'ceo@dagym.test' }).getByTestId('role-badge').filter({ hasText: '대표' }).waitFor();
+  await owner.goto(`${BASE}/admin/company`);
+  await owner.getByTestId('role-badge-off').click();
+  await owner.getByText('권한 배지 표시를 바꿨습니다', { exact: false }).waitFor();
+  await owner.goto(`${BASE}/admin/users`);
+  await owner.getByTestId('users').locator('tr', { hasText: 'ceo@dagym.test' }).waitFor();
+  assert.equal(await owner.getByTestId('users').getByTestId('role-badge').count(), 0, '끄면 배지 없음');
+  await owner.goto(`${BASE}/admin/company`);
+  await owner.getByTestId('role-badge-en').click();
+  await owner.getByText('권한 배지 표시를 바꿨습니다', { exact: false }).waitFor();
+}
