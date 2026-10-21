@@ -10,6 +10,9 @@
   --canvas: #f7f8fa; --surface: #ffffff; --line: #e5e7eb;
   --ink: #111827; --ink-2: #4b5563; --ink-3: #6b7280; /* 흰 바탕 대비 4.8:1 (WCAG AA) */
 }
+/* ⑤ PWA 제목줄(Window Controls Overlay)이 보일 때: 본문·고정 머리줄을 그 높이만큼 내림 */
+:root[data-wco] body { padding-top: var(--wco-h, 0px); }
+:root[data-wco] .sticky.top-0 { top: var(--wco-h, 0px); }
 html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 body { background: var(--canvas); color: var(--ink); font-feature-settings: 'ss06'; letter-spacing: -0.005em; }
 .tabular, time, .num { font-variant-numeric: tabular-nums; }

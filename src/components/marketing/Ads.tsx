@@ -69,14 +69,24 @@ const connectMsg = (sp: URLSearchParams) => (sp.get('published') ? `인스타그
 
 type Sum = { impressions: number; clicks: number; cost: number; conversions: number };
 type Analysis = { month: string; summary: string; good: string[]; bad: string[]; proposals: { title: string; detail: string; expected: string }[]; source: 'ai' | 'template'; generatedAt: string; cardId?: string | null };
-type MonthData = Data & { month: string; prevMonth: string; prev: Sum; byProvider: (Sum & { provider: string })[]; byBrand: (Sum & { brand: string })[]; months: string[]; analysis: Analysis | null };
+type MonthData = Data & { from: string; to: string; month: string | null; prevMonth: string; prev: Sum | null; prevFrom?: string | null; prevTo?: string | null; byProvider: (Sum & { provider: string })[]; byBrand: (Sum & { brand: string })[]; months: string[]; analysis: Analysis | null;
+  brands: { id: string; name: string }[]; filter: { brand: string; provider: string }; campaignDaily: { campaign_id: string; campaign_name: string; provider: string; day: string; cost: number; clicks: number; impressions: number }[] };
+/** 대표 10/20 14:10 ③: 캠페인 표 CSV(엑셀용 BOM) */
+function toCsv(rows: Camp[], label: string) {
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const head = ['매체', '계정', '브랜드', '캠페인', '노출', '클릭', 'CTR%', '광고비', 'CPC', '전환'];
+  const body = rows.map((c) => [c.provider, c.label, (c as any).brand ?? '', c.campaign_name || c.campaign_id, Math.round(c.impressions), Math.round(c.clicks), c.impressions ? ((c.clicks / c.impressions) * 100).toFixed(2) : '', Math.round(c.cost), c.clicks ? Math.round(c.cost / c.clicks) : '', Math.round(c.conversions)].map(esc).join(','));
+  const blob = new Blob([`\ufeff${[head.map(esc).join(','), ...body].join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `광고성과_${label}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const WD = ['일', '월', '화', '수', '목', '금', '토'];
 const thisMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7);
 const monthLabel = (m: string) => `${m.slice(0, 4)}년 ${Number(m.slice(5, 7))}월`;
 /** 전월 대비 — 비용·클릭은 ±%, 0 이면 '신규'/'—' */
-function Delta({ now, prev, invert }: { now: number; prev: number; invert?: boolean }) {
-  if (!prev) return <span className="text-ink-3">{now ? '전월 0' : '—'}</span>;
+function Delta({ now, prev, invert, label = '전월' }: { now: number; prev: number; invert?: boolean; label?: string }) {
+  if (!prev) return <span className="text-ink-3">{now ? `${label} 0` : '—'}</span>;
   const r = Math.round(((now - prev) / prev) * 100); const up = r > 0; const good = invert ? !up : up;
-  return <span className={cx('tabular-nums', r === 0 ? 'text-ink-3' : good ? 'text-emerald-700' : 'text-red-700')} data-testid="ads-delta">{r > 0 ? '+' : ''}{r}% <span className="text-ink-3">전월 대비</span></span>;
+  return <span className={cx('tabular-nums', r === 0 ? 'text-ink-3' : good ? 'text-emerald-700' : 'text-red-700')} data-testid="ads-delta">{r > 0 ? '+' : ''}{r}% <span className="text-ink-3">{label} 대비</span></span>;
 }
 function SumTable({ rows, head, testid, label }: { rows: Sum[]; head: string; testid: string; label: (r: any) => string }) {
   return (
@@ -124,24 +134,29 @@ export function Ads() {
   const sp = useSearchParams();
   const [month, setMonth] = useState<string | null>(() => (sp.get('days') ? null : (/^\d{4}-\d{2}$/.test(sp.get('month') ?? '') ? sp.get('month')! : thisMonth())));
   const [days, setDays] = useState(Number(sp.get('days')) || 7);
-  const query = month ? `month=${month}` : `days=${days}`;
+  const [brand, setBrand] = useState(sp.get('brand') ?? ''); const [provider, setProvider] = useState(sp.get('provider') ?? '');
+  const query = `${month ? `month=${month}` : `days=${days}`}${brand ? `&brand=${brand}` : ''}${provider ? `&provider=${provider}` : ''}`;
   const { data, error, reload, setData } = useApi<MonthData>(`/api/marketing/ads?${query}`, [query]);
   const msg = connectMsg(sp);
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={5} />;
-  const t = data.totals; const p = data.month ? data.prev : null;
+  const t = data.totals; const p = data.prev; const dl = data.month ? '전월' : `이전 ${data.days}일`;
   const cards: [string, string, React.ReactNode][] = [
-    ['노출', n0(t.impressions), p && <Delta now={t.impressions} prev={p.impressions} />],
-    ['클릭', `${n0(t.clicks)} · ${pct(t.clicks, t.impressions)}`, p && <Delta now={t.clicks} prev={p.clicks} />],
-    ['광고비', won(t.cost), p && <Delta now={t.cost} prev={p.cost} invert />],
-    ['전환', `${n0(t.conversions)}${t.conversions ? ` · ${won(t.cost / t.conversions)}/건` : ''}`, p && <Delta now={t.conversions} prev={p.conversions} />]];
+    ['노출', n0(t.impressions), p && <Delta now={t.impressions} prev={p.impressions} label={dl} />],
+    ['클릭', `${n0(t.clicks)} · ${pct(t.clicks, t.impressions)}`, p && <Delta now={t.clicks} prev={p.clicks} label={dl} />],
+    ['광고비', won(t.cost), p && <Delta now={t.cost} prev={p.cost} invert label={dl} />],
+    ['전환', `${n0(t.conversions)}${t.conversions ? ` · ${won(t.cost / t.conversions)}/건` : ''}`, p && <Delta now={t.conversions} prev={p.conversions} label={dl} />]];
+  // 캠페인 추이: 상위 5개 캠페인 × 날짜(비용) — 작은 막대
+  const trend = (() => { const m = new Map<string, { name: string; provider: string; days: { day: string; cost: number; clicks: number }[] }>(); for (const r of data.campaignDaily ?? []) { const k = r.campaign_id; if (!m.has(k)) m.set(k, { name: r.campaign_name || r.campaign_id, provider: r.provider, days: [] }); m.get(k)!.days.push({ day: r.day, cost: r.cost, clicks: r.clicks }); } return [...m.values()]; })();
+  const trendMax = Math.max(1, ...trend.flatMap((c) => c.days.map((d) => d.cost)));
+  const step = Math.max(1, Math.ceil(data.daily.length / 8));
   const max = Math.max(1, ...data.daily.map((d) => d.cost));
   const months = data.months ?? [thisMonth()];
   return (
     <div className="space-y-4" data-testid="mkt-ads">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold" style={{ color: C }}>광고 성과</h1>
-        <span className="text-xs text-ink-2">{data.month ? `${monthLabel(data.month)} · 전월(${monthLabel(data.prevMonth)}) 대비` : `최근 ${data.days}일`}</span>
+        <span className="text-xs text-ink-2">{data.month ? `${monthLabel(data.month)} · 전월(${monthLabel(data.prevMonth)}) 대비` : `최근 ${data.days}일${data.prevFrom ? ` · 이전 기간(${data.prevFrom.slice(5)}~${(data.prevTo ?? '').slice(5)}) 대비` : ''}`}</span>
         <span className="ml-auto flex flex-wrap items-center gap-1">
           <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={month ?? ''} onChange={(e) => setMonth(e.target.value || null)} aria-label="월 선택" data-testid="ads-month">
             {!month && <option value="">기간 보기</option>}{months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</select>
@@ -149,17 +164,29 @@ export function Ads() {
         </span>
       </div>
       {msg && <p className={cx('rounded-input px-3 py-2 text-sm', sp.get('error') ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800')} role="status">{msg}</p>}
+      {/* 대표 10/20 14:10 ③: 브랜드 필터 · 네이버/구글/메타 분리 · CSV */}
+      <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="ads-filters">
+        <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={brand} onChange={(e) => setBrand(e.target.value)} aria-label="브랜드" data-testid="ads-brand"><option value="">브랜드 전체</option>{(data.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}<option value="none">(브랜드 없음)</option></select>
+        {[{ key: '', label: '매체 전체' }, ...data.providers.map((x) => ({ key: x.key, label: x.label }))].map((x) => <button key={x.key || 'all'} type="button" onClick={() => setProvider(x.key)} className={cx('rounded-full border px-2.5 py-1', provider === x.key ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white')} data-testid={`ads-provider-${x.key || 'all'}`}>{x.key && <span className="mr-1 inline-block size-2 rounded-full" style={{ background: P_COLOR[x.key] }} />}{x.label}</button>)}
+        <Button size="sm" variant="secondary" className="ml-auto" onClick={() => toCsv(data.campaigns, data.month ?? `${data.from}_${data.to}`)} disabled={!data.campaigns.length} data-testid="ads-csv">CSV 내려받기</Button>
+      </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, v, d]) => <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ads-card"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div>{d && <div className="mt-0.5 text-[11px]">{d}</div>}</div>)}</div>
       {data.month && <MonthAnalysis month={data.month} analysis={data.analysis} canEdit={data.canEdit} onChange={(a) => setData({ ...data, analysis: a })} />}
-      {data.month && (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <SumTable rows={data.byProvider} head="매체" testid="ads-by-provider" label={(r) => <><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[r.provider] }} />{data.providers.find((x) => x.key === r.provider)?.label ?? r.provider}</> as unknown as string} />
-          <SumTable rows={data.byBrand} head="브랜드" testid="ads-by-brand" label={(r) => r.brand} />
-        </div>)}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <SumTable rows={data.byProvider ?? []} head="매체" testid="ads-by-provider" label={(r) => <><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[r.provider] }} />{data.providers.find((x) => x.key === r.provider)?.label ?? r.provider}</> as unknown as string} />
+        {data.month && <SumTable rows={data.byBrand} head="브랜드" testid="ads-by-brand" label={(r) => r.brand} />}
+      </div>
       {!!data.daily.length && (
         <section className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">날짜별 광고비</h2>
           <div className="flex h-24 items-end gap-1">{data.daily.map((d) => <div key={d.day} className="flex-1 rounded-t" style={{ height: `${Math.max(3, (d.cost / max) * 100)}%`, background: C, opacity: 0.75 }} title={`${d.day} · ${won(d.cost)} · 클릭 ${n0(d.clicks)} · 전환 ${n0(d.conversions)}`} />)}</div>
-          <div className="mt-1 flex justify-between text-[10px] text-ink-3"><span>{data.daily[0].day}</span><span>{data.daily[data.daily.length - 1].day}</span></div></section>
+          {/* ③ 날짜 라벨: 8개 안팎으로 간격을 두고 MM-DD(요일) */}
+          <div className="mt-1 flex gap-1 text-[10px] text-ink-3" data-testid="ads-daily-labels">{data.daily.map((d, i) => <span key={d.day} className="flex-1 truncate text-center">{i % step === 0 || i === data.daily.length - 1 ? `${d.day.slice(5)}(${WD[new Date(`${d.day}T12:00:00+09:00`).getUTCDay()]})` : ''}</span>)}</div></section>
+      )}
+      {trend.length > 0 && (
+        <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ads-trend"><h2 className="mb-2 text-sm font-semibold">캠페인 추이 <span className="text-xs font-normal text-ink-3">광고비 상위 {trend.length}개 · 날짜별 광고비</span></h2>
+          <div className="space-y-2">{trend.map((c) => <div key={c.name} className="flex items-center gap-2 text-xs" data-testid="ads-trend-row"><span className="w-40 shrink-0 truncate" title={c.name}><span className="mr-1 inline-block size-2 rounded-full" style={{ background: P_COLOR[c.provider] }} />{c.name}</span>
+            <div className="flex h-8 flex-1 items-end gap-px">{c.days.map((d) => <div key={d.day} className="flex-1 rounded-t" style={{ height: `${Math.max(4, (d.cost / trendMax) * 100)}%`, background: P_COLOR[c.provider] ?? C, opacity: 0.8 }} title={`${d.day} · ${won(d.cost)} · 클릭 ${n0(d.clicks)}`} />)}</div>
+            <span className="w-24 shrink-0 text-right tabular-nums text-ink-2">{won(c.days.reduce((s, d) => s + d.cost, 0))}</span></div>)}</div></section>
       )}
       <section className="overflow-x-auto rounded-card border border-line bg-white shadow-card">
         <table className="w-full min-w-[640px] text-sm" data-testid="ads-table"><thead className="bg-slate-50 text-xs text-ink-2"><tr><th className="p-2 text-left">캠페인</th><th className="p-2 text-right">노출</th><th className="p-2 text-right">클릭(CTR)</th><th className="p-2 text-right">광고비</th><th className="p-2 text-right">CPC</th><th className="p-2 text-right">전환</th></tr></thead>

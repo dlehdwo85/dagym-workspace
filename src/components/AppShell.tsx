@@ -1,4 +1,5 @@
 'use client';
+import { TitleBar } from '@/components/TitleBar';
 import { IN_APP_BILLING_NOTE, useInApp } from './inApp';
 import { ADMIN_PAGES } from '@/lib/adminPages';
 import Link from 'next/link';
@@ -18,7 +19,7 @@ import {
   MessageCircle, Mail,
   TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon, Phone, ClipboardCheck, Link2,
   History, Rocket, Ellipsis, Target, Briefcase,
-MapPin, Contact, } from 'lucide-react';
+MapPin, Contact, Globe, } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
@@ -119,7 +120,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
   const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드·거래처', icon: Users }, { href: '/s/sales/pipeline', label: '파이프라인', icon: Workflow }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, ...(session.features.salesBids !== false ? [{ href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }, ...(session.features.salesBids ? [{ href: '/s/sales/contracts', label: '계약만료·재입찰', icon: Stamp }] : [])] : []), { href: '/s/sales/hub', label: '영업기회 허브', icon: Building2 }, { href: '/s/sales/prospects', label: '공공데이터', icon: Search }, { href: '/s/sales/regions', label: '지역별', icon: Network }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '홈', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
     { href: '/s/marketing/goals', label: '월 운영 목표', icon: Target, group: '운영' }, { href: '/s/marketing/ops', label: '운영실', icon: Briefcase, group: '운영' }, { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' },
-    { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 운영', icon: Rocket, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []), { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' },
+    { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/sites', label: '사이트별 집계', icon: Globe, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 운영', icon: Rocket, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []), { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' },
     { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '설정' }, ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '운영실 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
 
   const commonNav: NavItem[] = [{ href: '/tasks', label: '업무', icon: CircleCheck }, { href: '/calendar', label: '캘린더', icon: CalendarDays }, { href: '/messages', label: '메시지', icon: MessageCircle },
@@ -339,6 +340,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
         {/* 대표 16:30 핫픽스: 휴대폰 대화방(?room=)이 열려 있으면(html[data-chat-room]) 하단 탭·아래 여백을 없애 키보드가 열려도 입력창이 보이게 */}
         <div className="min-w-0 flex-1 pb-[calc(6rem+var(--sab))] sm:pb-0 [[data-chat-room]_&]:pb-0">
+          <TitleBar title={sm.label} />
           {/* 상단 바 (데스크톱) */}
           <header className="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b border-line bg-white/90 px-5 backdrop-blur sm:flex">
             <button onClick={() => setPalette(true)} data-testid="open-palette"

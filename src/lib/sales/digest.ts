@@ -93,15 +93,21 @@ export async function sendDigest(tenant: string, opt: { force?: boolean; day?: s
   const [co] = await sql<{ name: string }[]>`select name from tenants where id = ${tenant}`;
   const to = p.digest_to.length ? await sql<{ id: string; email: string }[]>`select id, email from users where id = any(${p.digest_to}::uuid[]) and tenant = ${tenant} and status = 'active'`
     : await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${tenant} and status = 'active' and not is_demo and role in ('owner', 'admin')`;
-  let mailed = 0, notified = 0; let mailError: string | null = null;
+  let mailed = 0, notified = 0; let mailError: string | null = null; let mailVia: string | null = null;
   if (d.items.length) {
     const text = digestText(co?.name ?? '', d);
-    if (p.digest_mail) for (const u of to) { try { await sendMail(u.email, `[워크인 영업실] ${day} 당일 입찰 ${d.counts.total}건 — 새 공고 ${d.counts.new}`, text); mailed++; } catch (e) { mailError ??= e instanceof Error ? e.message : String(e); /* 메일 미설정·실패면 알림만 — 사유는 기록 */ } }
+    // 로컬 10/21 11:30: 회사 메일 경로(SMTP outbox → 워크인 발송)가 있으면 그쪽을 기본으로(한 통에 받는 사람 모두), 없으면 Resend(sendMail)
+    if (p.digest_mail && to.length) {
+      const subject = `[워크인 영업실] ${day} 당일 입찰 ${d.counts.total}건 — 새 공고 ${d.counts.new}`;
+      const q = await (await import('../mailbox')).queueSystemMail(tenant, { to: to.map((u) => u.email), subject, text, createdBy: opt.actorId ?? to[0].id, fromName: `${co?.name ?? '워크인'} 영업실` }).catch((e) => { mailError ??= e instanceof Error ? e.message : String(e); return null; });
+      if (q) { mailed = to.length; mailVia = q.channel; }
+      else for (const u of to) { try { mailVia = await sendMail(u.email, subject, text); mailed++; } catch (e) { mailError ??= e instanceof Error ? e.message : String(e); /* 메일 경로 없음·실패면 알림만 — 사유는 기록 */ } }
+    }
     notified = (await notify(sql, { userIds: to.map((u) => u.id), type: 'briefing', title: `오늘 새 공고 ${d.counts.total}건 — ${d.items[0].title.slice(0, 40)}${d.items.length > 1 ? ' 외' : ''}`, body: d.items.slice(0, 3).map((i) => `${i.kind === 'cancel' ? '[취소] ' : i.kind === 'amend' ? '[정정] ' : ''}${i.title}${i.dday != null ? ` (D-${i.dday})` : ''}`).join('\n'), link: '/s/sales/bids?tab=today', push: true, dedupeKey: `salesdigest:${tenant}:${day}${opt.force ? `:${Date.now()}` : ''}` }).catch(() => [])).length;
   }
-  await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified) values (${tenant}, ${day}, ${sql.json(d.items as never)}, ${sql.json({ ...d.counts, mailError, mailTo: to.length } as never)}, ${mailed}, ${notified}) on conflict (tenant, day) do update set items = excluded.items, counts = excluded.counts, mailed = excluded.mailed, notified = excluded.notified, created_at = now()`;
+  await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified) values (${tenant}, ${day}, ${sql.json(d.items as never)}, ${sql.json({ ...d.counts, mailError, mailVia, mailTo: to.length } as never)}, ${mailed}, ${notified}) on conflict (tenant, day) do update set items = excluded.items, counts = excluded.counts, mailed = excluded.mailed, notified = excluded.notified, created_at = now()`;
   if (opt.actorId) await audit(sql, opt.actorId, 'sales_digest.send', 'tenant', null, { day, total: d.counts.total, mailed, notified }).catch(() => {});
-  return { sent: true, day, counts: { ...d.counts, mailError, mailTo: to.length }, mailed, notified, mailError, items: d.items.slice(0, 50) };
+  return { sent: true, day, counts: { ...d.counts, mailError, mailVia, mailTo: to.length }, mailed, notified, mailError, mailVia, items: d.items.slice(0, 50) };
 }
 /** tick: 영업 공간 켠 회사마다 설정 시각 이후 하루 1번 */
 export async function salesDigestTick() {
