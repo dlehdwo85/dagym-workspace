@@ -134,7 +134,8 @@ export async function homeView(u: SessionUser) {
   if (topic.n) suggestions.push({ key: 'topic', title: `자동 제작 주제 필요 ${topic.n}건`, detail: '재료가 없어 시안을 만들지 못했습니다 — 주제를 적어 주세요', href: '/s/marketing/automation' });
   const { aiSettings } = await import('./ai/threads');
   const nightScope = (await aiSettings(t)).night_scope ?? {};
-  return { canEdit: admin, cards: await cardsOf(u), kpi, goal, approve, approvalHour: now.approvalHour, queue, night, nightScope, week, perf, ads, recent, suggestions: suggestions.slice(0, 5), channels, cardLabels: HOME_CARD_LABEL };
+  const production = await (await import('./mktAuto')).productionLeft(t).catch(() => null); // #103 이번 달 남은 제작
+  return { production, canEdit: admin, cards: await cardsOf(u), kpi, goal, approve, approvalHour: now.approvalHour, queue, night, nightScope, week, perf, ads, recent, suggestions: suggestions.slice(0, 5), channels, cardLabels: HOME_CARD_LABEL };
 }
 
 export const homeAction = z.discriminatedUnion('action', [

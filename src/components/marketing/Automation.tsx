@@ -18,7 +18,8 @@ const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const BUNDLE_TIMES: Record<string, string> = { feed: '10:00', shorts: '11:00', reels: '12:00', blog: '13:00', story: '18:00' };
 const BUNDLE_KINDS = ['feed', 'shorts', 'reels', 'blog', 'story'];
 const REQ: Record<string, string> = { image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성', topic: '주제 필요' };
-type View = { settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null; aiMonthlyUsd: number | null };
+type Production = { planCode: string | null; planLabel: string | null; monthlyCredits: number | null; usedCredits: number; leftCredits: number | null; images: number | null; videos: number | null; videosLeft: number | null; regensLeft: number | null; weekly: { kind: string; label: string; limit: number; used: number }[]; over: boolean; shortfall: number; extraCreditKrw: number | null; overMessage: string | null };
+type View = { production?: Production | null; settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null; aiMonthlyUsd: number | null };
   usage: { weekCredits: number; monthCredits: number; monthVideos: number; monthRegens: number; ai: { usd: number; requests: number }; companyAiUsd: number; companyAiLimitUsd: number }; plans: Record<string, { label: string; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; price: number | null }>;
   rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; intro: string | null; products: string | null; weekly_topic: string | null; banned_words: string[]; test_mode: boolean; ad_priority?: number | null; ad_share?: number | null; ad_note?: string | null }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean };
 const lim = (used: number, max: number | null) => (max === null ? `${used} (한도 없음)` : `${used} / ${max}`);
@@ -74,12 +75,21 @@ export function Automation() {
         ['이번 달 마케팅 AI($)', lim(data.usage.ai.usd, data.limits.aiMonthlyUsd)]] as [string, string][]).map(([l, v]) => (
         <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="auto-usage"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div></div>))}</section>
 
+      {/* 대표 10/20 15:40 (#103): 이번 달 남은 제작 n건 + 초과 안내 */}
+      {data.production && (
+        <section className={cx('rounded-card border p-3 shadow-card', data.production.over ? 'border-red-200 bg-red-50/40' : 'border-violet-200 bg-violet-50/30')} data-testid="auto-production">
+          <div className="flex flex-wrap items-center gap-2 text-sm"><b>이번 달 남은 제작</b>
+            {data.production.leftCredits === null ? <span className="text-ink-2">요금제를 고르면 남은 제작 수가 보입니다</span> : <span className="tabular-nums" data-testid="auto-production-left">크레딧 {data.production.leftCredits} / {data.production.monthlyCredits} → 이미지 <b>{data.production.images}장</b> 또는 영상 <b>{data.production.videos}편</b>{data.production.videosLeft !== null && ` · 생성 영상 ${data.production.videosLeft}편`}{data.production.regensLeft !== null && ` · 재생성 ${data.production.regensLeft}회`}</span>}
+            {data.production.planLabel && <span className="ml-auto text-xs text-ink-3">{data.production.planLabel}</span>}</div>
+          {data.production.weekly.length > 0 && <div className="mt-1 flex flex-wrap gap-1.5 text-xs" data-testid="auto-production-weekly">{data.production.weekly.map((w) => <span key={w.kind} className={cx('rounded-full border px-2 py-0.5', w.used >= w.limit ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-line bg-white')}>이번 주 {w.label} {w.used}/{w.limit}</span>)}</div>}
+          {data.production.overMessage && <p className="mt-1 text-xs text-red-800" data-testid="auto-production-over">{data.production.overMessage}</p>}
+        </section>)}
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
         <h2 className="text-sm font-semibold">{inApp ? '한도' : '요금제·한도'}</h2>
         {inApp ? <p className="mt-1 text-xs text-ink-2" data-testid="in-app-billing-note">{IN_APP_BILLING_NOTE}</p> : <div className="mt-2 grid gap-2 sm:grid-cols-3">{Object.entries(data.plans).map(([k, p]) => (
           <button key={k} type="button" disabled={!ed} onClick={() => save({ planCode: s.plan_code === k ? null : k })} data-testid={`auto-plan-${k}`}
             className={cx('rounded-input border p-3 text-left text-xs', s.plan_code === k ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
-            <div className="text-sm font-semibold">{p.label} <span className="font-normal text-ink-3">· 가격 {p.price ?? '결정 전'}</span></div>
+            <div className="text-sm font-semibold">{p.label} <span className="font-normal text-ink-3">· 가격 {p.price ? `${Number(p.price).toLocaleString('ko-KR')}원/월` : '결정 전'}</span></div>
             <div className="mt-1 text-ink-2">주간 {Object.entries(p.weekly).map(([kk, n]) => `${KIND[kk]} ${n}`).join(' · ')}</div>
             <div className="text-ink-2">월 크레딧 {p.monthlyCredits} · 생성 영상 {p.videoMonthly}편 · 재생성 {p.regenMonthly}회</div>
           </button>))}</div>}

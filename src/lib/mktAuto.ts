@@ -37,7 +37,22 @@ const kst = (date: string, hhmm: string) => new Date(`${date}T${hhmm.length === 
 const hourKst = (d: Date) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false }).format(d)) % 24;
 const pad = (n: number) => String(n).padStart(2, '0');
 
-export type MktSettings = { plan_code: keyof typeof MKT_PLANS | null; monthly_credits: number | null; weekly_credits: number | null; video_monthly: number | null; regen_monthly: number | null;
+/** 대표 10/20 15:40 (#103): 요금제 표는 DB(mkt_plan_limits, 플랫폼 운영에서 편집) — 없으면 코드 기본값 */
+export type PlanRow = { code: string; label: string; price: number | null; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; aiMonthlyUsd: number | null; extraCreditKrw: number | null };
+export async function planTable(): Promise<Record<string, PlanRow>> {
+  const rows = await db()<any[]>`select code, label, price_krw, monthly_credits::float8 monthly_credits, weekly, video_monthly, regen_monthly, ai_monthly_usd::float8 ai_monthly_usd, extra_credit_krw from mkt_plan_limits`.catch(() => [] as any[]);
+  const out: Record<string, PlanRow> = {};
+  for (const [k, p] of Object.entries(MKT_PLANS)) { const r = rows.find((x) => x.code === k);
+    out[k] = r ? { code: k, label: r.label, price: r.price_krw ?? null, weekly: r.weekly ?? {}, monthlyCredits: Number(r.monthly_credits), videoMonthly: r.video_monthly, regenMonthly: r.regen_monthly, aiMonthlyUsd: r.ai_monthly_usd ?? null, extraCreditKrw: r.extra_credit_krw ?? null }
+      : { code: k, label: p.label, price: p.price, weekly: { ...p.weekly }, monthlyCredits: p.monthlyCredits, videoMonthly: p.videoMonthly, regenMonthly: p.regenMonthly, aiMonthlyUsd: p.aiMonthlyUsd, extraCreditKrw: null }; }
+  return out;
+}
+export type CreditCost = { imageCredits: number; videoCredits: number; krwPerCreditMin: number; krwPerCreditMax: number };
+export async function creditCost(): Promise<CreditCost> {
+  const [r] = await db()<{ value: Partial<CreditCost> }[]>`select value from app_settings where key = 'mkt_credit_cost'`.catch(() => [] as any[]);
+  return { imageCredits: 6.5, videoCredits: 80, krwPerCreditMin: 43, krwPerCreditMax: 70, ...(r?.value ?? {}) };
+}
+export type MktSettings = { plan?: PlanRow | null; plan_code: keyof typeof MKT_PLANS | null; monthly_credits: number | null; weekly_credits: number | null; video_monthly: number | null; regen_monthly: number | null;
   approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null; ai_monthly_usd: number | null; auto_publish: boolean };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
   remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false };
@@ -45,13 +60,28 @@ export async function settingsOf(tenant: string): Promise<MktSettings> {
   const [s] = await db()<any[]>`select * from mkt_settings where tenant = ${tenant}`;
   if (!s) return { ...DEFAULTS };
   const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
-  return { ...DEFAULTS, ...s, monthly_credits: num(s.monthly_credits), weekly_credits: num(s.weekly_credits), ai_monthly_usd: num(s.ai_monthly_usd) };
+  const plan = s.plan_code ? (await planTable())[s.plan_code] ?? null : null; // #103: 요금제 숫자는 DB 표에서
+  return { ...DEFAULTS, ...s, plan, monthly_credits: num(s.monthly_credits), weekly_credits: num(s.weekly_credits), ai_monthly_usd: num(s.ai_monthly_usd) };
 }
 export function limitsOf(s: MktSettings) {
-  const p = s.plan_code ? MKT_PLANS[s.plan_code] : null;
+  const p = s.plan ?? (s.plan_code ? MKT_PLANS[s.plan_code] : null);
   const monthly = s.monthly_credits ?? p?.monthlyCredits ?? null;
   return { monthlyCredits: monthly, weeklyCredits: s.weekly_credits ?? (monthly === null ? null : Math.round((monthly / 4.3) * 10) / 10),
     videoMonthly: s.video_monthly ?? p?.videoMonthly ?? null, regenMonthly: s.regen_monthly ?? p?.regenMonthly ?? null, aiMonthlyUsd: s.ai_monthly_usd ?? p?.aiMonthlyUsd ?? null };
+}
+/** #103 회사 화면 '이번 달 남은 제작 n건' — 남은 크레딧을 이미지·영상 장수로 환산, 주간 종류별 한도 대비 이번 주 제작 수, 초과 안내(초과 크레딧 금액) */
+export async function productionLeft(tenant: string) {
+  const s = await settingsOf(tenant); const lim = limitsOf(s); const use = await usageOf(tenant); const cost = await creditCost();
+  const plan = s.plan ?? null;
+  const left = lim.monthlyCredits === null ? null : Math.max(0, Math.round((lim.monthlyCredits - use.monthCredits) * 10) / 10);
+  const over = lim.monthlyCredits !== null && use.monthCredits >= lim.monthlyCredits;
+  const today = ymd(new Date()); const dow = new Date(`${today}T12:00:00+09:00`).getUTCDay(); const weekStart = kst(ymd(new Date(Date.now() - ((dow + 6) % 7) * DAY)), '00:00'); const weekEnd = new Date(weekStart.getTime() + 7 * DAY);
+  const wk = await db()<{ kind: string; n: number }[]>`select coalesce(kind, 'feed') as kind, count(*)::int n from mkt_contents where tenant = ${tenant} and not is_test and status <> 'canceled' and scheduled_at >= ${weekStart} and scheduled_at < ${weekEnd} group by 1`;
+  const weekly = Object.entries(plan?.weekly ?? {}).map(([kind, limit]) => ({ kind, label: (KIND_LABEL as Record<string, string>)[kind] ?? kind, limit: Number(limit), used: wk.find((w) => w.kind === kind)?.n ?? 0 }));
+  const extra = plan?.extraCreditKrw ?? null; const shortfall = lim.monthlyCredits === null ? 0 : Math.max(0, Math.round((use.monthCredits - lim.monthlyCredits) * 10) / 10);
+  return { planCode: s.plan_code, planLabel: plan?.label ?? null, monthlyCredits: lim.monthlyCredits, usedCredits: use.monthCredits, leftCredits: left, images: left === null ? null : Math.floor(left / cost.imageCredits), videos: left === null ? null : Math.floor(left / cost.videoCredits),
+    videosLeft: lim.videoMonthly === null ? null : Math.max(0, lim.videoMonthly - use.monthVideos), regensLeft: lim.regenMonthly === null ? null : Math.max(0, lim.regenMonthly - use.monthRegens), weekly, over, shortfall, extraCreditKrw: extra,
+    overMessage: over ? `이번 달 제작 크레딧 ${lim.monthlyCredits}을 모두 썼습니다${shortfall ? ` (초과 ${shortfall})` : ''}. ${extra ? `초과분은 1크레딧당 ${extra.toLocaleString('ko-KR')}원으로 추가 구매(${shortfall ? `${Math.ceil(shortfall * extra).toLocaleString('ko-KR')}원` : '필요 시'})` : '초과 크레딧 금액은 결정 전'} — 또는 요금제를 올려 주세요.` : null, cost };
 }
 /** 이번 달 마케팅 AI 비용($) — 자동 원고·캡션 초안 등 purpose 'marketing_%' */
 export async function mktAiUsd(tenant: string) {
@@ -360,7 +390,7 @@ export async function automationView(u: SessionUser) {
     sql`select id, name, role from users where tenant = ${t} and status = 'active' and not is_demo order by name`,
   ]);
   const co = await (await import('./ai/assistant')).usageThisMonth(t);
-  return { settings: s, limits: limitsOf(s), usage: { ...(await usageOf(t)), ai: await mktAiUsd(t), companyAiUsd: co.costUsd, companyAiLimitUsd: co.limitUsd }, plans: MKT_PLANS, rules, requests, ledger, brands, people, canEdit: isAdmin(u) };
+  return { settings: s, limits: limitsOf(s), usage: { ...(await usageOf(t)), ai: await mktAiUsd(t), companyAiUsd: co.costUsd, companyAiLimitUsd: co.limitUsd }, plans: await planTable(), production: await productionLeft(t), rules, requests, ledger, brands, people, canEdit: isAdmin(u) };
 }
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 제작 설정은 관리자가 합니다'); }
 
