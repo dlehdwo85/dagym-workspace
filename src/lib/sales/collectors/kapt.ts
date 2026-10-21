@@ -87,7 +87,7 @@ export function parseKaptResultRows(body: string): { bidNum: string; title: stri
   let j: any = null; try { j = JSON.parse(body); } catch { /* HTML */ }
   const list = Array.isArray(j) ? j : Array.isArray(j?.list) ? j.list : Array.isArray(j?.resultList) ? j.resultList : Array.isArray(j?.data) ? j.data : null;
   if (list) { for (const it of list) { const bidNum = String(it.bidNum ?? it.BID_NUM ?? it.bidNo ?? ''); if (!bidNum) continue; out.push({ bidNum, title: String(it.bidTitle ?? it.BID_TITLE ?? it.title ?? ''), complex: String(it.kaptName ?? it.KAPT_NAME ?? it.complexName ?? ''), winner: it.sucsBidder ?? it.SUCS_BIDDER ?? it.winner ?? null, amount: it.sucsAmt ?? it.SUCS_AMT ?? it.amount ?? null, date: it.sucsDate ?? it.SUCS_DATE ?? it.openDate ?? null }); } return out; }
-  for (const m of body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)) { const tr = m[1]; const id = tr.match(/goView\('([^']+)'\)|bidNum=([^&'"]+)/); const bidNum = id?.[1] ?? id?.[2]; if (!bidNum) continue; const cells = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) => text(c[1])); if (cells.length < 5) continue;
+  for (const m of body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)) { const tr = m[1]; const id = m[0].match(/goView\('([^']+)'\)|bidNum=([^&'"]+)/); /* 원본 K-apt 는 <tr onclick="goView('…')"> — 행 여는 태그까지 본다 */ const bidNum = id?.[1] ?? id?.[2]; if (!bidNum) continue; const cells = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) => text(c[1])); if (cells.length < 5) continue;
     out.push({ bidNum, title: cells[2] ?? '', complex: cells[1] ?? '', winner: cells[cells.length - 3] || null, amount: cells[cells.length - 2] || null, date: cells[cells.length - 1] || null }); }
   return out;
 }
@@ -99,20 +99,21 @@ export const kaptBidResults: Collector = {
     try { const res = await fetchImpl(`${BASE()}/bid/bidResultList.do`, { headers: HEADERS, signal: AbortSignal.timeout(12000) }); const html = await res.text(); cookie = (res.headers.get('set-cookie') ?? '').split(/,(?=[^;]+=)/).map((c) => c.split(';')[0].trim()).filter(Boolean).join('; '); csrf = html.match(/name="_csrf"\s+(?:content|value)="([^"]+)"|_csrf['"]?\s*[:=]\s*['"]([^'"]+)/)?.[1] ?? html.match(/_csrf['"]?\s*[:=]\s*['"]([^'"]+)/)?.[1] ?? ''; }
     catch (e) { return { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: `세션 준비 실패: ${e instanceof Error ? e.message : String(e)}`, summary: 'K-apt 입찰결과: 세션 준비 실패', providerMode: 'web_scrape' }; }
     const from = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10), to = new Date().toISOString().slice(0, 10);
-    const items: Record<string, unknown>[] = []; let seen = new Set<string>();
+    const items: Record<string, unknown>[] = []; let seen = new Set<string>(); let listed = 0;
     for (const w of KAPT_RESULT_WORDS) {
       if (left() < 8000) { errors.push(`시간 한도 근접 — 검색어 '${w}' 부터는 다음 실행에서`); break; }
       try {
         const body = new URLSearchParams({ searchKeyword: w, sortType: '01', pageNo: '1', pageSelect: '100', startDate: from, endDate: to, ...(csrf ? { _csrf: csrf } : {}) });
         const res = await fetchImpl(`${BASE()}/bid/bidResultListAjax.do`, { method: 'POST', headers: { ...HEADERS, 'content-type': 'application/x-www-form-urlencoded', ...(cookie ? { cookie } : {}), ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}) }, body, signal: AbortSignal.timeout(10000) });
         if (!res.ok) { errors.push(`'${w}': HTTP ${res.status}`); continue; }
-        for (const r of parseKaptResultRows(await res.text())) { if (seen.has(r.bidNum) || !matchFit(r.title, '공동주택').fit) continue; seen.add(r.bidNum);
+        const rows = parseKaptResultRows(await res.text()); listed += rows.length; if (!rows.length && errors.length < 12) errors.push(`'${w}': 결과 목록 0건(응답 형식 확인 필요)`);
+        for (const r of rows) { if (seen.has(r.bidNum) || !matchFit(r.title, '공동주택').fit) continue; seen.add(r.bidNum);
           items.push({ source_type: 'kapt_bid', source_external_id: r.bidNum, source_url: `${BASE()}/bid/bidDetail.do?bidNum=${encodeURIComponent(r.bidNum)}`, title: r.title, issuer: r.complex || null, facility_name: r.complex || null, region: regionFromTitle(r.title), winner_name: r.winner, winner_amount: r.amount, award_date: r.date }); }
       } catch (e) { errors.push(`'${w}': ${e instanceof Error ? e.message : String(e)}`); }
     }
     const r = items.length ? await upsertNotices(items, { mergeScope: 'award' }) : { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0, duplicatesMerged: 0, errorLog: undefined as string | undefined };
     if (r.errorLog) errors.push(r.errorLog);
-    return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + errors.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape', summary: `K-apt 입찰결과 관련 ${items.length}건 · 낙찰 병합 ${r.updated} · 신규 ${r.inserted} · 변화없음 ${r.unchanged}` };
+    return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + errors.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape', summary: `K-apt 입찰결과 목록 ${listed}건 · 관련 ${items.length}건 · 낙찰 병합 ${r.updated} · 신규 ${r.inserted} · 변화없음 ${r.unchanged}` };
   },
 };
 

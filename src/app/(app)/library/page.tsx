@@ -12,7 +12,7 @@ import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, 
 
 type Sec = 'public' | 'internal' | 'confidential';
 type F = { id: string; folder: string; title: string; file_name: string; mime_type: string; size_bytes: number; tags: string[]; description: string | null;
-  created_at: string; updated_at: string; created_by: string; created_by_name: string; has_text: boolean; snippet: string | null;
+  created_at: string; updated_at: string; created_by: string; created_by_name: string; has_text: boolean; text_error: string | null; text_tried_at: string | null; snippet: string | null;
   organized_by: 'ai' | 'rule' | null; ai_confidence: number | null; needs_review: boolean; can_undo: boolean; level: string; organize_status: string | null; organize_error: string | null;
   security: Sec; security_suggested: Sec | null; security_confirmed: boolean; effective_security: Sec };
 type Fo = { folder: string; n: number; security: Sec; level: string };
@@ -336,7 +336,7 @@ export default function LibraryPage() {
                 ) : view === 'list' ? (
                   <ul className="divide-y divide-line overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="library-list">
                     {files.map((f) => <FileRow key={f.id} f={f} hi={hi === f.id} sel={sel.has(f.id)} onSel={() => toggle(f.id)} onDrag={dragFile(f)} user={user.id} admin={admin} confEdit={!!data?.confEdit}
-                      showFolder={!!(query || review) || f.folder !== cur} onEdit={() => setEdit({ ...f, tags: f.tags.join(', ') as never })} onRemove={() => remove([f.id])} onOrganize={(a) => organize(f, a)} onSec={(s) => patchSec(f, s)} onOpenFolder={() => { setQ(''); setCur(f.folder); }} />)}
+                      showFolder={!!(query || review) || f.folder !== cur} onEdit={() => setEdit({ ...f, tags: f.tags.join(', ') as never })} onRemove={() => remove([f.id])} onOrganize={(a) => organize(f, a)} onSec={(s) => patchSec(f, s)} onOpenFolder={() => { setQ(''); setCur(f.folder); }} onRetext={async () => { try { const r = await api<{ hasText: boolean; chars: number; error: string | null }>(`/api/library/${f.id}/retext`, { method: 'POST', body: {} }); toast[r.hasText ? 'ok' : 'error'](r.hasText ? `본문 ${r.chars.toLocaleString('ko-KR')}자 추출` : `추출 못 함 — ${r.error ?? '이유 모름'}`); reload(); } catch (e: any) { toast.error(e.message); } }} />)}
                   </ul>
                 ) : (
                   <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="library-list">
@@ -419,9 +419,9 @@ function FileIcon({ f, big }: { f: F; big?: boolean }) {
   return isDoc(f) ? <FilePenLine className={cx(c, 'text-brand-600')} /> : /sheet|excel|csv/.test(f.mime_type + f.file_name) ? <FileSpreadsheet className={cx(c, 'text-green-600')} /> : /^image\//.test(f.mime_type) ? <ImageIcon className={cx(c, 'text-ink-3')} /> : <FileText className={cx(c, 'text-ink-3')} />;
 }
 
-function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder, onEdit, onRemove, onOrganize, onSec, onOpenFolder }: {
+function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder, onEdit, onRemove, onOrganize, onSec, onOpenFolder, onRetext }: {
   f: F; hi: boolean; sel: boolean; onSel: () => void; onDrag: (e: React.DragEvent) => void; user: string; admin: boolean; confEdit: boolean; showFolder: boolean;
-  onEdit: () => void; onRemove: () => void; onOrganize: (a: 'undo' | 'redo') => void; onSec: (s: Sec) => void; onOpenFolder: () => void }) {
+  onEdit: () => void; onRemove: () => void; onOrganize: (a: 'undo' | 'redo') => void; onSec: (s: Sec) => void; onOpenFolder: () => void; onRetext?: () => void }) {
   const mine = f.created_by === user;
   const suggestConf = f.security_suggested === 'confidential' && f.effective_security !== 'confidential' && !f.security_confirmed;
   return (
@@ -453,6 +453,12 @@ function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder,
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-amber-800" data-testid="organize-failed">
             <span className="min-w-0 truncate">AI 정리 못 함 — {f.organize_error ?? '이유 모름'}</span>
             {(mine || admin) && <button className="shrink-0 font-semibold underline" onClick={() => onOrganize('redo')} data-testid="organize-retry">다시 정리</button>}
+          </div>
+        )}
+        {!f.has_text && f.text_error && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-amber-800" data-testid="text-failed" title={f.text_error}>
+            <span className="min-w-0 truncate">본문 추출 못 함 — {f.text_error}</span>
+            {(mine || admin) && onRetext && <button className="shrink-0 font-semibold underline" onClick={onRetext} data-testid="text-retry">다시 추출</button>}
           </div>
         )}
         {suggestConf && (
