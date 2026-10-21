@@ -1352,6 +1352,17 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 [대표 08:45·S1 맨 앞] 영업 수집기 12개 이식 + 당일 입찰 다이제스트 + 맞춤 설정 + 낙찰 결과 (#131, migration 141) [배포확인요청] — 배포 de3c2e3
+- 저장 구조: 수집 결과는 기존 공용 복사 표 `sales_src_rows(scope='global')` 에 원본과 같은 JSON 모양으로 쌓는다(`origin='workin'`) → 입찰·허브·홈 화면이 그대로 읽음. 매일 복사(migrate.ts)는 origin='workin' 행을 '사라짐'으로 표시하지 않음. 분류 규칙(matchFit·noticeStatus·planNoticeBatch·planBatch·assessProspect)은 원본 _shared 를 이식(`src/lib/sales/collectors/procurement.ts`·`prospects.ts`), 수동 필드(분류·대표 판단·메모·next_action…)는 수집기가 건드리지 않음.
+- 수집기 12개(`src/lib/sales/collectors/`, 원본 순서·KST 실행 시각): kapt_sa_sun(08, KAPT_SERVICE_KEY) · operating_from_kapt(08, 파생) · kicox(07, CSV) · public_sports(07, XLSX) · tourist_hotels(07, DATA_GO_KR) · reb_recent(07, CSV 40MB) · kapt_bid_notices(06, HTML 목록→관련 상세·첨부) · g2b_bid_notices(06, 나라장터 4대상+누리장터, 검색어 15개) · g2b_prespec_awards(06, 사전규격 matchFit·낙찰 병합) · kapt_bid_results(07, 세션+_csrf, 검색어 18개) · public_agency_bids(06, LH·국방·온비드) · vendor_recruit_watch(07, app_settings `sales_vendor_watch_pages` 목록 — **원본 21곳 URL 은 로컬이 넣어야 함**). tick 에서 시각 지난 것 하루 1회 하나씩(60초 한도), [지금 수집] 은 관리자 40초.
+- 원천 주소: 나라장터·누리장터·사전규격·낙찰은 apis.data.go.kr/1230000 명세 기준, LH·국방·온비드는 `app_settings sales_collector_endpoints` 로 바꿀 수 있음(기본값은 추정 — **활용신청·운영 확인 필요**, 'SERVICE ACCESS DENIED' 등은 실행 이력에 '활용신청 필요'로 남음).
+- 다이제스트(`src/lib/sales/digest.ts`): 회사 설정 시각(기본 08:00) 이후 하루 1회 — 그날 처음 본 공고 + 그날 정정·취소된 공고 중 회사 맞춤(적합 사업 또는 관심 검색어 → 제외어·지역·발주처·물품코드·금액) 통과분 → 메일(Resend, 받는 사람 = digest_to 또는 대표·관리자) + 알림(briefing, 푸시) + `sales_digests` 저장(영업 홈 '오늘 새 공고' = 입찰 today 탭). 항목: 공고명·발주처·지역·추정가·입찰마감 D-day·참가신청·개찰·출처·첨부·적합도. API `GET /api/sales/digest`(오늘 보낸 것/미리보기) · `GET/PUT /api/sales/digest/prefs` · `POST /api/sales/digest/send`(관리자).
+- 화면: 영업 › 데이터 설정에 '맞춤 공고 설정 · 당일 다이제스트'(검색어·제외어·발주처·물품코드·금액·지역 칩·시각·메일·받는 사람·[지금 보내기]·마지막 다이제스트) + '자동 수집(수집기 12개)'(상태·마지막 실행·요약·오류·키 필요·회사별 사용/안 함·[지금 수집]·최근 실행 30건). API `GET/PUT /api/sales/collectors`, `POST /api/sales/collectors/{slug}/run`.
+- 낙찰 결과: g2b 낙찰(ScsbidInfoService)·K-apt 입찰결과 → 같은 공고에 winner_name·winner_amount·award_date 병합(current_status '낙찰', 되돌리지 않음). 계약만료·재입찰 화면이 contract_end 를 읽는 흐름은 그대로.
+- 승인함(로컬 09:20): '승인됨 · 게시 전' 예정 임박·미래 순 + 기본 10건·더보기, 지난 건은 '승인됨 · 예정 지남 n건' 접힘, 브랜드 필터 적용.
+- 시험: API sales-collectors 4건(가짜 원천 — 구조 시험, 실제 원천 연동 완료 아님) + sales-views·sales-migrate 회귀.
+- 다음: ④ 매일 복사(migrate.ts)는 이식 완료·1개월 대조 뒤 끄기(플랫폼 화면 토글 있음) · 스케줄러 달력(참가신청·개찰·마감)을 영업 캘린더에 · 원본 21곳 협력사 페이지 목록·data.go.kr 활용신청 상태는 로컬 확인.
+
 ## 2026-10-21 E2E 기존 실패 3건 수정 (31차) [배포확인요청]
 - 직원 초대 E2E: 재정비 뒤 조직 체크가 '고급' 안 → 시험이 고급을 연 뒤 체크. 캘린더 빠른 입력 '업무 리스트에도 추가' 스위치: sr-only 입력이 뷰포트 밖이라 클릭 불가 → 스위치 위 투명 입력(화면 안)으로(실기기 터치도 안정). 마감일 선택 '직접' 시각 select 접근 이름 `… 직접 시각`(한 줄 두 칸 select 와 중복 해소).
 - 로컬 확인: 캘린더 빈 칸 → 빠른 입력 → '업무 리스트에도 추가' 스위치 터치 동작(휴대폰).

@@ -181,6 +181,8 @@ export async function runTick(trigger: string) {
   await step('adsSync', async () => (await import('./marketingAds')).adsSyncDue()); // V41 4-2 광고 성과(회사별 연결, 하루 한 번 최근 7일)
   await step('adCapGuard', async () => (await import('./adOps')).adCapGuard()); // V44 ① 월 광고비 상한 넘으면 워크인이 켠 광고 자동 중지
   await step('salesSync', async () => (await import('./sales/migrate')).salesSyncDaily()); // V41 단계 2 전환일까지 매일 영업관리 차이분
+  await step('salesCollectors', async () => (await import('./sales/collectors')).collectorsTick()); // 대표 10/21 08:45: 영업 수집기 12개(KST 시각 이후 하루 1회, tick 당 하나)
+  await step('salesDigest', async () => (await import('./sales/digest')).salesDigestTick()); // 당일 입찰 다이제스트(회사 설정 시각, 메일·알림·푸시)
   await step('notices', async () => (await import('./announcements')).noticesJob()); // V30 ② 예약 게시
   await step('textExtract', async () => (await import('./library')).textExtractJob()); // V14 32: HWP·PDF 본문 재추출(기존 파일, 한 번에 15개)
   await step('contacts', async () => (await import('./contacts')).contactsJob()); // V31 연락처 휴지통 30일 정리

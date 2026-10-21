@@ -66,7 +66,8 @@ async function upsertRows(scope: string, tbl: string, rows: any[]) {
     await sql`insert into sales_src_rows ${sql(chunk as never)} on conflict (scope, tbl, src_id) do update set row = excluded.row, gone = false, synced_at = excluded.synced_at`;
   }
   // 이번에 안 보인 행 = 원본에서 사라짐(지우지 않고 표시)
-  await sql`update sales_src_rows set gone = true where scope = ${scope} and tbl = ${tbl} and synced_at < ${now}`;
+  // 10/21 수집기 이식: 워크인이 직접 모은 행(origin='workin')은 원본에 없어도 '사라짐'으로 표시하지 않음
+  await sql`update sales_src_rows set gone = true where scope = ${scope} and tbl = ${tbl} and synced_at < ${now} and origin <> 'workin'`;
 }
 
 /** 원본 → 워크인(멱등). 끝나면 표별 '원본 건수 = 워크인 건수' 대조 */
