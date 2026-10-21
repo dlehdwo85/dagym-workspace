@@ -70,8 +70,33 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.getByTestId('mkt-status').filter({ hasText: '수정 요청' }).waitFor();
   await owner.keyboard.press('Escape');
   await owner.goto(`${BASE}/s/marketing/calendar`);
+  // 대표 10/20 16:10 (#105): 주 보기 기본 — 오늘 열 강조, 브랜드 행 × 요일 7열, 카드(상태·시각), [옮기기] 상자로 날짜·시각 이동(같은 주 안에서) → 월 보기 전환
+  await owner.getByTestId('mkt-week').waitFor();
+  assert.equal(await owner.getByTestId(`mkt-week-col-${today}`).getAttribute('data-today'), '1', '오늘 열 강조');
+  const card = owner.getByTestId('mkt-week-card').filter({ hasText: 'E2E 가을 행사 게시물' }).first();
+  await card.waitFor();
+  assert.equal(await card.getAttribute('data-status'), 'changes');
+  const dow = new Date(`${today}T12:00:00+09:00`).getUTCDay(); const delta = dow === 6 ? -1 : 1;
+  const target = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.parse(`${today}T12:00:00+09:00`) + delta * 864e5));
+  await card.getByTestId('mkt-card-move').click();
+  await owner.getByTestId('mkt-move-date').fill(target); await owner.getByTestId('mkt-move-time').fill('14:30');
+  await owner.getByTestId('mkt-move-save').click();
+  const moved = owner.locator(`[data-testid^="mkt-week-cell-"][data-testid$="-${target}"]`).getByTestId('mkt-week-card').filter({ hasText: 'E2E 가을 행사 게시물' }).first();
+  await moved.waitFor();
+  assert.match(await moved.innerText(), /14:30/);
+  // 채널 행·브랜드 필터·휴대폰 가로 스크롤 폭
+  await owner.getByTestId('mkt-cal-axis-channel').click();
+  await owner.getByTestId('mkt-week-row-instagram').waitFor();
+  await owner.getByTestId('mkt-cal-axis-brand').click();
+  await owner.screenshot({ path: `${SHOTS}/181-mkt-calendar-week.png` });
+  // 되돌리기(다른 단계가 오늘 날짜 기준) → 월 보기
+  await moved.getByTestId('mkt-card-move').click();
+  await owner.getByTestId('mkt-move-date').fill(today); await owner.getByTestId('mkt-move-save').click();
+  await owner.locator(`[data-testid^="mkt-week-cell-"][data-testid$="-${today}"]`).getByTestId('mkt-week-card').filter({ hasText: 'E2E 가을 행사 게시물' }).first().waitFor();
+  await owner.getByTestId('mkt-cal-view-month').click();
   const d = Number(today.slice(8));
   await owner.getByTestId(`mkt-day-${d}`).getByText('E2E 가을 행사 게시물').waitFor();
+  await owner.getByTestId('mkt-cal-view-week').click(); // 기본값(주)으로 되돌림(localStorage)
   await owner.goto(`${BASE}/s/marketing/calls`);
   // 로컬 검수 10/17: 하위 메뉴에 있으면 공간 첫 화면(현황)은 같이 강조하지 않음 — 강조는 하나
   await owner.getByTestId('call-phone').waitFor();
@@ -197,6 +222,15 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   // 원래대로
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
   await owner.goto(`${BASE}/admin/users`);
+  // 대표 10/20 15:00 (#100) 담당자 지정 탭: 영업 원천 '기본' 행에 주 담당 저장 → '지정됨' → 지우기
+  await owner.getByTestId('tab-assignees').click();
+  const ruleRow = owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first();
+  await ruleRow.getByTestId('assignee-primary').selectOption({ index: 1 });
+  await ruleRow.getByTestId('assignee-save').click();
+  await owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first().getByTestId('assignee-set').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/182-assignee-rules.png`, fullPage: true });
+  await owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first().getByTestId('assignee-clear').click();
+  await owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first().getByTestId('assignee-set').waitFor({ state: 'detached' });
   await owner.getByTestId('tab-spaces').click();
   await owner.getByTestId('space-toggle-marketing').click();
   await owner.getByTestId('space-tabs').waitFor({ state: 'detached' });

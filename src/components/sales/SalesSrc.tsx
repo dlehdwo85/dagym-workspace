@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ArrowRight, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
 import { api, useApi } from '@/components/client';
-import { useSession } from '@/components/session';
+import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -47,8 +47,8 @@ const attUrl = (a: any) => (typeof a === 'string' ? a : a?.url ?? a?.href ?? '')
 /** 대표 10/21 12:00 영업 재편 1): 행마다 [영업 진행으로 넘기기] — 담당자 선택 → 리드·'영업 중'·담당 업무·일정·알림 (전화·문자 옆, 체크 선택과 별개) */
 function HandoffButton({ kind, id, name, onDone, compact }: { kind: 'bid' | 'building' | 'facility' | 'vendor'; id: string; name: string; onDone?: () => void; compact?: boolean }) {
   const [open, setOpen] = useState(false); const [sel, setSel] = useState<string[]>([]); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
-  const people = useApi<{ people: { id: string; name: string; role: string; title: string | null }[]; me: string }>(open ? '/api/sales/work/handoff' : (null as unknown as string), [open]);
-  useEffect(() => { if (people.data && !sel.length) setSel([people.data.me]); }, [people.data, sel.length]);
+  const people = useApi<{ people: { id: string; name: string; role: string; title: string | null }[]; me: string; suggested?: string | null }>(open ? `/api/sales/work/handoff?kind=${kind}` : (null as unknown as string), [open, kind]);
+  useEffect(() => { if (people.data && !sel.length) setSel([people.data.suggested ?? people.data.me]); }, [people.data, sel.length]); // #100 원천별 담당 규칙이 있으면 그 사람이 기본
   async function go() {
     setBusy(true);
     try { const r = await api<{ leadId: string; taskIds: string[]; eventIds: string[]; eventErrors: string[]; due: string }>('/api/sales/work/handoff', { body: { kind, id, assigneeIds: sel, note: note || undefined } });
@@ -130,6 +130,7 @@ const CONTRACT_STATUS = ['계약', '진행중', '종료', '해지'];
 const RENEW_STAGE = ['영업 전', '영업 시작', '제안', '재입찰', '종료'];
 const numOf = (v: string) => (v.trim() ? Number(v.replace(/[,\s원]/g, '')) : null);
 function RecordForm({ kind, leads, onSaved, leadId }: { kind: 'proposals' | 'contracts'; leads: { id: string; name: string }[]; onSaved: () => void; leadId?: string }) {
+  const T = useSalesTerms(); // #408 업종 템플릿 예시 문구
   const [f, setF] = useState({ ...REC_EMPTY, leadId: leadId ?? '' }); const [busy, setBusy] = useState(false); const [more, setMore] = useState(false);
   const set = (k: keyof typeof REC_EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   async function submit(e: React.FormEvent) {
@@ -162,7 +163,7 @@ function RecordForm({ kind, leads, onSaved, leadId }: { kind: 'proposals' | 'con
           <Field label="재계약 단계"><select className={inputCls} value={f.renewStage} onChange={set('renewStage')} aria-label="재계약 단계"><option value="">—</option>{RENEW_STAGE.map((x) => <option key={x}>{x}</option>)}</select></Field>
         </>}
         <Field label="상태"><select className={inputCls} value={f.status} onChange={set('status')} aria-label="상태">{(P ? PROPOSAL_STATUS : CONTRACT_STATUS).map((x) => <option key={x}>{x}</option>)}</select></Field>
-        <Field label="사업"><input className={inputCls} value={f.business} onChange={set('business')} maxLength={60} placeholder="예: 커뮤니티 운영" aria-label="사업" /></Field>
+        <Field label="사업"><input className={inputCls} value={f.business} onChange={set('business')} maxLength={60} placeholder={T.examples.business} aria-label="사업" /></Field>
         <Field label="메모" className="sm:col-span-2"><input className={inputCls} value={f.memo} onChange={set('memo')} maxLength={2000} aria-label="메모" /></Field>
       </div>}
     </form>
@@ -202,6 +203,7 @@ export function TodayRow({ date, cards, color = C }: { date: string; cards: [str
 }
 
 export function SalesHome() {
+  const T = useSalesTerms(); // #408 업종 중립 문구 — 메뉴·타일·묶음 이름은 회사 업종 템플릿
   const { data, error, reload } = useApi<any>('/api/sales/src?view=summary');
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={4} />;
@@ -217,11 +219,13 @@ export function SalesHome() {
           <h2 className="text-base font-bold text-[#1D4ED8]">영업 출처부터 고르세요</h2>
           <p className="mt-1 text-sm text-ink-2">회사 업종·지역·주력 상품을 보고 AI 가 맞는 출처(공공데이터·입찰 등)를 근거와 함께 추천합니다. 체크로 고르고, 목록 밖 사이트·키워드·엑셀도 직접 넣을 수 있어요.</p>
           <Link href="/s/sales/sources" className="mt-2 inline-block rounded-input bg-[#2563EB] px-4 py-2 text-sm font-medium text-white" data-testid="sales-setup-go">출처 추천받기</Link>
+          {/* #408 온보딩 업종 템플릿: 업종을 고르면 영업 화면 용어가 따라옴 — 데이터 설정에서 바꿀 수 있음 */}
+          <p className="mt-2 text-xs text-ink-2" data-testid="sales-setup-template">업종 템플릿: <b>{T.label}</b> — 화면 용어({T.kind.building}·{T.kind.facility}·{T.kind.vendor})를 업종에 맞춥니다. <Link href="/s/sales/sources#template" className={linkCls}>바꾸기</Link></p>
         </section>)}
       {data.today && <TodayRow date={data.today.date} cards={[
         ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/bids?tab=today'] as [string, number, string]] : []),
         ['오늘 새 영업 DB', data.today.newDb.buildings + data.today.newDb.facilities + data.today.newDb.vendors, `/s/sales/hub?day=today&tab=${data.today.newDb.facilities >= data.today.newDb.buildings && data.today.newDb.facilities >= data.today.newDb.vendors ? 'facilities' : data.today.newDb.vendors > data.today.newDb.buildings ? 'vendors' : 'buildings'}`,
-          `신규단지 ${data.today.newDb.buildings} · 시설 ${data.today.newDb.facilities} · 협력사 ${data.today.newDb.vendors}`],
+          `${T.kind.building} ${data.today.newDb.buildings} · ${T.kind.facility} ${data.today.newDb.facilities} · ${T.kind.vendor} ${data.today.newDb.vendors}`],
         ['오늘 연락할 리드', data.today.contact, '/s/sales/leads?day=today'],
         ...(bids ? [['오늘 마감 입찰', data.today.closing, '/s/sales/bids?tab=closing'] as [string, number, string]] : [])]} />}
       {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적(계약 등록 금액) — 마케팅 홈과 같은 막대 */}
@@ -231,7 +235,7 @@ export function SalesHome() {
       {/* S2-6 영업기회 요약 타일 6 + 목록별 진행 현황표 */}
       {data.tiles && <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="sales-tiles">
         <h2 className="mb-2 text-sm font-semibold">영업기회 요약</h2>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 text-center">{([['지금 영업할 곳', data.tiles.nowSales, '/s/sales/bids?tab=working'], ...(bids ? [['진행 중 입찰', data.tiles.bidsOpen, '/s/sales/bids?tab=open'], ['계약만료·재입찰', data.tiles.contracts, '/s/sales/contracts']] : []), ['신규단지', data.tiles.buildings, '/s/sales/hub?tab=buildings'], ['준공·입주 시설', data.tiles.facilities, '/s/sales/hub?tab=facilities'], ['협력사 등록', data.tiles.vendors, '/s/sales/hub?tab=vendors']] as [string, number, string][]).map(([l, n, h]) => (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 text-center">{([['지금 영업할 곳', data.tiles.nowSales, '/s/sales/bids?tab=working'], ...(bids ? [['진행 중 입찰', data.tiles.bidsOpen, '/s/sales/bids?tab=open'], ['계약만료·재입찰', data.tiles.contracts, '/s/sales/contracts']] : []), [T.kind.building, data.tiles.buildings, '/s/sales/hub?tab=buildings'], [T.facilitiesTab, data.tiles.facilities, '/s/sales/hub?tab=facilities'], [T.vendorsTab, data.tiles.vendors, '/s/sales/hub?tab=vendors']] as [string, number, string][]).map(([l, n, h]) => (
           <Link key={l} href={h} className="rounded-input border border-line p-2 hover:border-blue-300" data-testid="sales-tile"><div className="text-[11px] text-ink-2">{l}</div><div className="text-lg font-bold tabular-nums" style={{ color: C }}>{n}</div></Link>))}</div>
         {data.progress && <div className="mt-2 hidden overflow-x-auto md:block" data-testid="sales-progress"><table className="w-full text-xs"><thead><tr className="text-left text-ink-3"><th className="py-1 pr-2">목록</th>{PROG_COLS.map((c) => <th key={c} className="py-1 pr-2 text-right">{c}</th>)}</tr></thead>
           <tbody>{(data.progress as [string, Record<string, number>][]).map(([name, m]) => <tr key={name} className="border-t border-line"><td className="py-1 pr-2 font-medium">{name}</td>{PROG_COLS.map((c) => <td key={c} className="py-1 pr-2 text-right tabular-nums">{Object.entries(m).filter(([k]) => PROG_MATCH[c].test(k)).reduce((a, [, v]) => a + v, 0) || ''}</td>)}</tr>)}</tbody></table></div>}
@@ -253,12 +257,13 @@ export function SalesHome() {
 
 const PROG_COLS = ['미검토·미연락', '검토중', '연락중', '신청', '보류', '완료·전환', '대상아님'];
 const PROG_MATCH: Record<string, RegExp> = { '미검토·미연락': /미검토|미연락|미등록/, '검토중': /검토중/, '연락중': /연락중/, '신청': /신청/, '보류': /보류/, '완료·전환': /완료|전환/, '대상아님': /대상|미참여/ };
-const TODO_GROUPS: [string, string, string][] = [['followUp', '입찰·신규단지 후속', '후속 기한이 오늘이거나 지난 건'], ['facilities', '준공시설 연락', '다음 연락일이 오늘이거나 지난 시설'], ['vendors', '협력사 등록 할 일', '등록 신청 기한'],
+/** #408: 묶음 이름은 회사 업종 템플릿(terms.todo) */
+const todoGroups = (T: ReturnType<typeof useSalesTerms>): [string, string, string][] => [['followUp', T.todo.followUp, '후속 기한이 오늘이거나 지난 건'], ['facilities', T.todo.facilities, `다음 연락일이 오늘이거나 지난 ${T.kind.facility}`], ['vendors', T.todo.vendors, '등록 신청 기한'],
   ['pastTasks', '지난 영업 업무', '마감이 지난 영업 업무(자동 업무 포함)'], ['nowSales', '지금 영업할 곳 상위 5', '작업 중 입찰, 마감 임박순'], ['leads', '리드 연락', '연락 지남·오늘 연락'], ['closingSoon', '입찰 오늘·내일 마감', '즉시 검토·검토중·연락중']];
 /** S2-5 오늘 할 일 7묶음 — 묶음마다 건수·목록(5개 접힘), [순서대로 시작]은 첫 항목으로 */
 function TodoGroups({ todo, bids }: { todo: Record<string, any[]>; bids: boolean }) {
-  const [openK, setOpenK] = useState<string | null>(null);
-  const groups = TODO_GROUPS.filter(([k]) => bids || !['nowSales', 'closingSoon'].includes(k));
+  const [openK, setOpenK] = useState<string | null>(null); const T = useSalesTerms();
+  const groups = todoGroups(T).filter(([k]) => bids || !['nowSales', 'closingSoon'].includes(k));
   const total = groups.reduce((n, [k]) => n + (todo[k]?.length ?? 0), 0);
   const first = groups.map(([k]) => todo[k]?.[0]).find(Boolean);
   const hrefOf = (x: any) => (x.sales_ref || x.title ? `/tasks/${x.id}` : x.href);
@@ -733,7 +738,7 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
       {!data ? <Skeleton rows={5} /> : <>
         {/* 영업 재편 5) 전환율(파이프라인 메뉴에서 흡수): 단계마다 지금 n · 거쳐 간 n(비율) + 계약 전환율 */}
         {data.funnel && <div className="rounded-card border border-line bg-white p-2 text-xs" data-testid="pipeline-funnel">
-          <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">전환율</span><span className="text-ink-2">리드 {data.funnel.total} → 계약완료 {data.funnel.won}{data.funnel.conversion !== null && <b className="ml-1" style={{ color: C }}>{data.funnel.conversion}%</b>}</span>{data.funnel.lost > 0 && <span className="text-ink-3">· 실패 {data.funnel.lost}</span>}<span className="ml-auto text-ink-3">막대 = 그 단계를 거쳐 간 리드 비율</span></div>
+          <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">전환율</span><span className="text-ink-2">리드 {data.funnel.total} → 계약완료 {data.funnel.won}{data.funnel.conversion !== null && <> (<b style={{ color: C }}>{data.funnel.conversion}%</b>)</>}</span>{data.funnel.lost > 0 && <span className="text-ink-3">· 실패 {data.funnel.lost}</span>}<span className="ml-auto text-ink-3">막대 = 그 단계를 거쳐 간 리드 비율</span></div>
           <div className="mt-1.5 grid gap-1" style={{ gridTemplateColumns: `repeat(${data.funnel.stages.length}, minmax(0, 1fr))` }}>{data.funnel.stages.map((f: any) => <div key={f.status} className="min-w-0" title={`${f.status}: 지금 ${f.now} · 거쳐 간 ${f.reached} (${f.pct}%)`} data-testid="funnel-stage"><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${f.pct}%`, background: C }} /></div><div className="mt-0.5 truncate text-[10px] text-ink-2">{f.status}</div><div className="text-[10px] tabular-nums text-ink-3">{f.now}<span className="text-ink-3">/{f.reached}</span></div></div>)}</div>
         </div>}
         {/* 대표 검수 10/20 ②: 휴대폰은 가로 칸반(빈 칸 많고 좁음) 대신 단계 칩 + 목록, PC 는 칸반 그대로 */}
@@ -863,7 +868,8 @@ export function Hub({ initialTab, initialDay }: { initialTab?: string; initialDa
   const { data, error, reload } = useApi<any>(sub ? (null as unknown as string) : `/api/sales/src?${q({ view: 'hub', tab, q: s, day })}`, [tab, s, day]);
   const [sel, setSel] = useState<string[]>([]); // 대표 10/20 14:15 ④ 일괄 선택
   useEffect(() => setSel([]), [tab]);
-  const tabs = [['buildings', '신규 현장'], ['facilities', '준공·입주 시설'], ['vendors', '협력사 등록'], ...(bidsOn ? [['contracts', '계약만료·재입찰']] : []), ['prospects', '공공데이터'], ['regions', '지역별']];
+  const T = useSalesTerms(); // #408
+  const tabs = [['buildings', T.buildingsTab], ['facilities', T.facilitiesTab], ['vendors', T.vendorsTab], ...(bidsOn ? [['contracts', '계약만료·재입찰']] : []), ['prospects', '공공데이터'], ['regions', '지역별']];
   if (sub) return (
     <div className="space-y-3" data-testid="sales-hub">
       <div className="flex flex-wrap gap-1.5">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-hub-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white')}>{l}</button>)}</div>
@@ -885,11 +891,12 @@ export function Hub({ initialTab, initialDay }: { initialTab?: string; initialDa
 }
 /** 대표 검수 10/20 ②: 허브 상세 — 원본 키 덤프 대신 한국어 칸(값 없는 칸은 '미확인'), 관리자 '원본 보기' 접힘 */
 function HubDetail({ tab, r, admin, canWrite, onChange, onClose }: { tab: string; r: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
+  const T = useSalesTerms(); // #408 칸 이름은 회사 업종 템플릿
   const rows: [string, React.ReactNode][] = tab === 'buildings'
-    ? [['단지명', r.name], ['상태', r.status], ['유형', r.kind], ['우선순위', r.priority], ['지역', r.region], ['주소', r.address], ...(r.dates ?? []).map(([k, v]: [string, unknown]) => [k, k === '세대수' ? (D(v) ? `${D(v)}세대` : UNK) : (D(v) ? kd(D(v)) : UNK)] as [string, React.ReactNode]), ['DB 등록', r.firstSeen && kd(r.firstSeen)], ['비고', r.estimated && '날짜는 시점 추정치'],
+    ? [[T.unitName, r.name], ['상태', r.status], ['유형', r.kind], ['우선순위', r.priority], ['지역', r.region], ['주소', r.address], ...(r.dates ?? []).map(([k, v]: [string, unknown]) => [k, k === '세대수' ? (D(v) ? `${D(v)}세대` : UNK) : (D(v) ? kd(D(v)) : UNK)] as [string, React.ReactNode]), ['DB 등록', r.firstSeen && kd(r.firstSeen)], ['비고', r.estimated && '날짜는 시점 추정치'],
         ['문서', (r.url || r.attachments?.length) && <ContactRow key="d" links={[[r.url, '공식 승인 원문'], ...((r.attachments ?? []) as any[]).map((a, i) => [attHref(a, i), attName(a, i)] as [string, string])]} />]]
     : tab === 'facilities'
-      ? [['시설명', r.name], ['판정', r.verdict], ['연락 상태', r.contact], ['유형', r.lane], ['지역', r.region], ['세대수', r.households && `${r.households}세대`], ['규모', r.scale], ['현 위탁사', r.operator], ['주소', r.address], ['관리사무소', r.phone ? <ContactRow phone={r.phone} /> : UNK],
+      ? [[T.facilityName, r.name], ['판정', r.verdict], ['연락 상태', r.contact], ['유형', r.lane], ['지역', r.region], ['세대수', r.households && `${r.households}세대`], ['규모', r.scale], [T.operator, r.operator], ['주소', r.address], [T.office, r.phone ? <ContactRow phone={r.phone} /> : UNK],
         ['부대시설', r.amenities && String(r.amenities)], ['준공(사용승인)', r.date && kd(r.date)], ['입주', r.moveIn && kd(r.moveIn)], ['경과', r.elapsedDays !== null && r.elapsedDays !== undefined && `입주·준공 뒤 ${r.elapsedDays}일`], ['DB 등록', r.firstSeen && kd(r.firstSeen)], ['다음 연락', r.next && kd(r.next)], ['최근 기록', r.lastNote], ['다음 조치', r.nextAction && `${r.nextAction}${r.nextActionFrom ? ` (${r.nextActionFrom})` : ''}`]]
       : [['회사', r.name], ['구분', r.division], ['순위', r.rank && `${r.rank}위`], ['상태', r.status], ['모집 공지', openLabel(r.open)], ['모집 시기', r.period], ['등록 요건', r.requirement], ['공동인증서', r.cert], ['비고', r.note], ['공지', r.notice],
         ['링크', <ContactRow key="l" links={[[r.url, '공지 원문'], [r.applyUrl, '등록 신청'], [r.portalUrl, '협력사 포털'], [r.homepage, '홈페이지']]} />], ['메모', r.memo], ['다음', r.next && kd(r.next)], ['DB 등록', r.firstSeen && kd(r.firstSeen)]];
@@ -978,7 +985,7 @@ const keyDates = (dates?: [string, unknown][]) => { const has = (dates ?? []).fi
   return pick3.map(([k, v]) => (k === '세대수' ? `${D(v)}세대` : `${k.replace('(예정)', '')} ${D(v)}`)).join(' · '); };
 /** 허브 카드(영업관리 2-7 신규단지 · 2-8 준공·입주 시설 · 2-9 협력사) — 칸 순서 그대로 */
 function HubCard({ tab, r, onRaw, onChange, canWrite }: { tab: string; r: any; onRaw: () => void; onChange?: () => void; canWrite?: boolean }) {
-  const today0 = today();
+  const today0 = today(); const T = useSalesTerms();
   const leadId = r.work?.leadId ?? r.leadId ?? null; const kind = tab === 'buildings' ? 'building' : tab === 'facilities' ? 'facility' : 'vendor';
   const handoff = canWrite && !leadId ? <HandoffButton kind={kind} id={String(r.id)} name={String(r.name ?? '')} onDone={onChange} compact /> : leadId ? <Link href={`/s/sales/leads?id=${leadId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-handoff-lead">영업 중 → 리드</Link> : null;
   return (
@@ -993,7 +1000,7 @@ function HubCard({ tab, r, onRaw, onChange, canWrite }: { tab: string; r: any; o
         <div className="mt-auto flex flex-wrap items-end gap-1.5 pt-1.5">{(r.url || r.attachments?.length) ? <ContactRow links={[[r.url, '공식 승인 원문'], ...((r.attachments ?? []) as any[]).map((a: any, i: number) => [attHref(a, i), attName(a, i)] as [string, string])]} /> : null}{handoff}</div>
       </>) : tab === 'facilities' ? (<>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" onClick={onRaw} className="text-left font-semibold hover:underline">{r.name}</button>{r.verdict && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800">{r.verdict}</span>}{r.contact && chip(r.contact)}</div>
-        <p className="text-xs text-ink-2">{[r.lane, r.region, r.households && `${r.households}세대`, r.scale, r.operator && `현 위탁 ${r.operator}`].filter(Boolean).join(' · ')}</p>
+        <p className="text-xs text-ink-2">{[r.lane, r.region, r.households && `${r.households}세대`, r.scale, r.operator && `${T.operator} ${r.operator}`].filter(Boolean).join(' · ')}</p>
         {r.address && <p className="hidden text-xs text-ink-3 md:block">{r.address}</p>}
         {/* 대표 검수 10/20 ②: 관리사무소 전화 → 전화·문자 줄, 앞에 '·' 가 붙던 준공·입주 줄 정리, 날짜 한국어 */}
         <div className="mt-1.5 flex flex-wrap items-end gap-1.5">{r.phone ? <ContactRow phone={r.phone} /> : <p className="hidden text-xs text-ink-3 md:block">대표 번호 미확인</p>}{handoff}</div>

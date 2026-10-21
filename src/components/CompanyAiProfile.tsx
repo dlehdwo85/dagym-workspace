@@ -4,6 +4,7 @@ import { Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, Field, cx, inputCls, toast } from '@/components/ui';
 import { uploadToLibrary } from '@/components/libraryUpload';
+import { useSalesTerms } from '@/components/session';
 
 type F = 'business' | 'customers' | 'tone' | 'cautions';
 type P = { name: string; industry: string | null; industries: string[]; business: string | null; customers: string | null; tone: string | null; cautions: string | null; industryOptions: string[] };
@@ -51,6 +52,7 @@ export function CompanyAiProfile({ compact = false }: { compact?: boolean }) {
 
 /** 'AI 로 정리': 글·홈페이지·회사소개서 또는 [질문으로 시작](5문항) → 칸별 초안 · 원래 값과 비교 · [적용]/[다시 쓰기] */
 function AiHelper({ values, onApply }: { values: Partial<Record<F, string | null>>; onApply: (k: F, v: string) => void }) {
+  const T = useSalesTerms(); // #408 업종 템플릿 예시 문구
   const [text, setText] = useState(''); const [url, setUrl] = useState(''); const [file, setFile] = useState<{ id: string; name: string } | null>(null);
   const [qs, setQs] = useState<string[] | null>(null); const [ans, setAns] = useState<string[]>(['', '', '', '', '']);
   const [draft, setDraft] = useState<Partial<Record<F, string>> | null>(null); const [busy, setBusy] = useState<F | 'all' | null>(null);
@@ -64,7 +66,7 @@ function AiHelper({ values, onApply }: { values: Partial<Record<F, string | null
     <aside className="space-y-2 rounded-card border border-violet-200 bg-violet-50/40 p-4 text-sm shadow-card" data-testid="ai-helper">
       <p className="flex items-center gap-1.5 font-semibold"><Sparkles className="size-4 text-violet-600" />AI 로 정리</p>
       <p className="text-xs text-ink-2">생각나는 대로 적거나 홈페이지·회사소개서를 넣으면 칸별 초안을 만듭니다. 잘 모르겠으면 [질문으로 시작].</p>
-      <textarea className={cx(inputCls, 'min-h-20')} maxLength={6000} value={text} onChange={(e) => setText(e.target.value)} placeholder="예: 우리는 아파트 커뮤니티 시설을 위탁 운영합니다. 관리사무소·입주자대표회의가 고객이고…" aria-label="회사 설명" data-testid="ai-helper-text" />
+      <textarea className={cx(inputCls, 'min-h-20')} maxLength={6000} value={text} onChange={(e) => setText(e.target.value)} placeholder={T.examples.aiProfile} aria-label="회사 설명" data-testid="ai-helper-text" />
       <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="홈페이지 주소 https://…" aria-label="홈페이지 주소" data-testid="ai-helper-url" />
       <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2"><span className="rounded-input border border-line bg-white px-2 py-1">회사소개서 파일</span>{file ? file.name : 'PDF·워드·한글·텍스트'}
         <input type="file" className="hidden" accept=".pdf,.doc,.docx,.hwp,.hwpx,.txt,.md" onChange={async (e) => { const x = e.target.files?.[0]; if (!x) return; try { setFile(await uploadToLibrary(x, '회사 소개', undefined, ['회사 소개'])); } catch (er: any) { toast.error(er.message); } }} data-testid="ai-helper-file" /></label>

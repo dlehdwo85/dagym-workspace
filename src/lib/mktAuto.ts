@@ -175,12 +175,20 @@ export async function planSlots(tenant: string, days = 14) {
 
 /** 알림·승인 받는 사람: 설정에서 고른 사람(회사 안·활성) — 없으면 관리자 전원 */
 export async function approvers(tenant: string) {
+  // #100 담당자 지정 '승인자' 규칙이 있으면 그 사람(부재면 부 담당)
+  const rule = await (await import('./assignees')).resolveAssignee(db(), tenant, 'approver', '').catch(() => null);
+  if (rule) return [rule.userId];
   const s = await settingsOf(tenant);
   if (s.notify_user_ids?.length) return (await db()<{ id: string }[]>`select id from users where tenant = ${tenant} and status = 'active' and id = any(${s.notify_user_ids}::uuid[])`).map((r) => r.id);
   return (await db()<{ id: string }[]>`select id from users where tenant = ${tenant} and role in ('owner', 'admin') and status = 'active'`).map((r) => r.id);
 }
 /** 시험 콘텐츠는 실행한 사람(없으면 규칙 만든 사람)에게만 */
-const audience = async (c: any, actorId?: string | null) => (c.is_test ? [actorId ?? c.created_by].filter(Boolean) as string[] : approvers(c.tenant));
+const audience = async (c: any, actorId?: string | null) => {
+  if (c.is_test) return [actorId ?? c.created_by].filter(Boolean) as string[];
+  // #100: 승인자 + 그 브랜드 마케팅 담당(규칙)도 함께
+  const brand = c.brand_id ? await (await import('./assignees')).resolveAssignee(db(), c.tenant, 'marketing_brand', c.brand_id).catch(() => null) : null;
+  return [...new Set([...(await approvers(c.tenant)), ...(brand ? [brand.userId] : [])])];
+};
 
 /** 제작: Claude 원고(+ 이미지/영상은 제작 요청 카드) → 품질 검사 → 통과본 승인함 · 실패본 '수정 요청'(사유) */
 /** 원고 재료(로컬 검수 10/18): 브랜드 키트(소개·주력 상품·이번 주 주제) · 회사 AI 프로필 · 마케팅 자료실 사진 설명 · 최근 게시 제목(겹치지 않게).

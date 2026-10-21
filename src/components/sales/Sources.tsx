@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, inputCls, toast } from '@/components/ui';
+import { useSalesTerms } from '@/components/session';
+import type { SalesTerms } from '@/lib/sales/terms';
 import { BidPrefs, Collectors } from './Collectors';
 
 type S = { code: string; name: string; provider: string; grp: string; category: string; refresh: string; enabled: boolean; common: boolean; keywords: string[]; regions: string[]; excludes: string[]; total: number; attribution: string; last_run_at: string | null };
@@ -14,6 +16,7 @@ const csv = (s: string) => s.split(/[,，]/).map((x) => x.trim()).filter(Boolean
 
 /** V41 단계 3 데이터 설정: AI 자동 세팅(업태·종목·지역 → 원천·검색어 추천 → [이대로 켜기]) + 원천별 켜기·검색어·지역·제외어 */
 export function Sources() {
+  const T = useSalesTerms(); // #408 업종 템플릿 예시 문구
   const { data, error, reload } = useApi<{ sources: S[]; settings: { industry: string | null; region: string | null; setup_done_at?: string | null } | null; canEdit: boolean; profile?: { industry: string | null; business: string | null; customers: string | null }; custom?: Custom[] }>('/api/sales/sources');
   const [prod, setProd] = useState(''); const [pick, setPick] = useState<Record<string, boolean>>({}); const [bids, setBids] = useState(true);
   const [cs, setCs] = useState<{ kind: Custom['kind']; label: string; value: string }>({ kind: 'site', label: '', value: '' });
@@ -46,8 +49,8 @@ export function Sources() {
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#1D4ED8]"><Sparkles className="size-4" />AI 자동 세팅</h2>
           <p className="mt-1 text-xs text-ink-2">사업자등록증의 업태·종목(또는 하는 일)과 영업 지역을 넣으면 맞는 공공데이터와 검색어를 골라 드립니다. 켜기 전에 고칠 수 있습니다.</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_10rem_auto]">
-            <input className={inputCls} value={ind} onChange={(e) => setInd(e.target.value)} placeholder={data.settings?.industry ?? data.profile?.industry ?? '예: 아파트 커뮤니티 운영 / 헬스장 / 인테리어'} aria-label="업태·종목" data-testid="sales-industry" />
-            <input className={cx(inputCls, 'sm:col-span-3')} value={prod} onChange={(e) => setProd(e.target.value)} placeholder="주력 상품·서비스(예: 커뮤니티 시설 위탁 운영)" aria-label="주력 상품" data-testid="sales-product" />
+            <input className={inputCls} value={ind} onChange={(e) => setInd(e.target.value)} placeholder={data.settings?.industry ?? data.profile?.industry ?? T.examples.industry} aria-label="업태·종목" data-testid="sales-industry" />
+            <input className={cx(inputCls, 'sm:col-span-3')} value={prod} onChange={(e) => setProd(e.target.value)} placeholder={T.examples.product} aria-label="주력 상품" data-testid="sales-product" />
             <select className={inputCls} value={reg} onChange={(e) => setReg(e.target.value)} aria-label="영업 지역"><option value="">{data.settings?.region ?? '전국'}</option>{SIDO.map((s) => <option key={s}>{s}</option>)}</select>
             <Button onClick={suggest} disabled={busy} data-testid="sales-suggest">{busy ? '고르는 중…' : '추천받기'}</Button>
           </div>
@@ -105,14 +108,21 @@ export function Sources() {
   );
 }
 
-/** 대표(10/19): 입찰·공고는 회사 선택 기능 — 끄면 입찰·공고 메뉴·카드·하단 탭(→ 제안·계약)·화면을 숨김 */
+/** 대표(10/19): 입찰·공고는 회사 선택 기능 — 끄면 입찰·공고 메뉴·카드·하단 탭(→ 제안·계약)·화면을 숨김
+ *  #408(대표 10/21 영업 재편 6): 업종 템플릿 — 영업 화면 용어(허브 탭·타일·칸 이름·예시 문구)를 회사 업종에 맞춤. null = 회사 업종으로 자동 */
+type Opts = { bids: boolean; bidsAuto: boolean; canEdit: boolean; template: { code: string; label: string; auto: boolean }; terms: SalesTerms; templates: { code: string; label: string; desc: string }[] };
 function SalesOptions() {
-  const { data, reload } = useApi<{ bids: boolean; bidsAuto: boolean; canEdit: boolean }>('/api/sales/options');
+  const { data, reload } = useApi<Opts>('/api/sales/options');
   if (!data) return null;
   async function set(v: boolean | null) {
     try { await api('/api/sales/options', { method: 'PUT', body: { bids: v } }); toast.ok(v === false ? '입찰·공고를 껐습니다 — 메뉴·카드·하단 탭에서 숨깁니다' : '입찰·공고를 켰습니다'); reload(); setTimeout(() => window.location.reload(), 600); }
     catch (e: any) { toast.error(e.message); }
   }
+  async function setTemplate(code: string | null) {
+    try { await api('/api/sales/options', { method: 'PUT', body: { template: code } }); toast.ok(code ? '업종 템플릿을 바꿨습니다 — 영업 화면 용어가 바뀝니다' : '회사 업종으로 자동 추정합니다'); reload(); setTimeout(() => window.location.reload(), 600); }
+    catch (e: any) { toast.error(e.message); }
+  }
+  const t = data.terms;
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="sales-options">
       <h2 className="text-sm font-semibold">쓰는 기능</h2>
@@ -122,6 +132,19 @@ function SalesOptions() {
         {data.canEdit && <Button size="sm" variant={data.bids ? 'secondary' : 'primary'} onClick={() => set(!data.bids)} data-testid="sales-bids-toggle">{data.bids ? '끄기' : '켜기'}</Button>}
       </div>
       <p className="mt-1 text-xs text-ink-2">입찰을 하지 않는 회사는 꺼 두세요. 입찰·공고 메뉴와 현황 카드가 사라지고, 휴대폰 하단 탭의 입찰·공고 자리는 &lsquo;제안·계약&rsquo;이 됩니다. 공용으로 모으는 공고 데이터는 다른 회사에 영향이 없습니다.</p>
+      <div id="template" className="mt-3 border-t border-line pt-3" data-testid="sales-template">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium">업종 템플릿</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-ink-2" data-testid="sales-template-state">{data.template.label}{data.template.auto ? ' (업종으로 자동)' : ''}</span>
+        </div>
+        <p className="mt-1 text-xs text-ink-2">영업 화면의 메뉴·칸 이름·예시 문구를 업종에 맞춥니다. 회사 정보의 업종으로 자동 고르고, 여기서 직접 바꿀 수 있습니다.</p>
+        <div className="mt-2 flex flex-wrap gap-1.5">{data.templates.map((x) => (
+          <button key={x.code} type="button" disabled={!data.canEdit} onClick={() => setTemplate(x.code)} title={x.desc} data-testid={`sales-template-${x.code}`} aria-pressed={x.code === data.template.code}
+            className={cx('rounded-full border px-3 py-1 text-xs', x.code === data.template.code ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white', !data.canEdit && 'cursor-default')}>{x.label}</button>))}
+          {data.canEdit && !data.template.auto && <button type="button" onClick={() => setTemplate(null)} className="rounded-full border border-dashed border-line px-3 py-1 text-xs text-ink-2" data-testid="sales-template-auto">업종으로 자동</button>}
+        </div>
+        <p className="mt-1.5 text-[11px] text-ink-3" data-testid="sales-template-preview">미리보기: {t.buildingsTab} · {t.facilitiesTab} · {t.vendorsTab} / 칸 이름 {t.unitName}·{t.office}·{t.operator}</p>
+      </div>
     </section>
   );
 }
@@ -142,7 +165,7 @@ function BizCats({ canEdit }: { canEdit: boolean }) {
   return (
     <section id="biz" className="rounded-card border border-line bg-white p-4" data-testid="sales-bizcats">
       <h2 className="text-sm font-semibold">관심 사업(카테고리)</h2>
-      <p className="mt-1 text-xs text-ink-2">우리 회사가 하는 사업을 적어 두면 입찰·공고를 사업별 탭으로 나누고, 공고마다 맞는 사업 배지를 붙입니다. 검색어는 공고의 사업 칸·제목·단지명·분류에서 찾습니다(쉼표로 구분).</p>
+      <p className="mt-1 text-xs text-ink-2">우리 회사가 하는 사업을 적어 두면 입찰·공고를 사업별 탭으로 나누고, 공고마다 맞는 사업 배지를 붙입니다. 검색어는 공고의 사업 칸·제목·대상 이름·분류에서 찾습니다(쉼표로 구분).</p>
       {!data ? <Skeleton rows={2} /> : <ul className="mt-2 space-y-1.5">{list.map((r, i) => (
         <li key={r.key ?? `n${i}`} className="grid gap-1.5 sm:grid-cols-[2.25rem_10rem_1fr_auto] sm:items-center" data-testid="sales-bizcat">
           <input type="color" className="h-8 w-9 cursor-pointer rounded border border-line" value={r.color} onChange={(e) => set(i, { color: e.target.value })} aria-label="색" disabled={!canEdit} />

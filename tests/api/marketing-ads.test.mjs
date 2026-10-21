@@ -20,7 +20,14 @@ before(async () => {
       const sig = createHmac('sha256', 'naver-secret-key-xyz').update(`${req.headers['x-timestamp']}.GET.${path}`).digest('base64');
       if (req.headers['x-signature'] !== sig || req.headers['x-api-key'] !== 'naver-license-abc' || req.headers['x-customer'] !== '1234567') return send(403, { title: 'Forbidden', code: 1018 });
       if (path === '/ncc/campaigns') return send(200, [{ nccCampaignId: 'cmp-a', name: '파워링크 본점' }]);
-      if (path === '/stats') { const day = JSON.parse(u.searchParams.get('timeRange')).since; return send(200, { data: day === today ? [{ id: 'cmp-a', impCnt: 1000, clkCnt: 50, salesAmt: 25000, ccnt: 2 }] : [] }); }
+      // #98 ③ 키워드/소재: 광고그룹 → 키워드·소재 → /stats(ids 가 키워드·소재면 그 단위)
+      if (path === '/ncc/adgroups') return send(200, u.searchParams.get('nccCampaignId') === 'cmp-a' ? [{ nccAdgroupId: 'grp-1', name: '동탄 그룹', nccCampaignId: 'cmp-a' }] : []);
+      if (path === '/ncc/keywords') return send(200, u.searchParams.get('nccAdgroupId') === 'grp-1' ? [{ nccKeywordId: 'kw-1', keyword: '커뮤니티 위탁' }, { nccKeywordId: 'kw-2', keyword: '헬스장 운영' }] : []);
+      if (path === '/ncc/ads') return send(200, u.searchParams.get('nccAdgroupId') === 'grp-1' ? [{ nccAdId: 'ad-1', ad: { headline: '아파트 커뮤니티 전문 운영', description: '…' } }] : []);
+      if (path === '/stats') { const day = JSON.parse(u.searchParams.get('timeRange')).since; const ids = (u.searchParams.get('ids') ?? '').split(',');
+        if (day !== today) return send(200, { data: [] });
+        if (ids.includes('cmp-a')) return send(200, { data: [{ id: 'cmp-a', impCnt: 1000, clkCnt: 50, salesAmt: 25000, ccnt: 2 }] });
+        return send(200, { data: [{ id: 'kw-1', impCnt: 600, clkCnt: 30, salesAmt: 15000, ccnt: 2 }, { id: 'kw-2', impCnt: 400, clkCnt: 20, salesAmt: 10000, ccnt: 0 }, { id: 'ad-1', impCnt: 1000, clkCnt: 50, salesAmt: 25000, ccnt: 2 }].filter((x) => ids.includes(x.id)) }); }
     }
     if (u.pathname === '/graph/oauth/access_token') return send(200, { access_token: u.searchParams.get('grant_type') ? 'meta-long' : 'meta-short' });
     if (u.pathname === '/graph/me') return send(200, { id: 'fb-user-77' });
@@ -29,6 +36,7 @@ before(async () => {
       { id: 'page-1', name: '다짐 본점', access_token: 'page-token-secret-1', tasks: ['MANAGE', 'CREATE_CONTENT'], instagram_business_account: { id: 'ig-1', username: 'dagym_main' } },
       { id: 'page-2', name: '다짐 2호점', access_token: 'page-token-secret-2', tasks: ['ANALYZE'] }] });
     if (u.pathname === '/graph/me/adaccounts') return send(200, { data: [{ account_id: '998877', name: '우리 메타 광고' }] });
+    if (u.pathname === '/graph/act_998877/insights' && u.searchParams.get('level') === 'ad') return send(200, { data: [{ date_start: today, ad_id: '5501', ad_name: '가을 리드 영상 A', adset_name: '30대 여성', campaign_id: '55', campaign_name: '가을 리드', impressions: '2000', clicks: '40', spend: '30000', account_currency: 'KRW', actions: [{ action_type: 'lead', value: '3' }] }] });
     if (u.pathname === '/graph/act_998877/insights') return send(200, { data: [{ date_start: today, campaign_id: '55', campaign_name: '가을 리드', impressions: '2000', clicks: '40', spend: '30000', account_currency: 'KRW', actions: [{ action_type: 'lead', value: '3' }, { action_type: 'link_click', value: '40' }] }] });
     if (u.pathname === '/goauth/token') return send(200, { access_token: 'g-access', refresh_token: 'g-refresh', expires_in: 3600 });
     // 종료된 버전(v24·v23 가정)은 구글처럼 HTML 404 → 수집기가 다음 버전을 찾아야 함
@@ -37,7 +45,12 @@ before(async () => {
     if (u.pathname === '/gads/customers:listAccessibleCustomers') return send(200, { resourceNames: ['customers/1112223333'] });
     if (u.pathname === '/gads/customers/1112223333/googleAds:search' && gads403) return send(403, { error: { code: 403, message: 'The caller does not have permission', status: 'PERMISSION_DENIED',
       details: [{ '@type': 'type.googleapis.com/google.ads.googleads.v22.errors.GoogleAdsFailure', errors: [{ errorCode: { authorizationError: 'DEVELOPER_TOKEN_NOT_APPROVED' }, message: 'The developer token is only approved for use with test accounts.' }] }] } });
-    if (u.pathname === '/gads/customers/1112223333/googleAds:search') return send(200, { results: [{ segments: { date: today }, campaign: { id: '77', name: '검색 캠페인' }, metrics: { impressions: '500', clicks: '10', costMicros: '12000000000', conversions: 1.5 }, customer: { currencyCode: 'KRW' } }] });
+    if (u.pathname === '/gads/customers/1112223333/googleAds:search') {
+      const q = String((() => { try { return JSON.parse(body).query; } catch { return ''; } })());
+      if (/FROM keyword_view/.test(q)) return send(200, { results: [{ segments: { date: today }, campaign: { id: '77', name: '검색 캠페인' }, adGroup: { name: '브랜드 그룹' }, adGroupCriterion: { criterionId: '9001', keyword: { text: '워크인 업무앱' } }, metrics: { impressions: '300', clicks: '8', costMicros: '9000000000', conversions: 1 }, customer: { currencyCode: 'KRW' } }] });
+      if (/FROM ad_group_ad/.test(q)) return send(200, { results: [{ segments: { date: today }, campaign: { id: '77', name: '검색 캠페인' }, adGroup: { name: '브랜드 그룹' }, adGroupAd: { ad: { id: '8001', name: '', type: 'RESPONSIVE_SEARCH_AD' } }, metrics: { impressions: '500', clicks: '10', costMicros: '12000000000', conversions: 1.5 }, customer: { currencyCode: 'KRW' } }] });
+      return send(200, { results: [{ segments: { date: today }, campaign: { id: '77', name: '검색 캠페인' }, metrics: { impressions: '500', clicks: '10', costMicros: '12000000000', conversions: 1.5 }, customer: { currencyCode: 'KRW' } }] });
+    }
     send(404, { error: { message: 'nope' } });
   }).listen(PORT);
   await resetDb();
@@ -58,7 +71,13 @@ test('네이버 라이선스 연결·읽기·합계·권한', async () => {
   assert.equal(r.sync.rows, 1, JSON.stringify(r));
   const [row] = await sql`select secret_enc from mkt_ad_accounts where id = ${r.id}`;
   assert.ok(row.secret_enc.startsWith('v1.') && !row.secret_enc.includes('naver-secret'), '암호화 보관');
-  assert.equal(hits.filter((h) => h.path === '/naver/stats').length, 7, '최근 7일 하루씩');
+  assert.equal(hits.filter((h) => h.path === '/naver/stats' && (h.q.ids ?? '').includes('cmp-a')).length, 7, '최근 7일 하루씩(캠페인)');
+  // #98 ③ 키워드/소재: 광고그룹 → 키워드·소재 → /stats(키워드·소재 id) → 표
+  assert.equal(r.sync.items, 3, JSON.stringify(r.sync));
+  const kw = await ctx.staffA.client.ok('GET', '/api/marketing/ads?days=7');
+  assert.deepEqual(kw.keywords.map((k) => [k.item_name, k.cost, k.adgroup_name, k.campaign_name]), [['커뮤니티 위탁', 15000, '동탄 그룹', '파워링크 본점'], ['헬스장 운영', 10000, '동탄 그룹', '파워링크 본점']], '키워드 광고비 순');
+  assert.deepEqual(kw.creatives.map((k) => [k.item_name, k.clicks]), [['아파트 커뮤니티 전문 운영', 50]]);
+  assert.equal((await ctx.staffA.client.ok('GET', '/api/marketing/ads?days=7&provider=google')).keywords.length, 0, '매체 필터');
   const ov = await ctx.staffA.client.ok('GET', '/api/marketing/ads?days=7');
   assert.deepEqual([ov.totals.impressions, ov.totals.clicks, ov.totals.cost, ov.totals.conversions], [1000, 50, 25000, 2]);
   assert.equal(ov.campaigns[0].campaign_name, '파워링크 본점'); assert.equal(ov.canEdit, false); assert.equal(ov.callbacks, null, '직원은 콜백 주소 없음');
@@ -70,6 +89,7 @@ test('네이버 라이선스 연결·읽기·합계·권한', async () => {
   // 다시 읽어도 덮어쓰기(중복 없음)
   await ctx.owner.ok('POST', '/api/marketing/ads/sync', {});
   assert.equal((await sql`select count(*)::int n from mkt_ad_stats`)[0].n, 1);
+  assert.equal((await sql`select count(*)::int n from mkt_ad_items`)[0].n, 3, '키워드·소재도 덮어쓰기');
   assert.equal((await ctx.staffB.client.req('GET', '/api/marketing/ads')).status, 404, '미배정 직원');
 });
 
@@ -95,6 +115,12 @@ test('Meta·Google OAuth 연결 → 계정 등록·성과', async () => {
   assert.equal(by['가을 리드'].conversions, 3, 'Meta 전환 = 리드만(링크 클릭 제외)');
   assert.equal(by['검색 캠페인'].cost, 12000, 'Google 비용 = micros / 1,000,000');
   assert.equal(ov.totals.cost, 25000 + 30000 + 12000);
+  // #98 ③ 구글 키워드(keyword_view)·광고(ad_group_ad) + Meta 광고(level=ad)
+  const kws = Object.fromEntries(ov.keywords.map((k) => [k.item_name, k]));
+  assert.equal(kws['워크인 업무앱'].cost, 9000); assert.equal(kws['워크인 업무앱'].adgroup_name, '브랜드 그룹');
+  const ads = Object.fromEntries(ov.creatives.map((k) => [k.item_name, k]));
+  assert.equal(ads['가을 리드 영상 A'].conversions, 3); assert.equal(ads['가을 리드 영상 A'].adgroup_name, '30대 여성');
+  assert.ok(ads['RESPONSIVE_SEARCH_AD 8001'], '이름 없는 구글 광고는 종류+id'); assert.equal(ads['RESPONSIVE_SEARCH_AD 8001'].cost, 12000);
   // 로컬 검수 10/19: Google 403 은 오류 상세(errorCode 종류=값)와 원인 안내를 계정 줄에 남김
   gads403 = true;
   await ctx.owner.ok('POST', '/api/marketing/ads/sync', {});
@@ -106,6 +132,7 @@ test('Meta·Google OAuth 연결 → 계정 등록·성과', async () => {
   const meta = ov.accounts.find((a) => a.provider === 'meta');
   await ctx.owner.ok('DELETE', `/api/marketing/ads/accounts/${meta.id}`);
   assert.equal((await sql`select count(*)::int n from mkt_ad_stats where account_id = ${meta.id}`)[0].n, 0);
+  assert.equal((await sql`select count(*)::int n from mkt_ad_items where account_id = ${meta.id}`)[0].n, 0, '키워드·소재도 함께 삭제');
 });
 
 test('게시 채널: 켜기/끄기·Meta [연결](페이지+인스타)·점검 안내·토큰 비노출·끊기·데이터 삭제 콜백', async () => {

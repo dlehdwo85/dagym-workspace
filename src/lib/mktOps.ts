@@ -423,7 +423,7 @@ export async function recommendRevenue(u: SessionUser, month: string) {
 }
 
 // ---------------- 대표 03:00 ② AI 마케터 상시 운영: 매일 지표 → 변화 감지 → '운영 신호' 카드(승인 뒤 실행) · 아침 한 줄 브리핑 · 지금 상태 ----------------
-export type OpsSignal = { key: string; level: 'warn' | 'action'; title: string; detail: string; action: string };
+export type OpsSignal = { key: string; level: 'warn' | 'action'; title: string; detail: string; action: string; /** 카드 [열기] 링크(선택) */ link?: string };
 async function dailyMetrics(tenant: string, day: string, includeWorkin: boolean) {
   const sql = db();
   const [c] = await sql<any[]>`select count(*) filter (where status = 'published' and (coalesce(published_at, scheduled_at) at time zone 'Asia/Seoul')::date = ${day}::date)::int posts,
@@ -464,6 +464,8 @@ export async function opsReview(tenant: string, now = new Date(), opts: { force?
   const hist = await sql<any[]>`select metrics from mkt_ops_daily where tenant = ${tenant} and day between ${minus(7)}::date and ${minus(1)}::date order by day`;
   const wk = async (from: number, to: number) => (await sql<{ n: number }[]>`select count(*)::int n from sales_lead_records where tenant = ${tenant} and kind = 'contracts' and coalesce((data->>'contract_date')::date, (occurred_at at time zone 'Asia/Seoul')::date) between ${minus(from)}::date and ${minus(to)}::date`)[0].n;
   const signals = detectSignals(m, hist, { contracts: await wk(6, 0), prevContracts: await wk(13, 7) });
+  // 대표 10/21 12:20 피드 일관성: 브랜드별 최근 9장 톤 편차(숫자만, sharp) → 신호(없으면 건너뜀)
+  signals.push(...(await (await import('./mktFeed')).feedSignals(tenant).catch(() => [])));
   const status = signals.some((s) => s.level === 'action') ? 'action' : signals.length ? 'warn' : 'ok';
   await sql`insert into mkt_ops_daily (tenant, day, metrics, signals, status, reviewed_at) values (${tenant}, ${day}::date, ${sql.json(m as never)}, ${sql.json(signals as never)}, ${status}, now())
     on conflict (tenant, day) do update set metrics = excluded.metrics, signals = excluded.signals, status = excluded.status, reviewed_at = now()`;
@@ -473,7 +475,7 @@ export async function opsReview(tenant: string, now = new Date(), opts: { force?
     const [dup] = await sql<{ id: string }[]>`select id from mkt_proposals where tenant = ${tenant} and kind = 'alert' and body->>'signal' = ${sg.key} and created_at >= now() - interval '3 days' limit 1`;
     if (dup) continue;
     await sql`insert into mkt_proposals (tenant, kind, title, summary, body, source, month, created_by) values (${tenant}, 'alert', ${sg.title.slice(0, 200)}, ${sg.detail.slice(0, 1000)},
-      ${sql.json({ signal: sg.key, level: sg.level, items: [{ title: '제안 조치', detail: sg.action, expected: sg.level === 'action' ? '손실 막기' : '기회 확대', cost: '없음(대표 승인 뒤 담당 업무)' }], rationale: `오늘 지표: 게시 ${m.posts}·클릭 ${m.clicks}·CPC ${m.cpc ? won(m.cpc) : '-'}·문의 ${m.inquiries}·가입 ${m.signups}·계약 ${m.contracts}${m.budgetRate !== null ? `·소진율 ${m.budgetRate}%` : ''}`, numbers: m } as never)}, 'template', ${day.slice(0, 7)}, null)`;
+      ${sql.json({ signal: sg.key, level: sg.level, items: [{ title: '제안 조치', detail: sg.action, expected: sg.level === 'action' ? '손실 막기' : '기회 확대', cost: '없음(대표 승인 뒤 담당 업무)' }], ...(sg.link ? { link: sg.link } : {}), rationale: `오늘 지표: 게시 ${m.posts}·클릭 ${m.clicks}·CPC ${m.cpc ? won(m.cpc) : '-'}·문의 ${m.inquiries}·가입 ${m.signups}·계약 ${m.contracts}${m.budgetRate !== null ? `·소진율 ${m.budgetRate}%` : ''}`, numbers: m } as never)}, 'template', ${day.slice(0, 7)}, null)`;
     cards++;
   }
   if (cards) await notify(sql, { userIds: await (await import('./mktAuto')).approvers(tenant), type: 'review_requested', title: `AI 마케터 운영 신호 ${cards}건: ${signals.slice(0, 2).map((s) => s.title).join(' · ')}`, body: '승인하면 담당 업무로 만듭니다', link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', dedupeKey: `mktops:alert:${tenant}:${day}`, push: true });
@@ -494,6 +496,7 @@ export async function opsStatus(tenant: string) {
 export async function opsView(u: SessionUser, month?: string) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u); const m = month ?? monthKst();
+  const feed = await (await import('./mktFeed')).feedConsistency(t).catch(() => null); // 대표 10/21 12:20 피드 일관성(브랜드별 최근 9장)
   const proposals = await sql<any[]>`select p.*, du.name as decided_by_name from mkt_proposals p left join users du on du.id = p.decided_by where p.tenant = ${t} order by (p.status = 'pending') desc, p.created_at desc limit 40`;
   const [budget] = await sql<any[]>`select b.*, au.name as approved_by_name from mkt_ad_budgets b left join users au on au.id = b.approved_by where b.tenant = ${t} and b.month = ${m}`;
   const spend = await sql<{ provider: string; cost: number }[]>`select a.provider, coalesce(sum(s.cost_krw), 0)::float8 cost from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.day between ${`${m}-01`}::date and ${lastDayOf(m)}::date group by a.provider`;
@@ -503,7 +506,7 @@ export async function opsView(u: SessionUser, month?: string) {
   const [st] = await sql<{ v: string | null }[]>`select ad_budget_monthly::text as v from mkt_settings where tenant = ${t}`;
   const brands = await brandShares(t);
   const totalDefault = await budgetTotalOf(t, m);
-  return { month: m, proposals, budget: budgetView, revenue, kinds: PROPOSAL_KIND, channels: AD_CH, canEdit: isAdmin(u), months: [monthKst(new Date(), 1), monthKst(), monthKst(new Date(), -1)],
+  return { month: m, feed, proposals, budget: budgetView, revenue, kinds: PROPOSAL_KIND, channels: AD_CH, canEdit: isAdmin(u), months: [monthKst(new Date(), 1), monthKst(), monthKst(new Date(), -1)],
     ownerTotal: st?.v ? Number(st.v) : null, totalDefault, brands, maxRevisions: MAX_REVISIONS, review: await opsStatus(t) };
 }
 /** 대표 02:30 ① 승인함 통합: 콘텐츠(기존) + 운영 제안 + 광고 예산 + 월 목표 + 제작 의뢰(프롬프트 준비 → [생성] 결정) 건수·목록 */
@@ -512,6 +515,7 @@ export async function inboxView(u: SessionUser) {
   const sql = db(); const t = tenantOf(u);
   const { approvableCount } = await import('./marketing');
   const contents = await approvableCount(t);
+  const feed = await (await import('./mktFeed')).feedConsistency(t).catch(() => null); // 대표 10/21 12:20 피드 일관성(브랜드별 최근 9장)
   const proposals = await sql<any[]>`select p.*, du.name as decided_by_name from mkt_proposals p left join users du on du.id = p.decided_by where p.tenant = ${t} and p.status = 'pending' order by p.created_at desc limit 20`;
   const budgets = await sql<any[]>`select b.*, au.name as approved_by_name from mkt_ad_budgets b left join users au on au.id = b.approved_by where b.tenant = ${t} and b.status = 'pending' order by b.month desc limit 3`;
   const goals = await sql<any[]>`select g.*, b.name as brand, ub.name as created_by_name, ua.name as approved_by_name from mkt_goals g left join mkt_brands b on b.id = g.brand_id left join users ub on ub.id = g.created_by left join users ua on ua.id = g.approved_by where g.tenant = ${t} and g.status = 'pending' order by g.month desc, (g.brand_id is null) desc limit 10`;

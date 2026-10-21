@@ -19,7 +19,8 @@ export const REVERTED_STATUS = '되돌림';
 export const handoffInput = z.object({ kind: z.enum(WORK_KINDS), id: z.string().min(1).max(100), assigneeIds: z.array(zUuid).min(1).max(10), note: z.string().trim().max(500).optional() });
 const ITEM_TBL: Record<WorkKind, string> = { bid: 'procurement_notices', building: 'building_sales_pipeline', facility: 'operating_facility_prospects', vendor: 'vendor_registrations' };
 const SRC_TBL: Record<WorkKind, string> = { bid: 'opportunity_work', building: 'opportunity_work', facility: 'operating_facility_prospects__progress', vendor: 'vendor_registrations__progress' };
-const KIND_NAME: Record<WorkKind, string> = { bid: '공고', building: '신규 현장', facility: '시설', vendor: '협력사' };
+/** #408 종류 이름은 회사 업종 템플릿에서(공고는 공통) */
+const kindNames = async (tenant: string): Promise<Record<WorkKind, string>> => { const k = (await (await import('./options')).salesTerms(tenant)).kind; return { bid: '공고', building: k.building, facility: k.facility, vendor: k.vendor }; };
 const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = o?.[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return null; };
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 /** 날짜(또는 일시) 문자열 → {day, iso(KST)} — 시각이 없으면 하루 종일 */
@@ -30,11 +31,13 @@ function when(v: unknown): { day: string; start: string; end: string; allDay: bo
   const st = new Date(`${m[1]}T00:00:00+09:00`); return { day: m[1], start: st.toISOString(), end: new Date(st.getTime() + 864e5).toISOString(), allDay: true };
 }
 /** 넘길 수 있는 사람: 영업 공간 구성원 + 관리자 */
-export async function handoffPeople(u: SessionUser) {
+export async function handoffPeople(u: SessionUser, kind?: string | null) {
   await assertSpace(u, 'sales'); const t = tenantOf(u);
+  // #100 담당자 지정: 원천별 영업 담당 규칙이 있으면 기본 선택(부재면 부 담당)
+  const rule = await (await import('../assignees')).resolveAssignee(db(), t, 'sales_source', (WORK_KINDS as readonly string[]).includes(String(kind)) ? String(kind) : '').catch(() => null);
   const people = await db()<{ id: string; name: string; role: string; title: string | null }[]>`select u.id, u.name, u.role, u.title from users u left join space_members m on m.user_id = u.id and m.tenant = u.tenant
     where u.tenant = ${t} and u.status = 'active' and not u.is_demo and (u.role in ('owner', 'admin') or 'sales' = any(coalesce(m.spaces, '{}'))) order by (u.id = ${u.id}) desc, u.name`;
-  return { people, me: u.id };
+  return { people, me: u.id, suggested: rule && people.some((p) => p.id === rule.userId) ? rule.userId : null, suggestedByRule: rule?.ruleId ?? null };
 }
 export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
   await assertSpace(u, 'sales'); const t = tenantOf(u); const sql = db();
@@ -42,6 +45,7 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
   if (!row) throw notFound('대상을 찾을 수 없습니다');
   const r = row.row;
   if (!(await writesOpen(t))) throw new HttpError(409, 'sales_read_only', '영업관리 전환 전이라 워크인에서는 넘길 수 없습니다');
+  const KIND_NAME = await kindNames(t);
   const cur = await workRecord(sql, t, i.kind, i.id);
   if (cur?.lead_id) throw new HttpError(409, 'already', '이미 영업 진행으로 넘긴 건입니다 — 리드에서 이어서 진행하세요');
   const ids = [...new Set(i.assigneeIds)];

@@ -9,6 +9,7 @@ import { ROLE_LABEL, type Role } from '@/lib/types';
 import { MenuPermsTab } from '@/components/MenuPerms';
 import { TeamsTab } from '@/components/Teams';
 import { OffboardModal } from '@/components/admin/Offboard';
+import { AssigneeRulesTab } from '@/components/admin/AssigneeRules';
 
 const STATUS: Record<string, string> = { invited: '초대됨', active: '사용 중', disabled: '사용 중지', left: '퇴사' };
 
@@ -29,13 +30,13 @@ function UnitChecks({ value, onChange }: { value: string[]; onChange: (v: string
 
 export default function UsersPage() {
   const { user } = useSession();
-  const [tab, setTabState] = useState<'users' | 'teams' | 'menus' | 'spaces'>('users');
+  const [tab, setTabState] = useState<'users' | 'teams' | 'menus' | 'spaces' | 'assignees'>('users');
   // 탭을 주소(?tab=)에도 남김 → 팀 보드 등 하위 화면에서 뒤로 오면 그 탭이 다시 열림
-  const setTab = (t: 'users' | 'teams' | 'menus' | 'spaces') => { setTabState(t); try { const u = new URL(window.location.href); if (t === 'users') u.searchParams.delete('tab'); else u.searchParams.set('tab', t); window.history.replaceState(window.history.state, '', u.toString()); } catch {} };
+  const setTab = (t: 'users' | 'teams' | 'menus' | 'spaces' | 'assignees') => { setTabState(t); try { const u = new URL(window.location.href); if (t === 'users') u.searchParams.delete('tab'); else u.searchParams.set('tab', t); window.history.replaceState(window.history.state, '', u.toString()); } catch {} };
   // 대기열 ①(10/19): 팀 보드 뒤로가기 등 ?tab=teams 로 오면 그 탭
-  useEffect(() => { const t = new URLSearchParams(window.location.search).get('tab'); if (t === 'teams' || t === 'menus' || t === 'spaces') setTabState(t); }, []);
+  useEffect(() => { const t = new URLSearchParams(window.location.search).get('tab'); if (t === 'teams' || t === 'menus' || t === 'spaces' || t === 'assignees') setTabState(t); }, []);
   const list = useApi<{ users: any[] }>(user.role === 'owner' ? '/api/admin/users' : null);
-  const tabs = [['users', '사용자'], ['teams', '부서·팀'], ...(user.role === 'owner' ? [['menus', '메뉴 권한']] : []), ...(['owner', 'admin'].includes(user.role) ? [['spaces', '공간']] : [])] as ['users' | 'teams' | 'menus' | 'spaces', string][];
+  const tabs = [['users', '사용자'], ['teams', '부서·팀'], ...(user.role === 'owner' ? [['menus', '메뉴 권한']] : []), ...(['owner', 'admin'].includes(user.role) ? [['spaces', '공간'], ['assignees', '담당자 지정']] : [])] as ['users' | 'teams' | 'menus' | 'spaces' | 'assignees', string][];
   return (
     <div className="space-y-3">
       <div className="flex gap-1.5" role="tablist" aria-label="사용자 관리">
@@ -44,7 +45,7 @@ export default function UsersPage() {
             className={cx('rounded-full border px-3 py-1 text-sm', tab === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line bg-white text-ink-2')}>{l}</button>
         ))}
       </div>
-      {tab === 'users' ? <Users /> : tab === 'teams' ? <TeamsTab /> : tab === 'spaces' ? <SpacesTab /> : <MenuPermsTab users={list.data?.users ?? []} />}
+      {tab === 'users' ? <Users /> : tab === 'teams' ? <TeamsTab /> : tab === 'spaces' ? <SpacesTab /> : tab === 'assignees' ? <AssigneeRulesTab /> : <MenuPermsTab users={list.data?.users ?? []} />}
     </div>
   );
 }

@@ -48,4 +48,19 @@ export async function salesTodo({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.getByTestId('sales-todo').waitFor();
   await owner.screenshot({ path: `${SHOTS}/157-sales-home-todo-390.png` });
   await owner.setViewportSize({ width: 1366, height: 900 });
+  // #408 업종 템플릿(대표 10/21 영업 재편 6): 데이터 설정에서 템플릿 → 허브 탭·업무 원천 배지 용어가 바뀜 → 되돌림
+  await owner.goto(`${BASE}/s/sales/sources`);
+  const tpl = owner.getByTestId('sales-template'); await tpl.waitFor();
+  assert.match(await tpl.getByTestId('sales-template-state').innerText(), /시설 운영·위탁/);
+  // 저장 뒤 600ms 에 화면이 새로고침(세션 용어 갱신) → 그 이동이 끝난 뒤에 다음으로(아니면 goto 가 ERR_ABORTED)
+  await Promise.all([owner.waitForNavigation({ waitUntil: 'load' }), tpl.getByTestId('sales-template-it').click()]);
+  await owner.getByTestId('sales-template').getByTestId('sales-template-state').filter({ hasText: 'IT·소프트웨어' }).waitFor();
+  await owner.screenshot({ path: `${SHOTS}/180-sales-template.png` });
+  await owner.goto(`${BASE}/s/sales/hub`);
+  await owner.getByTestId('sales-hub-buildings').filter({ hasText: '신규 프로젝트' }).waitFor();
+  await owner.goto(`${BASE}/tasks?space=sales`);
+  assert.equal(await owner.getByTestId('row-title').filter({ hasText: 'E2E 할일 단지 A' }).first().getByTestId('row-sales-ref').innerText(), '신규 프로젝트');
+  await owner.goto(`${BASE}/s/sales/sources`);
+  await Promise.all([owner.waitForNavigation({ waitUntil: 'load' }), owner.getByTestId('sales-template-facility').click()]);
+  await owner.getByTestId('sales-template').getByTestId('sales-template-state').filter({ hasText: '시설 운영·위탁' }).waitFor();
 }
