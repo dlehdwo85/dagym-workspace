@@ -24,7 +24,8 @@ async function awayNow(sql: Sql, ids: string[], now = new Date()): Promise<Set<s
   if (!ids.length) return new Set();
   const rows = await sql<{ created_by: string }[]>`select distinct e.created_by from events e where e.created_by = any(${ids}::uuid[]) and e.deleted_at is null and not e.cancelled and e.rrule is null
     and e.kind in ('vacation', 'business_trip') and e.start_at <= ${now} and e.end_at > ${now}`;
-  return new Set(rows.map((r) => r.created_by));
+  const manual = await (await import('./away')).manualAwaySet(sql, ids, now); // #76 직접 설정한 부재도 대체
+  return new Set([...rows.map((r) => r.created_by), ...manual]);
 }
 
 /** 규칙으로 담당자 고르기 — ref 가 있으면 그 규칙, 없으면 기본('') 규칙. 규칙이 없으면 null(호출한 쪽의 기존 기본값) */

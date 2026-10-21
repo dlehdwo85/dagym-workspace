@@ -1,10 +1,17 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, ListPartsCommand, AbortMultipartUploadCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { mkdir, writeFile, readFile, stat } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { hmac } from './crypto';
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+/** 대표 10/20 17:00 (#109): 영상은 100MB 까지 — 8MB 조각으로 나눠 올린다(조각 업로드는 20MB 넘는 파일부터) */
+export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+export const PART_SIZE = 8 * 1024 * 1024;
+export const MULTIPART_FROM = 20 * 1024 * 1024;
+export const isVideoMime = (mime: string | null | undefined) => /^video\//i.test(mime ?? '');
+export const maxUploadBytes = (mime: string | null | undefined) => (isVideoMime(mime) ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES);
+export const tooLargeMsg = (mime: string | null | undefined) => `${isVideoMime(mime) ? '영상' : '파일'}은 ${maxUploadBytes(mime) / 1024 / 1024}MB 까지 올릴 수 있습니다`;
 /** 서버 경유 업로드 최대 크기 (Vercel 함수 요청 본문 한도 4.5MB 아래) */
 export const FALLBACK_MAX = 4 * 1024 * 1024;
 const LOCAL_DIR = process.env.LOCAL_UPLOAD_DIR ?? path.join(process.cwd(), '.data', 'uploads');
@@ -50,8 +57,9 @@ function s3() {
   return client;
 }
 
+export type UploadTarget = { method: 'PUT'; url: string; headers: Record<string, string>; fallback?: string; fallbackMax?: number; multipart?: { uploadId: string; partSize: number; parts: { n: number; url: string }[] } };
 /** 업로드 대상: S3 면 presigned PUT, 로컬이면 서명된 내부 업로드 URL */
-export async function uploadTarget(key: string, mime: string) {
+export async function uploadTarget(key: string, mime: string): Promise<UploadTarget> {
   const exp = Date.now() + 600_000;
   const sig = hmac(`put:${key}:${exp}`);
   const viaServer = `/api/files/local?key=${encodeURIComponent(key)}&exp=${exp}&sig=${sig}`;
@@ -62,6 +70,47 @@ export async function uploadTarget(key: string, mime: string) {
   }
   return { method: 'PUT' as const, url: viaServer, headers: { 'content-type': mime } };
 }
+
+/** 큰 파일(영상)은 조각으로: S3 면 멀티파트(조각마다 presigned PUT, 완료는 서버가 ListParts 로 ETag 를 모아 합침 — 브라우저 CORS 에 ETag 노출이 없어도 됨), 로컬이면 `key.partN` 조각 파일을 완료 때 이어 붙인다 */
+export async function multipartTarget(key: string, mime: string, size: number): Promise<UploadTarget> {
+  const n = Math.max(1, Math.ceil(size / PART_SIZE));
+  if (s3Configured()) {
+    const c = await s3().send(new CreateMultipartUploadCommand({ Bucket: s3Env().bucket, Key: key, ContentType: mime }));
+    const parts = await Promise.all(Array.from({ length: n }, async (_, i) => ({ n: i + 1, url: await getSignedUrl(s3(), new UploadPartCommand({ Bucket: s3Env().bucket, Key: key, UploadId: c.UploadId!, PartNumber: i + 1 }), { expiresIn: 3600 }) })));
+    return { method: 'PUT' as const, url: '', headers: {}, multipart: { uploadId: c.UploadId!, partSize: PART_SIZE, parts } };
+  }
+  const exp = Date.now() + 3600_000;
+  const parts = Array.from({ length: n }, (_, i) => { const pk = `${key}.part${i + 1}`; return { n: i + 1, url: `/api/files/local?key=${encodeURIComponent(pk)}&exp=${exp}&sig=${hmac(`put:${pk}:${exp}`)}` }; });
+  return { method: 'PUT' as const, url: '', headers: { 'content-type': mime }, multipart: { uploadId: `local-${n}`, partSize: PART_SIZE, parts } };
+}
+/** 조각 업로드 완료 — 올린 조각을 한 파일로. 실패하면 조각을 버린다 */
+export async function completeMultipart(key: string, uploadId: string) {
+  if (s3Configured()) {
+    const parts: { ETag: string; PartNumber: number }[] = [];
+    let marker: string | undefined;
+    do {
+      const l = await s3().send(new ListPartsCommand({ Bucket: s3Env().bucket, Key: key, UploadId: uploadId, PartNumberMarker: marker }));
+      for (const p of l.Parts ?? []) parts.push({ ETag: p.ETag!, PartNumber: p.PartNumber! });
+      marker = l.IsTruncated ? l.NextPartNumberMarker : undefined;
+    } while (marker);
+    if (!parts.length) { await s3().send(new AbortMultipartUploadCommand({ Bucket: s3Env().bucket, Key: key, UploadId: uploadId })).catch(() => {}); throw new Error('올라온 조각이 없습니다'); }
+    parts.sort((a, b) => a.PartNumber - b.PartNumber);
+    await s3().send(new CompleteMultipartUploadCommand({ Bucket: s3Env().bucket, Key: key, UploadId: uploadId, MultipartUpload: { Parts: parts } }));
+    return;
+  }
+  const n = Number(/^local-(\d+)$/.exec(uploadId)?.[1]);
+  if (!n || n > 64) throw new Error('잘못된 조각 업로드입니다');
+  const bufs: Buffer[] = [];
+  for (let i = 1; i <= n; i++) {
+    const b = await readLocal(`${key}.part${i}`).catch(() => null);
+    if (!b) throw new Error(`조각 ${i}/${n} 이 올라오지 않았습니다`);
+    bufs.push(b);
+  }
+  await writeLocal(key, Buffer.concat(bufs));
+  for (let i = 1; i <= n; i++) await unlink(path.join(LOCAL_DIR, `${key}.part${i}`)).catch(() => {});
+}
+/** 크기·종류에 맞는 업로드 대상(조각 또는 한 번에) */
+export const uploadTargetFor = (key: string, mime: string, size: number): Promise<UploadTarget> => (size > MULTIPART_FROM ? multipartTarget(key, mime, size) : uploadTarget(key, mime));
 
 export function verifyLocalSig(kind: 'put' | 'get', key: string, exp: string, sig: string) {
   return Number(exp) > Date.now() && hmac(`${kind}:${key}:${exp}`) === sig && !key.includes('..');

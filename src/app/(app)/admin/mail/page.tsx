@@ -128,7 +128,8 @@ function Signatures({ data, reload }: { data: { me: { name: string; title: strin
 }
 
 /** V29 발송 방식: 워크인 발송(설정 없이) · 회사 메일 계정 · 자동 */
-function SendMode({ data, reload }: { data: { mode: 'auto' | 'workin' | 'smtp'; channel: string | null; account: Account | null; workin: { enabled: boolean; from: string | null }; canEdit: boolean; allowStaffReplyTo: boolean }; reload: () => void }) {
+type Staff = { allowed: boolean; domains: string[]; connections: { userId: string; name: string; fromEmail: string; provider: string; lastOkAt: string | null; lastError: string | null }[] };
+function SendMode({ data, reload }: { data: { mode: 'auto' | 'workin' | 'smtp'; channel: string | null; account: Account | null; workin: { enabled: boolean; from: string | null }; canEdit: boolean; allowStaffReplyTo: boolean; staff?: Staff }; reload: () => void }) {
   async function pick(mode: string) {
     try { await api('/api/org/mail-mode', { method: 'PUT', body: { mode } }); reload(); toast.ok('발송 방식을 바꿨습니다'); } catch (e: any) { toast.error(e.message); }
   }
@@ -158,6 +159,46 @@ function SendMode({ data, reload }: { data: { mode: 'auto' | 'workin' | 'smtp'; 
           직원이 자기 회신 주소(업무 이메일)를 바꿀 수 있음 <span className="text-xs text-ink-3">끄면 직원 메일의 답장은 늘 가입 때 정해진 업무 이메일로</span>
         </label>
       )}
+      {data.canEdit && data.staff && <StaffAccounts staff={data.staff} reload={reload} />}
     </section>
+  );
+}
+
+/** V33 4 (#184) 직원 개인 메일 계정: 허용 on/off · 허용 도메인 · 연결 현황(누가 어떤 주소로, 비밀번호는 안 보임). 연결되면 그 직원의 발송은 본인 계정으로(보낸메일함에도 남음) */
+function StaffAccounts({ staff, reload }: { staff: Staff; reload: () => void }) {
+  const [domains, setDomains] = useState(staff.domains.join(', '));
+  const [busy, setBusy] = useState(false);
+  async function put(body: Record<string, unknown>, msg: string) {
+    setBusy(true);
+    try { await api('/api/org/mail-mode', { method: 'PUT', body }); reload(); toast.ok(msg); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="mt-3 space-y-2 border-t border-line pt-3" data-testid="staff-mail">
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={staff.allowed} disabled={busy} onChange={(e) => put({ staffAccounts: e.target.checked }, e.target.checked ? '직원이 자기 메일 계정을 연결할 수 있습니다' : '직원 개인 메일 계정 연결을 껐습니다 — 발송은 회사 기본 방식으로')} data-testid="staff-mail-allow" />
+        직원 개인 메일 계정 연결 허용 <span className="text-xs text-ink-3">설정 › 내 메일 계정에서 연결하면 그 직원의 메일은 본인 계정(예: kim@회사도메인)으로 나가고 보낸메일함에도 남습니다</span>
+      </label>
+      {staff.allowed && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-ink-2">허용 도메인</span>
+          <input className={cx(inputCls, 'h-8 w-64 px-2')} value={domains} onChange={(e) => setDomains(e.target.value)} placeholder="예: company.co.kr (쉼표로 여러 개, 비우면 제한 없음)" data-testid="staff-mail-domains" />
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => put({ staffDomains: domains.split(/[,\s]+/).map((d) => d.trim().replace(/^@/, '')).filter(Boolean) }, '허용 도메인을 저장했습니다')} data-testid="staff-mail-domains-save">저장</Button>
+        </div>
+      )}
+      <div>
+        <p className="text-xs font-medium text-ink-2">연결 현황 {staff.connections.length}명</p>
+        {staff.connections.length === 0 ? <p className="text-xs text-ink-3">아직 연결한 직원이 없습니다.</p> : (
+          <ul className="mt-1 divide-y divide-line rounded-input border border-line text-sm" data-testid="staff-mail-list">
+            {staff.connections.map((c) => (
+              <li key={c.userId} className="flex flex-wrap items-center gap-2 px-2.5 py-1.5" data-testid="staff-mail-row">
+                <b>{c.name}</b><span className="text-ink-2">{c.fromEmail}</span><span className="text-xs text-ink-3">{c.provider}</span>
+                {c.lastOkAt && <span className="text-xs text-ink-3">마지막 성공 {fmtDateTime(c.lastOkAt)}</span>}
+                {c.lastError && <span className="text-xs text-red-600">최근 오류: {c.lastError}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }

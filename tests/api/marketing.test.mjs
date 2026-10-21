@@ -61,6 +61,15 @@ describe('V41 4-2 마케팅', () => {
     const cross = await st.ok('POST', '/api/marketing/contents', { title: '함께 올릴 글', channel: 'instagram', body: '캡션', mediaIds: [], crossChannels: ['facebook', 'threads', 'instagram'] });
     assert.deepEqual((await sql`select cross_channels from mkt_contents where id = ${cross.id}`)[0].cross_channels, ['facebook', 'threads']);
     await sql`update mkt_contents set status = 'canceled' where id = ${cross.id}`;
+    // #95 스레드 500자 한도: 스레드 채널·'스레드에도' 는 501자부터 400, 인스타만이면 통과. 수정본(새 버전)도 같은 규칙
+    const long = '가'.repeat(501);
+    const tooLong = await st.req('POST', '/api/marketing/contents', { title: '긴 글', channel: 'threads', body: long, mediaIds: [] });
+    assert.equal(tooLong.status, 400); assert.match(tooLong.body.error.message, /500자 이내.*501자/);
+    assert.equal((await st.req('POST', '/api/marketing/contents', { title: '긴 글 크로스', channel: 'instagram', body: long, mediaIds: [], crossChannels: ['threads'] })).status, 400);
+    const okLong = await st.ok('POST', '/api/marketing/contents', { title: '긴 글 인스타만', channel: 'instagram', body: long, mediaIds: [] });
+    const th = await st.ok('POST', '/api/marketing/contents', { title: '스레드 글', channel: 'threads', body: '가'.repeat(500), mediaIds: [] });
+    assert.equal((await st.req('POST', `/api/marketing/contents/${th.id}/versions`, { body: long, mediaIds: [] })).status, 400, '새 버전도 500자');
+    await sql`update mkt_contents set status = 'canceled' where id in (${okLong.id}, ${th.id})`;
     const n = await sql`select count(*)::int as n from notifications where user_id = ${ctx.ownerId} and type = 'review_requested'`;
     assert.ok(n[0].n >= 1, '관리자에게 승인 요청 알림');
     assert.equal((await st.req('POST', `/api/marketing/contents/${id}/decide`, { version: 1, decision: 'approve' })).status, 403, '직원은 승인 못 함');

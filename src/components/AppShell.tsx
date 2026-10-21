@@ -1,4 +1,5 @@
 'use client';
+import { ChatBubble } from '@/components/ChatBubble';
 import { RoleBadge } from '@/components/RoleBadge';
 import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
@@ -67,6 +68,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const router = useRouter();
   const [unread, setUnread] = useState(0);
   const [alarms, setAlarms] = useState<AlarmItem[]>([]); // 로컬 10/20(대표): 웹 알람 띠(알람처럼 울리는 알림, 해제 전)
+  const [approvalsTodo, setApprovalsTodo] = useState(0); // #114 ⑦ 휴대폰 상단 '결재할 것 n건'(알림 폴링에 실려 옴)
   const [chatUnread, setChatUnread] = useState(0);
   const [aiDock, setAiDock] = useState(false); // V14 11번 모든 화면 AI 비서
   // 메시지 화면을 오가면 메시지 배지를 바로 새로
@@ -162,11 +164,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
   useEffect(() => {
     let alive = true;
     const poll = async () => {
-      try { const r = await api('/api/notifications?unread=1'); if (alive) { setUnread(r.unread); setAlarms(r.alarms ?? []); } } catch {}
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // 10/21 DB 쿼터 장애: 가려진 탭은 폴링하지 않음
+      try { const r = await api('/api/notifications?unread=1'); if (alive) { setUnread(r.unread); setAlarms(r.alarms ?? []); setApprovalsTodo(r.approvalsTodo ?? 0); } } catch {}
       try { const c = await api('/api/chat/unread'); if (alive) setChatUnread(c.unread); } catch {}
     };
     poll();
-    const t = setInterval(poll, 60_000);
+    const t = setInterval(poll, 120_000); // 10/21: 60초 → 120초(탭 포커스·wos-refresh 때는 바로)
     const onFocus = () => { poll(); };
     window.addEventListener('focus', onFocus);
     // V32 0: 읽음 즉시 배지 반영(알림 화면이 보내는 값) + 다른 화면에서 바뀌면 다시 셈
@@ -217,7 +220,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
       ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
       // 대표 핫픽스 10/20 19:10(앱 캡처): 업무 공간 하단 = 홈 · 업무 · 캘린더 · 결재 · 더보기 — 프로젝트는 더보기 › 업무 메뉴로. 탭 구성 변경은 앞으로 대표 확인 뒤에만
-      : v3 ? [byHref('/'), byHref('/tasks'), byHref('/calendar'), byHref('/approvals')] : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
+      : v3 ? [byHref('/'), byHref('/tasks'), byHref('/calendar'), { ...byHref('/approvals'), badge: approvalsTodo }] : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
   const active = (href: string) => {
     const [p, q] = href.split('?');
     if (p === '/') return path === '/';
@@ -424,6 +427,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
               </span>
             </div>
           </header>
+          {/* #114 ⑦ 휴대폰 상단 '결재할 것 n건' — 내 결재 차례가 있을 때만, 누르면 결재 › 내가 결재할 것 */}
+          {approvalsTodo > 0 && !path.startsWith('/approvals') && (
+            <Link href="/approvals?view=todo" className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 sm:hidden" data-testid="approvals-todo-bar">
+              <span className="inline-flex items-center gap-1.5"><Stamp className="size-4 text-amber-700" aria-hidden />결재할 것 {approvalsTodo}건</span><span className="text-amber-700">결재하기 ›</span>
+            </Link>
+          )}
           {/* 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄은 없앰 — 하단 탭 + 더보기 › 공간 메뉴로(하단 탭과 겹치고 깔끔하지 않음) */}
           <AlarmBar items={alarms} onChange={(id) => { setAlarms((a) => a.filter((x) => x.id !== id)); window.dispatchEvent(new Event('wos-refresh')); }} />
           <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
@@ -474,6 +483,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
             {v3 && chatUnread + unread > 0 && <span className="absolute right-[18%] top-1 min-w-[18px] rounded-full bg-red-500 px-1 text-center text-[10px] font-bold leading-[18px] text-white" data-testid="tab-more-badge">{chatUnread + unread > 99 ? '99+' : chatUnread + unread}</span>}
           </button>
         </nav>
+        {/* 대표 10/20 16:20 (#106) 휴대폰 오른쪽 아래 말풍선 — 최근 대화방 바로·안 읽은 수·길게 누르면 AI 비서, 대화방·키보드·알람 띠에서 숨김 */}
+        <ChatBubble unread={chatUnread} ai={!!session.features.ai} alarm={alarms.length > 0} />
 
         {spaceSheet && spaces.length > 1 && (
           <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setSpaceSheet(false)}>

@@ -154,7 +154,7 @@ function afterRequest(method: string) {
     after(async () => {
       try {
         const [r] = await db()<{ age: number | null }[]>`select extract(epoch from now() - max(started_at))::int as age from job_runs where job = 'tick' and status in ('ok', 'running', 'error')`;
-        if (r?.age !== null && r?.age !== undefined && r.age < 600) return;
+        if (r?.age !== null && r?.age !== undefined && r.age < Number(process.env.PIGGYBACK_MIN_AGE_S ?? 900)) return; // 10/21: 10분 → 15분(스케줄러와 같은 간격)
         const { runTick } = await import('./jobs');
         await runTick('piggyback');
       } catch (e) { await logError('piggyback-tick', e); }

@@ -53,6 +53,11 @@ export function startFakeGoogle(port = 3199) {
       });
       return json(res, 200, { choices: [{ message: { role: 'assistant', content } }], usage: { total_tokens: 321 } });
     }
+    // ---- 가짜 OpenAI 음성 인식(#109 영상 음성 STT): multipart 를 받은 척하고 정해진 녹취를 돌려준다 ----
+    if (p === '/openai/v1/audio/transcriptions' && req.method === 'POST') {
+      state.openai.push({ auth: req.headers.authorization, kind: 'transcription', size: Buffer.byteLength(raw ?? ''), model: /name="model"\r\n\r\n([^\r]+)/.exec(String(raw))?.[1] ?? null });
+      return json(res, 200, { text: '다음 주 수요일까지 강남점 간판 교체 견적 받아 주세요. 그리고 전단지 초안은 금요일에 보겠습니다.' });
+    }
     // ---- 가짜 Anthropic Files API (V22 문서 엔진) ----
     if (p === '/v1/files' && req.method === 'POST') {
       const filename = /filename="([^"]+)"/.exec(raw)?.[1] ?? 'upload';

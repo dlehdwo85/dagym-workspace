@@ -262,7 +262,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         ...props.map((p: any) => ({ kind: 'proposal', at: p.proposal_date, title: `제안 · ${p.title}${p.amount ? ` ${Number(p.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: p.__id })),
         ...cons.map((c: any) => ({ kind: 'contract', at: c.contract_date ?? c.start_date, title: `계약 · ${c.title}${c.amount ? ` ${Number(c.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: c.__id })),
         ...events.map((e: any) => ({ kind: 'event', at: e.start_at, title: `일정 · ${e.title}`, by: null, id: e.id, href: `/calendar?event=${e.id}` }))]
-        .filter((x) => x.at).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+        .filter((x) => x.at).map((x) => ({ ...x, at: x.at instanceof Date ? x.at.toISOString() : String(x.at) })) // #148: Date 는 ISO 로(String(Date) 는 'Tue Oct…' 라 정렬이 틀림)
+        .sort((a, b) => String(b.at).localeCompare(String(a.at)));
       return { ...meta, lead: lead(r, names), raw: Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith('__'))), activities: acts, timing: await recs('lead_opportunity_timing'),
         interests: await recs('lead_business_interests'), tasks: await relSrc('tasks'), wTasks, timeline, proposals: props, contracts: cons,
         work: (await sql<any[]>`select src_id, src_tbl, status, data from sales_work_records where tenant = ${t} and lead_id = ${lid} order by updated_at desc`).map((w) => ({ ...w.data, status: w.status, __id: w.src_id })), // S1-2: 넘겨 온 공고·단지·시설·협력사

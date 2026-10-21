@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { MediaFull, MediaThumb, isVideoMime, mimeOf, posterFrom } from '@/components/MediaView';
+import { VideoDigestButton } from '@/components/VideoDigestButton';
 import { api } from '@/components/client';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -83,6 +84,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
               <MediaThumb src={`/api/library/${m}/download?inline=1`} mime={mimeOf(c.media_info, m)} poster={isVideoMime(mimeOf(c.media_info, m)) && posterFrom(c.media_info, m) ? `/api/library/${posterFrom(c.media_info, m)}/download?inline=1` : null} className="size-full object-cover" />{k === 0 && <span className="absolute left-0 top-0 rounded-br bg-violet-600 px-1 text-[10px] text-white">표지</span>}
             </button>))}</div>
           <p className="mt-0.5 text-[11px] text-ink-3">{media.length}장 — 옆으로 넘겨 보기</p>
+          {media.some((m) => isVideoMime(mimeOf(c.media_info, m))) && <VideoDigestButton fileId={media.find((m) => isVideoMime(mimeOf(c.media_info, m)))!} title={c.title} mode="review" />}
         </div>)}
       {/* 대표 재지적 10/20 18:45 ②: 시안이 없어도 카드 첫 화면에 자리(회색 상자)를 늘 보여 승인할 수 있게 — 제작 중이면 예정 시각 */}
       {media.length === 0 && <div className="mt-2 flex items-center gap-3 rounded-input border border-dashed border-line bg-slate-50 p-2" data-testid="approval-no-media">

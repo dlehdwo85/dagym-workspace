@@ -44,14 +44,17 @@ export async function notify(sql: Sql, n: NotifyInput): Promise<string[]> {
     const pref = await sql<{ in_app: boolean; push: boolean }[]>`
       select in_app, push from notification_prefs where user_id = ${userId} and type = ${n.type}`;
     const inApp = pref[0]?.in_app ?? true;
-    const push = n.push === false ? false : (pref[0]?.push ?? defaultPush(n.type));
-    if (!inApp && !push) continue;
+    let push = n.push === false ? false : (pref[0]?.push ?? defaultPush(n.type));
+    // V35 2 2차 (#76): 부재(직접 설정·연차) 중에는 푸시를 보류하고 목록에만(meta.held) → 돌아온 날 요약 1건
+    let held = false;
+    if (push && (await (await import('./away')).heldNow(sql, userId))) { push = false; held = true; }
+    if (!inApp && !push && !held) continue;
     const active = await sql`select 1 from users where id = ${userId} and status = 'active'`;
     if (active.length === 0) continue;
     const rows = await sql<{ id: string }[]>`
       insert into notifications (user_id, type, title, body, link, entity_type, entity_id, actor_id, dedupe_key, read_at, meta, space)
       values (${userId}, ${n.type}, ${n.title}, ${n.body ?? ''}, ${n.link}, ${n.entityType ?? null}, ${n.entityId ?? null},
-              ${n.actorId ?? null}, ${n.dedupeKey}, ${inApp ? null : sql`now()`}, ${sql.json((n.meta ?? {}) as never)}, ${n.space ?? null})
+              ${n.actorId ?? null}, ${n.dedupeKey}, ${inApp ? null : sql`now()`}, ${sql.json({ ...(n.meta ?? {}), ...(held ? { held: true } : {}) } as never)}, ${n.space ?? null})
       on conflict (user_id, dedupe_key) do nothing
       returning id`;
     if (!rows[0]) continue;

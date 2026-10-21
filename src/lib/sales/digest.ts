@@ -60,7 +60,9 @@ const SLUG_OF: Record<string, string> = { kapt_bid: 'kapt_bid_notices', g2b_bid:
 export async function buildDigest(tenant: string, day = kstDay()) {
   const sql = db(); const p = await prefsOf(tenant);
   const off = new Set((await sql<{ slug: string }[]>`select slug from sales_collector_settings where tenant = ${tenant} and not enabled`).map((r) => r.slug));
-  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone and (row->>'first_seen_at' >= ${day} or row->>'updated_at' >= ${day}) limit 5000`;
+  // #148: first_seen_at 은 UTC ISO 문자열, day 는 KST 날짜 — KST 00~09시에는 UTC 날짜가 하루 앞서 '>= day' 문자열 비교로 빠짐 → 하루 넓게 거르고 정확한 날짜는 아래 dayOf(KST) 로
+  const from = new Date(Date.parse(`${day}T00:00:00+09:00`) - 864e5).toISOString().slice(0, 10);
+  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone and (row->>'first_seen_at' >= ${from} or row->>'updated_at' >= ${from}) limit 5000`;
   const items: DigestItem[] = []; const skipped: Record<string, number> = {};
   for (const { src_id, row: r } of rows) {
     const slug = SLUG_OF[String(r.source_type)] ?? ''; if (slug && off.has(slug)) continue;

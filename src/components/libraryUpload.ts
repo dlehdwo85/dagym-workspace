@@ -7,8 +7,9 @@ import { putFile } from './upload';
 export async function uploadToLibrary(raw: File, folder = 'AI 요청 첨부', onProgress?: (pct: number) => void, tags: string[] = ['AI 첨부']): Promise<{ id: string; name: string }> {
   const file = await shrinkImage(raw);
   const r = await api('/api/library', { body: { fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, folder, tags, purpose: 'ai_attach' } });
-  await putFile(r.upload, file, onProgress);
-  await api(`/api/library/${r.id}/complete`, { body: {} });
+  const { uploadId } = await putFile(r.upload, file, onProgress);
+  await api(`/api/library/${r.id}/complete`, { body: uploadId ? { uploadId } : {} });
   return { id: r.id, name: file.name };
 }
-export const AI_ACCEPT = 'image/*,.pdf,.xlsx,.docx,.pptx,.txt,.csv,.md';
+/** #109: 영상(video/*)도 — 올린 뒤 화면에서 프레임·음성만 뽑아 AI 에 보낸다(영상 자체는 안 보냄) */
+export const AI_ACCEPT = 'image/*,video/*,.pdf,.xlsx,.docx,.pptx,.txt,.csv,.md';

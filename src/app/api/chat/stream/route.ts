@@ -4,7 +4,7 @@ import { changesSince, latestId } from '@/lib/chat';
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 /**
- * 실시간(SSE): 2초마다 새 메시지·수정·입력 중·읽음을 확인해 보낸다. 서버 실행 시간 제한 때문에 약 50초 뒤 닫고,
+ * 실시간(SSE): 4초마다(CHAT_STREAM_INTERVAL_MS, 10/21 DB 쿼터 장애 뒤 2초 → 4초) 새 메시지·수정·입력 중·읽음을 확인해 보낸다. 서버 실행 시간 제한 때문에 약 50초 뒤 닫고,
  * 브라우저 EventSource 가 이어서 다시 연결한다(Last-Event-ID = 마지막 메시지 id). 실패하면 화면이 5초 폴링으로 바꾼다.
  */
 export const GET = handler(async ({ req, user }) => {
@@ -30,7 +30,7 @@ export const GET = handler(async ({ req, user }) => {
           const rd = JSON.stringify(c.reads); if (rd !== lastReads) { send('reads', c.reads); lastReads = rd; }
           ctrl.enqueue(enc.encode(': ping\n\n'));
         } catch { break; }
-        await new Promise((r) => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, Number(process.env.CHAT_STREAM_INTERVAL_MS ?? 4000)));
       }
       ctrl.close();
     },

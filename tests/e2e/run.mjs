@@ -27,6 +27,8 @@ import { quotesFlow } from './quotes.step.mjs';
 import { noticesFlow } from './notices.step.mjs';
 import { attendanceFlow } from './attendance.step.mjs';
 import { approvalsFlow } from './approvals.step.mjs';
+import { contractsFlow } from './contracts.step.mjs';
+import { awayFlow } from './away.step.mjs';
 import { usageStatsFlow } from './usage-stats.step.mjs';
 import { contactsFlow } from './contacts.step.mjs';
 import { settlementFlow } from './settlement.step.mjs';
@@ -62,7 +64,7 @@ import { v1447 } from './v1447.step.mjs';
 import { v1448 } from './v1448.step.mjs';
 import { panel1440, listNarrow } from './panel1440.step.mjs';
 import { v283 } from './v283.step.mjs';
-import { v30import, sheetPhone, notifRead, checkScroll, roleBadge } from './v30import.step.mjs';
+import { v30import, sheetPhone, notifRead, checkScroll, roleBadge, chatBubble } from './v30import.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -1273,6 +1275,8 @@ await step('HQ-3 캘린더: 빈 칸 클릭 → 빠른 입력(업무 탭) 저장 
   await owner.getByTestId('calendar-list').getByLabel('업무 숨기기').waitFor();
   await owner.waitForLoadState('networkidle'); // 일정을 불러온 뒤(이른 시각 일정이 있으면 시간 칸이 늘어남) 위치 측정
   await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().scrollIntoViewIfNeeded(); // 첫 위치 = 지금 - 1시간(10/19)
+  // #148: 오늘이 목요일이면 d(오늘+2) 가 토요일 = 맨 오른쪽 열 → 가운데가 메신저 독 버튼(오른쪽 아래) 위에 와서 클릭이 독을 열었음. 클릭 전에 독 버튼을 숨김
+  await owner.evaluate(() => { const b = document.querySelector('[data-testid="msg-dock-open"]'); if (b) b.style.visibility = 'hidden'; });
   const col = await owner.locator(`.fc-timegrid-col[data-date="${d}"]`).boundingBox();
   const slot = await owner.locator('td.fc-timegrid-slot-lane[data-time="11:00:00"]').first().boundingBox();
   await owner.mouse.click(col.x + col.width / 2, slot.y + 4);
@@ -2320,6 +2324,7 @@ await step('V30 ① 엑셀·CSV 업무 가져오기(PC 표·담당자 고르기�
 await step('실기기 83: 휴대폰 문자·메일 시안 시트 스크롤·버튼 줄이 댓글 입력줄에 안 가림', () => sheetPhone({ owner, BASE, SHOTS }));
 await step('V32 0 알림 읽음: 안 읽은 것만·누르면 바로 읽음·업무를 열면 자동 읽음·전체 탭', () => notifRead({ owner, BASE, SHOTS, ctx }));
 await step('#101 권한 배지: 사용자 관리 CEO → 회사 설정 한글 → 끄기 → 영어', () => roleBadge({ owner, BASE, SHOTS }));
+await step('#106 휴대폰 말풍선: 보임·배지 → 최근 대화방 → 방 안 숨김 → 설정 끄기', () => chatBubble({ owner, ctx, BASE, SHOTS }));
 await step('실기기: 휴대폰 업무 상세(#댓글 주소)에서 체크리스트 체크해도 화면이 내려가지 않음·포커스 유지', () => checkScroll({ owner, BASE, SHOTS }));
 await step('점검 ①: 태블릿·좁은 창(768·1024·1100) 업무 목록 이름이 눌리지 않음', () => listNarrow({ owner, BASE, SHOTS }));
 await step('V36 3 관리 화면 권한: 직원이 관리 주소로 들어가면 안내(무슨 메뉴·누구에게 요청), 대표가 그 메뉴만 켜 주면 그 화면만 열림', async () => {
@@ -2420,6 +2425,9 @@ await step('대표 19:00 제작의뢰실: 의뢰 → 프롬프트 → 수정 →
 await step('대표 20:00 운영실: AI 마케터 카드 반려·승인 → 제작의뢰 · 광고 예산 고치기 → 승인·집행 · 월 매출 목표 막대(마케팅·영업 홈) · 월간 보고 CAC·ROI', () => mktOps({ owner, ctx, sql, BASE, SHOTS }));
 await step('대표 23:40·23:55 마감일 버튼 크기 + 업무 첨부 자료실에서 가져오기(검색·체크 → 연결·타임라인)', () => attachLibrary({ owner, ctx, BASE, SHOTS }));
 await step('대표 02:30·03:00 승인함 통합(종류별 탭·건수·바로 승인/반려) · 예산 브랜드 축(세팅안 필요·총액 적기) · 월 목표 반려 · 매출 목표 AI 추천 · 지금 상태', () => inbox({ owner, ctx, sql, BASE, SHOTS }));
+
+await step('#116 전자계약서: 사용자 줄 [전자계약서] → 근로계약서 보내기 → 링크·접속 코드 → 로그인 없는 서명 화면(코드·본문·그리기·동의) → 서명 → 전자계약서 탭 1/2', () => contractsFlow({ browser, owner, ctx, BASE, SHOTS, sql }));
+await step('대기열 소형 3건: 설정 부재중(기간·문구 → 부재 중 안내·근무 상태 부재 → 해제) · 일정 화상 회의 링크(수정 화면 칸 → 미리보기 [회의 참여])', () => awayFlow({ owner, staff, ctx, BASE, SHOTS, today, addDays }));
 
 await browser.close();
 srv.proc.kill();

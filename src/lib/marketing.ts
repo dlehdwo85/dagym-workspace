@@ -156,6 +156,13 @@ export async function getContent(u: SessionUser, id: string) {
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };
+/** 대표 10/20 11:40 ② (#95) 스레드는 글 500자(Threads API 한도) — 스레드 채널이거나 '스레드에도' 체크면 저장 때 막는다(게시 때 잘리지 않게) */
+export const THREADS_MAX = 500;
+function threadsLimit(channel: string, cross: string[] | null | undefined, body: string) {
+  if (channel !== 'threads' && !(cross ?? []).includes('threads')) return;
+  const n = [...body].length;
+  if (n > THREADS_MAX) throw badRequest(`스레드는 ${THREADS_MAX}자 이내로 써 주세요 (지금 ${n}자). 스레드를 빼거나 글을 줄여 주세요`);
+}
 export const contentInput = z.object({ title: z.string().trim().min(1).max(200), channel: zChannel, brandId: zUuid.nullable().optional(), scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
   /** 대표 10/20 11:40 ②·6): 같은 글을 함께 올릴 채널('페이스북에도'·'스레드에도') — 승인 1건, M1 게시 실행기가 채널마다 올림 */
   crossChannels: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional(), ...versionFields,
@@ -169,6 +176,7 @@ export async function createContent(u: SessionUser, i: z.infer<typeof contentInp
   if (i.brandId && !br) throw notFound('브랜드를 찾을 수 없습니다');
   const isTest = !!br?.test_mode; // 시험 모드 브랜드: [시험] 표시·알림은 올린 사람에게만·게시 확인 안 됨
   const title = isTest && !i.title.startsWith('[시험]') ? `[시험] ${i.title}` : i.title;
+  threadsLimit(i.channel, i.crossChannels, i.body);
   return sql.begin(async (tx) => {
     const rat = i.rationale && Object.values(i.rationale).some(Boolean) ? { ...i.rationale, source: 'user' } : null;
     const [c] = await tx<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, is_test, cross_channels, rationale)
@@ -189,9 +197,10 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
   await mediaOk(u, i.mediaIds);
   const sql = db();
   return sql.begin(async (tx) => {
-    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by, channel, brand_id from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
+    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by, channel, brand_id, cross_channels from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
+    threadsLimit(c.channel, c.cross_channels, i.body);
     const v = c.current_version + 1;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${id}, ${v}, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
     if (needsPhotos(c.channel, i.mediaIds.length)) { await tx`update mkt_contents set current_version = ${v}, status = 'changes', quality = ${tx.json({ passed: false, issues: [BLOG_PHOTO_RULE] } as never)}, updated_at = now() where id = ${id}`; return { version: v, needsPhotos: true }; }

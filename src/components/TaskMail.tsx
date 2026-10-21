@@ -12,7 +12,7 @@ import { KakaoSend } from './KakaoSend';
 
 type Cand = { value: string; label: string; source: 'inquiry' | 'contact' | 'lead' | 'description' }; // 대표 05:20 ②
 type Ctx = {
-  canSend: boolean; account: { fromEmail: string; fromName: string | null } | null;
+  canSend: boolean; account: { fromEmail: string; fromName: string | null; mine?: boolean } | null;
   channel: 'email:smtp' | 'email:workin' | null; workinFrom: string | null; defaults: { fromName: string; replyTo: string }; replyToEditable?: boolean;
   kinds: { key: string; label: string; subject: string; body: string }[];
   companies: { key: string; name: string; isDefault: boolean; html: string; smsLine: string }[]; company: string | null;
@@ -21,7 +21,11 @@ type Ctx = {
   attachments: { id: string; name: string; size: number; mime: string; source?: string; blocked?: 'deleted' | 'confidential' | null }[]; linkThresholdBytes: number; taskTitle: string;
 };
 type Item = { id: string; channel: string; preview: string | null; status: string; to_addrs: string[]; subject: string; files: { name: string }[]; as_link: boolean; attempts: number; last_error: string | null;
-  error_kind: string | null; sent_at: string | null; created_at: string; next_attempt_at: string; sender_name: string; first_opened_at: string | null; scheduled_at?: string | null; created_by?: string };
+  error_kind: string | null; sent_at: string | null; created_at: string; next_attempt_at: string; sender_name: string; first_opened_at: string | null; scheduled_at?: string | null; created_by?: string; sms_body?: string | null };
+/** #177 예약 문자를 다시 열 때(본문 완성본·받는 사람·보관함 행) */
+type ComposeInitial = AssistDraft & { to?: string; outboxId?: string; complete?: boolean };
+const INTENTS = { send: '자료 보냄', progress: '진행 안내', schedule: '일정 확인', thanks: '감사 인사' } as const;
+const PH = /\[[^\]\n]{1,12}\]/; // V32 7-1: [날짜] 같은 빈칸
 
 // ---- 대표 요청(10/19) 예약 보내기: KST 날짜·시각 → ISO(+09:00), 빠른 선택, 밤·주말 경고 ----
 const kstParts = (d = new Date()) => { const f = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' }).formatToParts(d);
@@ -52,7 +56,7 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const splitAddrs = (s: string) => s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
 const STATUS: Record<string, [string, string]> = {
   queued: ['보내는 중', 'bg-sky-50 text-sky-700'], sending: ['보내는 중', 'bg-sky-50 text-sky-700'], retry: ['재시도 대기', 'bg-amber-50 text-amber-800'],
-  sent: ['보냄', 'bg-emerald-50 text-emerald-700'], failed: ['실패', 'bg-red-50 text-red-700'], canceled: ['취소', 'bg-slate-100 text-ink-3'],
+  sent: ['보냄', 'bg-emerald-50 text-emerald-700'], failed: ['실패', 'bg-red-50 text-red-700'], canceled: ['취소', 'bg-slate-100 text-ink-3'], due: ['보낼 시간', 'bg-amber-50 text-amber-800'],
 };
 
 /** V21 업무 안 "보낼 자료·메일": [메일로] 시안(실제 나갈 모습 그대로) → 사람이 [보내기] → 보관함 발송, 상태 실시간 */
@@ -68,12 +72,21 @@ export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: str
     try { await api(`/api/mail/outbox/${id}/retry`, { body: {} }); hist.reload(); } catch (e: any) { toast.error(e.message); }
   }
   // V28-1: 업무 AI 비서의 초안 → 시안 창을 바로 연다(보내기 권한이 없으면 안내만)
-  const [initial, setInitial] = useState<AssistDraft | null>(null);
+  const [initial, setInitial] = useState<ComposeInitial | null>(null);
   useEffect(() => {
     if (!draft || !hist.data) return;
     if (hist.data.canSend) { setInitial(draft); setOpen(true); } else toast.info('보내기 권한이 없어 시안 창을 열 수 없습니다 — 초안을 복사해 대표에게 전달해 주세요');
     onDraftUsed?.();
   }, [draft, hist.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  // #177 예약 문자가 '보낼 시간'이면 본문 완성본으로 시안 창을 열어 문자앱으로 넘긴다 (알림 링크 /tasks/{id}?sms={outboxId} 는 자동으로)
+  const openDue = (i: Item) => { setInitial({ channel: 'sms', subject: '', body: i.sms_body ?? '', attachmentIds: [], to: i.to_addrs.join(', '), outboxId: i.id, complete: true }); setOpen(true); };
+  const dueOpened = useRef(false);
+  useEffect(() => {
+    if (!hist.data || dueOpened.current) return;
+    const id = new URLSearchParams(window.location.search).get('sms'); if (!id) return;
+    const it = hist.data.items.find((x) => x.id === id && x.status === 'due');
+    if (it && hist.data.canSend) { dueOpened.current = true; openDue(it); }
+  }, [hist.data]);
   if (!hist.data) return null;
   if (!hist.data.canSend && !hist.data.items.length) return null;
   return (
@@ -95,6 +108,9 @@ export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: str
                 <p className="mt-0.5 truncate text-xs text-ink-2">받는 사람 {i.to_addrs.join(', ')}{i.files.length > 0 && ` · 첨부 ${i.files.length}개${i.as_link ? '(링크)' : ''}`}</p>
                 {i.first_opened_at && <p className="mt-0.5 flex items-center gap-1 text-xs text-emerald-700" data-testid="mail-opened"><Eye className="size-3" />고객이 자료를 열어봄 · {fmtDateTime(i.first_opened_at)}</p>}
                 {sch && hist.data!.canSend && <ScheduleEdit at={i.scheduled_at!} onChange={(iso) => reschedule(i.id, { sendAt: iso })} onCancel={() => confirm('예약을 취소할까요?') && reschedule(i.id, { cancel: true })} />}
+                {i.status === 'due' && hist.data!.canSend && <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-amber-800" data-testid="sms-due"><span>보낼 시간이 됐습니다 — 휴대폰 문자앱으로 넘겨 보내 주세요</span>
+                  <button type="button" className="font-medium underline" onClick={() => openDue(i)} data-testid="sms-due-open">문자앱 열기</button>
+                  <button type="button" className="underline" onClick={() => confirm('이 예약 문자를 보내지 않을까요?') && reschedule(i.id, { cancel: true })} data-testid="sms-due-cancel">안 보냄</button></p>}
                 {i.status === 'retry' && <p className="mt-0.5 text-xs text-amber-800">{i.last_error} — {fmtDateTime(i.next_attempt_at)}에 자동으로 다시 보냅니다</p>}
                 {i.status === 'failed' && <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-red-700" data-testid="mail-error">{i.last_error}
                   {i.error_kind === 'auth' && <Link href="/admin/mail" className="underline">메일 계정 확인</Link>}
@@ -109,7 +125,7 @@ export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: str
   );
 }
 
-function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: string; onClose: () => void; onSent: () => void; onAttach: () => void; initial?: AssistDraft | null }) {
+function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: string; onClose: () => void; onSent: () => void; onAttach: () => void; initial?: ComposeInitial | null }) {
   const ctx = useApi<Ctx>(`/api/tasks/${taskId}/mail`, [taskId]);
   const d = ctx.data;
   const [f, setF] = useState<{ company: string; kind: string; to: string; cc: string; bcc: string; fromName: string; replyTo: string; more: boolean; subject: string; body: string; files: string[]; title: string; phone: string; workEmail: string } | null>(null);
@@ -121,6 +137,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   const [kakao, setKakao] = useState(initial?.channel === 'kakao' ? [initial.subject, initial.body].filter(Boolean).join('\n\n') : '');
   const [drafting, setDrafting] = useState(false);
   const [rec, setRec] = useState<{ id: string; title: string; folder: string; size: number }[]>([]);
+  const [warn, setWarn] = useState<string[]>([]); // V32 7-1 초안 경고(빈칸·LMS)
   const [sms, setSms] = useState({ to: '', body: '' });
   const [smsOpen, setSmsOpen] = useState<{ url: string; qr: string | null; share?: string } | null>(null);
   const [lib, setLib] = useState(false);
@@ -136,7 +153,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: d.to.join(', '), cc: '', bcc: '', fromName: d.defaults?.fromName ?? '', replyTo: d.defaults?.replyTo ?? '', more: false,
       subject: initial?.channel === 'email' && initial.subject ? initial.subject : `${k.subject}${d.contact?.organization ? ` — ${d.contact.organization}` : ''}`,
       body: initial?.channel === 'email' && initial.body ? initial.body : k.body, files: okFiles, title: '', phone: '', workEmail: '' });
-    if (initial?.channel === 'sms') setSms({ to: d.phone ?? d.contact?.phone ?? '', body: initial.body });
+    if (initial?.channel === 'sms') setSms({ to: initial.to ?? d.phone ?? d.contact?.phone ?? '', body: initial.body });
   }, [d, f]);
   const sig = d?.companies.find((c) => c.key === f?.company);
   const total = useMemo(() => (d && f ? d.attachments.filter((a) => f.files.includes(a.id)).reduce((s, a) => s + a.size, 0) + libFiles.reduce((s, a) => s + a.size, 0) : 0), [d, f, libFiles]);
@@ -155,12 +172,12 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     set({ kind: key, subject: `${k.subject}${d!.contact?.organization ? ` — ${d!.contact.organization}` : ''}`, body: k.body });
   }
   // V21 2차: AI 초안(제목·본문) + 자료 추천 상위 3 — 초안만, 보내기는 사람
-  async function aiDraft() {
+  async function aiDraft(intent?: string) {
     setDrafting(true);
     try {
-      const r = await api('/api/mail/draft', { body: { taskId, kind: f!.kind, company: f!.company || undefined, channel: channel === 'kakao' ? 'sms' : channel } }); // 카카오톡은 짧은 문자 초안을 씀
+      const r = await api('/api/mail/draft', { body: { taskId, kind: f!.kind, company: f!.company || undefined, channel: channel === 'kakao' ? 'sms' : channel, ...(intent ? { intent } : {}), hasFiles: fileCount > 0 } }); // 카카오톡은 짧은 문자 초안을 씀
       if (channel === 'sms') setSms((x) => ({ ...x, body: r.body })); else if (channel === 'kakao') setKakao(r.body); else set({ subject: r.subject, body: r.body });
-      setRec(r.recommend ?? []);
+      setRec(r.recommend ?? []); setWarn(r.warnings ?? []);
       toast.ok('AI 초안을 넣었습니다 — 확인하고 고쳐 주세요');
     } catch (e: any) { toast.error(e.message); } finally { setDrafting(false); }
   }
@@ -173,15 +190,17 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   async function openSms() {
     const nums = sms.to.split(/[,;\s]+/).map((x) => x.replace(/[^0-9+]/g, '')).filter(Boolean);
     if (!nums.length) { toast.error('받는 사람 전화번호를 넣어 주세요'); return; }
+    if (PH.test(sms.body)) { toast.error('빈칸([날짜] 등)을 채운 뒤 보내 주세요'); return; }
+    const complete = !!initial?.complete; // 예약 문자: 본문에 링크·서명이 이미 들어 있음
     let share: string | undefined;
     try {
-      if (f!.files.length || libFiles.length) {
+      if (!complete && (f!.files.length || libFiles.length)) {
         const r = await withConfidentialConfirm((ok) => api('/api/mail/share', { body: { taskId, attachmentIds: f!.files, libraryFileIds: libIds(), company: f!.company || undefined, ...(ok ? { confirmConfidential: true } : {}) } }));
         if (!r) return; // 기밀 경고에서 [취소]
         share = r.url;
       }
     } catch (e: any) { toast.error(e.message); return; }
-    const text = [sms.body.trim(), share ? `자료 내려받기(14일): ${share}` : '', smsLine].filter(Boolean).join('\n\n');
+    const text = complete ? sms.body.trim() : [sms.body.trim(), share ? `자료 내려받기(14일): ${share}` : '', smsLine].filter(Boolean).join('\n\n');
     const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
     const url = `sms:${nums.join(',')}${ios ? '&' : '?'}body=${encodeURIComponent(text)}`;
     const touch = window.matchMedia('(pointer: coarse)').matches;
@@ -193,9 +212,26 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!sent) { setSmsOpen(null); return; }
     try {
       const nums = sms.to.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
-      await api('/api/mail/sms-log', { body: { taskId, to: nums, body: sms.body, shareUrl: smsOpen?.share } });
+      await api('/api/mail/sms-log', { body: { taskId, to: nums, body: sms.body, shareUrl: smsOpen?.share, ...(initial?.outboxId ? { outboxId: initial.outboxId } : {}) } });
       toast.ok('문자 보낸 기록을 남겼습니다'); onSent();
     } catch (e: any) { toast.error(e.message); }
+  }
+  // #177 문자 예약: 서버는 보내지 못하므로 그 시각에 알림 → 문자앱으로 넘겨 사람이 보냄. 본문은 지금 완성본(링크·서명 포함)으로 저장
+  async function scheduleSmsSend() {
+    const nums = sms.to.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+    if (!nums.length) { toast.error('받는 사람 전화번호를 넣어 주세요'); return; }
+    if (PH.test(sms.body)) { toast.error('빈칸([날짜] 등)을 채운 뒤 예약해 주세요'); return; }
+    setBusy(true);
+    try {
+      let share: string | undefined;
+      if (f!.files.length || libFiles.length) {
+        const r = await withConfidentialConfirm((ok) => api('/api/mail/share', { body: { taskId, attachmentIds: f!.files, libraryFileIds: libIds(), company: f!.company || undefined, ...(ok ? { confirmConfidential: true } : {}) } }));
+        if (!r) return; share = r.url;
+      }
+      const text = [sms.body.trim(), share ? `자료 내려받기(14일): ${share}` : '', smsLine].filter(Boolean).join('\n\n');
+      const r = await api('/api/mail/sms-schedule', { body: { taskId, to: nums, body: text, sendAt: sched, ...(share ? { shareUrl: share } : {}) } });
+      toast.ok(`${fmtKst(r.scheduledAt)}에 알려 드립니다 — 그때 문자앱으로 넘겨 보내 주세요`); onSent();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   async function upload(list: FileList | null) {
     if (!list?.length) return;
@@ -208,6 +244,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   async function send() {
     const to = splitAddrs(f!.to);
     if (!to.length) { toast.error('받는 사람 메일 주소를 넣어 주세요'); return; }
+    if (PH.test(f!.body)) { toast.error('빈칸([날짜] 등)을 채운 뒤 보내 주세요'); return; }
     setBusy(true);
     try {
       const r = await withConfidentialConfirm((ok) => api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), bcc: splitAddrs(f!.bcc), fromName: f!.fromName.trim() || undefined, replyTo: f!.replyTo.trim() || undefined, subject: f!.subject, body: f!.body, attachmentIds: f!.files, libraryFileIds: libIds(),
@@ -236,8 +273,11 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
             className={cx('rounded-full border px-2.5 py-0.5 text-sm', f.company === c.key ? 'border-brand-600 bg-brand-50 font-medium text-brand-700' : 'border-line hover:bg-slate-50')}>{c.name}</button>)}
           <span className="ml-2 text-xs text-ink-3">양식</span>
           <span className="w-40"><select className={cx(inputCls, 'py-1')} value={f.kind} onChange={(e) => pickKind(e.target.value)} aria-label="메일 양식">{d.kinds.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></span>
-          <Button size="sm" variant="ghost" onClick={aiDraft} disabled={drafting} data-testid="mail-ai-draft"><Sparkles />{drafting ? 'AI 작성 중…' : 'AI 초안'}</Button>
+          <Button size="sm" variant="ghost" onClick={() => aiDraft()} disabled={drafting} data-testid="mail-ai-draft"><Sparkles />{drafting ? 'AI 작성 중…' : 'AI 초안'}</Button>
+          {channel !== 'kakao' && <span className="flex flex-wrap items-center gap-1 text-[11px] text-ink-3" data-testid="mail-ai-intents">다시 쓰기:
+            {Object.entries(INTENTS).map(([k, l]) => <button key={k} type="button" disabled={drafting} onClick={() => aiDraft(k)} className="rounded-full border border-line bg-white px-2 py-0.5 hover:bg-slate-50" data-testid={`mail-ai-intent-${k}`}>{l}</button>)}</span>}
         </div>
+        {warn.length > 0 && <ul className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="mail-draft-warn">{warn.map((w) => <li key={w}>⚠ {w}</li>)}</ul>}
         {rec.length > 0 && (
           <div className="rounded-input bg-brand-50/60 px-3 py-2 text-sm" data-testid="mail-rec">
             <p className="mb-1 text-xs font-medium text-brand-700">AI 추천 자료 — 눌러서 첨부</p>
@@ -251,7 +291,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           </div>
         ) : channel === 'sms' ? (
           <div className="grid gap-2 text-sm" data-testid="sms-pane">
-            <p className="text-ink-2">내 휴대폰 문자앱으로 넘겨서 <b>내 번호로</b> 보냅니다. 첨부를 고르면 14일 다운로드 링크가 들어갑니다.</p>
+            <p className="text-ink-2">내 휴대폰 문자앱으로 넘겨서 <b>내 번호로</b> 보냅니다. 첨부를 고르면 14일 다운로드 링크가 들어갑니다.{!initial?.complete && ' [예약]하면 그 시각에 알려 드리고, 그때 문자앱으로 넘겨 보냅니다(서버가 대신 보내지 않음).'}</p>
             <Field label="받는 사람 전화번호 (여러 명은 쉼표)"><SuggestInput value={sms.to} onChange={(v) => setSms({ ...sms, to: v })} kind="phone" multi taskId={taskId} testId="sms-to" placeholder="이름·회사·번호를 치면 회사 연락처에서 찾습니다" /></Field>
             <CandChips items={d.candidates?.phones ?? []} current={sms.to} onPick={(v) => setSms({ ...sms, to: [sms.to, v].filter((x) => x.trim()).join(', ') })} testId="sms-to-cand" />
             <Field label="문자 내용"><textarea className={inputCls} rows={4} value={sms.body} onChange={(e) => setSms({ ...sms, body: e.target.value })} data-testid="sms-body" /></Field>
@@ -266,7 +306,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
         <div className="grid gap-2 text-sm">
           {/* 대표 지적(10/19): '보내는 주소'는 이름 <주소> 한 줄(길면 …), 설명·버튼은 그 아래 */}
           <div className="min-w-0 text-ink-2">
-            <p className="flex min-w-0 items-baseline gap-2"><span className="shrink-0">보내는 주소</span><b className="min-w-0 truncate whitespace-nowrap text-ink" data-testid="mail-from-line" title={from ?? undefined}>{from ?? '연결 안 됨'}</b></p>
+            <p className="flex min-w-0 items-baseline gap-2"><span className="shrink-0">보내는 주소</span><b className="min-w-0 truncate whitespace-nowrap text-ink" data-testid="mail-from-line" title={from ?? undefined}>{from ?? '연결 안 됨'}{d.account?.mine ? ' (내 메일 계정)' : ''}</b></p>
             <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-3">{d.channel === 'email:workin' && <span>워크인 발송 — 답장은 회신 주소로</span>}
               {d.channel && <button type="button" className="text-brand-700 underline" onClick={() => set({ more: !f.more })} data-testid="mail-more">{f.more ? '접기' : '보내는 이름·회신 주소·숨은 참조'}</button>}</p>
           </div>
@@ -347,7 +387,16 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
                 <Button onClick={send} disabled={busy || !d.channel || !d.canSend} data-testid="mail-send"><Send />{busy ? '보관함에 넣는 중…' : sched ? '예약 보내기' : '바로 보내기'}</Button>
               </span>
             : channel === 'kakao' ? (kakao.trim() ? <KakaoSend taskId={taskId} body={kakao} onLogged={onSent} /> : <span className="text-xs text-ink-3">내용을 넣어 주세요</span>)
-            : <Button onClick={openSms} disabled={!d.canSend} data-testid="sms-open"><MessageSquare />문자앱으로 보내기</Button>}
+            : <span className="relative flex items-center gap-1.5">
+                {!initial?.complete && <>
+                  {schedOpen && <SchedulePicker value={sched} onPick={(v) => { setSched(v); setSchedOpen(false); }} onClose={() => setSchedOpen(false)} />}
+                  <Button variant="secondary" onClick={() => setSchedOpen(!schedOpen)} disabled={busy || !d.canSend} aria-expanded={schedOpen} data-testid="sms-schedule-open">{sched ? `예약 ${fmtKst(sched)}` : '예약 ▾'}</Button>
+                  {sched && <button type="button" className="text-xs text-ink-3 underline" onClick={() => setSched(null)} data-testid="sms-schedule-clear">지금 보내기로</button>}
+                </>}
+                {sched && !initial?.complete
+                  ? <Button onClick={scheduleSmsSend} disabled={busy || !d.canSend} data-testid="sms-schedule-send"><Send />{busy ? '예약 중…' : '예약하기'}</Button>
+                  : <Button onClick={openSms} disabled={!d.canSend} data-testid="sms-open"><MessageSquare />문자앱으로 보내기</Button>}
+              </span>}
         </div>
       </div>
     </Modal>

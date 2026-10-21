@@ -14,7 +14,7 @@ import dynamic from 'next/dynamic';
 import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, X, Palette } from 'lucide-react';
+import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, Video, X, Palette } from 'lucide-react';
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
 import { useBackClose, useSheetBack } from '@/components/backClose';
@@ -359,6 +359,34 @@ function CalendarPage() {
             ))}
           </div>
   );
+  // 대표 10/21 22:00 ⑥(#419): 휴대폰은 캘린더가 먼저 보이게 — 캘린더·업무 표시 칩 줄을 캘린더 아래로(PC 는 위 그대로)
+  const calChips = (
+          <div className={cx('flex flex-wrap gap-1.5 text-xs lg:hidden', mobile ? 'mt-2 border-t border-line pt-2' : 'mb-2')} aria-label="표시할 캘린더">
+            {/* V36 4 범례: 일정 = 꽉 찬 블록, 업무 = 왼쪽 굵은 선, 이동(장소 있음) = 📍·진한 테두리 */}
+            <span className="flex basis-full items-center gap-2 px-1 text-[11px] text-ink-3" data-testid="cal-legend-m">
+              <span className="inline-flex items-center gap-1"><span className="inline-block size-2.5 rounded-sm" style={{ background: calColors.company }} />일정</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border-l-[3px] border-slate-700 bg-slate-200" />업무</span>
+              <span className="inline-flex items-center gap-0.5"><MapPin className="size-3 text-ink-2" />이동</span>
+            </span>
+            {cals.data?.calendars.map((c) => (
+              <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} aria-pressed={!hidden.includes(c.id)}
+                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(c.id) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
+                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : calColors.cals?.[c.id] ?? (c.type === 'personal' ? calColors.personal : calColors.company) }} />{c.type === 'personal' ? '내 일정' : c.name}
+              </button>
+            ))}
+            {spaceCals.map((k) => (
+              <button key={k} onClick={() => setHidden(hidden.includes(`space:${k}`) ? hidden.filter((x) => x !== `space:${k}`) : [...hidden, `space:${k}`])} aria-pressed={!hidden.includes(`space:${k}`)}
+                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(`space:${k}`) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
+                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(`space:${k}`) ? '#e2e8f0' : spaceColor(k) }} />{SPACE_META[k].short}
+              </button>
+            ))}
+            <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
+            <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
+
+            <button onClick={() => setColorDlg(true)} className="hidden items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:inline-flex" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
+          </div>
+  );
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -436,30 +464,7 @@ function CalendarPage() {
         <div className="-mx-3 min-w-0 flex-1 border-y border-line bg-white px-1 py-1.5 sm:mx-0 sm:rounded-card sm:border sm:p-3 sm:shadow-card" data-testid="calendar" ref={calBox}>
           {/* 대표 검수 10/20: 휴대폰은 내 일정/다른 사람 전환을 화면 아래(하단 탭 바로 위)로 — 위는 날짜·일정만 */}
           {!mobile && peopleFilter}
-          <div className="mb-2 flex flex-wrap gap-1.5 text-xs lg:hidden" aria-label="표시할 캘린더">
-            {/* V36 4 범례: 일정 = 꽉 찬 블록, 업무 = 왼쪽 굵은 선, 이동(장소 있음) = 📍·진한 테두리 */}
-            <span className="flex basis-full items-center gap-2 px-1 text-[11px] text-ink-3" data-testid="cal-legend-m">
-              <span className="inline-flex items-center gap-1"><span className="inline-block size-2.5 rounded-sm" style={{ background: calColors.company }} />일정</span>
-              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border-l-[3px] border-slate-700 bg-slate-200" />업무</span>
-              <span className="inline-flex items-center gap-0.5"><MapPin className="size-3 text-ink-2" />이동</span>
-            </span>
-            {cals.data?.calendars.map((c) => (
-              <button key={c.id} onClick={() => setHidden(hidden.includes(c.id) ? hidden.filter((x) => x !== c.id) : [...hidden, c.id])} aria-pressed={!hidden.includes(c.id)}
-                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(c.id) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
-                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(c.id) ? '#e2e8f0' : calColors.cals?.[c.id] ?? (c.type === 'personal' ? calColors.personal : calColors.company) }} />{c.type === 'personal' ? '내 일정' : c.name}
-              </button>
-            ))}
-            {spaceCals.map((k) => (
-              <button key={k} onClick={() => setHidden(hidden.includes(`space:${k}`) ? hidden.filter((x) => x !== `space:${k}`) : [...hidden, `space:${k}`])} aria-pressed={!hidden.includes(`space:${k}`)}
-                className={cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', hidden.includes(`space:${k}`) ? 'border-line text-ink-3 line-through' : 'border-line text-ink')}>
-                <span className="size-2.5 rounded-full" style={{ background: hidden.includes(`space:${k}`) ? '#e2e8f0' : spaceColor(k) }} />{SPACE_META[k].short}
-              </button>
-            ))}
-            <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
-            <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
-
-            <button onClick={() => setColorDlg(true)} className="hidden items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:inline-flex" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
-          </div>
+          {!mobile && calChips}
           {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}
           <div className="mb-2 sm:hidden" data-testid="cal-mobile-head">
             <div className="flex items-center gap-1">
@@ -596,6 +601,7 @@ function CalendarPage() {
             }}
           />
           </div>
+          {mobile && calChips}
           {mobile && peopleFilter}
         </div>
         {sidePanel && <UnscheduledPanel onClose={() => setSidePanel(false)} onOpen={setOpenTask} />}
@@ -857,12 +863,12 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const s = occurrenceStart && !e.recurring_event_id ? new Date(occurrenceStart) : new Date(e.start_at);
       const en = new Date(s.getTime() + dur);
       setF({ title: e.title, calendarId: e.calendar_id, allDay: e.all_day, date: seoulDate(s), start: seoulTime(s),
-        endDate: e.all_day ? addDays(seoulDate(en), -1) : seoulDate(en), end: seoulTime(en), rrule: e.rrule, location: e.location,
+        endDate: e.all_day ? addDays(seoulDate(en), -1) : seoulDate(en), end: seoulTime(en), rrule: e.rrule, location: e.location, meetingUrl: e.meetingUrl ?? '',
         description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version, reminders: e.reminder_minutes ?? null, alarm: e.alarm ?? null, isPrivate: !!e.is_private, color: e.color ?? null });
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
       setF({ title: draft?.title ?? '', calendarId: draft?.calendarId ?? personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
-        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, prep: '', color: draft?.color ?? null, alsoTask: !!draft?.alsoTask });
+        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', meetingUrl: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, prep: '', color: draft?.color ?? null, alsoTask: !!draft?.alsoTask });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -905,7 +911,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const t = times();
       if (t.end < t.start) return;
       setAutoState('saving');
-      const run = patchWithRetry({ title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null, scope: 'all' });
+      const run = patchWithRetry({ title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null, scope: 'all' });
       autoRun.current = run.catch(() => {});
       try {
         const r = await run;
@@ -929,7 +935,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     setBusy(true);
     await autoRun.current;
     try {
-      const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
+      const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
       if (!id) {
         const made = await api<{ id?: string }>('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } }); pushRecentColor(f.color);
         // 대표 10/21 12:20 ②: 준비 업무는 '선택 창(체크, 기본 꺼짐)' — 자동 생성 없음. 체크했을 때만 묶음으로 만든다
@@ -1021,6 +1027,8 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           <Field label="장소"><input className={inputCls} value={f.location} onChange={(e) => set('location')(e.target.value)} placeholder="예: 음성 아이파크 — 적으면 이동 일정" /></Field>
           {/* V36 4: 장소를 적으면 이동 일정 — 캘린더에서 📍·진한 테두리, 알림 따로 안 정하면 30분 전 알림이 더해짐 */}
           {f.location?.trim() && <p className="-mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800" data-testid="editor-travel"><MapPin className="size-3" />이동 있음{!f.reminders ? ' · 30분 전 알림 기본' : ''}</p>}
+          {/* V30 ⑪ (#111) 화상 회의 링크 — 적으면 일정 상세에 [회의 참여] */}
+          <Field label="화상 회의 링크 (Zoom·Google Meet 등, 선택)"><input className={inputCls} inputMode="url" value={f.meetingUrl ?? ''} onChange={(e) => set('meetingUrl')(e.target.value)} placeholder="https://meet.google.com/…" data-testid="ev-meeting-url" /></Field>
           <Field label="설명"><textarea className={inputCls} rows={3} value={f.description} onChange={(e) => set('description')(e.target.value)} /></Field>
         </fieldset>
         {myAtt && (
@@ -1115,6 +1123,7 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged }: { 
             <p className="flex items-center gap-1.5 font-semibold leading-snug">{ev.kind === 'task_block' && <Timer className="size-4 shrink-0 text-ink-2" aria-label="업무 시간" />}{cleanTitle(ev.title)}</p>
             <p className="mt-1 text-sm text-ink-2" data-testid="preview-time">{fmtTimeRange(ev.start, ev.end, { allDay: ev.allDay })}</p>
             {ev.location && <p className="mt-0.5 flex items-center gap-1 text-sm text-ink-2"><MapPin className="size-3.5" />{ev.location}</p>}
+            {ev.meetingUrl && <a href={ev.meetingUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex h-8 items-center gap-1 rounded-input bg-brand-600 px-2.5 text-xs font-medium text-white hover:bg-brand-700" data-testid="ev-join"><Video className="size-3.5" />회의 참여</a>}
             <p className="mt-1 text-xs text-ink-3">{ev.calendarType === 'personal' && ev.ownerName ? `${ev.ownerName}님 일정` : calendarName}{ev.recurring ? ' · 반복 일정' : ''}{ev.isPrivate ? ' · 비공개' : ''}</p>
             {ev.masked && <p className="mt-1 text-xs text-ink-2" data-testid="masked-note">비공개 일정이라 시간만 보입니다</p>}
           </div>

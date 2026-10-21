@@ -5,6 +5,7 @@ import { ClipboardList, Link2, ListPlus, NotebookPen, Plus, Repeat, Trash2, Unli
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import { Avatar, Button, DueChip, Modal, StatusBadge, cx, inputCls, toast } from './ui';
+import { MeetingRecorder } from './MeetingRecorder';
 
 const ROLE_LABEL: Record<string, string> = { link: '연결', block: '업무 시간', followup: '회의 후속', prep: '준비', series: '회차 업무' };
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
@@ -121,6 +122,10 @@ export function EventWork({ eventId, occurrenceStart, eventDate, recurring, atte
           </ul>
         )}
       </section>
+
+      {/* V30 ⑥ (#74) 녹음 → 회의록 AI 요약: 할 일 후보 [업무로] = 메모 줄과 같은 후속 업무(noteLine) */}
+      <MeetingRecorder eventId={eventId} occurrenceStart={occurrenceStart} canWork={canWork} followed={followed}
+        onTodo={(t) => setNewTask({ title: t.title, assigneeId: (t.assignee && people.find((p) => t.assignee!.includes(p.name))?.user_id) || '', dueDate: t.due || defaultDue, noteLine: t.title })} />
 
       {!recurring && canEdit && (
         <section>

@@ -11,6 +11,7 @@ import { MenuPermsTab } from '@/components/MenuPerms';
 import { TeamsTab } from '@/components/Teams';
 import { OffboardModal } from '@/components/admin/Offboard';
 import { AssigneeRulesTab } from '@/components/admin/AssigneeRules';
+import { ContractsTab, SendContractModal, type ContractPreset } from '@/components/admin/Contracts'; // #116 전자계약서
 
 const STATUS: Record<string, string> = { invited: '초대됨', active: '사용 중', disabled: '사용 중지', left: '퇴사' };
 
@@ -31,13 +32,13 @@ function UnitChecks({ value, onChange }: { value: string[]; onChange: (v: string
 
 export default function UsersPage() {
   const { user } = useSession();
-  const [tab, setTabState] = useState<'users' | 'teams' | 'menus' | 'spaces' | 'assignees'>('users');
+  const [tab, setTabState] = useState<'users' | 'teams' | 'menus' | 'spaces' | 'assignees' | 'contracts'>('users');
   // 탭을 주소(?tab=)에도 남김 → 팀 보드 등 하위 화면에서 뒤로 오면 그 탭이 다시 열림
-  const setTab = (t: 'users' | 'teams' | 'menus' | 'spaces' | 'assignees') => { setTabState(t); try { const u = new URL(window.location.href); if (t === 'users') u.searchParams.delete('tab'); else u.searchParams.set('tab', t); window.history.replaceState(window.history.state, '', u.toString()); } catch {} };
+  const setTab = (t: 'users' | 'teams' | 'menus' | 'spaces' | 'assignees' | 'contracts') => { setTabState(t); try { const u = new URL(window.location.href); if (t === 'users') u.searchParams.delete('tab'); else u.searchParams.set('tab', t); window.history.replaceState(window.history.state, '', u.toString()); } catch {} };
   // 대기열 ①(10/19): 팀 보드 뒤로가기 등 ?tab=teams 로 오면 그 탭
-  useEffect(() => { const t = new URLSearchParams(window.location.search).get('tab'); if (t === 'teams' || t === 'menus' || t === 'spaces' || t === 'assignees') setTabState(t); }, []);
+  useEffect(() => { const t = new URLSearchParams(window.location.search).get('tab'); if (t === 'teams' || t === 'menus' || t === 'spaces' || t === 'assignees' || t === 'contracts') setTabState(t); }, []);
   const list = useApi<{ users: any[] }>(user.role === 'owner' ? '/api/admin/users' : null);
-  const tabs = [['users', '사용자'], ['teams', '부서·팀'], ...(user.role === 'owner' ? [['menus', '메뉴 권한']] : []), ...(['owner', 'admin'].includes(user.role) ? [['spaces', '공간'], ['assignees', '담당자 지정']] : [])] as ['users' | 'teams' | 'menus' | 'spaces' | 'assignees', string][];
+  const tabs = [['users', '사용자'], ['teams', '부서·팀'], ...(user.role === 'owner' ? [['menus', '메뉴 권한']] : []), ...(['owner', 'admin'].includes(user.role) ? [['spaces', '공간'], ['assignees', '담당자 지정'], ['contracts', '전자계약서']] : [])] as ['users' | 'teams' | 'menus' | 'spaces' | 'assignees' | 'contracts', string][];
   return (
     <div className="space-y-3">
       <div className="flex gap-1.5" role="tablist" aria-label="사용자 관리">
@@ -46,7 +47,7 @@ export default function UsersPage() {
             className={cx('rounded-full border px-3 py-1 text-sm', tab === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line bg-white text-ink-2')}>{l}</button>
         ))}
       </div>
-      {tab === 'users' ? <Users /> : tab === 'teams' ? <TeamsTab /> : tab === 'spaces' ? <SpacesTab /> : tab === 'assignees' ? <AssigneeRulesTab /> : <MenuPermsTab users={list.data?.users ?? []} />}
+      {tab === 'users' ? <Users /> : tab === 'teams' ? <TeamsTab /> : tab === 'spaces' ? <SpacesTab /> : tab === 'assignees' ? <AssigneeRulesTab /> : tab === 'contracts' ? <ContractsTab /> : <MenuPermsTab users={list.data?.users ?? []} />}
     </div>
   );
 }
@@ -61,6 +62,8 @@ function Users() {
   const spaceInfo = useApi<{ spaces: string[] }>('/api/spaces');
   const [link, setLink] = useState('');
   const [edit, setEdit] = useState<any>(null);
+  const [contract, setContract] = useState<ContractPreset | null>(null); // #116 전자계약서 보내기(초대 직후·줄 버튼)
+  const [withContract, setWithContract] = useState(false);
   const [review, setReview] = useState<{ email: string; name: string } | null>(null);
   const [reviewMsg, setReviewMsg] = useState('');
   // 로컬 검수 10/17: 심사용 체험 계정은 직원 목록에 섞지 않고 접어 둠
@@ -77,7 +80,7 @@ function Users() {
 
   async function invite(e: React.FormEvent) {
     e.preventDefault();
-    try { const r = await api('/api/admin/users', { body: inv }); setLink(location.origin + r.path); setInv(null); reload(); } catch (er: any) { toast.error(er.message); }
+    try { const r = await api('/api/admin/users', { body: inv }); setLink(location.origin + r.path); const wc = withContract ? { userId: r.userId as string, name: inv.name as string, email: inv.email as string } : null; setInv(null); reload(); if (wc) setContract(wc); } catch (er: any) { toast.error(er.message); }
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -123,6 +126,7 @@ function Users() {
                 <td className="p-2 text-xs">{u.last_login_at ? fmtDateTime(u.last_login_at) : '-'}</td>
                 <td className="p-2 text-right whitespace-nowrap">{canEdit && <>
                   <Button size="sm" variant="ghost" onClick={() => setEdit({ ...u })}>편집</Button>
+                  {u.status !== 'left' && !u.is_demo && <Button size="sm" variant="ghost" onClick={() => setContract({ userId: u.id, name: u.name, email: u.email, phone: u.phone })} data-testid="user-contract">전자계약서</Button>}
                   {u.status === 'active' && <Button size="sm" variant="ghost" onClick={() => reset(u)}>비번 재설정 링크</Button>}
                   {u.status === 'invited' && <Button size="sm" variant="ghost" onClick={() => reinvite(u)}>초대 링크 재발급</Button>}
                   {u.status === 'active' && u.id !== user.id && <Button size="sm" variant="ghost" onClick={() => setOff({ id: u.id, mode: 'leave' })} data-testid="user-leave">퇴사 처리</Button>}
@@ -152,6 +156,7 @@ function Users() {
           <fieldset data-testid="invite-spaces"><legend className="mb-1 text-xs font-medium text-slate-600">공간 {inv.teamIds?.length ? <span className="font-normal text-ink-3">(고른 부서·팀의 기본 공간을 제안)</span> : null}</legend>
             <div className="flex gap-3 text-sm">{([['work', '업무'], ['sales', '영업'], ['marketing', '마케팅']] as const).filter(([k]) => k === 'work' || (spaceInfo.data?.spaces ?? []).includes(k)).map(([k, l]) => (
               <label key={k} className="flex items-center gap-1.5"><input type="checkbox" checked={(inv.spaces ?? ['work']).includes(k)} onChange={(e) => { const cur = inv.spaces ?? ['work']; setInv({ ...inv, spaces: e.target.checked ? [...cur, k] : cur.filter((x: string) => x !== k) }); }} data-testid={`invite-space-${k}`} />{l}</label>))}</div></fieldset>
+          <label className="flex items-center gap-2 text-sm" data-testid="invite-with-contract"><input type="checkbox" checked={withContract} onChange={(e) => setWithContract(e.target.checked)} />초대와 함께 전자계약서(근로계약서·비밀유지서약서) 보내기 — 링크를 만든 뒤 바로 보내기 창이 열립니다</label>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setInv(null)}>취소</Button><Button type="submit">초대 링크 만들기</Button></div>
         </form>}
       </Modal>
@@ -170,6 +175,7 @@ function Users() {
         <div className="mt-3 flex justify-end"><Button onClick={() => { navigator.clipboard?.writeText(link); toast.ok('복사했습니다'); }}>복사</Button></div>
       </Modal>
       {off && <OffboardModal userId={off.id} mode={off.mode} onClose={() => setOff(null)} onDone={() => { setOff(null); reload(); }} />}
+      {contract && <SendContractModal preset={contract} onClose={() => setContract(null)} />}
       <Modal open={!!edit} onClose={() => setEdit(null)} title="사용자 편집">
         {edit && <form onSubmit={save} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -184,10 +190,24 @@ function Users() {
             <TeamPicker testid="edit-team" teamIds={edit.teamIds ?? (edit.teams ?? []).map((t: any) => t.id)} primaryTeamId={edit.primaryTeamId ?? (edit.teams ?? []).find((t: any) => t.primary)?.id ?? null}
               onChange={({ teamIds, primaryTeamId }) => setEdit({ ...edit, teamIds, primaryTeamId })} /></fieldset>
           <details className="text-xs"><summary className="cursor-pointer text-slate-600">고급 — 접근 가능한 조직</summary><div className="mt-1"><UnitChecks value={edit.org_unit_ids} onChange={(v) => setEdit({ ...edit, org_unit_ids: v })} /></div></details>
+          <UserContracts userId={edit.id} />
           <p className="text-xs text-slate-500">사용 중지·퇴사로 바꾸면 모든 기기에서 즉시 로그아웃되고 푸시·Google 동기화도 멈춥니다. 작성한 업무 기록은 남습니다.</p>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEdit(null)}>취소</Button><Button type="submit">저장</Button></div>
         </form>}
       </Modal>
+    </div>
+  );
+}
+
+/** #116 사용자 카드: 이 사람의 전자계약서(상태·완료 PDF) */
+function UserContracts({ userId }: { userId: string }) {
+  const d = useApi<{ contracts: any[] }>(`/api/contracts?userId=${userId}`);
+  const ST: Record<string, string> = { draft: '임시', sent: '서명 대기', partially_signed: '일부 서명', completed: '완료', declined: '거절', cancelled: '취소', expired: '기한 지남' };
+  if (!d.data?.contracts.length) return null;
+  return (
+    <div className="rounded-input border border-line bg-slate-50 p-2 text-xs" data-testid="user-contracts">
+      <b className="font-semibold">전자계약서</b>
+      <ul className="mt-1 space-y-0.5">{d.data.contracts.map((c) => <li key={c.id} className="flex items-center gap-2"><span className="font-mono text-[11px] text-ink-3">{c.doc_no}</span><span>{c.title}</span><span className="ml-auto text-ink-2">{ST[c.status] ?? c.status}</span>{c.file_id && <a href={`/api/library/${c.file_id}/download`} className="text-brand-700 underline">PDF</a>}</li>)}</ul>
     </div>
   );
 }

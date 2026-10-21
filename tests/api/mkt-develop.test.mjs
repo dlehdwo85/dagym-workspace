@@ -1,10 +1,10 @@
 // 대표 10/20 14:10 마케팅 디벨롭 5건(#98): ② 승인함 예정(초안) 묶음 ③ 광고 성과 브랜드·매체 필터·이전 기간 대비·캠페인 추이 ④ 주간 운영 제안 → 승인 → 항목별 업무 ① 사이트별 집계(비콘 → 주간 표·요약)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { BASE, bootstrap, resetDb, startServer, testDb, seoulToday } from '../helpers.mjs';
+import { BASE, bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
 
 let srv, ctx, sql; const today = seoulToday();
-const ago = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+const ago = (n) => addDays(today, -n); // #148: 서버와 같은 KST 날짜(UTC 날짜를 쓰면 KST 00~09시에 하루 어긋남)
 let brandA, brandB, accA, accB;
 before(async () => {
   await resetDb(); srv = await startServer({ MAIL_DEV: '1' }); sql = testDb(); ctx = await bootstrap();

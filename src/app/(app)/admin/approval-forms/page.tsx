@@ -6,16 +6,16 @@ import { api, useApi } from '@/components/client';
 import { Button, Field, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 
 type F = { key: string; label: string; type: 'text' | 'number' | 'date' | 'daterange' | 'select' | 'textarea' | 'file'; required?: boolean; options?: string[]; hint?: string };
-type Form = { id: string | null; kind: 'leave' | 'expense' | 'general'; name: string; fields: F[]; lineId: string | null; isDefault: boolean };
+type Form = { id: string | null; kind: 'leave' | 'expense' | 'general' | 'trip' | 'purchase' | 'family'; name: string; fields: F[]; lineId: string | null; isDefault: boolean };
 const TYPES: [F['type'], string][] = [['text', '글'], ['textarea', '긴 글'], ['number', '숫자'], ['date', '날짜'], ['daterange', '기간'], ['select', '선택'], ['file', '파일(결재 업무 첨부)']];
-const KIND: Record<string, string> = { leave: '휴가', expense: '지출결의', general: '품의' };
+const KIND: Record<string, string> = { leave: '휴가', expense: '지출결의', general: '품의', trip: '출장', purchase: '구매', family: '경조사' }; // #114 ⑤
 
 export default function ApprovalFormsPage() {
   const st = useApi<{ forms: Form[]; lines: { id: string; name: string }[]; canEdit: boolean }>('/api/approvals/forms');
   if (!st.data) return <Skeleton rows={6} />;
   return (
     <div className="space-y-4" data-testid="approval-forms-admin">
-      <PageHeader title="결재 양식" icon={Stamp} sub="휴가·지출결의·품의 양식의 칸을 회사에 맞게 고칩니다. 결재선은 운영 상태 › 결재선에서, 양식마다 기본 결재선을 고를 수 있습니다." />
+      <PageHeader title="결재 양식" icon={Stamp} sub="휴가·지출결의·품의·출장·구매·경조사 양식의 칸을 회사에 맞게 고칩니다. 결재선은 운영 상태 › 결재선에서, 양식마다 기본 결재선을 고를 수 있습니다(요청자가 올릴 때 바꿀 수도 있습니다)." />
       {st.data.forms.map((f) => <FormEditor key={f.kind} form={f} lines={st.data!.lines} canEdit={st.data!.canEdit} onSaved={st.reload} />)}
     </div>
   );

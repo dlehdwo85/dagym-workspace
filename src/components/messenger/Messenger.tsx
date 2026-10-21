@@ -2,7 +2,7 @@
 import { RoleBadge } from '@/components/RoleBadge';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, AtSign, Headphones, Mic, Pencil, Bell, BellOff, Camera, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, UserMinus, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, AtSign, Headphones, Mic, Pencil, Bell, BellOff, Camera, Image as ImageIcon, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { DropZone, UploadProgress, putFile } from '@/components/upload';
@@ -58,16 +58,21 @@ export function useLive(): Live {
         try { const r = await api(`/api/chat/poll?${new URLSearchParams({ ...(since ? { since } : {}), t: String(t) })}`); since = r.latest; t = r.now; emit(r); } catch { /* 다음 차례에 */ }
       }, 5000);
     };
-    if (typeof EventSource === 'undefined') startPoll();
-    else {
-      es = new EventSource('/api/chat/stream');
+    // 10/21 DB 쿼터 장애: 탭이 가려지면 SSE·폴링을 멈추고(DB 가 잠들 수 있게), 다시 보이면 마지막 id 부터 이어 받는다
+    const openSse = () => {
+      es = new EventSource(`/api/chat/stream${since ? `?since=${since}` : ''}`);
       es.addEventListener('ready', (e) => { fails = 0; since = (e as MessageEvent).lastEventId || since; });
       es.addEventListener('messages', (e) => { const m = JSON.parse((e as MessageEvent).data); since = (e as MessageEvent).lastEventId || since; emit({ messages: m }); });
       es.addEventListener('typing', (e) => emit({ typing: JSON.parse((e as MessageEvent).data) }));
       es.addEventListener('reads', (e) => emit({ reads: JSON.parse((e as MessageEvent).data) }));
       es.onerror = () => { if (++fails >= 3 && es) { es.close(); es = null; startPoll(); } };
-    }
-    return () => { es?.close(); if (timer) clearInterval(timer); };
+    };
+    const stopAll = () => { es?.close(); es = null; if (timer) { clearInterval(timer); timer = null; } };
+    const startAll = () => { if (es || timer) return; if (typeof EventSource === 'undefined') startPoll(); else openSse(); };
+    const onVis = () => { if (document.visibilityState === 'hidden') stopAll(); else startAll(); };
+    if (typeof document === 'undefined' || document.visibilityState !== 'hidden') startAll();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { document.removeEventListener('visibilitychange', onVis); stopAll(); };
   }, []);
   const subscribe = useCallback((f: (e: LiveEvt) => void) => { subs.current.add(f); return () => { subs.current.delete(f); }; }, []);
   return useMemo(() => ({ subscribe, mode }), [subscribe, mode]);
@@ -210,6 +215,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const [whoUnread, setWhoUnread] = useState<{ id: string; names: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null); // #109 갤러리 사진·영상
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const lastTyping = useRef(0);
@@ -339,8 +345,8 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
       try {
         const name = f.name || `붙여넣은 이미지.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`;
         const t = await api(`/api/chat/rooms/${id}/files`, { body: { fileName: name, mime: f.type || 'application/octet-stream', size: f.size } });
-        await putFile(t.upload, f, (pct) => setProg((x) => x.map((y, j) => (j === n ? { ...y, pct } : y))));
-        const file = { key: t.key, name, mime: f.type || 'application/octet-stream', size: f.size };
+        const { uploadId } = await putFile(t.upload, f, (pct) => setProg((x) => x.map((y, j) => (j === n ? { ...y, pct } : y))));
+        const file = { key: t.key, name, mime: f.type || 'application/octet-stream', size: f.size, ...(uploadId ? { uploadId } : {}) }; // #109: 영상 조각 업로드면 서버가 합침
         const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body: '', file } });
         mergeMine(r.id, { file_name: name, file_mime: file.mime, file_size: f.size });
       } catch (er: any) { setProg((x) => x.map((y, j) => (j === n ? { ...y, error: er.message } : y))); }
@@ -593,8 +599,10 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           )}
           <button type="button" className={iconBtn} onClick={() => fileRef.current?.click()} aria-label="파일 보내기" title="파일 보내기"><Paperclip className="size-[18px]" /></button>
           <button type="button" className={iconBtn} onClick={() => camRef.current?.click()} aria-label="사진 보내기" title="사진 보내기"><Camera className="size-[18px]" /></button>
+          <button type="button" className={cx(iconBtn, 'sm:hidden')} onClick={() => galleryRef.current?.click()} aria-label="사진·영상 고르기" title="갤러리에서 사진·영상(100MB 까지)" data-testid="chat-gallery"><ImageIcon className="size-[18px]" /></button>
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-file" />
           <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
+          <input ref={galleryRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-gallery-input" />
           <VoiceButton small value={text} onChange={(v) => onType(v)} label="말로 입력" />
           <textarea ref={inputRef} rows={1} className={cx(inputCls, 'max-h-32 min-h-9 min-w-0 flex-1 resize-none py-1.5')} placeholder="메시지 입력" title="Enter 보내기 · Shift+Enter 줄바꿈 · @ 멘션 · 이미지 붙여넣기" value={text}
             onChange={(e) => onType(e.target.value)} aria-label="메시지" data-testid="chat-input"

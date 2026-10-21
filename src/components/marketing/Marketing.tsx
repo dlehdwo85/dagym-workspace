@@ -107,7 +107,9 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
           <Field label="게시일"><input type="date" className={inputCls} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} data-testid="mkt-date" /></Field>
           <Field label="시각"><input type="time" className={inputCls} value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
         </div>
-        <Field label="본문·캡션"><textarea className={inputCls} rows={5} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} data-testid="mkt-body" /></Field>
+        <Field label="본문·캡션"><textarea className={inputCls} rows={5} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} data-testid="mkt-body" />
+          {/* #95 스레드 500자 한도 — 스레드 채널이거나 '스레드에도' 체크면 글자 수 표시 */}
+          {(f.channel === 'threads' || f.cross.includes('threads')) && <span className={cx('mt-1 block text-right text-[11px] tabular-nums', [...f.body].length > 500 ? 'font-semibold text-red-600' : 'text-ink-3')} data-testid="mkt-threads-count">스레드 {[...f.body].length}/500자{[...f.body].length > 500 ? ' — 넘침' : ''}</span>}</Field>
         <div className="space-y-1.5" data-testid="mkt-ai">
           <Button type="button" size="sm" variant="secondary" onClick={draft} disabled={aiBusy} data-testid="mkt-ai-draft">{aiBusy ? 'AI 가 쓰는 중…' : 'AI 로 캡션 초안 3개'}</Button>
           {ai && <ul className="space-y-1.5">{ai.captions.map((c, n) => (

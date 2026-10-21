@@ -3,7 +3,7 @@ import { db } from './db';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { isAdmin, denyDemo, accessibleUnitIds, taskVisibleSql, teamScope } from './access';
 import { activity } from './log';
-import { MAX_UPLOAD_BYTES, downloadUrl, getObject, objectSize, putObject, uploadTarget } from './storage';
+import { MAX_UPLOAD_BYTES, completeMultipart, downloadUrl, getObject, maxUploadBytes, objectSize, putObject, tooLargeMsg, uploadTargetFor } from './storage';
 import { extractText, extractTextDeep, extractTextResult } from './textExtract';
 import type { Role, SessionUser } from './types';
 import { RANK, menuLevel, requireMenu } from './menuPerms';
@@ -194,11 +194,11 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   if (!revenue) { await requireMenu(u, 'library', 'edit'); await requireFolder(u, folder, 'edit'); }
   const space = i.space ?? 'work';
   if (space !== 'work' && !(await librarySpaces(u)).includes(space)) throw notFound();
-  if (i.size > MAX_UPLOAD_BYTES) throw badRequest(`파일은 ${MAX_UPLOAD_BYTES / 1024 / 1024}MB 까지 올릴 수 있습니다`);
+  const mime = i.mimeType || 'application/octet-stream';
+  if (i.size > maxUploadBytes(mime)) throw badRequest(tooLargeMsg(mime)); // #109: 영상 100MB(조각), 그 외 50MB
   if (BLOCKED_EXT.test(i.fileName)) throw badRequest('실행 파일은 올릴 수 없습니다');
   await (await import('./plans')).assertStorage(u, i.size); // V10 회사 저장공간 한도
   const sql = db();
-  const mime = i.mimeType || 'application/octet-stream';
   if (i.contentHash && !i.allowDuplicate) { // V13 3번: 같은 파일이 이미 있으면 알려 준다(볼 수 있는 것만)
     const dups = await sql<{ id: string; title: string; folder: string; created_by: string }[]>`select id, title, folder, created_by, security from library_files
       where tenant = ${tenantOf(u)} and content_hash = ${i.contentHash} and deleted_at is null and upload_status = 'ready' limit 5`;
@@ -215,7 +215,7 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   const safe = i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120);
   const key = `lib/${tenantOf(u)}/${f.id}/${safe}`;
   await sql`update library_files set storage_key = ${key} where id = ${f.id}`;
-  return { id: f.id, upload: await uploadTarget(key, mime) };
+  return { id: f.id, upload: await uploadTargetFor(key, mime, i.size) };
 }
 
 /** 서버가 만든 파일(AI 보고서 등)을 자료실에 바로 저장 */
@@ -257,10 +257,11 @@ export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open
 }
 const canEdit = (u: SessionUser, f: { created_by?: string | null }) => f.created_by === u.id || isAdmin(u);
 
-export async function completeLibraryFile(u: SessionUser, id: string) {
+export async function completeLibraryFile(u: SessionUser, id: string, uploadId?: string) {
   const f = await loadLibraryFile(u, id);
   if (f.created_by !== u.id) throw forbidden();
   if (f.upload_status === 'ready') return { ok: true, id };
+  if (uploadId) await completeMultipart(f.storage_key, uploadId).catch((e) => { throw badRequest(`조각 합치기 실패: ${(e as Error).message}`); }); // #109 영상 조각 업로드
   const size = await objectSize(f.storage_key);
   if (size === null) throw badRequest('업로드된 파일을 찾을 수 없습니다. 다시 올려 주세요.');
   const tx = await getObject(f.storage_key).then((b) => extractTextResult(b, f.file_name, f.mime_type)).catch((e) => ({ text: null, error: `파일 읽기 실패: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) })); // V14 32: HWP·HWPX·PDF 본문도

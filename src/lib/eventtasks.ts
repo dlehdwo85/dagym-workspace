@@ -23,7 +23,7 @@ export const PREP_PRESETS: Record<string, { label: string; items: { title: strin
   event_promo: { label: '행사·프로모션', items: [{ title: '홍보물 제작', daysBefore: 10 }, { title: 'SNS·문자 공지', daysBefore: 5 }, { title: '현장 준비물 확인', daysBefore: 1 }] },
 };
 
-async function eventCtx(u: SessionUser, eventId: string, sql: Sql = db()) {
+export async function eventCtx(u: SessionUser, eventId: string, sql: Sql = db()) {
   const { event, perms } = await loadEvent(u, eventId, sql);
   const masterId = event.recurring_event_id ?? event.id;
   const [cal] = await sql<{ type: string; org_unit_id: string | null }[]>`select type, org_unit_id from calendars where id = ${event.calendar_id}`;

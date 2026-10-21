@@ -24,8 +24,8 @@ function Amount({ r, k }: { r: Row; k: 'limit' | 'used' | 'left' }) {
     if (v.videos !== undefined && v.videos !== null) parts.push(`영상 ${n(v.videos)}편`);
     if (v.usd !== null && v.usd !== undefined) parts.push(`AI $${v.usd}`);
   } else {
-    parts.push(v.requests === null || v.requests === undefined ? (k === 'limit' ? '요청 무제한' : '-') : `${n(v.requests)}회`);
-    if (v.usd !== null && v.usd !== undefined) parts.push(`$${v.usd}`);
+    // 대표 10/21 22:00 ③(#416): 금액($·원) 대신 'AI 로 할 수 있는 작업 횟수' 로 — 요청 횟수를 앞세우고, 횟수 한도가 없으면 남은 금액을 체감 단위(질문·답변 n회)로 환산해 보여 준다(오른쪽 칸)
+    parts.push(v.requests === null || v.requests === undefined ? (k === 'limit' ? '횟수 제한 없음' : '-') : `${n(v.requests)}회`);
   }
   return <span className="tabular-nums">{parts.filter((x) => x !== '-').join(' · ') || '-'}</span>;
 }
@@ -35,11 +35,11 @@ export function AiLimitsTable({ data }: { data: AiLimitsData }) {
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-limits">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="size-4 text-violet-600" />AI 한도 한눈에 <span className="font-normal text-ink-3">— {data.month}</span></h2>
-        <span className="text-xs text-ink-3">환율 {data.usdKrw.toLocaleString('ko-KR')}원/$ · 환산은 최근 평균 단가 기준(대략)</span>
+        <span className="text-xs text-ink-3">금액 대신 AI 로 할 수 있는 작업 횟수로 표시합니다 · 환산은 최근 평균 단가 기준(대략)</span>
       </div>
       <div className="mt-2 overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
-          <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">AI</th><th>이번 달 한도</th><th>쓴 양</th><th>남은 양</th><th>남은 양을 환산하면</th></tr></thead>
+          <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">AI</th><th>이번 달 한도</th><th>쓴 양</th><th>남은 양</th><th>남은 양으로 할 수 있는 작업</th></tr></thead>
           <tbody>
             {data.rows.map((r) => (
               <tr key={r.key} className="border-t border-line align-top" data-testid={`ai-limit-${r.key}`}>
@@ -47,11 +47,11 @@ export function AiLimitsTable({ data }: { data: AiLimitsData }) {
                   <div className="flex items-center gap-1.5 font-medium"><i className={cx('inline-block size-2 rounded-full', COLOR[r.key])} />{r.name}{r.planLabel && <span className="rounded bg-violet-50 px-1 text-[11px] font-normal text-violet-800">{r.planLabel}</span>}</div>
                   <div className="text-[11px] text-ink-3">{r.note}</div>
                 </td>
-                <td className="py-2 pr-2"><Amount r={r} k="limit" />{r.limit.usd !== null && r.key !== 'marketing' && <div className="text-[11px] text-ink-3">{won(r.limit.usd, data.usdKrw)}</div>}</td>
-                <td className="py-2 pr-2"><Amount r={r} k="used" /><div className="text-[11px] text-ink-3">{won(r.used.usd, data.usdKrw)}</div></td>
+                <td className="py-2 pr-2" title={r.limit.usd !== null && r.key !== 'marketing' ? `원가 한도 $${r.limit.usd} (${won(r.limit.usd, data.usdKrw)})` : undefined}><Amount r={r} k="limit" />{r.key !== 'marketing' && r.limit.requests === null && r.feel[0] && <div className="text-[11px] text-ink-3">{r.feel[0].label} 약 {r.feel[0].n === null ? '무제한' : n(Math.round(((r.left.usd ?? 0) + r.used.usd) / Math.max(1e-9, (r.left.usd ?? 0)) * r.feel[0].n))}{r.feel[0].n === null ? '' : r.feel[0].unit}</div>}</td>
+                <td className="py-2 pr-2" title={`원가 $${r.used.usd} (${won(r.used.usd, data.usdKrw)})`}><Amount r={r} k="used" />{r.key !== 'marketing' && r.feel[0] && r.feel[0].n !== null && r.left.usd !== null && r.left.usd > 0 && <div className="text-[11px] text-ink-3">{r.feel[0].label} 약 {n(Math.round((r.used.usd / r.left.usd) * r.feel[0].n))}{r.feel[0].unit}</div>}</td>
                 <td className="py-2 pr-2" data-testid={`ai-left-${r.key}`}>
                   <span className={cx('font-semibold', tone(r.pct))}><Amount r={r} k="left" /></span>
-                  <div className={cx('text-[11px]', tone(r.pct))}>{r.pct === null ? '무제한' : `${r.pct}% 사용`}{r.left.usd !== null && r.key !== 'marketing' ? ` · ${won(r.left.usd, data.usdKrw)}` : ''}</div>
+                  <div className={cx('text-[11px]', tone(r.pct))} title={r.left.usd !== null && r.key !== 'marketing' ? `남은 원가 ${won(r.left.usd, data.usdKrw)}` : undefined}>{r.pct === null ? '무제한' : `${r.pct}% 사용`}</div>
                   {r.pct !== null && <div className="mt-1 h-1.5 w-24 overflow-hidden rounded-full bg-slate-100"><div className={cx('h-full rounded-full', r.pct >= 100 ? 'bg-red-500' : r.pct >= 80 ? 'bg-amber-500' : COLOR[r.key])} style={{ width: `${Math.min(100, r.pct)}%` }} /></div>}
                 </td>
                 <td className="py-2 text-xs text-ink-2">
