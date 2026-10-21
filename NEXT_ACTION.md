@@ -1352,6 +1352,11 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 대표 14:30 — #411 광고비 충전 흐름 (migration 148) [배포확인요청]
+- `src/lib/mktRecharge.ts`: `balancesView`(페이스 = 최근 7일 평균 지출, days·level) · `setBalance`(관리자 직접 입력, PUT /api/marketing/ads/balances) · `rechargeCheck`(opsTick 마다: syncBalances → 카드 생성(signal recharge:<provider>:<label>, body.amount·link) → 열린 카드 잔액 상승 감지 자동 done). `marketingAds.readBalance/syncBalances`(네이버 bizmoney·Meta spend_cap).
+- UI: 광고실 '매체 잔액' 표(`ads-balances`, 직접 입력 폼) · 운영실 카드 [충전 페이지 열기](`ops-card-link`). 시험 tests/api/mkt-recharge.test.mjs.
+- 한계: 구글 선불 잔액은 Google Ads API 에 없음(직접 입력), Higgsfield 잔액 API 미확인(직접 입력). Meta 는 지출 상한을 안 두면 null.
+
 ## 2026-10-21 대표 12:20 — ① AI 명칭 통일 ② 일정 '준비 업무 만들기' 선택 창 [배포확인요청]
 - ① `src/lib/aiNames.ts` `aiName(space)`: work → AI 비서, sales → AI 세일즈, marketing → AI 마케터. AppShell 공통 메뉴·휴대폰 ✨ 버튼·AiDock 머리글(name prop)·/assistant 제목·AiAsk 입력창 문구·마케팅 홈 HOME_AI_LABEL·자동 제작/제작의뢰실 문구. E2E 마케팅 홈 aria-label 'AI 마케터'.
 - ② 캘린더 EventEditor(새 일정): `editor-prep` 체크(기본 꺼짐) + 묶음 select(`/api/events/_/prep` GET 목록) → 저장 뒤 `POST /api/events/{id}/prep {preset}`. 자동 생성은 없음.

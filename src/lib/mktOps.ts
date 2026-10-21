@@ -533,6 +533,7 @@ export async function opsTick(tenant: string, now = new Date()) {
   const out: Record<string, unknown> = {};
   out.guard = await budgetGuard(tenant, now).catch((e) => ({ error: String(e?.message ?? e) })); // 소진율 알림은 시각과 무관(광고 상한 감시와 같은 기준, 채널마다 한 번)
   out.review = await opsReview(tenant, now).catch((e) => ({ error: String(e?.message ?? e) })); // 대표 03:00 ② 상시 운영: 1시간마다 지표·신호(AI 비용 0), 07시 이후 아침 브리핑
+  out.recharge = await (await import('./mktRecharge')).rechargeCheck(tenant).catch((e) => ({ error: String(e?.message ?? e) })); // 대표 10/21 14:30 #411 매체 잔액 → 충전 필요 카드 → 충전 감지 자동 완료
   if (h < 9 || (h >= 22 && !night)) return { ...out, skipped: 'hour' };
   const sql = db(); const dow = new Date(`${ymd(now)}T00:00:00Z`).getUTCDay(); const day = Number(ymd(now).slice(8));
   if (dow === 1) {
