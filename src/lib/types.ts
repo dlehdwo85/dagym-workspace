@@ -60,6 +60,7 @@ export const NOTIFICATION_TYPES = {
   chat: '메신저 새 메시지',
   month_close: '월 마감 기록(지난달 완료·이월·지연)',
   mail_status: '메일 발송 실패',
+  sms_due: '예약 문자 보낼 시간(휴대폰 문자앱에서 보내기)',
   mail_sent: '내가 보낸 결과(예약 메일 발송·고객 자료 열람) — 기본 푸시 끔',
   account_request: '직원 계정 삭제 요청',
   library_organized: '자료실 자동 정리 결과(올린 파일이 간 폴더)',

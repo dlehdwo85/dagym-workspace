@@ -248,8 +248,21 @@ export function signatureText(p: SigProfile, s: Sender) {
   return ['--', `${s.name}${s.title ? ' ' + s.title : ''}`, p.name, [p.phone && `T ${p.phone}`, s.phone && `M ${s.phone}`].filter(Boolean).join(' · '), s.email, p.website, cardAddress(p.address)]
     .filter(Boolean).join('\n');
 }
-/** 문자 끝 한 줄: "이름 직급 / 회사 / 대표번호" */
-export const smsSignLine = (p: CompanyProfile, s: Sender) => [`${s.name}${s.title ? ' ' + s.title : ''}`, p.name, p.phone].filter(Boolean).join(' / ');
+/** V32 7-2 문자 서명(명함형 3줄): "이름 직급 · 회사" / "휴대폰 010-…" / "메일 …" — 보내는 직원 프로필에서, 없는 칸은 생략. 회사 대표번호는 회사 설정 '서명에 대표번호도 넣기'일 때만(기본 끔) */
+export const smsSignLine = (p: CompanyProfile, s: Sender, companyPhone = false) =>
+  [`${s.name}${s.title ? ' ' + s.title : ''} · ${p.name}`, s.phone ? `휴대폰 ${s.phone}` : '', s.email ? `메일 ${s.email}` : '', companyPhone && p.phone ? `대표 ${p.phone}` : ''].filter(Boolean).join('\n');
+/** V32 7-2 회사 설정: 문자 서명에 회사 대표번호도 넣기 */
+export async function getSmsSign(u: SessionUser) {
+  const [r] = await db()<{ sms_sign_phone: boolean }[]>`select sms_sign_phone from tenants where id = ${tenantOf(u)}`;
+  return { companyPhone: !!r?.sms_sign_phone };
+}
+export async function setSmsSign(u: SessionUser, companyPhone: boolean) {
+  await (await import('./menuPerms')).requireAnyMenu(u, ['company', 'ops'], 'edit');
+  const sql = db();
+  await sql`update tenants set sms_sign_phone = ${companyPhone} where id = ${tenantOf(u)}`;
+  await audit(sql, u.id, 'sms_sign.set', 'tenant', null, { companyPhone }, null).catch(() => {});
+  return getSmsSign(u);
+}
 
 export function bodyHtml(text: string, sig: string, linkBlock = '') {
   const paras = esc(text).replace(/\r\n/g, '\n').split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px">${p.replace(/\n/g, '<br>')}</p>`).join('');
@@ -322,7 +335,8 @@ export async function mailContext(u: SessionUser, taskId: string) {
     taskOutbox(taskId, sql),
   ]);
   const candidates = await recipientCandidates(taskId, contact, sql);
-  const sigs = await Promise.all(profiles.map(async (p) => ({ key: p.key, name: p.name, isDefault: p.is_default, html: signatureHtml(p, me), smsLine: smsSignLine(p, me) })));
+  const [tn] = await sql<{ sms_sign_phone: boolean }[]>`select sms_sign_phone from tenants where id = ${t}`;
+  const sigs = await Promise.all(profiles.map(async (p) => ({ key: p.key, name: p.name, isDefault: p.is_default, html: signatureHtml(p, me), smsLine: smsSignLine(p, me, !!tn?.sms_sign_phone) })));
   // 문의 사이트에 맞는 회사(하이링크 문의 → hilink)가 있으면 그 회사, 아니면 기본 회사
   const guess = contact?.site && profiles.some((p) => p.key === contact.site) ? contact.site : (profiles.find((p) => p.is_default) ?? profiles[0])?.key ?? null;
   return {
@@ -340,7 +354,7 @@ export async function mailContext(u: SessionUser, taskId: string) {
 }
 async function taskOutbox(taskId: string, sql: Sql) {
   return sql`select o.id, o.channel, o.status, o.to_addrs, o.cc_addrs, o.bcc_addrs, o.from_name, o.reply_to, o.subject, left(o.body_text, 200) as preview, o.files, o.as_link, o.attempts, o.last_error, o.error_kind, o.sent_at, o.created_at,
-      o.next_attempt_at, o.scheduled_at, o.created_by, u.name as sender_name, s.first_opened_at
+      o.next_attempt_at, o.scheduled_at, o.created_by, u.name as sender_name, s.first_opened_at, case when o.channel like 'sms:%' then o.body_text end as sms_body
     from outbox o join users u on u.id = o.created_by left join share_links s on s.id = o.share_id
     where o.task_id = ${taskId} order by o.created_at desc limit 50`;
 }
@@ -457,7 +471,7 @@ export async function rescheduleOutbox(u: SessionUser, id: string, i: z.infer<ty
   if (o.created_by !== u.id && u.role !== 'owner') throw forbidden('예약은 보낸 사람이나 대표만 바꿀 수 있습니다');
   if (!o.scheduled_at) throw badRequest('예약 메일이 아닙니다');
   if (i.cancel) {
-    const r = await sql`update outbox set status = 'canceled' where id = ${id} and status = 'queued' and (locked_until is null or locked_until < now()) returning id`;
+    const r = await sql`update outbox set status = 'canceled' where id = ${id} and status in ('queued', 'due') and (locked_until is null or locked_until < now()) returning id`;
     if (!r.length) throw new HttpError(409, 'not_scheduled', '이미 보내는 중이거나 보낸 메일이라 취소할 수 없습니다');
     if (o.task_id) await activity(sql, 'task', o.task_id, u.id, 'mail_schedule_canceled', { subject: o.subject });
     return { ok: true, status: 'canceled' };
@@ -491,6 +505,14 @@ export async function processOutbox(id: string): Promise<string> {
     where id = ${id} and status in ('queued', 'retry') and next_attempt_at <= now()
       and (locked_until is null or locked_until < now()) returning *`;
   if (!o) return 'skipped';
+  // #177 문자·카카오톡 예약: 서버는 보내지 못하므로(유료 발송 없음) '보낼 시간'(due)으로 바꾸고 보낸 사람에게 알림 → 휴대폰 문자앱에서 사람이 보내고 [보냈어요]
+  if (/:handoff$/.test(o.channel)) {
+    await sql`update outbox set status = 'due', locked_until = null where id = ${id}`;
+    await notify(sql, { userIds: [o.created_by], type: 'sms_due', title: `예약한 문자를 보낼 시간입니다: ${(o.to_addrs as string[]).join(', ')}`, body: String(o.body_text ?? '').slice(0, 120),
+      link: o.task_id ? `/tasks/${o.task_id}?sms=${id}` : '/tasks', entityType: 'task', entityId: o.task_id ?? undefined, dedupeKey: `sms_due:${id}`, push: true });
+    if (o.task_id) await activity(sql, 'task', o.task_id, o.created_by, 'sms_due', { to: o.to_addrs });
+    return 'due';
+  }
   try {
     const workin = o.channel === 'email:workin';
     const account = workin ? null : await loadAccount(o.tenant, sql);
@@ -683,11 +705,26 @@ export async function outboxTick() {
 }
 
 // ---------------- V21 2차: AI 초안·자료 추천 / 문자 넘기기 기록 ----------------
-export const draftInput = z.object({ taskId: z.string().uuid(), kind: z.enum(Object.keys(MAIL_KINDS) as [MailKind, ...MailKind[]]), company: z.string().regex(/^[a-z0-9_-]{2,30}$/).optional(), channel: z.enum(['email', 'sms']).default('email') });
+export const DRAFT_INTENTS = { send: '자료 보냄', progress: '진행 안내', schedule: '일정 확인', thanks: '감사 인사' } as const;
+export const draftInput = z.object({ taskId: z.string().uuid(), kind: z.enum(Object.keys(MAIL_KINDS) as [MailKind, ...MailKind[]]), company: z.string().regex(/^[a-z0-9_-]{2,30}$/).optional(), channel: z.enum(['email', 'sms']).default('email'),
+  intent: z.enum(Object.keys(DRAFT_INTENTS) as [keyof typeof DRAFT_INTENTS, ...(keyof typeof DRAFT_INTENTS)[]]).optional(), hasFiles: z.boolean().optional() });
+const korDate = (d: string) => `${+d.slice(5, 7)}월 ${+d.slice(8, 10)}일(${'일월화수목금토'[new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10))).getUTCDay()]})`;
+/** V32 7-1 초안 후처리: 대괄호 빈칸([날짜]·[이름])이 남으면 경고, 문자 90바이트 넘으면 LMS 안내 */
+export function draftWarnings(body: string, channel: 'email' | 'sms') {
+  const w: string[] = [];
+  const ph = [...new Set(body.match(/\[[^\]\n]{1,12}\]/g) ?? [])];
+  if (ph.length) w.push(`빈칸이 남아 있습니다: ${ph.join(' ')} — 보내기 전에 실제 값으로 채워 주세요`);
+  if (channel === 'sms') { const b = [...body].reduce((n, ch) => n + (ch.charCodeAt(0) > 127 ? 2 : 1), 0); if (b > 90) w.push(`${b}바이트 — 90바이트를 넘어 LMS(장문)로 갑니다. 핵심 2~3문장이면 충분합니다`); }
+  return w;
+}
 const DRAFT_SYSTEM = `회사 영업·고객 응대 메일(또는 문자) 초안을 씁니다. 사람이 보고 고친 뒤 직접 보냅니다.
 - 한국어 존댓말, 짧고 정중하게. 메일 본문은 3~6문장, 2~3문장마다 빈 줄. 문자는 2~3문장(명함·서명·링크는 시스템이 붙이므로 쓰지 않음).
-- 업무 내용·문의 내용에 있는 사실만 씁니다. 금액·날짜·약속을 지어내지 않습니다. 모르는 값은 [ ] 로 비워 둡니다.
-- 받는 사람 이름·전화·이메일은 쓰지 않습니다(호칭은 "담당자님").
+- 업무 내용·문의 내용에 있는 사실만 씁니다. 금액·날짜·약속을 지어내지 않습니다.
+- 대괄호 빈칸([날짜]·[이름]·[금액] 등)은 절대 쓰지 않습니다. 모르는 값은 그 문장을 빼고 씁니다.
+- [첨부] 있음이면 "요청하신 ○○ 자료를 보내드립니다. 아래 링크(14일)에서 받아 보세요" 처럼 '보내드림' 문장이 기본입니다(업무 상태와 무관, "확인 중·다시 안내" 금지).
+  [첨부] 없음이고 진행 중이면 진행 안내 — [업무 마감]이 있으면 그 날짜로 "○월 ○일(○)까지 안내드리겠습니다", 없으면 날짜 문장을 뺍니다.
+- 받는 사람 전화·이메일은 쓰지 않습니다. 호칭은 [받는 사람 호칭]이 있으면 그것(예: "관리소장님"), 없으면 "안녕하세요."로 시작합니다("담당자님" 금지).
+- [의도]가 있으면 그 목적에 맞게만 씁니다(자료 보냄 / 진행 안내 / 일정 확인 / 감사 인사).
 - [쓰는 사람]이 [우리 회사]를 대표해 보내는 글입니다. 그 사람의 직책에 맞는 어조로, 회사의 사업 방향·주요 고객·말투에 맞춰 씁니다. 자기소개가 필요하면 "(회사) (직책) (이름)입니다".
 - recommend: 보낼 자료 후보 목록에서 이 고객에게 보내면 좋은 자료 번호를 최대 3개(없으면 빈 배열).`;
 const DRAFT_SCHEMA = { type: 'object', additionalProperties: false, required: ['subject', 'body', 'recommend'],
@@ -703,7 +740,7 @@ export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
   await G.assertUserBudget(u);
   await (await import('./plans')).assertAiRequest(u);
   const sql = db();
-  const [t] = await sql<{ description: string | null }[]>`select description from tasks where id = ${i.taskId}`;
+  const [t] = await sql<{ description: string | null; due_date: string | null }[]>`select description, due_date::text as due_date from tasks where id = ${i.taskId}`;
   const items = await sql<{ text: string; done: boolean }[]>`select text, done from task_checklist_items where task_id = ${i.taskId} order by sort`;
   const contact = await inquiryContact(i.taskId, sql);
   const lib = await (await import('./library')).listLibrary(u, { limit: 60 }).catch(() => ({ files: [] as any[] }));
@@ -714,7 +751,9 @@ export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
   const profile = i.company ? (await companyProfiles(tenantOf(u), sql)).find((p) => p.key === i.company) : null;
   const Pn = await import('./ai/persona');
   const [co, me] = await Promise.all([Pn.companyAi(u, sql), Pn.writerOf(u, sql)]);
-  const prompt = [`[종류] ${i.channel === 'sms' ? '문자' : '메일'} · ${kind.label}`, Pn.companyBlock(co), Pn.writerLine(me), profile ? `[보내는 회사] ${profile.name}` : '', `[업무 제목] ${task.title}`,
+  const honor = contact?.name ? `${String(contact.name).replace(/\s*(님|씨)$/, '')}님` : '';
+  const prompt = [`[종류] ${i.channel === 'sms' ? '문자' : '메일'} · ${kind.label}`, i.intent ? `[의도] ${DRAFT_INTENTS[i.intent]}` : '', `[첨부] ${i.hasFiles ? '있음(링크로 전달)' : '없음'}`,
+    t?.due_date ? `[업무 마감] ${korDate(t.due_date)}` : '', honor ? `[받는 사람 호칭] ${honor}` : '', Pn.companyBlock(co), Pn.writerLine(me), profile ? `[보내는 회사] ${profile.name}` : '', `[업무 제목] ${task.title}`,
     contact?.organization ? `[고객 기관] ${contact.organization}` : '', `[업무 내용]\n${desc.slice(0, 3000)}`,
     items.length ? `[진행 단계]\n${items.map((x) => `${x.done ? '✔' : '·'} ${x.text}`).join('\n')}` : '',
     `[기본 문구 참고]\n제목: ${kind.subject}\n${kind.body}`,
@@ -729,7 +768,9 @@ export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
   try { out = JSON.parse(text); } catch { out = { body: text }; }
   const picks = [...new Set((out.recommend ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= cands.length))].slice(0, 3).map((n) => cands[n - 1]);
   await G.userBudgetAlerts(u).catch(() => {});
-  return { subject: String(out.subject ?? kind.subject).slice(0, 200), body: String(out.body ?? kind.body).slice(0, 5000),
+  let body = String(out.body ?? kind.body).slice(0, 5000);
+  if (!honor) body = body.replace(/담당자님[,.]?\s?/g, '').replace(/^안녕하세요\s*$/m, '안녕하세요.'); // 7-1: "담당자님" 기본값 금지
+  return { subject: String(out.subject ?? kind.subject).slice(0, 200), body, warnings: draftWarnings(body, i.channel),
     recommend: picks.map((f) => ({ id: f.id, title: f.title || f.file_name, folder: f.folder, size: Number(f.size_bytes) })) };
 }
 
@@ -748,15 +789,34 @@ export async function logKakao(u: SessionUser, i: z.infer<typeof kakaoLogInput>,
   return { id };
 }
 export const smsLogInput = z.object({ taskId: z.string().uuid(), to: z.array(z.string().trim().regex(/^[0-9+\-\s()]{8,20}$/, '전화번호 형식이 아닙니다')).min(1).max(20),
-  body: z.string().max(2000), shareUrl: z.string().max(500).optional() });
-export async function logSms(u: SessionUser, i: z.infer<typeof smsLogInput>, ip: string | null) {
-  await loadTaskForMail(u, i.taskId); // 못 보는 업무·다른 조직은 먼저 404
+  body: z.string().max(2000), shareUrl: z.string().max(500).optional(), outboxId: z.string().uuid().optional() /* #177 예약 문자를 보낸 뒤 */ });
+/** #177 문자 예약: 서버는 보내지 못하므로 예약 시각에 '보낼 시간' 알림 → 사람이 휴대폰 문자앱에서 보내고 [보냈어요]. 자료 링크(14일)가 있으면 13일 안으로만 */
+export const scheduleSmsInput = z.object({ taskId: z.string().uuid(), to: smsLogInput.shape.to, body: z.string().trim().min(1).max(2000), sendAt: z.string().datetime({ offset: true }), shareUrl: z.string().max(500).optional() });
+export async function scheduleSms(u: SessionUser, i: z.infer<typeof scheduleSmsInput>) {
+  const { task } = await loadTaskForMail(u, i.taskId);
   if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+  const at = checkSendAt(i.sendAt);
   const sql = db(); const id = randomUUID();
   let shareId: string | null = null;
   const tok = i.shareUrl?.match(/\/d\/([A-Za-z0-9_-]+)$/)?.[1];
   if (tok) { const [sl] = await sql<{ id: string }[]>`select id from share_links where token_hash = ${sha256(tok)} and tenant = ${tenantOf(u)}`; shareId = sl?.id ?? null; }
-  await sql`insert into outbox (id, tenant, channel, status, task_id, created_by, to_addrs, subject, body_text, share_id, message_id, sent_at)
+  if (shareId && at.getTime() > Date.now() + 13 * 86400_000) throw badRequest('자료 링크(14일)가 들어간 문자는 13일 안으로만 예약할 수 있습니다');
+  await sql`insert into outbox (id, tenant, channel, status, task_id, created_by, to_addrs, subject, body_text, share_id, message_id, scheduled_at, next_attempt_at)
+    values (${id}, ${tenantOf(u)}, 'sms:handoff', 'queued', ${i.taskId}, ${u.id}, ${i.to}, ${'문자'}, ${i.body}, ${shareId}, ${`sms-${id}`}, ${at}, ${at})`;
+  await activity(sql, 'task', i.taskId, u.id, 'sms_scheduled', { to: i.to, sendAt: at.toISOString(), subject: i.body.slice(0, 40) });
+  return { id, status: 'queued', scheduledAt: at.toISOString(), taskTitle: task.title };
+}
+export async function logSms(u: SessionUser, i: z.infer<typeof smsLogInput>, ip: string | null) {
+  await loadTaskForMail(u, i.taskId); // 못 보는 업무·다른 조직은 먼저 404
+  if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+  const sql = db(); const id = i.outboxId ?? randomUUID();
+  let shareId: string | null = null;
+  const tok = i.shareUrl?.match(/\/d\/([A-Za-z0-9_-]+)$/)?.[1];
+  if (tok) { const [sl] = await sql<{ id: string }[]>`select id from share_links where token_hash = ${sha256(tok)} and tenant = ${tenantOf(u)}`; shareId = sl?.id ?? null; }
+  if (i.outboxId) {
+    const r = await sql`update outbox set status = 'sent', sent_at = now(), locked_until = null, to_addrs = ${i.to}, body_text = ${i.body} where id = ${i.outboxId} and tenant = ${tenantOf(u)} and created_by = ${u.id} and status in ('due', 'queued') returning id`;
+    if (!r.length) throw new HttpError(409, 'not_due', '이미 처리된 예약 문자입니다');
+  } else await sql`insert into outbox (id, tenant, channel, status, task_id, created_by, to_addrs, subject, body_text, share_id, message_id, sent_at)
     values (${id}, ${tenantOf(u)}, 'sms:handoff', 'sent', ${i.taskId}, ${u.id}, ${i.to}, ${'문자'}, ${i.body}, ${shareId}, ${`sms-${id}`}, now())`;
   await activity(sql, 'task', i.taskId, u.id, 'sms_sent', { to: i.to, subject: i.body.slice(0, 40) });
   await audit(sql, u.id, 'sms.handoff', 'task', i.taskId, { outboxId: id, to: i.to.length }, ip);

@@ -42,6 +42,7 @@ export default function CompanyPage() {
       <AiProfile />
       <AttachToLibrary />
       <RoleBadgeSetting />
+      <SmsSignSetting />
       {loading && !data ? <Skeleton rows={3} /> : !data?.profiles.length ? <Empty title="아직 회사 정보가 없습니다" icon={Building2}>회사 추가를 눌러 상호·사업자번호·주소·로고·브랜드 색을 넣어 주세요.</Empty> : (
         <ul className="grid gap-3 sm:grid-cols-2" data-testid="company-list">
           {data.profiles.map((p) => (
@@ -102,6 +103,24 @@ function RoleBadgeSetting() {
       <div className="flex flex-col gap-1.5 text-sm" role="radiogroup" aria-label="권한 배지 표시">
         {(['en', 'ko', 'off'] as const).map((m) => <label key={m} className="flex items-center gap-2"><input type="radio" name="role-badge" checked={st.data!.mode === m} disabled={busy} onChange={() => set(m)} data-testid={`role-badge-${m}`} />{st.data!.modeLabels[m]}</label>)}
       </div>
+    </section>
+  );
+}
+
+/** V32 7-2 문자 서명(명함형): 이름 직급 · 회사 / 휴대폰 / 메일 — 회사 대표번호는 여기서 켤 때만 */
+function SmsSignSetting() {
+  const st = useApi<{ companyPhone: boolean }>('/api/org/sms-sign');
+  const [busy, setBusy] = useState(false);
+  if (!st.data) return null;
+  const set = async (companyPhone: boolean) => {
+    setBusy(true);
+    try { await api('/api/org/sms-sign', { method: 'PUT', body: { companyPhone } }); st.reload(); toast.ok(companyPhone ? '문자 서명에 대표번호를 넣습니다' : '문자 서명에서 대표번호를 뺍니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="sms-sign-setting">
+      <h2 className="text-sm font-semibold">문자 서명(명함형)</h2>
+      <p className="mb-2 text-xs text-ink-3">업무에서 보내는 문자 끝에 <b>이름 직급 · 회사</b> / <b>휴대폰</b> / <b>메일</b> 3줄이 붙습니다(보내는 직원 프로필에서, 없는 칸은 생략).</p>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 rounded" checked={st.data.companyPhone} disabled={busy} onChange={(e) => set(e.target.checked)} data-testid="sms-sign-phone" />서명에 회사 대표번호도 넣기</label>
     </section>
   );
 }

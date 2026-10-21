@@ -49,7 +49,7 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   await c.getByTestId('sms-bytes').getByText(/바이트 · (SMS|LMS)/).waitFor();
   await c.getByTestId('sms-to').fill('010-0000-0000');
   await c.getByTestId('sms-body').fill('제안서 보내 드립니다.');
-  assert.match(await c.getByTestId('sms-preview').innerText(), /제안서 보내 드립니다\.[\s\S]*HI-LINK 시험 \/ 1555-0000/);
+  assert.match(await c.getByTestId('sms-preview').innerText(), /제안서 보내 드립니다\.[\s\S]*김대표 · HI-LINK 시험\n메일 office@mail.test/); // V32 7-2 명함형 3줄(휴대폰 없으면 생략·대표번호는 설정으로만)
   // 대표 실기기: 카카오톡 보내기가 안 보임 → 메일·문자 옆 [카카오톡] 탭(문자 내용을 이어받음)
   await c.getByTestId('mail-channel-kakao').click();
   await c.getByTestId('kakao-pane').waitFor();
