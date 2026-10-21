@@ -9,6 +9,7 @@ import { AiPeopleBudgets } from '@/components/AiPeopleBudgets';
 import { byPurposeRows } from '@/components/aiPurpose';
 import { TaskQuota } from '@/components/TaskQuota';
 import { UsageStats } from '@/components/UsageStats';
+import { AiLimitsTable, AiPlanMatrix } from '@/components/AiLimitsTable';
 import { IN_APP_BILLING_NOTE, useInApp } from '@/components/inApp';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -58,6 +59,8 @@ export default function UsagePage() {
         <Meter label="사용자" icon={Users} used={usage.users} limit={limits.users} usedLabel={`${usage.users}명${usage.invited ? ` (+초대 중 ${usage.invited})` : ''}`} limitLabel={lim(limits.users, '명')} testid="meter-users" />
       </div>
       {limits.tasksTotal != null && <TaskQuota used={usage.tasks} limit={limits.tasksTotal} canEdit={canEdit} onChanged={reload} />}
+      {/* #412: 업무·영업·마케팅 AI 한도 → 쓴 양 → 남은 양 한 표(체감 단위) */}
+      {data.aiLimits && <AiLimitsTable data={data.aiLimits} />}
       {/* V14 4번: 이번 달 AI 사용 — 사람별·기능별, 한도 대비 % */}
       {!inApp && <BillingSection />}
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-usage">
@@ -146,6 +149,7 @@ export default function UsagePage() {
           </ul>
         )}
       </section>}
+      {!inApp && data.aiLimits?.plans && <AiPlanMatrix matrix={data.aiLimits.plans} currentCode={s.planCode} />}
       </>}
       <Modal open={!!req && !inApp} onClose={() => setReq(null)} title="요금제 변경 요청">
         {req && (

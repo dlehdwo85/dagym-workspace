@@ -1724,12 +1724,22 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await owner.getByTestId('current-plan').getByText('내부(무제한)').waitFor();
   await owner.getByTestId('meter-storage').getByText('무제한').first().waitFor();
   await owner.getByTestId('top-files').locator('li').first().waitFor();
+  // #412 세 AI 한도 한 표(업무·영업·마케팅) + 요금제별 기준표
+  await owner.getByTestId('ai-limits').waitFor();
+  assert.equal(await owner.getByTestId('ai-limits').locator('tbody tr').count(), 3);
+  assert.match(await owner.getByTestId('ai-limit-work').innerText(), /AI 비서[\s\S]*질문·답변/);
+  assert.match(await owner.getByTestId('ai-limit-sales').innerText(), /AI 세일즈[\s\S]*회사 한도를 나눠/);
+  assert.match(await owner.getByTestId('ai-limit-marketing').innerText(), /AI 마케터[\s\S]*시안 이미지/);
+  assert.match(await owner.getByTestId('ai-plan-matrix').innerText(), /베이직[\s\S]*1인당 월 6회[\s\S]*스탠다드[\s\S]*프로/);
+  await owner.getByTestId('ai-limits').screenshot({ path: `${SHOTS}/178-ai-limits.png` });
   await owner.getByTestId('plan-request').click();
   await owner.getByLabel('요청할 요금제').selectOption('w_standard'); // V27 요금표
   await owner.getByRole('button', { name: '요청 보내기' }).click();
   await owner.getByText(/요청을 보냈습니다/).waitFor();
   await owner.screenshot({ path: `${SHOTS}/78-usage-plan.png`, fullPage: true });
   await owner.goto(BASE + '/platform');
+  assert.match(await owner.getByTestId('platform-ai-margin').innerText(), /AI 원가\(고객사\)[\s\S]*요금 합계[\s\S]*마진/, '#412 플랫폼 원가·마진 한 줄');
+  await owner.getByTestId('company-ai-default').getByText('AI 요청 무제한').waitFor();
   await owner.getByTestId('platform-requests').getByRole('button', { name: '반려' }).first().click();
   await owner.getByText('반려했습니다').waitFor();
   await owner.getByLabel('business 월 요금').fill('80000');

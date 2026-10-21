@@ -32,6 +32,7 @@ export async function GET() {
         appPush: fcmConfigured(),
         googleCalendar: googleSyncEnabled(), // 선택 기능
         salesSrcKey: (await import('@/lib/sales/supabaseSrc')).srcKeyKind(), // V41 단계 2: 영업관리 원본 키 종류(값은 안 보임)
+        funnelStats: !!process.env.FUNNEL_STATS_TOKEN && process.env.FUNNEL_STATS_TOKEN.length >= 16, // 로컬 10/21 16:50: 주간 퍼널 읽기 토큰이 설정됐는지(값은 안 보임)
 
       },
       env: process.env.VERCEL_ENV ?? process.env.NODE_ENV,

@@ -20,7 +20,7 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
   const sql = db();
   const term = (q.q ?? '').trim();
   const like = `%${term.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
-  const rows = await sql`
+  const rows: any[] = await sql`
     select t.id, t.name, t.kind, t.status, t.is_test, t.created_at, t.delete_scheduled_at, t.support_consent_at, ow.email as owner_email,
       ts.plan_code, ts.status as sub_status, ts.trial_ends_at, ts.limit_overrides,
       ts.billing_cycle, ts.next_billing_on, ts.billing_amount, ts.past_due_since, ts.billing_lock, ts.billing_grace_until,
@@ -34,7 +34,30 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
     where (${term} = '' or t.name ilike ${like} or t.id ilike ${like} or coalesce(ow.email, '') ilike ${like})
       and (${q.status ?? ''} = '' or t.status = ${q.status ?? ''} or (${q.status ?? ''} = 'trial' and ts.status in ('trial', 'expired')) or (${q.status ?? ''} = 'deleting' and t.delete_scheduled_at is not null))
     order by (t.id in ('default', 'demo')) desc, t.created_at desc limit 300`;
-  return { tenants: rows };
+  // #412 회사별 AI 잔여(업무·영업 공유 요청 수 · 마케팅 크레딧) + 플랫폼 전체 원가·마진 한 줄(이달 AI 원가 합계 vs 요금 합계 VAT 제외)
+  const P = await import('./plans'); const M = await import('./mktAuto');
+  const monthStart = `${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7)}-01`;
+  const [mktPlans, mktSettings, mktUsed] = await Promise.all([
+    M.planTable(),
+    sql<{ tenant: string; plan_code: string | null; monthly_credits: number | null }[]>`select tenant, plan_code, monthly_credits::float8 monthly_credits from mkt_settings`.catch(() => []),
+    sql<{ tenant: string; credits: number }[]>`select tenant, coalesce(sum(credits), 0)::float8 credits from mkt_credit_ledger where created_at >= (${monthStart}::date::timestamp at time zone 'Asia/Seoul') group by tenant`.catch(() => []),
+  ]);
+  const tenants = await Promise.all(rows.map(async (r) => {
+    const { limits } = await P.effectiveLimits(r.id, sql).catch(() => ({ limits: { aiRequests: null } as { aiRequests: number | null } }));
+    const ms = mktSettings.find((x) => x.tenant === r.id);
+    const creditsLimit = ms ? ms.monthly_credits ?? (ms.plan_code ? mktPlans[ms.plan_code]?.monthlyCredits ?? null : null) : null;
+    const creditsUsed = mktUsed.find((x) => x.tenant === r.id)?.credits ?? 0;
+    const aiLimit = limits.aiRequests ?? null;
+    return { ...r, ai_limit_requests: aiLimit, ai_left_requests: aiLimit === null ? null : Math.max(0, aiLimit - Number(r.ai_requests)),
+      mkt_plan_code: ms?.plan_code ?? null, mkt_credits_limit: creditsLimit, mkt_credits_used: creditsUsed, mkt_credits_left: creditsLimit === null ? null : Math.max(0, Math.round((creditsLimit - creditsUsed) * 10) / 10) };
+  }));
+  const customers = tenants.filter((t) => !INTERNAL.includes(t.id) && !t.is_test);
+  const aiCostKrw = Math.round(tenants.reduce((a, t) => a + Number(t.ai_krw ?? 0), 0));
+  const customerAiCostKrw = Math.round(customers.reduce((a, t) => a + Number(t.ai_krw ?? 0), 0));
+  const revenueKrw = Math.round(customers.reduce((a, t) => a + (t.billing_amount ? (t.billing_cycle === 'annual' ? Number(t.billing_amount) / 12 : Number(t.billing_amount)) / 1.1 : 0), 0));
+  const summary = { month: monthStart.slice(0, 7), aiCostKrw, customerAiCostKrw, revenueKrw, marginKrw: revenueKrw - customerAiCostKrw, marginPct: revenueKrw > 0 ? Math.round(((revenueKrw - customerAiCostKrw) / revenueKrw) * 1000) / 10 : null,
+    customers: customers.length, paying: customers.filter((t) => t.billing_amount).length };
+  return { tenants, summary };
 }
 
 export async function tenantAdminDetail(u: SessionUser, tenant: string) {

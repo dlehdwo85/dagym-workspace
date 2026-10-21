@@ -17,7 +17,8 @@ export function PlatformTenants() {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
-  const list = useApi<{ tenants: any[] }>(`/api/platform/tenants?q=${encodeURIComponent(query)}&status=${status}`, [query, status]);
+  const list = useApi<{ tenants: any[]; summary?: { month: string; aiCostKrw: number; customerAiCostKrw: number; revenueKrw: number; marginKrw: number; marginPct: number | null; customers: number; paying: number } }>(`/api/platform/tenants?q=${encodeURIComponent(query)}&status=${status}`, [query, status]);
+  const sm = list.data?.summary;
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false); // 대표 10/20 ① [고객사 추가]
   return (
@@ -33,6 +34,13 @@ export function PlatformTenants() {
           <option value="">전체</option><option value="active">사용 중</option><option value="blocked">정지</option><option value="trial">체험·체험 끝</option><option value="deleting">삭제 예약</option>
         </select>
       </div>
+      {sm && (
+        <p className="border-b border-line bg-slate-50 px-3 py-1.5 text-xs text-ink-2" data-testid="platform-ai-margin">
+          {sm.month} AI 원가(고객사) <b>{sm.customerAiCostKrw.toLocaleString('ko-KR')}원</b>{sm.aiCostKrw !== sm.customerAiCostKrw && <span className="text-ink-3"> (우리 회사·시험 포함 {sm.aiCostKrw.toLocaleString('ko-KR')}원)</span>}
+          {' '}vs 요금 합계(월 환산·VAT 제외) <b>{sm.revenueKrw.toLocaleString('ko-KR')}원</b> → 마진 <b className={sm.marginKrw < 0 ? 'text-red-600' : 'text-emerald-700'}>{sm.marginKrw.toLocaleString('ko-KR')}원{sm.marginPct !== null ? ` (${sm.marginPct}%)` : ''}</b>
+          <span className="text-ink-3"> · 고객사 {sm.customers}곳 중 결제 {sm.paying}곳</span>
+        </p>
+      )}
       <div className="max-h-[28rem] overflow-auto">
         <table className="w-full min-w-[980px] text-sm">
           <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>회사</th><th className={cell}>요금제</th><th className={cell}>상태</th><th className={cell}>인원</th><th className={cell}>저장</th><th className={cell}>AI(이번 달)</th><th className={cell}>청구·미납</th><th className={cell}>최근 접속</th><th className={cell}>가입</th><th className={cell} /></tr></thead>
@@ -44,7 +52,8 @@ export function PlatformTenants() {
                 <td className={cell}>{STATUS[t.status] ?? t.status}{t.delete_scheduled_at && <div className="text-[11px] text-red-600">삭제 예정 {String(t.delete_scheduled_at).slice(0, 10)}</div>}{t.support_consent_at && <div className="text-[11px] text-emerald-700">지원 허용</div>}</td>
                 <td className={cell}>{t.users}명</td>
                 <td className={cell}>{t.storage_bytes != null ? fmtBytes(Number(t.storage_bytes)) : '-'}</td>
-                <td className={cell}>{t.ai_requests}회 · {Math.round(Number(t.ai_krw)).toLocaleString()}원</td>
+                <td className={cell} data-testid={`company-ai-${t.id}`}>{t.ai_requests}회{t.ai_limit_requests !== null && t.ai_limit_requests !== undefined ? ` / ${t.ai_limit_requests}회` : ''} · {Math.round(Number(t.ai_krw)).toLocaleString()}원
+                  <div className="text-[11px] text-ink-3">{t.ai_left_requests === null || t.ai_left_requests === undefined ? 'AI 요청 무제한' : `남은 ${t.ai_left_requests}회`}{t.mkt_credits_limit !== null && t.mkt_credits_limit !== undefined ? ` · 마케팅 ${t.mkt_credits_left}/${t.mkt_credits_limit}크레딧` : ''}</div></td>
                 <td className={cell}>{t.billing_amount ? `${Number(t.billing_amount).toLocaleString()}원/${t.billing_cycle === 'annual' ? '년' : '월'}` : '-'}
                   {t.next_billing_on && <div className="text-[11px] text-ink-3">다음 {String(t.next_billing_on).slice(0, 10)}</div>}
                   {t.past_due_since && <div className="text-[11px] font-medium text-red-600">미납 {String(t.past_due_since).slice(0, 10)}~{t.billing_lock === 'suspended' ? ' · 이용 중지' : t.billing_lock === 'read_only' ? ' · 읽기 전용' : ''}</div>}

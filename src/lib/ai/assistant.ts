@@ -942,7 +942,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     turnCost += costUsd(r.model ?? provider.model, used); inTok += used.input_tokens; outTok += used.output_tokens;
     await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose, web_searches)
       values (${tenant}, ${u.id}, ${requestId}, ${provider.name}, ${r.model ?? provider.model}, ${used.input_tokens}, ${used.output_tokens}, ${used.cache_read_input_tokens ?? 0},
-        ${used.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, used)}, 'assistant', ${(used as any).server_tool_use?.web_search_requests ?? 0})`;
+        ${used.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, used)}, ${i.space === 'sales' ? 'sales_assistant' : i.space === 'marketing' ? 'marketing_assistant' : 'assistant'}, ${(used as any).server_tool_use?.web_search_requests ?? 0})`; // #412 공간별 AI 사용량 구분
     const text = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('\n').trim();
     if (r.stop_reason === 'refusal') { reply = '이 요청은 처리할 수 없습니다. 다르게 요청해 주세요.'; break; }
     if (r.stop_reason === 'pause_turn') { messages.push({ role: 'assistant', content: r.content as never }); continue; }
