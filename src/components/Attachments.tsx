@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { api, broadcastRefresh } from './client';
-import { Camera, Download, Eye, FileText, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload } from 'lucide-react';
+import { Camera, Download, Eye, FileText, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload, Video } from 'lucide-react';
 import { isNativeApp } from './native';
 import { MediaFull } from './MediaView';
 import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
@@ -35,8 +35,8 @@ export async function uploadTaskFiles(list: File[], target: { taskId?: string; e
       // B-7 촬영(파일 수정) 시각을 함께 기록 — 사진 증빙의 시점 확인용
       const capturedAt = raw.lastModified ? new Date(raw.lastModified).toISOString() : undefined;
       const r = await api('/api/attachments', { body: { ...target, kind: 'file', fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, capturedAt } });
-      await putFile(r.upload, file, (pct) => upd(n, { pct }));
-      await api(`/api/attachments/${r.id}/complete`, { body: {} });
+      const { uploadId } = await putFile(r.upload, file, (pct) => upd(n, { pct }));
+      await api(`/api/attachments/${r.id}/complete`, { body: uploadId ? { uploadId } : {} });
       upd(n, { pct: 100 }); ok++;
     } catch (e: any) { upd(n, { error: e.message }); toast.error(`${raw.name}: ${e.message}`); }
   }
@@ -74,6 +74,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   }
   const photos = items.filter(isImage);
   const albumRef = useRef<HTMLInputElement>(null);
+  const vidRef = useRef<HTMLInputElement>(null); // #109 영상 촬영
 
   const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
   async function upload(files: FileList | null) {
@@ -162,11 +163,13 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       <div className="mt-2 flex flex-wrap gap-1.5">
         <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="file-input" />
         <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
-        <input ref={albumRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="album-input" />
+        <input ref={albumRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="album-input" />
+        <input ref={vidRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => upload(e.target.files)} data-testid="video-input" />
         <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={!!busy}><Paperclip />파일 첨부</Button>
         {taskId && <Button size="sm" variant="secondary" onClick={() => setLibOpen(true)} disabled={!!busy} title="자료실에 있는 파일을 이 업무에 연결(복사 아님, 자료실 권한 그대로)" data-testid="att-from-library"><FolderOpen />자료실에서</Button>}
         <Button size="sm" variant="secondary" onClick={() => camRef.current?.click()} disabled={!!busy}><Camera />사진 촬영</Button>
-        <Button size="sm" variant="secondary" onClick={() => albumRef.current?.click()} disabled={!!busy}><ImageIcon />사진 여러 장</Button>
+        <Button size="sm" variant="secondary" onClick={() => albumRef.current?.click()} disabled={!!busy}><ImageIcon />사진·영상</Button>
+        <Button size="sm" variant="secondary" onClick={() => vidRef.current?.click()} disabled={!!busy} className="sm:hidden" title="영상 촬영(100MB 까지)" data-testid="att-video-capture"><Video />영상 촬영</Button>
         <Button size="sm" variant="secondary" onClick={() => setLinkOpen(true)}><Link2 />문서 링크 연결</Button>
         {busy && <span className="inline-flex items-center gap-1.5 text-xs text-ink-2"><Loader2 className="size-3.5 animate-spin" />{busy}</span>}
       </div>

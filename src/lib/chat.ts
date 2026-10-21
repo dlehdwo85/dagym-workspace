@@ -4,7 +4,7 @@ import { badRequest, forbidden, notFound } from './errors';
 import { loadTaskForUser, teamScope } from './access';
 import { notify } from './notifications';
 import { audit } from './log';
-import { MAX_UPLOAD_BYTES, downloadUrl, objectSize, uploadTarget } from './storage';
+import { completeMultipart, downloadUrl, maxUploadBytes, objectSize, tooLargeMsg, uploadTargetFor } from './storage';
 import type { SessionUser } from './types';
 
 /**
@@ -236,7 +236,7 @@ export async function roomDetail(u: SessionUser, roomId: string, q: { before?: s
 
 export const messageInput = z.object({
   body: z.string().max(5000).default(''),
-  file: z.object({ key: z.string().max(400), name: z.string().max(200), mime: z.string().max(100), size: z.number().int().positive() }).optional(),
+  file: z.object({ key: z.string().max(400), name: z.string().max(200), mime: z.string().max(100), size: z.number().int().positive(), uploadId: z.string().max(400).optional() }).optional(),
   replyTo: z.string().regex(/^\d+$/).max(20).optional(),
 });
 export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typeof messageInput>) {
@@ -246,6 +246,7 @@ export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typ
   if (!body && !i.file) throw badRequest('내용을 입력하세요');
   if (i.file) {
     if (!i.file.key.startsWith(`chat/${r.tenant}/${r.id}/`)) throw badRequest('잘못된 파일입니다');
+    if (i.file.uploadId) await completeMultipart(i.file.key, i.file.uploadId).catch((e) => { throw badRequest(`조각 합치기 실패: ${(e as Error).message}`); }); // #109 영상 조각 업로드
     if ((await objectSize(i.file.key)) === null) throw badRequest('업로드된 파일을 찾을 수 없습니다. 다시 올려 주세요.');
   }
   if (i.replyTo && !(await sql`select 1 from chat_messages where id = ${i.replyTo}::bigint and room_id = ${r.id}`).length) throw badRequest('답장할 메시지가 이 대화방에 없습니다');
@@ -334,11 +335,11 @@ export async function setTyping(u: SessionUser, roomId: string) {
 export async function fileTarget(u: SessionUser, roomId: string, i: { fileName: string; mime: string; size: number }) {
   const sql = db();
   const r = await loadRoom(u, roomId, sql);
-  if (i.size > MAX_UPLOAD_BYTES) throw badRequest(`파일은 ${MAX_UPLOAD_BYTES / 1024 / 1024}MB 까지 올릴 수 있습니다`);
+  if (i.size > maxUploadBytes(i.mime)) throw badRequest(tooLargeMsg(i.mime)); // #109: 영상 100MB(조각)
   if (/\.(exe|bat|cmd|com|msi|scr|ps1|vbs|jar|apk|ipa|dll|sh)$/i.test(i.fileName)) throw badRequest('실행 파일은 올릴 수 없습니다');
   await (await import('./plans')).assertStorage(u, i.size);
   const key = `chat/${r.tenant}/${r.id}/${crypto.randomUUID()}/${i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
-  return { key, upload: await uploadTarget(key, i.mime || 'application/octet-stream') };
+  return { key, upload: await uploadTargetFor(key, i.mime || 'application/octet-stream', i.size) };
 }
 export async function fileDownload(u: SessionUser, id: string, inline: boolean) {
   const sql = db();

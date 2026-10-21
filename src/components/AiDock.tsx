@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Check, Loader2, Maximize2, Menu, Paperclip, Pin, Plus, Search, Send, Sparkles, X } from 'lucide-react';
-import { AttachChips, DEFAULT_FILE_ASK, useAiAttach } from './aiAttach';
+import { AttachChips, askFor, useAiAttach } from './aiAttach';
 import { DocJobCard } from '@/components/DocJobCard';
 import { VoiceButton } from './voice';
 import { dockHideCls, useDockHide } from './useDockHide';
@@ -79,7 +79,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
   const hideFab = path.startsWith('/messages'); // 메시지 화면은 아래 오른쪽에 보내기 버튼 — 겹치지 않게(휴대폰은 상단 ✨)
 
   async function send(q: string) {
-    const t = q.trim() || (att.files.length ? DEFAULT_FILE_ASK : ''); if (!t || busy || att.uploading) return;
+    const t = q.trim() || (att.files.length ? askFor(att.files) : ''); if (!t || busy || att.uploading) return;
     setText('');
     await conv.send(t, att.take());
   }

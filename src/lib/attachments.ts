@@ -4,7 +4,7 @@ import { loadTaskForUser } from './access';
 import { loadEvent } from './events';
 import { badRequest, forbidden, notFound } from './errors';
 import { activity } from './log';
-import { MAX_UPLOAD_BYTES } from './storage';
+import { maxUploadBytes, tooLargeMsg, uploadTargetFor } from './storage';
 import type { SessionUser } from './types';
 import { zDate, zUuid } from './api';
 
@@ -60,7 +60,7 @@ export async function createAttachment(u: SessionUser, i: z.infer<typeof attachm
     return { id: a.id };
   }
   if (!i.fileName || !i.size) throw badRequest('파일 이름과 크기가 필요합니다');
-  if (i.size > MAX_UPLOAD_BYTES) throw badRequest(`파일은 ${MAX_UPLOAD_BYTES / 1024 / 1024}MB 까지 올릴 수 있습니다`);
+  if (i.size > maxUploadBytes(i.mimeType)) throw badRequest(tooLargeMsg(i.mimeType)); // #109: 영상 100MB(조각)
   if (BLOCKED_EXT.test(i.fileName)) throw badRequest('실행 파일은 첨부할 수 없습니다');
   await (await import('./plans')).assertStorage(u, i.size); // V10 회사 저장공간 한도
   const safe = i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120);
@@ -72,8 +72,7 @@ export async function createAttachment(u: SessionUser, i: z.infer<typeof attachm
     returning id`;
   const key = `att/${new Date().toISOString().slice(0, 7)}/${a.id}/${safe}`;
   await sql`update attachments set storage_key = ${key} where id = ${a.id}`;
-  const { uploadTarget } = await import('./storage');
-  return { id: a.id, upload: await uploadTarget(key, mime) };
+  return { id: a.id, upload: await uploadTargetFor(key, mime, i.size) }; // #109: 20MB 넘으면 조각 업로드
 }
 
 export async function loadAttachment(u: SessionUser, id: string, need: 'view' | 'edit' = 'view') {

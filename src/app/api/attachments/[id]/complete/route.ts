@@ -1,14 +1,17 @@
-import { handler } from '@/lib/api';
+import { z } from 'zod';
+import { handler, body } from '@/lib/api';
 import { db } from '@/lib/db';
 import { loadAttachment } from '@/lib/attachments';
-import { objectSize } from '@/lib/storage';
+import { completeMultipart, objectSize } from '@/lib/storage';
 import { badRequest, forbidden } from '@/lib/errors';
 import { activity } from '@/lib/log';
 
-export const POST = handler<{ id: string }>(async ({ user, params }) => {
+export const POST = handler<{ id: string }>(async ({ req, user, params }) => {
   const { a } = await loadAttachment(user, params.id);
   if (a.created_by !== user.id) throw forbidden();
   if (a.upload_status === 'ready') return { ok: true, id: a.id };
+  const { uploadId } = await body(req, z.object({ uploadId: z.string().max(400).optional() }).default({})).catch(() => ({ uploadId: undefined as string | undefined }));
+  if (uploadId) await completeMultipart(a.storage_key, uploadId).catch((e) => { throw badRequest(`조각 합치기 실패: ${(e as Error).message}`); }); // #109 영상 조각 업로드
   const size = await objectSize(a.storage_key);
   if (size === null) throw badRequest('업로드된 파일을 찾을 수 없습니다. 다시 올려 주세요.');
   const sql = db();

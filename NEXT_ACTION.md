@@ -1352,6 +1352,16 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 대표 10/20 17:00 — AI 비서 영상 첨부 (#109) [배포확인요청]
+- **올리기**: 영상(video/*)은 100MB 까지(그 외 50MB 그대로). 20MB 넘으면 8MB 조각 — S3/R2 는 멀티파트(조각마다 presigned PUT, 완료는 서버가 ListParts 로 합침 → 버킷 CORS 에 ETag 노출 불필요), 로컬 저장소는 `key.partN` 을 완료 때 이어 붙임. 자료실 `/api/library/:id/complete {uploadId}` · 업무 첨부 `/api/attachments/:id/complete {uploadId}` · 메신저 메시지 `file.uploadId`. 화면 `putFile` 이 조각을 차례로 올리고(조각마다 3번 시도) uploadId 를 돌려줌.
+- **휴대폰 선택기**: AI 비서 첨부 accept 에 video/* · 업무 첨부 [사진·영상](갤러리 image+video) + [영상 촬영](휴대폰, capture) · 메신저 갤러리 버튼(사진·영상) 추가 — 로컬 ⑤ "영상 첨부(업무·메신저) 불가" 도 이걸로 해결.
+- **AI 처리(영상 자체는 AI 에 안 보냄)** `src/components/videoDigest.ts`: 브라우저가 ① 1초 간격(최대 120 표본) 회색 32×18 차이 ≥12% = 장면 전환, 최대 20장 640px JPEG ② decodeAudioData 로 음성 트랙 → 16kHz 모노 WAV(최대 10분, 무음이면 생략) 을 "AI 요청 첨부/영상 음성" 으로 잠깐 올림. 서버 `POST /api/ai/video-digest {fileId, duration, frames[], audioFileId?, mode}`(`src/lib/ai/videoDigest.ts`): 음성 → STT(`src/lib/ai/stt.ts`, OpenAI `gpt-4o-mini-transcribe`, env OPENAI_API_KEY·OPENAI_BASE_URL·STT_MODEL; **키 없으면 "음성 녹취 없음(STT 미설정)" 으로 프레임만**) → 빠른 모델(Haiku)에 프레임 이미지 + 녹취 → JSON(summary·scenes·todos·review) → 영상 파일 `meta.video_digest` + `text_content`(자료실 검색·AI 첨부에 쓰임) 저장, 음성 파일은 지움, ai_usage purpose `stt`(분당 $0.003)·`video`.
+- **'영상 요약 + 할 일 제안' 카드**: AI 비서에 영상을 붙이면 올린 직후 요약이 만들어지고(칩 🎬, 진행 문구), 글을 안 쓰면 기본 요청이 "첨부한 영상을 요약하고, 영상에서 나온 할 일을 업무로 제안해 줘" → 비서가 요약 글 + propose_create_tasks 제안 카드(기존 흐름). 비서에는 영상 대신 `[첨부 자료]` 글자 요약만 들어감(fileBlocks 의 text_content 경로).
+- **마케팅 시안 영상 검토 공용**: 승인함 카드에 영상 시안이 있으면 [AI 영상 검토] 버튼(`VideoDigestButton`, mode review: 자막 오타·브랜드 톤·구성·훅) → 창에 요약·검토 의견·장면·할 일 후보. 같은 버튼을 콘텐츠 상세·자료실에도 붙일 수 있음(다음).
+- 안 한 것(다음): 리드·콘텐츠 첨부 칸에 영상 직접 올리기(지금은 자료실 → 연결), 자료실 파일 상세 [AI 영상 요약] 버튼, 네이티브 앱에서 100MB 영상 decodeAudioData 메모리 한계(실기기 확인 필요 — 실패하면 프레임만으로 진행).
+- **대표 결정 필요**: 음성 녹취(STT)는 OpenAI 키(OPENAI_API_KEY)가 운영 env 에 있어야 한다 — 분당 약 4원(gpt-4o-mini-transcribe $0.003/분). 없으면 영상은 장면 요약만.
+- 로컬 확인 부탁: 휴대폰 AI 비서 📎 → 갤러리에서 30초 영상 → "영상 요약 준비됨" 토스트 → 보내기 → 요약 + 업무 제안 카드. 업무 첨부 [사진·영상]·[영상 촬영], 메신저 갤러리 버튼으로 20MB 넘는 영상(조각 업로드) 1건. 승인함 릴스 시안 [AI 영상 검토].
+
 ## 2026-10-21 운영 DB 쿼터 초과 장애 뒤 DB 부하 줄이기 (로컬 긴급 요청) [배포확인요청]
 - 원인(로컬 /api/health "exceeded the quota"): Neon Free 는 월 컴퓨트 시간이 정해져 있는데 운영이 24시간 DB 를 깨워 두고 있었다 — ① 서버 tick 10분마다(GitHub cron)+모든 API 요청에 같이 타는 tick ② 메신저를 연 탭마다 SSE 가 2초마다 changesSince ③ 껍데기 60초·메신저 독 30초 폴링(가려진 탭도). 복구는 **Neon Launch 요금제 올리기(대표 결정)** 또는 11/1 쿼터 초기화.
 - 줄인 것(서버 API·스키마 변경 없음):

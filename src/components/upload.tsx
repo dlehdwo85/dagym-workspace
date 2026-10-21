@@ -7,17 +7,35 @@ import { cx } from './ui';
  * V12 9번: 업로드 공통 — 진행률(%) + 실패 원인을 사람이 알 수 있는 말로.
  * presigned PUT(R2·S3) 은 브라우저가 저장소로 바로 보내므로, 저장소 CORS·네트워크 문제는 status 0 으로만 보인다.
  */
-export async function putFile(target: { url: string; method?: string; headers?: Record<string, string>; fallback?: string; fallbackMax?: number }, file: Blob, onProgress?: (pct: number) => void): Promise<void> {
+export type PutTarget = { url: string; method?: string; headers?: Record<string, string>; fallback?: string; fallbackMax?: number; multipart?: { uploadId: string; partSize: number; parts: { n: number; url: string }[] } };
+/** 돌려주는 uploadId 는 조각 업로드일 때만 — 완료 API(…/complete 또는 메시지 file.uploadId)에 넘겨야 서버가 조각을 합친다 */
+export async function putFile(target: PutTarget, file: Blob, onProgress?: (pct: number) => void): Promise<{ uploadId?: string }> {
+  // #109 영상 100MB: 8MB 조각을 차례로(조각마다 2번까지 재시도), 진행률은 전체 기준
+  if (target.multipart) {
+    const { parts, partSize, uploadId } = target.multipart;
+    let done = 0;
+    for (const p of parts) {
+      const chunk = file.slice((p.n - 1) * partSize, Math.min(file.size, p.n * partSize));
+      let last: unknown = null;
+      for (let tryN = 0; tryN < 3; tryN++) {
+        try { await xhrPut(p.url, 'PUT', target.headers, chunk, (pct) => onProgress?.(Math.round(((done + (chunk.size * pct) / 100) / file.size) * 100))); last = null; break; } catch (e) { last = e; }
+      }
+      if (last) throw new Error(`조각 ${p.n}/${parts.length}: ${(last as Error).message}`);
+      done += chunk.size; onProgress?.(Math.round((done / file.size) * 100));
+    }
+    return { uploadId };
+  }
   try {
     await xhrPut(target.url, target.method ?? 'PUT', target.headers, file, onProgress);
   } catch (e) {
     // 저장소로 바로 보내기 실패(CORS·네트워크·서명 문제) → 작은 파일은 서버를 거쳐 다시 보냄
     if (target.fallback && file.size <= (target.fallbackMax ?? 4 * 1024 * 1024)) {
-      try { onProgress?.(0); await xhrPut(target.fallback, 'PUT', target.headers, file, onProgress); return; }
+      try { onProgress?.(0); await xhrPut(target.fallback, 'PUT', target.headers, file, onProgress); return {}; }
       catch (e2) { throw new Error(`${(e as Error).message} / 서버 경유 재시도도 실패: ${(e2 as Error).message}`); }
     }
     throw e;
   }
+  return {};
 }
 function xhrPut(url: string, method: string, headers: Record<string, string> | undefined, file: Blob, onProgress?: (pct: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -37,7 +55,7 @@ export function uploadErrorText(status: number) {
   if (status === 0) return navigator.onLine === false ? '인터넷에 연결되어 있지 않습니다 — 연결 후 다시 올려 주세요'
     : '파일 저장소에 연결하지 못했습니다(저장소 접근 설정 또는 네트워크 문제) — 잠시 후 다시 시도하고, 계속되면 관리자에게 알려 주세요';
   if (status === 403) return '업로드 허가가 만료되었거나 거부되었습니다 — 다시 올려 주세요(계속되면 관리자에게 알려 주세요)';
-  if (status === 413) return '파일이 너무 큽니다 — 50MB 이하로 줄여서 올려 주세요';
+  if (status === 413) return '파일이 너무 큽니다 — 50MB(영상 100MB) 이하로 줄여서 올려 주세요';
   if (status >= 500) return `파일 저장소가 일시적으로 응답하지 않습니다(${status}) — 잠시 후 다시 올려 주세요`;
   return `파일을 보내지 못했습니다(${status}) — 다시 올려 주세요`;
 }

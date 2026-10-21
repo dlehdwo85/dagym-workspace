@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Headphones, Loader2, MessageSquarePlus, Mic, Paperclip, Pin, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { AI_ACCEPT } from '@/components/libraryUpload';
-import { AttachChips, DEFAULT_FILE_ASK, useAiAttach } from '@/components/aiAttach';
+import { AttachChips, askFor, useAiAttach } from '@/components/aiAttach';
 import { DropZone } from '@/components/upload';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
@@ -79,7 +79,7 @@ export default function AssistantPage() {
   const att = useAiAttach();
   const { files, uploading, attach } = att;
   async function send(q: string) {
-    const t = q.trim() || (files.length ? DEFAULT_FILE_ASK : ''); if (!t || busy || uploading) return;
+    const t = q.trim() || (files.length ? askFor(files) : ''); if (!t || busy || uploading) return;
     setText('');
     // 문맥(최근 20개 + 요약)은 서버가 보관된 대화에서 꺼낸다
     await conv.send(t, att.take());
@@ -261,7 +261,7 @@ export default function AssistantPage() {
         )}
         <ChatComposer value={text} onChange={setText} onSend={() => send(text)} onStop={() => conv.stop()} busy={busy} canSend={!uploading && (!!text.trim() || files.length > 0)} inputRef={inputRef}
           onPaste={att.onPaste} ariaLabel="AI 에게 요청" disabled={status.data?.overLimit} placeholder={status.data?.overLimit ? '이번 달 한도에 도달했습니다' : (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches ? 'AI에게 요청' : 'AI에게 요청 · 사진 붙여넣기 가능')}
-          leading={<Button type="button" variant="secondary" onClick={() => att.inputRef.current?.click()} aria-label="자료 첨부 (사진·PDF·엑셀)" disabled={att.full || !!uploading}><Paperclip /></Button>}
+          leading={<Button type="button" variant="secondary" onClick={() => att.inputRef.current?.click()} aria-label="자료 첨부 (사진·영상·PDF·엑셀)" disabled={att.full || !!uploading}><Paperclip /></Button>}
           trailing={<VoiceButton value={text} onChange={setText} label="음성으로 요청" />} />
       </div>
       {/* V14 6번: 직원 고지 (상시) */}
