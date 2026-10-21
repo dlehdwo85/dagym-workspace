@@ -4,7 +4,7 @@ import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor
 // 네이티브 플러그인은 앱(mobile/)에 설치되어 있고, 웹 번들에는 프록시만 둔다
 type L = (e: any) => void;
 interface AppPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; exitApp(): Promise<void> }
-interface FcmPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; requestPermissions(): Promise<{ receive: string }>; checkPermissions(): Promise<{ receive: string }>; getToken(): Promise<{ token: string }> }
+interface FcmPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; requestPermissions(): Promise<{ receive: string }>; checkPermissions(): Promise<{ receive: string }>; getToken(): Promise<{ token: string }>; removeDeliveredNotifications(o: { notifications: { id: string }[] }): Promise<void> }
 const App = registerPlugin<AppPlugin>('App');
 // 로컬 10/19(대표) 앱 생체 인증 잠금: @aparajita/capacitor-biometric-auth(네이티브 이름 BiometricAuthNative). 앱에 설치되지 않았으면 기능을 숨긴다
 interface BioPlugin { checkBiometry(): Promise<{ isAvailable: boolean; biometryType: number; reason?: string }>; authenticate(o: { reason?: string; cancelTitle?: string; allowDeviceCredential?: boolean; androidTitle?: string }): Promise<void> }
@@ -24,6 +24,8 @@ interface LocalPlugin {
   cancel(o: { notifications: { id: number }[] }): Promise<void>;
   schedule(o: { notifications: any[] }): Promise<unknown>;
   createChannel(c: { id: string; name: string; description?: string; importance?: number; visibility?: number; vibration?: boolean; sound?: string }): Promise<void>;
+  registerActionTypes(o: { types: { id: string; actions: { id: string; title: string; destructive?: boolean; foreground?: boolean }[] }[] }): Promise<void>;
+  removeDeliveredNotifications(o: { notifications: any[] }): Promise<void>;
 }
 const LocalNotifications = registerPlugin<LocalPlugin>('LocalNotifications');
 // 52ec734(로컬): filesystem·share·browser 플러그인 — 이 플러그인이 없는 예전 앱은 지금처럼 동작
@@ -67,13 +69,43 @@ export async function initNative(router: Router) {
     } catch {}
   };
   // 알림 탭 리스너는 맨 먼저(어떤 await 보다 앞) 등록: 플러그인이 보관해 둔 탭 이벤트를 바로 받아 해당 화면으로 이동하고 그 알림을 읽음 처리
+  // 로컬 10/21 13:05 #409(대표 실기기): 알람형 알림의 [해제]/[10분 뒤]/[열기]·본문 탭 — 전에는 link 이동만 하고 actionId 를 보지 않아
+  // ongoing 알림이 그대로 남고 재예약·결과 보고도 없었다. 로컬 예약·FCM 둘 다 같은 처리: 뜬 알림 지우기 → 미루기는 기기에서 재예약(서버 재발송에 기대지 않음) → POST /api/reminders/alarm → 토스트
+  const alarmAction = async (actionId: string, n: { id?: number | string; title?: string; body?: string; extra?: any }, from: 'local' | 'fcm') => {
+    const x = n.extra ?? {}; const act = actionId === 'tap' || !actionId ? 'open' : actionId;
+    // ① 뜬 알림 지우기(ongoing 은 스와이프로 못 지우므로 여기서)
+    if (from === 'local' && n.id !== undefined && hasLocal()) {
+      const id = Number(n.id);
+      await LocalNotifications.cancel({ notifications: [{ id }] }).catch(() => {});
+      await (LocalNotifications as any).removeDeliveredNotificationsById?.({ ids: [id] })?.catch?.(() => {});
+      await LocalNotifications.removeDeliveredNotifications({ notifications: [{ id, title: n.title ?? '', body: n.body ?? '' } as any] }).catch(() => {});
+    } else if (from === 'fcm' && n.id !== undefined) await FirebaseMessaging.removeDeliveredNotifications({ notifications: [{ id: String(n.id) }] }).catch(() => {});
+    const report = (action: 'dismiss' | 'snooze', minutes?: number) => (x.kind && x.entityId ? api('/api/reminders/alarm', { body: { kind: x.kind, id: x.entityId, action, minutes, key: x.key ? String(x.key).slice(0, 200) : undefined } }).catch(() => {}) : Promise.resolve());
+    const { toast } = await import('./ui');
+    if (act === 'snooze') {
+      const minutes = Math.min(120, Math.max(1, Number(x.snoozeMinutes) || 10));
+      if (hasLocal()) await LocalNotifications.schedule({ notifications: [{
+        id: (Math.floor(Date.now() / 1000) % 1_000_000_000) + 1_000_000_000, title: n.title ?? '알람', body: n.body ?? '', channelId: 'alarm', actionTypeId: 'alarm', ongoing: true,
+        schedule: { at: new Date(Date.now() + minutes * 60_000), allowWhileIdle: true }, extra: { ...x, alarm: true, snoozed: (Number(x.snoozed) || 0) + 1 } }] }).catch(() => {});
+      await report('snooze', minutes); toast.ok(`${minutes}분 뒤 다시 알립니다`); window.dispatchEvent(new Event('wos-refresh'));
+    } else if (act === 'dismiss') { await report('dismiss'); toast.ok('알람을 해제했습니다'); window.dispatchEvent(new Event('wos-refresh')); }
+    else go(x.link);
+  };
   FirebaseMessaging.addListener('notificationActionPerformed', (e: any) => {
     const d = e?.notification?.data ?? {};
-    go(d.link);
     if (d.notificationId) api('/api/notifications/read', { method: 'POST', body: { ids: [d.notificationId] } }).then(() => window.dispatchEvent(new Event('wos-refresh'))).catch(() => {});
+    if (d.alarm === 'true' || d.alarm === true) { alarmAction(String(e?.actionId ?? 'tap'), { id: e?.notification?.id, title: e?.notification?.title, body: e?.notification?.body, extra: { link: d.link, kind: d.taskId ? 'task' : undefined, entityId: d.taskId || undefined, alarm: true, snoozeMinutes: d.snoozeMinutes, key: d.notificationId } }, 'fcm').catch(() => go(d.link)); return; }
+    go(d.link);
   });
-  // 휴대폰 예약 알림(서버 연결 없이 정시에 울림) 탭 → 해당 화면
-  if (hasLocal()) LocalNotifications.addListener('localNotificationActionPerformed', (e: any) => go(e?.notification?.extra?.link));
+  // 휴대폰 예약 알림(서버 연결 없이 정시에 울림) 탭·액션 → 알람이면 위 처리, 아니면 해당 화면
+  if (hasLocal()) {
+    LocalNotifications.registerActionTypes({ types: [{ id: 'alarm', actions: [{ id: 'dismiss', title: '해제', destructive: true }, { id: 'snooze', title: '10분 뒤' }, { id: 'open', title: '열기' }] }] }).catch(() => {});
+    LocalNotifications.addListener('localNotificationActionPerformed', (e: any) => {
+      const n = e?.notification ?? {}; const x = n.extra ?? {};
+      if (x.alarm === true || x.alarm === 'true') { alarmAction(String(e?.actionId ?? 'tap'), { id: n.id, title: n.title, body: n.body, extra: x }, 'local').catch(() => go(x.link)); return; }
+      go(x.link);
+    });
+  }
   App.addListener('appUrlOpen', (e: any) => go(e.url.replace(/^[a-z]+:\/\/[^/]*/i, '') || '/'));
   // V14 39번: 하드웨어 뒤로 = 열린 시트·모달 닫기 → 이전 화면(history) → 홈 → (홈에서) 2초 안에 한 번 더 누르면 종료
   let exitAt = 0;
