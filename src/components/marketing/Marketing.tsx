@@ -1,10 +1,11 @@
 'use client';
 import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
-import { MediaFull, mimeOf, posterFrom } from '@/components/MediaView';
+import { MediaFull, MediaThumb, mimeOf, posterFrom } from '@/components/MediaView';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api, useApi } from '@/components/client';
+import { useSession } from '@/components/session';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
@@ -388,32 +389,114 @@ function OpsRequests() {
   );
 }
 
-/** 콘텐츠 캘린더: 이번 달(앞뒤 이동) 날짜별, 채널 색 */
+/** 콘텐츠 캘린더 — 대표 10/20 16:10 (#105): 주 보기(기본) = 요일 7열 × 브랜드(또는 채널) 행, 칸에 썸네일·상태·게시 시각, 끌어서 날짜 이동·[옮기기] 상자(날짜·시각), 오늘 열 강조, 브랜드 필터, 휴대폰은 가로 스크롤. 월 보기는 전과 같음 */
+type CalContent = Content & { kind?: string | null; brand_color?: string | null; media_info?: { id: string; mime: string }[] | null; is_test?: boolean };
+const KST = 'Asia/Seoul';
+const ymdK = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: KST }).format(d);
+const hmK = (iso: string) => new Intl.DateTimeFormat('en-GB', { timeZone: KST, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+const addDaysYmd = (ymd: string, n: number) => ymdK(new Date(Date.parse(`${ymd}T12:00:00+09:00`) + n * 864e5));
+/** 그 주(일요일 시작)의 7일 */
+const weekOf = (ymd: string) => { const dow = new Date(`${ymd}T12:00:00+09:00`).getUTCDay(); /* KST 정오 = UTC 03시, 같은 날 */ const start = addDaysYmd(ymd, -dow); return Array.from({ length: 7 }, (_, i) => addDaysYmd(start, i)); };
+const STATUS_TONE: Record<string, string> = { pending: 'bg-orange-50 text-orange-800', approved: 'bg-emerald-50 text-emerald-800', changes: 'bg-red-50 text-red-700', hold: 'bg-slate-100 text-ink-2', published: 'bg-blue-50 text-blue-800', draft: 'bg-slate-50 text-ink-3' };
 export function ContentCalendar() {
-  const [month, setMonth] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7));
+  const today = ymdK(new Date());
+  const [view, setView] = useState<'week' | 'month'>(() => { try { return localStorage.getItem('mkt-cal-view') === 'month' ? 'month' : 'week'; } catch { return 'week'; } });
+  const [axis, setAxis] = useState<'brand' | 'channel'>(() => { try { return localStorage.getItem('mkt-cal-axis') === 'channel' ? 'channel' : 'brand'; } catch { return 'brand'; } });
+  const [anchor, setAnchor] = useState(today); // 주 보기 기준 날짜
+  const [month, setMonth] = useState(today.slice(0, 7));
+  const [brand, setBrand] = useState('');
   const [open, setOpen] = useState<string | null>(null); const [nw, setNw] = useState<string | null>(null);
+  const [moving, setMoving] = useState<{ id: string; date: string; time: string } | null>(null); const [dragOver, setDragOver] = useState<string | null>(null);
+  useEffect(() => { try { localStorage.setItem('mkt-cal-view', view); localStorage.setItem('mkt-cal-axis', axis); } catch { /* 저장 못 해도 됨 */ } }, [view, axis]);
   const [y, m] = month.split('-').map(Number);
   const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const { data, error, reload } = useApi<{ contents: Content[] }>(`/api/marketing/contents?from=${month}-01&to=${month}-${String(last).padStart(2, '0')}`, [month]);
-  const shift = (d: number) => { const t = new Date(Date.UTC(y, m - 1 + d, 1)); setMonth(t.toISOString().slice(0, 7)); };
-  const byDay = (d: number) => (data?.contents ?? []).filter((c) => c.scheduled_at && new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(c.scheduled_at)) === `${month}-${String(d).padStart(2, '0')}`);
+  const week = weekOf(anchor);
+  const range = view === 'week' ? [week[0], week[6]] : [`${month}-01`, `${month}-${String(last).padStart(2, '0')}`];
+  const { data, error, reload } = useApi<{ contents: CalContent[] }>(`/api/marketing/contents?from=${range[0]}&to=${range[1]}`, [range[0], range[1]]);
+  const brands = useApi<{ brands: { id: string; name: string; color: string }[] }>('/api/marketing/brands');
+  const sess = useSession(); const canEdit = sess.user.role === 'owner' || sess.user.role === 'admin';
+  const all = (data?.contents ?? []).filter((c) => c.scheduled_at && (!brand || (brand === 'none' ? !c.brand : c.brand === brand)));
+  const dayOf = (c: CalContent) => ymdK(new Date(c.scheduled_at!));
+  const shift = (d: number) => { if (view === 'week') setAnchor(addDaysYmd(anchor, 7 * d)); else { const t = new Date(Date.UTC(y, m - 1 + d, 1)); setMonth(t.toISOString().slice(0, 7)); } };
+  const goToday = () => { setAnchor(today); setMonth(today.slice(0, 7)); };
+  async function move(id: string, date: string, time?: string) {
+    const c = all.find((x) => x.id === id) ?? (data?.contents ?? []).find((x) => x.id === id); if (!c?.scheduled_at) return;
+    if (c.status === 'published') return toast.error('게시된 콘텐츠는 옮길 수 없습니다');
+    const hm = time ?? hmK(c.scheduled_at);
+    try { await api(`/api/marketing/contents/${id}`, { method: 'PATCH', body: { scheduledAt: new Date(`${date}T${hm}:00+09:00`).toISOString() } }); toast.ok(`${date.slice(5).replace('-', '/')} ${hm} 로 옮겼습니다`); setMoving(null); reload(); }
+    catch (e: any) { toast.error(e.message); }
+  }
+  // 행: 브랜드(등록된 브랜드 전부 + '브랜드 없음'이 있으면) 또는 채널(있는 채널만)
+  const rows: { key: string; label: string; color: string }[] = axis === 'brand'
+    ? [...(brands.data?.brands ?? []).filter((b) => !brand || b.name === brand).map((b) => ({ key: b.name, label: b.name, color: b.color })), ...(all.some((c) => !c.brand) && (!brand || brand === 'none') ? [{ key: '', label: '브랜드 없음', color: '#94A3B8' }] : [])]
+    : Object.keys(CHANNELS).filter((k) => all.some((c) => c.channel === k)).map((k) => ({ key: k, label: CHANNELS[k], color: CH_COLOR[k] }));
+  const inCell = (rk: string, d: string) => all.filter((c) => (axis === 'brand' ? (c.brand ?? '') === rk : c.channel === rk) && dayOf(c) === d).sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));
+  const brandOptions = [...new Set(all.map((c) => c.brand).filter(Boolean) as string[]), ...(brands.data?.brands ?? []).map((b) => b.name)].filter((v, i, a) => a.indexOf(v) === i);
+  const byDay = (d: number) => all.filter((c) => dayOf(c) === `${month}-${String(d).padStart(2, '0')}`);
   const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+  const label = view === 'week' ? `${week[0].slice(5).replace('-', '/')} ~ ${week[6].slice(5).replace('-', '/')}` : `${y}.${String(m).padStart(2, '0')}`;
   return (
-    <div className="space-y-3" data-testid="mkt-calendar">
-      <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>콘텐츠 캘린더</h1>
-        <span className="ml-auto flex items-center gap-1"><Button size="sm" variant="secondary" onClick={() => shift(-1)} aria-label="이전 달">‹</Button><span className="w-20 text-center text-sm font-medium tabular-nums">{y}.{String(m).padStart(2, '0')}</span><Button size="sm" variant="secondary" onClick={() => shift(1)} aria-label="다음 달">›</Button></span></div>
-      {error ? <ErrorBox error={error} retry={reload} /> : (
+    <div className="space-y-3" data-testid="mkt-calendar" data-view={view}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-xl font-bold" style={{ color: C }}>콘텐츠 캘린더</h1>
+        <span className="inline-flex overflow-hidden rounded-input border border-line text-xs">{(['week', 'month'] as const).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cx('px-2.5 py-1', view === v ? 'bg-violet-600 font-semibold text-white' : 'bg-white text-ink-2')} data-testid={`mkt-cal-view-${v}`}>{v === 'week' ? '주' : '월'}</button>)}</span>
+        {view === 'week' && <span className="inline-flex overflow-hidden rounded-input border border-line text-xs">{(['brand', 'channel'] as const).map((v) => <button key={v} type="button" onClick={() => setAxis(v)} className={cx('px-2.5 py-1', axis === v ? 'bg-slate-700 font-semibold text-white' : 'bg-white text-ink-2')} data-testid={`mkt-cal-axis-${v}`}>{v === 'brand' ? '브랜드 행' : '채널 행'}</button>)}</span>}
+        <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={brand} onChange={(e) => setBrand(e.target.value)} aria-label="브랜드" data-testid="mkt-cal-brand"><option value="">브랜드 전체</option>{brandOptions.map((b) => <option key={b} value={b}>{b}</option>)}<option value="none">브랜드 없음</option></select>
+        <span className="ml-auto flex items-center gap-1"><Button size="sm" variant="secondary" onClick={() => shift(-1)} aria-label={view === 'week' ? '이전 주' : '이전 달'}>‹</Button><button type="button" onClick={goToday} className="min-w-24 text-center text-sm font-medium tabular-nums hover:underline" data-testid="mkt-cal-label" title="오늘로">{label}</button><Button size="sm" variant="secondary" onClick={() => shift(1)} aria-label={view === 'week' ? '다음 주' : '다음 달'}>›</Button></span>
+      </div>
+      {error ? <ErrorBox error={error} retry={reload} /> : view === 'week' ? (
+        <div className="overflow-x-auto rounded-card border border-line bg-white shadow-card" data-testid="mkt-week">
+          <div className="grid min-w-[880px] text-xs" style={{ gridTemplateColumns: '7rem repeat(7, minmax(0, 1fr))' }}>
+            <div className="sticky left-0 z-10 border-b border-r border-line bg-slate-50 p-1.5 text-[11px] text-ink-3">{axis === 'brand' ? '브랜드' : '채널'}</div>
+            {week.map((d, i) => <div key={d} className={cx('border-b border-line p-1.5 text-center', d === today ? 'bg-violet-50 font-semibold text-violet-800' : 'bg-slate-50 text-ink-2')} data-testid={`mkt-week-col-${d}`} data-today={d === today ? '1' : undefined}>{'일월화수목금토'[i]} <span className="tabular-nums">{Number(d.slice(8))}</span>{d === today && <span className="ml-1 rounded bg-violet-600 px-1 text-[10px] text-white">오늘</span>}</div>)}
+            {rows.map((r) => (
+              <Fragment key={r.key || '__none'}>
+                <div className="sticky left-0 z-10 flex items-start gap-1.5 border-b border-r border-line bg-white p-1.5 font-medium" data-testid={`mkt-week-row-${r.key || 'none'}`}><i className="mt-1 inline-block size-2 shrink-0 rounded-full" style={{ background: r.color }} /><span className="truncate">{r.label}</span></div>
+                {week.map((d) => { const items = inCell(r.key, d); const cell = `${r.key || 'none'}|${d}`;
+                  return (
+                    <div key={d} className={cx('min-h-16 border-b border-line p-1', d === today && 'bg-violet-50/40', dragOver === cell && 'bg-violet-100 ring-2 ring-inset ring-violet-400')} data-testid={`mkt-week-cell-${r.key || 'none'}-${d}`}
+                      onDragOver={(e) => { if (canEdit) { e.preventDefault(); setDragOver(cell); } }} onDragLeave={() => setDragOver((v) => (v === cell ? null : v))}
+                      onDrop={(e) => { e.preventDefault(); setDragOver(null); const id = e.dataTransfer.getData('text/plain'); if (id) move(id, d); }}
+                      onDoubleClick={(e) => { if (e.target === e.currentTarget) setNw(d); }} title={canEdit ? '빈 곳 두 번 클릭 = 새 콘텐츠 · 카드를 끌어다 놓으면 날짜 이동' : undefined}>
+                      {items.map((c) => { const thumb = (c.media_info ?? [])[0]; const mv = moving?.id === c.id;
+                        return (
+                          <div key={c.id} className={cx('relative mb-1 rounded-input border border-line bg-white p-1 shadow-sm', c.status === 'published' && 'opacity-70', canEdit && c.status !== 'published' && 'cursor-grab')} draggable={canEdit && c.status !== 'published'}
+                            onDragStart={(e) => { e.dataTransfer.setData('text/plain', c.id); e.dataTransfer.effectAllowed = 'move'; }} data-testid="mkt-week-card" data-id={c.id} data-status={c.status}>
+                            <button type="button" onClick={() => setOpen(c.id)} className="flex w-full items-start gap-1.5 text-left">
+                              {thumb ? <MediaThumb src={`/api/library/${thumb.id}/download?inline=1`} mime={thumb.mime} className="size-10 shrink-0 rounded object-cover" /> : <span className="flex size-10 shrink-0 items-center justify-center rounded bg-slate-100 text-[10px] text-ink-3">{c.media_count ? '시안' : '없음'}</span>}
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[11px] font-medium" title={c.title}>{c.is_test ? '[시험] ' : ''}{c.title}</span>
+                                <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px]"><span className="inline-block size-1.5 rounded-full" style={{ background: CH_COLOR[c.channel] }} /><span className={cx('rounded px-1', STATUS_TONE[c.status] ?? 'bg-slate-100')}>{STATUS[c.status] ?? c.status}</span></span>
+                              </span>
+                            </button>
+                            {canEdit && c.status !== 'published'
+                              ? <button type="button" onClick={() => setMoving(mv ? null : { id: c.id, date: dayOf(c), time: hmK(c.scheduled_at!) })} className="mt-0.5 text-[10px] tabular-nums text-violet-700 hover:underline" data-testid="mkt-card-move" title="날짜·시각 옮기기">{hmK(c.scheduled_at!)} ✎</button>
+                              : <span className="mt-0.5 block text-[10px] tabular-nums text-ink-3">{hmK(c.scheduled_at!)}</span>}
+                            {mv && moving && <div className="absolute left-0 top-full z-20 mt-0.5 flex w-56 flex-wrap items-center gap-1 rounded-input border border-line bg-white p-1.5 shadow-card" data-testid="mkt-move-box" onClick={(e) => e.stopPropagation()}>
+                              <input type="date" className={cx(inputCls, 'h-7 flex-1 px-1 py-0 text-[11px]')} value={moving.date} onChange={(e) => setMoving({ ...moving, date: e.target.value })} aria-label="게시 날짜" data-testid="mkt-move-date" />
+                              <input type="time" className={cx(inputCls, 'h-7 w-20 px-1 py-0 text-[11px]')} value={moving.time} onChange={(e) => setMoving({ ...moving, time: e.target.value })} aria-label="게시 시각" data-testid="mkt-move-time" />
+                              <Button size="sm" onClick={() => move(c.id, moving.date, moving.time)} data-testid="mkt-move-save">옮기기</Button><Button size="sm" variant="secondary" onClick={() => setMoving(null)}>취소</Button>
+                            </div>}
+                          </div>);
+                      })}
+                    </div>);
+                })}
+              </Fragment>))}
+            {!rows.length && <div className="col-span-8 p-6 text-center text-ink-3">이 주에 예정된 콘텐츠가 없습니다{canEdit ? ' — 빈 칸을 두 번 클릭하면 새 콘텐츠' : ''}</div>}
+          </div>
+        </div>
+      ) : (
         <div className="grid grid-cols-7 gap-px overflow-hidden rounded-card border border-line bg-line text-xs">
           {'일월화수목금토'.split('').map((d) => <div key={d} className="bg-slate-50 py-1 text-center font-medium text-ink-2">{d}</div>)}
           {Array.from({ length: first }, (_, i) => <div key={`b${i}`} className="min-h-20 bg-white" />)}
           {Array.from({ length: last }, (_, i) => i + 1).map((d) => (
-            <div key={d} className="min-h-20 bg-white p-1" data-testid={`mkt-day-${d}`}>
+            <div key={d} className={cx('min-h-20 bg-white p-1', `${month}-${String(d).padStart(2, '0')}` === today && 'bg-violet-50/40')} data-testid={`mkt-day-${d}`}>
               <button type="button" className="text-[11px] text-ink-3 hover:underline" onClick={() => setNw(`${month}-${String(d).padStart(2, '0')}`)} aria-label={`${m}월 ${d}일 새 콘텐츠`}>{d}</button>
               {byDay(d).map((c) => <button key={c.id} type="button" onClick={() => setOpen(c.id)} className={cx('mt-0.5 block w-full truncate rounded px-1 text-left text-[11px] text-white', c.status === 'published' && 'opacity-60')} style={{ background: CH_COLOR[c.channel] }} title={`${c.title} · ${STATUS[c.status]}`}>{c.status === 'approved' ? '✓ ' : c.status === 'pending' ? '… ' : ''}{c.title}</button>)}
             </div>))}
         </div>
       )}
-      <p className="flex flex-wrap gap-2 text-[11px] text-ink-2">{Object.entries(CHANNELS).map(([k, l]) => <span key={k} className="inline-flex items-center gap-1"><span className="size-2 rounded-full" style={{ background: CH_COLOR[k] }} />{l}</span>)} · ✓ 승인 · … 승인 대기</p>
+      <p className="flex flex-wrap gap-2 text-[11px] text-ink-2">{Object.entries(CHANNELS).map(([k, l]) => <span key={k} className="inline-flex items-center gap-1"><span className="size-2 rounded-full" style={{ background: CH_COLOR[k] }} />{l}</span>)}{view === 'week' ? <span>· 카드를 끌어다 놓으면 날짜 이동(관리자) · 시각 ✎ 로 날짜·시각 옮기기 · 게시된 글은 못 옮김</span> : <span>· ✓ 승인 · … 승인 대기</span>}</p>
       {open && <ContentDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
       {nw && <NewContent date={nw} onClose={() => setNw(null)} onDone={reload} />}
     </div>
