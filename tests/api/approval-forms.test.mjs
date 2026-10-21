@@ -12,7 +12,7 @@ const today = seoulToday();
 describe('V30 ④ 결재 양식', () => {
   test('기본 양식 3종 · 결재선 없으면 400 안내 · 직원은 양식 편집 403/404', async () => {
     const f = await ctx.staffA.client.ok('GET', '/api/approvals/forms');
-    assert.deepEqual(f.forms.map((x) => [x.kind, x.isDefault]), [['leave', true], ['expense', true], ['general', true]]); assert.equal(f.canEdit, false);
+    assert.deepEqual(f.forms.map((x) => [x.kind, x.isDefault]), [['leave', true], ['expense', true], ['general', true], ['trip', true], ['purchase', true], ['family', true]]); assert.equal(f.canEdit, false); // #114 ⑤ 6종
     assert.ok(f.forms[0].fields.some((x) => x.key === 'period' && x.type === 'daterange'));
     const r = await ctx.staffA.client.req('POST', '/api/approvals/requests', { kind: 'leave', data: { leave_type: '연차', period: { from: addDays(today, 3), to: addDays(today, 4) } } });
     assert.equal(r.status, 400); assert.match(r.body.error.message, /결재선이 없습니다/);

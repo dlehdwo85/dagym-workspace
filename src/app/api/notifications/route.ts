@@ -20,5 +20,7 @@ export const GET = handler(async ({ req, user }) => {
   // 로컬 10/20(대표): 웹 알람 띠 — 알람처럼 울리는 알림 중 아직 해제·읽음 전(3시간 안) 을 함께 돌려 상단 고정 띠 + 소리
   const alarms = unreadOnly ? items.filter((n) => n.meta?.alarm && !n.action_done && !n.read_at && Date.now() - new Date(n.created_at).getTime() < 3 * 3600e3).slice(0, 3)
     .map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, link: n.link, actions: actionsFor(n as NotifRow) })) : undefined;
-  return { items: items.map((n) => ({ ...n, actions: actionsFor(n as NotifRow) })), unread: c.c, ...(alarms ? { alarms } : {}) };
+  // #114 ⑦ 휴대폰 상단 '결재할 것 n건' — 같은 폴링에 실어 보낸다(별도 폴링 없음)
+  const approvalsTodo = unreadOnly ? await (await import('@/lib/approvalForms')).todoCount(sql, user).catch(() => 0) : undefined;
+  return { items: items.map((n) => ({ ...n, actions: actionsFor(n as NotifRow) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}) };
 });

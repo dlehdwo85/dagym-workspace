@@ -1352,6 +1352,16 @@ HANDOFF 5번 L-1 → L-2 → L-3 → L-4 순서로 진행합니다. 끝나면 `d
 - 다음(S2 2차): 제안·계약·ROI 화면과 폼(7), 리드 폼·상세 보강(8: 중복 검사·삭제·일정/업무 탭·CSV·칸반 드래그), 거래처 보기 4·칩 6·정렬·필터(10), AI 영업 도구(9)
 - 시험: tests/api/sales-auto.test.mjs 7건, tests/e2e/salesTodo.step.mjs(캡처 157·157-390·158)
 
+## 2026-10-21 로컬 10/20 19:10 결재 화면 보강 (#114) [배포확인요청]
+- ① 탭: `/approvals?view=todo|mine|cc|all` — 내가 결재할 것(지금 내 차례인 단계: 지정 사용자·역할 단계(대표/관리자 전사, 현장장·부서장은 업무 조직·상위 소속) 모두 SQL 로 판정 `approverCond`) · 내가 올린 것(임시 저장 포함) · 참조 · 전체(관리자). 탭마다 건수 배지, 관리자 처음 탭 = 전체, 그 밖은 내가 올린 것. 종류 필터는 select 로.
+- ② 작성 화면 결재선 미리 보기: `GET /api/approvals/line-preview?kind&formId&lineId` → 기안(나) → 단계마다 실제 결재자 이름(`stepApprovers` 재사용), 결재선 select 로 바꾸기(양식 기본·자동·회사 결재선 목록, 다른 회사 것은 404), 결재자 없는 단계 빨간 경고, 참조자 `MultiUserSelect`(보기·알림만, 결재 권한 없음, `mention` 알림 목록만).
+- ③ 상태 뱃지 `badgeOf`: 임시 저장·대기(아직 한 단계도 승인 전)·진행 중(한 단계 이상 승인)·승인·반려·취소 + 멈춘 단계 "○○ 단계에서 n일째 기다리는 중"(3일 이상 주황, 서버 `stuck{label,step,since}` = 이전 단계 승인 시각 또는 올린 시각) + '내 차례' 표시.
+- ④ 임시 저장: `POST/PATCH/DELETE /api/approvals/drafts` — 필수 검사 없이 값만, 업무·결재 회차 없음(`approval_requests.status='draft'`, task_id null), 내가 올린 것 탭 맨 위 [이어 쓰기]/지우기, 올릴 때 `draftId` 로 같은 건 승격. 문서번호 `결재-YYYY-NNNN`(회사·연도별 순번, advisory lock, 엑셀 첫 열). 반려 사유 `approval_requests.reject_reason`(반려 시 task_approvals.comment 복사) 목록 줄에 빨간 글씨.
+- ⑤ 양식 6종: 출장(출장지·기간·목적·교통편·예상 경비·동행자)·구매(품목·수량·금액·거래처·사유·희망 납기·견적서)·경조사(경조 종류·일자·대상·경조 휴가 일수·경조금·비고) 기본 칸 + 양식별 기본 결재선(이미 있던 것, 관리 › 결재 양식 6칸). 제목 `[출장] 이름 출장지 기간` 등. 마이그레이션 158(kind·status 제약 넓힘, task_id null 허용, doc_no·cc_user_ids·line_id·reject_reason·updated_at).
+- ⑥ 빈 상태 안내 탭별 문구. ⑦ 휴대폰 상단 "결재할 것 n건 › 결재하기" 띠(`approvals-todo-bar`, 알림 폴링 `/api/notifications?unread=1` 응답 `approvalsTodo` 에 실어 보내 별도 폴링 없음) + 하단 결재 탭 배지.
+- 시험: `tests/api/approvals-v2.test.mjs`(4건: 6종·미리 보기·다른 회사 404 / 임시 저장→올리기·문서번호·참조 / 결재할 것·멈춘 단계·approvalsTodo / 반려 사유·지우기) + 기존 approval-forms 6종 + E2E 결재 단계(결재선 체인·문서번호·대기 뱃지·임시 저장·휴대폰 띠·내 차례) 화면 131·131b·131c.
+- 로컬 확인 부탁: 복구 뒤 결재 › 양식 6개 버튼 · 휴가 올릴 때 결재선 체인(기안 → 대표) · 휴대폰 홈 상단 "결재할 것 n건" 띠(대표 계정) · 임시 저장 → 이어 쓰기. 경조사 승인은 휴가 일정 자동 등록 안 함(경조 휴가는 휴가 양식 '경조' 로) — 필요하면 다음에.
+
 ## 2026-10-21 시험 실패 원인 바로잡기 — 영업 당일 다이제스트 서버 결함 포함 [배포확인요청]
 - **서버 결함 2건**: `sales/digest.ts buildDigest` — `row->>'first_seen_at' >= day` 가 UTC ISO 와 KST 날짜 문자열 비교라 KST 00~09시(UTC 날짜가 하루 앞)에 수집된 공고가 그날 다이제스트에서 빠짐(아침 07시 다이제스트가 비거나 적게 나오는 실제 문제) → 하루 넓게 거르고 `dayOf`(KST) 로 정확히 고름. `sales/srcViews.ts` 리드 타임라인 — `String(Date)` 정렬('Tue Oct…')을 ISO 로 통일.
 - 시험 2건: mkt-develop `ago()` UTC → KST(addDays), E2E HQ-3 캘린더는 목요일(오늘+2 = 토요일 열)에 클릭 위치가 메신저 독 버튼과 겹쳐 실패 → 클릭 전 버튼 숨김. notif-diet 푸시 대기 1건은 기존 flake(단독 통과).
