@@ -1479,6 +1479,7 @@ await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에
   assert.equal(`${t.d} ${t.tm}`, e.s, '업무 마감 = 일정 시작');
   // 긴 제목의 종일 마감 업무도 제목이 보임(줄바꿈)
   await ctx.owner.ok('POST', '/api/tasks', { title: 'V5 마감 제목이 길어도 두 줄로 보여야 함', assigneeId: ctx.ownerId, dueDate: t.d, approvalRequired: false });
+  await m.evaluate(() => localStorage.setItem('wos_cal_allday', '1')); // 10/22 종일 칸 기본 숨김 — 아래는 켠 상태의 마감 칩 확인
   await m.goto(`${BASE}/calendar?date=${t.d}`);
   await m.getByTestId('cal-mobile-head').waitFor();
   assert.equal(await m.locator('[data-day-head]').count(), 3, '휴대폰 기본 = 3일 보기(V14 38번), 요일+날짜 머리');
@@ -2463,6 +2464,29 @@ await step('대표 10/22 #427 PC 목록: 상태 칸 오른쪽 정렬 · "진행 
     if (w === 1440) await owner.screenshot({ path: `${SHOTS}/191-status-chip-1440.png` });
   }
   await owner.setViewportSize({ width: 1366, height: 900 });
+});
+
+await step('대표 10/22 19:47 캘린더 시간 격자(주): 종일·시간 없는 업무 칸 기본 숨김 → 날짜 머리 "종일 n" 칩 → 그날 목록 시트 → [종일 칸] 켜면 다시 보임', async () => {
+  const d = addDays(today, 1);
+  const tid = (await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 종일 숨김 업무', orgUnitId: ctx.siteA, assigneeId: ctx.ownerId, approvalRequired: false, dueDate: d })).id;
+  await owner.goto(`${BASE}/calendar?view=timeGridWeek&date=${d}`);
+  await owner.locator('.fc-timegrid').first().waitFor();
+  assert.equal(await owner.locator('.fc-timegrid .fc-daygrid-body').count(), 0, '시간 격자 위 종일 칸 없음(기본)');
+  const chip = owner.locator(`[data-testid="allday-chip"][data-day="${d}"]`); await chip.waitFor();
+  assert.match(await chip.innerText(), /종일 \d+/);
+  await chip.click();
+  const sheet = owner.getByTestId('allday-sheet'); await sheet.getByText('E2E 종일 숨김 업무').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/192-calendar-allday-chip.png` });
+  await sheet.getByText('E2E 종일 숨김 업무').click();
+  await owner.getByTestId('task-panel').waitFor().catch(() => {});
+  await owner.goto(`${BASE}/calendar?view=timeGridWeek&date=${d}`);
+  const allDayToggle = owner.locator('[data-testid^="cal-show-allday"]:visible').first(); // PC = 왼쪽 목록 체크, 휴대폰 = 칩 줄
+  await allDayToggle.click();
+  await owner.locator('.fc-timegrid .fc-daygrid-body').first().waitFor();
+  assert.equal(await owner.locator(`[data-testid="allday-chip"]`).count(), 0, '종일 칸을 켜면 칩 대신 칸');
+  await allDayToggle.click(); // 기본(끔)으로 돌려 둠
+  await owner.locator('.fc-timegrid .fc-daygrid-body').first().waitFor({ state: 'detached' });
+  await ctx.owner.ok('DELETE', `/api/tasks/${tid}`).catch(() => {});
 });
 
 await browser.close();

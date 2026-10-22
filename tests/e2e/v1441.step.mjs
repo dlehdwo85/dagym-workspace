@@ -7,6 +7,7 @@ export async function v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today })
   await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '판교 하이링크 운영 점검 회의', start: `${d}T10:00:00+09:00`, end: `${d}T12:00:00+09:00` });
   const tid = (await ctx.owner.ok('POST', '/api/tasks', { title: '고천 대방 현장 점검', assigneeId: ctx.staffA.id, dueDate: d, dueTime: '15:00', approvalRequired: false })).id;
   const mc = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
+  await mc.addInitScript(() => { try { localStorage.setItem('wos_cal_allday', '1'); } catch {} }); // 10/22 종일 칸 기본 숨김 — 이 시험은 켠 상태의 칩 모양
   const m = await mc.newPage();
   try {
     await m.goto(`${BASE}/calendar?view=timeGridWeek&date=${d}`);
