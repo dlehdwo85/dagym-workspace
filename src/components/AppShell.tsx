@@ -13,11 +13,12 @@ import { BioLock } from './BioLock';
 import { MessengerDock } from './MessengerDock';
 import { VersionWatch } from './VersionWatch';
 import { Onboarding } from './Onboarding';
+import { TourHost, restartTours } from './Tour';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, FileText, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
-  Building2, HelpCircle, ListTodo, Library, LogOut, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
+  Building2, Compass, HelpCircle, ListTodo, Library, LogOut, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
   MessageCircle, Mail,
   TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon, Phone, ClipboardCheck, Link2,
@@ -49,7 +50,7 @@ const NAV: NavItem[] = [
   { href: '/contacts', label: '연락처', icon: Contact }, // V31 회사 공용 연락처
 ];
 /** 사이드바 "관리" 묶음 — 주소·이름·메뉴 키는 lib/adminPages(V36 3 한 곳), 여기는 아이콘만 */
-const ADMIN_ICON: Record<string, NavItem['icon']> = { '/reports': FileBarChart, '/revenue': BarChart3, '/admin/users': Users, '/admin/ops': Activity, '/admin/company': Building2, '/admin/mail': Mail, '/admin/usage': Gauge, '/admin/ai-logs': Sparkles };
+const ADMIN_ICON: Record<string, NavItem['icon']> = { '/reports': FileBarChart, '/revenue': BarChart3, '/admin/users': Users, '/admin/ops': Activity, '/admin/company': Building2, '/admin/mail': Mail, '/admin/usage': Gauge, '/admin/ai-logs': Sparkles, '/admin/approval-settings': Stamp };
 const ADMIN_MENU: NavItem[] = ADMIN_PAGES.filter((p) => p.sidebar).map((p) => ({ href: p.href, label: p.label, icon: ADMIN_ICON[p.href] ?? Activity }));
 /** V14 7번: 관리 메뉴 ↔ 메뉴 권한 키 (꺼진 메뉴는 숨김) */
 const ADMIN_KEY: Record<string, string> = Object.fromEntries(ADMIN_PAGES.map((p) => [p.href, p.menu]));
@@ -71,6 +72,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const [approvalsTodo, setApprovalsTodo] = useState(0); // #114 ⑦ 휴대폰 상단 '결재할 것 n건'(알림 폴링에 실려 옴)
   const [chatUnread, setChatUnread] = useState(0);
   const [aiDock, setAiDock] = useState(false); // V14 11번 모든 화면 AI 비서
+  // #429 '← 이전 화면': 앱 안에서 화면을 옮겨 다닌 횟수(처음 연 화면 = 1) — 1이면 뒤로 갈 앱 화면이 없으니 정해 둔 화면으로
+  useEffect(() => { const w = window as any; w.__wosNav = (w.__wosNav ?? 0) + 1; }, [path]);
   // 메시지 화면을 오가면 메시지 배지를 바로 새로
   useEffect(() => { api('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}); }, [path]);
   const [online, setOnline] = useState(true);
@@ -214,8 +217,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // 로컬 검수 10/19: 하단 탭은 마지막 공간이 아니라 지금 주소의 공간 기준(/tasks 등 공통 화면 = 업무)
   const tabSpace = path.startsWith('/s/sales') ? 'sales' : path.startsWith('/s/marketing') ? 'marketing' : 'work';
   const mobileTabs: (NavItem & { badge?: number })[] = tabSpace === 'sales'
-    // 대표 검수 10/20 ②: 앱에서 파이프라인(칸반) 탭 제거 → 입찰(켠 회사) 또는 제안·계약(끈 회사). 파이프라인은 더보기 › 영업 메뉴(휴대폰은 단계 칩 목록)·PC 사이드바
-    ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, session.features.salesBids !== false ? { href: '/s/sales/bids', label: '입찰', icon: Stamp } : { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/hub', label: '영업기회', icon: Building2 }]
+    // 대표 검수 10/20 ②: 앱에서 파이프라인(칸반) 탭 제거. 대표(10/19·#438): 입찰은 안 쓰는 회사도 있어 하단 탭에 넣지 않음 — 그 칸은 제안·계약, 입찰·공고는 프로필 시트 '영업 메뉴'·영업기회 허브·PC 사이드바(켠 회사만)
+    ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/hub', label: '영업기회', icon: Building2 }]
     : tabSpace === 'marketing'
       ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
@@ -399,6 +402,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                     <div className="my-1 border-t border-line" />
                     <Link role="menuitem" href="/settings" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Settings className="size-4 text-ink-2" />설정·알림</Link>
                     <Link role="menuitem" href="/help" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><HelpCircle className="size-4 text-ink-2" />도움말·문의</Link>
+                    <button role="menuitem" onClick={() => { setUserMenu(false); restartTours(); }} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50" data-testid="tour-restart"><Compass className="size-4 text-ink-2" />사용 안내 다시 보기</button>
                     <button role="menuitem" onClick={() => { setUserMenu(false); setHelp(true); }} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Keyboard className="size-4 text-ink-2" /><span className="flex-1 text-left">단축키</span><Kbd>?</Kbd></button>
                     <button role="menuitem" onClick={logout} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm text-red-600 hover:bg-red-50"><LogOut className="size-4" />로그아웃</button>
                   </div>
@@ -445,6 +449,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
         </div>
 
         {session.tenant?.onboarding && <Onboarding />}
+        {/* #77 처음 사용 안내 — 회사 첫 안내 창·결제 잠금 동안은 기다림 */}
+        {session.tours && <TourHost userId={session.user.id} seen={session.tours.seen} auto={session.tours.auto} admin={admin} blocked={!!session.tenant?.onboarding || !!session.tenant?.billingLock} />}
         <BioLock />
         {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} name={aiName(space)} /></Suspense>}
         <MessengerDock aiOpen={aiDock} />
@@ -555,6 +561,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 {v3 && admin && i === 1 + (session.features.googleSync ? 1 : 0) && adminMenu.length > 0 && <div className="px-3 pt-2 text-xs text-ink-3" data-testid="mobile-admin-head">관리</div>}
                 <Link href={h} onClick={() => { if (path === h) setMore(false); }} className="flex items-center gap-3 rounded-input px-3 py-3 text-sm active:bg-slate-100"><I className="size-5 text-ink-2" />{l}</Link>
               </Fragment>))}
+              <button onClick={() => { setMore(false); restartTours(); }} className="flex w-full items-center gap-3 rounded-input px-3 py-3 text-left text-sm active:bg-slate-100" data-testid="tour-restart-m"><Compass className="size-5 text-ink-2" />사용 안내 다시 보기</button>
               <button onClick={logout} className="flex w-full items-center gap-3 rounded-input px-3 py-3 text-left text-sm text-red-600 active:bg-red-50"><LogOut className="size-5" />로그아웃</button>
             </div>
           </div>

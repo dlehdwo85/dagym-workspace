@@ -12,6 +12,7 @@ import { MediaPick } from './MediaPick';
 import { ApprovalCard, BrandChip, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, WhyBox } from './ApprovalCard';
 import { ProposalCard, BudgetCard } from './Ops';
 import { GoalCard, type Goal } from './Goals';
+import { QualityPanel, type QReport } from './QualityPanel';
 
 const C = '#7C3AED';
 export const CHANNELS: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
@@ -157,6 +158,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   const { data, error, reload } = useApi<any>(`/api/marketing/contents/${id}`);
   const [comment, setComment] = useState(''); const [ver, setVer] = useState<{ body: string; media: { id: string; title: string }[]; note: string } | null>(null); const [url, setUrl] = useState(''); const [pubBusy, setPubBusy] = useState(false);
   const [picked, setPicked] = useState<Record<string, boolean>>({}); const [fixOpen, setFixOpen] = useState(false); const [fixBrand, setFixBrand] = useState(''); const [fixAt, setFixAt] = useState('');
+  const [qBusy, setQBusy] = useState(false);
   const brandsQ = useApi<{ brands: { id: string; name: string }[] }>(fixOpen ? '/api/marketing/brands' : null, [fixOpen]);
   if (error) return <Modal open onClose={onClose} title="콘텐츠"><ErrorBox error={error} retry={reload} /></Modal>;
   if (!data) return <Modal open onClose={onClose} title="콘텐츠"><Skeleton rows={4} /></Modal>;
@@ -178,6 +180,20 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
     try { const r = await api<any>(`/api/marketing/auto/contents/${id}`, { body: { action } });
       toast.ok(action === 'archive' ? '보관했습니다' : r.needsTopic ? '재료가 없어 주제 질문 카드를 만들었습니다' : r.passed ? '새 시안을 만들었습니다 — 다시 승인 대기' : `새 시안 품질 검사 미통과: ${r.issues.join(' · ')}`);
       if (action === 'archive') { onChange(); onClose(); } else { reload(); onChange(); } } catch (e: any) { toast.error(e.message); }
+  }
+  // #426 [AI로 다듬기]: 상투어·과한 느낌표/이모지·약한 훅을 AI 가 고친 새 버전(같은 사진, 0크레딧) — 다시 승인 대기
+  async function polish() {
+    setQBusy(true);
+    try { const r = await api<{ version: number }>(`/api/marketing/auto/contents/${id}`, { body: { action: 'polish' } }); toast.ok(`다듬은 수정본(v${r.version})을 만들었습니다 — 다시 승인 대기`); reload(); onChange(); }
+    catch (e: any) { toast.error(e.message); } finally { setQBusy(false); }
+  }
+  /** 훅 후보로 바꾸기: 지금 훅 줄만 바꾼 수정본(같은 사진) */
+  async function pickHook(text: string) {
+    const cur: string | undefined = data.qualityReport?.hook?.text;
+    if (!v || !cur || !v.body.includes(cur)) { toast.error('본문에서 지금 훅 줄을 찾지 못했습니다 — 수정본으로 직접 고쳐 주세요'); return; }
+    setQBusy(true);
+    try { await api(`/api/marketing/contents/${id}/versions`, { body: { body: v.body.replace(cur, () => text), mediaIds: v.media_ids, note: `훅 바꾸기: ${text.slice(0, 80)}` } }); toast.ok('훅을 바꾼 수정본을 올렸습니다 — 다시 승인 대기'); reload(); onChange(); }
+    catch (e: any) { toast.error(e.message); } finally { setQBusy(false); }
   }
   async function publish() { try { await api(`/api/marketing/contents/${id}/publish`, { body: { url } }); toast.ok('게시 확인했습니다'); reload(); onChange(); } catch (e: any) { toast.error(e.message); } }
   // 대표 10/20 22:30 ② M1: [서버로 게시] — 연결 계정으로 워크인 서버가 올림(승인된 최신 버전, 시험 제외). 결과는 게시 기록 줄에
@@ -207,6 +223,9 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
           </div>
         ) : <button type="button" className="text-xs underline text-ink-2" onClick={() => { setFixBrand(c.brand_id ?? ''); setFixAt(c.scheduled_at ? new Date(new Date(c.scheduled_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''); setFixOpen(true); }} data-testid="mkt-fix-open">브랜드·게시 예정 바로잡기</button>)}
         {c.quality?.passed === false && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">{c.auto ? '품질 검사: ' : ''}{c.quality.issues.join(' · ')}</p>}
+        {data.qualityReport && <QualityPanel r={data.qualityReport as QReport} channel={c.channel} busy={qBusy}
+          onPolish={data.canDecide && !['published', 'canceled', 'approved'].includes(c.status) && v?.body ? polish : undefined}
+          onPickHook={data.canDecide && !['published', 'canceled'].includes(c.status) && c.kind !== 'blog' && v ? pickHook : undefined} />}
         <WhyBox r={c.rationale} />
         {v && <PostPreview channel={c.channel} kind={c.kind} brand={c.brand} title={c.title} body={v.body} media={v.media_ids} info={(data.media ?? []).map((m: any) => ({ id: m.id, mime: m.mime_type }))} />}
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
@@ -507,24 +526,27 @@ export function ContentCalendar() {
 
 /** 전화 문의: 입력·제외·[영업 리드로](영업 담당 업무 카드) */
 export function Calls() {
-  const { data, error, reload } = useApi<{ calls: { id: string; phone: string; called_at: string; source: string | null; status: string; memo: string | null; task_id: string | null; brand: string | null }[] }>('/api/marketing/calls');
-  const [f, setF] = useState({ phone: '', source: '', memo: '' });
-  async function add(e: React.FormEvent) { e.preventDefault(); try { await api('/api/marketing/calls', { body: { phone: f.phone, source: f.source || undefined, memo: f.memo || undefined } }); setF({ phone: '', source: '', memo: '' }); reload(); } catch (er: any) { toast.error(er.message); } }
+  const { data, error, reload } = useApi<{ adKeywords?: string[]; calls: { id: string; phone: string; called_at: string; source: string | null; status: string; memo: string | null; task_id: string | null; brand: string | null; ad_keyword?: string | null }[] }>('/api/marketing/calls');
+  const [f, setF] = useState({ phone: '', source: '', memo: '', adKeyword: '' });
+  async function add(e: React.FormEvent) { e.preventDefault(); try { await api('/api/marketing/calls', { body: { phone: f.phone, source: f.source || undefined, memo: f.memo || undefined, adKeyword: f.adKeyword.trim() || undefined } }); setF({ phone: '', source: '', memo: '', adKeyword: '' }); reload(); } catch (er: any) { toast.error(er.message); } }
   async function convert(id: string) { try { const r = await api<{ taskId: string }>(`/api/marketing/calls/${id}/convert`, { body: {} }); toast.ok('영업 업무로 만들었습니다'); reload(); return r; } catch (e: any) { toast.error(e.message); } }
   async function exclude(id: string, status: string) { try { await api(`/api/marketing/calls/${id}`, { method: 'PATCH', body: { status } }); reload(); } catch (e: any) { toast.error(e.message); } }
   return (
     <div className="space-y-3" data-testid="mkt-calls">
       <h1 className="text-xl font-bold" style={{ color: C }}>전화 문의</h1>
-      <form onSubmit={add} className="grid gap-2 rounded-card border border-line bg-white p-3 shadow-card sm:grid-cols-[10rem_1fr_1fr_auto]">
+      <form onSubmit={add} className="grid gap-2 rounded-card border border-line bg-white p-3 shadow-card sm:grid-cols-[10rem_1fr_1fr_1fr_auto]">
         <input className={inputCls} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} placeholder="전화번호" required aria-label="전화번호" inputMode="tel" data-testid="call-phone" />
         <input className={inputCls} value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} placeholder="들어온 곳(광고·페이지)" aria-label="들어온 곳" />
+        {/* 광고 최적화 1차 ③ "어떻게 알고 전화하셨어요?" → 광고 키워드별 전환당 비용에 들어감 */}
+        <input className={inputCls} value={f.adKeyword} onChange={(e) => setF({ ...f, adKeyword: e.target.value })} placeholder="광고 키워드(알면)" aria-label="광고 키워드" list="call-ad-keywords" maxLength={60} data-testid="call-ad-keyword" />
+        <datalist id="call-ad-keywords">{(data?.adKeywords ?? []).map((k) => <option key={k} value={k} />)}</datalist>
         <input className={inputCls} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} placeholder="메모" aria-label="메모" />
         <Button type="submit" data-testid="call-add">추가</Button>
       </form>
       {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={3} /> : (
         <ul className="space-y-1.5">{data.calls.map((c) => (
           <li key={c.id} className={cx('flex flex-wrap items-center gap-2 rounded-card border border-line bg-white p-3 text-sm', c.status === 'excluded' && 'opacity-60')} data-testid="call-row">
-            <span className="font-medium tabular-nums">{c.phone}</span><span className="text-xs text-ink-2">{fmtDateTime(c.called_at)}{c.source ? ` · ${c.source}` : ''}{c.memo ? ` · ${c.memo}` : ''}</span>
+            <span className="font-medium tabular-nums">{c.phone}</span><span className="text-xs text-ink-2">{fmtDateTime(c.called_at)}{c.source ? ` · ${c.source}` : ''}{c.ad_keyword ? ` · 광고: ${c.ad_keyword}` : ''}{c.memo ? ` · ${c.memo}` : ''}</span>
             <span className="ml-auto flex gap-1.5">
               {c.task_id ? <Link href={`/tasks/${c.task_id}`} className="text-xs underline" style={{ color: '#2563EB' }}>영업 업무 보기</Link>
                 : c.status === 'excluded' ? <Button size="sm" variant="secondary" onClick={() => exclude(c.id, 'new')}>되살리기</Button>

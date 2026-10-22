@@ -71,7 +71,7 @@ const connectMsg = (sp: URLSearchParams) => (sp.get('published') ? `인스타그
 
 type Sum = { impressions: number; clicks: number; cost: number; conversions: number };
 type Analysis = { month: string; summary: string; good: string[]; bad: string[]; proposals: { title: string; detail: string; expected: string }[]; source: 'ai' | 'template'; generatedAt: string; cardId?: string | null };
-type MonthData = Data & { from: string; to: string; month: string | null; prevMonth: string; prev: Sum | null; prevFrom?: string | null; prevTo?: string | null; byProvider: (Sum & { provider: string })[]; byBrand: (Sum & { brand: string })[]; months: string[]; analysis: Analysis | null;
+type MonthData = Data & { savings?: { pct: number; spend: number; amount: number }; from: string; to: string; month: string | null; prevMonth: string; prev: Sum | null; prevFrom?: string | null; prevTo?: string | null; byProvider: (Sum & { provider: string })[]; byBrand: (Sum & { brand: string })[]; months: string[]; analysis: Analysis | null;
   brands: { id: string; name: string }[]; filter: { brand: string; provider: string }; campaignDaily: { campaign_id: string; campaign_name: string; provider: string; day: string; cost: number; clicks: number; impressions: number }[] };
 /** 대표 10/20 14:10 ③: 캠페인 표 CSV(엑셀용 BOM) */
 function toCsv(rows: Camp[], label: string) {
@@ -196,6 +196,7 @@ export function Ads() {
         <Button size="sm" variant="secondary" className="ml-auto" onClick={() => { const lbl = data.month ?? `${data.from}_${data.to}`; if (tab === 'campaign') toCsv(data.campaigns, lbl); else toCsvItems(tab, (tab === 'keyword' ? data.keywords : data.creatives) ?? [], lbl); }} disabled={!(tab === 'campaign' ? data.campaigns.length : ((tab === 'keyword' ? data.keywords : data.creatives) ?? []).length)} data-testid="ads-csv">CSV 내려받기</Button>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, v, d]) => <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ads-card"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div>{d && <div className="mt-0.5 text-[11px]">{d}</div>}</div>)}</div>
+      {!!data.savings?.amount && <p className="text-xs text-ink-2" data-testid="ads-savings">대행사 대비 절감액(추정) <b className="text-emerald-800">{won(data.savings.amount)}</b> — 이 기간 광고비 {won(data.savings.spend)} × 대행 수수료율 {data.savings.pct}%(통상 15~20%, 광고 운영에서 바꿀 수 있음)</p>}
       {data.month && <MonthAnalysis month={data.month} analysis={data.analysis} canEdit={data.canEdit} onChange={(a) => setData({ ...data, analysis: a })} />}
       <div className="grid gap-3 lg:grid-cols-2">
         <SumTable rows={data.byProvider ?? []} head="매체" testid="ads-by-provider" label={(r) => <><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[r.provider] }} />{data.providers.find((x) => x.key === r.provider)?.label ?? r.provider}</> as unknown as string} />

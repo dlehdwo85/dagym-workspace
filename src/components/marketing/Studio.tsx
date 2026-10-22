@@ -6,6 +6,7 @@ import { Copy } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { MediaPick } from './MediaPick';
+import { ScoreChip, TimingTable } from './QualityPanel';
 
 /**
  * 대표 10/20 19:00 제작의뢰실: 의뢰 폼(브랜드·채널/종류·목적·핵심 메시지·참고·톤·수량·마감) → AI 30년차 마케터 프롬프트(영문 + 한글 요약 + 참고 사진 + 자막) → [수정]/[생성]
@@ -92,8 +93,11 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
         <div className="rounded-input bg-slate-50 p-2"><div className="flex items-center justify-between font-semibold text-ink-2">생성 프롬프트(EN){pr.source === 'ai' ? <span className="font-normal text-ink-3">AI 마케터</span> : pr.source === 'user' ? <span className="font-normal text-ink-3">직접 고침</span> : <span className="font-normal text-ink-3">기본</span>}<button type="button" onClick={() => copy(pr.promptEn)} className="inline-flex items-center gap-0.5 text-violet-700" aria-label="프롬프트 복사"><Copy size={12} />복사</button></div>
           <p className="mt-1 whitespace-pre-wrap text-ink" data-testid="studio-prompt-en">{pr.promptEn}</p>{pr.negativeEn && <p className="mt-1 text-ink-3">피할 것: {pr.negativeEn}</p>}{pr.model && <p className="mt-1 text-ink-3">모델 {pr.model} · {pr.aspect}</p>}</div>
         <div className="space-y-1.5"><div className="rounded-input bg-violet-50/50 p-2"><div className="font-semibold text-violet-800">한글 의도 요약</div><p className="mt-0.5 whitespace-pre-wrap">{pr.summaryKo || '—'}</p></div>
-          <div className="rounded-input border border-line p-2"><div className="font-semibold text-ink-2">자막·카피</div><p className="mt-0.5 whitespace-pre-wrap">{pr.caption || '—'}</p></div>
+          <div className="rounded-input border border-line p-2"><div className="font-semibold text-ink-2">자막·카피</div><p className="mt-0.5 whitespace-pre-wrap">{pr.caption || '—'}</p>
+            {pr.quality && <div className="mt-1 flex flex-wrap items-center gap-1.5" data-testid="studio-quality"><ScoreChip label="사람다움" score={pr.quality.human.score} pass={pr.quality.human.pass} />{pr.quality.hook && <ScoreChip label="훅" score={pr.quality.hook.score} pass={pr.quality.hook.pass} />}
+              {(pr.quality.human.issues ?? []).length > 0 && <span className="text-ink-3">{pr.quality.human.issues.join(' · ')}</span>}{pr.quality.hook && !pr.quality.hook.pass && pr.quality.hook.fails?.length > 0 && <span className="text-amber-800">{pr.quality.hook.fails.join(' · ')}</span>}</div>}</div>
           {!!pr.refMediaIds?.length && <div className="flex gap-1.5">{pr.refMediaIds.map((m: string) => <img key={m} src={`/api/library/${m}/download?inline=1`} alt="" className="size-14 rounded-input object-cover" loading="lazy" />)}</div>}</div>
+        {pr.timing && <div className="md:col-span-2"><TimingTable t={pr.timing} visuals={(pr.scenes ?? []).map((x: { visualEn: string }) => x.visualEn)} /></div>}
       </div>}
       {edit && <div className="mt-2 space-y-2 text-xs" data-testid="studio-edit">
         <Field label="생성 프롬프트(EN)"><textarea className={inputCls} rows={5} value={p.promptEn} onChange={(e) => setP({ ...p, promptEn: e.target.value })} aria-label="프롬프트" data-testid="studio-edit-prompt" /></Field>

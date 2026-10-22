@@ -76,7 +76,7 @@ export default function Welcome() {
       <section className="mx-auto max-w-6xl px-4 pb-8 pt-8">
         <figure className="mx-auto -mt-16 max-w-5xl overflow-hidden rounded-card border border-line bg-white shadow-card sm:-mt-20"><img src="/landing/home.png" alt="워크인 홈 — 이번 주 일정·업무·영업·마케팅 요약" className="w-full" width={1280} height={960} /></figure>
         <ul className="mx-auto mt-8 grid max-w-4xl gap-3 text-left sm:grid-cols-4">
-          {([[Mic, '말로 등록', '“내일 3시 미팅” 한마디면 끝'], [BellRing, '정확한 알림', '앱·웹 푸시, 알람처럼 울리기'], [Users, '권한·부서', '부서 › 팀, 격리 팀, 결재선'], [Sparkles, 'AI 비서', '요약·초안·리드 제안']] as [typeof Mic, string, string][]).map(([I, t, d]) => (
+          {([[Mic, '음성 등록', '“내일 3시 미팅” 한마디면 끝'], [BellRing, '정확한 알림', '앱·웹 푸시, 알람처럼 울리기'], [Users, '권한·부서', '부서 › 팀, 격리 팀, 결재선'], [Sparkles, 'AI 비서', '요약·초안·리드 제안']] as [typeof Mic, string, string][]).map(([I, t, d]) => (
             <li key={t} className="rounded-card border border-line p-3"><I className="size-5 text-brand-700" /><div className="mt-1.5 font-semibold">{t}</div><div className="text-sm text-ink-2">{d}</div></li>))}
         </ul>
       </section>
@@ -124,7 +124,7 @@ export default function Welcome() {
       </section>
       {/* 앱 다운로드 */}
       <section id="app" className="bg-slate-50 py-12">
-        <div className="mx-auto max-w-6xl px-4 text-center"><h2 className="text-2xl font-bold">앱으로도</h2><p className="mt-1 text-sm text-ink-2">푸시 알림·말로 등록·바탕화면 위젯은 앱에서. 계정은 웹과 같습니다.</p>
+        <div className="mx-auto max-w-6xl px-4 text-center"><h2 className="text-2xl font-bold">앱으로도</h2><p className="mt-1 text-sm text-ink-2">푸시 알림·음성 등록·바탕화면 위젯은 앱에서. 계정은 웹과 같습니다.</p>
           <div className="mt-5 flex flex-wrap justify-center gap-2" data-testid="landing-stores">
             {PLAY ? <a href={PLAY} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[48px] items-center gap-2 rounded-input bg-ink px-5 py-3 font-semibold text-white" data-track="play">Google Play</a>
               : <span className="inline-flex min-h-[48px] items-center rounded-input border border-line px-5 py-3 text-sm text-ink-2">Google Play 심사 중</span>}

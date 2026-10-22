@@ -98,7 +98,11 @@ export function startFakeGoogle(port = 3199) {
         next = { content: [{ type: 'text', text: JSON.stringify({
           summary: `${row.site} ${row.month} 매출은 ${row.revenue}원입니다.`,
           anomalies: [{ site: row.site, month: row.month, metric: 'revenue', comment: '전월 대비 크게 늘었습니다.' }, { site: '없는 현장', month: row.month, metric: 'revenue', comment: '지어낸 제안' }],
-          comparisons: [{ site: row.site, comment: '가장 높습니다.' }] }) }], stop_reason: 'end_turn' };
+          comparisons: [{ site: row.site, comment: '가장 높습니다.' }],
+          // #161 새 보고서 칸(동향·전망·대안·확인 필요) — 스키마가 요구할 때만
+          ...(body.output_config.format.schema.required.includes('forecast') ? {
+            trend: `${row.site} 매출이 최근 3개월 평균보다 높습니다.`, forecast: [{ site: '전체', comment: '최근 추세가 이어진다는 가정의 추정입니다.' }, { site: '없는 현장', comment: '지어낸 전망' }],
+            actions: [{ site: row.site, items: ['재등록 안내를 이번 달 안에 보내기', '오전 시간대 프로그램 늘리기'] }], checks: ['다른 현장 자료가 빠졌는지 확인'] } : {}) }) }], stop_reason: 'end_turn' };
       }
       // V23-1 시험: 오류 응답(크레딧 부족 402 billing_error 등)
       if (next?.httpError) return json(res, next.httpError, { type: 'error', error: { type: next.errorType ?? 'api_error', message: next.message ?? 'error' } });

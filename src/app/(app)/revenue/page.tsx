@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Download, FileUp, Info, Sparkles } from 'lucide-react';
 import { DropHint, UploadProgress, putFile } from '@/components/upload';
 import { api, useApi } from '@/components/client';
+import { RevenueAuto } from '@/components/RevenueAuto';
 import { useSession } from '@/components/session';
 import { Button, Card, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { HIDDEN_BRANDS } from '@/lib/types';
@@ -155,6 +156,11 @@ export default function RevenuePage() {
         </select>
       </>} />
       {loading && !data ? <Skeleton rows={6} /> : <>
+        {/* #161 V25: 매출 자료 확인 대기 · 분석 대기열 · AI 분석 보고서(동향·전망·대안) — 화면 맨 위 */}
+        <RevenueAuto period={month} aiEnabled={!!data?.aiEnabled} canEdit={!!data?.canEdit} sites={(data?.units ?? []).map((u) => u.name)} onApplied={reload} onFocus={(site, m) => {
+          const u = data?.units.find((x) => x.name === site); if (u) setUnit(u.id); setMonth(m); setDrafts({});
+          document.querySelector('[data-testid=revenue-input]')?.scrollIntoView({ behavior: 'smooth' });
+        }} />
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="revenue-kpis">
           {([['올해 누적 매출', fmtFull(ytd), lastIdx >= 0 ? `1~${lastIdx + 1}월 입력분` : '입력 전'], ['누적 지출', fmtFull(ytdExp), `이익 ${fmtFull(ytd - ytdExp)}`],
             ['전년 같은 기간 대비', prevSame ? pct(ytd, prevSame) : '—', prevSame ? `작년 ${fmtFull(prevSame)}` : '작년 자료 없음'], ['목표 달성률', tgtSum ? `${((tgtAct / tgtSum) * 100).toFixed(1)}%` : '—', tgtSum ? `목표 ${fmtFull(tgtSum)}` : '목표 미입력']] as const).map(([l, v, sub]) => (
@@ -223,10 +229,6 @@ export default function RevenuePage() {
           )}
         </Card> : <p className="rounded-input bg-slate-50 p-3 text-sm text-ink-2" data-testid="revenue-view-only">보기 권한입니다 — 숫자 입력·가져오기는 대표가 &ldquo;입력&rdquo; 권한을 켜 준 사람만 할 수 있습니다.</p>}
 
-        {data?.aiEnabled && <AiPanel period={month} onFocus={(site, m) => {
-          const u = data.units.find((x) => x.name === site); if (u) setUnit(u.id); setMonth(m); setDrafts({});
-          document.querySelector('[data-testid=revenue-input]')?.scrollIntoView({ behavior: 'smooth' });
-        }} />}
         {data?.canEdit && data?.aiEnabled && <AiInputPanel units={units} onDone={reload} />}
         <p className="flex items-start gap-1.5 text-xs text-ink-3"><Info className="mt-0.5 size-3.5 shrink-0" />
           모든 숫자는 근거(입력 방식·파일·입력자·시각)와 함께 보관됩니다. CSV 는 표준 양식(현장·월·항목·금액·근거파일명)과 가로형(현장·월·매출·지출…) 모두 받습니다.
@@ -235,63 +237,6 @@ export default function RevenuePage() {
         {unit && <p className="text-xs text-ink-3">선택한 현장: {unitName(unit)}</p>}
       </>}
     </div>
-  );
-}
-
-const METRIC: Record<string, string> = { revenue: '매출', expense: '지출', members: '회원 수' };
-
-/** AI 분석: 집계 숫자만 보내 받은 요약·이상치·현장 비교. 결과는 "AI 제안"으로 구분하고 근거 숫자로 바로 이동 */
-function AiPanel({ period, onFocus }: { period: string; onFocus: (site: string, month: string) => void }) {
-  const cur = useApi<{ report: any }>(`/api/revenue/ai?period=${period}`, [period]);
-  const [busy, setBusy] = useState(false);
-  const r = cur.data?.report;
-  async function run() {
-    setBusy(true);
-    try { await api('/api/revenue/ai', { body: { period } }); cur.reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
-  }
-  const val = (site: string, month: string, metric: string) => {
-    const row = r?.input?.rows?.find((x: any) => x.site === site && x.month === month);
-    const v = row?.[metric];
-    return v === null || v === undefined ? null : metric === 'members' ? `${Number(v).toLocaleString('ko-KR')}명` : fmtFull(v);
-  };
-  return (
-    <Card className="p-4" data-testid="revenue-ai">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-violet-500" />AI 월간 분석 · {Number(period.slice(5))}월</h2>
-        <Button size="sm" variant="secondary" onClick={run} disabled={busy}>{busy ? '분석 중…' : r ? '다시 분석' : 'AI 분석'}</Button>
-      </div>
-      {!r ? <p className="text-sm text-ink-3">이 달의 분석이 없습니다. 현장별 집계 숫자(현장 이름·월·매출·지출·회원 수·목표)만 보내며, 메모·파일·개인정보는 보내지 않습니다.</p> : (
-        <div className="space-y-3 text-sm">
-          <p className="rounded-input bg-violet-50 p-3 leading-relaxed"><span className="mr-1.5 rounded bg-violet-600 px-1.5 py-0.5 text-[11px] font-semibold text-white">AI 제안</span>{r.output.summary}</p>
-          {r.output.anomalies.length > 0 && (
-            <div><h3 className="mb-1 text-xs font-semibold text-ink-2">눈에 띄는 변화</h3>
-              <ul className="space-y-1">{r.output.anomalies.map((a: any, i: number) => (
-                <li key={i} className="flex flex-wrap items-baseline gap-x-2">
-                  <button className="font-medium text-accent-600 underline" onClick={() => onFocus(a.site, a.month)} title="근거 숫자로 이동">{a.site} · {Number(a.month.slice(5))}월 {METRIC[a.metric]} {val(a.site, a.month, a.metric) ?? ''}</button>
-                  <span className="text-ink-2">{a.comment}</span>
-                </li>
-              ))}</ul>
-            </div>
-          )}
-          {r.output.comparisons.length > 0 && (
-            <div><h3 className="mb-1 text-xs font-semibold text-ink-2">현장 비교</h3>
-              <ul className="space-y-1">{r.output.comparisons.map((c: any, i: number) => (
-                <li key={i}><button className="font-medium text-accent-600 underline" onClick={() => onFocus(c.site, period)}>{c.site}</button> <span className="text-ink-2">{c.comment}</span></li>
-              ))}</ul>
-            </div>
-          )}
-          <details><summary className="cursor-pointer text-xs text-ink-2">AI 에 보낸 숫자 (근거) · {r.model} · {fmtDateTime(r.created_at)}</summary>
-            <div className="mt-1 overflow-x-auto"><table className="w-full min-w-[480px] text-right text-xs tabular-nums">
-              <thead><tr className="text-ink-2"><th className="text-left font-medium">현장</th><th className="font-medium">월</th><th className="font-medium">매출</th><th className="font-medium">지출</th><th className="font-medium">회원 수</th><th className="font-medium">목표</th></tr></thead>
-              <tbody className="divide-y divide-line">{r.input.rows.filter((x: any) => x.month === period).map((x: any) => (
-                <tr key={x.site}><td className="py-0.5 text-left">{x.site}</td><td>{x.month}</td><td>{fmtFull(x.revenue)}</td><td>{fmtFull(x.expense)}</td><td>{x.members ?? '—'}</td><td>{fmtFull(x.target)}</td></tr>
-              ))}</tbody>
-            </table></div>
-          </details>
-          <p className="text-[11px] text-ink-3">AI 제안은 참고용입니다. 숫자는 위 표의 입력값이 기준이며, 입력에 없는 현장·월을 가리키는 제안은 서버에서 걸러 냅니다.</p>
-        </div>
-      )}
-    </Card>
   );
 }
 

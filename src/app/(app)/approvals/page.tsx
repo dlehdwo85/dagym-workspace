@@ -2,10 +2,10 @@
 // V30 ④ 결재: 휴가·지출결의·품의 요청(회사 양식) = 결재 업무(기존 결재선) · 승인 건 엑셀
 // 로컬 10/20 19:10 (#114): ① 결재할 것·올린 것·참조 탭 ② 작성 화면 결재선 미리 보기·변경·참조자 ③ 상태 뱃지(대기·진행 중·승인·반려)+멈춘 단계
 // ④ 임시 저장·문서번호·반려 사유 ⑤ 양식 6종(출장·구매·경조사 추가) ⑥ 빈 상태 안내 ⑦ 휴대폰 상단 '결재할 것 n건'(AppShell)
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Download, FileEdit, Plus, Stamp, Trash2 } from 'lucide-react';
+import { Download, FileEdit, Plus, Settings2, Stamp, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { MultiUserSelect } from '@/components/pickers';
 import { isAdminRole, useSession } from '@/components/session';
@@ -56,7 +56,9 @@ export default function ApprovalsPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-3 p-3 sm:p-4" data-testid="approvals-page">
       <PageHeader title="결재" icon={Stamp} sub="회사 양식으로 올리면 결재선을 따라 승인됩니다. 휴가가 승인되면 연차·반차가 캘린더에 자동 등록됩니다."
-        actions={<div className="flex flex-wrap gap-1.5">{forms.data?.forms.map((f) => <Button key={f.kind} size="sm" variant={f.kind === 'leave' ? 'primary' : 'secondary'} onClick={() => setOpen({ form: f })} data-testid={`approval-new-${f.kind}`}><Plus />{f.name}</Button>)}</div>} />
+        actions={<div className="flex flex-wrap gap-1.5">{forms.data?.forms.map((f) => <Button key={f.kind} size="sm" variant={f.kind === 'leave' ? 'primary' : 'secondary'} onClick={() => setOpen({ form: f })} data-testid={`approval-new-${f.kind}`}><Plus />{f.name}</Button>)}
+          {/* #429 관리자: 결재선·양식·팀별 배정을 여기서 바로 */}
+          {forms.data?.canEdit && <Link href="/admin/approval-settings" className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-sm font-medium text-ink-2 hover:bg-slate-50" data-testid="approval-settings-link"><Settings2 className="size-4" />결재 설정</Link>}</div>} />
       {/* ① 탭 */}
       <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="결재 보기" data-testid="approval-tabs">
         {tabs.map(([v, l, n]) => (
@@ -68,7 +70,7 @@ export default function ApprovalsPage() {
       <div className="flex flex-wrap items-center gap-1.5">
         <select className={cx(inputCls, 'h-7 !w-auto max-w-[160px] py-0 pr-7 text-xs')} value={kind} onChange={(e) => setKind(e.target.value)} aria-label="종류" data-testid="approval-kind"><option value="">모든 종류</option>{KINDS.map((k) => <option key={k} value={k}>{KIND[k]}</option>)}</select>
         {list.data?.isAdmin && <a href={`/api/approvals/requests/export?kind=${kind || 'expense'}&month=${month}`} className="ml-auto inline-flex h-7 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-xs hover:bg-slate-50" data-testid="approvals-export"><Download className="size-3.5" />{month} {KIND[kind] ?? '지출결의'} 엑셀</a>}
-        {forms.data?.canEdit && <Link href="/admin/approval-forms" className="text-xs text-ink-2 underline">양식 고치기</Link>}
+
       </div>
       {list.error && <ErrorBox error={list.error} retry={list.reload} />}
       {!list.data && !list.error && <Skeleton rows={5} />}
@@ -122,7 +124,7 @@ export default function ApprovalsPage() {
 }
 const firstValue = (d: Record<string, any>) => { for (const v of Object.values(d)) { if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 40); if (v && typeof v === 'object' && v.from) return `${v.from}~${v.to ?? ''}`; } return ''; };
 
-type Preview = { lineId: string | null; lineName: string | null; fromForm: boolean; steps: { label: string; type: string; role: string | null; names: string[] }[]; lines: { id: string; name: string }[]; requester: string; missing: boolean };
+type Preview = { lineId: string | null; lineName: string | null; source: string | null; sourceLabel: string | null; via: string | null; fromForm: boolean; steps: { order: number | null; label: string; type: string; role: string | null; names: string[]; skipped: boolean; cond: string | null }[]; lines: { id: string; name: string }[]; requester: string; missing: boolean };
 
 function RequestModal({ form, draft, lines, onClose, onMade }: { form: Form; draft?: Req; lines: { id: string; name: string }[]; onClose: () => void; onMade: () => void }) {
   const [data, setData] = useState<Record<string, any>>(draft?.data ?? {});
@@ -131,8 +133,10 @@ function RequestModal({ form, draft, lines, onClose, onMade }: { form: Form; dra
   const [busy, setBusy] = useState<'' | 'submit' | 'draft'>('');
   const [draftId, setDraftId] = useState<string | null>(draft?.id ?? null);
   const set = (k: string, v: any) => setData((d) => ({ ...d, [k]: v }));
-  // ② 결재선 미리 보기(기안 → 단계별 결재자 이름) — 결재선을 바꾸면 다시
-  const preview = useApi<Preview>(`/api/approvals/line-preview?kind=${form.kind}${form.id ? `&formId=${form.id}` : ''}${lineId ? `&lineId=${lineId}` : ''}`);
+  // ② 결재선 미리 보기(기안 → 1차·2차·3차 결재자 이름) — 결재선을 바꾸거나 기간·금액이 바뀌면 다시(#429 조건 단계, 입력이 멈춘 뒤)
+  const [pd, setPd] = useState('');
+  useEffect(() => { const h = setTimeout(() => setPd(JSON.stringify({ period: data.period, leave_type: data.leave_type, amount: data.amount, leave_days: data.leave_days })), 400); return () => clearTimeout(h); }, [data.period, data.leave_type, data.amount, data.leave_days]);
+  const preview = useApi<Preview>(`/api/approvals/line-preview?kind=${form.kind}${form.id ? `&formId=${form.id}` : ''}${lineId ? `&lineId=${lineId}` : ''}${pd ? `&d=${encodeURIComponent(pd)}` : ''}`);
   const submit = async () => {
     setBusy('submit');
     try {
@@ -169,13 +173,13 @@ function RequestModal({ form, draft, lines, onClose, onMade }: { form: Form; dra
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <b className="font-semibold">결재선</b>
             <select className={cx(inputCls, 'h-7 !w-auto max-w-[220px] py-0 pr-7 text-xs')} value={lineId} onChange={(e) => setLineId(e.target.value)} aria-label="결재선 고르기" data-testid="line-select">
-              <option value="">{form.lineName ? `양식 기본: ${form.lineName}` : '자동(내 조직의 결재선)'}</option>
+              <option value="">자동(팀·양식 배정)</option>
               {lines.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
-            {preview.data?.lineName && <span className="text-ink-3">{preview.data.lineName}</span>}
+            {preview.data?.lineName && <span className="text-ink-3" data-testid="line-source">{preview.data.lineName}{preview.data.sourceLabel ? ` · ${preview.data.sourceLabel}${preview.data.via ? `(${preview.data.via})` : ''}` : ''}</span>}
           </div>
           <LineChain p={preview.data} loading={!preview.data && !preview.error} />
-          {preview.data && !preview.data.lineId && <p className="mt-1 text-xs text-red-600">결재선이 없습니다 — 관리자가 운영 상태 › 결재선에서 먼저 만들어야 올릴 수 있습니다.</p>}
+          {preview.data && !preview.data.lineId && <p className="mt-1 text-xs text-red-600">결재선이 없습니다 — 관리자가 결재 › 결재 설정에서 먼저 만들어야 올릴 수 있습니다.</p>}
           {preview.data?.missing && <p className="mt-1 text-xs text-amber-700">결재자가 비어 있는 단계가 있습니다 — 그 단계 역할의 사람이 조직에 없으면 올릴 때 막힙니다.</p>}
           <div className="mt-2 text-xs"><b className="font-semibold">참조자</b> <span className="text-ink-3">(보기·알림만, 결재 권한 없음)</span></div>
           <div className="mt-1" data-testid="cc-select"><MultiUserSelect value={cc} onChange={setCc} /></div>
@@ -189,17 +193,17 @@ function RequestModal({ form, draft, lines, onClose, onMade }: { form: Form; dra
     </Modal>
   );
 }
-/** 기안(나) → 검토 → 승인 … 단계마다 이름 */
+/** 기안(나) → 1차 → 2차 → 3차 … 단계마다 이름. #429 조건이 맞지 않아 건너뛰는 단계는 흐리게(조건 표시) */
 function LineChain({ p, loading }: { p: Preview | null | undefined; loading: boolean }) {
   if (loading) return <div className="mt-1.5 h-6 animate-pulse rounded bg-slate-200/60" />;
   if (!p) return null;
-  const nodes = [{ label: '기안', names: [p.requester], me: true }, ...p.steps.map((s) => ({ label: s.label, names: s.names, me: false }))];
+  const nodes = [{ label: '기안', names: [p.requester], me: true, skipped: false, cond: null as string | null }, ...p.steps.map((s) => ({ label: s.skipped ? s.label : `${s.order}차 ${s.label}`, names: s.names, me: false, skipped: s.skipped, cond: s.cond }))];
   return (
     <ol className="mt-1.5 flex flex-wrap items-center gap-1 text-xs" data-testid="line-chain">
       {nodes.map((n, i) => (
         <li key={i} className="flex items-center gap-1">
-          <span className={cx('inline-flex flex-col rounded-md border px-2 py-1 leading-tight', n.me ? 'border-brand-200 bg-brand-50 text-brand-800' : n.names.length ? 'border-line bg-white' : 'border-red-200 bg-red-50 text-red-700')} data-testid="line-step">
-            <span className="text-[10px] font-semibold text-ink-3">{n.label}</span>
+          <span className={cx('inline-flex flex-col rounded-md border px-2 py-1 leading-tight', n.skipped ? 'border-dashed border-slate-300 bg-white text-ink-3 line-through decoration-slate-300' : n.me ? 'border-brand-200 bg-brand-50 text-brand-800' : n.names.length ? 'border-line bg-white' : 'border-red-200 bg-red-50 text-red-700')} data-testid="line-step" data-skipped={n.skipped ? '1' : undefined}>
+            <span className="text-[10px] font-semibold text-ink-3">{n.label}{n.cond ? ` · ${n.skipped ? '건너뜀 — ' : ''}${n.cond}` : ''}</span>
             <span>{n.names.length ? n.names.slice(0, 3).join(', ') + (n.names.length > 3 ? ` 외 ${n.names.length - 3}` : '') : '결재자 없음'}</span>
           </span>
           {i < nodes.length - 1 && <span className="text-ink-3">→</span>}

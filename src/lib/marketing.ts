@@ -141,7 +141,7 @@ export async function getContent(u: SessionUser, id: string) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);
   const sql = db();
-  const [c] = await sql<any[]>`select c.*, b.name as brand from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`;
+  const [c] = await sql<any[]>`select c.*, b.name as brand, b.voice as brand_voice from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`;
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
   const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
@@ -152,7 +152,13 @@ export async function getContent(u: SessionUser, id: string) {
   const st = await (await import('./mktAuto')).settingsOf(tenantOf(u));
   // 대표 10/20 22:30 ② M1: 서버 게시 가능 채널·계정(관리자 [서버로 게시] 버튼) + 회사 자동 게시 설정
   const targets = await (await import('./mktPublish')).publishTargets(tenantOf(u), c).catch(() => []);
-  return { content: { ...c, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
+  // #426 글 품질: AI 시안은 제작 때 낸 보고서(훅 후보·자동 수정 기록 포함), 사람이 올린 버전은 지금 본문으로 바로 검사(저장 안 함)
+  const cur = versions.find((v) => v.version === c.current_version);
+  const Q = await import('./mktQuality');
+  const qualityReport = c.quality?.report?.v === c.current_version ? c.quality.report
+    : cur ? Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', keywords: [String(c.brand ?? '').replace(/^\s*\[시험\]\s*/, '')].filter(Boolean), voice: c.brand_voice, cross: c.cross_channels ?? [] }, await Q.qualityRules()).report : null;
+  delete c.brand_voice;
+  return { content: { ...c, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };
@@ -265,20 +271,31 @@ export async function markPublished(u: SessionUser, id: string, i: z.infer<typeo
 // ---------------- 전화 문의 → 영업 ----------------
 export async function listCalls(u: SessionUser, q: { status?: string }) {
   await assertSpace(u, 'marketing');
-  return { calls: await db()`select c.id, c.phone, c.called_at, c.source, c.status, c.memo, c.task_id, b.name as brand from mkt_calls c left join mkt_brands b on b.id = c.brand_id
-    where c.tenant = ${tenantOf(u)} and (${q.status ?? ''} = '' or c.status = ${q.status ?? ''}) order by c.called_at desc limit 200` };
+  const t = tenantOf(u);
+  // 광고 최적화 1차 ③ "어떻게 알고 전화하셨어요?" — 최근 30일 광고비가 나간 키워드를 고르기 목록으로
+  const adKeywords = (await db()<{ keyword: string }[]>`select max(s.item_name) as keyword from mkt_ad_items s join mkt_ad_accounts a on a.id = s.account_id
+    where a.tenant = ${t} and s.kind = 'keyword' and s.day >= (now() at time zone 'Asia/Seoul')::date - 30 group by s.item_id order by sum(s.cost_krw) desc limit 50`).map((r) => r.keyword).filter(Boolean);
+  return { adKeywords, calls: await db()`select c.id, c.phone, c.called_at, c.source, c.status, c.memo, c.task_id, c.ad_keyword, c.ad_provider, b.name as brand from mkt_calls c left join mkt_brands b on b.id = c.brand_id
+    where c.tenant = ${t} and (${q.status ?? ''} = '' or c.status = ${q.status ?? ''}) order by c.called_at desc limit 200` };
 }
-export const callInput = z.object({ phone: z.string().trim().min(4).max(30), calledAt: z.string().datetime({ offset: true }).optional(), source: z.string().max(100).optional(), brandId: zUuid.nullable().optional(), memo: z.string().max(1000).optional() });
+const zAdProvider = z.enum(['naver', 'google', 'meta', 'other']);
+export const callInput = z.object({ phone: z.string().trim().min(4).max(30), calledAt: z.string().datetime({ offset: true }).optional(), source: z.string().max(100).optional(), brandId: zUuid.nullable().optional(), memo: z.string().max(1000).optional(),
+  adKeyword: z.string().trim().max(60).optional(), adProvider: zAdProvider.optional() });
 export async function createCall(u: SessionUser, i: z.infer<typeof callInput>) {
   await assertSpace(u, 'marketing');
-  const [c] = await db()`insert into mkt_calls (tenant, brand_id, phone, called_at, source, memo, created_by) values (${tenantOf(u)}, ${i.brandId ?? null}, ${i.phone}, ${i.calledAt ?? new Date().toISOString()}, ${i.source ?? null}, ${i.memo ?? null}, ${u.id}) returning id`;
+  const [c] = await db()`insert into mkt_calls (tenant, brand_id, phone, called_at, source, memo, created_by, ad_keyword, ad_provider) values (${tenantOf(u)}, ${i.brandId ?? null}, ${i.phone}, ${i.calledAt ?? new Date().toISOString()}, ${i.source ?? null}, ${i.memo ?? null}, ${u.id},
+    ${i.adKeyword || null}, ${i.adKeyword ? i.adProvider ?? null : null}) returning id`;
   return { id: c.id };
 }
-export const callUpdateInput = z.object({ status: z.enum(['new', 'excluded']).optional(), memo: z.string().max(1000).optional() });
+export const callUpdateInput = z.object({ status: z.enum(['new', 'excluded']).optional(), memo: z.string().max(1000).optional(),
+  adKeyword: z.string().trim().max(60).nullable().optional(), adProvider: zAdProvider.nullable().optional() }); // 광고 키워드는 나중에 알게 되면 고침(null = 지움)
 export async function updateCall(u: SessionUser, id: string, i: z.infer<typeof callUpdateInput>) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);
-  const [c] = await db()`update mkt_calls set status = coalesce(${i.status ?? null}, status), memo = coalesce(${i.memo ?? null}, memo) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
+  const kw = i.adKeyword !== undefined; const kwVal = i.adKeyword || null;
+  const [c] = await db()`update mkt_calls set status = coalesce(${i.status ?? null}, status), memo = coalesce(${i.memo ?? null}, memo),
+    ad_keyword = case when ${kw} then ${kwVal}::text else ad_keyword end, ad_provider = case when ${kw} then ${kwVal ? i.adProvider ?? null : null}::text else ad_provider end
+    where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!c) throw notFound();
   return { ok: true };
 }

@@ -253,7 +253,7 @@ export default function AssistantPage() {
         </div>
         {voice && (
           <div className="mb-2 flex flex-col items-center gap-2 rounded-card border border-accent-200 bg-accent-50/60 p-3" data-testid="ai-voice-panel">
-            <button type="button" onClick={voiceAsk} disabled={vState !== 'idle' || busy} aria-label="말로 묻기" data-testid="ai-voice-talk"
+            <button type="button" onClick={voiceAsk} disabled={vState !== 'idle' || busy} aria-label="음성으로 묻기" data-testid="ai-voice-talk"
               className={cx('flex size-20 items-center justify-center rounded-full text-white shadow-pop transition active:scale-95 disabled:opacity-80', vState === 'listen' ? 'animate-pulse bg-red-500' : 'bg-accent-600')}>
               {vState === 'think' ? <Loader2 className="size-9 animate-spin" /> : <Mic className="size-9" />}</button>
             <p className="text-sm font-medium text-ink-2" data-testid="ai-voice-state">{vState === 'listen' ? '듣고 있어요…' : vState === 'think' ? '답을 찾는 중…' : vState === 'confirm' ? '“확인” 또는 “취소”라고 말해 주세요' : '예: 오늘 남은 업무 알려 줘 · 3시 미팅 30분 미뤄 줘'}</p>

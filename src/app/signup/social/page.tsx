@@ -8,7 +8,7 @@ import { Button, Field, cx, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
 import { CompanyFields } from '@/components/SignupFields';
 import { SignupSteps } from '@/components/SignupSteps';
-import { conversionTagsConfigured, fireSignupConversion, readUtm, setAdsConsent } from '@/components/conversion';
+import { conversionTagsConfigured, fireSignupConversion, readUtm, setAdsConsent, setConversionTags } from '@/components/conversion';
 
 /** V29 소셜 확인 뒤 2단계 "회사 만들기" — 확인된 이메일이라 확인 메일 없이 바로 시작(동료 초대는 첫 화면 안내에서) */
 function SocialSignup() {
@@ -21,6 +21,8 @@ function SocialSignup() {
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => { api(`/api/auth/oauth/pending?t=${encodeURIComponent(t)}`).then((r) => { setInfo(r); setF((x) => ({ ...x, name: r.name ?? '' })); }).catch((e) => setErr(e.message)); }, [t]);
+  const [tagsOn, setTagsOn] = useState(conversionTagsConfigured());
+  useEffect(() => { api('/api/auth/signup').then((r) => { setConversionTags(r.tags); setTagsOn(conversionTagsConfigured()); }).catch(() => {}); }, []); // #449 플랫폼 운영에서 넣은 전환 태그 ID
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setErr(null);
     if (!agree.terms || !agree.privacy || !agree.age14) { setErr('필수 약관에 동의해 주세요'); return; }
@@ -57,7 +59,7 @@ function SocialSignup() {
         {box('age14', '만 14세 이상입니다', true)}
         {box('ai', <><Link href="/ai-notice" target="_blank" className="underline">AI 기능 이용</Link>(입력 내용이 AI 처리 업체로 전송) 동의</>, false)}
         {box('marketing', '새 기능·혜택 소식 받기', false)}
-        {conversionTagsConfigured() && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" /><span>광고 효과 측정(가입 완료 1회) 동의 <span className="text-ink-3">(선택)</span></span></label>}
+        {tagsOn && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" /><span>광고 효과 측정(가입 완료 1회) 동의 <span className="text-ink-3">(선택)</span></span></label>}
       </div>
       {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
       <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy} data-testid="social-signup-submit">{busy ? <><Loader2 className="animate-spin" />만드는 중…</> : <>무료로 시작<ArrowRight /></>}</Button>

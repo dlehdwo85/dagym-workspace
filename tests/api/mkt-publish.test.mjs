@@ -7,6 +7,7 @@ import { BASE, bootstrap, resetDb, startServer, testDb, tick } from '../helpers.
 
 const PORT = 3227;
 let srv, ctx, sql, fake, calls = [], seq = 0, failPublish = false, hangPublish = false, recent = [], deletedPosts = new Set();
+let thMe = { id: 'th-9', username: 'dagym_threads' }; // #445 다른 스레드 계정 연결 시험용
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 before(async () => {
   fake = http.createServer(async (req, res) => {
@@ -31,9 +32,9 @@ before(async () => {
     if (req.method === 'POST' && p === '/graph/page-1/videos') return send(200, { id: `page-1_${++seq}` }); // 로컬 02:10: 릴스 → 페북 영상(+thumb)
     if (req.method === 'GET' && /^\/graph\/page-1_\d+$/.test(p)) { if (deletedPosts.has(p.split('/').pop())) return send(400, { error: { message: 'Unsupported get request. Object does not exist', code: 100, error_subcode: 33 } }); return send(200, { id: p.split('/').pop(), permalink_url: `https://www.facebook.com/${p.split('/').pop()}` }); }
     // 스레드 OAuth + 게시
-    if (p === '/threads/oauth/access_token') return send(200, { access_token: 'th-short', user_id: 'th-9' });
+    if (p === '/threads/oauth/access_token') return send(200, { access_token: 'th-short', user_id: thMe.id });
     if (p === '/threads/access_token') return send(200, { access_token: 'th-long', expires_in: 5184000 });
-    if (p === '/threads/v1.0/me') return send(200, { id: 'th-9', username: 'dagym_threads' });
+    if (p === '/threads/v1.0/me') return send(200, { id: thMe.id, username: thMe.username });
     if (req.method === 'POST' && p === '/threads/th-9/threads') return send(200, { id: `thc-${++seq}` });
     if (req.method === 'GET' && /^\/threads\/thc-\d+$/.test(p)) return send(200, { status: 'FINISHED' });
     if (req.method === 'POST' && p === '/threads/th-9/threads_publish') return send(200, { id: `thpost-${++seq}` });
@@ -279,4 +280,24 @@ test('게시 삭제 감지: tick 이 인스타 게시물 조회 → 없으면 �
   assert.equal(d2.content.published_deleted_at, null); assert.ok(d2.publishJobs.every((j) => !j.deleted_at)); assert.match(d2.content.published_url, /igpost-|facebook/);
   const after = await sql`select id, external_post_id from mkt_publish_jobs where content_id = ${id} and status = 'done'`;
   assert.ok(after.every((j) => !deletedPosts.has(j.external_post_id)), '새 게시물 id');
+});
+
+test('#445(대표 10/21 "스레드는 워크인만"): 이름으로 브랜드를 못 맞힌 스레드 계정은, 자동 제작 규칙에서 스레드를 쓰는 브랜드가 하나뿐이면 그 브랜드로 연결 · 둘 이상이면 미지정(사람이 지정)', async () => {
+  const workin = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '워크인' })).id;
+  await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: workin, channel: 'threads', kind: 'feed', weekdays: [1], postTime: '10:00' });
+  await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: P.dagym, channel: 'instagram', kind: 'feed', weekdays: [2], postTime: '11:00' }); // 다짐은 스레드 없음
+  thMe = { id: 'th-77', username: 'company_official' };
+  await connect('threads');
+  const [a] = await sql`select brand_id, label from mkt_publish_accounts where provider = 'meta_threads' and external_id = 'th-77'`;
+  assert.equal(a.label, '@company_official'); assert.equal(a.brand_id, workin, '스레드 규칙이 워크인뿐 → 워크인');
+  const cid = await approved({ channel: 'threads', brandId: P.dagym, title: '다짐 스레드 글' });
+  const th = (await ctx.owner.ok('GET', `/api/marketing/contents/${cid}`)).publish.targets.find((x) => x.channel === 'threads');
+  assert.ok(th && !th.accounts.some((x) => x.label === '@company_official'), '다짐 글은 워크인 스레드 계정으로 안 나감');
+  // 하이링크도 인스타 + '스레드에도'를 켜면 스레드를 쓰는 브랜드가 둘 → 새 계정은 미지정
+  await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: P.hilink, channel: 'instagram', kind: 'feed', weekdays: [3], postTime: '12:00', crossChannels: ['threads'] });
+  thMe = { id: 'th-78', username: 'another_one' };
+  await connect('threads');
+  const [b] = await sql`select brand_id from mkt_publish_accounts where provider = 'meta_threads' and external_id = 'th-78'`;
+  assert.equal(b.brand_id, null);
+  thMe = { id: 'th-9', username: 'dagym_threads' };
 });

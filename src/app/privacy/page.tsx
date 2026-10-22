@@ -58,7 +58,7 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
       <ul className="list-disc pl-5">
         <li>카메라: 업무 증빙 사진 촬영·첨부</li>
         <li>사진·파일(저장공간): 사진·문서를 업무·자료실에 첨부, 받은 파일 저장</li>
-        <li>마이크·음성 인식: &ldquo;말로 업무 등록&rdquo;과 AI 비서 음성 입력(음성은 글자로 바꾸는 데만 쓰고 저장하지 않습니다)</li>
+        <li>마이크·음성 인식: &ldquo;음성 업무 등록&rdquo;과 AI 비서 음성 입력(음성은 글자로 바꾸는 데만 쓰고 저장하지 않습니다)</li>
         <li>알림: 업무 배정·마감·일정·메시지 알림</li>
         <li>정확한 알람(예약 알림, Android): 마감·일정 미리 알림을 정한 시각에 울리기</li>
       </ul>

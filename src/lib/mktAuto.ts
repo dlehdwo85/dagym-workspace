@@ -6,6 +6,7 @@ import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
 import { zUuid } from './api';
 import { layoutBody } from './mktText';
+import { avoidOf, voiceInput } from './mktQuality';
 import { tenantOf, type SessionUser } from './types';
 
 /**
@@ -229,31 +230,93 @@ export async function materialOf(c: any, brand: any, rule: any) {
 /** 남은 [브랜드] 같은 자리표시는 아는 이름으로 바꿈 */
 const fillName = (t: string, name: string) => (name ? t.replace(/\[(브랜드|브랜드\s*이름|브랜드명|회사|회사\s*이름|회사명|상호|업체명)\]/g, name) : t);
 
-async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?: { prev: string; comment: string }) {
+type Draft = { title: string; body: string; brief: string; why: string; hooks: string[]; keyword: string; script: string[] };
+const VIDEO_KINDS = ['reels', 'shorts', 'video'];
+/** #426 훅 자리: 릴스·쇼츠·영상 = 첫 장면(3초), 블로그 = 제목, 그 밖 = 본문 첫 줄 */
+const hookAt = (kind: string) => (VIDEO_KINDS.includes(kind) ? '첫 장면(첫 3초)' : kind === 'blog' ? '제목' : '본문 첫 줄');
+async function logAi(c: any, p: { name: string; model: string }, r: any, P: typeof import('./ai/provider')) {
+  await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+    values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_produce')`;
+}
+const textOf = (r: any) => (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('');
+
+async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?: { prev: string; comment: string }): Promise<Draft> {
   const m = await materialOf(c, brand, rule);
-  const P = await import('./ai/provider');
+  const P = await import('./ai/provider'); const Q = await import('./mktQuality');
   const kindRule = { feed: '인스타그램 피드 캡션 4~6줄', blog: '블로그 원고(제목 1줄 + 본문 10~15문장, 소제목 2~3개 — 소제목은 "■ 소제목" 한 줄로 따로, 문단은 2~3문장씩 빈 줄로 나눔)', reels: '릴스 자막 대본(5~7컷, 컷마다 한 줄)과 캡션 3줄', video: '15~20초 광고 영상 컷 구성(4~5컷)과 캡션 3줄', shorts: '유튜브 쇼츠(세로 영상 15~45초) 자막 대본(5~8컷, 컷마다 한 줄)과 제목 1줄·설명 2줄', story: '인스타·페이스북 스토리(세로 1080×1920, 24시간) 한 장 문구 1~2줄 + 스티커/질문 제안 1줄' }[c.kind as Kind] ?? '게시물 글';
-  if (!P.aiEnabled()) return { title: c.title, body: extra ? extra.prev : `[AI 비서 꺼짐] ${rule?.topic_hint ?? c.title}`, brief: '', why: '' };
+  const video = VIDEO_KINDS.includes(c.kind);
+  if (!P.aiEnabled()) return { title: c.title, body: extra ? extra.prev : `[AI 비서 꺼짐] ${rule?.topic_hint ?? c.title}`, brief: '', why: '', hooks: [], keyword: '', script: [] };
   await assertMktAi(c.tenant);
   const p = P.anthropicProvider({ tier: 'fast' });
+  const voice = Q.voicePrompt(brand?.voice);
   const r = await p.chat({
     system: `회사 마케팅 담당 AI 비서입니다. ${kindRule}를 씁니다. JSON 만.
-- 한국어, 브랜드 말투: ${brand?.tone || '친절하고 담백하게'}. 금지어: ${(brand?.banned_words ?? []).join(', ') || '없음'}.
+- 한국어, 브랜드 말투: ${brand?.tone || '친절하고 담백하게'}. 금지어: ${bannedOf(brand).join(', ') || '없음'}.
 - 실사 사진 우선. ${s.allow_generated_people ? '' : '생성 인물을 실제 고객처럼 쓰지 않음(후기·체험담 지어내지 않음). '}${s.allow_slideshow ? '' : '슬라이드쇼(사진 + 느린 줌) 구성 금지. '}
 - 아래 [재료]에 있는 사실만 씁니다. 숫자·연혁·실적·가격·날짜는 재료에 있는 값만 — 없으면 그 문장을 빼고, [확인 필요]·[브랜드] 같은 대괄호 자리표시는 절대 쓰지 않습니다. 과장·최상급 금지.
 - 브랜드 이름은 '${m.name || '우리'}' 그대로 씁니다. 제목에 [시험] 같은 표시는 붙이지 않습니다.
 - brief 에는 이미지/영상 제작 지시(실사 사진 + 글자 렌더 우선, 촬영 구도·필요한 사진)를 씁니다.
-- why 에는 '왜 이 글인가'를 한 문장(이달 목표·이번 주 주제와 어떻게 이어지는지)으로 씁니다.`,
+- why 에는 '왜 이 글인가'를 한 문장(이달 목표·이번 주 주제와 어떻게 이어지는지)으로 씁니다.
+${Q.hookGuide(hookAt(c.kind))}
+- keyword: 검색 키워드 1개(재료의 브랜드·지역·상품에서, 2~12자).${video ? '\n- script: 컷 줄(화면 자막·내레이션) 배열 — 한 컷 2~4초(분당 300음절), 첫 컷은 3초 안, 마지막 컷은 첫 컷과 이어지게(반복 시청).' : ''}
+- 사람이 쓴 글처럼: 상투어(다양한·혁신적인·놓치지 마세요·지금 바로·~해 보는 건 어떨까요)·느낌표/이모지 나열·특수 대시(—)는 쓰지 않고, 문장 길이를 섞습니다.${voice ? `\n${voice}` : ''}`,
     tools: [], messages: [{ role: 'user', content: `[재료]\n${m.text}\n\n` + (extra ? `[지난 원고]\n${extra.prev}\n\n[수정 요청]\n${extra.comment}\n\n수정 요청을 반영해 다시 써 주세요.` : `채널: ${c.channel}\n게시일: ${ymd(new Date(c.scheduled_at))}\n주제: ${m.topic || '재료의 브랜드·상품 소개에서 이번 주에 알릴 만한 것 하나'}`) }],
-    format: { type: 'object', additionalProperties: false, required: ['title', 'body', 'brief', 'why'], properties: { title: { type: 'string' }, body: { type: 'string' }, brief: { type: 'string' }, why: { type: 'string' } } },
+    format: { type: 'object', additionalProperties: false, required: ['title', 'body', 'brief', 'why', 'hooks', 'keyword', ...(video ? ['script'] : [])],
+      properties: { title: { type: 'string' }, body: { type: 'string' }, brief: { type: 'string' }, why: { type: 'string' }, hooks: { type: 'array', items: { type: 'string' } }, keyword: { type: 'string' }, ...(video ? { script: { type: 'array', items: { type: 'string' } } } : {}) } },
   });
-  await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-    values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_produce')`;
-  const raw = (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  await logAi(c, p, r, P);
+  const raw = textOf(r);
   const strip = (t: string) => fillName(t.replace(/^\s*\[시험\]\s*/, ''), m.name);
-  try { const o = JSON.parse(raw); return { title: strip(String(o.title || c.title)).slice(0, 200), body: layoutBody(c.kind, fillName(String(o.body ?? ''), m.name)), brief: fillName(String(o.brief ?? ''), m.name), why: fillName(String(o.why ?? ''), m.name).slice(0, 300) }; }
-  catch { return { title: c.title, body: fillName(raw, m.name), brief: '', why: '' }; }
+  const arr = (x: unknown) => (Array.isArray(x) ? x.map((y) => fillName(String(y ?? ''), m.name).trim()).filter(Boolean) : []);
+  try { const o = JSON.parse(raw); return { title: strip(String(o.title || c.title)).slice(0, 200), body: layoutBody(c.kind, fillName(String(o.body ?? ''), m.name)), brief: fillName(String(o.brief ?? ''), m.name), why: fillName(String(o.why ?? ''), m.name).slice(0, 300), hooks: arr(o.hooks).slice(0, 3), keyword: String(o.keyword ?? '').trim().slice(0, 30), script: arr(o.script).slice(0, 12) }; }
+  catch { return { title: c.title, body: fillName(raw, m.name), brief: '', why: '', hooks: [], keyword: '', script: [] }; }
 }
+
+/** #426 약한 훅 다시 쓰기 — 후보 3개가 모두 탈락했을 때 한 번만 */
+async function rewriteHooks(c: any, brand: any, cur: string, prev: string[], why: string): Promise<string[]> {
+  const P = await import('./ai/provider'); const Q = await import('./mktQuality');
+  if (!P.aiEnabled()) return [];
+  await assertMktAi(c.tenant);
+  const p = P.anthropicProvider({ tier: 'fast' });
+  const r = await p.chat({
+    system: `회사 마케팅 담당 AI 비서입니다. 약한 훅을 다시 씁니다. JSON 만.\n${Q.hookGuide(hookAt(c.kind))}\n- 브랜드 말투: ${brand?.tone || '친절하고 담백하게'}. 재료에 없는 숫자·결과·가격은 쓰지 않습니다.`,
+    tools: [], messages: [{ role: 'user', content: `글 제목: ${c.title}\n지금 훅: ${cur}\n앞서 낸 후보(모두 약함): ${prev.join(' / ') || '(없음)'}\n약한 이유: ${why}\n\n더 구체적이고(숫자·장면·대상) 궁금하게 만드는 훅 3개를 다시 써 주세요.` }],
+    format: { type: 'object', additionalProperties: false, required: ['hooks'], properties: { hooks: { type: 'array', items: { type: 'string' } } } },
+  });
+  await logAi(c, p, r, P);
+  try { const o = JSON.parse(textOf(r)); return (Array.isArray(o.hooks) ? o.hooks : []).map((x: unknown) => String(x ?? '').trim()).filter(Boolean).slice(0, 3); } catch { return []; }
+}
+
+/**
+ * #426 글 품질 엔진: 상투어 사전·보이지 않는 문자·특수 대시 정리 → 인스타 해시태그 상한 → 지금 훅이 탈락이면 통과한 후보로(점수는 거르기용 — 통과한 훅끼리는 AI 순서)
+ * → 후보가 모두 탈락이면 AI 로 한 번 더 → 보고서(사람다움·훅 3개 점수·채널 검사·초 단위 구성표). 막는 문제(채널 error)는 errors 로
+ */
+async function refineDraft(c: any, d: Draft, brand: any, opt: { keepTitle?: boolean } = {}) {
+  const Q = await import('./mktQuality'); const rules = await Q.qualityRules();
+  const notes: string[] = []; let title = d.title; let body = Q.humanize(d.body, rules).text; const script = [...d.script];
+  if (c.channel === 'instagram') { const t = Q.trimHashtags(body, rules.instagram.hashtags); if (t.removed) { body = t.body; notes.push(`해시태그 ${t.removed}개 뺌(최대 ${rules.instagram.hashtags}개)`); } }
+  const video = VIDEO_KINDS.includes(c.kind);
+  if (video && script.length < 2) script.splice(0, script.length, ...Q.scriptLines(body));
+  const kw = [brandName(brand)].filter(Boolean);
+  let hooks = d.hooks;
+  const cur = Q.hookOf(c.kind, title, body, script); const curScore = cur ? Q.scoreHook(cur, rules, kw) : null;
+  if (cur && curScore && !curScore.pass && hooks.length && !(c.kind === 'blog' && opt.keepTitle)) {
+    let best = hooks.find((h) => h !== cur && Q.scoreHook(h, rules, kw).pass);
+    if (!best) {
+      const why = [...curScore.fails, ...Object.entries(curScore.parts).filter(([, v]) => !v).map(([k]) => ({ front: '앞부분이 흐림', specific: '구체성(숫자·장면) 없음', stakes: '걸린 것(손해·변화) 없음', callout: '대상 호명 없음', curiosity: '궁금증 없음' } as Record<string, string>)[k])].join(', ');
+      const more = await rewriteHooks(c, brand, cur, hooks, why).catch(() => [] as string[]);
+      if (more.length) { hooks = more; best = more.find((h) => Q.scoreHook(h, rules, kw).pass); }
+    }
+    if (best) {
+      if (c.kind === 'blog') title = best;
+      else { if (body.includes(cur)) body = body.replace(cur, () => best!); if (video && script.length) script[0] = best; }
+      notes.push(`약한 훅(${curScore.score}점)을 바꿈: '${[...cur].slice(0, 30).join('')}' → '${[...best].slice(0, 30).join('')}'`);
+    } else notes.push(`훅 후보가 모두 약함(${curScore.score}점) — 다른 훅으로 수정 요청해 주세요`);
+  }
+  const rep = Q.qualityReport({ channel: c.channel, kind: c.kind, title, body, hooks, script, keywords: kw, mainKeyword: d.keyword || null, voice: brand?.voice, cross: c.cross_channels ?? [] }, rules);
+  return { title, body: rep.body, report: { ...rep.report, notes }, errors: rep.report.channel.filter((x) => x.level === 'error').map((x) => x.msg), timing: rep.report.timing ? Q.timingText(rep.report.timing) : '' };
+}
+const bannedOf = (brand: any): string[] => [...(brand?.banned_words ?? []), ...avoidOf(brand?.voice)];
 
 /** 제작 요청 카드 — 한도를 넘으면 needs_approval(제작 전 승인 요청) */
 export async function requestCard(c: any, version: number, kind: 'image' | 'video' | 'regen_image' | 'regen_video', brief: string, est: number, tx?: any) {
@@ -275,8 +338,10 @@ export async function produceContent(c: any, actorId?: string | null) {
   const m = await materialOf(c, brand, rule);
   if (!m.enough) return askTopic(c, actorId);
   const d = await writeDraft(c, s, brand, rule);
+  const f = await refineDraft(c, d, brand);
   const kind = c.kind as Kind;
-  const q = qualityCheck(d.body, d.brief, s, brand?.banned_words ?? [], kind, d.title);
+  const q = qualityCheck(f.body, d.brief, s, bannedOf(brand), kind, f.title);
+  if (f.errors.length) { q.passed = false; q.issues = [...q.issues, ...f.errors]; }
   if (kind === 'blog') { q.passed = false; q.issues = [...q.issues, (await import('./marketing')).BLOG_PHOTO_RULE]; } // 대표 10/20 18:45 ③: 블로그는 표지+본문 사진이 붙어야 승인 대기
   const deadline = deadlineOf(c.scheduled_at, s);
   const v = (c.current_version ?? 0) + 1; // 처음 제작 = v1, 다시 만들기 = 다음 버전
@@ -287,12 +352,14 @@ export async function produceContent(c: any, actorId?: string | null) {
   await sql.begin(async (tx) => {
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${[]}, ${v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기'}, ${c.created_by})`;
     if (v > 1) await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('image', 'video') and status in ('open', 'needs_approval')`;
-    await tx`update mkt_contents set title = ${(c.is_test && !d.title.startsWith('[시험]') ? '[시험] ' : '') + d.title}, current_version = ${v}, reminded_at = null, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
+    await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief, report: { ...f.report, v } } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임)
-    await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', (kind === 'blog' ? `표지 1장 + 본문 사진 1장 이상(실사). ${d.brief ?? ''}`.trim() : d.brief) || (kind === 'story' ? '세로 1080×1920 실사 + 글자 렌더(24시간 스토리)' : '실사 사진 + 글자 렌더'), kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
+    // #426: 영상은 초 단위 장면표(분당 300음절)를 그대로 넘김 — Higgsfield 연동 뒤에는 장면별 프롬프트로
+    const base = (kind === 'blog' ? `표지 1장 + 본문 사진 1장 이상(실사). ${d.brief ?? ''}`.trim() : d.brief) || (kind === 'story' ? '세로 1080×1920 실사 + 글자 렌더(24시간 스토리)' : '실사 사진 + 글자 렌더');
+    await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', f.timing ? `${base}\n\n${f.timing}` : base, kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
   });
-  if (!isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${d.title}` : kind === 'blog' && q.issues.length === 1 ? `원고 완료 — 표지·본문 사진을 붙여 주세요: ${d.title}` : `품질 검사 미통과: ${d.title}`,
+  if (!isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${f.title}` : kind === 'blog' && q.issues.length === 1 ? `원고 완료 — 표지·본문 사진을 붙여 주세요: ${f.title}` : `품질 검사 미통과: ${f.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
   return { id: c.id, passed: q.passed, issues: q.issues };
 }
@@ -365,20 +432,25 @@ export async function onChangesRequested(contentId: string, comment: string) {
   if (!c?.auto) return null;
   const kind = classifyRevision(comment);
   if (kind !== 'text') return { kind, card: await requestCard(c, c.current_version, kind, comment, kind === 'regen_video' ? EST.regen_video : EST.regen_image) };
-  const s = await settingsOf(c.tenant);
+  return { kind, version: await reviseText(c, comment, `수정 요청 반영(글자·배치, 0크레딧): ${comment.slice(0, 200)}`, '수정 요청 — 글자·배치') };
+}
+/** 글자 다시 쓰기(수정 요청·AI로 다듬기 공용): 같은 사진으로 새 버전 + 품질 엔진 + 0크레딧 원장 */
+async function reviseText(c: any, comment: string, note: string, ledgerNote: string, actorId?: string | null) {
+  const sql = db(); const s = await settingsOf(c.tenant);
   const [brand] = c.brand_id ? await sql<any[]>`select * from mkt_brands where id = ${c.brand_id}` : [];
-  const [prev] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
+  const [prev] = await sql<{ body: string; media_ids: string[] }[]>`select body, media_ids from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
   const d = await writeDraft(c, s, brand, null, { prev: prev?.body ?? '', comment });
-  const q = qualityCheck(d.body, d.brief, s, brand?.banned_words ?? [], c.kind);
+  const f = await refineDraft(c, { ...d, title: c.title }, brand, { keepTitle: true });
+  const q = qualityCheck(f.body, d.brief, s, bannedOf(brand), c.kind);
+  if (f.errors.length) { q.passed = false; q.issues = [...q.issues, ...f.errors]; }
   const v = c.current_version + 1;
-  const [old] = await sql<{ media_ids: string[] }[]>`select media_ids from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
-  if ((await import('./marketing')).needsPhotos(c.channel, old?.media_ids?.length ?? 0)) { q.passed = false; q.issues = [...q.issues, (await import('./marketing')).BLOG_PHOTO_RULE]; }
+  if ((await import('./marketing')).needsPhotos(c.channel, prev?.media_ids?.length ?? 0)) { q.passed = false; q.issues = [...q.issues, (await import('./marketing')).BLOG_PHOTO_RULE]; }
   await sql.begin(async (tx) => {
-    await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${old?.media_ids ?? []}, ${`수정 요청 반영(글자·배치, 0크레딧): ${comment.slice(0, 200)}`}, ${c.created_by})`;
-    await tx`update mkt_contents set current_version = ${v}, status = ${q.passed ? 'pending' : 'changes'}, quality = ${tx.json({ passed: q.passed, issues: q.issues } as never)}, reminded_at = null, updated_at = now() where id = ${c.id}`;
-    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, '수정 요청 — 글자·배치', (select title from mkt_contents where id = ${c.id}))`;
+    await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${prev?.media_ids ?? []}, ${note}, ${actorId ?? c.created_by})`;
+    await tx`update mkt_contents set current_version = ${v}, status = ${q.passed ? 'pending' : 'changes'}, quality = ${tx.json({ passed: q.passed, issues: q.issues, report: { ...f.report, v } } as never)}, reminded_at = null, updated_at = now() where id = ${c.id}`;
+    await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${ledgerNote}, (select title from mkt_contents where id = ${c.id}))`;
   });
-  return { kind, version: v };
+  return v;
 }
 
 // ---------------- 화면 API ----------------
@@ -391,7 +463,7 @@ export async function automationView(u: SessionUser) {
     sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, q.brief_id, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
     sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, coalesce(l.title, c.title) as title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
-    sql`select id, name, tone, intro, products, weekly_topic, banned_words, test_mode, ad_priority, ad_share::float8 as ad_share, ad_note from mkt_brands where tenant = ${t} order by name`,
+    sql`select id, name, tone, intro, products, weekly_topic, banned_words, test_mode, ad_priority, ad_share::float8 as ad_share, ad_note, voice from mkt_brands where tenant = ${t} order by name`,
     sql`select id, name, role from users where tenant = ${t} and status = 'active' and not is_demo order by name`,
   ]);
   const co = await (await import('./ai/assistant')).usageThisMonth(t);
@@ -543,8 +615,8 @@ export async function actRequest(u: SessionUser, id: string, i: z.infer<typeof r
   return { status: 'done', credits };
 }
 
-export const contentActInput = z.object({ action: z.enum(['regen', 'archive']) });
-/** 시안 다시 만들기(자동 제작 시안: 지금 재료로 새 버전 — 이전 이미지·영상 카드는 취소) · 보관(취소 상태 = 목록에서 숨김, 지우지 않음) */
+export const contentActInput = z.object({ action: z.enum(['regen', 'archive', 'polish']) });
+/** 시안 다시 만들기(자동 제작 시안: 지금 재료로 새 버전 — 이전 이미지·영상 카드는 취소) · 보관(취소 상태 = 목록에서 숨김, 지우지 않음) · #426 AI로 다듬기(사람이 쓴 글도, 같은 사진으로 새 버전) */
 export async function actContent(u: SessionUser, id: string, i: z.infer<typeof contentActInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
@@ -559,6 +631,18 @@ export async function actContent(u: SessionUser, id: string, i: z.infer<typeof c
     });
     return { status: 'canceled' };
   }
+  if (i.action === 'polish') {
+    if (c.status === 'approved') throw badRequest('승인된 시안은 다듬지 않습니다 — [게시 전 수정 요청]으로 바꿔 주세요');
+    if (!(await import('./ai/provider')).aiEnabled()) throw badRequest('AI 비서가 꺼져 있어 다듬을 수 없습니다');
+    const [cur] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${id} and version = ${c.current_version}`;
+    if (!cur?.body?.trim()) throw badRequest('다듬을 본문이 없습니다');
+    const Q = await import('./mktQuality');
+    const [brand] = c.brand_id ? await sql<any[]>`select voice from mkt_brands where id = ${c.brand_id}` : [];
+    const r = Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body, voice: brand?.voice }, await Q.qualityRules()).report;
+    const why = [...r.human.issues.filter((x) => !/지움|바꿈/.test(x)), ...(r.hook && !r.hook.pass ? [`첫 줄 훅이 약함(${r.hook.score}점${r.hook.fails.length ? `: ${r.hook.fails.join('·')}` : ''})`] : []), ...r.voice].join(', ');
+    const comment = `AI 티 줄이기 — ${why || '문장을 더 사람답게'}. 사실·숫자·가격·브랜드 이름·링크는 그대로 두고, 상투어·과한 느낌표·이모지 나열·특수 대시를 빼고 문장 길이를 섞어 주세요.${r.hook && !r.hook.pass ? ' 첫 줄은 구체적인 숫자·장면·대상으로 다시.' : ''}`;
+    return { version: await reviseText(c, comment, `AI로 다듬기(0크레딧)${why ? `: ${why.slice(0, 160)}` : ''}`, 'AI로 다듬기 — 글자', u.id) };
+  }
   if (!c.auto) throw badRequest('자동 제작 시안만 다시 만들 수 있습니다');
   if (c.status === 'approved') throw badRequest('승인된 시안은 다시 만들지 않습니다');
   return produceContent(c, u.id);
@@ -566,18 +650,55 @@ export async function actContent(u: SessionUser, id: string, i: z.infer<typeof c
 
 export const brandKitInput = z.object({ tone: z.string().max(200).nullable().optional(), intro: z.string().max(1000).nullable().optional(), products: z.string().max(1000).nullable().optional(), weeklyTopic: z.string().max(300).nullable().optional(), bannedWords: z.array(z.string().trim().min(1).max(30)).max(50).optional(),
   adPriority: z.number().int().min(1).max(99).nullable().optional(), adShare: z.number().min(0).max(100).nullable().optional(), adNote: z.string().max(300).nullable().optional(), // 대표 02:30 ③ 광고 예산 브랜드 축
-  testMode: z.boolean().optional() });
+  testMode: z.boolean().optional(), voice: voiceInput.optional() }); // #426 말투 프로필
 export async function saveBrandKit(u: SessionUser, id: string, i: z.infer<typeof brandKitInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
   const [b] = await db()`update mkt_brands set tone = ${i.tone === undefined ? db()`tone` : i.tone}, intro = ${i.intro === undefined ? db()`intro` : i.intro || null}, products = ${i.products === undefined ? db()`products` : i.products || null},
     weekly_topic = ${i.weeklyTopic === undefined ? db()`weekly_topic` : i.weeklyTopic || null}, banned_words = coalesce(${i.bannedWords ?? null}::text[], banned_words), test_mode = coalesce(${i.testMode ?? null}, test_mode),
-    ad_priority = ${i.adPriority === undefined ? db()`ad_priority` : i.adPriority}, ad_share = ${i.adShare === undefined ? db()`ad_share` : i.adShare}, ad_note = ${i.adNote === undefined ? db()`ad_note` : i.adNote || null} where id = ${id} and tenant = ${tenantOf(u)} returning id`;
+    ad_priority = ${i.adPriority === undefined ? db()`ad_priority` : i.adPriority}, ad_share = ${i.adShare === undefined ? db()`ad_share` : i.adShare}, ad_note = ${i.adNote === undefined ? db()`ad_note` : i.adNote || null}, voice = ${i.voice === undefined ? db()`voice` : db().json(i.voice as never)} where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!b) throw notFound();
   // 재료(소개·상품·주제)가 생기면 이 브랜드의 열린 '주제 필요' 질문은 닫고 다음 실행에 제작
   if (i.intro || i.products || i.weeklyTopic) await db()`update mkt_production_requests q set status = 'done', brief = q.brief || ${'\n\n브랜드 키트 재료로 대신함'}, decided_by = ${u.id}, decided_at = now()
     from mkt_contents c where c.id = q.content_id and c.brand_id = ${id} and q.kind = 'topic' and q.status = 'open'`;
   return { ok: true };
+}
+/** #426 [잘 된 글로 말투 만들기]: 이 브랜드의 승인·게시 글(최근 8개)로 말투 프로필 초안 — 저장하지 않음(화면에서 고쳐 [저장] = 대표 승인) */
+export async function voiceDraft(u: SessionUser, id: string) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
+  const sql = db(); const t = tenantOf(u);
+  const [b] = await sql<any[]>`select id, name, tone, intro, products from mkt_brands where id = ${id} and tenant = ${t}`;
+  if (!b) throw notFound();
+  const posts = await sql<{ id: string; title: string; body: string }[]>`select c.id, c.title, v.body from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = coalesce(c.approved_version, c.current_version)
+    where c.tenant = ${t} and c.brand_id = ${id} and c.status in ('published', 'approved') and length(trim(v.body)) > 20
+    order by (c.status = 'published') desc, coalesce(c.published_at, c.scheduled_at, c.updated_at) desc limit 8`;
+  if (!posts.length) throw badRequest('이 브랜드에 승인·게시된 글이 아직 없습니다 — 잘 된 글 예시를 직접 붙여 넣어 주세요');
+  const P = await import('./ai/provider');
+  if (!P.aiEnabled()) throw badRequest('AI 비서가 꺼져 있어 초안을 만들 수 없습니다');
+  await assertMktAi(t);
+  const p = P.anthropicProvider({ tier: 'fast' });
+  const r = await p.chat({
+    system: `회사 마케팅 담당 AI 비서입니다. 이 브랜드의 실제 게시 글에서 말투 프로필을 뽑습니다. JSON 만.
+- topics: 주로 다루는 주제 한 줄 · audience: 타겟 한 줄 · offer: 파는 것 한 줄
+- phrases: 글에 실제로 자주 나오는 말(최대 8개) · avoid: 이 브랜드가 쓰지 않는 표현(상투어·과장 가운데 글에 없는 것, 최대 8개)
+- formality: polite(존댓말)·casual(반말)·mixed · emoji: none·few·many(글의 실제 사용량)
+- examples: 아래 글 가운데 말투가 가장 잘 드러난 글 번호 최대 3개(1부터)
+글에 없는 사실은 지어내지 않습니다.`,
+    tools: [], messages: [{ role: 'user', content: `브랜드: ${brandName(b)}${b.intro ? `\n소개: ${b.intro}` : ''}${b.products ? `\n상품: ${b.products}` : ''}${b.tone ? `\n지금 말투 한 줄: ${b.tone}` : ''}\n\n[게시 글]\n${posts.map((x, k) => `${k + 1}) ${x.title}\n${[...x.body].slice(0, 600).join('')}`).join('\n\n')}` }],
+    format: { type: 'object', additionalProperties: false, required: ['topics', 'audience', 'offer', 'phrases', 'avoid', 'formality', 'emoji', 'examples'],
+      properties: { topics: { type: 'string' }, audience: { type: 'string' }, offer: { type: 'string' }, phrases: { type: 'array', items: { type: 'string' } }, avoid: { type: 'array', items: { type: 'string' } },
+        formality: { type: 'string', enum: ['polite', 'casual', 'mixed'] }, emoji: { type: 'string', enum: ['none', 'few', 'many'] }, examples: { type: 'array', items: { type: 'integer' } } } },
+  });
+  await logAi({ tenant: t, created_by: u.id }, p, r, P);
+  let o: any = {}; try { o = JSON.parse(textOf(r)); } catch { /* 형식 오류 → 빈 초안 */ }
+  const cut = (x: unknown, n: number) => [...String(x ?? '').trim()].slice(0, n).join('');
+  const list = (x: unknown) => (Array.isArray(x) ? x.map((y) => cut(y, 60)).filter(Boolean) : []).slice(0, 8);
+  const picks = (Array.isArray(o.examples) ? o.examples : []).map((n: unknown) => posts[Number(n) - 1]).filter(Boolean).slice(0, 3);
+  const draft = voiceInput.parse({ topics: cut(o.topics, 300), audience: cut(o.audience, 300), offer: cut(o.offer, 300), phrases: list(o.phrases), avoid: list(o.avoid),
+    formality: ['polite', 'casual', 'mixed'].includes(o.formality) ? o.formality : 'polite', emoji: ['none', 'few', 'many'].includes(o.emoji) ? o.emoji : 'few',
+    examples: (picks.length ? picks : posts.slice(0, 2)).map((x: { body: string }) => cut(x.body, 1500)) });
+  return { draft, sources: posts.map((x) => ({ id: x.id, title: x.title })) };
 }
 export const brandCreateInput = z.object({ name: z.string().trim().min(1).max(40), testMode: z.boolean().optional() });
 /** 브랜드 추가(이름이 같으면 그 브랜드를 씀) + 시험 모드 — 한 번에 */
