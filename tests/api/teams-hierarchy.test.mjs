@@ -165,3 +165,17 @@ describe('검수 20 등록 창 마지막 설정(사용자 단위)', () => {
     assert.equal((await ctx.staffA.client.req('PUT', '/api/me/quick-last', { priority: 'x' })).status, 400);
   });
 });
+
+describe('대표 10/22 팀 소속 직원의 "여러 명에게 각각"', () => {
+  test('내 팀 태그(teamMode tag)가 붙어 있어도 고른 3명(본인·대표 포함) 각각 1건씩 + 팀 태그 유지 · 팀장 배정 모드(lead)도 각각으로', async () => {
+    const who = [D.opsA.id, ctx.ownerId, ctx.staffA.id];
+    const r = await D.opsA.c.ok('POST', '/api/tasks', { title: '팀원 각각 만들기 시험', orgUnitId: ctx.siteA, teamId: D.opsTeam, teamMode: 'tag', assigneeId: who[0], assigneeIds: who, approvalRequired: false });
+    assert.equal(r.ids?.length, 3, '3건');
+    const rows = await sql`select assignee_id, team_id from tasks where id = any(${r.ids}::uuid[])`;
+    assert.deepEqual(rows.map((x) => x.assignee_id).sort(), [...who].sort(), '고른 사람마다 1건');
+    assert.ok(rows.every((x) => x.team_id === D.opsTeam), '팀 태그 유지');
+    const l = await D.opsA.c.ok('POST', '/api/tasks', { title: '팀장 모드 각각 시험', orgUnitId: ctx.siteA, teamId: D.opsTeam, teamMode: 'lead', assigneeIds: who.slice(0, 2), approvalRequired: false });
+    assert.equal(l.ids?.length, 2);
+    assert.deepEqual((await sql`select assignee_id from tasks where id = any(${l.ids}::uuid[])`).map((x) => x.assignee_id).sort(), who.slice(0, 2).sort());
+  });
+});

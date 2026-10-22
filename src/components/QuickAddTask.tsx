@@ -137,6 +137,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
     const auto = closing.current; closing.current = false;
     if (!f.title?.trim()) return toast.error('제목을 입력하세요');
     setBusy(true);
+    const multiEach = count > 1 && f.multiMode !== 'together' && f.teamMode !== 'each';
     try {
       let r: { id: string };
       if (tpl) {
@@ -151,10 +152,12 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
             title: finalTitle(), assigneeId: f.assigneeId || null, requestedById: user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
             priority: f.priority ?? 'normal', recurrenceRule: f.rrule ?? null, reminderMinutes: f.remind ?? null,
             ...(f.description ? { description: f.description } : {}), ...(f.checklist?.length ? { checklist: f.checklist } : {}),
-            ...(count > 1 && !f.teamId && f.multiMode !== 'together' ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
+            // 대표 10/22(김민수): 팀 소속 직원은 열릴 때 '내 팀' 태그가 자동으로 붙어(teamId) 여러 명을 골라도 assigneeIds 가 빠지고 주 담당 1건만 생겼다
+            //   → 여러 명이면 팀은 태그로만 두고 고른 사람 모두에게 각각(팀원 전체 '각각'은 팀 쪽이 정함)
+            ...(multiEach ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
             // R-15 6번: "한 업무로 함께" — 첫 사람이 주 담당, 나머지는 협업자
             ...(f.multi && f.multiMode === 'together' && (f.more ?? []).length ? { collaboratorIds: (f.more ?? []).filter((x: string) => x !== f.assigneeId) } : {}),
-            ...(f.teamId ? { teamId: f.teamId, teamMode: f.teamMode ?? 'lead', ...(f.teamMode === 'each' || f.teamMode === 'tag' ? {} : { assigneeId: null }) } : {}),
+            ...(f.teamId ? { teamId: f.teamId, teamMode: multiEach ? 'tag' : f.teamMode ?? 'lead', ...(multiEach || f.teamMode === 'each' || f.teamMode === 'tag' ? {} : { assigneeId: null }) } : {}),
             parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
             sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null,
             approvalRequired: false,
@@ -172,7 +175,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
       const lastV = { assigneeId: f.assigneeId || null, requestedById: f.requestedById || null, priority: f.priority ?? 'normal', projectId: f.projectId || null, remind: f.remind ?? null };
       try { localStorage.setItem('wos_quick_last', JSON.stringify(lastV)); } catch {}
       api('/api/me/quick-last', { method: 'PUT', body: lastV }).catch(() => {});
-      toast.ok(f.teamId ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다 — 팀장에게 알림을 보냈습니다') : count > 1 ? `${count}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
+      toast.ok(f.teamId && !multiEach ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다 — 팀장에게 알림을 보냈습니다') : count > 1 ? `${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
       broadcastRefresh(); noteAway(r);
       if (keep && !auto && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setNoAuto(false); setTpl(''); titleRef.current?.focus(); return; }
       onClose();

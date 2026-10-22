@@ -426,6 +426,8 @@ export async function createTasksForAssignees(u: SessionUser, i: TaskInput) {
     if (!i.assigneeIds!.length) throw badRequest('팀원이 없습니다');
   }
   const ids = [...new Set(i.assigneeIds ?? [])];
+  // 대표 10/22: 여러 사람에게 각각이면 팀은 '소속 태그'로만(팀장 배정 모드여도 고른 사람이 담당)
+  if (ids.length >= 2 && i.teamId && i.teamMode === 'lead') i = { ...i, teamMode: 'tag' };
   if (ids.length < 2) {
     const one = await createTask(u, { ...i, assigneeId: ids[0] ?? i.assigneeId });
     const who = ids[0] ?? i.assigneeId;

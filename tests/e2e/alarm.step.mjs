@@ -22,6 +22,15 @@ export async function alarmFlow({ staff, ctx, sql, BASE, SHOTS }) {
   assert.match(await bar.innerText(), /1시간 뒤 마감: E2E 알람 업무/);
   assert.deepEqual(await bar.getByTestId('alarm-item').first().getByRole('button').allInnerTexts(), ['해제', '10분 뒤']);
   await staff.screenshot({ path: `${SHOTS}/142-alarm-bar.png` });
+  // 대표 10/22: [10분 뒤] → 띠가 바로 사라지고, 새로고침해도 10분 동안 다시 뜨지 않음(전에는 다시 떴다) → 시간이 지나면 다시 뜸
+  await bar.getByTestId('alarm-snooze').click();
+  await bar.waitFor({ state: 'detached' });
+  assert.ok(Date.parse((await sql`select meta->>'snoozeUntil' u from notifications where id = ${n.id}`)[0].u) > Date.now() + 8 * 60_000, '서버에 10분 숨김');
+  await staff.reload(); await staff.waitForTimeout(2500);
+  assert.equal(await staff.getByTestId('alarm-bar').count(), 0, '새로고침해도 10분 동안 띠 없음');
+  await sql`update notifications set meta = meta || ${sql.json({ snoozeUntil: new Date(Date.now() - 1000).toISOString() })} where id = ${n.id}`;
+  await staff.reload();
+  await bar.waitFor({ timeout: 15000 });
   await bar.getByTestId('alarm-dismiss').click();
   await bar.waitFor({ state: 'detached' });
   assert.equal((await sql`select action_done from notifications where id = ${n.id}`)[0].action_done, '알람 해제');
