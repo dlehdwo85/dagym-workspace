@@ -5,9 +5,9 @@ import { MessageCircle, Sparkles } from 'lucide-react';
 import { api } from '@/components/client';
 import { cx } from '@/components/ui';
 
-const KEY = 'wos_chat_bubble'; // '0' = 이 기기에서 끔(설정 › 말풍선 버튼)
+const KEY = 'wos_chat_bubble'; // '1' = 이 기기에서 켬(설정 › 말풍선 버튼). 대표 10/22(#422): 하단 탭에 '메시지'가 생겨 기본 끔(AI 버튼과 겹쳤음)
 const LONG_PRESS = 500;
-export const chatBubbleOn = () => { try { return localStorage.getItem(KEY) !== '0'; } catch { return true; } };
+export const chatBubbleOn = () => { try { return localStorage.getItem(KEY) === '1'; } catch { return false; } };
 export const setChatBubbleOn = (on: boolean) => { try { localStorage.setItem(KEY, on ? '1' : '0'); } catch { /* 무시 */ } window.dispatchEvent(new Event('wos-chat-bubble')); };
 
 /**
@@ -17,7 +17,7 @@ export const setChatBubbleOn = (on: boolean) => { try { localStorage.setItem(KEY
 export function ChatBubble({ unread, ai, alarm }: { unread: number; ai: boolean; alarm: boolean }) {
   const router = useRouter();
   const path = usePathname();
-  const [on, setOn] = useState(true);
+  const [on, setOn] = useState(false);
   const [kb, setKb] = useState(false);
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,7 +60,7 @@ export function ChatBubble({ unread, ai, alarm }: { unread: number; ai: boolean;
 
 /** 설정 › 말풍선 버튼 (휴대폰, 이 기기) */
 export function ChatBubbleToggle() {
-  const [on, setOn] = useState(true);
+  const [on, setOn] = useState(false);
   useEffect(() => { setOn(chatBubbleOn()); }, []);
   return (
     <label className="flex items-start gap-3 text-sm">

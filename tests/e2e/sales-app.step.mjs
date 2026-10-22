@@ -25,7 +25,7 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.match(await card.innerText(), /다음 연락 \d{1,2}\. \d{1,2}\.\([일월화수목금토]\)/, '날짜 한국어');
     assert.ok(!/0\.00|2026-/.test(await card.innerText()), '0.00·ISO 날짜 없음');
     const tabs = (await p.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-    assert.deepEqual(tabs, ['홈', '리드', '입찰', '영업기회', '더보기'], '앱 하단 탭에 파이프라인 없음');
+    assert.deepEqual(tabs, ['홈', '리드', '입찰', '영업기회'], '앱 하단 탭에 파이프라인 없음(#422 더보기 없음)');
     await p.screenshot({ path: `${SHOTS}/139-sales-app-leads.png` });
     // 대표 10/20 5): 영업 목록 상단 'AI에게 요청' → 예시 칩 → AI 비서(영업 맥락)로
     if (await p.getByTestId('ai-ask').count()) {

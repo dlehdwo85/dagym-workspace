@@ -17,12 +17,12 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, FileText, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
-  Building2, HelpCircle, ListTodo, Library, LogOut, Mic, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
+  Building2, HelpCircle, ListTodo, Library, LogOut, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
   type LucideIcon,
   MessageCircle, Mail,
   TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon, Phone, ClipboardCheck, Link2,
-  History, Rocket, Ellipsis, Target, Briefcase,
-MapPin, Contact, Globe, } from 'lucide-react';
+  History, Rocket, Target, Briefcase,
+Contact, Globe, } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
@@ -31,7 +31,7 @@ import { ROLE_LABEL } from '@/lib/types';
 import { clearReminders, enableNativePush, initNative } from './native';
 import { QuickAddTask } from './QuickAddTask';
 import { CommandPalette } from './CommandPalette';
-import { VoiceAddTask, openVoiceAdd } from './VoiceAddTask';
+import { VoiceAddTask } from './VoiceAddTask';
 
 type NavItem = { href: string; label: string; icon: LucideIcon; group?: string };
 /** 워크인(WORKIN_V2) 사이드바: 홈 · 업무(본사 전체) · 프로젝트 · 캘린더 · 알림 + 관리 묶음. 숨긴 화면(현장 신고 QR·자동화·현장 비교 등)은 코드·주소는 남겨 둔다 */
@@ -220,7 +220,13 @@ export function AppShell({ session, children }: { session: Sess; children: React
       ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
       // 대표 핫픽스 10/20 19:10(앱 캡처): 업무 공간 하단 = 홈 · 업무 · 캘린더 · 결재 · 더보기 — 프로젝트는 더보기 › 업무 메뉴로. 탭 구성 변경은 앞으로 대표 확인 뒤에만
-      : v3 ? [byHref('/'), byHref('/tasks'), byHref('/calendar'), { ...byHref('/approvals'), badge: approvalsTodo }] : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
+      // 대표 확정 10/22(#422): 업무 공간 하단 = 홈 · 업무 · 캘린더 · 메시지 · 결재, 더보기 없음 — 나머지 메뉴는 오른쪽 위 프로필 버튼 시트로
+      : v3 ? [byHref('/'), byHref('/tasks'), byHref('/calendar'), { ...byHref('/messages'), badge: chatUnread }, { ...byHref('/approvals'), badge: approvalsTodo }] : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
+  const tabHrefs = new Set(mobileTabs.map((n) => n.href.split('?')[0]));
+  // 프로필 시트: 하단 탭·머리줄(알림·AI)과 겹치는 메뉴는 빼고, 남은 공통 메뉴 + 설정만(#422 b·d)
+  const sheetLinks: NavItem[] = [...commonV3.filter((n) => !tabHrefs.has(n.href.split('?')[0]) && n.href !== '/notifications' && !n.href.startsWith('/assistant')), { href: '/settings', label: '설정·알림', icon: Settings }];
+  // #422 c: 업무 공간 메뉴 칸은 '내 주간 보고'(+ 매출 권한)만 — 홈·업무·결재는 하단 탭, 프로젝트는 업무 화면 안에서
+  const sheetSpaceMenu: NavItem[] = (v3 ? spaceMenuV3 : spaceNav).filter((n) => !tabHrefs.has(n.href.split('?')[0]) && !(space === 'work' && n.href === '/projects'));
   const active = (href: string) => {
     const [p, q] = href.split('?');
     if (p === '/') return path === '/';
@@ -423,7 +429,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <Link href="/notifications" className="relative inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label={`알림${unread ? ` ${unread}건` : ''}`} data-testid="mobile-bell">
                   <Bell className="size-[22px]" />{unread > 0 && <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{unread > 99 ? '99+' : unread}</span>}
                 </Link>
-                <button onClick={() => setMore(true)} className="inline-flex size-11 items-center justify-center rounded-full active:bg-slate-100" aria-label="메뉴 더보기"><Avatar id={session.user.id} name={session.user.name} size={30} /></button>
+                <button onClick={() => setMore(true)} className="relative inline-flex size-11 items-center justify-center rounded-full active:bg-slate-100" aria-label="프로필·메뉴" data-testid="profile-menu"><Avatar id={session.user.id} name={session.user.name} size={30} /></button>
               </span>
             </div>
           </header>
@@ -476,12 +482,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
         )}
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         {/* 대표 결정(10/19): 가운데 + 버튼 없이 공간마다 같은 크기 5칸 — 4개 메뉴 + 더보기(그 공간 나머지 메뉴·공통·공간 전환·만들기) */}
-        <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden [[data-chat-room]_&]:hidden" aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
+        <nav className={cx('fixed bottom-0 left-0 right-0 z-40 grid border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden [[data-chat-room]_&]:hidden', mobileTabs.length >= 5 ? 'grid-cols-5' : 'grid-cols-4')} aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
           {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.badge} />)}
-          <button type="button" onClick={() => setMore(true)} aria-label="더보기" data-testid="tab-more" className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs', more ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
-            <Ellipsis className="size-6" strokeWidth={more ? 2.4 : 1.8} aria-hidden />더보기
-            {v3 && chatUnread + unread > 0 && <span className="absolute right-[18%] top-1 min-w-[18px] rounded-full bg-red-500 px-1 text-center text-[10px] font-bold leading-[18px] text-white" data-testid="tab-more-badge">{chatUnread + unread > 99 ? '99+' : chatUnread + unread}</span>}
-          </button>
         </nav>
         {/* 대표 10/20 16:20 (#106) 휴대폰 오른쪽 아래 말풍선 — 최근 대화방 바로·안 읽은 수·길게 누르면 AI 비서, 대화방·키보드·알람 띠에서 숨김 */}
         <ChatBubble unread={chatUnread} ai={!!session.features.ai} alarm={alarms.length > 0} />
@@ -515,23 +517,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <div className="min-w-0 flex-1"><div className="flex items-center gap-1.5 font-semibold">{session.user.name}<RoleBadge role={session.user.role} /></div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
                 <button onClick={() => setMore(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button>
               </div>
-              {/* 대표 결정(10/19): + 버튼 대신 더보기 › 만들기(공간 맥락) */}
-              <div className="border-t border-line px-1 pb-1 pt-2" role="menu" aria-label="만들기" data-testid="more-create">
-                <div className="px-2 text-xs text-ink-3">만들기</div>
-                {/* 대표 지적(10/19): '미팅 일정 만들기'가 잘 안 보임 — 만들기 맨 위 */}
-                <Link href="/calendar?meeting=1" onClick={() => setMore(false)} role="menuitem" className="mt-1 flex min-h-[48px] items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-800" data-testid="more-new-meeting"><MapPin className="size-5" />미팅 일정 만들기</Link>
-                {tabSpace === 'sales' ? (
-                  <Link href="/s/sales/leads?new=1" onClick={() => setMore(false)} role="menuitem" className="mt-1 flex min-h-[48px] items-center gap-2 rounded-xl bg-brand-600 px-3 text-sm font-semibold text-white" data-testid="more-new-lead"><Plus className="size-5" />새 리드</Link>
-                ) : tabSpace === 'marketing' ? (
-                  <Link href="/s/marketing/approvals?new=1" onClick={() => setMore(false)} role="menuitem" className="mt-1 flex min-h-[48px] items-center gap-2 rounded-xl bg-brand-600 px-3 text-sm font-semibold text-white" data-testid="more-new-content"><Plus className="size-5" />새 콘텐츠</Link>
-                ) : (
-                  <div className="mt-1 grid grid-cols-3 gap-1.5">
-                    <button role="menuitem" onClick={() => { setMore(false); openVoiceAdd(); }} aria-label="음성 등록" className="flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl bg-brand-600 text-sm font-semibold text-white active:bg-brand-700" data-testid="fab-voice"><Mic className="size-5" />음성</button>
-                    <button role="menuitem" onClick={() => { setMore(false); setQuick(true); }} aria-label="업무 등록" className="flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border border-line text-sm font-semibold active:bg-slate-50"><SquarePen className="size-5 text-brand-600" />업무</button>
-                    <button role="menuitem" onClick={() => { setMore(false); router.push('/calendar?quick=1'); }} aria-label="일정 등록" className="flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border border-line text-sm font-semibold active:bg-slate-50"><CalendarPlus className="size-5 text-green-600" />일정</button>
-                  </div>
-                )}
-              </div>
+              {/* 대표 확정 10/22(#422 b): 하단 '더보기'를 없애고 이 시트는 오른쪽 위 프로필 버튼으로 연다 — '만들기' 줄은 뺌(업무 화면 [업무 추가]·캘린더·리드 화면에 있음, 음성은 업무 등록 창 안 [음성]) */}
               {spaces.length > 1 && (
                 <div className="space-y-1 border-t border-line px-1 pb-1 pt-2" data-testid="mobile-spaces">
                   <div className="px-2 text-xs text-ink-3">공간 전환</div>
@@ -546,22 +532,20 @@ export function AppShell({ session, children }: { session: Sess; children: React
                   ))}
                 </div>
               )}
-              {v3 && (
-                <div className="border-t border-line px-1 pb-1 pt-2" data-testid="mobile-common">
-                  <div className="px-2 text-xs text-ink-3">공통</div>
-                  <div className="mt-1 grid grid-cols-2 gap-1.5">{[...commonV3, { href: '/settings', label: '설정·알림', icon: Settings }].map((n) => { const b = n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0; return (
-                    <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
-                      <n.icon className="size-4 shrink-0 text-ink-2" aria-hidden /><span className="truncate">{n.label}</span>{!!b && <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[10px] font-semibold leading-4 text-white">{b}</span>}</Link>); })}</div>
-                </div>
-              )}
-              {(v3 || space !== 'work') && (
+              {sheetSpaceMenu.length > 0 && (
                 <div className="border-t border-line px-1 pb-1 pt-2" data-testid="mobile-space-menu">
                   <div className="px-2 text-xs text-ink-3">{sm.short} 메뉴</div>
-                  <div className="mt-1 grid grid-cols-2 gap-1.5">{(v3 ? spaceMenuV3 : spaceNav).map((n) => (
+                  <div className="mt-1 grid grid-cols-2 gap-1.5">{sheetSpaceMenu.map((n) => (
                     <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
                       <n.icon className="size-4 shrink-0" style={{ color: sm.color }} aria-hidden /><span className="truncate">{n.label}</span></Link>))}</div>
                 </div>
               )}
+              {/* #422 d: 하단 탭·머리줄(알림·AI 비서)과 겹치지 않는 공통 메뉴 + 설정 */}
+              <div className="border-t border-line px-1 pb-1 pt-2" data-testid="profile-links">
+                <div className="mt-1 grid grid-cols-2 gap-1.5">{sheetLinks.map((n) => { const b = n.href === '/messages' ? chatUnread : 0; return (
+                  <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
+                    <n.icon className="size-4 shrink-0 text-ink-2" aria-hidden /><span className="truncate">{n.label}</span>{!!b && <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[10px] font-semibold leading-4 text-white">{b}</span>}</Link>); })}</div>
+              </div>
               <div className="my-1 border-t border-line" />
               {(v3 ? [['/help', '도움말·문의', HelpCircle], ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)', CalendarDays]] : []),
                 ...(admin ? adminMenu.map((n) => [n.href, n.label, n.icon]) : nav.filter((n) => n.href === '/revenue').map((n) => [n.href, n.label, n.icon])), ...(session.user.platformAdmin ? [['/platform', '플랫폼 운영', Building2]] : [])] as [string, string, LucideIcon][]
