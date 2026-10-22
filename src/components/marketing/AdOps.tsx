@@ -26,14 +26,14 @@ const STATUS: Record<string, [string, string]> = { draft: ['세팅안', 'bg-slat
   paused: ['꺼짐', 'bg-amber-50 text-amber-800'], failed: ['만들기 실패', 'bg-red-50 text-red-800'] };
 const kwOk = (x: unknown) => Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === 'string' && v && v !== 'undefined');
 const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable: '켜기', pause: '끄기', budget: '하루 예산 변경', auto_pause: '상한 도달 자동 중지', sync: '키워드 다시 읽기', ad_pause: '소재 끄기', ad_resume: '소재 켜기',
-  region: '광고 지역 변경', keywords_add: '키워드 추가', keywords_remove: '키워드 빼기' };
-const REVERTIBLE = ['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add'];
+  region: '광고 지역 변경', keywords_add: '키워드 추가', keywords_remove: '키워드 빼기', kw_pause: '키워드 끄기', kw_resume: '키워드 켜기' };
+const REVERTIBLE = ['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add', 'kw_pause', 'kw_resume'];
 const kwList = (k: string[] = []) => (k.length > 3 ? `${k.slice(0, 3).join(', ')} 외 ${k.length - 3}개` : k.join(', '));
 const adName = (plans: Plan[], c: Change, id: string) => { const p = plans.find((x) => x.id === c.plan_id); const k = ((p?.external?.adIds as string[] | undefined) ?? []).indexOf(id); return k >= 0 ? `안 ${'ABC'[k] ?? k + 1}` : id; };
 const desc = (c: Change, plans: Plan[] = []) => c.kind === 'budget' ? `${won(c.before?.dailyBudget)} → ${won(c.after?.dailyBudget)}` : c.kind === 'auto_pause' && c.after?.spend ? `이번 달 ${won(c.after.spend)} / 상한 ${won(c.after.cap)}`
   : (c.kind === 'ad_pause' || c.kind === 'ad_resume') ? `${((c.after?.adIds ?? []) as string[]).map((x) => adName(plans, c, x)).join(', ')}${c.after?.ab ? ' (3안 테스트 결과)' : ''}`
   : c.kind === 'region' && c.after?.KR ? `${c.before ? `${regionLabel(c.before.KR)} → ` : ''}${regionLabel(c.after.KR)}${c.after.OTHERS?.includes('00') || c.after.abroad ? ' · 해외 포함' : ''}`
-  : c.kind === 'keywords_add' ? kwList(c.after?.keywords) : c.kind === 'keywords_remove' ? kwList(c.before?.keywords) : '';
+  : c.kind === 'keywords_add' || c.kind === 'kw_pause' || c.kind === 'kw_resume' ? kwList(c.after?.keywords) : c.kind === 'keywords_remove' ? kwList(c.before?.keywords) : '';
 const AB_STATUS: Record<string, [string, string]> = { not_started: ['켜기 전', 'bg-slate-100 text-ink-2'], running: ['비교 중', 'bg-sky-50 text-sky-800'], winner: ['이긴 안 나옴', 'bg-emerald-50 text-emerald-800'],
   partial: ['일부 판정', 'bg-amber-50 text-amber-800'], tie: ['차이 뚜렷하지 않음', 'bg-slate-100 text-ink-2'] };
 
@@ -84,7 +84,7 @@ export function AdOps() {
             <li key={p.id} className="rounded-input border border-line p-2 text-sm" data-testid="ad-plan">
               <div className="flex flex-wrap items-center gap-2"><b>{p.name}</b>{p.brand && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="ad-plan-brand">{p.brand}</span>}<span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', cls)} data-testid="ad-plan-status">{label}</span>
                 <span className="text-xs text-ink-2">{p.account_label} · 하루 {won(p.plan.dailyBudget)} · 입찰 {won(p.plan.bidAmt)} · 키워드 {p.plan.keywords.length}개</span></div>
-              <p className="mt-0.5 text-xs text-ink-2">키워드: {p.plan.keywords.join(', ')}</p>
+              <p className="mt-0.5 text-xs text-ink-2">키워드: {p.plan.keywords.map((k, j) => ((p.external?.kwLocks as Record<string, boolean> | undefined)?.[(p.external?.keywordIds as string[] | undefined)?.[j] ?? ''] ? `${k}(꺼짐)` : k)).join(', ')}</p>
               {p.plan.ads.map((a, k) => <p key={k} className="mt-0.5 text-xs"><b className="text-emerald-800">{a.headline}</b> {a.description} <span className="text-ink-3">{a.url}</span></p>)}
               {p.issues.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-amber-800" data-testid="ad-plan-issues">{p.issues.map((x, k) => <li key={k}>검사: {x}</li>)}</ul>}
               {p.error && <p className="mt-1 break-words text-xs text-red-700">{p.error}</p>}
@@ -109,6 +109,8 @@ export function AdOps() {
             </li>);
         })}{!data.plans.length && <li className="text-xs text-ink-3">세팅안이 없습니다</li>}</ul>
       </section>
+
+      <LeadsBox run={run} />
 
       <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ad-changes">
         <h2 className="text-sm font-semibold">변경 기록</h2>
@@ -332,5 +334,57 @@ function RegionModal({ p, onClose, onSave }: { p: Plan; onClose: () => void; onS
           <Button type="button" data-testid="region-save" onClick={() => confirm(`'${p.name}' 광고 지역을 ${regionLabel(r.region)}${r.abroad ? '·해외' : ''}(으)로 바꿀까요? (하루 예산은 그대로)`) && onSave(r.region, r.abroad)}>바꾸기</Button></div>
       </div>
     </Modal>
+  );
+}
+
+type LeadRow = { key: string; provider: string; itemId: string | null; keyword: string; campaign: string; clicks: number; cost: number; tel: number; calls: number; phone: number; inquiries: number; leads: number;
+  cpa: number | null; flag: 'waste' | 'high' | 'good' | null; planId: string | null; paused: boolean };
+type Leads = { days: number; canEdit: boolean; totals: { cost: number; tel: number; calls: number; phone: number; inquiries: number; leads: number; cpa: number | null }; unknown: { tel: number; calls: number; inquiries: number };
+  coverage: number | null; judge: boolean; target: { cpa: number | null; custom: boolean; avg: number | null }; tracking: { beacon: boolean; naverIds: boolean; calls: boolean }; rows: LeadRow[] };
+const FLAG: Record<string, [string, string]> = { waste: ['0건 — 끄기 제안', 'bg-red-50 text-red-800'], high: ['비용 높음', 'bg-amber-50 text-amber-800'], good: ['잘 됨', 'bg-emerald-50 text-emerald-800'] };
+const PROVIDER: Record<string, string> = { naver: '네이버', google: '구글', meta: '메타', other: '기타' };
+/**
+ * 광고 최적화 1차 ③ 통화 기반 최적화: 키워드별 광고비 × 광고로 들어온 전화(클릭·기록)·문의 → 전환당 비용과 판단(서버 숫자).
+ * 0건인데 돈만 쓴 키워드는 '끄기 제안' — 워크인이 만든 세팅안의 키워드는 바로 [끄기](되돌리기 가능), 나머지는 네이버 화면에서.
+ */
+function LeadsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok: string) => void }) {
+  const [days, setDays] = useState(30);
+  const { data, error, reload } = useApi<Leads>(`/api/marketing/ad-ops/leads?days=${days}`, [days]);
+  const t = data?.totals;
+  return (
+    <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ad-leads">
+      <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">전화·문의 기준 키워드 점검</h2>
+        <span className="w-28"><select className={cx(inputCls, 'h-8 text-xs')} value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="기간" data-testid="ad-leads-days">{[7, 30, 90].map((d) => <option key={d} value={d}>최근 {d}일</option>)}</select></span></div>
+      {error ? <ErrorBox error={error} retry={reload} /> : !data || !t ? <Skeleton rows={3} /> : <>
+        <p className="mt-1 text-xs text-ink-2" data-testid="ad-leads-summary">광고비 {won(t.cost)} · 전화 {n0(t.phone)}건(클릭 {n0(t.tel)} · 기록 {n0(t.calls)}) · 문의 {n0(t.inquiries)}건 → 전환당 비용 <b>{t.cpa === null ? '—' : won(t.cpa)}</b>
+          {' · '}목표 {data.target.cpa === null ? '없음' : won(data.target.cpa)}({data.target.custom ? '회사 설정' : '기간 평균'})
+          {data.canEdit && <> · <button type="button" className="underline" data-testid="ad-leads-target" onClick={() => { const v = prompt('목표 전환당 비용(원) — 비우면 기간 평균', data.target.custom ? String(data.target.cpa) : ''); if (v === null) return;
+            const n = Number(v.replace(/\D/g, '')); if (v.trim() && !(n >= 1000)) return toast.error('1,000원 이상 숫자로 적어 주세요');
+            run('cpa', async () => { await api('/api/marketing/ad-ops/target-cpa', { method: 'PUT', body: { cpa: v.trim() ? n : null } }); reload(); }, '목표 전환당 비용을 저장했습니다'); }}>목표 바꾸기</button></>}</p>
+        <p className="text-[11px] text-ink-3" data-testid="ad-leads-coverage">광고 키워드를 모르는 전화 클릭 {n0(data.unknown.tel)} · 전화 기록 {n0(data.unknown.calls)} · 문의 {n0(data.unknown.inquiries)}
+          {data.coverage !== null ? ` — 키워드를 아는 비율 ${data.coverage}%` : ''}{!data.judge ? ' · 추적이 절반이 안 돼 0건 키워드 판단은 하지 않습니다' : ''}. 전화 = 전화 클릭과 전화 기록 중 큰 값(같은 전화를 두 번 세지 않게).</p>
+        {data.rows.length ? <div className="mt-1 overflow-x-auto"><table className="w-full min-w-[720px] text-right text-xs">
+          <thead><tr className="text-ink-2"><th className="py-1 text-left font-medium">키워드</th><th className="text-left font-medium">매체</th><th className="font-medium">광고비</th><th className="font-medium">클릭</th><th className="font-medium">전화</th><th className="font-medium">문의</th><th className="font-medium">전환당 비용</th><th className="pl-2 text-left font-medium">판단</th><th /></tr></thead>
+          <tbody className="divide-y divide-line tabular-nums">{data.rows.map((r) => (
+            <tr key={r.key} data-testid="ad-leads-row" data-flag={r.flag ?? ''}>
+              <td className="max-w-[14rem] py-1 text-left"><span className="font-medium">{r.keyword || '(키워드 없음)'}</span>{r.paused && <span className="ml-1 text-ink-3">(꺼짐)</span>}<span className="block truncate text-[11px] text-ink-3">{r.campaign || (r.itemId ? '' : '광고비 자료 없음')}</span></td>
+              <td className="text-left">{PROVIDER[r.provider] ?? r.provider}</td><td>{won(r.cost)}</td><td>{n0(r.clicks)}</td>
+              <td title={`클릭 ${r.tel} · 기록 ${r.calls}`}>{n0(r.phone)}</td><td>{n0(r.inquiries)}</td><td>{r.cpa === null ? '—' : won(r.cpa)}</td>
+              <td className="whitespace-nowrap pl-2 text-left">{r.flag && <span className={cx('rounded-full px-1.5 py-0.5 text-[10px] font-medium', FLAG[r.flag][1])} data-testid="ad-leads-flag">{FLAG[r.flag][0]}</span>}</td>
+              <td className="whitespace-nowrap pl-1">{data.canEdit && r.planId && r.itemId ? <button type="button" className="px-1 text-[11px] underline" data-testid="ad-leads-pause"
+                onClick={() => { const lp = r.planId!; run(lp, async () => { await api(`/api/marketing/ad-ops/plans/${lp}/action`, { body: { action: r.paused ? 'kw_resume' : 'kw_pause', keywordIds: [r.itemId] } }); reload(); }, r.paused ? `'${r.keyword}' 키워드를 켰습니다` : `'${r.keyword}' 키워드를 껐습니다`); }}>{r.paused ? '켜기' : '끄기'}</button>
+                : r.flag === 'waste' ? <span className="text-[11px] text-ink-3">네이버 화면에서 끄기</span> : null}</td>
+            </tr>))}</tbody></table></div>
+          : <p className="mt-1 text-xs text-ink-3">아직 키워드별 광고 성과가 없습니다 — 매체 키워드 성과는 하루 한 번 읽어 옵니다.</p>}
+        <details className="mt-2 text-xs" data-testid="ad-leads-guide" open={!data.tracking.beacon && !data.tracking.calls}>
+          <summary className="cursor-pointer font-medium">키워드별로 전화·문의를 세는 법</summary>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-ink-2">
+            <li>네이버 광고 시스템 › 도구 › 추적 기능에서 <b>자동 추적 URL</b>을 켭니다 — 광고로 들어오면 주소 끝에 n_keyword_id 등이 붙습니다{data.tracking.naverIds ? ' (✓ 들어오고 있음)' : ''}.</li>
+            <li>브랜드 사이트 비콘이 전화·버튼 클릭을 보낼 때 <b>처음 들어온 주소</b>를 landing 으로 함께 보냅니다 — 예: {'{'}event: &apos;cta&apos;, label: &apos;tel&apos;, landing: 처음 주소{'}'}{data.tracking.beacon ? ' (✓ 들어오고 있음)' : ''}. 웹 문의는 이미 유입 주소를 받습니다.</li>
+            <li>전화 문의를 기록할 때 <b>광고 키워드</b>(“어떻게 알고 전화하셨어요?”)를 적으면 같이 셉니다{data.tracking.calls ? ' (✓ 기록 있음)' : ''}.</li>
+          </ol>
+        </details>
+      </>}
+    </section>
   );
 }

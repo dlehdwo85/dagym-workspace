@@ -4,13 +4,15 @@ import { sha256 } from './crypto';
 import { HttpError, unauthorized } from './errors';
 import { assertSpace } from './spaces';
 import { tenantOf, type SessionUser } from './types';
+import { adAttrib, isTelLabel, kwKey } from './adAttrib';
 
 /**
  * 대표 10/20 14:10 ①: 사이트별 운영 집계 — 브랜드(사이트)마다 주 단위로 방문자·CTA 클릭·게시·광고(비용·클릭)·문의를 한 표에, 이번 주 요약 한 줄(주간 보고용).
  * 방문·CTA 는 브랜드 사이트에 심는 비콘(POST /api/public/site-event?k=연동토큰)이 보냄 — 설치 전에는 '미연결'. 게시·광고·문의는 워크인 기록에서.
  */
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
-export const siteEventInput = z.object({ event: z.enum(['visit', 'cta']), site: z.string().trim().max(40).optional(), label: z.string().trim().max(60).optional(), path: z.string().trim().max(200).optional() });
+export const siteEventInput = z.object({ event: z.enum(['visit', 'cta']), site: z.string().trim().max(40).optional(), label: z.string().trim().max(60).optional(), path: z.string().trim().max(200).optional(),
+  landing: z.string().trim().max(2000).optional() }); // 광고 최적화 1차 ③ 그 방문자가 처음 들어온 주소(광고면 n_*·utm·gclid 가 붙어 있음)
 /** 비콘 수신: 연동 토큰(문의 연동과 같은 토큰) → tenant·site. 한 토큰 시간당 5,000건 넘으면 429 */
 export async function recordSiteEvent(rawToken: string, i: z.infer<typeof siteEventInput>) {
   if (!rawToken) throw unauthorized('연동 토큰이 필요합니다');
@@ -23,6 +25,10 @@ export async function recordSiteEvent(rawToken: string, i: z.infer<typeof siteEv
   if (n >= 200_000) throw new HttpError(429, 'too_many', '오늘 집계 한도를 넘었습니다');
   await sql`insert into mkt_site_events (tenant, site, day, event, label, n) values (${t.tenant}, ${site}, ${ymd(new Date())}::date, ${i.event}, ${label}, 1)
     on conflict (tenant, site, day, event, label) do update set n = mkt_site_events.n + 1`;
+  // 광고 최적화 1차 ③ 광고로 들어온 사람의 전화·버튼 클릭은 키워드별로도 셈(광고가 아닌 유입은 세지 않음)
+  const at = i.event === 'cta' && i.landing ? adAttrib({ landing: i.landing }) : null;
+  if (at) await sql`insert into mkt_ad_leads (tenant, day, provider, keyword_key, keyword_id, kind, keyword, n) values (${t.tenant}, ${ymd(new Date())}::date, ${at.provider}, ${kwKey(at.keyword)}, ${at.keywordId},
+    ${isTelLabel(label) ? 'tel' : 'cta'}, ${at.keyword}, 1) on conflict (tenant, day, provider, keyword_key, keyword_id, kind) do update set n = mkt_ad_leads.n + 1, keyword = excluded.keyword`;
   return { ok: true };
 }
 /** 사이트 키 ↔ 브랜드 이름(문의 연동 site 키와 브랜드 이름이 다르므로 이름 규칙으로) */

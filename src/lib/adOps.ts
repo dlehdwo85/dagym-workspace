@@ -289,7 +289,8 @@ async function guardMoneyUp(t: string, addDaily = 0) {
   if (spend >= cap.monthlyCap) throw new HttpError(409, 'cap_reached', `이번 달 광고비 ${won(spend)} 가 상한 ${won(cap.monthlyCap)} 에 닿아 켤 수 없습니다 — 상한을 올리거나 다음 달에 켜 주세요`);
   return { cap: cap.monthlyCap, spend, addDaily };
 }
-export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync', 'ad_pause', 'ad_resume', 'ab_apply', 'region', 'keywords_add']), dailyBudget: z.number().int().min(50).max(10_000_000).optional(),
+export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync', 'ad_pause', 'ad_resume', 'ab_apply', 'region', 'keywords_add', 'kw_pause', 'kw_resume']), dailyBudget: z.number().int().min(50).max(10_000_000).optional(),
+  keywordIds: z.array(z.string().trim().min(1).max(60)).min(1).max(50).optional(),
   adIds: z.array(z.string().trim().min(1).max(60)).min(1).max(3).optional(),
   region: z.array(z.string().regex(REGION_RE)).max(17).optional(), abroad: z.boolean().optional(), keywords: z.array(z.string().trim().min(1).max(25)).min(1).max(30).optional(),
   local: z.object({ center: z.string().trim().max(80), radiusKm: z.number().min(0.5).max(30), areas: z.array(z.string().trim().min(1).max(20)).max(20) }).partial().optional() });
@@ -297,6 +298,7 @@ export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof plan
   if (i.action === 'sync') return syncPlanKeywords(u, id);
   if (i.action === 'ad_pause' || i.action === 'ad_resume' || i.action === 'ab_apply') return actAds(u, id, i, revertOf);
   if (i.action === 'region' || i.action === 'keywords_add') return actLocal(u, id, i, revertOf);
+  if (i.action === 'kw_pause' || i.action === 'kw_resume') return actKeywords(u, id, i, revertOf);
   await assertSpace(u, 'marketing'); adminOnly(u);
   const t = tenantOf(u); const sql = db();
   const p = await planOf(t, id);
@@ -329,7 +331,8 @@ export async function revertChange(u: SessionUser, changeId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(changeId)) throw notFound();
   const [c] = await db()<any[]>`select id, plan_id, kind, before, after, status from mkt_ad_changes where id = ${changeId} and tenant = ${tenantOf(u)}`;
   if (!c || !c.plan_id) throw notFound('변경 기록을 찾을 수 없습니다');
-  if (c.status !== 'applied' || !['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add'].includes(c.kind)) throw new HttpError(409, 'not_revertible', '이 기록은 되돌릴 수 없습니다');
+  if (c.status !== 'applied' || !['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add', 'kw_pause', 'kw_resume'].includes(c.kind)) throw new HttpError(409, 'not_revertible', '이 기록은 되돌릴 수 없습니다');
+  if (c.kind === 'kw_pause' || c.kind === 'kw_resume') return actKeywords(u, c.plan_id, { action: c.kind === 'kw_pause' ? 'kw_resume' : 'kw_pause', keywordIds: c.before?.keywordIds ?? [] }, c.id);
   // 지역: 전 값으로(전에 타겟이 없었으면 = 전국 + 해외). 키워드 추가: 그때 새로 만든 키워드만 네이버에서 지우고 세팅안에서 뺌
   if (c.kind === 'region') return actLocal(u, c.plan_id, { action: 'region', region: c.before?.KR ?? [], abroad: c.before?.OTHERS == null || c.before.OTHERS.includes('00') }, c.id);
   if (c.kind === 'keywords_add') return removeKeywords(u, c.plan_id, c);
@@ -614,4 +617,36 @@ export async function localKeywords(u: SessionUser, i: z.infer<typeof localKwInp
   const asked = new Set(combos.map((c) => norm(c.keyword)));
   const related = vol.related.filter((r) => !asked.has(norm(r.keyword)) && areas.some((ar) => norm(r.keyword).includes(norm(ar)))).slice(0, 10);
   return { rows, related };
+}
+
+// ---------------- 광고 최적화 1차 ③ 통화 기반 최적화: 키워드 끄기·켜기 ----------------
+/** 워크인이 만든 세팅안의 키워드만 네이버 userLock(PUT /ncc/keywords/{id}?fields=userLock). 끄기는 돈이 줄어드는 변경 — 관리자 누름 = 승인. 중간 실패는 된 것까지 저장 + 실패 기록 */
+async function actKeywords(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null): Promise<Record<string, unknown>> {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db();
+  const p = await planOf(t, id);
+  if (!['created', 'active', 'paused'].includes(p.status) || !validIds(p.external?.keywordIds)) throw new HttpError(409, 'plan_not_created', '네이버에 만든 뒤에 바꿀 수 있습니다');
+  const all: string[] = p.external.keywordIds;
+  const ids = [...new Set(i.keywordIds ?? [])];
+  if (!ids.length || ids.some((x) => !all.includes(x))) throw badRequest('이 세팅안의 키워드를 골라 주세요');
+  const lock = i.action === 'kw_pause';
+  const names = ids.map((x) => String(p.plan.keywords?.[all.indexOf(x)] ?? x));
+  const locks: Record<string, boolean> = { ...(p.external.kwLocks ?? {}) };
+  const a = await naverAcc(t, p.account_id);
+  const done: string[] = [];
+  try {
+    for (const x of ids) { await naverReq(a, 'PUT', `/ncc/keywords/${x}`, '?fields=userLock', { nccKeywordId: x, userLock: lock }); locks[x] = lock; done.push(x); }
+  } catch (e: any) {
+    await sql`update mkt_ad_plans set external = ${sql.json({ ...p.external, kwLocks: locks } as never)}, updated_at = now() where id = ${id}`;
+    await sql`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, status, error, actor_id) values (${t}, ${id}, ${i.action},
+      ${sql.json({ keywordIds: ids, userLock: !lock } as never)}, ${sql.json({ keywordIds: ids, keywords: names, userLock: lock, done } as never)}, 'failed', ${String(e?.message ?? e).slice(0, 4000)}, ${u.id})`;
+    throw e;
+  }
+  await sql.begin(async (tx) => {
+    await tx`update mkt_ad_plans set external = ${tx.json({ ...p.external, kwLocks: locks } as never)}, updated_at = now() where id = ${id}`;
+    await tx`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up, actor_id, revert_of) values (${t}, ${id}, ${i.action},
+      ${tx.json({ keywordIds: ids, userLock: !lock } as never)}, ${tx.json({ keywordIds: ids, keywords: names, userLock: lock } as never)}, false, ${u.id}, ${revertOf})`;
+  });
+  await audit(sql, u.id, `mkt_ads.${i.action}`, 'mkt_ad_plan', id, { keywordIds: ids }).catch(() => {});
+  return { ok: true, kwLocks: locks };
 }

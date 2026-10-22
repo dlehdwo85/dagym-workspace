@@ -271,20 +271,31 @@ export async function markPublished(u: SessionUser, id: string, i: z.infer<typeo
 // ---------------- 전화 문의 → 영업 ----------------
 export async function listCalls(u: SessionUser, q: { status?: string }) {
   await assertSpace(u, 'marketing');
-  return { calls: await db()`select c.id, c.phone, c.called_at, c.source, c.status, c.memo, c.task_id, b.name as brand from mkt_calls c left join mkt_brands b on b.id = c.brand_id
-    where c.tenant = ${tenantOf(u)} and (${q.status ?? ''} = '' or c.status = ${q.status ?? ''}) order by c.called_at desc limit 200` };
+  const t = tenantOf(u);
+  // 광고 최적화 1차 ③ "어떻게 알고 전화하셨어요?" — 최근 30일 광고비가 나간 키워드를 고르기 목록으로
+  const adKeywords = (await db()<{ keyword: string }[]>`select max(s.item_name) as keyword from mkt_ad_items s join mkt_ad_accounts a on a.id = s.account_id
+    where a.tenant = ${t} and s.kind = 'keyword' and s.day >= (now() at time zone 'Asia/Seoul')::date - 30 group by s.item_id order by sum(s.cost_krw) desc limit 50`).map((r) => r.keyword).filter(Boolean);
+  return { adKeywords, calls: await db()`select c.id, c.phone, c.called_at, c.source, c.status, c.memo, c.task_id, c.ad_keyword, c.ad_provider, b.name as brand from mkt_calls c left join mkt_brands b on b.id = c.brand_id
+    where c.tenant = ${t} and (${q.status ?? ''} = '' or c.status = ${q.status ?? ''}) order by c.called_at desc limit 200` };
 }
-export const callInput = z.object({ phone: z.string().trim().min(4).max(30), calledAt: z.string().datetime({ offset: true }).optional(), source: z.string().max(100).optional(), brandId: zUuid.nullable().optional(), memo: z.string().max(1000).optional() });
+const zAdProvider = z.enum(['naver', 'google', 'meta', 'other']);
+export const callInput = z.object({ phone: z.string().trim().min(4).max(30), calledAt: z.string().datetime({ offset: true }).optional(), source: z.string().max(100).optional(), brandId: zUuid.nullable().optional(), memo: z.string().max(1000).optional(),
+  adKeyword: z.string().trim().max(60).optional(), adProvider: zAdProvider.optional() });
 export async function createCall(u: SessionUser, i: z.infer<typeof callInput>) {
   await assertSpace(u, 'marketing');
-  const [c] = await db()`insert into mkt_calls (tenant, brand_id, phone, called_at, source, memo, created_by) values (${tenantOf(u)}, ${i.brandId ?? null}, ${i.phone}, ${i.calledAt ?? new Date().toISOString()}, ${i.source ?? null}, ${i.memo ?? null}, ${u.id}) returning id`;
+  const [c] = await db()`insert into mkt_calls (tenant, brand_id, phone, called_at, source, memo, created_by, ad_keyword, ad_provider) values (${tenantOf(u)}, ${i.brandId ?? null}, ${i.phone}, ${i.calledAt ?? new Date().toISOString()}, ${i.source ?? null}, ${i.memo ?? null}, ${u.id},
+    ${i.adKeyword || null}, ${i.adKeyword ? i.adProvider ?? null : null}) returning id`;
   return { id: c.id };
 }
-export const callUpdateInput = z.object({ status: z.enum(['new', 'excluded']).optional(), memo: z.string().max(1000).optional() });
+export const callUpdateInput = z.object({ status: z.enum(['new', 'excluded']).optional(), memo: z.string().max(1000).optional(),
+  adKeyword: z.string().trim().max(60).nullable().optional(), adProvider: zAdProvider.nullable().optional() }); // 광고 키워드는 나중에 알게 되면 고침(null = 지움)
 export async function updateCall(u: SessionUser, id: string, i: z.infer<typeof callUpdateInput>) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);
-  const [c] = await db()`update mkt_calls set status = coalesce(${i.status ?? null}, status), memo = coalesce(${i.memo ?? null}, memo) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
+  const kw = i.adKeyword !== undefined; const kwVal = i.adKeyword || null;
+  const [c] = await db()`update mkt_calls set status = coalesce(${i.status ?? null}, status), memo = coalesce(${i.memo ?? null}, memo),
+    ad_keyword = case when ${kw} then ${kwVal}::text else ad_keyword end, ad_provider = case when ${kw} then ${kwVal ? i.adProvider ?? null : null}::text else ad_provider end
+    where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!c) throw notFound();
   return { ok: true };
 }

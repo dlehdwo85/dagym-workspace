@@ -526,24 +526,27 @@ export function ContentCalendar() {
 
 /** 전화 문의: 입력·제외·[영업 리드로](영업 담당 업무 카드) */
 export function Calls() {
-  const { data, error, reload } = useApi<{ calls: { id: string; phone: string; called_at: string; source: string | null; status: string; memo: string | null; task_id: string | null; brand: string | null }[] }>('/api/marketing/calls');
-  const [f, setF] = useState({ phone: '', source: '', memo: '' });
-  async function add(e: React.FormEvent) { e.preventDefault(); try { await api('/api/marketing/calls', { body: { phone: f.phone, source: f.source || undefined, memo: f.memo || undefined } }); setF({ phone: '', source: '', memo: '' }); reload(); } catch (er: any) { toast.error(er.message); } }
+  const { data, error, reload } = useApi<{ adKeywords?: string[]; calls: { id: string; phone: string; called_at: string; source: string | null; status: string; memo: string | null; task_id: string | null; brand: string | null; ad_keyword?: string | null }[] }>('/api/marketing/calls');
+  const [f, setF] = useState({ phone: '', source: '', memo: '', adKeyword: '' });
+  async function add(e: React.FormEvent) { e.preventDefault(); try { await api('/api/marketing/calls', { body: { phone: f.phone, source: f.source || undefined, memo: f.memo || undefined, adKeyword: f.adKeyword.trim() || undefined } }); setF({ phone: '', source: '', memo: '', adKeyword: '' }); reload(); } catch (er: any) { toast.error(er.message); } }
   async function convert(id: string) { try { const r = await api<{ taskId: string }>(`/api/marketing/calls/${id}/convert`, { body: {} }); toast.ok('영업 업무로 만들었습니다'); reload(); return r; } catch (e: any) { toast.error(e.message); } }
   async function exclude(id: string, status: string) { try { await api(`/api/marketing/calls/${id}`, { method: 'PATCH', body: { status } }); reload(); } catch (e: any) { toast.error(e.message); } }
   return (
     <div className="space-y-3" data-testid="mkt-calls">
       <h1 className="text-xl font-bold" style={{ color: C }}>전화 문의</h1>
-      <form onSubmit={add} className="grid gap-2 rounded-card border border-line bg-white p-3 shadow-card sm:grid-cols-[10rem_1fr_1fr_auto]">
+      <form onSubmit={add} className="grid gap-2 rounded-card border border-line bg-white p-3 shadow-card sm:grid-cols-[10rem_1fr_1fr_1fr_auto]">
         <input className={inputCls} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} placeholder="전화번호" required aria-label="전화번호" inputMode="tel" data-testid="call-phone" />
         <input className={inputCls} value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} placeholder="들어온 곳(광고·페이지)" aria-label="들어온 곳" />
+        {/* 광고 최적화 1차 ③ "어떻게 알고 전화하셨어요?" → 광고 키워드별 전환당 비용에 들어감 */}
+        <input className={inputCls} value={f.adKeyword} onChange={(e) => setF({ ...f, adKeyword: e.target.value })} placeholder="광고 키워드(알면)" aria-label="광고 키워드" list="call-ad-keywords" maxLength={60} data-testid="call-ad-keyword" />
+        <datalist id="call-ad-keywords">{(data?.adKeywords ?? []).map((k) => <option key={k} value={k} />)}</datalist>
         <input className={inputCls} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} placeholder="메모" aria-label="메모" />
         <Button type="submit" data-testid="call-add">추가</Button>
       </form>
       {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={3} /> : (
         <ul className="space-y-1.5">{data.calls.map((c) => (
           <li key={c.id} className={cx('flex flex-wrap items-center gap-2 rounded-card border border-line bg-white p-3 text-sm', c.status === 'excluded' && 'opacity-60')} data-testid="call-row">
-            <span className="font-medium tabular-nums">{c.phone}</span><span className="text-xs text-ink-2">{fmtDateTime(c.called_at)}{c.source ? ` · ${c.source}` : ''}{c.memo ? ` · ${c.memo}` : ''}</span>
+            <span className="font-medium tabular-nums">{c.phone}</span><span className="text-xs text-ink-2">{fmtDateTime(c.called_at)}{c.source ? ` · ${c.source}` : ''}{c.ad_keyword ? ` · 광고: ${c.ad_keyword}` : ''}{c.memo ? ` · ${c.memo}` : ''}</span>
             <span className="ml-auto flex gap-1.5">
               {c.task_id ? <Link href={`/tasks/${c.task_id}`} className="text-xs underline" style={{ color: '#2563EB' }}>영업 업무 보기</Link>
                 : c.status === 'excluded' ? <Button size="sm" variant="secondary" onClick={() => exclude(c.id, 'new')}>되살리기</Button>
