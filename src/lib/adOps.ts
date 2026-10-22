@@ -8,6 +8,7 @@ import { decrypt } from './crypto';
 import { audit } from './log';
 import { tenantOf, type SessionUser } from './types';
 import { DEFAULT_RULES, checkAd, qualityRules, type QualityRules } from './mktQuality';
+import { NAVER_REGION_CODES, REGION_RE } from './naverRegions';
 
 /**
  * V44 ① AI 광고 운영실 — 네이버 검색광고 '쓰기'(파워링크 먼저, 플레이스 다음).
@@ -23,7 +24,7 @@ function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('광고 �
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 
 type NaverAcc = { id: string; tenant: string; external_id: string; secret_enc: string | null };
-async function naverReq(a: NaverAcc, method: 'GET' | 'POST' | 'PUT', path: string, query = '', body?: unknown) {
+async function naverReq(a: NaverAcc, method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, query = '', body?: unknown) {
   const s = a.secret_enc ? JSON.parse(decrypt(a.secret_enc)) : {};
   const ts = String(Date.now());
   const sig = createHmac('sha256', String(s.secretKey ?? '')).update(`${ts}.${method}.${path}`).digest('base64');
@@ -57,6 +58,9 @@ export const planInput = z.object({
   // 광고 최적화 1차 ① 3안 소액 테스트: 같은 그룹의 소재 2~3개를 작은 하루 예산으로 비교 → 기간·최소 노출을 채우면 이긴 안 표시 → [이긴 안에 집중](진 안 끄기 + 예산 올리기, 승인)
   test: z.object({ on: z.boolean(), days: z.number().int().min(3).max(30).default(7), minImpressions: z.number().int().min(30).max(100_000).default(300),
     afterBudget: z.number().int().min(50).max(10_000_000).nullable().optional() }).optional(),
+  // 광고 최적화 1차 ② 동네 타깃: 중심·반경(동네 이름 고르기용 — 네이버 파워링크는 반경 지정이 없음)·동네 이름·광고 지역(시·도 = 네이버 REGIONAL_TARGET, 비우면 네이버 기본 = 전국)
+  local: z.object({ center: z.string().trim().max(80).default(''), radiusKm: z.number().min(0.5).max(30).default(3), areas: z.array(z.string().trim().min(1).max(20)).max(20).default([]),
+    region: z.array(z.string().regex(REGION_RE)).max(17).default([]), abroad: z.boolean().default(false) }).optional(),
 });
 /** 글자 수 상한은 플랫폼 운영 › 글 품질 규칙(#426, 기본 제목 15·설명 45) */
 export function precheck(p: z.infer<typeof planInput>, rules: QualityRules = DEFAULT_RULES) {
@@ -176,6 +180,8 @@ export async function approvePlan(u: SessionUser, id: string) {
       for (const ad of p.plan.ads) ids.push(String((await naverReq(a, 'POST', '/ncc/ads', '', { nccAdgroupId: ext.adgroupId, type: 'TEXT_45', userLock: false, ad: { headline: ad.headline, description: ad.description, pc: { final: ad.url }, mobile: { final: ad.url } } })).nccAdId));
       ext.adIds = ids;
     }
+    // 광고 최적화 1차 ② 광고 지역(시·도)을 골랐으면 켜기 전(꺼진 상태)에 맞춰 둠 — 실패하면 여기서 멈추고 다시 누르면 이어서
+    if (p.plan.local?.region?.length && !ext.regionSet) { await setRegion(a, String(ext.adgroupId), p.plan.local.region, !!p.plan.local.abroad); ext.regionSet = true; }
   } catch (e: any) {
     await sql`update mkt_ad_plans set status = 'failed', external = ${sql.json(ext as never)}, error = ${String(e?.message ?? e).slice(0, 4000)}, updated_at = now() where id = ${id}`;
     await sql`insert into mkt_ad_changes (tenant, plan_id, kind, after, status, error, actor_id) values (${t}, ${id}, 'create', ${sql.json(ext as never)}, 'failed', ${String(e?.message ?? e).slice(0, 4000)}, ${u.id})`;
@@ -239,7 +245,7 @@ export async function keywordVolumes(a: NaverAcc, keywords: string[]) {
     const r = await naverReq(a, 'GET', '/keywordstool', `?hintKeywords=${encodeURIComponent(hint)}&showDetail=1`);
     for (const k of (r?.keywordList ?? []) as any[]) {
       const key = norm(String(k.relKeyword ?? '')); const v = { pc: num(k.monthlyPcQcCnt), mobile: num(k.monthlyMobileQcCnt) };
-      if (asked.has(key)) out.set(key, v); else if (v.pc + v.mobile >= 30) out.related.push({ keyword: String(k.relKeyword), total: v.pc + v.mobile });
+      if (asked.has(key)) out.set(key, v); else if (v.pc + v.mobile >= 30 && !out.related.some((r) => norm(r.keyword) === key)) out.related.push({ keyword: String(k.relKeyword), total: v.pc + v.mobile }); // 5개씩 물으면 연관 키워드가 겹쳐 옴
     }
   }
   out.related.sort((x, y) => y.total - x.total);
@@ -283,11 +289,14 @@ async function guardMoneyUp(t: string, addDaily = 0) {
   if (spend >= cap.monthlyCap) throw new HttpError(409, 'cap_reached', `이번 달 광고비 ${won(spend)} 가 상한 ${won(cap.monthlyCap)} 에 닿아 켤 수 없습니다 — 상한을 올리거나 다음 달에 켜 주세요`);
   return { cap: cap.monthlyCap, spend, addDaily };
 }
-export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync', 'ad_pause', 'ad_resume', 'ab_apply']), dailyBudget: z.number().int().min(50).max(10_000_000).optional(),
-  adIds: z.array(z.string().trim().min(1).max(60)).min(1).max(3).optional() });
+export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync', 'ad_pause', 'ad_resume', 'ab_apply', 'region', 'keywords_add']), dailyBudget: z.number().int().min(50).max(10_000_000).optional(),
+  adIds: z.array(z.string().trim().min(1).max(60)).min(1).max(3).optional(),
+  region: z.array(z.string().regex(REGION_RE)).max(17).optional(), abroad: z.boolean().optional(), keywords: z.array(z.string().trim().min(1).max(25)).min(1).max(30).optional(),
+  local: z.object({ center: z.string().trim().max(80), radiusKm: z.number().min(0.5).max(30), areas: z.array(z.string().trim().min(1).max(20)).max(20) }).partial().optional() });
 export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null = null): Promise<Record<string, unknown>> {
   if (i.action === 'sync') return syncPlanKeywords(u, id);
   if (i.action === 'ad_pause' || i.action === 'ad_resume' || i.action === 'ab_apply') return actAds(u, id, i, revertOf);
+  if (i.action === 'region' || i.action === 'keywords_add') return actLocal(u, id, i, revertOf);
   await assertSpace(u, 'marketing'); adminOnly(u);
   const t = tenantOf(u); const sql = db();
   const p = await planOf(t, id);
@@ -318,9 +327,12 @@ export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof plan
 export async function revertChange(u: SessionUser, changeId: string) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!/^[0-9a-f-]{36}$/i.test(changeId)) throw notFound();
-  const [c] = await db()<any[]>`select id, plan_id, kind, before, status from mkt_ad_changes where id = ${changeId} and tenant = ${tenantOf(u)}`;
+  const [c] = await db()<any[]>`select id, plan_id, kind, before, after, status from mkt_ad_changes where id = ${changeId} and tenant = ${tenantOf(u)}`;
   if (!c || !c.plan_id) throw notFound('변경 기록을 찾을 수 없습니다');
-  if (c.status !== 'applied' || !['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume'].includes(c.kind)) throw new HttpError(409, 'not_revertible', '이 기록은 되돌릴 수 없습니다');
+  if (c.status !== 'applied' || !['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add'].includes(c.kind)) throw new HttpError(409, 'not_revertible', '이 기록은 되돌릴 수 없습니다');
+  // 지역: 전 값으로(전에 타겟이 없었으면 = 전국 + 해외). 키워드 추가: 그때 새로 만든 키워드만 네이버에서 지우고 세팅안에서 뺌
+  if (c.kind === 'region') return actLocal(u, c.plan_id, { action: 'region', region: c.before?.KR ?? [], abroad: c.before?.OTHERS == null || c.before.OTHERS.includes('00') }, c.id);
+  if (c.kind === 'keywords_add') return removeKeywords(u, c.plan_id, c);
   if (c.kind === 'ad_pause' || c.kind === 'ad_resume') return actAds(u, c.plan_id, { action: c.kind === 'ad_pause' ? 'ad_resume' : 'ad_pause', adIds: c.before?.adIds ?? [] }, c.id);
   const action = c.kind === 'budget' ? { action: 'budget' as const, dailyBudget: Number(c.before?.dailyBudget) } : { action: (c.before?.userLock ? 'pause' : 'enable') as 'pause' | 'enable' };
   return actPlan(u, c.plan_id, action, c.id);
@@ -472,4 +484,134 @@ export async function setAgencyFee(u: SessionUser, i: z.infer<typeof feeInput>) 
   await db()`insert into mkt_settings (tenant, agency_fee_pct) values (${t}, ${pct}) on conflict (tenant) do update set agency_fee_pct = excluded.agency_fee_pct`;
   await audit(db(), u.id, 'mkt_ads.agency_fee', 'tenant', null, { pct }).catch(() => {});
   return { ok: true, savings: await agencySavings(t, await monthSpend(t)) };
+}
+
+// ---------------- 광고 최적화 1차 ② 동네 타깃 ----------------
+// 네이버 파워링크는 반경 타겟팅이 없다 → ① 광고 지역(시·도, 공식 문서의 REGIONAL_TARGET) ② 반경 안 동네 이름 키워드(실제 월 검색량으로 고름)로 맞춘다.
+// 반경 값은 동네 이름을 고를 때 쓰고 세팅안에 남겨 둔다(구글·메타 광고 연결 때 그대로).
+async function regionTarget(a: NaverAcc, adgroupId: string) {
+  const r = await naverReq(a, 'GET', '/ncc/targets', `?ownerId=${encodeURIComponent(adgroupId)}&types=REGIONAL_TARGET`);
+  const t = ((Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as any[]).find((x) => x?.targetTp === 'REGIONAL_TARGET');
+  if (!t?.nccTargetId) throw new HttpError(502, 'naver_target', `네이버 광고그룹(${adgroupId})의 지역 타겟팅을 찾지 못했습니다`);
+  let v = t.target; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
+  const list = (x: unknown) => (Array.isArray(x) ? x.map(String) : null);
+  return { id: String(t.nccTargetId), kr: list(v?.location?.KR), others: list(v?.location?.OTHERS) }; // kr null = 타겟 없음(전국 + 해외)
+}
+/** 광고 지역을 시·도로(국내 그 지역만, abroad = 해외도). 빈 배열 = 네이버 기본(전국·해외). 네이버 화면에서 시·군·구·동까지 정한 광고그룹은 덮어쓰지 않음(409) */
+async function setRegion(a: NaverAcc, adgroupId: string, region: string[], abroad: boolean) {
+  const cur = await regionTarget(a, adgroupId);
+  if (cur.kr?.some((c) => !NAVER_REGION_CODES.includes(c))) throw new HttpError(409, 'region_custom', '네이버 광고 시스템에서 세부 지역(시·군·구·동)이 정해져 있어 워크인에서는 바꾸지 않습니다 — 네이버 화면에서 확인해 주세요');
+  const location = region.length ? { KR: [...new Set(region)], OTHERS: abroad ? ['00'] : [] } : { KR: [...NAVER_REGION_CODES], OTHERS: ['00'] };
+  await naverReq(a, 'PUT', `/ncc/targets/${cur.id}`, '', { nccTargetId: cur.id, ownerId: adgroupId, targetTp: 'REGIONAL_TARGET', target: { location } });
+  return { before: { KR: cur.kr, OTHERS: cur.others }, after: location };
+}
+/** 만든 세팅안의 광고 지역 바꾸기 · 동네 키워드 추가(그룹 입찰가 그대로). 하루 예산은 그대로라 상한 검사 없음, 두 번 눌림은 409 */
+async function actLocal(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null): Promise<Record<string, unknown>> {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db();
+  const p = await planOf(t, id);
+  if (!['created', 'active', 'paused'].includes(p.status) || !p.external?.adgroupId) throw new HttpError(409, 'plan_not_created', '네이버에 만든 뒤에 바꿀 수 있습니다');
+  if (i.action === 'keywords_add' && !validIds(p.external.keywordIds)) throw new HttpError(409, 'keywords_unsynced', '먼저 [키워드 다시 읽기]로 키워드 id 를 맞춰 주세요');
+  const a = await naverAcc(t, p.account_id); const gid = String(p.external.adgroupId);
+  let add: string[] = [];
+  if (i.action === 'keywords_add') {
+    const have = new Set((p.plan.keywords as string[]).map(norm));
+    add = [...new Map((i.keywords ?? []).map((k) => [norm(k), k.trim()] as [string, string])).values()].filter((k) => !have.has(norm(k)));
+    if (!add.length) throw badRequest('고른 키워드가 이미 세팅안에 있습니다');
+    if (p.plan.keywords.length + add.length > 50) throw badRequest(`키워드는 세팅안마다 50개까지입니다(지금 ${p.plan.keywords.length}개)`);
+  }
+  const [lock] = await sql`update mkt_ad_plans set external = external || ${sql.json({ localAt: new Date().toISOString() } as never)}
+    where id = ${id} and coalesce((external->>'localAt')::timestamptz, 'epoch') < now() - interval '2 minutes' returning id`;
+  if (!lock) throw new HttpError(409, 'plan_busy', '이미 바꾸는 중입니다 — 잠시 뒤 새로 고쳐 확인해 주세요');
+  let before: any, after: any, plan: any, external: any = { ...p.external };
+  try {
+    if (i.action === 'region') {
+      ({ before, after } = await setRegion(a, gid, i.region ?? [], !!i.abroad));
+      plan = { ...p.plan, local: { center: '', radiusKm: 3, areas: [], ...(p.plan.local ?? {}), region: i.region ?? [], abroad: !!i.abroad && !!i.region?.length } };
+    } else {
+      const r = await naverReq(a, 'GET', '/ncc/keywords', `?nccAdgroupId=${encodeURIComponent(gid)}`);
+      const existing = new Set(((Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as any[]).map(kwId).filter(Boolean));
+      const ids = await ensureKeywords(a, gid, add, Number(p.plan.bidAmt) || undefined);
+      before = { count: p.plan.keywords.length }; after = { keywords: add, keywordIds: ids, createdIds: ids.filter((x) => !existing.has(x)) };
+      plan = { ...p.plan, keywords: [...p.plan.keywords, ...add], ...(i.local ? { local: { center: '', radiusKm: 3, areas: [], region: [], abroad: false, ...(p.plan.local ?? {}), ...i.local } } : {}) };
+      external = { ...p.external, keywordIds: [...p.external.keywordIds, ...ids] };
+    }
+  } catch (e: any) {
+    const msg = String(e?.message ?? e).slice(0, 4000);
+    await sql`update mkt_ad_plans set external = external - 'localAt', updated_at = now() where id = ${id}`;
+    await sql`insert into mkt_ad_changes (tenant, plan_id, kind, after, status, error, actor_id, revert_of) values (${t}, ${id}, ${i.action},
+      ${sql.json((i.action === 'region' ? { KR: i.region ?? [], abroad: !!i.abroad } : { keywords: add }) as never)}, 'failed', ${msg}, ${u.id}, ${revertOf})`;
+    throw e;
+  }
+  delete external.localAt;
+  await sql.begin(async (tx) => {
+    await tx`update mkt_ad_plans set plan = ${tx.json(plan as never)}, external = ${tx.json(external as never)}, updated_at = now() where id = ${id}`;
+    await tx`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up, actor_id, revert_of) values (${t}, ${id}, ${i.action}, ${tx.json(before)}, ${tx.json(after)}, false, ${u.id}, ${revertOf})`;
+  });
+  await audit(sql, u.id, `mkt_ads.${i.action}`, 'mkt_ad_plan', id, { before, after }).catch(() => {});
+  return i.action === 'region' ? { ok: true, region: after } : { ok: true, keywords: add, keywordIds: after.keywordIds };
+}
+/** [되돌리기] 키워드 추가 → 그때 새로 만든 키워드만 네이버에서 지움(원래 있던 것은 그대로) + 세팅안에서 뺌. 중간 실패는 지운 것까지 반영 + 실패 기록 */
+async function removeKeywords(u: SessionUser, planId: string, c: any): Promise<Record<string, unknown>> {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db();
+  const p = await planOf(t, planId);
+  const a = await naverAcc(t, p.account_id);
+  const created: string[] = c.after?.createdIds ?? [];
+  const done: string[] = [];
+  let err: any = null;
+  for (const k of created) { try { await naverReq(a, 'DELETE', `/ncc/keywords/${k}`); done.push(k); } catch (e) { err = e; break; } }
+  // 빼는 키워드: 성공이면 그때 넣은 것 전부, 실패면 지운 것만(id 로 짝지음)
+  const addedKw: string[] = c.after?.keywords ?? []; const addedIds: string[] = c.after?.keywordIds ?? [];
+  const dropKw = new Set((err ? addedKw.filter((_, j) => done.includes(addedIds[j])) : addedKw).map(norm));
+  const ids: string[] = p.external?.keywordIds ?? [];
+  const keep = (p.plan.keywords as string[]).map((k, j) => [k, ids[j]] as [string, string]).filter(([k]) => !dropKw.has(norm(k)));
+  await sql.begin(async (tx) => {
+    await tx`update mkt_ad_plans set plan = ${tx.json({ ...p.plan, keywords: keep.map((x) => x[0]) } as never)}, external = ${tx.json({ ...p.external, keywordIds: keep.map((x) => x[1]) } as never)}, updated_at = now() where id = ${planId}`;
+    await tx`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up, status, error, actor_id, revert_of) values (${t}, ${planId}, 'keywords_remove',
+      ${tx.json({ keywords: addedKw } as never)}, ${tx.json({ deletedIds: done } as never)}, false, ${err ? 'failed' : 'applied'}, ${err ? String(err?.message ?? err).slice(0, 4000) : null}, ${u.id}, ${err ? null : c.id})`;
+  });
+  if (err) throw err;
+  await audit(sql, u.id, 'mkt_ads.keywords_remove', 'mkt_ad_plan', planId, { deletedIds: done }).catch(() => {});
+  return { ok: true, removed: [...dropKw].length };
+}
+
+export const areasInput = z.object({ center: z.string().trim().min(2).max(80), radiusKm: z.number().min(0.5).max(30).default(3), services: z.array(z.string().trim().min(1).max(20)).max(5).default([]) });
+const AREA_RE = /^[가-힣A-Za-z0-9]{2,15}$/;
+/** 기준 위치 반경 안 동네 이름(동·역·생활권) — AI 추정. 진짜인지는 [검색량 확인]의 실제 검색량으로 거름 */
+export async function localAreas(u: SessionUser, i: z.infer<typeof areasInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const { aiJson } = await import('./mktOps');
+  let o: any = null;
+  try {
+    o = await aiJson(tenantOf(u), u.id, `당신은 한국 동네 상권을 잘 아는 검색광고 담당자입니다. 기준 위치에서 반경 안에 있는 동네 이름을 JSON 으로만 답합니다.
+- 행정동·법정동(예: 두정동), 지하철·기차역(예: 두정역), 사람들이 검색에 쓰는 생활권 이름(예: 천안터미널)만. '시'·'구'처럼 넓은 이름은 반경 5km 이상일 때만.
+- 실제로 있는 이름만 씁니다. 확실하지 않으면 넣지 않습니다. 띄어쓰기 없이 씁니다.
+- km 는 기준 위치에서의 대략 거리(추정)입니다. 가까운 순서로 최대 15개.`,
+      `기준 위치: ${i.center}\n반경: ${i.radiusKm}km${i.services.length ? `\n업종·서비스: ${i.services.join(', ')}` : ''}`,
+      { type: 'object', additionalProperties: false, required: ['areas'], properties: { areas: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['name', 'kind', 'km'],
+        properties: { name: { type: 'string' }, kind: { type: 'string', enum: ['동', '역', '생활권', '기타'] }, km: { type: 'number' } } } } } }, 'marketing_ads_local');
+  } catch (e) { if (e instanceof HttpError) throw e; o = null; } // 한도 초과 등은 그대로 알림, 응답 형식 오류는 '직접 적기' 안내
+  if (!o) return { areas: [], note: 'AI 추천을 받지 못했습니다 — 동네 이름을 직접 적어 주세요' };
+  const seen = new Set<string>();
+  const areas = ((o.areas ?? []) as any[]).map((x) => ({ name: String(x?.name ?? '').replace(/\s+/g, ''), kind: ['동', '역', '생활권', '기타'].includes(x?.kind) ? String(x.kind) : '기타', km: Math.round(Number(x?.km) * 10) / 10 }))
+    .filter((x) => AREA_RE.test(x.name) && Number.isFinite(x.km) && x.km >= 0 && x.km <= i.radiusKm * 1.5 && !seen.has(x.name) && !!seen.add(x.name)).slice(0, 15);
+  return { areas, note: 'AI 가 추정한 동네 이름·거리입니다 — [검색량 확인]으로 실제 검색이 있는 것만 고르세요' };
+}
+export const localKwInput = z.object({ accountId: z.string().uuid(), areas: z.array(z.string().trim().min(1).max(20)).min(1).max(20), services: z.array(z.string().trim().min(1).max(20)).min(1).max(5) });
+/** 동네 × 서비스 조합(최대 50개)의 네이버 월 검색량(PC·모바일, 키워드 도구) + 검색량 있는 연관 동네 키워드. 고르는 것은 사람 */
+export async function localKeywords(u: SessionUser, i: z.infer<typeof localKwInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const a = await naverAcc(tenantOf(u), i.accountId);
+  const areas = [...new Set(i.areas.map((x) => x.replace(/\s+/g, '')))].filter((x) => x.length >= 2);
+  const services = [...new Set(i.services.map((x) => x.trim()))];
+  const combos: { keyword: string; area: string; service: string }[] = [];
+  for (const ar of areas) for (const s of services) { const k = `${ar} ${s}`; if ([...k].length <= 25 && combos.length < 50) combos.push({ keyword: k, area: ar, service: s }); }
+  if (!combos.length) throw badRequest('동네 이름과 서비스 단어를 넣어 주세요');
+  const vol = await keywordVolumes(a, combos.map((c) => c.keyword));
+  const rows = combos.map((c) => { const v = vol.get(norm(c.keyword)); const total = v ? v.pc + v.mobile : 0; return { ...c, pc: v?.pc ?? null, mobile: v?.mobile ?? null, total, low: total < 20 }; })
+    .sort((x, y) => y.total - x.total);
+  const asked = new Set(combos.map((c) => norm(c.keyword)));
+  const related = vol.related.filter((r) => !asked.has(norm(r.keyword)) && areas.some((ar) => norm(r.keyword).includes(norm(ar)))).slice(0, 10);
+  return { rows, related };
 }
