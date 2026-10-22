@@ -9,6 +9,7 @@ import { audit, logError } from './log';
 import { appUrl } from './mail';
 import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
+import { META_LEAD_SCOPES, enableLeadPage, hasLeadScopes } from './metaLeads';
 
 /**
  * 상용화 ⑤-2 게시 채널(대표 결정 10/19: 구독형 통합 게시 API 미사용 → 모든 채널 직접 연동).
@@ -72,19 +73,24 @@ export async function listChannels(u: SessionUser) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const sets = new Map((await sql<{ channel: string; enabled: boolean }[]>`select channel, enabled from mkt_channel_settings where tenant = ${t}`).map((r) => [r.channel, r.enabled]));
-  const accs = await sql<any[]>`select a.id, a.provider, a.external_id, a.label, a.status, a.last_error, a.info, a.created_at, a.brand_id, a.shared, b.name as brand from mkt_publish_accounts a left join mkt_brands b on b.id = a.brand_id where a.tenant = ${t} and a.status <> 'disconnected' order by a.created_at`;
+  const accs = await sql<any[]>`select a.id, a.provider, a.external_id, a.label, a.status, a.last_error, a.info, a.created_at, a.brand_id, a.shared, a.scopes, b.name as brand,
+      lp.enabled as lead_on, lp.subscribed_at as lead_sub, lp.webhook_at as lead_webhook, lp.last_error as lead_error
+    from mkt_publish_accounts a left join mkt_brands b on b.id = a.brand_id left join mkt_lead_pages lp on lp.account_id = a.id where a.tenant = ${t} and a.status <> 'disconnected' order by a.created_at`;
   const admin = isAdmin(u);
   return {
     canEdit: admin,
     metaDevMode: metaReady() && metaDevMode(),
     channels: PUBLISH_CHANNELS.map((c) => {
-      const accounts = accs.filter((a) => c.providers.includes(a.provider)).map((a) => ({ id: a.id, provider: a.provider, label: a.label, status: a.status, lastError: a.last_error, warnings: (a.info?.warnings ?? []) as string[], brandId: a.brand_id as string | null, brand: a.brand as string | null, shared: !!a.shared }));
+      const accounts = accs.filter((a) => c.providers.includes(a.provider)).map((a) => ({ id: a.id, provider: a.provider, label: a.label, status: a.status, lastError: a.last_error, warnings: (a.info?.warnings ?? []) as string[], brandId: a.brand_id as string | null, brand: a.brand as string | null, shared: !!a.shared,
+        // 광고 2차 ①: 페이스북 페이지의 리드 광고 받기 상태(권한·켜짐·앱 설치·웹후크 마지막 수신)
+        leads: a.provider === 'meta_fb' ? { scopes: hasLeadScopes(a.scopes), on: !!a.lead_on, subscribed: !!a.lead_sub, webhookAt: (a.lead_webhook ?? null) as string | null, error: (a.lead_error ?? null) as string | null } : null }));
       // 운영 방식: 도우미(사람이 올리고 [게시 확인]) / 자동(심사 통과 + 연결됨)
       const mode = ['meta', 'threads', 'google'].includes(c.kind) && accounts.length ? 'auto' : c.kind === 'later' ? 'later' : 'helper'; // M1: 연결되면 서버 게시(개발 모드 앱은 앱 역할 계정만)
       return { key: c.key, label: c.label, note: c.note, kind: c.kind, enabled: sets.get(c.key) ?? c.on, connectable: c.kind !== 'helper' && c.kind !== 'later', ready: kindReady(c.kind), mode, accounts };
     }),
     // 기술 정보는 플랫폼 관리자(슈퍼 계정)에게만 — 고객 화면에는 숨김
-    tech: u.platformAdmin ? { metaCallback: callback(), metaDeletion: `${appUrl()}/api/marketing/publish/meta/data-deletion`, metaScopes: META_PUBLISH_SCOPES, metaReady: metaReady(), metaLive: metaLive() } : null,
+    tech: u.platformAdmin ? { metaCallback: callback(), metaDeletion: `${appUrl()}/api/marketing/publish/meta/data-deletion`, metaScopes: META_PUBLISH_SCOPES, metaReady: metaReady(), metaLive: metaLive(),
+      metaWebhook: `${appUrl()}/api/marketing/meta/webhook`, metaWebhookToken: !!process.env.META_WEBHOOK_VERIFY_TOKEN, leadScopes: META_LEAD_SCOPES } : null,
   };
 }
 
@@ -96,8 +102,9 @@ export async function setChannel(u: SessionUser, i: z.infer<typeof channelToggle
   return { ok: true };
 }
 
-/** [연결] 시작 — 지금은 Meta(페이스북 페이지 + 인스타 비즈니스 한 번에)만. 앱 ID 가 없으면 409 + 쉬운 안내 */
-export async function publishConnectStart(u: SessionUser, provider: string) {
+/** [연결] 시작 — 지금은 Meta(페이스북 페이지 + 인스타 비즈니스 한 번에)만. 앱 ID 가 없으면 409 + 쉬운 안내.
+ * leads = 광고 2차 ① [리드 광고 받기]: 게시 권한 + 리드 권한(leads_retrieval 등)을 함께 묻고, 콜백에서 페이지에 앱 설치(leadgen) */
+export async function publishConnectStart(u: SessionUser, provider: string, opts: { leads?: boolean } = {}) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!['meta', 'threads', 'youtube'].includes(provider)) throw notFound();
   const state = newToken(24);
@@ -112,8 +119,8 @@ export async function publishConnectStart(u: SessionUser, provider: string) {
     return `${GOOGLE_AUTH()}?${new URLSearchParams({ client_id: process.env.YT_CLIENT_ID!, redirect_uri: callback('youtube'), state, scope: YT_SCOPES.join(' '), response_type: 'code', access_type: 'offline', prompt: 'consent', include_granted_scopes: 'false' })}`;
   }
   if (!metaReady()) throw new HttpError(409, 'publish_not_ready', '인스타그램·페이스북 연결은 곧 열립니다. 그동안은 게시 도우미로 올려 주세요');
-  await db()`insert into mkt_ad_oauth_states (state, user_id, tenant, provider) values (${state}, ${u.id}, ${tenantOf(u)}, 'meta_publish')`;
-  return `${FB_DIALOG()}?${new URLSearchParams({ client_id: process.env.META_APP_ID!, redirect_uri: callback(), state, scope: META_PUBLISH_SCOPES.join(','), response_type: 'code' })}`;
+  await db()`insert into mkt_ad_oauth_states (state, user_id, tenant, provider) values (${state}, ${u.id}, ${tenantOf(u)}, ${opts.leads ? 'meta_leads' : 'meta_publish'})`;
+  return `${FB_DIALOG()}?${new URLSearchParams({ client_id: process.env.META_APP_ID!, redirect_uri: callback(), state, scope: [...META_PUBLISH_SCOPES, ...(opts.leads ? META_LEAD_SCOPES : [])].join(','), response_type: 'code' })}`;
 }
 
 const META_HINT = {
@@ -121,6 +128,7 @@ const META_HINT = {
   noIg: '이 페이지에 연결된 인스타그램 비즈니스 계정이 없습니다 — 인스타그램 앱 › 설정 › 계정 유형을 비즈니스(또는 크리에이터)로 바꾸고, 페이스북 페이지와 연결한 뒤 다시 [연결]을 눌러 주세요',
   noPages: '관리하는 페이스북 페이지가 없습니다 — 인스타그램 게시에도 페이스북 페이지가 필요합니다. 페이지를 만들거나 관리자로 추가된 계정으로 연결해 주세요',
   missingScope: '연결 화면에서 일부 권한을 끄셨습니다 — 다시 [연결]을 눌러 모든 항목을 허용해 주세요',
+  missingLeadScope: '리드 광고 권한 일부를 허용하지 않았습니다 — [리드 광고 받기]를 다시 눌러 모든 항목을 허용해 주세요',
 };
 
 /** 콜백: 코드 → 사용자 토큰(장기) → 관리하는 페이지(+ 연결된 인스타) 등록. 안 된 항목은 쉬운 안내로 warnings 에 */
@@ -129,12 +137,14 @@ export async function publishConnectCallback(u: SessionUser, provider: string, c
   if (provider !== 'meta') throw notFound();
   const sql = db();
   const [st] = await sql`delete from mkt_ad_oauth_states where state = ${state} and created_at > now() - interval '15 minutes' returning user_id, tenant, provider`;
-  if (!st || st.user_id !== u.id || st.provider !== 'meta_publish' || st.tenant !== tenantOf(u)) throw badRequest('연결 요청이 만료됐습니다. 다시 시도해 주세요');
+  if (!st || st.user_id !== u.id || !['meta_publish', 'meta_leads'].includes(st.provider) || st.tenant !== tenantOf(u)) throw badRequest('연결 요청이 만료됐습니다. 다시 시도해 주세요');
+  const wantLeads = st.provider === 'meta_leads';
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!metaReady()) throw new HttpError(409, 'publish_not_ready', '연결이 아직 열리지 않았습니다');
   type Found = { provider: string; id: string; label: string; token: string; warnings: string[]; info: Record<string, unknown> };
   const found: Found[] = []; const general: string[] = [];
   let ownerId = '';
+  let scopes: string[] = META_PUBLISH_SCOPES;
   try {
     const app = { client_id: process.env.META_APP_ID!, client_secret: process.env.META_APP_SECRET! };
     const short = await getJson(`${GRAPH()}/oauth/access_token?${new URLSearchParams({ ...app, redirect_uri: callback(), code })}`);
@@ -144,6 +154,8 @@ export async function publishConnectCallback(u: SessionUser, provider: string, c
     const perms = await getJson(`${GRAPH()}/me/permissions?${new URLSearchParams({ access_token: token })}`);
     const granted = new Set((perms?.data ?? []).filter((p: any) => p.status === 'granted').map((p: any) => String(p.permission)));
     if (META_PUBLISH_SCOPES.some((s) => !granted.has(s))) general.push(META_HINT.missingScope);
+    scopes = [...META_PUBLISH_SCOPES, ...META_LEAD_SCOPES].filter((s) => granted.has(s)); // 실제로 허용된 것만(리드 광고 받기 가능 여부 판단)
+    if (wantLeads && !hasLeadScopes(scopes)) general.push(META_HINT.missingLeadScope);
     // 장기 사용자 토큰으로 받은 페이지 토큰은 만료되지 않음(페이지 권한이 바뀌면 무효 → 게시 때 오류로 표시)
     const pages = await getJson(`${GRAPH()}/me/accounts?${new URLSearchParams({ fields: 'id,name,access_token,tasks,instagram_business_account{id,username}', limit: '50', access_token: token })}`);
     for (const p of pages?.data ?? []) {
@@ -159,13 +171,25 @@ export async function publishConnectCallback(u: SessionUser, provider: string, c
   for (const f of found.slice(0, 40)) {
     const warnings = [...general, ...f.warnings];
     await sql`insert into mkt_publish_accounts (tenant, provider, external_id, label, token_enc, scopes, status, last_error, created_by, owner_ext_id, info, brand_id)
-      values (${tenantOf(u)}, ${f.provider}, ${f.id}, ${f.label}, ${f.token ? encrypt(f.token) : null}, ${META_PUBLISH_SCOPES}, 'active', null, ${u.id}, ${ownerId || null}, ${sql.json({ ...f.info, warnings } as never)}, ${await guessBrandId(tenantOf(u), f.label)})
+      values (${tenantOf(u)}, ${f.provider}, ${f.id}, ${f.label}, ${f.token ? encrypt(f.token) : null}, ${scopes}, 'active', null, ${u.id}, ${ownerId || null}, ${sql.json({ ...f.info, warnings } as never)}, ${await guessBrandId(tenantOf(u), f.label)})
       on conflict (tenant, provider, external_id) do update set label = excluded.label, token_enc = excluded.token_enc, scopes = excluded.scopes, status = 'active', last_error = null, owner_ext_id = excluded.owner_ext_id, info = excluded.info,
         brand_id = coalesce(mkt_publish_accounts.brand_id, excluded.brand_id)`;
   }
   const ig = found.filter((f) => f.provider === 'meta_ig').length, fb = found.filter((f) => f.provider === 'meta_fb').length;
-  await audit(sql, u.id, 'mkt_publish.connect', 'mkt_publish_account', null, { provider: 'meta', pages: fb, instagram: ig }).catch(() => {});
-  return { pages: fb, instagram: ig, warnings: found.reduce((n, f) => n + f.warnings.length, general.length) };
+  // 광고 2차 ①: [리드 광고 받기]로 들어왔고 리드 권한이 있으면 페이지마다 앱 설치(leadgen 웹후크) + 받기 켬(설치가 안 돼도 '놓친 리드 불러오기'로 받음)
+  let leads: number | null = null;
+  if (wantLeads && hasLeadScopes(scopes)) {
+    leads = 0;
+    for (const f of found.filter((x) => x.provider === 'meta_fb').slice(0, 20)) {
+      const [a] = await sql<{ id: string; tenant: string; external_id: string; token_enc: string | null }[]>`select id, tenant, external_id, token_enc from mkt_publish_accounts where tenant = ${tenantOf(u)} and provider = 'meta_fb' and external_id = ${f.id}`;
+      if (!a) continue;
+      const err = await enableLeadPage(sql, a, u.id); // 앱 설치가 안 돼도 받기는 켬(놓친 리드 불러오기) — 이유는 확인할 항목으로
+      if (err) general.push(err);
+      leads++;
+    }
+  }
+  await audit(sql, u.id, 'mkt_publish.connect', 'mkt_publish_account', null, { provider: 'meta', pages: fb, instagram: ig, leads }).catch(() => {});
+  return { pages: fb, instagram: ig, warnings: found.reduce((n, f) => n + f.warnings.length, general.length), leads };
 }
 
 /** 스레드(Threads API, 장기 토큰 60일 → tick 갱신) · 유튜브(refresh token, 채널 1개) 콜백 */

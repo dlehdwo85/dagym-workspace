@@ -44,6 +44,24 @@ function ContactRow({ phone, links, className }: { phone?: unknown; links?: [unk
   );
 }
 const attUrl = (a: any) => (typeof a === 'string' ? a : a?.url ?? a?.href ?? '');
+/** Meta 인스턴트 양식 기본 질문 키 → 한글(그 밖의 질문은 양식에 적힌 이름 그대로) */
+const META_Q: Record<string, string> = { full_name: '이름', first_name: '이름', last_name: '성', phone_number: '전화번호', email: '이메일', city: '도시', state: '시·도', province: '시·도', country: '국가',
+  zip_code: '우편번호', post_code: '우편번호', street_address: '주소', company_name: '회사명', job_title: '직함', work_email: '회사 이메일', work_phone_number: '회사 전화', date_of_birth: '생년월일', gender: '성별' };
+/** 광고 2차 ①: 메타 리드 광고로 들어온 리드 — 양식·광고·신청 시각·질문 답 + [전화][문자](누르면 리드 광고 '첫 연락' 시각으로 기록) */
+function MetaLeadBox({ id, raw, phone }: { id: string; raw: any; phone?: string | null }) {
+  const touch = (via: 'tel' | 'sms') => { api(`/api/sales/leads/${id}/touch`, { body: { via } }).catch(() => {}); };
+  const answers: { q: string; a: string }[] = Array.isArray(raw?.answers) ? raw.answers : [];
+  return (
+    <div className="rounded-input border border-sky-200 bg-sky-50 px-3 py-2 text-xs" data-testid="lead-meta-box">
+      <div className="flex flex-wrap items-center gap-2"><b className="text-sky-900">리드 광고(메타)</b>{raw?.test && <span className="rounded-full bg-white px-1.5 text-[10px] text-ink-2">시험</span>}
+        <span className="text-ink-2">{[raw?.formName && `양식 ${raw.formName}`, raw?.adName && `광고 ${raw.adName}`, raw?.createdTime && `신청 ${fmtDateTime(raw.createdTime)}`].filter(Boolean).join(' · ')}</span></div>
+      {phone ? <div className="mt-1.5 flex flex-wrap gap-1.5"><a href={`tel:${digits(phone)}`} onClick={() => touch('tel')} className={linkCls} style={{ color: C }} data-testid="lead-meta-call"><Phone className="size-3.5" aria-hidden />전화 {String(phone)}</a>
+        <a href={`sms:${digits(phone)}`} onClick={() => touch('sms')} className={linkCls} data-testid="lead-meta-sms"><MessageSquare className="size-3.5" aria-hidden />문자</a></div> : null}
+      {answers.length > 0 && <dl className="mt-1.5 grid grid-cols-[minmax(5rem,auto)_1fr] gap-x-3 gap-y-0.5" data-testid="lead-meta-answers">{answers.map((x, k) => [<dt key={`q${k}`} className="text-ink-3">{META_Q[String(x.q).toLowerCase()] ?? String(x.q).replace(/_/g, ' ')}</dt>,
+        <dd key={`a${k}`} className="break-words">{x.a || '—'}</dd>])}</dl>}
+    </div>
+  );
+}
 /** 대표 10/21 12:00 영업 재편 1): 행마다 [영업 진행으로 넘기기] — 담당자 선택 → 리드·'영업 중'·담당 업무·일정·알림 (전화·문자 옆, 체크 선택과 별개) */
 function HandoffButton({ kind, id, name, onDone, compact }: { kind: 'bid' | 'building' | 'facility' | 'vendor'; id: string; name: string; onDone?: () => void; compact?: boolean }) {
   const [open, setOpen] = useState(false); const [sel, setSel] = useState<string[]>([]); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
@@ -521,6 +539,7 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
           {handoffSrc?.handoff && <div className="flex flex-wrap items-center gap-2 rounded-input bg-slate-50 px-3 py-2 text-xs" data-testid="lead-handoff-box"><span className="text-ink-2">{data.lead.status === '되돌림' ? `배정 이전으로 되돌린 리드입니다${handoffSrc.reverted?.reason ? ` — ${handoffSrc.reverted.reason}` : ''}` : `넘기기로 만든 리드 — 담당 ${(handoffSrc.assignees ?? []).length}명, 업무 ${(handoffSrc.taskIds ?? []).length}건·일정 ${(handoffSrc.eventIds ?? []).length}건`}</span>
             {canRevert && (rv === null ? <Button size="sm" variant="secondary" onClick={() => setRv('')} data-testid="lead-revert">배정 이전으로 되돌리기</Button>
               : <span className="flex flex-1 flex-wrap items-center gap-1.5"><input className={cx(inputCls, 'h-8 min-w-40 flex-1 py-1 text-xs')} value={rv} onChange={(e) => setRv(e.target.value)} placeholder="사유(선택)" aria-label="되돌리기 사유" maxLength={300} data-testid="lead-revert-reason" /><Button size="sm" onClick={revert} data-testid="lead-revert-go">되돌리기</Button><Button size="sm" variant="secondary" onClick={() => setRv(null)}>취소</Button></span>)}</div>}
+          {data.raw?.from === 'meta_lead' && <MetaLeadBox id={id} raw={data.raw} phone={data.lead.phone} />}
           <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {kd(data.lead.next)}</span>}</div>
           <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-line px-1">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('shrink-0 px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`lead-tab-${k}`}>{l}</button>)}</div>
           {tab === 'progress' ? <LeadProgress key={data.lead.status} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} go={setTab} />

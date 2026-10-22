@@ -68,5 +68,6 @@ export const NOTIFICATION_TYPES = {
   digest: '영업·마케팅 묶음 알림(담당 아닌 것 1시간마다 1건 · 담당 미지정 하루 1건)',
   server_error: '서버 오류(플랫폼 운영자만)',
   revenue: '매출 자료 숫자 확인·분석 완료(매출 권한자만)',
+  lead_ad: '리드 광고 새 신청(5분 안에 연락)·연락 전 재알림(영업)',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

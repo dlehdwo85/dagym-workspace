@@ -1,5 +1,6 @@
 'use client';
 import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { NAVER_REGIONS, regionLabel } from '@/lib/naverRegions';
@@ -111,6 +112,8 @@ export function AdOps() {
       </section>
 
       <LeadsBox run={run} />
+
+      <LeadAdsBox run={run} />
 
       <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ad-changes">
         <h2 className="text-sm font-semibold">변경 기록</h2>
@@ -385,6 +388,100 @@ function LeadsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok: 
           </ol>
         </details>
       </>}
+    </section>
+  );
+}
+
+type LeadAdsPage = { accountId: string; label: string; scopes: boolean; enabled: boolean; subscribed: boolean; webhookAt: string | null; polledAt: string | null; error: string | null };
+type LeadAdsRow = { id: string; at: string; status: string; via: string; test: boolean; name: string | null; form: string | null; ad: string | null; owner: string | null; contactMin: number | null; contactVia: string | null;
+  late: boolean; error: string | null; leadId: string | null };
+type LeadAds = { days: number; canEdit: boolean; canSales: boolean; setup: { app: boolean; webhook: boolean }; pages: LeadAdsPage[];
+  summary: { leads: number; created: number; merged: number; problems: number; fast: number; waiting: number; medianMin: number | null };
+  byAd: { key: string; ad: string; campaign: string; leads: number; fast: number; cost: number | null; cpl: number | null }[]; recent: LeadAdsRow[] };
+const LEAD_CONNECT = '/api/marketing/publish/connect/meta?leads=1'; // 서버가 Facebook 동의 화면으로 보냄(페이지 이동)
+const LA_STATUS: Record<string, [string, string]> = { created: ['영업 리드 만듦', 'bg-emerald-50 text-emerald-800'], merged: ['기존 리드에 붙임', 'bg-sky-50 text-sky-800'], pending: ['처리 중', 'bg-slate-100 text-ink-2'],
+  working: ['처리 중', 'bg-slate-100 text-ink-2'], failed: ['실패', 'bg-red-50 text-red-800'], skipped: ['건너뜀', 'bg-amber-50 text-amber-800'] };
+/**
+ * 광고 2차 ① Meta 리드 광고 → 영업 리드: 페이지별 받기 상태(웹후크 마지막 수신·놓친 리드 불러오기) · 최근 신청(이름 가림) · 5분 안 첫 연락 · 광고별 리드당 비용.
+ * 연결은 연결 계정의 [리드 광고 받기], 확인은 [시험 리드 보내기](Meta test_leads API — 리드 광고 테스트 도구는 개발 모드 앱에서 못 씀).
+ */
+function LeadAdsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok: string) => void }) {
+  const [days, setDays] = useState(30);
+  const { data, error, reload } = useApi<LeadAds>(`/api/marketing/lead-ads?days=${days}`, [days]);
+  const [test, setTest] = useState<{ accountId: string; label: string; forms: { id: string; name: string; status: string }[] | null; formId: string } | null>(null);
+  async function openTest(p: LeadAdsPage) {
+    setTest({ accountId: p.accountId, label: p.label, forms: null, formId: '' });
+    try { const r = await api<{ forms: { id: string; name: string; status: string }[] }>(`/api/marketing/lead-ads/forms?accountId=${p.accountId}`); setTest({ accountId: p.accountId, label: p.label, forms: r.forms, formId: r.forms[0]?.id ?? '' }); }
+    catch (e: any) { toast.error(e.message); setTest(null); }
+  }
+  const s = data?.summary;
+  return (
+    <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="lead-ads">
+      <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">리드 광고(메타) → 영업 리드</h2>
+        <span className="w-28"><select className={cx(inputCls, 'h-8 text-xs')} value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="기간" data-testid="lead-ads-days">{[7, 30, 90].map((d) => <option key={d} value={d}>최근 {d}일</option>)}</select></span>
+        {data?.canEdit && data.pages.some((p) => p.enabled) && <Button size="sm" variant="secondary" className="ml-auto" data-testid="lead-ads-pull"
+          onClick={() => run('lead-pull', async () => { await api('/api/marketing/lead-ads/pull', { body: { days: 3 } }); reload(); }, '최근 3일 리드를 다시 확인했습니다')}>지금 불러오기</Button>}</div>
+      {error ? <ErrorBox error={error} retry={reload} /> : !data || !s ? <Skeleton rows={3} /> : <>
+        <p className="mt-1 text-xs text-ink-2" data-testid="lead-ads-summary">신청 {n0(s.leads)}건(새 리드 {n0(s.created)} · 기존 리드에 붙임 {n0(s.merged)}) · 5분 안 첫 연락 <b>{n0(s.fast)}/{n0(s.leads)}</b>
+          {' · '}첫 연락까지 중간값 {s.medianMin === null ? '—' : `${s.medianMin}분`} · 연락 전 {n0(s.waiting)}건{s.problems ? <span className="text-red-700"> · 처리 못 함 {n0(s.problems)}건</span> : null}</p>
+        <ul className="mt-2 space-y-1 text-xs" data-testid="lead-ads-pages">{data.pages.map((p) => (
+          <li key={p.accountId} className="flex flex-wrap items-center gap-2 rounded-input bg-slate-50 px-2 py-1.5" data-testid="lead-ads-page" data-state={p.enabled ? 'on' : p.scopes ? 'off' : 'scopes'}>
+            <span className="font-medium">{p.label}</span>
+            <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', p.enabled ? 'bg-emerald-50 text-emerald-800' : p.scopes ? 'bg-slate-100 text-ink-2' : 'bg-amber-50 text-amber-800')}>{p.enabled ? '받는 중' : p.scopes ? '꺼짐' : '리드 권한 필요'}</span>
+            {p.enabled && <span className="text-ink-3" data-testid="lead-ads-webhook">웹후크 {p.webhookAt ? `마지막 수신 ${fmtDateTime(p.webhookAt)}` : '아직 받은 적 없음'} · 놓친 리드 확인 {p.polledAt ? fmtDateTime(p.polledAt) : '아직'}</span>}
+            {data.canEdit && <span className="ml-auto flex flex-wrap gap-1.5">
+              {p.enabled ? <><Button size="sm" variant="secondary" onClick={() => openTest(p)} data-testid="lead-ads-test">시험 리드 보내기</Button>
+                <Button size="sm" variant="secondary" data-testid="lead-ads-off" onClick={() => confirm(`'${p.label}' 의 리드 광고 받기를 끌까요? 새 신청이 영업 리드로 들어오지 않습니다.`) && run(`lp-${p.accountId}`, async () => { await api(`/api/marketing/lead-ads/pages/${p.accountId}`, { method: 'PUT', body: { enabled: false } }); reload(); }, '리드 광고 받기를 껐습니다')}>끄기</Button></>
+                : p.scopes ? <Button size="sm" data-testid="lead-ads-on" onClick={() => run(`lp-${p.accountId}`, async () => { await api(`/api/marketing/lead-ads/pages/${p.accountId}`, { method: 'PUT', body: { enabled: true } }); reload(); }, '리드 광고 받기를 켰습니다')}>켜기</Button>
+                : <a href={LEAD_CONNECT} className="inline-flex min-h-8 items-center rounded-input bg-violet-600 px-3 text-xs font-medium text-white" data-testid="lead-ads-connect">리드 광고 받기</a>}</span>}
+            {p.error && <span className="w-full break-words text-amber-800" data-testid="lead-ads-page-error">{p.error}</span>}
+          </li>))}
+          {!data.pages.length && <li className="text-ink-3">연결된 페이스북 페이지가 없습니다 — 설정 › 연결 계정에서 페이스북 페이지를 연결한 뒤 [리드 광고 받기]를 눌러 주세요.</li>}</ul>
+        {data.canEdit && !data.setup.webhook && data.pages.some((p) => p.enabled) && <p className="mt-1 text-[11px] text-amber-800" data-testid="lead-ads-no-webhook">웹후크 확인 토큰이 아직 설정되지 않았습니다(플랫폼 설정) — 그동안은 30분마다 놓친 리드를 불러와 등록합니다.</p>}
+        {data.recent.length ? <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[680px] text-left text-xs">
+          <thead><tr className="text-ink-2"><th className="py-1 font-medium">신청</th><th className="font-medium">이름</th><th className="font-medium">양식 · 광고</th><th className="font-medium">담당</th><th className="font-medium">첫 연락</th><th className="font-medium">처리</th></tr></thead>
+          <tbody className="divide-y divide-line">{data.recent.map((r) => (
+            <tr key={r.id} data-testid="lead-ads-row" data-status={r.status}>
+              <td className="whitespace-nowrap py-1 text-ink-2">{fmtDateTime(r.at)}</td>
+              <td className="whitespace-nowrap">{r.test && <span className="mr-1 rounded-full bg-slate-100 px-1.5 text-[10px]">시험</span>}{r.leadId ? <Link href={`/s/sales/leads?id=${r.leadId}`} className="underline" style={{ color: C }}>{r.name ?? '리드'}</Link> : (r.name ?? '—')}</td>
+              <td className="max-w-[14rem] truncate">{[r.form, r.ad].filter(Boolean).join(' · ') || '—'}</td>
+              <td className="whitespace-nowrap">{r.owner ?? '—'}</td>
+              <td className="whitespace-nowrap" data-testid="lead-ads-contact">{r.contactMin !== null ? <span className={r.contactMin <= 5 ? 'text-emerald-800' : 'text-amber-800'}>{r.contactMin}분 · {r.contactVia}</span>
+                : r.status === 'created' || r.status === 'merged' ? <span className={r.late ? 'font-medium text-red-700' : 'text-ink-3'}>{r.late ? '연락 전(재알림 보냄)' : '연락 전'}</span> : '—'}</td>
+              <td className="whitespace-nowrap"><span className={cx('rounded-full px-1.5 py-0.5 text-[10px] font-medium', (LA_STATUS[r.status] ?? [r.status, 'bg-slate-100'])[1])}>{(LA_STATUS[r.status] ?? [r.status])[0]}</span>
+                {(r.status === 'failed' || r.status === 'skipped') && data.canEdit && <button type="button" className="ml-1 text-[11px] underline" data-testid="lead-ads-retry"
+                  onClick={() => run(`lr-${r.id}`, async () => { await api(`/api/marketing/lead-ads/${r.id}/retry`, { body: {} }); reload(); }, '다시 처리했습니다')}>다시 처리</button>}
+                {r.error && <span className="block max-w-[16rem] whitespace-normal break-words text-[11px] text-red-700">{r.error}</span>}</td>
+            </tr>))}</tbody></table></div>
+          : <p className="mt-2 text-xs text-ink-3" data-testid="lead-ads-empty">이 기간에 들어온 리드 광고 신청이 없습니다.</p>}
+        {data.byAd.length > 0 && <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[560px] text-right text-xs" data-testid="lead-ads-by-ad">
+          <thead><tr className="text-ink-2"><th className="py-1 text-left font-medium">광고</th><th className="font-medium">리드</th><th className="font-medium">5분 안 연락</th><th className="font-medium">광고비</th><th className="font-medium">리드당 비용</th></tr></thead>
+          <tbody className="divide-y divide-line tabular-nums">{data.byAd.map((g) => (
+            <tr key={g.key} data-testid="lead-ads-ad"><td className="max-w-[16rem] py-1 text-left"><span className="font-medium">{g.ad}</span>{g.campaign && <span className="block truncate text-[11px] text-ink-3">{g.campaign}</span>}</td>
+              <td>{n0(g.leads)}</td><td>{n0(g.fast)}/{n0(g.leads)}</td><td>{g.cost === null ? '—' : won(g.cost)}</td><td>{g.cpl === null ? '—' : won(g.cpl)}</td></tr>))}</tbody></table>
+          <p className="mt-0.5 text-[11px] text-ink-3">광고비는 메타 광고 계정 성과(하루 한 번 읽음)에서 — 광고 계정이 연결되지 않았으면 “—”.</p></div>}
+        <details className="mt-2 text-xs" data-testid="lead-ads-guide" open={!data.pages.some((p) => p.enabled)}>
+          <summary className="cursor-pointer font-medium">리드 광고를 영업 리드로 받는 법</summary>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-ink-2">
+            <li>설정 › 연결 계정 › 페이스북 페이지 [리드 광고 받기] — 페이지 관리자 계정으로 리드 권한까지 모두 허용합니다.</li>
+            <li>메타 광고 관리자에서 목표 &apos;잠재 고객 확보&apos; 광고와 인스턴트 양식(이름·전화번호 질문 포함)을 만듭니다.</li>
+            <li>신청이 들어오면 바로 영업 › 리드에 &apos;신규리드&apos;로 등록되고, 담당에게 업무 &apos;5분 안에 첫 연락&apos;과 알림이 갑니다. 같은 전화번호 리드가 있으면 그 리드에 기록으로 붙습니다.</li>
+            <li>담당은 관리 › 사용자 관리 › 담당자 지정의 &apos;영업 담당(원천별) · 리드&apos;를 따릅니다(없으면 리드 광고를 켠 관리자).</li>
+            <li>5분이 지나도 [전화]·[문자]·상담 기록·단계 변경이 없으면 담당과 관리자에게 다시 알립니다(점검 간격 때문에 최대 15분 늦을 수 있음).</li>
+            <li>[시험 리드 보내기]로 흐름을 확인할 수 있습니다 — 이름 앞에 [시험]이 붙고 알림은 누른 사람에게만 갑니다.</li>
+          </ol>
+        </details>
+      </>}
+      {test && <Modal open onClose={() => setTest(null)} title="시험 리드 보내기">
+        <div className="space-y-3 text-sm" data-testid="lead-ads-test-dialog">
+          <p className="text-xs text-ink-2">{test.label} 의 인스턴트 양식에 Meta 시험 리드를 하나 만들고(양식마다 1개 — 전에 만든 시험 리드는 지움) 바로 영업 리드로 등록합니다. 광고비는 들지 않습니다.</p>
+          {!test.forms ? <Skeleton rows={2} /> : test.forms.length ? <Field label="양식"><select className={inputCls} value={test.formId} onChange={(e) => setTest({ ...test, formId: e.target.value })} data-testid="lead-ads-test-form">
+            {test.forms.map((f) => <option key={f.id} value={f.id}>{f.name}{f.status && f.status !== 'ACTIVE' ? ` (${f.status})` : ''}</option>)}</select></Field>
+            : <p className="text-xs text-amber-800">이 페이지에 인스턴트 양식이 없습니다 — 메타 광고 관리자(또는 비즈니스 스위트 › 인스턴트 양식)에서 먼저 만들어 주세요.</p>}
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setTest(null)}>취소</Button>
+            <Button disabled={!test.formId} data-testid="lead-ads-test-send" onClick={() => { const t = test; setTest(null); run('lead-test', async () => { await api('/api/marketing/lead-ads/test', { body: { accountId: t.accountId, formId: t.formId } }); reload(); }, '시험 리드를 보냈습니다 — 영업 › 리드에 [시험] 리드가 생겼습니다'); }}>보내기</Button></div>
+        </div>
+      </Modal>}
     </section>
   );
 }
