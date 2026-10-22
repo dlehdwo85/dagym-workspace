@@ -43,6 +43,7 @@ export function MonthlyReport() {
         {card('전화 문의', `${r.calls.total}건`, `영업 리드 ${r.calls.leads}`)}
         {card('크레딧·AI', `${r.credits.total}`, `마케팅 AI 약 ${n(r.ai.krw)}원 · ${r.ai.requests}회`)}
       </section>
+      {r.savings?.amount > 0 && <p className="text-sm text-ink-2" data-testid="report-savings">대행사 대비 절감액(추정) <b className="text-emerald-800">{n(r.savings.amount)}원</b> — 광고비 {n(r.savings.spend)}원 × 대행 수수료율 {r.savings.pct}%(통상 15~20%, 광고 운영에서 바꿀 수 있음)</p>}
       {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적 + CAC·ROI */}
       {r.roi && <section className="grid gap-3 sm:grid-cols-4" data-testid="report-roi">
         {card('매출 실적', `${n(r.roi.revenue.actual)}원`, r.roi.revenue.target ? `목표 ${n(r.roi.revenue.target)}원 · ${r.roi.revenue.rate}%` : '목표 없음(운영실에서 적기)')}

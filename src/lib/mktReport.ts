@@ -40,7 +40,8 @@ export async function monthlyReport(tenant: string, month: string) {
   const adTotal = ads.reduce((a, r) => ({ impressions: a.impressions + r.impressions, clicks: a.clicks + r.clicks, cost_krw: a.cost_krw + r.cost_krw, conversions: a.conversions + r.conversions }), { impressions: 0, clicks: 0, cost_krw: 0, conversions: 0 });
   // 대표 10/20 20:00 ③ CAC·ROI: 광고비 ÷ 새 리드(없으면 문의), (매출 − 광고비) ÷ 광고비 — 매출 = 영업 계약 등록 금액(+플랫폼 회사 워크인 결제는 화면에서)
   const roi = await (await import('./mktOps')).cacRoi(tenant, month, adTotal.cost_krw, false).catch(() => null);
-  return { month, posts: { ...posts[0], byChannel }, approvals: approvals[0], auto: auto[0], roi, ads: { byProvider: ads, total: { ...adTotal, ctr: adTotal.impressions ? Math.round((adTotal.clicks / adTotal.impressions) * 10000) / 100 : 0, cpc: adTotal.clicks ? Math.round(adTotal.cost_krw / adTotal.clicks) : 0 } },
+  const savings = await (await import('./adOps')).agencySavings(tenant, adTotal.cost_krw); // 광고 최적화 1차 ④ 대행사 대비 절감액(추정)
+  return { month, posts: { ...posts[0], byChannel }, approvals: approvals[0], auto: auto[0], roi, savings, ads: { byProvider: ads, total: { ...adTotal, ctr: adTotal.impressions ? Math.round((adTotal.clicks / adTotal.impressions) * 10000) / 100 : 0, cpc: adTotal.clicks ? Math.round(adTotal.cost_krw / adTotal.clicks) : 0 } },
     calls: calls[0], credits: { byKind: credits, total: Math.round(credits.reduce((a, r) => a + r.credits, 0) * 100) / 100 }, ai: { usd: Math.round(ai[0].usd * 10000) / 10000, requests: ai[0].n, krw: Math.round(ai[0].usd * (Number(process.env.USD_KRW) || 1400)) } };
 }
 
@@ -63,6 +64,7 @@ function summaryText(company: string, r: Awaited<ReturnType<typeof monthlyReport
     `승인 ${r.approvals.approved}건 · 수정 요청 ${r.approvals.changes} · 보류 ${r.approvals.held}${r.approvals.avg_hours != null ? ` · 평균 승인 소요 ${r.approvals.avg_hours}시간` : ''}`,
     `자동 제작 ${r.auto.produced}건(품질 검사 미통과 ${r.auto.quality_failed})`,
     `광고 노출 ${r.ads.total.impressions.toLocaleString('ko-KR')} · 클릭 ${r.ads.total.clicks.toLocaleString('ko-KR')}(CTR ${r.ads.total.ctr}%) · 비용 ${won(r.ads.total.cost_krw)} · 전환 ${r.ads.total.conversions}`,
+    ...(r.savings.amount > 0 ? [`대행사 대비 절감액(추정) ${won(r.savings.amount)} — 광고비 × 대행 수수료율 ${r.savings.pct}%`] : []),
     `전화 문의 ${r.calls.total}건(영업 리드 ${r.calls.leads})`,
     `크레딧 ${r.credits.total} · 마케팅 AI 약 ${won(r.ai.krw)}($${usd(r.ai.usd)}, ${r.ai.requests}회)`, '', `자세히: ${link}`].join('\n');
 }

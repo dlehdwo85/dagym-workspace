@@ -54,6 +54,9 @@ export const planInput = z.object({
   bidAmt: z.number().int().min(70).max(100_000),                   // 그룹 기본 입찰가
   keywords: z.array(z.string().trim().min(1).max(25)).min(1).max(50),
   ads: z.array(z.object({ headline: z.string().trim().min(1), description: z.string().trim().min(1), url: z.string().url().max(500) })).min(1).max(3),
+  // 광고 최적화 1차 ① 3안 소액 테스트: 같은 그룹의 소재 2~3개를 작은 하루 예산으로 비교 → 기간·최소 노출을 채우면 이긴 안 표시 → [이긴 안에 집중](진 안 끄기 + 예산 올리기, 승인)
+  test: z.object({ on: z.boolean(), days: z.number().int().min(3).max(30).default(7), minImpressions: z.number().int().min(30).max(100_000).default(300),
+    afterBudget: z.number().int().min(50).max(10_000_000).nullable().optional() }).optional(),
 });
 /** 글자 수 상한은 플랫폼 운영 › 글 품질 규칙(#426, 기본 제목 15·설명 45) */
 export function precheck(p: z.infer<typeof planInput>, rules: QualityRules = DEFAULT_RULES) {
@@ -65,6 +68,7 @@ export function precheck(p: z.infer<typeof planInput>, rules: QualityRules = DEF
   // 네이버 소재 허용 문자(운영 10/19: 가운데점 '·' 으로 400 code 1030) — 한글·영문·숫자·공백·일부 기호만
   p.ads.forEach((a, i) => { const bad = [...new Set([...`${a.headline}${a.description}`].filter((ch) => !NAVER_OK.test(ch)))];
     if (bad.length) issues.push(`소재 ${i + 1}: 네이버에서 쓸 수 없는 문자 ${bad.map((c) => `'${c}'`).join(' ')} — 빼거나 바꿔 주세요(예: · → ,)`); });
+  if (p.test?.on && p.ads.length < 2) issues.push('3안 소액 테스트는 소재가 2개 이상이어야 합니다(3개 권장)');
   const dup = p.keywords.filter((k, i) => p.keywords.indexOf(k) !== i);
   if (dup.length) issues.push(`겹치는 키워드: ${[...new Set(dup)].join(', ')}`);
   return issues;
@@ -101,7 +105,9 @@ export async function adOpsOverview(u: SessionUser) {
   const brands = await sql<{ id: string; name: string }[]>`select id, name from mkt_brands where tenant = ${t} order by ad_priority nulls last, name`;
   const changes = await sql<any[]>`select c.id, c.plan_id, c.kind, c.before, c.after, c.money_up, c.status, c.error, c.revert_of, c.created_at, u.name as actor_name
     from mkt_ad_changes c left join users u on u.id = c.actor_id where c.tenant = ${t} order by c.created_at desc limit 100`;
-  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan, rules) })), changes };
+  const ab = await abFor(plans);
+  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan, rules), ab: ab.get(p.id) ?? null })), changes,
+    savings: await agencySavings(t, spend) };
 }
 
 /** 비즈채널(웹사이트) 목록 — 세팅안에서 고르기 */
@@ -277,9 +283,11 @@ async function guardMoneyUp(t: string, addDaily = 0) {
   if (spend >= cap.monthlyCap) throw new HttpError(409, 'cap_reached', `이번 달 광고비 ${won(spend)} 가 상한 ${won(cap.monthlyCap)} 에 닿아 켤 수 없습니다 — 상한을 올리거나 다음 달에 켜 주세요`);
   return { cap: cap.monthlyCap, spend, addDaily };
 }
-export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync']), dailyBudget: z.number().int().min(50).max(10_000_000).optional() });
-export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null = null) {
+export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync', 'ad_pause', 'ad_resume', 'ab_apply']), dailyBudget: z.number().int().min(50).max(10_000_000).optional(),
+  adIds: z.array(z.string().trim().min(1).max(60)).min(1).max(3).optional() });
+export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null = null): Promise<Record<string, unknown>> {
   if (i.action === 'sync') return syncPlanKeywords(u, id);
+  if (i.action === 'ad_pause' || i.action === 'ad_resume' || i.action === 'ab_apply') return actAds(u, id, i, revertOf);
   await assertSpace(u, 'marketing'); adminOnly(u);
   const t = tenantOf(u); const sql = db();
   const p = await planOf(t, id);
@@ -312,7 +320,8 @@ export async function revertChange(u: SessionUser, changeId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(changeId)) throw notFound();
   const [c] = await db()<any[]>`select id, plan_id, kind, before, status from mkt_ad_changes where id = ${changeId} and tenant = ${tenantOf(u)}`;
   if (!c || !c.plan_id) throw notFound('변경 기록을 찾을 수 없습니다');
-  if (c.status !== 'applied' || !['enable', 'pause', 'budget', 'auto_pause'].includes(c.kind)) throw new HttpError(409, 'not_revertible', '이 기록은 되돌릴 수 없습니다');
+  if (c.status !== 'applied' || !['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume'].includes(c.kind)) throw new HttpError(409, 'not_revertible', '이 기록은 되돌릴 수 없습니다');
+  if (c.kind === 'ad_pause' || c.kind === 'ad_resume') return actAds(u, c.plan_id, { action: c.kind === 'ad_pause' ? 'ad_resume' : 'ad_pause', adIds: c.before?.adIds ?? [] }, c.id);
   const action = c.kind === 'budget' ? { action: 'budget' as const, dailyBudget: Number(c.before?.dailyBudget) } : { action: (c.before?.userLock ? 'pause' : 'enable') as 'pause' | 'enable' };
   return actPlan(u, c.plan_id, action, c.id);
 }
@@ -342,4 +351,125 @@ export async function adCapGuard() {
     }
   }
   return { stopped };
+}
+
+// ---------------- 광고 최적화 1차 ① 3안 소액 테스트(소재 비교) ----------------
+export type AbAd = { adId: string; label: string; headline: string; impressions: number; clicks: number; cost: number; conversions: number; paused: boolean };
+const Z95 = 1.645; // 한쪽 95% — '확실히 낫다'의 기준
+const r2 = (x: number) => Math.round(x * 100) / 100;
+/**
+ * 소재 비교 판정(서버 계산, 숫자는 화면에 그대로): 기간(days)이 지나고 모든 안이 최소 노출을 채워야 판정.
+ * 기준 = 전환이 10건 이상이면 전환율(전환÷클릭), 아니면 클릭률(클릭÷노출). 1등 안이 다른 안보다 두 비율 z 검정에서 z ≥ 1.645(한쪽 95%)이면 '확실히 낫다'.
+ * 1등이 나머지 모두를 이기면 winner, 일부만 이기면 partial(진 안만), 아무도 못 이기면 tie. 1등의 성공(클릭·전환)이 5건 미만이면 판정하지 않음.
+ */
+export function abVerdict(ads: AbAd[], o: { days: number; minImpressions: number; elapsedDays: number | null }) {
+  const conv = ads.reduce((a, x) => a + x.conversions, 0);
+  const metric: 'ctr' | 'cvr' = conv >= 10 ? 'cvr' : 'ctr';
+  const succ = (x: AbAd) => (metric === 'ctr' ? x.clicks : x.conversions);
+  const trials = (x: AbAd) => (metric === 'ctr' ? x.impressions : x.clicks);
+  const rate = (x: AbAd) => (trials(x) ? succ(x) / trials(x) : 0);
+  const z = (a: AbAd, b: AbAd) => {
+    const n1 = trials(a), n2 = trials(b); if (!n1 || !n2) return 0;
+    const p = (succ(a) + succ(b)) / (n1 + n2); const se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2));
+    return se ? (rate(a) - rate(b)) / se : 0;
+  };
+  const sorted = [...ads].sort((a, b) => rate(b) - rate(a) || succ(b) - succ(a));
+  const leader = sorted[0];
+  const minImpr = ads.length ? Math.min(...ads.map((x) => x.impressions)) : 0;
+  const ready = o.elapsedDays !== null && o.elapsedDays >= o.days && minImpr >= o.minImpressions;
+  const losers = ready && leader && succ(leader) >= 5 ? sorted.slice(1).filter((b) => z(leader, b) >= Z95).map((b) => b.adId) : [];
+  const status = o.elapsedDays === null ? 'not_started' : !ready ? 'running' : losers.length && losers.length === ads.length - 1 ? 'winner' : losers.length ? 'partial' : 'tie';
+  const name = (id: string) => ads.find((x) => x.adId === id)?.label ?? id;
+  const unit = metric === 'ctr' ? '클릭률' : '전환율';
+  const pct = (x: AbAd) => `${r2(rate(x) * 100)}%`;
+  const message = status === 'not_started' ? `광고를 켜면 ${o.days}일 동안 소재 ${ads.length}개를 같은 예산으로 비교합니다(안마다 노출 ${o.minImpressions}회 이상).`
+    : status === 'running' ? `비교 중 ${Math.min(o.elapsedDays ?? 0, o.days)}/${o.days}일 · 노출이 가장 적은 안 ${minImpr.toLocaleString('ko-KR')}/${o.minImpressions.toLocaleString('ko-KR')}회 — 기간과 최소 노출을 채우면 판정합니다.`
+    : status === 'winner' ? `${leader.label} ${unit} ${pct(leader)} — 나머지 안(${sorted.slice(1).map((b) => `${b.label} ${pct(b)}`).join(', ')})보다 확실히 높습니다(한쪽 95%). 진 안을 끄고 예산을 이 안에 모으세요.`
+    : status === 'partial' ? `1등 ${leader.label}(${unit} ${pct(leader)}) — ${losers.map(name).join(', ')}보다는 확실히 낫지만 ${sorted.slice(1).filter((b) => !losers.includes(b.adId)).map((b) => b.label).join(', ')}와는 차이가 뚜렷하지 않습니다 — 진 안만 끄고 나머지는 더 지켜보세요.`
+    : `안 사이 ${unit} 차이가 뚜렷하지 않습니다(${sorted.map((b) => `${b.label} ${pct(b)}`).join(', ')}) — 그대로 더 두거나 새 문구로 바꿔 다시 비교하세요.`;
+  return { status, metric, days: o.days, minImpressions: o.minImpressions, elapsedDays: o.elapsedDays, leader: ready ? leader?.adId ?? null : null, losers, message,
+    ads: ads.map((x) => ({ ...x, ctr: x.impressions ? r2((x.clicks / x.impressions) * 100) : null, cvr: x.clicks ? r2((x.conversions / x.clicks) * 100) : null,
+      cpc: x.clicks ? Math.round(x.cost / x.clicks) : null, z: leader && x.adId !== leader.adId ? r2(z(leader, x)) : null })) };
+}
+const kstDay = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
+/** 세팅안마다 소재별 누적 성과(mkt_ad_items, 하루 한 번 읽음) + 처음 켠 날부터 지난 날 수 → 판정 */
+async function abFor(plans: any[]) {
+  const out = new Map<string, ReturnType<typeof abVerdict>>();
+  const live = plans.filter((p) => ['created', 'active', 'paused'].includes(p.status) && validIds(p.external?.adIds) && p.external.adIds.length >= 2);
+  if (!live.length) return out;
+  const sql = db();
+  const [starts, items] = await Promise.all([
+    sql<{ plan_id: string; at: string }[]>`select plan_id, min(created_at) as at from mkt_ad_changes where plan_id = any(${live.map((p) => p.id)}::uuid[]) and kind = 'enable' and status = 'applied' group by plan_id`,
+    sql<any[]>`select account_id, item_id, sum(impressions)::float8 impressions, sum(clicks)::float8 clicks, sum(cost_krw)::float8 cost, sum(conversions)::float8 conversions
+      from mkt_ad_items where kind = 'ad' and account_id = any(${[...new Set(live.map((p) => p.account_id))]}::uuid[]) and item_id = any(${live.flatMap((p) => p.external.adIds)}) group by account_id, item_id`,
+  ]);
+  const today = Date.parse(`${kstDay(new Date())}T00:00:00Z`);
+  for (const p of live) {
+    const st = starts.find((s) => s.plan_id === p.id);
+    const elapsed = st ? Math.round((today - Date.parse(`${kstDay(st.at)}T00:00:00Z`)) / 864e5) : null;
+    const t = { days: Number(p.plan.test?.days) || 7, minImpressions: Number(p.plan.test?.minImpressions) || 300 };
+    const ads: AbAd[] = (p.external.adIds as string[]).map((adId, k) => {
+      const it = items.find((r) => r.account_id === p.account_id && r.item_id === adId);
+      return { adId, label: `안 ${'ABC'[k] ?? k + 1}`, headline: String(p.plan.ads?.[k]?.headline ?? ''), impressions: it?.impressions ?? 0, clicks: it?.clicks ?? 0, cost: it?.cost ?? 0,
+        conversions: it?.conversions ?? 0, paused: !!p.external.adLocks?.[adId] };
+    });
+    out.set(p.id, { ...abVerdict(ads, { ...t, elapsedDays: elapsed }), afterBudget: p.plan.test?.afterBudget ?? null, on: !!p.plan.test?.on } as never);
+  }
+  return out;
+}
+
+/** 소재 하나씩 켜기·끄기(네이버 소재 userLock). 진 안 끄기는 돈이 줄어드는 변경 — 관리자 누름 = 승인. 소재를 모두 끌 수는 없음(광고 전체는 [끄기]) */
+async function actAds(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null): Promise<Record<string, unknown>> {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db();
+  const p = await planOf(t, id);
+  if (!['created', 'active', 'paused'].includes(p.status) || !validIds(p.external?.adIds)) throw new HttpError(409, 'plan_not_created', '네이버에 만든 뒤에 바꿀 수 있습니다');
+  const all: string[] = p.external.adIds;
+  const ids = [...new Set(i.adIds ?? [])];
+  if (!ids.length || ids.some((x) => !all.includes(x))) throw badRequest('이 세팅안의 소재를 골라 주세요');
+  const lock = i.action !== 'ad_resume';
+  const locks: Record<string, boolean> = { ...(p.external.adLocks ?? {}) };
+  if (lock && !all.some((x) => !locks[x] && !ids.includes(x))) throw new HttpError(409, 'last_ad', '소재를 모두 끌 수는 없습니다 — 하나는 켜 두세요(광고 전체를 끄려면 [끄기])');
+  const a = await naverAcc(t, p.account_id);
+  const done: string[] = [];
+  try {
+    for (const x of ids) { await naverReq(a, 'PUT', `/ncc/ads/${x}`, '?fields=userLock', { nccAdId: x, userLock: lock }); locks[x] = lock; done.push(x); }
+  } catch (e: any) {
+    // 일부만 바뀌었으면 바뀐 것까지 저장(화면이 실제와 같게) + 실패 기록
+    await sql`update mkt_ad_plans set external = ${sql.json({ ...p.external, adLocks: locks } as never)}, updated_at = now() where id = ${id}`;
+    await sql`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, status, error, actor_id) values (${t}, ${id}, ${lock ? 'ad_pause' : 'ad_resume'},
+      ${sql.json({ adIds: ids, userLock: !lock } as never)}, ${sql.json({ adIds: ids, userLock: lock, done } as never)}, 'failed', ${String(e?.message ?? e).slice(0, 4000)}, ${u.id})`;
+    throw e;
+  }
+  await sql.begin(async (tx) => {
+    await tx`update mkt_ad_plans set external = ${tx.json({ ...p.external, adLocks: locks } as never)}, updated_at = now() where id = ${id}`;
+    await tx`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up, actor_id, revert_of) values (${t}, ${id}, ${lock ? 'ad_pause' : 'ad_resume'},
+      ${tx.json({ adIds: ids, userLock: !lock } as never)}, ${tx.json({ adIds: ids, userLock: lock, ...(i.action === 'ab_apply' ? { ab: true } : {}) } as never)}, false, ${u.id}, ${revertOf})`;
+  });
+  await audit(sql, u.id, `mkt_ads.${lock ? 'ad_pause' : 'ad_resume'}`, 'mkt_ad_plan', id, { adIds: ids, ab: i.action === 'ab_apply' }).catch(() => {});
+  // [이긴 안에 집중]: 진 안을 끈 뒤 하루 예산도 바꿈 — 올리면 돈이 나가는 변경(켜져 있으면 월 상한 검사). 예산이 막혀도 소재 끄기는 그대로
+  if (i.action === 'ab_apply' && i.dailyBudget && i.dailyBudget !== Number(p.plan.dailyBudget)) {
+    try { await actPlan(u, id, { action: 'budget', dailyBudget: i.dailyBudget }); }
+    catch (e: any) { return { ok: true, adLocks: locks, budgetError: String(e?.message ?? e) }; }
+    return { ok: true, adLocks: locks, dailyBudget: i.dailyBudget };
+  }
+  return { ok: true, adLocks: locks };
+}
+
+// ---------------- 광고 최적화 1차 ④ 대행사 대비 절감액(추정) ----------------
+export const DEFAULT_AGENCY_FEE = 15; // 대행 수수료 통상 광고비의 15~20% — 낮은 쪽(과장하지 않게)
+/** 광고비 × 기준 수수료율. 직접 운영해서 아낀 '추정' 금액 — 화면에는 기준(수수료율)과 함께 */
+export async function agencySavings(tenant: string, spend: number) {
+  const [s] = await db()<{ agency_fee_pct: string | null }[]>`select agency_fee_pct from mkt_settings where tenant = ${tenant}`;
+  const pct = s?.agency_fee_pct == null ? DEFAULT_AGENCY_FEE : Number(s.agency_fee_pct);
+  return { pct, spend: Math.round(spend), amount: Math.round((spend * pct) / 100), custom: s?.agency_fee_pct != null };
+}
+export const feeInput = z.object({ pct: z.number().min(0).max(50).nullable() });
+export async function setAgencyFee(u: SessionUser, i: z.infer<typeof feeInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u);
+  const pct = i.pct === null ? null : Math.round(i.pct * 10) / 10;
+  await db()`insert into mkt_settings (tenant, agency_fee_pct) values (${t}, ${pct}) on conflict (tenant) do update set agency_fee_pct = excluded.agency_fee_pct`;
+  await audit(db(), u.id, 'mkt_ads.agency_fee', 'tenant', null, { pct }).catch(() => {});
+  return { ok: true, savings: await agencySavings(t, await monthSpend(t)) };
 }

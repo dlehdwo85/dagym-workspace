@@ -8,15 +8,26 @@ const C = '#7C3AED';
 const NAVER_OK = /^[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9 .,!?%&()+\-/:'"~@#*\[\]]$/;
 const badChars = (t: string) => [...new Set([...t].filter((c) => !NAVER_OK.test(c)))].join(' ');
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
-type Plan = { id: string; account_id: string; brand_id?: string | null; brand?: string | null; kind: string; name: string; plan: { dailyBudget: number; bidAmt: number; channelId: string; keywords: string[]; ads: { headline: string; description: string; url: string }[] };
-  status: string; external: Record<string, unknown>; error: string | null; created_at: string; approved_at: string | null; account_label: string; approved_by_name: string | null; issues: string[] };
+const n0 = (v: number) => Math.round(v).toLocaleString('ko-KR');
+type Test = { on: boolean; days: number; minImpressions: number; afterBudget?: number | null };
+type AbRow = { adId: string; label: string; headline: string; impressions: number; clicks: number; cost: number; conversions: number; paused: boolean; ctr: number | null; cvr: number | null };
+/** 광고 최적화 1차 ① 3안 소액 테스트 판정(서버 계산) */
+type Ab = { status: 'not_started' | 'running' | 'winner' | 'partial' | 'tie'; metric: 'ctr' | 'cvr'; days: number; minImpressions: number; leader: string | null; losers: string[]; message: string; ads: AbRow[]; afterBudget: number | null; on: boolean };
+type Plan = { id: string; account_id: string; brand_id?: string | null; brand?: string | null; kind: string; name: string; plan: { dailyBudget: number; bidAmt: number; channelId: string; keywords: string[]; ads: { headline: string; description: string; url: string }[]; test?: Test };
+  status: string; external: Record<string, unknown>; error: string | null; created_at: string; approved_at: string | null; account_label: string; approved_by_name: string | null; issues: string[]; ab?: Ab | null };
 type Change = { id: string; plan_id: string | null; kind: string; before: any; after: any; money_up: boolean; status: string; error: string | null; revert_of: string | null; created_at: string; actor_name: string | null };
-type Data = { canEdit: boolean; cap: { monthlyCap: number; stoppedMonth: string | null } | null; monthSpend: number; month: string; accounts: { id: string; label: string; external_id: string }[]; brands: { id: string; name: string }[]; plans: Plan[]; changes: Change[] };
+type Data = { canEdit: boolean; cap: { monthlyCap: number; stoppedMonth: string | null } | null; monthSpend: number; month: string; accounts: { id: string; label: string; external_id: string }[]; brands: { id: string; name: string }[]; plans: Plan[]; changes: Change[];
+  savings?: { pct: number; spend: number; amount: number; custom: boolean } };
 const STATUS: Record<string, [string, string]> = { draft: ['세팅안', 'bg-slate-100 text-ink-2'], creating: ['만드는 중', 'bg-sky-50 text-sky-800'], created: ['만듦 · 꺼짐', 'bg-sky-50 text-sky-800'], active: ['켜짐', 'bg-emerald-50 text-emerald-800'],
   paused: ['꺼짐', 'bg-amber-50 text-amber-800'], failed: ['만들기 실패', 'bg-red-50 text-red-800'] };
 const kwOk = (x: unknown) => Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === 'string' && v && v !== 'undefined');
-const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable: '켜기', pause: '끄기', budget: '하루 예산 변경', auto_pause: '상한 도달 자동 중지', sync: '키워드 다시 읽기' };
-const desc = (c: Change) => c.kind === 'budget' ? `${won(c.before?.dailyBudget)} → ${won(c.after?.dailyBudget)}` : c.kind === 'auto_pause' && c.after?.spend ? `이번 달 ${won(c.after.spend)} / 상한 ${won(c.after.cap)}` : '';
+const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable: '켜기', pause: '끄기', budget: '하루 예산 변경', auto_pause: '상한 도달 자동 중지', sync: '키워드 다시 읽기', ad_pause: '소재 끄기', ad_resume: '소재 켜기' };
+const REVERTIBLE = ['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume'];
+const adName = (plans: Plan[], c: Change, id: string) => { const p = plans.find((x) => x.id === c.plan_id); const k = ((p?.external?.adIds as string[] | undefined) ?? []).indexOf(id); return k >= 0 ? `안 ${'ABC'[k] ?? k + 1}` : id; };
+const desc = (c: Change, plans: Plan[] = []) => c.kind === 'budget' ? `${won(c.before?.dailyBudget)} → ${won(c.after?.dailyBudget)}` : c.kind === 'auto_pause' && c.after?.spend ? `이번 달 ${won(c.after.spend)} / 상한 ${won(c.after.cap)}`
+  : (c.kind === 'ad_pause' || c.kind === 'ad_resume') ? `${((c.after?.adIds ?? []) as string[]).map((x) => adName(plans, c, x)).join(', ')}${c.after?.ab ? ' (3안 테스트 결과)' : ''}` : '';
+const AB_STATUS: Record<string, [string, string]> = { not_started: ['켜기 전', 'bg-slate-100 text-ink-2'], running: ['비교 중', 'bg-sky-50 text-sky-800'], winner: ['이긴 안 나옴', 'bg-emerald-50 text-emerald-800'],
+  partial: ['일부 판정', 'bg-amber-50 text-amber-800'], tie: ['차이 뚜렷하지 않음', 'bg-slate-100 text-ink-2'] };
 
 /**
  * V44 ① 광고 운영(네이버 검색광고 파워링크) — 세팅안 → [승인하고 시작](꺼진 상태로 생성) → [켜기](상한 검사) · 변경 기록·되돌리기.
@@ -49,6 +60,9 @@ export function AdOps() {
           <div className="mt-2 flex flex-wrap items-center gap-2"><input className={cx(inputCls, 'w-40')} inputMode="numeric" value={capIn} onChange={(e) => setCapIn(e.target.value)} placeholder={data.cap ? String(data.cap.monthlyCap) : '예: 500000'} aria-label="월 광고비 상한(원)" data-testid="ad-cap-input" />
             <Button size="sm" onClick={saveCap} disabled={!capIn || busy === 'cap'} data-testid="ad-cap-save">상한 저장</Button>
             <span className="text-[11px] text-ink-3">광고비는 하루 한 번 읽어 오므로 실제보다 하루 늦게 반영됩니다.</span></div>)}
+        {data.savings && <p className="mt-2 text-xs text-ink-2" data-testid="ad-savings">이번 달 대행사 대비 절감액(추정) <b className="text-emerald-800">{won(data.savings.amount)}</b> — 광고비 {won(data.savings.spend)} × 대행 수수료율 {data.savings.pct}%{data.savings.custom ? '(회사 설정)' : '(기본값 — 통상 15~20%)'}
+          {data.canEdit && <> · <button type="button" className="underline" data-testid="ad-fee-edit" onClick={() => { const v = prompt('대행 수수료율(%) — 비우면 기본 15%', String(data.savings!.pct)); if (v === null) return; const t = v.trim();
+            if (t !== '' && !(Number(t) >= 0 && Number(t) <= 50)) return toast.error('0~50 사이 숫자로 적어 주세요'); run('fee', () => api('/api/marketing/ad-ops/fee', { method: 'PUT', body: { pct: t === '' ? null : Number(t) } }), '대행 수수료율을 저장했습니다'); }}>수수료율 바꾸기</button></>}</p>}
       </section>
 
       <section className="rounded-card border border-line bg-white p-3 shadow-card">
@@ -65,6 +79,7 @@ export function AdOps() {
               {p.plan.ads.map((a, k) => <p key={k} className="mt-0.5 text-xs"><b className="text-emerald-800">{a.headline}</b> {a.description} <span className="text-ink-3">{a.url}</span></p>)}
               {p.issues.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-amber-800" data-testid="ad-plan-issues">{p.issues.map((x, k) => <li key={k}>검사: {x}</li>)}</ul>}
               {p.error && <p className="mt-1 break-words text-xs text-red-700">{p.error}</p>}
+              {p.ab && <AbBox p={p} ab={p.ab} canEdit={data.canEdit} busy={busy === p.id} run={run} />}
               {data.canEdit && (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {(p.status === 'draft' || p.status === 'failed') && <Button size="sm" variant="secondary" onClick={() => setForm(p)} data-testid="ad-plan-edit">수정</Button>}
@@ -87,11 +102,11 @@ export function AdOps() {
         <h2 className="text-sm font-semibold">변경 기록</h2>
         <ul className="mt-1 divide-y divide-line text-xs">{data.changes.map((c) => {
           const plan = data.plans.find((p) => p.id === c.plan_id);
-          const canRevert = data.canEdit && c.status === 'applied' && ['enable', 'pause', 'budget', 'auto_pause'].includes(c.kind) && !reverted.has(c.id);
+          const canRevert = data.canEdit && c.status === 'applied' && REVERTIBLE.includes(c.kind) && !reverted.has(c.id);
           return (
             <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="ad-change">
               <span className="text-ink-3">{fmtDateTime(c.created_at)}</span><b>{KIND[c.kind] ?? c.kind}</b>{c.money_up && <span className="rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-800">돈 나가는 변경</span>}
-              <span>{plan?.name ?? ''} {desc(c)}</span><span className="text-ink-3">{c.actor_name ?? (c.kind === 'auto_pause' ? '워크인 자동' : '')}</span>
+              <span>{plan?.name ?? ''} {desc(c, data.plans)}</span><span className="text-ink-3">{c.actor_name ?? (c.kind === 'auto_pause' ? '워크인 자동' : '')}</span>
               {c.status === 'failed' && <span className="break-words text-red-700">실패: {c.error}</span>}
               {c.revert_of && <span className="text-ink-3">(되돌림)</span>}
               {canRevert && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => confirm('이 변경 전으로 되돌릴까요?') && run(c.id, () => api(`/api/marketing/ad-ops/changes/${c.id}/revert`, { body: {} }), '되돌렸습니다')} data-testid="ad-change-revert">되돌리기</Button>}
@@ -105,8 +120,9 @@ export function AdOps() {
 
 function PlanForm({ accounts, brands, edit, onClose, onDone }: { accounts: Data['accounts']; brands: Data['brands']; edit?: Plan; onClose: () => void; onDone: () => void }) {
   const [f, setF] = useState(edit
-    ? { accountId: edit.account_id, brandId: edit.brand_id ?? '', name: edit.name, dailyBudget: String(edit.plan.dailyBudget), bidAmt: String(edit.plan.bidAmt), channelId: edit.plan.channelId, keywords: edit.plan.keywords.join(', '), ads: edit.plan.ads.map((a) => ({ ...a })) }
-    : { accountId: accounts[0]?.id ?? '', brandId: '', name: '', dailyBudget: '10000', bidAmt: '300', channelId: '', keywords: '', ads: [{ headline: '', description: '', url: 'https://' }] });
+    ? { accountId: edit.account_id, brandId: edit.brand_id ?? '', name: edit.name, dailyBudget: String(edit.plan.dailyBudget), bidAmt: String(edit.plan.bidAmt), channelId: edit.plan.channelId, keywords: edit.plan.keywords.join(', '), ads: edit.plan.ads.map((a) => ({ ...a })),
+        test: { on: !!edit.plan.test?.on, days: String(edit.plan.test?.days ?? 7), min: String(edit.plan.test?.minImpressions ?? 300), after: edit.plan.test?.afterBudget ? String(edit.plan.test.afterBudget) : '' } }
+    : { accountId: accounts[0]?.id ?? '', brandId: '', name: '', dailyBudget: '10000', bidAmt: '300', channelId: '', keywords: '', ads: [{ headline: '', description: '', url: 'https://' }], test: { on: false, days: '7', min: '300', after: '' } });
   const ch = useApi<{ channels: { id: string; name: string; url: string | null; type: string }[] }>(f.accountId ? `/api/marketing/ad-ops/channels?accountId=${f.accountId}` : null, [f.accountId]);
   const [busy, setBusy] = useState(false);
   const setAd = (k: number, patch: Partial<(typeof f.ads)[number]>) => setF({ ...f, ads: f.ads.map((a, i) => (i === k ? { ...a, ...patch } : a)) });
@@ -114,7 +130,8 @@ function PlanForm({ accounts, brands, edit, onClose, onDone }: { accounts: Data[
     e.preventDefault(); setBusy(true);
     try {
       const r = await api<{ issues: string[] }>(edit ? `/api/marketing/ad-ops/plans/${edit.id}` : '/api/marketing/ad-ops/plans', { method: edit ? 'PUT' : 'POST', body: { accountId: f.accountId, brandId: f.brandId || null, name: f.name, dailyBudget: Number(f.dailyBudget), bidAmt: Number(f.bidAmt), channelId: f.channelId,
-        keywords: f.keywords.split(/[\n,]/).map((s) => s.trim()).filter(Boolean), ads: f.ads } });
+        keywords: f.keywords.split(/[\n,]/).map((s) => s.trim()).filter(Boolean), ads: f.ads,
+        test: { on: f.test.on, days: Number(f.test.days) || 7, minImpressions: Number(f.test.min) || 300, afterBudget: f.test.after ? Number(f.test.after) : null } } });
       r.issues.length ? toast.error(`저장했습니다 — 검사 ${r.issues.length}건을 고쳐야 시작할 수 있습니다`) : toast.ok('세팅안을 저장했습니다');
       onDone(); onClose();
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
@@ -145,9 +162,52 @@ function PlanForm({ accounts, brands, edit, onClose, onDone }: { accounts: Data[
             <span className={cx('text-[11px]', len(a.headline) > 15 || len(a.description) > 45 || badChars(a.headline + a.description) ? 'text-red-700' : 'text-ink-3')} data-testid="ad-plan-len">제목 {len(a.headline)}/15 · 설명 {len(a.description)}/45{badChars(a.headline + a.description) ? ` · 쓸 수 없는 문자 ${badChars(a.headline + a.description)}` : ''}</span>
           </fieldset>))}
         {f.ads.length < 3 && <Button type="button" size="sm" variant="secondary" className="justify-self-start" onClick={() => setF({ ...f, ads: [...f.ads, { headline: '', description: '', url: f.ads[0].url }] })}>소재 추가(3개까지)</Button>}
+        {/* 광고 최적화 1차 ① 3안 소액 테스트 */}
+        <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" checked={f.test.on} onChange={(e) => setF({ ...f, test: { ...f.test, on: e.target.checked } })} data-testid="ad-plan-ab" />
+          <span><b>3안 소액 테스트</b> — 소재 2~3개를 같은 예산으로 비교하고, 이긴 안이 나오면 [이긴 안에 집중]으로 진 안을 끄고 예산을 모읍니다.</span></label>
+        {f.test.on && <div className="grid grid-cols-3 gap-2">
+          <Field label="비교 기간(일)"><input className={inputCls} inputMode="numeric" value={f.test.days} onChange={(e) => setF({ ...f, test: { ...f.test, days: e.target.value.replace(/\D/g, '') } })} data-testid="ad-plan-ab-days" /></Field>
+          <Field label="안마다 최소 노출"><input className={inputCls} inputMode="numeric" value={f.test.min} onChange={(e) => setF({ ...f, test: { ...f.test, min: e.target.value.replace(/\D/g, '') } })} data-testid="ad-plan-ab-min" /></Field>
+          <Field label="이긴 뒤 하루 예산(원)"><input className={inputCls} inputMode="numeric" value={f.test.after} placeholder="비우면 그대로" onChange={(e) => setF({ ...f, test: { ...f.test, after: e.target.value.replace(/\D/g, '') } })} data-testid="ad-plan-ab-after" /></Field>
+        </div>}
+        {f.test.on && <p className="text-[11px] text-ink-3">테스트 동안 하루 예산은 작게(예: 5,000원) 두세요. 판정은 서버가 숫자로 합니다 — 클릭률(전환이 10건을 넘으면 전환율), 1등이 다른 안보다 한쪽 95% 신뢰로 높을 때만 “이긴 안”. 예산을 올리는 것은 [이긴 안에 집중]을 누를 때(월 상한 검사).</p>}
         <p className="text-[11px] text-ink-3">저장해도 네이버에는 아직 만들지 않습니다. 목록에서 검사 결과를 확인하고 [승인하고 시작]을 누르면 꺼진 상태로 만들어집니다.</p>
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy} data-testid="ad-plan-save">세팅안 저장</Button></div>
       </form>
     </Modal>
+  );
+}
+
+/** 광고 최적화 1차 ① 3안 소액 테스트 — 소재별 노출·클릭·클릭률·전환·비용과 서버 판정, 소재 켜기·끄기, [이긴 안에 집중] */
+function AbBox({ p, ab, canEdit, busy, run }: { p: Plan; ab: Ab; canEdit: boolean; busy: boolean; run: (key: string, fn: () => Promise<unknown>, ok: string) => void }) {
+  const [label, cls] = AB_STATUS[ab.status] ?? [ab.status, 'bg-slate-100'];
+  const pending = ab.losers.filter((id) => !ab.ads.find((a) => a.adId === id)?.paused);
+  const after = ab.afterBudget && ab.afterBudget !== p.plan.dailyBudget ? ab.afterBudget : null;
+  const act = (body: Record<string, unknown>, ok: string) => run(p.id, async () => {
+    const r = await api<{ budgetError?: string }>(`/api/marketing/ad-ops/plans/${p.id}/action`, { body });
+    if (r.budgetError) toast.error(`하루 예산은 바꾸지 못했습니다: ${r.budgetError}`);
+  }, ok);
+  return (
+    <div className="mt-2 rounded-input border border-violet-200 bg-violet-50/40 p-2" data-testid="ad-ab" data-status={ab.status}>
+      <div className="flex flex-wrap items-center gap-2 text-xs"><b>{ab.on ? '3안 소액 테스트' : '소재 비교'}</b>
+        <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', cls)} data-testid="ad-ab-status">{label}</span>
+        <span className="text-ink-3">기준 {ab.metric === 'ctr' ? '클릭률' : '전환율'} · {ab.days}일 · 안마다 노출 {n0(ab.minImpressions)}회 이상</span></div>
+      <div className="mt-1 overflow-x-auto"><table className="w-full min-w-[600px] text-right text-xs">
+        <thead><tr className="text-ink-2"><th className="py-1 text-left font-medium">안</th><th className="text-left font-medium">제목</th><th className="font-medium">노출</th><th className="font-medium">클릭</th><th className="font-medium">클릭률</th><th className="font-medium">전환</th><th className="font-medium">비용</th><th className="pl-2 text-left font-medium">상태</th><th /></tr></thead>
+        <tbody className="divide-y divide-line tabular-nums">{ab.ads.map((a) => (
+          <tr key={a.adId} data-testid="ad-ab-row" data-ad={a.label}>
+            <td className="py-1 text-left font-medium">{a.label}</td><td className="max-w-[12rem] truncate text-left">{a.headline}</td>
+            <td>{n0(a.impressions)}</td><td>{n0(a.clicks)}</td><td>{a.ctr === null ? '—' : `${a.ctr}%`}</td><td>{n0(a.conversions)}</td><td>{won(a.cost)}</td>
+            <td className="whitespace-nowrap pl-2 text-left">{ab.leader === a.adId && ab.status !== 'tie' && <span className="mr-1 rounded bg-emerald-600 px-1 text-[10px] font-semibold text-white" data-testid="ad-ab-win">이김</span>}
+              {ab.losers.includes(a.adId) && <span className="mr-1 rounded bg-slate-500 px-1 text-[10px] font-semibold text-white" data-testid="ad-ab-lose">짐</span>}{a.paused ? '꺼짐' : '켜짐'}</td>
+            <td>{canEdit && <button type="button" className="px-1 text-[11px] underline disabled:opacity-50" disabled={busy} data-testid="ad-ab-toggle"
+              onClick={() => act({ action: a.paused ? 'ad_resume' : 'ad_pause', adIds: [a.adId] }, a.paused ? `${a.label}를 켰습니다` : `${a.label}를 껐습니다`)}>{a.paused ? '켜기' : '끄기'}</button>}</td>
+          </tr>))}</tbody></table></div>
+      <p className="mt-1 text-xs" data-testid="ad-ab-message">{ab.message}</p>
+      {canEdit && pending.length > 0 && <Button size="sm" className="mt-1 h-auto min-h-8 whitespace-normal py-1 text-left" disabled={busy} data-testid="ad-ab-apply"
+        onClick={() => confirm(`진 안 ${pending.length}개를 끄고${after ? ` 하루 예산을 ${won(p.plan.dailyBudget)} → ${won(after)}(으)로 바꿀까요? 예산을 올리면 광고비가 더 나갑니다.` : ' 남은 안에 예산을 모을까요?'}`)
+          && act({ action: 'ab_apply', adIds: pending, ...(after ? { dailyBudget: after } : {}) }, '진 안을 끄고 이긴 안에 모았습니다')}>
+        이긴 안에 집중 — 진 안 {pending.length}개 끄기{after ? ` + 하루 예산 ${won(p.plan.dailyBudget)} → ${won(after)}` : ''}</Button>}
+    </div>
   );
 }

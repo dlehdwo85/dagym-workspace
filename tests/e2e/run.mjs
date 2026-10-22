@@ -52,6 +52,7 @@ import { mktQuality } from './mktQuality.step.mjs';
 import { revenueAuto } from './revenueAuto.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
+import { adAb } from './adAb.step.mjs';
 import { attachLibrary } from './attachLibrary.step.mjs';
 import { inbox } from './inbox.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
@@ -2429,6 +2430,7 @@ await step('소개 사이트(대표 16:45): / 랜딩(H1·무료로 시작·앱·
 await step('대표 18:00 월 운영 목표·근거: 초안 → 고치기 → 승인 → 홈 막대 → 새 콘텐츠 근거 칸 → 승인함 왜 이 글인가', () => mktGoals({ owner, ctx, BASE, SHOTS }));
 await step('대표 19:00 제작의뢰실: 의뢰 → 프롬프트 → 수정 → 제작 요청 카드로 → 카드에 제작의뢰실 표시', () => mktStudio({ owner, ctx, BASE, SHOTS }));
 await step('대표 20:00 운영실: AI 마케터 카드 반려·승인 → 제작의뢰 · 광고 예산 고치기 → 승인·집행 · 월 매출 목표 막대(마케팅·영업 홈) · 월간 보고 CAC·ROI', () => mktOps({ owner, ctx, sql, BASE, SHOTS }));
+await step('광고 최적화 1차 3안 소액 테스트: 판정 상자(이긴 안·진 안·서버 판정 문구) → [이긴 안에 집중](확인 창 → 진 안 끄기 + 예산) · 소재 끄기 · 변경 기록 · 새 세팅안 테스트 칸 · 절감액 수수료율 · 휴대폰 폭', () => adAb({ owner, ctx, sql, BASE, SHOTS }));
 await step('대표 23:40·23:55 마감일 버튼 크기 + 업무 첨부 자료실에서 가져오기(검색·체크 → 연결·타임라인)', () => attachLibrary({ owner, ctx, BASE, SHOTS }));
 await step('대표 02:30·03:00 승인함 통합(종류별 탭·건수·바로 승인/반려) · 예산 브랜드 축(세팅안 필요·총액 적기) · 월 목표 반려 · 매출 목표 AI 추천 · 지금 상태', () => inbox({ owner, ctx, sql, BASE, SHOTS }));
 
