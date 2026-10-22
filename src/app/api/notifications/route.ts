@@ -21,7 +21,7 @@ export const GET = handler(async ({ req, user }) => {
   // 대표 10/22: [10분 뒤] 누른 알람은 snoozeUntil 까지 띠에서 뺀다(그 뒤 다시 뜸)
   const snoozed = (n: any) => !!n.meta?.snoozeUntil && Date.parse(n.meta.snoozeUntil) > Date.now();
   const alarms = unreadOnly ? items.filter((n) => n.meta?.alarm && !n.action_done && !n.read_at && !snoozed(n) && Date.now() - new Date(n.created_at).getTime() < 3 * 3600e3).slice(0, 3)
-    .map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, link: n.link, actions: actionsFor(n as NotifRow) })) : undefined;
+    .map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, link: n.link, entityType: n.entity_type ?? null, entityId: n.entity_id ?? null, actions: actionsFor(n as NotifRow) })) : undefined;
   // #114 ⑦ 휴대폰 상단 '결재할 것 n건' — 같은 폴링에 실어 보낸다(별도 폴링 없음)
   const approvalsTodo = unreadOnly ? await (await import('@/lib/approvalForms')).todoCount(sql, user).catch(() => 0) : undefined;
   return { items: items.map((n) => ({ ...n, actions: actionsFor(n as NotifRow) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}) };
