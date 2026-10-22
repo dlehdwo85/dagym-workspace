@@ -55,6 +55,7 @@ import { mktOps } from './mktOps.step.mjs';
 import { adAb } from './adAb.step.mjs';
 import { adLocal } from './adLocal.step.mjs';
 import { adLeads } from './adLeads.step.mjs';
+import { leadAds } from './leadAds.step.mjs';
 import { attachLibrary } from './attachLibrary.step.mjs';
 import { inbox } from './inbox.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
@@ -2435,6 +2436,7 @@ await step('대표 20:00 운영실: AI 마케터 카드 반려·승인 → 제�
 await step('광고 최적화 1차 3안 소액 테스트: 판정 상자(이긴 안·진 안·서버 판정 문구) → [이긴 안에 집중](확인 창 → 진 안 끄기 + 예산) · 소재 끄기 · 변경 기록 · 새 세팅안 테스트 칸 · 절감액 수수료율 · 휴대폰 폭', () => adAb({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 최적화 1차 동네 타깃: 새 세팅안 동네 칸(중심·반경 → AI 동네 추천 → 검색량 → 고른 것 키워드에 넣기 · 광고 지역 충남) → 저장 → 카드 줄 · 켠 광고 [광고 지역]·[동네 키워드 추가] 보내는 값 · 변경 기록 · 휴대폰 폭', () => adLocal({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 최적화 1차 통화 기반: 전화·문의 기준 키워드 점검(요약·끄기 제안·잘 됨) → 워크인 키워드 [끄기] 보내는 값 → 목표 전환당 비용 → 기간 7일 → 휴대폰 폭 → 전화 문의 기록에 광고 키워드', () => adLeads({ owner, ctx, sql, BASE, SHOTS }));
+await step('광고 2차 ① 리드 광고(메타) → 영업 리드: 광고 운영 리드 광고 상자(받는 중·웹후크·요약·이름 가림·첫 연락·재알림·광고별 리드당 비용) → 실패 [다시 처리] → 휴대폰 폭 → 연결 계정 받는 중 → 영업 리드 상세 리드 광고 상자·[전화] 첫 연락 기록', () => leadAds({ owner, ctx, sql, BASE, SHOTS }));
 await step('대표 23:40·23:55 마감일 버튼 크기 + 업무 첨부 자료실에서 가져오기(검색·체크 → 연결·타임라인)', () => attachLibrary({ owner, ctx, BASE, SHOTS }));
 await step('대표 02:30·03:00 승인함 통합(종류별 탭·건수·바로 승인/반려) · 예산 브랜드 축(세팅안 필요·총액 적기) · 월 목표 반려 · 매출 목표 AI 추천 · 지금 상태', () => inbox({ owner, ctx, sql, BASE, SHOTS }));
 

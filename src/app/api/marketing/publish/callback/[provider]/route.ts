@@ -13,7 +13,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
   if (p.get('error')) return back(`error=${encodeURIComponent(p.get('error_description') ?? p.get('error')!)}`);
   try {
     const r = await publishConnectCallback(u, provider, p.get('code') ?? '', p.get('state') ?? '');
-    return back(`published=${provider}&pages=${r.pages}&ig=${r.instagram}&warn=${r.warnings}`);
+    return back(`published=${provider}&pages=${r.pages}&ig=${r.instagram}&warn=${r.warnings}${'leads' in r && r.leads !== null && r.leads !== undefined ? `&leads=${r.leads}` : ''}`);
   } catch (e: any) {
     return back(`error=${encodeURIComponent(String(e?.message ?? '연결 실패').slice(0, 300))}`);
   }

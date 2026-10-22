@@ -67,7 +67,7 @@ export function NaverForm({ onClose, onDone }: { onClose: () => void; onDone: ()
   );
 }
 
-const connectMsg = (sp: URLSearchParams) => (sp.get('published') ? `인스타그램 ${sp.get('ig') ?? 0}개·페이스북 페이지 ${sp.get('pages') ?? 0}개를 연결했습니다${Number(sp.get('warn')) ? ' — 아래 확인할 항목을 봐 주세요' : ''}` : sp.get('connected') ? `${sp.get('connected') === 'meta' ? 'Meta' : 'Google Ads'} 광고 계정 ${sp.get('count') ?? ''}개를 연결했습니다` : sp.get('error') ? `연결 실패: ${sp.get('error')}` : null);
+const connectMsg = (sp: URLSearchParams) => (sp.get('published') ? `인스타그램 ${sp.get('ig') ?? 0}개·페이스북 페이지 ${sp.get('pages') ?? 0}개를 연결했습니다${sp.get('leads') !== null ? ` · 리드 광고 받기 ${sp.get('leads')}개 페이지` : ''}${Number(sp.get('warn')) ? ' — 아래 확인할 항목을 봐 주세요' : ''}` : sp.get('connected') ? `${sp.get('connected') === 'meta' ? 'Meta' : 'Google Ads'} 광고 계정 ${sp.get('count') ?? ''}개를 연결했습니다` : sp.get('error') ? `연결 실패: ${sp.get('error')}` : null);
 
 type Sum = { impressions: number; clicks: number; cost: number; conversions: number };
 type Analysis = { month: string; summary: string; good: string[]; bad: string[]; proposals: { title: string; detail: string; expected: string }[]; source: 'ai' | 'template'; generatedAt: string; cardId?: string | null };
@@ -284,8 +284,9 @@ export function Connections() {
 }
 
 type Ch = { key: string; label: string; note: string; kind: string; enabled: boolean; connectable: boolean; ready: boolean; mode: 'helper' | 'auto' | 'later';
-  accounts: { id: string; provider: string; label: string; status: string; lastError: string | null; warnings: string[]; brandId: string | null; brand: string | null; shared: boolean }[] };
-type ChData = { canEdit: boolean; metaDevMode: boolean; channels: Ch[]; tech: { metaCallback: string; metaDeletion: string; metaScopes: string[]; metaReady: boolean; metaLive: boolean } | null };
+  accounts: { id: string; provider: string; label: string; status: string; lastError: string | null; warnings: string[]; brandId: string | null; brand: string | null; shared: boolean;
+    leads: { scopes: boolean; on: boolean; subscribed: boolean; webhookAt: string | null; error: string | null } | null }[] };
+type ChData = { canEdit: boolean; metaDevMode: boolean; channels: Ch[]; tech: { metaCallback: string; metaDeletion: string; metaScopes: string[]; metaReady: boolean; metaLive: boolean; metaWebhook: string; metaWebhookToken: boolean; leadScopes: string[] } | null };
 const CONNECT_URL: Record<string, string> = { meta: '/api/marketing/publish/connect/meta', threads: '/api/marketing/publish/connect/threads', google: '/api/marketing/publish/connect/youtube' };
 
 /**
@@ -326,6 +327,9 @@ function PublishChannels() {
               {data.canEdit && c.enabled && c.connectable && (c.ready && CONNECT_URL[c.kind]
                 ? <a href={CONNECT_URL[c.kind]} className={btnCls(c.accounts.length ? 'secondary' : 'primary', 'sm')} data-testid={`publish-connect-${c.key}`}>{c.accounts.length ? '다시 연결' : '연결'}</a>
                 : <PendingButton label="연결" reason={c.kind === 'meta' ? '심사 후 열림 — 그동안 게시 도우미' : c.kind === 'threads' ? 'Threads 앱 등록·심사 뒤 열림 — 그동안 게시 도우미' : c.kind === 'google' ? 'Google 동의 화면 검증 뒤 열림 — 그동안 게시 도우미' : '준비 중 — 그동안 게시 도우미'} testId={`publish-connect-${c.key}`} />)}
+              {/* 광고 2차 ①: 페이스북 페이지 리드 광고 → 영업 리드(리드 권한까지 묻는 다시 연결) */}
+              {data.canEdit && c.enabled && c.key === 'facebook' && c.ready && <a href={`${CONNECT_URL.meta}?leads=1`} className={btnCls(c.accounts.some((a) => a.leads?.on) ? 'secondary' : 'primary', 'sm')} data-testid="publish-connect-leads">
+                {c.accounts.some((a) => a.leads?.on) ? '리드 광고 다시 연결' : '리드 광고 받기'}</a>}
               {data.canEdit && <label className={cx('inline-flex min-h-[32px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium', c.enabled ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-line bg-white text-ink-3')}>
                 <input type="checkbox" className="size-4 accent-brand-600" checked={c.enabled} onChange={() => toggle(c)} aria-label={`${c.label} 사용`} data-testid="publish-channel-toggle" />{c.enabled ? '사용 중' : '사용 안 함'}</label>}
             </span>
@@ -340,8 +344,10 @@ function PublishChannels() {
                     <option value="">미지정(게시 안 함)</option><option value="shared">공용(모든 브랜드)</option>{(brands.data?.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
                   : <span className="text-[11px] text-ink-3">{a.shared ? '공용' : a.brand ?? '브랜드 미지정'}</span>}
                 {!a.shared && !a.brandId && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="publish-account-unassigned">브랜드를 지정하세요 — 지정 전엔 게시 대상에서 제외</span>}
+                {a.leads?.on && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800" data-testid="publish-account-leads">리드 광고 받는 중{a.leads.webhookAt ? ` · 웹후크 ${fmtDateTime(a.leads.webhookAt)}` : ''}</span>}
                 {data.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => remove(a.id, a.label)}>끊기</Button>}</div>
               {a.warnings.map((w, k) => <p key={k} className="mt-0.5 text-amber-800" data-testid="publish-warning">확인 필요: {w}</p>)}
+              {a.leads?.on && a.leads.error && <p className="mt-0.5 text-amber-800" data-testid="publish-leads-error">리드 광고: {a.leads.error}</p>}
             </div>))}
         </li>))}</ul>
       {data.canEdit && data.metaDevMode && <p className="mt-2 rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="meta-dev-mode">개발 모드: 워크인 Meta 앱의 앱 역할(개발자·테스터)에 등록된 Facebook 계정만 인스타그램·페이스북을 연결할 수 있습니다. 심사를 마치면 모든 계정이 연결됩니다.</p>}
@@ -360,7 +366,8 @@ function PublishChannels() {
             <li>상태: 앱 ID {data.tech.metaReady ? '있음' : '없음(META_APP_ID/SECRET 넣으면 [연결] 열림)'} · 자동 게시 {data.tech.metaLive ? '켜짐' : '꺼짐(앱 심사 통과 후 META_PUBLISH_LIVE=1)'}</li>
             <li>OAuth 리디렉션 URI <code className="select-all break-all rounded bg-white px-1">{data.tech.metaCallback}</code></li>
             <li>데이터 삭제 콜백 <code className="select-all break-all rounded bg-white px-1">{data.tech.metaDeletion}</code></li>
-            <li>권한 {data.tech.metaScopes.join(', ')}</li>
+            <li>권한 {data.tech.metaScopes.join(', ')} · 리드 광고 받기에 더 묻는 권한 {data.tech.leadScopes.join(', ')}</li>
+            <li>웹후크(Page › leadgen) 콜백 <code className="select-all break-all rounded bg-white px-1">{data.tech.metaWebhook}</code> · 확인 토큰 {data.tech.metaWebhookToken ? '있음' : '없음(META_WEBHOOK_VERIFY_TOKEN 을 넣고 같은 값을 앱 대시보드에)'}</li>
           </ul></details>
       )}
     </section>
