@@ -61,14 +61,14 @@ describe('V29 소셜 가입·로그인', () => {
     const t = to.searchParams.get('t');
     const info = await c.ok('GET', `/api/auth/oauth/pending?t=${t}`);
     assert.equal(info.email, 'boss@social.test'); assert.equal(info.name, '소셜대표');
-    assert.equal((await c.post('/api/auth/oauth/complete', { token: t, name: '소셜대표', mode: 'team', agree: { terms: true, privacy: true } })).status, 400, '팀이면 회사 이름 필요');
-    await c.ok('POST', '/api/auth/oauth/complete', { token: t, name: '소셜대표', mode: 'team', company: '소셜회사', size: '2-10', industry: '제조', agree: { terms: true, privacy: true, ai: false, marketing: false } });
+    assert.equal((await c.post('/api/auth/oauth/complete', { token: t, name: '소셜대표', mode: 'team', agree: { terms: true, age14: true, privacy: true } })).status, 400, '팀이면 회사 이름 필요');
+    await c.ok('POST', '/api/auth/oauth/complete', { token: t, name: '소셜대표', mode: 'team', company: '소셜회사', size: '2-10', industry: '제조', agree: { terms: true, age14: true, privacy: true, ai: false, marketing: false } });
     const me = await c.ok('GET', '/api/auth/me');
     assert.equal(me.user.email, 'boss@social.test'); assert.equal(me.user.role, 'owner');
     const [u] = await sql`select u.work_email, u.password_hash, u.signup_pending, t.size_band, t.industry, t.signup_utm from users u join tenants t on t.id = u.tenant where u.id = ${me.user.id}`;
     assert.equal(u.work_email, 'boss@social.test'); assert.equal(u.password_hash, null); assert.equal(u.signup_pending, false);
     assert.equal(u.size_band, '2-10'); assert.equal(u.industry, '제조'); assert.equal(u.signup_utm.source, 'naver');
-    assert.equal((await c.post('/api/auth/oauth/complete', { token: t, name: 'x', mode: 'personal', agree: { terms: true, privacy: true } })).status, 400, '한 번만');
+    assert.equal((await c.post('/api/auth/oauth/complete', { token: t, name: 'x', mode: 'personal', agree: { terms: true, age14: true, privacy: true } })).status, 400, '한 번만');
     // 다음 로그인
     const c2 = new Client('g2');
     assert.equal((await social(c2, 'google', { sub: 'g-100', email: 'boss@social.test' })).pathname, '/');

@@ -8,7 +8,7 @@ before(async () => {
   await resetDb(); srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1' }); sql = testDb(); ctx = await bootstrap();
   teamId = (await ctx.owner.ok('POST', '/api/teams', { name: '강남 운영팀', kind: 'dept', members: [{ userId: ctx.staffA.id, lead: true }, { userId: ctx.managerA.id, lead: false }] })).id;
   other = new Client('other');
-  const r = await other.ok('POST', '/api/auth/signup', { email: 'n@other.test', password: 'signup-pass-1234', name: '박대표', mode: 'team', company: '튼튼짐', industry: '운동·피트니스', agree: { terms: true, privacy: true, ai: true } });
+  const r = await other.ok('POST', '/api/auth/signup', { email: 'n@other.test', password: 'signup-pass-1234', name: '박대표', mode: 'team', company: '튼튼짐', industry: '운동·피트니스', agree: { terms: true, age14: true, privacy: true, ai: true } });
   await other.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
 });
 after(async () => { srv?.proc.kill(); await sql?.end(); });

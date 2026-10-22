@@ -17,8 +17,10 @@ if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
 fi
 # 같은 커밋 재배포(환경변수만 바꾼 Redeploy 등)는 비교할 변경이 없으므로 항상 빌드
 if [ "$(git rev-parse "$base^{commit}")" = "$(git rev-parse HEAD)" ]; then echo "같은 커밋 재배포 → 빌드"; exit 1; fi
-# 운영 화면에 영향 없는 것: 문서·기록(docs/·*.md)·시험(tests/)·CI 설정(.github/)
-if git diff --quiet "$base" HEAD -- . ':(exclude)docs' ':(exclude)*.md' ':(exclude)tests' ':(exclude).github'; then
-  echo "문서·시험만 변경 ($base..HEAD) → 빌드 건너뜀"; exit 0
+# 운영 화면에 영향 없는 것: 문서·기록(docs/·*.md)·시험(tests/)·CI 설정(.github/)·앱 네이티브(mobile/ — tsconfig 에서도 제외, 웹 빌드가 안 읽음)
+# 로컬 10/22: 빌드 CPU 가 인프라 요금 대부분 — 로컬 기록 커밋(docs/handoff)·mobile 설정 커밋은 빌드하지 않는다.
+# 주의: VERCEL_GIT_PREVIOUS_SHA 는 마지막 '성공' 배포라, 빌드가 계속 실패하던 동안(10/21 DB 쿼터)은 모든 푸시가 코드 변경으로 보였다.
+if git diff --quiet "$base" HEAD -- . ':(exclude)docs' ':(exclude)*.md' ':(exclude)tests' ':(exclude).github' ':(exclude)mobile'; then
+  echo "문서·시험·앱 네이티브만 변경 ($base..HEAD) → 빌드 건너뜀"; exit 0
 fi
 echo "코드 변경 있음 → 빌드"; exit 1

@@ -61,7 +61,7 @@ before(async () => {
   ctx = await bootstrap();
   platform = ctx.owner;
   owner = new Client('payer');
-  const r = await owner.ok('POST', '/api/auth/signup', { email: 'payer@example.com', name: '결제씨', mode: 'team', company: '결제상사', password: 'signup-pass-1234', agree: { terms: true, privacy: true, ai: true, marketing: false } });
+  const r = await owner.ok('POST', '/api/auth/signup', { email: 'payer@example.com', name: '결제씨', mode: 'team', company: '결제상사', password: 'signup-pass-1234', agree: { terms: true, age14: true, privacy: true, ai: true, marketing: false } });
   await owner.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
   await owner.ok('POST', '/api/auth/login', { email: 'payer@example.com', password: 'signup-pass-1234' });
   tid = (await owner.ok('GET', '/api/auth/me')).user.tenant;
@@ -92,8 +92,14 @@ describe('18차 나이스페이 결제', () => {
   });
 
   test('월 구독: 바로 첫 달 결제 → active·다음 결제일 한 달 뒤, 결제 내역', async () => {
-    const r = await owner.ok('POST', '/api/billing/subscribe', { planCode: 'w_standard' });
+    assert.equal((await owner.post('/api/billing/subscribe', { planCode: 'w_standard' })).status, 400, 'V34-B 정기결제 동의 없으면 결제 안 함');
+    assert.equal((await sql`select count(*)::int c from payments where tenant = ${tid} and kind = 'subscription'`)[0].c, 0);
+    const r = await owner.ok('POST', '/api/billing/subscribe', { planCode: 'w_standard', consent: true });
     assert.equal(r.amount, 14850);
+    const [bc] = await sql`select plan_code, amount_krw, cycle, text, terms_version, user_id from billing_consents where tenant = ${tid}`;
+    assert.deepEqual([bc.plan_code, bc.amount_krw, bc.cycle, bc.user_id], ['w_standard', 14850, 'monthly', (await owner.ok('GET', '/api/auth/me')).user.id]);
+    assert.match(bc.text, /매월 14,850원/); assert.match(bc.text, /해지/); assert.ok(bc.terms_version);
+    assert.equal((await owner.ok('GET', '/api/billing')).autoRenewConsent.amount_krw, 14850);
     const s = await sub();
     assert.equal(s.status, 'active'); assert.equal(s.plan_code, 'w_standard'); assert.equal(s.billing_cycle, 'monthly');
     const b = await owner.ok('GET', '/api/billing');
@@ -184,7 +190,7 @@ describe('18차 나이스페이 결제', () => {
     // 결제 성공 → 즉시 복구
     state.failBids.clear();
     await sql`update tenant_subscriptions set billing_lock = 'suspended', billing_grace_until = null where tenant = ${tid}`;
-    await owner.ok('POST', '/api/billing/subscribe', { planCode: 'w_standard' });
+    await owner.ok('POST', '/api/billing/subscribe', { planCode: 'w_standard', consent: true });
     s = await sub();
     assert.equal(s.billing_lock, null); assert.equal(s.past_due_since, null);
     await owner.ok('POST', '/api/tasks', { title: '다시 씀' });

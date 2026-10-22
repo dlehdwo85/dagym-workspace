@@ -11,7 +11,7 @@ const today = seoulToday();
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }).catch(() => chromium.launch());
 try {
   const c = new Client('sample');
-  const sg = await c.ok('POST', '/api/auth/signup', { email: 'sample@workin.test', password: 'sample-pass-1234', name: '김하늘', mode: 'team', company: '하늘커뮤니티', agree: { terms: true, privacy: true } });
+  const sg = await c.ok('POST', '/api/auth/signup', { email: 'sample@workin.test', password: 'sample-pass-1234', name: '김하늘', mode: 'team', company: '하늘커뮤니티', agree: { terms: true, age14: true, privacy: true } });
   await c.ok('POST', '/api/auth/verify', { token: sg.devLink.split('/').pop() });
   await c.ok('POST', '/api/onboarding', { title: '대표', done: true });
   const me = await c.ok('GET', '/api/auth/me'); const unit = me.orgUnits[0].id; const tenant = me.user.tenant ?? (await sql`select tenant from users where email = 'sample@workin.test'`)[0].tenant;

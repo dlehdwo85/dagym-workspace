@@ -22,6 +22,9 @@ export async function GET() {
       db: 'ok',
       dbLatencyMs: Date.now() - started,
       migration: r.migration,
+      // 로컬 10/22: 빌드가 기대하는 마지막 마이그레이션보다 DB 가 뒤면 true — 빌드 때 DB 장애로 건너뛴 것(다시 배포 또는 db:migrate)
+      expectedMigration: process.env.LATEST_MIGRATION || null,
+      migrationBehind: !!process.env.LATEST_MIGRATION && (r.migration ?? '') < process.env.LATEST_MIGRATION,
       scheduler: { lastTick, lastTrigger: r.last_trigger ?? null, ageMinutes: tickAgeMin, healthy: tickAgeMin !== null && tickAgeMin <= 30 },
       config: {
         fileStorage: s3Configured() ? 's3' : 'local-disk',
