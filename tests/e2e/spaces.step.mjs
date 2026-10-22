@@ -56,8 +56,9 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   // 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄 없음 — 공간 메뉴는 더보기 시트의 '영업 메뉴'(입찰·공고 포함)
   assert.equal(await m.getByTestId('space-chips').count(), 0, '상단 칩 줄 없음');
   await m.getByTestId('profile-menu').tap();
-  // #422 d: 하단 탭(입찰·영업기회)과 겹치는 메뉴는 시트에서 빠짐 — 허브는 하단 탭으로
-  assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).count(), 0, '하단 탭과 겹치는 입찰·공고 없음');
+  // #422 d: 하단 탭(제안·계약·영업기회)과 겹치는 메뉴는 시트에서 빠짐 — #438 입찰은 하단 탭이 아니라 시트 '영업 메뉴'에서
+  assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '제안·계약' }).count(), 0, '하단 탭과 겹치는 제안·계약 없음');
+  assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).count(), 1, '입찰·공고는 시트 영업 메뉴에');
   await m.getByTestId('more-sheet').getByLabel('닫기').tap();
   await m.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap(); // 대표 10/21 12:00 ③: 공공데이터·지역별·계약만료는 허브 카테고리
   await m.waitForURL(/\/s\/sales\/hub$/);
@@ -83,7 +84,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/sales-${w}.png` }); }
   // 대표 확정 10/22(#422): 하단 '더보기' 없음 — 영업은 4칸 같은 폭(나머지는 오른쪽 위 프로필 버튼 시트)
   const tabs = async () => (await m.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-  assert.deepEqual(await tabs(), ['홈', '리드', '입찰', '영업기회']); // 대표 검수 10/20: '영업 현황' → '홈', ② 앱 파이프라인 탭 → 입찰(끈 회사는 제안·계약)
+  assert.deepEqual(await tabs(), ['홈', '리드', '제안·계약', '영업기회']); // 대표 검수 10/20: '영업 현황' → '홈', ② 앱 파이프라인 탭 제거 · #438 입찰은 하단 탭에 넣지 않음(대표 10/19)
   const w = await m.getByTestId('mobile-tabs').locator(':scope > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
   assert.ok(Math.max(...w) - Math.min(...w) <= 1, `같은 폭 ${w}`);
   await m.getByTestId('mobile-space-switch').tap();

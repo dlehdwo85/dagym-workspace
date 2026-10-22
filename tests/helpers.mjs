@@ -34,6 +34,7 @@ export function serverEnv() {
     DATABASE_URL: DB_URL,
     APP_URL: BASE,
     APP_SECRET: 'test-secret-test-secret-test-secret-123',
+    TOURS_AUTO: '0', // #77 처음 사용 안내는 시험 서버에서 자동으로 안 띄움(다른 화면 시험을 가리지 않게) — 투어 시험은 localStorage wos_tour_auto=1
     SETUP_SECRET: 'setup-test',
     CRON_SECRET: 'cron-test-secret',
     GOOGLE_CLIENT_ID: 'fake-client',

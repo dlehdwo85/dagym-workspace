@@ -184,7 +184,7 @@ async function connectCallbackOther(u: SessionUser, provider: 'threads' | 'youtu
       const me = await getJson(`${THREADS_API()}/v1.0/me?${new URLSearchParams({ fields: 'id,username', access_token: tk })}`);
       const id = String(me?.id ?? short.user_id); const label = `@${String(me?.username ?? id)}`.slice(0, 60);
       await sql`insert into mkt_publish_accounts (tenant, provider, external_id, label, token_enc, scopes, expires_at, status, last_error, created_by, owner_ext_id, info, brand_id)
-        values (${tenantOf(u)}, 'meta_threads', ${id}, ${label}, ${encrypt(tk)}, ${THREADS_SCOPES}, ${exp}, 'active', null, ${u.id}, ${id}, ${sql.json({ warnings: [] } as never)}, ${await guessBrandId(tenantOf(u), label)})
+        values (${tenantOf(u)}, 'meta_threads', ${id}, ${label}, ${encrypt(tk)}, ${THREADS_SCOPES}, ${exp}, 'active', null, ${u.id}, ${id}, ${sql.json({ warnings: [] } as never)}, ${await guessBrandId(tenantOf(u), label, 'meta_threads')})
         on conflict (tenant, provider, external_id) do update set label = excluded.label, token_enc = excluded.token_enc, scopes = excluded.scopes, expires_at = excluded.expires_at, status = 'active', last_error = null, owner_ext_id = excluded.owner_ext_id, info = excluded.info`;
       await audit(sql, u.id, 'mkt_publish.connect', 'mkt_publish_account', null, { provider: 'threads', account: label }).catch(() => {});
       return { pages: 0, instagram: 0, threads: 1, youtube: 0, warnings: 0 };
@@ -208,11 +208,14 @@ async function connectCallbackOther(u: SessionUser, provider: 'threads' | 'youtu
 /** 연결 끊기 — 토큰을 바로 지움(행 삭제). 게시 기록(mkt_publish_jobs)은 account_id 만 비워져 남음 */
 /** 로컬 10/21 08:10: 연결 직후 라벨로 브랜드 추정(@hi_link_official → 하이링크, dagym → 다짐, work_in → 워크인, body_lab → 바디랩, 브랜드 이름 포함) — 못 맞추면 미지정(게시 대상에서 제외) */
 const BRAND_HINTS: Record<string, string[]> = { '하이링크': ['hi_link', 'hilink', 'hi-link'], '다짐': ['dagym'], '워크인': ['work_in', 'workin', 'work-in'], '바디랩': ['body_lab', 'bodylab', 'body-lab'] };
-export async function guessBrandId(tenant: string, label: string) {
+export async function guessBrandId(tenant: string, label: string, provider?: string) {
   const brands = await db()<{ id: string; name: string }[]>`select id, name from mkt_brands where tenant = ${tenant}`;
   const l = label.toLowerCase();
   const hit = brands.find((b) => l.includes(b.name.toLowerCase()) || (BRAND_HINTS[b.name] ?? []).some((h) => l.includes(h)));
-  return hit?.id ?? null;
+  if (hit || provider !== 'meta_threads') return hit?.id ?? null;
+  // #445(대표 10/21 '스레드는 워크인만'): 이름으로 못 맞히면, 자동 제작 규칙에서 스레드를 쓰는 브랜드가 하나뿐일 때 그 브랜드로(둘 이상이면 미지정 → 사람이 지정)
+  const th = await db()<{ brand_id: string }[]>`select distinct brand_id from mkt_rules where tenant = ${tenant} and active and brand_id is not null and (channel = 'threads' or 'threads' = any(cross_channels))`;
+  return th.length === 1 ? th[0].brand_id : null;
 }
 export const accountBrandInput = z.object({ brandId: zUuid.nullable().optional(), shared: z.boolean().optional() });
 /** 연결 계정의 브랜드(또는 공용) 지정 — 관리자. 공용이면 brand_id 비움 */

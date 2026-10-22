@@ -30,6 +30,7 @@ import { PRIORITY_LABEL, STATUS_LABEL, STATUSES, type TaskStatus } from '@/lib/t
 import { encodeMentions } from '@/lib/mentions';
 import { VoiceButton } from '@/components/voice';
 import { MeetingDialog } from '@/components/MeetingDialog';
+import { requestTour } from '@/components/Tour';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
@@ -48,6 +49,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const { user, dir, features, menus } = useSession();
   const [mailDraft, setMailDraft] = useState<AssistDraft | null>(null); // V28-1 업무 AI 비서 초안 → 시안 창
   const { data, error, loading, reload, setData } = useApi<any>(`/api/tasks/${id}`);
+  useEffect(() => { requestTour('task'); }, []); // #77 업무 상세를 처음 열 때 안내(본 사람은 안 뜸)
   const [cprog, setCprog] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const projects = useApi<{ projects: any[] }>('/api/projects');
   const [comment, setComment] = useState('');
@@ -324,7 +326,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <input ref={clipRef} type="file" multiple className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
               <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
               {/* 대표: 댓글도 음성으로 — 말한 글이 입력칸에 들어감(바로 보내지 않음) */}
-              <VoiceButton small value={comment} onChange={setComment} label="말로 입력" />
+              <VoiceButton small value={comment} onChange={setComment} label="음성 입력" />
               <textarea ref={autoGrow} rows={1} className="block max-h-28 min-h-9 min-w-0 flex-1 resize-none rounded-input border border-line bg-slate-50 px-3 py-[7px] text-sm leading-5 focus:border-accent-500 focus:outline-none focus:ring-0" placeholder="댓글 입력"
                 value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input" aria-label="댓글" />
               <Button size="sm" type="submit" className="h-9 shrink-0" disabled={!comment.trim()}>등록</Button>
@@ -341,7 +343,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               }} aria-label="멘션할 사람">
                 <option value="">@ 멘션</option>{mentionable.data?.users.filter((u) => u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
               </select>
-              <VoiceButton small value={comment} onChange={setComment} label="말로 입력" />
+              <VoiceButton small value={comment} onChange={setComment} label="음성 입력" />
               <span className="hidden text-[11px] text-ink-3 sm:inline">이 업무를 볼 수 있는 사람만 · Ctrl+Enter 로 등록</span>
               <span className="flex-1" />
               <Button size="sm" type="submit" disabled={!comment.trim()}>등록</Button>
@@ -1158,7 +1160,7 @@ function CommentThread({ c, replies, taskId, meId, mentionable, onChange }: { c:
               )}
               <input ref={replyRef} autoFocus className={cx(inputCls, 'h-8')} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="답글 입력 — @ 로 사람 태그" aria-label="답글"
                 onKeyDown={(e) => { if (e.key === 'Escape') setReply(null); }} />
-              <VoiceButton small value={reply} onChange={(v) => setReply(v)} label="말로 입력" />
+              <VoiceButton small value={reply} onChange={(v) => setReply(v)} label="음성 입력" />
               <Button size="sm" disabled={!reply.trim()}>등록</Button>
             </form>
           )}

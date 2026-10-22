@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { currentUser } from '@/lib/auth';
 import { directory } from '@/lib/admin';
 import { AppShell } from '@/components/AppShell';
+import { LaunchIntro } from '@/components/LaunchIntro';
 import { googleSyncEnabled } from '@/lib/google/client';
 import { aiEnabled } from '@/lib/ai/provider';
 import { menuLevels } from '@/lib/menuPerms';
@@ -37,9 +38,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       sidebar3: process.env.FEATURE_SIDEBAR3 !== '0' /* ⑦ 사이드바 3구역 — 되돌리려면 FEATURE_SIDEBAR3=0 */ },
     menus,
     spaces, // V41 공간
+    tours: { seen: await (await import('@/lib/tours')).seenTours(user.id).catch(() => []), auto: (await import('@/lib/tours')).toursAuto(user) }, // #77 처음 사용 안내
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)
     tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)),
       trial: trial ? { trial: trial.trial, readOnly: trial.readOnly, daysLeft: trial.daysLeft } : null, billingLock: billingLock as 'read_only' | 'suspended' | null },
   };
-  return <AppShell session={session}><Suspense>{children}</Suspense></AppShell>;
+  return <><LaunchIntro />{/* #443 실행 애니메이션(세션당 1번·동작 줄이기면 안 함) */}<AppShell session={session}><Suspense>{children}</Suspense></AppShell></>;
 }

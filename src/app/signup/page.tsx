@@ -7,7 +7,7 @@ import { Button, Field, cx, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
 import { OrDivider, SocialButtons } from '@/components/SocialButtons';
 import { CompanyFields } from '@/components/SignupFields';
-import { captureUtm, conversionTagsConfigured, readUtm, setAdsConsent, signupStep } from '@/components/conversion';
+import { captureUtm, conversionTagsConfigured, fireSignupConversion, readUtm, setAdsConsent, setConversionTags, signupStep } from '@/components/conversion';
 import { SignupSteps } from '@/components/SignupSteps';
 
 /** V15 공개 가입 → V32 3 한 화면씩: ① 계정(소셜·이메일·약관) → ② 회사(개인/팀·이름·규모·업종) → 확인 메일. ③ 연락 채널·④ 동료 초대는 첫 로그인 안내에서 */
@@ -25,7 +25,7 @@ export default function SignupPage() {
   const opened = useRef(Date.now());
   useEffect(() => { captureUtm(); }, []);
   useEffect(() => { if (enabled) signupStep(step === 1 ? 'account_view' : 'company_view'); }, [step, enabled]);
-  useEffect(() => { api('/api/auth/signup').then((r) => setEnabled(!!r.enabled)).catch(() => setEnabled(false)); }, []);
+  useEffect(() => { api('/api/auth/signup').then((r) => { setConversionTags(r.tags); setEnabled(!!r.enabled); }).catch(() => setEnabled(false)); }, []);
   const all = agree.terms && agree.age14 && agree.privacy && agree.ai && agree.marketing;
 
   function toCompany(e: React.FormEvent) {
@@ -42,6 +42,7 @@ export default function SignupPage() {
     try {
       setAdsConsent(ads);
       const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, mode, agree: { ...agree, ads }, openedAt: opened.current, utm: readUtm() } });
+      await fireSignupConversion().catch(() => {}); // #449 회사가 만들어진 이 순간(광고를 누른 그 브라우저) — 확인 메일을 다른 기기에서 열어도 전환이 빠지지 않게
       setDone(r);
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
   }

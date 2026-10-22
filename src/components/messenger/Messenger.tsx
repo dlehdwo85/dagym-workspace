@@ -333,7 +333,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     const on = !voice;
     setVoice(on); try { localStorage.setItem(`wos_voice_${id}`, on ? '1' : '0'); } catch {}
     keepScreenOn(on);
-    if (on) say('음성 모드를 켰습니다. 새 메시지를 읽어 드리고, 큰 마이크를 누르면 말로 보낼 수 있습니다');
+    if (on) say('음성 모드를 켰습니다. 새 메시지를 읽어 드리고, 큰 마이크를 누르면 음성으로 보낼 수 있습니다');
     else { stopSpeaking(); setVPhase('idle'); setHeard(''); }
   }
   useEffect(() => { if (voice) keepScreenOn(true); return () => { keepScreenOn(false); stopSpeaking(); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -434,7 +434,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           <div className="truncate text-[11px] text-ink-3">{room.kind === 'dm' ? dir.users.find((x) => x.id === other?.id)?.title ?? '1:1' : `${KIND_LABEL[room.kind]} · ${members.length}명`}
             {room.taskId && <> · <Link href={`/tasks/${room.taskId}`} className="text-accent-600 underline">업무 보기</Link></>}{live.mode === 'poll' && ' · 5초마다 새로 고침'}</div>
         </div>
-        <button className={cx(iconBtn, voice && 'bg-accent-600 text-white hover:bg-accent-700')} onClick={toggleVoice} aria-pressed={voice} aria-label={voice ? '음성 모드 끄기' : '음성 모드(운전 중) 켜기'} title={voice ? '음성 모드 끄기' : '음성 모드 — 새 메시지 읽어 주기·말로 보내기'} data-testid="chat-voice"><Headphones className="size-4" /></button>
+        <button className={cx(iconBtn, voice && 'bg-accent-600 text-white hover:bg-accent-700')} onClick={toggleVoice} aria-pressed={voice} aria-label={voice ? '음성 모드 끄기' : '음성 모드(운전 중) 켜기'} title={voice ? '음성 모드 끄기' : '음성 모드 — 새 메시지 읽어 주기·음성으로 보내기'} data-testid="chat-voice"><Headphones className="size-4" /></button>
         <button className={iconBtn} onClick={toggleMute} aria-label={room.muted ? '알림 켜기' : '알림 끄기'} title={room.muted ? '알림 켜기' : '알림 끄기'} data-testid="chat-mute">{room.muted ? <BellOff className="size-4" /> : <Bell className="size-4" />}</button>
         <button className={iconBtn} onClick={() => setInfo(true)} aria-label="방 정보" title="방 정보 — 참여자·초대·사진/파일/링크" data-testid="chat-info"><Info className="size-4" /></button>
         {!compact && user.role === 'owner' && <a className={iconBtn} href={`/api/chat/rooms/${id}/export`} aria-label="대화 내보내기(감사용)" title="대화 내보내기(감사용, 기록 남음)"><Download className="size-4" /></a>}
@@ -575,7 +575,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                 </div>
               </>
             ) : (
-              <button type="button" onClick={talk} disabled={vPhase === 'listen'} aria-label="말로 보내기" data-testid="chat-voice-talk"
+              <button type="button" onClick={talk} disabled={vPhase === 'listen'} aria-label="음성으로 보내기" data-testid="chat-voice-talk"
                 className={cx('flex size-20 items-center justify-center rounded-full text-white shadow-pop transition active:scale-95', vPhase === 'listen' ? 'animate-pulse bg-red-500' : 'bg-accent-600')}>
                 <Mic className="size-9" />
               </button>
@@ -603,7 +603,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-file" />
           <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
           <input ref={galleryRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-gallery-input" />
-          <VoiceButton small value={text} onChange={(v) => onType(v)} label="말로 입력" />
+          <VoiceButton small value={text} onChange={(v) => onType(v)} label="음성 입력" />
           <textarea ref={inputRef} rows={1} className={cx(inputCls, 'max-h-32 min-h-9 min-w-0 flex-1 resize-none py-1.5')} placeholder="메시지 입력" title="Enter 보내기 · Shift+Enter 줄바꿈 · @ 멘션 · 이미지 붙여넣기" value={text}
             onChange={(e) => onType(e.target.value)} aria-label="메시지" data-testid="chat-input"
             onFocus={() => { setTimeout(() => { toBottom(); inputRef.current?.scrollIntoView({ block: 'nearest' }); }, 80); }} // 핫픽스: 키보드가 열리며 칸이 줄어들면 맨 아래·입력창이 보이게

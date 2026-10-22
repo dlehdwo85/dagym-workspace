@@ -866,7 +866,7 @@ await step('W-1 이름 워크인·부제 다짐 · 하이링크, 사이드바(�
   for (const l of ['내 업무', '현장 신고 QR', '자동화', '현장 비교', '업무량', '결재선', '전체 업무', '오늘·이번 주', '템플릿']) assert.ok(!labels.includes(l), `${l} 숨김`);
   await owner.getByRole('button', { name: '내 계정 메뉴' }).click();
   const items = (await owner.getByRole('menuitem').allTextContents()).map((x) => x.replace(/\?$/, '').trim());
-  assert.deepEqual(items, ['설정·알림', '도움말·문의', '단축키', '로그아웃']);
+  assert.deepEqual(items, ['설정·알림', '도움말·문의', '사용 안내 다시 보기', '단축키', '로그아웃']);
   await owner.keyboard.press('Escape');
   await owner.screenshot({ path: `${SHOTS}/55-hq-sidebar.png` });
 });
@@ -2556,6 +2556,156 @@ await step('#429 결재 설정: 결재 화면 [결재 설정] → 탭(결재선�
   assert.ok(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '휴대폰 가로 넘침 없음');
   if (vp) await owner.setViewportSize(vp);
   await ctx.owner.ok('PUT', '/api/approval-lines/assignments', { kind: 'leave', teamId: dept, lineId: null });
+});
+
+await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리키는 말풍선(다음·이전·건너뛰기) → 끝나면 다시 안 뜸(서버 기록) · 업무 화면 첫 방문 안내 · [사용 안내 다시 보기] · 휴대폰은 하단 탭을 가리킴', async () => {
+  const newUser = async (key, name) => {
+    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: `${key}@dagym.test`, name, role: 'staff', orgUnitIds: [ctx.hq] });
+    await new Client(key).ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${key}-pass-1234` });
+  };
+  await newUser('tour77', '투어직원'); await newUser('tour77m', '투어폰');
+  const c = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  await c.addInitScript(() => { try { localStorage.setItem('wos_tour_auto', '1'); } catch {} }); // 시험 서버는 TOURS_AUTO=0 — 이 브라우저만 자동 켬
+  const p = await login(c, 'tour77@dagym.test', 'tour77-pass-1234');
+  const tour = p.getByTestId('tour');
+  await tour.waitFor({ timeout: 15000 });
+  assert.equal(await p.getByTestId('tour-title').innerText(), '워크인 사용 안내');
+  const titles = [];
+  for (let k = 0; k < 14 && (await tour.count()); k++) {
+    const title = await p.getByTestId('tour-title').innerText(); titles.push(title);
+    if (title === '업무·일정 만들기') {
+      // 대상 버튼 둘레가 밝게(구멍) — [만들기] 버튼을 감쌈, 말풍선은 화면 안(단계 사이 이동 애니메이션 0.2초 뒤)
+      await p.waitForTimeout(350);
+      const [spot, btn, bub] = await Promise.all([p.getByTestId('tour-spot').boundingBox(), p.getByTestId('create-menu').boundingBox(), tour.boundingBox()]);
+      assert.ok(spot.x <= btn.x && spot.y <= btn.y && spot.x + spot.width >= btn.x + btn.width && spot.y + spot.height >= btn.y + btn.height, `만들기 버튼 강조 spot=${JSON.stringify(spot)} btn=${JSON.stringify(btn)}`);
+      assert.ok(bub.y >= 0 && bub.y + bub.height <= 900 && bub.x >= 0 && bub.x + bub.width <= 1366, '말풍선 화면 안');
+      assert.match(await p.getByTestId('tour-count').innerText(), /^2 \/ \d+$/);
+      await p.waitForTimeout(250); await p.screenshot({ path: `${SHOTS}/195-tour-home.png` });
+      // 이전 → 처음, 다음으로 돌아옴
+      await p.getByTestId('tour-prev').click(); assert.equal(await p.getByTestId('tour-title').innerText(), '워크인 사용 안내');
+      await p.getByTestId('tour-next').click(); assert.equal(await p.getByTestId('tour-title').innerText(), '업무·일정 만들기');
+    }
+    await p.getByTestId('tour-next').click();
+    await p.waitForTimeout(150);
+  }
+  assert.equal(await tour.count(), 0, '끝까지 → 닫힘');
+  for (const t of ['업무·일정 만들기', '업무', '캘린더', '알림', '검색 (Ctrl K)']) assert.ok(titles.includes(t), `${t} 단계 (${titles.join(' / ')})`);
+  assert.ok(!titles.includes('동료 초대·회사 설정'), '직원에게는 관리자 단계 없음');
+  assert.ok(!titles.includes('바탕화면 위젯'), '웹에는 위젯 단계 없음');
+  const seen = async (pg) => (await pg.evaluate(() => fetch('/api/tours').then((r) => r.json()))).seen;
+  assert.ok((await seen(p)).includes('home'), '서버에 봤음 기록');
+  await p.reload(); await p.waitForTimeout(2500);
+  assert.equal(await tour.count(), 0, '다시 열어도 안 뜸');
+  // 업무 화면 처음 → 그 화면 안내, Esc = 건너뛰기(봤음)
+  await p.goto(BASE + '/tasks');
+  await tour.waitFor({ timeout: 15000 });
+  assert.equal(await p.getByTestId('tour-title').innerText(), '업무 추가');
+  await p.keyboard.press('Escape');
+  await tour.waitFor({ state: 'detached' });
+  assert.ok((await seen(p)).includes('tasks'));
+  // [사용 안내 다시 보기] → 홈부터 다시
+  await p.getByRole('button', { name: '내 계정 메뉴' }).click();
+  await p.getByTestId('tour-restart').click();
+  await p.waitForURL((u) => new URL(u).pathname === '/');
+  await tour.waitFor({ timeout: 15000 });
+  assert.equal(await p.getByTestId('tour-title').innerText(), '워크인 사용 안내');
+  await p.getByTestId('tour-skip').click();
+  await tour.waitFor({ state: 'detached' });
+  assert.deepEqual(await seen(p), ['home'], '다시 보기 = 기록 초기화 후 홈만 봤음');
+  await c.close();
+  // 휴대폰: 하단 탭(업무)을 가리키고 말풍선은 탭 위·화면 안, 가로 넘침 없음
+  const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  await mc.addInitScript(() => { try { localStorage.setItem('wos_tour_auto', '1'); } catch {} });
+  const m = await login(mc, 'tour77m@dagym.test', 'tour77m-pass-1234');
+  const mt = m.getByTestId('tour');
+  await mt.waitFor({ timeout: 15000 });
+  let found = false;
+  for (let k = 0; k < 10 && (await mt.count()); k++) {
+    if ((await m.getByTestId('tour-title').innerText()) === '업무') {
+      await m.waitForTimeout(350);
+      const [spot, tabs, bub] = await Promise.all([m.getByTestId('tour-spot').boundingBox(), m.getByTestId('mobile-tabs').boundingBox(), mt.boundingBox()]);
+      assert.ok(spot.y >= tabs.y - 8, `하단 탭의 업무를 가리킴 spot=${JSON.stringify(spot)} tabs=${JSON.stringify(tabs)}`);
+      assert.ok(bub.y >= 0 && bub.y + bub.height <= spot.y + 1 && bub.x >= 0 && bub.x + bub.width <= 390, '말풍선은 탭 위·화면 안');
+      await m.waitForTimeout(250); await m.screenshot({ path: `${SHOTS}/196-tour-mobile.png` });
+      found = true; break;
+    }
+    await m.getByTestId('tour-next').tap(); await m.waitForTimeout(150);
+  }
+  assert.ok(found, '휴대폰 업무 탭 단계');
+  assert.ok(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '가로 넘침 없음');
+  await m.getByTestId('tour-skip').tap();
+  await mt.waitFor({ state: 'detached' });
+  await mc.close();
+});
+
+await step('#443 실행 애니메이션: 앱을 처음 열면 로고(튀어나옴·체크 그리기·워드마크) 약 1초 뒤 사라짐 · 같은 실행(세션)에선 다시 안 나옴 · 동작 줄이기면 안 나옴', async () => {
+  const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const p = await login(c, 'tour77@dagym.test', 'tour77-pass-1234');
+  assert.equal(await p.evaluate(() => sessionStorage.getItem('wos_intro')), '1', '첫 화면에서 재생됨');
+  await p.waitForTimeout(1500);
+  assert.equal(await p.locator('#wos-intro').count(), 0, '재생 뒤 지워짐');
+  await p.reload({ waitUntil: 'domcontentloaded' });
+  assert.equal(await p.locator('#wos-intro').count(), 0, '같은 세션 다시 열면 바로 없음');
+  // 새 실행(세션) 흉내: 표시를 지우고 다시 열면 → 재생 중(로고·워드마크 보임) → 사라짐
+  await p.evaluate(() => sessionStorage.removeItem('wos_intro'));
+  await p.reload({ waitUntil: 'domcontentloaded' });
+  const intro = p.getByTestId('launch-intro');
+  assert.equal(await intro.getAttribute('class'), 'wi-play');
+  await p.waitForTimeout(700); await p.screenshot({ path: `${SHOTS}/197-launch-intro.png` });
+  await intro.waitFor({ state: 'detached', timeout: 3000 });
+  await c.close();
+  const rc = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR', reducedMotion: 'reduce' });
+  const rp = await login(rc, 'tour77@dagym.test', 'tour77-pass-1234');
+  assert.equal(await rp.evaluate(() => sessionStorage.getItem('wos_intro')), null, '동작 줄이기 = 재생 안 함');
+  assert.equal(await rp.locator('#wos-intro').count(), 0);
+  await rc.close();
+});
+
+await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]에 Google Ads 전환 ID/라벨 저장 → 광고 클릭(gclid) 소개 화면 → 가입(광고 효과 측정 동의) → 회사가 만들어지는 순간 conversion 1회 + _gcl_aw · 동의 안 하면 안 보냄', async () => {
+  srv.proc.kill('SIGTERM'); await new Promise((r) => setTimeout(r, 1000));
+  srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SIGNUP_IP_PER_DAY: '50' });
+  await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
+  await owner.goto(BASE + '/platform');
+  await owner.getByTestId('ct-googleAds').fill('AW-123456789/AbCdEf123');
+  await owner.getByTestId('ct-save').click();
+  await owner.getByText('가입 전환 태그를 저장했습니다').first().waitFor();
+  const signupWith = async (email, consent) => {
+    const c = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+    const tagHits = [];
+    await c.route(/googletagmanager\.com|googleadservices\.com|connect\.facebook\.net|wcs\.naver\.net/, (r) => { tagHits.push(r.request().url()); return r.fulfill({ status: 200, contentType: 'text/javascript', body: '' }); });
+    const p = await c.newPage();
+    await p.goto(BASE + '/welcome?gclid=TeSt_GcLiD_1234567890');
+    await p.waitForTimeout(500);
+    assert.equal(tagHits.filter((u) => /googleadservices|AW-/.test(u)).length, 0, '소개 화면에는 광고 전환 태그를 미리 깔지 않음');
+    await p.goto(BASE + '/signup');
+    await p.getByLabel('이름').fill('전환시험'); await p.getByLabel('이메일').fill(email);
+    await p.locator('input[type="password"]').first().fill('signup-pass-1234');
+    for (const k of ['terms', 'privacy', 'age14']) await p.getByTestId(`agree-${k}`).check();
+    await p.getByTestId('agree-ads').waitFor();
+    if (consent) await p.getByTestId('agree-ads').check();
+    await p.getByTestId('signup-next').click();
+    await p.getByTestId('mode-team').click();
+    await p.getByTestId('signup-step-company').locator('input').first().fill('전환시험상사');
+    await p.getByTestId('signup-industry').selectOption({ index: 1 }); // 업종 필수
+    await p.waitForTimeout(2700); // 가입 화면 연 뒤 2.5초 안 제출은 봇으로 봄
+    await p.getByTestId('signup-submit').click();
+    await p.getByTestId('signup-done').waitFor().catch(async (e) => { await p.screenshot({ path: 'test-results/debug-449.png', fullPage: true }); throw new Error(`가입 완료 화면 안 뜸: ${(await p.locator('[role="alert"]').allInnerTexts()).join(' | ')} — ${e.message.split('\n')[0]}`); });
+    const dl = await p.evaluate(() => (window.dataLayer ?? []).map((a) => JSON.parse(JSON.stringify(Array.from(a)))));
+    const cookies = await c.cookies();
+    await c.close();
+    return { dl, hits: tagHits, gcl: cookies.find((k) => k.name === '_gcl_aw')?.value };
+  };
+  const yes = await signupWith('conv-yes@workin.test', true);
+  const conv = yes.dl.filter((a) => a[0] === 'event' && a[1] === 'conversion');
+  assert.equal(conv.length, 1); assert.equal(conv[0][2].send_to, 'AW-123456789/AbCdEf123');
+  assert.match(yes.gcl ?? '', /^GCL\.\d{10}\.TeSt_GcLiD_1234567890$/, '광고 클릭 id → Google 표준 쿠키');
+  assert.ok(yes.hits.some((u) => u.includes('gtag/js?id=AW-123456789')), 'Google 태그 불러옴');
+  const [t] = await sql`select t.id from tenants t join users u on u.tenant = t.id where u.email = 'conv-yes@workin.test'`;
+  assert.ok(t, '회사가 만들어짐');
+  const no = await signupWith('conv-no@workin.test', false);
+  assert.equal(no.dl.filter((a) => a[1] === 'conversion').length, 0, '동의 안 하면 안 보냄');
+  assert.equal(no.hits.length, 0); assert.equal(no.gcl, undefined);
+  await ctx.owner.ok('PUT', '/api/platform/conversion-tags', { googleAds: '' });
 });
 
 await browser.close();
