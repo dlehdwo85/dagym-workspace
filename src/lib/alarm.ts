@@ -36,5 +36,9 @@ export async function recordAlarmResult(u: SessionUser, i: z.infer<typeof alarmR
   if (!own) throw notFound(i.kind === 'task' ? '업무가 없습니다' : '일정이 없습니다');
   if (i.action === 'snooze' && !i.minutes) throw badRequest('미룬 시간(분)을 보내 주세요');
   await activity(sql, i.kind, i.id, u.id, i.action === 'dismiss' ? 'alarm_dismissed' : 'alarm_snoozed', { minutes: i.minutes ?? null, key: i.key ?? null, from: 'device' });
+  // 대표 10/22: 휴대폰 알림에서 [해제]/[10분 뒤]를 누르면 같은 업무·일정의 앱 안 알람 띠(서버 알림)도 함께 처리 — 전에는 기록만 해서 띠가 계속 떠 있었다
+  const open = sql`user_id = ${u.id} and entity_type = ${i.kind} and entity_id = ${i.id} and (meta->>'alarm')::boolean is true and action_done is null`;
+  if (i.action === 'dismiss') await sql`update notifications set action_done = '알람 해제', action_done_at = now(), read_at = coalesce(read_at, now()) where ${open}`;
+  else await sql`update notifications set meta = meta || ${sql.json({ snoozed: true, snoozeUntil: new Date(Date.now() + i.minutes! * 60_000).toISOString() })} where ${open} and read_at is null`;
   return { ok: true };
 }

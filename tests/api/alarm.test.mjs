@@ -89,8 +89,16 @@ describe('알람처럼 울리기', () => {
   test('기기 로컬 알람 결과 기록: POST /api/reminders/alarm (dismiss/snooze, 남의 업무 404, snooze 는 minutes 필수)', async () => {
     const mine = (await ctx.owner.ok('POST', '/api/tasks', { title: '기기 알람 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false, dueDate: addDays(today, 1), dueTime: '10:00' })).id;
     const other = (await ctx.owner.ok('POST', '/api/tasks', { title: '남의 업무', assigneeId: ctx.staffB.id, orgUnitId: ctx.siteB, approvalRequired: false, dueDate: addDays(today, 1) })).id;
+    // 대표 10/22: 같은 업무의 앱 안 알람 띠(서버 알림)도 휴대폰 [10분 뒤]/[해제]를 따라간다
+    const [row] = await sql`insert into notifications (user_id, type, title, body, link, entity_type, entity_id, meta, dedupe_key) values (${ctx.staffA.id}, 'due_soon', '기기 알람 업무 마감 10분 전', '', ${`/tasks/${mine}`}, 'task', ${mine}, ${sql.json({ kind: 'due', alarm: true })}, ${`test-device:${mine}`}) returning id`;
+    const bar = async () => (await ctx.staffA.client.ok('GET', '/api/notifications?unread=1')).alarms.some((a) => a.id === row.id);
+    const item = (await ctx.staffA.client.ok('GET', '/api/notifications?unread=1')).alarms.find((a) => a.id === row.id);
+    assert.deepEqual([item.entityType, item.entityId], ['task', mine], '띠 항목에 업무 id(휴대폰 알림 지우기용)');
     await ctx.staffA.client.ok('POST', '/api/reminders/alarm', { kind: 'task', id: mine, action: 'snooze', minutes: 10, key: `task:${mine}` });
+    assert.equal(await bar(), false, '휴대폰 [10분 뒤] → 띠에서도 빠짐');
     await ctx.staffA.client.ok('POST', '/api/reminders/alarm', { kind: 'task', id: mine, action: 'dismiss' });
+    const [done] = await sql`select action_done, read_at from notifications where id = ${row.id}`;
+    assert.equal(done.action_done, '알람 해제'); assert.ok(done.read_at, '휴대폰 [해제] → 띠 알림도 처리됨');
     assert.equal((await ctx.staffA.client.req('POST', '/api/reminders/alarm', { kind: 'task', id: other, action: 'dismiss' })).status, 404);
     assert.equal((await ctx.staffA.client.req('POST', '/api/reminders/alarm', { kind: 'task', id: mine, action: 'snooze' })).status, 400);
     const acts = await sql`select action, changes from activities where entity_id = ${mine} and action like 'alarm_%' order by id`;

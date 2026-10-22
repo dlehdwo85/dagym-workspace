@@ -79,14 +79,12 @@ export async function initNative(router: Router) {
       await LocalNotifications.cancel({ notifications: [{ id }] }).catch(() => {});
       await (LocalNotifications as any).removeDeliveredNotificationsById?.({ ids: [id] })?.catch?.(() => {});
       await LocalNotifications.removeDeliveredNotifications({ notifications: [{ id, title: n.title ?? '', body: n.body ?? '' } as any] }).catch(() => {});
-    } else if (from === 'fcm' && n.id !== undefined) await FirebaseMessaging.removeDeliveredNotifications({ notifications: [{ id: String(n.id) }] }).catch(() => {});
+    } else if (from === 'fcm' && n.id !== undefined) await FirebaseMessaging.removeDeliveredNotifications({ notifications: [{ id: String(n.id), tag: x.key ? String(x.key) : undefined } as any] }).catch(() => {}); // 서버가 tag = 알림 id 로 보냄 — tag 없이는 안 지워졌다
     const report = (action: 'dismiss' | 'snooze', minutes?: number) => (x.kind && x.entityId ? api('/api/reminders/alarm', { body: { kind: x.kind, id: x.entityId, action, minutes, key: x.key ? String(x.key).slice(0, 200) : undefined } }).catch(() => {}) : Promise.resolve());
     const { toast } = await import('./ui');
     if (act === 'snooze') {
       const minutes = Math.min(120, Math.max(1, Number(x.snoozeMinutes) || 10));
-      if (hasLocal()) await LocalNotifications.schedule({ notifications: [{
-        id: (Math.floor(Date.now() / 1000) % 1_000_000_000) + 1_000_000_000, title: n.title ?? '알람', body: n.body ?? '', channelId: ALARM_CHANNEL, sound: ALARM_SOUND, actionTypeId: 'alarm', ongoing: true,
-        schedule: { at: new Date(Date.now() + minutes * 60_000), allowWhileIdle: true }, extra: { ...x, alarm: true, snoozed: (Number(x.snoozed) || 0) + 1 } }] }).catch(() => {});
+      await scheduleSnooze({ title: n.title ?? '알람', body: n.body ?? '', minutes, extra: x });
       await report('snooze', minutes); toast.ok(`${minutes}분 뒤 다시 알립니다`); window.dispatchEvent(new Event('wos-refresh'));
     } else if (act === 'dismiss') { await report('dismiss'); toast.ok('알람을 해제했습니다'); window.dispatchEvent(new Event('wos-refresh')); }
     else go(x.link);
@@ -172,6 +170,45 @@ let syncing: Promise<void> | null = null, again = false, channel = false;
  * FCM 알람 푸시도 같은 채널(서버 push.ts ALARM_CHANNEL) — 로컬 알림 권한이 없어도 채널은 만들어 둔다.
  */
 export const ALARM_CHANNEL = 'alarm_vibrate';
+
+/** 대표 10/22: 기기에 예약한 알람 id ↔ 업무·일정 — 앱 안 띠에서 [해제]/[10분 뒤]를 눌렀을 때 이미 울린(고정된) 휴대폰 알림을 찾아 지우려고 */
+type AlarmRef = { id: number; entityId: string; at: number };
+const ALARM_KEY = 'wos_alarm_ids';
+function loadAlarms(): AlarmRef[] { try { return JSON.parse(localStorage.getItem(ALARM_KEY) || '[]'); } catch { return []; } }
+function rememberAlarms(add: AlarmRef[], replaceFuture = false) {
+  const now = Date.now();
+  // 지난 하루치(이미 울린 것)는 남기고, 다시 맞출 때 앞으로 울릴 것은 새 목록으로
+  const keep = loadAlarms().filter((a) => a.at > now - 86_400_000 && (!replaceFuture || a.at <= now));
+  try { localStorage.setItem(ALARM_KEY, JSON.stringify([...keep, ...add].slice(-200))); } catch { /* 저장 못 함 */ }
+}
+async function scheduleSnooze(o: { title: string; body: string; minutes: number; extra: any }) {
+  if (!hasLocal()) return;
+  const id = (Math.floor(Date.now() / 1000) % 1_000_000_000) + 1_000_000_000, at = Date.now() + o.minutes * 60_000;
+  await LocalNotifications.schedule({ notifications: [{
+    id, title: o.title, body: o.body, channelId: ALARM_CHANNEL, sound: ALARM_SOUND, actionTypeId: 'alarm', ongoing: true,
+    schedule: { at: new Date(at), allowWhileIdle: true }, extra: { ...o.extra, alarm: true, snoozed: (Number(o.extra?.snoozed) || 0) + 1 } }] }).catch(() => {});
+  if (o.extra?.entityId) rememberAlarms([{ id, entityId: String(o.extra.entityId), at }]);
+}
+/**
+ * 앱 안 알람 띠에서 [해제]/[10분 뒤]를 눌렀을 때 휴대폰 쪽 정리:
+ * ① 이미 울려 알림창에 고정된 같은 업무·일정의 기기 예약 알람 지우기 ② 서버 푸시(FCM, tag = 알림 id) 지우기
+ * ③ [10분 뒤]면 이 기기에 10분 뒤 알람 다시 예약(기기 예약을 쓰는 휴대폰은 서버가 같은 알림을 다시 푸시하지 않음)
+ */
+export async function settleAlarmOnDevice(n: { notificationId: string; entityId: string | null; entityType: string | null; title: string; body: string; link: string }, action: 'dismiss' | 'snooze') {
+  if (!Capacitor.isNativePlatform()) return;
+  const now = Date.now();
+  if (hasLocal() && n.entityId) {
+    const fired = loadAlarms().filter((a) => a.entityId === n.entityId && a.at <= now + 60_000);
+    if (fired.length) await LocalNotifications.cancel({ notifications: fired.map((a) => ({ id: a.id })) }).catch(() => {});
+  }
+  const fcm = FirebaseMessaging as any;
+  const d = await fcm.getDeliveredNotifications?.().catch(() => null);
+  const mine = (d?.notifications ?? []).filter((x: any) => x?.tag === n.notificationId);
+  if (mine.length) await FirebaseMessaging.removeDeliveredNotifications({ notifications: mine.map((x: any) => ({ id: String(x.id), tag: x.tag })) as any }).catch(() => {});
+  if (action === 'snooze' && hasLocal() && (await LocalNotifications.checkPermissions().catch(() => ({ display: 'denied' }))).display === 'granted') {
+    await scheduleSnooze({ title: n.title, body: n.body, minutes: 10, extra: { link: n.link, kind: n.entityType === 'event' ? 'event' : n.entityType === 'task' ? 'task' : undefined, entityId: n.entityId ?? undefined, key: n.notificationId, snoozeMinutes: 10 } });
+  }
+}
 const ALARM_SOUND = 'silence.wav';
 let alarmChannel = false;
 async function createAlarmChannel() {
@@ -199,6 +236,7 @@ export function resyncReminders(): Promise<void> {
       if (stale.length) await LocalNotifications.cancel({ notifications: stale.map((n) => ({ id: n.id })) });
       const list = (reminders as { id: number; key: string; fireAt: string; title: string; body: string; link: string; kind?: string; entityId?: string; alarm?: boolean; snoozeMinutes?: number; actions?: { id: string; label: string }[] }[]).filter((r) => new Date(r.fireAt).getTime() > Date.now()).slice(0, 64);
       // 로컬 10/20(대표): alarm 이면 알람 채널(전체 화면·소리·[해제][10분 뒤] — 네이티브가 extra 를 보고 처리, 결과는 POST /api/reminders/alarm)
+      rememberAlarms(list.filter((r) => r.alarm && r.entityId).map((r) => ({ id: r.id, entityId: r.entityId!, at: Date.parse(r.fireAt) })), true);
       if (list.length) await LocalNotifications.schedule({ notifications: list.map((r) => ({
         id: r.id, title: r.title, body: r.body, channelId: r.alarm ? ALARM_CHANNEL : 'reminders', ...(r.alarm ? { sound: ALARM_SOUND } : {}), ...(r.alarm ? { actionTypeId: 'alarm', ongoing: true } : {}),
         schedule: { at: new Date(r.fireAt), allowWhileIdle: true }, extra: { link: r.link, key: r.key, kind: r.kind, entityId: r.entityId, alarm: !!r.alarm, snoozeMinutes: r.snoozeMinutes ?? 10, actions: r.actions ?? [] },

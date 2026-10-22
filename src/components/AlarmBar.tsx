@@ -7,7 +7,7 @@ import { cx, toast } from '@/components/ui';
 
 /** 로컬 10/20(대표): 웹은 전체 화면 알람이 없어 — 알람처럼 울리는 알림(일정·마감)이 오면 화면 맨 위 고정 띠 + [해제][10분 뒤][열기]
  *  대표 10/22: 소리 없이 진동만(휴대폰·지원 브라우저). 전에는 1.5초마다 삐-삐 소리를 냈다 */
-export type AlarmItem = { id: string; type: string; title: string; body: string | null; link: string; actions: { id: string; label: string }[] };
+export type AlarmItem = { id: string; type: string; title: string; body: string | null; link: string; entityType?: string | null; entityId?: string | null; actions: { id: string; label: string }[] };
 
 const PATTERN = [400, 200, 400]; // 진동 0.4초 · 쉼 0.2초 · 진동 0.4초
 const REPEAT_MS = 5000, MAX_REPEAT = 12; // 5초마다, 최대 1분 — 띠는 해제·10분 뒤 전까지 남는다
@@ -28,7 +28,13 @@ export function AlarmBar({ items, onChange }: { items: AlarmItem[]; onChange: (i
   if (!items.length) return null;
   async function act(n: AlarmItem, action: string) {
     setBusy(n.id + action);
-    try { await api(`/api/notifications/${n.id}/action`, { body: { action } }); toast.ok(action === 'snooze' ? '10분 뒤 다시 알립니다' : '알람을 해제했습니다'); } catch (e: any) { toast.error(e.message); }
+    try {
+      await api(`/api/notifications/${n.id}/action`, { body: { action } });
+      // 대표 10/22: 앱 안 띠에서 처리해도 휴대폰 알림창에 고정(ongoing)으로 남아 있던 같은 알람을 지우고, 10분 뒤면 휴대폰에 다시 예약
+      const { settleAlarmOnDevice } = await import('./native');
+      await settleAlarmOnDevice({ notificationId: n.id, entityId: n.entityId ?? null, entityType: n.entityType ?? null, title: n.title, body: n.body ?? '', link: n.link }, action as 'dismiss' | 'snooze').catch(() => {});
+      toast.ok(action === 'snooze' ? '10분 뒤 다시 알립니다' : '알람을 해제했습니다');
+    } catch (e: any) { toast.error(e.message); }
     finally { setBusy(null); onChange(n.id); }
   }
   return (
