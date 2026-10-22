@@ -14,7 +14,7 @@ export type HfSettings = { enabled: boolean; hasKey: boolean; keyIssue: HfKeyIss
 export const HF_BASE = 'https://api.higgsfield.ai';
 /** 모델 id = Higgsfield 엔드포인트 경로(문서의 Endpoint ID). 단가는 콘솔 모델 페이지 가격으로 운영자가 고친다 */
 export const DEFAULT_MODELS: HfModel[] = [
-  { id: 'higgsfield-ai/soul/v2/standard', kind: 'image', name: 'SOUL V2(실사·사람)', credits: 6.5, usd: 0.006, enabled: true, note: '실사 기본 · 1080p' },
+  { id: 'higgsfield-ai/soul/v2/standard', kind: 'image', name: 'SOUL V2(실사·사람)', credits: 6.5, usd: 0.01, enabled: true, note: '실사 기본 · 1080p · 10/22 실측 $0.01/장' },
   { id: 'ideogram/v4.0', kind: 'image', name: 'Ideogram 4(글자 들어간 시안)', credits: 6.5, usd: 0.006, enabled: true, note: '포스터·글자 렌더' },
   { id: 'recraft/v4.1/text-to-image', kind: 'image', name: 'Recraft 4.1(일러스트·아이콘)', credits: 4, usd: 0.003, enabled: true },
   { id: 'kling-video/v3.0-turbo/text-to-video', kind: 'video', name: 'Kling 3 Turbo(3~15초)', credits: 80, usd: 0.09, enabled: true, note: '릴스·쇼츠 기본 · 초당' },
