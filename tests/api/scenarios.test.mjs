@@ -1080,7 +1080,7 @@ describe('매출 2·3단계 (대표 승인): 표준 CSV · GPT Action 토큰 · 
     assert.equal((await fetch(BASE + '/api/public/revenue/openapi.json')).status, 404);
     assert.equal((await sql`select count(*)::int n from api_tokens where revoked_at is null`)[0].n, 0);
   });
-  test('V13 AI 분석: 내장 AI(가짜 Anthropic)로 집계 숫자만 전송, 입력에 없는 현장 제안은 버림, 사용량 기록', async () => {
+  test('V13 AI 분석: 내장 AI(가짜 Anthropic)로 집계 숫자만 전송, 입력에 없는 현장 제안은 버림, 사용량 기록 · #161 Sonnet 기본·종합 보고만 Opus', async () => {
     await ctx.owner.ok('PUT', '/api/revenue', { orgUnitId: ctx.siteA, month: '2026-07', revenue: 70000000, expense: 40000000, note: '비밀 메모 김대표 010-1234-5678' });
     assert.equal((await ctx.staffA.client.post('/api/revenue/ai', { period: '2026-07' })).status, 404);
     const before = (await (await fetch(FAKE + '/__state')).json()).anthropic.length;
@@ -1091,7 +1091,8 @@ describe('매출 2·3단계 (대표 승인): 표준 CSV · GPT Action 토큰 · 
     assert.equal(report.output.anomalies[0].site, '다짐 강남점');
     const sent = (await (await fetch(FAKE + '/__state')).json()).anthropic.slice(before);
     assert.equal(sent.length, 1); assert.equal(sent[0].key, 'sk-ant-fake-test');
-    assert.equal(sent[0].body.model, 'claude-opus-5-5', '복잡한 분석만 opus(AI_MODEL_DEEP)');
+    assert.equal(sent[0].body.model, 'claude-sonnet-5-5', '#161 매출 분석은 Sonnet(보통 생각 깊이) — Opus 는 월 마감 종합 보고만');
+    assert.equal(sent[0].body.output_config.effort, 'medium');
     assert.equal(sent[0].body.output_config.format.type, 'json_schema');
     const payload = JSON.stringify(sent[0].body.messages);
     for (const bad of ['비밀 메모', '010-1234-5678', '정산.xlsx', '@dagym.test', '김대표']) assert.ok(!payload.includes(bad), `보내면 안 되는 값: ${bad}`);
@@ -1099,6 +1100,11 @@ describe('매출 2·3단계 (대표 승인): 표준 CSV · GPT Action 토큰 · 
     assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'revenue'`)[0].n, 1, '회사 AI 사용량에 포함');
     const again = await ctx.owner.ok('GET', '/api/revenue/ai?period=2026-07');
     assert.equal(again.report.id, report.id);
+    assert.equal(report.kind, 'manual'); assert.ok(report.stats?.total, '서버 계산값(증감률·이동평균·추세)이 보고서에 함께');
+    const deep = await ctx.owner.ok('POST', '/api/revenue/ai', { period: '2026-07', deep: true });
+    assert.equal(deep.report.kind, 'deep');
+    assert.equal((await (await fetch(FAKE + '/__state')).json()).anthropic.at(-1).body.model, 'claude-opus-5-5', '[종합 보고]만 opus(AI_MODEL_DEEP)');
+    assert.equal((await ctx.owner.ok('GET', `/api/revenue/ai?id=${report.id}`)).report.id, report.id, '보고서 이력에서 고르기');
     assert.equal((await ctx.owner.post('/api/revenue/ai', { period: '2020-01' })).status, 400, '실적 없는 달');
   });
   test('V13 자료로 입력(AI): 정산서 → "매출 근거" 폴더 저장 → AI 추출 미리보기(저장 안 함) → 확인 후 반영, 숫자에 근거 파일 연결', async () => {

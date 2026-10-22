@@ -49,6 +49,7 @@ import { salesLeads2 } from './salesLeads2.step.mjs';
 import { landing } from './landing.step.mjs';
 import { mktGoals } from './mktGoals.step.mjs';
 import { mktQuality } from './mktQuality.step.mjs';
+import { revenueAuto } from './revenueAuto.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
 import { attachLibrary } from './attachLibrary.step.mjs';
@@ -1083,6 +1084,7 @@ await step('W-5 매출 AI 분석(내장 AI, AI 제안 표시·근거 숫자로 �
   const [row] = await sql`select revenue::float8 as revenue, source, source_file_ids from revenue_entries where org_unit_id = ${ctx.siteB} and month = ${month + '-01'}`;
   assert.equal(row.revenue, 12400000, '사람이 고친 값으로 반영'); assert.equal(row.source, 'ai'); assert.equal(row.source_file_ids.length, 1);
 });
+await step('#161 매출 자료 자동 분석: 확인 대기 카드(지금 값과 다른 칸 강조) → 고쳐서 확정 → 분석 대기 → [지금 분석] → 보고서(동향·전망 추정·대안·확인 필요·근거 파일) · 휴대폰 넘침 없음', () => revenueAuto({ owner, ctx, BASE, SHOTS, sql }));
 await step('V13 메뉴 권한: 대표만 "메뉴 권한" 탭 → 현장 관리자에게 매출 보기 켜기 → 그 사람 메뉴에 매출(입력 칸 없음) → 끄면 사라짐', async () => {
   await owner.goto(BASE + '/admin/users');
   await owner.getByTestId('tab-menus').click();

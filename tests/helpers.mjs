@@ -34,6 +34,7 @@ export function serverEnv() {
     DATABASE_URL: DB_URL,
     APP_URL: BASE,
     APP_SECRET: 'test-secret-test-secret-test-secret-123',
+    REVENUE_AUTO: '0', // #161 자료실 매출 자료 자동 감지·읽기는 tests/api/revenue-auto.test.mjs 에서만 켬(다른 시험의 가짜 AI 응답 순서를 흔들지 않게)
     TOURS_AUTO: '0', // #77 처음 사용 안내는 시험 서버에서 자동으로 안 띄움(다른 화면 시험을 가리지 않게) — 투어 시험은 localStorage wos_tour_auto=1
     SETUP_SECRET: 'setup-test',
     CRON_SECRET: 'cron-test-secret',

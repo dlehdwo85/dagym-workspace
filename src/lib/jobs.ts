@@ -189,6 +189,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('salesDigest', async () => (await import('./sales/digest')).salesDigestTick()); // 당일 입찰 다이제스트(회사 설정 시각, 메일·알림·푸시)
   await step('notices', async () => (await import('./announcements')).noticesJob()); // V30 ② 예약 게시
   await step('textExtract', async () => (await import('./library')).textExtractJob()); // V14 32: HWP·PDF 본문 재추출(기존 파일, 한 번에 15개)
+  await step('revenueAuto', async () => (await import('./revenueAuto')).revenueAutoTick()); // #161 V25 매출 자료: 끊긴 숫자 읽기 이어서 · 10분 모은 같은 달 분석
   await step('contacts', async () => (await import('./contacts')).contactsJob()); // V31 연락처 휴지통 30일 정리
   await step('docVersions', async () => (await import('./libDocs')).docVersionsJob()); // 10/19 공동 편집 문서: 10분·모두 나가면 변경 기록·조각 합치기·검색 글자
   await step('mktAuto', async () => (await import('./mktAuto')).mktAutoTick()); // V41 4-3 마케팅 주간 규칙 → 제작 → 승인함 → 알림
