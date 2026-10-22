@@ -77,9 +77,12 @@ const canEditForms = async (u: SessionUser) => isAdmin(u) || (await import('./me
 export async function listForms(u: SessionUser) {
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select f.id, f.kind, f.name, f.fields, f.line_id, f.active, l.name as line_name from approval_forms f left join approval_lines l on l.id = f.line_id where f.tenant = ${t} order by f.kind, f.created_at`;
+  // #429 양식 기본 결재선 = (양식 × 회사 전체) 배정. 예전 양식 칸(line_id)은 배정이 없을 때만
+  const assigned = await sql<{ kind: string; line_id: string; name: string }[]>`select a.kind, a.line_id, l.name from approval_line_assignments a join approval_lines l on l.id = a.line_id where a.tenant = ${t} and a.team_id is null and a.kind <> '*' and l.active`;
+  const def = (k: string, lineId: string | null, lineName: string | null) => { const a = assigned.find((x) => x.kind === k); return a ? { lineId: a.line_id, lineName: a.name } : { lineId, lineName }; };
   const forms = KINDS.flatMap((k) => {
     const mine = rows.filter((r) => r.kind === k && r.active);
-    return mine.length ? mine.map((r) => ({ id: r.id, kind: r.kind, name: r.name, fields: r.fields as Field[], lineId: r.line_id, lineName: r.line_name, isDefault: false })) : [{ id: null, kind: k, name: DEFAULT_NAME[k], fields: DEFAULT_FIELDS[k], lineId: null, lineName: null, isDefault: true }];
+    return mine.length ? mine.map((r) => ({ id: r.id, kind: r.kind, name: r.name, fields: r.fields as Field[], ...def(k, r.line_id, r.line_name), isDefault: false })) : [{ id: null, kind: k, name: DEFAULT_NAME[k], fields: DEFAULT_FIELDS[k], ...def(k, null, null), isDefault: true }];
   });
   const lines = await sql<{ id: string; name: string; active: boolean }[]>`select id, name, active from approval_lines where (tenant = ${t} or org_unit_id in (select id from org_units where tenant = ${t})) and active order by name`;
   return { forms, lines, canEdit: await canEditForms(u) };
@@ -88,12 +91,16 @@ export async function saveForm(u: SessionUser, id: string | null, i: z.infer<typ
   if (!(await canEditForms(u))) throw forbidden('결재 양식은 운영 상태 편집 권한(대표·관리자)만 고칠 수 있습니다');
   const sql = db(); const t = tenantOf(u);
   if (new Set(i.fields.map((f) => f.key)).size !== i.fields.length) throw badRequest('칸 키가 겹칩니다');
-  if (i.lineId) { const [l] = await sql`select 1 from approval_lines where id = ${i.lineId}`; if (!l) throw notFound('결재선이 없습니다'); }
+  if (i.lineId) { const [l] = await sql`select 1 from approval_lines l where l.id = ${i.lineId} and (l.tenant = ${t} or l.org_unit_id in (select id from org_units where tenant = ${t}))`; if (!l) throw notFound('결재선이 없습니다'); }
   let fid = id;
   if (id) {
     const r = await sql`update approval_forms set name = ${i.name}, fields = ${sql.json(i.fields as never)}, line_id = ${i.lineId ?? null}, active = ${i.active ?? true}, updated_at = now() where id = ${id} and tenant = ${t} returning id`;
     if (!r.length) throw notFound('양식이 없습니다');
   } else { const [r] = await sql<{ id: string }[]>`insert into approval_forms (tenant, kind, name, fields, line_id, created_by) values (${t}, ${i.kind}, ${i.name}, ${sql.json(i.fields as never)}, ${i.lineId ?? null}, ${u.id}) returning id`; fid = r.id; }
+  if (i.lineId !== undefined) { // #429 양식 기본 결재선 = (양식 × 회사 전체) 배정과 같은 값
+    await sql`delete from approval_line_assignments where tenant = ${t} and kind = ${i.kind} and team_id is null`;
+    if (i.lineId) await sql`insert into approval_line_assignments (tenant, kind, team_id, line_id, created_by) values (${t}, ${i.kind}, null, ${i.lineId}, ${u.id})`;
+  }
   await audit(sql, u.id, 'approval_form.save', 'approval_form', fid, { kind: i.kind, name: i.name }, ip);
   return { id: fid };
 }
@@ -130,38 +137,39 @@ async function requesterUnit(sql: Sql, u: SessionUser, t: string) {
   const [hq] = await sql<{ id: string }[]>`select id from org_units where tenant = ${t} and type = 'hq' order by created_at limit 1`;
   return m?.org_unit_id ?? hq?.id ?? null;
 }
-/** 결재선 고르기: 지정 → 양식 기본 → 요청자 조직(상위 포함)에 맞는 활성 결재선 1개. 지정한 결재선은 이 회사 것이어야 한다(다른 회사 404) */
-async function resolveLine(sql: Sql, t: string, orgUnitId: string, given: string | null | undefined, formLine: string | null) {
-  if (given) {
-    const [l] = await sql<{ id: string }[]>`select id from approval_lines where id = ${given} and active and (tenant = ${t} or org_unit_id in (select id from org_units where tenant = ${t}))`;
-    if (!l) throw notFound('결재선이 없습니다');
-    return l.id;
-  }
-  if (formLine) return formLine;
-  const [l] = await sql<{ id: string }[]>`with recursive up as (select id, parent_id from org_units where id = ${orgUnitId} union select o.id, o.parent_id from org_units o join up on o.id = up.parent_id)
-    select l.id from approval_lines l where l.active and (l.org_unit_id in (select id from up) or (l.org_unit_id is null and l.tenant = ${t})) order by l.org_unit_id nulls last limit 1`;
-  return l?.id ?? null;
-}
-/** #114 ② 작성 화면 결재선 미리 보기: 기안(나) → 단계마다 실제 결재자 이름 + 고를 수 있는 결재선 목록 */
-export async function previewLine(u: SessionUser, q: { kind?: string; formId?: string; lineId?: string }) {
+/** #114 ② · #429 작성 화면 결재선 미리 보기: 기안(나) → 1차·2차·3차 실제 결재자 이름 + 어디서 정해졌는지(양식×팀 배정·양식 기본·팀 기본·회사 기본) + 조건 단계(맞지 않으면 건너뜀 표시) */
+export async function previewLine(u: SessionUser, q: { kind?: string; formId?: string; lineId?: string; data?: string }) {
   const sql = db(); const t = tenantOf(u);
   const { forms, lines } = await listForms(u);
   const form = q.formId ? forms.find((f) => f.id === q.formId) : forms.find((f) => f.kind === q.kind);
+  const kind = form?.kind ?? q.kind ?? 'general';
   const orgUnitId = await requesterUnit(sql, u, t);
-  const lineId = orgUnitId ? await resolveLine(sql, t, orgUnitId, q.lineId, form?.lineId ?? null) : null;
-  let steps: { label: string; type: string; role: string | null; names: string[] }[] = [];
+  const A = await import('./approvals');
+  const res = await A.resolveLine(sql, t, { userId: u.id, orgUnitId, kind, given: q.lineId, formLine: form?.lineId ?? null });
+  let data: Record<string, unknown> = {};
+  try { if (q.data && q.data.length < 3000) { const d = JSON.parse(q.data); if (d && typeof d === 'object' && !Array.isArray(d)) data = d; } } catch { /* 값 없이 */ }
+  const m = A.requestMetrics(kind, data, null);
+  let steps: { order: number | null; label: string; type: string; role: string | null; names: string[]; skipped: boolean; cond: string | null }[] = [];
   let lineName: string | null = null;
-  if (lineId && orgUnitId) {
-    const [line] = await sql<{ name: string; steps: { label: string; type: string; role?: string; userId?: string }[] }[]>`select name, steps from approval_lines where id = ${lineId}`;
-    const { stepApprovers } = await import('./approvals');
+  if (res.lineId && orgUnitId) {
+    const [line] = await sql<{ name: string; steps: import('./approvals').Step[] }[]>`select name, steps from approval_lines where id = ${res.lineId}`;
     lineName = line?.name ?? null;
+    const chain = (line?.steps ?? []).some((st) => st.type === 'lead') ? await A.teamChain(sql, t, u.id) : [];
+    let order = 0;
     steps = await Promise.all((line?.steps ?? []).map(async (st) => {
-      const ids = await stepApprovers(sql, orgUnitId, { approver_type: st.type, approver_role: st.role ?? null, approver_user_id: st.userId ?? null });
+      const skipped = !A.stepApplies(st.when, m);
+      if (!skipped) order++;
+      const ord = skipped ? null : order;
+      let ids: string[] = [];
+      if (st.type === 'lead') { const l = A.leadFor(chain, st.up ?? 0, u.id); ids = l ? [l.userId] : []; }
+      else ids = await A.stepApprovers(sql, orgUnitId, { approver_type: st.type, approver_role: st.role ?? null, approver_user_id: st.userId ?? null }, { deputies: false });
       const names = ids.length ? (await sql<{ name: string }[]>`select name from users where id = any(${ids}::uuid[]) order by name`).map((x) => x.name) : [];
-      return { label: st.label, type: st.type, role: st.role ?? null, names };
+      return { order: ord, label: st.label, type: st.type, role: st.role ?? null, names, skipped, cond: st.when ? A.whenText(st.when) : null };
     }));
   }
-  return { lineId, lineName, fromForm: !q.lineId && !!form?.lineId, steps, lines: lines.map((l) => ({ id: l.id, name: l.name })), requester: u.name, missing: steps.some((s) => !s.names.length) };
+  const active = steps.filter((s) => !s.skipped);
+  return { lineId: res.lineId, lineName, source: res.source, sourceLabel: res.source ? A.SOURCE_LABEL[res.source] : null, via: res.via, fromForm: res.source === 'form', steps,
+    lines: lines.map((l) => ({ id: l.id, name: l.name })), requester: u.name, missing: active.some((s) => !s.names.length) };
 }
 
 /** 문서번호: 결재-YYYY-NNNN (회사·연도별 순번, 같은 트랜잭션 안에서 잠금) */
@@ -172,7 +180,7 @@ async function nextDocNo(sql: Sql, t: string) {
   return `결재-${year}-${String(n).padStart(4, '0')}`;
 }
 
-/** 결재 요청 만들기 = 결재 업무(검토 요청 상태) — 결재선: 지정 → 양식 기본 → 요청자 조직에 맞는 활성 결재선 1개. 참조자에게는 목록·알림만 */
+/** 결재 요청 만들기 = 결재 업무(검토 요청 상태) — 결재선: approvals.resolveLine(#429 지정 > 양식×팀 > 양식 기본 > 팀 기본 > 회사 기본 > 예전 방식). 참조자에게는 목록·알림만 */
 export async function createRequest(u: SessionUser, i: z.infer<typeof requestInput>, ip: string | null) {
   denyDemo(u);
   const sql = db(); const t = tenantOf(u);
@@ -184,8 +192,9 @@ export async function createRequest(u: SessionUser, i: z.infer<typeof requestInp
   if (!orgUnitId) throw badRequest('소속 조직이 없습니다');
   let draft: { id: string; line_id: string | null; cc_user_ids: string[] } | null = null;
   if (i.draftId) { [draft] = await sql<any[]>`select id, line_id, cc_user_ids from approval_requests where id = ${i.draftId} and tenant = ${t} and requester_id = ${u.id} and status = 'draft'`; if (!draft) throw notFound('임시 저장이 없습니다'); }
-  const lineId = await resolveLine(sql, t, orgUnitId, i.lineId ?? draft?.line_id ?? null, form.lineId);
-  if (!lineId) throw badRequest('결재선이 없습니다 — 관리자가 운영 상태 › 결재선에서 먼저 만들어 주세요');
+  const { lineId } = await (await import('./approvals')).resolveLine(sql, t, { userId: u.id, orgUnitId, kind: form.kind, given: i.lineId ?? draft?.line_id ?? null, formLine: form.lineId });
+  if (!lineId) throw badRequest('결재선이 없습니다 — 관리자가 결재 › 결재 설정에서 먼저 만들어 주세요');
+  await (await import('./approvals')).assertLineUsable(sql, t, lineId, { requesterId: u.id, orgUnitId, kind: form.kind, data, amount: typeof data.amount === 'number' ? data.amount : null }); // #429 결재자 없으면 업무를 만들기 전에 막음
   const cc = [...new Set((i.ccUserIds ?? draft?.cc_user_ids ?? []).filter((id) => id !== u.id))];
   if (cc.length) { const ok = await sql<{ id: string }[]>`select id from users where id = any(${cc}::uuid[]) and tenant = ${t} and status = 'active'`; if (ok.length !== cc.length) throw notFound('참조자를 찾을 수 없습니다'); }
   const title = summarize(form.kind, form.fields, data, u.name);
@@ -255,14 +264,18 @@ export async function onApprovalTaskDecided(tx: Sql, taskId: string, status: 'ap
   await audit(tx, actorId, `approval_request.${status}`, 'approval_request', r.id, { kind: r.kind, eventId }, null);
   return { id: r.id, eventId };
 }
-/** 지금 결재할 차례인 단계가 이 사용자 것인지(지정 사용자·역할: 대표/관리자 전사, 현장장·부서장은 업무 조직과 상위 조직 소속) */
+/** 지금 결재할 차례인 단계가 이 사용자 것인지(지정 사용자·역할: 대표/관리자 전사, 현장장·부서장은 업무 조직과 상위 조직 소속)
+ *  #429 대결: 오늘 부재 중인 결재자가 이 사용자를 대리인으로 정했으면 그 결재자 차례도 이 사용자 것 */
 function approverCond(sql: Sql, u: SessionUser) {
-  return sql`exists (select 1 from task_approvals a where a.task_id = r.task_id and a.status = 'pending' and a.round = (select max(round) from task_approvals where task_id = r.task_id)
-    and ((a.approver_type = 'user' and a.approver_user_id = ${u.id})
-      or (a.approver_type = 'role' and ((a.approver_role = 'owner' and ${u.role} = 'owner') or (a.approver_role = 'admin' and ${u.role} in ('owner', 'admin'))
-        or (a.approver_role in ('site_manager', 'dept_lead') and a.approver_role = ${u.role} and exists (
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const holder = (uid: any, role: any) => sql`((a.approver_type = 'user' and a.approver_user_id = ${uid})
+      or (a.approver_type = 'role' and ((a.approver_role = 'owner' and ${role} = 'owner') or (a.approver_role = 'admin' and ${role} in ('owner', 'admin'))
+        or (a.approver_role in ('site_manager', 'dept_lead') and a.approver_role = ${role} and exists (
           with recursive up as (select id, parent_id from org_units where id = tk.org_unit_id union select o.id, o.parent_id from org_units o join up on o.id = up.parent_id)
-          select 1 from memberships m where m.user_id = ${u.id} and m.org_unit_id in (select id from up)))))))`;
+          select 1 from memberships m where m.user_id = ${uid} and m.org_unit_id in (select id from up))))))`;
+  return sql`exists (select 1 from task_approvals a where a.task_id = r.task_id and a.status = 'pending' and a.round = (select max(round) from task_approvals where task_id = r.task_id)
+    and (${holder(u.id, u.role)} or exists (select 1 from user_settings s join users x on x.id = s.user_id where s.away_deputy_id = ${u.id} and s.away_from <= ${today} and s.away_to >= ${today}
+      and x.status = 'active' and x.tenant = r.tenant and ${holder(sql`x.id`, sql`x.role`)})))`;
 }
 /** 목록 — view: todo(내가 결재할 것) · mine(내가 올린 것, 임시 저장 포함) · cc(참조) · all(관리자 전체). 예전 ?mine=1 은 mine 과 같다 */
 export async function listRequests(u: SessionUser, f: { kind?: string; mine?: boolean; status?: string; month?: string; view?: string } = {}) {

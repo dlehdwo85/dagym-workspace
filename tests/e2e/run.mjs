@@ -2489,6 +2489,75 @@ await step('대표 10/22 19:47 캘린더 시간 격자(주): 종일·시간 없�
   await ctx.owner.ok('DELETE', `/api/tasks/${tid}`).catch(() => {});
 });
 
+await step('#429 결재 설정: 결재 화면 [결재 설정] → 탭(결재선·양식·팀별 배정) → ← 이전 화면 / 주소로 바로 열면 결재로 · 1차·2차 순서 바꾸기 · 3단계 예시 · 팀별 배정·적용 확인 · 휴대폰 넘침 없음', async () => {
+  // 부서·팀(E2E 결재부 › E2E 결재1팀) 준비 — 다른 단계 소속이 없는 새 직원으로
+  const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'appr429@dagym.test', name: '결재직원', role: 'staff', orgUnitIds: [ctx.hq] });
+  await new Client('appr429').ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'appr429-pass-1234' });
+  const dept = (await ctx.owner.ok('POST', '/api/teams', { name: 'E2E 결재부', kind: 'dept', members: [{ userId: ctx.managerA.id, lead: true }] })).id;
+  await ctx.owner.ok('POST', '/api/teams', { name: 'E2E 결재1팀', kind: 'team', parentId: dept, isolated: false, members: [{ userId: ctx.ownerId, lead: true }, { userId: inv.userId, lead: false }] });
+  await owner.goto(BASE + '/approvals');
+  // 이 단계만 돌리면 처음 연 화면(하이드레이션 중)의 첫 누름이 빠지는 경우가 있어(1/3) 이동할 때까지 다시 누른다 — 링크로 가는지는 그대로 확인
+  for (let k = 0; k < 3 && !owner.url().includes('/admin/approval-settings'); k++) {
+    await owner.getByTestId('approval-settings-link').click();
+    await owner.waitForURL(/\/admin\/approval-settings/, { timeout: 10_000 }).catch(() => {});
+  }
+  await owner.waitForURL(/\/admin\/approval-settings/);
+  await owner.getByTestId('aps-tabs').waitFor();
+  assert.match(await owner.getByTestId('breadcrumbs').innerText(), /결재[\s\S]*결재 설정[\s\S]*결재선/);
+  // 결재선 편집: 1차·2차 표시 → 2차를 위로 → 순서·번호 바뀜(저장 안 하고 닫음)
+  await owner.getByRole('button', { name: '결재선 만들기' }).first().click();
+  const dlg = owner.getByRole('dialog', { name: '결재선 만들기' });
+  assert.deepEqual(await dlg.getByTestId('step-order').allInnerTexts(), ['1차', '2차']);
+  assert.equal(await dlg.getByLabel('1차 이름').inputValue(), '현장 관리자');
+  await dlg.getByLabel('2차 위로').click();
+  assert.equal(await dlg.getByLabel('1차 이름').inputValue(), '대표', '2차를 위로 → 1차가 됨');
+  await dlg.getByLabel('1차 조건').selectOption('days');
+  await dlg.getByLabel('1차 일수').waitFor();
+  await owner.screenshot({ path: `${SHOTS}/194-approval-line-steps.png` });
+  await dlg.getByRole('button', { name: '취소' }).click();
+  // 예시 3단계 → 카드에 1차 팀장 → 2차 본부장 → 3차 대표
+  await owner.getByTestId('tpl-three').click();
+  const card = owner.getByTestId('approval-line-card').filter({ hasText: '3단계(팀장 → 본부장 → 대표)' }).first();
+  await card.waitFor();
+  assert.match((await card.innerText()).replace(/\s+/g, ' '), /1차 팀장.*2차 본부장.*3차 대표/);
+  // 팀별 배정: 휴가 × E2E 결재부 → 3단계 → 표에 한 줄 → 결재직원 적용 확인(1차 김대표(결재1팀 장) → 2차 최매니저(결재부 장) → 3차 김대표)
+  await owner.getByTestId('aps-tab-assign').click();
+  await owner.waitForURL(/tab=assign/);
+  await owner.getByTestId('assign-order').waitFor();
+  await owner.getByTestId('assign-team').selectOption({ label: 'E2E 결재부 (장 최매니저)' });
+  await owner.getByTestId('assign-kind').selectOption('leave');
+  await owner.getByTestId('assign-line').selectOption({ label: '3단계(팀장 → 본부장 → 대표) · 3단계' });
+  await owner.getByTestId('assign-add').click();
+  const row = owner.getByTestId('assign-row').filter({ hasText: 'E2E 결재부' });
+  await row.waitFor();
+  assert.match(await row.innerText(), /휴가[\s\S]*1차 팀장 → 2차 본부장 → 3차 대표/);
+  await owner.getByTestId('assign-check-user').selectOption({ label: '결재직원' });
+  const lv = owner.getByTestId('assign-check-row').filter({ hasText: '휴가' });
+  await lv.waitFor();
+  assert.match((await lv.innerText()).replace(/\s+/g, ' '), /양식 × 팀 배정 · E2E 결재부.*1차 팀장: 김대표.*2차 본부장: 최매니저.*3차 대표: 김대표/);
+  await owner.screenshot({ path: `${SHOTS}/193-approval-settings-assign.png` });
+  // ← 이전 화면 = 결재 화면(앱 안에서 왔으므로 기록대로)
+  await owner.getByTestId('back-link').click();
+  await owner.waitForURL((u) => new URL(u).pathname === '/approvals');
+  // 예전 주소를 바로 열면(기록 없음) ← 이전 화면 = 결재
+  await owner.goto(BASE + '/admin/approvals');
+  await owner.getByTestId('aps-tabs').waitFor();
+  assert.equal(await owner.getByTestId('aps-tab-lines').getAttribute('aria-selected'), 'true');
+  await owner.getByTestId('back-link').click();
+  await owner.waitForURL((u) => new URL(u).pathname === '/approvals');
+  // 다른 관리 화면에도 ← 이전 화면·경로
+  await owner.goto(BASE + '/admin/audit');
+  assert.match(await owner.getByTestId('breadcrumbs').innerText(), /관리[\s\S]*감사 기록/);
+  // 휴대폰(390): 팀별 배정 탭 가로 넘침 없음
+  const vp = owner.viewportSize();
+  await owner.setViewportSize({ width: 390, height: 844 });
+  await owner.goto(BASE + '/admin/approval-settings?tab=assign');
+  await owner.getByTestId('assign-order').waitFor();
+  assert.ok(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '휴대폰 가로 넘침 없음');
+  if (vp) await owner.setViewportSize(vp);
+  await ctx.owner.ok('PUT', '/api/approval-lines/assignments', { kind: 'leave', teamId: dept, lineId: null });
+});
+
 await browser.close();
 srv.proc.kill();
 fake.server.close();

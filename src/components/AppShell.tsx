@@ -49,7 +49,7 @@ const NAV: NavItem[] = [
   { href: '/contacts', label: '연락처', icon: Contact }, // V31 회사 공용 연락처
 ];
 /** 사이드바 "관리" 묶음 — 주소·이름·메뉴 키는 lib/adminPages(V36 3 한 곳), 여기는 아이콘만 */
-const ADMIN_ICON: Record<string, NavItem['icon']> = { '/reports': FileBarChart, '/revenue': BarChart3, '/admin/users': Users, '/admin/ops': Activity, '/admin/company': Building2, '/admin/mail': Mail, '/admin/usage': Gauge, '/admin/ai-logs': Sparkles };
+const ADMIN_ICON: Record<string, NavItem['icon']> = { '/reports': FileBarChart, '/revenue': BarChart3, '/admin/users': Users, '/admin/ops': Activity, '/admin/company': Building2, '/admin/mail': Mail, '/admin/usage': Gauge, '/admin/ai-logs': Sparkles, '/admin/approval-settings': Stamp };
 const ADMIN_MENU: NavItem[] = ADMIN_PAGES.filter((p) => p.sidebar).map((p) => ({ href: p.href, label: p.label, icon: ADMIN_ICON[p.href] ?? Activity }));
 /** V14 7번: 관리 메뉴 ↔ 메뉴 권한 키 (꺼진 메뉴는 숨김) */
 const ADMIN_KEY: Record<string, string> = Object.fromEntries(ADMIN_PAGES.map((p) => [p.href, p.menu]));
@@ -71,6 +71,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const [approvalsTodo, setApprovalsTodo] = useState(0); // #114 ⑦ 휴대폰 상단 '결재할 것 n건'(알림 폴링에 실려 옴)
   const [chatUnread, setChatUnread] = useState(0);
   const [aiDock, setAiDock] = useState(false); // V14 11번 모든 화면 AI 비서
+  // #429 '← 이전 화면': 앱 안에서 화면을 옮겨 다닌 횟수(처음 연 화면 = 1) — 1이면 뒤로 갈 앱 화면이 없으니 정해 둔 화면으로
+  useEffect(() => { const w = window as any; w.__wosNav = (w.__wosNav ?? 0) + 1; }, [path]);
   // 메시지 화면을 오가면 메시지 배지를 바로 새로
   useEffect(() => { api('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}); }, [path]);
   const [online, setOnline] = useState(true);

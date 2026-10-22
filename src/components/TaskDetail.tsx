@@ -492,14 +492,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         {/* B-9 결재 단계 */}
         {roundSteps.length > 0 && (
           <section className="rounded-card border border-line p-4" data-testid="approval-steps">
-            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Stamp className="size-4 text-amber-600" />결재 {lastRound && lastRound > 1 && <span className="text-xs font-normal text-ink-2">{lastRound}차</span>}</h2>
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Stamp className="size-4 text-amber-600" />결재 {lastRound && lastRound > 1 && <span className="text-xs font-normal text-ink-2">{lastRound}회차(다시 올림)</span>}</h2>
             <ol className="flex flex-wrap items-start gap-2">
               {roundSteps.map((a: any, i: number) => (
                 <li key={a.id} className="flex items-center gap-2">
                   <div className={cx('min-w-[120px] rounded-input border px-3 py-2 text-xs',
                     a.status === 'approved' ? 'border-green-200 bg-green-50' : a.status === 'rejected' ? 'border-red-200 bg-red-50' : a.status === 'pending' ? 'border-amber-300 bg-amber-50' : 'border-line bg-slate-50')}>
-                    <div className="font-semibold text-ink">{i + 1}. {a.label}</div>
-                    <div className="mt-0.5 text-ink-2">{a.status === 'approved' ? `승인 · ${a.decided_by_name}` : a.status === 'rejected' ? `반려 · ${a.decided_by_name}` : a.status === 'pending' ? '결재 대기' : '대기'}</div>
+                    {/* #429 단계는 1차·2차·3차로 */}
+                    <div className="font-semibold text-ink" data-testid="approval-step-label">{a.step ?? i + 1}차 · {a.label}</div>
+                    <div className="mt-0.5 text-ink-2">{a.status === 'approved' ? `승인 · ${a.decided_by_name}` : a.status === 'rejected' ? `반려 · ${a.decided_by_name}` : a.status === 'pending' ? `결재 대기${a.approver_name ? ` · ${a.approver_name}` : ''}` : `대기${a.approver_name ? ` · ${a.approver_name}` : ''}`}</div>
                     {a.comment && <div className="mt-1 text-red-700">“{a.comment}”</div>}
                   </div>
                   {i < roundSteps.length - 1 && <ChevronRight className="size-4 text-ink-3" />}

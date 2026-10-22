@@ -4,7 +4,9 @@
  * 메뉴 키가 menuPerms.MENUS 에 있어야 하므로 대표의 메뉴 권한 표에도 자동으로 나온다(시험이 둘의 짝을 확인).
  * (서버·화면 양쪽에서 쓰므로 서버 전용 모듈을 가져오지 않는다)
  */
-export type AdminPage = { href: string; label: string; menu: string; sidebar?: boolean };
+/** #429 parent = 경로(이전 화면이 없을 때 돌아갈 곳), selfBack = 화면이 직접 '← 이전 화면'·경로를 그린다(결재 설정 탭) */
+export type AdminPage = { href: string; label: string; menu: string; sidebar?: boolean; parent?: { label: string; href: string }; selfBack?: boolean };
+const APPROVALS = { label: '결재', href: '/approvals' };
 export const ADMIN_PAGES: AdminPage[] = [
   { href: '/reports', label: '주간 보고', menu: 'team_reports', sidebar: true },
   { href: '/revenue', label: '매출', menu: 'revenue', sidebar: true },
@@ -13,13 +15,14 @@ export const ADMIN_PAGES: AdminPage[] = [
   { href: '/admin/org', label: '조직 구성', menu: 'ops' },
   { href: '/admin/audit', label: '감사 기록', menu: 'ops' },
   { href: '/admin/holidays', label: '공휴일', menu: 'ops' },
-  { href: '/admin/approvals', label: '결재선', menu: 'ops' },
+  { href: '/admin/approvals', label: '결재선', menu: 'ops', parent: APPROVALS, selfBack: true },
   { href: '/admin/company', label: '회사 정보·디자인', menu: 'company', sidebar: true },
   { href: '/admin/mail', label: '메일 계정·명함', menu: 'mail_settings', sidebar: true },
   { href: '/admin/usage', label: '사용량·요금제', menu: 'usage', sidebar: true },
   { href: '/admin/ai-logs', label: 'AI 사용 내역', menu: 'ai_logs', sidebar: true },
   { href: '/admin/attendance', label: '근태(출퇴근)', menu: 'attendance_admin', sidebar: true }, // V30 ③
-  { href: '/admin/approval-forms', label: '결재 양식', menu: 'ops' }, // V30 ④
+  { href: '/admin/approval-forms', label: '결재 양식', menu: 'ops', parent: APPROVALS, selfBack: true }, // V30 ④
+  { href: '/admin/approval-settings', label: '결재 설정', menu: 'ops', sidebar: true, parent: APPROVALS, selfBack: true }, // #429 결재선·양식·팀별 배정 한 화면
 ];
 /** 주소에 해당하는 관리 화면(가장 긴 앞부분 일치) */
 export function adminPageFor(path: string): AdminPage | null {

@@ -151,7 +151,11 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
   const isCollab =
     (await sql`select 1 from task_collaborators where task_id = ${t.id} and user_id = ${u.id}`).length > 0
     || (await sql`select 1 from task_checklist_items where task_id = ${t.id} and assignee_id = ${u.id} limit 1`).length > 0; // R-15 6번 항목 담당자도 참여자
-  const involved = t.assignee_id === u.id || t.created_by === u.id || isCollab || (!!t.requested_by && t.requested_by === u.id);
+  // #429 결재선 결재자(지정 사람·소속 장으로 정해진 사람·결재한 사람)와 그 대결 대리인(오늘 부재)은 다른 부서·격리 팀 업무여도 결재 업무를 본다
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const isApprover = (await sql`select 1 from task_approvals a where a.task_id = ${t.id} and (a.approver_user_id = ${u.id} or a.decided_by = ${u.id}
+      or exists (select 1 from user_settings s where s.user_id = a.approver_user_id and s.away_deputy_id = ${u.id} and s.away_from <= ${today} and s.away_to >= ${today})) limit 1`).length > 0;
+  const involved = t.assignee_id === u.id || t.created_by === u.id || isCollab || (!!t.requested_by && t.requested_by === u.id) || isApprover;
   // V14 50(대표 결정): 내용·일정 수정 = 요청자(없으면 만든 사람)·담당자 2명만(대표·관리자·협업자·같은 팀은 보기·댓글·첨부 올리기만),
   // 담당자 변경·삭제 = 요청자만, 상태·검토 승인은 tasks.updateTask 에서 담당자(검토는 검토 담당자)만
   const requester = t.requested_by ?? t.created_by;
