@@ -2429,6 +2429,24 @@ await step('대표 02:30·03:00 승인함 통합(종류별 탭·건수·바로 �
 await step('#116 전자계약서: 사용자 줄 [전자계약서] → 근로계약서 보내기 → 링크·접속 코드 → 로그인 없는 서명 화면(코드·본문·그리기·동의) → 서명 → 전자계약서 탭 1/2', () => contractsFlow({ browser, owner, ctx, BASE, SHOTS, sql }));
 await step('대기열 소형 3건: 설정 부재중(기간·문구 → 부재 중 안내·근무 상태 부재 → 해제) · 일정 화상 회의 링크(수정 화면 칸 → 미리보기 [회의 참여])', () => awayFlow({ owner, staff, ctx, BASE, SHOTS, today, addDays }));
 
+await step('대표 10/22 #427 PC 목록: 상태 칸 오른쪽 정렬 · "진행 전 · 확인 전" 칩이 1280·1440·1920 폭에서 마감일 칸(달력 아이콘)과 겹치지 않음', async () => {
+  const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '상태 칩 겹침 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false, dueDate: addDays(today, 3) })).id;
+  for (const w of [1280, 1440, 1920]) {
+    await owner.setViewportSize({ width: w, height: 900 });
+    await owner.goto(BASE + '/tasks?mode=list');
+    await owner.getByLabel('업무 검색').fill('상태 칩 겹침');
+    const row = owner.locator(`[data-task-id="${id}"]`); await row.waitFor();
+    const cell = row.getByTestId('status-cell'), due = row.getByTestId('due-cell');
+    const [c, d] = [await cell.boundingBox(), await due.boundingBox()];
+    const chip = await cell.locator('[data-testid^="row-status"]').first().boundingBox();
+    assert.ok(c && d && chip, `${w}px 칸 위치`);
+    assert.ok(chip.x + chip.width <= d.x + 0.5, `${w}px: 상태 칩 오른쪽 끝(${Math.round(chip.x + chip.width)}) ≤ 마감일 칸 시작(${Math.round(d.x)})`);
+    assert.ok(Math.abs((chip.x + chip.width) - (c.x + c.width)) <= 2, `${w}px: 상태 칩 오른쪽 정렬`);
+    if (w === 1440) await owner.screenshot({ path: `${SHOTS}/191-status-chip-1440.png` });
+  }
+  await owner.setViewportSize({ width: 1366, height: 900 });
+});
+
 await browser.close();
 srv.proc.kill();
 fake.server.close();
