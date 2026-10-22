@@ -164,6 +164,12 @@ export async function chatBubble({ owner, ctx, BASE, SHOTS }) {
   await owner.setViewportSize({ width: 390, height: 844 });
   const room = await ctx.staffA.client.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.ownerId });
   await ctx.staffA.client.ok('POST', `/api/chat/rooms/${room.id}/messages`, { body: '말풍선 시험 메시지' });
+  // 대표 10/22(#422): 하단 탭에 '메시지'가 생겨 말풍선은 기본 끔 → 설정에서 켜야 보임
+  await owner.goto(`${BASE}/`);
+  await owner.getByTestId('mobile-tabs').waitFor();
+  assert.equal(await owner.getByTestId('chat-bubble').count(), 0, '기본 끔');
+  await owner.goto(`${BASE}/settings`);
+  await owner.getByTestId('chat-bubble-toggle').check();
   await owner.goto(`${BASE}/`);
   await owner.getByTestId('chat-bubble').waitFor();
   await owner.getByTestId('chat-bubble-badge').waitFor();
@@ -177,7 +183,5 @@ export async function chatBubble({ owner, ctx, BASE, SHOTS }) {
   await owner.goto(`${BASE}/`);
   await owner.getByTestId('mobile-tabs').waitFor();
   assert.equal(await owner.getByTestId('chat-bubble').count(), 0, '설정에서 끄면 없음');
-  await owner.goto(`${BASE}/settings`);
-  await owner.getByTestId('chat-bubble-toggle').check();
   await owner.setViewportSize({ width: 1366, height: 900 });
 }

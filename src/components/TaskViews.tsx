@@ -633,7 +633,7 @@ function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }
   const change = (v: string | null) => (ex === 'request' && t.due_date && (!v || v > t.due_date) ? setExt(v) : onPatch(t, { dueDate: v }));
   // 로컬 검수 10/17(390폭): 마감 칩이 92px 보다 넓으면(시간 포함 등) 왼쪽으로 넘쳐 둘째 줄 칩을 덮음 → 휴대폰은 칩 폭 그대로·줄 흐름 안에서
   return (
-    <span className="inline-flex w-[132px] shrink-0 justify-end max-lg:w-auto" data-testid="due-cell">
+    <span className="inline-flex w-[132px] shrink-0 justify-end max-lg:w-auto xl:w-[176px]" data-testid="due-cell">
       <DuePicker value={t.due_date} status={t.status} onChange={change} label={`${t.title} 마감일`} onExtend={ex ? () => setExt(null) : undefined} extendLabel={ex === 'request' ? '마감 연장 요청' : '마감 연장'} />
       {ex && <ExtendDialog task={t} boss={ex === 'boss'} open={ext !== false} initial={ext || null} onClose={() => setExt(false)} />}
     </span>
@@ -667,7 +667,7 @@ function sortTasks(ts: Task[], k: SortKey) {
 /** PC 열 머리: 누르면 그 기준으로 정렬 */
 function ListHeader({ sortBy, onSort, compact, stuck }: { sortBy: SortKey; onSort: (k: SortKey) => void; compact?: boolean; stuck?: boolean }) {
   // V14 48: 맨 위 줄은 스크롤해도 붙어 있음(정렬 버튼). 로컬 검수 10/19: 모든 묶음이 같은 자리(묶음 이름 아래)에 열 제목 — 맨 위 줄은 스크롤해 묶음 제목이 가려질 때만 보임.
-  // 열 폭은 줄(TaskRow)과 같은 값: 요청자 104·우선순위 60·상태 136(오른쪽 정렬, #427)·마감일 132·담당 48
+  // 열 폭은 줄(TaskRow)과 같은 값: 요청자 104·우선순위 60·상태 112/xl 136(오른쪽 정렬, #427)·마감일 132/xl 176(기한 지남 표기, lg~xl 은 'n일 지남' 글자 숨김 #427)·담당 48
   const H = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => (
     <button type="button" onClick={() => onSort(sortBy === k ? 'due' : k)} aria-pressed={sortBy === k}
       className={cx('truncate text-left hover:text-ink', sortBy === k ? 'font-semibold text-accent-600' : '', className)}>{children}{sortBy === k ? ' ↓' : ''}</button>
@@ -679,8 +679,8 @@ function ListHeader({ sortBy, onSort, compact, stuck }: { sortBy: SortKey; onSor
       <H k="title" className="flex-1">업무 이름</H>
       <H k="requester" className="hidden w-[104px] shrink-0 text-right xl:block">요청자</H>
       <H k="priority" className="w-[60px] shrink-0 text-right">우선순위</H>
-      <H k="status" className="w-[136px] shrink-0 text-right">상태</H>
-      <H k="due" className="w-[132px] shrink-0 text-right">마감일</H>
+      <H k="status" className="w-[112px] shrink-0 text-right xl:w-[136px]">상태</H>
+      <H k="due" className="w-[132px] shrink-0 text-right xl:w-[176px]">마감일</H>
       <H k="assignee" className="w-12 shrink-0 text-right">담당자</H>
     </div>
   );
@@ -1135,7 +1135,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
         <span className="hidden w-[104px] min-w-0 justify-end xl:flex" data-testid="requester-cell"><AssigneePicker role="요청자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
         <span className="hidden w-[60px] justify-end lg:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>
-        <span className="hidden w-[136px] shrink-0 justify-end overflow-hidden lg:inline-flex" data-testid="status-cell"><StatusChip t={t} onPatch={onPatch} /></span>
+        <span className="hidden w-[112px] shrink-0 justify-end overflow-hidden lg:inline-flex xl:w-[136px]" data-testid="status-cell"><StatusChip t={t} onPatch={onPatch} /></span>
         <DueEdit t={t} onPatch={onPatch} />
         <span className="inline-flex shrink-0 lg:w-12 lg:justify-end"><AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} /></span>
         {onMove && <OrderMenu title={t.title} onMove={(to) => onMove(t, to)} />}

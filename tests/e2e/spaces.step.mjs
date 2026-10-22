@@ -43,7 +43,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   const mc = await browser.newContext({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   const m = await mc.newPage();
   await m.goto(`${BASE}/tasks`);
-  await m.getByRole('button', { name: '메뉴 더보기' }).tap();
+  await m.getByTestId('profile-menu').tap();
   await m.getByTestId('mobile-spaces').waitFor();
   // 로컬 검수: 시트가 화면보다 길어도 맨 위(프로필·업무 카드)가 화면 안
   const top = await m.getByTestId('mobile-space-work').boundingBox();
@@ -55,16 +55,18 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
   // 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄 없음 — 공간 메뉴는 더보기 시트의 '영업 메뉴'(입찰·공고 포함)
   assert.equal(await m.getByTestId('space-chips').count(), 0, '상단 칩 줄 없음');
-  await m.getByRole('button', { name: '메뉴 더보기' }).tap();
-  await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).waitFor();
-  await m.getByTestId('mobile-space-menu').getByRole('link', { name: '영업 기회 허브' }).tap(); // 대표 10/21 12:00 ③: 공공데이터·지역별·계약만료는 허브 카테고리
+  await m.getByTestId('profile-menu').tap();
+  // #422 d: 하단 탭(입찰·영업기회)과 겹치는 메뉴는 시트에서 빠짐 — 허브는 하단 탭으로
+  assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).count(), 0, '하단 탭과 겹치는 입찰·공고 없음');
+  await m.getByTestId('more-sheet').getByLabel('닫기').tap();
+  await m.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap(); // 대표 10/21 12:00 ③: 공공데이터·지역별·계약만료는 허브 카테고리
   await m.waitForURL(/\/s\/sales\/hub$/);
   await m.getByTestId('sales-hub-prospects').tap(); await m.getByTestId('prospects').waitFor();
-  await m.getByRole('button', { name: '메뉴 더보기' }).tap();
+  await m.getByTestId('profile-menu').tap();
   await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap();
   await m.waitForURL(/\/s\/sales\/sources$/);
   await m.getByTestId('sales-custom').waitFor(); // 로컬 10/19: 직접 추가한 출처(사이트·키워드·엑셀) 칸
-  await m.getByRole('button', { name: '메뉴 더보기' }).tap();
+  await m.getByTestId('profile-menu').tap();
   await m.getByTestId('mobile-space-work').tap(); // 마지막 공간 = 업무로 돌려 둠
   await m.waitForURL(/\/$/);
   // 대표(10/19): 앱 머리줄 로고·공간 이름 → PC 와 같은 공간 전환 시트(회사 이름·지금 공간 체크)
@@ -79,24 +81,23 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   const onColor = () => m.getByTestId('mobile-tabs').locator('a.font-bold').first().evaluate((el) => getComputedStyle(el).color);
   assert.equal(await onColor(), 'rgb(29, 78, 216)', '영업 하단 탭 선택 = 파랑');
   for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/sales-${w}.png` }); }
-  // 대표 결정(10/19): 하단 탭 = 공간마다 같은 크기 5칸(+ 버튼 없음)
+  // 대표 확정 10/22(#422): 하단 '더보기' 없음 — 영업은 4칸 같은 폭(나머지는 오른쪽 위 프로필 버튼 시트)
   const tabs = async () => (await m.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-  assert.deepEqual(await tabs(), ['홈', '리드', '입찰', '영업기회', '더보기']); // 대표 검수 10/20: '영업 현황' → '홈', ② 앱 파이프라인 탭 → 입찰(끈 회사는 제안·계약)
+  assert.deepEqual(await tabs(), ['홈', '리드', '입찰', '영업기회']); // 대표 검수 10/20: '영업 현황' → '홈', ② 앱 파이프라인 탭 → 입찰(끈 회사는 제안·계약)
   const w = await m.getByTestId('mobile-tabs').locator(':scope > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
-  assert.ok(Math.max(...w) - Math.min(...w) <= 1, `5칸 같은 폭 ${w}`);
-  await m.getByTestId('tab-more').tap();
-  await m.getByTestId('more-new-lead').waitFor(); // 더보기 › 만들기 = 그 공간 맥락
-  await m.getByTestId('more-sheet').getByLabel('닫기').tap();
+  assert.ok(Math.max(...w) - Math.min(...w) <= 1, `같은 폭 ${w}`);
   await m.getByTestId('mobile-space-switch').tap();
   await m.getByTestId('sheet-space-sales').getByLabel('지금 공간').waitFor();
   await m.getByTestId('sheet-space-work').tap(); // 업무로 돌려 둠
   await m.waitForURL(/\/$/);
-  assert.deepEqual(await tabs(), ['홈', '업무', '캘린더', '결재', '더보기']); // 대표 핫픽스 10/20 19:10: 프로젝트 대신 캘린더(프로젝트는 더보기 › 업무 메뉴)
-  await m.getByTestId('tab-more').tap();
-  await m.getByTestId('mobile-common').getByRole('link', { name: '캘린더' }).waitFor();
-  await m.getByTestId('mobile-common').getByRole('link', { name: '메시지' }).waitFor();
-  await m.getByTestId('mobile-space-menu').getByRole('link', { name: '프로젝트' }).waitFor(); // 업무 공간도 '업무 메뉴' 묶음
-  await m.getByTestId('more-sheet').getByLabel('닫기').tap();
+  assert.deepEqual(await tabs(), ['홈', '업무', '캘린더', '메시지', '결재']); // 대표 확정 10/22(#422)
+  await m.getByTestId('profile-menu').tap();
+  const sheet2 = m.getByTestId('more-sheet');
+  assert.deepEqual(await sheet2.getByTestId('mobile-space-menu').getByRole('link').allInnerTexts(), ['내 주간 보고'], '#422 c: 업무 메뉴 = 내 주간 보고만');
+  for (const dup of ['홈', '업무', '캘린더', '메시지', '결재', '알림']) assert.equal(await sheet2.getByRole('link', { name: dup, exact: true }).count(), 0, `#422 d: 하단 탭·머리줄과 겹치는 '${dup}' 없음`);
+  await sheet2.getByTestId('profile-links').getByRole('link', { name: '설정·알림' }).waitFor();
+  assert.equal(await sheet2.getByTestId('more-create').count(), 0, '#422 b: 만들기 줄 없음');
+  await sheet2.getByLabel('닫기').tap();
   assert.equal(await onColor(), 'rgb(17, 94, 89)', '업무로 돌아오면 바로 청록');
   assert.equal(await m.getByTestId('mobile-space-logo').count(), 0, '업무는 워크인 로고');
   for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/work-${w}.png` }); }

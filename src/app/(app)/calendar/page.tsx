@@ -80,6 +80,10 @@ function CalendarPage() {
   // V14 20번(대표 결정): 완료된 업무·일정은 기본으로 숨기고 "완료 보기"로만 (이 기기 기억)
   const [showDone, setShowDone] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_done') === '1'; } catch { return false; } });
   useEffect(() => { try { localStorage.setItem('wos_cal_done', showDone ? '1' : '0'); } catch {} }, [showDone]);
+  // 대표 10/22 19:47: 일·3일·주(시간 격자)에서 종일·시간 없는 업무 칸이 위를 차지해 오전 일정을 가림 → 기본 숨김, 날짜 머리 아래 '종일 n' 칩(누르면 그날 목록). 이 기기 기억
+  const [showAllDay, setShowAllDay] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_allday') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('wos_cal_allday', showAllDay ? '1' : '0'); } catch {} }, [showAllDay]);
+  const [allDaySheet, setAllDaySheet] = useState<string | null>(null);
   const [sidePanel, setSidePanel] = useState<boolean>(() => { try { const v = localStorage.getItem('wos_cal_unscheduled'); return v === null ? typeof window !== 'undefined' && window.innerWidth >= 1440 : v === '1'; } catch { return false; } });
   const [range, setRange] = useState<{ from: string; to: string; start: Date; view: string } | null>(null);
   const [events, setEvents] = useState<any[]>([]);
@@ -225,6 +229,22 @@ function CalendarPage() {
       textColor: '#ffffff', classNames: ['task-item', ...(t.status === 'done' ? ['is-done'] : [])], extendedProps: { type: 'task', task: t, ...whoOf(t.assignee_id && t.assignee_id !== user.id && t.assignee_name ? t.assignee_id : null, t.assignee_name) }, durationEditable: false,
     })) : []),
   ], [events, tasks, hidden, showTasks, showDone, hol.data, who, JSON.stringify(calColors), agenda.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 날짜별 종일 항목(여러 날 종일 일정은 날마다) — 시간 격자의 '종일 n' 칩·목록 시트
+  const allDayByDate = useMemo(() => {
+    const m = new Map<string, any[]>();
+    for (const e of fcEvents as any[]) {
+      if (!e.allDay) continue;
+      const s = String(e.start).slice(0, 10), endEx = e.end ? String(e.end).slice(0, 10) : null;
+      for (let d = s, k = 0; k < 62 && (k === 0 || (endEx && d < endEx)); d = addDays(d, 1), k++) (m.get(d) ?? m.set(d, []).get(d)!).push(e);
+    }
+    return m;
+  }, [fcEvents]);
+  const openAllDayItem = (e: any) => {
+    const p = e.extendedProps; setAllDaySheet(null);
+    if (p.type === 'space') router.push(p.item.href);
+    else if (p.type === 'task') setOpenTask(p.task.id);
+    else if (p.type === 'event') setPreview({ ev: p.ev, x: 16, y: 120 });
+  };
 
   async function completeTask(t: any) {
     const to = t.status === 'done' ? 'in_progress' : t.status === 'review' ? 'done' : t.approval_line_id || (t.approval_required && user.role === 'staff') ? 'review' : 'done';
@@ -381,6 +401,7 @@ function CalendarPage() {
               </button>
             ))}
             <button onClick={() => setShowTasks(!showTasks)} aria-pressed={!showTasks} data-testid="cal-hide-tasks-chip" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showTasks ? 'border-line text-ink-2' : 'border-indigo-300 bg-indigo-50 text-indigo-700')}><CircleCheck className="size-3.5" />{showTasks ? '업무 숨기기' : '업무 숨김 중'}</button>
+            <button onClick={() => setShowAllDay(!showAllDay)} aria-pressed={showAllDay} data-testid="cal-show-allday" title="일·3일·주 보기 위쪽에 종일·시간 없는 업무 칸 보이기" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showAllDay ? 'border-accent-400 text-accent-700' : 'border-line text-ink-3')}>종일 칸</button>
             <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
 
             <button onClick={() => setColorDlg(true)} className="hidden items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:inline-flex" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
@@ -445,6 +466,12 @@ function CalendarPage() {
                   <span className="flex items-center gap-1"><Check className="size-3.5 text-green-600" />완료 보기</span>
                 </label>
               </li>
+              <li>
+                <label className="flex cursor-pointer items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50" title="일·주 보기 위쪽에 종일·시간 없는 업무 칸 보이기(끄면 날짜 머리 '종일 n')">
+                  <input type="checkbox" className="size-4 rounded accent-slate-600" checked={showAllDay} onChange={() => setShowAllDay(!showAllDay)} aria-label="종일 칸 보기" data-testid="cal-show-allday-side" />
+                  <span>종일 칸 보기</span>
+                </label>
+              </li>
             </ul>
           </div>
           {people.length > 1 && (
@@ -500,16 +527,22 @@ function CalendarPage() {
               // 날짜는 서울 기준으로 읽는다(a.date 는 서울 0시 = UTC 전날 15시)
               const ds = seoulDate(a.date), dd = new Date(ds + 'T00:00:00Z');
               return (
-                <span className="flex flex-col items-center leading-tight" data-day-head={ds}>
-                  <span className="text-[11px] font-medium">{'일월화수목금토'[dd.getUTCDay()]}</span>
-                  <span className={cx('mt-0.5 flex size-7 items-center justify-center rounded-full text-[15px] font-semibold tabular-nums', ds === seoulDate(new Date()) && 'bg-accent-600 text-white')}>{dd.getUTCDate()}</span>
+                <span className="flex flex-col items-center leading-tight">
+                  <span className="flex flex-col items-center" data-day-head={ds}>
+                    <span className="text-[11px] font-medium">{'일월화수목금토'[dd.getUTCDay()]}</span>
+                    <span className={cx('mt-0.5 flex size-7 items-center justify-center rounded-full text-[15px] font-semibold tabular-nums', ds === seoulDate(new Date()) && 'bg-accent-600 text-white')}>{dd.getUTCDate()}</span>
+                  </span>
+                  {!showAllDay && (allDayByDate.get(ds)?.length ?? 0) > 0 && (
+                    <button type="button" onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); setAllDaySheet(ds); }} data-testid="allday-chip" data-day={ds}
+                      className="mt-0.5 rounded-full bg-slate-100 px-1.5 text-[10px] font-medium leading-4 text-ink-2 hover:bg-slate-200">종일 {allDayByDate.get(ds)!.length}</button>
+                  )}
                 </span>
               ); }}
             slotLabelFormat={{ hour: 'numeric', hour12: true }}
             // V14 41번: 휴대폰 축은 "오전/오후 n시"를 두 줄로 좁게(날짜 칸을 넓게)
             slotLabelContent={mobile ? (a) => { const h = Number(seoulTime(a.date).slice(0, 2)); return <span className="block text-center text-[10px] leading-[1.1]" data-axis-label><span className="block text-ink-3">{h < 12 ? '오전' : '오후'}</span>{h % 12 || 12}시</span>; } : undefined}
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
-            allDayText="종일" noEventsText="일정이 없습니다" slotMinTime={slotMin} scrollTime={firstScroll()} scrollTimeReset={false}
+            allDaySlot={showAllDay} allDayText="종일" noEventsText="일정이 없습니다" slotMinTime={slotMin} scrollTime={firstScroll()} scrollTimeReset={false}
             // 대표 지적(10/19 ③): 월 보기는 칸 안에 최대한(PC 6·휴대폰 4줄), 넘치면 '+N개' — 높이 자동이라 true(칸 높이 맞춤)는 제한이 걸리지 않음
             dayMaxEvents={4} moreLinkContent={(a) => `+${a.num}개`}
             // 대표 지적(10/19 ① d): 겹친 일정·업무는 나란히(겹쳐 그리면 위에 깔린 항목이 눌려 다른 상세가 열림)
@@ -612,6 +645,22 @@ function CalendarPage() {
       <button type="button" onClick={() => openMeeting()} className="fixed bottom-[calc(var(--sab)+76px)] right-4 z-30 inline-flex h-12 items-center gap-1.5 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white shadow-pop lg:hidden" data-testid="cal-meeting-fab"><MapPin className="size-5" />미팅</button>
       {colorDlg && <CalColorsDialog onClose={() => setColorDlg(false)} />}
       {/* 대표 결정(10/16): 캘린더에서는 일정만 등록 — 업무는 업무 화면·홈 [+업무]. 일정과 함께 할 일이 필요하면 "업무 리스트에도 추가" */}
+      {allDaySheet && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40" onClick={() => setAllDaySheet(null)}>
+          <div role="dialog" aria-label={`${allDaySheet} 종일`} data-testid="allday-sheet" onClick={(e) => e.stopPropagation()}
+            className="absolute bottom-0 left-0 right-0 max-h-[70dvh] overflow-y-auto rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)] sm:bottom-auto sm:left-1/2 sm:top-24 sm:w-[380px] sm:-translate-x-1/2 sm:rounded-card sm:shadow-pop">
+            <div className="flex items-center gap-2 px-1 pb-2"><b className="flex-1 text-sm">{Number(allDaySheet.slice(5, 7))}월 {Number(allDaySheet.slice(8))}일 종일 · {allDayByDate.get(allDaySheet)?.length ?? 0}개</b>
+              <button onClick={() => setAllDaySheet(null)} className="rounded-full p-1.5 text-ink-3" aria-label="닫기"><X className="size-4" /></button></div>
+            <ul className="space-y-1">{(allDayByDate.get(allDaySheet) ?? []).map((e: any) => (
+              <li key={e.id}><button type="button" onClick={() => openAllDayItem(e)} disabled={e.extendedProps.type === 'holiday'} className="flex min-h-[44px] w-full items-center gap-2 rounded-input px-2 text-left text-sm hover:bg-slate-50 disabled:cursor-default">
+                <span className="size-2.5 shrink-0 rounded-full" style={{ background: e.extendedProps.type === 'holiday' ? '#dc2626' : e.backgroundColor }} aria-hidden />
+                <span className="min-w-0 flex-1 truncate">{e.title}</span>
+                <span className="shrink-0 text-[11px] text-ink-3">{e.extendedProps.type === 'task' ? '업무' : e.extendedProps.type === 'holiday' ? '공휴일' : e.extendedProps.type === 'space' ? '공간' : '일정'}</span>
+              </button></li>))}</ul>
+            <button type="button" onClick={() => { setAllDaySheet(null); setShowAllDay(true); }} className="mt-2 w-full rounded-input px-2 py-1.5 text-xs text-ink-3 hover:bg-slate-50">캘린더 위쪽에 종일 칸 보이기</button>
+          </div>
+        </div>
+      )}
       {quick && <QuickCreate {...quick} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
         onMore={(draft) => { setQuick(null); setEditor({ draft }); }} onSaved={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }} />}
       {preview && <EventPreview ev={preview.ev} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}

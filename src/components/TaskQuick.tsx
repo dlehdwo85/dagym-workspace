@@ -103,7 +103,7 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onPointerDown={(e) => e.stopPropagation()} aria-label={label} aria-haspopup="dialog" aria-expanded={open} data-testid="due-picker"
         /* 대표 10/20 23:40: 날짜 버튼이 시각 칩보다 작음 → 최소 높이 32px(터치 40px), 달력 아이콘 + 날짜, 비어 있으면 테두리 버튼 */
         className={cx('hit inline-flex min-h-8 items-center rounded-input hover:bg-slate-100', !value && 'gap-1.5 border border-line bg-white text-sm text-ink-2', !value && (compact ? 'w-9 justify-center px-0' : 'px-2.5'), value && 'gap-1 px-1.5')}>
-        {value ? <span className="inline-flex items-center gap-1"><CalendarDays className="size-4 text-ink-3" /><DueChip due={value} status={status} />{time && <span className="text-xs font-medium text-ink-2 tabular-nums">{timeLabel(time)}</span>}</span> : <><CalendarDays className="size-4" />{compact ? '' : emptyText ?? '마감일'}</>}
+        {value ? <span className="inline-flex items-center gap-1">{/* 로컬 10/22(#427): 마감 칩에 달력 아이콘이 이미 있어 바깥 아이콘은 뺌(기한 지남 줄이 칸 밖으로 넘쳤다) */}<DueChip due={value} status={status} />{time && <span className="text-xs font-medium text-ink-2 tabular-nums">{timeLabel(time)}</span>}</span> : <><CalendarDays className="size-4" />{compact ? '' : emptyText ?? '마감일'}</>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title={label} width={onTime ? 300 : 260}>
         {/* V32 4: 마감 연장(담당자 = 요청자에게 요청, 요청자 = 바로) — 목록에서도 상세에 들어가지 않고 */}
