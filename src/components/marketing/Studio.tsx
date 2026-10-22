@@ -73,7 +73,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
   useEffect(() => setP({ promptEn: b.prompt?.promptEn ?? '', negativeEn: b.prompt?.negativeEn ?? '', summaryKo: b.prompt?.summaryKo ?? '', caption: b.prompt?.caption ?? '', model: b.prompt?.model ?? '' }), [b]);
   async function act(body: Record<string, unknown>, msg: string) {
     setBusy(true);
-    try { const r = await api<any>(`/api/marketing/studio/${b.id}`, { method: 'PATCH', body }); toast.ok(r?.status === 'generating' && r.requestIds ? `제작 요청 카드 ${r.requestIds.length}건으로 넘겼습니다` : r?.status === 'review' ? '시안을 만들어 승인 대기에 올렸습니다' : r?.status === 'failed' ? `생성 실패: ${(r.errors ?? []).join(' / ')}` : msg); setEdit(false); onChange(); }
+    try { const r = await api<any>(`/api/marketing/studio/${b.id}`, { method: 'PATCH', body }); toast.ok(r?.status === 'generating' && r.requestIds ? `제작 요청 카드 ${r.requestIds.length}건으로 넘겼습니다` : r?.status === 'generating' ? 'Higgsfield 에 제출했습니다 — 끝나면 승인 대기로 올라갑니다' : r?.status === 'review' ? '시안을 만들어 승인 대기에 올렸습니다' : r?.status === 'failed' ? `생성 실패: ${(r.errors ?? []).join(' / ')}` : msg); setEdit(false); onChange(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   const [sl, sc] = labelOf(b); const spec = view.kinds[b.kind]; const pr = b.prompt;
@@ -107,7 +107,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
         {['ready', 'failed'].includes(b.status) && !edit && <><Button size="sm" variant="secondary" onClick={() => setEdit(true)} data-testid="studio-edit-open">수정</Button><Button size="sm" variant="secondary" onClick={() => act({ action: 'prompt' }, '프롬프트를 다시 썼습니다')} disabled={busy}>AI 다시 쓰기</Button>
           {view.canGenerate && <Button size="sm" onClick={() => act({ action: 'generate' }, '생성했습니다')} disabled={busy} data-testid="studio-generate">{view.provider === 'higgsfield' ? '생성' : '제작 요청 카드로 보내기'}</Button>}</>}
         {b.status === 'queued' && <Button size="sm" variant="secondary" onClick={() => act({ action: 'prompt' }, '프롬프트를 썼습니다')} disabled={busy} data-testid="studio-prompt-retry">프롬프트 쓰기</Button>}
-        {b.status === 'generating' && <span className="text-xs text-ink-2">{view.provider === 'higgsfield' ? '생성 중…' : `제작 요청 카드 ${b.open_requests}건 — 로컬 도우미가 만들어 붙이면 승인 대기로`} <Link href="/s/marketing/automation#requests" className="underline">카드 보기</Link></span>}
+        {b.status === 'generating' && <span className="text-xs text-ink-2" data-testid="studio-generating">{(b as any).result?.provider === 'higgsfield' ? <>Higgsfield 생성 중 {((b as any).result.jobs ?? []).filter((j: any) => j.status === 'completed').length}/{((b as any).result.jobs ?? []).length} <button type="button" className="underline" onClick={onChange}>상태 확인</button></> : <>제작 요청 카드 {b.open_requests}건 — 로컬 도우미가 만들어 붙이면 승인 대기로 <Link href="/s/marketing/automation#requests" className="underline">카드 보기</Link></>}</span>}
         {b.content_id && ['review', 'published'].includes(b.status) && <Link href={`/s/marketing/approvals?c=${b.content_id}`} className="rounded-input border border-line px-2.5 py-1 text-xs" data-testid="studio-open-content">승인함에서 보기</Link>}
         {!['review', 'published'].includes(b.status) && <Button size="sm" variant="secondary" onClick={() => act({ action: 'cancel' }, '취소했습니다')} disabled={busy}>취소</Button>}
       </div>

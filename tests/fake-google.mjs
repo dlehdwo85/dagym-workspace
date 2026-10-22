@@ -5,6 +5,7 @@ import https from 'node:https';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
+const FAKE_ORIGIN = (req) => `http://${req.headers.host}`;
 export function startFakeGoogle(port = 3199) {
   const state = {
     seq: 1,
@@ -26,6 +27,7 @@ export function startFakeGoogle(port = 3199) {
     webpush: [],
     webpushGone: new Set(),
     requests: [],
+    hf: [], hfJobs: {}, hfMode: null, hfPolls: 1, // 로컬 10/22 가짜 Higgsfield(/hf): 제출 기록·요청 상태(hfPolls 번 in_progress 뒤 completed)
   };
   const evs = (cal) => (state.events[cal] ??= {});
   const touch = (e) => { e.seq = ++state.seq; e.etag = `"${state.seq}"`; e.updated = new Date().toISOString(); return e; };
@@ -106,6 +108,28 @@ export function startFakeGoogle(port = 3199) {
         usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
         ...(body.container ? { container: { id: body.container.id ?? `cntr_fake_${state.anthropic.length}`, expires_at: new Date(Date.now() + 3600e3).toISOString() } } : {}), ...next });
     }
+    // ---- 가짜 Higgsfield (base = FAKE/hf): Authorization: Key test-id:test-secret, 제출 → queued + status_url, 상태 → hfPolls 번 in_progress 뒤 completed ----
+    if (p.startsWith('/hf-out/')) { res.writeHead(200, { 'content-type': p.endsWith('.mp4') ? 'video/mp4' : 'image/png' }); return res.end(Buffer.from(p.endsWith('.mp4') ? 'fakevideo' : 'fakepng')); }
+    if (p.startsWith('/hf/')) {
+      if (req.headers.authorization !== 'Key test-id:test-secret') return json(res, 401, { detail: 'Invalid credentials' });
+      const sm = /^\/hf\/requests\/([^/]+)\/status$/.exec(p);
+      if (sm && req.method === 'GET') {
+        const j = state.hfJobs[sm[1]];
+        if (!j) return json(res, 404, { detail: 'Request not found' });
+        j.polls++;
+        const status = j.final === 'nsfw' ? 'nsfw' : j.polls > j.need ? 'completed' : 'in_progress';
+        const out = status !== 'completed' ? {} : j.video ? { video: { url: `${FAKE_ORIGIN(req)}/hf-out/${sm[1]}.mp4` } } : { images: [{ url: `${FAKE_ORIGIN(req)}/hf-out/${sm[1]}.png` }] };
+        return json(res, 200, { status, request_id: sm[1], status_url: `${FAKE_ORIGIN(req)}/hf/requests/${sm[1]}/status`, ...out });
+      }
+      if (req.method === 'POST') {
+        if (state.hfMode === 'credits') return json(res, 403, { detail: 'Not enough credits' });
+        if (state.hfMode === 'validation') return json(res, 422, { detail: [{ loc: ['body', 'aspect_ratio'], msg: 'Input should be 1:1' }] });
+        const id = randomUUID();
+        state.hf.push({ path: p.slice(4), body, idem: req.headers['idempotency-key'] ?? null });
+        state.hfJobs[id] = { polls: 0, need: state.hfPolls, video: /video/.test(p), final: state.hfMode === 'nsfw' ? 'nsfw' : null };
+        return json(res, 200, { status: 'queued', request_id: id, status_url: `${FAKE_ORIGIN(req)}/hf/requests/${id}/status`, cancel_url: `${FAKE_ORIGIN(req)}/hf/requests/${id}/cancel` });
+      }
+    }
     // ---- 제어용 ----
     if (p === '/__state') return json(res, 200, { ...state, fcmUnregistered: [...state.fcmUnregistered], webpushGone: [...state.webpushGone] });
     if (p === '/__ctl' && req.method === 'POST') {
@@ -117,6 +141,9 @@ export function startFakeGoogle(port = 3199) {
       if (body.anthropicFiles) for (const [k, v] of Object.entries(body.anthropicFiles)) state.anthropicFiles[k] = { at: new Date().toISOString(), ...v };
       if (body.classifyQueue) state.classifyQueue.push(...body.classifyQueue);
       if (body.webpushGone) state.webpushGone.add(body.webpushGone);
+      if ('hfMode' in body) state.hfMode = body.hfMode;
+      if ('hfPolls' in body) state.hfPolls = body.hfPolls;
+      if (body.hfReset) { state.hf.length = 0; state.hfJobs = {}; }
       if (body.googleEdit) { // Google 쪽에서 사용자가 직접 수정
         const e = evs(body.googleEdit.cal)[body.googleEdit.id];
         Object.assign(e, body.googleEdit.patch); touch(e);

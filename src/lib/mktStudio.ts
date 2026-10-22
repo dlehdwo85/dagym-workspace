@@ -6,7 +6,7 @@ import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
 import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
-import { hfGenerate, hfSettings, modelFor } from './higgsfield';
+import { HF_TERMINAL, hfSettings, hfStatus, hfSubmit, modelFor, modelId, type HfState } from './higgsfield';
 
 /**
  * 대표 10/20 19:00 제작의뢰실: 사용자가 의도를 적으면 AI 비서가 '경력 30년 마케터·아트디렉터'로 Higgsfield 에 넣을 영문 프롬프트 + 한글 요약 + 참고 사진 + 자막을 쓰고,
@@ -31,6 +31,9 @@ export const briefAction = z.discriminatedUnion('action', [z.object({ action: z.
 export async function listBriefs(u: SessionUser) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
+  // 생성 중인 Higgsfield 의뢰는 화면을 열 때도 한 번 확인(tick 을 기다리지 않게, 기다리지는 않음)
+  const pending = await sql<{ id: string }[]>`select id from mkt_briefs where tenant = ${t} and status = 'generating' and result->>'provider' = 'higgsfield' order by updated_at limit 3`;
+  for (const x of pending) await pollBrief(x.id).catch(() => {});
   const briefs = await sql<any[]>`select b.*, br.name as brand, cu.name as created_by_name, c.status as content_status, c.title as content_title,
       (select count(*)::int from mkt_production_requests q where q.brief_id = b.id and q.status in ('open', 'needs_approval')) as open_requests
     from mkt_briefs b left join mkt_brands br on br.id = b.brand_id left join users cu on cu.id = b.created_by left join mkt_contents c on c.id = b.content_id
@@ -74,7 +77,7 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
       const { assertMktAi } = await import('./mktAuto'); await assertMktAi(tenant);
       const p = P.anthropicProvider({ tier: 'default' });
       const r = await p.chat({
-        system: `당신은 경력 30년의 마케터이자 아트디렉터입니다. 이미지·영상 생성 AI(Higgsfield: ${spec.media === 'video' ? 'Kling 계열 영상' : 'GPT Image 계열 실사'})에 넣을 프롬프트를 씁니다. JSON 만.
+        system: `당신은 경력 30년의 마케터이자 아트디렉터입니다. 이미지·영상 생성 AI(Higgsfield: ${model?.name ?? (spec.media === 'video' ? 'Kling 계열 영상' : 'SOUL 계열 실사')})에 넣을 프롬프트를 씁니다. JSON 만.
 - promptEn: 영문 생성 프롬프트(장면·피사체·구도·조명·분위기·카피 자리·규격 ${spec.aspect} ${spec.px}). 실사 우선, 생성 인물은 AI 느낌 최소(얼굴 클로즈업 피함). 브랜드 로고·문자를 그리게 하지 않음(글자는 뒤에 렌더).
 - negativeEn: 피할 것(영문).
 - summaryKo: 의뢰자가 읽을 한글 의도 요약 3줄(왜 이 장면인지).
@@ -142,25 +145,21 @@ async function generateBrief(u: SessionUser, b: any) {
   }
   const hf = await hfSettings();
   if (hf.enabled) {
-    await sql`update mkt_briefs set status = 'generating', content_id = ${contentId}, updated_at = now() where id = ${b.id}`;
-    const mediaIds: string[] = []; const errors: string[] = [];
-    for (let n = 0; n < b.quantity; n++) {
-      const r = await hfGenerate({ kind: spec.media, model: p.model ?? modelFor(hf.models, spec.media)?.id ?? 'gpt_image', prompt: p.promptEn, negative: p.negativeEn, aspect: spec.aspect, seconds: spec.seconds });
-      if (!r.ok) { errors.push(r.error); continue; }
-      try {
-        const { saveUrlToLibrary } = await import('./mktStudioStore');
-        mediaIds.push(await saveUrlToLibrary(u, r.url, r.mime, `${spec.label} 시안 ${n + 1} — ${String(b.message).slice(0, 30)}`));
-      } catch (e: any) { errors.push(String(e?.message ?? e)); }
+    // 로컬 10/22: 실제 API 는 비동기 — 제출(요청 id 저장) → 상태 폴링 → 완료 시 자료실 저장. 이미지는 잠깐 기다려 보고, 남은 건 tick(hfPollTick)이 이어받음
+    const model = modelId(p.model) ?? modelFor(hf.models, spec.media)?.id;
+    const jobs: HfJob[] = []; const errors: string[] = [];
+    if (!model) errors.push(`쓸 수 있는 ${spec.media === 'video' ? '영상' : '이미지'} 모델이 없습니다(플랫폼 운영 › 모델 표)`);
+    else for (let n = 0; n < b.quantity; n++) {
+      const r = await hfSubmit({ kind: spec.media, model, prompt: p.promptEn, negative: p.negativeEn, aspect: spec.aspect, seconds: spec.seconds, idempotencyKey: randomUUID() });
+      if (r.ok) jobs.push({ n, requestId: r.requestId, statusUrl: r.statusUrl, status: 'queued', mediaIds: [] }); else errors.push(r.error);
     }
-    if (mediaIds.length) {
-      const { addVersion } = await import('./marketing');
-      await addVersion(u, contentId, { body: p.caption ?? b.message, mediaIds, note: `제작의뢰실 생성(${mediaIds.length}장)` });
-      await sql`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, created_by, title) values (${t}, ${contentId}, 2, ${spec.media === 'video' ? 'generate_video' : 'generate_image'}, ${Number(b.est_credits)}, '제작의뢰실 생성', ${u.id}, ${title})`;
-      await sql`update mkt_briefs set status = 'review', result = ${sql.json({ provider: 'higgsfield', mediaIds, errors } as never)}, updated_at = now() where id = ${b.id}`;
-      return { status: 'review', contentId, mediaIds, errors };
+    if (!jobs.length) {
+      await sql`update mkt_briefs set status = 'failed', content_id = ${contentId}, error = ${errors.join(' / ').slice(0, 500)}, result = ${sql.json({ provider: 'higgsfield', model, errors } as never)}, updated_at = now() where id = ${b.id}`;
+      return { status: 'failed', contentId, errors };
     }
-    await sql`update mkt_briefs set status = 'failed', error = ${errors.join(' / ').slice(0, 500)}, result = ${sql.json({ provider: 'higgsfield', errors } as never)}, updated_at = now() where id = ${b.id}`;
-    return { status: 'failed', contentId, errors };
+    await sql`update mkt_briefs set status = 'generating', content_id = ${contentId}, error = null, result = ${sql.json({ provider: 'higgsfield', model, jobs, errors, mediaIds: [] } as never)}, updated_at = now() where id = ${b.id}`;
+    const out = await pollBrief(b.id, { waitMs: spec.media === 'image' ? 40000 : 5000 });
+    return { ...out, contentId };
   }
   // 연동 전: 제작 요청 카드(한도 검사 → needs_approval 가능)에 프롬프트·참고 사진·자막을 담아 로컬 도우미에 전달
   const { requestCard } = await import('./mktAuto');
@@ -175,6 +174,68 @@ async function generateBrief(u: SessionUser, b: any) {
   await sql`update mkt_briefs set status = 'generating', content_id = ${contentId}, result = ${sql.json({ provider: 'card', requestIds: ids } as never)}, updated_at = now() where id = ${b.id}`;
   await (await import('./mktAuto')).mktNotify(sql, { tenant: t, brand_id: b.brand_id ?? null, is_test: isTest, created_by: u.id }, u.id, { approval: true, type: 'review_requested', title: `제작 요청 카드 ${ids.length}건: ${title}`, body: '제작의뢰실 프롬프트·참고 사진이 카드에 담겨 있습니다 — 만들어 붙이면 승인 대기로', link: '/s/marketing/automation', entityType: 'mkt_content', entityId: contentId, dedupeKey: `mktbrief:${b.id}` }).catch(() => {});
   return { status: 'generating', contentId, requestIds: ids };
+}
+
+type HfJob = { n: number; requestId: string; statusUrl: string; status: HfState | 'timeout'; mediaIds: string[]; error?: string };
+const HF_TIMEOUT_MIN = 30; // 영상도 이 안에 끝남 — 넘으면 남은 요청은 실패로(과금은 Higgsfield 가 완료분만)
+/** 생성 요청 상태 확인 → 완료분 자료실 저장 → 모두 끝나면 새 버전·승인 대기(또는 실패). 동시에 둘이 돌지 않게 result.pollAt 으로 잡는다 */
+export async function pollBrief(briefId: string, opt: { waitMs?: number } = {}): Promise<{ status: string; mediaIds?: string[]; errors?: string[] }> {
+  const sql = db(); const until = Date.now() + (opt.waitMs ?? 0); let delay = 2000;
+  for (;;) {
+    const [b] = await sql<any[]>`update mkt_briefs set result = result || jsonb_build_object('pollAt', now()) where id = ${briefId} and status = 'generating' and result->>'provider' = 'higgsfield'
+      and coalesce((result->>'pollAt')::timestamptz, 'epoch') < now() - interval '3 minutes' returning *`;
+    if (!b) { const [x] = await sql<any[]>`select status, result from mkt_briefs where id = ${briefId}`; return { status: x?.status ?? 'missing', mediaIds: x?.result?.mediaIds, errors: x?.result?.errors }; }
+    const r = b.result; const jobs: HfJob[] = r.jobs ?? []; const errors: string[] = [...(r.errors ?? [])];
+    const spec = KIND_SPEC[b.kind]; const old = Date.now() - new Date(b.updated_at).getTime() > HF_TIMEOUT_MIN * 60000;
+    let actor: SessionUser | null = null;
+    for (const j of jobs) {
+      if (HF_TERMINAL.has(j.status as HfState) || j.status === 'timeout') continue;
+      const st = await hfStatus(j.requestId, j.statusUrl);
+      if (!st.ok) { if (!st.retry || old) { j.status = st.retry ? 'timeout' : 'failed'; j.error = st.error; errors.push(st.error); } continue; }
+      if (st.status === 'completed') {
+        try {
+          actor ??= await actorFor(b.created_by);
+          const { saveUrlToLibrary } = await import('./mktStudioStore');
+          for (const [k, url] of st.urls.entries()) j.mediaIds.push(await saveUrlToLibrary(actor, url, spec.media === 'video' ? 'video/mp4' : 'image/png', `${spec.label} 시안 ${j.n + 1}${st.urls.length > 1 ? `-${k + 1}` : ''} — ${String(b.message).slice(0, 30)}`));
+          j.status = 'completed'; if (!st.urls.length) { j.error = '완료됐지만 결과 주소가 없음'; errors.push(j.error); }
+        } catch (e: any) { j.status = 'failed'; j.error = String(e?.message ?? e).slice(0, 200); errors.push(j.error); }
+      } else if (HF_TERMINAL.has(st.status)) { j.status = st.status; j.error = st.error ?? `생성 ${st.status}`; errors.push(j.error); }
+      else if (old) { j.status = 'timeout'; j.error = `${HF_TIMEOUT_MIN}분 안에 끝나지 않음`; errors.push(j.error); }
+      else j.status = st.status;
+    }
+    const mediaIds = jobs.flatMap((j) => j.mediaIds); const done = jobs.every((j) => HF_TERMINAL.has(j.status as HfState) || j.status === 'timeout');
+    if (!done) {
+      await sql`update mkt_briefs set result = ${sql.json({ ...r, jobs, errors, mediaIds, pollAt: null } as never)} where id = ${briefId}`;
+      if (Date.now() + delay > until) return { status: 'generating', mediaIds, errors };
+      await new Promise((ok) => setTimeout(ok, delay)); delay = Math.min(delay * 1.5, 10000); continue;
+    }
+    if (!mediaIds.length) {
+      await sql`update mkt_briefs set status = 'failed', error = ${errors.join(' / ').slice(0, 500) || '생성 실패'}, result = ${sql.json({ ...r, jobs, errors, mediaIds, pollAt: null } as never)}, updated_at = now() where id = ${briefId}`;
+      return { status: 'failed', errors };
+    }
+    actor ??= await actorFor(b.created_by);
+    const p = b.prompt ?? {}; const t = b.tenant;
+    const { addVersion } = await import('./marketing');
+    const v = await addVersion(actor, b.content_id, { body: p.caption ?? b.message, mediaIds, note: `제작의뢰실 생성(${mediaIds.length}${spec.media === 'video' ? '편' : '장'} · ${r.model})` });
+    const [c] = await sql<{ title: string }[]>`select title from mkt_contents where id = ${b.content_id}`;
+    await sql`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, created_by, title) values (${t}, ${b.content_id}, ${(v as any)?.version ?? 2}, ${spec.media === 'video' ? 'generate_video' : 'generate_image'}, ${Number(b.est_credits)}, ${`제작의뢰실 생성 · ${r.model}`}, ${b.created_by}, ${c?.title ?? ''})`;
+    // 새 버전 알림(재승인 대기)은 addVersion 이 보냄
+    await sql`update mkt_briefs set status = 'review', error = ${errors.length ? errors.join(' / ').slice(0, 500) : null}, result = ${sql.json({ ...r, jobs, errors, mediaIds, pollAt: null } as never)}, updated_at = now() where id = ${briefId}`;
+    return { status: 'review', mediaIds, errors };
+  }
+}
+/** tick: 생성 중인 Higgsfield 의뢰 상태 이어받기(한 번에 5건, 기다리지 않음) */
+export async function hfPollTick() {
+  const rows = await db()<{ id: string }[]>`select id from mkt_briefs where status = 'generating' and result->>'provider' = 'higgsfield' order by updated_at limit 5`;
+  const out: Record<string, string> = {};
+  for (const r of rows) out[r.id] = (await pollBrief(r.id).catch((e) => ({ status: `error ${String(e?.message ?? e).slice(0, 80)}` }))).status;
+  return { checked: rows.length, out };
+}
+/** tick·폴링에서 의뢰자 권한으로 자료실 저장·새 버전(세션 없이) — 계정이 막혔으면 실패로 남김 */
+async function actorFor(userId: string): Promise<SessionUser> {
+  const [r] = await db()<any[]>`select u.id, u.email, u.name, u.role, u.status, u.timezone, u.is_demo, u.platform_admin, u.tenant, t.kind from users u join tenants t on t.id = u.tenant where u.id = ${userId} and u.status = 'active' and t.status = 'active'`;
+  if (!r) throw new Error('의뢰자 계정을 쓸 수 없어 결과를 저장하지 못했습니다');
+  return { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: '', isDemo: r.is_demo, platformAdmin: r.platform_admin, tenant: r.tenant, personal: r.kind === 'personal' } as SessionUser;
 }
 
 /** 제작 요청 카드가 [제작 완료]/[취소]되면 의뢰 상태를 따라가게(mktAuto.actRequest 에서 부름) */
