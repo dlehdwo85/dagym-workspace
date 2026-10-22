@@ -96,8 +96,9 @@ export async function performAction(u: SessionUser, notificationId: string, i: z
       const { queuePush } = await import('./notifications');
       await queuePush(sql, u.id, n.id, { delayMinutes: 10 });
       label = act.done!;
-      // 다시 울리게 두되 읽음으로는 두지 않음
-      await sql`update notifications set action_done = null, meta = meta || '{"snoozed": true}' where id = ${n.id}`;
+      // 다시 울리게 두되 읽음으로는 두지 않음. 대표 10/22: 띠(alarms)에서 10분 동안 빠지도록 snoozeUntil — 전에는 그대로 남아 [10분 뒤]를 눌러도 띠가 다시 떴다
+      const until = new Date(Date.now() + 10 * 60_000).toISOString();
+      await sql`update notifications set action_done = null, meta = meta || ${sql.json({ snoozed: true, snoozeUntil: until })} where id = ${n.id}`;
       if (n.meta?.alarm && n.entity_id && (n.entity_type === 'task' || n.entity_type === 'event')) await activity(sql, n.entity_type, n.entity_id, u.id, 'alarm_snoozed', { minutes: 10, from: 'notification' }); // 알림 '활동' 탭
       return { ok: true, label, unread: await unread(sql, u.id) };
     }

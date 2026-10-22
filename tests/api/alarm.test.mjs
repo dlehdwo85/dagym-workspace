@@ -72,6 +72,12 @@ describe('알람처럼 울리기', () => {
     const [d] = await sql`select max(next_attempt_at) at from notification_deliveries where notification_id = ${rh.id}`;
     assert.ok(new Date(d.at).getTime() > Date.now() + 8 * 60_000, '10분 뒤 재푸시');
     assert.equal((await sql`select count(*)::int n from activities where entity_type = 'task' and entity_id = ${high} and action = 'alarm_snoozed'`)[0].n, 1);
+    // 대표 10/22: [10분 뒤] 누르면 띠에서 바로 빠지고(다시 불러도 안 뜸), 10분이 지나면 다시 뜬다 · 읽음 처리는 안 함
+    const after = await ctx.staffA.client.ok('GET', '/api/notifications?unread=1');
+    assert.ok(!after.alarms.some((a) => a.id === rh.id), '10분 뒤 → 띠에서 빠짐');
+    assert.ok(after.items.some((x) => x.id === rh.id), '안 읽은 알림으로는 남음');
+    await sql`update notifications set meta = meta || ${sql.json({ snoozeUntil: new Date(Date.now() - 1000).toISOString() })} where id = ${rh.id}`;
+    assert.ok((await ctx.staffA.client.ok('GET', '/api/notifications?unread=1')).alarms.some((a) => a.id === rh.id), '10분 지나면 다시 띠');
     // 해제 → 처리됨·활동 기록·띠에서 사라짐
     const dm = await ctx.staffA.client.ok('POST', `/api/notifications/${rh.id}/action`, { action: 'dismiss' });
     assert.equal(dm.label, '알람 해제');

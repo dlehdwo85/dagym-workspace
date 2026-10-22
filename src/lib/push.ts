@@ -70,8 +70,9 @@ async function sendFcm(token: string, p: Payload) {
         // click_action 없음: 기본(앱 실행 activity)으로 열려야 data(link·notificationId)가 앱의 notificationActionPerformed 로 전달된다
         // V37 5: 안드로이드 상태바 단색 아이콘(앱 res/drawable/ic_stat_workin, 로컬 48806da)·강조색
         // 알람이면 알람 채널(앱이 전체 화면·소리·진동) · iOS 는 time-sensitive 로 집중 모드 통과
-        android: { priority: 'HIGH', notification: { channel_id: p.alarm ? 'alarm' : 'work', icon: 'ic_stat_workin', color: '#0F766E', tag: p.tag ?? p.notificationId } },
-        apns: { payload: { aps: { sound: 'default', category: p.alarm ? 'alarm' : p.type ?? 'default', 'thread-id': p.taskId || p.notificationId, ...(p.alarm ? { 'interruption-level': 'time-sensitive' } : {}) } } },
+        // 대표 10/22: 알람은 진동만 — 앱이 만드는 진동 채널(alarm_vibrate, src/components/native.ts), iOS 도 무음 파일(silence.wav, 앱에 없으면 기본음)
+        android: { priority: 'HIGH', notification: { channel_id: p.alarm ? 'alarm_vibrate' : 'work', icon: 'ic_stat_workin', color: '#0F766E', tag: p.tag ?? p.notificationId } },
+        apns: { payload: { aps: { sound: p.alarm ? 'silence.wav' : 'default', category: p.alarm ? 'alarm' : p.type ?? 'default', 'thread-id': p.taskId || p.notificationId, ...(p.alarm ? { 'interruption-level': 'time-sensitive' } : {}) } } },
       },
     }),
   });

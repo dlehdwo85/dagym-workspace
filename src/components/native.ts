@@ -85,7 +85,7 @@ export async function initNative(router: Router) {
     if (act === 'snooze') {
       const minutes = Math.min(120, Math.max(1, Number(x.snoozeMinutes) || 10));
       if (hasLocal()) await LocalNotifications.schedule({ notifications: [{
-        id: (Math.floor(Date.now() / 1000) % 1_000_000_000) + 1_000_000_000, title: n.title ?? '알람', body: n.body ?? '', channelId: 'alarm', actionTypeId: 'alarm', ongoing: true,
+        id: (Math.floor(Date.now() / 1000) % 1_000_000_000) + 1_000_000_000, title: n.title ?? '알람', body: n.body ?? '', channelId: ALARM_CHANNEL, sound: ALARM_SOUND, actionTypeId: 'alarm', ongoing: true,
         schedule: { at: new Date(Date.now() + minutes * 60_000), allowWhileIdle: true }, extra: { ...x, alarm: true, snoozed: (Number(x.snoozed) || 0) + 1 } }] }).catch(() => {});
       await report('snooze', minutes); toast.ok(`${minutes}분 뒤 다시 알립니다`); window.dispatchEvent(new Event('wos-refresh'));
     } else if (act === 'dismiss') { await report('dismiss'); toast.ok('알람을 해제했습니다'); window.dispatchEvent(new Event('wos-refresh')); }
@@ -132,6 +132,7 @@ export async function initNative(router: Router) {
   App.addListener('appStateChange', ({ isActive }: any) => { if (isActive) resyncReminders(); });
   let t: ReturnType<typeof setTimeout> | undefined;
   window.addEventListener('wos-refresh', () => { clearTimeout(t); t = setTimeout(() => resyncReminders(), 1500); });
+  createAlarmChannel().catch(() => {});
   resyncReminders();
   FirebaseMessaging.addListener('tokenReceived', (e: any) => registerToken(e.token));
   // 첫 실행: 시스템 권한 창을 바로 띄우지 않고, 이유를 먼저 보여 주는 안내(AppShell)를 띄운다
@@ -163,6 +164,23 @@ async function registerToken(token: string) {
  * 서버 정기 실행이 늦어도 정시에 울리고, 이 기기는 서버가 같은 미리 알림을 보내지 않는다(localReminders).
  */
 let syncing: Promise<void> | null = null, again = false, channel = false;
+
+/**
+ * 대표 10/22: 알람은 소리 없이 진동만. 안드로이드 채널 소리는 만든 뒤 못 바꿔서 새 채널(alarm_vibrate)을 만든다.
+ * 플러그인은 sound 를 비우면 기본 알림음을 쓰므로 무음 파일(silence)을 지정 — 앱에 무음 파일(안드로이드 res/raw/silence.wav · iOS 번들 silence.wav)이 들어가면 확실히 무음,
+ * 파일이 아직 없는 앱도 안드로이드는 열 수 없는 소리라 울리지 않는다. 진동은 채널 기본 진동.
+ * FCM 알람 푸시도 같은 채널(서버 push.ts ALARM_CHANNEL) — 로컬 알림 권한이 없어도 채널은 만들어 둔다.
+ */
+export const ALARM_CHANNEL = 'alarm_vibrate';
+const ALARM_SOUND = 'silence.wav';
+let alarmChannel = false;
+async function createAlarmChannel() {
+  if (alarmChannel || Capacitor.getPlatform() !== 'android') return;
+  const c = { id: ALARM_CHANNEL, name: '알람(진동)', description: '알람처럼 울리는 일정·마감 — 소리 없이 진동', importance: 5, visibility: 1, vibration: true, sound: ALARM_SOUND };
+  if (hasLocal()) await LocalNotifications.createChannel(c).catch(() => {});
+  else await (FirebaseMessaging as any).createChannel?.(c)?.catch?.(() => {});
+  alarmChannel = true;
+}
 export function resyncReminders(): Promise<void> {
   if (!Capacitor.isNativePlatform() || !hasLocal()) return Promise.resolve();
   if (syncing) { again = true; return syncing; }
@@ -171,16 +189,18 @@ export function resyncReminders(): Promise<void> {
       if ((await LocalNotifications.checkPermissions()).display !== 'granted') return;
       if (!channel && Capacitor.getPlatform() === 'android') {
         await LocalNotifications.createChannel({ id: 'reminders', name: '미리 알림', description: '일정·마감·아침 브리핑', importance: 4, visibility: 1, vibration: true }).catch(() => {});
-        await LocalNotifications.createChannel({ id: 'alarm', name: '알람', description: '알람처럼 울리는 일정·마감(전체 화면·소리)', importance: 5, visibility: 1, vibration: true, sound: 'alarm.wav' }).catch(() => {});
+        await createAlarmChannel();
         channel = true;
       }
       const { reminders } = await api('/api/reminders/upcoming');
-      const pending = await LocalNotifications.getPending();
-      if (pending.notifications.length) await LocalNotifications.cancel({ notifications: pending.notifications.map((n) => ({ id: n.id })) });
+      const pending = await LocalNotifications.getPending() as { notifications: { id: number; extra?: any }[] };
+      // 대표 10/22: [10분 뒤]로 기기에 다시 예약한 알람(extra.snoozed)은 남긴다 — 전에는 직후 다시 맞춤이 지워 10분 뒤에 안 울렸다
+      const stale = pending.notifications.filter((n) => !n.extra?.snoozed);
+      if (stale.length) await LocalNotifications.cancel({ notifications: stale.map((n) => ({ id: n.id })) });
       const list = (reminders as { id: number; key: string; fireAt: string; title: string; body: string; link: string; kind?: string; entityId?: string; alarm?: boolean; snoozeMinutes?: number; actions?: { id: string; label: string }[] }[]).filter((r) => new Date(r.fireAt).getTime() > Date.now()).slice(0, 64);
       // 로컬 10/20(대표): alarm 이면 알람 채널(전체 화면·소리·[해제][10분 뒤] — 네이티브가 extra 를 보고 처리, 결과는 POST /api/reminders/alarm)
       if (list.length) await LocalNotifications.schedule({ notifications: list.map((r) => ({
-        id: r.id, title: r.title, body: r.body, channelId: r.alarm ? 'alarm' : 'reminders', ...(r.alarm ? { actionTypeId: 'alarm', ongoing: true } : {}),
+        id: r.id, title: r.title, body: r.body, channelId: r.alarm ? ALARM_CHANNEL : 'reminders', ...(r.alarm ? { sound: ALARM_SOUND } : {}), ...(r.alarm ? { actionTypeId: 'alarm', ongoing: true } : {}),
         schedule: { at: new Date(r.fireAt), allowWhileIdle: true }, extra: { link: r.link, key: r.key, kind: r.kind, entityId: r.entityId, alarm: !!r.alarm, snoozeMinutes: r.snoozeMinutes ?? 10, actions: r.actions ?? [] },
       })) });
     } catch { /* 오프라인 등: 기존 예약 유지 */ } finally {
