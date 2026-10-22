@@ -59,6 +59,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 알람 진동(앱 안 알람 띠·알람 채널 alarm_vibrate) -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- 음성 등록·AI 비서 음성 입력: 마이크 + 휴대폰 음성 인식 서비스(Android 11+ 는 queries 로 서비스 조회 허용) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
