@@ -1,0 +1,60 @@
+'use client';
+import { Button, cx } from '@/components/ui';
+
+/** #426 글 품질 엔진 화면 조각 — 사람다움·훅 점수, 훅 후보 3개, 채널 검사, '더 보기' 전 미리보기, 초 단위 장면표 (승인함 상세·제작의뢰실 공용) */
+export type HookS = { text: string; score: number; pass: boolean; fails: string[]; parts?: Record<string, number> };
+export type Timing = { rows: { line: string; from: number; to: number; sec: number; over?: boolean }[]; total: number; warnings: string[] };
+export type QReport = { v?: number; human: { score: number; pass: boolean; issues: string[] }; needsPolish: boolean; hook: HookS | null; hooks?: HookS[];
+  channel?: { level: 'error' | 'warn'; msg: string }[]; preview?: string | null; timing?: Timing | null; voice?: string[]; notes?: string[] };
+const PART: Record<string, string> = { front: '앞부분', specific: '구체성', stakes: '걸린 것', callout: '대상 호명', curiosity: '궁금증' };
+const weak = (h: HookS) => Object.entries(h.parts ?? {}).filter(([, v]) => !v).map(([k]) => PART[k] ?? k).join('·');
+
+export const ScoreChip = ({ label, score, pass, testId }: { label: string; score: number; pass: boolean; testId?: string }) => (
+  <span className={cx('rounded-full border px-2 py-0.5 text-[11px] font-semibold', pass ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800')} data-testid={testId} data-pass={pass || undefined}>{label ? `${label} ` : ''}{score}점</span>
+);
+
+/** 대본 → 초 단위 구성표(분당 300음절). 넘친 장면은 빨강 */
+export function TimingTable({ t, visuals }: { t: Timing; visuals?: string[] }) {
+  return (
+    <div className="mt-2" data-testid="quality-timing">
+      <div className="font-medium text-ink-2">장면 구성 <span className="font-normal text-ink-3">전체 {t.total}초 · 첫 장면 3초·한 장면 4초 안</span></div>
+      <table className="mt-1 w-full text-left text-[11px]"><tbody>{t.rows.map((r, k) => (
+        <tr key={k} className={cx('border-t border-line align-top', r.over && 'bg-red-50 text-red-800')} data-testid="quality-timing-row" data-over={r.over || undefined}>
+          <td className="w-20 py-0.5 pr-2 font-mono tabular-nums">{r.from.toFixed(1)}~{r.to.toFixed(1)}초</td>
+          <td className="py-0.5">{r.line}{visuals?.[k] && <span className="block text-ink-3">{visuals[k]}</span>}</td>
+          <td className="w-12 py-0.5 text-right tabular-nums">{r.sec}초</td></tr>))}</tbody></table>
+      {t.warnings.length > 0 && <ul className="mt-1 space-y-0.5 text-amber-800" data-testid="quality-timing-warn">{t.warnings.map((w) => <li key={w}>· {w}</li>)}</ul>}
+    </div>
+  );
+}
+
+export function QualityPanel({ r, channel, onPolish, onPickHook, busy }: { r: QReport; channel?: string; onPolish?: () => void; onPickHook?: (text: string) => void; busy?: boolean }) {
+  const errs = (r.channel ?? []).filter((x) => x.level === 'error'); const warns = (r.channel ?? []).filter((x) => x.level === 'warn');
+  return (
+    <section className="rounded-input border border-line p-3 text-xs" data-testid="quality-panel">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <b className="text-ink-2">글 품질</b>
+        <ScoreChip label="사람다움" score={r.human.score} pass={r.human.pass} testId="quality-human" />
+        {r.needsPolish && <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white" data-testid="quality-needs-polish">다듬기 필요</span>}
+        {r.hook && <ScoreChip label="훅" score={r.hook.score} pass={r.hook.pass} testId="quality-hook" />}
+        {onPolish && <Button size="sm" variant={r.needsPolish ? 'primary' : 'secondary'} className="ml-auto" onClick={onPolish} disabled={busy} data-testid="quality-polish">{busy ? '다듬는 중…' : 'AI로 다듬기'}</Button>}
+      </div>
+      {r.human.issues.length > 0 && <p className="mt-1 text-ink-2" data-testid="quality-human-issues">{r.human.issues.join(' · ')}</p>}
+      {r.hook && !r.hook.pass && <p className="mt-1 text-amber-800" data-testid="quality-hook-why">첫 훅 «{r.hook.text}» — {r.hook.fails.length ? r.hook.fails.join(' · ') : `약한 항목: ${weak(r.hook) || '전반'}`}</p>}
+      {!!r.hooks?.length && (
+        <div className="mt-2" data-testid="quality-hooks">
+          <div className="font-medium text-ink-2">훅 후보 <span className="font-normal text-ink-3">점수는 나쁜 훅 거르기용 — 통과한 훅끼리는 실제 성과로 고릅니다</span></div>
+          <ul className="mt-1 space-y-1">{r.hooks.map((h, k) => (
+            <li key={k} className="flex items-center gap-1.5" data-testid="quality-hook-row"><span className="w-3 shrink-0 text-right text-ink-3">{k + 1}</span><ScoreChip label="" score={h.score} pass={h.pass} /><span className={cx('min-w-0 flex-1', h.text === r.hook?.text && 'font-semibold')}>{h.text}</span>
+              {onPickHook && h.pass && h.text !== r.hook?.text && <button type="button" className="shrink-0 rounded-input border border-line px-2 py-0.5 text-[11px] hover:bg-slate-50" onClick={() => onPickHook(h.text)} disabled={busy} data-testid="quality-hook-pick">이 훅으로</button>}</li>))}</ul>
+        </div>)}
+      {(errs.length > 0 || warns.length > 0) && <ul className="mt-2 space-y-0.5" data-testid="quality-channel">
+        {errs.map((e) => <li key={e.msg} className="text-red-700"><b>막음</b> {e.msg}</li>)}{warns.map((e) => <li key={e.msg} className="text-ink-2"><b className="text-amber-800">권장</b> {e.msg}</li>)}</ul>}
+      {r.preview && (channel === 'instagram' || channel === 'facebook') && <div className="mt-2" data-testid="quality-preview"><div className="text-ink-3">&lsquo;더 보기&rsquo; 전 미리보기</div>
+        <p className="mt-0.5 whitespace-pre-wrap rounded-input bg-slate-50 p-2">{r.preview}<span className="text-ink-3"> … 더 보기</span></p></div>}
+      {r.timing && <TimingTable t={r.timing} />}
+      {!!r.voice?.length && <p className="mt-1 text-amber-800" data-testid="quality-voice">{r.voice.join(' · ')}</p>}
+      {!!r.notes?.length && <p className="mt-1 text-ink-3" data-testid="quality-notes">자동 수정: {r.notes.join(' · ')}</p>}
+    </section>
+  );
+}

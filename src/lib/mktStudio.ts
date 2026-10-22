@@ -54,6 +54,20 @@ export async function createBrief(u: SessionUser, i: z.infer<typeof briefInput>)
   return { id: b.id, prompt: p };
 }
 
+type Scene = { line: string; visualEn: string };
+/** #426 자막 품질: 상투어·특수 대시 정리 + 훅(첫 줄·첫 장면) 점수 + 영상이면 초 단위 장면표(분당 300음절, 규격 초 넘으면 경고) */
+function captionQuality(caption: string, scenes: Scene[], spec: { seconds?: number; channel: string }, rules: import('./mktQuality').QualityRules, Q: typeof import('./mktQuality')) {
+  const h = Q.humanize(caption, rules);
+  const hookText = scenes[0]?.line || h.text.split('\n').map((l) => l.trim()).find(Boolean) || '';
+  const timing = scenes.length >= 2 ? Q.scriptTiming(scenes.map((x) => x.line), { ...rules, script: { ...rules.script, maxTotalSec: spec.seconds ?? rules.script.maxTotalSec } }) : null;
+  return { caption: h.text, timing, quality: { human: { score: h.score, pass: h.pass, issues: h.issues }, hook: hookText ? Q.scoreHook(hookText, rules) : null } };
+}
+/** Higgsfield 프롬프트에 장면표를 그대로(장면별 초 + 영상 지시) */
+export function withShots(promptEn: string, scenes: Scene[] | undefined, timing: { rows: { from: number; to: number }[] } | null | undefined) {
+  if (!scenes?.length) return promptEn;
+  return `${promptEn}\n\nShot list (keep this timing):\n${scenes.map((x, k) => `${k + 1}. ${timing?.rows[k] ? `${timing.rows[k].from.toFixed(1)}-${timing.rows[k].to.toFixed(1)}s` : ''} ${x.visualEn || x.line}`.replace(/\s+/g, ' ').trim()).join('\n')}`.slice(0, 4000);
+}
+
 /** AI(경력 30년 마케터·아트디렉터): 브랜드 키트·회사·목적·채널 규격·참고 자료 → 영문 생성 프롬프트 + 한글 요약 + 참고 사진 + 자막 */
 export async function writePrompt(tenant: string, briefId: string, actorId: string | null) {
   const sql = db();
@@ -68,6 +82,7 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
   const posts = refs.contentIds?.length ? await sql<{ title: string; body: string }[]>`select c.title, v.body from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = any(${refs.contentIds}::uuid[]) and c.tenant = ${tenant}` : [];
   const hf = await hfSettings(); const model = modelFor(hf.models, spec.media);
   const tone = b.tone || brand?.tone || co?.tone || '친절하고 담백하게';
+  const Q = await import('./mktQuality'); const rules = await Q.qualityRules(); const voice = Q.voicePrompt(brand?.voice);
   const fallback = { promptEn: `${spec.media === 'video' ? 'A 15-second vertical video' : 'A photorealistic photo'} for a Korean ${co?.industries?.[0] ?? 'local business'} brand "${brand?.name ?? co?.name ?? ''}": ${b.message}. Natural daylight, candid everyday scene, product/space close-up, warm and slightly humorous mood, minimal AI look (no close-up faces, use hands/back view), clean negative space for a short Korean headline. ${spec.aspect} aspect, ${spec.px}.`,
     negativeEn: 'text artifacts, distorted hands, extra fingers, uncanny faces, watermark, logo, low quality, oversaturated', summaryKo: `${spec.label}: ${PURPOSE[b.purpose]} 목적, 메시지 '${b.message}', 자연광 실사 느낌, ${tone}`, caption: b.message, refMediaIds: photos.map((p) => p.id), aspect: spec.aspect, model: model?.id ?? null, source: 'template' as 'template' | 'ai' };
   let out = fallback;
@@ -81,23 +96,29 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
 - promptEn: 영문 생성 프롬프트(장면·피사체·구도·조명·분위기·카피 자리·규격 ${spec.aspect} ${spec.px}). 실사 우선, 생성 인물은 AI 느낌 최소(얼굴 클로즈업 피함). 브랜드 로고·문자를 그리게 하지 않음(글자는 뒤에 렌더).
 - negativeEn: 피할 것(영문).
 - summaryKo: 의뢰자가 읽을 한글 의도 요약 3줄(왜 이 장면인지).
-- caption: 이 시안에 얹을 한국어 자막·카피 1~2줄(브랜드 말투: ${tone}, 금지어: ${(brand?.banned_words ?? []).join(', ') || '없음'}, 과장·최상급 금지, 숫자·가격은 재료에 있는 것만).
-- refMediaIds: 아래 참고 사진 중 기준으로 쓸 id 배열(없으면 빈 배열).
-${REFERENCE_STYLE}`,
+- caption: 이 시안에 얹을 한국어 자막·카피 1~2줄(브랜드 말투: ${tone}, 금지어: ${[...(brand?.banned_words ?? []), ...Q.avoidOf(brand?.voice)].join(', ') || '없음'}, 과장·최상급 금지, 숫자·가격은 재료에 있는 것만). 첫 줄이 훅 — 인사·"스크롤 멈추세요"·내용 없는 서두 금지, 숫자·장면·대상으로 구체적으로. 상투어(다양한·혁신적인·놓치지 마세요·지금 바로)·특수 대시(—)는 쓰지 않음.
+- refMediaIds: 아래 참고 사진 중 기준으로 쓸 id 배열(없으면 빈 배열).${spec.media === 'video' ? `
+- scenes: 장면 배열(${spec.seconds ?? 15}초 안, 4~6개) — line = 그 장면의 한국어 자막·내레이션 한 줄(분당 300음절로 2~4초, 첫 장면은 3초 안에 훅, 마지막 장면은 첫 장면과 이어지게), visualEn = 그 장면 영상 지시(영문).` : ''}
+${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}`,
         tools: [], messages: [{ role: 'user', content: `[재료]\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}${brand?.intro ? `\n소개: ${brand.intro}` : ''}${brand?.products ? `\n주력 상품: ${brand.products}` : ''}${co?.business ? `\n회사 사업: ${co.business}` : ''}${co?.customers ? `\n주요 고객: ${co.customers}` : ''}\n목적: ${PURPOSE[b.purpose]}\n채널·종류: ${spec.label}(${spec.aspect}, ${spec.px})\n핵심 메시지: ${b.message}\n톤: ${tone}\n수량: ${b.quantity}\n${photos.length ? `참고 사진(자료실):\n${photos.map((p) => `- ${p.id} ${p.title}${p.description ? `: ${p.description.slice(0, 100)}` : ''}`).join('\n')}\n` : ''}${posts.length ? `참고 게시물:\n${posts.map((p) => `- ${p.title}: ${String(p.body ?? '').slice(0, 120)}`).join('\n')}\n` : ''}${refs.links?.length ? `레퍼런스 링크: ${refs.links.join(', ')}\n` : ''}` }],
-        format: { type: 'object', additionalProperties: false, required: ['promptEn', 'negativeEn', 'summaryKo', 'caption', 'refMediaIds'], properties: { promptEn: { type: 'string' }, negativeEn: { type: 'string' }, summaryKo: { type: 'string' }, caption: { type: 'string' }, refMediaIds: { type: 'array', items: { type: 'string' } } } },
+        format: { type: 'object', additionalProperties: false, required: ['promptEn', 'negativeEn', 'summaryKo', 'caption', 'refMediaIds', ...(spec.media === 'video' ? ['scenes'] : [])],
+          properties: { promptEn: { type: 'string' }, negativeEn: { type: 'string' }, summaryKo: { type: 'string' }, caption: { type: 'string' }, refMediaIds: { type: 'array', items: { type: 'string' } },
+            ...(spec.media === 'video' ? { scenes: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['line', 'visualEn'], properties: { line: { type: 'string' }, visualEn: { type: 'string' } } } } } : {}) } },
       });
       await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
         values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_studio')`;
       const o = JSON.parse((r.content as any[]).filter((x) => x.type === 'text').map((x) => x.text).join(''));
       const okIds = new Set(photos.map((p) => p.id));
+      const scenes = spec.media === 'video' && Array.isArray(o.scenes) ? o.scenes.map((x: any) => ({ line: String(x?.line ?? '').trim().slice(0, 200), visualEn: String(x?.visualEn ?? '').trim().slice(0, 500) })).filter((x: { line: string }) => x.line).slice(0, 10) : [];
       out = { promptEn: String(o.promptEn ?? fallback.promptEn).slice(0, 4000), negativeEn: String(o.negativeEn ?? fallback.negativeEn).slice(0, 1000), summaryKo: String(o.summaryKo ?? '').slice(0, 1000), caption: String(o.caption ?? b.message).slice(0, 2000),
-        refMediaIds: (Array.isArray(o.refMediaIds) ? o.refMediaIds.filter((x: string) => okIds.has(x)) : fallback.refMediaIds), aspect: spec.aspect, model: model?.id ?? null, source: 'ai' };
+        refMediaIds: (Array.isArray(o.refMediaIds) ? o.refMediaIds.filter((x: string) => okIds.has(x)) : fallback.refMediaIds), aspect: spec.aspect, model: model?.id ?? null, source: 'ai', ...(scenes.length ? { scenes } : {}) };
     } catch { /* AI 실패·한도 → 기본 프롬프트 */ }
   }
   const est = (model?.credits ?? (spec.media === 'video' ? 80 : 6.5)) * b.quantity;
-  await sql`update mkt_briefs set prompt = ${sql.json(out as never)}, est_credits = ${est}, status = 'ready', updated_at = now() where id = ${briefId}`;
-  return { ...out, estCredits: est };
+  const q = captionQuality(out.caption, (out as { scenes?: Scene[] }).scenes ?? [], spec, rules, Q);
+  const saved = { ...out, caption: q.caption, quality: q.quality, ...(q.timing ? { timing: q.timing } : {}) };
+  await sql`update mkt_briefs set prompt = ${sql.json(saved as never)}, est_credits = ${est}, status = 'ready', updated_at = now() where id = ${briefId}`;
+  return { ...saved, estCredits: est };
 }
 
 export async function actBrief(u: SessionUser, id: string, i: z.infer<typeof briefAction>) {
@@ -112,7 +133,9 @@ export async function actBrief(u: SessionUser, id: string, i: z.infer<typeof bri
   if (i.action === 'update') {
     if (!['ready', 'failed'].includes(b.status)) throw badRequest('생성 전에만 고칠 수 있습니다');
     const { action: _a, ...patch } = i; void _a;
-    const prompt = { ...(b.prompt ?? {}), ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)), source: 'user' };
+    const prompt: Record<string, any> = { ...(b.prompt ?? {}), ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)), source: 'user' };
+    // 사람이 고친 자막은 그대로 두고 점수만 다시(자동으로 고치는 건 AI 가 쓴 자막만)
+    if (patch.caption !== undefined) { const Q = await import('./mktQuality'); prompt.quality = captionQuality(patch.caption, prompt.scenes ?? [], KIND_SPEC[b.kind], await Q.qualityRules(), Q).quality; }
     await sql`update mkt_briefs set prompt = ${sql.json(prompt as never)}, updated_at = now() where id = ${id}`;
     return { ok: true, prompt };
   }
@@ -150,7 +173,7 @@ async function generateBrief(u: SessionUser, b: any) {
     const jobs: HfJob[] = []; const errors: string[] = [];
     if (!model) errors.push(`쓸 수 있는 ${spec.media === 'video' ? '영상' : '이미지'} 모델이 없습니다(플랫폼 운영 › 모델 표)`);
     else for (let n = 0; n < b.quantity; n++) {
-      const r = await hfSubmit({ kind: spec.media, model, prompt: p.promptEn, negative: p.negativeEn, aspect: spec.aspect, seconds: spec.seconds, idempotencyKey: randomUUID() });
+      const r = await hfSubmit({ kind: spec.media, model, prompt: withShots(p.promptEn, p.scenes, p.timing), negative: p.negativeEn, aspect: spec.aspect, seconds: spec.seconds, idempotencyKey: randomUUID() });
       if (r.ok) jobs.push({ n, requestId: r.requestId, statusUrl: r.statusUrl, status: 'queued', mediaIds: [] }); else errors.push(r.error);
     }
     if (!jobs.length) {
@@ -163,7 +186,8 @@ async function generateBrief(u: SessionUser, b: any) {
   }
   // 연동 전: 제작 요청 카드(한도 검사 → needs_approval 가능)에 프롬프트·참고 사진·자막을 담아 로컬 도우미에 전달
   const { requestCard } = await import('./mktAuto');
-  const brief = [`[제작의뢰실] ${spec.label} ${spec.px} · ${PURPOSE[b.purpose]} · 수량 ${b.quantity}`, p.summaryKo ? `의도: ${p.summaryKo}` : '', `프롬프트(EN): ${p.promptEn}`, p.negativeEn ? `피할 것: ${p.negativeEn}` : '', p.caption ? `자막: ${p.caption}` : '',
+  const brief = [`[제작의뢰실] ${spec.label} ${spec.px} · ${PURPOSE[b.purpose]} · 수량 ${b.quantity}`, p.summaryKo ? `의도: ${p.summaryKo}` : '', `프롬프트(EN): ${withShots(p.promptEn, p.scenes, p.timing)}`, p.negativeEn ? `피할 것: ${p.negativeEn}` : '', p.caption ? `자막: ${p.caption}` : '',
+    p.timing ? (await import('./mktQuality')).timingText(p.timing) : '',
     p.refMediaIds?.length ? `참고 사진: ${p.refMediaIds.map((x: string) => `/api/library/${x}/download?inline=1`).join(' ')}` : '', p.model ? `모델: ${p.model}` : ''].filter(Boolean).join('\n');
   const ids: string[] = [];
   const est = Number(b.est_credits) / Math.max(1, b.quantity);

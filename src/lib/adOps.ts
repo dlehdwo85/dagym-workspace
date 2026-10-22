@@ -7,6 +7,7 @@ import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { decrypt } from './crypto';
 import { audit } from './log';
 import { tenantOf, type SessionUser } from './types';
+import { DEFAULT_RULES, checkAd, qualityRules, type QualityRules } from './mktQuality';
 
 /**
  * V44 ① AI 광고 운영실 — 네이버 검색광고 '쓰기'(파워링크 먼저, 플레이스 다음).
@@ -54,11 +55,11 @@ export const planInput = z.object({
   keywords: z.array(z.string().trim().min(1).max(25)).min(1).max(50),
   ads: z.array(z.object({ headline: z.string().trim().min(1), description: z.string().trim().min(1), url: z.string().url().max(500) })).min(1).max(3),
 });
-export function precheck(p: z.infer<typeof planInput>) {
+/** 글자 수 상한은 플랫폼 운영 › 글 품질 규칙(#426, 기본 제목 15·설명 45) */
+export function precheck(p: z.infer<typeof planInput>, rules: QualityRules = DEFAULT_RULES) {
   const issues: string[] = [];
   p.ads.forEach((a, i) => {
-    if ([...a.headline].length > 15) issues.push(`소재 ${i + 1} 제목은 15자 이내(지금 ${[...a.headline].length}자)`);
-    if ([...a.description].length > 45) issues.push(`소재 ${i + 1} 설명은 45자 이내(지금 ${[...a.description].length}자)`);
+    for (const x of checkAd('naver', a, rules)) issues.push(`소재 ${i + 1} ${x.msg}`);
     for (const [re, msg] of RISKY) if (re.test(`${a.headline} ${a.description}`)) issues.push(`소재 ${i + 1}: ${msg}`);
   });
   // 네이버 소재 허용 문자(운영 10/19: 가운데점 '·' 으로 400 code 1030) — 한글·영문·숫자·공백·일부 기호만
@@ -93,14 +94,14 @@ export async function setCap(u: SessionUser, i: z.infer<typeof capInput>) {
 export async function adOpsOverview(u: SessionUser) {
   await assertSpace(u, 'marketing');
   const t = tenantOf(u); const sql = db();
-  const [cap, spend] = await Promise.all([capOf(t), monthSpend(t)]);
+  const [cap, spend, rules] = await Promise.all([capOf(t), monthSpend(t), qualityRules()]);
   const accounts = await sql`select id, label, external_id from mkt_ad_accounts where tenant = ${t} and provider = 'naver' and status <> 'disconnected' order by created_at`;
   const plans = await sql<any[]>`select p.id, p.account_id, p.brand_id, br.name as brand, p.kind, p.name, p.plan, p.status, p.external, p.error, p.created_at, p.approved_at, a.label as account_label, ab.name as approved_by_name
     from mkt_ad_plans p join mkt_ad_accounts a on a.id = p.account_id left join mkt_brands br on br.id = p.brand_id left join users ab on ab.id = p.approved_by where p.tenant = ${t} and p.status <> 'archived' order by p.created_at desc limit 50`;
   const brands = await sql<{ id: string; name: string }[]>`select id, name from mkt_brands where tenant = ${t} order by ad_priority nulls last, name`;
   const changes = await sql<any[]>`select c.id, c.plan_id, c.kind, c.before, c.after, c.money_up, c.status, c.error, c.revert_of, c.created_at, u.name as actor_name
     from mkt_ad_changes c left join users u on u.id = c.actor_id where c.tenant = ${t} order by c.created_at desc limit 100`;
-  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan) })), changes };
+  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan, rules) })), changes };
 }
 
 /** 비즈채널(웹사이트) 목록 — 세팅안에서 고르기 */
@@ -132,7 +133,7 @@ export async function createPlan(u: SessionUser, i: z.infer<typeof planInput>) {
   await naverAcc(tenantOf(u), i.accountId);
   const { accountId, name, brandId, ...plan } = i;
   const [p] = await db()`insert into mkt_ad_plans (tenant, account_id, provider, kind, name, plan, created_by, brand_id) values (${tenantOf(u)}, ${accountId}, 'naver', 'powerlink', ${name}, ${db().json(plan as never)}, ${u.id}, ${brandId ?? null}) returning id`;
-  return { id: p.id, issues: precheck(i) };
+  return { id: p.id, issues: precheck(i, await qualityRules()) };
 }
 
 /** 세팅안 고치기(만들기 전·실패 뒤) — 이미 네이버에 만든 부분(캠페인·그룹)은 그대로, 남은 단계에 새 값 사용 */
@@ -142,7 +143,7 @@ export async function updatePlan(u: SessionUser, id: string, i: z.infer<typeof p
   if (p.status !== 'draft' && p.status !== 'failed') throw new HttpError(409, 'plan_locked', '네이버에 만든 뒤에는 세팅안을 고칠 수 없습니다 — 끄기·하루 예산만 바꿀 수 있습니다');
   const { accountId: _a, name, brandId, ...plan } = i;
   await db()`update mkt_ad_plans set name = ${name}, plan = ${db().json(plan as never)}, brand_id = ${brandId === undefined ? p.brand_id : brandId}, updated_at = now() where id = ${id}`;
-  return { id, issues: precheck(i) };
+  return { id, issues: precheck(i, await qualityRules()) };
 }
 
 /** [승인하고 시작]: 상한 필수 → 검사 통과 → 네이버에 캠페인·그룹·키워드·소재를 모두 꺼진 상태로 생성 */
@@ -152,7 +153,7 @@ export async function approvePlan(u: SessionUser, id: string) {
   const p = await planOf(t, id);
   if (p.status !== 'draft' && p.status !== 'failed') throw new HttpError(409, 'plan_not_draft', '이미 만든 세팅안입니다');
   if (!(await capOf(t))) throw new HttpError(409, 'cap_required', '먼저 회사 월 광고비 상한을 정해 주세요');
-  const issues = precheck(p.plan);
+  const issues = precheck(p.plan, await qualityRules());
   if (issues.length) throw new HttpError(409, 'precheck_failed', `세팅안 검사를 통과하지 못했습니다: ${issues.join(' · ')}`);
   const a = await naverAcc(t, p.account_id);
   // 같은 세팅안을 동시에 두 번 만들지 않게(운영 10/19: 한 번 눌렀는데 요청 3번) — 만드는 중으로 바꾼 요청만 진행, 나머지는 409

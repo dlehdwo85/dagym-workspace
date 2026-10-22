@@ -36,7 +36,7 @@ export const deadlineLabel = (deadline: string | null, at: string | null) => dea
 
 export type CardContent = { id: string; title: string; channel: string; kind?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null;
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
-  auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[] } | null; production?: { kind: string; status: string } | null;
+  auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null } } | null; production?: { kind: string; status: string } | null;
   rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; week?: number | null } | null;
   last_decision?: { decision: string; comment: string | null; at: string; version: number; by: string | null } | null };
 
@@ -57,6 +57,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
   const [full, setFull] = useState(false); const [idx, setIdx] = useState(0); const [bodyOpen, setBodyOpen] = useState(false);
   const media = c.media_ids ?? [];
   const issues = c.quality?.passed === false ? c.quality.issues ?? [] : [];
+  const rep = c.quality?.report?.v === c.current_version ? c.quality.report : null; // #426 이 버전의 품질 보고서만(사람이 고친 새 버전엔 옛 점수 안 붙임)
   const late = !!c.late;
   async function decide(decision: 'approve' | 'changes') {
     try { await api(`/api/marketing/contents/${c.id}/decide`, { body: { version: c.current_version, decision, comment: decision === 'changes' ? memo.trim() : undefined } });
@@ -72,6 +73,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="mkt-channel-label">{channelLabel(c.channel, c.kind)}</span>
         <StatusChip s={late ? 'late' : c.status} />
         <span className="text-[11px] text-ink-3">v{c.current_version}</span>
+        {rep?.needsPolish && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-polish-badge" title="사람다움 점수가 기준보다 낮습니다 — 상세에서 [AI로 다듬기]">다듬기 필요{rep.human ? ` · ${rep.human.score}점` : ''}</span>}
+        {rep?.hook && !rep.hook.pass && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-weak-hook">훅 약함 {rep.hook.score}점</span>}
         {!!c.reapprove_from && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="mkt-reapprove">재승인 (v{c.reapprove_from} 수정 요청 → v{c.current_version})</span>}
         {done && <span className="ml-auto text-xs font-semibold text-emerald-700" data-testid="approval-done">{done}</span>}
       </div>

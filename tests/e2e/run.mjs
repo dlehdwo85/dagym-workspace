@@ -48,6 +48,7 @@ import { salesTodo } from './salesTodo.step.mjs';
 import { salesLeads2 } from './salesLeads2.step.mjs';
 import { landing } from './landing.step.mjs';
 import { mktGoals } from './mktGoals.step.mjs';
+import { mktQuality } from './mktQuality.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
 import { attachLibrary } from './attachLibrary.step.mjs';
@@ -2660,6 +2661,8 @@ await step('#443 실행 애니메이션: 앱을 처음 열면 로고(튀어나�
   assert.equal(await rp.locator('#wos-intro').count(), 0);
   await rc.close();
 });
+
+await step('#426 글 품질 엔진: 승인함 다듬기 필요·훅 약함 → 상세 글 품질 패널(훅 후보·미리보기) → [AI로 다듬기] v2 → 휴대폰 넘침 없음 → 말투 프로필 저장 → 플랫폼 글 품질 규칙', () => mktQuality({ owner, ctx, BASE, FAKE, SHOTS, sql }));
 
 await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]에 Google Ads 전환 ID/라벨 저장 → 광고 클릭(gclid) 소개 화면 → 가입(광고 효과 측정 동의) → 회사가 만들어지는 순간 conversion 1회 + _gcl_aw · 동의 안 하면 안 보냄', async () => {
   srv.proc.kill('SIGTERM'); await new Promise((r) => setTimeout(r, 1000));

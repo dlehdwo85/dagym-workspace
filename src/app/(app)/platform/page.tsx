@@ -1,6 +1,7 @@
 'use client';
 import { PlatformFunnel } from '@/components/PlatformFunnel';
 import { PlatformConversionTags } from '@/components/PlatformConversionTags';
+import { PlatformQualityRules } from '@/components/PlatformQualityRules';
 import { Suspense, useState } from 'react';
 import { Building2, Check, Copy, KeyRound, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
@@ -61,6 +62,7 @@ export default function PlatformPage() {
       {/* V12 3번: 문의 접수함 */}
       <PlatformFunnel />
       <PlatformConversionTags />
+      <PlatformQualityRules />
       <AiForecast />
       <PlatformHiggsfield />
       <PlatformSalesMigrate />

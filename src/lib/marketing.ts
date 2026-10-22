@@ -141,7 +141,7 @@ export async function getContent(u: SessionUser, id: string) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);
   const sql = db();
-  const [c] = await sql<any[]>`select c.*, b.name as brand from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`;
+  const [c] = await sql<any[]>`select c.*, b.name as brand, b.voice as brand_voice from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`;
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
   const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
@@ -152,7 +152,13 @@ export async function getContent(u: SessionUser, id: string) {
   const st = await (await import('./mktAuto')).settingsOf(tenantOf(u));
   // 대표 10/20 22:30 ② M1: 서버 게시 가능 채널·계정(관리자 [서버로 게시] 버튼) + 회사 자동 게시 설정
   const targets = await (await import('./mktPublish')).publishTargets(tenantOf(u), c).catch(() => []);
-  return { content: { ...c, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
+  // #426 글 품질: AI 시안은 제작 때 낸 보고서(훅 후보·자동 수정 기록 포함), 사람이 올린 버전은 지금 본문으로 바로 검사(저장 안 함)
+  const cur = versions.find((v) => v.version === c.current_version);
+  const Q = await import('./mktQuality');
+  const qualityReport = c.quality?.report?.v === c.current_version ? c.quality.report
+    : cur ? Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', keywords: [String(c.brand ?? '').replace(/^\s*\[시험\]\s*/, '')].filter(Boolean), voice: c.brand_voice, cross: c.cross_channels ?? [] }, await Q.qualityRules()).report : null;
+  delete c.brand_voice;
+  return { content: { ...c, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };
