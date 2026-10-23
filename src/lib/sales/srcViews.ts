@@ -242,7 +242,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       [terms.facilitiesTab, tally(FPall, (p) => pick(p, 'contact_status', 'status'))], [terms.kind.vendor, tally(VPall, (p) => pick(p, 'status'))]];
     // #450 홈 카드 '마감 임박 지원사업 n건'(7일 안: 관심·준비 중 + 맞춤)
     const support = await (await import('./support')).supportHomeCard(t, sql).catch(() => null);
-    return { ...meta, bidsOn, setupNeeded, todo, tiles, progress, support, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
+    // #522 영업 DB 누락 점검 — 원천이 24시간 넘게 성공 없음·2회 연속 실패면 홈 맨 위 빨간 띠
+    const collectorAlerts = bidsOn || isAdmin(u) ? await (await import('./collectors')).collectorAlerts().catch(() => []) : [];
+    return { ...meta, bidsOn, setupNeeded, todo, tiles, progress, support, collectorAlerts, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
       bidsOpen: NR.filter((r) => isOpenBid(notice(r), workOf.get(String(r.id ?? r.__id)), today())).length,
       relatedNotices: N.length, newNotices7d: N.filter((n) => n.noticeDate && n.noticeDate >= plus(-7) && n.noticeDate <= today()).length /* 로컬 10/19: 원본 초기 적재(10/13 3,343건) 때문에 first_seen 7일은 부풀려짐 → 공고일 기준 */ }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses,
       // 대표(10/19): 첫 화면 맨 위 '오늘' — 새 공고·새 영업 DB(신규단지·시설·협력사)·오늘 연락할 리드·오늘 마감 입찰

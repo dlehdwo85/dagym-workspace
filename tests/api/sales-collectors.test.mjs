@@ -24,6 +24,8 @@ let kaptExtra = [], kaptApiItems = []; const detailCat = {};
 const kapt = fakeKapt({ files: { '20261021000001': [{ seq: 7001, fileName: '래미안 강남 커뮤니티 위탁운영 입찰공고.hwp' }] },
   detailHtml: (bid) => `<table><tr><th>주택관리업자</th><th>단지명</th><th>관리사무소 주소</th><th>전화번호</th><th>팩스번호</th><th>동수</th><th>세대수</th></tr><tr><td>우리관리<td>래미안 강남<td>서울 강남구 역삼로 1<td>02-555-1234<td>02-555-1235<td>12<td>1,250</tr></table>
       <table><tr><th>입찰분류</th><td>${detailCat[bid] ?? '용역 &gt; 커뮤니티 위탁운영'}</td></tr><tr><th>입찰종류</th><td>일반경쟁</td></tr><tr><th>내용</th><td><pre>커뮤니티센터 피트니스·수영장 위탁운영 사업자 선정</pre></td></tr></table><a href="javascript:fileDown('7001')">공고문.hwp</a>` });
+let agencyV2 = false, hotelMode = 'ok'; // #522: 새 명세(swagger) 응답 모양 · 관광숙박업 오류 응답(JSON)
+const ymd8 = (n) => plus(n).replace(/-/g, '');
 let vendorStatus = 200, nuriMode = 'denied'; // 누리장터: denied(활용신청 전) · empty(정상 0건) · odd(칸 이름이 다른 응답) · ok(새 명세 칸 이름 — 로컬 10/23 운영 응답)
 let vendorHtml = `<html><ul><li><a href="/notice/12">2026년 협력업체 정기등록 모집 안내</a> <span>${today}</span></li><li><a href="/notice/13">추석 연휴 안내</a></li></ul></html>`;
 before(async () => {
@@ -41,11 +43,14 @@ before(async () => {
       : send(200, dataGo(nuriMode === 'odd' ? [{ ntceNo: 'N-1', ntceNm: '시험 민간 입찰' }] : nuriMode === 'ok' && u.searchParams.get('bidNtceNm') === '커뮤니티' && u.pathname.endsWith('ServcPPSSrch') ? [{ bidNtceNo: 'R26BK00000001', bidNtceOrd: '000', bidNtceClsfc: '용역', nticeDt: `${today} 09:30:00`, refNo: '관리-12', ntceNm: '광교 센트럴 커뮤니티센터 피트니스 위탁운영 업체 선정', ntceDivNm: '일반공고', ntceInsttNm: '광교센트럴 입주자대표회의', bidMethdNm: '전자입찰', cntrctMthdNm: '제한경쟁', sucsfbidMthdNm: '적격심사최저가', rbidDivNm: '재입찰 허용', bidQlfctNm: '공고규격서 참조', ofclNm: '홍길동', ofclTelNo: '010-1234-5678', ofclEmail: 'hong@example.com', bidBeginDt: `${today} 10:00:00`, bidClseDt: `${plus(8)} 17:00:00`, opengDt: `${plus(9)} 11:00:00`, refAmtOpenYn: 'Y', refAmt: '180000000', asignBdgtAmt: '200000000', rgnLmtDivNm: '공고서 참조', servcDtlList: '커뮤니티센터 피트니스·GX 위탁운영', ntceSpecDocUrl1: 'https://nuri.g2b.go.kr/f/spec1.hwp', ntceSpecDocNm1: '공고문.hwp', aptHsmpNm: '광교 센트럴', aptCeoAdrs: '경기도 수원시 영통구 광교중앙로 1', aptMngOfficeTelNo: '0312223333', aptHshldNum: '1,200', rgstDt: `${today} 09:30:00` }] : []), 'application/json');
     if (u.pathname.startsWith('/g2b/ao/HrcspSsstndrdInfoService/')) return send(200, dataGo([{ bfSpecRgstNo: 'PRE-1', prdctClsfcNoNm: '커뮤니티센터 운영 위탁 용역 사전규격', orderInsttNm: 'LH', rcptDt: `${today} 08:00:00`, opninRgstClseDt: `${plus(4)} 18:00:00`, asignBdgtAmt: '90000000' }, { bfSpecRgstNo: 'PRE-2', prdctClsfcNoNm: '도로 포장 공사 사전규격', orderInsttNm: '도로공사' }]), 'application/json');
     if (u.pathname.startsWith('/g2b/as/ScsbidInfoService/')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', bidwinnrNm: '하이링크', sucsfbidAmt: '240000000', opengDt: `${today} 11:00:00` }] : []), 'application/json');
+    if (agencyV2 && u.pathname.startsWith('/agency/')) return agency522(u, send);
     if (u.pathname === '/agency/lh_bid') return send(200, dataGo([{ bidNum: 'LH-1', bidNm: '행복주택 커뮤니티시설 운영 위탁', ognzNm: 'LH', clseDt: `${plus(6)} 17:00`, bidAmt: '50000000' }]), 'application/json');
     if (u.pathname.startsWith('/agency/')) return send(403, '<r><returnReasonCode>SERVICE ACCESS DENIED</returnReasonCode></r>', 'application/xml');
     if (u.pathname === '/vendor/notice') return send(vendorStatus, vendorHtml);
     if (u.pathname === '/files/kicox.csv') return send(200, '﻿유형,시도,시군,단지명,조성상태,입주업체(개),가동업체(개),관리면적(천제곱미터)\n일반,경기,성남시,판교테크노밸리,완료,1200,1150,660\n일반,경기,화성시,동탄,조성중,30,0,100\n', 'text/csv');
     if (u.pathname === '/files/reb.csv') return send(200, `﻿단지고유번호,주소,단지명_공시가격,단지종류,세대수,동수,사용승인일,도로명주소\nA100,경기도 성남시 분당구 정자동 1,분당 새아파트,1,850,8,${plus(-100)},경기도 성남시 분당구 정자로 1\nA101,서울특별시 강남구 역삼동 2,옛날아파트,1,300,3,2010-01-01,\n`, 'text/csv');
+    if (u.pathname === '/hotels/info' && hotelMode === 'denied') return send(401, JSON.stringify({ OpenAPI_ServiceResponse: { cmmMsgHeader: { errMsg: 'SERVICE_KEY_IS_NOT_REGISTERED_ERROR', returnAuthMsg: 'SERVICE_KEY_IS_NOT_REGISTERED_ERROR', returnReasonCode: '30' } } }), 'application/json');
+    if (u.pathname === '/hotels/info' && hotelMode === 'nocond' && u.searchParams.has('cond[SALS_STTS_CD::EQ]')) return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 0, items: '' } } }), 'application/json');
     if (u.pathname === '/hotels/info') return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 1, items: { item: [{ BPLC_NM: '판교 호텔', SALS_STTS_CD: '01', ROAD_NM_ADDR: '경기도 성남시 분당구 대왕판교로 1', GSRM_CNT: '320', LCPMT_YMD: '20200101', TOUR_LDGBIZ_DTL_NM: '관광호텔업', MNG_NO: 'H1' }] } } } }), 'application/json');
     if (u.pathname === '/kaptapi/getKaptBidResultList') return send(200, dataGo([{ bidNo: 'SA-1', kaptName: '래미안 강남', kaptCode: 'A10001', doroJuso: '서울 강남구 역삼로 1', sido: '서울', hhldCnt: '1250', bidCategoryName: '커뮤니티 시설 위탁운영', selectedCompany: '다짐', ctrtStartYmd: `${plus(-300)}`, ctrtEndYmd: `${plus(65)}` }, { bidNo: 'SA-2', kaptName: '분당 파크뷰', kaptCode: 'A10002', bidCategoryName: '승강기 유지보수', selectedCompany: '현대엘리베이터' }]), 'application/json');
     send(404, 'nope');
@@ -345,4 +350,77 @@ test('#507 후속(로컬 10/23): 같은 공고 여러 줄(원본 복사 + 워크
   const v = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all');
   const hit = v.items.filter((i) => i.noticeNo === '20261021000001');
   assert.equal(hit.length, 1, JSON.stringify(hit.map((i) => i.id))); assert.equal(hit[0].attachments.length, 2);
+});
+
+/** #522 새 명세 응답(가짜 원천): LH 는 body.item 에 바로·날짜 yyyy-MM-dd 만 받음(yyyyMMdd 면 오류) · 국방은 response.body.items.item · 온비드는 resultType=json·필수 입력 확인 */
+function agency522(u, send) {
+  const q = Object.fromEntries(u.searchParams); const json = (o) => send(200, JSON.stringify(o), 'application/json');
+  const ok = (item, wrap = false) => (wrap ? { response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items: { item }, numOfRows: 100, pageNo: 1, totalCount: item.length } } } : { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { item, numOfRows: 100, pageNo: 1, totalCount: item.length } });
+  if (u.pathname === '/agency/lh_bid') {
+    if (/^\d{8}$/.test(q.tndrbidRegDtStart ?? '')) return json({ header: { resultCode: '99', resultMsg: 'INVALID REQUEST PARAMETER ERROR' }, body: {} });
+    return json(ok([{ bidNum: '2026-0001', bidDegree: '0', bidnmKor: '행복주택 커뮤니티 피트니스 운영 위탁 용역', cstrtnJobGbNm: '용역', zoneHqCd: '경기남부지역본부', bidKind: '일반', bidProgrsStatus: '공고중', tndrCtrctMedCd: '제한경쟁', tndrbidRegDt: plus(0), presmtPrc: '50000000', fdmtlAmt: '55000000', sunjungNm: '적격심사', tndrdocAcptBgninDtm: `${plus(2)} 10:00`, tndrdocAcptEndDtm: `${plus(6)} 17:00`, openDtm: `${plus(7)} 11:00`, zoneRstrct1: '경기도', zoneRstrct2: '서울특별시', req1Reqlic1Nm: '체육시설업' },
+      { bidNum: '2026-0002', bidDegree: '0', bidnmKor: '아파트 외벽 도장공사', cstrtnJobGbNm: '공사', tndrbidRegDt: plus(0) }]));
+  }
+  if (u.pathname === '/agency/lh_prespec') return json(ok([{ inadvcStddztNm: '임대주택 커뮤니티센터 피트니스 운영 위탁 용역', gdsnm: '운영 위탁', assignBudgetAmt: '90000000', opinionRegEndDtm: `${plus(4)} 18:00`, revertDeptNm: '경기남부지역본부 주거복지부', dlvgdsSpot: '경기도 화성시 동탄', dlvgdsTmlmt: '계약일부터 2년', cstrtnJobGbNm: '용역', chpsnEmail: 'tester@lh.example', chpsnTelNum: '031-000-1111' }]));
+  if (u.pathname === '/agency/d2b_bid') return json(ok(q.bidNm === '체력단련' ? [{ pblancNo: '2026-D-77', pblancOdr: '1', pblancSe: '정상공고', pblancDate: plus(0), bidNm: '부대 체력단련장 위탁운영 용역', ornt: '국군재정관리단', cntrctMth: '제한경쟁', bidStle: '전자입찰', busiDivs: '용역', bidPartcptRegistClosDt: `${plus(5)} 18:00`, biddocPresentnClosDt: `${plus(6)} 10:00`, opengDt: `${plus(6)} 11:00`, bsicExpt: '120000000' }]
+    : q.bidNm === '피트니스' ? [{ pblancNo: '2026-D-78', pblancOdr: '1', pblancSe: '정상공고', pblancDate: plus(0), bidNm: '국군 체육시설 피트니스 위탁운영 용역', ornt: '국방부', busiDivs: '용역', g2bPblancNo: '20261021001', g2bPblancOdr: '00', biddocPresentnClosDt: `${plus(9)} 10:00` }] : [], true));
+  if (u.pathname === '/agency/d2b_fclty') return json(ok([], true));
+  if (u.pathname === '/agency/onbid_lease') {
+    if (q.resultType !== 'json' || q.cltrTypeCd !== '0001' || q.prptDivCd !== '0002,0010,0005' || !/^\d{8}$/.test(q.opbdDtStart ?? '')) return json({ header: { resultCode: '10', resultMsg: '필수 입력 누락' }, body: {} });
+    return json(ok(q.onbidPbancNm === '스포츠' ? [{ onbidPbancNo: '202610-36613-00', pbancMngNo: 'M-1', pbctNo: 'P-1', onbidPbancNm: '진영스포츠센터 내 용품점 및 자판기 사용·수익허가(3차)', orgNm: '김해시도시개발공사', rspbSbrNm: '시설운영팀', pbancYmd: ymd8(0), cltrBidBgngDt: `${ymd8(1)}1000`, cltrBidEndDt: `${ymd8(3)}1700`, cltrOpbdDt: `${ymd8(4)}1000`, dspsMthodNm: '임대', prptDivNm: '공유재산', pbancKindNm: '일반공고', bidDivNm: '인터넷', pbctNsq: '3' }] : [], true));
+  }
+  return send(404, 'nope');
+}
+
+test('#522 LH·국방·온비드 새 주소·칸: LH(body.item·날짜 형식 다시)·사전규격(번호 없음·담당자 개인정보 안 씀)·국방(나라장터와 같은 공고는 한 줄)·온비드(체육시설 임대는 자판기 섞여도) · 원천별 받은 줄·관련·첫 줄 칸 이름 기록', async () => {
+  agencyV2 = true; hits = [];
+  const r = await ctx.owner.ok('POST', '/api/sales/collectors/public_agency_bids/run', {});
+  assert.equal(r.status, 'success', JSON.stringify(r));
+  for (const k of ['lh_bid', 'lh_prespec', 'd2b_bid', 'd2b_fclty', 'onbid_lease']) assert.equal(r.sources[k].ok, true, `${k} ${JSON.stringify(r.sources[k])}`);
+  assert.deepEqual([r.sources.lh_bid.received, r.sources.lh_bid.kept, r.sources.lh_bid.note], [2, 1, '날짜를 yyyy-MM-dd 로 다시 보냄'], '도장공사는 걸러짐');
+  assert.ok(r.sources.lh_bid.keys.includes('bidnmKor') && r.sources.lh_bid.keys.includes('zoneRstrct1'), '첫 줄 칸 이름(값 없이)');
+  assert.ok(!JSON.stringify(r.sources).includes('행복주택'), '값은 안 남김');
+  assert.match(r.summary, /LH 입찰공고 받음 2·관련 1/); assert.match(r.summary, /온비드 공고\(차세대\) 받음 1·관련 1/); assert.match(r.summary, /나라장터와 같은 국방 공고 1건은 나라장터 줄로/);
+  const row = async (st, ext) => (await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = ${st} and row->>'source_external_id' = ${ext} and not gone`)[0]?.row;
+  const lh = await row('lh_bid', '2026-0001-0');
+  assert.deepEqual([lh.title, lh.estimated_amount, lh.base_amount, lh.region_restriction, lh.demand_agency, lh.fit_business, lh.deadline_at.slice(0, 16)], ['행복주택 커뮤니티 피트니스 운영 위탁 용역', 50000000, 55000000, '경기도, 서울특별시', '경기남부지역본부', '다짐', `${plus(6)}T17:00`]);
+  const pre = (await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = 'lh_prespec'`).map((x) => x.row);
+  assert.equal(pre.length, 1); assert.deepEqual([pre[0].budget_amount, pre[0].region, pre[0].current_status, pre[0].notice_type], [90000000, '경기 화성시', '예정', '사전규격']);
+  assert.ok(!JSON.stringify(pre[0]).includes('tester@lh.example') && !JSON.stringify(pre[0]).includes('031-000-1111'), '담당자 메일·전화 저장 안 함');
+  const d2b = await row('d2b_bid', '2026-D-77-1');
+  assert.deepEqual([d2b.issuer, d2b.base_amount, d2b.bid_category, d2b.participation_deadline_at.slice(0, 16)], ['국군재정관리단', 120000000, '용역', `${plus(5)}T18:00`]);
+  assert.equal(await row('d2b_bid', '2026-D-78-1'), undefined, '나라장터(20261021001)에 이미 있는 국방 공고는 따로 안 만듦');
+  const on = await row('onbid_lease', '202610-36613-00');
+  assert.deepEqual([on.title, on.issuer, on.fit_business, on.related, on.notice_type, on.deadline_at.slice(0, 16)], ['진영스포츠센터 내 용품점 및 자판기 사용·수익허가(3차)', '김해시도시개발공사', '다짐', true, '공유재산 임대', `${plus(3)}T17:00`]);
+  const oq = hits.find((h) => h.path === '/agency/onbid_lease' && h.q.onbidPbancNm === '스포츠').q;
+  assert.deepEqual([oq.resultType, oq.cltrTypeCd, oq.prptDivCd, oq.opbdDtStart, oq.opbdDtEnd], ['json', '0001', '0002,0010,0005', ymd8(0), ymd8(60)]);
+  const [run] = await sql`select detail from sales_collector_runs where slug = 'public_agency_bids' order by started_at desc limit 1`;
+  assert.deepEqual(Object.keys(run.detail.sources).sort(), ['d2b_bid', 'd2b_fclty', 'lh_bid', 'lh_prespec', 'onbid_lease']);
+  const v = await ctx.owner.ok('GET', '/api/sales/collectors');
+  assert.ok(v.collectors.find((c) => c.slug === 'public_agency_bids').last.detail.sources.lh_bid.keys.length > 0, '수집기 칸에 원천별 줄');
+  agencyV2 = false;
+});
+
+test('#522 관광숙박업 오류 응답(JSON)도 코드·사유 그대로 · 영업상태 조건으로 0건이면 조건 없이 · 누락 점검(2회 연속 실패 → 영업 홈 빨간 띠·수집기 칸)', async () => {
+  hotelMode = 'denied';
+  const a = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
+  assert.equal(a.status, 'failed'); assert.match(a.summary, /^활용신청 필요\(HTTP 401\): 30 SERVICE_KEY_IS_NOT_REGISTERED_ERROR/); assert.equal(a.sources.tourist_hotels.ok, false);
+  let v = await ctx.owner.ok('GET', '/api/sales/collectors');
+  assert.ok(!v.alerts.some((x) => x.slug === 'tourist_hotels_localdata'), '한 번 실패로는 아직');
+  await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
+  v = await ctx.owner.ok('GET', '/api/sales/collectors');
+  const al = v.alerts.find((x) => x.slug === 'tourist_hotels_localdata');
+  assert.ok(al, JSON.stringify(v.alerts)); assert.equal(al.reason, '2회 연속 실패'); assert.match(al.error, /활용신청 필요/); assert.match(al.label, /관광숙박업/);
+  const home = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
+  assert.ok(home.collectorAlerts.some((x) => x.slug === 'tourist_hotels_localdata'), '영업 홈 빨간 띠 자료');
+  // 마지막 성공이 25시간 넘음 → 문제(연속 실패가 아니어도)
+  hotelMode = 'nocond';
+  const b = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
+  assert.notEqual(b.status, 'failed', JSON.stringify(b)); assert.match(b.summary, /영업상태 조건 없이 받음/);
+  v = await ctx.owner.ok('GET', '/api/sales/collectors');
+  assert.ok(!v.alerts.some((x) => x.slug === 'tourist_hotels_localdata'), '성공하면 사라짐');
+  await sql`update sales_collector_runs set started_at = started_at - interval '26 hours' where slug = 'tourist_hotels_localdata'`;
+  v = await ctx.owner.ok('GET', '/api/sales/collectors');
+  assert.match(v.alerts.find((x) => x.slug === 'tourist_hotels_localdata').reason, /^마지막 성공 2\d시간 전$/);
+  hotelMode = 'ok';
 });

@@ -62,17 +62,62 @@ export async function collectorsTick(opt: { now?: Date } = {}) {
   const r = await runCollector(due.slug, 'cron');
   return { ran: due.slug, status: r.status, summary: r.summary };
 }
+/**
+ * #522 누락 점검(로컬 10/24 '실패가 3일째 조용히 지나갔다'): 켜진 수집기마다(원천이 여럿이면 원천마다) 마지막 성공·연속 실패.
+ * 마지막 성공이 25시간(하루 + 1시간 여유) 넘었거나 2회 연속 실패면 문제 → 영업 홈 빨간 띠 + 하루 한 번 관리자 알림. 한 번도 안 돈 수집기는 보지 않음.
+ */
+export type CollectorAlert = { slug: string; source: string | null; label: string; lastOkAt: string | null; failStreak: number; reason: string; error: string | null };
+export async function collectorAlerts(now = Date.now()): Promise<CollectorAlert[]> {
+  const sql = db(); const LIMIT = 25 * 3600e3;
+  const off = new Set((await sql<{ slug: string }[]>`select slug from sales_collector_state where not enabled`).map((r) => r.slug));
+  type RunRow = { slug: string; status: string; started_at: Date; detail: any; error_log: string | null };
+  const runs = await sql<RunRow[]>`select slug, status, started_at, detail, error_log from (
+      select r.slug, r.status, r.started_at, r.detail, r.error_log, row_number() over (partition by r.slug order by r.started_at desc) as n from sales_collector_runs r
+      where r.status in ('success', 'partial', 'failed') and r.started_at > now() - interval '14 days') x where n <= 12 order by slug, started_at desc`;
+  const by = new Map<string, RunRow[]>(); for (const r of runs) { if (!by.has(r.slug)) by.set(r.slug, []); by.get(r.slug)!.push(r); }
+  const out: CollectorAlert[] = [];
+  for (const c of COLLECTORS) {
+    const rs = by.get(c.slug) ?? []; if (off.has(c.slug) || !rs.length) continue;
+    const keys = [...new Set(rs.flatMap((r) => Object.keys(r.detail?.sources ?? {})))];
+    const units = keys.length
+      ? keys.map((k) => ({ source: k as string | null, label: keys.length > 1 ? `${c.label} › ${rs.find((r) => r.detail?.sources?.[k])!.detail.sources[k].label ?? k}` : c.label, ok: (r: RunRow) => (r.detail?.sources?.[k] ? !!r.detail.sources[k].ok : null), err: (r: RunRow) => (r.detail?.sources?.[k]?.error as string | undefined) ?? null }))
+      : [{ source: null as string | null, label: c.label, ok: (r: RunRow) => r.status !== 'failed', err: (r: RunRow) => r.error_log }];
+    for (const u of units) {
+      let streak = 0, lastOk: Date | null = null, err: string | null = null, oldest: Date | null = null;
+      for (const r of rs) { const ok = u.ok(r); if (ok === null) continue; oldest = new Date(r.started_at); if (ok) { lastOk = oldest; break; } streak++; err ??= u.err(r); }
+      if (!oldest) continue;
+      const stale = now - (lastOk ?? oldest).getTime() > LIMIT;
+      if (streak >= 2 || stale) out.push({ slug: c.slug, source: u.source, label: u.label, lastOkAt: lastOk?.toISOString() ?? null, failStreak: streak, error: err?.split('\n')[0].slice(0, 160) ?? null,
+        reason: streak >= 2 ? `${streak}회 연속 실패` : lastOk ? `마지막 성공 ${Math.floor((now - lastOk.getTime()) / 3600e3)}시간 전` : '최근 성공 없음' });
+    }
+  }
+  return out;
+}
+/** 하루 한 번(09시 뒤) 문제 원천을 영업 공간 회사의 관리자 + 플랫폼 운영자에게(같은 날 다시 안 보냄) */
+export async function collectorAlertTick(now = new Date()) {
+  if (kstHourOf(now) < 9) return { skipped: 'before 09 KST' };
+  const alerts = await collectorAlerts(now.getTime()); if (!alerts.length) return { alerts: 0 };
+  const sql = db(); const day = kstDay(now);
+  const people = await sql<{ id: string }[]>`select u.id from users u join tenants t on t.id = u.tenant where u.status = 'active' and not coalesce(u.is_demo, false)
+    and ((t.spaces @> array['sales']::text[] and u.role in ('owner', 'admin')) or coalesce(u.platform_admin, false))`;
+  if (!people.length) return { alerts: alerts.length, notified: 0 };
+  const title = `영업 DB 수집 누락 위험 ${alerts.length}곳 — ${alerts.slice(0, 2).map((a) => a.label).join(' · ')}${alerts.length > 2 ? ' 외' : ''}`;
+  const body = alerts.slice(0, 6).map((a) => `${a.label}: ${a.reason}${a.error ? ` (${a.error.slice(0, 70)})` : ''}`).join('\n');
+  const { notify } = await import('../../notifications');
+  const sent = await notify(sql, { userIds: people.map((p) => p.id), type: 'sales_collector_alert', title, body, link: '/s/sales/sources#collectors', entityType: 'sales_collector', actorId: null, dedupeKey: `salescol:${day}`, space: 'sales' });
+  return { alerts: alerts.length, notified: sent.length };
+}
 /** 회사 화면: 수집기 목록(상태·마지막 실행·회사 켜기)·최근 실행 20건·필요 env 존재 여부(값은 안 보여줌) */
 export async function collectorsView(u: SessionUser) {
   await assertSpace(u, 'sales'); const sql = db(); const t = tenantOf(u);
   const states = new Map((await sql<any[]>`select slug, enabled, last_run_at, last_status from sales_collector_state`).map((r) => [r.slug, r]));
   const mine = new Map((await sql<{ slug: string; enabled: boolean }[]>`select slug, enabled from sales_collector_settings where tenant = ${t}`).map((r) => [r.slug, r.enabled]));
-  const last = new Map((await sql<any[]>`select distinct on (slug) slug, started_at, finished_at, status, inserted, updated, unchanged, errors, summary, error_log from sales_collector_runs order by slug, started_at desc`).map((r) => [r.slug, r]));
+  const last = new Map((await sql<any[]>`select distinct on (slug) slug, started_at, finished_at, status, inserted, updated, unchanged, errors, summary, error_log, detail from sales_collector_runs order by slug, started_at desc`).map((r) => [r.slug, r]));
   const env = (k: string) => !!process.env[k.replace(/\(.*\)$/, '')];
   const counts = Object.fromEntries((await sql<{ st: string; n: number }[]>`select row->>'source_type' as st, count(*)::int as n from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone group by 1`).map((r) => [r.st, r.n]));
   const runs = await sql<any[]>`select id, slug, trigger, started_at, finished_at, status, inserted, updated, unchanged, errors, summary, error_log from sales_collector_runs order by started_at desc limit 30`;
   const ready = new Map(await Promise.all(COLLECTORS.filter((c) => c.keyReady).map(async (c) => [c.slug, await c.keyReady!().catch(() => false)] as const))); // 플랫폼 운영에 넣은 키도 '있음'
-  return { canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, counts,
+  return { canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, counts, alerts: await collectorAlerts().catch(() => []),
     collectors: COLLECTORS.map((c) => ({ slug: c.slug, label: c.label, hourKst: c.hourKst, againKst: c.againKst ?? null, hours: hoursOf(c), source: c.source, bid: BID_COLLECTORS.has(c.slug), support: SUPPORT_COLLECTORS.has(c.slug), needs: (c.needs ?? []).map((k) => ({ key: k, present: env(k) || !!ready.get(c.slug) })), globalEnabled: states.get(c.slug)?.enabled ?? true, enabled: mine.get(c.slug) ?? true, lastRunAt: states.get(c.slug)?.last_run_at ?? null, lastStatus: states.get(c.slug)?.last_status ?? null, last: last.get(c.slug) ?? null })), runs };
 }
 export async function setCollectorEnabled(u: SessionUser, slug: string, enabled: boolean, scope: 'tenant' | 'global' = 'tenant') {

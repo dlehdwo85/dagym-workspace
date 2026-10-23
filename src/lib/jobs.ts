@@ -199,6 +199,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('metaCapi', async () => (await import('./metaCapi')).capiTick()); // #499-3 리드 광고로 들어온 영업 리드 단계 → Meta 전환 API(켠 회사만, 메타: 하루 한 번 이상)
   await step('salesSync', async () => (await import('./sales/migrate')).salesSyncDaily()); // V41 단계 2 전환일까지 매일 영업관리 차이분
   await step('salesCollectors', async () => (await import('./sales/collectors')).collectorsTick()); // 대표 10/21 08:45: 영업 수집기 12개(KST 시각 이후 하루 1회, tick 당 하나)
+  await step('salesCollectorAlerts', async () => (await import('./sales/collectors')).collectorAlertTick()); // #522 하루 한 번 누락 점검(24시간 넘게 성공 없음·2회 연속 실패 → 관리자 알림)
   await step('supportDeadlines', async () => (await import('./sales/support')).supportTick()); // #450 지원사업: 관심·신청 준비 공고 마감 7일·3일 전 담당자 알림(KST 08~20시)
   await step('salesDigest', async () => (await import('./sales/digest')).salesDigestTick()); // 당일 입찰 다이제스트(회사 설정 시각, 메일·알림·푸시)
   await step('notices', async () => (await import('./announcements')).noticesJob()); // V30 ② 예약 게시

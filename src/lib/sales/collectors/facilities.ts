@@ -4,7 +4,7 @@ import { RECENT_COMPLETION_DAYS } from './prospects';
 import { addDaysYmd, parseCsv, regionFromAddress, resolveDataGoKrFileUrl, rotatingWindow, runFileProspectCollector, todayIndex, todayKst, toYmd, type Extracted, type FileSourceSpec, type ProspectPayload } from './files';
 import { upsertProspects } from './store';
 import { readXlsx } from './xlsx';
-import type { Collector, CollectorCtx, CollectorResult } from './types';
+import type { Collector, CollectorCtx, CollectorResult, SourceStat } from './types';
 
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
 // ---- 산업단지 ----
@@ -90,24 +90,39 @@ export function mapHotelItem(it: Record<string, any>): ProspectPayload | null {
     scale_note: [kind || '관광숙박업', licensed ? `인허가 ${licensed}` : null, it.TOTAL_NOFL ? `${it.TOTAL_NOFL}층` : null].filter(Boolean).join(' · '), contract_scope: '호텔 피트니스·부대시설 운영', source_external_id: String(it.MNG_NO ?? '') || null };
 }
 export const touristHotels: Collector = {
-  slug: 'tourist_hotels_localdata', label: '관광숙박업(호텔·리조트)', hourKst: 7, source: '행안부 관광숙박업 조회 OpenAPI — 영업중만, 하루 12쪽(1,200건) 순환', needs: ['DATA_GO_KR_SERVICE_KEY'],
+  slug: 'tourist_hotels_localdata', label: '관광숙박업(호텔·리조트)', hourKst: 7, source: '행안부 관광숙박업 조회 OpenAPI(15155090) — 영업중만, 하루 12쪽(1,200건) 순환', needs: ['DATA_GO_KR_SERVICE_KEY'],
   async run(ctx: CollectorCtx): Promise<CollectorResult> {
-    const key = dataGoKey(); const fail = (msg: string): CollectorResult => ({ inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: msg, summary: msg, providerMode: 'api' });
+    const key = dataGoKey(); const st: SourceStat = { label: '관광숙박업', ok: false, calls: 0, received: 0, kept: 0, total: 0 };
+    const fail = (msg: string): CollectorResult => { st.error = msg.slice(0, 200); return { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: msg, summary: msg, providerMode: 'api', sources: { tourist_hotels: st } }; };
     if (!key) return fail('DATA_GO_KR_SERVICE_KEY 미설정');
     const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const safe = (s: string) => s.split(key).join('***').split(encodeURIComponent(key)).join('***').slice(0, 160);
-    const page = async (p: number) => { const u = new URL(HOTEL_API()); u.searchParams.set('serviceKey', key); u.searchParams.set('pageNo', String(p)); u.searchParams.set('numOfRows', '100'); u.searchParams.set('returnType', 'json'); u.searchParams.set('cond[SALS_STTS_CD::EQ]', '01');
-      const res = await ctx.fetchImpl(u.toString(), { signal: AbortSignal.timeout(Math.min(15000, Math.max(1000, left() - 2000))) }); const txt = await res.text(); let body: any; try { body = JSON.parse(txt); } catch { throw new Error(`관광숙박업 API 오류(HTTP ${res.status}): ${safe(txt.match(/<errMsg>([^<]+)</)?.[1] ?? 'non-json')}`); }
-      const header = body?.response?.header ?? body?.header; const code = header?.resultCode != null ? String(header.resultCode) : null; if (code != null && !['00', '0', 'INFO-000'].includes(code)) throw new Error(`결과코드 ${safe(code)}`);
-      const b = body?.response?.body ?? body?.body ?? {}; const raw = b?.items?.item ?? b?.items ?? []; const items = Array.isArray(raw) ? raw : raw ? [raw] : []; return { items, totalCount: Number(b?.totalCount ?? items.length) }; };
+    // #522(로컬 10/24 '10/22부터 실패'): 주소는 명세(15155090)와 같음 — 오류 응답이 JSON(OpenAPI_ServiceResponse)·XML 이라 예전 코드는 '0건'으로만 보였다 → 코드·사유를 그대로 남김
+    let cond = true;
+    const page = async (p: number) => { const u = new URL(HOTEL_API()); u.searchParams.set('serviceKey', key); u.searchParams.set('pageNo', String(p)); u.searchParams.set('numOfRows', '100'); u.searchParams.set('returnType', 'json'); if (cond) u.searchParams.set('cond[SALS_STTS_CD::EQ]', '01');
+      const res = await ctx.fetchImpl(u.toString(), { signal: AbortSignal.timeout(Math.min(15000, Math.max(1000, left() - 2000))) }); const txt = await res.text(); st.calls++;
+      let body: any; try { body = JSON.parse(txt); } catch { const code = txt.match(/<returnReasonCode>([^<]+)</)?.[1] ?? txt.match(/<resultCode>([^<]+)</)?.[1] ?? ''; const msg = txt.match(/<returnAuthMsg>([^<]+)</)?.[1] ?? txt.match(/<errMsg>([^<]+)</)?.[1] ?? txt.match(/<resultMsg>([^<]+)</)?.[1] ?? 'non-json';
+        throw new Error(`관광숙박업 API 오류(HTTP ${res.status}): ${safe(`${code} ${msg}`.trim())}`); }
+      const cm = body?.OpenAPI_ServiceResponse?.cmmMsgHeader; if (cm) { const rc = String(cm.returnReasonCode ?? ''); const em = String(cm.errMsg ?? cm.returnAuthMsg ?? '');
+        throw new Error(`${/^(20|21|22|30|31|32|33)$/.test(rc) || /DENIED|UNREGISTERED|NOT_REGISTERED|LIMITED|FORBIDDEN|EXPIRED/i.test(em) ? '활용신청 필요' : rc === '12' ? '주소 확인 필요' : '관광숙박업 API 오류'}(HTTP ${res.status}): ${safe(`${rc} ${em}`.trim())}`); }
+      const header = body?.response?.header ?? body?.header; const code = header?.resultCode != null ? String(header.resultCode) : null; if (code != null && !['00', '0', 'INFO-000'].includes(code)) throw new Error(`결과코드 ${safe(code)} ${safe(String(header?.resultMsg ?? ''))}`.trim());
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${safe(JSON.stringify(body).slice(0, 120))}`);
+      const b = body?.response?.body ?? body?.body ?? {}; const raw = b?.items?.item ?? b?.items ?? []; const items = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
+      st.received += items.length; if (!st.keys && items[0] && typeof items[0] === 'object') st.keys = Object.keys(items[0]).slice(0, 60);
+      if (!header && !b?.totalCount && !items.length) throw new Error(`관광숙박업 응답 모양이 다름 — 맨 위 칸: ${Object.keys(body ?? {}).slice(0, 6).join(', ') || '없음'}`);
+      return { items, totalCount: Number(b?.totalCount ?? items.length) }; };
     let first; try { first = await page(1); } catch (e) { return fail(safe(e instanceof Error ? e.message : String(e))); }
+    // 영업상태 조건(cond[SALS_STTS_CD::EQ]=01)으로 0건이면 조건 없이 한 번 더(값 형식이 다를 때) — 영업중은 아래 mapHotelItem 이 거름
+    if (!first.totalCount) { cond = false; try { first = await page(1); st.note = '영업상태 조건 없이 받음(조건으로는 0건)'; } catch (e) { return fail(safe(e instanceof Error ? e.message : String(e))); } }
     if (!first.totalCount) return fail('관광숙박업 API 응답 0건 — 서비스키 권한·요청 조건 확인 필요');
+    st.total = first.totalCount;
     const totalPages = Math.max(1, Math.ceil(first.totalCount / 100)); const win = rotatingWindow(totalPages, 12, todayIndex()); const items: any[] = []; const errs: string[] = [];
     for (let p = win.start + 1; p <= win.end; p++) { if (left() < 5000) { errs.push(`시간 한도 근접 — ${win.end - p + 1}쪽은 다음 순환에서`); break; } try { items.push(...(p === 1 ? first.items : (await page(p)).items)); } catch (e) { errs.push(safe(`page ${p}: ${e instanceof Error ? e.message : String(e)}`)); } }
     const observedAt = new Date().toISOString(); const payloads: ProspectPayload[] = []; let filtered = 0;
     for (const it of items) { const p = mapHotelItem(it); if (!p) { filtered++; continue; } payloads.push({ source_slug: 'tourist_hotels_localdata', source_name: '행정안전부 관광숙박업 조회서비스', source_url: HOTEL_PAGE_URL, source_observed_at: observedAt, ...p }); }
+    st.kept = payloads.length; st.ok = true;
     let inserted = 0, updated = 0, unchanged = 0, errors = errs.length, invalid = 0;
     for (let i = 0; i < payloads.length; i += 300) { if (left() < 5000) { errs.push(`시간 한도 근접 — ${payloads.length - i}건은 다음 순환에서`); errors++; break; } try { const r = await upsertProspects(payloads.slice(i, i + 300)); inserted += r.inserted; updated += r.updated; unchanged += r.unchanged; errors += r.errors; invalid += r.invalid; if (r.errorLog && errs.length < 10) errs.push(r.errorLog); } catch (e) { errors += Math.min(300, payloads.length - i); if (errs.length < 10) errs.push(e instanceof Error ? e.message : String(e)); } }
-    return { inserted, updated, unchanged, errors: errors + invalid, errorLog: errs.length ? errs.join('\n') : undefined, providerMode: 'api', summary: `영업중 ${first.totalCount}건 · 이번 페이지 ${win.start + 1}~${win.end}/${totalPages}` + (win.cycleDays > 1 ? ` (${win.cycleDays}일 순환)` : '') + ` · 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged} · 대상외 ${filtered}` + (errors ? ` · 오류 ${errors}` : '') };
+    return { inserted, updated, unchanged, errors: errors + invalid, errorLog: errs.length ? errs.join('\n') : undefined, providerMode: 'api', sources: { tourist_hotels: st }, summary: `영업중 ${first.totalCount}건 · 이번 페이지 ${win.start + 1}~${win.end}/${totalPages}` + (win.cycleDays > 1 ? ` (${win.cycleDays}일 순환)` : '') + ` · 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged} · 대상외 ${filtered}` + (errors ? ` · 오류 ${errors}` : '') + (st.note ? ` · ${st.note}` : '') };
   },
 };
 // ---- 신규 준공 공동주택(부동산원 CSV) ----

@@ -29,14 +29,16 @@ export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string,
   const txt = await res.text(); const safe = (s: string) => s.split(key).join('***').split(encodeURIComponent(key)).join('***').slice(0, 160);
   // data.go.kr 공통 오류(XML): returnReasonCode 20·21·22·30·31·32·33 = 활용신청·키·호출 제한 문제 → '활용신청 필요'(그 서비스는 이번 실행에서 건너뜀)
   let j: any = null; try { j = JSON.parse(txt); } catch { const code = txt.match(/<returnReasonCode>([^<]+)</)?.[1] ?? txt.match(/<resultCode>([^<]+)</)?.[1] ?? ''; const msg = txt.match(/<returnAuthMsg>([^<]+)</)?.[1] ?? txt.match(/<errMsg>([^<]+)</)?.[1] ?? txt.match(/<resultMsg>([^<]+)</)?.[1] ?? ''; const both = `${code} ${msg}`;
+    if (/^(00|0|INFO-000)$/.test(code.trim())) throw new Error(`XML 로 응답(정상 코드 ${code.trim()}) — JSON 요청 값(type·_type·resultType) 확인 필요`); // #522 원천마다 JSON 요청 칸 이름이 다름
     throw new Error(/^(20|21|22|30|31|32|33)\b/.test(code.trim()) || /DENIED|UNREGISTERED|NOT_REGISTERED|LIMITED|FORBIDDEN|EXPIRED/i.test(both) ? `활용신청 필요: ${safe(both.trim())}` : `응답 오류 (HTTP ${res.status}): ${safe(both.trim() || txt.slice(0, 80))}`); }
   // JSON 형식의 공통 오류(OpenAPI_ServiceResponse): NO_OPENAPI_SERVICE_ERROR(12) = 주소가 틀리거나 폐기된 서비스 → '주소 확인 필요'(그 서비스는 건너뜀)
   const cm = j?.OpenAPI_ServiceResponse?.cmmMsgHeader; if (cm) { const em = String(cm.errMsg ?? ''); const rc = String(cm.returnReasonCode ?? ''); if (/NO_OPENAPI_SERVICE|^12$/.test(em) || rc === '12') throw new Error(`주소 확인 필요: ${safe(em)} (해당 오픈API 서비스가 없거나 폐기됨 — 플랫폼 운영 › 영업 수집기 설정)`); if (/^(20|21|22|30|31|32|33)$/.test(rc) || /DENIED|UNREGISTERED|NOT_REGISTERED|LIMITED|FORBIDDEN|EXPIRED/i.test(em)) throw new Error(`활용신청 필요: ${safe(`${rc} ${em}`.trim())}`); throw new Error(`응답 오류 (HTTP ${res.status}): ${safe(`${rc} ${em}`.trim())}`); }
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${safe(JSON.stringify(j).slice(0, 120))}`);
   const header = j?.response?.header ?? j?.header; const code = header?.resultCode != null ? String(header.resultCode) : null;
   if (code != null && !['00', '0', 'INFO-000'].includes(code)) throw new Error(/03|04|30|31|32|33/.test(code) ? `활용신청 필요: ${safe(String(header?.resultMsg ?? code))}` : `결과코드 ${code}: ${safe(String(header?.resultMsg ?? ''))}`);
-  const b = j?.response?.body ?? j?.body ?? {}; const raw = b?.items?.item ?? b?.items ?? []; const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
-  if (stats) { stats.calls++; stats.codes[code ?? '없음'] = (stats.codes[code ?? '없음'] ?? 0) + 1; stats.total += Number(b?.totalCount) || 0; stats.raw += list.length; if (list[0] && typeof list[0] === 'object' && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 15); }
+  // #522 LH(OpenBidInfoList 등)는 body.items 없이 body.item 에 바로
+  const b = j?.response?.body ?? j?.body ?? {}; const raw = b?.items?.item ?? b?.items ?? b?.item ?? []; const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
+  if (stats) { stats.calls++; stats.codes[code ?? '없음'] = (stats.codes[code ?? '없음'] ?? 0) + 1; stats.total += Number(b?.totalCount) || 0; stats.raw += list.length; if (list[0] && typeof list[0] === 'object' && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 60); }
   return list;
 }
 const attachments = (it: any) => { const out: string[] = []; for (let i = 1; i <= 10; i++) { const u = str(it[`ntceSpecDocUrl${i}`] ?? it[`atchFileUrl${i}`]); if (u && /^https?:\/\//.test(u)) out.push(u); } return out; };
@@ -76,7 +78,7 @@ async function searchAll(ops: readonly (readonly [string, string])[], words: str
   return { items, errors, denied: [...denied], stats };
 }
 /** 요약 한 줄: '검색 30회 · 응답 00 · 전체 0건' — 받은 줄이 있는데 하나도 못 읽었으면 첫 줄 칸 이름(형식 확인용) */
-const statLine = (s: DataGoStats, read: number) => !s.calls ? '응답 없음' : `검색 ${s.calls}회 · 응답 ${Object.entries(s.codes).map(([c, n]) => (Object.keys(s.codes).length > 1 ? `${c}×${n}` : c)).join('·')} · 전체 ${s.total}건` + (s.raw && !read ? ` · 받은 ${s.raw}줄을 못 읽음(칸: ${(s.keys ?? []).join(',')})` : '');
+const statLine = (s: DataGoStats, read: number) => !s.calls ? '응답 없음' : `검색 ${s.calls}회 · 응답 ${Object.entries(s.codes).map(([c, n]) => (Object.keys(s.codes).length > 1 ? `${c}×${n}` : c)).join('·')} · 전체 ${s.total}건` + (s.raw && !read ? ` · 받은 ${s.raw}줄을 못 읽음(칸: ${(s.keys ?? []).slice(0, 15).join(',')})` : '');
 async function write(items: Record<string, unknown>[], errors: string[], opt: { mergeScope?: 'all' | 'award' } = {}) { if (!items.length) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0 }; const r = await upsertNotices(items, opt); if (r.errorLog) errors.push(r.errorLog); return r; }
 const noKey = (label: string): CollectorResult => ({ inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `${label}: DATA_GO_KR_SERVICE_KEY 미설정 — 건너뜀`, providerMode: 'api' });
 

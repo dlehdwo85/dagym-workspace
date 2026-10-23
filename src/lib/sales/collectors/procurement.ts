@@ -24,7 +24,8 @@ const norm = (s: string) => s.toUpperCase().replace(/\s+/g, '');
 
 /** 제목·분류·내용에서 키워드를 찾아 적합 사업을 정한다(띄어쓰기 무시, 긴 단어에 포함된 짧은 단어는 하나로). */
 export function matchFit(...texts: (string | null | undefined)[]): FitResult {
-  const text = texts.filter(Boolean).join(' ');
+  // #522 조달 사이트 이름(나라장터·누리장터)은 제외 주제 '장터'(알뜰장터 등)가 아님 — '나라장터 공고번호 …' 가 붙은 국방 공고가 통째로 빠졌다
+  const text = texts.filter(Boolean).join(' ').replace(/나라\s*장터|누리\s*장터/g, ' ');
   if (!text.trim()) return { fit: null, matched: [], direct: false };
   const title = String(texts[0] ?? '');
   const upper = norm(text);
@@ -69,7 +70,8 @@ export function noticeKind(title: string | null, kindName: string | null): 'new'
 
 export const PROCUREMENT_ETL_FIELDS = ['source_url', 'notice_file_url', 'issuer', 'title', 'region', 'notice_type', 'posted_date', 'deadline_at', 'budget_amount', 'estimated_amount', 'contract_method', 'current_status', 'task_scope',
   'bid_system', 'award_method', 'notice_state', 'facility_name', 'bid_category', 'office_phone', 'office_fax', 'office_address', 'household_count', 'fit_business', 'matched_keywords', 'related', 'attachment_urls',
-  'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at', 'site_briefing_at', 'site_briefing_place'] as const;
+  'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at', 'site_briefing_at', 'site_briefing_place',
+  'base_amount'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로
 export const AWARD_FIELDS = ['winner_name', 'winner_amount', 'award_date', 'current_status'] as const;
 export type NoticeRow = Record<string, unknown> & { source_type: string; source_external_id: string; title: string; source_url: string };
 
@@ -105,7 +107,10 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
   if (!title) return { ok: false, reason: 'title required' };
   if (!url || !/^https?:\/\//i.test(url)) return { ok: false, reason: 'source_url must be http(s)' };
   const deadline = ts(p.deadline_at); const state = txt(p.notice_state);
-  const fit = matchFit(title, txt(p.bid_category), txt(p.task_scope), sourceType === 'kapt_bid' ? '공동주택' : null);
+  const fit0 = matchFit(title, txt(p.bid_category), txt(p.task_scope), sourceType === 'kapt_bid' ? '공동주택' : null);
+  // #522 온비드: '스포츠센터 내 용품점 및 자판기 사용·수익허가'처럼 제외 낱말(자판기)이 섞인 체육시설 임대도 놓치지 않게 — 수집기가 준 적합 힌트
+  const hint = txt(p.fit_hint) as FitBusiness | null;
+  const fit: FitResult = fit0.fit || !hint ? fit0 : { fit: hint, matched: Array.isArray(p.fit_words) ? (p.fit_words as string[]).slice(0, 5) : [], direct: false };
   const winner = txt(p.winner_name);
   const row: NoticeRow = {
     source_type: sourceType, source_external_id: ext, source_url: url, notice_file_url: txt(p.notice_file_url), issuer: txt(p.issuer), title, region: txt(p.region),
@@ -118,6 +123,7 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
     industry_code: txt(p.industry_code), winner_name: winner, winner_amount: num(p.winner_amount), award_date: ymdOf(p.award_date),
     files_checked_at: txt(p.files_checked_at), // #507 후속: K-apt 첨부 목록을 읽은 때(다음 수집에서 다시 읽지 않음)
     site_briefing_at: ts(p.site_briefing_at), site_briefing_place: txt(p.site_briefing_place), // #510 현장설명(나라장터 dcmtgOprtnDt·Plce)
+    base_amount: num(p.base_amount),
   };
   return { ok: true, row };
 }

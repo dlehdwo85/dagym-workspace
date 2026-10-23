@@ -1,13 +1,16 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { useSalesTerms } from '@/components/session';
 import { PortalApplyLink, portalService } from './PortalApply';
 
-type Run = { id: number; slug: string; trigger: string; started_at: string; finished_at: string | null; status: string; inserted: number; updated: number; unchanged: number; errors: number; summary: string | null; error_log: string | null };
+type Src = { label: string; ok: boolean; calls: number; received: number; kept: number; total?: number; keys?: string[]; error?: string; note?: string };
+type Run = { id: number; slug: string; trigger: string; started_at: string; finished_at: string | null; status: string; inserted: number; updated: number; unchanged: number; errors: number; summary: string | null; error_log: string | null; detail?: { sources?: Record<string, Src> } | null };
+export type CollectorAlert = { slug: string; source: string | null; label: string; lastOkAt: string | null; failStreak: number; reason: string; error: string | null };
 type C = { slug: string; label: string; hourKst: number; againKst?: number | number[] | null; hours?: number[]; source: string; bid: boolean; support?: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null };
-type Data = { canEdit: boolean; platformAdmin: boolean; counts: Record<string, number>; collectors: C[]; runs: Run[] };
+type Data = { canEdit: boolean; platformAdmin: boolean; counts: Record<string, number>; collectors: C[]; runs: Run[]; alerts?: CollectorAlert[] };
 const ST: Record<string, [string, string]> = { success: ['성공', 'bg-emerald-50 text-emerald-800'], partial: ['일부', 'bg-amber-50 text-amber-800'], failed: ['실패', 'bg-red-50 text-red-800'], running: ['실행 중', 'bg-blue-50 text-blue-800'], skipped: ['건너뜀', 'bg-slate-100 text-ink-3'] };
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
 const csv = (s: string) => s.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
@@ -22,7 +25,8 @@ export function Collectors() {
   async function run(c: C) { setBusy(c.slug); try { const r = await api<any>(`/api/sales/collectors/${c.slug}/run`, { body: {} }); toast[r.status === 'failed' ? 'error' : 'ok'](`${c.label}: ${r.summary ?? r.status}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(null); } }
   const total = Object.values(data.counts).reduce((a, b) => a + b, 0);
   return (
-    <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="sales-collectors">
+    <section id="collectors" className="scroll-mt-16 rounded-card border border-line bg-white p-4 shadow-card" data-testid="sales-collectors">
+      {!!data.alerts?.length && <CollectorAlerts alerts={data.alerts} />}
       <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">자동 수집(수집기 {data.collectors.length}개)</h2><span className="text-xs text-ink-2">공고 {total.toLocaleString('ko-KR')}건 보유 · 매일 KST 06~08시 순서대로 하루 한 번(지원사업은 08·14시 두 번)</span></div>
       <p className="mt-1 text-xs text-ink-2">영업관리에서 옮겨 온 수집기입니다. 끄면 이 회사의 당일 다이제스트·오늘 새 공고에서 그 출처가 빠집니다(수집 자체는 공용). 필요한 키가 없는 수집기는 “키 필요”로 표시됩니다.</p>
       <ul className="mt-2 divide-y divide-line text-sm">{data.collectors.map((c) => { const st = c.last ? ST[c.last.status] ?? [c.last.status, 'bg-slate-100'] : null; const missing = c.needs.filter((n) => !n.present && !/선택/.test(n.key)); return (
@@ -42,6 +46,10 @@ export function Collectors() {
           </div>
           <p className="mt-0.5 text-xs text-ink-3">{c.source}</p>
           {c.last?.summary && <p className={cx('mt-0.5 text-xs', portalService(c.last.summary) ? 'text-amber-900' : 'text-ink-2')} data-testid="sales-collector-summary">{c.last.summary}<PortalApplyLink summary={c.last.summary} /></p>}
+          {/* #522 원천별: 받은 줄·관련(저장) 줄·첫 줄 칸 이름(값 없이) — [지금 수집] 뒤 바로 확인 */}
+          {c.last?.detail?.sources && <ul className="mt-0.5 space-y-0.5 text-[11px] text-ink-2" data-testid="sales-collector-sources">{Object.entries(c.last.detail.sources).map(([k, v]) => (
+            <li key={k} className={cx(!v.ok && 'text-red-700')} data-source={k}><b className="font-medium">{v.label}</b>: {v.ok ? `받음 ${v.received.toLocaleString('ko-KR')}줄${v.total && v.total !== v.received ? `(전체 ${v.total.toLocaleString('ko-KR')})` : ''} · 관련 ${v.kept}` : `실패 — ${v.error ?? '오류'}`}{v.note ? ` · ${v.note}` : ''}
+              {v.keys?.length ? <details className="text-ink-3"><summary className="cursor-pointer">첫 줄 칸 이름 {v.keys.length}개(값 없이)</summary><p className="break-all" data-testid="sales-collector-keys">{v.keys.join(', ')}</p></details> : null}</li>))}</ul>}
           {c.last?.error_log && <details className="mt-0.5 text-xs text-red-700"><summary className="cursor-pointer">오류 {c.last.errors}건</summary><pre className="whitespace-pre-wrap break-all">{c.last.error_log}</pre></details>}
         </li>); })}</ul>
       <details className="mt-2 text-xs" open={open === 'runs'} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open ? 'runs' : null)}><summary className="cursor-pointer text-ink-2">최근 실행 {data.runs.length}건</summary>
@@ -125,5 +133,16 @@ export function BidPrefs() {
       <p className="mt-2 text-xs"><a href="/api/sales/digest?preview=html" target="_blank" rel="noopener noreferrer" className="font-medium text-[#1D4ED8] underline" data-testid="prefs-preview">오늘 메일 미리보기</a><span className="text-ink-3"> — 지금 보내면 이렇게 갑니다(보내지 않음)</span></p>
       {data.last && <p className="mt-2 text-xs text-ink-2" data-testid="prefs-last-digest">마지막 다이제스트 {data.last.day}: 새 공고 {data.last.counts?.new ?? 0}{data.last.counts?.now != null ? `(즉시 검토 ${data.last.counts.now} · 검토 ${data.last.counts.review ?? 0})` : ''} · 정정 {data.last.counts?.amend ?? 0} · 취소 {data.last.counts?.cancel ?? 0}{data.last.counts?.soon ? ` · 마감 임박 ${data.last.counts.soon}` : ''} · 메일 {data.last.mailed}{data.last.counts?.mailVia ? <span className="text-ink-3"> ({VIA[String(data.last.counts.mailVia)] ?? String(data.last.counts.mailVia)})</span> : null}{data.last.counts?.mailError && <span className="text-red-600" title={String(data.last.counts.mailError)}> (메일 실패: {String(data.last.counts.mailError).slice(0, 60)})</span>} · 알림 {data.last.notified}</p>}
     </section>
+  );
+}
+
+/** #522 누락 점검 빨간 띠(영업 홈·수집기 칸 공용) */
+export function CollectorAlerts({ alerts, link }: { alerts: CollectorAlert[]; link?: boolean }) {
+  return (
+    <div className="mb-3 rounded-input border border-red-300 bg-red-50 p-3 text-sm text-red-900" role="alert" data-testid="sales-collector-alerts">
+      <p className="font-bold">영업 DB 수집 누락 위험 {alerts.length}곳 — 공고를 놓칠 수 있습니다</p>
+      <ul className="mt-1 space-y-0.5 text-xs">{alerts.slice(0, 8).map((a) => <li key={`${a.slug}:${a.source ?? ''}`} data-testid="sales-collector-alert"><b>{a.label}</b>: {a.reason}{a.lastOkAt ? ` (마지막 성공 ${fmtDateTime(a.lastOkAt)})` : ''}{a.error ? ` — ${a.error}` : ''}</li>)}</ul>
+      {link && <Link href="/s/sales/sources#collectors" className="mt-1 inline-block text-xs font-semibold underline">수집기 보기 · [지금 수집] →</Link>}
+    </div>
   );
 }

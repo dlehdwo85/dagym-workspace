@@ -7,6 +7,7 @@ import { ArrowRight, Download, ExternalLink, MessageSquare, Phone } from 'lucide
 import { api, useApi } from '@/components/client';
 import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
+import { CollectorAlerts } from '@/components/sales/Collectors';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
@@ -239,6 +240,8 @@ export function SalesHome() {
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="space-home-sales">
       <Head title="워크인 · 영업" meta={data} />
+      {/* #522 영업 DB 누락 점검: 원천이 24시간 넘게 성공 없음·2회 연속 실패 */}
+      {!!data.collectorAlerts?.length && <CollectorAlerts alerts={data.collectorAlerts} link />}
       {data.setupNeeded && (
         <section className="rounded-card border-2 border-[#93C5FD] bg-[#EFF6FF] p-4" data-testid="sales-setup-prompt">
           <h2 className="text-base font-bold text-[#1D4ED8]">영업 출처부터 고르세요</h2>
