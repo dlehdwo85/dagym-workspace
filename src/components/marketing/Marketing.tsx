@@ -6,6 +6,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
+import { useBackClose } from '@/components/backClose';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
@@ -149,6 +150,8 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   const [picked, setPicked] = useState<Record<string, boolean>>({}); const [fixOpen, setFixOpen] = useState(false); const [fixBrand, setFixBrand] = useState(''); const [fixAt, setFixAt] = useState('');
   const [qBusy, setQBusy] = useState(false);
   const brandsQ = useApi<{ brands: { id: string; name: string }[] }>(fixOpen ? '/api/marketing/brands' : null, [fixOpen]);
+  // #535(대표 10/24 08:05 '승인 대기 상세 → 뒤로가기 → 마케팅 홈'): 열 때 ?c=<id> 를 방문 기록에 남김 — 뒤로가기(휴대폰·앱 버튼)는 이 창만 닫고 승인함·캘린더(탭·필터·스크롤)는 그대로
+  useBackClose(true, onClose, ['c', id]);
   if (error) return <Modal open onClose={onClose} title="콘텐츠"><ErrorBox error={error} retry={reload} /></Modal>;
   if (!data) return <Modal open onClose={onClose} title="콘텐츠"><Skeleton rows={4} /></Modal>;
   const c = data.content, v = data.versions[0];

@@ -66,6 +66,7 @@ import { mktPreview } from './mktPreview.step.mjs';
 import { aiStream } from './aiStream.step.mjs';
 import { mktVisual } from './mktVisual.step.mjs';
 import { collectorAlerts } from './collectorAlerts.step.mjs';
+import { backClose } from './backClose.step.mjs';
 import { supportPrograms } from './support.step.mjs';
 import { mktVideo } from './mktVideo.step.mjs';
 import { coAssign } from './coAssign.step.mjs';
@@ -2506,6 +2507,7 @@ await step('#497 R06 채널별 실제 게시 화면 미리보기: 인스타 피�
 await step('#497 R44 AI 비서 답 실시간 출력: 쓰는 중 말풍선(글이 이어서·[멈춤]) → 끝나면 서식(제목·굵게·목록·표·링크) · 도구 단계 한 줄 · 패널 같음 · 휴대폰 표 넘침 없음', () => aiStream({ browser, desk, owner, BASE, FAKE, SHOTS }));
 await step('#516 승인함 시안 없음: 승인할 시안 수에서 빼고 빨간 묶음·빨간 띠·[승인] 없음 → [지금 만들기](서버 그리기·크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧]', () => mktVisual({ owner, ctx, sql, BASE, SHOTS }));
 await step('#522 영업 DB 누락 점검: 원천 2회 연속 실패·24시간 넘게 성공 없음 → 영업 홈 빨간 띠(받는 원천은 빼기·원천 하나뿐이면 수집기 이름) → [수집기 보기] → 수집기 칸 같은 띠·원천별 줄(받은 줄·관련·실패 빨간 줄)·첫 줄 칸 이름(값 없이) 펼치기', () => collectorAlerts({ owner, ctx, sql, BASE, SHOTS }));
+await step('#535 승인함·콘텐츠 캘린더 상세 뒤로가기: 열면 ?c 기록 → 뒤로가기는 상세만 닫힘(승인함 그대로) · 닫기 단추는 기록 되돌림 · 링크로 연 상세는 ?c 만 지움 (390폭)', () => backClose({ owner, ctx, BASE }));
 await step('#494 메타 광고 자동 세팅: 광고 운영 메타 칸(초안 대기 줄·승인함 링크·권한 다시 연결) → [새 메타 광고] 창(양식 번호 직접·개인정보 확인·자료실 소재·반경·자동 일시정지) 저장 → 승인함 광고 초안 탭(배지·요약·피드 미리보기·확인 문구) → 휴대폰 폭 → [반려] 사유 → 보관', () => metaAuto({ owner, ctx, sql, BASE, SHOTS }));
 await step('#450 영업실 지원사업: 사이드바 메뉴 → 맞춤 목록(1차 판단·조건 칩·D-day·자격 안 맞는 공고 빼기) → [AI 판단] → [신청 준비] 담당 업무 → 영업 홈 마감 임박 카드 → 상세(준비 서류·진행) → [신청 완료] → [직접 추가] 지난 신청 → 신청·결과 탭 → 휴대폰 폭', () => supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#454 영상 파이프라인 v2: 플랫폼 운영 내레이션(TTS) 카드·연결 시험 → 브랜드 키트 영상 끝 화면·자막 → 제작의뢰실 릴스 준비 상태 → [생성] 장면별 생성·검수·합성 → 장면 칩(실제 화면·검수 ✓)·완성 영상·승인 대기 → 휴대폰 폭', () => mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }));
