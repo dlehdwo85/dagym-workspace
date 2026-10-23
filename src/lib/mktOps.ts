@@ -550,6 +550,7 @@ export async function opsTick(tenant: string, now = new Date()) {
     const [recent] = await sql<{ n: number }[]>`select count(*)::int n from mkt_proposals where tenant = ${tenant} and source <> 'user' and created_at >= now() - interval '6 days'`;
     if (!recent.n) out.proposals = await propose(tenant, ['analysis', 'direction'], null).catch((e) => ({ error: String(e?.message ?? e) }));
     out.weekly = await weeklyProposal(tenant, null).catch((e) => ({ error: String(e?.message ?? e) })); // 대표 10/20 14:10 ④ 월요일 주간 운영 제안(숫자)
+    out.adrefs = await (await import('./mktAdRefs')).adRefWeekly(tenant, now).catch((e) => ({ error: String(e?.message ?? e) })); // #499-6 경쟁 광고 주간 분석(새 광고 3개 이상일 때)
   }
   if (day >= 25) {
     const next = monthKst(now, 1);

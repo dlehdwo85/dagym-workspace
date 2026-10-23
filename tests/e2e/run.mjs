@@ -60,6 +60,7 @@ import { leadAds } from './leadAds.step.mjs';
 import { metaCapi } from './metaCapi.step.mjs';
 import { mktConcepts } from './mktConcepts.step.mjs';
 import { mktCarousel } from './mktCarousel.step.mjs';
+import { mktAdRefs } from './mktAdRefs.step.mjs';
 import { supportPrograms } from './support.step.mjs';
 import { mktVideo } from './mktVideo.step.mjs';
 import { coAssign } from './coAssign.step.mjs';
@@ -2494,6 +2495,7 @@ await step('광고 2차 ① 리드 광고(메타) → 영업 리드: 광고 운�
 await step('#499-3 리드 단계 → 메타 전환 API: 리드 광고 상자 안 설정(기본 꺼짐·보내는 것 안내·데이터 세트 숫자만·토큰 저장됨·단계 이름표) → 저장(보내는 값) → [시험 보내기] → 켜기 → [지금 보내기](형식 아닌 리드 ID 건너뜀) → 최근 기록 · 휴대폰 폭', () => metaCapi({ owner, ctx, sql, BASE, SHOTS }));
 await step('#499-4 상황 매트릭스: 운영실 광고 컨셉 [새 상황 매트릭스] → AI로 채우기 → 역할 추가 → 컨셉 만들기(보내는 값) → 카드(역할×상황 칸·광고형 점수) → 승인함 광고 컨셉 탭 → 2개 채택 → 제작 의뢰(피드·릴스·광고형) → 운영실 채택함·새 각도 · 휴대폰 폭', () => mktConcepts({ owner, ctx, sql, BASE, SHOTS }));
 await step('#499-5 카드뉴스 장별 생성기: 자동 제작 › 카드뉴스 탭 → 제품·대상·키워드 → 주제 후보 4유형(훅 점수) → 고르기 → 장별 문구 만들기(보내는 값) → 채울 곳 경고·그리기 잠김 → 채우기·순서·틀 → 저장(미리보기 다시 그림) → 이미지로 만들어 승인 요청(인스타 피드 7장) · 휴대폰 폭', () => mktCarousel({ owner, ctx, sql, BASE, SHOTS }));
+await step('#499-6 경쟁 광고 보관함: 운영실 [광고 넣기](업체·링크·게재 시작·비슷한 소재·대본 — 보내는 값) → 질문형 → 칩 거르기 → ★ → 자세히·AI 분석(뼈대) → 3개 골라 공통 구조 분석(대본 3안·제작의뢰실 링크) → 주간 분석 지금 · 휴대폰 폭', () => mktAdRefs({ owner, ctx, sql, BASE, SHOTS }));
 await step('#494 메타 광고 자동 세팅: 광고 운영 메타 칸(초안 대기 줄·승인함 링크·권한 다시 연결) → [새 메타 광고] 창(양식 번호 직접·개인정보 확인·자료실 소재·반경·자동 일시정지) 저장 → 승인함 광고 초안 탭(배지·요약·피드 미리보기·확인 문구) → 휴대폰 폭 → [반려] 사유 → 보관', () => metaAuto({ owner, ctx, sql, BASE, SHOTS }));
 await step('#450 영업실 지원사업: 사이드바 메뉴 → 맞춤 목록(1차 판단·조건 칩·D-day·자격 안 맞는 공고 빼기) → [AI 판단] → [신청 준비] 담당 업무 → 영업 홈 마감 임박 카드 → 상세(준비 서류·진행) → [신청 완료] → [직접 추가] 지난 신청 → 신청·결과 탭 → 휴대폰 폭', () => supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#454 영상 파이프라인 v2: 플랫폼 운영 내레이션(TTS) 카드·연결 시험 → 브랜드 키트 영상 끝 화면·자막 → 제작의뢰실 릴스 준비 상태 → [생성] 장면별 생성·검수·합성 → 장면 칩(실제 화면·검수 ✓)·완성 영상·승인 대기 → 휴대폰 폭', () => mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }));

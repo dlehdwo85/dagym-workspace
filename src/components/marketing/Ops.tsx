@@ -5,6 +5,7 @@ import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { RevenueGoal } from './RevenueGoal';
 import { ConceptBox } from './Concepts';
+import { AdRefBox } from './AdRefs';
 
 /**
  * 대표 10/20 20:00 ① 마케팅 운영실: AI 마케터(30년차)가 운영을 맡되 분석·방향·협업·인플루언서·계획은 '승인 요청 카드'로 올리고, 대표가 [승인]해야 실행(계획·방향 → 제작의뢰실, 협업·인플루언서·분석 → 업무).
@@ -91,6 +92,8 @@ export function Ops() {
         </section>
         {/* #499-4 상황 매트릭스: 구매자 역할 × 상황 → AI 광고 컨셉 → 대표 1~4개 채택 → 광고형 제작 의뢰 */}
         <ConceptBox />
+        {/* #499-6 경쟁 광고 보관함: 링크·영상(수집 없음) → 대본·첫 문장 유형 → 공통 구조 → 우리 대본 3안 */}
+        <AdRefBox />
         <BudgetCard b={data.budget} month={data.month} canEdit={data.canEdit} busy={busy} onDraft={draftBudget} onChange={reload} ownerTotal={data.ownerTotal} totalDefault={data.totalDefault} />
         {rest.length > 0 && <details className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ops-history"><summary className="cursor-pointer text-sm font-semibold">지난 카드 {rest.length}</summary>
           <div className="mt-2 grid gap-3 md:grid-cols-2">{rest.map((p) => <ProposalCard key={p.id} p={p} kinds={data.kinds} canEdit={data.canEdit} onChange={reload} />)}</div></details>}

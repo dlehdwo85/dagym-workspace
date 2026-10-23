@@ -53,8 +53,8 @@ const PLACEHOLDER = /\{\{[^}]*\}\}/;
 /** 받침에 맞는 조사(을/를·이/가·와/과·은/는) — 한글이 아니면 뒤 것 */
 const josa = (w: string, pair: '을를' | '이가' | '와과' | '은는') => { const c = w.trim().slice(-1).charCodeAt(0); const batchim = c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28 !== 0; return `${w}${batchim ? pair[0] : pair[1]}`; };
 
-/** 재료: 회사·브랜드 소개·주력 상품·말투 + 금지어 + 브랜드 키트(색·로고·글꼴) */
-async function material(tenant: string, brandId: string | null) {
+/** 재료: 회사·브랜드 소개·주력 상품·말투 + 금지어 (#499-6 경쟁 광고 보관함도 씀) */
+export async function material(tenant: string, brandId: string | null) {
   const sql = db();
   const [brand] = brandId ? await sql<any[]>`select id, name, intro, products, voice, banned_words, color, video from mkt_brands where id = ${brandId} and tenant = ${tenant}` : [];
   if (brandId && !brand) throw notFound('브랜드를 찾을 수 없습니다');
