@@ -24,13 +24,47 @@ interface LocalPlugin {
   cancel(o: { notifications: { id: number }[] }): Promise<void>;
   schedule(o: { notifications: any[] }): Promise<unknown>;
   createChannel(c: { id: string; name: string; description?: string; importance?: number; visibility?: number; vibration?: boolean; sound?: string }): Promise<void>;
-  registerActionTypes(o: { types: { id: string; actions: { id: string; title: string; destructive?: boolean; foreground?: boolean }[] }[] }): Promise<void>;
+  registerActionTypes(o: { types: { id: string; actions: { id: string; title: string; destructive?: boolean; foreground?: boolean; input?: boolean; inputButtonTitle?: string; inputPlaceholder?: string }[] }[] }): Promise<void>;
   removeDeliveredNotifications(o: { notifications: any[] }): Promise<void>;
 }
 const LocalNotifications = registerPlugin<LocalPlugin>('LocalNotifications');
+// 앱 1.1.3 네이티브(로컬 f10f7337): 이 앱이 할 수 있는 일(caps) — 옛 앱(1.1.2 이하)에는 플러그인이 없어 []
+type NativeAlarm = { id: number; at: number; title: string; body: string; link: string; kind?: string; entityId?: string; key?: string; snoozeMinutes?: number; snooze?: boolean };
+interface WorkinNativePlugin {
+  getInfo(): Promise<{ platform?: string; caps?: string[] }>;
+  // #447 전체화면 알람('android-fullscreen-alarm-1'): 알람시계로 예약 → 잠금 화면 위 [해제][n분 뒤][열기], 결과는 앱이 POST /api/reminders/alarm
+  setAlarms(o: { alarms: NativeAlarm[] }): Promise<{ scheduled: number }>;
+  addAlarm(o: NativeAlarm): Promise<void>;
+  settleAlarm(o: { entityId: string }): Promise<void>;
+  alarmStatus(): Promise<{ fullScreen: boolean; exact: boolean; count: number }>;
+  openAlarmSettings(): Promise<void>;
+  // #194 바탕화면 위젯 '워크인 오늘'('android-widget-1') 새로고침 — 위젯을 두지 않았으면 앱이 아무것도 안 함
+  refreshWidget(): Promise<void>;
+  // #194 문자에 파일 바로 첨부('android-sms-attach-1'): 기본 문자 앱을 번호·본문·첨부(앱 캐시 파일만)로 채워 연다 — 보내기는 사람이
+  shareToSms(o: { phones: string[]; body: string; files: { uri: string; mime: string }[] }): Promise<{ app: string; attached: number }>;
+}
+const WorkinNative = registerPlugin<WorkinNativePlugin>('WorkinNative');
+export async function nativeCaps(): Promise<string[]> {
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('WorkinNative')) return [];
+  try { return ((await WorkinNative.getInfo()).caps ?? []).filter((c) => typeof c === 'string').slice(0, 20); } catch { return []; }
+}
+let capsOnce: Promise<string[]> | null = null;
+const hasCap = async (c: string) => (await (capsOnce ??= nativeCaps())).includes(c);
+const FULLSCREEN_ALARM = 'android-fullscreen-alarm-1';
+/** #447 이 휴대폰의 전체화면 알람 상태(1.1.3 안드로이드만, 아니면 null) — 설정 › 알림의 허용 안내 */
+export async function alarmDeviceStatus() {
+  if (!(await hasCap(FULLSCREEN_ALARM))) return null;
+  try { return await WorkinNative.alarmStatus(); } catch { return null; }
+}
+/** 안드로이드 14+ '전체화면 알림 허용' 설정 화면(그 아래 버전은 앱 알림 설정) */
+export const openAlarmSettings = () => WorkinNative.openAlarmSettings();
+/** #194 1.1.3 바탕화면 위젯 새로고침 — 앱을 열 때·나갈 때·저장했을 때·로그아웃(위젯이 로그인 안내로) */
+export async function refreshWidget() {
+  if (await hasCap('android-widget-1')) await WorkinNative.refreshWidget().catch(() => {});
+}
 // 52ec734(로컬): filesystem·share·browser 플러그인 — 이 플러그인이 없는 예전 앱은 지금처럼 동작
 interface BrowserPlugin { open(o: { url: string; presentationStyle?: string }): Promise<void>; close(): Promise<void> }
-interface FsPlugin { writeFile(o: { path: string; data: string; directory: string }): Promise<{ uri: string }> }
+interface FsPlugin { writeFile(o: { path: string; data: string; directory: string; recursive?: boolean }): Promise<{ uri: string }> }
 interface SharePlugin { share(o: { title?: string; files?: string[]; dialogTitle?: string }): Promise<unknown> }
 const Browser = registerPlugin<BrowserPlugin>('Browser');
 const Filesystem = registerPlugin<FsPlugin>('Filesystem');
@@ -40,6 +74,8 @@ const canShareFiles = () => Capacitor.getPlatform() === 'ios' && Capacitor.isPlu
 /** 예전 앱(플러그인 없음)에서는 서버 알림을 그대로 받는다 */
 const hasLocal = () => Capacitor.isPluginAvailable('LocalNotifications');
 import { api } from './client';
+import { WN_ACTION_IDS, WN_SETS, wnCategory } from '@/lib/notifCategories';
+import { deepPath } from '@/lib/deepLink';
 
 type Router = { push: (href: string) => void };
 
@@ -89,22 +125,35 @@ export async function initNative(router: Router) {
     } else if (act === 'dismiss') { await report('dismiss'); toast.ok('알람을 해제했습니다'); window.dispatchEvent(new Event('wos-refresh')); }
     else go(x.link);
   };
+  // 앱 1.1.3 알림창 버튼(#130·#478, iOS): 알림의 [승인][수정 요청]·[답글][확인] 등 → 알림 액션 API(서버가 권한·상태 검사). 안드로이드 1.1.3 은 앱이 직접 처리(NotificationActionReceiver)
+  const notifAction = async (nid: string, action: string, text: string | undefined, link?: string) => {
+    const { toast } = await import('./ui');
+    try {
+      const r = await api<{ label?: string }>(`/api/notifications/${encodeURIComponent(nid)}/action`, { body: { action, ...(text?.trim() ? { text: text.trim() } : {}) } });
+      toast.ok(`✓ ${r?.label ?? '처리했습니다'}`); window.dispatchEvent(new Event('wos-refresh'));
+    } catch (err: any) { toast.error(err?.message ?? '처리하지 못했습니다 — 열어서 확인해 주세요'); go(link); }
+  };
   FirebaseMessaging.addListener('notificationActionPerformed', (e: any) => {
     const d = e?.notification?.data ?? {};
+    const aid = String(e?.actionId ?? 'tap');
+    if (d.notificationId && d.alarm !== 'true' && d.alarm !== true && WN_ACTION_IDS.has(aid)) { notifAction(String(d.notificationId), aid, e?.inputValue, d.link).catch(() => go(d.link)); return; }
     if (d.notificationId) api('/api/notifications/read', { method: 'POST', body: { ids: [d.notificationId] } }).then(() => window.dispatchEvent(new Event('wos-refresh'))).catch(() => {});
     if (d.alarm === 'true' || d.alarm === true) { alarmAction(String(e?.actionId ?? 'tap'), { id: e?.notification?.id, title: e?.notification?.title, body: e?.notification?.body, extra: { link: d.link, kind: d.taskId ? 'task' : undefined, entityId: d.taskId || undefined, alarm: true, snoozeMinutes: d.snoozeMinutes, key: d.notificationId } }, 'fcm').catch(() => go(d.link)); return; }
     go(d.link);
   });
   // 휴대폰 예약 알림(서버 연결 없이 정시에 울림) 탭·액션 → 알람이면 위 처리, 아니면 해당 화면
   if (hasLocal()) {
-    LocalNotifications.registerActionTypes({ types: [{ id: 'alarm', actions: [{ id: 'dismiss', title: '해제', destructive: true }, { id: 'snooze', title: '10분 뒤' }, { id: 'open', title: '열기' }] }] }).catch(() => {});
+    // 버튼 묶음은 한 번에 등록(iOS 는 등록할 때마다 전체가 바뀜): 알람 + 서버 푸시의 aps.category 'wn.*'(src/lib/notifCategories — 서버와 같은 표).
+    // iOS 버튼은 앱을 열고 처리(foreground) — 앱이 꺼진 채 뒤에서 처리하면 결과를 보여 줄 수 없어서
+    LocalNotifications.registerActionTypes({ types: [{ id: 'alarm', actions: [{ id: 'dismiss', title: '해제', destructive: true }, { id: 'snooze', title: '10분 뒤' }, { id: 'open', title: '열기' }] },
+      ...WN_SETS.map((set) => ({ id: wnCategory(set), actions: set.map((a) => ({ id: a.id, title: a.label, foreground: true, ...(a.input ? { input: true, inputButtonTitle: '보내기', inputPlaceholder: a.id === 'changes' ? '고칠 내용' : '답글' } : {}) })) }))] }).catch(() => {});
     LocalNotifications.addListener('localNotificationActionPerformed', (e: any) => {
       const n = e?.notification ?? {}; const x = n.extra ?? {};
       if (x.alarm === true || x.alarm === 'true') { alarmAction(String(e?.actionId ?? 'tap'), { id: n.id, title: n.title, body: n.body, extra: x }, 'local').catch(() => go(x.link)); return; }
       go(x.link);
     });
   }
-  App.addListener('appUrlOpen', (e: any) => go(e.url.replace(/^[a-z]+:\/\/[^/]*/i, '') || '/'));
+  App.addListener('appUrlOpen', (e: any) => go(deepPath(String(e?.url ?? '')))); // #194 workos://tasks/{id}·workos://app/…·https://… 모두
   // V14 39번: 하드웨어 뒤로 = 열린 시트·모달 닫기 → 이전 화면(history) → 홈 → (홈에서) 2초 안에 한 번 더 누르면 종료
   let exitAt = 0;
   App.addListener('backButton', async ({ canGoBack }: any) => {
@@ -126,12 +175,13 @@ export async function initNative(router: Router) {
     if (e?.notification?.data?.type === 'reminders-changed') { resyncReminders(); return; }
     window.dispatchEvent(new Event('wos-refresh'));
   });
-  // 앱 시작·복귀·화면에서 저장했을 때 예약 다시 맞춤
-  App.addListener('appStateChange', ({ isActive }: any) => { if (isActive) resyncReminders(); });
+  // 앱 시작·복귀·화면에서 저장했을 때 예약 다시 맞춤 · #194 위젯은 앱을 나갈 때(바탕화면이 보일 때)·저장했을 때·앱을 열 때 새로고침
+  App.addListener('appStateChange', ({ isActive }: any) => { if (isActive) resyncReminders(); else refreshWidget(); });
   let t: ReturnType<typeof setTimeout> | undefined;
-  window.addEventListener('wos-refresh', () => { clearTimeout(t); t = setTimeout(() => resyncReminders(), 1500); });
+  window.addEventListener('wos-refresh', () => { clearTimeout(t); t = setTimeout(() => { resyncReminders(); refreshWidget(); }, 1500); });
   createAlarmChannel().catch(() => {});
   resyncReminders();
+  refreshWidget();
   FirebaseMessaging.addListener('tokenReceived', (e: any) => registerToken(e.token));
   // 첫 실행: 시스템 권한 창을 바로 띄우지 않고, 이유를 먼저 보여 주는 안내(AppShell)를 띄운다
   const perm = await FirebaseMessaging.checkPermissions().catch(() => ({ receive: 'prompt' }));
@@ -153,7 +203,7 @@ export async function enableNativePush() {
 async function registerToken(token: string) {
   if (!token) return;
   const local = hasLocal() && (await LocalNotifications.checkPermissions().catch(() => ({ display: 'denied' }))).display === 'granted';
-  await api('/api/push/subscribe', { body: { kind: 'fcm', endpoint: token, platform: Capacitor.getPlatform(), localReminders: local } });
+  await api('/api/push/subscribe', { body: { kind: 'fcm', endpoint: token, platform: Capacitor.getPlatform(), localReminders: local, caps: await nativeCaps() } });
   try { localStorage.setItem('wos_push_endpoint', token); } catch {}
 }
 
@@ -182,8 +232,14 @@ function rememberAlarms(add: AlarmRef[], replaceFuture = false) {
   try { localStorage.setItem(ALARM_KEY, JSON.stringify([...keep, ...add].slice(-200))); } catch { /* 저장 못 함 */ }
 }
 async function scheduleSnooze(o: { title: string; body: string; minutes: number; extra: any }) {
-  if (!hasLocal()) return;
   const id = (Math.floor(Date.now() / 1000) % 1_000_000_000) + 1_000_000_000, at = Date.now() + o.minutes * 60_000;
+  // #447 1.1.3: 전체화면 알람 앱은 알람시계 예약(잠금 화면 위)으로 — 결과 보고는 앱이 직접
+  if (await hasCap(FULLSCREEN_ALARM)) {
+    const x = o.extra ?? {};
+    await WorkinNative.addAlarm({ id, at, title: o.title, body: o.body, link: x.link ?? '/', kind: x.kind, entityId: x.entityId, key: x.key ? String(x.key) : undefined, snoozeMinutes: o.minutes, snooze: true }).catch(() => {});
+    return;
+  }
+  if (!hasLocal()) return;
   await LocalNotifications.schedule({ notifications: [{
     id, title: o.title, body: o.body, channelId: ALARM_CHANNEL, sound: ALARM_SOUND, actionTypeId: 'alarm', ongoing: true,
     schedule: { at: new Date(at), allowWhileIdle: true }, extra: { ...o.extra, alarm: true, snoozed: (Number(o.extra?.snoozed) || 0) + 1 } }] }).catch(() => {});
@@ -197,6 +253,7 @@ async function scheduleSnooze(o: { title: string; body: string; minutes: number;
 export async function settleAlarmOnDevice(n: { notificationId: string; entityId: string | null; entityType: string | null; title: string; body: string; link: string }, action: 'dismiss' | 'snooze') {
   if (!Capacitor.isNativePlatform()) return;
   const now = Date.now();
+  if (n.entityId && (await hasCap(FULLSCREEN_ALARM))) await WorkinNative.settleAlarm({ entityId: n.entityId }).catch(() => {}); // #447 울리는 전체화면 알람 알림 지우기
   if (hasLocal() && n.entityId) {
     const fired = loadAlarms().filter((a) => a.entityId === n.entityId && a.at <= now + 60_000);
     if (fired.length) await LocalNotifications.cancel({ notifications: fired.map((a) => ({ id: a.id })) }).catch(() => {});
@@ -205,7 +262,7 @@ export async function settleAlarmOnDevice(n: { notificationId: string; entityId:
   const d = await fcm.getDeliveredNotifications?.().catch(() => null);
   const mine = (d?.notifications ?? []).filter((x: any) => x?.tag === n.notificationId);
   if (mine.length) await FirebaseMessaging.removeDeliveredNotifications({ notifications: mine.map((x: any) => ({ id: String(x.id), tag: x.tag })) as any }).catch(() => {});
-  if (action === 'snooze' && hasLocal() && (await LocalNotifications.checkPermissions().catch(() => ({ display: 'denied' }))).display === 'granted') {
+  if (action === 'snooze' && (await hasCap(FULLSCREEN_ALARM) || (hasLocal() && (await LocalNotifications.checkPermissions().catch(() => ({ display: 'denied' }))).display === 'granted'))) {
     await scheduleSnooze({ title: n.title, body: n.body, minutes: 10, extra: { link: n.link, kind: n.entityType === 'event' ? 'event' : n.entityType === 'task' ? 'task' : undefined, entityId: n.entityId ?? undefined, key: n.notificationId, snoozeMinutes: 10 } });
   }
 }
@@ -234,7 +291,13 @@ export function resyncReminders(): Promise<void> {
       // 대표 10/22: [10분 뒤]로 기기에 다시 예약한 알람(extra.snoozed)은 남긴다 — 전에는 직후 다시 맞춤이 지워 10분 뒤에 안 울렸다
       const stale = pending.notifications.filter((n) => !n.extra?.snoozed);
       if (stale.length) await LocalNotifications.cancel({ notifications: stale.map((n) => ({ id: n.id })) });
-      const list = (reminders as { id: number; key: string; fireAt: string; title: string; body: string; link: string; kind?: string; entityId?: string; alarm?: boolean; snoozeMinutes?: number; actions?: { id: string; label: string }[] }[]).filter((r) => new Date(r.fireAt).getTime() > Date.now()).slice(0, 64);
+      let list = (reminders as { id: number; key: string; fireAt: string; title: string; body: string; link: string; kind?: string; entityId?: string; alarm?: boolean; snoozeMinutes?: number; actions?: { id: string; label: string }[] }[]).filter((r) => new Date(r.fireAt).getTime() > Date.now()).slice(0, 64);
+      // #447 1.1.3 전체화면 알람 앱: 알람은 알람시계 예약(잠금 화면 위 전체 화면·[해제][n분 뒤][열기], 재부팅 뒤 다시 예약) — 앞으로 울릴 알람 전체를 이 목록으로 바꿈. 나머지 미리 알림만 아래 로컬 예약
+      if (await hasCap(FULLSCREEN_ALARM)) {
+        const alarms = list.filter((r) => r.alarm);
+        await WorkinNative.setAlarms({ alarms: alarms.map((r) => ({ id: r.id, at: Date.parse(r.fireAt), title: r.title, body: r.body, link: r.link, kind: r.kind, entityId: r.entityId, key: r.key, snoozeMinutes: r.snoozeMinutes ?? 10 })) });
+        list = list.filter((r) => !r.alarm);
+      }
       // 로컬 10/20(대표): alarm 이면 알람 채널(전체 화면·소리·[해제][10분 뒤] — 네이티브가 extra 를 보고 처리, 결과는 POST /api/reminders/alarm)
       rememberAlarms(list.filter((r) => r.alarm && r.entityId).map((r) => ({ id: r.id, entityId: r.entityId!, at: Date.parse(r.fireAt) })), true);
       if (list.length) await LocalNotifications.schedule({ notifications: list.map((r) => ({
@@ -251,7 +314,9 @@ export function resyncReminders(): Promise<void> {
 
 /** 로그아웃: 이 기기에 남은 예약 지우기 */
 export async function clearReminders() {
-  if (!Capacitor.isNativePlatform() || !hasLocal()) return;
+  if (!Capacitor.isNativePlatform()) return;
+  if (await hasCap(FULLSCREEN_ALARM)) await WorkinNative.setAlarms({ alarms: [] }).catch(() => {}); // #447 로그아웃하면 이 기기 알람시계 예약도 지움
+  if (!hasLocal()) return;
   const p = await LocalNotifications.getPending().catch(() => ({ notifications: [] as { id: number }[] }));
   if (p.notifications.length) await LocalNotifications.cancel({ notifications: p.notifications.map((n) => ({ id: n.id })) }).catch(() => {});
 }
@@ -326,3 +391,35 @@ export async function shareServerFile(path: string, title = '파일'): Promise<b
   await Share.share({ title, files: [w.uri], dialogTitle: title });
   return true;
 }
+
+/** #194 앱 1.1.3(안드로이드 'android-sms-attach-1'): 문자에 파일을 바로 붙일 수 있나 — 아니면 지금처럼 14일 내려받기 주소 */
+export async function canSmsAttach() {
+  return Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('Filesystem') && (await hasCap('android-sms-attach-1'));
+}
+export type SmsFile = { kind: 'att' | 'lib'; id: string; name: string; size: number; mime?: string };
+/**
+ * #194 문자 첨부 준비: 권한을 확인한 서명 주소로 받아(쿠키 없이 — 저장소 CORS) 앱 캐시 sms/보낸 시각/원래 이름 에 저장 → 문자 앱에 그 이름으로 붙는다.
+ * 받지 못한 파일(링크 첨부·워크인 문서·연결 끊김)은 failed 로 돌려준다 — 화면이 본문에 내려받기 주소를 넣는다.
+ */
+export async function cacheForSms(files: SmsFile[]) {
+  const ok: { uri: string; mime: string; name: string; size: number }[] = [], failed: SmsFile[] = [];
+  const dir = `sms/${Date.now()}`, used = new Set<string>();
+  for (const x of files) {
+    try {
+      const j = await api<{ url: string; mime?: string | null; external?: boolean }>(`/api/${x.kind === 'att' ? 'attachments' : 'library'}/${encodeURIComponent(x.id)}/download?json=1`);
+      if (j?.external || !j?.url) throw new Error('파일이 아닌 링크');
+      const r = await fetch(j.url, { credentials: 'omit' });
+      if (!r.ok) throw new Error(`내려받기 ${r.status}`);
+      const blob = await r.blob();
+      const data = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] ?? ''); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob); });
+      let name = x.name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 120) || 'file';
+      if (used.has(name)) name = `(${used.size + 1}) ${name}`;
+      used.add(name);
+      const { uri } = await Filesystem.writeFile({ path: `${dir}/${name}`, data, directory: 'CACHE', recursive: true });
+      ok.push({ uri, mime: j.mime || blob.type || x.mime || 'application/octet-stream', name: x.name, size: blob.size });
+    } catch { failed.push(x); }
+  }
+  return { ok, failed };
+}
+/** #194 기본 문자 앱을 번호·본문·첨부로 채워 연다(보내기는 사람이). 못 열면 오류 → 화면은 예전 방식(sms: 주소·내려받기 링크) */
+export const smsWithFiles = (o: { phones: string[]; body: string; files: { uri: string; mime: string }[] }) => WorkinNative.shareToSms(o);

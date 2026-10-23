@@ -2,6 +2,7 @@ import webpush from 'web-push';
 import { importPKCS8, SignJWT } from 'jose';
 import { db } from './db';
 import { actionsFor } from './notifActions';
+import { WN_CATEGORY_IDS, wnCategory } from './notifCategories';
 import { logError } from './log';
 
 const MAX_ATTEMPTS = 5;
@@ -53,8 +54,14 @@ async function sendWebPush(sub: { endpoint: string; keys: { p256dh: string; auth
   }
 }
 
-async function sendFcm(token: string, p: Payload) {
+/** 앱 1.1.3(#130·#478): 이 기기 앱이 data 알림을 버튼과 함께 직접 그림(mobile/android WorkinMessagingService) */
+export const DRAWS_OWN = 'android-actions-1';
+async function sendFcm(token: string, p: Payload, caps: string[] = []) {
   if (!fcmConfigured()) throw new PermanentError('FCM 서비스 계정 미설정');
+  // 1.1.3 앱은 notification 없이 data 만(wn=1) — 앱이 꺼져 있어도 앱이 [승인][수정 요청]·[답글][확인] 버튼이 달린 알림을 그리고, 버튼은 앱을 열지 않고 처리. 옛 앱은 지금처럼 시스템 알림
+  const draws = caps.includes(DRAWS_OWN);
+  // iOS: 버튼 묶음(카테고리)은 앱이 등록(native.ts) — 등록된 묶음만, 없으면 버튼 없는 예전 카테고리
+  const cat = p.actions?.length ? wnCategory(p.actions) : null;
   const sa = JSON.parse(process.env.FCM_SERVICE_ACCOUNT_JSON!);
   const access = await fcmAccessToken(sa);
   const base = process.env.FCM_API_BASE ?? 'https://fcm.googleapis.com';
@@ -64,15 +71,17 @@ async function sendFcm(token: string, p: Payload) {
     body: JSON.stringify({
       message: {
         token,
-        notification: { title: p.title, body: p.body },
+        ...(draws ? {} : { notification: { title: p.title, body: p.body } }),
         // 로컬 10/20 알림에서 바로 처리: 앱이 액션 버튼(Android)·카테고리(iOS)를 그릴 수 있게 종류·버튼·업무 id 를 data 로(값은 문자열만)
-        data: { link: p.link, notificationId: p.notificationId, type: p.type ?? '', taskId: p.taskId ?? '', actions: JSON.stringify(p.actions ?? []), alarm: p.alarm ? 'true' : '', snoozeMinutes: String(p.snoozeMinutes ?? '') },
+        data: { link: p.link, notificationId: p.notificationId, type: p.type ?? '', taskId: p.taskId ?? '', actions: JSON.stringify(p.actions ?? []), alarm: p.alarm ? 'true' : '', snoozeMinutes: String(p.snoozeMinutes ?? ''),
+          // FCM 메시지는 4KB 까지(한글 1자 = 3바이트) — 넘으면 INVALID_ARGUMENT 로 거절되고 아래에서 토큰 무효로 처리되므로 제목 120·본문 600자로 자름
+          ...(draws ? { wn: '1', title: p.title.slice(0, 120), body: p.body.length > 600 ? `${p.body.slice(0, 599)}…` : p.body, tag: p.tag ?? p.notificationId, channel: p.alarm ? 'alarm_vibrate' : 'work' } : {}) },
         // click_action 없음: 기본(앱 실행 activity)으로 열려야 data(link·notificationId)가 앱의 notificationActionPerformed 로 전달된다
         // V37 5: 안드로이드 상태바 단색 아이콘(앱 res/drawable/ic_stat_workin, 로컬 48806da)·강조색
         // 알람이면 알람 채널(앱이 전체 화면·소리·진동) · iOS 는 time-sensitive 로 집중 모드 통과
         // 대표 10/22: 알람은 진동만 — 앱이 만드는 진동 채널(alarm_vibrate, src/components/native.ts), iOS 도 무음 파일(silence.wav, 앱에 없으면 기본음)
-        android: { priority: 'HIGH', notification: { channel_id: p.alarm ? 'alarm_vibrate' : 'work', icon: 'ic_stat_workin', color: '#0F766E', tag: p.tag ?? p.notificationId } },
-        apns: { payload: { aps: { sound: p.alarm ? 'silence.wav' : 'default', category: p.alarm ? 'alarm' : p.type ?? 'default', 'thread-id': p.taskId || p.notificationId, ...(p.alarm ? { 'interruption-level': 'time-sensitive' } : {}) } } },
+        android: draws ? { priority: 'HIGH' } : { priority: 'HIGH', notification: { channel_id: p.alarm ? 'alarm_vibrate' : 'work', icon: 'ic_stat_workin', color: '#0F766E', tag: p.tag ?? p.notificationId } },
+        apns: { payload: { aps: { sound: p.alarm ? 'silence.wav' : 'default', category: p.alarm ? 'alarm' : cat && WN_CATEGORY_IDS.has(cat) ? cat : p.type ?? 'default', 'thread-id': p.taskId || p.notificationId, ...(p.alarm ? { 'interruption-level': 'time-sensitive' } : {}) } } },
       },
     }),
   });
@@ -92,7 +101,7 @@ async function sendFcm(token: string, p: Payload) {
 export async function dispatchPending(limit = 50) {
   const sql = db();
   const claimed = await sql<
-    { id: number; channel: string; endpoint: string; keys: any; sub_id: string; title: string; body: string; link: string; nid: string; attempts: number; type: string; entity_type: string | null; entity_id: string | null; meta: any; action_done: string | null }[]
+    { id: number; channel: string; endpoint: string; keys: any; sub_id: string; caps: string[] | null; title: string; body: string; link: string; nid: string; attempts: number; type: string; entity_type: string | null; entity_id: string | null; meta: any; action_done: string | null }[]
   >`
     with c as (
       select d.id from notification_deliveries d
@@ -102,7 +111,7 @@ export async function dispatchPending(limit = 50) {
     update notification_deliveries d set attempts = d.attempts + 1, next_attempt_at = now() + interval '5 minutes'
     from c, push_subscriptions p, notifications n
     where d.id = c.id and p.id = d.subscription_id and n.id = d.notification_id
-    returning d.id, d.channel, p.endpoint, p.keys, p.id as sub_id, n.title, n.body, n.link, n.id as nid, d.attempts, n.type, n.entity_type, n.entity_id, n.meta, n.action_done`;
+    returning d.id, d.channel, p.endpoint, p.keys, p.id as sub_id, p.caps, n.title, n.body, n.link, n.id as nid, d.attempts, n.type, n.entity_type, n.entity_id, n.meta, n.action_done`;
   // 구독이 삭제된 행 정리
   await sql`update notification_deliveries set status = 'skipped', error = '구독 없음' where status = 'pending' and subscription_id is null`;
 
@@ -114,7 +123,7 @@ export async function dispatchPending(limit = 50) {
       ...(d.meta?.alarm ? { alarm: true, snoozeMinutes: 10 } : {}) };
     try {
       if (d.channel === 'webpush') await sendWebPush({ endpoint: d.endpoint, keys: d.keys }, payload);
-      else await sendFcm(d.endpoint, payload);
+      else await sendFcm(d.endpoint, payload, d.caps ?? []);
       await sql`update notification_deliveries set status = 'sent', sent_at = now(), error = null where id = ${d.id}`;
       await sql`update push_subscriptions set last_success_at = now(), fail_count = 0 where id = ${d.sub_id}`;
       sent++;

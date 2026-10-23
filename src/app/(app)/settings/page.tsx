@@ -6,10 +6,27 @@ import { useEffect, useRef, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, cx, Field, Loading, fmtDateTime, inputCls, toast } from '@/components/ui';
-import { enableNativePush, isNativeApp, subscribeWebPush } from '@/components/native';
+import { alarmDeviceStatus, enableNativePush, isNativeApp, openAlarmSettings, subscribeWebPush } from '@/components/native';
 import { BioLockSetting } from '@/components/BioLock';
 import { ROLE_LABEL } from '@/lib/types';
 import { UserSelect } from '@/components/pickers';
+
+/** #447 앱 1.1.3 전체화면 알람: 이 휴대폰이 잠금 화면 위 전체 화면을 막아 두었거나 정확한 시각 예약이 꺼져 있으면 안내(안드로이드 14+ 는 사용자가 설정에서 허용) */
+function FullScreenAlarmNotice() {
+  const [st, setSt] = useState<{ fullScreen: boolean; exact: boolean } | null>(null);
+  useEffect(() => {
+    let on = true; const load = () => alarmDeviceStatus().then((r) => { if (on) setSt(r); });
+    load(); document.addEventListener('visibilitychange', load); // 설정에서 허용하고 돌아오면 다시 확인
+    return () => { on = false; document.removeEventListener('visibilitychange', load); };
+  }, []);
+  if (!st || (st.fullScreen && st.exact)) return null;
+  return (
+    <p className="mt-2 rounded-input border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900" data-testid="alarm-fullscreen-notice">
+      {!st.fullScreen ? <>이 휴대폰은 알람이 잠금 화면 위에 전체 화면으로 뜨지 않게 되어 있습니다. <button type="button" className="font-semibold underline" onClick={() => openAlarmSettings().catch(() => toast.error('설정 화면을 열 수 없습니다'))}>설정에서 허용하기</button></>
+        : '이 휴대폰은 정확한 시각 알람이 꺼져 있어 알람이 몇 분 늦게 울릴 수 있습니다 — 휴대폰 설정 › 앱 › 워크인 › 알람 및 리마인더에서 허용해 주세요.'}
+    </p>
+  );
+}
 
 export default function Settings() {
   const { user, features } = useSession();
@@ -94,6 +111,7 @@ export default function Settings() {
               <label className="flex items-center gap-1.5 text-sm" title="대표 10/21: 일정 시작·업무 마감 기준 몇 분 전에 알람처럼 울릴지 (배정·검토 요청 같은 알림은 알람으로 울리지 않음)"><input type="number" min={1} max={1440} className={cx(inputCls, 'h-8 w-20 px-2 py-0 text-sm')} value={s.alarmMinutes ?? 10} onChange={(e) => setS({ ...s, alarmMinutes: Math.max(1, Math.min(1440, Number(e.target.value) || 10)) })} aria-label="알람 몇 분 전" data-testid="alarm-minutes" />분 전에</label>
               <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.alarmImportant ?? true} onChange={(e) => setS({ ...s, alarmImportant: e.target.checked })} aria-label="중요 업무 알람" data-testid="alarm-important" />높음·긴급 업무</label>
             </span>
+            <FullScreenAlarmNotice />
           </Field>
           <Field label="조용한 시간 (기본 22:00~07:00)">
             <span className="flex flex-wrap items-center gap-2">

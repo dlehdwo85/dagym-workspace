@@ -831,6 +831,7 @@ function HistLine({ h, userName }: { h: any; userName: (id: string | null) => st
     {h.changes?.note && <span className="ml-1">“{h.changes.note}”</span>}
     {['mail_queued', 'mail_sent', 'mail_failed'].includes(h.action) && <span className="ml-1">“{h.changes?.subject}” → {(h.changes?.to ?? []).join(', ')}{h.changes?.error ? ` (${h.changes.error})` : ''}</span>}
     {['share_created', 'share_opened'].includes(h.action) && <span className="ml-1">{(h.changes?.files ?? []).join(', ')}</span>}
+    {h.action === 'sms_sent' && h.changes?.files?.length > 0 && <span className="ml-1" data-testid="hist-sms-files">· 첨부 {(h.changes.files as string[]).join(', ')}</span>}
     {h.action === 'file_edited' && <span className="ml-1">{h.changes?.name} v{h.changes?.version}</span>}
     {['assignee_added', 'assignee_removed'].includes(h.action) && <span className="ml-1" data-testid="hist-co">{(h.changes?.users ?? []).map(userName).join(', ')}</span>}
     {h.action === 'file_attached' && h.changes?.from === 'library' && <span className="ml-1 rounded bg-slate-100 px-1 text-[11px] text-ink-2">자료실에서</span>}

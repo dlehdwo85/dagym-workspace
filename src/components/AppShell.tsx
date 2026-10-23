@@ -29,7 +29,7 @@ import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
-import { clearReminders, enableNativePush, initNative } from './native';
+import { clearReminders, enableNativePush, initNative, refreshWidget } from './native';
 import { QuickAddTask } from './QuickAddTask';
 import { CommandPalette } from './CommandPalette';
 import { VoiceAddTask } from './VoiceAddTask';
@@ -243,6 +243,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     try { pushEndpoint = localStorage.getItem('wos_push_endpoint') ?? undefined; } catch {}
     await clearReminders().catch(() => {});
     await api('/api/auth/logout', { body: { pushEndpoint } }).catch(() => {});
+    await refreshWidget(); // #194 바탕화면 위젯이 앞 사람의 할 일을 계속 보이지 않게(로그인 안내로)
     location.href = '/login';
   }
   const toggleCollapsed = () => setCollapsed((c) => { writePref('wos_nav_collapsed', c ? '0' : '1'); return !c; });

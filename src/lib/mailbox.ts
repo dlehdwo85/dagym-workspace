@@ -876,7 +876,8 @@ export async function logKakao(u: SessionUser, i: z.infer<typeof kakaoLogInput>,
   return { id };
 }
 export const smsLogInput = z.object({ taskId: z.string().uuid(), to: z.array(z.string().trim().regex(/^[0-9+\-\s()]{8,20}$/, '전화번호 형식이 아닙니다')).min(1).max(20),
-  body: z.string().max(2000), shareUrl: z.string().max(500).optional(), outboxId: z.string().uuid().optional() /* #177 예약 문자를 보낸 뒤 */ });
+  body: z.string().max(2000), shareUrl: z.string().max(500).optional(), outboxId: z.string().uuid().optional() /* #177 예약 문자를 보낸 뒤 */,
+  files: z.array(z.object({ name: z.string().trim().min(1).max(200), size: z.number().int().min(0).max(100 * 1024 * 1024) })).max(20).optional() /* #194 앱 1.1.3 문자에 바로 붙인 파일 */ });
 /** #177 문자 예약: 서버는 보내지 못하므로 예약 시각에 '보낼 시간' 알림 → 사람이 휴대폰 문자앱에서 보내고 [보냈어요]. 자료 링크(14일)가 있으면 13일 안으로만 */
 export const scheduleSmsInput = z.object({ taskId: z.string().uuid(), to: smsLogInput.shape.to, body: z.string().trim().min(1).max(2000), sendAt: z.string().datetime({ offset: true }), shareUrl: z.string().max(500).optional() });
 export async function scheduleSms(u: SessionUser, i: z.infer<typeof scheduleSmsInput>) {
@@ -903,9 +904,9 @@ export async function logSms(u: SessionUser, i: z.infer<typeof smsLogInput>, ip:
   if (i.outboxId) {
     const r = await sql`update outbox set status = 'sent', sent_at = now(), locked_until = null, to_addrs = ${i.to}, body_text = ${i.body} where id = ${i.outboxId} and tenant = ${tenantOf(u)} and created_by = ${u.id} and status in ('due', 'queued') returning id`;
     if (!r.length) throw new HttpError(409, 'not_due', '이미 처리된 예약 문자입니다');
-  } else await sql`insert into outbox (id, tenant, channel, status, task_id, created_by, to_addrs, subject, body_text, share_id, message_id, sent_at)
-    values (${id}, ${tenantOf(u)}, 'sms:handoff', 'sent', ${i.taskId}, ${u.id}, ${i.to}, ${'문자'}, ${i.body}, ${shareId}, ${`sms-${id}`}, now())`;
-  await activity(sql, 'task', i.taskId, u.id, 'sms_sent', { to: i.to, subject: i.body.slice(0, 40) });
+  } else await sql`insert into outbox (id, tenant, channel, status, task_id, created_by, to_addrs, subject, body_text, files, share_id, message_id, sent_at)
+    values (${id}, ${tenantOf(u)}, 'sms:handoff', 'sent', ${i.taskId}, ${u.id}, ${i.to}, ${'문자'}, ${i.body}, ${sql.json(i.files ?? [])}, ${shareId}, ${`sms-${id}`}, now())`;
+  await activity(sql, 'task', i.taskId, u.id, 'sms_sent', { to: i.to, subject: i.body.slice(0, 40), ...(i.files?.length ? { files: i.files.map((f) => f.name) } : {}) });
   await audit(sql, u.id, 'sms.handoff', 'task', i.taskId, { outboxId: id, to: i.to.length }, ip);
   await rememberSent(sql, tenantOf(u), u.id, i.taskId, i.to.map((phone) => ({ phone })));
   if (shareId) await crmSteps(sql, i.taskId, i.body, [{ name: 'link' }]);

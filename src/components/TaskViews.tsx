@@ -116,6 +116,12 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     setAdding(true); setAddKey((k) => k + 1);
     setTimeout(() => document.querySelector<HTMLElement>('[data-testid="task-groups"] [aria-label="업무 추가 제목"]')?.scrollIntoView({ block: 'center' }), 50);
   };
+  useEffect(() => { // #194 바탕화면 위젯 [+]·딥링크 workos://tasks?new=1 → 새 업무 등록 창(주소에서 new 를 지워 뒤로·새로고침에 다시 안 열림)
+    if (sp.get('new') !== '1' || location.pathname !== '/tasks') return;
+    setQuickOpen(true);
+    const p = new URLSearchParams(sp.toString()); p.delete('new');
+    router.replace(`/tasks${p.toString() ? `?${p}` : ''}`);
+  }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { // URL 변경(메뉴 이동) 반영 — 패널로 /tasks/:id 가 된 동안에는 목록 필터를 그대로 둔다
     if (/^\/tasks\/[0-9a-f-]{36}$/.test(location.pathname)) return;
     const v = cleanView(sp.get('view'));
