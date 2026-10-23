@@ -28,6 +28,9 @@ export const SECTIONS: { key: Exclude<DigestSection, 'ref'>; title: string; sub:
   { key: 'change', title: '정정·취소', sub: '관련 사업이거나 진행 기록이 있는 공고만' },
 ];
 const of = (d: Digest, s: DigestSection) => d.items.filter((i) => i.section === s);
+/** 로컬 10/23 22:45: 마감 임박은 10건까지 보이고 나머지는 '나머지 n건 — [보기]'(입찰 화면 진행 중·마감 임박순) */
+const SOON_MAX = 10;
+const cap = (s: DigestSection, list: DigestItem[]) => (s === 'soon' ? list.slice(0, SOON_MAX) : list);
 
 /** 제목: '[다짐·하이링크 영업실] 10/24(금) 오늘 입찰 9건 — 즉시 검토 3 · 마감 임박 2' (0인 칸은 뺌) */
 export function digestSubject(fromName: string, d: Digest) {
@@ -68,9 +71,10 @@ const button = (href: string, label: string, primary: boolean) => `<a href="${es
 /** 메일 한 통(제목·HTML·텍스트) */
 export function digestMail(fromName: string, d: Digest, base: string) {
   const subject = digestSubject(fromName, d);
-  const today = `${base}/s/sales/bids?tab=today`, prefs = `${base}/s/sales/sources`, refs = `${base}/s/sales/bids?tab=ref`;
+  const today = `${base}/s/sales/bids?tab=today`, prefs = `${base}/s/sales/sources`, refs = `${base}/s/sales/bids?tab=ref`, open = `${base}/s/sales/bids?tab=open`;
   const sections = SECTIONS.map((s) => { const list = of(d, s.key); if (!list.length) return '';
-    return `<tr><td style="padding:18px 16px 6px" data-digest-section="${s.key}"><div style="font-size:15px;font-weight:800;color:${C.ink}">${esc(s.title)} <span style="color:${C.ink3};font-weight:700">${list.length}</span></div>${s.sub ? `<div style="margin-top:2px;font-size:12px;color:${C.ink3}">${esc(s.sub)}</div>` : ''}</td></tr>${list.map((x, k) => itemHtml(x, k + 1, base, d.day)).join('')}`; }).join('');
+    const shown = cap(s.key, list); const rest = list.length - shown.length;
+    return `<tr><td style="padding:18px 16px 6px" data-digest-section="${s.key}"><div style="font-size:15px;font-weight:800;color:${C.ink}">${esc(s.title)} <span style="color:${C.ink3};font-weight:700">${list.length}</span></div>${s.sub ? `<div style="margin-top:2px;font-size:12px;color:${C.ink3}">${esc(s.sub)}</div>` : ''}</td></tr>${shown.map((x, k) => itemHtml(x, k + 1, base, d.day)).join('')}${rest > 0 ? `<tr><td style="padding:10px 16px;border-top:1px solid ${C.line};font-size:13px;color:${C.ink2}" data-digest-more="${s.key}">나머지 ${rest}건 — <a href="${esc(open)}" style="color:${C.brand}">보기</a></td></tr>` : ''}`; }).join('');
   const ref = d.counts.ref ? `<tr><td style="padding:14px 16px;border-top:1px solid ${C.line};font-size:13px;color:${C.ink2}" data-digest-section="ref"><b>참고(검색어만 일치)</b> ${d.counts.ref}건 — <a href="${esc(refs)}" style="color:${C.brand}">보기</a></td></tr>` : '';
   const empty = !sections && !ref ? `<tr><td style="padding:18px 16px;font-size:14px;color:${C.ink2}">지난 메일 뒤 들어온 맞춤 공고가 없습니다.</td></tr>` : '';
   const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(subject)}</title></head>
@@ -90,7 +94,8 @@ ${sections}${ref}${empty}
       l3.length ? `   ${l3.map((x) => (x.startsWith('입찰마감 ') && i.dday != null ? `${x} ${ddText(i.dday)}` : x)).join(' · ')}` : null,
       `   보기: ${base}/s/sales/bids?tab=all&id=${encodeURIComponent(i.id)}`].filter(Boolean).join('\n'); };
   const text = [subject, '', summary(d), `오늘 공고 전체 보기: ${today}`, `맞춤 설정: ${prefs}`,
-    ...SECTIONS.flatMap((s) => { const list = of(d, s.key); return list.length ? ['', `■ ${s.title} (${list.length})${s.sub ? ` — ${s.sub}` : ''}`, ...list.map((x, k) => txt(x, k + 1))] : []; }),
+    ...SECTIONS.flatMap((s) => { const list = of(d, s.key); const shown = cap(s.key, list); const rest = list.length - shown.length;
+      return list.length ? ['', `■ ${s.title} (${list.length})${s.sub ? ` — ${s.sub}` : ''}`, ...shown.map((x, k) => txt(x, k + 1)), ...(rest > 0 ? [`   나머지 ${rest}건 — 보기: ${open}`] : [])] : []; }),
     ...(d.counts.ref ? ['', `■ 참고(검색어만 일치) ${d.counts.ref}건 — 보기: ${refs}`] : []),
     ...(!d.items.some((i) => i.section !== 'ref') && !d.counts.ref ? ['', '지난 메일 뒤 들어온 맞춤 공고가 없습니다.'] : []),
     '', `${skippedLine(d)}${d.counts.merged ? ` · 같은 공고 ${d.counts.merged}줄은 최신 차수 하나로` : ''} — 맞춤 설정에서 바꾸기: ${prefs}`, '이 메일은 워크인 영업실 당일 공고 알림입니다.'].join('\n');

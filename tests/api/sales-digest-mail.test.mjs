@@ -67,7 +67,8 @@ before(async () => {
   // 관련 사업 취소(전에 받은 공고가 오늘 취소로 바뀜) → 정정·취소
   await ins(8, { source_type: 'g2b_bid', source_external_id: 'C510-000', fit_business: '다짐', title: '시험구 국민체육센터 위탁운영', issuer: '서울특별시 시험구', deadline_at: at(plus(8), '10:00'), notice_kind: 'cancel', current_status: '취소', first_seen_at: ago(72), updated_at: ago(1) });
   // 마감 임박: 전에 받은 관련 공고 D-2 · 진행 기록(영업 업무)이 걸린 D-1 은 뺌
-  await ins(9, { ...kapt, source_external_id: 'S510', title: '[경기용인] 시험 단지 운동시설 위탁관리업체 선정', classification: '즉시 검토', deadline_at: at(plus(2), '17:00'), first_seen_at: ago(72), updated_at: ago(72), posted_date: plus(-3) });
+  await ins(9, { ...kapt, source_external_id: 'S510', title: '[경기용인] 시험 단지 운동시설 위탁관리업체 선정', classification: '즉시 검토', deadline_at: at(plus(2), '17:00'), first_seen_at: ago(72), updated_at: ago(72), posted_date: plus(-3),
+    bid_category: '사업자 - 공사 - 일반보수', bid_system: 'KG2B' });
   await ins(10, { ...kapt, source_external_id: 'S510L', title: '[서울] 시험 단지 헬스장 위탁운영', deadline_at: at(plus(1), '17:00'), first_seen_at: ago(72), updated_at: ago(72), posted_date: plus(-3) });
   const t = await ctx.owner.ok('POST', '/api/tasks', { title: '시험 단지 헬스장 입찰 준비', assigneeId: ctx.ownerId, orgUnitId: ctx.siteA, approvalRequired: false });
   await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: ID(10) })} where id = ${t.id}`;
@@ -128,6 +129,8 @@ test('#510 메일 정리(21라인 수준): 구역·번호·빈칸 숨김·같은
   assert.equal(html.split(kaptUrl).length - 1, html.split(`href="${kaptUrl}"`).length - 1, '원천 주소는 [원문] 링크로만');
   assert.ok(html.includes(`/s/sales/bids?tab=all&amp;id=${ID(1)}`), '공고명 = 워크인 상세');
   assert.ok(html.includes('>용역</span>') && html.includes('>주민운동시설의 위탁</span>'), '업종 태그(입찰 분류 나눔)');
+  assert.ok(html.includes('>공사</span>') && html.includes('>일반보수</span>') && !html.includes('사업자 -') && !html.includes('>사업자<'), "로컬 22:45 ①: K-apt '사업자 - 공사 - 일반보수' → 공사·일반보수");
+  assert.ok(!html.includes('투찰 K-APT') && html.includes('투찰 KG2B'), '로컬 22:45 ②: 투찰처가 원천(K-apt)과 같으면 숨김, 다른 곳만');
   // 정정·취소 = 관련 사업만(취소 배지·가운데 줄) · 검색어만 맞은 공고(새·취소)는 참고 건수만
   assert.ok(html.includes('시험구 국민체육센터 위탁운영') && html.includes('>취소</span>') && html.includes('text-decoration:line-through'));
   assert.ok(!html.includes('시험키워드'), '참고 공고 제목은 메일에 안 나옴');
@@ -183,4 +186,14 @@ test('#509 a 워크인 발송(Resend)이 있으면 먼저 — 회사 주소도 �
   assert.equal(r.from, `"${FROM_NAME}" <noreply@mail.work-in.test>`); assert.equal(r.reply_to, 'sales@company.test');
   assert.deepEqual([...r.to].sort(), ['ceo@dagym.test', 'office@mail.test'], '회사 주소도 받는 사람(받은메일함)');
   assert.ok(r.html.includes('data-digest-section="now"') && r.text.startsWith(`[${FROM_NAME}] ${mdw(today)} 오늘 입찰 4건`));
+});
+
+test('로컬 22:45 ③ 마감 임박은 10건까지 · 나머지 n건 — [보기](입찰 화면 진행 중·마감 임박순)', async () => {
+  for (let k = 0; k < 11; k++) await ins(30 + k, { source_type: 'kapt_bid', fit_business: '다짐', bid_system: 'K-APT', source_external_id: `S510-M${k}`, title: `[서울] 시험 단지 헬스장 위탁 마감 임박 ${k + 1}`,
+    deadline_at: at(plus(1 + (k % 3)), '16:00'), first_seen_at: ago(72), updated_at: ago(72), posted_date: plus(-3) });
+  const html = (await ctx.owner.req('GET', '/api/sales/digest?preview=html')).body; const text = (await ctx.owner.req('GET', '/api/sales/digest?preview=text')).body;
+  assert.match(html, /마감 임박 <span[^>]*>12<\/span>/, '구역 머리 건수는 전체');
+  assert.equal((html.match(/data-digest-item="soon"/g) ?? []).length, 10, '줄은 10건까지');
+  assert.ok(html.includes('data-digest-more="soon"') && html.includes('나머지 2건 — <a href=') && html.includes('/s/sales/bids?tab=open'));
+  assert.ok(text.includes('■ 마감 임박 (12)') && text.includes('나머지 2건 — 보기: ') && text.includes('/s/sales/bids?tab=open'));
 });

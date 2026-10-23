@@ -108,12 +108,13 @@ const won = (n: number) => (n >= 1e8 ? `${(n / 1e8).toFixed(1).replace(/\.0$/, '
 const amountOf = (r: any) => { const est = num(r.estimated_amount), bud = num(r.budget_amount); return est && est > 0 ? `추정가격 ${won(est)}` : bud && bud > 0 ? `배정예산 ${won(bud)}` : est === 0 || bud === 0 ? '추정가격 미공개' : null; };
 /** 지역: 원천 지역 → 비면(나라장터 '지역 -') 참가가능지역·발주처·수요기관·주소·단지·제목에서 시도 */
 const regionOf = (r: any) => { const v = String(r.region ?? '').trim(); return v && v !== '-' ? v : sidoIn(r.region_restriction, r.issuer, r.demand_agency, r.office_address, r.facility_name, r.title); };
-/** 업종 태그: 입찰 분류(K-apt '용역 > 주민운동시설의 위탁' 은 나눠서) + 업종 제한 이름(숫자 코드는 뺌), 3개까지 */
-const tagsOf = (r: any) => [...new Set([...String(r.bid_category ?? '').split(/\s*(?:&gt;|>|›)\s*/).map((x) => x.trim()).filter((x) => x && x !== '사업자' && x.length <= 20),
+/** 업종 태그: 입찰 분류(K-apt '사업자 - 공사 - 일반보수'·'용역 > 주민운동시설의 위탁' 은 나눠서, 앞의 '사업자' 뺌) + 업종 제한 이름(숫자 코드는 뺌), 3개까지 */
+const tagsOf = (r: any) => [...new Set([...String(r.bid_category ?? '').split(/\s*(?:&gt;|>|›)\s*|\s+-\s+/).map((x) => x.trim()).filter((x) => x && x !== '사업자' && x.length <= 20),
   ...(String(r.industry_code ?? '').trim() && !/^[\d,\s]+$/.test(String(r.industry_code)) ? [String(r.industry_code).trim().slice(0, 20)] : [])])].slice(0, 3);
 /** 같은 공고 판단 열쇠: 나라장터·누리장터는 '번호-차수'라 차수를 뗀 번호 */
 const noKey = (r: any) => { const st = String(r.source_type ?? ''); const ext = String(r.source_external_id ?? '').trim(); const m = ['g2b_bid', 'nuri_bid'].includes(st) ? ext.match(/^(.*)-(\d{1,3})$/) : null; return { key: `${st}|${m ? m[1] : ext}`, ord: m ? Number(m[2]) : 0 }; };
 const at = (v: unknown) => { const t = Date.parse(String(v ?? '')); return Number.isNaN(t) ? null : t; };
+const sysKey = (v: unknown) => String(v ?? '').toUpperCase().replace(/[^0-9A-Z가-힣]/g, '');
 /**
  * 회사의 공고 진행 기록 — 진행 기록(opportunity_work, 정식 표 sales_work_records)·영업 업무(tasks.sales_ref bid)가 걸린 공고 id,
  * 그리고 회사 판단으로 바꾼 분류(procurement_notices__progress.classification — '즉시 검토' 구역 판단에 우선)
@@ -197,7 +198,8 @@ export async function buildDigest(tenant: string, day = kstDay()) {
       participation: dayOf(r.participation_deadline_at), opening: dayOf(r.opening_at), attachments: Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0, why: c.why, seenAt: r.first_seen_at ?? null, late: c.late, posted: dayOf(r.posted_date),
       section, noticeNo: st === 'vendor_recruit' ? null : String(r.source_external_id ?? '').trim() || null, badges, biz: biz.length ? biz : c.fit ? [{ name: c.fit, color: '#2563EB' }] : [], tags: tagsOf(r), amount: amountOf(r),
       deadlineAt: fmtWhen(dl), participationAt: fmtWhen(when(r.participation_deadline_at)), openingAt: fmtWhen(when(r.opening_at)),
-      briefingAt: fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at)), bidSystem: st === 'kapt_bid' && r.bid_system ? String(r.bid_system) : null });
+      briefingAt: fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at)),
+      bidSystem: st === 'kapt_bid' && r.bid_system && sysKey(r.bid_system) !== sysKey(SRC[st]) ? String(r.bid_system) : null }); // 투찰처가 원천(K-APT)과 같으면 숨김 — KG2B 같은 다른 곳만
   }
   // 구역 순서 → 구역 안 마감 임박 순(마감 모르면 뒤) → 제목
   items.sort((a, b) => SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section) || String(a.deadlineAt ?? '9999').localeCompare(String(b.deadlineAt ?? '9999')) || a.title.localeCompare(b.title));
