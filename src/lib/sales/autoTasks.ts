@@ -61,6 +61,7 @@ export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Pro
   const desc = `${KIND_LABEL[i.kind]} 건에서 자동으로 만든 영업 업무입니다 — 원천: ${LINK[i.kind](i.id)}${i.deadline ? `\n입찰 마감: ${i.deadline}` : ''}\n(상태를 보류·미참여·대상아님·완료로 바꾸면 이 업무도 함께 보류·완료됩니다)`;
   const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', KIND_LABEL[i.kind]] }, { quiet: false, skipQuota: true });
   await sql`update tasks set sales_ref = ${sql.json({ kind: i.kind, id: i.id, name: i.name })}, lead_id = ${i.leadId ?? (i.kind === 'lead' ? i.id : null)}, assigned_by_rule = ${rule?.ruleId ?? null} where id = ${r.id}`;
+  if (i.kind === 'bid') (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'bid', id: i.id, taskIds: [r.id] }); // #507 공고 첨부 자동
   return { taskId: r.id, action: 'created' };
 }
 

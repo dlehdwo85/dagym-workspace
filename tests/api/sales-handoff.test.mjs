@@ -2,6 +2,7 @@
 // · 공고 일정(현장설명회·참가신청 마감·입찰 마감·개찰) → 회사 공용 캘린더(참석 = 담당자, 알림) · 배정 알림 · 같은 건 다시 넘기면 409 · 영업 밖 직원 404 · 전환 전 409
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
 
 let srv, ctx, sql;
@@ -102,5 +103,56 @@ describe('배정 이전으로 되돌리기', () => {
     assert.equal((await ctx.staffA.client.req('POST', '/api/sales/work/handoff/revert', { leadId: r.leadId })).status, 409, '두 번 되돌리기');
     const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${r.leadId}`); assert.equal(d.lead.status, '되돌림'); assert.equal(d.raw.handoff, true, 'raw 에 src 펼쳐짐'); assert.equal(d.raw.reverted.reason, '담당 변경');
     const r2 = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N3', assigneeIds: [ctx.ownerId] }); assert.notEqual(r2.leadId, r.leadId, '다시 넘기면 새 리드');
+  });
+});
+
+describe('#507 공고 첨부 자동(대표 10/23 15:50)', () => {
+  test('넘기기 → 응답 뒤 공고 첨부를 받아 자료실 영업/공고에 한 번 저장 · 담당자 업무마다 연결(공고 첨부(자동)) · 30MB 넘는 파일은 설명에 실패 한 줄 · [공고 파일 붙이기] 다시 눌러도 중복 없음', async () => {
+    let hits = 0;
+    const fake = http.createServer((req, res) => {
+      hits++;
+      if (req.url.startsWith('/spec.hwp')) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': '11' }); res.end('HWP-CONTENT'); return; }
+      if (req.url.startsWith('/big.pdf')) { res.writeHead(200, { 'content-length': String(31 * 1024 * 1024) }); res.end(); return; }
+      if (req.url.startsWith('/login.hwp')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<!DOCTYPE html><html><body>로그인이 필요합니다</body></html>'); return; }
+      res.writeHead(404); res.end();
+    });
+    await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${fake.address().port}`;
+    try {
+      await sql`insert into sales_cutover (tenant, writes_open, ok) values ('default', true, true) on conflict (tenant) do update set writes_open = true, ok = true`;
+      await put('procurement_notices', { id: 'N9', title: '커뮤니티센터 피트니스 위탁운영 업체 선정', complex_name: '광교 센트럴', issuer: '입주자대표회의', related: true, first_seen_at: today, deadline_at: `${addDays(today, 9)}T17:00`,
+        attachment_urls: [{ url: `${base}/spec.hwp`, name: '입찰공고문.hwp' }, `${base}/big.pdf`, `/api/bids/file?u=${encodeURIComponent(`${base}/spec.hwp`)}&n=dup.hwp`, { url: `${base}/login.hwp`, name: '과업지시서.hwp' }] });
+      const r = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N9', assigneeIds: [ctx.staffA.id, ctx.ownerId] });
+      assert.equal(r.files, 3, '받을 첨부 3건(중계 주소는 원래 주소로 바꿔 같은 파일 1건으로)');
+      assert.equal(r.taskIds.length, 2);
+      // 응답 뒤(after)에 붙음 — 기다림
+      let rows = [];
+      for (let i = 0; i < 50 && rows.length < 2; i++) { await new Promise((ok) => setTimeout(ok, 200)); rows = await sql`select task_id, file_name, source, storage_key from attachments where task_id = any(${r.taskIds}::uuid[]) and deleted_at is null`; }
+      assert.equal(rows.length, 2, '담당자 업무 2건에 1건씩');
+      assert.ok(rows.every((a) => a.source === 'sales_auto' && a.file_name === '입찰공고문.hwp'), JSON.stringify(rows));
+      assert.equal(new Set(rows.map((a) => a.storage_key)).size, 1, '같은 저장 파일(한 번만 저장)');
+      const libs = await sql`select folder, space, source, file_name from library_files where ext_ref like 'salesfile:%' and deleted_at is null`;
+      assert.deepEqual(libs.map((l) => [l.folder, l.space, l.source, l.file_name]), [['영업/공고/광교 센트럴 커뮤니티센터 피트니스 위탁운영 업체 선정', 'sales', 'sales_auto', '입찰공고문.hwp']]);
+      let desc = '';
+      for (let i = 0; i < 30 && !/자동 첨부 실패/.test(desc); i++) { await new Promise((ok) => setTimeout(ok, 200)); desc = (await sql`select description from tasks where id = ${r.taskIds[0]}`)[0].description; }
+      assert.match(desc, /공고 첨부 3건 중 2건 자동 첨부 실패\(big\.pdf: 30MB 넘음 · 과업지시서\.hwp: 파일 대신 웹페이지\(로그인·세션 필요\)\) — 공고문 내려받기: \/s\/sales\/bids\?tab=working&q=N9/, desc);
+      const act = await sql`select changes from activities where entity_type = 'task' and entity_id = ${r.taskIds[0]} and action = 'file_attached'`;
+      assert.equal(act[0].changes.from, 'sales_auto');
+      // 업무 상세 [공고 파일 붙이기]: 이미 붙은 파일은 건너뜀, 실패 줄은 한 줄만(새로 씀) · 볼 수 없는 사람은 404
+      const before = hits;
+      const again = await ctx.owner.ok('POST', `/api/tasks/${r.taskIds[1]}/source-files`, {});
+      assert.deepEqual([again.total, again.ok, again.failed.length], [3, 1, 2]);
+      assert.equal(hits - before, 2, '자료실에 있는 파일은 다시 받지 않음(실패한 2건만 다시 시도)');
+      assert.equal((await sql`select count(*)::int n from attachments where task_id = ${r.taskIds[1]} and deleted_at is null`)[0].n, 1, '중복 첨부 없음');
+      const d2 = (await sql`select description from tasks where id = ${r.taskIds[1]}`)[0].description;
+      assert.equal((d2.match(/자동 첨부 실패/g) ?? []).length, 1, '실패 줄 한 줄');
+      assert.equal((await ctx.staffB.client.req('POST', `/api/tasks/${r.taskIds[1]}/source-files`, {})).status, 404);
+      // 첨부 없는 공고(협력사 모집 등)는 건너뜀 · 공고가 아닌 업무는 400
+      await put('procurement_notices', { id: 'N10', title: '협력업체 정기등록 안내', issuer: '건설사', related: true, first_seen_at: today });
+      const r3 = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N10', assigneeIds: [ctx.ownerId] });
+      assert.equal(r3.files, 0);
+      const plain = await ctx.owner.ok('POST', '/api/tasks', { title: '그냥 업무', assigneeId: ctx.ownerId, approvalRequired: false });
+      assert.equal((await ctx.owner.req('POST', `/api/tasks/${plain.id}/source-files`, {})).status, 400);
+    } finally { fake.close(); }
   });
 });

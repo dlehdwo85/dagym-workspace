@@ -410,6 +410,7 @@ async function ensureTask(sql: Sql, u: SessionUser, p: Prog, w: { id: string; st
     p.amount && `지원 규모: ${p.amount}`, p.url && `공고: ${p.url}`, '마감 7일·3일 전에 알림이 갑니다. 신청하면 지원사업 화면에서 [신청 완료]로 바꾸세요.'].filter(Boolean).join('\n');
   const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: owner, requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', '지원사업'], checklist: steps } as never, { quiet: owner === u.id, skipQuota: true });
   await sql`update tasks set sales_ref = ${sql.json({ kind: 'support', id: p.id, name: p.title.slice(0, 120) })} where id = ${r.id}`;
+  if ((p.attachments ?? []).length) (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'support', id: p.id, taskIds: [r.id] }); // #507 공고 첨부 자동
   return r.id;
 }
 export async function saveWork(u: SessionUser, id: string, i: z.infer<typeof workInput>) {

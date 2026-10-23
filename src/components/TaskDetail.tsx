@@ -737,6 +737,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <span className="flex gap-0.5">{data.attachments.slice(0, 3).map((a: any) => <FileKindIcon key={a.id} a={a} small />)}</span>
           </>}</h2>
           {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.edit} onChange={reload} meId={user.id} />}
+          {!fold.att && <SourceFilesButton taskId={id} t={t} attachments={data.attachments} onDone={reload} />}
           {!fold.att && <TaskMail taskId={id} onChange={reload} draft={mailDraft} onDraftUsed={() => setMailDraft(null)} />}
           {/* V28-1 이 업무의 AI 비서 — 자료·첨부 바로 아래(초안 → 메일·문자 시안 창) */}
           {features.ai && menus?.assistant !== 'none' && (
@@ -1229,5 +1230,26 @@ function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: stri
         </div>
       </div>
     </div>
+  );
+}
+
+/** #507 공고·지원사업에서 넘어온 업무: 원천 첨부를 받아 붙이기(자동으로 못 붙였거나 기능 전에 만든 업무) — 이미 붙은 파일은 건너뜀 */
+function SourceFilesButton({ taskId, t, attachments, onDone }: { taskId: string; t: any; attachments: any[]; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const kind = t?.sales_ref?.kind;
+  if (!t?.sales_ref?.id || (kind !== 'bid' && kind !== 'support')) return null;
+  const has = attachments.some((a) => a.source === 'sales_auto'); const failed = /자동 첨부 실패/.test(String(t.description ?? ''));
+  if (has && !failed) return null;
+  return (
+    <Button size="sm" variant="secondary" className="mt-2" disabled={busy} data-testid="task-source-files" onClick={async () => {
+      setBusy(true);
+      try {
+        const r = await api<{ total: number; ok: number; failed: { name: string; reason: string }[] }>(`/api/tasks/${taskId}/source-files`, { body: {} });
+        if (!r.total) toast.info('공고에 첨부 파일이 없습니다');
+        else if (r.failed.length) toast.error(`공고 첨부 ${r.total}건 중 ${r.ok}건을 붙였습니다 — ${r.failed.map((x) => `${x.name}: ${x.reason}`).join(' · ')}`);
+        else toast.ok(`공고 첨부 ${r.ok}건을 붙였습니다`);
+        onDone(); broadcastRefresh();
+      } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+    }}>{has ? '공고 파일 다시 받기' : '공고 파일 붙이기'}</Button>
   );
 }

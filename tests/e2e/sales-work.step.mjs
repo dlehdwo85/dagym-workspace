@@ -53,6 +53,18 @@ export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.match(await p.getByRole('dialog').innerText(), /E2E 단지/);
     const [l] = await sql`select l.name, w.status from sales_work_records w join sales_leads l on l.id = w.lead_id where w.ref_id = ${id}`;
     assert.deepEqual([l.name, l.status], ['E2E 단지', '진행영업 전환']);
+    // #507 공고 첨부: 공고에서 넘어온 업무 상세 — 자동 첨부가 없으면 [공고 파일 붙이기](공고에 파일이 없으면 안내) · 자동 첨부가 있으면 '공고 첨부(자동)' 표시·버튼 숨김
+    const [tk] = await sql`select t.id from tasks t join sales_work_records w on w.lead_id = t.lead_id where w.ref_id = ${id2} and t.deleted_at is null order by t.created_at limit 1`;
+    await p.evaluate(() => { try { localStorage.removeItem('wos_td_fold'); } catch {} });
+    await p.goto(`${BASE}/tasks/${tk.id}`);
+    const sf = p.getByTestId('task-source-files'); await sf.waitFor();
+    assert.equal(await sf.innerText(), '공고 파일 붙이기');
+    await sf.tap(); await p.getByText('공고에 첨부 파일이 없습니다').first().waitFor();
+    await sql`insert into attachments (task_id, kind, storage_key, file_name, mime_type, size_bytes, upload_status, doc_title, source, created_by)
+      values (${tk.id}, 'file', 'e2e/sales-auto.hwp', '입찰공고문.hwp', 'application/x-hwp', 11, 'ready', '입찰공고문', 'sales_auto', ${ctx.ownerId})`;
+    await p.reload();
+    await p.getByTestId('attach-section').getByText('공고 첨부(자동)').first().waitFor();
+    assert.equal(await p.getByTestId('task-source-files').count(), 0, '자동 첨부가 있으면 버튼 숨김');
   } finally {
     await m.close().catch(() => {});
     await sql`update sales_cutover set writes_open = false where tenant = 'default'`.catch(() => {});

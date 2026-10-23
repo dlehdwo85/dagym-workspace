@@ -86,6 +86,9 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
     await sql`update tasks set sales_ref = ${sql.json({ kind: i.kind, id: i.id, name, leadId, handoff: true })}, lead_id = ${leadId} where id = ${task.id}`;
     taskIds.push(task.id);
   }
+  // #507 공고 첨부: 응답 뒤에 받아 자료실 '영업/공고/…'에 한 번 저장 → 업무마다 연결(실패는 업무 설명에 한 줄)
+  const files = i.kind === 'bid' ? (await import('./autoAttach')).sourceFiles(r.attachment_urls ?? r.attachments, r.notice_file_url).length : 0;
+  if (files) (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'bid', id: i.id, taskIds });
   // ④ 일정: 회사 공용 캘린더(없으면 건너뜀) — 참석 = 담당자, 알림 하루 전·1시간 전
   const eventIds: string[] = []; const eventErrors: string[] = [];
   if (future.length) {
@@ -101,7 +104,7 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
   await sql`update sales_leads set src = coalesce(src, '{}'::jsonb) || ${sql.json({ taskIds, eventIds: eventIds.filter(Boolean) })} where id = ${leadId}`;
   // ⑤ 배정 알림(넘긴 본인 제외)
   await notify(sql, { userIds: ids.filter((x) => x !== u.id), type: 'assigned', space: 'sales', title: `영업 배정: ${name.slice(0, 60)}`, body: `${u.name}님이 ${KIND_NAME[i.kind]}을(를) 영업 진행으로 넘겼습니다 — 검토·첫 연락 (마감 ${due})`, link: `/s/sales/leads?id=${leadId}`, entityType: 'sales_lead', entityId: leadId, actorId: u.id, push: true, dedupeKey: `sales:handoff:${leadId}` } as never).catch(() => {});
-  return { leadId, status: HANDOFF_STATUS, taskIds, eventIds: eventIds.filter(Boolean), eventErrors, due, dates: future.map(([l, w]) => ({ label: l, day: w.day })) };
+  return { leadId, status: HANDOFF_STATUS, taskIds, eventIds: eventIds.filter(Boolean), eventErrors, due, dates: future.map(([l, w]) => ({ label: l, day: w.day })), files };
 }
 
 /**

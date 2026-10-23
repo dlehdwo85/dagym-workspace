@@ -48,7 +48,7 @@ export async function uploadTaskFiles(list: File[], target: { taskId?: string; e
 const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '');
 const isVideo = (a: any) => a.kind === 'file' && /^video\//.test(a.mime_type ?? ''); // 대표 10/21 02:00: 영상은 보기 창에서 재생
 
-const SOURCE_LABEL: Record<string, string> = { upload: '업로드', google_drive: 'Google Drive', chatgpt: 'ChatGPT 결과물', notion: 'Notion', web: '웹 링크', other: '기타', library: '자료실' };
+const SOURCE_LABEL: Record<string, string> = { upload: '업로드', google_drive: 'Google Drive', chatgpt: 'ChatGPT 결과물', notion: 'Notion', web: '웹 링크', other: '기타', library: '자료실', sales_auto: '공고 첨부(자동)' };
 
 export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }: { items: any[]; taskId?: string; eventId?: string; canEdit: boolean; onChange: () => void; meId: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
