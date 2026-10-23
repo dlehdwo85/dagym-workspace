@@ -87,8 +87,9 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
     taskIds.push(task.id);
   }
   // #507 공고 첨부: 응답 뒤에 받아 자료실 '영업/공고/…'에 한 번 저장 → 업무마다 연결(실패는 업무 설명에 한 줄)
+  //   #507 후속: 이 줄에 첨부가 없어도 같은 공고번호의 다른 줄 첨부·K-apt 첨부 목록을 응답 뒤에 찾아 붙임
   const files = i.kind === 'bid' ? (await import('./autoAttach')).sourceFiles(r.attachment_urls ?? r.attachments, r.notice_file_url).length : 0;
-  if (files) (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'bid', id: i.id, taskIds });
+  if (i.kind === 'bid') (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'bid', id: i.id, taskIds });
   // ④ 일정: 회사 공용 캘린더(없으면 건너뜀) — 참석 = 담당자, 알림 하루 전·1시간 전
   const eventIds: string[] = []; const eventErrors: string[] = [];
   if (future.length) {

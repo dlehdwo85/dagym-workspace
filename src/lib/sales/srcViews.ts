@@ -5,6 +5,7 @@ import { badRequest, notFound } from '../errors';
 import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
+import { sourceFiles } from './files';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -74,6 +75,20 @@ function todayReason(n: { posted: string | null; noticeDate: string | null; vend
   const seen = Date.parse(String(firstSeenAt ?? ''));
   if (since != null && !Number.isNaN(seen) && seen >= since) return { hit: true, label: `${n.posted === yd ? '어제' : n.posted ? md(n.posted) : ''} 메일 뒤 수집`.trim() };
   return { hit: false, label: null };
+}
+/** #507 후속(로컬 10/23): 같은 공고(원천 종류 + 원천 번호)가 여러 줄(원본 복사 + 워크인 수집)이면 한 줄로 — 이 회사 진행 기록이 걸린 줄을 남기고(여럿이면 다), 첨부는 묶음 전체.
+ *  수집 뒤 합치기(mergeNoticeDuplicates)가 못 숨긴 경우(두 줄 모두 진행 기록)의 화면 보완 */
+function oneRowPerNotice(list: any[], linked: (id: string) => boolean) {
+  const groups = new Map<string, any[]>();
+  for (const r of list) { const ext = String(r.source_external_id ?? ''); const k = ext ? `${r.source_type}|${ext}` : `#${r.__id}`; const g = groups.get(k); if (g) g.push(r); else groups.set(k, [r]); }
+  const out: any[] = [];
+  for (const g of groups.values()) {
+    if (g.length === 1) { out.push(g[0]); continue; }
+    const keep = g.filter((r) => linked(String(r.id ?? r.__id)));
+    const files = sourceFiles(...g.flatMap((r) => [r.attachment_urls ?? r.attachments, r.notice_file_url])).map((x) => (x.name ? { name: x.name, url: x.url } : x.url));
+    for (const r of keep.length ? keep : [g[0]]) out.push({ ...r, attachment_urls: files });
+  }
+  return out;
 }
 const attachmentsOf = (r: any) => { const a = pick(r, 'attachment_urls', 'attachments'); return Array.isArray(a) ? a : typeof a === 'string' && a.startsWith('[') ? (() => { try { return JSON.parse(a); } catch { return []; } })() : a ? [a] : []; };
 /** S1-3: 시설 규모 facility_scale + facility_scale_unit(㎡·평·세대 등) */
@@ -177,7 +192,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await prog('opportunity_work'); // S2-5: 전환 뒤에는 정식 진행 기록 표(원본 행 모양)
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
-    const NR = (await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && (!vendorUnchecked(r) || workOf.has(String(r.id ?? r.__id)))); // 입찰 목록과 같은 기준(확인 안 된 협력사 줄 빼기)
+    const NR = oneRowPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && (!vendorUnchecked(r) || workOf.has(String(r.id ?? r.__id)))), (id) => workOf.has(id)); // 입찰 목록과 같은 기준(확인 안 된 협력사 줄 빼기·같은 공고 한 줄)
     const N = NR.map((r) => notice(r, cats));
     const live = L.filter((l) => !CLOSED.has(String(l.status))); // 종결(계약완료·보류·실패) 제외
     const due = live.filter((l) => l.next && l.next >= today() && l.next <= plus(7)).sort((a, b) => String(a.next).localeCompare(String(b.next)));
@@ -345,7 +360,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const W = await prog('opportunity_work');
     const P = new Map((await prog('procurement_notices__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
     const byNotice = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), w]));
-    let N = (await rows('global', 'procurement_notices', 20000)).filter((r) => byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r))); // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식) 빼기
+    let N = oneRowPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r))), (id) => byNotice.has(id) || P.has(id)); // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식) 빼기 · 같은 공고 한 줄
     const since = await lastMailAt(t);
     const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since);
       return { ...n0, todayHit: why.hit, todayLabel: why.label, work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),

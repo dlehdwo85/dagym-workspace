@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { fakeKapt } from '../fakeKapt.mjs';
 
 const PORT = 3231;
 let srv, ctx, sql, fake, hits = [];
@@ -19,6 +20,10 @@ const KAPT_ROWS = [
 const dataGo = (items) => JSON.stringify({ response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items, numOfRows: 100, pageNo: 1, totalCount: items.length } } });
 // #476: 시험마다 바꾸는 원천 — K-apt 목록 추가 줄·상세 입찰분류·공식 API(15058166) 응답·협력사 게시판
 let kaptExtra = [], kaptApiItems = []; const detailCat = {};
+// #507 후속: 상세(쿠키·_csrf) → 첨부 목록(POST JSON) — 로컬 10/23 실측 순서의 가짜 K-apt. 상세 본문은 원래 시험 표 그대로
+const kapt = fakeKapt({ files: { '20261021000001': [{ seq: 7001, fileName: '래미안 강남 커뮤니티 위탁운영 입찰공고.hwp' }] },
+  detailHtml: (bid) => `<table><tr><th>주택관리업자</th><th>단지명</th><th>관리사무소 주소</th><th>전화번호</th><th>팩스번호</th><th>동수</th><th>세대수</th></tr><tr><td>우리관리<td>래미안 강남<td>서울 강남구 역삼로 1<td>02-555-1234<td>02-555-1235<td>12<td>1,250</tr></table>
+      <table><tr><th>입찰분류</th><td>${detailCat[bid] ?? '용역 &gt; 커뮤니티 위탁운영'}</td></tr><tr><th>입찰종류</th><td>일반경쟁</td></tr><tr><th>내용</th><td><pre>커뮤니티센터 피트니스·수영장 위탁운영 사업자 선정</pre></td></tr></table><a href="javascript:fileDown('7001')">공고문.hwp</a>` });
 let vendorStatus = 200, nuriMode = 'denied'; // 누리장터: denied(활용신청 전) · empty(정상 0건) · odd(칸 이름이 다른 응답) · ok(새 명세 칸 이름 — 로컬 10/23 운영 응답)
 let vendorHtml = `<html><ul><li><a href="/notice/12">2026년 협력업체 정기등록 모집 안내</a> <span>${today}</span></li><li><a href="/notice/13">추석 연휴 안내</a></li></ul></html>`;
 before(async () => {
@@ -27,8 +32,7 @@ before(async () => {
     const send = (code, text, type = 'text/html; charset=utf-8') => { res.statusCode = code; res.setHeader('content-type', type); res.end(text); };
     if (u.pathname === '/kapt/bid/bidList.do') return send(200, u.searchParams.get('pageNo') === '1' ? listHtml([...KAPT_ROWS, ...kaptExtra]) : listHtml([]));
     if (u.pathname === '/kaptbidapi/getPblAncDeSearchV3') return send(200, dataGo(kaptApiItems), 'application/json');
-    if (u.pathname === '/kapt/bid/bidDetail.do') return send(200, `<html><table><tr><th>주택관리업자</th><th>단지명</th><th>관리사무소 주소</th><th>전화번호</th><th>팩스번호</th><th>동수</th><th>세대수</th></tr><tr><td>우리관리<td>래미안 강남<td>서울 강남구 역삼로 1<td>02-555-1234<td>02-555-1235<td>12<td>1,250</tr></table>
-      <table><tr><th>입찰분류</th><td>${detailCat[u.searchParams.get('bidNum')] ?? '용역 &gt; 커뮤니티 위탁운영'}</td></tr><tr><th>입찰종류</th><td>일반경쟁</td></tr><tr><th>내용</th><td><pre>커뮤니티센터 피트니스·수영장 위탁운영 사업자 선정</pre></td></tr></table><a href="/bid/fileDown.do?f=1">공고문.hwp</a></html>`);
+    if (kapt.handle(req, res, body)) return;
     if (u.pathname === '/kapt/bid/bidResultList.do') return send(200, '<html><input name="_csrf" value="csrf-1"></html>');
     if (u.pathname === '/kapt/bid/bidResultListAjax.do') { const kw = new URLSearchParams(body).get('searchKeyword'); return send(200, JSON.stringify(kw === '커뮤니티' ? [{ bidNum: '20261021000001', bidTitle: '[서울강남] 커뮤니티 피트니스센터 위탁운영 사업자 선정', kaptName: '래미안 강남', sucsBidder: '다짐', sucsAmt: '120000000', sucsDate: today }] : []), 'application/json'); }
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', ntceInsttNm: '성남시', dminsttNm: '성남시체육회', bidNtceDt: `${today} 09:00:00`, bidClseDt: `${plus(9)} 10:00:00`, opengDt: `${plus(9)} 11:00:00`, presmptPrce: '250000000', ntceKindNm: '일반', cntrctCnclsMthdNm: '제한경쟁', prtcptLmtRgnNm: '경기도', bidNtceDtlUrl: 'https://www.g2b.go.kr/x/1', ntceSpecDocUrl1: 'https://www.g2b.go.kr/f/1.hwp' }] : []), 'application/json');
@@ -63,10 +67,16 @@ test('수집기 12개 목록 · K-apt 입찰공고(목록→관련 상세→적�
   assert.equal(rows.length, 3); assert.ok(rows.every((x) => x.origin === 'workin'));
   const fit = rows[0].row; assert.equal(fit.source_type, 'kapt_bid'); assert.equal(fit.fit_business, '다짐'); assert.equal(fit.classification, '즉시 검토'); assert.equal(fit.related, true); assert.equal(fit.office_phone, '02-555-1234'); assert.equal(fit.household_count, 1250); assert.equal(fit.region, '서울강남'); assert.equal(fit.notice_kind, 'new');
   assert.match(fit.deadline_at, /\+09:00$/); assert.equal(fit.first_seen_at.slice(0, 10), new Date().toISOString().slice(0, 10)); assert.equal(fit.attachment_urls.length, 1);
+  // #507 후속: 관련 새 공고는 상세 세션으로 첨부 목록(원래 이름·파일 번호) — 상세 HTML 의 javascript 링크는 쓰지 않음
+  assert.equal(fit.attachment_urls[0].name, '래미안 강남 커뮤니티 위탁운영 입찰공고.hwp'); assert.match(fit.attachment_urls[0].url, /\/kapt\/cmm\/file\/BID\/fileDownload\.do\?key=7001&bidNum=20261021000001$/); assert.ok(fit.files_checked_at);
+  const lists = kapt.calls.filter((c) => c.path === '/kapt/bid/bidFileListData.do'); assert.equal(lists.length, 1, '관련 공고 1건만');
+  assert.match(lists[0].cookie, /JSESSIONID=/); assert.match(lists[0].csrf, /^csrf-/); assert.deepEqual(JSON.parse(lists[0].body), { bidNum: '20261021000001' });
+  assert.match(r.summary, /첨부 목록 1건\(파일 1\)/, r.summary);
   assert.equal(rows[1].row.related, false, '승강기 보수공사 = 비관련'); assert.equal(rows[1].row.classification, '참고(비관련)');
   assert.equal(rows[2].row.fit_business, null, '어린이집은 제외 주제');
   const r2 = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
   assert.equal(r2.inserted, 0); assert.equal(r2.unchanged, 3);
+  assert.equal(kapt.calls.filter((c) => c.path === '/kapt/bid/bidFileListData.do').length, 1, '이미 읽은 공고는 다시 읽지 않음(새 공고만)');
   const runs = await sql`select slug, status, trigger from sales_collector_runs order by id`; assert.equal(runs.length, 2); assert.equal(runs[0].trigger, 'manual');
   assert.equal((await ctx.owner.ok('GET', '/api/sales/collectors')).collectors.find((c) => c.slug === 'kapt_bid_notices').lastStatus, 'success');
   // 영업 화면: 오늘 새 공고에 보임
@@ -302,4 +312,37 @@ test('누리장터 응답 통계(로컬 10/23 "0건이 진짜 0건인지"): 정�
   const raw = JSON.stringify(r);
   assert.ok(!raw.includes('홍길동') && !raw.includes('010-1234-5678') && !raw.includes('1234-5678') && !raw.includes('hong@example.com'), '담당자 이름·전화·메일은 저장하지 않음(개인정보)');
   nuriMode = 'denied';
+});
+
+test('#507 후속(로컬 10/23): 같은 공고 여러 줄(원본 복사 + 워크인 수집) → 수집 뒤 한 줄로 — 업무·진행 기록이 걸린 줄의 id 를 살리고 첨부는 합치고 빈 칸은 채움 · 둘 다 걸려 있으면 그대로 두고 목록은 한 줄', async () => {
+  const one = async () => (await sql`select src_id, origin, gone, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and row->>'source_external_id' = '20261021000001' order by src_id`);
+  const [w] = (await one()).filter((x) => !x.gone);
+  assert.equal(w.origin, 'workin');
+  // ① 원본 복사 줄(연결 없음): 같은 공고 · 예산 · 옛 주소 첨부 → 워크인 줄이 남고 예산·첨부를 받음
+  const src = (id, extra) => sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', ${id}, ${sql.json({ ...w.row, id, ...extra })}, 'src')`;
+  await src('SRC-1', { budget_amount: 98000000, attachment_urls: ['https://www.k-apt.go.kr/bid/bidFileDown.do?bidNum=20261021000001&fileSeq=7002'], updated_at: '2026-01-01T00:00:00.000Z' });
+  const a = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
+  assert.match(a.summary, /같은 공고 1줄 합침\(K-apt 1\)/, a.summary);
+  let rows = await one(); const keep = rows.find((x) => x.src_id === w.src_id); const s1 = rows.find((x) => x.src_id === 'SRC-1');
+  assert.deepEqual([keep.gone, s1.gone, s1.row.merged_into], [false, true, w.src_id]);
+  assert.equal(Number(keep.row.budget_amount), 98000000, '빈 칸은 다른 줄 값으로');
+  assert.deepEqual(keep.row.attachment_urls.map((x) => (typeof x === 'string' ? x : x.url).replace(/^.*key=/, '')), ['7001&bidNum=20261021000001', '7002&bidNum=20261021000001'], '첨부는 합침(옛 주소도 같은 모양으로)');
+  // ② 원본 복사 줄에 업무가 걸려 있으면 그 줄의 id 를 살리고 워크인 줄을 숨김
+  await src('SRC-2', { attachment_urls: [] });
+  const t = await ctx.owner.ok('POST', '/api/tasks', { title: '광명 공고 검토', assigneeId: ctx.ownerId, approvalRequired: false });
+  await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: 'SRC-2', name: '시험' })} where id = ${t.id}`;
+  await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
+  rows = await one();
+  assert.deepEqual(rows.filter((x) => !x.gone).map((x) => x.src_id), ['SRC-2'], '업무가 걸린 줄만 남음');
+  assert.equal(rows.find((x) => x.src_id === 'SRC-2').row.attachment_urls.length, 2, '첨부를 넘겨받음');
+  // ③ 둘 다 걸려 있으면(진행 기록 + 업무) 숨기지 않음 — 입찰 목록은 한 줄(첨부 합침)
+  await src('SRC-3', { attachment_urls: [] });
+  await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, data) values ('default', 'opportunity_work', 'w:bid:SRC-3', 'SRC-3', '검토중', '{}')`;
+  const c = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
+  assert.match(c.summary, /두 줄 모두 진행 기록·업무가 있어 그대로 둔 공고 1건/, c.summary);
+  rows = await one();
+  assert.deepEqual(rows.filter((x) => !x.gone).map((x) => x.src_id), ['SRC-2', 'SRC-3']);
+  const v = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all');
+  const hit = v.items.filter((i) => i.noticeNo === '20261021000001');
+  assert.equal(hit.length, 1, JSON.stringify(hit.map((i) => i.id))); assert.equal(hit[0].attachments.length, 2);
 });

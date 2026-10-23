@@ -1,5 +1,7 @@
 // K-apt(공동주택) 수집기 3종 — 전국 입찰공고 HTML(키 불필요) · 입찰결과 HTML(낙찰 병합) · 사업자선정 결과 OpenAPI(KAPT_SERVICE_KEY). 원본 lib/collectors/kapt_* 이식(10/21).
+import { db } from '../../db';
 import { dataGoKey } from '../collect';
+import { kaptFileList, kaptFileUrl, kaptSession } from '../files';
 import { callDataGo } from './g2b';
 import { matchFit } from './procurement';
 import { upsertKaptVendor, upsertNotices, deriveOperatingFromKapt } from './store';
@@ -32,7 +34,8 @@ export function parseKaptBidList(html: string): { rows: KaptBidRow[]; malformed:
   }
   return { rows, malformed };
 }
-export type KaptBidDetail = { manager?: string; officeAddress?: string; phone?: string; fax?: string; households?: number; category?: string; bidKind?: string; content?: string; attachments?: string[] };
+export type KaptBidDetail = { manager?: string; officeAddress?: string; phone?: string; fax?: string; households?: number; category?: string; bidKind?: string; content?: string; attachments?: string[];
+  /** #507 후속: 첨부 목록 API(bidFileListData.do)로 읽은 원래 이름·파일 번호 */ files?: { name: string | null; url: string }[] };
 export function parseKaptBidDetail(html: string): KaptBidDetail {
   const d: KaptBidDetail = {};
   const t = html.match(/<tr>\s*(?:<th[^>]*>[\s\S]*?<\/th>\s*)+<\/tr>\s*<tr>([\s\S]*?)<\/tr>/); const head = html.match(/<tr>\s*((?:<th[^>]*>[\s\S]*?<\/th>\s*)+)<\/tr>\s*<tr>/);
@@ -45,7 +48,7 @@ export function parseKaptBidDetail(html: string): KaptBidDetail {
   const pair = (name: string) => { const m = html.match(new RegExp(`<th[^>]*>\\s*${name}\\s*</th>\\s*<td[^>]*>([\\s\\S]*?)</td>`)); const v = m ? text(m[1]) : ''; return v || undefined; };
   d.category = pair('입찰분류'); d.bidKind = pair('입찰종류');
   const pre = html.match(/<th[^>]*>\s*내용\s*<\/th>[\s\S]*?<pre>([\s\S]*?)<\/pre>/); if (pre) d.content = text(pre[1]).slice(0, 2000) || undefined;
-  const files = [...html.matchAll(/href="([^"]*(?:fileDown|download|attach)[^"]*)"/gi)].map((m) => m[1].replace(/&amp;/g, '&')).map((u) => (u.startsWith('http') ? u : `${BASE()}${u.startsWith('/') ? '' : '/'}${u}`)).slice(0, 10);
+  const files = [...html.matchAll(/href="([^"]*(?:fileDown|download|attach)[^"]*)"/gi)].map((m) => m[1].replace(/&amp;/g, '&')).filter((u) => !/^\s*javascript:/i.test(u)).map((u) => (u.startsWith('http') ? u : `${BASE()}${u.startsWith('/') ? '' : '/'}${u}`)).slice(0, 10);
   if (files.length) d.attachments = files;
   return d;
 }
@@ -53,7 +56,29 @@ export const regionFromTitle = (title: string) => title.match(/^\s*\[([^\]]{1,12
 export function toPayload(r: KaptBidRow, d?: KaptBidDetail): Record<string, unknown> {
   return { source_type: 'kapt_bid', source_external_id: r.bidNum, source_url: `${BASE().replace(/\/kapt$/, T() ? '/kapt' : '')}/bid/bidDetail.do?bidNum=${encodeURIComponent(r.bidNum)}`, issuer: r.complex || null, facility_name: r.complex || null, title: r.title, region: regionFromTitle(r.title),
     posted_date: r.registeredAt.slice(0, 10), deadline_at: r.deadline, notice_state: r.state, bid_system: r.system, award_method: r.awardMethod, contract_method: d?.bidKind ?? null, bid_category: d?.category ?? null, task_scope: d?.content ?? null,
-    office_phone: d?.phone ?? null, office_fax: d?.fax ?? null, office_address: d?.officeAddress ?? null, household_count: d?.households ?? null, attachment_urls: d?.attachments ?? [] };
+    office_phone: d?.phone ?? null, office_fax: d?.fax ?? null, office_address: d?.officeAddress ?? null, household_count: d?.households ?? null,
+    // 첨부는 첨부 목록 API 로 읽은 것만(상세 HTML 의 링크는 화면 스크립트가 그려 실제 K-apt 에선 비거나 엉뚱한 주소 — 10/23 a7e4efad·086aeff2)
+    attachment_urls: d?.files ? d.files.map((f) => (f.name ? { name: f.name, url: f.url } : f.url)) : [], files_checked_at: d?.files ? new Date().toISOString() : null };
+}
+// #507 후속(로컬 10/23): 관련 공고의 첨부 목록 — 상세를 열 때 받은 세션으로 POST bidFileListData.do. 새 공고만(첨부가 있거나 이미 읽은 공고는 건너뜀), 하루 300건·한 번에 80건
+const FILE_LIST_DAY = 300, FILE_LIST_RUN = 80;
+async function filesNeeded(bids: string[]): Promise<Set<string>> {
+  if (!bids.length) return new Set();
+  const done = await db()<{ ext: string }[]>`select distinct row->>'source_external_id' as ext from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'source_type' = 'kapt_bid' and row->>'source_external_id' = any(${bids})
+    and ((row->>'files_checked_at') is not null or coalesce(row->>'notice_file_url', '') <> '' or case when jsonb_typeof(row->'attachment_urls') = 'array' then jsonb_array_length(row->'attachment_urls') > 0 else false end)`;
+  const has = new Set(done.map((r) => r.ext));
+  return new Set(bids.filter((b) => !has.has(b)));
+}
+const kstDay = () => kstYmd(new Date());
+async function fileListBudget(): Promise<number> {
+  const [s] = await db()<{ value: any }[]>`select value from app_settings where key = 'kapt_file_list'`;
+  const used = s?.value?.day === kstDay() ? Number(s.value.n) || 0 : 0;
+  return Math.max(0, Math.min(FILE_LIST_RUN, FILE_LIST_DAY - used));
+}
+async function fileListUsed(n: number) {
+  if (!n) return; const d = kstDay(); const sql = db();
+  await sql`insert into app_settings (key, value) values ('kapt_file_list', ${sql.json({ day: d, n } as never)})
+    on conflict (key) do update set value = case when app_settings.value->>'day' = ${d} then jsonb_build_object('day', ${d}::text, 'n', coalesce((app_settings.value->>'n')::int, 0) + ${n}::int) else excluded.value end, updated_at = now()`;
 }
 async function getText(url: string, fetchImpl: typeof fetch, timeoutMs: number, init: RequestInit = {}) { const res = await fetchImpl(url, { ...init, headers: { ...HEADERS, ...(init.headers as any) }, signal: AbortSignal.timeout(timeoutMs) }); if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.text(); }
 export async function pool<T, R>(items: T[], n: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> { const out: R[] = new Array(items.length); let next = 0; await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); } })); return out; }
@@ -112,7 +137,23 @@ export const kaptBidNotices: Collector = {
     if (malformed) errors.push(`형식이 다른 줄 ${malformed}건 건너뜀`);
     const seen = new Set<string>(); const uniq = all.filter((r) => (seen.has(r.bidNum) ? false : (seen.add(r.bidNum), true)));
     const fitRows = uniq.filter((r) => matchFit(r.title, '공동주택').fit); const details = new Map<string, KaptBidDetail>();
-    await pool(fitRows.slice(0, DETAIL_LIMIT), 6, async (r) => { if (left() < 15000) return; try { details.set(r.bidNum, parseKaptBidDetail(await getText(`${BASE()}/bid/bidDetail.do?bidNum=${encodeURIComponent(r.bidNum)}`, fetchImpl, 8000))); } catch (e) { if (errors.length < 15) errors.push(`상세 ${r.bidNum}: ${e instanceof Error ? e.message : String(e)}`); } });
+    // 상세 = K-apt 세션(쿠키·_csrf). #507 후속: 새 관련 공고는 같은 세션으로 첨부 목록(이름·파일 번호)까지 — 하루 상한
+    const need = await filesNeeded(fitRows.slice(0, DETAIL_LIMIT).map((r) => r.bidNum)).catch(() => new Set<string>());
+    let budget = need.size ? await fileListBudget().catch(() => 0) : 0; let filesRead = 0, listFiles = 0, listFailed = 0;
+    await pool(fitRows.slice(0, DETAIL_LIMIT), 6, async (r) => {
+      if (left() < 15000) return;
+      try {
+        const s = await kaptSession(r.bidNum, fetchImpl, 8000); if (s.status !== 200) throw new Error(`HTTP ${s.status}`);
+        const d = parseKaptBidDetail(s.html);
+        if (need.has(r.bidNum) && budget > 0 && left() > 15000) {
+          budget--;
+          try { const list = await kaptFileList(r.bidNum, { fetchImpl, session: s, timeoutMs: 8000 }); d.files = list.map((f) => ({ name: f.name, url: kaptFileUrl(r.bidNum, f.seq) })); filesRead++; listFiles += list.length; }
+          catch (e) { listFailed++; if (errors.length < 15) errors.push(`첨부 목록 ${r.bidNum}: ${e instanceof Error ? e.message : String(e)}`); }
+        }
+        details.set(r.bidNum, d);
+      } catch (e) { if (errors.length < 15) errors.push(`상세 ${r.bidNum}: ${e instanceof Error ? e.message : String(e)}`); }
+    });
+    await fileListUsed(filesRead + listFailed).catch(() => {});
     const fitIds = new Set(fitRows.map((r) => r.bidNum));
     const listed = new Set(uniq.map((r) => r.bidNum));
     // 공식 API 에만 있는 공고(목록 화면 쪽에서 놓친 것)를 앞에 — 같은 입찰번호는 목록 화면 값(상세 포함)이 기준
@@ -128,7 +169,7 @@ export const kaptBidNotices: Collector = {
     let direct = 0; const fitCount = { 다짐: 0, 하이링크: 0, 둘다: 0 };
     for (const r of fitRows) { const d = details.get(r.bidNum); const m = matchFit(r.title, d?.category, d?.content, '공동주택'); if (m.direct) direct++; if (m.fit === '다짐') fitCount.다짐++; else if (m.fit === '하이링크') fitCount.하이링크++; else if (m.fit) fitCount.둘다++; }
     return { inserted, updated, unchanged, errors: writeErrors + invalid + listFailures + (api.error ? 1 : 0) + (written < ordered.length ? 1 : 0), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
-      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') };
+      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}${filesRead || listFailed ? ` · 첨부 목록 ${filesRead}건(파일 ${listFiles}${listFailed ? `, 못 읽음 ${listFailed}` : ''})` : ''}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') };
   },
 };
 

@@ -89,9 +89,15 @@ function HandoffButton({ kind, id, name, onDone, compact }: { kind: 'bid' | 'bui
 }
 const attName = (a: any, i: number) => (typeof a === 'object' && a?.name ? String(a.name) : `공고문 ${i + 1} 내려받기`);
 /** S1-4: 공공 사이트 첨부는 같은 도메인 중계(/api/bids/file, K-apt 는 /api/bids/kapt-file)로 — 앱 WebView 에서도 내려받기, 30MB·허용 사이트만 */
-const FILE_HOSTS = ['g2b.go.kr', 'ebid.lh.or.kr', 'apply.lh.or.kr', 'onbid.co.kr', 'nuri.go.kr', 'd2b.go.kr', 'k-apt.go.kr'];
-const fileHref = (url: string, name?: string) => { try { const h = new URL(url).hostname.toLowerCase(); if (!FILE_HOSTS.some((d) => h === d || h.endsWith('.' + d))) return url; const q = `u=${encodeURIComponent(url)}${name ? `&n=${encodeURIComponent(name)}` : ''}`; return h.endsWith('k-apt.go.kr') ? `/api/bids/kapt-file?${q}` : `/api/bids/file?${q}`; } catch { return url; } };
-const attHref = (a: any, i: number) => fileHref(attUrl(a), typeof a === 'object' && a?.name ? String(a.name) : undefined) || attUrl(a);
+const FILE_HOSTS = ['g2b.go.kr', 'ebid.lh.or.kr', 'apply.lh.or.kr', 'onbid.co.kr', 'nuri.go.kr', 'd2b.go.kr', 'k-apt.go.kr', 'bizinfo.go.kr', 'k-startup.go.kr'];
+/** #507 후속: f = 이름을 못 읽을 때 '<공고명 앞 30자> 첨부 n', o = 원문(웹페이지가 오면 안내 화면의 [원문 열기]), bid = K-apt 공고번호(세션 열기) */
+type AttCtx = { title?: string | null; origin?: string | null; bid?: string | null };
+const fileHref = (url: string, name?: string, c: AttCtx & { i?: number } = {}) => { try { const h = new URL(url).hostname.toLowerCase(); if (!FILE_HOSTS.some((d) => h === d || h.endsWith('.' + d))) return url;
+  const kapt = h.endsWith('k-apt.go.kr'); const q = new URLSearchParams({ u: url }); if (name) q.set('n', name); if (c.title) q.set('f', `${c.title.slice(0, 30).trim()} 첨부 ${(c.i ?? 0) + 1}`);
+  if (c.origin) q.set('o', c.origin); if (kapt && c.bid) q.set('bid', c.bid); return `${kapt ? '/api/bids/kapt-file' : '/api/bids/file'}?${q}`; } catch { return url; } };
+const attHref = (a: any, i: number, c: AttCtx = {}) => fileHref(attUrl(a), typeof a === 'object' && a?.name ? String(a.name) : undefined, { ...c, i }) || attUrl(a);
+/** 공고 행 → 첨부 링크 맥락(공고명·원문·K-apt 공고번호) */
+const bidCtx = (n: any): AttCtx => ({ title: `${n.complex ? `${n.complex} ` : ''}${n.title ?? ''}`.trim() || null, origin: n.url ?? null, bid: String(n.source ?? '') === 'kapt_bid' ? String(n.noticeNo ?? '') || null : null });
 const UNK2 = '후속조사 필요';
 /** 한국어 칸 표(값 없는 칸은 숨김) */
 function KoDl({ rows, testId }: { rows: [string, React.ReactNode][]; testId?: string }) {
@@ -857,7 +863,7 @@ export function Bids({ initialTab }: { initialTab?: string }) {
 function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
   // S1-4: 원본 상세 그대로 — [공식 원문][공고문][첨부 각각], 정보 칸(마감·예산·낙찰·추정가격·계약방식·계약기간·공고일·DB 등록)은 값이 없으면 '후속조사 필요', 접힘 '과업·참가자격·요건 상세'
   const docs = [n.url && <a key="u" href={n.url} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-url"><ExternalLink className="size-3.5" aria-hidden />공식 원문</a>,
-    ...(n.attachments ?? []).map((a: any, i: number) => attUrl(a) && <a key={i} href={attHref(a, i)} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-file"><Download className="size-3.5" aria-hidden />{attName(a, i)}</a>)].filter(Boolean);
+    ...(n.attachments ?? []).map((a: any, i: number) => attUrl(a) && <a key={i} href={attHref(a, i, bidCtx(n))} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-file"><Download className="size-3.5" aria-hidden />{attName(a, i)}</a>)].filter(Boolean);
   const unk = (v: unknown) => (v === null || v === undefined || v === '' ? <span className="text-ink-3">{UNK2}</span> : v as React.ReactNode);
   const D8: [string, unknown][] = [['주요 과업', n.detail?.tasks], ['참가 자격', n.detail?.qualification], ['실적 요건', n.detail?.performance], ['지역 제한', n.detail?.regionLimit], ['면허·등록', n.detail?.license], ['공동수급·하도급', n.detail?.joint], ['현장설명회', n.detail?.briefing], ['제안 발표', n.detail?.presentation]];
   return (
@@ -915,7 +921,7 @@ function HubDetail({ tab, r, admin, canWrite, onChange, onClose }: { tab: string
   const T = useSalesTerms(); // #408 칸 이름은 회사 업종 템플릿
   const rows: [string, React.ReactNode][] = tab === 'buildings'
     ? [[T.unitName, r.name], ['상태', r.status], ['유형', r.kind], ['우선순위', r.priority], ['지역', r.region], ['주소', r.address], ...(r.dates ?? []).map(([k, v]: [string, unknown]) => [k, k === '세대수' ? (D(v) ? `${D(v)}세대` : UNK) : (D(v) ? kd(D(v)) : UNK)] as [string, React.ReactNode]), ['DB 등록', r.firstSeen && kd(r.firstSeen)], ['비고', r.estimated && '날짜는 시점 추정치'],
-        ['문서', (r.url || r.attachments?.length) && <ContactRow key="d" links={[[r.url, '공식 승인 원문'], ...((r.attachments ?? []) as any[]).map((a, i) => [attHref(a, i), attName(a, i)] as [string, string])]} />]]
+        ['문서', (r.url || r.attachments?.length) && <ContactRow key="d" links={[[r.url, '공식 승인 원문'], ...((r.attachments ?? []) as any[]).map((a, i) => [attHref(a, i, { title: r.name, origin: r.url }), attName(a, i)] as [string, string])]} />]]
     : tab === 'facilities'
       ? [[T.facilityName, r.name], ['판정', r.verdict], ['연락 상태', r.contact], ['유형', r.lane], ['지역', r.region], ['세대수', r.households && `${r.households}세대`], ['규모', r.scale], [T.operator, r.operator], ['주소', r.address], [T.office, r.phone ? <ContactRow phone={r.phone} /> : UNK],
         ['부대시설', r.amenities && String(r.amenities)], ['준공(사용승인)', r.date && kd(r.date)], ['입주', r.moveIn && kd(r.moveIn)], ['경과', r.elapsedDays !== null && r.elapsedDays !== undefined && `입주·준공 뒤 ${r.elapsedDays}일`], ['DB 등록', r.firstSeen && kd(r.firstSeen)], ['다음 연락', r.next && kd(r.next)], ['최근 기록', r.lastNote], ['다음 조치', r.nextAction && `${r.nextAction}${r.nextActionFrom ? ` (${r.nextActionFrom})` : ''}`]]
@@ -990,7 +996,7 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
       {n.keywords && <div className="mt-0.5 hidden text-xs text-ink-3 md:block">키워드: {n.keywords}</div>}
       {n.judgment && <div className="mt-0.5 hidden text-xs text-ink-2 md:block">판단: {n.judgment}</div>}
       <div className="mt-1.5 flex flex-wrap items-end gap-1.5 text-xs">
-        <ContactRow phone={n.phone} links={[[n.url, '원문'], [n.attachments?.length ? attHref(n.attachments[0], 0) : null, n.attachments?.length > 1 ? `공고문 내려받기 ${n.attachments.length}건` : '공고문 내려받기']]} />
+        <ContactRow phone={n.phone} links={[[n.url, '원문'], [n.attachments?.length ? attHref(n.attachments[0], 0, bidCtx(n)) : null, n.attachments?.length > 1 ? `공고문 내려받기 ${n.attachments.length}건` : '공고문 내려받기']]} />
         {canWrite && !n.workLeadId && <HandoffButton kind="bid" id={String(n.id)} name={`${n.complex ? n.complex + ' ' : ''}${n.title}`} onDone={onChange} compact />}
         {n.workLeadId && <Link href={`/s/sales/leads?id=${n.workLeadId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-handoff-lead">영업 중 → 리드</Link>}
         <span className="ml-auto font-medium text-ink" data-testid="bid-deadline">{n.deadline ? `마감 ${kdt(n.deadline)}` : '마감일 미확인'}</span>
@@ -1018,7 +1024,7 @@ function HubCard({ tab, r, onRaw, onChange, canWrite }: { tab: string; r: any; o
         {/* 대표(10/19 앱): 휴대폰 카드는 값이 있는 핵심 2~3개만(준공·세대수·입주 먼저), 빈 값('미확인')은 숨김 — 전체 10칸은 PC·상세 */}
         <p className="mt-0.5 text-xs text-ink-2 md:hidden" data-testid="hub-key">{keyDates(r.dates)}</p>
         <dl className="mt-1 hidden grid-cols-2 gap-x-3 gap-y-0.5 text-xs md:grid md:grid-cols-5">{(r.dates ?? []).map(([k, v]: [string, unknown]) => <div key={k}><dt className="text-ink-3">{k}</dt><dd>{D(v) ?? UNK}</dd></div>)}</dl>
-        <div className="mt-auto flex flex-wrap items-end gap-1.5 pt-1.5">{(r.url || r.attachments?.length) ? <ContactRow links={[[r.url, '공식 승인 원문'], ...((r.attachments ?? []) as any[]).map((a: any, i: number) => [attHref(a, i), attName(a, i)] as [string, string])]} /> : null}{handoff}</div>
+        <div className="mt-auto flex flex-wrap items-end gap-1.5 pt-1.5">{(r.url || r.attachments?.length) ? <ContactRow links={[[r.url, '공식 승인 원문'], ...((r.attachments ?? []) as any[]).map((a: any, i: number) => [attHref(a, i, { title: r.name, origin: r.url }), attName(a, i)] as [string, string])]} /> : null}{handoff}</div>
       </>) : tab === 'facilities' ? (<>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" onClick={onRaw} className="text-left font-semibold hover:underline">{r.name}</button>{r.verdict && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800">{r.verdict}</span>}{r.contact && chip(r.contact)}</div>
         <p className="text-xs text-ink-2">{[r.lane, r.region, r.households && `${r.households}세대`, r.scale, r.operator && `${T.operator} ${r.operator}`].filter(Boolean).join(' · ')}</p>

@@ -95,6 +95,8 @@ export async function salesMigrateApply(u: SessionUser | null, tenant: string) {
     } catch (e: any) { results.push({ tbl, scope, src: null, dst: 0, ok: false, error: String(e?.message ?? e).slice(0, 200) }); }
   };
   for (const tbl of Object.keys(GLOBAL)) await doTable(tbl, 'global');
+  // #507 후속: 원본 수집기가 넣은 공고가 워크인 수집 줄과 같은 공고면(복사가 숨긴 줄을 되살려도) 바로 한 줄로 — 진행 기록·업무가 걸린 줄을 살림
+  const merged = await (await import('./collectors/store')).mergeNoticeDuplicates().catch(() => null);
   // 전환(쓰기 열림) 뒤에는 회사별 표를 다시 가져오지 않음 — 워크인이 정본. 공용 수집 표는 계속(원본 수집기가 계속 돎)
   const open = !!(await sql<{ o: boolean }[]>`select writes_open as o from sales_cutover where tenant = ${tenant}`)[0]?.o;
   if (!open) for (const tbl of TENANT) await doTable(tbl, 'tenant');
@@ -122,7 +124,7 @@ export async function salesMigrateApply(u: SessionUser | null, tenant: string) {
   }
   for (const r of results.filter((x) => x.error)) await sql`insert into sales_src_sync (tenant, tbl, error) values (${tenant}, ${r.tbl}, ${r.error!}) on conflict (tenant, tbl) do update set error = excluded.error, synced_at = now()`;
   const [rel] = await sql<{ n: number }[]>`select count(*)::int as n from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and (row->>'related')::boolean is true`;
-  const out = { tenant, at: new Date().toISOString(), seconds: Math.round((Date.now() - started) / 1000), results, users, related: rel?.n ?? 0, notMoved: NOT_MOVED };
+  const out = { tenant, at: new Date().toISOString(), seconds: Math.round((Date.now() - started) / 1000), results, users, related: rel?.n ?? 0, notMoved: NOT_MOVED, merged };
   await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant, at: out.at, daily: true } as never)})
     on conflict (key) do update set value = jsonb_set(excluded.value, '{daily}', coalesce(app_settings.value->'daily', 'true'::jsonb)), updated_at = now()`;
   if (u) await audit(sql, u.id, 'sales_migrate.apply', 'tenant', null, { tenant, tables: results.length, ok: results.filter((r) => r.ok).length }).catch(() => {});

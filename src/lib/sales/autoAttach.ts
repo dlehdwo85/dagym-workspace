@@ -6,52 +6,47 @@ import { sha256 } from '../crypto';
 import { db } from '../db';
 import { HttpError, badRequest } from '../errors';
 import { tenantOf, type SessionUser } from '../types';
-import { fetchFile } from './files';
+import { fetchFile, isKaptUrl, kaptFileList, kaptFileRef, kaptFileUrl, sourceFiles, type SrcFile } from './files';
 
-export type SrcFile = { url: string; name: string | null };
+export { sourceFiles, type SrcFile };
 export type SourceKind = 'bid' | 'support';
 type Lib = { id: string; storage_key: string; file_name: string; mime_type: string; size_bytes: string | number; title: string };
-const MAX_FILES = 10;
-const kaptUrl = (bid: string, seq: string) => `https://www.k-apt.go.kr/bid/bidFileDown.do?bidNum=${encodeURIComponent(bid)}&fileSeq=${encodeURIComponent(seq)}`;
 
-/** 원천 행의 첨부 칸(문자열 주소·{url|href, name}·JSON 글자) → 받을 목록. 화면용 중계 주소(/api/bids/…)는 원래 주소로 */
-export function sourceFiles(...lists: unknown[]): SrcFile[] {
-  const out: SrcFile[] = []; const seen = new Set<string>();
-  for (const list of lists) {
-    const arr = Array.isArray(list) ? list : typeof list === 'string' && list.startsWith('[') ? (() => { try { return JSON.parse(list) as unknown[]; } catch { return []; } })() : list ? [list] : [];
-    for (const a of arr as any[]) {
-      let url = typeof a === 'string' ? a : String(a?.url ?? a?.href ?? '');
-      let name: string | null = a && typeof a === 'object' && a.name ? String(a.name) : null;
-      if (url.startsWith('/api/bids/')) {
-        const q = new URL(url, 'http://x').searchParams; name = name ?? q.get('n');
-        url = q.get('u') ?? (q.get('bid') && q.get('seq') ? kaptUrl(q.get('bid')!, q.get('seq')!) : '');
-      }
-      url = url.trim();
-      if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
-      seen.add(url); out.push({ url, name: name?.trim() || null });
-    }
-  }
-  return out.slice(0, MAX_FILES);
-}
-
-/** 원천의 이름·첨부·바로가기 */
-async function sourceOf(tenant: string, kind: SourceKind, id: string): Promise<{ name: string; files: SrcFile[]; link: string } | null> {
+/** 원천의 이름·첨부·바로가기. #507 후속(로컬 10/23): 같은 공고번호(원천 종류 + 원천 번호)의 다른 줄(원본 복사·워크인 수집) 첨부까지 모으고,
+ *  K-apt 공고는 그 자리에서 K-apt 첨부 목록을 읽어(세션) 합친 뒤 줄에도 저장 — 목록 화면 '공고문 내려받기'도 생김 */
+async function sourceOf(tenant: string, kind: SourceKind, id: string): Promise<{ name: string; files: SrcFile[]; link: string; bid?: string | null; listError?: string } | null> {
   const sql = db();
   if (kind === 'bid') {
-    const [r] = await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id} and not gone`;
+    const [r] = await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`; // 합쳐서 숨긴 줄이어도
     if (!r) return null;
-    const row = r.row ?? {};
+    const row = r.row ?? {}; const st = String(row.source_type ?? ''); const ext = String(row.source_external_id ?? '');
     const name = [row.complex_name ?? row.facility_name, row.title ?? row.notice_title ?? row.bid_name].filter(Boolean).join(' ').trim() || '공고';
-    return { name, files: sourceFiles(row.attachment_urls ?? row.attachments, row.notice_file_url), link: `/s/sales/bids?tab=working&q=${encodeURIComponent(id)}` };
+    const sibs = st && ext ? await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id <> ${id} and row->>'source_type' = ${st} and row->>'source_external_id' = ${ext}
+      order by gone, row->>'updated_at' desc nulls last limit 10` : [];
+    let files = sourceFiles(row.attachment_urls ?? row.attachments, row.notice_file_url, ...sibs.flatMap((x) => [x.row?.attachment_urls ?? x.row?.attachments, x.row?.notice_file_url]));
+    // K-apt: 늘 첨부 목록을 그 자리에서 읽어(세션 1번) 저장된 첨부와 합침 — 정정 공고로 바뀐 첨부·빈 줄(한화포레나)·화면 링크 조각(파일 주소가 아닌 K-apt 주소)까지
+    const bid = st === 'kapt_bid' && ext ? ext : null; let listError: string | undefined;
+    if (bid) {
+      files = files.filter((f) => !isKaptUrl(f.url) || kaptFileRef(f.url));
+      try {
+        const live = (await kaptFileList(bid)).map((f) => ({ url: kaptFileUrl(bid, f.seq), name: f.name }));
+        const own = new Set(sourceFiles(row.attachment_urls ?? row.attachments).map((f) => f.url));
+        files = sourceFiles(live, files); // 원래 이름이 있는 목록 먼저
+        if (files.some((f) => !own.has(f.url))) await sql`update sales_src_rows set row = row || ${sql.json({ attachment_urls: files.map((f) => (f.name ? { name: f.name, url: f.url } : f.url)), files_checked_at: new Date().toISOString() } as never)}::jsonb, synced_at = now()
+          where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`; // 목록 화면 '공고문 내려받기'도 생김
+      } catch (e) { if (!files.length) listError = String((e as Error)?.message ?? e).slice(0, 120); }
+    }
+    return { name, files, bid, listError, link: `/s/sales/bids?tab=working&q=${encodeURIComponent(id)}` };
   }
   const [p] = await sql<{ title: string; attachments: any }[]>`select title, attachments from support_programs where id = ${id} and (tenant is null or tenant = ${tenant})`.catch(() => []);
   if (!p) return null;
   return { name: p.title || '지원사업', files: sourceFiles(p.attachments), link: `/s/sales/support?id=${id}` };
 }
 
-const reasonOf = (e: unknown) => e instanceof HttpError ? (e.status === 413 ? '30MB 넘음' : e.status === 403 ? '허용하지 않은 사이트' : /redirect/.test(e.code ?? '') ? '다른 주소로 넘어감' : e.code === 'file_page' ? '파일 대신 웹페이지(로그인·세션 필요)' : e.message.replace(/ — .*$/, '').slice(0, 60))
+const reasonOf = (e: unknown) => e instanceof HttpError ? (e.status === 413 ? '30MB 넘음' : e.status === 403 ? '허용하지 않은 사이트' : /redirect/.test(e.code ?? '') ? '다른 주소로 넘어감' : e.code === 'file_page' ? '파일 대신 웹페이지(로그인·세션 필요)'
+  : e.code === 'kapt_list' ? 'K-apt 첨부 목록 못 읽음' : e.code === 'kapt_missing' ? '공고 첨부 목록에 없음(정정·삭제)' : e.code === 'kapt_no_bid' ? 'K-apt 공고번호 모름' : e.message.replace(/ — .*$/, '').slice(0, 60))
   : String((e as Error)?.message ?? e).slice(0, 60);
-const fileLabel = (f: SrcFile) => f.name || (() => { try { return decodeURIComponent(new URL(f.url).pathname.split('/').pop() || '') || '첨부'; } catch { return '첨부'; } })();
+const fileLabel = (f: SrcFile, n: number) => f.name || (() => { try { const p = decodeURIComponent(new URL(f.url).pathname.split('/').pop() || ''); return /\.(do|jsp|aspx?|php)$/i.test(p) || !p ? `첨부 ${n}` : p; } catch { return `첨부 ${n}`; } })();
 const FAIL_RE = '\n?공고 첨부 [0-9]+건 중 [0-9]+건 자동 첨부 실패[^\n]*';
 
 /**
@@ -61,22 +56,22 @@ const FAIL_RE = '\n?공고 첨부 [0-9]+건 중 [0-9]+건 자동 첨부 실패[^
 export async function attachSourceFiles(u: SessionUser, i: { kind: SourceKind; id: string; taskIds: string[] }) {
   const t = tenantOf(u); const sql = db();
   const src = await sourceOf(t, i.kind, i.id);
-  if (!src || !src.files.length || !i.taskIds.length) return { total: src?.files.length ?? 0, ok: 0, failed: [] as { name: string; reason: string }[] };
+  if (!src || !src.files.length || !i.taskIds.length) return { total: src?.files.length ?? 0, ok: 0, failed: [] as { name: string; reason: string }[], listError: src?.listError };
   const folder = `영업/공고/${src.name.replace(/[\\/]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40)}`;
   const { saveGeneratedFile } = await import('../library');
   const libs: Lib[] = []; const failed: { name: string; reason: string }[] = [];
-  for (const f of src.files) {
+  for (const [k, f] of src.files.entries()) {
     const ref = `salesfile:${sha256(`${f.url}`).slice(0, 40)}`;
     try {
       let [lib] = await sql<Lib[]>`select id, storage_key, file_name, mime_type, size_bytes, title from library_files where tenant = ${t} and ext_ref = ${ref} and deleted_at is null and upload_status = 'ready' limit 1`;
       if (!lib) {
-        const got = await fetchFile(f.url, f.name);
+        const got = await fetchFile(f.url, f.name, { fallback: `${src.name.slice(0, 30).trim()} 첨부 ${k + 1}`, bid: src.bid }); // 이름을 못 읽으면 '<공고명 앞 30자> 첨부 n.<확장자>'
         const saved = await saveGeneratedFile(u, { fileName: got.fileName, mime: got.mime, data: got.data, title: got.fileName.replace(/\.[^.]+$/, '') || got.fileName, folder, tags: ['영업', '공고 첨부'],
           description: `${src.name} — 공고 첨부(자동)`, source: 'sales_auto', space: 'sales', extRef: ref, meta: { url: f.url, kind: i.kind, id: i.id } });
         lib = { id: saved.id, storage_key: saved.storageKey, file_name: got.fileName, mime_type: got.mime, size_bytes: got.data.length, title: got.fileName.replace(/\.[^.]+$/, '') || got.fileName };
       }
       libs.push(lib);
-    } catch (e) { failed.push({ name: fileLabel(f), reason: reasonOf(e) }); }
+    } catch (e) { failed.push({ name: fileLabel(f, k + 1), reason: reasonOf(e) }); }
   }
   const { activity } = await import('../log');
   const line = failed.length ? `\n공고 첨부 ${src.files.length}건 중 ${failed.length}건 자동 첨부 실패(${failed.map((x) => `${x.name}: ${x.reason}`).join(' · ').slice(0, 300)}) — 공고문 내려받기: ${src.link}` : '';
@@ -108,5 +103,7 @@ export async function attachTaskSourceFiles(u: SessionUser, taskId: string) {
   const [t] = await db()<{ sales_ref: any }[]>`select sales_ref from tasks where id = ${taskId}`;
   const ref = t?.sales_ref;
   if (!ref?.id || !['bid', 'support'].includes(String(ref.kind))) throw badRequest('공고·지원사업에서 넘어온 업무가 아닙니다');
-  return attachSourceFiles(u, { kind: ref.kind as SourceKind, id: String(ref.id), taskIds: [taskId] });
+  const r = await attachSourceFiles(u, { kind: ref.kind as SourceKind, id: String(ref.id), taskIds: [taskId] });
+  if (!r.total && r.listError) throw new HttpError(502, 'kapt_list', `${r.listError.replace(/ — .*$/, '')} — 공고 원문에서 받아 주세요`);
+  return r;
 }

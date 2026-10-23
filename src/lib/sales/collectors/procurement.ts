@@ -69,7 +69,7 @@ export function noticeKind(title: string | null, kindName: string | null): 'new'
 
 export const PROCUREMENT_ETL_FIELDS = ['source_url', 'notice_file_url', 'issuer', 'title', 'region', 'notice_type', 'posted_date', 'deadline_at', 'budget_amount', 'estimated_amount', 'contract_method', 'current_status', 'task_scope',
   'bid_system', 'award_method', 'notice_state', 'facility_name', 'bid_category', 'office_phone', 'office_fax', 'office_address', 'household_count', 'fit_business', 'matched_keywords', 'related', 'attachment_urls',
-  'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date'] as const;
+  'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at'] as const;
 export const AWARD_FIELDS = ['winner_name', 'winner_amount', 'award_date', 'current_status'] as const;
 export type NoticeRow = Record<string, unknown> & { source_type: string; source_external_id: string; title: string; source_url: string };
 
@@ -89,7 +89,12 @@ const phone = (v: unknown): string | null => {
   if (d.startsWith('02')) return d.length === 9 ? `02-${d.slice(2, 5)}-${d.slice(5)}` : `02-${d.slice(2, 6)}-${d.slice(6)}`;
   return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : d.length === 11 ? `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}` : d;
 };
-const urls = (v: unknown): string[] => (Array.isArray(v) ? v : typeof v === 'string' && v ? [v] : []).map(String).filter((u) => /^https?:\/\//i.test(u) || u.startsWith('/api/bids/')).slice(0, 20);
+/** 첨부 칸: 주소 문자열 또는 {name, url}(#507 후속 K-apt 첨부 목록 — 원래 파일 이름) */
+const urls = (v: unknown): (string | { name: string; url: string })[] => (Array.isArray(v) ? v : typeof v === 'string' && v ? [v] : []).map((a: any) => {
+  const u = a && typeof a === 'object' ? String(a.url ?? a.href ?? '') : String(a ?? ''); const n = a && typeof a === 'object' ? txt(a.name) : null;
+  if (!(/^https?:\/\//i.test(u) || u.startsWith('/api/bids/'))) return null;
+  return n ? { name: n.slice(0, 200), url: u } : u;
+}).filter((x): x is string | { name: string; url: string } => x !== null).slice(0, 20);
 
 export type NoticeValidate = { ok: true; row: NoticeRow } | { ok: false; reason: string };
 /** 수집 payload → 저장 행(ETL 필드만). 적합 분류·상태·공고구분은 여기서 계산 */
@@ -111,6 +116,7 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
     fit_business: fit.fit, matched_keywords: fit.matched, related: !!fit.fit || sourceType === 'vendor_recruit', attachment_urls: urls(p.attachment_urls),
     notice_kind: noticeKind(title, state), participation_deadline_at: ts(p.participation_deadline_at), opening_at: ts(p.opening_at), demand_agency: txt(p.demand_agency), region_restriction: txt(p.region_restriction),
     industry_code: txt(p.industry_code), winner_name: winner, winner_amount: num(p.winner_amount), award_date: ymdOf(p.award_date),
+    files_checked_at: txt(p.files_checked_at), // #507 후속: K-apt 첨부 목록을 읽은 때(다음 수집에서 다시 읽지 않음)
   };
   return { ok: true, row };
 }

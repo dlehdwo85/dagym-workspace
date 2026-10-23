@@ -4,12 +4,20 @@ import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
+import { fakeKapt } from '../fakeKapt.mjs';
 
-let srv, ctx, sql;
+let srv, ctx, sql, kaptSrv;
+// #507 후속: 가짜 K-apt(로컬 10/23 실측 순서) — 광명푸르지오(같은 공고 두 줄)·한화포레나(첨부 칸 빈 줄)·목록 거절 공고
+const KAPT_PORT = 3241;
+const kapt = fakeKapt({ fail: new Set(['20261022999999999']), files: {
+  '20261021092205298': [{ seq: 4329886, fileName: '커뮤니티 시설 위탁 운영업체 선정 입찰 공고.hwp' }],
+  '20261022180315277': [{ seq: 5100001, fileName: '주민운동시설 위탁관리 입찰공고.hwp' }, { seq: 5100002, fileName: '과업내용서', body: Buffer.from('%PDF-1.4\n%x\n') }] } });
 const today = seoulToday();
 const put = (tbl, row) => sql`insert into sales_src_rows (scope, tbl, src_id, row) values ('global', ${tbl}, ${String(row.id)}, ${sql.json(row)})`;
 before(async () => {
-  await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
+  kaptSrv = http.createServer(async (req, res) => { let body = ''; for await (const c of req) body += c; if (!kapt.handle(req, res, body)) { res.writeHead(404); res.end(); } });
+  await new Promise((r) => kaptSrv.listen(KAPT_PORT, '127.0.0.1', r));
+  await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://127.0.0.1:${KAPT_PORT}` }); sql = testDb(); ctx = await bootstrap();
   await put('procurement_notices', { id: 'N1', title: '체육시설 위탁운영 용역', complex_name: '분당 스포츠센터', issuer: '성남시청', region: '경기', related: true, first_seen_at: today,
     site_briefing_at: `${addDays(today, 2)}T14:00`, participation_deadline_at: `${addDays(today, 6)}T18:00`, deadline_at: `${addDays(today, 8)}T10:00`, opening_at: `${addDays(today, 8)}T11:00` });
   await put('procurement_notices', { id: 'N2', title: '지난 공고', issuer: '구청', deadline_at: `${addDays(today, -3)}T10:00`, first_seen_at: addDays(today, -10) });
@@ -20,7 +28,7 @@ before(async () => {
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['sales'] });
 });
-after(async () => { srv?.proc.kill(); await sql?.end(); });
+after(async () => { srv?.proc.kill(); kaptSrv?.close(); await sql?.end(); });
 
 describe('영업 진행으로 넘기기', () => {
   test('담당자 후보 = 영업 공간 구성원 + 관리자 · 영업 밖 직원 404 · 전환 전 409', async () => {
@@ -154,5 +162,36 @@ describe('#507 공고 첨부 자동(대표 10/23 15:50)', () => {
       const plain = await ctx.owner.ok('POST', '/api/tasks', { title: '그냥 업무', assigneeId: ctx.ownerId, approvalRequired: false });
       assert.equal((await ctx.owner.req('POST', `/api/tasks/${plain.id}/source-files`, {})).status, 400);
     } finally { fake.close(); }
+  });
+  test('#507 후속 K-apt(로컬 10/23): 같은 공고 두 줄이면 업무 줄에 첨부가 없어도 다른 줄의 옛 주소 첨부를 세션 순서로 받음 · 첨부 칸이 빈 K-apt 공고는 그 자리에서 첨부 목록을 읽어 받고 줄에도 저장 · 목록을 못 읽으면 이유를 알림', async () => {
+    const wait = async (q, ok) => { let v; for (let i = 0; i < 60; i++) { v = await q(); if (ok(v)) return v; await new Promise((r) => setTimeout(r, 200)); } return v; };
+    // 광명푸르지오센트베르: 진행 기록·업무가 걸릴 줄(첨부 []) + 같은 공고 다른 줄(원본 영업관리가 저장한 옛 주소 첨부 1건)
+    const g = { source_type: 'kapt_bid', source_external_id: '20261021092205298', title: '커뮤니티 시설 위탁 운영업체 선정', complex_name: '광명푸르지오센트베르', related: true, first_seen_at: today };
+    await put('procurement_notices', { id: 'KA1', ...g, attachment_urls: [] });
+    await put('procurement_notices', { id: 'KA2', ...g, attachment_urls: ['https://www.k-apt.go.kr/bid/bidFileDown.do?bidNum=20261021092205298&fileSeq=4329886'] });
+    const r = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'KA1', assigneeIds: [ctx.ownerId] });
+    assert.equal(r.files, 0, '이 줄 자체에는 첨부가 없음');
+    const a1 = await wait(() => sql`select file_name, mime_type, source from attachments where task_id = ${r.taskIds[0]} and deleted_at is null`, (x) => x.length > 0);
+    assert.deepEqual(a1.map((a) => [a.file_name, a.mime_type, a.source]), [['커뮤니티 시설 위탁 운영업체 선정 입찰 공고.hwp', 'application/x-hwp', 'sales_auto']]);
+    const [lib] = await sql`select folder from library_files where file_name = '커뮤니티 시설 위탁 운영업체 선정 입찰 공고.hwp' and deleted_at is null`;
+    assert.equal(lib.folder, '영업/공고/광명푸르지오센트베르 커뮤니티 시설 위탁 운영업체 선정');
+    assert.ok(!kapt.calls.some((c) => c.path === '/kapt/bid/bidFileDown.do'), '옛 주소를 K-apt 에 그대로 부르지 않음(오류 화면)');
+    // 한화포레나 평택화양: 첨부 칸 [] · 다른 줄 없음 → 그 자리에서 첨부 목록(세션) → 2건, 이름 없는 건 첫 바이트(%PDF)로 확장자
+    await put('procurement_notices', { id: 'KB1', source_type: 'kapt_bid', source_external_id: '20261022180315277', title: '주민운동시설 위탁관리 업체 선정', complex_name: '한화포레나 평택화양', related: true, first_seen_at: today, attachment_urls: [] });
+    const r2 = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'KB1', assigneeIds: [ctx.ownerId] });
+    const a2 = await wait(() => sql`select file_name from attachments where task_id = ${r2.taskIds[0]} and deleted_at is null order by file_name`, (x) => x.length >= 2);
+    assert.deepEqual(a2.map((a) => a.file_name), ['과업내용서.pdf', '주민운동시설 위탁관리 입찰공고.hwp']);
+    const [kb] = await sql`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = 'KB1'`;
+    assert.deepEqual(kb.row.attachment_urls.map((x) => x.name), ['주민운동시설 위탁관리 입찰공고.hwp', '과업내용서'], '목록 화면 공고문 내려받기도 생김(원래 이름)');
+    assert.match(kb.row.attachment_urls[0].url, /\/kapt\/cmm\/file\/BID\/fileDownload\.do\?key=5100001&bidNum=20261022180315277$/); assert.ok(kb.row.files_checked_at);
+    // [공고 파일 붙이기] 다시: 자료실에 있는 파일은 다시 받지 않고 중복 첨부 없음
+    const again = await ctx.owner.ok('POST', `/api/tasks/${r2.taskIds[0]}/source-files`, {});
+    assert.deepEqual([again.total, again.ok, again.failed.length], [2, 2, 0]);
+    assert.equal((await sql`select count(*)::int n from attachments where task_id = ${r2.taskIds[0]} and deleted_at is null`)[0].n, 2);
+    // K-apt 가 첨부 목록을 거절(보안 값) → 버튼이 이유를 알림
+    await put('procurement_notices', { id: 'KC1', source_type: 'kapt_bid', source_external_id: '20261022999999999', title: '커뮤니티 운영 위탁', complex_name: '시험 단지', related: true, first_seen_at: today, attachment_urls: [] });
+    const r3 = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'KC1', assigneeIds: [ctx.ownerId] });
+    const fail = await ctx.owner.req('POST', `/api/tasks/${r3.taskIds[0]}/source-files`, {});
+    assert.equal(fail.status, 502); assert.match(JSON.stringify(fail.body), /K-apt 첨부 목록을 읽지 못했습니다/);
   });
 });

@@ -5,7 +5,7 @@ import { assertSpace } from '../../spaces';
 import { forbidden, notFound } from '../../errors';
 import { audit, logError } from '../../log';
 import { tenantOf, type SessionUser } from '../../types';
-import { completeRun, startRun } from './store';
+import { completeRun, mergeNoticeDuplicates, startRun } from './store';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 import { kaptBidNotices, kaptBidResults, kaptSaSun, operatingFromKapt } from './kapt';
 import { g2bBidNotices, g2bPrespecAwards } from './g2b';
@@ -20,6 +20,7 @@ export const COLLECTORS: Collector[] = [kaptSaSun, operatingFromKapt, kicoxIndus
 export const SUPPORT_COLLECTORS = new Set(['bizinfo_support', 'kstartup_support', 'support_watch']);
 export const BID_COLLECTORS = new Set(['kapt_bid_notices', 'g2b_bid_notices', 'g2b_prespec_awards', 'kapt_bid_results', 'public_agency_bids', 'vendor_recruit_watch']);
 export const find = (slug: string) => COLLECTORS.find((c) => c.slug === slug) ?? null;
+const SRC_KO: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드', vendor_recruit: '협력사 모집' };
 const kstHour = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
 const kstDay = (d: Date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 const kstHourOf = (d: Date) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(d)) % 24;
@@ -41,6 +42,12 @@ export async function runCollector(slug: string, trigger: 'cron' | 'manual', opt
   let result: CollectorResult;
   try { result = await Promise.race([c.run(ctx), new Promise<CollectorResult>((_, rej) => setTimeout(() => rej(new Error('수집기 시간 초과')), ctx.deadlineMs + 8000))]); }
   catch (e) { const msg = e instanceof Error ? e.message : String(e); result = { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: msg, summary: `실행 중 예외: ${msg}`, providerMode: 'manual' }; await logError(`sales-collect:${slug}`, e).catch(() => {}); }
+  // #507 후속: 공고 수집 뒤 같은 공고 여러 줄(원본 복사 + 워크인 수집)을 한 줄로 — 진행 기록·업무가 걸린 줄을 살림
+  if (BID_COLLECTORS.has(slug)) {
+    const m = await mergeNoticeDuplicates().catch(async (e) => { await logError('sales-notice-merge', e).catch(() => {}); return null; });
+    const by = Object.entries(m?.byType ?? {}).map(([k, v]) => `${SRC_KO[k] ?? k} ${v}`).join('·');
+    if (m?.hidden || m?.kept) result = { ...result, summary: `${result.summary ?? ''}${m.hidden ? ` · 같은 공고 ${m.hidden}줄 합침(${by})` : ''}${m.kept ? ` · 두 줄 모두 진행 기록·업무가 있어 그대로 둔 공고 ${m.kept}건` : ''}` };
+  }
   const status = await completeRun(runId, slug, result);
   return { runId, slug, status, ...result };
 }
