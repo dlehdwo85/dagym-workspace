@@ -109,18 +109,23 @@ export const toast = {
 };
 export function Toaster() {
   const [items, setItems] = useState<ToastMsg[]>([]);
+  // 로컬 10/23(#508 확인): 버튼 있는 안내([완료됨 보기]·[되돌리기])는 8초, 마우스를 올리거나 손가락을 대면 멈춤(떼면 3초 뒤 닫힘)
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  const close = (id: number) => { clearTimeout(timers.current.get(id)); timers.current.delete(id); setItems((x) => x.filter((i) => i.id !== id)); };
+  const arm = (id: number, ms: number) => { clearTimeout(timers.current.get(id)); timers.current.set(id, setTimeout(() => close(id), ms)); };
   useEffect(() => {
     pushToast = (t) => {
       const id = Date.now() + Math.random();
-      setItems((x) => [...x.slice(-2), { ...t, id }]);
-      setTimeout(() => setItems((x) => x.filter((i) => i.id !== id)), t.kind === 'error' ? 6000 : t.action ? 6000 : 3000);
+      // 3개를 넘으면 버튼 없는 안내부터 뺀다(버튼 있는 안내가 뒤 안내에 밀려 바로 사라지지 않게)
+      setItems((x) => { const n = [...x, { ...t, id }]; while (n.length > 3) { const k = n.findIndex((i) => !i.action); const [gone] = n.splice(k >= 0 && k < n.length - 1 ? k : 0, 1); clearTimeout(timers.current.get(gone.id)); timers.current.delete(gone.id); } return n; });
+      arm(id, t.kind === 'error' ? 6000 : t.action ? 8000 : 3000);
     };
-  }, []);
-  const close = (id: number) => setItems((x) => x.filter((i) => i.id !== id));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="pointer-events-none fixed bottom-[calc(6rem+var(--toast-lift,0px))] left-0 right-0 z-[60] flex flex-col items-center gap-2 px-4 sm:bottom-6 sm:left-auto sm:right-6 sm:items-end" role="status" aria-live="polite">
       {items.map((t) => (
-        <div key={t.id} className="pointer-events-auto flex max-w-md animate-fade-up items-center gap-3 rounded-card bg-slate-900 py-2.5 pl-3.5 pr-2 text-sm text-white shadow-pop">
+        <div key={t.id} onMouseEnter={() => clearTimeout(timers.current.get(t.id))} onMouseLeave={() => arm(t.id, 3000)} onTouchStart={() => clearTimeout(timers.current.get(t.id))} onTouchEnd={() => arm(t.id, 3000)}
+          className="pointer-events-auto flex max-w-md animate-fade-up items-center gap-3 rounded-card bg-slate-900 py-2.5 pl-3.5 pr-2 text-sm text-white shadow-pop" data-testid="toast">
           {t.kind === 'ok' ? <CheckCircle2 className="size-4 shrink-0 text-green-400" /> : t.kind === 'error' ? <AlertCircle className="size-4 shrink-0 text-red-400" /> : <Info className="size-4 shrink-0 text-sky-300" />}
           <span className="min-w-0 flex-1">{t.text}</span>
           {t.action && <button className="rounded px-2 py-1 font-semibold text-sky-300 hover:bg-white/10" onClick={() => { t.action!.run(); close(t.id); }}>{t.action.label}</button>}

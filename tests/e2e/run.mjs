@@ -639,6 +639,23 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'on_hold', '새로 불러와도 완료 직전 상태(보류)로');
   await owner.evaluate(() => localStorage.removeItem('wos_done_fold')); // 펼침 기억은 이 단계 안에서만
   await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { status: 'todo', version: (await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.version });
+  // #508 후속(로컬 10/23 운영): 반복 업무 완료 → 다음 회차 → '완료됨'에서 되돌리기 → 손대지 않은 다음 회차도 같이 휴지통(안내) · 안내는 4초 넘게 그대로(새로고침 신호에도 다시 그려지지 않음)
+  const rid = (await ctx.owner.ok('POST', '/api/tasks', { title: '원형 체크 반복', orgUnitId: ctx.siteA, dueDate: addDays(today, 1), recurrenceRule: 'FREQ=WEEKLY', approvalRequired: false })).id;
+  await owner.reload(); await owner.getByLabel('업무 검색').fill('원형 체크');
+  await owner.locator(`[data-task-id="${rid}"]`).getByTestId('row-status-chip').filter({ visible: true }).click();
+  await owner.getByTestId('status-quick').click();
+  const doneToast = owner.getByTestId('toast').filter({ hasText: '완료했습니다 — 완료됨으로 옮겼습니다' }); await doneToast.waitFor();
+  const th = await doneToast.elementHandle();
+  await owner.evaluate(() => window.dispatchEvent(new Event('wos-refresh')));
+  await owner.waitForTimeout(4500);
+  assert.equal(await th.isVisible(), true, '4.5초 뒤·새로고침 신호 뒤에도 같은 안내');
+  const [nx] = await sql`select id from tasks where recurrence_source_id = ${rid} and deleted_at is null`; assert.ok(nx, '다음 회차 생김');
+  const fold3 = owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }); await fold3.waitFor();
+  await fold3.getByTestId('done-fold-toggle').click();
+  await fold3.locator(`[data-done-id="${rid}"]`).getByTestId('done-fold-undo').click();
+  await owner.getByText('완료 때 자동으로 만든 다음 업무 1건도 지웠습니다').waitFor();
+  assert.ok((await sql`select deleted_at from tasks where id = ${nx.id}`)[0].deleted_at, '손대지 않은 다음 회차는 휴지통');
+  await owner.evaluate(() => localStorage.removeItem('wos_done_fold'));
   await owner.getByTestId('filter-toggle').click();
   await owner.getByTestId('filter-panel').getByLabel('상태').selectOption('todo');
   await owner.getByTestId('filter-chip').filter({ hasText: '상태: 진행 전' }).waitFor();

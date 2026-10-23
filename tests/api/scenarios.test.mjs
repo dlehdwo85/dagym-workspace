@@ -198,16 +198,16 @@ describe('④ 반복 업무·반복 일정 생성·수정·취소', () => {
     assert.equal(next.task.status, 'todo');
     assert.equal(next.checklist.length, 2);
     assert.ok(next.checklist.every((c) => !c.done));
-    // 다시 열고 완료해도 중복 생성 없음
+    // 다시 열고 완료해도 중복 생성 없음 — #508 후속: 다시 열면 손대지 않은 다음 회차는 휴지통, 다시 완료하면 새로 1개(열린 다음 회차는 늘 1개)
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'in_progress' });
     const r2 = await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'done' });
-    assert.equal(r2.spawned, null);
+    assert.ok(r2.spawned && r2.spawned !== r.spawned);
     const [{ c }] = await sql`select count(*)::int c from tasks where (recurrence_source_id = ${id} or id = ${id}) and deleted_at is null`;
     assert.equal(c, 2);
     assert.ok((await notifs(ctx.staffA.client)).some((x) => x.type === 'recurring_created'));
     // 반복 중지
-    await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.spawned}`, { recurrenceRule: null });
-    const r3 = await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.spawned}`, { status: 'done' }); // V12: 진행 상태는 담당자만
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${r2.spawned}`, { recurrenceRule: null });
+    const r3 = await ctx.staffA.client.ok('PATCH', `/api/tasks/${r2.spawned}`, { status: 'done' }); // V12: 진행 상태는 담당자만
     assert.equal(r3.spawned, null);
   });
   test('반복 업무: 서버 스케줄러가 기한 7일 전 다음 회차를 미리 만든다', async () => {

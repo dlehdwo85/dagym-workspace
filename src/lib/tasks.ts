@@ -702,6 +702,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     set.updated_at = new Date();
     const [upd] = await tx<{ version: number }[]>`
       update tasks set ${tx(set as never, ...(Object.keys(set) as never[]))}, version = version + 1 where id = ${id} returning version`;
+    const auto = statusEvent === 'reopened' ? await undoAutoSpawned(tx, u, id) : null; // #508 후속: '다시 열기' 기록보다 먼저(마지막 완료의 자동 업무를 찾음)
 
     if (coNext) { // #475 공동 담당 바꾸기(주 담당이 바뀌어 공동 담당이던 사람은 트리거가 이미 뺌)
       const primary = ('assignee_id' in set ? set.assignee_id : cur.assignee_id) as string | null;
@@ -788,13 +789,47 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     let spawned: string | null = null;
     if (set.status === 'done') spawned = await spawnNextRecurrence(tx, id, u.id);
     // 대표 10/21 22:00 ⑧(#421) 영업 2차 추적: 리드에서 나온 업무를 완료하면 리드 '다음 연락'으로 자동 이어짐(다음 연락일 → 다음 조치 업무)
-    if (set.status === 'done' && cur.lead_id) await (await import('./sales/autoTasks')).followUpAfterTaskDone(tx, u, { taskId: id, title, leadId: cur.lead_id }).catch(async (e) => { const { logError } = await import('./log'); await logError('sales-followup', e).catch(() => {}); });
+    const fu = set.status === 'done' && cur.lead_id ? await (await import('./sales/autoTasks')).followUpAfterTaskDone(tx, u, { taskId: id, title, leadId: cur.lead_id }).catch(async (e) => { const { logError } = await import('./log'); await logError('sales-followup', e).catch(() => {}); return null; }) : null;
+    // #508 후속(로컬 10/23): 이 완료로 자동으로 생긴 업무(반복 다음 회차·리드 '다음 연락')를 기록 — 완료를 되돌리면 손대지 않은 것은 같이 정리(undoAutoSpawned)
+    const lead = fu && fu.action === 'followup' && fu.created && fu.taskId ? fu : null;
+    const made = [spawned, lead?.taskId ?? null].filter((x): x is string => !!x);
+    if (made.length) await activity(tx, 'task', id, u.id, 'auto_spawned', { taskIds: made, ...(lead ? { lead: { id: lead.leadId, from: lead.prev, to: lead.next } } : {}) });
     // B-10 자동화 (사람이 한 변경에만 반응, 규칙이 한 변경은 다시 부르지 않음)
     const { runAutomations } = await import('./automation');
     if (set.status) await runAutomations(tx, { trigger: set.status === 'done' ? 'task_completed' : 'status_changed', taskId: id, actorId: u.id, fromStatus: cur.status });
     if ('section_id' in set && set.section_id) await runAutomations(tx, { trigger: 'section_moved', taskId: id, actorId: u.id });
-    return { id, version: upd.version, changed: true, spawned };
+    return { id, version: upd.version, changed: true, spawned, ...(auto ? { autoRemoved: auto.removed, autoKept: auto.kept } : {}) };
   });
+}
+
+/**
+ * #508 후속(로컬 10/23 운영 확인): 완료를 되돌리면(완료 → 다른 상태) 그 완료 때 자동으로 생긴 업무(반복 다음 회차·리드 '다음 연락')가 남아 같은 일이 둘이 됨 →
+ * 마지막 완료 기록(auto_spawned, 그 뒤 '다시 열기' 기록이 없을 때)의 업무 중 손대지 않은 것(진행 전 · 댓글·첨부·하위 업무·생성 말고 다른 기록 없음 — 자기에게 만든 업무는 '확인'이 자동이라 보지 않음)은 휴지통으로(기록 남김, 30일 되살리기),
+ * 손댄 것은 그대로 두고 화면에 알림. 반복 다음 회차를 지우면 이 업무가 다시 반복을 이어받고, 리드 다음 연락일도 완료 전 날짜로(그 뒤 바뀌지 않았을 때만)
+ */
+async function undoAutoSpawned(tx: Sql, u: SessionUser, id: string) {
+  const [a] = await tx<{ action: string; changes: any }[]>`select action, changes from activities where entity_type = 'task' and entity_id = ${id} and action in ('auto_spawned', 'reopened') order by id desc limit 1`;
+  const ids: string[] = a?.action === 'auto_spawned' && Array.isArray(a.changes?.taskIds) ? a.changes.taskIds : [];
+  if (!ids.length) return null;
+  const rows = await tx<{ id: string; title: string; recur: boolean; touched: boolean }[]>`select t.id, t.title, t.recurrence_source_id is not null as recur,
+      (t.status <> 'todo'
+        or exists (select 1 from comments c where c.task_id = t.id and c.deleted_at is null)
+        or exists (select 1 from attachments f where f.task_id = t.id and f.deleted_at is null)
+        or exists (select 1 from tasks s where s.parent_id = t.id and s.deleted_at is null)
+        or exists (select 1 from activities v where v.entity_type = 'task' and v.entity_id = t.id and v.action not in ('created', 'recurring_created'))) as touched
+    from tasks t where t.id = any(${ids}::uuid[]) and t.deleted_at is null`;
+  const gone = rows.filter((r) => !r.touched);
+  if (gone.length) {
+    const gids = gone.map((r) => r.id);
+    await tx`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = any(${gids}::uuid[])`;
+    await hideTaskBlocks(tx, gids);
+    for (const g of gone) await activity(tx, 'task', g.id, u.id, 'deleted', { auto: '완료 되돌리기', from: id });
+    await activity(tx, 'task', id, u.id, 'auto_removed', { taskIds: gids });
+    if (gone.some((g) => g.recur)) await tx`update tasks set recurrence_stopped = false where id = ${id} and recurrence_rule is not null`;
+    const lead = a.changes?.lead;
+    if (lead?.id && lead.to && gone.some((g) => !g.recur)) await tx`update sales_leads set next_contact_date = ${lead.from ?? null}, updated_at = now() where id = ${lead.id} and next_contact_date = ${lead.to}::date`;
+  }
+  return { removed: gone.map(({ id: x, title }) => ({ id: x, title })), kept: rows.filter((r) => r.touched).map(({ id: x, title }) => ({ id: x, title })) };
 }
 
 /**
