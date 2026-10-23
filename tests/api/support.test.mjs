@@ -42,6 +42,8 @@ before(async () => {
   src = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x'); const q = Object.fromEntries(u.searchParams); hits.push({ path: u.pathname, q });
     if (u.pathname === '/agency/bizinfo_support') return json(res, { jsonArray: q.hashtags === '경기' ? [B.b8, B.b1] : [B.b1, B.b2, B.b3, B.b4, B.b5, B.b6, B.b7] });
+    // 운영(로컬 10/23): 활용신청 안 한 서비스는 HTTP 403 + 본문 SERVICE_KEY_IS_NOT_REGISTERED_ERROR
+    if (u.pathname === '/agency/bizinfo_datago_support' && q.serviceKey === 'bad-key') { res.statusCode = 403; return res.end('SERVICE_KEY_IS_NOT_REGISTERED_ERROR'); }
     if (u.pathname === '/agency/bizinfo_datago_support') return json(res, { response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items: { item: [B.b1, B.b2] }, totalCount: 2 } } });
     if (u.pathname === '/agency/kstartup_support') {
       if (q.serviceKey === 'bad-key') { res.setHeader('content-type', 'application/xml'); return res.end('<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>30</returnReasonCode><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>'); }
@@ -108,7 +110,7 @@ test('기업마당: 키가 없으면 공공데이터포털(15157820) → 플랫�
   assert.deepEqual([r2.inserted, r2.updated, r2.unchanged], [0, 0, 8]);
 });
 
-test('K-Startup: 모집 중·접수 마감 오늘 이후만 요청 · 업력·지역·상세/신청 링크 · 키 오류는 \'활용신청·인증키 확인 필요\'(키는 가림)', async () => {
+test('K-Startup: 모집 중·접수 마감 오늘 이후만 요청 · 업력·지역·상세/신청 링크 · 활용신청 안 한 키는 \'공공데이터포털 활용신청 필요(서비스 번호)\' 요약·플랫폼 설정(키는 가림)', async () => {
   hits.length = 0;
   const r = await ctx.owner.ok('POST', '/api/sales/collectors/kstartup_support/run', {});
   assert.equal(r.status, 'success', JSON.stringify(r)); assert.equal(r.inserted, 2);
@@ -120,7 +122,16 @@ test('K-Startup: 모집 중·접수 마감 오늘 이후만 요청 · 업력·�
   assert.deepEqual((await sql`select regions from support_programs where source_id = '175002'`)[0].regions, ['경남']);
   await ctx.owner.ok('PUT', '/api/platform/sales-collectors', { supportKeys: { datago: 'bad-key' } });
   const bad = await ctx.owner.ok('POST', '/api/sales/collectors/kstartup_support/run', {});
-  assert.equal(bad.status, 'failed'); assert.match(bad.errorLog, /활용신청·인증키 확인 필요/); assert.ok(!bad.errorLog.includes('bad-key'), '키는 가림');
+  assert.equal(bad.status, 'failed'); assert.ok(!bad.errorLog.includes('bad-key'), '키는 가림');
+  assert.equal(bad.summary, 'K-Startup: 공공데이터포털 활용신청 필요(서비스 15125364) — 키는 그대로 두고 포털(data.go.kr)에서 [활용신청]', '카드 아래 줄 = 원인(로컬 10/23)');
+  // 기업마당 키가 없으면 포털(15157820) 경로 — 운영처럼 HTTP 403 본문만 와도 같은 안내
+  await ctx.owner.ok('PUT', '/api/platform/sales-collectors', { supportKeys: { bizinfo: null } });
+  const bb = await ctx.owner.ok('POST', '/api/sales/collectors/bizinfo_support/run', {});
+  assert.equal(bb.status, 'failed'); assert.equal(bb.summary, '기업마당: 공공데이터포털 활용신청 필요(서비스 15157820) — 키는 그대로 두고 포털(data.go.kr)에서 [활용신청]');
+  assert.ok(!JSON.stringify(bb).includes('bad-key'), '키는 가림');
+  const ps = await ctx.owner.ok('GET', '/api/platform/sales-collectors');
+  assert.deepEqual(ps.supportRuns.filter((r) => r.slug !== 'support_watch').map((r) => [r.slug, r.status, r.summary.match(/서비스 (\d+)/)?.[1]]), [['bizinfo_support', 'failed', '15157820'], ['kstartup_support', 'failed', '15125364']]);
+  await ctx.owner.ok('PUT', '/api/platform/sales-collectors', { supportKeys: { bizinfo: 'biz-key-1234' } });
   const s = await ctx.owner.ok('PUT', '/api/platform/sales-collectors', { supportKeys: { datago: null } });
   assert.equal(s.supportKeys.datago.from, 'env', '지우면 환경 변수 키로');
 });

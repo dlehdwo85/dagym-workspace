@@ -17,7 +17,7 @@ export const DEFAULT_MODELS: HfModel[] = [
   { id: 'higgsfield-ai/soul/v2/standard', kind: 'image', name: 'SOUL V2(실사·사람)', credits: 6.5, usd: 0.01, enabled: true, note: '실사 기본 · 1080p · 10/22 실측 $0.01/장' },
   { id: 'ideogram/v4.0', kind: 'image', name: 'Ideogram 4(글자 들어간 시안)', credits: 6.5, usd: 0.006, enabled: true, note: '포스터·글자 렌더' },
   { id: 'recraft/v4.1/text-to-image', kind: 'image', name: 'Recraft 4.1(일러스트·아이콘)', credits: 4, usd: 0.003, enabled: true },
-  { id: 'kling-video/v3.0-turbo/text-to-video', kind: 'video', name: 'Kling 3 Turbo(3~15초)', credits: 80, usd: 0.09, enabled: true, note: '릴스·쇼츠 기본 · 초당' },
+  { id: 'kling-video/v3.0-turbo/text-to-video', kind: 'video', name: 'Kling 3 Turbo(3~15초)', credits: 80, usd: 0.12, enabled: true, note: '릴스·쇼츠 기본 · 초당 · 10/23 기본 $0.12/초(15초 ≈ $1.8)' },
   { id: 'bytedance/seedance-2.5/text-to-video', kind: 'video', name: 'Seedance 2.5(4~30초·소리)', credits: 40, usd: 0.07, enabled: false, note: '초당' },
 ];
 /** 10/20 판(실제 API 확인 전)에 쓰던 이름 → 실제 경로. 저장된 모델 표·의뢰 프롬프트에 남은 옛 이름을 읽을 때 바꾼다 */
@@ -37,7 +37,8 @@ const ENDPOINTS: Record<string, { aspects?: string[]; dur?: [number, number]; du
   'ideogram/v4.0': { aspects: ['1:1', '1:2', '2:1', '2:3', '3:2', '4:5', '5:4', '9:16', '16:9', '5:8', '8:5', '3:4', '4:3'] },
   'recraft/v4.1/text-to-image': { aspects: ['1:1', '2:1', '1:2', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16'], extra: { output_format: 'png' } },
   'kling-video/v3.0-turbo/text-to-video': { aspects: ['16:9', '9:16', '1:1'], dur: [3, 15], extra: { resolution: '1080p' } },
-  'kling-video/v3.0/std/text-to-video': { aspects: ['16:9', '9:16', '1:1'], dur: [3, 15] },
+  'kling-video/v3.0/std/text-to-video': { aspects: ['16:9', '9:16', '1:1'], dur: [3, 15], extra: { sound: 'off' } }, // #454 소리는 합성 단계(내레이션·배경음)에서
+  'kling-video/v3.0/pro/text-to-video': { aspects: ['16:9', '9:16', '1:1'], dur: [3, 15], extra: { sound: 'off' } },
   'kling-video/v2.5-turbo/pro/text-to-video': { noAspect: true, durs: [5, 10], negative: true },
   'bytedance/seedance-2.5/text-to-video': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'], dur: [4, 30], extra: { resolution: '1080p' } },
 };

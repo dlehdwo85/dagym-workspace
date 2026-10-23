@@ -12,7 +12,7 @@ type Camp = { account_id: string; provider: string; label: string; campaign_id: 
 type Balance = { id: string; provider: string; label: string; balance: number; currency: string; source: 'manual' | 'api'; checked_at: string; pace: number; days: number | null; level: 'ok' | 'warn' | 'action'; link: string; how: string };
 type Item = { provider: string; label: string; brand: string | null; item_id: string; item_name: string; campaign_name: string; adgroup_name: string; currency: string; impressions: number; clicks: number; cost: number; conversions: number };
 type Data = { days: number; accounts: Acc[]; balances?: Balance[]; totals: { impressions: number; clicks: number; cost: number; conversions: number }; campaigns: Camp[]; keywords?: Item[]; creatives?: Item[];
-  daily: { day: string; clicks: number; cost: number; conversions: number }[]; providers: { key: string; label: string; ready: boolean }[]; canEdit: boolean; callbacks: { meta: string; google: string } | null };
+  daily: { day: string; clicks: number; cost: number; conversions: number }[]; providers: { key: string; label: string; ready: boolean }[]; canEdit: boolean; callbacks: { meta: string; google: string; metaPublish?: string } | null };
 const n0 = (v: number) => Math.round(v).toLocaleString('ko-KR');
 const won = (v: number, cur = 'KRW') => (cur === 'KRW' ? `${n0(v)}원` : `${v.toLocaleString('ko-KR', { maximumFractionDigits: 2 })} ${cur}`);
 const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(2)}%` : '—');
@@ -275,7 +275,10 @@ export function Connections() {
       <PublishChannels />
       {data.callbacks && (
         <details className="rounded-card border border-line bg-white p-3 text-xs text-ink-2 shadow-card" data-testid="ads-callbacks"><summary className="cursor-pointer font-medium">관리자: Google·Meta 콘솔에 등록할 콜백 주소</summary>
-          <ul className="mt-1 space-y-0.5">{(['google', 'meta'] as const).map((k) => <li key={k}><span className="inline-block w-14">{k === 'google' ? 'Google' : 'Meta'}</span><code className="select-all break-all rounded bg-slate-100 px-1">{data.callbacks![k]}</code></li>)}</ul>
+          <ul className="mt-1 space-y-0.5"><li><span className="inline-block w-14">Google</span><code className="select-all break-all rounded bg-slate-100 px-1">{data.callbacks.google}</code></li>
+            <li data-testid="ads-callbacks-meta"><span className="inline-block w-14">Meta</span>앱 › Facebook 로그인 › 설정 › <b>유효한 OAuth 리디렉션 URI</b>에 두 주소를 모두 넣습니다.
+              <span className="mt-0.5 block pl-14">광고 계정 <code className="select-all break-all rounded bg-slate-100 px-1">{data.callbacks.meta}</code></span>
+              {data.callbacks.metaPublish && <span className="block pl-14">게시·리드 광고 <code className="select-all break-all rounded bg-slate-100 px-1">{data.callbacks.metaPublish}</code></span>}</li></ul>
           <p className="mt-1 text-[11px] text-ink-3">운영 주소(APP_URL)를 바꾸면 이 주소도 바뀌니 콘솔에도 다시 등록해야 합니다.</p></details>
       )}
       {naver && <NaverForm onClose={() => setNaver(false)} onDone={reload} />}
@@ -286,7 +289,7 @@ export function Connections() {
 type Ch = { key: string; label: string; note: string; kind: string; enabled: boolean; connectable: boolean; ready: boolean; mode: 'helper' | 'auto' | 'later';
   accounts: { id: string; provider: string; label: string; status: string; lastError: string | null; warnings: string[]; brandId: string | null; brand: string | null; shared: boolean;
     leads: { scopes: boolean; on: boolean; subscribed: boolean; webhookAt: string | null; error: string | null } | null }[] };
-type ChData = { canEdit: boolean; metaDevMode: boolean; channels: Ch[]; tech: { metaCallback: string; metaDeletion: string; metaScopes: string[]; metaReady: boolean; metaLive: boolean; metaWebhook: string; metaWebhookToken: boolean; leadScopes: string[] } | null };
+type ChData = { canEdit: boolean; metaDevMode: boolean; channels: Ch[]; tech: { metaCallback: string; metaAdsCallback: string; metaDeletion: string; metaScopes: string[]; metaReady: boolean; metaLive: boolean; metaWebhook: string; metaWebhookToken: boolean; leadScopes: string[] } | null };
 const CONNECT_URL: Record<string, string> = { meta: '/api/marketing/publish/connect/meta', threads: '/api/marketing/publish/connect/threads', google: '/api/marketing/publish/connect/youtube' };
 
 /**
@@ -364,7 +367,7 @@ function PublishChannels() {
         <details className="mt-2 rounded-input bg-slate-50 p-2 text-[11px] text-ink-2" data-testid="publish-tech"><summary className="cursor-pointer font-medium">플랫폼 관리자: Meta 앱 설정 값</summary>
           <ul className="mt-1 space-y-0.5">
             <li>상태: 앱 ID {data.tech.metaReady ? '있음' : '없음(META_APP_ID/SECRET 넣으면 [연결] 열림)'} · 자동 게시 {data.tech.metaLive ? '켜짐' : '꺼짐(앱 심사 통과 후 META_PUBLISH_LIVE=1)'}</li>
-            <li>OAuth 리디렉션 URI <code className="select-all break-all rounded bg-white px-1">{data.tech.metaCallback}</code></li>
+            <li data-testid="publish-tech-oauth">유효한 OAuth 리디렉션 URI(두 주소 모두 등록) — 게시·리드 광고 <code className="select-all break-all rounded bg-white px-1">{data.tech.metaCallback}</code> · 광고 계정 <code className="select-all break-all rounded bg-white px-1">{data.tech.metaAdsCallback}</code></li>
             <li>데이터 삭제 콜백 <code className="select-all break-all rounded bg-white px-1">{data.tech.metaDeletion}</code></li>
             <li>권한 {data.tech.metaScopes.join(', ')} · 리드 광고 받기에 더 묻는 권한 {data.tech.leadScopes.join(', ')}</li>
             <li>웹후크(Page › leadgen) 콜백 <code className="select-all break-all rounded bg-white px-1">{data.tech.metaWebhook}</code> · 확인 토큰 {data.tech.metaWebhookToken ? '있음' : '없음(META_WEBHOOK_VERIFY_TOKEN 을 넣고 같은 값을 앱 대시보드에)'}</li>

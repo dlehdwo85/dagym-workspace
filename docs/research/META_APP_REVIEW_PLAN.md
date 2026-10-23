@@ -34,6 +34,8 @@
    - 광고: `…/api/marketing/ads/callback/meta`
    - 운영 주소 기준 값은 연결 계정 화면의 '플랫폼 관리자: Meta 앱 설정 값'에 나온다.
 3. 비즈니스 인증: 하이링크 사업자 정보로 진행(대표 진행). 고급(Advanced/Full) 액세스의 전제 조건이다.
+   - 리드 광고 실운영에 신청할 고급 액세스(로컬 10/23): **leads_retrieval · pages_manage_metadata · pages_manage_ads · ads_read** — 비즈니스 인증을 마친 뒤 앱 심사로 신청한다.
+   - 그 전(개발 모드, `META_APP_LIVE_MODE` ≠ 1)에는 실제 광고 리드 웹후크가 오지 않는다 → 워크인이 30분마다 놓친 리드를 불러와 등록한다(리드 광고 상자에 '개발 모드' 안내). 앱 심사·라이브 뒤에는 웹후크로 실시간.
 4. 웹후크
    - 콜백 `…/api/marketing/meta/webhook` — **B(리드 광고) 구현됨(2026-10-23)**: GET 확인(hub.verify_token = env `META_WEBHOOK_VERIFY_TOKEN`) · POST 서명 확인(X-Hub-Signature-256 = 앱 시크릿 HMAC).
    - 앱 대시보드 › 웹후크 › 'Page' 객체에 콜백 URL·확인 토큰을 넣고 `leadgen` 필드를 구독한다. 페이지마다 앱 설치(`POST /{page-id}/subscribed_apps?subscribed_fields=leadgen`)는 워크인 [리드 광고 받기]가 한다.

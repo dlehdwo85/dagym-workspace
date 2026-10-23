@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { CHANNELS } from './Marketing';
+import { BrandVideoKit } from './BrandVideoKit';
 import { MediaPick } from './MediaPick';
 import { Studio } from './Studio';
 import { BrandVoice, type Voice } from './BrandVoice';
@@ -22,7 +23,7 @@ const REQ: Record<string, string> = { image: '이미지', video: '영상', regen
 type Production = { planCode: string | null; planLabel: string | null; monthlyCredits: number | null; usedCredits: number; leftCredits: number | null; images: number | null; videos: number | null; videosLeft: number | null; regensLeft: number | null; weekly: { kind: string; label: string; limit: number; used: number }[]; over: boolean; shortfall: number; extraCreditKrw: number | null; overMessage: string | null };
 type View = { production?: Production | null; settings: any; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null; aiMonthlyUsd: number | null };
   usage: { weekCredits: number; monthCredits: number; monthVideos: number; monthRegens: number; ai: { usd: number; requests: number }; companyAiUsd: number; companyAiLimitUsd: number }; plans: Record<string, { label: string; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; price: number | null }>;
-  rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; intro: string | null; products: string | null; weekly_topic: string | null; banned_words: string[]; test_mode: boolean; voice?: Partial<Voice> | null; ad_priority?: number | null; ad_share?: number | null; ad_note?: string | null }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean };
+  rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; intro: string | null; products: string | null; weekly_topic: string | null; banned_words: string[]; test_mode: boolean; voice?: Partial<Voice> | null; ad_priority?: number | null; ad_share?: number | null; ad_note?: string | null; color?: string | null; video?: Record<string, string | null> | null }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean };
 const lim = (used: number, max: number | null) => (max === null ? `${used} (한도 없음)` : `${used} / ${max}`);
 
 /** V41 4-3 + V43: 자동 제작 — 요금제·한도·사용량, 일정·마감·알림, 브랜드 키트, 주간 규칙, 제작 요청 카드, 크레딧 원장 */
@@ -189,6 +190,7 @@ export function Automation() {
               <input className={cx(inputCls, 'h-8 w-20 py-0 text-xs')} defaultValue={b.ad_priority ?? ''} placeholder="우선순위" inputMode="numeric" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { adPriority: e.target.value ? Number(e.target.value) : null } }).then(reload)} aria-label={`${b.name} 광고 우선순위`} data-testid="brand-ad-priority" />
               <input className={cx(inputCls, 'h-8 w-20 py-0 text-xs')} defaultValue={b.ad_share ?? ''} placeholder="비중 %" inputMode="decimal" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { adShare: e.target.value ? Number(e.target.value) : null } }).then(reload)} aria-label={`${b.name} 광고 비중`} data-testid="brand-ad-share" />
               <input className={cx(inputCls, 'h-8 min-w-48 flex-1 py-0 text-xs')} defaultValue={b.ad_note ?? ''} placeholder="메모(예: 지역 한정 천안 두정·성정)" maxLength={300} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { adNote: e.target.value } }).then(reload)} aria-label={`${b.name} 광고 메모`} data-testid="brand-ad-note" /></div>
+            <BrandVideoKit brand={b} onSaved={reload} />
             <BrandVoice brand={b} onSaved={reload} /></li>))}</ul>
         <p className="mt-2 text-xs text-ink-3">원고 재료: 브랜드 소개·주력 상품·이번 주 주제 + 회사 AI 프로필 + 마케팅 자료실 사진 설명. 재료가 없으면 시안 대신 “주제 필요” 카드로 묻습니다. 말투 프로필은 모든 원고·자막이 읽고, 다 쓴 원고는 글 품질 엔진(훅 점수·사람다움 점수·채널 검사)을 거칩니다.</p>
       </section>}

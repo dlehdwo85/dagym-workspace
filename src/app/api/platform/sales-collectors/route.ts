@@ -9,11 +9,14 @@ import { SIDO, saveSupportKeys, supportKeyStatus } from '@/lib/sales/collectors/
 /** 로컬 10/21 10:40: 플랫폼 운영자가 DB 없이 협력사 감시 페이지(21곳)·기관 엔드포인트(LH·국방·온비드)를 넣는다 — app_settings 'sales_vendor_watch_pages'·'sales_collector_endpoints' */
 const read = async () => {
   const rows = await db()<{ key: string; value: unknown; updated_at: string }[]>`select key, value, updated_at from app_settings where key in ('sales_vendor_watch_pages', 'sales_collector_endpoints', 'support_watch_pages')`;
+  // 지원사업 원천 마지막 수집(요약·상태) — 활용신청 필요 같은 원인을 여기서도 보이게(로컬 10/23)
+  const runs = await db()<{ slug: string; status: string; started_at: string; summary: string | null }[]>`select distinct on (slug) slug, status, started_at, summary from sales_collector_runs
+    where slug in ('bizinfo_support', 'kstartup_support', 'support_watch') order by slug, started_at desc`;
   const pages = rows.find((r) => r.key === 'sales_vendor_watch_pages'); const ep = rows.find((r) => r.key === 'sales_collector_endpoints'); const sp = rows.find((r) => r.key === 'support_watch_pages');
   return { vendorPages: Array.isArray(pages?.value) ? pages!.value as { company: string; url: string; register_url?: string | null }[] : [], vendorPagesUpdatedAt: pages?.updated_at ?? null,
     endpoints: { ...DEFAULT_ENDPOINTS, ...((ep?.value as Record<string, string>) ?? {}) }, endpointOverrides: (ep?.value as Record<string, string>) ?? {}, defaultEndpoints: DEFAULT_ENDPOINTS,
     // #450 지원사업 원천 — 인증키는 있는지·어디서·앞 4자만(값은 절대 안 내보냄), 감시 페이지(지자체·RIPC·진흥원 공지)
-    supportKeys: await supportKeyStatus(), supportWatchPages: Array.isArray(sp?.value) ? sp!.value as { name: string; url: string; region?: string | null }[] : [], supportWatchPagesUpdatedAt: sp?.updated_at ?? null };
+    supportKeys: await supportKeyStatus(), supportWatchPages: Array.isArray(sp?.value) ? sp!.value as { name: string; url: string; region?: string | null }[] : [], supportWatchPagesUpdatedAt: sp?.updated_at ?? null, supportRuns: runs };
 };
 export const GET = handler(async ({ user }) => { if (!user.platformAdmin) throw notFound(); return read(); });
 const input = z.object({

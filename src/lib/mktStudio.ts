@@ -41,7 +41,13 @@ export async function listBriefs(u: SessionUser) {
   const brands = await sql<{ id: string; name: string; tone: string | null }[]>`select id, name, tone from mkt_brands where tenant = ${t} order by name`;
   const recent = await sql<{ id: string; title: string; channel: string }[]>`select id, title, channel from mkt_contents where tenant = ${t} and not is_test and status in ('published', 'approved') order by coalesce(published_at, scheduled_at) desc nulls last limit 12`;
   const hf = await hfSettings();
-  return { briefs, brands, recent, kinds: KIND_SPEC, purposes: PURPOSE, canGenerate: isAdmin(u), provider: hf.enabled ? 'higgsfield' : 'card', models: hf.models.filter((m) => m.enabled).map(({ id, kind, name, credits, usd }) => ({ id, kind, name, credits, usd: usd ?? null })), pricing: hf.pricing, usdKrw: hf.usdKrw };
+  // #454 영상: 장면 진행·검수·합성 요약 + 내레이션 키·자료실 화면 캡처·배경음 준비 상태
+  const V = await import('./mktVideo');
+  for (const b of briefs) b.progress = V.v2Progress(b.result);
+  const tts = await (await import('./video/tts')).ttsSettings();
+  const [caps, bgm] = await Promise.all([V.videoAssets(t, '영상 화면 캡처'), V.videoAssets(t, '영상 배경음')]);
+  return { briefs, brands, recent, kinds: KIND_SPEC, purposes: PURPOSE, canGenerate: isAdmin(u), provider: hf.enabled ? 'higgsfield' : 'card', models: hf.models.filter((m) => m.enabled).map(({ id, kind, name, credits, usd }) => ({ id, kind, name, credits, usd: usd ?? null })), pricing: hf.pricing, usdKrw: hf.usdKrw,
+    video: { tts: { ready: tts.ready, provider: tts.provider ? tts.providers[tts.provider].label : null }, captures: caps.length, bgm: bgm.length } };
 }
 export async function createBrief(u: SessionUser, i: z.infer<typeof briefInput>) {
   await assertSpace(u, 'marketing');
@@ -68,7 +74,8 @@ export function withShots(promptEn: string, scenes: Scene[] | undefined, timing:
   return `${promptEn}\n\nShot list (keep this timing):\n${scenes.map((x, k) => `${k + 1}. ${timing?.rows[k] ? `${timing.rows[k].from.toFixed(1)}-${timing.rows[k].to.toFixed(1)}s` : ''} ${x.visualEn || x.line}`.replace(/\s+/g, ' ').trim()).join('\n')}`.slice(0, 4000);
 }
 
-/** AI(경력 30년 마케터·아트디렉터): 브랜드 키트·회사·목적·채널 규격·참고 자료 → 영문 생성 프롬프트 + 한글 요약 + 참고 사진 + 자막 */
+/** AI(경력 30년 마케터·아트디렉터): 브랜드 키트·회사·목적·채널 규격·참고 자료 → 영문 생성 프롬프트 + 한글 요약 + 참고 사진 + 자막
+ *  #454 영상은 '국내 대기업 광고 수준' 장면 설계: 장면 3~5개(각 3~5초) · 같은 출연진·룩 · 한국인·한국 배경 · 화면 안 글자 금지 · 실제 화면 캡처 얹을 장면 · 끝 화면 · 배경음 */
 export async function writePrompt(tenant: string, briefId: string, actorId: string | null) {
   const sql = db();
   const [b] = await sql<any[]>`select * from mkt_briefs where id = ${briefId} and tenant = ${tenant}`;
@@ -77,44 +84,67 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
   const [brand] = b.brand_id ? await sql<any[]>`select * from mkt_brands where id = ${b.brand_id}` : [];
   const { companyAi } = await import('./ai/persona');
   const co = await companyAi({ tenant } as SessionUser).catch(() => ({} as any));
-  const spec = KIND_SPEC[b.kind]; const refs = b.refs ?? {};
+  const spec = KIND_SPEC[b.kind]; const refs = b.refs ?? {}; const video = spec.media === 'video';
   const photos = refs.mediaIds?.length ? await sql<{ id: string; title: string; description: string | null }[]>`select id, title, description from library_files where id = any(${refs.mediaIds}::uuid[]) and tenant = ${tenant} and deleted_at is null` : [];
   const posts = refs.contentIds?.length ? await sql<{ title: string; body: string }[]>`select c.title, v.body from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = any(${refs.contentIds}::uuid[]) and c.tenant = ${tenant}` : [];
+  const V = video ? await import('./mktVideo') : null;
+  const [caps, bgms] = V ? await Promise.all([V.videoAssets(tenant, '영상 화면 캡처'), V.videoAssets(tenant, '영상 배경음')]) : [[], []];
+  const kit = brand?.video ?? {};
   const hf = await hfSettings(); const model = modelFor(hf.models, spec.media);
   const tone = b.tone || brand?.tone || co?.tone || '친절하고 담백하게';
   const Q = await import('./mktQuality'); const rules = await Q.qualityRules(); const voice = Q.voicePrompt(brand?.voice);
-  const fallback = { promptEn: `${spec.media === 'video' ? 'A 15-second vertical video' : 'A photorealistic photo'} for a Korean ${co?.industries?.[0] ?? 'local business'} brand "${brand?.name ?? co?.name ?? ''}": ${b.message}. Natural daylight, candid everyday scene, product/space close-up, warm and slightly humorous mood, minimal AI look (no close-up faces, use hands/back view), clean negative space for a short Korean headline. ${spec.aspect} aspect, ${spec.px}.`,
-    negativeEn: 'text artifacts, distorted hands, extra fingers, uncanny faces, watermark, logo, low quality, oversaturated', summaryKo: `${spec.label}: ${PURPOSE[b.purpose]} 목적, 메시지 '${b.message}', 자연광 실사 느낌, ${tone}`, caption: b.message, refMediaIds: photos.map((p) => p.id), aspect: spec.aspect, model: model?.id ?? null, source: 'template' as 'template' | 'ai' };
-  let out = fallback;
+  const korean = 'All people are Korean (East Asian) and the setting is clearly South Korea; no text, letters, signage, logos or UI text in frame';
+  const fallback = { promptEn: `${video ? `A ${spec.seconds ?? 15}-second ${spec.aspect === '9:16' ? 'vertical ' : ''}Korean TV-commercial-style video` : 'A photorealistic photo'} for a Korean ${co?.industries?.[0] ?? 'local business'} brand "${brand?.name ?? co?.name ?? ''}": ${b.message}. Natural daylight, candid everyday scene, product/space close-up, warm and slightly humorous mood, minimal AI look (no close-up faces, use hands/back view). ${korean}. ${video ? '' : 'Clean negative space for a short Korean headline. '}${spec.aspect} aspect, ${spec.px}.`,
+    negativeEn: 'text artifacts, letters, signage, distorted hands, extra fingers, uncanny faces, watermark, logo, low quality, oversaturated, western-style houses, foreign-language signs, non-Korean people', summaryKo: `${spec.label}: ${PURPOSE[b.purpose]} 목적, 메시지 '${b.message}', 자연광 실사 느낌, ${tone}`, caption: b.message, refMediaIds: photos.map((p) => p.id), aspect: spec.aspect, model: model?.id ?? null, source: 'template' as 'template' | 'ai' };
+  let out: Record<string, any> = fallback;
   const P = await import('./ai/provider');
   if (P.aiEnabled()) {
     try {
       const { assertMktAi } = await import('./mktAuto'); await assertMktAi(tenant);
       const p = P.anthropicProvider({ tier: 'default' });
+      const target = Math.round((spec.seconds ?? 15) - 2.5 + 0.5 + 3 * 0.4);
+      const videoRules = `- 국내 대기업 TV·디지털 광고 수준: 메시지 하나, 첫 3초 훅, 인물의 작은 감정 변화, 제품·서비스가 문제를 푸는 순간, 마지막은 브랜드(끝 화면은 합성 단계가 따로 붙임).
+- 모든 인물은 한국인, 배경은 한국(한국 아파트·사무실·카페·거리). 서양식 주택·외국어 간판·영문 화면 금지.
+- 화면 안에 글자를 넣지 않음(간판·화면 UI·자막·로고·숫자 모두). 한국어 자막·로고는 합성 단계가 넣음. 휴대폰·모니터 화면은 '부드러운 빛'만.
+- character: 모든 장면에 똑같이 쓸 출연진 묘사(영문: 한국인, 나이대·옷·머리). look: 전 장면 공통 색·빛·분위기(영문).
+- scenes: 3~5개, 장면마다 seconds 3~5(정수), 합계 약 ${target}초. 한 장면 = 한 동작·한 감정.
+  line = 그 장면 한국어 자막 겸 내레이션 한 줄(분당 300음절: 3초 15음절·4초 20음절·5초 25음절 안쪽). 첫 장면 line 이 훅 — 인사·"스크롤 멈추세요" 금지, 구체적 상황·숫자·대상으로.
+  visualEn = 그 장면만 읽어도 찍을 수 있는 영문 지시(구도·렌즈·카메라 움직임·빛·동작).
+  screenMediaId·device = 아래 '실제 화면 캡처'를 휴대폰(phone)·노트북(laptop) 화면으로 얹을 장면이면 그 id(1~2장면만), 아니면 '' 와 'none'. 얹는 장면의 visualEn 은 흐릿하게 깔릴 배경(책상·사무실 등).
+- endCard: headline = 끝 화면 한 줄(12자 안팎), cta = 행동 유도 한 줄${kit.cta ? `(브랜드 키트 값 '${kit.cta}' 그대로)` : ''}.
+- bgmId: 아래 '배경음' 중 분위기에 맞는 id(없으면 '').
+- promptEn: 전체 콘셉트 한 단락(영문, 장면 전체를 아우름).`;
       const r = await p.chat({
-        system: `당신은 경력 30년의 마케터이자 아트디렉터입니다. 이미지·영상 생성 AI(Higgsfield: ${model?.name ?? (spec.media === 'video' ? 'Kling 계열 영상' : 'SOUL 계열 실사')})에 넣을 프롬프트를 씁니다. JSON 만.
-- promptEn: 영문 생성 프롬프트(장면·피사체·구도·조명·분위기·카피 자리·규격 ${spec.aspect} ${spec.px}). 실사 우선, 생성 인물은 AI 느낌 최소(얼굴 클로즈업 피함). 브랜드 로고·문자를 그리게 하지 않음(글자는 뒤에 렌더).
-- negativeEn: 피할 것(영문).
+        system: `당신은 경력 30년의 마케터이자 아트디렉터${video ? '(국내 대기업 광고 크리에이티브 디렉터 겸 촬영감독)' : ''}입니다. 이미지·영상 생성 AI(Higgsfield: ${model?.name ?? (video ? 'Kling 계열 영상' : 'SOUL 계열 실사')})에 넣을 프롬프트를 씁니다. JSON 만.
+${video ? videoRules : `- promptEn: 영문 생성 프롬프트(장면·피사체·구도·조명·분위기·카피 자리·규격 ${spec.aspect} ${spec.px}). 실사 우선, 생성 인물은 AI 느낌 최소(얼굴 클로즈업 피함). 인물은 한국인, 배경은 한국. 브랜드 로고·간판·문자를 그리게 하지 않음(글자는 뒤에 렌더).`}
+- negativeEn: 피할 것(영문 — 외국어 글자·서양식 배경·외국인·손가락 뭉개짐 포함).
 - summaryKo: 의뢰자가 읽을 한글 의도 요약 3줄(왜 이 장면인지).
-- caption: 이 시안에 얹을 한국어 자막·카피 1~2줄(브랜드 말투: ${tone}, 금지어: ${[...(brand?.banned_words ?? []), ...Q.avoidOf(brand?.voice)].join(', ') || '없음'}, 과장·최상급 금지, 숫자·가격은 재료에 있는 것만). 첫 줄이 훅 — 인사·"스크롤 멈추세요"·내용 없는 서두 금지, 숫자·장면·대상으로 구체적으로. 상투어(다양한·혁신적인·놓치지 마세요·지금 바로)·특수 대시(—)는 쓰지 않음.
-- refMediaIds: 아래 참고 사진 중 기준으로 쓸 id 배열(없으면 빈 배열).${spec.media === 'video' ? `
-- scenes: 장면 배열(${spec.seconds ?? 15}초 안, 4~6개) — line = 그 장면의 한국어 자막·내레이션 한 줄(분당 300음절로 2~4초, 첫 장면은 3초 안에 훅, 마지막 장면은 첫 장면과 이어지게), visualEn = 그 장면 영상 지시(영문).` : ''}
+- caption: 이 시안${video ? '을 올릴 게시물 본문' : '에 얹을'} 한국어 카피 1~2줄(브랜드 말투: ${tone}, 금지어: ${[...(brand?.banned_words ?? []), ...Q.avoidOf(brand?.voice)].join(', ') || '없음'}, 과장·최상급 금지, 숫자·가격은 재료에 있는 것만). 첫 줄이 훅 — 인사·"스크롤 멈추세요"·내용 없는 서두 금지, 숫자·장면·대상으로 구체적으로. 상투어(다양한·혁신적인·놓치지 마세요·지금 바로)·특수 대시(—)는 쓰지 않음.
+- refMediaIds: 아래 참고 사진 중 기준으로 쓸 id 배열(없으면 빈 배열).
 ${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}`,
-        tools: [], messages: [{ role: 'user', content: `[재료]\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}${brand?.intro ? `\n소개: ${brand.intro}` : ''}${brand?.products ? `\n주력 상품: ${brand.products}` : ''}${co?.business ? `\n회사 사업: ${co.business}` : ''}${co?.customers ? `\n주요 고객: ${co.customers}` : ''}\n목적: ${PURPOSE[b.purpose]}\n채널·종류: ${spec.label}(${spec.aspect}, ${spec.px})\n핵심 메시지: ${b.message}\n톤: ${tone}\n수량: ${b.quantity}\n${photos.length ? `참고 사진(자료실):\n${photos.map((p) => `- ${p.id} ${p.title}${p.description ? `: ${p.description.slice(0, 100)}` : ''}`).join('\n')}\n` : ''}${posts.length ? `참고 게시물:\n${posts.map((p) => `- ${p.title}: ${String(p.body ?? '').slice(0, 120)}`).join('\n')}\n` : ''}${refs.links?.length ? `레퍼런스 링크: ${refs.links.join(', ')}\n` : ''}` }],
-        format: { type: 'object', additionalProperties: false, required: ['promptEn', 'negativeEn', 'summaryKo', 'caption', 'refMediaIds', ...(spec.media === 'video' ? ['scenes'] : [])],
+        tools: [], messages: [{ role: 'user', content: `[재료]\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}${brand?.intro ? `\n소개: ${brand.intro}` : ''}${brand?.products ? `\n주력 상품: ${brand.products}` : ''}${co?.business ? `\n회사 사업: ${co.business}` : ''}${co?.customers ? `\n주요 고객: ${co.customers}` : ''}\n목적: ${PURPOSE[b.purpose]}\n채널·종류: ${spec.label}(${spec.aspect}, ${spec.px})\n핵심 메시지: ${b.message}\n톤: ${tone}\n수량: ${b.quantity}\n${photos.length ? `참고 사진(자료실):\n${photos.map((p) => `- ${p.id} ${p.title}${p.description ? `: ${p.description.slice(0, 100)}` : ''}`).join('\n')}\n` : ''}${posts.length ? `참고 게시물:\n${posts.map((p) => `- ${p.title}: ${String(p.body ?? '').slice(0, 120)}`).join('\n')}\n` : ''}${refs.links?.length ? `레퍼런스 링크: ${refs.links.join(', ')}\n` : ''}${video ? `실제 화면 캡처(자료실 '영상 화면 캡처'):\n${caps.length ? caps.map((c) => `- ${c.id} ${c.title}${c.description ? `: ${c.description.slice(0, 80)}` : ''}`).join('\n') : '(없음 — 화면 얹는 장면 없이)'}\n배경음(자료실 '영상 배경음'):\n${bgms.length ? bgms.map((x) => `- ${x.id} ${x.title}`).join('\n') : '(없음)'}\n` : ''}` }],
+        format: { type: 'object', additionalProperties: false, required: ['promptEn', 'negativeEn', 'summaryKo', 'caption', 'refMediaIds', ...(video ? ['character', 'look', 'scenes', 'endCard', 'bgmId'] : [])],
           properties: { promptEn: { type: 'string' }, negativeEn: { type: 'string' }, summaryKo: { type: 'string' }, caption: { type: 'string' }, refMediaIds: { type: 'array', items: { type: 'string' } },
-            ...(spec.media === 'video' ? { scenes: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['line', 'visualEn'], properties: { line: { type: 'string' }, visualEn: { type: 'string' } } } } } : {}) } },
+            ...(video ? { character: { type: 'string' }, look: { type: 'string' }, bgmId: { type: 'string' },
+              endCard: { type: 'object', additionalProperties: false, required: ['headline', 'cta'], properties: { headline: { type: 'string' }, cta: { type: 'string' } } },
+              scenes: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['line', 'visualEn', 'seconds', 'screenMediaId', 'device'],
+                properties: { line: { type: 'string' }, visualEn: { type: 'string' }, seconds: { type: 'integer' }, screenMediaId: { type: 'string' }, device: { type: 'string', enum: ['phone', 'laptop', 'none'] } } } } } : {}) } },
       });
       await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
         values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_studio')`;
       const o = JSON.parse((r.content as any[]).filter((x) => x.type === 'text').map((x) => x.text).join(''));
-      const okIds = new Set(photos.map((p) => p.id));
-      const scenes = spec.media === 'video' && Array.isArray(o.scenes) ? o.scenes.map((x: any) => ({ line: String(x?.line ?? '').trim().slice(0, 200), visualEn: String(x?.visualEn ?? '').trim().slice(0, 500) })).filter((x: { line: string }) => x.line).slice(0, 10) : [];
+      const okIds = new Set(photos.map((p) => p.id)); const capIds = new Set(caps.map((c) => c.id)); let screens = 0;
+      const scenes = video && Array.isArray(o.scenes) ? o.scenes.map((x: any) => {
+        const screen = capIds.has(String(x?.screenMediaId ?? '')) && x?.device !== 'none' && screens < 2 ? (screens++, { mediaId: String(x.screenMediaId), device: x.device === 'laptop' ? 'laptop' : 'phone' }) : null;
+        return { line: String(x?.line ?? '').trim().slice(0, 120), visualEn: String(x?.visualEn ?? '').trim().slice(0, 700), seconds: Math.min(5, Math.max(3, Math.round(Number(x?.seconds) || 4))), screen };
+      }).filter((x: { line: string; visualEn: string }) => x.line || x.visualEn).slice(0, 5) : [];
       out = { promptEn: String(o.promptEn ?? fallback.promptEn).slice(0, 4000), negativeEn: String(o.negativeEn ?? fallback.negativeEn).slice(0, 1000), summaryKo: String(o.summaryKo ?? '').slice(0, 1000), caption: String(o.caption ?? b.message).slice(0, 2000),
-        refMediaIds: (Array.isArray(o.refMediaIds) ? o.refMediaIds.filter((x: string) => okIds.has(x)) : fallback.refMediaIds), aspect: spec.aspect, model: model?.id ?? null, source: 'ai', ...(scenes.length ? { scenes } : {}) };
+        refMediaIds: (Array.isArray(o.refMediaIds) ? o.refMediaIds.filter((x: string) => okIds.has(x)) : fallback.refMediaIds), aspect: spec.aspect, model: model?.id ?? null, source: 'ai',
+        ...(scenes.length ? { scenes } : {}), ...(video ? { character: String(o.character ?? '').slice(0, 400), look: String(o.look ?? '').slice(0, 300),
+          endCard: { headline: String(o.endCard?.headline ?? '').slice(0, 30), cta: String(kit.cta || o.endCard?.cta || '').slice(0, 60) }, bgmId: bgms.some((x) => x.id === o.bgmId) ? o.bgmId : null } : {}) };
     } catch { /* AI 실패·한도 → 기본 프롬프트 */ }
   }
-  const est = (model?.credits ?? (spec.media === 'video' ? 80 : 6.5)) * b.quantity;
+  const est = (model?.credits ?? (video ? 80 : 6.5)) * b.quantity;
   const q = captionQuality(out.caption, (out as { scenes?: Scene[] }).scenes ?? [], spec, rules, Q);
   const saved = { ...out, caption: q.caption, quality: q.quality, ...(q.timing ? { timing: q.timing } : {}) };
   await sql`update mkt_briefs set prompt = ${sql.json(saved as never)}, est_credits = ${est}, status = 'ready', updated_at = now() where id = ${briefId}`;
@@ -170,6 +200,8 @@ async function generateBrief(u: SessionUser, b: any) {
   if (hf.enabled) {
     // 로컬 10/22: 실제 API 는 비동기 — 제출(요청 id 저장) → 상태 폴링 → 완료 시 자료실 저장. 이미지는 잠깐 기다려 보고, 남은 건 tick(hfPollTick)이 이어받음
     const model = modelId(p.model) ?? modelFor(hf.models, spec.media)?.id;
+    // #454 영상은 장면별 생성 → 검수 → 서버 합성(mktVideo)
+    if (spec.media === 'video' && model) return (await import('./mktVideo')).startV2(b, contentId, model);
     const jobs: HfJob[] = []; const errors: string[] = [];
     if (!model) errors.push(`쓸 수 있는 ${spec.media === 'video' ? '영상' : '이미지'} 모델이 없습니다(플랫폼 운영 › 모델 표)`);
     else for (let n = 0; n < b.quantity; n++) {
@@ -205,6 +237,8 @@ const HF_TIMEOUT_MIN = 30; // 영상도 이 안에 끝남 — 넘으면 남은 �
 /** 생성 요청 상태 확인 → 완료분 자료실 저장 → 모두 끝나면 새 버전·승인 대기(또는 실패). 동시에 둘이 돌지 않게 result.pollAt 으로 잡는다 */
 export async function pollBrief(briefId: string, opt: { waitMs?: number } = {}): Promise<{ status: string; mediaIds?: string[]; errors?: string[] }> {
   const sql = db(); const until = Date.now() + (opt.waitMs ?? 0); let delay = 2000;
+  const [pl] = await sql<{ p: string | null }[]>`select result->>'pipeline' as p from mkt_briefs where id = ${briefId}`;
+  if (pl?.p === 'v2') return (await import('./mktVideo')).pollV2(briefId, opt);
   for (;;) {
     const [b] = await sql<any[]>`update mkt_briefs set result = result || jsonb_build_object('pollAt', now()) where id = ${briefId} and status = 'generating' and result->>'provider' = 'higgsfield'
       and coalesce((result->>'pollAt')::timestamptz, 'epoch') < now() - interval '3 minutes' returning *`;
@@ -256,7 +290,7 @@ export async function hfPollTick() {
   return { checked: rows.length, out };
 }
 /** tick·폴링에서 의뢰자 권한으로 자료실 저장·새 버전(세션 없이) — 계정이 막혔으면 실패로 남김 */
-async function actorFor(userId: string): Promise<SessionUser> {
+export async function actorFor(userId: string): Promise<SessionUser> {
   const [r] = await db()<any[]>`select u.id, u.email, u.name, u.role, u.status, u.timezone, u.is_demo, u.platform_admin, u.tenant, t.kind from users u join tenants t on t.id = u.tenant where u.id = ${userId} and u.status = 'active' and t.status = 'active'`;
   if (!r) throw new Error('의뢰자 계정을 쓸 수 없어 결과를 저장하지 못했습니다');
   return { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: '', isDemo: r.is_demo, platformAdmin: r.platform_admin, tenant: r.tenant, personal: r.kind === 'personal' } as SessionUser;

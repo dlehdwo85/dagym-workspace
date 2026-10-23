@@ -152,6 +152,8 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.getByTestId('meta-precheck').waitFor();
   // 대표(첫 설치 계정)는 플랫폼 관리자 → 콘솔 등록 값이 보임(고객 회사 관리자에게는 숨김 — API 시험)
   await owner.getByTestId('ads-callbacks').getByText(/\/api\/marketing\/ads\/callback\/meta/).waitFor({ state: 'attached' });
+  await owner.getByTestId('ads-callbacks-meta').getByText(/\/api\/marketing\/publish\/callback\/meta/).waitFor({ state: 'attached' }); // 로컬 10/23 #448: Meta OAuth 리디렉션 URI 두 개 다
+  for (const re of [/\/api\/marketing\/publish\/callback\/meta/, /\/api\/marketing\/ads\/callback\/meta/]) await owner.getByTestId('publish-tech-oauth').getByText(re).waitFor({ state: 'attached' });
   await owner.getByTestId('publish-tech').getByText(/\/api\/marketing\/publish\/meta\/data-deletion/).waitFor({ state: 'attached' });
   const thRow = owner.getByTestId('publish-channel').and(owner.locator('[data-channel="threads"]'));
   await thRow.getByTestId('publish-channel-mode').filter({ hasText: '꺼짐' }).waitFor();

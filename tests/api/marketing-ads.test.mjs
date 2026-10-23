@@ -85,6 +85,7 @@ test('네이버 라이선스 연결·읽기·합계·권한', async () => {
   assert.equal((await ctx.owner.ok('GET', '/api/marketing/ads')).callbacks, null, '플랫폼 관리자가 아닌 회사 관리자에게는 콘솔 값 숨김');
   await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
   assert.match((await ctx.owner.ok('GET', '/api/marketing/ads')).callbacks.google, /\/api\/marketing\/ads\/callback\/google$/);
+  assert.match((await ctx.owner.ok('GET', '/api/marketing/ads')).callbacks.metaPublish, /\/api\/marketing\/publish\/callback\/meta$/, 'Meta OAuth 리디렉션 URI 두 개(광고 계정·게시)');
   assert.ok(!JSON.stringify(ov).includes('naver-secret') && !JSON.stringify(ov).includes('naver-license'), '비밀값 미노출');
   // 다시 읽어도 덮어쓰기(중복 없음)
   await ctx.owner.ok('POST', '/api/marketing/ads/sync', {});

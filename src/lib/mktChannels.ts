@@ -89,7 +89,7 @@ export async function listChannels(u: SessionUser) {
       return { key: c.key, label: c.label, note: c.note, kind: c.kind, enabled: sets.get(c.key) ?? c.on, connectable: c.kind !== 'helper' && c.kind !== 'later', ready: kindReady(c.kind), mode, accounts };
     }),
     // 기술 정보는 플랫폼 관리자(슈퍼 계정)에게만 — 고객 화면에는 숨김
-    tech: u.platformAdmin ? { metaCallback: callback(), metaDeletion: `${appUrl()}/api/marketing/publish/meta/data-deletion`, metaScopes: META_PUBLISH_SCOPES, metaReady: metaReady(), metaLive: metaLive(),
+    tech: u.platformAdmin ? { metaCallback: callback(), metaAdsCallback: `${appUrl()}/api/marketing/ads/callback/meta`, metaDeletion: `${appUrl()}/api/marketing/publish/meta/data-deletion`, metaScopes: META_PUBLISH_SCOPES, metaReady: metaReady(), metaLive: metaLive(),
       metaWebhook: `${appUrl()}/api/marketing/meta/webhook`, metaWebhookToken: !!process.env.META_WEBHOOK_VERIFY_TOKEN, leadScopes: META_LEAD_SCOPES } : null,
   };
 }

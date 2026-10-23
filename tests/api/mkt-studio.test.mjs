@@ -63,7 +63,7 @@ test('[생성](연동 전) → 콘텐츠 초안(자막·근거 포함) + 제작 
 test('AI 없으면 기본 프롬프트(규격·메시지 포함) · 취소 → 열린 카드도 취소 · 영상 종류는 kling 80크레딧 · 월 운영 목표 주차 정보 보관', async () => {
   await ctl({ anthropicReset: true });
   const r = await ctx.owner.ok('POST', '/api/marketing/studio', { kind: 'reels', purpose: 'launch', message: '겨울 시즌권 출시', quantity: 1, goalWeek: 2 });
-  assert.equal(r.prompt.source, 'template'); assert.match(r.prompt.promptEn, /15-second vertical video[\s\S]*겨울 시즌권 출시[\s\S]*9:16/); assert.equal(r.prompt.model, 'kling-video/v3.0-turbo/text-to-video'); assert.equal(r.prompt.estCredits, 80);
+  assert.equal(r.prompt.source, 'template'); assert.match(r.prompt.promptEn, /15-second vertical Korean TV-commercial-style video[\s\S]*겨울 시즌권 출시[\s\S]*All people are Korean[\s\S]*no text, letters, signage[\s\S]*9:16/); // #454 한국인·글자 금지 assert.equal(r.prompt.model, 'kling-video/v3.0-turbo/text-to-video'); assert.equal(r.prompt.estCredits, 80);
   const g = await ctx.owner.ok('PATCH', `/api/marketing/studio/${r.id}`, { action: 'generate' });
   assert.equal(g.requestIds.length, 1);
   assert.equal((await sql`select kind from mkt_production_requests where id = ${g.requestIds[0]}`)[0].kind, 'video');
@@ -127,9 +127,10 @@ test('Higgsfield 생성(비동기): 제출(경로·Key 인증·비율 맞춤·�
   const gv = await ctx.owner.ok('PATCH', `/api/marketing/studio/${rv.id}`, { action: 'generate' });
   assert.equal(gv.status, 'generating');
   const sv = await fetch(`${FAKE}/__state`).then((x) => x.json());
-  assert.deepEqual([sv.hf[0].path, sv.hf[0].body.aspect_ratio, sv.hf[0].body.duration], ['kling-video/v3.0-turbo/text-to-video', '9:16', 15]);
+  // #454 영상은 장면별(AI 없을 때 기본 4장면 3·3·4·4초) → 검수 → 서버 합성(tests/api/mkt-video.test.mjs 에서 자세히)
+  assert.deepEqual([sv.hf.length, sv.hf[0].path, sv.hf[0].body.aspect_ratio, sv.hf.map((h) => h.body.duration).join(',')], [4, 'kling-video/v3.0-turbo/text-to-video', '9:16', '3,3,4,4']);
   let bv;
-  for (let i = 0; i < 6 && bv?.status !== 'review'; i++) { bv = (await ctx.owner.ok('GET', '/api/marketing/studio')).briefs.find((x) => x.id === rv.id); }
+  for (let i = 0; i < 12 && bv?.status !== 'review'; i++) { bv = (await ctx.owner.ok('GET', '/api/marketing/studio')).briefs.find((x) => x.id === rv.id); }
   assert.equal(bv.status, 'review', '목록 열 때 폴링해서 완료');
   const [fv] = await sql`select mime_type from library_files where id = ${bv.result.mediaIds[0]}`; assert.equal(fv.mime_type, 'video/mp4');
   // 잔액 부족(403) → 바로 실패, 이유가 화면에

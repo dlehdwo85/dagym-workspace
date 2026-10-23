@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ExternalLink, Plus, Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { PortalApplyLink, portalService } from './PortalApply';
 
 /** #450 영업실 '지원사업' — 기업마당·K-Startup·기관 공지 공고를 회사 프로필로 맞춤(1차 규칙 + AI 세일즈 판단) → 관심·신청 준비(담당 업무·마감 알림) → 신청·선정·탈락 기록 */
 const C = '#2563EB';
@@ -127,7 +128,7 @@ function SourceLine({ sources }: { sources: ListData['sources'] }) {
   return (
     <footer className="space-y-0.5 border-t border-line pt-2 text-[11px] text-ink-3" data-testid="support-sources">
       <p>공고 원문 출처: 기업마당(bizinfo.go.kr) · K-Startup(k-startup.go.kr) · 각 기관 공지. 공고 내용은 원문 그대로 옮기고, 자세한 조건은 원문 링크에서 확인하세요. 1차 판단·AI 판단은 참고용입니다.</p>
-      {sources.map((s) => <p key={s.slug}>{s.label}: {s.last_run_at ? `마지막 수집 ${fmtDateTime(s.last_run_at)}` : '아직 수집 전'}{s.summary ? ` — ${s.summary}` : ''}</p>)}
+      {sources.map((s) => <p key={s.slug} className={cx(portalService(s.summary) && 'text-amber-900')}>{s.label}: {s.last_run_at ? `마지막 수집 ${fmtDateTime(s.last_run_at)}` : '아직 수집 전'}{s.summary ? ` — ${s.summary}` : ''}<PortalApplyLink summary={s.summary} /></p>)}
     </footer>
   );
 }

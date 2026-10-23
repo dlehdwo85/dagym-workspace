@@ -107,12 +107,14 @@ const arrOf = (j: any): any[] => {
 };
 const keysOf = (list: any[]) => [...new Set(list.slice(0, 3).flatMap((x) => Object.keys(x ?? {})))].slice(0, 25).join(', ');
 
-/** 공공 원천 응답 읽기 — 키는 로그·요약에서 가림. data.go.kr XML 오류(활용신청·키 문제)는 알아보기 쉬운 말로 */
-async function fetchSource(url: URL, ctx: CollectorCtx, secret: string, timeoutMs: number): Promise<{ json: any; text: string }> {
+/** 공공 원천 응답 읽기 — 키는 로그·요약에서 가림. data.go.kr XML 오류(활용신청·키 문제)는 알아보기 쉬운 말로.
+ *  service = 공공데이터포털 서비스 번호(15157820·15125364) — 로컬 10/23 운영: 활용신청 전 키는 HTTP 403 SERVICE_KEY_IS_NOT_REGISTERED_ERROR → '활용신청 필요(서비스 번호)'로 */
+async function fetchSource(url: URL, ctx: CollectorCtx, secret: string, timeoutMs: number, service?: string): Promise<{ json: any; text: string }> {
   const safe = (s: string) => s.split(secret).join('***').split(encodeURIComponent(secret)).join('***').slice(0, 200);
   let res: Response; try { res = await ctx.fetchImpl(url.toString(), { headers: { Accept: 'application/json, application/xml;q=0.9, */*;q=0.5', 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' }, signal: AbortSignal.timeout(timeoutMs) }); }
   catch (e) { throw new Error(`요청 실패 (${e instanceof Error ? e.name : 'Error'})`); }
   const text = decodeKoreanText(new Uint8Array(await res.arrayBuffer())).text;
+  if (/SERVICE_KEY_IS_NOT_REGISTERED|SERVICE ACCESS DENIED|등록되지 않은 (서비스|인증)키/i.test(text)) throw new Error(`공공데이터포털 활용신청 필요${service ? `(서비스 ${service})` : ''} — 키는 그대로 두고 포털(data.go.kr)에서 [활용신청]`);
   let json: any = null; try { json = JSON.parse(text); } catch { /* XML·HTML */ }
   if (!json) {
     const code = text.match(/<returnReasonCode>([^<]+)</)?.[1] ?? text.match(/<resultCode>([^<]+)</)?.[1] ?? '';
@@ -180,6 +182,8 @@ export async function upsertPrograms(items: ProgramIn[]) {
   }
   return out;
 }
+/** 한 건도 못 받았을 때 요약 = 첫 오류(활용신청 안내면 '공공데이터포털 전체:'·'1쪽:' 머리말은 뗌) — 로컬 10/23: '호출 실패 · 받은 0건'만으로는 원인을 모름 */
+const firstErr = (errors: string[]) => errors[0].replace(/^[^:]{1,20}: (?=공공데이터포털 활용신청)/, '');
 const done = (r: { inserted: number; updated: number; unchanged: number }, errors: string[], summary: string, mode: CollectorResult['providerMode'] = 'api'): CollectorResult =>
   ({ ...r, errors: errors.length, errorLog: errors.length ? errors.join('\n').slice(0, 4000) : undefined, summary, providerMode: mode });
 
@@ -210,11 +214,11 @@ export const bizinfoSupport: Collector = {
         const url = new URL(ep.bizinfo_datago_support);
         url.searchParams.set('serviceKey', keys.datago); url.searchParams.set('dataType', 'json'); url.searchParams.set('type', 'json'); url.searchParams.set('pageNo', String(page)); url.searchParams.set('numOfRows', '300');
         if (tag) url.searchParams.set('hashtags', tag);
-        try { const { json, text } = await fetchSource(url, ctx, keys.datago, Math.min(20000, left() - 3000)); const list = json ? arrOf(json) : xmlItems(text); take(list); calls.push(`포털 ${tag ?? '전체'} ${page}쪽`); if (!tag && list.length < 300) break; }
+        try { const { json, text } = await fetchSource(url, ctx, keys.datago, Math.min(20000, left() - 3000), '15157820'); const list = json ? arrOf(json) : xmlItems(text); take(list); calls.push(`포털 ${tag ?? '전체'} ${page}쪽`); if (!tag && list.length < 300) break; }
         catch (e) { errors.push(`공공데이터포털 ${tag ?? '전체'}: ${e instanceof Error ? e.message : String(e)}`); break; }
       }
     } else return done({ inserted: 0, updated: 0, unchanged: 0 }, [], '기업마당: 인증키 입력 필요 — 건너뜀(플랫폼 운영 › 지원사업 원천 인증키 또는 BIZINFO_API_KEY)');
-    if (!items.length) { if (got) errors.push(`공고 칸을 찾지 못함 — 받은 칸: ${keys1}`); return done({ inserted: 0, updated: 0, unchanged: 0 }, errors, `기업마당: ${calls.join('·') || '호출 실패'} · 받은 ${got}건 · 공고 0건${got ? ` (칸: ${keys1})` : ''}`); }
+    if (!items.length) { if (got) errors.push(`공고 칸을 찾지 못함 — 받은 칸: ${keys1}`); return done({ inserted: 0, updated: 0, unchanged: 0 }, errors, !calls.length && errors.length ? `기업마당: ${firstErr(errors)}` : `기업마당: ${calls.join('·') || '호출 실패'} · 받은 ${got}건 · 공고 0건${got ? ` (칸: ${keys1})` : ''}`); }
     const r = await upsertPrograms(items);
     return done(r, errors, `기업마당(${keys.bizinfo ? '직접' : '공공데이터포털'}: ${calls.join('·')}): 공고 ${items.length}건 · 신규 ${r.inserted} · 바뀜 ${r.updated} · 변화없음 ${r.unchanged}`);
   },
@@ -253,13 +257,13 @@ export const kstartupSupport: Collector = {
       url.searchParams.set('serviceKey', key); url.searchParams.set('page', String(page)); url.searchParams.set('perPage', '100'); url.searchParams.set('returnType', 'json'); url.searchParams.set('cond[rcrt_prgs_yn::EQ]', 'Y');
       url.searchParams.set('cond[pbanc_rcpt_end_dt::GTE]', ymdKst().replace(/-/g, '')); // 접수 마감이 오늘 이후(모집 중)
       let list: any[];
-      try { const { json, text } = await fetchSource(url, ctx, key, Math.min(15000, left() - 2000)); list = json ? arrOf(json) : xmlItems(text); }
+      try { const { json, text } = await fetchSource(url, ctx, key, Math.min(15000, left() - 2000), '15125364'); list = json ? arrOf(json) : xmlItems(text); }
       catch (e) { errors.push(`${page}쪽: ${e instanceof Error ? e.message : String(e)}`); break; }
       pages++; got += list.length; if (!keys) keys = keysOf(list);
       for (const it of list) { const p = kstartupProgram(it); if (p) items.push(p); }
       if (list.length < 100) break;
     }
-    if (!items.length) { if (got) errors.push(`공고 칸을 찾지 못함 — 받은 칸: ${keys}`); return done({ inserted: 0, updated: 0, unchanged: 0 }, errors, `K-Startup: ${pages}쪽 · 받은 ${got}건 · 공고 0건`); }
+    if (!items.length) { if (got) errors.push(`공고 칸을 찾지 못함 — 받은 칸: ${keys}`); return done({ inserted: 0, updated: 0, unchanged: 0 }, errors, !pages && errors.length ? `K-Startup: ${firstErr(errors)}` : `K-Startup: ${pages}쪽 · 받은 ${got}건 · 공고 0건`); }
     const r = await upsertPrograms(items);
     return done(r, errors, `K-Startup: ${pages}쪽 · 공고 ${items.length}건 · 신규 ${r.inserted} · 바뀜 ${r.updated} · 변화없음 ${r.unchanged}`);
   },

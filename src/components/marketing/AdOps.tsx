@@ -395,7 +395,7 @@ function LeadsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok: 
 type LeadAdsPage = { accountId: string; label: string; scopes: boolean; enabled: boolean; subscribed: boolean; webhookAt: string | null; polledAt: string | null; error: string | null };
 type LeadAdsRow = { id: string; at: string; status: string; via: string; test: boolean; name: string | null; form: string | null; ad: string | null; owner: string | null; contactMin: number | null; contactVia: string | null;
   late: boolean; error: string | null; leadId: string | null };
-type LeadAds = { days: number; canEdit: boolean; canSales: boolean; setup: { app: boolean; webhook: boolean }; pages: LeadAdsPage[];
+type LeadAds = { days: number; canEdit: boolean; canSales: boolean; setup: { app: boolean; webhook: boolean; devMode?: boolean }; pages: LeadAdsPage[];
   summary: { leads: number; created: number; merged: number; problems: number; fast: number; waiting: number; medianMin: number | null };
   byAd: { key: string; ad: string; campaign: string; leads: number; fast: number; cost: number | null; cpl: number | null }[]; recent: LeadAdsRow[] };
 const LEAD_CONNECT = '/api/marketing/publish/connect/meta?leads=1'; // 서버가 Facebook 동의 화면으로 보냄(페이지 이동)
@@ -429,6 +429,7 @@ function LeadAdsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok
             <span className="font-medium">{p.label}</span>
             <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', p.enabled ? 'bg-emerald-50 text-emerald-800' : p.scopes ? 'bg-slate-100 text-ink-2' : 'bg-amber-50 text-amber-800')}>{p.enabled ? '받는 중' : p.scopes ? '꺼짐' : '리드 권한 필요'}</span>
             {p.enabled && <span className="text-ink-3" data-testid="lead-ads-webhook">웹후크 {p.webhookAt ? `마지막 수신 ${fmtDateTime(p.webhookAt)}` : '아직 받은 적 없음'} · 놓친 리드 확인 {p.polledAt ? fmtDateTime(p.polledAt) : '아직'}</span>}
+            {p.enabled && data.setup.devMode && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-900" data-testid="lead-ads-devmode">개발 모드: 실제 광고 리드는 30분마다 불러오기로 들어옵니다(앱 심사·라이브 뒤 실시간)</span>}
             {data.canEdit && <span className="ml-auto flex flex-wrap gap-1.5">
               {p.enabled ? <><Button size="sm" variant="secondary" onClick={() => openTest(p)} data-testid="lead-ads-test">시험 리드 보내기</Button>
                 <Button size="sm" variant="secondary" data-testid="lead-ads-off" onClick={() => confirm(`'${p.label}' 의 리드 광고 받기를 끌까요? 새 신청이 영업 리드로 들어오지 않습니다.`) && run(`lp-${p.accountId}`, async () => { await api(`/api/marketing/lead-ads/pages/${p.accountId}`, { method: 'PUT', body: { enabled: false } }); reload(); }, '리드 광고 받기를 껐습니다')}>끄기</Button></>

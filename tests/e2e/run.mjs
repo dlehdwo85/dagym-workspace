@@ -57,6 +57,7 @@ import { adLocal } from './adLocal.step.mjs';
 import { adLeads } from './adLeads.step.mjs';
 import { leadAds } from './leadAds.step.mjs';
 import { supportPrograms } from './support.step.mjs';
+import { mktVideo } from './mktVideo.step.mjs';
 import { attachLibrary } from './attachLibrary.step.mjs';
 import { inbox } from './inbox.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
@@ -2439,6 +2440,7 @@ await step('광고 최적화 1차 동네 타깃: 새 세팅안 동네 칸(중심
 await step('광고 최적화 1차 통화 기반: 전화·문의 기준 키워드 점검(요약·끄기 제안·잘 됨) → 워크인 키워드 [끄기] 보내는 값 → 목표 전환당 비용 → 기간 7일 → 휴대폰 폭 → 전화 문의 기록에 광고 키워드', () => adLeads({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 2차 ① 리드 광고(메타) → 영업 리드: 광고 운영 리드 광고 상자(받는 중·웹후크·요약·이름 가림·첫 연락·재알림·광고별 리드당 비용) → 실패 [다시 처리] → 휴대폰 폭 → 연결 계정 받는 중 → 영업 리드 상세 리드 광고 상자·[전화] 첫 연락 기록', () => leadAds({ owner, ctx, sql, BASE, SHOTS }));
 await step('#450 영업실 지원사업: 사이드바 메뉴 → 맞춤 목록(1차 판단·조건 칩·D-day·자격 안 맞는 공고 빼기) → [AI 판단] → [신청 준비] 담당 업무 → 영업 홈 마감 임박 카드 → 상세(준비 서류·진행) → [신청 완료] → [직접 추가] 지난 신청 → 신청·결과 탭 → 휴대폰 폭', () => supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }));
+await step('#454 영상 파이프라인 v2: 플랫폼 운영 내레이션(TTS) 카드·연결 시험 → 브랜드 키트 영상 끝 화면·자막 → 제작의뢰실 릴스 준비 상태 → [생성] 장면별 생성·검수·합성 → 장면 칩(실제 화면·검수 ✓)·완성 영상·승인 대기 → 휴대폰 폭', () => mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('대표 23:40·23:55 마감일 버튼 크기 + 업무 첨부 자료실에서 가져오기(검색·체크 → 연결·타임라인)', () => attachLibrary({ owner, ctx, BASE, SHOTS }));
 await step('대표 02:30·03:00 승인함 통합(종류별 탭·건수·바로 승인/반려) · 예산 브랜드 축(세팅안 필요·총액 적기) · 월 목표 반려 · 매출 목표 AI 추천 · 지금 상태', () => inbox({ owner, ctx, sql, BASE, SHOTS }));
 

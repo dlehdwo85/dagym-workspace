@@ -211,7 +211,7 @@ test('놓친 리드 불러오기: 웹후크 없이 양식 리드 읽기 → 처�
 
 test('보고서: 받는 중·웹후크 마지막 수신 · 5분 안 연락 · 광고별 리드당 비용 · 직원은 보기만 · 공간 밖 404', async () => {
   const rep = await ctx.owner.ok('GET', '/api/marketing/lead-ads?days=7');
-  assert.equal(rep.pages[0].enabled, true); assert.ok(rep.pages[0].webhookAt); assert.equal(rep.setup.webhook, true);
+  assert.equal(rep.pages[0].enabled, true); assert.ok(rep.pages[0].webhookAt); assert.equal(rep.setup.webhook, true); assert.equal(rep.setup.devMode, true, '라이브 전 = 개발 모드 안내');
   // 시험 리드 2건은 빼고: 홍길동·김영희·박민수(새 리드 3) + 홍길동 다시 신청(기존 리드에 붙임 1)
   assert.deepEqual({ leads: rep.summary.leads, created: rep.summary.created, merged: rep.summary.merged, problems: rep.summary.problems }, { leads: 4, created: 3, merged: 1, problems: 0 });
   assert.ok(rep.summary.fast >= 1, '김영희 = [전화] 바로');

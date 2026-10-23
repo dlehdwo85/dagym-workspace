@@ -8,6 +8,7 @@ import { api, useApi } from '@/components/client';
 import { AiForecast } from '@/components/AiForecast';
 import { PlatformTenants } from '@/components/PlatformTenants';
 import { PlatformHiggsfield } from '@/components/PlatformHiggsfield';
+import { PlatformTts } from '@/components/PlatformTts';
 import { fmtBytes, lim, won } from '@/components/usage';
 import { PlatformPayments } from '@/components/Billing';
 import { PayTest } from '@/components/PayTest';
@@ -65,6 +66,7 @@ export default function PlatformPage() {
       <PlatformQualityRules />
       <AiForecast />
       <PlatformHiggsfield />
+      <PlatformTts />
       <PlatformSalesMigrate />
       <PlatformSalesSources />
       <PlatformCollectorSettings />

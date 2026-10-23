@@ -2,10 +2,12 @@
 import { useEffect, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { PortalApplyLink, portalService, portalUrl } from './PortalApply';
 
 type KeyS = { present: boolean; from: 'settings' | 'env' | null; hint: string | null };
 type S = { vendorPages: { company: string; url: string; register_url?: string | null }[]; vendorPagesUpdatedAt: string | null; endpoints: Record<string, string>; endpointOverrides: Record<string, string>; defaultEndpoints: Record<string, string>;
-  supportKeys: { bizinfo: KeyS; datago: KeyS; updatedAt: string | null }; supportWatchPages: { name: string; url: string; region?: string | null }[]; supportWatchPagesUpdatedAt: string | null };
+  supportKeys: { bizinfo: KeyS; datago: KeyS; updatedAt: string | null }; supportWatchPages: { name: string; url: string; region?: string | null }[]; supportWatchPagesUpdatedAt: string | null;
+  supportRuns: { slug: string; status: string; started_at: string; summary: string | null }[] };
 const EP_LABEL: Record<string, string> = { lh_bid: 'LH 입찰공고', lh_prespec: 'LH 사전규격', d2b_bid: '방위사업청(국방전자조달) 입찰', onbid_lease: '온비드 임대 공고', nuri_bid_servc: '누리장터 민간입찰 용역', nuri_bid_thng: '누리장터 민간입찰 물품', bizinfo_support: '지원사업 · 기업마당', bizinfo_datago_support: '지원사업 · 기업마당(공공데이터포털)', kstartup_support: '지원사업 · K-Startup' };
 /** 한 줄 = "회사명 | https://감시주소 | https://등록신청주소(선택)" (탭·쉼표도 허용) */
 export function parsePages(text: string): { company: string; url: string; registerUrl: string | null }[] {
@@ -18,6 +20,7 @@ export function parseSupportPages(text: string): { name: string; url: string; re
     const name = m[1].trim() || (() => { try { return new URL(m[2]).hostname; } catch { return m[2]; } })(); return { name, url: m[2], region: m[3] ?? null }; }).filter((p): p is P => !!p);
 }
 const KEY_FROM: Record<string, string> = { settings: '여기 입력', env: '환경 변수' };
+const RUN_LABEL: Record<string, string> = { bizinfo_support: '기업마당', kstartup_support: 'K-Startup', support_watch: '감시 페이지' };
 /** #450 지원사업 원천 — 기업마당 인증키·공공데이터포털 인증키(K-Startup·기업마당 데이터)·감시 페이지. 키 값은 다시 보여 주지 않음(앞 4자만) */
 function SupportSources({ data, reload }: { data: S; reload: () => void }) {
   const [biz, setBiz] = useState(''); const [dg, setDg] = useState(''); const [busy, setBusy] = useState(false);
@@ -34,6 +37,11 @@ function SupportSources({ data, reload }: { data: S; reload: () => void }) {
       <h3 className="text-sm font-semibold">지원사업 원천(영업실 ‘지원사업’)</h3>
       <p className="mt-1 text-xs text-ink-2">기업마당 인증키는 기업마당 ‘정책정보 개방 › 지원사업정보 API’ 아래 ‘API 사용 신청’에서 바로 발급됩니다. 공공데이터포털 인증키는 K-Startup 사업공고(15125364)·기업마당 데이터(15157820)를 각각 활용신청한 키 — 비우면 영업 수집기와 같은 DATA_GO_KR_SERVICE_KEY 를 씁니다. 키는 암호화해 저장하고 다시 보여 주지 않습니다.</p>
       <div className="mt-2 flex flex-wrap gap-1.5"><K k="bizinfo" label="기업마당" /><K k="datago" label="공공데이터포털" /></div>
+      {data.supportRuns.some((r) => portalService(r.summary)) && <p className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-900" data-testid="support-apply-needed">
+        공공데이터포털 활용신청 필요(서비스 <a className="font-semibold underline" href={portalUrl('15157820')} target="_blank" rel="noreferrer">15157820</a> / <a className="font-semibold underline" href={portalUrl('15125364')} target="_blank" rel="noreferrer">15125364</a>) — 키는 그대로 두고 포털에서 [활용신청]. 신청이 승인되면 영업실 › 수집기 [지금 수집]으로 다시 확인하세요.</p>}
+      {data.supportRuns.length > 0 && <ul className="mt-1.5 space-y-0.5 text-xs" data-testid="support-last-runs">{data.supportRuns.map((r) => (
+        <li key={r.slug} className={cx(portalService(r.summary) ? 'text-amber-900' : r.status === 'failed' ? 'text-red-700' : 'text-ink-2')} data-testid={`support-last-run-${r.slug}`}>
+          최근 수집 · {RUN_LABEL[r.slug] ?? r.slug} {fmtDateTime(r.started_at)} — {r.summary ?? r.status}<PortalApplyLink summary={r.summary} /></li>))}</ul>}
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <label className="text-xs"><span className="text-ink-2">기업마당 인증키(crtfcKey)</span><input type="password" autoComplete="off" className={cx(inputCls, 'mt-0.5 h-8 py-0.5 text-xs')} value={biz} onChange={(e) => setBiz(e.target.value)} placeholder={data.supportKeys.bizinfo.present ? '새 키로 바꿀 때만 입력' : '발급받은 키'} aria-label="기업마당 인증키" data-testid="support-key-bizinfo-input" /></label>
         <label className="text-xs"><span className="text-ink-2">공공데이터포털 인증키(선택)</span><input type="password" autoComplete="off" className={cx(inputCls, 'mt-0.5 h-8 py-0.5 text-xs')} value={dg} onChange={(e) => setDg(e.target.value)} placeholder="비우면 DATA_GO_KR_SERVICE_KEY" aria-label="공공데이터포털 인증키" /></label>
