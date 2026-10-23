@@ -892,3 +892,13 @@
     - 토큰 caps 등록, Android data 전용 발송, iOS 카테고리 'wn.*' + 버튼 처리
     - resyncReminders 알람 → WorkinNative.setAlarms, 전체화면 허용 안내
   - 이 노트북에는 Java·Android SDK가 없어 컴파일은 GitHub Actions 'mobile'로 확인한다.
+- 16:50 (10/23) 앱 1.1.3 네이티브(Android) 계속
+  - 9f4f670a 문자에 파일 바로 첨부(#183 7-3): WorkinNative.shareToSms로 기본 문자 앱을 번호·본문·첨부로 채워 연다(캐시 파일만, 못 열면 공유 창).
+  - 클라우드에 웹 몫을 요청했다: 위젯 refreshWidget 호출, 문자 탭에서 첨부를 받아 shareToSms로 넘기기(10MB 넘으면 주소).
+  - 위젯 링크 형식 불일치도 확인을 요청했다: 서버 links 'workos://tasks/{id}'를 appUrlOpen이 '/{id}'로 해석한다.
+  - Play 정책 확인: USE_FULL_SCREEN_INTENT(대상 SDK 34+)는 Play Console '앱 콘텐츠 › 전체화면 인텐트' 신고가 필요하다.
+    - 자동 허용은 알람 앱·통화 앱뿐이다. 워크인은 사용자가 설정에서 허용하는 방식이다(alarmStatus·openAlarmSettings로 안내).
+    - 신고는 1.1.3 업로드 때 대표 승인 아래 로컬이 작성한다.
+  - iOS:
+    - 알림 버튼은 웹(카테고리 등록·처리)만으로 지금 앱에서 동작한다(클라우드 배포 뒤).
+    - 전체화면 알람(iOS 26 AlarmKit)·위젯(WidgetKit)·문자 첨부(MFMessageCompose)는 Apple 설정·별도 대상이 필요해 다음 단계로 둔다.
