@@ -26,7 +26,7 @@ export const BrandChip = ({ name, color }: { name: string | null; color?: string
 
 const VIDEO_KINDS = ['reels', 'shorts', 'video'];
 /** #516 서버가 바로 그릴 수 있는 시안(인스타·페북 피드·스토리, 크레딧 0) — 서버 mktAutoVisual.serverVisual 과 같은 규칙 */
-export const canDrawVisual = (c: { channel: string; kind?: string | null }) => (c.channel === 'instagram' || c.channel === 'facebook') && !VIDEO_KINDS.includes(c.kind ?? '');
+export const canDrawVisual = (c: { channel: string; kind?: string | null }) => ['instagram', 'facebook', 'blog'].includes(c.channel) && !VIDEO_KINDS.includes(c.kind ?? '');
 /** #516 시안이 없어 승인할 수 없는 카드(스레드만 글로 승인 — 서버 decide 와 같은 규칙) */
 export const needsVisual = (c: { channel: string; media_ids?: string[] }) => c.channel !== 'threads' && !c.media_ids?.length;
 /** [AI 이미지로 다시] 수정 요청 문구 — 서버 classifyRevision 이 이미지 재생성(regen_image)으로 읽음 */

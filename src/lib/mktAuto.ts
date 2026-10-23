@@ -344,14 +344,16 @@ export async function produceContent(c: any, actorId?: string | null) {
   const kind = c.kind as Kind;
   const q = qualityCheck(f.body, d.brief, s, bannedOf(brand), kind, f.title);
   if (f.errors.length) { q.passed = false; q.issues = [...q.issues, ...f.errors]; }
-  if (kind === 'blog') { q.passed = false; q.issues = [...q.issues, (await import('./marketing')).BLOG_PHOTO_RULE]; } // 대표 10/20 18:45 ③: 블로그는 표지+본문 사진이 붙어야 승인 대기
   // #516 시안이 붙은 뒤에만 승인함: 피드·스토리(인스타·페북)는 서버가 바로 그림(크레딧 0), 영상은 제작 요청 카드로 만든 뒤 붙으면 승인 대기
+  // 블로그(로컬 10/24 (c)): 대표 이미지를 그리고 본문 사진 1장(실사)을 붙임 — 둘 다 붙어야 승인 대기(대표 10/20 18:45 ③), 실사가 없으면 '수정 요청'에서 사진을 기다림
   const V = await import('./mktAutoVisual');
-  let mediaIds: string[] = []; let visualNote = ''; let photoId: string | null = null;
+  let mediaIds: string[] = []; let visualNote = ''; let photoId: string | null = null; let bodyIds: string[] = [];
   if (V.serverVisual({ channel: c.channel, kind })) {
-    try { const d = await V.drawAutoVisual({ ...c, title: f.title }, q.body); mediaIds = [d.fileId]; photoId = d.photoId; visualNote = d.photoTitle ? ` · 시안 서버 그리기(사진: ${d.photoTitle})` : ' · 시안 서버 그리기(브랜드 색 바탕)'; }
+    try { const d = await V.drawAutoVisual({ ...c, title: f.title }, q.body); bodyIds = d.bodyId ? [d.bodyId] : []; mediaIds = [d.fileId, ...bodyIds]; photoId = d.photoId;
+      visualNote = (d.photoTitle ? ` · 시안 서버 그리기(사진: ${d.photoTitle})` : ' · 시안 서버 그리기(브랜드 색 바탕)') + (d.bodyTitle ? ` · 본문 사진: ${d.bodyTitle}` : ''); }
     catch (e: any) { visualNote = ` · 시안 그리기 실패: ${String(e?.message ?? e).slice(0, 80)}`; }
   }
+  if (kind === 'blog' && mediaIds.length < 2) { q.passed = false; q.issues = [...q.issues, (await import('./marketing')).BLOG_PHOTO_RULE]; }
   const visualIssue = VIDEO_KINDS.includes(kind) ? '영상 시안 제작 중 — 영상이 붙으면 승인 대기로 올라갑니다' : '시안 이미지 없음 — 승인함에서 [지금 만들기]';
   if (!mediaIds.length && c.channel !== 'threads' && kind !== 'blog') { q.passed = false; q.issues = [...q.issues, visualIssue]; }
   const visualOnly = !q.passed && q.issues.length === 1 && q.issues[0] === visualIssue;
@@ -364,7 +366,7 @@ export async function produceContent(c: any, actorId?: string | null) {
   await sql.begin(async (tx) => {
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${mediaIds}, ${(v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기') + visualNote}, ${c.created_by})`;
     if (v > 1) await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('image', 'video') and status in ('open', 'needs_approval')`;
-    await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief, report: { ...f.report, v }, ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 2, tried: photoId ? [photoId] : [] } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
+    await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief, report: { ...f.report, v }, ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 2, tried: photoId ? [photoId] : [], ...(bodyIds.length ? { bodyIds } : {}) } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임)
     // #426: 영상은 초 단위 장면표(분당 300음절)를 그대로 넘김 — Higgsfield 연동 뒤에는 장면별 프롬프트로

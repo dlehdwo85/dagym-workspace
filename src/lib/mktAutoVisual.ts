@@ -9,10 +9,12 @@ import { tenantOf, type SessionUser } from './types';
  * 자료실 마케팅 실사 사진(그 브랜드 것 먼저, 다른 브랜드 사진은 빼고, 최근 30일에 쓴 사진은 뒤로) 위에
  * 첫 문장(훅)·제목을 카드뉴스 표지 틀(#499-5)로 — 피드·페이스북 1080×1350(4:5), 스토리 1080×1920(9:16, 위·아래 안전 영역).
  * 사진이 없으면 브랜드 색 바탕. 브랜드 키트 로고·글꼴을 씀. Higgsfield AI 이미지는 승인함 [AI 이미지로 다시](크레딧)로만.
- * 영상(릴스·쇼츠·영상)·블로그(표지+본문 실사)·스레드(글만 가능)는 그리지 않는다.
+ * 영상(릴스·쇼츠·영상)·스레드(글만 가능)는 그리지 않는다. 블로그(로컬 10/24 (c))는 대표 이미지(1080×1080)를 그리고 본문 사진 1장(실사)을 붙인다.
  */
 const VIDEO_KINDS = ['reels', 'shorts', 'video'];
-export const serverVisual = (c: { channel: string; kind?: string | null }) => (c.channel === 'instagram' || c.channel === 'facebook') && !VIDEO_KINDS.includes(c.kind ?? '');
+export const serverVisual = (c: { channel: string; kind?: string | null }) => (c.channel === 'instagram' || c.channel === 'facebook' || c.channel === 'blog') && !VIDEO_KINDS.includes(c.kind ?? '');
+/** 블로그는 표지 1장 + 본문 사진 1장 이상(marketing.ts BLOG_PHOTO_RULE) — 둘 다 붙으면 그 줄을 지움 */
+const BLOG_RULE = /^블로그는 표지 1장/;
 
 type Content = { id: string; tenant: string; brand_id: string | null; title: string; channel: string; kind: string | null; created_by: string | null; is_test?: boolean | null; current_version: number };
 
@@ -69,7 +71,7 @@ export function headlineOf(title: string, body: string) {
   return { head: cutAt(head, 44), sub: head === t || !t ? '' : cutAt(t, 40) };
 }
 
-/** 한 장 그려 자료실(마케팅/자동 시안)에 저장 → 파일 id */
+/** 한 장 그려 자료실(마케팅/자동 시안)에 저장 → 파일 id. 블로그는 대표 이미지(정사각) + 본문 사진(그림에 쓴 것과 다른 실사, 없으면 null) */
 export async function drawAutoVisual(c: Content, body: string, opts: { actor?: SessionUser | null; exclude?: Set<string> } = {}) {
   const sql = db();
   const [b] = c.brand_id ? await sql<{ name: string; color: string | null; video: any }[]>`select name, color, video from mkt_brands where id = ${c.brand_id}` : [];
@@ -81,24 +83,27 @@ export async function drawAutoVisual(c: Content, body: string, opts: { actor?: S
   const [photo, logo, font] = await Promise.all([libBytes(c.tenant, photoId, /^image\//).catch(() => null), libBytes(c.tenant, b?.video?.logoFileId, /^image\//).catch(() => null),
     libBytes(c.tenant, b?.video?.fontFileId, /font|\.(otf|ttf)$/i).catch(() => null)]);
   const D = await import('./mktCarouselDraw');
-  const story = c.kind === 'story';
+  const story = c.kind === 'story'; const blog = c.channel === 'blog';
   const png = await D.drawSlide({ kind: 'cover', title: head, body: sub, rows: [], imagePlan: '', imageId: photoId }, 0, 1,
-    { template: photo ? 'box' : 'bold', color: b?.color ?? null, brand, keyword: '', logo: logo?.data ?? null, font: font && /\.(otf|ttf)$/i.test(font.name) ? font.data : null, height: story ? 1920 : 1350 }, photo?.data ?? null);
+    { template: photo ? 'box' : 'bold', color: b?.color ?? null, brand, keyword: '', logo: logo?.data ?? null, font: font && /\.(otf|ttf)$/i.test(font.name) ? font.data : null, height: story ? 1920 : blog ? 1080 : 1350 }, photo?.data ?? null);
   const jpg = await D.toJpeg(png);
   const actor = opts.actor ?? (await actorOf(c));
   if (!actor) throw badRequest('자료실에 저장할 사람이 없습니다(활성 계정 없음)');
   const { saveGeneratedFile } = await import('./library');
   const safe = c.title.replace(/^\s*\[시험\]\s*/, '').replace(/[\\/:*?"<>|\n]+/g, ' ').trim().slice(0, 50) || '자동 시안';
-  const f = await saveGeneratedFile(actor, { fileName: `${safe}_${story ? '스토리' : '피드'}.jpg`, mime: 'image/jpeg', data: jpg, title: `${safe} — 자동 시안`, folder: '마케팅/자동 시안',
-    tags: ['자동 시안', ...(brand ? [brand] : [])], description: `서버 그리기(크레딧 0) · ${photo ? `사진: ${photo.title}` : '사진 없음 — 브랜드 색 바탕'}`, source: 'ai', space: 'marketing', meta: { contentId: c.id, photoId, kind: story ? 'story' : 'feed' } });
-  return { fileId: f.id, photoId, photoTitle: photo?.title ?? null };
+  const f = await saveGeneratedFile(actor, { fileName: `${safe}_${story ? '스토리' : blog ? '블로그 표지' : '피드'}.jpg`, mime: 'image/jpeg', data: jpg, title: `${safe} — 자동 시안`, folder: '마케팅/자동 시안',
+    tags: ['자동 시안', ...(brand ? [brand] : [])], description: `서버 그리기(크레딧 0) · ${photo ? `사진: ${photo.title}` : '사진 없음 — 브랜드 색 바탕'}`, source: 'ai', space: 'marketing', meta: { contentId: c.id, photoId, kind: story ? 'story' : blog ? 'blog' : 'feed' } });
+  // 블로그 본문 사진: 표지에 쓴 것과 다른 실사(같은 규칙 — 글자 든 그래픽·다른 브랜드 빼고)
+  const bodyId = blog ? await pickPhoto(c, brand, others, `${c.title} ${body}`, new Set([...(opts.exclude ?? []), ...(photoId ? [photoId] : [])])) : null;
+  const [bp] = bodyId ? await sql<{ title: string }[]>`select coalesce(nullif(title, ''), file_name) as title from library_files where id = ${bodyId}` : [];
+  return { fileId: f.id, photoId, photoTitle: photo?.title ?? null, bodyId, bodyTitle: bp?.title ?? null };
 }
 
 /** 시안이 없어서 단 문제 줄(#516) — 시안을 붙이면 지운다 */
 export const VISUAL_ISSUE = /^(시안 이미지 없음|영상 시안 제작 중)/;
 /** 시안 붙여 새 버전(같은 글). 시안이 없어서만 막혀 있던 글(수정 요청 상태)은 승인 대기로, 열린 이미지 제작 요청은 '서버 그리기로 대체'
  *  replace = 서버가 그린 시안만 붙어 있을 때 새로 그린 것으로 바꿈(다시 그리기). rv 2 = 글자 든 그래픽을 빼는 규칙으로 그림 · tried = 이 글에 써 본 바탕 사진 */
-async function attachVisual(c: Content, fileId: string, note: string, actorId: string | null, photoId: string | null = null, replace = false) {
+async function attachVisual(c: Content, fileId: string, note: string, actorId: string | null, photoId: string | null = null, replace = false, extra: string[] = []) {
   const sql = db();
   return sql.begin(async (tx) => {
     const [cur] = await tx<any[]>`select id, current_version, status, quality from mkt_contents where id = ${c.id} for update`;
@@ -108,11 +113,12 @@ async function attachVisual(c: Content, fileId: string, note: string, actorId: s
     if (replace ? !(prev?.media_ids?.length === 1 && q.visual?.by === 'server' && String(prev.media_ids[0]) === q.visual.fileId) : prev?.media_ids?.length) return null;
     const v = cur.current_version + 1;
     const tried = [...new Set([...(replace ? ((q.visual?.tried ?? []) as string[]) : []), ...(replace && q.visual?.photoId ? [q.visual.photoId as string] : []), ...(photoId ? [photoId] : [])])].slice(-20);
-    const issues = ((q.issues ?? []) as string[]).filter((x) => !VISUAL_ISSUE.test(x));
+    const media = [fileId, ...extra];
+    const issues = ((q.issues ?? []) as string[]).filter((x) => !VISUAL_ISSUE.test(x) && !(media.length >= 2 && BLOG_RULE.test(x)));
     const onlyVisual = q.passed === false && (q.issues ?? []).length > 0 && !issues.length;
     const status = cur.status === 'changes' && onlyVisual ? 'pending' : cur.status;
-    const quality = { ...q, issues, ...(onlyVisual ? { passed: true } : {}), ...(q.report ? { report: { ...q.report, v } } : {}), visual: { by: 'server', fileId, at: new Date().toISOString(), photoId, rv: 2, tried } };
-    await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${prev?.body ?? ''}, ${[fileId]}, ${note}, ${actorId})`;
+    const quality = { ...q, issues, ...(onlyVisual ? { passed: true } : {}), ...(q.report ? { report: { ...q.report, v } } : {}), visual: { by: 'server', fileId, at: new Date().toISOString(), photoId, rv: 2, tried, ...(extra.length ? { bodyIds: extra } : {}) } };
+    await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${prev?.body ?? ''}, ${media}, ${note}, ${actorId})`;
     await tx`update mkt_contents set current_version = ${v}, status = ${status}, quality = ${tx.json(quality as never)}, reminded_at = null, updated_at = now() where id = ${c.id}`;
     await tx`update mkt_production_requests set status = 'canceled', reason = '서버 그리기로 시안을 붙임', decided_at = now() where content_id = ${c.id} and kind = 'image' and status in ('open', 'needs_approval')`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'generate_image', 0, ${replace ? '시안 서버 다시 그리기 — 크레딧 0' : '시안 서버 그리기 — 크레딧 0'}, ${c.title})`;
@@ -126,7 +132,7 @@ export async function fillMissingVisuals(tenant: string, limit = 4, budgetMs = 2
   const sql = db(); const t0 = Date.now();
   const rows = await sql<(Content & { status: string })[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status from mkt_contents c
     join mkt_versions v on v.content_id = c.id and v.version = c.current_version
-    where c.tenant = ${tenant} and c.auto and c.status in ('pending', 'changes') and cardinality(v.media_ids) = 0 and c.channel in ('instagram', 'facebook')
+    where c.tenant = ${tenant} and c.auto and c.status in ('pending', 'changes') and cardinality(v.media_ids) = 0 and c.channel in ('instagram', 'facebook', 'blog')
       and coalesce(c.kind, '') not in ('reels', 'shorts', 'video') and (c.scheduled_at is null or c.scheduled_at > now() - interval '1 day')
       and not exists (select 1 from mkt_decisions d where d.content_id = c.id and d.version = c.current_version and d.decision in ('changes', 'hold'))
     order by c.scheduled_at nulls last limit ${limit}`;
@@ -137,7 +143,7 @@ export async function fillMissingVisuals(tenant: string, limit = 4, budgetMs = 2
     try {
       const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
       const d = await drawAutoVisual(c, v?.body ?? '');
-      const r = await attachVisual(c, d.fileId, `시안 자동 그리기(서버·크레딧 0)${d.photoTitle ? ` — 사진: ${d.photoTitle}` : ' — 브랜드 색 바탕'}`, c.created_by, d.photoId);
+      const r = await attachVisual(c, d.fileId, `시안 자동 그리기(서버·크레딧 0)${d.photoTitle ? ` — 사진: ${d.photoTitle}` : ' — 브랜드 색 바탕'}${d.bodyTitle ? ` · 본문 사진: ${d.bodyTitle}` : c.channel === 'blog' ? ' · 본문 사진 없음(실사를 붙여 주세요)' : ''}`, c.created_by, d.photoId, false, d.bodyId ? [d.bodyId] : []);
       if (!r) continue;
       out.push({ id: c.id, version: r.version });
       if (r.status === 'pending') await M.mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `시안을 붙여 다시 올렸습니다(v${r.version}): ${c.title}`, body: '시안 없이 올라갔던 자동 제작 글에 서버가 그린 이미지를 붙였습니다 — 승인해 주세요',
@@ -192,7 +198,7 @@ export async function makeVisualNow(u: SessionUser, id: string, opts: { redraw?:
   const sql = db();
   const [c] = await sql<(Content & { status: string; quality: any })[]>`select id, tenant, brand_id, title, channel, kind, created_by, is_test, current_version, status, quality from mkt_contents where id = ${id} and tenant = ${tenantOf(u)}`;
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
-  if (!serverVisual(c)) throw badRequest(c.channel === 'blog' ? '블로그는 표지·본문 실사 사진을 붙여 주세요' : '영상 시안은 서버가 그리지 않습니다 — 제작 요청 카드(제작의뢰실)로 만들어 주세요');
+  if (!serverVisual(c)) throw badRequest(c.channel === 'threads' ? '스레드는 글만으로 올릴 수 있습니다' : '영상 시안은 서버가 그리지 않습니다 — 제작 요청 카드(제작의뢰실)로 만들어 주세요');
   if (['published', 'canceled'].includes(c.status)) throw badRequest('게시했거나 취소한 콘텐츠입니다');
   const [v] = await sql<{ body: string; media_ids: string[] }[]>`select body, media_ids from mkt_versions where content_id = ${id} and version = ${c.current_version}`;
   const vis = c.quality?.visual;
@@ -207,7 +213,7 @@ export async function makeVisualNow(u: SessionUser, id: string, opts: { redraw?:
     if (f?.photo && !vis.photoId) await sql`update mkt_contents set quality = jsonb_set(quality, '{visual}', (quality->'visual') || ${sql.json({ photoId: f.photo } as never)}::jsonb) where id = ${id}`;
   }
   const d = await drawAutoVisual(c, v?.body ?? '', { actor: u, exclude });
-  const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}`, u.id, d.photoId, !!opts.redraw);
+  const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}${d.bodyTitle ? ` · 본문 사진: ${d.bodyTitle}` : ''}`, u.id, d.photoId, !!opts.redraw, !opts.redraw && d.bodyId ? [d.bodyId] : []);
   if (!r) throw badRequest('그사이 콘텐츠가 바뀌었습니다 — 새로 고쳐 다시');
   await audit(sql, u.id, opts.redraw ? 'mkt.visual_redraw' : 'mkt.visual_now', 'mkt_content', id, { version: r.version, photoId: d.photoId }).catch(() => {});
   return { version: r.version, status: r.status, fileId: d.fileId, photo: d.photoTitle };

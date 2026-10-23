@@ -150,8 +150,13 @@ test('[지금 만들기]: 그 자리에서 그려 새 버전 · 이미 있으면
   assert.equal(again.status, 400); assert.match(again.body.error.message, /이미 시안이 있습니다/);
   const reel = await stuck('릴스 지금 만들기', { kind: 'reels' });
   assert.match((await ctx.owner.req('POST', `/api/marketing/contents/${reel}/visual`, {})).body.error.message, /영상 시안은 서버가 그리지 않습니다/);
+  // #516 후속 (c): 블로그도 [지금 만들기] — 대표 이미지(정사각) + 본문 실사 1장 → '표지+본문' 줄이 지워지고 승인 대기
   const blog = await ctx.owner.ok('POST', '/api/marketing/contents', { title: '블로그 글', channel: 'blog', body: '본문', mediaIds: [] });
-  assert.match((await ctx.owner.req('POST', `/api/marketing/contents/${blog.id}/visual`, {})).body.error.message, /블로그는 표지/);
+  const bv = await ctx.owner.ok('POST', `/api/marketing/contents/${blog.id}/visual`, {});
+  const bc = await cur(blog.id);
+  assert.deepEqual([bv.status, bc.status, bc.media_ids.length, bc.quality.issues], ['pending', 'pending', 2, []], JSON.stringify(bc));
+  assert.equal(await dims(bc.media_ids[0]), '1080x1080');
+  assert.match(bc.note, / · 본문 사진: .+\.jpg$/);
   // 사람이 사진을 붙인 새 버전: '시안 없음' 줄만 있었으면 검사 결과 비움, 다른 줄은 남김 · 서버 그림 표시(visual)는 다른 사진이면 지움
   const s = await stuck('수정 요청 대기', { status: 'changes', issues: ['시안 이미지 없음 — 승인함에서 [지금 만들기]', '채우지 않은 자리표시'] });
   await sql`update mkt_contents set quality = quality || ${sql.json({ visual: { by: 'server', fileId: P.wrong } })} where id = ${s}`;
@@ -241,4 +246,26 @@ test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네
   assert.equal(no.status, 400); assert.match(no.body.error.message, /서버가 그린 시안만 다시 그릴 수 있습니다/);
   await ctx.owner.ok('POST', `/api/marketing/contents/${sentence.id}/decide`, { version: 3, decision: 'approve' });
   assert.match((await ctx.owner.req('POST', `/api/marketing/contents/${sentence.id}/visual`, { redraw: true })).body.error.message, /승인한 콘텐츠입니다/);
+});
+
+test('#516 후속 (c) 블로그 자동 글: 대표 이미지(1080×1080) + 본문 실사 1장 → 승인 대기 · 실사가 1장뿐이면 표지만 붙이고 수정 요청에서 본문 사진을 기다림', async () => {
+  const jpg = (r, g, b) => sharp({ create: { width: 1200, height: 1500, channels: 3, background: { r, g, b } } }).jpeg().toBuffer();
+  const bl = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '블로그브랜드' })).id;
+  const rule = '블로그는 표지 1장 + 본문 사진 1장 이상을 붙여야 승인 요청됩니다';
+  const p1 = await libFile(ctx.ownerId, await jpg(70, 110, 90), '블로그브랜드 현장 사진 1.jpg');
+  const one = await stuck('블로그브랜드 글 하나', { channel: 'blog', kind: 'blog', status: 'changes', issues: [rule], brand: bl });
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const c1 = await cur(one);
+  assert.deepEqual([c1.status, c1.current_version, c1.media_ids.length, c1.quality.issues], ['changes', 2, 1, [rule]], '실사가 표지에 쓰여 본문 사진이 없음 → 표지만');
+  assert.match(c1.note, /사진: 블로그브랜드 현장 사진 1\.jpg · 본문 사진 없음\(실사를 붙여 주세요\)$/);
+  assert.equal(await dims(c1.media_ids[0]), '1080x1080');
+  const p2 = await libFile(ctx.ownerId, await jpg(90, 70, 110), '블로그브랜드 현장 사진 2.jpg');
+  const two = await stuck('블로그브랜드 글 둘', { channel: 'blog', kind: 'blog', status: 'changes', issues: [rule], brand: bl });
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const c2 = await cur(two);
+  assert.deepEqual([c2.status, c2.media_ids.length, c2.quality.issues, c2.quality.visual.bodyIds], ['pending', 2, [], [p1]], JSON.stringify(c2.quality));
+  assert.deepEqual([c2.quality.visual.photoId], [p2], '표지 바탕은 최근 실사, 본문은 다른 실사');
+  assert.match(c2.note, /사진: 블로그브랜드 현장 사진 2\.jpg · 본문 사진: 블로그브랜드 현장 사진 1\.jpg$/);
+  assert.ok((await sql`select 1 from notifications where entity_id = ${two} and title like '시안을 붙여 다시 올렸습니다(v2)%'`).length);
+  await ctx.owner.ok('POST', `/api/marketing/contents/${two}/decide`, { version: 2, decision: 'approve' });
 });
