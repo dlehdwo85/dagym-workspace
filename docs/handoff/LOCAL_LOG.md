@@ -39,6 +39,12 @@
      - 기존 데이터: 팀 없는 업무는 지금처럼(소속 조직 기준) 보이게 — 이행 시 데이터 손실·노출 없게
   2. **메신저 바로가기**: 화면 우측 하단 **AI 비서 버튼 옆에 메신저 버튼**(안 읽은 개수 배지). 누르면 작은 대화 패널(최근 대화방·바로 답장), 휴대폰은 /messages 로 이동. AI 비서 버튼과 겹치지 않게 나란히 배치
 - [R-8 참고] 자동 시험이 Linux 전용 경로(`/tmp/claude-0`, `node_modules/.bin/next`, openssl)를 써서 Windows 에서 못 돎. 필수 아님 — 원하면 `os.tmpdir()`·`process.execPath`+`next/dist/bin/next` 로 바꾸면 로컬에서도 회귀 시험 가능
+- [R-17 대표 지시, 2026-10-23 13:40 전달] 조사 기반 개발 요청(#494·#497·#499) — 근거 docs/handoff/AI_KIT_RESEARCH_2026-10-23.md·REFERENCE_REAUDIT_2026-10-23.md·TECHTREE_VIDEOS_2026-10-23.md, #475 공동 배정 다음 순서
+  - A. 메타 API v21.0 → v26.0(버전 상수화, OAuth 다이얼로그 포함, 리드·게시·성과 회귀 시험) — marketingAds.ts·metaLeads.ts·mktPublish.ts·mktChannels.ts
+  - B. #494 광고 자동 세팅: 소재·지시 입력 → qualityCheck + 메타 정책 점검 → /adimages·/advideos 업로드 → 캠페인·세트·광고 전부 PAUSED + spend_cap → 승인함 '광고 초안' → 승인 시 서버가 상한 재확인 후 ACTIVE(감사 기록) → 기준 초과 시 자동 일시정지만 허용·증액은 승인 · 토큰 secret_enc · 1단계 자사 계정만
+  - C. #499 마케팅 개선 7건: 콘텐츠형/광고형 분리 채점, 파워링크 세팅안 보강(추적 파라미터·매체·PC/모바일 가중치·확장 검색 예산 비율·성과 기반 노출·이미지 확장·키워드 3단 조합), 리드 단계 → 메타 전환 API(lead_id 문자열), 상황 매트릭스, 카드뉴스 장별 생성기, 경쟁 광고 보관함(크롤링 없음), AI 마케팅팀 화면
+  - D. #497 레퍼런스 빈 곳: R06 채널별 실제 미리보기·여러 장 넘기기 / R07 상단 고정 3장 / R09 플레이스·파워콘텐츠 / R10 강점 대조표 / R12 카톡 2·3차 / R19 업무 홈 폴시아 패턴·밤사이 비서 3범위 / R21 낙찰·경쟁사·입찰 달력 / R23 원본 재대조 / R35 한글·PPT 공동 편집 / R44 AI 비서 스트리밍 / R46 소개 사이트 '5명 무료' → 14일 체험 / R47 스토어 사진 비교
+  - 키트: kit-reference-matcher·kit-design-reviewer·kit-prod-verifier 사용, CLAUDE.md 담당표에 '.claude/skills·agents·rules(키트 복사본) = 로컬' 추가
 
 ## 클라우드 회신 (클라우드는 이 파일 대신 NEXT_ACTION.md 의 "로컬 요청 처리" 절에 답합니다)
 
@@ -789,3 +795,17 @@
     - 10/23 01:10 전수 검수에서 작업 중 들어온 대표 대기열 메시지 135건이 빠졌다 → 포함해 재검수 진행 중.
     - 휴대폰 앱 빌드가 필요한 항목(알림창 버튼·전체화면 알람·위젯)은 로컬 담당인데 멈춰 있다.
   - 클라우드 요청(CLAUDE.md 담당표): `.claude/skills·agents·rules`(키트 복사본)는 로컬 담당으로 추가.
+- 13:50 (10/23) 키트 후속·보고(#492~#499)
+  - 홈페이지 2곳에 kit/claude-company-kit 브랜치를 푸시했다(main 기준): 하이링크 hilink-website 9197a69, 다짐 dagym-website 2b1fe57.
+    - 키트에 Taste 스킬(design-taste-frontend, 커밋 6010f91a 고정·MIT)을 더했다(홈페이지 전용). gh api로 파일을 확인했다.
+    - 'DAGYM 공식 홈페이지 전면 개편'·'HILINK 공식 홈페이지 전면 구축' 세션에 '키트로 검수 → 디벨롭'을 지시했다.
+  - 조사 보고서 3건을 저장소에 올렸다(975bfa9c, 로컬 경로 가림): REFERENCE_REAUDIT·AI_KIT_RESEARCH·TECHTREE_VIDEOS.
+  - 클라우드 요청 R-17을 전달했다(위 '클라우드 요청' 칸):
+    - A. 메타 API v21 → v26
+    - B. #494 광고 자동 세팅
+    - C. #499 영상 분석 개선 7건
+    - D. #497 레퍼런스 빈 곳 12묶음
+    - 키트 에이전트 사용, CLAUDE.md 담당표
+  - 대표용 설치 안내 docs/handoff/AI_TOOLS_GUIDE_2026-10-23.md를 썼다(도구별 Claude·GPT 추가 방법).
+    - GPT 경로는 OpenAI 공식 문서로 확인했다: Codex 스킬 `.agents/skills`·`~/.agents/skills`, `codex mcp add --url`, AGENTS.md.
+    - ChatGPT 자체 MCP·스킬은 Business 이상 요금제(Plus·Pro는 미확인).
