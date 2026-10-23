@@ -194,6 +194,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('salesCollect', async () => (await import('./sales/collect')).collectDue()); // V41 단계 3 공공데이터(하루 한 번, 원천 하나씩)
   await step('adsSync', async () => (await import('./marketingAds')).adsSyncDue()); // V41 4-2 광고 성과(회사별 연결, 하루 한 번 최근 7일)
   await step('adCapGuard', async () => (await import('./adOps')).adCapGuard()); // V44 ① 월 광고비 상한 넘으면 워크인이 켠 광고 자동 중지
+  await step('metaAutoGuard', async () => (await import('./metaAuto')).metaAutoTick()); // #494 메타 자동 세팅 광고: 리드당·클릭당 비용 기준 넘으면 자동 일시정지(2시간마다)
   await step('metaLeads', async () => (await import('./metaLeads')).metaLeadsTick()); // 광고 2차 ① 리드 광고: 남은 처리·놓친 리드 불러오기·5분 넘게 연락 전이면 재알림
   await step('salesSync', async () => (await import('./sales/migrate')).salesSyncDaily()); // V41 단계 2 전환일까지 매일 영업관리 차이분
   await step('salesCollectors', async () => (await import('./sales/collectors')).collectorsTick()); // 대표 10/21 08:45: 영업 수집기 12개(KST 시각 이후 하루 1회, tick 당 하나)

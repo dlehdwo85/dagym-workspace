@@ -74,6 +74,7 @@ import { v1448 } from './v1448.step.mjs';
 import { panel1440, listNarrow } from './panel1440.step.mjs';
 import { v283 } from './v283.step.mjs';
 import { v30import, sheetPhone, notifRead, checkScroll, roleBadge, chatBubble } from './v30import.step.mjs';
+import { metaAuto } from './metaAuto.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -2442,6 +2443,7 @@ await step('광고 최적화 1차 3안 소액 테스트: 판정 상자(이긴 �
 await step('광고 최적화 1차 동네 타깃: 새 세팅안 동네 칸(중심·반경 → AI 동네 추천 → 검색량 → 고른 것 키워드에 넣기 · 광고 지역 충남) → 저장 → 카드 줄 · 켠 광고 [광고 지역]·[동네 키워드 추가] 보내는 값 · 변경 기록 · 휴대폰 폭', () => adLocal({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 최적화 1차 통화 기반: 전화·문의 기준 키워드 점검(요약·끄기 제안·잘 됨) → 워크인 키워드 [끄기] 보내는 값 → 목표 전환당 비용 → 기간 7일 → 휴대폰 폭 → 전화 문의 기록에 광고 키워드', () => adLeads({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 2차 ① 리드 광고(메타) → 영업 리드: 광고 운영 리드 광고 상자(받는 중·웹후크·요약·이름 가림·첫 연락·재알림·광고별 리드당 비용) → 실패 [다시 처리] → 휴대폰 폭 → 연결 계정 받는 중 → 영업 리드 상세 리드 광고 상자·[전화] 첫 연락 기록', () => leadAds({ owner, ctx, sql, BASE, SHOTS }));
+await step('#494 메타 광고 자동 세팅: 광고 운영 메타 칸(초안 대기 줄·승인함 링크·권한 다시 연결) → [새 메타 광고] 창(양식 번호 직접·개인정보 확인·자료실 소재·반경·자동 일시정지) 저장 → 승인함 광고 초안 탭(배지·요약·피드 미리보기·확인 문구) → 휴대폰 폭 → [반려] 사유 → 보관', () => metaAuto({ owner, ctx, sql, BASE, SHOTS }));
 await step('#450 영업실 지원사업: 사이드바 메뉴 → 맞춤 목록(1차 판단·조건 칩·D-day·자격 안 맞는 공고 빼기) → [AI 판단] → [신청 준비] 담당 업무 → 영업 홈 마감 임박 카드 → 상세(준비 서류·진행) → [신청 완료] → [직접 추가] 지난 신청 → 신청·결과 탭 → 휴대폰 폭', () => supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#454 영상 파이프라인 v2: 플랫폼 운영 내레이션(TTS) 카드·연결 시험 → 브랜드 키트 영상 끝 화면·자막 → 제작의뢰실 릴스 준비 상태 → [생성] 장면별 생성·검수·합성 → 장면 칩(실제 화면·검수 ✓)·완성 영상·승인 대기 → 휴대폰 폭', () => mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#475 업무 공동 배정: 업무 등록 시트 여러 명 = 기본 함께 담당(1건·완료 규칙) → 상세 공동 담당 칩 빼기·[+] 추가·활동 기록 → 담당자별 묶음 3곳·+2 → 휴대폰 공동 담당 내 몫 완료 칩·상세 안내', () => coAssign({ owner, staff, ctx, sql, BASE, SHOTS }));

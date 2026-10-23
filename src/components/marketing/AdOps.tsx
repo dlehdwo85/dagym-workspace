@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { NAVER_REGIONS, regionLabel } from '@/lib/naverRegions';
+import { MetaAuto } from './MetaAuto';
 
 const C = '#7C3AED';
 /** 네이버 소재 허용 문자(서버 검사와 같은 규칙) — 저장 전에 바로 표시 */
@@ -110,6 +111,8 @@ export function AdOps() {
             </li>);
         })}{!data.plans.length && <li className="text-xs text-ink-3">세팅안이 없습니다</li>}</ul>
       </section>
+
+      <MetaAuto />
 
       <LeadsBox run={run} />
 

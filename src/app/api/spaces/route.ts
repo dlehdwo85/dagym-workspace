@@ -15,9 +15,10 @@ export const GET = handler(async ({ user }) => {
   if (spaces.includes('marketing')) { // 앱 하단 탭 '승인 대기' 배지
     const t = tenantOf(user);
     const n = await (await import('@/lib/marketing')).approvableCount(t); // 승인함·현황과 같은 계산(마감 지남 제외)
-    // 대표 02:30 ①: 승인함에 운영실 승인 요청(제안·예산·월 목표·제작 의뢰)도 합쳐 배지
+    // 대표 02:30 ①: 승인함에 운영실 승인 요청(제안·예산·월 목표·제작 의뢰·#494 메타 광고 초안)도 합쳐 배지
     const [o] = await sql<{ n: number }[]>`select (select count(*) from mkt_proposals where tenant = ${t} and status = 'pending') + (select count(*) from mkt_ad_budgets where tenant = ${t} and status = 'pending')
-      + (select count(*) from mkt_goals where tenant = ${t} and status = 'pending') + (select count(*) from mkt_briefs where tenant = ${t} and status in ('ready', 'failed')) as n`.then((r) => r.map((x) => ({ n: Number(x.n) })));
+      + (select count(*) from mkt_goals where tenant = ${t} and status = 'pending') + (select count(*) from mkt_briefs where tenant = ${t} and status in ('ready', 'failed'))
+      + (select count(*) from mkt_ad_plans where tenant = ${t} and provider = 'meta' and status = 'created') as n`.then((r) => r.map((x) => ({ n: Number(x.n) })));
     summary.marketing = { text: n ? `승인할 시안 ${n}${o.n ? ` · 운영 ${o.n}` : ''}` : o.n ? `운영 승인 ${o.n}` : '승인할 시안 없음', badge: n + o.n };
   }
   return { spaces, summary };

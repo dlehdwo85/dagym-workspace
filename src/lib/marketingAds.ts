@@ -355,13 +355,15 @@ export async function syncNow(u: SessionUser) {
 }
 
 // ---------------- OAuth(Meta·Google) ----------------
-export async function oauthStart(u: SessionUser, p: string) {
+/** #494 메타 광고 자동 세팅(캠페인 만들기)은 ads_management + 페이지 광고 권한까지 — [광고 만들기 권한으로 다시 연결](manage=1)에서만 요청 */
+export const META_ADS_MANAGE_SCOPES = ['ads_read', 'ads_management', 'pages_show_list', 'pages_read_engagement', 'pages_manage_ads'];
+export async function oauthStart(u: SessionUser, p: string, opts: { manage?: boolean } = {}) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (p !== 'meta' && p !== 'google') throw notFound();
   if (!providerReady(p)) throw new HttpError(409, 'ads_not_ready', `${AD_PROVIDERS[p]} 연결은 아직 준비 중입니다(워크인 앱 등록·심사 대기)`);
   const state = newToken(24);
   await db()`insert into mkt_ad_oauth_states (state, user_id, tenant, provider) values (${state}, ${u.id}, ${tenantOf(u)}, ${p})`;
-  if (p === 'meta') return `${FB_DIALOG()}?${new URLSearchParams({ client_id: process.env.META_APP_ID!, redirect_uri: callback('meta'), state, scope: 'ads_read', response_type: 'code' })}`;
+  if (p === 'meta') return `${FB_DIALOG()}?${new URLSearchParams({ client_id: process.env.META_APP_ID!, redirect_uri: callback('meta'), state, scope: opts.manage ? META_ADS_MANAGE_SCOPES.join(',') : 'ads_read', response_type: 'code' })}`;
   return `${G_AUTH()}?${new URLSearchParams({ client_id: process.env.GOOGLE_ADS_CLIENT_ID!, redirect_uri: callback('google'), state, response_type: 'code', scope: 'https://www.googleapis.com/auth/adwords', access_type: 'offline', prompt: 'consent' })}`;
 }
 

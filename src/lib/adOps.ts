@@ -39,7 +39,7 @@ async function naverReq(a: NaverAcc, method: 'GET' | 'POST' | 'PUT' | 'DELETE', 
 
 // ---------------- 세팅안 검사(광고 심사 위반 문구·글자 수·입찰가) ----------------
 /** 업종 공통 위험 표현(네이버 검색광고 심사·표시광고법 기준 요약 — 업종별 규칙은 다음 단계에서 추가) */
-const RISKY: [RegExp, string][] = [
+export const RISKY: [RegExp, string][] = [
   [/최고|최상|최초|1위|넘버원|No\.?\s?1/i, '최상급·순위 표현은 객관적 근거가 있어야 합니다'],
   [/100\s?%|무조건|보장|확실/, '보장·단정 표현은 심사에서 반려될 수 있습니다'],
   [/완치|치료|효능|부작용\s?없/, '의료 효능 표현은 의료광고 심의 대상입니다'],
@@ -79,12 +79,12 @@ export function precheck(p: z.infer<typeof planInput>, rules: QualityRules = DEF
 }
 
 // ---------------- 상한·이번 달 광고비 ----------------
-async function monthSpend(tenant: string) {
+export async function monthSpend(tenant: string) {
   const [r] = await db()<{ spend: number }[]>`select coalesce(sum(s.cost_krw), 0)::float as spend from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id
     where a.tenant = ${tenant} and s.day >= ((now() at time zone 'Asia/Seoul')::date - (extract(day from (now() at time zone 'Asia/Seoul'))::int - 1))`;
   return Number(r?.spend ?? 0);
 }
-async function capOf(tenant: string) {
+export async function capOf(tenant: string) {
   const [c] = await db()<{ monthly_cap: string; stopped_month: string | null }[]>`select monthly_cap, stopped_month from mkt_ad_caps where tenant = ${tenant}`;
   return c ? { monthlyCap: Number(c.monthly_cap), stoppedMonth: c.stopped_month } : null;
 }
@@ -105,10 +105,10 @@ export async function adOpsOverview(u: SessionUser) {
   const [cap, spend, rules] = await Promise.all([capOf(t), monthSpend(t), qualityRules()]);
   const accounts = await sql`select id, label, external_id from mkt_ad_accounts where tenant = ${t} and provider = 'naver' and status <> 'disconnected' order by created_at`;
   const plans = await sql<any[]>`select p.id, p.account_id, p.brand_id, br.name as brand, p.kind, p.name, p.plan, p.status, p.external, p.error, p.created_at, p.approved_at, a.label as account_label, ab.name as approved_by_name
-    from mkt_ad_plans p join mkt_ad_accounts a on a.id = p.account_id left join mkt_brands br on br.id = p.brand_id left join users ab on ab.id = p.approved_by where p.tenant = ${t} and p.status <> 'archived' order by p.created_at desc limit 50`;
+    from mkt_ad_plans p join mkt_ad_accounts a on a.id = p.account_id left join mkt_brands br on br.id = p.brand_id left join users ab on ab.id = p.approved_by where p.tenant = ${t} and p.provider = 'naver' and p.status <> 'archived' order by p.created_at desc limit 50`;
   const brands = await sql<{ id: string; name: string }[]>`select id, name from mkt_brands where tenant = ${t} order by ad_priority nulls last, name`;
   const changes = await sql<any[]>`select c.id, c.plan_id, c.kind, c.before, c.after, c.money_up, c.status, c.error, c.revert_of, c.created_at, u.name as actor_name
-    from mkt_ad_changes c left join users u on u.id = c.actor_id where c.tenant = ${t} order by c.created_at desc limit 100`;
+    from mkt_ad_changes c left join users u on u.id = c.actor_id left join mkt_ad_plans pp on pp.id = c.plan_id where c.tenant = ${t} and (pp.provider is null or pp.provider = 'naver') order by c.created_at desc limit 100`;
   const ab = await abFor(plans);
   return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan, rules), ab: ab.get(p.id) ?? null })), changes,
     savings: await agencySavings(t, spend) };
@@ -132,7 +132,7 @@ async function naverAcc(tenant: string, id: string) {
 }
 async function planOf(tenant: string, id: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
-  const [p] = await db()<any[]>`select * from mkt_ad_plans where id = ${id} and tenant = ${tenant}`;
+  const [p] = await db()<any[]>`select * from mkt_ad_plans where id = ${id} and tenant = ${tenant} and provider = 'naver'`; // #494 메타 세팅안은 metaAuto
   if (!p) throw notFound('세팅안을 찾을 수 없습니다');
   return p;
 }
@@ -282,7 +282,7 @@ export async function syncPlanKeywords(u: SessionUser, id: string) {
 async function setLock(a: NaverAcc, campaignId: string, lock: boolean) {
   await naverReq(a, 'PUT', `/ncc/campaigns/${campaignId}`, '?fields=userLock', { nccCampaignId: campaignId, userLock: lock });
 }
-async function guardMoneyUp(t: string, addDaily = 0) {
+export async function guardMoneyUp(t: string, addDaily = 0) {
   const cap = await capOf(t);
   if (!cap) throw new HttpError(409, 'cap_required', '먼저 회사 월 광고비 상한을 정해 주세요');
   const spend = await monthSpend(t);
@@ -295,6 +295,10 @@ export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget'
   region: z.array(z.string().regex(REGION_RE)).max(17).optional(), abroad: z.boolean().optional(), keywords: z.array(z.string().trim().min(1).max(25)).min(1).max(30).optional(),
   local: z.object({ center: z.string().trim().max(80), radiusKm: z.number().min(0.5).max(30), areas: z.array(z.string().trim().min(1).max(20)).max(20) }).partial().optional() });
 export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null = null): Promise<Record<string, unknown>> {
+  if (/^[0-9a-f-]{36}$/i.test(id)) { // #494 메타 자동 세팅안: 끄기·다시 켜기·하루 예산은 metaAuto(상한 검사·기록 같은 규칙)
+    const [pv] = await db()<{ provider: string }[]>`select provider from mkt_ad_plans where id = ${id} and tenant = ${tenantOf(u)}`;
+    if (pv?.provider === 'meta') return (await import('./metaAuto')).actMetaPlan(u, id, i, revertOf);
+  }
   if (i.action === 'sync') return syncPlanKeywords(u, id);
   if (i.action === 'ad_pause' || i.action === 'ad_resume' || i.action === 'ab_apply') return actAds(u, id, i, revertOf);
   if (i.action === 'region' || i.action === 'keywords_add') return actLocal(u, id, i, revertOf);
@@ -337,7 +341,7 @@ export async function revertChange(u: SessionUser, changeId: string) {
   if (c.kind === 'region') return actLocal(u, c.plan_id, { action: 'region', region: c.before?.KR ?? [], abroad: c.before?.OTHERS == null || c.before.OTHERS.includes('00') }, c.id);
   if (c.kind === 'keywords_add') return removeKeywords(u, c.plan_id, c);
   if (c.kind === 'ad_pause' || c.kind === 'ad_resume') return actAds(u, c.plan_id, { action: c.kind === 'ad_pause' ? 'ad_resume' : 'ad_pause', adIds: c.before?.adIds ?? [] }, c.id);
-  const action = c.kind === 'budget' ? { action: 'budget' as const, dailyBudget: Number(c.before?.dailyBudget) } : { action: (c.before?.userLock ? 'pause' : 'enable') as 'pause' | 'enable' };
+  const action = c.kind === 'budget' ? { action: 'budget' as const, dailyBudget: Number(c.before?.dailyBudget) } : { action: ((c.before?.userLock ?? c.before?.paused) ? 'pause' : 'enable') as 'pause' | 'enable' }; // 메타 = paused
   return actPlan(u, c.plan_id, action, c.id);
 }
 
@@ -348,13 +352,14 @@ export async function adCapGuard() {
   for (const c of caps) {
     const spend = await monthSpend(c.tenant);
     if (spend < Number(c.monthly_cap)) continue;
-    const active = await sql<any[]>`select id, account_id, external from mkt_ad_plans where tenant = ${c.tenant} and status = 'active'`;
+    const active = await sql<any[]>`select id, account_id, external, provider from mkt_ad_plans where tenant = ${c.tenant} and status = 'active'`;
     for (const p of active) {
       try {
-        const a = await naverAcc(c.tenant, p.account_id);
-        await setLock(a, String(p.external.campaignId), true);
+        const meta = p.provider === 'meta'; // #494 메타 자동 세팅안도 같은 상한으로 끔
+        if (meta) await (await import('./metaAuto')).pauseMetaCampaign(c.tenant, p);
+        else { const a = await naverAcc(c.tenant, p.account_id); await setLock(a, String(p.external.campaignId), true); }
         await sql`update mkt_ad_plans set status = 'paused', updated_at = now() where id = ${p.id}`;
-        await sql`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up) values (${c.tenant}, ${p.id}, 'auto_pause', ${sql.json({ userLock: false })}, ${sql.json({ userLock: true, reason: 'monthly_cap', spend, cap: Number(c.monthly_cap) } as never)}, false)`;
+        await sql`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up) values (${c.tenant}, ${p.id}, 'auto_pause', ${sql.json(meta ? { paused: false } : { userLock: false })}, ${sql.json({ ...(meta ? { paused: true } : { userLock: true }), reason: 'monthly_cap', spend, cap: Number(c.monthly_cap) } as never)}, false)`;
         stopped++;
       } catch (e: any) {
         await sql`insert into mkt_ad_changes (tenant, plan_id, kind, status, error) values (${c.tenant}, ${p.id}, 'auto_pause', 'failed', ${String(e?.message ?? e).slice(0, 300)})`;
