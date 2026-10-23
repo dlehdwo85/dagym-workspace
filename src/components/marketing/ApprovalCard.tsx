@@ -80,10 +80,10 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
     catch (e: any) { toast.error(e.message); }
   }
   // #516 (c): 시안 없는 카드 [지금 만들기] = 서버가 브랜드 키트·자료실 사진으로 그려 새 버전(크레딧 0) → 승인 대기
-  async function makeNow() {
+  async function makeNow(redraw = false) {
     setMaking(true);
-    try { const r = await api<{ version: number; photo: string | null }>(`/api/marketing/contents/${c.id}/visual`, { body: {} });
-      toast.ok(`시안을 그려 붙였습니다(v${r.version}) — ${r.photo ? `사진: ${r.photo}` : '브랜드 색 바탕'}`); onDone(); }
+    try { const r = await api<{ version: number; photo: string | null }>(`/api/marketing/contents/${c.id}/visual`, { body: redraw ? { redraw: true } : {} });
+      toast.ok(`시안을 ${redraw ? '다시 ' : ''}그려 붙였습니다(v${r.version}) — ${r.photo ? `사진: ${r.photo}` : '브랜드 색 바탕'}`); onDone(); }
     catch (e: any) { toast.error(e.message); }
     finally { setMaking(false); }
   }
@@ -120,7 +120,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         <div className="min-w-0 flex-1 space-y-1">
           {noVisual && <p className="text-xs font-bold text-red-800" data-testid="approval-no-media-band">시안 없음 — 글만으로는 승인할 수 없습니다</p>}
           <p className="text-xs text-ink-2">{c.production ? `${c.production.kind.includes('video') ? '영상' : '이미지'} 제작 요청이 열려 있습니다${c.production.status === 'needs_approval' ? ' (한도 승인 대기)' : ''} — 붙으면 여기에 보입니다` : c.auto && !c.produced_at && c.produce_at ? `AI 제작 예정 ${fmtDateTime(c.produce_at)}` : drawable ? '[지금 만들기]를 누르면 브랜드 키트·자료실 사진으로 바로 그려 붙입니다(크레딧 0)' : '아직 시안이 없습니다 — 상세에서 수정본에 사진을 붙여 주세요'}</p>
-          {noVisual && !done && (drawable ? <Button size="sm" onClick={makeNow} disabled={making} data-testid="approval-make-visual">{making ? '그리는 중…' : '지금 만들기'}</Button>
+          {noVisual && !done && (drawable ? <Button size="sm" onClick={() => makeNow()} disabled={making} data-testid="approval-make-visual">{making ? '그리는 중…' : '지금 만들기'}</Button>
             : VIDEO_KINDS.includes(c.kind ?? '') ? <Link href="/s/marketing/automation" className="inline-block text-xs font-medium text-violet-700 underline" data-testid="approval-production-link">제작 요청 카드 보기 →</Link> : null)}
         </div>
       </div>}
@@ -141,6 +141,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         <div className="mt-2 flex flex-wrap gap-2">
           {c.status !== 'approved' && !noVisual && <Button size="sm" onClick={() => decide('approve')} data-testid="card-approve">{c.reapprove_from ? `수정본 v${c.current_version} 승인` : '승인'}</Button>}
           <Button size="sm" variant="secondary" onClick={() => setMode('changes')} data-testid="card-changes">{c.status === 'approved' ? '게시 전 수정 요청' : '수정 요청'}</Button>
+          {/* #516 후속: 서버가 그린 시안이 어색하면(바탕 글자 겹침 등) 써 본 사진을 빼고 무료로 다시 그림 */}
+          {c.status !== 'approved' && media.length === 1 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" onClick={() => makeNow(true)} disabled={making} data-testid="card-redraw">{making ? '그리는 중…' : '다시 그리기(무료)'}</Button>}
           {/* #516 (a): 서버가 그린 시안 → Higgsfield AI 이미지로 바꾸기는 크레딧이 들어 따로(제작 요청 카드·한도 확인) */}
           {c.auto && c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" data-testid="card-ai-image"
             onClick={() => confirm(`AI 이미지로 다시 만들면 약 ${AI_REGEN_CREDITS}크레딧이 듭니다(이번 달 한도를 넘으면 한도 승인 뒤 제작). 지금 시안은 그대로 두고 새 이미지가 붙으면 다시 승인 요청이 옵니다. 진행할까요?`) && decide('changes', AI_REGEN)}>AI 이미지로 다시 · 약 {AI_REGEN_CREDITS}크레딧</Button>}

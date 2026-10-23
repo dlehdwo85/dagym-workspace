@@ -181,3 +181,64 @@ test('승인 마감 지난 미승인 자동 글: 다음 슬롯(같은 시각, �
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.equal((await cur(id)).status, 'canceled');
 });
+
+test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네일·핀·쇼츠·문장 이름·카드뉴스 폴더)은 바탕으로 안 씀 · 예전 규칙 시안은 정기 실행이 다시 그림(실사는 그대로) · [다시 그리기(무료)]', async () => {
+  const jpg = (r, g, b) => sharp({ create: { width: 1200, height: 1500, channels: 3, background: { r, g, b } } }).jpeg().toBuffer();
+  const dg = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '다짐' })).id;
+  await sql`update mkt_brands set color = '#1D4ED8' where id = ${dg}`;
+  const real = await libFile(ctx.ownerId, await jpg(90, 90, 60), '다짐 실제 운영 현장 사진.jpg'); // 먼저 올림(같은 점수면 최근 것이 이기던 예전 규칙에서는 뒤로 밀림)
+  const g = {};
+  for (const [k, name] of [['thumb', 'dg-1022-shorts-thumb.jpg'], ['pin', 'dagym-pin-2.png'], ['sentence', '관리사무소는 무엇을 받아 보나요?'], ['card', '다짐 카드 1.jpg']]) {
+    g[k] = await libFile(ctx.ownerId, await jpg(250, 250, 250), name);
+    await sql`update library_files set tags = ${['다짐']}, folder = ${k === 'card' ? '마케팅/카드뉴스' : '마케팅/사진'} where id = ${g[k]}`;
+  }
+  // ① 새로 그릴 때: 그래픽 4장은 빼고 실사
+  const a = await stuck('다짐 가을 소식', { brand: dg });
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const ac = await cur(a);
+  assert.match(ac.note, /사진: 다짐 실제 운영 현장 사진\.jpg$/, ac.note);
+  assert.deepEqual([ac.quality.visual.rv, ac.quality.visual.photoId, ac.quality.visual.tried], [2, real, [real]]);
+  // ② 예전 규칙(rv 없음)으로 그래픽 위에 그린 승인 전 시안 → 정기 실행이 다시 그림 · 실사였던 것은 그대로 · 사람이 수정 요청한 것은 안 건드림
+  const old = async (title, photoId, { decided = false } = {}) => {
+    const drawn = await libFile(ctx.ownerId, await jpg(20, 20, 20), `${title}_피드.jpg`);
+    await sql`update library_files set folder = '마케팅/자동 시안', source = 'ai', meta = ${sql.json({ photoId })} where id = ${drawn}`;
+    const id = await stuck(title, { brand: dg });
+    await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${id}, 2, ${`${title}\n가을 운동을 시작하기 좋은 때입니다.`}, ${[drawn]}, '시안 자동 그리기(서버·크레딧 0)', ${ctx.ownerId})`;
+    await sql`update mkt_contents set current_version = 2, quality = ${sql.json({ passed: true, issues: [], visual: { by: 'server', fileId: drawn, at: new Date().toISOString() } })} where id = ${id}`;
+    if (decided) { await sql`insert into mkt_decisions (content_id, version, decision, comment, decided_by) values (${id}, 2, 'changes', '문구 다시', ${ctx.ownerId})`; await sql`update mkt_contents set status = 'changes' where id = ${id}`; }
+    return { id, drawn };
+  };
+  const bad = await old('다짐 겹친 시안', g.thumb);
+  const sentence = await old('다짐 문장 바탕 시안', g.sentence);
+  const fine = await old('다짐 실사 바탕 시안', real);
+  const human = await old('다짐 사람이 고치라는 시안', g.pin, { decided: true });
+  const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  assert.deepEqual(run.redraws.filter((x) => x.error), [], JSON.stringify(run.redraws));
+  for (const o of [bad, sentence]) {
+    const c = await cur(o.id);
+    assert.deepEqual([c.status, c.current_version, c.media_ids.length], ['pending', 3, 1], JSON.stringify(c.quality));
+    assert.notEqual(c.media_ids[0], o.drawn);
+    assert.match(c.note, /^시안 다시 그리기\(글자 든 바탕 그림 빼고·서버·크레딧 0\) — 사진: 다짐 실제 운영 현장 사진\.jpg$/);
+    assert.equal(c.quality.visual.rv, 2); assert.equal(c.quality.visual.photoId, real);
+    assert.ok(c.quality.visual.tried.includes(real) && c.quality.visual.tried.length === 2, JSON.stringify(c.quality.visual));
+    assert.ok((await sql`select 1 from notifications where entity_id = ${o.id} and title like '시안을 다시 그렸습니다(v3)%'`).length, '승인자 알림');
+    assert.equal((await sql`select credits::float8 c from mkt_credit_ledger where content_id = ${o.id} and version = 3`)[0].c, 0, '무료');
+  }
+  const fc = await cur(fine.id);
+  assert.deepEqual([fc.current_version, fc.media_ids[0], fc.quality.visual.rv, fc.quality.visual.photoId], [2, fine.drawn, 2, real], '실사 바탕은 그대로(표시만)');
+  assert.deepEqual([(await cur(human.id)).current_version, (await cur(human.id)).quality.visual.rv], [2, undefined], '사람이 수정 요청한 버전은 그대로');
+  assert.deepEqual((await ctx.owner.ok('POST', '/api/marketing/auto/run', {})).redraws, [], '한 번만');
+  // ③ [다시 그리기(무료)]: 써 본 사진(실사)은 빼고 → 남은 사진이 없으면 브랜드 색 바탕 · 새 버전 · 감사
+  const r = await ctx.owner.ok('POST', `/api/marketing/contents/${bad.id}/visual`, { redraw: true });
+  assert.deepEqual([r.version, r.status, r.photo], [4, 'pending', null]);
+  const rc = await cur(bad.id);
+  assert.match(rc.note, /^시안 다시 그리기\(서버·크레딧 0\) — .+ · 브랜드 색 바탕$/);
+  assert.equal(rc.quality.visual.photoId, null);
+  assert.ok((await sql`select 1 from audit_logs where action = 'mkt.visual_redraw' and target_id = ${bad.id}`).length);
+  // 직접 붙인 시안·승인한 글은 안 됨
+  await ctx.owner.ok('POST', `/api/marketing/contents/${fine.id}/versions`, { body: '사람이 사진을 붙인 본문', mediaIds: [real] });
+  const no = await ctx.owner.req('POST', `/api/marketing/contents/${fine.id}/visual`, { redraw: true });
+  assert.equal(no.status, 400); assert.match(no.body.error.message, /서버가 그린 시안만 다시 그릴 수 있습니다/);
+  await ctx.owner.ok('POST', `/api/marketing/contents/${sentence.id}/decide`, { version: 3, decision: 'approve' });
+  assert.match((await ctx.owner.req('POST', `/api/marketing/contents/${sentence.id}/visual`, { redraw: true })).body.error.message, /승인한 콘텐츠입니다/);
+});
