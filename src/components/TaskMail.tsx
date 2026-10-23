@@ -9,6 +9,8 @@ import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
 import { uploadTaskFiles } from './Attachments';
 import type { AssistDraft } from './TaskAssist';
 import { KakaoSend } from './KakaoSend';
+import { cacheForSms, canSmsAttach, smsWithFiles, type SmsFile } from './native';
+import { planSmsAttach } from '@/lib/smsAttach';
 
 type Cand = { value: string; label: string; source: 'inquiry' | 'contact' | 'lead' | 'description' }; // 대표 05:20 ②
 type Ctx = {
@@ -139,7 +141,10 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   const [rec, setRec] = useState<{ id: string; title: string; folder: string; size: number }[]>([]);
   const [warn, setWarn] = useState<string[]>([]); // V32 7-1 초안 경고(빈칸·LMS)
   const [sms, setSms] = useState({ to: '', body: '' });
-  const [smsOpen, setSmsOpen] = useState<{ url: string; qr: string | null; share?: string } | null>(null);
+  // #194 files = 문자에 바로 붙인 파일(앱 1.1.3), fallbackShare = 문자앱이 안 열려 주소 방식으로 다시 열 때 쓸 내려받기 링크
+  const [smsOpen, setSmsOpen] = useState<{ url: string; qr: string | null; share?: string; files?: { name: string; size: number }[]; fallbackShare?: string } | null>(null);
+  const [attachOk, setAttachOk] = useState(false); // #194 앱 1.1.3(안드로이드): 문자에 파일 바로 첨부
+  useEffect(() => { canSmsAttach().then(setAttachOk).catch(() => {}); }, []);
   const [lib, setLib] = useState(false);
   // 로컬 검수 10/17 보안: 자료실에서 고른 파일은 업무 첨부로 붙이지 않고 이번 발송에만 담는다
   const [libFiles, setLibFiles] = useState<{ id: string; name: string; size: number }[]>([]);
@@ -185,6 +190,9 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     addLib({ id: r.id, name: r.title, size: r.size }); setRec((x) => x.filter((y) => y.id !== r.id));
   }
   const libIds = () => (libFiles.length ? libFiles.map((x) => x.id) : undefined);
+  const picked = (): SmsFile[] => [...d!.attachments.filter((a) => f!.files.includes(a.id)).map((a) => ({ kind: 'att' as const, id: a.id, name: a.name, size: a.size, mime: a.mime })),
+    ...libFiles.map((x) => ({ kind: 'lib' as const, id: x.id, name: x.name, size: x.size }))];
+  const smsPlan = attachOk && fileCount > 0 && !initial?.complete ? planSmsAttach(picked()) : null;
   // 문자 A 방식: 휴대폰 문자앱으로 넘김(본문·첨부 링크·서명 한 줄). PC 는 QR 로 휴대폰에서 열기
   const smsLine = sig?.smsLine ?? '';
   async function openSms() {
@@ -200,10 +208,27 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
         share = r.url;
       }
     } catch (e: any) { toast.error(e.message); return; }
-    const text = complete ? sms.body.trim() : [sms.body.trim(), share ? `자료 내려받기(14일): ${share}` : '', smsLine].filter(Boolean).join('\n\n');
+    const textOf = (link: boolean) => (complete ? sms.body.trim() : [sms.body.trim(), link && share ? `자료 내려받기(14일): ${share}` : '', smsLine].filter(Boolean).join('\n\n'));
+    const text = textOf(true);
     const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
     const url = `sms:${nums.join(',')}${ios ? '&' : '?'}body=${encodeURIComponent(text)}`;
     const touch = window.matchMedia('(pointer: coarse)').matches;
+    // #194 앱 1.1.3(안드로이드): 합계 10MB까지는 파일을 문자에 바로 붙이고, 못 붙인 파일이 있을 때만 내려받기 링크를 넣는다.
+    // 링크는 위에서 먼저 만든다(기밀 확인·공유 기록) — 문자앱이 안 열리면 아래 예전 방식(sms: 주소 + 링크)
+    if (touch && attachOk && share) {
+      setBusy(true);
+      try {
+        const plan = planSmsAttach(picked());
+        const got = plan.direct.length ? await cacheForSms(plan.direct) : { ok: [], failed: [] };
+        if (got.ok.length) {
+          const linked = plan.link.length + got.failed.length > 0;
+          await smsWithFiles({ phones: nums, body: textOf(linked), files: got.ok.map((x) => ({ uri: x.uri, mime: x.mime })) });
+          setSmsOpen({ url, qr: null, share: linked ? share : undefined, files: got.ok.map((x) => ({ name: x.name, size: x.size })), fallbackShare: share });
+          if (got.failed.length) toast.info(`${got.failed.length}개 파일은 받지 못해 내려받기 링크로 넣었습니다`);
+          return;
+        }
+      } catch { /* 문자앱을 열지 못함 → 예전 방식 */ } finally { setBusy(false); }
+    }
     const qr = touch ? null : await QRCode.toDataURL(`sms:${nums.join(',')}?body=${encodeURIComponent(text)}`, { margin: 1, width: 220 }).catch(() => null);
     setSmsOpen({ url, qr, share });
     if (touch) window.location.href = url;
@@ -212,7 +237,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!sent) { setSmsOpen(null); return; }
     try {
       const nums = sms.to.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
-      await api('/api/mail/sms-log', { body: { taskId, to: nums, body: sms.body, shareUrl: smsOpen?.share, ...(initial?.outboxId ? { outboxId: initial.outboxId } : {}) } });
+      await api('/api/mail/sms-log', { body: { taskId, to: nums, body: sms.body, shareUrl: smsOpen?.share, ...(smsOpen?.files?.length ? { files: smsOpen.files } : {}), ...(initial?.outboxId ? { outboxId: initial.outboxId } : {}) } });
       toast.ok('문자 보낸 기록을 남겼습니다'); onSent();
     } catch (e: any) { toast.error(e.message); }
   }
@@ -291,7 +316,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           </div>
         ) : channel === 'sms' ? (
           <div className="grid gap-2 text-sm" data-testid="sms-pane">
-            <p className="text-ink-2">내 휴대폰 문자앱으로 넘겨서 <b>내 번호로</b> 보냅니다. 첨부를 고르면 14일 다운로드 링크가 들어갑니다.{!initial?.complete && ' [예약]하면 그 시각에 알려 드리고, 그때 문자앱으로 넘겨 보냅니다(서버가 대신 보내지 않음).'}</p>
+            <p className="text-ink-2">내 휴대폰 문자앱으로 넘겨서 <b>내 번호로</b> 보냅니다. {attachOk ? '첨부는 합계 10MB까지 문자에 바로 붙이고, 넘는 파일만 14일 다운로드 링크로 들어갑니다.' : '첨부를 고르면 14일 다운로드 링크가 들어갑니다.'}{!initial?.complete && ' [예약]하면 그 시각에 알려 드리고, 그때 문자앱으로 넘겨 보냅니다(서버가 대신 보내지 않음).'}</p>
             <Field label="받는 사람 전화번호 (여러 명은 쉼표)"><SuggestInput value={sms.to} onChange={(v) => setSms({ ...sms, to: v })} kind="phone" multi taskId={taskId} testId="sms-to" placeholder="이름·회사·번호를 치면 회사 연락처에서 찾습니다" /></Field>
             <CandChips items={d.candidates?.phones ?? []} current={sms.to} onPick={(v) => setSms({ ...sms, to: [sms.to, v].filter((x) => x.trim()).join(', ') })} testId="sms-to-cand" />
             <Field label="문자 내용"><textarea className={inputCls} rows={4} value={sms.body} onChange={(e) => setSms({ ...sms, body: e.target.value })} data-testid="sms-body" /></Field>
@@ -300,7 +325,8 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
                 {b}바이트 · {b <= 90 ? 'SMS(90바이트)' : b <= 2000 ? 'LMS(2,000바이트)' : '2,000바이트 넘음 — 줄여 주세요'}
                 {b > 2000 && <button type="button" className="font-medium underline" onClick={() => setSms({ ...sms, body: fitBytes(sms.body, 2000 - smsBytes(smsLine) - 4) })} data-testid="sms-fit">요약본 넣기(앞부분만)</button>}
               </p>); })()}
-            <p className="whitespace-pre-wrap rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="sms-preview">{[sms.body.trim() || '(내용)', fileCount ? '자료 내려받기(14일): https://…/d/…' : '', smsLine].filter(Boolean).join('\n\n')}</p>
+            <p className="whitespace-pre-wrap rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="sms-preview">{[sms.body.trim() || '(내용)', fileCount && (!smsPlan || smsPlan.link.length) ? '자료 내려받기(14일): https://…/d/…' : '', smsLine].filter(Boolean).join('\n\n')}</p>
+            {smsPlan && <p className="flex items-center gap-1 text-xs text-ink-2" data-testid="sms-attach-plan"><Paperclip className="size-3.5 shrink-0" />파일 {smsPlan.direct.length}개({mb(smsPlan.bytes)})를 문자에 바로 붙입니다{smsPlan.link.length > 0 && ` · ${smsPlan.link.length}개는 10MB를 넘어 내려받기 링크로`}</p>}
           </div>
         ) : (
         <div className="grid gap-2 text-sm">
@@ -371,7 +397,8 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
         {channel === 'sms' && smsOpen && (
           <div className="space-y-2 rounded-input border border-line p-3 text-sm" data-testid="sms-confirm">
             {smsOpen.qr && <div className="flex items-center gap-3"><img src={smsOpen.qr} alt="휴대폰으로 찍으면 문자앱이 열립니다" className="size-36" /><p className="text-xs text-ink-2">PC 에는 문자앱이 없습니다. 휴대폰 카메라로 QR 을 찍으면 같은 문자가 문자앱에 채워집니다.</p></div>}
-            {!smsOpen.qr && <p className="text-xs text-ink-2">문자앱이 열리지 않으면 <a href={smsOpen.url} className="underline">여기</a>를 누르세요.</p>}
+            {smsOpen.files?.length ? <p className="text-xs text-ink-2" data-testid="sms-attached">파일 {smsOpen.files.length}개를 붙여 문자앱을 열었습니다.</p> : null}
+            {!smsOpen.qr && <p className="text-xs text-ink-2">문자앱이 열리지 않으면 <a href={smsOpen.url} className="underline" onClick={() => setSmsOpen((s) => s && { ...s, files: undefined, share: s.fallbackShare ?? s.share })}>여기</a>를 누르세요{smsOpen.files?.length ? '(파일 대신 내려받기 링크)' : ''}.</p>}
             <p className="font-medium">문자를 보내셨나요?</p>
             <div className="flex gap-2"><Button size="sm" onClick={() => smsDone(true)} data-testid="sms-sent">보냈어요</Button><Button size="sm" variant="secondary" onClick={() => smsDone(false)}>안 보냄</Button></div>
           </div>
@@ -395,7 +422,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
                 </>}
                 {sched && !initial?.complete
                   ? <Button onClick={scheduleSmsSend} disabled={busy || !d.canSend} data-testid="sms-schedule-send"><Send />{busy ? '예약 중…' : '예약하기'}</Button>
-                  : <Button onClick={openSms} disabled={!d.canSend} data-testid="sms-open"><MessageSquare />문자앱으로 보내기</Button>}
+                  : <Button onClick={openSms} disabled={busy || !d.canSend} data-testid="sms-open"><MessageSquare />{busy ? '파일을 붙이는 중…' : '문자앱으로 보내기'}</Button>}
               </span>}
         </div>
       </div>

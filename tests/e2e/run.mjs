@@ -76,6 +76,7 @@ import { v283 } from './v283.step.mjs';
 import { v30import, sheetPhone, notifRead, checkScroll, roleBadge, chatBubble } from './v30import.step.mjs';
 import { metaAuto } from './metaAuto.step.mjs';
 import { digestMail } from './digestMail.step.mjs';
+import { app113 } from './app113.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -2774,6 +2775,8 @@ await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]�
 });
 
 await step('#509·#510 당일 공고 메일: 데이터 설정 받는 주소 직접 추가(형식 확인·칩)·보낸 사람 이름·발송 경로 안내 → [오늘 메일 미리보기] 구역·지역·미공개·D-day, 휴대폰 폭 넘침 없음 → 메일 제목 링크로 공고 상세 바로', () => digestMail({ owner, ctx, sql, BASE, SHOTS }));
+
+await step('#192·#194 앱 1.1.3 웹 몫: 위젯 [+]·딥링크 /tasks?new=1 → 업무 등록 창(new 지움·새로고침에 다시 안 열림·같은 화면에서도 열림) · 브라우저에는 전체화면 알람 안내 없음', () => app113({ owner, BASE }));
 
 await browser.close();
 srv.proc.kill();
