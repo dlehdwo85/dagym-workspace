@@ -19,7 +19,8 @@ const KAPT_ROWS = [
 const dataGo = (items) => JSON.stringify({ response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items, numOfRows: 100, pageNo: 1, totalCount: items.length } } });
 // #476: 시험마다 바꾸는 원천 — K-apt 목록 추가 줄·상세 입찰분류·공식 API(15058166) 응답·협력사 게시판
 let kaptExtra = [], kaptApiItems = []; const detailCat = {};
-let vendorHtml = '<html><ul><li><a href="/notice/12">2026년 협력업체 정기등록 모집 안내</a></li><li><a href="/notice/13">추석 연휴 안내</a></li></ul></html>';
+let vendorStatus = 200;
+let vendorHtml = `<html><ul><li><a href="/notice/12">2026년 협력업체 정기등록 모집 안내</a> <span>${today}</span></li><li><a href="/notice/13">추석 연휴 안내</a></li></ul></html>`;
 before(async () => {
   fake = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'); let body = ''; for await (const c of req) body += c; hits.push({ path: u.pathname, q: Object.fromEntries(u.searchParams), body });
@@ -37,7 +38,7 @@ before(async () => {
     if (u.pathname.startsWith('/g2b/as/ScsbidInfoService/')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', bidwinnrNm: '하이링크', sucsfbidAmt: '240000000', opengDt: `${today} 11:00:00` }] : []), 'application/json');
     if (u.pathname === '/agency/lh_bid') return send(200, dataGo([{ bidNum: 'LH-1', bidNm: '행복주택 커뮤니티시설 운영 위탁', ognzNm: 'LH', clseDt: `${plus(6)} 17:00`, bidAmt: '50000000' }]), 'application/json');
     if (u.pathname.startsWith('/agency/')) return send(403, '<r><returnReasonCode>SERVICE ACCESS DENIED</returnReasonCode></r>', 'application/xml');
-    if (u.pathname === '/vendor/notice') return send(200, vendorHtml);
+    if (u.pathname === '/vendor/notice') return send(vendorStatus, vendorHtml);
     if (u.pathname === '/files/kicox.csv') return send(200, '﻿유형,시도,시군,단지명,조성상태,입주업체(개),가동업체(개),관리면적(천제곱미터)\n일반,경기,성남시,판교테크노밸리,완료,1200,1150,660\n일반,경기,화성시,동탄,조성중,30,0,100\n', 'text/csv');
     if (u.pathname === '/files/reb.csv') return send(200, `﻿단지고유번호,주소,단지명_공시가격,단지종류,세대수,동수,사용승인일,도로명주소\nA100,경기도 성남시 분당구 정자동 1,분당 새아파트,1,850,8,${plus(-100)},경기도 성남시 분당구 정자로 1\nA101,서울특별시 강남구 역삼동 2,옛날아파트,1,300,3,2010-01-01,\n`, 'text/csv');
     if (u.pathname === '/hotels/info') return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 1, items: { item: [{ BPLC_NM: '판교 호텔', SALS_STTS_CD: '01', ROAD_NM_ADDR: '경기도 성남시 분당구 대왕판교로 1', GSRM_CNT: '320', LCPMT_YMD: '20200101', TOUR_LDGBIZ_DTL_NM: '관광호텔업', MNG_NO: 'H1' }] } } } }), 'application/json');
@@ -92,7 +93,7 @@ test('나라장터(검색어 × 4대상) + 누리장터 활용신청 필요 → 
   const vr = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
   assert.equal(vr.inserted, 1, JSON.stringify(vr));
   const [v] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = 'vendor_recruit'`;
-  assert.equal(v.row.notice_type, '협력사 모집'); assert.equal(v.row.related, true); assert.equal(v.row.classification, '즉시 검토');
+  assert.equal(v.row.notice_type, '협력사 모집'); assert.equal(v.row.related, true); assert.equal(v.row.classification, '중장기 영업리드', '#476 후속 d: 협력사 모집은 즉시 검토 아님'); assert.equal(v.row.posted_checked, true);
 });
 
 test('영업 DB 수집기: 산업단지 CSV·부동산원 CSV(18개월)·관광숙박업 API·K-apt 사업자선정 → 파생(커뮤니티 업무만) · 수동 필드 보존', async () => {
@@ -189,7 +190,8 @@ test('#476 입찰공고 누락: 지난 메일 뒤 처음 본 공고 → 다음 �
   assert.match(api.deadline_at, /T17:00:00\+09:00$/); assert.ok(api.source_url.includes('bidNum=20261022135202498'));
   const up = (await byExt('20261022000009')).row; assert.equal(up.bid_category, '사업자 > 용역 > 주민운동시설의 위탁'); assert.equal(up.classification, '즉시 검토', '옛 규칙의 중장기 → 즉시 검토로 올림');
   assert.equal((await byExt('20261021000001')).row.title, '[서울강남] 커뮤니티 피트니스센터 위탁운영 사업자 선정', '목록에 있는 공고는 목록 화면 값이 기준');
-  // e) 협력사 게시판: 링크 글자 = 제목(조회수·작성자 꼬리 없음) · 게시일 · 30일 넘은 글·결과 공지 빼기 · 날짜 미상은 오늘 탭 밖 · 옛 꼬리 줄 정리
+  // e) 협력사 게시판(#476 후속 로컬 10/23): 링크 글자 = 제목 · 게시판 날짜를 읽은 글만 줄 · 30일 넘은 글·결과 공지 빼기 · 날짜 없는 줄은 글로 쪼개지 않고 '안내 페이지 바뀜' 1줄
+  // · 예전 방식 줄(꼬리·공고일 = 수집일) 숨김 · 회사 진행 기록이 걸린 줄은 남기되 게시일 비움 · 분류 '즉시 검토' → '중장기 영업리드'
   const dot = (x) => x.replace(/-/g, '.');
   vendorHtml = `<html><table><tr><th>번호</th><th>제목</th><th>작성자</th><th>날짜</th><th>조회</th></tr>
 <tr><td>14</td><td><a href="/notice/view?id=114">2026년 협력업체 정기등록 모집 안내</a></td><td>관리자</td><td>${dot(today)}</td><td>351</td></tr>
@@ -197,28 +199,69 @@ test('#476 입찰공고 누락: 지난 메일 뒤 처음 본 공고 → 다음 �
 <tr><td>12</td><td><a href="/notice/view?id=112">2026 하반기 협력업체 모집 결과 공지</a></td><td>관리자</td><td>${dot(yd)}</td><td>20</td></tr>
 <tr><td>11</td><td><a href="javascript:goView(111)">우수 협력사 등록 신청 안내</a></td><td>관리자</td><td>-</td><td>12</td></tr>
 <tr><td>10</td><td><a href="/notice/view?id=110">파트너사 신규 모집 안내 [N]</a></td><td>관리자</td><td></td><td>3</td></tr></table></html>`;
-  const vrow = (title, ext, first) => ({ source_type: 'vendor_recruit', source_external_id: ext, source_url: 'http://x/vendor/notice', title: `[시험건설] ${title}`, issuer: '시험건설', notice_type: '협력사 모집', bid_category: '협력사 모집', related: true, classification: '즉시 검토', posted_date: first.slice(0, 10), first_seen_at: first, updated_at: first });
+  const vrow = (title, ext, first, posted = first.slice(0, 10)) => ({ source_type: 'vendor_recruit', source_external_id: ext, source_url: 'http://x/vendor/notice', title: `[시험건설] ${title}`, issuer: '시험건설', notice_type: '협력사 모집', bid_category: '협력사 모집', related: true, classification: '즉시 검토', posted_date: posted, first_seen_at: first, updated_at: first });
   await ins('00000000-0000-4000-8000-0000000476c1', vrow('협력업체 신규 등록 접수 안내 조회 Hit 3501 추천 0 관리자 2019.03.05', 'junk-1', new Date().toISOString()));
   await ins('00000000-0000-4000-8000-0000000476c2', vrow('우수 협력사 등록 신청 안내 조회 12 추천 0', 'junk-2', kst(yd, '07:00')));
   await ins('00000000-0000-4000-8000-0000000476c3', vrow('협력업체 모집 결과 공지 조회 5 추천 0', 'junk-3', kst(yd, '07:00')));
   await ins('00000000-0000-4000-8000-0000000476c4', vrow('협력업체 신규 등록 접수 안내', 'old-clean', kst(yd, '07:00'))); // 제목은 깨끗하지만 게시판에선 2019년 글
   await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, data) values ('default', 'opportunity_work', 'w-476', '00000000-0000-4000-8000-0000000476c3', '검토', '{}')`;
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('default', 'opportunity_work', 'w-476v', ${sql.json({ id: 'w-476v', notice_id: '00000000-0000-4000-8000-0000000476c3', status: '검토' })}, 'src')`; // 화면(진행 기록 복사본)에서도 걸린 줄
   const v = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
-  assert.match(v.summary, /모집 글 3건\(최근 30일, 날짜 미상 2\)/, v.summary); assert.match(v.summary, /제목 고침 1 · 숨김 2/, v.summary);
+  assert.match(v.summary, /모집 글 1건\(최근 30일·게시일 있는 글\) · 안내 페이지 바뀜 1 /, v.summary); assert.match(v.summary, /제목 고침 0 · 숨김 3 · 게시일 지움 1/, v.summary);
   const vr = await sql`select row, gone from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = 'vendor_recruit' order by row->>'title'`;
   const live = vr.filter((r) => !r.gone).map((r) => r.row);
   assert.ok(live.every((r) => !/조회|Hit|추천 \d/.test(r.title) || r.source_external_id === 'junk-3'), JSON.stringify(live.map((r) => r.title)));
   assert.ok(!live.some((r) => r.title.includes('결과 공지') && r.source_external_id !== 'junk-3'), '결과 공지는 안 들어옴(진행 기록이 걸린 옛 줄만 남음)');
   assert.ok(!live.some((r) => r.title.includes('신규 등록 접수 안내')), '2019년 글 = 30일 넘음 → 옛 꼬리 줄은 숨김');
-  assert.equal((await byExt('junk-1')).gone, true); assert.equal((await byExt('junk-3')).gone, false, '회사 진행 기록이 걸린 줄은 그대로');
-  assert.equal((await byExt('old-clean')).gone, true, '게시판에서 30일 넘은 글로 읽힌 옛 줄은 제목이 깨끗해도 숨김');
-  const regular = live.find((r) => r.title === '[시험건설] 2026년 협력업체 정기등록 모집 안내'); assert.equal(regular.posted_date, today, '게시일 = 게시판 날짜'); assert.equal(regular.source_url, 'http://localhost:3231/notice/view?id=114');
-  const moved = (await byExt(`${h8('시험건설')}-${h8('우수 협력사 등록 신청 안내')}`)).row;
-  assert.deepEqual([moved.title, moved.posted_date, moved.first_seen_at], ['[시험건설] 우수 협력사 등록 신청 안내', null, kst(yd, '07:00')], '같은 글 = 새 키로 옮김(처음 본 날 유지)');
-  const partner = live.find((r) => r.title === '[시험건설] 파트너사 신규 모집 안내'); assert.ok(partner, '[N] 표시 지움'); assert.equal(partner.posted_date, null, '날짜 미상');
+  assert.deepEqual([(await byExt('junk-1')).gone, (await byExt('junk-2')).gone, (await byExt('old-clean')).gone], [true, true, true], '게시판에서 게시일을 확인 못 한 옛 줄은 숨김');
+  const j3 = await byExt('junk-3'); assert.deepEqual([j3.gone, j3.row.posted_date, j3.row.classification], [false, null, '중장기 영업리드'], '회사 진행 기록이 걸린 줄은 그대로(게시일만 비움)');
+  const regular = live.find((r) => r.title === '[시험건설] 2026년 협력업체 정기등록 모집 안내');
+  assert.deepEqual([regular.posted_date, regular.posted_checked, regular.classification, regular.source_url], [today, true, '중장기 영업리드', 'http://localhost:3231/notice/view?id=114'], '게시일 = 게시판 날짜 · 확인 표시');
+  assert.ok(!live.some((r) => /우수 협력사 등록 신청 안내$|파트너사 신규 모집 안내$/.test(r.title)), '날짜 없는 줄은 글로 쪼개지 않음');
+  const chg = live.filter((r) => r.notice_state === '안내 페이지 바뀜');
+  assert.equal(chg.length, 1, JSON.stringify(live.map((r) => r.title)));
+  assert.deepEqual([chg[0].title, chg[0].posted_date, chg[0].task_scope], ['[시험건설] 협력사 안내 페이지 바뀜 — 우수 협력사 등록 신청 안내 외 1줄', today, '새로 보인 줄 2: 우수 협력사 등록 신청 안내 / 파트너사 신규 모집 안내']);
   const tt2 = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today')).items.map((n) => n.title);
-  assert.ok(tt2.includes('[시험건설] 2026년 협력업체 정기등록 모집 안내')); assert.ok(!tt2.includes('[시험건설] 파트너사 신규 모집 안내'), '날짜 미상 협력사 글은 오늘 탭 밖');
-  assert.ok((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=recruit')).items.some((n) => n.title === '[시험건설] 파트너사 신규 모집 안내'), '협력사 모집 탭에는 있음');
+  assert.ok(tt2.includes('[시험건설] 2026년 협력업체 정기등록 모집 안내') && tt2.includes(chg[0].title), JSON.stringify(tt2)); assert.ok(!tt2.some((x) => x.includes('결과 공지')), '게시일 비운 줄은 오늘 탭 밖');
+  const rc = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=recruit')).items;
+  assert.deepEqual(rc.map((n) => n.title).sort(), [chg[0].title, '[시험건설] 2026년 협력업체 정기등록 모집 안내', '[시험건설] 협력업체 모집 결과 공지 조회 5 추천 0'].sort(), '협력사 모집 탭 = 확인된 글 + 안내 페이지 바뀜 + 진행 기록 걸린 줄');
+  assert.equal(rc.find((n) => n.title.includes('결과 공지')).noticeDate, null);
+  const again = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
+  assert.equal(again.inserted, 0, again.summary); assert.match(again.summary, /안내 페이지 바뀜 0/, '같은 페이지면 다시 넣지 않음');
+  // f) 로컬 10/23 14:20 운영 지적: 안내 페이지 조각(목록 기호·메뉴·고정 링크)·예전 방식 '공고일 = 수집일' 줄이 '공고일 오늘'로 오늘 탭에 → 수집 전에도 오늘 탭·협력사 탭·메일 밖,
+  // 수집하면 숨김 · 게시판 줄 전체가 링크인 곳(대방건설형)은 링크 안 날짜를 읽음 · 메뉴·바닥 고정 링크 뒤 날짜는 그 링크 날짜가 아님
+  for (const [n, title] of [['1', '개요 CEO 인사말 연혁 조직도 오시는길 협력업체등록'], ['2', '1) 협력사 등록 신청서 (당사 양식)'], ['3', '협력업체등록신청']]) await ins(`00000000-0000-4000-8000-0000000476d${n}`, vrow(title, `j476-${n}`, kst(yd, '13:00'), today));
+  const tt3 = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today')).items.map((n) => n.title);
+  assert.ok(!tt3.some((x) => /인사말|신청서 \(당사|협력업체등록신청/.test(x)), `예전 방식 줄은 공고일을 믿지 않음: ${JSON.stringify(tt3)}`);
+  assert.ok(!(await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=recruit')).items.some((n) => /인사말|신청서 \(당사|협력업체등록신청/.test(n.title)), '협력사 탭에도 없음');
+  const mail = await ctx.owner.ok('POST', '/api/sales/digest/send', {});
+  assert.ok(!mail.items.some((i) => /인사말|신청서 \(당사|협력업체등록신청/.test(i.title)), `메일 밖: ${JSON.stringify(mail.items.map((i) => i.title))}`); assert.ok(mail.counts.skipped['게시일 미상'] >= 3, JSON.stringify(mail.counts.skipped));
+  vendorHtml = `<html><ul class="gnb"><li><a href="/c/1">개요</a> <a href="/c/2">CEO 인사말</a> <a href="/c/3">연혁</a> <a href="/c/4">조직도</a> <a href="/c/5">오시는길</a> <a href="/c/6">협력업체등록</a></li></ul>
+<div class="board"><a href="javascript:goBoardView('/b','View','753');"><p>공지</p><div><p>시험건설 2026년도 하반기 협력업체 모집공고</p></div><p class="date">${dot(plus(-3))}</p><p>3,489</p></a>
+<a href="javascript:goBoardView('/b','View','703');"><p>1</p><div><p>시험건설 2025년도 협력업체 모집공고</p></div><p class="date">2024.12.09</p><p>3,363</p></a></div>
+<ul><li>1) 협력사 등록 신청서 (당사 양식) 제출 — 협력업체 등록</li><li>b. 신용등급 B이상, 현금흐름도 C이상 (협력업체 등록 요건)</li></ul>
+<table><tr><td>구분 2021년 신규협력업체 모집</td></tr></table><a href="/files/form.zip">협력업체 등록신청서 다운로드</a> <span>${dot(today)} 갱신</span></html>`;
+  const f = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
+  assert.match(f.summary, /모집 글 1건\(최근 30일·게시일 있는 글\) · 안내 페이지 바뀜 1 /, f.summary); assert.match(f.summary, /숨김 3/, f.summary);
+  assert.deepEqual(await Promise.all(['j476-1', 'j476-2', 'j476-3'].map(async (x) => (await byExt(x)).gone)), [true, true, true], '조각·메뉴·고정 링크 줄 숨김');
+  const db2 = (await sql`select row from sales_src_rows where tbl = 'procurement_notices' and not gone and row->>'title' = '[시험건설] 시험건설 2026년도 하반기 협력업체 모집공고'`)[0]?.row;
+  assert.deepEqual([db2?.posted_date, db2?.posted_checked, db2?.classification], [plus(-3), true, '중장기 영업리드'], '링크 안 날짜 = 게시일');
+  const all2 = (await sql`select row->>'title' t from sales_src_rows where tbl = 'procurement_notices' and not gone and row->>'source_type' = 'vendor_recruit'`).map((r) => r.t);
+  assert.ok(!all2.some((x) => /2025년도|^\[시험건설\] (1\)|b\.|구분|협력업체등록$|협력업체 등록신청서)/.test(x)), `30일 넘은 글·조각은 줄이 아님: ${JSON.stringify(all2)}`);
+  assert.ok(all2.includes('[시험건설] 협력사 안내 페이지 바뀜 — 협력업체등록 외 4줄'), JSON.stringify(all2));
+  const tt4 = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today')).items;
+  assert.equal(tt4.find((n) => n.title.includes('2026년도 하반기')).todayLabel, `${Number(plus(-3).slice(5, 7))}/${Number(plus(-3).slice(8, 10))} 공고·오늘 수집`);
+  assert.match((await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {})).summary, /안내 페이지 바뀜 0 · 신규 0/);
+  // g) 로컬 10/23 '서희건설 시간 초과 반복': 3번 연속 실패한 페이지는 3일 쉼(다른 페이지 시간을 잡아먹지 않게) · 쉬는 동안 요약에 표시 · 다시 되면 실패 수 0
+  vendorStatus = 503;
+  for (let i = 1; i <= 3; i++) { const r = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {}); assert.match(r.errorLog ?? '', i === 3 ? /시험건설: HTTP 503 — 3번 연속 실패라 3일 쉬고 다시 시도/ : /^시험건설: HTTP 503$/m, JSON.stringify(r)); }
+  const rest = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
+  assert.match(rest.summary, /쉬는 페이지 1: 시험건설\(\d+\/\d+까지\)/, rest.summary);
+  vendorStatus = 200; const purl = `http://localhost:${PORT}/vendor/notice`;
+  await sql`update app_settings set value = jsonb_set(value, ${[purl, 'restUntil']}::text[], '"2000-01-01T00:00:00.000Z"'::jsonb) where key = 'sales_vendor_page_state'`;
+  const back = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
+  assert.ok(!/쉬는 페이지/.test(back.summary) && /안내 페이지 바뀜 0/.test(back.summary), back.summary);
+  const [pst] = await sql`select value->${purl} v from app_settings where key = 'sales_vendor_page_state'`; assert.deepEqual([pst.v.fails, pst.v.restUntil, pst.v.seen.length], [0, null, 7], '기준(본 줄)은 그대로');
   kaptExtra = []; kaptApiItems = [];
 });
 
@@ -226,7 +269,7 @@ test('플랫폼 운영자: 협력사 감시 페이지·기관 엔드포인트 �
   assert.equal((await ctx.staffA.client.req('GET', '/api/platform/sales-collectors')).status, 404);
   assert.equal((await ctx.staffA.client.req('PUT', '/api/platform/sales-collectors', { vendorPages: [] })).status, 404);
   const g = await ctx.owner.ok('GET', '/api/platform/sales-collectors');
-  assert.equal(g.vendorPages.length, 21, '마이그레이션 142 seed(원본 21곳)'); assert.ok(g.vendorPages.every((x) => x.company && /^https?:\/\//.test(x.url))); assert.ok(g.endpoints.lh_bid.startsWith('http')); assert.ok(g.endpoints.nuri_bid_servc.includes('PrvtBidNtceService')); assert.deepEqual(g.endpointOverrides, {});
+  assert.equal(g.vendorPages.length, 21, '마이그레이션 142 seed(원본 21곳)'); assert.ok(g.vendorPages.every((x) => x.company && /^https?:\/\//.test(x.url))); assert.ok(g.endpoints.lh_bid.startsWith('http')); assert.ok(g.endpoints.nuri_bid_servc.endsWith('PrvtBidNtceService/getPrvtBidPblancListInfoServcPPSSrch') && g.endpoints.nuri_bid_thng.endsWith('getPrvtBidPblancListInfoThngPPSSrch'), '누리장터 = getPrvtBidPblancListInfo*(10/23 주소 확인)'); assert.deepEqual(g.endpointOverrides, {});
   const p = await ctx.owner.ok('PUT', '/api/platform/sales-collectors', { vendorPages: [{ company: '현대건설', url: 'https://www.hdec.kr/notice', registerUrl: 'https://www.hdec.kr/register' }, { company: '현대건설', url: 'https://www.hdec.kr/notice' }, { company: '대우건설', url: 'https://www.daewooenc.com/partner' }], endpoints: { lh_bid: 'https://apis.data.go.kr/B552555/lhBidInfo2/getList', onbid_lease: '' } });
   assert.deepEqual(p.vendorPages.map((x) => x.company), ['현대건설', '대우건설'], '같은 주소 중복 제거'); assert.equal(p.vendorPages[0].register_url, 'https://www.hdec.kr/register'); assert.equal(p.vendorPages[1].register_url, null);
   assert.equal(p.endpoints.lh_bid, 'https://apis.data.go.kr/B552555/lhBidInfo2/getList'); assert.deepEqual(Object.keys(p.endpointOverrides), ['lh_bid'], '비운 칸은 기본값(덮어쓰기 없음)');

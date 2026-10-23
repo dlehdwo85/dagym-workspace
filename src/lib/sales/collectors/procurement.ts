@@ -119,7 +119,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stri
 const IMMEDIATE_CATEGORY = /주민\s*운동\s*시설의\s*위탁|커뮤니티/;
 /** 처음 적재할 때의 분류(담당자 판단은 회사별 진행 칸에 — 공용 행은 규칙이 바뀌면 '중장기 → 즉시 검토'로만 올림, planNoticeBatch) */
 export function initialClassification(row: { title?: unknown; bid_category?: unknown; task_scope?: unknown; fit_business?: unknown; source_type?: unknown }): string {
-  if (row.source_type === 'vendor_recruit') return '즉시 검토';
+  if (row.source_type === 'vendor_recruit') return '중장기 영업리드'; // #476 후속 d(로컬 10/23): 협력사 모집은 등록 준비 — 즉시 검토로 두지 않음
   if (!row.fit_business) return '참고(비관련)';
   const cat = String(row.bid_category ?? '');
   if (IMMEDIATE_CATEGORY.test(cat) && !/공사/.test(cat)) return '즉시 검토';

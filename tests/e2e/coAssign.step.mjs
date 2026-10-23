@@ -41,6 +41,10 @@ export async function coAssign({ owner, staff, ctx, sql, BASE, SHOTS }) {
   await owner.getByTestId('sum-co-add').click(); // 휴대폰에서도 담당자 칩 옆 [+] → 공동 담당 추가 칸으로(초점 + 목록 열기)
   for (let i = 0; i < 20 && (await owner.evaluate(() => document.activeElement?.getAttribute('aria-label'))) !== '공동 담당 추가'; i++) await owner.waitForTimeout(100);
   assert.equal(await owner.evaluate(() => document.activeElement?.getAttribute('aria-label')), '공동 담당 추가', '[+] → 공동 담당 추가 칸에 초점');
+  // 로컬 10/23 #475 운영 확인: 추가 칸 목록에 주 담당(최매니저)·이미 붙은 사람(이직원)은 안 보임 · 줄마다 한 줄 설명
+  const opts = await box.getByLabel('공동 담당 추가').locator('option').allInnerTexts();
+  assert.ok(!opts.some((o) => o.startsWith('최매니저') || o.startsWith('이직원')) && opts.some((o) => o.startsWith('박직원')), JSON.stringify(opts));
+  assert.deepEqual(await owner.getByTestId('prop-hint').allInnerTexts(), ['같이 맡고 내 몫 완료', '보기·댓글 알림만']);
   await box.getByLabel('공동 담당 추가').selectOption({ label: '박직원' });
   await owner.getByText('공동 담당을 추가했습니다').first().waitFor();
   await box.locator(`[data-testid="co-chip"][data-user="${ctx.staffB.id}"]`).waitFor(); // 다시 읽힌 화면에 칩 2개

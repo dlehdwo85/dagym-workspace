@@ -684,9 +684,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 : <span className="px-2 text-sm" title="담당자를 바꿀 권한이 없습니다" data-testid="assignee-locked">{t.assignee_name ? personLabel(dir.users.find((x) => x.id === t.assignee_id) ?? { name: t.assignee_name }) : '담당자 없음'}</span>}</span>
             </Prop>
             {/* 대표 10/23 #475: 한 업무에 담당자 여러 명 — 공동 담당(주 담당 + 함께 맡는 사람) */}
-            <Prop icon={Users} label="공동 담당" asDiv><CoAssignees t={t} canEdit={!!perms.coAssign} canRule={!!perms.coAssign || t.assignee_id === user.id} onPatch={patch} /></Prop>
+            {/* 로컬 10/23 #475 운영 확인: '공동 담당'과 '협업자'가 나란히 있어 헷갈림 → 줄마다 한 줄 설명 */}
+            <Prop icon={Users} label="공동 담당" hint="같이 맡고 내 몫 완료" asDiv><CoAssignees t={t} canEdit={!!perms.coAssign} canRule={!!perms.coAssign || t.assignee_id === user.id} onPatch={patch} /></Prop>
             {/* R-15 6번: 1명 배정 뒤에도 협업자 추가 */}
-            <Prop icon={Users} label="협업자" asDiv><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
+            <Prop icon={Users} label="협업자" hint="보기·댓글 알림만" asDiv><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
             <Prop icon={Megaphone} label="요청자">
               <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
             </Prop>
@@ -836,10 +837,13 @@ const TASK_TYPE_LABEL: Record<string, string> = { normal: '일반', milestone: '
 const ghostCls = 'h-8 w-full min-w-0 rounded-input border border-transparent bg-transparent px-2 text-sm text-ink transition-colors hover:border-line hover:bg-white focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent-500/20 disabled:cursor-not-allowed disabled:text-ink-2 disabled:hover:border-transparent';
 
 /** "라벨: 값" 한 줄. 라벨을 누르면 값으로 이동(접근성: label 로 연결) */
-function Prop({ icon: Icon, label, children, asDiv, className }: { icon: LucideIcon; label: string; children: React.ReactNode; asDiv?: boolean; className?: string }) {
+function Prop({ icon: Icon, label, children, asDiv, className, hint }: { icon: LucideIcon; label: string; children: React.ReactNode; asDiv?: boolean; className?: string; hint?: string }) {
+  const head = <><Icon className="size-4 shrink-0 text-ink-3" />{label}</>;
   const inner = (
     <>
-      <span className="flex min-h-8 w-24 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-2 sm:w-[120px] sm:gap-2"><Icon className="size-4 shrink-0 text-ink-3" />{label}</span>
+      {hint
+        ? <span className="flex min-h-8 w-24 shrink-0 flex-col justify-center text-[13px] text-ink-2 sm:w-[120px]"><span className="flex items-center gap-1.5 whitespace-nowrap sm:gap-2">{head}</span><span className="pl-[22px] text-[10.5px] leading-tight text-ink-3 sm:pl-6" data-testid="prop-hint">{hint}</span></span>
+        : <span className="flex min-h-8 w-24 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-2 sm:w-[120px] sm:gap-2">{head}</span>}
       <span className="flex min-h-8 min-w-0 flex-1 items-center">{children}</span>
     </>
   );

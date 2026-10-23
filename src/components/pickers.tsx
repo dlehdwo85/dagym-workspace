@@ -31,12 +31,13 @@ export function UnitSelect({ value, onChange, allowEmpty, id, className }: { val
   );
 }
 
-export function UserSelect({ value, onChange, placeholder = '담당자 없음', id, className, ariaLabel }: { value: string | null | undefined; onChange: (v: string | null) => void; placeholder?: string; id?: string; className?: string; ariaLabel?: string }) {
+/** exclude: 목록에서 뺄 사람(#475 공동 담당 추가 — 주 담당·이미 붙은 사람은 골라도 아무 일이 없으니 안 보임) */
+export function UserSelect({ value, onChange, placeholder = '담당자 없음', id, className, ariaLabel, exclude }: { value: string | null | undefined; onChange: (v: string | null) => void; placeholder?: string; id?: string; className?: string; ariaLabel?: string; exclude?: (string | null | undefined)[] }) {
   const { dir } = useSession();
   return (
     <select id={id} className={className ?? inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} aria-label={ariaLabel}>
       <option value="">{placeholder}</option>
-      {dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
+      {dir.users.filter((u) => u.id === value || !exclude?.includes(u.id)).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
     </select>
   );
 }

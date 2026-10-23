@@ -22,7 +22,9 @@ before(async () => {
   // #476 b(로컬 10/23): '오늘' 탭 = 공고일 오늘 OR 처음 본 날 오늘 → 공고일이 오늘이 된 옛 공고(정정·재공고)는 '공고일 오늘·M/D 처음 수집' 배지로 오늘 탭에
   await put('global', 'procurement_notices', { id: 14, title: '예전 공고(first_seen 30일 전)', related: true, first_seen_at: `${plus(-30)}T01:00:00+09:00`, notice_date: today, created_at: today, deadline_at: `${plus(3)}T10:00:00`, current_status: '공고중' });
   await put('global', 'procurement_notices', { id: 13, title: '낙찰된 공고', related: true, first_seen_at: plus(-30), deadline_at: `${plus(-10)}T10:00:00`, current_status: '낙찰', source_type: 'kapt_bid', winner_name: '좋은업체', winner_amount: 123000000 });
-  await put('global', 'procurement_notices', { id: 19, title: '협력사 모집 공고', related: true, first_seen_at: plus(-1), deadline_at: `${plus(12)}T10:00:00`, current_status: '공고중', source_type: 'vendor_recruit', fit_business: 'both' });
+  await put('global', 'procurement_notices', { id: 19, title: '협력사 모집 공고', related: true, first_seen_at: plus(-1), deadline_at: `${plus(12)}T10:00:00`, current_status: '공고중', source_type: 'vendor_recruit', fit_business: 'both', posted_checked: true });
+  // #476 후속(로컬 10/23): 수집기가 게시판 날짜로 확인하지 않은 협력사 줄(예전 방식·안내문 조각·메뉴)은 목록·오늘 탭에서 빠짐
+  await put('global', 'procurement_notices', { id: 20, title: '[대방건설] 개요 CEO 인사말 연혁 조직도 오시는길 협력업체등록', related: true, first_seen_at: today, posted_date: today, deadline_at: `${plus(12)}T10:00:00`, current_status: '공고중', source_type: 'vendor_recruit', classification: '즉시 검토' });
   await put('global', 'procurement_notices', { id: 12, title: '관계없는 공고', related: false, posted_at: today });
   // 운영 10/19: 진행 중 탭 0건(현황은 31) — 원본 상태 문구가 '공고중'이 아닌 진행 공고, 미참여로 정리한 공고, 사전규격
   await put('global', 'procurement_notices', { id: 15, title: '상태 문구 다른 진행 공고', related: true, first_seen_at: plus(-2), deadline_at: `${plus(8)}T10:00:00`, current_status: '입찰진행' });

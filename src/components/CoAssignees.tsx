@@ -26,7 +26,7 @@ export function CoAssignees({ t, canEdit, canRule, onPatch }: { t: any; canEdit:
           {canEdit && <button type="button" onClick={() => onPatch({ coAssigneeIds: ids.filter((x) => x !== c.id) }, `${c.name}님을 공동 담당에서 뺐습니다`)} className="rounded-full p-0.5 text-ink-3 hover:bg-slate-100 hover:text-ink" aria-label={`${c.name} 공동 담당에서 빼기`} data-testid="co-remove"><X className="size-3" /></button>}
         </span>
       ))}
-      {canEdit ? <UserSelect className="h-7 w-auto max-w-[9rem] rounded-full border border-dashed border-line bg-white px-2 text-xs text-ink-2" placeholder="+ 공동 담당 추가" value={null} ariaLabel="공동 담당 추가"
+      {canEdit ? <UserSelect className="h-7 w-auto max-w-[9rem] rounded-full border border-dashed border-line bg-white px-2 text-xs text-ink-2" placeholder="+ 공동 담당 추가" value={null} ariaLabel="공동 담당 추가" exclude={[t.assignee_id, ...ids]}
         onChange={(v) => { if (v && v !== t.assignee_id && !ids.includes(v)) onPatch({ coAssigneeIds: [...ids, v] }, '공동 담당을 추가했습니다 — 알림을 보냈습니다'); }} />
         : !list.length && <span className="text-xs text-ink-3">없음 · 요청자가 추가해요</span>}
       {list.length > 0 && (

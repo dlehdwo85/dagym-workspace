@@ -11,6 +11,7 @@ import { audit } from '../log';
 import { zUuid } from '../api';
 import { tenantOf, type SessionUser } from '../types';
 import { matchFit } from './collectors/procurement';
+import { vendorDateOk } from './collectors/vendorRules';
 import { BID_COLLECTORS } from './collectors';
 
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
@@ -78,7 +79,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const seen = at(r.first_seen_at); const upd = at(r.updated_at);
     const isNew = seen != null && seen >= sinceMs; const kind = String(r.notice_kind ?? 'new'); const changedToday = upd != null && upd >= sinceMs && (kind === 'cancel' || kind === 'amend' || String(r.current_status ?? '') === '취소');
     if (!isNew && !changedToday) continue;
-    if (r.source_type === 'vendor_recruit' && !r.posted_date) { skipped['게시일 미상'] = (skipped['게시일 미상'] ?? 0) + 1; continue; } // #476 e: 게시일을 못 읽은 협력사 글은 메일·오늘 탭에서 뺌
+    if (r.source_type === 'vendor_recruit' && (!r.posted_date || !vendorDateOk(r))) { skipped['게시일 미상'] = (skipped['게시일 미상'] ?? 0) + 1; continue; } // #476 e·후속: 게시판 날짜로 확인 못 한 협력사 줄(조각·메뉴·예전 방식)은 메일·오늘 탭에서 뺌
     const f = passPrefs(r, p); if (!f.ok) { skipped[f.why] = (skipped[f.why] ?? 0) + 1; continue; }
     const deadline = dayOf(r.deadline_at); const dday = deadline ? Math.round((Date.parse(deadline) - Date.parse(day)) / 864e5) : null;
     if (dday != null && dday < 0) { skipped['마감 지남'] = (skipped['마감 지남'] ?? 0) + 1; continue; } // 첫 수집일에 과거 마감 공고가 '새 공고'로 섞이지 않게(로컬 10/21 10:55)

@@ -4,6 +4,7 @@ import { assertSpace } from '../spaces';
 import { badRequest, notFound } from '../errors';
 import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
+import { vendorDateOk } from './collectors/vendorRules';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -79,8 +80,10 @@ const attachmentsOf = (r: any) => { const a = pick(r, 'attachment_urls', 'attach
 const scaleOf = (r: any) => { const v = pick(r, 'facility_scale', 'scale', 'size', 'area'); if (v === null || v === undefined || v === '') return null; const u = pick(r, 'facility_scale_unit', 'scale_unit'); return u ? `${v}${u}` : v; };
 /** 입주·준공 뒤 지난 날수(KST 오늘 기준, 미래면 null) */
 const daysSince = (d: string | null) => { if (!d) return null; const n = Math.floor((Date.parse(today()) - Date.parse(d)) / 864e5); return Number.isFinite(n) && n >= 0 ? n : null; };
+/** #476 후속(로컬 10/23 14:20): 협력사 모집 줄은 수집기가 게시판 날짜로 확인한 것(또는 '안내 페이지 바뀜')만 공고일을 믿음 — 예전 방식·원본 복사 줄의 공고일은 수집한 날 */
+const vendorUnchecked = (r: any) => String(r?.source_type ?? '') === 'vendor_recruit' && !vendorDateOk(r);
 const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); return ({ id: r.__id, title: pick(r, 'title', 'notice_title', 'bid_name', 'name') ?? '(제목 없음)', agency: pick(r, 'issuer', 'agency', 'org_name', 'demand_agency', 'organization', 'buyer'),
-  region: pick(r, 'region'), posted: firstSeen(r), noticeDate: day(pick(r, 'posted_date', 'posted_at', 'notice_date', 'published_at', 'bid_notice_date')), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'),
+  region: pick(r, 'region'), posted: firstSeen(r), noticeDate: vendorUnchecked(r) ? null : day(pick(r, 'posted_date', 'posted_at', 'notice_date', 'published_at', 'bid_notice_date')), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'),
   close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')), source: pick(r, 'source_type', 'source', 'source_code'), url: pick(r, 'source_url', 'url', 'detail_url', 'link'),
   attachments: attachmentsOf(r),
   fit: pick(r, 'fit_score'), status: pick(r, 'current_status', 'status'), amount: pick(r, 'amount', 'budget', 'estimated_price', 'base_amount', 'presumed_price'), related: r.related === true || r.related === 'true',
@@ -173,9 +176,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   if (view === 'summary') {
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await prog('opportunity_work'); // S2-5: 전환 뒤에는 정식 진행 기록 표(원본 행 모양)
-    const NR = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true');
-    const N = NR.map((r) => notice(r, cats));
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
+    const NR = (await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && (!vendorUnchecked(r) || workOf.has(String(r.id ?? r.__id)))); // 입찰 목록과 같은 기준(확인 안 된 협력사 줄 빼기)
+    const N = NR.map((r) => notice(r, cats));
     const live = L.filter((l) => !CLOSED.has(String(l.status))); // 종결(계약완료·보류·실패) 제외
     const due = live.filter((l) => l.next && l.next >= today() && l.next <= plus(7)).sort((a, b) => String(a.next).localeCompare(String(b.next)));
     const overdue = live.filter((l) => l.next && l.next < today()).sort((a, b) => String(b.next).localeCompare(String(a.next)));
@@ -342,7 +345,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const W = await prog('opportunity_work');
     const P = new Map((await prog('procurement_notices__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
     const byNotice = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), w]));
-    let N = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true' || byNotice.has(String(r.id ?? r.__id)));
+    let N = (await rows('global', 'procurement_notices', 20000)).filter((r) => byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r))); // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식) 빼기
     const since = await lastMailAt(t);
     const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since);
       return { ...n0, todayHit: why.hit, todayLabel: why.label, work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
