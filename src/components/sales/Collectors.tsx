@@ -5,7 +5,7 @@ import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } f
 import { useSalesTerms } from '@/components/session';
 
 type Run = { id: number; slug: string; trigger: string; started_at: string; finished_at: string | null; status: string; inserted: number; updated: number; unchanged: number; errors: number; summary: string | null; error_log: string | null };
-type C = { slug: string; label: string; hourKst: number; source: string; bid: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null };
+type C = { slug: string; label: string; hourKst: number; againKst?: number | null; source: string; bid: boolean; support?: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null };
 type Data = { canEdit: boolean; platformAdmin: boolean; counts: Record<string, number>; collectors: C[]; runs: Run[] };
 const ST: Record<string, [string, string]> = { success: ['성공', 'bg-emerald-50 text-emerald-800'], partial: ['일부', 'bg-amber-50 text-amber-800'], failed: ['실패', 'bg-red-50 text-red-800'], running: ['실행 중', 'bg-blue-50 text-blue-800'], skipped: ['건너뜀', 'bg-slate-100 text-ink-3'] };
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
@@ -22,17 +22,17 @@ export function Collectors() {
   const total = Object.values(data.counts).reduce((a, b) => a + b, 0);
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="sales-collectors">
-      <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">자동 수집(수집기 {data.collectors.length}개)</h2><span className="text-xs text-ink-2">공고 {total.toLocaleString('ko-KR')}건 보유 · 매일 KST 06~08시 순서대로 하루 한 번</span></div>
+      <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">자동 수집(수집기 {data.collectors.length}개)</h2><span className="text-xs text-ink-2">공고 {total.toLocaleString('ko-KR')}건 보유 · 매일 KST 06~08시 순서대로 하루 한 번(지원사업은 08·14시 두 번)</span></div>
       <p className="mt-1 text-xs text-ink-2">영업관리에서 옮겨 온 수집기입니다. 끄면 이 회사의 당일 다이제스트·오늘 새 공고에서 그 출처가 빠집니다(수집 자체는 공용). 필요한 키가 없는 수집기는 “키 필요”로 표시됩니다.</p>
       <ul className="mt-2 divide-y divide-line text-sm">{data.collectors.map((c) => { const st = c.last ? ST[c.last.status] ?? [c.last.status, 'bg-slate-100'] : null; const missing = c.needs.filter((n) => !n.present && !/선택/.test(n.key)); return (
         <li key={c.slug} className="py-2" data-testid="sales-collector" data-slug={c.slug} data-enabled={c.enabled}>
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium">{c.label}</span>
-            <span className={cx('rounded-full px-2 py-0.5 text-[11px]', c.bid ? 'bg-violet-50 text-violet-800' : 'bg-slate-100 text-ink-2')}>{c.bid ? '입찰·공고' : '영업 DB'}</span>
+            <span className={cx('rounded-full px-2 py-0.5 text-[11px]', c.bid ? 'bg-violet-50 text-violet-800' : c.support ? 'bg-teal-50 text-teal-800' : 'bg-slate-100 text-ink-2')}>{c.bid ? '입찰·공고' : c.support ? '지원사업' : '영업 DB'}</span>
             {st && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', st[1])} data-testid="sales-collector-status">{st[0]}</span>}
             {missing.length > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">키 필요: {missing.map((m) => m.key).join(', ')}</span>}
             {!c.globalEnabled && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-3">플랫폼에서 꺼짐</span>}
-            <span className="text-xs text-ink-3">{c.hourKst.toString().padStart(2, '0')}:00 · {c.lastRunAt ? `마지막 ${fmtDateTime(c.lastRunAt)}` : '아직 안 돌음'}</span>
+            <span className="text-xs text-ink-3">{c.hourKst.toString().padStart(2, '0')}:00{c.againKst != null ? `·${c.againKst.toString().padStart(2, '0')}:00` : ''} · {c.lastRunAt ? `마지막 ${fmtDateTime(c.lastRunAt)}` : '아직 안 돌음'}</span>
             <span className="ml-auto flex items-center gap-1.5">
               {data.canEdit && <Button size="sm" variant="secondary" onClick={() => run(c)} disabled={busy === c.slug || !c.globalEnabled} data-testid="sales-collector-run">{busy === c.slug ? '수집 중…' : '지금 수집'}</Button>}
               {data.canEdit && <label className={cx('inline-flex min-h-[32px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium', c.enabled ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-line bg-white text-ink-3')}><input type="checkbox" className="size-4 accent-brand-600" checked={c.enabled} onChange={() => toggle(c, 'tenant')} aria-label={`${c.label} 사용`} data-testid="sales-collector-toggle" />{c.enabled ? '사용 중' : '사용 안 함'}</label>}

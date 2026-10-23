@@ -205,7 +205,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const isBuildingWork = (w: any) => String(pick(w, 'source_type') ?? '') === 'building' || !!pick(w, 'building_id'); // 정식 표는 notice_id 에 ref_id 가 들어가므로 source_type 으로 구분
     const progress: [string, Record<string, number>][] = [['입찰', tally(W.filter((w: any) => !isBuildingWork(w)), (w) => pick(w, 'status'))], [terms.kind.building, tally(W.filter(isBuildingWork), (w) => pick(w, 'status'))],
       [terms.facilitiesTab, tally(FPall, (p) => pick(p, 'contact_status', 'status'))], [terms.kind.vendor, tally(VPall, (p) => pick(p, 'status'))]];
-    return { ...meta, bidsOn, setupNeeded, todo, tiles, progress, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
+    // #450 홈 카드 '마감 임박 지원사업 n건'(7일 안: 관심·준비 중 + 맞춤)
+    const support = await (await import('./support')).supportHomeCard(t, sql).catch(() => null);
+    return { ...meta, bidsOn, setupNeeded, todo, tiles, progress, support, kpi: { leads: L.length, dueSoon: due.length, overdue: overdue.length, bidsWorking: W.filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? ''))).length,
       bidsOpen: NR.filter((r) => isOpenBid(notice(r), workOf.get(String(r.id ?? r.__id)), today())).length,
       relatedNotices: N.length, newNotices7d: N.filter((n) => n.noticeDate && n.noticeDate >= plus(-7) && n.noticeDate <= today()).length /* 로컬 10/19: 원본 초기 적재(10/13 3,343건) 때문에 first_seen 7일은 부풀려짐 → 공고일 기준 */ }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses,
       // 대표(10/19): 첫 화면 맨 위 '오늘' — 새 공고·새 영업 DB(신규단지·시설·협력사)·오늘 연락할 리드·오늘 마감 입찰

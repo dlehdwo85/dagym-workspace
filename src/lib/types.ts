@@ -69,5 +69,6 @@ export const NOTIFICATION_TYPES = {
   server_error: '서버 오류(플랫폼 운영자만)',
   revenue: '매출 자료 숫자 확인·분석 완료(매출 권한자만)',
   lead_ad: '리드 광고 새 신청(5분 안에 연락)·연락 전 재알림(영업)',
+  support_deadline: '지원사업 신청 마감 7일·3일 전(관심·신청 준비 중인 공고 담당)',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

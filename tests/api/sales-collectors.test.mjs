@@ -47,7 +47,7 @@ after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
 
 test('수집기 12개 목록 · K-apt 입찰공고(목록→관련 상세→적재, 비관련은 참고) · 다시 돌리면 변화없음 · origin=workin', async () => {
   const v = await ctx.owner.ok('GET', '/api/sales/collectors');
-  assert.equal(v.collectors.length, 12); assert.deepEqual(v.collectors.map((c) => c.slug).slice(0, 3), ['kapt_sa_sun', 'operating_from_kapt', 'kicox_industrial_complexes']);
+  assert.equal(v.collectors.length, 15, '영업 12 + 지원사업 3(#450)'); assert.deepEqual(v.collectors.map((c) => c.slug).slice(0, 3), ['kapt_sa_sun', 'operating_from_kapt', 'kicox_industrial_complexes']);
   assert.ok(v.collectors.find((c) => c.slug === 'kapt_sa_sun').needs[0].present, '시험 환경은 키 있음');
   assert.equal((await ctx.staffA.client.req('POST', '/api/sales/collectors/kapt_bid_notices/run', {})).status, 403, '지금 수집은 관리자');
   const r = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});

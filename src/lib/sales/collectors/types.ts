@@ -1,3 +1,3 @@
 export type CollectorResult = { inserted: number; updated: number; unchanged: number; errors: number; errorLog?: string; summary?: string; providerMode: 'api' | 'web_scrape' | 'file_download' | 'manual' };
 export type CollectorCtx = { fetchImpl: typeof fetch; deadlineMs: number; params?: Record<string, unknown>; now: () => number };
-export type Collector = { slug: string; label: string; hourKst: number; source: string; needs?: string[]; note?: string; run(ctx: CollectorCtx): Promise<CollectorResult> };
+export type Collector = { slug: string; label: string; hourKst: number; againKst?: number /* 하루 두 번: 이 시각 이후 한 번 더 */; source: string; needs?: string[]; keyReady?: () => Promise<boolean> /* env 말고 설정에 넣은 키 */; note?: string; run(ctx: CollectorCtx): Promise<CollectorResult> };

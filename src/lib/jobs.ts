@@ -187,6 +187,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('metaLeads', async () => (await import('./metaLeads')).metaLeadsTick()); // 광고 2차 ① 리드 광고: 남은 처리·놓친 리드 불러오기·5분 넘게 연락 전이면 재알림
   await step('salesSync', async () => (await import('./sales/migrate')).salesSyncDaily()); // V41 단계 2 전환일까지 매일 영업관리 차이분
   await step('salesCollectors', async () => (await import('./sales/collectors')).collectorsTick()); // 대표 10/21 08:45: 영업 수집기 12개(KST 시각 이후 하루 1회, tick 당 하나)
+  await step('supportDeadlines', async () => (await import('./sales/support')).supportTick()); // #450 지원사업: 관심·신청 준비 공고 마감 7일·3일 전 담당자 알림(KST 08~20시)
   await step('salesDigest', async () => (await import('./sales/digest')).salesDigestTick()); // 당일 입찰 다이제스트(회사 설정 시각, 메일·알림·푸시)
   await step('notices', async () => (await import('./announcements')).noticesJob()); // V30 ② 예약 게시
   await step('textExtract', async () => (await import('./library')).textExtractJob()); // V14 32: HWP·PDF 본문 재추출(기존 파일, 한 번에 15개)

@@ -7,8 +7,11 @@ export const DEFAULT_ENDPOINTS: Record<string, string> = {
   lh_bid: 'https://apis.data.go.kr/B552555/lhBidInfo/getBidInfoList', lh_prespec: 'https://apis.data.go.kr/B552555/lhPreStdInfo/getPreStdInfoList',
   d2b_bid: 'https://apis.data.go.kr/1290000/cmpetBidInfoService/getCmpetBidInfoList', onbid_lease: 'https://apis.data.go.kr/1360000/OnbidRentalService/getPublicRentalNoticeList',
   nuri_bid_servc: 'https://apis.data.go.kr/1230000/ao/PrvtBidNtceService/getPrvtBidNtceListServc', nuri_bid_thng: 'https://apis.data.go.kr/1230000/ao/PrvtBidNtceService/getPrvtBidNtceListThng',
+  // #450 지원사업 — 기업마당 지원사업정보 API(인증키 crtfcKey) · K-Startup 사업공고(창업진흥원, data.go.kr)
+  bizinfo_support: 'https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do', bizinfo_datago_support: 'https://apis.data.go.kr/1421000/bizinfo/pblancBsnsService',
+  kstartup_support: 'https://apis.data.go.kr/B552735/kisedKstartupService01/getAnnouncementInformation01',
 };
-export const ENDPOINT_LABEL: Record<string, string> = { lh_bid: 'LH 입찰공고', lh_prespec: 'LH 사전규격', d2b_bid: '방위사업청(국방전자조달) 입찰', onbid_lease: '온비드 임대 공고', nuri_bid_servc: '누리장터 민간입찰 용역', nuri_bid_thng: '누리장터 민간입찰 물품' };
+export const ENDPOINT_LABEL: Record<string, string> = { lh_bid: 'LH 입찰공고', lh_prespec: 'LH 사전규격', d2b_bid: '방위사업청(국방전자조달) 입찰', onbid_lease: '온비드 임대 공고', nuri_bid_servc: '누리장터 민간입찰 용역', nuri_bid_thng: '누리장터 민간입찰 물품', bizinfo_support: '지원사업 · 기업마당', bizinfo_datago_support: '지원사업 · 기업마당(공공데이터포털)', kstartup_support: '지원사업 · K-Startup' };
 /** 시험 모드: 기관은 `${T}/agency/<key>`, 누리장터는 `${T}/g2b/ao/PrvtBidNtceService/...` (가짜 원천 경로 그대로) */
 export async function endpoints(): Promise<Record<string, string>> {
   if (T()) return Object.fromEntries(Object.keys(DEFAULT_ENDPOINTS).map((k) => [k, k.startsWith('nuri_') ? DEFAULT_ENDPOINTS[k].replace('https://apis.data.go.kr/1230000', `${T()}/g2b`) : `${T()}/agency/${k}`]));

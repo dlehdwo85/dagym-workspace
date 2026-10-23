@@ -22,7 +22,7 @@ import {
   type LucideIcon,
   MessageCircle, Mail,
   TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon, Phone, ClipboardCheck, Link2,
-  History, Rocket, Target, Briefcase,
+  History, Rocket, Target, Briefcase, Landmark,
 Contact, Globe, } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
@@ -126,7 +126,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
   // 대표 10/21 12:00 영업 재편 3): 홈 → 영업 기회 허브(모든 원천 입구: 신규 현장·시설·협력사·계약만료·공공데이터·지역별) → 입찰·공고 → 리드·거래처(진행 단계 포함) → 제안·계약 → 데이터 설정. '파이프라인' 메뉴 없음(리드 안 단계별 보기)
-  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/hub', label: '영업 기회 허브', icon: Building2 }, ...(session.features.salesBids !== false ? [{ href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }] : []), { href: '/s/sales/leads', label: '리드·거래처', icon: Users }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '홈', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
+  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/hub', label: '영업 기회 허브', icon: Building2 }, ...(session.features.salesBids !== false ? [{ href: '/s/sales/bids', label: '입찰·공고', icon: Stamp }] : []), { href: '/s/sales/leads', label: '리드·거래처', icon: Users }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/support', label: '지원사업', icon: Landmark } /* #450 — 하단 탭에는 안 넣음(#438) */, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '홈', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
     { href: '/s/marketing/goals', label: '월 운영 목표', icon: Target, group: '운영' }, { href: '/s/marketing/ops', label: '운영실', icon: Briefcase, group: '운영' }, { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' },
     { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/sites', label: '사이트별 집계', icon: Globe, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 운영', icon: Rocket, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []), { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' },
     { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '설정' }, ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '운영실 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
