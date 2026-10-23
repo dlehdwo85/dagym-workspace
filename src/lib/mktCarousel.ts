@@ -134,6 +134,7 @@ function normSlides(raw: any[], topic: string, kw: string): Slide[] {
 const slidesText = (s: Slide[]) => s.map((x, k) => `${k + 1}. [${x.kind}] ${x.title.replace(/\n/g, ' / ')}${x.body ? ` — ${x.body.replace(/\n/g, ' / ')}` : ''}${x.rows.length ? ` — 표: ${x.rows.map((r) => r.join(' | ')).join(' / ')}` : ''}`).join('\n');
 async function generate(tenant: string, actorId: string, p: { product: string; topic: string; pattern: Pattern; audience?: string; a?: string; b?: string; note?: string; keyword?: string; brandId: string | null }, prev?: { slides: Slide[]; caption: string; note: string }): Promise<Gen | null> {
   const m = await material(tenant, p.brandId);
+  const mem = await (await import('./mktTeam')).memoryText(tenant, 'designer', p.brandId).catch(() => ''); // #499-7 디자인 담당 기억(수정 요청·대표 메모)
   const kw0 = clip(p.keyword, 20).replace(/['"‘’“”]/g, '');
   try {
     const Q = await import('./mktQuality');
@@ -149,7 +150,7 @@ async function generate(tenant: string, actorId: string, p: { product: string; t
 - keyword: 댓글 키워드(2~6자 — 예: 비교표·체크리스트)
 - ${Q.MODE_GUIDE.content}
 - 숫자·실적·가격·후기는 재료에 있는 것만. 없으면 {{ }} 로 비워 둡니다(직원이 채움). 과장·최상급 금지.${prev ? "\n- changes: '수정 요청 → 반영한 점' 한 줄" : ''}`,
-      `[재료]\n${m.text}\n\n제품·서비스: ${p.product}\n주제(표지): ${p.topic}\n유형: ${PATTERNS[p.pattern]}${p.a || p.b ? `\n비교 대상: A=${p.a || '?'} · B=${p.b || '?'}` : ''}\n대상: ${p.audience || '(재료에서 판단)'}${kw0 ? `\n댓글 키워드: ${kw0}` : ''}${p.note ? `\n메모: ${p.note}` : ''}${bannedLine(m.banned)}${prev ? `\n\n[지금 안]\n${slidesText(prev.slides)}\n본문: ${prev.caption}\n\n[수정 요청] ${prev.note}` : ''}`,
+      `[재료]\n${m.text}\n\n제품·서비스: ${p.product}\n주제(표지): ${p.topic}\n유형: ${PATTERNS[p.pattern]}${p.a || p.b ? `\n비교 대상: A=${p.a || '?'} · B=${p.b || '?'}` : ''}\n대상: ${p.audience || '(재료에서 판단)'}${kw0 ? `\n댓글 키워드: ${kw0}` : ''}${p.note ? `\n메모: ${p.note}` : ''}${bannedLine(m.banned)}${mem ? `\n\n${mem}` : ''}${prev ? `\n\n[지금 안]\n${slidesText(prev.slides)}\n본문: ${prev.caption}\n\n[수정 요청] ${prev.note}` : ''}`,
       { type: 'object', additionalProperties: false, required: ['slides', 'caption', 'keyword', ...(prev ? ['changes'] : [])], properties: { caption: { type: 'string' }, keyword: { type: 'string' }, ...(prev ? { changes: { type: 'string' } } : {}),
         slides: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind', 'title', 'body', 'rows', 'imagePlan'], properties: { kind: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, imagePlan: { type: 'string' },
           rows: { type: 'array', items: { type: 'array', items: { type: 'string' } } } } } } } }, 'marketing_carousel');
@@ -237,6 +238,7 @@ export async function patchCarousel(u: SessionUser, id: string, i: z.infer<typeo
     // 고른 사진은 같은 자리(장 번호)에 남긴다
     const slides = g.slides.map((s, k) => ({ ...s, imageId: s.kind === 'cover' || s.kind === 'body' ? r.slides[k]?.imageId ?? null : null }));
     await sql`update mkt_carousels set slides = ${sql.json(slides as never)}, caption = ${g.caption}, keyword = ${g.keyword}, source = 'ai', input = ${sql.json({ ...r.input, changes: g.changes || i.note } as never)}, updated_at = now() where id = ${id}`;
+    await (await import('./mktTeam')).remember(r.tenant, 'designer', { brandId: r.brand_id, kind: 'edit', text: i.note, sourceType: 'mkt_carousel', sourceId: id, by: u.id }).catch(() => {}); // #499-7 수정 이유 = 디자인 담당 기억
     return { item: (await viewRows(r.tenant, id))[0], changes: g.changes ?? null };
   }
   if (i.slides) {

@@ -214,6 +214,7 @@ async function buildReport(tenant: string, actorId: string | null, refs: Ref[], 
   const base: Result = { hookTypes, facts, common: [], structure: [], scripts: [] };
   const { material } = await import('./mktCarousel');
   const m = await material(tenant, opts.brandId ?? null);
+  const mem = await (await import('./mktTeam')).memoryText(tenant, 'researcher', opts.brandId ?? null).catch(() => ''); // #499-7 광고 리서처 기억(대표 메모)
   const Q = await import('./mktQuality');
   try {
     const list = refs.map((r, k) => `${k + 1}) ${r.advertiser} · ${FORMATS[r.format] ?? r.format}${r.started_on ? ` · ${daysSince(r.started_on)}일째` : ''}${r.variants ? ` · 비슷한 소재 ${r.variants}개` : ''} · 첫 문장(${HOOK_TYPES[r.hook_type ?? 'other']}): ${r.hook ?? '없음'}
@@ -224,7 +225,7 @@ async function buildReport(tenant: string, actorId: string | null, refs: Ref[], 
 - scripts: 우리 브랜드용 15~30초 광고 대본 3안 {title(한 줄), hook(첫 문장), lines(이어지는 3~5줄), cta(행동 1개)} — 경쟁사 문장을 베끼지 말고 구조만 빌립니다
 - ${Q.MODE_GUIDE.ad}
 - 숫자·실적·가격은 [우리 재료]에 있는 것만, 없으면 {{ }}. 다른 업체 이름·로고·문구를 쓰지 않습니다. 과장·최상급 금지.`,
-      `[우리 재료]\n${m.text}${opts.product ? `\n광고할 제품·서비스: ${opts.product}` : ''}${m.banned.length ? `\n금지어: ${m.banned.join(', ')}` : ''}\n\n[경쟁 광고 ${refs.length}개]\n${list}`,
+      `[우리 재료]\n${m.text}${opts.product ? `\n광고할 제품·서비스: ${opts.product}` : ''}${m.banned.length ? `\n금지어: ${m.banned.join(', ')}` : ''}\n\n[경쟁 광고 ${refs.length}개]\n${list}${mem ? `\n\n${mem}` : ''}`,
       { type: 'object', additionalProperties: false, required: ['common', 'structure', 'scripts'], properties: { common: { type: 'array', items: { type: 'string' } }, structure: { type: 'array', items: { type: 'string' } },
         scripts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'hook', 'lines', 'cta'], properties: { title: { type: 'string' }, hook: { type: 'string' }, cta: { type: 'string' }, lines: { type: 'array', items: { type: 'string' } } } } } } }, 'marketing_adrefs');
     if (o) {

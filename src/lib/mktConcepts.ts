@@ -53,9 +53,10 @@ async function memoryOf(tenant: string, brandId: string | null) {
     where tenant = ${tenant} and brand_id is not distinct from ${brandId} and status in ('decided', 'rejected') order by coalesce(decided_at, updated_at) desc limit 3`;
   const pick = (d: string) => rows.flatMap((r) => (r.concepts ?? []).filter((c) => c.decision === d)).slice(0, 8);
   const adopted = pick('adopted'), rejected = pick('rejected'); const notes = rows.map((r) => r.decision_note).filter((x): x is string => !!x).slice(0, 3);
-  if (!adopted.length && !rejected.length) return '';
+  const team = await (await import('./mktTeam')).memoryText(tenant, 'adsetter', brandId, { notesOnly: true }).catch(() => ''); // #499-7 광고 세팅 담당에게 남긴 대표 메모
+  if (!adopted.length && !rejected.length) return team;
   return [`[이전 결정 — 브랜드 기억]`, adopted.length && `채택: ${adopted.map((c) => `${c.role}·${c.situation} «${c.hook}»`).join(' / ')}`,
-    rejected.length && `반려: ${rejected.map((c) => `«${c.hook}»`).join(' / ')}`, notes.length && `대표 메모: ${notes.join(' / ')}`].filter(Boolean).join('\n');
+    rejected.length && `반려: ${rejected.map((c) => `«${c.hook}»`).join(' / ')}`, notes.length && `대표 메모: ${notes.join(' / ')}`, team].filter(Boolean).join('\n');
 }
 
 /** 역할×상황 기본 조합(AI 없음·한도): 상황을 돌아가며 n개 — 같은 상황이 몰리지 않게 */
@@ -193,6 +194,7 @@ export async function actConceptSet(u: SessionUser, id: string, i: z.infer<typeo
     const concepts = s.concepts.map((c) => ({ ...c, decision: 'rejected' as const }));
     const [ok] = await sql<{ id: string }[]>`update mkt_concept_sets set status = 'rejected', concepts = ${sql.json(concepts as never)}, decision_note = ${i.note}, decided_by = ${u.id}, decided_at = now(), updated_at = now() where id = ${id} and status = 'pending' returning id`;
     if (!ok) throw new HttpError(409, 'concept_decided', '이미 결정한 매트릭스입니다');
+    await (await import('./mktTeam')).remember(t, 'adsetter', { brandId: s.brand_id, kind: 'reject', text: `${s.product} 컨셉 ${s.concepts.length}개 전부`, reason: i.note, sourceType: 'mkt_concept_set', sourceId: id, by: u.id }).catch(() => {}); // #499-7
     let revised: { id: string; version: number; changes: string | null } | null = null;
     if (s.version < MAX_REVISIONS) {
       const g = await generate(t, u.id, s.product, s.input, s.brand_id, { note: i.note, prev: s.concepts, version: s.version }).catch(() => null);
@@ -216,6 +218,8 @@ export async function actConceptSet(u: SessionUser, id: string, i: z.infer<typeo
     briefs.push({ conceptId: c.id, briefId: b.id });
   }
   await sql`update mkt_concept_sets set executed = ${sql.json({ briefs } as never)} where id = ${id}`;
+  { const T = await import('./mktTeam'); // #499-7 광고 세팅 담당 기억: 채택한 첫 줄·고르지 않은 수
+    for (const c of concepts.filter((x) => x.decision === 'adopted')) await T.remember(t, 'adsetter', { brandId: s.brand_id, kind: 'adopt', text: `${c.role}·${c.situation} «${c.hook}»`, reason: i.note ?? null, sourceType: 'mkt_concept_set', sourceId: id, by: u.id }).catch(() => {}); }
   const { audit } = await import('./log'); await audit(sql as never, u.id, 'mkt.concepts_adopt', 'mkt_concept_set', id, { adopted: briefs.length, of: s.concepts.length }, null).catch(() => {});
   // 제작 의뢰 프롬프트(AI)는 응답 뒤에 — 의뢰마다 몇 초씩 걸려 채택 화면을 기다리게 하지 않음. 실패하면 '대기'로 남고 제작의뢰실 [프롬프트 다시]
   const write = async () => { const { writePrompt } = await import('./mktStudio'); for (const b of briefs) await writePrompt(t, b.briefId, u.id).catch(() => {}); };

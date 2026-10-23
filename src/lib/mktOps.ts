@@ -63,12 +63,13 @@ export async function propose(tenant: string, kinds: string[], actorId: string |
   const existing = await sql<{ kind: string }[]>`select kind from mkt_proposals where tenant = ${tenant} and status = 'pending'`;
   const want = kinds.filter((k) => !existing.some((e) => e.kind === k));
   if (!want.length) return { created: 0, skipped: kinds };
+  const mem = await (await import('./mktTeam')).memoryText(tenant, 'reporter', null).catch(() => ''); // #499-7 보고 담당 기억(채택·반려·대표 메모)
   let cards: any[] = [];
   try {
     const o = await aiJson(tenant, actorId, `당신은 경력 30년의 마케터입니다. 회사 상황을 보고 아래 종류의 운영 제안 카드를 씁니다. JSON 만. 사실·숫자는 [재료]에 있는 것만, 없으면 '확인 필요'라고 씁니다. 돈을 쓰거나 밖으로 보내는 일은 모두 '대표 승인 뒤 사람이 실행'이 전제이므로 실행 단계를 구체적으로(누가·무엇을) 씁니다. 과장·최상급 금지.
 종류: direction=게시 방향(채널·주제·빈도), collab=협업 제안(업체·기관, 이유·접근 방법), influencer=인플루언서 제안(규모·분야·조건·예산 범위), analysis=광고 효과 분석(지표·문제·개선안), plan=향후 계획(4주, 단계별).
 각 카드: {kind, title(한 줄), summary(2~3문장), items[{title, detail, expected(기대 효과), cost(비용·'없음'|'확인 필요')}] 3~5개, rationale(근거 한 문단)}`,
-      `[재료]\n${m.text}\n\n만들 종류: ${want.join(', ')}`,
+      `[재료]\n${m.text}\n\n만들 종류: ${want.join(', ')}${mem ? `\n\n${mem}` : ''}`,
       { type: 'object', additionalProperties: false, required: ['cards'], properties: { cards: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind', 'title', 'summary', 'items', 'rationale'], properties: { kind: { type: 'string' }, title: { type: 'string' }, summary: { type: 'string' }, rationale: { type: 'string' },
         items: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'detail', 'expected', 'cost'], properties: { title: { type: 'string' }, detail: { type: 'string' }, expected: { type: 'string' }, cost: { type: 'string' } } } } } } } } }, 'marketing_ops');
     cards = (o?.cards ?? []).filter((c: any) => want.includes(c.kind)).map((c: any) => ({ ...c, source: 'ai' }));
@@ -106,6 +107,8 @@ export async function reviseProposal(tenant: string, p: any, note: string, actor
   await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'review_requested', title: `AI 마케터 고친 안 v${version + 1}: ${String(o.title).slice(0, 60)}`, body: String(o.changes ?? '').slice(0, 200), link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', entityId: n.id, dedupeKey: `mktops:rev:${n.id}`, push: true });
   return { id: n.id, version: version + 1, changes: String(o.changes ?? '') };
 }
+/** #499-7 보고 담당이 낸 카드 종류(결정 = 보고 담당 기억) */
+const TEAM_KINDS = ['weekly', 'analysis', 'direction', 'plan'];
 export const proposalAction = z.object({ action: z.enum(['approve', 'reject', 'done']), note: z.string().trim().max(500).optional() });
 export async function actProposal(u: SessionUser, id: string, i: z.infer<typeof proposalAction>) {
   await assertSpace(u, 'marketing'); if (!isAdmin(u)) throw forbidden('대표·관리자만');
@@ -116,6 +119,7 @@ export async function actProposal(u: SessionUser, id: string, i: z.infer<typeof 
   if (i.action === 'reject') {
     if (!i.note) throw badRequest('반려 사유를 적어 주세요');
     await sql`update mkt_proposals set status = 'rejected', decision_note = ${i.note}, decided_by = ${u.id}, decided_at = now(), updated_at = now() where id = ${id}`;
+    if (TEAM_KINDS.includes(p.kind)) await (await import('./mktTeam')).remember(t, 'reporter', { kind: 'reject', text: `${PROPOSAL_KIND[p.kind] ?? p.kind}: ${p.title}`, reason: i.note, sourceType: 'mkt_proposal', sourceId: id, by: u.id }).catch(() => {}); // #499-7
     // ② 반려 사유 → AI 가 고친 안(v2) 을 같은 줄기로 다시 올림(최대 3회, 승인자 알림 1회). 반려 사유 없는 반려·AI 없음·3회 초과면 반려로 끝
     const revised = p.status === 'pending' ? await reviseProposal(t, p, i.note, u.id).catch(() => null) : null;
     return { status: 'rejected', revised };
@@ -141,6 +145,7 @@ export async function actProposal(u: SessionUser, id: string, i: z.infer<typeof 
     } catch (e: any) { executed.taskError = String(e?.message ?? e); }
   }
   await sql`update mkt_proposals set status = 'approved', decision_note = ${i.note ?? null}, decided_by = ${u.id}, decided_at = now(), executed = ${sql.json(executed as never)}, updated_at = now() where id = ${id}`;
+  if (TEAM_KINDS.includes(p.kind)) await (await import('./mktTeam')).remember(t, 'reporter', { kind: 'adopt', text: `${PROPOSAL_KIND[p.kind] ?? p.kind}: ${p.title}`, reason: i.note ?? null, sourceType: 'mkt_proposal', sourceId: id, by: u.id }).catch(() => {}); // #499-7
   const { audit } = await import('./log'); await audit(sql as never, u.id, 'mkt.proposal_approve', 'mkt_proposal', id, { kind: p.kind }, null).catch(() => {});
   return { status: 'approved', executed };
 }
@@ -544,13 +549,22 @@ export async function opsTick(tenant: string, now = new Date()) {
   out.guard = await budgetGuard(tenant, now).catch((e) => ({ error: String(e?.message ?? e) })); // 소진율 알림은 시각과 무관(광고 상한 감시와 같은 기준, 채널마다 한 번)
   out.review = await opsReview(tenant, now).catch((e) => ({ error: String(e?.message ?? e) })); // 대표 03:00 ② 상시 운영: 1시간마다 지표·신호(AI 비용 0), 07시 이후 아침 브리핑
   out.recharge = await (await import('./mktRecharge')).rechargeCheck(tenant).catch((e) => ({ error: String(e?.message ?? e) })); // 대표 10/21 14:30 #411 매체 잔액 → 충전 필요 카드 → 충전 감지 자동 완료
+  const T = await import('./mktTeam'); // #499-7 AI 마케팅팀: 예산 담당 기록 · 기획 담당(켠 회사만, 서울 07~21시, 점검마다 한 브랜드)
+  await T.noteBudget(tenant, out.guard, out.recharge).catch(() => {});
+  out.planner = await T.plannerTick(tenant, now).catch((e) => ({ error: String(e?.message ?? e) }));
   if (h < 9 || (h >= 22 && !night)) return { ...out, skipped: 'hour' };
   const sql = db(); const dow = new Date(`${ymd(now)}T00:00:00Z`).getUTCDay(); const day = Number(ymd(now).slice(8));
   if (dow === 1) {
-    const [recent] = await sql<{ n: number }[]>`select count(*)::int n from mkt_proposals where tenant = ${tenant} and source <> 'user' and created_at >= now() - interval '6 days'`;
-    if (!recent.n) out.proposals = await propose(tenant, ['analysis', 'direction'], null).catch((e) => ({ error: String(e?.message ?? e) }));
-    out.weekly = await weeklyProposal(tenant, null).catch((e) => ({ error: String(e?.message ?? e) })); // 대표 10/20 14:10 ④ 월요일 주간 운영 제안(숫자)
-    out.adrefs = await (await import('./mktAdRefs')).adRefWeekly(tenant, now).catch((e) => ({ error: String(e?.message ?? e) })); // #499-6 경쟁 광고 주간 분석(새 광고 3개 이상일 때)
+    if (await T.roleOn(tenant, 'reporter')) { // #499-7 보고 담당(기본 켬 — 끄면 월요일 분석·방향 카드와 주간 운영 제안을 건너뜀)
+      const [recent] = await sql<{ n: number }[]>`select count(*)::int n from mkt_proposals where tenant = ${tenant} and source <> 'user' and created_at >= now() - interval '6 days'`;
+      if (!recent.n) out.proposals = await propose(tenant, ['analysis', 'direction'], null).catch((e) => ({ error: String(e?.message ?? e) }));
+      out.weekly = await weeklyProposal(tenant, null).catch((e) => ({ error: String(e?.message ?? e) })); // 대표 10/20 14:10 ④ 월요일 주간 운영 제안(숫자)
+      await T.noteReporter(tenant, out.weekly, out.proposals).catch(() => {});
+    } else out.weekly = { skipped: 'off' };
+    if (await T.roleOn(tenant, 'researcher')) { // #499-7 광고 리서처(기본 켬)
+      out.adrefs = await (await import('./mktAdRefs')).adRefWeekly(tenant, now).catch((e) => ({ error: String(e?.message ?? e) })); // #499-6 경쟁 광고 주간 분석(새 광고 3개 이상일 때)
+      await T.noteResearcher(tenant, out.adrefs).catch(() => {});
+    } else out.adrefs = { skipped: 'off' };
   }
   if (day >= 25) {
     const next = monthKst(now, 1);
