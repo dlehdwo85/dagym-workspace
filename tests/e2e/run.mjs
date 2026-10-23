@@ -57,6 +57,7 @@ import { adLocal } from './adLocal.step.mjs';
 import { adSetup } from './adSetup.step.mjs';
 import { adLeads } from './adLeads.step.mjs';
 import { leadAds } from './leadAds.step.mjs';
+import { metaCapi } from './metaCapi.step.mjs';
 import { supportPrograms } from './support.step.mjs';
 import { mktVideo } from './mktVideo.step.mjs';
 import { coAssign } from './coAssign.step.mjs';
@@ -2488,6 +2489,7 @@ await step('광고 최적화 1차 동네 타깃: 새 세팅안 동네 칸(중심
 await step('#499-2 파워링크 세팅안 보강: 광고 설정 칸(추천값·가중치·3안 테스트 동일 비중·제외 키워드) · 키워드 조합기(그룹 곱·빼도 됨·검색량·낮음도 함께) · 하루 예산 권장 → 저장(보내는 값) → 카드 설정 줄·권고 · 고치기 · 휴대폰 폭', () => adSetup({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 최적화 1차 통화 기반: 전화·문의 기준 키워드 점검(요약·끄기 제안·잘 됨) → 워크인 키워드 [끄기] 보내는 값 → 목표 전환당 비용 → 기간 7일 → 휴대폰 폭 → 전화 문의 기록에 광고 키워드', () => adLeads({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 2차 ① 리드 광고(메타) → 영업 리드: 광고 운영 리드 광고 상자(받는 중·웹후크·요약·이름 가림·첫 연락·재알림·광고별 리드당 비용) → 실패 [다시 처리] → 휴대폰 폭 → 연결 계정 받는 중 → 영업 리드 상세 리드 광고 상자·[전화] 첫 연락 기록', () => leadAds({ owner, ctx, sql, BASE, SHOTS }));
+await step('#499-3 리드 단계 → 메타 전환 API: 리드 광고 상자 안 설정(기본 꺼짐·보내는 것 안내·데이터 세트 숫자만·토큰 저장됨·단계 이름표) → 저장(보내는 값) → [시험 보내기] → 켜기 → [지금 보내기](형식 아닌 리드 ID 건너뜀) → 최근 기록 · 휴대폰 폭', () => metaCapi({ owner, ctx, sql, BASE, SHOTS }));
 await step('#494 메타 광고 자동 세팅: 광고 운영 메타 칸(초안 대기 줄·승인함 링크·권한 다시 연결) → [새 메타 광고] 창(양식 번호 직접·개인정보 확인·자료실 소재·반경·자동 일시정지) 저장 → 승인함 광고 초안 탭(배지·요약·피드 미리보기·확인 문구) → 휴대폰 폭 → [반려] 사유 → 보관', () => metaAuto({ owner, ctx, sql, BASE, SHOTS }));
 await step('#450 영업실 지원사업: 사이드바 메뉴 → 맞춤 목록(1차 판단·조건 칩·D-day·자격 안 맞는 공고 빼기) → [AI 판단] → [신청 준비] 담당 업무 → 영업 홈 마감 임박 카드 → 상세(준비 서류·진행) → [신청 완료] → [직접 추가] 지난 신청 → 신청·결과 탭 → 휴대폰 폭', () => supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#454 영상 파이프라인 v2: 플랫폼 운영 내레이션(TTS) 카드·연결 시험 → 브랜드 키트 영상 끝 화면·자막 → 제작의뢰실 릴스 준비 상태 → [생성] 장면별 생성·검수·합성 → 장면 칩(실제 화면·검수 ✓)·완성 영상·승인 대기 → 휴대폰 폭', () => mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }));

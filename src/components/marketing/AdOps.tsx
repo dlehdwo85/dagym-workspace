@@ -626,6 +626,7 @@ function LeadAdsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok
           </ol>
         </details>
       </>}
+      <CapiBox run={run} />
       {test && <Modal open onClose={() => setTest(null)} title="시험 리드 보내기">
         <div className="space-y-3 text-sm" data-testid="lead-ads-test-dialog">
           <p className="text-xs text-ink-2">{test.label} 의 인스턴트 양식에 Meta 시험 리드를 하나 만들고(양식마다 1개 — 전에 만든 시험 리드는 지움) 바로 영업 리드로 등록합니다. 광고비는 들지 않습니다.</p>
@@ -637,5 +638,81 @@ function LeadAdsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok
         </div>
       </Modal>}
     </section>
+  );
+}
+
+type CapiRow = { id: string; event_name: string; stage: string; event_time: string; status: string; attempts: number; error: string | null; sent_at: string | null; lead_tail: string };
+type Capi = { canEdit: boolean; on: boolean; datasetId: string; source: string; map: Record<string, string>; defaults: Record<string, string>; stages: string[]; hasToken: boolean; since: string | null;
+  stats: { sent7: number; pending: number; failed: number; skipped7: number; lastSent: string | null; lastError: string | null }; recent: CapiRow[] };
+const CAPI_STATUS: Record<string, [string, string]> = { pending: ['대기', 'bg-slate-100 text-ink-2'], sent: ['보냄', 'bg-emerald-50 text-emerald-800'], failed: ['실패', 'bg-red-50 text-red-800'], skipped: ['건너뜀', 'bg-amber-50 text-amber-800'] };
+/**
+ * #499-3 리드 단계 → Meta 전환 API(CAPI for CRM): 리드 광고로 들어온 영업 리드의 단계를 메타에 돌려보내 신청만 하는 사람보다 미팅·계약까지 가는 사람을 더 찾게 함.
+ * 보내는 것 = 메타 리드 번호·단계 이름·시각. 기본 꺼짐 — 켜기·데이터 세트·토큰·이름표는 관리자, 처리방침 문구는 대표 결정.
+ */
+function CapiBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok: string) => void }) {
+  const { data, error, reload } = useApi<Capi>('/api/marketing/lead-ads/capi');
+  const [f, setF] = useState<{ on: boolean; datasetId: string; token: string; source: string; map: Record<string, string> } | null>(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState('');
+  if (error) return <ErrorBox error={error} retry={reload} />;
+  if (!data) return <Skeleton rows={2} />;
+  const v = f ?? { on: data.on, datasetId: data.datasetId, token: '', source: data.source, map: data.map };
+  const set = (p: Partial<typeof v>) => setF({ ...v, ...p });
+  const save = () => run('capi', async () => {
+    await api('/api/marketing/lead-ads/capi', { method: 'PUT', body: { on: v.on, datasetId: v.datasetId.trim(), ...(v.token.trim() ? { token: v.token.trim() } : {}), source: v.source.trim() || 'Workin', map: v.map } });
+    await reload(); setF(null); // 저장된 값을 받아 온 뒤에 입력 칸을 비움(잠깐 옛 값이 보이지 않게)
+  }, v.on ? '전환 API 를 켰습니다 — 리드 단계가 바뀌면 메타로 보냅니다' : '전환 API 설정을 저장했습니다');
+  async function act(kind: 'send' | 'test') {
+    setBusy(kind);
+    try {
+      if (kind === 'send') { const r = await api<{ queued: number; sent: number; failed: number }>('/api/marketing/lead-ads/capi/send', { body: {} }); toast.ok(`새 이벤트 ${r.queued}건 · 보냄 ${r.sent}건${r.failed ? ` · 실패 ${r.failed}건` : ''}`); }
+      else { const r = await api<{ received: number; eventName: string; leadTail: string }>('/api/marketing/lead-ads/capi/test', { body: { testEventCode: code } }); toast.ok(`시험 이벤트를 보냈습니다 — 메타가 받음 ${r.received}건('${r.eventName}', 리드 …${r.leadTail}). 이벤트 테스트 탭에서 확인하세요`); }
+      reload();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
+  }
+  return (
+    <div className="mt-3 rounded-input border border-line p-2 text-xs" data-testid="capi" data-on={data.on ? '1' : '0'}>
+      <div className="flex flex-wrap items-center gap-2"><b className="text-sm">리드 단계 → 메타에 알리기(전환 API)</b>
+        <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', data.on ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-ink-2')} data-testid="capi-state">{data.on ? '보내는 중' : '꺼짐'}</span>
+        {data.canEdit && data.on && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy !== ''} onClick={() => act('send')} data-testid="capi-send">{busy === 'send' ? '보내는 중…' : '지금 보내기'}</Button>}</div>
+      <p className="mt-1 text-ink-2">영업 리드 단계(새 리드 → 1차 연락 → 미팅 … → 계약)를 메타에 돌려보내, 메타가 신청만 하는 사람보다 실제로 미팅·계약까지 가는 사람을 더 찾게 합니다(메타 &apos;전환 리드&apos; 최적화). 보내는 것은 <b>메타 리드 번호·단계 이름·바뀐 시각</b>뿐 — 이름·전화·이메일은 보내지 않습니다.</p>
+      <p className="mt-1 text-ink-2" data-testid="capi-stats">지난 7일 보냄 {n0(data.stats.sent7)}건 · 대기 {n0(data.stats.pending)} · 실패 {n0(data.stats.failed)}{data.stats.skipped7 ? ` · 건너뜀 ${n0(data.stats.skipped7)}` : ''}{data.stats.lastSent ? ` · 마지막 ${fmtDateTime(data.stats.lastSent)}` : ''}</p>
+      {data.stats.lastError && <p className="mt-0.5 break-words text-amber-800" data-testid="capi-error">최근 오류: {data.stats.lastError}</p>}
+      {data.canEdit && <details className="mt-2" open={!data.on} data-testid="capi-setup">
+        <summary className="cursor-pointer font-medium">설정 · 단계 이름표</summary>
+        <div className="mt-2 grid gap-2">
+          <label className="flex items-start gap-1.5"><input type="checkbox" className="mt-0.5" checked={v.on} onChange={(e) => set({ on: e.target.checked })} data-testid="capi-on" /><span><b>켜기</b> — 리드 광고로 들어온 리드의 단계가 바뀌면 메타로 보냅니다(하루 여러 번)</span></label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="데이터 세트(픽셀) ID"><input className={inputCls} inputMode="numeric" value={v.datasetId} onChange={(e) => set({ datasetId: e.target.value.replace(/\D/g, '') })} placeholder="예: 1234567890123456" data-testid="capi-dataset" /></Field>
+            <Field label="전환 API 토큰"><input className={inputCls} type="password" autoComplete="off" value={v.token} onChange={(e) => set({ token: e.target.value })} placeholder={data.hasToken ? '저장됨 — 바꿀 때만 넣기' : '이벤트 관리자에서 만든 토큰'} data-testid="capi-token" /></Field>
+          </div>
+          <Field label="CRM 이름(메타 이벤트에 보이는 이름)"><input className={inputCls} value={v.source} maxLength={40} onChange={(e) => set({ source: e.target.value })} data-testid="capi-source" /></Field>
+          <div className="overflow-x-auto"><table className="w-full min-w-[300px] text-left" data-testid="capi-map">
+            <thead><tr className="text-ink-2"><th className="py-1 font-medium">워크인 단계</th><th className="font-medium">메타 이벤트 이름(비우면 안 보냄)</th></tr></thead>
+            <tbody className="divide-y divide-line">{data.stages.map((s) => (
+              <tr key={s}><td className="whitespace-nowrap py-1 pr-2">{s}</td>
+                <td><input className={cx(inputCls, 'h-8 py-1 text-xs')} value={v.map[s] ?? ''} maxLength={40} onChange={(e) => set({ map: { ...v.map, [s]: e.target.value } })} aria-label={`${s} 이벤트 이름`} placeholder="보내지 않음" data-testid="capi-map-input" /></td></tr>))}</tbody></table></div>
+          <p className="text-[11px] text-ink-3">같은 이름은 리드마다 한 번만 보냅니다. 단계를 건너뛰면(예: 새 리드 → 미팅) 건너뛴 앞 단계도 같은 시각으로 보냅니다. 메타 이벤트 관리자의 &apos;세일즈 퍼널 설정&apos;에서 이 이름들로 단계 순서를 고릅니다.</p>
+          <div className="flex flex-wrap gap-2"><Button size="sm" onClick={save} data-testid="capi-save">저장</Button>
+            {f && <Button size="sm" variant="secondary" onClick={() => setF(null)}>되돌리기</Button>}</div>
+          <div className="flex flex-wrap items-end gap-2 border-t border-line pt-2">
+            <Field label="시험 이벤트 코드(이벤트 관리자 › 이벤트 테스트)"><input className={cx(inputCls, 'h-8 py-1 text-xs')} value={code} onChange={(e) => setCode(e.target.value.trim())} placeholder="예: TEST12345" data-testid="capi-test-code" /></Field>
+            <Button size="sm" variant="secondary" disabled={!code || !data.datasetId || !data.hasToken || busy !== ''} onClick={() => act('test')} data-testid="capi-test">{busy === 'test' ? '보내는 중…' : '시험 보내기'}</Button>
+          </div>
+          <ol className="list-decimal space-y-0.5 pl-5 text-[11px] text-ink-2" data-testid="capi-guide">
+            <li>메타 이벤트 관리자 › 데이터 소스 연결 › <b>CRM</b> 으로 데이터 세트를 만들고(기존 것을 CRM 으로 바꿔도 됨) ID 를 넣습니다. 한 번 연결한 뒤에는 바꾸지 마세요(학습이 처음부터 다시 시작됨).</li>
+            <li>그 데이터 세트의 설정 › 전환 API › <b>액세스 토큰 생성</b> → 위 칸에 붙여 넣고 저장합니다(워크인은 암호화해 보관하고 다시 보여 주지 않음).</li>
+            <li>[시험 보내기] 뒤 이벤트 테스트 탭에 보이면 [켜기] — 켠 때로부터 7일 전 신청까지 보냅니다(메타가 받는 한도).</li>
+            <li><b>켜기 전 대표 확인:</b> 개인정보 처리방침에 &apos;광고 성과 측정을 위해 리드 진행 단계(메타 리드 번호·단계·시각)를 Meta 에 보냅니다&apos; 문구.</li>
+            <li>메타 &apos;전환 리드&apos; 최적화 기준: 월 리드 200건 이상 · 목표 단계가 28일 안 · 도달률 1~40%. 모자라도 지금부터 보내 두면 보고에 쓰입니다.</li>
+          </ol>
+        </div>
+      </details>}
+      {data.recent.length > 0 && <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[480px] text-left" data-testid="capi-recent">
+        <thead><tr className="text-ink-2"><th className="py-1 font-medium">단계 시각</th><th className="font-medium">이벤트</th><th className="font-medium">리드</th><th className="font-medium">상태</th></tr></thead>
+        <tbody className="divide-y divide-line">{data.recent.map((r) => { const [label, cls] = CAPI_STATUS[r.status] ?? [r.status, 'bg-slate-100']; return (
+          <tr key={r.id} data-testid="capi-row" data-status={r.status}><td className="whitespace-nowrap py-1 text-ink-2">{fmtDateTime(r.event_time)}</td><td>{r.event_name} <span className="text-ink-3">({r.stage})</span></td><td className="text-ink-3">…{r.lead_tail}</td>
+            <td><span className={cx('rounded-full px-1.5 py-0.5 text-[10px] font-medium', cls)}>{label}</span>{r.error && <span className="block max-w-[18rem] whitespace-normal break-words text-[11px] text-red-700">{r.error}</span>}</td></tr>); })}</tbody></table></div>}
+    </div>
   );
 }
