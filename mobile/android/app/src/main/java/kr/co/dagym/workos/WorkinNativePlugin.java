@@ -18,12 +18,13 @@ import org.json.JSONObject;
  * 웹(native.ts)이 이 앱 빌드의 네이티브 기능을 쓰는 곳.
  * - getInfo(): caps — 푸시 토큰 등록 때 함께 보내면 서버가 'android-actions-1' 앱에만 data 전용 알림(앱이 버튼을 그림)을 보낸다.
  * - setAlarms/addAlarm/settleAlarm/alarmStatus/openAlarmSettings: 전체화면 알람('android-fullscreen-alarm-1') — 알람은 LocalNotifications 대신 여기로.
+ * - refreshWidget: 바탕화면 위젯('android-widget-1') 새로고침 — 앱을 열 때·업무를 저장했을 때.
  * 옛 앱(1.1.2 이하)에는 이 플러그인이 없으니 웹은 Capacitor.isPluginAvailable('WorkinNative') 로 확인하고 지금 방식을 쓴다.
  */
 @CapacitorPlugin(name = "WorkinNative")
 public class WorkinNativePlugin extends Plugin {
 
-    static final String[] CAPS = { "android-actions-1", "android-fullscreen-alarm-1" };
+    static final String[] CAPS = { "android-actions-1", "android-fullscreen-alarm-1", "android-widget-1" };
 
     @PluginMethod
     public void getInfo(PluginCall call) {
@@ -102,5 +103,12 @@ public class WorkinNativePlugin extends Plugin {
         } catch (Exception e) {
             call.reject("설정 화면을 열 수 없습니다");
         }
+    }
+
+    /** 바탕화면 위젯 새로고침(위젯이 없으면 아무것도 안 함) */
+    @PluginMethod
+    public void refreshWidget(PluginCall call) {
+        TodayWidget.requestRefresh(getContext());
+        call.resolve();
     }
 }
