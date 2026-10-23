@@ -14,7 +14,7 @@ import { vendorRecruitWatch } from './vendorRecruit';
 import { kicoxIndustrial, publicSports, rebRecent, touristHotels } from './facilities';
 import { bizinfoSupport, kstartupSupport, supportWatch } from './support';
 
-/** 원본 12개 그대로(영업관리 FEATURES 4장 순서) + #450 지원사업 3개(하루 두 번). 실행 시각은 KST 시(時) — tick 이 그 시각 이후 하루 1회(againKst 가 있으면 그 시각 이후 한 번 더) */
+/** 원본 12개 그대로(영업관리 FEATURES 4장 순서) + #450 지원사업 3개(하루 두 번). 실행 시각은 KST 시(時) — tick 이 그 시각 이후 하루 1회(againKst 가 있으면 그 시각(들) 이후 한 번씩 더) */
 export const COLLECTORS: Collector[] = [kaptSaSun, operatingFromKapt, kicoxIndustrial, publicSports, touristHotels, rebRecent, kaptBidNotices, g2bBidNotices, g2bPrespecAwards, kaptBidResults, publicAgencyBids, vendorRecruitWatch,
   bizinfoSupport, kstartupSupport, supportWatch];
 export const SUPPORT_COLLECTORS = new Set(['bizinfo_support', 'kstartup_support', 'support_watch']);
@@ -23,11 +23,14 @@ export const find = (slug: string) => COLLECTORS.find((c) => c.slug === slug) ??
 const kstHour = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
 const kstDay = (d: Date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 const kstHourOf = (d: Date) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(d)) % 24;
-/** 오늘 돌 차례인가: 실행 시각이 지났고 오늘 아직 안 돌았거나, 두 번째 시각(againKst)이 지났는데 그 뒤로 안 돌았으면 */
+/** 하루 실행 시각들(KST 시) — hourKst + againKst(하나 또는 여러 개) */
+export const hoursOf = (c: Pick<Collector, 'hourKst' | 'againKst'>) => [...new Set([c.hourKst, ...(c.againKst == null ? [] : Array.isArray(c.againKst) ? c.againKst : [c.againKst])])].sort((a, b) => a - b);
+/** 오늘 돌 차례인가: 실행 시각이 지났고 오늘 아직 안 돌았거나, 지난 마지막 실행 시각(againKst) 뒤로 안 돌았으면 — #476 c: K-apt·나라장터 06·10·14·18시 */
 export function isDue(c: Pick<Collector, 'hourKst' | 'againKst'>, lastRunAt: Date | null, hour: number, today: string) {
-  if (hour < c.hourKst) return false;
+  const slots = hoursOf(c).filter((h) => h <= hour);
+  if (!slots.length) return false;
   if (!lastRunAt || kstDay(lastRunAt) !== today) return true;
-  return c.againKst != null && hour >= c.againKst && kstHourOf(lastRunAt) < c.againKst;
+  return kstHourOf(lastRunAt) < slots[slots.length - 1];
 }
 
 /** 한 수집기 실행(실행 이력·공용 상태 갱신). 예산은 Vercel 60초 안 — 기본 45초 */
@@ -63,7 +66,7 @@ export async function collectorsView(u: SessionUser) {
   const runs = await sql<any[]>`select id, slug, trigger, started_at, finished_at, status, inserted, updated, unchanged, errors, summary, error_log from sales_collector_runs order by started_at desc limit 30`;
   const ready = new Map(await Promise.all(COLLECTORS.filter((c) => c.keyReady).map(async (c) => [c.slug, await c.keyReady!().catch(() => false)] as const))); // 플랫폼 운영에 넣은 키도 '있음'
   return { canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, counts,
-    collectors: COLLECTORS.map((c) => ({ slug: c.slug, label: c.label, hourKst: c.hourKst, againKst: c.againKst ?? null, source: c.source, bid: BID_COLLECTORS.has(c.slug), support: SUPPORT_COLLECTORS.has(c.slug), needs: (c.needs ?? []).map((k) => ({ key: k, present: env(k) || !!ready.get(c.slug) })), globalEnabled: states.get(c.slug)?.enabled ?? true, enabled: mine.get(c.slug) ?? true, lastRunAt: states.get(c.slug)?.last_run_at ?? null, lastStatus: states.get(c.slug)?.last_status ?? null, last: last.get(c.slug) ?? null })), runs };
+    collectors: COLLECTORS.map((c) => ({ slug: c.slug, label: c.label, hourKst: c.hourKst, againKst: c.againKst ?? null, hours: hoursOf(c), source: c.source, bid: BID_COLLECTORS.has(c.slug), support: SUPPORT_COLLECTORS.has(c.slug), needs: (c.needs ?? []).map((k) => ({ key: k, present: env(k) || !!ready.get(c.slug) })), globalEnabled: states.get(c.slug)?.enabled ?? true, enabled: mine.get(c.slug) ?? true, lastRunAt: states.get(c.slug)?.last_run_at ?? null, lastStatus: states.get(c.slug)?.last_status ?? null, last: last.get(c.slug) ?? null })), runs };
 }
 export async function setCollectorEnabled(u: SessionUser, slug: string, enabled: boolean, scope: 'tenant' | 'global' = 'tenant') {
   await assertSpace(u, 'sales'); if (!isAdmin(u)) throw forbidden('관리자만'); if (!find(slug)) throw notFound('그런 수집기가 없습니다');

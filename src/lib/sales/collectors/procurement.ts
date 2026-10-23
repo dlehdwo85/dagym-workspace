@@ -10,7 +10,8 @@ export const NOISE_KEYWORDS = ['도장', '방수', '보수공사', '공사', '�
   '회계감사', '감사', '변압기', '택배', '리모델링', '바닥재', '인테리어', '교체'] as const;
 export const EXCLUDE_TOPICS = ['어린이집', '보육', '알뜰', '장터', '야시장', '자판기', '주차관제', '주차장', '음식물', '종량기', '재활용', '택배', '이동통신', '중계기', '헬스케어', '구내식당', '급식', '매점', '학위복', '방과후',
   '영어마을', '정보시스템', '전산', '선거', '투표', '돼지', '가축', '축산', '양돈', '농장', '개체식별', '해외연수', '바이오헬스', '헬스산업', '조기경보', '재난', '하천', '임대공실', '공실', '점포', '장서'] as const;
-const DIRECT = /(위탁\s*운영|운영\s*위탁|운영\s*업체|운영\s*사업자|운영자|위탁\s*용역|출입\s*통제|출입\s*시스템|출입시스템|출입\s*구축|출입\s*장치|자동\s*출입|통합\s*보안|안면\s*인식|얼굴\s*인식|키오스크|회원\s*관리|예약\s*시스템|타석|스크린\s*골프|커뮤니티\s*시스템)/;
+// #476 d: '주민 운동시설 위탁관리업체 선정'(K-apt 분류 '사업자-용역-주민운동시설의 위탁')이 중장기로 빠졌다 → 위탁 관리(업체)·시설의 위탁·위탁 업체/사업자 선정도 즉시 검토
+const DIRECT = /(위탁\s*운영|운영\s*위탁|운영\s*업체|운영\s*사업자|운영자|위탁\s*용역|위탁\s*관리(?:\s*업체)?|시설의\s*위탁|위탁\s*(?:업체|사업자)\s*선정|출입\s*통제|출입\s*시스템|출입시스템|출입\s*구축|출입\s*장치|자동\s*출입|통합\s*보안|안면\s*인식|얼굴\s*인식|키오스크|회원\s*관리|예약\s*시스템|타석|스크린\s*골프|커뮤니티\s*시스템)/;
 const WEAK = new Set(['커뮤니티', '주민공동시설', '주민공동', '부대복리시설', '카페', '강사', '골프', '게이트', '무인', '도서관', '운영업체', 'IoT', '락커', '사물함', '통합관리시스템']);
 const APT_CONTEXT = /아파트|단지|주민|입주|공동주택|커뮤니티|관리사무소|오피스텔|레지던스/;
 const CONSTRUCTION_RE = /공사|관급자재|설계|감리|측량|폐기물|골재|건립|신축|증축|개축|철거|타일|안전진단|기술지도|시공/;
@@ -114,10 +115,14 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
   return { ok: true, row };
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-/** 처음 적재할 때의 분류(이후엔 담당자 판단을 존중해 바꾸지 않음) */
+/** #476 d: K-apt 입찰분류에 '주민운동시설의 위탁'·커뮤니티(공사 제외)가 있으면 즉시 검토 */
+const IMMEDIATE_CATEGORY = /주민\s*운동\s*시설의\s*위탁|커뮤니티/;
+/** 처음 적재할 때의 분류(담당자 판단은 회사별 진행 칸에 — 공용 행은 규칙이 바뀌면 '중장기 → 즉시 검토'로만 올림, planNoticeBatch) */
 export function initialClassification(row: { title?: unknown; bid_category?: unknown; task_scope?: unknown; fit_business?: unknown; source_type?: unknown }): string {
   if (row.source_type === 'vendor_recruit') return '즉시 검토';
   if (!row.fit_business) return '참고(비관련)';
+  const cat = String(row.bid_category ?? '');
+  if (IMMEDIATE_CATEGORY.test(cat) && !/공사/.test(cat)) return '즉시 검토';
   const f = matchFit(String(row.title ?? ''), row.bid_category as string | null, row.task_scope as string | null);
   return f.direct ? '즉시 검토' : '중장기 영업리드';
 }
@@ -144,6 +149,11 @@ export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<stri
       if (empty && f !== 'fit_business' && f !== 'matched_keywords') continue;
       if (f === 'current_status' && p.current_status === '낙찰' && nv !== '낙찰') continue; // 낙찰된 공고는 재수집으로 되돌리지 않음
       if (!same(nv, p[f])) { patch[f] = nv; changed.push(f); }
+    }
+    // #476 d: 규칙이 바뀌어 즉시 검토가 된 공고는 공용 분류를 올림(내리지는 않음 — 회사별 판단은 진행 칸에 따로)
+    if (mergeScope === 'all' && p.classification === '중장기 영업리드') {
+      const merged = { ...p, ...Object.fromEntries(Object.entries(v.row).filter(([, x]) => x != null)) };
+      if (initialClassification(merged) === '즉시 검토') { patch.classification = '즉시 검토'; changed.push('classification'); }
     }
     if (changed.length) plan.updates.push({ id: String(p.id), key, patch, summary: `변경: ${changed.join(', ')}` });
     else plan.unchangedIds.push(String(p.id));

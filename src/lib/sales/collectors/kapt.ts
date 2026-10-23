@@ -1,4 +1,6 @@
 // K-apt(공동주택) 수집기 3종 — 전국 입찰공고 HTML(키 불필요) · 입찰결과 HTML(낙찰 병합) · 사업자선정 결과 OpenAPI(KAPT_SERVICE_KEY). 원본 lib/collectors/kapt_* 이식(10/21).
+import { dataGoKey } from '../collect';
+import { callDataGo } from './g2b';
 import { matchFit } from './procurement';
 import { upsertKaptVendor, upsertNotices, deriveOperatingFromKapt } from './store';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
@@ -6,7 +8,16 @@ import type { Collector, CollectorCtx, CollectorResult } from './types';
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
 const BASE = () => (T() ? `${T()}/kapt` : 'https://www.k-apt.go.kr');
 const HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)', 'Accept-Language': 'ko-KR' };
-const PAGE_SIZE = 100, MAX_PAGES = 40, DETAIL_LIMIT = 150, CHUNK = 500;
+const PAGE_SIZE = 100, MAX_PAGES = 40, QUICK_PAGES = 5, DETAIL_LIMIT = 150, CHUNK = 500;
+const kstHourNow = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
+const kstYmd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
+/** #476 f: K-apt 공공데이터 키 — KAPT_SERVICE_KEY 가 없으면 같은 포털 키(플랫폼 운영에 넣은 공공데이터포털 키 → DATA_GO_KR_SERVICE_KEY) */
+export async function kaptKey(): Promise<string | null> {
+  const k = dataGoKey(process.env.KAPT_SERVICE_KEY); if (k) return k;
+  return (await (await import('./support')).supportKeys().catch(() => null))?.datago ?? dataGoKey();
+}
+/** 활용신청 안 된 키(포털 공통 오류) → '활용신청 필요(서비스 번호)' — #172 화면이 번호로 [활용신청] 링크를 붙임 */
+const portalErr = (msg: string, service: string) => (/활용신청 필요|SERVICE_KEY_IS_NOT_REGISTERED|SERVICE ACCESS DENIED|등록되지 않은 (서비스|인증)키/i.test(msg) ? `공공데이터포털 활용신청 필요(서비스 ${service}) — 키는 그대로 두고 포털(data.go.kr)에서 [활용신청]` : msg);
 export const text = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
 export type KaptBidRow = { bidNum: string; system: string; awardMethod: string; title: string; deadline: string; state: string; complex: string; registeredAt: string };
 /** 목록 HTML → 행. goView('번호') 가 있는 줄만. 칸 수가 다르면 형식 변경으로 보고 버림 */
@@ -47,16 +58,54 @@ export function toPayload(r: KaptBidRow, d?: KaptBidDetail): Record<string, unkn
 async function getText(url: string, fetchImpl: typeof fetch, timeoutMs: number, init: RequestInit = {}) { const res = await fetchImpl(url, { ...init, headers: { ...HEADERS, ...(init.headers as any) }, signal: AbortSignal.timeout(timeoutMs) }); if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.text(); }
 export async function pool<T, R>(items: T[], n: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> { const out: R[] = new Array(items.length); let next = 0; await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); } })); return out; }
 
+// ---- #476 c: 국토교통부_공동주택 입찰공고 정보제공 서비스(data.go.kr 15058166) — 포털 명세(Swagger) 그대로: 입찰공고일 조회 getPblAncDeSearchV3(startDate·endDate)
+// 키 승인 전이라 실제 응답은 아직 확인 못 함(가짜 서버 구조 시험). 날짜는 같은 서비스 예시값 형식(YYYYMMDD)
+const KAPT_BID_API = () => (T() ? `${T()}/kaptbidapi` : 'https://apis.data.go.kr/1613000/ApHusBidPblAncInfoOfferServiceV3');
+const SIDO_CODE: Record<string, string> = { 11: '서울', 26: '부산', 27: '대구', 28: '인천', 29: '광주', 30: '대전', 31: '울산', 36: '세종', 41: '경기', 42: '강원', 51: '강원', 43: '충북', 44: '충남', 45: '전북', 52: '전북', 46: '전남', 47: '경북', 48: '경남', 50: '제주' };
+const API_AUTH: Record<string, string> = { '01': 'K-APT', '02': '조달청', '03': '아파트비드포유', '04': 'KG2B전자입찰', '05': '나이스아파트', '06': '이 아파트', '99': '기타민간업체' };
+const API_KIND: Record<string, string> = { '01': '일반경쟁', '02': '제한경쟁', '03': '지명경쟁' };
+const API_SUC: Record<string, string> = { '01': '최저(고) 낙찰', '02': '적격심사', '03': '최저 낙찰', '04': '최고 낙찰', '05': '적격심사(최저)', '06': '적격심사(최고)' };
+const API_STATE: Record<string, string> = { 1: '신규공고', 2: '정정공고', 3: '재공고' };
+const s0 = (v: unknown) => { if (v == null) return null; const t = String(v).trim(); return t ? t : null; };
+/** 공식 API 한 줄 → 공고(목록 화면과 같은 source_external_id = 입찰번호라 한 줄로 합쳐짐). 공고문·내용은 목록 상세 쪽 값을 두고 덮지 않음 */
+export function kaptApiPayload(it: any): Record<string, unknown> | null {
+  const no = s0(it?.bidNum), title = s0(it?.bidTitle); if (!no || !title) return null;
+  return { source_type: 'kapt_bid', source_external_id: no, source_url: `${BASE()}/bid/bidDetail.do?bidNum=${encodeURIComponent(no)}`, issuer: s0(it.bidKaptname), facility_name: s0(it.bidKaptname), title,
+    region: regionFromTitle(title) ?? SIDO_CODE[String(it.bidArea ?? '').slice(0, 2)] ?? null, posted_date: s0(it.bidRegDate), deadline_at: s0(it.bidDeadline), notice_state: API_STATE[String(it.bidState ?? '')] ?? null,
+    bid_system: API_AUTH[String(it.codeAuth ?? '')] ?? null, award_method: API_SUC[String(it.codeSucWay ?? '')] ?? null, contract_method: API_KIND[String(it.codeKind ?? '')] ?? null, participation_deadline_at: s0(it.bidDocsDeadline) };
+}
+async function kaptApiNotices(ctx: CollectorCtx, days: number): Promise<{ items: Record<string, unknown>[]; note: string; error?: string }> {
+  const key = await kaptKey(); if (!key) return { items: [], note: '공식 API: 키 없음(KAPT_SERVICE_KEY·DATA_GO_KR_SERVICE_KEY) — 목록 화면만' };
+  const end = new Date(ctx.now()); const start = new Date(end.getTime() - days * 864e5); const ymd = (d: Date) => kstYmd(d).replace(/-/g, '');
+  const items: Record<string, unknown>[] = []; const t0 = ctx.now(); // 수집기 45초 안 — 공식 API 는 모두 합쳐 15초·3쪽(1,500건)까지
+  try {
+    for (let page = 1; page <= 3 && ctx.now() - t0 < 12000; page++) {
+      const u = new URL(`${KAPT_BID_API()}/getPblAncDeSearchV3`); u.searchParams.set('serviceKey', key); u.searchParams.set('startDate', ymd(start)); u.searchParams.set('endDate', ymd(end)); u.searchParams.set('pageNo', String(page)); u.searchParams.set('numOfRows', '500'); u.searchParams.set('_type', 'json');
+      const rows = await callDataGo(u, ctx.fetchImpl, key, Math.max(3000, 15000 - (ctx.now() - t0)));
+      for (const it of rows) { const p = kaptApiPayload(it); if (p) items.push(p); }
+      if (rows.length < 500) break;
+    }
+  } catch (e) { const msg = portalErr(e instanceof Error ? e.message : String(e), '15058166'); return { items, note: `공식 API: ${msg}`, error: `공식 API(15058166): ${msg}` }; }
+  return { items, note: `공식 API ${items.length}건(최근 ${days}일)` };
+}
+
 export const kaptBidNotices: Collector = {
-  slug: 'kapt_bid_notices', label: 'K-apt 전국 입찰공고', hourKst: 6, source: 'k-apt.go.kr/bid/bidList.do (K-APT·조달청·민간 전자입찰 통합, 키 불필요)',
-  async run({ fetchImpl, deadlineMs, now }: CollectorCtx): Promise<CollectorResult> {
+  slug: 'kapt_bid_notices', label: 'K-apt 전국 입찰공고', hourKst: 6, againKst: [10, 14, 18],
+  source: 'k-apt.go.kr/bid/bidList.do (K-APT·조달청·민간 전자입찰 통합, 키 불필요) + 공식 API(data.go.kr 15058166, 키 있으면 함께) — 06시 전체, 10·14·18시는 최신 500건',
+  async run(ctx: CollectorCtx): Promise<CollectorResult> {
+    const { fetchImpl, deadlineMs, now } = ctx;
     const started = now(); const left = () => deadlineMs - (now() - started); const errors: string[] = []; let listFailures = 0;
     const all: KaptBidRow[] = []; let malformed = 0;
-    const first = parseKaptBidList(await getText(`${BASE()}/bid/bidList.do?pageNo=1&pageSelect=${PAGE_SIZE}`, fetchImpl, 15000));
-    if (!first.rows.length) return { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: 'K-apt 목록 0건 — 원천 형식 변경 의심', summary: 'K-apt 입찰공고: 목록 파싱 0건', providerMode: 'web_scrape' };
+    // #476 c: 06시는 전체(최대 40쪽), 10·14·18시·그 뒤 [지금 수집]은 최신순 앞 5쪽(500건) — 목록은 등록 시각 최신순(10/23 실측)
+    const full = ctx.params?.full === true || kstHourNow() < 10; const pagesMax = full ? MAX_PAGES : QUICK_PAGES;
+    const api = await kaptApiNotices(ctx, full ? 3 : 2); if (api.error) errors.push(api.error);
+    // 목록 화면이 실패해도 공식 API 로 받은 공고는 적재
+    const first = await getText(`${BASE()}/bid/bidList.do?pageNo=1&pageSelect=${PAGE_SIZE}`, fetchImpl, 15000).then(parseKaptBidList).catch((e) => { listFailures++; errors.push(`목록 1쪽: ${e instanceof Error ? e.message : String(e)}`); return { rows: [] as KaptBidRow[], malformed: 0 }; });
+    if (!first.rows.length && !api.items.length) return { inserted: 0, updated: 0, unchanged: 0, errors: 1 + (api.error ? 1 : 0), errorLog: [listFailures ? null : 'K-apt 목록 0건 — 원천 형식 변경 의심', ...errors].filter(Boolean).join('\n'), summary: `K-apt 입찰공고: 목록 ${listFailures ? '불러오기 실패' : '파싱 0건'} · ${api.note}`, providerMode: 'web_scrape' };
+    if (!first.rows.length && !listFailures) errors.push('K-apt 목록 0건 — 원천 형식 변경 의심(공식 API 공고만 적재)');
     all.push(...first.rows); malformed += first.malformed;
-    if (first.rows.length === PAGE_SIZE) for (let p = 2; p <= MAX_PAGES && left() > 20000; p += 4) {
-      const pages = [p, p + 1, p + 2, p + 3].filter((x) => x <= MAX_PAGES);
+    if (first.rows.length === PAGE_SIZE) for (let p = 2; p <= pagesMax && left() > 20000; p += 4) {
+      const pages = [p, p + 1, p + 2, p + 3].filter((x) => x <= pagesMax);
       const res = await pool(pages, 4, async (pg) => { try { return parseKaptBidList(await getText(`${BASE()}/bid/bidList.do?pageNo=${pg}&pageSelect=${PAGE_SIZE}`, fetchImpl, 12000)); } catch (e) { listFailures++; errors.push(`목록 ${pg}쪽: ${e instanceof Error ? e.message : String(e)}`); return null; } });
       let done = false; for (const r of res) { if (!r) continue; all.push(...r.rows); malformed += r.malformed; if (r.rows.length < PAGE_SIZE) done = true; } if (done) break;
     }
@@ -65,7 +114,10 @@ export const kaptBidNotices: Collector = {
     const fitRows = uniq.filter((r) => matchFit(r.title, '공동주택').fit); const details = new Map<string, KaptBidDetail>();
     await pool(fitRows.slice(0, DETAIL_LIMIT), 6, async (r) => { if (left() < 15000) return; try { details.set(r.bidNum, parseKaptBidDetail(await getText(`${BASE()}/bid/bidDetail.do?bidNum=${encodeURIComponent(r.bidNum)}`, fetchImpl, 8000))); } catch (e) { if (errors.length < 15) errors.push(`상세 ${r.bidNum}: ${e instanceof Error ? e.message : String(e)}`); } });
     const fitIds = new Set(fitRows.map((r) => r.bidNum));
-    const ordered = [...fitRows, ...uniq.filter((r) => !fitIds.has(r.bidNum))].map((r) => toPayload(r, details.get(r.bidNum)));
+    const listed = new Set(uniq.map((r) => r.bidNum));
+    // 공식 API 에만 있는 공고(목록 화면 쪽에서 놓친 것)를 앞에 — 같은 입찰번호는 목록 화면 값(상세 포함)이 기준
+    const apiOnly = api.items.filter((p) => !listed.has(String(p.source_external_id)));
+    const ordered = [...apiOnly.filter((p) => matchFit(String(p.title), '공동주택').fit), ...fitRows.map((r) => toPayload(r, details.get(r.bidNum))), ...apiOnly.filter((p) => !matchFit(String(p.title), '공동주택').fit), ...uniq.filter((r) => !fitIds.has(r.bidNum)).map((r) => toPayload(r, details.get(r.bidNum)))];
     let inserted = 0, updated = 0, unchanged = 0, writeErrors = 0, invalid = 0, written = 0;
     for (let i = 0; i < ordered.length; i += CHUNK) {
       if (left() < 5000) { errors.push(`시간 한도 근접 — ${ordered.length - i}건(비관련 공고)은 다음 실행에서`); break; }
@@ -75,8 +127,8 @@ export const kaptBidNotices: Collector = {
     }
     let direct = 0; const fitCount = { 다짐: 0, 하이링크: 0, 둘다: 0 };
     for (const r of fitRows) { const d = details.get(r.bidNum); const m = matchFit(r.title, d?.category, d?.content, '공동주택'); if (m.direct) direct++; if (m.fit === '다짐') fitCount.다짐++; else if (m.fit === '하이링크') fitCount.하이링크++; else if (m.fit) fitCount.둘다++; }
-    return { inserted, updated, unchanged, errors: writeErrors + invalid + listFailures + (written < ordered.length ? 1 : 0), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
-      summary: `K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}) · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') };
+    return { inserted, updated, unchanged, errors: writeErrors + invalid + listFailures + (api.error ? 1 : 0) + (written < ordered.length ? 1 : 0), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
+      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') };
   },
 };
 
@@ -131,15 +183,21 @@ export function toKaptRaw(r: any) {
     contract_start_date: toYmd(r.ctrtStartYmd) ?? toYmd(r.contractStartDate), contract_end_date: toYmd(r.ctrtEndYmd) ?? toYmd(r.contractEndDate) };
 }
 export const kaptSaSun: Collector = {
-  slug: 'kapt_sa_sun', label: 'K-apt 사업자선정 결과', hourKst: 8, source: 'apis.data.go.kr/B553530/kaptBidResult (최근 18개월)', needs: ['KAPT_SERVICE_KEY'],
+  slug: 'kapt_sa_sun', label: 'K-apt 사업자선정 결과', hourKst: 8, source: 'apis.data.go.kr/B553530/kaptBidResult (최근 18개월) — 키는 KAPT_SERVICE_KEY, 없으면 공공데이터포털 키(15059177 활용신청)', needs: ['KAPT_SERVICE_KEY(없으면 DATA_GO_KR_SERVICE_KEY)'],
+  keyReady: async () => !!(await kaptKey()),
   async run({ fetchImpl }: CollectorCtx): Promise<CollectorResult> {
-    const key = process.env.KAPT_SERVICE_KEY?.trim();
+    const key = await kaptKey();
     const from = new Date(Date.now() - 18 * 30 * 864e5).toISOString().slice(0, 10), to = new Date().toISOString().slice(0, 10);
-    if (!key) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `K-apt 사업자선정 ${from}~${to} · KAPT_SERVICE_KEY 미설정 — 공공데이터포털 무료 신청 후 Vercel env 추가`, providerMode: 'manual' };
+    if (!key) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `K-apt 사업자선정 ${from}~${to} · 키 없음(KAPT_SERVICE_KEY·DATA_GO_KR_SERVICE_KEY) — 공공데이터포털 15059177 활용신청 후 플랫폼 운영 또는 Vercel env`, providerMode: 'manual' };
     const u = new URL(KAPT_API()); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '500'); u.searchParams.set('pageNo', '1'); u.searchParams.set('_type', 'json'); u.searchParams.set('searchStartYmd', from.replaceAll('-', '')); u.searchParams.set('searchEndYmd', to.replaceAll('-', ''));
     let items: any[] = [];
-    try { const res = await fetchImpl(u.toString(), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12000) }); if (!res.ok) throw new Error(`HTTP ${res.status}`); const raw: any = await res.json(); const body = raw?.response?.body ?? raw?.body; const it = body?.items; items = Array.isArray(it) ? it : Array.isArray(it?.item) ? it.item : it?.item ? [it.item] : []; }
-    catch (e) { const msg = (e instanceof Error ? e.message : String(e)).split(key).join('***'); return { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: `OpenAPI 호출 실패: ${msg}`, summary: `K-apt 사업자선정 ${from}~${to} · OpenAPI 호출 실패`, providerMode: 'api' }; }
+    try {
+      const res = await fetchImpl(u.toString(), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12000) }); const txt = await res.text();
+      // 활용신청 안 된 키는 HTTP 403·XML 본문으로 옴(#172) — 먼저 본문을 보고 '활용신청 필요'로
+      if (/SERVICE_KEY_IS_NOT_REGISTERED|SERVICE ACCESS DENIED|등록되지 않은 (서비스|인증)키/i.test(txt)) throw new Error('SERVICE_KEY_IS_NOT_REGISTERED');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const raw: any = JSON.parse(txt); const body = raw?.response?.body ?? raw?.body; const it = body?.items; items = Array.isArray(it) ? it : Array.isArray(it?.item) ? it.item : it?.item ? [it.item] : [];
+    } catch (e) { const msg = portalErr((e instanceof Error ? e.message : String(e)).split(key).join('***'), '15059177'); return { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: `OpenAPI 호출 실패: ${msg}`, summary: /활용신청/.test(msg) ? `K-apt 사업자선정: ${msg}` : `K-apt 사업자선정 ${from}~${to} · OpenAPI 호출 실패`, providerMode: 'api' }; }
     let inserted = 0, updated = 0, skipped = 0; const errors: string[] = [];
     for (const it of items) { const r = toKaptRaw(it); if (!r) continue; try { const res = await upsertKaptVendor(r); if (res.result === 'insert') inserted++; else if (res.result === 'update') updated++; else skipped++; } catch (e) { errors.push(`${r.source_external_id}: ${e instanceof Error ? e.message : String(e)}`); } }
     return { inserted, updated, unchanged: skipped, errors: errors.length, errorLog: errors.length ? errors.slice(0, 10).join('\n') : undefined, providerMode: 'api', summary: `K-apt 사업자선정 ${from}~${to} · 응답 ${items.length}건 · 신규 ${inserted}, 갱신 ${updated}, 변화없음 ${skipped}, 오류 ${errors.length}` };

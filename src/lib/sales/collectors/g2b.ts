@@ -17,6 +17,7 @@ const PRESPEC_OPS = [['ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServc'
 // 낙찰정보는 'as/' 접두(2026-10-21 실측: ao/ 는 '서비스 없음', as/ 는 키 오류 = 주소 존재)
 const AWARD_OPS = [['as/ScsbidInfoService/getScsbidListSttusServcPPSSrch', '용역'], ['as/ScsbidInfoService/getScsbidListSttusThngPPSSrch', '물품']] as const;
 const fmt = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d).replace(/-/g, '');
+const kstHourNow = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
 const str = (v: unknown) => { if (v == null) return null; const s = String(v).trim(); return s ? s : null; };
 export type ApiErr = { denied: boolean; msg: string };
 /** data.go.kr 표준 응답 → items[]. 결과코드가 성공이 아니면 throw(키·활용신청 오류 구분) */
@@ -57,15 +58,17 @@ async function write(items: Record<string, unknown>[], errors: string[], opt: { 
 const noKey = (label: string): CollectorResult => ({ inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `${label}: DATA_GO_KR_SERVICE_KEY 미설정 — 건너뜀`, providerMode: 'api' });
 
 export const g2bBidNotices: Collector = {
-  slug: 'g2b_bid_notices', label: '나라장터·누리장터 입찰공고', hourKst: 6, source: 'apis.data.go.kr/1230000 BidPublicInfoService(4대상) + PrvtBidNtceService(누리장터) — 최근 14일 × 검색어 15개', needs: ['DATA_GO_KR_SERVICE_KEY'],
+  slug: 'g2b_bid_notices', label: '나라장터·누리장터 입찰공고', hourKst: 6, againKst: [10, 14, 18], source: 'apis.data.go.kr/1230000 BidPublicInfoService(4대상) + PrvtBidNtceService(누리장터) — 검색어 15개 × 06시 최근 14일, 10·14·18시 최근 3일', needs: ['DATA_GO_KR_SERVICE_KEY'],
   async run(ctx: CollectorCtx): Promise<CollectorResult> {
     const key = dataGoKey(); if (!key) return noKey('나라장터');
-    const a = await searchAll(BID_OPS, G2B_WORDS, 14, (it, cat) => g2bPayload(it, 'g2b_bid', cat), ctx, key);
-    const b = await searchAll(await nuriOps(), G2B_WORDS, 14, (it, cat) => g2bPayload(it, 'nuri_bid', cat), ctx, key);
+    // #476 c: 06시는 최근 14일 전체, 낮 수집(10·14·18시·그 뒤 [지금 수집])은 최근 3일 — 낮에 올라온 공고를 그날 잡는다
+    const days = ctx.params?.full === true || kstHourNow() < 10 ? 14 : 3;
+    const a = await searchAll(BID_OPS, G2B_WORDS, days, (it, cat) => g2bPayload(it, 'g2b_bid', cat), ctx, key);
+    const b = await searchAll(await nuriOps(), G2B_WORDS, days, (it, cat) => g2bPayload(it, 'nuri_bid', cat), ctx, key);
     const errors = [...a.errors, ...b.errors]; const items = [...a.items, ...b.items];
     const r = await write(items, errors);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + a.denied.length + b.denied.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
-      summary: `나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건 (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
+      summary: `${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건 (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
   },
 };
 export function prespecPayload(it: any, cat: string): Record<string, unknown> | null {

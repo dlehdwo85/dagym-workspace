@@ -57,6 +57,23 @@ const firstSeen = (r: any) => {
   const d = new Date(String(v));
   return /T|\s\d{2}:/.test(String(v)) && !Number.isNaN(d.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d) : String(v).slice(0, 10);
 };
+/** #476 b: '오늘' 탭 = 공고일 오늘 · 처음 본 날 오늘 · 지난 메일(전날까지 마지막 다이제스트) 뒤 처음 본 공고 — 메일 링크(오늘 탭)와 같은 범위.
+ * 오늘이 된 까닭이 공고일·수집일 차이면 배지('어제 공고·오늘 수집' / '어제 메일 뒤 수집'). 게시일을 못 읽은 협력사 글은 뺌 */
+async function lastMailAt(tenant: string): Promise<number | null> {
+  const td = today(); const [prev] = await db()<{ created_at: Date }[]>`select created_at from sales_digests where tenant = ${tenant} and day < ${td} order by day desc limit 1`;
+  const at = prev ? new Date(prev.created_at).getTime() : null; const start = Date.parse(`${td}T00:00:00+09:00`);
+  return at != null && at < start && start - at <= 3 * 864e5 ? at : null;
+}
+const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+function todayReason(n: { posted: string | null; noticeDate: string | null; vendorRecruit: boolean }, firstSeenAt: unknown, since: number | null): { hit: boolean; label: string | null } {
+  if (n.vendorRecruit && !n.noticeDate) return { hit: false, label: null };
+  const td = today(), yd = plus(-1);
+  if (n.posted === td) return { hit: true, label: n.noticeDate && n.noticeDate < td ? `${n.noticeDate === yd ? '어제' : md(n.noticeDate)} 공고·오늘 수집` : null };
+  if (n.noticeDate === td) return { hit: true, label: n.posted && n.posted < td ? `공고일 오늘·${n.posted === yd ? '어제' : md(n.posted)} 처음 수집` : null }; // 정정·재공고로 공고일이 오늘이 된 옛 공고
+  const seen = Date.parse(String(firstSeenAt ?? ''));
+  if (since != null && !Number.isNaN(seen) && seen >= since) return { hit: true, label: `${n.posted === yd ? '어제' : n.posted ? md(n.posted) : ''} 메일 뒤 수집`.trim() };
+  return { hit: false, label: null };
+}
 const attachmentsOf = (r: any) => { const a = pick(r, 'attachment_urls', 'attachments'); return Array.isArray(a) ? a : typeof a === 'string' && a.startsWith('[') ? (() => { try { return JSON.parse(a); } catch { return []; } })() : a ? [a] : []; };
 /** S1-3: 시설 규모 facility_scale + facility_scale_unit(㎡·평·세대 등) */
 const scaleOf = (r: any) => { const v = pick(r, 'facility_scale', 'scale', 'size', 'area'); if (v === null || v === undefined || v === '') return null; const u = pick(r, 'facility_scale_unit', 'scale_unit'); return u ? `${v}${u}` : v; };
@@ -213,7 +230,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       // 대표(10/19): 첫 화면 맨 위 '오늘' — 새 공고·새 영업 DB(신규단지·시설·협력사)·오늘 연락할 리드·오늘 마감 입찰
       today: await (async () => { const td = today();
         const db3 = await Promise.all((['building_sales_pipeline', 'operating_facility_prospects', 'vendor_registrations'] as const).map(async (tb) => (await rows('global', tb, 20000)).filter((r) => firstSeen(r) === td).length));
-        return { date: td, newNotices: N.filter((n) => n.posted === td).length, newDb: { buildings: db3[0], facilities: db3[1], vendors: db3[2] }, contact: live.filter((l) => l.next === td).length, closing: N.filter((n) => n.close === td).length }; })() };
+        const since = await lastMailAt(t); // #476 b: 홈 '오늘 새 공고' 수 = 오늘 탭과 같은 기준
+        return { date: td, newNotices: NR.filter((r, i) => todayReason(N[i], r.first_seen_at, since).hit).length, newDb: { buildings: db3[0], facilities: db3[1], vendors: db3[2] }, contact: live.filter((l) => l.next === td).length, closing: N.filter((n) => n.close === td).length }; })() };
   }
   // S2-6 계약만료·재입찰(영업관리 2-6): 타 업체 계약 종료일이 있는 공고 → 영업 시작(−12·−9개월)·제안(−6)·재입찰(−3) 역산, 단계 5, 요약 4(90/180/365일 내·지남)
   if (view === 'contracts') {
@@ -325,12 +343,13 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const P = new Map((await prog('procurement_notices__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
     const byNotice = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), w]));
     let N = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true' || byNotice.has(String(r.id ?? r.__id)));
-    const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id);
-      return { ...notice(r, cats), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
+    const since = await lastMailAt(t);
+    const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since);
+      return { ...n0, todayHit: why.hit, todayLabel: why.label, work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본)
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, raw: r }; })
       .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
-        && (tab !== 'today' || n.posted === today()) && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit)
+        && (tab !== 'today' || n.todayHit) && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit)
         && (!q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz))))
       .sort((a, b) => tab === 'open' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
     return { ...meta, tab, total: N.length, items, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };

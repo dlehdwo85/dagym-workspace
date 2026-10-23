@@ -40,7 +40,14 @@ const kstDay = (d: Date = new Date()) => new Intl.DateTimeFormat('en-CA', { time
 const kstHour = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
 const dayOf = (v: unknown) => { const s = String(v ?? ''); const m = s.match(/^(\d{4}-\d{2}-\d{2})/); if (!m) return null; if (/T|\s\d{2}:/.test(s)) { const d = new Date(s); return Number.isNaN(d.getTime()) ? m[1] : kstDay(d); } return m[1]; };
 const norm = (s: string) => s.replace(/\s+/g, '').toUpperCase();
-export type DigestItem = { id: string; title: string; issuer: string | null; region: string | null; source: string; url: string; kind: string; fit: string | null; keywords: string[]; estimated: number | null; deadline: string | null; dday: number | null; participation: string | null; opening: string | null; attachments: number; why: string };
+export type DigestItem = { id: string; title: string; issuer: string | null; region: string | null; source: string; url: string; kind: string; fit: string | null; keywords: string[]; estimated: number | null; deadline: string | null; dday: number | null; participation: string | null; opening: string | null; attachments: number; why: string; seenAt?: string | null; late?: boolean };
+/** #476 a: 지난 메일(그 전날까지의 마지막 다이제스트) 이후 처음 본 공고 — 그날 메일 뒤에 들어온 공고가 다음 날 메일에서 빠지지 않게. 3일 넘게 비었거나 처음이면 그날 0시(KST)부터 */
+export async function digestSince(tenant: string, day: string): Promise<Date> {
+  const start = new Date(`${day}T00:00:00+09:00`);
+  const [prev] = await db()<{ created_at: Date }[]>`select created_at from sales_digests where tenant = ${tenant} and day < ${day} order by day desc limit 1`;
+  const at = prev ? new Date(prev.created_at) : null;
+  return at && at < start && start.getTime() - at.getTime() <= 3 * 864e5 ? at : start;
+}
 /** 회사 맞춤 필터: 우리 업종 적합(matchFit) 또는 관심 검색어 → 제외어·지역·발주처·금액으로 거름 */
 export function passPrefs(r: any, p: Prefs): { ok: boolean; why: string } {
   const text = `${r.title ?? ''} ${r.bid_category ?? ''} ${r.task_scope ?? ''}`; const t = norm(text);
@@ -56,34 +63,39 @@ export function passPrefs(r: any, p: Prefs): { ok: boolean; why: string } {
 }
 const SRC: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집' };
 const SLUG_OF: Record<string, string> = { kapt_bid: 'kapt_bid_notices', g2b_bid: 'g2b_bid_notices', nuri_bid: 'g2b_bid_notices', g2b_prespec: 'g2b_prespec_awards', lh_bid: 'public_agency_bids', lh_prespec: 'public_agency_bids', d2b_bid: 'public_agency_bids', onbid_lease: 'public_agency_bids', vendor_recruit: 'vendor_recruit_watch' };
-/** 그날(KST) 처음 본 공고 + 그날 정정·취소로 바뀐 공고 → 회사 맞춤 통과분 */
+/** 지난 메일 이후(digestSince) 처음 본 공고 + 그 뒤 정정·취소로 바뀐 공고 → 회사 맞춤 통과분 */
 export async function buildDigest(tenant: string, day = kstDay()) {
   const sql = db(); const p = await prefsOf(tenant);
   const off = new Set((await sql<{ slug: string }[]>`select slug from sales_collector_settings where tenant = ${tenant} and not enabled`).map((r) => r.slug));
-  // #148: first_seen_at 은 UTC ISO 문자열, day 는 KST 날짜 — KST 00~09시에는 UTC 날짜가 하루 앞서 '>= day' 문자열 비교로 빠짐 → 하루 넓게 거르고 정확한 날짜는 아래 dayOf(KST) 로
-  const from = new Date(Date.parse(`${day}T00:00:00+09:00`) - 864e5).toISOString().slice(0, 10);
+  const since = await digestSince(tenant, day); const sinceMs = since.getTime(); const dayStart = Date.parse(`${day}T00:00:00+09:00`);
+  // first_seen_at·updated_at 은 UTC ISO 문자열 — 하루 넓게 거르고(#148) 정확한 비교는 아래 시각으로
+  const from = new Date(sinceMs - 864e5).toISOString().slice(0, 10);
   const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone and (row->>'first_seen_at' >= ${from} or row->>'updated_at' >= ${from}) limit 5000`;
   const items: DigestItem[] = []; const skipped: Record<string, number> = {};
+  const at = (v: unknown) => { const t = Date.parse(String(v ?? '')); return Number.isNaN(t) ? null : t; };
   for (const { src_id, row: r } of rows) {
     const slug = SLUG_OF[String(r.source_type)] ?? ''; if (slug && off.has(slug)) continue;
-    const isNew = dayOf(r.first_seen_at) === day; const kind = String(r.notice_kind ?? 'new'); const changedToday = dayOf(r.updated_at) === day && (kind === 'cancel' || kind === 'amend' || String(r.current_status ?? '') === '취소');
+    const seen = at(r.first_seen_at); const upd = at(r.updated_at);
+    const isNew = seen != null && seen >= sinceMs; const kind = String(r.notice_kind ?? 'new'); const changedToday = upd != null && upd >= sinceMs && (kind === 'cancel' || kind === 'amend' || String(r.current_status ?? '') === '취소');
     if (!isNew && !changedToday) continue;
+    if (r.source_type === 'vendor_recruit' && !r.posted_date) { skipped['게시일 미상'] = (skipped['게시일 미상'] ?? 0) + 1; continue; } // #476 e: 게시일을 못 읽은 협력사 글은 메일·오늘 탭에서 뺌
     const f = passPrefs(r, p); if (!f.ok) { skipped[f.why] = (skipped[f.why] ?? 0) + 1; continue; }
     const deadline = dayOf(r.deadline_at); const dday = deadline ? Math.round((Date.parse(deadline) - Date.parse(day)) / 864e5) : null;
     if (dday != null && dday < 0) { skipped['마감 지남'] = (skipped['마감 지남'] ?? 0) + 1; continue; } // 첫 수집일에 과거 마감 공고가 '새 공고'로 섞이지 않게(로컬 10/21 10:55)
     items.push({ id: String(r.id ?? src_id), title: String(r.title ?? ''), issuer: r.issuer ?? r.demand_agency ?? null, region: r.region ?? null, source: SRC[String(r.source_type)] ?? String(r.source_type), url: String(r.source_url ?? ''), kind: String(r.current_status ?? '') === '취소' ? 'cancel' : isNew ? kind : kind,
-      fit: r.fit_business ?? null, keywords: Array.isArray(r.matched_keywords) ? r.matched_keywords : [], estimated: r.estimated_amount != null ? Number(r.estimated_amount) : r.budget_amount != null ? Number(r.budget_amount) : null, deadline, dday, participation: dayOf(r.participation_deadline_at), opening: dayOf(r.opening_at), attachments: Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0, why: f.why });
+      fit: r.fit_business ?? null, keywords: Array.isArray(r.matched_keywords) ? r.matched_keywords : [], estimated: r.estimated_amount != null ? Number(r.estimated_amount) : r.budget_amount != null ? Number(r.budget_amount) : null, deadline, dday, participation: dayOf(r.participation_deadline_at), opening: dayOf(r.opening_at), attachments: Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0, why: f.why, seenAt: r.first_seen_at ?? null, late: isNew && seen! < dayStart });
   }
   items.sort((a, b) => (a.kind === 'cancel' ? 1 : 0) - (b.kind === 'cancel' ? 1 : 0) || (a.dday ?? 999) - (b.dday ?? 999));
   const counts = { total: items.length, new: items.filter((i) => i.kind === 'new' || i.kind === 'urgent' || i.kind === 'rebid').length, amend: items.filter((i) => i.kind === 'amend').length, cancel: items.filter((i) => i.kind === 'cancel').length, skipped };
-  return { day, items: items.slice(0, 200), counts, prefs: p };
+  return { day, since: since.toISOString(), items: items.slice(0, 200), counts, prefs: p };
 }
+const seenLabel = (v: string | null | undefined) => { if (!v) return ''; const d = new Date(v); if (Number.isNaN(d.getTime())) return ''; const p = Object.fromEntries(new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d).map((x) => [x.type, x.value])); return `${p.month}/${p.day} ${p.hour}:${p.minute}`; };
 const won = (n: number | null) => (n == null ? '-' : n >= 1e8 ? `${(n / 1e8).toFixed(1)}억` : `${Math.round(n / 1e4).toLocaleString('ko-KR')}만원`);
 export function digestText(company: string, d: Awaited<ReturnType<typeof buildDigest>>) {
-  const line = (i: DigestItem, n: number) => `${n}. ${i.kind === 'cancel' ? '[취소] ' : i.kind === 'amend' ? '[정정] ' : i.kind === 'rebid' ? '[재공고] ' : i.kind === 'urgent' ? '[긴급] ' : ''}${i.title}\n   발주처 ${i.issuer ?? '-'} · 지역 ${i.region ?? '-'} · 추정 ${won(i.estimated)} · 입찰마감 ${i.deadline ?? '-'}${i.dday != null ? ` (D${i.dday >= 0 ? '-' : '+'}${Math.abs(i.dday)})` : ''}${i.participation ? ` · 참가신청 ${i.participation}` : ''}${i.opening ? ` · 개찰 ${i.opening}` : ''}\n   출처 ${i.source}${i.attachments ? ` · 첨부 ${i.attachments}` : ''} · 적합도 ${i.why}\n   ${i.url}`;
+  const line = (i: DigestItem, n: number) => `${n}. ${i.kind === 'cancel' ? '[취소] ' : i.kind === 'amend' ? '[정정] ' : i.kind === 'rebid' ? '[재공고] ' : i.kind === 'urgent' ? '[긴급] ' : ''}${i.late ? `[지난 메일 뒤 ${seenLabel(i.seenAt)} 수집] ` : ''}${i.title}\n   발주처 ${i.issuer ?? '-'} · 지역 ${i.region ?? '-'} · 추정 ${won(i.estimated)} · 입찰마감 ${i.deadline ?? '-'}${i.dday != null ? ` (D${i.dday >= 0 ? '-' : '+'}${Math.abs(i.dday)})` : ''}${i.participation ? ` · 참가신청 ${i.participation}` : ''}${i.opening ? ` · 개찰 ${i.opening}` : ''}\n   출처 ${i.source}${i.attachments ? ` · 첨부 ${i.attachments}` : ''} · 적합도 ${i.why}\n   ${i.url}`;
   const main = d.items.filter((i) => i.kind !== 'cancel' && i.kind !== 'amend'), amend = d.items.filter((i) => i.kind === 'amend'), cancel = d.items.filter((i) => i.kind === 'cancel');
   return [`[워크인 영업실] ${company} ${d.day} 당일 입찰 다이제스트 — 새 공고 ${d.counts.new}건 · 정정 ${d.counts.amend} · 취소 ${d.counts.cancel}`, '',
-    main.length ? ['■ 새 공고', ...main.map(line)].join('\n') : '■ 새 공고: 오늘 들어온 맞춤 공고가 없습니다', amend.length ? ['', '■ 정정 공고', ...amend.map(line)].join('\n') : '', cancel.length ? ['', '■ 취소 공고', ...cancel.map(line)].join('\n') : '', '',
+    main.length ? ['■ 새 공고(지난 메일 뒤 처음 본 공고)', ...main.map(line)].join('\n') : '■ 새 공고: 지난 메일 뒤 들어온 맞춤 공고가 없습니다', amend.length ? ['', '■ 정정 공고', ...amend.map(line)].join('\n') : '', cancel.length ? ['', '■ 취소 공고', ...cancel.map(line)].join('\n') : '', '',
     `전체 보기: ${appUrl()}/s/sales/bids?tab=today · 맞춤 설정: ${appUrl()}/s/sales/sources`, `걸러진 공고: ${Object.entries(d.counts.skipped).map(([k, v]) => `${k} ${v}`).join(' · ') || '없음'}`].filter((x) => x !== '').join('\n');
 }
 /** 보내기(하루 1건, force 면 다시 만들어 덮어쓰고 다시 보냄). 받는 사람: digest_to 또는 영업 공간 대표·관리자 */
