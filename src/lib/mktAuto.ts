@@ -165,8 +165,8 @@ export async function planSlots(tenant: string, days = 14) {
     if (produce.getTime() < Date.now()) produce = new Date();
     const cross = (r.cross_channels ?? []) as string[];
     const title = `${r.test ? '[시험] ' : ''}${r.brand ? brandName({ name: r.brand }) + ' ' : ''}${KIND_LABEL[r.kind as Kind]}${cross.length ? '(함께 ' + cross.map((c) => CROSS_LABEL[c] ?? c).join('·') + ')' : ''} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
-    const ins = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, rule_id, kind, auto, produce_at, is_test, cross_channels)
-      values (${tenant}, ${r.brand_id}, ${title}, ${r.channel}, ${at}, 'draft', 0, ${r.created_by}, ${r.id}, ${r.kind}, true, ${produce}, ${!!r.test}, ${cross})
+    const ins = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, rule_id, kind, auto, produce_at, is_test, cross_channels, mode)
+      values (${tenant}, ${r.brand_id}, ${title}, ${r.channel}, ${at}, 'draft', 0, ${r.created_by}, ${r.id}, ${r.kind}, true, ${produce}, ${!!r.test}, ${cross}, ${r.mode ?? 'content'})
       on conflict (rule_id, scheduled_at) where rule_id is not null do nothing returning id`;
     made += ins.length;
   }
@@ -257,7 +257,7 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
 - 브랜드 이름은 '${m.name || '우리'}' 그대로 씁니다. 제목에 [시험] 같은 표시는 붙이지 않습니다.
 - brief 에는 이미지/영상 제작 지시(실사 사진 + 글자 렌더 우선, 촬영 구도·필요한 사진)를 씁니다.
 - why 에는 '왜 이 글인가'를 한 문장(이달 목표·이번 주 주제와 어떻게 이어지는지)으로 씁니다.
-${Q.hookGuide(hookAt(c.kind))}
+${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}
 - keyword: 검색 키워드 1개(재료의 브랜드·지역·상품에서, 2~12자).${video ? '\n- script: 컷 줄(화면 자막·내레이션) 배열 — 한 컷 2~4초(분당 300음절), 첫 컷은 3초 안, 마지막 컷은 첫 컷과 이어지게(반복 시청).' : ''}
 - 사람이 쓴 글처럼: 상투어(다양한·혁신적인·놓치지 마세요·지금 바로·~해 보는 건 어떨까요)·느낌표/이모지 나열·특수 대시(—)는 쓰지 않고, 문장 길이를 섞습니다.${voice ? `\n${voice}` : ''}`,
     tools: [], messages: [{ role: 'user', content: `[재료]\n${m.text}\n\n` + (extra ? `[지난 원고]\n${extra.prev}\n\n[수정 요청]\n${extra.comment}\n\n수정 요청을 반영해 다시 써 주세요.` : `채널: ${c.channel}\n게시일: ${ymd(new Date(c.scheduled_at))}\n주제: ${m.topic || '재료의 브랜드·상품 소개에서 이번 주에 알릴 만한 것 하나'}`) }],
@@ -279,8 +279,8 @@ async function rewriteHooks(c: any, brand: any, cur: string, prev: string[], why
   await assertMktAi(c.tenant);
   const p = P.anthropicProvider({ tier: 'fast' });
   const r = await p.chat({
-    system: `회사 마케팅 담당 AI 비서입니다. 약한 훅을 다시 씁니다. JSON 만.\n${Q.hookGuide(hookAt(c.kind))}\n- 브랜드 말투: ${brand?.tone || '친절하고 담백하게'}. 재료에 없는 숫자·결과·가격은 쓰지 않습니다.`,
-    tools: [], messages: [{ role: 'user', content: `글 제목: ${c.title}\n지금 훅: ${cur}\n앞서 낸 후보(모두 약함): ${prev.join(' / ') || '(없음)'}\n약한 이유: ${why}\n\n더 구체적이고(숫자·장면·대상) 궁금하게 만드는 훅 3개를 다시 써 주세요.` }],
+    system: `회사 마케팅 담당 AI 비서입니다. 약한 훅을 다시 씁니다. JSON 만.\n${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}\n- 브랜드 말투: ${brand?.tone || '친절하고 담백하게'}. 재료에 없는 숫자·결과·가격은 쓰지 않습니다.`,
+    tools: [], messages: [{ role: 'user', content: `글 제목: ${c.title}\n지금 훅: ${cur}\n앞서 낸 후보(모두 약함): ${prev.join(' / ') || '(없음)'}\n약한 이유: ${why}\n\n${Q.asMode(c.mode) === 'ad' ? '대상을 부르고(○○하는 분) 무엇을 주는지(제안·혜택·가격 — 재료에 있는 것만) 2초 안에 말하는 광고형 훅' : '더 구체적이고(숫자·장면·대상) 궁금하게 만드는 훅'} 3개를 다시 써 주세요.` }],
     format: { type: 'object', additionalProperties: false, required: ['hooks'], properties: { hooks: { type: 'array', items: { type: 'string' } } } },
   });
   await logAi(c, p, r, P);
@@ -297,15 +297,15 @@ async function refineDraft(c: any, d: Draft, brand: any, opt: { keepTitle?: bool
   if (c.channel === 'instagram') { const t = Q.trimHashtags(body, rules.instagram.hashtags); if (t.removed) { body = t.body; notes.push(`해시태그 ${t.removed}개 뺌(최대 ${rules.instagram.hashtags}개)`); } }
   const video = VIDEO_KINDS.includes(c.kind);
   if (video && script.length < 2) script.splice(0, script.length, ...Q.scriptLines(body));
-  const kw = [brandName(brand)].filter(Boolean);
+  const kw = [brandName(brand)].filter(Boolean); const mode = Q.asMode(c.mode); // #499-1 콘텐츠형/광고형 채점 따로
   let hooks = d.hooks;
-  const cur = Q.hookOf(c.kind, title, body, script); const curScore = cur ? Q.scoreHook(cur, rules, kw) : null;
+  const cur = Q.hookOf(c.kind, title, body, script); const curScore = cur ? Q.scoreHook(cur, rules, kw, mode) : null;
   if (cur && curScore && !curScore.pass && hooks.length && !(c.kind === 'blog' && opt.keepTitle)) {
-    let best = hooks.find((h) => h !== cur && Q.scoreHook(h, rules, kw).pass);
+    let best = hooks.find((h) => h !== cur && Q.scoreHook(h, rules, kw, mode).pass);
     if (!best) {
-      const why = [...curScore.fails, ...Object.entries(curScore.parts).filter(([, v]) => !v).map(([k]) => ({ front: '앞부분이 흐림', specific: '구체성(숫자·장면) 없음', stakes: '걸린 것(손해·변화) 없음', callout: '대상 호명 없음', curiosity: '궁금증 없음' } as Record<string, string>)[k])].join(', ');
+      const why = [...curScore.fails, ...(curScore.notes ?? []), ...Object.entries(curScore.parts).filter(([, v]) => !v).map(([k]) => ({ front: '앞부분이 흐림', specific: '구체성(숫자·장면) 없음', stakes: '걸린 것(손해·변화) 없음', callout: '대상 호명 없음', curiosity: '궁금증 없음', offer: '제안(무엇을 주는지) 없음' } as Record<string, string>)[k])].join(', ');
       const more = await rewriteHooks(c, brand, cur, hooks, why).catch(() => [] as string[]);
-      if (more.length) { hooks = more; best = more.find((h) => Q.scoreHook(h, rules, kw).pass); }
+      if (more.length) { hooks = more; best = more.find((h) => Q.scoreHook(h, rules, kw, mode).pass); }
     }
     if (best) {
       if (c.kind === 'blog') title = best;
@@ -313,7 +313,7 @@ async function refineDraft(c: any, d: Draft, brand: any, opt: { keepTitle?: bool
       notes.push(`약한 훅(${curScore.score}점)을 바꿈: '${[...cur].slice(0, 30).join('')}' → '${[...best].slice(0, 30).join('')}'`);
     } else notes.push(`훅 후보가 모두 약함(${curScore.score}점) — 다른 훅으로 수정 요청해 주세요`);
   }
-  const rep = Q.qualityReport({ channel: c.channel, kind: c.kind, title, body, hooks, script, keywords: kw, mainKeyword: d.keyword || null, voice: brand?.voice, cross: c.cross_channels ?? [] }, rules);
+  const rep = Q.qualityReport({ channel: c.channel, kind: c.kind, title, body, hooks, script, keywords: kw, mainKeyword: d.keyword || null, voice: brand?.voice, cross: c.cross_channels ?? [], mode }, rules);
   return { title, body: rep.body, report: { ...rep.report, notes }, errors: rep.report.channel.filter((x) => x.level === 'error').map((x) => x.msg), timing: rep.report.timing ? Q.timingText(rep.report.timing) : '' };
 }
 const bannedOf = (brand: any): string[] => [...(brand?.banned_words ?? []), ...avoidOf(brand?.voice)];
@@ -459,7 +459,7 @@ export async function automationView(u: SessionUser) {
   const sql = db(); const t = tenantOf(u);
   const s = await settingsOf(t);
   const [rules, requests, ledger, brands, people] = await Promise.all([
-    sql`select r.id, r.brand_id, b.name as brand, r.channel, r.kind, r.weekdays, r.post_time, r.topic_hint, r.active, r.interval_days, r.anchor_date::text as anchor_date, r.cross_channels, r.bundle_key, r.skip_weekend from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${t} order by r.created_at`,
+    sql`select r.id, r.brand_id, b.name as brand, r.channel, r.kind, r.weekdays, r.post_time, r.topic_hint, r.active, r.interval_days, r.anchor_date::text as anchor_date, r.cross_channels, r.bundle_key, r.skip_weekend, r.mode from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${t} order by r.created_at`,
     sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, q.brief_id, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
     sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, coalesce(l.title, c.title) as title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
@@ -499,14 +499,16 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
 const ruleBase = z.object({ brandId: zUuid.nullable().optional(), channel: z.enum(['instagram', 'facebook', 'threads', 'blog', 'youtube', 'naver_place', 'other']), kind: z.enum(['feed', 'blog', 'reels', 'video', 'shorts', 'story']),
   weekdays: z.array(nInt(0, 6)).max(7).default([]), postTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), topicHint: z.string().max(300).optional(), active: z.boolean().optional(),
   /** 대표 10/20 6): n일마다(요일 대신)·시작일·같은 글을 함께 올릴 채널 */
-  intervalDays: nInt(1, 30).nullable().optional(), anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), crossChannels: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional(), skipWeekend: z.boolean().optional() })
+  intervalDays: nInt(1, 30).nullable().optional(), anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), crossChannels: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional(), skipWeekend: z.boolean().optional(),
+  /** #499-1 용도: 콘텐츠형(참여) / 광고형(전환) — 훅·구성 안내와 채점이 다름 */
+  mode: z.enum(['content', 'ad']).optional() })
 export const ruleInput = ruleBase.refine((i) => i.intervalDays || i.weekdays.length, { message: '요일을 고르거나 n일마다를 정하세요' });
 export async function createRule(u: SessionUser, i: z.infer<typeof ruleInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const sql = db(); const t = tenantOf(u);
   if (i.brandId && !(await sql`select 1 from mkt_brands where id = ${i.brandId} and tenant = ${t}`).length) throw notFound('브랜드를 찾을 수 없습니다');
-  const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by, interval_days, anchor_date, cross_channels, skip_weekend)
-    values (${t}, ${i.brandId ?? null}, ${i.channel}, ${i.kind}, ${[...new Set(i.weekdays)].sort()}, ${i.postTime}, ${i.topicHint ?? null}, ${i.active ?? true}, ${u.id}, ${i.intervalDays ?? null}, ${i.anchorDate ?? null}, ${(i.crossChannels ?? []).filter((c) => c !== i.channel)}, ${i.skipWeekend ?? false}) returning id`;
+  const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by, interval_days, anchor_date, cross_channels, skip_weekend, mode)
+    values (${t}, ${i.brandId ?? null}, ${i.channel}, ${i.kind}, ${[...new Set(i.weekdays)].sort()}, ${i.postTime}, ${i.topicHint ?? null}, ${i.active ?? true}, ${u.id}, ${i.intervalDays ?? null}, ${i.anchorDate ?? null}, ${(i.crossChannels ?? []).filter((c) => c !== i.channel)}, ${i.skipWeekend ?? false}, ${i.mode ?? 'content'}) returning id`;
   return { id: r.id, planned: await planSlots(t) };
 }
 const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -560,8 +562,10 @@ export async function updateRule(u: SessionUser, id: string, i: z.infer<typeof r
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
   const sql = db();
   const [r] = await sql`update mkt_rules set channel = coalesce(${i.channel ?? null}, channel), kind = coalesce(${i.kind ?? null}, kind), weekdays = coalesce(${i.weekdays ? ([...new Set(i.weekdays)].sort() as number[]) : null}::int[], weekdays), interval_days = coalesce(${i.intervalDays ?? null}, interval_days), anchor_date = coalesce(${i.anchorDate ?? null}, anchor_date),
-    post_time = coalesce(${i.postTime ?? null}, post_time), topic_hint = coalesce(${i.topicHint ?? null}, topic_hint), active = coalesce(${i.active ?? null}, active), skip_weekend = coalesce(${i.skipWeekend ?? null}, skip_weekend) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
+    post_time = coalesce(${i.postTime ?? null}, post_time), topic_hint = coalesce(${i.topicHint ?? null}, topic_hint), active = coalesce(${i.active ?? null}, active), skip_weekend = coalesce(${i.skipWeekend ?? null}, skip_weekend),
+    mode = coalesce(${i.mode ?? null}, mode) where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!r) throw notFound();
+  if (i.mode) await sql`update mkt_contents set mode = ${i.mode} where rule_id = ${id} and tenant = ${tenantOf(u)} and status = 'draft' and produced_at is null`; // 아직 안 만든 칸도 새 용도로
   return { ok: true };
 }
 /** 규칙 지우기: 아직 제작 안 한 초안만 같이 지움(제작된 것·승인 이력은 남김) */
@@ -638,7 +642,7 @@ export async function actContent(u: SessionUser, id: string, i: z.infer<typeof c
     if (!cur?.body?.trim()) throw badRequest('다듬을 본문이 없습니다');
     const Q = await import('./mktQuality');
     const [brand] = c.brand_id ? await sql<any[]>`select voice from mkt_brands where id = ${c.brand_id}` : [];
-    const r = Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body, voice: brand?.voice }, await Q.qualityRules()).report;
+    const r = Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body, voice: brand?.voice, mode: Q.asMode(c.mode) }, await Q.qualityRules()).report;
     const why = [...r.human.issues.filter((x) => !/지움|바꿈/.test(x)), ...(r.hook && !r.hook.pass ? [`첫 줄 훅이 약함(${r.hook.score}점${r.hook.fails.length ? `: ${r.hook.fails.join('·')}` : ''})`] : []), ...r.voice].join(', ');
     const comment = `AI 티 줄이기 — ${why || '문장을 더 사람답게'}. 사실·숫자·가격·브랜드 이름·링크는 그대로 두고, 상투어·과한 느낌표·이모지 나열·특수 대시를 빼고 문장 길이를 섞어 주세요.${r.hook && !r.hook.pass ? ' 첫 줄은 구체적인 숫자·장면·대상으로 다시.' : ''}`;
     return { version: await reviseText(c, comment, `AI로 다듬기(0크레딧)${why ? `: ${why.slice(0, 160)}` : ''}`, 'AI로 다듬기 — 글자', u.id) };

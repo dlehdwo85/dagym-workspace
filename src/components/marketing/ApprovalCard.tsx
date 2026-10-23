@@ -5,6 +5,7 @@ import { VideoDigestButton } from '@/components/VideoDigestButton';
 import { api } from '@/components/client';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { ModeChip } from './ModeToggle';
 
 /** 운영실 화면 명세(OPS_ROOM_SCREEN_SPEC 2-2·5절)에 맞춘 승인 카드·라벨 — 승인함·현황이 같이 씀 */
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', video: '생성 영상', shorts: '쇼츠', story: '스토리' };
@@ -34,7 +35,7 @@ export function whenLabel(at: string | null) {
 /** '10/19(일) 09:00까지 승인하면 18:00 게시' */
 export const deadlineLabel = (deadline: string | null, at: string | null) => deadline && at ? `${whenLabel(deadline).replace(/^(오늘|내일) /, '$1 ')}까지 승인하면 ${hm(at)} 게시` : null;
 
-export type CardContent = { id: string; title: string; channel: string; kind?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null;
+export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null;
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
   auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null } } | null; production?: { kind: string; status: string } | null;
   rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; week?: number | null; qa?: { needsHuman?: boolean; issues?: string[]; notes?: string[] } | null } | null;
@@ -73,6 +74,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
       <div className="flex flex-wrap items-center gap-1.5">
         <BrandChip name={c.brand} color={c.brand_color} />
         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="mkt-channel-label">{channelLabel(c.channel, c.kind)}</span>
+        <ModeChip mode={c.mode} />
         <StatusChip s={late ? 'late' : c.status} />
         <span className="text-[11px] text-ink-3">v{c.current_version}</span>
         {rep?.needsPolish && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-polish-badge" title="사람다움 점수가 기준보다 낮습니다 — 상세에서 [AI로 다듬기]">다듬기 필요{rep.human ? ` · ${rep.human.score}점` : ''}</span>}

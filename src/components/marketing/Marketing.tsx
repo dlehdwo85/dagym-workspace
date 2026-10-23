@@ -14,6 +14,7 @@ import { ProposalCard, BudgetCard } from './Ops';
 import { GoalCard, type Goal } from './Goals';
 import { MetaDraftCard, type MetaPlanRow } from './MetaAuto';
 import { QualityPanel, type QReport } from './QualityPanel';
+import { MODE_HINT, MODE_LABEL, ModeChip, ModeToggle, type Mode } from './ModeToggle';
 
 const C = '#7C3AED';
 export const CHANNELS: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
@@ -79,7 +80,7 @@ export function ApproveRow({ c, canDecide, onDone }: { c: CardContent; canDecide
 
 function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: () => void; date?: string }) {
   const brands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
-  const [f, setF] = useState({ title: '', channel: 'instagram', brandId: '', date: date ?? '', time: '10:00', body: '', cross: [] as string[], purpose: '', metric: '', message: '', why: '' }); // cross: 대표 10/20 '페이스북에도'·'스레드에도'(승인 1건) · purpose~why: 근거(대표 18:00 ①)
+  const [f, setF] = useState({ title: '', channel: 'instagram', brandId: '', date: date ?? '', time: '10:00', body: '', cross: [] as string[], purpose: '', metric: '', message: '', why: '', mode: 'content' as Mode }); // cross: 대표 10/20 '페이스북에도'·'스레드에도'(승인 1건) · purpose~why: 근거(대표 18:00 ①) · mode: #499-1 용도
   const [media, setMedia] = useState<{ id: string; title: string }[]>([]);
   const [ai, setAi] = useState<{ captions: string[]; hashtags: string[] } | null>(null); const [aiBusy, setAiBusy] = useState(false);
   async function draft() {
@@ -91,7 +92,7 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
   async function save(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api('/api/marketing/contents', { body: { title: f.title, channel: f.channel, brandId: f.brandId || null, scheduledAt: f.date ? `${f.date}T${f.time}:00+09:00` : null, body: f.body, mediaIds: media.map((m) => m.id), crossChannels: f.cross,
+      await api('/api/marketing/contents', { body: { title: f.title, channel: f.channel, brandId: f.brandId || null, scheduledAt: f.date ? `${f.date}T${f.time}:00+09:00` : null, body: f.body, mediaIds: media.map((m) => m.id), crossChannels: f.cross, mode: f.mode,
         rationale: { purpose: f.purpose || undefined, metric: f.metric || undefined, message: f.message || undefined, why: f.why || undefined } } });
       toast.ok('승인 대기에 올렸습니다'); onDone(); onClose();
     } catch (er: any) { toast.error(er.message); }
@@ -109,6 +110,8 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
           <Field label="게시일"><input type="date" className={inputCls} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} data-testid="mkt-date" /></Field>
           <Field label="시각"><input type="time" className={inputCls} value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
         </div>
+        {/* #499-1 용도: 콘텐츠형(참여)·광고형(전환) — 첫 줄 훅 채점 기준이 다름 */}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-2" data-testid="mkt-mode"><span className="font-medium text-ink">용도</span><ModeToggle value={f.mode} onChange={(m) => setF({ ...f, mode: m })} testId="mkt-mode-toggle" /><span className="text-ink-3">{MODE_HINT[f.mode]}</span></div>
         <Field label="본문·캡션"><textarea className={inputCls} rows={5} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} data-testid="mkt-body" />
           {/* #95 스레드 500자 한도 — 스레드 채널이거나 '스레드에도' 체크면 글자 수 표시 */}
           {(f.channel === 'threads' || f.cross.includes('threads')) && <span className={cx('mt-1 block text-right text-[11px] tabular-nums', [...f.body].length > 500 ? 'font-semibold text-red-600' : 'text-ink-3')} data-testid="mkt-threads-count">스레드 {[...f.body].length}/500자{[...f.body].length > 500 ? ' — 넘침' : ''}</span>}</Field>
@@ -167,8 +170,8 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   const titleOf = (mid: string) => data.media.find((m: any) => m.id === mid)?.title ?? '자료';
   const targetAccs: { id: string; label: string; channel: string; brand: string | null; shared: boolean }[] = (data.publish?.targets ?? []).flatMap((t: any) => t.accounts.map((a: any) => ({ ...a, channel: t.label })));
   const pickedIds = targetAccs.filter((a) => !(a.id in picked) || picked[a.id]).map((a) => a.id);
-  async function fix(body: { brandId?: string | null; scheduledAt?: string | null }) {
-    try { await api(`/api/marketing/contents/${id}`, { method: 'PATCH', body }); toast.ok('바로잡았습니다'); setFixOpen(false); reload(); onChange(); } catch (e: any) { toast.error(e.message); }
+  async function fix(body: { brandId?: string | null; scheduledAt?: string | null; mode?: Mode }) {
+    try { await api(`/api/marketing/contents/${id}`, { method: 'PATCH', body }); toast.ok(body.mode ? `${MODE_LABEL[body.mode]} 기준으로 다시 채점했습니다` : '바로잡았습니다'); setFixOpen(false); reload(); onChange(); } catch (e: any) { toast.error(e.message); }
   }
   async function act(decision: 'approve' | 'changes' | 'hold') {
     try { await api(`/api/marketing/contents/${id}/decide`, { body: { version: c.current_version, decision, comment: comment || undefined } }); toast.ok({ approve: '승인했습니다', changes: '수정을 요청했습니다', hold: '보류했습니다' }[decision]); setComment(''); reload(); onChange(); } catch (e: any) { toast.error(e.message); reload(); }
@@ -214,7 +217,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
     <Modal open onClose={onClose} title={c.title} wide>
       <div className="space-y-3 text-sm" data-testid="mkt-detail">
         <AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContent} subject={`시안 ${String(c.title).slice(0, 40)}`} compact testId="ai-ask-content" />
-        <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b> · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
+        <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b>{c.mode === 'ad' && <> · <ModeChip mode="ad" /></>} · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
         {data.canDecide && c.status !== 'published' && (fixOpen ? (
           <div className="flex flex-wrap items-end gap-2 rounded-input border border-line p-2 text-xs" data-testid="mkt-fix">
             <label className="grid gap-0.5">브랜드<select className={cx(inputCls, 'h-8 py-0 text-xs')} value={fixBrand} onChange={(e) => setFixBrand(e.target.value)} data-testid="mkt-fix-brand"><option value="">(없음)</option>{(brandsQ.data?.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
@@ -225,6 +228,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         ) : <button type="button" className="text-xs underline text-ink-2" onClick={() => { setFixBrand(c.brand_id ?? ''); setFixAt(c.scheduled_at ? new Date(new Date(c.scheduled_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''); setFixOpen(true); }} data-testid="mkt-fix-open">브랜드·게시 예정 바로잡기</button>)}
         {c.quality?.passed === false && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">{c.auto ? '품질 검사: ' : ''}{c.quality.issues.join(' · ')}</p>}
         {data.qualityReport && <QualityPanel r={data.qualityReport as QReport} channel={c.channel} busy={qBusy}
+          onMode={data.canDecide && c.status !== 'published' ? (m) => fix({ mode: m }) : undefined}
           onPolish={data.canDecide && !['published', 'canceled', 'approved'].includes(c.status) && v?.body ? polish : undefined}
           onPickHook={data.canDecide && !['published', 'canceled'].includes(c.status) && c.kind !== 'blog' && v ? pickHook : undefined} />}
         <WhyBox r={c.rationale} />

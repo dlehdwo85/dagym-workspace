@@ -9,7 +9,7 @@ import { audit, logError } from './log';
 import { tenantOf, type SessionUser } from './types';
 import { metaGraph } from './metaGraph';
 import { RISKY, capOf, guardMoneyUp, monthSpend } from './adOps';
-import { DEFAULT_RULES, checkAd, qualityRules, type QualityRules } from './mktQuality';
+import { DEFAULT_RULES, checkAd, qualityRules, scoreHook, type QualityRules } from './mktQuality';
 import { downloadUrl, getObject } from './storage';
 import { appUrl } from './mail';
 
@@ -82,6 +82,11 @@ export function metaPrecheck(p: MetaPlan, rules: QualityRules = DEFAULT_RULES, t
   const special = SPECIAL_RE.filter(([re]) => re.test(text)).map(([, k]) => k);
   if (special.length) issues.push(`특별 광고 카테고리(${special.join('·')})로 보이는 문구 — Meta 규정상 나이·반경 타깃에 제한이 있어 이 화면에서는 만들지 않습니다. 문구를 바꾸거나 Meta 광고 관리자에서 직접 만들어 주세요`);
   for (const x of checkAd('meta', { primary: c.primary }, rules)) warnings.push(x.msg);
+  // #499-1 광고형 기준(알림만): 본문 첫 줄(더 보기 전에 보이는 줄)·제목 어딘가에 대상 호명·제안이 2초 안에 보이는지
+  const first = String(c.primary ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  const hk = scoreHook(first || c.headline, rules, [], 'ad'); const hd = c.headline ? scoreHook(c.headline, rules, [], 'ad') : null;
+  const miss = [...(hk.parts.callout || hd?.parts.callout ? [] : ['대상 호명(누구에게)']), ...(hk.parts.offer || hd?.parts.offer ? [] : ['제안(무료 진단·체크리스트·실제 가격 등 무엇을 주는지)'])];
+  if (miss.length) warnings.push(`광고형 기준: 본문 첫 줄·제목에 ${miss.join('·')}이 없습니다 — 첫 2초 안에 보이게 넣어 주세요`);
   if ([...c.headline].length > 40) warnings.push(`제목 ${[...c.headline].length}자 — 40자 안쪽이어야 잘리지 않고 보입니다`);
   if (p.objective === 'traffic' && !c.link) issues.push('방문 광고는 연결할 주소(홈페이지·예약 페이지)가 필요합니다');
   if (p.objective === 'leads') {

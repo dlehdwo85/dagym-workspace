@@ -132,9 +132,18 @@ export const HOOK_FORMULAS: [string, string][] = [
   ['공감', '월요일 아침, ○○할 때'], ['추천 순위', '○○ 추천 TOP 3'], ['체크리스트', '○○ 체크리스트 5'], ['비교', '○○ vs △△, 뭐가 나을까'],
   ['손해', '이거 모르면 ○○ 손해'], ['새 소식', '이번 주부터 ○○ 바뀝니다'],
 ];
+/** #499-1(테크트리 EP.12·S1): 목적 — 콘텐츠형(참여: 시청 지속·저장·공유·댓글) / 광고형(전환: 리드·문의 단가). 틀과 훅 채점을 따로 */
+export type HookMode = 'content' | 'ad';
+export const HOOK_MODES: Record<HookMode, string> = { content: '콘텐츠형(참여)', ad: '광고형(전환)' };
+export const asMode = (x: unknown): HookMode => (x === 'ad' ? 'ad' : 'content');
+export const MODE_GUIDE: Record<HookMode, string> = {
+  content: '콘텐츠형(참여): 첫 줄은 질문·공감·이야기로 — 가격·할인·신청 같은 판매 문구로 시작하지 않습니다. 구조: 이야기 → 반전 → 비교 → 자문자답 → 마지막에 행동 1개(저장·댓글 키워드). 성공 기준은 시청 지속·저장·공유·댓글.',
+  ad: '광고형(전환): 첫 줄 2초 안에 대상·상황을 부르고(○○하는 분·○○ 앞둔 단지) 무엇을 주는지(무료 진단·체크리스트·제안서·실제 가격) 말합니다. 구조: 지목 → 제안 → 문제 한 줄 → 장점 2~3개 → 행동 1개. 제안·가격·혜택은 재료에 있는 것만. 성공 기준은 리드·문의 단가.',
+};
 /** AI 지시문에 넣는 훅 안내 */
-export const hookGuide = (where: string) => `- hooks: ${where}에 쓸 훅 후보 3개(서로 다른 공식, 30자 안팎). 공식: ${HOOK_FORMULAS.map(([n, ex]) => `${n}(${ex})`).join(' · ')}.
-  인사로 시작·"스크롤 멈추세요"류·"오늘은 ~를 소개합니다" 같은 내용 없는 서두 금지. 숫자·결과·가격은 재료에 있는 것만. 가장 좋은 훅을 본문 첫 줄(제목·첫 장면)에 씁니다.`;
+export const hookGuide = (where: string, mode: HookMode = 'content') => `- hooks: ${where}에 쓸 훅 후보 3개(서로 다른 공식, 30자 안팎). 공식: ${HOOK_FORMULAS.map(([n, ex]) => `${n}(${ex})`).join(' · ')}.
+  인사로 시작·"스크롤 멈추세요"류·"오늘은 ~를 소개합니다" 같은 내용 없는 서두 금지. 숫자·결과·가격은 재료에 있는 것만. 가장 좋은 훅을 본문 첫 줄(제목·첫 장면)에 씁니다.
+- 목적 ${MODE_GUIDE[mode]}`;
 const GREETING = /^(?:안녕하세요|안녕|반갑습니다|여러분\s?안녕)/;
 const FILLER = /^(?:여러분|오늘은|오늘도|이번에는|자,|음,|혹시\s?아시나요)/;
 const SCROLL_STOP = /스크롤\s?(?:을\s?)?(?:멈추|멈춰|내리지)|잠깐만요|주목해\s?주세요|이거\s?(?:꼭\s?)?보세요/;
@@ -143,12 +152,16 @@ const VAGUE = /다양한|여러\s?가지|많은|좋은|특별한|최고의|놀�
 const NUM_WORD = /\d|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s?(?:가지|개|명|번|분|시간|일|주|달|개월|살|곳|단계)/;
 const UNIT = /\d+(?:[.,]\d+)?\s?(?:%|가지|개|명|번|분|초|시간|일|주|개월|달|년|살|원|만\s?원|kg|km|cm|곳|단계|배|층|평|회|세트|TOP)/i;
 const STAKES = /손해|실수|놓치면|망치|후회|아끼|절약|줄이|줄어|늘리|늘어|효과|결과|차이|비용|돈|위험|주의|경고|몰랐|바뀌|달라지|변화|살\s?빠|건강|통증|매출|문의|예약/;
-const CALLOUT = /이라면|라면|하는\s?분|인\s?분|분들|분께|사장님|직장인|초보|입문|\d+대|엄마|아빠|부모|학생|주부|대표님|원장님|회원님|고객님|러너|헬린이|입주민|자영업/;
+const CALLOUT = /이라면|라면|하는\s?분|인\s?분|신\s?분|분들|분께|사장님|직장인|초보|입문|\d+대|엄마|아빠|부모|학생|주부|대표님|원장님|회원님|고객님|러너|헬린이|입주민|자영업|앞둔|소장님|관리사무소|입주자\s?대표/; // #499-1 '처음이신 분'·'공사 앞둔 단지'·'관리소장님'
 const CURIOUS = /\?|사실|진짜|의외|아무도|몰랐|비밀|반전|하지만|대신|왜|이유|끝까지|공개|처음|정체|숨은|모르는|vs/i;
 const OPEN_LOOP = /(?:것|이유|방법|차이|비밀|정체|결과|순간|한\s?가지|단\s?하나)\s*[.!?…]*$/;
-export type HookScore = { text: string; score: number; pass: boolean; parts: { front: number; specific: number; stakes: number; callout: number; curiosity: number }; fails: string[] };
-/** 점수 5항목 × 20(앞부분 집중·구체성·걸린 것·대상 호명·궁금증) − 상투어. 탈락 사유가 있으면 20점 이하 */
-export function scoreHook(raw: string, rules: QualityRules = DEFAULT_RULES, keywords: string[] = []): HookScore {
+/** 광고형 '제안'(무엇을 주는가) · 콘텐츠형 '처음부터 판다'(앞 12자 안 판매 문구) */
+const OFFER = /무료|할인|\d+\s?%|\d[\d,]*\s?(?:만\s?)?원|체험|상담|진단|견적|제안서|체크리스트|시연|이벤트|혜택|쿠폰|증정|드려요|드립니다|받아\s?가|받으세요|신청|예약|오픈|출시|모집|1\s?\+\s?1/;
+const SALES_EARLY = /^[^.!?\n]{0,12}(?:할인|특가|이벤트|구매|주문|\d[\d,]*\s?(?:만\s?)?원|지금\s?(?:바로\s?)?(?:신청|예약|구매|문의|상담)|선착순|마감\s?임박)/;
+export type HookScore = { text: string; score: number; pass: boolean; parts: Record<string, number>; fails: string[]; mode?: HookMode; notes?: string[] };
+/** 콘텐츠형: 5항목 × 20(앞부분 집중·구체성·걸린 것·대상 호명·궁금증) − 상투어 − '처음부터 판다' 15.
+ * 광고형(#499-1): 앞부분 20·대상 호명 25·제안 25·구체성 15·걸린 것 15 — 궁금증 대신 '누구에게 무엇을'. 탈락 사유가 있으면 20점 이하 */
+export function scoreHook(raw: string, rules: QualityRules = DEFAULT_RULES, keywords: string[] = [], mode: HookMode = 'content'): HookScore {
   const text = String(raw ?? '').replace(INVISIBLE, '').trim(); const n = len(text);
   const fails: string[] = [];
   if (!text) fails.push('훅 없음');
@@ -159,12 +172,20 @@ export function scoreHook(raw: string, rules: QualityRules = DEFAULT_RULES, keyw
   if (n > 80) fails.push('훅이 너무 김(80자 초과)');
   const kw = keywords.map((k) => k.trim()).filter((k) => len(k) >= 2);
   const front = !text || GREETING.test(text) || FILLER.test(text) || EMPTY_OPEN.test(text) ? 0 : n <= 30 ? 20 : n <= 45 ? 12 : 5;
-  const specific = UNIT.test(text) ? 20 : NUM_WORD.test(text) ? 15 : kw.some((k) => text.includes(k)) ? 10 : VAGUE.test(text) ? 0 : 5;
-  const parts = { front, specific, stakes: STAKES.test(text) ? 20 : 0, callout: CALLOUT.test(text) ? 20 : 0, curiosity: CURIOUS.test(text) || OPEN_LOOP.test(text) ? 20 : 0 };
-  const cl = CLICHES.filter(([re]) => re.test(text)).length;
-  let score = Math.max(0, Math.min(100, Object.values(parts).reduce((a, b) => a + b, 0) - cl * 10));
+  const spec = UNIT.test(text) ? 4 : NUM_WORD.test(text) ? 3 : kw.some((k) => text.includes(k)) ? 2 : VAGUE.test(text) ? 0 : 1; // 4단계 → 항목 배점에 맞춤
+  const notes: string[] = []; let pen = CLICHES.filter(([re]) => re.test(text)).length * 10;
+  let parts: Record<string, number>;
+  if (mode === 'ad') {
+    parts = { front, callout: CALLOUT.test(text) ? 25 : 0, offer: OFFER.test(text) ? 25 : 0, specific: [0, 4, 8, 11, 15][spec], stakes: STAKES.test(text) ? 15 : 0 };
+    if (!parts.offer) notes.push('제안이 없음 — 광고형은 무엇을 주는지(무료 진단·체크리스트·제안서·실제 가격)를 2초 안에');
+    if (!parts.callout) notes.push('대상 호명이 없음 — 누구에게(○○하는 분·○○ 앞둔 단지)');
+  } else {
+    parts = { front, specific: [0, 5, 10, 15, 20][spec], stakes: STAKES.test(text) ? 20 : 0, callout: CALLOUT.test(text) ? 20 : 0, curiosity: CURIOUS.test(text) || OPEN_LOOP.test(text) ? 20 : 0 };
+    if (SALES_EARLY.test(text)) { pen += 15; notes.push('처음부터 판다(가격·할인·신청) — 콘텐츠형은 질문·공감·이야기로 시작'); }
+  }
+  let score = Math.max(0, Math.min(100, Object.values(parts).reduce((a, b) => a + b, 0) - pen));
   if (fails.length) score = Math.min(score, 20);
-  return { text, score, pass: !fails.length && score >= rules.hook.min, parts, fails };
+  return { text, score, pass: !fails.length && score >= rules.hook.min, parts, fails, mode, notes };
 }
 
 // ---------------- ② 대본 → 초 단위 구성표 ----------------
@@ -185,7 +206,11 @@ export function syllables(line: string) {
 export type Timing = { rows: { line: string; from: number; to: number; sec: number; over?: boolean }[]; total: number; warnings: string[] };
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const stems = (t: string) => new Set((t.match(/[가-힣A-Za-z0-9]{2,}/g) ?? []).map((w) => w.slice(0, 2)));
-export function scriptTiming(script: string[], rules: QualityRules = DEFAULT_RULES): Timing {
+/** 광고형 마지막 장면 = 행동 1개(신청·문의·상담·예약·받기 등) */
+const ACTION = /신청|문의|상담|예약|받아|받기|받으세요|클릭|링크|프로필|전화|DM|메시지|방문|구독|저장|댓글|확인해\s?보세요|시작하세요|들러/;
+/** #499-1 광고형 영상 길이 제안값 15초 — 20초를 넘으면 경고 */
+export const AD_MAX_SEC = 20;
+export function scriptTiming(script: string[], rules: QualityRules = DEFAULT_RULES, mode: HookMode = 'content'): Timing {
   const per = rules.script.syllPerMin / 60; let at = 0;
   const rows = script.map((line, k) => {
     const pause = (line.match(/,/g) ?? []).length * 0.15 + (line.match(/[.!?…]/g) ?? []).length * 0.25;
@@ -196,11 +221,14 @@ export function scriptTiming(script: string[], rules: QualityRules = DEFAULT_RUL
   rows.forEach((r, k) => { if (k > 0 && r.sec > rules.script.sceneMaxSec) warnings.push(`${k + 1}번째 장면 ${r.sec}초 — ${rules.script.sceneMaxSec}초 넘으면 이탈 구간(둘로 나누기)`); });
   const vague = (l: string) => !NUM_WORD.test(l) && (VAGUE.test(l) || CLICHES.some(([re]) => re.test(l)));
   for (let k = 1; k < rows.length; k++) if (vague(rows[k - 1].line) && vague(rows[k].line)) { warnings.push(`${k}~${k + 1}번째 장면이 연달아 막연함(숫자·장면 없이 '다양한·좋은')`); break; }
-  if (rows.length >= 3) {
+  if (mode === 'ad') { // 광고형: 끝은 반복 고리 대신 행동 1개, 15초 안팎
+    if (rows.length >= 2 && !ACTION.test(rows[rows.length - 1].line)) warnings.push('광고형 마지막 장면에 행동 1개(신청·문의·상담·예약 등)를 넣으세요');
+  } else if (rows.length >= 3) {
     const a = stems(rows[0].line); const z = rows[rows.length - 1].line;
     if (![...stems(z)].some((w) => a.has(w)) && !/처음|다시|그래서|그러니까|이게\s?바로|\?/.test(z)) warnings.push('마지막 장면이 첫 장면과 이어지지 않음 — 반복 시청 고리(첫 말로 돌아가기)를 넣으세요');
   }
-  if (total > rules.script.maxTotalSec) warnings.push(`전체 ${total}초 — ${rules.script.maxTotalSec}초를 넘음`);
+  const max = mode === 'ad' ? Math.min(rules.script.maxTotalSec, AD_MAX_SEC) : rules.script.maxTotalSec;
+  if (total > max) warnings.push(mode === 'ad' ? `전체 ${total}초 — 광고형은 15초 안팎(${max}초 넘음)` : `전체 ${total}초 — ${max}초를 넘음`);
   return { rows, total, warnings };
 }
 /** Higgsfield·제작 요청 카드에 넘기는 장면표 한 덩어리 */
@@ -316,9 +344,10 @@ export function hookOf(kind: string | null | undefined, title: string, body: str
 }
 export type QualityReportData = {
   v?: number; human: { score: number; pass: boolean; issues: string[] }; needsPolish: boolean; hook: HookScore | null; hooks: HookScore[];
-  channel: ChannelIssue[]; preview: string | null; timing: Timing | null; voice: string[]; keyword?: string | null;
+  channel: ChannelIssue[]; preview: string | null; timing: Timing | null; voice: string[]; keyword?: string | null; mode?: HookMode;
 };
-export function qualityReport(i: { channel: string; kind?: string | null; title?: string; body: string; hooks?: string[]; script?: string[]; keywords?: string[]; mainKeyword?: string | null; voice?: Partial<Voice> | null; cross?: string[] }, rules: QualityRules = DEFAULT_RULES): { body: string; report: QualityReportData } {
+export function qualityReport(i: { channel: string; kind?: string | null; title?: string; body: string; hooks?: string[]; script?: string[]; keywords?: string[]; mainKeyword?: string | null; voice?: Partial<Voice> | null; cross?: string[]; mode?: HookMode | null }, rules: QualityRules = DEFAULT_RULES): { body: string; report: QualityReportData } {
+  const mode: HookMode = i.mode === 'ad' ? 'ad' : 'content';
   const kind = i.kind ?? null; const h = humanize(i.body, rules); const title = String(i.title ?? '').replace(/^\s*\[시험\]\s*/, '');
   const script = i.script?.filter((x) => String(x ?? '').trim()).map((x) => String(x).trim()) ?? [];
   const sc = script.length >= 2 ? script : kind && VIDEO.has(kind) ? scriptLines(h.text) : [];
@@ -328,9 +357,9 @@ export function qualityReport(i: { channel: string; kind?: string | null; title?
   // '스레드에도'·'페이스북에도' 같이 올리는 채널은 막는 문제(error)만
   for (const x of (i.cross ?? []).filter((c) => c !== i.channel)) for (const e of checkChannel(x, kind, { title, body: h.text }, rules).issues) if (e.level === 'error') ch.issues.push({ level: 'error', msg: `${x === 'threads' ? '스레드' : x === 'facebook' ? '페이스북' : x}: ${e.msg}` });
   return { body: h.text, report: {
-    human: { score: h.score, pass: h.pass, issues: h.issues }, needsPolish: !h.pass, hook: hookText ? scoreHook(hookText, rules, keywords) : null,
-    hooks: (i.hooks ?? []).map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 3).map((x) => scoreHook(x, rules, keywords)),
-    channel: ch.issues, preview: ch.preview, timing: sc.length >= 2 ? scriptTiming(sc, rules) : null, voice: voiceIssues(h.text, i.voice), keyword: i.mainKeyword ?? null,
+    human: { score: h.score, pass: h.pass, issues: h.issues }, needsPolish: !h.pass, hook: hookText ? scoreHook(hookText, rules, keywords, mode) : null,
+    hooks: (i.hooks ?? []).map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 3).map((x) => scoreHook(x, rules, keywords, mode)),
+    channel: ch.issues, preview: ch.preview, timing: sc.length >= 2 ? scriptTiming(sc, rules, mode) : null, voice: voiceIssues(h.text, i.voice), keyword: i.mainKeyword ?? null, mode,
   } };
 }
 
@@ -338,7 +367,7 @@ export function qualityReport(i: { channel: string; kind?: string | null; title?
 export const checkInput = z.object({
   channel: z.enum(['instagram', 'facebook', 'threads', 'blog', 'youtube', 'naver_place', 'other']), kind: z.enum(['feed', 'blog', 'reels', 'video', 'shorts', 'story']).nullable().optional(),
   title: z.string().max(300).default(''), body: z.string().max(20000).default(''), hooks: z.array(z.string().max(200)).max(5).optional(), script: z.array(z.string().max(300)).max(20).optional(),
-  keyword: z.string().trim().max(40).optional(), brandId: z.string().uuid().nullable().optional(), cross: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional(),
+  keyword: z.string().trim().max(40).optional(), brandId: z.string().uuid().nullable().optional(), cross: z.array(z.enum(['instagram', 'facebook', 'threads'])).max(3).optional(), mode: z.enum(['content', 'ad']).optional(),
   ad: z.object({ platform: z.enum(['google', 'naver', 'meta']), headline: z.string().max(200).optional(), description: z.string().max(500).optional(), primary: z.string().max(3000).optional() }).optional(),
 });
 export async function checkQuality(u: SessionUser, i: z.infer<typeof checkInput>) {
@@ -347,7 +376,7 @@ export async function checkQuality(u: SessionUser, i: z.infer<typeof checkInput>
   const [brand] = i.brandId ? await db()<{ name: string; voice: Partial<Voice> }[]>`select name, voice from mkt_brands where id = ${i.brandId} and tenant = ${tenantOf(u)}` : [];
   if (i.brandId && !brand) throw notFound('브랜드를 찾을 수 없습니다');
   const name = String(brand?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
-  const r = qualityReport({ channel: i.channel, kind: i.kind ?? null, title: i.title, body: i.body, hooks: i.hooks, script: i.script, keywords: name ? [name] : [], mainKeyword: i.keyword || null, voice: brand?.voice, cross: i.cross }, rules);
-  const ad = i.ad ? { issues: checkAd(i.ad.platform, i.ad, rules), hook: i.ad.headline ? scoreHook(i.ad.headline, rules) : null } : null;
+  const r = qualityReport({ channel: i.channel, kind: i.kind ?? null, title: i.title, body: i.body, hooks: i.hooks, script: i.script, keywords: name ? [name] : [], mainKeyword: i.keyword || null, voice: brand?.voice, cross: i.cross, mode: i.mode }, rules);
+  const ad = i.ad ? { issues: checkAd(i.ad.platform, i.ad, rules), hook: i.ad.headline ? scoreHook(i.ad.headline, rules, name ? [name] : [], 'ad') : null } : null; // 광고 제목 = 늘 광고형 기준
   return { cleaned: r.body, ...r.report, ad, thresholds: { hook: rules.hook.min, human: rules.human.min } };
 }

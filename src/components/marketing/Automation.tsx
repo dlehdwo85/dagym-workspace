@@ -9,6 +9,7 @@ import { BrandVideoKit } from './BrandVideoKit';
 import { MediaPick } from './MediaPick';
 import { Studio } from './Studio';
 import { BrandVoice, type Voice } from './BrandVoice';
+import { MODE_HINT, ModeChip, ModeToggle, asMode, type Mode } from './ModeToggle';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
@@ -31,7 +32,7 @@ export function Automation() {
   const tab = useSearchParams().get('tab') === 'studio' ? 'studio' : 'rules'; // 대표 10/20 19:00: '제작의뢰실' 탭
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 고르기 없음
-  const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '' });
+  const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '', mode: 'content' as Mode });
   // 로컬 10/20 보완: 묶음은 n일마다(+주말 건너뛰기) 또는 요일 지정(월·수·금), 종류별 시각 한 번에
   const [bundle, setBundle] = useState({ brandId: '', mode: 'interval' as 'interval' | 'weekdays', intervalDays: 3, skipWeekend: false /* 대표 15:40: 기본 끔 */, weekdays: [1, 3, 5] as number[], startDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), times: { ...BUNDLE_TIMES } });
   async function addBundle(e: React.FormEvent) {
@@ -150,7 +151,9 @@ export function Automation() {
         <ul className="mt-2 divide-y divide-line text-sm">{data.rules.map((r) => (
           <li key={r.id} className={cx('flex flex-wrap items-center gap-2 py-2', !r.active && 'opacity-50')} data-testid="auto-rule">
             <span className="font-medium">{r.brand ?? '브랜드 없음'}</span><span className="text-xs text-ink-2">{CHANNELS[r.channel as keyof typeof CHANNELS]}{(r.cross_channels ?? []).length ? `+${(r.cross_channels as string[]).map((c) => CROSS[c] ?? c).join('·')}` : ''} · {KIND[r.kind]} · {r.interval_days ? `${r.interval_days}일마다(${r.anchor_date ?? ''}부터${r.skip_weekend ? '·주말 건너뜀' : ''})` : (r.weekdays as number[]).map((d) => DOW[d]).join('·')} {r.post_time}{r.topic_hint ? ` · ${r.topic_hint}` : ''}{r.bundle_key && <span className="ml-1 rounded-full bg-violet-50 px-1.5 text-[10px] text-violet-700">묶음</span>}</span>
-            {ed && <span className="ml-auto flex gap-1.5"><Button size="sm" variant="secondary" onClick={async () => { await api(`/api/marketing/auto/rules/${r.id}`, { method: 'PATCH', body: { active: !r.active } }); reload(); }}>{r.active ? '멈춤' : '켜기'}</Button>
+            {!ed && <ModeChip mode={r.mode} />}
+            {ed && <span className="ml-auto flex flex-wrap items-center gap-1.5"><ModeToggle value={asMode(r.mode)} testId="auto-rule-row-mode" onChange={async (m) => { try { await api(`/api/marketing/auto/rules/${r.id}`, { method: 'PATCH', body: { mode: m } }); toast.ok(m === 'ad' ? '광고형으로 — 아직 안 만든 칸도 광고형으로 만듭니다' : '콘텐츠형으로 — 아직 안 만든 칸도 콘텐츠형으로 만듭니다'); reload(); } catch (e: any) { toast.error(e.message); } }} />
+              <Button size="sm" variant="secondary" onClick={async () => { await api(`/api/marketing/auto/rules/${r.id}`, { method: 'PATCH', body: { active: !r.active } }); reload(); }}>{r.active ? '멈춤' : '켜기'}</Button>
               <Button size="sm" variant="secondary" onClick={async () => { if (!confirm('규칙을 지울까요? 아직 제작 안 한 칸도 같이 지워집니다.')) return; await api(`/api/marketing/auto/rules/${r.id}`, { method: 'DELETE' }); reload(); }}>지우기</Button></span>}
           </li>))}{!data.rules.length && <li className="py-2 text-xs text-ink-3">규칙이 없습니다 — 예: 인스타그램 피드 화·목 10:00</li>}</ul>
         {ed && <form onSubmit={addRule} className="mt-3 grid gap-2 sm:grid-cols-6" data-testid="auto-rule-form">
@@ -162,6 +165,8 @@ export function Automation() {
           <input type="time" className={inputCls} value={rule.postTime} onChange={(e) => setRule({ ...rule, postTime: e.target.value })} aria-label="게시 시각" />
           <Button type="submit" disabled={!rule.weekdays.length} data-testid="auto-rule-add">규칙 추가</Button>
           <input className={cx(inputCls, 'sm:col-span-6')} value={rule.topicHint} onChange={(e) => setRule({ ...rule, topicHint: e.target.value })} placeholder="주제 힌트(선택) — 예: 신규 회원 이벤트, 시설 소개" aria-label="주제 힌트" />
+          {/* #499-1 용도: 콘텐츠형(참여)·광고형(전환) — AI 가 쓰는 첫 줄·구성과 훅 채점이 다름 */}
+          <span className="flex flex-wrap items-center gap-2 text-xs text-ink-2 sm:col-span-6"><span className="font-medium text-ink">용도</span><ModeToggle value={rule.mode} onChange={(m) => setRule({ ...rule, mode: m })} testId="auto-rule-mode" /><span className="text-ink-3">{MODE_HINT[rule.mode]}</span></span>
         </form>}
       </section>
 
