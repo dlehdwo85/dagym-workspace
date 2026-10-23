@@ -6,7 +6,7 @@ import { useSalesTerms } from '@/components/session';
 import { PortalApplyLink, portalService } from './PortalApply';
 
 type Run = { id: number; slug: string; trigger: string; started_at: string; finished_at: string | null; status: string; inserted: number; updated: number; unchanged: number; errors: number; summary: string | null; error_log: string | null };
-type C = { slug: string; label: string; hourKst: number; againKst?: number | null; source: string; bid: boolean; support?: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null };
+type C = { slug: string; label: string; hourKst: number; againKst?: number | number[] | null; hours?: number[]; source: string; bid: boolean; support?: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null };
 type Data = { canEdit: boolean; platformAdmin: boolean; counts: Record<string, number>; collectors: C[]; runs: Run[] };
 const ST: Record<string, [string, string]> = { success: ['성공', 'bg-emerald-50 text-emerald-800'], partial: ['일부', 'bg-amber-50 text-amber-800'], failed: ['실패', 'bg-red-50 text-red-800'], running: ['실행 중', 'bg-blue-50 text-blue-800'], skipped: ['건너뜀', 'bg-slate-100 text-ink-3'] };
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
@@ -33,7 +33,7 @@ export function Collectors() {
             {st && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', st[1])} data-testid="sales-collector-status">{st[0]}</span>}
             {missing.length > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">키 필요: {missing.map((m) => m.key).join(', ')}</span>}
             {!c.globalEnabled && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-3">플랫폼에서 꺼짐</span>}
-            <span className="text-xs text-ink-3">{c.hourKst.toString().padStart(2, '0')}:00{c.againKst != null ? `·${c.againKst.toString().padStart(2, '0')}:00` : ''} · {c.lastRunAt ? `마지막 ${fmtDateTime(c.lastRunAt)}` : '아직 안 돌음'}</span>
+            <span className="text-xs text-ink-3">{(c.hours ?? [c.hourKst]).map((h) => `${String(h).padStart(2, '0')}:00`).join('·')} · {c.lastRunAt ? `마지막 ${fmtDateTime(c.lastRunAt)}` : '아직 안 돌음'}</span>
             <span className="ml-auto flex items-center gap-1.5">
               {data.canEdit && <Button size="sm" variant="secondary" onClick={() => run(c)} disabled={busy === c.slug || !c.globalEnabled} data-testid="sales-collector-run">{busy === c.slug ? '수집 중…' : '지금 수집'}</Button>}
               {data.canEdit && <label className={cx('inline-flex min-h-[32px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium', c.enabled ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-line bg-white text-ink-3')}><input type="checkbox" className="size-4 accent-brand-600" checked={c.enabled} onChange={() => toggle(c, 'tenant')} aria-label={`${c.label} 사용`} data-testid="sales-collector-toggle" />{c.enabled ? '사용 중' : '사용 안 함'}</label>}

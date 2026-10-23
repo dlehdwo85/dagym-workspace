@@ -18,7 +18,8 @@ before(async () => {
   await put('default', 'opportunity_work', { id: 'W1', notice_id: '11', status: '검토 중', lead_id: 'L1' });
   // S1-3(로컬 10/20): 감사에 적힌 원본 실제 칸 이름으로 심음 — source_type(9값)·fit_business·household_count·notice_type·winner_amount
   await put('global', 'procurement_notices', { id: 11, title: '체육시설 위탁운영', issuer: '성남시', related: true, first_seen_at: today, created_at: today, deadline_at: `${plus(5)}T10:00:00`, current_status: '공고중', fit_score: 82, source_type: 'g2b_bid', fit_business: 'dagym', household_count: 500, notice_type: '용역' });
-  // 영업관리 기준(10/19): 신규 판단은 first_seen_at 하나만 — 공고일·created_at 이 오늘이어도 first_seen 이 30일 전이면 새 공고 아님
+  // 영업관리 기준(10/19): 신규 판단은 first_seen_at — 공고일·created_at 이 오늘이어도 first_seen 이 30일 전이면 '최근 7일 새 공고'가 아님
+  // #476 b(로컬 10/23): '오늘' 탭 = 공고일 오늘 OR 처음 본 날 오늘 → 공고일이 오늘이 된 옛 공고(정정·재공고)는 '공고일 오늘·M/D 처음 수집' 배지로 오늘 탭에
   await put('global', 'procurement_notices', { id: 14, title: '예전 공고(first_seen 30일 전)', related: true, first_seen_at: `${plus(-30)}T01:00:00+09:00`, notice_date: today, created_at: today, deadline_at: `${plus(3)}T10:00:00`, current_status: '공고중' });
   await put('global', 'procurement_notices', { id: 13, title: '낙찰된 공고', related: true, first_seen_at: plus(-30), deadline_at: `${plus(-10)}T10:00:00`, current_status: '낙찰', source_type: 'kapt_bid', winner_name: '좋은업체', winner_amount: 123000000 });
   await put('global', 'procurement_notices', { id: 19, title: '협력사 모집 공고', related: true, first_seen_at: plus(-1), deadline_at: `${plus(12)}T10:00:00`, current_status: '공고중', source_type: 'vendor_recruit', fit_business: 'both' });
@@ -46,9 +47,10 @@ test('영업 공간 화면', async () => {
   const s = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
   assert.equal(s.readOnly, true); assert.equal(s.imported, true);
   assert.deepEqual([s.kpi.leads, s.kpi.dueSoon, s.kpi.overdue, s.kpi.bidsWorking, s.kpi.relatedNotices, s.kpi.newNotices7d], [4, 1, 1, 1, 8, 1], JSON.stringify(s.kpi));
-  assert.equal(s.today.newNotices, 1, '오늘 새 공고 = first_seen_at 이 오늘(KST)');
+  assert.equal(s.today.newNotices, 2, '오늘 새 공고 = 오늘 탭과 같은 기준(처음 본 날 오늘 + 공고일 오늘)');
   assert.equal(s.today.date, today); assert.equal(s.bidsOn, true);
-  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today')).items.map((n) => n.title), ['체육시설 위탁운영']);
+  const todayTab = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today')).items;
+  assert.deepEqual(todayTab.map((n) => [n.title, n.todayLabel]), [['체육시설 위탁운영', null], ['예전 공고(first_seen 30일 전)', `공고일 오늘·${Number(plus(-30).slice(5, 7))}/${Number(plus(-30).slice(8, 10))} 처음 수집`]]);
   assert.deepEqual(s.due.map((l) => l.name), ['판교 피트니스'], '다가오는 연락 = 오늘~7일');
   assert.deepEqual(s.overdueList.map((l) => l.name), ['강남 커뮤니티'], '지남 = 종결 제외');
   assert.equal(s.statuses[0][0], '미팅예정', '11단계 순서');
