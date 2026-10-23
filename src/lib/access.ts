@@ -83,6 +83,7 @@ export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null)
       -- 대표 10/20 4): '팀 업무 보기' 전체(team_tasks_all) 또는 지정 팀(team_view_grants) — 격리 팀원은 자기 팀만(넓어지지 않음)
       or (not ${isolatedSql(sql, u)} and (${menuLevelSql(sql, u, 'team_tasks_all', dAll)} <> 'none' or t.team_id in (select g.team_id from team_view_grants g where g.user_id = ${u.id})))))
     or t.assignee_id = ${u.id}
+    or exists (select 1 from task_assignees tas where tas.task_id = t.id and tas.user_id = ${u.id})
     or t.created_by = ${u.id}
     or ${leadOfInvolvedSql(sql, u)}
     or t.requested_by = ${u.id}
@@ -101,7 +102,8 @@ export function leadOfInvolvedSql(sql: Sql, u: SessionUser) {
     with recursive lt as (
       select lm.team_id as id from team_members lm join teams lt0 on lt0.id = lm.team_id where lm.user_id = ${u.id} and lm.is_lead and not lt0.archived and lt0.tenant = ${tenantOf(u)}
       union select c.id from teams c join lt on c.parent_id = lt.id where not c.archived
-    ) select 1 from team_members pm where pm.team_id in (select id from lt) and pm.user_id in (t.assignee_id, t.requested_by))`;
+    ) select 1 from team_members pm where pm.team_id in (select id from lt) and (pm.user_id in (t.assignee_id, t.requested_by)
+      or exists (select 1 from task_assignees lta where lta.task_id = t.id and lta.user_id = pm.user_id)))`;
 }
 /** R-16: 내가 속한 팀의 하위 팀들(자식·손자…) — 상위 팀 구성원은 하위 팀 업무 전체 권한 */
 export function subTeamsSql(sql: Sql, u: SessionUser) {
@@ -143,6 +145,8 @@ export interface TaskPerms {
   edit: boolean; // 내용·일정·담당자 변경
   approve: boolean; // 최종 완료 확인
   delete: boolean;
+  /** #475 공동 담당(주 담당 외) — 보기·내용 수정·'내 몫 완료' */
+  co?: boolean;
 }
 
 export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db()): Promise<TaskPerms> {
@@ -155,11 +159,12 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
   const isApprover = (await sql`select 1 from task_approvals a where a.task_id = ${t.id} and (a.approver_user_id = ${u.id} or a.decided_by = ${u.id}
       or exists (select 1 from user_settings s where s.user_id = a.approver_user_id and s.away_deputy_id = ${u.id} and s.away_from <= ${today} and s.away_to >= ${today})) limit 1`).length > 0;
-  const involved = t.assignee_id === u.id || t.created_by === u.id || isCollab || (!!t.requested_by && t.requested_by === u.id) || isApprover;
+  const isCo = t.assignee_id !== u.id && (await sql`select 1 from task_assignees where task_id = ${t.id} and user_id = ${u.id}`).length > 0; // #475 공동 담당
+  const involved = t.assignee_id === u.id || isCo || t.created_by === u.id || isCollab || (!!t.requested_by && t.requested_by === u.id) || isApprover;
   // V14 50(대표 결정): 내용·일정 수정 = 요청자(없으면 만든 사람)·담당자 2명만(대표·관리자·협업자·같은 팀은 보기·댓글·첨부 올리기만),
   // 담당자 변경·삭제 = 요청자만, 상태·검토 승인은 tasks.updateTask 에서 담당자(검토는 검토 담당자)만
   const requester = t.requested_by ?? t.created_by;
-  const edit = t.assignee_id === u.id || requester === u.id;
+  const edit = t.assignee_id === u.id || isCo || requester === u.id;
   const del = requester === u.id;
   // 부서장: 자기 부서원이 담당·요청한 업무(부서 간 협업 포함)
   const deptLead = (await sql`select 1 from tasks t where t.id = ${t.id} and ${leadOfInvolvedSql(sql, u)}`).length > 0;
@@ -167,10 +172,10 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
     const lv = await teamTaskLevel(u, t.team_id, sql);
     const [lead] = await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`;
     const teamManager = isAdmin(u) || (!!lead && lv === 'edit');
-    return { view: lv !== 'none' || involved || deptLead, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del };
+    return { view: lv !== 'none' || involved || deptLead, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del, co: isCo };
   }
   const manager = inUnit && atLeast(u, 'site_manager');
-  return { view: inUnit || involved || deptLead, edit, approve: manager, delete: del };
+  return { view: inUnit || involved || deptLead, edit, approve: manager, delete: del, co: isCo };
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

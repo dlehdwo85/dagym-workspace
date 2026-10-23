@@ -54,8 +54,15 @@ export async function leaveUser(actor: SessionUser, id: string, i: z.infer<typeo
 
 /** 인수인계 항목: key → 라벨·개수 SQL·이전 SQL */
 const ITEMS: Record<string, { label: string; count: (sql: ReturnType<typeof db>, id: string) => Promise<number>; move: (sql: ReturnType<typeof db>, id: string, to: string) => Promise<number> }> = {
-  tasks: { label: '담당 업무(진행 중)', count: async (sql, id) => n(await sql`select count(*)::int as n from tasks where assignee_id = ${id} and status <> 'done' and deleted_at is null`),
-    move: async (sql, id, to) => n(await sql`with u as (update tasks set assignee_id = ${to}, updated_at = now() where assignee_id = ${id} and status <> 'done' and deleted_at is null returning 1) select count(*)::int as n from u`) },
+  // #475 공동 담당으로 맡은 진행 중 업무도 같이 넘긴다(받는 사람이 이미 주·공동 담당이면 그 줄은 지움)
+  tasks: { label: '담당 업무(진행 중)', count: async (sql, id) => n(await sql`select ((select count(*) from tasks where assignee_id = ${id} and status <> 'done' and deleted_at is null)
+      + (select count(*) from task_assignees ta join tasks t on t.id = ta.task_id where ta.user_id = ${id} and t.status <> 'done' and t.deleted_at is null))::int as n`),
+    move: async (sql, id, to) => {
+      const co = n(await sql`with m as (update task_assignees ta set user_id = ${to} from tasks t where t.id = ta.task_id and ta.user_id = ${id} and t.status <> 'done' and t.deleted_at is null
+          and t.assignee_id is distinct from ${to} and not exists (select 1 from task_assignees x where x.task_id = ta.task_id and x.user_id = ${to}) returning 1) select count(*)::int as n from m`);
+      await sql`delete from task_assignees ta using tasks t where t.id = ta.task_id and ta.user_id = ${id} and t.status <> 'done' and t.deleted_at is null`;
+      return co + n(await sql`with u as (update tasks set assignee_id = ${to}, updated_at = now() where assignee_id = ${id} and status <> 'done' and deleted_at is null returning 1) select count(*)::int as n from u`);
+    } },
   requested: { label: '내가 요청한 업무(진행 중)', count: async (sql, id) => n(await sql`select count(*)::int as n from tasks where requested_by = ${id} and status <> 'done' and deleted_at is null`),
     move: async (sql, id, to) => n(await sql`with u as (update tasks set requested_by = ${to}, updated_at = now() where requested_by = ${id} and status <> 'done' and deleted_at is null returning 1) select count(*)::int as n from u`) },
   collab: { label: '참여 중인 업무', count: async (sql, id) => n(await sql`select count(*)::int as n from task_collaborators c join tasks t on t.id = c.task_id where c.user_id = ${id} and t.status <> 'done' and t.deleted_at is null`),

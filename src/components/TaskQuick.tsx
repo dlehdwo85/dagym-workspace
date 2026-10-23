@@ -158,8 +158,8 @@ export function AssigneePicker({ value, name, onChange, size = 24, role = '담�
   );
 }
 
-/** V12 5번: 담당자 여러 명(체크) — 2명 이상이면 각자 1건씩 만든다. 빈 배열 = 담당자 없음 */
-export function MultiAssigneePicker({ values, onChange }: { values: string[]; onChange: (ids: string[]) => void }) {
+/** V12 5번: 담당자 여러 명(체크). 대표 10/23 #475: 2명 이상이면 기본 = 한 업무를 함께 담당(첫 사람 = 주 담당), '각자 1건씩'도 고를 수 있음. 빈 배열 = 담당자 없음 */
+export function MultiAssigneePicker({ values, onChange, mode = 'together', onMode }: { values: string[]; onChange: (ids: string[]) => void; mode?: 'together' | 'each'; onMode?: (m: 'together' | 'each') => void }) {
   const { dir, user } = useSession();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -175,7 +175,10 @@ export function MultiAssigneePicker({ values, onChange }: { values: string[]; on
         <Avatar id={values[0] ?? null} name={names[0] ?? null} size={20} /><span className="truncate">{label}{values.length === 1 && dir.users.find((u) => u.id === values[0])?.title && <span className="hidden text-ink-3 sm:inline"> · {dir.users.find((u) => u.id === values[0])!.title}</span>}</span>
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="담당자 선택 (여러 명 가능)">
-        <p className="px-2 pb-1 text-[11px] text-ink-3">여러 명 선택 — 2명 이상이면 각자 1건씩 만들어집니다</p>
+        <p className="px-2 pb-1 text-[11px] text-ink-3">여러 명 선택 — 처음 고른 사람이 주 담당{onMode ? ', 기본은 한 업무를 함께 담당' : ''}</p>
+        {onMode && values.length > 1 && <div className="mb-1 flex flex-wrap gap-2 px-2 text-xs" role="radiogroup" aria-label="여러 명 방식">
+          <label className="flex items-center gap-1"><input type="radio" name="inlineMultiMode" checked={mode === 'together'} onChange={() => onMode('together')} data-testid="inline-multi-together" />함께 담당(1건)</label>
+          <label className="flex items-center gap-1"><input type="radio" name="inlineMultiMode" checked={mode === 'each'} onChange={() => onMode('each')} data-testid="inline-multi-each" />각자 1건씩</label></div>}
         <input autoFocus={typeof window !== 'undefined' && window.innerWidth >= 640} className="mb-1 w-full rounded-input border border-line px-2 py-1 text-sm" placeholder="이름·직책 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="담당자 검색" />
         <div className="max-h-60 overflow-y-auto">
           {shown.map((u) => { const on = values.includes(u.id); return (
@@ -278,6 +281,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   // 묶음 끝 줄은 그 묶음 값(담당자·마감·프로젝트)이 자동으로 들어간다. 지정이 없으면 담당 = 나
   const initAssignee = defaultAssignee === undefined ? user.id : defaultAssignee;
   const [assignees, setAssignees] = useState<string[]>(initAssignee ? [initAssignee] : []);
+  const [multiMode, setMultiMode] = useState<'together' | 'each'>('together'); // #475 여러 명 = 기본 함께 담당
   const assignee = assignees[0] ?? null;
   const setAssignee = (v: string | null) => setAssignees(v ? [v] : []);
   const [due, setDue] = useState<string | null>(defaultDue ?? null);
@@ -305,9 +309,10 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     setTitle(''); setRrule(null);
     try {
       const multi = assignees.length > 1;
-      const r = await api('/api/tasks', { body: { title: autoTitle(t), priority, assigneeId: assignee, ...(multi ? { assigneeIds: assignees } : {}), requestedById: user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? proj?.id ?? null, sectionId: sectionId ?? null, approvalRequired: review } });
+      const each = multi && multiMode === 'each';
+      const r = await api('/api/tasks', { body: { title: autoTitle(t), priority, assigneeId: assignee, ...(each ? { assigneeIds: assignees } : multi ? { coAssigneeIds: assignees.slice(1) } : {}), requestedById: user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? proj?.id ?? null, sectionId: sectionId ?? null, approvalRequired: review } });
       markNew(r.id); setRemind(null); setPriority('normal'); setProj(null); setReview(false);
-      const who = multi ? `${assignees.length}명 각각` : assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
+      const who = each ? `${assignees.length}명 각각` : multi ? `${assignees.length}명 함께 담당으로` : assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
       toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? ' — 담당자에게 알림을 보냈습니다' : assignee ? ' — 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       broadcastRefresh(); onCreated?.(r.id); noteAway(r);
       if (!r.away?.length && assignee && assignee !== user.id && due) warnAway(assignee, due, dir.users.find((u) => u.id === assignee)?.name ?? '담당자');
@@ -362,7 +367,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
         {/* V11 4번: 음성은 입력칸 오른쪽 큰 마이크 버튼 */}
         <button type="button" onClick={voice} aria-label="음성으로 업무 추가" aria-pressed={listening} data-testid="voice-btn"
           className={cx('flex size-11 shrink-0 items-center justify-center rounded-full sm:size-9', listening ? 'animate-pulse bg-red-500 text-white' : 'bg-accent-50 text-accent-700 hover:bg-accent-100')}><Mic className="size-5" /></button>
-        {title.trim() && <button type="submit" className="h-11 shrink-0 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white shadow-card active:scale-95 sm:h-8 sm:px-3" data-testid="inline-save">{assignees.length > 1 ? `${assignees.length}명에게 각각 만들기` : '저장'}</button>}
+        {title.trim() && <button type="submit" className="h-11 shrink-0 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white shadow-card active:scale-95 sm:h-8 sm:px-3" data-testid="inline-save">{assignees.length > 1 ? (multiMode === 'each' ? `${assignees.length}명에게 각각 만들기` : `${assignees.length}명 함께 담당 · 저장`) : '저장'}</button>}
         {busy && <span className="shrink-0 text-xs text-ink-3" data-testid="inline-saving">저장 중…</span>}
       </div>
       {showChips && (
@@ -370,7 +375,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 pl-12" data-testid="inline-chips">
           {/* 대표(10/16): 요청자 = 로그인한 사람 고정 — 만들 때 고르는 칸 없음(바꾸려면 업무 상세에서) */}
           <DuePicker value={due} onChange={back(setDue)} label="새 업무 마감일" time={dueTime} onTime={setDueTime} emptyText="마감 없음" />
-          <span className="inline-flex items-center gap-1"><span className="text-[11px] text-ink-3">담당</span><MultiAssigneePicker values={assignees} onChange={setAssignees} /></span>
+          <span className="inline-flex items-center gap-1"><span className="text-[11px] text-ink-3">담당</span><MultiAssigneePicker values={assignees} onChange={setAssignees} mode={multiMode} onMode={setMultiMode} /></span>
           <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
           <BellChip value={remind} onChange={setRemind} />
           <PriorityPicker value={priority} onChange={back(setPriority)} />

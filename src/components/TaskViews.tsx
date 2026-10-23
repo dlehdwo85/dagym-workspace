@@ -21,6 +21,7 @@ import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/ty
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
 import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
+import { coOf, type Co } from './CoAssignees';
 import { QuickAddTask } from './QuickAddTask';
 import { CarriedBadge } from './carried';
 
@@ -28,6 +29,7 @@ export type Task = {
   space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
   sales_ref?: { kind: string; id: string; name?: string } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천
   assigned_by_rule?: string | null; // #100 담당자 지정 규칙으로 배정됨
+  co_assignees?: Co[] | null; complete_rule?: 'primary' | 'all'; // 대표 10/23 #475 공동 담당·완료 규칙
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
   team_id?: string | null; team_name?: string | null; team_color?: string | null;
   org_unit_id: string; org_unit_name: string; brand_id: string | null; assignee_id: string | null; assignee_name: string | null;
@@ -578,6 +580,11 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
   const quick = nextStatusOnCheck(t, user.role); // 완료(또는 검토 요청, 완료 상태면 다시 진행 중)
   const can = STATUSES.some((s) => s !== t.status && canSetStatus(t, user.id, s));
   const ack = t.status === 'todo' && t.assignee_id ? (t.assignee_ack_at ? '확인함' : '확인 전') : null;
+  // #475 공동 담당(주 담당 아님): 상태 대신 '내 몫 완료' 칩 — 업무 완료는 주 담당이(검토 담당자로서 승인하는 경우는 아래 원래 칩)
+  const mine = coOf(t).find((c) => c.id === user.id);
+  const coMode = !!mine && t.assignee_id !== user.id && t.status !== 'done' && !(t.status === 'review' && canSetStatus(t, user.id, 'done'));
+  const [partDone, setPartDone] = useState(!!mine?.done);
+  useEffect(() => { setPartDone(!!mine?.done); }, [mine?.done]);
   useEffect(() => {
     if (!can || tipClaimed) return;
     try { const n = Number(localStorage.getItem('wos_status_tip') ?? 0); if (n < 3) { tipClaimed = true; setTip(true); localStorage.setItem('wos_status_tip', String(n + 1)); } } catch {}
@@ -593,6 +600,15 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
   // 휴대폰은 "확인 전"만(검수 10/16). 로컬 검수 10/19: PC 목록 상태 칸(112px)에 '진행 전 · 확인함'이 넘쳐 마감일과 겹침 → '확인함'은 넓은 화면(2xl)에서만 글자, 그 밖에는 툴팁
   // 대표 10/22(#427): PC 에서 '진행 전 · 확인 전'도 마감일 달력 아이콘 위로 넘쳤다 → PC 는 2xl 이상에서만 글자, 그 밖에는 빨간 점 + 툴팁(휴대폰은 그대로 글자)
   const sub = ack && <span className={cx('text-[10.5px] font-normal', ack === '확인 전' ? 'text-red-600 lg:hidden 2xl:inline' : 'hidden text-ink-3 2xl:inline')}>· {ack}</span>;
+  if (coMode) return (
+    <button type="button" onClick={async (e) => { e.stopPropagation(); const next = !partDone; setPartDone(next);
+        const ok = await onPatch(t, { myPart: next ? 'done' : 'open' });
+        if (ok === false) setPartDone(!next); else toast.ok(next ? `내 몫 완료로 표시했습니다 — 업무 완료는 주 담당 ${t.assignee_name ?? ''}님이` : '내 몫 완료를 취소했습니다'); }}
+      onPointerDown={(e) => e.stopPropagation()} aria-pressed={partDone} aria-label={`${t.title} 내 몫 완료${partDone ? '됨' : ''} (공동 담당 · 업무 ${STATUS_LABEL[t.status]})`} title={`공동 담당 — 업무 상태: ${STATUS_LABEL[t.status]}`} data-testid="row-part-chip" data-done={partDone ? '1' : undefined}
+      className={cx('hit inline-flex h-6 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[11px] font-semibold transition active:scale-95 lg:h-7 lg:text-[12px]', partDone ? 'border-green-300 bg-green-50 text-green-800' : 'border-violet-300 bg-violet-50 text-violet-800')}>
+      {partDone ? <Check className="size-3 shrink-0" aria-hidden /> : <span className={cx('size-1.5 shrink-0 rounded-full', CHIP_DOT[t.status])} aria-hidden />}{partDone ? '내 몫 완료' : '내 몫 완료하기'}
+    </button>
+  );
   if (!can) return (
     <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); toast.info(NOT_MINE); }} onPointerDown={(e) => e.stopPropagation()} aria-label={`${t.title} 상태: ${statusText(t)} (담당자만 변경)`} title={statusText(t)} data-testid="row-status-locked"
       className="inline-flex h-8 min-w-0 items-center gap-1 whitespace-nowrap px-1 text-[12px] font-medium text-ink-2">
@@ -736,7 +752,11 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     // 본사 사람 전원(업무 0건이어도) → 나 먼저. 사람 필터가 있으면 그 사람만
     if (!isReq && assigneeFilter) ensure(assigneeFilter, null);
     else { ensure(user.id, user.name); for (const p of people) ensure(p.id, p.name); }
-    for (const t of tasks) (isReq ? ensure(t.requested_by ?? null, t.requested_by_name ?? null) : ensure(t.assignee_id, t.assignee_name)).items.push(t);
+    for (const t of tasks) {
+      if (isReq) ensure(t.requested_by ?? null, t.requested_by_name ?? null).items.push(t);
+      else if (assigneeFilter) ensure(assigneeFilter, null).items.push(t); // 사람 필터: 그 사람이 주·공동 담당인 업무를 그 사람 묶음에
+      else { ensure(t.assignee_id, t.assignee_name).items.push(t); for (const c of coOf(t)) ensure(c.id, c.name).items.push(t); } // #475 공동 담당 묶음에도
+    }
     groups = [...m.values()].sort((a, b) => (a.key === user.id ? -1 : b.key === user.id ? 1 : a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.label.localeCompare(b.label, 'ko')));
   } else if (group === 'due') {
     const d = new Date(today + 'T00:00:00Z');
@@ -1137,7 +1157,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
         <span className="hidden w-[60px] justify-end lg:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>
         <span className="hidden w-[112px] shrink-0 justify-end overflow-hidden lg:inline-flex xl:w-[136px]" data-testid="status-cell"><StatusChip t={t} onPatch={onPatch} /></span>
         <DueEdit t={t} onPatch={onPatch} />
-        <span className="inline-flex shrink-0 lg:w-12 lg:justify-end"><AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} /></span>
+        <span className="inline-flex shrink-0 items-center lg:w-12 lg:justify-end"><AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} /><CoBadge t={t} /></span>
         {onMove && <OrderMenu title={t.title} onMove={(to) => onMove(t, to)} />}
       </div>
     </div>
@@ -1169,7 +1189,7 @@ function BoardCard({ t }: { t: Task }) {
           {t.due_date ? <DueChip due={t.due_date} status={t.status} /> : <span className="text-xs text-ink-3">마감 없음</span>}
           <PriorityTag p={t.priority} label={false} />
         </span>
-        <Avatar id={t.assignee_id} name={t.assignee_name} size={24} />
+        <span className="inline-flex items-center"><Avatar id={t.assignee_id} name={t.assignee_name} size={24} /><CoBadge t={t} /></span>
       </div>
       <span className="sr-only">{t.due_date ? fmtDate(t.due_date) : ''}</span>
     </div>
@@ -1481,9 +1501,15 @@ function DraggableRow({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => v
       <span className="hidden w-[60px] justify-end sm:flex"><PriorityTag p={t.priority} /></span>
       <StatusChip t={t} onPatch={onPatch} />
       <span className="hidden sm:inline-flex"><DueEdit t={t} onPatch={onPatch} /></span>
-      <AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} />
+      <span className="inline-flex items-center"><AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} /><CoBadge t={t} /></span>
     </div>
   );
+}
+/** #475 공동 담당 수(+n) — 주 담당 아바타 옆, 이름은 툴팁 */
+function CoBadge({ t }: { t: Task }) {
+  const co = coOf(t);
+  if (!co.length) return null;
+  return <span className="ml-0.5 shrink-0 rounded-full bg-violet-50 px-1 text-[10px] font-semibold tabular-nums text-violet-700" title={`공동 담당: ${co.map((c) => `${c.name}${c.done ? '(완료)' : ''}`).join(', ')}`} data-testid="row-co">+{co.length}</span>;
 }
 
 /** 보드 열 = 섹션 */

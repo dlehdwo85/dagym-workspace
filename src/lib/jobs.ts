@@ -32,10 +32,15 @@ async function dueNotifications() {
       -- V14 10번: 같은 업무·같은 날 알림은 가장 구체적인 1건 — 마감 당일은 "오늘 마감", 업무별 🔔 를 정했으면 그 알림만
       and t.due_date > (now() at time zone 'Asia/Seoul')::date and t.reminder_minutes is null`;
   let n = 0;
-  for (const t of soon) {
-    n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `마감 임박: ${t.title}`,
+  // 대표 10/23 #475: 마감 알림·리마인더·알람은 공동 담당(내 몫 완료 전)에게도 — 주 담당과 같은 시각, 알람 여부는 각자 설정
+  const { coMap } = await import('./taskAssignees');
+  const coOf = await coMap(sql, soon.map((t) => t.id));
+  const who = (t: { id: string; assignee_id: string }, m: Map<string, string[]>) => [t.assignee_id, ...(m.get(t.id) ?? [])];
+  for (const t of soon) for (const uid of who(t, coOf)) {
+    const tt = { ...t, assignee_id: uid };
+    n += (await notify(sql, { userIds: [uid], type: 'due_soon', title: `마감 임박: ${t.title}`,
       body: `마감 ${t.due_date}${t.due_time ? ' ' + t.due_time : ''}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
-      dedupeKey: `due_soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, push: important(t.priority) || alarmOn('task', t.alarm, adOf(t.assignee_id), t.priority), meta: { kind: 'due', ...alarmMeta(t) } })).length;
+      dedupeKey: `due_soon:${t.id}:${t.due_date}:${t.due_time ?? ''}`, push: important(t.priority) || alarmOn('task', t.alarm, adOf(uid), t.priority), meta: { kind: 'due', ...alarmMeta(tt) } })).length;
   }
   // 매일 오전 9시(서울) 이후 첫 실행에서 하루 1회: 기한 지남 → 담당자·요청자, 오늘 마감 → 담당자 (완료·보류되면 멈춤)
   const now = new Date();
@@ -48,8 +53,9 @@ async function dueNotifications() {
       select t.id, t.title, t.assignee_id, t.requested_by, t.created_by, t.due_date, (${today}::date - t.due_date)::int as days from tasks t
       -- 2026-10-15 대표: 기한 초과는 첫날(마감 다음 날) 1번만 — 그 뒤는 홈 "지연" 목록으로
       where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_date is not null and t.due_date = ${today}::date - 1`;
+    const coOver = await coMap(sql, over.map((t) => t.id));
     for (const t of over) {
-      n += (await notify(sql, { userIds: [t.assignee_id, t.requested_by ?? t.created_by], type: 'overdue', title: `기한 지남: ${t.title}`,
+      n += (await notify(sql, { userIds: [t.assignee_id, ...(coOver.get(t.id) ?? []), t.requested_by ?? t.created_by], type: 'overdue', title: `기한 지남: ${t.title}`,
         body: `마감일 ${t.due_date} · ${t.days}일 지났습니다`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
         dedupeKey: `overdue:${t.id}:${today}`, push: false, meta: { kind: 'due' } })).length;
     }
@@ -60,10 +66,12 @@ async function dueNotifications() {
         -- V14 10번(검수 3): 같은 업무·수신자·날짜당 1건 — 오늘 울리는 시각 알림(🔔 또는 기본 n분 전)이 있으면 "오늘 마감"은 생략
         and not exists (select 1 from unnest(coalesce(t.reminder_minutes, case when t.due_time is not null then array[coalesce(s.task_reminder_minutes, 60)] else array[]::int[] end)) r(m)
           where ((t.due_date + coalesce(t.due_time, time '09:00')) - make_interval(mins => r.m))::date = t.due_date)`;
-    for (const t of dueToday) {
-      n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `오늘 마감: ${t.title}`,
+    const coToday = await coMap(sql, dueToday.map((t) => t.id));
+    for (const t of dueToday) for (const uid of who(t, coToday)) {
+      const tt = { ...(t as any), assignee_id: uid };
+      n += (await notify(sql, { userIds: [uid], type: 'due_soon', title: `오늘 마감: ${t.title}`,
         body: t.due_time ? `오늘 ${t.due_time}까지` : '오늘까지 마감입니다', link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
-        dedupeKey: `due_today:${t.id}:${today}`, push: !!alarmMeta(t as any).alarm, meta: { kind: 'due', ...alarmMeta(t as any) } })).length;
+        dedupeKey: `due_today:${t.id}:${today}`, push: !!alarmMeta(tt).alarm, meta: { kind: 'due', ...alarmMeta(tt) } })).length;
     }
   }
   // V8 8번 미리 알림: 시간 있는 업무는 업무별 알림(최대 3개) 또는 각자 기본값(60분 전), 날짜만 있는 업무는 업무별 알림을 정했을 때만(당일 09시 기준)
@@ -78,11 +86,13 @@ async function dueNotifications() {
     cross join lateral (select (t.due_date + coalesce(t.due_time, case when t.reminder_minutes is null then time '18:00' else time '09:00' end)) at time zone 'Asia/Seoul' as at) b
     where t.deleted_at is null and t.status not in ('done','on_hold') and u.status = 'active' and t.due_date is not null
       and b.at > now() and b.at - make_interval(mins => r.m) <= now()`;
-  for (const t of hourLeft) {
+  const coLeft = await coMap(sql, hourLeft.map((t) => t.id));
+  for (const t of hourLeft) for (const uid of who(t, coLeft)) {
     const left = t.m >= 1440 ? `${Math.round(t.m / 1440)}일 뒤` : t.m >= 60 ? `${Math.round(t.m / 60)}시간 뒤` : t.m > 0 ? `${t.m}분 뒤` : '지금';
-    n += (await notify(sql, { userIds: [t.assignee_id], type: 'due_soon', title: `${left} 마감: ${t.title}`,
+    const tt = { ...t, assignee_id: uid };
+    n += (await notify(sql, { userIds: [uid], type: 'due_soon', title: `${left} 마감: ${t.title}`,
       body: `${t.due_date === today ? '오늘' : t.due_date} ${t.due_time ?? ''}까지`.trim(), link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
-      dedupeKey: `due_rem:${t.id}:${t.due_date}:${t.due_time ?? ''}:${t.m}`, push: important(t.priority) || alarmOn('task', t.alarm, adOf(t.assignee_id), t.priority), meta: { kind: 'due', ...alarmAt(t) } })).length;
+      dedupeKey: `due_rem:${t.id}:${t.due_date}:${t.due_time ?? ''}:${t.m}`, push: important(t.priority) || alarmOn('task', t.alarm, adOf(uid), t.priority), meta: { kind: 'due', ...alarmAt(tt) } })).length;
   }
   // V13 6번: 같은 알림을 요청자에게도 (담당자 이름·상태로 구분, 요청자 = 담당자면 생략, 일괄 업무는 묶음 1건)
   const kinds = [

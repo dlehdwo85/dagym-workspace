@@ -25,6 +25,7 @@ import { Attachments } from '@/components/Attachments';
 import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
 import { SPACE_META } from '@/components/spaceMeta';
 import { CalColorsDialog, ColorDot, PALETTE_NAMES, eventColorOf, isPersonalTask, saveColorPart, useCalColors } from '@/components/calColors';
+import { assignedTo } from '@/components/CoAssignees';
 
 type Scope = 'this' | 'following' | 'all';
 const seoulDate = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
@@ -114,7 +115,7 @@ function CalendarPage() {
     const ids = who === 'mine' ? [user.id] : who;
     return ids.includes(e.ownerId) || ids.includes(e.createdBy) || (e.attendees ?? []).some((a: any) => ids.includes(a.user_id));
   };
-  const showTask = (t: any) => who === 'all' || (who === 'mine' ? t.assignee_id === user.id : who.includes(t.assignee_id));
+  const showTask = (t: any) => who === 'all' || (who === 'mine' ? assignedTo(t, user.id) : who.some((w) => assignedTo(t, w))); // #475 공동 담당 업무도
   const calRef = useRef<FullCalendar>(null);
   // V14 36번: 좌우로 밀어 이전·다음 기간(휴대폰), 트랙패드 가로 스크롤(PC)
   const swipeWrap = useRef<HTMLDivElement>(null);
@@ -729,7 +730,7 @@ function UnscheduledPanel({ onClose, onOpen }: { onClose: () => void; onOpen: (i
     return () => d.destroy();
   }, [tasks.data]);
   // V14 46: 미배정 = 마감 시각도 업무 시간도 아직 없는 업무(예상 시간이 있으면 잡은 시간이 예상보다 적을 때까지)
-  const list = (tasks.data?.tasks ?? []).filter((t) => t.assignee_id === user.id && !hidden.has(t.id) && !t.due_time
+  const list = (tasks.data?.tasks ?? []).filter((t) => assignedTo(t, user.id) && !hidden.has(t.id) && !t.due_time
       && (t.estimate_minutes ? (t.scheduled_minutes ?? 0) < t.estimate_minutes : !(t.scheduled_minutes > 0)))
     .sort((a, b) => ((a.due_date ?? '9999') < (b.due_date ?? '9999') ? -1 : 1));
   return (

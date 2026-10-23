@@ -3,6 +3,7 @@ import { db, type Sql } from './db';
 import { notify } from './notifications';
 import { occurrences } from './recurrence';
 import { addDays, todaySeoul, weekRangeSeoul } from './time';
+import { assignedOpenSql } from './taskAssignees';
 
 const TZ = 'Asia/Seoul';
 const hm = (d: Date) => DateTime.fromJSDate(d).setZone(TZ).toFormat('HH:mm');
@@ -46,14 +47,14 @@ export async function briefingJob(now = new Date()) {
     if ((weekend || hol) && !u.weekend) continue;
     const [c] = await sql<{ open: number; over: number; due: number }[]>`
       select count(*)::int as open, count(*) filter (where t.due_date < ${today})::int as over, count(*) filter (where t.due_date = ${today})::int as due
-      from tasks t where t.deleted_at is null and t.assignee_id = ${u.id} and t.status not in ('done', 'on_hold')
-        and (t.due_date <= ${today} or t.start_date <= ${today})`;
+      from tasks t where t.deleted_at is null and ${assignedOpenSql(sql, u.id)} and t.status not in ('done', 'on_hold')
+        and (t.due_date <= ${today} or t.start_date <= ${today})`; // #475 공동 담당(내 몫 완료 전)도
     const evs = await eventsOfDay(sql, u.id, today);
     if (!c.open && !evs.length) continue;
     const first = evs.find((e) => !e.allDay) ?? evs[0];
     const parts = [`오늘의 일정 ${c.open}건${c.over ? `(기한 지남 ${c.over})` : ''}`, `일정 ${evs.length}건`];
     // 로컬 10/20 알림 다이어트: 개별 마감 예고 푸시 대신 아침 브리핑에 오늘 마감·기한 지남 업무 이름(최대 3개)
-    const dueList = await sql<{ title: string; late: boolean }[]>`select t.title, (t.due_date < ${today}) as late from tasks t where t.deleted_at is null and t.assignee_id = ${u.id} and t.status not in ('done', 'on_hold') and t.due_date <= ${today}
+    const dueList = await sql<{ title: string; late: boolean }[]>`select t.title, (t.due_date < ${today}) as late from tasks t where t.deleted_at is null and ${assignedOpenSql(sql, u.id)} and t.status not in ('done', 'on_hold') and t.due_date <= ${today}
       order by t.priority = 'urgent' desc, t.priority = 'high' desc, t.due_date limit 3`;
     const dueText = dueList.length ? ` — 마감: ${dueList.map((d) => `${d.title}${d.late ? '(지남)' : ''}`).join(', ')}${c.due + c.over > dueList.length ? ` 외 ${c.due + c.over - dueList.length}건` : ''}` : '';
     const body = `${parts.join(' · ')}${first ? ` — 첫 일정 ${first.allDay ? '종일' : hm(first.start)} ${first.title}` : ''}${dueText}`;
