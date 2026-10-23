@@ -19,7 +19,7 @@ const KAPT_ROWS = [
 const dataGo = (items) => JSON.stringify({ response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items, numOfRows: 100, pageNo: 1, totalCount: items.length } } });
 // #476: 시험마다 바꾸는 원천 — K-apt 목록 추가 줄·상세 입찰분류·공식 API(15058166) 응답·협력사 게시판
 let kaptExtra = [], kaptApiItems = []; const detailCat = {};
-let vendorStatus = 200, nuriMode = 'denied'; // 누리장터: denied(활용신청 전) · empty(정상 0건) · odd(칸 이름이 다른 응답)
+let vendorStatus = 200, nuriMode = 'denied'; // 누리장터: denied(활용신청 전) · empty(정상 0건) · odd(칸 이름이 다른 응답) · ok(새 명세 칸 이름 — 로컬 10/23 운영 응답)
 let vendorHtml = `<html><ul><li><a href="/notice/12">2026년 협력업체 정기등록 모집 안내</a> <span>${today}</span></li><li><a href="/notice/13">추석 연휴 안내</a></li></ul></html>`;
 before(async () => {
   fake = http.createServer(async (req, res) => {
@@ -34,7 +34,7 @@ before(async () => {
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', ntceInsttNm: '성남시', dminsttNm: '성남시체육회', bidNtceDt: `${today} 09:00:00`, bidClseDt: `${plus(9)} 10:00:00`, opengDt: `${plus(9)} 11:00:00`, presmptPrce: '250000000', ntceKindNm: '일반', cntrctCnclsMthdNm: '제한경쟁', prtcptLmtRgnNm: '경기도', bidNtceDtlUrl: 'https://www.g2b.go.kr/x/1', ntceSpecDocUrl1: 'https://www.g2b.go.kr/f/1.hwp' }] : []), 'application/json');
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/')) return send(200, dataGo([]), 'application/json');
     if (u.pathname.startsWith('/g2b/ao/PrvtBidNtceService/')) return nuriMode === 'denied' ? send(200, '<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>30</returnReasonCode><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>', 'application/xml')
-      : send(200, dataGo(nuriMode === 'odd' ? [{ ntceNo: 'N-1', ntceNm: '시험 민간 입찰' }] : []), 'application/json');
+      : send(200, dataGo(nuriMode === 'odd' ? [{ ntceNo: 'N-1', ntceNm: '시험 민간 입찰' }] : nuriMode === 'ok' && u.searchParams.get('bidNtceNm') === '커뮤니티' && u.pathname.endsWith('ServcPPSSrch') ? [{ bidNtceNo: 'R26BK00000001', bidNtceOrd: '000', bidNtceClsfc: '용역', nticeDt: `${today} 09:30:00`, refNo: '관리-12', ntceNm: '광교 센트럴 커뮤니티센터 피트니스 위탁운영 업체 선정', ntceDivNm: '일반공고', ntceInsttNm: '광교센트럴 입주자대표회의', bidMethdNm: '전자입찰', cntrctMthdNm: '제한경쟁', sucsfbidMthdNm: '적격심사최저가', rbidDivNm: '재입찰 허용', bidQlfctNm: '공고규격서 참조', ofclNm: '홍길동', ofclTelNo: '010-1234-5678', ofclEmail: 'hong@example.com', bidBeginDt: `${today} 10:00:00`, bidClseDt: `${plus(8)} 17:00:00`, opengDt: `${plus(9)} 11:00:00`, refAmtOpenYn: 'Y', refAmt: '180000000', asignBdgtAmt: '200000000', rgnLmtDivNm: '공고서 참조', servcDtlList: '커뮤니티센터 피트니스·GX 위탁운영', ntceSpecDocUrl1: 'https://nuri.g2b.go.kr/f/spec1.hwp', ntceSpecDocNm1: '공고문.hwp', aptHsmpNm: '광교 센트럴', aptCeoAdrs: '경기도 수원시 영통구 광교중앙로 1', aptMngOfficeTelNo: '0312223333', aptHshldNum: '1,200', rgstDt: `${today} 09:30:00` }] : []), 'application/json');
     if (u.pathname.startsWith('/g2b/ao/HrcspSsstndrdInfoService/')) return send(200, dataGo([{ bfSpecRgstNo: 'PRE-1', prdctClsfcNoNm: '커뮤니티센터 운영 위탁 용역 사전규격', orderInsttNm: 'LH', rcptDt: `${today} 08:00:00`, opninRgstClseDt: `${plus(4)} 18:00:00`, asignBdgtAmt: '90000000' }, { bfSpecRgstNo: 'PRE-2', prdctClsfcNoNm: '도로 포장 공사 사전규격', orderInsttNm: '도로공사' }]), 'application/json');
     if (u.pathname.startsWith('/g2b/as/ScsbidInfoService/')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', bidwinnrNm: '하이링크', sucsfbidAmt: '240000000', opengDt: `${today} 11:00:00` }] : []), 'application/json');
     if (u.pathname === '/agency/lh_bid') return send(200, dataGo([{ bidNum: 'LH-1', bidNm: '행복주택 커뮤니티시설 운영 위탁', ognzNm: 'LH', clseDt: `${plus(6)} 17:00`, bidAmt: '50000000' }]), 'application/json');
@@ -289,5 +289,17 @@ test('누리장터 응답 통계(로컬 10/23 "0건이 진짜 0건인지"): 정�
   nuriMode = 'odd';
   const o = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
   assert.match(o.summary, /누리장터 0건\(검색 \d+회 · 응답 00 · 전체 \d+건 · 받은 \d+줄을 못 읽음\(칸: ntceNo,ntceNm\)\)/, o.summary);
+  // 새 명세 칸 이름(로컬 10/23 운영: ntceNm·nticeDt·ntceInsttNm·bidNtceNo+bidNtceOrd·bidMethdNm·cntrctMthdNm·ntceDivNm·bidNtceClsfc) → 읽음. 담당자 이름·전화·메일은 저장 안 함
+  nuriMode = 'ok';
+  const k = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
+  assert.match(k.summary, /누리장터 1건\(검색 \d+회 · 응답 00 · 전체 1건\)/, k.summary);
+  const [n] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = 'nuri_bid' and row->>'source_external_id' = 'R26BK00000001-000'`;
+  assert.ok(n, '누리장터 공고 저장');
+  const r = n.row;
+  assert.deepEqual([r.title, r.issuer, r.posted_date, r.contract_method, r.bid_system, r.award_method, r.notice_state, r.bid_category, r.region, r.facility_name, r.office_phone, r.household_count, r.estimated_amount, r.budget_amount, r.source_url, r.related],
+    ['광교 센트럴 커뮤니티센터 피트니스 위탁운영 업체 선정', '광교센트럴 입주자대표회의', today, '제한경쟁', '전자입찰', '적격심사최저가', '일반공고', '용역', '경기', '광교 센트럴', '031-222-3333', 1200, 180000000, 200000000, 'https://nuri.g2b.go.kr/f/spec1.hwp', true]);
+  assert.ok(String(r.deadline_at).startsWith(plus(8)) && String(r.opening_at).startsWith(plus(9)), '마감·개찰');
+  const raw = JSON.stringify(r);
+  assert.ok(!raw.includes('홍길동') && !raw.includes('010-1234-5678') && !raw.includes('1234-5678') && !raw.includes('hong@example.com'), '담당자 이름·전화·메일은 저장하지 않음(개인정보)');
   nuriMode = 'denied';
 });

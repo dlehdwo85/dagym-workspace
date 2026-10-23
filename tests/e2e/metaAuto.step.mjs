@@ -22,7 +22,8 @@ export async function metaAuto({ owner, ctx, sql, BASE, SHOTS }) {
   // Meta 에 꺼진 채로 만들어진 초안(승인 대기) — 실제 생성은 API 시험에서
   const [draft] = await sql`insert into mkt_ad_plans (tenant, account_id, provider, kind, name, plan, status, external, created_by)
     values ('default', ${acc.id}, 'meta', 'meta_auto', 'E2E 가을 PT 리드', ${sql.json(plan)}, 'created',
-      ${sql.json({ campaignId: '120210000000000101', adsetId: '120210000000000102', creativeId: '120210000000000103', adId: '120210000000000104', formName: '가을 PT 상담', privacyUrl: 'https://example.com/privacy',
+      ${sql.json({ campaignId: '120210000000000101', adsetId: '120210000000000102', creativeId: '120210000000000103', adId: '120210000000000104', formName: '가을 PT 상담', privacyUrl: 'https://example.com/privacy', formChecked: true,
+        imageText: { checked: true, ratio: 8, note: '이미지 속 글자 약 8%' },
         checks: { at: new Date().toISOString(), warnings: ['하루 예산 × 20일 = 200,000원 — 총 상한 150,000원에 닿으면 그 뒤로는 멈춥니다'] } })}, ${ctx.ownerId}) returning id`;
   // 리드 양식 목록은 페이지 토큰이 필요(시험 연결엔 없음) → 화면은 번호 직접 입력으로 바뀌어야
   await owner.goto(`${BASE}/s/marketing/ad-ops`);
@@ -32,6 +33,7 @@ export async function metaAuto({ owner, ctx, sql, BASE, SHOTS }) {
   assert.equal(await row.getByTestId('meta-plan-status').innerText(), '광고 초안 · 승인 대기');
   assert.match(await row.getByTestId('meta-plan-summary').innerText(), /리드\(광고 안 양식\) · 하루 10,000원 · 총 상한 150,000원 · .*\(20일\) · 경기 수원시 영통구 광교중앙로 140 반경 3km · 25~55세 · 리드당 20,000원 넘으면 자동 일시정지/);
   assert.equal(await row.getByTestId('meta-plan-to-inbox').getAttribute('href'), '/s/marketing/approvals?tab=ads');
+  assert.equal(await row.getByTestId('meta-plan-checked').innerText(), '검사 결과: 리드 양식: 가을 PT 상담 · 개인정보처리방침 링크 있음 · 이미지 속 글자 약 8%', '4cde86d b: 초안 때 검사 결과');
   assert.equal(await box.getByTestId('meta-manage-connect').getAttribute('href'), '/api/marketing/ads/connect/meta?manage=1');
 
   // [새 메타 광고] 창
@@ -60,6 +62,7 @@ export async function metaAuto({ owner, ctx, sql, BASE, SHOTS }) {
   const [saved] = await sql`select plan from mkt_ad_plans where name = 'E2E 겨울 PT 리드'`;
   assert.deepEqual([saved.plan.leadFormId, saved.plan.privacyConfirmed, saved.plan.creative.fileId, saved.plan.location.radiusKm, saved.plan.guard.maxCpl], ['880000333', true, lf.id, 5, 25000]);
   assert.equal(await made.getByTestId('meta-plan-draft').isEnabled(), true, '검사 통과·상한 있음 → [Meta에 초안 만들기] 누를 수 있음');
+  assert.equal(await made.getByTestId('meta-plan-later').innerText(), '초안 만들 때 검사: 광고 계정 권한·원화·활성 상태 · 리드 양식 상태·개인정보처리방침 링크 · 이미지 속 글자 비율', '4cde86d b: 세팅안 카드에 미리 표시');
 
   // 승인함 '광고 초안' 탭
   await owner.goto(`${BASE}/s/marketing/approvals?tab=ads`);
@@ -68,6 +71,7 @@ export async function metaAuto({ owner, ctx, sql, BASE, SHOTS }) {
   assert.equal(await owner.getByTestId('mkt-inbox-tab-ads').getAttribute('data-count'), '1');
   assert.match(await card.innerText(), /리드 양식: 가을 PT 상담 · 개인정보처리방침 링크 있음/);
   assert.match(await card.getByTestId('meta-draft-warnings').innerText(), /총 상한 150,000원에 닿으면/);
+  assert.equal(await card.getByTestId('meta-draft-image-text').innerText(), '이미지 속 글자 약 8%');
   assert.match(await card.getByTestId('meta-preview').innerText(), /E2E 다짐 본점[\s\S]*가을 PT 첫 상담[\s\S]*가입하기/);
   await owner.waitForFunction(() => { const i = document.querySelector('[data-testid="meta-draft"] [data-testid="meta-preview"] img'); return !!i && i.complete && i.naturalWidth > 0; });
   await card.evaluate((el) => el.scrollIntoView({ block: 'center' }));

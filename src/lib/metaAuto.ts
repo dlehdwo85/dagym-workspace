@@ -172,8 +172,9 @@ export async function metaAutoOverview(u: SessionUser) {
   const ids = plans.map((p) => p.id);
   const changes = ids.length ? await sql`select c.id, c.plan_id, c.kind, c.before, c.after, c.money_up, c.status, c.error, c.revert_of, c.created_at, u.name as actor_name
     from mkt_ad_changes c left join users u on u.id = c.actor_id where c.tenant = ${t} and c.plan_id = any(${ids}::uuid[]) order by c.created_at desc limit 100` : [];
+  const checkOf = (p: any) => { const c = metaPrecheck(p.plan, rules); return { issues: c.issues, warnings: [...c.warnings, ...capWarnings(p.plan, cap, spend)], later: draftTimeChecks(p.plan, p.creative_mime) }; };
   return { canEdit: isAdmin(u), cap, monthSpend: spend, today: ymd(), minTotalCap: MIN_TOTAL_CAP, cta: META_CTA, leadCta: LEAD_CTA, accounts, pages, brands, changes,
-    plans: plans.map((p) => ({ ...p, check: p.status === 'draft' || p.status === 'failed' ? metaPrecheck(p.plan, rules) : { issues: [], warnings: (p.external?.checks?.warnings ?? []) as string[] } })) };
+    plans: plans.map((p) => ({ ...p, check: p.status === 'draft' || p.status === 'failed' ? checkOf(p) : { issues: [], warnings: (p.external?.checks?.warnings ?? []) as string[] } })) };
 }
 
 /** 리드 양식 목록(페이지 토큰) — 고르기용 */
@@ -195,7 +196,7 @@ export async function createMetaPlan(u: SessionUser, i: Input) {
   await validateRefs(u, i);
   const { accountId, name, brandId, ...plan } = i;
   const [p] = await db()`insert into mkt_ad_plans (tenant, account_id, provider, kind, name, plan, created_by, brand_id) values (${tenantOf(u)}, ${accountId}, 'meta', 'meta_auto', ${name}, ${db().json(plan as never)}, ${u.id}, ${brandId ?? null}) returning id`;
-  return { id: p.id, ...metaPrecheck(plan, await qualityRules()) };
+  return { id: p.id, ...(await savedCheck(tenantOf(u), plan)) };
 }
 export async function updateMetaPlan(u: SessionUser, id: string, i: Input) {
   await assertSpace(u, 'marketing'); adminOnly(u);
@@ -208,7 +209,13 @@ export async function updateMetaPlan(u: SessionUser, id: string, i: Input) {
   const restart = accountId !== p.account_id || plan.creative.fileId !== p.plan?.creative?.fileId;
   await db()`update mkt_ad_plans set account_id = ${accountId}, name = ${name}, plan = ${db().json(plan as never)}, brand_id = ${brandId === undefined ? p.brand_id : brandId},
     external = ${db().json((restart ? {} : ext) as never)}, error = null, updated_at = now() where id = ${id}`;
-  return { id, ...metaPrecheck(plan, await qualityRules()) };
+  return { id, ...(await savedCheck(tenantOf(u), plan)) };
+}
+/** 저장 직후 검사 = 세팅안 검사 + 회사 월 상한 경고(4cde86d a) */
+async function savedCheck(t: string, plan: MetaPlan) {
+  const [rules, cap, spent] = await Promise.all([qualityRules(), capOf(t), monthSpend(t)]);
+  const c = metaPrecheck(plan, rules);
+  return { issues: c.issues, warnings: [...c.warnings, ...capWarnings(plan, cap, spent)] };
 }
 
 // ---------------- 이미지 속 글자(경고만) ----------------
@@ -269,7 +276,8 @@ export async function buildMetaDraft(u: SessionUser, id: string) {
   const pl = p.plan as MetaPlan;
   const pre = metaPrecheck(pl, await qualityRules());
   if (pre.issues.length) throw new HttpError(409, 'precheck_failed', `세팅안 검사를 통과하지 못했습니다: ${pre.issues.join(' · ')}`);
-  if (!(await capOf(t))) throw new HttpError(409, 'cap_required', '먼저 회사 월 광고비 상한을 정해 주세요(광고 운영 맨 위)');
+  const cap = await capOf(t);
+  if (!cap) throw new HttpError(409, 'cap_required', '먼저 회사 월 광고비 상한을 정해 주세요(광고 운영 맨 위)');
   const a = await adAccount(t, p.account_id); const token = tokenOf(a);
   const page = await pageAccount(t, pl.pageAccountId);
   const file = await creativeFile(u, pl.creative.fileId);
@@ -278,7 +286,7 @@ export async function buildMetaDraft(u: SessionUser, id: string) {
   const [lock] = await sql`update mkt_ad_plans set status = 'creating', updated_at = now() where id = ${id} and status in ('draft', 'failed') returning id`;
   if (!lock) throw new HttpError(409, 'plan_busy', '이미 만드는 중입니다 — 잠시 뒤 새로 고쳐 확인해 주세요');
   const ext: Record<string, any> = { ...(p.external ?? {}) };
-  const warnings = [...pre.warnings];
+  const warnings = [...pre.warnings, ...capWarnings(pl, cap, await monthSpend(t))]; // 승인함 카드에도 회사 월 상한 경고
   const save = (status: string, error: string | null) => sql`update mkt_ad_plans set status = ${status}, external = ${sql.json(ext as never)}, error = ${error}, updated_at = now() where id = ${id}`;
   try {
     // 1) 계정: 광고 만들기 권한·원화·활성
@@ -349,6 +357,23 @@ export async function buildMetaDraft(u: SessionUser, id: string) {
     title: `메타 광고 초안 — 승인해 주세요 (하루 ${won(pl.dailyBudget)} · 총 상한 ${won(pl.totalCap)})`, body: `${p.name} · ${pl.startDate} ~ ${pl.endDate} · ${pl.location.address} 반경 ${pl.location.radiusKm}km`,
     link: '/s/marketing/approvals?tab=ads', entityType: 'mkt_ad_plan', entityId: id, dedupeKey: `metaads:${id}`, push: true }).catch(() => {});
   return { ok: true, status: 'created', external: ids(ext), warnings };
+}
+/** 회사 월 광고비 상한과 견주기(로컬 10/23 4cde86d a — 저장·목록에서도 미리 알림): 초안은 꺼진 채라 막지 않음.
+ * 켤 때(승인·다시 켜기)는 guardMoneyUp 이 다시 막고, 켜진 뒤 상한에 닿으면 adCapGuard 가 끔 */
+export function capWarnings(p: Pick<MetaPlan, 'startDate' | 'endDate' | 'dailyBudget' | 'totalCap'>, cap: { monthlyCap: number } | null, spent: number, today = ymd()) {
+  if (!cap) return ['회사 월 광고비 상한이 아직 없습니다 — 광고 운영 맨 위에서 정해야 Meta 에 초안을 만들 수 있습니다'];
+  const w: string[] = []; const left = Math.max(0, cap.monthlyCap - spent);
+  if (MIN_TOTAL_CAP > cap.monthlyCap) w.push(`메타 총 상한은 최소 ${won(MIN_TOTAL_CAP)}인데 회사 월 상한은 ${won(cap.monthlyCap)}입니다 — 이 광고는 회사 월 상한에 먼저 닿아 꺼집니다(총 상한까지 쓰려면 회사 월 상한을 올려 주세요)`);
+  const [y, m] = today.split('-').map(Number); const monthEnd = `${today.slice(0, 8)}${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+  const from = p.startDate > today ? p.startDate : today; const to = p.endDate < monthEnd ? p.endDate : monthEnd;
+  const inMonth = from <= to ? Math.min(p.totalCap, p.dailyBudget * days({ startDate: from, endDate: to })) : 0;
+  if (inMonth > left) w.push(`이번 달 회사 월 상한 ${won(cap.monthlyCap)} 중 ${won(spent)}을 써서 남은 금액은 ${won(left)}입니다 — 이 광고는 이번 달 최대 ${won(inMonth)}까지 쓸 수 있어 상한에 닿으면 워크인이 끕니다${left <= 0 ? '(지금은 켤 수 없음)' : ''}`);
+  return w;
+}
+/** 4cde86d b: [Meta에 초안 만들기] 때 Meta 에 물어봐야 하는 검사(세팅안 카드에 미리 표시 — 결과는 초안 뒤 카드·승인함에) */
+export function draftTimeChecks(p: Pick<MetaPlan, 'objective' | 'creative'>, mime: string | null) {
+  return ['광고 계정 권한·원화·활성 상태', ...(p.objective === 'leads' ? ['리드 양식 상태·개인정보처리방침 링크'] : []),
+    ...(!String(mime ?? '').startsWith('video/') || p.creative.thumbFileId ? ['이미지 속 글자 비율'] : [])];
 }
 const ids = (ext: Record<string, any>) => ({ campaignId: ext.campaignId ?? null, adsetId: ext.adsetId ?? null, creativeId: ext.creativeId ?? null, adId: ext.adId ?? null });
 

@@ -18,7 +18,7 @@ export type MetaPlanBody = {
 };
 export type MetaPlanRow = { id: string; account_id: string; brand_id: string | null; brand: string | null; name: string; plan: MetaPlanBody; status: string; external: Record<string, any>; error: string | null;
   created_at: string; approved_at?: string | null; account_label: string; approved_by_name?: string | null; created_by_name: string | null; page_label: string | null; creative_mime: string | null;
-  check?: { issues: string[]; warnings: string[] } };
+  check?: { issues: string[]; warnings: string[]; later?: string[] } };
 type Change = { id: string; plan_id: string | null; kind: string; before: any; after: any; money_up: boolean; status: string; error: string | null; created_at: string; actor_name: string | null };
 type Data = { canEdit: boolean; cap: { monthlyCap: number } | null; monthSpend: number; today: string; minTotalCap: number; cta: string[]; leadCta: string[];
   accounts: { id: string; label: string }[]; pages: { id: string; label: string; brand: string | null; brand_id: string | null; leads: boolean }[]; brands: { id: string; name: string }[]; plans: MetaPlanRow[]; changes: Change[] };
@@ -32,6 +32,13 @@ const changeDesc = (c: Change) => c.kind === 'budget' ? `${won(c.before?.dailyBu
   : c.kind === 'auto_pause' ? (c.after?.reason === 'monthly_cap' ? `월 상한 도달(${won(c.after.spend)} / ${won(c.after.cap)})` : `${c.after?.reason === 'cpl' ? '리드당' : '클릭당'} 비용 ${c.after?.value != null ? won(c.after.value) : '(0건)'} > 기준 ${won(c.after?.limit ?? 0)}`)
   : c.kind === 'approve' && c.status === 'rejected' ? `사유: ${c.after?.reason ?? ''}` : c.kind === 'enable' && c.after?.approved ? '승인하고 집행' : '';
 
+/** 초안 만들 때 Meta 에 물어본 검사 결과(리드 양식·개인정보처리방침 링크·이미지 속 글자) — 세팅안 카드·승인함 카드 같은 줄 */
+export function MetaCheckedLine({ r }: { r: Pick<MetaPlanRow, 'plan' | 'external'> }) {
+  const x = r.external ?? {}; const parts: string[] = [];
+  if (r.plan.objective === 'leads' && (x.formChecked || x.formName)) parts.push(`리드 양식: ${x.formName ?? r.plan.leadFormId}${x.privacyUrl ? ' · 개인정보처리방침 링크 있음' : r.plan.privacyConfirmed ? ' · 개인정보처리방침 링크(담당자 확인)' : ''}`);
+  if (x.imageText?.note) parts.push(String(x.imageText.note));
+  return parts.length ? <p className="mt-0.5 text-xs text-ink-2" data-testid="meta-plan-checked">검사 결과: {parts.join(' · ')}</p> : null;
+}
 /** 한 줄 요약: 목적 · 하루 예산 · 총 상한 · 기간 · 반경 · 나이 */
 export function MetaPlanSummary({ p }: { p: MetaPlanBody }) {
   return (
@@ -70,6 +77,7 @@ export function MetaDraftCard({ r, canEdit, onChange }: { r: MetaPlanRow; canEdi
       <div className="mt-2 flex flex-wrap gap-3"><MetaCreativePreview r={r} />
         <div className="min-w-0 flex-1 space-y-1 text-xs">
           {r.plan.objective === 'leads' && <p>리드 양식: {r.external?.formName ?? r.plan.leadFormId}{r.external?.privacyUrl ? ' · 개인정보처리방침 링크 있음' : r.plan.privacyConfirmed ? ' · 개인정보처리방침 링크(담당자 확인)' : ''}</p>}
+          {r.external?.imageText?.note && <p data-testid="meta-draft-image-text">{String(r.external.imageText.note)}</p>}
           {r.plan.objective === 'traffic' && <p className="break-all">연결 주소: {r.plan.creative.link}</p>}
           {warnings.length > 0 && <ul className="space-y-0.5 text-amber-800" data-testid="meta-draft-warnings">{warnings.map((w, k) => <li key={k}>확인: {w}</li>)}</ul>}
           <p className="text-ink-3">승인하면 서버가 회사 월 광고비 상한·Meta 쪽 총 상한·하루 예산을 다시 확인한 뒤 켭니다. 켜기 전에는 광고비가 나가지 않습니다.</p>
@@ -124,6 +132,8 @@ export function MetaAuto() {
             {st && <p className="mt-0.5 text-xs text-ink-2" data-testid="meta-plan-stats">지금까지 {won(st.spend)} · 클릭 {st.clicks} · 리드 {st.leads}{st.leads ? ` · 리드당 ${won(st.spend / st.leads)}` : ''} ({fmtDateTime(st.at)} 기준)</p>}
             {issues.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-red-700" data-testid="meta-plan-issues">{issues.map((x, k) => <li key={k}>고칠 것: {x}</li>)}</ul>}
             {warnings.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-amber-800" data-testid="meta-plan-warnings">{warnings.map((x, k) => <li key={k}>확인: {x}</li>)}</ul>}
+            {(p.status === 'draft' || p.status === 'failed') && !!p.check?.later?.length && <p className="mt-1 text-xs text-ink-3" data-testid="meta-plan-later">초안 만들 때 검사: {p.check.later.join(' · ')}</p>}
+            {!['draft', 'failed'].includes(p.status) && <MetaCheckedLine r={p} />}
             {p.error && <p className="mt-1 break-words text-xs text-red-700" data-testid="meta-plan-error">{p.error}</p>}
             {data.canEdit && (
               <div className="mt-2 flex flex-wrap gap-2">
@@ -179,8 +189,10 @@ function MetaPlanForm({ d, edit, onClose, onDone }: { d: Data; edit?: MetaPlanRo
         location: { address: f.address, radiusKm: Number(f.radiusKm) || 3 }, ageMin: Number(f.ageMin) || 20, ageMax: Number(f.ageMax) || 65, startDate: f.startDate, endDate: f.endDate,
         dailyBudget: Number(f.dailyBudget), totalCap: Number(f.totalCap),
         guard: f.maxCpl || f.maxCpc ? { maxCpl: f.maxCpl ? Number(f.maxCpl) : null, maxCpc: f.maxCpc ? Number(f.maxCpc) : null, minSpend: Number(f.minSpend) || 30000 } : null };
-      const r = await api<{ issues: string[] }>(edit ? `/api/marketing/ad-ops/meta/${edit.id}` : '/api/marketing/ad-ops/meta', { method: edit ? 'PUT' : 'POST', body });
-      r.issues.length ? toast.error(`저장했습니다 — 고칠 것 ${r.issues.length}건을 고쳐야 Meta 에 초안을 만들 수 있습니다`) : toast.ok('세팅안을 저장했습니다 — [Meta에 초안 만들기]를 눌러 주세요');
+      const r = await api<{ issues: string[]; warnings?: string[] }>(edit ? `/api/marketing/ad-ops/meta/${edit.id}` : '/api/marketing/ad-ops/meta', { method: edit ? 'PUT' : 'POST', body });
+      const capW = (r.warnings ?? []).filter((w) => /회사 월/.test(w)); // 4cde86d a: 회사 월 상한 경고는 저장할 때 바로
+      r.issues.length ? toast.error(`저장했습니다 — 고칠 것 ${r.issues.length}건을 고쳐야 Meta 에 초안을 만들 수 있습니다`)
+        : capW.length ? toast.info(`세팅안을 저장했습니다 — 확인: ${capW[0]}`) : toast.ok('세팅안을 저장했습니다 — [Meta에 초안 만들기]를 눌러 주세요');
       onDone(); onClose();
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }

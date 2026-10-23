@@ -138,6 +138,12 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.getByTestId('mkt-sites').waitFor(); await owner.getByTestId('sites-summary').waitFor(); await owner.getByTestId('sites-snippet').waitFor();
   await owner.getByTestId('sites-table').waitFor(); // 브랜드가 없으면 빈 표(브랜드 줄은 브랜드를 만든 뒤)
   await owner.screenshot({ path: `${SHOTS}/174-mkt-sites.png`, fullPage: true });
+  // 로컬 10/23 보안: 안내에 연동 토큰을 브라우저에 넣는 예시가 없어야(서버 경유 + 공개 키만)
+  await owner.getByTestId('sites-snippet').locator('summary').click();
+  await owner.getByTestId('sites-token-warn').waitFor();
+  const guide = await owner.getByTestId('sites-snippet').innerText();
+  assert.ok(!/\?k=/.test(guide) && !guide.includes('연동토큰'), '브라우저 코드에 연동 토큰 자리 없음');
+  assert.match(await owner.getByTestId('sites-server-code').innerText(), /Bearer \$\{process\.env\.WORKIN_INQUIRY_TOKEN\}/);
   await owner.locator('aside').getByRole('link', { name: '광고 성과' }).click(); await owner.getByTestId('mkt-ads').waitFor(); // 원래 흐름으로
   await owner.getByTestId('ads-days-7').click();
   await owner.getByText('최근 7일', { exact: true }).first().waitFor();
