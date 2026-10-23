@@ -1,4 +1,4 @@
-// V14 43번: 업무 목록 왼쪽 동그라미 없음, 상태 칩 = 버튼(테두리·▾·32px↑, 처음엔 "눌러서 상태 바꾸기"), 메뉴 맨 위 [✓ 완료] → 완료·되돌리기, 남의 업무는 잠김 표시, "확인 완료" 문구 없음
+// V14 43번: 업무 목록 왼쪽 동그라미 없음, 상태 칩 = 버튼(테두리·▾·32px↑, 처음엔 "눌러서 상태 바꾸기"), 메뉴 맨 위 [✓ 완료] → 완료·(#508) 맨 아래 '완료됨'에서 되돌리기, 남의 업무는 잠김 표시, "확인 완료" 문구 없음
 import assert from 'node:assert/strict';
 export async function v1443({ browser, desk, ctx, BASE, SHOTS, sql }) {
   const mine = (await ctx.owner.ok('POST', '/api/tasks', { title: '상태칩 버튼 시험', assigneeId: ctx.ownerId, approvalRequired: false })).id;
@@ -23,7 +23,8 @@ export async function v1443({ browser, desk, ctx, BASE, SHOTS, sql }) {
     await quick.tap();
     await m.getByText('완료했습니다').waitFor();
     assert.equal((await sql`select status from tasks where id = ${mine}`)[0].status, 'done');
-    await m.getByRole('button', { name: '되돌리기', exact: true }).tap();
+    await m.getByRole('button', { name: '완료됨 보기' }).tap(); // #508 되돌리기는 맨 아래 '완료됨'에서
+    await m.getByTestId('done-fold').locator(`[data-done-id="${mine}"]`).getByTestId('done-fold-undo').tap();
     for (let i = 0; i < 20 && (await sql`select status from tasks where id = ${mine}`)[0].status === 'done'; i++) await m.waitForTimeout(150);
     assert.notEqual((await sql`select status from tasks where id = ${mine}`)[0].status, 'done', '되돌리기');
     const locked = m.locator(`[data-row="${other}"]`).getByTestId('row-status-locked').filter({ visible: true });

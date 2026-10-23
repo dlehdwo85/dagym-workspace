@@ -39,7 +39,7 @@ export type Task = {
   section_id?: string | null; assignee_ack_at?: string | null; created_by?: string; sort_order?: number;
   task_type?: 'normal' | 'milestone' | 'approval' | 'inspection'; approval_line_id?: string | null; photo_required?: number; photo_count?: number;
   fields?: Record<string, unknown>;
-  requested_by?: string | null; requested_by_name?: string | null; created_at?: string; completed_at?: string | null;
+  requested_by?: string | null; requested_by_name?: string | null; created_at?: string; completed_at?: string | null; prev_status?: string | null;
   assigned_at?: string | null;
   batch_id?: string | null; batch?: { total: number; done: number } | null; recurrence_source_id?: string | null;
   /** V32 4 마감 연장: 횟수 · 대기 중인 요청 */
@@ -125,8 +125,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const qs = useMemo(() => {
     const p = new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), ...(fixed ?? {}) });
     if (q) p.set('q', q);
-    // V6 16번: 기본 목록에도 오늘 완료한 업무(댓글 있으면 7일)는 남겨 취소선으로 — "완료" 보기는 완료 업무 전체(월별)
-    if (!showDone && mode !== 'board' && !filters.status && (fixed?.view ?? filters.view) !== 'done') p.set('includeDone', 'recent');
+    // #508(대표 10/23): 목록은 완료하면 바로 빠지고 묶음 맨 아래 접힌 '완료됨 n건'(이번 주 완료) — 캘린더는 V6 16번 그대로(오늘 완료 취소선). "완료" 보기는 완료 업무 전체(월별)
+    if (!showDone && mode !== 'board' && !filters.status && (fixed?.view ?? filters.view) !== 'done') p.set('includeDone', mode === 'list' ? 'week' : 'recent');
     if ((fixed?.view ?? filters.view) === 'done') { p.set('limit', '1000'); if (mode === 'list') p.set('doneMonth', todayStr().slice(0, 7)); } // V20: 목록은 이번 달만, 지난달은 펼칠 때
     return p.toString();
   }, [filters, fixed, q, showDone, mode]);
@@ -145,16 +145,11 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   }, [mode]);
 
   /** 모든 보기에서 같은 경로로 원본 업무를 수정 → 다른 보기에도 즉시 반영 */
-  // "방금 완료한 업무": 완료되어 목록에서 빠진 업무를 다시 찾고 되돌릴 수 있게 (실수로 사라진 듯 보이지 않게)
-  const [justDone, setJustDone] = useState<{ t: Task; prev: TaskStatus }[]>([]);
-  const [justOpen, setJustOpen] = useState(false);
-  // 이 화면에서 방금 완료한 업무는 그 자리에 취소선으로 남긴다(목록을 새로 불러와도)
-  const keepIds = useMemo(() => new Set(justDone.map((x) => x.t.id)), [justDone]);
   async function patch(t: Task, body: Record<string, unknown>) {
     const before = data;
-    if (body.status === 'done' && t.status !== 'done') setJustDone((x) => [{ t, prev: t.status }, ...x.filter((y) => y.t.id !== t.id)].slice(0, 20));
-    if (body.status && body.status !== 'done') setJustDone((x) => x.filter((y) => y.t.id !== t.id));
-    setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, ...snake(body) } : x)) });
+    // #508: 완료하면 목록에서 빠져 묶음 맨 아래 '완료됨'으로 — 되돌리기는 거기서(바로 전 상태 기억)
+    if (body.status === 'done' && t.status !== 'done') PREV_STATUS.set(t.id, t.status);
+    setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, ...snake(body), ...(body.status === 'done' && t.status !== 'done' ? { completed_at: new Date().toISOString() } : {}) } : x)) });
     try {
       const r = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { ...body, version: t.version } });
       setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, version: r.version } : x)) });
@@ -418,23 +413,6 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.hasAttach === '1'} onChange={(e) => setFilters((f) => ({ ...f, hasAttach: e.target.checked ? '1' : '' }))} data-testid="filter-attach" /><Paperclip className="size-3.5 text-sky-700" />첨부 있음</label>
         </div>
       )}
-      {justDone.length > 0 && !showDone && (
-        <div className="rounded-card border border-green-200 bg-green-50 text-sm" data-testid="just-done">
-          <button onClick={() => setJustOpen(!justOpen)} aria-expanded={justOpen} className="flex w-full items-center gap-2 px-3 py-2 text-left font-medium text-green-800">
-            <CircleCheck className="size-4" />방금 완료한 업무 {justDone.length}건<span className="ml-auto text-xs font-normal">{justOpen ? '접기' : '보기 · 되돌리기'}</span>
-          </button>
-          {justOpen && (
-            <ul className="divide-y divide-green-100 border-t border-green-200">
-              {justDone.map(({ t, prev }) => (
-                <li key={t.id} className="flex items-center gap-2 px-3 py-1.5">
-                  <span className="min-w-0 flex-1 truncate text-ink-2 line-through">{t.title}</span>
-                  <Button size="sm" variant="secondary" onClick={async () => { if (await patch({ ...t, status: 'done', version: t.version + 1 }, { status: prev === 'done' ? 'in_progress' : prev })) { setJustDone((x) => x.filter((y) => y.t.id !== t.id)); reload(); } }}>되돌리기</Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton /> : (
         <>
           {mode === 'list' && projectId && adding && <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask autoFocus projectId={projectId} onEscape={() => setAdding(false)} /></div>}
@@ -447,7 +425,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           <SelectCtx.Provider value={mode === 'list' || mode === 'board' ? selCtx : null}>
           {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
             : curView === 'done' ? <DoneArchive thisMonth={tasks} filterQs={new URLSearchParams(Object.entries({ assigneeId: filters.assigneeId, teamId: filters.teamId, projectId: fixed?.projectId }).filter(([, v]) => v) as [string, string][]).toString()} onPatch={patch} />
-            : <GroupedTasks tasks={tasks} group={group} view={curView} keepIds={keepIds} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
+            : <GroupedTasks tasks={tasks} group={group} view={curView} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
                 people={people} sortBy={sortBy} onSort={pickSort} onReorder={reorder}
                 top={adding ? <InlineAddTask key={addKey} autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
           {mode === 'board' && projectId && (
@@ -530,6 +508,64 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
   );
 }
 
+/** #508(대표 10/23): 완료하면 목록에서 바로 빼고 묶음 맨 아래 접힌 '완료됨 n건' — 되돌리기는 거기서. 이 화면에서 완료한 업무의 바로 전 상태 */
+const PREV_STATUS = new Map<string, TaskStatus>();
+/** 되돌릴 상태: 이 화면에서 완료했으면 그 전 상태, 아니면 서버 활동 기록의 완료 직전 상태(진행 전·진행 중·보류만), 모르면 진행 중 */
+const undoTo = (t: Task): TaskStatus => PREV_STATUS.get(t.id) ?? (t.prev_status === 'todo' || t.prev_status === 'in_progress' || t.prev_status === 'on_hold' ? t.prev_status : 'in_progress');
+/** 안내 [완료됨 보기] → 그 업무가 든 '완료됨'을 펼치고 그 자리로(id 없으면 모두 펼침) */
+export const openDoneFold = (id?: string) => window.dispatchEvent(new CustomEvent('wos-done-open', { detail: { id } }));
+const toastDone = (id: string) => toast.ok('완료했습니다 — 완료됨으로 옮겼습니다', { label: '완료됨 보기', run: () => openDoneFold(id) });
+const seoulDay = (iso?: string | null) => (iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso)) : '');
+const doneWhen = (iso?: string | null) => { const d = seoulDay(iso); if (!d) return ''; return d === todayStr() ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso!)) : `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`; };
+/** 묶음 맨 아래 접힌 '완료됨 n건 (오늘 a · 이번 주 n)' — 줄마다 [되돌리기](담당자만), [완료 전체 보기 →]. 펼침은 이 기기에 기억 */
+function DoneFold({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => any }) {
+  const { user } = useSession();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const ids = tasks.map((t) => t.id).join(',');
+  useEffect(() => { try { if (localStorage.getItem('wos_done_fold') === '1' || new URLSearchParams(location.search).get('openDone') === '1') setOpen(true); } catch {} }, []);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id;
+      if (id && !ids.split(',').includes(id)) return;
+      setOpen(true);
+      if (id) setTimeout(() => ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60);
+    };
+    window.addEventListener('wos-done-open', on); return () => window.removeEventListener('wos-done-open', on);
+  }, [ids]);
+  if (!tasks.length) return null;
+  const toggle = () => setOpen((v) => { try { localStorage.setItem('wos_done_fold', v ? '0' : '1'); } catch {} return !v; });
+  const nToday = tasks.filter((t) => seoulDay(t.completed_at) === todayStr()).length;
+  const sorted = [...tasks].sort((a, b) => String(b.completed_at ?? '').localeCompare(String(a.completed_at ?? '')));
+  return (
+    <div ref={ref} className="mt-1" data-testid="done-fold">
+      <button type="button" onClick={toggle} aria-expanded={open} className="flex min-h-9 items-center gap-1.5 px-2 text-xs font-medium text-ink-2 hover:text-ink" data-testid="done-fold-toggle">
+        <ChevronDown className={cx('size-3.5 transition-transform', !open && '-rotate-90')} /><CircleCheck className="size-3.5 text-green-600" />완료됨 {tasks.length}건
+        <span className="font-normal text-ink-3">(오늘 {nToday} · 이번 주 {tasks.length})</span>
+      </button>
+      {open && (
+        <ul className="divide-y divide-line overflow-hidden rounded-input border border-line bg-white" data-testid="done-fold-list">
+          {sorted.map((t) => {
+            const back = undoTo(t);
+            return (
+              <li key={t.id} className="flex min-h-[44px] min-w-0 items-center gap-2 px-3 py-1" data-testid="done-fold-row" data-done-id={t.id}>
+                <CircleCheck className="size-4 shrink-0 text-green-600" aria-hidden />
+                <TaskLink id={t.id} className="min-w-0 flex-1 truncate text-sm text-ink-2 hover:text-accent-600 hover:underline">{t.title}</TaskLink>
+                <span className="shrink-0 text-xs tabular-nums text-ink-3" title="완료한 때">{doneWhen(t.completed_at)}</span>
+                {canSetStatus(t, user.id, back) && <Button size="sm" variant="secondary" data-testid="done-fold-undo" onClick={async () => {
+                  if (await onPatch(t, { status: back }) === false) return;
+                  PREV_STATUS.delete(t.id); toast.ok(`되돌렸습니다 — ${STATUS_LABEL[back]}`);
+                }}>되돌리기</Button>}
+              </li>
+            );
+          })}
+          <li className="flex justify-end px-3 py-1.5"><Link href="/tasks?view=done" className="text-xs font-medium text-accent-600 hover:underline" data-testid="done-fold-all">완료 전체 보기 →</Link></li>
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** V14 50(대표 결정): 상태는 담당자만(없으면 요청자·만든 사람). 검토 중인 업무의 승인·반려는 검토 담당자(요청자)만 — 서버와 같은 규칙 */
 export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
   if (to === t.status) return true;
@@ -595,7 +631,8 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
     if (s === t.status) return;
     const before = t.status;
     const ok = await onPatch(t, { status: s });
-    if (ok !== false && (s === quick || s === 'done')) toast.ok(s === 'done' ? '완료했습니다' : s === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: s, version: t.version + 1 }, { status: before }) });
+    if (ok !== false && s === 'done') toastDone(t.id); // #508 되돌리기는 '완료됨'에서
+    else if (ok !== false && s === quick) toast.ok(s === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: s, version: t.version + 1 }, { status: before }) });
   }
   // 휴대폰은 "확인 전"만(검수 10/16). 로컬 검수 10/19: PC 목록 상태 칸(112px)에 '진행 전 · 확인함'이 넘쳐 마감일과 겹침 → '확인함'은 넓은 화면(2xl)에서만 글자, 그 밖에는 툴팁
   // 대표 10/22(#427): PC 에서 '진행 전 · 확인 전'도 마감일 달력 아이콘 위로 넘쳤다 → PC 는 2xl 이상에서만 글자, 그 밖에는 빨간 점 + 툴팁(휴대폰은 그대로 글자)
@@ -717,16 +754,12 @@ function ViewChip({ on, onClick, children, label, grid }: { on: boolean; onClick
  * 담당자별은 본사 사람 전원을 업무 0건이어도 묶음으로 보여 준다(바로 그 사람에게 배정).
  * 직접 순서일 때는 손잡이로 끌어 순서를 바꾸고, 다른 묶음으로 끌면 그 묶음 값(담당자·요청자·마감·프로젝트)으로 바뀐다.
  */
-function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, top, people, sortBy, onSort, onReorder, keepIds }: {
-  tasks: Task[]; group: GroupBy | 'month'; view: string; keepIds?: Set<string>; assigneeFilter: string | null; onPatch: (t: Task, b: any) => any; onAcked: () => void; top: React.ReactNode;
+function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, top, people, sortBy, onSort, onReorder }: {
+  tasks: Task[]; group: GroupBy | 'month'; view: string; assigneeFilter: string | null; onPatch: (t: Task, b: any) => any; onAcked: () => void; top: React.ReactNode;
   people: { id: string; name: string }[]; sortBy: SortKey; onSort: (k: SortKey) => void; onReorder: (ids: string[]) => void;
 }) {
   const { user, dir } = useSession();
   const [folded, setFolded] = useState<Record<string, boolean>>({});
-  // "오늘 완료 n건" 접힘 줄 펼침 상태(이 기기에 기억)
-  const [doneOpen, setDoneOpen] = useState(false);
-  useEffect(() => { try { setDoneOpen(localStorage.getItem('wos_done_fold') === '1'); } catch {} }, []);
-  const toggleDone = () => setDoneOpen((v) => { try { localStorage.setItem('wos_done_fold', v ? '0' : '1'); } catch {} return !v; });
   // PC: 손잡이를 마우스로 끌기 · 휴대폰: 행을 0.4초 꾹 누르면 들어 올려 위아래로
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 8 } }));
   const selOnCtx = !!useContext(SelectCtx)?.on;
@@ -851,10 +884,10 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
         })() : <ListHeader sortBy={sortBy} onSort={onSort} stuck={stuck} />}
         {groups.map((x, gi) => {
           const open = x.items.filter((t) => t.status !== 'done').length;
-          // 완료 업무: 이 화면에서 방금 끝낸 건 제자리(취소선), 그 밖의 오늘 완료는 묶음 끝 "오늘 완료 n건" 접힘 줄
+          // #508: 완료 업무는 목록에서 빼고 묶음 맨 아래 접힌 '완료됨 n건(오늘·이번 주)'
           const archive = group === 'month';
-          const shown = archive ? x.items : x.items.filter((t) => t.status !== 'done' || keepIds?.has(t.id));
-          const doneFold = archive ? [] : x.items.filter((t) => t.status === 'done' && !keepIds?.has(t.id));
+          const shown = archive ? x.items : x.items.filter((t) => t.status !== 'done');
+          const doneFold = archive ? [] : x.items.filter((t) => t.status === 'done');
           const late = x.items.filter((t) => t.status !== 'done' && t.due_date && t.due_date < today).length;
           const isFolded = folded[x.key];
           const who = x.label === '담당자 없음' ? '담당자 없이' : `${x.label}님에게`;
@@ -878,14 +911,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
                 const at = to === 'top' ? 0 : to === 'bottom' ? ids.length - 1 : Math.max(0, Math.min(ids.length - 1, from + (to === 'up' ? -1 : 1)));
                 if (at !== from) onReorder(arrayMove(ids, from, at));
               } : undefined} />}
-              {!isFolded && doneFold.length > 0 && (
-                <div className="mt-1" data-testid="done-fold">
-                  <button type="button" onClick={toggleDone} aria-expanded={doneOpen} className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-ink-2 hover:text-ink">
-                    <ChevronDown className={cx('size-3.5 transition-transform', !doneOpen && '-rotate-90')} /><CircleCheck className="size-3.5 text-green-600" />오늘 완료 {doneFold.length}건
-                  </button>
-                  {doneOpen && <ListView tasks={doneFold} onPatch={onPatch} hint={false} />}
-                </div>
-              )}
+              {!isFolded && <DoneFold tasks={doneFold} onPatch={onPatch} />}
             </GroupDrop>
           );
         })}
@@ -999,11 +1025,13 @@ function SortableRow({ t, onPatch, onAck, onMove }: { t: Task; onPatch: (t: Task
 }
 
 /** 내 업무: 최근 배정 → 기한 지남 → 오늘 → 이번 주 → 나중 → 날짜 없음 (Asana '내 작업' 참고) */
-function MyGroupedList({ tasks, onPatch, onAcked, top }: { tasks: Task[]; onPatch: (t: Task, b: any) => void; onAcked: () => void; top?: React.ReactNode }) {
+function MyGroupedList({ tasks: all, onPatch, onAcked, top }: { tasks: Task[]; onPatch: (t: Task, b: any) => void; onAcked: () => void; top?: React.ReactNode }) {
   const { user } = useSession();
   const add = top ? <div className="overflow-hidden rounded-card border border-line bg-white shadow-card">{top}</div> : null;
+  // #508: 이번 주 완료는 마감 묶음이 아니라 맨 아래 접힌 '완료됨 n건' 하나로
+  const tasks = all.filter((t) => t.status !== 'done'); const done = all.filter((t) => t.status === 'done');
   if (!tasks.length) return <div className="space-y-3" data-testid="my-groups">{add}<Empty title="내 업무가 없습니다" icon={CircleCheck}>맡은 업무가 모두 끝났습니다. 아래 줄이나 <b>+ 업무 추가</b>로 바로 추가하세요.</Empty>
-    <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask muted /></div></div>;
+    <div className="overflow-hidden rounded-card border border-line bg-white shadow-card"><InlineAddTask muted /></div><DoneFold tasks={done} onPatch={onPatch} /></div>;
   const today = todayStr();
   const d = new Date(today + 'T00:00:00Z');
   const weekEnd = new Date(d.getTime() + ((7 - ((d.getUTCDay() + 6) % 7)) - 1) * 86400000).toISOString().slice(0, 10); // 이번 주 일요일
@@ -1032,6 +1060,7 @@ function MyGroupedList({ tasks, onPatch, onAcked, top }: { tasks: Task[]; onPatc
           <ListView tasks={x.items} onPatch={onPatch} hint={gi === 0} tail={<InlineAddTask muted defaultDue={DUE_DEFAULT[x.key]?.() ?? null} placeholder="업무 추가" />} onAck={x.key === 'new' ? async (t) => { try { await api(`/api/tasks/${t.id}/ack`, { body: {} }); onAcked(); } catch (e: any) { toast.error(e.message); } } : undefined} />
         </section>
       ))}
+      <DoneFold tasks={done} onPatch={onPatch} />
     </div>
   );
 }
@@ -1099,7 +1128,9 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
   const right = nextStatusOnCheck(t, user.role);
   const swipe = async (to: TaskStatus) => {
     const before = t.status;
-    if (await onPatch(t, { status: to }) !== false) toast.ok(to === 'on_hold' ? '보류로 바꿨습니다' : to === 'review' ? '검토를 요청했습니다' : to === 'done' ? '완료했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: to, version: t.version + 1 }, { status: before }) });
+    if (await onPatch(t, { status: to }) === false) return;
+    if (to === 'done') toastDone(t.id); // #508 되돌리기는 '완료됨'에서
+    else toast.ok(to === 'on_hold' ? '보류로 바꿨습니다' : to === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: to, version: t.version + 1 }, { status: before }) });
   };
   return (
     <div className="relative overflow-hidden border-b border-line last:border-b-0">
@@ -1429,8 +1460,9 @@ function SectionedList({ projectId, sections, tasks, onPatch, reloadSections, re
     <DndContext sensors={sensors} onDragEnd={end}>
       <div className="space-y-3" data-testid="sectioned-list">
         {groups.map((g, i) => {
-          const items = tasks.filter((t) => (t.section_id ?? null) === g.id);
-          if (g.id === null && !items.length && sections.length) return null;
+          const all = tasks.filter((t) => (t.section_id ?? null) === g.id);
+          const items = all.filter((t) => t.status !== 'done'); const done = all.filter((t) => t.status === 'done'); // #508 완료는 섹션 맨 아래 '완료됨'
+          if (g.id === null && !all.length && sections.length) return null;
           return (
             <SectionGroup key={g.id ?? 'none'} id={g.id} name={g.name} count={items.length}
               onRename={g.id ? (name) => call(() => api(`/api/sections/${g.id}`, { method: 'PATCH', body: { name } })) : undefined}
@@ -1444,6 +1476,7 @@ function SectionedList({ projectId, sections, tasks, onPatch, reloadSections, re
               {items.map((t) => <DraggableRow key={t.id} t={t} onPatch={onPatch} />)}
               {!items.length && <div className="px-4 py-3 text-center text-xs text-ink-3">업무를 여기로 끌어 오거나 아래에 바로 추가하세요</div>}
               <InlineAddTask projectId={projectId} sectionId={g.id} placeholder={`${g.name}에 업무 추가 — 제목 입력 후 Enter`} />
+              {done.length > 0 && <div className="px-1 pb-1"><DoneFold tasks={done} onPatch={onPatch} /></div>}
             </SectionGroup>
           );
         })}
@@ -1605,12 +1638,13 @@ function BulkBar({ ids, tasks, onClear, onDone }: { ids: string[]; tasks: Task[]
     const before = Object.fromEntries(ids.map((id) => [id, { [key]: (byId.get(id) as any)?.[col[key]] ?? null }]));
     try {
       const r = await api('/api/tasks/bulk', { body: { ids, action, ...(patch ? { patch } : {}) } });
-      const msg = `${r.done.length}건 ${label ?? '바꿨습니다'}${r.skipped.length ? ` · ${r.skipped.length}건 건너뜀` : ''}`;
+      const msg = `${r.done.length}건 ${label ?? '바꿨습니다'}${action === 'done' && r.done.length ? ' — 완료됨으로 옮겼습니다' : ''}${r.skipped.length ? ` · ${r.skipped.length}건 건너뜀` : ''}`;
+      if (action === 'done') for (const id of r.done as string[]) { const st = byId.get(id)?.status; if (st && st !== 'done') PREV_STATUS.set(id, st); }
       const undo = r.done.length ? { label: '되돌리기', run: async () => {
         const back = action === 'delete' ? { ids: r.done, action: 'restore' } : { ids: r.done, action: 'patch', each: Object.fromEntries(r.done.map((id: string) => [id, before[id]])) };
         try { await api('/api/tasks/bulk', { body: back }); onDone('undo', []); toast.ok('되돌렸습니다'); } catch (e: any) { toast.error(e.message); }
       } } : undefined;
-      toast.ok(msg, undo);
+      toast.ok(msg, action === 'done' && r.done.length ? { label: '완료됨 보기', run: () => openDoneFold() } : undo); // #508 완료 되돌리기는 '완료됨'에서
       if (r.skipped.length) toast.info(`건너뜀: ${r.skipped.slice(0, 3).map((s: any) => `${s.title}(${s.reason})`).join(', ')}${r.skipped.length > 3 ? ' 외' : ''}`);
       onDone(action, r.done);
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }

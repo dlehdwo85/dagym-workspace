@@ -193,10 +193,16 @@ export function dispositionName(h: string | null): string | null {
   v = v.replace(/^["']|["']$/g, '').trim();
   return v || null;
 }
+/** 이름에 %XX 가 남아 있으면 풀기(두 번 인코딩까지, 빈칸 +) — 원천·옛 저장 칸이 이름을 URL 인코딩한 채로 줄 때(로컬 10/23: K-apt 중계 n 없을 때 '%EC%BB…+…') */
+export function decodeName(n: string): string {
+  let v = n;
+  for (let i = 0; i < 2 && /%[0-9a-f]{2}/i.test(v); i++) { const d = pctDecode(v); if (d === v || d.includes('\uFFFD')) break; v = d; }
+  return v;
+}
 /** 파일 이름: 넘겨받은 이름 > 응답 머리 > 원천 목록 이름 > 주소 끝(진짜 파일 이름일 때만 — downloadFile.do·bidFileDown.do 는 아님) > '<공고명 앞 30자> 첨부 n'. 확장자가 없으면 첫 바이트로 붙임 */
 export function fileNameOf(o: { given?: string | null; header?: string | null; hint?: string | null; url?: URL | null; head: Uint8Array; fallback?: string | null }): string {
   let pathName = ''; try { pathName = decodeURIComponent(o.url?.pathname.split('/').pop() || ''); } catch { pathName = o.url?.pathname.split('/').pop() || ''; }
-  let n = (o.given?.trim() || dispositionName(o.header ?? null) || o.hint?.trim() || (FILE_EXT.test(extOf(pathName)) ? pathName : '') || o.fallback?.trim() || '첨부').trim();
+  let n = decodeName((o.given?.trim() || dispositionName(o.header ?? null) || o.hint?.trim() || (FILE_EXT.test(extOf(pathName)) ? pathName : '') || o.fallback?.trim() || '첨부').trim());
   const ext = sniffExt(o.head);
   if (!FILE_EXT.test(extOf(n)) && ext) n = `${n}.${ext}`;
   return safeName(n);

@@ -602,7 +602,7 @@ await step('U-0b·U-0c 검증 오류는 항목 이름과 한국어로, 연결 �
   assert.match(fam[0], /Pretendard Variable/); assert.equal(fam[1], true, 'Pretendard 글꼴 로드');
   await c.close();
 });
-await step('목록: 상태 칩 [✓ 완료]로 완료 → 되돌리기 (V14 43번: 왼쪽 동그라미 없음), 필터 칩 표시·해제, 상단 검색(Ctrl K 버튼)', async () => {
+await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고 맨 아래 \'완료됨 1건\' → 되돌리기(#508) (V14 43번: 왼쪽 동그라미 없음), 필터 칩 표시·해제, 상단 검색(Ctrl K 버튼)', async () => {
   const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '원형 체크 시험', orgUnitId: ctx.siteA, approvalRequired: false })).id;
   await owner.goto(BASE + '/tasks?mode=list');
   await owner.getByLabel('업무 검색').fill('원형 체크');
@@ -610,12 +610,35 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 되돌리기 (V14 43�
   assert.equal(await row.getByTestId('check-circle').count(), 0, '왼쪽 완료 동그라미 없음');
   await row.getByTestId('row-status-chip').filter({ visible: true }).click();
   await owner.getByTestId('status-quick').click();
-  await owner.getByText('완료했습니다').waitFor();
+  await owner.getByText('완료했습니다 — 완료됨으로 옮겼습니다').waitFor();
   await owner.waitForTimeout(500);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
-  await owner.getByRole('button', { name: '되돌리기', exact: true }).click();
-  await owner.waitForTimeout(800);
-  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'todo');
+  // #508: 목록에서 바로 빠지고 묶음 맨 아래 접힌 '완료됨 1건' — 안내 [완료됨 보기]가 펼치고, 되돌리기는 거기서
+  await owner.locator(`[data-row="${id}"]`).waitFor({ state: 'detached' });
+  const fold = owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' });
+  await fold.waitFor();
+  assert.match(await fold.getByTestId('done-fold-toggle').innerText(), /완료됨 1건\s*\(오늘 1 · 이번 주 1\)/);
+  assert.equal(await owner.getByRole('button', { name: '되돌리기', exact: true }).count(), 0, '안내에는 되돌리기 없음');
+  await owner.getByRole('button', { name: '완료됨 보기' }).click();
+  const doneRow = fold.locator(`[data-done-id="${id}"]`); await doneRow.waitFor();
+  assert.equal(await fold.getByTestId('done-fold-all').getAttribute('href'), '/tasks?view=done');
+  await owner.screenshot({ path: `${SHOTS}/217-done-fold.png`, clip: await fold.boundingBox() });
+  await doneRow.getByTestId('done-fold-undo').click();
+  await owner.getByText('되돌렸습니다 — 진행 전').waitFor();
+  await owner.locator(`[data-row="${id}"]`).waitFor();
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'todo', '바로 전 상태(진행 전)로');
+  await owner.reload(); await owner.getByLabel('업무 검색').fill('원형 체크'); await owner.locator(`[data-row="${id}"]`).waitFor(); // 새로 불러와도 목록에
+  assert.equal(await owner.getByTestId('done-fold').count(), 0, '완료가 없으면 접힌 칸도 없음');
+  // 다른 화면(API)에서 보류 → 완료: 새로 불러온 '완료됨'의 [되돌리기]는 서버 활동 기록의 완료 직전 상태(보류)로
+  for (const st of ['on_hold', 'done']) await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { status: st, version: (await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.version });
+  await owner.reload(); await owner.getByLabel('업무 검색').fill('원형 체크');
+  const fold2 = owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }); await fold2.waitFor();
+  await fold2.getByTestId('done-fold-toggle').click();
+  await fold2.locator(`[data-done-id="${id}"]`).getByTestId('done-fold-undo').click();
+  await owner.getByText('되돌렸습니다 — 보류').waitFor();
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'on_hold', '새로 불러와도 완료 직전 상태(보류)로');
+  await owner.evaluate(() => localStorage.removeItem('wos_done_fold')); // 펼침 기억은 이 단계 안에서만
+  await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { status: 'todo', version: (await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.version });
   await owner.getByTestId('filter-toggle').click();
   await owner.getByTestId('filter-panel').getByLabel('상태').selectOption('todo');
   await owner.getByTestId('filter-chip').filter({ hasText: '상태: 진행 전' }).waitFor();
@@ -726,7 +749,7 @@ await step('B-14·B-15·B-16·B-17 현장 비교·주간 보고·업무량·공�
   await owner.locator('.fc-dayGridMonth-view').waitFor();
   await owner.screenshot({ path: `${SHOTS}/48-calendar-holidays.png` });
 });
-await step('모바일 밀기: 기본 꺼짐·짧은/세로 밀기 무시, 켜면 45% 이상 밀어 완료 → "방금 완료한 업무"에서 되돌리기', async () => {
+await step('모바일 밀기: 기본 꺼짐·짧은/세로 밀기 무시, 켜면 45% 이상 밀어 완료 → 맨 아래 "완료됨"에서 되돌리기(#508)', async () => {
   const id = (await ctx.staffA.client.ok('POST', '/api/tasks', { title: '밀어서 완료 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
   await staff.evaluate(() => localStorage.setItem('wos_task_group', 'assignee')); // V14 34번: 휴대폰 기본 마감별 — 뜬 뒤 묶기가 바뀌지 않게 고정
   await staff.goto(BASE + '/tasks?mode=list');
@@ -753,12 +776,13 @@ await step('모바일 밀기: 기본 꺼짐·짧은/세로 밀기 무시, 켜면
   await drag([w * 0.2, w * 0.4, w * 0.5]);
   await staff.getByText('완료했습니다').waitFor();
   assert.equal(await status(), 'done');
-  const bar = staff.getByTestId('just-done');
-  await bar.getByText('방금 완료한 업무 1건').waitFor();
-  await bar.getByRole('button', { name: /방금 완료한 업무/ }).click();
-  await bar.getByRole('button', { name: '되돌리기', exact: true }).click();
+  await row.waitFor({ state: 'detached' }); // #508 목록에서 바로 빠짐
+  await staff.getByRole('button', { name: '완료됨 보기' }).click();
+  const back = staff.getByTestId('done-fold').locator(`[data-done-id="${id}"]`);
+  await back.getByTestId('done-fold-undo').click();
   await staff.waitForTimeout(600);
   assert.notEqual(await status(), 'done', '되돌리기');
+  await row.waitFor();
   await staff.evaluate(() => localStorage.removeItem('wos_swipe_done'));
 });
 
@@ -1553,13 +1577,13 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   assert.equal(batch.length, 3); assert.equal(new Set(batch.map((b) => b.batch_id)).size, 1);
   await owner.goto(BASE + '/tasks');
   await owner.locator('[data-batch]').first().waitFor();
-  // 완료해도 제자리(취소선)
+  // #508(대표 10/23): 완료하면 목록에서 빠지고 그 묶음 맨 아래 접힌 '완료됨'으로(예전 V6 16번 '제자리 취소선' 대신)
   const row = owner.locator('[data-row]', { hasText: 'V6 다같이 점검' }).first();
   const rid = await row.getAttribute('data-row');
   await row.getByTestId('row-status-chip').filter({ visible: true }).click(); await owner.getByTestId('status-quick').click(); // V14 43번: 상태 칩 메뉴 맨 위 완료
-  await owner.waitForTimeout(800);
-  await owner.locator(`[data-row="${rid}"]`).waitFor();
-  assert.ok((await owner.locator(`[data-row="${rid}"] a[data-open-task]`).getAttribute('class')).includes('line-through'), '완료해도 제자리 취소선');
+  await owner.locator(`[data-row="${rid}"]`).waitFor({ state: 'detached' });
+  await owner.getByRole('button', { name: '완료됨 보기' }).click();
+  await owner.getByTestId('done-fold').locator(`[data-done-id="${rid}"]`).waitFor();
   // 완료 보기(월별)
   await owner.getByRole('button', { name: '완료', exact: true }).click();
   await owner.getByTestId('task-groups').getByText(/\d{4}년 \d+월/).first().waitFor();

@@ -23,6 +23,7 @@ before(async () => {
     if (req.url.startsWith('/euckr.do')) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${EUCKR_GONGGO}.hwp"` }); res.end(HWP5); return; }
     if (req.url.startsWith('/pct-euckr.do')) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename=%B0%F8%B0%ED%B9%AE+%281%29.hwp;' }); res.end(HWP5); return; }
     if (req.url.startsWith('/star.do')) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': "attachment; filename=\"x.pdf\"; filename*=UTF-8''%EC%9E%85%EC%B0%B0%20%EA%B3%B5%EA%B3%A0.pdf" }); res.end(PDF); return; }
+    if (req.url.startsWith('/double.do')) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename=${encodeURIComponent(encodeURIComponent('커뮤니티 시설 공고.hwp').replace(/%20/g, '+'))};` }); res.end(HWP5); return; } // 두 번 인코딩한 이름
     if (req.url.startsWith('/downloadFile.do')) { const q = new URL(req.url, 'http://x').searchParams.get('t'); res.writeHead(200, { 'content-type': 'application/octet-stream' }); res.end(q === 'hwpx' ? HWPX : q === 'zip' ? ZIP : PDF); return; }
     res.writeHead(404); res.end();
   });
@@ -75,6 +76,9 @@ describe('S1-4 공고 첨부 중계', () => {
     assert.equal(await name('/downloadFile.do', `&f=${encodeURIComponent('광교 센트럴 커뮤니티 첨부 1')}`), '광교 센트럴 커뮤니티 첨부 1.pdf', '나라장터 downloadFile.do → 넘긴 이름 + %PDF');
     assert.equal(await name('/downloadFile.do?t=hwpx'), '첨부.hwpx', 'PK + hwp+zip → hwpx');
     assert.equal(await name('/downloadFile.do?t=zip'), '첨부.zip', '그 밖 PK → zip');
+    // 로컬 10/23: 이름이 URL 인코딩된 채로 오면(두 번 인코딩·옛 저장 칸의 n) 풀어서 — '%EC%BB…+…' 로 내려가지 않게
+    assert.equal(await name('/double.do'), '커뮤니티 시설 공고.hwp', '두 번 인코딩한 머리');
+    assert.equal(await name('/euckr.do', `&n=${encodeURIComponent(encodeURIComponent('공고문 원본.hwp').replace(/%20/g, '+'))}`), '공고문 원본.hwp', '인코딩된 채로 넘어온 n');
   });
   test('#507 후속 K-apt(로컬 10/23 실측 순서): 상세(쿠키·_csrf) → 첨부 목록 POST(JSON·X-CSRF-TOKEN·같은 쿠키) → fileDownload.do(같은 쿠키·Referer) — 옛 주소(bidFileDown.do)도 같은 순서로 · 목록에 없는 파일은 안내', async () => {
     const r = await get('/api/bids/kapt-file?bid=20261021092205298&seq=4329886', ctx.owner.cookie);

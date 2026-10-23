@@ -1454,6 +1454,27 @@ describe('WORKIN_V6 상태 알림 · 일괄 생성 · 삭제/휴지통 · 오늘
     const done = (await a.ok('GET', '/api/tasks?view=done')).tasks;
     assert.ok(done.every((x) => x.status === 'done') && done.some((x) => x.id === t));
   });
+  test('#508 목록 includeDone=week: 진행 중 + 이번 주(월요일 0시, 서울) 완료(맨 아래 \'완료됨\') · 내 업무·오늘 보기도 같은 규칙 · 완료는 맨 뒤 · 칩 건수는 진행 중만', async () => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    const mk = async (title) => (await a.ok('POST', '/api/tasks', { title, orgUnitId: ctx.hq, assigneeId: a.id, dueDate: today, approvalRequired: false })).id;
+    const open = await mk('508 진행 중'), now = await mk('508 이번 주 완료'), old = await mk('508 지난주 완료');
+    await a.ok('PATCH', `/api/tasks/${now}`, { status: 'on_hold', version: (await a.ok('GET', `/api/tasks/${now}`)).task.version });
+    for (const id of [now, old]) await a.ok('PATCH', `/api/tasks/${id}`, { status: 'done', version: (await a.ok('GET', `/api/tasks/${id}`)).task.version });
+    await sql`update tasks set completed_at = date_trunc('week', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul' - interval '1 minute' where id = ${old}`; // 지난주 일요일 23:59(서울)
+    for (const qs of ['includeDone=week', 'view=my&includeDone=week', 'view=today&includeDone=week']) {
+      const ids = (await a.ok('GET', `/api/tasks?${qs}&q=508&limit=50`)).tasks.map((x) => x.id);
+      assert.ok(ids.includes(open) && ids.includes(now), `${qs}: 진행 중·이번 주 완료`);
+      assert.ok(!ids.includes(old), `${qs}: 지난주 완료는 빠짐`);
+      assert.ok(ids.indexOf(open) < ids.indexOf(now), `${qs}: 완료는 맨 뒤`);
+    }
+    // [되돌리기] 상태: 완료 직전 상태(활동 기록) — 다른 화면에서 완료해도 보류로 돌아감
+    const wk = (await a.ok('GET', '/api/tasks?includeDone=week&q=508&limit=50')).tasks;
+    assert.deepEqual([wk.find((x) => x.id === now)?.prev_status, wk.find((x) => x.id === open)?.prev_status], ['on_hold', null], '완료 직전 상태(완료 아닌 줄은 없음)');
+    assert.ok(!(await a.ok('GET', '/api/tasks?view=my&q=508')).tasks.some((x) => x.id === now), '기본(내 업무)은 완료 제외 그대로');
+    const week = (await a.ok('GET', '/api/tasks/counts?includeDone=week')).counts, zero = (await a.ok('GET', '/api/tasks/counts?includeDone=0')).counts;
+    assert.deepEqual([week.my, week.week, week.requested], [zero.my, zero.week, zero.requested], '칩 건수는 진행 중만(이번 주 완료를 세지 않음)');
+    assert.equal(week.my, (await a.ok('GET', '/api/tasks?view=my&includeDone=0&limit=1000')).tasks.length, '칩 건수 = 진행 중 목록 수');
+  });
   test('마감 시각이 있는 업무: 1시간 전 알림 (본인 업무도)', async () => {
     const hm = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(Date.now() + 40 * 60000));
     const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + 40 * 60000));

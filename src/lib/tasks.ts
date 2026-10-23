@@ -120,7 +120,7 @@ export const listQuery = z.object({
   parentId: zUuid.optional(),
   teamId: zUuid.optional(),
   includeSubtasks: z.enum(['0', '1']).optional().catch(undefined),
-  includeDone: z.enum(['0', '1', 'recent']).optional().catch(undefined),
+  includeDone: z.enum(['0', '1', 'recent', 'week']).optional().catch(undefined), // week = #508 이번 주(월요일, 서울) 완료까지 — 화면 맨 아래 '완료됨' 칸
   limit: z.coerce.number().int().min(1).max(1000).catch(500),
   /** V20 완료 보관: 이 달(YYYY-MM, 서울 기준)에 완료한 업무만 */
   doneMonth: z.string().regex(/^\d{4}-\d{2}$/).optional().catch(undefined),
@@ -138,6 +138,7 @@ export async function viewCounts(u: SessionUser, raw: Record<string, string>) {
   const units = await accessibleUnitIds(u, sql);
   const today = todaySeoul();
   const base = { ...raw }; delete base.view; delete base.assigneeId; delete base.limit; delete base.doneMonth; delete base.carried;
+  if (base.includeDone === 'week') base.includeDone = '0'; // #508 칩 건수 = 진행 중만(이번 주 완료는 목록 맨 아래 '완료됨' 칸)
   const parts = COUNT_VIEWS.map((v) => sql`(select count(*)::int from tasks t where ${taskWhere(sql, u, listQuery.parse({ ...base, view: v }), units, today)}) as ${sql(v)}`);
   const [r] = await sql<Record<string, number>[]>`select ${parts.reduce((a, c) => sql`${a}, ${c}`)}`;
   return { counts: r };
@@ -157,6 +158,8 @@ export async function doneMonths(u: SessionUser, raw: Record<string, string>) {
 /** 목록 조건(보기·필터·권한) — 목록과 V14 42번 칩 건수가 같은 규칙을 쓴다 */
 function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units: string[] | null, today: string) {
   const conds = [sql`t.deleted_at is null`, taskVisibleSql(sql, u, units)];
+  // #508 '완료됨' 칸: 진행 중 + 이번 주(월요일 0시, 서울) 완료 — 보기 조건의 '완료 아님' 자리에도 같이 씀
+  const notDone = q.includeDone === 'week' ? sql`(t.status <> 'done' or t.completed_at >= date_trunc('week', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul')` : sql`t.status <> 'done'`;
   if (q.parentId) conds.push(sql`t.parent_id = ${q.parentId}`);
   else if (q.includeSubtasks !== '1') conds.push(sql`t.parent_id is null`);
   if (q.projectId) conds.push(sql`t.project_id = ${q.projectId}`);
@@ -176,6 +179,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
   // V6 16번: 완료해도 오늘(서울 자정까지)은 목록에 남기고, 댓글이 달린 완료 업무는 7일 동안
   else if (q.includeDone === 'recent') conds.push(sql`(t.status <> 'done' or t.completed_at >= ${today}::date::timestamp at time zone 'Asia/Seoul'
     or (t.completed_at > now() - interval '7 days' and exists (select 1 from comments c where c.task_id = t.id and c.deleted_at is null)))`);
+  else if (q.includeDone === 'week') conds.push(notDone);
   if (q.q) {
     const like = '%' + q.q.replace(/[%_\\]/g, (m) => '\\' + m) + '%';
     conds.push(sql`(t.title ilike ${like} or t.description ilike ${like} or exists (select 1 from unnest(t.tags) tg where tg ilike ${like}))`);
@@ -189,7 +193,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
     case 'my':
       conds.push(sql`(${assignedSql(sql, u.id)} or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id})
         or exists (select 1 from task_checklist_items mi where mi.task_id = t.id and mi.assignee_id = ${u.id} and not mi.done))`); // R-15 6번: 내 몫 체크리스트가 남은 업무도
-      conds.push(sql`t.status <> 'done'`);
+      conds.push(notDone);
       break;
     case 'done': // V6 5번 완료 보관: 완료일 기준 (화면에서 월별로 묶음)
       conds.push(sql`t.status = 'done'`);
@@ -198,14 +202,14 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
       conds.push(sql`t.requested_by = ${u.id}`);
       break;
     case 'today':
-      conds.push(sql`${assignedSql(sql, u.id)} and t.status <> 'done' and (t.due_date <= ${today} or t.start_date <= ${today})`);
+      conds.push(sql`${assignedSql(sql, u.id)} and ${notDone} and (t.due_date <= ${today} or t.start_date <= ${today})`);
       break;
     case 'overdue':
       conds.push(sql`t.status <> 'done' and t.due_date < ${today}`);
       break;
     case 'week': {
       const w = weekRangeSeoul();
-      conds.push(sql`t.status <> 'done' and t.due_date between ${w.start} and ${w.end}`);
+      conds.push(sql`${notDone} and t.due_date between ${w.start} and ${w.end}`);
       break;
     }
     case 'review':
@@ -228,8 +232,11 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
   const sql = db();
   const units = await accessibleUnitIds(u, sql);
   const where = taskWhere(sql, u, q, units, todaySeoul());
-  const rows = await sql<any[]>`select ${TASK_COLS(sql, u.id)} ${TASK_FROM(sql)} where ${where}
-    order by ${q.view === 'done' ? sql`t.completed_at desc nulls last,` : sql``} t.due_date asc nulls last, t.priority = 'urgent' desc, t.priority = 'high' desc, t.sort_order, t.created_at
+  // #508 '완료됨' 칸 [되돌리기]: 완료 직전 상태(활동 기록 마지막 '→ 완료'의 이전 상태) — 다른 화면·다른 날 완료해도 원래 상태로
+  const prev = q.includeDone === 'week' ? sql`, case when t.status = 'done' then (select a.changes->'status'->>'from' from activities a where a.entity_type = 'task' and a.entity_id = t.id
+    and a.changes->'status'->>'to' = 'done' order by a.created_at desc limit 1) end as prev_status` : sql``;
+  const rows = await sql<any[]>`select ${TASK_COLS(sql, u.id)} ${prev} ${TASK_FROM(sql)} where ${where}
+    order by ${q.view === 'done' ? sql`t.completed_at desc nulls last,` : q.includeDone === 'week' ? sql`(t.status = 'done'),` : sql``} t.due_date asc nulls last, t.priority = 'urgent' desc, t.priority = 'high' desc, t.sort_order, t.created_at
     limit ${q.limit}`;
   if (q.view !== 'risk') return rows;
   const { deadlineRisk } = await import('./availability');
