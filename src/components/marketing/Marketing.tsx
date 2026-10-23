@@ -1,6 +1,6 @@
 'use client';
 import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
-import { MediaFull, MediaThumb, mimeOf, posterFrom } from '@/components/MediaView';
+import { MediaThumb } from '@/components/MediaView';
 import Link from 'next/link';
 import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -13,7 +13,10 @@ import { ApprovalCard, BrandChip, StatusChip, channelLabel, deadlineLabel, forma
 import { ProposalCard, BudgetCard } from './Ops';
 import { GoalCard, type Goal } from './Goals';
 import { MetaDraftCard, type MetaPlanRow } from './MetaAuto';
+import { ConceptSetCard, type ConceptSet } from './Concepts';
 import { QualityPanel, type QReport } from './QualityPanel';
+import { ChannelPreview } from './ChannelPreview';
+import { MODE_HINT, MODE_LABEL, ModeChip, ModeToggle, type Mode } from './ModeToggle';
 
 const C = '#7C3AED';
 export const CHANNELS: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
@@ -79,7 +82,7 @@ export function ApproveRow({ c, canDecide, onDone }: { c: CardContent; canDecide
 
 function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: () => void; date?: string }) {
   const brands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
-  const [f, setF] = useState({ title: '', channel: 'instagram', brandId: '', date: date ?? '', time: '10:00', body: '', cross: [] as string[], purpose: '', metric: '', message: '', why: '' }); // cross: 대표 10/20 '페이스북에도'·'스레드에도'(승인 1건) · purpose~why: 근거(대표 18:00 ①)
+  const [f, setF] = useState({ title: '', channel: 'instagram', brandId: '', date: date ?? '', time: '10:00', body: '', cross: [] as string[], purpose: '', metric: '', message: '', why: '', mode: 'content' as Mode }); // cross: 대표 10/20 '페이스북에도'·'스레드에도'(승인 1건) · purpose~why: 근거(대표 18:00 ①) · mode: #499-1 용도
   const [media, setMedia] = useState<{ id: string; title: string }[]>([]);
   const [ai, setAi] = useState<{ captions: string[]; hashtags: string[] } | null>(null); const [aiBusy, setAiBusy] = useState(false);
   async function draft() {
@@ -91,7 +94,7 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
   async function save(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api('/api/marketing/contents', { body: { title: f.title, channel: f.channel, brandId: f.brandId || null, scheduledAt: f.date ? `${f.date}T${f.time}:00+09:00` : null, body: f.body, mediaIds: media.map((m) => m.id), crossChannels: f.cross,
+      await api('/api/marketing/contents', { body: { title: f.title, channel: f.channel, brandId: f.brandId || null, scheduledAt: f.date ? `${f.date}T${f.time}:00+09:00` : null, body: f.body, mediaIds: media.map((m) => m.id), crossChannels: f.cross, mode: f.mode,
         rationale: { purpose: f.purpose || undefined, metric: f.metric || undefined, message: f.message || undefined, why: f.why || undefined } } });
       toast.ok('승인 대기에 올렸습니다'); onDone(); onClose();
     } catch (er: any) { toast.error(er.message); }
@@ -109,6 +112,8 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
           <Field label="게시일"><input type="date" className={inputCls} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} data-testid="mkt-date" /></Field>
           <Field label="시각"><input type="time" className={inputCls} value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
         </div>
+        {/* #499-1 용도: 콘텐츠형(참여)·광고형(전환) — 첫 줄 훅 채점 기준이 다름 */}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-2" data-testid="mkt-mode"><span className="font-medium text-ink">용도</span><ModeToggle value={f.mode} onChange={(m) => setF({ ...f, mode: m })} testId="mkt-mode-toggle" /><span className="text-ink-3">{MODE_HINT[f.mode]}</span></div>
         <Field label="본문·캡션"><textarea className={inputCls} rows={5} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} data-testid="mkt-body" />
           {/* #95 스레드 500자 한도 — 스레드 채널이거나 '스레드에도' 체크면 글자 수 표시 */}
           {(f.channel === 'threads' || f.cross.includes('threads')) && <span className={cx('mt-1 block text-right text-[11px] tabular-nums', [...f.body].length > 500 ? 'font-semibold text-red-600' : 'text-ink-3')} data-testid="mkt-threads-count">스레드 {[...f.body].length}/500자{[...f.body].length > 500 ? ' — 넘침' : ''}</span>}</Field>
@@ -135,26 +140,6 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
 }
 
 /** 콘텐츠 상세: 버전·시안·결정 기록 + (관리자) 승인·수정 요청·보류 + 수정본 올리기 + 게시 확인 */
-/** 대표 10/20 ②: 상세 첫 화면에 실제 게시 화면처럼 미리보기 — 인스타·페북·스레드는 카드(사진 + 캡션), 블로그는 제목·표지·본문(둘째 사진은 첫 문단 뒤), 유튜브는 16:9 표지 + 제목 */
-function PostPreview({ channel, kind, brand, title, body, media, info }: { channel: string; kind?: string | null; brand: string | null; title: string; body: string; media: string[]; info?: { id: string; mime: string | null }[] }) {
-  const [more, setMore] = useState(false);
-  // 대표 10/21 02:00: 영상(릴스·쇼츠)은 재생 가능한 <video>(세로 그대로), 같은 버전의 이미지는 포스터
-  const img = (id: string, cls: string) => <MediaFull src={`/api/library/${id}/download?inline=1`} mime={mimeOf(info, id)} poster={posterFrom(info, id) ? `/api/library/${posterFrom(info, id)}/download?inline=1` : null} className={cls} />;
-  const none = (cls: string) => <div className={cx(cls, 'flex items-center justify-center bg-slate-200 text-xs text-ink-2')}>시안 제작 중</div>;
-  const paras = body.split(/\n{2,}/).filter(Boolean);
-  const blog = channel === 'blog'; const yt = channel === 'youtube'; const vertical = kind === 'reels' || kind === 'shorts' || kind === 'story';
-  return (
-    <div className="mx-auto w-full max-w-sm overflow-hidden rounded-card border border-line bg-white text-sm shadow-card" data-testid="mkt-preview">
-      <div className="flex items-center gap-2 border-b border-line px-3 py-2"><span className="size-7 rounded-full" style={{ background: '#7C3AED' }} aria-hidden /><b className="truncate text-xs">{brand ?? '브랜드'}</b><span className="ml-auto text-[11px] text-ink-3">{channelLabel(channel, kind)} 미리보기</span></div>
-      {blog ? <div className="space-y-2 p-3"><h3 className="text-base font-bold">{title}</h3>{media[0] ? img(media[0], 'w-full rounded-input object-cover') : none('aspect-video w-full rounded-input')}
-        {(more ? paras : paras.slice(0, 2)).map((p, i) => <div key={i}><p className="whitespace-pre-wrap text-xs">{p}</p>{i === 0 && (media[1] ? img(media[1], 'mt-2 w-full rounded-input object-cover') : none('mt-2 aspect-video w-full rounded-input'))}</div>)}</div>
-      : <>{media[0] ? img(media[0], cx('w-full object-cover', vertical ? 'aspect-[9/16] max-h-80' : yt ? 'aspect-video' : 'aspect-square')) : none(vertical ? 'aspect-[9/16] max-h-80 w-full' : yt ? 'aspect-video w-full' : 'aspect-square w-full')}
-        {media.length > 1 && <p className="px-3 pt-1 text-[11px] text-ink-3">사진 {media.length}장</p>}
-        <p className={cx('whitespace-pre-wrap px-3 py-2 text-xs', !more && 'line-clamp-3')}><b className="mr-1">{brand ?? ''}</b>{yt ? title : body}</p></>}
-      {(blog ? paras.length > 2 : body.length > 80) && <button type="button" onClick={() => setMore(!more)} className="px-3 pb-2 text-xs font-medium text-violet-700" data-testid="mkt-preview-more">{more ? '접기' : '더보기'}</button>}
-    </div>
-  );
-}
 function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange: () => void }) {
   const { data, error, reload } = useApi<any>(`/api/marketing/contents/${id}`);
   const [comment, setComment] = useState(''); const [ver, setVer] = useState<{ body: string; media: { id: string; title: string }[]; note: string } | null>(null); const [url, setUrl] = useState(''); const [pubBusy, setPubBusy] = useState(false);
@@ -167,8 +152,8 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   const titleOf = (mid: string) => data.media.find((m: any) => m.id === mid)?.title ?? '자료';
   const targetAccs: { id: string; label: string; channel: string; brand: string | null; shared: boolean }[] = (data.publish?.targets ?? []).flatMap((t: any) => t.accounts.map((a: any) => ({ ...a, channel: t.label })));
   const pickedIds = targetAccs.filter((a) => !(a.id in picked) || picked[a.id]).map((a) => a.id);
-  async function fix(body: { brandId?: string | null; scheduledAt?: string | null }) {
-    try { await api(`/api/marketing/contents/${id}`, { method: 'PATCH', body }); toast.ok('바로잡았습니다'); setFixOpen(false); reload(); onChange(); } catch (e: any) { toast.error(e.message); }
+  async function fix(body: { brandId?: string | null; scheduledAt?: string | null; mode?: Mode }) {
+    try { await api(`/api/marketing/contents/${id}`, { method: 'PATCH', body }); toast.ok(body.mode ? `${MODE_LABEL[body.mode]} 기준으로 다시 채점했습니다` : '바로잡았습니다'); setFixOpen(false); reload(); onChange(); } catch (e: any) { toast.error(e.message); }
   }
   async function act(decision: 'approve' | 'changes' | 'hold') {
     try { await api(`/api/marketing/contents/${id}/decide`, { body: { version: c.current_version, decision, comment: comment || undefined } }); toast.ok({ approve: '승인했습니다', changes: '수정을 요청했습니다', hold: '보류했습니다' }[decision]); setComment(''); reload(); onChange(); } catch (e: any) { toast.error(e.message); reload(); }
@@ -214,7 +199,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
     <Modal open onClose={onClose} title={c.title} wide>
       <div className="space-y-3 text-sm" data-testid="mkt-detail">
         <AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContent} subject={`시안 ${String(c.title).slice(0, 40)}`} compact testId="ai-ask-content" />
-        <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b> · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
+        <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b>{c.mode === 'ad' && <> · <ModeChip mode="ad" /></>} · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
         {data.canDecide && c.status !== 'published' && (fixOpen ? (
           <div className="flex flex-wrap items-end gap-2 rounded-input border border-line p-2 text-xs" data-testid="mkt-fix">
             <label className="grid gap-0.5">브랜드<select className={cx(inputCls, 'h-8 py-0 text-xs')} value={fixBrand} onChange={(e) => setFixBrand(e.target.value)} data-testid="mkt-fix-brand"><option value="">(없음)</option>{(brandsQ.data?.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
@@ -225,10 +210,11 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         ) : <button type="button" className="text-xs underline text-ink-2" onClick={() => { setFixBrand(c.brand_id ?? ''); setFixAt(c.scheduled_at ? new Date(new Date(c.scheduled_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''); setFixOpen(true); }} data-testid="mkt-fix-open">브랜드·게시 예정 바로잡기</button>)}
         {c.quality?.passed === false && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">{c.auto ? '품질 검사: ' : ''}{c.quality.issues.join(' · ')}</p>}
         {data.qualityReport && <QualityPanel r={data.qualityReport as QReport} channel={c.channel} busy={qBusy}
+          onMode={data.canDecide && c.status !== 'published' ? (m) => fix({ mode: m }) : undefined}
           onPolish={data.canDecide && !['published', 'canceled', 'approved'].includes(c.status) && v?.body ? polish : undefined}
           onPickHook={data.canDecide && !['published', 'canceled'].includes(c.status) && c.kind !== 'blog' && v ? pickHook : undefined} />}
         <WhyBox r={c.rationale} />
-        {v && <PostPreview channel={c.channel} kind={c.kind} brand={c.brand} title={c.title} body={v.body} media={v.media_ids} info={(data.media ?? []).map((m: any) => ({ id: m.id, mime: m.mime_type }))} />}
+        {v && <ChannelPreview channel={c.channel} kind={c.kind} brand={c.brand} handle={c.handle} logo={c.brand_logo} color={c.brand_color} title={c.title} body={v.body} media={v.media_ids} info={(data.media ?? []).map((m: any) => ({ id: m.id, mime: m.mime_type }))} />}
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div></div>
@@ -286,9 +272,9 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
  * 승인함(대표 02:30 ①): 콘텐츠 시안 + 운영실 승인 요청(운영 제안·광고 예산·월 목표·제작 의뢰)을 종류별 탭으로 한곳에. 탭마다 건수, 카드에서 바로 승인·반려.
  * 반려 사유를 적으면 AI 가 사유를 반영한 v2 를 다시 올림(최대 3회). 콘텐츠 탭은 기존 승인함 그대로(승인 대기·수정 요청·보류).
  */
-type Inbox = { counts: { contents: number; proposals: number; budget: number; goals: number; briefs: number; ads: number }; total: number; proposals: any[]; budgets: any[]; goals: Goal[]; briefs: InboxBrief[]; ads: MetaPlanRow[]; kinds: Record<string, string>; canEdit: boolean; today: string; maxRevisions: number };
+type Inbox = { counts: { contents: number; proposals: number; budget: number; goals: number; briefs: number; ads: number; concepts: number }; total: number; proposals: any[]; budgets: any[]; goals: Goal[]; briefs: InboxBrief[]; ads: MetaPlanRow[]; concepts: ConceptSet[]; kinds: Record<string, string>; canEdit: boolean; today: string; maxRevisions: number; userId: string };
 type InboxBrief = { id: string; kind: string; channel: string; purpose: string; message: string; status: string; quantity: number; due_date: string | null; created_at: string; brand: string | null; created_by_name: string | null; summary_ko: string | null; model: string | null };
-const INBOX_TABS: [string, string][] = [['contents', '콘텐츠'], ['proposals', '운영 제안'], ['budget', '광고 예산'], ['ads', '광고 초안'], ['goals', '월 목표'], ['briefs', '제작 의뢰']];
+const INBOX_TABS: [string, string][] = [['contents', '콘텐츠'], ['proposals', '운영 제안'], ['budget', '광고 예산'], ['concepts', '광고 컨셉'], ['ads', '광고 초안'], ['goals', '월 목표'], ['briefs', '제작 의뢰']];
 export function Approvals() {
   const sp = useSearchParams();
   const [open, setOpen] = useState<string | null>(sp.get('c'));
@@ -326,6 +312,9 @@ function InboxTab({ tab, d, onChange }: { tab: string; d: Inbox; onChange: () =>
   // #494 메타 광고 초안(Meta 에 꺼진 채로 만든 것) — 승인하면 서버가 상한을 다시 확인하고 켬
   if (tab === 'ads') return d.ads.length ? <div className="grid gap-3 xl:grid-cols-2" data-testid="mkt-inbox-ads">{d.ads.map((r) => <MetaDraftCard key={r.id} r={r} canEdit={d.canEdit} onChange={onChange} />)}</div>
     : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops', '광고 운영에서 메타 광고 세팅 →');
+  // #499-4 상황 매트릭스: 1~4개 채택 → 광고형 제작 의뢰 · 반려 사유 → AI 고친 안
+  if (tab === 'concepts') return d.concepts.length ? <div className="space-y-3" data-testid="mkt-inbox-concepts">{d.concepts.map((s) => <ConceptSetCard key={s.id} s={s} canDecide={d.canEdit} userId={d.userId} maxRevisions={d.maxRevisions} onChange={onChange} />)}</div>
+    : empty('채택을 기다리는 광고 컨셉이 없습니다.', '/s/marketing/ops#concepts', '운영실에서 상황 매트릭스 만들기 →');
   if (tab === 'goals') return d.goals.length ? <div className="space-y-3" data-testid="mkt-inbox-goals">{d.goals.map((g) => <GoalCard key={g.id} g={g} canEdit={d.canEdit} today={d.today} onChange={onChange} />)}</div>
     : empty('승인 대기 중인 월 운영 목표 초안이 없습니다.', '/s/marketing/goals', '월 운영 목표 →');
   return d.briefs.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-briefs">{d.briefs.map((b) => <BriefDecisionCard key={b.id} b={b} canEdit={d.canEdit} onChange={onChange} />)}</div>

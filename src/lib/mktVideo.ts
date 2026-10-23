@@ -158,7 +158,8 @@ export async function renderTick() {
   return { kicked: rows.length };
 }
 
-async function libBytes(tenant: string, id: string | null | undefined, mime: RegExp) {
+/** 자료실 파일 바이트(기밀 제외) — 브랜드 키트 로고·글꼴, #499-5 카드뉴스도 씀 */
+export async function libBytes(tenant: string, id: string | null | undefined, mime: RegExp) {
   if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return null;
   const [f] = await db()<{ storage_key: string; mime_type: string; file_name: string; title: string }[]>`select storage_key, mime_type, file_name, title from library_files
     where id = ${id} and tenant = ${tenant} and deleted_at is null and upload_status = 'ready' and coalesce(security, 'internal') <> 'confidential'`;

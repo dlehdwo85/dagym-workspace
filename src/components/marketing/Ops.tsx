@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { RevenueGoal } from './RevenueGoal';
+import { ConceptBox } from './Concepts';
+import { AdRefBox } from './AdRefs';
 
 /**
  * 대표 10/20 20:00 ① 마케팅 운영실: AI 마케터(30년차)가 운영을 맡되 분석·방향·협업·인플루언서·계획은 '승인 요청 카드'로 올리고, 대표가 [승인]해야 실행(계획·방향 → 제작의뢰실, 협업·인플루언서·분석 → 업무).
@@ -52,6 +54,7 @@ export function Ops() {
     <div className="mx-auto max-w-5xl space-y-4" data-testid="mkt-ops">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold" style={{ color: C }}>운영실 <span className="text-sm font-normal text-ink-2">AI 마케터</span></h1>
+        <Link href="/s/marketing/team" className="text-xs text-ink-2 underline" data-testid="ops-team-link">AI 마케팅팀(역할·일정·기억) →</Link>
         <select className={cx(inputCls, 'h-8 w-auto py-0 text-sm')} value={data?.month ?? ''} onChange={(e) => setMonth(e.target.value)} aria-label="달" data-testid="ops-month">{(data?.months ?? []).map((m) => <option key={m} value={m}>{mk(m)}</option>)}</select>
         {data?.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={weekly} disabled={busy} data-testid="ops-weekly">주간 제안 만들기</Button>}
         {data?.canEdit && <Button size="sm" onClick={propose} disabled={busy} data-testid="ops-propose">AI 마케터 제안 받기</Button>}
@@ -88,6 +91,10 @@ export function Ops() {
           {pending.length === 0 && <div className="mt-2 rounded-card border border-dashed border-line p-6 text-center text-sm text-ink-2" data-testid="ops-empty">대기 중인 카드가 없습니다{data.canEdit ? ' — [AI 마케터 제안 받기]' : ''}</div>}
           <div className="mt-2 grid gap-3 md:grid-cols-2">{pending.map((p) => <ProposalCard key={p.id} p={p} kinds={data.kinds} canEdit={data.canEdit} onChange={reload} />)}</div>
         </section>
+        {/* #499-4 상황 매트릭스: 구매자 역할 × 상황 → AI 광고 컨셉 → 대표 1~4개 채택 → 광고형 제작 의뢰 */}
+        <ConceptBox />
+        {/* #499-6 경쟁 광고 보관함: 링크·영상(수집 없음) → 대본·첫 문장 유형 → 공통 구조 → 우리 대본 3안 */}
+        <AdRefBox />
         <BudgetCard b={data.budget} month={data.month} canEdit={data.canEdit} busy={busy} onDraft={draftBudget} onChange={reload} ownerTotal={data.ownerTotal} totalDefault={data.totalDefault} />
         {rest.length > 0 && <details className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ops-history"><summary className="cursor-pointer text-sm font-semibold">지난 카드 {rest.length}</summary>
           <div className="mt-2 grid gap-3 md:grid-cols-2">{rest.map((p) => <ProposalCard key={p.id} p={p} kinds={data.kinds} canEdit={data.canEdit} onChange={reload} />)}</div></details>}

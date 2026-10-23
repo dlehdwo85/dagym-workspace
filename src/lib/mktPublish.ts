@@ -203,6 +203,14 @@ export async function publishTargets(tenant: string, c: { channel: string; cross
       accounts: pick.map((a) => ({ id: a.id, label: a.label, status: a.status, brand: a.brand, shared: a.shared })), reason, unassigned: unassigned.map((a) => a.label) };
   });
 }
+/** #497 R06 미리보기 이름: 채널의 게시 계정 이름(@아이디·페이지 이름) — 브랜드 계정 먼저, 없으면 공용(publishTargets 와 같은 고르기) */
+export async function accountLabels(tenant: string) {
+  const accs = await db()<{ provider: string; label: string; brand_id: string | null; shared: boolean }[]>`select provider, label, brand_id, shared from mkt_publish_accounts where tenant = ${tenant} and status <> 'disconnected' order by label`;
+  return (channel: string, brandId: string | null) => {
+    const all = accs.filter((a) => a.provider === AUTO_CHANNELS[channel]);
+    return (all.find((a) => !!brandId && a.brand_id === brandId) ?? all.find((a) => a.shared))?.label ?? null;
+  };
+}
 /** [서버로 게시](관리자): 승인된 최신 버전 → 채널마다 연결 계정에 작업(대기). atSchedule=true 면 예정 시각 뒤에 실행 */
 export async function queuePublish(u: SessionUser, contentId: string, opts: { accountIds?: string[]; atSchedule?: boolean } = {}) {
   await assertSpace(u, 'marketing'); if (!isAdmin(u)) throw forbidden('서버 게시는 관리자가 누릅니다');

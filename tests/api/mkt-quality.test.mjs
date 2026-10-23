@@ -94,6 +94,7 @@ test('자동 제작 연결: 말투 프로필이 지시문에 · 약한 첫 줄�
   const r = await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: P.brand, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '23:00', topicHint: '가을 PT' });
   const slots = await sql`select id from mkt_contents where rule_id = ${r.id} order by scheduled_at limit 2`;
   const tags = '#다짐 #헬스 #PT #천안 #두정동 #운동 #가을';
+  // #499-1: '가을맞이 이벤트 진행 중'은 판매 문구로 시작 — 콘텐츠형(기본) '처음부터 판다' 15점 감점(25 → 10점)
   await ctl({ anthropicReset: true, anthropicQueue: [
     say({ title: '가을 PT', body: `가을맞이 이벤트 진행 중\n퇴근 후 20분, 같이 해요. 첫 상담은 댓글로 남겨 주세요.\n${tags}`, brief: '실사', why: '가을 목표', hooks: ['가을맞이 이벤트 진행 중', '안녕하세요 다짐입니다', '다양한 혜택을 놓치지 마세요'], keyword: '두정동 헬스장' }),
     say({ hooks: ['퇴근 후 20분이면 충분한 이유', '천안 직장인이라면 이 3가지만', '안녕하세요'] }),
@@ -110,7 +111,7 @@ test('자동 제작 연결: 말투 프로필이 지시문에 · 약한 첫 줄�
   assert.equal((v1.body.match(/#\S+/g) ?? []).length, 5, '해시태그 7개 → 5개');
   const rep = c1.quality.report;
   assert.deepEqual([rep.v, rep.hooks.length, rep.hook.pass, rep.keyword, re.passed, c1.status], [1, 3, true, '두정동 헬스장', true, 'pending']);
-  assert.ok(rep.notes.some((x) => x.includes('해시태그 2개 뺌')) && rep.notes.some((x) => x.startsWith('약한 훅(25점)을 바꿈')), JSON.stringify(rep.notes));
+  assert.ok(rep.notes.some((x) => x.includes('해시태그 2개 뺌')) && rep.notes.some((x) => x.startsWith('약한 훅(10점)을 바꿈')), JSON.stringify(rep.notes));
   const d = await ctx.owner.ok('GET', `/api/marketing/contents/${slots[0].id}`);
   assert.deepEqual([d.qualityReport.v, d.qualityReport.hooks.length], [1, 3], '상세 = 제작 때 보고서(훅 후보 포함)');
   const card = (await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals')).contents.find((x) => x.id === slots[0].id);

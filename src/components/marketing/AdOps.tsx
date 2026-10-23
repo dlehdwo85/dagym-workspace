@@ -1,9 +1,10 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { NAVER_REGIONS, regionLabel } from '@/lib/naverRegions';
+import { PLAN_KEYWORDS_MAX, combineKeywords } from '@/lib/kwCombine';
 import { MetaAuto } from './MetaAuto';
 
 const C = '#7C3AED';
@@ -19,14 +20,31 @@ type Ab = { status: 'not_started' | 'running' | 'winner' | 'partial' | 'tie'; me
 /** 광고 최적화 1차 ② 동네 타깃(반경은 동네 고르기용 — 네이버 파워링크는 반경 지정 없음) */
 type Local = { center: string; radiusKm: number; areas: string[]; region: string[]; abroad: boolean };
 const NO_LOCAL: Local = { center: '', radiusKm: 3, areas: [], region: [], abroad: false };
-type Plan = { id: string; account_id: string; brand_id?: string | null; brand?: string | null; kind: string; name: string; plan: { dailyBudget: number; bidAmt: number; channelId: string; keywords: string[]; ads: { headline: string; description: string; url: string }[]; test?: Test; local?: Local };
-  status: string; external: Record<string, unknown>; error: string | null; created_at: string; approved_at: string | null; account_label: string; approved_by_name: string | null; issues: string[]; ab?: Ab | null };
+/** #499-2 광고 설정(서버 adOps setupInput 과 같은 칸) */
+type Setup = { tracking: boolean; media: 'all' | 'naver'; pcWeight: number; mobileWeight: number; rolling: 'PERFORMANCE' | 'ROUND_ROBIN'; expSearch: boolean; expRatio: number; aiMax: boolean; negatives: string[] };
+/** 새 세팅안 추천값(테크트리 EP.7, 대표 결정 전): 자동 추적 켬 · 네이버 매체만 · PC 60/모바일 120 · 확장 검색 100%(ADVoost Max 는 네이버 기본 켬) · 성과 기반 */
+const SETUP_NEW: Setup = { tracking: true, media: 'naver', pcWeight: 60, mobileWeight: 120, rolling: 'PERFORMANCE', expSearch: true, expRatio: 100, aiMax: true, negatives: [] };
+const WEIGHT_PRESETS: [string, number, number][] = [['모바일 중심 60·120(영상 권고)', 60, 120], ['같게 100·100(네이버 기본)', 100, 100], ['PC 중심 120·60', 120, 60]];
+const NEG_STARTERS = ['구인', '채용', '알바', '아르바이트', '모집', '중고']; // 제외 키워드 시작 예(업종에 맞게 고침)
+const setupText = (s: Setup | undefined, abTest: boolean) => !s ? '네이버 기본값(광고 설정 칸이 생기기 전 세팅안)' : [
+  s.tracking ? '자동 추적 켬' : '자동 추적 끔', s.media === 'naver' ? '네이버 매체만' : '전체 매체', `PC ${s.pcWeight}%·모바일 ${s.mobileWeight}%`,
+  s.expSearch ? `확장 검색 켬(예산 ${s.expRatio}%${s.aiMax ? '' : ' · ADVoost Max 끔'}${s.negatives.length ? ` · 제외 키워드 ${s.negatives.length}개` : ''})` : '확장 검색 끔',
+  abTest ? '소재 동일 비중(3안 테스트)' : s.rolling === 'PERFORMANCE' ? '소재 성과 기반' : '소재 동일 비중'].join(' · ');
+type Plan = { id: string; account_id: string; brand_id?: string | null; brand?: string | null; kind: string; name: string; plan: { dailyBudget: number; bidAmt: number; channelId: string; keywords: string[]; ads: { headline: string; description: string; url: string }[]; test?: Test; local?: Local; setup?: Setup };
+  status: string; external: Record<string, unknown>; error: string | null; created_at: string; approved_at: string | null; account_label: string; approved_by_name: string | null; issues: string[]; advice?: string[]; ab?: Ab | null };
 type Change = { id: string; plan_id: string | null; kind: string; before: any; after: any; money_up: boolean; status: string; error: string | null; revert_of: string | null; created_at: string; actor_name: string | null };
 type Data = { canEdit: boolean; cap: { monthlyCap: number; stoppedMonth: string | null } | null; monthSpend: number; month: string; accounts: { id: string; label: string; external_id: string }[]; brands: { id: string; name: string }[]; plans: Plan[]; changes: Change[];
-  savings?: { pct: number; spend: number; amount: number; custom: boolean } };
+  savings?: { pct: number; spend: number; amount: number; custom: boolean }; budgetHint?: { naver: number; brands: Record<string, number> } | null };
 const STATUS: Record<string, [string, string]> = { draft: ['세팅안', 'bg-slate-100 text-ink-2'], creating: ['만드는 중', 'bg-sky-50 text-sky-800'], created: ['만듦 · 꺼짐', 'bg-sky-50 text-sky-800'], active: ['켜짐', 'bg-emerald-50 text-emerald-800'],
   paused: ['꺼짐', 'bg-amber-50 text-amber-800'], failed: ['만들기 실패', 'bg-red-50 text-red-800'] };
 const kwOk = (x: unknown) => Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === 'string' && v && v !== 'undefined');
+/** 카드 키워드 줄: 끈 키워드는 '(꺼짐)', 조합기로 수백 개면 앞 20개 + 외 n개 */
+const kwLabel = (p: Plan) => {
+  const locks = p.external?.kwLocks as Record<string, boolean> | undefined; const ids = p.external?.keywordIds as string[] | undefined;
+  const all = p.plan.keywords.map((k, j) => (locks?.[ids?.[j] ?? ''] ? `${k}(꺼짐)` : k));
+  return all.length > 20 ? `${all.slice(0, 20).join(', ')} 외 ${all.length - 20}개` : all.join(', ');
+};
+const negFailed = (p: Plan) => (Array.isArray(p.external?.negFailed) ? (p.external.negFailed as string[]) : []);
 const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable: '켜기', pause: '끄기', budget: '하루 예산 변경', auto_pause: '상한 도달 자동 중지', sync: '키워드 다시 읽기', ad_pause: '소재 끄기', ad_resume: '소재 켜기',
   region: '광고 지역 변경', keywords_add: '키워드 추가', keywords_remove: '키워드 빼기', kw_pause: '키워드 끄기', kw_resume: '키워드 켜기' };
 const REVERTIBLE = ['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add', 'kw_pause', 'kw_resume'];
@@ -86,9 +104,14 @@ export function AdOps() {
             <li key={p.id} className="rounded-input border border-line p-2 text-sm" data-testid="ad-plan">
               <div className="flex flex-wrap items-center gap-2"><b>{p.name}</b>{p.brand && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="ad-plan-brand">{p.brand}</span>}<span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', cls)} data-testid="ad-plan-status">{label}</span>
                 <span className="text-xs text-ink-2">{p.account_label} · 하루 {won(p.plan.dailyBudget)} · 입찰 {won(p.plan.bidAmt)} · 키워드 {p.plan.keywords.length}개</span></div>
-              <p className="mt-0.5 text-xs text-ink-2">키워드: {p.plan.keywords.map((k, j) => ((p.external?.kwLocks as Record<string, boolean> | undefined)?.[(p.external?.keywordIds as string[] | undefined)?.[j] ?? ''] ? `${k}(꺼짐)` : k)).join(', ')}</p>
+              <p className="mt-0.5 text-xs text-ink-2" data-testid="ad-plan-kw-line">키워드: {kwLabel(p)}</p>
               {p.plan.ads.map((a, k) => <p key={k} className="mt-0.5 text-xs"><b className="text-emerald-800">{a.headline}</b> {a.description} <span className="text-ink-3">{a.url}</span></p>)}
+              <p className="mt-0.5 text-xs text-ink-2" data-testid="ad-plan-setup">광고 설정: {setupText(p.plan.setup, !!p.plan.test?.on)}</p>
               {p.issues.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-amber-800" data-testid="ad-plan-issues">{p.issues.map((x, k) => <li key={k}>검사: {x}</li>)}</ul>}
+              {/* #499-2 권고는 시작을 막지 않음(연결 주소·광고형 문구·질문형 제목·제외 키워드) */}
+              {!!p.advice?.length && ['draft', 'failed'].includes(p.status) && <ul className="mt-1 space-y-0.5 text-xs text-sky-900" data-testid="ad-plan-advice">{p.advice.map((x, k) => <li key={k}>권고: {x}</li>)}</ul>}
+              {negFailed(p).length > 0 && <p className="mt-1 break-words text-xs text-amber-800" data-testid="ad-plan-neg-failed">제외 키워드 {negFailed(p).length}개는 네이버가 받지 않았습니다 — {negFailed(p).join(' / ')} · 네이버 광고 시스템에서 직접 넣어 주세요</p>}
+              {['created', 'active', 'paused'].includes(p.status) && <p className="mt-0.5 text-xs text-ink-3" data-testid="ad-plan-manual">직접 할 일(권장): 파워링크 이미지(썸네일 확장 소재)는 네이버 API로 만들 수 없어, 네이버 광고 시스템에서 이 광고그룹에 등록합니다.</p>}
               {p.error && <p className="mt-1 break-words text-xs text-red-700">{p.error}</p>}
               {p.plan.local && (p.plan.local.center || p.plan.local.areas?.length || p.plan.local.region?.length) ? <p className="mt-0.5 text-xs text-ink-2" data-testid="ad-plan-local">동네 타깃: {p.plan.local.center ? `${p.plan.local.center} 반경 ${p.plan.local.radiusKm}km` : '중심 없음'}{p.plan.local.areas?.length ? ` · 동네 ${p.plan.local.areas.length}곳(${kwList(p.plan.local.areas)})` : ''} · 광고 지역 {regionLabel(p.plan.local.region)}{p.plan.local.abroad ? '·해외' : ''}</p> : null}
               {p.ab && <AbBox p={p} ab={p.ab} canEdit={data.canEdit} busy={busy === p.id} run={run} />}
@@ -133,7 +156,7 @@ export function AdOps() {
             </li>);
         })}{!data.changes.length && <li className="py-1.5 text-ink-3">아직 변경이 없습니다</li>}</ul>
       </section>
-      {form && <PlanForm accounts={data.accounts} brands={data.brands ?? []} edit={form === true ? undefined : form} onClose={() => setForm(false)} onDone={reload} />}
+      {form && <PlanForm accounts={data.accounts} brands={data.brands ?? []} budgetHint={data.budgetHint ?? null} edit={form === true ? undefined : form} onClose={() => setForm(false)} onDone={reload} />}
       {local?.mode === 'keywords' && <Modal open onClose={() => setLocal(null)} title="동네 키워드 추가">
         <LocalFinder accountId={local.p.account_id} value={{ ...NO_LOCAL, ...(local.p.plan.local ?? {}) }} have={local.p.plan.keywords} pickLabel="광고에 키워드 추가"
           onPick={(keywords, v) => { const lp = local.p; setLocal(null); run(lp.id, () => api(`/api/marketing/ad-ops/plans/${lp.id}/action`, { body: { action: 'keywords_add', keywords, local: { center: v.center, radiusKm: v.radiusKm, areas: v.areas } } }), `키워드 ${keywords.length}개를 광고에 넣었습니다(그룹 입찰가)`); }} />
@@ -144,26 +167,46 @@ export function AdOps() {
   );
 }
 
-function PlanForm({ accounts, brands, edit, onClose, onDone }: { accounts: Data['accounts']; brands: Data['brands']; edit?: Plan; onClose: () => void; onDone: () => void }) {
+function PlanForm({ accounts, brands, budgetHint, edit, onClose, onDone }: { accounts: Data['accounts']; brands: Data['brands']; budgetHint: Data['budgetHint']; edit?: Plan; onClose: () => void; onDone: () => void }) {
   const [f, setF] = useState(edit
     ? { accountId: edit.account_id, brandId: edit.brand_id ?? '', name: edit.name, dailyBudget: String(edit.plan.dailyBudget), bidAmt: String(edit.plan.bidAmt), channelId: edit.plan.channelId, keywords: edit.plan.keywords.join(', '), ads: edit.plan.ads.map((a) => ({ ...a })),
-        test: { on: !!edit.plan.test?.on, days: String(edit.plan.test?.days ?? 7), min: String(edit.plan.test?.minImpressions ?? 300), after: edit.plan.test?.afterBudget ? String(edit.plan.test.afterBudget) : '' }, local: { ...NO_LOCAL, ...(edit.plan.local ?? {}) } }
-    : { accountId: accounts[0]?.id ?? '', brandId: '', name: '', dailyBudget: '10000', bidAmt: '300', channelId: '', keywords: '', ads: [{ headline: '', description: '', url: 'https://' }], test: { on: false, days: '7', min: '300', after: '' }, local: NO_LOCAL });
+        test: { on: !!edit.plan.test?.on, days: String(edit.plan.test?.days ?? 7), min: String(edit.plan.test?.minImpressions ?? 300), after: edit.plan.test?.afterBudget ? String(edit.plan.test.afterBudget) : '' }, local: { ...NO_LOCAL, ...(edit.plan.local ?? {}) },
+        setup: { ...SETUP_NEW, ...(edit.plan.setup ?? {}) }, negText: (edit.plan.setup?.negatives ?? []).join(', ') }
+    : { accountId: accounts[0]?.id ?? '', brandId: '', name: '', dailyBudget: '10000', bidAmt: '300', channelId: '', keywords: '', ads: [{ headline: '', description: '', url: 'https://' }], test: { on: false, days: '7', min: '300', after: '' }, local: NO_LOCAL,
+        setup: SETUP_NEW, negText: '' });
   const ch = useApi<{ channels: { id: string; name: string; url: string | null; type: string }[] }>(f.accountId ? `/api/marketing/ad-ops/channels?accountId=${f.accountId}` : null, [f.accountId]);
   const [busy, setBusy] = useState(false);
   const setAd = (k: number, patch: Partial<(typeof f.ads)[number]>) => setF({ ...f, ads: f.ads.map((a, i) => (i === k ? { ...a, ...patch } : a)) });
+  const setS = (patch: Partial<Setup>) => setF((x) => ({ ...x, setup: { ...x.setup, ...patch } }));
+  /** 키워드 칸에 덧붙이기(띄어쓰기 무시 중복 제거) — 세팅안 한도를 넘는 것은 넣지 않고 알림 */
+  const addKw = (add: string[]) => {
+    const n = mergeKw(f.keywords, add).length;
+    if (n > PLAN_KEYWORDS_MAX) toast.error(`키워드는 ${PLAN_KEYWORDS_MAX}개까지입니다 — 넘는 ${n - PLAN_KEYWORDS_MAX}개는 넣지 않았습니다`);
+    setF((x) => ({ ...x, keywords: mergeKw(x.keywords, add).slice(0, PLAN_KEYWORDS_MAX).join(', ') }));
+  };
+  const kwCount = splitKw(f.keywords).length;
+  const negs = splitKw(f.negText);
   async function save(e: React.FormEvent) {
-    e.preventDefault(); setBusy(true);
+    e.preventDefault();
+    const bad = kwCount > PLAN_KEYWORDS_MAX ? `키워드는 ${PLAN_KEYWORDS_MAX}개까지입니다(지금 ${kwCount}개)` : [f.setup.pcWeight, f.setup.mobileWeight].some((w) => w < 10 || w > 500) ? 'PC·모바일 입찰 가중치는 10~500% 입니다'
+      : f.setup.expRatio < 1 || f.setup.expRatio > 100 ? '확장 검색 예산 비율은 1~100% 입니다' : negs.length > 100 ? '제외 키워드는 100개까지입니다' : '';
+    if (bad) { toast.error(bad); return; }
+    setBusy(true);
     try {
       const r = await api<{ issues: string[] }>(edit ? `/api/marketing/ad-ops/plans/${edit.id}` : '/api/marketing/ad-ops/plans', { method: edit ? 'PUT' : 'POST', body: { accountId: f.accountId, brandId: f.brandId || null, name: f.name, dailyBudget: Number(f.dailyBudget), bidAmt: Number(f.bidAmt), channelId: f.channelId,
-        keywords: f.keywords.split(/[\n,]/).map((s) => s.trim()).filter(Boolean), ads: f.ads,
+        keywords: splitKw(f.keywords), ads: f.ads,
         test: { on: f.test.on, days: Number(f.test.days) || 7, minImpressions: Number(f.test.min) || 300, afterBudget: f.test.after ? Number(f.test.after) : null },
-        ...(f.local.center || f.local.areas.length || f.local.region.length ? { local: f.local } : {}) } });
+        ...(f.local.center || f.local.areas.length || f.local.region.length ? { local: f.local } : {}), setup: { ...f.setup, negatives: negs } } });
       r.issues.length ? toast.error(`저장했습니다 — 검사 ${r.issues.length}건을 고쳐야 시작할 수 있습니다`) : toast.ok('세팅안을 저장했습니다');
       onDone(); onClose();
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   const len = (s: string) => [...s].length;
+  // #499-2 하루 예산 권장 = 월 예산 ÷ 30 × 1.5(테크트리 3장 C — 넘치는 날을 받아 주고 마지막 방어선은 월 상한). 월 = 이번 달 승인된 광고 예산의 네이버 몫(브랜드를 고르면 그 브랜드 몫)
+  const brandMonthly = f.brandId ? budgetHint?.brands?.[f.brandId] : undefined;
+  const monthly = brandMonthly ?? budgetHint?.naver ?? 0;
+  const daily = monthly ? Math.max(100, Math.round(((monthly / 30) * 1.5) / 100) * 100) : 0;
+  const bid = Number(f.bidAmt) || 0;
   return (
     <Modal open onClose={onClose} title={edit ? '세팅안 고치기' : '네이버 파워링크 세팅안'}>
       <form onSubmit={save} className="grid gap-3 text-sm" data-testid="ad-plan-form">
@@ -174,20 +217,58 @@ function PlanForm({ accounts, brands, edit, onClose, onDone }: { accounts: Data[
           <Field label="하루 예산(원)"><input className={inputCls} inputMode="numeric" value={f.dailyBudget} onChange={(e) => setF({ ...f, dailyBudget: e.target.value.replace(/\D/g, '') })} required data-testid="ad-plan-budget-input" /></Field>
           <Field label="기본 입찰가(원, 70~)"><input className={inputCls} inputMode="numeric" value={f.bidAmt} onChange={(e) => setF({ ...f, bidAmt: e.target.value.replace(/\D/g, '') })} required data-testid="ad-plan-bid" /></Field>
         </div>
+        <p className="-mt-2 text-[11px] text-ink-3" data-testid="ad-plan-budget-hint">{daily
+          ? <>권장 하루 예산 {won(daily)} — 이번 달 승인된 네이버 예산{brandMonthly !== undefined ? '(이 브랜드 몫)' : ''} {won(monthly)} ÷ 30 × 1.5. 마지막 방어선은 월 상한입니다. <button type="button" className="underline" onClick={() => setF({ ...f, dailyBudget: String(daily) })} data-testid="ad-plan-budget-apply">넣기</button></>
+          : '권장 하루 예산 = 월 예산 ÷ 30 × 1.5(넘치는 날을 받아 줌). 마지막 방어선은 월 상한입니다.'}</p>
         <Field label="광고할 웹사이트(네이버에 등록된 비즈채널)">
           {ch.data?.channels.length ? <select className={inputCls} value={f.channelId} onChange={(e) => setF({ ...f, channelId: e.target.value })} required data-testid="ad-plan-channel"><option value="">고르기</option>{ch.data.channels.map((c) => <option key={c.id} value={c.id}>{c.name}{c.url ? ` (${c.url})` : ''}{c.type && !/SITE/i.test(c.type) ? ` · ${c.type}` : ''}</option>)}</select>
             : <><input className={inputCls} value={f.channelId} onChange={(e) => setF({ ...f, channelId: e.target.value })} required data-testid="ad-plan-channel"
                 placeholder={!ch.data && !ch.error ? '불러오는 중…' : '비즈채널 id(bsn-…) 직접 입력'} />
               {(ch.error || ch.data) && <span className="mt-1 block text-[11px] text-amber-800" data-testid="ad-plan-channel-hint">{ch.error ? `목록을 못 읽었습니다: ${ch.error.message}` : '이 계정에서 웹사이트 비즈채널을 찾지 못했습니다'} — 네이버 광고 시스템 › 도구 › 비즈채널 관리에서 id 를 복사해 넣어 주세요.</span>}</>}
         </Field>
-        <Field label="키워드(쉼표·줄바꿈으로 구분, 50개까지)"><textarea className={inputCls} rows={3} value={f.keywords} onChange={(e) => setF({ ...f, keywords: e.target.value })} required data-testid="ad-plan-keywords" /></Field>
+        <Field label={`키워드(쉼표·줄바꿈으로 구분, ${PLAN_KEYWORDS_MAX}개까지) — 지금 ${kwCount}개`}><textarea className={cx(inputCls, kwCount > PLAN_KEYWORDS_MAX && 'border-red-400')} rows={3} value={f.keywords} onChange={(e) => setF({ ...f, keywords: e.target.value })} required data-testid="ad-plan-keywords" /></Field>
+        {/* #499-2 키워드 N단 조합기 */}
+        <details className="rounded-input border border-line p-2" data-testid="kw-combiner-section">
+          <summary className="cursor-pointer text-xs font-medium">키워드 조합기(선택) — 단어 그룹 2~4개를 곱해 롱테일 키워드 만들기</summary>
+          <div className="mt-2"><KwCombiner accountId={f.accountId} have={splitKw(f.keywords)} onPick={addKw} /></div>
+        </details>
         {/* 광고 최적화 1차 ② 동네 타깃 */}
         <details className="rounded-input border border-line p-2" data-testid="ad-plan-local-section" open={!!(f.local.center || f.local.areas.length || f.local.region.length)}>
           <summary className="cursor-pointer text-xs font-medium">동네 타깃(선택) — 반경 안 동네 키워드 · 광고 지역</summary>
           <div className="mt-2 grid gap-3">
-            <LocalFinder accountId={f.accountId} value={f.local} have={splitKw(f.keywords)} onChange={(v) => setF((x) => ({ ...x, local: { ...x.local, ...v } }))} pickLabel="키워드에 넣기"
-              onPick={(keywords) => { if (mergeKw(f.keywords, keywords).length > 50) toast.error('키워드는 50개까지입니다 — 넘는 것은 빼 주세요'); setF((x) => ({ ...x, keywords: mergeKw(x.keywords, keywords).join(', ') })); }} />
+            <LocalFinder accountId={f.accountId} value={f.local} have={splitKw(f.keywords)} onChange={(v) => setF((x) => ({ ...x, local: { ...x.local, ...v } }))} pickLabel="키워드에 넣기" onPick={(keywords) => addKw(keywords)} />
             <RegionPicker region={f.local.region} abroad={f.local.abroad} onChange={(region, abroad) => setF((x) => ({ ...x, local: { ...x.local, region, abroad } }))} />
+          </div>
+        </details>
+        {/* #499-2 광고 설정(테크트리 EP.7) — 네이버 공식 API 칸, 새 세팅안은 추천값 */}
+        <details className="rounded-input border border-line p-2" data-testid="ad-setup" open>
+          <summary className="cursor-pointer text-xs font-medium">광고 설정 — <span className="font-normal text-ink-2" data-testid="ad-setup-summary">{setupText({ ...f.setup, negatives: negs }, f.test.on)}</span></summary>
+          <div className="mt-2 grid gap-2 text-xs">
+            <label className="flex items-start gap-2"><input type="checkbox" className="mt-0.5" checked={f.setup.tracking} onChange={(e) => setS({ tracking: e.target.checked })} data-testid="setup-tracking" />
+              <span><b>자동 추적 URL 파라미터</b>(추천) — 광고로 들어온 문의·전화에 검색 키워드가 함께 남아 키워드별 문의를 셉니다.</span></label>
+            <Field label="노출 매체"><select className={inputCls} value={f.setup.media} onChange={(e) => setS({ media: e.target.value as Setup['media'] })} data-testid="setup-media">
+              <option value="naver">네이버 매체만(추천 · 파트너 제외)</option><option value="all">전체 매체(네이버 기본 · 파트너 포함)</option></select>
+              <span className="mt-1 block text-[11px] text-ink-3">네이버 매체만 = 검색·콘텐츠 모두 네이버 안에서만 보입니다(네이버와 제휴한 파트너 사이트 제외).</span></Field>
+            <div><p className="mb-1 font-medium">PC·모바일 입찰 가중치</p>
+              <div className="flex flex-wrap gap-1">{WEIGHT_PRESETS.map(([label, pc, mo]) => { const on = f.setup.pcWeight === pc && f.setup.mobileWeight === mo; return (
+                <button key={label} type="button" aria-pressed={on} className={cx('rounded-full border px-2 py-0.5', on ? 'border-violet-500 bg-violet-600 text-white' : 'border-line bg-white')} onClick={() => setS({ pcWeight: pc, mobileWeight: mo })} data-testid="setup-weight-preset">{label}</button>); })}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1 whitespace-nowrap">PC <PctInput value={f.setup.pcWeight} onChange={(n) => setS({ pcWeight: n })} label="PC 입찰 가중치(%)" testId="setup-pc" />%</label>
+                <label className="flex items-center gap-1 whitespace-nowrap">모바일 <PctInput value={f.setup.mobileWeight} onChange={(n) => setS({ mobileWeight: n })} label="모바일 입찰 가중치(%)" testId="setup-mobile" />%</label>
+                <span className="text-ink-3" data-testid="setup-weight-bid">입찰 {won(bid)} → PC 약 {won((bid * f.setup.pcWeight) / 100)} · 모바일 약 {won((bid * f.setup.mobileWeight) / 100)} (10~500%)</span></div>
+              <p className="mt-0.5 text-[11px] text-ink-3">60·120 은 영상(의류 쇼핑몰)의 값입니다 — 우리 업종 PC·모바일 문의 실적을 보고 조정하세요.</p></div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label className="flex items-center gap-1"><input type="checkbox" checked={f.setup.expSearch} onChange={(e) => setS({ expSearch: e.target.checked })} data-testid="setup-exp" /><b>확장 검색</b>(네이버 기본 켬)</label>
+              {f.setup.expSearch && <label className="flex items-center gap-1 whitespace-nowrap">예산 비율 <PctInput value={f.setup.expRatio} onChange={(n) => setS({ expRatio: n })} label="확장 검색 예산 비율(%)" testId="setup-exp-ratio" />%</label>}
+              {f.setup.expSearch && <label className="flex items-center gap-1"><input type="checkbox" checked={f.setup.aiMax} onChange={(e) => setS({ aiMax: e.target.checked })} data-testid="setup-aimax" />ADVoost Max(네이버 기본 켬)</label>}
+            </div>
+            {f.setup.expSearch && <p className="text-[11px] text-ink-3">확장 검색은 등록 키워드와 비슷한 검색어에도 광고를 내고, 연결 페이지 내용으로 검색어를 맞춥니다. 예산 비율은 예산 중 확장 검색에 쓸 수 있는 몫(입찰 가중치가 아님)입니다. ADVoost Max 는 네이버가 확장 검색 그룹에 기본으로 켜는 AI 설정입니다.</p>}
+            {f.setup.expSearch && <Field label={`확장 검색 제외 키워드(쉼표로, 100개까지) — ${negs.length}개`}><textarea className={inputCls} rows={2} value={f.negText} onChange={(e) => setF({ ...f, negText: e.target.value })} placeholder="예: 구인, 채용, 알바" data-testid="setup-negatives" />
+              <span className="mt-1 flex flex-wrap gap-1">{NEG_STARTERS.filter((w) => !negs.includes(w)).map((w) => <button key={w} type="button" className="rounded-full border border-line px-2 py-0.5 text-[11px]" onClick={() => setF((x) => ({ ...x, negText: [...splitKw(x.negText), w].join(', ') }))} data-testid="setup-neg-chip">+ {w}</button>)}</span></Field>}
+            <Field label="소재 노출 방식"><select className={inputCls} value={f.test.on ? 'ROUND_ROBIN' : f.setup.rolling} disabled={f.test.on} onChange={(e) => setS({ rolling: e.target.value as Setup['rolling'] })} data-testid="setup-rolling">
+              <option value="PERFORMANCE">성과 기반(추천 — 성과 좋은 소재를 더 자주)</option><option value="ROUND_ROBIN">동일 비중(번갈아)</option></select>
+              {f.test.on && <span className="mt-1 block text-[11px] text-ink-3">3안 소액 테스트 중에는 공정하게 비교하도록 동일 비중으로 만듭니다.</span>}</Field>
+            <p className="text-[11px] text-ink-3">파워링크 이미지(썸네일 확장 소재)는 네이버 API로 만들 수 없어, 만든 뒤 네이버 광고 시스템에서 직접 등록합니다.</p>
           </div>
         </details>
         {f.ads.map((a, k) => (
@@ -198,6 +279,7 @@ function PlanForm({ accounts, brands, edit, onClose, onDone }: { accounts: Data[
             <span className={cx('text-[11px]', len(a.headline) > 15 || len(a.description) > 45 || badChars(a.headline + a.description) ? 'text-red-700' : 'text-ink-3')} data-testid="ad-plan-len">제목 {len(a.headline)}/15 · 설명 {len(a.description)}/45{badChars(a.headline + a.description) ? ` · 쓸 수 없는 문자 ${badChars(a.headline + a.description)}` : ''}</span>
           </fieldset>))}
         {f.ads.length < 3 && <Button type="button" size="sm" variant="secondary" className="justify-self-start" onClick={() => setF({ ...f, ads: [...f.ads, { headline: '', description: '', url: f.ads[0].url }] })}>소재 추가(3개까지)</Button>}
+        <p className="text-[11px] text-ink-3">문구 팁: 연결 주소는 서비스별 페이지로, 제목엔 소구점(+ 물음표 질문형 한 안), 설명엔 무엇을 주는지(무료 상담·진단 등) — 저장하면 광고형 점수와 권고를 보여 드립니다(시작은 막지 않음).</p>
         {/* 광고 최적화 1차 ① 3안 소액 테스트 */}
         <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" checked={f.test.on} onChange={(e) => setF({ ...f, test: { ...f.test, on: e.target.checked } })} data-testid="ad-plan-ab" />
           <span><b>3안 소액 테스트</b> — 소재 2~3개를 같은 예산으로 비교하고, 이긴 안이 나오면 [이긴 안에 집중]으로 진 안을 끄고 예산을 모읍니다.</span></label>
@@ -211,6 +293,74 @@ function PlanForm({ accounts, brands, edit, onClose, onDone }: { accounts: Data[
         <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy} data-testid="ad-plan-save">세팅안 저장</Button></div>
       </form>
     </Modal>
+  );
+}
+
+/** 좁은 % 칸 — inputCls 의 w-full 을 감싸는 폭으로 제한 */
+function PctInput({ value, onChange, label, testId }: { value: number; onChange: (n: number) => void; label: string; testId: string }) {
+  return <span className="inline-block w-20"><input className={cx(inputCls, 'h-8 py-1')} inputMode="numeric" value={value || ''} onChange={(e) => onChange(Number(e.target.value.replace(/\D/g, '')) || 0)} aria-label={label} data-testid={testId} /></span>;
+}
+
+type CombRow = { keyword: string; pc: number | null; mobile: number | null; total: number; low: boolean };
+const GROUP_HINT = ['예: 아파트, 신축아파트, 단지', '예: 커뮤니티, 헬스장, 골프연습장', '예: 운영, 위탁운영, 운영업체', '(선택) 네 번째 그룹'];
+/**
+ * #499-2 키워드 N단 조합기(테크트리 EP.7): 단어 그룹 2~4개 → 조합(화면에서 바로 셈, 최대 300개) → [검색량 확인](네이버 키워드 도구) → 고르기.
+ * 영상 절차: 같은 그룹 안 단어끼리 꾸밀 수 없으면 그 단어를 앞 그룹에도 넣는다. '빼도 됨' 그룹은 그 그룹 없는 조합도 만든다.
+ */
+function KwCombiner({ accountId, have, onPick }: { accountId: string; have: string[]; onPick: (keywords: string[]) => void }) {
+  const [groups, setGroups] = useState(GROUP_HINT.map(() => ({ text: '', optional: false })));
+  const [rows, setRows] = useState<CombRow[] | null>(null);
+  const [related, setRelated] = useState<{ keyword: string; total: number }[]>([]);
+  const [pick, setPick] = useState<Set<string>>(new Set());
+  const [low, setLow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const gs = useMemo(() => groups.map((g) => ({ words: splitKw(g.text).filter((w) => [...w].length <= 20).slice(0, 20), optional: g.optional })).filter((g) => g.words.length), [groups]);
+  const comb = useMemo(() => combineKeywords(gs), [gs]);
+  const haveSet = new Set(have.map(kwKey));
+  const setG = (i: number, patch: Partial<{ text: string; optional: boolean }>) => { setGroups((g) => g.map((x, j) => (j === i ? { ...x, ...patch } : x))); setRows(null); };
+  async function check() {
+    setBusy(true);
+    try {
+      const r = await api<{ rows: CombRow[]; truncated: boolean; failed: number; related: { keyword: string; total: number }[] }>('/api/marketing/ad-ops/keywords/combine', { body: { accountId, groups: gs } });
+      setRows(r.rows); setRelated(r.related); setPick(new Set(r.rows.filter((x) => !haveSet.has(kwKey(x.keyword)) && (low || !x.low)).map((x) => x.keyword)));
+      setNote(r.failed ? `검색량을 읽지 못한 조합 ${r.failed}개는 '자료 없음'으로 표시했습니다(네이버 키워드 도구 응답 실패 — 다시 확인하거나 그대로 넣을 수 있습니다).` : '');
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  const toggle = (k: string) => setPick((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const toggleLow = (on: boolean) => { setLow(on); if (rows) setPick((s) => { const n = new Set(s); for (const x of rows) if (x.low && !haveSet.has(kwKey(x.keyword))) { if (on) n.add(x.keyword); else n.delete(x.keyword); } return n; }); };
+  const fresh = comb.keywords.filter((k) => !haveSet.has(kwKey(k)));
+  return (
+    <div className="grid gap-2 text-xs" data-testid="kw-combiner">
+      {groups.map((g, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span className="w-12 shrink-0 text-ink-2">그룹 {i + 1}</span>
+          <input className={cx(inputCls, 'h-8 min-w-0 flex-1 text-xs')} value={g.text} onChange={(e) => setG(i, { text: e.target.value })} placeholder={GROUP_HINT[i]} aria-label={`단어 그룹 ${i + 1}`} data-testid="kw-group" />
+          <label className="flex shrink-0 items-center gap-1 whitespace-nowrap"><input type="checkbox" checked={g.optional} onChange={(e) => setG(i, { optional: e.target.checked })} data-testid="kw-group-optional" />빼도 됨</label>
+        </div>))}
+      <p className="text-ink-2" data-testid="kw-comb-count">조합 {comb.keywords.length}개{comb.truncated ? `(${PLAN_KEYWORDS_MAX}개에서 자름 — 그룹 단어를 줄이세요)` : ''}{comb.keywords.length ? ` · 예: ${comb.keywords.slice(0, 3).join(', ')}` : ' — 그룹 2개 이상에 단어를 쉼표로 넣으세요'}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" variant="secondary" disabled={!accountId || gs.length < 2 || !comb.keywords.length || busy} onClick={check} data-testid="kw-comb-check">{busy ? '확인 중…' : '검색량 확인'}</Button>
+        <Button type="button" size="sm" variant="secondary" disabled={!fresh.length || busy} onClick={() => onPick(fresh)} data-testid="kw-comb-all">조합 {fresh.length}개 모두 넣기(검색량 확인 없이)</Button>
+      </div>
+      {busy && comb.keywords.length > 50 && <p className="text-[11px] text-ink-3">조합이 많으면 30초 넘게 걸릴 수 있습니다.</p>}
+      {note && <p className="text-[11px] text-amber-800" data-testid="kw-comb-note">{note}</p>}
+      {rows && <>
+        <label className="flex items-start gap-1"><input type="checkbox" className="mt-0.5" checked={low} onChange={(e) => toggleLow(e.target.checked)} data-testid="kw-comb-low" />
+          <span>검색량 낮음(월 20 미만)도 함께 넣기 — 영상은 검색량 0인 조합도 등록하지만, 확장 검색을 켜면 그 이득이 줄어듭니다.</span></label>
+        <div className="max-h-64 overflow-auto rounded-input border border-line" data-testid="kw-comb-rows"><table className="w-full min-w-[360px] text-left">
+          <thead className="sticky top-0 bg-white"><tr className="text-ink-2"><th className="w-6" /><th className="py-1 font-medium">조합</th><th className="pr-1 text-right font-medium">월 검색(네이버)</th></tr></thead>
+          <tbody className="divide-y divide-line tabular-nums">{rows.map((x) => { const dup = haveSet.has(kwKey(x.keyword)); return (
+            <tr key={x.keyword} className={cx(x.low && 'text-ink-3')} data-testid="kw-comb-row" data-low={x.low ? '1' : '0'}>
+              <td className="pl-1"><input type="checkbox" checked={pick.has(x.keyword)} disabled={dup} onChange={() => toggle(x.keyword)} aria-label={`${x.keyword} 고르기`} /></td>
+              <td className="py-1">{x.keyword}{dup && <span className="ml-1 text-ink-3">(이미 있음)</span>}{x.low && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px]">검색 거의 없음</span>}</td>
+              <td className="pr-1 text-right">{x.pc === null ? '자료 없음' : `${n0(x.total)} (PC ${n0(x.pc)} · 모바일 ${n0(x.mobile ?? 0)})`}</td></tr>); })}</tbody></table></div>
+        {related.length > 0 && <p className="flex flex-wrap gap-1" data-testid="kw-comb-related"><span className="text-ink-2">검색이 있는 연관 키워드:</span>{related.map((r) =>
+          <button key={r.keyword} type="button" className={cx('rounded-full border px-2', pick.has(r.keyword) ? 'border-violet-400 bg-violet-50' : 'border-line')} onClick={() => toggle(r.keyword)}>{r.keyword} {n0(r.total)}</button>)}</p>}
+        <Button type="button" size="sm" className="justify-self-start" disabled={!pick.size} onClick={() => onPick([...pick])} data-testid="kw-comb-pick">{pick.size}개 키워드에 넣기</Button>
+      </>}
+      <p className="text-[11px] text-ink-3">순서: 핵심 키워드를 단어 그룹 3~4개로 나눔 → 같은 그룹끼리 꾸밀 수 없는 단어는 앞 그룹에도 넣음 → 조합 → 검색량 확인 → 넣기. 말이 안 되는 조합은 검색이 없어 넣어도 돈이 나가지 않습니다.</p>
+    </div>
   );
 }
 
@@ -476,6 +626,7 @@ function LeadAdsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok
           </ol>
         </details>
       </>}
+      <CapiBox run={run} />
       {test && <Modal open onClose={() => setTest(null)} title="시험 리드 보내기">
         <div className="space-y-3 text-sm" data-testid="lead-ads-test-dialog">
           <p className="text-xs text-ink-2">{test.label} 의 인스턴트 양식에 Meta 시험 리드를 하나 만들고(양식마다 1개 — 전에 만든 시험 리드는 지움) 바로 영업 리드로 등록합니다. 광고비는 들지 않습니다.</p>
@@ -487,5 +638,81 @@ function LeadAdsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok
         </div>
       </Modal>}
     </section>
+  );
+}
+
+type CapiRow = { id: string; event_name: string; stage: string; event_time: string; status: string; attempts: number; error: string | null; sent_at: string | null; lead_tail: string };
+type Capi = { canEdit: boolean; on: boolean; datasetId: string; source: string; map: Record<string, string>; defaults: Record<string, string>; stages: string[]; hasToken: boolean; since: string | null;
+  stats: { sent7: number; pending: number; failed: number; skipped7: number; lastSent: string | null; lastError: string | null }; recent: CapiRow[] };
+const CAPI_STATUS: Record<string, [string, string]> = { pending: ['대기', 'bg-slate-100 text-ink-2'], sent: ['보냄', 'bg-emerald-50 text-emerald-800'], failed: ['실패', 'bg-red-50 text-red-800'], skipped: ['건너뜀', 'bg-amber-50 text-amber-800'] };
+/**
+ * #499-3 리드 단계 → Meta 전환 API(CAPI for CRM): 리드 광고로 들어온 영업 리드의 단계를 메타에 돌려보내 신청만 하는 사람보다 미팅·계약까지 가는 사람을 더 찾게 함.
+ * 보내는 것 = 메타 리드 번호·단계 이름·시각. 기본 꺼짐 — 켜기·데이터 세트·토큰·이름표는 관리자, 처리방침 문구는 대표 결정.
+ */
+function CapiBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok: string) => void }) {
+  const { data, error, reload } = useApi<Capi>('/api/marketing/lead-ads/capi');
+  const [f, setF] = useState<{ on: boolean; datasetId: string; token: string; source: string; map: Record<string, string> } | null>(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState('');
+  if (error) return <ErrorBox error={error} retry={reload} />;
+  if (!data) return <Skeleton rows={2} />;
+  const v = f ?? { on: data.on, datasetId: data.datasetId, token: '', source: data.source, map: data.map };
+  const set = (p: Partial<typeof v>) => setF({ ...v, ...p });
+  const save = () => run('capi', async () => {
+    await api('/api/marketing/lead-ads/capi', { method: 'PUT', body: { on: v.on, datasetId: v.datasetId.trim(), ...(v.token.trim() ? { token: v.token.trim() } : {}), source: v.source.trim() || 'Workin', map: v.map } });
+    await reload(); setF(null); // 저장된 값을 받아 온 뒤에 입력 칸을 비움(잠깐 옛 값이 보이지 않게)
+  }, v.on ? '전환 API 를 켰습니다 — 리드 단계가 바뀌면 메타로 보냅니다' : '전환 API 설정을 저장했습니다');
+  async function act(kind: 'send' | 'test') {
+    setBusy(kind);
+    try {
+      if (kind === 'send') { const r = await api<{ queued: number; sent: number; failed: number }>('/api/marketing/lead-ads/capi/send', { body: {} }); toast.ok(`새 이벤트 ${r.queued}건 · 보냄 ${r.sent}건${r.failed ? ` · 실패 ${r.failed}건` : ''}`); }
+      else { const r = await api<{ received: number; eventName: string; leadTail: string }>('/api/marketing/lead-ads/capi/test', { body: { testEventCode: code } }); toast.ok(`시험 이벤트를 보냈습니다 — 메타가 받음 ${r.received}건('${r.eventName}', 리드 …${r.leadTail}). 이벤트 테스트 탭에서 확인하세요`); }
+      reload();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
+  }
+  return (
+    <div className="mt-3 rounded-input border border-line p-2 text-xs" data-testid="capi" data-on={data.on ? '1' : '0'}>
+      <div className="flex flex-wrap items-center gap-2"><b className="text-sm">리드 단계 → 메타에 알리기(전환 API)</b>
+        <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', data.on ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-ink-2')} data-testid="capi-state">{data.on ? '보내는 중' : '꺼짐'}</span>
+        {data.canEdit && data.on && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy !== ''} onClick={() => act('send')} data-testid="capi-send">{busy === 'send' ? '보내는 중…' : '지금 보내기'}</Button>}</div>
+      <p className="mt-1 text-ink-2">영업 리드 단계(새 리드 → 1차 연락 → 미팅 … → 계약)를 메타에 돌려보내, 메타가 신청만 하는 사람보다 실제로 미팅·계약까지 가는 사람을 더 찾게 합니다(메타 &apos;전환 리드&apos; 최적화). 보내는 것은 <b>메타 리드 번호·단계 이름·바뀐 시각</b>뿐 — 이름·전화·이메일은 보내지 않습니다.</p>
+      <p className="mt-1 text-ink-2" data-testid="capi-stats">지난 7일 보냄 {n0(data.stats.sent7)}건 · 대기 {n0(data.stats.pending)} · 실패 {n0(data.stats.failed)}{data.stats.skipped7 ? ` · 건너뜀 ${n0(data.stats.skipped7)}` : ''}{data.stats.lastSent ? ` · 마지막 ${fmtDateTime(data.stats.lastSent)}` : ''}</p>
+      {data.stats.lastError && <p className="mt-0.5 break-words text-amber-800" data-testid="capi-error">최근 오류: {data.stats.lastError}</p>}
+      {data.canEdit && <details className="mt-2" open={!data.on} data-testid="capi-setup">
+        <summary className="cursor-pointer font-medium">설정 · 단계 이름표</summary>
+        <div className="mt-2 grid gap-2">
+          <label className="flex items-start gap-1.5"><input type="checkbox" className="mt-0.5" checked={v.on} onChange={(e) => set({ on: e.target.checked })} data-testid="capi-on" /><span><b>켜기</b> — 리드 광고로 들어온 리드의 단계가 바뀌면 메타로 보냅니다(하루 여러 번)</span></label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="데이터 세트(픽셀) ID"><input className={inputCls} inputMode="numeric" value={v.datasetId} onChange={(e) => set({ datasetId: e.target.value.replace(/\D/g, '') })} placeholder="예: 1234567890123456" data-testid="capi-dataset" /></Field>
+            <Field label="전환 API 토큰"><input className={inputCls} type="password" autoComplete="off" value={v.token} onChange={(e) => set({ token: e.target.value })} placeholder={data.hasToken ? '저장됨 — 바꿀 때만 넣기' : '이벤트 관리자에서 만든 토큰'} data-testid="capi-token" /></Field>
+          </div>
+          <Field label="CRM 이름(메타 이벤트에 보이는 이름)"><input className={inputCls} value={v.source} maxLength={40} onChange={(e) => set({ source: e.target.value })} data-testid="capi-source" /></Field>
+          <div className="overflow-x-auto"><table className="w-full min-w-[300px] text-left" data-testid="capi-map">
+            <thead><tr className="text-ink-2"><th className="py-1 font-medium">워크인 단계</th><th className="font-medium">메타 이벤트 이름(비우면 안 보냄)</th></tr></thead>
+            <tbody className="divide-y divide-line">{data.stages.map((s) => (
+              <tr key={s}><td className="whitespace-nowrap py-1 pr-2">{s}</td>
+                <td><input className={cx(inputCls, 'h-8 py-1 text-xs')} value={v.map[s] ?? ''} maxLength={40} onChange={(e) => set({ map: { ...v.map, [s]: e.target.value } })} aria-label={`${s} 이벤트 이름`} placeholder="보내지 않음" data-testid="capi-map-input" /></td></tr>))}</tbody></table></div>
+          <p className="text-[11px] text-ink-3">같은 이름은 리드마다 한 번만 보냅니다. 단계를 건너뛰면(예: 새 리드 → 미팅) 건너뛴 앞 단계도 같은 시각으로 보냅니다. 메타 이벤트 관리자의 &apos;세일즈 퍼널 설정&apos;에서 이 이름들로 단계 순서를 고릅니다.</p>
+          <div className="flex flex-wrap gap-2"><Button size="sm" onClick={save} data-testid="capi-save">저장</Button>
+            {f && <Button size="sm" variant="secondary" onClick={() => setF(null)}>되돌리기</Button>}</div>
+          <div className="flex flex-wrap items-end gap-2 border-t border-line pt-2">
+            <Field label="시험 이벤트 코드(이벤트 관리자 › 이벤트 테스트)"><input className={cx(inputCls, 'h-8 py-1 text-xs')} value={code} onChange={(e) => setCode(e.target.value.trim())} placeholder="예: TEST12345" data-testid="capi-test-code" /></Field>
+            <Button size="sm" variant="secondary" disabled={!code || !data.datasetId || !data.hasToken || busy !== ''} onClick={() => act('test')} data-testid="capi-test">{busy === 'test' ? '보내는 중…' : '시험 보내기'}</Button>
+          </div>
+          <ol className="list-decimal space-y-0.5 pl-5 text-[11px] text-ink-2" data-testid="capi-guide">
+            <li>메타 이벤트 관리자 › 데이터 소스 연결 › <b>CRM</b> 으로 데이터 세트를 만들고(기존 것을 CRM 으로 바꿔도 됨) ID 를 넣습니다. 한 번 연결한 뒤에는 바꾸지 마세요(학습이 처음부터 다시 시작됨).</li>
+            <li>그 데이터 세트의 설정 › 전환 API › <b>액세스 토큰 생성</b> → 위 칸에 붙여 넣고 저장합니다(워크인은 암호화해 보관하고 다시 보여 주지 않음).</li>
+            <li>[시험 보내기] 뒤 이벤트 테스트 탭에 보이면 [켜기] — 켠 때로부터 7일 전 신청까지 보냅니다(메타가 받는 한도).</li>
+            <li><b>켜기 전 대표 확인:</b> 개인정보 처리방침에 &apos;광고 성과 측정을 위해 리드 진행 단계(메타 리드 번호·단계·시각)를 Meta 에 보냅니다&apos; 문구.</li>
+            <li>메타 &apos;전환 리드&apos; 최적화 기준: 월 리드 200건 이상 · 목표 단계가 28일 안 · 도달률 1~40%. 모자라도 지금부터 보내 두면 보고에 쓰입니다.</li>
+          </ol>
+        </div>
+      </details>}
+      {data.recent.length > 0 && <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[480px] text-left" data-testid="capi-recent">
+        <thead><tr className="text-ink-2"><th className="py-1 font-medium">단계 시각</th><th className="font-medium">이벤트</th><th className="font-medium">리드</th><th className="font-medium">상태</th></tr></thead>
+        <tbody className="divide-y divide-line">{data.recent.map((r) => { const [label, cls] = CAPI_STATUS[r.status] ?? [r.status, 'bg-slate-100']; return (
+          <tr key={r.id} data-testid="capi-row" data-status={r.status}><td className="whitespace-nowrap py-1 text-ink-2">{fmtDateTime(r.event_time)}</td><td>{r.event_name} <span className="text-ink-3">({r.stage})</span></td><td className="text-ink-3">…{r.lead_tail}</td>
+            <td><span className={cx('rounded-full px-1.5 py-0.5 text-[10px] font-medium', cls)}>{label}</span>{r.error && <span className="block max-w-[18rem] whitespace-normal break-words text-[11px] text-red-700">{r.error}</span>}</td></tr>); })}</tbody></table></div>}
+    </div>
   );
 }

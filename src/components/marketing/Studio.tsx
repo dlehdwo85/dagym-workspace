@@ -7,6 +7,7 @@ import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { MediaPick } from './MediaPick';
 import { ScoreChip, TimingTable } from './QualityPanel';
+import { MODE_HINT, ModeChip, ModeToggle, type Mode } from './ModeToggle';
 
 /**
  * 대표 10/20 19:00 제작의뢰실: 의뢰 폼(브랜드·채널/종류·목적·핵심 메시지·참고·톤·수량·마감) → AI 30년차 마케터 프롬프트(영문 + 한글 요약 + 참고 사진 + 자막) → [수정]/[생성]
@@ -18,7 +19,7 @@ function estLabel(m: { kind: string; credits: number; usd?: number | null }, qua
   if (v.pricing === 'usd' && m.usd != null) { const usd = Math.round(m.usd * (m.kind === 'video' ? 15 : 1) * quantity * 1000) / 1000; return `약 $${usd} (≈${Math.round(usd * (v.usdKrw ?? 1400)).toLocaleString('ko-KR')}원)`; }
   return `${m.credits * quantity}크레딧`;
 }
-type Brief = { id: string; brand: string | null; brand_id: string | null; channel: string; kind: string; purpose: string; message: string; refs: any; tone: string | null; quantity: number; due_date: string | null; status: string; prompt: any; content_id: string | null; est_credits: number; result: any; error: string | null; created_by_name: string | null; created_at: string; content_status: string | null; open_requests: number ; progress?: Progress | null };
+type Brief = { id: string; brand: string | null; brand_id: string | null; channel: string; kind: string; purpose: string; mode?: string | null; message: string; refs: any; tone: string | null; quantity: number; due_date: string | null; status: string; prompt: any; content_id: string | null; est_credits: number; result: any; error: string | null; created_by_name: string | null; created_at: string; content_status: string | null; open_requests: number ; progress?: Progress | null };
 type View = { briefs: Brief[]; brands: { id: string; name: string; tone: string | null }[]; recent: { id: string; title: string; channel: string }[]; kinds: Record<string, { label: string; aspect: string; px: string; media: string }>; purposes: Record<string, string>; canGenerate: boolean; pricing?: 'credits' | 'usd'; usdKrw?: number; provider: 'higgsfield' | 'card'; models: { id: string; kind: string; name: string; credits: number }[] ; video?: { tts: { ready: boolean; provider: string | null }; captures: number; bgm: number } };
 const STATUS: Record<string, [string, string]> = { queued: ['대기', 'bg-slate-100 text-ink-2'], prompting: ['프롬프트 작성 중', 'bg-sky-50 text-sky-800'], ready: ['프롬프트 준비', 'bg-violet-50 text-violet-800'], generating: ['생성 중', 'bg-amber-50 text-amber-800'], review: ['승인 대기', 'bg-orange-50 text-orange-800'], published: ['게시됨', 'bg-emerald-50 text-emerald-800'], rejected: ['반려', 'bg-red-50 text-red-800'], failed: ['실패', 'bg-red-50 text-red-800'] };
 const labelOf = (b: Brief) => (b.content_status === 'published' ? STATUS.published : b.content_status === 'changes' && b.status === 'review' ? ['수정 요청', 'bg-slate-100 text-ink-2'] : STATUS[b.status] ?? [b.status, 'bg-slate-100 text-ink-2']);
@@ -46,14 +47,14 @@ function VideoProgress({ p }: { p: Progress }) {
 export function Studio() {
   const sp = useSearchParams();
   const { data, error, reload } = useApi<View>('/api/marketing/studio');
-  const [f, setF] = useState({ brandId: sp.get('brand') ?? '', kind: sp.get('kind') ?? 'feed', purpose: sp.get('purpose') ?? 'inquiry', message: sp.get('message') ?? '', tone: '', quantity: 1, dueDate: sp.get('due') ?? '', links: '', contentIds: [] as string[], goalWeek: sp.get('week') ? Number(sp.get('week')) : undefined });
+  const [f, setF] = useState({ brandId: sp.get('brand') ?? '', kind: sp.get('kind') ?? 'feed', purpose: sp.get('purpose') ?? 'inquiry', mode: (sp.get('mode') === 'ad' ? 'ad' : 'content') as Mode, message: sp.get('message') ?? '', tone: '', quantity: 1, dueDate: sp.get('due') ?? '', links: '', contentIds: [] as string[], goalWeek: sp.get('week') ? Number(sp.get('week')) : undefined });
   const [media, setMedia] = useState<{ id: string; title: string }[]>([]);
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (data && !f.brandId && data.brands.length === 1) setF((x) => ({ ...x, brandId: data.brands[0].id })); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   async function submit(e: React.FormEvent) {
     e.preventDefault(); if (f.message.trim().length < 2) return; setBusy(true);
     try {
-      const r = await api<{ id: string; prompt: any }>('/api/marketing/studio', { body: { brandId: f.brandId || null, kind: f.kind, purpose: f.purpose, message: f.message.trim(), tone: f.tone || null, quantity: f.quantity, dueDate: f.dueDate || null, goalWeek: f.goalWeek,
+      const r = await api<{ id: string; prompt: any }>('/api/marketing/studio', { body: { brandId: f.brandId || null, kind: f.kind, purpose: f.purpose, mode: f.mode, message: f.message.trim(), tone: f.tone || null, quantity: f.quantity, dueDate: f.dueDate || null, goalWeek: f.goalWeek,
         refs: { mediaIds: media.map((m) => m.id), contentIds: f.contentIds, links: f.links.split(/\s+/).filter((x) => /^https?:\/\//.test(x)).slice(0, 5) } } });
       toast.ok(r.prompt?.error ? '의뢰했습니다 — 프롬프트는 [다시 쓰기]로' : r.prompt?.source === 'ai' ? '의뢰했습니다 — AI 마케터가 프롬프트를 썼습니다' : '의뢰했습니다 — AI 없이 기본 프롬프트');
       setF({ ...f, message: '', links: '', contentIds: [] }); setMedia([]); reload();
@@ -74,6 +75,8 @@ export function Studio() {
           <Field label="마감(게시 예정일)"><input className={inputCls} type="date" value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} aria-label="마감" /></Field>
         </div>
         <Field label="목적"><div className="flex flex-wrap gap-1.5">{Object.entries(data.purposes).map(([k, l]) => <button key={k} type="button" onClick={() => setF({ ...f, purpose: k })} className={cx('rounded-full border px-3 py-1 text-xs', f.purpose === k ? 'border-transparent text-white' : 'border-line bg-white')} style={f.purpose === k ? { background: C } : undefined} aria-pressed={f.purpose === k} data-testid={`studio-purpose-${k}`}>{l}</button>)}</div></Field>
+        {/* #499-1 용도: 콘텐츠형(참여)·광고형(전환) — AI 마케터가 쓰는 첫 줄·장면 구성과 훅 채점이 다름 */}
+        <Field label="용도"><span className="flex flex-wrap items-center gap-2 text-xs"><ModeToggle value={f.mode} onChange={(m) => setF({ ...f, mode: m })} testId="studio-mode" /><span className="text-ink-3">{MODE_HINT[f.mode]}</span></span></Field>
         <Field label="핵심 메시지 1줄"><input className={inputCls} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} maxLength={300} placeholder="예: 가을 신규 회원 PT 10회 30% 할인 — 10월 말까지" required aria-label="핵심 메시지" data-testid="studio-message" /></Field>
         <div className="grid gap-2 sm:grid-cols-2">
           <Field label="참고 사진(자료실)"><MediaPick value={media} onChange={setMedia} /></Field>
@@ -106,6 +109,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
         <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', sc)} data-testid="studio-status">{sl}</span>
         {b.brand && <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-semibold text-white">{b.brand}</span>}
         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800">{spec?.label ?? b.kind} · {view.purposes[b.purpose] ?? b.purpose}</span>
+        <ModeChip mode={b.mode} />
         <b className="min-w-0 flex-1 truncate">{b.message}</b>
         <span className="text-[11px] text-ink-3">{b.created_by_name ?? ''} · {fmtDateTime(b.created_at)}{b.quantity > 1 ? ` · ${b.quantity}장` : ''}{b.due_date ? ` · 마감 ${b.due_date}` : ''}{b.est_credits ? ` · 예상 ${view.pricing === 'usd' && view.models.find((m) => m.id === (b.prompt?.model ?? '')) ? estLabel(view.models.find((m) => m.id === b.prompt?.model)!, b.quantity, view) : `${b.est_credits}크레딧`}` : ''}</span>
       </div>

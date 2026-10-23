@@ -24,7 +24,9 @@ const REFERENCE_STYLE = '참고 스타일(삼립 광고 계열): 일상 속 장�
 
 export const briefInput = z.object({ brandId: zUuid.nullable().optional(), kind: z.enum(Object.keys(KIND_SPEC) as [string, ...string[]]), purpose: z.enum(Object.keys(PURPOSE) as [string, ...string[]]), message: z.string().trim().min(2).max(300),
   refs: z.object({ mediaIds: z.array(zUuid).max(10).default([]), contentIds: z.array(zUuid).max(5).default([]), links: z.array(z.string().trim().url().max(500)).max(5).default([]) }).default({ mediaIds: [], contentIds: [], links: [] }),
-  tone: z.string().trim().max(200).nullable().optional(), quantity: z.number().int().min(1).max(5).default(1), dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), goalWeek: z.number().int().optional() });
+  tone: z.string().trim().max(200).nullable().optional(), quantity: z.number().int().min(1).max(5).default(1), dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), goalWeek: z.number().int().optional(),
+  /** #499-1 용도: 콘텐츠형(참여) / 광고형(전환) — 첫 줄·구성 안내와 훅 채점이 다름 */
+  mode: z.enum(['content', 'ad']).default('content') });
 export const promptPatch = z.object({ promptEn: z.string().trim().min(5).max(4000), negativeEn: z.string().trim().max(1000).optional(), summaryKo: z.string().trim().max(1000).optional(), caption: z.string().trim().max(2000).optional(), model: z.string().max(40).nullable().optional(), refMediaIds: z.array(zUuid).max(10).optional() });
 export const briefAction = z.discriminatedUnion('action', [z.object({ action: z.literal('prompt') }), z.object({ action: z.literal('update'), ...promptPatch.shape }), z.object({ action: z.literal('generate') }), z.object({ action: z.literal('cancel') })]);
 
@@ -53,8 +55,8 @@ export async function createBrief(u: SessionUser, i: z.infer<typeof briefInput>)
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const spec = KIND_SPEC[i.kind];
-  const [b] = await sql<{ id: string }[]>`insert into mkt_briefs (tenant, brand_id, channel, kind, purpose, message, refs, tone, quantity, due_date, status, created_by)
-    values (${t}, ${i.brandId ?? null}, ${spec.channel}, ${i.kind}, ${i.purpose}, ${i.message}, ${sql.json({ ...i.refs, goalWeek: i.goalWeek ?? null } as never)}, ${i.tone ?? null}, ${i.quantity}, ${i.dueDate ?? null}, 'queued', ${u.id}) returning id`;
+  const [b] = await sql<{ id: string }[]>`insert into mkt_briefs (tenant, brand_id, channel, kind, purpose, message, refs, tone, quantity, due_date, status, created_by, mode)
+    values (${t}, ${i.brandId ?? null}, ${spec.channel}, ${i.kind}, ${i.purpose}, ${i.message}, ${sql.json({ ...i.refs, goalWeek: i.goalWeek ?? null } as never)}, ${i.tone ?? null}, ${i.quantity}, ${i.dueDate ?? null}, 'queued', ${u.id}, ${i.mode}) returning id`;
   // 의뢰 즉시 프롬프트 작성(AI) — 실패하면 queued 로 남고 [프롬프트 다시] 로 재시도
   const p = await writePrompt(t, b.id, u.id).catch((e) => ({ error: String(e?.message ?? e) }));
   return { id: b.id, prompt: p };
@@ -62,11 +64,11 @@ export async function createBrief(u: SessionUser, i: z.infer<typeof briefInput>)
 
 type Scene = { line: string; visualEn: string };
 /** #426 자막 품질: 상투어·특수 대시 정리 + 훅(첫 줄·첫 장면) 점수 + 영상이면 초 단위 장면표(분당 300음절, 규격 초 넘으면 경고) */
-function captionQuality(caption: string, scenes: Scene[], spec: { seconds?: number; channel: string }, rules: import('./mktQuality').QualityRules, Q: typeof import('./mktQuality')) {
+function captionQuality(caption: string, scenes: Scene[], spec: { seconds?: number; channel: string }, rules: import('./mktQuality').QualityRules, Q: typeof import('./mktQuality'), mode: import('./mktQuality').HookMode = 'content') {
   const h = Q.humanize(caption, rules);
   const hookText = scenes[0]?.line || h.text.split('\n').map((l) => l.trim()).find(Boolean) || '';
-  const timing = scenes.length >= 2 ? Q.scriptTiming(scenes.map((x) => x.line), { ...rules, script: { ...rules.script, maxTotalSec: spec.seconds ?? rules.script.maxTotalSec } }) : null;
-  return { caption: h.text, timing, quality: { human: { score: h.score, pass: h.pass, issues: h.issues }, hook: hookText ? Q.scoreHook(hookText, rules) : null } };
+  const timing = scenes.length >= 2 ? Q.scriptTiming(scenes.map((x) => x.line), { ...rules, script: { ...rules.script, maxTotalSec: spec.seconds ?? rules.script.maxTotalSec } }, mode) : null;
+  return { caption: h.text, timing, quality: { mode, human: { score: h.score, pass: h.pass, issues: h.issues }, hook: hookText ? Q.scoreHook(hookText, rules, [], mode) : null } };
 }
 /** Higgsfield 프롬프트에 장면표를 그대로(장면별 초 + 영상 지시) */
 export function withShots(promptEn: string, scenes: Scene[] | undefined, timing: { rows: { from: number; to: number }[] } | null | undefined) {
@@ -121,8 +123,9 @@ ${video ? videoRules : `- promptEn: 영문 생성 프롬프트(장면·피사체
 - summaryKo: 의뢰자가 읽을 한글 의도 요약 3줄(왜 이 장면인지).
 - caption: 이 시안${video ? '을 올릴 게시물 본문' : '에 얹을'} 한국어 카피 1~2줄(브랜드 말투: ${tone}, 금지어: ${[...(brand?.banned_words ?? []), ...Q.avoidOf(brand?.voice)].join(', ') || '없음'}, 과장·최상급 금지, 숫자·가격은 재료에 있는 것만). 첫 줄이 훅 — 인사·"스크롤 멈추세요"·내용 없는 서두 금지, 숫자·장면·대상으로 구체적으로. 상투어(다양한·혁신적인·놓치지 마세요·지금 바로)·특수 대시(—)는 쓰지 않음.
 - refMediaIds: 아래 참고 사진 중 기준으로 쓸 id 배열(없으면 빈 배열).
+- 용도 ${Q.MODE_GUIDE[Q.asMode(b.mode)]}
 ${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}`,
-        tools: [], messages: [{ role: 'user', content: `[재료]\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}${brand?.intro ? `\n소개: ${brand.intro}` : ''}${brand?.products ? `\n주력 상품: ${brand.products}` : ''}${co?.business ? `\n회사 사업: ${co.business}` : ''}${co?.customers ? `\n주요 고객: ${co.customers}` : ''}\n목적: ${PURPOSE[b.purpose]}\n채널·종류: ${spec.label}(${spec.aspect}, ${spec.px})\n핵심 메시지: ${b.message}\n톤: ${tone}\n수량: ${b.quantity}\n${photos.length ? `참고 사진(자료실):\n${photos.map((p) => `- ${p.id} ${p.title}${p.description ? `: ${p.description.slice(0, 100)}` : ''}`).join('\n')}\n` : ''}${posts.length ? `참고 게시물:\n${posts.map((p) => `- ${p.title}: ${String(p.body ?? '').slice(0, 120)}`).join('\n')}\n` : ''}${refs.links?.length ? `레퍼런스 링크: ${refs.links.join(', ')}\n` : ''}${video ? `실제 화면 캡처(자료실 '영상 화면 캡처'):\n${caps.length ? caps.map((c) => `- ${c.id} ${c.title}${c.description ? `: ${c.description.slice(0, 80)}` : ''}`).join('\n') : '(없음 — 화면 얹는 장면 없이)'}\n배경음(자료실 '영상 배경음'):\n${bgms.length ? bgms.map((x) => `- ${x.id} ${x.title}`).join('\n') : '(없음)'}\n` : ''}` }],
+        tools: [], messages: [{ role: 'user', content: `[재료]\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}${brand?.intro ? `\n소개: ${brand.intro}` : ''}${brand?.products ? `\n주력 상품: ${brand.products}` : ''}${co?.business ? `\n회사 사업: ${co.business}` : ''}${co?.customers ? `\n주요 고객: ${co.customers}` : ''}\n목적: ${PURPOSE[b.purpose]}\n용도: ${Q.HOOK_MODES[Q.asMode(b.mode)]}\n채널·종류: ${spec.label}(${spec.aspect}, ${spec.px})\n핵심 메시지: ${b.message}\n톤: ${tone}\n수량: ${b.quantity}\n${photos.length ? `참고 사진(자료실):\n${photos.map((p) => `- ${p.id} ${p.title}${p.description ? `: ${p.description.slice(0, 100)}` : ''}`).join('\n')}\n` : ''}${posts.length ? `참고 게시물:\n${posts.map((p) => `- ${p.title}: ${String(p.body ?? '').slice(0, 120)}`).join('\n')}\n` : ''}${refs.links?.length ? `레퍼런스 링크: ${refs.links.join(', ')}\n` : ''}${refs.concept ? `광고 컨셉(상황 매트릭스에서 채택 — 이 대상·상황·제안을 그대로 살림): 대상 ${refs.concept.role} · 상황 ${refs.concept.situation} · 고통 ${refs.concept.pain || '-'} · 제안 ${refs.concept.offer || '-'}\n첫 줄(훅): ${refs.concept.hook}\n광고 제목: ${refs.concept.headline || '-'}\n본문: ${String(refs.concept.primary ?? '').replace(/\n/g, ' / ')}\n` : ''}${video ? `실제 화면 캡처(자료실 '영상 화면 캡처'):\n${caps.length ? caps.map((c) => `- ${c.id} ${c.title}${c.description ? `: ${c.description.slice(0, 80)}` : ''}`).join('\n') : '(없음 — 화면 얹는 장면 없이)'}\n배경음(자료실 '영상 배경음'):\n${bgms.length ? bgms.map((x) => `- ${x.id} ${x.title}`).join('\n') : '(없음)'}\n` : ''}` }],
         format: { type: 'object', additionalProperties: false, required: ['promptEn', 'negativeEn', 'summaryKo', 'caption', 'refMediaIds', ...(video ? ['character', 'look', 'scenes', 'endCard', 'bgmId'] : [])],
           properties: { promptEn: { type: 'string' }, negativeEn: { type: 'string' }, summaryKo: { type: 'string' }, caption: { type: 'string' }, refMediaIds: { type: 'array', items: { type: 'string' } },
             ...(video ? { character: { type: 'string' }, look: { type: 'string' }, bgmId: { type: 'string' },
@@ -145,7 +148,7 @@ ${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}`,
     } catch { /* AI 실패·한도 → 기본 프롬프트 */ }
   }
   const est = (model?.credits ?? (video ? 80 : 6.5)) * b.quantity;
-  const q = captionQuality(out.caption, (out as { scenes?: Scene[] }).scenes ?? [], spec, rules, Q);
+  const q = captionQuality(out.caption, (out as { scenes?: Scene[] }).scenes ?? [], spec, rules, Q, Q.asMode(b.mode));
   const saved = { ...out, caption: q.caption, quality: q.quality, ...(q.timing ? { timing: q.timing } : {}) };
   await sql`update mkt_briefs set prompt = ${sql.json(saved as never)}, est_credits = ${est}, status = 'ready', updated_at = now() where id = ${briefId}`;
   return { ...saved, estCredits: est };
@@ -165,7 +168,7 @@ export async function actBrief(u: SessionUser, id: string, i: z.infer<typeof bri
     const { action: _a, ...patch } = i; void _a;
     const prompt: Record<string, any> = { ...(b.prompt ?? {}), ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)), source: 'user' };
     // 사람이 고친 자막은 그대로 두고 점수만 다시(자동으로 고치는 건 AI 가 쓴 자막만)
-    if (patch.caption !== undefined) { const Q = await import('./mktQuality'); prompt.quality = captionQuality(patch.caption, prompt.scenes ?? [], KIND_SPEC[b.kind], await Q.qualityRules(), Q).quality; }
+    if (patch.caption !== undefined) { const Q = await import('./mktQuality'); prompt.quality = captionQuality(patch.caption, prompt.scenes ?? [], KIND_SPEC[b.kind], await Q.qualityRules(), Q, Q.asMode(b.mode)).quality; }
     await sql`update mkt_briefs set prompt = ${sql.json(prompt as never)}, updated_at = now() where id = ${id}`;
     return { ok: true, prompt };
   }
@@ -191,8 +194,8 @@ async function generateBrief(u: SessionUser, b: any) {
   const rationale = { purpose: PURPOSE[b.purpose], metric: null, message: b.message, why: p.summaryKo ? String(p.summaryKo).split('\n')[0].slice(0, 200) : `제작의뢰실 의뢰(${PURPOSE[b.purpose]})`, source: 'user', topic: b.message, prompt: { en: p.promptEn, negative: p.negativeEn, model: p.model, aspect: p.aspect } };
   let contentId: string = b.content_id;
   if (!contentId) {
-    const [c] = await sql<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, kind, scheduled_at, status, current_version, created_by, is_test, rationale)
-      values (${t}, ${b.brand_id ?? null}, ${title}, ${spec.channel}, ${KIND_MAP[b.kind] ?? 'feed'}, ${scheduledAt}, 'draft', 1, ${b.created_by ?? u.id}, ${isTest}, ${sql.json(rationale as never)}) returning id`;
+    const [c] = await sql<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, kind, scheduled_at, status, current_version, created_by, is_test, rationale, mode)
+      values (${t}, ${b.brand_id ?? null}, ${title}, ${spec.channel}, ${KIND_MAP[b.kind] ?? 'feed'}, ${scheduledAt}, 'draft', 1, ${b.created_by ?? u.id}, ${isTest}, ${sql.json(rationale as never)}, ${b.mode ?? 'content'}) returning id`;
     await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${p.caption ?? b.message}, ${[]}, '제작의뢰실 — 자막·카피', ${u.id})`;
     contentId = c.id;
   }

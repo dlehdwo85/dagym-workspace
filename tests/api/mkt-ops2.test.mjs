@@ -160,7 +160,7 @@ test('① 승인함 통합: 건수(콘텐츠·제안·예산·목표·제작 의
   const brief = await ctx.staffA.client.ok('POST', '/api/marketing/studio', { brandId: P['다짐'], kind: 'feed', purpose: 'inquiry', message: '가을 신규 PT 할인', refs: { mediaIds: [], contentIds: [], links: [] }, quantity: 1 });
   await ctx.owner.ok('POST', '/api/marketing/contents', { title: '승인함 콘텐츠', channel: 'instagram', scheduledAt: new Date(Date.now() + 2 * 864e5).toISOString(), body: '본문' });
   const ib = await ctx.owner.ok('GET', '/api/marketing/inbox');
-  assert.deepEqual(ib.counts, { contents: 1, proposals: 1, budget: 0, goals: 0, briefs: 1, ads: 0 }, JSON.stringify(ib.counts));
+  assert.deepEqual(ib.counts, { contents: 1, proposals: 1, budget: 0, goals: 0, briefs: 1, ads: 0, concepts: 0 }, JSON.stringify(ib.counts));
   assert.equal(ib.total, 3);
   assert.ok(ib.proposals[0].kind === 'direction' && ib.briefs[0].id === brief.id && ib.briefs[0].status === 'ready' && ib.briefs[0].brand === '다짐', JSON.stringify([ib.proposals[0].version, ib.briefs[0]]));
   assert.equal(ib.canEdit, true); assert.equal((await ctx.staffA.client.ok('GET', '/api/marketing/inbox')).canEdit, false);

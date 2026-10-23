@@ -36,6 +36,17 @@ export async function mktQuality({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   await owner.getByTestId('quality-panel').getByTestId('quality-human').filter({ hasText: '사람다움 100점' }).waitFor();
   assert.equal(await owner.getByTestId('quality-needs-polish').count(), 0);
   assert.equal((await sql`select current_version from mkt_contents where id = ${c.id}`)[0].current_version, 2);
+  // #499-1 채점 기준(용도) 바꾸기: 콘텐츠형 → 광고형 = 같은 글을 광고형 기준으로(제안·대상 없음 안내) → 다시 콘텐츠형
+  await owner.getByTestId('quality-panel').getByTestId('quality-mode-ad').click();
+  await owner.getByText('광고형 기준으로 다시 채점했습니다').first().waitFor();
+  await owner.getByTestId('quality-panel').locator('[data-testid="quality-mode"][data-mode="ad"]').waitFor();
+  assert.match(await owner.getByTestId('quality-hook-notes').innerText(), /제안이 없음/);
+  assert.equal((await sql`select mode from mkt_contents where id = ${c.id}`)[0].mode, 'ad');
+  await owner.getByTestId('quality-panel').scrollIntoViewIfNeeded();
+  await owner.screenshot({ path: `${SHOTS}/219-quality-mode-ad.png` });
+  await owner.getByTestId('quality-panel').getByTestId('quality-mode-content').click();
+  await owner.getByText('콘텐츠형 기준으로 다시 채점했습니다').first().waitFor();
+  assert.equal((await sql`select mode from mkt_contents where id = ${c.id}`)[0].mode, 'content');
   // 휴대폰: 상세 패널이 옆으로 넘치지 않음
   await owner.setViewportSize({ width: 390, height: 844 });
   await owner.goto(`${BASE}/s/marketing/approvals?c=${c.id}`);
@@ -53,6 +64,11 @@ export async function mktQuality({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   await vb.getByTestId('voice-avoid').fill('역대급, 최저가');
   await vb.getByTestId('voice-formality').selectOption('mixed');
   await vb.getByTestId('voice-example').first().fill('퇴근길 20분, 같이 해요.');
+  // #499-1 규칙 추가 칸: 용도 고르기(콘텐츠형 기본 → 광고형이면 안내 문구가 바뀜)
+  const rf = owner.getByTestId('auto-rule-form');
+  await rf.locator('[data-testid="auto-rule-mode"][data-mode="content"]').waitFor();
+  await rf.getByTestId('auto-rule-mode-ad').click();
+  await rf.getByText('전환(리드·문의)').waitFor();
   await vb.getByTestId('voice-save').click();
   await owner.getByText('말투 프로필을 저장했습니다').first().waitFor();
   const [bv] = await sql`select voice from mkt_brands where id = ${b.id}`;
