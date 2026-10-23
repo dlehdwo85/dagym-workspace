@@ -21,7 +21,9 @@ const kstHourNow = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'As
 const str = (v: unknown) => { if (v == null) return null; const s = String(v).trim(); return s ? s : null; };
 export type ApiErr = { denied: boolean; msg: string };
 /** data.go.kr 표준 응답 → items[]. 결과코드가 성공이 아니면 throw(키·활용신청 오류 구분) */
-export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string, timeoutMs = 12000): Promise<any[]> {
+/** 응답 통계(로컬 10/23 '누리장터 0건 — 진짜 0건인지 못 읽은 건지'): 호출 수·결과코드·totalCount 합·받은 줄 수·첫 줄 칸 이름(값은 안 씀) */
+export type DataGoStats = { calls: number; codes: Record<string, number>; total: number; raw: number; keys?: string[] };
+export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string, timeoutMs = 12000, stats?: DataGoStats): Promise<any[]> {
   let res: Response; try { res = await fetchImpl(url.toString(), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) }); } catch (e) { throw new Error(`요청 실패 (${e instanceof Error ? e.name : 'Error'})`); }
   const txt = await res.text(); const safe = (s: string) => s.split(key).join('***').split(encodeURIComponent(key)).join('***').slice(0, 160);
   // data.go.kr 공통 오류(XML): returnReasonCode 20·21·22·30·31·32·33 = 활용신청·키·호출 제한 문제 → '활용신청 필요'(그 서비스는 이번 실행에서 건너뜀)
@@ -32,7 +34,9 @@ export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string,
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${safe(JSON.stringify(j).slice(0, 120))}`);
   const header = j?.response?.header ?? j?.header; const code = header?.resultCode != null ? String(header.resultCode) : null;
   if (code != null && !['00', '0', 'INFO-000'].includes(code)) throw new Error(/03|04|30|31|32|33/.test(code) ? `활용신청 필요: ${safe(String(header?.resultMsg ?? code))}` : `결과코드 ${code}: ${safe(String(header?.resultMsg ?? ''))}`);
-  const b = j?.response?.body ?? j?.body ?? {}; const raw = b?.items?.item ?? b?.items ?? []; return Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
+  const b = j?.response?.body ?? j?.body ?? {}; const raw = b?.items?.item ?? b?.items ?? []; const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
+  if (stats) { stats.calls++; stats.codes[code ?? '없음'] = (stats.codes[code ?? '없음'] ?? 0) + 1; stats.total += Number(b?.totalCount) || 0; stats.raw += list.length; if (list[0] && typeof list[0] === 'object' && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 15); }
+  return list;
 }
 const attachments = (it: any) => { const out: string[] = []; for (let i = 1; i <= 10; i++) { const u = str(it[`ntceSpecDocUrl${i}`] ?? it[`atchFileUrl${i}`]); if (u && /^https?:\/\//.test(u)) out.push(u); } return out; };
 export function g2bPayload(it: any, sourceType: 'g2b_bid' | 'nuri_bid', cat: string): Record<string, unknown> | null {
@@ -45,15 +49,17 @@ export function g2bPayload(it: any, sourceType: 'g2b_bid' | 'nuri_bid', cat: str
 }
 function windowParams(days: number) { const end = new Date(); const start = new Date(end.getTime() - days * 864e5); return { inqryDiv: '1', inqryBgnDt: `${fmt(start)}0000`, inqryEndDt: `${fmt(end)}2359` }; }
 async function searchAll(ops: readonly (readonly [string, string])[], words: string[], days: number, map: (it: any, cat: string) => Record<string, unknown> | null, ctx: CollectorCtx, key: string, extra: Record<string, string> = {}) {
-  const items: Record<string, unknown>[] = []; const errors: string[] = []; const denied = new Set<string>(); const seen = new Set<string>(); const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started);
+  const items: Record<string, unknown>[] = []; const errors: string[] = []; const denied = new Set<string>(); const seen = new Set<string>(); const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const stats: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 };
   const tasks: [string, string, string][] = []; for (const [op, cat] of ops) for (const w of words) tasks.push([op, cat, w]);
   let next = 0;
   await Promise.all(Array.from({ length: 4 }, async () => { while (next < tasks.length) { const [op, cat, w] = tasks[next++]; if (denied.has(op) || left() < 6000) continue;
     const u = new URL(/^https?:\/\//.test(op) ? op : `${API()}/${op}`); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', '1'); u.searchParams.set('type', 'json'); for (const [k, v] of Object.entries({ ...windowParams(days), ...extra })) u.searchParams.set(k, v); if (w) u.searchParams.set('bidNtceNm', w);
-    try { for (const it of await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000))) { const p = map(it, cat); if (!p) continue; const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) continue; seen.add(k); items.push(p); } }
+    try { for (const it of await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000), stats)) { const p = map(it, cat); if (!p) continue; const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) continue; seen.add(k); items.push(p); } }
     catch (e) { const m = e instanceof Error ? e.message : String(e); if (/활용신청 필요|주소 확인 필요/.test(m)) { denied.add(op); errors.push(`${cat}(${op.split('/').slice(-1)[0]}): ${m}`); /* 서비스 단위 오류 — 같은 op 의 남은 검색어는 건너뜀 */ } else if (errors.length < 12) errors.push(`${cat} '${w}': ${m}`); } } }));
-  return { items, errors, denied: [...denied] };
+  return { items, errors, denied: [...denied], stats };
 }
+/** 요약 한 줄: '검색 30회 · 응답 00 · 전체 0건' — 받은 줄이 있는데 하나도 못 읽었으면 첫 줄 칸 이름(형식 확인용) */
+const statLine = (s: DataGoStats, read: number) => !s.calls ? '응답 없음' : `검색 ${s.calls}회 · 응답 ${Object.entries(s.codes).map(([c, n]) => (Object.keys(s.codes).length > 1 ? `${c}×${n}` : c)).join('·')} · 전체 ${s.total}건` + (s.raw && !read ? ` · 받은 ${s.raw}줄을 못 읽음(칸: ${(s.keys ?? []).join(',')})` : '');
 async function write(items: Record<string, unknown>[], errors: string[], opt: { mergeScope?: 'all' | 'award' } = {}) { if (!items.length) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0 }; const r = await upsertNotices(items, opt); if (r.errorLog) errors.push(r.errorLog); return r; }
 const noKey = (label: string): CollectorResult => ({ inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `${label}: DATA_GO_KR_SERVICE_KEY 미설정 — 건너뜀`, providerMode: 'api' });
 
@@ -68,7 +74,7 @@ export const g2bBidNotices: Collector = {
     const errors = [...a.errors, ...b.errors]; const items = [...a.items, ...b.items];
     const r = await write(items, errors);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + a.denied.length + b.denied.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
-      summary: `${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건 (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
+      summary: `${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건(${statLine(b.stats, b.items.length)}) (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
   },
 };
 export function prespecPayload(it: any, cat: string): Record<string, unknown> | null {

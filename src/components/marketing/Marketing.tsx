@@ -12,6 +12,7 @@ import { MediaPick } from './MediaPick';
 import { ApprovalCard, BrandChip, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, WhyBox } from './ApprovalCard';
 import { ProposalCard, BudgetCard } from './Ops';
 import { GoalCard, type Goal } from './Goals';
+import { MetaDraftCard, type MetaPlanRow } from './MetaAuto';
 import { QualityPanel, type QReport } from './QualityPanel';
 
 const C = '#7C3AED';
@@ -285,9 +286,9 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
  * 승인함(대표 02:30 ①): 콘텐츠 시안 + 운영실 승인 요청(운영 제안·광고 예산·월 목표·제작 의뢰)을 종류별 탭으로 한곳에. 탭마다 건수, 카드에서 바로 승인·반려.
  * 반려 사유를 적으면 AI 가 사유를 반영한 v2 를 다시 올림(최대 3회). 콘텐츠 탭은 기존 승인함 그대로(승인 대기·수정 요청·보류).
  */
-type Inbox = { counts: { contents: number; proposals: number; budget: number; goals: number; briefs: number }; total: number; proposals: any[]; budgets: any[]; goals: Goal[]; briefs: InboxBrief[]; kinds: Record<string, string>; canEdit: boolean; today: string; maxRevisions: number };
+type Inbox = { counts: { contents: number; proposals: number; budget: number; goals: number; briefs: number; ads: number }; total: number; proposals: any[]; budgets: any[]; goals: Goal[]; briefs: InboxBrief[]; ads: MetaPlanRow[]; kinds: Record<string, string>; canEdit: boolean; today: string; maxRevisions: number };
 type InboxBrief = { id: string; kind: string; channel: string; purpose: string; message: string; status: string; quantity: number; due_date: string | null; created_at: string; brand: string | null; created_by_name: string | null; summary_ko: string | null; model: string | null };
-const INBOX_TABS: [string, string][] = [['contents', '콘텐츠'], ['proposals', '운영 제안'], ['budget', '광고 예산'], ['goals', '월 목표'], ['briefs', '제작 의뢰']];
+const INBOX_TABS: [string, string][] = [['contents', '콘텐츠'], ['proposals', '운영 제안'], ['budget', '광고 예산'], ['ads', '광고 초안'], ['goals', '월 목표'], ['briefs', '제작 의뢰']];
 export function Approvals() {
   const sp = useSearchParams();
   const [open, setOpen] = useState<string | null>(sp.get('c'));
@@ -322,6 +323,9 @@ function InboxTab({ tab, d, onChange }: { tab: string; d: Inbox; onChange: () =>
     : empty('대기 중인 운영 제안 카드가 없습니다.', '/s/marketing/ops', '운영실에서 [AI 마케터 제안 받기] →');
   if (tab === 'budget') return d.budgets.length ? <div className="space-y-3" data-testid="mkt-inbox-budget">{d.budgets.map((b) => <BudgetCard key={b.id} b={b} month={b.month} canEdit={d.canEdit} busy={false} onDraft={() => {}} onChange={onChange} compact />)}</div>
     : empty('승인 대기 중인 광고 예산 계획이 없습니다.', '/s/marketing/ops', '운영실에서 계획 만들기 →');
+  // #494 메타 광고 초안(Meta 에 꺼진 채로 만든 것) — 승인하면 서버가 상한을 다시 확인하고 켬
+  if (tab === 'ads') return d.ads.length ? <div className="grid gap-3 xl:grid-cols-2" data-testid="mkt-inbox-ads">{d.ads.map((r) => <MetaDraftCard key={r.id} r={r} canEdit={d.canEdit} onChange={onChange} />)}</div>
+    : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops', '광고 운영에서 메타 광고 세팅 →');
   if (tab === 'goals') return d.goals.length ? <div className="space-y-3" data-testid="mkt-inbox-goals">{d.goals.map((g) => <GoalCard key={g.id} g={g} canEdit={d.canEdit} today={d.today} onChange={onChange} />)}</div>
     : empty('승인 대기 중인 월 운영 목표 초안이 없습니다.', '/s/marketing/goals', '월 운영 목표 →');
   return d.briefs.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-briefs">{d.briefs.map((b) => <BriefDecisionCard key={b.id} b={b} canEdit={d.canEdit} onChange={onChange} />)}</div>

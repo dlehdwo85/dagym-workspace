@@ -19,7 +19,7 @@ const KAPT_ROWS = [
 const dataGo = (items) => JSON.stringify({ response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items, numOfRows: 100, pageNo: 1, totalCount: items.length } } });
 // #476: 시험마다 바꾸는 원천 — K-apt 목록 추가 줄·상세 입찰분류·공식 API(15058166) 응답·협력사 게시판
 let kaptExtra = [], kaptApiItems = []; const detailCat = {};
-let vendorStatus = 200;
+let vendorStatus = 200, nuriMode = 'denied'; // 누리장터: denied(활용신청 전) · empty(정상 0건) · odd(칸 이름이 다른 응답)
 let vendorHtml = `<html><ul><li><a href="/notice/12">2026년 협력업체 정기등록 모집 안내</a> <span>${today}</span></li><li><a href="/notice/13">추석 연휴 안내</a></li></ul></html>`;
 before(async () => {
   fake = http.createServer(async (req, res) => {
@@ -33,7 +33,8 @@ before(async () => {
     if (u.pathname === '/kapt/bid/bidResultListAjax.do') { const kw = new URLSearchParams(body).get('searchKeyword'); return send(200, JSON.stringify(kw === '커뮤니티' ? [{ bidNum: '20261021000001', bidTitle: '[서울강남] 커뮤니티 피트니스센터 위탁운영 사업자 선정', kaptName: '래미안 강남', sucsBidder: '다짐', sucsAmt: '120000000', sucsDate: today }] : []), 'application/json'); }
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', ntceInsttNm: '성남시', dminsttNm: '성남시체육회', bidNtceDt: `${today} 09:00:00`, bidClseDt: `${plus(9)} 10:00:00`, opengDt: `${plus(9)} 11:00:00`, presmptPrce: '250000000', ntceKindNm: '일반', cntrctCnclsMthdNm: '제한경쟁', prtcptLmtRgnNm: '경기도', bidNtceDtlUrl: 'https://www.g2b.go.kr/x/1', ntceSpecDocUrl1: 'https://www.g2b.go.kr/f/1.hwp' }] : []), 'application/json');
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/')) return send(200, dataGo([]), 'application/json');
-    if (u.pathname.startsWith('/g2b/ao/PrvtBidNtceService/')) return send(200, '<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>30</returnReasonCode><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>', 'application/xml');
+    if (u.pathname.startsWith('/g2b/ao/PrvtBidNtceService/')) return nuriMode === 'denied' ? send(200, '<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>30</returnReasonCode><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>', 'application/xml')
+      : send(200, dataGo(nuriMode === 'odd' ? [{ ntceNo: 'N-1', ntceNm: '시험 민간 입찰' }] : []), 'application/json');
     if (u.pathname.startsWith('/g2b/ao/HrcspSsstndrdInfoService/')) return send(200, dataGo([{ bfSpecRgstNo: 'PRE-1', prdctClsfcNoNm: '커뮤니티센터 운영 위탁 용역 사전규격', orderInsttNm: 'LH', rcptDt: `${today} 08:00:00`, opninRgstClseDt: `${plus(4)} 18:00:00`, asignBdgtAmt: '90000000' }, { bfSpecRgstNo: 'PRE-2', prdctClsfcNoNm: '도로 포장 공사 사전규격', orderInsttNm: '도로공사' }]), 'application/json');
     if (u.pathname.startsWith('/g2b/as/ScsbidInfoService/')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', bidwinnrNm: '하이링크', sucsfbidAmt: '240000000', opengDt: `${today} 11:00:00` }] : []), 'application/json');
     if (u.pathname === '/agency/lh_bid') return send(200, dataGo([{ bidNum: 'LH-1', bidNm: '행복주택 커뮤니티시설 운영 위탁', ognzNm: 'LH', clseDt: `${plus(6)} 17:00`, bidAmt: '50000000' }]), 'application/json');
@@ -75,7 +76,7 @@ test('수집기 12개 목록 · K-apt 입찰공고(목록→관련 상세→적�
 
 test('나라장터(검색어 × 4대상) + 누리장터 활용신청 필요 → 일부 · 사전규격(matchFit 거름)·낙찰 병합 · LH 관련 + 나머지 DENIED', async () => {
   const r = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
-  assert.equal(r.status, 'partial', JSON.stringify(r)); assert.equal(r.inserted, 1); assert.match(r.errorLog, /활용신청 필요/);
+  assert.equal(r.status, 'partial', JSON.stringify(r)); assert.equal(r.inserted, 1); assert.match(r.errorLog, /활용신청 필요/); assert.match(r.summary, /누리장터 0건\(응답 없음\)/, r.summary);
   const [g] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = 'g2b_bid'`;
   assert.equal(g.row.source_external_id, '20261021001-00'); assert.equal(g.row.fit_business, '다짐'); assert.equal(g.row.region, '경기도'); assert.equal(g.row.estimated_amount, 250000000); assert.equal(g.row.attachment_urls.length, 1);
   const p = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_prespec_awards/run', {});
@@ -249,6 +250,8 @@ test('#476 입찰공고 누락: 지난 메일 뒤 처음 본 공고 → 다음 �
   const all2 = (await sql`select row->>'title' t from sales_src_rows where tbl = 'procurement_notices' and not gone and row->>'source_type' = 'vendor_recruit'`).map((r) => r.t);
   assert.ok(!all2.some((x) => /2025년도|^\[시험건설\] (1\)|b\.|구분|협력업체등록$|협력업체 등록신청서)/.test(x)), `30일 넘은 글·조각은 줄이 아님: ${JSON.stringify(all2)}`);
   assert.ok(all2.includes('[시험건설] 협력사 안내 페이지 바뀜 — 협력업체등록 외 4줄'), JSON.stringify(all2));
+  const mail2 = await ctx.owner.ok('POST', '/api/sales/digest/send', {}); // 메일 줄에 공고일(오늘보다 앞이면 '공고일 YYYY-MM-DD') — 지난 메일 뒤 처음 본 옛 공고가 오늘 공고처럼 보이지 않게
+  assert.equal(mail2.items.find((i) => i.title.includes('2026년도 하반기'))?.posted, plus(-3), JSON.stringify(mail2.items.map((i) => [i.title, i.posted])));
   const tt4 = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today')).items;
   assert.equal(tt4.find((n) => n.title.includes('2026년도 하반기')).todayLabel, `${Number(plus(-3).slice(5, 7))}/${Number(plus(-3).slice(8, 10))} 공고·오늘 수집`);
   assert.match((await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {})).summary, /안내 페이지 바뀜 0 · 신규 0/);
@@ -279,3 +282,12 @@ test('플랫폼 운영자: 협력사 감시 페이지·기관 엔드포인트 �
   const [a] = await sql`select count(*)::int n from audit_logs where action = 'platform.sales_collectors.settings'`; assert.ok(a.n >= 1);
 });
 
+test('누리장터 응답 통계(로컬 10/23 "0건이 진짜 0건인지"): 정상 0건 = 검색 n회 · 응답 00 · 전체 0건 · 칸 이름이 다르면 받은 줄을 못 읽음(칸 이름)', async () => {
+  nuriMode = 'empty';
+  const e = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
+  assert.match(e.summary, /누리장터 0건\(검색 \d+회 · 응답 00 · 전체 0건\)/, e.summary);
+  nuriMode = 'odd';
+  const o = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
+  assert.match(o.summary, /누리장터 0건\(검색 \d+회 · 응답 00 · 전체 \d+건 · 받은 \d+줄을 못 읽음\(칸: ntceNo,ntceNm\)\)/, o.summary);
+  nuriMode = 'denied';
+});

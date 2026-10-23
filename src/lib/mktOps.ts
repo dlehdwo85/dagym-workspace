@@ -526,8 +526,14 @@ export async function inboxView(u: SessionUser) {
   const spend = budgets.length ? await sql<{ provider: string; cost: number }[]>`select a.provider, coalesce(sum(s.cost_krw), 0)::float8 cost from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.day >= ${`${budgets[0].month}-01`}::date group by a.provider` : [];
   const used = Object.fromEntries(spend.map((s) => [s.provider, s.cost]));
   const budgetsOut = budgets.map((b) => ({ ...b, total: Number(b.total), brand_plan: b.brand_plan ?? [], plan: (b.plan as any[]).map((p) => { const ch = AD_CH[p.provider]; const u2 = ch?.provider ? used[ch.provider] ?? 0 : 0; return { ...p, charge: ch?.charge ?? null, used: u2, rate: p.monthly ? Math.round((u2 / p.monthly) * 100) : null }; }) }));
-  const counts = { contents, proposals: proposals.length, budget: budgets.length, goals: goals.length, briefs: briefs.length };
-  return { counts, total: Object.values(counts).reduce((a, b) => a + b, 0), proposals, budgets: budgetsOut, goals: goalsOut, briefs, kinds: PROPOSAL_KIND, canEdit: isAdmin(u), today: ymd(new Date()), maxRevisions: MAX_REVISIONS };
+  // #494 메타 광고 초안(Meta 에 꺼진 채로 만든 것) — 승인하면 서버가 상한을 다시 확인하고 켬
+  const ads = await sql<any[]>`select p.id, p.name, p.plan, p.external, p.created_at, br.name as brand, a.label as account_label, cu.name as created_by_name, pa.label as page_label, lf.mime_type as creative_mime
+    from mkt_ad_plans p join mkt_ad_accounts a on a.id = p.account_id left join mkt_brands br on br.id = p.brand_id left join users cu on cu.id = p.created_by
+      left join mkt_publish_accounts pa on pa.id::text = p.plan->>'pageAccountId' and pa.tenant = p.tenant
+      left join library_files lf on lf.id::text = p.plan->'creative'->>'fileId' and lf.tenant = p.tenant
+    where p.tenant = ${t} and p.provider = 'meta' and p.status = 'created' order by p.created_at desc limit 20`;
+  const counts = { contents, proposals: proposals.length, budget: budgets.length, goals: goals.length, briefs: briefs.length, ads: ads.length };
+  return { counts, total: Object.values(counts).reduce((a, b) => a + b, 0), proposals, budgets: budgetsOut, goals: goalsOut, briefs, ads, kinds: PROPOSAL_KIND, canEdit: isAdmin(u), today: ymd(new Date()), maxRevisions: MAX_REVISIONS };
 }
 /** 정기: 월요일 09시 이후 분석·방향 카드(대기 없으면), 매일 소진율 알림, 25일 이후 다음 달 예산 초안(없으면). 밤(22시~)은 night_scope.goal 켠 회사만 */
 export async function opsTick(tenant: string, now = new Date()) {
