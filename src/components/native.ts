@@ -24,10 +24,17 @@ interface LocalPlugin {
   cancel(o: { notifications: { id: number }[] }): Promise<void>;
   schedule(o: { notifications: any[] }): Promise<unknown>;
   createChannel(c: { id: string; name: string; description?: string; importance?: number; visibility?: number; vibration?: boolean; sound?: string }): Promise<void>;
-  registerActionTypes(o: { types: { id: string; actions: { id: string; title: string; destructive?: boolean; foreground?: boolean }[] }[] }): Promise<void>;
+  registerActionTypes(o: { types: { id: string; actions: { id: string; title: string; destructive?: boolean; foreground?: boolean; input?: boolean; inputButtonTitle?: string; inputPlaceholder?: string }[] }[] }): Promise<void>;
   removeDeliveredNotifications(o: { notifications: any[] }): Promise<void>;
 }
 const LocalNotifications = registerPlugin<LocalPlugin>('LocalNotifications');
+// 앱 1.1.3 네이티브(로컬 f10f7337): 이 앱이 할 수 있는 일(caps) — 옛 앱(1.1.2 이하)에는 플러그인이 없어 []
+interface WorkinNativePlugin { getInfo(): Promise<{ platform?: string; caps?: string[] }> }
+const WorkinNative = registerPlugin<WorkinNativePlugin>('WorkinNative');
+export async function nativeCaps(): Promise<string[]> {
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('WorkinNative')) return [];
+  try { return ((await WorkinNative.getInfo()).caps ?? []).filter((c) => typeof c === 'string').slice(0, 20); } catch { return []; }
+}
 // 52ec734(로컬): filesystem·share·browser 플러그인 — 이 플러그인이 없는 예전 앱은 지금처럼 동작
 interface BrowserPlugin { open(o: { url: string; presentationStyle?: string }): Promise<void>; close(): Promise<void> }
 interface FsPlugin { writeFile(o: { path: string; data: string; directory: string }): Promise<{ uri: string }> }
@@ -40,6 +47,7 @@ const canShareFiles = () => Capacitor.getPlatform() === 'ios' && Capacitor.isPlu
 /** 예전 앱(플러그인 없음)에서는 서버 알림을 그대로 받는다 */
 const hasLocal = () => Capacitor.isPluginAvailable('LocalNotifications');
 import { api } from './client';
+import { WN_ACTION_IDS, WN_SETS, wnCategory } from '@/lib/notifCategories';
 
 type Router = { push: (href: string) => void };
 
@@ -89,15 +97,28 @@ export async function initNative(router: Router) {
     } else if (act === 'dismiss') { await report('dismiss'); toast.ok('알람을 해제했습니다'); window.dispatchEvent(new Event('wos-refresh')); }
     else go(x.link);
   };
+  // 앱 1.1.3 알림창 버튼(#130·#478, iOS): 알림의 [승인][수정 요청]·[답글][확인] 등 → 알림 액션 API(서버가 권한·상태 검사). 안드로이드 1.1.3 은 앱이 직접 처리(NotificationActionReceiver)
+  const notifAction = async (nid: string, action: string, text: string | undefined, link?: string) => {
+    const { toast } = await import('./ui');
+    try {
+      const r = await api<{ label?: string }>(`/api/notifications/${encodeURIComponent(nid)}/action`, { body: { action, ...(text?.trim() ? { text: text.trim() } : {}) } });
+      toast.ok(`✓ ${r?.label ?? '처리했습니다'}`); window.dispatchEvent(new Event('wos-refresh'));
+    } catch (err: any) { toast.error(err?.message ?? '처리하지 못했습니다 — 열어서 확인해 주세요'); go(link); }
+  };
   FirebaseMessaging.addListener('notificationActionPerformed', (e: any) => {
     const d = e?.notification?.data ?? {};
+    const aid = String(e?.actionId ?? 'tap');
+    if (d.notificationId && d.alarm !== 'true' && d.alarm !== true && WN_ACTION_IDS.has(aid)) { notifAction(String(d.notificationId), aid, e?.inputValue, d.link).catch(() => go(d.link)); return; }
     if (d.notificationId) api('/api/notifications/read', { method: 'POST', body: { ids: [d.notificationId] } }).then(() => window.dispatchEvent(new Event('wos-refresh'))).catch(() => {});
     if (d.alarm === 'true' || d.alarm === true) { alarmAction(String(e?.actionId ?? 'tap'), { id: e?.notification?.id, title: e?.notification?.title, body: e?.notification?.body, extra: { link: d.link, kind: d.taskId ? 'task' : undefined, entityId: d.taskId || undefined, alarm: true, snoozeMinutes: d.snoozeMinutes, key: d.notificationId } }, 'fcm').catch(() => go(d.link)); return; }
     go(d.link);
   });
   // 휴대폰 예약 알림(서버 연결 없이 정시에 울림) 탭·액션 → 알람이면 위 처리, 아니면 해당 화면
   if (hasLocal()) {
-    LocalNotifications.registerActionTypes({ types: [{ id: 'alarm', actions: [{ id: 'dismiss', title: '해제', destructive: true }, { id: 'snooze', title: '10분 뒤' }, { id: 'open', title: '열기' }] }] }).catch(() => {});
+    // 버튼 묶음은 한 번에 등록(iOS 는 등록할 때마다 전체가 바뀜): 알람 + 서버 푸시의 aps.category 'wn.*'(src/lib/notifCategories — 서버와 같은 표).
+    // iOS 버튼은 앱을 열고 처리(foreground) — 앱이 꺼진 채 뒤에서 처리하면 결과를 보여 줄 수 없어서
+    LocalNotifications.registerActionTypes({ types: [{ id: 'alarm', actions: [{ id: 'dismiss', title: '해제', destructive: true }, { id: 'snooze', title: '10분 뒤' }, { id: 'open', title: '열기' }] },
+      ...WN_SETS.map((set) => ({ id: wnCategory(set), actions: set.map((a) => ({ id: a.id, title: a.label, foreground: true, ...(a.input ? { input: true, inputButtonTitle: '보내기', inputPlaceholder: a.id === 'changes' ? '고칠 내용' : '답글' } : {}) })) }))] }).catch(() => {});
     LocalNotifications.addListener('localNotificationActionPerformed', (e: any) => {
       const n = e?.notification ?? {}; const x = n.extra ?? {};
       if (x.alarm === true || x.alarm === 'true') { alarmAction(String(e?.actionId ?? 'tap'), { id: n.id, title: n.title, body: n.body, extra: x }, 'local').catch(() => go(x.link)); return; }
@@ -153,7 +174,7 @@ export async function enableNativePush() {
 async function registerToken(token: string) {
   if (!token) return;
   const local = hasLocal() && (await LocalNotifications.checkPermissions().catch(() => ({ display: 'denied' }))).display === 'granted';
-  await api('/api/push/subscribe', { body: { kind: 'fcm', endpoint: token, platform: Capacitor.getPlatform(), localReminders: local } });
+  await api('/api/push/subscribe', { body: { kind: 'fcm', endpoint: token, platform: Capacitor.getPlatform(), localReminders: local, caps: await nativeCaps() } });
   try { localStorage.setItem('wos_push_endpoint', token); } catch {}
 }
 
