@@ -1,11 +1,15 @@
 package kr.co.dagym.workos;
 
+import android.appwidget.AppWidgetManager;
 import android.content.ClipData;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
 import android.provider.Telephony;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -24,12 +28,13 @@ import org.json.JSONObject;
  * - setAlarms/addAlarm/settleAlarm/alarmStatus/openAlarmSettings: 전체화면 알람('android-fullscreen-alarm-1') — 알람은 LocalNotifications 대신 여기로.
  * - refreshWidget: 바탕화면 위젯('android-widget-1') 새로고침 — 앱을 열 때·업무를 저장했을 때.
  * - shareToSms: 문자에 파일 바로 첨부('android-sms-attach-1') — 기본 문자 앱을 받는 번호·본문·파일을 채워 연다.
+ * - permissionStatus/requestPinWidget/openNotificationSettings: 처음 시작 권한 안내 창('android-permissions-1').
  * 옛 앱(1.1.2 이하)에는 이 플러그인이 없으니 웹은 Capacitor.isPluginAvailable('WorkinNative') 로 확인하고 지금 방식을 쓴다.
  */
 @CapacitorPlugin(name = "WorkinNative")
 public class WorkinNativePlugin extends Plugin {
 
-    static final String[] CAPS = { "android-actions-1", "android-fullscreen-alarm-1", "android-widget-1", "android-sms-attach-1" };
+    static final String[] CAPS = { "android-actions-1", "android-fullscreen-alarm-1", "android-widget-1", "android-sms-attach-1", "android-permissions-1" };
 
     @PluginMethod
     public void getInfo(PluginCall call) {
@@ -115,6 +120,55 @@ public class WorkinNativePlugin extends Plugin {
     public void refreshWidget(PluginCall call) {
         TodayWidget.requestRefresh(getContext());
         call.resolve();
+    }
+
+    /**
+     * 대표 10/23 "앱 받고 시작할 때 자연스럽게 허용하도록 창": 처음 시작 안내 창이 한 번에 읽는 상태.
+     * notifications = 앱 알림 켜짐(Android 13+ 권한 요청은 웹이 FirebaseMessaging.requestPermissions 로),
+     * fullScreen = 잠금 화면 알람 허용(Android 14+ 설정), exact = 정확한 시각 예약, widgets = 바탕화면에 둔 위젯 수, widgetPin = 위젯 추가 창 지원.
+     */
+    @PluginMethod
+    public void permissionStatus(PluginCall call) {
+        Context ctx = getContext();
+        AppWidgetManager awm = AppWidgetManager.getInstance(ctx);
+        JSObject r = new JSObject();
+        r.put("notifications", NotificationManagerCompat.from(ctx).areNotificationsEnabled());
+        r.put("fullScreen", WorkinAlarms.canFullScreen(ctx));
+        r.put("exact", WorkinAlarms.canExact(ctx));
+        r.put("widgets", awm.getAppWidgetIds(new ComponentName(ctx, TodayWidget.class)).length);
+        r.put("widgetPin", Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && awm.isRequestPinAppWidgetSupported());
+        r.put("sdk", Build.VERSION.SDK_INT);
+        call.resolve(r);
+    }
+
+    /** '워크인 오늘' 위젯을 바탕화면에 추가하는 시스템 창(Android 8+, 런처가 지원할 때). requested=false 면 길게 눌러 추가 안내 */
+    @PluginMethod
+    public void requestPinWidget(PluginCall call) {
+        Context ctx = getContext();
+        boolean ok = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            AppWidgetManager awm = AppWidgetManager.getInstance(ctx);
+            if (awm.isRequestPinAppWidgetSupported()) ok = awm.requestPinAppWidget(new ComponentName(ctx, TodayWidget.class), null, null);
+        }
+        JSObject r = new JSObject();
+        r.put("requested", ok);
+        call.resolve(r);
+    }
+
+    /** 앱 알림 설정 화면 — 알림 권한을 한 번 거절해 시스템 창이 다시 안 뜰 때 */
+    @PluginMethod
+    public void openNotificationSettings(PluginCall call) {
+        String pkg = getContext().getPackageName();
+        Intent i = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+            ? new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg)
+            : new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + pkg));
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("설정 화면을 열 수 없습니다");
+        }
     }
 
     /**
