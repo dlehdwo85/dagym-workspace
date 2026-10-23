@@ -940,3 +940,12 @@
   - 광명푸르지오 같은 공고번호가 두 줄이고, 업무는 첨부 없는 줄을 가리킨다.
   - 나라장터 파일은 실제 파일(HWPX)로 받아지지만 이름이 'downloadFile.do'다.
   - 클라우드에 4건 수정을 요청했다: 상세 첨부 수집, 세션 방식 내려받기+HTML 감지, 같은 공고 합치기·첨부 모으기, 파일 이름 읽기·확장자 판별. 고쳐지면 같은 업무에서 다시 확인한다.
+- 18:20 (10/23) K-apt 첨부 내려받기 방식 확인(클라우드 컨테이너는 k-apt.go.kr에 접속하지 못해서 로컬이 대신 확인)
+  - 동작하는 순서(쿠키 없는 새 세션에서 성공, HWP 71KB D0CF11E0):
+    1. GET /bid/bidDetail.do?bidNum= → JSESSIONID·KHANUSER, meta _csrf
+    2. POST /bid/bidFileListData.do?seq=BID_FILE, 본문 JSON {bidNum}, 헤더 X-CSRF-TOKEN → seq·fileName
+    3. GET /cmm/file/BID/fileDownload.do?key=seq&fileName=…(같은 쿠키)
+  - 2를 건너뛰면 500(XML), CSRF가 없으면 `<state>csrf</state>`.
+  - 지금 워크인이 쓰는 /bid/bidFileDown.do는 오류 웹페이지(256KB)다 → 가짜 .hwp의 원인.
+  - 같은 공고 두 줄: a7e4efad(10/21 09:42 영업 전환 복사, 진행 기록·업무 연결)와 086aeff2(10/22 새 수집기, 첨부 있음). 같은 source_type·source_external_id인데 다른 줄이다 → 합치기를 요청했다.
+  - 클라우드에 형식 전체와 합치기 규칙을 전달했다.
