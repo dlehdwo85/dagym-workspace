@@ -9,7 +9,7 @@ import { useSession } from '@/components/session';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
-import { ApprovalCard, BrandChip, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, WhyBox } from './ApprovalCard';
+import { ApprovalCard, BrandChip, needsVisual, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, WhyBox } from './ApprovalCard';
 import { ProposalCard, BudgetCard } from './Ops';
 import { GoalCard, type Goal } from './Goals';
 import { MetaDraftCard, type MetaPlanRow } from './MetaAuto';
@@ -71,7 +71,10 @@ export function ApproveRow({ c, canDecide, onDone }: { c: CardContent; canDecide
         {c.deadline && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-800" data-testid="mkt-home-deadline">{whenLabel(c.deadline)}까지</span>}
       </div>
       <p className="text-xs text-ink-2">{[c.brand, channelLabel(c.channel, c.kind)].filter(Boolean).join(' · ')} · {whenLabel(c.scheduled_at)} 게시{c.current_version > 1 ? ` · 수정본 v${c.current_version}` : ''}</p>
-      {!canDecide ? null : mode === 'idle' ? <div className="mt-1 flex gap-1.5"><Button size="sm" disabled={busy} onClick={() => decide('approve')} data-testid="home-approve">승인</Button><Button size="sm" variant="secondary" onClick={() => setMode('changes')} data-testid="home-changes">수정 요청</Button></div>
+      {/* #516 (c): 시안 없는 글(홈은 첫 시안 id 만 받음)은 [승인] 대신 승인함 [지금 만들기]로 */}
+      {!canDecide ? null : mode === 'idle' ? <div className="mt-1 flex flex-wrap items-center gap-1.5">{'media' in c && !(c as { media?: string | null }).media && c.channel !== 'threads'
+        ? <Link href={`/s/marketing/approvals?c=${c.id}`} className="text-xs font-semibold text-red-700 underline" data-testid="home-no-visual">시안 없음 — 승인함에서 [지금 만들기]</Link>
+        : <Button size="sm" disabled={busy} onClick={() => decide('approve')} data-testid="home-approve">승인</Button>}<Button size="sm" variant="secondary" onClick={() => setMode('changes')} data-testid="home-changes">수정 요청</Button></div>
         : <div className="mt-1 flex flex-wrap gap-1.5"><input className={cx(inputCls, 'min-w-0 flex-1')} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="무엇을 고칠지(두 글자 이상)" aria-label="수정 요청 메모" data-testid="home-changes-memo" />
           <Button size="sm" disabled={busy || memo.trim().length < 2} onClick={() => decide('changes')} data-testid="home-changes-send">보내기</Button><Button size="sm" variant="secondary" onClick={() => setMode('idle')}>취소</Button></div>}
     </li>
@@ -353,7 +356,9 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
   const list = contents.filter((c) => !brand || c.brand === brand);
   const drafts = plain ? [] : list.filter((c) => c.status === 'draft').sort((a, b) => String(a.scheduled_at ?? '9999').localeCompare(String(b.scheduled_at ?? '9999')));
   const emptyBrands = plain ? [] : (allBrands.data?.brands ?? []).map((b) => b.name).filter((n) => !contents.some((c) => c.brand === n && ['draft', 'pending', 'changes', 'hold', 'approved'].includes(c.status)));
-  const ready = plain ? list : list.filter((c) => c.status === 'pending' && !c.late);
+  // #516·#455: 시안 없이는 승인할 수 없는 글은 '승인할 시안' 수에서 빼고 따로(빨간 칸 — [지금 만들기])
+  const ready = plain ? list : list.filter((c) => c.status === 'pending' && !c.late && !needsVisual(c));
+  const noVisual = plain ? [] : list.filter((c) => c.status === 'pending' && !c.late && needsVisual(c));
   const waiting = plain ? [] : list.filter((c) => (c.status === 'changes' || c.status === 'hold') && !c.late);
   const late = plain ? [] : list.filter((c) => c.late);
   // 로컬 10/21 08:10·09:20: 승인됐지만 아직 게시 전 — 예정 시각 임박·미래 순, 지난 건은 '예정 지남' 접힘, 기본 10건 + 더보기(브랜드 필터 적용)
@@ -366,12 +371,14 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
     <div className="space-y-3">
       {brands.length > 1 && <div className="flex flex-wrap gap-1.5" data-testid="mkt-brand-tabs">{['', ...brands].map((b) => (
         <button key={b || 'all'} type="button" onClick={() => setBrand(b)} className={cx('rounded-full border px-3 py-1 text-xs', brand === b ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white')}>
-          {b || '전체'} {contents.filter((c) => (!b || c.brand === b) && c.status === 'pending' && !c.late).length}</button>))}</div>}
+          {b || '전체'} {contents.filter((c) => (!b || c.brand === b) && c.status === 'pending' && !c.late && !needsVisual(c)).length}</button>))}</div>}
       {!plain && <p className="text-sm" data-testid="mkt-approvable-count">승인할 시안 <b className="text-orange-700">{ready.length}건</b></p>}
       {!ready.length ? <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3">{plain ? '해당 콘텐츠가 없습니다' : '지금 승인할 최종 시안이 없습니다.'}</p> : (
         <div className="space-y-2">{shown.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}
           {!more && ready.length > 3 && <Button variant="secondary" className="w-full" onClick={() => setMore(true)} data-testid="mkt-more">{ready.length - 3}건 더 보기</Button>}</div>
       )}
+      {noVisual.length > 0 && <details open className="rounded-card border border-red-300 bg-red-50/40 p-3 text-sm" data-testid="mkt-no-visual"><summary className="cursor-pointer font-medium text-red-800">시안 없음 — 시안을 붙여야 승인할 수 있습니다 {noVisual.length}건 (승인 숫자에서 뺌)</summary>
+        <div className="mt-2 space-y-2">{noVisual.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {approvedWait.length > 0 && <details open className="rounded-card border border-emerald-200 bg-emerald-50/30 p-3 text-sm" data-testid="mkt-approved-wait"><summary className="cursor-pointer font-medium text-emerald-900">승인됨 · 게시 전 {approvedWait.length}건 — 열어서 [지금 게시] 또는 예정 시각에 자동</summary>
         <div className="mt-2 space-y-2">{(moreApproved ? approvedWait : approvedWait.slice(0, 10)).map((c) => <div key={c.id} className="space-y-1"><ApprovalCard c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />
           {canDecide && <Button size="sm" variant="secondary" onClick={() => onOpen(c.id)} data-testid="mkt-approved-publish">열어서 게시 →</Button>}</div>)}

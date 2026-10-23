@@ -37,7 +37,9 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   assert.ok(good, '통과본은 승인 대기');
   const [gv] = await sql`select body from mkt_versions where content_id = ${good.id} and version = 1`;
   assert.match(gv.body, /AI 도움을 받아 제작했습니다$/, 'AI 표기 자동');
-  assert.ok((await sql`select 1 from mkt_production_requests where content_id = ${good.id} and kind = 'image' and status = 'open'`).length, '이미지 제작 요청 카드');
+  // #516: 피드 시안은 서버가 바로 그려 붙임(크레딧 0) — 이미지 제작 요청 카드 없이 승인 대기
+  assert.equal((await sql`select cardinality(media_ids)::int n from mkt_versions where content_id = ${good.id} and version = 1`)[0].n, 1, '시안 1장');
+  assert.equal((await sql`select count(*)::int n from mkt_production_requests where content_id = ${good.id} and kind = 'image'`)[0].n, 0, '이미지 제작 요청 카드 없음');
   assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '제작 완료%'`).length, '제작 완료 알림');
   assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '승인 마감 72시간 전%'`).length, '마감 N시간 전 알림');
   // 수정 요청: 글자 → AI 새 버전 / 사진 재생성 → 카드(재생성 0회 → 승인 필요)
@@ -57,8 +59,8 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   v = await ctx.owner.ok('GET', '/api/marketing/auto');
   assert.equal(v.usage.weekCredits, 6.5); assert.equal(v.usage.monthRegens, 1);
   assert.ok(v.ledger.some((l) => l.kind === 'regen_image' && l.credits === 6.5), '원장: 게시물·버전별');
-  // 마감 지난 자동 시안은 정리(취소), 규칙 지우면 아직 안 만든 칸만 같이 지움
-  await sql`update mkt_contents set scheduled_at = now() - interval '1 day' where id = ${bad.id}`;
+  // 마감 지난 자동 시안은 다음 슬롯으로 3번까지 미루고(#516, mkt-visual 시험) 그 뒤에는 정리(취소), 규칙 지우면 아직 안 만든 칸만 같이 지움
+  await sql`update mkt_contents set scheduled_at = now() - interval '1 day', quality = quality || '{"moved": 3}'::jsonb where id = ${bad.id}`;
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.equal((await sql`select status from mkt_contents where id = ${bad.id}`)[0].status, 'canceled');
   const [rule] = await sql`select id from mkt_rules`;
@@ -109,7 +111,8 @@ test('알림 받는 사람 고르기 · 브랜드 시험 모드', async () => {
   assert.match((await sql`select body from mkt_versions where content_id = ${tc[0].id}`)[0].body, /^워크인에서/);
   assert.ok(tc[1].quality.issues.some((x) => x.includes('자리표시')), JSON.stringify(tc[1].quality));
   v = await ctx.owner.ok('GET', '/api/marketing/auto');
-  assert.ok(tc.every((c) => v.requests.some((q) => q.content_id === c.id && q.kind === 'image')), '시안마다 이미지 제작 요청 카드');
+  assert.ok(tc.every((c) => !v.requests.some((q) => q.content_id === c.id && q.kind === 'image')), '#516 시안은 서버가 그려 붙임 — 이미지 제작 요청 카드 없음');
+  assert.equal((await sql`select count(*)::int n from mkt_versions where content_id = any(${tc.map((c) => c.id)}::uuid[]) and cardinality(media_ids) = 1`)[0].n, tc.length, '시안마다 1장');
   assert.ok(tc.every((c) => c.is_test && c.title.startsWith('[시험]')));
   const tn = await sql`select distinct user_id from notifications where entity_id = any(${tc.map((c) => c.id)}::uuid[])`;
   assert.deepEqual(tn.map((r) => r.user_id), [ctx.ownerId], '시험 알림은 실행한 사람에게만');
@@ -152,8 +155,10 @@ test('제작 시점 바꾸면 안 만든 칸 다시 계산 · AI 다시 만들�
   assert.equal(re.passed, true, JSON.stringify(re));
   const [after] = await sql`select status, current_version, title from mkt_contents where id = ${c.id}`;
   assert.deepEqual([after.status, after.current_version, after.title], ['pending', 2, '헬스장 가을 소식']);
-  const cards = await sql`select version, status from mkt_production_requests where content_id = ${c.id} and kind = 'image' order by version`;
-  assert.deepEqual(cards.map((x) => `${x.version}:${x.status}`), ['1:canceled', '2:open']);
+  // #516: 버전마다 서버가 시안을 새로 그림(이미지 제작 카드 없음)
+  const vs = await sql`select version, cardinality(media_ids)::int n from mkt_versions where content_id = ${c.id} order by version`;
+  assert.deepEqual(vs.map((x) => `${x.version}:${x.n}`), ['1:1', '2:1']);
+  assert.equal((await sql`select count(*)::int n from mkt_production_requests where content_id = ${c.id} and kind = 'image'`)[0].n, 0);
   const led = (await ctx.owner.ok('GET', '/api/marketing/auto')).ledger.filter((l) => l.kind === 'text' && ['헬스장 소식', '헬스장 가을 소식'].includes(l.title));
   assert.deepEqual(led.map((l) => `v${l.version} ${l.title}`).sort(), ['v1 헬스장 소식', 'v2 헬스장 가을 소식'], '원장 = 기록 당시 제목');
   await ctx.owner.ok('POST', `/api/marketing/auto/contents/${c.id}`, { action: 'archive' });
