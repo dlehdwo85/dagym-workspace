@@ -5,14 +5,14 @@ import { useApi } from '@/components/client';
 import { Button, cx, inputCls } from '@/components/ui';
 
 /** 자료실에서 시안(이미지·영상) 고르기 — 볼 수 있는 자료만 */
-export function MediaPick({ value, onChange }: { value: { id: string; title: string }[]; onChange: (v: { id: string; title: string }[]) => void }) {
+export function MediaPick({ value, onChange, label = '자료실에서 시안 고르기' }: { value: { id: string; title: string }[]; onChange: (v: { id: string; title: string }[]) => void; label?: string }) {
   const [q, setQ] = useState(''); const [query, setQuery] = useState(''); const [open, setOpen] = useState(false);
   const res = useApi<{ files: { id: string; title: string; file_name: string; mime_type: string }[] }>(open ? `/api/library?limit=30&space=marketing&q=${encodeURIComponent(query)}` : null, [query, open]);
   return (
     <div className="space-y-1.5" data-testid="media-pick">
       <div className="flex flex-wrap gap-1.5">
         {value.map((m) => <span key={m.id} className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800">{m.title}<button type="button" onClick={() => onChange(value.filter((x) => x.id !== m.id))} aria-label={`${m.title} 빼기`}>×</button></span>)}
-        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen((x) => !x)} data-testid="media-pick-open">자료실에서 시안 고르기</Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen((x) => !x)} data-testid="media-pick-open">{label}</Button>
       </div>
       {open && (
         <div className="rounded-input border border-line p-2">

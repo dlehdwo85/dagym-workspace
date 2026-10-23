@@ -2,10 +2,24 @@
 // 실제 Google 동작 중 동기화에 필요한 부분(syncToken, 410, ETag/If-Match 412, watch, 취소 상태)을 흉내 낸다.
 import http from 'node:http';
 import https from 'node:https';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const FAKE_ORIGIN = (req) => `http://${req.headers.host}`;
+// #454 가짜 Higgsfield 영상 결과·가짜 TTS 는 진짜 mp4·mp3(작게) — 서버 합성(ffmpeg)이 실제로 돈다. ffmpeg 위치는 앱과 같은 순서
+const FFMPEG = [process.env.FFMPEG_PATH, join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg')].find((x) => x && existsSync(x)) ?? 'ffmpeg';
+const media = new Map();
+function makeMedia(key, args) {
+  if (media.has(key)) return media.get(key);
+  const r = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', ...args, '-f', key.endsWith('mp3') ? 'mp3' : 'mp4', 'pipe:1'], { maxBuffer: 64 * 1024 * 1024 });
+  const out = r.status === 0 && r.stdout?.length ? r.stdout : null; if (out) media.set(key, out); return out;
+}
+const fakeClip = (sec, ar) => { const [w, h] = ar === '16:9' ? [640, 360] : ar === '1:1' ? [480, 480] : [360, 640];
+  return makeMedia(`clip-${sec}-${ar}.mp4`, ['-f', 'lavfi', '-i', `testsrc2=s=${w}x${h}:r=24:d=${sec}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov']); };
+const fakeMp3 = (sec, hz = 440) => makeMedia(`tone-${sec}-${hz}.mp3`, ['-f', 'lavfi', '-i', `sine=frequency=${hz}:duration=${sec}`, '-c:a', 'libmp3lame', '-b:a', '64k']);
+export { fakeMp3 };
 export function startFakeGoogle(port = 3199) {
   const state = {
     seq: 1,
@@ -28,6 +42,7 @@ export function startFakeGoogle(port = 3199) {
     webpushGone: new Set(),
     requests: [],
     hf: [], hfJobs: {}, hfMode: null, hfPolls: 1, // 로컬 10/22 가짜 Higgsfield(/hf): 제출 기록·요청 상태(hfPolls 번 in_progress 뒤 completed)
+    tts: [], // #454 가짜 TTS 요청 기록
   };
   const evs = (cal) => (state.events[cal] ??= {});
   const touch = (e) => { e.seq = ++state.seq; e.etag = `"${state.seq}"`; e.updated = new Date().toISOString(); return e; };
@@ -113,7 +128,19 @@ export function startFakeGoogle(port = 3199) {
         ...(body.container ? { container: { id: body.container.id ?? `cntr_fake_${state.anthropic.length}`, expires_at: new Date(Date.now() + 3600e3).toISOString() } } : {}), ...next });
     }
     // ---- 가짜 Higgsfield (base = FAKE/hf): Authorization: Key test-id:test-secret, 제출 → queued + status_url, 상태 → hfPolls 번 in_progress 뒤 completed ----
-    if (p.startsWith('/hf-out/')) { res.writeHead(200, { 'content-type': p.endsWith('.mp4') ? 'video/mp4' : 'image/png' }); return res.end(Buffer.from(p.endsWith('.mp4') ? 'fakevideo' : 'fakepng')); }
+    if (p.startsWith('/hf-out/')) {
+      const job = state.hfJobs[p.slice(8).replace(/\.\w+$/, '')];
+      const clip = p.endsWith('.mp4') && job ? fakeClip(job.seconds ?? 5, job.aspect ?? '9:16') : null;
+      res.writeHead(200, { 'content-type': p.endsWith('.mp4') ? 'video/mp4' : 'image/png' }); return res.end(clip ?? Buffer.from(p.endsWith('.mp4') ? 'fakevideo' : 'fakepng'));
+    }
+    // ---- 가짜 TTS(OpenAI 형식, base = FAKE/openai/v1): Bearer test-tts-key, 글자 수 × 0.12초 사인파 mp3 ----
+    if (p === '/openai/v1/audio/speech' && req.method === 'POST') {
+      if (req.headers.authorization !== 'Bearer test-tts-key') return json(res, 401, { error: { message: 'Incorrect API key provided' } });
+      state.tts.push({ input: body.input, voice: body.voice, model: body.model, instructions: body.instructions ?? null });
+      const mp3 = fakeMp3(Math.min(4, Math.max(0.8, Math.round(String(body.input ?? '').length * 0.12 * 10) / 10)));
+      res.writeHead(200, { 'content-type': 'audio/mpeg' }); return res.end(mp3 ?? Buffer.alloc(0));
+    }
+    if (p === '/openai/v1/models' && req.method === 'GET') return req.headers.authorization === 'Bearer test-tts-key' ? json(res, 200, { data: [{ id: 'gpt-4o-mini-tts' }] }) : json(res, 401, { error: { message: 'Incorrect API key provided' } });
     if (p.startsWith('/hf/')) {
       if (req.headers.authorization !== 'Key test-id:test-secret') return json(res, 401, { detail: 'Invalid credentials' });
       const sm = /^\/hf\/requests\/([^/]+)\/status$/.exec(p);
@@ -130,7 +157,7 @@ export function startFakeGoogle(port = 3199) {
         if (state.hfMode === 'validation') return json(res, 422, { detail: [{ loc: ['body', 'aspect_ratio'], msg: 'Input should be 1:1' }] });
         const id = randomUUID();
         state.hf.push({ path: p.slice(4), body, idem: req.headers['idempotency-key'] ?? null });
-        state.hfJobs[id] = { polls: 0, need: state.hfPolls, video: /video/.test(p), final: state.hfMode === 'nsfw' ? 'nsfw' : null };
+        state.hfJobs[id] = { polls: 0, need: state.hfPolls, video: /video/.test(p), final: state.hfMode === 'nsfw' ? 'nsfw' : null, seconds: body.duration ?? 5, aspect: body.aspect_ratio ?? '9:16' };
         return json(res, 200, { status: 'queued', request_id: id, status_url: `${FAKE_ORIGIN(req)}/hf/requests/${id}/status`, cancel_url: `${FAKE_ORIGIN(req)}/hf/requests/${id}/cancel` });
       }
     }
@@ -148,6 +175,7 @@ export function startFakeGoogle(port = 3199) {
       if ('hfMode' in body) state.hfMode = body.hfMode;
       if ('hfPolls' in body) state.hfPolls = body.hfPolls;
       if (body.hfReset) { state.hf.length = 0; state.hfJobs = {}; }
+      if (body.ttsReset) state.tts.length = 0;
       if (body.googleEdit) { // Google 쪽에서 사용자가 직접 수정
         const e = evs(body.googleEdit.cal)[body.googleEdit.id];
         Object.assign(e, body.googleEdit.patch); touch(e);

@@ -18,10 +18,30 @@ function estLabel(m: { kind: string; credits: number; usd?: number | null }, qua
   if (v.pricing === 'usd' && m.usd != null) { const usd = Math.round(m.usd * (m.kind === 'video' ? 15 : 1) * quantity * 1000) / 1000; return `약 $${usd} (≈${Math.round(usd * (v.usdKrw ?? 1400)).toLocaleString('ko-KR')}원)`; }
   return `${m.credits * quantity}크레딧`;
 }
-type Brief = { id: string; brand: string | null; brand_id: string | null; channel: string; kind: string; purpose: string; message: string; refs: any; tone: string | null; quantity: number; due_date: string | null; status: string; prompt: any; content_id: string | null; est_credits: number; result: any; error: string | null; created_by_name: string | null; created_at: string; content_status: string | null; open_requests: number };
-type View = { briefs: Brief[]; brands: { id: string; name: string; tone: string | null }[]; recent: { id: string; title: string; channel: string }[]; kinds: Record<string, { label: string; aspect: string; px: string; media: string }>; purposes: Record<string, string>; canGenerate: boolean; pricing?: 'credits' | 'usd'; usdKrw?: number; provider: 'higgsfield' | 'card'; models: { id: string; kind: string; name: string; credits: number }[] };
+type Brief = { id: string; brand: string | null; brand_id: string | null; channel: string; kind: string; purpose: string; message: string; refs: any; tone: string | null; quantity: number; due_date: string | null; status: string; prompt: any; content_id: string | null; est_credits: number; result: any; error: string | null; created_by_name: string | null; created_at: string; content_status: string | null; open_requests: number ; progress?: Progress | null };
+type View = { briefs: Brief[]; brands: { id: string; name: string; tone: string | null }[]; recent: { id: string; title: string; channel: string }[]; kinds: Record<string, { label: string; aspect: string; px: string; media: string }>; purposes: Record<string, string>; canGenerate: boolean; pricing?: 'credits' | 'usd'; usdKrw?: number; provider: 'higgsfield' | 'card'; models: { id: string; kind: string; name: string; credits: number }[] ; video?: { tts: { ready: boolean; provider: string | null }; captures: number; bgm: number } };
 const STATUS: Record<string, [string, string]> = { queued: ['대기', 'bg-slate-100 text-ink-2'], prompting: ['프롬프트 작성 중', 'bg-sky-50 text-sky-800'], ready: ['프롬프트 준비', 'bg-violet-50 text-violet-800'], generating: ['생성 중', 'bg-amber-50 text-amber-800'], review: ['승인 대기', 'bg-orange-50 text-orange-800'], published: ['게시됨', 'bg-emerald-50 text-emerald-800'], rejected: ['반려', 'bg-red-50 text-red-800'], failed: ['실패', 'bg-red-50 text-red-800'] };
 const labelOf = (b: Brief) => (b.content_status === 'published' ? STATUS.published : b.content_status === 'changes' && b.status === 'review' ? ['수정 요청', 'bg-slate-100 text-ink-2'] : STATUS[b.status] ?? [b.status, 'bg-slate-100 text-ink-2']);
+
+type SceneP = { k: number; seconds: number; line: string; status: string; screen: boolean; regens: number; qa: { checked: boolean; ok: boolean; issues: string[] } | null };
+type Progress = { stage: string; label: string; done: number; total: number; review: string[]; notes: string[]; audio: { narration: string | null; bgm: string | null } | null;
+  variants: { n: number; mediaId: string | null; duration: number | null; error: string | null; renderError: string | null; scenes: SceneP[] }[] };
+const SC: Record<string, string> = { completed: 'bg-emerald-50 text-emerald-800', queued: 'bg-slate-100 text-ink-2', in_progress: 'bg-amber-50 text-amber-800', pending: 'bg-slate-100 text-ink-2' };
+/** #454 영상 진행: 단계 · 장면 칩(상태·검수) · 사람 검수 필요 · 알림(내레이션 키·배경음) · 완성 영상 */
+function VideoProgress({ p }: { p: Progress }) {
+  return (
+    <div className="mt-2 space-y-1.5 rounded-input border border-violet-100 bg-violet-50/30 p-2 text-xs" data-testid="studio-video" data-stage={p.stage}>
+      <div className="font-semibold text-violet-900" data-testid="studio-video-stage">{p.label}</div>
+      {p.variants.map((v) => <div key={v.n} className="flex flex-wrap items-center gap-1">{p.variants.length > 1 && <span className="text-ink-3">{v.n + 1}편</span>}
+        {v.scenes.map((s) => <span key={s.k} title={s.line} className={cx('rounded-full px-2 py-0.5', s.qa && !s.qa.ok ? 'bg-red-50 text-red-800' : SC[s.status] ?? 'bg-red-50 text-red-800')} data-testid="studio-scene" data-status={s.status}>
+          장면 {s.k + 1} · {s.seconds}초{s.screen ? ' · 실제 화면' : ''}{s.regens ? ' · 다시 만듦' : ''}{s.qa ? (s.qa.ok ? ' · 검수 ✓' : ' · 검수 ✕') : ''}</span>)}
+        {v.duration ? <span className="text-ink-3">완성 {v.duration.toFixed(1)}초</span> : null}{v.error ? <span className="text-red-700">{v.error}</span> : v.renderError ? <span className="text-amber-800">합성 다시 시도: {v.renderError}</span> : null}</div>)}
+      {p.review.length > 0 && <div className="rounded-input bg-red-50 px-2 py-1 text-red-900" data-testid="studio-review"><b>사람 검수 필요</b> — {p.review.join(' · ')}</div>}
+      {p.notes.length > 0 && <ul className="list-disc pl-4 text-ink-2" data-testid="studio-video-notes">{p.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
+      {p.variants.some((v) => v.mediaId) && <div className="flex flex-wrap gap-2">{p.variants.filter((v) => v.mediaId).map((v) => <video key={v.n} src={`/api/library/${v.mediaId}/download?inline=1`} controls playsInline preload="metadata" className="max-h-72 rounded-input bg-black" data-testid="studio-video-file" />)}</div>}
+    </div>
+  );
+}
 
 export function Studio() {
   const sp = useSearchParams();
@@ -61,6 +81,7 @@ export function Studio() {
           <Field label="레퍼런스 링크(공백으로 구분)"><input className={inputCls} value={f.links} onChange={(e) => setF({ ...f, links: e.target.value })} placeholder="https://…" aria-label="레퍼런스 링크" /></Field>
           <Field label="톤(비우면 브랜드 키트)"><input className={inputCls} value={f.tone} onChange={(e) => setF({ ...f, tone: e.target.value })} maxLength={200} placeholder={data.brands.find((b) => b.id === f.brandId)?.tone ?? '친절하고 담백하게'} aria-label="톤" /></Field>
         </div>
+        {spec?.media === 'video' && data.provider === 'higgsfield' && data.video && <p className="rounded-input bg-white px-2 py-1.5 text-xs text-ink-2" data-testid="studio-video-ready">영상은 장면 3~5개(각 3~5초)를 따로 만들어 AI 가 검수(외국어 글자·외국인·깨진 화면)한 뒤 서버에서 합성합니다 — 한국어 자막·끝 화면{data.video.tts.ready ? ` · 내레이션 ${data.video.tts.provider}` : ' · 내레이션 키 필요(자막만)'} · 실제 화면 캡처 {data.video.captures}장(자료실 &apos;영상 화면 캡처&apos;) · 배경음 {data.video.bgm}곡(자료실 &apos;영상 배경음&apos;)</p>}
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-2"><span>{spec ? `${spec.label} ${spec.aspect} · ${spec.px}` : ''}{model ? ` · 모델 ${model.name} · 예상 ${estLabel(model, f.quantity, data)}` : ''}</span><Button disabled={busy || f.message.trim().length < 2} data-testid="studio-submit">{busy ? 'AI 마케터가 쓰는 중…' : '의뢰하기'}</Button></div>
       </form>
       <ul className="space-y-2" data-testid="studio-list">{data.briefs.map((b) => <BriefCard key={b.id} b={b} view={data} onChange={reload} />)}{!data.briefs.length && <li className="text-sm text-ink-3">아직 의뢰가 없습니다</li>}</ul>
@@ -89,6 +110,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
         <span className="text-[11px] text-ink-3">{b.created_by_name ?? ''} · {fmtDateTime(b.created_at)}{b.quantity > 1 ? ` · ${b.quantity}장` : ''}{b.due_date ? ` · 마감 ${b.due_date}` : ''}{b.est_credits ? ` · 예상 ${view.pricing === 'usd' && view.models.find((m) => m.id === (b.prompt?.model ?? '')) ? estLabel(view.models.find((m) => m.id === b.prompt?.model)!, b.quantity, view) : `${b.est_credits}크레딧`}` : ''}</span>
       </div>
       {b.error && <p className="mt-1 text-xs text-red-700">{b.error}</p>}
+      {b.progress && <VideoProgress p={b.progress} />}
       {pr && !edit && <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs" data-testid="studio-prompt">
         <div className="rounded-input bg-slate-50 p-2"><div className="flex items-center justify-between font-semibold text-ink-2">생성 프롬프트(EN){pr.source === 'ai' ? <span className="font-normal text-ink-3">AI 마케터</span> : pr.source === 'user' ? <span className="font-normal text-ink-3">직접 고침</span> : <span className="font-normal text-ink-3">기본</span>}<button type="button" onClick={() => copy(pr.promptEn)} className="inline-flex items-center gap-0.5 text-violet-700" aria-label="프롬프트 복사"><Copy size={12} />복사</button></div>
           <p className="mt-1 whitespace-pre-wrap text-ink" data-testid="studio-prompt-en">{pr.promptEn}</p>{pr.negativeEn && <p className="mt-1 text-ink-3">피할 것: {pr.negativeEn}</p>}{pr.model && <p className="mt-1 text-ink-3">모델 {pr.model} · {pr.aspect}</p>}</div>
@@ -97,7 +119,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
             {pr.quality && <div className="mt-1 flex flex-wrap items-center gap-1.5" data-testid="studio-quality"><ScoreChip label="사람다움" score={pr.quality.human.score} pass={pr.quality.human.pass} />{pr.quality.hook && <ScoreChip label="훅" score={pr.quality.hook.score} pass={pr.quality.hook.pass} />}
               {(pr.quality.human.issues ?? []).length > 0 && <span className="text-ink-3">{pr.quality.human.issues.join(' · ')}</span>}{pr.quality.hook && !pr.quality.hook.pass && pr.quality.hook.fails?.length > 0 && <span className="text-amber-800">{pr.quality.hook.fails.join(' · ')}</span>}</div>}</div>
           {!!pr.refMediaIds?.length && <div className="flex gap-1.5">{pr.refMediaIds.map((m: string) => <img key={m} src={`/api/library/${m}/download?inline=1`} alt="" className="size-14 rounded-input object-cover" loading="lazy" />)}</div>}</div>
-        {pr.timing && <div className="md:col-span-2"><TimingTable t={pr.timing} visuals={(pr.scenes ?? []).map((x: { visualEn: string }) => x.visualEn)} /></div>}
+        {pr.timing && <div className="md:col-span-2"><TimingTable t={pr.timing} visuals={(pr.scenes ?? []).map((x: { visualEn: string }) => x.visualEn)} secs={(pr.scenes ?? []).map((x: { seconds?: number }) => x.seconds ?? 0)} /></div>}
       </div>}
       {edit && <div className="mt-2 space-y-2 text-xs" data-testid="studio-edit">
         <Field label="생성 프롬프트(EN)"><textarea className={inputCls} rows={5} value={p.promptEn} onChange={(e) => setP({ ...p, promptEn: e.target.value })} aria-label="프롬프트" data-testid="studio-edit-prompt" /></Field>
@@ -111,7 +133,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
         {['ready', 'failed'].includes(b.status) && !edit && <><Button size="sm" variant="secondary" onClick={() => setEdit(true)} data-testid="studio-edit-open">수정</Button><Button size="sm" variant="secondary" onClick={() => act({ action: 'prompt' }, '프롬프트를 다시 썼습니다')} disabled={busy}>AI 다시 쓰기</Button>
           {view.canGenerate && <Button size="sm" onClick={() => act({ action: 'generate' }, '생성했습니다')} disabled={busy} data-testid="studio-generate">{view.provider === 'higgsfield' ? '생성' : '제작 요청 카드로 보내기'}</Button>}</>}
         {b.status === 'queued' && <Button size="sm" variant="secondary" onClick={() => act({ action: 'prompt' }, '프롬프트를 썼습니다')} disabled={busy} data-testid="studio-prompt-retry">프롬프트 쓰기</Button>}
-        {b.status === 'generating' && <span className="text-xs text-ink-2" data-testid="studio-generating">{(b as any).result?.provider === 'higgsfield' ? <>Higgsfield 생성 중 {((b as any).result.jobs ?? []).filter((j: any) => j.status === 'completed').length}/{((b as any).result.jobs ?? []).length} <button type="button" className="underline" onClick={onChange}>상태 확인</button></> : <>제작 요청 카드 {b.open_requests}건 — 로컬 도우미가 만들어 붙이면 승인 대기로 <Link href="/s/marketing/automation#requests" className="underline">카드 보기</Link></>}</span>}
+        {b.status === 'generating' && <span className="text-xs text-ink-2" data-testid="studio-generating">{b.progress ? <>{b.progress.label} <button type="button" className="underline" onClick={onChange}>상태 확인</button></> : (b as any).result?.provider === 'higgsfield' ? <>Higgsfield 생성 중 {((b as any).result.jobs ?? []).filter((j: any) => j.status === 'completed').length}/{((b as any).result.jobs ?? []).length} <button type="button" className="underline" onClick={onChange}>상태 확인</button></> : <>제작 요청 카드 {b.open_requests}건 — 로컬 도우미가 만들어 붙이면 승인 대기로 <Link href="/s/marketing/automation#requests" className="underline">카드 보기</Link></>}</span>}
         {b.content_id && ['review', 'published'].includes(b.status) && <Link href={`/s/marketing/approvals?c=${b.content_id}`} className="rounded-input border border-line px-2.5 py-1 text-xs" data-testid="studio-open-content">승인함에서 보기</Link>}
         {!['review', 'published'].includes(b.status) && <Button size="sm" variant="secondary" onClick={() => act({ action: 'cancel' }, '취소했습니다')} disabled={busy}>취소</Button>}
       </div>

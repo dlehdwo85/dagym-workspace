@@ -37,18 +37,20 @@ export const deadlineLabel = (deadline: string | null, at: string | null) => dea
 export type CardContent = { id: string; title: string; channel: string; kind?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null;
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
   auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null } } | null; production?: { kind: string; status: string } | null;
-  rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; week?: number | null } | null;
+  rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; week?: number | null; qa?: { needsHuman?: boolean; issues?: string[]; notes?: string[] } | null } | null;
   last_decision?: { decision: string; comment: string | null; at: string; version: number; by: string | null } | null };
 
 /** 대표 10/20 18:00 ①: '왜 이 글인가' — 목적·목표 지표·핵심 메시지·근거 한 줄(목표·주차 주제·규칙에서 자동, 사람이 적은 것도) */
 export function WhyBox({ r, compact }: { r?: CardContent['rationale']; compact?: boolean }) {
-  if (!r || !(r.purpose || r.metric || r.message || r.why)) return null;
-  return (
+  // #454 영상 AI 검수: 걸린 장면이 남았으면 승인 전에 사람이 보도록 빨간 줄
+  const qa = r?.qa?.needsHuman ? <div className={cx('rounded-input bg-red-50 px-2.5 py-1.5 text-xs text-red-900', compact ? 'mt-2' : 'mt-1')} data-testid="mkt-qa-review"><b>사람 검수 필요</b> — {(r.qa.issues ?? []).join(' · ') || 'AI 검수를 못 했습니다'}</div> : null;
+  if (!r || !(r.purpose || r.metric || r.message || r.why)) return qa;
+  return (<>{qa}
     <div className={cx('rounded-input border border-violet-100 bg-violet-50/40 px-2.5 py-1.5 text-xs', compact ? 'mt-2' : '')} data-testid="mkt-why">
       <div className="font-semibold text-violet-800">왜 이 글인가{r.week ? <span className="ml-1 font-normal text-ink-3">{r.week}주{r.topic ? ` · ${r.topic}` : ''}</span> : r.topic ? <span className="ml-1 font-normal text-ink-3">{r.topic}</span> : null}</div>
       {r.why && <p className="mt-0.5 text-ink">{r.why}</p>}
       <dl className="mt-0.5 grid grid-cols-[4.5rem_1fr] gap-x-2 gap-y-0 text-[11px] text-ink-2">{([['목적', r.purpose], ['목표 지표', r.metric], ['핵심 메시지', r.message]] as [string, string | null | undefined][]).filter(([, v]) => v).map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'}>{v}</dd>])}</dl>
-    </div>
+    </div></>
   );
 }
 /** 승인 카드: 머리 칩(브랜드·채널+형식·제목·상태·vN·재승인) · 게시 시각·마감 · 미디어 넘겨 보기 · 문안 · 제작 메모 · 결정 기록 · [승인]/[수정 요청] */

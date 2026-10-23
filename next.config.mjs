@@ -9,7 +9,8 @@ const nextConfig = {
   serverExternalPackages: ['postgres', 'web-push', 'pdfjs-dist', 'sharp'], // sharp: 피드 일관성 이미지 통계(next 동봉)
   // V19 견적서 PDF 한글 글꼴(assets/fonts)을 서버 함수 번들에 포함
   // 로컬 10/21 #133: pdfjs 의 fake worker(pdf.worker.mjs)는 동적 import 라 서버리스 번들 추적에서 빠져 운영 PDF 추출이 전부 실패했음 → 명시 포함
-  outputFileTracingIncludes: { '/api/**': ['./assets/fonts/**', './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'] }, // V14 32: PDF 글자 추출(Node legacy 빌드, 번들하지 않음)
+  // #454 영상 합성: ffmpeg 정적 빌드(약 80MB)는 합성 함수에만 싣는다(다른 함수 크기·콜드 스타트에 영향 없게)
+  outputFileTracingIncludes: { '/api/**': ['./assets/fonts/**', './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'], '/api/marketing/studio/render': ['./node_modules/ffmpeg-static/ffmpeg'] }, // V14 32: PDF 글자 추출(Node legacy 빌드, 번들하지 않음)
   async headers() {
     return [
       {

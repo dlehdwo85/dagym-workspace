@@ -14,15 +14,17 @@ export const ScoreChip = ({ label, score, pass, testId }: { label: string; score
 );
 
 /** 대본 → 초 단위 구성표(분당 300음절). 넘친 장면은 빨강 */
-export function TimingTable({ t, visuals }: { t: Timing; visuals?: string[] }) {
+/** secs(#454 영상 v2): 장면 실제 길이 — 있으면 '읽는 시간 / 장면 길이'로 보여 주고, 대사가 장면보다 길면 빨갛게 */
+export function TimingTable({ t, visuals, secs }: { t: Timing; visuals?: string[]; secs?: number[] }) {
+  const has = !!secs?.length && secs.every((x) => x > 0);
   return (
     <div className="mt-2" data-testid="quality-timing">
-      <div className="font-medium text-ink-2">장면 구성 <span className="font-normal text-ink-3">전체 {t.total}초 · 첫 장면 3초·한 장면 4초 안</span></div>
-      <table className="mt-1 w-full text-left text-[11px]"><tbody>{t.rows.map((r, k) => (
-        <tr key={k} className={cx('border-t border-line align-top', r.over && 'bg-red-50 text-red-800')} data-testid="quality-timing-row" data-over={r.over || undefined}>
-          <td className="w-20 py-0.5 pr-2 font-mono tabular-nums">{r.from.toFixed(1)}~{r.to.toFixed(1)}초</td>
+      <div className="font-medium text-ink-2">장면 구성 <span className="font-normal text-ink-3">{has ? `장면 ${secs!.reduce((a, x) => a + x, 0)}초(끝 화면 따로) · 대사 읽는 시간 ${t.total}초` : `전체 ${t.total}초 · 첫 장면 3초·한 장면 4초 안`}</span></div>
+      <table className="mt-1 w-full text-left text-[11px]"><tbody>{t.rows.map((r, k) => { const tight = has && r.sec > (secs![k] ?? 0) - 0.3; return (
+        <tr key={k} className={cx('border-t border-line align-top', (has ? tight : r.over) && 'bg-red-50 text-red-800')} data-testid="quality-timing-row" data-over={(has ? tight : r.over) || undefined}>
+          <td className="w-20 py-0.5 pr-2 font-mono tabular-nums">{has ? `장면 ${k + 1}` : `${r.from.toFixed(1)}~${r.to.toFixed(1)}초`}</td>
           <td className="py-0.5">{r.line}{visuals?.[k] && <span className="block text-ink-3">{visuals[k]}</span>}</td>
-          <td className="w-12 py-0.5 text-right tabular-nums">{r.sec}초</td></tr>))}</tbody></table>
+          <td className="w-20 py-0.5 text-right tabular-nums">{has ? `${r.sec} / ${secs![k]}초` : `${r.sec}초`}</td></tr>); })}</tbody></table>
       {t.warnings.length > 0 && <ul className="mt-1 space-y-0.5 text-amber-800" data-testid="quality-timing-warn">{t.warnings.map((w) => <li key={w}>· {w}</li>)}</ul>}
     </div>
   );
