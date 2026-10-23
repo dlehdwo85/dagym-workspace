@@ -532,8 +532,9 @@ export async function inboxView(u: SessionUser) {
       left join mkt_publish_accounts pa on pa.id::text = p.plan->>'pageAccountId' and pa.tenant = p.tenant
       left join library_files lf on lf.id::text = p.plan->'creative'->>'fileId' and lf.tenant = p.tenant
     where p.tenant = ${t} and p.provider = 'meta' and p.status = 'created' order by p.created_at desc limit 20`;
-  const counts = { contents, proposals: proposals.length, budget: budgets.length, goals: goals.length, briefs: briefs.length, ads: ads.length };
-  return { counts, total: Object.values(counts).reduce((a, b) => a + b, 0), proposals, budgets: budgetsOut, goals: goalsOut, briefs, ads, kinds: PROPOSAL_KIND, canEdit: isAdmin(u), today: ymd(new Date()), maxRevisions: MAX_REVISIONS };
+  const concepts = await (await import('./mktConcepts')).pendingConceptSets(t); // #499-4 상황 매트릭스 — 1~4개 채택 → 광고형 제작 의뢰
+  const counts = { contents, proposals: proposals.length, budget: budgets.length, goals: goals.length, briefs: briefs.length, ads: ads.length, concepts: concepts.length };
+  return { counts, total: Object.values(counts).reduce((a, b) => a + b, 0), proposals, budgets: budgetsOut, goals: goalsOut, briefs, ads, concepts, kinds: PROPOSAL_KIND, canEdit: isAdmin(u), today: ymd(new Date()), maxRevisions: MAX_REVISIONS, userId: u.id };
 }
 /** 정기: 월요일 09시 이후 분석·방향 카드(대기 없으면), 매일 소진율 알림, 25일 이후 다음 달 예산 초안(없으면). 밤(22시~)은 night_scope.goal 켠 회사만 */
 export async function opsTick(tenant: string, now = new Date()) {

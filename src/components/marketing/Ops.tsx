@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { RevenueGoal } from './RevenueGoal';
+import { ConceptBox } from './Concepts';
 
 /**
  * 대표 10/20 20:00 ① 마케팅 운영실: AI 마케터(30년차)가 운영을 맡되 분석·방향·협업·인플루언서·계획은 '승인 요청 카드'로 올리고, 대표가 [승인]해야 실행(계획·방향 → 제작의뢰실, 협업·인플루언서·분석 → 업무).
@@ -88,6 +89,8 @@ export function Ops() {
           {pending.length === 0 && <div className="mt-2 rounded-card border border-dashed border-line p-6 text-center text-sm text-ink-2" data-testid="ops-empty">대기 중인 카드가 없습니다{data.canEdit ? ' — [AI 마케터 제안 받기]' : ''}</div>}
           <div className="mt-2 grid gap-3 md:grid-cols-2">{pending.map((p) => <ProposalCard key={p.id} p={p} kinds={data.kinds} canEdit={data.canEdit} onChange={reload} />)}</div>
         </section>
+        {/* #499-4 상황 매트릭스: 구매자 역할 × 상황 → AI 광고 컨셉 → 대표 1~4개 채택 → 광고형 제작 의뢰 */}
+        <ConceptBox />
         <BudgetCard b={data.budget} month={data.month} canEdit={data.canEdit} busy={busy} onDraft={draftBudget} onChange={reload} ownerTotal={data.ownerTotal} totalDefault={data.totalDefault} />
         {rest.length > 0 && <details className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ops-history"><summary className="cursor-pointer text-sm font-semibold">지난 카드 {rest.length}</summary>
           <div className="mt-2 grid gap-3 md:grid-cols-2">{rest.map((p) => <ProposalCard key={p.id} p={p} kinds={data.kinds} canEdit={data.canEdit} onChange={reload} />)}</div></details>}
