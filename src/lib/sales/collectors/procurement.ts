@@ -69,7 +69,7 @@ export function noticeKind(title: string | null, kindName: string | null): 'new'
 
 export const PROCUREMENT_ETL_FIELDS = ['source_url', 'notice_file_url', 'issuer', 'title', 'region', 'notice_type', 'posted_date', 'deadline_at', 'budget_amount', 'estimated_amount', 'contract_method', 'current_status', 'task_scope',
   'bid_system', 'award_method', 'notice_state', 'facility_name', 'bid_category', 'office_phone', 'office_fax', 'office_address', 'household_count', 'fit_business', 'matched_keywords', 'related', 'attachment_urls',
-  'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at'] as const;
+  'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at', 'site_briefing_at', 'site_briefing_place'] as const;
 export const AWARD_FIELDS = ['winner_name', 'winner_amount', 'award_date', 'current_status'] as const;
 export type NoticeRow = Record<string, unknown> & { source_type: string; source_external_id: string; title: string; source_url: string };
 
@@ -117,6 +117,7 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
     notice_kind: noticeKind(title, state), participation_deadline_at: ts(p.participation_deadline_at), opening_at: ts(p.opening_at), demand_agency: txt(p.demand_agency), region_restriction: txt(p.region_restriction),
     industry_code: txt(p.industry_code), winner_name: winner, winner_amount: num(p.winner_amount), award_date: ymdOf(p.award_date),
     files_checked_at: txt(p.files_checked_at), // #507 후속: K-apt 첨부 목록을 읽은 때(다음 수집에서 다시 읽지 않음)
+    site_briefing_at: ts(p.site_briefing_at), site_briefing_place: txt(p.site_briefing_place), // #510 현장설명(나라장터 dcmtgOprtnDt·Plce)
   };
   return { ok: true, row };
 }

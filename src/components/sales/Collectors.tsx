@@ -50,22 +50,44 @@ export function Collectors() {
   );
 }
 
-type Prefs = { keywords: string[]; excludes: string[]; regions: string[]; issuers: string[]; item_codes: string[]; amount_min: number | null; amount_max: number | null; digest_enabled: boolean; digest_hour: number; digest_mail: boolean; digest_to: string[] };
-type PD = { prefs: Prefs; people: { id: string; name: string; email: string; role: string }[]; last: { day: string; counts: any; items: any[]; mailed: number; notified: number; created_at: string } | null; canEdit: boolean };
+type Prefs = { keywords: string[]; excludes: string[]; regions: string[]; issuers: string[]; item_codes: string[]; amount_min: number | null; amount_max: number | null; digest_enabled: boolean; digest_hour: number; digest_mail: boolean; digest_to: string[];
+  digest_emails: string[]; digest_from_name: string | null; digest_reply_to: string | null };
+type MailRoute = { channel: 'email:workin' | 'email:smtp' | null; smtpFrom: string | null; fallback: 'resend' | 'dev' | null; fromName: string; replyTo: string | null };
+type PD = { prefs: Prefs; people: { id: string; name: string; email: string; role: string }[]; last: { day: string; counts: any; items: any[]; mailed: number; notified: number; created_at: string } | null; canEdit: boolean; mail?: MailRoute };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const VIA: Record<string, string> = { 'email:smtp': '회사 메일 계정', 'email:workin': '워크인 발송', sent: '워크인 기본 발송', dev: '개발 모드' };
+/** #509 d: 당일 메일이 어느 길로 나가는지 — 회사 SMTP 면 회사 메일함엔 보낸메일함에만 남는다는 안내 */
+function MailRouteNote({ m }: { m: MailRoute }) {
+  const [cls, text] = m.channel === 'email:workin' ? ['border-emerald-200 bg-emerald-50 text-emerald-900', '워크인 발송으로 보냅니다 — 받는 사람의 받은메일함으로 갑니다.']
+    : m.channel === 'email:smtp' ? ['border-amber-200 bg-amber-50 text-amber-900', `회사 메일 계정(${m.smtpFrom ?? ''})으로 보냅니다. 회사 메일 계정으로 보내면 회사 메일함에는 보낸메일함에만 남습니다 — 워크인 발송을 켜면 받은메일함으로 옵니다. 보내는 회사 주소는 받는 사람에서 뺍니다.`]
+    : m.fallback === 'resend' ? ['border-emerald-200 bg-emerald-50 text-emerald-900', '워크인 기본 발송으로 보냅니다 — 받는 사람의 받은메일함으로 갑니다.']
+    : ['border-line bg-white text-ink-2', m.fallback === 'dev' ? '메일 발송이 아직 설정되지 않았습니다(개발 모드) — 지금은 워크인 알림·앱 푸시로만 갑니다.' : '메일 보낼 길이 없습니다 — 관리 › 메일 계정을 연결하거나 워크인 발송이 켜져야 합니다. 지금은 워크인 알림·앱 푸시로만 갑니다.'];
+  return <p className={cx('mt-2 rounded-input border px-2.5 py-1.5 text-xs', cls)} data-testid="prefs-mail-route" data-channel={m.channel ?? m.fallback ?? 'none'}>{text}</p>;
+}
 /** 대표 10/21 08:45 ②③: 맞춤 설정(21라인 관심검색어·제외어·지역·발주처·물품 코드·금액) + 당일 다이제스트(시각·메일·받는 사람·지금 보내기) */
 export function BidPrefs() {
   const T = useSalesTerms(); // #408 업종 템플릿 예시 검색어
   const { data, error, reload } = useApi<PD>('/api/sales/digest/prefs');
-  const [f, setF] = useState<Record<string, string> | null>(null); const [busy, setBusy] = useState(false);
+  const [f, setF] = useState<Record<string, string> | null>(null); const [busy, setBusy] = useState(false); const [addr, setAddr] = useState('');
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={4} />;
-  const p = data.prefs;
-  const form = f ?? { keywords: p.keywords.join(', '), excludes: p.excludes.join(', '), issuers: p.issuers.join(', '), item_codes: p.item_codes.join(', '), amount_min: p.amount_min == null ? '' : String(p.amount_min), amount_max: p.amount_max == null ? '' : String(p.amount_max), digest_hour: String(p.digest_hour) };
+  const p = data.prefs; const emails = p.digest_emails ?? [];
+  const form = f ?? { keywords: p.keywords.join(', '), excludes: p.excludes.join(', '), issuers: p.issuers.join(', '), item_codes: p.item_codes.join(', '), amount_min: p.amount_min == null ? '' : String(p.amount_min), amount_max: p.amount_max == null ? '' : String(p.amount_max), digest_hour: String(p.digest_hour),
+    from_name: p.digest_from_name ?? '', reply_to: p.digest_reply_to ?? '' };
   const set = (k: string, v: string) => setF({ ...form, [k]: v });
   async function save(extra: Record<string, unknown> = {}) {
     setBusy(true);
-    try { await api('/api/sales/digest/prefs', { method: 'PUT', body: { keywords: csv(form.keywords), excludes: csv(form.excludes), issuers: csv(form.issuers), itemCodes: csv(form.item_codes), amountMin: form.amount_min ? Number(form.amount_min) : null, amountMax: form.amount_max ? Number(form.amount_max) : null, digestHour: Number(form.digest_hour), ...extra } }); toast.ok('저장했습니다'); setF(null); reload(); }
-    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+    try { await api('/api/sales/digest/prefs', { method: 'PUT', body: { keywords: csv(form.keywords), excludes: csv(form.excludes), issuers: csv(form.issuers), itemCodes: csv(form.item_codes), amountMin: form.amount_min ? Number(form.amount_min) : null, amountMax: form.amount_max ? Number(form.amount_max) : null, digestHour: Number(form.digest_hour),
+      digestFromName: form.from_name.trim() || null, digestReplyTo: form.reply_to.trim(), ...extra } }); toast.ok('저장했습니다'); setF(null); reload(); return true; }
+    catch (e: any) { toast.error(e.message); return false; } finally { setBusy(false); }
+  }
+  // #509 b: 직원 말고 메일 주소 직접(회사 메일 등) — 최대 5개, 형식 확인
+  async function addEmail() {
+    const v = addr.trim().toLowerCase(); if (!v) return;
+    if (!EMAIL_RE.test(v)) { toast.error('메일 주소 형식이 아닙니다(예: name@company.co.kr)'); return; }
+    if (emails.includes(v)) { toast.info('이미 넣은 주소입니다'); setAddr(''); return; }
+    if (emails.length >= 5) { toast.error('메일 주소는 5개까지 넣을 수 있습니다'); return; }
+    if (await save({ digestEmails: [...emails, v] })) setAddr('');
   }
   async function sendNow() { setBusy(true); try { const r = await api<any>('/api/sales/digest/send', { body: {} }); toast.ok(`오늘 다이제스트 ${r.counts?.total ?? 0}건 — 메일 ${r.mailed} · 알림 ${r.notified}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
   const toggleRegion = (s: string) => save({ regions: p.regions.includes(s) ? p.regions.filter((x) => x !== s) : [...p.regions, s] });
@@ -86,12 +108,22 @@ export function BidPrefs() {
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium">다이제스트</span>
         {data.canEdit && <label className="inline-flex items-center gap-1.5 text-xs"><input type="checkbox" className="size-4 accent-brand-600" checked={p.digest_enabled} onChange={() => save({ digestEnabled: !p.digest_enabled })} data-testid="prefs-digest-enabled" />매일 보내기</label>}
-        <label className="inline-flex items-center gap-1 text-xs">시각 <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={form.digest_hour} onChange={(e) => set('digest_hour', e.target.value)} disabled={!data.canEdit} data-testid="prefs-digest-hour">{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h.toString().padStart(2, '0')}:00</option>)}</select></label>
+        <label className="inline-flex items-center gap-1 whitespace-nowrap text-xs">시각 <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={form.digest_hour} onChange={(e) => set('digest_hour', e.target.value)} disabled={!data.canEdit} data-testid="prefs-digest-hour">{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h.toString().padStart(2, '0')}:00</option>)}</select></label>
         {data.canEdit && <label className="inline-flex items-center gap-1.5 text-xs"><input type="checkbox" className="size-4 accent-brand-600" checked={p.digest_mail} onChange={() => save({ digestMail: !p.digest_mail })} />메일도 보내기</label>}
         <span className="ml-auto flex gap-1.5">{data.canEdit && <Button size="sm" onClick={() => save()} disabled={busy} data-testid="prefs-save">저장</Button>}{data.canEdit && <Button size="sm" variant="secondary" onClick={sendNow} disabled={busy} data-testid="prefs-send-now">지금 보내기</Button>}</span>
       </div>
       <div className="mt-2 text-xs"><span className="text-ink-2">받는 사람(비우면 대표·관리자): </span>{data.people.map((u) => <button key={u.id} type="button" disabled={!data.canEdit} onClick={() => togglePerson(u.id)} className={cx('mr-1 rounded-full border px-2 py-0.5', p.digest_to.includes(u.id) ? 'border-[#2563EB] bg-white font-semibold text-[#1D4ED8]' : 'border-line bg-white text-ink-2')}>{u.name}</button>)}</div>
-      {data.last && <p className="mt-2 text-xs text-ink-2" data-testid="prefs-last-digest">마지막 다이제스트 {data.last.day}: 새 공고 {data.last.counts?.new ?? 0} · 정정 {data.last.counts?.amend ?? 0} · 취소 {data.last.counts?.cancel ?? 0} · 메일 {data.last.mailed}{data.last.counts?.mailVia ? <span className="text-ink-3"> ({({ 'email:smtp': '회사 메일 계정', 'email:workin': '워크인 발송', sent: 'Resend', dev: '개발 모드' } as Record<string, string>)[String(data.last.counts.mailVia)] ?? String(data.last.counts.mailVia)})</span> : null}{data.last.counts?.mailError && <span className="text-red-600" title={String(data.last.counts.mailError)}> (메일 실패: {String(data.last.counts.mailError).slice(0, 60)})</span>} · 알림 {data.last.notified}</p>}
+      <div className="mt-2 flex flex-wrap items-center gap-1 text-xs" data-testid="prefs-emails"><span className="text-ink-2">메일 주소 직접 추가({emails.length}/5): </span>
+        {emails.map((e) => <span key={e} className="inline-flex max-w-full items-center gap-1 rounded-full border border-[#2563EB] bg-white px-2 py-0.5 font-semibold text-[#1D4ED8]" data-testid="prefs-email-chip"><span className="truncate">{e}</span>{data.canEdit && <button type="button" onClick={() => save({ digestEmails: emails.filter((x) => x !== e) })} disabled={busy} className="text-ink-3 hover:text-red-600" aria-label={`${e} 빼기`}>×</button>}</span>)}
+        {data.canEdit && emails.length < 5 && <span className="inline-flex items-center gap-1"><input className={cx(inputCls, 'h-8 w-56 max-w-full py-0 text-xs')} type="email" inputMode="email" value={addr} onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addEmail(); } }} placeholder="회사 메일 주소(예: name@company.co.kr)" data-testid="prefs-email-input" />
+          <Button size="sm" variant="secondary" onClick={addEmail} disabled={busy || !addr.trim()} data-testid="prefs-email-add">추가</Button></span>}</div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <Field label="보낸 사람 이름(비우면 회사 이름 + 영업실)"><input className={inputCls} value={form.from_name} onChange={(e) => set('from_name', e.target.value)} placeholder={data.mail?.fromName} maxLength={60} disabled={!data.canEdit} data-testid="prefs-from-name" /></Field>
+        <Field label="답장 받을 주소(비우면 회사 메일 계정)"><input className={inputCls} type="email" inputMode="email" value={form.reply_to} onChange={(e) => set('reply_to', e.target.value)} placeholder={data.mail?.smtpFrom ?? 'name@company.co.kr'} disabled={!data.canEdit} data-testid="prefs-reply-to" /></Field>
+      </div>
+      {data.mail && <MailRouteNote m={data.mail} />}
+      <p className="mt-2 text-xs"><a href="/api/sales/digest?preview=html" target="_blank" rel="noopener noreferrer" className="font-medium text-[#1D4ED8] underline" data-testid="prefs-preview">오늘 메일 미리보기</a><span className="text-ink-3"> — 지금 보내면 이렇게 갑니다(보내지 않음)</span></p>
+      {data.last && <p className="mt-2 text-xs text-ink-2" data-testid="prefs-last-digest">마지막 다이제스트 {data.last.day}: 새 공고 {data.last.counts?.new ?? 0}{data.last.counts?.now != null ? `(즉시 검토 ${data.last.counts.now} · 검토 ${data.last.counts.review ?? 0})` : ''} · 정정 {data.last.counts?.amend ?? 0} · 취소 {data.last.counts?.cancel ?? 0}{data.last.counts?.soon ? ` · 마감 임박 ${data.last.counts.soon}` : ''} · 메일 {data.last.mailed}{data.last.counts?.mailVia ? <span className="text-ink-3"> ({VIA[String(data.last.counts.mailVia)] ?? String(data.last.counts.mailVia)})</span> : null}{data.last.counts?.mailError && <span className="text-red-600" title={String(data.last.counts.mailError)}> (메일 실패: {String(data.last.counts.mailError).slice(0, 60)})</span>} · 알림 {data.last.notified}</p>}
     </section>
   );
 }

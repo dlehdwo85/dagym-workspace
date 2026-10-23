@@ -518,15 +518,27 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   await rememberSent(sql, t, u.id, i.taskId, [...i.to, ...(i.cc ?? [])].map((email) => ({ email })));
   return { id, status: 'queued', asLink, taskTitle: task.title, channel, scheduledAt: at?.toISOString() ?? null };
 }
-/** 로컬 10/21 11:30: 시스템 메일(영업 다이제스트 등)을 회사 메일 경로(SMTP 계정 → 워크인 발송)로 큐에 넣는다. 경로가 없으면 null(호출 쪽이 다른 길을 씀) */
-export async function queueSystemMail(tenant: string, m: { to: string[]; subject: string; text: string; createdBy: string; fromName?: string }, sql: Sql = db()) {
-  const channel = await pickChannel(tenant, sql); if (!channel) return null;
+/**
+ * 시스템 메일(당일 공고·브리핑 등) 경로 — #509(대표 10/23): 워크인 발송(Resend)을 먼저 쓰고 회사 SMTP 는 워크인 발송이 없을 때만.
+ * 회사 계정으로 보내면 회사 메일함에는 보낸메일함에만 남고, 회사 주소로 받으려 해도 자기 자신에게 보내는 메일이 된다. smtpFrom = 회사 계정 주소(답장 주소 기본값·화면 안내)
+ */
+export async function systemChannel(tenant: string, sql: Sql = db()): Promise<{ channel: 'email:workin' | 'email:smtp' | null; smtpFrom: string | null }> {
+  const acc = await loadAccount(tenant, sql);
+  if (workinMailEnabled()) return { channel: 'email:workin', smtpFrom: acc?.from_email ?? null };
+  return { channel: acc ? 'email:smtp' : null, smtpFrom: acc?.from_email ?? null };
+}
+/** 로컬 10/21 11:30: 시스템 메일을 큐에 넣는다(경로는 systemChannel). 경로가 없으면 null(호출 쪽이 다른 길을 씀).
+ *  회사 SMTP 로 보낼 때는 받는 사람에서 보내는 주소(회사 주소)를 뺀다 — 남는 사람이 없으면 보내지 않고 skipped='self' */
+export async function queueSystemMail(tenant: string, m: { to: string[]; subject: string; text: string; html?: string; replyTo?: string | null; createdBy: string; fromName?: string }, sql: Sql = db()) {
+  const { channel } = await systemChannel(tenant, sql); if (!channel) return null;
   const account = channel === 'email:smtp' ? await loadAccount(tenant, sql) : null;
+  const to = account ? m.to.filter((a) => a.toLowerCase() !== account.from_email.toLowerCase()) : m.to;
+  if (!to.length) return { id: null, channel, to, skipped: 'self' as const };
   const fromEmail = account ? account.from_email : workinFrom(); const domain = fromEmail.split('@')[1] ?? 'workin';
   const id = randomUUID();
-  await sql`insert into outbox (id, tenant, channel, status, created_by, from_email, from_name, to_addrs, subject, body_text, body_html, message_id, next_attempt_at)
-    values (${id}, ${tenant}, ${channel}, 'queued', ${m.createdBy}, ${fromEmail}, ${(m.fromName ?? account?.from_name ?? '워크인').slice(0, 80)}, ${m.to}, ${m.subject.slice(0, 200)}, ${m.text}, ${bodyHtml(m.text, '')}, ${`<${id}@${domain}>`}, now())`;
-  return { id, channel };
+  await sql`insert into outbox (id, tenant, channel, status, created_by, from_email, from_name, reply_to, to_addrs, subject, body_text, body_html, message_id, next_attempt_at)
+    values (${id}, ${tenant}, ${channel}, 'queued', ${m.createdBy}, ${fromEmail}, ${(m.fromName ?? account?.from_name ?? '워크인').slice(0, 80)}, ${m.replyTo || null}, ${to}, ${m.subject.slice(0, 200)}, ${m.text}, ${m.html ?? bodyHtml(m.text, '')}, ${`<${id}@${domain}>`}, now())`;
+  return { id, channel, to, skipped: null };
 }
 export const defaultFromName = (me: { name: string; title: string | null }, company: string) => `${me.name}${me.title ? ` ${me.title}` : ''} (${company})`;
 

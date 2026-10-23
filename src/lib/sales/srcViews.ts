@@ -360,7 +360,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const W = await prog('opportunity_work');
     const P = new Map((await prog('procurement_notices__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
     const byNotice = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), w]));
-    let N = oneRowPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r))), (id) => byNotice.has(id) || P.has(id)); // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식) 빼기 · 같은 공고 한 줄
+    // #510: 메일 '참고(검색어만 일치)' [보기] = 마지막 다이제스트의 참고 줄(관련 사업은 아니고 관심 검색어만 맞은 공고)
+    const refIds = tab === 'ref' ? new Set(((await db()<{ items: any }[]>`select items from sales_digests where tenant = ${t} order by day desc limit 1`)[0]?.items ?? []).filter((i: any) => i?.section === 'ref').map((i: any) => String(i.id))) : null;
+    let N = oneRowPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => refIds ? refIds.has(String(r.id ?? r.__id)) : byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r))), (id) => byNotice.has(id) || P.has(id)); // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식) 빼기 · 같은 공고 한 줄
     const since = await lastMailAt(t);
     const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since);
       return { ...n0, todayHit: why.hit, todayLabel: why.label, work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),

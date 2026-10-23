@@ -6,7 +6,7 @@
 export const mailConfigured = () => !!process.env.RESEND_API_KEY && !!process.env.MAIL_FROM;
 export const mailDevMode = () => !mailConfigured() && (process.env.NODE_ENV !== 'production' || process.env.MAIL_DEV === '1');
 
-export async function sendMail(to: string, subject: string, text: string): Promise<'sent' | 'dev'> {
+export async function sendMail(to: string, subject: string, text: string, html?: string): Promise<'sent' | 'dev'> {
   if (!mailConfigured()) {
     if (mailDevMode()) return 'dev';
     throw new Error('메일 발송이 설정되지 않았습니다(RESEND_API_KEY·MAIL_FROM)');
@@ -14,7 +14,7 @@ export async function sendMail(to: string, subject: string, text: string): Promi
   const r = await fetch(`${process.env.RESEND_API_BASE ?? 'https://api.resend.com'}/emails`, {
     method: 'POST',
     headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ from: process.env.MAIL_FROM, to: [to], subject, text }),
+    body: JSON.stringify({ from: process.env.MAIL_FROM, to: [to], subject, text, ...(html ? { html } : {}) }),
     signal: AbortSignal.timeout(10_000),
   });
   if (!r.ok) throw new Error(`메일 발송 실패 (${r.status}) ${(await r.text()).slice(0, 200)}`);

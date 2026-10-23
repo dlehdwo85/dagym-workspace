@@ -46,7 +46,8 @@ export function g2bPayload(it: any, sourceType: 'g2b_bid' | 'nuri_bid', cat: str
   return { source_type: sourceType, source_external_id: `${no}-${ord}`, source_url: url, title, issuer: str(it.ntceInsttNm), demand_agency: str(it.dminsttNm), region: str(it.prtcptLmtRgnNm) ?? str(it.rgnNm) ?? null, region_restriction: str(it.prtcptLmtRgnNm),
     posted_date: str(it.bidNtceDt)?.slice(0, 10), deadline_at: str(it.bidClseDt), opening_at: str(it.opengDt), participation_deadline_at: str(it.bidBeginDt) ? null : str(it.rbidPrtcptLmtRgstClseDt ?? it.prtcptLmtRgstClseDt),
     estimated_amount: str(it.presmptPrce), budget_amount: str(it.asignBdgtAmt), contract_method: str(it.cntrctCnclsMthdNm), award_method: str(it.sucsfbidMthdNm), notice_state: str(it.ntceKindNm), bid_category: cat, notice_type: cat === '공사' ? '공사' : undefined,
-    industry_code: str(it.indstrytyLmtNm) ?? str(it.indstrytyNm), task_scope: str(it.bidNtceDtlCntnts ?? it.ntceSpecFileNm1), attachment_urls: attachments(it), notice_file_url: str(it.ntceSpecDocUrl1) };
+    industry_code: str(it.indstrytyLmtNm) ?? str(it.indstrytyNm), task_scope: str(it.bidNtceDtlCntnts ?? it.ntceSpecFileNm1), attachment_urls: attachments(it), notice_file_url: str(it.ntceSpecDocUrl1),
+    site_briefing_at: str(it.dcmtgOprtnDt), site_briefing_place: str(it.dcmtgOprtnPlce) }; // #510 메일 3행 '현장설명'
 }
 /** 누리장터(PrvtBidNtceService getPrvtBidPblancListInfo*PPSSrch) — 나라장터와 칸 이름이 다름(로컬 10/23 운영 응답: ntceNm·nticeDt…, 명세 = 공공데이터포털 '조달청_누리장터 민간입찰공고서비스').
  * 담당자 이름·전화·메일(ofclNm·ofclTelNo·ofclEmail)은 개인정보 → 나라장터 공고(담당자 칸 안 읽음)와 같게 저장하지 않음. 아파트 관리사무소 전화는 K-apt 와 같게 office_phone */
