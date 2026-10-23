@@ -6,7 +6,7 @@ import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } f
 import { useSalesTerms } from '@/components/session';
 import { PortalApplyLink, portalService } from './PortalApply';
 
-type Src = { label: string; ok: boolean; calls: number; received: number; kept: number; total?: number; keys?: string[]; error?: string; note?: string };
+type Src = { label: string; ok: boolean; calls: number; received: number; kept: number; total?: number; keys?: string[]; error?: string; note?: string; sent?: string; head?: string };
 type Run = { id: number; slug: string; trigger: string; started_at: string; finished_at: string | null; status: string; inserted: number; updated: number; unchanged: number; errors: number; summary: string | null; error_log: string | null; detail?: { sources?: Record<string, Src> } | null };
 export type CollectorAlert = { slug: string; source: string | null; label: string; lastOkAt: string | null; failStreak: number; reason: string; error: string | null };
 type C = { slug: string; label: string; hourKst: number; againKst?: number | number[] | null; hours?: number[]; source: string; bid: boolean; support?: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null };
@@ -49,7 +49,8 @@ export function Collectors() {
           {/* #522 원천별: 받은 줄·관련(저장) 줄·첫 줄 칸 이름(값 없이) — [지금 수집] 뒤 바로 확인 */}
           {c.last?.detail?.sources && <ul className="mt-0.5 space-y-0.5 text-[11px] text-ink-2" data-testid="sales-collector-sources">{Object.entries(c.last.detail.sources).map(([k, v]) => (
             <li key={k} className={cx(!v.ok && 'text-red-700')} data-source={k}><b className="font-medium">{v.label}</b>: {v.ok ? `받음 ${v.received.toLocaleString('ko-KR')}줄${v.total && v.total !== v.received ? `(전체 ${v.total.toLocaleString('ko-KR')})` : ''} · 관련 ${v.kept}` : `실패 — ${v.error ?? '오류'}`}{v.note ? ` · ${v.note}` : ''}
-              {v.keys?.length ? <details className="text-ink-3"><summary className="cursor-pointer">첫 줄 칸 이름 {v.keys.length}개(값 없이)</summary><p className="break-all" data-testid="sales-collector-keys">{v.keys.join(', ')}</p></details> : null}</li>))}</ul>}
+              {v.keys?.length ? <details className="text-ink-3"><summary className="cursor-pointer">첫 줄 칸 이름 {v.keys.length}개(값 없이)</summary><p className="break-all" data-testid="sales-collector-keys">{v.keys.join(', ')}</p></details> : null}
+              {!v.ok && (v.sent || v.head) ? <details className="text-ink-3"><summary className="cursor-pointer">보낸 주소·응답 앞부분(키는 ***)</summary><p className="break-all font-mono" data-testid="sales-collector-sent">{v.sent}</p>{v.head && <pre className="whitespace-pre-wrap break-all font-mono" data-testid="sales-collector-head">{v.head}</pre>}</details> : null}</li>))}</ul>}
           {c.last?.error_log && <details className="mt-0.5 text-xs text-red-700"><summary className="cursor-pointer">오류 {c.last.errors}건</summary><pre className="whitespace-pre-wrap break-all">{c.last.error_log}</pre></details>}
         </li>); })}</ul>
       <details className="mt-2 text-xs" open={open === 'runs'} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open ? 'runs' : null)}><summary className="cursor-pointer text-ink-2">최근 실행 {data.runs.length}건</summary>

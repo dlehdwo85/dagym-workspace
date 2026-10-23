@@ -82,10 +82,14 @@ export const publicAgencyBids: Collector = {
       if (left() < 6000) { S(src).note = '시간 한도 근접 — 일부만 받음'; return null; }
       const once = async () => {
         const u = new URL(ep[src]); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', String(page));
-        if (src === 'onbid_lease') u.searchParams.set('resultType', 'json'); else { u.searchParams.set('type', 'json'); u.searchParams.set('_type', 'json'); }
+        // 로컬 10/24: LH 2종은 명세가 XML 만(produces application/xml) — JSON 요청 칸(type·_type)을 빼고 XML 로 받아 읽음
+        const xml = src === 'lh_bid' || src === 'lh_prespec';
+        if (src === 'onbid_lease') u.searchParams.set('resultType', 'json'); else if (!xml) { u.searchParams.set('type', 'json'); u.searchParams.set('_type', 'json'); }
         for (const [k, v] of Object.entries(params((x) => D(src, x)))) u.searchParams.set(k, v);
         const ds: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 };
-        const rows = await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000), ds);
+        let rows: any[];
+        try { rows = await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000), ds, xml ? 'application/xml' : 'application/json'); }
+        catch (e) { S(src).sent = ds.sent; S(src).head = ds.head; throw e; } // 실패하면 보낸 주소(키 ***)·응답 앞 300자를 원천별 줄에
         const st = S(src); st.calls++; st.received += rows.length; st.total = (st.total ?? 0) + ds.total; if (!st.keys && ds.keys) st.keys = ds.keys;
         return { rows, total: ds.total };
       };
@@ -108,7 +112,7 @@ export const publicAgencyBids: Collector = {
     /** 원천 하나: 성공·실패 기록. 검색어 여러 번은 하나라도 받으면 성공(활용신청·주소 문제면 바로 멈춤) */
     const source = async (src: Src, fn: () => Promise<void>) => {
       S(src);
-      try { await fn(); S(src).ok = true; }
+      try { await fn(); S(src).ok = true; delete S(src).sent; delete S(src).head; }
       catch (e) { const m = e instanceof Error ? e.message : String(e); S(src).error = m.slice(0, 200); if (NEED.test(m)) denied.add(src); if (errors.length < 12) errors.push(`${src}: ${m}`); }
     };
     const words = async (src: Src, list: string[], params: (w: string, d: (x: Date) => string) => Record<string, string>, map: (it: any) => Record<string, unknown> | null) => {

@@ -23,13 +23,27 @@ const str = (v: unknown) => { if (v == null) return null; const s = String(v).tr
 export type ApiErr = { denied: boolean; msg: string };
 /** data.go.kr 표준 응답 → items[]. 결과코드가 성공이 아니면 throw(키·활용신청 오류 구분) */
 /** 응답 통계(로컬 10/23 '누리장터 0건 — 진짜 0건인지 못 읽은 건지'): 호출 수·결과코드·totalCount 합·받은 줄 수·첫 줄 칸 이름(값은 안 씀) */
-export type DataGoStats = { calls: number; codes: Record<string, number>; total: number; raw: number; keys?: string[] };
-export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string, timeoutMs = 12000, stats?: DataGoStats): Promise<any[]> {
-  let res: Response; try { res = await fetchImpl(url.toString(), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) }); } catch (e) { throw new Error(`요청 실패 (${e instanceof Error ? e.name : 'Error'})`); }
-  const txt = await res.text(); const safe = (s: string) => s.split(key).join('***').split(encodeURIComponent(key)).join('***').slice(0, 160);
+/** sent = 마지막에 보낸 주소(키는 ***) · head = 실패한 응답 앞 300자(키·메일·전화 가림) — 로컬 10/24 LH 오류 11 확인용 */
+export type DataGoStats = { calls: number; codes: Record<string, number>; total: number; raw: number; keys?: string[]; sent?: string; head?: string };
+const unxml = (s: string) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
+/** #522 XML 만 주는 원천(LH OpenBidInfoList·OpenAdvcinfoReqList = produces application/xml): <item> 마다 한 단계 칸만 읽음 */
+export function xmlItems(txt: string): Record<string, string>[] {
+  return [...txt.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => Object.fromEntries([...m[1].matchAll(/<([A-Za-z_][\w.-]*)>([\s\S]*?)<\/\1>/g)].map(([, k, v]) => [k, unxml(v).trim()])));
+}
+const noPii = (s: string) => s.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '***@***').replace(/\b0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}\b/g, '***-****-****');
+export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string, timeoutMs = 12000, stats?: DataGoStats, accept = 'application/json'): Promise<any[]> {
+  const mask = (s: string) => s.split(key).join('***').split(encodeURIComponent(key)).join('***');
+  if (stats) stats.sent = mask(url.toString()).slice(0, 400);
+  let res: Response; try { res = await fetchImpl(url.toString(), { headers: { Accept: accept }, signal: AbortSignal.timeout(timeoutMs) }); } catch (e) { throw new Error(`요청 실패 (${e instanceof Error ? e.name : 'Error'})`); }
+  const txt = await res.text(); const safe = (s: string) => mask(s).slice(0, 160);
+  if (stats) stats.head = noPii(mask(txt)).slice(0, 300); // 성공하면 아래에서 지움
   // data.go.kr 공통 오류(XML): returnReasonCode 20·21·22·30·31·32·33 = 활용신청·키·호출 제한 문제 → '활용신청 필요'(그 서비스는 이번 실행에서 건너뜀)
   let j: any = null; try { j = JSON.parse(txt); } catch { const code = txt.match(/<returnReasonCode>([^<]+)</)?.[1] ?? txt.match(/<resultCode>([^<]+)</)?.[1] ?? ''; const msg = txt.match(/<returnAuthMsg>([^<]+)</)?.[1] ?? txt.match(/<errMsg>([^<]+)</)?.[1] ?? txt.match(/<resultMsg>([^<]+)</)?.[1] ?? ''; const both = `${code} ${msg}`;
-    if (/^(00|0|INFO-000)$/.test(code.trim())) throw new Error(`XML 로 응답(정상 코드 ${code.trim()}) — JSON 요청 값(type·_type·resultType) 확인 필요`); // #522 원천마다 JSON 요청 칸 이름이 다름
+    if (/^(00|0|INFO-000)$/.test(code.trim())) { // #522 XML 정상 응답(JSON 을 안 주는 원천) → <item> 읽기
+      const list = xmlItems(txt); const total = Number(txt.match(/<totalCount>(\d+)</)?.[1] ?? list.length) || 0;
+      if (stats) { delete stats.head; stats.calls++; stats.codes[code.trim()] = (stats.codes[code.trim()] ?? 0) + 1; stats.total += total; stats.raw += list.length; if (list[0] && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 60); }
+      return list;
+    }
     throw new Error(/^(20|21|22|30|31|32|33)\b/.test(code.trim()) || /DENIED|UNREGISTERED|NOT_REGISTERED|LIMITED|FORBIDDEN|EXPIRED/i.test(both) ? `활용신청 필요: ${safe(both.trim())}` : `응답 오류 (HTTP ${res.status}): ${safe(both.trim() || txt.slice(0, 80))}`); }
   // JSON 형식의 공통 오류(OpenAPI_ServiceResponse): NO_OPENAPI_SERVICE_ERROR(12) = 주소가 틀리거나 폐기된 서비스 → '주소 확인 필요'(그 서비스는 건너뜀)
   const cm = j?.OpenAPI_ServiceResponse?.cmmMsgHeader; if (cm) { const em = String(cm.errMsg ?? ''); const rc = String(cm.returnReasonCode ?? ''); if (/NO_OPENAPI_SERVICE|^12$/.test(em) || rc === '12') throw new Error(`주소 확인 필요: ${safe(em)} (해당 오픈API 서비스가 없거나 폐기됨 — 플랫폼 운영 › 영업 수집기 설정)`); if (/^(20|21|22|30|31|32|33)$/.test(rc) || /DENIED|UNREGISTERED|NOT_REGISTERED|LIMITED|FORBIDDEN|EXPIRED/i.test(em)) throw new Error(`활용신청 필요: ${safe(`${rc} ${em}`.trim())}`); throw new Error(`응답 오류 (HTTP ${res.status}): ${safe(`${rc} ${em}`.trim())}`); }
@@ -38,7 +52,7 @@ export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string,
   if (code != null && !['00', '0', 'INFO-000'].includes(code)) throw new Error(/03|04|30|31|32|33/.test(code) ? `활용신청 필요: ${safe(String(header?.resultMsg ?? code))}` : `결과코드 ${code}: ${safe(String(header?.resultMsg ?? ''))}`);
   // #522 LH(OpenBidInfoList 등)는 body.items 없이 body.item 에 바로
   const b = j?.response?.body ?? j?.body ?? {}; const raw = b?.items?.item ?? b?.items ?? b?.item ?? []; const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
-  if (stats) { stats.calls++; stats.codes[code ?? '없음'] = (stats.codes[code ?? '없음'] ?? 0) + 1; stats.total += Number(b?.totalCount) || 0; stats.raw += list.length; if (list[0] && typeof list[0] === 'object' && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 60); }
+  if (stats) { delete stats.head; stats.calls++; stats.codes[code ?? '없음'] = (stats.codes[code ?? '없음'] ?? 0) + 1; stats.total += Number(b?.totalCount) || 0; stats.raw += list.length; if (list[0] && typeof list[0] === 'object' && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 60); }
   return list;
 }
 const attachments = (it: any) => { const out: string[] = []; for (let i = 1; i <= 10; i++) { const u = str(it[`ntceSpecDocUrl${i}`] ?? it[`atchFileUrl${i}`]); if (u && /^https?:\/\//.test(u)) out.push(u); } return out; };

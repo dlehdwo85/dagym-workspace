@@ -24,7 +24,7 @@ let kaptExtra = [], kaptApiItems = []; const detailCat = {};
 const kapt = fakeKapt({ files: { '20261021000001': [{ seq: 7001, fileName: '래미안 강남 커뮤니티 위탁운영 입찰공고.hwp' }] },
   detailHtml: (bid) => `<table><tr><th>주택관리업자</th><th>단지명</th><th>관리사무소 주소</th><th>전화번호</th><th>팩스번호</th><th>동수</th><th>세대수</th></tr><tr><td>우리관리<td>래미안 강남<td>서울 강남구 역삼로 1<td>02-555-1234<td>02-555-1235<td>12<td>1,250</tr></table>
       <table><tr><th>입찰분류</th><td>${detailCat[bid] ?? '용역 &gt; 커뮤니티 위탁운영'}</td></tr><tr><th>입찰종류</th><td>일반경쟁</td></tr><tr><th>내용</th><td><pre>커뮤니티센터 피트니스·수영장 위탁운영 사업자 선정</pre></td></tr></table><a href="javascript:fileDown('7001')">공고문.hwp</a>` });
-let agencyV2 = false, hotelMode = 'ok'; // #522: 새 명세(swagger) 응답 모양 · 관광숙박업 오류 응답(JSON)
+let agencyV2 = false, hotelMode = 'ok', lhFail = false; // #522: 새 명세(swagger) 응답 모양 · 관광숙박업 오류 응답(JSON) · 로컬 10/24 LH 오류 11
 const ymd8 = (n) => plus(n).replace(/-/g, '');
 let vendorStatus = 200, nuriMode = 'denied'; // 누리장터: denied(활용신청 전) · empty(정상 0건) · odd(칸 이름이 다른 응답) · ok(새 명세 칸 이름 — 로컬 10/23 운영 응답)
 let vendorHtml = `<html><ul><li><a href="/notice/12">2026년 협력업체 정기등록 모집 안내</a> <span>${today}</span></li><li><a href="/notice/13">추석 연휴 안내</a></li></ul></html>`;
@@ -356,12 +356,19 @@ test('#507 후속(로컬 10/23): 같은 공고 여러 줄(원본 복사 + 워크
 function agency522(u, send) {
   const q = Object.fromEntries(u.searchParams); const json = (o) => send(200, JSON.stringify(o), 'application/json');
   const ok = (item, wrap = false) => (wrap ? { response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items: { item }, numOfRows: 100, pageNo: 1, totalCount: item.length } } } : { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { item, numOfRows: 100, pageNo: 1, totalCount: item.length } });
+  // 로컬 10/24: LH 2종은 XML 만(produces application/xml) — JSON 요청 칸(type·_type)이 오면 400 으로 막아 안 보내는지 확인
+  const xmlEsc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const xml = (items) => send(200, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><response><header><resultCode>00</resultCode><resultMsg>NORMAL SERVICE.</resultMsg></header><body><items>${items.map((it) => `<item>${Object.entries(it).map(([k, v]) => `<${k}>${xmlEsc(v)}</${k}>`).join('')}</item>`).join('')}</items><numOfRows>100</numOfRows><pageNo>1</pageNo><totalCount>${items.length}</totalCount></body></response>`, 'application/xml;charset=UTF-8');
+  const xmlErr = (code, msg) => send(200, `<?xml version="1.0" encoding="UTF-8"?><response><header><resultCode>${code}</resultCode><resultMsg>${xmlEsc(msg)}</resultMsg></header><body/></response>`, 'application/xml;charset=UTF-8');
+  if (u.pathname.startsWith('/agency/lh_') && (q.type || q._type)) return send(400, 'type not allowed');
+  if (u.pathname.startsWith('/agency/lh_') && lhFail) return xmlErr('11', `NO MANDATORY REQUEST PARAMETERS ERROR (문의 tester@lh.example 031-000-1111)`);
   if (u.pathname === '/agency/lh_bid') {
-    if (/^\d{8}$/.test(q.tndrbidRegDtStart ?? '')) return json({ header: { resultCode: '99', resultMsg: 'INVALID REQUEST PARAMETER ERROR' }, body: {} });
-    return json(ok([{ bidNum: '2026-0001', bidDegree: '0', bidnmKor: '행복주택 커뮤니티 피트니스 운영 위탁 용역', cstrtnJobGbNm: '용역', zoneHqCd: '경기남부지역본부', bidKind: '일반', bidProgrsStatus: '공고중', tndrCtrctMedCd: '제한경쟁', tndrbidRegDt: plus(0), presmtPrc: '50000000', fdmtlAmt: '55000000', sunjungNm: '적격심사', tndrdocAcptBgninDtm: `${plus(2)} 10:00`, tndrdocAcptEndDtm: `${plus(6)} 17:00`, openDtm: `${plus(7)} 11:00`, zoneRstrct1: '경기도', zoneRstrct2: '서울특별시', req1Reqlic1Nm: '체육시설업' },
-      { bidNum: '2026-0002', bidDegree: '0', bidnmKor: '아파트 외벽 도장공사', cstrtnJobGbNm: '공사', tndrbidRegDt: plus(0) }]));
+    if (!/^\d{8}$/.test(q.tndrbidRegDtStart ?? '')) return xmlErr('99', 'INVALID REQUEST PARAMETER ERROR'); // 포털 기본값 '20161122' = yyyyMMdd
+    return xml([{ bidNum: '2026-0001', bidDegree: '0', bidnmKor: '행복주택 커뮤니티 피트니스 운영 위탁 용역', cstrtnJobGbNm: '용역', zoneHqCd: '경기남부지역본부', bidKind: '일반', bidProgrsStatus: '공고중', tndrCtrctMedCd: '제한경쟁', tndrbidRegDt: plus(0), presmtPrc: '50000000', fdmtlAmt: '55000000', sunjungNm: '적격심사', tndrdocAcptBgninDtm: `${plus(2)} 10:00`, tndrdocAcptEndDtm: `${plus(6)} 17:00`, openDtm: `${plus(7)} 11:00`, zoneRstrct1: '경기도', zoneRstrct2: '서울특별시', req1Reqlic1Nm: '체육시설업' },
+      { bidNum: '2026-0002', bidDegree: '0', bidnmKor: '아파트 외벽 도장공사', cstrtnJobGbNm: '공사', tndrbidRegDt: plus(0) }]);
   }
-  if (u.pathname === '/agency/lh_prespec') return json(ok([{ inadvcStddztNm: '임대주택 커뮤니티센터 피트니스 운영 위탁 용역', gdsnm: '운영 위탁', assignBudgetAmt: '90000000', opinionRegEndDtm: `${plus(4)} 18:00`, revertDeptNm: '경기남부지역본부 주거복지부', dlvgdsSpot: '경기도 화성시 동탄', dlvgdsTmlmt: '계약일부터 2년', cstrtnJobGbNm: '용역', chpsnEmail: 'tester@lh.example', chpsnTelNum: '031-000-1111' }]));
+  if (u.pathname === '/agency/lh_prespec' && /^\d{8}$/.test(q.opinionRegEndDtmStart ?? '')) return xmlErr('99', 'INVALID REQUEST PARAMETER ERROR'); // 날짜 형식 다시 보내기 시험
+  if (u.pathname === '/agency/lh_prespec') return xml([{ inadvcStddztNm: '임대주택 커뮤니티센터 피트니스 운영 위탁 용역', gdsnm: '운영 위탁', assignBudgetAmt: '90000000', opinionRegEndDtm: `${plus(4)} 18:00`, revertDeptNm: '경기남부지역본부 주거복지부', dlvgdsSpot: '경기도 화성시 동탄', dlvgdsTmlmt: '계약일부터 2년', cstrtnJobGbNm: '용역', chpsnEmail: 'tester@lh.example', chpsnTelNum: '031-000-1111' }]);
   if (u.pathname === '/agency/d2b_bid') return json(ok(q.bidNm === '체력단련' ? [{ pblancNo: '2026-D-77', pblancOdr: '1', pblancSe: '정상공고', pblancDate: plus(0), bidNm: '부대 체력단련장 위탁운영 용역', ornt: '국군재정관리단', cntrctMth: '제한경쟁', bidStle: '전자입찰', busiDivs: '용역', bidPartcptRegistClosDt: `${plus(5)} 18:00`, biddocPresentnClosDt: `${plus(6)} 10:00`, opengDt: `${plus(6)} 11:00`, bsicExpt: '120000000' }]
     : q.bidNm === '피트니스' ? [{ pblancNo: '2026-D-78', pblancOdr: '1', pblancSe: '정상공고', pblancDate: plus(0), bidNm: '국군 체육시설 피트니스 위탁운영 용역', ornt: '국방부', busiDivs: '용역', g2bPblancNo: '20261021001', g2bPblancOdr: '00', biddocPresentnClosDt: `${plus(9)} 10:00` }] : [], true));
   if (u.pathname === '/agency/d2b_fclty') return json(ok([], true));
@@ -377,7 +384,10 @@ test('#522 LH·국방·온비드 새 주소·칸: LH(body.item·날짜 형식 �
   const r = await ctx.owner.ok('POST', '/api/sales/collectors/public_agency_bids/run', {});
   assert.equal(r.status, 'success', JSON.stringify(r));
   for (const k of ['lh_bid', 'lh_prespec', 'd2b_bid', 'd2b_fclty', 'onbid_lease']) assert.equal(r.sources[k].ok, true, `${k} ${JSON.stringify(r.sources[k])}`);
-  assert.deepEqual([r.sources.lh_bid.received, r.sources.lh_bid.kept, r.sources.lh_bid.note], [2, 1, '날짜를 yyyy-MM-dd 로 다시 보냄'], '도장공사는 걸러짐');
+  assert.deepEqual([r.sources.lh_bid.received, r.sources.lh_bid.kept, r.sources.lh_bid.note], [2, 1, undefined], '도장공사는 걸러짐 · XML 로 받아 읽음');
+  assert.equal(r.sources.lh_prespec.note, '날짜를 yyyy-MM-dd 로 다시 보냄');
+  assert.ok(hits.filter((h) => h.path.startsWith('/agency/lh_')).every((h) => !h.q.type && !h.q._type), 'LH 는 type·_type 안 보냄');
+  assert.equal(r.sources.lh_bid.sent, undefined, '성공한 원천은 보낸 주소를 안 남김');
   assert.ok(r.sources.lh_bid.keys.includes('bidnmKor') && r.sources.lh_bid.keys.includes('zoneRstrct1'), '첫 줄 칸 이름(값 없이)');
   assert.ok(!JSON.stringify(r.sources).includes('행복주택'), '값은 안 남김');
   assert.match(r.summary, /LH 입찰공고 받음 2·관련 1/); assert.match(r.summary, /온비드 공고\(차세대\) 받음 1·관련 1/); assert.match(r.summary, /나라장터와 같은 국방 공고 1건은 나라장터 줄로/);
@@ -398,7 +408,17 @@ test('#522 LH·국방·온비드 새 주소·칸: LH(body.item·날짜 형식 �
   assert.deepEqual(Object.keys(run.detail.sources).sort(), ['d2b_bid', 'd2b_fclty', 'lh_bid', 'lh_prespec', 'onbid_lease']);
   const v = await ctx.owner.ok('GET', '/api/sales/collectors');
   assert.ok(v.collectors.find((c) => c.slug === 'public_agency_bids').last.detail.sources.lh_bid.keys.length > 0, '수집기 칸에 원천별 줄');
-  agencyV2 = false;
+  // 로컬 10/24 운영: LH 가 '11 NO MANDATORY REQUEST PARAMETERS ERROR' → 원천별 줄에 보낸 주소(키 ***)·응답 앞 300자(메일·전화 가림)
+  lhFail = true;
+  const f = await ctx.owner.ok('POST', '/api/sales/collectors/public_agency_bids/run', {});
+  const lf = f.sources.lh_bid;
+  assert.equal(lf.ok, false); assert.match(lf.error, /11 NO MANDATORY REQUEST PARAMETERS ERROR/);
+  assert.equal(lf.note, '날짜를 yyyy-MM-dd 로 다시 보냄', '두 날짜 형식 모두 시도');
+  assert.match(lf.sent, /\/agency\/lh_bid\?serviceKey=\*\*\*&numOfRows=100&pageNo=1&tndrbidRegDtStart=\d{4}-\d{2}-\d{2}&tndrbidRegDtEnd=/, lf.sent);
+  assert.match(lf.head, /^<\?xml .*<resultCode>11<\/resultCode>/); assert.ok(lf.head.length <= 300);
+  assert.ok(!lf.head.includes('tester@lh.example') && !lf.head.includes('031-000-1111') && lf.head.includes('***@***'), '응답 앞부분의 메일·전화는 가림');
+  assert.equal(f.sources.d2b_bid.ok, true, '다른 원천은 그대로');
+  lhFail = false; agencyV2 = false;
 });
 
 test('#522 관광숙박업 오류 응답(JSON)도 코드·사유 그대로 · 영업상태 조건으로 0건이면 조건 없이 · 누락 점검(2회 연속 실패 → 영업 홈 빨간 띠·수집기 칸)', async () => {
