@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -46,6 +47,42 @@
         <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/workin_notification" />
         <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="work" />
 
+        <!-- 1.1.3 알림창 버튼: 플러그인 서비스를 이어받은 앱 서비스가 FCM 을 받는다(data 전용 알림을 버튼과 함께 그림) -->
+        <service android:name="io.capawesome.capacitorjs.plugins.firebase.messaging.MessagingService" tools:node="remove" />
+        <service android:name=".WorkinMessagingService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- 알림 버튼(승인·수정 요청·답글·확인·10분 뒤) — 앱을 열지 않고 처리 -->
+        <receiver android:name=".NotificationActionReceiver" android:exported="false" />
+
+        <!-- 1.1.3 전체화면 알람(#447): 잠금 화면 위 알람 화면 · 예약 시각 수신 · 알림 버튼 · 재부팅/업데이트 뒤 다시 예약 -->
+        <activity
+            android:name=".AlarmActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/AppTheme.Alarm"
+            android:turnScreenOn="true" />
+        <receiver android:name=".AlarmReceiver" android:exported="false" />
+        <receiver android:name=".AlarmActionReceiver" android:exported="false" />
+        <!-- 1.1.3 바탕화면 위젯 '워크인 오늘'(#110) -->
+        <receiver android:name=".TodayWidget" android:exported="false" android:label="@string/widget_today_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_today_info" />
+        </receiver>
+        <receiver android:name=".AlarmBootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -77,5 +114,7 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 1.1.3 전체화면 알람: 잠금 화면에서 알람 화면을 띄움(Android 14+ 는 설정에서 허용해야 전체화면, 아니면 머리 위 알림) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>
