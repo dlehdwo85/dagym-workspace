@@ -155,7 +155,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, version: r.version } : x)) });
       if (r.spawned) toast.info('반복 업무의 다음 회차가 생성되었습니다');
       broadcastRefresh();
-      return true;
+      return r ?? true; // #508 후속: 되돌리기 안내가 자동 후속 업무 정리 결과(autoRemoved·autoKept)를 씀
     } catch (e: any) {
       setData(before);
       toast.error(e.message);
@@ -520,6 +520,7 @@ const doneWhen = (iso?: string | null) => { const d = seoulDay(iso); if (!d) ret
 /** 묶음 맨 아래 접힌 '완료됨 n건 (오늘 a · 이번 주 n)' — 줄마다 [되돌리기](담당자만), [완료 전체 보기 →]. 펼침은 이 기기에 기억 */
 function DoneFold({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => any }) {
   const { user } = useSession();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const ids = tasks.map((t) => t.id).join(',');
@@ -553,8 +554,12 @@ function DoneFold({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any
                 <TaskLink id={t.id} className="min-w-0 flex-1 truncate text-sm text-ink-2 hover:text-accent-600 hover:underline">{t.title}</TaskLink>
                 <span className="shrink-0 text-xs tabular-nums text-ink-3" title="완료한 때">{doneWhen(t.completed_at)}</span>
                 {canSetStatus(t, user.id, back) && <Button size="sm" variant="secondary" data-testid="done-fold-undo" onClick={async () => {
-                  if (await onPatch(t, { status: back }) === false) return;
-                  PREV_STATUS.delete(t.id); toast.ok(`되돌렸습니다 — ${STATUS_LABEL[back]}`);
+                  const r = await onPatch(t, { status: back }); if (r === false) return;
+                  PREV_STATUS.delete(t.id);
+                  // #508 후속(로컬 10/23): 완료 때 자동으로 생긴 다음 회차·리드 후속 업무 — 손대지 않은 것은 서버가 같이 지움, 손댄 것은 그대로 두고 [열기]
+                  const removed: { id: string }[] = r?.autoRemoved ?? []; const kept: { id: string; title: string }[] = r?.autoKept ?? [];
+                  const tail = kept.length ? ' · 다음 회차/후속 업무는 그대로 두었습니다' : removed.length ? ` · 완료 때 자동으로 만든 다음 업무 ${removed.length}건도 지웠습니다` : '';
+                  toast.ok(`되돌렸습니다 — ${STATUS_LABEL[back]}${tail}`, kept.length ? { label: '열기', run: () => router.push(`/tasks/${kept[0].id}`) } : undefined);
                 }}>되돌리기</Button>}
               </li>
             );

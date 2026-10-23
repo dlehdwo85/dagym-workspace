@@ -35,7 +35,7 @@ import { CoAssignees, CoPartBox, coOf } from '@/components/CoAssignees';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
-  reopened: '다시 열기', deleted: '삭제', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
+  reopened: '다시 열기', deleted: '삭제', auto_spawned: '완료로 다음 업무 자동 생성', auto_removed: '완료 되돌리기 — 자동 생성 업무 정리', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
   checklist_done: '체크리스트 완료', reassigned: '재배정', part_done: '내 몫 완료(공동 담당)', part_reopened: '내 몫 완료 취소(공동 담당)', assignee_added: '담당 추가', assignee_removed: '담당 빼기', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
   file_attached: '파일 첨부', file_edited: '파일 수정', file_opened_doc: '파일을 문서로 열어 편집', file_downloaded: '파일 내려받음', mail_queued: '메일 보내기 요청', mail_sent: '메일 보냄', mail_failed: '메일 발송 실패', share_created: '다운로드 링크 만듦', share_opened: '고객이 자료를 열어봄', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
@@ -174,6 +174,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       const r = await api(`/api/tasks/${id}`, { method: 'PATCH', body: { ...body, version: t.version } });
       if (okMsg) toast.ok(okMsg);
       if (r.spawned) toast.info('반복 업무의 다음 회차가 생성되었습니다');
+      // #508 후속: 완료를 되돌리면 그 완료 때 자동으로 생긴 다음 회차·리드 후속 업무 — 손대지 않은 것은 지움, 손댄 것은 그대로
+      if (r.autoKept?.length) toast.info('다음 회차/후속 업무는 그대로 두었습니다', { label: '열기', run: () => router.push(`/tasks/${r.autoKept[0].id}`) });
+      else if (r.autoRemoved?.length) toast.info(`완료 때 자동으로 만든 다음 업무 ${r.autoRemoved.length}건도 지웠습니다(휴지통)`);
       reload(); broadcastRefresh();
     } catch (e: any) { toast.error(e.message); if (e.status === 409) reload(); }
   }

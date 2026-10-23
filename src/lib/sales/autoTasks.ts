@@ -83,5 +83,6 @@ export async function followUpAfterTaskDone(sql: Sql, u: SessionUser, i: { taskI
     await audit(sql, u.id, 'sales.followup', 'sales_lead', l.id, { from: l.next, to: next, taskId: i.taskId, title: i.title }, null).catch(() => {});
   }
   const r = await syncSalesTask(sql, u, { kind: 'lead', id: l.id, name: l.name, status: l.status, nextDate: next, nextAction: '다음 연락', assigneeId: l.owner_id ?? u.id, leadId: l.id });
-  return { action: 'followup' as const, next, taskId: r.taskId };
+  // #508 후속: 새로 만든 업무인지(열린 자동 업무가 이미 있으면 그 업무 마감만 바꿈) + 완료 전 다음 연락일 — 완료를 되돌리면 같이 되돌림(tasks.ts undoAutoSpawned)
+  return { action: 'followup' as const, next, prev: l.next, leadId: l.id, taskId: r.taskId, created: r.action === 'created' };
 }
