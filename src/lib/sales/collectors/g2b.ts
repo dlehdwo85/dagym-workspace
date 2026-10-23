@@ -4,6 +4,7 @@ import { dataGoKey } from '../collect';
 import { matchFit } from './procurement';
 import { upsertNotices } from './store';
 import { endpoints } from './endpoints';
+import { SIDO_ALIASES } from './prospects';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
@@ -47,6 +48,21 @@ export function g2bPayload(it: any, sourceType: 'g2b_bid' | 'nuri_bid', cat: str
     estimated_amount: str(it.presmptPrce), budget_amount: str(it.asignBdgtAmt), contract_method: str(it.cntrctCnclsMthdNm), award_method: str(it.sucsfbidMthdNm), notice_state: str(it.ntceKindNm), bid_category: cat, notice_type: cat === '공사' ? '공사' : undefined,
     industry_code: str(it.indstrytyLmtNm) ?? str(it.indstrytyNm), task_scope: str(it.bidNtceDtlCntnts ?? it.ntceSpecFileNm1), attachment_urls: attachments(it), notice_file_url: str(it.ntceSpecDocUrl1) };
 }
+/** 누리장터(PrvtBidNtceService getPrvtBidPblancListInfo*PPSSrch) — 나라장터와 칸 이름이 다름(로컬 10/23 운영 응답: ntceNm·nticeDt…, 명세 = 공공데이터포털 '조달청_누리장터 민간입찰공고서비스').
+ * 담당자 이름·전화·메일(ofclNm·ofclTelNo·ofclEmail)은 개인정보 → 나라장터 공고(담당자 칸 안 읽음)와 같게 저장하지 않음. 아파트 관리사무소 전화는 K-apt 와 같게 office_phone */
+const SIDO_SHORT = new Set(Object.values(SIDO_ALIASES));
+const sidoOf = (addr: string | null) => { const w = addr?.trim().split(/\s+/)[0] ?? ''; return SIDO_ALIASES[w] ?? (SIDO_SHORT.has(w) ? w : null); };
+const ymd19 = (v: unknown) => str(v)?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? str(v)?.match(/^(\d{4})(\d{2})(\d{2})/)?.slice(1).join('-') ?? null;
+export function nuriPayload(it: any, cat: string): Record<string, unknown> | null {
+  const no = str(it.bidNtceNo), ord = str(it.bidNtceOrd) ?? '00', title = str(it.ntceNm) ?? str(it.bidNtceNm); if (!no || !title) return null;
+  const docs = attachments(it); const kind = str(it.bidNtceClsfc); const apt = str(it.aptHsmpNm); const addr = str(it.aptCeoAdrs);
+  const list = (v: unknown) => (typeof v === 'string' ? str(v) : null);
+  return { source_type: 'nuri_bid', source_external_id: `${no}-${ord}`, source_url: docs[0] ?? 'https://nuri.g2b.go.kr/', title, issuer: str(it.ntceInsttNm) ?? apt, facility_name: apt,
+    region: sidoOf(addr), region_restriction: str(it.rgnLmtDivNm), posted_date: ymd19(it.nticeDt) ?? ymd19(it.rgstDt), deadline_at: str(it.bidClseDt), opening_at: str(it.opengDt),
+    estimated_amount: str(it.refAmtOpenYn) === 'N' ? null : str(it.refAmt), budget_amount: str(it.asignBdgtAmt), contract_method: str(it.cntrctMthdNm), bid_system: str(it.bidMethdNm), award_method: str(it.sucsfbidMthdNm),
+    notice_state: str(it.ntceDivNm), bid_category: kind && kind !== '기타' ? kind : cat, notice_type: (kind ?? cat) === '공사' ? '공사' : undefined, task_scope: list(it.servcDtlList) ?? list(it.prdctDtlList),
+    office_phone: str(it.aptMngOfficeTelNo), office_address: addr, household_count: str(it.aptHshldNum), attachment_urls: docs, notice_file_url: docs[0] ?? null };
+}
 function windowParams(days: number) { const end = new Date(); const start = new Date(end.getTime() - days * 864e5); return { inqryDiv: '1', inqryBgnDt: `${fmt(start)}0000`, inqryEndDt: `${fmt(end)}2359` }; }
 async function searchAll(ops: readonly (readonly [string, string])[], words: string[], days: number, map: (it: any, cat: string) => Record<string, unknown> | null, ctx: CollectorCtx, key: string, extra: Record<string, string> = {}) {
   const items: Record<string, unknown>[] = []; const errors: string[] = []; const denied = new Set<string>(); const seen = new Set<string>(); const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const stats: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 };
@@ -70,7 +86,7 @@ export const g2bBidNotices: Collector = {
     // #476 c: 06시는 최근 14일 전체, 낮 수집(10·14·18시·그 뒤 [지금 수집])은 최근 3일 — 낮에 올라온 공고를 그날 잡는다
     const days = ctx.params?.full === true || kstHourNow() < 10 ? 14 : 3;
     const a = await searchAll(BID_OPS, G2B_WORDS, days, (it, cat) => g2bPayload(it, 'g2b_bid', cat), ctx, key);
-    const b = await searchAll(await nuriOps(), G2B_WORDS, days, (it, cat) => g2bPayload(it, 'nuri_bid', cat), ctx, key);
+    const b = await searchAll(await nuriOps(), G2B_WORDS, days, nuriPayload, ctx, key);
     const errors = [...a.errors, ...b.errors]; const items = [...a.items, ...b.items];
     const r = await write(items, errors);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + a.denied.length + b.denied.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',

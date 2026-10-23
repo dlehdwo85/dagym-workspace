@@ -75,3 +75,26 @@ test('① 사이트별 집계: 비콘(연동 토큰, 다른 출처 CORS) → 방
   assert.ok(v.summary.some((s) => s.startsWith('하이링크: 방문 3')), v.summary.join('\n')); assert.ok(v.beaconUrl.endsWith('/api/public/site-event'));
   assert.equal((await ctx.staffA.client.req('GET', '/api/marketing/sites')).status, 200);
 });
+
+test('보안(로컬 10/23 #502): 브라우저용 공개 키 = 방문·CTA 만(다른 사이트 이름 불가) · 문의 등록 불가 · 서버 경유 Bearer · 위조·폐기 키 401 · 화면 데이터에 토큰 원문 없음', async () => {
+  await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
+  const tok = await ctx.owner.ok('POST', '/api/platform/inquiries/tokens', { site: 'dagym', name: '다짐 웹(공개 키 시험)' });
+  const v = await ctx.owner.ok('GET', '/api/marketing/sites?weeks=4');
+  const k = v.beaconKeys.find((x) => x.name === '다짐 웹(공개 키 시험)'); assert.ok(k, JSON.stringify(v.beaconKeys));
+  assert.match(k.key, /^wkpub_[0-9a-f]{32}_[A-Za-z0-9_-]{22}$/); assert.equal(k.site, 'dagym');
+  assert.ok(!JSON.stringify(v).includes(tok.token), '연동 토큰 원문은 화면 데이터에 없음');
+  const post = (q, b, h = {}) => fetch(`${BASE}/api/public/site-event${q}`, { method: 'POST', headers: { 'content-type': 'text/plain', origin: 'https://dagym.example', ...h }, body: JSON.stringify(b) });
+  const count = async (site) => (await sql`select coalesce(sum(n), 0)::int n from mkt_site_events where tenant = 'default' and site = ${site} and event = 'visit'`)[0].n;
+  const [dg0, hl0] = [await count('dagym'), await count('hilink')];
+  const ok = await post(`?pk=${k.key}`, { event: 'visit', path: '/', site: 'hilink' }); assert.equal(ok.status, 200); assert.equal(ok.headers.get('access-control-allow-origin'), '*');
+  assert.deepEqual([await count('dagym'), await count('hilink')], [dg0 + 1, hl0], '공개 키는 그 토큰의 사이트로만 셈(site 바꿔 보내기 무시)');
+  const forged = `${k.key.slice(0, -1)}${k.key.endsWith('A') ? 'B' : 'A'}`;
+  assert.equal((await post(`?pk=${forged}`, { event: 'visit' })).status, 401, '서명이 틀리면 401');
+  assert.equal((await post('?pk=wkpub_nope', { event: 'visit' })).status, 401);
+  const iq = await fetch(`${BASE}/api/integrations/inquiries`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${k.key}` }, body: JSON.stringify({ lead_id: 'PK-1', inquiry_type: '기타', name: '가짜', phone: '010-0000-0000' }) });
+  assert.equal(iq.status, 401, '공개 키로는 문의 등록 불가');
+  assert.equal((await post('', { event: 'cta', label: '전화' }, { authorization: `Bearer ${tok.token}` })).status, 200, '사이트 서버 경유(Bearer 연동 토큰)');
+  await ctx.owner.ok('DELETE', `/api/platform/inquiries/tokens/${tok.id}`);
+  assert.equal((await post(`?pk=${k.key}`, { event: 'visit' })).status, 401, '연동 토큰을 폐기하면 공개 키도 막힘');
+  assert.ok(!(await ctx.owner.ok('GET', '/api/marketing/sites?weeks=4')).beaconKeys.some((x) => x.key === k.key));
+});

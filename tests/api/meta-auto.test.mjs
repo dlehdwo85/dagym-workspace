@@ -232,3 +232,31 @@ test('영상 소재: Meta 처리 중이면 멈췄다가 다시 누르면 이어�
   assert.equal(r3.status, 'created');
   privacyMode = 'ok';
 });
+
+test('4cde86d 확인 후속: 세팅안 저장 때 회사 월 상한 경고(남은 금액·메타 최소 총 상한) · 목록 카드에도 · 초안 만들 때 검사 목록 · 승인함 카드 경고', async () => {
+  const [acc] = await sql`select id from mkt_ad_accounts where provider = 'meta'`; const [page] = await sql`select id from mkt_publish_accounts where provider = 'meta_fb'`;
+  const img = (await sql`select id from library_files where file_name = '가을 PT 광고.png'`)[0].id;
+  const o = { accountId: acc.id, pageAccountId: page.id, fileId: img };
+  // 로컬 운영 상황 재현: 회사 월 상한 100,000원 · 이번 달 95,000원 사용 · 세팅안 하루 10,000원 × 7일 · 총 상한 140,000원(메타 최소)
+  await ctx.owner.ok('PUT', '/api/marketing/ad-ops/cap', { monthlyCap: 100_000 });
+  await sql`insert into mkt_ad_stats (account_id, day, campaign_id, cost_krw) values (${acc.id}, ${day(0)}, 'cap-test', 95000)`;
+  const r = await ctx.owner.ok('POST', '/api/marketing/ad-ops/meta', plan(o, { name: '상한 경고 확인', startDate: day(0), endDate: day(6), dailyBudget: 10000, totalCap: 140000 }));
+  assert.deepEqual(r.issues, [], '경고만(꺼진 초안은 돈이 안 나감)');
+  assert.ok(r.warnings.some((w) => /메타 총 상한은 최소 140,000원인데 회사 월 상한은 100,000원입니다/.test(w)), r.warnings.join(' | '));
+  assert.ok(r.warnings.some((w) => /회사 월 상한 100,000원 중 95,000원을 써서 남은 금액은 5,000원입니다/.test(w)), r.warnings.join(' | '));
+  const ov = await ctx.owner.ok('GET', '/api/marketing/ad-ops/meta');
+  const row = ov.plans.find((p) => p.id === r.id);
+  assert.ok(row.check.warnings.some((w) => /남은 금액은 5,000원/.test(w)), '목록 카드에도');
+  assert.deepEqual(row.check.later, ['광고 계정 권한·원화·활성 상태', '리드 양식 상태·개인정보처리방침 링크', '이미지 속 글자 비율'], '초안 만들 때 검사(4cde86d b)');
+  // 초안을 만들면 같은 경고가 승인함 카드(checks.warnings)에 남음 · 결과(양식·개인정보 링크)도
+  const d = await ctx.owner.ok('POST', `/api/marketing/ad-ops/meta/${r.id}/draft`, {});
+  assert.equal(d.status, 'created'); assert.ok(d.warnings.some((w) => /남은 금액은 5,000원/.test(w)), d.warnings.join(' | '));
+  const [x] = await sql`select external from mkt_ad_plans where id = ${r.id}`;
+  assert.ok(x.external.checks.warnings.some((w) => /회사 월 상한에 먼저 닿아/.test(w))); assert.equal(x.external.formChecked, true);
+  // 상한이 넉넉하면 경고 없음 · 다음 달에 시작하는 세팅안은 이번 달 남은 금액과 견주지 않음
+  await ctx.owner.ok('PUT', '/api/marketing/ad-ops/cap', { monthlyCap: 1_000_000 });
+  const ok = await ctx.owner.ok('PUT', `/api/marketing/ad-ops/meta/${(await ctx.owner.ok('POST', '/api/marketing/ad-ops/meta', plan(o, { name: '상한 넉넉' }))).id}`, plan(o, { name: '상한 넉넉', startDate: day(0), endDate: day(6), totalCap: 140000 }));
+  assert.ok(!ok.warnings.some((w) => /회사 월/.test(w)), ok.warnings.join(' | '));
+  await ctx.owner.ok('POST', `/api/marketing/ad-ops/meta/${r.id}/reject`, { reason: '시험 정리' });
+  await sql`delete from mkt_ad_stats where campaign_id = 'cap-test'`;
+});

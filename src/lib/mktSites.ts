@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from './db';
-import { sha256 } from './crypto';
+import { timingSafeEqual } from 'node:crypto';
+import { hmac, sha256 } from './crypto';
 import { HttpError, unauthorized } from './errors';
 import { assertSpace } from './spaces';
 import { tenantOf, type SessionUser } from './types';
@@ -13,13 +14,29 @@ import { adAttrib, isTelLabel, kwKey } from './adAttrib';
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 export const siteEventInput = z.object({ event: z.enum(['visit', 'cta']), site: z.string().trim().max(40).optional(), label: z.string().trim().max(60).optional(), path: z.string().trim().max(200).optional(),
   landing: z.string().trim().max(2000).optional() }); // 광고 최적화 1차 ③ 그 방문자가 처음 들어온 주소(광고면 n_*·utm·gclid 가 붙어 있음)
-/** 비콘 수신: 연동 토큰(문의 연동과 같은 토큰) → tenant·site. 한 토큰 시간당 5,000건 넘으면 429 */
-export async function recordSiteEvent(rawToken: string, i: z.infer<typeof siteEventInput>) {
-  if (!rawToken) throw unauthorized('연동 토큰이 필요합니다');
+/**
+ * 로컬 10/23 보안(#502): 연동 토큰은 문의 등록(/api/integrations/inquiries)도 되는 비밀값이라 브라우저 코드에 넣으면 안 됨 →
+ * ① 사이트 서버가 토큰(Bearer)으로 대신 보내거나 ② 브라우저에는 이 '공개 키'(방문·CTA 만, 문의 등록 불가)를 넣음.
+ * 형식 wkpub_<연동 토큰 번호 32자>_<서명 22자> — 서명 = HMAC(APP_SECRET, 'site-beacon:'+번호)라 따로 저장하지 않고, 연동 토큰을 폐기하면 같이 막힘
+ */
+export const beaconKeyOf = (tokenId: string) => `wkpub_${tokenId.replace(/-/g, '')}_${hmac(`site-beacon:${tokenId}`).slice(0, 22)}`;
+function beaconTokenId(key: string): string | null {
+  const m = /^wkpub_([0-9a-f]{32})_[A-Za-z0-9_-]{22}$/.exec(key); if (!m) return null;
+  const id = m[1].replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, '$1-$2-$3-$4-$5');
+  const a = Buffer.from(beaconKeyOf(id)), b = Buffer.from(key);
+  return a.length === b.length && timingSafeEqual(a, b) ? id : null;
+}
+/** 비콘 수신: 연동 토큰(서버 경유) 또는 공개 키(브라우저) → tenant·site. 사이트마다 하루 200,000건 넘으면 429 */
+export async function recordSiteEvent(rawToken: string, i: z.infer<typeof siteEventInput>, publicKey = '') {
+  if (!rawToken && !publicKey) throw unauthorized('연동 토큰(서버) 또는 공개 키(브라우저)가 필요합니다');
   const sql = db();
-  const [t] = await sql<{ id: string; tenant: string; site: string }[]>`select id, tenant, site from integration_tokens where token_hash = ${sha256(`inquiry:${rawToken}`)} and revoked_at is null`;
-  if (!t) throw unauthorized('연동 토큰이 올바르지 않습니다');
-  const site = (i.site || t.site).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40) || t.site;
+  const pid = publicKey ? beaconTokenId(publicKey) : null;
+  if (publicKey && !pid) throw unauthorized('공개 키가 올바르지 않습니다');
+  const [t] = pid ? await sql<{ id: string; tenant: string; site: string }[]>`select id, tenant, site from integration_tokens where id = ${pid} and revoked_at is null`
+    : await sql<{ id: string; tenant: string; site: string }[]>`select id, tenant, site from integration_tokens where token_hash = ${sha256(`inquiry:${rawToken}`)} and revoked_at is null`;
+  if (!t) throw unauthorized(pid ? '공개 키가 올바르지 않습니다(연동 토큰이 폐기됨)' : '연동 토큰이 올바르지 않습니다');
+  // 공개 키는 누구나 볼 수 있으므로 사이트 이름을 바꿔 보낼 수 없음(그 토큰의 사이트로만 셈)
+  const site = (pid ? '' : (i.site ?? '')).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40) || t.site;
   const label = i.event === 'cta' ? (i.label || i.path || '').slice(0, 60) : '';
   const [{ n }] = await sql<{ n: number }[]>`select coalesce(sum(n), 0)::int n from mkt_site_events where tenant = ${t.tenant} and site = ${site} and day = ${ymd(new Date())}::date`;
   if (n >= 200_000) throw new HttpError(429, 'too_many', '오늘 집계 한도를 넘었습니다');
@@ -67,5 +84,8 @@ export async function sitesView(u: SessionUser, weeks = 4) {
   const won = (v: number) => (v >= 1e4 ? `${Math.round(v / 1e4).toLocaleString('ko-KR')}만원` : `${v.toLocaleString('ko-KR')}원`);
   const d = (a: number | null, b: number | null) => (a == null || b == null ? '' : b === 0 ? (a ? ' (지난주 0)' : '') : ` (지난주 대비 ${a >= b ? '+' : ''}${Math.round(((a - b) / b) * 100)}%)`);
   const summary = rows.map((r) => { const [c, p] = r.weeks; return `${r.name}: ${r.connected ? `방문 ${c.visits}${d(c.visits, p?.visits ?? null)} · CTA ${c.cta}${d(c.cta, p?.cta ?? null)} · ` : '방문·CTA 미연결 · '}게시 ${c.posts}${d(c.posts, p?.posts ?? null)} · 광고 ${won(c.adCost)}/클릭 ${c.clicks}${d(c.clicks, p?.clicks ?? null)} · 문의 ${c.inquiries}${d(c.inquiries, p?.inquiries ?? null)}`; });
-  return { weeks: wk, rows, summary, thisWeek: wk[0], sites, beaconUrl: `${(process.env.APP_URL ?? 'https://work-in.dev').replace(/\/$/, '')}/api/public/site-event` };
+  // 사이트별 공개 키(방문·CTA 전용 — 브라우저에 넣어도 되는 값). 연동 토큰 원문은 여기 없음
+  const keys = await sql<{ id: string; site: string; name: string }[]>`select id, site, name from integration_tokens where tenant = ${t} and revoked_at is null order by created_at`;
+  return { weeks: wk, rows, summary, thisWeek: wk[0], sites, beaconUrl: `${(process.env.APP_URL ?? 'https://work-in.dev').replace(/\/$/, '')}/api/public/site-event`,
+    beaconKeys: keys.map((k) => ({ site: k.site, name: k.name, key: beaconKeyOf(k.id) })) };
 }
