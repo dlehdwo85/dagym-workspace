@@ -96,7 +96,7 @@ export const needsPhotos = (channel: string, mediaCount: number) => channel === 
 export async function listContents(u: SessionUser, q: { view?: string; from?: string; to?: string; day?: string }) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
-  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color,
+  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
       v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note,
       (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality, c.rationale,
       (select json_build_object('kind', p.kind, 'status', p.status) from mkt_production_requests p where p.content_id = c.id and p.kind in ('image', 'video', 'regen_image', 'regen_video') and p.status in ('open', 'needs_approval') order by p.created_at desc limit 1) as production,
@@ -119,9 +119,10 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
       and (${q.to ?? ''} = '' or c.scheduled_at < (${q.to || '2999-01-01'}::date + 1))
     order by c.scheduled_at nulls last, c.created_at desc limit 300`;
   const st = await (await import('./mktAuto')).settingsOf(t);
+  const handleOf = await (await import('./mktPublish')).accountLabels(t).catch(() => () => null); // #497 R06 카드 '게시 화면으로 보기' 이름
   const now = Date.now();
   return { approvalHour: st.approval_hour, canDecide: isAdmin(u), contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st.approval_hour) : null;
-    return { ...r, deadline, late: !!deadline && deadline.getTime() < now && ['pending', 'changes'].includes(r.status) }; }) };
+    return { ...r, handle: handleOf(r.channel, r.brand_id), deadline, late: !!deadline && deadline.getTime() < now && ['pending', 'changes'].includes(r.status) }; }) };
 }
 
 /** 로컬 10/21 08:10: 브랜드·게시 예정 시각 바로잡기(관리자) — 승인 상태는 그대로(게시 계정 선택·마감 재배치용) */
@@ -142,7 +143,7 @@ export async function getContent(u: SessionUser, id: string) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);
   const sql = db();
-  const [c] = await sql<any[]>`select c.*, b.name as brand, b.voice as brand_voice from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`;
+  const [c] = await sql<any[]>`select c.*, b.name as brand, b.voice as brand_voice, b.color as brand_color, b.video->>'logoFileId' as brand_logo from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`; // #497 R06 미리보기 프로필(브랜드 키트 로고·색)
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
   const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
@@ -152,7 +153,9 @@ export async function getContent(u: SessionUser, id: string) {
   const decisions = await sql`select d.version, d.decision, d.comment, d.decided_at, u.name as decided_by_name from mkt_decisions d left join users u on u.id = d.decided_by where d.content_id = ${id} order by d.decided_at desc`;
   const st = await (await import('./mktAuto')).settingsOf(tenantOf(u));
   // 대표 10/20 22:30 ② M1: 서버 게시 가능 채널·계정(관리자 [서버로 게시] 버튼) + 회사 자동 게시 설정
-  const targets = await (await import('./mktPublish')).publishTargets(tenantOf(u), c).catch(() => []);
+  const P = await import('./mktPublish');
+  const targets = await P.publishTargets(tenantOf(u), c).catch(() => []);
+  const handle = (await P.accountLabels(tenantOf(u)).catch(() => () => null))(c.channel, c.brand_id); // #497 R06 미리보기 이름(카드와 같은 고르기)
   // #426 글 품질: AI 시안은 제작 때 낸 보고서(훅 후보·자동 수정 기록 포함), 사람이 올린 버전은 지금 본문으로 바로 검사(저장 안 함)
   const cur = versions.find((v) => v.version === c.current_version);
   const Q = await import('./mktQuality');
@@ -163,7 +166,7 @@ export async function getContent(u: SessionUser, id: string) {
     : cur ? { ...Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', keywords: kw, voice: c.brand_voice, cross: c.cross_channels ?? [], mode,
         hooks: saved?.hooks?.map((h: { text: string }) => h.text), script: saved?.timing?.rows?.map((r: { line: string }) => r.line) }, await Q.qualityRules()).report, ...(saved ? { v: saved.v, notes: saved.notes } : {}) } : null;
   delete c.brand_voice;
-  return { content: { ...c, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
+  return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };
