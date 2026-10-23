@@ -20,6 +20,7 @@ function subBox(d: Dim) {
   if (d.w > d.h) return { size: Math.round(d.h * 0.052), perLine: 26, marginV: Math.round(d.h * 0.08), marginH: Math.round(d.w * 0.1) };
   return { size: Math.round(d.w * 0.054), perLine: 16, marginV: Math.round(d.h * 0.1), marginH: Math.round(d.w * 0.09) };
 }
+const PUNCT = /[?!.,…·~:;)\]}」』>%？！。，、]/;
 /** 한국어 줄바꿈: 두 줄에 들어가면 두 줄 길이가 비슷한 띄어쓰기에서 나누고, 아니면 띄어쓰기 단위로 채운다(한 단어가 줄보다 길면 자름) */
 export function wrapKo(text: string, max: number): string[] {
   const t = text.replace(/\s+/g, ' ').trim(); const words = t.split(' ').filter(Boolean);
@@ -32,7 +33,11 @@ export function wrapKo(text: string, max: number): string[] {
   if (best) return best.lines;
   const lines: string[] = []; let cur = '';
   for (let w of words) {
-    while (w.length > max) { if (cur) { lines.push(cur); cur = ''; } lines.push(w.slice(0, max)); w = w.slice(max); }
+    while (w.length > max) { // 줄보다 긴 낱말은 자르되 문장부호('?'·'!'…)는 앞 글자에 붙인다(로컬 10/24 08:40 — 부호만 혼자 다음 줄로 가지 않게)
+      if (cur) { lines.push(cur); cur = ''; }
+      let cut = max; while (cut < w.length && PUNCT.test(w[cut])) cut++;
+      lines.push(w.slice(0, cut)); w = w.slice(cut);
+    }
     if (!cur) cur = w; else if ((cur + ' ' + w).length <= max) cur += ' ' + w; else { lines.push(cur); cur = w; }
   }
   if (cur) lines.push(cur);

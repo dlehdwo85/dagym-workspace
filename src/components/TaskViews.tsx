@@ -20,6 +20,7 @@ import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag,
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
+import { keepScroll } from './backClose';
 import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
 import { coOf, type Co } from './CoAssignees';
 import { QuickAddTask } from './QuickAddTask';
@@ -179,8 +180,10 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   // 오른쪽 패널
   const [panelId, setPanelId] = useState<string | null>(null);
   const listUrl = useRef<string | null>(null);
+  const panelY = useRef(0); // #535: 휴대폰은 패널이 목록을 덮음 — 닫으면 목록을 연 자리로
   const openTask = useCallback((id: string) => {
     if (!listUrl.current) listUrl.current = location.pathname + location.search;
+    if (!window.history.state?.wosPanel) panelY.current = window.scrollY;
     // V12 4번: 패널이 열린 채 다른 업무를 누르면 닫지 않고 그 업무로 교체(기록은 한 칸만 — 닫으면 바로 목록)
     if (window.history.state?.wosPanel) window.history.replaceState({ wosPanel: id }, '', `/tasks/${id}`);
     else window.history.pushState({ wosPanel: id }, '', `/tasks/${id}`);
@@ -188,13 +191,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   }, []);
   const closePanel = useCallback(() => {
     if (window.history.state?.wosPanel) window.history.back();
-    else { if (listUrl.current) window.history.replaceState(null, '', listUrl.current); setPanelId(null); }
+    else { if (listUrl.current) { window.history.replaceState(null, '', listUrl.current); keepScroll(panelY.current, new URL(listUrl.current, location.origin).pathname); } setPanelId(null); }
   }, []);
   useEffect(() => {
     const onPop = () => {
       const m = /^\/tasks\/([0-9a-f-]{36})$/.exec(location.pathname);
       setPanelId(m && window.history.state?.wosPanel ? m[1] : null);
-      if (!m) listUrl.current = null;
+      if (!m) { if (listUrl.current) keepScroll(panelY.current); listUrl.current = null; }
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && panelId && !document.querySelector('[role=dialog]')) closePanel(); };
     // V12 4번(PC): 패널 바깥(목록 빈 곳·사이드바 등)을 누르면 닫힘 — 업무 행·선택 창·대화상자·알림 띠는 제외. 입력 중이던 칸은 초점이 빠지며 자동 저장

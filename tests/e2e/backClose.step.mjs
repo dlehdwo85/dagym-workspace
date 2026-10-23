@@ -47,5 +47,37 @@ export async function backClose({ owner, ctx, BASE }) {
   await owner.goBack();
   await detail.waitFor({ state: 'hidden' });
   assert.deepEqual([path(), param()], ['/s/marketing/calendar', null], '캘린더도 뒤로가기 = 상세만 닫힘');
+  // 로컬 08:23: 목록을 내린 뒤 상세를 열고 닫으면(뒤로가기·닫기 단추) 승인함이 맨 위로 돌아가던 것 → 연 자리 그대로
+  for (let i = 1; i <= 6; i++) await ctx.owner.ok('POST', '/api/marketing/contents', { title: `E2E 뒤로가기 스크롤 글 ${i}`, channel: 'facebook', brandId, body: '스크롤 시험 본문', mediaIds: [], scheduledAt: new Date(Date.now() + (30 + i) * 3600e3).toISOString() });
+  await owner.goto(`${BASE}/s/marketing`); // 대표 순서: 마케팅 홈 → 아래 탭 '승인 대기'(화면 안 이동)
+  await owner.locator('a[href="/s/marketing/approvals"]:visible').first().click();
+  await owner.waitForURL((u) => u.pathname === '/s/marketing/approvals');
+  const far = () => owner.getByTestId('approval-card').filter({ hasText: 'E2E 뒤로가기 스크롤 글' }).last().getByTestId('mkt-row');
+  await far().scrollIntoViewIfNeeded();
+  const y0 = await owner.evaluate(() => Math.round(window.scrollY));
+  assert.ok(y0 > 300, `목록을 충분히 내림(${y0})`);
+  for (const how of ['back', 'button']) {
+    await far().click();
+    await detail.waitFor();
+    if (how === 'back') await owner.goBack(); else await owner.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
+    await detail.waitFor({ state: 'hidden' });
+    await owner.waitForTimeout(400);
+    const y = await owner.evaluate(() => Math.round(window.scrollY));
+    assert.ok(Math.abs(y - y0) <= 4, `${how === 'back' ? '뒤로가기' : '닫기 단추'} 뒤 스크롤 위치 그대로(${y0} → ${y})`);
+  }
+  // 업무 목록(휴대폰은 상세가 목록을 덮음)도 같음: 아래 업무를 열고 뒤로가기 → 연 자리
+  for (let i = 1; i <= 16; i++) await ctx.owner.ok('POST', '/api/tasks', { title: `E2E 뒤로가기 업무 ${String(i).padStart(2, '0')}`, assigneeId: ctx.ownerId, approvalRequired: false });
+  await owner.goto(`${BASE}/tasks`);
+  const lastTask = () => owner.locator('[data-task-id]:visible').filter({ hasText: 'E2E 뒤로가기 업무' }).last();
+  await lastTask().scrollIntoViewIfNeeded();
+  const t0 = await owner.evaluate(() => Math.round(window.scrollY));
+  assert.ok(t0 > 300, `업무 목록을 충분히 내림(${t0})`);
+  await lastTask().click();
+  await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
+  await owner.goBack();
+  await owner.waitForURL((u) => u.pathname === '/tasks');
+  await owner.waitForTimeout(400);
+  const t1 = await owner.evaluate(() => Math.round(window.scrollY));
+  assert.ok(Math.abs(t1 - t0) <= 4, `업무 상세 뒤로가기 뒤 목록 위치 그대로(${t0} → ${t1})`);
   await owner.setViewportSize({ width: 1366, height: 900 });
 }

@@ -38,10 +38,23 @@ function clean(s: string, has: (cp: number) => boolean) {
 }
 const lum = (hex: string) => { const n = parseInt(hex.slice(1), 16); const c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
 export const okColor = (c: string | null | undefined) => (c && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
+/** 브랜드를 색 없이 만들면 들어가는 기본 보라(083 마이그레이션·brandInput) — 바탕 색을 고를 때는 '정하지 않음'으로 본다 */
+const UNSET_BRAND_COLOR = '#7C3AED';
+/** #516 후속 3(로컬 10/24 08:40 '하이링크도 보라'): 그림 바탕 색 = 브랜드 키트 끝 화면 색 → 브랜드 색(기본 보라 제외) → 회사 정보 기본 브랜드 색 → 없으면 null(진한 남색) */
+export async function brandDrawColor(tenant: string, b?: { color: string | null; video?: { endColor?: string | null } | null } | null) {
+  const own = okColor(b?.video?.endColor) ?? (okColor(b?.color) && b!.color!.toUpperCase() !== UNSET_BRAND_COLOR ? b!.color : null);
+  if (own) return own;
+  const { db } = await import('./db');
+  const [p] = await db()<{ brand_color: string | null }[]>`select brand_color from company_profiles where tenant = ${tenant} and brand_color is not null order by is_default desc limit 1`.catch(() => []);
+  return okColor(p?.brand_color);
+}
 const len = (s: string) => Math.max(0, ...s.split('\n').map((l) => [...l].length));
 const titleSize = (t: string, cover: boolean) => { const n = len(t); return cover ? (n <= 10 ? 112 : n <= 16 ? 96 : n <= 24 ? 80 : 66) : (n <= 12 ? 84 : n <= 18 ? 72 : n <= 26 ? 62 : 54); };
 const bodySize = (b: string) => { const n = [...b.replace(/\n/g, '')].length; return n <= 50 ? 46 : n <= 100 ? 40 : n <= 160 ? 35 : 31; };
-const lines = (s: string, style: Record<string, unknown> = {}) => s.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => h(style, l));
+/** 줄 = 낱말(띄어쓰기 단위) 칸을 이어 놓고 넘치면 다음 줄로 — satori keep-all 은 문장부호를 낱말과 따로 떼어
+ *  줄 끝에 자리가 모자라면 '?'·'!' 만 다음 줄 맨 앞에 혼자 보낸다(로컬 10/24 08:40 '…있으시죠 / ?') */
+const lines = (s: string, size: number, center = false) => s.split('\n').map((l) => l.trim()).filter(Boolean)
+  .map((l) => h({ width: '100%', flexWrap: 'wrap', justifyContent: center ? 'center' : 'flex-start', columnGap: Math.round(size * 0.26) }, l.split(/\s+/).map((w) => h({}, w))));
 
 /** 사진 자리: clean = 위쪽 둥근 틀, box·bold = 장 전체 */
 const frameOf = (t: DrawOpts['template'], hh = H) => (t === 'clean' ? { x: PAD, y: hh > H ? 330 : 190, w: W - PAD * 2, h: hh > H ? 760 : 560, r: 28 } : { x: 0, y: 0, w: W, h: hh, r: 0 });
@@ -82,8 +95,8 @@ function tree(s: Slide, i: number, n: number, o: DrawOpts & { photo: boolean; lo
   // bold + 사진: 제목 상자를 브랜드 색으로(밝은 색이면 글자는 검정)
   const brandBox = T === 'bold' && onPhoto && !!brandColor;
   const titleColor = brandBox ? (lum(brandColor!) < 0.45 ? '#FFFFFF' : '#111827') : fg;
-  const title = (center = false) => h({ flexDirection: 'column', alignItems: center ? 'center' : 'flex-start', fontFamily: o.titleFamily, fontWeight: 700, fontSize: titleSize(s.title, s.kind === 'cover'), lineHeight: 1.24, letterSpacing: -1.5, color: titleColor, wordBreak: 'keep-all', textAlign: center ? 'center' : 'left' }, lines(s.title));
-  const body = (center = false) => (s.body ? h({ flexDirection: 'column', alignItems: center ? 'center' : 'flex-start', marginTop: 30, fontWeight: 400, fontSize: cta ? 38 : bodySize(s.body), lineHeight: 1.55, color: sub, wordBreak: 'keep-all', textAlign: center ? 'center' : 'left' }, lines(s.body)) : null);
+  const title = (center = false) => h({ flexDirection: 'column', alignItems: center ? 'center' : 'flex-start', fontFamily: o.titleFamily, fontWeight: 700, fontSize: titleSize(s.title, s.kind === 'cover'), lineHeight: 1.24, letterSpacing: -1.5, color: titleColor, wordBreak: 'keep-all', textAlign: center ? 'center' : 'left' }, lines(s.title, titleSize(s.title, s.kind === 'cover'), center));
+  const body = (center = false) => (s.body ? h({ flexDirection: 'column', alignItems: center ? 'center' : 'flex-start', marginTop: 30, fontWeight: 400, fontSize: cta ? 38 : bodySize(s.body), lineHeight: 1.55, color: sub, wordBreak: 'keep-all', textAlign: center ? 'center' : 'left' }, lines(s.body, cta ? 38 : bodySize(s.body), center)) : null);
   const table = s.rows.length ? h({ flexDirection: 'column', marginTop: 36, borderTop: `3px solid ${fg}` }, s.rows.map((r, ri) => h({ borderBottom: `1px solid ${line}`, padding: s.rows.length > 5 ? '16px 0' : '22px 0', fontSize: s.rows.length > 5 ? 31 : 35, color: ri === 0 ? fg : sub, fontWeight: ri === 0 ? 700 : 400 },
     r.map((c, ci) => h({ flex: ci === 0 ? 1.15 : 1, paddingRight: 18, wordBreak: 'keep-all' }, c))))) : null;
   const kids: unknown[] = [];

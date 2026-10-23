@@ -89,7 +89,7 @@ export async function drawAutoVisual(c: Content, body: string, opts: { actor?: S
   const D = await import('./mktCarouselDraw');
   const story = c.kind === 'story'; const blog = c.channel === 'blog';
   const png = await D.drawSlide({ kind: 'cover', title: head, body: sub, rows: [], imagePlan: '', imageId: photoId }, 0, 1,
-    { template: photo ? 'box' : 'bold', color: b?.color ?? null, brand, keyword: '', logo: logo?.data ?? null, font: font && /\.(otf|ttf)$/i.test(font.name) ? font.data : null, height: story ? 1920 : blog ? 1080 : 1350 }, photo?.data ?? null);
+    { template: photo ? 'box' : 'bold', color: await D.brandDrawColor(c.tenant, b), brand, keyword: '', logo: logo?.data ?? null, font: font && /\.(otf|ttf)$/i.test(font.name) ? font.data : null, height: story ? 1920 : blog ? 1080 : 1350 }, photo?.data ?? null);
   const jpg = await D.toJpeg(png);
   const actor = opts.actor ?? (await actorOf(c));
   if (!actor) throw badRequest('자료실에 저장할 사람이 없습니다(활성 계정 없음)');

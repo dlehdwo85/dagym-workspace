@@ -265,9 +265,10 @@ async function drawOpts(r: Row): Promise<DrawOpts> {
   const [b] = r.brand_id ? await db()<{ name: string; color: string | null; video: any }[]>`select name, color, video from mkt_brands where id = ${r.brand_id}` : [];
   const kit = b?.video ?? {};
   const { libBytes } = await import('./mktVideo');
+  const D0 = await import('./mktCarouselDraw');
   const logo = await libBytes(r.tenant, kit.logoFileId, /^image\//).catch(() => null);
   const font = await libBytes(r.tenant, kit.fontFileId, /font|\.(otf|ttf)$/i).catch(() => null);
-  return { template: r.template, color: b?.color ?? null, brand: b?.name ?? '', keyword: r.keyword ?? '', logo: logo?.data ?? null, font: font && /\.(otf|ttf)$/i.test(font.name) ? font.data : null };
+  return { template: r.template, color: await D0.brandDrawColor(r.tenant, b), brand: b?.name ?? '', keyword: r.keyword ?? '', logo: logo?.data ?? null, font: font && /\.(otf|ttf)$/i.test(font.name) ? font.data : null };
 }
 async function photoOf(u: SessionUser, s: Slide) {
   if (!s.imageId || (s.kind !== 'cover' && s.kind !== 'body')) return null;
