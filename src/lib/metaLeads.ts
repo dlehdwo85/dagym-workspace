@@ -460,7 +460,7 @@ export async function leadAdsReport(u: SessionUser, q: { days?: number }) {
   const sales = (await userSpaces(u)).includes('sales');
   return {
     days, from, canEdit: isAdmin(u), canSales: sales,
-    setup: { app: !!(process.env.META_APP_ID && process.env.META_APP_SECRET), webhook: !!process.env.META_WEBHOOK_VERIFY_TOKEN },
+    setup: { app: !!(process.env.META_APP_ID && process.env.META_APP_SECRET), webhook: !!process.env.META_WEBHOOK_VERIFY_TOKEN, devMode: process.env.META_APP_LIVE_MODE !== '1' }, // 개발 모드 = 실제 광고 리드 웹후크가 안 옴(mktChannels metaDevMode 와 같은 기준)
     pages: pages.map((p) => ({ accountId: p.account_id, label: p.label, scopes: hasLeadScopes(p.scopes), enabled: !!p.enabled, subscribed: !!p.subscribed_at, webhookAt: p.webhook_at, polledAt: p.polled_at, error: p.last_error })),
     summary: { leads: real.length, created: real.filter((r) => r.status === 'created').length, merged: real.filter((r) => r.status === 'merged').length,
       problems: rows.filter((r) => r.status === 'failed' || r.status === 'skipped').length, fast: done.filter((x) => x <= LATE_MINUTES).length,

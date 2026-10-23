@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { useSalesTerms } from '@/components/session';
+import { PortalApplyLink, portalService } from './PortalApply';
 
 type Run = { id: number; slug: string; trigger: string; started_at: string; finished_at: string | null; status: string; inserted: number; updated: number; unchanged: number; errors: number; summary: string | null; error_log: string | null };
 type C = { slug: string; label: string; hourKst: number; againKst?: number | null; source: string; bid: boolean; support?: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null };
@@ -40,7 +41,7 @@ export function Collectors() {
             </span>
           </div>
           <p className="mt-0.5 text-xs text-ink-3">{c.source}</p>
-          {c.last?.summary && <p className="mt-0.5 text-xs text-ink-2" data-testid="sales-collector-summary">{c.last.summary}</p>}
+          {c.last?.summary && <p className={cx('mt-0.5 text-xs', portalService(c.last.summary) ? 'text-amber-900' : 'text-ink-2')} data-testid="sales-collector-summary">{c.last.summary}<PortalApplyLink summary={c.last.summary} /></p>}
           {c.last?.error_log && <details className="mt-0.5 text-xs text-red-700"><summary className="cursor-pointer">오류 {c.last.errors}건</summary><pre className="whitespace-pre-wrap break-all">{c.last.error_log}</pre></details>}
         </li>); })}</ul>
       <details className="mt-2 text-xs" open={open === 'runs'} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open ? 'runs' : null)}><summary className="cursor-pointer text-ink-2">최근 실행 {data.runs.length}건</summary>

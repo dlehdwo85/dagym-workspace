@@ -33,6 +33,7 @@ export async function leadAds({ owner, ctx, sql, BASE, SHOTS }) {
   const page = box.getByTestId('lead-ads-page').filter({ hasText: 'E2E 다짐 본점' });
   assert.equal(await page.getAttribute('data-state'), 'on');
   assert.match(await page.getByTestId('lead-ads-webhook').innerText(), /웹후크 마지막 수신 .+ · 놓친 리드 확인/);
+  assert.equal(await page.getByTestId('lead-ads-devmode').innerText(), '개발 모드: 실제 광고 리드는 30분마다 불러오기로 들어옵니다(앱 심사·라이브 뒤 실시간)', '로컬 10/23 #469');
   const rows = box.getByTestId('lead-ads-row');
   assert.equal(await rows.count(), 3);
   const late = rows.filter({ hasText: '가을 PT 이벤트 A' });
