@@ -31,16 +31,18 @@ import { encodeMentions } from '@/lib/mentions';
 import { VoiceButton } from '@/components/voice';
 import { MeetingDialog } from '@/components/MeetingDialog';
 import { requestTour } from '@/components/Tour';
+import { CoAssignees, CoPartBox, coOf } from '@/components/CoAssignees';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
   reopened: '다시 열기', deleted: '삭제', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
-  checklist_done: '체크리스트 완료', reassigned: '재배정', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
+  checklist_done: '체크리스트 완료', reassigned: '재배정', part_done: '내 몫 완료(공동 담당)', part_reopened: '내 몫 완료 취소(공동 담당)', assignee_added: '담당 추가', assignee_removed: '담당 빼기', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
   file_attached: '파일 첨부', file_edited: '파일 수정', file_opened_doc: '파일을 문서로 열어 편집', file_downloaded: '파일 내려받음', mail_queued: '메일 보내기 요청', mail_sent: '메일 보냄', mail_failed: '메일 발송 실패', share_created: '다운로드 링크 만듦', share_opened: '고객이 자료를 열어봄', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
 const FIELD_LABEL: Record<string, string> = {
   title: '제목', description: '설명', assigneeId: '담당자', requestedById: '요청자', priority: '우선순위', startDate: '시작일', dueDate: '마감일', dueTime: '마감 시각', status: '상태',
   tags: '태그', projectId: '프로젝트', sectionId: '섹션', brandId: '브랜드', orgUnitId: '소속', collaborators: '협업자', approvalRequired: '검토 필요', recurrenceRule: '반복', dependsOn: '선행 업무',
+  coAssignees: '공동 담당', coAssigneeIds: '공동 담당', completeRule: '완료 규칙',
 };
 
 /** 업무 상세. 전체 화면(/tasks/:id)과 목록 옆 오른쪽 패널(inPanel) 공용 */
@@ -98,7 +100,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   // B-2: 담당자가 업무를 열면 '확인'으로 처리 → 내 업무의 '새로 배정됨'에서 빠진다
   useEffect(() => {
     const t = data?.task;
-    if (t && t.assignee_id === user.id && !t.assignee_ack_at) {
+    if (t && ((t.assignee_id === user.id && !t.assignee_ack_at) || coOf(t).some((c) => c.id === user.id && !c.acked))) { // #475 공동 담당도 자기 확인
       api(`/api/tasks/${id}/ack`, { body: {} }).then(() => broadcastRefresh()).catch(() => {});
     }
   }, [data?.task?.id, data?.task?.assignee_ack_at]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -432,7 +434,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="task-summary">
             {/* V14 19번(검수 6): 요약 칩을 누르면 그 속성을 바로 고친다 */}
-            <button type="button" onClick={() => editProp('select[aria-label="담당자"]')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 hover:bg-slate-200" title="담당자 바꾸기" data-testid="sum-assignee"><Avatar id={t.assignee_id} name={t.assignee_name} size={16} badge={false} />{t.assignee_name ?? '담당 없음'}{data.collaborators?.length > 0 && <span className="text-ink-3">+{data.collaborators.length}</span>}</button>
+            <button type="button" onClick={() => editProp('select[aria-label="담당자"]')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 hover:bg-slate-200" title="담당자 바꾸기" data-testid="sum-assignee"><Avatar id={t.assignee_id} name={t.assignee_name} size={16} badge={false} />{t.assignee_name ?? '담당 없음'}{coOf(t).length > 0 && <span className="font-medium text-violet-700" data-testid="sum-co">외 {coOf(t).length}명</span>}{data.collaborators?.length > 0 && <span className="text-ink-3">+{data.collaborators.length}</span>}</button>
+            {/* 로컬 10/23 #475: 휴대폰(앱)에서도 담당자 칩 옆 [+]로 바로 공동 담당 추가 */}
+            {perms.coAssign && t.status !== 'done' && <button type="button" onClick={() => editProp('select[aria-label="공동 담당 추가"]')} className="inline-flex size-6 items-center justify-center rounded-full border border-dashed border-violet-300 text-violet-700 hover:bg-violet-50" aria-label="담당자 추가(공동 담당)" title="담당자 추가(공동 담당)" data-testid="sum-co-add"><Plus className="size-3.5" /></button>}
             <button type="button" onClick={() => editProp('[data-testid="due-picker"]', true)} className="rounded-full hover:opacity-80" title="마감일 바꾸기" data-testid="sum-due"><DdayChip due={t.due_date} time={t.due_time} status={t.status} /></button>
             {extRole && !t.ext_pending && <button type="button" onClick={() => setExt(null)} className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100" data-testid="sum-extend">
               <CalendarDays className="size-3.5" />{extRole === 'boss' ? '마감 연장' : '마감 연장 요청'}</button>}
@@ -452,7 +456,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </div>
           )}
           {/* V14 20번: 완료 업무는 "다시 진행"을 크게 (권한 없으면 서버가 이유를 알려 줌) */}
- {t.status !== 'done' && t.status !== 'review' && !primary && (
+ <CoPartBox t={t} onPatch={patch} />
+          {t.status !== 'done' && t.status !== 'review' && !primary && !coOf(t).some((c) => c.id === user.id) && (
             <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">{t.assignee_name ? `담당자 ${t.assignee_name}님이 진행합니다` : `만든 사람 ${t.created_by_name}님이 진행합니다`}</p>
           )}
           {t.status === 'done' && !(statusOwner || isRequester) && <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">완료됨 — 다시 진행은 담당자·요청자만 할 수 있습니다</p>}
@@ -678,6 +683,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                   }} />
                 : <span className="px-2 text-sm" title="담당자를 바꿀 권한이 없습니다" data-testid="assignee-locked">{t.assignee_name ? personLabel(dir.users.find((x) => x.id === t.assignee_id) ?? { name: t.assignee_name }) : '담당자 없음'}</span>}</span>
             </Prop>
+            {/* 대표 10/23 #475: 한 업무에 담당자 여러 명 — 공동 담당(주 담당 + 함께 맡는 사람) */}
+            <Prop icon={Users} label="공동 담당" asDiv><CoAssignees t={t} canEdit={!!perms.coAssign} canRule={!!perms.coAssign || t.assignee_id === user.id} onPatch={patch} /></Prop>
             {/* R-15 6번: 1명 배정 뒤에도 협업자 추가 */}
             <Prop icon={Users} label="협업자" asDiv><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
             <Prop icon={Megaphone} label="요청자">
@@ -820,6 +827,7 @@ function HistLine({ h, userName }: { h: any; userName: (id: string | null) => st
     {['mail_queued', 'mail_sent', 'mail_failed'].includes(h.action) && <span className="ml-1">“{h.changes?.subject}” → {(h.changes?.to ?? []).join(', ')}{h.changes?.error ? ` (${h.changes.error})` : ''}</span>}
     {['share_created', 'share_opened'].includes(h.action) && <span className="ml-1">{(h.changes?.files ?? []).join(', ')}</span>}
     {h.action === 'file_edited' && <span className="ml-1">{h.changes?.name} v{h.changes?.version}</span>}
+    {['assignee_added', 'assignee_removed'].includes(h.action) && <span className="ml-1" data-testid="hist-co">{(h.changes?.users ?? []).map(userName).join(', ')}</span>}
     {h.action === 'file_attached' && h.changes?.from === 'library' && <span className="ml-1 rounded bg-slate-100 px-1 text-[11px] text-ink-2">자료실에서</span>}
     {['file_attached', 'file_opened_doc', 'file_downloaded', 'link_attached', 'attachment_removed', 'checklist_added', 'checklist_done', 'checklist_undone', 'checklist_removed'].includes(h.action) && <span className="ml-1">{h.changes?.name ?? h.changes?.title ?? h.changes?.text}</span>}
   </>;
@@ -959,7 +967,8 @@ function fmtVal(k: string, v: any, userName: (id: string | null) => string) {
   if (k === 'assigneeId' || k === 'requestedById') return userName(v) || '알 수 없음';
   if (k === 'status') return STATUS_LABEL[v as keyof typeof STATUS_LABEL] ?? v;
   if (k === 'priority') return PRIORITY_LABEL[v as keyof typeof PRIORITY_LABEL] ?? v;
-  if (Array.isArray(v)) return k === 'collaborators' ? v.map(userName).join(', ') || '없음' : v.join(', ');
+  if (k === 'completeRule') return v === 'all' ? '모두 내 몫 완료 뒤' : '주 담당 완료';
+  if (Array.isArray(v)) return ['collaborators', 'coAssignees', 'coAssigneeIds'].includes(k) ? v.map(userName).join(', ') || '없음' : v.join(', ');
   if (typeof v === 'boolean') return v ? '예' : '아니오';
   return String(v).slice(0, 40);
 }

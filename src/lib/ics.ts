@@ -3,6 +3,7 @@ import { db } from './db';
 import { newToken, sha256 } from './crypto';
 import { listEvents } from './events';
 import type { SessionUser } from './types';
+import { assignedSql } from './taskAssignees';
 
 /**
  * V12 3번 캘린더 ICS 구독 주소: 구글·아웃룩·애플 캘린더에 "URL로 추가"하면 워크인 일정이 보인다(읽기 전용, 연결·로그인 없음).
@@ -38,8 +39,8 @@ export async function feedIcs(token: string, origin: string): Promise<string | n
   const from = DateTime.now().minus({ days: 30 }).toJSDate(), to = DateTime.now().plus({ days: 180 }).toJSDate();
   const evs = (await listEvents(u, from, to)).filter((e: any) => !e.masked && (e.ownerId === u.id || e.createdBy === u.id || e.attendees?.some((a: any) => a.user_id === u.id)));
   const tasks = await sql<{ id: string; title: string; due_date: string; due_time: string | null; status: string; updated_at: Date }[]>`
-    select id, title, to_char(due_date,'YYYY-MM-DD') due_date, to_char(due_time,'HH24:MI') due_time, status, updated_at from tasks
-    where deleted_at is null and assignee_id = ${u.id} and due_date is not null and due_date >= current_date - 30 and due_date <= current_date + 180 limit 1000`;
+    select t.id, t.title, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time, t.status, t.updated_at from tasks t
+    where t.deleted_at is null and ${assignedSql(sql, u.id)} and t.due_date is not null and t.due_date >= current_date - 30 and t.due_date <= current_date + 180 limit 1000`; // #475 공동 담당도
   const now = utc(new Date());
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Workin//KO', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', `X-WR-CALNAME:${esc(`워크인 · ${u.name}`)}`, 'X-WR-TIMEZONE:Asia/Seoul', 'REFRESH-INTERVAL;VALUE=DURATION:PT1H'];
   for (const e of evs) {

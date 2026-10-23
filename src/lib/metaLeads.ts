@@ -8,6 +8,7 @@ import { decrypt } from './crypto';
 import { audit, logError } from './log';
 import { fmtPhone, normPhone } from './contacts';
 import { tenantOf, type SessionUser } from './types';
+import { metaGraph } from './metaGraph';
 
 /**
  * 광고 2차 ① Meta 리드 광고 → 영업 리드 자동 등록(설계 AI_ADS_OPERATIONS_DESIGN 6절 B · META_APP_REVIEW_PLAN R5).
@@ -20,7 +21,7 @@ import { tenantOf, type SessionUser } from './types';
  * - 시험 리드([시험 리드 보내기] = Meta test_leads API)는 이름 앞에 [시험], 알림은 누른 사람에게만(#104).
  */
 const T = () => process.env.ADS_TEST_BASE?.replace(/\/$/, '');
-const GRAPH = () => (T() ? `${T()}/graph` : 'https://graph.facebook.com/v21.0');
+const GRAPH = metaGraph; // 버전은 metaGraph.ts 한곳
 /** 리드 읽기(leads_retrieval·pages_manage_ads)·페이지에 앱 설치(pages_manage_metadata)·광고 칸(ads_management) — Meta 문서 '리드 가져오기' 기준 */
 export const META_LEAD_SCOPES = ['leads_retrieval', 'pages_manage_ads', 'pages_manage_metadata', 'ads_management'];
 export const hasLeadScopes = (scopes: string[] | null | undefined) => META_LEAD_SCOPES.every((s) => (scopes ?? []).includes(s));

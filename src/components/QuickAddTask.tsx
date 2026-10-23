@@ -137,7 +137,9 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
     const auto = closing.current; closing.current = false;
     if (!f.title?.trim()) return toast.error('제목을 입력하세요');
     setBusy(true);
-    const multiEach = count > 1 && f.multiMode !== 'together' && f.teamMode !== 'each';
+    // 대표 10/23 #475: 여러 명을 고르면 기본 = 한 업무를 함께 담당(공동 담당), '각자 1건씩'을 고르면 사람마다 따로
+    const multiEach = count > 1 && f.multiMode === 'each' && f.teamMode !== 'each';
+    const together = count > 1 && f.multiMode !== 'each';
     try {
       let r: { id: string };
       if (tpl) {
@@ -156,8 +158,9 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
             //   → 여러 명이면 팀은 태그로만 두고 고른 사람 모두에게 각각(팀원 전체 '각각'은 팀 쪽이 정함)
             ...(multiEach ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
             // R-15 6번: "한 업무로 함께" — 첫 사람이 주 담당, 나머지는 협업자
-            ...(f.multi && f.multiMode === 'together' && (f.more ?? []).length ? { collaboratorIds: (f.more ?? []).filter((x: string) => x !== f.assigneeId) } : {}),
-            ...(f.teamId ? { teamId: f.teamId, teamMode: multiEach ? 'tag' : f.teamMode ?? 'lead', ...(multiEach || f.teamMode === 'each' || f.teamMode === 'tag' ? {} : { assigneeId: null }) } : {}),
+            ...(together ? { coAssigneeIds: (f.more ?? []).filter((x: string) => x !== f.assigneeId), completeRule: f.completeRule ?? 'primary' } : {}),
+            // #475: '함께 담당'도 고른 사람이 담당 — 팀은 태그로만
+            ...(f.teamId ? { teamId: f.teamId, teamMode: multiEach || together ? 'tag' : f.teamMode ?? 'lead', ...(multiEach || together || f.teamMode === 'each' || f.teamMode === 'tag' ? {} : { assigneeId: null }) } : {}),
             parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
             sectionId: f.projectId && f.projectId === defaults?.projectId ? defaults?.sectionId ?? null : null,
             approvalRequired: false,
@@ -175,7 +178,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
       const lastV = { assigneeId: f.assigneeId || null, requestedById: f.requestedById || null, priority: f.priority ?? 'normal', projectId: f.projectId || null, remind: f.remind ?? null };
       try { localStorage.setItem('wos_quick_last', JSON.stringify(lastV)); } catch {}
       api('/api/me/quick-last', { method: 'PUT', body: lastV }).catch(() => {});
-      toast.ok(f.teamId && !multiEach ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다 — 팀장에게 알림을 보냈습니다') : count > 1 ? `${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
+      toast.ok(f.teamId && !multiEach && !together && f.teamMode !== 'tag' ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다 — 팀장에게 알림을 보냈습니다') : together ? `${count}명이 함께 담당하는 업무를 만들었습니다 — 모두에게 알림을 보냈습니다` : count > 1 ? `${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
       broadcastRefresh(); noteAway(r);
       if (keep && !auto && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setNoAuto(false); setTpl(''); titleRef.current?.focus(); return; }
       onClose();
@@ -291,12 +294,15 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
         {/* V6 13번: 다른 사람도 같은 업무를 각자 1건씩 (담당자별 묶음) */}
         {!defaults?.parentId && !tpl && (
           <div data-testid="multi-assignee">
-            <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={() => set('multi')(!f.multi)} aria-expanded={!!f.multi}>{f.multi ? '− 여러 명 선택 닫기' : '+ 여러 명에게 각자 1건씩'}</button>
+            <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={() => set('multi')(!f.multi)} aria-expanded={!!f.multi}>{f.multi ? '− 여러 명 선택 닫기' : '+ 담당자 여러 명'}</button>
             {f.multi && (
               <div className="mt-1.5 flex flex-wrap gap-1.5 rounded-input bg-slate-50 p-2">
                 <div className="flex w-full flex-wrap gap-3 pb-1 text-xs" role="radiogroup" aria-label="여러 명 방식">
-                  <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode !== 'together'} onChange={() => set('multiMode')('each')} />각자 1건씩</label>
-                  <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode === 'together'} onChange={() => set('multiMode')('together')} data-testid="multi-together" />한 업무로 함께(위 담당자 = 주 담당, 고른 사람 = 협업자)</label>
+                  <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode !== 'each'} onChange={() => set('multiMode')('together')} data-testid="multi-together" />함께 담당(업무 1개 · 위 담당자 = 주 담당)</label>
+                  <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode === 'each'} onChange={() => set('multiMode')('each')} data-testid="multi-each" />각자 1건씩(사람마다 따로)</label>
+                  {f.multiMode !== 'each' && <label className="flex items-center gap-1 text-ink-2">완료 규칙
+                    <select className="h-7 rounded-input border border-line bg-white px-1 text-xs" value={f.completeRule ?? 'primary'} onChange={(e) => set('completeRule')(e.target.value)} aria-label="완료 규칙" data-testid="quick-complete-rule">
+                      <option value="primary">주 담당이 완료하면 끝</option><option value="all">모두 &apos;내 몫 완료&apos; 뒤에 완료</option></select></label>}
                 </div>
                 {dir.users.map((x) => {
                   const on = (f.more ?? []).includes(x.id) || x.id === f.assigneeId;
@@ -358,7 +364,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
           )}
           <div className="flex gap-2">
             <Button type="button" variant="secondary" onClick={onClose}>취소</Button>
-            <Button type="submit" disabled={busy} className="min-w-[88px]" title="Ctrl+Enter">{busy ? '저장 중…' : count > 1 ? `${count}명에게 각각 만들기` : '저장'}</Button>
+            <Button type="submit" disabled={busy} className="min-w-[88px]" title="Ctrl+Enter">{busy ? '저장 중…' : count > 1 ? (f.multiMode === 'each' ? `${count}명에게 각각 만들기` : `${count}명이 함께 담당 · 저장`) : '저장'}</Button>
           </div>
         </div>
       </form>

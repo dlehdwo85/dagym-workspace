@@ -8,6 +8,7 @@ import { nextDate, normalizeRule } from './recurrence';
 import { addDays, todaySeoul, weekRangeSeoul } from './time';
 import { STATUS_LABEL, tenantOf, type SessionUser, type TaskStatus } from './types';
 import { zDate, zTime, zUuid } from './api';
+import { assignedSql, coAssigneesCol, coIds, isCoAssignee, pendingCoNames, replaceCoAssignees, setMyPart } from './taskAssignees';
 
 export const taskInput = z.object({
   title: z.string().trim().min(1, '제목을 입력하세요').max(200),
@@ -47,6 +48,12 @@ export const taskInput = z.object({
   alarm: z.boolean().nullable().optional(),
   /** V6 13번: 담당자 여러 명 → 각자 1건씩 (만들 때만) */
   assigneeIds: z.array(zUuid).max(50).optional(),
+  /** #475 공동 담당(주 담당 = assigneeId 와 함께 맡는 사람, 최대 20명) — 만들 때·고칠 때(전체 교체, 요청자만) */
+  coAssigneeIds: z.array(zUuid).max(20).optional(),
+  /** #475 완료 규칙: primary = 주 담당이 완료하면 끝 · all = 공동 담당이 모두 '내 몫 완료'해야 주 담당이 완료(검토 요청) */
+  completeRule: z.enum(['primary', 'all']).optional(),
+  /** #475 공동 담당 본인의 '내 몫 완료'(done)·취소(open) — 업무 상태는 그대로 */
+  myPart: z.enum(['done', 'open']).optional(),
   /** V14 8번: 팀에 배정 — each = 팀원 모두에게 각각, lead = 팀장이 담당자 지정 */
   teamId: zUuid.nullable().optional(),
   teamMode: z.enum(['each', 'lead', 'tag']).optional(), // tag(R-16): 소속 팀만 붙이고 담당자는 그대로
@@ -61,6 +68,7 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id, t.review_of,
   t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id, t.reminder_minutes, t.alarm, t.lead_id, t.sales_ref, t.assigned_by_rule,
+  t.complete_rule, ${coAssigneesCol(sql)},
   t.due_extend_count, (select json_build_object('id', x.id, 'from', to_char(x.from_date, 'YYYY-MM-DD'), 'to', to_char(x.to_date, 'YYYY-MM-DD'), 'reason', x.reason, 'by', x.requested_by, 'byName', xu.name)
     from task_due_extensions x join users xu on xu.id = x.requested_by where x.task_id = t.id and x.status = 'pending' order by x.created_at desc limit 1) as ext_pending,
   t.team_id, (select tm.name from teams tm where tm.id = t.team_id) as team_name, (select tm.color from teams tm where tm.id = t.team_id) as team_color,
@@ -141,7 +149,7 @@ export async function doneMonths(u: SessionUser, raw: Record<string, string>) {
   const units = await accessibleUnitIds(u, sql);
   const rows = await sql<{ month: string; n: number }[]>`select to_char(t.completed_at at time zone 'Asia/Seoul', 'YYYY-MM') as month, count(*)::int n
     from tasks t where t.deleted_at is null and t.status = 'done' and t.parent_id is null and t.completed_at is not null and ${taskVisibleSql(sql, u, units)}
-      ${q.assigneeId ? sql`and t.assignee_id = ${q.assigneeId}` : sql``} ${q.projectId ? sql`and t.project_id = ${q.projectId}` : sql``} ${q.teamId ? sql`and t.team_id = ${q.teamId}` : sql``}
+      ${q.assigneeId ? sql`and ${assignedSql(sql, q.assigneeId)}` : sql``} ${q.projectId ? sql`and t.project_id = ${q.projectId}` : sql``} ${q.teamId ? sql`and t.team_id = ${q.teamId}` : sql``}
     group by 1 order by 1 desc limit 60`;
   return { months: rows };
 }
@@ -159,7 +167,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
   if (q.brandId) conds.push(sql`t.brand_id = ${q.brandId}`);
   if (q.space) conds.push(q.space === 'work' ? sql`t.space is null` : sql`t.space = ${q.space}`); // 대표 확정(10/19) 업무 목록 '공간' 필터
   if (q.teamId) conds.push(sql`t.team_id = ${q.teamId}`); // V14 8번
-  if (q.assigneeId) conds.push(sql`t.assignee_id = ${q.assigneeId}`);
+  if (q.assigneeId) conds.push(assignedSql(sql, q.assigneeId)); // #475 공동 담당 업무도 그 사람 업무로
   if (q.requestedById) conds.push(sql`t.requested_by = ${q.requestedById}`);
   if (q.status) {
     const st = q.status.split(',').filter((s) => s in STATUS_LABEL);
@@ -179,7 +187,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
   if (q.to) conds.push(sql`coalesce(t.start_date, t.due_date) <= ${q.to}`);
   switch (q.view) {
     case 'my':
-      conds.push(sql`(t.assignee_id = ${u.id} or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id})
+      conds.push(sql`(${assignedSql(sql, u.id)} or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id})
         or exists (select 1 from task_checklist_items mi where mi.task_id = t.id and mi.assignee_id = ${u.id} and not mi.done))`); // R-15 6번: 내 몫 체크리스트가 남은 업무도
       conds.push(sql`t.status <> 'done'`);
       break;
@@ -190,7 +198,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
       conds.push(sql`t.requested_by = ${u.id}`);
       break;
     case 'today':
-      conds.push(sql`t.assignee_id = ${u.id} and t.status <> 'done' and (t.due_date <= ${today} or t.start_date <= ${today})`);
+      conds.push(sql`${assignedSql(sql, u.id)} and t.status <> 'done' and (t.due_date <= ${today} or t.start_date <= ${today})`);
       break;
     case 'overdue':
       conds.push(sql`t.status <> 'done' and t.due_date < ${today}`);
@@ -287,7 +295,7 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     const [rv] = await sql<{ id: string; name: string }[]>`select u2.id, u2.name from tasks r join users u2 on u2.id = r.assignee_id where r.review_of = ${id} and r.deleted_at is null and r.status <> 'done' limit 1`;
     reviewer = rv ?? (t.requested_by && t.requested_by !== t.assignee_id ? { id: t.requested_by, name: t.requested_by_name ?? '' } : null);
   }
-  return { reviewTarget: reviewTarget ?? null, reviewer, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
+  return { reviewTarget: reviewTarget ?? null, reviewer, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff, coAssign: reassign || atLeast(u, 'admin') || !t.assignee_id }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -298,7 +306,7 @@ async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: s
     const [pt] = await sql`select 1 from org_units where id = ${p[0].org_unit_id} and tenant = ${tenantOf(u)}`; // 다른 회사·체험 조직 프로젝트 금지
     if (!pt) throw badRequest('프로젝트가 없습니다');
   }
-  const ids = [i.assigneeId, i.requestedById, ...(i.collaboratorIds ?? [])].filter(Boolean) as string[];
+  const ids = [i.assigneeId, i.requestedById, ...(i.collaboratorIds ?? []), ...(i.coAssigneeIds ?? [])].filter(Boolean) as string[];
   if (ids.length) {
     const ok = await sql`select id from users where id = any(${ids}::uuid[]) and status = 'active' and tenant = ${tenantOf(u)}`;
     if (ok.length !== new Set(ids).size) throw badRequest('비활성 사용자이거나 없는 사용자입니다');
@@ -335,6 +343,10 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
     const o = await sql<{ brand_id: string | null }[]>`select brand_id from org_units where id = ${orgUnitId}`;
     brandId = (o[0]?.brand_id as never) ?? null;
   }
+  // #475 공동 담당만 고르고 주 담당이 비었으면 첫 사람이 주 담당
+  let co = [...new Set(i.coAssigneeIds ?? [])];
+  if (!i.assigneeId && co.length) { i = { ...i, assigneeId: co[0] }; co = co.slice(1); }
+  co = co.filter((x) => x !== i.assigneeId);
   await validateRefs(sql, u, i, orgUnitId);
   const rule = normalizeRule(i.recurrenceRule);
   if (rule && !i.dueDate) throw badRequest('반복 업무는 마감일이 필요합니다');
@@ -360,13 +372,14 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
     const [t] = await tx<{ id: string }[]>`
       insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
         start_date, due_date, due_time, tags, approval_required, recurrence_rule, created_by, sort_order, section_id, assignee_ack_at,
-        task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id, reminder_minutes, team_id, space, alarm)
+        task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id, reminder_minutes, team_id, space, alarm, complete_rule)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
         ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
         ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null},
-        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null}, ${i.reminderMinutes ?? null}, ${i.teamId ?? null}, ${i.space ?? null}, ${i.alarm ?? null})
+        ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null}, ${i.reminderMinutes ?? null}, ${i.teamId ?? null}, ${i.space ?? null}, ${i.alarm ?? null}, ${i.completeRule ?? 'primary'})
       returning id`;
+    if (co.length) await replaceCoAssignees(tx, u, { id: t.id, title: i.title, assignee_id: i.assigneeId ?? null }, co, 1, { quiet: opts.quiet, log: false }); // 만들 때는 'created' 기록에 함께
     if (i.teamId && i.teamMode === 'lead' && !i.assigneeId) { // 팀에 배정 → 팀장이 담당자를 정한다
       const leads = await tx<{ user_id: string }[]>`select user_id from team_members where team_id = ${i.teamId} and is_lead`;
       await notify(tx, { userIds: leads.map((l) => l.user_id), type: 'task_assigned', title: `팀 업무 배정: ${i.title}`, body: `${u.name}님이 팀에 배정했습니다 — 담당자를 정해 주세요`,
@@ -382,7 +395,7 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
     for (const d of i.dependsOn ?? []) {
       await tx`insert into task_dependencies (task_id, depends_on_id) values (${t.id}, ${d}) on conflict do nothing`;
     }
-    await activity(tx, 'task', t.id, u.id, 'created', { title: i.title, assigneeId: i.assigneeId ?? null, dueDate: i.dueDate ?? null });
+    await activity(tx, 'task', t.id, u.id, 'created', { title: i.title, assigneeId: i.assigneeId ?? null, dueDate: i.dueDate ?? null, ...(co.length ? { coAssigneeIds: co, completeRule: i.completeRule ?? 'primary' } : {}) });
     if (i.assigneeId && !opts.quiet) {
       await notify(tx, {
         userIds: [i.assigneeId], type: 'task_assigned', title: `새 업무 배정: ${i.title}`,
@@ -437,7 +450,7 @@ export async function createTasksForAssignees(u: SessionUser, i: TaskInput) {
   const batchId = crypto.randomUUID();
   const out: string[] = [];
   // V36 2: 연차·출장 중인 사람도 빼지 않는다(업무를 잃어버리지 않게) — 누가 부재 중인지 돌려줘 화면에 "복귀 후 확인" 표시
-  for (const a of ids) out.push((await createTask(u, { ...i, assigneeId: a, batchId } as TaskInput)).id);
+  for (const a of ids) out.push((await createTask(u, { ...i, assigneeId: a, batchId, coAssigneeIds: undefined, completeRule: undefined } as TaskInput)).id); // 각자 1건씩이면 공동 담당 없음
   return { id: out[0], ids: out, batchId, away: await awayOf(u, ids.filter((x) => x !== u.id)) };
 }
 
@@ -476,7 +489,7 @@ export async function deleteBatch(u: SessionUser, batchId: string) {
   return { deleted: rows.length };
 }
 
-export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInput>): Promise<{ id: string; version: number; changed: boolean; spawned?: string | null; approvedOriginal?: string }> {
+export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInput>): Promise<{ id: string; version: number; changed: boolean; spawned?: string | null; approvedOriginal?: string; part?: 'done' | 'open' }> {
   const sql = db();
   // 점검 2026-10-16 ②: [검토] 업무(review_of)는 상태를 직접 바꾸지 않는다 — "완료" = 원 업무 승인(검토 담당자 권한 그대로), 그 밖은 원 업무에서 승인·반려
   if (i.status) {
@@ -495,6 +508,24 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
   return sql.begin(async (tx) => {
     const { perms } = await loadTaskForUser(u, id, tx);
     const [cur] = await tx`select * , to_char(due_time,'HH24:MI') as due_time_s from tasks where id = ${id} for update`;
+    // #475 공동 담당: '내 몫 완료'는 업무 버전과 상관없이(목록이 옛 버전이어도) 바로
+    const isCo = cur.assignee_id !== u.id && (await isCoAssignee(tx, id, u.id));
+    const partOnly = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'myPart'].includes(k));
+    if (i.myPart !== undefined || (isCo && partOnly && i.status)) {
+      if (!isCo) throw forbidden(cur.assignee_id === u.id ? '주 담당은 업무 상태(완료·검토 요청)로 처리해요' : '공동 담당만 내 몫 완료를 표시할 수 있어요');
+      // 공동 담당이 검토 담당자(요청자)이기도 하면 승인·반려는 아래 원래 길로
+      let reviewerMe = false;
+      if (i.myPart === undefined && cur.status === 'review' && !cur.approval_line_id) {
+        const [rv] = await tx<{ assignee_id: string | null }[]>`select assignee_id from tasks where review_of = ${id} and deleted_at is null and status <> 'done' limit 1`;
+        reviewerMe = (rv?.assignee_id ?? (cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : null)) === u.id;
+      }
+      if (!reviewerMe) {
+        const done = i.myPart !== undefined ? i.myPart === 'done' : i.status === 'done' || i.status === 'review';
+        if (cur.status === 'done' && !done) throw forbidden('완료된 업무를 다시 여는 것은 주 담당만 할 수 있어요');
+        const r = await setMyPart(tx, u, cur as never, done);
+        return { id, version: cur.version, changed: true, part: r.part };
+      }
+    }
     if (i.version !== undefined && i.version !== cur.version) {
       throw conflict('다른 사용자가 먼저 수정했습니다. 새로고침 후 다시 시도하세요.', { currentVersion: cur.version });
     }
@@ -502,7 +533,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const onlyAssign = Object.entries(i).every(([k, v]) => v === undefined || k === 'assigneeId' || k === 'version');
     const leadFirstAssign = !perms.edit && onlyAssign && !!i.assigneeId && !cur.assignee_id && !!cur.team_id
       && (await tx`select 1 from team_members where team_id = ${cur.team_id} and user_id = ${u.id} and is_lead`).length > 0;
-    if (!perms.edit && !leadFirstAssign) {
+    // #475(로컬 10/23): 관리자는 남의 업무에도 공동 담당 추가·빼기·완료 규칙만은 바꿀 수 있다(내용·일정은 그대로 요청자·담당자만)
+    const coAdminOnly = atLeast(u, 'admin') && Object.entries(i).every(([k, v]) => v === undefined || ['coAssigneeIds', 'completeRule', 'version'].includes(k));
+    if (!perms.edit && !leadFirstAssign && !coAdminOnly) {
       const onlyStatus = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote'].includes(k));
       throw forbidden(onlyStatus ? '상태는 담당자만 바꿀 수 있어요' : '이 업무를 수정할 권한이 없습니다 — 업무 내용·일정은 요청자·담당자만 바꿀 수 있습니다');
     }
@@ -527,7 +560,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       changes.dueTime = { from: cur.due_time_s, to: i.dueTime };
     }
     // V32 4(대표 결정): 담당자는 마감을 뒤로 미루거나 지울 수 없다 — 요청자에게 [마감 연장] 요청(앞당기기는 됨). 요청자 = 본인이면 제한 없음
-    if ('due_date' in set && cur.due_date && cur.status !== 'done' && cur.assignee_id === u.id && (cur.requested_by ?? cur.created_by) !== u.id
+    if ('due_date' in set && cur.due_date && cur.status !== 'done' && (cur.assignee_id === u.id || isCo) && (cur.requested_by ?? cur.created_by) !== u.id
       && (!set.due_date || String(set.due_date).slice(0, 10) > dstr(cur.due_date))) {
       throw new HttpError(403, 'extend_required', '마감을 미루려면 요청자에게 [마감 연장]을 요청하세요');
     }
@@ -539,6 +572,24 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         set.recurrence_stopped = false;
         changes.recurrenceRule = { from: cur.recurrence_rule, to: rule };
       }
+    }
+    // #475 공동 담당 추가·빼기 = 요청자(없으면 만든 사람)·관리자(로컬 10/23: 대표가 남의 업무에 담당자를 붙이는 일이 많음), 완료 규칙 = 그 사람들 + 주 담당
+    const coManager = (await canReassign(u, cur, tx)) || atLeast(u, 'admin');
+    if (i.coAssigneeIds !== undefined && !coManager && !(!cur.assignee_id && perms.edit)) throw forbidden('공동 담당 추가·빼기는 요청자(없으면 만든 사람)·관리자만 할 수 있어요');
+    if (i.completeRule !== undefined && i.completeRule !== cur.complete_rule) {
+      if (!coManager && cur.assignee_id !== u.id) throw forbidden('완료 규칙은 요청자·관리자·주 담당이 정해요');
+      set.complete_rule = i.completeRule; changes.completeRule = { from: cur.complete_rule, to: i.completeRule };
+    }
+    const coBefore = await coIds(tx, id);
+    let coNext: string[] | null = i.coAssigneeIds !== undefined ? [...new Set(i.coAssigneeIds)] : null;
+    if ('assignee_id' in set && !set.assignee_id && (coNext ?? coBefore).length) { // 주 담당을 비우면 공동 담당 첫 사람이 주 담당
+      const first = (coNext ?? coBefore)[0];
+      set.assignee_id = first; changes.assigneeId = { from: cur.assignee_id, to: first };
+      if (coNext) coNext = coNext.filter((x) => x !== first);
+    }
+    if (coNext) {
+      const primary = ('assignee_id' in set ? set.assignee_id : cur.assignee_id) as string | null;
+      coNext = coNext.filter((x) => x !== primary); // 같은 회사·활성 사용자인지는 replaceCoAssignees 가 확인
     }
     if (set.org_unit_id) await assertUnitAccess(u, set.org_unit_id as string, tx);
     // 섹션은 같은 프로젝트의 것만. 프로젝트를 옮기면 섹션은 비운다
@@ -590,6 +641,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         if (!reviewer && owner !== u.id) throw forbidden('상태는 담당자만 바꿀 수 있어요');
       } else if (owner !== u.id) {
         const [nm] = cur.assignee_id ? await tx<{ name: string }[]>`select name from users where id = ${cur.assignee_id}` : [];
+        if (isCo) throw forbidden(`업무 상태는 주 담당 ${nm?.name ?? ''}님이 바꿔요 — 공동 담당은 '내 몫 완료'를 눌러 주세요`);
         throw forbidden(cur.assignee_id ? `상태는 담당자만 바꿀 수 있어요(담당 ${nm?.name ?? ''})` : '담당자가 없는 업무의 상태는 요청자(만든 사람)만 바꿀 수 있어요');
       }
     }
@@ -605,6 +657,11 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         if (n < needPhotos) throw conflict(`완료 증빙 사진 ${needPhotos}장이 필요합니다 (현재 ${n}장). 사진 촬영으로 첨부해 주세요.`);
       }
       if (to === 'done' && lineId) throw forbidden('결재선이 지정된 업무입니다. "검토 요청"으로 결재를 올려 주세요.');
+      // #475 완료 규칙 '모두 완료': 주 담당의 완료·검토 요청은 공동 담당이 모두 '내 몫 완료'를 한 뒤에(검토 승인은 이미 확인된 것이라 그대로)
+      if ((to === 'done' || to === 'review') && cur.status !== 'review' && (set.complete_rule ?? cur.complete_rule) === 'all') {
+        const left = await pendingCoNames(tx, id);
+        if (left.length) throw conflict(`공동 담당 ${left.join(', ')}님이 아직 '내 몫 완료'를 하지 않았어요 — 완료 규칙이 '모두 완료'라 모두 끝나야 ${to === 'review' ? '검토 요청' : '완료'}할 수 있어요`);
+      }
       if (to === 'done') {
         // #410 보강(로컬 14:10): 검토 필수면 담당자가 관리자여도 바로 완료 불가 — 검토자(요청자, 없으면 만든 사람)가 따로 있을 때. 담당자 = 요청자면 자기 승인(바로 완료)
         const reviewerOf = cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : cur.created_by && cur.created_by !== cur.assignee_id ? cur.created_by : null;
@@ -632,13 +689,18 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       set.status = to;
       changes.status = { from: cur.status, to };
     }
-    if (Object.keys(set).length === 0 && i.collaboratorIds === undefined && i.checklist === undefined && i.dependsOn === undefined) {
+    if (Object.keys(set).length === 0 && i.collaboratorIds === undefined && i.checklist === undefined && i.dependsOn === undefined && coNext === null) {
       return { id, version: cur.version, changed: false };
     }
     set.updated_at = new Date();
     const [upd] = await tx<{ version: number }[]>`
       update tasks set ${tx(set as never, ...(Object.keys(set) as never[]))}, version = version + 1 where id = ${id} returning version`;
 
+    if (coNext) { // #475 공동 담당 바꾸기(주 담당이 바뀌어 공동 담당이던 사람은 트리거가 이미 뺌)
+      const primary = ('assignee_id' in set ? set.assignee_id : cur.assignee_id) as string | null;
+      await replaceCoAssignees(tx, u, { id, title: (set.title as string) ?? cur.title, assignee_id: primary }, coNext, upd.version); // 활동 기록 'OOO 담당 추가·빼기'는 replaceCoAssignees 가
+    }
+    if (statusEvent === 'reopened') await tx`update task_assignees set done_at = null where task_id = ${id}`; // 다시 열면 내 몫 완료도 처음부터
     if (i.collaboratorIds) {
       const before = (await tx<{ user_id: string }[]>`select user_id from task_collaborators where task_id = ${id}`).map((r) => r.user_id);
       await tx`delete from task_collaborators where task_id = ${id}`;
@@ -683,7 +745,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       // V5 "업무에도 추가"로 연결된 일정도 같은 날짜·시각으로
       const { syncEventsFromTask } = await import('./eventtasks');
       await syncEventsFromTask(tx, id, ('due_date' in set ? set.due_date : cur.due_date) as string | null, ('due_time' in set ? set.due_time : cur.due_time_s) as string | null, u.id);
-      await notify(tx, { userIds: [cur.assignee_id, ...(await collabIds(tx, id))], type: 'event_changed', title: `마감일 변경: ${title}`,
+      await notify(tx, { userIds: [cur.assignee_id, ...(await coIds(tx, id)), ...(await collabIds(tx, id))], type: 'event_changed', title: `마감일 변경: ${title}`,
         body: `${cur.due_date ?? '없음'} → ${set.due_date ?? cur.due_date ?? '없음'}`, link: `/tasks/${id}`, entityType: 'task',
         entityId: id, actorId: u.id, dedupeKey: `due:${id}:${upd.version}` });
     }
@@ -700,7 +762,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `review:${id}:${upd.version}`, meta: { kind: 'review' } });
     }
     if (statusEvent === 'approved' || statusEvent === 'review_rejected') {
-      await notify(tx, { userIds: [cur.assignee_id, cur.review_requested_by], type: 'review_result',
+      await notify(tx, { userIds: [cur.assignee_id, cur.review_requested_by, ...(await coIds(tx, id))], type: 'review_result',
         title: `${statusEvent === 'approved' ? '최종 완료 확인' : '보완 요청'}: ${title}`,
         body: statusEvent === 'approved' ? `${u.name}님이 완료를 확인했습니다` : `${u.name}님이 보완을 요청했습니다${i.reviewNote ? `: ${i.reviewNote}` : ''}`,
         link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reviewres:${id}:${upd.version}` });
@@ -784,16 +846,17 @@ export async function spawnNextRecurrence(sql: Sql, taskId: string, actorId: str
   const offset = t.start_date ? Math.round((Date.parse(t.due_date) - Date.parse(t.start_date)) / 86400000) : null;
   const [n] = await sql<{ id: string }[]>`
     insert into tasks (project_id, parent_id, org_unit_id, brand_id, title, description, status, priority, assignee_id,
-      start_date, due_date, due_time, tags, approval_required, recurrence_rule, recurrence_source_id, created_by, sort_order)
+      start_date, due_date, due_time, tags, approval_required, recurrence_rule, recurrence_source_id, created_by, sort_order, complete_rule)
     values (${t.project_id}, ${t.parent_id}, ${t.org_unit_id}, ${t.brand_id}, ${t.title}, ${t.description}, 'todo', ${t.priority},
       ${t.assignee_id}, ${offset === null ? null : addDays(next, -offset)}, ${next}, ${t.due_time_s}, ${t.tags}, ${t.approval_required},
-      ${t.recurrence_rule}, ${root}, ${t.created_by}, extract(epoch from now()))
+      ${t.recurrence_rule}, ${root}, ${t.created_by}, extract(epoch from now()), ${t.complete_rule ?? 'primary'})
     returning id`;
   await sql`insert into task_collaborators (task_id, user_id) select ${n.id}, user_id from task_collaborators where task_id = ${taskId}`;
+  await sql`insert into task_assignees (task_id, user_id, added_by) select ${n.id}, user_id, added_by from task_assignees where task_id = ${taskId} and user_id is distinct from ${t.assignee_id} on conflict do nothing`; // #475 다음 회차도 같은 공동 담당
   await sql`insert into task_checklist_items (task_id, text, sort) select ${n.id}, text, sort from task_checklist_items where task_id = ${taskId}`;
   await sql`update tasks set recurrence_stopped = true where id = ${taskId}`;
   await activity(sql, 'task', n.id, actorId, 'recurring_created', { from: taskId, dueDate: next });
-  await notify(sql, { userIds: [t.assignee_id], type: 'recurring_created', title: `반복 업무 생성: ${t.title}`,
+  await notify(sql, { userIds: [t.assignee_id, ...(await coIds(sql, n.id))], type: 'recurring_created', title: `반복 업무 생성: ${t.title}`,
     body: `다음 회차 마감 ${next}`, link: `/tasks/${n.id}`, entityType: 'task', entityId: n.id, actorId: null,
     dedupeKey: `recur:${root}:${next}` });
   return n.id;
@@ -895,7 +958,7 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
       followers = [parent.author_id, ...(await tx<{ author_id: string }[]>`select distinct author_id from comments where parent_id = ${parent.id} and deleted_at is null`).map((r) => r.author_id)];
     } else {
       const commenters = (await tx<{ author_id: string }[]>`select distinct author_id from comments where task_id = ${taskId} and deleted_at is null`).map((r) => r.author_id);
-      followers = [task.assignee_id, task.requested_by, task.created_by, ...(await collabIds(tx, taskId)), ...commenters].filter((x): x is string => !!x);
+      followers = [task.assignee_id, task.requested_by, task.created_by, ...(await coIds(tx, taskId)), ...(await collabIds(tx, taskId)), ...commenters].filter((x): x is string => !!x);
     }
     followers = [...new Set(followers.filter((x): x is string => !!x && x !== u.id && !visibleMentions.includes(x)))];
     // 업무를 더는 볼 수 없게 된 사람(예: 예전에 댓글 단 사람)에게는 보내지 않는다
@@ -961,7 +1024,11 @@ async function checkSection(sql: Sql, sectionId: string, projectId: string | nul
 export async function ackTask(u: SessionUser, id: string) {
   const sql = db();
   const { task } = await loadTaskForUser(u, id, sql);
-  if (task.assignee_id !== u.id) throw forbidden('담당자만 확인할 수 있습니다');
+  if (task.assignee_id !== u.id) { // #475 공동 담당은 자기 줄에 확인 표시
+    const [r] = await sql`update task_assignees set acked_at = coalesce(acked_at, now()) where task_id = ${id} and user_id = ${u.id} returning 1`;
+    if (!r) throw forbidden('담당자만 확인할 수 있습니다');
+    return { ok: true };
+  }
   await markAcked(u, id);
   return { ok: true };
 }
@@ -1001,7 +1068,7 @@ export async function duplicateTask(u: SessionUser, id: string, withSubtasks = t
   const r = await createTask(u, { title: `${t.title} (복제)`, description: t.description, projectId: t.project_id, sectionId: t.section_id, orgUnitId: t.org_unit_id,
     brandId: t.brand_id, assigneeId: t.assignee_id, priority: t.priority, startDate: t.start_date, dueDate: t.due_date, dueTime: t.due_time_s, tags: t.tags,
     approvalRequired: t.approval_required, taskType: t.task_type, photoRequired: t.photo_required, approvalLineId: t.approval_line_id, estimateMinutes: t.estimate_minutes,
-    collaboratorIds: collab, checklist: cl.map((c) => c.text) });
+    collaboratorIds: collab, checklist: cl.map((c) => c.text), coAssigneeIds: await coIds(sql, id), completeRule: t.complete_rule });
   if (withSubtasks) {
     const subs = await sql<{ title: string; assignee_id: string | null; due_date: string | null }[]>`select title, assignee_id, due_date from tasks where parent_id = ${id} and deleted_at is null order by sort_order`;
     for (const s of subs) await createTask(u, { title: s.title, parentId: r.id, assigneeId: s.assignee_id, dueDate: s.due_date, approvalRequired: false });
@@ -1024,6 +1091,8 @@ export async function mergeTask(u: SessionUser, id: string, intoId: string) {
     await tx`update attachments set task_id = ${intoId} where task_id = ${id}`;
     await tx`update tasks set parent_id = ${intoId} where parent_id = ${id} and deleted_at is null`;
     await tx`insert into task_collaborators (task_id, user_id) select ${intoId}, user_id from task_collaborators where task_id = ${id} on conflict do nothing`;
+    await tx`insert into task_assignees (task_id, user_id, added_by) select ${intoId}, user_id, ${u.id} from task_assignees where task_id = ${id}
+      and user_id is distinct from (select assignee_id from tasks where id = ${intoId}) on conflict do nothing`; // #475 공동 담당도 대상 업무로
     await tx`insert into comments (task_id, author_id, body) values (${intoId}, ${u.id}, ${`[중복 통합] '${src.title}' 업무를 이 업무로 통합했습니다`})`;
     await tx`update tasks set deleted_at = now(), version = version + 1, updated_at = now() where id = ${id}`;
     await hideTaskBlocks(tx, [id]);

@@ -256,7 +256,8 @@ export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typ
   // 업무 방은 업무를 볼 수 있지만 아직 방을 연 적 없는 담당·요청자에게도 알린다
   if (r.kind === 'task') {
     const [t] = await sql<{ assignee_id: string | null; requested_by: string | null; created_by: string }[]>`select assignee_id, requested_by, created_by from tasks where id = ${r.task_id}`;
-    for (const id of [t?.assignee_id, t?.requested_by, t?.created_by]) if (id && !memberIds.includes(id)) {
+    const co = (await sql<{ user_id: string }[]>`select user_id from task_assignees where task_id = ${r.task_id}`).map((x) => x.user_id); // #475 공동 담당도
+    for (const id of [t?.assignee_id, ...co, t?.requested_by, t?.created_by]) if (id && !memberIds.includes(id)) {
       await sql`insert into chat_members (room_id, user_id) values (${r.id}, ${id}) on conflict do nothing`; memberIds.push(id); members.push({ user_id: id, muted: false });
     }
   }

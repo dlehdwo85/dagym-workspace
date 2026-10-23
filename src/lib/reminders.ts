@@ -3,6 +3,7 @@ import { db } from './db';
 import { occurrences } from './recurrence';
 import { todaySeoul, addDays } from './time';
 import type { SessionUser } from './types';
+import { assignedOpenSql } from './taskAssignees';
 
 const TZ = 'Asia/Seoul';
 /** 로컬 10/20(대표): alarm 이면 앱이 전체 화면·알람 채널로 띄우고 [해제][10분 뒤][열기] — 결과는 POST /api/reminders/alarm 로 기록(미루기 재예약은 기기) */
@@ -73,8 +74,8 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
 
   // 업무 (내가 담당, 미완료·보류 아님, 삭제 제외)
   const tasks = await sql<{ id: string; title: string; due_date: string; due_time: string | null; reminder_minutes: number[] | null; alarm: boolean | null; priority: string }[]>`
-    select id, title, to_char(due_date,'YYYY-MM-DD') due_date, to_char(due_time,'HH24:MI') due_time, reminder_minutes, alarm, priority from tasks
-    where deleted_at is null and assignee_id = ${u.id} and status not in ('done','on_hold') and due_date between ${today} and ${addDays(today, days + 1)}`;
+    select t.id, t.title, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time, t.reminder_minutes, t.alarm, t.priority from tasks t
+    where t.deleted_at is null and ${assignedOpenSql(sql, u.id)} and t.status not in ('done','on_hold') and t.due_date between ${today} and ${addDays(today, days + 1)}`; // #475 공동 담당(내 몫 완료 전)도
   for (const t of tasks) {
     const due = kst(t.due_date, t.due_time ?? '09:00');
     const tAlarm = alarmOn('task', t.alarm, ad, t.priority);
@@ -135,7 +136,8 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
 /** 바뀐 일정·업무의 미리 알림을 받는 사람 (조용한 재예약 메시지 대상) */
 export async function affectedByTask(taskId: string) {
   return (await db()<{ id: string }[]>`select assignee_id as id from tasks where id = ${taskId} and assignee_id is not null
-    union select requested_by from tasks where id = ${taskId} and requested_by is not null`).map((r) => r.id);
+    union select requested_by from tasks where id = ${taskId} and requested_by is not null
+    union select user_id from task_assignees where task_id = ${taskId}`).map((r) => r.id);
 }
 export async function affectedByEvent(eventId: string) {
   return (await db()<{ id: string }[]>`

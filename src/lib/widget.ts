@@ -4,6 +4,7 @@ import { DateTime } from 'luxon';
 import { db } from './db';
 import { todaySeoul } from './time';
 import type { SessionUser } from './types';
+import { assignedOpenSql } from './taskAssignees';
 
 const TZ = 'Asia/Seoul';
 const SPACE_COLOR: Record<string, string> = { work: '#0F766E', sales: '#2563EB', marketing: '#7C3AED' };
@@ -16,7 +17,7 @@ export async function widgetToday(u: SessionUser) {
   const [tasks, [c], evs] = await Promise.all([
     sql<{ id: string; title: string; due_date: string | null; due_time: string | null; status: string; priority: string; space: string | null }[]>`
       select t.id, t.title, to_char(t.due_date, 'YYYY-MM-DD') due_date, to_char(t.due_time, 'HH24:MI') due_time, t.status, t.priority, t.space from tasks t
-      where t.deleted_at is null and t.assignee_id = ${u.id} and t.status not in ('on_hold')
+      where t.deleted_at is null and ${assignedOpenSql(sql, u.id)} and t.status not in ('on_hold') -- #475 공동 담당(내 몫 완료 전)도
         and ((t.status <> 'done' and (t.due_date <= ${today} or t.start_date <= ${today})) or (t.status = 'done' and t.completed_at >= (${today}::date::timestamp at time zone 'Asia/Seoul')))
       order by (t.status = 'done'), (t.due_date < ${today}) desc, t.priority = 'urgent' desc, t.priority = 'high' desc, t.due_time nulls last, t.created_at limit 5`,
     sql<{ late: number; today: number; approvals: number }[]>`
@@ -24,7 +25,7 @@ export async function widgetToday(u: SessionUser) {
         count(*) filter (where t.status <> 'done' and t.due_date = ${today})::int as today,
         (select count(*)::int from tasks r where r.deleted_at is null and r.status = 'review' and r.requested_by = ${u.id} and r.assignee_id <> ${u.id})
           + (select count(*)::int from task_approvals a join tasks ta on ta.id = a.task_id where a.status = 'pending' and a.approver_user_id = ${u.id} and ta.deleted_at is null) as approvals
-      from tasks t where t.deleted_at is null and t.assignee_id = ${u.id} and t.status <> 'on_hold'`,
+      from tasks t where t.deleted_at is null and ${assignedOpenSql(sql, u.id)} and t.status <> 'on_hold'`,
     (await import('./briefing')).eventsOfDay(sql, u.id, today),
   ]);
   const left = evs.filter((e) => e.allDay || e.start.getTime() >= now.getTime() - 15 * 60_000);

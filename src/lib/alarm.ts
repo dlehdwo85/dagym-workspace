@@ -30,7 +30,8 @@ export const alarmResultInput = z.object({ kind: z.enum(['event', 'task']), id: 
 export async function recordAlarmResult(u: SessionUser, i: z.infer<typeof alarmResultInput>) {
   const sql = db();
   const [own] = i.kind === 'task'
-    ? await sql<{ id: string }[]>`select id from tasks where id = ${i.id} and deleted_at is null and (assignee_id = ${u.id} or requested_by = ${u.id} or created_by = ${u.id})`
+    ? await sql<{ id: string }[]>`select id from tasks where id = ${i.id} and deleted_at is null and (assignee_id = ${u.id} or requested_by = ${u.id} or created_by = ${u.id}
+        or exists (select 1 from task_assignees ta where ta.task_id = tasks.id and ta.user_id = ${u.id}))`
     : await sql<{ id: string }[]>`select e.id from events e join calendars c on c.id = e.calendar_id where e.id = ${i.id} and e.deleted_at is null
         and (c.owner_user_id = ${u.id} or e.created_by = ${u.id} or exists (select 1 from event_attendees a where a.event_id = coalesce(e.recurring_event_id, e.id) and a.user_id = ${u.id}))`;
   if (!own) throw notFound(i.kind === 'task' ? '업무가 없습니다' : '일정이 없습니다');
