@@ -9,6 +9,7 @@ import { audit, logError } from './log';
 import { appUrl } from './mail';
 import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
+import { metaDialog, metaGraph } from './metaGraph';
 import { META_LEAD_SCOPES, enableLeadPage, hasLeadScopes } from './metaLeads';
 
 /**
@@ -35,8 +36,8 @@ export const PUBLISH_CHANNELS: { key: ChannelKey; label: string; kind: Kind; pro
   { key: 'naver_place', label: '네이버 플레이스', kind: 'helper', providers: [], note: '스마트플레이스에서 직접 소식 작성', on: false },
 ];
 const T = () => process.env.ADS_TEST_BASE?.replace(/\/$/, '');
-const GRAPH = () => (T() ? `${T()}/graph` : 'https://graph.facebook.com/v21.0');
-const FB_DIALOG = () => (T() ? `${T()}/fbdialog` : 'https://www.facebook.com/v21.0/dialog/oauth');
+const GRAPH = metaGraph; // 버전은 metaGraph.ts 한곳
+const FB_DIALOG = metaDialog;
 // 페이지 목록·인스타 연결 확인·게시에 필요한 권한(제출 직전 Meta 문서로 다시 확인 — MKT_PUBLISHING_DESIGN.md)
 export const META_PUBLISH_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'instagram_basic', 'instagram_content_publish', 'business_management'];
 const metaReady = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET);

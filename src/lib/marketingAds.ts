@@ -9,6 +9,7 @@ import { audit, logError } from './log';
 import { appUrl } from './mail';
 import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
+import { metaDialog, metaGraph } from './metaGraph';
 
 /**
  * V41 4-2 광고 성과 읽기 — 회사별 직접 연결(F-5, Windsor 등 중개 없음). 읽기 전용: 광고를 바꾸는 기능은 없다.
@@ -21,8 +22,8 @@ export type AdProvider = 'naver' | 'google' | 'meta';
 export const AD_PROVIDERS: Record<AdProvider, string> = { naver: '네이버 검색광고', google: 'Google Ads', meta: 'Meta 광고(페이스북·인스타그램)' };
 const T = () => process.env.ADS_TEST_BASE?.replace(/\/$/, '');
 const NAVER = () => (T() ? `${T()}/naver` : 'https://api.searchad.naver.com');
-const GRAPH = () => (T() ? `${T()}/graph` : 'https://graph.facebook.com/v21.0');
-const FB_DIALOG = () => (T() ? `${T()}/fbdialog` : 'https://www.facebook.com/v21.0/dialog/oauth');
+const GRAPH = metaGraph; // 버전은 metaGraph.ts 한곳
+const FB_DIALOG = metaDialog;
 // Google Ads API 버전: 종료된 버전은 HTML 404 → 상수 하나(env GOOGLE_ADS_API_VERSION 로 바꿀 수 있음), 404 면 최신→예전 순서로 찾아 기억
 const GADS_VERSIONS = ['v24', 'v23', 'v22', 'v21', 'v20'];
 let gadsVersion: string | null = null;

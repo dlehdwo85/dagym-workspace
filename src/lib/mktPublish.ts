@@ -7,6 +7,7 @@ import { audit, logError } from './log';
 import { appUrl } from './mail';
 import { downloadUrl, getObject } from './storage';
 import { tenantOf, type SessionUser } from './types';
+import { metaGraph } from './metaGraph';
 
 /**
  * 대표 10/20 22:30 ②(M1) 서버 게시 실행기 — "인스타 게시를 왜 사람이 직접 하나". 승인된 최신 버전만, 사람이 [서버로 게시]를 누르거나(관리자) 회사 설정 '자동 게시'가 켜져 있으면 예정 시각에 워크인 서버가 올린다.
@@ -19,7 +20,7 @@ import { tenantOf, type SessionUser } from './types';
 export const AUTO_CHANNELS: Record<string, string> = { instagram: 'meta_ig', facebook: 'meta_fb', threads: 'meta_threads', youtube: 'youtube' };
 export const PROVIDER_LABEL: Record<string, string> = { meta_ig: '인스타그램', meta_fb: '페이스북 페이지', meta_threads: '스레드', youtube: '유튜브', manual: '직접 게시', naver_blog: '네이버 블로그(도우미)' };
 const T = () => process.env.ADS_TEST_BASE?.replace(/\/$/, '');
-const GRAPH = () => (T() ? `${T()}/graph` : 'https://graph.facebook.com/v21.0');
+const GRAPH = metaGraph; // 버전은 metaGraph.ts 한곳
 const THREADS = () => (T() ? `${T()}/threads` : 'https://graph.threads.net/v1.0');
 const GOOGLE_TOKEN = () => (T() ? `${T()}/goauth/token` : 'https://oauth2.googleapis.com/token');
 const YT = () => (T() ? `${T()}/yt` : 'https://www.googleapis.com/youtube/v3');
