@@ -213,14 +213,23 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
   await mediaOk(u, i.mediaIds);
   const sql = db();
   return sql.begin(async (tx) => {
-    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by, channel, brand_id, cross_channels from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
+    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by, channel, brand_id, cross_channels, quality from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
     threadsLimit(c.channel, c.cross_channels, i.body);
     const v = c.current_version + 1;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${id}, ${v}, ${i.body}, ${i.mediaIds}, ${i.note ?? null}, ${u.id})`;
     if (needsPhotos(c.channel, i.mediaIds.length)) { await tx`update mkt_contents set current_version = ${v}, status = 'changes', quality = ${tx.json({ passed: false, issues: [BLOG_PHOTO_RULE] } as never)}, updated_at = now() where id = ${id}`; return { version: v, needsPhotos: true }; }
-    await tx`update mkt_contents set current_version = ${v}, status = 'pending', quality = case when quality->>'passed' = 'false' and quality->'issues' @> ${tx.json([BLOG_PHOTO_RULE] as never)} then null else quality end, updated_at = now() where id = ${id}`;
+    // 사진·영상이 붙으면 '사진 필요'(블로그)·'시안 없음/영상 제작 중'(#516) 줄은 지우고, 그것뿐이었으면 검사 결과를 비움
+    // 서버가 그린 시안 표시(visual)는 같은 그림을 그대로 둘 때만 남김 — 사람이 다른 사진을 붙이면 [AI 이미지로 다시] 대상이 아님
+    let quality = c.quality ?? null;
+    if (quality && i.mediaIds.length) {
+      const { VISUAL_ISSUE } = await import('./mktAutoVisual');
+      const { visual, ...q } = quality;
+      const left = ((q.issues ?? []) as string[]).filter((x) => x !== BLOG_PHOTO_RULE && !VISUAL_ISSUE.test(x));
+      quality = q.passed === false && (q.issues ?? []).length && !left.length ? null : { ...q, issues: left, ...(visual && i.mediaIds.length === 1 && i.mediaIds[0] === visual.fileId ? { visual } : {}) };
+    }
+    await tx`update mkt_contents set current_version = ${v}, status = 'pending', quality = ${quality ? tx.json(quality as never) : null}, updated_at = now() where id = ${id}`;
     await (await import('./mktAuto')).mktNotify(tx, { tenant: tenantOf(u), brand_id: c.brand_id, is_test: c.is_test, created_by: c.created_by }, u.id, { approval: true, type: 'review_requested', title: `재승인 대기(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
     return { version: v };
   });

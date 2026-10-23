@@ -2,13 +2,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Check, Loader2, Maximize2, Menu, Paperclip, Pin, Plus, Search, Send, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Check, Maximize2, Menu, Paperclip, Pin, Plus, Search, Send, Sparkles, X } from 'lucide-react';
 import { AttachChips, askFor, useAiAttach } from './aiAttach';
 import { DocJobCard } from '@/components/DocJobCard';
 import { VoiceButton } from './voice';
 import { dockHideCls, useDockHide } from './useDockHide';
 import { AiBudgetBar, costLine, type Budget } from './AiBudget';
-import { ChatComposer, DoneSummary, MsgTools, useAiConversation, type ChatMsg } from './aiChat';
+import { ChatComposer, DoneSummary, LiveAnswer, MsgTools, useAiConversation, type ChatMsg } from './aiChat';
+import { AiText } from './AiText';
 import { AI_ACCEPT } from './libraryUpload';
 import { DropZone } from './upload';
 import { api, broadcastRefresh, useApi } from './client';
@@ -74,7 +75,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
   // 다른 업무·화면으로 가면 새 대화 (맥락이 섞이지 않게)
   const key = `${ctx.page}:${ctx.id ?? ''}:${ctx.taskId ?? ''}`;
   useEffect(() => { conv.stop(false); conv.cancelEdit(); setMsgs([]); setThreadId(null); setView('chat'); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy]);
+  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy, conv.live]); // #497 R44 답이 이어서 나오는 동안에도
   if (path.startsWith('/assistant')) return null;
   const hideFab = path.startsWith('/messages'); // 메시지 화면은 아래 오른쪽에 보내기 버튼 — 겹치지 않게(휴대폰은 상단 ✨)
 
@@ -138,7 +139,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
                   : m.note ? <div className="rounded-input bg-green-50 px-2.5 py-1 text-xs text-green-800" data-testid="ai-kept">✓ {m.text}</div> : <>
                   <div className={cx('max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.role === 'user' ? 'ai-user-msg' : 'ai-answer'}>
                     {m.files && <div className="mb-0.5 text-xs opacity-80">📎 {m.files.join(', ')}</div>}
-                    {m.text}
+                    {m.role === 'assistant' && !m.error ? <AiText text={m.text} /> : m.text}
                     {m.proposals?.map((p) => (p.kind === 'draft_sms' || p.kind === 'draft_quote') ? <SpecialProposal key={p.id} p={p} onDecided={(a, patch) => decide(i, p, a, patch)} /> : (
                       <div key={p.id} className="mt-1.5 rounded-input border border-amber-200 bg-white p-2 text-ink">
                         <div className="text-xs font-semibold text-amber-700">✨ AI 제안</div><div className="text-sm">{p.summary}</div>
@@ -158,7 +159,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
                   </>}
                 </div>
               ))}
-              {busy && <div className="flex items-center gap-2 text-sm text-ink-3"><Loader2 className="size-4 animate-spin" />찾아보는 중…</div>}
+              {busy && <LiveAnswer live={conv.live} className="max-w-[90%] py-1.5" />}
               <div ref={end} />
             </div>
             </DropZone>

@@ -13,7 +13,8 @@ export type AiResponse = Anthropic.Beta.BetaMessage;
 export interface AiProvider {
   name: string;
   model: string;
-  chat(p: { system: string | Anthropic.Beta.BetaTextBlockParam[]; messages: AiMessage[]; tools: AiTool[]; format?: Record<string, unknown>; signal?: AbortSignal }): Promise<AiResponse>;
+  /** onText: #497 R44 답을 글자 단위로 받으며(스트리밍) 조각마다 부른다 — 끝나면 같은 모양의 전체 응답을 돌려준다 */
+  chat(p: { system: string | Anthropic.Beta.BetaTextBlockParam[]; messages: AiMessage[]; tools: AiTool[]; format?: Record<string, unknown>; signal?: AbortSignal; onText?: (delta: string) => void }): Promise<AiResponse>;
 }
 
 /**
@@ -67,12 +68,12 @@ export function anthropicProvider(opt: { tier?: AiTier } = {}): AiProvider {
   return {
     name: 'anthropic',
     model,
-    chat: async ({ system, messages, tools, format, signal }) => {
+    chat: async ({ system, messages, tools, format, signal, onText }) => {
       // V23-1: 크레딧 부족으로 막혀 있으면 호출하지 않고 바로 안내, 실패하면 종류별 문구(크레딧 부족은 1시간 차단)
       const G = await import('./guard');
       await G.assertAiCredit();
       try {
-        const r = await client!.beta.messages.create({
+        const params: Anthropic.Beta.Messages.MessageCreateParamsNonStreaming = {
         model,
         max_tokens: light ? 4000 : 16000,
         system,
@@ -82,7 +83,9 @@ export function anthropicProvider(opt: { tier?: AiTier } = {}): AiProvider {
         output_config: { ...(withEffort ? { effort } : {}), ...(format ? { format: { type: 'json_schema', schema: format } } : {}) } as never,
         cache_control: { type: 'ephemeral' },
         ...(FALLBACK_MODELS.has(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
-      }, signal ? { signal } : undefined); // 부록 A2: 사용자가 [멈춤]하면 AI 호출도 끊는다
+      };
+        const opts = signal ? { signal } : undefined; // 부록 A2: 사용자가 [멈춤]하면 AI 호출도 끊는다
+        const r = onText ? await client!.beta.messages.stream(params, opts).on('text', (d) => onText(d)).finalMessage() : await client!.beta.messages.create(params, opts);
         await G.clearAiCredit();
         return r;
       } catch (e: any) {

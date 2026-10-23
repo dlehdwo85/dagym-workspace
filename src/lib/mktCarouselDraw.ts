@@ -14,7 +14,8 @@ export const W = 1080, H = 1350;
 const PAD = 88;
 export type SlideKind = 'cover' | 'body' | 'table' | 'cta';
 export type Slide = { kind: SlideKind; title: string; body: string; rows: string[][]; imagePlan: string; imageId: string | null };
-export type DrawOpts = { template: 'box' | 'clean' | 'bold'; color: string | null; brand: string; keyword: string; logo: Buffer | null; font: Buffer | null };
+/** height: #516 자동 시안 스토리 = 1920(9:16, 위·아래 안전 영역) — 없으면 1350(4:5) */
+export type DrawOpts = { template: 'box' | 'clean' | 'bold'; color: string | null; brand: string; keyword: string; logo: Buffer | null; font: Buffer | null; height?: number };
 
 type El = { type: string; key: null; props: Record<string, unknown> };
 const h = (style: Record<string, unknown>, children: unknown): El => ({ type: 'div', key: null, props: { style: { display: 'flex', ...style }, children } });
@@ -43,9 +44,11 @@ const bodySize = (b: string) => { const n = [...b.replace(/\n/g, '')].length; re
 const lines = (s: string, style: Record<string, unknown> = {}) => s.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => h(style, l));
 
 /** 사진 자리: clean = 위쪽 둥근 틀, box·bold = 장 전체 */
-const frameOf = (t: DrawOpts['template']) => (t === 'clean' ? { x: PAD, y: 190, w: W - PAD * 2, h: 560, r: 28 } : { x: 0, y: 0, w: W, h: H, r: 0 });
+const frameOf = (t: DrawOpts['template'], hh = H) => (t === 'clean' ? { x: PAD, y: hh > H ? 330 : 190, w: W - PAD * 2, h: hh > H ? 760 : 560, r: 28 } : { x: 0, y: 0, w: W, h: hh, r: 0 });
+/** 스토리(9:16)는 위(진행 막대·프로필)·아래(메시지 칸)를 비워 둠 */
+const safeOf = (hh: number) => (hh > H ? { top: 210, bottom: 420 } : { top: 52, bottom: 0 });
 /** 사진 위 그늘(위 살짝·아래 진하게) — 글자가 사진 위에서도 읽히게 */
-const SHADE = Buffer.from(`<svg width="${W}" height="${H}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.28"/><stop offset="0.26" stop-color="#000" stop-opacity="0"/><stop offset="0.52" stop-color="#000" stop-opacity="0.12"/><stop offset="1" stop-color="#000" stop-opacity="0.74"/></linearGradient></defs><rect width="${W}" height="${H}" fill="url(#g)"/></svg>`);
+const shadeOf = (hh: number) => Buffer.from(`<svg width="${W}" height="${hh}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.28"/><stop offset="0.26" stop-color="#000" stop-opacity="0"/><stop offset="0.52" stop-color="#000" stop-opacity="0.12"/><stop offset="1" stop-color="#000" stop-opacity="0.74"/></linearGradient></defs><rect width="${W}" height="${hh}" fill="url(#g)"/></svg>`);
 /** 사진·그늘은 satori 밖에서 sharp 로 깔고 그 위에 글자 층(투명 바탕)을 얹는다 — 큰 사진·그라데이션을 satori 안에서 그리면 장당 1~2초 더 걸림 */
 async function photoLayer(buf: Buffer, f: ReturnType<typeof frameOf>) {
   const sharp = (await import('sharp')).default;
@@ -66,15 +69,16 @@ function tree(s: Slide, i: number, n: number, o: DrawOpts & { photo: boolean; lo
   const brandColor = okColor(o.color);
   const cta = s.kind === 'cta';
   const T = o.template;
+  const HH = o.height ?? H; const safe = safeOf(HH); const fr = frameOf(T, HH);
   const bg = bgOf(s, o);
   const onPhoto = o.photo && T !== 'clean'; // 사진 위 글자는 늘 흰색(아래 그늘)
   const dark = cta || T === 'box' || onPhoto || lum(bg) < 0.45;
   const fg = dark ? '#FFFFFF' : '#111827'; const sub = dark ? 'rgba(255,255,255,0.88)' : '#374151'; const line = dark ? 'rgba(255,255,255,0.35)' : '#D1D5DB';
   const accent = T === 'bold' ? fg : (brandColor ?? (dark ? '#FFFFFF' : '#111827'));
-  const head = h({ position: 'absolute', top: 52, left: PAD, right: PAD, height: 72, justifyContent: 'space-between', alignItems: 'center', color: dark ? 'rgba(255,255,255,0.9)' : '#6B7280', fontSize: 28 }, [
+  const head = h({ position: 'absolute', top: safe.top, left: PAD, right: PAD, height: 72, justifyContent: 'space-between', alignItems: 'center', color: dark ? 'rgba(255,255,255,0.9)' : '#6B7280', fontSize: 28 }, [
     h({ width: 140 }, ''),
     o.logoEl ? img(o.logoEl.src, o.logoEl.w, o.logoEl.h, { objectFit: 'contain' }) : h({ fontWeight: 700, fontSize: 30, letterSpacing: 1 }, o.brand || ''),
-    h({ width: 140, justifyContent: 'flex-end' }, `${i + 1}/${n}`)]);
+    h({ width: 140, justifyContent: 'flex-end' }, n > 1 ? `${i + 1}/${n}` : '')]); // 한 장짜리(#516 자동 시안)는 쪽수 없음
   // bold + 사진: 제목 상자를 브랜드 색으로(밝은 색이면 글자는 검정)
   const brandBox = T === 'bold' && onPhoto && !!brandColor;
   const titleColor = brandBox ? (lum(brandColor!) < 0.45 ? '#FFFFFF' : '#111827') : fg;
@@ -87,40 +91,41 @@ function tree(s: Slide, i: number, n: number, o: DrawOpts & { photo: boolean; lo
     kids.push(head, h({ position: 'absolute', left: PAD, right: PAD, top: 0, bottom: 0, flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }, [title(true), body(true),
       o.keyword ? h({ marginTop: 64, padding: '18px 48px', borderRadius: 999, border: '3px solid #FFFFFF', color: '#FFFFFF', fontSize: 36, fontWeight: 700 }, `댓글에 '${o.keyword}'`) : null].filter(Boolean)));
   } else if (T === 'clean') {
-    kids.push(head, h({ position: 'absolute', left: PAD, top: 150, width: 72, height: 10, background: accent }, '')); // 사진(둥근 틀 190~750)은 sharp 로 아래에 깔림
-    kids.push(h({ position: 'absolute', left: PAD, right: PAD, top: o.photo ? 810 : 190, bottom: 96, flexDirection: 'column', justifyContent: o.photo ? 'flex-start' : 'center' }, [title(), body(), table].filter(Boolean)));
+    kids.push(head, h({ position: 'absolute', left: PAD, top: fr.y - 40, width: 72, height: 10, background: accent }, '')); // 사진(둥근 틀)은 sharp 로 아래에 깔림
+    kids.push(h({ position: 'absolute', left: PAD, right: PAD, top: o.photo ? fr.y + fr.h + 60 : fr.y, bottom: 96 + safe.bottom, flexDirection: 'column', justifyContent: o.photo ? 'flex-start' : 'center' }, [title(), body(), table].filter(Boolean)));
   } else {
     kids.push(head);
     const box = T === 'box';
     const block = [h({ flexDirection: 'column', background: box ? 'rgba(0,0,0,0.2)' : brandBox ? brandColor! : 'transparent', padding: box || brandBox ? '34px 32px 38px' : '0 32px', borderRadius: 6 }, [title()]),
       s.body || table ? h({ flexDirection: 'column', padding: '0 32px' }, [body(), table].filter(Boolean)) : null].filter(Boolean);
     // 사진이 있으면 아래쪽 정렬(레퍼런스), 글만 있으면 가운데 + 색 막대
-    kids.push(o.photo ? h({ position: 'absolute', left: PAD - 32, right: PAD - 32, bottom: s.kind === 'cover' ? 140 : 104, flexDirection: 'column' }, block)
-      : h({ position: 'absolute', left: PAD - 32, right: PAD - 32, top: 170, bottom: 96, flexDirection: 'column', justifyContent: 'center' }, [h({ marginLeft: 32, marginBottom: 28, width: 72, height: 10, background: accent }, ''), ...block]));
+    kids.push(o.photo ? h({ position: 'absolute', left: PAD - 32, right: PAD - 32, bottom: (s.kind === 'cover' ? 140 : 104) + safe.bottom, flexDirection: 'column' }, block)
+      : h({ position: 'absolute', left: PAD - 32, right: PAD - 32, top: 118 + safe.top, bottom: 96 + safe.bottom, flexDirection: 'column', justifyContent: 'center' }, [h({ marginLeft: 32, marginBottom: 28, width: 72, height: 10, background: accent }, ''), ...block]));
   }
-  return h({ position: 'relative', width: W, height: H, fontFamily: 'Noto Sans KR', overflow: 'hidden' }, kids); // 바탕은 투명 — 바탕색·사진은 drawSlide 가 깔아 줌
+  return h({ position: 'relative', width: W, height: HH, fontFamily: 'Noto Sans KR', overflow: 'hidden' }, kids); // 바탕은 투명 — 바탕색·사진은 drawSlide 가 깔아 줌
 }
 
 /** 한 장 → PNG. photo = 자료실 사진 원본(있으면), 표·CTA 장에는 사진을 쓰지 않음 */
 export async function drawSlide(s: Slide, i: number, n: number, o: DrawOpts, photo: Buffer | null): Promise<Buffer> {
   const f = await fonts();
   const t: Slide = { ...s, title: clean(s.title, f.has), body: clean(s.body, f.has), rows: s.rows.map((r) => r.map((c) => clean(c, f.has))) };
-  const frame = frameOf(o.template);
+  const HH = o.height ?? H;
+  const frame = frameOf(o.template, HH);
   const under = photo && (s.kind === 'cover' || s.kind === 'body') ? await photoLayer(photo, frame).catch(() => null) : null;
   const logoEl = o.logo ? await logoUri(o.logo).catch(() => null) : null;
   const { ImageResponse } = await import('next/og');
   const fontList: any[] = [{ name: 'Noto Sans KR', data: f.bold, weight: 700, style: 'normal' }, { name: 'Noto Sans KR', data: f.reg, weight: 400, style: 'normal' }];
   const render = async (brandFont: boolean) => {
     const el = tree(t, i, n, { ...o, keyword: clean(o.keyword, f.has), brand: clean(o.brand, f.has), photo: !!under, logoEl, titleFamily: brandFont ? 'Brand' : 'Noto Sans KR' });
-    const res = new ImageResponse(el as any, { width: W, height: H, fonts: brandFont ? [{ name: 'Brand', data: o.font!, weight: 700, style: 'normal' }, ...fontList] : fontList });
+    const res = new ImageResponse(el as any, { width: W, height: HH, fonts: brandFont ? [{ name: 'Brand', data: o.font!, weight: 700, style: 'normal' }, ...fontList] : fontList });
     return Buffer.from(await res.arrayBuffer());
   };
   let layer: Buffer | null = null;
   if (o.font) { try { layer = await render(true); } catch { /* 브랜드 글꼴을 못 읽으면 기본 글꼴로 */ } }
   layer ??= await render(false);
   const sharp = (await import('sharp')).default;
-  return sharp({ create: { width: W, height: H, channels: 4, background: bgOf(s, o) } })
-    .composite([...(under ? [{ input: under, left: frame.x, top: frame.y }, ...(frame.r ? [] : [{ input: SHADE, left: 0, top: 0 }])] : []), { input: layer, left: 0, top: 0 }]).png().toBuffer();
+  return sharp({ create: { width: W, height: HH, channels: 4, background: bgOf(s, o) } })
+    .composite([...(under ? [{ input: under, left: frame.x, top: frame.y }, ...(frame.r ? [] : [{ input: shadeOf(HH), left: 0, top: 0 }])] : []), { input: layer, left: 0, top: 0 }]).png().toBuffer();
 }
 export async function toJpeg(png: Buffer) {
   const sharp = (await import('sharp')).default;

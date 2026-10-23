@@ -39,6 +39,43 @@ async function raw(url: string, method: string, body?: unknown, key?: string, si
 }
 
 /**
+ * #497 R44: 서버가 보내는 이벤트(SSE: data: {type…}) 받기 — 조각마다 onEvent, 'done' 이면 그 내용을 돌려주고 'error' 면 ApiError.
+ * 다시 보내지 않는다(이미 받은 조각이 있을 수 있음). 서버가 JSON 으로 답하면(예전 서버) 그 JSON 을 그대로 돌려준다.
+ */
+export async function apiStream<T = any>(url: string, body: unknown, opts: { signal?: AbortSignal; onEvent: (e: any) => void }): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'text/event-stream' }, body: JSON.stringify(body), credentials: 'same-origin', ...(opts.signal ? { signal: opts.signal } : {}) });
+  } catch (e) {
+    if (opts.signal?.aborted) throw e;
+    throw new ApiError(0, 'network', '서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도하세요.');
+  }
+  const sse = (res.headers.get('content-type') ?? '').includes('text/event-stream');
+  if (!res.ok || !sse || !res.body) {
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) return j as T;
+    if (res.status === 401 && typeof window !== 'undefined' && !location.pathname.startsWith('/login')) location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
+    throw new ApiError(res.status, j?.error?.code ?? 'error', j?.error?.message ?? (res.status >= 500 ? `서버가 잠시 응답하지 않습니다 (${res.status}). 잠시 후 다시 시도하세요.` : `요청을 처리하지 못했습니다 (${res.status})`), j?.error?.detail);
+  }
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    for (let k = buf.indexOf('\n\n'); k >= 0; k = buf.indexOf('\n\n')) {
+      const data = buf.slice(0, k).split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
+      buf = buf.slice(k + 2);
+      if (!data) continue;
+      const e = JSON.parse(data);
+      if (e.type === 'done') return e as T;
+      if (e.type === 'error') throw new ApiError(e.status ?? 500, e.code ?? 'error', e.message ?? '처리하지 못했습니다');
+      opts.onEvent(e);
+    }
+  }
+  throw new ApiError(0, 'network', '답을 받는 중 연결이 끊겼습니다. 다시 시도하세요.');
+}
+
+/**
  * API 호출. POST 는 Idempotency-Key 를 붙여 재시도해도 중복 생성되지 않는다.
  * queueOffline=true 이면 네트워크 끊김 시 기기에 보관했다가 재연결 시 같은 키로 다시 보낸다.
  */

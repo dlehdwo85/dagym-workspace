@@ -49,6 +49,30 @@ export function startFakeGoogle(port = 3199) {
   const pub = (e) => { const { seq, ...rest } = e; return rest; };
 
   function json(res, code, body) { res.writeHead(code, { 'content-type': 'application/json' }); res.end(body === undefined ? '' : JSON.stringify(body)); }
+  // #497 R44: stream: true 요청은 실제 API 처럼 SSE 로 — 글은 8조각쯤(조각 사이 chunkDelayMs), 도구 입력은 input_json_delta 로
+  async function sseMessage(res, msg, delay) {
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    const ev = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+    const { content = [], stop_reason, usage, ...head } = msg;
+    ev('message_start', { message: { ...head, content: [], stop_reason: null, usage: { ...usage, output_tokens: 1 } } });
+    for (const [index, b] of content.entries()) {
+      if (b.type === 'text') {
+        ev('content_block_start', { index, content_block: { type: 'text', text: '' } });
+        const chars = Array.from(b.text ?? ''); const step = Math.max(1, Math.ceil(chars.length / 8));
+        for (let k = 0; k < chars.length; k += step) {
+          ev('content_block_delta', { index, delta: { type: 'text_delta', text: chars.slice(k, k + step).join('') } });
+          if (delay) await new Promise((r) => setTimeout(r, delay));
+        }
+      } else if (/tool_use$/.test(b.type)) {
+        ev('content_block_start', { index, content_block: { ...b, input: {} } });
+        ev('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(b.input ?? {}) } });
+      } else ev('content_block_start', { index, content_block: b });
+      ev('content_block_stop', { index });
+    }
+    ev('message_delta', { delta: { stop_reason: stop_reason ?? 'end_turn', stop_sequence: null }, usage: { output_tokens: usage.output_tokens } });
+    ev('message_stop', {});
+    res.end();
+  }
 
   const server = http.createServer(async (req, res) => {
     let raw = '';
@@ -123,9 +147,11 @@ export function startFakeGoogle(port = 3199) {
       if (next?.httpError) return json(res, next.httpError, { type: 'error', error: { type: next.errorType ?? 'api_error', message: next.message ?? 'error' } });
       next ??= { content: [{ type: 'text', text: '테스트 응답입니다.' }], stop_reason: 'end_turn' };
       if (next.delayMs) { const ms = next.delayMs; next = { ...next }; delete next.delayMs; await new Promise((r) => setTimeout(r, ms)); } // 부록 A2 멈춤 시험: 늦게 답하기
-      return json(res, 200, { id: `msg_${state.anthropic.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null,
+      const { chunkDelayMs, ...reply } = next;
+      const msg = { id: `msg_${state.anthropic.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null,
         usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-        ...(body.container ? { container: { id: body.container.id ?? `cntr_fake_${state.anthropic.length}`, expires_at: new Date(Date.now() + 3600e3).toISOString() } } : {}), ...next });
+        ...(body.container ? { container: { id: body.container.id ?? `cntr_fake_${state.anthropic.length}`, expires_at: new Date(Date.now() + 3600e3).toISOString() } } : {}), ...reply };
+      return body.stream ? sseMessage(res, msg, chunkDelayMs ?? 0) : json(res, 200, msg);
     }
     // ---- 가짜 Higgsfield (base = FAKE/hf): Authorization: Key test-id:test-secret, 제출 → queued + status_url, 상태 → hfPolls 번 in_progress 뒤 completed ----
     if (p.startsWith('/hf-out/')) {
