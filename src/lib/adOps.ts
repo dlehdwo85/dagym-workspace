@@ -7,8 +7,9 @@ import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { decrypt } from './crypto';
 import { audit } from './log';
 import { tenantOf, type SessionUser } from './types';
-import { DEFAULT_RULES, checkAd, qualityRules, type QualityRules } from './mktQuality';
+import { DEFAULT_RULES, checkAd, qualityRules, scoreHook, type QualityRules } from './mktQuality';
 import { NAVER_REGION_CODES, REGION_RE } from './naverRegions';
+import { PLAN_KEYWORDS_MAX, combineKeywords } from './kwCombine';
 
 /**
  * V44 ① AI 광고 운영실 — 네이버 검색광고 '쓰기'(파워링크 먼저, 플레이스 다음).
@@ -46,6 +47,34 @@ export const RISKY: [RegExp, string][] = [
   [/원금|수익\s?보장|고수익/, '금융 수익 보장 표현은 쓸 수 없습니다'],
 ];
 const NAVER_OK = /^[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9 .,!?%&()+\-/:'"~@#*\[\]]$/;
+/**
+ * #499-2 광고 설정(테크트리 EP.7 — 네이버 검색광고 공식 API 명세 ncc-heroes-ncc.json·FAQ 로 필드 확인 10/23). 값이 없으면(이전 세팅안) 네이버 기본값 그대로 만든다.
+ * 기본값은 대표 결정 전 제안값 — 화면 새 세팅안이 추천값을 채워 보냄(서버 기본값 = 네이버 기본값).
+ */
+export const setupInput = z.object({
+  tracking: z.boolean().default(false),                                   // 캠페인 trackingMode AUTO_TRACKING_MODE = 자동 추적 URL 파라미터(n_keyword_id 등 → 문의·전화의 광고 키워드, adAttrib)
+  media: z.enum(['all', 'naver']).default('all'),                         // 노출 매체(MEDIA_TARGET): 전체(네이버 기본) / 네이버 매체만(검색·콘텐츠 모두 네이버, 파트너 제외)
+  pcWeight: z.number().int().min(10).max(500).default(100),              // 광고그룹 pcNetworkBidWeight(%) — 입찰가 × 가중치
+  mobileWeight: z.number().int().min(10).max(500).default(100),          // mobileNetworkBidWeight(%)
+  rolling: z.enum(['PERFORMANCE', 'ROUND_ROBIN']).default('PERFORMANCE'), // 소재 노출 방식 adRollingType: 성과 기반 / 동일 비중(3안 테스트 중에는 늘 동일 비중)
+  expSearch: z.boolean().default(true),                                   // 확장 검색 useExpSearch(네이버 기본 켬)
+  expRatio: z.number().int().min(1).max(100).default(100),               // 확장 검색 예산 비율 expSearchBudgetRatio(%) — 입찰 가중치가 아님(네이버 기본 100)
+  aiMax: z.boolean().default(true),                                       // ADVoost Max aiAdsOptIn(파워링크 + 확장 검색 그룹만, 미지정이면 네이버가 켬)
+  negatives: z.array(z.string().trim().min(1).max(25)).max(100).default([]), // 확장 검색 제외 키워드(POST restricted-keywords, type EXP_SEARCH)
+});
+export type AdSetup = z.infer<typeof setupInput>;
+/** 광고그룹 만들 때 더 보낼 칸: 네이버 문서 기본값(가중치 100·확장 검색 켬·비율 100·ADVoost Max 켬)과 같은 값은 보내지 않음(실계정에서 검증된 요청 모양 유지). 소재 노출 방식은 늘 보냄 */
+export function groupSetup(s: AdSetup | undefined, abTest: boolean): Record<string, unknown> {
+  if (!s) return {};
+  const o: Record<string, unknown> = { adRollingType: abTest ? 'ROUND_ROBIN' : s.rolling }; // 3안 테스트는 같은 비중으로 노출해야 비교가 공정
+  if (s.pcWeight !== 100) o.pcNetworkBidWeight = s.pcWeight;
+  if (s.mobileWeight !== 100) o.mobileNetworkBidWeight = s.mobileWeight;
+  if (!s.expSearch) Object.assign(o, { useExpSearch: false, aiAdsOptIn: false }); // ADVoost Max 는 확장 검색 그룹만 — 끌 때 함께 끔
+  else { if (s.expRatio !== 100) o.expSearchBudgetRatio = s.expRatio; if (!s.aiMax) o.aiAdsOptIn = false; }
+  return o;
+}
+/** 네이버 매체만: 공식 FAQ '네트워크 선택' 예시(type 2)에서 파트너 매체만 뺀 값 — 검색·콘텐츠 모두 네이버 */
+const MEDIA_NAVER_ONLY = { type: 2, search: ['naver'], contents: ['naver'], black: { media: [], mediaGroup: [] }, white: { media: null, mediaGroup: null } };
 export const planInput = z.object({
   accountId: z.string().uuid(),
   brandId: z.string().uuid().nullable().optional(),                   // 대표 02:30 ③ 브랜드별 세팅안 — 예산 승인 때 브랜드 몫을 이 캠페인에
@@ -53,8 +82,9 @@ export const planInput = z.object({
   dailyBudget: z.number().int().min(50).max(10_000_000),          // 원, 캠페인 하루 예산
   channelId: z.string().trim().min(1).max(60),                     // 비즈채널(웹사이트) id — 네이버에 먼저 등록된 것
   bidAmt: z.number().int().min(70).max(100_000),                   // 그룹 기본 입찰가
-  keywords: z.array(z.string().trim().min(1).max(25)).min(1).max(50),
+  keywords: z.array(z.string().trim().min(1).max(25)).min(1).max(PLAN_KEYWORDS_MAX), // #499-2 조합기 롱테일까지 300개(전에는 50)
   ads: z.array(z.object({ headline: z.string().trim().min(1), description: z.string().trim().min(1), url: z.string().url().max(500) })).min(1).max(3),
+  setup: setupInput.optional(),
   // 광고 최적화 1차 ① 3안 소액 테스트: 같은 그룹의 소재 2~3개를 작은 하루 예산으로 비교 → 기간·최소 노출을 채우면 이긴 안 표시 → [이긴 안에 집중](진 안 끄기 + 예산 올리기, 승인)
   test: z.object({ on: z.boolean(), days: z.number().int().min(3).max(30).default(7), minImpressions: z.number().int().min(30).max(100_000).default(300),
     afterBudget: z.number().int().min(50).max(10_000_000).nullable().optional() }).optional(),
@@ -73,9 +103,29 @@ export function precheck(p: z.infer<typeof planInput>, rules: QualityRules = DEF
   p.ads.forEach((a, i) => { const bad = [...new Set([...`${a.headline}${a.description}`].filter((ch) => !NAVER_OK.test(ch)))];
     if (bad.length) issues.push(`소재 ${i + 1}: 네이버에서 쓸 수 없는 문자 ${bad.map((c) => `'${c}'`).join(' ')} — 빼거나 바꿔 주세요(예: · → ,)`); });
   if (p.test?.on && p.ads.length < 2) issues.push('3안 소액 테스트는 소재가 2개 이상이어야 합니다(3개 권장)');
-  const dup = p.keywords.filter((k, i) => p.keywords.indexOf(k) !== i);
-  if (dup.length) issues.push(`겹치는 키워드: ${[...new Set(dup)].join(', ')}`);
+  // 네이버 키워드는 띄어쓰기를 구분하지 않음 — '헬스장 운영'과 '헬스장운영'도 같은 키워드(#499-2 조합기로 수백 개)
+  const keys = p.keywords.map(norm);
+  const dup = p.keywords.filter((_, i) => keys.indexOf(keys[i]) !== i);
+  if (dup.length) issues.push(`겹치는 키워드(띄어쓰기만 다른 것 포함): ${[...new Set(dup)].join(', ')}`);
   return issues;
+}
+/** 연결 주소가 사이트 첫 화면(경로·검색어 없음)인지 */
+const isRootUrl = (u: string) => { try { const x = new URL(u); return (x.pathname === '/' || x.pathname === '') && !x.search; } catch { return false; } };
+/**
+ * #499-2 권고(시작을 막지 않음, 테크트리 EP.7·3장 C): 연결 주소가 첫 화면 · 광고형 문구 점수(#499-1, 제목+설명) · 질문형 제목 · 확장 검색 제외 키워드.
+ * 검색광고는 검색어가 이미 대상을 말해 주므로 점수는 참고용 — 무엇을 주는지(제안)·누구에게를 문구에 넣으라는 안내.
+ */
+export function advice(p: z.infer<typeof planInput>, rules: QualityRules = DEFAULT_RULES) {
+  const out: string[] = [];
+  const roots = p.ads.map((a, i) => (isRootUrl(a.url) ? i + 1 : 0)).filter(Boolean);
+  if (roots.length) out.push(`소재 ${roots.join('·')} 연결 주소가 홈페이지 첫 화면입니다 — 서비스별 페이지로 연결하세요(확장 검색은 연결 페이지 내용으로 검색어를 맞춥니다)`);
+  p.ads.forEach((a, i) => {
+    const h = scoreHook(`${a.headline} ${a.description}`, rules, p.keywords, 'ad');
+    if (!h.pass) out.push(`소재 ${i + 1} 광고형 점수 ${h.score}점${h.notes?.length ? ` — ${h.notes.join(' · ')}` : ''}`);
+  });
+  if (p.ads.length >= 2 && !p.ads.some((a) => /\?/.test(a.headline))) out.push('질문형 제목(물음표) 안이 없습니다 — 소구점 + 물음표 제목을 한 안 넣어 비교해 보세요');
+  if (p.setup?.expSearch && !p.setup.negatives.length) out.push('확장 검색은 엉뚱한 검색어에도 나갈 수 있습니다 — 제외 키워드(예: 구인, 채용, 알바)를 넣어 두세요');
+  return out;
 }
 
 // ---------------- 상한·이번 달 광고비 ----------------
@@ -110,8 +160,16 @@ export async function adOpsOverview(u: SessionUser) {
   const changes = await sql<any[]>`select c.id, c.plan_id, c.kind, c.before, c.after, c.money_up, c.status, c.error, c.revert_of, c.created_at, u.name as actor_name
     from mkt_ad_changes c left join users u on u.id = c.actor_id left join mkt_ad_plans pp on pp.id = c.plan_id where c.tenant = ${t} and (pp.provider is null or pp.provider = 'naver') order by c.created_at desc limit 100`;
   const ab = await abFor(plans);
-  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan, rules), ab: ab.get(p.id) ?? null })), changes,
-    savings: await agencySavings(t, spend) };
+  const [bud] = await sql<any[]>`select plan, brand_plan, total from mkt_ad_budgets where tenant = ${t} and month = ${ymKst()} and status = 'approved'`;
+  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan, rules), advice: advice(p.plan, rules), ab: ab.get(p.id) ?? null })), changes,
+    savings: await agencySavings(t, spend), budgetHint: bud ? naverBudgetHint(bud) : null };
+}
+/** #499-2 하루 예산 권장(월 ÷ 30 × 1.5)의 '월': 이번 달 승인된 광고 예산의 네이버 몫 — 브랜드별은 예산 승인 집행과 같은 비율(브랜드 월 예산 × 네이버 비중) */
+function naverBudgetHint(b: { plan: any[]; brand_plan: any[] | null; total: string | number }) {
+  const naver = Number((b.plan ?? []).find((p) => p?.provider === 'naver')?.monthly ?? 0);
+  const share = Number(b.total) ? naver / Number(b.total) : 0;
+  const brands = Object.fromEntries(((b.brand_plan ?? []) as any[]).filter((x) => x?.brandId).map((x) => [String(x.brandId), Math.round(Number(x.monthly ?? 0) * share)]));
+  return naver > 0 ? { naver, brands } : null;
 }
 
 /** 비즈채널(웹사이트) 목록 — 세팅안에서 고르기 */
@@ -143,7 +201,8 @@ export async function createPlan(u: SessionUser, i: z.infer<typeof planInput>) {
   await naverAcc(tenantOf(u), i.accountId);
   const { accountId, name, brandId, ...plan } = i;
   const [p] = await db()`insert into mkt_ad_plans (tenant, account_id, provider, kind, name, plan, created_by, brand_id) values (${tenantOf(u)}, ${accountId}, 'naver', 'powerlink', ${name}, ${db().json(plan as never)}, ${u.id}, ${brandId ?? null}) returning id`;
-  return { id: p.id, issues: precheck(i, await qualityRules()) };
+  const rules = await qualityRules();
+  return { id: p.id, issues: precheck(i, rules), advice: advice(i, rules) };
 }
 
 /** 세팅안 고치기(만들기 전·실패 뒤) — 이미 네이버에 만든 부분(캠페인·그룹)은 그대로, 남은 단계에 새 값 사용 */
@@ -153,7 +212,8 @@ export async function updatePlan(u: SessionUser, id: string, i: z.infer<typeof p
   if (p.status !== 'draft' && p.status !== 'failed') throw new HttpError(409, 'plan_locked', '네이버에 만든 뒤에는 세팅안을 고칠 수 없습니다 — 끄기·하루 예산만 바꿀 수 있습니다');
   const { accountId: _a, name, brandId, ...plan } = i;
   await db()`update mkt_ad_plans set name = ${name}, plan = ${db().json(plan as never)}, brand_id = ${brandId === undefined ? p.brand_id : brandId}, updated_at = now() where id = ${id}`;
-  return { id, issues: precheck(i, await qualityRules()) };
+  const rules = await qualityRules();
+  return { id, issues: precheck(i, rules), advice: advice(i, rules) };
 }
 
 /** [승인하고 시작]: 상한 필수 → 검사 통과 → 네이버에 캠페인·그룹·키워드·소재를 모두 꺼진 상태로 생성 */
@@ -165,6 +225,7 @@ export async function approvePlan(u: SessionUser, id: string) {
   if (!(await capOf(t))) throw new HttpError(409, 'cap_required', '먼저 회사 월 광고비 상한을 정해 주세요');
   const issues = precheck(p.plan, await qualityRules());
   if (issues.length) throw new HttpError(409, 'precheck_failed', `세팅안 검사를 통과하지 못했습니다: ${issues.join(' · ')}`);
+  const s: AdSetup | undefined = p.plan.setup ? setupInput.parse(p.plan.setup) : undefined; // #499-2 광고 설정(없으면 이전처럼 네이버 기본값) — 잠그기 전에 읽음
   const a = await naverAcc(t, p.account_id);
   // 같은 세팅안을 동시에 두 번 만들지 않게(운영 10/19: 한 번 눌렀는데 요청 3번) — 만드는 중으로 바꾼 요청만 진행, 나머지는 409
   const [lock] = await sql`update mkt_ad_plans set status = 'creating', updated_at = now() where id = ${id} and status in ('draft', 'failed') returning id`;
@@ -172,8 +233,10 @@ export async function approvePlan(u: SessionUser, id: string) {
   const ext: Record<string, unknown> = { ...(p.external ?? {}) };
   try {
     // 실패하면 거기서 멈추고, 이미 만든 id 는 external 에 남김(다시 시도하면 이어서 만듦)
-    if (!ext.campaignId) ext.campaignId = String((await naverReq(a, 'POST', '/ncc/campaigns', '', { customerId: Number(a.external_id), name: p.name, campaignTp: 'WEB_SITE', dailyBudget: p.plan.dailyBudget, useDailyBudget: true, userLock: true })).nccCampaignId);
-    if (!ext.adgroupId) ext.adgroupId = String((await naverReq(a, 'POST', '/ncc/adgroups', '', { nccCampaignId: ext.campaignId, adgroupType: 'WEB_SITE', name: `${p.name} 그룹`, pcChannelId: p.plan.channelId, mobileChannelId: p.plan.channelId, bidAmt: p.plan.bidAmt, useDailyBudget: false, userLock: true })).nccAdgroupId);
+    if (!ext.campaignId) ext.campaignId = String((await naverReq(a, 'POST', '/ncc/campaigns', '', { customerId: Number(a.external_id), name: p.name, campaignTp: 'WEB_SITE', dailyBudget: p.plan.dailyBudget, useDailyBudget: true, userLock: true,
+      ...(s?.tracking ? { trackingMode: 'AUTO_TRACKING_MODE' } : {}) })).nccCampaignId);
+    if (!ext.adgroupId) ext.adgroupId = String((await naverReq(a, 'POST', '/ncc/adgroups', '', { nccCampaignId: ext.campaignId, adgroupType: 'WEB_SITE', name: `${p.name} 그룹`, pcChannelId: p.plan.channelId, mobileChannelId: p.plan.channelId, bidAmt: p.plan.bidAmt, useDailyBudget: false, userLock: true,
+      ...groupSetup(s, !!p.plan.test?.on) })).nccAdgroupId);
     if (!validIds(ext.keywordIds)) ext.keywordIds = await ensureKeywords(a, String(ext.adgroupId), p.plan.keywords, Number(p.plan.bidAmt) || undefined);
     if (!ext.adIds) {
       const ids: string[] = [];
@@ -182,6 +245,9 @@ export async function approvePlan(u: SessionUser, id: string) {
     }
     // 광고 최적화 1차 ② 광고 지역(시·도)을 골랐으면 켜기 전(꺼진 상태)에 맞춰 둠 — 실패하면 여기서 멈추고 다시 누르면 이어서
     if (p.plan.local?.region?.length && !ext.regionSet) { await setRegion(a, String(ext.adgroupId), p.plan.local.region, !!p.plan.local.abroad); ext.regionSet = true; }
+    // #499-2 노출 매체 '네이버 매체만'(파트너 제외) · 확장 검색 제외 키워드 — 같은 방식으로 꺼진 상태에서 맞추고, 실패하면 멈췄다가 다시 누르면 이어서
+    if (s?.media === 'naver' && !ext.mediaSet) { await setMedia(a, String(ext.adgroupId)); ext.mediaSet = true; }
+    if (s?.expSearch && s.negatives.length && !ext.negSet) { ext.negFailed = await addNegatives(a, String(ext.adgroupId), s.negatives); ext.negSet = true; }
   } catch (e: any) {
     await sql`update mkt_ad_plans set status = 'failed', external = ${sql.json(ext as never)}, error = ${String(e?.message ?? e).slice(0, 4000)}, updated_at = now() where id = ${id}`;
     await sql`insert into mkt_ad_changes (tenant, plan_id, kind, after, status, error, actor_id) values (${t}, ${id}, 'create', ${sql.json(ext as never)}, 'failed', ${String(e?.message ?? e).slice(0, 4000)}, ${u.id})`;
@@ -199,6 +265,8 @@ export async function approvePlan(u: SessionUser, id: string) {
 const validIds = (x: unknown): x is string[] => Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === 'string' && v && v !== 'undefined' && v !== 'null');
 const kwId = (k: any) => String(k?.nccKeywordId ?? k?.nccKeywordID ?? k?.id ?? '');
 const norm = (k: string) => k.replace(/\s+/g, '').toLowerCase();
+const KW_CHUNK = 100; // 키워드 만들기 한 번에 보내는 수(네이버 화면 붙여넣기 단위)
+const KW_RETRY = 30;  // 안 생긴 키워드를 하나씩 다시 보내는 수(한 번 누름에)
 /** 키워드 멱등 생성: 그룹에 이미 있는 키워드는 id 만 읽고, 없는 것만 만든 뒤 다시 읽어 세팅안 순서대로 id 를 돌려줌 */
 async function ensureKeywords(a: NaverAcc, adgroupId: string, keywords: string[], bidAmt?: number): Promise<string[]> {
   const q = `?nccAdgroupId=${encodeURIComponent(adgroupId)}`;
@@ -216,33 +284,43 @@ async function ensureKeywords(a: NaverAcc, adgroupId: string, keywords: string[]
   const take = (r: any) => { for (const k of (Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : [r])) if (kwId(k) && k?.keyword) byKw.set(norm(String(k.keyword)), kwId(k)); };
   const why: string[] = [];
   if (missing.length) {
-    try { const r = await naverReq(a, 'POST', '/ncc/keywords', q, body(missing)); take(r); why.push(...statusOf(r)); } catch (e: any) { why.push(String(e?.message ?? e)); }
+    // #499-2 조합기로 300개까지 — 한 번에 100개씩(네이버 화면 붙여넣기 단위)
+    for (let i = 0; i < missing.length; i += KW_CHUNK) {
+      try { const r = await naverReq(a, 'POST', '/ncc/keywords', q, body(missing.slice(i, i + KW_CHUNK))); take(r); why.push(...statusOf(r)); } catch (e: any) { why.push(String(e?.message ?? e)); }
+    }
     for (const k of await list()) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
-    for (const k of missing.filter((x) => !byKw.has(norm(x)))) {
+    // 안 생긴 키워드는 하나씩 다시 보내 이유를 받음 — 한 번 누름에 KW_RETRY 개까지(시간 제한), 나머지는 다시 누르면 이어서
+    const left = missing.filter((x) => !byKw.has(norm(x)));
+    for (const k of left.slice(0, KW_RETRY)) {
       try { const r = await naverReq(a, 'POST', '/ncc/keywords', q, body([k])); take(r); if (!byKw.has(norm(k))) { const st = statusOf(r); why.push(`${k}: ${st.length ? st.join(' ') : `응답에 키워드 id 없음 ${JSON.stringify(r).slice(0, 1000)}`}`); } }
       catch (e: any) { why.push(`${k}: ${String(e?.message ?? e)}`); }
     }
+    if (left.length > KW_RETRY) why.push(`나머지 ${left.length - KW_RETRY}개는 하나씩 다시 보내지 않았습니다 — 다시 누르면 이어서 만듭니다`);
     if (missing.some((k) => !byKw.has(norm(k)))) for (const k of await list()) if (kwId(k)) byKw.set(norm(String(k.keyword ?? '')), kwId(k));
   }
   const ids = keywords.map((k) => byKw.get(norm(k)) ?? '');
   if (!validIds(ids)) {
     const failed = keywords.filter((_, i) => !ids[i]);
+    const shown = failed.slice(0, 20); const more = failed.length > shown.length ? ` 외 ${failed.length - shown.length}개` : '';
     // 검색량·연관 키워드(네이버 키워드 도구 /keywordstool, 공식 RelKwdStat) — 사유를 사람이 판단하고 바꿀 키워드를 고르게
-    const vol = await keywordVolumes(a, failed).catch(() => null);
-    const volText = vol ? ` · 월 검색량(PC/모바일): ${failed.map((k) => { const v = vol.get(norm(k)); return `${k} ${v ? `${v.pc}/${v.mobile}` : '자료 없음'}`; }).join(', ')}` + (vol.related.length ? ` · 검색량 있는 연관 키워드: ${vol.related.slice(0, 8).map((r) => `${r.keyword}(${r.total})`).join(', ')}` : '') : '';
-    throw new HttpError(502, 'naver_keywords', `네이버에 키워드를 만들지 못했습니다(${failed.join(', ')})${why.length ? ` — ${[...new Set(why)].join(' / ')}` : ''}${volText}`, { why: [...new Set(why)], volumes: vol ? Object.fromEntries(vol) : null, related: vol?.related ?? [] });
+    const vol = await keywordVolumes(a, shown).catch(() => null);
+    const volText = vol ? ` · 월 검색량(PC/모바일): ${shown.map((k) => { const v = vol.get(norm(k)); return `${k} ${v ? `${v.pc}/${v.mobile}` : '자료 없음'}`; }).join(', ')}${more}` + (vol.related.length ? ` · 검색량 있는 연관 키워드: ${vol.related.slice(0, 8).map((r) => `${r.keyword}(${r.total})`).join(', ')}` : '') : '';
+    throw new HttpError(502, 'naver_keywords', `네이버에 키워드를 만들지 못했습니다(${shown.join(', ')}${more})${why.length ? ` — ${[...new Set(why)].join(' / ')}` : ''}${volText}`, { why: [...new Set(why)], volumes: vol ? Object.fromEntries(vol) : null, related: vol?.related ?? [] });
   }
   return ids;
 }
-/** 네이버 키워드 도구(RelKwdStat): 힌트 키워드(띄어쓰기 없이, 한 번에 5개)의 월 검색량과 연관 키워드. '< 10' 은 5 로 셈 */
-export async function keywordVolumes(a: NaverAcc, keywords: string[]) {
+/** 네이버 키워드 도구(RelKwdStat): 힌트 키워드(띄어쓰기 없이, 한 번에 5개)의 월 검색량과 연관 키워드. '< 10' 은 5 로 셈.
+ * tolerant(#499-2 조합 300개): 한 묶음이 실패해도 나머지는 계속 — 실패한 키워드 수는 failed */
+export async function keywordVolumes(a: NaverAcc, keywords: string[], o: { tolerant?: boolean } = {}) {
   const num = (v: unknown) => (typeof v === 'number' ? v : /</.test(String(v)) ? 5 : Number(v) || 0);
-  const out = new Map<string, { pc: number; mobile: number }>() as Map<string, { pc: number; mobile: number }> & { related: { keyword: string; total: number }[] };
-  out.related = [];
+  const out = new Map<string, { pc: number; mobile: number }>() as Map<string, { pc: number; mobile: number }> & { related: { keyword: string; total: number }[]; failed: number };
+  out.related = []; out.failed = 0;
   const asked = new Set(keywords.map(norm));
   for (let i = 0; i < keywords.length; i += 5) {
     const hint = keywords.slice(i, i + 5).map((k) => k.replace(/\s+/g, '')).join(',');
-    const r = await naverReq(a, 'GET', '/keywordstool', `?hintKeywords=${encodeURIComponent(hint)}&showDetail=1`);
+    let r: any;
+    try { r = await naverReq(a, 'GET', '/keywordstool', `?hintKeywords=${encodeURIComponent(hint)}&showDetail=1`); }
+    catch (e) { if (!o.tolerant) throw e; out.failed += keywords.slice(i, i + 5).length; continue; }
     for (const k of (r?.keywordList ?? []) as any[]) {
       const key = norm(String(k.relKeyword ?? '')); const v = { pc: num(k.monthlyPcQcCnt), mobile: num(k.monthlyMobileQcCnt) };
       if (asked.has(key)) out.set(key, v); else if (v.pc + v.mobile >= 30 && !out.related.some((r) => norm(r.keyword) === key)) out.related.push({ keyword: String(k.relKeyword), total: v.pc + v.mobile }); // 5개씩 물으면 연관 키워드가 겹쳐 옴
@@ -497,13 +575,30 @@ export async function setAgencyFee(u: SessionUser, i: z.infer<typeof feeInput>) 
 // ---------------- 광고 최적화 1차 ② 동네 타깃 ----------------
 // 네이버 파워링크는 반경 타겟팅이 없다 → ① 광고 지역(시·도, 공식 문서의 REGIONAL_TARGET) ② 반경 안 동네 이름 키워드(실제 월 검색량으로 고름)로 맞춘다.
 // 반경 값은 동네 이름을 고를 때 쓰고 세팅안에 남겨 둔다(구글·메타 광고 연결 때 그대로).
-async function regionTarget(a: NaverAcc, adgroupId: string) {
-  const r = await naverReq(a, 'GET', '/ncc/targets', `?ownerId=${encodeURIComponent(adgroupId)}&types=REGIONAL_TARGET`);
-  const t = ((Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as any[]).find((x) => x?.targetTp === 'REGIONAL_TARGET');
-  if (!t?.nccTargetId) throw new HttpError(502, 'naver_target', `네이버 광고그룹(${adgroupId})의 지역 타겟팅을 찾지 못했습니다`);
+/** 광고그룹의 타겟팅 하나(GET /ncc/targets?ownerId&types) — target 이 문자열(JSON)로 오기도 함 */
+async function targetOf(a: NaverAcc, adgroupId: string, type: 'REGIONAL_TARGET' | 'MEDIA_TARGET') {
+  const r = await naverReq(a, 'GET', '/ncc/targets', `?ownerId=${encodeURIComponent(adgroupId)}&types=${type}`);
+  const t = ((Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as any[]).find((x) => x?.targetTp === type);
+  if (!t?.nccTargetId) throw new HttpError(502, 'naver_target', `네이버 광고그룹(${adgroupId})의 ${type === 'MEDIA_TARGET' ? '매체' : '지역'} 타겟팅을 찾지 못했습니다`);
   let v = t.target; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
+  return { id: String(t.nccTargetId), value: v };
+}
+async function regionTarget(a: NaverAcc, adgroupId: string) {
+  const { id, value: v } = await targetOf(a, adgroupId, 'REGIONAL_TARGET');
   const list = (x: unknown) => (Array.isArray(x) ? x.map(String) : null);
-  return { id: String(t.nccTargetId), kr: list(v?.location?.KR), others: list(v?.location?.OTHERS) }; // kr null = 타겟 없음(전국 + 해외)
+  return { id, kr: list(v?.location?.KR), others: list(v?.location?.OTHERS) }; // kr null = 타겟 없음(전국 + 해외)
+}
+/** #499-2 노출 매체를 '네이버 매체만'으로(MEDIA_TARGET, 꺼진 상태에서) */
+async function setMedia(a: NaverAcc, adgroupId: string) {
+  const cur = await targetOf(a, adgroupId, 'MEDIA_TARGET');
+  await naverReq(a, 'PUT', `/ncc/targets/${cur.id}`, '', { nccTargetId: cur.id, ownerId: adgroupId, targetTp: 'MEDIA_TARGET', target: MEDIA_NAVER_ONLY });
+}
+/** #499-2 확장 검색 제외 키워드(공식: POST /ncc/adgroups/{id}/restricted-keywords, type EXP_SEARCH — 파워링크 그룹만). 항목별로 거절된 것은 이유와 함께 돌려줌(나머지는 그대로) */
+async function addNegatives(a: NaverAcc, adgroupId: string, negatives: string[]) {
+  const ks = [...new Map(negatives.map((k) => [norm(k), k.replace(/\s+/g, '')] as [string, string])).values()];
+  const r = await naverReq(a, 'POST', `/ncc/adgroups/${adgroupId}/restricted-keywords`, '', ks.map((keyword) => ({ nccAdgroupId: adgroupId, keyword, type: 'EXP_SEARCH' })));
+  return ((Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as any[]).filter((x) => !x?.nccAdgroupRestrictKwdId && (x?.resultStatus?.code || x?.resultStatus?.message))
+    .map((x) => `${String(x.keyword ?? '')} [code ${x.resultStatus.code ?? '?'}] ${String(x.resultStatus.message ?? '').slice(0, 300)}`.trim());
 }
 /** 광고 지역을 시·도로(국내 그 지역만, abroad = 해외도). 빈 배열 = 네이버 기본(전국·해외). 네이버 화면에서 시·군·구·동까지 정한 광고그룹은 덮어쓰지 않음(409) */
 async function setRegion(a: NaverAcc, adgroupId: string, region: string[], abroad: boolean) {
@@ -526,7 +621,7 @@ async function actLocal(u: SessionUser, id: string, i: z.infer<typeof planAction
     const have = new Set((p.plan.keywords as string[]).map(norm));
     add = [...new Map((i.keywords ?? []).map((k) => [norm(k), k.trim()] as [string, string])).values()].filter((k) => !have.has(norm(k)));
     if (!add.length) throw badRequest('고른 키워드가 이미 세팅안에 있습니다');
-    if (p.plan.keywords.length + add.length > 50) throw badRequest(`키워드는 세팅안마다 50개까지입니다(지금 ${p.plan.keywords.length}개)`);
+    if (p.plan.keywords.length + add.length > PLAN_KEYWORDS_MAX) throw badRequest(`키워드는 세팅안마다 ${PLAN_KEYWORDS_MAX}개까지입니다(지금 ${p.plan.keywords.length}개)`);
   }
   const [lock] = await sql`update mkt_ad_plans set external = external || ${sql.json({ localAt: new Date().toISOString() } as never)}
     where id = ${id} and coalesce((external->>'localAt')::timestamptz, 'epoch') < now() - interval '2 minutes' returning id`;
@@ -622,6 +717,24 @@ export async function localKeywords(u: SessionUser, i: z.infer<typeof localKwInp
   const asked = new Set(combos.map((c) => norm(c.keyword)));
   const related = vol.related.filter((r) => !asked.has(norm(r.keyword)) && areas.some((ar) => norm(r.keyword).includes(norm(ar)))).slice(0, 10);
   return { rows, related };
+}
+
+export const combineInput = z.object({ accountId: z.string().uuid(),
+  groups: z.array(z.object({ words: z.array(z.string().trim().min(1).max(20)).min(1).max(20), optional: z.boolean().default(false) })).min(2).max(4) });
+/**
+ * #499-2 키워드 N단 조합기(테크트리 EP.7): 단어 그룹 2~4개 조합(최대 300개) + 네이버 월 검색량(키워드 도구). 고르는 것은 사람 —
+ * 영상은 검색량 0인 조합도 등록하지만 기본은 검색량 있는 것만 고르고, 화면 '검색량 낮음도 함께 넣기'로 모두 고를 수 있음.
+ */
+export async function combineVolumes(u: SessionUser, i: z.infer<typeof combineInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const a = await naverAcc(tenantOf(u), i.accountId);
+  const { keywords, truncated } = combineKeywords(i.groups);
+  if (!keywords.length) throw badRequest('만들 조합이 없습니다 — 그룹마다 단어를 넣어 주세요(조합은 25자 이내)');
+  const vol = await keywordVolumes(a, keywords, { tolerant: true });
+  const rows = keywords.map((k) => { const v = vol.get(norm(k)); const total = v ? v.pc + v.mobile : 0; return { keyword: k, pc: v?.pc ?? null, mobile: v?.mobile ?? null, total, low: total < 20 }; })
+    .sort((x, y) => y.total - x.total);
+  const asked = new Set(keywords.map(norm));
+  return { rows, truncated, failed: vol.failed, related: vol.related.filter((r) => !asked.has(norm(r.keyword))).slice(0, 10) };
 }
 
 // ---------------- 광고 최적화 1차 ③ 통화 기반 최적화: 키워드 끄기·켜기 ----------------
