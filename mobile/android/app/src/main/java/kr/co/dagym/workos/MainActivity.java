@@ -20,6 +20,8 @@ import com.getcapacitor.BridgeWebViewClient;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // 1.1.3: 웹이 이 빌드의 네이티브 기능(알림창 버튼 등)을 묻는 플러그인 — super.onCreate 전에 등록
+        registerPlugin(WorkinNativePlugin.class);
         super.onCreate(savedInstanceState);
         // 서버가 보내는 FCM 알림 채널(work)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
