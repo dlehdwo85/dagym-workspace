@@ -8,6 +8,7 @@ import { CHANNELS } from './Marketing';
 import { BrandVideoKit } from './BrandVideoKit';
 import { MediaPick } from './MediaPick';
 import { Studio } from './Studio';
+import { CarouselStudio } from './Carousel';
 import { BrandVoice, type Voice } from './BrandVoice';
 import { MODE_HINT, ModeChip, ModeToggle, asMode, type Mode } from './ModeToggle';
 import { useSearchParams } from 'next/navigation';
@@ -29,7 +30,7 @@ const lim = (used: number, max: number | null) => (max === null ? `${used} (한�
 
 /** V41 4-3 + V43: 자동 제작 — 요금제·한도·사용량, 일정·마감·알림, 브랜드 키트, 주간 규칙, 제작 요청 카드, 크레딧 원장 */
 export function Automation() {
-  const tab = useSearchParams().get('tab') === 'studio' ? 'studio' : 'rules'; // 대표 10/20 19:00: '제작의뢰실' 탭
+  const tabQ = useSearchParams().get('tab'); const tab = tabQ === 'studio' || tabQ === 'cards' ? tabQ : 'rules'; // 대표 10/20 19:00: '제작의뢰실' 탭 · #499-5 '카드뉴스' 탭
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 고르기 없음
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '', mode: 'content' as Mode });
@@ -66,8 +67,8 @@ export function Automation() {
   const num = (v: string) => (v === '' ? null : Number(v));
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="mkt-automation">
-      <div className="flex gap-1 border-b border-line" role="tablist">{([['rules', '자동 제작'], ['studio', '제작의뢰실']] as [string, string][]).map(([k, l]) => <Link key={k} href={k === 'studio' ? '/s/marketing/automation?tab=studio' : '/s/marketing/automation'} role="tab" aria-selected={tab === k} className={cx('px-3 py-1.5 text-sm', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`auto-tab-${k}`}>{l}</Link>)}</div>
-      {tab === 'studio' ? <><h1 className="text-xl font-bold" style={{ color: C }}>제작의뢰실</h1><Studio /></> : <>
+      <div className="flex gap-1 border-b border-line" role="tablist">{([['rules', '자동 제작'], ['studio', '제작의뢰실'], ['cards', '카드뉴스']] as [string, string][]).map(([k, l]) => <Link key={k} href={k === 'rules' ? '/s/marketing/automation' : `/s/marketing/automation?tab=${k}`} role="tab" aria-selected={tab === k} className={cx('px-3 py-1.5 text-sm', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`auto-tab-${k}`}>{l}</Link>)}</div>
+      {tab === 'cards' ? <><h1 className="text-xl font-bold" style={{ color: C }}>카드뉴스</h1><CarouselStudio /></> : tab === 'studio' ? <><h1 className="text-xl font-bold" style={{ color: C }}>제작의뢰실</h1><Studio /></> : <>
       <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>자동 제작</h1>
         {ed && <Button size="sm" variant="secondary" className="ml-auto" onClick={runNow} disabled={busy} data-testid="auto-run">{busy ? '도는 중…' : '지금 한 번 돌리기'}</Button>}</div>
       <p className="text-xs text-ink-2" data-testid="auto-ai-note">AI 원고는 회사 AI 한도(이번 달 ${data.usage.companyAiUsd} / ${data.usage.companyAiLimitUsd})와 마케팅 AI 월 한도 중 먼저 닿는 쪽에서 멈추고, 받는 사람에게 하루 한 번 알립니다. 회사 전체 AI 사용은 <a className="underline" href="/admin/usage">관리 → 사용량·요금제</a>(기능별 “마케팅”).</p>
