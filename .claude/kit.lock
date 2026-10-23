@@ -1,0 +1,31 @@
+# claude-company-kit 복사본 목록 — 여기 적힌 파일은 키트에서 고치고 다시 sync 하세요
+source: https://github.com/dlehdwo85/claude-company-kit
+commit: be00149538996c933ebb4f433da9580a72f7023d
+date: 2026-10-23T03:13:00Z
+.claude/skills/break-ui/CATALOG.md
+.claude/skills/break-ui/LICENSE
+.claude/skills/break-ui/SKILL.md
+.claude/skills/break-ui/SOURCE.md
+.claude/skills/emil-design-eng/LICENSE
+.claude/skills/emil-design-eng/SKILL.md
+.claude/skills/emil-design-eng/SOURCE.md
+.claude/skills/kit-design-system/SKILL.md
+.claude/skills/kit-ko-copy/SKILL.md
+.claude/skills/kit-reference-match/SKILL.md
+.claude/skills/kit-reference-match/scripts/LICENSE-replica-skill
+.claude/skills/kit-reference-match/scripts/contrast.py
+.claude/skills/kit-reference-match/scripts/imgdiff.py
+.claude/skills/kit-reference-match/scripts/parity.py
+.claude/skills/kit-reference-match/templates/features.csv
+.claude/skills/review-animations/LICENSE
+.claude/skills/review-animations/SKILL.md
+.claude/skills/review-animations/SOURCE.md
+.claude/skills/review-animations/STANDARDS.md
+.claude/agents/kit-ads-launch-gate.md
+.claude/agents/kit-design-reviewer.md
+.claude/agents/kit-marketing-qa.md
+.claude/agents/kit-prod-verifier.md
+.claude/agents/kit-reference-matcher.md
+.claude/agents/kit-request-auditor.md
+.claude/agents/kit-sales-data-qa.md
+.claude/rules/company-basics.md

@@ -1,0 +1,7 @@
+feature,area,priority,original,clone,notes
+계약서 파일(PDF·한글·워드·사진) 올리기,문서,must,yes,no,대표가 콕 집은 부분은 must
+서명자마다 색을 정하고 서명 칸 끌어 놓기,위치 지정,must,yes,no,
+상태별 계약 목록(내 서명 필요·상대 서명 필요·완료),목록,must,yes,no,
+대면 계약(한 기기에서 차례로 서명),계약 방법,should,yes,no,
+참조자(서명 없이 완료본만 받음),참여자,should,yes,no,
+대량 전송,반복,could,yes,skip,3차로 미룸 — 이유를 꼭 적기
