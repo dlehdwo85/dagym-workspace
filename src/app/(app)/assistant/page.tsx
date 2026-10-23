@@ -14,7 +14,8 @@ import { VoiceButton } from '@/components/voice';
 import { hearOnce, keepScreenOn, speak, stopSpeaking, yesNo } from '@/components/speak';
 import { AiBudgetBar, costLine, type Budget } from '@/components/AiBudget';
 import { DocJobCard } from '@/components/DocJobCard';
-import { ChatComposer, DoneSummary, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
+import { ChatComposer, DoneSummary, LiveAnswer, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
+import { AiText } from '@/components/AiText';
 import { SpecialProposal } from '@/components/ProposalCard';
 
 type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: Record<string, any> & { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; tasks?: string[]; taskDue?: string; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
@@ -72,7 +73,7 @@ export default function AssistantPage() {
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
   const started = useRef(false);
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy]);
+  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy, conv.live]); // #497 R44 답이 이어서 나오는 동안에도
 
   // V12 8번: 자료(사진·PDF·엑셀)를 붙여 요청 → 자료실 "AI 요청 첨부"에 저장하고 AI 가 내용을 읽음
   // 대표 요청(2026-10-14): 사진은 버튼·끌어 놓기·붙여넣기(Ctrl+V) 모두
@@ -202,7 +203,7 @@ export default function AssistantPage() {
             : m.note ? <div className="rounded-input bg-green-50 px-2.5 py-1 text-xs text-green-800" data-testid="ai-kept">✓ {m.text}</div> : <>
             <div className={cx('max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.blocked ? 'ai-blocked' : m.role === 'user' ? 'ai-user-msg' : 'ai-answer'}>
               {m.files?.length ? <div className="mb-1 text-xs opacity-80">📎 {m.files.join(', ')}</div> : null}
-              {m.text}
+              {m.role === 'assistant' && !m.error ? <AiText text={m.text} /> : m.text}
               {!!m.proposals?.length && (
                 <div className="mt-2 space-y-1.5">
                   {m.proposals.map((p) => (p.kind === 'draft_sms' || p.kind === 'draft_quote') ? <SpecialProposal key={p.id} p={p} onDecided={(a, patch) => decide(i, p, a, patch)} /> : (
@@ -239,7 +240,7 @@ export default function AssistantPage() {
             </>}
           </div>
         ))}
-        {busy && <div className="flex items-center gap-2 text-sm text-ink-3"><Loader2 className="size-4 animate-spin" />찾아보는 중…</div>}
+        {busy && <LiveAnswer live={conv.live} className="max-w-[88%] py-2" />}
         <div ref={end} />
       </div>
       </DropZone>

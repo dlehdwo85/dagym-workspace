@@ -63,6 +63,7 @@ import { mktCarousel } from './mktCarousel.step.mjs';
 import { mktAdRefs } from './mktAdRefs.step.mjs';
 import { mktTeam } from './mktTeam.step.mjs';
 import { mktPreview } from './mktPreview.step.mjs';
+import { aiStream } from './aiStream.step.mjs';
 import { supportPrograms } from './support.step.mjs';
 import { mktVideo } from './mktVideo.step.mjs';
 import { coAssign } from './coAssign.step.mjs';
@@ -2500,6 +2501,7 @@ await step('#499-5 카드뉴스 장별 생성기: 자동 제작 › 카드뉴스
 await step('#499-6 경쟁 광고 보관함: 운영실 [광고 넣기](업체·링크·게재 시작·비슷한 소재·대본 — 보내는 값) → 질문형 → 칩 거르기 → ★ → 자세히·AI 분석(뼈대) → 3개 골라 공통 구조 분석(대본 3안·제작의뢰실 링크) → 주간 분석 지금 · 휴대폰 폭', () => mktAdRefs({ owner, ctx, sql, BASE, SHOTS }));
 await step('#499-7 AI 마케팅팀: 사이드바 → 역할 7개(기획 담당 꺼짐·예산 담당 항상) → 켜기 → [오늘 주제 받기](3안·형식·근거) → 반려(사유 칩) → 채택(카드뉴스) → 디자인 담당이 그려서 승인 대기([열기]) → 기억시키기 · 휴대폰 폭', () => mktTeam({ owner, ctx, sql, BASE, SHOTS }));
 await step('#497 R06 채널별 실제 게시 화면 미리보기: 인스타 피드(3장 옆으로 넘기기·n/N·점·2번째 장 보임·더 보기·해시태그·계정 이름) · 승인함 카드 [게시 화면으로 보기] · 페이스북(글 위·사진 격자) · 릴스(세로·오른쪽 아이콘·팔로우) · 스레드 · 블로그(문단 사이 사진) · 유튜브 · 휴대폰 손가락 넘기기', () => mktPreview({ owner, ctx, sql, BASE, SHOTS }));
+await step('#497 R44 AI 비서 답 실시간 출력: 쓰는 중 말풍선(글이 이어서·[멈춤]) → 끝나면 서식(제목·굵게·목록·표·링크) · 도구 단계 한 줄 · 패널 같음 · 휴대폰 표 넘침 없음', () => aiStream({ browser, desk, owner, BASE, FAKE, SHOTS }));
 await step('#494 메타 광고 자동 세팅: 광고 운영 메타 칸(초안 대기 줄·승인함 링크·권한 다시 연결) → [새 메타 광고] 창(양식 번호 직접·개인정보 확인·자료실 소재·반경·자동 일시정지) 저장 → 승인함 광고 초안 탭(배지·요약·피드 미리보기·확인 문구) → 휴대폰 폭 → [반려] 사유 → 보관', () => metaAuto({ owner, ctx, sql, BASE, SHOTS }));
 await step('#450 영업실 지원사업: 사이드바 메뉴 → 맞춤 목록(1차 판단·조건 칩·D-day·자격 안 맞는 공고 빼기) → [AI 판단] → [신청 준비] 담당 업무 → 영업 홈 마감 임박 카드 → 상세(준비 서류·진행) → [신청 완료] → [직접 추가] 지난 신청 → 신청·결과 탭 → 휴대폰 폭', () => supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#454 영상 파이프라인 v2: 플랫폼 운영 내레이션(TTS) 카드·연결 시험 → 브랜드 키트 영상 끝 화면·자막 → 제작의뢰실 릴스 준비 상태 → [생성] 장면별 생성·검수·합성 → 장면 칩(실제 화면·검수 ✓)·완성 영상·승인 대기 → 휴대폰 폭', () => mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }));

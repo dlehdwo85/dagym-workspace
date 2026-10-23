@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Copy, Pencil, RotateCw, Send, Square } from 'lucide-react';
+import { Copy, Loader2, Pencil, RotateCw, Send, Square } from 'lucide-react';
 import Link from 'next/link';
-import { api } from './client';
+import { apiStream } from './client';
+import { AiText } from './AiText';
 import { Button, cx, inputCls, toast } from './ui';
 
 /**
@@ -10,8 +11,14 @@ import { Button, cx, inputCls, toast } from './ui';
  * A1 휴대폰 Enter = 줄바꿈(보내기는 버튼), PC Enter = 보내기·Shift+Enter = 줄바꿈, 입력창 자동 높이(최대 6줄)
  * A2 답을 기다리는 동안 [보내기] → [멈춤] — 요청을 끊으면 서버도 AI 호출을 멈추고 제안을 만들지 않는다
  * A3 마지막 내 말 [수정]·AI 답 [다시 답하기]·모든 말 [복사]
+ * #497 R44 답을 글자 단위로 이어서 보여 준다(서버 SSE) — 도구를 쓰는 동안은 무엇을 하는지 한 줄, 끝나면 정식 답으로 바꾼다
  */
 export type ChatMsg = { role: 'user' | 'assistant'; text: string; files?: string[]; proposals?: any[]; error?: boolean; blocked?: boolean; stopped?: boolean; note?: boolean; docJobs?: string[]; costKrw?: number };
+/** 쓰는 중인 답: 지금까지 온 글자 · 도구 단계면 무엇을 하는지 */
+export type LiveReply = { text: string; status?: string };
+const TOOL_LABEL: [RegExp, string][] = [[/^propose_|^draft_/, '제안 만드는 중…'], [/run_file_task|template/, '문서 준비 중…'], [/^web_|fetch_page/, '웹에서 찾는 중…'],
+  [/library|file/, '자료 찾는 중…'], [/event|calendar|slot|schedule/, '일정 확인 중…'], [/task/, '업무 확인 중…']];
+export const toolLabel = (names: string[]) => TOOL_LABEL.find(([re]) => names.some((n) => re.test(n)))?.[1] ?? '찾아보는 중…';
 
 export function useAiConversation<M extends ChatMsg>(opts: {
   /** 이번 요청의 본문(대화 id·맥락·첨부) */
@@ -22,6 +29,7 @@ export function useAiConversation<M extends ChatMsg>(opts: {
 }) {
   const [msgs, setMsgs] = useState<M[]>([]);
   const [busy, setBusy] = useState(false);
+  const [live, setLive] = useState<LiveReply | null>(null);
   const ac = useRef<AbortController | null>(null);
   const replacing = useRef<string | null>(null); // 고쳐 보내기·다시 답하기: 바꿀 원래 질문
   const o = useRef(opts); o.current = opts;
@@ -30,10 +38,17 @@ export function useAiConversation<M extends ChatMsg>(opts: {
   async function send(text: string, files: { id: string; name: string }[] = [], shownFiles?: string[]) {
     const replaceText = replacing.current; replacing.current = null;
     setMsgs((m) => [...m, { role: 'user', text, files: shownFiles ?? (files.length ? files.map((f) => f.name) : undefined) } as M]);
-    setBusy(true);
+    setBusy(true); setLive({ text: '' });
     const ctl = new AbortController(); ac.current = ctl;
     try {
-      const r = await api('/api/ai/chat', { body: { ...o.current.body(text, files.map((f) => f.id)), ...(replaceText !== null ? { replaceLast: true, replaceText } : {}) }, signal: ctl.signal });
+      const r = await apiStream('/api/ai/chat', { ...o.current.body(text, files.map((f) => f.id)), ...(replaceText !== null ? { replaceLast: true, replaceText } : {}), stream: true }, {
+        signal: ctl.signal,
+        onEvent: (e) => {
+          if (ctl.signal.aborted) return;
+          if (e.type === 'text') setLive((l) => ({ text: (l?.text ?? '') + e.delta }));
+          else if (e.type === 'tools') setLive({ text: '', status: toolLabel(e.names ?? []) }); // 도구 전에 쓴 말("확인해 볼게요")은 지우고 하는 일 표시
+        },
+      });
       if (ctl.signal.aborted) return;
       o.current.onReply?.(r);
       if (r.stopped) return;
@@ -42,13 +57,13 @@ export function useAiConversation<M extends ChatMsg>(opts: {
       if (ctl.signal.aborted) return;
       setMsgs((m) => [...m, { role: 'assistant', text: e.message, error: true } as M]);
     } finally {
-      if (ac.current === ctl) { ac.current = null; setBusy(false); }
+      if (ac.current === ctl) { ac.current = null; setBusy(false); setLive(null); }
     }
   }
   /** [멈춤]: 요청을 끊고 "멈춤" 표시만 남긴다 */
   function stop(mark = true) {
     if (!ac.current) return;
-    ac.current.abort(); ac.current = null; setBusy(false);
+    ac.current.abort(); ac.current = null; setBusy(false); setLive(null);
     if (mark) setMsgs((m) => [...m, { role: 'assistant', text: '멈춤', stopped: true } as M]);
   }
   /** 이 질문(i)과 그 뒤를 화면에서 걷어 낸다 — 이미 실행된 제안은 "이미 처리됨"으로 남김 */
@@ -78,7 +93,20 @@ export function useAiConversation<M extends ChatMsg>(opts: {
   }
   const cancelEdit = () => { replacing.current = null; };
   useEffect(() => () => ac.current?.abort(), []);
-  return { msgs, setMsgs, busy, send, stop, editLast, regenerate, cancelEdit, lastUserIndex: lastUser };
+  return { msgs, setMsgs, busy, live, send, stop, editLast, regenerate, cancelEdit, lastUserIndex: lastUser };
+}
+
+/** #497 R44 쓰는 중인 답(화면·패널 공통): 글자가 오기 전·도구 단계는 한 줄 안내, 글자가 오면 서식 그대로 이어서 + 커서 */
+export function LiveAnswer({ live, className }: { live: LiveReply | null; className?: string }) {
+  if (!live) return null;
+  if (!live.text) return <div className="flex items-center gap-2 text-sm text-ink-3" data-testid="ai-live-status"><Loader2 className="size-4 animate-spin" />{live.status ?? '찾아보는 중…'}</div>;
+  return (
+    <div className="flex flex-col items-start">
+      <div className={cx('rounded-2xl bg-slate-100 px-3 text-sm text-ink', className)} data-testid="ai-live" aria-live="polite" aria-busy="true">
+        <AiText text={live.text} tail={<span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-ink-3 align-[-2px]" aria-hidden />} />
+      </div>
+    </div>
+  );
 }
 
 const touchInput = () => typeof window !== 'undefined' && (!!window.matchMedia?.('(pointer: coarse)').matches || window.innerWidth < 640);

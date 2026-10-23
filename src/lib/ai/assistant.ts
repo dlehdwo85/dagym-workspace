@@ -765,8 +765,12 @@ const chatInput = z.object({
   replaceLast: z.boolean().optional(),
   /** 바꿀 원래 질문 — 서버의 마지막 질문과 같을 때만 지운다(멈춘 요청이 늦게 저장되는 경우 엉뚱한 질문을 지우지 않게) */
   replaceText: z.string().max(20000).optional(),
+  /** #497 R44: 답을 글자 단위로 받기(SSE) — 화면 대화창만. 없으면 지금처럼 한 번에 */
+  stream: z.boolean().optional(),
 });
 export { chatInput };
+/** #497 R44 스트리밍 중 화면에 보내는 것: 시작(대화 id) · 답 글자 조각 · 도구 단계(이번 단계 글은 지우고 '찾아보는 중' 표시) */
+export type ChatEvent = { type: 'start'; threadId: string } | { type: 'text'; delta: string } | { type: 'tools'; names: string[] };
 
 /** 공간 맥락: 그 공간 권한이 있을 때만 한 줄 요약(영업 = 영업기회, 마케팅 = 승인 대기·광고·전화 문의). 권한 없으면 아무것도 안 붙임 */
 async function spaceContext(u: SessionUser, space: 'sales' | 'marketing') {
@@ -854,7 +858,7 @@ const DOC_SYSTEM = `당신은 사내 서비스 "워크인"의 문서 담당 AI �
 - run_file_task 뒤에는 "만들기 시작했습니다(1~3분, 아래 카드)"라고만 짧게. fill_template 뒤에는 결과·경고를 한두 줄로.
 - 답은 한국어로 짧게.`;
 
-export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, providerArg?: AiProvider, signal?: AbortSignal) {
+export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, providerArg?: AiProvider, signal?: AbortSignal, onEvent?: (e: ChatEvent) => void) {
   // 로컬 10/20(심사): 체험 계정도 대화는 됨(체험 조직 한도 안) — 제안 확인·자료로 채우기 등 바깥에 영향 주는 것은 그대로 막음(denyDemo)
   if (!aiEnabled()) throw notFound();
   await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use'); // V13 메뉴 권한
@@ -879,6 +883,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   const blocked = await T.precheck(u, userText, i.threadId ?? null, !!i.fileIds?.length);
   const threadId = i.threadId ?? (await T.startThread(u, userText, i.taskId ?? null, db(), i.context));
+  onEvent?.({ type: 'start', threadId }); // 여기까지 오면 사전 점검 통과 — 스트리밍 응답을 연다
   const fileNames = i.fileIds?.length ? (await db()<{ file_name: string }[]>`select file_name from library_files where id = any(${i.fileIds}::uuid[])`).map((f) => f.file_name) : [];
   if (blocked) {
     await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: blocked, status: 'blocked', reason: blocked });
@@ -932,7 +937,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   for (let step = 0; step < MAX_STEPS; step++) {
     if (signal?.aborted) break;
     tools = pick(); // more_tools 를 부르면 다음 단계부터 모든 도구
-    const r = await provider.chat({ system, messages, tools, signal }).catch((e: any) => {
+    const r = await provider.chat({ system, messages, tools, signal, ...(onEvent ? { onText: (delta: string) => onEvent({ type: 'text', delta }) } : {}) }).catch((e: any) => {
       if (signal?.aborted) return null; // 부록 A2: 사용자가 멈춤
       if (e instanceof HttpError) throw e; // V23-1: 크레딧 부족·요청 한도·일시 장애 문구
       throw new HttpError(502, 'ai_unavailable', `AI 서버 응답 오류${e?.status ? ` (${e.status})` : ''}. 잠시 후 다시 시도하세요.`);
@@ -949,6 +954,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     if (r.stop_reason !== 'tool_use') { reply = text || (r.stop_reason === 'max_tokens' ? '답이 너무 길어 중간에 끊겼습니다. 범위를 좁혀 다시 요청해 주세요.' : ''); break; }
     messages.push({ role: 'assistant', content: r.content as never });
     const uses = r.content.filter((b): b is Extract<typeof b, { type: 'tool_use' }> => b.type === 'tool_use');
+    onEvent?.({ type: 'tools', names: uses.map((t) => t.name) });
     const results = await Promise.all(uses.map(async (t) => {
       steps.push(t.name);
       try {
