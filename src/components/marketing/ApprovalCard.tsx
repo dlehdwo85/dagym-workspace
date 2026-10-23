@@ -141,8 +141,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         <div className="mt-2 flex flex-wrap gap-2">
           {c.status !== 'approved' && !noVisual && <Button size="sm" onClick={() => decide('approve')} data-testid="card-approve">{c.reapprove_from ? `수정본 v${c.current_version} 승인` : '승인'}</Button>}
           <Button size="sm" variant="secondary" onClick={() => setMode('changes')} data-testid="card-changes">{c.status === 'approved' ? '게시 전 수정 요청' : '수정 요청'}</Button>
-          {/* #516 후속: 서버가 그린 시안이 어색하면(바탕 글자 겹침 등) 써 본 사진을 빼고 무료로 다시 그림 */}
-          {c.status !== 'approved' && media.length === 1 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" onClick={() => makeNow(true)} disabled={making} data-testid="card-redraw">{making ? '그리는 중…' : '다시 그리기(무료)'}</Button>}
+          {/* #516 후속: 서버가 그린 시안이 어색하면(바탕 글자 겹침 등) 브랜드 색 바탕으로 무료로 다시 그림(블로그는 대표 이미지만) */}
+          {c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" onClick={() => makeNow(true)} disabled={making} data-testid="card-redraw">{making ? '그리는 중…' : '브랜드 색으로 다시 그리기'}</Button>}
           {/* #516 (a): 서버가 그린 시안 → Higgsfield AI 이미지로 바꾸기는 크레딧이 들어 따로(제작 요청 카드·한도 확인) */}
           {c.auto && c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" data-testid="card-ai-image"
             onClick={() => confirm(`AI 이미지로 다시 만들면 약 ${AI_REGEN_CREDITS}크레딧이 듭니다(이번 달 한도를 넘으면 한도 승인 뒤 제작). 지금 시안은 그대로 두고 새 이미지가 붙으면 다시 승인 요청이 옵니다. 진행할까요?`) && decide('changes', AI_REGEN)}>AI 이미지로 다시 · 약 {AI_REGEN_CREDITS}크레딧</Button>}

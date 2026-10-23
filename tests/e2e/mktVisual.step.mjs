@@ -49,9 +49,9 @@ export async function mktVisual({ owner, ctx, sql, BASE, SHOTS }) {
   // 손 글(페이스북)도 [지금 만들기] 가능
   await owner.getByTestId('mkt-no-visual').getByTestId('approval-card').filter({ hasText: 'E2E 시안 없는 손 글' }).getByTestId('approval-make-visual').waitFor();
   assert.ok(manual.id);
-  // #516 후속(로컬 10/24 글자 겹침): 서버가 그린 시안은 [다시 그리기(무료)] — 써 본 사진을 빼고 새 버전, 그대로 승인 대기
+  // #516 후속(로컬 10/24 글자 겹침): 서버가 그린 시안은 [브랜드 색으로 다시 그리기](무료) — 새 버전, 그대로 승인 대기
   const redraw = owner.getByTestId('approval-card').filter({ hasText: 'E2E 시안 없는 자동 글' }).getByTestId('card-redraw');
-  assert.equal(await redraw.innerText(), '다시 그리기(무료)');
+  assert.equal(await redraw.innerText(), '브랜드 색으로 다시 그리기');
   await redraw.click();
   let w;
   for (let i = 0; i < 80; i++) { [w] = await sql`select c.current_version, c.status, v.note from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = ${ac.id}`; if (w.current_version === 3) break; await owner.waitForTimeout(250); }
