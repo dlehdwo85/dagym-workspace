@@ -1,6 +1,7 @@
 // 대표 10/20 20:00 ④ (#116) 전자계약서 1차 — 관리 › 사용자 관리 '전자계약서 발송'.
 // 서식 2종 기본(근로계약서·비밀유지서약서) + 회사 서식, 직원 초대와 함께 또는 따로 발송(메일 링크 + 접속 코드는 문자로 넘기거나 메일),
 // 가입 없이 서명(그리기·도장 이미지), 서명자 여럿·순서, 완료 PDF 를 자료실(인사/전자계약서, 기밀)에 보관, 감사 추적(참여자·시각·IP·기기). PASS 본인인증은 2차.
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { db, type Sql } from './db';
 import { badRequest, conflict, forbidden, notFound, HttpError } from './errors';
@@ -10,13 +11,13 @@ import { tenantOf, type SessionUser } from './types';
 import { zUuid } from './api';
 import { newToken, sha256 } from './crypto';
 import { appUrl, sendMail } from './mail';
-import { putObject } from './storage';
-import { renderContractPdf, ROLE_LABEL } from './contractPdf';
+import { getObject, objectSize, putObject, uploadTargetFor } from './storage';
+import { renderContractPdf, renderFieldsPdf, ROLE_LABEL, unrotatePdf } from './contractPdf';
 
 export type TField = { key: string; label: string; type: 'text' | 'date' | 'number' | 'textarea'; required?: boolean; hint?: string };
 export const tfieldInput = z.object({ key: z.string().regex(/^[a-z][a-z0-9_]{0,29}$/, '영문 소문자 키'), label: z.string().trim().min(1).max(40), type: z.enum(['text', 'date', 'number', 'textarea']), required: z.boolean().optional(), hint: z.string().trim().max(120).optional() });
 export const templateInput = z.object({ kind: z.enum(['employment', 'nda', 'custom']), name: z.string().trim().min(1).max(60), body: z.string().trim().min(10).max(40000), fields: z.array(tfieldInput).max(30), active: z.boolean().optional() });
-export const signerInput = z.object({ role: z.enum(['employee', 'company', 'witness']), name: z.string().trim().min(1).max(60), email: z.string().trim().email().optional(), phone: z.string().trim().max(30).optional(), userId: zUuid.optional(), ord: z.number().int().min(1).max(9).optional() });
+export const signerInput = z.object({ role: z.enum(['employee', 'company', 'witness', 'party']), name: z.string().trim().min(1).max(60), email: z.string().trim().email().optional(), phone: z.string().trim().max(30).optional(), userId: zUuid.optional(), ord: z.number().int().min(1).max(9).optional() });
 export const contractInput = z.object({
   templateId: zUuid.optional(), kind: z.enum(['employment', 'nda', 'custom']).optional(),
   userId: zUuid.optional(),                                    // 대상 직원(초대 중 포함) — 이름·이메일 자동
@@ -180,7 +181,8 @@ async function issue(sql: Sql, signerId: string) {
   return { token, code, link: `${appUrl()}/sign/${token}` };
 }
 type SignerRow = { id: string; contract_id: string; ord: number; role: string; name: string; email: string | null; phone: string | null; user_id: string | null; status: string; code_attempts: number; code_hash: string; signed_at: Date | null; sign_method: string | null; signature_png: Buffer | null; decline_reason: string | null; opened_at: Date | null; ip: string | null; user_agent: string | null };
-type ContractRow = { id: string; tenant: string; kind: string; title: string; doc_no: string | null; body: string; data: any; user_id: string | null; status: string; code_by: string; file_id: string | null; expires_at: Date | null; completed_at: Date | null; created_by: string | null; created_at: Date };
+type ContractRow = { id: string; tenant: string; kind: string; title: string; doc_no: string | null; body: string; data: any; user_id: string | null; status: string; code_by: string; file_id: string | null; expires_at: Date | null; completed_at: Date | null; created_by: string | null; created_at: Date;
+  /** 2차: 올린 원본 PDF(없으면 1차 텍스트 서식) */ source_key?: string | null; page_count?: number | null; original_sha256?: string | null; message?: string | null };
 
 /** 이번 순서(ord) 서명자에게 메일(링크) + 코드(메일이면 두 번째 메일). 문자 전달용 문구를 돌려준다 */
 async function sendOrd(sql: Sql, c: ContractRow, ord: number, resend = false) {
@@ -192,7 +194,7 @@ async function sendOrd(sql: Sql, c: ContractRow, ord: number, resend = false) {
     let mail: 'sent' | 'dev' | 'none' | 'failed' = 'none';
     if (s.email) {
       try {
-        mail = await sendMail(s.email, `[${company.name}] ${c.title} 서명 요청`, `${s.name}님, ${company.name}에서 보낸 "${c.title}" 에 전자서명해 주세요.\n\n서명 링크: ${link}\n${c.code_by === 'mail' ? `접속 코드: ${code}\n` : '접속 코드(6자리)는 담당자가 문자로 따로 보내 드립니다.\n'}\n링크는 ${c.expires_at ? new Date(c.expires_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }) : '기한'}까지 유효하며, 본인만 열어 주세요. 문의: ${company.name}`);
+        mail = await sendMail(s.email, `[${company.name}] ${c.title} 서명 요청`, `${s.name}님, ${company.name}에서 보낸 "${c.title}" 에 전자서명해 주세요.\n${c.message ? `\n전하는 말: ${c.message}\n` : ''}\n서명 링크: ${link}\n${c.code_by === 'mail' ? `접속 코드: ${code}\n` : '접속 코드(6자리)는 담당자가 문자로 따로 보내 드립니다.\n'}\n링크는 ${c.expires_at ? new Date(c.expires_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }) : '기한'}까지 유효하며, 본인만 열어 주세요. 문의: ${company.name}`);
       } catch { mail = 'failed'; }
     }
     await event(sql, c.id, resend ? 'resent' : 'sent', { signerId: s.id, detail: { mail, codeBy: c.code_by } });
@@ -248,14 +250,126 @@ export async function createContract(u: SessionUser, i: z.infer<typeof contractI
   return r;
 }
 
-export async function listContracts(u: SessionUser, f: { userId?: string; status?: string } = {}) {
+/** 2차(글로싸인 레퍼런스) 상태 바구니: 내 서명 필요(내 차례) · 상대 서명 필요(진행 중, 내 차례 아님) · 작성 중 · 완료 · 취소·거절·만료 */
+export const BUCKETS = ['mine', 'others', 'draft', 'done', 'closed'] as const;
+const bucketOf = (r: { status: string; signers: { userId: string | null; ord: number; status: string }[] | null }, me: string) => {
+  if (r.status === 'draft') return 'draft';
+  if (r.status === 'completed') return 'done';
+  if (!['sent', 'partially_signed'].includes(r.status)) return 'closed';
+  const ss = r.signers ?? [];
+  return ss.some((s) => s.userId === me && s.status === 'pending' && !ss.some((x) => x.ord < s.ord && x.status !== 'signed')) ? 'mine' : 'others';
+};
+export async function listContracts(u: SessionUser, f: { userId?: string; status?: string; bucket?: string } = {}) {
   await requireView(u);
   const sql = db(); const t = tenantOf(u);
-  const rows = await sql<any[]>`select c.id, c.kind, c.title, c.doc_no, c.status, c.user_id, c.file_id, c.expires_at, c.completed_at, c.created_at, cb.name as created_by_name,
-      (select json_agg(json_build_object('id', s.id, 'ord', s.ord, 'role', s.role, 'name', s.name, 'status', s.status, 'signedAt', s.signed_at) order by s.ord, s.created_at) from contract_signers s where s.contract_id = c.id) as signers
+  const rows = await sql<any[]>`select c.id, c.kind, c.title, c.doc_no, c.status, c.user_id, c.file_id, c.expires_at, c.completed_at, c.created_at, c.created_by, cb.name as created_by_name, (c.source_key is not null) as is_pdf, c.page_count,
+      (select json_agg(json_build_object('id', s.id, 'ord', s.ord, 'role', s.role, 'name', s.name, 'status', s.status, 'signedAt', s.signed_at, 'userId', s.user_id, 'openedAt', s.opened_at) order by s.ord, s.created_at) from contract_signers s where s.contract_id = c.id) as signers
     from contracts c left join users cb on cb.id = c.created_by
     where c.tenant = ${t} ${f.userId ? sql`and c.user_id = ${f.userId}` : sql``} ${f.status ? sql`and c.status = ${f.status}` : sql``} order by c.created_at desc limit 300`;
-  return { contracts: rows };
+  const all = rows.map((r) => ({ ...r, bucket: bucketOf(r, u.id) }));
+  const counts = Object.fromEntries(BUCKETS.map((b) => [b, all.filter((r) => r.bucket === b).length]));
+  return { contracts: f.bucket && (BUCKETS as readonly string[]).includes(f.bucket) ? all.filter((r) => r.bucket === f.bucket) : all, counts };
+}
+
+// ---------------- 2차: 올린 계약서(PDF·사진) 위에 서명자별 칸 — 글로싸인 레퍼런스(docs/handoff/ECONTRACT_GLOSIGN_REFERENCE_2026-10-23.md) ----------------
+const MAX_SRC = 20 * 1024 * 1024;
+export const sourceUploadInput = z.object({ fileName: z.string().trim().min(1).max(200), mime: z.string().max(100), size: z.number().int().positive() });
+/** 계약서 원본 올릴 주소 — PDF·사진(png·jpg) 20MB. 한글·워드는 PDF 로 저장해 올리도록 안내 */
+export async function contractUploadTarget(u: SessionUser, i: z.infer<typeof sourceUploadInput>) {
+  await requireEdit(u);
+  if (!/^(application\/pdf|image\/(png|jpeg))$/.test(i.mime)) throw badRequest('PDF 또는 사진(png·jpg)만 올릴 수 있습니다 — 한글·워드 문서는 PDF로 저장해 올려 주세요');
+  if (i.size > MAX_SRC) throw badRequest('계약서 파일은 20MB까지입니다');
+  const key = `contract/${tenantOf(u)}/${crypto.randomUUID()}/${i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
+  return { key, upload: await uploadTargetFor(key, i.mime, i.size) };
+}
+/** 올린 원본 확인 — PDF 는 그대로, 사진은 A4 한 쪽 PDF 로 바꿔 저장(키 뒤에 .pdf). 쪽 수·해시 */
+async function loadSource(t: string, key: string, convert: boolean) {
+  if (!key.startsWith(`contract/${t}/`) || key.includes('..')) throw badRequest('잘못된 파일입니다');
+  const size = await objectSize(key);
+  if (size === null) throw badRequest('올린 파일을 찾을 수 없습니다. 다시 올려 주세요.');
+  if (size > MAX_SRC) throw badRequest('계약서 파일은 20MB까지입니다');
+  let buf = await getObject(key); let outKey = key;
+  const { PDFDocument } = await import('pdf-lib');
+  if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') {
+    const png = buf.subarray(0, 8).toString('hex') === '89504e470d0a1a0a', jpg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    if (!convert || (!png && !jpg)) throw badRequest('PDF 또는 사진(png·jpg)만 쓸 수 있습니다');
+    const doc = await PDFDocument.create();
+    const img = png ? await doc.embedPng(buf) : await doc.embedJpg(buf);
+    const [pw, ph] = img.width > img.height ? [841.89, 595.28] : [595.28, 841.89];
+    const sc = Math.min((pw - 40) / img.width, (ph - 40) / img.height);
+    doc.addPage([pw, ph]).drawImage(img, { x: (pw - img.width * sc) / 2, y: (ph - img.height * sc) / 2, width: img.width * sc, height: img.height * sc });
+    buf = Buffer.from(await doc.save()); outKey = `${key}.pdf`;
+    await putObject(outKey, buf, 'application/pdf');
+  }
+  if (convert) {
+    const flat = await unrotatePdf(buf).catch(() => null); // 회전된 쪽은 보이는 방향 그대로(칸 좌표가 완료본과 같게)
+    if (flat) { buf = flat; outKey = outKey.endsWith('.pdf') && outKey !== key ? outKey : `${key}.pdf`; await putObject(outKey, buf, 'application/pdf'); }
+  }
+  let pages = 0;
+  try { pages = (await PDFDocument.load(buf, { updateMetadata: false })).getPageCount(); }
+  catch (e) { throw badRequest(/encrypt/i.test(String((e as Error)?.message ?? e)) ? '암호가 걸린 PDF는 쓸 수 없습니다 — 암호를 풀어 다시 저장해 올려 주세요' : 'PDF를 읽을 수 없습니다 — 다시 저장해 올려 주세요'); }
+  if (!pages || pages > 50) throw badRequest('1~50쪽 PDF만 쓸 수 있습니다');
+  return { key: outKey, pages, sha256: createHash('sha256').update(buf).digest('hex'), bytes: buf };
+}
+export async function prepareSource(u: SessionUser, key: string) {
+  await requireEdit(u);
+  const r = await loadSource(tenantOf(u), key, true);
+  return { key: r.key, pages: r.pages, sha256: r.sha256 };
+}
+/** 편집기에서 쪽 그림을 그리려고 원본을 내려받음(우리 회사 키만) */
+export async function sourceBytes(u: SessionUser, key: string) {
+  await requireEdit(u);
+  return (await loadSource(tenantOf(u), key, false)).bytes;
+}
+export const pdfFieldInput = z.object({ signer: z.number().int().min(0).max(5), type: z.enum(['sign', 'stamp', 'text', 'date']), page: z.number().int().min(1).max(50),
+  x: z.number().min(0).max(1), y: z.number().min(0).max(1), w: z.number().min(0.01).max(1), h: z.number().min(0.005).max(1), required: z.boolean().optional(), label: z.string().trim().max(40).optional() });
+export const pdfContractInput = z.object({
+  title: z.string().trim().min(1).max(120),
+  sourceKey: z.string().min(1).max(400),
+  sourceName: z.string().trim().min(1).max(200),
+  message: z.string().trim().max(1000).optional(),
+  signers: z.array(signerInput.extend({ role: z.enum(['employee', 'company', 'witness', 'party']).default('party') })).min(1).max(6),
+  fields: z.array(pdfFieldInput).min(1).max(200),
+  userId: zUuid.optional(),                                    // 연결할 직원(인사 계약)
+  codeBy: z.enum(['sms', 'mail']).optional(),
+  expiresDays: z.number().int().min(1).max(90).optional(),
+  send: z.boolean().optional(),
+});
+export const FIELD_LABEL: Record<string, string> = { sign: '서명', stamp: '도장', text: '텍스트', date: '날짜' };
+/** 올린 계약서 + 칸 배치로 만들어 보내기 — 서명자마다 서명·도장 칸이 1개 이상 있어야 함 */
+export async function createPdfContract(u: SessionUser, i: z.infer<typeof pdfContractInput>, ip: string | null) {
+  await requireEdit(u);
+  if (u.isDemo) throw forbidden('체험 계정에서는 쓸 수 없습니다');
+  const sql = db(); const t = tenantOf(u);
+  const src = await loadSource(t, i.sourceKey, false);
+  const signers = i.signers.map((s, n) => ({ ...s, ord: s.ord ?? n + 1 }));
+  if (signers.some((s) => !s.email && !s.phone)) throw badRequest('서명자마다 이메일 또는 전화번호가 필요합니다');
+  for (const s of signers) if (s.userId && !(await sql`select 1 from users where id = ${s.userId} and tenant = ${t}`).length) throw notFound('사용자가 없습니다');
+  for (const f of i.fields) {
+    if (f.signer >= signers.length) throw badRequest('없는 서명자의 칸이 있습니다');
+    if (f.page > src.pages) throw badRequest(`문서는 ${src.pages}쪽까지입니다`);
+    if (f.x + f.w > 1.001 || f.y + f.h > 1.001) throw badRequest('칸이 쪽 밖으로 나갔습니다');
+  }
+  const lacking = signers.filter((_, n) => !i.fields.some((f) => f.signer === n && (f.type === 'sign' || f.type === 'stamp')));
+  if (lacking.length) throw badRequest(`서명자마다 서명이나 도장 칸이 1개 이상 있어야 합니다: ${lacking.map((s) => s.name).join(', ')}`);
+  if (i.userId && !(await sql`select 1 from users where id = ${i.userId} and tenant = ${t}`).length) throw notFound('사용자가 없습니다');
+  const send = i.send ?? true;
+  return sql.begin(async (tx) => {
+    const no = await docNo(tx, t);
+    const [c] = await tx<ContractRow[]>`insert into contracts (tenant, template_id, kind, title, doc_no, body, data, user_id, status, code_by, expires_at, created_by, source_key, source_name, page_count, original_sha256, message)
+      values (${t}, null, 'custom', ${i.title}, ${no}, '', '{}', ${i.userId ?? signers.find((s) => s.role === 'employee')?.userId ?? null}, ${send ? 'sent' : 'draft'}, ${i.codeBy ?? 'sms'}, now() + make_interval(days => ${i.expiresDays ?? 14}), ${u.id},
+        ${src.key}, ${i.sourceName}, ${src.pages}, ${src.sha256}, ${i.message || null}) returning *`;
+    const ids: string[] = [];
+    for (const s of signers) {
+      const [r] = await tx<{ id: string }[]>`insert into contract_signers (contract_id, ord, role, name, email, phone, user_id, token_hash, code_hash) values (${c.id}, ${s.ord}, ${s.role}, ${s.name}, ${s.email ?? null}, ${s.phone ?? null}, ${s.userId ?? null}, ${sha256(newToken(24))}, ${sha256(code6())}) returning id`;
+      ids.push(r.id);
+    }
+    for (const f of i.fields) await tx`insert into contract_fields (contract_id, signer_id, type, page, x, y, w, h, required, label) values (${c.id}, ${ids[f.signer]}, ${f.type}, ${f.page}, ${f.x}, ${f.y}, ${f.w}, ${f.h}, ${f.type === 'date' ? true : f.required ?? true}, ${f.label || null})`;
+    await event(tx, c.id, 'created', { actorUserId: u.id, ip, detail: { source: i.sourceName, pages: src.pages, sha256: src.sha256, signers: signers.length, fields: i.fields.length } });
+    const delivery = send ? await sendOrd(tx, c, Math.min(...signers.map((s) => s.ord))) : [];
+    await audit(tx, u.id, 'contract.create', 'contract', c.id, { kind: 'upload', docNo: no, pages: src.pages, send }, ip);
+    return { id: c.id, docNo: no, title: i.title, status: c.status, delivery };
+  });
 }
 async function loadContract(u: SessionUser, id: string) {
   const [c] = await db()<ContractRow[]>`select * from contracts where id = ${id} and tenant = ${tenantOf(u)}`;
@@ -336,20 +450,50 @@ export async function signView(token: string, code: string, ip: string | null, u
   const signers = await sql<{ id: string; ord: number; role: string; name: string; status: string; signed_at: Date | null }[]>`select id, ord, role, name, status, signed_at from contract_signers where contract_id = ${c.id} order by ord, created_at`;
   const myTurn = s.status === 'pending' && !signers.some((x) => x.ord < s.ord && x.status !== 'signed') && ['sent', 'partially_signed'].includes(c.status);
   const company = await companyOf(sql, c.tenant);
+  // 2차: 올린 계약서면 쪽 수와 칸(서명자 색 = signers 순서) — 남의 텍스트 값은 그 사람이 서명한 뒤에만
+  let doc: { pages: number; fields: { id: string; signer: number; type: string; page: number; x: number; y: number; w: number; h: number; required: boolean; label: string | null; value: string | null; filled: boolean; mine: boolean }[] } | null = null;
+  if (c.source_key) {
+    const fs = await sql<{ id: string; signer_id: string; type: string; page: number; x: number; y: number; w: number; h: number; required: boolean; label: string | null; value: string | null; filled_at: Date | null }[]>`
+      select id, signer_id, type, page, x, y, w, h, required, label, value, filled_at from contract_fields where contract_id = ${c.id} order by page, y, x`;
+    doc = { pages: c.page_count ?? 1, fields: fs.map((f) => {
+      const k = signers.findIndex((x) => x.id === f.signer_id); const owner = signers[k];
+      return { id: f.id, signer: k, type: f.type, page: f.page, x: f.x, y: f.y, w: f.w, h: f.h, required: f.required, label: f.label, value: f.type === 'text' && (f.signer_id === s.id || owner?.status === 'signed') ? f.value : f.type === 'date' && f.filled_at ? f.value : null, filled: !!f.filled_at, mine: f.signer_id === s.id };
+    }) };
+  }
   return { company: company.name, title: c.title, docNo: c.doc_no, body: c.body, status: c.status, myStatus: s.status, myTurn, me: { id: s.id, name: s.name, role: s.role, roleLabel: ROLE_LABEL[s.role] },
-    signers: signers.map((x) => ({ ord: x.ord, role: x.role, roleLabel: ROLE_LABEL[x.role], name: x.name, status: x.status, signedAt: x.signed_at, me: x.id === s.id })), pdfReady: c.status === 'completed' && !!c.file_id, completedAt: c.completed_at };
+    signers: signers.map((x) => ({ ord: x.ord, role: x.role, roleLabel: ROLE_LABEL[x.role], name: x.name, status: x.status, signedAt: x.signed_at, me: x.id === s.id })), pdfReady: c.status === 'completed' && !!c.file_id, completedAt: c.completed_at, doc };
 }
-export const signBody = z.object({ code: z.string().trim().min(4).max(10), image: z.string().min(50).max(600000), method: z.enum(['draw', 'stamp']).default('draw'), agree: z.literal(true) });
+/** 2차: 올린 계약서 원본(코드 확인 뒤) — 서명 화면이 쪽 그림을 그림 */
+export async function signSource(token: string, code: string, ip: string | null, ua: string | null) {
+  const { c } = await verify(token, code, ip, ua);
+  if (!c.source_key) throw notFound('올린 계약서가 아닙니다');
+  return getObject(c.source_key);
+}
+export const signBody = z.object({ code: z.string().trim().min(4).max(10), image: z.string().min(50).max(600000).optional(), method: z.enum(['draw', 'stamp']).default('draw'), agree: z.literal(true),
+  /** 2차: 올린 계약서의 내 텍스트 칸 값(서명·도장 칸은 image, 날짜 칸은 서명일 자동) */ fields: z.array(z.object({ id: zUuid, value: z.string().max(300) })).max(200).optional() });
 export async function signContract(token: string, i: z.infer<typeof signBody>, ip: string | null, ua: string | null) {
   const { s, c, sql } = await verify(token, i.code, ip, ua);
   if (s.status === 'signed') throw conflict('이미 서명했습니다');
   if (s.status !== 'pending' || !['sent', 'partially_signed'].includes(c.status)) throw conflict('지금은 서명할 수 없는 상태입니다');
   const [before] = await sql<{ n: number }[]>`select count(*)::int n from contract_signers where contract_id = ${c.id} and ord < ${s.ord} and status <> 'signed'`;
   if (before.n) throw conflict('앞 순서 서명자가 아직 서명하지 않았습니다');
-  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(i.image);
-  if (!m) throw badRequest('서명 이미지는 PNG(data URL)여야 합니다');
-  const png = Buffer.from(m[1], 'base64');
-  if (png.length < 60 || png.length > 400000 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw badRequest('서명 이미지가 올바르지 않습니다');
+  let png: Buffer | null = null;
+  if (i.image) {
+    const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(i.image);
+    if (!m) throw badRequest('서명 이미지는 PNG(data URL)여야 합니다');
+    png = Buffer.from(m[1], 'base64');
+    if (png.length < 60 || png.length > 400000 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw badRequest('서명 이미지가 올바르지 않습니다');
+  }
+  if (c.source_key) {
+    // 2차: 내 칸 채우기 — 서명·도장 칸 = 서명 이미지, 텍스트 칸 = 입력 값(필수는 비면 안 됨), 날짜 칸 = 오늘(서명일, 한국 날짜)
+    const mine = await sql<{ id: string; type: string; required: boolean }[]>`select id, type, required from contract_fields where contract_id = ${c.id} and signer_id = ${s.id}`;
+    const given = new Map((i.fields ?? []).map((f) => [f.id, f.value.trim()]));
+    if (mine.some((f) => f.type === 'sign' || f.type === 'stamp') && !png) throw badRequest('서명(또는 도장)을 해 주세요');
+    const empty = mine.filter((f) => f.type === 'text' && f.required && !given.get(f.id));
+    if (empty.length) throw badRequest(`필수 입력 칸 ${empty.length}개를 채워 주세요`);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    for (const f of mine) await sql`update contract_fields set value = ${f.type === 'text' ? (given.get(f.id) || null)?.slice(0, 300) ?? null : f.type === 'date' ? today : 'signed'}, filled_at = now() where id = ${f.id}`;
+  } else if (!png) throw badRequest('서명 이미지가 필요합니다');
   await sql`update contract_signers set status = 'signed', signed_at = now(), sign_method = ${i.method}, signature_png = ${png}, ip = ${ip}, user_agent = ${(ua ?? '').slice(0, 300) || null} where id = ${s.id}`;
   await event(sql, c.id, 'signed', { signerId: s.id, ip, ua, detail: { method: i.method } });
   await advance(sql, c.id);
@@ -378,14 +522,19 @@ async function complete(sql: Sql, c: ContractRow, signers: SignerRow[]) {
   const company = await companyOf(sql, c.tenant);
   const events = await sql<any[]>`select e.type, e.at, e.ip, e.user_agent, e.detail, coalesce(s.name, au.name) as who from contract_events e left join contract_signers s on s.id = e.signer_id left join users au on au.id = e.actor_user_id where e.contract_id = ${c.id} order by e.at, e.id`;
   const now = new Date();
-  const pdf = await renderContractPdf({ title: c.title, docNo: c.doc_no, company: company.name, body: c.body, signers, events: [...events, { type: 'completed', at: now, ip: null, user_agent: null, who: '워크인' }], completedAt: now });
+  const evs = [...events, { type: 'completed', at: now, ip: null, user_agent: null, who: '워크인' }];
+  // 2차: 올린 계약서면 원본 쪽 그대로 + 칸 값을 같은 좌표에 찍고 맨 뒤에 감사 추적 쪽(원본 해시). 1차 텍스트 서식은 그대로
+  const pdf = c.source_key
+    ? await renderFieldsPdf({ source: await getObject(c.source_key), title: c.title, docNo: c.doc_no, company: company.name, originalSha256: c.original_sha256 ?? null, signers,
+      fields: await sql<any[]>`select signer_id, type, page, x, y, w, h, value, label from contract_fields where contract_id = ${c.id}`, events: evs, completedAt: now })
+    : await renderContractPdf({ title: c.title, docNo: c.doc_no, company: company.name, body: c.body, signers, events: evs, completedAt: now });
   const fileName = `${c.doc_no ?? '계약'}_${c.title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60)}.pdf`;
   const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, space, folder, title, file_name, mime_type, size_bytes, tags, description, source, created_by, upload_status, security, security_confirmed, text_content)
-    values (${c.tenant}, 'work', '인사/전자계약서', ${c.title}, ${fileName}, 'application/pdf', ${pdf.length}, ${['전자계약서', KIND_LABEL[c.kind] ?? c.kind]}, ${`${c.doc_no ?? ''} 완료 ${now.toISOString()}`}, 'contract', ${c.created_by}, 'pending', 'confidential', true, ${c.body}) returning id`;
+    values (${c.tenant}, 'work', '인사/전자계약서', ${c.title}, ${fileName}, 'application/pdf', ${pdf.length}, ${['전자계약서', c.source_key ? '올린 계약서' : KIND_LABEL[c.kind] ?? c.kind]}, ${`${c.doc_no ?? ''} 완료 ${now.toISOString()}`}, 'contract', ${c.created_by}, 'pending', 'confidential', true, ${c.body || c.title}) returning id`;
   const key = `lib/${c.tenant}/${f.id}/${fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
   await putObject(key, pdf, 'application/pdf');
   await sql`update library_files set storage_key = ${key}, upload_status = 'ready' where id = ${f.id}`;
-  await sql`update contracts set status = 'completed', completed_at = ${now}, file_id = ${f.id}, updated_at = now() where id = ${c.id}`;
+  await sql`update contracts set status = 'completed', completed_at = ${now}, file_id = ${f.id}, final_sha256 = ${createHash('sha256').update(pdf).digest('hex')}, updated_at = now() where id = ${c.id}`;
   await event(sql, c.id, 'completed', { detail: { fileId: f.id, bytes: pdf.length } });
   const to = [c.created_by, ...signers.map((s) => s.user_id)].filter((x): x is string => !!x);
   await notify(sql, { userIds: [...new Set(to)], type: 'mention', title: `전자계약 완료: ${c.title}`, body: `모든 서명이 끝나 PDF 가 자료실(인사/전자계약서)에 보관되었습니다`, link: `/library?file=${f.id}`, entityType: 'contract', entityId: c.id, dedupeKey: `contract_done:${c.id}` });

@@ -11,6 +11,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   { href: '/reports', label: '주간 보고', menu: 'team_reports', sidebar: true },
   { href: '/revenue', label: '매출', menu: 'revenue', sidebar: true },
   { href: '/admin/users', label: '사용자 관리', menu: 'admin_users', sidebar: true },
+  { href: '/contracts', label: '전자계약', menu: 'admin_users', sidebar: true }, // 2차(글로싸인 레퍼런스): 올린 계약서에 칸 놓아 보내기·상태 바구니
   { href: '/admin/ops', label: '운영 상태', menu: 'ops', sidebar: true },
   { href: '/admin/org', label: '조직 구성', menu: 'ops' },
   { href: '/admin/audit', label: '감사 기록', menu: 'ops' },

@@ -12,7 +12,7 @@ async function fonts() {
   return fontCache;
 }
 const fmtAt = (d: Date | string | null | undefined) => (d ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(d)) : '');
-export const ROLE_LABEL: Record<string, string> = { employee: '근로자(을)', company: '회사(갑)', witness: '입회인' };
+export const ROLE_LABEL: Record<string, string> = { employee: '근로자(을)', company: '회사(갑)', witness: '입회인', party: '상대방' };
 export const EVENT_LABEL: Record<string, string> = { created: '작성', sent: '발송', resent: '재발송', opened: '링크 열람', code_ok: '접속 코드 확인', code_fail: '접속 코드 오류', locked: '코드 5회 오류로 잠김', signed: '서명', declined: '서명 거절', completed: '완료(PDF 생성)', cancelled: '취소', pdf_viewed: '완료본 열람' };
 
 export type PdfSigner = { role: string; name: string; email: string | null; signed_at: Date | string | null; sign_method: string | null; signature_png: Buffer | Uint8Array | null; status: string };
@@ -97,4 +97,74 @@ export async function renderContractPdf(p: { title: string; docNo: string | null
   }
   footer();
   return Buffer.from(await doc.save());
+}
+
+/**
+ * 전자계약 2차(글로싸인 레퍼런스): 올린 계약서 원본 쪽은 그대로 두고 칸 값을 같은 좌표에 찍는다 — 서명·도장 = 서명자 이미지(칸 안에 비율 유지),
+ * 텍스트·날짜 = 글자(칸에 맞게 줄임). 칸 좌표는 쪽 크기 기준 비율(왼쪽 위 0,0). 맨 뒤에 감사 추적 쪽(원본 해시·참여자·행위 기록)
+ */
+export async function renderFieldsPdf(p: { source: Buffer | Uint8Array; title: string; docNo: string | null; company: string; originalSha256: string | null;
+  signers: (PdfSigner & { id: string; ord: number; ip: string | null })[]; fields: { signer_id: string; type: string; page: number; x: number; y: number; w: number; h: number; value: string | null }[];
+  events: PdfEvent[]; completedAt: Date | string | null }): Promise<Buffer> {
+  const { PDFDocument, rgb } = await import('pdf-lib');
+  const fontkit = (await import('@pdf-lib/fontkit')).default;
+  const f = await fonts();
+  const doc = await PDFDocument.load(p.source, { updateMetadata: false }); doc.registerFontkit(fontkit);
+  const reg = await doc.embedFont(f.regular, { subset: true }), bold = await doc.embedFont(f.bold, { subset: true });
+  const ink = rgb(0.08, 0.08, 0.1), grey = rgb(0.42, 0.44, 0.47), lineC = rgb(0.78, 0.8, 0.83);
+  const imgs = new Map<string, Awaited<ReturnType<typeof doc.embedPng>>>();
+  for (const s of p.signers) if (s.signature_png && s.status === 'signed') { try { imgs.set(s.id, await doc.embedPng(s.signature_png)); } catch { /* 깨진 이미지는 비워 둠 */ } }
+  const pages = doc.getPages();
+  for (const fd of p.fields) {
+    const page = pages[fd.page - 1]; if (!page) continue;
+    const { width: PW, height: PH } = page.getSize();
+    const bx = fd.x * PW, bw = fd.w * PW, bh = fd.h * PH, by = PH - fd.y * PH - bh;
+    if (fd.type === 'sign' || fd.type === 'stamp') {
+      const img = imgs.get(fd.signer_id); if (!img) continue;
+      const sc = Math.min(bw / img.width, bh / img.height), w = img.width * sc, h = img.height * sc;
+      page.drawImage(img, { x: bx + (bw - w) / 2, y: by + (bh - h) / 2, width: w, height: h });
+    } else if (fd.value) {
+      let size = Math.max(5, Math.min(bh * 0.7, 14));
+      while (size > 5 && reg.widthOfTextAtSize(fd.value, size) > bw - 2) size -= 0.5;
+      let t = fd.value; while (t.length > 1 && reg.widthOfTextAtSize(t, size) > bw - 2) t = t.slice(0, -1);
+      page.drawText(t, { x: bx + 1, y: by + (bh - size) / 2 + size * 0.18, size, font: reg, color: ink });
+    }
+  }
+  // 감사 추적 쪽
+  const W = 595.28, H = 841.89, M = 50;
+  let page = doc.addPage([W, H]); let y = H - M;
+  const line = (t: string, o: { size?: number; b?: boolean; c?: ReturnType<typeof rgb>; x?: number } = {}) => {
+    const size = o.size ?? 9; if (y - size * 1.6 < M) { page = doc.addPage([W, H]); y = H - M; }
+    let s = t; const font = o.b ? bold : reg, maxW = W - M - (o.x ?? M); while (s.length > 1 && font.widthOfTextAtSize(s, size) > maxW) s = s.slice(0, -2) + '…';
+    page.drawText(s, { x: o.x ?? M, y: y - size, size, font, color: o.c ?? ink }); y -= size * 1.6;
+  };
+  line('서명 감사 추적', { size: 14, b: true });
+  line(`${p.title}${p.docNo ? ` · 문서번호 ${p.docNo}` : ''} · ${p.company}`, { c: grey });
+  line(`원본 문서 SHA-256: ${p.originalSha256 ?? '-'}`, { size: 8, c: grey });
+  if (p.completedAt) line(`완료 ${fmtAt(p.completedAt)} (한국 시간) · 이 쪽 앞까지가 서명된 원본 쪽입니다`, { size: 8, c: grey });
+  y -= 6; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.6, color: lineC }); y -= 10;
+  line('서명자', { size: 11, b: true });
+  for (const s of p.signers) line(`${s.ord}. ${ROLE_LABEL[s.role] ?? s.role} ${s.name}${s.email ? ` (${s.email})` : ''} — ${s.status === 'signed' ? `${fmtAt(s.signed_at)} 서명(${s.sign_method === 'stamp' ? '도장' : '직접 그림'}) · IP ${s.ip ?? '-'}` : s.status === 'declined' ? '서명 거절' : '서명 전'}`);
+  y -= 6; line('행위 기록', { size: 11, b: true });
+  for (const e of p.events) line(`${fmtAt(e.at)}  ${e.who ?? '-'}  ${EVENT_LABEL[e.type] ?? e.type}  IP ${e.ip ?? '-'}  ${(e.user_agent ?? '').replace(/^Mozilla\/5\.0 \(/, '(').slice(0, 60)}`, { size: 8 });
+  return Buffer.from(await doc.save());
+}
+
+/** 회전(/Rotate)이 걸린 쪽은 보이는 방향 그대로 새 쪽에 옮겨 담는다 — 화면(pdf.js)의 칸 좌표와 완료본 좌표가 같게. 회전 없으면 null */
+export async function unrotatePdf(buf: Buffer | Uint8Array): Promise<Buffer | null> {
+  const { PDFDocument, degrees } = await import('pdf-lib');
+  const src = await PDFDocument.load(buf, { updateMetadata: false });
+  const angle = (pg: { getRotation(): { angle: number } }) => ((pg.getRotation().angle % 360) + 360) % 360;
+  if (!src.getPages().some((pg) => angle(pg) !== 0)) return null;
+  const out = await PDFDocument.create();
+  for (const pg of src.getPages()) {
+    const a = angle(pg), { width: w, height: h } = pg.getSize(), e = await out.embedPage(pg);
+    const [nw, nh] = a === 90 || a === 270 ? [h, w] : [w, h];
+    const np = out.addPage([nw, nh]);
+    if (a === 0) np.drawPage(e, { x: 0, y: 0 });
+    else if (a === 90) np.drawPage(e, { x: 0, y: nh, rotate: degrees(-90) });
+    else if (a === 180) np.drawPage(e, { x: nw, y: nh, rotate: degrees(180) });
+    else np.drawPage(e, { x: nw, y: 0, rotate: degrees(90) });
+  }
+  return Buffer.from(await out.save());
 }
