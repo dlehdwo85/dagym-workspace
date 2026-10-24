@@ -8,7 +8,7 @@ import { nextDate, normalizeRule } from './recurrence';
 import { addDays, todaySeoul, weekRangeSeoul } from './time';
 import { STATUS_LABEL, tenantOf, type SessionUser, type TaskStatus } from './types';
 import { zDate, zTime, zUuid } from './api';
-import { assignedSql, coAssigneesCol, coIds, isCoAssignee, pendingCoNames, replaceCoAssignees, setMyPart } from './taskAssignees';
+import { assignedSql, clearParts, coAssigneesCol, coIds, isCoAssignee, partsOf, replaceCoAssignees, setPart } from './taskAssignees';
 
 export const taskInput = z.object({
   title: z.string().trim().min(1, '제목을 입력하세요').max(200),
@@ -48,11 +48,11 @@ export const taskInput = z.object({
   alarm: z.boolean().nullable().optional(),
   /** V6 13번: 담당자 여러 명 → 각자 1건씩 (만들 때만) */
   assigneeIds: z.array(zUuid).max(50).optional(),
-  /** #475 공동 담당(주 담당 = assigneeId 와 함께 맡는 사람, 최대 20명) — 만들 때·고칠 때(전체 교체, 요청자만) */
+  /** #475 함께 맡는 담당자(첫 담당자 = assigneeId 말고, 최대 20명) — 만들 때·고칠 때(전체 교체, 요청자·관리자) */
   coAssigneeIds: z.array(zUuid).max(20).optional(),
-  /** #475 완료 규칙: primary = 주 담당이 완료하면 끝 · all = 공동 담당이 모두 '내 몫 완료'해야 주 담당이 완료(검토 요청) */
+  /** #475 예전 완료 규칙 — 대표 10/24 다시 설계 뒤로는 쓰지 않음(담당자가 여럿이면 항상 모두 내 몫 완료 뒤 업무 완료). 예전 화면 호환으로 받기만 */
   completeRule: z.enum(['primary', 'all']).optional(),
-  /** #475 공동 담당 본인의 '내 몫 완료'(done)·취소(open) — 업무 상태는 그대로 */
+  /** 담당자 본인의 '내 몫 완료'(done)·취소(open) — 담당자가 여럿이면 마지막 사람이 끝낼 때 업무 완료, 혼자면 업무 상태 그대로 */
   myPart: z.enum(['done', 'open']).optional(),
   /** V14 8번: 팀에 배정 — each = 팀원 모두에게 각각, lead = 팀장이 담당자 지정 */
   teamId: zUuid.nullable().optional(),
@@ -68,7 +68,7 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id, t.review_of,
   t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id, t.reminder_minutes, t.alarm, t.lead_id, t.sales_ref, t.assigned_by_rule,
-  t.complete_rule, ${coAssigneesCol(sql)},
+  t.complete_rule, t.assignee_done_at is not null as assignee_done, ${coAssigneesCol(sql)},
   t.due_extend_count, (select json_build_object('id', x.id, 'from', to_char(x.from_date, 'YYYY-MM-DD'), 'to', to_char(x.to_date, 'YYYY-MM-DD'), 'reason', x.reason, 'by', x.requested_by, 'byName', xu.name)
     from task_due_extensions x join users xu on xu.id = x.requested_by where x.task_id = t.id and x.status = 'pending' order by x.created_at desc limit 1) as ext_pending,
   t.team_id, (select tm.name from teams tm where tm.id = t.team_id) as team_name, (select tm.color from teams tm where tm.id = t.team_id) as team_color,
@@ -496,7 +496,7 @@ export async function deleteBatch(u: SessionUser, batchId: string) {
   return { deleted: rows.length };
 }
 
-export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInput>): Promise<{ id: string; version: number; changed: boolean; spawned?: string | null; approvedOriginal?: string; part?: 'done' | 'open' }> {
+export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInput>): Promise<{ id: string; version: number; changed: boolean; spawned?: string | null; approvedOriginal?: string; part?: 'done' | 'open'; left?: string[]; partsDone?: number; partsTotal?: number; status?: string }> {
   const sql = db();
   // 점검 2026-10-16 ②: [검토] 업무(review_of)는 상태를 직접 바꾸지 않는다 — "완료" = 원 업무 승인(검토 담당자 권한 그대로), 그 밖은 원 업무에서 승인·반려
   if (i.status) {
@@ -515,25 +515,38 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
   return sql.begin(async (tx) => {
     const { perms } = await loadTaskForUser(u, id, tx);
     const [cur] = await tx`select * , to_char(due_time,'HH24:MI') as due_time_s from tasks where id = ${id} for update`;
-    // #475 공동 담당: '내 몫 완료'는 업무 버전과 상관없이(목록이 옛 버전이어도) 바로
+    // #475 + 대표 10/24 후속: 담당자가 여럿이면(첫 담당자 + 다른 담당자) 모두 같은 무게 — 누구나 [완료] = '내 몫 완료'(업무 버전과 상관없이 바로),
+    // 마지막 사람이 끝내면 아래 원래 길로 업무 완료(검토 필수·결재선이면 검토 요청). 내 몫 완료 취소 = 내 몫만 처음부터(완료된 업무면 다시 열기)
+    const multi = !!cur.assignee_id && (await coIds(tx, id)).length > 0;
     const isCo = cur.assignee_id !== u.id && (await isCoAssignee(tx, id, u.id));
+    const mine = cur.assignee_id === u.id || isCo;
     const partOnly = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'myPart'].includes(k));
-    if (i.myPart !== undefined || (isCo && partOnly && i.status)) {
-      if (!isCo) throw forbidden(cur.assignee_id === u.id ? '주 담당은 업무 상태(완료·검토 요청)로 처리해요' : '공동 담당만 내 몫 완료를 표시할 수 있어요');
-      // 공동 담당이 검토 담당자(요청자)이기도 하면 승인·반려는 아래 원래 길로
-      let reviewerMe = false;
-      if (i.myPart === undefined && cur.status === 'review' && !cur.approval_line_id) {
-        const [rv] = await tx<{ assignee_id: string | null }[]>`select assignee_id from tasks where review_of = ${id} and deleted_at is null and status <> 'done' limit 1`;
-        reviewerMe = (rv?.assignee_id ?? (cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : null)) === u.id;
-      }
-      if (!reviewerMe) {
-        const done = i.myPart !== undefined ? i.myPart === 'done' : i.status === 'done' || i.status === 'review';
-        if (cur.status === 'done' && !done) throw forbidden('완료된 업무를 다시 여는 것은 주 담당만 할 수 있어요');
-        const r = await setMyPart(tx, u, cur as never, done);
-        return { id, version: cur.version, changed: true, part: r.part };
+    let partStatus = false; // 담당자가 내 몫으로 바꾸는 업무 상태(마지막 사람의 완료·내 몫 취소로 다시 열기) — 버전·첫 담당자 확인 없이
+    if (i.myPart !== undefined || (multi && mine && partOnly && i.status)) {
+      if (!mine) throw forbidden('담당자만 내 몫 완료를 표시할 수 있어요');
+      // 내 몫: myPart 그대로 · 완료/검토 요청 = 내 몫 완료 · 완료된 업무를 다른 상태로 = 내 몫 취소(다시 열기). 진행 중·보류 같은 단계 바꾸기는 내 몫과 상관없이 아래 원래 길로
+      const want = i.myPart !== undefined ? i.myPart === 'done' : i.status === 'done' || i.status === 'review' ? true : cur.status === 'done' ? false : null;
+      // 검토 중인 업무의 승인·반려·검토 요청 취소는 아래 원래 길로(담당자가 검토 담당자이기도 한 경우 포함)
+      if (want !== null && !(cur.status === 'review' && i.myPart === undefined)) {
+        const reviewerOf = cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : cur.created_by && cur.created_by !== cur.assignee_id ? cur.created_by : null;
+        const finish = (i.status === 'review' || cur.approval_line_id || (cur.approval_required && reviewerOf && reviewerOf !== u.id) ? 'review' : 'done') as TaskStatus;
+        if (!multi) { // 혼자 맡은 업무: 내 몫 = 업무 상태
+          if (want ? cur.status === 'done' || cur.status === 'review' : cur.status !== 'done') return { id, version: cur.version, changed: false };
+          i = { status: want ? finish : 'in_progress' };
+        } else if (want) {
+          if (cur.status === 'done' || cur.status === 'review') return { id, version: cur.version, changed: false };
+          const r = await setPart(tx, u, cur as never, true);
+          if (r.left.length) return { id, version: cur.version, changed: true, part: r.part, left: r.left, partsDone: r.partsDone, partsTotal: r.partsTotal, status: cur.status };
+          i = { status: finish, ...(i.reviewNote ? { reviewNote: i.reviewNote } : {}) }; // 마지막 사람 → 업무 완료(또는 검토 요청)
+        } else if (cur.status === 'done' || cur.status === 'review') i = { status: 'in_progress' }; // 완료·검토 중 업무에서 내 몫 취소 = 다시 열기·검토 요청 취소(내 몫만 처음부터)
+        else {
+          const r = await setPart(tx, u, cur as never, false);
+          return { id, version: cur.version, changed: true, part: r.part, left: r.left, partsDone: r.partsDone, partsTotal: r.partsTotal, status: cur.status };
+        }
+        partStatus = true;
       }
     }
-    if (i.version !== undefined && i.version !== cur.version) {
+    if (!partStatus && i.version !== undefined && i.version !== cur.version) {
       throw conflict('다른 사용자가 먼저 수정했습니다. 새로고침 후 다시 시도하세요.', { currentVersion: cur.version });
     }
     // V14 8번 팀장 배정(팀 업무 "팀장이 담당 지정"): 담당이 비어 있는 팀 업무는 팀장이 처음 담당을 정할 수 있다(그 뒤 변경은 요청자만)
@@ -597,6 +610,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if (coNext) {
       const primary = ('assignee_id' in set ? set.assignee_id : cur.assignee_id) as string | null;
       coNext = coNext.filter((x) => x !== primary); // 같은 회사·활성 사용자인지는 replaceCoAssignees 가 확인
+      if (!coNext.length) set.assignee_done_at = null; // 혼자 남으면 내 몫 = 업무 상태
     }
     if (set.org_unit_id) await assertUnitAccess(u, set.org_unit_id as string, tx);
     // 섹션은 같은 프로젝트의 것만. 프로젝트를 옮기면 섹션은 비운다
@@ -604,7 +618,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if (set.section_id) await checkSection(tx, set.section_id as string, ('project_id' in set ? set.project_id : cur.project_id) as string | null);
     delete changes.sortOrder; // 순서 변경은 이력에 남기지 않는다
     // 담당자가 바뀌면 새 담당자의 '확인' 전 상태로 (본인에게 배정하면 확인 처리)
-    if ('assignee_id' in set) set.assignee_ack_at = set.assignee_id === u.id ? new Date() : null;
+    if ('assignee_id' in set) { set.assignee_ack_at = set.assignee_id === u.id ? new Date() : null; set.assignee_done_at = null; } // 새 첫 담당자는 내 몫 완료 전
     // V14 1번: 이미 담당자가 있는 업무의 담당자를 바꾸는 것(재배정)은 메뉴 권한으로
     const reassigned = 'assignee_id' in set && !!cur.assignee_id && set.assignee_id !== cur.assignee_id;
     if ('assignee_id' in set && !cur.assignee_id && !leadFirstAssign && !perms.edit) throw forbidden();
@@ -639,16 +653,15 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         const [rv] = await tx<{ assignee_id: string | null }[]>`select assignee_id from tasks where review_of = ${id} and deleted_at is null and status <> 'done' limit 1`;
         const reviewer = rv?.assignee_id ?? (cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : null);
         // 대표 피드백(10/15): 담당자는 자기 검토 요청을 취소(→ 진행 중)할 수 있다. 승인(완료)·반려는 검토 담당자만
-        const cancelByOwner = owner === u.id && i.status === 'in_progress';
+        const cancelByOwner = (owner === u.id || (multi && isCo)) && i.status === 'in_progress';
         if (reviewer && reviewer !== u.id && !cancelByOwner) {
           const [nm] = await tx<{ name: string }[]>`select name from users where id = ${reviewer}`;
           throw forbidden(`검토 중인 업무의 승인·반려는 검토 담당자 ${nm?.name ?? ''}님만 할 수 있습니다`);
         }
         if (reviewer && reviewer === u.id && i.status !== 'done' && i.status !== 'in_progress') throw forbidden('검토 담당자는 승인(완료)·반려(진행 중)만 할 수 있어요');
-        if (!reviewer && owner !== u.id) throw forbidden('상태는 담당자만 바꿀 수 있어요');
-      } else if (owner !== u.id) {
+        if (!reviewer && owner !== u.id && !(multi && isCo)) throw forbidden('상태는 담당자만 바꿀 수 있어요');
+      } else if (owner !== u.id && !(multi && isCo)) { // 대표 10/24: 담당자가 여럿이면 누구나(같은 무게)
         const [nm] = cur.assignee_id ? await tx<{ name: string }[]>`select name from users where id = ${cur.assignee_id}` : [];
-        if (isCo) throw forbidden(`업무 상태는 주 담당 ${nm?.name ?? ''}님이 바꿔요 — 공동 담당은 '내 몫 완료'를 눌러 주세요`);
         throw forbidden(cur.assignee_id ? `상태는 담당자만 바꿀 수 있어요(담당 ${nm?.name ?? ''})` : '담당자가 없는 업무의 상태는 요청자(만든 사람)만 바꿀 수 있어요');
       }
     }
@@ -664,10 +677,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         if (n < needPhotos) throw conflict(`완료 증빙 사진 ${needPhotos}장이 필요합니다 (현재 ${n}장). 사진 촬영으로 첨부해 주세요.`);
       }
       if (to === 'done' && lineId) throw forbidden('결재선이 지정된 업무입니다. "검토 요청"으로 결재를 올려 주세요.');
-      // #475 완료 규칙 '모두 완료': 주 담당의 완료·검토 요청은 공동 담당이 모두 '내 몫 완료'를 한 뒤에(검토 승인은 이미 확인된 것이라 그대로)
-      if ((to === 'done' || to === 'review') && cur.status !== 'review' && (set.complete_rule ?? cur.complete_rule) === 'all') {
-        const left = await pendingCoNames(tx, id);
-        if (left.length) throw conflict(`공동 담당 ${left.join(', ')}님이 아직 '내 몫 완료'를 하지 않았어요 — 완료 규칙이 '모두 완료'라 모두 끝나야 ${to === 'review' ? '검토 요청' : '완료'}할 수 있어요`);
+      // 대표 10/24: 담당자가 여럿이면 모두 내 몫을 끝내야 완료·검토 요청(각자 [완료] → 마지막 사람이 끝내면 위에서 자동) — 검토 승인은 이미 확인된 것이라 그대로
+      if ((to === 'done' || to === 'review') && cur.status !== 'review' && multi && !partStatus) {
+        const left = (await partsOf(tx, id)).filter((p) => !p.done).map((p) => p.name);
+        if (left.length) throw conflict(`담당자 ${left.join(', ')}님이 아직 완료하지 않았어요 — 담당자가 각자 [완료]를 누르면 마지막 사람이 끝낼 때 업무가 완료돼요`);
       }
       if (to === 'done') {
         // #410 보강(로컬 14:10): 검토 필수면 담당자가 관리자여도 바로 완료 불가 — 검토자(요청자, 없으면 만든 사람)가 따로 있을 때. 담당자 = 요청자면 자기 승인(바로 완료)
@@ -690,7 +703,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
           const { cancelOpenRound } = await import('./approvals');
           await cancelOpenRound(tx, id);
         }
-        if (cur.status === 'review' && cur.review_requested_by !== u.id) statusEvent = 'review_rejected';
+        if (cur.status === 'review' && cur.review_requested_by !== u.id && !(multi && mine)) statusEvent = 'review_rejected'; // 담당자끼리 검토 요청 취소는 반려 아님
         if (cur.status === 'done') { set.completed_at = null; set.approved_at = null; set.approved_by = null; statusEvent = 'reopened'; }
       }
       set.status = to;
@@ -708,7 +721,8 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       const primary = ('assignee_id' in set ? set.assignee_id : cur.assignee_id) as string | null;
       await replaceCoAssignees(tx, u, { id, title: (set.title as string) ?? cur.title, assignee_id: primary }, coNext, upd.version); // 활동 기록 'OOO 담당 추가·빼기'는 replaceCoAssignees 가
     }
-    if (statusEvent === 'reopened') await tx`update task_assignees set done_at = null where task_id = ${id}`; // 다시 열면 내 몫 완료도 처음부터
+    // 대표 10/24: 담당자가 다시 열거나 검토 요청을 취소하면 그 사람 몫만 처음부터, 검토 반려·담당자가 아닌 사람의 다시 열기는 모두 처음부터
+    if (statusEvent === 'reopened' || (cur.status === 'review' && set.status && set.status !== 'done')) await clearParts(tx, id, mine && statusEvent !== 'review_rejected' ? u.id : null);
     if (i.collaboratorIds) {
       const before = (await tx<{ user_id: string }[]>`select user_id from task_collaborators where task_id = ${id}`).map((r) => r.user_id);
       await tx`delete from task_collaborators where task_id = ${id}`;
@@ -798,7 +812,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const { runAutomations } = await import('./automation');
     if (set.status) await runAutomations(tx, { trigger: set.status === 'done' ? 'task_completed' : 'status_changed', taskId: id, actorId: u.id, fromStatus: cur.status });
     if ('section_id' in set && set.section_id) await runAutomations(tx, { trigger: 'section_moved', taskId: id, actorId: u.id });
-    return { id, version: upd.version, changed: true, spawned, ...(auto ? { autoRemoved: auto.removed, autoKept: auto.kept } : {}) };
+    return { id, version: upd.version, changed: true, spawned, status: (set.status ?? cur.status) as string, ...(auto ? { autoRemoved: auto.removed, autoKept: auto.kept } : {}) };
   });
 }
 

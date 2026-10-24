@@ -158,7 +158,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
             //   → 여러 명이면 팀은 태그로만 두고 고른 사람 모두에게 각각(팀원 전체 '각각'은 팀 쪽이 정함)
             ...(multiEach ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
             // R-15 6번: "한 업무로 함께" — 첫 사람이 주 담당, 나머지는 협업자
-            ...(together ? { coAssigneeIds: (f.more ?? []).filter((x: string) => x !== f.assigneeId), completeRule: f.completeRule ?? 'primary' } : {}),
+            ...(together ? { coAssigneeIds: (f.more ?? []).filter((x: string) => x !== f.assigneeId) } : {}),
             // #475: '함께 담당'도 고른 사람이 담당 — 팀은 태그로만
             ...(f.teamId ? { teamId: f.teamId, teamMode: multiEach || together ? 'tag' : f.teamMode ?? 'lead', ...(multiEach || together || f.teamMode === 'each' || f.teamMode === 'tag' ? {} : { assigneeId: null }) } : {}),
             parentId: defaults?.parentId, orgUnitId: defaults?.orgUnitId,
@@ -298,11 +298,8 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
             {f.multi && (
               <div className="mt-1.5 flex flex-wrap gap-1.5 rounded-input bg-slate-50 p-2">
                 <div className="flex w-full flex-wrap gap-3 pb-1 text-xs" role="radiogroup" aria-label="여러 명 방식">
-                  <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode !== 'each'} onChange={() => set('multiMode')('together')} data-testid="multi-together" />함께 담당(업무 1개 · 위 담당자 = 주 담당)</label>
+                  <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode !== 'each'} onChange={() => set('multiMode')('together')} data-testid="multi-together" />함께 담당(업무 1개 · 각자 완료, 모두 끝나면 완료)</label>
                   <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode === 'each'} onChange={() => set('multiMode')('each')} data-testid="multi-each" />각자 1건씩(사람마다 따로)</label>
-                  {f.multiMode !== 'each' && <label className="flex items-center gap-1 text-ink-2">완료 규칙
-                    <select className="h-7 rounded-input border border-line bg-white px-1 text-xs" value={f.completeRule ?? 'primary'} onChange={(e) => set('completeRule')(e.target.value)} aria-label="완료 규칙" data-testid="quick-complete-rule">
-                      <option value="primary">주 담당이 완료하면 끝</option><option value="all">모두 &apos;내 몫 완료&apos; 뒤에 완료</option></select></label>}
                 </div>
                 {dir.users.map((x) => {
                   const on = (f.more ?? []).includes(x.id) || x.id === f.assigneeId;

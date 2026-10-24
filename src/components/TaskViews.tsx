@@ -22,7 +22,7 @@ import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
 import { keepScroll } from './backClose';
 import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
-import { coOf, type Co } from './CoAssignees';
+import { coOf, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
 import { QuickAddTask } from './QuickAddTask';
 import { CarriedBadge } from './carried';
 
@@ -30,7 +30,7 @@ export type Task = {
   space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
   sales_ref?: { kind: string; id: string; name?: string } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천
   assigned_by_rule?: string | null; // #100 담당자 지정 규칙으로 배정됨
-  co_assignees?: Co[] | null; complete_rule?: 'primary' | 'all'; // 대표 10/23 #475 공동 담당·완료 규칙
+  co_assignees?: Co[] | null; assignee_done?: boolean | null; complete_rule?: 'primary' | 'all'; // 대표 10/23 #475 함께 맡은 담당자 · 10/24 첫 담당자의 내 몫 완료
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
   team_id?: string | null; team_name?: string | null; team_color?: string | null;
   org_unit_id: string; org_unit_name: string; brand_id: string | null; assignee_id: string | null; assignee_name: string | null;
@@ -159,7 +159,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, ...snake(body), ...(body.status === 'done' && t.status !== 'done' ? { completed_at: new Date().toISOString() } : {}) } : x)) });
     try {
       const r = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { ...body, version: t.version } });
-      setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, version: r.version } : x)) });
+      if (!r.part && r.status === 'done' && t.status !== 'done') PREV_STATUS.set(t.id, t.status); // 마지막 담당자가 내 몫을 끝내 업무 완료
+      setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? withPart({ ...x, version: r.version }, r, sess.user.id) : x)) });
       if (r.spawned) toast.info('반복 업무의 다음 회차가 생성되었습니다');
       broadcastRefresh();
       return r ?? true; // #508 후속: 되돌리기 안내가 자동 후속 업무 정리 결과(autoRemoved·autoKept)를 씀
@@ -470,6 +471,17 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   );
 }
 
+/** 대표 10/24: 내 몫 완료 응답을 목록에 바로(내 칩 ✓ · k/n) — 마지막 사람이면 업무 상태까지 */
+function withPart(x: Task, r: { part?: string; status?: string }, uid: string): Task {
+  if (r.part) { // 업무 상태는 서버 그대로(밀어서·칩으로 '완료'를 눌러도 다른 담당자가 남았으면 목록에 남음)
+    const done = r.part === 'done';
+    const y = { ...x, ...(r.status ? { status: r.status as TaskStatus, completed_at: r.status === 'done' ? x.completed_at : null } : {}) };
+    return y.assignee_id === uid ? { ...y, assignee_done: done } : { ...y, co_assignees: coOf(y).map((c) => (c.id === uid ? { ...c, done } : c)) };
+  }
+  if (r.status && r.status !== x.status) return { ...x, status: r.status as TaskStatus, ...(r.status === 'done' ? { completed_at: new Date().toISOString() } : {}) };
+  return x;
+}
+
 function snake(b: Record<string, unknown>) {
   const m: Record<string, string> = { dueDate: 'due_date', startDate: 'start_date', assigneeId: 'assignee_id', sectionId: 'section_id', sortOrder: 'sort_order' };
   return Object.fromEntries(Object.entries(b).map(([k, v]) => [m[k] ?? k, v]));
@@ -587,9 +599,10 @@ export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
   // 점검 2026-10-16 ②: [검토] 업무는 "완료"(= 원 업무 승인)만
   if ((t as Task & { review_of?: string | null }).review_of) return to === 'done' && owner === uid;
   const reviewer = t.requested_by && t.requested_by !== t.assignee_id ? t.requested_by : null;
+  const mine = owner === uid || (multiOf(t) && coOf(t).some((c) => c.id === uid)); // 대표 10/24: 담당자가 여럿이면 모두 같은 무게
   // 검토 중: 검토 담당자는 승인(완료)·반려(진행 중), 담당자는 검토 요청 취소(진행 중)만
-  if (t.status === 'review' && reviewer) return (reviewer === uid && (to === 'done' || to === 'in_progress')) || (owner === uid && to === 'in_progress');
-  return owner === uid;
+  if (t.status === 'review' && reviewer) return (reviewer === uid && (to === 'done' || to === 'in_progress')) || (mine && to === 'in_progress');
+  return mine;
 }
 const NOT_MINE = '상태는 담당자만 바꿀 수 있어요 (검토 중인 업무는 검토 담당자만 승인·반려)';
 /** 진행 전 업무는 담당자 확인 여부를 뒤에 — V14 43번: "확인 완료"가 "완료"와 헷갈려 "진행 전 · 확인함/확인 전" */
@@ -630,11 +643,13 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
   const quick = nextStatusOnCheck(t, user.role); // 완료(또는 검토 요청, 완료 상태면 다시 진행 중)
   const can = STATUSES.some((s) => s !== t.status && canSetStatus(t, user.id, s));
   const ack = t.status === 'todo' && t.assignee_id ? (t.assignee_ack_at ? '확인함' : '확인 전') : null;
-  // #475 공동 담당(주 담당 아님): 상태 대신 '내 몫 완료' 칩 — 업무 완료는 주 담당이(검토 담당자로서 승인하는 경우는 아래 원래 칩)
-  const mine = coOf(t).find((c) => c.id === user.id);
-  const coMode = !!mine && t.assignee_id !== user.id && t.status !== 'done' && !(t.status === 'review' && canSetStatus(t, user.id, 'done'));
+  // 대표 10/24: 담당자가 여럿이면 [완료] = 내 몫 완료 — 내 몫을 끝냈으면 '내 몫 완료 · k/n'(흐리게, 누르면 취소), 모두 끝나면 업무 완료
+  const parts = partsOf(t); const multi = parts.length > 1;
+  const mine = multi ? parts.find((p) => p.id === user.id) : undefined;
+  const k = parts.filter((p) => p.done).length;
   const [partDone, setPartDone] = useState(!!mine?.done);
   useEffect(() => { setPartDone(!!mine?.done); }, [mine?.done]);
+  const coMode = !!mine && partDone && t.status !== 'done' && t.status !== 'review';
   useEffect(() => {
     if (!can || tipClaimed) return;
     try { const n = Number(localStorage.getItem('wos_status_tip') ?? 0); if (n < 3) { tipClaimed = true; setTip(true); localStorage.setItem('wos_status_tip', String(n + 1)); } } catch {}
@@ -643,6 +658,12 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
   async function go(s: TaskStatus) {
     setOpen(false); setTip(false);
     if (s === t.status) return;
+    if (mine && (s === 'done' || s === 'review') && t.status !== 'review') { // 내 몫 완료(마지막 사람이면 업무 완료)
+      setPartDone(true);
+      const r = await onPatch(t, { myPart: 'done' });
+      if (r === false) setPartDone(false); else if (r?.part) toast.ok(partMsg(r)); else toastDone(t.id);
+      return;
+    }
     const before = t.status;
     const ok = await onPatch(t, { status: s });
     if (ok !== false && s === 'done') toastDone(t.id); // #508 되돌리기는 '완료됨'에서
@@ -652,12 +673,12 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
   // 대표 10/22(#427): PC 에서 '진행 전 · 확인 전'도 마감일 달력 아이콘 위로 넘쳤다 → PC 는 2xl 이상에서만 글자, 그 밖에는 빨간 점 + 툴팁(휴대폰은 그대로 글자)
   const sub = ack && <span className={cx('text-[10.5px] font-normal', ack === '확인 전' ? 'text-red-600 lg:hidden 2xl:inline' : 'hidden text-ink-3 2xl:inline')}>· {ack}</span>;
   if (coMode) return (
-    <button type="button" onClick={async (e) => { e.stopPropagation(); const next = !partDone; setPartDone(next);
-        const ok = await onPatch(t, { myPart: next ? 'done' : 'open' });
-        if (ok === false) setPartDone(!next); else toast.ok(next ? `내 몫 완료로 표시했습니다 — 업무 완료는 주 담당 ${t.assignee_name ?? ''}님이` : '내 몫 완료를 취소했습니다'); }}
-      onPointerDown={(e) => e.stopPropagation()} aria-pressed={partDone} aria-label={`${t.title} 내 몫 완료${partDone ? '됨' : ''} (공동 담당 · 업무 ${STATUS_LABEL[t.status]})`} title={`공동 담당 — 업무 상태: ${STATUS_LABEL[t.status]}`} data-testid="row-part-chip" data-done={partDone ? '1' : undefined}
-      className={cx('hit inline-flex h-6 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[11px] font-semibold transition active:scale-95 lg:h-7 lg:text-[12px]', partDone ? 'border-green-300 bg-green-50 text-green-800' : 'border-violet-300 bg-violet-50 text-violet-800')}>
-      {partDone ? <Check className="size-3 shrink-0" aria-hidden /> : <span className={cx('size-1.5 shrink-0 rounded-full', CHIP_DOT[t.status])} aria-hidden />}{partDone ? '내 몫 완료' : '내 몫 완료하기'}
+    <button type="button" onClick={async (e) => { e.stopPropagation(); setPartDone(false);
+        const r = await onPatch(t, { myPart: 'open' });
+        if (r === false) setPartDone(true); else toast.ok('내 몫 완료를 취소했습니다'); }}
+      onPointerDown={(e) => e.stopPropagation()} aria-pressed aria-label={`${t.title} 내 몫 완료 ${k}/${parts.length} — 누르면 취소`} title={`내 몫 완료 — 담당 ${parts.length}명 중 ${k}명 완료, 모두 끝나면 업무 완료`} data-testid="row-part-chip" data-done="1"
+      className="hit inline-flex h-6 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border border-green-200 bg-green-50/60 px-1.5 text-[11px] font-semibold text-green-800/80 transition active:scale-95 lg:h-7 lg:text-[12px]">
+      <Check className="size-3 shrink-0" aria-hidden />내 몫 완료 · {k}/{parts.length}
     </button>
   );
   if (!can) return (
@@ -671,14 +692,14 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setTip(false); setOpen(true); }} onPointerDown={(e) => e.stopPropagation()} aria-haspopup="dialog" aria-label={`${t.title} 상태: ${statusText(t)}`} title={statusText(t)} data-testid="row-status-chip"
         // 대표(10/16): 휴대폰에서 상태 버튼이 너무 큼 → 보이는 크기 24px·글자 11px(누르는 범위는 hit 로 44px 유지)
         className={cx('hit inline-flex h-6 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border pl-1.5 pr-1 text-[11px] font-semibold transition active:scale-95 lg:h-7 lg:text-[12px]', CHIP_TONE[t.status])}>
-        <span className={cx('size-1.5 shrink-0 rounded-full', ack === '확인 전' ? 'bg-red-500' : CHIP_DOT[t.status])} aria-hidden />{STATUS_LABEL[t.status]}{sub}<ChevronDown className="size-3 shrink-0 opacity-70" aria-hidden />
+        <span className={cx('size-1.5 shrink-0 rounded-full', ack === '확인 전' ? 'bg-red-500' : CHIP_DOT[t.status])} aria-hidden />{STATUS_LABEL[t.status]}{multi && t.status !== 'done' && <span className="font-normal tabular-nums opacity-80" data-testid="row-parts">· {k}/{parts.length}</span>}{sub}<ChevronDown className="size-3 shrink-0 opacity-70" aria-hidden />
       </button>
       {tip && <span className="pointer-events-none absolute left-full top-1/2 z-10 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] text-white shadow-pop after:absolute after:right-full after:top-1/2 after:-translate-y-1/2 after:border-4 after:border-transparent after:border-r-ink" data-testid="status-tip">눌러서 상태 바꾸기</span>}
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={200}>
         {canSetStatus(t, user.id, quick) && quick !== t.status && (
           <button type="button" onClick={() => go(quick)} data-testid="status-quick"
             className="mb-1 flex w-full items-center gap-2 rounded-input bg-green-50 px-2.5 py-2 text-left text-sm font-bold text-green-800 hover:bg-green-100">
-            <Check className="size-4" />{quick === 'done' ? '완료' : quick === 'review' ? '검토 요청' : '다시 진행 중'}
+            <Check className="size-4" />{mine && quick !== 'in_progress' && t.status !== 'review' ? '내 몫 완료' : quick === 'done' ? '완료' : quick === 'review' ? '검토 요청' : '다시 진행 중'}
           </button>
         )}
         {(['in_progress', 'todo', 'review', 'on_hold', 'done'] as TaskStatus[]).filter((s) => s !== quick).map((s) => (
@@ -1142,7 +1163,9 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
   const right = nextStatusOnCheck(t, user.role);
   const swipe = async (to: TaskStatus) => {
     const before = t.status;
-    if (await onPatch(t, { status: to }) === false) return;
+    const r = await onPatch(t, { status: to });
+    if (r === false) return;
+    if (r?.part) { toast.ok(partMsg(r)); return; } // 대표 10/24: 담당자가 여럿이면 내 몫 완료
     if (to === 'done') toastDone(t.id); // #508 되돌리기는 '완료됨'에서
     else toast.ok(to === 'on_hold' ? '보류로 바꿨습니다' : to === 'review' ? '검토를 요청했습니다' : '다시 진행 중으로 바꿨습니다', { label: '되돌리기', run: () => onPatch({ ...t, status: to, version: t.version + 1 }, { status: before }) });
   };
@@ -1189,7 +1212,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
           <span className="flex min-w-0 items-center gap-1.5 max-lg:basis-full lg:max-w-[55%] lg:shrink-0" data-testid="row-title">
             <TypeIcon t={t} />
             {/* 대표(10/16): 제목은 한 줄 전체 폭·길면 … (두 줄은 목록이 길어져 눈이 피로) — 전체 제목은 줄을 눌러 상세에서 */}
-            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through')}>{t.title}</TaskLink>
+            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
             {t.sales_ref?.kind && <span className="shrink-0 rounded-full bg-blue-50 px-1.5 text-[10px] font-medium text-blue-800" title={t.sales_ref.name ?? ''} data-testid="row-sales-ref">{(ST.kind as Record<string, string>)[t.sales_ref.kind] ?? (t.sales_ref.kind === 'support' ? '지원사업' : t.sales_ref.kind)}</span>}
             {t.assigned_by_rule && <span className="shrink-0 rounded-full bg-violet-50 px-1.5 text-[10px] font-medium text-violet-800" title="담당자 지정 규칙으로 배정됨" data-testid="row-rule-badge">규칙 배정</span>}
@@ -1552,11 +1575,11 @@ function DraggableRow({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => v
     </div>
   );
 }
-/** #475 공동 담당 수(+n) — 주 담당 아바타 옆, 이름은 툴팁 */
+/** #475 함께 맡은 담당자 수(+n) — 첫 담당자 아바타 옆, 이름·내 몫 완료는 툴팁 */
 function CoBadge({ t }: { t: Task }) {
   const co = coOf(t);
   if (!co.length) return null;
-  return <span className="ml-0.5 shrink-0 rounded-full bg-violet-50 px-1 text-[10px] font-semibold tabular-nums text-violet-700" title={`공동 담당: ${co.map((c) => `${c.name}${c.done ? '(완료)' : ''}`).join(', ')}`} data-testid="row-co">+{co.length}</span>;
+  return <span className="ml-0.5 shrink-0 rounded-full bg-slate-100 px-1 text-[10px] font-semibold tabular-nums text-ink-2" title={`담당: ${partsOf(t).map((c) => `${c.name}${c.done ? '(완료)' : ''}`).join(', ')}`} data-testid="row-co">+{co.length}</span>;
 }
 
 /** 보드 열 = 섹션 */

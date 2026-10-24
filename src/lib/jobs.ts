@@ -24,18 +24,18 @@ async function dueNotifications() {
   const alarmMeta = (t: { assignee_id: string; alarm: boolean | null; priority: string }) => (alarmOn('task', t.alarm, adOf(t.assignee_id), t.priority) ? { alarm: true } : {});
   // 대표 10/21 22:00 ⑦(#420): 알람은 사람별 'N분 전'(alarm_minutes, 기본 10) 시점에만 전체 화면으로 — 다른 시점(1시간 전 등) 알림은 보통 푸시
   const alarmAt = (t: { assignee_id: string; alarm: boolean | null; priority: string; m: number; alarm_m: number }) => (t.m === t.alarm_m ? alarmMeta(t) : {});
-  const soon = await sql<{ id: string; title: string; assignee_id: string; due_date: string; due_time: string | null; priority: string; alarm: boolean | null }[]>`
-    select t.id, t.title, t.assignee_id, t.due_date, to_char(t.due_time,'HH24:MI') due_time, t.priority, t.alarm
+  const soon = await sql<{ id: string; title: string; assignee_id: string; due_date: string; due_time: string | null; priority: string; alarm: boolean | null; pdone: boolean }[]>`
+    select t.id, t.title, t.assignee_id, t.due_date, to_char(t.due_time,'HH24:MI') due_time, t.priority, t.alarm, t.assignee_done_at is not null as pdone
     from tasks t join users u on u.id = t.assignee_id left join user_settings s on s.user_id = u.id
     where t.deleted_at is null and t.status not in ('done','on_hold') and u.status = 'active' and t.due_date is not null
       and ((t.due_date + coalesce(t.due_time, time '23:59')) at time zone 'Asia/Seoul') between now() and now() + make_interval(hours => coalesce(s.due_soon_hours, 0))
       -- V14 10번: 같은 업무·같은 날 알림은 가장 구체적인 1건 — 마감 당일은 "오늘 마감", 업무별 🔔 를 정했으면 그 알림만
       and t.due_date > (now() at time zone 'Asia/Seoul')::date and t.reminder_minutes is null`;
   let n = 0;
-  // 대표 10/23 #475: 마감 알림·리마인더·알람은 공동 담당(내 몫 완료 전)에게도 — 주 담당과 같은 시각, 알람 여부는 각자 설정
+  // 대표 10/23 #475: 마감 알림·리마인더·알람은 함께 맡은 담당자(내 몫 완료 전)에게도 — 같은 시각, 알람 여부는 각자 설정. 10/24: 첫 담당자도 내 몫을 끝냈으면 빠짐
   const { coMap } = await import('./taskAssignees');
   const coOf = await coMap(sql, soon.map((t) => t.id));
-  const who = (t: { id: string; assignee_id: string }, m: Map<string, string[]>) => [t.assignee_id, ...(m.get(t.id) ?? [])];
+  const who = (t: { id: string; assignee_id: string; pdone?: boolean }, m: Map<string, string[]>) => [...(t.pdone ? [] : [t.assignee_id]), ...(m.get(t.id) ?? [])];
   for (const t of soon) for (const uid of who(t, coOf)) {
     const tt = { ...t, assignee_id: uid };
     n += (await notify(sql, { userIds: [uid], type: 'due_soon', title: `마감 임박: ${t.title}`,
@@ -47,7 +47,7 @@ async function dueNotifications() {
   const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(now));
   const today = todaySeoul(now);
   let over: { id: string; title: string; assignee_id: string | null; requested_by: string | null; created_by: string; due_date: string; days: number }[] = [];
-  let dueToday: { id: string; title: string; assignee_id: string; due_time: string | null }[] = [];
+  let dueToday: { id: string; title: string; assignee_id: string; due_time: string | null; pdone?: boolean }[] = [];
   if (hour >= Number(process.env.DUE_DIGEST_HOUR ?? 9)) {
     over = await sql`
       select t.id, t.title, t.assignee_id, t.requested_by, t.created_by, t.due_date, (${today}::date - t.due_date)::int as days from tasks t
@@ -60,7 +60,7 @@ async function dueNotifications() {
         dedupeKey: `overdue:${t.id}:${today}`, push: false, meta: { kind: 'due' } })).length;
     }
     dueToday = await sql`
-      select t.id, t.title, t.assignee_id, to_char(t.due_time,'HH24:MI') due_time, t.alarm, t.priority from tasks t join users u on u.id = t.assignee_id
+      select t.id, t.title, t.assignee_id, to_char(t.due_time,'HH24:MI') due_time, t.alarm, t.priority, t.assignee_done_at is not null as pdone from tasks t join users u on u.id = t.assignee_id
         left join user_settings s on s.user_id = t.assignee_id
       where t.deleted_at is null and t.status not in ('done','on_hold') and t.due_date = ${today}::date and u.status = 'active'
         -- V14 10번(검수 3): 같은 업무·수신자·날짜당 1건 — 오늘 울리는 시각 알림(🔔 또는 기본 n분 전)이 있으면 "오늘 마감"은 생략
@@ -76,8 +76,8 @@ async function dueNotifications() {
   }
   // V8 8번 미리 알림: 시간 있는 업무는 업무별 알림(최대 3개) 또는 각자 기본값(60분 전), 날짜만 있는 업무는 업무별 알림을 정했을 때만(당일 09시 기준)
   // 정기 실행 사이에 지나간 알림도 마감 전이면 보낸다(분 단위 정확도는 정기 실행 주기에 따름 — NEXT_ACTION 참고)
-  const hourLeft = await sql<{ id: string; title: string; assignee_id: string; due_date: string; due_time: string | null; m: number; priority: string; alarm: boolean | null; alarm_m: number }[]>`
-    select t.id, t.title, t.assignee_id, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time, r.m, t.priority, t.alarm, coalesce(s.alarm_minutes, 10) as alarm_m
+  const hourLeft = await sql<{ id: string; title: string; assignee_id: string; due_date: string; due_time: string | null; m: number; priority: string; alarm: boolean | null; alarm_m: number; pdone: boolean }[]>`
+    select t.id, t.title, t.assignee_id, to_char(t.due_date,'YYYY-MM-DD') due_date, to_char(t.due_time,'HH24:MI') due_time, r.m, t.priority, t.alarm, coalesce(s.alarm_minutes, 10) as alarm_m, t.assignee_done_at is not null as pdone
     from tasks t join users u on u.id = t.assignee_id left join user_settings s on s.user_id = t.assignee_id
     -- #420: 알람이 켜진 업무는 'N분 전'(alarm_minutes) 시점을 알림 시각에 더한다(그 시점만 전체 화면 알람)
     cross join lateral unnest(array_cat(coalesce(t.reminder_minutes, array[coalesce(s.task_reminder_minutes, 60)]),

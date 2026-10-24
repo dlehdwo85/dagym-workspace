@@ -31,7 +31,7 @@ import { encodeMentions } from '@/lib/mentions';
 import { VoiceButton } from '@/components/voice';
 import { MeetingDialog } from '@/components/MeetingDialog';
 import { requestTour } from '@/components/Tour';
-import { CoAssignees, CoPartBox, coOf } from '@/components/CoAssignees';
+import { Assignees, PartBox, coOf, multiOf, partMsg, partsOf } from '@/components/CoAssignees';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
@@ -169,10 +169,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     try { await api(`/api/tasks/${id}/extend/${t.ext_pending.id}`, { body: { approve } }); toast.ok(approve ? '마감 연장을 승인했습니다' : '연장 요청을 반려했습니다'); reload(); broadcastRefresh(); }
     catch (e: any) { toast.error(e.message); reload(); }
   }
-  async function patch(body: Record<string, unknown>, okMsg?: string) {
+  async function patch(body: Record<string, unknown>, okMsg?: string | ((r: any) => string)) {
     try {
       const r = await api(`/api/tasks/${id}`, { method: 'PATCH', body: { ...body, version: t.version } });
-      if (okMsg) toast.ok(okMsg);
+      // 대표 10/24: 담당자가 여럿이면 [완료] = 내 몫 완료 — 남은 사람 안내(마지막 사람이면 원래 안내)
+      if (r.part) toast.ok(partMsg(r)); else if (okMsg) toast.ok(typeof okMsg === 'function' ? okMsg(r) : okMsg);
       if (r.spawned) toast.info('반복 업무의 다음 회차가 생성되었습니다');
       // #508 후속: 완료를 되돌리면 그 완료 때 자동으로 생긴 다음 회차·리드 후속 업무 — 손대지 않은 것은 지움, 손댄 것은 그대로
       if (r.autoKept?.length) toast.info('다음 회차/후속 업무는 그대로 두었습니다', { label: '열기', run: () => router.push(`/tasks/${r.autoKept[0].id}`) });
@@ -268,12 +269,15 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
 
   // V14 20번: 상태는 담당자(없으면 만든 사람)만 — 요청자는 검토 요청 승인·반려와 완료 해지만
   // V14 50 + 점검 2026-10-16 ③: 검토 중에는 서버가 정한 검토 담당자(data.reviewer)가 있으면 담당자도 단계 변경 불가(검토 요청 취소만) — 서버와 같은 기준
-  const statusOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id && !(t.status === 'review' && data.reviewer && data.reviewer.id !== user.id);
+  // 대표 10/24: 담당자가 여럿이면 모두 같은 무게 — 누구나 단계를 바꾸고 [완료] = 내 몫 완료
+  const multi = multiOf(t);
+  const myPart = partsOf(t).find((p) => p.id === user.id);
+  const statusOwner = ((t.assignee_id ?? t.requested_by ?? t.created_by) === user.id || (multi && !!myPart)) && !(t.status === 'review' && data.reviewer && data.reviewer.id !== user.id);
   const isRequester = !!t.requested_by && t.requested_by === user.id;
   // 대표 피드백(10/15): 검토 중 — 승인·반려는 검토 담당자([검토] 업무 담당, 없으면 요청자), 담당자는 [검토 요청 취소]만. 막힐 땐 실제 권한자 이름
   const reviewer: { id: string; name: string } | null = data.reviewer ?? null;
   const isReviewer = t.status === 'review' && !!reviewer && reviewer.id === user.id;
-  const isTaskOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id;
+  const isTaskOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id || (multi && !!myPart);
   const reviewerLabel = reviewer ? `${reviewer.id === t.requested_by ? '요청자' : '검토 담당'} ${reviewer.name}님` : '검토자';
   const ownerLabel = t.assignee_id ? `담당자 ${t.assignee_name}님` : t.requested_by ? `요청자 ${t.requested_by_name}님` : `만든 사람 ${t.created_by_name}님`;
   const lockMsg = statusOwner ? null : t.status === 'review'
@@ -293,6 +297,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const reviewerCandidate0 = t.requested_by && t.requested_by !== t.assignee_id ? t.requested_by : (!t.assignee_id || t.created_by !== t.assignee_id) ? t.created_by : null;
   const primary0 = t.status === 'done' ? null
     : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : isReviewer ? { label: '승인(최종 완료)', run: () => patch({ status: 'done' }, '승인했습니다 — 최종 완료') } : null)
+    : multi ? (myPart && !myPart.done ? { label: '내 몫 완료', run: () => patch({ myPart: 'done' }, (r) => (r.status === 'review' ? '모두 마쳐 검토를 요청했습니다' : '모두 마쳐 업무를 완료했습니다')) } : null)
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
     : t.approval_required && reviewerCandidate0 && reviewerCandidate0 !== user.id ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') } // #410 보강: 담당자가 관리자여도 검토자가 따로 있으면 검토 요청
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
@@ -437,9 +442,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="task-summary">
             {/* V14 19번(검수 6): 요약 칩을 누르면 그 속성을 바로 고친다 */}
-            <button type="button" onClick={() => editProp('select[aria-label="담당자"]')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 hover:bg-slate-200" title="담당자 바꾸기" data-testid="sum-assignee"><Avatar id={t.assignee_id} name={t.assignee_name} size={16} badge={false} />{t.assignee_name ?? '담당 없음'}{coOf(t).length > 0 && <span className="font-medium text-violet-700" data-testid="sum-co">외 {coOf(t).length}명</span>}{data.collaborators?.length > 0 && <span className="text-ink-3">+{data.collaborators.length}</span>}</button>
-            {/* 로컬 10/23 #475: 휴대폰(앱)에서도 담당자 칩 옆 [+]로 바로 공동 담당 추가 */}
-            {perms.coAssign && t.status !== 'done' && <button type="button" onClick={() => editProp('select[aria-label="공동 담당 추가"]')} className="inline-flex size-6 items-center justify-center rounded-full border border-dashed border-violet-300 text-violet-700 hover:bg-violet-50" aria-label="담당자 추가(공동 담당)" title="담당자 추가(공동 담당)" data-testid="sum-co-add"><Plus className="size-3.5" /></button>}
+            <button type="button" onClick={() => editProp(perms.coAssign ? 'select[aria-label="담당자 추가"]' : '[data-testid="assignees"]')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 hover:bg-slate-200" title="담당자" data-testid="sum-assignee"><Avatar id={t.assignee_id} name={t.assignee_name} size={16} badge={false} />{t.assignee_name ?? '담당 없음'}{coOf(t).length > 0 && <span className="font-medium" data-testid="sum-co">외 {coOf(t).length}명{multi && t.status !== 'done' && <span className="ml-1 tabular-nums text-ink-3" data-testid="sum-parts">· {partsOf(t).filter((p) => p.done).length}/{partsOf(t).length} 완료</span>}</span>}{data.collaborators?.length > 0 && <span className="text-ink-3">+{data.collaborators.length}</span>}</button>
+            {/* 로컬 10/23 #475: 휴대폰(앱)에서도 담당자 칩 옆 [+]로 바로 담당자 추가 */}
+            {perms.coAssign && t.status !== 'done' && <button type="button" onClick={() => editProp('select[aria-label="담당자 추가"]')} className="inline-flex size-6 items-center justify-center rounded-full border border-dashed border-line text-ink-2 hover:bg-slate-50" aria-label="담당자 추가" title="담당자 추가" data-testid="sum-assignee-add"><Plus className="size-3.5" /></button>}
             <button type="button" onClick={() => editProp('[data-testid="due-picker"]', true)} className="rounded-full hover:opacity-80" title="마감일 바꾸기" data-testid="sum-due"><DdayChip due={t.due_date} time={t.due_time} status={t.status} /></button>
             {extRole && !t.ext_pending && <button type="button" onClick={() => setExt(null)} className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100" data-testid="sum-extend">
               <CalendarDays className="size-3.5" />{extRole === 'boss' ? '마감 연장' : '마감 연장 요청'}</button>}
@@ -459,8 +464,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </div>
           )}
           {/* V14 20번: 완료 업무는 "다시 진행"을 크게 (권한 없으면 서버가 이유를 알려 줌) */}
- <CoPartBox t={t} onPatch={patch} />
-          {t.status !== 'done' && t.status !== 'review' && !primary && !coOf(t).some((c) => c.id === user.id) && (
+ <PartBox t={t} onPatch={patch} />
+          {t.status !== 'done' && t.status !== 'review' && !primary && !myPart && (
             <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">{t.assignee_name ? `담당자 ${t.assignee_name}님이 진행합니다` : `만든 사람 ${t.created_by_name}님이 진행합니다`}</p>
           )}
           {t.status === 'done' && !(statusOwner || isRequester) && <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">완료됨 — 다시 진행은 담당자·요청자만 할 수 있습니다</p>}
@@ -675,20 +680,18 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         )}
         {/* 속성 */}
           <section className={cx('grid grid-cols-1 border-y border-line', wide && 'lg:border-y-0')} aria-label="업무 속성">
-            <Prop icon={UserRound} label="담당자">
-              <span className="flex pl-2 items-center gap-1.5"><Avatar id={t.assignee_id} name={t.assignee_name} size={22} />{/* V14 1번: 재배정 권한이 없으면 잠금, 담당자 본인 + 넘기기 켜짐이면 "넘기기 요청" */}
-              {perms.reassign ? <UserSelect className={ghostCls} ariaLabel="담당자" value={t.assignee_id} onChange={(v) => { patch({ assigneeId: v }); if (v && v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }} />
-                : perms.handoff ? <UserSelect className={ghostCls} value={t.assignee_id} ariaLabel="다른 사람에게 넘기기" onChange={async (v) => {
+            {/* 대표 10/24 #475 후속 '담당자 칸 하나에 담당 직원을 모두 나란히': 첫 담당자·함께 맡은 사람 구분 없이 같은 칩 — 추가·빼기는 요청자·관리자,
+                담당자 본인(재배정 권한 없음)은 [다른 사람에게 넘기기](요청자 승인). 담당자가 여럿이면 각자 [내 몫 완료] → 모두 끝나면 업무 완료 */}
+            <Prop icon={UserRound} label="담당자" hint={multi ? '각자 완료 · 모두 끝나면 완료' : undefined} asDiv>
+              <Assignees t={t} canEdit={!!perms.coAssign} onPatch={patch}
+                onAdded={(v) => { if (v !== user.id && t.due_date) warnAway(v, t.due_date, dir.users.find((x) => x.id === v)?.name ?? '담당자'); }}
+                extra={!perms.coAssign && perms.handoff && t.assignee_id === user.id ? <UserSelect className={ghostCls} value={null} placeholder="다른 사람에게 넘기기" ariaLabel="다른 사람에게 넘기기" onChange={async (v) => {
                     if (!v || v === t.assignee_id) return;
                     const note = prompt(`${dir.users.find((x) => x.id === v)?.name ?? ''}님에게 넘기기를 요청자에게 요청할까요? (사유, 선택)`);
                     if (note === null) return;
                     try { await api(`/api/tasks/${id}/handoff`, { body: { toUserId: v, note: note || undefined } }); toast.ok('요청자에게 넘기기 요청을 보냈습니다'); reload(); } catch (e: any) { toast.error(e.message); }
-                  }} />
-                : <span className="px-2 text-sm" title="담당자를 바꿀 권한이 없습니다" data-testid="assignee-locked">{t.assignee_name ? personLabel(dir.users.find((x) => x.id === t.assignee_id) ?? { name: t.assignee_name }) : '담당자 없음'}</span>}</span>
+                  }} /> : null} />
             </Prop>
-            {/* 대표 10/23 #475: 한 업무에 담당자 여러 명 — 공동 담당(주 담당 + 함께 맡는 사람) */}
-            {/* 로컬 10/23 #475 운영 확인: '공동 담당'과 '협업자'가 나란히 있어 헷갈림 → 줄마다 한 줄 설명 */}
-            <Prop icon={Users} label="공동 담당" hint="같이 맡고 내 몫 완료" asDiv><CoAssignees t={t} canEdit={!!perms.coAssign} canRule={!!perms.coAssign || t.assignee_id === user.id} onPatch={patch} /></Prop>
             {/* R-15 6번: 1명 배정 뒤에도 협업자 추가 */}
             <Prop icon={Users} label="협업자" hint="보기·댓글 알림만" asDiv><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
             <Prop icon={Megaphone} label="요청자">
