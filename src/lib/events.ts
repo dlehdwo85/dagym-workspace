@@ -469,6 +469,7 @@ export async function respondEvent(u: SessionUser, id: string, response: 'accept
   const r = await sql`update event_attendees set response = ${response} where event_id = ${masterId} and user_id = ${u.id} returning 1`;
   if (!r.length) throw forbidden('참석자로 초대된 일정만 응답할 수 있습니다');
   await sql`update events set version = version + 1, updated_at = now() where id = ${masterId}`;
+  await sql`update chat_messages set reacted_at = now() where event_id = ${masterId}`; // 메신저 2차: 대화방 일정 카드의 참석 수도 실시간으로
   return { ok: true };
 }
 

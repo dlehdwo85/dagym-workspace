@@ -4,7 +4,8 @@ import { leaveRoom, renameRoom, roomDetail, setHistoryVisible, setMuted, setRoom
 
 export const GET = handler<{ id: string }>(async ({ req, user, params }) => {
   const p = req.nextUrl.searchParams;
-  return roomDetail(user, params.id, { before: /^\d+$/.test(p.get('before') ?? '') ? p.get('before')! : undefined, q: p.get('q')?.trim() || undefined });
+  const id = (k: string) => (/^\d{1,20}$/.test(p.get(k) ?? '') ? p.get(k)! : undefined);
+  return roomDetail(user, params.id, { before: id('before'), after: id('after'), around: id('around'), q: p.get('q')?.trim() || undefined });
 });
 /** 대화방 알림 끄기·켜기, 목록 위 고정, 이름 바꾸기 */
 export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {

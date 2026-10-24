@@ -52,6 +52,7 @@ import { mktQuality } from './mktQuality.step.mjs';
 import { mktPreflight } from './mktPreflight.step.mjs';
 import { chatBackPc, chatBackPcHard } from './chatBackPc.step.mjs';
 import { bidGroups } from './bidGroups.step.mjs';
+import { messengerV4 } from './messengerV4.step.mjs';
 import { revenueAuto } from './revenueAuto.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
@@ -2821,6 +2822,7 @@ await step('로컬 QA 10/24 ②~⑥ 올리기 전 검사·사실 카드·주제 
 await step('#242 2단계 다른 화면 돌아오기: 알림 탭·위치·방금 읽은 줄 · 홈 월 캘린더 달·날 · 프로젝트 보관함 · 영업 리드 정렬·우선·칩 · 허브 탭 · 마케팅 콘텐츠 캘린더 주 — 다른 화면에 갔다 뒤로가기 = 그대로', () => backKeep({ owner, ctx, sql, BASE }));
 
 await step('대표 10/24 추가 ② 입찰 같은 제목: 취소 공고 = 원 공고 카드 \'취소\'·\'M/D 취소 공고\' · K-apt 재게시 한 장 \'2회 게시\' → [대상 아님으로](사유) → 전체 탭에서 빠짐 → [대상 아님 n건] 탭(누가·사유) → [되돌리기] · 상세 \'대상아님\' 사유·되돌리기 · 휴대폰 넘침 없음', () => bidGroups({ owner, ctx, sql, BASE, SHOTS }));
+await step('메신저 2차(대표 10/20 카톡 수준 B8~B11·C13): 여기까지 읽음 선·긴 글 전체 보기·[+] 투표(실시간·누가·마감)·일정 잡기 카드·스티커·사진 3장 한 묶음·좌우 뷰어·@전체·메시지→일정(날짜·시각)·자주 쓰는 반응·답장 원문 이동(최신으로)·휴대폰 [+]·방 목록 밀기', () => messengerV4({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

@@ -1,8 +1,9 @@
 'use client';
 import { RoleBadge } from '@/components/RoleBadge';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { ArrowLeft, AtSign, Headphones, Mic, Pencil, Bell, BellOff, Camera, Image as ImageIcon, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, UserMinus, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, AtSign, BarChart3, CalendarPlus, Check, ChevronLeft, ChevronRight, Headphones, MapPin, Mic, Pencil, Play, Bell, BellOff, Camera, Image as ImageIcon, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Sticker as StickerIcon, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { cameBack } from '@/components/urlState';
@@ -11,21 +12,46 @@ import { Avatar, Button, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toas
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { VoiceButton } from '@/components/voice';
 import { hearOnce, keepScreenOn, speak, stopSpeaking, yesNo } from '@/components/speak';
+import { ALL_ID, POLL_MAX, POLL_MIN, REACTIONS, STICKERS, stickerOf, whenText } from '@/lib/chatShared';
+import { useSheetBack } from '@/components/backClose';
+import { parseTaskText } from '@/lib/nlparse';
 
 /**
  * V14 25번 메신저 — /messages 화면과 오른쪽 아래 패널이 같은 컴포넌트를 쓴다.
  * 목록(검색·＋새 대화·탭·아바타·미리보기·안 읽음·고정) / 대화방(연속 묶기·날짜 구분·읽음·이미지/파일 카드·답장 인용·반응·hover 메뉴) / 입력(자동 높이·📎📷😊@·붙여넣기·끌어 놓기)
  */
 export type RoomRow = { id: string; kind: 'dm' | 'group' | 'company' | 'task' | 'team'; name: string | null; task_id: string | null; muted: boolean; pinned: boolean; unread: number; member_count: number;
-  last_body: string | null; last_file: string | null; last_author: string | null; last_deleted: boolean; last_message_at: string | null; other_id: string | null };
+  last_body: string | null; last_file: string | null; last_author: string | null; last_deleted: boolean; last_message_at: string | null; other_id: string | null; last_mime?: string | null; last_kind?: string | null };
 type Reaction = { emoji: string; n: number; mine: boolean; names: string[] };
 export type Msg = { id: string; room_id: string; author_id: string | null; author_name: string | null; created_at: string; edited_at: string | null; pinned_at: string | null;
   body: string; deleted: boolean; file_name: string | null; file_mime: string | null; file_size: number | null; task_id: string | null; mine: boolean;
   reply_to?: string | null; reply?: { author: string | null; body: string; file: string | null; deleted: boolean } | null; reactions?: Reaction[];
-  kind?: 'text' | 'system' | 'forward'; forward_of?: string | null; unread?: number };
+  kind?: 'text' | 'system' | 'forward' | 'poll' | 'event' | 'sticker'; forward_of?: string | null; unread?: number;
+  /** 메신저 2차: 사진 묶음·스티커·투표·일정 카드 */
+  batch_id?: string | null; sticker?: string | null; poll?: Poll | null; event?: EventCard | null };
+type Poll = { question: string; options: string[]; multi: boolean; anonymous: boolean; closes_at: string | null; closed: boolean; counts: number[]; mine: number[]; voters: number; names: Record<string, string[]> | null };
+type EventCard = { id: string; title: string; start_at: string; end_at: string; all_day: boolean; location: string; cancelled: boolean; going: number; invited: number; response: string | null };
 export const KIND_LABEL = { dm: '1:1', group: '그룹', company: '회사 전체', task: '업무', team: '팀' } as const;
-const EMOJI = ['👍', '❤️', '😂', '😮', '🙏', '✅'];
-const INSERT_EMOJI = ['😀', '😂', '😊', '😍', '🙏', '👍', '👏', '🎉', '🔥', '✅', '❗', '❓', '💪', '😢', '😅', '🙌'];
+// B10 이모지 패널(자주 쓰는 것은 이 기기에 기억)
+const INSERT_EMOJI = ['😀', '😂', '😊', '😍', '🥰', '😎', '🤔', '😅', '😢', '😭', '😡', '😴', '🙏', '👍', '👎', '👏', '🙌', '💪', '👌', '✌️', '🤝', '🎉', '🔥', '✅',
+  '❗', '❓', '💯', '❤️', '💙', '⭐', '☕', '🍚', '🍺', '🎂', '📌', '📎', '📅', '⏰', '📞', '💰', '🚗', '✈️', '🏢', '🏠', '☀️', '🌧️', '❄️', '🌙'];
+const EMOJI_KEY = 'wos_emoji_freq';
+const readFreq = (): Record<string, number> => { try { return JSON.parse(localStorage.getItem(EMOJI_KEY) || '{}'); } catch { return {}; } };
+const bumpFreq = (e: string) => { try { const f = readFreq(); f[e] = (f[e] ?? 0) + 1; localStorage.setItem(EMOJI_KEY, JSON.stringify(f)); } catch { /* 저장 못 해도 됨 */ } };
+const uuid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16)));
+const isImage = (m: Pick<Msg, 'file_name' | 'file_mime'>) => !!m.file_name && /^image\/(png|jpe?g|gif|webp)$/.test(m.file_mime ?? '');
+const isVideo = (m: Pick<Msg, 'file_name' | 'file_mime'>) => !!m.file_name && /^video\//.test(m.file_mime ?? '');
+const isAudio = (m: Pick<Msg, 'file_name' | 'file_mime'>) => !!m.file_name && /^audio\//.test(m.file_mime ?? '');
+const fileUrl = (id: string, inline = true) => `/api/chat/messages/${id}/file${inline ? '?inline=1' : ''}`;
+/** 긴 글: 600자 또는 15줄 넘으면 접고 [전체 보기] */
+const isLong = (b: string) => b.length > 600 || b.split('\n').length > 15;
+/** 목록 미리보기: 사진·영상·스티커·투표·일정은 종류로 */
+const lastPreview = (r: RoomRow) => {
+  if (r.last_kind === 'sticker') return `(스티커) ${r.last_body ?? ''}`;
+  if (r.last_kind === 'poll') return `📊 투표: ${r.last_body ?? ''}`;
+  if (r.last_file && !plain(r.last_body)) return /^image\//.test(r.last_mime ?? '') ? '📷 사진' : /^video\//.test(r.last_mime ?? '') ? '🎬 동영상' : `📎 ${r.last_file}`;
+  return plain(r.last_body);
+};
 const TZ = 'Asia/Seoul';
 const dayKey = (s: string) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date(s));
 const timeOf = (s: string) => new Intl.DateTimeFormat('ko-KR', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(s));
@@ -88,6 +114,42 @@ function RoomIcon({ r, size = 40 }: { r: Pick<RoomRow, 'kind' | 'other_id' | 'na
   );
 }
 
+/**
+ * C13 휴대폰 방 목록: 줄을 왼쪽으로 밀면 [고정][알림][나가기](그룹만). 화면 폭 640 미만에서만, 세로 스크롤은 그대로(touch-action: pan-y).
+ * 손가락(터치)·마우스 모두 pointer 이벤트로 — 민 뒤에는 그 줄 누름(방 열기)을 막는다
+ */
+function SwipeRow({ r, open, setOpen, onPin, onMute, onLeave, children }: { r: RoomRow; open: boolean; setOpen: (o: boolean) => void; onPin: () => void; onMute: () => void; onLeave: () => void; children: React.ReactNode }) {
+  const W = r.kind === 'group' ? 204 : 136;
+  const st = useRef<{ x: number; y: number; lock: 'x' | 'y' | null; id: number } | null>(null);
+  const moved = useRef(false);
+  const [dx, setDx] = useState<number | null>(null);
+  const narrow = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches;
+  const x = dx !== null ? Math.max(-W - 24, Math.min(0, (open ? -W : 0) + dx)) : open ? -W : 0;
+  const btn = 'flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold text-white';
+  return (
+    <li className="group relative overflow-hidden" data-testid="room-row">
+      <div className="absolute inset-y-0 right-0 flex" style={{ width: W }} aria-hidden={!open} data-testid="room-swipe-actions">
+        <button type="button" tabIndex={open ? 0 : -1} className={cx(btn, 'bg-slate-500')} onClick={onPin} data-testid="swipe-pin">{r.pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}{r.pinned ? '고정 해제' : '고정'}</button>
+        <button type="button" tabIndex={open ? 0 : -1} className={cx(btn, 'bg-amber-500')} onClick={onMute} data-testid="swipe-mute">{r.muted ? <Bell className="size-4" /> : <BellOff className="size-4" />}{r.muted ? '알림 켜기' : '알림 끄기'}</button>
+        {r.kind === 'group' && <button type="button" tabIndex={open ? 0 : -1} className={cx(btn, 'bg-red-500')} onClick={onLeave} data-testid="swipe-leave"><LogOut className="size-4" />나가기</button>}
+      </div>
+      <div className={cx('relative bg-white', dx === null && 'transition-transform duration-200')} style={{ transform: `translateX(${x}px)`, touchAction: 'pan-y' }}
+        onPointerDown={(e) => { if (!narrow() || (e.pointerType === 'mouse' && e.button !== 0)) return; st.current = { x: e.clientX, y: e.clientY, lock: null, id: e.pointerId }; moved.current = false; }}
+        onPointerMove={(e) => {
+          const s = st.current; if (!s || s.id !== e.pointerId) return;
+          const ddx = e.clientX - s.x, ddy = e.clientY - s.y;
+          if (!s.lock && (Math.abs(ddx) > 8 || Math.abs(ddy) > 8)) { s.lock = Math.abs(ddx) > Math.abs(ddy) ? 'x' : 'y'; if (s.lock === 'x') { moved.current = true; try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* 없음 */ } } }
+          if (s.lock === 'x') setDx(ddx);
+        }}
+        onPointerUp={(e) => { const s = st.current; st.current = null; if (s?.lock === 'x') { const d = e.clientX - s.x; setOpen(open ? d < 20 : d < -48); } setDx(null); }}
+        onPointerCancel={() => { st.current = null; setDx(null); }}
+        onClickCapture={(e) => { if (moved.current) { e.preventDefault(); e.stopPropagation(); moved.current = false; return; } if (open) { e.preventDefault(); e.stopPropagation(); setOpen(false); } }}>
+        {children}
+      </div>
+    </li>
+  );
+}
+
 const TABS = [['all', '전체'], ['unread', '안 읽음'], ['dm', '1:1'], ['group', '그룹'], ['task', '업무']] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -110,6 +172,17 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
   }
   async function pin(r: RoomRow) {
     try { await api(`/api/chat/rooms/${r.id}`, { method: 'PATCH', body: { pinned: !r.pinned } }); rooms.reload(); } catch (e: any) { toast.error(e.message); }
+  }
+  // C13 휴대폰 방 목록 왼쪽으로 밀기 → [고정][알림][나가기]
+  const [swiped, setSwiped] = useState<string | null>(null);
+  async function mute(r: RoomRow) {
+    setSwiped(null);
+    try { await api(`/api/chat/rooms/${r.id}`, { method: 'PATCH', body: { muted: !r.muted } }); rooms.reload(); toast.ok(r.muted ? '알림을 켰습니다' : '알림을 껐습니다'); } catch (e: any) { toast.error(e.message); }
+  }
+  async function leave(r: RoomRow) {
+    setSwiped(null);
+    if (!confirm(`"${r.name ?? '대화방'}"에서 나갈까요?`)) return;
+    try { await api(`/api/chat/rooms/${r.id}`, { method: 'DELETE' }); rooms.reload(); broadcastRefresh(); toast.ok('대화방에서 나갔습니다'); } catch (e: any) { toast.error(e.message); }
   }
   const noChats = rooms.data && !rooms.data.rooms.some((r) => r.last_message_at);
   const suggest = dir.users.filter((x) => x.id !== user.id).slice(0, 6);
@@ -146,7 +219,7 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
       ) : rooms.loading && !rooms.data ? <div className="p-3"><Skeleton rows={5} /></div> : (
         <ul className="min-h-0 flex-1 overflow-y-auto" data-testid="chat-rooms">
           {list.map((r) => (
-            <li key={r.id} className="group relative">
+            <SwipeRow key={r.id} r={r} open={swiped === r.id} setOpen={(o) => setSwiped(o ? r.id : null)} onPin={() => { setSwiped(null); pin(r); }} onMute={() => mute(r)} onLeave={() => leave(r)}>
               <button onClick={() => onOpen(r.id)} className={cx('flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50', activeId === r.id && 'bg-teal-50')} data-room={r.kind}>
                 <RoomIcon r={r} />
                 <span className="min-w-0 flex-1">
@@ -160,14 +233,14 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
                   </span>
                   <span className="mt-0.5 flex items-center gap-1.5">
                     <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
-                      {r.last_deleted ? '삭제된 메시지' : r.last_body || r.last_file ? `${r.kind !== 'dm' && r.last_author ? r.last_author + ': ' : ''}${plain(r.last_body) || '📎 ' + r.last_file}` : '아직 메시지가 없습니다'}</span>
+                      {r.last_deleted ? '삭제된 메시지' : r.last_body || r.last_file ? `${r.kind !== 'dm' && r.last_author ? r.last_author + ': ' : ''}${lastPreview(r)}` : '아직 메시지가 없습니다'}</span>
                     {r.unread > 0 && <span className={cx('shrink-0 rounded-full px-1.5 text-[11px] font-bold leading-5 text-white', r.muted ? 'bg-slate-400' : 'bg-red-500')} data-testid="room-unread">{r.unread > 99 ? '99+' : r.unread}</span>}
                   </span>
                 </span>
               </button>
-              <button onClick={() => pin(r)} className="absolute right-2 top-1 hidden rounded p-1 text-ink-3 hover:bg-white hover:text-ink group-hover:block" aria-label={r.pinned ? '고정 해제' : '위에 고정'} title={r.pinned ? '고정 해제' : '위에 고정'}>
+              <button onClick={() => pin(r)} className="absolute right-2 top-1 hidden rounded p-1 text-ink-3 hover:bg-white hover:text-ink sm:group-hover:block" aria-label={r.pinned ? '고정 해제' : '위에 고정'} title={r.pinned ? '고정 해제' : '위에 고정'}>
                 {r.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}</button>
-            </li>
+            </SwipeRow>
           ))}
           {!list.length && <li className="px-3 py-6 text-center text-sm text-ink-3">{tab === 'unread' ? '안 읽은 대화가 없습니다' : '대화방이 없습니다'}</li>}
           {noChats && !!suggest.length && (
@@ -190,7 +263,8 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
 }
 
 type Member = { id: string; name: string; title?: string | null; phone?: string | null; role?: string; last_read_id: string; is_owner?: boolean; joined_at?: string };
-type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean; canRename?: boolean; ownerId?: string | null; canManage?: boolean; historyVisible?: boolean }; messages: Msg[]; members: Member[]; pinned: Msg[] };
+type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean; canRename?: boolean; ownerId?: string | null; canManage?: boolean; historyVisible?: boolean; canMentionAll?: boolean };
+  messages: Msg[]; members: Member[]; pinned: Msg[]; hasOlder?: boolean; hasNewer?: boolean; lastRead?: string; quickReactions?: string[] };
 
 /** 132차 확인 후속(로컬 10/24 ⑧): 주소를 새로 열어 다른 화면에 갔다가 브라우저 뒤로가기로 이 페이지를 다시 연 경우(전체 새로고침) — 그때 처음 여는 방만 '돌아옴'으로 */
 let firstRoom = true;
@@ -218,6 +292,23 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const [fwd, setFwd] = useState<Msg | null>(null);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [whoUnread, setWhoUnread] = useState<{ id: string; names: string[] } | null>(null);
+  // 메신저 2차(10/24): 사진 뷰어·긴 글·[+] 메뉴·투표·일정·스티커·답장 원문 이동·여기까지 읽음
+  const [viewer, setViewer] = useState<string | null>(null);
+  const [longText, setLongText] = useState<Msg | null>(null);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [emojiTab, setEmojiTab] = useState<'emoji' | 'sticker'>('emoji');
+  const [pollOpen, setPollOpen] = useState(false);
+  const [eventDraft, setEventDraft] = useState<{ title: string; date: string; time: string | null; fromMessage?: string } | null>(null);
+  const [newTask, setNewTask] = useState(false);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [detached, setDetached] = useState(false); // 답장 원문으로 옮겨 가 최신 메시지가 아닌 구간을 보는 중
+  const detachedRef = useRef(false); detachedRef.current = detached;
+  const [flash, setFlash] = useState<string | null>(null);
+  const readMark = useRef<string | null>(null); // 방을 열 때 내가 읽은 마지막 메시지(그 뒤에 '여기까지 읽었습니다')
+  const pendingJump = useRef<string | null>(null);
+  const forceBottom = useRef(false);
+  const keepPos = useRef(false);
+  const loadingNewer = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null); // #109 갤러리 사진·영상
@@ -233,7 +324,13 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const spoken = useRef(new Set<string>());
   const sayQ = useRef<Promise<void>>(Promise.resolve());
   const say = (t: string) => { sayQ.current = sayQ.current.then(() => speak(t)); return sayQ.current; };
-  useEffect(() => { if (data) { for (const m of data.messages) spoken.current.add(m.id); setMsgs(data.messages); setReads(Object.fromEntries(data.members.map((m) => [m.id, m.last_read_id]))); } }, [data]);
+  useEffect(() => {
+    if (!data) return;
+    for (const m of data.messages) spoken.current.add(m.id);
+    if (readMark.current === null) readMark.current = data.lastRead ?? null;
+    setMsgs(data.messages); setHasOlder(data.hasOlder ?? data.messages.length >= 60); setDetached(false);
+    setReads(Object.fromEntries(data.members.map((m) => [m.id, m.last_read_id])));
+  }, [data]);
   const markRead = useCallback(async () => { try { await api(`/api/chat/rooms/${id}/read`, { body: {} }); onRead(); } catch { /* 다음에 */ } }, [id, onRead]);
   useEffect(() => { if (data) markRead(); }, [data, markRead]);
   // V38 1 흔들림 방지: 대화 칸만 움직인다(scrollIntoView 는 화면 전체를 끌어 올려 위아래로 튐).
@@ -256,13 +353,29 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     const el = listRef.current; if (!el) return;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     fromBottom.current = el.scrollHeight - el.scrollTop;
+    if (atBottom.current && detachedRef.current) { loadNewer(); return; } // 지난 구간을 보다 아래 끝 → 다음 메시지 이어서
     if (atBottom.current) setUnseen(0);
   };
+  /** 그 메시지가 화면 위쪽 1/3 쯤 오게 + 잠깐 강조 */
+  const reveal = useCallback((mid: string) => {
+    const el = listRef.current; const t = el?.querySelector<HTMLElement>(`[data-msg-id="${mid}"]`) ?? el?.querySelector<HTMLElement>(`[data-batch-ids~="${mid}"]`); if (!el || !t) return false; // 묶음 둘째 장 = 묶음 칸
+    el.scrollTop += t.getBoundingClientRect().top - el.getBoundingClientRect().top - el.clientHeight / 3;
+    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const hid = t.dataset.msgId ?? mid; setFlash(hid); setTimeout(() => setFlash((f) => (f === hid ? null : f)), 1800);
+    return true;
+  }, []);
   useLayoutEffect(() => {
     const el = listRef.current; if (!el || !msgs.length) return;
     const first = msgs[0].id, last = msgs[msgs.length - 1].id, prev = edge.current;
+    const done = () => { edge.current = { first, last, height: el.scrollHeight, top: el.scrollTop }; };
+    if (pendingJump.current) { const j = pendingJump.current; pendingJump.current = null; reveal(j); return done(); } // 답장 원문으로 옮겨 감
+    if (forceBottom.current) { forceBottom.current = false; toBottom(); return done(); } // [최신 메시지로]
+    if (keepPos.current) { keepPos.current = false; return done(); } // 아래로 이어 불러옴 → 자리 그대로
     let saved = 0; if (!prev.last && back.current) try { saved = Number(sessionStorage.getItem(posKey)) || 0; } catch { /* 없음 */ }
+    const line = !prev.last ? el.querySelector<HTMLElement>('[data-testid="chat-read-line"]') : null;
     if (!prev.last && saved > el.clientHeight) { el.scrollTop = Math.max(0, el.scrollHeight - saved); atBottom.current = false; fromBottom.current = saved; } // 뒤로가기로 돌아옴 → 보던 자리
+    else if (line && line.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop > el.scrollHeight - el.clientHeight) toBottom(); // 안 읽은 것이 한 화면 안 → 맨 아래
+    else if (line) { el.scrollTop += line.getBoundingClientRect().top - el.getBoundingClientRect().top - 8; atBottom.current = false; } // B11 안 읽은 것이 많으면 '여기까지 읽었습니다' 선부터
     else if (!prev.last) toBottom(); // 처음 열 때
     else if (first !== prev.first && last === prev.last) el.scrollTop = prev.top + (el.scrollHeight - prev.height); // 이전 메시지 불러옴 → 보던 자리 유지
     else if (last !== prev.last) {
@@ -270,8 +383,8 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
       if (atBottom.current || added.some((m) => m.mine)) toBottom();
       else setUnseen((n) => n + added.filter((m) => !m.mine).length);
     }
-    edge.current = { first, last, height: el.scrollHeight, top: el.scrollTop };
-  }, [msgs, toBottom, posKey]);
+    done();
+  }, [msgs, toBottom, posKey, reveal]);
   // 사진이 늦게 뜨거나 키보드가 열려 칸 높이가 바뀌어도 맨 아래를 보던 중이면 맨 아래 유지
   useEffect(() => {
     const keep = () => { if (atBottom.current) { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; } };
@@ -282,11 +395,14 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     return () => { vv?.removeEventListener('resize', keep); ro?.disconnect(); };
   }, [data]);
   useEffect(() => { const el = inputRef.current; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 128)}px`; } }, [text]);
+  const lastId = useRef('0'); lastId.current = msgs[msgs.length - 1]?.id ?? '0';
   useEffect(() => live.subscribe((e) => {
     if (e.messages?.some((m) => m.room_id === id)) {
+      // 지난 구간을 보는 중(detached)이면 새 메시지는 붙이지 않고 '새 메시지 n' 만 — 고친 것·반응·투표는 그대로 반영
+      if (detachedRef.current) setUnseen((n) => n + e.messages!.filter((x) => x.room_id === id && !x.mine && BigInt(x.id) > BigInt(lastId.current)).length);
       setMsgs((cur) => {
         const map = new Map(cur.map((m) => [m.id, m]));
-        for (const m of e.messages!.filter((x) => x.room_id === id)) map.set(m.id, { ...map.get(m.id), ...m });
+        for (const m of e.messages!.filter((x) => x.room_id === id)) { if (detachedRef.current && !map.has(m.id)) continue; map.set(m.id, { ...map.get(m.id), ...m }); }
         return [...map.values()].sort((a, b) => Number(BigInt(a.id) - BigInt(b.id)));
       });
       if (document.visibilityState === 'visible') markRead();
@@ -304,9 +420,34 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   useEffect(() => { if (!menu) return; const close = () => setMenu(null); window.addEventListener('click', close); return () => window.removeEventListener('click', close); }, [menu]);
 
   const members = data?.members ?? [];
-  const toWire = (s: string) => members.filter((m) => m.id !== user.id).reduce((acc, m) => acc.split(`@${m.name}`).join(`@[${m.name}](${m.id})`), s);
+  const toWire = (s: string) => members.filter((m) => m.id !== user.id).reduce((acc, m) => acc.split(`@${m.name}`).join(`@[${m.name}](${m.id})`),
+    data?.room.canMentionAll ? s.replace(/(^|\s)@전체(?=$|[\s.,!?~])/g, `$1@[전체](${ALL_ID})`) : s); // B11 @전체
   const mergeMine = (mid: string, p: Partial<Msg>) => setMsgs((cur) => cur.some((m) => m.id === mid) ? cur : [...cur, { id: mid, room_id: id, author_id: user.id, author_name: user.name, created_at: new Date().toISOString(),
     edited_at: null, pinned_at: null, body: '', deleted: false, file_name: null, file_mime: null, file_size: null, task_id: null, mine: true, reactions: [], ...p }]);
+  /** 최신 메시지로(지난 구간을 보던 중이면 새로 불러와 맨 아래) */
+  const goLatest = () => { forceBottom.current = true; setUnseen(0); reload(); };
+  /** 보낸 직후: 지난 구간을 보던 중이면 최신으로 옮겨 가서, 아니면 바로 붙임 */
+  const afterSend = (mid: string, p: Partial<Msg>) => { if (detachedRef.current) goLatest(); else mergeMine(mid, p); };
+  async function loadNewer() {
+    if (loadingNewer.current || !msgs.length) return;
+    loadingNewer.current = true;
+    try {
+      const r = await api(`/api/chat/rooms/${id}?after=${msgs[msgs.length - 1].id}`);
+      keepPos.current = true;
+      setMsgs((c) => [...c, ...r.messages.filter((m: Msg) => !c.some((x) => x.id === m.id))]);
+      if (!r.hasNewer) { setDetached(false); setUnseen(0); }
+    } catch (e: any) { toast.error(e.message); } finally { loadingNewer.current = false; }
+  }
+  /** B11 답장 원문 눌러 이동: 화면에 있으면 바로, 없으면 그 앞뒤를 불러와서 */
+  async function jumpTo(mid: string) {
+    if (reveal(mid)) return;
+    try {
+      const r = await api(`/api/chat/rooms/${id}?around=${mid}`);
+      if (!r.messages.some((m: Msg) => m.id === mid)) { toast.error('원래 메시지를 찾을 수 없습니다(초대 전 메시지이거나 지워짐)'); return; }
+      pendingJump.current = mid;
+      setMsgs(r.messages); setHasOlder(!!r.hasOlder); setDetached(!!r.hasNewer);
+    } catch (e: any) { toast.error(e.message); }
+  }
   async function send(e?: React.FormEvent) {
     e?.preventDefault();
     if (!text.trim()) return;
@@ -314,7 +455,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     try {
       const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body, ...(rep ? { replyTo: rep.id } : {}) } });
       spoken.current.add(r.id);
-      mergeMine(r.id, { body, reply_to: rep?.id ?? null, reply: rep ? { author: rep.author_name, body: rep.body.slice(0, 120), file: rep.file_name, deleted: false } : null });
+      afterSend(r.id, { body, reply_to: rep?.id ?? null, reply: rep ? { author: rep.author_name, body: rep.body.slice(0, 120), file: rep.file_name, deleted: false } : null });
     } catch (er: any) { setText(text); setReplyTo(rep); toast.error(er.message); }
   }
   // ---- V38 3 음성 모드 ----
@@ -323,7 +464,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     try {
       const body = toWire(t);
       const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body } });
-      spoken.current.add(r.id); mergeMine(r.id, { body });
+      spoken.current.add(r.id); afterSend(r.id, { body });
       setVPhase('idle'); setHeard(''); await say('보냈습니다');
     } catch (er: any) { setVPhase('confirm'); toast.error(er.message); await say('보내지 못했습니다'); }
   }
@@ -355,8 +496,11 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   }
   useEffect(() => { if (voice) keepScreenOn(true); return () => { keepScreenOn(false); stopSpeaking(); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   async function upload(files: FileList | File[]) {
-    const list = Array.from(files).slice(0, 10);
+    const list = Array.from(files).slice(0, 30);
     if (!list.length) return;
+    // B8 사진·영상을 여러 장 고르면 한 묶음(대화창 한 칸·알림 1번·안 읽은 수 1)
+    const media = list.filter((f) => /^(image|video)\//.test(f.type));
+    const batch = media.length > 1 ? uuid() : null;
     setProg(list.map((f) => ({ name: f.name, pct: 0 })));
     for (const [n, f] of list.entries()) {
       try {
@@ -364,12 +508,14 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
         const t = await api(`/api/chat/rooms/${id}/files`, { body: { fileName: name, mime: f.type || 'application/octet-stream', size: f.size } });
         const { uploadId } = await putFile(t.upload, f, (pct) => setProg((x) => x.map((y, j) => (j === n ? { ...y, pct } : y))));
         const file = { key: t.key, name, mime: f.type || 'application/octet-stream', size: f.size, ...(uploadId ? { uploadId } : {}) }; // #109: 영상 조각 업로드면 서버가 합침
-        const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body: '', file } });
-        mergeMine(r.id, { file_name: name, file_mime: file.mime, file_size: f.size });
+        const inBatch = batch && media.includes(f);
+        const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body: '', file, ...(inBatch ? { batch, batchSize: media.length } : {}) } });
+        afterSend(r.id, { file_name: name, file_mime: file.mime, file_size: f.size, batch_id: inBatch ? batch : null });
       } catch (er: any) { setProg((x) => x.map((y, j) => (j === n ? { ...y, error: er.message } : y))); }
     }
     if (fileRef.current) fileRef.current.value = '';
     if (camRef.current) camRef.current.value = '';
+    if (galleryRef.current) galleryRef.current.value = '';
     setTimeout(() => setProg((x) => (x.some((y) => y.error) ? x : [])), 1200);
   }
   function onType(v: string) {
@@ -377,10 +523,27 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     if (v && Date.now() - lastTyping.current > 3000) { lastTyping.current = Date.now(); api(`/api/chat/rooms/${id}/typing`, { body: {} }).catch(() => {}); }
   }
   const insert = (s: string) => { setText((c) => c + s); setTimeout(() => inputRef.current?.focus(), 0); };
-  async function act(m: Msg, what: 'pin' | 'unpin' | 'delete' | 'task') {
+  /** B10 스티커 보내기 */
+  async function sendSticker(code: string) {
+    setEmojiOpen(false); setPlusOpen(false);
+    const st = stickerOf(code); if (!st) return;
+    try { const r = await api(`/api/chat/rooms/${id}/messages`, { body: { sticker: code } }); spoken.current.add(r.id); afterSend(r.id, { body: st.text, sticker: code, kind: 'sticker' }); }
+    catch (e: any) { toast.error(e.message); }
+  }
+  async function act(m: Msg, what: 'pin' | 'unpin' | 'delete' | 'task' | 'event', run?: Msg[]) {
     setMenu(null); setActive(null);
     try {
-      if (what === 'delete') { if (!confirm('이 메시지를 지울까요? ("삭제된 메시지"로 표시됩니다)')) return; await api(`/api/chat/messages/${m.id}`, { method: 'DELETE' }); setMsgs((c) => c.map((x) => (x.id === m.id ? { ...x, deleted: true, body: '' } : x))); }
+      if (what === 'delete') {
+        const ids = (run ?? [m]).filter((x) => x.mine && !x.deleted).map((x) => x.id); // 사진 묶음은 한 번에
+        if (!confirm(ids.length > 1 ? `사진·영상 ${ids.length}개를 모두 지울까요? ("삭제된 메시지"로 표시됩니다)` : '이 메시지를 지울까요? ("삭제된 메시지"로 표시됩니다)')) return;
+        for (const x of ids) await api(`/api/chat/messages/${x}`, { method: 'DELETE' });
+        setMsgs((c) => c.map((x) => (ids.includes(x.id) ? { ...x, deleted: true, body: '' } : x)));
+      }
+      else if (what === 'event') { // B9 메시지 → 일정(날짜·시각은 글에서 읽어 미리 채움)
+        const today = dayKey(new Date().toISOString());
+        const p = parseTaskText(plain(m.body), dir.users, today);
+        setEventDraft({ title: (p.title || plain(m.body).split('\n')[0]).slice(0, 100), date: p.dueDate ?? today, time: p.dueTime, fromMessage: m.id });
+      }
       else if (what === 'task') { const s = await api(`/api/chat/messages/${m.id}/to-task`, { body: {} }); setToTask({ msg: m, ...s }); }
       else { await api(`/api/chat/messages/${m.id}/pin`, { body: { pin: what === 'pin' } }); reload(); }
     } catch (e: any) { toast.error(e.message); }
@@ -405,7 +568,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   async function loadOlder() {
     if (!msgs.length) return;
     setOlder(true);
-    try { const r = await api(`/api/chat/rooms/${id}?before=${msgs[0].id}`); setMsgs((c) => [...r.messages.filter((m: Msg) => !c.some((x) => x.id === m.id)), ...c]); } catch (e: any) { toast.error(e.message); } finally { setOlder(false); }
+    try { const r = await api(`/api/chat/rooms/${id}?before=${msgs[0].id}`); setMsgs((c) => [...r.messages.filter((m: Msg) => !c.some((x) => x.id === m.id)), ...c]); setHasOlder(r.hasOlder ?? r.messages.length >= 60); } catch (e: any) { toast.error(e.message); } finally { setOlder(false); }
   }
   async function toggleMute() {
     try { await api(`/api/chat/rooms/${id}`, { method: 'PATCH', body: { muted: !data!.room.muted } }); reload(); onRead(); } catch (e: any) { toast.error(e.message); }
@@ -414,6 +577,11 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   if (loading && !data) return <div className="p-3"><Skeleton rows={6} /></div>;
   const room = data!.room;
   const other = room.kind === 'dm' ? members.find((x) => x.id !== user.id) : null;
+  const quick = data!.quickReactions?.length ? data!.quickReactions : REACTIONS.slice(0, 6);
+  const mediaList = msgs.filter((m) => !m.deleted && (isImage(m) || isVideo(m)));
+  // B11 '여기까지 읽었습니다': 방을 열 때 읽은 마지막 메시지 다음(남이 보낸 것) — 읽은 메시지가 화면에 하나는 있어야 선을 그음
+  const mark = readMark.current;
+  const readLine = mark && mark !== '0' && msgs.some((m) => BigInt(m.id) <= BigInt(mark)) ? msgs.find((m) => BigInt(m.id) > BigInt(mark) && !m.mine)?.id ?? null : null;
   const readBy = (m: Msg) => members.filter((x) => x.id !== m.author_id && BigInt(reads[x.id] ?? '0') >= BigInt(m.id)).length;
   const others = members.filter((x) => x.id !== user.id).length;
   // B7: 카톡처럼 '안 읽은 수'(실시간 읽음 반영) — 누르면 안 읽은 사람 이름
@@ -424,6 +592,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   }
   const mention = /(^|\s)@([^\s@]*)$/.exec(text);
   const mentionList = mention ? members.filter((m) => m.id !== user.id && m.name.includes(mention[2])).slice(0, 6) : [];
+  const mentionAll = !!mention && !!room.canMentionAll && '전체'.startsWith(mention[2]); // B11 @전체(1:1 제외, 회사 전체방은 대표·관리자)
   const iconBtn = 'inline-flex size-8 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100';
   async function saveName() {
     if (nameDraft === null) return; // Enter 뒤 blur 로 두 번 불리지 않게
@@ -475,56 +644,81 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
       <DropZone onFiles={upload} label="놓으면 이 대화방에 보냅니다" testid="chat-drop" className="flex min-h-0 flex-1 flex-col">
         <div className="relative flex min-h-0 flex-1 flex-col">
         <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/60 px-3 py-2 [overflow-anchor:none]" data-testid="chat-messages" onClick={() => setActive(null)}>
-          {msgs.length >= 60 && <div className="text-center"><Button size="sm" variant="ghost" onClick={loadOlder} disabled={older}>{older ? <Loader2 className="animate-spin" /> : null}이전 메시지</Button></div>}
+          {hasOlder && <div className="text-center"><Button size="sm" variant="ghost" onClick={loadOlder} disabled={older} data-testid="chat-older">{older ? <Loader2 className="animate-spin" /> : null}이전 메시지</Button></div>}
           {!msgs.length && <p className="py-10 text-center text-sm text-ink-3">첫 메시지를 보내 보세요</p>}
           {msgs.map((m, i) => {
-            const prev = msgs[i - 1], next = msgs[i + 1];
+            const prev = msgs[i - 1];
+            // B8 사진 묶음: 같은 사람이 한 번에 보낸 사진·영상은 첫 장 칸에 함께(둘째 장부터는 따로 그리지 않음)
+            if (m.batch_id && prev?.batch_id === m.batch_id && prev.author_id === m.author_id) return null;
+            let j = i; while (m.batch_id && msgs[j + 1]?.batch_id === m.batch_id && msgs[j + 1].author_id === m.author_id) j++;
+            const run = msgs.slice(i, j + 1), lastOf = run[run.length - 1], next = msgs[j + 1];
+            const album = run.filter((x) => !x.deleted && (isImage(x) || isVideo(x)));
             const newDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at);
             const head = newDay || prev.author_id !== m.author_id || new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() > 5 * 60_000;
-            const tail = !next || next.author_id !== m.author_id || dayKey(next.created_at) !== dayKey(m.created_at) || timeOf(next.created_at) !== timeOf(m.created_at);
-            const img = m.file_name && /^image\/(png|jpe?g|gif|webp)$/.test(m.file_mime ?? '');
+            const tail = !next || next.author_id !== m.author_id || dayKey(next.created_at) !== dayKey(lastOf.created_at) || timeOf(next.created_at) !== timeOf(lastOf.created_at);
+            const st = stickerOf(m.sticker);
+            const img = isImage(m), vid = isVideo(m), aud = isAudio(m);
+            const gone = run.every((x) => x.deleted);
+            const isText = (m.kind ?? 'text') === 'text' || (m.kind === 'forward' && !st && !m.event);
+            const bare = !!st || album.length > 1 || ((img || vid) && !m.body) || !!m.poll || !!m.event; // 말풍선 없이(스티커·사진·카드)
             const showMenu = active === m.id || menu?.id === m.id;
+            const dateLine = newDay && <div className="my-3 flex items-center gap-2 text-[11px] text-ink-3" data-testid="chat-date"><span className="h-px flex-1 bg-line" />{dayLabel(m.created_at)}<span className="h-px flex-1 bg-line" /></div>;
+            // B11 '여기까지 읽었습니다' — 방을 열 때 읽은 곳 바로 다음
+            const readLineEl = readLine === m.id && <div className="my-3 flex items-center gap-2 text-[11px] font-semibold text-teal-700" data-testid="chat-read-line"><span className="h-px flex-1 bg-teal-600/40" />여기까지 읽었습니다<span className="h-px flex-1 bg-teal-600/40" /></div>;
             if (m.kind === 'system') return (
-              <div key={m.id}>
-                {newDay && <div className="my-3 flex items-center gap-2 text-[11px] text-ink-3" data-testid="chat-date"><span className="h-px flex-1 bg-line" />{dayLabel(m.created_at)}<span className="h-px flex-1 bg-line" /></div>}
+              <div key={m.id} data-msg-id={m.id}>
+                {dateLine}{readLineEl}
                 <div className="my-1.5 text-center"><span className="inline-block rounded-full bg-slate-200/70 px-3 py-0.5 text-[11px] text-ink-2" data-testid="chat-system">{m.body}</span></div>
               </div>
             );
-            const un = unreadOf(m);
+            const un = unreadOf(lastOf);
+            const u0 = dir.users.find((x) => x.id === m.author_id);
             return (
-              <div key={m.id}>
-                {newDay && <div className="my-3 flex items-center gap-2 text-[11px] text-ink-3" data-testid="chat-date"><span className="h-px flex-1 bg-line" />{dayLabel(m.created_at)}<span className="h-px flex-1 bg-line" /></div>}
-                <div className={cx('group relative flex gap-2', m.mine && 'flex-row-reverse', head ? 'mt-2.5' : 'mt-0.5')} data-testid="chat-message" data-mine={m.mine ? '1' : '0'}>
+              <div key={m.id} data-msg-id={m.id} data-batch-ids={run.length > 1 ? run.map((x) => x.id).join(' ') : undefined}>
+                {dateLine}{readLineEl}
+                <div className={cx('group relative flex gap-2 rounded-xl transition-colors duration-500', m.mine && 'flex-row-reverse', head ? 'mt-2.5' : 'mt-0.5', flash === m.id && 'bg-amber-100/80')} data-testid="chat-message" data-mine={m.mine ? '1' : '0'}>
                   {!m.mine && (head ? <Avatar id={m.author_id} name={m.author_name} size={compact ? 30 : 34} badge={false} /> : <span className={cx('shrink-0', compact ? 'w-[30px]' : 'w-[34px]')} />)}
                   <div className={cx('flex min-w-0 max-w-[78%] flex-col', m.mine ? 'items-end' : 'items-start')}>
-                    {head && !m.mine && <div className="mb-0.5 flex items-center gap-1 text-xs font-medium text-ink-2">{m.author_name}<RoleBadge role={dir.users.find((x) => x.id === m.author_id)?.role} guest={dir.users.find((x) => x.id === m.author_id)?.is_demo} />{dir.users.find((x) => x.id === m.author_id)?.title && <span className="font-normal text-ink-3">{dir.users.find((x) => x.id === m.author_id)?.title}</span>}</div>}
+                    {head && !m.mine && <div className="mb-0.5 flex items-center gap-1 text-xs font-medium text-ink-2">{m.author_name}<RoleBadge role={u0?.role} guest={u0?.is_demo} />{u0?.title && <span className="font-normal text-ink-3">{u0.title}</span>}</div>}
                     <div className={cx('flex items-end gap-1.5', m.mine && 'flex-row-reverse')}>
                       {editing?.id === m.id ? (
                         <form onSubmit={saveEdit} className="flex gap-1"><input autoFocus className={cx(inputCls, 'h-8')} value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null); }} aria-label="메시지 고치기" /><Button size="sm">저장</Button></form>
-                      ) : m.deleted ? <span className="rounded-2xl bg-slate-100 px-3 py-1.5 text-sm italic text-ink-3">삭제된 메시지</span> : (
+                      ) : gone ? <span className="rounded-2xl bg-slate-100 px-3 py-1.5 text-sm italic text-ink-3">삭제된 메시지</span> : (
                         <div onClick={(e) => { e.stopPropagation(); setActive(active === m.id ? null : m.id); }}
-                          className={cx('min-w-0 whitespace-pre-wrap break-words text-left text-sm', img && !m.body ? '' : cx('rounded-2xl px-3 py-1.5', m.mine ? 'rounded-tr-md bg-teal-700 text-white' : 'rounded-tl-md border border-line bg-white text-ink'), m.pinned_at && 'ring-2 ring-amber-300')}>
-                          {m.kind === 'forward' && <div className={cx('mb-0.5 flex items-center gap-1 text-[11px]', m.mine ? 'text-white/75' : 'text-ink-3')} data-testid="chat-forwarded"><Forward className="size-3" />전달된 메시지</div>}
+                          className={cx('min-w-0 whitespace-pre-wrap break-words text-left text-sm', bare ? '' : cx('rounded-2xl px-3 py-1.5', m.mine ? 'rounded-tr-md bg-teal-700 text-white' : 'rounded-tl-md border border-line bg-white text-ink'), m.pinned_at && 'rounded-2xl ring-2 ring-amber-300')}>
+                          {m.kind === 'forward' && <div className={cx('mb-0.5 flex items-center gap-1 text-[11px]', m.mine && !bare ? 'text-white/75' : 'text-ink-3')} data-testid="chat-forwarded"><Forward className="size-3" />전달된 메시지</div>}
                           {m.reply && (
-                            <div className={cx('mb-1 border-l-2 pl-2 text-xs', m.mine ? 'border-white/60 text-white/80' : 'border-teal-600 text-ink-2')} data-testid="chat-reply-quote">
+                            <button type="button" onClick={(e) => { e.stopPropagation(); if (m.reply_to) jumpTo(m.reply_to); }} title="원래 메시지로 가기"
+                              className={cx('mb-1 block w-full border-l-2 pl-2 text-left text-xs hover:opacity-80', m.mine ? 'border-white/60 text-white/80' : 'border-teal-600 text-ink-2')} data-testid="chat-reply-quote">
                               <b>{m.reply.author ?? '알 수 없음'}</b><div className="line-clamp-2">{m.reply.deleted ? '삭제된 메시지' : plain(m.reply.body) || `📎 ${m.reply.file}`}</div>
-                            </div>
+                            </button>
                           )}
-                          {m.file_name && (img
-                            ? <a href={`/api/chat/messages/${m.id}/file?inline=1`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><img src={`/api/chat/messages/${m.id}/file?inline=1`} alt={m.file_name} loading="lazy" className="h-48 w-auto max-w-full rounded-xl border border-line bg-slate-100 object-cover" /></a>
-                            : <a href={`/api/chat/messages/${m.id}/file`} onClick={(e) => e.stopPropagation()} className={cx('flex items-center gap-2 rounded-xl p-2 no-underline', m.mine ? 'bg-white/15' : 'bg-slate-50')} data-testid="chat-file-card">
-                                <span className={cx('inline-flex size-9 shrink-0 items-center justify-center rounded-lg', m.mine ? 'bg-white/20' : 'bg-teal-50 text-teal-700')}><FileText className="size-5" /></span>
-                                <span className="min-w-0"><span className="block truncate font-medium">{m.file_name}</span><span className={cx('text-[11px]', m.mine ? 'text-white/70' : 'text-ink-3')}>{fmtSize(m.file_size)} · 내려받기</span></span>
-                              </a>)}
-                          {m.body && render(m.body)}
+                          {st ? <StickerView s={st} />
+                            : m.poll ? <PollCard m={m} canClose={m.mine || !!room.canManage} onChanged={(p) => setMsgs((c) => c.map((x) => (x.id === m.id ? { ...x, poll: p } : x)))} />
+                            : m.event ? <EventCardView ev={m.event} onChanged={(ev) => setMsgs((c) => c.map((x) => (x.id === m.id ? { ...x, event: ev } : x)))} />
+                            : album.length > 1 ? <Album items={album} onOpen={setViewer} />
+                            : m.file_name && (img
+                              ? <button type="button" onClick={(e) => { e.stopPropagation(); setViewer(m.id); }} aria-label={`${m.file_name} 크게 보기`} data-testid="chat-image"><img src={fileUrl(m.id)} alt={m.file_name} loading="lazy" className="h-48 w-auto max-w-full rounded-xl border border-line bg-slate-100 object-cover" /></button>
+                              : vid ? <span className="block" onClick={(e) => e.stopPropagation()}><video src={fileUrl(m.id)} controls playsInline preload="metadata" className="max-h-64 w-auto max-w-full rounded-xl bg-black" data-testid="chat-video" /><button type="button" className="mt-0.5 text-[11px] text-ink-3 underline" onClick={() => setViewer(m.id)}>크게 보기</button></span>
+                              : aud ? <audio src={fileUrl(m.id)} controls preload="none" className="w-60 max-w-full" onClick={(e) => e.stopPropagation()} data-testid="chat-audio" />
+                              : <span className={cx('flex items-center gap-2 rounded-xl p-2', m.mine ? 'bg-white/15' : 'bg-slate-50')} data-testid="chat-file-card">
+                                  <span className={cx('inline-flex size-9 shrink-0 flex-col items-center justify-center rounded-lg text-[9px] font-bold', m.mine ? 'bg-white/20' : 'bg-teal-50 text-teal-700')}><FileText className="size-4" />{(m.file_name.split('.').pop() ?? '').slice(0, 4).toUpperCase()}</span>
+                                  <span className="min-w-0"><span className="block truncate font-medium">{m.file_name}</span>
+                                    <span className={cx('flex gap-2 text-[11px]', m.mine ? 'text-white/70' : 'text-ink-3')}>{fmtSize(m.file_size)}
+                                      <a href={fileUrl(m.id, false)} onClick={(e) => e.stopPropagation()} className="underline">내려받기</a>
+                                      {/\.pdf$/i.test(m.file_name) && <a href={fileUrl(m.id)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="underline" data-testid="chat-file-preview">미리보기</a>}</span></span>
+                                </span>)}
+                          {m.body && isText && (isLong(m.body)
+                            ? <><div className="line-clamp-[12]" data-testid="msg-long">{render(m.body)}</div><button type="button" onClick={(e) => { e.stopPropagation(); setLongText(m); }} className={cx('mt-1 block text-xs font-semibold underline', m.mine ? 'text-white/90' : 'text-teal-700')} data-testid="msg-long-more">전체 보기</button></>
+                            : render(m.body))}
                         </div>
                       )}
                       {tail || (others > 0 && (un > 0 || m.mine)) ? (
                         <span className="shrink-0 text-[10px] leading-tight text-ink-3">
-                          {others > 0 && !m.deleted && (un > 0 ? (
-                            <button type="button" className="relative z-20 block text-amber-600 hover:underline" onClick={(e) => { e.stopPropagation(); showUnread(m); }} title="안 읽은 사람 보기" data-testid="msg-unread">{un}</button>
+                          {others > 0 && !gone && (un > 0 ? (
+                            <button type="button" className="relative z-20 block text-amber-600 hover:underline" onClick={(e) => { e.stopPropagation(); showUnread(lastOf); }} title="안 읽은 사람 보기" data-testid="msg-unread">{un}</button>
                           ) : m.mine ? <span className="block text-teal-700">읽음</span> : null)}
-                          {tail && timeOf(m.created_at)}{m.edited_at && !m.deleted && ' · 수정'}
+                          {tail && timeOf(lastOf.created_at)}{m.edited_at && !m.deleted && ' · 수정'}
                         </span>
                       ) : null}
                     </div>
@@ -536,29 +730,34 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                         ))}
                       </div>
                     )}
-                    {whoUnread?.id === m.id && <div className="mt-0.5 rounded-input border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-900" data-testid="msg-unread-names">안 읽음: {whoUnread.names.length ? whoUnread.names.join(', ') : '없음'}</div>}
+                    {whoUnread?.id === lastOf.id && <div className="mt-0.5 rounded-input border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-900" data-testid="msg-unread-names">안 읽음: {whoUnread.names.length ? whoUnread.names.join(', ') : '없음'}</div>}
                     {m.task_id && <Link href={`/tasks/${m.task_id}`} className="mt-0.5 inline-block text-xs text-accent-600 underline">→ 업무로 만듦</Link>}
                   </div>
                   {/* hover(휴대폰은 누르면) 메뉴 — 메시지마다 글자 링크를 늘어놓지 않는다 */}
-                  {!m.deleted && editing?.id !== m.id && (
+                  {!gone && editing?.id !== m.id && (
                     <div className={cx('absolute -top-3 z-10 items-center gap-0.5 rounded-full border border-line bg-white px-1 py-0.5 shadow-card', m.mine ? 'right-2' : 'left-12', showMenu ? 'flex' : 'hidden sm:group-hover:flex')} data-testid="msg-menu" onClick={(e) => e.stopPropagation()}>
-                      {EMOJI.slice(0, 3).map((em) => <button key={em} className="rounded-full px-1 text-sm hover:bg-slate-100" onClick={() => react(m, em)} aria-label={`${em} 반응`}>{em}</button>)}
-                      <button className="rounded-full p-1 text-ink-2 hover:bg-slate-100" onClick={() => setMenu(menu?.id === m.id && menu.kind === 'react' ? null : { id: m.id, kind: 'react' })} aria-label="반응 더 보기"><SmilePlus className="size-4" /></button>
+                      {quick.slice(0, 3).map((em) => <button key={em} className="rounded-full px-1 text-sm hover:bg-slate-100" onClick={() => react(m, em)} aria-label={`${em} 반응`}>{em}</button>)}
+                      <button className="rounded-full p-1 text-ink-2 hover:bg-slate-100" onClick={() => setMenu(menu?.id === m.id && menu.kind === 'react' ? null : { id: m.id, kind: 'react' })} aria-label="반응 더 보기" data-testid="msg-react-more"><SmilePlus className="size-4" /></button>
                       <button className="rounded-full p-1 text-ink-2 hover:bg-slate-100" onClick={() => { setReplyTo(m); setActive(null); inputRef.current?.focus(); }} aria-label="답장" data-testid="msg-reply"><CornerUpLeft className="size-4" /></button>
                       <button className="rounded-full p-1 text-ink-2 hover:bg-slate-100" onClick={() => setMenu(menu?.id === m.id && menu.kind === 'more' ? null : { id: m.id, kind: 'more' })} aria-label="더 보기" data-testid="msg-more"><MoreHorizontal className="size-4" /></button>
                       {menu?.id === m.id && menu.kind === 'react' && (
-                        <div className={cx('absolute top-full mt-1 flex gap-0.5 rounded-full border border-line bg-white p-1 shadow-pop', m.mine ? 'right-0' : 'left-0')}>
-                          {EMOJI.map((em) => <button key={em} className="rounded-full px-1 text-base hover:bg-slate-100" onClick={() => react(m, em)} aria-label={`${em} 반응`}>{em}</button>)}
+                        // B10 자주 쓰는 반응 6개(내가 많이 쓴 순) + 나머지
+                        <div className={cx('absolute top-full z-20 mt-1 w-[13.5rem] rounded-card border border-line bg-white p-1.5 shadow-pop', m.mine ? 'right-0' : 'left-0')} data-testid="msg-react-panel">
+                          <div className="mb-0.5 px-0.5 text-[10px] font-semibold text-ink-3">자주 쓰는 반응</div>
+                          <div className="flex gap-0.5">{quick.map((em) => <button key={em} className="rounded-full px-1 text-lg hover:bg-slate-100" onClick={() => react(m, em)} aria-label={`${em} 반응`} data-testid="react-quick">{em}</button>)}</div>
+                          <div className="mt-1 grid grid-cols-8 gap-0.5 border-t border-line pt-1">{REACTIONS.filter((em) => !quick.includes(em)).map((em) => <button key={em} className="rounded px-0.5 text-base hover:bg-slate-100" onClick={() => react(m, em)} aria-label={`${em} 반응`}>{em}</button>)}</div>
                         </div>
                       )}
                       {menu?.id === m.id && menu.kind === 'more' && (
-                        <ul className={cx('absolute top-full z-20 mt-1 w-40 overflow-hidden rounded-card border border-line bg-white py-1 text-sm shadow-pop', m.mine ? 'right-0' : 'left-0')} role="menu">
-                          <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { setFwd(m); setMenu(null); setActive(null); }} data-testid="msg-forward">전달</button></li>
-                          <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, 'task')} data-testid="msg-to-task">업무로 만들기</button></li>
+                        <ul className={cx('absolute top-full z-20 mt-1 w-44 overflow-hidden rounded-card border border-line bg-white py-1 text-sm shadow-pop', m.mine ? 'right-0' : 'left-0')} role="menu">
+                          {m.kind !== 'poll' && album.length <= 1 && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { setFwd(m); setMenu(null); setActive(null); }} data-testid="msg-forward">전달</button></li>}
+                          {album.length > 1 && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { setViewer(album[0].id); setMenu(null); setActive(null); }}>크게 보기·저장</button></li>}
+                          {isText && m.body && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, 'task')} data-testid="msg-to-task">업무로 만들기</button></li>}
+                          {isText && m.body && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, 'event')} data-testid="msg-to-event">일정으로 만들기</button></li>}
                           <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, m.pinned_at ? 'unpin' : 'pin')} data-testid="msg-notice">{m.pinned_at ? '공지 해제' : '공지 등록'}</button></li>
                           {m.body && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { navigator.clipboard?.writeText(plain(m.body)); setMenu(null); toast.ok('복사했습니다'); }}>복사</button></li>}
-                          {m.mine && m.body && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { setEditing({ id: m.id, body: plain(m.body) }); setMenu(null); setActive(null); }}>수정</button></li>}
-                          {m.mine && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-red-50" onClick={() => act(m, 'delete')}>삭제</button></li>}
+                          {m.mine && m.body && isText && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { setEditing({ id: m.id, body: plain(m.body) }); setMenu(null); setActive(null); }}>수정</button></li>}
+                          {m.mine && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-red-50" onClick={() => act(m, 'delete', run)} data-testid="msg-delete">{album.length > 1 ? `${album.length}개 모두 삭제` : '삭제'}</button></li>}
                         </ul>
                       )}
                     </div>
@@ -569,7 +768,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           })}
           <div ref={bottom} />
         </div>
-        {unseen > 0 && <button type="button" onClick={toBottom} className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-pop" data-testid="chat-new-below">새 메시지 {unseen} ↓</button>}
+        {(unseen > 0 || detached) && <button type="button" onClick={detached ? goLatest : toBottom} className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-pop" data-testid="chat-new-below">{unseen > 0 ? `새 메시지 ${unseen} ↓` : '최신 메시지로 ↓'}</button>}
         </div>
         <div className="h-5 bg-slate-50/60 px-3 text-xs text-ink-3" aria-live="polite" data-testid="chat-typing">{typing.length ? `${typing.join(', ')} 님이 입력 중…` : ''}</div>
         <UploadProgress items={prog} />
@@ -601,40 +800,347 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           </div>
         )}
         <form onSubmit={send} className="relative flex items-end gap-1 border-t border-line bg-white p-2 pb-[calc(0.5rem+var(--sab))] sm:pb-2">
-          {mentionList.length > 0 && (
-            <ul role="listbox" aria-label="멘션 자동완성" className="absolute bottom-full left-2 z-20 mb-1 w-56 overflow-hidden rounded-card border border-line bg-white shadow-pop">
+          {(mentionList.length > 0 || mentionAll) && (
+            <ul role="listbox" aria-label="멘션 자동완성" className="absolute bottom-full left-2 z-20 mb-1 w-56 overflow-hidden rounded-card border border-line bg-white shadow-pop" data-testid="chat-mentions">
+              {mentionAll && <li><button type="button" role="option" aria-selected={false} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => setText((c) => c.replace(/@[^\s@]*$/, '@전체 '))} data-testid="mention-all">
+                <span className="inline-flex size-5 items-center justify-center rounded-full bg-teal-100 text-teal-800"><Users className="size-3" /></span>전체<span className="text-xs text-ink-3">· 이 방 모두에게 알림</span></button></li>}
               {mentionList.map((m) => {
                 const t = dir.users.find((x) => x.id === m.id)?.title;
                 return <li key={m.id}><button type="button" role="option" aria-selected={false} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => setText((c) => c.replace(/@[^\s@]*$/, `@${m.name} `))}><Avatar id={m.id} name={m.name} size={20} badge={false} />{m.name}{t && <span className="text-xs text-ink-3">· {t}</span>}</button></li>;
               })}
             </ul>
           )}
-          {emojiOpen && (
-            <div className="absolute bottom-full left-2 z-20 mb-1 grid w-60 grid-cols-8 gap-0.5 rounded-card border border-line bg-white p-1.5 shadow-pop" data-testid="chat-emoji">
-              {INSERT_EMOJI.map((em) => <button type="button" key={em} className="rounded p-0.5 text-lg hover:bg-slate-100" onClick={() => { insert(em); setEmojiOpen(false); }}>{em}</button>)}
+          {emojiOpen && <EmojiPanel tab={emojiTab} setTab={setEmojiTab} onEmoji={(em) => { insert(em); bumpFreq(em); setEmojiOpen(false); }} onSticker={sendSticker} />}
+          {plusOpen && (
+            // C13 입력창 [+]: 사진·카메라·파일·투표·일정·업무·스티커·음성 모드(휴대폰은 여기서, PC 는 📎·😊·@ 도 그대로)
+            <div className="absolute bottom-full left-2 right-2 z-20 mb-1 grid grid-cols-4 gap-1 rounded-card border border-line bg-white p-2 shadow-pop sm:right-auto sm:w-80" data-testid="chat-plus-panel" onClick={() => setPlusOpen(false)}>
+              {([
+                ['photo', '사진·영상', ImageIcon, () => galleryRef.current?.click(), 'bg-sky-50 text-sky-700'],
+                ['camera', '카메라', Camera, () => camRef.current?.click(), 'bg-teal-50 text-teal-700'],
+                ['file', '파일', Paperclip, () => fileRef.current?.click(), 'bg-slate-100 text-slate-700'],
+                ['poll', '투표', BarChart3, () => setPollOpen(true), 'bg-violet-50 text-violet-700'],
+                ['event', '일정', CalendarPlus, () => { const today = dayKey(new Date().toISOString()); setEventDraft({ title: '', date: today, time: null }); }, 'bg-amber-50 text-amber-700'],
+                ['task', '업무', SquarePen, () => setNewTask(true), 'bg-rose-50 text-rose-700'],
+                ['sticker', '스티커', StickerIcon, () => { setEmojiTab('sticker'); setEmojiOpen(true); }, 'bg-emerald-50 text-emerald-700'],
+                ['voice', voice ? '음성 모드 끄기' : '음성 모드', Headphones, toggleVoice, 'bg-indigo-50 text-indigo-700'],
+              ] as const).map(([k, label, Icon, run, tone]) => (
+                <button key={k} type="button" onClick={run} className="flex flex-col items-center gap-1 rounded-input px-1 py-2 text-[11px] text-ink-2 hover:bg-slate-50" data-testid={`plus-${k}`}>
+                  <span className={cx('inline-flex size-10 items-center justify-center rounded-2xl', tone)}><Icon className="size-5" /></span>{label}
+                </button>
+              ))}
             </div>
           )}
-          <button type="button" className={iconBtn} onClick={() => fileRef.current?.click()} aria-label="파일 보내기" title="파일 보내기"><Paperclip className="size-[18px]" /></button>
-          <button type="button" className={iconBtn} onClick={() => camRef.current?.click()} aria-label="사진 보내기" title="사진 보내기"><Camera className="size-[18px]" /></button>
-          <button type="button" className={cx(iconBtn, 'sm:hidden')} onClick={() => galleryRef.current?.click()} aria-label="사진·영상 고르기" title="갤러리에서 사진·영상(100MB 까지)" data-testid="chat-gallery"><ImageIcon className="size-[18px]" /></button>
+          <button type="button" className={iconBtn} onClick={() => { setPlusOpen((v) => !v); setEmojiOpen(false); }} aria-label="더 보내기(사진·파일·투표·일정·업무)" aria-expanded={plusOpen} title="사진·파일·투표·일정·업무" data-testid="chat-plus"><Plus className={cx('size-[18px] transition-transform', plusOpen && 'rotate-45')} /></button>
+          <button type="button" className={cx(iconBtn, 'hidden sm:inline-flex')} onClick={() => fileRef.current?.click()} aria-label="파일 보내기" title="파일 보내기"><Paperclip className="size-[18px]" /></button>
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-file" />
           <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
           <input ref={galleryRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-gallery-input" />
           <VoiceButton small value={text} onChange={(v) => onType(v)} label="음성 입력" />
           <textarea ref={inputRef} rows={1} className={cx(inputCls, 'max-h-32 min-h-9 min-w-0 flex-1 resize-none py-1.5')} placeholder="메시지 입력" title="Enter 보내기 · Shift+Enter 줄바꿈 · @ 멘션 · 이미지 붙여넣기" value={text}
             onChange={(e) => onType(e.target.value)} aria-label="메시지" data-testid="chat-input"
-            onFocus={() => { setTimeout(() => { toBottom(); inputRef.current?.scrollIntoView({ block: 'nearest' }); }, 80); }} // 핫픽스: 키보드가 열리며 칸이 줄어들면 맨 아래·입력창이 보이게
+            onFocus={() => { setPlusOpen(false); setTimeout(() => { if (!detachedRef.current) toBottom(); inputRef.current?.scrollIntoView({ block: 'nearest' }); }, 80); }} // 핫픽스: 키보드가 열리며 칸이 줄어들면 맨 아래·입력창이 보이게
             onPaste={(e) => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); upload(fs); } }}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } if (e.key === 'Escape') setReplyTo(null); }} />
-          <button type="button" className={cx(iconBtn, compact && 'hidden')} onClick={() => setEmojiOpen((v) => !v)} aria-label="이모지" title="이모지"><SmilePlus className="size-[18px]" /></button>
-          <button type="button" className={cx(iconBtn, compact && 'hidden')} onClick={() => insert(text && !text.endsWith(' ') ? ' @' : '@')} aria-label="사람 언급" title="사람 언급(@)"><AtSign className="size-[18px]" /></button>
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } if (e.key === 'Escape') { setReplyTo(null); setPlusOpen(false); setEmojiOpen(false); } }} />
+          <button type="button" className={iconBtn} onClick={() => { setEmojiOpen((v) => !v); setPlusOpen(false); }} aria-label="이모지·스티커" title="이모지·스티커" aria-expanded={emojiOpen} data-testid="chat-emoji-open"><SmilePlus className="size-[18px]" /></button>
+          <button type="button" className={cx(iconBtn, 'hidden', !compact && 'sm:inline-flex')} onClick={() => insert(text && !text.endsWith(' ') ? ' @' : '@')} aria-label="사람 언급" title="사람 언급(@)"><AtSign className="size-[18px]" /></button>
           <Button type="submit" className="h-9 shrink-0 bg-teal-700 hover:bg-teal-800" disabled={!text.trim()} aria-label="보내기" data-testid="chat-send"><Send /></Button>
         </form>
       </DropZone>
       {toTask && <ToTask s={toTask} roomName={room.name} onClose={() => setToTask(null)} onDone={() => { setToTask(null); reload(); }} />}
       {info && <RoomInfo data={data!} onClose={() => setInfo(false)} onChanged={() => { reload(); broadcastRefresh(); onRead(); }} onLeft={() => { setInfo(false); broadcastRefresh(); onBack(); }} />}
       {fwd && <ForwardModal msg={fwd} fromRoom={id} onClose={() => setFwd(null)} />}
+      {viewer && <MediaViewer items={mediaList} start={viewer} onClose={() => setViewer(null)} onForward={(m) => { setViewer(null); setFwd(m); }} />}
+      {longText && (
+        <Modal open onClose={() => setLongText(null)} title="전체 보기">
+          <div className="space-y-3" data-testid="msg-long-modal">
+            <p className="text-xs text-ink-3">{longText.author_name} · {fmtDateTime(longText.created_at)}</p>
+            <div className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed">{render(longText.body)}</div>
+            <div className="flex justify-end"><Button size="sm" variant="secondary" onClick={() => { navigator.clipboard?.writeText(plain(longText.body)); toast.ok('복사했습니다'); }}>복사</Button></div>
+          </div>
+        </Modal>
+      )}
+      {pollOpen && <PollModal roomId={id} onClose={() => setPollOpen(false)} onSent={afterSend} />}
+      {eventDraft && <EventModal roomId={id} draft={eventDraft} members={members} me={user.id} onClose={() => setEventDraft(null)} onSent={afterSend} />}
+      {newTask && <QuickAddTask open onClose={() => setNewTask(false)} defaults={{ description: `메신저 "${room.name}"에서 만든 업무` }}
+        onCreated={async (tid) => {
+          setNewTask(false);
+          // [+] 업무: 만든 업무를 방에 알리고(메시지 → 업무 연결) 모두가 바로 열 수 있게
+          try {
+            const t = await api(`/api/tasks/${tid}`); const title = t?.task?.title ?? t?.title ?? '새 업무';
+            const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body: `📌 새 업무: ${title}` } });
+            await api(`/api/chat/messages/${r.id}/link`, { body: { taskId: tid } });
+            afterSend(r.id, { body: `📌 새 업무: ${title}`, task_id: tid });
+          } catch (e: any) { toast.error(e.message); }
+        }} />}
     </div>
+  );
+}
+
+/** B10 회사 기본 스티커 — 그림 파일 없이 이모지 + 짧은 말 */
+const STICKER_TONE = { teal: 'bg-teal-50 text-teal-900 ring-teal-200', amber: 'bg-amber-50 text-amber-900 ring-amber-200', violet: 'bg-violet-50 text-violet-900 ring-violet-200',
+  sky: 'bg-sky-50 text-sky-900 ring-sky-200', slate: 'bg-slate-100 text-slate-800 ring-slate-200', rose: 'bg-rose-50 text-rose-900 ring-rose-200' } as const;
+function StickerView({ s, small }: { s: NonNullable<ReturnType<typeof stickerOf>>; small?: boolean }) {
+  return (
+    <span className={cx('inline-flex flex-col items-center justify-center rounded-3xl text-center ring-1', STICKER_TONE[s.tone], small ? 'size-[72px] gap-0.5' : 'size-28 gap-1')} data-testid="chat-sticker" data-sticker={s.code}>
+      <span className={small ? 'text-2xl leading-none' : 'text-[40px] leading-none'} aria-hidden>{s.emoji}</span>
+      <span className={cx('px-1 font-bold leading-tight', small ? 'text-[10px]' : 'text-[13px]')}>{s.text}</span>
+    </span>
+  );
+}
+
+/** B8 사진 묶음: 2·4장은 2칸, 나머지는 3칸, 9장 넘으면 마지막 칸에 +n — 누르면 좌우 넘기기 뷰어 */
+function Album({ items, onOpen }: { items: Msg[]; onOpen: (id: string) => void }) {
+  const show = items.slice(0, 9); const more = items.length - show.length;
+  return (
+    <div className={cx('grid w-[264px] max-w-full gap-0.5 overflow-hidden rounded-xl bg-slate-100', items.length === 2 || items.length === 4 ? 'grid-cols-2' : 'grid-cols-3')} data-testid="chat-album" data-count={items.length}>
+      {show.map((x, k) => (
+        <button key={x.id} type="button" className="relative aspect-square overflow-hidden" onClick={(e) => { e.stopPropagation(); onOpen(x.id); }} aria-label={`${k + 1}번째 ${isVideo(x) ? '영상' : '사진'} 크게 보기`} data-testid="album-item">
+          {isVideo(x) ? <video src={fileUrl(x.id)} preload="metadata" muted playsInline className="size-full object-cover" /> : <img src={fileUrl(x.id)} alt={x.file_name ?? ''} loading="lazy" className="size-full object-cover" />}
+          {isVideo(x) && <span className="absolute inset-0 m-auto flex size-8 items-center justify-center rounded-full bg-black/55 text-white"><Play className="size-4" /></span>}
+          {k === show.length - 1 && more > 0 && <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-lg font-bold text-white">+{more}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** B8 사진·영상 뷰어: 방의 사진·영상을 좌우로 넘기기(← → 키·밀기), 저장(내려받기)·전달 */
+function MediaViewer({ items, start, onClose, onForward }: { items: Msg[]; start: string; onClose: () => void; onForward: (m: Msg) => void }) {
+  const [i, setI] = useState(() => Math.max(0, items.findIndex((x) => x.id === start)));
+  const go = useCallback((d: number) => setI((k) => Math.min(items.length - 1, Math.max(0, k + d))), [items.length]);
+  useSheetBack(true, onClose); // 앱 뒤로 버튼 = 뷰어만 닫힘
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); else if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1); };
+    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
+  }, [go, onClose]);
+  const sx = useRef<number | null>(null);
+  const m = items[i];
+  if (!m || typeof document === 'undefined') return null;
+  const nav = 'absolute top-1/2 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25';
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex flex-col bg-black/95 text-white" role="dialog" aria-modal="true" aria-label="사진·영상 크게 보기" data-testid="chat-viewer">
+      <div className="flex items-center gap-1 px-3 pb-2 pt-[calc(0.5rem+var(--sat))]">
+        <div className="min-w-0 flex-1 text-sm"><div className="truncate font-semibold">{m.author_name ?? ''}</div><div className="text-xs text-white/70">{fmtDateTime(m.created_at)}</div></div>
+        <span className="px-2 text-xs tabular-nums text-white/80" data-testid="viewer-count">{i + 1} / {items.length}</span>
+        <a href={fileUrl(m.id, false)} className="inline-flex size-9 items-center justify-center rounded-full hover:bg-white/10" aria-label="저장(내려받기)" title="저장(내려받기)" data-testid="viewer-save"><Download className="size-5" /></a>
+        <button type="button" className="inline-flex size-9 items-center justify-center rounded-full hover:bg-white/10" onClick={() => onForward(m)} aria-label="전달" title="전달"><Forward className="size-5" /></button>
+        <button type="button" className="inline-flex size-9 items-center justify-center rounded-full hover:bg-white/10" onClick={onClose} aria-label="닫기" data-testid="viewer-close"><X className="size-5" /></button>
+      </div>
+      <div className="relative flex min-h-0 flex-1 select-none items-center justify-center px-2 pb-[var(--sab)]" style={{ touchAction: 'pan-y' }}
+        onPointerDown={(e) => { sx.current = e.clientX; }}
+        onPointerUp={(e) => { if (sx.current === null) return; const d = e.clientX - sx.current; sx.current = null; if (d > 50) go(-1); else if (d < -50) go(1); }}>
+        {isVideo(m)
+          ? <video key={m.id} src={fileUrl(m.id)} controls playsInline className="max-h-full max-w-full" data-testid="viewer-video" />
+          : <img key={m.id} src={fileUrl(m.id)} alt={m.file_name ?? ''} draggable={false} className="max-h-full max-w-full object-contain" data-testid="viewer-image" />}
+        {i > 0 && <button type="button" className={cx(nav, 'left-2')} onClick={() => go(-1)} aria-label="이전" data-testid="viewer-prev"><ChevronLeft className="size-6" /></button>}
+        {i < items.length - 1 && <button type="button" className={cx(nav, 'right-2')} onClick={() => go(1)} aria-label="다음" data-testid="viewer-next"><ChevronRight className="size-6" /></button>}
+      </div>
+    </div>, document.body);
+}
+
+/** B10 이모지·스티커 패널 — 이모지는 '자주 쓰는'(이 기기 기억)이 먼저 */
+function EmojiPanel({ tab, setTab, onEmoji, onSticker }: { tab: 'emoji' | 'sticker'; setTab: (t: 'emoji' | 'sticker') => void; onEmoji: (e: string) => void; onSticker: (code: string) => void }) {
+  const freq = useMemo(() => Object.entries(readFreq()).sort((a, b) => b[1] - a[1]).map(([e]) => e).filter((e) => INSERT_EMOJI.includes(e)).slice(0, 8), []);
+  const tabCls = (on: boolean) => cx('rounded-full px-2.5 py-0.5 text-xs', on ? 'bg-teal-700 font-semibold text-white' : 'text-ink-2 hover:bg-slate-100');
+  return (
+    <div className="absolute bottom-full left-2 right-2 z-20 mb-1 rounded-card border border-line bg-white p-2 shadow-pop sm:left-auto sm:w-80" data-testid="chat-emoji">
+      <div className="mb-1.5 flex gap-1" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === 'emoji'} className={tabCls(tab === 'emoji')} onClick={() => setTab('emoji')} data-testid="emoji-tab">이모지</button>
+        <button type="button" role="tab" aria-selected={tab === 'sticker'} className={tabCls(tab === 'sticker')} onClick={() => setTab('sticker')} data-testid="sticker-tab">스티커</button>
+      </div>
+      {tab === 'emoji' ? (
+        <div className="max-h-56 overflow-y-auto">
+          {freq.length > 0 && <><div className="px-0.5 text-[10px] font-semibold text-ink-3">자주 쓰는</div><div className="mb-1 grid grid-cols-8 gap-0.5">{freq.map((em) => <button type="button" key={`f-${em}`} className="rounded p-0.5 text-lg hover:bg-slate-100" onClick={() => onEmoji(em)}>{em}</button>)}</div></>}
+          <div className="grid grid-cols-8 gap-0.5">{INSERT_EMOJI.map((em) => <button type="button" key={em} className="rounded p-0.5 text-lg hover:bg-slate-100" onClick={() => onEmoji(em)}>{em}</button>)}</div>
+        </div>
+      ) : (
+        <div className="grid max-h-60 grid-cols-4 gap-1.5 overflow-y-auto" data-testid="sticker-grid">
+          {STICKERS.map((st) => <button type="button" key={st.code} onClick={() => onSticker(st.code)} className="rounded-2xl p-0.5 hover:bg-slate-50" aria-label={`스티커 ${st.text}`} data-testid={`sticker-${st.code}`}><StickerView s={st} small /></button>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** B9 투표 카드: 누르면 바로 투표(하나만이면 바꾸기·다시 누르면 취소), 막대·표 수, 익명 아니면 '누가 골랐나', 만든 사람·방장은 [투표 마감] */
+function PollCard({ m, canClose, onChanged }: { m: Msg; canClose: boolean; onChanged: (p: Poll) => void }) {
+  const p = m.poll!;
+  const [busy, setBusy] = useState(false);
+  const [showNames, setShowNames] = useState(false);
+  const max = Math.max(0, ...p.counts);
+  async function vote(k: number) {
+    if (p.closed || busy) return;
+    const next = p.multi ? (p.mine.includes(k) ? p.mine.filter((x) => x !== k) : [...p.mine, k].sort((a, b) => a - b)) : p.mine.includes(k) ? [] : [k];
+    const counts = p.counts.map((c, x) => c - (p.mine.includes(x) ? 1 : 0) + (next.includes(x) ? 1 : 0));
+    const voters = p.voters + (!p.mine.length && next.length ? 1 : 0) - (p.mine.length && !next.length ? 1 : 0);
+    onChanged({ ...p, mine: next, counts, voters });
+    setBusy(true);
+    try { await api(`/api/chat/messages/${m.id}/poll`, { body: { vote: next } }); } catch (e: any) { toast.error(e.message); onChanged(p); } finally { setBusy(false); }
+  }
+  async function close() {
+    if (!confirm('투표를 마감할까요? 마감하면 더 투표할 수 없습니다')) return;
+    try { await api(`/api/chat/messages/${m.id}/poll`, { body: { close: true } }); onChanged({ ...p, closed: true }); } catch (e: any) { toast.error(e.message); }
+  }
+  return (
+    <div className="w-64 max-w-full rounded-2xl border border-line bg-white p-3 text-ink shadow-card" data-testid="chat-poll" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-teal-700"><BarChart3 className="size-3.5" />투표
+        {p.closed && <span className="ml-auto rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-ink-2" data-testid="poll-closed">마감</span>}</div>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm font-semibold" data-testid="poll-question">{p.question}</p>
+      <p className="mt-0.5 text-[11px] text-ink-3">{[p.multi ? '여러 개 선택' : '하나만 선택', p.anonymous ? '익명' : null, p.closes_at && !p.closed ? `${fmtDateTime(p.closes_at)} 마감` : null].filter(Boolean).join(' · ')}</p>
+      <ul className="mt-2 space-y-1.5">
+        {p.options.map((o, k) => {
+          const mine = p.mine.includes(k); const pct = p.voters ? Math.round((p.counts[k] / p.voters) * 100) : 0;
+          return (
+            <li key={k}>
+              <button type="button" disabled={p.closed || busy} onClick={() => vote(k)} aria-pressed={mine} data-testid="poll-option"
+                className={cx('relative w-full overflow-hidden rounded-input border px-2.5 py-1.5 text-left text-sm disabled:cursor-default', mine ? 'border-teal-600' : 'border-line', !p.closed && 'hover:border-teal-500')}>
+                <span className={cx('absolute inset-y-0 left-0', p.closed && max > 0 && p.counts[k] === max ? 'bg-amber-100' : mine ? 'bg-teal-100' : 'bg-slate-100')} style={{ width: `${pct}%` }} aria-hidden />
+                <span className="relative flex items-center gap-2">
+                  <span className={cx('inline-flex size-4 shrink-0 items-center justify-center border', p.multi ? 'rounded' : 'rounded-full', mine ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white')}>{mine && <Check className="size-3" />}</span>
+                  <span className="min-w-0 flex-1 break-words">{o}</span><span className="shrink-0 text-xs tabular-nums text-ink-2" data-testid="poll-count">{p.counts[k]}</span>
+                </span>
+              </button>
+              {showNames && !!p.names?.[k]?.length && <p className="mt-0.5 px-1 text-[11px] text-ink-3" data-testid="poll-names-line">{p.names[k].join(', ')}</p>}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-2 flex items-center gap-2 text-[11px] text-ink-3">
+        {!p.anonymous && p.voters > 0 ? <button type="button" className="underline" onClick={() => setShowNames((v) => !v)} data-testid="poll-names">{p.voters}명 참여 · {showNames ? '이름 숨기기' : '누가 골랐나'}</button>
+          : <span data-testid="poll-voters">{p.voters}명 참여</span>}
+        {canClose && !p.closed && <button type="button" className="ml-auto rounded-input border border-line px-2 py-0.5 text-ink-2 hover:bg-slate-50" onClick={close} data-testid="poll-close">투표 마감</button>}
+      </div>
+    </div>
+  );
+}
+
+/** B9 일정 카드: 제목·시각·장소·참석 수, 내가 참석자면 [참석][불참], 캘린더로 */
+function EventCardView({ ev, onChanged }: { ev: EventCard; onChanged: (e: EventCard) => void }) {
+  async function respond(r: 'accepted' | 'declined') {
+    if (ev.response === r) return;
+    onChanged({ ...ev, response: r, going: ev.going + (r === 'accepted' ? 1 : 0) - (ev.response === 'accepted' ? 1 : 0) });
+    try { await api(`/api/events/${ev.id}/respond`, { body: { response: r } }); } catch (e: any) { toast.error(e.message); onChanged(ev); }
+  }
+  const btn = (on: boolean) => cx('rounded-input border px-2 py-1 text-xs font-medium', on ? 'border-teal-700 bg-teal-700 text-white' : 'border-line text-ink-2 hover:bg-slate-50');
+  return (
+    <div className="w-64 max-w-full rounded-2xl border border-line bg-white p-3 text-ink shadow-card" data-testid="chat-event" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700"><CalendarPlus className="size-3.5" />일정
+        {ev.cancelled && <span className="ml-auto rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-ink-2">취소됨</span>}</div>
+      <p className={cx('mt-1 break-words text-sm font-semibold', ev.cancelled && 'text-ink-3 line-through')} data-testid="event-title">{ev.title}</p>
+      <p className="mt-0.5 text-xs text-ink-2" data-testid="event-when">{whenText(new Date(ev.start_at), new Date(ev.end_at), ev.all_day)}</p>
+      {ev.location && <p className="mt-0.5 flex items-center gap-1 text-xs text-ink-2"><MapPin className="size-3 shrink-0" />{ev.location}</p>}
+      <p className="mt-1 text-[11px] text-ink-3" data-testid="event-going">참석 {ev.going}명 · 초대 {ev.invited}명</p>
+      {!ev.cancelled && ev.response && (
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          <button type="button" className={btn(ev.response === 'accepted')} aria-pressed={ev.response === 'accepted'} onClick={() => respond('accepted')} data-testid="event-accept">참석</button>
+          <button type="button" className={btn(ev.response === 'declined')} aria-pressed={ev.response === 'declined'} onClick={() => respond('declined')} data-testid="event-decline">불참</button>
+        </div>
+      )}
+      <Link href={`/calendar?event=${ev.id}`} className="mt-2 block text-center text-xs text-accent-600 underline">캘린더에서 보기</Link>
+    </div>
+  );
+}
+
+/** B9 투표 만들기: 질문·보기 2~10개·여러 개 선택·익명·마감(서울 시각) */
+function PollModal({ roomId, onClose, onSent }: { roomId: string; onClose: () => void; onSent: (id: string, p: Partial<Msg>) => void }) {
+  const [q, setQ] = useState('');
+  const [opts, setOpts] = useState(['', '']);
+  const [multi, setMulti] = useState(false);
+  const [anon, setAnon] = useState(false);
+  const [due, setDue] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    const options = opts.map((o) => o.trim()).filter(Boolean);
+    if (!q.trim()) return toast.error('질문을 입력하세요');
+    if (options.length < POLL_MIN) return toast.error(`보기를 ${POLL_MIN}개 이상 넣으세요`);
+    setBusy(true);
+    try {
+      const closesAt = due ? new Date(`${due}:00+09:00`).toISOString() : null;
+      const r = await api(`/api/chat/rooms/${roomId}/messages`, { body: { poll: { question: q.trim(), options, multi, anonymous: anon, closesAt } } });
+      onSent(r.id, { kind: 'poll', body: q.trim(), poll: { question: q.trim(), options, multi, anonymous: anon, closes_at: closesAt, closed: false, counts: options.map(() => 0), mine: [], voters: 0, names: anon ? null : {} } });
+      onClose();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title="투표 만들기">
+      <div className="space-y-3 text-sm" data-testid="poll-modal">
+        <Field label="질문"><input autoFocus className={inputCls} value={q} maxLength={200} onChange={(e) => setQ(e.target.value)} placeholder="예: 회식 날짜 정해요" data-testid="poll-q" /></Field>
+        <div className="space-y-1.5">
+          <div className="text-xs font-semibold text-ink-2">보기</div>
+          {opts.map((o, k) => (
+            <div key={k} className="flex items-center gap-1.5">
+              <input className={inputCls} value={o} maxLength={80} onChange={(e) => setOpts((c) => c.map((x, j) => (j === k ? e.target.value : x)))} placeholder={`보기 ${k + 1}`} data-testid="poll-opt" />
+              {opts.length > POLL_MIN && <button type="button" className="rounded p-1 text-ink-3 hover:bg-slate-100" onClick={() => setOpts((c) => c.filter((_, j) => j !== k))} aria-label={`보기 ${k + 1} 빼기`}><Trash2 className="size-4" /></button>}
+            </div>
+          ))}
+          {opts.length < POLL_MAX && <button type="button" className="text-xs font-semibold text-teal-700" onClick={() => setOpts((c) => [...c, ''])} data-testid="poll-add-opt">+ 보기 추가</button>}
+        </div>
+        <div className="flex flex-wrap gap-4">
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={multi} onChange={(e) => setMulti(e.target.checked)} data-testid="poll-multi" />여러 개 선택</label>
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={anon} onChange={(e) => setAnon(e.target.checked)} data-testid="poll-anon" />익명 투표</label>
+        </div>
+        <Field label="마감(선택)"><input type="datetime-local" className={inputCls} value={due} onChange={(e) => setDue(e.target.value)} data-testid="poll-due" /></Field>
+        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>취소</Button><Button disabled={busy} onClick={go} data-testid="poll-go">투표 올리기</Button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/** B9 일정 잡기: 캘린더 일정(참석자 = 방 참여자, 뺄 수 있음) + 방에 일정 카드. 메시지에서 열면 글의 날짜·시각을 미리 채움 */
+function EventModal({ roomId, draft, members, me, onClose, onSent }: { roomId: string; draft: { title: string; date: string; time: string | null; fromMessage?: string }; members: Member[]; me: string; onClose: () => void; onSent: (id: string, p: Partial<Msg>) => void }) {
+  const nextHour = () => { const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(new Date())); return `${String(Math.min(23, h + 1)).padStart(2, '0')}:00`; };
+  const plus1 = (t: string) => { const [h, m] = t.split(':').map(Number); return `${String(Math.min(23, h + 1)).padStart(2, '0')}:${String(h >= 23 ? 59 : m).padStart(2, '0')}`; };
+  const [title, setTitle] = useState(draft.title);
+  const [date, setDate] = useState(draft.date);
+  const [allDay, setAllDay] = useState(false);
+  const [start, setStart] = useState(draft.time ?? nextHour());
+  const [end, setEnd] = useState(plus1(draft.time ?? nextHour()));
+  const [loc, setLoc] = useState('');
+  const others = members.filter((x) => x.id !== me);
+  const [pick, setPick] = useState<string[]>(others.map((x) => x.id));
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    if (!title.trim()) return toast.error('제목을 입력하세요');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return toast.error('날짜를 고르세요');
+    const s = allDay ? `${date}T00:00:00+09:00` : `${date}T${start}:00+09:00`;
+    const e = allDay ? new Date(Date.parse(`${date}T00:00:00+09:00`) + 864e5).toISOString() : `${date}T${end}:00+09:00`;
+    if (!allDay && Date.parse(e) <= Date.parse(s)) return toast.error('끝 시각이 시작 시각보다 늦어야 합니다');
+    setBusy(true);
+    try {
+      const r = await api(`/api/chat/rooms/${roomId}/event`, { body: { title: title.trim(), start: s, end: e, allDay, location: loc.trim() || undefined, attendeeIds: pick, ...(draft.fromMessage ? { fromMessage: draft.fromMessage } : {}) } });
+      onSent(r.id, { kind: 'event', body: `📅 ${title.trim()}`, event: { id: r.eventId, title: title.trim(), start_at: new Date(s).toISOString(), end_at: new Date(e).toISOString(), all_day: allDay, location: loc.trim(), cancelled: false, going: 1, invited: pick.length + 1, response: 'accepted' } });
+      toast.ok(pick.length ? `일정을 잡고 ${pick.length}명을 초대했습니다` : '일정을 잡았습니다');
+      onClose();
+    } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title="일정 잡기">
+      <div className="space-y-3 text-sm" data-testid="event-modal">
+        <Field label="제목"><input autoFocus className={inputCls} value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} placeholder="예: 주간 회의" data-testid="event-title-input" /></Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="날짜"><input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} data-testid="event-date" /></Field>
+          <label className="mt-6 inline-flex items-center gap-1.5"><input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} data-testid="event-allday" />하루 종일</label>
+        </div>
+        {!allDay && (
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="시작"><input type="time" className={inputCls} value={start} onChange={(e) => { setStart(e.target.value); if (e.target.value >= end) setEnd(plus1(e.target.value)); }} data-testid="event-start" /></Field>
+            <Field label="끝"><input type="time" className={inputCls} value={end} onChange={(e) => setEnd(e.target.value)} data-testid="event-end" /></Field>
+          </div>
+        )}
+        <Field label="장소(선택)"><input className={inputCls} value={loc} maxLength={300} onChange={(e) => setLoc(e.target.value)} placeholder="예: 3층 회의실" data-testid="event-loc" /></Field>
+        {others.length > 0 && (
+          <div>
+            <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-ink-2">참석자 {pick.length + 1}명(나 포함)
+              <button type="button" className="font-normal text-teal-700 underline" onClick={() => setPick(pick.length === others.length ? [] : others.map((x) => x.id))}>{pick.length === others.length ? '모두 빼기' : '모두 넣기'}</button></div>
+            <ul className="max-h-36 overflow-y-auto rounded-input border border-line p-1" data-testid="event-people">
+              {others.map((x) => <li key={x.id}><label className="flex items-center gap-2 px-1 py-0.5"><input type="checkbox" checked={pick.includes(x.id)} onChange={(e) => setPick((p) => (e.target.checked ? [...p, x.id] : p.filter((y) => y !== x.id)))} aria-label={`${x.name} 참석`} />{x.name}{x.title && <span className="text-xs text-ink-3">· {x.title}</span>}</label></li>)}
+            </ul>
+          </div>
+        )}
+        <p className="text-xs text-ink-3">내 캘린더에 일정이 생기고, 참석자에게 &lsquo;일정 초대&rsquo; 알림이 갑니다.</p>
+        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>취소</Button><Button disabled={busy} onClick={go} data-testid="event-go">일정 잡기</Button></div>
+      </div>
+    </Modal>
   );
 }
 
