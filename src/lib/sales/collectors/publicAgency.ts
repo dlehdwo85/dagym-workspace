@@ -30,7 +30,7 @@ export function lhBidPayload(it: any): Record<string, unknown> | null {
   const no = pick(it, 'bidNum'), title = pick(it, 'bidnmKor', 'bidNm'); if (!no || !title) return null;
   const deg = pick(it, 'bidDegree'); const zones = [1, 2, 3, 4].map((i) => pick(it, `zoneRstrct${i}`)).filter(Boolean);
   const lic = [1, 2, 3].map((i) => pick(it, `req1Reqlic${i}Nm`)).filter(Boolean);
-  return { source_type: 'lh_bid', source_external_id: deg ? `${no}-${deg}` : no, source_url: 'https://ebid.lh.or.kr', title, issuer: 'LH 한국토지주택공사', demand_agency: pick(it, 'zoneHqCd'),
+  return { source_type: 'lh_bid', source_external_id: deg ? `${no}-${deg}` : no, notice_no: no, source_url: 'https://ebid.lh.or.kr', title, issuer: 'LH 한국토지주택공사', demand_agency: pick(it, 'zoneHqCd'),
     region_restriction: zones.join(', ') || null, posted_date: pick(it, 'tndrbidRegDt'), deadline_at: pick(it, 'tndrdocAcptEndDtm'), opening_at: pick(it, 'openDtm'),
     estimated_amount: pick(it, 'presmtPrc'), base_amount: pick(it, 'fdmtlAmt'), contract_method: pick(it, 'tndrCtrctMedCd'), award_method: pick(it, 'sunjungNm'),
     notice_state: line(pick(it, 'bidKind'), pick(it, 'bidProgrsStatus')), bid_category: pick(it, 'cstrtnJobGbNm'), industry_code: lic.join(', ') || null,
@@ -50,7 +50,7 @@ export function lhPrespecPayload(it: any): Record<string, unknown> | null {
 export function d2bPayload(it: any, kind: 'dmstc' | 'fclty'): (Record<string, unknown> & { g2b_no?: string | null }) | null {
   const no = pick(it, 'pblancNo'), title = kind === 'fclty' ? pick(it, 'cntrwkNm', 'bidNm') : pick(it, 'bidNm', 'cntrwkNm'); if (!no || !title) return null;
   const odr = pick(it, 'pblancOdr'); const g2b = pick(it, 'g2bPblancNo')?.split('-')[0] ?? null;
-  return { source_type: 'd2b_bid', source_external_id: `${kind === 'fclty' ? 'F-' : ''}${no}${odr ? `-${odr}` : ''}`, source_url: 'https://www.d2b.go.kr', title, issuer: pick(it, 'ornt') ?? '방위사업청',
+  return { source_type: 'd2b_bid', source_external_id: `${kind === 'fclty' ? 'F-' : ''}${no}${odr ? `-${odr}` : ''}`, notice_no: no, source_url: 'https://www.d2b.go.kr', title, issuer: pick(it, 'ornt') ?? '방위사업청',
     posted_date: pick(it, 'pblancDate'), participation_deadline_at: pick(it, 'bidPartcptRegistClosDt'), deadline_at: pick(it, 'biddocPresentnClosDt'), opening_at: pick(it, 'opengDt'),
     base_amount: pick(it, 'bsicExpt', 'baseAmnt'), contract_method: pick(it, 'cntrctMth'), bid_system: pick(it, 'bidStle'), bid_category: pick(it, 'busiDivs') ?? (kind === 'fclty' ? '공사' : null), notice_state: pick(it, 'pblancSe'),
     notice_type: kind === 'fclty' ? '시설 공사' : undefined, task_scope: line(g2b && `나라장터 공고번호 ${g2b}${pick(it, 'g2bPblancOdr') ? `-${pick(it, 'g2bPblancOdr')}` : ''}`, pick(it, 'excutTy') && `집행 ${pick(it, 'excutTy')}`), g2b_no: g2b };
@@ -59,7 +59,7 @@ export function d2bPayload(it: any, kind: 'dmstc' | 'fclty'): (Record<string, un
 export function onbidPayload(it: any): Record<string, unknown> | null {
   const no = pick(it, 'onbidPbancNo', 'pbancMngNo', 'pbctNo'), title = pick(it, 'onbidPbancNm'); if (!no || !title) return null;
   const sports = title.match(SPORTS)?.[0]; const dsps = pick(it, 'dspsMthodNm');
-  return { source_type: 'onbid_lease', source_external_id: no, source_url: 'https://www.onbid.co.kr', title, issuer: pick(it, 'orgNm') ?? '온비드(한국자산관리공사)', demand_agency: pick(it, 'rspbSbrNm'),
+  return { source_type: 'onbid_lease', source_external_id: no, notice_no: no, source_url: 'https://www.onbid.co.kr', title, issuer: pick(it, 'orgNm') ?? '온비드(한국자산관리공사)', demand_agency: pick(it, 'rspbSbrNm'),
     posted_date: pick(it, 'pbancYmd'), deadline_at: pick(it, 'cltrBidEndDt'), opening_at: pick(it, 'cltrOpbdDt'), contract_method: pick(it, 'bidDivNm'), notice_state: pick(it, 'pbancKindNm'),
     bid_category: dsps ?? '임대', notice_type: [pick(it, 'prptDivNm'), dsps].filter(Boolean).join(' ') || '공유재산 임대', task_scope: line(pick(it, 'cltrBidBgngDt') && `입찰 ${short(pick(it, 'cltrBidBgngDt'))}~${short(pick(it, 'cltrBidEndDt')) ?? ''}`, pick(it, 'pbctNsq') && `${pick(it, 'pbctNsq')}회차`),
     ...(sports ? { fit_hint: '다짐', fit_words: [sports] } : {}) };

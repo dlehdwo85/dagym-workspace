@@ -5,6 +5,7 @@ import { matchFit } from './procurement';
 import { upsertNotices } from './store';
 import { endpoints } from './endpoints';
 import { SIDO_ALIASES } from './prospects';
+import { fixG2bUrl, g2bBidUrl } from '../sourceLink';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
@@ -58,7 +59,8 @@ export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string,
 const attachments = (it: any) => { const out: string[] = []; for (let i = 1; i <= 10; i++) { const u = str(it[`ntceSpecDocUrl${i}`] ?? it[`atchFileUrl${i}`]); if (u && /^https?:\/\//.test(u)) out.push(u); } return out; };
 export function g2bPayload(it: any, sourceType: 'g2b_bid' | 'nuri_bid', cat: string): Record<string, unknown> | null {
   const no = str(it.bidNtceNo), ord = str(it.bidNtceOrd) ?? '00', title = str(it.bidNtceNm); if (!no || !title) return null;
-  const url = str(it.bidNtceDtlUrl) ?? str(it.bidNtceUrl) ?? `https://www.g2b.go.kr/ep/invitation/publish/bidInfoDtl.do?bidno=${no}&bidseq=${ord}`;
+  // #543 API 가 주는 상세 주소도 옛 형식(ep/invitation/publish/bidInfoDtl.do, 차세대 나라장터에서 '찾을 수 없음') → 새 형식으로
+  const url = fixG2bUrl(str(it.bidNtceDtlUrl) ?? str(it.bidNtceUrl)) ?? g2bBidUrl(no, ord);
   return { source_type: sourceType, source_external_id: `${no}-${ord}`, source_url: url, title, issuer: str(it.ntceInsttNm), demand_agency: str(it.dminsttNm), region: str(it.prtcptLmtRgnNm) ?? str(it.rgnNm) ?? null, region_restriction: str(it.prtcptLmtRgnNm),
     posted_date: str(it.bidNtceDt)?.slice(0, 10), deadline_at: str(it.bidClseDt), opening_at: str(it.opengDt), participation_deadline_at: str(it.bidBeginDt) ? null : str(it.rbidPrtcptLmtRgstClseDt ?? it.prtcptLmtRgstClseDt),
     estimated_amount: str(it.presmptPrce), budget_amount: str(it.asignBdgtAmt), contract_method: str(it.cntrctCnclsMthdNm), award_method: str(it.sucsfbidMthdNm), notice_state: str(it.ntceKindNm), bid_category: cat, notice_type: cat === '공사' ? '공사' : undefined,
@@ -118,7 +120,7 @@ export function prespecPayload(it: any, cat: string): Record<string, unknown> | 
 }
 export function awardPayload(it: any, cat: string): Record<string, unknown> | null {
   const no = str(it.bidNtceNo), ord = str(it.bidNtceOrd) ?? '00', title = str(it.bidNtceNm); if (!no || !title) return null;
-  return { source_type: 'g2b_bid', source_external_id: `${no}-${ord}`, source_url: str(it.bidNtceDtlUrl) ?? `https://www.g2b.go.kr/ep/invitation/publish/bidInfoDtl.do?bidno=${no}&bidseq=${ord}`, title, issuer: str(it.ntceInsttNm), demand_agency: str(it.dminsttNm), bid_category: cat,
+  return { source_type: 'g2b_bid', source_external_id: `${no}-${ord}`, source_url: fixG2bUrl(str(it.bidNtceDtlUrl)) ?? g2bBidUrl(no, ord), title, issuer: str(it.ntceInsttNm), demand_agency: str(it.dminsttNm), bid_category: cat,
     winner_name: str(it.bidwinnrNm) ?? str(it.sucsfBidNm), winner_amount: str(it.sucsfbidAmt), award_date: str(it.opengDt)?.slice(0, 10), posted_date: str(it.bidNtceDt)?.slice(0, 10) };
 }
 export const g2bPrespecAwards: Collector = {

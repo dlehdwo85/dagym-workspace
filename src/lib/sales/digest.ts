@@ -18,6 +18,7 @@ import { BID_COLLECTORS } from './collectors';
 import { listBizCats, matchBiz, type BizCat } from './bizCats';
 import { sidoIn } from './region';
 import { digestMail } from './digestMail';
+import { fixG2bUrl, searchHint, type SearchHint } from './sourceLink';
 
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
 const words = z.array(z.string().trim().min(1).max(40)).max(50);
@@ -78,7 +79,8 @@ function when(v: unknown): { d: string; t: string | null } | null {
 const fmtWhen = (w: ReturnType<typeof when>) => (w ? (w.t ? `${w.d} ${w.t}` : w.d) : null);
 export type DigestSection = 'now' | 'review' | 'soon' | 'change' | 'ref';
 export type DigestItem = { id: string; title: string; issuer: string | null; region: string | null; source: string; url: string; kind: string; fit: string | null; keywords: string[]; estimated: number | null; deadline: string | null; dday: number | null; participation: string | null; opening: string | null; attachments: number; why: string; seenAt?: string | null; late?: boolean; posted?: string | null;
-  /** #510 21라인 칸 */ section: DigestSection; noticeNo: string | null; badges: string[]; biz: { name: string; color: string }[]; tags: string[]; amount: string | null; deadlineAt: string | null; participationAt: string | null; openingAt: string | null; briefingAt: string | null; bidSystem: string | null };
+  /** #510 21라인 칸 */ section: DigestSection; noticeNo: string | null; badges: string[]; biz: { name: string; color: string }[]; tags: string[]; amount: string | null; deadlineAt: string | null; participationAt: string | null; openingAt: string | null; briefingAt: string | null; bidSystem: string | null;
+  /** #543 바로 가는 상세 주소가 없는 원천 — [원문] 대신 '○○에서 번호 검색' */ search?: SearchHint | null };
 /** #476 a: 지난 메일(그 전날까지의 마지막 다이제스트) 이후 처음 본 공고 — 그날 메일 뒤에 들어온 공고가 다음 날 메일에서 빠지지 않게. 3일 넘게 비었거나 처음이면 그날 0시(KST)부터 */
 export async function digestSince(tenant: string, day: string): Promise<Date> {
   const start = new Date(`${day}T00:00:00+09:00`);
@@ -193,7 +195,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const state = String(r.notice_state ?? '');
     const badges = [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null].filter((x): x is string => !!x);
     const biz = matchBiz(r, cats).map((b) => ({ name: b.name, color: b.color }));
-    items.push({ id: c.id, title: String(r.title ?? ''), issuer: r.issuer ?? r.demand_agency ?? null, region: regionOf(r), source: SRC[st] ?? st, url: String(r.source_url ?? ''), kind: c.kind,
+    items.push({ id: c.id, title: String(r.title ?? ''), issuer: r.issuer ?? r.demand_agency ?? null, region: regionOf(r), source: SRC[st] ?? st, url: fixG2bUrl(r.source_url) ?? '', search: searchHint({ source: st, url: r.source_url, externalId: r.source_external_id, noticeNo: r.notice_no }), kind: c.kind,
       fit: c.fit, keywords: Array.isArray(r.matched_keywords) ? r.matched_keywords : [], estimated: num(r.estimated_amount) ?? num(r.budget_amount), deadline: dl?.d ?? null, dday,
       participation: dayOf(r.participation_deadline_at), opening: dayOf(r.opening_at), attachments: Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0, why: c.why, seenAt: r.first_seen_at ?? null, late: c.late, posted: dayOf(r.posted_date),
       section, noticeNo: st === 'vendor_recruit' ? null : String(r.source_external_id ?? '').trim() || null, badges, biz: biz.length ? biz : c.fit ? [{ name: c.fit, color: '#2563EB' }] : [], tags: tagsOf(r), amount: amountOf(r),

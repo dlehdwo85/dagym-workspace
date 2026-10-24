@@ -4,7 +4,8 @@ import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import { RevenueGoal } from '@/components/marketing/RevenueGoal';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArrowRight, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
+import { ArrowRight, Copy, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
+import type { SearchHint } from '@/lib/sales/sourceLink';
 import { api, useApi } from '@/components/client';
 import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
@@ -43,6 +44,16 @@ function ContactRow({ phone, links, className }: { phone?: unknown; links?: [unk
         <a href={`sms:${digits(phone)}`} className={linkCls} data-testid="contact-sms"><MessageSquare className="size-3.5" aria-hidden />문자</a></> : null}
       {L.map(([u, l]) => <a key={l} href={u} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="contact-link">{/내려받기/.test(l) ? <Download className="size-3.5" aria-hidden /> : <ExternalLink className="size-3.5" aria-hidden />}{l}</a>)}
     </div>
+  );
+}
+/** #543 바로 가는 공고 주소가 없는 원천(온비드·국방·LH 첫 화면, 옛 사전규격 주소) — [원문] 대신 '○○에서 공고번호 ○○ 검색' + [번호 복사] */
+function SearchHintChip({ h }: { h: SearchHint }) {
+  const copy = () => navigator.clipboard?.writeText(h.no).then(() => toast.ok(`${h.label}를 복사했습니다 — ${h.site}에서 붙여 넣어 검색하세요`), () => toast.error('복사하지 못했습니다'));
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5 text-xs text-ink-2" data-testid="bid-search-hint">
+      <span><a href={h.home} target="_blank" rel="noopener noreferrer" className="underline">{h.site}</a>에서 {h.label} <b className="select-all text-ink">{h.no}</b> 검색</span>
+      <button type="button" onClick={copy} className={cx(linkCls, 'text-ink-2')} data-testid="bid-search-copy"><Copy className="size-3.5" aria-hidden />번호 복사</button>
+    </span>
   );
 }
 const attUrl = (a: any) => (typeof a === 'string' ? a : a?.url ?? a?.href ?? '');
@@ -872,7 +883,7 @@ export function Bids({ initialTab, initialId }: { initialTab?: string; initialId
 function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
   useBackClose(true, onClose, ['id', String(n.id)]); // #535: 휴대폰 뒤로가기 = 공고 상세만 닫힘(메일 링크 ?id= 와 같은 주소)
   // S1-4: 원본 상세 그대로 — [공식 원문][공고문][첨부 각각], 정보 칸(마감·예산·낙찰·추정가격·계약방식·계약기간·공고일·DB 등록)은 값이 없으면 '후속조사 필요', 접힘 '과업·참가자격·요건 상세'
-  const docs = [n.url && <a key="u" href={n.url} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-url"><ExternalLink className="size-3.5" aria-hidden />공식 원문</a>,
+  const docs = [n.search ? <SearchHintChip key="u" h={n.search} /> : n.url && <a key="u" href={n.url} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-url"><ExternalLink className="size-3.5" aria-hidden />공식 원문</a>,
     ...(n.attachments ?? []).map((a: any, i: number) => attUrl(a) && <a key={i} href={attHref(a, i, bidCtx(n))} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-file"><Download className="size-3.5" aria-hidden />{attName(a, i)}</a>)].filter(Boolean);
   const unk = (v: unknown) => (v === null || v === undefined || v === '' ? <span className="text-ink-3">{UNK2}</span> : v as React.ReactNode);
   const D8: [string, unknown][] = [['주요 과업', n.detail?.tasks], ['참가 자격', n.detail?.qualification], ['실적 요건', n.detail?.performance], ['지역 제한', n.detail?.regionLimit], ['면허·등록', n.detail?.license], ['공동수급·하도급', n.detail?.joint], ['현장설명회', n.detail?.briefing], ['제안 발표', n.detail?.presentation]];
@@ -881,7 +892,7 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
       <div className="space-y-3" data-testid="bid-detail">
         <AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBid} subject={`공고 ${String(n.title).slice(0, 40)}`} compact testId="ai-ask-bid" />
         <div className="flex flex-wrap gap-1.5 text-[11px]">{[n.classification ?? n.category, n.businesses?.map((b: any) => b.name).join('·') || null, n.status, n.fit !== null && n.fit !== undefined && `적합 ${n.fit}`, n.sourceLabel && `${n.sourceLabel}${n.noticeNo ? ` ${n.noticeNo}` : ''}`].filter(Boolean).map((b, i) => <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">{String(b)}</span>)}</div>
-        <KoDl rows={[['공고명', n.title], ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.fitBusiness],
+        <KoDl rows={[['공고명', n.title], ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.businesses?.length ? n.businesses.map((b: { name: string }) => b.name).join(' · ') : n.fitBusiness],
           ['마감', n.deadline ? kdt(n.deadline) : unk(null)], ['예산', won(n.amount) || (n.amount ? String(n.amount) : unk(null))], ['낙찰', n.winner ? [n.winner, won(n.awardAmount), n.awardDate && kd(n.awardDate)].filter(Boolean).join(' · ') : unk(null)],
           ['추정가격', won(n.estimated) || unk(n.estimated)], ['계약방식', unk(n.contractMethod)], ['계약기간', unk(n.contractPeriod)], ['공고일', n.noticeDate ? kd(n.noticeDate) : unk(null)], ['DB 등록', n.posted ? kd(n.posted) : unk(null)],
           ['세대수', n.households && `${n.households}세대`], ['업종', n.industry !== n.noticeType && n.industry], ['키워드', n.keywords], ['대표 판단', n.judgment && `${n.judgment}${n.salesPoint ? ` · 영업 포인트: ${n.salesPoint}` : ''}`], ['부족 자격', n.qualificationGap],
@@ -1006,7 +1017,8 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
       {n.keywords && <div className="mt-0.5 hidden text-xs text-ink-3 md:block">키워드: {n.keywords}</div>}
       {n.judgment && <div className="mt-0.5 hidden text-xs text-ink-2 md:block">판단: {n.judgment}</div>}
       <div className="mt-1.5 flex flex-wrap items-end gap-1.5 text-xs">
-        <ContactRow phone={n.phone} links={[[n.url, '원문'], [n.attachments?.length ? attHref(n.attachments[0], 0, bidCtx(n)) : null, n.attachments?.length > 1 ? `공고문 내려받기 ${n.attachments.length}건` : '공고문 내려받기']]} />
+        <ContactRow phone={n.phone} links={[[n.search ? null : n.url, '원문'], [n.attachments?.length ? attHref(n.attachments[0], 0, bidCtx(n)) : null, n.attachments?.length > 1 ? `공고문 내려받기 ${n.attachments.length}건` : '공고문 내려받기']]} />
+        {n.search && <SearchHintChip h={n.search} />}
         {canWrite && !n.workLeadId && <HandoffButton kind="bid" id={String(n.id)} name={`${n.complex ? n.complex + ' ' : ''}${n.title}`} onDone={onChange} compact />}
         {n.workLeadId && <Link href={`/s/sales/leads?id=${n.workLeadId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-handoff-lead">영업 중 → 리드</Link>}
         <span className="ml-auto font-medium text-ink" data-testid="bid-deadline">{n.deadline ? `마감 ${kdt(n.deadline)}` : '마감일 미확인'}</span>

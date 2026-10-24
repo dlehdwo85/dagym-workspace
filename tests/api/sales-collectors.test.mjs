@@ -399,9 +399,11 @@ test('#522 LH·국방·온비드 새 주소·칸: LH(body.item·날짜 형식 �
   assert.ok(!JSON.stringify(pre[0]).includes('tester@lh.example') && !JSON.stringify(pre[0]).includes('031-000-1111'), '담당자 메일·전화 저장 안 함');
   const d2b = await row('d2b_bid', '2026-D-77-1');
   assert.deepEqual([d2b.issuer, d2b.base_amount, d2b.bid_category, d2b.participation_deadline_at.slice(0, 16)], ['국군재정관리단', 120000000, '용역', `${plus(5)}T18:00`]);
+  assert.deepEqual([d2b.notice_no, d2b.source_url], ['2026-D-77', 'https://www.d2b.go.kr'], '#543 원천 사이트에서 검색할 공고번호(차수 뺌)');
   assert.equal(await row('d2b_bid', '2026-D-78-1'), undefined, '나라장터(20261021001)에 이미 있는 국방 공고는 따로 안 만듦');
   const on = await row('onbid_lease', '202610-36613-00');
   assert.deepEqual([on.title, on.issuer, on.fit_business, on.related, on.notice_type, on.deadline_at.slice(0, 16)], ['진영스포츠센터 내 용품점 및 자판기 사용·수익허가(3차)', '김해시도시개발공사', '다짐', true, '공유재산 임대', `${plus(3)}T17:00`]);
+  assert.equal(on.notice_no, '202610-36613-00');
   const oq = hits.find((h) => h.path === '/agency/onbid_lease' && h.q.onbidPbancNm === '스포츠').q;
   assert.deepEqual([oq.resultType, oq.cltrTypeCd, oq.prptDivCd, oq.opbdDtStart, oq.opbdDtEnd], ['json', '0001', '0002,0010,0005', ymd8(0), ymd8(60)]);
   const [run] = await sql`select detail from sales_collector_runs where slug = 'public_agency_bids' order by started_at desc limit 1`;

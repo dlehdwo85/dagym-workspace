@@ -71,7 +71,7 @@ export function noticeKind(title: string | null, kindName: string | null): 'new'
 export const PROCUREMENT_ETL_FIELDS = ['source_url', 'notice_file_url', 'issuer', 'title', 'region', 'notice_type', 'posted_date', 'deadline_at', 'budget_amount', 'estimated_amount', 'contract_method', 'current_status', 'task_scope',
   'bid_system', 'award_method', 'notice_state', 'facility_name', 'bid_category', 'office_phone', 'office_fax', 'office_address', 'household_count', 'fit_business', 'matched_keywords', 'related', 'attachment_urls',
   'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at', 'site_briefing_at', 'site_briefing_place',
-  'base_amount'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로
+  'base_amount', 'notice_no'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로 · #543 공고번호(바로 가는 주소가 없는 원천의 '번호 검색' 안내)
 export const AWARD_FIELDS = ['winner_name', 'winner_amount', 'award_date', 'current_status'] as const;
 export type NoticeRow = Record<string, unknown> & { source_type: string; source_external_id: string; title: string; source_url: string };
 
@@ -124,6 +124,7 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
     files_checked_at: txt(p.files_checked_at), // #507 후속: K-apt 첨부 목록을 읽은 때(다음 수집에서 다시 읽지 않음)
     site_briefing_at: ts(p.site_briefing_at), site_briefing_place: txt(p.site_briefing_place), // #510 현장설명(나라장터 dcmtgOprtnDt·Plce)
     base_amount: num(p.base_amount),
+    notice_no: txt(p.notice_no), // #543 차수·구분 없는 공고번호(온비드·국방·LH — 원천 사이트에서 검색할 번호)
   };
   return { ok: true, row };
 }

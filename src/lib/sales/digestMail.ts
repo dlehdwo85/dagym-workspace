@@ -60,7 +60,9 @@ function itemHtml(i: DigestItem, n: number, base: string, day: string) {
   const tags = i.tags.map((t) => `<span style="display:inline-block;padding:0 6px;margin-left:4px;border:1px solid ${C.line};border-radius:4px;font-size:11px;line-height:16px;color:${C.ink3}">${esc(t)}</span>`).join('');
   const dl = i.deadlineAt && i.dday != null ? ` <b style="color:${ddColor(i.dday)}">${ddText(i.dday)}</b>` : '';
   const l3html = l3.map((x) => (x.startsWith('입찰마감 ') ? `${esc(x)}${dl}` : esc(x))).join(' · ');
-  const orig = http(i.url) ? `${l3.length ? ' · ' : ''}<a href="${esc(i.url)}" style="color:${C.brand};text-decoration:underline">원문</a>` : '';
+  // #543 바로 가는 공고 주소가 없는 원천(온비드·국방·LH 첫 화면, 옛 사전규격 주소) — [원문] 대신 '○○에서 공고번호 ○○ 검색'
+  const orig = i.search ? `${l3.length ? ' · ' : ''}<a href="${esc(i.search.home)}" style="color:${C.brand};text-decoration:underline">${esc(i.search.site)}</a>에서 ${esc(i.search.label)} <b>${esc(i.search.no)}</b> 검색`
+    : http(i.url) ? `${l3.length ? ' · ' : ''}<a href="${esc(i.url)}" style="color:${C.brand};text-decoration:underline">원문</a>` : '';
   return `<tr><td style="padding:12px 16px;border-top:1px solid ${C.line}" data-digest-item="${esc(i.section)}">
 <div style="font-size:15px;line-height:22px;font-weight:700;color:${C.ink}"><span style="color:${C.ink3};font-weight:600;margin-right:4px">${n}.</span>${badges}<a href="${esc(link)}" style="color:${C.ink};text-decoration:${i.kind === 'cancel' ? 'line-through' : 'none'}">${esc(i.title)}</a>${biz}</div>
 ${l2.length || tags ? `<div style="margin-top:3px;font-size:13px;line-height:20px;color:${C.ink2}">${l2.map(esc).join(' · ')}${tags}</div>` : ''}

@@ -6,6 +6,7 @@ import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
 import { sourceFiles } from './files';
+import { fixG2bUrl, searchHint } from './sourceLink';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -99,7 +100,9 @@ const daysSince = (d: string | null) => { if (!d) return null; const n = Math.fl
 const vendorUnchecked = (r: any) => String(r?.source_type ?? '') === 'vendor_recruit' && !vendorDateOk(r);
 const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); return ({ id: r.__id, title: pick(r, 'title', 'notice_title', 'bid_name', 'name') ?? '(제목 없음)', agency: pick(r, 'issuer', 'agency', 'org_name', 'demand_agency', 'organization', 'buyer'),
   region: pick(r, 'region'), posted: firstSeen(r), noticeDate: vendorUnchecked(r) ? null : day(pick(r, 'posted_date', 'posted_at', 'notice_date', 'published_at', 'bid_notice_date')), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'),
-  close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')), source: pick(r, 'source_type', 'source', 'source_code'), url: pick(r, 'source_url', 'url', 'detail_url', 'link'),
+  close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')), source: pick(r, 'source_type', 'source', 'source_code'), url: fixG2bUrl(pick(r, 'source_url', 'url', 'detail_url', 'link')),
+  // #543 옛 나라장터 주소는 새 형식으로, 바로 가는 주소가 없는 원천은 번호 검색 안내
+  search: searchHint({ source: pick(r, 'source_type', 'source', 'source_code'), url: pick(r, 'source_url', 'url', 'detail_url', 'link'), externalId: pick(r, 'source_external_id'), noticeNo: pick(r, 'notice_no') }),
   attachments: attachmentsOf(r),
   fit: pick(r, 'fit_score'), status: pick(r, 'current_status', 'status'), amount: pick(r, 'amount', 'budget', 'estimated_price', 'base_amount', 'presumed_price'), related: r.related === true || r.related === 'true',
   // 영업관리 입찰 카드 칸(SALES_SCREEN_INVENTORY 2-5): 사업·분류·출처·단지·세대·업종·낙찰·키워드·전화·DB 등록·오늘 등록
