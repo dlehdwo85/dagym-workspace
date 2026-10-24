@@ -34,6 +34,11 @@ export async function aiStream({ browser, desk, owner, BASE, FAKE, SHOTS }) {
   assert.equal(await ans.locator('a', { hasText: '업무 목록' }).getAttribute('href'), '/tasks');
   assert.ok(!(await ans.innerText()).includes('**'), '굵게 표시(**)가 글자로 남지 않음');
   await ans.screenshot({ path: `${SHOTS}/242-ai-answer-format.png` });
+  // 로컬 10/24: 답 아래 '첫 글자 n초 · 끝 n초'(화면 기준, [보내기]부터) — 글자가 흘러나왔는지 재는 기록(조각 수 data-chunks)
+  const tmg = owner.getByTestId('ai-timing').last();
+  assert.match(await tmg.innerText(), /^첫 글자 \d+\.\d초 · 끝 \d+\.\d초$/);
+  const [fm, dm, ch] = await Promise.all(['data-first-ms', 'data-done-ms', 'data-chunks'].map(async (k) => Number(await tmg.getAttribute(k))));
+  assert.ok(fm > 0 && dm - fm >= 1000 && ch >= 4, `첫 글자 ${fm}ms · 끝 ${dm}ms · 조각 ${ch}개 — 8조각 × 0.25초면 끝이 첫 글자보다 1초 넘게 늦음`);
 
   // 도구 단계: '업무 확인 중…' 한 줄 → 다음 단계 답
   await q([{ content: [{ type: 'tool_use', id: 't1', name: 'search_tasks', input: { query: '견적' } }], stop_reason: 'tool_use' }, say('찾은 업무가 없습니다.', { delayMs: 1500 })]);
@@ -41,6 +46,7 @@ export async function aiStream({ browser, desk, owner, BASE, FAKE, SHOTS }) {
   await box.press('Enter');
   await owner.getByTestId('ai-live-status').filter({ hasText: '업무 확인 중' }).waitFor();
   await owner.getByTestId('ai-answer').filter({ hasText: '찾은 업무가 없습니다' }).waitFor();
+  assert.ok(Number(await owner.getByTestId('ai-timing').last().getAttribute('data-first-ms')) >= 1400, '도구 단계 뒤 답 첫 글자(1.5초 기다린 뒤)');
 
   // 패널(✨)도 같은 흐름
   await owner.goto(BASE + '/tasks');

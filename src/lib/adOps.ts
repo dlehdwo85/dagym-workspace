@@ -8,8 +8,9 @@ import { decrypt } from './crypto';
 import { audit } from './log';
 import { tenantOf, type SessionUser } from './types';
 import { DEFAULT_RULES, checkAd, qualityRules, scoreHook, type QualityRules } from './mktQuality';
-import { NAVER_REGION_CODES, REGION_RE } from './naverRegions';
+import { NAVER_REGION_CODES, REGION_RE, regionLabel } from './naverRegions';
 import { PLAN_KEYWORDS_MAX, combineKeywords } from './kwCombine';
+import { NAVER_NAME_MAX, NAVER_OK, fixAdText, groupName, naverName } from './naverText';
 
 /**
  * V44 ① AI 광고 운영실 — 네이버 검색광고 '쓰기'(파워링크 먼저, 플레이스 다음).
@@ -46,7 +47,6 @@ export const RISKY: [RegExp, string][] = [
   [/완치|치료|효능|부작용\s?없/, '의료 효능 표현은 의료광고 심의 대상입니다'],
   [/원금|수익\s?보장|고수익/, '금융 수익 보장 표현은 쓸 수 없습니다'],
 ];
-const NAVER_OK = /^[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9 .,!?%&()+\-/:'"~@#*\[\]]$/;
 /**
  * #499-2 광고 설정(테크트리 EP.7 — 네이버 검색광고 공식 API 명세 ncc-heroes-ncc.json·FAQ 로 필드 확인 10/23). 값이 없으면(이전 세팅안) 네이버 기본값 그대로 만든다.
  * 기본값은 대표 결정 전 제안값 — 화면 새 세팅안이 추천값을 채워 보냄(서버 기본값 = 네이버 기본값).
@@ -117,6 +117,9 @@ const isRootUrl = (u: string) => { try { const x = new URL(u); return (x.pathnam
  */
 export function advice(p: z.infer<typeof planInput>, rules: QualityRules = DEFAULT_RULES) {
   const out: string[] = [];
+  // #499-2 후속(a) 운영 10/24 code 3711: 네이버 캠페인·광고그룹 이름은 30자까지 — 만들 때 줄여 보내고, 저장할 때 미리 알림
+  const nm = [...(p.name ?? '')].length;
+  if (nm > NAVER_NAME_MAX - 3) out.push(`이름이 ${nm}자입니다 — 네이버 이름은 30자까지라 ${nm > NAVER_NAME_MAX ? `캠페인 '${naverName(p.name)}', ` : ''}광고그룹 '${groupName(p.name)}'(으)로 줄여 만듭니다`);
   const roots = p.ads.map((a, i) => (isRootUrl(a.url) ? i + 1 : 0)).filter(Boolean);
   if (roots.length) out.push(`소재 ${roots.join('·')} 연결 주소가 홈페이지 첫 화면입니다 — 서비스별 페이지로 연결하세요(확장 검색은 연결 페이지 내용으로 검색어를 맞춥니다)`);
   p.ads.forEach((a, i) => {
@@ -154,14 +157,14 @@ export async function adOpsOverview(u: SessionUser) {
   const t = tenantOf(u); const sql = db();
   const [cap, spend, rules] = await Promise.all([capOf(t), monthSpend(t), qualityRules()]);
   const accounts = await sql`select id, label, external_id from mkt_ad_accounts where tenant = ${t} and provider = 'naver' and status <> 'disconnected' order by created_at`;
-  const plans = await sql<any[]>`select p.id, p.account_id, p.brand_id, br.name as brand, p.kind, p.name, p.plan, p.status, p.external, p.error, p.created_at, p.approved_at, a.label as account_label, ab.name as approved_by_name
+  const plans = await sql<any[]>`select p.id, p.account_id, p.brand_id, br.name as brand, p.kind, p.name, p.plan, p.status, p.external, p.error, p.created_at, p.updated_at, p.approved_at, a.label as account_label, a.external_id as customer_id, ab.name as approved_by_name
     from mkt_ad_plans p join mkt_ad_accounts a on a.id = p.account_id left join mkt_brands br on br.id = p.brand_id left join users ab on ab.id = p.approved_by where p.tenant = ${t} and p.provider = 'naver' and p.status <> 'archived' order by p.created_at desc limit 50`;
   const brands = await sql<{ id: string; name: string }[]>`select id, name from mkt_brands where tenant = ${t} order by ad_priority nulls last, name`;
   const changes = await sql<any[]>`select c.id, c.plan_id, c.kind, c.before, c.after, c.money_up, c.status, c.error, c.revert_of, c.created_at, u.name as actor_name
     from mkt_ad_changes c left join users u on u.id = c.actor_id left join mkt_ad_plans pp on pp.id = c.plan_id where c.tenant = ${t} and (pp.provider is null or pp.provider = 'naver') order by c.created_at desc limit 100`;
   const ab = await abFor(plans);
   const [bud] = await sql<any[]>`select plan, brand_plan, total from mkt_ad_budgets where tenant = ${t} and month = ${ymKst()} and status = 'approved'`;
-  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan, rules), advice: advice(p.plan, rules), ab: ab.get(p.id) ?? null })), changes,
+  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan, rules), advice: advice({ ...p.plan, name: p.name }, rules), ab: ab.get(p.id) ?? null })), changes,
     savings: await agencySavings(t, spend), budgetHint: bud ? naverBudgetHint(bud) : null };
 }
 /** #499-2 하루 예산 권장(월 ÷ 30 × 1.5)의 '월': 이번 달 승인된 광고 예산의 네이버 몫 — 브랜드별은 예산 승인 집행과 같은 비율(브랜드 월 예산 × 네이버 비중) */
@@ -196,24 +199,77 @@ async function planOf(tenant: string, id: string) {
 }
 
 // ---------------- 세팅안 → 생성(꺼진 상태) ----------------
-export async function createPlan(u: SessionUser, i: z.infer<typeof planInput>) {
+/** #499-2 후속(d): 소재 문구의 가운뎃점·긴 줄표·둥근 따옴표를 네이버가 받는 글자로(AI·사람이 쓴 문구 모두, 저장할 때) — 바꾼 소재 수와 함께 */
+function fixAds(i: z.infer<typeof planInput>) {
+  const ads = i.ads.map((a) => ({ ...a, headline: fixAdText(a.headline), description: fixAdText(a.description) }));
+  return { i: { ...i, ads }, fixed: ads.filter((a, k) => a.headline !== i.ads[k].headline || a.description !== i.ads[k].description).length };
+}
+export async function createPlan(u: SessionUser, input: z.infer<typeof planInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
-  await naverAcc(tenantOf(u), i.accountId);
+  await naverAcc(tenantOf(u), input.accountId);
+  const { i, fixed } = fixAds(input);
   const { accountId, name, brandId, ...plan } = i;
   const [p] = await db()`insert into mkt_ad_plans (tenant, account_id, provider, kind, name, plan, created_by, brand_id) values (${tenantOf(u)}, ${accountId}, 'naver', 'powerlink', ${name}, ${db().json(plan as never)}, ${u.id}, ${brandId ?? null}) returning id`;
   const rules = await qualityRules();
-  return { id: p.id, issues: precheck(i, rules), advice: advice(i, rules) };
+  return { id: p.id, issues: precheck(i, rules), advice: advice(i, rules), fixed };
 }
 
 /** 세팅안 고치기(만들기 전·실패 뒤) — 이미 네이버에 만든 부분(캠페인·그룹)은 그대로, 남은 단계에 새 값 사용 */
-export async function updatePlan(u: SessionUser, id: string, i: z.infer<typeof planInput>) {
+export async function updatePlan(u: SessionUser, id: string, input: z.infer<typeof planInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const p = await planOf(tenantOf(u), id);
+  const { i, fixed } = fixAds(input);
   if (p.status !== 'draft' && p.status !== 'failed') throw new HttpError(409, 'plan_locked', '네이버에 만든 뒤에는 세팅안을 고칠 수 없습니다 — 끄기·하루 예산만 바꿀 수 있습니다');
   const { accountId: _a, name, brandId, ...plan } = i;
   await db()`update mkt_ad_plans set name = ${name}, plan = ${db().json(plan as never)}, brand_id = ${brandId === undefined ? p.brand_id : brandId}, updated_at = now() where id = ${id}`;
   const rules = await qualityRules();
-  return { id, issues: precheck(i, rules), advice: advice(i, rules) };
+  return { id, issues: precheck(i, rules), advice: advice(i, rules), fixed };
+}
+
+/** '만드는 중'이 이만큼 진행 없이 멈춰 있으면 끊긴 것(승인 함수 시간 제한 120초) — 다시 눌러 이어 만들 수 있음 */
+export const CREATING_STALE_MIN = 5;
+const staleCreating = (p: { status: string; updated_at: string | Date }) => p.status === 'creating' && Date.now() - new Date(p.updated_at).getTime() > CREATING_STALE_MIN * 60_000;
+const listOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []);
+const adgroupsOf = async (a: NaverAcc, campaignId: string) => listOf(await naverReq(a, 'GET', '/ncc/adgroups', `?nccCampaignId=${encodeURIComponent(campaignId)}`));
+/** 이 회사 세팅안(어느 상태든)에 연결된 캠페인 id — 남은 캠페인으로 잘못 이어 쓰지 않게 */
+async function linkedCampaigns(tenant: string, exceptPlan?: string) {
+  const sql = db();
+  const rows = await sql<{ cid: string }[]>`select external->>'campaignId' as cid from mkt_ad_plans
+    where tenant = ${tenant} and provider = 'naver' and external->>'campaignId' is not null ${exceptPlan ? sql`and id <> ${exceptPlan}` : sql``}`;
+  return new Set(rows.map((r) => r.cid));
+}
+/**
+ * #499-2 후속(b): 캠페인을 만들기 전에 네이버에 같은 이름이 있는지 — 다른 세팅안과 연결 안 됨 + 꺼짐 + 광고그룹 없음(또는 이 세팅안 그룹 이름 하나뿐)
+ * = 지난 시도에서 남은 것(응답을 못 받음 · 세팅안을 지우고 다시 만듦)이라 이어 씀. 같은 이름이 있는데 이어 쓸 수 없으면 이름 뒤에 번호를 붙여 새로 만듦.
+ * 목록을 못 읽으면 예전처럼 그 이름으로 새로 만듦
+ */
+async function campaignFor(a: NaverAcc, tenant: string, planId: string, name: string, gName: string): Promise<{ name: string; campaignId?: string; adgroupId?: string }> {
+  let list: any[];
+  try { list = listOf(await naverReq(a, 'GET', '/ncc/campaigns')); } catch { return { name }; }
+  const linked = await linkedCampaigns(tenant, planId);
+  for (const c of list) {
+    const cid = String(c?.nccCampaignId ?? '');
+    if (!cid || String(c?.name ?? '') !== name || linked.has(cid) || c?.userLock === false || (c?.campaignTp && c.campaignTp !== 'WEB_SITE')) continue;
+    const groups = await adgroupsOf(a, cid).catch(() => null);
+    if (groups && !groups.length) return { name, campaignId: cid };
+    if (groups?.length === 1 && String(groups[0]?.name ?? '') === gName && groups[0]?.nccAdgroupId) return { name, campaignId: cid, adgroupId: String(groups[0].nccAdgroupId) };
+  }
+  const taken = new Set(list.map((c) => String(c?.name ?? '')));
+  for (let k = 2; taken.has(name) && k < 100; k++) { const n = `${naverName(name, NAVER_NAME_MAX - String(k).length - 1)} ${k}`; if (!taken.has(n)) return { name: n }; }
+  return { name };
+}
+/** 소재 멱등 생성: 새 그룹이 아니면 같은 제목·설명·연결 주소 소재가 이미 있는지 먼저(지난 시도) — 있으면 그 id, 없는 것만 만듦(세팅안 순서대로 id) */
+async function ensureAds(a: NaverAcc, adgroupId: string, ads: { headline: string; description: string; url: string }[], fresh: boolean) {
+  const key = (h: unknown, d: unknown, url: unknown) => JSON.stringify([String(h ?? ''), String(d ?? ''), String(url ?? '')]);
+  const have = new Map<string, string>();
+  if (!fresh) for (const x of listOf(await naverReq(a, 'GET', '/ncc/ads', `?nccAdgroupId=${encodeURIComponent(adgroupId)}`).catch(() => []))) if (x?.nccAdId) have.set(key(x.ad?.headline, x.ad?.description, x.ad?.pc?.final), String(x.nccAdId));
+  const ids: string[] = [];
+  for (const ad of ads) {
+    const k = key(ad.headline, ad.description, ad.url);
+    ids.push(have.get(k) ?? String((await naverReq(a, 'POST', '/ncc/ads', '', { nccAdgroupId: adgroupId, type: 'TEXT_45', userLock: false, ad: { headline: ad.headline, description: ad.description, pc: { final: ad.url }, mobile: { final: ad.url } } })).nccAdId));
+    have.delete(k); // 같은 소재를 두 번 넣었으면 두 번째는 새로
+  }
+  return ids;
 }
 
 /** [승인하고 시작]: 상한 필수 → 검사 통과 → 네이버에 캠페인·그룹·키워드·소재를 모두 꺼진 상태로 생성 */
@@ -221,28 +277,49 @@ export async function approvePlan(u: SessionUser, id: string) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const t = tenantOf(u); const sql = db();
   const p = await planOf(t, id);
-  if (p.status !== 'draft' && p.status !== 'failed') throw new HttpError(409, 'plan_not_draft', '이미 만든 세팅안입니다');
+  if (p.status !== 'draft' && p.status !== 'failed' && !staleCreating(p)) throw new HttpError(409, 'plan_not_draft', p.status === 'creating' ? '이미 만드는 중입니다 — 잠시 뒤 새로 고쳐 확인해 주세요' : '이미 만든 세팅안입니다');
   if (!(await capOf(t))) throw new HttpError(409, 'cap_required', '먼저 회사 월 광고비 상한을 정해 주세요');
   const issues = precheck(p.plan, await qualityRules());
   if (issues.length) throw new HttpError(409, 'precheck_failed', `세팅안 검사를 통과하지 못했습니다: ${issues.join(' · ')}`);
   const s: AdSetup | undefined = p.plan.setup ? setupInput.parse(p.plan.setup) : undefined; // #499-2 광고 설정(없으면 이전처럼 네이버 기본값) — 잠그기 전에 읽음
   const a = await naverAcc(t, p.account_id);
   // 같은 세팅안을 동시에 두 번 만들지 않게(운영 10/19: 한 번 눌렀는데 요청 3번) — 만드는 중으로 바꾼 요청만 진행, 나머지는 409
-  const [lock] = await sql`update mkt_ad_plans set status = 'creating', updated_at = now() where id = ${id} and status in ('draft', 'failed') returning id`;
+  // 끊긴 '만드는 중'(진행 없이 5분)은 다시 눌러 이어 만듦
+  const [lock] = await sql`update mkt_ad_plans set status = 'creating', updated_at = now() where id = ${id}
+    and (status in ('draft', 'failed') or (status = 'creating' and updated_at < now() - make_interval(mins => ${CREATING_STALE_MIN}))) returning id`;
   if (!lock) throw new HttpError(409, 'plan_busy', '이미 만드는 중입니다 — 잠시 뒤 새로 고쳐 확인해 주세요');
   const ext: Record<string, unknown> = { ...(p.external ?? {}) };
+  // 단계마다 만든 id 를 바로 남김 — 함수가 시간 제한으로 끊겨도 다시 누르면 같은 캠페인·그룹에 이어서 만듦
+  const keep = () => sql`update mkt_ad_plans set external = ${sql.json(ext as never)}, updated_at = now() where id = ${id} and status = 'creating'`.catch(() => {});
+  // #499-2 후속(a) 운영 10/24 code 3711: 네이버 이름은 30자까지 — 캠페인 = 세팅안 이름 앞 30자, 광고그룹 = 앞 27자 + ' 그룹'
+  const cName = naverName(p.name), gName = groupName(p.name);
   try {
-    // 실패하면 거기서 멈추고, 이미 만든 id 는 external 에 남김(다시 시도하면 이어서 만듦)
-    if (!ext.campaignId) ext.campaignId = String((await naverReq(a, 'POST', '/ncc/campaigns', '', { customerId: Number(a.external_id), name: p.name, campaignTp: 'WEB_SITE', dailyBudget: p.plan.dailyBudget, useDailyBudget: true, userLock: true,
-      ...(s?.tracking ? { trackingMode: 'AUTO_TRACKING_MODE' } : {}) })).nccCampaignId);
-    if (!ext.adgroupId) ext.adgroupId = String((await naverReq(a, 'POST', '/ncc/adgroups', '', { nccCampaignId: ext.campaignId, adgroupType: 'WEB_SITE', name: `${p.name} 그룹`, pcChannelId: p.plan.channelId, mobileChannelId: p.plan.channelId, bidAmt: p.plan.bidAmt, useDailyBudget: false, userLock: true,
-      ...groupSetup(s, !!p.plan.test?.on) })).nccAdgroupId);
-    if (!validIds(ext.keywordIds)) ext.keywordIds = await ensureKeywords(a, String(ext.adgroupId), p.plan.keywords, Number(p.plan.bidAmt) || undefined);
-    if (!ext.adIds) {
-      const ids: string[] = [];
-      for (const ad of p.plan.ads) ids.push(String((await naverReq(a, 'POST', '/ncc/ads', '', { nccAdgroupId: ext.adgroupId, type: 'TEXT_45', userLock: false, ad: { headline: ad.headline, description: ad.description, pc: { final: ad.url }, mobile: { final: ad.url } } })).nccAdId));
-      ext.adIds = ids;
+    // 실패하면 거기서 멈추고, 이미 만든 id 는 external 에 남김(다시 시도하면 이어서 만듦 — 몇 번 이어 썼는지 resumed)
+    let freshCampaign = false, freshGroup = false;
+    if (ext.campaignId) ext.resumed = Number(ext.resumed ?? 0) + 1;
+    else {
+      const f = await campaignFor(a, t, id, cName, gName);
+      if (f.campaignId) Object.assign(ext, { campaignId: f.campaignId, campaignFrom: 'leftover', campaignName: f.name, ...(f.adgroupId ? { adgroupId: f.adgroupId, adgroupFrom: 'leftover', adgroupName: gName } : {}) });
+      else {
+        ext.campaignId = String((await naverReq(a, 'POST', '/ncc/campaigns', '', { customerId: Number(a.external_id), name: f.name, campaignTp: 'WEB_SITE', dailyBudget: p.plan.dailyBudget, useDailyBudget: true, userLock: true,
+          ...(s?.tracking ? { trackingMode: 'AUTO_TRACKING_MODE' } : {}) })).nccCampaignId);
+        Object.assign(ext, { campaignFrom: 'new', campaignName: f.name }); freshCampaign = true;
+      }
+      await keep();
     }
+    if (!ext.adgroupId) {
+      // 새 캠페인이 아니면 같은 이름 그룹이 이미 있는지 먼저(지난 시도에서 응답만 못 받은 것) — 있으면 이어 씀
+      const prev = freshCampaign ? null : (await adgroupsOf(a, String(ext.campaignId)).catch(() => [])).find((g) => String(g?.name ?? '') === gName && g?.nccAdgroupId);
+      if (prev) Object.assign(ext, { adgroupId: String(prev.nccAdgroupId), adgroupFrom: 'leftover', adgroupName: gName });
+      else {
+        ext.adgroupId = String((await naverReq(a, 'POST', '/ncc/adgroups', '', { nccCampaignId: ext.campaignId, adgroupType: 'WEB_SITE', name: gName, pcChannelId: p.plan.channelId, mobileChannelId: p.plan.channelId, bidAmt: p.plan.bidAmt, useDailyBudget: false, userLock: true,
+          ...groupSetup(s, !!p.plan.test?.on) })).nccAdgroupId);
+        Object.assign(ext, { adgroupFrom: 'new', adgroupName: gName }); freshGroup = true;
+      }
+      await keep();
+    }
+    if (!validIds(ext.keywordIds)) { ext.keywordIds = await ensureKeywords(a, String(ext.adgroupId), p.plan.keywords, Number(p.plan.bidAmt) || undefined); await keep(); }
+    if (!ext.adIds) { ext.adIds = await ensureAds(a, String(ext.adgroupId), p.plan.ads, freshGroup); await keep(); }
     // 광고 최적화 1차 ② 광고 지역(시·도)을 골랐으면 켜기 전(꺼진 상태)에 맞춰 둠 — 실패하면 여기서 멈추고 다시 누르면 이어서
     if (p.plan.local?.region?.length && !ext.regionSet) { await setRegion(a, String(ext.adgroupId), p.plan.local.region, !!p.plan.local.abroad); ext.regionSet = true; }
     // #499-2 노출 매체 '네이버 매체만'(파트너 제외) · 확장 검색 제외 키워드 — 같은 방식으로 꺼진 상태에서 맞추고, 실패하면 멈췄다가 다시 누르면 이어서
@@ -356,6 +433,116 @@ export async function syncPlanKeywords(u: SessionUser, id: string) {
   return { ok: true, keywordIds };
 }
 
+type ReadItem = { key: string; label: string; plan: string; naver: string | null; ok: boolean | null; note?: string };
+const ROLL: Record<string, string> = { PERFORMANCE: '성과 기반', ROUND_ROBIN: '동일 비중' };
+const INSPECT: Record<string, string> = { APPROVED: '검수 통과', UNDER_REVIEW: '검수 중', PENDING: '검수 대기', REJECTED: '보류(반려)', LIMITED: '일부 제한' };
+const sameSet = (x: unknown, y: string[]) => Array.isArray(x) && new Set(x.map(String)).size === new Set(y).size && y.every((v) => x.map(String).includes(v));
+/**
+ * #499-2 후속(c) [네이버 반영 값 다시 읽기]: 네이버에 만든 캠페인·광고그룹·매체·지역·제외 키워드·키워드·소재를 읽어 세팅안과 맞는지 — 읽기만(바꾸는 것 없음),
+ * 결과는 카드에 남김(external.readBack). (b) 실패한 시도의 캠페인을 이어 썼는지(변경 기록) · 이 계정에 세팅안과 연결 안 된 빈 캠페인이 남았는지도 함께.
+ * 네이버가 돌려주지 않는 칸은 '읽지 못함'(다름으로 세지 않음). 응답 칸 이름은 공식 문서 기준 — 실계정 응답으로 확인 전
+ */
+export async function readBackPlan(u: SessionUser, id: string) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db();
+  const p = await planOf(t, id);
+  const ext = p.external ?? {};
+  if (!ext.campaignId) throw new HttpError(409, 'plan_not_created', '네이버에 캠페인을 만든 뒤에 읽을 수 있습니다');
+  const a = await naverAcc(t, p.account_id);
+  const cid = String(ext.campaignId), gid = ext.adgroupId ? String(ext.adgroupId) : null;
+  const s: AdSetup | undefined = p.plan.setup ? setupInput.parse(p.plan.setup) : undefined;
+  const known = (v: unknown) => v !== undefined && v !== null;
+  const tryGet = async <T>(f: () => Promise<T>): Promise<T | null> => { try { return await f(); } catch { return null; } };
+  const items: ReadItem[] = [];
+  const add = (key: string, label: string, plan: string, naver: string | null | undefined, ok: boolean | null, note?: string) =>
+    items.push({ key, label, plan, naver: naver ?? null, ok: known(naver) ? ok : null, ...(note ? { note } : {}) });
+
+  const camp = await naverReq(a, 'GET', `/ncc/campaigns/${encodeURIComponent(cid)}`); // 캠페인을 못 읽으면 오류로 알림
+  const wantName = String(ext.campaignName ?? naverName(p.name));
+  add('campaignName', '캠페인 이름', wantName, camp?.name, camp?.name === wantName, known(camp?.name) && camp.name !== wantName ? '세팅안 이름과 다릅니다(첫 시도 때 이름이거나 네이버에서 바꿈) — 광고에는 영향 없음' : undefined);
+  const on = p.status === 'active';
+  add('lock', '켜짐·꺼짐', on ? '켜짐' : '꺼짐', known(camp?.userLock) ? (camp.userLock ? '꺼짐' : '켜짐') : null, known(camp?.userLock) && !camp.userLock === on, camp?.statusReason ? `네이버 상태 ${camp.statusReason}` : undefined);
+  add('budget', '하루 예산', won(p.plan.dailyBudget), camp?.useDailyBudget === false ? '제한 없음' : known(camp?.dailyBudget) ? won(Number(camp.dailyBudget)) : null,
+    camp?.useDailyBudget !== false && Number(camp?.dailyBudget) === Number(p.plan.dailyBudget));
+  add('tracking', '자동 추적 URL 파라미터', s ? (s.tracking ? '켬' : '끔') : '네이버 기본', known(camp?.trackingMode) ? (camp.trackingMode === 'AUTO_TRACKING_MODE' ? '켬' : `끔(${camp.trackingMode})`) : null,
+    s ? (camp?.trackingMode === 'AUTO_TRACKING_MODE') === s.tracking : null);
+
+  let ads: { id: string; label: string; headline: string; inspect: string }[] = [];
+  if (gid) {
+    const g = await tryGet(() => naverReq(a, 'GET', `/ncc/adgroups/${encodeURIComponent(gid)}`));
+    const wantG = String(ext.adgroupName ?? groupName(p.name));
+    add('groupName', '광고그룹 이름', wantG, g?.name, g?.name === wantG, known(g?.name) && g.name !== wantG ? '세팅안 이름과 다릅니다(첫 시도 때 이름이거나 네이버에서 바꿈) — 광고에는 영향 없음' : undefined);
+    add('bid', '기본 입찰가', won(p.plan.bidAmt), known(g?.bidAmt) ? won(Number(g.bidAmt)) : null, Number(g?.bidAmt) === Number(p.plan.bidAmt));
+    const wPc = s?.pcWeight ?? 100, wMo = s?.mobileWeight ?? 100;
+    add('weight', 'PC·모바일 입찰 가중치', `${wPc}%·${wMo}%`, known(g?.pcNetworkBidWeight) || known(g?.mobileNetworkBidWeight) ? `${g?.pcNetworkBidWeight ?? '?'}%·${g?.mobileNetworkBidWeight ?? '?'}%` : null,
+      Number(g?.pcNetworkBidWeight) === wPc && Number(g?.mobileNetworkBidWeight) === wMo);
+    const wantRoll = p.plan.test?.on ? 'ROUND_ROBIN' : s?.rolling;
+    add('rolling', '소재 노출 방식', wantRoll ? ROLL[wantRoll] : '네이버 기본', known(g?.adRollingType) ? (ROLL[g.adRollingType] ?? String(g.adRollingType)) : null, wantRoll ? g?.adRollingType === wantRoll : null);
+    const expTxt = (x: boolean, ratio: unknown, ai: unknown) => (x ? `켬(예산 ${ratio ?? '?'}%${ai === false ? ' · ADVoost Max 끔' : ''})` : '끔');
+    add('exp', '확장 검색', s ? expTxt(s.expSearch, s.expRatio, s.aiMax) : '네이버 기본', known(g?.useExpSearch) ? expTxt(!!g.useExpSearch, g.expSearchBudgetRatio, g.aiAdsOptIn) : null,
+      s ? !!g?.useExpSearch === s.expSearch && (!s.expSearch || ((!known(g?.expSearchBudgetRatio) || Number(g.expSearchBudgetRatio) === s.expRatio) && (!known(g?.aiAdsOptIn) || !!g.aiAdsOptIn === s.aiMax))) : null);
+    add('channel', '연결 사이트(비즈채널)', String(p.plan.channelId), g?.pcChannelId ?? g?.mobileChannelId, g?.pcChannelId === p.plan.channelId && (g?.mobileChannelId ?? p.plan.channelId) === p.plan.channelId);
+    // 노출 매체 · 광고 지역(타겟)
+    const m = await tryGet(() => targetOf(a, gid, 'MEDIA_TARGET'));
+    const mediaTxt = (v: any) => (!v ? null : Number(v.type) === 1 ? '전체 매체' : Number(v.type) === 2 && sameSet(v.search, ['naver']) && sameSet(v.contents, ['naver']) ? '네이버 매체만'
+      : `직접 고른 매체(검색 ${(v.search ?? []).join(',') || '-'} · 콘텐츠 ${(v.contents ?? []).join(',') || '-'})`);
+    const wantMedia = s?.media === 'naver' ? '네이버 매체만' : '전체 매체';
+    add('media', '노출 매체', s ? wantMedia : '네이버 기본(전체 매체)', mediaTxt(m?.value), mediaTxt(m?.value) === wantMedia);
+    const rg = await tryGet(() => regionTarget(a, gid));
+    const want = (p.plan.local?.region ?? []) as string[];
+    const all = (kr: string[] | null) => kr === null || NAVER_REGION_CODES.every((c) => kr.includes(c));
+    const rAbroad = !!rg && (rg.kr === null || !!rg.others?.includes('00')); // 타겟 없음 = 전국 + 해외
+    add('region', '광고 지역', want.length ? `${regionLabel(want)}${p.plan.local?.abroad ? '·해외' : ''}` : '전국(네이버 기본)', rg ? `${rg.kr === null ? '전국' : regionLabel(rg.kr)}${rAbroad ? '·해외' : ''}` : null,
+      !!rg && (want.length ? sameSet(rg.kr ?? [], want) && rAbroad === !!p.plan.local?.abroad : all(rg.kr)));
+    // 확장 검색 제외 키워드
+    if (s?.expSearch) {
+      const r = await tryGet(() => naverReq(a, 'GET', `/ncc/adgroups/${encodeURIComponent(gid)}/restricted-keywords`, '?type=EXP_SEARCH'));
+      const have = r ? new Set(listOf(r).filter((x) => !x?.type || x.type === 'EXP_SEARCH').map((x) => norm(String(x?.keyword ?? ''))).filter(Boolean)) : null;
+      const wantN = [...new Set(s.negatives.map(norm))];
+      const miss = have ? wantN.filter((k) => !have.has(k)) : [];
+      add('negatives', '확장 검색 제외 키워드', `${wantN.length}개`, have ? `${have.size}개` : null, miss.length === 0,
+        miss.length ? `네이버에 없는 것 ${miss.length}개: ${miss.slice(0, 10).join(', ')}${miss.length > 10 ? ' …' : ''}` : undefined);
+    }
+    // 키워드 · 소재(검수 상태)
+    const kr = await tryGet(() => naverReq(a, 'GET', '/ncc/keywords', `?nccAdgroupId=${encodeURIComponent(gid)}`));
+    const ks = kr ? listOf(kr) : null;
+    const haveK = new Set((ks ?? []).map((k) => norm(String(k?.keyword ?? ''))));
+    const missK = ks ? (p.plan.keywords as string[]).filter((k) => !haveK.has(norm(k))) : [];
+    const offK = (ks ?? []).filter((k) => k?.userLock === true).length;
+    add('keywords', '키워드', `${p.plan.keywords.length}개`, ks ? `${ks.length}개${offK ? `(꺼짐 ${offK})` : ''}` : null, missK.length === 0,
+      missK.length ? `네이버에 없는 키워드 ${missK.length}개: ${missK.slice(0, 10).join(', ')}${missK.length > 10 ? ' …' : ''}` : undefined);
+    const ar = await tryGet(() => naverReq(a, 'GET', '/ncc/ads', `?nccAdgroupId=${encodeURIComponent(gid)}`));
+    if (ar) {
+      const list = listOf(ar); const mine = (ext.adIds as string[] | undefined) ?? [];
+      ads = list.filter((x) => x?.nccAdId).map((x) => { const k = mine.indexOf(String(x.nccAdId));
+        return { id: String(x.nccAdId), label: k >= 0 ? `안 ${'ABC'[k] ?? k + 1}` : '세팅안 밖', headline: String(x.ad?.headline ?? ''), inspect: INSPECT[String(x.inspectStatus ?? '')] ?? (x.inspectStatus ? String(x.inspectStatus) : '알 수 없음') }; });
+      const missA = (p.plan.ads as { headline: string; description: string }[]).filter((d) => !list.some((x) => x?.ad?.headline === d.headline && x?.ad?.description === d.description));
+      add('ads', '소재', `${p.plan.ads.length}개`, `${list.length}개`, missA.length === 0, missA.length ? `네이버에 없는 소재 ${missA.length}개` : undefined);
+    } else add('ads', '소재', `${p.plan.ads.length}개`, null, null);
+  }
+
+  // (b) 실패한 시도에서 만든 캠페인을 이어 썼는지 — 만들기 실패 기록(after = 그때까지 만든 id)
+  const fails = await sql<{ cid: string | null }[]>`select after->>'campaignId' as cid from mkt_ad_changes where tenant = ${t} and plan_id = ${id} and kind = 'create' and status = 'failed' order by created_at`;
+  const others = [...new Set(fails.map((f) => f.cid).filter((x): x is string => !!x && x !== cid))];
+  const history = others.length ? `실패한 시도 ${fails.length}번 — 그때 만든 캠페인 ${others.join(', ')} 은(는) 지금 캠페인과 다릅니다. 아래 '연결 안 된 빈 캠페인'을 확인하세요`
+    : fails.some((f) => f.cid === cid) ? `실패한 시도 ${fails.length}번 — 다시 눌렀을 때 실패한 시도에서 만든 캠페인(${cid})을 이어 썼습니다(새로 만들지 않음)`
+    : fails.length ? `실패한 시도 ${fails.length}번 — 그때는 캠페인을 만들기 전에 멈췄습니다`
+    : ext.campaignFrom === 'leftover' ? '네이버에 남아 있던 같은 이름의 빈 캠페인을 이어 썼습니다(새로 만들지 않음)' : null;
+  // 이 계정에서 어느 세팅안과도 연결 안 된 꺼진 빈 캠페인(광고그룹 0) — 최근 10개만 확인. 지우기는 대표 승인 뒤 네이버 화면에서
+  const listAll = await tryGet(() => naverReq(a, 'GET', '/ncc/campaigns'));
+  let orphans: { id: string; name: string; at: string | null }[] | null = null;
+  if (listAll) {
+    const linked = await linkedCampaigns(t);
+    const cands = listOf(listAll).filter((c) => c?.nccCampaignId && !linked.has(String(c.nccCampaignId)) && c?.userLock !== false && (!c?.campaignTp || c.campaignTp === 'WEB_SITE'))
+      .sort((x, y) => String(y?.regTm ?? '').localeCompare(String(x?.regTm ?? ''))).slice(0, 10);
+    orphans = [];
+    for (const c of cands) { const gs = await tryGet(() => adgroupsOf(a, String(c.nccCampaignId))); if (gs && !gs.length) orphans.push({ id: String(c.nccCampaignId), name: String(c.name ?? ''), at: c.regTm ? String(c.regTm) : null }); }
+  }
+  const readBack = { at: new Date().toISOString(), items, ads, history, orphans };
+  await sql`update mkt_ad_plans set external = coalesce(external, '{}'::jsonb) || ${sql.json({ readBack } as never)} where id = ${id}`;
+  return { ok: true, readBack };
+}
+
 // ---------------- 켜기·끄기·예산 + 되돌리기 ----------------
 async function setLock(a: NaverAcc, campaignId: string, lock: boolean) {
   await naverReq(a, 'PUT', `/ncc/campaigns/${campaignId}`, '?fields=userLock', { nccCampaignId: campaignId, userLock: lock });
@@ -367,7 +554,7 @@ export async function guardMoneyUp(t: string, addDaily = 0) {
   if (spend >= cap.monthlyCap) throw new HttpError(409, 'cap_reached', `이번 달 광고비 ${won(spend)} 가 상한 ${won(cap.monthlyCap)} 에 닿아 켤 수 없습니다 — 상한을 올리거나 다음 달에 켜 주세요`);
   return { cap: cap.monthlyCap, spend, addDaily };
 }
-export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync', 'ad_pause', 'ad_resume', 'ab_apply', 'region', 'keywords_add', 'kw_pause', 'kw_resume']), dailyBudget: z.number().int().min(50).max(10_000_000).optional(),
+export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync', 'readback', 'ad_pause', 'ad_resume', 'ab_apply', 'region', 'keywords_add', 'kw_pause', 'kw_resume']), dailyBudget: z.number().int().min(50).max(10_000_000).optional(),
   keywordIds: z.array(z.string().trim().min(1).max(60)).min(1).max(50).optional(),
   adIds: z.array(z.string().trim().min(1).max(60)).min(1).max(3).optional(),
   region: z.array(z.string().regex(REGION_RE)).max(17).optional(), abroad: z.boolean().optional(), keywords: z.array(z.string().trim().min(1).max(25)).min(1).max(30).optional(),
@@ -378,6 +565,7 @@ export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof plan
     if (pv?.provider === 'meta') return (await import('./metaAuto')).actMetaPlan(u, id, i, revertOf);
   }
   if (i.action === 'sync') return syncPlanKeywords(u, id);
+  if (i.action === 'readback') return readBackPlan(u, id);
   if (i.action === 'ad_pause' || i.action === 'ad_resume' || i.action === 'ab_apply') return actAds(u, id, i, revertOf);
   if (i.action === 'region' || i.action === 'keywords_add') return actLocal(u, id, i, revertOf);
   if (i.action === 'kw_pause' || i.action === 'kw_resume') return actKeywords(u, id, i, revertOf);

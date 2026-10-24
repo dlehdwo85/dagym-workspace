@@ -12,9 +12,9 @@ import { useSession } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
 import { VoiceButton } from '@/components/voice';
 import { hearOnce, keepScreenOn, speak, stopSpeaking, yesNo } from '@/components/speak';
-import { AiBudgetBar, costLine, type Budget } from '@/components/AiBudget';
+import { AiBudgetBar, type Budget } from '@/components/AiBudget';
 import { DocJobCard } from '@/components/DocJobCard';
-import { ChatComposer, DoneSummary, LiveAnswer, MsgTools, useAiConversation, type ChatMsg } from '@/components/aiChat';
+import { ChatComposer, DoneSummary, LiveAnswer, MsgTools, ReplyMeta, useAiConversation, type ChatMsg } from '@/components/aiChat';
 import { AiText } from '@/components/AiText';
 import { SpecialProposal } from '@/components/ProposalCard';
 
@@ -236,7 +236,7 @@ export default function AssistantPage() {
             {m.role === 'assistant' && <DoneSummary proposals={m.proposals as any} />}
             {m.docJobs?.map((id) => <DocJobCard key={id} id={id} onRefine={(t) => { setText(t); inputRef.current?.focus(); }} />)}
             {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
-            {m.role === 'assistant' && costLine(m.costKrw) && <span className="mt-0.5 text-[10.5px] text-ink-3" data-testid="ai-cost">{costLine(m.costKrw)}</span>}
+            <ReplyMeta m={m} />
             </>}
           </div>
         ))}

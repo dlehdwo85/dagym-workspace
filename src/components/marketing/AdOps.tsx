@@ -1,16 +1,17 @@
 'use client';
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { Check } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { NAVER_REGIONS, regionLabel } from '@/lib/naverRegions';
 import { PLAN_KEYWORDS_MAX, combineKeywords } from '@/lib/kwCombine';
+import { NAVER_NAME_MAX, badChars as badList, fixAdText, groupName, naverManageUrl, naverName } from '@/lib/naverText';
 import { MetaAuto } from './MetaAuto';
 
 const C = '#7C3AED';
-/** 네이버 소재 허용 문자(서버 검사와 같은 규칙) — 저장 전에 바로 표시 */
-const NAVER_OK = /^[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9 .,!?%&()+\-/:'"~@#*\[\]]$/;
-const badChars = (t: string) => [...new Set([...t].filter((c) => !NAVER_OK.test(c)))].join(' ');
+/** 네이버 소재 허용 문자(서버 검사와 같은 규칙, naverText) — 저장 전에 바로 표시 */
+const badChars = (t: string) => badList(t).join(' ');
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 const n0 = (v: number) => Math.round(v).toLocaleString('ko-KR');
 type Test = { on: boolean; days: number; minImpressions: number; afterBudget?: number | null };
@@ -30,7 +31,10 @@ const setupText = (s: Setup | undefined, abTest: boolean) => !s ? '네이버 기
   s.tracking ? '자동 추적 켬' : '자동 추적 끔', s.media === 'naver' ? '네이버 매체만' : '전체 매체', `PC ${s.pcWeight}%·모바일 ${s.mobileWeight}%`,
   s.expSearch ? `확장 검색 켬(예산 ${s.expRatio}%${s.aiMax ? '' : ' · ADVoost Max 끔'}${s.negatives.length ? ` · 제외 키워드 ${s.negatives.length}개` : ''})` : '확장 검색 끔',
   abTest ? '소재 동일 비중(3안 테스트)' : s.rolling === 'PERFORMANCE' ? '소재 성과 기반' : '소재 동일 비중'].join(' · ');
-type Plan = { id: string; account_id: string; brand_id?: string | null; brand?: string | null; kind: string; name: string; plan: { dailyBudget: number; bidAmt: number; channelId: string; keywords: string[]; ads: { headline: string; description: string; url: string }[]; test?: Test; local?: Local; setup?: Setup };
+/** #499-2 후속(c) 네이버 반영 값 다시 읽기 결과(서버 readBackPlan) */
+type ReadBack = { at: string; items: { key: string; label: string; plan: string; naver: string | null; ok: boolean | null; note?: string }[]; ads: { id: string; label: string; headline: string; inspect: string }[];
+  history: string | null; orphans: { id: string; name: string; at: string | null }[] | null };
+type Plan = { id: string; account_id: string; brand_id?: string | null; brand?: string | null; kind: string; name: string; customer_id?: string; updated_at?: string; plan: { dailyBudget: number; bidAmt: number; channelId: string; keywords: string[]; ads: { headline: string; description: string; url: string }[]; test?: Test; local?: Local; setup?: Setup };
   status: string; external: Record<string, unknown>; error: string | null; created_at: string; approved_at: string | null; account_label: string; approved_by_name: string | null; issues: string[]; advice?: string[]; ab?: Ab | null };
 type Change = { id: string; plan_id: string | null; kind: string; before: any; after: any; money_up: boolean; status: string; error: string | null; revert_of: string | null; created_at: string; actor_name: string | null };
 type Data = { canEdit: boolean; cap: { monthlyCap: number; stoppedMonth: string | null } | null; monthSpend: number; month: string; accounts: { id: string; label: string; external_id: string }[]; brands: { id: string; name: string }[]; plans: Plan[]; changes: Change[];
@@ -50,12 +54,55 @@ const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable
 const REVERTIBLE = ['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add', 'kw_pause', 'kw_resume'];
 const kwList = (k: string[] = []) => (k.length > 3 ? `${k.slice(0, 3).join(', ')} 외 ${k.length - 3}개` : k.join(', '));
 const adName = (plans: Plan[], c: Change, id: string) => { const p = plans.find((x) => x.id === c.plan_id); const k = ((p?.external?.adIds as string[] | undefined) ?? []).indexOf(id); return k >= 0 ? `안 ${'ABC'[k] ?? k + 1}` : id; };
-const desc = (c: Change, plans: Plan[] = []) => c.kind === 'budget' ? `${won(c.before?.dailyBudget)} → ${won(c.after?.dailyBudget)}` : c.kind === 'auto_pause' && c.after?.spend ? `이번 달 ${won(c.after.spend)} / 상한 ${won(c.after.cap)}`
+const desc = (c: Change, plans: Plan[] = []) => c.kind === 'create' && c.after?.campaignId ? `캠페인 ${c.after.campaignId}${c.after.adgroupId ? ` · 그룹 ${c.after.adgroupId}` : ''}` : c.kind === 'budget' ? `${won(c.before?.dailyBudget)} → ${won(c.after?.dailyBudget)}` : c.kind === 'auto_pause' && c.after?.spend ? `이번 달 ${won(c.after.spend)} / 상한 ${won(c.after.cap)}`
   : (c.kind === 'ad_pause' || c.kind === 'ad_resume') ? `${((c.after?.adIds ?? []) as string[]).map((x) => adName(plans, c, x)).join(', ')}${c.after?.ab ? ' (3안 테스트 결과)' : ''}`
   : c.kind === 'region' && c.after?.KR ? `${c.before ? `${regionLabel(c.before.KR)} → ` : ''}${regionLabel(c.after.KR)}${c.after.OTHERS?.includes('00') || c.after.abroad ? ' · 해외 포함' : ''}`
   : c.kind === 'keywords_add' || c.kind === 'kw_pause' || c.kind === 'kw_resume' ? kwList(c.after?.keywords) : c.kind === 'keywords_remove' ? kwList(c.before?.keywords) : '';
 const AB_STATUS: Record<string, [string, string]> = { not_started: ['켜기 전', 'bg-slate-100 text-ink-2'], running: ['비교 중', 'bg-sky-50 text-sky-800'], winner: ['이긴 안 나옴', 'bg-emerald-50 text-emerald-800'],
   partial: ['일부 판정', 'bg-amber-50 text-amber-800'], tie: ['차이 뚜렷하지 않음', 'bg-slate-100 text-ink-2'] };
+
+/** 승인 함수가 시간 제한으로 끊겨 '만드는 중'에 멈춘 세팅안(서버 CREATING_STALE_MIN 과 같은 값) */
+const STALE_MIN = 5;
+const staleCreating = (p: Plan) => p.status === 'creating' && !!p.updated_at && Date.now() - Date.parse(p.updated_at) > STALE_MIN * 60_000;
+/** #499-2 후속(b) 만든 캠페인·광고그룹 id 와 네이버 광고 관리 화면 링크 · 지난 시도의 캠페인을 이어 썼는지 */
+function NaverIds({ p }: { p: Plan }) {
+  const e = p.external as Record<string, any>;
+  const cid = String(e.campaignId), gid = e.adgroupId ? String(e.adgroupId) : null;
+  const from = e.campaignFrom === 'leftover' ? '네이버에 남아 있던 같은 이름의 빈 캠페인을 이어 썼습니다(새로 만들지 않음)'
+    : Number(e.resumed) > 0 ? '실패 뒤 다시 눌러, 앞 시도에서 만든 캠페인을 이어 썼습니다(새로 만들지 않음)' : null;
+  return (
+    <p className="mt-0.5 break-all text-xs text-ink-2" data-testid="ad-plan-ids">
+      네이버: 캠페인 <code className="text-[11px]">{cid}</code>{gid && <> · 광고그룹 <code className="text-[11px]">{gid}</code></>}
+      {e.campaignName && e.campaignName !== p.name && <> · 네이버 이름 ‘{e.campaignName}’</>}
+      {p.customer_id && <> · <a className="underline" href={naverManageUrl(p.customer_id, gid ? 'adgroups' : 'campaigns', gid ?? cid)} target="_blank" rel="noreferrer" data-testid="ad-plan-naver-link">네이버에서 보기</a></>}
+      {from && <span className="block text-ink-3" data-testid="ad-plan-resumed">{from}</span>}
+    </p>
+  );
+}
+/** #499-2 후속(c) 네이버 반영 값 — 세팅안과 다른 값은 강조(네이버가 돌려주지 않은 칸은 '읽지 못함', 다름으로 세지 않음) */
+function ReadBackBox({ rb }: { rb: ReadBack }) {
+  const diff = rb.items.filter((x) => x.ok === false).length;
+  const unread = rb.items.filter((x) => x.naver === null).length;
+  return (
+    <details className="mt-1 rounded-input border border-line p-2 text-xs" open={diff > 0} data-testid="ad-plan-readback">
+      <summary className="cursor-pointer"><b>네이버 반영 값</b> <span className="text-ink-3">{fmtDateTime(rb.at)} 읽음</span> — {diff
+        ? <span className="font-medium text-amber-800" data-testid="ad-readback-diff">세팅안과 다른 값 {diff}개</span> : <span className="text-emerald-800" data-testid="ad-readback-diff">세팅안과 같음</span>}{unread ? ` · 읽지 못한 칸 ${unread}개` : ''}</summary>
+      <ul className="mt-1 space-y-1">{rb.items.map((x) => (
+        <li key={x.key} className="flex flex-wrap items-baseline gap-x-2" data-testid="ad-readback-item" data-ok={x.ok === null ? 'unknown' : String(x.ok)}>
+          <span className="w-32 shrink-0 text-ink-2">{x.label}</span>
+          <span className={cx(x.ok === false && 'font-medium text-amber-800', x.naver === null && 'text-ink-3')}>{x.naver ?? '읽지 못함'}</span>
+          {x.ok === true && <span role="img" aria-label="세팅안과 같음" className="self-center text-emerald-700"><Check className="size-3.5" aria-hidden /></span>}
+          {x.ok === false && <span className="rounded bg-amber-50 px-1 text-amber-800">다름 · 세팅안 {x.plan}</span>}
+          {x.note && <span className="basis-full text-ink-3">{x.note}</span>}
+        </li>))}</ul>
+      {rb.ads.length > 0 && <p className="mt-1 text-ink-2" data-testid="ad-readback-ads">소재 검수: {rb.ads.map((a) => `${a.label} ${a.inspect}`).join(' · ')}</p>}
+      {rb.history && <p className="mt-1 text-ink-2" data-testid="ad-readback-history">{rb.history}</p>}
+      {rb.orphans && <p className="mt-1 break-all text-ink-2" data-testid="ad-readback-orphans">{rb.orphans.length
+        ? `이 계정에 세팅안과 연결 안 된 빈 캠페인 ${rb.orphans.length}개: ${rb.orphans.map((o) => `${o.name}(${o.id})`).join(', ')} — 지우려면 대표 확인 뒤 네이버 화면에서`
+        : '세팅안과 연결 안 된 빈 캠페인 없음(최근 캠페인 10개 확인)'}</p>}
+    </details>
+  );
+}
 
 /**
  * V44 ① 광고 운영(네이버 검색광고 파워링크) — 세팅안 → [승인하고 시작](꺼진 상태로 생성) → [켜기](상한 검사) · 변경 기록·되돌리기.
@@ -107,6 +154,9 @@ export function AdOps() {
               <p className="mt-0.5 text-xs text-ink-2" data-testid="ad-plan-kw-line">키워드: {kwLabel(p)}</p>
               {p.plan.ads.map((a, k) => <p key={k} className="mt-0.5 text-xs"><b className="text-emerald-800">{a.headline}</b> {a.description} <span className="text-ink-3">{a.url}</span></p>)}
               <p className="mt-0.5 text-xs text-ink-2" data-testid="ad-plan-setup">광고 설정: {setupText(p.plan.setup, !!p.plan.test?.on)}</p>
+              {!!p.external?.campaignId && <NaverIds p={p} />}
+              {!!p.external?.readBack && <ReadBackBox rb={p.external.readBack as ReadBack} />}
+              {staleCreating(p) && <p className="mt-1 text-xs text-amber-800" data-testid="ad-plan-stale">만드는 중에 끊겼습니다({STALE_MIN}분 넘게 진행 없음) — [이어서 만들기]를 누르면 네이버에 만든 데까지 이어서 만듭니다.</p>}
               {p.issues.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-amber-800" data-testid="ad-plan-issues">{p.issues.map((x, k) => <li key={k}>검사: {x}</li>)}</ul>}
               {/* #499-2 권고는 시작을 막지 않음(연결 주소·광고형 문구·질문형 제목·제외 키워드) */}
               {!!p.advice?.length && ['draft', 'failed'].includes(p.status) && <ul className="mt-1 space-y-0.5 text-xs text-sky-900" data-testid="ad-plan-advice">{p.advice.map((x, k) => <li key={k}>권고: {x}</li>)}</ul>}
@@ -118,14 +168,17 @@ export function AdOps() {
               {data.canEdit && (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {(p.status === 'draft' || p.status === 'failed') && <Button size="sm" variant="secondary" onClick={() => setForm(p)} data-testid="ad-plan-edit">수정</Button>}
-                  {(p.status === 'draft' || p.status === 'failed') && <Button size="sm" disabled={!!p.issues.length || !data.cap || busy === p.id} data-testid="ad-plan-approve"
-                    onClick={() => confirm(`'${p.name}' 을(를) 네이버에 꺼진 상태로 만들까요? 켜기 전에는 광고비가 나가지 않습니다.`) && run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/approve`, { body: {} }), '네이버에 꺼진 상태로 만들었습니다')}>승인하고 시작</Button>}
+                  {(p.status === 'draft' || p.status === 'failed' || staleCreating(p)) && <Button size="sm" disabled={!!p.issues.length || !data.cap || busy === p.id} data-testid="ad-plan-approve"
+                    onClick={() => confirm(`'${p.name}' 을(를) 네이버에 꺼진 상태로 만들까요? 켜기 전에는 광고비가 나가지 않습니다.`) && run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/approve`, { body: {} }), '네이버에 꺼진 상태로 만들었습니다')}>{staleCreating(p) ? '이어서 만들기' : '승인하고 시작'}</Button>}
                   {(p.status === 'created' || p.status === 'paused') && <Button size="sm" disabled={busy === p.id} data-testid="ad-plan-enable"
                     onClick={() => confirm(`광고를 켭니다. 하루 최대 ${won(p.plan.dailyBudget)} 이 나갈 수 있습니다(이번 달 ${won(data.monthSpend)} / 상한 ${data.cap ? won(data.cap.monthlyCap) : '없음'}). 켤까요?`) && run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'enable' } }), '광고를 켰습니다')}>켜기</Button>}
                   {p.status === 'active' && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-pause" onClick={() => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'pause' } }), '광고를 껐습니다')}>끄기</Button>}
                   {/* 운영 10/19: 키워드 id 가 비어 있으면(생성 응답 파싱 실패) 네이버에서 다시 읽기 — 켜기·예산은 그대로 */}
                   {['created', 'active', 'paused'].includes(p.status) && !kwOk(p.external?.keywordIds) && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-sync"
                     onClick={() => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'sync' } }), '키워드 id 를 다시 읽었습니다')}>키워드 다시 읽기</Button>}
+                  {/* #499-2 후속(c) 읽기만 — 실패한 세팅안도 만든 캠페인이 있으면(남은 캠페인 확인) */}
+                  {['created', 'active', 'paused', 'failed'].includes(p.status) && !!p.external?.campaignId && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-readback-btn"
+                    onClick={() => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'readback' } }), '네이버에서 반영 값을 다시 읽었습니다')}>네이버 반영 값 다시 읽기</Button>}
                   {['created', 'active', 'paused'].includes(p.status) && <Button size="sm" variant="secondary" disabled={busy === p.id} onClick={() => setLocal({ p, mode: 'keywords' })} data-testid="ad-local-kw">동네 키워드 추가</Button>}
                   {['created', 'active', 'paused'].includes(p.status) && <Button size="sm" variant="secondary" disabled={busy === p.id} onClick={() => setLocal({ p, mode: 'region' })} data-testid="ad-local-region">광고 지역</Button>}
                   {['created', 'active', 'paused'].includes(p.status) && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-budget"
@@ -193,11 +246,12 @@ function PlanForm({ accounts, brands, budgetHint, edit, onClose, onDone }: { acc
     if (bad) { toast.error(bad); return; }
     setBusy(true);
     try {
-      const r = await api<{ issues: string[] }>(edit ? `/api/marketing/ad-ops/plans/${edit.id}` : '/api/marketing/ad-ops/plans', { method: edit ? 'PUT' : 'POST', body: { accountId: f.accountId, brandId: f.brandId || null, name: f.name, dailyBudget: Number(f.dailyBudget), bidAmt: Number(f.bidAmt), channelId: f.channelId,
+      const r = await api<{ issues: string[]; fixed?: number }>(edit ? `/api/marketing/ad-ops/plans/${edit.id}` : '/api/marketing/ad-ops/plans', { method: edit ? 'PUT' : 'POST', body: { accountId: f.accountId, brandId: f.brandId || null, name: f.name, dailyBudget: Number(f.dailyBudget), bidAmt: Number(f.bidAmt), channelId: f.channelId,
         keywords: splitKw(f.keywords), ads: f.ads,
         test: { on: f.test.on, days: Number(f.test.days) || 7, minImpressions: Number(f.test.min) || 300, afterBudget: f.test.after ? Number(f.test.after) : null },
         ...(f.local.center || f.local.areas.length || f.local.region.length ? { local: f.local } : {}), setup: { ...f.setup, negatives: negs } } });
-      r.issues.length ? toast.error(`저장했습니다 — 검사 ${r.issues.length}건을 고쳐야 시작할 수 있습니다`) : toast.ok('세팅안을 저장했습니다');
+      const fx = r.fixed ? ` — 소재 ${r.fixed}개의 가운뎃점·줄표를 네이버가 받는 글자로 바꿨습니다` : '';
+      r.issues.length ? toast.error(`저장했습니다 — 검사 ${r.issues.length}건을 고쳐야 시작할 수 있습니다${fx}`) : toast.ok(`세팅안을 저장했습니다${fx}`);
       onDone(); onClose();
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
@@ -212,7 +266,11 @@ function PlanForm({ accounts, brands, budgetHint, edit, onClose, onDone }: { acc
       <form onSubmit={save} className="grid gap-3 text-sm" data-testid="ad-plan-form">
         <Field label="광고 계정"><select className={inputCls} value={f.accountId} onChange={(e) => setF({ ...f, accountId: e.target.value, channelId: '' })}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></Field>
         {brands.length > 0 && <Field label="브랜드(예산 집행 단위)"><select className={inputCls} value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value })} aria-label="세팅안 브랜드" data-testid="plan-brand"><option value="">브랜드 없음</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>}
-        <Field label="캠페인 이름"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={60} data-testid="ad-plan-name" /></Field>
+        <Field label="캠페인 이름"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={60} data-testid="ad-plan-name" />
+          {/* #499-2 후속(a) 운영 10/24 code 3711: 네이버 이름 30자 — 광고그룹 = 이름 + ' 그룹' */}
+          <span className={cx('mt-1 block text-[11px]', len(f.name) > NAVER_NAME_MAX - 3 ? 'text-amber-800' : 'text-ink-3')} data-testid="ad-plan-name-len">{len(f.name) > NAVER_NAME_MAX - 3
+            ? `${len(f.name)}자 — 네이버 이름은 30자까지라 ${len(f.name) > NAVER_NAME_MAX ? `캠페인 '${naverName(f.name)}', ` : ''}광고그룹 '${groupName(f.name)}'(으)로 줄여 만듭니다`
+            : `${len(f.name)}/30자 · 광고그룹 이름은 뒤에 ' 그룹'을 붙여 만듭니다`}</span></Field>
         <div className="grid grid-cols-2 gap-2">
           <Field label="하루 예산(원)"><input className={inputCls} inputMode="numeric" value={f.dailyBudget} onChange={(e) => setF({ ...f, dailyBudget: e.target.value.replace(/\D/g, '') })} required data-testid="ad-plan-budget-input" /></Field>
           <Field label="기본 입찰가(원, 70~)"><input className={inputCls} inputMode="numeric" value={f.bidAmt} onChange={(e) => setF({ ...f, bidAmt: e.target.value.replace(/\D/g, '') })} required data-testid="ad-plan-bid" /></Field>
@@ -273,13 +331,13 @@ function PlanForm({ accounts, brands, budgetHint, edit, onClose, onDone }: { acc
         </details>
         {f.ads.map((a, k) => (
           <fieldset key={k} className="grid gap-2 rounded-input border border-line p-2"><legend className="px-1 text-xs text-ink-2">소재 {k + 1}</legend>
-            <input className={inputCls} value={a.headline} onChange={(e) => setAd(k, { headline: e.target.value })} placeholder={`제목(15자) ${len(a.headline)}/15`} aria-label={`소재 ${k + 1} 제목`} required data-testid="ad-plan-headline" />
-            <input className={inputCls} value={a.description} onChange={(e) => setAd(k, { description: e.target.value })} placeholder={`설명(45자) ${len(a.description)}/45`} aria-label={`소재 ${k + 1} 설명`} required data-testid="ad-plan-desc" />
+            <input className={inputCls} value={a.headline} onChange={(e) => setAd(k, { headline: e.target.value })} onBlur={(e) => setAd(k, { headline: fixAdText(e.target.value) })} placeholder={`제목(15자) ${len(a.headline)}/15`} aria-label={`소재 ${k + 1} 제목`} required data-testid="ad-plan-headline" />
+            <input className={inputCls} value={a.description} onChange={(e) => setAd(k, { description: e.target.value })} onBlur={(e) => setAd(k, { description: fixAdText(e.target.value) })} placeholder={`설명(45자) ${len(a.description)}/45`} aria-label={`소재 ${k + 1} 설명`} required data-testid="ad-plan-desc" />
             <input className={inputCls} value={a.url} onChange={(e) => setAd(k, { url: e.target.value })} aria-label={`소재 ${k + 1} 연결 주소`} required data-testid="ad-plan-url" />
             <span className={cx('text-[11px]', len(a.headline) > 15 || len(a.description) > 45 || badChars(a.headline + a.description) ? 'text-red-700' : 'text-ink-3')} data-testid="ad-plan-len">제목 {len(a.headline)}/15 · 설명 {len(a.description)}/45{badChars(a.headline + a.description) ? ` · 쓸 수 없는 문자 ${badChars(a.headline + a.description)}` : ''}</span>
           </fieldset>))}
         {f.ads.length < 3 && <Button type="button" size="sm" variant="secondary" className="justify-self-start" onClick={() => setF({ ...f, ads: [...f.ads, { headline: '', description: '', url: f.ads[0].url }] })}>소재 추가(3개까지)</Button>}
-        <p className="text-[11px] text-ink-3">문구 팁: 연결 주소는 서비스별 페이지로, 제목엔 소구점(+ 물음표 질문형 한 안), 설명엔 무엇을 주는지(무료 상담·진단 등) — 저장하면 광고형 점수와 권고를 보여 드립니다(시작은 막지 않음).</p>
+        <p className="text-[11px] text-ink-3">문구 팁: 연결 주소는 서비스별 페이지로, 제목엔 소구점(+ 물음표 질문형 한 안), 설명엔 무엇을 주는지(무료 상담·진단 등) — 저장하면 광고형 점수와 권고를 보여 드립니다(시작은 막지 않음). 가운뎃점(·)은 네이버가 받지 않아 쉼표(,)로, 긴 줄표(—)는 하이픈(-)으로 바꿔 저장합니다.</p>
         {/* 광고 최적화 1차 ① 3안 소액 테스트 */}
         <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" checked={f.test.on} onChange={(e) => setF({ ...f, test: { ...f.test, on: e.target.checked } })} data-testid="ad-plan-ab" />
           <span><b>3안 소액 테스트</b> — 소재 2~3개를 같은 예산으로 비교하고, 이긴 안이 나오면 [이긴 안에 집중]으로 진 안을 끄고 예산을 모읍니다.</span></label>

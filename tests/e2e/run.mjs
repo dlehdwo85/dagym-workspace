@@ -55,6 +55,7 @@ import { mktOps } from './mktOps.step.mjs';
 import { adAb } from './adAb.step.mjs';
 import { adLocal } from './adLocal.step.mjs';
 import { adSetup } from './adSetup.step.mjs';
+import { adReadback } from './adReadback.step.mjs';
 import { adLeads } from './adLeads.step.mjs';
 import { leadAds } from './leadAds.step.mjs';
 import { metaCapi } from './metaCapi.step.mjs';
@@ -2496,6 +2497,7 @@ await step('대표 20:00 운영실: AI 마케터 카드 반려·승인 → 제�
 await step('광고 최적화 1차 3안 소액 테스트: 판정 상자(이긴 안·진 안·서버 판정 문구) → [이긴 안에 집중](확인 창 → 진 안 끄기 + 예산) · 소재 끄기 · 변경 기록 · 새 세팅안 테스트 칸 · 절감액 수수료율 · 휴대폰 폭', () => adAb({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 최적화 1차 동네 타깃: 새 세팅안 동네 칸(중심·반경 → AI 동네 추천 → 검색량 → 고른 것 키워드에 넣기 · 광고 지역 충남) → 저장 → 카드 줄 · 켠 광고 [광고 지역]·[동네 키워드 추가] 보내는 값 · 변경 기록 · 휴대폰 폭', () => adLocal({ owner, ctx, sql, BASE, SHOTS }));
 await step('#499-2 파워링크 세팅안 보강: 광고 설정 칸(추천값·가중치·3안 테스트 동일 비중·제외 키워드) · 키워드 조합기(그룹 곱·빼도 됨·검색량·낮음도 함께) · 하루 예산 권장 → 저장(보내는 값) → 카드 설정 줄·권고 · 고치기 · 휴대폰 폭', () => adSetup({ owner, ctx, sql, BASE, SHOTS }));
+await step('#499-2 후속 파워링크 카드: 캠페인·광고그룹 id·네이버에서 보기 링크·실패 뒤 이어 씀 · 네이버 반영 값 상자(다름·읽지 못함·소재 검수·남은 빈 캠페인) · [다시 읽기] 보내는 값 · 끊긴 만드는 중 [이어서 만들기] · 이름 30자 안내 · 가운뎃점 → 쉼표 · 휴대폰 폭', () => adReadback({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 최적화 1차 통화 기반: 전화·문의 기준 키워드 점검(요약·끄기 제안·잘 됨) → 워크인 키워드 [끄기] 보내는 값 → 목표 전환당 비용 → 기간 7일 → 휴대폰 폭 → 전화 문의 기록에 광고 키워드', () => adLeads({ owner, ctx, sql, BASE, SHOTS }));
 await step('광고 2차 ① 리드 광고(메타) → 영업 리드: 광고 운영 리드 광고 상자(받는 중·웹후크·요약·이름 가림·첫 연락·재알림·광고별 리드당 비용) → 실패 [다시 처리] → 휴대폰 폭 → 연결 계정 받는 중 → 영업 리드 상세 리드 광고 상자·[전화] 첫 연락 기록', () => leadAds({ owner, ctx, sql, BASE, SHOTS }));
 await step('#499-3 리드 단계 → 메타 전환 API: 리드 광고 상자 안 설정(기본 꺼짐·보내는 것 안내·데이터 세트 숫자만·토큰 저장됨·단계 이름표) → 저장(보내는 값) → [시험 보내기] → 켜기 → [지금 보내기](형식 아닌 리드 ID 건너뜀) → 최근 기록 · 휴대폰 폭', () => metaCapi({ owner, ctx, sql, BASE, SHOTS }));

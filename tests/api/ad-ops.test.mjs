@@ -62,9 +62,11 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   const bad = await ctx.owner.ok('POST', '/api/marketing/ad-ops/plans', plan(acc.id, { name: '검사 걸림', ads: [{ headline: '무조건 효과 보장하는 가을 PT 특가', description: '설명', url: 'https://example.com' }] }));
   assert.equal(bad.issues.length >= 2, true, JSON.stringify(bad.issues));
   assert.equal((await ctx.staffA.client.req('POST', '/api/marketing/ad-ops/plans', plan(acc.id))).status, 403, '직원은 못 만듦');
-  // 네이버 허용 문자(운영 10/19 '·' 으로 400 1030) — 저장 때 바로 검사, [수정]으로 고치면 통과
+  // 네이버 허용 문자(운영 10/19 '·' 으로 400 1030) — #499-2 후속(d) 가운뎃점은 저장할 때 쉼표로 바꿈, 그 밖의 문자(이모지)는 저장 때 바로 검사하고 [수정]으로 고치면 통과
   const dot = await ctx.owner.ok('POST', '/api/marketing/ad-ops/plans', plan(acc.id, { name: '가운데점', ads: [{ headline: '가을 PT', description: '상담·체험 가능 😀', url: 'https://example.com' }] }));
-  assert.ok(dot.issues.some((x) => x.includes("'·'") && x.includes("'😀'")), JSON.stringify(dot.issues));
+  assert.equal(dot.fixed, 1, '가운뎃점을 바꾼 소재 수');
+  assert.ok(dot.issues.some((x) => x.includes("'😀'")) && !dot.issues.some((x) => x.includes("'·'")), JSON.stringify(dot.issues));
+  assert.equal((await sql`select plan from mkt_ad_plans where id = ${dot.id}`)[0].plan.ads[0].description, '상담,체험 가능 😀');
   const fixed = await ctx.owner.ok('PUT', `/api/marketing/ad-ops/plans/${dot.id}`, plan(acc.id, { name: '가운데점 고침', ads: [{ headline: '가을 PT', description: '상담, 체험 가능', url: 'https://example.com' }] }));
   assert.deepEqual(fixed.issues, []);
   assert.equal((await sql`select name from mkt_ad_plans where id = ${dot.id}`)[0].name, '가운데점 고침');
@@ -98,8 +100,10 @@ test('상한 필수·검사·꺼진 상태 생성·켜기/끄기/예산·되돌�
   assert.equal(ok.external.campaignId, fp.external.campaignId);
   const camp = (await sql`select after from mkt_ad_changes where plan_id = ${p.id} and kind = 'create' and status = 'failed'`)[0];
   assert.ok(camp.after.campaignId);
-  assert.equal(calls.find((c) => c.path === '/ncc/adgroups').body.adgroupType, 'WEB_SITE');
-  assert.equal(calls.find((c) => c.path === '/ncc/adgroups').body.userLock, true);
+  // #499-2 후속(b): 이어서 만들 때는 같은 이름 그룹이 이미 있는지 먼저 읽음(GET) — 없으면 만듦(POST)
+  assert.deepEqual(calls.filter((c) => c.path === '/ncc/adgroups').map((c) => [c.method, c.q.nccCampaignId ?? null]), [['GET', fp.external.campaignId], ['POST', null]]);
+  assert.equal(calls.find((c) => c.method === 'POST' && c.path === '/ncc/adgroups').body.adgroupType, 'WEB_SITE');
+  assert.equal(calls.find((c) => c.method === 'POST' && c.path === '/ncc/adgroups').body.userLock, true);
   assert.deepEqual(calls.find((c) => c.method === 'POST' && c.path === '/ncc/keywords').body.map((k) => k.keyword), ['동네헬스장', 'PT가격'], '네이버 키워드는 띄어쓰기 없이');
   assert.deepEqual(calls.find((c) => c.method === 'POST' && c.path === '/ncc/keywords').body.map((k) => [k.useGroupBidAmt, k.bidAmt]), [[false, 300], [false, 300]], '키워드마다 세팅안 입찰가(그룹 기본 입찰가에 기대지 않음)');
   assert.deepEqual(ok.external.keywordIds, ['kw-1', 'kw-2'], '생성 응답에 id 가 없어도 그룹에서 다시 읽음');

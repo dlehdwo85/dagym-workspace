@@ -859,6 +859,9 @@ const DOC_SYSTEM = `당신은 사내 서비스 "워크인"의 문서 담당 AI �
 - 답은 한국어로 짧게.`;
 
 export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, providerArg?: AiProvider, signal?: AbortSignal, onEvent?: (e: ChatEvent) => void) {
+  // #497 R44 로컬 10/24: 첫 글자 시각 기록(서버 기준, 요청 받은 때부터) — first = 처음 보낸 글자, answer = 마지막 도구 단계 뒤 답 첫 글자(화면에 남는 답), chunks = 그 답을 몇 조각으로 보냈는지
+  const t0 = Date.now(); const tm = { first: 0, answer: 0, chunks: 0 };
+  const onText = onEvent ? (delta: string) => { const now = Date.now(); if (!tm.first) tm.first = now; if (!tm.answer) tm.answer = now; tm.chunks++; onEvent({ type: 'text', delta }); } : undefined;
   // 로컬 10/20(심사): 체험 계정도 대화는 됨(체험 조직 한도 안) — 제안 확인·자료로 채우기 등 바깥에 영향 주는 것은 그대로 막음(denyDemo)
   if (!aiEnabled()) throw notFound();
   await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use'); // V13 메뉴 권한
@@ -937,7 +940,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   for (let step = 0; step < MAX_STEPS; step++) {
     if (signal?.aborted) break;
     tools = pick(); // more_tools 를 부르면 다음 단계부터 모든 도구
-    const r = await provider.chat({ system, messages, tools, signal, ...(onEvent ? { onText: (delta: string) => onEvent({ type: 'text', delta }) } : {}) }).catch((e: any) => {
+    const r = await provider.chat({ system, messages, tools, signal, ...(onText ? { onText } : {}) }).catch((e: any) => {
       if (signal?.aborted) return null; // 부록 A2: 사용자가 멈춤
       if (e instanceof HttpError) throw e; // V23-1: 크레딧 부족·요청 한도·일시 장애 문구
       throw new HttpError(502, 'ai_unavailable', `AI 서버 응답 오류${e?.status ? ` (${e.status})` : ''}. 잠시 후 다시 시도하세요.`);
@@ -955,6 +958,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     messages.push({ role: 'assistant', content: r.content as never });
     const uses = r.content.filter((b): b is Extract<typeof b, { type: 'tool_use' }> => b.type === 'tool_use');
     onEvent?.({ type: 'tools', names: uses.map((t) => t.name) });
+    tm.answer = 0; tm.chunks = 0; // 도구 전에 쓴 말은 화면에서 지워짐 — 답 첫 글자는 다음 단계부터
     const results = await Promise.all(uses.map(async (t) => {
       steps.push(t.name);
       try {
@@ -974,12 +978,13 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     await audit(sql, u.id, 'ai.chat_stopped', null, null, { threadId, steps }, null);
     return { reply: '', proposals: [], tools: steps, threadId, stopped: true };
   }
-  await audit(sql, u.id, 'ai.chat', i.taskId ? 'task' : null, i.taskId ?? null, { tools: steps, proposals: c.proposals.map((p) => p.id), threadId }, null);
+  const timing = { firstMs: tm.first ? tm.first - t0 : null, answerMs: tm.answer ? tm.answer - t0 : null, totalMs: Date.now() - t0, chunks: tm.chunks };
+  await audit(sql, u.id, 'ai.chat', i.taskId ? 'task' : null, i.taskId ?? null, { tools: steps, proposals: c.proposals.map((p) => p.id), threadId, timing }, null);
   await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: reply, proposalIds: c.proposals.map((p) => p.id), docJobIds: c.docJobs?.map((j) => j.id), cost: turnCost, inTok, outTok });
   if (c.confidential) await sql`update ai_threads set confidential = true where id = ${threadId}`; // 사용 내역에서 기밀 권한 없는 사람에게 내용 가림
   await T.maybeSummarize(u, threadId);
   const budget = await G.userBudgetAlerts(u).catch(() => null); // 80%·100% 알림
-  return { reply, proposals: c.proposals, tools: steps, threadId, costKrw: Math.round(turnCost * usdKrw()), budget, ...(kept.length ? { kept } : {}), ...(c.docJobs?.length ? { docJobs: c.docJobs } : {}) };
+  return { reply, proposals: c.proposals, tools: steps, threadId, costKrw: Math.round(turnCost * usdKrw()), budget, timing, ...(kept.length ? { kept } : {}), ...(c.docJobs?.length ? { docJobs: c.docJobs } : {}) };
 }
 
 // ---------------- 제안 실행 (사람이 [확인]) ----------------

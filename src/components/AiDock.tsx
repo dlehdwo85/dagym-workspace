@@ -7,8 +7,8 @@ import { AttachChips, askFor, useAiAttach } from './aiAttach';
 import { DocJobCard } from '@/components/DocJobCard';
 import { VoiceButton } from './voice';
 import { dockHideCls, useDockHide } from './useDockHide';
-import { AiBudgetBar, costLine, type Budget } from './AiBudget';
-import { ChatComposer, DoneSummary, LiveAnswer, MsgTools, useAiConversation, type ChatMsg } from './aiChat';
+import { AiBudgetBar, type Budget } from './AiBudget';
+import { ChatComposer, DoneSummary, LiveAnswer, MsgTools, ReplyMeta, useAiConversation, type ChatMsg } from './aiChat';
 import { AiText } from './AiText';
 import { AI_ACCEPT } from './libraryUpload';
 import { DropZone } from './upload';
@@ -155,7 +155,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
                   {m.role === 'assistant' && <DoneSummary proposals={m.proposals as any} />}
                   {m.docJobs?.map((id) => <DocJobCard key={id} id={id} onRefine={(t) => { setText(t); inputRef.current?.focus(); }} />)}
                   {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
-                  {m.role === 'assistant' && costLine(m.costKrw) && <span className="mt-0.5 text-[10.5px] text-ink-3" data-testid="ai-cost">{costLine(m.costKrw)}</span>}
+                  <ReplyMeta m={m} />
                   </>}
                 </div>
               ))}

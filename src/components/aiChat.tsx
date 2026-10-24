@@ -4,6 +4,7 @@ import { Copy, Loader2, Pencil, RotateCw, Send, Square } from 'lucide-react';
 import Link from 'next/link';
 import { apiStream } from './client';
 import { AiText } from './AiText';
+import { costLine } from './AiBudget';
 import { Button, cx, inputCls, toast } from './ui';
 
 /**
@@ -13,7 +14,27 @@ import { Button, cx, inputCls, toast } from './ui';
  * A3 마지막 내 말 [수정]·AI 답 [다시 답하기]·모든 말 [복사]
  * #497 R44 답을 글자 단위로 이어서 보여 준다(서버 SSE) — 도구를 쓰는 동안은 무엇을 하는지 한 줄, 끝나면 정식 답으로 바꾼다
  */
-export type ChatMsg = { role: 'user' | 'assistant'; text: string; files?: string[]; proposals?: any[]; error?: boolean; blocked?: boolean; stopped?: boolean; note?: boolean; docJobs?: string[]; costKrw?: number };
+export type ChatMsg = { role: 'user' | 'assistant'; text: string; files?: string[]; proposals?: any[]; error?: boolean; blocked?: boolean; stopped?: boolean; note?: boolean; docJobs?: string[]; costKrw?: number; timing?: ReplyTiming };
+/**
+ * #497 R44 로컬 10/24: 답이 언제 보이기 시작했는지(화면 기준, [보내기] 누른 때부터) — firstMs = 마지막 도구 단계 뒤 답 첫 글자, chunks = 그 답이 몇 조각으로 왔는지
+ * (1조각이면 한꺼번에 온 것). server = 서버가 잰 같은 값(요청 받은 때부터)
+ */
+export type ReplyTiming = { firstMs: number | null; doneMs: number; chunks: number; server?: { firstMs: number | null; answerMs: number | null; totalMs: number; chunks: number } | null };
+const sec = (ms: number) => `${(ms / 1000).toFixed(1)}초`;
+export const timingLine = (t?: ReplyTiming) => (!t ? null : `${t.firstMs !== null ? `첫 글자 ${sec(t.firstMs)} · ` : ''}끝 ${sec(t.doneMs)}`);
+/** 답 아래 작은 줄: 이번 요청 비용 · 첫 글자·끝 시각(화면·패널 공통) */
+export function ReplyMeta({ m }: { m: ChatMsg }) {
+  const cost = m.role === 'assistant' ? costLine(m.costKrw) : null; const t = m.role === 'assistant' ? timingLine(m.timing) : null;
+  if (!cost && !t) return null;
+  const sv = m.timing?.server;
+  return (
+    <span className="mt-0.5 text-[10.5px] text-ink-3">
+      {cost && <span data-testid="ai-cost">{cost}</span>}{cost && t ? ' · ' : ''}
+      {t && <span data-testid="ai-timing" data-first-ms={m.timing?.firstMs ?? ''} data-done-ms={m.timing?.doneMs} data-chunks={m.timing?.chunks}
+        title={`글자 조각 ${m.timing?.chunks}개${sv ? ` · 서버 기준 답 첫 글자 ${sv.answerMs !== null ? sec(sv.answerMs) : '-'} · 끝 ${sec(sv.totalMs)} · 조각 ${sv.chunks}개` : ''}`}>{t}</span>}
+    </span>
+  );
+}
 /** 쓰는 중인 답: 지금까지 온 글자 · 도구 단계면 무엇을 하는지 */
 export type LiveReply = { text: string; status?: string };
 const TOOL_LABEL: [RegExp, string][] = [[/^propose_|^draft_/, '제안 만드는 중…'], [/run_file_task|template/, '문서 준비 중…'], [/^web_|fetch_page/, '웹에서 찾는 중…'],
@@ -40,19 +61,21 @@ export function useAiConversation<M extends ChatMsg>(opts: {
     setMsgs((m) => [...m, { role: 'user', text, files: shownFiles ?? (files.length ? files.map((f) => f.name) : undefined) } as M]);
     setBusy(true); setLive({ text: '' });
     const ctl = new AbortController(); ac.current = ctl;
+    const t0 = performance.now(); let first: number | null = null, chunks = 0; // #497 R44 화면 기준 첫 글자 시각
     try {
       const r = await apiStream('/api/ai/chat', { ...o.current.body(text, files.map((f) => f.id)), ...(replaceText !== null ? { replaceLast: true, replaceText } : {}), stream: true }, {
         signal: ctl.signal,
         onEvent: (e) => {
           if (ctl.signal.aborted) return;
-          if (e.type === 'text') setLive((l) => ({ text: (l?.text ?? '') + e.delta }));
-          else if (e.type === 'tools') setLive({ text: '', status: toolLabel(e.names ?? []) }); // 도구 전에 쓴 말("확인해 볼게요")은 지우고 하는 일 표시
+          if (e.type === 'text') { if (first === null && e.delta) first = performance.now() - t0; chunks++; setLive((l) => ({ text: (l?.text ?? '') + e.delta })); }
+          else if (e.type === 'tools') { first = null; chunks = 0; setLive({ text: '', status: toolLabel(e.names ?? []) }); } // 도구 전에 쓴 말("확인해 볼게요")은 지우고 하는 일 표시
         },
       });
       if (ctl.signal.aborted) return;
       o.current.onReply?.(r);
       if (r.stopped) return;
-      setMsgs((m) => [...m, ...(r.kept?.length ? [{ role: 'assistant', text: `이전 요청으로 이미 처리됨: ${r.kept.join(' · ')}`, note: true } as M] : []), o.current.toAssistant(r)]);
+      const timing: ReplyTiming = { firstMs: first === null ? null : Math.round(first), doneMs: Math.round(performance.now() - t0), chunks, server: r.timing ?? null };
+      setMsgs((m) => [...m, ...(r.kept?.length ? [{ role: 'assistant', text: `이전 요청으로 이미 처리됨: ${r.kept.join(' · ')}`, note: true } as M] : []), { ...o.current.toAssistant(r), ...(r.blocked ? {} : { timing }) }]);
     } catch (e: any) {
       if (ctl.signal.aborted) return;
       setMsgs((m) => [...m, { role: 'assistant', text: e.message, error: true } as M]);

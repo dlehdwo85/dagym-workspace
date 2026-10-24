@@ -45,6 +45,11 @@ describe('AI 비서 스트리밍', () => {
     assert.equal(done.reply, text);
     assert.equal(done.threadId, events[0].threadId);
     assert.ok(done.at - deltas[0].at >= 150, '첫 조각이 끝보다 먼저 옴(한 번에 오지 않음)');
+    // 로컬 10/24 첫 글자 시각 기록: 답 첫 글자·끝·조각 수(서버 기준) — 끝 이벤트와 감사 기록에
+    const tm = done.timing;
+    assert.ok(tm && tm.answerMs > 0 && tm.firstMs === tm.answerMs && tm.totalMs - tm.answerMs >= 150 && tm.chunks === deltas.length, JSON.stringify(tm));
+    const [lg] = await sql`select detail from audit_logs where action = 'ai.chat' and detail->>'threadId' = ${done.threadId}`;
+    assert.deepEqual(lg.detail.timing, tm);
     const [m] = await sql`select text from ai_messages where thread_id = ${done.threadId} and role = 'assistant'`;
     assert.equal(m.text, text);
     assert.equal((await fakeState()).anthropic.slice(n0)[0].body.stream, true);
@@ -62,6 +67,9 @@ describe('AI 비서 스트리밍', () => {
     assert.equal(done.reply, '업무를 준비했습니다. 확인을 눌러 주세요.');
     assert.equal(done.proposals.length, 1);
     assert.deepEqual(done.tools, ['search_tasks', 'propose_create_task']);
+    // 첫 글자('찾아볼게요.')는 도구 전 — 답 첫 글자는 마지막 도구 단계 뒤부터, 조각 수도 그 답만
+    assert.ok(done.timing.firstMs < done.timing.answerMs, JSON.stringify(done.timing));
+    assert.equal(done.timing.chunks, events.filter((e, k) => e.type === 'text' && k > kinds.lastIndexOf('tools')).length);
   });
 
   test('사전 점검 오류(빈 질문)는 지금처럼 HTTP 오류 JSON — 스트림을 열지 않음', async () => {
@@ -86,5 +94,6 @@ describe('AI 비서 스트리밍', () => {
     await queue([say('한 번에 답')]);
     const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '한 번에 답해줘' });
     assert.equal(r.reply, '한 번에 답');
+    assert.deepEqual([r.timing.firstMs, r.timing.answerMs, r.timing.chunks], [null, null, 0], '스트리밍이 아니면 끝 시각만');
   });
 });
