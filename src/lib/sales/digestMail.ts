@@ -1,9 +1,9 @@
 // #510(대표 10/23 17:30 "메일 내용 정리 수준은 21라인을 레퍼런스"): 당일 공고 메일 — HTML 표(메일 앱 호환: 인라인 스타일·폭 680px·휴대폰은 한 칸으로 줄바꿈) + 같은 내용의 텍스트판.
-// 머리 요약(건수·[오늘 공고 전체 보기]·[맞춤 설정]) → 구역 ★ 즉시 검토 → 검토 → 마감 임박 → 정정·취소 → 참고(건수 + [보기]만) → 걸러진 공고.
+// 머리 요약(건수·[오늘 공고 전체 보기]·[맞춤 설정]) → 구역 ★ 즉시 검토 → 검토 → 마감 임박 → 정정·취소 → 결과(낙찰·유찰, 새 공고 수 밖) → 참고(건수 + [보기]만) → 걸러진 공고.
 // 줄 = 1행 배지·공고명(워크인 상세)·사업 배지 / 2행 발주처·지역·금액·업종 / 3행 참가신청마감·입찰마감 D-day·개찰·현장설명·첨부·출처 공고번호·[원문]. 번호는 구역마다 1부터, 값이 없으면 칸째 숨김.
 import type { DigestItem, DigestSection } from './digest';
 
-type Digest = { day: string; items: DigestItem[]; counts: { total: number; new: number; now: number; review: number; soon: number; ref: number; amend: number; cancel: number; merged: number; skipped: Record<string, number> } };
+type Digest = { day: string; items: DigestItem[]; counts: { total: number; new: number; now: number; review: number; soon: number; result?: number; ref: number; amend: number; cancel: number; merged: number; skipped: Record<string, number> } };
 
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
 /** 'YYYY-MM-DD' → '10/24(금)' */
@@ -26,6 +26,7 @@ export const SECTIONS: { key: Exclude<DigestSection, 'ref'>; title: string; sub:
   { key: 'review', title: '검토', sub: '관련 사업이지만 공사·장비·조건을 확인할 공고' },
   { key: 'soon', title: '마감 임박', sub: '이미 받은 공고 중 D-3 이내 · 진행 기록 없음' },
   { key: 'change', title: '정정·취소', sub: '관련 사업이거나 진행 기록이 있는 공고만' },
+  { key: 'result', title: '결과(낙찰·유찰)', sub: '영업 기회가 아닌 결과 — 새 공고 수에는 넣지 않음' }, // 로컬 10/24 12:20(#537 후속·#530)
 ];
 const of = (d: Digest, s: DigestSection) => d.items.filter((i) => i.section === s);
 /** 로컬 10/23 22:45: 마감 임박은 10건까지 보이고 나머지는 '나머지 n건 — [보기]'(입찰 화면 진행 중·마감 임박순) */
@@ -34,10 +35,10 @@ const cap = (s: DigestSection, list: DigestItem[]) => (s === 'soon' ? list.slice
 
 /** 제목: '[다짐·하이링크 영업실] 10/24(금) 오늘 입찰 9건 — 즉시 검토 3 · 마감 임박 2' (0인 칸은 뺌) */
 export function digestSubject(fromName: string, d: Digest) {
-  const tail = [d.counts.now ? `즉시 검토 ${d.counts.now}` : null, d.counts.soon ? `마감 임박 ${d.counts.soon}` : null].filter(Boolean).join(' · ');
+  const tail = [d.counts.now ? `즉시 검토 ${d.counts.now}` : null, d.counts.soon ? `마감 임박 ${d.counts.soon}` : null, d.counts.result ? `결과 ${d.counts.result}` : null].filter(Boolean).join(' · ');
   return `[${fromName}] ${mdw(d.day)} 오늘 입찰 ${d.counts.total}건${tail ? ` — ${tail}` : ''}`;
 }
-const summary = (d: Digest) => `새 공고 ${d.counts.new}(즉시 검토 ${d.counts.now} · 검토 ${d.counts.review}) · 정정 ${d.counts.amend} · 취소 ${d.counts.cancel} · 마감 임박(D-3 이내) ${d.counts.soon}`;
+const summary = (d: Digest) => `새 공고 ${d.counts.new}(즉시 검토 ${d.counts.now} · 검토 ${d.counts.review}) · 정정 ${d.counts.amend} · 취소 ${d.counts.cancel} · 마감 임박(D-3 이내) ${d.counts.soon}${d.counts.result ? ` · 결과(낙찰·유찰) ${d.counts.result}` : ''}`;
 /** 걸러진 공고: 업종 무관·제외어·마감 지남 먼저 */
 const skippedLine = (d: Digest) => {
   const order = ['업종 무관', '제외어', '마감 지남']; const e = Object.entries(d.counts.skipped).filter(([, v]) => v > 0).sort(([a], [b]) => (order.indexOf(a) + 1 || 9) - (order.indexOf(b) + 1 || 9));
@@ -45,7 +46,8 @@ const skippedLine = (d: Digest) => {
 };
 /** 2·3행 조각(글자) — HTML 은 아래에서 감쌈 */
 function parts(i: DigestItem, day: string) {
-  const l2 = [i.issuer, i.region, i.amount].filter((x): x is string => !!x && x.trim() !== '' && x.trim() !== '-');
+  const l2 = [i.result, i.issuer, i.region, i.amount].filter((x): x is string => !!x && x.trim() !== '' && x.trim() !== '-');
+  if (i.section === 'result') return { l2, l3: [i.openingAt ? `개찰 ${whenLabel(i.openingAt)}` : null, [i.source, i.noticeNo].filter(Boolean).join(' ') || null].filter((x): x is string => !!x) }; // 결과는 지난 마감·참가신청 대신 개찰·출처만
   const l3 = [i.participationAt ? `참가신청마감 ${whenLabel(i.participationAt)}` : null, i.deadlineAt ? `입찰마감 ${whenLabel(i.deadlineAt)}` : null, i.openingAt ? `개찰 ${whenLabel(i.openingAt)}` : null,
     i.briefingAt ? `현장설명 ${whenLabel(i.briefingAt)}` : null, i.attachments ? `첨부 ${i.attachments}` : null, i.bidSystem ? `투찰 ${i.bidSystem}` : null,
     [i.source, i.noticeNo].filter(Boolean).join(' ') || null, i.posted && i.posted < day ? `공고일 ${mdw(i.posted)}` : null, i.late ? `지난 메일 뒤 ${seenLabel(i.seenAt)} 수집` : null].filter((x): x is string => !!x);

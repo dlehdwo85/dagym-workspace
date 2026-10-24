@@ -50,6 +50,8 @@ export function matchFit(...texts: (string | null | undefined)[]): FitResult {
   return { fit, matched: [...d, ...h], direct: !!fit && direct };
 }
 
+/** 로컬 10/24 12:20(#537 후속): 결과(낙찰·유찰) 줄 — 영업 기회가 아니라 결과. 오늘 새 공고·새 공고 수에서 빼고 '결과' 묶음으로(당일 메일·영업기회 오늘 탭·영업 홈 같은 기준) */
+export const isAwardResult = (r: any) => /낙찰|유찰/.test(String(r?.current_status ?? '')) || ['winner_name', 'award_company', 'successful_bidder'].some((k) => String(r?.[k] ?? '').trim() !== '');
 /** 공고 상태: 취소 → 취소, 낙찰자 있음 → 낙찰, 사전규격·발주계획 → 예정, 마감 지남 → 마감, 3일 이내 → 마감임박, 그 외 진행중 */
 export function noticeStatus(state: string | null, deadlineAt: string | null, now: Date, opt: { winner?: string | null; sourceType?: string } = {}): string {
   if (state && /취소/.test(state)) return '취소';

@@ -149,7 +149,10 @@ test('맞춤 설정(검색어·제외어·지역) → 당일 다이제스트(새
   assert.ok(titles.some((t) => t.includes('커뮤니티 피트니스센터')), '적합 공고'); assert.ok(titles.some((t) => t.includes('행복주택')), '관심 검색어로 통과(LH)');
   assert.ok(!titles.some((t) => t.includes('사전규격')), '제외어'); assert.ok(!titles.some((t) => t.includes('승강기')), '비관련');
   assert.ok(pv.counts.skipped['업종 무관'] >= 1, JSON.stringify(pv.counts));
-  const first = pv.items[0]; assert.ok(first.dday != null && first.url && first.source, JSON.stringify(first));
+  // 로컬 10/24 12:20(#537 후속): 앞 시험에서 낙찰이 붙은 나라장터 공고(하이링크)는 새 공고가 아니라 '결과' 구역 — 낙찰 줄이 다른 구역에 섞이지 않음
+  const won = pv.items.find((i) => i.section === 'result' && /^낙찰 하이링크/.test(i.result ?? ''));
+  assert.ok(won && won.dday != null && won.url && won.source, JSON.stringify(pv.items.map((i) => [i.section, i.title, i.result])));
+  assert.ok(!pv.items.some((i) => i.section !== 'result' && i.result), '결과 줄은 결과 구역에만');
   // 취소 공고 — 오늘 바뀐 건은 별도
   await sql`update sales_src_rows set row = row || ${sql.json({ current_status: '취소', notice_kind: 'cancel', updated_at: new Date().toISOString() })}::jsonb where tbl = 'procurement_notices' and row->>'source_external_id' = 'LH-1'`;
   const sent = await ctx.owner.ok('POST', '/api/sales/digest/send', {});

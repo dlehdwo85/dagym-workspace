@@ -72,3 +72,23 @@ test('#537 입찰 마감 임박(3일) 탭 · 앱 하단 영업기회 배지 = �
     on conflict (tenant, day) do update set counts = excluded.counts`;
   assert.deepEqual((await ctx.owner.ok('GET', '/api/spaces')).summary.sales, { text: '오늘 새 공고 3건', badge: 3 });
 });
+
+test('#537 후속(로컬 10/24 12:20): 결과(낙찰·유찰)는 오늘 새 공고에서 빼고 아래 결과 묶음 · 홈 수도 빼고 · 당일 메일은 결과 구역(새 공고 수 밖)', async () => {
+  await ins(31, { source_type: 'g2b_bid', source_external_id: 'R26BK00543031-000', title: '시험 과학기술원 헬스기구 구매', issuer: '시험 과학기술원', current_status: '낙찰', winner_name: '에스에이치홀딩스', winner_amount: 123000000, deadline_at: at(plus(-5), '10:00') });
+  await ins(32, { source_type: 'kapt_bid', source_external_id: 'K543-32', title: '[시험] 수영장 위탁운영', issuer: '시험 단지', current_status: '유찰', deadline_at: at(plus(-2), '10:00') });
+  const t = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today');
+  const titles = t.items.map((i) => i.title);
+  assert.ok(titles.includes('시험시 체육센터 헬스장 위탁운영 용역'), '진행 중 새 공고는 그대로');
+  assert.ok(!titles.includes('시험 과학기술원 헬스기구 구매') && !titles.includes('[시험] 수영장 위탁운영'), `오늘 새 공고에서 결과 뺌: ${titles.join(' / ')}`);
+  assert.deepEqual(t.results.map((i) => i.title).sort(), ['[시험] 수영장 위탁운영', '시험 과학기술원 헬스기구 구매'].sort(), '결과 묶음');
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=summary')).today.newNotices, t.items.length, '홈 오늘 새 공고 수 = 오늘 탭(결과 빼고)');
+  assert.ok((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.some((i) => i.title === '시험 과학기술원 헬스기구 구매'), '관련 전체에는 그대로');
+  const html = (await ctx.owner.req('GET', '/api/sales/digest?preview=html')).body;
+  assert.match(html, /data-digest-section="result"[\s\S]*결과\(낙찰·유찰\)[\s\S]*낙찰 에스에이치홀딩스 · 낙찰금액 1\.2억/);
+  assert.match(html, /결과\(낙찰·유찰\) 2/, '머리 요약에 결과 건수(새 공고 수와 따로)');
+  const items = [...html.matchAll(/data-digest-item="(\w+)"[\s\S]*?<a href="[^"]*"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(items.filter(([, ti]) => /과학기술원|수영장 위탁운영/.test(ti)).map(([s]) => s), ['result', 'result'], '결과 줄은 결과 구역에만');
+  const text = (await ctx.owner.req('GET', '/api/sales/digest?preview=text')).body;
+  assert.match(text, /■ 결과\(낙찰·유찰\) \(2\)/);
+  assert.doesNotMatch(text, /입찰마감[^\n]*D--/, '지난 마감에 D-day 없음');
+});
