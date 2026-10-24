@@ -48,6 +48,8 @@ const FIELD_LABEL: Record<string, string> = {
 /** 업무 상세. 전체 화면(/tasks/:id)과 목록 옆 오른쪽 패널(inPanel) 공용 */
 export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () => void; inPanel?: boolean }) {
   const router = useRouter();
+  // #242(대표 10/24 '창 닫기·돌아가기를 누르면 다른 화면으로 넘어가지 않게'): 전체 화면 닫기 = 직전 화면(앱 안에서 옮겨 왔으면 뒤로가기), 새 탭·링크로 바로 연 경우만 업무 목록
+  const closePage = () => { if (((window as any).__wosNav ?? 0) > 1 && window.history.length > 1) router.back(); else router.push('/tasks'); };
   const { user, dir, features, menus } = useSession();
   const [mailDraft, setMailDraft] = useState<AssistDraft | null>(null); // V28-1 업무 AI 비서 초안 → 시안 창
   const { data, error, loading, reload, setData } = useApi<any>(`/api/tasks/${id}`);
@@ -220,7 +222,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       toast.ok(batchAll ? `${t0.batch.total}건을 삭제했습니다` : '삭제했습니다 — 휴지통에서 30일 동안 되살릴 수 있습니다', batchAll ? undefined : {
         label: '되돌리기', run: async () => { try { await api(`/api/tasks/${id}/restore`, { body: {} }); toast.ok('되살렸습니다'); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } },
       });
-      broadcastRefresh(); if (onClose) onClose(); else router.push('/tasks');
+      broadcastRefresh(); if (onClose) onClose(); else closePage();
     } catch (e: any) { toast.error(e.message); }
   }
   async function saveTemplate() {
@@ -391,6 +393,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           )}
         </div>
         {inPanel && <IconButton label="패널 닫기" onClick={onClose}><X /></IconButton>}
+        {!inPanel && <IconButton label="닫기" data-testid="task-page-close" onClick={closePage}><X /></IconButton>}
       </div>
 
       <div className={cx('space-y-6 px-5 py-5', !inPanel && 'rounded-b-card border border-t-0 border-line bg-white')}>

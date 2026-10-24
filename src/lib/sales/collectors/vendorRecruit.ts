@@ -114,13 +114,13 @@ export const vendorRecruitWatch: Collector = {
     const pages = await watchPages(); if (!pages.length) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: '감시 페이지 목록이 비어 있습니다(app_settings sales_vendor_watch_pages)', providerMode: 'web_scrape' };
     const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const errors: string[] = []; const items: Record<string, unknown>[] = [];
     const state = await loadState(); const today = kstToday(); const checked: string[] = [];
-    let posts = 0, moved = 0, hidden = 0, cleared = 0, changed = 0, baseline = 0; const resting: string[] = [];
+    let posts = 0, moved = 0, hidden = 0, cleared = 0, changed = 0, baseline = 0; const resting: string[] = []; const failed: string[] = []; // 로컬 10/24 19:20: 못 읽은 곳 이름을 요약에
     for (const p of pages) {
       if (left() < 6000) { errors.push(`시간 한도 근접 — ${p.company} 부터는 다음 실행에서`); break; }
       const st = state[p.url];
       if (st?.restUntil && st.restUntil > new Date().toISOString()) { resting.push(`${p.company}(${kstMd(st.restUntil)}까지)`); continue; }
       const fail = (msg: string) => { const n = (st?.fails ?? 0) + 1; const rest = n >= FAIL_REST ? new Date(Date.now() + REST_DAYS * 864e5).toISOString() : null;
-        state[p.url] = { ...st, fails: n, restUntil: rest }; errors.push(`${p.company}: ${msg}${rest ? ` — ${n}번 연속 실패라 ${REST_DAYS}일 쉬고 다시 시도` : ''}`); };
+        state[p.url] = { ...st, fails: n, restUntil: rest }; failed.push(p.company); errors.push(`${p.company}: ${msg}${rest ? ` — ${n}번 연속 실패라 ${REST_DAYS}일 쉬고 다시 시도` : ''}`); };
       try { const res = await ctx.fetchImpl(p.url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' }, signal: AbortSignal.timeout(Math.min(10000, left() - 2000)) }); if (!res.ok) { fail(`HTTP ${res.status}`); continue; }
         const { text } = decodeKoreanText(new Uint8Array(await res.arrayBuffer()));
         const page = parseRecruitPage(text, p.url, today); const fresh = page.posts.map((r) => ({ ...r, ext: `${h8(p.company)}-${h8(r.title)}` }));
@@ -133,6 +133,6 @@ export const vendorRecruitWatch: Collector = {
     await markChecked(checked); await saveState(state);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + errors.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
       summary: `감시 ${pages.length}곳 · 모집 글 ${posts}건(최근 30일·게시일 있는 글) · ${PAGE_CHANGED} ${changed}` + (baseline ? `(처음 본 페이지 ${baseline}곳은 기준만 저장)` : '') + ` · 신규 ${r.inserted} · 변화없음 ${r.unchanged}`
-        + (moved || hidden || cleared ? ` · 옛 줄 정리: 제목 고침 ${moved} · 숨김 ${hidden}${cleared ? ` · 게시일 지움 ${cleared}` : ''}` : '') + (resting.length ? ` · 쉬는 페이지 ${resting.length}: ${resting.join(', ')}` : '') };
+        + (moved || hidden || cleared ? ` · 옛 줄 정리: 제목 고침 ${moved} · 숨김 ${hidden}${cleared ? ` · 게시일 지움 ${cleared}` : ''}` : '') + (failed.length ? ` · 못 읽은 곳 ${failed.length}: ${failed.join(', ')}` : '') + (resting.length ? ` · 쉬는 페이지 ${resting.length}: ${resting.join(', ')}` : '') };
   },
 };

@@ -154,6 +154,12 @@ export async function upsertKaptVendor(r: Record<string, unknown>): Promise<{ re
   await patchRows('kapt_vendor_selection', [{ id: prev.src_id, patch: { ...patch, last_seen_at: t, last_seen_date: d, updated_at: t } }]);
   return { result: 'update', id: prev.src_id, changeSummary: `변경: ${changed.join(', ')}` };
 }
+/** 낙찰 업체 이름을 이미 아는 사업자선정 결과(다시 묻지 않게) */
+export async function knownKaptVendors(exts: string[]): Promise<Set<string>> {
+  if (!exts.length) return new Set();
+  const rows = await db()<{ ext: string }[]>`select row->>'source_external_id' as ext from sales_src_rows where tbl = 'kapt_vendor_selection' and scope = ${SCOPE} and coalesce(row->>'selected_vendor', '') <> '' and row->>'source_external_id' = any(${exts})`;
+  return new Set(rows.map((r) => r.ext));
+}
 /** kapt_vendor_selection → operating_facility_prospects 파생(커뮤니티·운동시설 위탁 업무만) */
 export async function deriveOperatingFromKapt(limit = 500): Promise<WriteSummary & { filtered: number }> {
   const rows = await db()<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'kapt_vendor_selection' and scope = ${SCOPE} and not gone order by row->>'last_seen_at' desc nulls last limit ${limit}`;
