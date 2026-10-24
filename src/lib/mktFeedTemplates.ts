@@ -135,14 +135,48 @@ export const labelOf = (title: string) => { const t = title.replace(/\.[a-z0-9]{
 const W = 1080;
 /** 안전 영역: 스토리(9:16)는 위 진행 막대·프로필 자리, 아래 24% 비움(답장 칸) · 블로그 대표 이미지는 정사각 */
 const boxOf = (H: number) => (H >= 1900 ? { top: 210, bottom: Math.round(H * 0.24) + 24, pad: 80 } : H <= 1100 ? { top: 60, bottom: 60, pad: 72 } : { top: 72, bottom: 76, pad: 80 });
-const units = (s: string) => [...s].reduce((n, ch) => n + (ch === ' ' ? 0.3 : /[\u0000-ɏ]/.test(ch) ? 0.58 : 1), 0);
-/** 줄 수 안에 들어가는 가장 큰 글자 크기(한글 1em·영숫자 0.58em, 낱말 줄바꿈 여유 16%) — 가장 긴 낱말은 한 줄에 */
-const fit = (s: string, width: number, lines: number, max: number, min: number) => {
-  const u = units(s); if (!u) return max;
-  const longest = Math.max(1, ...s.split(/\s+/).map(units));
-  return Math.max(min, Math.min(max, Math.floor((width * lines) / (u * 1.16)), Math.floor(width / (longest * 1.04))));
-};
-const estLines = (s: string, size: number, width: number) => Math.max(1, Math.min(4, Math.ceil((units(s) * size * 1.12) / width)));
+/** 실제 글꼴 폭(Noto Sans KR, em) — 줄 수를 그림과 같게 센다(로컬 10/24 '사진 덧칠형 제목 4줄 + 작은 글 겹침': 글자 수 어림으로는 3줄인데 그리면 4줄) */
+type Meter = (s: string, bold: boolean) => number;
+let meterP: Promise<Meter> | null = null;
+function meter(): Promise<Meter> {
+  meterP ??= (async () => {
+    const f = await D.fonts(); const m: any = await import('@pdf-lib/fontkit'); const fk = m.default ?? m;
+    const fb = fk.create(f.bold), fr = fk.create(f.reg);
+    return (s: string, bold: boolean) => { const font = bold ? fb : fr; return font.layout(s).advanceWidth / font.unitsPerEm; };
+  })().catch((e) => { meterP = null; throw e; });
+  return meterP;
+}
+export type FitOpts = { bold?: boolean; ls?: number; mark?: string; spill?: boolean };
+/** rows() 와 같은 낱말 줄바꿈(낱말 칸 + 칸 사이 0.26em, 넘치면 다음 줄)으로 몇 줄이 되는지 — 한 낱말이 한 줄보다 길면 Infinity(keep-all 이라 넘침) */
+function wrapCount(M: Meter, s: string, size: number, width: number, o: FitOpts) {
+  const gap = Math.round(size * 0.26); const ls = o.ls ?? -Math.round(size * 0.025); let n = 0;
+  for (const l of s.split('\n').map((x) => x.trim()).filter(Boolean)) {
+    let cur = -1; n++;
+    for (const w of l.split(/\s+/)) {
+      const ww = (M(w, o.bold ?? true) * size + ls * [...w].length + (o.mark && w.includes(o.mark) ? size * 0.56 : 0)) * 1.03; // 3% 여유(글꼴 차이)
+      if (ww > width) return Infinity;
+      if (cur < 0) cur = ww; else if (cur + gap + ww <= width) cur += gap + ww; else { n++; cur = ww; }
+    }
+  }
+  return Math.max(1, n);
+}
+export type Fitted = { text: string; size: number; lines: number };
+/** 줄 수 안에 드는 가장 큰 글자 크기 — 안 되면 ① 최소 크기의 85%까지 줄여 보고 ② (spill) 한 줄 더 쓰고(틀이 아래 칸을 그만큼 내림)
+ *  ③ 그래도 넘치면 낱말 단위로 잘라 '…'. 줄바꿈(\n)이 있으면 푼 글도 시험 — 정해 둔 줄 수를 넘겨 아래 글·사진과 겹치는 일이 없게 */
+export function fitTo(M: Meter, s: string, width: number, lines: number, max: number, min: number, o: FitOpts = {}): Fitted {
+  const down = (a: number, b: number) => { const r: number[] = []; for (let z = a; z > b; z -= 2) r.push(z); return r.concat(b); };
+  const tryAt = (t: string, n: number, sizes: number[]) => { for (const z of sizes) { const k = wrapCount(M, t, z, width, o); if (k <= n) return { text: t, size: z, lines: k }; } return null; };
+  const flat = s.replace(/\s*\n\s*/g, ' ').trim();
+  const texts = flat !== s ? [s, flat] : [s];
+  for (const t of texts) { const r = tryAt(t, lines, down(max, Math.max(12, Math.floor(min * 0.85)))); if (r) return r; }
+  if (o.spill !== false) for (const t of texts) { const r = tryAt(t, lines + 1, down(max, min)); if (r) return r; }
+  const n = o.spill !== false ? lines + 1 : lines; const words = flat.split(/\s+/);
+  for (let k = words.length - 1; k >= 1; k--) {
+    const t = `${words.slice(0, k).join(' ').replace(/[\s,.·…]+$/, '')}…`; const c = wrapCount(M, t, min, width, o);
+    if (c <= n) return { text: t, size: min, lines: c };
+  }
+  return { text: cut(flat, 6), size: min, lines: 1 };
+}
 const svg = (w: number, h: number, inner: string) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">${inner}</svg>`);
 const vgrad = (w: number, h: number, stops: [number, string, number][]) => svg(w, h, `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">${stops.map(([o, c, a]) => `<stop offset="${o}" stop-color="${c}" stop-opacity="${a}"/>`).join('')}</linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/>`);
 const fill = (w: number, h: number, c: string, a = 1, r = 0) => svg(w, h, `<rect width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${c}" fill-opacity="${a}"/>`);
@@ -177,7 +211,7 @@ async function logoOf(buf: Buffer): Promise<Logo> {
 }
 
 export type RenderIn = { t: TemplateId; kit: Kit; brand: string; H: number; h: Hints; photo: Buffer | null; photos: { data: Buffer; label: string }[]; screen: Buffer | null; logo: Buffer | null; font: Buffer | null; set?: { bg: string; fg: string; accent: string } };
-type X = RenderIn & { logoEl: Logo | null; b: ReturnType<typeof boxOf>; width: number; set: { bg: string; fg: string; accent: string } };
+type X = RenderIn & { logoEl: Logo | null; b: ReturnType<typeof boxOf>; width: number; set: { bg: string; fg: string; accent: string }; fitT: (s: string, width: number, lines: number, max: number, min: number, o?: FitOpts) => Fitted };
 type Spec = { bg: string; layers: { input: Buffer; left: number; top: number }[]; el: (fam: string) => D.El };
 const { h } = D;
 const abs = (style: Record<string, unknown>, kids: unknown) => h({ position: 'absolute', ...style }, kids);
@@ -202,60 +236,65 @@ function headerEl(x: X, color: string, bgDark: boolean, o: { size?: number } = {
   return h({ alignItems: 'center', columnGap: 16 }, kids);
 }
 const headerAt = (x: X, color: string, bgDark: boolean) => abs({ left: x.b.pad, top: x.b.top }, [headerEl(x, color, bgDark)]);
-const contactEl = (x: X, color: string, width = x.width, o: { center?: boolean; weight?: number } = {}) => (x.kit.contact ? h({ fontSize: fit(x.kit.contact, width, 1, 30, 20), fontWeight: o.weight ?? 400, color, justifyContent: o.center ? 'center' : 'flex-start', width }, x.kit.contact) : null);
+const contactEl = (x: X, color: string, width = x.width, o: { center?: boolean; weight?: number } = {}) => {
+  if (!x.kit.contact) return null;
+  const c = x.fitT(x.kit.contact, width, 1, 30, 20, { bold: o.weight === 700, ls: 0, spill: false });
+  return h({ fontSize: c.size, fontWeight: o.weight ?? 400, color, justifyContent: o.center ? 'center' : 'flex-start', width }, c.text);
+};
 const contactAt = (x: X, color: string) => (x.kit.contact ? abs({ left: x.b.pad, right: x.b.pad, bottom: x.b.bottom, flexDirection: 'column' }, [h({ height: 2, background: rgba(color, 0.28), marginBottom: 22 }, ''), contactEl(x, rgba(color, 0.9))]) : null);
 
 const DRAW: Record<TemplateId, (x: X) => Promise<Spec>> = {
   async title(x) {
-    const { kit } = x; const size = fit(x.h.head, x.width, 3, x.H >= 1900 ? 120 : 108, 62);
+    const { kit } = x; const T = x.fitT(x.h.head, x.width, 3, x.H >= 1900 ? 120 : 108, 62);
     return { bg: kit.bg, layers: [], el: (fam) => root(x.H, [headerAt(x, kit.text, dark(kit.bg)),
       abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 110, bottom: x.b.bottom + (kit.contact ? 110 : 40), flexDirection: 'column', justifyContent: 'center' }, [
-        kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(x.h.head, size, kit.text, fam), subEl(x.h.sub, 38, rgba(kit.text, 0.8), { mt: 34 })].filter(Boolean)),
+        kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(T.text, T.size, kit.text, fam), subEl(x.h.sub, 38, rgba(kit.text, 0.8), { mt: 34 })].filter(Boolean)),
       contactAt(x, kit.text)]) };
   },
   async list(x) {
-    const { kit } = x; const pts = x.h.points.slice(0, 5); const size = fit(x.h.head, x.width, 2, 80, 50); const rs = x.H <= 1100 ? 32 : pts.length > 4 ? 35 : 38;
+    const { kit } = x; const pts = x.h.points.slice(0, 5); const T = x.fitT(x.h.head, x.width, 2, 80, 50); const rs = x.H <= 1100 ? 32 : pts.length > 4 ? 35 : 38;
     return { bg: kit.bg, layers: [], el: (fam) => root(x.H, [headerAt(x, kit.text, dark(kit.bg)),
-      abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 110, flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(x.h.head, size, kit.text, fam),
+      abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 110, flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(T.text, T.size, kit.text, fam),
         h({ flexDirection: 'column', marginTop: 40, borderTop: `3px solid ${rgba(kit.text, 0.5)}` }, pts.map((p, i) => h({ alignItems: 'center', padding: `${x.H <= 1100 ? 16 : 22}px 0`, borderBottom: `1px solid ${rgba(kit.text, 0.2)}` }, [
           h({ width: 92, fontFamily: fam, fontSize: rs + 8, fontWeight: 700, color: ink(kit.accent, kit.bg) }, String(i + 1).padStart(2, '0')), h({ flex: 1, fontSize: rs, color: kit.text, wordBreak: 'keep-all' }, p)])))].filter(Boolean)),
       contactAt(x, kit.text)]) };
   },
   async photo_fade(x) {
-    const { kit } = x; const size = fit(x.h.head, x.width, 2, 92, 56);
+    const { kit } = x; const T = x.fitT(x.h.head, x.width, 2, 92, 56);
     return { bg: kit.bg, layers: [{ input: await cover(x.photo!, W, x.H), left: 0, top: 0 }, { input: vgrad(W, x.H, [[0, '#000000', 0.4], [0.17, '#000000', 0], [0.4, kit.bg, 0], [0.7, kit.bg, 0.8], [1, kit.bg, 0.96]]), left: 0, top: 0 }],
       el: (fam) => root(x.H, [headerAt(x, '#FFFFFF', true),
-        abs({ left: x.b.pad, right: x.b.pad, bottom: x.b.bottom + (kit.contact ? 96 : 10), flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(x.h.head, size, '#FFFFFF', fam), subEl(x.h.sub, 36, 'rgba(255,255,255,0.86)', { mt: 24 })].filter(Boolean)),
+        abs({ left: x.b.pad, right: x.b.pad, bottom: x.b.bottom + (kit.contact ? 96 : 10), flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(T.text, T.size, '#FFFFFF', fam), subEl(x.h.sub, 36, 'rgba(255,255,255,0.86)', { mt: 24 })].filter(Boolean)),
         contactAt(x, '#FFFFFF')]) };
   },
   async photo_dim(x) {
-    const { kit } = x; const size = fit(x.h.head, x.width, 3, 100, 58); const shade = dark(kit.bg) ? kit.bg : '#000000';
+    const { kit } = x; const T = x.fitT(x.h.head, x.width, 3, 100, 58); const shade = dark(kit.bg) ? kit.bg : '#000000';
     return { bg: kit.bg, layers: [{ input: await cover(x.photo!, W, x.H), left: 0, top: 0 }, { input: fill(W, x.H, shade, 0.66), left: 0, top: 0 }],
       el: (fam) => root(x.H, [headerAt(x, '#FFFFFF', true),
-        abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 110, bottom: x.b.bottom + (kit.contact ? 110 : 40), flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }, [
-          kickerEl(x.h.kicker, ink(kit.accent, kit.bg), { center: true }), titleEl(x.h.head, size, '#FFFFFF', fam, { center: true }), subEl(x.h.sub, 36, 'rgba(255,255,255,0.86)', { center: true, mt: 28 })].filter(Boolean)),
+        // 상자는 늘이고(stretch) 줄마다 가운데 — alignItems center 면 제목 칸 폭이 좁게 잡혀 4줄이 되고 아래 글이 겹쳤음(로컬 10/24 06e30253)
+        abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 110, bottom: x.b.bottom + (kit.contact ? 110 : 40), flexDirection: 'column', justifyContent: 'center' }, [
+          kickerEl(x.h.kicker, ink(kit.accent, kit.bg), { center: true }), titleEl(T.text, T.size, '#FFFFFF', fam, { center: true }), subEl(x.h.sub, 36, 'rgba(255,255,255,0.86)', { center: true, mt: 28 })].filter(Boolean)),
         x.kit.contact ? abs({ left: x.b.pad, right: x.b.pad, bottom: x.b.bottom, justifyContent: 'center' }, [contactEl(x, 'rgba(255,255,255,0.9)', x.width, { center: true })]) : null]) };
   },
   async photo_caption(x) {
-    const band = x.H <= 1100 ? 170 : 196; const top = x.H - (x.H >= 1900 ? x.b.bottom : 0) - band; const head = cut(x.h.head.replace(/\n/g, ' '), 24); const size = fit(head, x.width, 1, 54, 36);
+    const band = x.H <= 1100 ? 170 : 196; const top = x.H - (x.H >= 1900 ? x.b.bottom : 0) - band; const T = x.fitT(cut(x.h.head.replace(/\n/g, ' '), 24), x.width, 1, 54, 36, { ls: -1, spill: false });
     return { bg: '#000000', layers: [{ input: await cover(x.photo!, W, x.H), left: 0, top: 0 }, { input: vgrad(W, 260, [[0, '#000000', 0.45], [1, '#000000', 0]]), left: 0, top: 0 }, { input: fill(W, band, '#000000', 0.58), left: 0, top }],
       el: (fam) => root(x.H, [headerAt(x, '#FFFFFF', true),
-        abs({ left: x.b.pad, right: x.b.pad, top: top + (x.kit.contact ? 34 : 56), flexDirection: 'column' }, [h({ fontFamily: fam, fontSize: size, fontWeight: 700, color: '#FFFFFF', letterSpacing: -1 }, head),
+        abs({ left: x.b.pad, right: x.b.pad, top: top + (x.kit.contact ? 34 : 56), flexDirection: 'column' }, [h({ fontFamily: fam, fontSize: T.size, fontWeight: 700, color: '#FFFFFF', letterSpacing: -1 }, T.text),
           x.kit.contact ? h({ marginTop: 14 }, [contactEl(x, 'rgba(255,255,255,0.85)', x.width)]) : null].filter(Boolean))]) };
   },
   async grid4(x) {
-    const { kit } = x; const size = fit(x.h.head, x.width, 2, 72, 46); const tTop = x.b.top + 104; const kick = x.h.kicker ? 58 : 0;
-    const gy = tTop + kick + Math.min(2, estLines(x.h.head, size, x.width)) * size * 1.2 + 40; const gap = 16; const tw = Math.floor((x.width - gap) / 2);
+    const { kit } = x; const T = x.fitT(x.h.head, x.width, 2, 72, 46); const tTop = x.b.top + 104; const kick = x.h.kicker ? 58 : 0;
+    const gy = tTop + kick + T.lines * T.size * 1.2 + 40; const gap = 16; const tw = Math.floor((x.width - gap) / 2);
     const th = Math.min(tw, Math.floor((x.H - x.b.bottom - (kit.contact ? 70 : 0) - gy - gap) / 2)); const at = (i: number) => ({ left: x.b.pad + (i % 2) * (tw + gap), top: Math.round(gy + Math.floor(i / 2) * (th + gap)) });
     const tiles = await Promise.all(x.photos.slice(0, 4).map(async (p, i) => ({ input: await cover(p.data, tw, th, 22), ...at(i) })));
     return { bg: kit.bg, layers: tiles, el: (fam) => root(x.H, [headerAt(x, kit.text, dark(kit.bg)),
-      abs({ left: x.b.pad, right: x.b.pad, top: tTop, flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(x.h.head, size, kit.text, fam)].filter(Boolean)),
+      abs({ left: x.b.pad, right: x.b.pad, top: tTop, flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(T.text, T.size, kit.text, fam)].filter(Boolean)),
       ...x.photos.slice(0, 4).map((p, i) => (p.label ? abs({ left: at(i).left + 18, top: at(i).top + th - 18 - 50, height: 50, alignItems: 'center', padding: '0 18px', borderRadius: 999, background: 'rgba(0,0,0,0.62)', color: '#FFFFFF', fontSize: 26, fontWeight: 700 }, p.label) : null)),
       contactAt(x, kit.text)]) };
   },
   async phone(x) {
-    const sharp = (await import('sharp')).default; const { kit } = x; const size = fit(x.h.head, x.width, 2, 84, 52); const tTop = x.b.top + 104;
-    const tBottom = tTop + (x.h.kicker ? 58 : 0) + Math.min(2, estLines(x.h.head, size, x.width)) * size * 1.2;
+    const sharp = (await import('sharp')).default; const { kit } = x; const T = x.fitT(x.h.head, x.width, 2, 84, 52); const tTop = x.b.top + 104;
+    const tBottom = tTop + (x.h.kicker ? 58 : 0) + T.lines * T.size * 1.2;
     const pw = x.H <= 1100 ? 360 : 430; const ph = Math.round(pw * 2.05); const px = W - x.b.pad - pw + 6; const py = Math.round(tBottom + 56);
     const body = await sharp(svg(pw, ph, `<rect width="${pw}" height="${ph}" rx="64" ry="64" fill="#0B0B0F"/><rect x="5" y="5" width="${pw - 10}" height="${ph - 10}" rx="60" ry="60" fill="none" stroke="#2A2A33" stroke-width="3"/>`))
       .composite([{ input: await screenFit(x.screen!, pw - 28, ph - 28, 48), left: 14, top: 14 }, { input: fill(118, 30, '#0B0B0F', 1, 15), left: Math.round((pw - 118) / 2), top: 26 }]).png().toBuffer();
@@ -263,53 +302,53 @@ const DRAW: Record<TemplateId, (x: X) => Promise<Spec>> = {
     const colW = px - x.b.pad - 40;
     return { bg: kit.bg, layers: [{ input: vgrad(W, x.H, [[0, kit.bg, 1], [1, kit.bg2, 1]]), left: 0, top: 0 }, ...(visible > 40 ? [{ input: phone, left: px, top: py }] : [])],
       el: (fam) => root(x.H, [headerAt(x, kit.text, dark(kit.bg)),
-        abs({ left: x.b.pad, right: x.b.pad, top: tTop, flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(x.h.head, size, kit.text, fam)].filter(Boolean)),
+        abs({ left: x.b.pad, right: x.b.pad, top: tTop, flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(T.text, T.size, kit.text, fam)].filter(Boolean)),
         abs({ left: x.b.pad, width: colW, top: py + 10, flexDirection: 'column' }, [subEl(x.h.sub, 34, rgba(kit.text, 0.86), { mt: 0 }),
           ...x.h.points.slice(0, 3).map((p) => h({ alignItems: 'center', columnGap: 14, marginTop: 22, fontSize: 30, color: kit.text, wordBreak: 'keep-all' }, [h({ width: 12, height: 12, borderRadius: 999, background: ink(kit.accent, kit.bg2), flexShrink: 0 }, ''), h({ flex: 1 }, p)]))].filter(Boolean)),
         kit.contact ? abs({ left: x.b.pad, width: colW, bottom: x.b.bottom }, [contactEl(x, rgba(kit.text, 0.9), colW, { weight: 700 })]) : null]) };
   },
   async vs(x) {
-    const { kit } = x; const size = fit(x.h.head, x.width, 2, 76, 48); const tTop = x.b.top + 104;
-    const cy = Math.round(tTop + (x.h.kicker ? 58 : 0) + Math.min(2, estLines(x.h.head, size, x.width)) * size * 1.2 + 64); const gap = 28; const cw = Math.floor((x.width - gap) / 2);
+    const { kit } = x; const T = x.fitT(x.h.head, x.width, 2, 76, 48); const tTop = x.b.top + 104;
+    const cy = Math.round(tTop + (x.h.kicker ? 58 : 0) + T.lines * T.size * 1.2 + 64); const gap = 28; const cw = Math.floor((x.width - gap) / 2);
     const ch = x.H >= 1900 ? 620 : x.H <= 1100 ? 360 : 500; const L = Math.abs(D.lum(kit.bg2) - D.lum(kit.bg)) < 0.02 ? mix(kit.bg, '#FFFFFF', 0.14) : kit.bg2; const R = contrast(kit.accent, L) < 1.6 ? kit.text : kit.accent; const d = 150; // 두 칸 색이 비슷하면 오른쪽은 글자 색으로
-    const card = (s: string, bg: string) => h({ width: cw, height: ch, borderRadius: 32, background: bg, alignItems: 'center', justifyContent: 'center', padding: '0 36px' }, [titleEl(s, fit(s, cw - 72, 3, 66, 36), on(bg), 'Noto Sans KR', { center: true })]);
+    const card = (s: string, bg: string) => { const c = x.fitT(s, cw - 72, 3, 66, 36); return h({ width: cw, height: ch, borderRadius: 32, background: bg, flexDirection: 'column', justifyContent: 'center', padding: '0 36px' }, [titleEl(c.text, c.size, on(bg), 'Noto Sans KR', { center: true })]); };
     return { bg: kit.bg, layers: [], el: (fam) => root(x.H, [
-      abs({ left: x.b.pad, right: x.b.pad, top: tTop, flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(x.h.head, size, kit.text, fam)].filter(Boolean)),
+      abs({ left: x.b.pad, right: x.b.pad, top: tTop, flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(T.text, T.size, kit.text, fam)].filter(Boolean)),
       abs({ left: x.b.pad, top: cy, width: x.width, columnGap: gap }, [card(x.h.left, L), card(x.h.right, R)]),
       abs({ left: Math.round(W / 2 - d / 2), top: Math.round(cy + ch / 2 - d / 2), width: d, height: d, borderRadius: 999, background: kit.text, border: `8px solid ${kit.bg}`, alignItems: 'center', justifyContent: 'center', fontFamily: fam, fontSize: 52, fontWeight: 700, color: kit.bg, letterSpacing: 1 }, 'VS'),
       abs({ left: x.b.pad, right: x.b.pad, bottom: x.b.bottom, flexDirection: 'column', alignItems: 'center', rowGap: 16 }, [headerEl(x, kit.text, dark(kit.bg)), contactEl(x, rgba(kit.text, 0.85), x.width, { center: true })].filter(Boolean))]) };
   },
   async poster(x) {
-    const s = x.set; const size = fit(x.h.head, x.width, 3, 150, 74); const pill = cut(x.h.sub || x.h.points[0] || '', 22);
+    const s = x.set; const T = x.fitT(x.h.head, x.width, 3, 150, 74); const pill = cut(x.h.sub || x.h.points[0] || '', 22);
     return { bg: s.bg, layers: [], el: (fam) => root(x.H, [
       abs({ right: -220, top: -180, width: 760, height: 760, borderRadius: 9999, background: s.fg, opacity: 0.07 }, ''), abs({ right: 120, top: 330, width: 260, height: 260, borderRadius: 9999, background: s.fg, opacity: 0.06 }, ''),
       abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 4, flexDirection: 'column' }, [h({ fontSize: 30, fontWeight: 700, letterSpacing: 6, color: s.fg }, x.kit.header.toUpperCase()), h({ marginTop: 18, width: 120, height: 6, background: s.fg }, '')]),
-      abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 120, bottom: x.b.bottom + 190, flexDirection: 'column', justifyContent: 'center' }, [titleEl(x.h.head, size, s.fg, fam, { lh: 1.1 }),
+      abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 120, bottom: x.b.bottom + 190, flexDirection: 'column', justifyContent: 'center' }, [titleEl(T.text, T.size, s.fg, fam, { lh: 1.1 }),
         pill ? h({ marginTop: 44, alignSelf: 'flex-start', background: s.accent, color: s.accent.toUpperCase() === s.bg.toUpperCase() ? s.fg : on(s.accent), fontSize: 40, fontWeight: 700, padding: '16px 34px', borderRadius: 999 }, pill) : null].filter(Boolean)),
       abs({ left: x.b.pad, right: x.b.pad, bottom: x.b.bottom, flexDirection: 'column', rowGap: 10 }, [x.h.period ? h({ fontFamily: fam, fontSize: 44, fontWeight: 700, color: s.fg }, x.h.period) : null, contactEl(x, s.fg)].filter(Boolean))]) };
   },
   async price(x) {
-    const s = x.kit.style === 'event' ? x.set : { bg: x.kit.bg, fg: x.kit.text, accent: x.kit.accent }; const ps = x.h.prices.slice(0, 4); const size = fit(x.h.head, x.width, 2, 80, 50);
+    const s = x.kit.style === 'event' ? x.set : { bg: x.kit.bg, fg: x.kit.text, accent: x.kit.accent }; const ps = x.h.prices.slice(0, 4); const T = x.fitT(x.h.head, x.width, 2, 80, 50);
     const cols = ps.length === 4 ? 2 : ps.length; const gap = 20; const cw = Math.floor((x.width - gap * (cols - 1)) / cols); const ch = ps.length === 4 ? 230 : 300;
     const cardBg = dark(s.bg) ? '#FFFFFF' : '#111111'; const cardFg = on(cardBg); const lab = dark(s.bg) ? s.bg : s.fg === '#111111' ? s.bg : s.fg;
     return { bg: s.bg, layers: [], el: (fam) => root(x.H, [headerAt(x, s.fg, dark(s.bg)),
-      abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 110, flexDirection: 'column' }, [kickerEl(x.h.kicker, x.kit.style === 'event' ? s.fg : ink(x.kit.accent, s.bg)), titleEl(x.h.head, size, s.fg, fam),
+      abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 110, flexDirection: 'column' }, [kickerEl(x.h.kicker, x.kit.style === 'event' ? s.fg : ink(x.kit.accent, s.bg)), titleEl(T.text, T.size, s.fg, fam),
         h({ marginTop: 48, flexWrap: 'wrap', columnGap: gap, rowGap: gap, width: x.width }, ps.map((p) => h({ width: cw, height: ch, borderRadius: 28, background: cardBg, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', rowGap: 14 }, [
-          h({ fontSize: 34, fontWeight: 700, color: cardBg === '#FFFFFF' ? lab : '#FFFFFF' }, p.label), h({ fontFamily: fam, fontSize: fit(p.value, cw - 40, 1, 66, 34), fontWeight: 700, color: cardFg }, p.value)])))].filter(Boolean)),
+          h({ fontSize: 34, fontWeight: 700, color: cardBg === '#FFFFFF' ? lab : '#FFFFFF' }, p.label), ((v) => h({ fontFamily: fam, fontSize: v.size, fontWeight: 700, color: cardFg }, v.text))(x.fitT(p.value, cw - 40, 1, 66, 34, { ls: 0, spill: false }))])))].filter(Boolean)),
       abs({ left: x.b.pad, right: x.b.pad, bottom: x.b.bottom, flexDirection: 'column', rowGap: 8 }, [x.h.period ? h({ fontSize: 36, fontWeight: 700, color: s.fg }, x.h.period) : null, contactEl(x, s.fg)].filter(Boolean))]) };
   },
   async statement(x) {
-    const { kit } = x; const bg = D.lum(kit.bg) < 0.06 ? kit.bg : mix(kit.bg, '#000000', 0.55); const size = fit(x.h.head, x.width, 3, 124, 64);
+    const { kit } = x; const bg = D.lum(kit.bg) < 0.06 ? kit.bg : mix(kit.bg, '#000000', 0.55); const T = x.fitT(x.h.head, x.width, 3, 124, 64, { mark: x.h.keyword });
     return { bg, layers: [], el: (fam) => root(x.H, [headerAt(x, '#FFFFFF', true),
       abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 110, bottom: x.b.bottom + (kit.contact ? 110 : 40), flexDirection: 'column', justifyContent: 'center' }, [
-        titleEl(x.h.head, size, '#FFFFFF', fam, { mark: x.h.keyword, markColor: ink(kit.accent, bg), lh: 1.3 }), subEl(x.h.sub, 38, 'rgba(255,255,255,0.72)', { mt: 36 })].filter(Boolean)),
+        titleEl(T.text, T.size, '#FFFFFF', fam, { mark: x.h.keyword, markColor: ink(kit.accent, bg), lh: 1.3 }), subEl(x.h.sub, 38, 'rgba(255,255,255,0.72)', { mt: 36 })].filter(Boolean)),
       contactAt(x, '#FFFFFF')]) };
   },
   async report(x) {
-    const { kit } = x; const size = fit(x.h.head, x.width, 3, 104, 60);
+    const { kit } = x; const T = x.fitT(x.h.head, x.width, 3, 104, 60);
     return { bg: kit.bg, layers: [], el: (fam) => root(x.H, [headerAt(x, kit.text, dark(kit.bg)),
       abs({ left: x.b.pad, right: x.b.pad, top: x.b.top + 120, flexDirection: 'column' }, [x.h.kicker ? h({ fontSize: 32, fontWeight: 700, color: ink(kit.accent, kit.bg), letterSpacing: 1 }, x.h.kicker) : null,
-        h({ marginTop: 18, height: 3, background: rgba(kit.text, 0.35) }, ''), h({ marginTop: 56, flexDirection: 'column' }, [titleEl(x.h.head, size, kit.text, fam)]), subEl(x.h.sub, 36, rgba(kit.text, 0.8), { mt: 34 })].filter(Boolean)),
+        h({ marginTop: 18, height: 3, background: rgba(kit.text, 0.35) }, ''), h({ marginTop: 56, flexDirection: 'column' }, [titleEl(T.text, T.size, kit.text, fam)]), subEl(x.h.sub, 36, rgba(kit.text, 0.8), { mt: 34 })].filter(Boolean)),
       kit.contact ? abs({ left: x.b.pad, right: x.b.pad, bottom: x.b.bottom, alignItems: 'center', columnGap: 18 }, [h({ width: 56, height: 6, borderRadius: 3, background: ink(kit.accent, kit.bg) }, ''), contactEl(x, ink(kit.accent, kit.bg), x.width - 80, { weight: 700 })]) : null]) };
   },
 };
@@ -322,7 +361,8 @@ export async function renderFeed(x: RenderIn): Promise<Buffer> {
   const b = boxOf(x.H); const logoEl = x.logo ? await logoOf(x.logo).catch(() => null) : null;
   const need = FEED_TEMPLATES[x.t].need as Need;
   const t: TemplateId = (need === 'photo' && !x.photo) || (need === 'photos4' && x.photos.length < 4) || (need === 'screen' && !x.screen) ? 'title' : x.t; // 사진·화면을 못 읽었으면 제목형으로
-  const spec = await DRAW[t]({ ...x, t, h: hh, kit, brand: c(x.brand), logoEl, b, width: W - b.pad * 2, set: x.set ?? EVENT_SETS[0] });
+  const M = await meter();
+  const spec = await DRAW[t]({ ...x, t, h: hh, kit, brand: c(x.brand), logoEl, b, width: W - b.pad * 2, set: x.set ?? EVENT_SETS[0], fitT: (s, w, n, max, min, o) => fitTo(M, s, w, n, max, min, o) });
   const { ImageResponse } = await import('next/og');
   const fonts: any[] = [{ name: 'Noto Sans KR', data: f.bold, weight: 700, style: 'normal' }, { name: 'Noto Sans KR', data: f.reg, weight: 400, style: 'normal' }];
   const render = async (brandFont: boolean) => Buffer.from(await new ImageResponse(spec.el(brandFont ? 'Brand' : 'Noto Sans KR') as any, { width: W, height: x.H, fonts: brandFont ? [{ name: 'Brand', data: x.font!, weight: 700, style: 'normal' }, ...fonts] : fonts }).arrayBuffer());

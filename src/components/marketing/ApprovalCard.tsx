@@ -8,7 +8,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ModeChip } from './ModeToggle';
 import { ChannelPreview } from './ChannelPreview';
-import { VersionCompare, partsLabel, type Revision } from './VersionCompare';
+import { VersionCompare, partsLabel, requestLabel, requestNote, type Revision } from './VersionCompare';
 
 /** 운영실 화면 명세(OPS_ROOM_SCREEN_SPEC 2-2·5절)에 맞춘 승인 카드·라벨 — 승인함·현황이 같이 씀 */
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', video: '생성 영상', shorts: '쇼츠', story: '스토리' };
@@ -34,12 +34,12 @@ export const needsVisual = (c: { channel: string; media_ids?: string[] }) => c.c
 const AI_REGEN = 'AI 이미지로 다시 만들어 주세요(사진 재생성)';
 const AI_REGEN_CREDITS = 6.5;
 
-export type DecideRevision = { kind?: string; version?: number | null; n?: number | null; max?: number; parts?: string[]; card?: unknown; error?: string };
+export type DecideRevision = { kind?: string; version?: number | null; n?: number | null; max?: number; parts?: string[]; card?: unknown; error?: string; check?: Revision['check'] };
 /** #545: 수정 요청 → AI 가 글·시안을 고친 수정본을 바로 승인함에 다시 올림(3번까지) — 결정 뒤 무엇을 했는지 그대로 알림(카드·상세 공용) */
 export function decideMessage(decision: 'approve' | 'changes' | 'hold', rv?: DecideRevision | null) {
   if (decision === 'approve') return '승인했습니다';
   if (decision === 'hold') return '보류했습니다';
-  if (rv?.version) return `AI 가 고쳐 다시 올렸습니다 — 수정본 v${rv.version}(${partsLabel(rv.parts) || '글'} · AI 수정 ${rv.n}/${rv.max ?? 3})${rv.card ? ' · 사진·영상은 제작 요청 카드로' : ''}`;
+  if (rv?.version) return `AI 가 고쳐 다시 올렸습니다 — 수정본 v${rv.version}(${partsLabel(rv.parts) || '글'} · AI 수정 ${rv.n}/${rv.max ?? 3})${rv.card ? ' · 사진·영상은 제작 요청 카드로' : ''}${requestNote({ check: rv.check }) ? ` — ${requestLabel({ check: rv.check })}: ${requestNote({ check: rv.check })}` : ''}`;
   if (rv?.kind === 'limit') return `수정을 요청했습니다 — AI 수정은 ${rv.max ?? 3}번까지라 이번엔 사람이 고칩니다(상세 › 수정본 올리기)`;
   if (rv?.card) return '수정을 요청했습니다 — 사진·영상 다시 만들기는 제작 요청 카드로 넘겼습니다';
   if (rv?.error) return `수정을 요청했습니다 — AI 수정본은 만들지 못했습니다: ${rv.error.slice(0, 80)}`;
@@ -120,7 +120,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         {rep?.needsPolish && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-polish-badge" title="사람다움 점수가 기준보다 낮습니다 — 상세에서 [AI로 다듬기]">다듬기 필요{rep.human ? ` · ${rep.human.score}점` : ''}</span>}
         {rep?.hook && !rep.hook.pass && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-weak-hook">훅 약함 {rep.hook.score}점</span>}
         {/* #545: '수정본 v3 — 반영한 요청: …'(AI 수정본은 반영한 요청을 버전에, 사람이 올린 수정본은 마지막 수정 요청 메모로) */}
-        {(!!c.reapprove_from || !!c.revision?.request) && <span className="max-w-full truncate rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="mkt-reapprove" title={req ?? undefined}>수정본 v{c.current_version}{req ? ` — 반영한 요청: ${req}` : ` (v${c.reapprove_from} 수정 요청)`}</span>}
+        {(!!c.reapprove_from || !!c.revision?.request) && <span className={cx('max-w-full truncate rounded-full px-2 py-0.5 text-[11px] font-medium', c.revision?.check?.status === 'unmet' ? 'bg-red-50 text-red-800' : 'bg-amber-50 text-amber-800')} data-testid="mkt-reapprove"
+          title={[req, c.revision?.check?.detail].filter(Boolean).join(' — ') || undefined}>수정본 v{c.current_version}{req ? ` — ${requestLabel(c.revision)}: ${req}${requestNote(c.revision) ? ` · ${requestNote(c.revision)}` : ''}` : ` (v${c.reapprove_from} 수정 요청)`}</span>}
         {c.revision?.ai && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="mkt-ai-revision">AI 수정 {c.revision.n}/{c.revision.max ?? 3}{c.revision.parts?.length ? ` · ${partsLabel(c.revision.parts)}` : ''}</span>}
         {done && <span className="ml-auto text-xs font-semibold text-emerald-700" data-testid="approval-done">{done}</span>}
       </div>

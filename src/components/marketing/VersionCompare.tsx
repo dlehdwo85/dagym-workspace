@@ -3,7 +3,12 @@ import { MediaThumb } from '@/components/MediaView';
 import { useApi } from '@/components/client';
 import { Skeleton, cx } from '@/components/ui';
 
-export type Revision = { ai?: boolean; n?: number; max?: number; from?: number; request?: string; by?: string | null; parts?: string[]; backdrop?: string | null };
+/** 로컬 10/24: 수정본이 요청을 실제로 반영했는지(서버 checkRevision) — 반영한 요청 / 일부 반영 / 요청(이미 충족) / 반영 안 됨 */
+export type RevisionCheck = { status: 'applied' | 'partial' | 'already' | 'unmet' | 'unknown'; detail?: string };
+export type Revision = { ai?: boolean; n?: number; max?: number; from?: number; request?: string; by?: string | null; parts?: string[]; backdrop?: string | null; check?: RevisionCheck | null };
+export const requestLabel = (r?: Revision | null) => (r?.check?.status === 'unmet' ? '반영 안 됨' : r?.check?.status === 'partial' ? '일부 반영' : r?.check?.status === 'already' ? '요청(이미 충족)' : '반영한 요청');
+/** 반영 안 됨·일부만이면 한 줄 설명(무엇이 그대로인지) */
+export const requestNote = (r?: Revision | null) => (r?.check?.detail && r.check.status !== 'applied' && r.check.status !== 'unknown' ? r.check.detail : '');
 type Ver = { version: number; body: string | null; media_ids: string[]; note: string | null; revision?: Revision | null };
 const PART: Record<string, string> = { text: '글', visual: '시안' };
 export const partsLabel = (p?: string[]) => (p ?? []).map((x) => PART[x] ?? x).join('·');
@@ -35,7 +40,7 @@ export function VersionCompare({ id, from, to }: { id: string; from?: number | n
               return <p key={k} className={cx('whitespace-pre-wrap', changed && (side === 'new' ? 'rounded bg-emerald-100 text-emerald-950' : 'rounded bg-red-50 text-red-900 line-through decoration-red-300'))} data-changed={changed || undefined}>{l || ' '}</p>; })}</div>
           </div>))}
       </div>
-      {b.revision?.request && <p className="mt-2 text-ink-2" data-testid="compare-request">반영한 요청: <b className="text-ink">{b.revision.request}</b>{b.revision.parts?.length ? ` · 바뀐 것: ${partsLabel(b.revision.parts)}` : ''}{b.revision.backdrop ? ` · 바탕: ${b.revision.backdrop}` : ''}</p>}
+      {b.revision?.request && <p className={cx('mt-2', b.revision.check?.status === 'unmet' ? 'text-red-800' : 'text-ink-2')} data-testid="compare-request">{requestLabel(b.revision)}: <b className="text-ink">{b.revision.request}</b>{b.revision.parts?.length ? ` · 바뀐 것: ${partsLabel(b.revision.parts)}` : ''}{b.revision.backdrop ? ` · 바탕: ${b.revision.backdrop}` : ''}{b.revision.check?.detail ? ` · 확인: ${b.revision.check.detail}` : ''}</p>}
     </div>
   );
 }
