@@ -76,10 +76,7 @@ export async function makeMinutes(u: SessionUser, eventId: string, i: z.infer<ty
   const c = await eventCtx(u, eventId, sql);
   if (!c.canWork) throw forbidden('일정 작성자·편집 권한자·참석자만 회의록을 만들 수 있습니다');
   const occ = c.event.rrule && i.occurrenceStart ? new Date(i.occurrenceStart).toISOString() : '';
-  const { usageThisMonth } = await import('./assistant');
-  const usage = await usageThisMonth(tenant);
-  if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다.`);
-  await (await import('../plans')).assertAiRequest(u);
+  await (await import('../plans')).assertAiRequest(u, { legacy: true }); // 회사 월 AI 예산(원)·예전 달러 한도·요청 수
   await (await import('./guard')).assertUserBudget(u, sql); // 사람별 AI 한도
   // 녹음 파일(본인이 올린 것만)
   const a = await loadLibraryFile(u, i.audioFileId, 'ai').catch(() => null);

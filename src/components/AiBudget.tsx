@@ -5,16 +5,21 @@ import { api } from './client';
 import { Button, cx, toast } from './ui';
 
 export type Budget = { limitKrw: number; usedKrw: number; remainingKrw: number; pct: number; todayKrw: number; dayLimitKrw: number; chatsLeft: number; docsLeft: number; extraKrw: number };
+/** 대표 10/24 ② 회사 월 AI 예산 — 직원에게는 %·다시 채워지는 날만(금액은 관리자 응답에만) */
+export type CompanyAi = { pct: number | null; over: boolean; resetLabel: string; message: string | null; limitKrw?: number | null; usedKrw?: number; leftKrw?: number | null };
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 
 /**
  * V23 4.3: AI 비서 위 "이번 달 남은 AI 6,420원 / 10,000원 · 대화 약 90회 · 문서 약 70건" 막대.
  * 다 쓰면 [추가 요청](대표 승인), 크레딧 소진이면 빨간 안내(V23-1). compact = 오른쪽 패널용 한 줄
  */
-export function AiBudgetBar({ budget, creditMessage, compact, onChanged }: { budget?: Budget | null; creditMessage?: string | null; compact?: boolean; onChanged?: () => void }) {
+export function AiBudgetBar({ budget, company, creditMessage, compact, onChanged }: { budget?: Budget | null; company?: CompanyAi | null; creditMessage?: string | null; compact?: boolean; onChanged?: () => void }) {
   const [sent, setSent] = useState(false);
   if (creditMessage) return <div className={cx('flex items-start gap-1.5 rounded-input border border-red-200 bg-red-50 text-red-800', compact ? 'px-2 py-1 text-[11px]' : 'px-3 py-2 text-xs')} data-testid="ai-credit-banner"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{creditMessage}</div>;
-  if (!budget) return null;
+  // 회사 월 AI 예산을 다 썼으면 내 한도보다 먼저 안내(다음 달 1일 초기화), 80% 넘으면 한 줄 미리 알림
+  if (company?.over && company.message) return <div className={cx('flex items-start gap-1.5 rounded-input border border-red-200 bg-red-50 text-red-800', compact ? 'px-2 py-1 text-[11px]' : 'px-3 py-2 text-xs')} data-testid="ai-company-banner"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{company.message}</div>;
+  const near = company && company.pct !== null && company.pct >= 80 ? <div className={cx('mb-1 text-amber-700', compact ? 'text-[11px]' : 'text-xs')} data-testid="ai-company-near">회사 이번 달 AI 사용량 {company.pct}% — 100%가 되면 {company.resetLabel}까지 AI 기능이 멈춥니다</div> : null;
+  if (!budget) return near;
   const out = budget.usedKrw >= budget.limitKrw;
   const dayOut = !out && budget.todayKrw >= budget.dayLimitKrw;
   async function ask() {
@@ -28,6 +33,7 @@ export function AiBudgetBar({ budget, creditMessage, compact, onChanged }: { bud
   const tone = out ? 'bg-red-500' : budget.pct >= 80 ? 'bg-amber-500' : 'bg-brand-600';
   return (
     <div className={cx('rounded-input border border-line bg-white', compact ? 'px-2 py-1' : 'px-3 py-2')} data-testid="ai-budget">
+      {near}
       <div className={cx('flex flex-wrap items-center gap-x-2 gap-y-0.5', compact ? 'text-[11px]' : 'text-xs')}>
         <span className="font-semibold text-ink">내 이번 달 남은 AI <span data-testid="ai-budget-left">{won(budget.remainingKrw)}</span> <span className="font-normal text-ink-3">/ {won(budget.limitKrw)}</span></span>
         {!out && <span className="text-ink-3">대화 약 {budget.chatsLeft.toLocaleString('ko-KR')}회 · 문서 약 {budget.docsLeft.toLocaleString('ko-KR')}건</span>}

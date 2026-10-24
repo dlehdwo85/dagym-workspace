@@ -212,7 +212,7 @@ describe('V15 첫 주소(/) 비로그인 → 랜딩, 앱은 로그인', () => {
 
 describe('17차 14일 무료 체험 · 끝나면 읽기 전용', () => {
   let c, tid, owner;
-  test('가입하면 14일 체험(비즈니스 기능, 10명·20GB·AI 300), 무료 요금제 없음', async () => {
+  test('가입하면 14일 체험(비즈니스 기능, 10명·20GB·AI 예산 5,000원), 무료 요금제 없음', async () => {
     await sql`delete from signup_attempts`; // 이 서버는 IP 하루 3회 제한으로 띄움
     const r = await join({ email: 'trial@example.com', name: '체험씨', mode: 'team', company: '체험상사' });
     c = r.c; await c.ok('POST', '/api/auth/verify', { token: r.link.split('/').pop() });
@@ -223,7 +223,9 @@ describe('17차 14일 무료 체험 · 끝나면 읽기 전용', () => {
     const days = (new Date(s.trial_ends_at).getTime() - Date.now()) / 86400000;
     assert.ok(days > 13.9 && days <= 14, '14일');
     const u = await c.ok('GET', '/api/usage');
-    assert.equal(u.limits.users, 10); assert.equal(u.limits.storageGb, 20); assert.equal(u.limits.aiRequests, 300);
+    assert.equal(u.limits.users, 10); assert.equal(u.limits.storageGb, 20);
+    // 대표 10/24 ②: 체험 AI = 회사 월 예산 5,000원(요청 횟수 한도 없음)
+    assert.equal(u.limits.aiRequests, null); assert.equal(u.aiBudget.limitKrw, 5000); assert.equal(u.aiBudget.source, 'plan');
     await c.ok('POST', '/api/tasks', { title: '체험 중 업무' });
   });
   test('종료 3·1·0일 전 알림(한 번씩), 끝나면 expired → 쓰기 402·보기·내보내기·요금제 신청은 됨', async () => {

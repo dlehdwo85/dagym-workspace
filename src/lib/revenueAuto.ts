@@ -51,14 +51,16 @@ async function actorFor(userId: string): Promise<SessionUser> {
   return { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: '', isDemo: r.is_demo, platformAdmin: r.platform_admin, tenant: r.tenant, personal: r.kind === 'personal' } as SessionUser;
 }
 
-/** 회사 시스템 작업(올린 사람 개인 한도가 아니라 회사 한도에 합산): 크레딧 차단·회사 요청 수·회사 월 한도 */
+/** 회사 시스템 작업(올린 사람 개인 한도가 아니라 회사 한도에 합산): 크레딧 차단·회사 월 AI 예산(원)·예전 달러 한도·회사 요청 수 */
 async function assertSystemAi(tenant: string) {
   await (await import('./ai/guard')).assertAiCredit();
+  const B = await import('./ai/companyBudget');
+  const b = await B.companyAiBudget(tenant);
+  if (b.over) throw new HttpError(429, 'ai_budget', `${B.budgetMessage(b)} — 매출 자동 분석도 멈췄습니다([다시 읽기]는 다음 달에)`);
+  if (b.pct !== null && b.pct >= 80) await B.budgetAlerts(tenant, b).catch(() => {});
   const Pl = await import('./plans');
   const { limits } = await Pl.effectiveLimits(tenant);
   if (limits.aiRequests !== null && (await Pl.currentUsage(tenant)).aiRequests >= limits.aiRequests) throw new HttpError(429, 'ai_quota', `이번 달 회사 AI 요청 ${limits.aiRequests}회를 모두 써 매출 자동 분석을 멈췄습니다 — 다음 달에 다시 하거나 [다시 읽기]를 눌러 주세요`);
-  const co = await (await import('./ai/assistant')).usageThisMonth(tenant);
-  if (co.limitUsd > 0 && co.costUsd >= co.limitUsd) throw new HttpError(429, 'ai_quota', `이번 달 회사 AI 한도에 닿아 매출 자동 분석을 멈췄습니다 — 관리 → 사용량·요금제에서 확인하세요`);
 }
 
 /** 자료실 올리기 완료 직후(라우트 after) — 매출 자료면 확인 대기 1건을 만들고 바로 숫자를 읽는다. 매출 화면 [자료로 입력(AI)]·AI 첨부·생성 파일은 제외 */

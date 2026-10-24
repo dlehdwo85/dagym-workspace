@@ -31,7 +31,7 @@ export async function qaScenes(tenant: string, actorId: string | null, dir: stri
   if (!clips.length) return res;
   const P = await import('../ai/provider');
   if (!P.aiEnabled()) return skip('AI 가 꺼져 있어 자동 검수를 못 했습니다');
-  try { const { assertMktAi } = await import('../mktAuto'); await assertMktAi(tenant); } catch (e: any) { return skip(`AI 한도로 자동 검수를 못 했습니다(${String(e?.message ?? e).slice(0, 80)})`); }
+  try { const { assertMktAi } = await import('../mktAuto'); await assertMktAi(tenant, { video: true }); } catch (e: any) { return skip(`AI 한도로 자동 검수를 못 했습니다(${String(e?.message ?? e).slice(0, 80)})`); }
   const blocks: any[] = [];
   for (const c of clips) {
     const fr = await frames(dir, c.file, c.seconds, c.k);
@@ -48,7 +48,7 @@ export async function qaScenes(tenant: string, actorId: string | null, dir: stri
     const p = P.anthropicProvider({ tier: 'default' });
     const r = await p.chat({ system: '당신은 광고 영상 품질 검수자입니다. 보이는 것만 근거로 판단하고, 애매하면 문제로 표시합니다.', tools: [], format: SCHEMA, messages: [{ role: 'user', content: blocks }] });
     await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-      values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_studio')`;
+      values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_video_qa')`; // 영상 제작 몫 — 회사 AI 예산에서 뺌(companyBudget VIDEO_PURPOSE)
     const j = JSON.parse((r.content as any[]).filter((x) => x.type === 'text').map((x) => x.text).join(''));
     for (const s of Array.isArray(j?.scenes) ? j.scenes : []) {
       const c = clips.find((x) => x.k === Number(s?.scene) - 1); if (!c) continue;

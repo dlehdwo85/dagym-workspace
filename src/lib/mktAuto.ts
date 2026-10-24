@@ -92,15 +92,20 @@ export async function mktAiUsd(tenant: string) {
   const [r] = await db()<{ usd: number; n: number }[]>`select coalesce(sum(cost_usd), 0)::float8 usd, count(*)::int n from ai_usage where tenant = ${tenant} and purpose like 'marketing%' and created_at >= ${start}`;
   return { usd: Math.round(r.usd * 10000) / 10000, requests: r.n };
 }
-/** 상용화 ⑦: 마케팅 AI 호출 전 한도 확인 — 크레딧 소진 차단 · 회사 요금제 월 AI 요청 수 · 회사 AI 월 한도($) · 마케팅 월 한도($). 넘으면 429(정기 실행은 그 회사 제작을 멈추고 하루 한 번 알림) */
-export async function assertMktAi(tenant: string) {
+/** 상용화 ⑦: 마케팅 AI 호출 전 한도 확인 — 크레딧 소진 차단 · 회사 월 AI 예산(원, 대표 10/24 ②)·예전 회사 한도($) · 회사 요금제 월 AI 요청 수 · 마케팅 월 한도($). 넘으면 429(정기 실행은 그 회사 제작을 멈추고 하루 한 번 알림)
+ *  video = 영상 제작(기획·검수) — 마케팅 크레딧으로 따로 세므로 회사 AI 예산·요청 수는 보지 않는다 */
+export async function assertMktAi(tenant: string, o: { video?: boolean } = {}) {
   const { HttpError } = await import('./errors');
   await (await import('./ai/guard')).assertAiCredit();
-  const Pl = await import('./plans');
-  const { limits } = await Pl.effectiveLimits(tenant);
-  if (limits.aiRequests !== null && (await Pl.currentUsage(tenant)).aiRequests >= limits.aiRequests) throw new HttpError(429, 'ai_quota', `이번 달 회사 AI 요청 ${limits.aiRequests}회를 모두 써 마케팅 자동 제작을 멈췄습니다 — 관리 → 사용량·요금제`);
-  const co = await (await import('./ai/assistant')).usageThisMonth(tenant);
-  if (co.limitUsd > 0 && co.costUsd >= co.limitUsd) throw new HttpError(429, 'ai_quota', `이번 달 회사 AI 한도($${co.limitUsd})에 닿아 마케팅 자동 제작을 멈췄습니다 — 관리 → 사용량·요금제`);
+  if (!o.video) {
+    const B = await import('./ai/companyBudget');
+    const b = await B.companyAiBudget(tenant);
+    if (b.over) throw new HttpError(429, 'ai_budget', `${B.budgetMessage(b)} — 마케팅 자동 제작도 멈췄습니다`);
+    if (b.pct !== null && b.pct >= 80) await B.budgetAlerts(tenant, b).catch(() => {});
+    const Pl = await import('./plans');
+    const { limits } = await Pl.effectiveLimits(tenant);
+    if (limits.aiRequests !== null && (await Pl.currentUsage(tenant)).aiRequests >= limits.aiRequests) throw new HttpError(429, 'ai_quota', `이번 달 회사 AI 요청 ${limits.aiRequests}회를 모두 써 마케팅 자동 제작을 멈췄습니다 — 관리 → 사용량·요금제`);
+  }
   const cap = limitsOf(await settingsOf(tenant)).aiMonthlyUsd;
   if (cap !== null && (await mktAiUsd(tenant)).usd >= cap) throw new HttpError(429, 'mkt_ai_quota', `이번 달 마케팅 AI 한도($${cap})를 다 썼습니다 — 자동 제작 설정에서 한도를 올리거나 다음 달 1일에 다시 만듭니다`);
 }
@@ -768,7 +773,7 @@ export async function automationView(u: SessionUser) {
   // #544(로컬 13:55): 그림·프롬프트가 실제로 쓰는 바탕 색과 출처(피드 틀·영상 끝 화면·브랜드 색·회사 기본 색)를 키트 화면에 그대로
   const D = await import('./mktCarouselDraw');
   const withDraw = await Promise.all((brands as any[]).map(async (b) => ({ ...b, draw: await D.brandColorInfo(t, b).catch(() => ({ color: null, from: null })) })));
-  return { settings: s, limits: limitsOf(s), usage: { ...(await usageOf(t)), ai: await mktAiUsd(t), companyAiUsd: co.costUsd, companyAiLimitUsd: co.limitUsd }, plans: await planTable(), production: await productionLeft(t), rules, requests, ledger, brands: withDraw, people, canEdit: isAdmin(u),
+  return { settings: s, limits: limitsOf(s), usage: { ...(await usageOf(t)), ai: await mktAiUsd(t), companyAiUsd: co.costUsd, companyAiLimitUsd: co.limitUsd, companyAi: { usedKrw: co.budget.usedKrw, limitKrw: co.budget.limitKrw, pct: co.budget.pct, resetLabel: co.budget.resetLabel } }, plans: await planTable(), production: await productionLeft(t), rules, requests, ledger, brands: withDraw, people, canEdit: isAdmin(u),
     feedCatalog: { templates: TEMPLATE_IDS.map((id) => { const x = FEED_TEMPLATES[id]; return { id, label: x.label, desc: x.desc, need: x.need ? NEED_LABEL[x.need as keyof typeof NEED_LABEL] : null }; }), styles: Object.entries(FEED_STYLES).map(([id, x]) => ({ id, label: x.label, templates: [...x.templates] as string[] })) } };
 }
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 제작 설정은 관리자가 합니다'); }

@@ -46,7 +46,7 @@ export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<
   const codes = Object.keys(counts).filter((k) => counts[k] > 0);
   if (codes.length) {
     for (const a of await sql<{ code: string; adds: Partial<Limits> }[]>`select code, adds from plan_addons where code = any(${codes})`) {
-      for (const [k, v] of Object.entries(a.adds) as [keyof Limits, number][]) if (limits[k] !== null) limits[k] = (limits[k] ?? 0) + v * counts[a.code];
+      for (const [k, v] of Object.entries(a.adds) as [keyof Limits, number][]) if (k in limits && limits[k] !== null) limits[k] = (limits[k] ?? 0) + v * counts[a.code]; // 원 예산(aiBudgetKrw)은 ai/companyBudget 이 셈
     }
   }
   return { limits, sub };
@@ -106,8 +106,11 @@ export async function assertStorage(u: SessionUser, addBytes: number) {
     throw new HttpError(409, 'storage_full', `회사 저장공간(${limits.storageGb}GB)이 가득 찼습니다. 기존 파일 보기·내려받기는 계속 됩니다. 관리 → 사용량·요금제에서 정리하거나 저장 팩(+20GB 월 3,000원·+100GB 월 9,900원)을 요청해 주세요.`);
   }
 }
-export async function assertAiRequest(u: SessionUser) {
+/** AI 요청 전 회사 한도: 대표 10/24 ② 회사 월 AI 예산(원, 다 쓰면 다음 달 1일까지 멈춤) → 요금제 월 AI 요청 수.
+ *  legacy = 요금제에 원 예산이 없을 때 예전 회사 월 한도($)도 확인(예전부터 확인하던 AI 비서·문서·회의록 등에서만) */
+export async function assertAiRequest(u: SessionUser, o: { legacy?: boolean } = {}) {
   const tenant = tenantOfUser(u);
+  await (await import('./ai/companyBudget')).assertCompanyAi(tenant, { legacy: !!o.legacy });
   const { limits } = await effectiveLimits(tenant);
   if (limits.aiRequests === null) return;
   const usage = await currentUsage(tenant);
@@ -142,7 +145,8 @@ export async function usageOverview(u: SessionUser) {
       where r.tenant = ${tenant} order by r.created_at desc limit 10`,
   ]);
   return { tenant, subscription: { planCode: sub.plan_code, planName: sub.plan_name, monthlyKrw: sub.per_user_krw ? sub.per_user_krw * Math.max(1, usage.users) : sub.monthly_krw, perUserKrw: sub.per_user_krw ?? null, addons: sub.addons, periodStart: sub.period_start, periodEnd: sub.period_end, status: sub.status },
-    limits, usage, plans, addons, topFiles: top, requests, demo: tenant === 'demo', ai: await aiBreakdown(tenant, sql), aiLimits: await (await import('./aiLimits')).aiLimitsView(tenant, sql), canEdit: (await (await import('./menuPerms')).menuLevel(u, 'usage', sql)) === 'edit' };
+    limits, usage, plans, addons, topFiles: top, requests, demo: tenant === 'demo', ai: await aiBreakdown(tenant, sql), aiLimits: await (await import('./aiLimits')).aiLimitsView(tenant, sql), canEdit: (await (await import('./menuPerms')).menuLevel(u, 'usage', sql)) === 'edit',
+    aiBudget: await (await import('./ai/companyBudget')).companyAiBudget(tenant, sql) }; // 대표 10/24 ② 회사 월 AI 예산(원) 게이지
 }
 
 /** V14 4번: 이번 달 AI 사용 — 사람별·기능별, 회사 월 한도($) 대비 %, 원 환산(USD_KRW, 기본 1,400) */
@@ -190,11 +194,12 @@ export async function platformOverview(u: SessionUser) {
   const sql = db();
   const tenants = await sql<{ id: string; name: string }[]>`select id, name from tenants order by created_at`;
   const rows = await Promise.all(tenants.map(async (t) => {
-    const [{ limits, sub }, usage] = await Promise.all([effectiveLimits(t.id, sql), currentUsage(t.id, sql)]);
+    const [{ limits, sub }, usage, budget] = await Promise.all([effectiveLimits(t.id, sql), currentUsage(t.id, sql), import('./ai/companyBudget').then((B) => B.companyAiBudget(t.id, sql))]);
     const pct = (used: number, lim: number | null) => (lim === null ? null : lim === 0 ? 100 : Math.round((used / lim) * 100));
-    const p = { storage: pct(usage.storageBytes / GB, limits.storageGb), ai: pct(usage.aiRequests, limits.aiRequests), users: pct(usage.users, limits.users) };
+    // AI 칸: 대표 10/24 ② 회사 월 AI 예산(원)이 있으면 그 %(없으면 요청 수 %)
+    const p = { storage: pct(usage.storageBytes / GB, limits.storageGb), ai: budget.source === 'legacy' ? pct(usage.aiRequests, limits.aiRequests) : budget.pct, users: pct(usage.users, limits.users) };
     return { ...t, planCode: sub.plan_code, planName: sub.plan_name, monthlyKrw: sub.monthly_krw, addons: sub.addons, periodEnd: sub.period_end, status: sub.status, note: sub.note ?? null,
-      limits, usage, pct: p, overLimit: Object.values(p).some((x) => x !== null && x >= 100) };
+      limits, usage, aiBudget: budget, pct: p, overLimit: Object.values(p).some((x) => x !== null && x >= 100) };
   }));
   const [plans, addons, requests] = await Promise.all([
     sql`select code, name, monthly_krw, per_user_krw, limits, description, public, sort, active from plans order by sort`,
@@ -227,7 +232,9 @@ export async function setSubscription(u: SessionUser, tenant: string, i: z.infer
 export const planInput = z.object({
   name: z.string().trim().min(1).max(50), monthlyKrw: z.number().int().min(0).max(100_000_000).nullable(),
   limits: z.object({ users: z.number().int().min(0).nullable(), storageGb: z.number().min(0).nullable(), aiRequests: z.number().int().min(0).nullable(),
-    perUserStorageGb: z.number().min(0).optional(), perUserAi: z.number().int().min(0).optional(), tasksTotal: z.number().int().min(0).nullable().optional() }),
+    perUserStorageGb: z.number().min(0).optional(), perUserAi: z.number().int().min(0).optional(), tasksTotal: z.number().int().min(0).nullable().optional(),
+    // 대표 10/24 ② 회사 월 AI 예산(원): 고정액 또는 1인 금액(× 결제 인원) — 둘 다 없으면 예전 한도
+    aiBudgetKrw: z.number().int().min(0).max(100_000_000).optional(), perUserAiBudgetKrw: z.number().int().min(0).max(10_000_000).optional() }),
   perUserKrw: z.number().int().min(0).max(1_000_000).nullable().optional(),
   description: z.string().max(200).nullable().optional(), public: z.boolean().optional(), active: z.boolean().optional(), sort: z.number().int().optional(),
 });
@@ -244,7 +251,7 @@ export async function upsertPlan(u: SessionUser, code: string, i: z.infer<typeof
   await audit(sql, u.id, 'platform.plan', null, null, { code, ...i }, null);
   return { ok: true };
 }
-export const addonInput = z.object({ name: z.string().trim().min(1).max(50), monthlyKrw: z.number().int().min(0).max(10_000_000), adds: z.record(z.enum(['users', 'storageGb', 'aiRequests']), z.number().min(0)), active: z.boolean().optional() });
+export const addonInput = z.object({ name: z.string().trim().min(1).max(50), monthlyKrw: z.number().int().min(0).max(10_000_000), adds: z.record(z.enum(['users', 'storageGb', 'aiRequests', 'aiBudgetKrw']), z.number().min(0)), active: z.boolean().optional() });
 export async function upsertAddon(u: SessionUser, code: string, i: z.infer<typeof addonInput>) {
   requirePlatform(u);
   if (!/^[a-z0-9_-]{2,40}$/.test(code)) throw badRequest('코드는 영문 소문자·숫자 2~40자');
@@ -282,6 +289,8 @@ export async function usageJob() {
     await sql`insert into tenant_usage (tenant, month, storage_bytes, ai_requests, ai_tokens, active_users) values (${t.id}, ${month}, ${usage.storageBytes}, ${usage.aiRequests}, ${usage.aiTokens}, ${usage.users})
       on conflict (tenant, month) do update set storage_bytes = excluded.storage_bytes, ai_requests = excluded.ai_requests, ai_tokens = excluded.ai_tokens, active_users = excluded.active_users, updated_at = now()`;
     if (t.id === 'demo') continue; // 체험 조직에는 관리자 알림 없음
+    // 대표 10/24 ② 회사 월 AI 예산(원) 80%·100% — AI 호출 때도 보내지만, 자동 작업으로만 쓴 달을 위해 여기서도 확인(같은 달 한 번)
+    alerts += await (await import('./ai/companyBudget')).budgetAlerts(t.id, undefined, sql).catch(() => 0);
     const admins = (await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active' and tenant = ${t.id}`).map((x) => x.id);
     const checks: [string, string, number, number | null][] = [
       ['storage', '저장공간', usage.storageBytes / GB, limits.storageGb], ['ai', 'AI 요청', usage.aiRequests, limits.aiRequests], ['users', '사용자', usage.users, limits.users],

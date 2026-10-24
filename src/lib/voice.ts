@@ -122,8 +122,8 @@ export async function correctVoice(u: SessionUser, i: z.infer<typeof correctInpu
   }
   text = out.join(' ');
   // 4) 애매한 곳만 AI 1번(단어장 후보 안에서만)
-  // 사람별 AI 한도를 다 썼거나 크레딧 부족이면 AI 보정은 건너뜀(서버 보정만)
-  const canAi = ambiguous.length > 0 && aiEnabled() && await (async () => { try { const G = await import('./ai/guard'); await G.assertAiCredit(); await G.assertUserBudget(u); return true; } catch { return false; } })();
+  // 사람별 AI 한도·회사 월 AI 예산(원)을 다 썼거나 크레딧 부족이면 AI 보정은 건너뜀(서버 보정만)
+  const canAi = ambiguous.length > 0 && aiEnabled() && await (async () => { try { const G = await import('./ai/guard'); await G.assertAiCredit(); await G.assertUserBudget(u); await (await import('./plans')).assertAiRequest(u); return true; } catch { return false; } })();
   if (canAi) {
     try {
       const p = anthropicProvider({ tier: 'fast' });
@@ -158,7 +158,7 @@ export const structureInput = z.object({ text: z.string().trim().min(1).max(2000
  */
 export async function structureVoice(u: SessionUser, i: z.infer<typeof structureInput>) {
   if (!aiEnabled()) return { ok: false as const };
-  try { const G = await import('./ai/guard'); await G.assertAiCredit(); await G.assertUserBudget(u); } catch { return { ok: false as const }; }
+  try { const G = await import('./ai/guard'); await G.assertAiCredit(); await G.assertUserBudget(u); await (await import('./plans')).assertAiRequest(u); } catch { return { ok: false as const }; }
   const dir = await directory(u);
   const people = (dir.users as unknown as { id: string; name: string; title: string | null; title_short: string | null }[]).slice(0, 200);
   const { todaySeoul } = await import('./time');

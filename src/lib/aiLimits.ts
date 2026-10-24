@@ -55,9 +55,11 @@ export async function aiLimitsView(tenant: string, sql: Sql = db()) {
   const of = (s: AiSpace) => bySpace.find((x) => x.space === s) ?? { space: s, requests: 0, usd: 0 };
   const r2 = (n: number) => Math.round(n * 100) / 100;
   const poolReqLeft = limits.aiRequests === null ? null : Math.max(0, limits.aiRequests - usage.aiRequests);
-  const poolUsdLimit = m.limitUsd > 0 ? m.limitUsd : null;
-  const poolUsdLeft = poolUsdLimit === null ? null : Math.max(0, r2(poolUsdLimit - m.costUsd));
-  const poolPct = limits.aiRequests !== null && limits.aiRequests > 0 ? Math.round((usage.aiRequests / limits.aiRequests) * 100) : poolUsdLimit ? Math.round((m.costUsd / poolUsdLimit) * 100) : null;
+  // 대표 10/24 ② 회사 월 AI 예산(원, 영상 제작 제외) — 달러 칸은 예산을 환율로 바꾼 값
+  const b = m.budget;
+  const poolUsdLimit = b.limitKrw === null ? null : r2(b.limitKrw / rate);
+  const poolUsdLeft = b.leftKrw === null ? null : r2(b.leftKrw / rate);
+  const poolPct = limits.aiRequests !== null && limits.aiRequests > 0 ? Math.max(Math.round((usage.aiRequests / limits.aiRequests) * 100), b.pct ?? 0) : b.pct;
   const w = of('work'), s = of('sales'), k = of('marketing');
   const ml = M.limitsOf(ms);
   const creditsLeft = ml.monthlyCredits === null ? null : Math.max(0, Math.round((ml.monthlyCredits - mu.monthCredits) * 10) / 10);
@@ -67,11 +69,11 @@ export async function aiLimitsView(tenant: string, sql: Sql = db()) {
     { key: 'work', name: AI_NAME.work, shared: true, planLabel: null, limit: { requests: limits.aiRequests, usd: poolUsdLimit }, used: { requests: w.requests, usd: r2(w.usd) },
       left: { requests: poolReqLeft, usd: poolUsdLeft }, pct: poolPct,
       feel: feelOf(poolUsdLeft, [['질문·답변', rates.assistant, '회'], ['메일·문자 초안', rates.mail_draft, '건'], ['문서 생성', rates.doc_engine, '건']], rate),
-      note: '회사가 함께 쓰는 한도(요금제 월 요청 수 + 회사 월 AI 한도)' },
+      note: b.source === 'legacy' ? '회사가 함께 쓰는 한도(요금제 월 요청 수 + 회사 월 AI 한도)' : `회사 월 AI 예산을 업무·영업·마케팅 글 AI 가 함께 씀(영상 제작 제외) · ${b.resetLabel}에 다시 채워짐` },
     { key: 'sales', name: AI_NAME.sales, shared: true, planLabel: null, limit: { requests: limits.aiRequests, usd: poolUsdLimit }, used: { requests: s.requests, usd: r2(s.usd) },
       left: { requests: poolReqLeft, usd: poolUsdLeft }, pct: poolPct,
       feel: feelOf(poolUsdLeft, [['영업 질문·분석', rates.sales_assistant, '회'], ['제안서·견적 문서', rates.doc_engine, '건']], rate),
-      note: '업무 AI 와 같은 회사 한도를 나눠 씁니다(영업 사용자 인당 한도는 요금 설계안 — 결정 전)' },
+      note: b.source === 'legacy' ? '업무 AI 와 같은 회사 한도를 나눠 씁니다(영업 사용자 인당 한도는 요금 설계안 — 결정 전)' : '업무 AI 와 같은 회사 월 AI 예산을 나눠 씁니다' },
     { key: 'marketing', name: AI_NAME.marketing, shared: mktUsdLimit === null, planLabel: ms.plan?.label ?? null,
       limit: { requests: null, usd: mktUsdLimit, credits: ml.monthlyCredits, videos: ml.videoMonthly }, used: { requests: k.requests, usd: r2(k.usd), credits: mu.monthCredits, videos: mu.monthVideos },
       left: { requests: null, usd: mktUsdLeft, credits: creditsLeft, videos: ml.videoMonthly === null ? null : Math.max(0, ml.videoMonthly - mu.monthVideos) },
@@ -83,12 +85,12 @@ export async function aiLimitsView(tenant: string, sql: Sql = db()) {
       ],
       note: ms.plan_code ? `마케팅 요금제 ${ms.plan?.label ?? ms.plan_code}: 월 크레딧·마케팅 AI 한도·생성 영상 편수` : '마케팅 요금제를 고르면 크레딧 한도가 생깁니다(지금은 회사 AI 한도만)' },
   ];
-  return { month: month(), usdKrw: rate, rows, pool: { requests: { limit: limits.aiRequests, used: usage.aiRequests, left: poolReqLeft }, usd: { limit: poolUsdLimit, used: r2(m.costUsd), left: poolUsdLeft } }, plans };
+  return { month: month(), usdKrw: rate, rows, pool: { requests: { limit: limits.aiRequests, used: usage.aiRequests, left: poolReqLeft }, usd: { limit: poolUsdLimit, used: r2(m.costUsd), left: poolUsdLeft } }, budget: b, plans };
 }
 
 export type AiPlanRow = {
   code: string; name: string; perUserKrw: number | null; monthlyKrw: number | null; minUsers: number | null; description: string | null;
-  work: { perUserAi: number | null; aiRequests: number | null; feelPerUser: Feel[] };
+  work: { perUserAi: number | null; aiRequests: number | null; feelPerUser: Feel[]; budgetKrw: number | null; perUserBudgetKrw: number | null };
   sales: { shared: true };
   marketing: { code: string; label: string; price: number | null; monthlyCredits: number; aiMonthlyUsd: number | null; videoMonthly: number; regenMonthly: number; images: number; videos: number; weekly: Record<string, number> } | null;
 };
@@ -102,16 +104,19 @@ export async function aiPlanMatrix(sql: Sql = db()) {
   ]);
   const rate = usdKrwRate();
   const rows: AiPlanRow[] = plans.map((p) => {
-    const lim = (p.limits ?? {}) as { aiRequests?: number | null; perUserAi?: number | null };
+    const lim = (p.limits ?? {}) as { aiRequests?: number | null; perUserAi?: number | null; aiBudgetKrw?: number | null; perUserAiBudgetKrw?: number | null };
     const mk = mkt[p.code.replace(/^w_/, '')] ?? null;
-    // 1인당 월 요청 수 → 체감(질문 기준): 요청 1회 = 질문 1회로 본다
+    // 1인당 월 요청 수 → 체감(질문 기준): 요청 1회 = 질문 1회로 본다. 대표 10/24 ② 원 예산 요금제는 1인 금액 ÷ 최근 평균 단가
     const per = lim.perUserAi ?? null;
+    const perKrw = lim.perUserAiBudgetKrw ?? null;
+    const feelPerUser: Feel[] = perKrw !== null ? [{ label: '질문·답변', n: Math.floor(perKrw / (rates.assistant * rate)), unit: '회', per: `1회 약 ${krw(rates.assistant, rate)}` }, { label: '메일·문자 초안', n: Math.floor(perKrw / (rates.mail_draft * rate)), unit: '건', per: `1건 약 ${krw(rates.mail_draft, rate)}` }]
+      : per === null ? [] : [{ label: '질문·답변', n: per, unit: '회', per: `1회 약 ${krw(rates.assistant, rate)}` }, { label: '메일·문자 초안', n: Math.floor((per * rates.assistant) / rates.mail_draft), unit: '건', per: `1건 약 ${krw(rates.mail_draft, rate)}` }];
     return { code: p.code, name: p.name, perUserKrw: p.per_user_krw ?? null, monthlyKrw: p.monthly_krw ?? null, minUsers: p.min_users ?? null, description: p.description ?? null,
-      work: { perUserAi: per, aiRequests: lim.aiRequests ?? null, feelPerUser: per === null ? [] : [{ label: '질문·답변', n: per, unit: '회', per: `1회 약 ${krw(rates.assistant, rate)}` }, { label: '메일·문자 초안', n: Math.floor((per * rates.assistant) / rates.mail_draft), unit: '건', per: `1건 약 ${krw(rates.mail_draft, rate)}` }] },
+      work: { perUserAi: per, aiRequests: lim.aiRequests ?? null, feelPerUser, budgetKrw: lim.aiBudgetKrw ?? null, perUserBudgetKrw: perKrw },
       sales: { shared: true as const },
       marketing: mk ? { code: mk.code, label: mk.label, price: mk.price, monthlyCredits: mk.monthlyCredits, aiMonthlyUsd: mk.aiMonthlyUsd, videoMonthly: mk.videoMonthly, regenMonthly: mk.regenMonthly,
         images: Math.floor(mk.monthlyCredits / cost.imageCredits), videos: Math.floor(mk.monthlyCredits / cost.videoCredits), weekly: mk.weekly } : null };
   });
-  return { plans: rows, packs: packs.map((a) => ({ code: a.code, name: a.name, monthlyKrw: a.monthly_krw, aiRequests: Number(a.adds?.aiRequests ?? 0) })), cost, rates, usdKrw: rate,
-    note: '업무·영업 AI 는 회사 공유 한도(1인당 월 요청 수 × 인원 + 회사 월 AI 한도). 영업 사용자 인당 한도는 대표 결정 전. 마케팅은 마케팅 요금제(크레딧) 별도.' };
+  return { plans: rows, packs: packs.map((a) => ({ code: a.code, name: a.name, monthlyKrw: a.monthly_krw, aiRequests: Number(a.adds?.aiRequests ?? 0), aiBudgetKrw: a.adds?.aiBudgetKrw === undefined ? null : Number(a.adds.aiBudgetKrw) })), cost, rates, usdKrw: rate,
+    note: '업무·영업·마케팅 글 AI 는 회사 월 AI 예산 하나를 함께 씀(1인 금액 × 결제 인원 + 마케팅 요금제 AI 몫 + AI 크레딧 팩, 매달 1일 다시 채워짐). 영상·시안 생성은 마케팅 크레딧으로 따로.' };
 }

@@ -25,19 +25,16 @@ import type { SessionUser } from '../types';
 const TZ = 'Asia/Seoul';
 const MAX_STEPS = 8;
 
-export function defaultBudget() {
-  const n = Number(process.env.AI_MONTHLY_BUDGET_USD);
-  return Number.isFinite(n) && n > 0 ? n : 30;
-}
+/** 이번 달 회사 AI 사용($·요청·토큰) + 대표 10/24 ② 회사 월 AI 예산(원, ai/companyBudget). limitUsd = 예산을 달러로(무제한이면 0) — 예전 화면 호환 */
 export async function usageThisMonth(tenant: string) {
   const sql = db();
   const start = DateTime.now().setZone(TZ).startOf('month').toJSDate();
-  const [[u], [l]] = await Promise.all([
+  const [[u], budget] = await Promise.all([
     sql<{ cost: number; requests: number; tokens: number }[]>`select coalesce(sum(cost_usd), 0)::float8 cost, count(*)::int requests,
       coalesce(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens), 0)::float8 tokens from ai_usage where tenant = ${tenant} and created_at >= ${start}`,
-    sql<{ monthly_usd: number }[]>`select monthly_usd::float8 monthly_usd from ai_limits where tenant = ${tenant}`,
+    (await import('./companyBudget')).companyAiBudget(tenant, sql),
   ]);
-  return { costUsd: Math.round(u.cost * 10000) / 10000, requests: u.requests, tokens: u.tokens, limitUsd: l?.monthly_usd ?? defaultBudget() };
+  return { costUsd: Math.round(u.cost * 10000) / 10000, requests: u.requests, tokens: u.tokens, limitUsd: budget.limitKrw === null ? 0 : Math.round((budget.limitKrw / usdKrw()) * 100) / 100, budget };
 }
 
 export async function aiStatus(u: SessionUser) {
@@ -52,14 +49,21 @@ export async function aiStatus(u: SessionUser) {
   const quota = { used: cu.aiRequests, limit: limits.aiRequests };
   const G = await import('./guard');
   const [budget, creditUntil] = await Promise.all([G.userAiBudget(u), G.creditBlockedUntil()]);
-  return { enabled: true, model: modelFor(), usage: isAdmin(u) ? usage : { ...usage, costUsd: undefined, tokens: undefined }, quota,
-    budget, creditBlocked: !!creditUntil, creditMessage: creditUntil ? G.CREDIT_MSG : null,
-    overLimit: usage.costUsd >= usage.limitUsd || (quota.limit !== null && quota.used >= quota.limit) || budget.usedKrw >= budget.limitKrw || !!creditUntil, canSetLimit: u.role === 'owner' };
+  // 대표 10/24 ② 회사 월 AI 예산: 직원에게는 %·다시 채워지는 날만(금액은 관리자만), 다 썼으면 안내 문구
+  const B = await import('./companyBudget');
+  const cb = usage.budget;
+  const company = { pct: cb.pct, over: cb.over, resetLabel: cb.resetLabel, message: cb.over ? B.budgetMessage(cb) : null, ...(isAdmin(u) ? { limitKrw: cb.limitKrw, usedKrw: cb.usedKrw, leftKrw: cb.leftKrw } : {}) };
+  const { budget: _cb, ...usageOut } = usage;
+  return { enabled: true, model: modelFor(), usage: isAdmin(u) ? usageOut : { ...usageOut, costUsd: undefined, tokens: undefined }, quota,
+    budget, company, creditBlocked: !!creditUntil, creditMessage: creditUntil ? G.CREDIT_MSG : null,
+    overLimit: cb.over || (quota.limit !== null && quota.used >= quota.limit) || budget.usedKrw >= budget.limitKrw || !!creditUntil, canSetLimit: u.role === 'owner' };
 }
-export async function setLimit(u: SessionUser, monthlyUsd: number) {
+/** 대표가 정하는 회사 AI 월 한도($) — null 이면 지움(요금제 예산 그대로, 예전 요금제는 기본 한도) */
+export async function setLimit(u: SessionUser, monthlyUsd: number | null) {
   if (u.role !== 'owner') throw new HttpError(403, 'forbidden', '대표만 바꿀 수 있습니다');
   const sql = db();
-  await sql`insert into ai_limits (tenant, monthly_usd, updated_by) values (${tenantOf(u)}, ${monthlyUsd}, ${u.id})
+  if (monthlyUsd === null) await sql`delete from ai_limits where tenant = ${tenantOf(u)}`;
+  else await sql`insert into ai_limits (tenant, monthly_usd, updated_by) values (${tenantOf(u)}, ${monthlyUsd}, ${u.id})
     on conflict (tenant) do update set monthly_usd = excluded.monthly_usd, updated_by = excluded.updated_by, updated_at = now()`;
   await audit(sql, u.id, 'ai.limit', null, null, { monthlyUsd }, null);
   return { ok: true };
@@ -545,8 +549,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         instructions: z.string().trim().min(1).max(20000), referenceFileIds: z.array(z.string().uuid()).max(5).optional(), baseJobId: z.string().uuid().optional(), company: z.string().max(30).optional(), design: z.boolean().optional(), confirmedCost: z.boolean().optional() }).parse(input);
       const T = await import('./threads');
       if (!(await T.aiSettings(tenantOf(u))).doc_engine) return { error: '회사 설정에서 문서 작업이 꺼져 있습니다. 대신 propose_create_document·propose_xlsx_report 를 쓰세요.' };
-      const usage = await usageThisMonth(tenantOf(u));
-      if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', '이번 달 AI 사용 한도에 도달해 문서 작업을 시작할 수 없습니다');
+      await (await import('./companyBudget')).assertCompanyAi(tenantOf(u)); // 대표 10/24 ② 회사 월 AI 예산(원) — 다 썼으면 다음 달 1일까지 시작 안 함
       for (const f of i.referenceFileIds ?? []) { const lf = await loadLibraryFile(u, f, 'ai'); if (lf.effective_security === 'confidential') c.confidential = true; }
       // V23 4장·4.5: 예상 비용(최근 내 문서 평균, 새 디자인은 3배)이 남은 한도보다 크면 시작하지 않음, 500원 넘으면 먼저 확인
       {
@@ -866,11 +869,9 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   if (!aiEnabled()) throw notFound();
   await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use'); // V13 메뉴 권한
   const tenant = tenantOf(u);
-  const usage = await usageThisMonth(tenant);
-  if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다. 대표에게 한도 조정을 요청하세요.`);
   const userText = (i.text ?? (i.messages?.[i.messages.length - 1]?.role === 'user' ? i.messages[i.messages.length - 1].text : '')).trim();
   if (!userText) throw badRequest('질문을 입력하세요');
-  await (await import('../plans')).assertAiRequest(u); // V10 요금제 월 AI 요청 수
+  await (await import('../plans')).assertAiRequest(u, { legacy: true }); // 대표 10/24 ② 회사 월 AI 예산(원)·예전 달러 한도 + V10 요금제 월 AI 요청 수
   const G = await import('./guard');
   await G.assertAiCredit();
   await G.assertUserBudget(u); // V23 4장: 사람별 월·하루 한도
@@ -1122,9 +1123,7 @@ export async function fillFromFiles(u: SessionUser, i: z.infer<typeof fillInput>
   if (!aiEnabled()) throw notFound();
   await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use');
   const tenant = tenantOf(u);
-  const usage = await usageThisMonth(tenant);
-  if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다.`);
-  await (await import('../plans')).assertAiRequest(u);
+  await (await import('../plans')).assertAiRequest(u, { legacy: true });
   const fb = await fileBlocks(u, i.fileIds);
   const system = `워크인 업무 등록 도우미입니다. 첨부 자료를 읽고 업무 한 건의 제목(짧게), 설명(핵심 요약·메모, 한국어), 체크리스트(자료의 각 항목·할 일, 최대 30개), 자료에 마감이 있으면 dueDate(YYYY-MM-DD)·dueTime(HH:MM)을 JSON 으로만 답하세요. 없는 내용은 지어내지 말고 null. 오늘: ${todaySeoul()} (Asia/Seoul).`;
   const r = await provider.chat({ system, tools: [], format: FILL_SCHEMA,

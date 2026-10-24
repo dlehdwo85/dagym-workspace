@@ -103,7 +103,9 @@ export default function PlatformPage() {
                   <tr key={t.id} className={cx('border-t border-line align-top', t.overLimit && 'bg-red-50/50')}>
                     <td className={cell}><div className="font-medium">{t.name}</div><div className="text-[11px] text-ink-3">{t.id}{t.overLimit && <b className="ml-1 text-red-600">한도 초과</b>}</div></td>
                     <td className={cx(cell, pctTone(t.pct.storage))}>{fmtBytes(t.usage.storageBytes)} / {lim(t.limits.storageGb, 'GB')}</td>
-                    <td className={cx(cell, pctTone(t.pct.ai))}>{t.usage.aiRequests}회 / {lim(t.limits.aiRequests, '회')}<div className="text-[11px] text-ink-3">${t.usage.aiCostUsd}</div></td>
+                    <td className={cx(cell, pctTone(t.pct.ai))}>{t.aiBudget && t.aiBudget.source !== 'legacy'
+                      ? <>{won(t.aiBudget.usedKrw)} / {t.aiBudget.limitKrw === null ? '무제한' : won(t.aiBudget.limitKrw)}<div className="text-[11px] text-ink-3">월 AI 예산 · {t.usage.aiRequests}회</div></>
+                      : <>{t.usage.aiRequests}회 / {lim(t.limits.aiRequests, '회')}<div className="text-[11px] text-ink-3">${t.usage.aiCostUsd}</div></>}</td>
                     <td className={cx(cell, pctTone(t.pct.users))}>{t.usage.users}명 / {lim(t.limits.users, '명')}</td>
                     <td className={cell}>
                       <select className={small} value={e.planCode} onChange={(x) => set({ planCode: x.target.value })} aria-label={`${t.name} 요금제`}>
@@ -135,10 +137,11 @@ export default function PlatformPage() {
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">요금제 (비우면 무제한·별도 협의)</h2>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-sm" data-testid="platform-plans">
-            <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>코드</th><th className={cell}>이름</th><th className={cell}>월 요금(원)</th><th className={cell}>1인 요금</th><th className={cell}>사용자</th><th className={cell}>저장(GB)</th><th className={cell}>AI 요청/월</th><th className={cell}>1인 저장·AI</th><th className={cell}>공개</th><th /></tr></thead>
+            <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>코드</th><th className={cell}>이름</th><th className={cell}>월 요금(원)</th><th className={cell}>1인 요금</th><th className={cell}>사용자</th><th className={cell}>저장(GB)</th><th className={cell}>AI 요청/월</th><th className={cell}>1인 저장·AI</th><th className={cell} title="대표 10/24 ②: 회사 월 AI 예산(원) — 회사 고정액 또는 1인 금액 × 결제 인원. 비우면 요청 횟수·예전 한도">AI 예산(원) 회사·1인</th><th className={cell}>공개</th><th /></tr></thead>
             <tbody>
               {data.plans.map((p: any) => {
-                const e = plans[p.code] ?? { name: p.name, monthlyKrw: p.monthly_krw ?? '', perUserKrw: p.per_user_krw ?? '', puStorage: p.limits.perUserStorageGb ?? '', puAi: p.limits.perUserAi ?? '', users: p.limits.users ?? '', storageGb: p.limits.storageGb ?? '', aiRequests: p.limits.aiRequests ?? '', public: p.public };
+                const e = plans[p.code] ?? { name: p.name, monthlyKrw: p.monthly_krw ?? '', perUserKrw: p.per_user_krw ?? '', puStorage: p.limits.perUserStorageGb ?? '', puAi: p.limits.perUserAi ?? '', users: p.limits.users ?? '', storageGb: p.limits.storageGb ?? '', aiRequests: p.limits.aiRequests ?? '',
+                  aiKrw: p.limits.aiBudgetKrw ?? '', puAiKrw: p.limits.perUserAiBudgetKrw ?? '', public: p.public };
                 const set = (patch: any) => setPlans({ ...plans, [p.code]: { ...e, ...patch } });
                 return (
                   <tr key={p.code} className="border-t border-line">
@@ -148,10 +151,13 @@ export default function PlatformPage() {
                     <td className={cell}><input className={small} inputMode="numeric" value={e.perUserKrw} onChange={(x) => set({ perUserKrw: x.target.value })} aria-label={`${p.code} 1인 요금`} /></td>
                     {(['users', 'storageGb', 'aiRequests'] as const).map((k) => <td key={k} className={cell}><input className={small} inputMode="numeric" value={e[k]} onChange={(x) => set({ [k]: x.target.value })} aria-label={`${p.code} ${k}`} /></td>)}
                     <td className={cell}><span className="flex gap-1"><input className={cx(small, 'w-12')} inputMode="numeric" value={e.puStorage} onChange={(x) => set({ puStorage: x.target.value })} aria-label={`${p.code} 1인 저장GB`} /><input className={cx(small, 'w-12')} inputMode="numeric" value={e.puAi} onChange={(x) => set({ puAi: x.target.value })} aria-label={`${p.code} 1인 AI`} /></span></td>
+                    <td className={cell}><span className="flex gap-1"><input className={cx(small, 'w-16')} inputMode="numeric" value={e.aiKrw} placeholder="회사" onChange={(x) => set({ aiKrw: x.target.value })} aria-label={`${p.code} 회사 월 AI 예산(원)`} data-testid={`plan-ai-krw-${p.code}`} />
+                      <input className={cx(small, 'w-14')} inputMode="numeric" value={e.puAiKrw} placeholder="1인" onChange={(x) => set({ puAiKrw: x.target.value })} aria-label={`${p.code} 1인 월 AI 예산(원)`} data-testid={`plan-ai-krw-pu-${p.code}`} /></span></td>
                     <td className={cell}><input type="checkbox" checked={e.public} onChange={(x) => set({ public: x.target.checked })} aria-label={`${p.code} 공개`} /></td>
                     <td className={cell}><Button size="sm" variant="secondary" onClick={() => save(`/api/platform/plans/${p.code}`, { name: e.name, monthlyKrw: num(String(e.monthlyKrw)), perUserKrw: num(String(e.perUserKrw)), public: e.public,
                       limits: { users: num(String(e.users)), storageGb: num(String(e.storageGb)), aiRequests: num(String(e.aiRequests)),
-                        ...(num(String(e.puStorage)) ? { perUserStorageGb: num(String(e.puStorage))! } : {}), ...(num(String(e.puAi)) ? { perUserAi: num(String(e.puAi))! } : {}) } }, () => setPlans((s) => { const n = { ...s }; delete n[p.code]; return n; }))}>저장</Button></td>
+                        ...(num(String(e.puStorage)) ? { perUserStorageGb: num(String(e.puStorage))! } : {}), ...(num(String(e.puAi)) ? { perUserAi: num(String(e.puAi))! } : {}),
+                        ...(num(String(e.aiKrw)) !== null ? { aiBudgetKrw: num(String(e.aiKrw))! } : {}), ...(num(String(e.puAiKrw)) !== null ? { perUserAiBudgetKrw: num(String(e.puAiKrw))! } : {}) } }, () => setPlans((s) => { const n = { ...s }; delete n[p.code]; return n; }))}>저장</Button></td>
                   </tr>
                 );
               })}

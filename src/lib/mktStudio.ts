@@ -118,7 +118,7 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
   const P = await import('./ai/provider');
   if (P.aiEnabled()) {
     try {
-      const { assertMktAi } = await import('./mktAuto'); await assertMktAi(tenant);
+      const { assertMktAi } = await import('./mktAuto'); await assertMktAi(tenant, { video }); // 영상 기획은 마케팅 크레딧 몫 — 회사 AI 예산 밖
       const p = P.anthropicProvider({ tier: 'default' });
       const target = Math.round((spec.seconds ?? 15) - 2.5 + 0.5 + 3 * 0.4);
       const videoRules = `- 국내 대기업 TV·디지털 광고 수준: 메시지 하나, 첫 3초 훅, 인물의 작은 감정 변화, 제품·서비스가 문제를 푸는 순간, 마지막은 브랜드(끝 화면은 합성 단계가 따로 붙임).
@@ -154,7 +154,7 @@ ${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}${mem ? `\n${mem}` : ''}`,
                 properties: { line: { type: 'string' }, visualEn: { type: 'string' }, seconds: { type: 'integer' }, screenMediaId: { type: 'string' }, device: { type: 'string', enum: ['phone', 'laptop', 'none'] } } } } } : {}) } },
       });
       await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-        values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_studio')`;
+        values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, ${video ? 'marketing_video_plan' : 'marketing_studio'})`;
       const o = JSON.parse((r.content as any[]).filter((x) => x.type === 'text').map((x) => x.text).join(''));
       const okIds = new Set(photos.map((p) => p.id)); const capIds = new Set(caps.map((c) => c.id)); let screens = 0;
       const scenes = video && Array.isArray(o.scenes) ? o.scenes.map((x: any) => {

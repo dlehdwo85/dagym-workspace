@@ -42,13 +42,16 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
     sql<{ tenant: string; plan_code: string | null; monthly_credits: number | null }[]>`select tenant, plan_code, monthly_credits::float8 monthly_credits from mkt_settings`.catch(() => []),
     sql<{ tenant: string; credits: number }[]>`select tenant, coalesce(sum(credits), 0)::float8 credits from mkt_credit_ledger where created_at >= (${monthStart}::date::timestamp at time zone 'Asia/Seoul') group by tenant`.catch(() => []),
   ]);
+  const B = await import('./ai/companyBudget');
   const tenants = await Promise.all(rows.map(async (r) => {
     const { limits } = await P.effectiveLimits(r.id, sql).catch(() => ({ limits: { aiRequests: null } as { aiRequests: number | null } }));
+    const budget = await B.companyAiBudget(r.id, sql).catch(() => null); // 대표 10/24 ② 회사 월 AI 예산(원)
     const ms = mktSettings.find((x) => x.tenant === r.id);
     const creditsLimit = ms ? ms.monthly_credits ?? (ms.plan_code ? mktPlans[ms.plan_code]?.monthlyCredits ?? null : null) : null;
     const creditsUsed = mktUsed.find((x) => x.tenant === r.id)?.credits ?? 0;
     const aiLimit = limits.aiRequests ?? null;
     return { ...r, ai_limit_requests: aiLimit, ai_left_requests: aiLimit === null ? null : Math.max(0, aiLimit - Number(r.ai_requests)),
+      ai_budget: budget ? { source: budget.source, limitKrw: budget.limitKrw, usedKrw: budget.usedKrw, pct: budget.pct, over: budget.over } : null,
       mkt_plan_code: ms?.plan_code ?? null, mkt_credits_limit: creditsLimit, mkt_credits_used: creditsUsed, mkt_credits_left: creditsLimit === null ? null : Math.max(0, Math.round((creditsLimit - creditsUsed) * 10) / 10) };
   }));
   const customers = tenants.filter((t) => !INTERNAL.includes(t.id) && !t.is_test);
@@ -66,12 +69,13 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   const [t] = await sql`select t.*, ow.email as owner_email from tenants t left join users ow on ow.id = t.owner_user_id where t.id = ${tenant}`;
   if (!t) throw notFound('없는 회사입니다');
   const P = await import('./plans');
-  const [{ limits, sub }, usage, users, support, payments] = await Promise.all([
+  const [{ limits, sub }, usage, users, support, payments, aiBudget] = await Promise.all([
     P.effectiveLimits(tenant, sql), P.currentUsage(tenant, sql),
     sql`select id, name, email, role, status, last_login_at, (totp_enabled_at is not null) as totp, platform_admin, created_at from users where tenant = ${tenant} and deleted_at is null order by (role = 'owner') desc, name`,
     sql`select s.created_at, s.expires_at, s.ended_at, s.reason, a.name as admin_name from support_sessions s join users a on a.id = s.admin_id where s.tenant = ${tenant} order by s.created_at desc limit 10`,
     sql`select p.id, p.kind, p.plan_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.paid_at, p.created_at, s.status as settlement, to_char(s.expected_on, 'YYYY-MM-DD') as expected_on, to_char(s.settled_on, 'YYYY-MM-DD') as settled_on
       from payments p left join payment_settlements s on s.payment_id = p.id where p.tenant = ${tenant} order by p.created_at desc limit 12`, // V32 2 정산 상태 같이
+    import('./ai/companyBudget').then((B) => B.companyAiBudget(tenant, sql)), // 대표 10/24 ② 회사 월 AI 예산(원)·내역
   ]);
   // V28 B2: 이번 달 청구 예정(정기 결제 금액, VAT 포함)·미납·AI 원가율
   const [b] = await sql<any[]>`select billing_cycle, next_billing_on, billing_amount, past_due_since, billing_lock, billing_grace_until from tenant_subscriptions where tenant = ${tenant}`;
@@ -81,22 +85,23 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   // 대표 10/20 ① 고객사 추가로 만든 회사: 대표가 아직 초대를 안 받았으면 '초대 대기'(다시 보내기)
   const [inv] = await sql<{ expires_at: Date; created_at: Date }[]>`select expires_at, created_at from invitations where user_id = ${t.owner_user_id} and accepted_at is null and revoked_at is null order by created_at desc limit 1`;
   const ownerInvite = t.owner_user_id && users.find((x: any) => x.id === t.owner_user_id)?.status === 'invited' ? { pending: true, expiresAt: inv?.expires_at ?? null, expired: !inv || new Date(inv.expires_at) < new Date() } : { pending: false };
-  return { ownerInvite, billing, payments, tenant: t, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support };
+  return { ownerInvite, billing, payments, tenant: t, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget };
 }
 
 export const overrideInput = z.object({
   users: z.number().int().min(0).max(100000).nullable().optional(), storageGb: z.number().min(0).max(100000).nullable().optional(), aiRequests: z.number().int().min(0).max(10_000_000).nullable().optional(),
   tasksTotal: z.number().int().min(0).max(100_000_000).nullable().optional(),
-  clear: z.array(z.enum(['users', 'storageGb', 'aiRequests', 'tasksTotal'])).optional(),
+  aiBudgetKrw: z.number().int().min(0).max(100_000_000).nullable().optional(), // 대표 10/24 ② 회사 월 AI 예산(원) — null = 무제한
+  clear: z.array(z.enum(['users', 'storageGb', 'aiRequests', 'tasksTotal', 'aiBudgetKrw'])).optional(),
 });
-/** 인원·저장·AI 한도 개별 조정(요금제 대신). clear 에 넣은 항목은 요금제 값으로 되돌림. AI 크레딧 지급 = aiRequests 를 올려 주는 것 */
+/** 인원·저장·AI 한도 개별 조정(요금제 대신). clear 에 넣은 항목은 요금제 값으로 되돌림. AI 크레딧 지급 = aiBudgetKrw(원 예산 요금제)·aiRequests(예전 요금제)를 올려 주는 것 */
 export async function setLimitOverrides(u: SessionUser, tenant: string, i: z.infer<typeof overrideInput>, ip: string | null) {
   requirePlatform(u);
   const sql = db();
   const [s] = await sql<{ limit_overrides: Record<string, unknown> }[]>`select limit_overrides from tenant_subscriptions where tenant = ${tenant}`;
   if (!s) throw notFound('요금제가 없는 회사입니다 — 먼저 요금제를 지정하세요');
   const next: Record<string, unknown> = { ...(s.limit_overrides ?? {}) };
-  for (const k of ['users', 'storageGb', 'aiRequests', 'tasksTotal'] as const) if (i[k] !== undefined) next[k] = i[k];
+  for (const k of ['users', 'storageGb', 'aiRequests', 'tasksTotal', 'aiBudgetKrw'] as const) if (i[k] !== undefined) next[k] = i[k];
   for (const k of i.clear ?? []) delete next[k];
   await sql`update tenant_subscriptions set limit_overrides = ${sql.json(next as never)}, updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
   await audit(sql, u.id, 'platform.limit_overrides', 'tenant', null, { tenant, ...next }, ip);

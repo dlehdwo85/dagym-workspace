@@ -73,6 +73,7 @@ import { backClose } from './backClose.step.mjs';
 import { supportPrograms } from './support.step.mjs';
 import { mktVideo } from './mktVideo.step.mjs';
 import { coAssign } from './coAssign.step.mjs';
+import { aiBudget } from './aiBudget.step.mjs';
 import { attachLibrary } from './attachLibrary.step.mjs';
 import { inbox } from './inbox.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
@@ -1805,7 +1806,7 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   assert.match(await owner.getByTestId('ai-limit-work').innerText(), /AI 비서[\s\S]*질문·답변/);
   assert.match(await owner.getByTestId('ai-limit-sales').innerText(), /AI 세일즈[\s\S]*회사 한도를 나눠/);
   assert.match(await owner.getByTestId('ai-limit-marketing').innerText(), /AI 마케터[\s\S]*시안 이미지/);
-  assert.match(await owner.getByTestId('ai-plan-matrix').innerText(), /베이직[\s\S]*1인당 월 6회[\s\S]*스탠다드[\s\S]*프로/);
+  assert.match(await owner.getByTestId('ai-plan-matrix').innerText(), /베이직[\s\S]*1인 월 500원분[\s\S]*스탠다드[\s\S]*1인 월 1,200원분[\s\S]*프로/); // 대표 10/24 ② 1인 월 AI 예산(원)
   await owner.getByTestId('ai-limits').screenshot({ path: `${SHOTS}/178-ai-limits.png` });
   await owner.getByTestId('plan-request').click();
   await owner.getByLabel('요청할 요금제').selectOption('w_standard'); // V27 요금표
@@ -2518,6 +2519,7 @@ await step('#494 메타 광고 자동 세팅: 광고 운영 메타 칸(초안 �
 await step('#450 영업실 지원사업: 사이드바 메뉴 → 맞춤 목록(1차 판단·조건 칩·D-day·자격 안 맞는 공고 빼기) → [AI 판단] → [신청 준비] 담당 업무 → 영업 홈 마감 임박 카드 → 상세(준비 서류·진행) → [신청 완료] → [직접 추가] 지난 신청 → 신청·결과 탭 → 휴대폰 폭', () => supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#454 영상 파이프라인 v2: 플랫폼 운영 내레이션(TTS) 카드·연결 시험 → 브랜드 키트 영상 끝 화면·자막 → 제작의뢰실 릴스 준비 상태 → [생성] 장면별 생성·검수·합성 → 장면 칩(실제 화면·검수 ✓)·완성 영상·승인 대기 → 휴대폰 폭', () => mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#475 업무 공동 배정(10/24 다시 설계): 업무 등록 시트 여러 명 = 기본 함께 담당(1건·완료 규칙 칸 없음) → 상세 담당자 칸 하나에 칩 3개 빼기·[+] 추가·활동 기록 → 담당자별 묶음 3곳·+2 → 휴대폰 [내 몫 완료] → 내 몫 완료 · 1/3(목록에 남음)·상세 진행 상자', () => coAssign({ owner, staff, ctx, sql, BASE, SHOTS }));
+await step('대표 10/24 ② 회사 월 AI 예산(원): 사용량 화면 게이지(84% 주황·다시 채워지는 날·영상 제작 따로) → AI 비서 회사 사용량 한 줄 → 100% 빨간 안내(다음 달 1일)·입력 막힘 → 플랫폼 운영 요금제 표 원 칸·회사 목록', () => aiBudget({ owner, sql, BASE, SHOTS }));
 await step('대표 23:40·23:55 마감일 버튼 크기 + 업무 첨부 자료실에서 가져오기(검색·체크 → 연결·타임라인)', () => attachLibrary({ owner, ctx, BASE, SHOTS }));
 await step('대표 02:30·03:00 승인함 통합(종류별 탭·건수·바로 승인/반려) · 예산 브랜드 축(세팅안 필요·총액 적기) · 월 목표 반려 · 매출 목표 AI 추천 · 지금 상태', () => inbox({ owner, ctx, sql, BASE, SHOTS }));
 

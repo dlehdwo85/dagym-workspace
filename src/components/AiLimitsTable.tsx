@@ -7,9 +7,9 @@ type Feel = { label: string; n: number | null; unit: string; per: string };
 type Row = { key: 'work' | 'sales' | 'marketing'; name: string; shared: boolean; planLabel: string | null; limit: { requests: number | null; usd: number | null; credits?: number | null; videos?: number | null };
   used: { requests: number; usd: number; credits?: number; videos?: number }; left: { requests: number | null; usd: number | null; credits?: number | null; videos?: number | null }; pct: number | null; feel: Feel[]; note: string };
 export type AiLimitsData = { month: string; usdKrw: number; rows: Row[]; pool: { requests: { limit: number | null; used: number; left: number | null }; usd: { limit: number | null; used: number; left: number | null } }; plans: PlanMatrix };
-export type PlanMatrix = { plans: { code: string; name: string; perUserKrw: number | null; monthlyKrw: number | null; minUsers: number | null; work: { perUserAi: number | null; aiRequests: number | null; feelPerUser: Feel[] };
+export type PlanMatrix = { plans: { code: string; name: string; perUserKrw: number | null; monthlyKrw: number | null; minUsers: number | null; work: { perUserAi: number | null; aiRequests: number | null; feelPerUser: Feel[]; budgetKrw?: number | null; perUserBudgetKrw?: number | null };
   marketing: { label: string; price: number | null; monthlyCredits: number; aiMonthlyUsd: number | null; videoMonthly: number; images: number; videos: number } | null }[];
-  packs: { code: string; name: string; monthlyKrw: number; aiRequests: number }[]; usdKrw: number; note: string };
+  packs: { code: string; name: string; monthlyKrw: number; aiRequests: number; aiBudgetKrw?: number | null }[]; usdKrw: number; note: string };
 
 const n = (v: number | null | undefined) => (v === null || v === undefined ? null : v.toLocaleString('ko-KR'));
 const won = (usd: number | null, rate: number) => (usd === null ? null : `약 ${Math.round(usd * rate).toLocaleString('ko-KR')}원`);
@@ -79,7 +79,9 @@ export function AiPlanMatrix({ matrix, currentCode, showPrice = true }: { matrix
               <tr key={p.code} className={cx('border-t border-line align-top', p.code === currentCode && 'bg-brand-50')} data-testid={`ai-plan-${p.code}`}>
                 <td className="py-1.5 pr-2"><div className={cx(p.code === currentCode && 'font-semibold')}>{p.name}</div>{showPrice && <div className="text-[11px] text-ink-3">{p.perUserKrw ? `1인 월 ${p.perUserKrw.toLocaleString('ko-KR')}원` : p.monthlyKrw === 0 || p.monthlyKrw === null ? '무료' : `월 ${p.monthlyKrw.toLocaleString('ko-KR')}원`}</div>}</td>
                 <td className="py-1.5 pr-2">
-                  {p.work.perUserAi !== null ? <>1인당 월 <b>{p.work.perUserAi}회</b>(회사 합산)</> : p.work.aiRequests !== null ? <>회사 월 <b>{p.work.aiRequests}회</b></> : '무제한'}
+                  {/* 대표 10/24 ②: 원 예산 요금제는 '1인 월 n원분(회사 합산)' + 체감 횟수 */}
+                  {p.work.perUserBudgetKrw != null ? <>1인 월 <b>{p.work.perUserBudgetKrw.toLocaleString('ko-KR')}원분</b>(회사 합산)</> : p.work.budgetKrw != null ? <>회사 월 <b>{p.work.budgetKrw.toLocaleString('ko-KR')}원분</b></>
+                    : p.work.perUserAi !== null ? <>1인당 월 <b>{p.work.perUserAi}회</b>(회사 합산)</> : p.work.aiRequests !== null ? <>회사 월 <b>{p.work.aiRequests}회</b></> : '무제한'}
                   {p.work.feelPerUser.length > 0 && <div className="text-[11px] text-ink-3">{p.work.feelPerUser.map((f) => `${f.label} 약 ${f.n}${f.unit}`).join(' · ')}</div>}
                 </td>
                 <td className="py-1.5 pr-2 text-ink-2">회사 공유<div className="text-[11px] text-ink-3">업무 AI 와 같은 한도</div></td>
@@ -93,7 +95,7 @@ export function AiPlanMatrix({ matrix, currentCode, showPrice = true }: { matrix
           </tbody>
         </table>
       </div>
-      {!!matrix.packs.length && <p className="mt-2 text-xs text-ink-2">AI 크레딧 팩(회사 단위, 업무·영업 공유): {matrix.packs.map((a) => `${a.name} +${a.aiRequests}회${showPrice ? ` 월 ${a.monthlyKrw.toLocaleString('ko-KR')}원` : ''}`).join(' · ')}</p>}
+      {!!matrix.packs.length && <p className="mt-2 text-xs text-ink-2">AI 크레딧 팩(회사 단위, 업무·영업·마케팅 공유): {matrix.packs.map((a) => `${a.name} +${a.aiBudgetKrw != null ? `${a.aiBudgetKrw.toLocaleString('ko-KR')}원분` : `${a.aiRequests}회`}${showPrice ? ` 월 ${a.monthlyKrw.toLocaleString('ko-KR')}원` : ''}`).join(' · ')}</p>}
       <p className="mt-1 text-[11px] text-ink-3">{matrix.note}</p>
     </section>
   );

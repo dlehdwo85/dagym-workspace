@@ -109,7 +109,8 @@ export async function suggestSources(u: SessionUser, i: z.infer<typeof suggestIn
   const text = `${i.industry} ${i.product ?? ''}`.toLowerCase();
   let keys = RULES.filter((r) => r.words.some((w) => text.includes(w.toLowerCase()))).map((r) => r.key);
   let extra: string[] = []; let via = 'rules';
-  if (aiEnabled()) {
+  // 회사 월 AI 예산(원)을 다 썼으면 AI 없이 규칙으로만(대표 10/24 ②)
+  if (aiEnabled() && await (await import('../plans')).assertAiRequest(u).then(() => true, () => false)) {
     const p = anthropicProvider({ tier: 'fast' });
     try {
       const r = await p.chat({

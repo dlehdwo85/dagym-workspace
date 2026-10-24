@@ -46,10 +46,12 @@ test('사용량·요금제: 세 AI 줄 — 공간별 쓴 양(purpose 로 구분)
   assert.ok(wf['메일·문자 초안'].n > wf['질문·답변'].n, '메일 초안이 더 싸다');
   // 요금제별 기준표: 업무 요금제 × 마케팅 요금제 짝(w_basic→basic) + AI 크레딧 팩
   const basic = L.plans.plans.find((p) => p.code === 'w_basic');
-  assert.equal(basic.work.perUserAi, 6); assert.equal(basic.marketing.label, '베이직'); assert.equal(basic.marketing.monthlyCredits, 30); assert.equal(basic.marketing.images, 4);
-  assert.equal(basic.work.feelPerUser[0].n, 6);
+  // 대표 10/24 ②: 1인 월 AI 예산(원, 192 초안 500원) — 요청 횟수 대신, 체감 = 500원 ÷ 질문 단가(기본 $0.05 × 1,400 = 70원) = 7회
+  assert.equal(basic.work.perUserAi, null); assert.equal(basic.work.perUserBudgetKrw, 500); assert.equal(basic.marketing.label, '베이직'); assert.equal(basic.marketing.monthlyCredits, 30); assert.equal(basic.marketing.images, 4);
+  assert.equal(basic.work.feelPerUser[0].n, 7);
   assert.equal(L.plans.plans.find((p) => p.code === 'w_free'), undefined, '#466 무료 5명 폐지(188) — 요금표에서 내림'); // 대표 10/23
-  assert.ok(L.plans.packs.some((a) => a.code === 'ai_credit_s' && a.aiRequests === 100));
+  assert.ok(L.plans.packs.some((a) => a.code === 'ai_credit_s' && a.aiRequests === 100 && a.aiBudgetKrw === 4950));
+  assert.equal(L.budget.source, 'legacy', '우리 회사(internal)는 예전 회사 월 한도'); assert.equal(L.budget.limitKrw, 14000);
   // 직원은 사용량 화면 없음(메뉴 권한 → 있는 줄도 모르게 404)
   assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 404);
 });

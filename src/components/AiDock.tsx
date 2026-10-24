@@ -7,7 +7,7 @@ import { AttachChips, askFor, useAiAttach } from './aiAttach';
 import { DocJobCard } from '@/components/DocJobCard';
 import { VoiceButton } from './voice';
 import { dockHideCls, useDockHide } from './useDockHide';
-import { AiBudgetBar, type Budget } from './AiBudget';
+import { AiBudgetBar, type Budget, type CompanyAi } from './AiBudget';
 import { ChatComposer, DoneSummary, LiveAnswer, MsgTools, ReplyMeta, useAiConversation, type ChatMsg } from './aiChat';
 import { AiText } from './AiText';
 import { AI_ACCEPT } from './libraryUpload';
@@ -59,7 +59,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
   const ctxRef = useRef(ctx); ctxRef.current = ctx;
   // V19 부록 A: 줄바꿈·멈춤·수정 (AI 비서 화면과 같은 동작)
   // V23 4.3: 남은 AI 한도 막대(패널을 열었을 때만 불러옴), 답이 올 때마다 새로
-  const aiStatus = useApi<{ budget?: Budget; creditMessage?: string | null }>(open ? '/api/ai/status' : null);
+  const aiStatus = useApi<{ budget?: Budget; company?: CompanyAi; creditMessage?: string | null }>(open ? '/api/ai/status' : null);
   const aiStatusRef = useRef(aiStatus.reload); aiStatusRef.current = aiStatus.reload;
   const conv = useAiConversation<M>({
     body: (t, fileIds) => { const c = ctxRef.current; return { text: t, ...(threadRef.current ? { threadId: threadRef.current } : {}), ...(fileIds.length ? { fileIds } : {}), ...(c.taskId ? { taskId: c.taskId } : { context: { page: c.page, ...(c.id ? { id: c.id } : {}) } }) }; },
@@ -167,7 +167,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
             <AttachChips files={att.files} uploading={att.uploading} onRemove={att.remove} compact />
             <input ref={att.inputRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => att.attach(e.target.files)} data-testid="ai-dock-file-input" />
             <div className="p-2">
-              <div className="mb-1.5"><AiBudgetBar compact budget={aiStatus.data?.budget} creditMessage={aiStatus.data?.creditMessage} onChanged={aiStatus.reload} /></div>
+              <div className="mb-1.5"><AiBudgetBar compact budget={aiStatus.data?.budget} company={aiStatus.data?.company} creditMessage={aiStatus.data?.creditMessage} onChanged={aiStatus.reload} /></div>
               <ChatComposer small value={text} onChange={setText} onSend={() => send(text)} onStop={() => conv.stop()} busy={busy} canSend={!att.uploading && (!!text.trim() || att.files.length > 0)} inputRef={inputRef}
                 onPaste={att.onPaste} placeholder="AI에게 요청 · 사진 첨부 가능" ariaLabel="AI 에게 요청 (화면 맥락)"
                 leading={<button type="button" onClick={() => att.inputRef.current?.click()} disabled={att.full || !!att.uploading} aria-label="사진·자료 첨부" title="사진·자료 첨부 (붙여넣기·끌어 놓기도 됩니다)" data-testid="ai-dock-attach"

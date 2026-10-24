@@ -321,10 +321,7 @@ export async function analyzeProgram(u: SessionUser, id: string, provider: AiPro
   if (!aiEnabled()) throw new HttpError(503, 'ai_off', 'AI 가 설정되지 않았습니다 — 플랫폼 운영자에게 요청해 주세요');
   const t = tenantOf(u); const sql = db(); const today = ymd();
   let p = await programFor(sql, t, id);
-  const { usageThisMonth } = await import('../ai/assistant');
-  const usage = await usageThisMonth(t);
-  if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다.`);
-  await (await import('../plans')).assertAiRequest(u);
+  await (await import('../plans')).assertAiRequest(u, { legacy: true }); // 회사 월 AI 예산(원)·예전 달러 한도·요청 수
   await (await import('../ai/guard')).assertUserBudget(u, sql);
   await (await import('../ai/guard')).assertAiCredit(sql);
   if (p.source === 'watch' && !p.summary && p.url) { // 기관 공지: 본문을 한 번 읽어 둔다(같은 호스트만)

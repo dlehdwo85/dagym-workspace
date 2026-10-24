@@ -58,10 +58,7 @@ export async function digestVideo(u: SessionUser, i: z.infer<typeof videoDigestI
   const f = await loadLibraryFile(u, i.fileId, 'ai');
   if (!/^video\//i.test(f.mime_type)) throw badRequest('영상 파일이 아닙니다');
   if (!i.frames.length && !i.audioFileId) throw badRequest('프레임이나 음성이 필요합니다');
-  const { usageThisMonth } = await import('./assistant');
-  const usage = await usageThisMonth(tenant);
-  if (usage.costUsd >= usage.limitUsd) throw new HttpError(429, 'ai_limit', `이번 달 AI 사용 한도($${usage.limitUsd})에 도달했습니다.`);
-  await (await import('../plans')).assertAiRequest(u);
+  await (await import('../plans')).assertAiRequest(u, { legacy: true }); // 회사 월 AI 예산(원)·예전 달러 한도·요청 수
 
   // 1) 음성 → 글자 (키 없으면 건너뜀). 음성 파일은 쓰고 나면 자료실에서 지운다(영상 원본만 남김)
   let transcript: string | null = null; let sttNote: string | null = null;

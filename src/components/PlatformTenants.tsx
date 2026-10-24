@@ -53,7 +53,9 @@ export function PlatformTenants() {
                 <td className={cell}>{t.users}명</td>
                 <td className={cell}>{t.storage_bytes != null ? fmtBytes(Number(t.storage_bytes)) : '-'}</td>
                 <td className={cell} data-testid={`company-ai-${t.id}`}>{t.ai_requests}회{t.ai_limit_requests !== null && t.ai_limit_requests !== undefined ? ` / ${t.ai_limit_requests}회` : ''} · {Math.round(Number(t.ai_krw)).toLocaleString()}원
-                  <div className="text-[11px] text-ink-3">{t.ai_left_requests === null || t.ai_left_requests === undefined ? 'AI 요청 무제한' : `남은 ${t.ai_left_requests}회`}{t.mkt_credits_limit !== null && t.mkt_credits_limit !== undefined ? ` · 마케팅 ${t.mkt_credits_left}/${t.mkt_credits_limit}크레딧` : ''}</div></td>
+                  <div className="text-[11px] text-ink-3">{t.ai_left_requests === null || t.ai_left_requests === undefined ? 'AI 요청 무제한' : `남은 ${t.ai_left_requests}회`}{t.mkt_credits_limit !== null && t.mkt_credits_limit !== undefined ? ` · 마케팅 ${t.mkt_credits_left}/${t.mkt_credits_limit}크레딧` : ''}</div>
+                  {t.ai_budget && t.ai_budget.source !== 'legacy' && <div className={cx('text-[11px]', t.ai_budget.over ? 'font-semibold text-red-600' : (t.ai_budget.pct ?? 0) >= 80 ? 'text-amber-700' : 'text-ink-3')} data-testid={`company-ai-budget-${t.id}`}>
+                    월 AI 예산 {t.ai_budget.limitKrw === null ? '무제한' : `${Number(t.ai_budget.limitKrw).toLocaleString()}원 중 ${t.ai_budget.pct}%`}{t.ai_budget.over ? ' · 멈춤' : ''}</div>}</td>
                 <td className={cell}>{t.billing_amount ? `${Number(t.billing_amount).toLocaleString()}원/${t.billing_cycle === 'annual' ? '년' : '월'}` : '-'}
                   {t.next_billing_on && <div className="text-[11px] text-ink-3">다음 {String(t.next_billing_on).slice(0, 10)}</div>}
                   {t.past_due_since && <div className="text-[11px] font-medium text-red-600">미납 {String(t.past_due_since).slice(0, 10)}~{t.billing_lock === 'suspended' ? ' · 이용 중지' : t.billing_lock === 'read_only' ? ' · 읽기 전용' : ''}</div>}
@@ -75,13 +77,15 @@ export function PlatformTenants() {
 
 function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const d = useApi<any>(`/api/platform/tenants/${id}/detail`, [id]);
-  const [ov, setOv] = useState<{ users: string; storageGb: string; aiRequests: string; tasksTotal: string } | null>(null);
+  const [ov, setOv] = useState<{ users: string; storageGb: string; aiRequests: string; tasksTotal: string; aiBudgetKrw: string } | null>(null);
   const t = d.data?.tenant;
   const run = async (fn: () => Promise<any>, ok: string) => { try { const r = await fn(); toast.ok(ok); d.reload(); return r; } catch (e: any) { toast.error(e.message); } };
   if (!d.data) return <Modal open onClose={onClose} title="회사 관리" wide><p className="text-sm text-ink-3">불러오는 중…</p></Modal>;
   const internal = id === 'default' || id === 'demo';
   const o = d.data.subscription.overrides ?? {};
-  const cur = ov ?? { users: o.users === undefined ? '' : String(o.users ?? ''), storageGb: o.storageGb === undefined ? '' : String(o.storageGb ?? ''), aiRequests: o.aiRequests === undefined ? '' : String(o.aiRequests ?? ''), tasksTotal: o.tasksTotal === undefined ? '' : String(o.tasksTotal ?? '') };
+  const cur = ov ?? { users: o.users === undefined ? '' : String(o.users ?? ''), storageGb: o.storageGb === undefined ? '' : String(o.storageGb ?? ''), aiRequests: o.aiRequests === undefined ? '' : String(o.aiRequests ?? ''), tasksTotal: o.tasksTotal === undefined ? '' : String(o.tasksTotal ?? ''),
+    aiBudgetKrw: o.aiBudgetKrw === undefined ? '' : o.aiBudgetKrw === null ? '무제한' : String(o.aiBudgetKrw) };
+  const ab = d.data.aiBudget as { source: string; limitKrw: number | null; usedKrw: number; pct: number | null; over: boolean; resetLabel: string; parts: { planKrw: number | null; perSeatKrw: number | null; seats: number | null; mktKrw: number; packKrw: number; ownerCapKrw: number | null } } | undefined;
   const n = (v: string) => (v.trim() === '' ? undefined : v.trim() === '무제한' ? null : Number(v));
   return (
     <Modal open onClose={onClose} title={`회사 관리 — ${t.name}`} wide>
@@ -119,13 +123,22 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
         )}
         <div className="rounded-input border border-line p-3">
-          <p className="mb-2 text-xs font-medium text-ink-2">한도 개별 조정 (비우면 요금제 값, ‘무제한’ 입력 가능) — AI 크레딧 지급은 AI 한도를 올려 주세요</p>
+          <p className="mb-2 text-xs font-medium text-ink-2">한도 개별 조정 (비우면 요금제 값, ‘무제한’ 입력 가능) — AI 크레딧 지급은 AI 예산(원)을 올려 주세요</p>
+          {ab && (
+            <p className={cx('mb-2 text-xs', ab.over ? 'font-medium text-red-600' : 'text-ink-2')} data-testid="company-ai-budget">
+              이번 달 AI 예산 {ab.limitKrw === null ? '무제한' : `${ab.limitKrw.toLocaleString('ko-KR')}원`} 중 {ab.usedKrw.toLocaleString('ko-KR')}원{ab.pct !== null && ` (${ab.pct}%)`}{ab.over && ' — AI 멈춤'} · {ab.resetLabel} 초기화
+              <span className="text-ink-3"> · {ab.source === 'legacy' ? '요금제에 원 예산 없음(예전 회사 월 한도 $)' : ab.source === 'override' ? '회사별 조정 값' : ab.source === 'unlimited' ? '회사별 조정: 무제한' : [
+                ab.parts.perSeatKrw !== null ? `1인 ${ab.parts.perSeatKrw.toLocaleString('ko-KR')}원 × ${ab.parts.seats}명` : `요금제 ${Number(ab.parts.planKrw ?? 0).toLocaleString('ko-KR')}원`,
+                ab.parts.mktKrw ? `마케팅 요금제 ${ab.parts.mktKrw.toLocaleString('ko-KR')}원` : '', ab.parts.packKrw ? `AI 팩 ${ab.parts.packKrw.toLocaleString('ko-KR')}원` : '',
+                ab.parts.ownerCapKrw !== null ? `대표 한도 ${ab.parts.ownerCapKrw.toLocaleString('ko-KR')}원` : ''].filter(Boolean).join(' + ')}</span>
+            </p>
+          )}
           <div className="flex flex-wrap items-end gap-2">
-            {([['users', '인원(명)'], ['storageGb', '저장(GB)'], ['aiRequests', 'AI(회/월)'], ['tasksTotal', '업무 총량(개)']] as const).map(([k, l]) => (
-              <label key={k} className="text-xs">{l}<input className={cx(inputCls, 'mt-0.5 h-8 w-28 py-1 text-xs')} value={cur[k]} placeholder={String(d.data.limits[k] ?? '무제한')} onChange={(e) => setOv({ ...cur, [k]: e.target.value })} data-testid={`ov-${k}`} /></label>
+            {([['users', '인원(명)'], ['storageGb', '저장(GB)'], ['aiRequests', 'AI(회/월)'], ['tasksTotal', '업무 총량(개)'], ['aiBudgetKrw', 'AI 예산(원/월)']] as const).map(([k, l]) => (
+              <label key={k} className="text-xs">{l}<input className={cx(inputCls, 'mt-0.5 h-8 w-28 py-1 text-xs')} value={cur[k]} placeholder={k === 'aiBudgetKrw' ? (ab?.limitKrw === null || ab?.limitKrw === undefined ? '요금제 값' : String(ab.limitKrw)) : String(d.data.limits[k] ?? '무제한')} onChange={(e) => setOv({ ...cur, [k]: e.target.value })} data-testid={`ov-${k}`} /></label>
             ))}
-            <Button size="sm" onClick={() => run(() => api(`/api/platform/tenants/${id}/limits`, { method: 'PUT', body: { users: n(cur.users), storageGb: n(cur.storageGb), aiRequests: n(cur.aiRequests), tasksTotal: n(cur.tasksTotal),
-              clear: (['users', 'storageGb', 'aiRequests', 'tasksTotal'] as const).filter((k) => cur[k].trim() === '') } }), '한도를 바꿨습니다')} data-testid="ov-save">저장</Button>
+            <Button size="sm" onClick={() => run(() => api(`/api/platform/tenants/${id}/limits`, { method: 'PUT', body: { users: n(cur.users), storageGb: n(cur.storageGb), aiRequests: n(cur.aiRequests), tasksTotal: n(cur.tasksTotal), aiBudgetKrw: n(cur.aiBudgetKrw),
+              clear: (['users', 'storageGb', 'aiRequests', 'tasksTotal', 'aiBudgetKrw'] as const).filter((k) => cur[k].trim() === '') } }), '한도를 바꿨습니다')} data-testid="ov-save">저장</Button>
           </div>
         </div>
         <div>
