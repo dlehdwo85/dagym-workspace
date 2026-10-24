@@ -357,7 +357,9 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
   const allBrands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
   const brands = [...new Set([...(allBrands.data?.brands ?? []).map((b) => b.name), ...contents.map((c) => c.brand).filter(Boolean) as string[]])];
   const list = contents.filter((c) => !brand || c.brand === brand);
-  const drafts = plain ? [] : list.filter((c) => c.status === 'draft').sort((a, b) => String(a.scheduled_at ?? '9999').localeCompare(String(b.scheduled_at ?? '9999')));
+  const byWhen = (a: CardContent, b: CardContent) => String(a.scheduled_at ?? '9999').localeCompare(String(b.scheduled_at ?? '9999'));
+  const drafts = plain ? [] : list.filter((c) => c.status === 'draft' && !c.quality?.held).sort(byWhen);
+  const held = plain ? [] : list.filter((c) => c.status === 'draft' && c.quality?.held).sort(byWhen); // #544 브랜드 템플릿 전 자동 시안 = 초안 보관(승인 숫자·승인함 위쪽에 안 올림)
   const emptyBrands = plain ? [] : (allBrands.data?.brands ?? []).map((b) => b.name).filter((n) => !contents.some((c) => c.brand === n && ['draft', 'pending', 'changes', 'hold', 'approved'].includes(c.status)));
   // #516·#455: 시안 없이는 승인할 수 없는 글은 '승인할 시안' 수에서 빼고 따로(빨간 칸 — [지금 만들기])
   const ready = plain ? list : list.filter((c) => c.status === 'pending' && !c.late && !needsVisual(c));
@@ -392,6 +394,11 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
       {drafts.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-drafts"><summary className="cursor-pointer font-medium text-ink-2">예정(초안) {drafts.length}건 — 제작 예정, 시안이 오면 승인 대기로</summary>
         <ul className="mt-2 divide-y divide-line text-xs">{drafts.slice(0, 30).map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-draft"><button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button><span className="text-ink-3">{[c.brand, channelLabel(c.channel, c.kind), whenLabel(c.scheduled_at), c.auto ? '자동 제작' : null].filter(Boolean).join(' · ')}</span></li>)}</ul></details>}
       {emptyBrands.length > 0 && <p className="rounded-card border border-dashed border-amber-300 bg-amber-50/40 px-3 py-2 text-xs text-amber-900" data-testid="mkt-brand-empty">제작 예정 없음: <b>{emptyBrands.join(' · ')}</b> — <Link href="/s/marketing/automation" className="font-medium underline">자동 제작 규칙</Link>을 켜거나 <Link href="/s/marketing/ops" className="font-medium underline">운영실</Link>에서 제작을 의뢰하세요.</p>}
+      {held.length > 0 && <details className="rounded-card border border-violet-200 bg-violet-50/30 p-3 text-sm" data-testid="mkt-held"><summary className="cursor-pointer font-medium text-violet-900">초안 보관 — 브랜드 템플릿 준비 전 자동 시안 {held.length}건(승인함에 올리지 않음)</summary>
+        <p className="mt-1 text-xs text-ink-2">대표 결정(10/24): 브랜드별 템플릿이 나올 때까지 정기·밤사이 자동 제작 시안은 초안으로 둡니다. 쓸 만한 것만 [승인 요청]으로 올리세요.</p>
+        <div className="mt-2 space-y-2">{held.slice(0, 20).map((c) => <div key={c.id} className="space-y-1" data-testid="mkt-held-row"><ApprovalCard c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />
+          {canDecide && <HeldSubmit id={c.id} onDone={onDone} />}</div>)}
+          {held.length > 20 && <p className="text-xs text-ink-3">최근 20건만 보입니다 — 나머지는 콘텐츠 캘린더에서 초안으로 볼 수 있습니다.</p>}</div></details>}
       {postponed.length > 0 && <details open className="rounded-card border border-amber-300 bg-amber-50/60 p-3 text-sm" data-testid="mkt-postponed"><summary className="cursor-pointer font-medium text-amber-900">미뤄진 글 — 옮길 날짜가 없어 멈춘 글 {postponed.length}건(취소 아님)</summary>
         <p className="mt-1 text-xs text-amber-900">날짜를 골라 다시 올리면 승인 대기로 돌아가고, 버리면 취소됩니다.</p>
         <ul className="mt-2 space-y-2">{postponed.map((c) => <PostponedRow key={c.id} c={c} canDecide={canDecide} onOpen={() => onOpen(c.id)} onDone={onDone} />)}</ul></details>}
@@ -403,6 +410,15 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
   );
 }
 
+/** #544 초안 보관 자동 시안 → [승인 요청](관리자): 승인 대기로(검사 미통과면 수정 요청 칸) */
+function HeldSubmit({ id, onDone }: { id: string; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  return <Button size="sm" variant="secondary" disabled={busy} data-testid="mkt-held-submit" onClick={async () => {
+    setBusy(true);
+    try { const r = await api<{ status: string }>(`/api/marketing/auto/contents/${id}`, { body: { action: 'submit' } }); toast.ok(r.status === 'pending' ? '승인 요청했습니다 — 승인 대기로 올렸습니다' : '승인 요청했습니다 — 검사 미통과라 수정 요청 칸으로 갔습니다'); onDone(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }}>승인 요청</Button>;
+}
 /** 로컬 10/24 09:00 '미뤄진 글' 한 줄: 원래 게시 시각 · [날짜 골라 다시 올리기](승인 대기로) · [버리기](취소) */
 function PostponedRow({ c, canDecide, onOpen, onDone }: { c: CardContent; canDecide: boolean; onOpen: () => void; onDone: () => void }) {
   const from = c.quality?.postponed?.from ?? null;

@@ -128,6 +128,7 @@ export function Automation() {
           <div className="space-y-1 pt-5 text-xs">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_generated_people} onChange={(e) => save({ allowGeneratedPeople: e.target.checked })} />생성 인물 허용</label>
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_slideshow} onChange={(e) => save({ allowSlideshow: e.target.checked })} />슬라이드쇼 허용</label>
+            <label className="flex items-center gap-1.5" title="대표 결정(10/24): 브랜드 템플릿이 나올 때까지 정기·밤사이 자동 제작 시안은 승인함에 올리지 않고 초안으로 둡니다. 승인함 아래 '초안 보관'에서 [승인 요청]으로 올릴 수 있습니다."><input type="checkbox" checked={!!s.auto_hold} onChange={(e) => save({ autoHold: e.target.checked })} data-testid="auto-hold" />자동 시안은 초안으로 보관(브랜드 템플릿 전)</label>
             <label className="flex items-center gap-1.5" title="승인된 최신 버전이 예정 시각이 되면 연결된 계정(인스타·페북·스레드·유튜브)에 워크인 서버가 올립니다. 승인이 곧 게시 결정입니다."><input type="checkbox" checked={!!s.auto_publish} onChange={(e) => save({ autoPublish: e.target.checked })} data-testid="auto-publish" />승인되면 예정 시각에 자동 게시(연결 채널)</label>
           </div>
         </div>

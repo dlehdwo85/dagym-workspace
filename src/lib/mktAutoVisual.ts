@@ -103,6 +103,13 @@ export async function drawAutoVisual(c: Content, body: string, opts: { actor?: S
   return { fileId: f.id, photoId, photoTitle: photo?.title ?? null, bodyId, bodyTitle: bp?.title ?? null };
 }
 
+/**
+ * #544(대표 10/24 '브랜드별 레퍼런스 업체와 비교해 개선한 뒤 승인 다시'): 브랜드 템플릿(사진형·정보형·후기형)이 생기기 전에는
+ * 정기·밤사이 자동 제작 시안을 승인함에 올리지 않고 초안으로 보관한다. 사람이 직접 누른 제작([지금 만들기]·[다시 만들기])과 [승인 요청]은 예외.
+ * 템플릿 칸(templates)은 #544 본 작업에서 붙는다 — 그 전에는 모든 브랜드가 보관.
+ */
+export const templateReady = (brand: { templates?: unknown } | null | undefined) => Array.isArray(brand?.templates) && brand.templates.length > 0;
+export const HOLD_NOTE = '브랜드 템플릿 준비 전 — 자동 시안은 승인함에 올리지 않고 초안으로 보관합니다(대표 10/24)';
 /** 시안이 없어서 단 문제 줄(#516) — 시안을 붙이면 지운다 */
 export const VISUAL_ISSUE = /^(시안 이미지 없음|영상 시안 제작 중)/;
 /** 시안 붙여 새 버전(같은 글). 시안이 없어서만 막혀 있던 글(수정 요청 상태)은 승인 대기로, 열린 이미지 제작 요청은 '서버 그리기로 대체'

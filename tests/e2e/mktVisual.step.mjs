@@ -1,4 +1,4 @@
-// #516 승인함 '시안 없음': 시안 없는 승인 대기 글은 '승인할 시안' 수에서 빠지고 빨간 묶음 · 카드 빨간 띠 '시안 없음 — 글만으로는 승인할 수 없습니다' · [승인] 없음
+// #516 승인함 '시안 없음'(+#544 초안 보관 묶음·[승인 요청]): 시안 없는 승인 대기 글은 '승인할 시안' 수에서 빠지고 빨간 묶음 · 카드 빨간 띠 '시안 없음 — 글만으로는 승인할 수 없습니다' · [승인] 없음
 // · [지금 만들기] → 서버가 그려 붙임(크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧] (구조 시험 — 운영 사진 고르기·그림 품질은 실제 화면에서)
 import assert from 'node:assert/strict';
 
@@ -74,4 +74,24 @@ export async function mktVisual({ owner, ctx, sql, BASE, SHOTS }) {
   const [back] = await sql`select status, (scheduled_at at time zone 'Asia/Seoul')::text as at, quality->'postponed' as p from mkt_contents where id = ${ac.id}`;
   assert.deepEqual([back.status, back.at.slice(0, 16), back.p], ['pending', `${day} 12:30`, null]);
   await owner.getByTestId('approval-card').filter({ hasText: 'E2E 시안 없는 자동 글' }).first().waitFor();
+  // #544(대표 10/24): 브랜드 템플릿 전 정기 자동 시안 = 초안 보관 — 승인 숫자·예정(초안)과 따로 접힌 '초안 보관' 묶음, 바로 [승인] 없음 → [승인 요청] = 승인 대기
+  const [v3] = await sql`select media_ids from mkt_versions where content_id = ${ac.id} and version = 3`;
+  const [hc] = await sql`insert into mkt_contents (tenant, title, channel, kind, scheduled_at, status, current_version, created_by, auto, produced_at, brand_id, quality)
+    values (${tenant}, 'E2E 초안 보관 자동 글', 'instagram', 'feed', now() + interval '3 days', 'draft', 1, ${created_by}, true, now(), ${brand}, ${sql.json({ passed: true, issues: [], held: { at: new Date().toISOString(), reason: 'template' } })}) returning id`;
+  await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${hc.id}, 1, '관리사무소 공지, 아직 종이로 붙이세요?', ${v3.media_ids}, 'AI 자동 제작', ${created_by})`;
+  await owner.reload();
+  const held = owner.getByTestId('mkt-held');
+  await held.waitFor();
+  assert.match(await held.locator(':scope > summary').innerText(), /^초안 보관 — 브랜드 템플릿 준비 전 자동 시안 1건\(승인함에 올리지 않음\)$/);
+  assert.equal(await owner.getByTestId('mkt-draft').filter({ hasText: 'E2E 초안 보관 자동 글' }).count(), 0, '예정(초안) 묶음과 따로');
+  await held.locator(':scope > summary').click();
+  const hrow = held.getByTestId('mkt-held-row').filter({ hasText: 'E2E 초안 보관 자동 글' });
+  await hrow.getByTestId('approval-card').waitFor();
+  assert.equal(await hrow.getByTestId('card-approve').count(), 0, '초안은 바로 승인 없음');
+  await hrow.scrollIntoViewIfNeeded();
+  await owner.screenshot({ path: `${SHOTS}/225-mkt-held.png` });
+  await hrow.getByTestId('mkt-held-submit').click();
+  await owner.getByText('승인 요청했습니다 — 승인 대기로 올렸습니다').waitFor();
+  await held.waitFor({ state: 'detached' });
+  assert.equal((await sql`select status from mkt_contents where id = ${hc.id}`)[0].status, 'pending');
 }

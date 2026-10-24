@@ -89,8 +89,10 @@ export async function api<T = any>(url: string, opts: { method?: string; body?: 
     } catch (e) {
       lastErr = e;
       if (opts.signal?.aborted) throw e; // 부록 A2: 사용자가 멈춘 요청은 다시 보내지 않는다
-      // 서버가 응답한 오류는 재시도하지 않는다 (게이트웨이 오류만 재시도)
-      if (e instanceof ApiError && !(e.status >= 502 && e.status <= 504)) throw e;
+      // 서버가 응답한 오류는 재시도하지 않는다 (게이트웨이 오류만 재시도). 쓰기 요청은 우리 서버가 오류 코드와 함께 돌려준 502~504
+      // (네이버·메타·AI 등 바깥 API 오류)도 다시 보내지 않는다 — 로컬 10/24: 한 번 누른 [승인하고 시작]이 3번 실행돼 실패 기록이 3줄(운영 10/19 '한 번 눌렀는데 요청 3번'도 같은 원인)
+      const gateway = e instanceof ApiError && e.status >= 502 && e.status <= 504 && (method === 'GET' || e.code === 'error');
+      if (e instanceof ApiError && !gateway) throw e;
       if (typeof navigator !== 'undefined' && !navigator.onLine) break;
       await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
     }

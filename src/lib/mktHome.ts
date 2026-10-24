@@ -200,7 +200,7 @@ export async function nightAssistantTick() {
     let n = 0;
     for (const c of due) {
       await sql`update mkt_contents set night_run = true where id = ${c.id}`;
-      const r: any = await produceContent(c).catch((e) => ({ error: String(e?.message ?? e), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' }));
+      const r: any = await produceContent(c, null, 'auto').catch((e) => ({ error: String(e?.message ?? e), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' }));
       if (r?.error) { await sql`update mkt_contents set night_run = false where id = ${c.id}`; if (r.quota) break; continue; }
       n++;
     }

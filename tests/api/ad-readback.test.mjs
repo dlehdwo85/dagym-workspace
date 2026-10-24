@@ -176,6 +176,14 @@ test('[네이버 반영 값 다시 읽기]: 같음 ✓ · 네이버에서 바뀐
   assert.deepEqual(r.readBack.ads.map((a) => [a.label, a.inspect]), [['안 A', '검수 중']]);
   assert.match(r.readBack.history, /^실패한 시도 1번\(\d{1,2}\. \d{1,2}\. \d{2}:\d{2} code 3711\) — 다시 눌렀을 때 실패한 시도에서 만든 캠페인\(cmp-\d+\)을 이어 썼습니다\(새로 만들지 않음\)$/);
   assert.ok(r.readBack.history.includes(cid));
+  // 같은 분·같은 오류가 이어진 실패(예전 화면의 자동 재전송)는 묶어 ×n
+  const [f1] = await sql`select after, error, actor_id, created_at from mkt_ad_changes where plan_id = ${p.id} and kind = 'create' and status = 'failed'`;
+  const dupIds = (await sql`insert into mkt_ad_changes (tenant, plan_id, kind, after, status, error, actor_id, created_at)
+    select tenant, plan_id, kind, after, status, error, actor_id, created_at from mkt_ad_changes where plan_id = ${p.id} and kind = 'create' and status = 'failed' union all
+    select tenant, plan_id, kind, after, status, error, actor_id, created_at from mkt_ad_changes where plan_id = ${p.id} and kind = 'create' and status = 'failed' returning id`).map((x) => x.id);
+  assert.ok(f1.error.includes('[code 3711]'));
+  assert.match((await act(p.id, { action: 'readback' })).readBack.history, /^실패한 시도 3번\(\d{1,2}\. \d{1,2}\. \d{2}:\d{2} code 3711 ×3\) — 다시 눌렀을 때/);
+  await sql`delete from mkt_ad_changes where id in ${sql(dupIds)}`;
   assert.deepEqual(r.readBack.orphans.map((o) => o.id), ['cmp-orphan'], '그룹 있는 캠페인·세팅안 캠페인은 빠짐');
   // 네이버 화면에서 바꾼 값 → 다름(세팅안 값과 함께), 응답에 없는 칸 → 읽지 못함(다름으로 안 셈)
   camps.get(cid).dailyBudget = 5000;

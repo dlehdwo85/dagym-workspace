@@ -548,7 +548,10 @@ export async function readBackPlan(u: SessionUser, id: string) {
   // [승인하고 시작]이 실패할 때마다 1줄(내부 재시도 없음) — 로컬 10:07 '2번 눌렀는데 3번': 언제·어떤 오류였는지 같이 보여 줌
   const fails = await sql<{ cid: string | null; at: Date; error: string | null }[]>`select after->>'campaignId' as cid, created_at as at, error from mkt_ad_changes where tenant = ${t} and plan_id = ${id} and kind = 'create' and status = 'failed' order by created_at`;
   const others = [...new Set(fails.map((f) => f.cid).filter((x): x is string => !!x && x !== cid))];
-  const tries = `실패한 시도 ${fails.length}번(${fails.map((f) => { const c = f.error?.match(/\[code (\d+)\]/)?.[1]; return `${kstMdHm(f.at)}${c ? ` code ${c}` : ''}`; }).join(' · ')})`;
+  // 같은 분·같은 오류가 이어지면 한 번으로 묶어 ×n(10/24 전에는 한 번 누름에 화면이 2번 더 보냈음 — client.ts 에서 고침)
+  const marks: [string, number][] = [];
+  for (const f of fails) { const c = f.error?.match(/\[code (\d+)\]/)?.[1]; const m = `${kstMdHm(f.at)}${c ? ` code ${c}` : ''}`; const last = marks[marks.length - 1]; if (last?.[0] === m) last[1]++; else marks.push([m, 1]); }
+  const tries = `실패한 시도 ${fails.length}번(${marks.map(([m, n]) => (n > 1 ? `${m} ×${n}` : m)).join(' · ')})`;
   const history = others.length ? `${tries} — 그때 만든 캠페인 ${others.join(', ')} 은(는) 지금 캠페인과 다릅니다. 아래 '연결 안 된 빈 캠페인'을 확인하세요`
     : fails.some((f) => f.cid === cid) ? `${tries} — 다시 눌렀을 때 실패한 시도에서 만든 캠페인(${cid})을 이어 썼습니다(새로 만들지 않음)`
     : fails.length ? `${tries} — 그때는 캠페인을 만들기 전에 멈췄습니다`
