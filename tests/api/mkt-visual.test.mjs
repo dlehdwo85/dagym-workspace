@@ -167,14 +167,15 @@ test('[지금 만들기]: 그 자리에서 그려 새 버전 · 이미 있으면
   assert.deepEqual([sq.issues, sq.visual], [['채우지 않은 자리표시'], undefined]);
 });
 
-test('승인 마감 지난 미승인 자동 글: 다음 슬롯(같은 시각, 같은 브랜드·채널 글이 있는 날은 건너뜀)으로 미루고 알림 · 옮길 날짜가 없으면 취소 대신 미뤄진 글([날짜 골라 다시 올리기]·[버리기]) · 10/24 09시 취소분 1회 복구', async () => {
+test('승인 마감 지난 미승인 자동 글: 다음 슬롯(같은 시각, 같은 브랜드·채널·형식 글이 2건 찬 날은 건너뜀)으로 미루고 알림 · 옮길 날짜가 없으면 취소 대신 미뤄진 글([날짜 골라 다시 올리기]·[버리기]) · 10/24 09시 취소분 1회 복구', async () => {
   await ctx.owner.ok('PUT', '/api/marketing/auto', { approvalHour: 9 });
   await sql`update mkt_contents set status = 'canceled' where brand_id = ${P.plain}`; // 앞 시험의 워크인 글이 빈 날을 막지 않게
   const at = new Date(Date.now() - 20 * 3600e3); // 20시간 전 게시 예정 = 그날 09:00 마감은 언제 돌려도 지남
   const id = await stuck('마감 지난 글', { at, brand: P.plain });
-  // 다음 날은 같은 브랜드·채널·형식 글이 이미 있음(또는 마감 1시간 안) → 그다음 날로
-  const busy = await stuck('그날 이미 있는 글', { at: new Date(at.getTime() + 86400e3), brand: P.plain });
-  await sql`update mkt_versions set media_ids = ${[P.photo]} where content_id = ${busy}`; // 이 글은 시안 있음(정기 실행이 건드리지 않게)
+  // 다음 날은 같은 브랜드·채널·형식 글이 이미 2건(#540 하루 2건까지 — 또는 마감 1시간 안) → 그다음 날로
+  const busy = await stuck('그날 이미 있는 글', { at: new Date(at.getTime() + 86400e3), brand: P.plain, status: 'approved' });
+  const busy2 = await stuck('그날 이미 있는 둘째 글', { at: new Date(at.getTime() + 86400e3), brand: P.plain, status: 'approved' });
+  await sql`update mkt_versions set media_ids = ${[P.photo]} where content_id in ${sql([busy, busy2])}`; // 이 글들은 시안 있음·승인됨(정기 실행이 건드리지 않게)
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const c = await cur(id);
   assert.notEqual(c.status, 'canceled');
@@ -215,6 +216,68 @@ test('승인 마감 지난 미승인 자동 글: 다음 슬롯(같은 시각, �
   const g = await cur(gone);
   assert.deepEqual([g.status, g.scheduled_at, g.quality.expired, g.quality.postponed?.restored, new Date(g.quality.postponed?.from).toISOString()], ['hold', null, undefined, true, at.toISOString()]);
   assert.deepEqual([(await cur(old)).status, (await cur(bare)).status], ['canceled', 'canceled']);
+});
+
+test('#540 같은 브랜드 하루 2건(대표 10/24): 같은 브랜드·채널·형식은 하루 2건까지 · 같은 시각·3시간 안 금지 · 같은 주제·같은 시안 금지 — 다음 슬롯·미뤄진 글 다시 올리기·캘린더 옮기기', async () => {
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { approvalHour: 9 });
+  await sql`update mkt_contents set status = 'canceled' where brand_id = ${P.plain}`;
+  const day = (n) => kstYmd(Date.now() + n * 86400e3);
+  const at = (n, hm) => new Date(`${day(n)}T${hm}:00+09:00`);
+  /** 그날 이미 있는(승인된) 같은 브랜드·채널·형식 글 */
+  const fixed = async (title, when, { media = [], ...o } = {}) => { const id = await stuck(title, { at: when, brand: P.plain, status: 'approved', ...o }); await sql`update mkt_versions set media_ids = ${media} where content_id = ${id}`; return id; };
+  /** 미뤄진 글(보류·날짜 비움) */
+  const postponed = async (title, { media = [], ...o } = {}) => {
+    const id = await stuck(title, { at: at(-1, '10:00'), brand: P.plain, ...o });
+    await sql`update mkt_versions set media_ids = ${media} where content_id = ${id}`;
+    await sql`update mkt_contents set status = 'hold', scheduled_at = null, quality = quality || ${sql.json({ postponed: { from: at(-1, '10:00').toISOString(), status: 'pending' } })} where id = ${id}`;
+    return id;
+  };
+  const again = (id, date, time) => ctx.owner.req('POST', `/api/marketing/contents/${id}/postponed`, { action: 'reschedule', date, time });
+
+  // ① 다음 슬롯(정기 실행): 오늘은 같은 형식 글 2건으로 참(또는 승인 마감 지남) · 내일 10:00 에 1건 → 내일 13:00(원래 시각 10:00 에서 3시간 뒤, 그날 둘째 글)
+  const moved = await stuck('마감 지난 미승인 글', { at: at(-1, '10:00'), brand: P.plain });
+  await fixed('오늘 첫 글', at(0, '10:00')); await fixed('오늘 둘째 글', at(0, '15:00'));
+  await fixed('내일 아침 글', at(1, '10:00'));
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const m = await cur(moved);
+  assert.deepEqual([kstYmd(m.scheduled_at), kstHm(m.scheduled_at), m.quality.moved], [day(1), '13:00', 1], '내일, 원래 시각에서 3시간 뒤');
+
+  // ② 미뤄진 글 [날짜 골라 다시 올리기]: 같은 시각·3시간 안은 400 + 그날 넣을 수 있는 시각 안내 · 13:00 은 됨(그날 둘째) · 2건 차면 400 · 다른 채널·형식은 따로 셈
+  await fixed('사흘 뒤 아침 글', at(3, '10:00'));
+  const p1 = await postponed('미뤄진 글 하나');
+  const same = await again(p1, day(3), '10:00');
+  assert.equal(same.status, 400);
+  assert.equal(same.body.error.message, '그 시각(10:00)에 같은 브랜드·채널·형식 글이 이미 있습니다 — 그날은 13:00에 넣을 수 있습니다');
+  const near = await again(p1, day(3), '11:30');
+  assert.equal(near.status, 400);
+  assert.equal(near.body.error.message, "같은 브랜드·채널·형식 글(10:00 '사흘 뒤 아침 글')과 3시간 넘게 띄워야 합니다 — 그날은 14:30에 넣을 수 있습니다");
+  const ok1 = await ctx.owner.ok('POST', `/api/marketing/contents/${p1}/postponed`, { action: 'reschedule', date: day(3), time: '13:00' });
+  assert.deepEqual([ok1.status, ok1.sameDay], ['pending', 1]);
+  const full = await again(await postponed('미뤄진 글 둘'), day(3), '17:00');
+  assert.equal(full.status, 400);
+  assert.equal(full.body.error.message, '그날 같은 브랜드·채널·형식 글이 이미 2건입니다(하루 2건까지) — 그날은 더 넣을 수 없습니다. 다른 날을 골라 주세요');
+  assert.equal((await again(await postponed('미뤄진 블로그 글', { channel: 'blog', kind: 'blog' }), day(3), '10:00')).status, 200, '블로그는 인스타 피드와 따로 셈');
+  // 같은 주제(만든 글 제목이 같음 — [시험]·띄어쓰기·문장부호 무시)·같은 시안(같은 사진 파일)은 3시간 넘게 떨어져도 그날은 안 됨
+  await fixed('가을 운동 시작 가이드', at(4, '10:00'));
+  const topic = await again(await postponed('[시험] 가을 운동, 시작 가이드!'), day(4), '15:00');
+  assert.equal(topic.status, 400);
+  assert.equal(topic.body.error.message, "그날 같은 주제의 글('가을 운동 시작 가이드')이 있습니다 — 그날은 더 넣을 수 없습니다. 다른 날을 골라 주세요");
+  await fixed('겨울 회원 모집', at(5, '10:00'), { media: [P.photo] });
+  const pv = await postponed('봄맞이 이벤트 안내', { media: [P.photo] });
+  const vis = await again(pv, day(5), '15:00');
+  assert.equal(vis.status, 400);
+  assert.match(vis.body.error.message, /^그날 같은 시안\(같은 사진\)을 쓴 글\('겨울 회원 모집'\)이 있습니다 — /);
+  assert.equal((await again(pv, day(6), '15:00')).status, 200, '다른 날이면 됨');
+
+  // ③ 캘린더 옮기기(게시 시각 PATCH)도 같은 검사 — 안 되면 그날 넣을 수 있는 시각 안내 · 3시간 넘게 떨어진 시각은 됨 · 시각을 안 바꾸는 수정(브랜드 바로잡기)은 검사 안 함
+  const mv = await fixed('옮길 글', at(7, '10:00'));
+  await fixed('그날 저녁 글', at(8, '18:00'));
+  const bad = await ctx.owner.req('PATCH', `/api/marketing/contents/${mv}`, { scheduledAt: at(8, '16:00').toISOString() });
+  assert.equal(bad.status, 400);
+  assert.equal(bad.body.error.message, "같은 브랜드·채널·형식 글(18:00 '그날 저녁 글')과 3시간 넘게 띄워야 합니다 — 그날은 13:00에 넣을 수 있습니다");
+  const good = await ctx.owner.ok('PATCH', `/api/marketing/contents/${mv}`, { scheduledAt: at(8, '13:00').toISOString() });
+  assert.equal(new Date(good.scheduledAt).toISOString(), at(8, '13:00').toISOString());
+  await ctx.owner.ok('PATCH', `/api/marketing/contents/${mv}`, { brandId: P.plain, scheduledAt: at(8, '13:00').toISOString() });
 });
 
 test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네일·핀·쇼츠·문장 이름·카드뉴스 폴더)은 바탕으로 안 씀 · 예전 규칙 시안은 정기 실행이 다시 그림(실사는 그대로) · [다시 그리기(무료)]', async () => {

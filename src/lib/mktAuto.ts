@@ -471,6 +471,7 @@ export async function postponedAction(u: SessionUser, id: string, i: z.infer<typ
   const at = kst(i.date, i.time);
   if (Number.isNaN(at.getTime())) throw badRequest('날짜·시각을 다시 확인해 주세요');
   if (deadlineOf(at, s).getTime() <= Date.now()) throw badRequest(`그날 승인 마감(${pad(s.approval_hour)}:00)이 이미 지났습니다 — 더 뒤 날짜를 골라 주세요`);
+  await assertSlot(sql, { id, tenant: t, brand_id: c.brand_id, channel: c.channel, kind: c.kind }, at, s); // #540 하루 2건·3시간·같은 주제/시안
   const [same] = await sql<{ n: number }[]>`select count(*)::int as n from mkt_contents where tenant = ${t} and id <> ${id} and status <> 'canceled' and brand_id is not distinct from ${c.brand_id}
     and channel = ${c.channel} and coalesce(kind, '') = ${c.kind ?? ''} and (scheduled_at at time zone 'Asia/Seoul')::date = ${i.date}::date`;
   const status = c.quality.postponed.status === 'changes' ? 'changes' : 'pending';
@@ -485,23 +486,84 @@ export async function postponedAction(u: SessionUser, id: string, i: z.infer<typ
   await audit(sql, u.id, 'mkt.postponed_reschedule', 'mkt_content', id, { at: at.toISOString(), from: c.quality.postponed.from ?? null }).catch(() => {});
   return { ok: true, status, scheduledAt: at.toISOString(), sameDay: same?.n ?? 0 };
 }
-/** #516 다음 슬롯: 같은 시각으로 하루씩 뒤로(규칙의 요일·주말 건너뛰기 지킴), 그날 같은 브랜드·채널·형식 글이 있거나 같은 규칙 칸이 있으면 다음 날 — 승인 마감이 아직 안 지난 날만, 14일 안 */
-async function nextSlot(c: { id: string; tenant: string; brand_id: string | null; rule_id: string | null; channel: string; kind: string | null; scheduled_at: string | Date }, s: MktSettings) {
+/** #540 같은 브랜드 하루 2건(대표 결정 10/24, 단 겹치면 안 됨): 같은 브랜드·채널·형식 글은 하루 2건까지 — 같은 시각 겹침 금지·3시간 넘게 띄움·같은 주제나 같은 시안(같은 사진)이면 막음.
+ *  다른 채널·형식(묶음 규칙의 피드·쇼츠·릴스·블로그·스토리)은 따로 셈. 다음 슬롯 찾기·미뤄진 글 다시 올리기·게시 시각 바꾸기(캘린더)가 같은 검사를 씀 */
+export const SAME_DAY_MAX = 2;
+const GAP = 3 * 3600e3;
+type SlotPost = { id: string; tenant: string; brand_id: string | null; channel: string; kind: string | null };
+type SlotKeys = { topics: string[]; visuals: string[] };
+type Peer = SlotKeys & { title: string; at: Date };
+const normTopic = (x: unknown) => String(x ?? '').replace(/^\s*\[시험\]\s*/, '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+/** 주제 = 답한 주제 · 만든 글의 제목(아직 안 만든 칸의 제목은 칸 이름이라 뺌) / 시안 = 지금 버전 파일 · 서버 그리기 바탕 사진 */
+const keysOf = (r: { title?: string | null; current_version?: number | null; quality?: any; media_ids?: string[] | null }): SlotKeys => ({
+  topics: [normTopic(r.quality?.topic), Number(r.current_version ?? 0) > 0 ? normTopic(r.title) : ''].filter((x) => x.length >= 2),
+  visuals: [...(r.media_ids ?? []), r.quality?.visual?.photoId].filter(Boolean).map(String) });
+const shortTitle = (t: string) => (t.length > 20 ? `${t.slice(0, 20)}…` : t);
+async function selfKeys(sql: any, id: string): Promise<SlotKeys> {
+  const [r] = await sql`select c.title, c.current_version, c.quality, v.media_ids from mkt_contents c left join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = ${id}`;
+  return r ? keysOf(r) : { topics: [], visuals: [] };
+}
+/** 그 기간(서울 날짜) 같은 브랜드·채널·형식 글 — 취소 말고 전부(승인·게시·초안 보관 포함) */
+async function slotPeers(sql: any, c: SlotPost, from: string, to: string): Promise<Peer[]> {
+  const rows = await sql`select c.title, c.scheduled_at, c.current_version, c.quality, v.media_ids from mkt_contents c
+      left join mkt_versions v on v.content_id = c.id and v.version = c.current_version
+    where c.tenant = ${c.tenant} and c.id <> ${c.id} and c.status <> 'canceled' and c.brand_id is not distinct from ${c.brand_id}
+      and c.channel = ${c.channel} and coalesce(c.kind, '') = ${c.kind ?? ''} and c.scheduled_at is not null
+      and (c.scheduled_at at time zone 'Asia/Seoul')::date between ${from}::date and ${to}::date`;
+  return rows.map((r: any) => ({ ...keysOf(r), title: String(r.title ?? ''), at: new Date(r.scheduled_at) }));
+}
+/** 그 시각에 놓을 수 있으면 null, 아니면 이유(화면에 그대로 보임) */
+function slotIssue(me: SlotKeys, peers: Peer[], at: Date): string | null {
+  const day = ymd(at);
+  const same = peers.filter((p) => ymd(p.at) === day);
+  if (same.length >= SAME_DAY_MAX) return `그날 같은 브랜드·채널·형식 글이 이미 ${same.length}건입니다(하루 ${SAME_DAY_MAX}건까지)`;
+  const near = same.find((p) => Math.abs(p.at.getTime() - at.getTime()) < GAP);
+  if (near) return Math.abs(near.at.getTime() - at.getTime()) < 60e3 ? `그 시각(${hm(at)})에 같은 브랜드·채널·형식 글이 이미 있습니다` : `같은 브랜드·채널·형식 글(${hm(near.at)} '${shortTitle(near.title)}')과 3시간 넘게 띄워야 합니다`;
+  const topic = same.find((p) => p.topics.some((x) => me.topics.includes(x)));
+  if (topic) return `그날 같은 주제의 글('${shortTitle(topic.title)}')이 있습니다`;
+  const visual = same.find((p) => p.visuals.some((x) => me.visuals.includes(x)));
+  if (visual) return `그날 같은 시안(같은 사진)을 쓴 글('${shortTitle(visual.title)}')이 있습니다`;
+  return null;
+}
+/** 그날 넣어 볼 시각: 원래 시각 → 3시간씩 뒤·앞(승인 마감 다음 시각 ~ 21:00 안) */
+function slotTimes(day: string, time: string, s: Pick<MktSettings, 'approval_hour'>) {
+  const base = kst(day, time); const lo = `${pad(Math.max(8, s.approval_hour + 1))}:00`;
+  const out = [base];
+  for (let k = 1; k <= 4; k++) for (const sign of [1, -1]) {
+    const t = new Date(base.getTime() + sign * k * GAP);
+    if (ymd(t) === day && hm(t) >= lo && hm(t) <= '21:00') out.push(t);
+  }
+  return out;
+}
+/** 사람이 고른 시각(미뤄진 글 다시 올리기·캘린더 옮기기) 검사 — 안 되면 그날 넣을 수 있는 가장 가까운 시각을 붙여 400 */
+export async function assertSlot(sql: any, c: SlotPost, at: Date, s?: Pick<MktSettings, 'approval_hour'>) {
+  const day = ymd(at);
+  const peers = await slotPeers(sql, c, day, day);
+  if (!peers.length) return;
+  const me = await selfKeys(sql, c.id);
+  const issue = slotIssue(me, peers, at);
+  if (!issue) return;
+  const alt = slotTimes(day, hm(at), s ?? (await settingsOf(c.tenant))).slice(1).find((t) => !slotIssue(me, peers, t));
+  throw badRequest(`${issue} — ${alt ? `그날은 ${hm(alt)}에 넣을 수 있습니다` : '그날은 더 넣을 수 없습니다. 다른 날을 골라 주세요'}`);
+}
+/** #516 다음 슬롯: 하루씩 뒤로(규칙의 요일·주말 건너뛰기 지킴) — #540 그날 같은 브랜드·채널·형식 글이 있으면 원래 시각에서 3시간씩 옮겨 보고(하루 2건까지·같은 주제/시안 X), 같은 규칙 칸과 같은 시각은 피함 — 승인 마감이 아직 안 지난 날만, 14일 안 */
+async function nextSlot(c: SlotPost & { rule_id: string | null; scheduled_at: string | Date }, s: MktSettings) {
   const sql = db();
   const [rule] = c.rule_id ? await sql<{ weekdays: number[]; skip_weekend: boolean }[]>`select weekdays, skip_weekend from mkt_rules where id = ${c.rule_id}` : [];
   const from = new Date(c.scheduled_at); const time = hm(from);
+  const me = await selfKeys(sql, c.id);
+  const peers = await slotPeers(sql, c, ymd(new Date(from.getTime() + DAY)), ymd(new Date(from.getTime() + 14 * DAY)));
   for (let k = 1; k <= 14; k++) {
     const day = ymd(new Date(from.getTime() + k * DAY));
     const dow = new Date(`${day}T12:00:00+09:00`).getUTCDay();
     if (rule?.skip_weekend && (dow === 0 || dow === 6)) continue;
     if (rule?.weekdays?.length && !rule.weekdays.includes(dow)) continue;
-    const at = kst(day, time);
-    if (deadlineOf(at, s).getTime() <= Date.now() + 3600e3) continue; // 승인할 시간이 1시간은 남게
-    const busy = await sql`select 1 from mkt_contents where tenant = ${c.tenant} and id <> ${c.id} and status <> 'canceled' and brand_id is not distinct from ${c.brand_id}
-      and channel = ${c.channel} and coalesce(kind, '') = ${c.kind ?? ''} and (scheduled_at at time zone 'Asia/Seoul')::date = ${day}::date limit 1`;
-    if (busy.length) continue;
-    if (c.rule_id && (await sql`select 1 from mkt_contents where rule_id = ${c.rule_id} and scheduled_at = ${at}`).length) continue;
-    return at;
+    if (deadlineOf(kst(day, time), s).getTime() <= Date.now() + 3600e3) continue; // 승인할 시간이 1시간은 남게(마감은 그날 기준)
+    for (const at of slotTimes(day, time, s)) {
+      if (slotIssue(me, peers, at)) continue;
+      if (c.rule_id && (await sql`select 1 from mkt_contents where rule_id = ${c.rule_id} and scheduled_at = ${at}`).length) continue;
+      return at;
+    }
   }
   return null;
 }

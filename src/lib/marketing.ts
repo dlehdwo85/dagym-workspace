@@ -133,6 +133,11 @@ export async function patchContent(u: SessionUser, id: string, i: z.infer<typeof
   uuidOr404(id);
   const sql = db(); const t = tenantOf(u);
   if (i.brandId) { const [b] = await sql`select id from mkt_brands where id = ${i.brandId} and tenant = ${t}`; if (!b) throw badRequest('브랜드를 찾을 수 없습니다'); }
+  if (i.scheduledAt) { // #540 게시 시각을 옮기면(캘린더) 같은 브랜드·채널·형식 하루 2건·3시간 간격·같은 주제/시안 검사
+    const [o] = await sql<any[]>`select brand_id, channel, kind, scheduled_at, status from mkt_contents where id = ${id} and tenant = ${t}`;
+    if (o && o.status !== 'published' && o.status !== 'canceled' && new Date(i.scheduledAt).getTime() !== new Date(o.scheduled_at ?? 0).getTime())
+      await (await import('./mktAuto')).assertSlot(sql, { id, tenant: t, brand_id: i.brandId === undefined ? o.brand_id : i.brandId, channel: o.channel, kind: o.kind }, new Date(i.scheduledAt));
+  }
   const [c] = await sql<any[]>`update mkt_contents set brand_id = ${i.brandId === undefined ? sql`brand_id` : i.brandId}, scheduled_at = ${i.scheduledAt === undefined ? sql`scheduled_at` : i.scheduledAt}, mode = ${i.mode ?? sql`mode`}, updated_at = now()
     where id = ${id} and tenant = ${t} and status <> 'published' returning id, brand_id, scheduled_at, status, mode`;
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다(게시된 콘텐츠는 못 바꿈)');

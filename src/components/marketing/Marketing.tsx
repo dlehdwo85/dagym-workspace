@@ -400,7 +400,7 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
           {canDecide && <HeldSubmit id={c.id} onDone={onDone} />}</div>)}
           {held.length > 20 && <p className="text-xs text-ink-3">최근 20건만 보입니다 — 나머지는 콘텐츠 캘린더에서 초안으로 볼 수 있습니다.</p>}</div></details>}
       {postponed.length > 0 && <details open className="rounded-card border border-amber-300 bg-amber-50/60 p-3 text-sm" data-testid="mkt-postponed"><summary className="cursor-pointer font-medium text-amber-900">미뤄진 글 — 옮길 날짜가 없어 멈춘 글 {postponed.length}건(취소 아님)</summary>
-        <p className="mt-1 text-xs text-amber-900">날짜를 골라 다시 올리면 승인 대기로 돌아가고, 버리면 취소됩니다.</p>
+        <p className="mt-1 text-xs text-amber-900">날짜를 골라 다시 올리면 승인 대기로 돌아가고, 버리면 취소됩니다. 같은 브랜드·채널·형식 글은 하루 2건까지 — 3시간 넘게 띄우고, 같은 주제·같은 사진이면 그날은 안 됩니다.</p>
         <ul className="mt-2 space-y-2">{postponed.map((c) => <PostponedRow key={c.id} c={c} canDecide={canDecide} onOpen={() => onOpen(c.id)} onDone={onDone} />)}</ul></details>}
       {waiting.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
         <div className="mt-2 space-y-2">{waiting.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
