@@ -8,5 +8,9 @@ export const NAVER_REGIONS: [string, string][] = [['09', '서울'], ['02', '경�
 export const NAVER_REGION_CODES = NAVER_REGIONS.map(([c]) => c);
 export const REGION_RE = /^(0[1-9]|1[0-7])$/;
 const NAME = new Map(NAVER_REGIONS);
+/** 네이버 새 지역 타겟팅(기준 방식 criterion RL)의 이름 → 시·도 짧은 이름(서울특별시 → 서울). 시·도가 아니면(시·군·구 등) 그대로 */
+const SIDO_FULL: Record<string, string> = { 서울특별시: '서울', 부산광역시: '부산', 대구광역시: '대구', 인천광역시: '인천', 광주광역시: '광주', 대전광역시: '대전', 울산광역시: '울산', 세종특별자치시: '세종',
+  경기도: '경기', 강원도: '강원', 강원특별자치도: '강원', 충청북도: '충북', 충청남도: '충남', 전라북도: '전북', 전북특별자치도: '전북', 전라남도: '전남', 경상북도: '경북', 경상남도: '경남', 제주특별자치도: '제주' };
+export const sidoShort = (name: string) => SIDO_FULL[name.trim()] ?? name.trim();
 /** ['15'] → '충남', null·전체 → '전국' */
 export const regionLabel = (codes: string[] | null | undefined) => (!codes?.length || NAVER_REGION_CODES.every((c) => codes.includes(c)) ? '전국' : codes.map((c) => NAME.get(c) ?? c).join('·'));

@@ -9,7 +9,7 @@ import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
 const PORT = 3244;
 let srv, ctx, sql, naver, calls = [], seq = 0, fail = {};
-const camps = new Map(); const groups = new Map(); const kws = new Map(); const ads = new Map(); const targets = new Map(); const negs = new Map();
+const camps = new Map(); const groups = new Map(); const kws = new Map(); const ads = new Map(); const targets = new Map(); const negs = new Map(); const crit = new Map();
 const nameErr = (n) => [...String(n ?? '')].length < 1 || [...String(n ?? '')].length > 30;
 before(async () => {
   naver = http.createServer(async (req, res) => {
@@ -50,8 +50,11 @@ before(async () => {
     if (req.method === 'GET' && path === '/ncc/targets') {
       const t = targets.get(q.ownerId) ?? {};
       return send(200, [{ nccTargetId: `mtg-${q.ownerId}`, ownerId: q.ownerId, targetTp: 'MEDIA_TARGET', target: JSON.stringify(t.MEDIA_TARGET ?? { type: 1, search: [], contents: [] }) },
-        { nccTargetId: `rtg-${q.ownerId}`, ownerId: q.ownerId, targetTp: 'REGIONAL_TARGET', target: t.REGIONAL_TARGET ?? { location: null } }].filter((x) => !q.types || x.targetTp === q.types));
+        { nccTargetId: `rtg-${q.ownerId}`, ownerId: q.ownerId, targetTp: 'REGIONAL_TARGET', target: t.REGIONAL_TARGET ?? { location: null } }]
+        .filter((x) => (!q.types || x.targetTp === q.types) && !(fail.noRegional && x.targetTp === 'REGIONAL_TARGET')));
     }
+    // 새 지역 타겟팅(기준 방식) — 실계정 광고그룹은 옛 REGIONAL_TARGET 이 없을 수 있음(로컬 10:07 '읽지 못함')
+    if (req.method === 'GET' && (m = path.match(/^\/ncc\/criterion\/([^/]+)$/))) return fail.noCriterion ? send(404, { title: 'Not Found', code: 1002 }) : send(200, crit.get(m[1]) ?? []);
     if (req.method === 'PUT' && path.startsWith('/ncc/targets/')) { targets.set(j.ownerId, { ...(targets.get(j.ownerId) ?? {}), [j.targetTp]: j.target }); return send(200, j); }
     if ((m = path.match(/^\/ncc\/adgroups\/([^/]+)\/restricted-keywords$/))) {
       if (req.method === 'POST') { negs.set(m[1], [...(negs.get(m[1]) ?? []), ...j.map((k) => ({ ...k, nccAdgroupRestrictKwdId: `rst-${++seq}` }))]); return send(200, negs.get(m[1])); }
@@ -171,7 +174,7 @@ test('[네이버 반영 값 다시 읽기]: 같음 ✓ · 네이버에서 바뀐
     assert.equal(it[k]?.ok, true, `${k} ${JSON.stringify(it[k])}`);
   assert.deepEqual([it.lock.naver, it.weight.naver, it.media.naver, it.budget.naver], ['꺼짐', '60%·120%', '네이버 매체만', '3,000원']);
   assert.deepEqual(r.readBack.ads.map((a) => [a.label, a.inspect]), [['안 A', '검수 중']]);
-  assert.match(r.readBack.history, /^실패한 시도 1번 — 다시 눌렀을 때 실패한 시도에서 만든 캠페인\(cmp-\d+\)을 이어 썼습니다\(새로 만들지 않음\)$/);
+  assert.match(r.readBack.history, /^실패한 시도 1번\(\d{1,2}\. \d{1,2}\. \d{2}:\d{2} code 3711\) — 다시 눌렀을 때 실패한 시도에서 만든 캠페인\(cmp-\d+\)을 이어 썼습니다\(새로 만들지 않음\)$/);
   assert.ok(r.readBack.history.includes(cid));
   assert.deepEqual(r.readBack.orphans.map((o) => o.id), ['cmp-orphan'], '그룹 있는 캠페인·세팅안 캠페인은 빠짐');
   // 네이버 화면에서 바꾼 값 → 다름(세팅안 값과 함께), 응답에 없는 칸 → 읽지 못함(다름으로 안 셈)
@@ -196,6 +199,37 @@ test('[네이버 반영 값 다시 읽기]: 같음 ✓ · 네이버에서 바뀐
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   assert.equal((await ctx.staffA.client.req('POST', `/api/marketing/ad-ops/plans/${p.id}/action`, { action: 'readback' })).status, 403);
   assert.equal((await ctx.owner.req('POST', '/api/marketing/ad-ops/plans/00000000-0000-4000-8000-000000000000/action', { action: 'readback' })).status, 404);
+});
+
+test('광고 지역: 옛 지역 타겟이 없으면 새 지역 타겟팅(기준 방식)으로 읽음 · 둘 다 못 읽으면 네이버가 돌려준 내용을 남김', async () => {
+  const p = await ctx.owner.ok('POST', '/api/marketing/ad-ops/plans', plan(acc.id, { name: '새 지역 타겟팅 시험' }));
+  const gid = (await ctx.owner.ok('POST', `/api/marketing/ad-ops/plans/${p.id}/approve`, {})).external.adgroupId;
+  const region = async () => (await act(p.id, { action: 'readback' })).readBack.items.find((x) => x.key === 'region');
+  fail.noRegional = true;
+  try {
+    // 지역 기준 없음 = 전국 → 세팅안(전국)과 같음
+    let r = await region();
+    assert.deepEqual([r.naver, r.ok, r.plan, r.note], ['전국', true, '전국(네이버 기본)', '네이버 새 지역 타겟팅(기준 방식)에서 읽음']);
+    // 네이버 화면에서 서울 + 반경 → 다름(꺼진 기준·지운 기준은 빼고 셈, 코드 함께)
+    const rl = (code, name, o = {}) => ({ ownerId: gid, type: 'RL', dictionaryCode: code, codeName: name, enable: true, negative: false, delFlag: false, ...o });
+    crit.set(gid, [rl('09', '서울특별시'), rl('02', '경기도', { enable: false }), rl('08', '부산광역시', { delFlag: true }),
+      { ownerId: gid, type: 'RP', dictionaryCode: 'P-1', codeName: '반경 3km', enable: true, negative: false, delFlag: false }]);
+    r = await region();
+    assert.deepEqual([r.naver, r.ok, r.note], ['서울특별시 · 반경 1곳', false, '네이버 새 지역 타겟팅(기준 방식)에서 읽음 — 코드 09']);
+    // 세팅안이 서울이면 같음(서울특별시 = 서울), 제외 지역은 따로 표시하고 다름으로
+    await sql`update mkt_ad_plans set plan = plan || ${sql.json({ local: { center: '', radiusKm: 3, areas: [], region: ['09'], abroad: false } })} where id = ${p.id}`;
+    crit.set(gid, [rl('09', '서울특별시')]);
+    r = await region();
+    assert.deepEqual([r.plan, r.naver, r.ok], ['서울', '서울특별시', true]);
+    crit.set(gid, [rl('09', '서울특별시'), rl('11', '인천광역시', { negative: true })]);
+    r = await region();
+    assert.deepEqual([r.naver, r.ok], ['서울특별시 · 제외 인천광역시', false]);
+    // 둘 다 못 읽음 → 읽지 못함(다름으로 안 셈) + 네이버 응답 그대로
+    fail.noCriterion = true;
+    r = await region();
+    assert.deepEqual([r.naver, r.ok], [null, null]);
+    assert.match(r.note, /^옛 지역 타겟: 네이버 광고그룹\(grp-\d+\)의 지역 타겟팅을 찾지 못했습니다 — 받은 응답: 빈 목록 \/ 새 지역 타겟팅: 네이버 검색광고 API 오류 404 GET \/ncc\/criterion\/grp-\d+ Not Found \[code 1002\]/);
+  } finally { fail.noRegional = false; fail.noCriterion = false; }
 });
 
 test("끊긴 '만드는 중'(5분 넘게 진행 없음) → 다시 눌러 이어 만들기 · 진행 중이면 409", async () => {

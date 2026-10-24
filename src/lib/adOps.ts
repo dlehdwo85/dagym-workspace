@@ -8,7 +8,7 @@ import { decrypt } from './crypto';
 import { audit } from './log';
 import { tenantOf, type SessionUser } from './types';
 import { DEFAULT_RULES, checkAd, qualityRules, scoreHook, type QualityRules } from './mktQuality';
-import { NAVER_REGION_CODES, REGION_RE, regionLabel } from './naverRegions';
+import { NAVER_REGION_CODES, REGION_RE, regionLabel, sidoShort } from './naverRegions';
 import { PLAN_KEYWORDS_MAX, combineKeywords } from './kwCombine';
 import { NAVER_NAME_MAX, NAVER_OK, fixAdText, groupName, naverName } from './naverText';
 
@@ -436,6 +436,8 @@ export async function syncPlanKeywords(u: SessionUser, id: string) {
 type ReadItem = { key: string; label: string; plan: string; naver: string | null; ok: boolean | null; note?: string };
 const ROLL: Record<string, string> = { PERFORMANCE: '성과 기반', ROUND_ROBIN: '동일 비중' };
 const INSPECT: Record<string, string> = { APPROVED: '검수 통과', UNDER_REVIEW: '검수 중', PENDING: '검수 대기', REJECTED: '보류(반려)', LIMITED: '일부 제한' };
+const errText = (e: any) => String(e?.message ?? e).slice(0, 280);
+const kstMdHm = (d: Date | string) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(d));
 const sameSet = (x: unknown, y: string[]) => Array.isArray(x) && new Set(x.map(String)).size === new Set(y).size && y.every((v) => x.map(String).includes(v));
 /**
  * #499-2 후속(c) [네이버 반영 값 다시 읽기]: 네이버에 만든 캠페인·광고그룹·매체·지역·제외 키워드·키워드·소재를 읽어 세팅안과 맞는지 — 읽기만(바꾸는 것 없음),
@@ -488,12 +490,33 @@ export async function readBackPlan(u: SessionUser, id: string) {
       : `직접 고른 매체(검색 ${(v.search ?? []).join(',') || '-'} · 콘텐츠 ${(v.contents ?? []).join(',') || '-'})`);
     const wantMedia = s?.media === 'naver' ? '네이버 매체만' : '전체 매체';
     add('media', '노출 매체', s ? wantMedia : '네이버 기본(전체 매체)', mediaTxt(m?.value), mediaTxt(m?.value) === wantMedia);
-    const rg = await tryGet(() => regionTarget(a, gid));
     const want = (p.plan.local?.region ?? []) as string[];
-    const all = (kr: string[] | null) => kr === null || NAVER_REGION_CODES.every((c) => kr.includes(c));
-    const rAbroad = !!rg && (rg.kr === null || !!rg.others?.includes('00')); // 타겟 없음 = 전국 + 해외
-    add('region', '광고 지역', want.length ? `${regionLabel(want)}${p.plan.local?.abroad ? '·해외' : ''}` : '전국(네이버 기본)', rg ? `${rg.kr === null ? '전국' : regionLabel(rg.kr)}${rAbroad ? '·해외' : ''}` : null,
-      !!rg && (want.length ? sameSet(rg.kr ?? [], want) && rAbroad === !!p.plan.local?.abroad : all(rg.kr)));
+    const wantTxt = want.length ? `${regionLabel(want)}${p.plan.local?.abroad ? '·해외' : ''}` : '전국(네이버 기본)';
+    // 106차 후속(로컬 10:07 실계정 '읽지 못함'): 옛 지역 타겟(REGIONAL_TARGET)이 없으면 새 지역 타겟팅(기준 방식 GET /ncc/criterion/{광고그룹}, 지역 RL·반경 RP)으로 읽고,
+    // 둘 다 못 읽으면 네이버가 돌려준 내용을 그대로 남김(다음 확인 때 원인을 바로 보게)
+    let rgErr = '';
+    const rg = await regionTarget(a, gid).catch((e) => { rgErr = errText(e); return null; });
+    if (rg) {
+      const all = (kr: string[] | null) => kr === null || NAVER_REGION_CODES.every((c) => kr.includes(c));
+      const rAbroad = rg.kr === null || !!rg.others?.includes('00'); // 타겟 없음 = 전국 + 해외
+      add('region', '광고 지역', wantTxt, `${rg.kr === null ? '전국' : regionLabel(rg.kr)}${rAbroad ? '·해외' : ''}`,
+        want.length ? sameSet(rg.kr ?? [], want) && rAbroad === !!p.plan.local?.abroad : all(rg.kr));
+    } else {
+      let cErr = '';
+      const cr = await naverReq(a, 'GET', `/ncc/criterion/${encodeURIComponent(gid)}`).then(listOf).catch((e) => { cErr = errText(e); return null; });
+      if (cr) {
+        const live = cr.filter((x) => x && !x.delFlag && x.enable !== false);
+        const nm = (x: any) => String(x?.codeName ?? x?.dictionaryCode ?? '?');
+        const rl = live.filter((x) => x.type === 'RL');
+        const on = rl.filter((x) => !x.negative && !/해외/.test(nm(x))), off = rl.filter((x) => x.negative), rp = live.filter((x) => x.type === 'RP' && !x.negative);
+        const abroad = rl.some((x) => !x.negative && /해외/.test(nm(x)));
+        const names = (xs: any[]) => `${xs.slice(0, 8).map(nm).join('·')}${xs.length > 8 ? ` 외 ${xs.length - 8}곳` : ''}`;
+        add('region', '광고 지역', wantTxt, `${on.length ? names(on) : '전국'}${abroad ? '·해외' : ''}${off.length ? ` · 제외 ${names(off)}` : ''}${rp.length ? ` · 반경 ${rp.length}곳` : ''}`,
+          want.length ? !off.length && !rp.length && abroad === !!p.plan.local?.abroad && sameSet(on.map((x) => sidoShort(nm(x))), want.map((c) => regionLabel([c])))
+            : !on.length && !off.length && !rp.length,
+          `네이버 새 지역 타겟팅(기준 방식)에서 읽음${rl.length ? ` — 코드 ${rl.slice(0, 5).map((x) => String(x.dictionaryCode ?? '?')).join(', ')}` : ''}`);
+      } else add('region', '광고 지역', wantTxt, null, null, `옛 지역 타겟: ${rgErr} / 새 지역 타겟팅: ${cErr}`.slice(0, 600));
+    }
     // 확장 검색 제외 키워드
     if (s?.expSearch) {
       const r = await tryGet(() => naverReq(a, 'GET', `/ncc/adgroups/${encodeURIComponent(gid)}/restricted-keywords`, '?type=EXP_SEARCH'));
@@ -522,11 +545,13 @@ export async function readBackPlan(u: SessionUser, id: string) {
   }
 
   // (b) 실패한 시도에서 만든 캠페인을 이어 썼는지 — 만들기 실패 기록(after = 그때까지 만든 id)
-  const fails = await sql<{ cid: string | null }[]>`select after->>'campaignId' as cid from mkt_ad_changes where tenant = ${t} and plan_id = ${id} and kind = 'create' and status = 'failed' order by created_at`;
+  // [승인하고 시작]이 실패할 때마다 1줄(내부 재시도 없음) — 로컬 10:07 '2번 눌렀는데 3번': 언제·어떤 오류였는지 같이 보여 줌
+  const fails = await sql<{ cid: string | null; at: Date; error: string | null }[]>`select after->>'campaignId' as cid, created_at as at, error from mkt_ad_changes where tenant = ${t} and plan_id = ${id} and kind = 'create' and status = 'failed' order by created_at`;
   const others = [...new Set(fails.map((f) => f.cid).filter((x): x is string => !!x && x !== cid))];
-  const history = others.length ? `실패한 시도 ${fails.length}번 — 그때 만든 캠페인 ${others.join(', ')} 은(는) 지금 캠페인과 다릅니다. 아래 '연결 안 된 빈 캠페인'을 확인하세요`
-    : fails.some((f) => f.cid === cid) ? `실패한 시도 ${fails.length}번 — 다시 눌렀을 때 실패한 시도에서 만든 캠페인(${cid})을 이어 썼습니다(새로 만들지 않음)`
-    : fails.length ? `실패한 시도 ${fails.length}번 — 그때는 캠페인을 만들기 전에 멈췄습니다`
+  const tries = `실패한 시도 ${fails.length}번(${fails.map((f) => { const c = f.error?.match(/\[code (\d+)\]/)?.[1]; return `${kstMdHm(f.at)}${c ? ` code ${c}` : ''}`; }).join(' · ')})`;
+  const history = others.length ? `${tries} — 그때 만든 캠페인 ${others.join(', ')} 은(는) 지금 캠페인과 다릅니다. 아래 '연결 안 된 빈 캠페인'을 확인하세요`
+    : fails.some((f) => f.cid === cid) ? `${tries} — 다시 눌렀을 때 실패한 시도에서 만든 캠페인(${cid})을 이어 썼습니다(새로 만들지 않음)`
+    : fails.length ? `${tries} — 그때는 캠페인을 만들기 전에 멈췄습니다`
     : ext.campaignFrom === 'leftover' ? '네이버에 남아 있던 같은 이름의 빈 캠페인을 이어 썼습니다(새로 만들지 않음)' : null;
   // 이 계정에서 어느 세팅안과도 연결 안 된 꺼진 빈 캠페인(광고그룹 0) — 최근 10개만 확인. 지우기는 대표 승인 뒤 네이버 화면에서
   const listAll = await tryGet(() => naverReq(a, 'GET', '/ncc/campaigns'));
@@ -766,8 +791,8 @@ export async function setAgencyFee(u: SessionUser, i: z.infer<typeof feeInput>) 
 /** 광고그룹의 타겟팅 하나(GET /ncc/targets?ownerId&types) — target 이 문자열(JSON)로 오기도 함 */
 async function targetOf(a: NaverAcc, adgroupId: string, type: 'REGIONAL_TARGET' | 'MEDIA_TARGET') {
   const r = await naverReq(a, 'GET', '/ncc/targets', `?ownerId=${encodeURIComponent(adgroupId)}&types=${type}`);
-  const t = ((Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as any[]).find((x) => x?.targetTp === type);
-  if (!t?.nccTargetId) throw new HttpError(502, 'naver_target', `네이버 광고그룹(${adgroupId})의 ${type === 'MEDIA_TARGET' ? '매체' : '지역'} 타겟팅을 찾지 못했습니다`);
+  const got = listOf(r); const t = got.find((x) => x?.targetTp === type);
+  if (!t?.nccTargetId) throw new HttpError(502, 'naver_target', `네이버 광고그룹(${adgroupId})의 ${type === 'MEDIA_TARGET' ? '매체' : '지역'} 타겟팅을 찾지 못했습니다 — 받은 응답: ${got.length ? got.map((x) => String(x?.targetTp ?? '?')).join(', ') : '빈 목록'}`);
   let v = t.target; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
   return { id: String(t.nccTargetId), value: v };
 }
