@@ -3,6 +3,7 @@
 // · 알림 없음 · 승인 마감 정리·미루기 없음 · 승인함 '초안 보관' 묶음(날짜가 지나도) · 관리자 [승인 요청] → 승인 대기 · 끄면 예전처럼 승인 대기
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { FAKE, bootstrap, ensureTls, resetDb, startServer, testDb } from '../helpers.mjs';
 import { startFakeGoogle } from '../fake-google.mjs';
 
@@ -65,4 +66,24 @@ test('초안 보관: 자동 제작 → 초안(시안 붙음·알림 없음) → 
   const run2 = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.ok(run2.produced.some((r) => r.id === next.id && !r.held), JSON.stringify(run2.produced));
   assert.equal((await sql`select status from mkt_contents where id = ${next.id}`)[0].status, 'pending');
+});
+
+test('187: 이미 승인 대기에 있던 자동 시안(로컬이 짚은 4건)·미뤄진 글 → 초안 보관 · 사람 글·[승인 요청]한 글·수정 요청·대표 보류·보관 끈 회사는 그대로', async () => {
+  const [{ tenant }] = await sql`select tenant from mkt_settings limit 1`;
+  await sql`update mkt_settings set auto_hold = true where tenant = ${tenant}`;
+  const mk = async (id, o) => (await sql`insert into mkt_contents (id, tenant, title, channel, kind, scheduled_at, status, current_version, created_by, auto, produced_at, quality)
+    values (${id}, ${tenant}, ${o.title}, 'instagram', 'feed', ${o.at === undefined ? sql`now() + interval '1 day'` : o.at}, ${o.status}, 1, ${ctx.ownerId}, ${o.auto ?? true}, now(), ${sql.json(o.quality ?? { passed: true, issues: [] })}) returning id`)[0].id;
+  const a = await mk('c24da858-0000-4000-8000-000000000187', { title: '바디랩 자동 1', status: 'pending' });
+  const b = await mk('942dc77d-0000-4000-8000-000000000187', { title: '워크인 자동 1', status: 'pending' });
+  const other = await mk('0b0b0b0b-0000-4000-8000-000000000187', { title: '목록 밖 자동', status: 'pending' });
+  const human = await mk('c333aca1-0000-4000-8000-000000000187', { title: '사람 글', status: 'pending', auto: false });
+  const post = await mk('11111111-0000-4000-8000-000000000187', { title: '미뤄진 자동', status: 'hold', at: null, quality: { passed: true, issues: [], postponed: { from: new Date().toISOString(), at: new Date().toISOString() } } });
+  const held = await mk('22222222-0000-4000-8000-000000000187', { title: '대표 보류', status: 'hold' });
+  const sub = await mk('2dd53eb7-0000-4000-8000-000000000187', { title: '승인 요청한 글', status: 'pending', quality: { passed: true, issues: [], submitted: { at: new Date().toISOString() } } });
+  await sql.unsafe(readFileSync(new URL('../../db/migrations/187_mkt_hold_existing_auto.sql', import.meta.url), 'utf8'));
+  const st = Object.fromEntries((await sql`select id, status, quality->'held'->>'from' as f from mkt_contents where id in ${sql([a, b, other, human, post, held, sub])}`).map((r) => [r.id, `${r.status}${r.f ? `:${r.f}` : ''}`]));
+  assert.deepEqual([st[a], st[b], st[other], st[human], st[post], st[held], st[sub]], ['draft:pending', 'draft:pending', 'pending', 'pending', 'draft:hold', 'hold', 'pending']);
+  const list = (await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals')).contents;
+  assert.ok(list.some((c) => c.id === post && c.status === 'draft' && c.quality?.held), '날짜 없는 미뤄진 글도 초안 보관 묶음에');
+  assert.equal((await ctx.owner.ok('POST', `/api/marketing/auto/contents/${a}`, { action: 'submit' })).status, 'pending', '[승인 요청]으로 되돌림');
 });
