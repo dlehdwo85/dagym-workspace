@@ -71,16 +71,24 @@ describe('로컬 10/20 묶음 보완 ①② (주말 건너뛰기·요일 지정�
   test('② PATCH 묶음: 시각을 바꾸면 규칙 + 제작 전 초안이 같은 날 새 시각으로, 요일을 바꾸면 제작 전 초안을 지우고 다시 계획, 다른 회사·없는 묶음 404', async () => {
     const rules0 = (await ctx.owner.ok('GET', '/api/marketing/auto')).rules.filter((x) => x.bundle_key === P.key);
     const blogId0 = rules0.find((x) => x.kind === 'blog').id;
-    const before = (await sql`select (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = ${blogId0} and status = 'draft' order by scheduled_at`).map((x) => x.d);
+    const before = await sql`select id, (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = ${blogId0} and status = 'draft' order by scheduled_at`;
     assert.ok(before.length);
     const r = await ctx.owner.ok('PATCH', '/api/marketing/auto/bundle', { bundleKey: P.key, times: { blog: '09:30', feed: '14:00' } });
     assert.equal(typeof r.planned, 'number');
     const rules = (await ctx.owner.ok('GET', '/api/marketing/auto')).rules.filter((x) => x.bundle_key === P.key);
     assert.equal(rules.find((x) => x.kind === 'blog').post_time.slice(0, 5), '09:30'); assert.equal(rules.find((x) => x.kind === 'story').post_time.slice(0, 5), '18:00', '안 바꾼 종류는 그대로');
     const blogId = rules.find((x) => x.kind === 'blog').id;
-    const moved = await sql`select to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24:MI') as t, (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = ${blogId} order by scheduled_at`;
+    const moved = await sql`select id, to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24:MI') as t, (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = ${blogId} order by scheduled_at`;
     assert.ok(moved.length && moved.every((x) => x.t === '09:30'), `초안도 새 시각 ${JSON.stringify(moved)}`);
-    assert.deepEqual(moved.map((x) => x.d), before, '날짜는 그대로, 시각만');
+    const kept = before.filter((b) => moved.some((m) => m.id === b.id));
+    assert.ok(kept.length && kept.every((b) => moved.find((m) => m.id === b.id).d === b.d), '날짜는 그대로, 시각만');
+    // 대표 10/24 ③: 같은 브랜드 다른 묶음(위 ①의 2일마다 블로그 10:00·⑥의 3일마다 13:00)과 하루 2건·3시간 규칙 — 새 시각에 걸리는 칸은 빠지고, 예전 시각이라 막혔던 날은 새로 생길 수 있음
+    const mins = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+    for (const m of moved) {
+      const others = await sql`select to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24:MI') as t from mkt_contents where brand_id = ${brand.id} and channel = 'blog' and coalesce(kind, '') = 'blog'
+        and status <> 'canceled' and id <> ${m.id} and (scheduled_at at time zone 'Asia/Seoul')::date = ${m.d}::date`;
+      assert.ok(others.length < 2 && others.every((o) => Math.abs(mins(o.t) - mins('09:30')) >= 180), `${m.d} 같은 브랜드 블로그 ${JSON.stringify(others)}`);
+    }
     await ctx.owner.ok('PATCH', '/api/marketing/auto/bundle', { bundleKey: P.key, weekdays: [2, 4, 6] });
     const wd = (await sql`select distinct (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = any(${P.ids}::uuid[])`).map((x) => new Date(`${x.d}T12:00:00+09:00`).getUTCDay());
     assert.ok(wd.length && wd.every((d) => [2, 4, 6].includes(d)), `화·목·토로 다시 계획 ${wd}`);

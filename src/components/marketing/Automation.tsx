@@ -137,6 +137,7 @@ export function Automation() {
 
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-rules">
         <h2 className="text-sm font-semibold">게시 규칙 <span className="font-normal text-ink-3">— 기본값(대표 10/20): 브랜드마다 2~3일에 한 묶음(유튜브 쇼츠 1 · 인스타 릴스 1 · 블로그 1 · 인스타+페이스북 게시물 1 · 인스타+페이스북 스토리 1)</span></h2>
+        <p className="mt-1 text-xs text-ink-2" data-testid="auto-rules-daycap">같은 브랜드·채널·형식(피드·릴스·블로그·스토리 따로)은 하루 2건까지 — 3시간 넘게 띄우고, 규칙이 겹쳐 넘치는 칸은 만들지 않습니다(먼저 만든 규칙 우선). 같은 날 같은 주제·같은 사진은 쓰지 않습니다.</p>
         {ed && <form onSubmit={addBundle} className="mt-2 flex flex-wrap items-center gap-2 rounded-input border border-violet-200 bg-violet-50/40 p-2 text-sm" data-testid="auto-bundle-form">
           <span className="text-xs font-medium text-violet-800">묶음 규칙 만들기</span>
           <select className={cx(inputCls, 'h-8 !w-auto')} value={bundle.brandId} onChange={(e) => setBundle({ ...bundle, brandId: e.target.value })} aria-label="묶음 브랜드"><option value="">브랜드 없음</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>

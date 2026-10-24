@@ -76,18 +76,25 @@ describe('V23 AI 비용·한도', () => {
     await ctx.owner.ok('PUT', '/api/ai/user-limits', { userId: ctx.ownerId, monthlyKrw: 1000000 });
     await ctl({ anthropicReset: true, anthropicQueue: [{ httpError: 402, errorType: 'billing_error', message: 'Your credit balance is too low to access the Anthropic API.' }] });
     const r = await ctx.owner.req('POST', '/api/ai/chat', { text: '오늘 할 일' });
-    assert.equal(r.status, 503); assert.match(r.body.error.message, /AI 크레딧이 모두 사용/);
+    assert.equal(r.status, 503); assert.match(r.body.error.message, /^AI 기능을 잠시 쓸 수 없습니다 — 운영팀이 확인하고 있어요/);
     const n0 = (await fakeState()).anthropic.length;
     const r2 = await ctx.owner.req('POST', '/api/ai/chat', { text: '다시' });
     assert.equal(r2.status, 503); assert.equal((await fakeState()).anthropic.length, n0, '차단 중엔 Anthropic 을 다시 부르지 않음');
     assert.equal((await sql`select count(*)::int n from notifications where title = 'AI 크레딧 소진'`)[0].n, 1);
     const st = await ctx.staffA.client.ok('GET', '/api/ai/status');
-    assert.equal(st.creditBlocked, true); assert.match(st.creditMessage, /크레딧/);
+    assert.equal(st.creditBlocked, true); assert.match(st.creditMessage, /AI 기능을 잠시 쓸 수 없습니다/);
     // 1시간 지난 것으로 → 다음 요청이 확인, 성공하면 풀림
     await sql`update app_settings set value = jsonb_set(value, '{until}', to_jsonb((now() - interval '1 minute')::text)) where key = 'ai_credit_block'`;
     await ctl({ anthropicReset: true, anthropicQueue: [say('다시 됩니다')] });
     await ctx.owner.ok('POST', '/api/ai/chat', { text: '이제 됩니까' });
     assert.equal((await sql`select count(*)::int n from app_settings where key = 'ai_credit_block'`)[0].n, 0);
+    // 대표 10/24: 실제 Anthropic 응답 모양(400 invalid_request_error 'Your credit balance is too low …')도 크레딧 부족 → 같은 안내·차단
+    await ctl({ anthropicReset: true, anthropicQueue: [{ httpError: 400, errorType: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.' }] });
+    const r4 = await ctx.staffA.client.req('POST', '/api/ai/chat', { text: '크레딧 시험' });
+    assert.equal(r4.status, 503); assert.match(r4.body.error.message, /^AI 기능을 잠시 쓸 수 없습니다/);
+    assert.doesNotMatch(r4.body.error.message, /credit|Anthropic|충전/, '고객 화면에 원문·충전 이야기 없음');
+    assert.equal((await sql`select count(*)::int n from app_settings where key = 'ai_credit_block'`)[0].n, 1);
+    await sql`delete from app_settings where key = 'ai_credit_block'`;
     // 요청 한도(429)는 다른 문구, 차단 없음
     await ctl({ anthropicReset: true, anthropicQueue: [{ httpError: 400, errorType: 'invalid_request_error', message: 'bad' }] });
     const r3 = await ctx.owner.req('POST', '/api/ai/chat', { text: '오류 시험' });

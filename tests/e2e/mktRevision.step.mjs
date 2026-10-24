@@ -42,7 +42,7 @@ export async function mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   assert.equal(await cmp.getByTestId('compare-new').locator('[data-changed]', { hasText: '종이 고지서, 이제 그만.' }).count(), 1, '새 첫 줄 = 바뀐 줄');
   assert.equal(await cmp.getByTestId('compare-old').locator('[data-changed]', { hasText: '관리비 고지서, 아직 종이로 나눠 주세요?' }).count(), 1, '옛 첫 줄 = 지운 줄');
   assert.equal(await cmp.getByTestId('compare-new').locator('[data-changed]', { hasText: '입주민 앱 하나로 끝납니다.' }).count(), 0, '그대로인 줄은 표시 없음');
-  assert.match(await cmp.getByTestId('compare-request').innerText(), /^반영한 요청: 첫 줄을 더 짧게 · 바뀐 것: 글·시안 · 바탕: \S/);
+  assert.match(await cmp.getByTestId('compare-request').innerText(), /^반영한 요청: 첫 줄을 더 짧게 · 바뀐 것: 글·시안 · 바탕: \S.* · 확인: 첫 줄 \d+자 → \d+자$/, '로컬 10/24: 실제로 줄었는지 확인');
   for (const side of ['compare-old', 'compare-new']) {
     const img = cmp.getByTestId(side).locator('img').first();
     let ok = false;
@@ -58,7 +58,11 @@ export async function mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await card().getByTestId('card-changes-send').click();
   await owner.getByText('AI 가 고쳐 다시 올렸습니다 — 수정본 v4(시안 · AI 수정 2/3)').waitFor({ timeout: 30000 });
   await card().getByTestId('mkt-ai-revision').filter({ hasText: 'AI 수정 2/3 · 시안' }).waitFor({ timeout: 15000 });
-  assert.equal(await card().getByTestId('mkt-reapprove').innerText(), '수정본 v4 — 반영한 요청: 사진을 다시 만들어 주세요');
+  // 로컬 10/24: 사진을 바꿨는지 확인 — 바꿀 바탕 사진이 없으면 '반영 안 됨'(빨강), 다른 틀로만 다시 그렸으면 '일부 반영'
+  const v4 = await sql`select revision from mkt_versions where content_id = ${c.id} and version = 4`;
+  const label = { applied: '반영한 요청', partial: '일부 반영', unmet: '반영 안 됨' }[v4[0].revision.check.status];
+  assert.ok(label, JSON.stringify(v4[0].revision.check));
+  assert.match(await card().getByTestId('mkt-reapprove').innerText(), new RegExp(`^수정본 v4 — ${label}: 사진을 다시 만들어 주세요`));
   const vs = await sql`select version, body, media_ids, revision from mkt_versions where content_id = ${c.id} order by version`;
   assert.deepEqual(vs.map((v) => v.version), [1, 2, 3, 4]);
   assert.deepEqual([vs[2].revision.n, vs[2].revision.from, vs[2].revision.parts], [1, 2, ['text', 'visual']]);
@@ -70,10 +74,10 @@ export async function mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   // ④ 상세에서도 나란히
   await card().getByTestId('mkt-row').click();
   const toggle = owner.getByTestId('mkt-detail').getByTestId('mkt-detail-compare-toggle');
-  assert.equal(await toggle.innerText(), '이전 버전(v3)과 나란히 비교 — 반영한 요청: 사진을 다시 만들어 주세요');
+  assert.equal(await toggle.innerText(), `이전 버전(v3)과 나란히 비교 — ${label}: 사진을 다시 만들어 주세요`);
   await toggle.click();
   await owner.getByTestId('mkt-detail').getByTestId('version-compare').waitFor();
-  assert.match(await owner.getByTestId('mkt-detail').getByTestId('compare-request').innerText(), /^반영한 요청: 사진을 다시 만들어 주세요 · 바뀐 것: 시안 · 바탕: \S/);
+  assert.match(await owner.getByTestId('mkt-detail').getByTestId('compare-request').innerText(), new RegExp(`^${label}: 사진을 다시 만들어 주세요 · 바뀐 것: 시안 · 바탕: \\S`));
   await owner.keyboard.press('Escape');
   await owner.setViewportSize({ width: 1366, height: 900 });
 }

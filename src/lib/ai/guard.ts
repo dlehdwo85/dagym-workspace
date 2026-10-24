@@ -6,11 +6,12 @@ import { usdKrw } from './provider';
 
 /**
  * V23-1 Anthropic 크레딧 소진 안내 + 4장·4.5 사람별 AI 한도.
- * - 오류 구분: 크레딧 부족(402 billing_error·"credit balance") / 요청 한도(429) / 일시 장애(5xx·529) — 사용자 문구 각각, 원문은 로그만
+ * - 오류 구분: 크레딧 부족(402 billing_error, 또는 400 invalid_request_error 'Your credit balance is too low…') / 요청 한도(429) / 일시 장애(5xx·529) — 사용자 문구 각각, 원문은 로그만
  * - 크레딧 부족이면 1시간 동안 AI 호출을 막고(반복 호출 금지), 1시간 뒤 첫 요청이 확인 역할. 대표·플랫폼 운영자에게 하루 1번 알림
  * - 사람별 월 한도(원, 기본 대표 20,000·그 밖 10,000) + 하루 한도(월의 20%) + 승인된 추가 요청. 회사 월 한도($)와 둘 중 먼저 닿는 쪽에서 멈춤
  */
-export const CREDIT_MSG = '이번 달 AI 크레딧이 모두 사용되었습니다. 다음 충전 이후 다시 사용할 수 있습니다. (업무·일정 등 다른 기능은 그대로 쓸 수 있습니다)';
+// 대표 10/24: 워크인 운영 키(Anthropic) 크레딧이 떨어진 것 — 고객 회사가 자기 한도를 다 쓴 것처럼 읽히지 않게 'AI 잠시 사용 불가'로
+export const CREDIT_MSG = 'AI 기능을 잠시 쓸 수 없습니다 — 운영팀이 확인하고 있어요. 업무·일정 등 다른 기능은 그대로 쓸 수 있습니다.';
 const BLOCK_KEY = 'ai_credit_block';
 export type AiErrKind = 'credit' | 'rate' | 'outage' | 'other';
 export function classifyAiError(e: any): AiErrKind {
@@ -46,7 +47,7 @@ export async function onAiError(e: any, sql: Sql = db()): Promise<HttpError> {
       on conflict (key) do update set value = excluded.value, updated_at = now()`.catch(() => {});
     const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
     const targets = (await sql<{ id: string }[]>`select id from users where status = 'active' and (platform_admin or (role = 'owner' and tenant = 'default'))`.catch(() => [])).map((x) => x.id);
-    await notify(sql, { userIds: targets, type: 'usage_alert', title: 'AI 크레딧 소진', body: 'Anthropic 크레딧이 부족해 AI 기능이 멈췄습니다. 콘솔에서 크레딧을 확인하세요. (1시간마다 다시 확인)',
+    await notify(sql, { userIds: targets, type: 'usage_alert', title: 'AI 크레딧 소진', body: 'Anthropic 크레딧이 부족해 모든 회사의 AI 기능이 멈췄습니다(화면 안내: AI 잠시 사용 불가). 콘솔에서 충전하면 1시간 안에 자동으로 다시 열립니다.',
       link: '/admin/usage', dedupeKey: `ai_credit:${day}` }).catch(() => {});
     const { logError } = await import('../log');
     await logError('ai.credit', e, {}).catch(() => {});

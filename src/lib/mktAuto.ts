@@ -148,7 +148,8 @@ export function qualityCheck(body: string, brief: string, s: MktSettings, banned
 /** 규칙 → 앞으로 14일 게시 칸(초안) 만들기 — 같은 규칙·시각은 한 번만 */
 export async function planSlots(tenant: string, days = 14) {
   const sql = db(); const s = await settingsOf(tenant);
-  const rules = await sql<any[]>`select r.*, b.name as brand, coalesce(b.test_mode, false) as test from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${tenant} and r.active`;
+  // 먼저 만든 규칙이 먼저(아래 하루 2건 검사에서 늦게 만든 규칙의 칸이 빠짐)
+  const rules = await sql<any[]>`select r.*, b.name as brand, coalesce(b.test_mode, false) as test from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${tenant} and r.active order by r.created_at, r.id`;
   let made = 0;
   for (const r of rules) for (let k = 0; k <= days; k++) {
     let date = ymd(new Date(Date.now() + k * DAY));
@@ -164,6 +165,9 @@ export async function planSlots(tenant: string, days = 14) {
     }
     const at = kst(date, r.post_time);
     if (deadlineOf(at, s).getTime() <= Date.now()) continue; // 승인 마감이 이미 지난 칸은 만들지 않음
+    // 대표 10/24 ③ '하루 2건 = 브랜드 × 채널 × 형식마다 각각 2건': 규칙이 여럿이어도 같은 브랜드·채널·형식은 하루 2건까지·같은 시각/3시간 안 X(#540 과 같은 기준). 이미 만든 칸이면 아래 insert 도 어차피 건너뜀
+    const peers = await slotPeers(sql, { id: NIL_ID, tenant, brand_id: r.brand_id, channel: r.channel, kind: r.kind }, date, date);
+    if (peers.length && slotIssue({ topics: [], visuals: [] }, peers, at)) continue;
     let produce = kst(ymd(new Date(at.getTime() - s.lead_days * DAY)), `${pad(s.lead_hour)}:00`);
     if (produce.getTime() < Date.now()) produce = new Date();
     const cross = (r.cross_channels ?? []) as string[];
@@ -490,9 +494,10 @@ export async function postponedAction(u: SessionUser, id: string, i: z.infer<typ
   return { ok: true, status, scheduledAt: at.toISOString(), sameDay: same?.n ?? 0 };
 }
 /** #540 같은 브랜드 하루 2건(대표 결정 10/24, 단 겹치면 안 됨): 같은 브랜드·채널·형식 글은 하루 2건까지 — 같은 시각 겹침 금지·3시간 넘게 띄움·같은 주제나 같은 시안(같은 사진)이면 막음.
- *  다른 채널·형식(묶음 규칙의 피드·쇼츠·릴스·블로그·스토리)은 따로 셈. 다음 슬롯 찾기·미뤄진 글 다시 올리기·게시 시각 바꾸기(캘린더)가 같은 검사를 씀 */
+ *  다른 채널·형식(묶음 규칙의 피드·쇼츠·릴스·블로그·스토리)은 따로 셈(대표 10/24 ③ '각각 2건'). 규칙이 칸 만들기·다음 슬롯 찾기·미뤄진 글 다시 올리기·게시 시각 바꾸기(캘린더)가 같은 검사를 씀 */
 export const SAME_DAY_MAX = 2;
 const GAP = 3 * 3600e3;
+const NIL_ID = '00000000-0000-0000-0000-000000000000'; // 아직 없는 칸(규칙이 만들 칸)
 type SlotPost = { id: string; tenant: string; brand_id: string | null; channel: string; kind: string | null };
 type SlotKeys = { topics: string[]; visuals: string[] };
 type Peer = SlotKeys & { title: string; at: Date };
@@ -614,6 +619,55 @@ export function classifyRevision(comment: string): 'text' | 'regen_image' | 'reg
 }
 /** #534 AI 수정본은 콘텐츠당 3번까지 — 그 뒤는 사람이 수정본을 올리거나 [다시 만들기] */
 export const AI_REVISION_MAX = 3;
+/** 로컬 10/24(d22c7d8e '첫 줄을 더 짧게' — 첫 줄이 그대로인데 '반영한 요청'): 수정본이 요청을 실제로 반영했는지 잴 수 있는 것만 검사.
+ *  첫 줄·글 길이 · 해시태그·이모지 수 · 따옴표 낱말 빼기/넣기 · 사진 바꾸기. 잴 수 없는 요청(말투·내용)은 unknown(글이 바뀌었으면 '반영한 요청'),
+ *  글을 고치라 했는데 글이 그대로면 unmet — 화면·메모·알림이 '반영한 요청 / 일부 반영 / 요청(이미 충족) / 반영 안 됨'으로 나뉨 */
+export type RevisionCheck = { status: 'applied' | 'partial' | 'already' | 'unmet' | 'unknown'; detail: string };
+type CheckSide = { body: string; photoId?: string | null; template?: string | null };
+export function checkRevision(comment: string, a: CheckSide, b: CheckSide & { drawn: boolean }, parts: { text: boolean; photo: boolean }): RevisionCheck {
+  const r: { s: 'applied' | 'partial' | 'already' | 'unmet'; d: string }[] = [];
+  const len = (x: string) => [...x.trim()].length;
+  const first = (x: string) => x.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  const same = a.body.trim() === b.body.trim();
+  if (parts.text) {
+    const shorter = /(짧게|짧은|줄여|줄이|간결)/.test(comment), longer = /(길게|늘려|늘리|자세히|풍부하게)/.test(comment);
+    if (shorter || longer) {
+      const head = /(첫\s*(줄|문장|머리)|훅|제목)/.test(comment); const what = head ? '첫 줄' : '글';
+      const x = len(head ? first(a.body) : a.body), y = len(head ? first(b.body) : b.body);
+      if (shorter) r.push(y <= x - 3 && y <= x * 0.9 ? { s: 'applied', d: `${what} ${x}자 → ${y}자` } : head && x <= 20 ? { s: 'already', d: `${what}은 이미 ${x}자로 짧음(수정본 ${y}자)` } : { s: 'unmet', d: `${what} 길이가 거의 그대로(${x}자 → ${y}자)` });
+      else r.push(y >= x + 3 && y >= x * 1.1 ? { s: 'applied', d: `${what} ${x}자 → ${y}자` } : { s: 'unmet', d: `${what} 길이가 거의 그대로(${x}자 → ${y}자)` });
+    }
+    const drop = /(빼|없애|지워|지우|삭제|제거|줄여|줄이|적게)/, add = /(넣어|넣|추가|늘려|늘리|달아|붙여)/;
+    if (/해시\s*태그/.test(comment)) {
+      const t = (x: string) => (x.match(/#[^\s#]+/g) ?? []).length; const x = t(a.body), y = t(b.body);
+      if (drop.test(comment)) r.push(y < x ? { s: 'applied', d: `해시태그 ${x}개 → ${y}개` } : x === 0 ? { s: 'already', d: '해시태그가 원래 없음' } : { s: 'unmet', d: `해시태그 ${x}개 그대로` });
+      else if (add.test(comment)) r.push(y > x ? { s: 'applied', d: `해시태그 ${x}개 → ${y}개` } : { s: 'unmet', d: `해시태그 ${x}개 그대로` });
+    }
+    if (/(이모지|이모티콘)/.test(comment) && drop.test(comment)) {
+      const e = (x: string) => (x.match(/\p{Extended_Pictographic}/gu) ?? []).length; const x = e(a.body), y = e(b.body);
+      r.push(y < x ? { s: 'applied', d: `이모지 ${x}개 → ${y}개` } : x === 0 ? { s: 'already', d: '이모지가 원래 없음' } : { s: 'unmet', d: `이모지 ${x}개 그대로` });
+    }
+    for (const m of comment.matchAll(/['"‘“「『]([^'"’”」』\n]{1,30})['"’”」』]/g)) { // '…' 빼 줘 → 없어야 · '…'(으)로 바꿔/넣어 → 있어야
+      const w = m[1].trim(); const after = comment.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 10);
+      if (!w) continue;
+      if (/^\s*(을|를|은|는|도)?\s*(빼|없애|지워|지우|삭제|제거)/.test(after)) r.push(!b.body.includes(w) ? { s: 'applied', d: `'${w}' 뺌` } : { s: 'unmet', d: `'${w}' 아직 있음` });
+      else if (/^\s*(으로|로)\s*(바꿔|바꾸|고쳐|수정|변경)|^\s*(을|를|도)?\s*(넣어|넣|추가|붙여|써)/.test(after)) r.push(b.body.includes(w) ? { s: 'applied', d: `'${w}' 넣음` } : { s: 'unmet', d: `'${w}' 없음` });
+    }
+    if (same && !r.some((x) => x.s === 'already')) r.push({ s: 'unmet', d: '글이 바뀌지 않음' });
+  }
+  if (parts.photo) {
+    if (!b.drawn) r.push({ s: 'unmet', d: '시안을 다시 그리지 못함' });
+    else if (b.photoId && b.photoId !== a.photoId) r.push({ s: 'applied', d: '바탕 사진 바꿈' });
+    else if (b.template && b.template !== a.template) r.push({ s: 'partial', d: '바꿀 바탕 사진이 없어 다른 틀로 다시 그림' });
+    else r.push({ s: 'unmet', d: "바꿀 바탕 사진이 없어 같은 바탕으로 다시 그림 — 자료실 '마케팅/시안 바탕(글자 없는 사진)'에 사진을 올려 주세요" });
+  }
+  if (!r.length) return { status: 'unknown', detail: '' };
+  const has = (k: string) => r.some((x) => x.s === k);
+  const status = has('unmet') ? (has('applied') || has('partial') ? 'partial' : 'unmet') : has('partial') ? 'partial' : has('applied') ? 'applied' : 'already';
+  const detail = r.map((x) => x.d).join(' · ') + (status === 'already' && parts.text && !same ? ' — 본문만 고침' : '');
+  return { status, detail };
+}
+export const revisionLabel = (c?: { status: string } | null) => (c?.status === 'unmet' ? '반영 안 됨' : c?.status === 'partial' ? '일부 반영' : c?.status === 'already' ? '요청(이미 충족)' : '반영한 요청');
 type By = { id: string; name?: string | null } | null | undefined;
 /** #545(+#534) 수정 요청 → AI 가 그 내용으로 고친 수정본을 승인함에 다시 올림(자동 제작 글).
  *  글 = AI 가 다시 씀 · 서버가 그린 시안 = 새 글(첫 줄)로 다시 그림, 사진을 바꾸라면 이 글에 써 본 바탕 사진은 빼고 — 한 버전으로(0크레딧)
@@ -676,9 +730,12 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
   if (M.needsPhotos(c.channel, media.length)) { q.passed = false; q.issues.push(M.BLOG_PHOTO_RULE); }
   const status = q.passed ? 'pending' : 'changes';
   const changed = [...(body !== old ? ['text'] : []), ...(drawn ? ['visual'] : [])];
-  const revision = o.n ? { ai: true, n: o.n, max: AI_REVISION_MAX, from: c.current_version, request: comment.slice(0, 500), by: o.by?.name ?? null, at: new Date().toISOString(), parts: changed, backdrop: drawn ? (drawn.photoTitle ?? '브랜드 색 바탕') : null } : null;
+  const check = o.n ? checkRevision(comment, { body: old, photoId: c.quality?.visual?.photoId ?? null, template: c.quality?.visual?.template ?? null },
+    { body, drawn: !!drawn, photoId: drawn?.photoId ?? null, template: drawn?.template ?? null }, { text: o.text !== false, photo: !!o.photo }) : null;
+  const revision = o.n ? { ai: true, n: o.n, max: AI_REVISION_MAX, from: c.current_version, request: comment.slice(0, 500), by: o.by?.name ?? null, at: new Date().toISOString(), parts: changed, backdrop: drawn ? (drawn.photoTitle ?? '브랜드 색 바탕') : null, check } : null;
   const drawnNote = drawn ? ` · 시안 다시 그림(${[drawn.templateLabel ? `틀: ${drawn.templateLabel}` : '', drawn.photoTitle ? `사진: ${drawn.photoTitle}` : '브랜드 색 바탕'].filter(Boolean).join(' · ')})` : '';
-  const note = (o.note ?? (o.n ? `수정본(AI ${o.n}/${AI_REVISION_MAX}) — 반영한 요청: ${comment.slice(0, 160)}` : `수정 요청 반영(0크레딧): ${comment.slice(0, 200)}`)) + drawnNote;
+  const checkNote = check?.detail ? ` (${check.status === 'applied' ? '확인: ' : ''}${check.detail})` : '';
+  const note = (o.note ?? (o.n ? `수정본(AI ${o.n}/${AI_REVISION_MAX}) — ${revisionLabel(check)}: ${comment.slice(0, 160)}${checkNote}` : `수정 요청 반영(0크레딧): ${comment.slice(0, 200)}`)) + drawnNote;
   const ok = await sql.begin(async (tx) => {
     const [lock] = await tx<{ current_version: number; status: string }[]>`select current_version, status from mkt_contents where id = ${c.id} for update`;
     if (!lock || lock.current_version !== c.current_version || ['published', 'canceled'].includes(lock.status)) return false; // AI 가 쓰는 동안 다른 수정본·게시가 먼저 됨
@@ -689,9 +746,9 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     return true;
   });
   if (!ok) return { version: null as number | null, skipped: '그사이 다른 수정본이 올라왔습니다' };
-  if (o.n && status === 'pending' && !isQuiet(new Date(), s)) await mktNotify(sql, c, o.by?.id ?? null, { approval: true, type: 'review_requested', title: `수정본 승인 요청(v${v}): ${c.title}`, body: `반영한 요청: ${comment.slice(0, 120)}`,
+  if (o.n && status === 'pending' && !isQuiet(new Date(), s)) await mktNotify(sql, c, o.by?.id ?? null, { approval: true, type: 'review_requested', title: `수정본 승인 요청(v${v}): ${c.title}`, body: `${revisionLabel(check)}: ${comment.slice(0, 120)}${checkNote}`,
     link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, actorId: o.by?.id ?? null, dedupeKey: `mktrev:${c.id}:${v}` });
-  return { version: v as number | null, status, parts: changed, n: o.n ?? null, max: AI_REVISION_MAX, backdrop: revision?.backdrop ?? null };
+  return { version: v as number | null, status, parts: changed, n: o.n ?? null, max: AI_REVISION_MAX, backdrop: revision?.backdrop ?? null, check };
 }
 
 // ---------------- 화면 API ----------------
@@ -788,8 +845,15 @@ export async function updateBundle(u: SessionUser, i: z.infer<typeof bundlePatch
     const tm = i.times?.[r.kind as keyof typeof i.times];
     if (!tm) continue;
     await sql`update mkt_rules set post_time = ${tm} where id = ${r.id}`;
-    // 제작 전 초안은 같은 날 새 시각으로
-    await sql`update mkt_contents set scheduled_at = ((scheduled_at at time zone 'Asia/Seoul')::date::text || ' ' || ${tm})::timestamp at time zone 'Asia/Seoul' where rule_id = ${r.id} and status = 'draft' and produced_at is null and scheduled_at > now()`;
+    // 제작 전 초안은 같은 날 새 시각으로 — 대표 10/24 ③: 새 시각이 같은 브랜드·채널·형식 하루 2건·3시간 규칙에 걸리는 칸은 지움(아직 빈 칸 — 규칙도 다시 만들지 않음)
+    const drafts = await sql<{ id: string; tenant: string; brand_id: string | null; channel: string; kind: string | null; d: string }[]>`select id, tenant, brand_id, channel, kind, (scheduled_at at time zone 'Asia/Seoul')::date::text as d
+      from mkt_contents where rule_id = ${r.id} and status = 'draft' and produced_at is null and scheduled_at > now()`;
+    for (const c of drafts) {
+      const at = kst(c.d, tm);
+      const peers = await slotPeers(sql, c, c.d, c.d);
+      if (peers.length && slotIssue({ topics: [], visuals: [] }, peers, at)) await sql`delete from mkt_contents where id = ${c.id}`;
+      else await sql`update mkt_contents set scheduled_at = ${at} where id = ${c.id}`;
+    }
   }
   const reschedule = i.weekdays !== undefined || i.intervalDays !== undefined || i.skipWeekend !== undefined || i.startDate !== undefined;
   if (reschedule) {

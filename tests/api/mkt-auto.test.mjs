@@ -51,18 +51,22 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   assert.match(gv2.body, /^짧게 고친 안내/); assert.notEqual(String(gv2.media_ids[0]), String(gv1.media_ids[0]), '시안도 새 첫 줄로 다시 그림');
   assert.deepEqual([gv2.revision.ai, gv2.revision.n, gv2.revision.from, gv2.revision.request, gv2.revision.parts], [true, 1, 1, '첫 줄을 더 짧게', ['text', 'visual']]);
   assert.ok(typeof gv2.revision.by === 'string' && gv2.revision.by.length > 0, '수정 요청한 사람');
-  assert.match(gv2.note, /^수정본\(AI 1\/3\) — 반영한 요청: 첫 줄을 더 짧게/);
+  // 로컬 10/24(d22c7d8e): 첫 줄이 원래 8자로 짧아 AI 가 길이를 못 줄였으면 '반영한 요청'이 아니라 '요청(이미 충족)' + 무엇이 그대로인지
+  assert.equal(gv2.note, '수정본(AI 1/3) — 요청(이미 충족): 첫 줄을 더 짧게 (첫 줄은 이미 8자로 짧음(수정본 8자) — 본문만 고침) · 시안 다시 그림(브랜드 색 바탕)');
+  assert.deepEqual(gv2.revision.check, { status: 'already', detail: '첫 줄은 이미 8자로 짧음(수정본 8자) — 본문만 고침' });
   const [gc2] = await sql`select status, quality from mkt_contents where id = ${good.id}`;
   assert.deepEqual([gc2.status, gc2.quality.visual.by, gc2.quality.visual.fileId], ['pending', 'server', String(gv2.media_ids[0])], '새 버전은 다시 승인 대기 · 서버 그림 표시 유지');
   assert.ok((await sql`select 1 from mkt_team_memory where role = 'designer' and kind = 'edit' and text = '첫 줄을 더 짧게' and source_id = ${good.id}`).length, '수정 요청 사유 = 디자인 담당 기억');
   assert.equal((await sql`select count(*)::int n from mkt_credit_ledger where content_id = ${good.id} and version = 2 and credits = 0 and kind in ('text', 'generate_image')`)[0].n, 2, '원장: 글·시안 0크레딧');
   const card = (await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals')).contents.find((x) => x.id === good.id);
-  assert.deepEqual([card.reapprove_from, card.reapprove_comment, card.revision.request, card.revision.n], [1, '첫 줄을 더 짧게', '첫 줄을 더 짧게', 1], '승인함 카드 = 수정본 v2 — 반영한 요청');
+  assert.deepEqual([card.reapprove_from, card.reapprove_comment, card.revision.request, card.revision.n, card.revision.check.status], [1, '첫 줄을 더 짧게', '첫 줄을 더 짧게', 1, 'already'], '승인함 카드 = 수정본 v2 — 요청(이미 충족)');
   assert.equal((await ctx.owner.ok('GET', `/api/marketing/contents/${good.id}`)).versions[0].revision.request, '첫 줄을 더 짧게', '상세 버전에도(나란히 비교)');
   // 사진만 바꾸기 → 서버가 이 글에 써 본 바탕을 빼고 다시 그린 v3(글 그대로·0크레딧, AI 호출 없음)
   const n0 = fake.state.anthropic.length;
   const d2 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 2, decision: 'changes', comment: '사진을 다시 만들어 주세요' });
   assert.deepEqual([d2.revision.kind, d2.revision.version, d2.revision.parts, d2.revision.card, d2.revision.backdrop], ['visual', 3, ['visual'], undefined, '브랜드 색 바탕']);
+  assert.equal(d2.revision.check.status, 'unmet', '바꿀 바탕 사진이 없으면 반영 안 됨'); assert.match(d2.revision.check.detail, /^바꿀 바탕 사진이 없어 같은 바탕으로 다시 그림 — 자료실/);
+  assert.match((await sql`select note from mkt_versions where content_id = ${good.id} and version = 3`)[0].note, /^수정본\(AI 2\/3\) — 반영 안 됨: 사진을 다시 만들어 주세요 \(바꿀 바탕 사진이 없어/);
   assert.equal(fake.state.anthropic.length, n0, '사진만 바꿀 때는 글을 다시 쓰지 않음');
   const [gv3] = await sql`select body, media_ids from mkt_versions where content_id = ${good.id} and version = 3`;
   assert.equal(gv3.body, gv2.body); assert.notEqual(String(gv3.media_ids[0]), String(gv2.media_ids[0]));

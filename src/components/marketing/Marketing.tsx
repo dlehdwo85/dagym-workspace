@@ -11,7 +11,7 @@ import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, to
 import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
 import { ApprovalCard, BrandChip, decideMessage, needsVisual, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, type DecideRevision, WhyBox } from './ApprovalCard';
-import { VersionCompare } from './VersionCompare';
+import { VersionCompare, requestLabel } from './VersionCompare';
 import { ProposalCard, BudgetCard } from './Ops';
 import { GoalCard, type Goal } from './Goals';
 import { MetaDraftCard, type MetaPlanRow } from './MetaAuto';
@@ -229,7 +229,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
           <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div></div>
         {/* #545: 수정본이면 이전 버전과 나란히(시안·글, 바뀐 줄 표시) — 열 때만 불러옴 */}
         {data.versions.length > 1 && <div data-testid="mkt-detail-compare">
-          <button type="button" onClick={() => setCmp(!cmp)} className="text-xs font-medium text-violet-700 underline" aria-expanded={cmp} data-testid="mkt-detail-compare-toggle">{cmp ? '비교 접기' : `이전 버전(v${v.revision?.from ?? data.versions[1].version})과 나란히 비교`}{v.revision?.request ? ` — 반영한 요청: ${v.revision.request}` : ''}</button>
+          <button type="button" onClick={() => setCmp(!cmp)} className="text-xs font-medium text-violet-700 underline" aria-expanded={cmp} data-testid="mkt-detail-compare-toggle">{cmp ? '비교 접기' : `이전 버전(v${v.revision?.from ?? data.versions[1].version})과 나란히 비교`}{v.revision?.request ? ` — ${requestLabel(v.revision)}: ${v.revision.request}` : ''}</button>
           {cmp && <VersionCompare id={id} from={v.revision?.from ?? data.versions[1].version} to={v.version} />}</div>}
         {data.canDecide && !['published', 'canceled'].includes(c.status) && (
           <div className="space-y-2 rounded-input border border-violet-200 p-3" data-testid="mkt-decide">
