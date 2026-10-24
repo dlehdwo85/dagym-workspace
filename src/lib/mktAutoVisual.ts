@@ -76,13 +76,14 @@ export function headlineOf(title: string, body: string) {
 }
 
 /** 한 장 그려 자료실(마케팅/자동 시안)에 저장 → 파일 id. 블로그는 대표 이미지(정사각) + 본문 사진(그림에 쓴 것과 다른 실사, 없으면 null) */
-export async function drawAutoVisual(c: Content, body: string, opts: { actor?: SessionUser | null; exclude?: Set<string>; brandOnly?: boolean } = {}) {
+export async function drawAutoVisual(c: Content, body: string, opts: { actor?: SessionUser | null; exclude?: Set<string>; brandOnly?: boolean; photoId?: string | null } = {}) {
   const sql = db();
   const [b] = c.brand_id ? await sql<{ name: string; color: string | null; video: any }[]>`select name, color, video from mkt_brands where id = ${c.brand_id}` : [];
   const brand = (b?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
   const others = c.brand_id ? (await sql<{ name: string }[]>`select name from mkt_brands where tenant = ${c.tenant} and id <> ${c.brand_id}`).map((x) => x.name.replace(/^\s*\[시험\]\s*/, '').trim()).filter((n) => n && n !== brand) : [];
   const { head, sub } = headlineOf(c.title, body);
-  const photoId = opts.brandOnly ? null : await pickPhoto(c, brand, others, `${c.title} ${body}`, opts.exclude);
+  // photoId = 그 바탕 사진 그대로(#545 글만 고친 수정본 — 같은 사진에 새 첫 줄, null = 브랜드 색 바탕)
+  const photoId = opts.photoId !== undefined ? opts.photoId : opts.brandOnly ? null : await pickPhoto(c, brand, others, `${c.title} ${body}`, opts.exclude);
   const { libBytes } = await import('./mktVideo');
   const [photo, logo, font] = await Promise.all([libBytes(c.tenant, photoId, /^image\//).catch(() => null), libBytes(c.tenant, b?.video?.logoFileId, /^image\//).catch(() => null),
     libBytes(c.tenant, b?.video?.fontFileId, /font|\.(otf|ttf)$/i).catch(() => null)]);

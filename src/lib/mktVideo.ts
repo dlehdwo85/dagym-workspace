@@ -21,6 +21,8 @@ const TIMEOUT_MIN = 30;
 const NEGATIVE = 'western-style houses, foreign-language signs, English UI text, non-Korean people, distorted hands, extra fingers, warped faces, glitches, low resolution';
 const LOOK = 'Photorealistic Korean TV commercial footage, cinematic 35mm look, natural soft light, shallow depth of field, clean premium color grade, smooth subtle camera movement. Set in South Korea; all people are Korean (East Asian).';
 const NO_TEXT = 'No text anywhere in frame: no letters, words, numbers, captions, subtitles, logos, watermarks, signage or on-screen UI text. Any phone or monitor screen shows only soft abstract light.';
+/** #534 구도: 아래 24%는 합성 단계의 한국어 자막 자리 — 사람·제품을 두지 않음 */
+const COMPOSITION = 'Composition: keep the bottom 24% of the frame free of faces, products and busy detail (Korean captions are added there later).';
 const FIX_EN: Record<string, string> = { '화면 안 글자': 'remove every visible letter, sign and UI text', '한국인이 아닌 사람': 'cast only Korean (East Asian) people', '서양식 배경': 'use a clearly Korean location', '깨진 화면': 'keep hands, faces and bodies anatomically clean and stable' };
 
 export type V2Scene = { k: number; seconds: number; line: string; visualEn: string; screen: { mediaId: string; device: 'phone' | 'laptop' } | null;
@@ -52,7 +54,7 @@ export function planScenes(p: any, total: number, message: string): PlanScene[] 
 /** 장면 프롬프트: 공통 룩(한국 TV 광고 실사) + 출연진 + 장면 지시 + 글자 금지 + 피할 것(+ 검수에서 걸린 점 고치기) */
 export function scenePrompt(sc: { visualEn: string; screen?: unknown }, p: any, fix?: string[]) {
   return [LOOK, p?.look ? `Look: ${p.look}` : '', p?.character ? `Cast: ${p.character}` : '', `Shot: ${sc.visualEn}`,
-    sc.screen ? 'This shot is a calm background plate: uncluttered composition, soft subject, gentle motion.' : '', NO_TEXT,
+    sc.screen ? 'This shot is a calm background plate: uncluttered composition, soft subject, gentle motion.' : '', NO_TEXT, COMPOSITION,
     `Avoid: ${[p?.negativeEn, NEGATIVE].filter(Boolean).join(', ')}`, fix?.length ? `Fix from the previous attempt: ${fix.join('; ')}` : ''].filter(Boolean).join('\n').slice(0, 2400);
 }
 async function submitScene(sc: V2Scene, p: any, aspect: string, model: string, errors: string[], fix?: string[]) {

@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { MediaFull, MediaThumb, isVideoMime, mimeOf, posterFrom } from '@/components/MediaView';
 import { VideoDigestButton } from '@/components/VideoDigestButton';
@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ModeChip } from './ModeToggle';
 import { ChannelPreview } from './ChannelPreview';
+import { VersionCompare, partsLabel, type Revision } from './VersionCompare';
 
 /** 운영실 화면 명세(OPS_ROOM_SCREEN_SPEC 2-2·5절)에 맞춘 승인 카드·라벨 — 승인함·현황이 같이 씀 */
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', video: '생성 영상', shorts: '쇼츠', story: '스토리' };
@@ -33,6 +34,17 @@ export const needsVisual = (c: { channel: string; media_ids?: string[] }) => c.c
 const AI_REGEN = 'AI 이미지로 다시 만들어 주세요(사진 재생성)';
 const AI_REGEN_CREDITS = 6.5;
 
+export type DecideRevision = { kind?: string; version?: number | null; n?: number | null; max?: number; parts?: string[]; card?: unknown; error?: string };
+/** #545: 수정 요청 → AI 가 글·시안을 고친 수정본을 바로 승인함에 다시 올림(3번까지) — 결정 뒤 무엇을 했는지 그대로 알림(카드·상세 공용) */
+export function decideMessage(decision: 'approve' | 'changes' | 'hold', rv?: DecideRevision | null) {
+  if (decision === 'approve') return '승인했습니다';
+  if (decision === 'hold') return '보류했습니다';
+  if (rv?.version) return `AI 가 고쳐 다시 올렸습니다 — 수정본 v${rv.version}(${partsLabel(rv.parts) || '글'} · AI 수정 ${rv.n}/${rv.max ?? 3})${rv.card ? ' · 사진·영상은 제작 요청 카드로' : ''}`;
+  if (rv?.kind === 'limit') return `수정을 요청했습니다 — AI 수정은 ${rv.max ?? 3}번까지라 이번엔 사람이 고칩니다(상세 › 수정본 올리기)`;
+  if (rv?.card) return '수정을 요청했습니다 — 사진·영상 다시 만들기는 제작 요청 카드로 넘겼습니다';
+  if (rv?.error) return `수정을 요청했습니다 — AI 수정본은 만들지 못했습니다: ${rv.error.slice(0, 80)}`;
+  return '수정을 요청했습니다';
+}
 const kst = (d: Date | string, o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', ...o }).format(new Date(d));
 const ymd = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const hm = (d: Date | string) => kst(d, { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -48,6 +60,7 @@ export const deadlineLabel = (deadline: string | null, at: string | null) => dea
 
 export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null; brand_logo?: string | null; handle?: string | null;
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
+  revision?: Revision | null; reapprove_comment?: string | null; // #545 수정본 배지(반영한 요청·AI 수정 n/3)
   auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; visual?: { by: string } | null; postponed?: { from?: string | null; at?: string; restored?: boolean } | null; held?: { at?: string; reason?: string } | null; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null } } | null; production?: { kind: string; status: string } | null;
   rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; week?: number | null; qa?: { needsHuman?: boolean; issues?: string[]; notes?: string[] } | null } | null;
   last_decision?: { decision: string; comment: string | null; at: string; version: number; by: string | null } | null };
@@ -68,16 +81,21 @@ export function WhyBox({ r, compact }: { r?: CardContent['rationale']; compact?:
 /** 승인 카드: 머리 칩(브랜드·채널+형식·제목·상태·vN·재승인) · 게시 시각·마감 · 미디어 넘겨 보기 · 문안 · 제작 메모 · 결정 기록 · [승인]/[수정 요청] */
 export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent; canDecide: boolean; onDone: () => void; onOpen?: () => void }) {
   const [mode, setMode] = useState<'idle' | 'changes'>('idle'); const [memo, setMemo] = useState(''); const [done, setDone] = useState<string | null>(null);
-  const [full, setFull] = useState(false); const [idx, setIdx] = useState(0); const [bodyOpen, setBodyOpen] = useState(false); const [look, setLook] = useState(false);
+  const [full, setFull] = useState(false); const [idx, setIdx] = useState(0); const [bodyOpen, setBodyOpen] = useState(false); const [look, setLook] = useState(false); const [cmp, setCmp] = useState(false); const [busy, setBusy] = useState(false);
+  // #545: AI 수정본이 바로 올라오면 같은 카드가 새 버전으로 다시 그려짐 — [승인]·[수정 요청]을 다시 보이게
+  useEffect(() => { setDone(null); setMode('idle'); setMemo(''); }, [c.current_version]);
   const media = c.media_ids ?? [];
   const issues = c.quality?.passed === false ? c.quality.issues ?? [] : [];
   const rep = c.quality?.report?.v === c.current_version ? c.quality.report : null; // #426 이 버전의 품질 보고서만(사람이 고친 새 버전엔 옛 점수 안 붙임)
   const late = !!c.late;
   const noVisual = needsVisual(c); const drawable = canDrawVisual(c); const [making, setMaking] = useState(false);
   async function decide(decision: 'approve' | 'changes', comment = memo.trim()) {
-    try { await api(`/api/marketing/contents/${c.id}/decide`, { body: { version: c.current_version, decision, comment: decision === 'changes' ? comment : undefined } });
-      setDone(decision === 'approve' ? '✓ 승인됨' : comment === AI_REGEN ? 'AI 이미지 요청함' : '수정 요청 보냄'); toast.ok(decision === 'approve' ? '승인했습니다' : comment === AI_REGEN ? 'AI 이미지 제작을 요청했습니다 — 붙으면 다시 승인 요청이 옵니다' : '수정을 요청했습니다'); setTimeout(onDone, 900); }
+    setBusy(true);
+    try { const r = await api<{ revision?: DecideRevision }>(`/api/marketing/contents/${c.id}/decide`, { body: { version: c.current_version, decision, comment: decision === 'changes' ? comment : undefined } });
+      const rv = r.revision;
+      setDone(decision === 'approve' ? '✓ 승인됨' : comment === AI_REGEN ? 'AI 이미지 요청함' : rv?.version ? `수정본 v${rv.version} 올라감` : '수정 요청 보냄'); toast.ok(comment === AI_REGEN && decision === 'changes' ? 'AI 이미지 제작을 요청했습니다 — 붙으면 다시 승인 요청이 옵니다' : decideMessage(decision, rv)); setTimeout(onDone, 900); }
     catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
   }
   // #516 (c): 시안 없는 카드 [지금 만들기] = 서버가 브랜드 키트·자료실 사진으로 그려 새 버전(크레딧 0) → 승인 대기
   async function makeNow(redraw = false) {
@@ -89,6 +107,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
   }
   const canAct = canDecide && !done && ['pending', 'changes', 'approved'].includes(c.status);
   const d = c.last_decision;
+  const req = c.revision?.request ?? c.reapprove_comment ?? null; const from = c.revision?.from ?? c.reapprove_from ?? null; // #545
   return (
     <article className={cx('rounded-card border bg-white p-3 text-sm shadow-card', late ? 'border-2 border-red-500' : 'border-line')} data-testid="approval-card" data-late={late || undefined}>
       <div className="flex flex-wrap items-center gap-1.5">
@@ -99,7 +118,9 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         <span className="text-[11px] text-ink-3">v{c.current_version}</span>
         {rep?.needsPolish && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-polish-badge" title="사람다움 점수가 기준보다 낮습니다 — 상세에서 [AI로 다듬기]">다듬기 필요{rep.human ? ` · ${rep.human.score}점` : ''}</span>}
         {rep?.hook && !rep.hook.pass && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-weak-hook">훅 약함 {rep.hook.score}점</span>}
-        {!!c.reapprove_from && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="mkt-reapprove">재승인 (v{c.reapprove_from} 수정 요청 → v{c.current_version})</span>}
+        {/* #545: '수정본 v3 — 반영한 요청: …'(AI 수정본은 반영한 요청을 버전에, 사람이 올린 수정본은 마지막 수정 요청 메모로) */}
+        {(!!c.reapprove_from || !!c.revision?.request) && <span className="max-w-full truncate rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="mkt-reapprove" title={req ?? undefined}>수정본 v{c.current_version}{req ? ` — 반영한 요청: ${req}` : ` (v${c.reapprove_from} 수정 요청)`}</span>}
+        {c.revision?.ai && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="mkt-ai-revision">AI 수정 {c.revision.n}/{c.revision.max ?? 3}{c.revision.parts?.length ? ` · ${partsLabel(c.revision.parts)}` : ''}</span>}
         {done && <span className="ml-auto text-xs font-semibold text-emerald-700" data-testid="approval-done">{done}</span>}
       </div>
       <button type="button" onClick={onOpen} className="mt-1 block text-left font-semibold hover:underline" data-testid="mkt-row">{c.title}</button>
@@ -128,6 +149,10 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
       {(media.length > 0 || c.body) && <button type="button" onClick={() => setLook(!look)} className="mt-1 inline-flex items-center gap-0.5 text-xs font-medium text-violet-700" aria-expanded={look} data-testid="approval-look">
         {look ? <><ChevronUp size={14} aria-hidden />게시 화면 접기</> : <><ChevronDown size={14} aria-hidden />게시 화면으로 보기</>}</button>}
       {look && <div className="mt-2"><ChannelPreview channel={c.channel} kind={c.kind} brand={c.brand} handle={c.handle} logo={c.brand_logo} color={c.brand_color} title={c.title} body={c.body ?? ''} media={media} info={c.media_info ?? []} /></div>}
+      {/* #545: 수정본이면 이전 버전과 나란히(시안·글, 바뀐 줄 표시) */}
+      {!!from && c.current_version > 1 && <button type="button" onClick={() => setCmp(!cmp)} className="ml-3 mt-1 inline-flex items-center gap-0.5 text-xs font-medium text-violet-700" aria-expanded={cmp} data-testid="approval-compare">
+        {cmp ? <><ChevronUp size={14} aria-hidden />비교 접기</> : <><ChevronDown size={14} aria-hidden />이전 버전(v{from})과 나란히 비교</>}</button>}
+      {cmp && !!from && <VersionCompare id={c.id} from={from} to={c.current_version} />}
       {issues.length > 0 && <p className="mt-1 rounded-input bg-amber-50 px-2 py-1 text-[11px] text-amber-800" data-testid="approval-issues">{issues.join(' · ')}</p>}
       <WhyBox r={c.rationale} compact />
       {/* 대표 재지적 10/20 18:45 ①: 본문은 2줄(PC 4줄)만 보이고 [더보기] 글자 버튼(아이콘+글자)으로 펼침 — 전에는 줄임표(…)만 보여 누를 수 있는지 몰랐음 */}
@@ -149,7 +174,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2"><input className={cx(inputCls, 'min-w-0 flex-1')} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="무엇을 고칠지(두 글자 이상)" aria-label="수정 요청 메모" data-testid="card-changes-memo" />
-          <Button size="sm" disabled={memo.trim().length < 2} onClick={() => decide('changes')} data-testid="card-changes-send">수정 요청 보내기</Button><Button size="sm" variant="secondary" onClick={() => setMode('idle')}>취소</Button></div>
+          <Button size="sm" disabled={busy || memo.trim().length < 2} onClick={() => decide('changes')} data-testid="card-changes-send">{busy ? 'AI 가 고치는 중…' : '수정 요청 보내기'}</Button><Button size="sm" variant="secondary" onClick={() => setMode('idle')}>취소</Button></div>
       ))}
       {canAct && !late && c.status !== 'approved' && !noVisual && <p className="mt-1 hidden text-[11px] text-ink-3 md:block">승인해도 바로 공개되지 않습니다 — 게시 시각에 게시(도우미 또는 연결된 채널)합니다.</p>}
       {full && media.length > 0 && (

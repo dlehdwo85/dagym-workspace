@@ -76,6 +76,19 @@ export function withShots(promptEn: string, scenes: Scene[] | undefined, timing:
   return `${promptEn}\n\nShot list (keep this timing):\n${scenes.map((x, k) => `${k + 1}. ${timing?.rows[k] ? `${timing.rows[k].from.toFixed(1)}-${timing.rows[k].to.toFixed(1)}s` : ''} ${x.visualEn || x.line}`.replace(/\s+/g, ' ').trim()).join('\n')}`.slice(0, 4000);
 }
 
+/** #534 프롬프트 검사 재료: 규격(비율·크기)·브랜드 키트 색(서버 그리기와 같은 색)·자료실 참고 사진 후보(의뢰에 고른 사진이 없을 때 — 시안 바탕 폴더·브랜드 이름 먼저, 글자 든 그래픽·AI 생성 빼고) */
+async function promptCtx(tenant: string, b: any, brand: any) {
+  const spec = KIND_SPEC[b.kind]; const sql = db();
+  const color = await (await import('./mktCarouselDraw')).brandDrawColor(tenant, brand).catch(() => null);
+  const V = await import('./mktAutoVisual'); const name = String(brand?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim().toLowerCase();
+  const rows = await sql<{ id: string; title: string; file_name: string; description: string | null; folder: string; tags: string[] }[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, description, folder, tags from library_files
+    where tenant = ${tenant} and space = 'marketing' and deleted_at is null and upload_status = 'ready' and mime_type in ('image/jpeg', 'image/png', 'image/webp') and coalesce(source, '') <> 'ai'
+      and coalesce(security, 'internal') <> 'confidential' order by created_at desc limit 80`;
+  const score = (r: (typeof rows)[number]) => (V.backdropOk(r) ? 3 : 0) + (name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''}`.toLowerCase().includes(name) ? 6 : 0);
+  const candidates = rows.filter((r) => !V.textGraphic(r)).map((r) => ({ r, s: score(r) })).sort((x, y) => y.s - x.s).slice(0, 3).map(({ r }) => ({ id: r.id, title: r.title, description: r.description }));
+  return { ctx: { aspect: spec.aspect, px: spec.px, video: spec.media === 'video', brandColors: color ? [color] : [], refAvailable: candidates.length } as import('./mktPromptCheck').PromptCtx, candidates };
+}
+
 /** AI(경력 30년 마케터·아트디렉터): 브랜드 키트·회사·목적·채널 규격·참고 자료 → 영문 생성 프롬프트 + 한글 요약 + 참고 사진 + 자막
  *  #454 영상은 '국내 대기업 광고 수준' 장면 설계: 장면 3~5개(각 3~5초) · 같은 출연진·룩 · 한국인·한국 배경 · 화면 안 글자 금지 · 실제 화면 캡처 얹을 장면 · 끝 화면 · 배경음 */
 export async function writePrompt(tenant: string, briefId: string, actorId: string | null) {
@@ -87,7 +100,10 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
   const { companyAi } = await import('./ai/persona');
   const co = await companyAi({ tenant } as SessionUser).catch(() => ({} as any));
   const spec = KIND_SPEC[b.kind]; const refs = b.refs ?? {}; const video = spec.media === 'video';
-  const photos = refs.mediaIds?.length ? await sql<{ id: string; title: string; description: string | null }[]>`select id, title, description from library_files where id = any(${refs.mediaIds}::uuid[]) and tenant = ${tenant} and deleted_at is null` : [];
+  const picked = refs.mediaIds?.length ? await sql<{ id: string; title: string; description: string | null }[]>`select id, title, description from library_files where id = any(${refs.mediaIds}::uuid[]) and tenant = ${tenant} and deleted_at is null` : [];
+  const PC = await promptCtx(tenant, b, brand); // #534 고른 참고 사진이 없으면 자료실 후보(시안 바탕·브랜드 사진)를 AI 에게 보여 주고 연결
+  const photos = picked.length ? picked : PC.candidates;
+  const mem = await (await import('./mktTeam')).memoryText(tenant, 'designer', b.brand_id ?? null).catch(() => ''); // #534 수정 요청 사유 = 디자인 담당 기억
   const posts = refs.contentIds?.length ? await sql<{ title: string; body: string }[]>`select c.title, v.body from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = any(${refs.contentIds}::uuid[]) and c.tenant = ${tenant}` : [];
   const V = video ? await import('./mktVideo') : null;
   const [caps, bgms] = V ? await Promise.all([V.videoAssets(tenant, '영상 화면 캡처'), V.videoAssets(tenant, '영상 배경음')]) : [[], []];
@@ -97,7 +113,7 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
   const Q = await import('./mktQuality'); const rules = await Q.qualityRules(); const voice = Q.voicePrompt(brand?.voice);
   const korean = 'All people are Korean (East Asian) and the setting is clearly South Korea; no text, letters, signage, logos or UI text in frame';
   const fallback = { promptEn: `${video ? `A ${spec.seconds ?? 15}-second ${spec.aspect === '9:16' ? 'vertical ' : ''}Korean TV-commercial-style video` : 'A photorealistic photo'} for a Korean ${co?.industries?.[0] ?? 'local business'} brand "${brand?.name ?? co?.name ?? ''}": ${b.message}. Natural daylight, candid everyday scene, product/space close-up, warm and slightly humorous mood, minimal AI look (no close-up faces, use hands/back view). ${korean}. ${video ? '' : 'Clean negative space for a short Korean headline. '}${spec.aspect} aspect, ${spec.px}.`,
-    negativeEn: 'text artifacts, letters, signage, distorted hands, extra fingers, uncanny faces, watermark, logo, low quality, oversaturated, western-style houses, foreign-language signs, non-Korean people', summaryKo: `${spec.label}: ${PURPOSE[b.purpose]} 목적, 메시지 '${b.message}', 자연광 실사 느낌, ${tone}`, caption: b.message, refMediaIds: photos.map((p) => p.id), aspect: spec.aspect, model: model?.id ?? null, source: 'template' as 'template' | 'ai' };
+    negativeEn: 'text artifacts, letters, signage, distorted hands, extra fingers, uncanny faces, watermark, logo, low quality, oversaturated, western-style houses, foreign-language signs, non-Korean people', summaryKo: `${spec.label}: ${PURPOSE[b.purpose]} 목적, 메시지 '${b.message}', 자연광 실사 느낌, ${tone}`, caption: b.message, refMediaIds: (picked.length ? picked : photos.slice(0, 1)).map((p) => p.id), aspect: spec.aspect, model: model?.id ?? null, source: 'template' as 'template' | 'ai' };
   let out: Record<string, any> = fallback;
   const P = await import('./ai/provider');
   if (P.aiEnabled()) {
@@ -119,15 +135,19 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
       const r = await p.chat({
         system: `당신은 경력 30년의 마케터이자 아트디렉터${video ? '(국내 대기업 광고 크리에이티브 디렉터 겸 촬영감독)' : ''}입니다. 이미지·영상 생성 AI(Higgsfield: ${model?.name ?? (video ? 'Kling 계열 영상' : 'SOUL 계열 실사')})에 넣을 프롬프트를 씁니다. JSON 만.
 ${video ? videoRules : `- promptEn: 영문 생성 프롬프트(장면·피사체·구도·조명·분위기·카피 자리·규격 ${spec.aspect} ${spec.px}). 실사 우선, 생성 인물은 AI 느낌 최소(얼굴 클로즈업 피함). 인물은 한국인, 배경은 한국. 브랜드 로고·간판·문자를 그리게 하지 않음(글자는 뒤에 렌더).`}
-- negativeEn: 피할 것(영문 — 외국어 글자·서양식 배경·외국인·손가락 뭉개짐 포함).
+- fields: 필수 칸(영문, #534) — who(누가: 한국인, 나이대·옷), where(어디서: 실제 한국 장소), action(무엇을: 한 동작), emotion(작은 감정 변화: from ○○ to ○○), lens(렌즈 mm), angle(앵글: eye-level 등), movement(카메라 움직임: ${video ? 'slow push-in·tracking 등' : '사진은 static'}), light(빛: 시간대·자연광 + 브랜드 키트 색${PC.ctx.brandColors.length ? ` ${PC.ctx.brandColors.join(', ')}` : ''}을 소품·옷·배경 포인트로), props(소품 2~4개).
+- promptEn 에 이 칸을 모두 담아 쓰고, 구도는 ${spec.aspect} ${spec.px}·아래 24%는 한국어 자막 자리로 비움(사람·제품을 두지 않음). Props: 줄을 넣음.
+- negativeEn: 피할 것(영문 — 화면 글자·로고·외국어 간판·서양식 배경·외국인·손 왜곡·손가락 뭉개짐 포함).
 - summaryKo: 의뢰자가 읽을 한글 의도 요약 3줄(왜 이 장면인지).
 - caption: 이 시안${video ? '을 올릴 게시물 본문' : '에 얹을'} 한국어 카피 1~2줄(브랜드 말투: ${tone}, 금지어: ${[...(brand?.banned_words ?? []), ...Q.avoidOf(brand?.voice)].join(', ') || '없음'}, 과장·최상급 금지, 숫자·가격은 재료에 있는 것만). 첫 줄이 훅 — 인사·"스크롤 멈추세요"·내용 없는 서두 금지, 숫자·장면·대상으로 구체적으로. 상투어(다양한·혁신적인·놓치지 마세요·지금 바로)·특수 대시(—)는 쓰지 않음.
 - refMediaIds: 아래 참고 사진 중 기준으로 쓸 id 배열(없으면 빈 배열).
 - 용도 ${Q.MODE_GUIDE[Q.asMode(b.mode)]}
-${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}`,
+${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}${mem ? `\n${mem}` : ''}`,
         tools: [], messages: [{ role: 'user', content: `[재료]\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}${brand?.intro ? `\n소개: ${brand.intro}` : ''}${brand?.products ? `\n주력 상품: ${brand.products}` : ''}${co?.business ? `\n회사 사업: ${co.business}` : ''}${co?.customers ? `\n주요 고객: ${co.customers}` : ''}\n목적: ${PURPOSE[b.purpose]}\n용도: ${Q.HOOK_MODES[Q.asMode(b.mode)]}\n채널·종류: ${spec.label}(${spec.aspect}, ${spec.px})\n핵심 메시지: ${b.message}\n톤: ${tone}\n수량: ${b.quantity}\n${photos.length ? `참고 사진(자료실):\n${photos.map((p) => `- ${p.id} ${p.title}${p.description ? `: ${p.description.slice(0, 100)}` : ''}`).join('\n')}\n` : ''}${posts.length ? `참고 게시물:\n${posts.map((p) => `- ${p.title}: ${String(p.body ?? '').slice(0, 120)}`).join('\n')}\n` : ''}${refs.links?.length ? `레퍼런스 링크: ${refs.links.join(', ')}\n` : ''}${refs.concept ? `광고 컨셉(상황 매트릭스에서 채택 — 이 대상·상황·제안을 그대로 살림): 대상 ${refs.concept.role} · 상황 ${refs.concept.situation} · 고통 ${refs.concept.pain || '-'} · 제안 ${refs.concept.offer || '-'}\n첫 줄(훅): ${refs.concept.hook}\n광고 제목: ${refs.concept.headline || '-'}\n본문: ${String(refs.concept.primary ?? '').replace(/\n/g, ' / ')}\n` : ''}${video ? `실제 화면 캡처(자료실 '영상 화면 캡처'):\n${caps.length ? caps.map((c) => `- ${c.id} ${c.title}${c.description ? `: ${c.description.slice(0, 80)}` : ''}`).join('\n') : '(없음 — 화면 얹는 장면 없이)'}\n배경음(자료실 '영상 배경음'):\n${bgms.length ? bgms.map((x) => `- ${x.id} ${x.title}`).join('\n') : '(없음)'}\n` : ''}` }],
-        format: { type: 'object', additionalProperties: false, required: ['promptEn', 'negativeEn', 'summaryKo', 'caption', 'refMediaIds', ...(video ? ['character', 'look', 'scenes', 'endCard', 'bgmId'] : [])],
+        format: { type: 'object', additionalProperties: false, required: ['promptEn', 'negativeEn', 'summaryKo', 'caption', 'refMediaIds', 'fields', ...(video ? ['character', 'look', 'scenes', 'endCard', 'bgmId'] : [])],
           properties: { promptEn: { type: 'string' }, negativeEn: { type: 'string' }, summaryKo: { type: 'string' }, caption: { type: 'string' }, refMediaIds: { type: 'array', items: { type: 'string' } },
+            fields: { type: 'object', additionalProperties: false, required: ['who', 'where', 'action', 'emotion', 'lens', 'angle', 'movement', 'light', 'props'], properties: { who: { type: 'string' }, where: { type: 'string' }, action: { type: 'string' }, emotion: { type: 'string' },
+              lens: { type: 'string' }, angle: { type: 'string' }, movement: { type: 'string' }, light: { type: 'string' }, props: { type: 'array', items: { type: 'string' } } } },
             ...(video ? { character: { type: 'string' }, look: { type: 'string' }, bgmId: { type: 'string' },
               endCard: { type: 'object', additionalProperties: false, required: ['headline', 'cta'], properties: { headline: { type: 'string' }, cta: { type: 'string' } } },
               scenes: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['line', 'visualEn', 'seconds', 'screenMediaId', 'device'],
@@ -143,13 +163,17 @@ ${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}`,
       }).filter((x: { line: string; visualEn: string }) => x.line || x.visualEn).slice(0, 5) : [];
       out = { promptEn: String(o.promptEn ?? fallback.promptEn).slice(0, 4000), negativeEn: String(o.negativeEn ?? fallback.negativeEn).slice(0, 1000), summaryKo: String(o.summaryKo ?? '').slice(0, 1000), caption: String(o.caption ?? b.message).slice(0, 2000),
         refMediaIds: (Array.isArray(o.refMediaIds) ? o.refMediaIds.filter((x: string) => okIds.has(x)) : fallback.refMediaIds), aspect: spec.aspect, model: model?.id ?? null, source: 'ai',
+        ...(o.fields && typeof o.fields === 'object' ? { fields: o.fields } : {}),
         ...(scenes.length ? { scenes } : {}), ...(video ? { character: String(o.character ?? '').slice(0, 400), look: String(o.look ?? '').slice(0, 300),
           endCard: { headline: String(o.endCard?.headline ?? '').slice(0, 30), cta: String(kit.cta || o.endCard?.cta || '').slice(0, 60) }, bgmId: bgms.some((x) => x.id === o.bgmId) ? o.bgmId : null } : {}) };
     } catch { /* AI 실패·한도 → 기본 프롬프트 */ }
   }
   const est = (model?.credits ?? (video ? 80 : 6.5)) * b.quantity;
   const q = captionQuality(out.caption, (out as { scenes?: Scene[] }).scenes ?? [], spec, rules, Q, Q.asMode(b.mode));
-  const saved = { ...out, caption: q.caption, quality: q.quality, ...(q.timing ? { timing: q.timing } : {}) };
+  // #534 프롬프트 검사: 필수 칸 8개 점수 → 빠진 칸은 AI 가 쓴 칸(없으면 기본값)으로 보강 · 참고 사진을 안 골랐으면 자료실 후보 1장 연결
+  if (!out.refMediaIds?.length && photos.length) out.refMediaIds = [photos[0].id];
+  const pc = (await import('./mktPromptCheck')).supplementPrompt(out as { promptEn: string; negativeEn: string; refMediaIds: string[] }, PC.ctx, out.fields);
+  const saved = { ...out, promptEn: pc.promptEn, negativeEn: pc.negativeEn, check: pc.check, caption: q.caption, quality: q.quality, ...(q.timing ? { timing: q.timing } : {}) };
   await sql`update mkt_briefs set prompt = ${sql.json(saved as never)}, est_credits = ${est}, status = 'ready', updated_at = now() where id = ${briefId}`;
   return { ...saved, estCredits: est };
 }
@@ -169,6 +193,10 @@ export async function actBrief(u: SessionUser, id: string, i: z.infer<typeof bri
     const prompt: Record<string, any> = { ...(b.prompt ?? {}), ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)), source: 'user' };
     // 사람이 고친 자막은 그대로 두고 점수만 다시(자동으로 고치는 건 AI 가 쓴 자막만)
     if (patch.caption !== undefined) { const Q = await import('./mktQuality'); prompt.quality = captionQuality(patch.caption, prompt.scenes ?? [], KIND_SPEC[b.kind], await Q.qualityRules(), Q, Q.asMode(b.mode)).quality; }
+    // #534 사람이 고친 프롬프트도 다시 검사 — 빠진 필수 칸은 AI 가 쓴 칸(없으면 기본값)으로 끝에 붙임
+    const [brand] = b.brand_id ? await sql<any[]>`select * from mkt_brands where id = ${b.brand_id}` : [];
+    const pc = (await import('./mktPromptCheck')).supplementPrompt(prompt as { promptEn: string }, (await promptCtx(t, b, brand)).ctx, prompt.fields);
+    Object.assign(prompt, { promptEn: pc.promptEn, negativeEn: pc.negativeEn, check: pc.check });
     await sql`update mkt_briefs set prompt = ${sql.json(prompt as never)}, updated_at = now() where id = ${id}`;
     return { ok: true, prompt };
   }

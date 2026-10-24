@@ -14,6 +14,19 @@ import { MODE_HINT, ModeChip, ModeToggle, type Mode } from './ModeToggle';
  * → 생성(Higgsfield 연동 전엔 제작 요청 카드로 로컬 도우미에) → 승인 대기. 월 운영 목표 주간 달력에서 오면(?brand=&message=&kind=) 의뢰가 미리 채워짐.
  */
 const C = '#7C3AED';
+/** #534 프롬프트 검사(필수 칸 8개): 점수 · 칸별 ✓/✗ · 처음 점수와 보강한 칸(AI 가 쓴 칸 또는 기본값) */
+type PCheck = { score: number; before: number; items: { key: string; label: string; ok: boolean; note?: string }[]; fixed: string[]; by: 'ai' | 'default' | null };
+const ITEM_SHORT: Record<string, string> = { scene: '장면', korean: '한국인·한국 배경', camera: '카메라', light: '빛·키트 색', composition: '구도', props: '소품', negative: '금지', refs: '참고 사진' };
+function PromptCheckBox({ c }: { c: PCheck }) {
+  const cls = c.score >= 88 ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : c.score >= 63 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-red-200 bg-red-50 text-red-800';
+  return (
+    <div className="mt-1.5 rounded-input border border-line bg-white p-2" data-testid="studio-prompt-check">
+      <div className="flex flex-wrap items-center gap-1.5"><span className={cx('rounded-full border px-2 py-0.5 text-[11px] font-semibold', cls)} data-testid="studio-prompt-score">프롬프트 검사 {c.score}점</span>
+        {c.fixed.length > 0 && <span className="text-[11px] text-ink-2" data-testid="studio-prompt-fixed">처음 {c.before}점 → 빠진 칸 {c.fixed.map((k) => ITEM_SHORT[k] ?? k).join('·')} {c.by === 'ai' ? 'AI 가 쓴 칸으로 보강' : '기본값으로 보강'}</span>}</div>
+      <ul className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px]">{c.items.map((i) => <li key={i.key} className={i.ok ? 'text-emerald-800' : 'text-red-700'} title={i.note ?? i.label} data-testid="studio-prompt-item" data-ok={i.ok || undefined}>{i.ok ? '✓' : '✗'} {i.label}{!i.ok && i.note ? ` — ${i.note}` : ''}</li>)}</ul>
+    </div>
+  );
+}
 /** 로컬 10/20 22:30 ⑤: 표시 단위가 달러면 장당·초당 USD × 수량(영상 15초) + 원 환산 */
 function estLabel(m: { kind: string; credits: number; usd?: number | null }, quantity: number, v: { pricing?: string; usdKrw?: number }) {
   if (v.pricing === 'usd' && m.usd != null) { const usd = Math.round(m.usd * (m.kind === 'video' ? 15 : 1) * quantity * 1000) / 1000; return `약 $${usd} (≈${Math.round(usd * (v.usdKrw ?? 1400)).toLocaleString('ko-KR')}원)`; }
@@ -98,7 +111,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
   useEffect(() => setP({ promptEn: b.prompt?.promptEn ?? '', negativeEn: b.prompt?.negativeEn ?? '', summaryKo: b.prompt?.summaryKo ?? '', caption: b.prompt?.caption ?? '', model: b.prompt?.model ?? '' }), [b]);
   async function act(body: Record<string, unknown>, msg: string) {
     setBusy(true);
-    try { const r = await api<any>(`/api/marketing/studio/${b.id}`, { method: 'PATCH', body }); toast.ok(r?.status === 'generating' && r.requestIds ? `제작 요청 카드 ${r.requestIds.length}건으로 넘겼습니다` : r?.status === 'generating' ? 'Higgsfield 에 제출했습니다 — 끝나면 승인 대기로 올라갑니다' : r?.status === 'review' ? '시안을 만들어 승인 대기에 올렸습니다' : r?.status === 'failed' ? `생성 실패: ${(r.errors ?? []).join(' / ')}` : msg); setEdit(false); onChange(); }
+    try { const r = await api<any>(`/api/marketing/studio/${b.id}`, { method: 'PATCH', body }); toast.ok(r?.prompt?.check && body.action === 'update' ? `${msg} · 프롬프트 검사 ${r.prompt.check.score}점${r.prompt.check.fixed?.length ? '(빠진 칸 보강)' : ''}` : r?.status === 'generating' && r.requestIds ? `제작 요청 카드 ${r.requestIds.length}건으로 넘겼습니다` : r?.status === 'generating' ? 'Higgsfield 에 제출했습니다 — 끝나면 승인 대기로 올라갑니다' : r?.status === 'review' ? '시안을 만들어 승인 대기에 올렸습니다' : r?.status === 'failed' ? `생성 실패: ${(r.errors ?? []).join(' / ')}` : msg); setEdit(false); onChange(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   const [sl, sc] = labelOf(b); const spec = view.kinds[b.kind]; const pr = b.prompt;
@@ -117,7 +130,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
       {b.progress && <VideoProgress p={b.progress} />}
       {pr && !edit && <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs" data-testid="studio-prompt">
         <div className="rounded-input bg-slate-50 p-2"><div className="flex items-center justify-between font-semibold text-ink-2">생성 프롬프트(EN){pr.source === 'ai' ? <span className="font-normal text-ink-3">AI 마케터</span> : pr.source === 'user' ? <span className="font-normal text-ink-3">직접 고침</span> : <span className="font-normal text-ink-3">기본</span>}<button type="button" onClick={() => copy(pr.promptEn)} className="inline-flex items-center gap-0.5 text-violet-700" aria-label="프롬프트 복사"><Copy size={12} />복사</button></div>
-          <p className="mt-1 whitespace-pre-wrap text-ink" data-testid="studio-prompt-en">{pr.promptEn}</p>{pr.negativeEn && <p className="mt-1 text-ink-3">피할 것: {pr.negativeEn}</p>}{pr.model && <p className="mt-1 text-ink-3">모델 {pr.model} · {pr.aspect}</p>}</div>
+          <p className="mt-1 whitespace-pre-wrap text-ink" data-testid="studio-prompt-en">{pr.promptEn}</p>{pr.negativeEn && <p className="mt-1 text-ink-3">피할 것: {pr.negativeEn}</p>}{pr.model && <p className="mt-1 text-ink-3">모델 {pr.model} · {pr.aspect}</p>}{pr.check && <PromptCheckBox c={pr.check as PCheck} />}</div>
         <div className="space-y-1.5"><div className="rounded-input bg-violet-50/50 p-2"><div className="font-semibold text-violet-800">한글 의도 요약</div><p className="mt-0.5 whitespace-pre-wrap">{pr.summaryKo || '—'}</p></div>
           <div className="rounded-input border border-line p-2"><div className="font-semibold text-ink-2">자막·카피</div><p className="mt-0.5 whitespace-pre-wrap">{pr.caption || '—'}</p>
             {pr.quality && <div className="mt-1 flex flex-wrap items-center gap-1.5" data-testid="studio-quality"><ScoreChip label="사람다움" score={pr.quality.human.score} pass={pr.quality.human.pass} />{pr.quality.hook && <ScoreChip label="훅" score={pr.quality.hook.score} pass={pr.quality.hook.pass} />}
