@@ -52,6 +52,14 @@ export function matchFit(...texts: (string | null | undefined)[]): FitResult {
 
 /** 로컬 10/24 12:20(#537 후속): 결과(낙찰·유찰) 줄 — 영업 기회가 아니라 결과. 오늘 새 공고·새 공고 수에서 빼고 '결과' 묶음으로(당일 메일·영업기회 오늘 탭·영업 홈 같은 기준) */
 export const isAwardResult = (r: any) => /낙찰|유찰/.test(String(r?.current_status ?? '')) || ['winner_name', 'award_company', 'successful_bidder'].some((k) => String(r?.[k] ?? '').trim() !== '');
+/** 닫힌 공고 상태 — '마감임박'(3일 안 마감, 아직 진행 중)은 닫힘이 아님(로컬 10/24 12:58: 마감 10/26 공고가 '마감·취소'로 보였음) */
+export const CLOSED_STATUS = /마감(?!임박)|종료|취소|낙찰|유찰|개찰완료/;
+/** 로컬 10/24 12:58(#537 후속2): 온비드는 처분방식 임대·사용(수익)허가만 영업 대상 — 매각(재산 팔기)은 뺌. 처분방식 칸이 '매각'이거나, 공고명에 매각만 있고 임대·사용허가가 없으면 */
+export function onbidSale(r: { source_type?: unknown; bid_category?: unknown; notice_type?: unknown; title?: unknown }) {
+  if (String(r?.source_type ?? '') !== 'onbid_lease') return false;
+  if (/매각/.test(`${r.bid_category ?? ''} ${r.notice_type ?? ''}`)) return true;
+  const t = String(r.title ?? ''); return /매각/.test(t) && !/임대|대부|사용|허가/.test(t);
+}
 /** 공고 상태: 취소 → 취소, 낙찰자 있음 → 낙찰, 사전규격·발주계획 → 예정, 마감 지남 → 마감, 3일 이내 → 마감임박, 그 외 진행중 */
 export function noticeStatus(state: string | null, deadlineAt: string | null, now: Date, opt: { winner?: string | null; sourceType?: string } = {}): string {
   if (state && /취소/.test(state)) return '취소';

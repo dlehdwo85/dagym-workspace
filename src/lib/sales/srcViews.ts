@@ -5,7 +5,7 @@ import { badRequest, notFound } from '../errors';
 import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
-import { isAwardResult } from './collectors/procurement';
+import { isAwardResult, onbidSale } from './collectors/procurement';
 import { sourceFiles } from './files';
 import { fixG2bUrl, searchHint } from './sourceLink';
 
@@ -125,7 +125,7 @@ const SOURCE_LABEL: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나�
   kapt: 'K-apt', 'k-apt': 'K-apt', g2b: '나라장터', nara: '나라장터', g2b_pre: '나라장터 사전규격', nuri: '누리장터', lh: 'LH', lh_pre: 'LH 사전규격', defense: '국방', d2b: '국방', onbid: '온비드 임대', vendor: '협력사 모집' };
 /** 진행 중 입찰(SALES_SCREEN_INVENTORY 2-5·143행) — 현황 숫자와 입찰 '진행 중' 탭이 같은 기준: 관련 공고 · 마감·취소·낙찰·유찰 아님 · KST 마감일 ≥ 오늘(마감일 없으면 진행으로)
  * · 사전규격(입찰 예정)은 빼고 · 작업 상태 미참여·대상아님은 뺀다. 원본 상태 문구가 '공고중'만이 아니어서(운영 10/19 진행 중 0건) 닫힌 상태만 거른다 */
-const CLOSED_NOTICE = /마감|종료|취소|낙찰|유찰|개찰완료|closed|cancel|award|expired|done/i;
+const CLOSED_NOTICE = /마감(?!임박)|종료|취소|낙찰|유찰|개찰완료|closed|cancel|award|expired|done/i; // '마감임박'(3일 안 마감)은 진행 중(#537 후속2)
 const SKIP_WORK = /미참여|대상아님|not[_\s-]?target|skip/i;
 /** 마감 시각(KST) → epoch ms. 시각이 없거나 읽을 수 없으면 null. 오프셋 없는 'YYYY-MM-DD HH:MM' 은 서울 시각으로 */
 function deadlineAt(v: unknown): number | null {
@@ -135,12 +135,17 @@ function deadlineAt(v: unknown): number | null {
   if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) { const t = Date.parse(s); return Number.isNaN(t) ? null : t; }
   return Date.parse(`${m[1]}T${m[2]}:${m[3]}:00+09:00`);
 }
+/** 끝난 공고: 마감·취소·낙찰 상태이거나 마감일이 지남 — #537 후속2(로컬 10/24 12:58) 오늘 새 공고에서도 뺌 */
+export function bidEnded(n: { status?: unknown; close?: string | null; deadline?: unknown }, td: string) {
+  if (n.status && CLOSED_NOTICE.test(String(n.status))) return true;
+  if (n.close && n.close < td) return true;
+  // 로컬 10/19: 오늘 09:00·14:59 처럼 이미 지난 마감 — 시각이 있으면 지금 시각과 비교(시각 없으면 날짜만)
+  if (n.close === td && n.deadline) { const at = deadlineAt(n.deadline); if (at !== null && at <= Date.now()) return true; }
+  return false;
+}
 export function isOpenBid(n: { related?: boolean; status?: unknown; close?: string | null; source?: unknown; deadline?: unknown }, work: unknown, td: string) {
   if (!n.related) return false;
-  if (n.status && CLOSED_NOTICE.test(String(n.status))) return false;
-  if (n.close && n.close < td) return false;
-  // 로컬 10/19: 오늘 09:00·14:59 처럼 이미 지난 마감 — 시각이 있으면 지금 시각과 비교(시각 없으면 날짜만)
-  if (n.close === td && n.deadline) { const at = deadlineAt(n.deadline); if (at !== null && at <= Date.now()) return false; }
+  if (bidEnded(n, td)) return false;
   if (/pre|사전/i.test(String(n.source ?? ''))) return false;
   if (work && SKIP_WORK.test(String(work))) return false;
   return true;
@@ -196,7 +201,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await prog('opportunity_work'); // S2-5: 전환 뒤에는 정식 진행 기록 표(원본 행 모양)
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
-    const NR = oneRowPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && (!vendorUnchecked(r) || workOf.has(String(r.id ?? r.__id)))), (id) => workOf.has(id)); // 입찰 목록과 같은 기준(확인 안 된 협력사 줄 빼기·같은 공고 한 줄)
+    const NR = oneRowPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && ((!vendorUnchecked(r) && !onbidSale(r)) || workOf.has(String(r.id ?? r.__id)))), (id) => workOf.has(id)); // 입찰 목록과 같은 기준(확인 안 된 협력사 줄·온비드 매각 빼기·같은 공고 한 줄)
     const N = NR.map((r) => notice(r, cats));
     const live = L.filter((l) => !CLOSED.has(String(l.status))); // 종결(계약완료·보류·실패) 제외
     const due = live.filter((l) => l.next && l.next >= today() && l.next <= plus(7)).sort((a, b) => String(a.next).localeCompare(String(b.next)));
@@ -255,7 +260,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       today: await (async () => { const td = today();
         const db3 = await Promise.all((['building_sales_pipeline', 'operating_facility_prospects', 'vendor_registrations'] as const).map(async (tb) => (await rows('global', tb, 20000)).filter((r) => firstSeen(r) === td).length));
         const since = await lastMailAt(t); // #476 b: 홈 '오늘 새 공고' 수 = 오늘 탭과 같은 기준
-        return { date: td, newNotices: NR.filter((r, i) => !isAwardResult(r) && todayReason(N[i], r.first_seen_at, since).hit).length /* 결과(낙찰·유찰)는 새 공고가 아님 */, newDb: { buildings: db3[0], facilities: db3[1], vendors: db3[2] }, contact: live.filter((l) => l.next === td).length, closing: N.filter((n) => n.close === td).length }; })() };
+        return { date: td, newNotices: NR.filter((r, i) => !isAwardResult(r) && todayReason(N[i], r.first_seen_at, since).hit && !bidEnded(N[i], td)).length /* 결과(낙찰·유찰)·끝난 공고는 새 공고가 아님 */, newDb: { buildings: db3[0], facilities: db3[1], vendors: db3[2] }, contact: live.filter((l) => l.next === td).length, closing: N.filter((n) => n.close === td).length }; })() };
   }
   // S2-6 계약만료·재입찰(영업관리 2-6): 타 업체 계약 종료일이 있는 공고 → 영업 시작(−12·−9개월)·제안(−6)·재입찰(−3) 역산, 단계 5, 요약 4(90/180/365일 내·지남)
   if (view === 'contracts') {
@@ -368,14 +373,14 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const byNotice = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), w]));
     // #510: 메일 '참고(검색어만 일치)' [보기] = 마지막 다이제스트의 참고 줄(관련 사업은 아니고 관심 검색어만 맞은 공고)
     const refIds = tab === 'ref' ? new Set(((await db()<{ items: any }[]>`select items from sales_digests where tenant = ${t} order by day desc limit 1`)[0]?.items ?? []).filter((i: any) => i?.section === 'ref').map((i: any) => String(i.id))) : null;
-    let N = oneRowPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => refIds ? refIds.has(String(r.id ?? r.__id)) : byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r))), (id) => byNotice.has(id) || P.has(id)); // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식) 빼기 · 같은 공고 한 줄
+    let N = oneRowPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => refIds ? refIds.has(String(r.id ?? r.__id)) : byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r) && !onbidSale(r))), (id) => byNotice.has(id) || P.has(id)); // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식)·온비드 매각 빼기 · 같은 공고 한 줄
     const since = await lastMailAt(t);
     const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since);
       return { ...n0, todayHit: why.hit, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본)
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, raw: r }; })
       .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
-        && (tab !== 'today' || n.todayHit) && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit)
+        && (tab !== 'today' || (n.todayHit && (n.result || !bidEnded(n, today())))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit)
         && (tab !== 'soon' || (!!n.close && n.close >= today() && n.close <= plus(3) && isOpenBid({ ...n, related: true }, n.work, today()))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중
         && (!q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz))))
       .sort((a, b) => tab === 'open' || tab === 'soon' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);

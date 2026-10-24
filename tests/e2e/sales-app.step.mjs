@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
   const ymd = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
   const put = (scope, tbl, row) => sql`insert into sales_src_rows (scope, tbl, src_id, row) values (${scope}, ${tbl}, ${String(row.id)}, ${sql.json(row)})`;
-  const ids = ['E2E-APP-L1', 'E2E-APP-N1', 'E2E-APP-W1', 'E2E-APP-F1', 'E2E-APP-N2', 'E2E-APP-R1'];
+  const ids = ['E2E-APP-L1', 'E2E-APP-N1', 'E2E-APP-W1', 'E2E-APP-F1', 'E2E-APP-N2', 'E2E-APP-R1', 'E2E-APP-S1', 'E2E-APP-S2'];
   await sql`delete from sales_src_rows where src_id = any(${ids})`;
   await put('default', 'leads', { id: ids[0], name: 'E2E 앱 거래처', sales_status: '미팅예정', region: '경기', next_contact_date: ymd(2), phone: '031-123-4567', contact_name: '김소장', homepage: 'https://example.com/e2e', expected_revenue: '0.00', updated_at: `${ymd(0)}T01:00:00Z` });
   await put('global', 'procurement_notices', { id: ids[1], title: 'E2E 앱 체육시설 위탁운영', issuer: '성남시청', region: '경기', related: true, first_seen_at: `${ymd(0)}T00:30:00+09:00`, deadline_at: `${ymd(5)}T10:00:00`, current_status: '공고중', source_type: 'g2b_bid', fit_business: 'hilink', household_count: 800, source_url: 'https://example.com/notice/1', attachment_urls: ['https://www.g2b.go.kr/files/notice.hwp'], budget: '385000000.00', office_phone: '031-729-2600', complex_name: '분당 스포츠센터' });
@@ -12,6 +12,9 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
   await put('global', 'procurement_notices', { id: ids[4], title: 'E2E 앱 스포츠센터 매점 사용허가', issuer: '시험구', region: '경기', related: true, first_seen_at: `${ymd(0)}T00:40:00+09:00`, deadline_at: `${ymd(6)}T10:00:00`, current_status: '공고중', source_type: 'onbid_lease', source_external_id: '202610-E2E-00', notice_no: '202610-E2E-00', fit_business: 'dagym', source_url: 'https://www.onbid.co.kr' });
   // 로컬 10/24 12:20(#537 후속): 오늘 들어온 낙찰 결과 — 오늘 새 공고가 아니라 아래 '결과' 묶음
   await put('global', 'procurement_notices', { id: ids[5], title: 'E2E 앱 헬스기구 구매 낙찰 결과', issuer: '시험 과학기술원', region: '경기', related: true, fit_business: '다짐', first_seen_at: `${ymd(0)}T00:50:00+09:00`, posted_date: ymd(0), deadline_at: `${ymd(-3)}T10:00:00`, current_status: '낙찰', winner_name: 'E2E낙찰사', source_type: 'g2b_bid', source_external_id: 'E2E-R1-000' });
+  // 로컬 10/24 12:58(#537 후속2): 상태 '마감임박'(3일 안 마감)은 진행 중 → D-2 배지 / 온비드 매각·마감 지난 공고는 오늘 새 공고에서 뺌
+  await put('global', 'procurement_notices', { id: ids[6], title: 'E2E 앱 골프클럽 골프숍 사용·수익허가', issuer: '시험구', region: '경남', related: true, fit_business: '다짐', first_seen_at: `${ymd(0)}T00:55:00+09:00`, posted_date: ymd(0), deadline_at: `${ymd(2)}T16:00:00+09:00`, current_status: '마감임박', source_type: 'onbid_lease', source_external_id: 'E2E-909609', notice_no: 'E2E-909609', source_url: 'https://www.onbid.co.kr', bid_category: '임대' });
+  await put('global', 'procurement_notices', { id: ids[7], title: 'E2E 앱 골프장 27홀 매각 수의계약 공고', issuer: '시험 레스포타운', region: '경남', related: true, fit_business: '다짐', first_seen_at: `${ymd(0)}T00:56:00+09:00`, posted_date: ymd(0), deadline_at: `${ymd(-17)}T17:00:00+09:00`, current_status: '마감', source_type: 'onbid_lease', source_external_id: 'E2E-905892', notice_no: 'E2E-905892', source_url: 'https://www.onbid.co.kr', bid_category: '매각' });
   await put('default', 'opportunity_work', { id: ids[2], notice_id: ids[1], status: '검토 중', memo: '현장 설명회 10/25', next_action_date: ymd(3) });
   await put('global', 'operating_facility_prospects', { id: ids[3], name: 'E2E 앱 시설', address: '경기 수원시', household_count: 1500, facility_type: '아파트', region: '경기', office_phone: '031-222-3333', completion_date: '2024-05-13', first_seen_at: ymd(0) }); // S1-3: 원본 칸 이름(household_count·completion_date)
   await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant: 'default', at: new Date().toISOString(), daily: true })}) on conflict (key) do nothing`;
@@ -41,6 +44,8 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.match(await res.locator('summary').innerText(), /결과\(낙찰·유찰\) 1건/);
     assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 헬스기구 구매 낙찰 결과' }).count(), 1, '결과는 오늘 새 공고 목록에 없고');
     assert.equal(await res.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 헬스기구 구매 낙찰 결과' }).count(), 1, '결과 묶음에만');
+    assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프클럽 골프숍' }).getByTestId('bid-status').innerText(), 'D-2', '#537 후속2: 마감임박(3일 안)은 마감·취소가 아니라 D-2');
+    assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프장 27홀 매각' }).count(), 0, '온비드 매각·마감 지난 공고는 오늘 새 공고에 없음');
     await hb.getByTestId('sales-bids-tab-open').tap();
     await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 체육시설' }).waitFor();
     assert.match(await p.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).getAttribute('class'), /font-bold/, '영업기회 칸 켜짐');

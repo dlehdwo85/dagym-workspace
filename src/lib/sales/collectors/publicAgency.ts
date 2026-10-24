@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { db } from '../../db';
 import { dataGoKey } from '../collect';
 import { callDataGo, type DataGoStats } from './g2b';
-import { matchFit } from './procurement';
+import { matchFit, onbidSale } from './procurement';
 import { regionFromAddress } from './files';
 import { noticeLinks, upsertNotices } from './store';
 import type { Collector, CollectorCtx, CollectorResult, SourceStat } from './types';
@@ -59,6 +59,7 @@ export function d2bPayload(it: any, kind: 'dmstc' | 'fclty'): (Record<string, un
 export function onbidPayload(it: any): Record<string, unknown> | null {
   const no = pick(it, 'onbidPbancNo', 'pbancMngNo', 'pbctNo'), title = pick(it, 'onbidPbancNm'); if (!no || !title) return null;
   const sports = title.match(SPORTS)?.[0]; const dsps = pick(it, 'dspsMthodNm');
+  if (pick(it, 'dspsMthodCd') === '0001' || onbidSale({ source_type: 'onbid_lease', bid_category: dsps, title })) return null; // #537 후속2: 매각(재산 팔기)은 영업 대상 아님 — 임대·사용허가만
   return { source_type: 'onbid_lease', source_external_id: no, notice_no: no, source_url: 'https://www.onbid.co.kr', title, issuer: pick(it, 'orgNm') ?? '온비드(한국자산관리공사)', demand_agency: pick(it, 'rspbSbrNm'),
     posted_date: pick(it, 'pbancYmd'), deadline_at: pick(it, 'cltrBidEndDt'), opening_at: pick(it, 'cltrOpbdDt'), contract_method: pick(it, 'bidDivNm'), notice_state: pick(it, 'pbancKindNm'),
     bid_category: dsps ?? '임대', notice_type: [pick(it, 'prptDivNm'), dsps].filter(Boolean).join(' ') || '공유재산 임대', task_scope: line(pick(it, 'cltrBidBgngDt') && `입찰 ${short(pick(it, 'cltrBidBgngDt'))}~${short(pick(it, 'cltrBidEndDt')) ?? ''}`, pick(it, 'pbctNsq') && `${pick(it, 'pbctNsq')}회차`),

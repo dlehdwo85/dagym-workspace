@@ -1002,7 +1002,7 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
   const td = today();
   const dd = n.close ? Math.round((Date.parse(n.close) - Date.parse(td)) / 864e5) : null;
   const st = /정정/.test(String(n.status ?? '')) ? ['정정 전 공고', 'bg-slate-100 text-ink-2'] : /낙찰/.test(String(n.status ?? '')) ? ['낙찰', 'bg-emerald-50 text-emerald-800'] : /사전|예정/.test(String(n.status ?? '')) ? ['입찰 예정', 'bg-sky-50 text-sky-800']
-    : /취소|마감/.test(String(n.status ?? '')) || (dd !== null && dd < 0) ? ['마감·취소', 'bg-slate-100 text-ink-3'] : dd === 0 ? [`오늘 마감 ${String(n.deadline ?? '').slice(11, 16)}`, 'bg-red-600 text-white'] : dd !== null ? [`D-${dd}`, dd <= 3 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2'] : ['진행중', 'bg-slate-100 text-ink-2'];
+    : /취소|마감(?!임박)/.test(String(n.status ?? '')) || (dd !== null && dd < 0) ? ['마감·취소', 'bg-slate-100 text-ink-3'] /* '마감임박'(3일 안 마감)은 D-n — #537 후속2 */ : dd === 0 ? [`오늘 마감 ${String(n.deadline ?? '').slice(11, 16)}`, 'bg-red-600 text-white'] : dd !== null ? [`D-${dd}`, dd <= 3 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2'] : ['진행중', 'bg-slate-100 text-ink-2'];
   const cat = n.classification ?? n.category;
   return (
     <li className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-bid">

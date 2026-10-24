@@ -92,3 +92,24 @@ test('#537 후속(로컬 10/24 12:20): 결과(낙찰·유찰)는 오늘 새 공�
   assert.match(text, /■ 결과\(낙찰·유찰\) \(2\)/);
   assert.doesNotMatch(text, /입찰마감[^\n]*D--/, '지난 마감에 D-day 없음');
 });
+
+test('#537 후속2(로컬 10/24 12:58): 오늘 새 공고에서 마감 지남·취소 빼기 · 온비드 매각 빼기 · 상태 마감임박(3일 안)은 진행 중(D-n 배지·마감 임박 탭·당일 메일 마감 임박)', async () => {
+  const GOLF = '[시험] 오동골프클럽 부대시설(골프숍) 사용·수익허가';
+  await ins(41, { source_type: 'onbid_lease', source_external_id: '905892', notice_no: '905892', source_url: 'https://www.onbid.co.kr', title: '[시험] 골프장 27홀 매각 수의계약 공고', issuer: '시험 레스포타운', bid_category: '매각', notice_type: '기타일반재산 매각', current_status: '마감', deadline_at: at(plus(-17), '17:00') });
+  await ins(42, { source_type: 'onbid_lease', source_external_id: '909609', notice_no: '909609', source_url: 'https://www.onbid.co.kr', title: GOLF, issuer: '시험구', bid_category: '임대', notice_type: '공유재산 임대', current_status: '마감임박', deadline_at: at(plus(2), '16:00') });
+  await ins(43, { source_type: 'g2b_bid', source_external_id: 'R26BK00543043-000', title: '[시험] 마감 지난 체육관 위탁운영', issuer: '시험시', deadline_at: at(plus(-3), '10:00') });
+  await ins(44, { source_type: 'g2b_bid', source_external_id: 'R26BK00543044-000', title: '[시험] 취소된 헬스장 위탁운영', issuer: '시험시', current_status: '취소', notice_kind: 'cancel' });
+  // 이미 받은(지난 메일 전) 마감임박 공고 — 당일 메일 '마감 임박' 구역 대상
+  await ins(45, { source_type: 'g2b_bid', source_external_id: 'R26BK00543045-000', title: '[시험] 수영장 위탁운영 마감임박', issuer: '시험시', current_status: '마감임박', first_seen_at: ago(72), posted_date: plus(-3), deadline_at: at(plus(1), '18:00') });
+  const t = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=today');
+  const titles = t.items.map((i) => i.title);
+  assert.ok(titles.includes(GOLF), '마감임박(마감 10/26 같은 3일 안)은 오늘 새 공고에 그대로');
+  for (const x of ['[시험] 골프장 27홀 매각 수의계약 공고', '[시험] 마감 지난 체육관 위탁운영', '[시험] 취소된 헬스장 위탁운영']) assert.ok(!titles.includes(x), `오늘 새 공고에서 뺌: ${x} / ${titles.join(' · ')}`);
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=summary')).today.newNotices, t.items.length, '홈 오늘 새 공고 수 = 오늘 탭');
+  assert.ok((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=soon')).items.some((i) => i.title === GOLF), '마감 임박 탭(예전에는 상태 마감임박을 닫힌 공고로 봐서 빠졌음)');
+  assert.ok((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=open')).items.some((i) => i.title === GOLF), '진행 중 탭');
+  assert.ok(!(await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.some((i) => i.title.includes('매각 수의계약')), '온비드 매각은 관련 목록에서도 뺌');
+  const html = (await ctx.owner.req('GET', '/api/sales/digest?preview=html')).body;
+  assert.doesNotMatch(html, /매각 수의계약/, '당일 메일에도 매각 없음');
+  assert.match(html, /data-digest-section="soon"[\s\S]*수영장 위탁운영 마감임박/, '상태 마감임박 공고가 메일 마감 임박 구역에 나옴');
+});

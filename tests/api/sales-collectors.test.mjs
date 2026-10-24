@@ -377,7 +377,8 @@ function agency522(u, send) {
   if (u.pathname === '/agency/d2b_fclty') return json(ok([], true));
   if (u.pathname === '/agency/onbid_lease') {
     if (q.resultType !== 'json' || q.cltrTypeCd !== '0001' || q.prptDivCd !== '0002,0010,0005' || !/^\d{8}$/.test(q.opbdDtStart ?? '')) return json({ header: { resultCode: '10', resultMsg: '필수 입력 누락' }, body: {} });
-    return json(ok(q.onbidPbancNm === '스포츠' ? [{ onbidPbancNo: '202610-36613-00', pbancMngNo: 'M-1', pbctNo: 'P-1', onbidPbancNm: '진영스포츠센터 내 용품점 및 자판기 사용·수익허가(3차)', orgNm: '김해시도시개발공사', rspbSbrNm: '시설운영팀', pbancYmd: ymd8(0), cltrBidBgngDt: `${ymd8(1)}1000`, cltrBidEndDt: `${ymd8(3)}1700`, cltrOpbdDt: `${ymd8(4)}1000`, dspsMthodNm: '임대', prptDivNm: '공유재산', pbancKindNm: '일반공고', bidDivNm: '인터넷', pbctNsq: '3' }] : [], true));
+    return json(ok(q.onbidPbancNm === '스포츠' ? [{ onbidPbancNo: '202610-36613-00', pbancMngNo: 'M-1', pbctNo: 'P-1', onbidPbancNm: '진영스포츠센터 내 용품점 및 자판기 사용·수익허가(3차)', orgNm: '김해시도시개발공사', rspbSbrNm: '시설운영팀', pbancYmd: ymd8(0), cltrBidBgngDt: `${ymd8(1)}1000`, cltrBidEndDt: `${ymd8(3)}1700`, cltrOpbdDt: `${ymd8(4)}1000`, dspsMthodNm: '임대', prptDivNm: '공유재산', pbancKindNm: '일반공고', bidDivNm: '인터넷', pbctNsq: '3' }]
+      : q.onbidPbancNm === '골프' ? [{ onbidPbancNo: '202610-90589-00', onbidPbancNm: '골프장 27홀 매각 수의계약 공고', orgNm: '시험 레스포타운', pbancYmd: ymd8(0), cltrBidBgngDt: `${ymd8(1)}1000`, cltrBidEndDt: `${ymd8(5)}1700`, cltrOpbdDt: `${ymd8(6)}1000`, dspsMthodNm: '매각', prptDivNm: '기타일반재산', pbancKindNm: '수의계약공고' }] : [], true)); // #537 후속2: 매각은 영업 대상 아님
   }
   return send(404, 'nope');
 }
@@ -393,7 +394,7 @@ test('#522 LH·국방·온비드 새 주소·칸: LH(body.item·날짜 형식 �
   assert.equal(r.sources.lh_bid.sent, undefined, '성공한 원천은 보낸 주소를 안 남김');
   assert.ok(r.sources.lh_bid.keys.includes('bidnmKor') && r.sources.lh_bid.keys.includes('zoneRstrct1'), '첫 줄 칸 이름(값 없이)');
   assert.ok(!JSON.stringify(r.sources).includes('행복주택'), '값은 안 남김');
-  assert.match(r.summary, /LH 입찰공고 받음 2·관련 1/); assert.match(r.summary, /온비드 공고\(차세대\) 받음 1·관련 1/); assert.match(r.summary, /나라장터와 같은 국방 공고 1건은 나라장터 줄로/);
+  assert.match(r.summary, /LH 입찰공고 받음 2·관련 1/); assert.match(r.summary, /온비드 공고\(차세대\) 받음 2·관련 1/, '매각 1건은 받았지만 관련 아님(#537 후속2)'); assert.match(r.summary, /나라장터와 같은 국방 공고 1건은 나라장터 줄로/);
   const row = async (st, ext) => (await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = ${st} and row->>'source_external_id' = ${ext} and not gone`)[0]?.row;
   const lh = await row('lh_bid', '2026-0001-0');
   assert.deepEqual([lh.title, lh.estimated_amount, lh.base_amount, lh.region_restriction, lh.demand_agency, lh.fit_business, lh.deadline_at.slice(0, 16)], ['행복주택 커뮤니티 피트니스 운영 위탁 용역', 50000000, 55000000, '경기도, 서울특별시', '경기남부지역본부', '다짐', `${plus(6)}T17:00`]);
@@ -407,6 +408,7 @@ test('#522 LH·국방·온비드 새 주소·칸: LH(body.item·날짜 형식 �
   const on = await row('onbid_lease', '202610-36613-00');
   assert.deepEqual([on.title, on.issuer, on.fit_business, on.related, on.notice_type, on.deadline_at.slice(0, 16)], ['진영스포츠센터 내 용품점 및 자판기 사용·수익허가(3차)', '김해시도시개발공사', '다짐', true, '공유재산 임대', `${plus(3)}T17:00`]);
   assert.equal(on.notice_no, '202610-36613-00');
+  assert.equal(await row('onbid_lease', '202610-90589-00'), undefined, '#537 후속2(로컬 10/24 12:58): 온비드 매각(재산 팔기)은 저장 안 함 — 임대·사용허가만');
   const oq = hits.find((h) => h.path === '/agency/onbid_lease' && h.q.onbidPbancNm === '스포츠').q;
   assert.deepEqual([oq.resultType, oq.cltrTypeCd, oq.prptDivCd, oq.opbdDtStart, oq.opbdDtEnd], ['json', '0001', '0002,0010,0005', ymd8(0), ymd8(60)]);
   const [run] = await sql`select detail from sales_collector_runs where slug = 'public_agency_bids' order by started_at desc limit 1`;

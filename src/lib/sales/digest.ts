@@ -12,7 +12,7 @@ import { notify } from '../notifications';
 import { audit } from '../log';
 import { zUuid } from '../api';
 import { tenantOf, type SessionUser } from '../types';
-import { initialClassification, isAwardResult, matchFit } from './collectors/procurement';
+import { CLOSED_STATUS, initialClassification, isAwardResult, matchFit, onbidSale } from './collectors/procurement';
 import { vendorDateOk } from './collectors/vendorRules';
 import { BID_COLLECTORS } from './collectors';
 import { listBizCats, matchBiz, type BizCat } from './bizCats';
@@ -156,6 +156,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const changedToday = upd != null && upd >= sinceMs && (kind0 === 'cancel' || kind0 === 'amend' || String(r.current_status ?? '') === '취소' || result);
     if (!isNew && !changedToday) continue;
     if (r.source_type === 'vendor_recruit' && (!r.posted_date || !vendorDateOk(r))) { skip('게시일 미상'); continue; } // #476 e·후속: 게시판 날짜로 확인 못 한 협력사 줄(조각·메뉴·예전 방식)은 메일·오늘 탭에서 뺌
+    if (onbidSale(r)) { skip('온비드 매각'); continue; } // #537 후속2(로컬 10/24 12:58): 온비드는 임대·사용허가만
     const f = passPrefs(r, p); if (!f.ok) { skip(f.why); continue; }
     if (result) { cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
     const dl = dayOf(r.deadline_at);
@@ -180,7 +181,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const slug = SLUG_OF[String(r.source_type)] ?? ''; if (slug && off.has(slug)) continue;
     if (todayKeys.has(noKey(r).key)) continue;
     const seen = at(r.first_seen_at); if (seen != null && seen >= sinceMs) continue;
-    if (r.source_type === 'vendor_recruit' || String(r.notice_kind ?? '') === 'cancel' || /취소|마감|낙찰|유찰/.test(String(r.current_status ?? ''))) continue;
+    if (r.source_type === 'vendor_recruit' || String(r.notice_kind ?? '') === 'cancel' || CLOSED_STATUS.test(String(r.current_status ?? '')) || onbidSale(r)) continue; // '마감임박'은 진행 중(#537 후속2)
     const f = passPrefs(r, p); if (!f.ok || !f.fit) continue;
     const dl = when(r.deadline_at); if (!dl) continue;
     const dday = Math.round((Date.parse(dl.d) - Date.parse(day)) / 864e5); if (dday < 0 || dday > 3) continue;
