@@ -67,6 +67,24 @@ type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 const VIEW_MODES: ViewMode[] = ['list', 'board', 'calendar', 'timeline'];
 const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done', 'extend'];
 const cleanView = (v: string | null) => (v && LIST_VIEWS.includes(v) ? v : '');
+/** #242(대표 10/24 '내 업무에서 업무를 열었다 닫으면 전체로'): 목록 거르기·검색어·보기 방식은 주소에 둔다(기록은 쌓지 않음) — 닫기·뒤로가기·새로 고침·링크 공유에도 같은 목록 */
+const URL_KEYS = ['view', 'brandId', 'space', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId', 'hasAttach', 'carried'] as const;
+const PANEL_PATH = /^\/tasks\/([0-9a-f-]{36})$/;
+function filtersOf(sp: { get: (k: string) => string | null }) {
+  const f: Record<string, string> = {};
+  for (const k of URL_KEYS) { const v = k === 'view' ? cleanView(sp.get(k)) : sp.get(k); if (v) f[k] = v; }
+  return f;
+}
+const sameFilters = (a: Record<string, string>, b: Record<string, string>) => URL_KEYS.every((k) => (a[k] ?? '') === (b[k] ?? ''));
+/** 목록 상태 → 주소 검색어. 주소에 있던 다른 값(group·done 등)은 그대로, 한 번 쓰고 마는 new 는 지움 */
+function listSearch(cur: string, mode: string, filters: Record<string, string>, q: string) {
+  const p = new URLSearchParams(cur);
+  for (const k of [...URL_KEYS, 'q', 'mode', 'new']) p.delete(k);
+  p.set('mode', mode);
+  for (const k of URL_KEYS) if (filters[k]) p.set(k, filters[k]);
+  if (q) p.set('q', q);
+  return p.toString();
+}
 
 /** V14 40번: 진행 중·대기 중인 끌기(dnd-kit) 취소 — 센서는 창 resize 에 취소되며 문서 클릭 가로채기도 걷어 낸다 */
 const NO_SENSORS: never[] = [];
@@ -80,7 +98,6 @@ function cancelDrag() { try { window.dispatchEvent(new Event('resize')); } catch
 
 export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Record<string, string>; title?: string; defaultMode?: ViewMode }) {
   const sp = useSearchParams();
-  const router = useRouter();
   const sess = useSession(); const { dir } = sess;
   const [mode, setMode] = useState<ViewMode>(() => {
     // U-0a ?view=board 처럼 보기 이름이 view 로 들어와도 화면 보기로 해석, 모르는 값은 기본 보기
@@ -88,12 +105,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     return VIEW_MODES.includes(m as ViewMode) ? (m as ViewMode) : defaultMode;
   });
   const [q, setQ] = useState(sp.get('q') ?? '');
-  const [filters, setFilters] = useState<Record<string, string>>(() => {
-    const f: Record<string, string> = {};
-    for (const k of ['brandId', 'space', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId', 'hasAttach']) { const v = sp.get(k); if (v) f[k] = v; }
-    const v = cleanView(sp.get('view')); if (v) f.view = v;
-    return f;
-  });
+  const [filters, setFilters] = useState<Record<string, string>>(() => filtersOf(sp));
   // V11 2번: "완료된 업무도 보기" 체크박스는 없앰(상단 "완료" 칩 = 완료 업무 월별). 주소 ?done=1 만 호환
   const [showDone] = useState(sp.get('done') === '1');
   // 묶기: 담당자별(기본) · 마감일 · 프로젝트 · 묶지 않음. "내 업무"는 마감일 묶음(새로 배정됨 확인 포함)이 기본
@@ -120,13 +132,24 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   useEffect(() => { // #194 바탕화면 위젯 [+]·딥링크 workos://tasks?new=1 → 새 업무 등록 창(주소에서 new 를 지워 뒤로·새로고침에 다시 안 열림)
     if (sp.get('new') !== '1' || location.pathname !== '/tasks') return;
     setQuickOpen(true);
-    const p = new URLSearchParams(sp.toString()); p.delete('new');
-    router.replace(`/tasks${p.toString() ? `?${p}` : ''}`);
-  }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { // URL 변경(메뉴 이동) 반영 — 패널로 /tasks/:id 가 된 동안에는 목록 필터를 그대로 둔다
-    if (/^\/tasks\/[0-9a-f-]{36}$/.test(location.pathname)) return;
-    const v = cleanView(sp.get('view'));
-    setFilters((f) => ((f.view ?? '') === v ? f : { ...f, view: v }));
+    const p = new URLSearchParams(location.search); p.delete('new');
+    window.history.replaceState(null, '', `/tasks${p.size ? `?${p}` : ''}`);
+  }, [sp]);
+  // #242 주소 ↔ 목록 상태. 내가 쓴 주소(wrote)와 아직 따라오는 중인 주소(sp ≠ 실제 주소)는 무시하고, 메뉴·링크 이동이나 뒤로가기로 다른 목록 주소가 되면 그 주소대로
+  const wrote = useRef<string | null>(null);
+  const adopt = useRef(false); // 패널 칸(/tasks/:id)에서 처음 그려진 목록 — 목록 주소로 돌아오면 그 주소의 거르기를 따른다
+  const fromUrl = (u: URLSearchParams) => {
+    const f = filtersOf(u);
+    setFilters((cur) => (sameFilters(cur, f) ? cur : f));
+    setQ(u.get('q') ?? '');
+    const m = u.get('mode') ?? u.get('view');
+    if (VIEW_MODES.includes(m as ViewMode)) setMode(m as ViewMode);
+  };
+  useEffect(() => {
+    if (PANEL_PATH.test(location.pathname)) return; // 패널로 /tasks/:id 가 된 동안에는 목록 거르기를 그대로 둔다
+    const s = sp.toString();
+    if (s !== new URLSearchParams(location.search).toString() || s === wrote.current) return;
+    fromUrl(new URLSearchParams(s));
   }, [sp]);
 
   const qs = useMemo(() => {
@@ -143,13 +166,6 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const countQs = useMemo(() => { const p = new URLSearchParams(qs); ['view', 'assigneeId', 'limit', 'doneMonth', 'carried'].forEach((k) => p.delete(k)); return p.toString(); }, [qs]);
   const counts = useApi<{ counts: Record<string, number> }>(fixed?.view ? null : `/api/tasks/counts?${countQs}`);
   useEffect(() => { if (data) counts.reload(); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const p = new URLSearchParams(sp.toString());
-    p.set('mode', mode);
-    router.replace(`?${p}`, { scroll: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
 
   /** 모든 보기에서 같은 경로로 원본 업무를 수정 → 다른 보기에도 즉시 반영 */
   async function patch(t: Task, body: Record<string, unknown>) {
@@ -183,20 +199,37 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const listUrl = useRef<string | null>(null);
   const panelY = useRef(0); // #535: 휴대폰은 패널이 목록을 덮음 — 닫으면 목록을 연 자리로
   const openTask = useCallback((id: string) => {
-    if (!listUrl.current) listUrl.current = location.pathname + location.search;
+    if (!listUrl.current && !PANEL_PATH.test(location.pathname)) listUrl.current = location.pathname + location.search;
     if (!window.history.state?.wosPanel) panelY.current = window.scrollY;
-    // V12 4번: 패널이 열린 채 다른 업무를 누르면 닫지 않고 그 업무로 교체(기록은 한 칸만 — 닫으면 바로 목록)
-    if (window.history.state?.wosPanel) window.history.replaceState({ wosPanel: id }, '', `/tasks/${id}`);
-    else window.history.pushState({ wosPanel: id }, '', `/tasks/${id}`);
+    // V12 4번: 패널이 열린 채 다른 업무를 누르면 닫지 않고 그 업무로 교체(기록은 한 칸만 — 닫으면 바로 목록). #242 패널 칸에 목록 주소도 적어 둠(다른 화면에 갔다 뒤로 오면 같은 거르기로 다시 그림)
+    const st = { wosPanel: id, wosList: listUrl.current };
+    if (window.history.state?.wosPanel) window.history.replaceState(st, '', `/tasks/${id}`);
+    else window.history.pushState(st, '', `/tasks/${id}`);
     setPanelId(id);
   }, []);
   const closePanel = useCallback(() => {
     if (window.history.state?.wosPanel) window.history.back();
     else { if (listUrl.current) { window.history.replaceState(null, '', listUrl.current); keepScroll(panelY.current, new URL(listUrl.current, location.origin).pathname); } setPanelId(null); }
   }, []);
+  useEffect(() => { // 패널에서 다른 화면(대화방·AI 비서 등)에 갔다 뒤로가기로 패널 칸(/tasks/:id)에 돌아오면 그 업무를 다시 패널로, 뒤 목록은 적어 둔 거르기로 — 한 번 더 닫으면 목록
+    const m = PANEL_PATH.exec(location.pathname);
+    if (!m) return;
+    const st = window.history.state;
+    if (st?.wosPanel) setPanelId(m[1]);
+    if (st?.wosPanel && typeof st.wosList === 'string') { listUrl.current = st.wosList; fromUrl(new URLSearchParams(st.wosList.split('?')[1] ?? '')); }
+    else adopt.current = true;
+  }, []);
+  useEffect(() => { // #242 목록 상태를 주소에(replaceState·기록 안 쌓임). 패널이 열린 동안(/tasks/:id)은 닫혀 목록 주소로 돌아온 뒤에 씀
+    if (PANEL_PATH.test(location.pathname)) return;
+    if (adopt.current) { adopt.current = false; fromUrl(new URLSearchParams(location.search)); return; }
+    const s = listSearch(location.search, mode, filters, q);
+    wrote.current = s;
+    // data 에 Next 내부 값(__NA)을 넣지 않아야 라우터도 새 주소를 알아 useSearchParams 가 따라옴(넣으면 다음 라우터 갱신 때 옛 주소로 되돌아감)
+    if (s !== new URLSearchParams(location.search).toString()) window.history.replaceState(null, '', `${location.pathname}?${s}`);
+  }, [mode, filters, q, panelId]);
   useEffect(() => {
     const onPop = () => {
-      const m = /^\/tasks\/([0-9a-f-]{36})$/.exec(location.pathname);
+      const m = PANEL_PATH.exec(location.pathname);
       setPanelId(m && window.history.state?.wosPanel ? m[1] : null);
       if (!m) { if (listUrl.current) keepScroll(panelY.current); listUrl.current = null; }
     };
