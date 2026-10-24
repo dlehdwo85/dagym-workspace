@@ -89,7 +89,7 @@ ${Q.MODE_GUIDE.content}
 숫자·실적·가격은 재료에 있는 것만 — 없으면 쓰지 않습니다. 과장·최상급 금지.`,
       `[재료]\n${m.text}\n\n제품·서비스: ${i.product}\n대상: ${i.audience || '(재료에서 판단)'}${i.a || i.b ? `\n비교 대상: ${i.a || '?'} vs ${i.b || '?'}` : ''}${i.note ? `\n메모: ${i.note}` : ''}${bannedLine(m.banned)}`,
       { type: 'object', additionalProperties: false, required: ['topics'], properties: { topics: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['pattern', 'topic', 'why', 'a', 'b'],
-        properties: { pattern: { type: 'string' }, topic: { type: 'string' }, why: { type: 'string' }, a: { type: 'string' }, b: { type: 'string' } } } } } }, 'marketing_carousel');
+        properties: { pattern: { type: 'string' }, topic: { type: 'string' }, why: { type: 'string' }, a: { type: 'string' }, b: { type: 'string' } } } } } }, 'marketing_carousel', { make: true });
     const got = (Array.isArray(o?.topics) ? o.topics : []).map((x: any) => ({ pattern: x?.pattern, topic: clip(x?.topic, 80), why: clip(x?.why, 120), a: clip(x?.a, 30), b: clip(x?.b, 30) }))
       .filter((x: Topic) => PATTERN_KEYS.includes(x.pattern) && x.topic.length >= 2) as Topic[];
     const byPattern = PATTERN_KEYS.map((p) => got.find((x) => x.pattern === p)).filter((x): x is Topic => !!x);
@@ -153,7 +153,7 @@ async function generate(tenant: string, actorId: string, p: { product: string; t
       `[재료]\n${m.text}\n\n제품·서비스: ${p.product}\n주제(표지): ${p.topic}\n유형: ${PATTERNS[p.pattern]}${p.a || p.b ? `\n비교 대상: A=${p.a || '?'} · B=${p.b || '?'}` : ''}\n대상: ${p.audience || '(재료에서 판단)'}${kw0 ? `\n댓글 키워드: ${kw0}` : ''}${p.note ? `\n메모: ${p.note}` : ''}${bannedLine(m.banned)}${mem ? `\n\n${mem}` : ''}${prev ? `\n\n[지금 안]\n${slidesText(prev.slides)}\n본문: ${prev.caption}\n\n[수정 요청] ${prev.note}` : ''}`,
       { type: 'object', additionalProperties: false, required: ['slides', 'caption', 'keyword', ...(prev ? ['changes'] : [])], properties: { caption: { type: 'string' }, keyword: { type: 'string' }, ...(prev ? { changes: { type: 'string' } } : {}),
         slides: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind', 'title', 'body', 'rows', 'imagePlan'], properties: { kind: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, imagePlan: { type: 'string' },
-          rows: { type: 'array', items: { type: 'array', items: { type: 'string' } } } } } } } }, 'marketing_carousel');
+          rows: { type: 'array', items: { type: 'array', items: { type: 'string' } } } } } } } }, 'marketing_carousel', { make: true });
     if (o === null && prev) throw badRequest('AI 가 꺼져 있어 고칠 수 없습니다 — 직접 고쳐 주세요');
     const aiKw = clip(o?.keyword, 20).replace(/['"‘’“”]/g, '');
     const kw = (prev ? aiKw || kw0 : kw0 || aiKw) || '자료'; // 처음: 직원이 적은 키워드 우선 · 고칠 때: 지금 키워드를 AI 에 주고 AI 답을 따름

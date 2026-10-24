@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { runTick } from '@/lib/jobs';
 import { logError } from '@/lib/log';
 
-export const maxDuration = 60;
+export const maxDuration = 300; // 대표 10/24 ①: 마케팅 글 제작(최상 모델)은 응답 뒤(after)로 돌아 이 시간 안에서 끝남
 export const dynamic = 'force-dynamic';
 
 const GITHUB_JWKS = createRemoteJWKSet(new URL('https://token.actions.githubusercontent.com/.well-known/jwks'));

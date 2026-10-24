@@ -41,13 +41,13 @@ const hourKst = (d: Date) => Number(new Intl.DateTimeFormat('en-GB', { timeZone:
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /** 대표 10/20 15:40 (#103): 요금제 표는 DB(mkt_plan_limits, 플랫폼 운영에서 편집) — 없으면 코드 기본값 */
-export type PlanRow = { code: string; label: string; price: number | null; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; aiMonthlyUsd: number | null; extraCreditKrw: number | null };
+export type PlanRow = { code: string; label: string; price: number | null; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; aiMonthlyUsd: number | null; extraCreditKrw: number | null; writeTier: WriteTier | null };
 export async function planTable(): Promise<Record<string, PlanRow>> {
-  const rows = await db()<any[]>`select code, label, price_krw, monthly_credits::float8 monthly_credits, weekly, video_monthly, regen_monthly, ai_monthly_usd::float8 ai_monthly_usd, extra_credit_krw from mkt_plan_limits`.catch(() => [] as any[]);
+  const rows = await db()<any[]>`select code, label, price_krw, monthly_credits::float8 monthly_credits, weekly, video_monthly, regen_monthly, ai_monthly_usd::float8 ai_monthly_usd, extra_credit_krw, write_tier from mkt_plan_limits`.catch(() => [] as any[]);
   const out: Record<string, PlanRow> = {};
   for (const [k, p] of Object.entries(MKT_PLANS)) { const r = rows.find((x) => x.code === k);
-    out[k] = r ? { code: k, label: r.label, price: r.price_krw ?? null, weekly: r.weekly ?? {}, monthlyCredits: Number(r.monthly_credits), videoMonthly: r.video_monthly, regenMonthly: r.regen_monthly, aiMonthlyUsd: r.ai_monthly_usd ?? null, extraCreditKrw: r.extra_credit_krw ?? null }
-      : { code: k, label: p.label, price: p.price, weekly: { ...p.weekly }, monthlyCredits: p.monthlyCredits, videoMonthly: p.videoMonthly, regenMonthly: p.regenMonthly, aiMonthlyUsd: p.aiMonthlyUsd, extraCreditKrw: null }; }
+    out[k] = r ? { code: k, label: r.label, price: r.price_krw ?? null, weekly: r.weekly ?? {}, monthlyCredits: Number(r.monthly_credits), videoMonthly: r.video_monthly, regenMonthly: r.regen_monthly, aiMonthlyUsd: r.ai_monthly_usd ?? null, extraCreditKrw: r.extra_credit_krw ?? null, writeTier: r.write_tier ?? null }
+      : { code: k, label: p.label, price: p.price, weekly: { ...p.weekly }, monthlyCredits: p.monthlyCredits, videoMonthly: p.videoMonthly, regenMonthly: p.regenMonthly, aiMonthlyUsd: p.aiMonthlyUsd, extraCreditKrw: null, writeTier: null }; }
   return out;
 }
 export type CreditCost = { imageCredits: number; videoCredits: number; krwPerCreditMin: number; krwPerCreditMax: number };
@@ -56,9 +56,9 @@ export async function creditCost(): Promise<CreditCost> {
   return { imageCredits: 6.5, videoCredits: 80, krwPerCreditMin: 43, krwPerCreditMax: 70, ...(r?.value ?? {}) };
 }
 export type MktSettings = { plan?: PlanRow | null; plan_code: keyof typeof MKT_PLANS | null; monthly_credits: number | null; weekly_credits: number | null; video_monthly: number | null; regen_monthly: number | null;
-  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null; ai_monthly_usd: number | null; auto_publish: boolean; auto_hold: boolean };
+  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null; ai_monthly_usd: number | null; auto_publish: boolean; auto_hold: boolean; write_tier: WriteTier | null };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
-  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false };
+  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false, write_tier: null };
 export async function settingsOf(tenant: string): Promise<MktSettings> {
   const [s] = await db()<any[]>`select * from mkt_settings where tenant = ${tenant}`;
   if (!s) return { ...DEFAULTS };
@@ -71,6 +71,34 @@ export function limitsOf(s: MktSettings) {
   const monthly = s.monthly_credits ?? p?.monthlyCredits ?? null;
   return { monthlyCredits: monthly, weeklyCredits: s.weekly_credits ?? (monthly === null ? null : Math.round((monthly / 4.3) * 10) / 10),
     videoMonthly: s.video_monthly ?? p?.videoMonthly ?? null, regenMonthly: s.regen_monthly ?? p?.regenMonthly ?? null, aiMonthlyUsd: s.ai_monthly_usd ?? p?.aiMonthlyUsd ?? null };
+}
+/** 대표 10/24 추가 ①: 자동 제작 글(원고·약한 첫 줄 다시 쓰기·수정본·블로그) 모델 단계 — 회사 지정(플랫폼 운영) → 마케팅 요금제 → 빠른 모델. 품질 검사는 그대로 빠른 모델 */
+export type WriteTier = 'fast' | 'default' | 'deep';
+export const WRITE_TIER_LABEL: Record<WriteTier, string> = { fast: '빠른 모델', default: '표준 모델', deep: '최상 모델' };
+export function writeTierOf(s: Pick<MktSettings, 'write_tier' | 'plan'>): { tier: WriteTier; source: 'company' | 'plan' | 'base' } {
+  if (s.write_tier) return { tier: s.write_tier, source: 'company' };
+  if (s.plan?.writeTier) return { tier: s.plan.writeTier, source: 'plan' };
+  return { tier: 'fast', source: 'base' };
+}
+/** 글 1건 원가(원) 어림 — 최근 60일 자동 제작 원고의 평균 토큰(5건 미만이면 입력 5천·출력 1.5천)을 모델 단계별 단가로 */
+export async function writeCostKrw(): Promise<Record<WriteTier, number>> {
+  const P = await import('./ai/provider');
+  const [r] = await db()<{ i: number | null; o: number | null; n: number }[]>`select avg(input_tokens)::float8 i, avg(output_tokens)::float8 o, count(*)::int n from ai_usage
+    where purpose = 'marketing_produce' and input_tokens > 100 and created_at > now() - interval '60 days'`.catch(() => [] as { i: number | null; o: number | null; n: number }[]);
+  const usage = r && r.n >= 5 && r.i && r.o ? { input_tokens: r.i, output_tokens: r.o } : { input_tokens: 5000, output_tokens: 1500 };
+  const krw = (t: WriteTier) => Math.max(1, Math.round(P.costUsd(P.modelFor(t), usage) * P.usdKrw()));
+  return { fast: krw('fast'), default: krw('default'), deep: krw('deep') };
+}
+const TIER_RANK: Record<WriteTier, number> = { fast: 0, default: 1, deep: 2 };
+/** 로컬 10/24(대표 '대기업 수준 홍보'): 만드는 일(원고·시안 지시·말투·월 목표·캡션·카드뉴스·상황 매트릭스·광고 대본)은 글 모델로 — 원래 더 높은 모델을 쓰던 곳(floor)은 그보다 낮추지 않음. 숫자 요약·분석은 그대로 */
+export async function makeTier(tenant: string, floor: WriteTier = 'fast'): Promise<WriteTier> {
+  const t = writeTierOf(await settingsOf(tenant)).tier;
+  return TIER_RANK[t] >= TIER_RANK[floor] ? t : floor;
+}
+export async function writeModelInfo(s: Pick<MktSettings, 'write_tier' | 'plan'>) {
+  const P = await import('./ai/provider');
+  const w = writeTierOf(s); const cost = await writeCostKrw();
+  return { ...w, label: WRITE_TIER_LABEL[w.tier], model: P.modelFor(w.tier), perDraftKrw: cost[w.tier], byTier: cost };
 }
 /** #103 회사 화면 '이번 달 남은 제작 n건' — 남은 크레딧을 이미지·영상 장수로 환산, 주간 종류별 한도 대비 이번 주 제작 수, 초과 안내(초과 크레딧 금액) */
 export async function productionLeft(tenant: string) {
@@ -259,7 +287,7 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
   const video = VIDEO_KINDS.includes(c.kind);
   if (!P.aiEnabled()) return { title: c.title, body: extra ? extra.prev : `[AI 비서 꺼짐] ${rule?.topic_hint ?? c.title}`, brief: '', why: '', hooks: [], keyword: '', script: [] };
   await assertMktAi(c.tenant);
-  const p = P.anthropicProvider({ tier: 'fast' });
+  const p = P.anthropicProvider({ tier: writeTierOf(s).tier }); // 대표 10/24 추가 ①: 회사·요금제가 정한 글 모델
   const voice = Q.voicePrompt(brand?.voice);
   const mem = await (await import('./mktTeam')).memoryText(c.tenant, 'designer', c.brand_id ?? null).catch(() => ''); // #534 지난 수정 요청 사유(디자인 담당 기억)를 다음 원고에
   const F = await import('./mktFeedTemplates'); // #544 피드 틀 칸(머리말·핵심·비교·강조 낱말·기간·가격 — 금액·기간은 재료에 있는 것만)
@@ -273,7 +301,10 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
 - why 에는 '왜 이 글인가'를 한 문장(이달 목표·이번 주 주제와 어떻게 이어지는지)으로 씁니다.
 ${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}
 - keyword: 검색 키워드 1개(재료의 브랜드·지역·상품에서, 2~12자).${video ? '\n- script: 컷 줄(화면 자막·내레이션) 배열 — 한 컷 2~4초(분당 300음절), 첫 컷은 3초 안, 마지막 컷은 첫 컷과 이어지게(반복 시청).' : `\n${F.CARD_GUIDE}`}
-- 사람이 쓴 글처럼: 상투어(다양한·혁신적인·놓치지 마세요·지금 바로·~해 보는 건 어떨까요)·느낌표/이모지 나열·특수 대시(—)는 쓰지 않고, 문장 길이를 섞습니다.${voice ? `\n${voice}` : ''}${mem ? `\n${mem}` : ''}`,
+- 사람이 쓴 글처럼: 상투어(다양한·혁신적인·놓치지 마세요·지금 바로·~해 보는 건 어떨까요)·느낌표/이모지 나열·특수 대시(—)는 쓰지 않고, 문장 길이를 섞습니다.
+- 문구 기준(표시광고법·신뢰): 최고·1위·유일·최초·100%·무조건·완벽·국내 최대는 [재료]에 근거가 없으면 쓰지 않고, 효과·결과를 단정하지 않으며(매출 2배 보장 같은 말), 다른 회사를 깎아내리지 않습니다. 차세대·올인원 솔루션·시너지·극대화 같은 빈 말도 쓰지 않습니다.
+- 요금·무료 범위·가격·혜택·기간은 [재료]의 상품 설명에 적힌 그대로만 씁니다(추측해서 바꾸지 않음). 한 브랜드 글에 다른 브랜드의 이름·명의를 섞지 않습니다.
+- 채널 틀: 인스타는 첫 줄(약 125자 안)에 핵심·해시태그 5개 이하·행동 권유 1개, 블로그는 검색 키워드를 제목과 첫 문단에, 숏폼·릴스는 첫 3초 질문으로 열고 마지막에 행동 권유 하나.${voice ? `\n${voice}` : ''}${mem ? `\n${mem}` : ''}`,
     tools: [], messages: [{ role: 'user', content: `[재료]\n${m.text}\n\n` + (extra ? `[지난 원고]\n${extra.prev}\n\n[수정 요청]\n${extra.comment}\n\n수정 요청을 반영해 다시 써 주세요.` : `채널: ${c.channel}\n게시일: ${ymd(new Date(c.scheduled_at))}\n주제: ${m.topic || '재료의 브랜드·상품 소개에서 이번 주에 알릴 만한 것 하나'}`) }],
     format: { type: 'object', additionalProperties: false, required: ['title', 'body', 'brief', 'why', 'hooks', 'keyword', ...(video ? ['script'] : ['card'])],
       properties: { title: { type: 'string' }, body: { type: 'string' }, brief: { type: 'string' }, why: { type: 'string' }, hooks: { type: 'array', items: { type: 'string' } }, keyword: { type: 'string' }, ...(video ? { script: { type: 'array', items: { type: 'string' } } } : { card: F.CARD_FORMAT }) } },
@@ -291,7 +322,7 @@ async function rewriteHooks(c: any, brand: any, cur: string, prev: string[], why
   const P = await import('./ai/provider'); const Q = await import('./mktQuality');
   if (!P.aiEnabled()) return [];
   await assertMktAi(c.tenant);
-  const p = P.anthropicProvider({ tier: 'fast' });
+  const p = P.anthropicProvider({ tier: writeTierOf(await settingsOf(c.tenant)).tier }); // 원고와 같은 글 모델
   const r = await p.chat({
     system: `회사 마케팅 담당 AI 비서입니다. 약한 훅을 다시 씁니다. JSON 만.\n${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}\n- 브랜드 말투: ${brand?.tone || '친절하고 담백하게'}. 재료에 없는 숫자·결과·가격은 쓰지 않습니다.`,
     tools: [], messages: [{ role: 'user', content: `글 제목: ${c.title}\n지금 훅: ${cur}\n앞서 낸 후보(모두 약함): ${prev.join(' / ') || '(없음)'}\n약한 이유: ${why}\n\n${Q.asMode(c.mode) === 'ad' ? '대상을 부르고(○○하는 분) 무엇을 주는지(제안·혜택·가격 — 재료에 있는 것만) 2초 안에 말하는 광고형 훅' : '더 구체적이고(숫자·장면·대상) 궁금하게 만드는 훅'} 3개를 다시 써 주세요.` }],
@@ -581,33 +612,50 @@ async function nextSlot(c: SlotPost & { rule_id: string | null; scheduled_at: st
   return null;
 }
 
-export async function runTenant(tenant: string, actorId?: string) {
+/** 정해진 시각이 된 자동 제작 칸을 만든다 — 회사마다 한 번에 하나(정기 실행 뒤 이어 만들기·밤사이 비서·[지금 실행]이 같은 글을 두 번 만들지 않게).
+ *  글 모델이 최상 모델이면 1건 30~60초라 budgetMs 가 지나면 다음 건은 시작하지 않고 다음 실행에 넘긴다(left) */
+async function produceDue(tenant: string, actorId: string | undefined, budgetMs: number): Promise<{ produced: any[]; left: number; busy?: boolean }> {
+  const L = await import('./later');
+  const r = await L.withLock(`mktProduce:${tenant}`, async () => {
+    const due = await db()<any[]>`select * from mkt_contents where tenant = ${tenant} and auto and status = 'draft' and produced_at is null and produce_at <= now()
+      and not exists (select 1 from mkt_production_requests q where q.content_id = mkt_contents.id and q.kind = 'topic' and q.status = 'open') order by produce_at limit 5`;
+    const start = Date.now(); const produced: any[] = []; let k = 0;
+    for (; k < due.length; k++) {
+      const c = due[k];
+      if (produced.length && Date.now() - start > budgetMs) break;
+      const [fresh] = await db()<any[]>`select * from mkt_contents where id = ${c.id} and status = 'draft' and produced_at is null`; // 그사이 [지금 만들기] 등으로 만들어졌으면 건너뜀
+      if (!fresh) continue;
+      const r: any = await produceContent(fresh, actorId, 'auto').catch((e) => ({ id: c.id, error: String(e?.message ?? e).slice(0, 200), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' }));
+      produced.push(r);
+      if (r.quota) { // 한도·크레딧: 남은 칸도 같은 이유로 실패하므로 멈추고, 받는 사람에게 하루 한 번 알림
+        await (await import('./spaceNotify')).notifySpace(db(), { tenant, space: 'marketing', approval: true, type: 'usage_alert', title: '마케팅 자동 제작 멈춤(AI 한도)', body: r.error, link: '/s/marketing/automation', dedupeKey: `mktquota:${tenant}:${ymd(new Date())}` }).catch(() => {});
+        k++; break;
+      }
+    }
+    return { produced, left: due.length - k };
+  });
+  return L.isBusy(r) ? { produced: [] as any[], left: 0, busy: true } : r;
+}
+export async function runTenant(tenant: string, actorId?: string, opt: { later?: boolean } = {}) {
   // 예전 칸 제목의 '[시험] [시험] ' 겹침 정리(브랜드 이름에 [시험]이 들어 있던 때 만든 아직 안 만든 칸)
   await db()`update mkt_contents set title = regexp_replace(title, '^\\[시험\\]\\s*\\[시험\\]\\s*', '[시험] ') where tenant = ${tenant} and title like '[시험]%[시험]%' and produced_at is null`;
   const planned = await planSlots(tenant);
-  const due = await db()<any[]>`select * from mkt_contents where tenant = ${tenant} and auto and status = 'draft' and produced_at is null and produce_at <= now()
-    and not exists (select 1 from mkt_production_requests q where q.content_id = mkt_contents.id and q.kind = 'topic' and q.status = 'open') order by produce_at limit 5`;
-  const produced = [];
-  for (const c of due) {
-    const r: any = await produceContent(c, actorId, 'auto').catch((e) => ({ id: c.id, error: String(e?.message ?? e).slice(0, 200), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' }));
-    produced.push(r);
-    if (r.quota) { // 한도·크레딧: 남은 칸도 같은 이유로 실패하므로 멈추고, 받는 사람에게 하루 한 번 알림
-      await (await import('./spaceNotify')).notifySpace(db(), { tenant, space: 'marketing', approval: true, type: 'usage_alert', title: '마케팅 자동 제작 멈춤(AI 한도)', body: r.error, link: '/s/marketing/automation', dedupeKey: `mktquota:${tenant}:${ymd(new Date())}` }).catch(() => {});
-      break;
-    }
-  }
+  // 정기 실행(later): 글 제작은 응답 뒤에 — 최상 모델은 1건 30~60초라 게시·알림·메일 단계를 밀어내지 않게. [지금 실행]은 그 자리에서(2분 30초 안에 시작한 건까지)
+  const made = opt.later ? null : await produceDue(tenant, actorId, 150e3);
+  if (opt.later) (await import('./later')).runLater('mktProduce', async () => ({ tenant, ...(await produceDue(tenant, undefined, 120e3)) }));
+  const produced = made?.produced ?? [];
   // #516 (b): 시안 없이 승인 대기에 걸린 자동 제작 글 → 서버 그리기로 시안을 붙여 재승인(마감 정리보다 먼저)
   // #516 후속: 글자 든 그래픽을 바탕으로 그린 승인 전 시안 → 새 규칙으로 다시 그림(한 번)
   const V = await import('./mktAutoVisual');
   const redraws = await V.redrawTextVisuals(tenant).catch((e) => [{ id: '', error: String(e?.message ?? e).slice(0, 200) }]);
   const visuals = await V.fillMissingVisuals(tenant).catch((e) => [{ id: '', error: String(e?.message ?? e).slice(0, 200) }]);
-  return { planned, produced, visuals, redraws, ...(await remindAndExpire(tenant)) };
+  return { planned, produced, ...(made ? { left: made.left, ...(made.busy ? { busy: true } : {}) } : { producing: 'later' as const }), visuals, redraws, ...(await remindAndExpire(tenant)) };
 }
-/** tick: 규칙이 있는 회사만(한 번에 3곳) */
+/** tick: 규칙이 있는 회사만(한 번에 3곳) — 글 제작은 응답 뒤(runLater) */
 export async function mktAutoTick() {
   const ts = await db()<{ tenant: string }[]>`select distinct tenant from mkt_rules where active limit 3`;
   const out = [];
-  for (const t of ts) out.push({ tenant: t.tenant, ...(await runTenant(t.tenant)) });
+  for (const t of ts) out.push({ tenant: t.tenant, ...(await runTenant(t.tenant, undefined, { later: true })) });
   return out;
 }
 
@@ -773,7 +821,7 @@ export async function automationView(u: SessionUser) {
   // #544(로컬 13:55): 그림·프롬프트가 실제로 쓰는 바탕 색과 출처(피드 틀·영상 끝 화면·브랜드 색·회사 기본 색)를 키트 화면에 그대로
   const D = await import('./mktCarouselDraw');
   const withDraw = await Promise.all((brands as any[]).map(async (b) => ({ ...b, draw: await D.brandColorInfo(t, b).catch(() => ({ color: null, from: null })) })));
-  return { settings: s, limits: limitsOf(s), usage: { ...(await usageOf(t)), ai: await mktAiUsd(t), companyAiUsd: co.costUsd, companyAiLimitUsd: co.limitUsd, companyAi: { usedKrw: co.budget.usedKrw, limitKrw: co.budget.limitKrw, pct: co.budget.pct, resetLabel: co.budget.resetLabel } }, plans: await planTable(), production: await productionLeft(t), rules, requests, ledger, brands: withDraw, people, canEdit: isAdmin(u),
+  return { settings: s, limits: limitsOf(s), writeModel: await writeModelInfo(s), usage: { ...(await usageOf(t)), ai: await mktAiUsd(t), companyAiUsd: co.costUsd, companyAiLimitUsd: co.limitUsd, companyAi: { usedKrw: co.budget.usedKrw, limitKrw: co.budget.limitKrw, pct: co.budget.pct, resetLabel: co.budget.resetLabel } }, plans: await planTable(), production: await productionLeft(t), rules, requests, ledger, brands: withDraw, people, canEdit: isAdmin(u),
     feedCatalog: { templates: TEMPLATE_IDS.map((id) => { const x = FEED_TEMPLATES[id]; return { id, label: x.label, desc: x.desc, need: x.need ? NEED_LABEL[x.need as keyof typeof NEED_LABEL] : null }; }), styles: Object.entries(FEED_STYLES).map(([id, x]) => ({ id, label: x.label, templates: [...x.templates] as string[] })) } };
 }
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 제작 설정은 관리자가 합니다'); }
@@ -1016,7 +1064,7 @@ export async function voiceDraft(u: SessionUser, id: string) {
   const P = await import('./ai/provider');
   if (!P.aiEnabled()) throw badRequest('AI 비서가 꺼져 있어 초안을 만들 수 없습니다');
   await assertMktAi(t);
-  const p = P.anthropicProvider({ tier: 'fast' });
+  const p = P.anthropicProvider({ tier: await makeTier(t) }); // 말투 초안도 글 모델
   const r = await p.chat({
     system: `회사 마케팅 담당 AI 비서입니다. 이 브랜드의 실제 게시 글에서 말투 프로필을 뽑습니다. JSON 만.
 - topics: 주로 다루는 주제 한 줄 · audience: 타겟 한 줄 · offer: 파는 것 한 줄

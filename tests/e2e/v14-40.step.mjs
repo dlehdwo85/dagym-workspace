@@ -50,6 +50,7 @@ export async function v1440({ browser, desk, ctx, sql, BASE, SHOTS }) {
   // 상세에서 그 업무를 지우면 패널이 닫히고 목록 터치가 그대로 된다
   await m.getByTestId('task-panel').getByRole('button', { name: '패널 닫기' }).click();
   await m.getByTestId('task-panel').waitFor({ state: 'detached' });
+  await m.waitForTimeout(800); // #535 닫은 뒤 0.7초 동안 목록을 연 자리로 맞춤(사람 손이 닿으면 멈춤) — 시험의 scrollIntoView 는 사람 입력이 아니어서 끝날 때까지 기다림(전체 실행에서 '선택'이 아닌 곳을 누르던 원인)
   await tap(m.getByTestId('select-mode'));
   await m.getByTestId('bulk-bar').waitFor();
   await tap(m.getByTestId('select-mode')); // 선택 끝내기

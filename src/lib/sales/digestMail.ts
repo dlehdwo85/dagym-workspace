@@ -18,8 +18,9 @@ const tint = (hex: string) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex); if (!m
 const C = { ink: '#111827', ink2: '#374151', ink3: '#6B7280', line: '#E5E7EB', bg: '#F3F4F6', brand: '#2563EB', brandInk: '#1D4ED8', soft: '#EFF6FF' };
 const BADGE: Record<string, [string, string]> = { 취소: ['#374151', '#E5E7EB'], 정정: ['#B45309', '#FEF3C7'], 긴급: ['#B91C1C', '#FEE2E2'], 재공고: ['#6D28D9', '#EDE9FE'] };
 const FONT = "-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif";
-const ddText = (n: number) => (n === 0 ? 'D-day' : `D-${n}`);
-const ddColor = (n: number) => (n <= 3 ? '#DC2626' : n <= 7 ? '#D97706' : C.ink2);
+// 대표 10/24 추가 ③: 입찰 준비 기간 D-4~D-10 = 주황 '준비 시작'(입찰 화면 카드와 같은 기준), D-3 안 = 빨강
+const ddText = (n: number) => (n === 0 ? 'D-day' : n >= 4 && n <= 10 ? `D-${n} · 준비 시작` : `D-${n}`);
+const ddColor = (n: number) => (n <= 3 ? '#DC2626' : n <= 10 ? '#D97706' : C.ink2);
 
 export const SECTIONS: { key: Exclude<DigestSection, 'ref'>; title: string; sub: string }[] = [
   { key: 'now', title: '★ 즉시 검토', sub: '' },

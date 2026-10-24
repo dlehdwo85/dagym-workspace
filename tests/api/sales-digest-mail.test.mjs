@@ -120,9 +120,9 @@ test('#510 메일 정리(21라인 수준): 구역·번호·빈칸 숨김·같은
   assert.ok(html.includes('추정가격 미공개') && !/(^|[^\d,])0만원|>-<| · - | · -<|undefined|null/.test(html), '빈 값 표시 없음');
   assert.ok(html.includes('경기도 시험시 · 경기 · 추정가격 5,300만원'), '나라장터 지역 = 발주처 시도');
   // 3행: 참가신청마감·입찰마감 D-day·개찰·현장설명·첨부·출처 공고번호·[원문](원천 주소는 글자로 안 보임)
-  assert.ok(html.includes(`참가신청마감 ${mdw(plus(7))} 18:00 · 입찰마감 ${mdw(plus(9))} 10:00 <b style="color:#374151">D-9</b>`), html.slice(html.indexOf('R2026510-002') - 600, html.indexOf('R2026510-002') + 50));
+  assert.ok(html.includes(`참가신청마감 ${mdw(plus(7))} 18:00 · 입찰마감 ${mdw(plus(9))} 10:00 <b style="color:#D97706">D-9 · 준비 시작</b>`), html.slice(html.indexOf('R2026510-002') - 600, html.indexOf('R2026510-002') + 50));
   assert.ok(html.includes(`현장설명 ${mdw(plus(3))} 14:00`) && html.includes(`개찰 ${mdw(plus(9))} 11:00`));
-  assert.ok(html.includes(`입찰마감 ${mdw(plus(5))} 17:00 <b style="color:#D97706">D-5</b>`), 'D-5 주황');
+  assert.ok(html.includes(`입찰마감 ${mdw(plus(5))} 17:00 <b style="color:#D97706">D-5 · 준비 시작</b>`), '대표 10/24 추가 ③: D-4~D-10 = 주황 준비 시작');
   assert.ok(html.includes(`입찰마감 ${mdw(plus(2))} 17:00 <b style="color:#DC2626">D-2</b>`), '마감 임박 D-2 빨강');
   assert.ok(html.includes('첨부 2') && html.includes('K-apt K510-1'));
   const kaptUrl = 'https://www.k-apt.go.kr/bid/bidDetail.do?bidNum=K510-1';
@@ -141,7 +141,7 @@ test('#510 메일 정리(21라인 수준): 구역·번호·빈칸 숨김·같은
   // 텍스트판도 같은 내용
   assert.ok(text.includes('■ ★ 즉시 검토 (2)') && text.includes('■ 마감 임박 (1)') && text.includes('■ 참고(검색어만 일치) 2건'));
   assert.ok(/\n1\. \[서울강남\] 시험 단지 피트니스 위탁운영 사업자 선정/.test(text) && !/\n0\. /.test(text));
-  assert.ok(text.includes(`입찰마감 ${mdw(plus(5))} 17:00 D-5`));
+  assert.ok(text.includes(`입찰마감 ${mdw(plus(5))} 17:00 D-5 · 준비 시작`));
 });
 
 test('#509 a·d 회사 SMTP 경로(워크인 발송 없음): 회사 주소는 받는 사람에서 빠짐 · 보낸 사람 이름·답장 주소 · 받는 사람이 회사 주소뿐이면 안 보냄 · 오늘 탭·참고 탭·상세 바로 열기', async () => {

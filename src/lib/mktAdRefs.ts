@@ -188,7 +188,7 @@ async function analyzeAdRef(u: SessionUser, r: Ref) {
   try {
     o = await aiJson(r.tenant, u.id, SCRIPT_SYS, `업체: ${r.advertiser}\n형식: ${FORMATS[r.format] ?? r.format}\n게재: ${days !== null ? `${r.started_on}부터 ${days}일째` : '모름'}${r.variants ? ` · 비슷한 소재 ${r.variants}개` : ''}${r.note ? `\n메모: ${r.note}` : ''}\n\n[대본]\n${String(body).slice(0, 6000)}`,
       { type: 'object', additionalProperties: false, required: ['hook', 'hookType', 'beats', 'offer', 'cta', 'angle', 'why'], properties: { hook: { type: 'string' }, hookType: { type: 'string' }, offer: { type: 'string' }, cta: { type: 'string' }, angle: { type: 'string' }, why: { type: 'string' },
-        beats: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['part', 'text'], properties: { part: { type: 'string' }, text: { type: 'string' } } } } } }, 'marketing_adrefs');
+        beats: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['part', 'text'], properties: { part: { type: 'string' }, text: { type: 'string' } } } } } }, 'marketing_adrefs', { make: true });
   } catch (e) { throw badRequest(`AI 분석을 하지 못했습니다 — ${clip((e as Error)?.message ?? e, 150)}`); }
   if (!o) throw badRequest('AI 가 꺼져 있어 분석할 수 없습니다');
   const analysis = { beats: (Array.isArray(o.beats) ? o.beats : []).slice(0, 6).map((b: any) => ({ part: clip(b?.part, 10), text: clip(b?.text, 120) })).filter((b: { text: string }) => b.text),
@@ -227,7 +227,7 @@ async function buildReport(tenant: string, actorId: string | null, refs: Ref[], 
 - 숫자·실적·가격은 [우리 재료]에 있는 것만, 없으면 {{ }}. 다른 업체 이름·로고·문구를 쓰지 않습니다. 과장·최상급 금지.`,
       `[우리 재료]\n${m.text}${opts.product ? `\n광고할 제품·서비스: ${opts.product}` : ''}${m.banned.length ? `\n금지어: ${m.banned.join(', ')}` : ''}\n\n[경쟁 광고 ${refs.length}개]\n${list}${mem ? `\n\n${mem}` : ''}`,
       { type: 'object', additionalProperties: false, required: ['common', 'structure', 'scripts'], properties: { common: { type: 'array', items: { type: 'string' } }, structure: { type: 'array', items: { type: 'string' } },
-        scripts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'hook', 'lines', 'cta'], properties: { title: { type: 'string' }, hook: { type: 'string' }, cta: { type: 'string' }, lines: { type: 'array', items: { type: 'string' } } } } } } }, 'marketing_adrefs');
+        scripts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'hook', 'lines', 'cta'], properties: { title: { type: 'string' }, hook: { type: 'string' }, cta: { type: 'string' }, lines: { type: 'array', items: { type: 'string' } } } } } } }, 'marketing_adrefs', { make: true });
     if (o) {
       const rules = await Q.qualityRules();
       const scripts = (Array.isArray(o.scripts) ? o.scripts : []).slice(0, 3).map((s: any) => {

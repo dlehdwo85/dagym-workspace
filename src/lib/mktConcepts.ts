@@ -91,7 +91,7 @@ async function generate(tenant: string, actorId: string | null, product: string,
 - 이전 안이 반려되었습니다. 반려 사유를 반영해 다시 만들고, changes 에 "반려 사유 → 반영한 점"을 2~3문장으로 씁니다. 반려가 아니면 changes 는 빈 문자열.` : `
 - changes 는 빈 문자열.`}`,
       `[재료]\n${m.text}\n제품·서비스: ${product}\n[역할] ${input.roles.join(' / ')}\n[상황]\n${input.situations.map((s) => `- ${s.name}: 고통 ${s.pain || '(없음)'} · 제안 ${s.offer || '(없음)'}`).join('\n')}${input.note ? `\n메모: ${input.note}` : ''}${mem ? `\n${mem}` : ''}${input.variantOf ? `\n[새 각도 — 이긴 컨셉] ${input.roles[0]} · ${input.situations[0].name} «${input.variantOf.hook}»` : ''}${revise ? `\n\n[이전 안 v${revise.version}]\n${revise.prev.map((c) => `- ${c.role}·${c.situation} «${c.hook}»`).join('\n')}\n[반려 사유] ${revise.note}` : ''}`,
-      FORMAT, 'marketing_concepts');
+      FORMAT, 'marketing_concepts', { make: true });
     if (Array.isArray(o?.concepts) && o.concepts.length) { raw = o.concepts; source = 'ai'; changes = clip(o.changes, 600) || null; }
   } catch { /* AI 실패·한도 → 기본 조합 */ }
   if (!raw.length) { if (revise) return null; raw = templateConcepts(input, n); }
@@ -155,7 +155,7 @@ export async function suggestConceptInput(u: SessionUser, i: z.infer<typeof conc
 - situations: 3~5개. name(구매를 고민하게 되는 상황 — 예: 신축 입주 3~6개월 전·운영 중 인력 문제·재계약 시점), pain(그 상황의 고통 한 줄), offer(비용이 들지 않는 제안 — 무료 진단·체크리스트·비교표·시연·상담. 가격·할인은 재료에 있을 때만).
 - 재료에 없는 숫자·실적은 쓰지 않습니다.`, `[재료]\n${m.text}`,
       { type: 'object', additionalProperties: false, required: ['product', 'roles', 'situations'], properties: { product: { type: 'string' }, roles: { type: 'array', items: { type: 'string' } },
-        situations: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['name', 'pain', 'offer'], properties: { name: { type: 'string' }, pain: { type: 'string' }, offer: { type: 'string' } } } } } }, 'marketing_concepts');
+        situations: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['name', 'pain', 'offer'], properties: { name: { type: 'string' }, pain: { type: 'string' }, offer: { type: 'string' } } } } } }, 'marketing_concepts', { make: true });
     const roles = uniq((Array.isArray(o?.roles) ? o.roles : []).map((r: unknown) => clip(r, 30)).filter(Boolean)).slice(0, 6);
     const situations = (Array.isArray(o?.situations) ? o.situations : []).map((s: any) => ({ name: clip(s?.name, 40), pain: clip(s?.pain, 120), offer: clip(s?.offer, 80) })).filter((s: Situation) => s.name).slice(0, 6);
     if (roles.length || situations.length) return { product: clip(o.product, 120) || fallback.product, roles: roles.length ? roles : fallback.roles, situations, source: 'ai' as const };

@@ -191,20 +191,28 @@ export async function nightAssistantTick() {
   if (h < 22 && h >= 6) return { skipped: 'day' };
   const sql = db();
   const ts = await sql<{ tenant: string }[]>`select tenant from ai_settings where coalesce((night_scope->>'draft')::boolean, false) limit 5`;
-  const out: { tenant: string; produced: number }[] = [];
+  const out: { tenant: string; due: number }[] = [];
   const { produceContent } = await import('./mktAuto');
+  const L = await import('./later');
   for (const { tenant } of ts) {
     const due = await sql<any[]>`select * from mkt_contents where tenant = ${tenant} and auto and status = 'draft' and produced_at is null and not is_test
       and scheduled_at between now() and now() + interval '3 days'
       and not exists (select 1 from mkt_production_requests q where q.content_id = mkt_contents.id and q.kind = 'topic' and q.status = 'open') order by scheduled_at limit 3`;
-    let n = 0;
-    for (const c of due) {
-      await sql`update mkt_contents set night_run = true where id = ${c.id}`;
-      const r: any = await produceContent(c, null, 'auto').catch((e) => ({ error: String(e?.message ?? e), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' }));
-      if (r?.error) { await sql`update mkt_contents set night_run = false where id = ${c.id}`; if (r.quota) break; continue; }
-      n++;
-    }
-    out.push({ tenant, produced: n });
+    out.push({ tenant, due: due.length });
+    if (!due.length) continue;
+    // 대표 10/24 ①: 글 모델이 최상 모델이면 1건 30~60초 — 응답 뒤에, 회사 제작 잠금 안에서(자동 제작과 같은 글을 두 번 만들지 않게), 2분이 지나면 다음 건은 다음 실행에
+    L.runLater('mktNight', async () => ({ tenant, ...(await L.withLock(`mktProduce:${tenant}`, async () => {
+      const start = Date.now(); let n = 0;
+      for (const c of due) {
+        if (n && Date.now() - start > 120e3) break;
+        const [fresh] = await sql<any[]>`update mkt_contents set night_run = true where id = ${c.id} and produced_at is null returning *`; // 그사이 다른 실행이 만들었으면 건너뜀
+        if (!fresh) continue;
+        const r: any = await produceContent(fresh, null, 'auto').catch((e) => ({ error: String(e?.message ?? e), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' }));
+        if (r?.error) { await sql`update mkt_contents set night_run = false where id = ${c.id}`; if (r.quota) break; continue; }
+        n++;
+      }
+      return { produced: n };
+    })) }));
   }
   return out;
 }

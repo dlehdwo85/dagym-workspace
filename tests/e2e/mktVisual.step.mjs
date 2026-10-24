@@ -18,7 +18,7 @@ export async function mktVisual({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.goto(`${BASE}/s/marketing/approvals`);
   await owner.getByTestId('mkt-approvable-count').waitFor();
   const tabs = owner.getByTestId('mkt-brand-tabs');
-  if (await tabs.isVisible()) await tabs.getByRole('button', { name: /^E2E 시안 브랜드/ }).click();
+  if (await tabs.waitFor({ timeout: 5000 }).then(() => true, () => false)) await tabs.getByRole('button', { name: /^E2E 시안 브랜드/ }).click(); // 탭은 자료가 온 뒤 그려짐(바로 보면 없을 수 있음)
   assert.match(await owner.getByTestId('mkt-approvable-count').innerText(), /승인할 시안 0건/, '시안 없는 글은 승인할 시안 수에서 뺌');
   const group = owner.getByTestId('mkt-no-visual');
   await group.waitFor();

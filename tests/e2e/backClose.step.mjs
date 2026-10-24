@@ -72,7 +72,7 @@ export async function backClose({ owner, ctx, BASE }) {
   await lastTask().scrollIntoViewIfNeeded();
   const t0 = await owner.evaluate(() => Math.round(window.scrollY));
   assert.ok(t0 > 300, `업무 목록을 충분히 내림(${t0})`);
-  await lastTask().click();
+  await lastTask().getByText(/^E2E 뒤로가기 업무 \d+$/).first().click(); // 줄 가운데는 마감일·팀 칩일 수 있어 제목을 누름
   await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
   await owner.goBack();
   await owner.waitForURL((u) => u.pathname === '/tasks');

@@ -361,7 +361,7 @@ export async function captionAssist(u: SessionUser, i: z.infer<typeof captionInp
   const [brand] = i.brandId ? await sql<{ name: string }[]>`select name from mkt_brands where id = ${i.brandId} and tenant = ${tenantOf(u)}` : [];
   const Pn = await import('./ai/persona');
   const co = await Pn.companyAi(u, sql);
-  const p = P.anthropicProvider({ tier: 'fast' });
+  const p = P.anthropicProvider({ tier: await (await import('./mktAuto')).makeTier(tenantOf(u)) }); // 대표 10/24 ①: 글 초안 3개도 글 모델
   let r;
   try {
     r = await p.chat({

@@ -872,7 +872,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
         {[['', '전체'], ...data.categories.map((c: any) => [c.key, c.name]), ['none', '미분류']].map(([k, l]) => <button key={k} type="button" onClick={() => setBiz(k)} data-testid={`sales-bids-biz-${k || 'all'}`} className={cx('rounded-full border px-2.5 py-0.5 text-xs', biz === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white')}>{l}</button>)}
         <Link href="/s/sales/sources#biz" className="text-[11px] text-ink-3 underline">관심 사업 설정</Link></div>}
       <Head title="입찰·공고 모니터링" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBids} compact /><Search value={s} onChange={setS} /></Head>
-      <div className="flex flex-wrap items-center gap-1.5">{(embedded ? [['today', '오늘 새 공고'], ['soon', '마감 임박(3일)'], ['open', '진행 중']] : [['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감'], ['soon', '마감 임박(3일)'], ['recruit', '협력사 모집'], ...(initialTab === 'ref' ? [['ref', '참고(검색어만 일치)']] : [])]).map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}{embedded && <Link href="/s/sales/bids" className="ml-auto text-xs text-ink-2 underline" data-testid="bids-all-link">입찰·공고 전체 보기 →</Link>}</div>
+      <div className="flex flex-wrap items-center gap-1.5">{(embedded ? [['today', '오늘 새 공고'], ['soon', '마감 임박(3일)'], ['prep', '준비 기간(D-10 안)'], ['open', '진행 중']] : [['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감'], ['soon', '마감 임박(3일)'], ['prep', '준비 기간(D-10 안)'], ['recruit', '협력사 모집'], ...(initialTab === 'ref' ? [['ref', '참고(검색어만 일치)']] : [])]).map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}{embedded && <Link href="/s/sales/bids" className="ml-auto text-xs text-ink-2 underline" data-testid="bids-all-link">입찰·공고 전체 보기 →</Link>}</div>
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => <li key={n.id} className="relative">{data.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data.readOnly === false} /></li>)}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
       {/* 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 뺀 결과(낙찰·유찰) — 당일 메일 '결과' 구역과 같은 기준, 접어 둠 */}
@@ -997,15 +997,22 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' })
 /** 대표 10/21 12:00 영업 재편 4): 사업 배지는 회사 관심 사업(카테고리) 설정에서 — 이름·색 모두 자료(코드에 회사 이름 없음) */
 const BizBadges = ({ items, testid }: { items?: { key: string; name: string; color: string }[]; testid?: string }) => items?.length ? <span className="inline-flex flex-wrap gap-1" data-testid={testid}>{items.map((b) => <span key={b.key} className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white" style={{ background: b.color }} data-testid={testid ? `${testid}-item` : undefined}>{b.name}</span>)}</span> : null;
 const CAT_CLS: Record<string, string> = { '즉시 검토': 'bg-rose-50 text-rose-800', '협력사 필요': 'bg-amber-50 text-amber-800' };
+/** 대표 10/24 추가 ③: 마감 D-10 안 = 입찰 준비 기간(D-4~D-10 주황 강조, 입찰 탭 '준비 기간(D-10 안)' 필터·당일 메일 배지와 같은 기준) */
+const PREP_DAYS = 10;
 /** 입찰 카드(영업관리 2-5, PC·휴대폰 같음): 상태 → 사업 → 분류 → 출처 → 단지·공고명 → 기관·지역·세대·업종 → 낙찰 → 공고·DB 등록(오늘 등록) → 키워드 → [전화][원문][첨부]·마감 */
 function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => void; onChange?: () => void; canWrite?: boolean }) {
   const td = today();
   const dd = n.close ? Math.round((Date.parse(n.close) - Date.parse(td)) / 864e5) : null;
   const st = /정정/.test(String(n.status ?? '')) ? ['정정 전 공고', 'bg-slate-100 text-ink-2'] : /낙찰/.test(String(n.status ?? '')) ? ['낙찰', 'bg-emerald-50 text-emerald-800'] : /사전|예정/.test(String(n.status ?? '')) ? ['입찰 예정', 'bg-sky-50 text-sky-800']
-    : /취소|마감(?!임박)/.test(String(n.status ?? '')) || (dd !== null && dd < 0) ? ['마감·취소', 'bg-slate-100 text-ink-3'] /* '마감임박'(3일 안 마감)은 D-n — #537 후속2 */ : dd === 0 ? [`오늘 마감 ${String(n.deadline ?? '').slice(11, 16)}`, 'bg-red-600 text-white'] : dd !== null ? [`D-${dd}`, dd <= 3 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2'] : ['진행중', 'bg-slate-100 text-ink-2'];
+    // 대표 10/24 추가 ②: '마감·취소' → '취소'·'마감' 따로. '마감임박'(3일 안 마감)은 D-n — #537 후속2
+    : /취소/.test(String(n.status ?? '')) ? ['취소', 'bg-slate-200 text-ink-2'] : /마감(?!임박)/.test(String(n.status ?? '')) || (dd !== null && dd < 0) ? ['마감', 'bg-slate-100 text-ink-3']
+    : dd === 0 ? [`오늘 마감 ${String(n.deadline ?? '').slice(11, 16)}`, 'bg-red-600 text-white'] : dd !== null && dd <= 3 ? [`D-${dd}`, 'bg-red-50 text-red-700']
+    // 대표 10/24 추가 ③: 입찰 준비는 9~10일 전부터 — D-4~D-10 주황·굵게 '준비 시작' + 카드 왼쪽 주황 줄
+    : dd !== null && dd <= PREP_DAYS ? [`D-${dd} · 준비 시작`, 'bg-amber-100 font-bold text-amber-800'] : dd !== null ? [`D-${dd}`, 'bg-slate-100 text-ink-2'] : ['진행중', 'bg-slate-100 text-ink-2'];
+  const prep = dd !== null && dd > 3 && dd <= PREP_DAYS && st[0].endsWith('준비 시작');
   const cat = n.classification ?? n.category;
   return (
-    <li className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-bid">
+    <li className={cx('rounded-card border border-line bg-white p-3 text-sm', prep && 'border-l-4 border-l-amber-400')} data-testid="sales-bid" data-prep={prep ? '1' : undefined}>
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', st[1])} data-testid="bid-status">{st[0]}</span>
         <BizBadges items={n.businesses} testid="bid-business" />

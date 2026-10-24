@@ -382,8 +382,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
         && (tab !== 'today' || (n.todayHit && (n.result || !bidEnded(n, today())))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit)
         && (tab !== 'soon' || (!!n.close && n.close >= today() && n.close <= plus(3) && isOpenBid({ ...n, related: true }, n.work, today()))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중
+        && (tab !== 'prep' || (!!n.close && n.close >= today() && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, today()))) // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
         && (!q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz))))
-      .sort((a, b) => tab === 'open' || tab === 'soon' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
+      .sort((a, b) => tab === 'open' || tab === 'soon' || tab === 'prep' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
     // 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 결과(낙찰·유찰)는 빼고 아래 '결과' 묶음으로 — 당일 메일 결과 구역과 같은 기준(isAwardResult)
     const results = tab === 'today' ? items.filter((n) => n.result) : [];
     return { ...meta, tab, total: N.length, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };

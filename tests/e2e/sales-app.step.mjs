@@ -38,7 +38,7 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     await p.waitForURL(/\/s\/sales\/hub\?tab=bids$/);
     const hb = p.getByTestId('sales-bids'); await hb.waitFor();
     assert.match(await p.getByTestId('sales-hub-bids').getAttribute('class'), /border-brand-600/, '입찰 칩 선택');
-    assert.deepEqual((await hb.locator('button[data-testid^="sales-bids-tab-"]').allInnerTexts()).map((x) => x.trim()), ['오늘 새 공고', '마감 임박(3일)', '진행 중']);
+    assert.deepEqual((await hb.locator('button[data-testid^="sales-bids-tab-"]').allInnerTexts()).map((x) => x.trim()), ['오늘 새 공고', '마감 임박(3일)', '준비 기간(D-10 안)', '진행 중']);
     assert.equal(await hb.getByTestId('bids-all-link').getAttribute('href'), '/s/sales/bids');
     const res = hb.getByTestId('bids-results'); await res.waitFor();
     assert.match(await res.locator('summary').innerText(), /결과\(낙찰·유찰\) 1건/);
@@ -46,6 +46,14 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.equal(await res.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 헬스기구 구매 낙찰 결과' }).count(), 1, '결과 묶음에만');
     assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프클럽 골프숍' }).getByTestId('bid-status').innerText(), 'D-2', '#537 후속2: 마감임박(3일 안)은 마감·취소가 아니라 D-2');
     assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프장 27홀 매각' }).count(), 0, '온비드 매각·마감 지난 공고는 오늘 새 공고에 없음');
+    // 대표 10/24 추가 ③: 입찰 준비는 9~10일 전부터 — D-4~D-10 = 주황 'D-5 · 준비 시작' + 카드 왼쪽 주황 줄, '준비 기간(D-10 안)' 탭
+    const prepCard = hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 체육시설' });
+    assert.equal(await prepCard.getByTestId('bid-status').innerText(), 'D-5 · 준비 시작');
+    assert.equal(await prepCard.getAttribute('data-prep'), '1');
+    assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프클럽 골프숍' }).getAttribute('data-prep'), null, 'D-3 안은 빨강(준비 줄 없음)');
+    await hb.getByTestId('sales-bids-tab-prep').tap();
+    await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 체육시설' }).waitFor();
+    assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프장 27홀 매각' }).count(), 0, '마감 지난 공고는 준비 기간 탭에 없음');
     await hb.getByTestId('sales-bids-tab-open').tap();
     await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 체육시설' }).waitFor();
     assert.match(await p.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).getAttribute('class'), /font-bold/, '영업기회 칸 켜짐');

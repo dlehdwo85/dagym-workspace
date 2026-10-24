@@ -78,6 +78,7 @@ export function PlatformTenants() {
 function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const d = useApi<any>(`/api/platform/tenants/${id}/detail`, [id]);
   const [ov, setOv] = useState<{ users: string; storageGb: string; aiRequests: string; tasksTotal: string; aiBudgetKrw: string } | null>(null);
+  const [wt, setWt] = useState<string | null>(null); // 대표 10/24 추가 ① 마케팅 글 모델(고른 값, 저장 전)
   const t = d.data?.tenant;
   const run = async (fn: () => Promise<any>, ok: string) => { try { const r = await fn(); toast.ok(ok); d.reload(); return r; } catch (e: any) { toast.error(e.message); } };
   if (!d.data) return <Modal open onClose={onClose} title="회사 관리" wide><p className="text-sm text-ink-3">불러오는 중…</p></Modal>;
@@ -141,6 +142,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
               clear: (['users', 'storageGb', 'aiRequests', 'tasksTotal', 'aiBudgetKrw'] as const).filter((k) => cur[k].trim() === '') } }), '한도를 바꿨습니다')} data-testid="ov-save">저장</Button>
           </div>
         </div>
+        {d.data.mktWrite && <MktWriteBox id={id} w={d.data.mktWrite} pick={wt} setPick={setWt} run={run} />}
         <div>
           <p className="mb-1 text-xs font-medium text-ink-2">사용자 {d.data.users.length}명 — 비밀번호는 보거나 정할 수 없고 재설정 메일만 보냅니다</p>
           <ul className="divide-y divide-line rounded-input border border-line" data-testid="company-users">
@@ -262,5 +264,22 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
         </form>
       )}
     </Modal>
+  );
+}
+
+/** 대표 10/24 추가 ①: 회사별 마케팅 자동 제작 글 모델(원고·약한 첫 줄 다시 쓰기·수정본·블로그). 비우면 마케팅 요금제 값(없으면 빠른 모델) */
+type Tier = 'fast' | 'default' | 'deep';
+const TIER: Record<Tier, string> = { fast: '빠른 모델', default: '표준 모델', deep: '최상 모델' };
+function MktWriteBox({ id, w, pick, setPick, run }: { id: string; w: { company: Tier | null; plan: { label: string; tier: Tier | null } | null; tier: Tier; source: string; model: string; perDraftKrw: number; byTier: Record<Tier, number> }; pick: string | null; setPick: (v: string) => void; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+  const v = pick ?? w.company ?? '';
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-input border border-line p-3 text-xs" data-testid="company-mkt-write">
+      <span className="min-w-0 flex-1 text-ink-2">마케팅 자동 제작 글 모델(원고·수정본·블로그) — 지금 <b className="text-ink" data-testid="company-mkt-write-now">{TIER[w.tier]}</b> ({w.model}) · 글 1건 약 {w.perDraftKrw.toLocaleString('ko-KR')}원 · {w.source === 'company' ? '회사 지정' : w.source === 'plan' ? `마케팅 요금제(${w.plan?.label ?? ''})` : '기본값'} · 품질 검사는 빠른 모델</span>
+      <select className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={v} onChange={(e) => setPick(e.target.value)} aria-label="마케팅 글 모델" data-testid="company-mkt-write-tier">
+        <option value="">요금제 값({w.plan ? `${w.plan.label}: ${TIER[w.plan.tier ?? 'fast']}` : '빠른 모델'})</option>
+        {(['fast', 'default', 'deep'] as const).map((k) => <option key={k} value={k}>{TIER[k]} · 글 1건 약 {w.byTier[k].toLocaleString('ko-KR')}원</option>)}
+      </select>
+      <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/platform/tenants/${id}/mkt-write`, { method: 'PUT', body: { tier: v || null } }), '글 모델을 바꿨습니다')} data-testid="company-mkt-write-save">저장</Button>
+    </div>
   );
 }

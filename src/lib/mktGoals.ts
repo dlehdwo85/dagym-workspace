@@ -82,8 +82,8 @@ export async function draftGoal(tenant: string, month: string, brandId: string |
   const P = await import('./ai/provider');
   if (P.aiEnabled()) {
     try {
-      const { assertMktAi } = await import('./mktAuto'); await assertMktAi(tenant);
-      const p = P.anthropicProvider({ tier: 'fast' });
+      const { assertMktAi, makeTier } = await import('./mktAuto'); await assertMktAi(tenant);
+      const p = P.anthropicProvider({ tier: await makeTier(tenant) }); // 대표 10/24 ①: 월 목표·주제 달력도 글 모델(우리 회사 최상 모델)
       const r = await p.chat({
         system: `회사 마케팅 담당 AI 비서입니다. 다음 달 마케팅 운영 목표와 주간 주제 달력을 JSON 으로만 씁니다.${opt.revise ? ' 이전 초안이 반려되었습니다 — 반려 사유를 반영해 고치고 changes 에 "반려 사유 → 반영한 점"을 2~3문장으로 씁니다.' : ''} 한국어. 사실은 [재료]에 있는 것만, 숫자 목표는 지난달 실적을 바탕으로 현실적으로(지난달 +10~30%). 과장·최상급 금지. 돈을 쓰거나 밖으로 보내는 계획은 '대표 승인 뒤'라고 씁니다.`,
         tools: [], messages: [{ role: 'user', content: `[재료]\n달: ${month}\n브랜드: ${brand?.name ?? co?.name ?? '(없음)'}\n${brand?.intro ? `소개: ${brand.intro}\n` : ''}${brand?.products ? `주력 상품: ${brand.products}\n` : ''}${brand?.weekly_topic ? `이번 주 주제(참고): ${brand.weekly_topic}\n` : ''}${co?.business ? `회사 사업: ${co.business}\n` : ''}${co?.customers ? `주요 고객: ${co.customers}\n` : ''}채널: ${goals.channels.join(', ')}\n지난달 실적: 게시 ${prev.posts}건(${Object.entries(prev.byChannel).map(([k, v]) => `${k} ${v}`).join(', ') || '없음'}), 전화 문의 ${prev.inquiries}건, 광고비 ${prev.adCost.toLocaleString('ko-KR')}원\n이달 현황: 묶음 규칙으로 예정된 게시 ${cur.planned}건, 지금까지 게시 ${cur.posts}건·문의 ${cur.inquiries}건·광고비 ${cur.adCost.toLocaleString('ko-KR')}원(실적) → 목표 수치는 예정·실적보다 높게\n주 블록(남은 주만 주제를 배정): ${remaining.map((w) => `${w.week}주 ${w.from}~${w.to}`).join(' / ') || '(남은 주 없음)'}\n\nobjectives 3개(한 줄씩), message(핵심 메시지 한 줄), targets{posts, inquiries, adBudget(원, 광고비 실적 없으면 null)}, weeks(남은 주 블록 수만큼 순서대로: topic 한 줄, channels, kinds(feed/reels/blog/shorts/story 중), note 한 줄)${opt.revise ? `\n\n[이전 초안 v${opt.revise.prev?.version ?? 1}]\n목표: ${(opt.revise.prev?.goals?.objectives ?? []).join(' / ')}\n핵심 메시지: ${opt.revise.prev?.goals?.message ?? ''}\n주간: ${(opt.revise.prev?.weekly ?? []).map((w: any) => `${w.week}주 ${w.topic}`).join(' / ')}\n[반려 사유] ${opt.revise.note}` : ''}` }],
@@ -209,7 +209,7 @@ export async function reviewWeek(tenant: string, goalId: string, week?: number, 
   if (P.aiEnabled()) {
     try {
       const { assertMktAi } = await import('./mktAuto'); await assertMktAi(tenant);
-      const p = P.anthropicProvider({ tier: 'fast' });
+      const p = P.anthropicProvider({ tier: 'default' }); // 대표 10/24 ①: 숫자 요약·분석은 표준 모델(전에는 빠른 모델)
       const r = await p.chat({ system: '마케팅 주간 리뷰를 한국어 3문장으로 씁니다. 숫자는 [실적]에 있는 것만, 다음 주 제안 1개 포함. 텍스트만.', tools: [],
         messages: [{ role: 'user', content: `[목표] ${(g.goals?.objectives ?? []).join(' / ')} · 월 목표 게시 ${t.posts ?? '-'}건 문의 ${t.inquiries ?? '-'}건\n[이번 주] ${target.week}주 주제 '${target.topic}'\n[실적] 게시 ${n.posts}건(${Object.entries(n.byChannel).map(([k, v]) => `${k} ${v}`).join(', ') || '없음'}), 문의 ${n.inquiries}건, 광고비 ${n.adCost}원, 클릭 ${n.clicks}\n[다음 주 주제] ${weekly.find((w) => w.week === target.week + 1)?.topic ?? '(없음)'}` }] });
       await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
@@ -265,7 +265,7 @@ export async function goalTick(tenant: string, now = new Date()) {
   const month = monthKst(now), next = monthKst(now, 1), prev = monthKst(now, -1);
   if (dayKst(now) >= 25) {
     const [ex] = await sql<{ id: string }[]>`select id from mkt_goals where tenant = ${tenant} and month = ${next} and brand_id is null`;
-    if (!ex) out.draft = await draftGoal(tenant, next, null, null).catch((e) => ({ error: String(e?.message ?? e) }));
+    if (!ex) out.draft = (await import('./later')).runLater('mktGoalDraft', async () => ({ tenant, month: next, ...(await draftGoal(tenant, next, null, null)) })); // 글 모델(최상)은 30~60초 — 응답 뒤에
   }
   if (dowKst(now) === 1) {
     const goals = await sql<any[]>`select id, weekly, reviews from mkt_goals where tenant = ${tenant} and month in (${month}, ${prev}) and status = 'approved'`;

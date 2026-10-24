@@ -44,11 +44,11 @@ async function material(tenant: string) {
   return { last30, byProvider, campaigns, brands, co, goal: goal[0] ?? null, text };
 }
 
-export async function aiJson(tenant: string, actorId: string | null, system: string, user: string, format: any, purpose: string) {
+export async function aiJson(tenant: string, actorId: string | null, system: string, user: string, format: any, purpose: string, opt: { make?: boolean } = {}) {
   const P = await import('./ai/provider');
   if (!P.aiEnabled()) return null;
-  const { assertMktAi } = await import('./mktAuto'); await assertMktAi(tenant);
-  const p = P.anthropicProvider({ tier: 'default' });
+  const { assertMktAi, makeTier } = await import('./mktAuto'); await assertMktAi(tenant);
+  const p = P.anthropicProvider({ tier: opt.make ? await makeTier(tenant, 'default') : 'default' }); // make = 만드는 일(카드뉴스·상황 매트릭스·광고 대본) → 회사·요금제 글 모델(표준 아래로는 안 내림)
   const r = await p.chat({ system, tools: [], messages: [{ role: 'user', content: user }], format });
   await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
     values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, ${purpose})`;
@@ -562,8 +562,12 @@ export async function opsTick(tenant: string, now = new Date()) {
       await T.noteReporter(tenant, out.weekly, out.proposals).catch(() => {});
     } else out.weekly = { skipped: 'off' };
     if (await T.roleOn(tenant, 'researcher')) { // #499-7 광고 리서처(기본 켬)
-      out.adrefs = await (await import('./mktAdRefs')).adRefWeekly(tenant, now).catch((e) => ({ error: String(e?.message ?? e) })); // #499-6 경쟁 광고 주간 분석(새 광고 3개 이상일 때)
-      await T.noteResearcher(tenant, out.adrefs).catch(() => {});
+      // #499-6 경쟁 광고 주간 분석(새 광고 3개 이상일 때) — 대본은 글 모델(최상은 30~60초)이라 응답 뒤에(대표 10/24 ①)
+      out.adrefs = (await import('./later')).runLater('mktAdRefsWeekly', async () => {
+        const r: any = await (await import('./mktAdRefs')).adRefWeekly(tenant, now).catch((e) => ({ error: String(e?.message ?? e) }));
+        await T.noteResearcher(tenant, r).catch(() => {});
+        return { tenant, ...r };
+      });
     } else out.adrefs = { skipped: 'off' };
   }
   if (day >= 25) {
