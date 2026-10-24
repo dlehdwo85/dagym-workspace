@@ -394,8 +394,9 @@ async function askTopic(c: any, actorId?: string | null) {
 /** 마감 N시간 전 알림(야간이면 직전 저녁) · 마감 지난 자동 시안 정리 */
 export async function remindAndExpire(tenant: string) {
   const sql = db(); const s = await settingsOf(tenant);
+  const restored = await restoreExpired(sql, tenant);
   const rows = await sql<any[]>`select id, tenant, title, scheduled_at, status, auto, reminded_at, is_test, created_by, brand_id, rule_id, channel, kind, quality from mkt_contents where tenant = ${tenant} and status in ('pending', 'changes', 'draft') and scheduled_at is not null and scheduled_at > now() - interval '2 days'`;
-  let reminded = 0, expired = 0, moved = 0;
+  let reminded = 0, expired = 0, moved = 0, postponed = 0;
   for (const c of rows) {
     const dl = deadlineOf(c.scheduled_at, s);
     if (c.auto && dl.getTime() < Date.now()) {
@@ -404,7 +405,7 @@ export async function remindAndExpire(tenant: string) {
       const at = c.status !== 'draft' && n < 3 ? await nextSlot(c, s) : null;
       if (at) {
         const done = await sql`update mkt_contents set scheduled_at = ${at}, reminded_at = null, quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ moved: n + 1, movedFrom: new Date(c.scheduled_at).toISOString() } as never)}, updated_at = now()
-          where id = ${c.id} and scheduled_at = ${c.scheduled_at}`.then((r) => r.count, () => 0); // 같은 규칙 칸과 겹치면(유일 색인) 옮기지 않음
+          where id = ${c.id} and abs(extract(epoch from scheduled_at - ${c.scheduled_at}::timestamptz)) < 1`.then((r) => r.count, () => 0); // 같은 규칙 칸과 겹치면(유일 색인) 옮기지 않음 · 그사이 바뀐 글은 그대로(DB 시각은 마이크로초라 1초 안이면 같은 칸)
         if (done) {
           const when = (d: Date) => `${Number(ymd(d).slice(5, 7))}/${Number(ymd(d).slice(8))} ${hm(d)}`;
           await mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `승인 마감이 지나 다음 슬롯으로 미뤘습니다: ${c.title}`, body: `${when(new Date(c.scheduled_at))} → ${when(at)} 게시 · 승인 마감 ${when(deadlineOf(at, s))}${n + 1 >= 3 ? ' · 이번이 마지막(3번째) 미룸' : ''}`,
@@ -412,6 +413,19 @@ export async function remindAndExpire(tenant: string) {
           moved++; continue;
         }
       }
+      if (c.status !== 'draft') {
+        // 로컬 10/24 09:00: 옮길 날짜가 없으면 취소하지 않고 '미뤄진 글'(보류·날짜 비움)에 둔다 — 승인함에서 [날짜 골라 다시 올리기]·[버리기]
+        const done = await sql`update mkt_contents set status = 'hold', scheduled_at = null, reminded_at = null,
+            quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ postponed: { from: new Date(c.scheduled_at).toISOString(), at: new Date().toISOString(), moved: n, status: c.status } } as never)}, updated_at = now()
+          where id = ${c.id} and abs(extract(epoch from scheduled_at - ${c.scheduled_at}::timestamptz)) < 1 and status in ('pending', 'changes')`.then((r) => r.count, () => 0);
+        if (done) {
+          await mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `옮길 날짜가 없어 '미뤄진 글'에 두었습니다: ${c.title}`, body: '취소하지 않았습니다 — 승인함 › 미뤄진 글에서 날짜를 골라 다시 올리거나 버려 주세요',
+            link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktpost:${c.id}` });
+          postponed++;
+        }
+        continue;
+      }
+      // 예정(초안) = 아직 만들지 않은 계획 칸만 예전처럼 정리
       await sql`update mkt_contents set status = 'canceled', quality = coalesce(quality, '{}'::jsonb) || '{"expired": true}'::jsonb, updated_at = now() where id = ${c.id}`;
       expired++; continue;
     }
@@ -420,7 +434,53 @@ export async function remindAndExpire(tenant: string) {
     await sql`update mkt_contents set reminded_at = now() where id = ${c.id}`;
     reminded++;
   }
-  return { reminded, expired, moved };
+  return { reminded, expired, moved, postponed, ...(restored ? { restored } : {}) };
+}
+/** 1회 복구(로컬 10/24 09:00): 그날 09시 정리에서 '옮길 날짜 없음'으로 취소된 승인 대기 글(시안 있음)을 '미뤄진 글'로 되돌림.
+ *  이제는 취소하지 않으므로 그 정리 시각(08:50~10:00)에 취소된 것만 — 예정(초안)은 시안이 없어 빠짐 */
+async function restoreExpired(sql: any, tenant: string): Promise<number> {
+  const r = await sql`update mkt_contents c set status = 'hold', reminded_at = null, scheduled_at = null, updated_at = now(),
+      quality = (coalesce(c.quality, '{}'::jsonb) - 'expired') || jsonb_build_object('postponed', jsonb_build_object('from', c.scheduled_at, 'at', now(), 'restored', true))
+    from mkt_versions v where v.content_id = c.id and v.version = c.current_version and cardinality(v.media_ids) > 0
+      and c.tenant = ${tenant} and c.status = 'canceled' and c.auto and c.quality->>'expired' = 'true'
+      and c.updated_at >= '2026-10-24T08:50:00+09:00' and c.updated_at < '2026-10-24T10:00:00+09:00'`.catch(() => ({ count: 0 }));
+  return r.count;
+}
+
+export const postponedInput = z.object({ action: z.enum(['reschedule', 'discard']), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), time: z.string().regex(/^\d{2}:\d{2}$/).optional() });
+/** 로컬 10/24 09:00 '미뤄진 글'(옮길 날짜가 없어 보류·날짜 비움): [날짜 골라 다시 올리기] = 고른 날짜·시각의 승인 대기로 / [버리기] = 취소 — 승인하는 관리자만 */
+export async function postponedAction(u: SessionUser, id: string, i: z.infer<typeof postponedInput>) {
+  await assertSpace(u, 'marketing');
+  if (!isAdmin(u)) throw forbidden('미뤄진 글은 승인하는 관리자가 다시 올리거나 버립니다');
+  if (!zUuid.safeParse(id).success) throw notFound('콘텐츠를 찾을 수 없습니다');
+  const sql = db(); const t = tenantOf(u);
+  const [c] = await sql<any[]>`select id, title, status, quality, brand_id, channel, kind from mkt_contents where id = ${id} and tenant = ${t}`;
+  if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
+  if (c.status !== 'hold' || !c.quality?.postponed) throw badRequest('미뤄진 글이 아닙니다 — 승인함을 새로 고쳐 확인해 주세요');
+  const { audit } = await import('./log');
+  if (i.action === 'discard') {
+    await sql`update mkt_contents set status = 'canceled', quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ discarded: { by: u.id, at: new Date().toISOString() } } as never)}, updated_at = now() where id = ${id} and status = 'hold'`;
+    await audit(sql, u.id, 'mkt.postponed_discard', 'mkt_content', id, { from: c.quality.postponed.from ?? null }).catch(() => {});
+    return { ok: true, status: 'canceled' };
+  }
+  if (!i.date || !i.time) throw badRequest('다시 올릴 날짜와 시각을 골라 주세요');
+  const s = await settingsOf(t);
+  const at = kst(i.date, i.time);
+  if (Number.isNaN(at.getTime())) throw badRequest('날짜·시각을 다시 확인해 주세요');
+  if (deadlineOf(at, s).getTime() <= Date.now()) throw badRequest(`그날 승인 마감(${pad(s.approval_hour)}:00)이 이미 지났습니다 — 더 뒤 날짜를 골라 주세요`);
+  const [same] = await sql<{ n: number }[]>`select count(*)::int as n from mkt_contents where tenant = ${t} and id <> ${id} and status <> 'canceled' and brand_id is not distinct from ${c.brand_id}
+    and channel = ${c.channel} and coalesce(kind, '') = ${c.kind ?? ''} and (scheduled_at at time zone 'Asia/Seoul')::date = ${i.date}::date`;
+  const status = c.quality.postponed.status === 'changes' ? 'changes' : 'pending';
+  try {
+    await sql`update mkt_contents set status = ${status}, scheduled_at = ${at}, reminded_at = null, updated_at = now(),
+      quality = (coalesce(quality, '{}'::jsonb) - 'postponed' - 'expired' - 'moved' - 'movedFrom') || ${sql.json({ rescheduled: { by: u.id, at: new Date().toISOString(), from: c.quality.postponed.from ?? null } } as never)}
+      where id = ${id} and status = 'hold'`;
+  } catch (e: any) {
+    if (e?.code === '23505') throw badRequest('그 시각에 같은 자동 제작 칸의 글이 이미 있습니다 — 다른 시각을 골라 주세요');
+    throw e;
+  }
+  await audit(sql, u.id, 'mkt.postponed_reschedule', 'mkt_content', id, { at: at.toISOString(), from: c.quality.postponed.from ?? null }).catch(() => {});
+  return { ok: true, status, scheduledAt: at.toISOString(), sameDay: same?.n ?? 0 };
 }
 /** #516 다음 슬롯: 같은 시각으로 하루씩 뒤로(규칙의 요일·주말 건너뛰기 지킴), 그날 같은 브랜드·채널·형식 글이 있거나 같은 규칙 칸이 있으면 다음 날 — 승인 마감이 아직 안 지난 날만, 14일 안 */
 async function nextSlot(c: { id: string; tenant: string; brand_id: string | null; rule_id: string | null; channel: string; kind: string | null; scheduled_at: string | Date }, s: MktSettings) {

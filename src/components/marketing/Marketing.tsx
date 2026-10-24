@@ -362,7 +362,8 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
   // #516·#455: 시안 없이는 승인할 수 없는 글은 '승인할 시안' 수에서 빼고 따로(빨간 칸 — [지금 만들기])
   const ready = plain ? list : list.filter((c) => c.status === 'pending' && !c.late && !needsVisual(c));
   const noVisual = plain ? [] : list.filter((c) => c.status === 'pending' && !c.late && needsVisual(c));
-  const waiting = plain ? [] : list.filter((c) => (c.status === 'changes' || c.status === 'hold') && !c.late);
+  const postponed = plain ? [] : list.filter((c) => c.status === 'hold' && c.quality?.postponed); // 로컬 10/24 09:00: 옮길 날짜가 없어 멈춘 글(취소 아님)
+  const waiting = plain ? [] : list.filter((c) => (c.status === 'changes' || (c.status === 'hold' && !c.quality?.postponed)) && !c.late);
   const late = plain ? [] : list.filter((c) => c.late);
   // 로컬 10/21 08:10·09:20: 승인됐지만 아직 게시 전 — 예정 시각 임박·미래 순, 지난 건은 '예정 지남' 접힘, 기본 10건 + 더보기(브랜드 필터 적용)
   const nowMs = Date.now(); const [moreApproved, setMoreApproved] = useState(false);
@@ -391,11 +392,43 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
       {drafts.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-drafts"><summary className="cursor-pointer font-medium text-ink-2">예정(초안) {drafts.length}건 — 제작 예정, 시안이 오면 승인 대기로</summary>
         <ul className="mt-2 divide-y divide-line text-xs">{drafts.slice(0, 30).map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-draft"><button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button><span className="text-ink-3">{[c.brand, channelLabel(c.channel, c.kind), whenLabel(c.scheduled_at), c.auto ? '자동 제작' : null].filter(Boolean).join(' · ')}</span></li>)}</ul></details>}
       {emptyBrands.length > 0 && <p className="rounded-card border border-dashed border-amber-300 bg-amber-50/40 px-3 py-2 text-xs text-amber-900" data-testid="mkt-brand-empty">제작 예정 없음: <b>{emptyBrands.join(' · ')}</b> — <Link href="/s/marketing/automation" className="font-medium underline">자동 제작 규칙</Link>을 켜거나 <Link href="/s/marketing/ops" className="font-medium underline">운영실</Link>에서 제작을 의뢰하세요.</p>}
+      {postponed.length > 0 && <details open className="rounded-card border border-amber-300 bg-amber-50/60 p-3 text-sm" data-testid="mkt-postponed"><summary className="cursor-pointer font-medium text-amber-900">미뤄진 글 — 옮길 날짜가 없어 멈춘 글 {postponed.length}건(취소 아님)</summary>
+        <p className="mt-1 text-xs text-amber-900">날짜를 골라 다시 올리면 승인 대기로 돌아가고, 버리면 취소됩니다.</p>
+        <ul className="mt-2 space-y-2">{postponed.map((c) => <PostponedRow key={c.id} c={c} canDecide={canDecide} onOpen={() => onOpen(c.id)} onDone={onDone} />)}</ul></details>}
       {waiting.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
         <div className="mt-2 space-y-2">{waiting.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {late.length > 0 && <details className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" data-testid="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>
         <div className="mt-2 space-y-2">{late.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
     </div>
+  );
+}
+
+/** 로컬 10/24 09:00 '미뤄진 글' 한 줄: 원래 게시 시각 · [날짜 골라 다시 올리기](승인 대기로) · [버리기](취소) */
+function PostponedRow({ c, canDecide, onOpen, onDone }: { c: CardContent; canDecide: boolean; onOpen: () => void; onDone: () => void }) {
+  const from = c.quality?.postponed?.from ?? null;
+  const [date, setDate] = useState(() => ymdK(new Date(Date.now() + 864e5)));
+  const [time, setTime] = useState(() => (from ? hmK(from) : '10:00'));
+  const [busy, setBusy] = useState(false);
+  async function act(action: 'reschedule' | 'discard') {
+    if (action === 'discard' && !confirm(`'${c.title}' 글을 버릴까요? 버린 글은 승인함에서 사라집니다.`)) return;
+    setBusy(true);
+    try {
+      const r = await api<{ sameDay?: number }>(`/api/marketing/contents/${c.id}/postponed`, { body: action === 'discard' ? { action } : { action, date, time } });
+      toast.ok(action === 'discard' ? '버렸습니다' : `${Number(date.slice(5, 7))}/${Number(date.slice(8))} ${time} 게시로 승인 대기에 다시 올렸습니다${r.sameDay ? ` — 그날 같은 브랜드·채널 글이 ${r.sameDay}건 더 있습니다` : ''}`);
+      onDone();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <li className="rounded-input border border-line bg-white p-2.5" data-testid="mkt-postponed-row" data-id={c.id}>
+      <button type="button" className="block text-left font-medium hover:underline" onClick={onOpen}>{c.title}</button>
+      <p className="text-xs text-ink-3">{[c.brand, channelLabel(c.channel, c.kind), from ? `원래 ${whenLabel(from)} 게시` : null].filter(Boolean).join(' · ')}</p>
+      {canDecide && <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <input type="date" className={cx(inputCls, 'h-8 w-36 py-0 text-xs')} value={date} min={ymdK(new Date())} onChange={(e) => setDate(e.target.value)} aria-label="다시 올릴 날짜" data-testid="mkt-postponed-date" />
+        <input type="time" className={cx(inputCls, 'h-8 w-28 py-0 text-xs')} value={time} onChange={(e) => setTime(e.target.value)} aria-label="게시 시각" data-testid="mkt-postponed-time" />
+        <Button size="sm" onClick={() => act('reschedule')} disabled={busy || !date || !time} data-testid="mkt-postponed-reschedule">날짜 골라 다시 올리기</Button>
+        <Button size="sm" variant="secondary" onClick={() => act('discard')} disabled={busy} data-testid="mkt-postponed-discard">버리기</Button>
+      </div>}
+    </li>
   );
 }
 

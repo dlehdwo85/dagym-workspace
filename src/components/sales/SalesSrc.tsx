@@ -1,4 +1,5 @@
 'use client';
+import { useBackClose } from '@/components/backClose';
 import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import { RevenueGoal } from '@/components/marketing/RevenueGoal';
 import Link from 'next/link';
@@ -526,6 +527,7 @@ function LeadEvents({ data }: { data: any }) {
 }
 
 function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange?: () => void }) {
+  useBackClose(true, onClose, ['id', id]); // #535: 휴대폰 뒤로가기 = 상세만 닫힘(주소 ?id= 로 새로 고침·공유해도 같은 상세)
   const { data, error, reload } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`);
   const [tab, setTab] = useState('progress'); // 영업 재편 5): 진행 탭이 첫 화면
   const [del, setDel] = useState<string | null>(null);
@@ -868,6 +870,7 @@ export function Bids({ initialTab, initialId }: { initialTab?: string; initialId
 }
 /** 대표 검수 10/20 ②: 입찰 상세 — 한국어 칸만(공고명·단지·발주처·마감·예산·문서·연락처·상태·메모·다음 조치), 관리자 '원본 보기' 접힘 */
 function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
+  useBackClose(true, onClose, ['id', String(n.id)]); // #535: 휴대폰 뒤로가기 = 공고 상세만 닫힘(메일 링크 ?id= 와 같은 주소)
   // S1-4: 원본 상세 그대로 — [공식 원문][공고문][첨부 각각], 정보 칸(마감·예산·낙찰·추정가격·계약방식·계약기간·공고일·DB 등록)은 값이 없으면 '후속조사 필요', 접힘 '과업·참가자격·요건 상세'
   const docs = [n.url && <a key="u" href={n.url} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-url"><ExternalLink className="size-3.5" aria-hidden />공식 원문</a>,
     ...(n.attachments ?? []).map((a: any, i: number) => attUrl(a) && <a key={i} href={attHref(a, i, bidCtx(n))} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-file"><Download className="size-3.5" aria-hidden />{attName(a, i)}</a>)].filter(Boolean);

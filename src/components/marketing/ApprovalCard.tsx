@@ -48,7 +48,7 @@ export const deadlineLabel = (deadline: string | null, at: string | null) => dea
 
 export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null; brand_logo?: string | null; handle?: string | null;
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
-  auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; visual?: { by: string } | null; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null } } | null; production?: { kind: string; status: string } | null;
+  auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; visual?: { by: string } | null; postponed?: { from?: string | null; at?: string; restored?: boolean } | null; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null } } | null; production?: { kind: string; status: string } | null;
   rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; week?: number | null; qa?: { needsHuman?: boolean; issues?: string[]; notes?: string[] } | null } | null;
   last_decision?: { decision: string; comment: string | null; at: string; version: number; by: string | null } | null };
 

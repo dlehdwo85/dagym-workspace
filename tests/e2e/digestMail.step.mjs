@@ -50,6 +50,18 @@ export async function digestMail({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.goto(`${BASE}/s/sales/bids?tab=all&id=${id}`);
   await owner.getByTestId('bid-detail').waitFor();
   await owner.getByRole('dialog').getByText('E2E 시험구 국민체육센터 헬스장 위탁운영 용역').first().waitFor();
+  // #535: 링크로 연 상세의 닫기 = ?id 만 지우고 목록에 남음 → 목록에서 다시 열면 ?id= 기록 → 뒤로가기는 상세만 닫힘
+  const qs = () => new URL(owner.url()).searchParams;
+  await owner.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
+  await owner.getByTestId('bid-detail').waitFor({ state: 'hidden' });
+  await owner.waitForFunction(() => !new URL(location.href).searchParams.has('id'));
+  assert.equal(new URL(owner.url()).pathname, '/s/sales/bids');
+  await owner.getByTestId('bid-open').filter({ hasText: 'E2E 시험구 국민체육센터' }).first().click();
+  await owner.getByTestId('bid-detail').waitFor();
+  assert.equal(qs().get('id'), String(id), '목록에서 연 상세는 ?id= 기록');
+  await owner.goBack();
+  await owner.getByTestId('bid-detail').waitFor({ state: 'hidden' });
+  assert.deepEqual([new URL(owner.url()).pathname, qs().get('id')], ['/s/sales/bids', null], '뒤로가기 = 공고 상세만 닫힘');
   // 되돌림
   await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { digestEmails: [], digestFromName: null });
   await sql`delete from sales_src_rows where src_id = ${id}`;

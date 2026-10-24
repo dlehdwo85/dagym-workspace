@@ -1,4 +1,5 @@
 'use client';
+import { useBackClose } from '@/components/backClose';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react';
@@ -35,6 +36,7 @@ export function CarouselStudio() {
   const [topics, setTopics] = useState<{ list: Topic[]; source: string; aiError: string | null } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  useBackClose(!!open, () => setOpen(null)); // #535: 휴대폰 뒤로가기 = 펼친 카드뉴스 편집만 닫힘
   useEffect(() => { if (data && !f.brandId && data.brands.length === 1) setF((x) => ({ ...x, brandId: data.brands[0].id })); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={5} />;

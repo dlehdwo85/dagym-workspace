@@ -167,7 +167,7 @@ test('[지금 만들기]: 그 자리에서 그려 새 버전 · 이미 있으면
   assert.deepEqual([sq.issues, sq.visual], [['채우지 않은 자리표시'], undefined]);
 });
 
-test('승인 마감 지난 미승인 자동 글: 다음 슬롯(같은 시각, 같은 브랜드·채널 글이 있는 날은 건너뜀)으로 미루고 알림 · 3번 미루면 정리', async () => {
+test('승인 마감 지난 미승인 자동 글: 다음 슬롯(같은 시각, 같은 브랜드·채널 글이 있는 날은 건너뜀)으로 미루고 알림 · 옮길 날짜가 없으면 취소 대신 미뤄진 글([날짜 골라 다시 올리기]·[버리기]) · 10/24 09시 취소분 1회 복구', async () => {
   await ctx.owner.ok('PUT', '/api/marketing/auto', { approvalHour: 9 });
   await sql`update mkt_contents set status = 'canceled' where brand_id = ${P.plain}`; // 앞 시험의 워크인 글이 빈 날을 막지 않게
   const at = new Date(Date.now() - 20 * 3600e3); // 20시간 전 게시 예정 = 그날 09:00 마감은 언제 돌려도 지남
@@ -183,10 +183,38 @@ test('승인 마감 지난 미승인 자동 글: 다음 슬롯(같은 시각, �
   assert.deepEqual([c.quality.moved, c.quality.movedFrom], [1, at.toISOString()]);
   const [n] = await sql`select title, body from notifications where entity_id = ${id} and title like '승인 마감이 지나 다음 슬롯으로 미뤘습니다%'`;
   assert.ok(n, '승인자 알림'); assert.match(n.body, /게시 · 승인 마감/);
-  // 이미 3번 미룬 글은 더 미루지 않고 정리(예전처럼 '마감 지남'만 반복해 보이지 않게)
+  // 이미 3번 미룬(=옮길 날짜가 없는) 글은 취소하지 않고 '미뤄진 글'(보류·날짜 비움) — 로컬 10/24 09:00 '대표는 미룸으로 알았는데 취소됨'
   await sql`update mkt_contents set scheduled_at = ${at}, quality = quality || '{"moved": 3}'::jsonb where id = ${id}`;
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const p = await cur(id);
+  assert.deepEqual([p.status, p.scheduled_at, p.quality.postponed?.from], ['hold', null, at.toISOString()]);
+  assert.ok((await sql`select 1 from notifications where entity_id = ${id} and title like '옮길 날짜가 없어%'`).length, '승인자 알림(취소 아님)');
+  const list = await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals');
+  assert.ok(list.contents.some((x) => x.id === id && x.status === 'hold' && x.quality?.postponed), '승인함 목록에 미뤄진 글');
+  // [날짜 골라 다시 올리기]: 관리자만 · 그날 승인 마감이 지난 날짜는 400 · 뒤 날짜는 그 시각 승인 대기로(미룸 횟수 초기화)
+  assert.equal((await ctx.staffA.client.req('POST', `/api/marketing/contents/${id}/postponed`, { action: 'discard' })).status, 403);
+  assert.equal((await ctx.owner.req('POST', `/api/marketing/contents/${id}/postponed`, { action: 'reschedule', date: kstYmd(Date.now() - 86400e3), time: '10:00' })).status, 400);
+  const day = kstYmd(Date.now() + 3 * 86400e3);
+  const r = await ctx.owner.ok('POST', `/api/marketing/contents/${id}/postponed`, { action: 'reschedule', date: day, time: '11:30' });
+  assert.equal(r.status, 'pending');
+  const q = await cur(id);
+  assert.deepEqual([q.status, kstYmd(q.scheduled_at), kstHm(q.scheduled_at), q.quality.postponed, q.quality.moved, q.quality.rescheduled?.from], ['pending', day, '11:30', undefined, undefined, at.toISOString()]);
+  assert.equal((await ctx.owner.req('POST', `/api/marketing/contents/${id}/postponed`, { action: 'discard' })).status, 400, '미뤄진 글이 아니면 거절');
+  // [버리기] = 취소
+  await sql`update mkt_contents set status = 'hold', scheduled_at = null, quality = quality || ${sql.json({ postponed: { from: at.toISOString() } })} where id = ${id}`;
+  await ctx.owner.ok('POST', `/api/marketing/contents/${id}/postponed`, { action: 'discard' });
   assert.equal((await cur(id)).status, 'canceled');
+  // 1회 복구: 10/24 09시 정리에서 '옮길 날짜 없음'으로 취소된 시안 있는 자동 글 → 미뤄진 글(그 시각 밖·시안 없는 글은 그대로)
+  const gone = await stuck('9시에 취소된 글', { at, brand: P.plain });
+  const old = await stuck('예전에 취소된 글', { at, brand: P.plain });
+  const bare = await stuck('시안 없는 취소 글', { at, brand: P.plain });
+  await sql`update mkt_versions set media_ids = ${[P.photo]} where content_id in ${sql([gone, old])}`;
+  await sql`update mkt_contents set status = 'canceled', quality = quality || '{"expired": true}'::jsonb, updated_at = '2026-10-24T09:05:00+09:00' where id in ${sql([gone, bare])}`;
+  await sql`update mkt_contents set status = 'canceled', quality = quality || '{"expired": true}'::jsonb, updated_at = '2026-10-23T09:05:00+09:00' where id = ${old}`;
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const g = await cur(gone);
+  assert.deepEqual([g.status, g.scheduled_at, g.quality.expired, g.quality.postponed?.restored, new Date(g.quality.postponed?.from).toISOString()], ['hold', null, undefined, true, at.toISOString()]);
+  assert.deepEqual([(await cur(old)).status, (await cur(bare)).status], ['canceled', 'canceled']);
 });
 
 test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네일·핀·쇼츠·문장 이름·카드뉴스 폴더)은 바탕으로 안 씀 · 예전 규칙 시안은 정기 실행이 다시 그림(실사는 그대로) · [다시 그리기(무료)]', async () => {

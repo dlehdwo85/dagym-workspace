@@ -58,4 +58,20 @@ export async function mktVisual({ owner, ctx, sql, BASE, SHOTS }) {
   assert.deepEqual([w.current_version, w.status], [3, 'pending']);
   assert.match(w.note, /^시안 다시 그리기\(서버·크레딧 0\)/);
   await owner.getByTestId('approval-card').filter({ hasText: 'E2E 시안 없는 자동 글' }).getByTestId('card-approve').waitFor();
+  // 로컬 10/24 09:00: 옮길 날짜가 없어 멈춘 글은 취소하지 않고 '미뤄진 글' 묶음 → [날짜 골라 다시 올리기] = 승인 대기로
+  const from = new Date(Date.now() - 20 * 3600e3);
+  await sql`update mkt_contents set status = 'hold', scheduled_at = null, quality = quality || ${sql.json({ postponed: { from: from.toISOString(), at: new Date().toISOString() } })} where id = ${ac.id}`;
+  await owner.reload();
+  const row = owner.getByTestId('mkt-postponed').getByTestId('mkt-postponed-row').filter({ hasText: 'E2E 시안 없는 자동 글' });
+  await row.waitFor();
+  assert.match(await owner.getByTestId('mkt-postponed').locator('summary').innerText(), /미뤄진 글 — 옮길 날짜가 없어 멈춘 글 1건\(취소 아님\)/);
+  assert.match(await row.innerText(), /원래 .* 게시/);
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + 2 * 86400e3));
+  await row.getByTestId('mkt-postponed-date').fill(day);
+  await row.getByTestId('mkt-postponed-time').fill('12:30');
+  await row.getByTestId('mkt-postponed-reschedule').click();
+  await owner.getByTestId('mkt-postponed').waitFor({ state: 'detached' });
+  const [back] = await sql`select status, (scheduled_at at time zone 'Asia/Seoul')::text as at, quality->'postponed' as p from mkt_contents where id = ${ac.id}`;
+  assert.deepEqual([back.status, back.at.slice(0, 16), back.p], ['pending', `${day} 12:30`, null]);
+  await owner.getByTestId('approval-card').filter({ hasText: 'E2E 시안 없는 자동 글' }).first().waitFor();
 }

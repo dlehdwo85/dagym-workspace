@@ -59,10 +59,11 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   v = await ctx.owner.ok('GET', '/api/marketing/auto');
   assert.equal(v.usage.weekCredits, 6.5); assert.equal(v.usage.monthRegens, 1);
   assert.ok(v.ledger.some((l) => l.kind === 'regen_image' && l.credits === 6.5), '원장: 게시물·버전별');
-  // 마감 지난 자동 시안은 다음 슬롯으로 3번까지 미루고(#516, mkt-visual 시험) 그 뒤에는 정리(취소), 규칙 지우면 아직 안 만든 칸만 같이 지움
+  // 마감 지난 자동 시안은 다음 슬롯으로 3번까지 미루고(#516, mkt-visual 시험) 그 뒤에는 '미뤄진 글'(보류·날짜 비움, 취소 아님 — 로컬 10/24 09:00), 규칙 지우면 아직 안 만든 칸만 같이 지움
   await sql`update mkt_contents set scheduled_at = now() - interval '1 day', quality = quality || '{"moved": 3}'::jsonb where id = ${bad.id}`;
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
-  assert.equal((await sql`select status from mkt_contents where id = ${bad.id}`)[0].status, 'canceled');
+  const [held] = await sql`select status, scheduled_at, quality from mkt_contents where id = ${bad.id}`;
+  assert.deepEqual([held.status, held.scheduled_at, !!held.quality.postponed], ['hold', null, true]);
   const [rule] = await sql`select id from mkt_rules`;
   await ctx.owner.ok('DELETE', `/api/marketing/auto/rules/${rule.id}`);
   assert.equal((await sql`select count(*)::int n from mkt_contents where status = 'draft' and produced_at is null`)[0].n, 0);
