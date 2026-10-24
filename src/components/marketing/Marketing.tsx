@@ -157,6 +157,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   if (error) return <Modal open onClose={onClose} title="콘텐츠"><ErrorBox error={error} retry={reload} /></Modal>;
   if (!data) return <Modal open onClose={onClose} title="콘텐츠"><Skeleton rows={4} /></Modal>;
   const c = data.content, v = data.versions[0];
+  const issuesLeft = ((c.quality?.issues ?? []) as string[]).filter((x) => !((data.qualityReport as QReport | null)?.preflight ?? []).includes(x));
   const titleOf = (mid: string) => data.media.find((m: any) => m.id === mid)?.title ?? '자료';
   const targetAccs: { id: string; label: string; channel: string; brand: string | null; shared: boolean }[] = (data.publish?.targets ?? []).flatMap((t: any) => t.accounts.map((a: any) => ({ ...a, channel: t.label })));
   const pickedIds = targetAccs.filter((a) => !(a.id in picked) || picked[a.id]).map((a) => a.id);
@@ -218,7 +219,8 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
             <span className="text-ink-3">승인 상태는 그대로 — 브랜드가 틀렸거나 마감이 지난 건을 바로잡을 때</span>
           </div>
         ) : <button type="button" className="text-xs underline text-ink-2" onClick={() => { setFixBrand(c.brand_id ?? ''); setFixAt(c.scheduled_at ? new Date(new Date(c.scheduled_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''); setFixOpen(true); }} data-testid="mkt-fix-open">브랜드·게시 예정 바로잡기</button>)}
-        {c.quality?.passed === false && c.quality?.issues?.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">{c.auto ? '품질 검사: ' : ''}{c.quality.issues.join(' · ')}</p>}
+        {/* 올리기 전 검사에 걸린 줄은 아래 글 품질 칸에 따로 — 여기선 나머지만 */}
+        {c.quality?.passed === false && issuesLeft.length > 0 && <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="mkt-quality">{c.auto ? '품질 검사: ' : ''}{issuesLeft.join(' · ')}</p>}
         {data.qualityReport && <QualityPanel r={data.qualityReport as QReport} channel={c.channel} busy={qBusy}
           onMode={data.canDecide && c.status !== 'published' ? (m) => fix({ mode: m }) : undefined}
           onPolish={data.canDecide && !['published', 'canceled', 'approved'].includes(c.status) && v?.body ? polish : undefined}
@@ -228,6 +230,9 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div></div>
+        {/* 로컬 QA 10/24 ⑥: 릴스·쇼츠 컷 대본 — 영상 만들 때만 쓰고 게시 글(캡션)에는 안 들어감 */}
+        {!!c.quality?.script?.length && <div className="rounded-input border border-line p-3 text-xs" data-testid="mkt-script"><p className="font-medium text-ink-2">대본(컷) <span className="font-normal text-ink-3">영상 제작용 — 게시 글에는 안 들어감</span></p>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-5">{(c.quality.script as string[]).map((l, k) => <li key={k}>{l}</li>)}</ol></div>}
         {/* #545: 수정본이면 이전 버전과 나란히(시안·글, 바뀐 줄 표시) — 열 때만 불러옴 */}
         {data.versions.length > 1 && <div data-testid="mkt-detail-compare">
           <button type="button" onClick={() => setCmp(!cmp)} className="text-xs font-medium text-violet-700 underline" aria-expanded={cmp} data-testid="mkt-detail-compare-toggle">{cmp ? '비교 접기' : `이전 버전(v${v.revision?.from ?? data.versions[1].version})과 나란히 비교`}{v.revision?.request ? ` — ${requestLabel(v.revision)}: ${v.revision.request}` : ''}</button>

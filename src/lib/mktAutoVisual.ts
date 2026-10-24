@@ -75,7 +75,7 @@ const cutAt = (s: string, n: number) => { const a = [...s]; if (a.length <= n) r
 export function headlineOf(title: string, body: string) {
   const clean = (s: string) => s.replace(/#[^\s#]+/g, '').replace(/\s+/g, ' ').trim();
   const t = clean(title.replace(/^\s*\[시험\]\s*/, ''));
-  const first = clean(body.split('\n').map((l) => l.trim()).find((l) => clean(l).length >= 4) ?? '');
+  const first = clean(body.split('\n').map((l) => l.trim()).find((l) => clean(l).length >= 4 && !/^스티커 제안\s*[:：]/.test(l)) ?? ''); // 스토리 '스티커 제안:' 줄은 그림 글자로 안 씀
   const head = first && [...first].length <= 42 ? first : t || cutAt(first, 40);
   return { head: cutAt(head, 44), sub: head === t || !t ? '' : cutAt(t, 40) };
 }

@@ -6,7 +6,9 @@ import { MODE_HINT, MODE_LABEL, ModeToggle, asMode, type Mode } from './ModeTogg
 export type HookS = { text: string; score: number; pass: boolean; fails: string[]; parts?: Record<string, number>; notes?: string[] };
 export type Timing = { rows: { line: string; from: number; to: number; sec: number; over?: boolean }[]; total: number; warnings: string[] };
 export type QReport = { v?: number; human: { score: number; pass: boolean; issues: string[] }; needsPolish: boolean; hook: HookS | null; hooks?: HookS[];
-  channel?: { level: 'error' | 'warn'; msg: string }[]; preview?: string | null; timing?: Timing | null; voice?: string[]; notes?: string[]; mode?: Mode };
+  channel?: { level: 'error' | 'warn'; msg: string }[]; preview?: string | null; timing?: Timing | null; voice?: string[]; notes?: string[]; mode?: Mode;
+  /** 로컬 QA 10/24 ②: 올리기 전 자동 검사(빈 글·끊긴 문장·해시태그·권유·연락처·형식·틀 문구·다른 브랜드) — 걸린 줄. 없으면 검사 전 글 */
+  preflight?: string[] };
 const PART: Record<string, string> = { front: '앞부분', specific: '구체성', stakes: '걸린 것', callout: '대상 호명', curiosity: '궁금증', offer: '제안' };
 const weak = (h: HookS) => Object.entries(h.parts ?? {}).filter(([, v]) => !v).map(([k]) => PART[k] ?? k).join('·');
 
@@ -42,10 +44,12 @@ export function QualityPanel({ r, channel, onPolish, onPickHook, onMode, busy }:
         <ScoreChip label="사람다움" score={r.human.score} pass={r.human.pass} testId="quality-human" />
         {r.needsPolish && <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white" data-testid="quality-needs-polish">다듬기 필요</span>}
         {r.hook && <ScoreChip label="훅" score={r.hook.score} pass={r.hook.pass} testId="quality-hook" />}
+        {r.preflight && <span className={cx('rounded-full border px-2 py-0.5 text-[11px] font-semibold', r.preflight.length ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800')} data-testid="quality-preflight-chip" data-pass={!r.preflight.length || undefined}>{r.preflight.length ? `올리기 전 검사 ${r.preflight.length}건` : '올리기 전 검사 통과'}</span>}
         {onMode ? <ModeToggle value={mode} onChange={onMode} disabled={busy} testId="quality-mode" />
           : <span className="text-[11px] text-ink-3" title={MODE_HINT[mode]} data-testid="quality-mode-label">{MODE_LABEL[mode]} 기준</span>}
         {onPolish && <Button size="sm" variant={r.needsPolish ? 'primary' : 'secondary'} className="ml-auto" onClick={onPolish} disabled={busy} data-testid="quality-polish">{busy ? '다듬는 중…' : 'AI로 다듬기'}</Button>}
       </div>
+      {!!r.preflight?.length && <ul className="mt-1.5 space-y-0.5 rounded-input bg-red-50 px-2 py-1.5 text-red-800" data-testid="quality-preflight">{r.preflight.map((x) => <li key={x}>· {x}</li>)}</ul>}
       {r.human.issues.length > 0 && <p className="mt-1 text-ink-2" data-testid="quality-human-issues">{r.human.issues.join(' · ')}</p>}
       {r.hook && !r.hook.pass && <p className="mt-1 text-amber-800" data-testid="quality-hook-why">첫 훅 «{r.hook.text}» — {r.hook.fails.length ? r.hook.fails.join(' · ') : `약한 항목: ${weak(r.hook) || '전반'}`}</p>}
       {!!r.hook?.notes?.length && <p className="mt-1 text-amber-800" data-testid="quality-hook-notes">{r.hook.notes.join(' · ')}</p>}

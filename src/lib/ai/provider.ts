@@ -59,7 +59,7 @@ export const modelFor = (tier: AiTier = 'default') =>
   tier === 'fast' ? process.env.AI_MODEL_FAST || process.env.AI_LIGHT_MODEL || 'claude-haiku-5-5'
   : tier === 'deep' ? process.env.AI_MODEL_DEEP || 'claude-opus-5-5'
   : process.env.AI_MODEL || 'claude-sonnet-5-5';
-export function anthropicProvider(opt: { tier?: AiTier } = {}): AiProvider {
+export function anthropicProvider(opt: { tier?: AiTier; maxTokens?: number } = {}): AiProvider { // maxTokens: 긴 글(블로그 1,800자 이상)을 빠른 모델로 쓸 때만 늘림
   client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, baseURL: process.env.ANTHROPIC_BASE_URL || undefined, maxRetries: 2, timeout: 100_000 });
   const light = opt.tier === 'fast';
   const model = modelFor(opt.tier);
@@ -75,7 +75,7 @@ export function anthropicProvider(opt: { tier?: AiTier } = {}): AiProvider {
       try {
         const params: Anthropic.Beta.Messages.MessageCreateParamsNonStreaming = {
         model,
-        max_tokens: light ? 4000 : 16000,
+        max_tokens: opt.maxTokens ?? (light ? 4000 : 16000),
         system,
         messages,
         ...(tools.length ? { tools } : {}),

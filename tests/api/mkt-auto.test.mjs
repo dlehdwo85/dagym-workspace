@@ -28,7 +28,7 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   assert.ok(r1.planned >= 13, String(r1.planned));
   assert.equal((await sql`select count(*)::int n from mkt_contents where rule_id = ${r1.id} and scheduled_at < now() + interval '1 hour'`)[0].n, 0, '마감 지난 칸은 안 만듦');
   // 제작: 가까운 칸(게시 D-3 이내)은 지금 바로. 첫 원고에 금지어 → 품질 검사 미통과
-  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트 최저가', body: '최저가로 모십니다', brief: '실사 사진 + 글자' }), say({ title: '가을 이벤트', body: '가을 맞이 안내', brief: '현관 실사' })] });
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트 최저가', body: '최저가로 모십니다', brief: '실사 사진 + 글자' }), say({ title: '가을 이벤트', body: '가을 맞이 안내\n이번 주 토요일까지 현관에서 안내합니다.', brief: '현관 실사' })] });
   const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.ok(run.produced.length >= 2, JSON.stringify(run));
   const made = await sql`select id, status, quality, current_version from mkt_contents where auto and produced_at is not null order by produce_at, scheduled_at`;
@@ -43,7 +43,7 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '제작 완료%'`).length, '제작 완료 알림');
   assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '승인 마감 72시간 전%'`).length, '마감 N시간 전 알림');
   // #545(+#534) 수정 요청 → AI 가 글과 시안(서버 그림의 첫 줄)을 함께 고친 수정본 한 버전 → 바로 승인 대기 · 반영한 요청·바뀐 것·AI 수정 n/3 은 버전에 · 사유는 디자인 담당 기억
-  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트', body: '짧게 고친 안내', brief: '' })] });
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트', body: '짧게 고친 안내\n이번 주 토요일까지 현관에서 안내합니다.', brief: '' })] });
   const [gv1] = await sql`select media_ids from mkt_versions where content_id = ${good.id} and version = 1`;
   const d1 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 1, decision: 'changes', comment: '첫 줄을 더 짧게' });
   assert.deepEqual([d1.revision.kind, d1.revision.version, d1.revision.n, d1.revision.max, d1.revision.parts], ['text', 2, 1, 3, ['text', 'visual']]);
@@ -84,7 +84,7 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   assert.equal(v.usage.weekCredits, 6.5); assert.equal(v.usage.monthRegens, 1);
   assert.ok(v.ledger.some((l) => l.kind === 'regen_image' && l.credits === 6.5), '원장: 게시물·버전별');
   // AI 수정본은 3번까지 — 4번째 수정 요청은 새 버전 없이(사람이 수정본을 올림)
-  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트', body: '해시태그를 줄인 안내', brief: '' })] });
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트', body: '해시태그를 줄인 안내\n이번 주 토요일까지 현관에서 안내합니다.', brief: '' })] });
   const d4 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 3, decision: 'changes', comment: '해시태그를 줄여 주세요' });
   assert.deepEqual([d4.revision.version, d4.revision.n], [4, 3]);
   const d5 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 4, decision: 'changes', comment: '문장을 조금 더 짧게' });
@@ -133,7 +133,7 @@ test('알림 받는 사람 고르기 · 브랜드 시험 모드', async () => {
   assert.equal((await ctx.owner.ok('GET', '/api/marketing/auto')).brands.find((b) => b.id === test.id).intro, '운동 기록 앱');
   // 원고: 남은 [브랜드] 는 이름으로 채움 · 피드에 '슬라이드쇼' 가 있어도 영상 유형이 아니면 통과 · [확인 필요] 는 미통과
   await ctl({ anthropicReset: true, anthropicQueue: [
-    say({ title: '[시험] [브랜드] 이번 주 소식', body: '[브랜드]에서 10월 이벤트를 엽니다', brief: '실사 사진 슬라이드쇼 느낌의 피드' }),
+    say({ title: '[시험] [브랜드] 이번 주 소식', body: '[브랜드]에서 10월 이벤트를 엽니다.\n이번 주 토요일까지 이어집니다.', brief: '실사 사진 슬라이드쇼 느낌의 피드' }),
     say({ title: '가격 안내', body: '월 [확인 필요]원', brief: '실사' })] });
   const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const tc = await sql`select id, title, is_test, status, quality from mkt_contents where brand_id = ${test.id} and produced_at is not null order by produced_at`;
@@ -182,7 +182,7 @@ test('제작 시점 바꾸면 안 만든 칸 다시 계산 · AI 다시 만들�
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.equal((await sql`select status from mkt_contents where id = ${c.id}`)[0].status, 'changes');
   assert.equal((await ctx.staffA.client.req('POST', `/api/marketing/auto/contents/${c.id}`, { action: 'regen' })).status, 403, '다시 만들기는 관리자');
-  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '헬스장 가을 소식', body: '동네 헬스장 가을 안내', brief: '실사' })] });
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '헬스장 가을 소식', body: '동네 헬스장 가을 안내입니다.\n이번 주 토요일까지 이어집니다.', brief: '실사' })] });
   const re = await ctx.owner.ok('POST', `/api/marketing/auto/contents/${c.id}`, { action: 'regen' });
   assert.equal(re.passed, true, JSON.stringify(re));
   const [after] = await sql`select status, current_version, title from mkt_contents where id = ${c.id}`;

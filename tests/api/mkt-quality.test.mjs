@@ -103,7 +103,7 @@ test('자동 제작 연결: 말투 프로필이 지시문에 · 약한 첫 줄�
   const re = await ctx.owner.ok('POST', `/api/marketing/auto/contents/${slots[0].id}`, { action: 'regen' });
   assert.equal(fake.state.anthropic.length - n0, 2, '원고 1번 + 훅 다시 쓰기 1번(후보가 모두 탈락일 때만)');
   const sys = JSON.stringify(fake.state.anthropic[n0].body.system);
-  assert.ok(sys.includes('[말투 프로필]') && sys.includes('천안 직장인') && sys.includes('역대급') && sys.includes('hooks:') && sys.includes('아무도 안 알려주는'), '말투 프로필·금지 표현·훅 공식이 지시문에');
+  assert.ok(sys.includes('[말투 프로필]') && sys.includes('천안 직장인') && sys.includes('역대급') && sys.includes('hooks:') && sys.includes('흔히 믿는 것을 짧게 말하고 바로 뒤집기') && sys.includes("'아직도 ~ 계신가요?'"), '말투 프로필·금지 표현·훅 공식(구조만 — 예문 틀은 금지 목록으로)이 지시문에');
   assert.match(JSON.stringify(fake.state.anthropic[n0 + 1].body.messages), /약한 이유/);
   const [c1] = await sql`select status, quality from mkt_contents where id = ${slots[0].id}`;
   const [v1] = await sql`select body from mkt_versions where content_id = ${slots[0].id} and version = 1`;

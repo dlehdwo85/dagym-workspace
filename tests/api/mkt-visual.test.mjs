@@ -71,7 +71,7 @@ test('자동 제작: 피드·스토리는 서버가 시안을 그려 붙인 뒤 
     await sql`update mkt_contents set produce_at = now() + interval '30 days' where rule_id = ${r.id} and id <> ${c.id}`;
     r.c = c.id;
   }
-  const draft = say({ title: '커뮤니티 예약 한 번에', body: '입주민 예약 문의, 아직 전화로 받으세요?\n하이링크로 한 화면에서 정리하세요.', brief: '라운지 실사' });
+  const draft = say({ title: '커뮤니티 예약 한 번에', body: '입주민 예약 문의, 아직 전화로 받으세요?\n하이링크로 한 화면에서 정리하세요.\n스티커 제안: 투표 — 전화 예약 vs 앱 예약', brief: '라운지 실사' });
   await ctl({ anthropicReset: true, anthropicQueue: [draft, draft, draft] });
   const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.equal(run.produced.filter((p) => !p.error).length, 3, JSON.stringify(run.produced));

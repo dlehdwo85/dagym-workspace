@@ -21,7 +21,7 @@ test('초안 보관: 자동 제작 → 초안(시안 붙음·알림 없음) → 
   assert.equal((await ctx.owner.ok('GET', '/api/marketing/auto')).settings.auto_hold, true);
   const brand = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '보관 시험 브랜드' });
   const rule = await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: brand.id, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '23:00', topicHint: '가을 이벤트' });
-  await ctl({ anthropicReset: true, anthropicQueue: Array.from({ length: 8 }, (_, i) => say({ title: `가을 이벤트 ${i + 1}`, body: '가을 맞이 안내입니다', brief: '현관 실사' })) });
+  await ctl({ anthropicReset: true, anthropicQueue: Array.from({ length: 8 }, (_, i) => say({ title: `가을 이벤트 ${i + 1}`, body: '가을 맞이 안내입니다. 이번 주 토요일까지 현관에서 안내합니다.', brief: '현관 실사' })) });
   const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.ok(run.produced.length >= 1 && run.produced.every((r) => r.held === true), JSON.stringify(run.produced));
   const made = await sql`select id, status, produced_at, quality, current_version from mkt_contents where rule_id = ${rule.id} and produced_at is not null order by scheduled_at`;
@@ -53,7 +53,7 @@ test('초안 보관: 자동 제작 → 초안(시안 붙음·알림 없음) → 
   assert.equal((await ctx.owner.req('POST', `/api/marketing/auto/contents/${h.id}`, { action: 'submit' })).status, 400, '보관 중이 아니면 거절');
   // 사람이 직접 [다시 만들기] = 예외(승인 대기로)
   if (made[1]) {
-    await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트 다시', body: '다시 만든 안내입니다', brief: '현관 실사' })] });
+    await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트 다시', body: '다시 만든 안내입니다. 이번 주 토요일까지 현관에서 안내합니다.', brief: '현관 실사' })] });
     const r = await ctx.owner.ok('POST', `/api/marketing/auto/contents/${made[1].id}`, { action: 'regen' });
     assert.ok(!r.held);
     assert.equal((await sql`select status from mkt_contents where id = ${made[1].id}`)[0].status, 'pending');
@@ -62,7 +62,7 @@ test('초안 보관: 자동 제작 → 초안(시안 붙음·알림 없음) → 
   await ctx.owner.ok('PUT', '/api/marketing/auto', { autoHold: false });
   const [next] = await sql`select id from mkt_contents where rule_id = ${rule.id} and produced_at is null and status = 'draft' order by scheduled_at limit 1`;
   await sql`update mkt_contents set produce_at = now() - interval '1 minute' where id = ${next.id}`;
-  await ctl({ anthropicReset: true, anthropicQueue: Array.from({ length: 8 }, () => say({ title: '가을 이벤트 끔', body: '끈 뒤 안내입니다', brief: '현관 실사' })) });
+  await ctl({ anthropicReset: true, anthropicQueue: Array.from({ length: 8 }, () => say({ title: '가을 이벤트 끔', body: '끈 뒤 안내입니다. 이번 주 토요일까지 현관에서 안내합니다.', brief: '현관 실사' })) });
   const run2 = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.ok(run2.produced.some((r) => r.id === next.id && !r.held), JSON.stringify(run2.produced));
   assert.equal((await sql`select status from mkt_contents where id = ${next.id}`)[0].status, 'pending');

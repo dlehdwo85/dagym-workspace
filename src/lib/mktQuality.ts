@@ -15,13 +15,13 @@ import { tenantOf, type SessionUser } from './types';
 export type QualityRules = {
   hook: { min: number; maxSec: number }; human: { min: number }; script: { syllPerMin: number; sceneMaxSec: number; maxTotalSec: number };
   instagram: { preview: number; hashtags: number; cta: number }; threads: { max: number; links: number }; facebook: { previewLines: number; lineChars: number };
-  youtube: { title: number; titleFront: number; descLines: number }; blog: { titleFront: number; minHeadings: number; keywordPer1000: number };
+  youtube: { title: number; titleFront: number; descLines: number }; blog: { titleFront: number; minHeadings: number; keywordPer1000: number; minChars: number };
   ads: { googleHeadline: number; googleDesc: number; naverHeadline: number; naverDesc: number; metaPrimary: number };
 };
 export const DEFAULT_RULES: QualityRules = {
   hook: { min: 40, maxSec: 3 }, human: { min: 70 }, script: { syllPerMin: 300, sceneMaxSec: 4, maxTotalSec: 60 },
   instagram: { preview: 125, hashtags: 5, cta: 1 }, threads: { max: 500, links: 1 }, facebook: { previewLines: 2, lineChars: 60 },
-  youtube: { title: 100, titleFront: 40, descLines: 2 }, blog: { titleFront: 15, minHeadings: 2, keywordPer1000: 6 },
+  youtube: { title: 100, titleFront: 40, descLines: 2 }, blog: { titleFront: 15, minHeadings: 2, keywordPer1000: 6, minChars: 1800 }, // 로컬 QA 10/24 ②: 블로그 1,800자 미만은 승인함에 안 올림
   ads: { googleHeadline: 30, googleDesc: 90, naverHeadline: 15, naverDesc: 45, metaPrimary: 125 },
 };
 type Sec = keyof QualityRules;
@@ -35,7 +35,7 @@ export const RULE_FIELDS: [Sec, string, string, number, number, string][] = [
   ['threads', 'max', '글자 수 최대', 50, 500, '자'], ['threads', 'links', '링크 최대', 0, 5, '개'],
   ['facebook', 'previewLines', '미리보기 줄', 1, 10, '줄'], ['facebook', 'lineChars', '한 줄 글자', 20, 200, '자'],
   ['youtube', 'title', '제목 글자', 20, 100, '자'], ['youtube', 'titleFront', '핵심 키워드는 제목 앞', 10, 100, '자'], ['youtube', 'descLines', '설명 첫 줄 수', 1, 10, '줄'],
-  ['blog', 'titleFront', '키워드는 제목 앞', 5, 60, '자'], ['blog', 'minHeadings', '소제목 최소', 0, 10, '개'], ['blog', 'keywordPer1000', '키워드 반복 최대(1000자당)', 1, 50, '회'],
+  ['blog', 'titleFront', '키워드는 제목 앞', 5, 60, '자'], ['blog', 'minHeadings', '소제목 최소', 0, 10, '개'], ['blog', 'keywordPer1000', '키워드 반복 최대(1000자당)', 1, 50, '회'], ['blog', 'minChars', '본문 최소 글자(승인함 올리기 전)', 300, 5000, '자'],
   ['ads', 'googleHeadline', '구글 제목(한글 2배폭)', 10, 90, '폭'], ['ads', 'googleDesc', '구글 설명(한글 2배폭)', 30, 180, '폭'],
   ['ads', 'naverHeadline', '네이버 제목', 5, 50, '자'], ['ads', 'naverDesc', '네이버 설명', 10, 100, '자'], ['ads', 'metaPrimary', "Meta 기본 문구 '더 보기' 전", 40, 500, '자'],
 ];
@@ -122,27 +122,37 @@ export function humanize(input: string, rules: QualityRules = DEFAULT_RULES): Hu
 }
 
 // ---------------- ① 훅 라이브러리·훅 점수 ----------------
-/** 훅 공식 26개(한국어) — AI 가 서로 다른 공식으로 3개를 쓰게 함. 결과·가격·최상급은 재료에 근거가 있을 때만 */
+/** 훅 공식(한국어) — AI 가 서로 다른 공식으로 3개를 쓰게 함. 결과·가격·최상급은 재료에 근거가 있을 때만.
+ *  로컬 QA 10/24 ④: 예문('다들 ○○라고 하지만, 사실은 △△')을 주면 AI 가 빈칸만 채워 같은 틀이 반복됨 → 문장 틀 없이 '구조'만 설명 */
 export const HOOK_FORMULAS: [string, string][] = [
-  ['반전', '다들 ○○라고 하지만, 사실은 △△'], ['숫자', '○○하는 3가지 방법'], ['아무도 안 알려주는', '아무도 안 알려주는 ○○'], ['실제 결과', '○○했더니 생긴 변화(재료에 있는 사례만)'],
-  ['가장', '가장 쉬운 ○○(근거 있을 때만)'], ['공개', '처음 공개하는 ○○'], ['실수', '○○할 때 가장 많이 하는 실수'], ['질문', '○○, 해 본 적 있으세요?'],
-  ['대상 호명', '○○하는 분이라면 꼭'], ['전후 비교', '○○ 전과 후'], ['시간', '딱 ○분이면 ○○'], ['경고', '○○하기 전에 이것부터'],
-  ['이야기', '어제 ○○에서 생긴 일'], ['솔직 고백', '솔직히 말하면 ○○'], ['오해 깨기', '○○는 사실 오해입니다'], ['방법', '○○하는 법, 한 장 정리'],
-  ['진짜 이유', '○○하는 진짜 이유'], ['해 봤다', '○○ 7일 해 봤습니다'], ['현장', '○○ 준비하는 현장'], ['가격·가치', '○○원으로 ○○하기(실제 가격만)'],
-  ['공감', '월요일 아침, ○○할 때'], ['추천 순위', '○○ 추천 TOP 3'], ['체크리스트', '○○ 체크리스트 5'], ['비교', '○○ vs △△, 뭐가 나을까'],
-  ['손해', '이거 모르면 ○○ 손해'], ['새 소식', '이번 주부터 ○○ 바뀝니다'],
+  ['반전', '흔히 믿는 것을 짧게 말하고 바로 뒤집기'], ['숫자', '재료에 있는 숫자 하나(개수·기간·금액)로 시작'], ['숨은 정보', '고객이 모르고 지나치는 사실 하나'], ['실제 결과', '재료에 있는 사례의 전후 변화 한 장면'],
+  ['실수', '고객이 자주 하는 실수 하나를 짚기'], ['질문', '고객이 실제로 묻는 질문을 그 사람 말투로'], ['대상 호명', '누구 이야기인지 첫 단어로(직업·상황·단지)'], ['전후 비교', '바뀌기 전과 후를 한 줄에'],
+  ['시간', '걸리는 시간·순서를 구체적으로'], ['경고', '하기 전에 확인할 것 하나'], ['이야기', '이번 주 현장에서 있었던 일 한 장면'], ['솔직 고백', '숨기지 않고 털어놓는 한마디'],
+  ['오해 깨기', '흔한 오해 하나를 바로잡기'], ['방법', '한 가지 방법을 단계로'], ['진짜 이유', '고객 행동의 숨은 이유'], ['해 봤다', '직접 해 본 기간과 결과'],
+  ['현장', '준비·작업 중인 현장 장면'], ['가격·가치', '재료에 있는 실제 가격·혜택'], ['공감', '고객 하루의 구체적인 순간'], ['체크리스트', '확인할 항목 수와 첫 항목'],
+  ['비교', '두 선택지를 나란히'], ['손해', '모르면 생기는 구체적인 손해'], ['새 소식', '이번 주에 바뀌는 것'],
 ];
+/** 로컬 QA 10/24 ④: 예문을 그대로 채운 틀 문구('아직도~계신가요?' 5·'다들~하지만 사실은' 4 등) — 훅 탈락·올리기 전 검사에서 막음 */
+export const TEMPLATE_PHRASES: [RegExp, string][] = [
+  [/아직도\s?[^?\n]{0,40}(?:계신가요|계세요|하시나요|하세요|있나요)\s?\?/, "'아직도 ~ 계신가요?'"],
+  [/다들\s?[^\n]{0,40}(?:지만|는데|라는데),?\s?사실/, "'다들 ~지만 사실은'"],
+  [/(?:해|봐|가|써|들어|먹어|받아)\s?(?:보신|본)\s?적\s?(?:있으세요|있나요|있으신가요|있으시죠)/, "'~해 본 적 있으세요?'"],
+  [/(?:하는|인|이신|하시는)\s?분(?:이라면|들이라면)\s?꼭/, "'~하는 분이라면 꼭'"],
+  [/편하게\s?(?:문의|연락|상담)/, "'편하게 문의해 주세요'"],
+  [/(?:을|를)\s?소개(?:합니다|해\s?드립니다|해\s?드릴게요|할게요|해요)/, "'~를 소개합니다'"],
+];
+export const templatesIn = (t: string) => TEMPLATE_PHRASES.filter(([re]) => re.test(t)).map(([, w]) => w);
 /** #499-1(테크트리 EP.12·S1): 목적 — 콘텐츠형(참여: 시청 지속·저장·공유·댓글) / 광고형(전환: 리드·문의 단가). 틀과 훅 채점을 따로 */
 export type HookMode = 'content' | 'ad';
 export const HOOK_MODES: Record<HookMode, string> = { content: '콘텐츠형(참여)', ad: '광고형(전환)' };
 export const asMode = (x: unknown): HookMode => (x === 'ad' ? 'ad' : 'content');
 export const MODE_GUIDE: Record<HookMode, string> = {
   content: '콘텐츠형(참여): 첫 줄은 질문·공감·이야기로 — 가격·할인·신청 같은 판매 문구로 시작하지 않습니다. 구조: 이야기 → 반전 → 비교 → 자문자답 → 마지막에 행동 1개(저장·댓글 키워드). 성공 기준은 시청 지속·저장·공유·댓글.',
-  ad: '광고형(전환): 첫 줄 2초 안에 대상·상황을 부르고(○○하는 분·○○ 앞둔 단지) 무엇을 주는지(무료 진단·체크리스트·제안서·실제 가격) 말합니다. 구조: 지목 → 제안 → 문제 한 줄 → 장점 2~3개 → 행동 1개. 제안·가격·혜택은 재료에 있는 것만. 성공 기준은 리드·문의 단가.',
+  ad: '광고형(전환): 첫 줄 2초 안에 누구에게(직업·상황·단지를 구체적으로) 무엇을 주는지(무료 진단·체크리스트·제안서·실제 가격) 말합니다. 구조: 지목 → 제안 → 문제 한 줄 → 장점 2~3개 → 행동 1개. 제안·가격·혜택은 재료에 있는 것만. 성공 기준은 리드·문의 단가.',
 };
 /** AI 지시문에 넣는 훅 안내 */
-export const hookGuide = (where: string, mode: HookMode = 'content') => `- hooks: ${where}에 쓸 훅 후보 3개(서로 다른 공식, 30자 안팎). 공식: ${HOOK_FORMULAS.map(([n, ex]) => `${n}(${ex})`).join(' · ')}.
-  인사로 시작·"스크롤 멈추세요"류·"오늘은 ~를 소개합니다" 같은 내용 없는 서두 금지. 숫자·결과·가격은 재료에 있는 것만. 가장 좋은 훅을 본문 첫 줄(제목·첫 장면)에 씁니다.
+export const hookGuide = (where: string, mode: HookMode = 'content') => `- hooks: ${where}에 쓸 훅 후보 3개(서로 다른 공식, 30자 안팎). 공식은 구조만 참고합니다(정해진 문장 틀을 베끼거나 빈칸을 채우는 식으로 쓰지 않음): ${HOOK_FORMULAS.map(([n, how]) => `${n}(${how})`).join(' · ')}.
+  인사로 시작·"스크롤 멈추세요"류·내용 없는 서두 금지. 이런 틀 문구는 본문 어디에도 쓰지 않습니다: ${TEMPLATE_PHRASES.map(([, w]) => w).join(', ')}. 숫자·결과·가격은 재료에 있는 것만. 가장 좋은 훅을 본문 첫 줄(제목·첫 장면)에 씁니다.
 - 목적 ${MODE_GUIDE[mode]}`;
 const GREETING = /^(?:안녕하세요|안녕|반갑습니다|여러분\s?안녕)/;
 const FILLER = /^(?:여러분|오늘은|오늘도|이번에는|자,|음,|혹시\s?아시나요)/;
@@ -170,6 +180,7 @@ export function scoreHook(raw: string, rules: QualityRules = DEFAULT_RULES, keyw
   if (EMPTY_OPEN.test(text)) fails.push('내용 없는 서두');
   if (PLACEHOLDER.test(text)) fails.push('채우지 않은 자리표시');
   if (n > 80) fails.push('훅이 너무 김(80자 초과)');
+  const tpl = templatesIn(text); if (tpl.length) fails.push(`틀 문구(${tpl.join(', ')})`); // 로컬 QA 10/24 ④
   const kw = keywords.map((k) => k.trim()).filter((k) => len(k) >= 2);
   const front = !text || GREETING.test(text) || FILLER.test(text) || EMPTY_OPEN.test(text) ? 0 : n <= 30 ? 20 : n <= 45 ? 12 : 5;
   const spec = UNIT.test(text) ? 4 : NUM_WORD.test(text) ? 3 : kw.some((k) => text.includes(k)) ? 2 : VAGUE.test(text) ? 0 : 1; // 4단계 → 항목 배점에 맞춤
@@ -236,7 +247,16 @@ export const timingText = (t: Timing) => `장면 구성(초 단위·분당 낭�
 
 // ---------------- ③ 채널별 글 검사기 ----------------
 export type ChannelIssue = { level: 'error' | 'warn'; msg: string };
-const CTA = /(?:문의|예약|신청|방문|상담|구매|주문|가입|DM|디엠|링크|프로필|댓글|저장|공유|팔로우|전화)\s?(?:하|해|주|남겨|눌러|확인|부탁|드려|걸어|보내)/g;
+/** 행동 권유 = 요청형 말끝('…하세요·…해 주세요·남겨 주세요')만 셈 — 같은 묶음은 하나(전화·문의·상담 = 문의, 예약·신청·방문 = 신청·방문), 링크·프로필 안내는 따로 세지 않음.
+ *  로컬 QA 10/24 ②: '방문하시면 상담해 드립니다' 같은 안내는 권유가 아님 · 권유 2가지 이상은 승인함에 안 올림(올리기 전 검사) */
+const ASK = '(?:하세요|해\\s?주세요|해\\s?보세요|해\\s?두세요|하십시오|해\\s?주시면|주세요|주시면|하러\\s?오세요)';
+const CTA_GROUPS: [RegExp, string][] = [
+  [new RegExp(`(?:문의|상담|전화|연락|DM|디엠|메시지|톡)\\s?${ASK}|(?:메시지|DM|디엠)[^.!?\\n]{0,10}보내\\s?(?:주세요|보세요)`, 'i'), '문의'],
+  [new RegExp(`(?:예약|신청|구매|주문|가입|등록|방문|체험|시작)\\s?${ASK}|(?:놀러|들러)\\s?(?:오세요|주세요)`), '신청·방문'],
+  [new RegExp(`저장\\s?${ASK}`), '저장'], [new RegExp(`공유\\s?${ASK}`), '공유'],
+  [/댓글[^.!?\n]{0,15}?(?:남겨|달아|써)\s?(?:주세요|보세요)|댓글\s?(?:주세요|부탁)/, '댓글'], [new RegExp(`(?:팔로우|구독)\\s?(?:${ASK}|부탁)`), '팔로우'],
+];
+export const ctaKinds = (t: string) => CTA_GROUPS.filter(([re]) => re.test(t)).map(([, k]) => k);
 const HASHTAG = /(^|\s)#[^\s#]+/g;
 /** 인스타 해시태그 상한(2025-12-18 이후 5개) — AI 원고는 앞에서부터 상한까지만 남김 */
 export function trimHashtags(body: string, max: number) {
@@ -252,7 +272,7 @@ export function checkChannel(channel: string, kind: string | null | undefined, i
     if (L[0] && len(L[0]) > R.preview) issues.push({ level: 'warn', msg: `첫 줄 ${len(L[0])}자 — '더 보기' 전 ${R.preview}자 안에 핵심이 보이게` });
     if (tags > R.hashtags) issues.push({ level: 'error', msg: `해시태그 ${tags}개 — 최대 ${R.hashtags}개` });
     if (kind !== 'story') {
-      const cta = new Set((text.match(CTA) ?? []).map((m) => m.replace(/\s/g, '').slice(0, 2))).size;
+      const cta = ctaKinds(text.split('\n').filter((l) => !STICKER_LINE.test(l)).join('\n')).length;
       if (cta > R.cta) issues.push({ level: 'warn', msg: `요청(CTA) ${cta}가지 — ${R.cta}개만(저장·댓글·문의 중 하나)` });
       else if (!cta) issues.push({ level: 'warn', msg: '요청(CTA)이 없음 — 저장·댓글·문의 중 하나를 마지막에' });
       if (kw.length && !kw.some((k) => text.includes(k))) issues.push({ level: 'warn', msg: `검색 키워드(${kw.slice(0, 2).join('·')})가 본문에 없음` });
@@ -335,6 +355,120 @@ export function voiceIssues(text: string, v: Partial<Voice> | null | undefined):
   return out;
 }
 
+// ---------------- ⑥ 브랜드 사실 카드(로컬 QA 10/24 ⑤) ----------------
+/** 글 안에 직접 쓰는 연락처·운영 시간·요금·써도 되는 숫자(근거와 함께)·섞으면 안 되는 이름 — 카드에 없는 숫자·가격·시간은 쓰지 않음(mkt_brands.facts) */
+export const factsInput = z.object({
+  phone: z.string().trim().max(40).optional(), link: z.string().trim().max(200).optional(), website: z.string().trim().max(200).optional(), address: z.string().trim().max(200).optional(),
+  hours: z.string().trim().max(200).optional(), prices: z.string().trim().max(500).optional(), numbers: z.string().trim().max(1000).optional(),
+  avoidNames: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+});
+export type Facts = z.infer<typeof factsInput>;
+/** 저장 값(옛 값·빈 값 포함) → 카드. 형식이 안 맞으면 빈 카드 — 원고 쓰기를 막지 않음 */
+export const factsOf = (v: unknown): Facts => { const r = factsInput.safeParse(v ?? {}); return r.success ? r.data : {}; };
+const FACT_LABEL: [Exclude<keyof Facts, 'avoidNames'>, string][] = [['phone', '전화'], ['link', '문의·예약 링크'], ['website', '홈페이지'], ['address', '주소'], ['hours', '운영 시간'], ['prices', '요금·가격'], ['numbers', '써도 되는 숫자·근거']];
+/** 원고 재료에 넣는 사실 카드 */
+export function factsText(f: Facts) {
+  const rows = FACT_LABEL.filter(([k]) => String(f[k] ?? '').trim()).map(([k, l]) => `- ${l}: ${String(f[k]).trim()}`);
+  return rows.length ? `[사실 카드 — 이 브랜드의 확인된 사실. 숫자·가격·시간은 이 카드와 재료에 있는 값만]\n${rows.join('\n')}` : '';
+}
+export const hasContacts = (f: Facts) => !!(f.phone || f.link || f.website);
+/** 글에 직접 쓸 연락처 한 줄(전화 → 문의 링크 → 홈페이지) */
+export const contactLine = (f: Facts) => (f.phone ? `문의 ${f.phone}` : f.link ? `문의 ${f.link}` : f.website ?? '');
+const digits = (s: string) => s.replace(/\D/g, '');
+const urlKey = (s: string) => s.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '');
+/** 글에 사실 카드의 연락처(전화 숫자·링크·홈페이지·주소 앞부분)가 있는가 */
+export function contactIn(text: string, f: Facts) {
+  const p = digits(f.phone ?? ''); if (p.length >= 7 && digits(text).includes(p)) return true;
+  const lower = text.toLowerCase();
+  for (const u of [f.link, f.website]) { const k = urlKey(u ?? ''); if (k.length >= 4 && lower.includes(k)) return true; }
+  const a = (f.address ?? '').replace(/\s/g, ''); return a.length >= 8 && text.replace(/\s/g, '').includes(a.slice(0, 12));
+}
+const PHONE = /(?:0\d{1,2}|1[5-9]\d{2})[-.\s)]?\d{3,4}[-.\s]?\d{4}/;
+const PHONE_ASK = /전화\s?(?:문의|상담|예약)(?!\s?(?:vs|VS|대신|말고|보다|와|과))|전화\s?(?:주세요|부탁)|전화로\s?(?:문의|예약|상담)/;
+/** '이미지 참조'·'이미지에 안내된 연락처'처럼 연락처를 그림으로 돌린 말 */
+const IMG_CONTACT = /(?:이미지|사진|그림|포스터|썸네일)\s?(?:에|속|의|에서)?\s?(?:안내된|있는|적힌|나온|표시된|담긴)?\s?(?:연락처|전화\s?번호|번호|주소|문의처)|(?:연락처|번호|문의처|주소)[^.\n]{0,10}(?:이미지|사진)\s?(?:참조|참고|확인)|(?:이미지|사진)\s?(?:참조|참고)/;
+/** 다른 브랜드·회사 이름(명의) 섞임 — 3자 이상·영문은 그대로, 두 글자 이름(일반 낱말일 수 있음)은 브랜드로 쓰인 자리(서비스·운영·구축·명의…)만 */
+const BRAND_CTX = '\\s?(?:의|이|가|은|는|에서|와|과)?\\s?(?:서비스|브랜드|운영|구축|시공|관리|본사|대표|팀|커뮤니티|센터|앱|플랫폼|솔루션|명의|헬스|피트니스)';
+export function otherBrandIn(text: string, names: string[], own = ''): string | null {
+  const mine = own.replace(/^\s*\[시험\]\s*/, '').trim().toLowerCase();
+  for (const raw of names) {
+    const n = raw.replace(/^\s*\[시험\]\s*/, '').trim();
+    if (!n || (mine && (mine.includes(n.toLowerCase()) || n.toLowerCase().includes(mine)))) continue; // 같은 브랜드의 시험 복사본·겹치는 이름은 빼고
+    const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = /[A-Za-z]/.test(n) ? new RegExp(`(?<![\\w.@-])${esc}(?![\\w.@-])`, 'i') : [...n].length >= 3 ? new RegExp(esc) : new RegExp(`${esc}${BRAND_CTX}`);
+    if (re.test(text)) return n;
+  }
+  return null;
+}
+
+// ---------------- ⑦ 올리기 전 자동 검사(로컬 QA 10/24 ②·⑥) ----------------
+/** JSON 모양 본문(원고 칸 이름이 섞임) — 본문 첫머리 '[브랜드]' 같은 자리표시는 JSON 이 아님 */
+export const JSON_LIKE = /^\s*(?:\{|\[\s*["{[])|"(?:title|body|brief|why|hooks|keyword|card|script)"\s*:/;
+/** 스토리의 '스티커 제안:' 줄(투표·질문 스티커 — 그림 글자·권유 수에 넣지 않음) */
+export const STICKER_LINE = /^\s*스티커 제안\s*[:：]/;
+const CUT_LABEL = /^\s*(?:[[(【]?\s*(?:컷|장면|씬|scene|cut|shot)\s*\d+|#\s?\d+\s|S\d+\s*[:.)\-–])/i;
+const STICKER_ANY = /^\s*(?:[[(【]\s*(?:질문\s?|투표\s?|퀴즈\s?)?스티커(?:\s?제안)?\s*[\])】]\s*[:：\-–]?|(?:질문\s?|투표\s?|퀴즈\s?)?스티커(?:\s?제안)?\s*[:：\-–])\s*/; // '[질문 스티커] …'처럼 괄호면 쌍점 없이도
+/** AI 가 '스티커:'·'[질문 스티커]' 등으로 쓴 줄을 '스티커 제안: …'으로 맞춤 */
+export const normalizeSticker = (body: string) => body.split('\n').map((l) => (STICKER_ANY.test(l) ? `스티커 제안: ${l.replace(STICKER_ANY, '').trim()}` : l)).join('\n');
+const normLine = (s: string) => s.replace(/[\s\p{P}\p{S}]+/gu, '').toLowerCase();
+/** 릴스·쇼츠·영상 원고의 캡션(게시 글)과 컷 대본을 나눔 — AI 가 대본 배열을 줬으면 그 줄과 같은 줄만 캡션에서 빼고(번호 목록은 그대로),
+ *  안 줬으면 컷 줄('[컷1] …'·'#1 …'·'1) …')이 2개 이상일 때 대본으로. '대본:'·'캡션:' 머리줄은 뺌 */
+export function splitScript(body: string, given: string[] = []): { caption: string; script: string[]; moved: number } {
+  const src = body.replace(/\r\n/g, '\n').split('\n');
+  const head = /^\s*[[(【]?\s*(?:대본|자막\s?대본|컷\s?구성|스크립트|캡션|게시\s?글)\s*[\])】]?\s*[:：]?\s*$/;
+  const g = given.map((x) => String(x ?? '').trim()).filter(Boolean);
+  if (g.length >= 2) {
+    const keys = g.map(normLine).filter((k) => k.length >= 4);
+    const keep = src.filter((l) => { if (head.test(l)) return false; const c = l.match(CUT)?.[1] ?? l; const k = normLine(c); return !(k.length >= 4 && keys.some((x) => x === k || x.includes(k) || k.includes(x))); });
+    return { caption: keep.join('\n').replace(/\n{3,}/g, '\n\n').trim(), script: g, moved: src.length - keep.length };
+  }
+  const cuts = src.filter((l) => CUT.test(l));
+  if (cuts.length < 2) return { caption: body.trim(), script: [], moved: 0 };
+  const keep = src.filter((l) => !CUT.test(l) && !head.test(l));
+  return { caption: keep.join('\n').replace(/\n{3,}/g, '\n\n').trim(), script: scriptLines(cuts.join('\n')), moved: src.length - keep.length };
+}
+/** 끝이 조사·연결어미·꾸밈말로 끊긴 문장(예: '…관리자라면 꼭', '…주차는 건물 뒤편에', '…문의:') — 명사로 끝나는 안내('24시간 운영')·날짜('31일까지')는 그대로 */
+const DANGLING = /(?:[,·:;(\[/\-–—]|(?:^|\s)(?:꼭|가장|바로|더욱|그리고|또는|하지만|그래서|그런데|및)|[가-힣](?:를|은|는|에|에서|에게|으로|라면|하면|해서|하고|하며|하는|있는|없는|위한|통한|통해|대한|같은|좋은|많은))$/;
+const URL_END = /(?:https?:\/\/\S+|[a-z0-9-]+\.[a-z]{2,}(?:\/\S*)?)$/i;
+export type PreflightInput = { channel: string; kind?: string | null; title?: string; body: string; isTest?: boolean; aiLabel?: string | null; facts?: Facts | null; otherBrands?: string[]; brandName?: string | null; script?: string[] | null; cross?: string[] | null };
+/** 승인함(승인 대기)에 올리기 전에 막는 문제 — 걸리면 '수정 요청' 칸에 이유와 함께(자동 제작). 사람이 올린 글은 상세에 보여 주기만.
+ *  빈 글·한 줄·끊긴 문장·JSON 모양·[시험]·해시태그 초과·권유 2가지 이상·연락처(이미지 참조·사실 카드)·블로그 길이·스토리 형식·릴스/쇼츠 대본·틀 문구·다른 브랜드 이름 */
+export function preflight(i: PreflightInput, rules: QualityRules = DEFAULT_RULES): string[] {
+  const kind = i.kind ?? null; const story = kind === 'story'; const video = !!kind && VIDEO.has(kind); const blog = i.channel === 'blog' || kind === 'blog';
+  let all = String(i.body ?? '').replace(/\r\n/g, '\n');
+  if (i.aiLabel) all = all.split(i.aiLabel).join('');
+  all = all.trim();
+  if (all.replace(/\s/g, '').length < 5) return ['본문이 비었거나 너무 짧음'];
+  const out: string[] = [];
+  if (JSON_LIKE.test(all)) out.push('본문이 코드(JSON) 모양 — 원고 칸 이름이 섞임');
+  if (/\[시험\]/.test(all) || (!i.isTest && /\[시험\]/.test(i.title ?? ''))) out.push("'[시험]' 표시가 섞임");
+  const body = lines(all).filter((l) => !/^(?:#[^\s#]+\s*)+$/.test(l) && !STICKER_LINE.test(l)); // 해시태그만 있는 줄·스티커 제안 줄 빼고
+  const content = body.join('\n');
+  if (!story && !video && !blog && i.channel !== 'threads' && sentences(content).length < 2 && len(content) < 80) out.push('한 줄짜리 글(내용 부족) — 두 문장 이상');
+  const last = (body[body.length - 1] ?? '').replace(HASHTAG, '').replace(EMOJI, '').replace(/[\s"'”’」』)]+$/, '');
+  if (last && !URL_END.test(last) && DANGLING.test(last)) out.push(`끝 문장이 끊김('…${[...last].slice(-12).join('')}')`);
+  const social = ['instagram', 'facebook', 'threads']; const tags = (all.match(HASHTAG) ?? []).length;
+  if ((social.includes(i.channel) || (i.cross ?? []).some((c) => social.includes(c))) && tags > rules.instagram.hashtags) out.push(`해시태그 ${tags}개 — ${rules.instagram.hashtags}개까지`);
+  if (!blog) { const k = ctaKinds(content); if (k.length > rules.instagram.cta) out.push(`권유 ${k.length}가지(${k.join('·')}) — 글 한 편에 행동 하나`); }
+  const f = i.facts ?? {};
+  if (IMG_CONTACT.test(all)) out.push("연락처를 '이미지 참조'로 돌림 — 글 안에 직접");
+  else if (!story && i.channel !== 'threads' && hasContacts(f) && !contactIn(all, f)) out.push(`연락처 없음 — 사실 카드의 ${f.phone ? '전화' : f.link ? '문의 링크' : '홈페이지'}를 글 안에 직접`);
+  else if (PHONE_ASK.test(content) && !PHONE.test(all) && !contactIn(all, f)) out.push("'전화 문의'인데 번호가 없음"); // 스티커 제안 줄(투표·질문)·'전화 예약 vs 앱 예약' 같은 비교는 권유가 아님
+  if (blog) { const n = len(content.replace(/\n/g, '')); if (n < rules.blog.minChars) out.push(`블로그 본문 ${n.toLocaleString('ko-KR')}자 — ${rules.blog.minChars.toLocaleString('ko-KR')}자 이상`); }
+  if (story) { if (body.length > 2) out.push(`스토리 문구 ${body.length}줄 — 1~2줄`); if (!all.split('\n').some((l) => STICKER_LINE.test(l))) out.push("스토리 '스티커 제안:' 줄 없음"); }
+  if (video) {
+    const cuts = (i.script ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
+    // 컷 이름표('[컷1]'·'장면 2:'·'#3 '·'S4')가 붙은 줄이나 대본과 같은 줄이 캡션에 2줄 이상 — 그냥 번호 목록('1. …')은 캡션 내용일 수 있어 대본 줄과 같을 때만
+    const keys = cuts.map(normLine).filter((k) => k.length >= 4);
+    if (lines(all).filter((l) => CUT_LABEL.test(l) || (CUT.test(l) && keys.includes(normLine(l.match(CUT)?.[1] ?? l)))).length >= 2) out.push('캡션에 컷 대본이 섞임 — 대본은 대본 칸에');
+    if (cuts.length < 2) out.push('대본(컷) 없음');
+    else { const first = scriptTiming(cuts.slice(0, 1), rules).rows[0]; if (first && first.sec > rules.hook.maxSec + 1) out.push(`첫 컷 대사 ${first.sec}초 — ${rules.hook.maxSec}초(15음절 안팎) 안으로`); } // QA: 첫 문장 6·7초
+  }
+  const tp = templatesIn(all); if (tp.length) out.push(`틀 문구 그대로: ${tp.join(', ')}`);
+  const ob = otherBrandIn(blog ? `${i.title ?? ''}\n${all}` : all, [...(i.otherBrands ?? []), ...(f.avoidNames ?? [])], i.brandName ?? ''); if (ob) out.push(`다른 브랜드·회사 이름('${ob}')이 섞임`);
+  return out;
+}
+
 // ---------------- 묶음 보고서 ----------------
 /** 어느 줄이 훅인가: 릴스·쇼츠·영상 = 첫 장면, 블로그 = 제목, 그 밖 = 본문 첫 줄 */
 export function hookOf(kind: string | null | undefined, title: string, body: string, script: string[]) {
@@ -345,6 +479,7 @@ export function hookOf(kind: string | null | undefined, title: string, body: str
 export type QualityReportData = {
   v?: number; human: { score: number; pass: boolean; issues: string[] }; needsPolish: boolean; hook: HookScore | null; hooks: HookScore[];
   channel: ChannelIssue[]; preview: string | null; timing: Timing | null; voice: string[]; keyword?: string | null; mode?: HookMode;
+  preflight?: string[]; // 로컬 QA 10/24 ②: 올리기 전 검사에 걸린 것(자동 제작 글은 이게 있으면 승인함 대신 '수정 요청')
 };
 export function qualityReport(i: { channel: string; kind?: string | null; title?: string; body: string; hooks?: string[]; script?: string[]; keywords?: string[]; mainKeyword?: string | null; voice?: Partial<Voice> | null; cross?: string[]; mode?: HookMode | null }, rules: QualityRules = DEFAULT_RULES): { body: string; report: QualityReportData } {
   const mode: HookMode = i.mode === 'ad' ? 'ad' : 'content';
@@ -373,10 +508,12 @@ export const checkInput = z.object({
 export async function checkQuality(u: SessionUser, i: z.infer<typeof checkInput>) {
   await assertSpace(u, 'marketing');
   const rules = await qualityRules();
-  const [brand] = i.brandId ? await db()<{ name: string; voice: Partial<Voice> }[]>`select name, voice from mkt_brands where id = ${i.brandId} and tenant = ${tenantOf(u)}` : [];
+  const [brand] = i.brandId ? await db()<{ name: string; voice: Partial<Voice>; facts: unknown }[]>`select name, voice, facts from mkt_brands where id = ${i.brandId} and tenant = ${tenantOf(u)}` : [];
   if (i.brandId && !brand) throw notFound('브랜드를 찾을 수 없습니다');
   const name = String(brand?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
   const r = qualityReport({ channel: i.channel, kind: i.kind ?? null, title: i.title, body: i.body, hooks: i.hooks, script: i.script, keywords: name ? [name] : [], mainKeyword: i.keyword || null, voice: brand?.voice, cross: i.cross, mode: i.mode }, rules);
   const ad = i.ad ? { issues: checkAd(i.ad.platform, i.ad, rules), hook: i.ad.headline ? scoreHook(i.ad.headline, rules, name ? [name] : [], 'ad') : null } : null; // 광고 제목 = 늘 광고형 기준
-  return { cleaned: r.body, ...r.report, ad, thresholds: { hook: rules.hook.min, human: rules.human.min } };
+  const others = i.brandId ? (await db()<{ name: string }[]>`select name from mkt_brands where tenant = ${tenantOf(u)} and id <> ${i.brandId}`).map((b) => b.name) : [];
+  const pre = i.body.trim() ? preflight({ channel: i.channel, kind: i.kind ?? null, title: i.title, body: r.body, facts: factsOf(brand?.facts), otherBrands: others, brandName: name, script: i.script ?? null, cross: i.cross ?? null }, rules) : [];
+  return { cleaned: r.body, ...r.report, preflight: pre, ad, thresholds: { hook: rules.hook.min, human: rules.human.min } };
 }

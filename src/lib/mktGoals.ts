@@ -12,7 +12,8 @@ import { tenantOf, type SessionUser } from './types';
  * ③ AI 작업 큐 종류 '목표 설정·주간 계획·리뷰'(밤사이 범위 'goal' 기본 끔 — 낮(09~22시)에는 정기 실행이 돌림) ④ 이달 자동 제작분 근거 소급(AI 비용 0, 목표·규칙에서 문장으로).
  * 묶음 규칙의 자동 제작은 그 주 주제 달력에서 주제를 가져오고, 근거 칸이 자동으로 채워진다. 돈·외부 발송 없음.
  */
-export type Rationale = { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; source?: 'goal' | 'rule' | 'ai' | 'user' | 'backfill'; goalId?: string | null; week?: number | null; topic?: string | null };
+export type Rationale = { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; source?: 'goal' | 'rule' | 'ai' | 'user' | 'backfill'; goalId?: string | null; week?: number | null; topic?: string | null;
+  topicFrom?: string | null }; // 로컬 QA 10/24 ③ 주제를 어디서 골랐나: answer·goal(브랜드 목표)·brand(키트 이번 주)·pool(주제 풀)·rule·company(회사 공통 — 브랜드에 맞게 바꿔 씀)
 export type GoalWeek = { week: number; from: string; to: string; topic: string; channels: string[]; kinds: string[]; note?: string };
 export type Goals = { objectives: string[]; message: string; targets: { posts: number | null; inquiries: number | null; adBudget: number | null; revenue?: number | null }; channels: string[] };
 
@@ -126,15 +127,15 @@ export async function goalProgress(tenant: string, month = monthKst()) {
 }
 
 /** 콘텐츠 근거 문장(AI 비용 0): 목표·주차 주제·규칙에서 */
-export function rationaleFrom(opts: { goal?: any; day: string; rule?: any; brandName?: string | null; kind?: string | null; channel?: string | null; why?: string | null; source: Rationale['source'] }): Rationale {
+export function rationaleFrom(opts: { goal?: any; day: string; rule?: any; brandName?: string | null; kind?: string | null; channel?: string | null; why?: string | null; source: Rationale['source']; topic?: string | null; topicFrom?: string | null }): Rationale {
   const { goal, day, rule } = opts;
   const week = goal ? weekOf(goal.weekly ?? [], day) : null;
   const objective = goal?.goals?.objectives?.[0] ?? null;
   const t = goal?.goals?.targets;
   const metric = t ? [t.posts ? `게시 ${t.posts}건` : '', t.inquiries ? `문의 ${t.inquiries}건` : ''].filter(Boolean).join(' · ') || null : null;
-  const topic = week?.topic ?? rule?.topic_hint ?? null;
-  const why = opts.why ?? (goal ? `${goal.month.slice(5).replace(/^0/, '')}월 운영 목표 '${objective ?? ''}'${week ? ` · ${week.week}주 주제 '${week.topic}'` : ''}에 따라 ${rule ? '묶음 규칙으로 자동 제작' : '만든 글'}` : rule ? `묶음 규칙(${rule.channel ?? opts.channel ?? ''} ${rule.kind ?? opts.kind ?? ''})에 따라 자동 제작${rule.topic_hint ? ` — 주제 '${rule.topic_hint}'` : ''}` : null);
-  return { purpose: objective, metric, message: goal?.goals?.message ?? null, why, source: opts.source, goalId: goal?.id ?? null, week: week?.week ?? null, topic };
+  const topic = opts.topic ?? week?.topic ?? rule?.topic_hint ?? null; // 로컬 QA 10/24 ③: 실제로 쓴 주제(브랜드 주제 풀 등)
+  const why = opts.why ?? (goal ? `${goal.month.slice(5).replace(/^0/, '')}월 운영 목표 '${objective ?? ''}'${topic ? ` · ${week ? `${week.week}주 ` : ''}주제 '${topic}'` : ''}에 따라 ${rule ? '묶음 규칙으로 자동 제작' : '만든 글'}` : rule ? `묶음 규칙(${rule.channel ?? opts.channel ?? ''} ${rule.kind ?? opts.kind ?? ''})에 따라 자동 제작${topic ? ` — 주제 '${topic}'` : ''}` : null);
+  return { purpose: objective, metric, message: goal?.goals?.message ?? null, why, source: opts.source, goalId: goal?.id ?? null, week: week?.week ?? null, topic, ...(opts.topicFrom ? { topicFrom: opts.topicFrom } : {}) };
 }
 
 export const goalInput = z.object({ goals: z.object({ objectives: z.array(z.string().trim().max(200)).max(6), message: z.string().trim().max(200), targets: z.object({ posts: z.number().int().min(0).nullable(), inquiries: z.number().int().min(0).nullable(), adBudget: z.number().int().min(0).nullable(), revenue: z.number().int().min(0).nullable().optional() }), channels: z.array(z.string()).max(8) }).optional(),

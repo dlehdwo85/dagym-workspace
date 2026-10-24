@@ -150,7 +150,7 @@ export async function getContent(u: SessionUser, id: string) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);
   const sql = db();
-  const [c] = await sql<any[]>`select c.*, b.name as brand, b.voice as brand_voice, b.color as brand_color, b.video->>'logoFileId' as brand_logo from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`; // #497 R06 미리보기 프로필(브랜드 키트 로고·색)
+  const [c] = await sql<any[]>`select c.*, b.name as brand, b.voice as brand_voice, b.facts as brand_facts, b.color as brand_color, b.video->>'logoFileId' as brand_logo from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`; // #497 R06 미리보기 프로필(브랜드 키트 로고·색)
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
   const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.revision, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
@@ -168,11 +168,15 @@ export async function getContent(u: SessionUser, id: string) {
   const Q = await import('./mktQuality');
   const mode = Q.asMode(c.mode); const kw = [String(c.brand ?? '').replace(/^\s*\[시험\]\s*/, '')].filter(Boolean);
   const saved = c.quality?.report?.v === c.current_version ? c.quality.report : null;
+  const rules = await Q.qualityRules();
+  // 로컬 QA 10/24 ②: 올리기 전 자동 검사 — AI 시안은 제작 때 결과, 사람이 올린 버전은 지금 본문으로(보여 주기만, 막지 않음)
+  const preflight: string[] | undefined = saved ? saved.preflight : cur ? Q.preflight({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', isTest: !!c.is_test, aiLabel: st.ai_label, facts: Q.factsOf(c.brand_facts),
+    otherBrands: c.brand_id ? (await sql<{ name: string }[]>`select name from mkt_brands where tenant = ${tenantOf(u)} and id <> ${c.brand_id}`).map((b) => b.name) : [], brandName: kw[0] ?? null, script: c.quality?.script ?? null, cross: c.cross_channels ?? [] }, rules) : undefined;
   // #499-1 용도를 바꿨으면(콘텐츠형↔광고형) 제작 때 보고서의 훅 후보·장면으로 그 기준에 맞춰 다시 채점(자동 수정 기록은 그대로)
   const qualityReport = saved && Q.asMode(saved.mode) === mode ? saved
     : cur ? { ...Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', keywords: kw, voice: c.brand_voice, cross: c.cross_channels ?? [], mode,
-        hooks: saved?.hooks?.map((h: { text: string }) => h.text), script: saved?.timing?.rows?.map((r: { line: string }) => r.line) }, await Q.qualityRules()).report, ...(saved ? { v: saved.v, notes: saved.notes } : {}) } : null;
-  delete c.brand_voice;
+        hooks: saved?.hooks?.map((h: { text: string }) => h.text), script: c.quality?.script ?? saved?.timing?.rows?.map((r: { line: string }) => r.line) }, rules).report, ...(saved ? { v: saved.v, notes: saved.notes } : {}), ...(preflight ? { preflight } : {}) } : null;
+  delete c.brand_voice; delete c.brand_facts;
   return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
 }
 
@@ -231,11 +235,13 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
     // 서버가 그린 시안 표시(visual)는 같은 그림을 그대로 둘 때만 남김 — 사람이 다른 사진을 붙이면 [AI 이미지로 다시] 대상이 아님
     let quality = c.quality ?? null;
     if (quality?.held) { const { held: _held, ...rest } = quality; quality = Object.keys(rest).length ? rest : null; } // 로컬 QA 10/24 #7: 초안 보관 글에 수정본을 올리면 승인 대기 — 보관 표시는 지움('pending/held' 섞임)
+    // 로컬 QA 10/24 ②: 올리기 전 자동 검사 결과는 이전 본문 것 — 지움(사람이 올린 본문은 상세에서 다시 검사해 보여 주기만)
+    if (quality?.preflight) { const { preflight: old, ...q } = quality; const left = ((q.issues ?? []) as string[]).filter((x) => !(old as string[]).includes(x)); quality = { ...q, issues: left, ...(q.passed === false && !left.length ? { passed: true } : {}) }; }
     if (quality && i.mediaIds.length) {
       const { VISUAL_ISSUE } = await import('./mktAutoVisual');
       const { visual, ...q } = quality;
       const left = ((q.issues ?? []) as string[]).filter((x) => x !== BLOG_PHOTO_RULE && !VISUAL_ISSUE.test(x));
-      quality = q.passed === false && (q.issues ?? []).length && !left.length ? null : { ...q, issues: left, ...(visual && i.mediaIds.length === 1 && i.mediaIds[0] === visual.fileId ? { visual } : {}) };
+      quality = q.passed === false && (q.issues ?? []).length && !left.length ? (q.script ? { script: q.script } : null) : { ...q, issues: left, ...(visual && i.mediaIds.length === 1 && i.mediaIds[0] === visual.fileId ? { visual } : {}) }; // 대본(컷) 칸은 영상을 붙여도 남김
     }
     await tx`update mkt_contents set current_version = ${v}, status = 'pending', quality = ${quality ? tx.json(quality as never) : null}, updated_at = now() where id = ${id}`;
     await (await import('./mktAuto')).mktNotify(tx, { tenant: tenantOf(u), brand_id: c.brand_id, is_test: c.is_test, created_by: c.created_by }, u.id, { approval: true, type: 'review_requested', title: `재승인 대기(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
