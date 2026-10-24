@@ -18,6 +18,7 @@ import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, C
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
 import { useBackClose, useSheetBack } from '@/components/backClose';
+import { replaceUrl } from '@/components/urlState';
 import { useCalendarSwipe } from '@/components/calSwipe';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
@@ -85,6 +86,7 @@ function CalendarPage() {
   const [showAllDay, setShowAllDay] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_allday') === '1'; } catch { return false; } });
   useEffect(() => { try { localStorage.setItem('wos_cal_allday', showAllDay ? '1' : '0'); } catch {} }, [showAllDay]);
   const [allDaySheet, setAllDaySheet] = useState<string | null>(null);
+  useBackClose(!!allDaySheet, () => setAllDaySheet(null)); // #242 2단계: 뒤로가기 = 종일 목록만 닫힘(캘린더 그대로)
   const [sidePanel, setSidePanel] = useState<boolean>(() => { try { const v = localStorage.getItem('wos_cal_unscheduled'); return v === null ? typeof window !== 'undefined' && window.innerWidth >= 1440 : v === '1'; } catch { return false; } });
   const [range, setRange] = useState<{ from: string; to: string; start: Date; view: string } | null>(null);
   const [events, setEvents] = useState<any[]>([]);
@@ -665,8 +667,9 @@ function CalendarPage() {
       {quick && <QuickCreate {...quick} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
         onMore={(draft) => { setQuick(null); setEditor({ draft }); }} onSaved={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }} />}
       {preview && <EventPreview ev={preview.ev} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}
-        onClose={() => setPreview(null)} onEdit={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }} onChanged={() => { setPreview(null); load(); broadcastRefresh(); }} />}
-      {editor && <EventEditor {...editor} calendars={cals.data?.calendars ?? []} onClose={() => { setEditor(null); if (sp.get('event')) router.replace('/calendar'); }} onSaved={() => { load(); broadcastRefresh(); }} dirUsers={dir.users} />}
+        onClose={() => setPreview(null)} onEdit={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }} onChanged={() => { setPreview(null); load(); broadcastRefresh(); }}
+        onOpenTask={(id) => { setOpenTask(id); setPreview(null); }} />}
+      {editor && <EventEditor {...editor} calendars={cals.data?.calendars ?? []} onClose={() => { setEditor(null); if (sp.get('event')) { const p = new URLSearchParams(location.search); p.delete('event'); replaceUrl(`/calendar${p.size ? `?${p}` : ''}`); } }} onSaved={() => { load(); broadcastRefresh(); }} dirUsers={dir.users} />}
       {openTask && (
         <aside className="fixed inset-0 z-40 animate-slide-in overflow-y-auto bg-white shadow-pop sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(640px,100vw-240px)] sm:border-l sm:border-line" data-testid="task-panel" aria-label="업무 상세 패널">
           <TaskDetail key={openTask} id={openTask} inPanel onClose={() => { setOpenTask(null); load(); }} />
@@ -1126,7 +1129,9 @@ function saveError(er: any): string {
 function cleanTitle(t: string) { return t.replace(/^(\[(업무|업무 시간)\]\s*)+/, ''); }
 
 /** 일정 미리보기: 시간·장소·참석자·연결 업무, 업무 시간 블록이면 그 업무의 상태·완료 */
-function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged }: { ev: any; x: number; y: number; calendarName?: string; onClose: () => void; onEdit: () => void; onChanged: () => void }) {
+function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged, onOpenTask }: { ev: any; x: number; y: number; calendarName?: string; onClose: () => void; onEdit: () => void; onChanged: () => void; onOpenTask: (id: string) => void }) {
+  // #242 2단계: 업무 시간 블록의 업무는 캘린더 위 업무 패널로(예전엔 페이지를 새로 불러와 닫으면 업무 목록으로 감). Ctrl·⌘·가운데 클릭은 새 탭
+  const openIn = (e: React.MouseEvent, id: string) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; e.preventDefault(); onOpenTask(id); };
   const occ = ev.recurring && !ev.exception && ev.originalStart ? `?occurrenceStart=${encodeURIComponent(new Date(ev.originalStart).toISOString())}` : '';
   const linked = useApi<{ tasks: any[] }>(ev.masked ? null : `/api/events/${ev.id}/tasks${occ}`);
   const tasks = linked.data?.tasks ?? [];
@@ -1186,12 +1191,12 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged }: { 
           <div className="mt-3 rounded-input border border-line p-2.5" data-testid="block-task">
             <div className="flex items-center gap-2 text-sm">
               <StatusBadge status={block.status} />
-              <a href={`/tasks/${block.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{block.title}</a>
+              <a href={`/tasks/${block.id}`} onClick={(e) => openIn(e, block.id)} className="min-w-0 flex-1 truncate font-medium hover:underline">{block.title}</a>
               <DueChip due={block.due_date} status={block.status} />
             </div>
             <div className="mt-2 flex items-center gap-1.5">
               <Avatar id={block.assignee_id} name={block.assignee_name} size={20} /><span className="flex-1 text-xs text-ink-2">{block.assignee_name ?? '담당자 없음'}</span>
-              <a href={`/tasks/${block.id}`}><Button type="button" size="sm" variant="ghost"><ExternalLink />업무 열기</Button></a>
+              <a href={`/tasks/${block.id}`} onClick={(e) => openIn(e, block.id)} data-testid="block-task-open"><Button type="button" size="sm" variant="ghost"><ExternalLink />업무 열기</Button></a>
               {block.status !== 'done' && <Button type="button" size="sm" onClick={() => complete(block)}><CircleCheck />{block.status === 'review' ? '최종 완료' : '완료'}</Button>}
             </div>
           </div>

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef } from 'react';
+import { ownState } from './urlState';
 
 /**
  * V14 39번: 뒤로가기 = 직전 화면.
@@ -18,7 +19,8 @@ export function useBackClose(open: boolean, onClose: () => void, param?: [string
     const url = new URL(window.location.href);
     const y0 = window.scrollY, path0 = url.pathname; // #535(로컬 10/24 08:23): 닫으면 목록을 연 자리로
     const direct = !!key && url.searchParams.get(key) === val;
-    if (!direct) { if (key && val) url.searchParams.set(key, val); window.history.pushState({ ...(window.history.state ?? {}), __overlay: id }, '', key ? url.toString() : undefined); }
+    // #242 2단계: 기록 값에 Next 내부 값을 넣지 않아야 라우터도 ?key= 를 알아, 상세에서 다른 화면에 갔다 뒤로 오면 그 상세를 다시 열 수 있음(ownState)
+    if (!direct) { if (key && val) url.searchParams.set(key, val); window.history.pushState({ ...ownState(), __overlay: id }, '', key ? url.toString() : undefined); }
     let popped = false;
     const onPop = () => {
       if (!direct && window.history.state?.__overlay === id) return;
@@ -32,7 +34,7 @@ export function useBackClose(open: boolean, onClose: () => void, param?: [string
       if (popped) return;
       if (direct) { // 닫기 단추: 주소에서 key 만 지움(기록은 그대로)
         const u = new URL(window.location.href);
-        if (key && u.searchParams.get(key) === val) { u.searchParams.delete(key); window.history.replaceState(window.history.state, '', u.toString()); }
+        if (key && u.searchParams.get(key) === val) { u.searchParams.delete(key); window.history.replaceState(ownState(), '', u.toString()); }
         return;
       }
       // 버튼으로 닫음: 아직 우리 칸 위에 있으면 한 칸 되돌림 (다른 화면으로 이동해 닫힌 경우는 그대로)
@@ -55,6 +57,38 @@ export function keepScroll(y: number, path = window.location.pathname) {
     if (stop || window.location.pathname !== path) { evs.forEach((e) => window.removeEventListener(e, user, { capture: true })); return; }
     if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
     if (++n < 8) setTimeout(tick, n < 3 ? 30 : 110); else evs.forEach((e) => window.removeEventListener(e, user, { capture: true }));
+  };
+  requestAnimationFrame(tick);
+}
+
+/**
+ * #242 2단계(대표 10/24 '창 닫기·돌아가기를 누르면 다른 화면으로 넘어가지 않게'): 다른 화면에 갔다 뒤로가기로 돌아와 다시 그려진 화면을 보던 위치로.
+ * 목록을 다시 불러와 늦게 길어져도 그 높이가 될 때까지 기다렸다 맞추고(0.3초 뒤 한 번 더 확인) 끝 — 2.5초 지나거나 사람이 스크롤·터치·클릭하면 멈춤
+ */
+export function restoreScroll(y: number) {
+  if (!(y > 0)) return;
+  const path = window.location.pathname, t0 = Date.now();
+  let stop = false, hit = 0;
+  const evs = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const;
+  const user = () => { stop = true; };
+  evs.forEach((e) => window.addEventListener(e, user, { passive: true, capture: true }));
+  const end = () => evs.forEach((e) => window.removeEventListener(e, user, { capture: true }));
+  // 돌아온 화면이 조금 짧아졌으면(읽음 처리로 줄이 접히는 등) 다 그려진 뒤(높이가 늘었다가 0.4초 그대로) 갈 수 있는 가장 가까운 위치로
+  let lastH = document.documentElement.scrollHeight, grew = false, same = 0;
+  const near = () => { const max = document.documentElement.scrollHeight - window.innerHeight; if (max > 0 && Math.abs(window.scrollY - Math.min(y, max)) > 2) window.scrollTo(0, Math.min(y, max)); };
+  const tick = () => {
+    if (stop || window.location.pathname !== path) { end(); return; }
+    if (Date.now() - t0 > 2500) { near(); end(); return; }
+    const h = document.documentElement.scrollHeight;
+    if (h - window.innerHeight >= y - 2) {
+      if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
+      if (++hit >= 2) { end(); return; }
+      setTimeout(tick, 300); return;
+    }
+    if (h > lastH) { grew = true; same = 0; } else if (h === lastH) same += 100; else same = 0;
+    lastH = h;
+    if (grew && same >= 400) { near(); end(); return; }
+    setTimeout(tick, 100);
   };
   requestAnimationFrame(tick);
 }

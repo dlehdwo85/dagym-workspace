@@ -4,26 +4,38 @@ import Link from 'next/link';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Loading, cx, fmtDateTime, toast } from '@/components/ui';
 import { NOTIFICATION_TYPES } from '@/lib/types';
+import { cameBack, useUrlState } from '@/components/urlState';
 
 const SPACE_CHIP: Record<string, string> = { sales: '영업', marketing: '마케팅', work: '업무' };
+type Tab = 'unread' | 'all' | 'archived' | 'activity';
+const TABS: Tab[] = ['unread', 'all', 'archived', 'activity'];
 const SWIPE = 70; // px — 왼쪽으로 밀면 읽음, 오른쪽으로 밀면 보관
 const LONG_PRESS = 500; // ms — 길게 누르면 다중 선택
 
 export default function Notifications() {
   // #104 ⑥: 묶음 알림 링크(/notifications?space=marketing) → 그 공간 알림만
-  const [space, setSpace] = useState<string | null>(null);
-  useEffect(() => { const s = new URLSearchParams(window.location.search).get('space'); if (s && SPACE_CHIP[s]) setSpace(s); }, []);
+  const [spaceQ, setSpaceQ] = useUrlState('space', '');
+  const space = SPACE_CHIP[spaceQ] ? spaceQ : null;
   // V32 0: 기본은 안 읽은 알림만 — 누르면 바로 읽음(배지 감소), 서버 실패 때만 되돌림. [전체]로 읽은 것까지 · #110 [보관함]
-  const [tab, setTab] = useState<'unread' | 'all' | 'archived' | 'activity'>('unread');
+  // #242 2단계: 탭은 주소(?tab=)에 — 알림을 눌러 업무·승인함에 갔다 뒤로 와도 보던 탭
+  const [tabQ, setTabQ] = useUrlState('tab', 'unread');
+  const tab = (TABS.includes(tabQ as Tab) ? tabQ : 'unread') as Tab;
+  const setTab = (t: Tab) => setTabQ(t);
   const { data, error, loading, reload, setData } = useApi<any>(`/api/notifications${tab === 'archived' ? '?archived=1' : space ? `?space=${space}` : ''}`);
   // 로컬 10/19(대표) 홈 개편: 홈 '최근 활동' 카드가 여기 '활동' 탭으로
   const [doneIds, setDoneIds] = useState<string[]>([]); // 이 화면에서 방금 처리한 알림 — 다시 불러와도 안 읽음 탭에 "…함 ✓"로 남김
-  // #110: 이 화면에서 읽음 처리한 알림은 흐리게 남겨 둔다(새로 고치거나 탭을 바꾸면 빠짐)
+  // #110: 이 화면에서 읽음 처리한 알림은 흐리게 남겨 둔다(탭을 바꾸면 빠짐). #242 2단계: 눌러서 다른 화면에 갔다 뒤로 와도 남김(이 창 동안, 같은 탭)
   const [readHere, setReadHere] = useState<string[]>([]);
   // #110: 길게 눌러(또는 [선택]) 여러 건 고르기
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
-  useEffect(() => { setReadHere([]); setSelecting(false); setPicked([]); }, [tab, space]);
+  const hereKey = `${tab}|${space ?? ''}`;
+  useEffect(() => {
+    let ids: string[] = [];
+    if (cameBack()) try { const r = JSON.parse(sessionStorage.getItem('wos_notif_here') ?? 'null'); if (r?.k === hereKey && Array.isArray(r.ids)) ids = r.ids; } catch { /* 무시 */ } // 뒤로가기로 돌아왔을 때만
+    setReadHere(ids); setSelecting(false); setPicked([]);
+  }, [hereKey]);
+  useEffect(() => { try { sessionStorage.setItem('wos_notif_here', JSON.stringify({ k: hereKey, ids: readHere })); } catch { /* 무시 */ } }, [readHere]); // eslint-disable-line react-hooks/exhaustive-deps
   // #104 ⑥ 종류별 묶음 접기(이 기기 기억)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   useEffect(() => { try { setCollapsed(JSON.parse(localStorage.getItem('notif-collapsed') ?? '{}')); } catch { /* 무시 */ } }, []);
@@ -81,7 +93,7 @@ export default function Notifications() {
   return (
     <div className="mx-auto max-w-3xl space-y-3">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold">알림 {data?.unread ? <span className="text-sm text-red-600">{data.unread}</span> : null}{space && <span className="ml-1 rounded-full bg-brand-50 px-2 text-xs font-normal text-brand-700" data-testid="notif-space-filter">{SPACE_CHIP[space]}만 <button type="button" className="underline" onClick={() => { setSpace(null); window.history.replaceState(null, '', '/notifications'); }}>해제</button></span>}</h1>
+        <h1 className="text-lg font-bold">알림 {data?.unread ? <span className="text-sm text-red-600">{data.unread}</span> : null}{space && <span className="ml-1 rounded-full bg-brand-50 px-2 text-xs font-normal text-brand-700" data-testid="notif-space-filter">{SPACE_CHIP[space]}만 <button type="button" className="underline" onClick={() => setSpaceQ('')}>해제</button></span>}</h1>
         <div className="flex gap-2"><Link href="/settings" className="text-sm text-brand-600 hover:underline">알림 설정</Link>
           {tab !== 'activity' && tab !== 'archived' && <Button size="sm" variant="secondary" onClick={() => { setSelecting((s) => !s); setPicked([]); }} data-testid="notif-select" aria-pressed={selecting}>{selecting ? '선택 끝' : '선택'}</Button>}
           <Button size="sm" variant="secondary" onClick={() => read()} disabled={!data?.unread} data-testid="read-all">모두 읽음</Button></div>

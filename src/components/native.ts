@@ -77,7 +77,7 @@ import { api } from './client';
 import { WN_ACTION_IDS, WN_SETS, wnCategory } from '@/lib/notifCategories';
 import { deepPath } from '@/lib/deepLink';
 
-type Router = { push: (href: string) => void };
+type Router = { push: (href: string) => void; replace: (href: string) => void };
 
 /** 앱(안드로이드·iOS) 안에서 실행될 때만 동작: 푸시 토큰 등록, 알림 탭 → 해당 화면 이동, 딥링크, 뒤로가기 */
 export async function initNative(router: Router) {
@@ -161,9 +161,10 @@ export async function initNative(router: Router) {
     if (closeTopSheet()) return;
     if (canGoBack && history.length > 1 && location.pathname !== '/') { history.back(); return; }
     // 점검 2026-10-16: 알림으로 처음 연 업무·일정 상세에서 뒤로 → 홈 대신 그 목록
-    if (/^\/tasks\/[^/]+/.test(location.pathname)) { router.push('/tasks'); return; }
-    if (/^\/messages\/./.test(location.pathname)) { router.push('/messages'); return; }
-    if (location.pathname !== '/') { router.push('/'); return; }
+    // #242 2단계: 바꿔 쓰기(replace) — 쌓으면 다음 뒤로가기가 방금 화면으로 돌아가 오가며 맴돎
+    if (/^\/tasks\/[^/]+/.test(location.pathname)) { router.replace('/tasks'); return; }
+    if (/^\/messages\/./.test(location.pathname)) { router.replace('/messages'); return; }
+    if (location.pathname !== '/') { router.replace('/'); return; }
     if (Date.now() - exitAt < 2000) { App.exitApp(); return; }
     exitAt = Date.now();
     const { toast } = await import('./ui');

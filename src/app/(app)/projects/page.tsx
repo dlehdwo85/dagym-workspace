@@ -7,23 +7,24 @@ import { api, useApi } from '@/components/client';
 import { useSession, canManage } from '@/components/session';
 import { Avatar, BrandDot, Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { BrandSelect, UnitSelect, UserSelect } from '@/components/pickers';
+import { useUrlState } from '@/components/urlState';
 
 export default function Projects() {
   const { user, dir } = useSession();
-  const [archived, setArchived] = useState(false);
+  const [arch, setArch] = useUrlState('archived', ''); const archived = arch === '1'; const setArchived = (v: boolean) => setArch(v ? '1' : ''); // #242 2단계: 보관함 보기는 주소(?archived=1)에 — 프로젝트를 열었다 뒤로 와도 보관함
   const { data, error, loading, reload } = useApi<{ projects: any[] }>(`/api/projects${archived ? '?archived=1' : ''}`);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<any>({});
   const sp = useSearchParams();
   const router = useRouter();
-  useEffect(() => { if (sp.get('new') === '1' && canManage(user.role)) { setF({ ownerId: user.id }); setOpen(true); router.replace('/projects'); } }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (sp.get('new') === '1' && canManage(user.role)) { setF({ ownerId: user.id }); setOpen(true); const p = new URLSearchParams(location.search); p.delete('new'); router.replace(`/projects${p.size ? `?${p}` : ''}`); } }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
   async function toggleFav(e: React.MouseEvent, p: any) {
     e.preventDefault(); e.stopPropagation();
     try { await api(`/api/projects/${p.id}/favorite`, { method: p.favorite ? 'DELETE' : 'PUT' }); reload(); window.dispatchEvent(new Event('wos-favorites')); } catch (er: any) { toast.error(er.message); }
   }
   async function create(e: React.FormEvent) {
     e.preventDefault();
-    try { const r = await api('/api/projects', { body: { ...f, orgUnitId: f.orgUnitId ?? dir.orgUnits[0]?.id } }); setOpen(false); location.href = `/projects/${r.id}`; } catch (er: any) { toast.error(er.message); }
+    try { const r = await api('/api/projects', { body: { ...f, orgUnitId: f.orgUnitId ?? dir.orgUnits[0]?.id } }); setOpen(false); router.push(`/projects/${r.id}`); } catch (er: any) { toast.error(er.message); }
   }
   return (
     <div className="space-y-4">

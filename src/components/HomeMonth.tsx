@@ -1,11 +1,12 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { CalendarRange, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useApi } from './client';
 import { Card, cx } from './ui';
 import { SPACE_META } from './spaceMeta';
+import { useUrlState } from './urlState';
 
 const seoulDay = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const hm = (d: Date | string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
@@ -28,8 +29,11 @@ const C = { event: '#0F766E', task: '#64748B', overdue: '#DC2626' };
  */
 export function HomeMonth({ today, className }: { today: string; className?: string }) {
   const router = useRouter();
-  const [month, setMonth] = useState(monthOf(today));
-  const [sel, setSel] = useState<string | null>(null);
+  // #242 2단계: 보던 달(?hm)·펼친 날(?hd)을 주소에 — 그날 업무·일정을 열었다 돌아와도 같은 달·같은 날 목록
+  const [month, setMonth] = useUrlState('hm', monthOf(today));
+  const [selDay, setSelDay] = useUrlState('hd', '');
+  const sel = selDay || null;
+  const setSel = (d: string | null) => setSelDay(d ?? '');
   const from = `${month}-01`, to = `${nextMonth(month)}-01`;
   const ev = useApi<{ events: any[] }>(`/api/events?from=${encodeURIComponent(`${from}T00:00:00+09:00`)}&to=${encodeURIComponent(`${to}T00:00:00+09:00`)}`, [month]);
   const tk = useApi<{ tasks: any[] }>(`/api/tasks?view=all&includeDone=1&from=${from}&to=${addDays(to, -1)}&limit=500`, [month]);

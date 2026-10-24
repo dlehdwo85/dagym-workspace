@@ -1,9 +1,11 @@
 'use client';
 import { useBackClose } from '@/components/backClose';
+import { replaceUrl, useUrlState } from '@/components/urlState';
+import { useSearchParams } from 'next/navigation';
 import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import { RevenueGoal } from '@/components/marketing/RevenueGoal';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Copy, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
 import type { SearchHint } from '@/lib/sales/sourceLink';
 import { api, useApi } from '@/components/client';
@@ -323,7 +325,7 @@ function TodoGroups({ todo, bids }: { todo: Record<string, any[]>; bids: boolean
 }
 /** S2-6 계약만료·재입찰(영업관리 2-6): 타 업체 계약 종료일 역산 — 영업 시작(−12/−9개월)·제안(−6)·재입찰(−3), 단계 5, 요약 4, 표 */
 export function Contracts() {
-  const [s, setS] = useState(''); const [stage, setStage] = useState('');
+  const [s, setS] = useUrlState('cq', ''); const [stage, setStage] = useUrlState('cs', ''); // #242 2단계: 검색어·단계는 주소에(허브 안에서도 겹치지 않게 cq·cs)
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'contracts', q: s })}`, [s]);
   if (error) return <ErrorBox error={error} retry={reload} />;
   const items: any[] = (data?.items ?? []).filter((x: any) => !stage || x.stage === stage);
@@ -540,7 +542,8 @@ function LeadEvents({ data }: { data: any }) {
 function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange?: () => void }) {
   useBackClose(true, onClose, ['id', id]); // #535: 휴대폰 뒤로가기 = 상세만 닫힘(주소 ?id= 로 새로 고침·공유해도 같은 상세)
   const { data, error, reload } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`);
-  const [tab, setTab] = useState('progress'); // 영업 재편 5): 진행 탭이 첫 화면
+  const [tab, setTab] = useUrlState('lt', 'progress'); // 영업 재편 5): 진행 탭이 첫 화면. #242 2단계: 탭은 주소(?lt=)에 — 업무·일정을 열었다 뒤로 와도 같은 탭
+  useEffect(() => () => { const p = new URLSearchParams(location.search); if (p.has('lt')) { p.delete('lt'); replaceUrl(`${location.pathname}${p.size ? `?${p}` : ''}`); } }, []); // 닫으면 탭 값은 지움
   const [del, setDel] = useState<string | null>(null);
   const [rv, setRv] = useState<string | null>(null); // 영업 재편 2) 되돌리기 사유
   async function revert() {
@@ -615,11 +618,14 @@ async function readCsvFile(file: File) {
 }
 const IMPORT_MAP: [RegExp, string][] = [[/거래처|회사|이름|^name$|company/i, 'name'], [/단계|상태|status|stage/i, 'status'], [/우선|priority/i, 'priority'], [/시설|유형|facility|type/i, 'facilityType'], [/지역|region|area/i, 'region'], [/규모|scale|size|세대/i, 'scale'],
   [/고객.?담당|담당자|contact.?name|manager/i, 'contactName'], [/연락처|전화|phone|tel/i, 'phone'], [/이메일|e-?mail/i, 'email'], [/홈페이지|website|url|homepage/i, 'homepage'], [/매출|금액|revenue|amount/i, 'expectedRevenue'], [/다음.?연락|next/i, 'nextContactDate'], [/메모|비고|memo|note/i, 'memo']];
-export function Leads({ initialId, initialDay, initialView }: { initialId?: string; initialDay?: string; initialView?: string }) {
-  const [s, setS] = useState(''); const [status, setStatus] = useState(''); const [open, setOpen] = useState<string | null>(initialId ?? null);
-  const [day, setDay] = useState(initialDay === 'today' ? 'today' : ''); // 영업 현황 '오늘 연락할 리드'
-  const [view, setView] = useState(initialView && LEAD_VIEWS.some(([k]) => k === initialView) ? initialView : 'table'); const [chips, setChips] = useState<string[]>([]); const [sort, setSort] = useState('activity');
-  const [fPri, setFPri] = useState(''); const [fOwner, setFOwner] = useState(''); const [fRegion, setFRegion] = useState('');
+export function Leads({ initialId, initialView }: { initialId?: string; initialDay?: string; initialView?: string }) { // initialDay 는 주소(?day)에서 직접 읽음
+  // #242 2단계: 검색어·단계·오늘·칩·정렬·우선·담당·지역은 주소에 — 리드에서 업무·일정을 열었다 뒤로 와도 같은 목록. ?id= 는 뒤로가기로 돌아온 상세(서버가 준 값이 없을 때)
+  const sp = useSearchParams();
+  const [s, setS] = useUrlState('q', ''); const [status, setStatus] = useUrlState('status', ''); const [open, setOpen] = useState<string | null>(initialId ?? sp.get('id'));
+  const [dayQ, setDay] = useUrlState('day', ''); const day = dayQ === 'today' ? 'today' : ''; // 영업 현황 '오늘 연락할 리드'
+  const [chipsQ, setChipsQ] = useUrlState('chips', ''); const chips = chipsQ ? chipsQ.split(',') : []; const setChips = (c: string[]) => setChipsQ(c.join(','));
+  const [view, setView] = useState(initialView && LEAD_VIEWS.some(([k]) => k === initialView) ? initialView : 'table'); const [sort, setSort] = useUrlState('sort', 'activity');
+  const [fPri, setFPri] = useUrlState('pri', ''); const [fOwner, setFOwner] = useUrlState('owner', ''); const [fRegion, setFRegion] = useUrlState('region', '');
   const [imp, setImp] = useState<{ rows: Record<string, unknown>[]; file: string; skipped: string[]; done?: { created: number; skipped: string[] } } | null>(null);
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, status, day })}`, [s, status, day]);
   useEffect(() => { if (initialView) return; try { const v = localStorage.getItem('sales-leads-view'); if (v && LEAD_VIEWS.some(([k]) => k === v)) setView(v); } catch { /* 없음 */ } }, [initialView]);
@@ -766,7 +772,7 @@ const STAGE_FALLBACK = ['신규리드', '1차연락완료', '미팅예정', '현
 export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
   const { data, error, reload } = useApi<any>('/api/sales/src?view=pipeline');
   const [open, setOpen] = useState<string | null>(null);
-  const [stage, setStage] = useState(''); // 앱 단계 칩
+  const [stage, setStage] = useUrlState('pst', ''); // 앱 단계 칩. #242 2단계: 주소(?pst=)에 — 리드를 열었다 뒤로 와도 같은 단계
   // 영업 재편 5) 단계 이동(칸반 카드 select): 보류·실패는 사유가 필요해 상세에서
   async function moveStage(id: string, st: string) {
     if (st === '보류' || st === '실패') { toast.error(`${st}(으)로 옮기려면 사유가 필요합니다 — 상세 '진행' 탭에서`); setOpen(id); return; }
@@ -806,7 +812,7 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
 const g = (r: any, ...keys: string[]) => { for (const k of keys) { const v = r?.[k]; if (v !== null && v !== undefined && v !== '') return v; } return null; };
 const pct = (v: number | null) => (v === null ? '-' : `${v}%`);
 function Deals() {
-  const [months, setMonths] = useState('6');
+  const [months, setMonths] = useUrlState('dm', '6'); // #242 2단계: 보던 기간은 주소(?dm=)에
   const { data, error, reload } = useApi<any>(`/api/sales/src?view=deals&status=${months}`, [months]);
   const [cost, setCost] = useState({ month: today().slice(0, 7), business: '', item: '', amount: '', memo: '' });
   async function addCost(e: React.FormEvent) {
@@ -857,10 +863,13 @@ export { Deals };
 
 /** embedded = 영업기회 허브 안 '입찰' 탭(#537 대표 10/24): 오늘 새 공고 · 마감 임박 · 진행 중만, 전체는 입찰·공고 화면으로 */
 export function Bids({ initialTab, initialId, embedded }: { initialTab?: string; initialId?: string; embedded?: boolean }) {
-  const [tab, setTab] = useState(initialTab ?? (embedded ? 'today' : 'open')); const [s, setS] = useState(''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useState('');
+  // #242 2단계: 탭·검색어·사업은 주소에(허브 안에서는 허브의 tab·q 와 겹치지 않게 bt·bq·bz) — 공고에서 업무·리드로 갔다 뒤로 와도 같은 목록
+  // 기본 탭은 고정(입찰·공고 화면은 주소 ?tab 이 곧 처음 값 — 같은 칸의 값을 기본으로 받으면 그 탭을 다시 고를 때 주소에서 빠져 새로 고침하면 다른 탭이 됨)
+  const sp = useSearchParams();
+  const [tab, setTab] = useUrlState(embedded ? 'bt' : 'tab', embedded ? (initialTab ?? 'today') : 'open'); const [s, setS] = useUrlState(embedded ? 'bq' : 'q', ''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useUrlState(embedded ? 'bz' : 'biz', '');
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'bids', tab, q: s, biz })}`, [tab, s, biz]);
-  // #510: 당일 공고 메일 제목(?id=) → 그 공고 상세를 바로 — 지금 탭 목록에 없어도 한 건 찾아서
-  const [deep, setDeep] = useState<string | null>(initialId ?? null);
+  // #510: 당일 공고 메일 제목(?id=) → 그 공고 상세를 바로 — 지금 탭 목록에 없어도 한 건 찾아서. #242 2단계: 허브 안·뒤로가기로 돌아온 상세도(?id=)
+  const [deep, setDeep] = useState<string | null>(initialId ?? sp.get('id'));
   const one = useApi<any>(deep ? `/api/sales/src?${q({ view: 'bids', tab: 'all', q: deep })}` : null, [deep]);
   useEffect(() => { if (!deep || !one.data) return; const n = one.data.items?.find((x: any) => String(x.id) === deep); if (n) setOpen(n); else toast.info('이 공고는 지금 관련 공고 목록에 없습니다 — 메일의 [원문]으로 확인해 주세요'); setDeep(null); }, [deep, one.data]);
   const [sel, setSel] = useState<string[]>([]); // 대표 10/20 14:15 ④ 일괄 선택
@@ -912,16 +921,21 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
   );
 }
 
-export function Hub({ initialTab, initialDay, initialSub }: { initialTab?: string; initialDay?: string; initialSub?: string }) {
+export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; initialSub?: string }) { // initialTab·initialDay 는 주소(?tab·?day)에서 직접 읽음
   // 대표 10/21 12:00 영업 재편 3): 허브 = 모든 기회 원천의 입구 — 신규 현장·준공 시설·협력사 + 계약만료·재입찰·공공데이터·지역별 카테고리
   const sess = useSession(); const bidsOn = sess.features.salesBids !== false;
   // #537(대표 10/24): 영업기회 안 '입찰' 탭(켠 회사만) — 앱 하단 '영업기회'가 여기로(?tab=bids)
-  const [tab, setTab] = useState(['buildings', 'facilities', 'vendors', 'contracts', 'prospects', 'regions', ...(bidsOn ? ['bids'] : [])].includes(initialTab ?? '') ? initialTab! : 'buildings'); const [s, setS] = useState(''); const [detail, setDetail] = useState<any>(null);
-  const [day, setDay] = useState(initialDay === 'today' ? 'today' : ''); // 영업 현황 '오늘 새 영업 DB'
+  // #242 2단계: 탭·검색어·오늘만은 주소에, 상세는 ?id= — 상세에서 리드·업무로 갔다 뒤로 와도 같은 탭·같은 상세
+  const sp = useSearchParams();
+  const [tabQ, setTab] = useUrlState('tab', 'buildings'); const tab = ['buildings', 'facilities', 'vendors', 'contracts', 'prospects', 'regions', ...(bidsOn ? ['bids'] : [])].includes(tabQ) ? tabQ : 'buildings';
+  const [s, setS] = useUrlState('q', ''); const [detail, setDetail] = useState<any>(null);
+  const [dayQ, setDay] = useUrlState('day', ''); const day = dayQ === 'today' ? 'today' : ''; // 영업 현황 '오늘 새 영업 DB'
   const sub = ['bids', 'contracts', 'prospects', 'regions'].includes(tab);
   const { data, error, reload } = useApi<any>(sub ? (null as unknown as string) : `/api/sales/src?${q({ view: 'hub', tab, q: s, day })}`, [tab, s, day]);
   const [sel, setSel] = useState<string[]>([]); // 대표 10/20 14:15 ④ 일괄 선택
   useEffect(() => setSel([]), [tab]);
+  const reopen = useRef(sub ? null : sp.get('id')); // 주소 ?id= 상세(새로 고침·뒤로가기) — 목록을 불러온 뒤 그 줄로
+  useEffect(() => { if (!reopen.current || !data?.items) return; const r = data.items.find((x: any) => String(x.id) === reopen.current); reopen.current = null; if (r) setDetail({ tab, r }); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   const T = useSalesTerms(); // #408
   const tabs = [...(bidsOn ? [['bids', '입찰']] : []), ['buildings', T.buildingsTab], ['facilities', T.facilitiesTab], ['vendors', T.vendorsTab], ...(bidsOn ? [['contracts', '계약만료·재입찰']] : []), ['prospects', '공공데이터'], ['regions', '지역별']];
   if (sub) return (
@@ -945,6 +959,7 @@ export function Hub({ initialTab, initialDay, initialSub }: { initialTab?: strin
 }
 /** 대표 검수 10/20 ②: 허브 상세 — 원본 키 덤프 대신 한국어 칸(값 없는 칸은 '미확인'), 관리자 '원본 보기' 접힘 */
 function HubDetail({ tab, r, admin, canWrite, onChange, onClose }: { tab: string; r: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
+  useBackClose(true, onClose, ['id', String(r.id)]); // #242 2단계: 뒤로가기 = 상세만 닫힘(허브 그대로), 주소 ?id= 로 새로 고침·뒤로가기에도 같은 상세
   const T = useSalesTerms(); // #408 칸 이름은 회사 업종 템플릿
   const rows: [string, React.ReactNode][] = tab === 'buildings'
     ? [[T.unitName, r.name], ['상태', r.status], ['유형', r.kind], ['우선순위', r.priority], ['지역', r.region], ['주소', r.address], ...(r.dates ?? []).map(([k, v]: [string, unknown]) => [k, k === '세대수' ? (D(v) ? `${D(v)}세대` : UNK) : (D(v) ? kd(D(v)) : UNK)] as [string, React.ReactNode]), ['DB 등록', r.firstSeen && kd(r.firstSeen)], ['비고', r.estimated && '날짜는 시점 추정치'],

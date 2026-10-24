@@ -4,6 +4,7 @@ import { MediaThumb } from '@/components/MediaView';
 import Link from 'next/link';
 import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useUrlState } from '@/components/urlState';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { useBackClose } from '@/components/backClose';
@@ -295,7 +296,7 @@ export function Approvals() {
   const [open, setOpen] = useState<string | null>(sp.get('c'));
   const [nw, setNw] = useState(sp.get('new') === '1'); // 앱 더보기 › 만들기 › 새 콘텐츠
   const day = sp.get('day') ?? ''; // 현황 '오늘' 카드: produced·soon·today·published
-  const [tab, setTab] = useState(() => (INBOX_TABS.some(([k]) => k === sp.get('tab')) ? String(sp.get('tab')) : 'contents'));
+  const [tabQ, setTab] = useUrlState('tab', 'contents'); const tab = INBOX_TABS.some(([k]) => k === tabQ) ? tabQ : 'contents'; // #242 2단계: 종류 탭은 주소에 — 승인함에서 다른 화면에 갔다 와도 같은 탭
   const DAY_LABEL: Record<string, string> = { produced: '오늘 제작된 시안', soon: '오늘 승인할 것(내일까지 게시 예정)', today: '오늘 게시 예정', published: '오늘 게시됨' };
   const { data, error, reload } = useApi<{ contents: Content[] }>(`/api/marketing/contents?view=approvals${DAY_LABEL[day] ? `&day=${day}` : ''}`);
   const inbox = useApi<Inbox>('/api/marketing/inbox');
@@ -494,10 +495,12 @@ export function ContentCalendar() {
   const today = ymdK(new Date());
   const [view, setView] = useState<'week' | 'month'>(() => { try { return localStorage.getItem('mkt-cal-view') === 'month' ? 'month' : 'week'; } catch { return 'week'; } });
   const [axis, setAxis] = useState<'brand' | 'channel'>(() => { try { return localStorage.getItem('mkt-cal-axis') === 'channel' ? 'channel' : 'brand'; } catch { return 'brand'; } });
-  const [anchor, setAnchor] = useState(today); // 주 보기 기준 날짜
-  const [month, setMonth] = useState(today.slice(0, 7));
-  const [brand, setBrand] = useState('');
-  const [open, setOpen] = useState<string | null>(null); const [nw, setNw] = useState<string | null>(null);
+  // #242 2단계: 보던 주(?w)·달(?m)·브랜드(?brand)는 주소에, 연 상세는 ?c= — 상세에서 연결 계정·업무로 갔다 뒤로 와도 같은 주·같은 상세
+  const sp = useSearchParams();
+  const [anchor, setAnchor] = useUrlState('w', today); // 주 보기 기준 날짜
+  const [month, setMonth] = useUrlState('m', today.slice(0, 7));
+  const [brand, setBrand] = useUrlState('brand', '');
+  const [open, setOpen] = useState<string | null>(sp.get('c')); const [nw, setNw] = useState<string | null>(null);
   const [moving, setMoving] = useState<{ id: string; date: string; time: string } | null>(null); const [dragOver, setDragOver] = useState<string | null>(null);
   useEffect(() => { try { localStorage.setItem('mkt-cal-view', view); localStorage.setItem('mkt-cal-axis', axis); } catch { /* 저장 못 해도 됨 */ } }, [view, axis]);
   const [y, m] = month.split('-').map(Number);

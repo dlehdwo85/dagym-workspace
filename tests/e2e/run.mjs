@@ -75,6 +75,7 @@ import { mktVideo } from './mktVideo.step.mjs';
 import { coAssign } from './coAssign.step.mjs';
 import { aiBudget } from './aiBudget.step.mjs';
 import { listKeep } from './listKeep.step.mjs';
+import { backKeep } from './backKeep.step.mjs';
 import { attachLibrary } from './attachLibrary.step.mjs';
 import { inbox } from './inbox.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
@@ -2810,6 +2811,8 @@ await step('#509·#510 당일 공고 메일: 데이터 설정 받는 주소 직�
 await step('#192·#194 앱 1.1.3 웹 몫: 위젯 [+]·딥링크 /tasks?new=1 → 업무 등록 창(new 지움·새로고침에 다시 안 열림·같은 화면에서도 열림) · 브라우저에는 전체화면 알람 안내 없음', () => app113({ owner, BASE }));
 
 await step('#242 대표 10/24 업무 목록 거르기 유지: 내 업무·검색어·스크롤 → 업무 열기(패널) → 닫기 단추·Esc·뒤로가기 = 같은 목록·같은 위치(주소에 view·q, 새로 고침도) · 전체 화면 [닫기] = 직전 화면 · 링크로 연 상세 [닫기] = 업무 목록 · 휴대폰 390', () => listKeep({ owner, ctx, BASE, SHOTS }));
+
+await step('#242 2단계 다른 화면 돌아오기: 알림 탭·위치·방금 읽은 줄 · 홈 월 캘린더 달·날 · 프로젝트 보관함 · 영업 리드 정렬·우선·칩 · 허브 탭 · 마케팅 콘텐츠 캘린더 주 — 다른 화면에 갔다 뒤로가기 = 그대로', () => backKeep({ owner, ctx, sql, BASE }));
 
 await browser.close();
 srv.proc.kill();

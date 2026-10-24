@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, AtSign, Headphones, Mic, Pencil, Bell, BellOff, Camera, Image as ImageIcon, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
+import { cameBack } from '@/components/urlState';
 import { DropZone, UploadProgress, putFile } from '@/components/upload';
 import { Avatar, Button, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { QuickAddTask } from '@/components/QuickAddTask';
@@ -238,15 +239,21 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const edge = useRef<{ first?: string; last?: string; height: number; top: number }>({ height: 0, top: 0 });
   const [unseen, setUnseen] = useState(0);
   const toBottom = useCallback(() => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; atBottom.current = true; setUnseen(0); }, []);
+  // #242 2단계: 대화에서 업무·링크를 열었다 뒤로가기로 오면 보던 자리로(맨 아래가 아니었을 때만, 이 창 동안) — 예전엔 늘 맨 아래로
+  const posKey = `wos_chat_pos:${id}`; const fromBottom = useRef(0); const back = useRef(cameBack());
+  useEffect(() => () => { try { if (atBottom.current) sessionStorage.removeItem(posKey); else sessionStorage.setItem(posKey, String(Math.round(fromBottom.current))); } catch { /* 저장 못 해도 됨 */ } }, [posKey]);
   const onScroll = () => {
     const el = listRef.current; if (!el) return;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    fromBottom.current = el.scrollHeight - el.scrollTop;
     if (atBottom.current) setUnseen(0);
   };
   useLayoutEffect(() => {
     const el = listRef.current; if (!el || !msgs.length) return;
     const first = msgs[0].id, last = msgs[msgs.length - 1].id, prev = edge.current;
-    if (!prev.last) toBottom(); // 처음 열 때
+    let saved = 0; if (!prev.last && back.current) try { saved = Number(sessionStorage.getItem(posKey)) || 0; } catch { /* 없음 */ }
+    if (!prev.last && saved > el.clientHeight) { el.scrollTop = Math.max(0, el.scrollHeight - saved); atBottom.current = false; fromBottom.current = saved; } // 뒤로가기로 돌아옴 → 보던 자리
+    else if (!prev.last) toBottom(); // 처음 열 때
     else if (first !== prev.first && last === prev.last) el.scrollTop = prev.top + (el.scrollHeight - prev.height); // 이전 메시지 불러옴 → 보던 자리 유지
     else if (last !== prev.last) {
       const added = msgs.filter((m) => BigInt(m.id) > BigInt(prev.last!));
@@ -254,7 +261,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
       else setUnseen((n) => n + added.filter((m) => !m.mine).length);
     }
     edge.current = { first, last, height: el.scrollHeight, top: el.scrollTop };
-  }, [msgs, toBottom]);
+  }, [msgs, toBottom, posKey]);
   // 사진이 늦게 뜨거나 키보드가 열려 칸 높이가 바뀌어도 맨 아래를 보던 중이면 맨 아래 유지
   useEffect(() => {
     const keep = () => { if (atBottom.current) { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; } };

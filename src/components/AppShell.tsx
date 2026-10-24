@@ -30,6 +30,7 @@ import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './cl
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
 import { clearReminders, enableNativePush, initNative, refreshWidget } from './native';
+import { restoreScroll, useSheetBack } from './backClose';
 import { QuickAddTask } from './QuickAddTask';
 import { CommandPalette } from './CommandPalette';
 import { VoiceAddTask } from './VoiceAddTask';
@@ -75,6 +76,16 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const [aiDock, setAiDock] = useState(false); // V14 11번 모든 화면 AI 비서
   // #429 '← 이전 화면': 앱 안에서 화면을 옮겨 다닌 횟수(처음 연 화면 = 1) — 1이면 뒤로 갈 앱 화면이 없으니 정해 둔 화면으로
   useEffect(() => { const w = window as any; w.__wosNav = (w.__wosNav ?? 0) + 1; }, [path]);
+  // #242 2단계: 다른 화면에 갔다 뒤로가기로 돌아오면 보던 위치로 — 누르는 순간(다른 화면으로 가기 직전) 위치를 주소별로 적어 두고, 뒤로·앞으로 가기 때 그 주소의 위치로.
+  // 대화방(자기 위치 기억)·캘린더(주소 y·st 로 복원)는 각자 처리
+  useEffect(() => {
+    const at = new Map<string, number>(); const key = () => location.pathname + location.search;
+    const save = () => { at.set(key(), window.scrollY); };
+    const onPop = () => { if (!/^\/(messages|calendar)(\/|$)/.test(location.pathname)) restoreScroll(at.get(key()) ?? 0); };
+    document.addEventListener('click', save, true);
+    window.addEventListener('popstate', onPop);
+    return () => { document.removeEventListener('click', save, true); window.removeEventListener('popstate', onPop); };
+  }, []);
   // 메시지 화면을 오가면 메시지 배지를 바로 새로
   useEffect(() => { api('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}); }, [path]);
   const [online, setOnline] = useState(true);
@@ -112,6 +123,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   useEffect(() => { const h = document.documentElement; h.dataset.space = space; return () => { delete h.dataset.space; }; }, [space]);
   const [spaceMenu, setSpaceMenu] = useState(false);
   const [spaceSheet, setSpaceSheet] = useState(false); // 휴대폰 머리줄 로고·공간 이름 → 공간 전환 시트
+  useSheetBack(spaceSheet, () => setSpaceSheet(false)); // #242 2단계: 앱 뒤로 버튼 = 시트만 닫힘(화면 그대로)
+  useSheetBack(more, () => setMore(false));
   const v3 = session.features.sidebar3 !== false; // ⑦ 사이드바 3구역(대표 승인 10/20 오후). FEATURE_SIDEBAR3=0 → 예전 모양
   const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number }> }>(spaces.length > 1 && (v3 || spaceMenu || more || spaceSheet || space === 'marketing') ? '/api/spaces' : null, [space]);
   const goSpace = (sp: SpaceKey) => { setSpaceMenu(false); try { localStorage.setItem('wos_space', sp); } catch {} router.push(SPACE_META[sp].home); };
