@@ -97,10 +97,11 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
-      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note,
+      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, v.revision, -- #545 수정본 배지(반영한 요청·AI 수정 n/3)
       (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality, c.rationale,
       (select json_build_object('kind', p.kind, 'status', p.status) from mkt_production_requests p where p.content_id = c.id and p.kind in ('image', 'video', 'regen_image', 'regen_video') and p.status in ('open', 'needs_approval') order by p.created_at desc limit 1) as production,
       (select max(d.version) from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version) as reapprove_from,
+      (select d.comment from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version order by d.decided_at desc limit 1) as reapprove_comment,
       (select json_build_object('decision', d.decision, 'comment', d.comment, 'at', d.decided_at, 'version', d.version, 'by', du.name) from mkt_decisions d left join users du on du.id = d.decided_by
         where d.content_id = c.id order by d.decided_at desc limit 1) as last_decision
     from mkt_contents c left join mkt_brands b on b.id = c.brand_id
@@ -150,7 +151,7 @@ export async function getContent(u: SessionUser, id: string) {
   const sql = db();
   const [c] = await sql<any[]>`select c.*, b.name as brand, b.voice as brand_voice, b.color as brand_color, b.video->>'logoFileId' as brand_logo from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`; // #497 R06 미리보기 프로필(브랜드 키트 로고·색)
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
-  const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
+  const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.revision, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
   // 로컬 10/21 02:10: media 는 버전의 media_ids 순서(표지 → 영상)로
   const media = ids.length ? await sql`select id, title, file_name, mime_type from library_files where id = any(${ids}::uuid[]) and tenant = ${tenantOf(u)} and deleted_at is null order by array_position(${ids}::uuid[], id)` : [];
@@ -265,9 +266,9 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
     await audit(tx as never, u.id, 'mkt.decide', 'mkt_content', id, { version: i.version, decision: i.decision }, ip);
     return { status };
   });
-  // V41 4-3/V43 5: 자동 제작 콘텐츠의 수정 요청 = 분류 → 글자·배치는 AI 가 새 버전, 재생성은 제작 요청 카드(한도 확인)
+  // V41 4-3/V43 5 → #545(+#534): 자동 제작 콘텐츠의 수정 요청 = AI 가 글·시안을 함께 고친 수정본(3번까지)을 승인함에 다시 · 서버가 못 그리는 시안은 제작 요청 카드(한도 확인) · 사유는 디자인 담당 기억
   if (i.decision === 'changes' && i.comment) {
-    const r = await (await import('./mktAuto')).onChangesRequested(id, i.comment).catch((e) => ({ error: String(e?.message ?? e).slice(0, 200) }));
+    const r = await (await import('./mktAuto')).onChangesRequested(id, i.comment, { id: u.id, name: u.name }).catch((e) => ({ error: String(e?.message ?? e).slice(0, 200) }));
     if (r) return { ...res, revision: r };
   }
   return res;

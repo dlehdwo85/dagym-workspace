@@ -14,6 +14,12 @@ export async function mktStudio({ owner, ctx, BASE, SHOTS }) {
   await card.getByTestId('studio-prompt').waitFor();
   assert.match(await card.getByTestId('studio-prompt-en').innerText(), /E2E 겨울 시즌권 출시 안내/);
   assert.equal(await card.getByTestId('studio-status').innerText(), '프롬프트 준비');
+  // #534 프롬프트 검사: 필수 칸 8개 ✓/✗ · 빠진 칸은 기본값으로 보강(가짜 AI = 기본 프롬프트) — 참고 사진은 자료실 사정에 따라
+  const ck = card.getByTestId('studio-prompt-check');
+  assert.match(await ck.getByTestId('studio-prompt-score').innerText(), /^프롬프트 검사 (88|100)점$/);
+  assert.match(await ck.getByTestId('studio-prompt-fixed').innerText(), /^처음 \d+점 → 빠진 칸 .*구도.* (AI 가 쓴 칸으로|기본값으로) 보강$/);
+  assert.equal(await ck.getByTestId('studio-prompt-item').count(), 8);
+  assert.match(await card.getByTestId('studio-prompt-en').innerText(), /keep the bottom 24% of the frame clean/);
   await owner.screenshot({ path: `${SHOTS}/166-studio.png`, fullPage: true });
   await card.getByTestId('studio-edit-open').click();
   await card.getByTestId('studio-edit-prompt').fill('A photorealistic vertical photo, winter morning, community center entrance, soft daylight, copy space, 9:16');

@@ -10,7 +10,8 @@ import { useBackClose } from '@/components/backClose';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
-import { ApprovalCard, BrandChip, needsVisual, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, WhyBox } from './ApprovalCard';
+import { ApprovalCard, BrandChip, decideMessage, needsVisual, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, type DecideRevision, WhyBox } from './ApprovalCard';
+import { VersionCompare } from './VersionCompare';
 import { ProposalCard, BudgetCard } from './Ops';
 import { GoalCard, type Goal } from './Goals';
 import { MetaDraftCard, type MetaPlanRow } from './MetaAuto';
@@ -148,7 +149,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   const { data, error, reload } = useApi<any>(`/api/marketing/contents/${id}`);
   const [comment, setComment] = useState(''); const [ver, setVer] = useState<{ body: string; media: { id: string; title: string }[]; note: string } | null>(null); const [url, setUrl] = useState(''); const [pubBusy, setPubBusy] = useState(false);
   const [picked, setPicked] = useState<Record<string, boolean>>({}); const [fixOpen, setFixOpen] = useState(false); const [fixBrand, setFixBrand] = useState(''); const [fixAt, setFixAt] = useState('');
-  const [qBusy, setQBusy] = useState(false);
+  const [qBusy, setQBusy] = useState(false); const [acting, setActing] = useState(false); const [cmp, setCmp] = useState(false);
   const brandsQ = useApi<{ brands: { id: string; name: string }[] }>(fixOpen ? '/api/marketing/brands' : null, [fixOpen]);
   // #535(대표 10/24 08:05 '승인 대기 상세 → 뒤로가기 → 마케팅 홈'): 열 때 ?c=<id> 를 방문 기록에 남김 — 뒤로가기(휴대폰·앱 버튼)는 이 창만 닫고 승인함·캘린더(탭·필터·스크롤)는 그대로
   useBackClose(true, onClose, ['c', id]);
@@ -162,7 +163,9 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
     try { await api(`/api/marketing/contents/${id}`, { method: 'PATCH', body }); toast.ok(body.mode ? `${MODE_LABEL[body.mode]} 기준으로 다시 채점했습니다` : '바로잡았습니다'); setFixOpen(false); reload(); onChange(); } catch (e: any) { toast.error(e.message); }
   }
   async function act(decision: 'approve' | 'changes' | 'hold') {
-    try { await api(`/api/marketing/contents/${id}/decide`, { body: { version: c.current_version, decision, comment: comment || undefined } }); toast.ok({ approve: '승인했습니다', changes: '수정을 요청했습니다', hold: '보류했습니다' }[decision]); setComment(''); reload(); onChange(); } catch (e: any) { toast.error(e.message); reload(); }
+    setActing(true);
+    try { const r = await api<{ revision?: DecideRevision }>(`/api/marketing/contents/${id}/decide`, { body: { version: c.current_version, decision, comment: comment || undefined } }); toast.ok(decideMessage(decision, r.revision)); setComment(''); reload(); onChange(); } catch (e: any) { toast.error(e.message); reload(); }
+    finally { setActing(false); }
   }
   async function newVersion() {
     try { await api(`/api/marketing/contents/${id}/versions`, { body: { body: ver!.body, mediaIds: ver!.media.map((m) => m.id), note: ver!.note || undefined } }); toast.ok('수정본을 올렸습니다 — 다시 승인 대기'); setVer(null); reload(); onChange(); } catch (e: any) { toast.error(e.message); }
@@ -224,10 +227,15 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div></div>
+        {/* #545: 수정본이면 이전 버전과 나란히(시안·글, 바뀐 줄 표시) — 열 때만 불러옴 */}
+        {data.versions.length > 1 && <div data-testid="mkt-detail-compare">
+          <button type="button" onClick={() => setCmp(!cmp)} className="text-xs font-medium text-violet-700 underline" aria-expanded={cmp} data-testid="mkt-detail-compare-toggle">{cmp ? '비교 접기' : `이전 버전(v${v.revision?.from ?? data.versions[1].version})과 나란히 비교`}{v.revision?.request ? ` — 반영한 요청: ${v.revision.request}` : ''}</button>
+          {cmp && <VersionCompare id={id} from={v.revision?.from ?? data.versions[1].version} to={v.version} />}</div>}
         {data.canDecide && !['published', 'canceled'].includes(c.status) && (
           <div className="space-y-2 rounded-input border border-violet-200 p-3" data-testid="mkt-decide">
             <input className={inputCls} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="수정 요청·보류는 이유를 적어 주세요" aria-label="결정 메모" />
-            <div className="flex flex-wrap gap-2"><Button onClick={() => act('approve')} data-testid="mkt-approve">승인</Button><Button variant="secondary" onClick={() => act('changes')} data-testid="mkt-changes">수정 요청</Button><Button variant="secondary" onClick={() => act('hold')} data-testid="mkt-hold">보류</Button></div>
+            <div className="flex flex-wrap gap-2"><Button onClick={() => act('approve')} disabled={acting} data-testid="mkt-approve">승인</Button><Button variant="secondary" onClick={() => act('changes')} disabled={acting} data-testid="mkt-changes">{acting ? 'AI 가 고치는 중…' : '수정 요청'}</Button><Button variant="secondary" onClick={() => act('hold')} disabled={acting} data-testid="mkt-hold">보류</Button></div>
+            {c.auto && <p className="text-[11px] text-ink-3">자동 제작 글은 수정 요청을 적으면 AI 가 글과 시안을 함께 고친 수정본을 바로 다시 올립니다(3번까지, 크레딧 0 — AI 이미지·영상 다시는 제작 요청 카드).</p>}
           </div>
         )}
         {data.canDecide && !['published', 'canceled'].includes(c.status) && (

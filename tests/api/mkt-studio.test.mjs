@@ -25,6 +25,14 @@ test('의뢰(직원도) → AI 프롬프트(영문·한글 요약·자막·참�
   P.brief = r.id;
   assert.equal(r.prompt.source, 'ai'); assert.match(r.prompt.promptEn, /golden hour/); assert.equal(r.prompt.caption, '가을, 가까운 곳에서 시작하세요'); assert.deepEqual(r.prompt.refMediaIds, [img], '모르는 id 는 버림');
   assert.equal(r.prompt.aspect, '4:5'); assert.equal(r.prompt.model, 'higgsfield-ai/soul/v2/standard'); assert.equal(r.prompt.estCredits, 13, '6.5 × 2');
+  // #534 프롬프트 검사: AI 초안에 빠진 필수 칸(장면·한국인·카메라·구도·소품·금지)은 기본값으로 보강 → 100점
+  const ck = r.prompt.check;
+  assert.deepEqual([ck.score, ck.items.length, ck.by], [100, 8, 'default']); assert.ok(ck.before < 50, `처음 ${ck.before}점`);
+  for (const k of ['scene', 'korean', 'camera', 'composition', 'props', 'negative']) assert.ok(ck.fixed.includes(k), `보강: ${k}`);
+  assert.match(r.prompt.promptEn, /^A photorealistic photo of a bright apartment community gym at golden hour/);
+  assert.match(r.prompt.promptEn, /\nComposition: 4:5 \(1080×1350\); keep the bottom 24% of the frame clean/);
+  assert.match(r.prompt.promptEn, /\nCamera: 35mm lens, eye-level, static on a tripod\./);
+  assert.match(r.prompt.negativeEn, /^uncanny faces, watermark, .*foreign-language signage, distorted hands/);
   const sent = JSON.stringify(fake.state.anthropic.at(-1)?.body ?? {});
   assert.ok(sent.includes('경력 30년') && sent.includes('1080×1350') && sent.includes('최저가') && sent.includes('example.com/ref'), '역할·규격·금지어·레퍼런스가 프롬프트 재료에');
   const l = await ctx.staffA.client.ok('GET', '/api/marketing/studio');
@@ -35,7 +43,30 @@ test('의뢰(직원도) → AI 프롬프트(영문·한글 요약·자막·참�
   assert.equal((await ctx.staffA.client.req('PATCH', `/api/marketing/studio/${r.id}`, { action: 'generate' })).status, 403, '생성은 관리자');
   await ctx.staffA.client.ok('PATCH', `/api/marketing/studio/${r.id}`, { action: 'update', promptEn: 'A photorealistic photo, warm morning light, Korean apartment community gym, 4:5', caption: '가을 PT 30% — 10월 말까지' });
   const b2 = (await ctx.owner.ok('GET', '/api/marketing/studio')).briefs.find((x) => x.id === r.id);
-  assert.deepEqual([b2.prompt.source, b2.prompt.caption, b2.prompt.negativeEn], ['user', '가을 PT 30% — 10월 말까지', 'uncanny faces, watermark'], '고친 칸만 바뀜');
+  assert.deepEqual([b2.prompt.source, b2.prompt.caption], ['user', '가을 PT 30% — 10월 말까지'], '고친 칸만 바뀜');
+  // #534 사람이 고친 프롬프트도 다시 검사 — 빠진 필수 칸은 끝에 보강(사람이 쓴 앞부분은 그대로)
+  assert.ok(b2.prompt.promptEn.startsWith('A photorealistic photo, warm morning light, Korean apartment community gym, 4:5\n\n'), b2.prompt.promptEn);
+  assert.match(b2.prompt.promptEn, /bottom 24%/); assert.equal(b2.prompt.check.score, 100);
+  assert.match(b2.prompt.negativeEn, /^uncanny faces, watermark, /);
+});
+test('#534 프롬프트 검사: AI 가 쓴 필수 칸(fields)으로 빠진 칸 보강 · 고른 참고 사진이 없으면 자료실 사진 연결 · 지난 수정 요청(디자인 담당 기억)을 재료로', async () => {
+  await sql`insert into mkt_team_memory (tenant, role, kind, text) values ('default', 'designer', 'edit', '사진이 너무 어두움 — 밝게')`;
+  const F = { who: 'a Korean woman in her 40s in a navy cardigan', where: 'a bright apartment community lounge in Seoul', action: 'checking the class timetable on the wall', emotion: 'from unsure to relieved',
+    lens: '50mm', angle: 'eye-level', movement: 'static', light: 'soft morning window light', props: ['timetable board', 'water bottle'] };
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ promptEn: 'A calm photo of a community lounge, warm tones, 9:16', negativeEn: 'blur', summaryKo: '오전 수업 안내', caption: '오전 GX 자리 남았어요', refMediaIds: [], fields: F })] });
+  const r = await ctx.owner.ok('POST', '/api/marketing/studio', { brandId: P.brand, kind: 'story', purpose: 'awareness', message: '오전 GX 수업 안내', quantity: 1 });
+  const ck = r.prompt.check;
+  assert.deepEqual([ck.score, ck.by], [100, 'ai']); assert.ok(ck.before <= 25, `처음 ${ck.before}점`);
+  assert.match(r.prompt.promptEn, /\nScene: a Korean woman in her 40s in a navy cardigan at a bright apartment community lounge in Seoul, checking the class timetable on the wall; small emotional change: from unsure to relieved\./);
+  assert.match(r.prompt.promptEn, /\nCamera: 50mm lens, eye-level, static\./);
+  assert.match(r.prompt.promptEn, /\nLight: soft morning window light/);
+  assert.match(r.prompt.promptEn, /\nComposition: 9:16 \(1080×1920\); keep the bottom 24%/);
+  assert.match(r.prompt.promptEn, /\nProps: timetable board, water bottle\./);
+  assert.deepEqual(r.prompt.fields, F);
+  assert.equal(r.prompt.refMediaIds.length, 1, '고른 참고 사진이 없으면 자료실 사진 1장 연결'); assert.ok(ck.items.find((i) => i.key === 'refs').ok);
+  const sent = JSON.stringify(fake.state.anthropic.at(-1)?.body ?? {});
+  assert.ok(sent.includes('사진이 너무 어두움') && sent.includes('"fields"') && sent.includes('아래 24%') && sent.includes(img), '디자인 담당 기억·필수 칸 지시·자료실 후보 사진이 AI 재료에');
+  await ctx.owner.ok('PATCH', `/api/marketing/studio/${r.id}`, { action: 'cancel' });
 });
 test('[생성](연동 전) → 콘텐츠 초안(자막·근거 포함) + 제작 요청 카드 2건(프롬프트·참고 사진 링크·자막·brief_id) → 카드 [제작 완료] → 새 버전·승인 대기·의뢰 review', async () => {
   const g = await ctx.owner.ok('PATCH', `/api/marketing/studio/${P.brief}`, { action: 'generate' });

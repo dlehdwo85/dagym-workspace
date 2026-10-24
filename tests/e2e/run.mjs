@@ -66,6 +66,7 @@ import { mktTeam } from './mktTeam.step.mjs';
 import { mktPreview } from './mktPreview.step.mjs';
 import { aiStream } from './aiStream.step.mjs';
 import { mktVisual } from './mktVisual.step.mjs';
+import { mktRevision } from './mktRevision.step.mjs';
 import { collectorAlerts } from './collectorAlerts.step.mjs';
 import { backClose } from './backClose.step.mjs';
 import { supportPrograms } from './support.step.mjs';
@@ -95,7 +96,7 @@ mkdirSync(SHOTS, { recursive: true });
 mkdirSync('test-results', { recursive: true });
 const results = [];
 async function step(name, fn) {
-  if (process.env.E2E_ONLY && !name.includes(process.env.E2E_ONLY)) return; // 개발 중 한 단계만(앞 단계에 기대지 않는 단계)
+  if (process.env.E2E_ONLY && !process.env.E2E_ONLY.split('||').some((x) => name.includes(x))) return; // 개발 중 한 단계만(앞 단계에 기대지 않는 단계) — 'A||B' 면 여러 단계
   const t0 = Date.now();
   try { await fn(); results.push({ name, ok: true, ms: Date.now() - t0 }); console.log('✔', name); }
   catch (e) {
@@ -2508,6 +2509,7 @@ await step('#499-7 AI 마케팅팀: 사이드바 → 역할 7개(기획 담당 �
 await step('#497 R06 채널별 실제 게시 화면 미리보기: 인스타 피드(3장 옆으로 넘기기·n/N·점·2번째 장 보임·더 보기·해시태그·계정 이름) · 승인함 카드 [게시 화면으로 보기] · 페이스북(글 위·사진 격자) · 릴스(세로·오른쪽 아이콘·팔로우) · 스레드 · 블로그(문단 사이 사진) · 유튜브 · 휴대폰 손가락 넘기기', () => mktPreview({ owner, ctx, sql, BASE, SHOTS }));
 await step('#497 R44 AI 비서 답 실시간 출력: 쓰는 중 말풍선(글이 이어서·[멈춤]) → 끝나면 서식(제목·굵게·목록·표·링크) · 도구 단계 한 줄 · 패널 같음 · 휴대폰 표 넘침 없음', () => aiStream({ browser, desk, owner, BASE, FAKE, SHOTS }));
 await step('#516 승인함 시안 없음: 승인할 시안 수에서 빼고 빨간 묶음·빨간 띠·[승인] 없음 → [지금 만들기](서버 그리기·크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧]', () => mktVisual({ owner, ctx, sql, BASE, SHOTS }));
+await step('#545(+#534) 수정 요청 → AI 수정본: 카드 [수정 요청] → AI 가 글·시안을 함께 고친 수정본 v3 바로 승인함 → 배지 \'수정본 v3 — 반영한 요청\'·AI 수정 1/3·[수정본 v3 승인] → 이전 버전과 나란히 비교(시안·바뀐 줄) → 같은 카드 다시 수정 요청(사진만 = v4) → 상세 비교 · 휴대폰 폭', () => mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#522 영업 DB 누락 점검: 원천 2회 연속 실패·24시간 넘게 성공 없음 → 영업 홈 빨간 띠(받는 원천은 빼기·원천 하나뿐이면 수집기 이름) → [수집기 보기] → 수집기 칸 같은 띠·원천별 줄(받은 줄·관련·실패 빨간 줄)·첫 줄 칸 이름(값 없이) 펼치기', () => collectorAlerts({ owner, ctx, sql, BASE, SHOTS }));
 await step('#535 승인함·콘텐츠 캘린더 상세 뒤로가기: 열면 ?c 기록 → 뒤로가기는 상세만 닫힘(승인함 그대로) · 닫기 단추는 기록 되돌림 · 링크로 연 상세는 ?c 만 지움 (390폭)', () => backClose({ owner, ctx, BASE }));
 await step('#494 메타 광고 자동 세팅: 광고 운영 메타 칸(초안 대기 줄·승인함 링크·권한 다시 연결) → [새 메타 광고] 창(양식 번호 직접·개인정보 확인·자료실 소재·반경·자동 일시정지) 저장 → 승인함 광고 초안 탭(배지·요약·피드 미리보기·확인 문구) → 휴대폰 폭 → [반려] 사유 → 보관', () => metaAuto({ owner, ctx, sql, BASE, SHOTS }));
