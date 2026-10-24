@@ -143,6 +143,10 @@ export function startFakeGoogle(port = 3199) {
             trend: `${row.site} 매출이 최근 3개월 평균보다 높습니다.`, forecast: [{ site: '전체', comment: '최근 추세가 이어진다는 가정의 추정입니다.' }, { site: '없는 현장', comment: '지어낸 전망' }],
             actions: [{ site: row.site, items: ['재등록 안내를 이번 달 안에 보내기', '오전 시간대 프로그램 늘리기'] }], checks: ['다른 현장 자료가 빠졌는지 확인'] } : {}) }) }], stop_reason: 'end_turn' };
       }
+      // 로컬 QA 10/24 ①: 마케팅 원고(구조화 출력 title·body·brief…)인데 넣어 둔 응답이 없으면 — 실제 API 처럼 스키마 모양 JSON(본문은 예전 짧은 글 답 그대로)
+      if (!next && ['body', 'brief', 'why', 'hooks', 'keyword'].every((k) => body.output_config?.format?.schema?.required?.includes(k))) {
+        next = { content: [{ type: 'text', text: JSON.stringify({ title: '', body: '테스트 응답입니다.', brief: '', why: '', hooks: [], keyword: '', script: [] }) }], stop_reason: 'end_turn' };
+      }
       // V23-1 시험: 오류 응답(크레딧 부족 402 billing_error 등)
       if (next?.httpError) return json(res, next.httpError, { type: 'error', error: { type: next.errorType ?? 'api_error', message: next.message ?? 'error' } });
       next ??= { content: [{ type: 'text', text: '테스트 응답입니다.' }], stop_reason: 'end_turn' };
