@@ -122,14 +122,22 @@ function KoDl({ rows, testId }: { rows: [string, React.ReactNode][]; testId?: st
 /* S1-2(로컬 10/20 최우선): 진행 기록 쓰기 — 원본 영업관리 상태 버튼 그대로(입찰·신규단지 2-10 / 시설 2-8 / 협력사 2-9) + 메모·다음 연락일 + [진행영업으로 넘기기](비슷한 리드 확인). 전환 전(readOnly)에는 안 보임 */
 const WORK_STATUS: Record<string, string[]> = { bid: ['미검토', '검토중', '연락중', '보류', '미참여', '대상아님'], building: ['미검토', '검토중', '연락중', '보류', '대상아님'], facility: ['미연락', '연락중', '영업완료', '대상아님'], vendor: ['미등록', '신청 준비', '신청 완료', '등록 완료', '대상 아님'] };
 const DONE_STATUS = new Set(['미참여', '대상아님', '영업완료', '등록 완료', '대상 아님']);
+/** 대표 10/24 추가 ②: '대상 아님' — 사유(선택)를 묻고 넘김, 입찰은 모든 목록·당일 메일에서 빠지고 [대상 아님] 탭에만, [되돌리기] = 넘기기 전 상태 */
+const SKIP_ST = /^대상\s?아님$/;
 function WorkPanel({ kind, id, cur, onSaved }: { kind: 'bid' | 'building' | 'facility' | 'vendor'; id: string; cur: { status?: string | null; memo?: string | null; next?: string | null; leadId?: string | null }; onSaved: () => void }) {
   const [status, setStatus] = useState<string>(cur.status ?? WORK_STATUS[kind][0]);
   const [memo, setMemo] = useState(cur.memo ?? ''); const [next, setNext] = useState(cur.next ?? ''); const [busy, setBusy] = useState(false);
   const [similar, setSimilar] = useState<{ id: string; name: string; status: string | null }[] | null>(null);
+  const [ask, setAsk] = useState<string | null>(null); const [why, setWhy] = useState(''); // 대표 10/24 추가 ②: '대상 아님' 사유(선택)
   const converted = cur.status === '진행영업 전환' || !!cur.leadId;
-  async function save(st = status) {
+  async function save(st = status, extra: Record<string, unknown> = {}) {
     setBusy(true);
-    try { const r = await api<{ status: string }>('/api/sales/work', { body: { kind, id, status: st, memo: memo.trim() || null, nextDate: next || null } }); setStatus(r.status); toast.ok(DONE_STATUS.has(st) ? '완료 목록으로 옮깁니다' : '저장했습니다'); onSaved(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+    try { const r = await api<{ status: string }>('/api/sales/work', { body: { kind, id, status: st, memo: memo.trim() || null, nextDate: next || null, ...extra } }); setStatus(r.status);
+      toast.ok(kind === 'bid' && SKIP_ST.test(r.status) && !SKIP_ST.test(status) ? '대상 아님으로 넘겼습니다 — 목록·당일 메일에서 빠지고 [대상 아님] 탭에서 볼 수 있습니다' : DONE_STATUS.has(st) ? '완료 목록으로 옮깁니다' : '저장했습니다'); onSaved(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  async function restore() {
+    setBusy(true);
+    try { const r = await api<{ status: string }>('/api/sales/work', { body: { kind, id, restore: true } }); setStatus(r.status); toast.ok(`되돌렸습니다 — '${r.status}'`); onSaved(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   async function convert(force = false) {
     setBusy(true);
@@ -142,7 +150,12 @@ function WorkPanel({ kind, id, cur, onSaved }: { kind: 'bid' | 'building' | 'fac
   return (
     <div className="space-y-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm" data-testid="work-panel">
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="진행 상태">{WORK_STATUS[kind].map((s) => (
-        <button key={s} type="button" disabled={busy} onClick={() => { setStatus(s); void save(s); }} className={cx('rounded-full border px-2.5 py-1 text-xs', status === s ? 'border-transparent text-white' : 'border-line bg-white', DONE_STATUS.has(s) && status !== s && 'text-ink-3')} style={status === s ? { background: C } : undefined} data-testid={`work-status-${s}`}>{s}</button>))}</div>
+        <button key={s} type="button" disabled={busy} onClick={() => { if (SKIP_ST.test(s) && !SKIP_ST.test(status)) { setAsk(s); return; } setStatus(s); void save(s); }} className={cx('rounded-full border px-2.5 py-1 text-xs', status === s ? 'border-transparent text-white' : 'border-line bg-white', DONE_STATUS.has(s) && status !== s && 'text-ink-3')} style={status === s ? { background: C } : undefined} data-testid={`work-status-${s}`}>{s}</button>))}</div>
+      {ask && <div className="flex flex-wrap items-center gap-1.5 rounded-input border border-line bg-white p-2" data-testid="work-skip-ask">
+        <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1 text-xs')} value={why} onChange={(e) => setWhy(e.target.value)} maxLength={300} placeholder="사유(선택) — 예: 취소 공고 확인, 우리 업종 아님" aria-label="대상 아님 사유" data-testid="work-skip-reason" />
+        <Button size="sm" disabled={busy} onClick={() => { const s = ask; setAsk(null); setStatus(s); void save(s, { reason: why.trim() || null }); setWhy(''); }} data-testid="work-skip-go">대상 아님으로 넘기기</Button>
+        <Button size="sm" variant="ghost" onClick={() => setAsk(null)}>취소</Button></div>}
+      {SKIP_ST.test(status) && <div className="flex flex-wrap items-center gap-2 text-xs text-ink-2" data-testid="work-skipped">{kind === 'bid' ? '목록·당일 메일에서 빠진 공고입니다' : '대상 아님으로 넘긴 건입니다'}<Button size="sm" variant="secondary" disabled={busy} onClick={restore} data-testid="work-restore">되돌리기</Button></div>}
       <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
         <textarea className={cx(inputCls, 'min-h-[60px]')} value={memo} onChange={(e) => setMemo(e.target.value)} maxLength={2000} placeholder="메모 (처음 메모를 남기면 검토중으로)" aria-label="진행 메모" data-testid="work-memo" />
         <div className="flex flex-col gap-1.5"><input type="date" className={cx(inputCls, 'h-9')} value={next} onChange={(e) => setNext(e.target.value)} aria-label="다음 연락일" data-testid="work-next" />
@@ -881,7 +894,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
         {[['', '전체'], ...data.categories.map((c: any) => [c.key, c.name]), ['none', '미분류']].map(([k, l]) => <button key={k} type="button" onClick={() => setBiz(k)} data-testid={`sales-bids-biz-${k || 'all'}`} className={cx('rounded-full border px-2.5 py-0.5 text-xs', biz === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white')}>{l}</button>)}
         <Link href="/s/sales/sources#biz" className="text-[11px] text-ink-3 underline">관심 사업 설정</Link></div>}
       <Head title="입찰·공고 모니터링" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBids} compact /><Search value={s} onChange={setS} /></Head>
-      <div className="flex flex-wrap items-center gap-1.5">{(embedded ? [['today', '오늘 새 공고'], ['soon', '마감 임박(3일)'], ['prep', '준비 기간(D-10 안)'], ['open', '진행 중']] : [['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감'], ['soon', '마감 임박(3일)'], ['prep', '준비 기간(D-10 안)'], ['recruit', '협력사 모집'], ...(initialTab === 'ref' ? [['ref', '참고(검색어만 일치)']] : [])]).map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}{embedded && <Link href="/s/sales/bids" className="ml-auto text-xs text-ink-2 underline" data-testid="bids-all-link">입찰·공고 전체 보기 →</Link>}</div>
+      <div className="flex flex-wrap items-center gap-1.5">{(embedded ? [['today', '오늘 새 공고'], ['soon', '마감 임박(3일)'], ['prep', '준비 기간(D-10 안)'], ['open', '진행 중']] : [['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감'], ['soon', '마감 임박(3일)'], ['prep', '준비 기간(D-10 안)'], ['recruit', '협력사 모집'], ...(initialTab === 'ref' ? [['ref', '참고(검색어만 일치)']] : []), ['skip', `대상 아님${data ? ` ${data.skipCount ?? 0}건` : ''}`]]).map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}{embedded && <Link href="/s/sales/bids" className="ml-auto text-xs text-ink-2 underline" data-testid="bids-all-link">입찰·공고 전체 보기 →</Link>}</div>
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => <li key={n.id} className="relative">{data.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data.readOnly === false} /></li>)}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
       {/* 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 뺀 결과(낙찰·유찰) — 당일 메일 '결과' 구역과 같은 기준, 접어 둠 */}
@@ -1042,17 +1055,53 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
       <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.region, n.households && `${n.households}세대`, n.industry].filter(Boolean).join(' · ')}</div>
       {(won(n.amount) || n.winner) && <div className="mt-0.5 text-xs text-ink-2">{won(n.amount) && <>예산 {won(n.amount)}</>}{n.winner && <>{won(n.amount) ? ' · ' : ''}낙찰 {n.winner}{won(n.awardAmount) ? ` · ${won(n.awardAmount)}` : ''}{n.awardDate ? ` (${kd(n.awardDate)})` : ''}</>}</div>}
       <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3" data-testid="bid-dates"><span className="hidden md:inline">{[n.noticeDate && `공고 ${kd(n.noticeDate)}`, n.posted && `DB 등록 ${kd(n.posted)}`].filter(Boolean).join(' · ')}</span>{n.todayNew && <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white" data-testid="bid-today">오늘 등록</span>}{n.todayLabel && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900" title="오늘 탭에 있는 까닭 — 공고일과 수집 시각이 다름" data-testid="bid-today-why">{n.todayLabel}</span>}</div>
+      <BidHistory h={n.history} />
       {n.keywords && <div className="mt-0.5 hidden text-xs text-ink-3 md:block">키워드: {n.keywords}</div>}
       {n.judgment && <div className="mt-0.5 hidden text-xs text-ink-2 md:block">판단: {n.judgment}</div>}
       <div className="mt-1.5 flex flex-wrap items-end gap-1.5 text-xs">
         <ContactRow phone={n.phone} links={[[n.search ? null : n.url, '원문'], [n.attachments?.length ? attHref(n.attachments[0], 0, bidCtx(n)) : null, n.attachments?.length > 1 ? `공고문 내려받기 ${n.attachments.length}건` : '공고문 내려받기']]} />
         {n.search && <SearchHintChip h={n.search} />}
-        {canWrite && !n.workLeadId && <HandoffButton kind="bid" id={String(n.id)} name={`${n.complex ? n.complex + ' ' : ''}${n.title}`} onDone={onChange} compact />}
+        {canWrite && !n.workLeadId && !n.skipped && st[0] !== '취소' && <HandoffButton kind="bid" id={String(n.id)} name={`${n.complex ? n.complex + ' ' : ''}${n.title}`} onDone={onChange} compact />}{/* 대표 10/24 추가 ②: 취소·대상 아님 공고는 넘기기 대신 [대상 아님]·[되돌리기] */}
         {n.workLeadId && <Link href={`/s/sales/leads?id=${n.workLeadId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-handoff-lead">영업 중 → 리드</Link>}
         <span className="ml-auto font-medium text-ink" data-testid="bid-deadline">{n.deadline ? `마감 ${kdt(n.deadline)}` : '마감일 미확인'}</span>
       </div>
+      {(n.skipped || st[0] === '취소') && <BidSkip n={n} onChange={onChange} canWrite={canWrite} />}
     </li>
   );
+}
+/** 대표 10/24 추가 ②: 같은 공고 묶음 — '10/23 취소 공고' · '2회 게시(10/20 취소·10/22)' · '정정 10/22' (취소·정정 공고·재게시는 따로 카드로 안 냄) */
+const md = (d?: string | null) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '?');
+function BidHistory({ h }: { h?: { cancelDay: string | null; cancelNotice: boolean; posts: { day: string | null; cancelled: boolean }[]; amendDay: string | null } | null }) {
+  if (!h || (!h.cancelDay && h.posts.length < 2 && !h.amendDay)) return null;
+  return (
+    <div className="mt-0.5 flex flex-wrap gap-1.5 text-[11px]" data-testid="bid-history">
+      {h.cancelDay && <span className="rounded-full bg-slate-200 px-1.5 py-0.5 font-semibold text-ink-2" data-testid="bid-history-cancel">{md(h.cancelDay)} {h.cancelNotice ? '취소 공고' : '취소'}</span>}
+      {h.posts.length > 1 && <span className="rounded-full border border-line px-1.5 py-0.5 text-ink-2" data-testid="bid-history-posts">{h.posts.length}회 게시({h.posts.map((p) => `${md(p.day)}${p.cancelled ? ' 취소' : ''}`).join('·')})</span>}
+      {h.amendDay && <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-amber-800" data-testid="bid-history-amend">정정 {md(h.amendDay)}</span>}
+    </div>
+  );
+}
+/** 대표 10/24 추가 ②: [대상 아님] 탭 줄 = 누가·언제·사유 + [되돌리기] / 취소된 공고 카드 = [대상 아님으로](사유 선택) — 넘기면 모든 목록·당일 메일에서 빠짐 */
+function BidSkip({ n, onChange, canWrite }: { n: any; onChange?: () => void; canWrite?: boolean }) {
+  const [ask, setAsk] = useState(false); const [why, setWhy] = useState(''); const [busy, setBusy] = useState(false);
+  async function go(body: Record<string, unknown>, msg: string) {
+    setBusy(true);
+    try { await api('/api/sales/work', { body: { kind: 'bid', id: String(n.id), ...body } }); toast.ok(msg); onChange?.(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  if (n.skipped) return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-input bg-slate-50 px-2 py-1 text-xs text-ink-2" data-testid="bid-skip">
+      <b>대상 아님</b>{[n.skip?.by, n.skip?.at && fmtDateTime(n.skip.at)].filter(Boolean).map((x: string) => <span key={x}>· {x}</span>)}{n.skip?.reason && <span data-testid="bid-skip-reason">· 사유: {n.skip.reason}</span>}
+      {canWrite && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={() => go({ restore: true }, '되돌렸습니다 — 다시 목록에 나옵니다')} data-testid="bid-skip-restore">되돌리기</Button>}
+    </div>
+  );
+  if (!canWrite || n.workLeadId) return null;
+  return ask ? (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="bid-skip-ask">
+      <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1 text-xs')} value={why} onChange={(e) => setWhy(e.target.value)} maxLength={300} placeholder="사유(선택) — 예: 취소 공고 확인" aria-label="대상 아님 사유" data-testid="bid-skip-reason-input" />
+      <Button size="sm" disabled={busy} onClick={() => go({ status: '대상아님', reason: why.trim() || null }, '대상 아님으로 넘겼습니다 — [대상 아님] 탭에서 볼 수 있습니다')} data-testid="bid-skip-go">넘기기</Button>
+      <Button size="sm" variant="ghost" onClick={() => setAsk(false)}>취소</Button>
+    </div>
+  ) : <div className="mt-1.5"><button type="button" className={cx(linkCls, 'text-ink-2')} onClick={() => setAsk(true)} data-testid="bid-skip-open">취소 확인 · 대상 아님으로</button></div>;
 }
 const UNK = <span className="text-ink-3">미확인 · 후속조사</span>;
 /** S1-3: 협력사 모집 공지 공개 여부 — 원본 recruit_visibility(글자) 그대로, 예전 참/거짓 값은 공개·비공개 */

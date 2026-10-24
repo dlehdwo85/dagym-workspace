@@ -51,6 +51,7 @@ import { mktGoals } from './mktGoals.step.mjs';
 import { mktQuality } from './mktQuality.step.mjs';
 import { mktPreflight } from './mktPreflight.step.mjs';
 import { chatBackPc, chatBackPcHard } from './chatBackPc.step.mjs';
+import { bidGroups } from './bidGroups.step.mjs';
 import { revenueAuto } from './revenueAuto.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
@@ -2818,6 +2819,8 @@ await step('132차 확인 후속 ⑧ PC 대화방: 위로 올려 보다 사이�
 await step('132차 확인 후속 ⑧-2 PC 대화방: 주소를 새로 열어 다른 화면 → 뒤로가기 = 보던 자리', () => chatBackPcHard({ owner, ctx, BASE }));
 await step('로컬 QA 10/24 ②~⑥ 올리기 전 검사·사실 카드·주제 풀: 브랜드 키트 사실 카드(연락처·운영 시간·섞으면 안 되는 이름)·주제 풀 [AI로 주제 20개 제안] → 저장(빈 칸 빼고) → 릴스 상세 \'올리기 전 검사 n건\'·노란 칸은 그 밖만·대본(컷) 칸·주제 풀 표시 → 사람이 고친 수정본 = 승인 대기·검사 통과 → 휴대폰 넘침 없음', () => mktPreflight({ owner, ctx, BASE, FAKE, SHOTS, sql }));
 await step('#242 2단계 다른 화면 돌아오기: 알림 탭·위치·방금 읽은 줄 · 홈 월 캘린더 달·날 · 프로젝트 보관함 · 영업 리드 정렬·우선·칩 · 허브 탭 · 마케팅 콘텐츠 캘린더 주 — 다른 화면에 갔다 뒤로가기 = 그대로', () => backKeep({ owner, ctx, sql, BASE }));
+
+await step('대표 10/24 추가 ② 입찰 같은 제목: 취소 공고 = 원 공고 카드 \'취소\'·\'M/D 취소 공고\' · K-apt 재게시 한 장 \'2회 게시\' → [대상 아님으로](사유) → 전체 탭에서 빠짐 → [대상 아님 n건] 탭(누가·사유) → [되돌리기] · 상세 \'대상아님\' 사유·되돌리기 · 휴대폰 넘침 없음', () => bidGroups({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { db, type Sql } from '../db';
 import { HttpError, badRequest, notFound } from '../errors';
+import { audit } from '../log';
 import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
@@ -24,7 +25,11 @@ const SRC_TBL: Record<WorkKind, string> = { bid: 'opportunity_work', building: '
 const ITEM_TBL: Record<WorkKind, string> = { bid: 'procurement_notices', building: 'building_sales_pipeline', facility: 'operating_facility_prospects', vendor: 'vendor_registrations' };
 const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = o?.[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return null; };
 
-export const workInput = z.object({ kind: z.enum(WORK_KINDS), id: z.string().min(1).max(100), status: z.string().max(30).optional(), memo: z.string().trim().max(2000).nullable().optional(), nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional() });
+export const workInput = z.object({ kind: z.enum(WORK_KINDS), id: z.string().min(1).max(100), status: z.string().max(30).optional(), memo: z.string().trim().max(2000).nullable().optional(), nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  // 대표 10/24 추가 ②: '대상 아님' 사유(선택) · restore = [되돌리기](넘기기 전 상태로)
+  reason: z.string().trim().max(300).nullable().optional(), restore: z.boolean().optional() });
+/** 대표 10/24 추가 ②: '대상 아님'(입찰은 모든 목록·당일 메일에서 빠지고 [대상 아님] 탭에만) — 누가·언제·사유·넘기기 전 상태를 진행 기록에 */
+const SKIP = /^대상\s?아님$/;
 export const convertInput = z.object({ kind: z.enum(WORK_KINDS), id: z.string().min(1).max(100), force: z.boolean().optional(), name: z.string().trim().min(1).max(300).optional() });
 export const recordInput = z.object({ kind: z.enum(['proposals', 'contracts']), title: z.string().trim().min(1).max(300), amount: z.number().min(0).max(1e13).nullable().optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), status: z.string().max(30).optional(), memo: z.string().trim().max(2000).optional() ,
   // S2 2차(감사 1-16): 제안 13칸·계약 9칸 중 핵심 — 버전·최종금액·월 운영비·계약 예상일 / 시작·종료·PM·재계약 단계·사업
@@ -59,8 +64,16 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>) {
   if (cur?.status === CONVERTED) throw badRequest('진행영업으로 넘긴 건입니다 — 리드에서 고쳐 주세요');
   const first = WORK_STATUS[i.kind][0], review = i.kind === 'facility' ? '연락중' : i.kind === 'vendor' ? '신청 준비' : '검토중';
   let status = i.status ?? cur?.status ?? first;
-  if (i.status === undefined && i.memo && status === first && !pick(cur?.data, 'memo', 'last_note')) status = review;
-  const d = cur?.data ?? {};
+  if (i.restore) {
+    if (!cur || !SKIP.test(String(cur.status ?? ''))) throw badRequest('대상 아님으로 넘긴 건이 아닙니다');
+    const prev = String(cur.data?.skip_prev ?? '');
+    status = WORK_STATUS[i.kind].includes(prev) && !SKIP.test(prev) ? prev : first;
+  } else if (i.status === undefined && i.memo && status === first && !pick(cur?.data, 'memo', 'last_note')) status = review;
+  const skipNow = SKIP.test(status), skipWas = SKIP.test(String(cur?.status ?? ''));
+  const { skip_by: _by, skip_at: _at, skip_reason: _why, skip_prev: _prev, ...d0 } = cur?.data ?? {};
+  // 이미 대상 아님인데 메모만 고치면 넘긴 사람·시각 그대로, 다른 상태로 바꾸면(되돌리기 포함) 지움
+  const d = !skipNow ? d0 : skipWas && i.reason === undefined ? { ...d0, skip_by: _by, skip_at: _at, skip_reason: _why, skip_prev: _prev }
+    : { ...d0, skip_by: u.id, skip_at: new Date().toISOString(), skip_reason: i.reason?.trim() || null, skip_prev: skipWas ? _prev ?? null : cur?.status ?? null };
   const memo = i.memo === undefined ? pick(d, 'memo', 'last_note', 'note') : i.memo;
   const next = i.nextDate === undefined ? pick(d, 'next_date', 'next_action_date', 'next_contact_date') : i.nextDate;
   // 원본 칸 이름 그대로 저장(화면 읽기 코드가 그대로 쓰이게)
@@ -70,6 +83,7 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>) {
   const srcId = cur?.src_id ?? (SRC_TBL[i.kind] === 'opportunity_work' ? `w:${i.kind}:${i.id}` : i.id);
   await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, lead_id, data) values (${t}, ${SRC_TBL[i.kind]}, ${srcId}, ${i.id}, ${status}, ${cur?.lead_id ?? null}, ${sql.json(data)})
     on conflict (tenant, src_tbl, src_id) do update set status = excluded.status, data = excluded.data, updated_at = now()`;
+  if (skipNow !== skipWas) await audit(sql, u.id, skipNow ? 'sales_work.skip' : 'sales_work.unskip', i.kind, i.id, { from: cur?.status ?? null, to: status, reason: skipNow ? d.skip_reason ?? null : null }).catch(() => {});
   // 대표 10/20 14:15: 영업 진행(연락중 등)으로 바뀌면 업무 자동 생성, 보류·미참여·완료면 업무도 함께
   const r = await item(sql, i.kind, i.id);
   const bidName = [pick(r, 'complex_name', 'facility_name'), pick(r, 'title', 'notice_title', 'bid_name')].filter(Boolean).join(' '); // 입찰은 '단지 공고명'
@@ -111,10 +125,10 @@ export async function convertToLead(u: SessionUser, i: z.infer<typeof convertInp
   return { leadId };
 }
 /** 대표 10/20 14:15 ④ 허브·입찰 목록에서 여러 건 체크 → [영업 진행으로] — 한 번에 상태 바꾸고 업무 n건 */
-export async function bulkWork(u: SessionUser, i: { kind: WorkKind; ids: string[]; status: string; nextDate?: string | null }) {
+export async function bulkWork(u: SessionUser, i: { kind: WorkKind; ids: string[]; status: string; nextDate?: string | null; reason?: string | null }) {
   const out: { id: string; ok: boolean; taskId?: string | null; error?: string }[] = [];
   for (const id of [...new Set(i.ids)].slice(0, 100)) {
-    try { const r = await saveWork(u, { kind: i.kind, id, status: i.status, nextDate: i.nextDate ?? undefined }); out.push({ id, ok: true, taskId: r.task?.taskId ?? null }); }
+    try { const r = await saveWork(u, { kind: i.kind, id, status: i.status, nextDate: i.nextDate ?? undefined, reason: i.reason ?? undefined }); out.push({ id, ok: true, taskId: r.task?.taskId ?? null }); }
     catch (e: any) { out.push({ id, ok: false, error: e?.message ?? String(e) }); }
   }
   return { ok: true, results: out, tasks: out.filter((x) => x.taskId).length };
@@ -136,8 +150,9 @@ export async function addLeadRecord(u: SessionUser, leadId: string, i: z.infer<t
 }
 /** 전환 뒤 화면 읽기용: 정식 표 행을 원본 행 모양으로 */
 export async function workRows(sql: Sql, tenant: string, srcTbl: string) {
-  return (await sql<any[]>`select src_id, ref_id, status, lead_id, data from sales_work_records where tenant = ${tenant} and src_tbl = ${srcTbl}`)
-    .map((w) => ({ ...w.data, id: w.src_id, __id: w.src_id, status: w.status ?? w.data?.status ?? null, lead_id: w.lead_id ?? w.data?.lead_id ?? null, ...(srcTbl === 'opportunity_work' ? { notice_id: w.data?.notice_id ?? w.ref_id } : {}) }));
+  return (await sql<any[]>`select src_id, ref_id, status, lead_id, data, updated_at from sales_work_records where tenant = ${tenant} and src_tbl = ${srcTbl}`)
+    .map((w) => ({ ...w.data, id: w.src_id, __id: w.src_id, status: w.status ?? w.data?.status ?? null, lead_id: w.lead_id ?? w.data?.lead_id ?? null, ...(srcTbl === 'opportunity_work' ? { notice_id: w.data?.notice_id ?? w.ref_id } : {}),
+      __updated_at: w.updated_at instanceof Date ? w.updated_at.toISOString() : w.updated_at ?? null })); // 대표 10/24 추가 ②: 같은 공고 묶음에서 가장 최근에 고친 진행 기록
 }
 
 /** S2 2차(감사 1-16 ROI): 영업비용 입력(월·사업·항목·금액·메모) — sales_lead_records kind 'sales_costs' */

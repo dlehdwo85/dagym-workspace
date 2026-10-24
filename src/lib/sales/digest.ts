@@ -18,6 +18,7 @@ import { BID_COLLECTORS } from './collectors';
 import { listBizCats, matchBiz, type BizCat } from './bizCats';
 import { sidoIn } from './region';
 import { digestMail } from './digestMail';
+import { SKIP_ONLY, noKey, noticeKeys, titleKey } from './noticeGroups';
 import { fixG2bUrl, searchHint, type SearchHint } from './sourceLink';
 
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
@@ -117,8 +118,8 @@ const regionOf = (r: any) => { const v = String(r.region ?? '').trim(); return v
 /** 업종 태그: 입찰 분류(K-apt '사업자 - 공사 - 일반보수'·'용역 > 주민운동시설의 위탁' 은 나눠서, 앞의 '사업자' 뺌) + 업종 제한 이름(숫자 코드는 뺌), 3개까지 */
 const tagsOf = (r: any) => [...new Set([...String(r.bid_category ?? '').split(/\s*(?:&gt;|>|›)\s*|\s+-\s+/).map((x) => x.trim()).filter((x) => x && x !== '사업자' && x.length <= 20),
   ...(String(r.industry_code ?? '').trim() && !/^[\d,\s]+$/.test(String(r.industry_code)) ? [String(r.industry_code).trim().slice(0, 20)] : [])])].slice(0, 3);
-/** 같은 공고 판단 열쇠: 나라장터·누리장터는 '번호-차수'라 차수를 뗀 번호 */
-const noKey = (r: any) => { const st = String(r.source_type ?? ''); const ext = String(r.source_external_id ?? '').trim(); const m = ['g2b_bid', 'nuri_bid'].includes(st) ? ext.match(/^(.*)-(\d{1,3})$/) : null; return { key: `${st}|${m ? m[1] : ext}`, ord: m ? Number(m[2]) : 0 }; };
+/** 같은 공고 판단 열쇠(noticeGroups): 나라장터·누리장터는 '번호-차수'라 차수를 뗀 번호 — 번호가 없으면 그 줄만 */
+const nk = (r: any, id: string) => noKey(r).key ?? `#${id}`;
 const at = (v: unknown) => { const t = Date.parse(String(v ?? '')); return Number.isNaN(t) ? null : t; };
 const sysKey = (v: unknown) => String(v ?? '').toUpperCase().replace(/[^0-9A-Z가-힣]/g, '');
 /**
@@ -138,6 +139,18 @@ async function tenantLinks(tenant: string, ids: string[]) {
   for (const r of rows) { if (!r.id) continue; if (r.kind === 'procurement_notices__progress') { if (r.cls) cls.set(r.id, r.cls); } else linked.add(r.id); }
   return { linked, cls };
 }
+/** 대표 10/24 추가 ②: 이 회사가 '대상 아님'으로 넘긴 공고 — 같은 공고의 다른 게시(같은 번호 취소·정정 공고, 같은 제목·기관·마감 재게시)도 메일에서 뺌. 그 게시에 다른 진행 기록이 있으면 그대로 */
+async function notTargets(tenant: string) {
+  const sql = db(); const { writesOpen } = await import('./cutover');
+  const w = (await writesOpen(tenant))
+    ? await sql<{ id: string | null; status: string | null }[]>`select coalesce(data->>'notice_id', ref_id) as id, status from sales_work_records where tenant = ${tenant} and src_tbl = 'opportunity_work'`
+    : await sql<{ id: string | null; status: string | null }[]>`select coalesce(row->>'notice_id', row->>'procurement_notice_id') as id, row->>'status' as status from sales_src_rows where scope = ${tenant} and tbl = 'opportunity_work'`;
+  const ids = new Set(w.filter((x) => x.id && SKIP_ONLY.test(String(x.status ?? ''))).map((x) => String(x.id)));
+  const live = new Set(w.filter((x) => x.id && !SKIP_ONLY.test(String(x.status ?? ''))).map((x) => String(x.id)));
+  const keys = new Set<string>();
+  if (ids.size) for (const { row } of await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and (src_id = any(${[...ids]}::text[]) or row->>'id' = any(${[...ids]}::text[]))`) for (const k of noticeKeys(row)) keys.add(k);
+  return (id: string, r: any) => ids.has(id) || (!live.has(id) && noticeKeys(r).some((k) => keys.has(k)));
+}
 type Cand = { id: string; r: any; isNew: boolean; kind: string; late: boolean; fit: string | null; why: string; soon?: boolean };
 /** 지난 메일 이후(digestSince) 처음 본 공고 + 그 뒤 정정·취소로 바뀐 공고 → 회사 맞춤 통과분 → 구역. 마감 임박 = 이미 받은 관련 공고 중 D-3 이내·진행 기록 없음 */
 export async function buildDigest(tenant: string, day = kstDay()) {
@@ -148,6 +161,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
   const from = new Date(sinceMs - 864e5).toISOString().slice(0, 10);
   const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone and (row->>'first_seen_at' >= ${from} or row->>'updated_at' >= ${from}) limit 5000`;
   const skipped: Record<string, number> = {}; const skip = (why: string) => { skipped[why] = (skipped[why] ?? 0) + 1; };
+  const notTarget = await notTargets(tenant);
   const cands: Cand[] = [];
   for (const { src_id, row: r } of rows) {
     const slug = SLUG_OF[String(r.source_type)] ?? ''; if (slug && off.has(slug)) continue;
@@ -157,6 +171,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     if (!isNew && !changedToday) continue;
     if (r.source_type === 'vendor_recruit' && (!r.posted_date || !vendorDateOk(r))) { skip('게시일 미상'); continue; } // #476 e·후속: 게시판 날짜로 확인 못 한 협력사 줄(조각·메뉴·예전 방식)은 메일·오늘 탭에서 뺌
     if (onbidSale(r)) { skip('온비드 매각'); continue; } // #537 후속2(로컬 10/24 12:58): 온비드는 임대·사용허가만
+    if (notTarget(String(r.id ?? src_id), r)) { skip('대상 아님'); continue; }
     const f = passPrefs(r, p); if (!f.ok) { skip(f.why); continue; }
     if (result) { cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
     const dl = dayOf(r.deadline_at);
@@ -170,16 +185,16 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     for (const c of list) { const k = keyOf(c); const o = m.get(k); if (!o) { m.set(k, c); continue; } merged++; if (rank(c) > rank(o) || (rank(c) === rank(o) && (at(c.r.updated_at) ?? 0) > (at(o.r.updated_at) ?? 0))) m.set(k, c); }
     return [...m.values()];
   };
-  const today = latest(latest(cands, (c) => noKey(c.r).key, (c) => noKey(c.r).ord),
+  const today = latest(latest(cands, (c) => nk(c.r, c.id), (c) => noKey(c.r).ord),
     (c) => `${norm(String(c.r.title ?? ''))}|${norm(String(c.r.issuer ?? c.r.demand_agency ?? ''))}|${dayOf(c.r.deadline_at) ?? ''}|${c.kind === 'amend' || c.kind === 'cancel' || c.kind === 'result' ? c.kind : 'new'}`, () => 0);
   // 마감 임박: 이미 받은 공고(지난 메일 전에 처음 본) 중 관련 사업·D-3 이내·취소/마감 아님·진행 기록 없음
-  const end = plusDays(day, 4); const todayKeys = new Set(today.map((c) => noKey(c.r).key));
+  const end = plusDays(day, 4); const todayKeys = new Set(today.map((c) => nk(c.r, c.id)));
   const soonRows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone
     and row->>'deadline_at' >= ${plusDays(day, -1)} and row->>'deadline_at' < ${end} limit 3000`;
   const soonCands: Cand[] = [];
   for (const { src_id, row: r } of soonRows) {
     const slug = SLUG_OF[String(r.source_type)] ?? ''; if (slug && off.has(slug)) continue;
-    if (todayKeys.has(noKey(r).key)) continue;
+    if (todayKeys.has(nk(r, String(r.id ?? src_id))) || notTarget(String(r.id ?? src_id), r)) continue;
     const seen = at(r.first_seen_at); if (seen != null && seen >= sinceMs) continue;
     if (r.source_type === 'vendor_recruit' || String(r.notice_kind ?? '') === 'cancel' || CLOSED_STATUS.test(String(r.current_status ?? '')) || onbidSale(r)) continue; // '마감임박'은 진행 중(#537 후속2)
     const f = passPrefs(r, p); if (!f.ok || !f.fit) continue;
@@ -188,7 +203,17 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     if (dday === 0 && dl.t && Date.parse(`${dl.d}T${dl.t}:00+09:00`) < Date.now()) continue; // 오늘 마감인데 시각이 지남
     soonCands.push({ id: String(r.id ?? src_id), r, isNew: false, kind: String(r.notice_kind ?? 'new'), late: false, fit: f.fit, why: f.why, soon: true });
   }
-  const soon = latest(soonCands, (c) => noKey(c.r).key, (c) => noKey(c.r).ord);
+  const soon = latest(soonCands, (c) => nk(c.r, c.id), (c) => noKey(c.r).ord);
+  // 대표 10/24 추가 ②: 같은 제목·기관·마감으로 먼저 게시된 공고가 있으면 '재게시'(K-apt 같은 공고 두 번 게시) — 화면은 한 카드 '2회 게시(…)'
+  const titles = [...new Set(today.filter((c) => c.kind === 'new').map((c) => String(c.r.title ?? '')).filter(Boolean))].slice(0, 300);
+  const reposted = new Set<string>();
+  if (titles.length) {
+    const tk = new Map(today.map((c) => [titleKey(c.r), c] as const).filter(([k]) => !!k));
+    for (const { src_id, row } of await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'title' = any(${titles}::text[])`) {
+      const c = tk.get(titleKey(row)); const seen = at(row.first_seen_at);
+      if (c && String(row.id ?? src_id) !== c.id && nk(row, String(row.id ?? src_id)) !== nk(c.r, c.id) && seen != null && seen < (at(c.r.first_seen_at) ?? 0)) reposted.add(c.id);
+    }
+  }
   const { linked, cls } = await tenantLinks(tenant, [...today, ...soon].map((c) => c.id));
   const items: DigestItem[] = [];
   for (const c of [...today, ...soon]) {
@@ -201,7 +226,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     else section = (cls.get(c.id) ?? r.classification ?? initialClassification({ ...r, fit_business: c.fit })) === '즉시 검토' ? 'now' : 'review';
     const dl = when(r.deadline_at); const dd = dl ? Math.round((Date.parse(dl.d) - Date.parse(day)) / 864e5) : null; const dday = dd != null && dd < 0 ? null : dd; // 결과 줄은 마감이 지났음 — D-day 없음
     const state = String(r.notice_state ?? '');
-    const badges = [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null].filter((x): x is string => !!x);
+    const badges = [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : reposted.has(c.id) ? '재게시' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null].filter((x): x is string => !!x);
     const biz = matchBiz(r, cats).map((b) => ({ name: b.name, color: b.color }));
     items.push({ id: c.id, title: String(r.title ?? ''), issuer: r.issuer ?? r.demand_agency ?? null, region: regionOf(r), source: SRC[st] ?? st, url: fixG2bUrl(r.source_url) ?? '', search: searchHint({ source: st, url: r.source_url, externalId: r.source_external_id, noticeNo: r.notice_no }), kind: c.kind,
       fit: c.fit, keywords: Array.isArray(r.matched_keywords) ? r.matched_keywords : [], estimated: num(r.estimated_amount) ?? num(r.budget_amount), deadline: dl?.d ?? null, dday,

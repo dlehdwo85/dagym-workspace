@@ -16,7 +16,7 @@ const http = (u: string) => (/^https?:\/\//i.test(u) ? u : null);
 /** 사업 배지 바탕색: 사업 색을 흰색에 88% 섞은 연한 색(메일 앱은 반투명 색을 못 그리는 곳이 있어 섞은 값으로) */
 const tint = (hex: string) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex); if (!m) return '#EFF6FF'; const n = parseInt(m[1], 16); const mix = (c: number) => Math.round(c + (255 - c) * 0.88); return `#${[(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => mix(c).toString(16).padStart(2, '0')).join('')}`; };
 const C = { ink: '#111827', ink2: '#374151', ink3: '#6B7280', line: '#E5E7EB', bg: '#F3F4F6', brand: '#2563EB', brandInk: '#1D4ED8', soft: '#EFF6FF' };
-const BADGE: Record<string, [string, string]> = { 취소: ['#374151', '#E5E7EB'], 정정: ['#B45309', '#FEF3C7'], 긴급: ['#B91C1C', '#FEE2E2'], 재공고: ['#6D28D9', '#EDE9FE'] };
+const BADGE: Record<string, [string, string]> = { 취소: ['#374151', '#E5E7EB'], 정정: ['#B45309', '#FEF3C7'], 긴급: ['#B91C1C', '#FEE2E2'], 재공고: ['#6D28D9', '#EDE9FE'], 재게시: ['#6D28D9', '#EDE9FE'] };
 const FONT = "-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif";
 // 대표 10/24 추가 ③: 입찰 준비 기간 D-4~D-10 = 주황 '준비 시작'(입찰 화면 카드와 같은 기준), D-3 안 = 빨강
 const ddText = (n: number) => (n === 0 ? 'D-day' : n >= 4 && n <= 10 ? `D-${n} · 준비 시작` : `D-${n}`);
