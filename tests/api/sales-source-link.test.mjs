@@ -1,4 +1,4 @@
-// #543 영업 공고 [원문] 404(로컬 10/24): 옛 나라장터 입찰공고 주소 → 새 형식(목록·상세·당일 메일 + 저장분 고치기 185 마이그레이션)
+// #543 영업 공고 [원문] 404(로컬 10/24): 옛 나라장터 입찰공고 주소 → 새 형식(목록·상세·당일 메일 + 저장분 고치기 185 마이그레이션) (+#537 입찰 마감 임박 탭·영업기회 배지)
 // · 바로 가는 주소가 없는 원천(온비드·국방 첫 화면 주소, 옛 사전규격 주소)은 [원문] 대신 '○○에서 공고번호 ○○ 검색' 안내 · 상세 주소가 있는 원천(K-apt)은 그대로
 // 새 주소가 실제 나라장터에서 그 공고로 가는지는 로컬 확인(나라장터 로그인을 거침) — 이 시험은 주소 모양만
 import { test, before, after } from 'node:test';
@@ -58,4 +58,17 @@ test('185 마이그레이션: 저장된 옛 나라장터 입찰공고 주소만 
   await sql.unsafe(readFileSync(new URL('../../db/migrations/185_g2b_new_bid_url.sql', import.meta.url), 'utf8'));
   const u = Object.fromEntries((await sql`select src_id, row->>'source_url' as u from sales_src_rows where src_id in ${sql([ID(1), ID(11), ID(12), ID(13)])}`).map((r) => [r.src_id, r.u]));
   assert.deepEqual([u[ID(1)], u[ID(11)], u[ID(12)], u[ID(13)]], [NEW, 'https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=20251012345&bidPbancOrd=01', 'https://www.onbid.co.kr', NEW]);
+});
+
+test('#537 입찰 마감 임박(3일) 탭 · 앱 하단 영업기회 배지 = 오늘 새 공고(당일 다이제스트 수)', async () => {
+  await ins(21, { source_type: 'g2b_bid', source_external_id: 'R26BK00543021-000', title: '시험 마감 임박 체육관 위탁', issuer: '시험군', deadline_at: at(plus(2), '10:00') });
+  await ins(22, { source_type: 'g2b_bid', source_external_id: 'R26BK00543022-000', title: '시험 마감 지난 공고', issuer: '시험군', deadline_at: at(plus(-1), '10:00') });
+  const soon = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=soon')).items.map((i) => i.title);
+  assert.ok(soon.includes('시험 마감 임박 체육관 위탁'), soon.join(' / '));
+  assert.ok(!soon.includes('시험시 체육센터 헬스장 위탁운영 용역'), '6일 뒤 마감은 빠짐');
+  assert.ok(!soon.includes('시험 마감 지난 공고'), '마감 지난 공고는 빠짐');
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/spaces')).summary.sales, { text: '오늘 새 공고 없음', badge: 0 });
+  await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified) values ('default', ${today}, '[]', ${sql.json({ total: 3 })}, 1, 1)
+    on conflict (tenant, day) do update set counts = excluded.counts`;
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/spaces')).summary.sales, { text: '오늘 새 공고 3건', badge: 3 });
 });

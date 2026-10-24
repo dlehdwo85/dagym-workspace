@@ -216,9 +216,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // 공간별 하단 탭 4개(+ 더보기) — 배지: 메시지 안 읽음 · 마케팅 승인 대기
   // 로컬 검수 10/19: 하단 탭은 마지막 공간이 아니라 지금 주소의 공간 기준(/tasks 등 공통 화면 = 업무)
   const tabSpace = path.startsWith('/s/sales') ? 'sales' : path.startsWith('/s/marketing') ? 'marketing' : 'work';
-  const mobileTabs: (NavItem & { badge?: number })[] = tabSpace === 'sales'
-    // 대표 검수 10/20 ②: 앱에서 파이프라인(칸반) 탭 제거. 대표(10/19·#438): 입찰은 안 쓰는 회사도 있어 하단 탭에 넣지 않음 — 그 칸은 제안·계약, 입찰·공고는 프로필 시트 '영업 메뉴'·영업기회 허브·PC 사이드바(켠 회사만)
-    ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/hub', label: '영업기회', icon: Building2 }]
+  const mobileTabs: (NavItem & { badge?: number; match?: string[] })[] = tabSpace === 'sales'
+    // 대표 확정 10/24(#537·#518 로컬 추천 A): 영업 하단 = 홈 · 영업기회(오늘 새 공고 배지) · 리드 · 제안·계약 · 메시지. 입찰은 하단 칸이 아니라 영업기회 안 '입찰' 탭(켠 회사만, #438)
+    // — 영업기회 칸은 허브·입찰·계약만료·공공데이터·지원사업 화면에서도 켜짐
+    ? [{ href: '/s/sales', label: '홈', icon: TrendingUp },
+        { href: session.features.salesBids ? '/s/sales/hub?tab=bids' : '/s/sales/hub', label: '영업기회', icon: Building2, badge: spaceInfo.data?.summary.sales?.badge ?? 0, match: ['/s/sales/hub', '/s/sales/bids', '/s/sales/contracts', '/s/sales/prospects', '/s/sales/support', '/s/sales/regions'] },
+        { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { ...byHref('/messages'), badge: chatUnread }]
     : tabSpace === 'marketing'
       ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
@@ -490,7 +493,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         {/* 대표 결정(10/19): 가운데 + 버튼 없이 공간마다 같은 크기 5칸 — 4개 메뉴 + 더보기(그 공간 나머지 메뉴·공통·공간 전환·만들기) */}
         <nav className={cx('fixed bottom-0 left-0 right-0 z-40 grid border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden [[data-chat-room]_&]:hidden', mobileTabs.length >= 5 ? 'grid-cols-5' : 'grid-cols-4')} aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
-          {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={active(n.href)} badge={n.badge} />)}
+          {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={n.match ? n.match.some((m) => path.startsWith(m)) : active(n.href)} badge={n.badge} />)}
         </nav>
         {/* 대표 10/20 16:20 (#106) 휴대폰 오른쪽 아래 말풍선 — 최근 대화방 바로·안 읽은 수·길게 누르면 AI 비서, 대화방·키보드·알람 띠에서 숨김 */}
         <ChatBubble unread={chatUnread} ai={!!session.features.ai} alarm={alarms.length > 0} />

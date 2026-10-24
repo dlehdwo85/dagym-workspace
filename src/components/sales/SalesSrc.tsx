@@ -263,7 +263,7 @@ export function SalesHome() {
           <p className="mt-2 text-xs text-ink-2" data-testid="sales-setup-template">업종 템플릿: <b>{T.label}</b> — 화면 용어({T.kind.building}·{T.kind.facility}·{T.kind.vendor})를 업종에 맞춥니다. <Link href="/s/sales/sources#template" className={linkCls}>바꾸기</Link></p>
         </section>)}
       {data.today && <TodayRow date={data.today.date} cards={[
-        ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/bids?tab=today'] as [string, number, string]] : []),
+        ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/hub?tab=bids&sub=today'] as [string, number, string]] : []), // #537 영업기회 › 입찰 › 오늘 새 공고
         ['오늘 새 영업 DB', data.today.newDb.buildings + data.today.newDb.facilities + data.today.newDb.vendors, `/s/sales/hub?day=today&tab=${data.today.newDb.facilities >= data.today.newDb.buildings && data.today.newDb.facilities >= data.today.newDb.vendors ? 'facilities' : data.today.newDb.vendors > data.today.newDb.buildings ? 'vendors' : 'buildings'}`,
           `${T.kind.building} ${data.today.newDb.buildings} · ${T.kind.facility} ${data.today.newDb.facilities} · ${T.kind.vendor} ${data.today.newDb.vendors}`],
         ['오늘 연락할 리드', data.today.contact, '/s/sales/leads?day=today'],
@@ -855,8 +855,9 @@ function Deals() {
 }
 export { Deals };
 
-export function Bids({ initialTab, initialId }: { initialTab?: string; initialId?: string }) {
-  const [tab, setTab] = useState(initialTab ?? 'open'); const [s, setS] = useState(''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useState('');
+/** embedded = 영업기회 허브 안 '입찰' 탭(#537 대표 10/24): 오늘 새 공고 · 마감 임박 · 진행 중만, 전체는 입찰·공고 화면으로 */
+export function Bids({ initialTab, initialId, embedded }: { initialTab?: string; initialId?: string; embedded?: boolean }) {
+  const [tab, setTab] = useState(initialTab ?? (embedded ? 'today' : 'open')); const [s, setS] = useState(''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useState('');
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'bids', tab, q: s, biz })}`, [tab, s, biz]);
   // #510: 당일 공고 메일 제목(?id=) → 그 공고 상세를 바로 — 지금 탭 목록에 없어도 한 건 찾아서
   const [deep, setDeep] = useState<string | null>(initialId ?? null);
@@ -871,7 +872,7 @@ export function Bids({ initialTab, initialId }: { initialTab?: string; initialId
         {[['', '전체'], ...data.categories.map((c: any) => [c.key, c.name]), ['none', '미분류']].map(([k, l]) => <button key={k} type="button" onClick={() => setBiz(k)} data-testid={`sales-bids-biz-${k || 'all'}`} className={cx('rounded-full border px-2.5 py-0.5 text-xs', biz === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white')}>{l}</button>)}
         <Link href="/s/sales/sources#biz" className="text-[11px] text-ink-3 underline">관심 사업 설정</Link></div>}
       <Head title="입찰·공고 모니터링" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBids} compact /><Search value={s} onChange={setS} /></Head>
-      <div className="flex flex-wrap gap-1.5">{[['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감'], ['recruit', '협력사 모집'], ...(initialTab === 'ref' ? [['ref', '참고(검색어만 일치)']] : [])].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
+      <div className="flex flex-wrap items-center gap-1.5">{(embedded ? [['today', '오늘 새 공고'], ['soon', '마감 임박(3일)'], ['open', '진행 중']] : [['open', '진행 중(마감 임박순)'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['today', '오늘 새 공고'], ['closing', '오늘 마감'], ['soon', '마감 임박(3일)'], ['recruit', '협력사 모집'], ...(initialTab === 'ref' ? [['ref', '참고(검색어만 일치)']] : [])]).map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}{data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}{embedded && <Link href="/s/sales/bids" className="ml-auto text-xs text-ink-2 underline" data-testid="bids-all-link">입찰·공고 전체 보기 →</Link>}</div>
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => <li key={n.id} className="relative">{data.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data.readOnly === false} /></li>)}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
       <BulkBar kind="bid" ids={sel} onDone={reload} onClear={() => setSel([])} />
@@ -907,21 +908,22 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
   );
 }
 
-export function Hub({ initialTab, initialDay }: { initialTab?: string; initialDay?: string }) {
+export function Hub({ initialTab, initialDay, initialSub }: { initialTab?: string; initialDay?: string; initialSub?: string }) {
   // 대표 10/21 12:00 영업 재편 3): 허브 = 모든 기회 원천의 입구 — 신규 현장·준공 시설·협력사 + 계약만료·재입찰·공공데이터·지역별 카테고리
-  const [tab, setTab] = useState(['buildings', 'facilities', 'vendors', 'contracts', 'prospects', 'regions'].includes(initialTab ?? '') ? initialTab! : 'buildings'); const [s, setS] = useState(''); const [detail, setDetail] = useState<any>(null);
   const sess = useSession(); const bidsOn = sess.features.salesBids !== false;
+  // #537(대표 10/24): 영업기회 안 '입찰' 탭(켠 회사만) — 앱 하단 '영업기회'가 여기로(?tab=bids)
+  const [tab, setTab] = useState(['buildings', 'facilities', 'vendors', 'contracts', 'prospects', 'regions', ...(bidsOn ? ['bids'] : [])].includes(initialTab ?? '') ? initialTab! : 'buildings'); const [s, setS] = useState(''); const [detail, setDetail] = useState<any>(null);
   const [day, setDay] = useState(initialDay === 'today' ? 'today' : ''); // 영업 현황 '오늘 새 영업 DB'
-  const sub = ['contracts', 'prospects', 'regions'].includes(tab);
+  const sub = ['bids', 'contracts', 'prospects', 'regions'].includes(tab);
   const { data, error, reload } = useApi<any>(sub ? (null as unknown as string) : `/api/sales/src?${q({ view: 'hub', tab, q: s, day })}`, [tab, s, day]);
   const [sel, setSel] = useState<string[]>([]); // 대표 10/20 14:15 ④ 일괄 선택
   useEffect(() => setSel([]), [tab]);
   const T = useSalesTerms(); // #408
-  const tabs = [['buildings', T.buildingsTab], ['facilities', T.facilitiesTab], ['vendors', T.vendorsTab], ...(bidsOn ? [['contracts', '계약만료·재입찰']] : []), ['prospects', '공공데이터'], ['regions', '지역별']];
+  const tabs = [...(bidsOn ? [['bids', '입찰']] : []), ['buildings', T.buildingsTab], ['facilities', T.facilitiesTab], ['vendors', T.vendorsTab], ...(bidsOn ? [['contracts', '계약만료·재입찰']] : []), ['prospects', '공공데이터'], ['regions', '지역별']];
   if (sub) return (
     <div className="space-y-3" data-testid="sales-hub">
       <div className="flex flex-wrap gap-1.5">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-hub-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white')}>{l}</button>)}</div>
-      {tab === 'contracts' ? <Contracts /> : tab === 'prospects' ? <Prospects /> : <Regions />}
+      {tab === 'bids' ? <Bids embedded initialTab={['today', 'soon', 'open'].includes(initialSub ?? '') ? initialSub : undefined} /> : tab === 'contracts' ? <Contracts /> : tab === 'prospects' ? <Prospects /> : <Regions />}
     </div>);
   if (error) return <ErrorBox error={error} retry={reload} />;
   return (

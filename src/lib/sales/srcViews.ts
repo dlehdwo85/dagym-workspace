@@ -375,8 +375,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, raw: r }; })
       .filter((n) => hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
         && (tab !== 'today' || n.todayHit) && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit)
+        && (tab !== 'soon' || (!!n.close && n.close >= today() && n.close <= plus(3) && isOpenBid({ ...n, related: true }, n.work, today()))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중
         && (!q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz))))
-      .sort((a, b) => tab === 'open' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
+      .sort((a, b) => tab === 'open' || tab === 'soon' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
     return { ...meta, tab, total: N.length, items, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {

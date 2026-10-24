@@ -27,7 +27,21 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.match(await card.innerText(), /다음 연락 \d{1,2}\. \d{1,2}\.\([일월화수목금토]\)/, '날짜 한국어');
     assert.ok(!/0\.00|2026-/.test(await card.innerText()), '0.00·ISO 날짜 없음');
     const tabs = (await p.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-    assert.deepEqual(tabs, ['홈', '리드', '제안·계약', '영업기회'], '앱 하단 탭에 파이프라인·입찰 없음(#422 더보기 없음, #438)');
+    assert.deepEqual(tabs, ['홈', '영업기회', '리드', '제안·계약', '메시지'], '#537 대표 10/24: 영업 하단 5칸 — 입찰은 영업기회 안(#438)');
+    // #537 영업기회 = 허브 › 입찰(오늘 새 공고·마감 임박(3일)·진행 중) · 입찰 화면에서도 영업기회 칸 켜짐
+    await p.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap();
+    await p.waitForURL(/\/s\/sales\/hub\?tab=bids$/);
+    const hb = p.getByTestId('sales-bids'); await hb.waitFor();
+    assert.match(await p.getByTestId('sales-hub-bids').getAttribute('class'), /border-brand-600/, '입찰 칩 선택');
+    assert.deepEqual((await hb.locator('button[data-testid^="sales-bids-tab-"]').allInnerTexts()).map((x) => x.trim()), ['오늘 새 공고', '마감 임박(3일)', '진행 중']);
+    assert.equal(await hb.getByTestId('bids-all-link').getAttribute('href'), '/s/sales/bids');
+    await hb.getByTestId('sales-bids-tab-open').tap();
+    await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 체육시설' }).waitFor();
+    assert.match(await p.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).getAttribute('class'), /font-bold/, '영업기회 칸 켜짐');
+    await p.locator('#wos-intro').waitFor({ state: 'detached' }).catch(() => {}); // 첫 실행 애니메이션(약 1초)이 끝난 뒤
+    await p.screenshot({ path: `${SHOTS}/226-sales-app-hub-bids.png` });
+    await p.goto(`${BASE}/s/sales/leads`);
+    await p.getByTestId('sales-lead-card').filter({ hasText: 'E2E 앱 거래처' }).waitFor();
     await p.screenshot({ path: `${SHOTS}/139-sales-app-leads.png` });
     // 대표 10/20 5): 영업 목록 상단 'AI에게 요청' → 예시 칩 → AI 비서(영업 맥락)로
     if (await p.getByTestId('ai-ask').count()) {

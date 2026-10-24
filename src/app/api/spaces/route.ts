@@ -11,7 +11,11 @@ export const GET = handler(async ({ user }) => {
       count(*) filter (where t.status <> 'done' and t.due_date <= (now() at time zone 'Asia/Seoul')::date)::int as today
     from tasks t where t.deleted_at is null and t.assignee_id = ${user.id}`; // 나에게 배정된 업무
   const summary: Record<string, { text: string; badge: number }> = { work: { text: `내 업무 ${w.open} · 오늘까지 ${w.today}`, badge: 0 } };
-  if (spaces.includes('sales')) summary.sales = { text: '영업관리 이전 준비 중', badge: 0 };
+  if (spaces.includes('sales')) { // #537 앱 하단 '영업기회' 배지 = 오늘 새 공고(당일 공고 메일·알림과 같은 다이제스트 수 — 무거운 원천 계산 없이)
+    const [d] = await sql<{ n: number }[]>`select coalesce((counts->>'total')::int, 0) as n from sales_digests where tenant = ${tenantOf(user)} and day = (now() at time zone 'Asia/Seoul')::date`;
+    const n = d?.n ?? 0;
+    summary.sales = { text: n ? `오늘 새 공고 ${n}건` : '오늘 새 공고 없음', badge: n };
+  }
   if (spaces.includes('marketing')) { // 앱 하단 탭 '승인 대기' 배지
     const t = tenantOf(user);
     const n = await (await import('@/lib/marketing')).approvableCount(t); // 승인함·현황과 같은 계산(마감 지남 제외)

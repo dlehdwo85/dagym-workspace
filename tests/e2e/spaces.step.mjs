@@ -60,8 +60,8 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '제안·계약' }).count(), 0, '하단 탭과 겹치는 제안·계약 없음');
   assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).count(), 1, '입찰·공고는 시트 영업 메뉴에');
   await m.getByTestId('more-sheet').getByLabel('닫기').tap();
-  await m.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap(); // 대표 10/21 12:00 ③: 공공데이터·지역별·계약만료는 허브 카테고리
-  await m.waitForURL(/\/s\/sales\/hub$/);
+  await m.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap(); // 대표 10/21 12:00 ③: 공공데이터·지역별·계약만료는 허브 카테고리 · #537 입찰을 켠 회사는 영업기회 › 입찰로
+  await m.waitForURL(/\/s\/sales\/hub(\?tab=bids)?$/);
   await m.getByTestId('sales-hub-prospects').tap(); await m.getByTestId('prospects').waitFor();
   await m.getByTestId('profile-menu').tap();
   await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap();
@@ -82,9 +82,9 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   const onColor = () => m.getByTestId('mobile-tabs').locator('a.font-bold').first().evaluate((el) => getComputedStyle(el).color);
   assert.equal(await onColor(), 'rgb(29, 78, 216)', '영업 하단 탭 선택 = 파랑');
   for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/sales-${w}.png` }); }
-  // 대표 확정 10/22(#422): 하단 '더보기' 없음 — 영업은 4칸 같은 폭(나머지는 오른쪽 위 프로필 버튼 시트)
+  // 대표 확정 10/22(#422): 하단 '더보기' 없음 — 같은 폭(나머지는 오른쪽 위 프로필 버튼 시트) · #537 대표 확정 10/24: 영업 5칸
   const tabs = async () => (await m.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-  assert.deepEqual(await tabs(), ['홈', '리드', '제안·계약', '영업기회']); // 대표 검수 10/20: '영업 현황' → '홈', ② 앱 파이프라인 탭 제거 · #438 입찰은 하단 탭에 넣지 않음(대표 10/19)
+  assert.deepEqual(await tabs(), ['홈', '영업기회', '리드', '제안·계약', '메시지']); // #537 홈·영업기회(입찰은 그 안, #438)·리드·제안·계약·메시지
   const w = await m.getByTestId('mobile-tabs').locator(':scope > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
   assert.ok(Math.max(...w) - Math.min(...w) <= 1, `같은 폭 ${w}`);
   await m.getByTestId('mobile-space-switch').tap();
