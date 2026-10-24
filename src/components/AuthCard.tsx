@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { CalendarDays, CheckCircle2, Eye, EyeOff, ShieldCheck, TriangleAlert, Users } from 'lucide-react';
+import { CalendarDays, CheckCircle2, Eye, EyeOff, Gift, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { inputCls } from './ui';
 
 
@@ -16,11 +16,12 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
           <div className="mt-1 text-xs text-slate-400">업무 · 일정 · 알림을 한 곳에</div>
         </div>
         <div className="relative">
-          <h2 className="text-[28px] font-bold leading-snug tracking-tight">음성으로 등록하고,<br />정확한 시간에 알림 받기.</h2>
+          {/* #538 대표 선택 10/24: 왼쪽 큰 문구·셋째 줄 */}
+          <h2 className="text-[28px] font-bold leading-snug tracking-tight">흩어진 업무·일정·파일을<br />한곳에 모으세요.</h2>
           <ul className="mt-8 space-y-4 text-sm text-slate-300">
             <li className="flex items-center gap-3"><CheckCircle2 className="size-5 text-green-400" />업무 배정 · 완료 확인 · 결재까지 한 흐름으로</li>
             <li className="flex items-center gap-3"><CalendarDays className="size-5 text-sky-400" />회사·부서·현장 일정과 마감일을 한 캘린더에</li>
-            <li className="flex items-center gap-3"><Users className="size-5 text-orange-300" />혼자서도, 팀으로도 — 무료로 시작</li>
+            <li className="flex items-center gap-3"><Gift className="size-5 text-orange-300" />14일 무료 체험으로 시작</li>
           </ul>
         </div>
         <div className="relative text-xs text-slate-400">개인 무료 · 팀 5명까지 무료</div>
