@@ -98,6 +98,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
       v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, v.revision, -- #545 수정본 배지(반영한 요청·AI 수정 n/3)
+      jsonb_array_length(case when jsonb_typeof(b.feed->'templates') = 'array' then b.feed->'templates' else '[]'::jsonb end) > 0 as brand_templates, -- #544 피드 틀이 있으면 [다른 틀로 다시 그리기]
       (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality, c.rationale,
       (select json_build_object('kind', p.kind, 'status', p.status) from mkt_production_requests p where p.content_id = c.id and p.kind in ('image', 'video', 'regen_image', 'regen_video') and p.status in ('open', 'needs_approval') order by p.created_at desc limit 1) as production,
       (select max(d.version) from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version) as reapprove_from,

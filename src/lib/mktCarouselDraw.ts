@@ -17,43 +17,49 @@ export type Slide = { kind: SlideKind; title: string; body: string; rows: string
 /** height: #516 자동 시안 스토리 = 1920(9:16, 위·아래 안전 영역) — 없으면 1350(4:5) */
 export type DrawOpts = { template: 'box' | 'clean' | 'bold'; color: string | null; brand: string; keyword: string; logo: Buffer | null; font: Buffer | null; height?: number };
 
-type El = { type: string; key: null; props: Record<string, unknown> };
-const h = (style: Record<string, unknown>, children: unknown): El => ({ type: 'div', key: null, props: { style: { display: 'flex', ...style }, children } });
-const img = (src: string, w: number, hh: number, style: Record<string, unknown>): El => ({ type: 'img', key: null, props: { src, width: w, height: hh, style: { width: w, height: hh, objectFit: 'cover', ...style } } });
+export type El = { type: string; key: null; props: Record<string, unknown> };
+export const h = (style: Record<string, unknown>, children: unknown): El => ({ type: 'div', key: null, props: { style: { display: 'flex', ...style }, children } });
+export const img = (src: string, w: number, hh: number, style: Record<string, unknown>): El => ({ type: 'img', key: null, props: { src, width: w, height: hh, style: { width: w, height: hh, objectFit: 'cover', ...style } } });
 
 let base: Promise<{ bold: Buffer; reg: Buffer; has: (cp: number) => boolean }> | null = null;
-function fonts() {
+export function fonts() {
   base ??= (async () => {
     const dir = join(process.cwd(), 'assets', 'fonts');
     const [bold, reg] = await Promise.all([readFile(join(dir, 'NotoSansKR-Bold.otf')), readFile(join(dir, 'NotoSansKR-Regular.otf'))]);
-    const fk: any = (await import('@pdf-lib/fontkit')).default;
+    const m: any = await import('@pdf-lib/fontkit'); const fk = m.default ?? m; // CJS 묶음(시험 스크립트)에서도
     const f = fk.create(reg);
     return { bold, reg, has: (cp: number) => f.hasGlyphForCodePoint(cp) };
   })().catch((e) => { base = null; throw e; });
   return base;
 }
 /** 글꼴에 있는 글자만(체크 표시는 ✓ 로) — 없는 글자가 있으면 next/og 가 외부 글꼴을 받으러 감 */
-function clean(s: string, has: (cp: number) => boolean) {
+export function clean(s: string, has: (cp: number) => boolean) {
   return [...String(s ?? '').replace(/[✔✅☑]/g, '✓')].filter((ch) => ch === '\n' || has(ch.codePointAt(0)!)).join('').replace(/[ \t]+\n/g, '\n').trim();
 }
-const lum = (hex: string) => { const n = parseInt(hex.slice(1), 16); const c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+export const lum = (hex: string) => { const n = parseInt(hex.slice(1), 16); const c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
 export const okColor = (c: string | null | undefined) => (c && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
 /** 브랜드를 색 없이 만들면 들어가는 기본 보라(083 마이그레이션·brandInput) — 바탕 색을 고를 때는 '정하지 않음'으로 본다 */
 const UNSET_BRAND_COLOR = '#7C3AED';
-/** #516 후속 3(로컬 10/24 08:40 '하이링크도 보라'): 그림 바탕 색 = 브랜드 키트 끝 화면 색 → 브랜드 색(기본 보라 제외) → 회사 정보 기본 브랜드 색 → 없으면 null(진한 남색) */
-export async function brandDrawColor(tenant: string, b?: { color: string | null; video?: { endColor?: string | null } | null } | null) {
-  const own = okColor(b?.video?.endColor) ?? (okColor(b?.color) && b!.color!.toUpperCase() !== UNSET_BRAND_COLOR ? b!.color : null);
-  if (own) return own;
+export type ColorFrom = 'feed' | 'video' | 'brand' | 'company';
+type ColorBrand = { color: string | null; video?: { endColor?: string | null } | null; feed?: { palette?: { bg?: string | null } | null } | null } | null | undefined;
+/** #516 후속 3(로컬 10/24 08:40 '하이링크도 보라') → #544(로컬 13:55 '키트 color 와 프롬프트 색이 다름 — 한 곳으로'): 시안 그림·제작 프롬프트·카드뉴스 바탕 색은 여기 한 곳.
+ *  브랜드 키트 피드 틀 바탕 → 영상 끝 화면 색 → 브랜드 색(기본 보라 제외) → 회사 정보 기본 브랜드 색 → 없으면 null(진한 남색) · from = 키트 화면에 출처 표시 */
+export async function brandColorInfo(tenant: string, b?: ColorBrand): Promise<{ color: string | null; from: ColorFrom | null }> {
+  const feed = okColor(b?.feed?.palette?.bg); if (feed) return { color: feed, from: 'feed' };
+  const video = okColor(b?.video?.endColor); if (video) return { color: video, from: 'video' };
+  if (okColor(b?.color) && b!.color!.toUpperCase() !== UNSET_BRAND_COLOR) return { color: b!.color, from: 'brand' };
   const { db } = await import('./db');
   const [p] = await db()<{ brand_color: string | null }[]>`select brand_color from company_profiles where tenant = ${tenant} and brand_color is not null order by is_default desc limit 1`.catch(() => []);
-  return okColor(p?.brand_color);
+  const company = okColor(p?.brand_color);
+  return { color: company, from: company ? 'company' : null };
 }
+export const brandDrawColor = async (tenant: string, b?: ColorBrand) => (await brandColorInfo(tenant, b)).color;
 const len = (s: string) => Math.max(0, ...s.split('\n').map((l) => [...l].length));
 const titleSize = (t: string, cover: boolean) => { const n = len(t); return cover ? (n <= 10 ? 112 : n <= 16 ? 96 : n <= 24 ? 80 : 66) : (n <= 12 ? 84 : n <= 18 ? 72 : n <= 26 ? 62 : 54); };
 const bodySize = (b: string) => { const n = [...b.replace(/\n/g, '')].length; return n <= 50 ? 46 : n <= 100 ? 40 : n <= 160 ? 35 : 31; };
 /** 줄 = 낱말(띄어쓰기 단위) 칸을 이어 놓고 넘치면 다음 줄로 — satori keep-all 은 문장부호를 낱말과 따로 떼어
  *  줄 끝에 자리가 모자라면 '?'·'!' 만 다음 줄 맨 앞에 혼자 보낸다(로컬 10/24 08:40 '…있으시죠 / ?') */
-const lines = (s: string, size: number, center = false) => s.split('\n').map((l) => l.trim()).filter(Boolean)
+export const lines = (s: string, size: number, center = false) => s.split('\n').map((l) => l.trim()).filter(Boolean)
   .map((l) => h({ width: '100%', flexWrap: 'wrap', justifyContent: center ? 'center' : 'flex-start', columnGap: Math.round(size * 0.26) }, l.split(/\s+/).map((w) => h({}, w))));
 
 /** 사진 자리: clean = 위쪽 둥근 틀, box·bold = 장 전체 */
@@ -70,7 +76,7 @@ async function photoLayer(buf: Buffer, f: ReturnType<typeof frameOf>) {
   const mask = Buffer.from(`<svg width="${f.w}" height="${f.h}"><rect width="${f.w}" height="${f.h}" rx="${f.r}" ry="${f.r}"/></svg>`);
   return sharp(await fit.ensureAlpha().png().toBuffer()).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
 }
-async function logoUri(buf: Buffer) {
+export async function logoUri(buf: Buffer) {
   const sharp = (await import('sharp')).default;
   const out = await sharp(buf, { density: 300 }).resize(320, 64, { fit: 'inside', withoutEnlargement: false }).png().toBuffer();
   const m = await sharp(out).metadata();

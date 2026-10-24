@@ -61,6 +61,7 @@ export const deadlineLabel = (deadline: string | null, at: string | null) => dea
 export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null; brand_logo?: string | null; handle?: string | null;
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
   revision?: Revision | null; reapprove_comment?: string | null; // #545 수정본 배지(반영한 요청·AI 수정 n/3)
+  brand_templates?: boolean; // #544 브랜드 키트 피드 틀이 있으면 [다른 틀로 다시 그리기]
   auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; visual?: { by: string } | null; postponed?: { from?: string | null; at?: string; restored?: boolean } | null; held?: { at?: string; reason?: string } | null; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null } } | null; production?: { kind: string; status: string } | null;
   rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; week?: number | null; qa?: { needsHuman?: boolean; issues?: string[]; notes?: string[] } | null } | null;
   last_decision?: { decision: string; comment: string | null; at: string; version: number; by: string | null } | null };
@@ -100,8 +101,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
   // #516 (c): 시안 없는 카드 [지금 만들기] = 서버가 브랜드 키트·자료실 사진으로 그려 새 버전(크레딧 0) → 승인 대기
   async function makeNow(redraw = false) {
     setMaking(true);
-    try { const r = await api<{ version: number; photo: string | null }>(`/api/marketing/contents/${c.id}/visual`, { body: redraw ? { redraw: true } : {} });
-      toast.ok(`시안을 ${redraw ? '다시 ' : ''}그려 붙였습니다(v${r.version}) — ${r.photo ? `사진: ${r.photo}` : '브랜드 색 바탕'}`); onDone(); }
+    try { const r = await api<{ version: number; photo: string | null; template?: string | null }>(`/api/marketing/contents/${c.id}/visual`, { body: redraw ? { redraw: true } : {} });
+      toast.ok(`시안을 ${redraw ? '다시 ' : ''}그려 붙였습니다(v${r.version}) — ${[r.template ? `틀: ${r.template}` : '', r.photo ? `사진: ${r.photo}` : '브랜드 색 바탕'].filter(Boolean).join(' · ')}`); onDone(); }
     catch (e: any) { toast.error(e.message); }
     finally { setMaking(false); }
   }
@@ -167,7 +168,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
           {c.status !== 'approved' && !noVisual && <Button size="sm" onClick={() => decide('approve')} data-testid="card-approve">{c.reapprove_from ? `수정본 v${c.current_version} 승인` : '승인'}</Button>}
           <Button size="sm" variant="secondary" onClick={() => setMode('changes')} data-testid="card-changes">{c.status === 'approved' ? '게시 전 수정 요청' : '수정 요청'}</Button>
           {/* #516 후속: 서버가 그린 시안이 어색하면(바탕 글자 겹침 등) 브랜드 색 바탕으로 무료로 다시 그림(블로그는 대표 이미지만) */}
-          {c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" onClick={() => makeNow(true)} disabled={making} data-testid="card-redraw">{making ? '그리는 중…' : '브랜드 색으로 다시 그리기'}</Button>}
+          {c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" onClick={() => makeNow(true)} disabled={making} data-testid="card-redraw">{making ? '그리는 중…' : c.brand_templates ? '다른 틀로 다시 그리기' : '브랜드 색으로 다시 그리기'}</Button>}
           {/* #516 (a): 서버가 그린 시안 → Higgsfield AI 이미지로 바꾸기는 크레딧이 들어 따로(제작 요청 카드·한도 확인) */}
           {c.auto && c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" data-testid="card-ai-image"
             onClick={() => confirm(`AI 이미지로 다시 만들면 약 ${AI_REGEN_CREDITS}크레딧이 듭니다(이번 달 한도를 넘으면 한도 승인 뒤 제작). 지금 시안은 그대로 두고 새 이미지가 붙으면 다시 승인 요청이 옵니다. 진행할까요?`) && decide('changes', AI_REGEN)}>AI 이미지로 다시 · 약 {AI_REGEN_CREDITS}크레딧</Button>}

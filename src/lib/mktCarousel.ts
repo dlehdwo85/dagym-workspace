@@ -262,7 +262,7 @@ export async function patchCarousel(u: SessionUser, id: string, i: z.infer<typeo
 
 // ---------------- ③ 그리기 ----------------
 async function drawOpts(r: Row): Promise<DrawOpts> {
-  const [b] = r.brand_id ? await db()<{ name: string; color: string | null; video: any }[]>`select name, color, video from mkt_brands where id = ${r.brand_id}` : [];
+  const [b] = r.brand_id ? await db()<{ name: string; color: string | null; video: any; feed: any }[]>`select name, color, video, feed from mkt_brands where id = ${r.brand_id}` : [];
   const kit = b?.video ?? {};
   const { libBytes } = await import('./mktVideo');
   const D0 = await import('./mktCarouselDraw');
