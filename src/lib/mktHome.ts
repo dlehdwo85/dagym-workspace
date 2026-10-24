@@ -196,7 +196,7 @@ export async function nightAssistantTick() {
   const L = await import('./later');
   for (const { tenant } of ts) {
     const due = await sql<any[]>`select * from mkt_contents where tenant = ${tenant} and auto and status = 'draft' and produced_at is null and not is_test
-      and scheduled_at between now() and now() + interval '3 days'
+      and scheduled_at between now() and now() + interval '3 days' and not coalesce(quality ? 'failed', false)
       and not exists (select 1 from mkt_production_requests q where q.content_id = mkt_contents.id and q.kind = 'topic' and q.status = 'open') order by scheduled_at limit 3`;
     out.push({ tenant, due: due.length });
     if (!due.length) continue;

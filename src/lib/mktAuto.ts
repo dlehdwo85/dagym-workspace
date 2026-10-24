@@ -173,6 +173,7 @@ export function qualityCheck(body: string, brief: string, s: MktSettings, banned
   for (const w of banned) if (w && body.includes(w)) issues.push(`금지어 '${w}'`);
   if (!s.allow_generated_people && /(실제\s*(고객|회원)|고객\s*후기|회원\s*후기|체험담|"[^"]{5,}"\s*[-—]\s*\S+\s*(님|회원))/.test(body)) issues.push('생성 인물·후기를 실제 고객처럼 씀');
   if (!s.allow_slideshow && (kind === 'reels' || kind === 'video' || kind === 'shorts') && /슬라이드\s*쇼|사진\s*넘기기|느린\s*줌/.test(brief)) issues.push('슬라이드쇼(사진 + 느린 줌) 금지');
+  if (emptyBody(body, s.ai_label)) return { passed: false, issues: [...issues, '본문이 비었거나 너무 짧음'], body: body.trim() }; // QA 10/24 ①: 빈 글에 AI 표시 줄만 붙여 '내용 있는 글'로 만들지 않음
   const fixed = body.includes(s.ai_label) ? body : `${body.trim()}\n\n${s.ai_label}`;
   return { passed: issues.length === 0, issues, body: fixed };
 }
@@ -270,6 +271,9 @@ export async function materialOf(c: any, brand: any, rule: any) {
 /** 남은 [브랜드] 같은 자리표시는 아는 이름으로 바꿈 */
 const fillName = (t: string, name: string) => (name ? t.replace(/\[(브랜드|브랜드\s*이름|브랜드명|회사|회사\s*이름|회사명|상호|업체명)\]/g, name) : t);
 
+/** 로컬 QA 10/24 ①: 빈 글(공백·AI 표시 줄만)·JSON 모양 본문은 글로 저장하지 않음 */
+const JSON_LIKE = /^\s*(?:\{|\[\s*["{[])|"(?:title|body|brief|why|hooks|keyword|card|script)"\s*:/; // 본문 첫머리 '[브랜드]' 같은 자리표시는 JSON 이 아님
+export const emptyBody = (t: string, aiLabel?: string) => (aiLabel ? t.split(aiLabel).join('') : t).replace(/\s/g, '').length < 5;
 type Draft = { title: string; body: string; brief: string; why: string; hooks: string[]; keyword: string; script: string[]; card?: import('./mktFeedTemplates').FeedCard }; // card = #544 시안 그림 칸
 const VIDEO_KINDS = ['reels', 'shorts', 'video'];
 /** #426 훅 자리: 릴스·쇼츠·영상 = 첫 장면(3초), 블로그 = 제목, 그 밖 = 본문 첫 줄 */
@@ -291,7 +295,7 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
   const voice = Q.voicePrompt(brand?.voice);
   const mem = await (await import('./mktTeam')).memoryText(c.tenant, 'designer', c.brand_id ?? null).catch(() => ''); // #534 지난 수정 요청 사유(디자인 담당 기억)를 다음 원고에
   const F = await import('./mktFeedTemplates'); // #544 피드 틀 칸(머리말·핵심·비교·강조 낱말·기간·가격 — 금액·기간은 재료에 있는 것만)
-  const r = await p.chat({
+  const req: Parameters<typeof p.chat>[0] = {
     system: `회사 마케팅 담당 AI 비서입니다. ${kindRule}를 씁니다. JSON 만.
 - 한국어, 브랜드 말투: ${brand?.tone || '친절하고 담백하게'}. 금지어: ${bannedOf(brand).join(', ') || '없음'}.
 - 실사 사진 우선. ${s.allow_generated_people ? '' : '생성 인물을 실제 고객처럼 쓰지 않음(후기·체험담 지어내지 않음). '}${s.allow_slideshow ? '' : '슬라이드쇼(사진 + 느린 줌) 구성 금지. '}
@@ -308,13 +312,20 @@ ${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}
     tools: [], messages: [{ role: 'user', content: `[재료]\n${m.text}\n\n` + (extra ? `[지난 원고]\n${extra.prev}\n\n[수정 요청]\n${extra.comment}\n\n수정 요청을 반영해 다시 써 주세요.` : `채널: ${c.channel}\n게시일: ${ymd(new Date(c.scheduled_at))}\n주제: ${m.topic || '재료의 브랜드·상품 소개에서 이번 주에 알릴 만한 것 하나'}`) }],
     format: { type: 'object', additionalProperties: false, required: ['title', 'body', 'brief', 'why', 'hooks', 'keyword', ...(video ? ['script'] : ['card'])],
       properties: { title: { type: 'string' }, body: { type: 'string' }, brief: { type: 'string' }, why: { type: 'string' }, hooks: { type: 'array', items: { type: 'string' } }, keyword: { type: 'string' }, ...(video ? { script: { type: 'array', items: { type: 'string' } } } : { card: F.CARD_FORMAT }) } },
-  });
-  await logAi(c, p, r, P);
-  const raw = textOf(r);
+  };
   const strip = (t: string) => fillName(t.replace(/^\s*\[시험\]\s*/, ''), m.name);
   const arr = (x: unknown) => (Array.isArray(x) ? x.map((y) => fillName(String(y ?? ''), m.name).trim()).filter(Boolean) : []);
-  try { const o = JSON.parse(raw); return { title: strip(String(o.title || c.title)).slice(0, 200), body: layoutBody(c.kind, fillName(String(o.body ?? ''), m.name)), brief: fillName(String(o.brief ?? ''), m.name), why: fillName(String(o.why ?? ''), m.name).slice(0, 300), hooks: arr(o.hooks).slice(0, 3), keyword: String(o.keyword ?? '').trim().slice(0, 30), script: arr(o.script).slice(0, 12), card: video ? undefined : F.cardFrom(o.card, m.text) }; }
-  catch { return { title: c.title, body: fillName(raw, m.name), brief: '', why: '', hooks: [], keyword: '', script: [] }; }
+  // 로컬 QA 10/24 ①: 형식이 깨진 답(길이 초과로 잘림·JSON 아님·본문이 비었거나 JSON 모양)은 본문에 넣지 않음 — 한 번 다시, 그래도면 '제작 실패'
+  const parse = (r: any): Draft | null => {
+    if (r.stop_reason === 'max_tokens') return null;
+    let o: any; try { o = JSON.parse(textOf(r)); } catch { return null; }
+    if (!o || typeof o !== 'object' || emptyBody(String(o.body ?? ''), s.ai_label) || JSON_LIKE.test(String(o.body ?? ''))) return null;
+    return { title: strip(String(o.title || c.title)).slice(0, 200), body: layoutBody(c.kind, fillName(String(o.body ?? ''), m.name)), brief: fillName(String(o.brief ?? ''), m.name), why: fillName(String(o.why ?? ''), m.name).slice(0, 300), hooks: arr(o.hooks).slice(0, 3), keyword: String(o.keyword ?? '').trim().slice(0, 30), script: arr(o.script).slice(0, 12), card: video ? undefined : F.cardFrom(o.card, m.text) };
+  };
+  let d: Draft | null = null;
+  for (let k = 0; k < 2 && !d; k++) { const r = await p.chat(req); await logAi(c, p, r, P); d = parse(r); }
+  if (!d) { const { HttpError } = await import('./errors'); throw new HttpError(502, 'draft_invalid', '원고 형식이 두 번 다 깨져 본문에 넣지 않았습니다(제작 실패)'); }
+  return d;
 }
 
 /** #426 약한 훅 다시 쓰기 — 후보 3개가 모두 탈락했을 때 한 번만 */
@@ -383,10 +394,11 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   const [rule] = c.rule_id ? await sql<any[]>`select * from mkt_rules where id = ${c.rule_id}` : [];
   const m = await materialOf(c, brand, rule);
   if (!m.enough) return askTopic(c, actorId);
-  const d = await writeDraft(c, s, brand, rule);
+  const d = await writeDraft(c, s, brand, rule).catch(async (e) => { if (e?.code === 'draft_invalid') await markFailed(c, e.message); throw e; });
   const f = await refineDraft(c, d, brand);
   const kind = c.kind as Kind;
   const q = qualityCheck(f.body, d.brief, s, bannedOf(brand), kind, f.title);
+  if (emptyBody(q.body, s.ai_label)) { await markFailed(c, '본문이 비었거나 너무 짧음'); const { HttpError } = await import('./errors'); throw new HttpError(502, 'draft_invalid', '다듬은 뒤 본문이 비어 저장하지 않았습니다(제작 실패)'); }
   if (f.errors.length) { q.passed = false; q.issues = [...q.issues, ...f.errors]; }
   // #516 시안이 붙은 뒤에만 승인함: 피드·스토리(인스타·페북)는 서버가 바로 그림(크레딧 0), 영상은 제작 요청 카드로 만든 뒤 붙으면 승인 대기
   // 블로그(로컬 10/24 (c)): 대표 이미지를 그리고 본문 사진 1장(실사)을 붙임 — 둘 다 붙어야 승인 대기(대표 10/20 18:45 ③), 실사가 없으면 '수정 요청'에서 사진을 기다림
@@ -422,6 +434,13 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   if (!held && !isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${f.title}` : kind === 'blog' && q.issues.length === 1 ? `원고 완료 — 표지·본문 사진을 붙여 주세요: ${f.title}` : visualOnly ? `원고 완료 — 시안 제작 중: ${f.title}` : `품질 검사 미통과: ${f.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
   return { id: c.id, passed: q.passed, issues: q.issues, ...(held ? { held: true } : {}) };
+}
+
+/** 로컬 QA 10/24 ①: 원고 형식이 깨져 만들지 못한 칸 — 본문 없이 '제작 실패' 표시. 자동 제작은 2시간 뒤 한 번 더, 두 번째도 실패면 자동은 멈추고 사람이 [AI 다시 만들기] */
+async function markFailed(c: any, reason: string) {
+  const n = Number(c.quality?.failed?.n ?? 0) + 1;
+  await db()`update mkt_contents set quality = coalesce(quality, '{}'::jsonb) || ${db().json({ failed: { at: new Date().toISOString(), reason: reason.slice(0, 200), n } } as never)},
+    produce_at = ${n >= 2 ? null : new Date(Date.now() + 2 * 3600e3)}, updated_at = now() where id = ${c.id} and produced_at is null`.catch(() => {});
 }
 
 /** 재료 부족: 원고를 만들지 않고 '주제 필요' 카드로 질문 — 답(주제)을 넣으면 다음 실행에 그 주제로 제작 */

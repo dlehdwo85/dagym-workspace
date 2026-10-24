@@ -230,6 +230,7 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
     // 사진·영상이 붙으면 '사진 필요'(블로그)·'시안 없음/영상 제작 중'(#516) 줄은 지우고, 그것뿐이었으면 검사 결과를 비움
     // 서버가 그린 시안 표시(visual)는 같은 그림을 그대로 둘 때만 남김 — 사람이 다른 사진을 붙이면 [AI 이미지로 다시] 대상이 아님
     let quality = c.quality ?? null;
+    if (quality?.held) { const { held: _held, ...rest } = quality; quality = Object.keys(rest).length ? rest : null; } // 로컬 QA 10/24 #7: 초안 보관 글에 수정본을 올리면 승인 대기 — 보관 표시는 지움('pending/held' 섞임)
     if (quality && i.mediaIds.length) {
       const { VISUAL_ISSUE } = await import('./mktAutoVisual');
       const { visual, ...q } = quality;
@@ -262,7 +263,7 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
     }
     const status = { approve: 'approved', changes: 'changes', hold: 'hold' }[i.decision];
     await tx`insert into mkt_decisions (content_id, version, decision, comment, decided_by) values (${id}, ${i.version}, ${i.decision}, ${i.comment ?? null}, ${u.id})`;
-    await tx`update mkt_contents set status = ${status}, approved_version = ${i.decision === 'approve' ? i.version : null}, updated_at = now() where id = ${id}`;
+    await tx`update mkt_contents set status = ${status}, approved_version = ${i.decision === 'approve' ? i.version : null}, quality = case when quality ? 'held' then quality - 'held' else quality end, updated_at = now() where id = ${id}`; // QA 10/24 #7: 결정하면 초안 보관 표시는 지움
     if (c.created_by) await notify(tx, { userIds: [c.created_by], type: 'review_result', title: `${{ approve: '승인', changes: '수정 요청', hold: '보류' }[i.decision]}: ${c.title}`, body: i.comment ?? `v${i.version}`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mktd:${id}:${i.version}:${i.decision}`, space: 'marketing' });
     await audit(tx as never, u.id, 'mkt.decide', 'mkt_content', id, { version: i.version, decision: i.decision }, ip);
     return { status };
