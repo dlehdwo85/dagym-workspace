@@ -418,6 +418,13 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     if (e.reads) setReads((r) => ({ ...r, ...Object.fromEntries(e.reads!.filter((x) => x.room_id === id).map((x) => [x.user_id, x.last_read_id])) }));
   }), [live, id, markRead, user.id]);
   useEffect(() => { if (!menu) return; const close = () => setMenu(null); window.addEventListener('click', close); return () => window.removeEventListener('click', close); }, [menu]);
+  // 로컬 10/25 00:30(136차 확인): Esc 로 😊 창·[+] 패널·메시지 더 보기 메뉴 닫기 — 수정·삭제 메뉴가 열린 채 남지 않게(위에 뜬 창이 있으면 그 창이 먼저)
+  useEffect(() => {
+    if (!menu && !active && !emojiOpen && !plusOpen) return;
+    const h = (e: KeyboardEvent) => { if (e.key !== 'Escape' || document.querySelector('[data-modal-root]')) return; setMenu(null); setActive(null); setEmojiOpen(false); setPlusOpen(false); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [menu, active, emojiOpen, plusOpen]);
 
   const members = data?.members ?? [];
   const toWire = (s: string) => members.filter((m) => m.id !== user.id).reduce((acc, m) => acc.split(`@${m.name}`).join(`@[${m.name}](${m.id})`),

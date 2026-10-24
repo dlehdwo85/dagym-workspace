@@ -171,7 +171,7 @@ export async function getContent(u: SessionUser, id: string) {
   const rules = await Q.qualityRules();
   // 로컬 QA 10/24 ②: 올리기 전 자동 검사 — AI 시안은 제작 때 결과, 사람이 올린 버전은 지금 본문으로(보여 주기만, 막지 않음)
   const preflight: string[] | undefined = saved ? saved.preflight : cur ? Q.preflight({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', isTest: !!c.is_test, aiLabel: st.ai_label, facts: Q.factsOf(c.brand_facts),
-    otherBrands: c.brand_id ? (await sql<{ name: string }[]>`select name from mkt_brands where tenant = ${tenantOf(u)} and id <> ${c.brand_id}`).map((b) => b.name) : [], brandName: kw[0] ?? null, script: c.quality?.script ?? null, cross: c.cross_channels ?? [] }, rules) : undefined;
+    otherBrands: Q.otherBrandNames(await Q.otherBrands(tenantOf(u), c.brand_id)), brandName: kw[0] ?? null, script: c.quality?.script ?? null, cross: c.cross_channels ?? [] }, rules) : undefined;
   // #499-1 용도를 바꿨으면(콘텐츠형↔광고형) 제작 때 보고서의 훅 후보·장면으로 그 기준에 맞춰 다시 채점(자동 수정 기록은 그대로)
   const qualityReport = saved && Q.asMode(saved.mode) === mode ? saved
     : cur ? { ...Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', keywords: kw, voice: c.brand_voice, cross: c.cross_channels ?? [], mode,

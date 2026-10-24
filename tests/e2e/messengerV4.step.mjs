@@ -65,6 +65,9 @@ export async function messengerV4({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.getByTestId('sticker-tab').click();
   await owner.getByTestId('sticker-ok').click();
   await list.locator('[data-testid="chat-sticker"][data-sticker="ok"]').waitFor();
+  // 137차(로컬 10/25 00:30): Esc 로 😊 창 닫기
+  await owner.getByTestId('chat-emoji-open').click(); await owner.getByTestId('chat-emoji').waitFor();
+  await owner.keyboard.press('Escape'); await owner.getByTestId('chat-emoji').waitFor({ state: 'detached' });
 
   // B8 사진 3장 = 한 묶음 → 좌우 넘기기 뷰어
   await owner.getByTestId('chat-gallery-input').setInputFiles([1, 2, 3].map((n) => ({ name: `현장${n}.png`, mimeType: 'image/png', buffer: PNG })));
@@ -97,6 +100,9 @@ export async function messengerV4({ owner, ctx, sql, BASE, SHOTS }) {
   // B9 메시지 → 일정으로 만들기(글의 날짜·시각) · B10 자주 쓰는 반응
   await ctx.staffA.client.ok('POST', `/api/chat/rooms/${room}/messages`, { body: '내일 오후 3시 현장 점검' });
   const src = list.getByTestId('chat-message').filter({ hasText: '내일 오후 3시 현장 점검' }); await src.waitFor({ timeout: 20000 });
+  // 137차: 메시지 더 보기 메뉴도 Esc 로 닫힘(수정·삭제가 열린 채 남지 않게)
+  await src.hover(); await src.getByTestId('msg-more').click(); await src.getByTestId('msg-to-event').waitFor();
+  await owner.keyboard.press('Escape'); await src.getByTestId('msg-to-event').waitFor({ state: 'detached' });
   await src.hover(); await src.getByTestId('msg-more').click(); await src.getByTestId('msg-to-event').click();
   const em2 = owner.getByTestId('event-modal'); await em2.waitFor();
   assert.deepEqual([await em2.getByTestId('event-date').inputValue(), await em2.getByTestId('event-start').inputValue()], [ymd(1), '15:00']);

@@ -8,6 +8,7 @@ import { audit } from '../log';
 import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
+import { sameProject } from './noticeGroups';
 
 export const WORK_KINDS = ['bid', 'building', 'facility', 'vendor'] as const;
 export type WorkKind = (typeof WORK_KINDS)[number];
@@ -53,11 +54,17 @@ export async function workRecord(sql: Sql, tenant: string, kind: WorkKind, id: s
     : await sql<any[]>`select src_id, status, lead_id, data from sales_work_records where tenant = ${tenant} and src_tbl = ${tbl} and src_id = ${id}`;
   return w ?? null;
 }
-/** 진행 기록 저장(상태·메모·다음 연락일) — 원본 규칙: 처음 메모를 남기면 미검토 → 검토중 */
-export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>) {
+/** 137차: 같은 사업(사전규격 ↔ 본 공고, noticeGroups.sameProject)으로 이어진 이 회사의 대상 아님 공고 id — 진행 기록은 공고마다 가장 최근 것 */
+async function projectSkipped(sql: Sql, tenant: string, id: string, row: any) {
+  const rows = await sql<{ ref_id: string; row: any }[]>`select x.ref_id, n.row from (select distinct on (ref_id) ref_id, status from sales_work_records where tenant = ${tenant} and src_tbl = 'opportunity_work' and ref_id <> ${id} order by ref_id, updated_at desc) x
+    join sales_src_rows n on n.scope = 'global' and n.tbl = 'procurement_notices' and n.src_id = x.ref_id where x.status in ('대상아님', '대상 아님')`;
+  return rows.filter((x) => sameProject(row, x.row)).map((x) => x.ref_id);
+}
+/** 진행 기록 저장(상태·메모·다음 연락일) — 원본 규칙: 처음 메모를 남기면 미검토 → 검토중. linked=false: 함께 되돌리는 안쪽 호출 */
+export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>, opt: { linked?: boolean } = {}) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
-  await item(sql, i.kind, i.id);
+  const row0 = await item(sql, i.kind, i.id);
   await assertWritesOpen(t);
   if (i.status !== undefined && !WORK_STATUS[i.kind].includes(i.status)) throw badRequest(`상태는 ${WORK_STATUS[i.kind].join('·')} 중 하나입니다`);
   const cur = await workRecord(sql, t, i.kind, i.id);
@@ -84,12 +91,15 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>) {
   await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, lead_id, data) values (${t}, ${SRC_TBL[i.kind]}, ${srcId}, ${i.id}, ${status}, ${cur?.lead_id ?? null}, ${sql.json(data)})
     on conflict (tenant, src_tbl, src_id) do update set status = excluded.status, data = excluded.data, updated_at = now()`;
   if (skipNow !== skipWas) await audit(sql, u.id, skipNow ? 'sales_work.skip' : 'sales_work.unskip', i.kind, i.id, { from: cur?.status ?? null, to: status, reason: skipNow ? d.skip_reason ?? null : null }).catch(() => {});
+  // 137차: [대상 아님] 탭의 한 장 = 같은 사업 사전규격·본 공고 — 되돌리기도 함께(이어진 쪽이 따로 대상 아님이었으면 그것도)
+  const together: string[] = [];
+  if (i.restore && i.kind === 'bid' && opt.linked !== false) for (const id of await projectSkipped(sql, t, i.id, row0)) { await saveWork(u, { kind: 'bid', id, restore: true }, { linked: false }); together.push(id); }
   // 대표 10/20 14:15: 영업 진행(연락중 등)으로 바뀌면 업무 자동 생성, 보류·미참여·완료면 업무도 함께
-  const r = await item(sql, i.kind, i.id);
+  const r = row0;
   const bidName = [pick(r, 'complex_name', 'facility_name'), pick(r, 'title', 'notice_title', 'bid_name')].filter(Boolean).join(' '); // 입찰은 '단지 공고명'
   const task = await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: i.kind, id: i.id, name: (i.kind === 'bid' ? bidName : String(pick(r, 'name', 'complex_name', 'company', 'company_name', 'facility_name', 'title') ?? '')) || (await kindName(t, i.kind)), status, nextDate: next,
     deadline: i.kind === 'bid' ? (String(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date') ?? '').slice(0, 10) || null) : null, nextAction: pick(cur?.data, 'next_action') });
-  return { ok: true, status, memo, nextDate: next, task };
+  return { ok: true, status, memo, nextDate: next, task, ...(together.length ? { together } : {}) };
 }
 const norm = (s: string) => s.replace(/[\s()（）·\-_,.]/g, '').toLowerCase();
 /** [진행영업으로 넘기기]: 비슷한 이름의 리드가 있으면 최대 5곳을 먼저(force 로 그래도 새로 만들기) → 리드 생성·연결·상태 '진행영업 전환' */

@@ -6,7 +6,7 @@ import { Button, cx, inputCls, toast } from '@/components/ui';
 /** 로컬 QA 10/24 ⑤·③ 브랜드 사실 카드 + 주제 풀.
  *  사실 카드: 원고는 여기 적힌 연락처·운영 시간·요금·숫자만 씀(없는 숫자는 안 씀). 연락처가 있으면 글 끝에 직접 붙고, 빠지거나 '이미지 참조'로 돌리거나 다른 브랜드 이름이 섞이면 올리기 전 검사가 막음.
  *  주제 풀: 한 줄에 하나 — 이 브랜드만의 주제를 돌아가며 씀(같은 날 묶음은 같은 주제, 다른 브랜드가 앞뒤 3일 안에 쓴 주제는 건너뜀). [AI로 주제 20개 제안] = 초안만(고쳐서 [저장]) */
-export type Facts = { phone?: string; link?: string; website?: string; address?: string; hours?: string; prices?: string; numbers?: string; avoidNames?: string[] };
+export type Facts = { phone?: string; link?: string; website?: string; address?: string; hours?: string; prices?: string; numbers?: string; avoidNames?: string[]; aliases?: string[] };
 const LINES: ['phone' | 'link' | 'website' | 'address' | 'hours', string, number][] = [
   ['phone', '대표 전화(예: 02-000-0000)', 40], ['link', '상담·예약 링크(카카오 채널·예약 페이지)', 200], ['website', '홈페이지 주소', 200], ['address', '주소', 200], ['hours', '운영 시간', 200],
 ];
@@ -15,7 +15,7 @@ const rows = (s: string) => [...new Set(s.split('\n').map((x) => [...x.trim()].s
 
 export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: string; facts?: Facts | null; topic_pool?: string[] | null }; onSaved: () => void }) {
   const init: Facts = brand.facts ?? {};
-  const [f, setF] = useState<Facts>(init); const [avoid, setAvoid] = useState((init.avoidNames ?? []).join(', '));
+  const [f, setF] = useState<Facts>(init); const [avoid, setAvoid] = useState((init.avoidNames ?? []).join(', ')); const [aliases, setAliases] = useState((init.aliases ?? []).join(', '));
   const [topics, setTopics] = useState((brand.topic_pool ?? []).join('\n')); const [busy, setBusy] = useState(false);
   const n = rows(topics).length; const contact = !!(init.phone || init.link || init.website);
   async function draft() {
@@ -29,7 +29,7 @@ export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: stri
   async function save() {
     setBusy(true);
     try {
-      const facts: Facts = { ...Object.fromEntries((['phone', 'link', 'website', 'address', 'hours', 'prices', 'numbers'] as const).map((k) => [k, (f[k] ?? '').trim()])), avoidNames: avoid.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20) };
+      const facts: Facts = { ...Object.fromEntries((['phone', 'link', 'website', 'address', 'hours', 'prices', 'numbers'] as const).map((k) => [k, (f[k] ?? '').trim()])), avoidNames: avoid.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20), aliases: aliases.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 10) };
       await api(`/api/marketing/auto/brands/${brand.id}`, { method: 'PATCH', body: { facts, topicPool: rows(topics).slice(0, POOL_MAX) } });
       toast.ok('사실 카드·주제 풀을 저장했습니다 — 다음 원고부터 씁니다'); onSaved();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
@@ -42,6 +42,8 @@ export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: stri
       <div className="mt-2 grid gap-2 sm:grid-cols-3">
         {LINES.map(([k, label, max]) => <input key={k} className={small} value={f[k] ?? ''} onChange={(e) => setF({ ...f, [k]: e.target.value })} maxLength={max} placeholder={label} aria-label={label} data-testid={`facts-${k}`} />)}
         <input className={small} value={avoid} onChange={(e) => setAvoid(e.target.value)} placeholder="섞으면 안 되는 이름(쉼표) — 다른 회사·옛 이름" aria-label="섞으면 안 되는 이름" data-testid="facts-avoid" />
+        {/* 137차: 이 브랜드의 영문·다른 이름 — 다른 브랜드 글에 섞이면 올리기 전 검사가 막음(피드 머리줄 영문·홈페이지 주소 이름은 자동으로 함께) */}
+        <input className={small} value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="이 브랜드의 다른 이름(쉼표) — 영문·약칭" aria-label="이 브랜드의 다른 이름" title="다른 브랜드 글에 이 이름이 섞이면 올리기 전 검사가 막습니다. 피드 머리줄의 영문 이름과 홈페이지 주소 이름은 따로 적지 않아도 함께 거릅니다." data-testid="facts-aliases" />
       </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <textarea className={cx(inputCls, 'min-h-14 text-xs')} value={f.prices ?? ''} onChange={(e) => setF({ ...f, prices: e.target.value })} maxLength={500} placeholder="요금·혜택 — 원고는 여기 적힌 것만 씀" aria-label="요금·혜택" data-testid="facts-prices" />

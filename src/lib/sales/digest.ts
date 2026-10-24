@@ -18,7 +18,7 @@ import { BID_COLLECTORS } from './collectors';
 import { listBizCats, matchBiz, type BizCat } from './bizCats';
 import { sidoIn } from './region';
 import { digestMail } from './digestMail';
-import { SKIP_ONLY, noKey, noticeKeys, titleKey } from './noticeGroups';
+import { SKIP_ONLY, noKey, noticeKeys, projectSkipOf, settledWork, titleKey } from './noticeGroups';
 import { fixG2bUrl, searchHint, type SearchHint } from './sourceLink';
 
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
@@ -139,7 +139,8 @@ async function tenantLinks(tenant: string, ids: string[]) {
   for (const r of rows) { if (!r.id) continue; if (r.kind === 'procurement_notices__progress') { if (r.cls) cls.set(r.id, r.cls); } else linked.add(r.id); }
   return { linked, cls };
 }
-/** 대표 10/24 추가 ②: 이 회사가 '대상 아님'으로 넘긴 공고 — 같은 공고의 다른 게시(같은 번호 취소·정정 공고, 같은 제목·기관·마감 재게시)도 메일에서 뺌. 그 게시에 다른 진행 기록이 있으면 그대로 */
+/** 대표 10/24 추가 ②: 이 회사가 '대상 아님'으로 넘긴 공고 — 같은 공고의 다른 게시(같은 번호 취소·정정 공고, 같은 제목·기관·마감 재게시)도 메일에서 뺌. 그 게시에 다른 진행 기록이 있으면 그대로.
+ * 137차: 같은 사업(사전규격 ↔ 본 공고, noticeGroups.sameProject)도 — 목록과 같은 기준(미검토 말고 진행 기록이 있으면 그대로) */
 async function notTargets(tenant: string) {
   const sql = db(); const { writesOpen } = await import('./cutover');
   const w = (await writesOpen(tenant))
@@ -147,9 +148,11 @@ async function notTargets(tenant: string) {
     : await sql<{ id: string | null; status: string | null }[]>`select coalesce(row->>'notice_id', row->>'procurement_notice_id') as id, row->>'status' as status from sales_src_rows where scope = ${tenant} and tbl = 'opportunity_work'`;
   const ids = new Set(w.filter((x) => x.id && SKIP_ONLY.test(String(x.status ?? ''))).map((x) => String(x.id)));
   const live = new Set(w.filter((x) => x.id && !SKIP_ONLY.test(String(x.status ?? ''))).map((x) => String(x.id)));
-  const keys = new Set<string>();
-  if (ids.size) for (const { row } of await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and (src_id = any(${[...ids]}::text[]) or row->>'id' = any(${[...ids]}::text[]))`) for (const k of noticeKeys(row)) keys.add(k);
-  return (id: string, r: any) => ids.has(id) || (!live.has(id) && noticeKeys(r).some((k) => keys.has(k)));
+  const settled = new Set(w.filter((x) => x.id && settledWork(x.status)).map((x) => String(x.id)));
+  const keys = new Set<string>(); const skippedRows: any[] = [];
+  if (ids.size) for (const { row } of await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and (src_id = any(${[...ids]}::text[]) or row->>'id' = any(${[...ids]}::text[]))`) { skippedRows.push(row); for (const k of noticeKeys(row)) keys.add(k); }
+  const project = projectSkipOf(skippedRows);
+  return (id: string, r: any) => ids.has(id) || (!live.has(id) && noticeKeys(r).some((k) => keys.has(k))) || (!settled.has(id) && !!project(r));
 }
 type Cand = { id: string; r: any; isNew: boolean; kind: string; late: boolean; fit: string | null; why: string; soon?: boolean };
 /** 지난 메일 이후(digestSince) 처음 본 공고 + 그 뒤 정정·취소로 바뀐 공고 → 회사 맞춤 통과분 → 구역. 마감 임박 = 이미 받은 관련 공고 중 D-3 이내·진행 기록 없음 */

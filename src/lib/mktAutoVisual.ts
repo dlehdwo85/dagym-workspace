@@ -4,6 +4,7 @@ import { assertSpace } from './spaces';
 import { isAdmin } from './access';
 import { badRequest, forbidden, notFound } from './errors';
 import { tenantOf, type SessionUser } from './types';
+import { otherBrandNames, otherBrands } from './mktQuality';
 
 /**
  * #516 자동 제작 시안 = 우리 서버가 그림(외부 유료 생성 없음, 크레딧 0) — 대표 10/24 "승인 대기 시안이 안 보임".
@@ -87,7 +88,7 @@ export async function drawAutoVisual(c: Content, body: string, opts: DrawOpts = 
   const sql = db();
   const [b] = c.brand_id ? await sql<{ name: string; color: string | null; video: any; feed: any }[]>`select name, color, video, feed from mkt_brands where id = ${c.brand_id}` : [];
   const brand = (b?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
-  const others = c.brand_id ? (await sql<{ name: string }[]>`select name from mkt_brands where tenant = ${c.tenant} and id <> ${c.brand_id}`).map((x) => x.name.replace(/^\s*\[시험\]\s*/, '').trim()).filter((n) => n && n !== brand) : [];
+  const others = otherBrandNames(await otherBrands(c.tenant, c.brand_id, { site: false })).filter((n) => n !== brand); // 137차: 영문·다른 이름 포함
   const { head, sub } = headlineOf(c.title, body);
   const { libBytes } = await import('./mktVideo');
   const D = await import('./mktCarouselDraw'); const F = await import('./mktFeedTemplates');
@@ -260,7 +261,7 @@ export async function feedPreview(u: SessionUser, id: string, i: { feed?: import
   if (!b) throw notFound('브랜드를 찾을 수 없습니다');
   const feed = i.feed ? F.normalizeFeed(i.feed) : b.feed;
   const brand = String(b.name).replace(/^\s*\[시험\]\s*/, '').trim();
-  const others = (await sql<{ name: string }[]>`select name from mkt_brands where tenant = ${t} and id <> ${id}`).map((x) => x.name.replace(/^\s*\[시험\]\s*/, '').trim()).filter((n) => n && n !== brand);
+  const others = otherBrandNames(await otherBrands(t, id, { site: false })).filter((n) => n !== brand);
   const color = await D.brandColorInfo(t, { ...b, feed });
   const kit = F.kitOf(feed, color, brand);
   const [last] = await sql<{ title: string; body: string; card: any }[]>`select c.title, v.body, c.quality->'card' as card from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version

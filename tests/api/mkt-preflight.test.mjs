@@ -194,3 +194,20 @@ test('③ [AI로 주제 20개 제안]: 저장 안 함 · 이미 있는 주제·�
   assert.equal(e.status, 400);
   assert.match(e.body.error?.message ?? '', /브랜드 소개·주력 상품/);
 });
+
+test("137차 다른 브랜드 영문·다른 이름: 사실 카드 '다른 이름'·피드 머리줄 영문·홈페이지 주소 이름도 거름 · 낱말 일부·자기 브랜드 표기는 그대로 · 주제 제안에서도 뺌", async () => {
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${nu.id}`, { facts: { website: 'https://www.nuri-link.test/about', aliases: ['NURI LINK'] } });
+  assert.deepEqual((await sql`select facts from mkt_brands where id = ${nu.id}`)[0].facts.aliases, ['NURI LINK']);
+  await sql`update mkt_brands set feed = coalesce(feed, '{}'::jsonb) || ${sql.json({ header: 'SEUM WORKS' })} where id = ${se.id}`;
+  const pf = async (body, brandId = ga.id) => (await ctx.owner.ok('POST', '/api/marketing/quality/check', { channel: 'instagram', kind: 'feed', title: '가을 안내', brandId, body })).preflight;
+  const brandIssue = (list) => list.find((x) => /다른 브랜드·회사 이름/.test(x)) ?? null;
+  const tail = `이번 주 토요일입니다.\n문의 ${PHONE}`;
+  assert.match(brandIssue(await pf(`NURI LINK 회원도 함께할 수 있습니다. ${tail}`)) ?? '', /'NURI LINK'/, '사실 카드 다른 이름');
+  assert.match(brandIssue(await pf(`Nurilink 앱으로 확인하세요. ${tail}`)) ?? '', /'nurilink'/, '홈페이지 주소 이름(nuri-link → nurilink)');
+  assert.match(brandIssue(await pf(`SEUM WORKS 클래스와 함께합니다. ${tail}`)) ?? '', /'SEUM WORKS'/, '피드 머리줄 영문');
+  assert.equal(brandIssue(await pf(`nurilinked 같은 낱말은 괜찮습니다. ${tail}`)), null, '낱말 일부는 걸지 않음');
+  assert.equal(brandIssue(await pf('NURI LINK 가을 행사를 엽니다. 이번 주 토요일입니다.\n자세히 www.nuri-link.test/about', nu.id)), null, '자기 브랜드 글의 자기 영문 이름·주소는 그대로');
+  await ctl({ anthropicReset: true, anthropicQueue: [reply({ topics: ['NURI LINK 앱 안내', '아침 운동 루틴 짜기'] })] });
+  const r = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${ga.id}/topic-draft`, {});
+  assert.deepEqual(r.topics, ['아침 운동 루틴 짜기'], '다른 브랜드 영문 이름이 든 주제는 뺌');
+});

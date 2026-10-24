@@ -361,6 +361,7 @@ export const factsInput = z.object({
   phone: z.string().trim().max(40).optional(), link: z.string().trim().max(200).optional(), website: z.string().trim().max(200).optional(), address: z.string().trim().max(200).optional(),
   hours: z.string().trim().max(200).optional(), prices: z.string().trim().max(500).optional(), numbers: z.string().trim().max(1000).optional(),
   avoidNames: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+  aliases: z.array(z.string().trim().min(1).max(40)).max(10).optional(), // 137차: 이 브랜드의 다른 이름(영문·약칭) — 다른 브랜드 글에서 거름
 });
 export type Facts = z.infer<typeof factsInput>;
 /** 저장 값(옛 값·빈 값 포함) → 카드. 형식이 안 맞으면 빈 카드 — 원고 쓰기를 막지 않음 */
@@ -400,6 +401,32 @@ export function otherBrandIn(text: string, names: string[], own = ''): string | 
   }
   return null;
 }
+/**
+ * 137차(로컬 10/24 23:55 — 'HILINK' 가 다른 브랜드 이름 거르기를 통과): 브랜드 이름 + 다른 표기.
+ * 다른 표기 = 사실 카드 '다른 이름(영문·약칭)' + 피드 틀 머리줄(영문 로고 글자) + 홈페이지 주소 이름(hi-link.co.kr → hi-link·hilink, 5자 이상, 블로그·카카오 같은 공용 주소 제외)
+ */
+const SHARED_HOST = /(?:^|\.)(?:naver|kakao|instagram|facebook|youtube|youtu|google|notion|linktr|blogspot|tistory|wixsite|modoo|imweb|cafe24|threads)\./;
+export function brandAliases(b: { name?: unknown; facts?: unknown; feed?: unknown }, o: { site?: boolean } = {}): string[] {
+  const f = factsOf(b.facts);
+  const head = String((b.feed as { header?: unknown } | null)?.header ?? '').trim();
+  const host = urlKey(f.website ?? '').split(/[/?#]/)[0]; const label = host.includes('.') ? host.split('.')[0] : '';
+  const site = o.site !== false && /^[a-z0-9][a-z0-9-]{4,}$/.test(label) && !SHARED_HOST.test(host) ? [label, label.replace(/-/g, '')] : [];
+  const all = [String(b.name ?? '').replace(/^\s*\[시험\]\s*/, ''), ...(f.aliases ?? []), ...(/[A-Za-z]/.test(head) ? [head] : []), ...site].map((x) => x.trim()).filter((x) => [...x].length >= 2);
+  const seen = new Set<string>();
+  return all.filter((x) => { const k = x.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+/** 이 회사의 다른 브랜드 — 이름(name)과 다른 표기(aliases). 이 브랜드 자신의 표기와 같은 것은 뺌(같은 브랜드가 두 줄로 있을 때).
+ *  site=false: 주소 이름은 빼고(사진 제목처럼 낱말 경계 없이 찾는 곳 — 'workin' 이 'working' 에 걸리지 않게) */
+export async function otherBrands(tenant: string, brandId: string | null | undefined, o: { site?: boolean } = {}): Promise<{ name: string; aliases: string[] }[]> {
+  if (!brandId) return [];
+  const rows = await db()<{ id: string; name: string; facts: unknown; feed: unknown }[]>`select id, name, facts, feed from mkt_brands where tenant = ${tenant}`;
+  const own = new Set(brandAliases(rows.find((r) => r.id === brandId) ?? {}).map((x) => x.toLowerCase()));
+  return rows.filter((r) => r.id !== brandId).map((r) => { const all = brandAliases(r, o).filter((x) => !own.has(x.toLowerCase())); return { name: all[0] ?? '', aliases: all.slice(1) }; }).filter((x) => x.name);
+}
+/** 다른 브랜드 이름 거르기에 넣는 이름 전부 */
+export const otherBrandNames = (list: { name: string; aliases: string[] }[]) => list.flatMap((x) => [x.name, ...x.aliases]);
+/** 원고 지시용 — '하이링크(HILINK)' */
+export const otherBrandLabels = (list: { name: string; aliases: string[] }[]) => list.map((x) => { const en = x.aliases.filter((a) => /[A-Za-z]/.test(a) && !a.includes('-')).slice(0, 2); return en.length ? `${x.name}(${en.join('·')})` : x.name; });
 
 // ---------------- ⑦ 올리기 전 자동 검사(로컬 QA 10/24 ②·⑥) ----------------
 /** JSON 모양 본문(원고 칸 이름이 섞임) — 본문 첫머리 '[브랜드]' 같은 자리표시는 JSON 이 아님 */
@@ -513,7 +540,7 @@ export async function checkQuality(u: SessionUser, i: z.infer<typeof checkInput>
   const name = String(brand?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
   const r = qualityReport({ channel: i.channel, kind: i.kind ?? null, title: i.title, body: i.body, hooks: i.hooks, script: i.script, keywords: name ? [name] : [], mainKeyword: i.keyword || null, voice: brand?.voice, cross: i.cross, mode: i.mode }, rules);
   const ad = i.ad ? { issues: checkAd(i.ad.platform, i.ad, rules), hook: i.ad.headline ? scoreHook(i.ad.headline, rules, name ? [name] : [], 'ad') : null } : null; // 광고 제목 = 늘 광고형 기준
-  const others = i.brandId ? (await db()<{ name: string }[]>`select name from mkt_brands where tenant = ${tenantOf(u)} and id <> ${i.brandId}`).map((b) => b.name) : [];
+  const others = otherBrandNames(await otherBrands(tenantOf(u), i.brandId)); // 137차: 영문·다른 이름 포함
   const pre = i.body.trim() ? preflight({ channel: i.channel, kind: i.kind ?? null, title: i.title, body: r.body, facts: factsOf(brand?.facts), otherBrands: others, brandName: name, script: i.script ?? null, cross: i.cross ?? null }, rules) : [];
   return { cleaned: r.body, ...r.report, preflight: pre, ad, thresholds: { hook: rules.hook.min, human: rules.human.min } };
 }

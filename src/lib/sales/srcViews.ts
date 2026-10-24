@@ -6,7 +6,7 @@ import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
 import { isAwardResult, onbidSale } from './collectors/procurement';
-import { SKIP_ONLY, oneCardPerNotice } from './noticeGroups';
+import { oneCardPerNotice, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 
 /**
@@ -192,8 +192,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await prog('opportunity_work'); // S2-5: 전환 뒤에는 정식 진행 기록 표(원본 행 모양)
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
-    const NR = oneCardPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && ((!vendorUnchecked(r) && !onbidSale(r)) || workOf.has(String(r.id ?? r.__id)))), workTime(W))
-      .filter((r) => !SKIP_ONLY.test(String(workOf.get(String(r.id ?? r.__id)) ?? ''))); // 입찰 목록과 같은 기준(확인 안 된 협력사 줄·온비드 매각 빼기·같은 공고 한 장·대상 아님 빼기)
+    const NR0 = oneCardPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && ((!vendorUnchecked(r) && !onbidSale(r)) || workOf.has(String(r.id ?? r.__id)))), workTime(W));
+    const skips = skipLinks(NR0, (id) => workOf.get(id));
+    const NR = NR0.filter((r) => !skips.hidden(r)); // 입찰 목록과 같은 기준(확인 안 된 협력사 줄·온비드 매각 빼기·같은 공고 한 장·대상 아님 빼기 — 137차 같은 사업 사전규격·본 공고 함께)
     const N = NR.map((r) => notice(r, cats));
     const live = L.filter((l) => !CLOSED.has(String(l.status))); // 종결(계약완료·보류·실패) 제외
     const due = live.filter((l) => l.next && l.next >= today() && l.next <= plus(7)).sort((a, b) => String(a.next).localeCompare(String(b.next)));
@@ -260,7 +261,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
     const endOf = (r: any) => day(pick(r, 'contract_end_date', 'contract_end', 'service_end_date', 'contract_expiry_date'));
     const shift = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x); };
-    const items = (await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && endOf(r) && !SKIP_ONLY.test(String(workOf.get(String(r.id ?? r.__id)) ?? ''))).map((r) => { const n = notice(r); const end = endOf(r)!;
+    const rel = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true');
+    const skips = skipLinks(rel, (id) => workOf.get(id)); // 137차: 대상 아님 + 같은 사업(사전규격 ↔ 본 공고)
+    const items = rel.filter((r) => endOf(r) && !skips.hidden(r)).map((r) => { const n = notice(r); const end = endOf(r)!;
       const start = shift(end, -12), start2 = shift(end, -9), propose = shift(end, -6), rebid = shift(end, -3);
       const stage = td < start ? '영업 전' : td < propose ? '영업 시작' : td < rebid ? '제안' : td <= end ? '재입찰' : '종료';
       const daysLeft = Math.round((Date.parse(end) - Date.parse(td)) / 864e5);
@@ -367,16 +370,19 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const refIds = tab === 'ref' ? new Set(((await db()<{ items: any }[]>`select items from sales_digests where tenant = ${t} order by day desc limit 1`)[0]?.items ?? []).filter((i: any) => i?.section === 'ref').map((i: any) => String(i.id))) : null;
     // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식)·온비드 매각 빼기 · 대표 10/24 추가 ②: 같은 공고(취소·정정 공고·재게시·완전 중복)는 카드 한 장(noticeGroups)
     const N = oneCardPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => refIds ? refIds.has(String(r.id ?? r.__id)) : byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r) && !onbidSale(r))), workTime(W, P));
-    const skippedOf = (r: any) => SKIP_ONLY.test(String(pick(byNotice.get(String(r.id ?? r.__id)), 'status') ?? ''));
+    // 137차: 대상 아님 = 자기 진행 기록 + 같은 사업(사전규격 ↔ 본 공고)으로 함께 숨김 — [대상 아님] 탭은 한 장(함께 숨긴 카드는 linked)
+    const skips = skipLinks(N, (id) => pick(byNotice.get(id), 'status'));
+    const folded = (r: any) => skips.under.has(String(r.id ?? r.__id));
     const since = await lastMailAt(t);
     // [대상 아님] 탭: 누가·언제·사유(진행 기록) — 사유 칸이 생기기 전에 넘긴 것은 마지막으로 고친 사람·시각
     const who = tab === 'skip' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
-    const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since); const skipped = skippedOf(r);
+    const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since); const skipped = skips.hidden(r);
       return { ...n0, todayHit: why.hit, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본)
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, raw: r.__orig ?? r,
-        history: r.__history ?? null, skipped, skip: who && skipped ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null }; })
-      .filter((n) => (tab === 'skip' ? n.skipped : !n.skipped) && hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
+        history: r.__history ?? null, skipped, skip: who && skipped && !folded(r) ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null,
+        linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; })
+      .filter((n) => (tab === 'skip' ? n.skipped && !!n.skip : !n.skipped) && hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
         && (tab !== 'today' || (n.todayHit && (n.result || !bidEnded(n, today())))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit)
         && (tab !== 'soon' || (!!n.close && n.close >= today() && n.close <= plus(3) && isOpenBid({ ...n, related: true }, n.work, today()))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중
         && (tab !== 'prep' || (!!n.close && n.close >= today() && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, today()))) // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
@@ -384,8 +390,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       .sort((a, b) => tab === 'open' || tab === 'soon' || tab === 'prep' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : tab === 'skip' ? String(b.skip?.at ?? '').localeCompare(String(a.skip?.at ?? '')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
     // 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 결과(낙찰·유찰)는 빼고 아래 '결과' 묶음으로 — 당일 메일 결과 구역과 같은 기준(isAwardResult)
     const results = tab === 'today' ? items.filter((n) => n.result) : [];
-    const skipCount = N.filter(skippedOf).length;
-    return { ...meta, tab, total: N.length - skipCount, skipCount, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
+    const skipCount = N.filter((r) => skips.own(r) && !folded(r)).length; // [대상 아님] 탭 장 수(같은 사업은 한 장)
+    return { ...meta, tab, total: N.filter((r) => !skips.hidden(r)).length, skipCount, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings';

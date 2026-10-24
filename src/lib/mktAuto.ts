@@ -6,7 +6,7 @@ import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
 import { zUuid } from './api';
 import { layoutBody } from './mktText';
-import { JSON_LIKE, avoidOf, voiceInput, factsInput } from './mktQuality';
+import { JSON_LIKE, avoidOf, voiceInput, factsInput, otherBrands, otherBrandNames, otherBrandLabels } from './mktQuality';
 import { FEED_STYLES, FEED_TEMPLATES, NEED_LABEL, TEMPLATE_IDS, feedInput, normalizeFeed } from './mktFeedTemplates';
 import { tenantOf, type SessionUser } from './types';
 
@@ -252,7 +252,7 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
   const topic = pick.topic;
   const about = [brand?.intro, brand?.products, co.business].map((x) => String(x ?? '').trim()).filter(Boolean);
   // 로컬 21:45 버그: 다짐 스토리에 하이링크 주제 — 브랜드 글은 그 브랜드 재료만(브랜드 키트가 있으면 회사 공통 소개는 빼고, 다른 브랜드 이름은 금지)
-  const others = brand ? (await sql<{ name: string }[]>`select name from mkt_brands where tenant = ${c.tenant} and id <> ${brand.id}`).map((b) => brandName(b)).filter(Boolean) : [];
+  const ob = brand ? await otherBrands(c.tenant, brand.id) : []; const others = otherBrandNames(ob); // 137차: 영문·다른 이름(HILINK 등) 포함
   const brandOnly = !!brand && !!(brand.intro || brand.products);
   const Q = await import('./mktQuality'); const facts = Q.factsOf(brand?.facts); // 로컬 QA 10/24 ⑤ 사실 카드
   // 로컬 QA 10/24 ③: 같은 주 다른 브랜드 글 제목 — 같은 주제·같은 제목을 피하게
@@ -266,7 +266,7 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
     brand?.products ? `주력 상품·서비스: ${brand.products}` : '',
     co.business && !brandOnly ? `회사 사업 소개: ${co.business}` : '',
     co.customers && !brandOnly ? `주요 고객: ${co.customers}` : '',
-    brand ? `이 글은 '${brandName(brand)}' 브랜드 전용 — ${others.length ? `다른 브랜드(${others.join(', ')})의 상품·소식·이름·명의는 쓰지 않음` : '다른 브랜드 이야기는 쓰지 않음'}` : '',
+    brand ? `이 글은 '${brandName(brand)}' 브랜드 전용 — ${ob.length ? `다른 브랜드(${otherBrandLabels(ob).join(', ')})의 상품·소식·이름·명의는 쓰지 않음` : '다른 브랜드 이야기는 쓰지 않음'}` : '',
     topic ? (pick.from === 'company' ? `이번 주 회사 공통 테마: ${topic} — 그대로 쓰지 말고 이 브랜드의 고객·상품에 맞는 구체적인 주제 하나로 바꿔 씀(다른 브랜드 글과 같은 주제·같은 제목 금지)` : `이번 글 주제: ${topic}`) : '',
     Q.factsText(facts),
     goal && goal.status !== 'pending' ? `이달 운영 목표: ${(goal.goals?.objectives ?? []).join(' / ')}${goal.goals?.message ? ` · 핵심 메시지: ${goal.goals.message}` : ''}` : '',
@@ -430,7 +430,7 @@ function withContact(body: string, line: string) {
 /** 로컬 QA 10/24 ②: 올리기 전 자동 검사 — 걸리면 승인함 대신 '수정 요청'(이유와 함께). 다른 브랜드 이름·사실 카드는 이 브랜드 기준 */
 async function preflightOf(c: any, brand: any, s: MktSettings, x: { title: string; body: string; script?: string[] | null }) {
   const Q = await import('./mktQuality');
-  const others = brand ? (await db()<{ name: string }[]>`select name from mkt_brands where tenant = ${c.tenant} and id <> ${brand.id}`).map((b) => b.name) : [];
+  const others = otherBrandNames(await otherBrands(c.tenant, brand?.id));
   return Q.preflight({ channel: c.channel, kind: c.kind, title: x.title, body: x.body, isTest: !!c.is_test, aiLabel: s.ai_label, facts: Q.factsOf(brand?.facts), otherBrands: others, brandName: brandName(brand), script: x.script ?? null, cross: c.cross_channels ?? [] }, await Q.qualityRules());
 }
 const bannedOf = (brand: any): string[] => [...(brand?.banned_words ?? []), ...avoidOf(brand?.voice)];
@@ -1191,7 +1191,7 @@ export async function topicDraft(u: SessionUser, id: string) {
   if (!b.intro && !b.products && !v.topics && !v.audience && !v.offer) throw badRequest('브랜드 소개·주력 상품(또는 말투 프로필의 고객·파는 것)을 먼저 적어 주세요 — 그걸로 주제를 뽑습니다');
   const mine = await sql<{ title: string }[]>`select title from mkt_contents where tenant = ${t} and brand_id = ${id} and status <> 'canceled' order by coalesce(scheduled_at, created_at) desc limit 20`;
   const peers = await sql<{ title: string }[]>`select c.title from mkt_contents c where c.tenant = ${t} and c.brand_id is distinct from ${id} and c.status <> 'canceled' and coalesce(c.scheduled_at, c.created_at) > now() - interval '14 days' order by coalesce(c.scheduled_at, c.created_at) desc limit 20`;
-  const others = (await sql<{ name: string }[]>`select name from mkt_brands where tenant = ${t} and id <> ${id}`).map((x) => x.name);
+  const others = otherBrandNames(await otherBrands(t, id)); // 137차: 'HILINK' 같은 영문 이름도 거름
   const P = await import('./ai/provider');
   if (!P.aiEnabled()) throw badRequest('AI 비서가 꺼져 있어 초안을 만들 수 없습니다');
   await assertMktAi(t);

@@ -79,7 +79,49 @@ export function oneCardPerNotice(list: any[], workAt: (id: string) => number | n
       posts: posts.length > 1 ? posts : [], amendDay: amend ? postDay(amend) : null };
     const files = sourceFiles(...g.flatMap((r) => [r.attachment_urls ?? r.attachments, r.notice_file_url])).map((x) => (x.name ? { name: x.name, url: x.url } : x.url));
     const deadline = pick(lastLive ?? rep, ...DEADLINE);
-    out.push({ ...rep, current_status: cancelled ? '취소' : pick(lastLive, 'current_status', 'status') ?? rep.current_status, ...(deadline ? { deadline_at: deadline } : {}), attachment_urls: files, __history: history, __orig: rep });
+    out.push({ ...rep, current_status: cancelled ? '취소' : pick(lastLive, 'current_status', 'status') ?? rep.current_status, ...(deadline ? { deadline_at: deadline } : {}), attachment_urls: files, __history: history, __orig: rep, __firstDay: postDay(all[0]) });
   }
   return out;
+}
+
+// 137차(로컬 10/24 23:55 135차 ③ 화원): 사전규격 → 본 공고 = 같은 사업. 원천이 달라(g2b_prespec·g2b_bid) 위 같은 공고 묶음에는 안 들어가므로 따로 잇는다.
+// 기준: 같은 발주·수요기관 + 표시를 뺀 같은 제목(8자 넘으면 한쪽이 다른 쪽을 품어도) + 사전규격이 본 공고보다 앞(120일 안).
+// 둘 중 하나를 '대상 아님'으로 넘기면 다른 쪽도 모든 목록·숫자·당일 메일에서 빠짐 — 다른 쪽에 미검토 말고 진행 기록이 있으면 그대로.
+export const isPrespec = (r: any) => /prespec/.test(s(r?.source_type)) || s(r?.notice_type) === '사전규격';
+const NOT_BID = /vendor_recruit|onbid/;
+const PROJECT_DAYS = 120;
+const orgsOf = (r: any) => [...new Set([pick(r, 'issuer', 'agency', 'org_name'), pick(r, 'demand_agency')].map(flat).filter((x) => x.length >= 2))];
+const projectTitle = (r: any) => plainTitle(pick(r, 'title', 'notice_title', 'bid_name', 'name')).replace(/사전규격(?:공개)?/g, '');
+const sameTitle = (a: string, b: string) => a.length >= 6 && b.length >= 6 && (a === b || (Math.min(a.length, b.length) >= 8 && (a.includes(b) || b.includes(a))));
+/** 사전규격 pre 가 본 공고 bid 의 같은 사업인가 — 날짜는 묶음의 첫 게시(oneCardPerNotice __firstDay) */
+function leadsTo(pre: any, bid: any) {
+  if (!isPrespec(pre) || isPrespec(bid) || NOT_BID.test(s(bid?.source_type))) return false;
+  const a = s(pre?.__firstDay) || postDay(pre), b = s(bid?.__firstDay) || postDay(bid); if (!a || !b) return false;
+  const gap = (Date.parse(b) - Date.parse(a)) / 864e5;
+  return gap >= 0 && gap <= PROJECT_DAYS && sameTitle(projectTitle(pre), projectTitle(bid)) && orgsOf(pre).some((o) => orgsOf(bid).includes(o));
+}
+export const sameProject = (a: any, b: any) => a !== b && (leadsTo(a, b) || leadsTo(b, a));
+/** 대상 아님 줄(카드)들 → 줄 하나를 주면 같은 사업으로 이어진 대상 아님 줄(없으면 null) */
+export function projectSkipOf(skipped: any[]): (r: any) => any | null {
+  const byOrg = new Map<string, any[]>();
+  for (const x of skipped) for (const o of orgsOf(x)) byOrg.set(o, [...(byOrg.get(o) ?? []), x]);
+  return (r) => { for (const o of orgsOf(r)) for (const x of byOrg.get(o) ?? []) if (sameProject(x, r)) return x; return null; };
+}
+/** 미검토(처음 상태·되돌리기 직후) 말고 진행 기록이 있음 — 이어진 쪽이 대상 아님이어도 그대로 보임 */
+export const settledWork = (status: unknown) => { const x = s(status); return !!x && x !== '미검토' && !SKIP_ONLY.test(x); };
+/**
+ * 목록·숫자 공통: 카드마다 '대상 아님' 숨김 — 자기 진행 기록이 대상 아님(own) · 또는 같은 사업 카드가 대상 아님이라 함께 숨김(under: 카드 id → 그 대상 아님 카드).
+ * [대상 아님] 탭은 한 장: 함께 숨긴 카드·이어진 대상 아님 사전규격은 본 카드(lead) 아래 linked 로
+ */
+export function skipLinks(cards: any[], statusOf: (id: string) => unknown) {
+  const own = (r: any) => SKIP_ONLY.test(s(statusOf(idOf(r))));
+  const owned = cards.filter(own); const via = projectSkipOf(owned);
+  const under = new Map<string, any>();
+  for (const r of cards) { if (own(r) || settledWork(statusOf(idOf(r)))) continue; const x = via(r); if (x) under.set(idOf(r), x); }
+  // 둘 다 대상 아님이면 본 공고 쪽 한 장(사전규격을 그 아래로)
+  for (const r of owned) if (isPrespec(r)) { const bid = owned.find((x) => !isPrespec(x) && sameProject(r, x)); if (bid) under.set(idOf(r), bid); }
+  for (const [k, v] of under) { const up = under.get(idOf(v)); if (up) under.set(k, up); } // 함께 숨긴 카드 → 사전규격(본 공고 아래) → 본 공고
+  const hidden = (r: any) => own(r) || under.has(idOf(r));
+  const linked = (lead: any) => cards.filter((r) => under.get(idOf(r)) === lead);
+  return { own, hidden, under, linked };
 }

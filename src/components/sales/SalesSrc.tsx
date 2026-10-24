@@ -1091,7 +1091,10 @@ function BidSkip({ n, onChange, canWrite }: { n: any; onChange?: () => void; can
   if (n.skipped) return (
     <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-input bg-slate-50 px-2 py-1 text-xs text-ink-2" data-testid="bid-skip">
       <b>대상 아님</b>{[n.skip?.by, n.skip?.at && fmtDateTime(n.skip.at)].filter(Boolean).map((x: string) => <span key={x}>· {x}</span>)}{n.skip?.reason && <span data-testid="bid-skip-reason">· 사유: {n.skip.reason}</span>}
-      {canWrite && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={() => go({ restore: true }, '되돌렸습니다 — 다시 목록에 나옵니다')} data-testid="bid-skip-restore">되돌리기</Button>}
+      {canWrite && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={() => go({ restore: true }, n.linked?.length ? `되돌렸습니다 — 같은 사업 ${n.linked.length}건과 함께 다시 목록에 나옵니다` : '되돌렸습니다 — 다시 목록에 나옵니다')} data-testid="bid-skip-restore">되돌리기</Button>}
+      {/* 137차: 같은 사업(사전규격 ↔ 본 공고)이라 함께 숨긴 공고 — 되돌리기도 함께 */}
+      {n.linked?.length > 0 && <ul className="basis-full space-y-0.5 border-t border-line pt-1" data-testid="bid-skip-linked">{n.linked.map((l: any) => (
+        <li key={l.id} className="text-[11px] text-ink-3" data-testid="bid-skip-linked-row">같은 사업이라 함께 숨김 · {[l.sourceLabel, l.title, l.noticeDate && `공고 ${kd(l.noticeDate)}`].filter(Boolean).join(' · ')}</li>))}</ul>}
     </div>
   );
   if (!canWrite || n.workLeadId) return null;
