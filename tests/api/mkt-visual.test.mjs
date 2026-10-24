@@ -278,6 +278,18 @@ test('#540 같은 브랜드 하루 2건(대표 10/24): 같은 브랜드·채널�
   const good = await ctx.owner.ok('PATCH', `/api/marketing/contents/${mv}`, { scheduledAt: at(8, '13:00').toISOString() });
   assert.equal(new Date(good.scheduledAt).toISOString(), at(8, '13:00').toISOString());
   await ctx.owner.ok('PATCH', `/api/marketing/contents/${mv}`, { brandId: P.plain, scheduledAt: at(8, '13:00').toISOString() });
+
+  // ④ 대표 10/24 ③ '하루 2건 = 브랜드 × 채널 × 형식마다 각각 2건': 규칙이 칸을 만들 때도 — 같은 형식 규칙 4개(10:00·11:30·15:00·19:00) → 10:00·15:00 만(11:30 은 3시간 안, 19:00 은 셋째), 릴스는 따로 셈
+  const b2 = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '하루 2건 브랜드' })).id;
+  const dow = new Date(`${day(3)}T12:00:00+09:00`).getUTCDay();
+  const rule = (kind, postTime) => ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: b2, channel: 'instagram', kind, weekdays: [dow], postTime });
+  for (const t of ['10:00', '11:30', '15:00', '19:00']) await rule('feed', t);
+  await rule('reels', '10:00');
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const slots = await sql`select kind, to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24:MI') hm from mkt_contents where brand_id = ${b2} and status <> 'canceled'
+    and (scheduled_at at time zone 'Asia/Seoul')::date = ${day(3)}::date order by kind, scheduled_at`;
+  assert.deepEqual(slots.map((x) => `${x.kind} ${x.hm}`), ['feed 10:00', 'feed 15:00', 'reels 10:00']);
+  await sql`update mkt_rules set active = false where brand_id = ${b2}`; await sql`update mkt_contents set status = 'canceled' where brand_id = ${b2}`;
 });
 
 test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네일·핀·쇼츠·문장 이름·카드뉴스 폴더)은 바탕으로 안 씀 · 예전 규칙 시안은 정기 실행이 다시 그림(실사는 그대로) · [다시 그리기(무료)]', async () => {

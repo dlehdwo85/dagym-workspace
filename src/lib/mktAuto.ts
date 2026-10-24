@@ -148,7 +148,8 @@ export function qualityCheck(body: string, brief: string, s: MktSettings, banned
 /** 규칙 → 앞으로 14일 게시 칸(초안) 만들기 — 같은 규칙·시각은 한 번만 */
 export async function planSlots(tenant: string, days = 14) {
   const sql = db(); const s = await settingsOf(tenant);
-  const rules = await sql<any[]>`select r.*, b.name as brand, coalesce(b.test_mode, false) as test from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${tenant} and r.active`;
+  // 먼저 만든 규칙이 먼저(아래 하루 2건 검사에서 늦게 만든 규칙의 칸이 빠짐)
+  const rules = await sql<any[]>`select r.*, b.name as brand, coalesce(b.test_mode, false) as test from mkt_rules r left join mkt_brands b on b.id = r.brand_id where r.tenant = ${tenant} and r.active order by r.created_at, r.id`;
   let made = 0;
   for (const r of rules) for (let k = 0; k <= days; k++) {
     let date = ymd(new Date(Date.now() + k * DAY));
@@ -164,6 +165,9 @@ export async function planSlots(tenant: string, days = 14) {
     }
     const at = kst(date, r.post_time);
     if (deadlineOf(at, s).getTime() <= Date.now()) continue; // 승인 마감이 이미 지난 칸은 만들지 않음
+    // 대표 10/24 ③ '하루 2건 = 브랜드 × 채널 × 형식마다 각각 2건': 규칙이 여럿이어도 같은 브랜드·채널·형식은 하루 2건까지·같은 시각/3시간 안 X(#540 과 같은 기준). 이미 만든 칸이면 아래 insert 도 어차피 건너뜀
+    const peers = await slotPeers(sql, { id: NIL_ID, tenant, brand_id: r.brand_id, channel: r.channel, kind: r.kind }, date, date);
+    if (peers.length && slotIssue({ topics: [], visuals: [] }, peers, at)) continue;
     let produce = kst(ymd(new Date(at.getTime() - s.lead_days * DAY)), `${pad(s.lead_hour)}:00`);
     if (produce.getTime() < Date.now()) produce = new Date();
     const cross = (r.cross_channels ?? []) as string[];
@@ -490,9 +494,10 @@ export async function postponedAction(u: SessionUser, id: string, i: z.infer<typ
   return { ok: true, status, scheduledAt: at.toISOString(), sameDay: same?.n ?? 0 };
 }
 /** #540 같은 브랜드 하루 2건(대표 결정 10/24, 단 겹치면 안 됨): 같은 브랜드·채널·형식 글은 하루 2건까지 — 같은 시각 겹침 금지·3시간 넘게 띄움·같은 주제나 같은 시안(같은 사진)이면 막음.
- *  다른 채널·형식(묶음 규칙의 피드·쇼츠·릴스·블로그·스토리)은 따로 셈. 다음 슬롯 찾기·미뤄진 글 다시 올리기·게시 시각 바꾸기(캘린더)가 같은 검사를 씀 */
+ *  다른 채널·형식(묶음 규칙의 피드·쇼츠·릴스·블로그·스토리)은 따로 셈(대표 10/24 ③ '각각 2건'). 규칙이 칸 만들기·다음 슬롯 찾기·미뤄진 글 다시 올리기·게시 시각 바꾸기(캘린더)가 같은 검사를 씀 */
 export const SAME_DAY_MAX = 2;
 const GAP = 3 * 3600e3;
+const NIL_ID = '00000000-0000-0000-0000-000000000000'; // 아직 없는 칸(규칙이 만들 칸)
 type SlotPost = { id: string; tenant: string; brand_id: string | null; channel: string; kind: string | null };
 type SlotKeys = { topics: string[]; visuals: string[] };
 type Peer = SlotKeys & { title: string; at: Date };
@@ -788,8 +793,15 @@ export async function updateBundle(u: SessionUser, i: z.infer<typeof bundlePatch
     const tm = i.times?.[r.kind as keyof typeof i.times];
     if (!tm) continue;
     await sql`update mkt_rules set post_time = ${tm} where id = ${r.id}`;
-    // 제작 전 초안은 같은 날 새 시각으로
-    await sql`update mkt_contents set scheduled_at = ((scheduled_at at time zone 'Asia/Seoul')::date::text || ' ' || ${tm})::timestamp at time zone 'Asia/Seoul' where rule_id = ${r.id} and status = 'draft' and produced_at is null and scheduled_at > now()`;
+    // 제작 전 초안은 같은 날 새 시각으로 — 대표 10/24 ③: 새 시각이 같은 브랜드·채널·형식 하루 2건·3시간 규칙에 걸리는 칸은 지움(아직 빈 칸 — 규칙도 다시 만들지 않음)
+    const drafts = await sql<{ id: string; tenant: string; brand_id: string | null; channel: string; kind: string | null; d: string }[]>`select id, tenant, brand_id, channel, kind, (scheduled_at at time zone 'Asia/Seoul')::date::text as d
+      from mkt_contents where rule_id = ${r.id} and status = 'draft' and produced_at is null and scheduled_at > now()`;
+    for (const c of drafts) {
+      const at = kst(c.d, tm);
+      const peers = await slotPeers(sql, c, c.d, c.d);
+      if (peers.length && slotIssue({ topics: [], visuals: [] }, peers, at)) await sql`delete from mkt_contents where id = ${c.id}`;
+      else await sql`update mkt_contents set scheduled_at = ${at} where id = ${c.id}`;
+    }
   }
   const reschedule = i.weekdays !== undefined || i.intervalDays !== undefined || i.skipWeekend !== undefined || i.startDate !== undefined;
   if (reschedule) {
