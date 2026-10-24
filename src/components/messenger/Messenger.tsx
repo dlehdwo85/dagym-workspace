@@ -192,6 +192,10 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
 type Member = { id: string; name: string; title?: string | null; phone?: string | null; role?: string; last_read_id: string; is_owner?: boolean; joined_at?: string };
 type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean; canRename?: boolean; ownerId?: string | null; canManage?: boolean; historyVisible?: boolean }; messages: Msg[]; members: Member[]; pinned: Msg[] };
 
+/** 132차 확인 후속(로컬 10/24 ⑧): 주소를 새로 열어 다른 화면에 갔다가 브라우저 뒤로가기로 이 페이지를 다시 연 경우(전체 새로고침) — 그때 처음 여는 방만 '돌아옴'으로 */
+let firstRoom = true;
+const loadedBack = () => { if (!firstRoom) return false; firstRoom = false; try { return performance.now() < 8000 && (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type === 'back_forward'; } catch { return false; } }; // 페이지를 연 직후에 여는 방만
+
 /** 대화방 */
 export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose, backAlways }: { id: string; live: Live; onRead: () => void; onBack: () => void; compact?: boolean; onExpand?: () => void; onClose?: () => void; backAlways?: boolean }) {
   const { user, dir } = useSession();
@@ -240,8 +244,14 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const [unseen, setUnseen] = useState(0);
   const toBottom = useCallback(() => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; atBottom.current = true; setUnseen(0); }, []);
   // #242 2단계: 대화에서 업무·링크를 열었다 뒤로가기로 오면 보던 자리로(맨 아래가 아니었을 때만, 이 창 동안) — 예전엔 늘 맨 아래로
-  const posKey = `wos_chat_pos:${id}`; const fromBottom = useRef(0); const back = useRef(cameBack());
-  useEffect(() => () => { try { if (atBottom.current) sessionStorage.removeItem(posKey); else sessionStorage.setItem(posKey, String(Math.round(fromBottom.current))); } catch { /* 저장 못 해도 됨 */ } }, [posKey]);
+  const posKey = `wos_chat_pos:${id}`; const fromBottom = useRef(0); const back = useRef<boolean | null>(null);
+  if (back.current === null) back.current = cameBack() || loadedBack();
+  // 방을 닫을 때 + 주소를 새로 열어 페이지를 떠날 때(pagehide — 이때는 React 정리가 안 돎) 보던 자리를 적어 둠
+  useEffect(() => {
+    const save = () => { try { if (atBottom.current) sessionStorage.removeItem(posKey); else sessionStorage.setItem(posKey, String(Math.round(fromBottom.current))); } catch { /* 저장 못 해도 됨 */ } };
+    window.addEventListener('pagehide', save);
+    return () => { window.removeEventListener('pagehide', save); save(); };
+  }, [posKey]);
   const onScroll = () => {
     const el = listRef.current; if (!el) return;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;

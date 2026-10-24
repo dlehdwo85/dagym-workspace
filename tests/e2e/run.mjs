@@ -50,6 +50,7 @@ import { landing } from './landing.step.mjs';
 import { mktGoals } from './mktGoals.step.mjs';
 import { mktQuality } from './mktQuality.step.mjs';
 import { mktPreflight } from './mktPreflight.step.mjs';
+import { chatBackPc, chatBackPcHard } from './chatBackPc.step.mjs';
 import { revenueAuto } from './revenueAuto.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
@@ -2813,6 +2814,8 @@ await step('#192·#194 앱 1.1.3 웹 몫: 위젯 [+]·딥링크 /tasks?new=1 →
 
 await step('#242 대표 10/24 업무 목록 거르기 유지: 내 업무·검색어·스크롤 → 업무 열기(패널) → 닫기 단추·Esc·뒤로가기 = 같은 목록·같은 위치(주소에 view·q, 새로 고침도) · 전체 화면 [닫기] = 직전 화면 · 링크로 연 상세 [닫기] = 업무 목록 · 휴대폰 390', () => listKeep({ owner, ctx, BASE, SHOTS }));
 
+await step('132차 확인 후속 ⑧ PC 대화방: 위로 올려 보다 사이드바로 다른 화면 → 뒤로가기 = 보던 자리(맨 아래로 안 감)', () => chatBackPc({ owner, ctx, BASE }));
+await step('132차 확인 후속 ⑧-2 PC 대화방: 주소를 새로 열어 다른 화면 → 뒤로가기 = 보던 자리', () => chatBackPcHard({ owner, ctx, BASE }));
 await step('로컬 QA 10/24 ②~⑥ 올리기 전 검사·사실 카드·주제 풀: 브랜드 키트 사실 카드(연락처·운영 시간·섞으면 안 되는 이름)·주제 풀 [AI로 주제 20개 제안] → 저장(빈 칸 빼고) → 릴스 상세 \'올리기 전 검사 n건\'·노란 칸은 그 밖만·대본(컷) 칸·주제 풀 표시 → 사람이 고친 수정본 = 승인 대기·검사 통과 → 휴대폰 넘침 없음', () => mktPreflight({ owner, ctx, BASE, FAKE, SHOTS, sql }));
 await step('#242 2단계 다른 화면 돌아오기: 알림 탭·위치·방금 읽은 줄 · 홈 월 캘린더 달·날 · 프로젝트 보관함 · 영업 리드 정렬·우선·칩 · 허브 탭 · 마케팅 콘텐츠 캘린더 주 — 다른 화면에 갔다 뒤로가기 = 그대로', () => backKeep({ owner, ctx, sql, BASE }));
 
