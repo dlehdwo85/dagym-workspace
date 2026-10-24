@@ -4,7 +4,8 @@ import { dataGoKey } from '../collect';
 import { kaptFileList, kaptFileUrl, kaptSession } from '../files';
 import { callDataGo } from './g2b';
 import { matchFit } from './procurement';
-import { upsertKaptVendor, upsertNotices, deriveOperatingFromKapt } from './store';
+import { upsertKaptVendor, upsertNotices, deriveOperatingFromKapt, knownKaptVendors } from './store';
+import { KAPT_RELEVANT_TASK } from './prospects';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
@@ -210,38 +211,52 @@ export const kaptBidResults: Collector = {
   },
 };
 
-// ---- 사업자선정 결과 OpenAPI (KAPT_SERVICE_KEY) ----
-const KAPT_API = () => (T() ? `${T()}/kaptapi/getKaptBidResultList` : process.env.KAPT_API_BASE?.trim() || 'https://apis.data.go.kr/B553530/kaptBidResult/getKaptBidResultList');
+// ---- 사업자선정 결과: 국토교통부_공동주택 입찰결과공지 정보제공 서비스(data.go.kr 15059177) — 포털 명세(Swagger) 그대로 ----
+// 로컬 10/24 19:20(운영 'OpenAPI 호출 실패'): 예전 주소(B553530/kaptBidResult/getKaptBidResultList)는 명세에 없는 주소였다 →
+// 입찰 상태 조회 getBidSttusSearchV3(bidState=5 낙찰공고 · searchYear 올해·작년), 낙찰 업체는 커뮤니티·운동시설 위탁 건만 입찰 참여업체 조회 getBidEntrpsInfoSearchV3(bidNum)의 낙찰여부 Y
+const KAPT_API = () => (T() ? `${T()}/kaptapi` : process.env.KAPT_API_BASE?.trim() || 'https://apis.data.go.kr/1613000/ApHusBidResultNoticeInfoOfferServiceV3');
 const toStr = (v: unknown) => { if (v == null) return null; const s = String(v).trim(); return s.length ? s : null; };
-const toInt = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; };
-const toYmd = (v: unknown) => { if (!v) return null; const s = String(v).trim(); if (/^\d{8}$/.test(s)) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`; if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10); const d = new Date(s); return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10); };
+const toYmd = (v: unknown) => { if (!v) return null; const s = String(v).trim(); if (/^\d{8}/.test(s)) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`; if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10); const d = new Date(s); return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10); };
+/** 명세 칸(bidNum·bidKaptname·aptCode·bidArea·bidTitle·bidResultContent·bidRegdate·amount·contractPeriodSdate/Edate) → kapt_vendor_selection 한 줄 */
 export function toKaptRaw(r: any) {
-  const ext = toStr(r.bidNo) ?? toStr(r.selectNo) ?? toStr(r.bidId) ?? toStr(r.selectBidId); const url = toStr(r.bidUrl) ?? toStr(r.detailUrl) ?? toStr(r.url) ?? (ext ? `https://www.k-apt.go.kr/bid/bidList.do?bidNo=${ext}` : null);
-  const complexName = toStr(r.kaptName) ?? toStr(r.aptName) ?? toStr(r.danjiName) ?? ''; if (!ext || !url || !complexName) return null;
-  return { source_type: 'kapt_sa_sun', source_external_id: ext, source_url: url, complex_code: toStr(r.kaptCode) ?? toStr(r.danjiCode), complex_name: complexName, address: toStr(r.doroJuso) ?? toStr(r.jibunJuso) ?? toStr(r.address), region: toStr(r.sido) ?? toStr(r.sigungu),
-    household_count: toInt(r.hhldCnt) ?? toInt(r.householdCount), task_category: toStr(r.bidCategoryName) ?? toStr(r.taskCategory), task_detail: toStr(r.bidDetail) ?? toStr(r.taskDetail), announcement_date: toYmd(r.anncYmd) ?? toYmd(r.announcementDate), bid_open_date: toYmd(r.openYmd) ?? toYmd(r.bidOpenDate),
-    selected_vendor: toStr(r.selectedCompany) ?? toStr(r.winnerName), selected_vendor_biz_no: toStr(r.selectedBizNo) ?? toStr(r.winnerBizNo), selected_amount: (() => { const v = r.selectAmount ?? r.contractAmount; if (v == null || v === '') return null; const n = Number(String(v).replace(/[^0-9.-]/g, '')); return Number.isFinite(n) ? n : null; })(),
-    contract_start_date: toYmd(r.ctrtStartYmd) ?? toYmd(r.contractStartDate), contract_end_date: toYmd(r.ctrtEndYmd) ?? toYmd(r.contractEndDate) };
+  const ext = toStr(r.bidNum); const complexName = toStr(r.bidKaptname); if (!ext || !complexName) return null;
+  const title = toStr(r.bidTitle);
+  const amount = (() => { const v = r.amount; if (v == null || v === '') return null; const n = Number(String(v).replace(/[^0-9.-]/g, '')); return Number.isFinite(n) && n > 0 ? n : null; })();
+  return { source_type: 'kapt_sa_sun', source_external_id: ext, source_url: `${BASE()}/bid/bidDetail.do?bidNum=${encodeURIComponent(ext)}`, complex_code: toStr(r.aptCode), complex_name: complexName, address: null as string | null,
+    region: (title ? regionFromTitle(title) : null) ?? SIDO_CODE[String(r.bidArea ?? '').slice(0, 2)] ?? null, household_count: null as number | null, task_category: title, task_detail: toStr(r.bidResultContent) ?? toStr(r.bidContent),
+    announcement_date: toYmd(r.bidRegdate ?? r.bidRegDate), bid_open_date: toYmd(r.bidDeadline), selected_vendor: null as string | null, selected_vendor_biz_no: null as string | null, selected_amount: amount,
+    contract_start_date: toYmd(r.contractPeriodSdate), contract_end_date: toYmd(r.contractPeriodEdate) };
 }
 export const kaptSaSun: Collector = {
-  slug: 'kapt_sa_sun', label: 'K-apt 사업자선정 결과', hourKst: 8, source: 'apis.data.go.kr/B553530/kaptBidResult (최근 18개월) — 키는 KAPT_SERVICE_KEY, 없으면 공공데이터포털 키(15059177 활용신청)', needs: ['KAPT_SERVICE_KEY(없으면 DATA_GO_KR_SERVICE_KEY)'],
+  slug: 'kapt_sa_sun', label: 'K-apt 사업자선정 결과', hourKst: 8, source: 'apis.data.go.kr/1613000/ApHusBidResultNoticeInfoOfferServiceV3 낙찰공고(올해·작년) — 키는 KAPT_SERVICE_KEY, 없으면 공공데이터포털 키(15059177 활용신청)', needs: ['KAPT_SERVICE_KEY(없으면 DATA_GO_KR_SERVICE_KEY)'],
   keyReady: async () => !!(await kaptKey()),
-  async run({ fetchImpl }: CollectorCtx): Promise<CollectorResult> {
-    const key = await kaptKey();
-    const from = new Date(Date.now() - 18 * 30 * 864e5).toISOString().slice(0, 10), to = new Date().toISOString().slice(0, 10);
-    if (!key) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `K-apt 사업자선정 ${from}~${to} · 키 없음(KAPT_SERVICE_KEY·DATA_GO_KR_SERVICE_KEY) — 공공데이터포털 15059177 활용신청 후 플랫폼 운영 또는 Vercel env`, providerMode: 'manual' };
-    const u = new URL(KAPT_API()); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '500'); u.searchParams.set('pageNo', '1'); u.searchParams.set('_type', 'json'); u.searchParams.set('searchStartYmd', from.replaceAll('-', '')); u.searchParams.set('searchEndYmd', to.replaceAll('-', ''));
-    let items: any[] = [];
+  async run(ctx: CollectorCtx): Promise<CollectorResult> {
+    const key = await kaptKey(); const year = Number(kstYmd(new Date(ctx.now())).slice(0, 4));
+    if (!key) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `K-apt 사업자선정 ${year - 1}~${year} · 키 없음(KAPT_SERVICE_KEY·DATA_GO_KR_SERVICE_KEY) — 공공데이터포털 15059177 활용신청 후 플랫폼 운영 또는 Vercel env`, providerMode: 'api' };
+    const t0 = ctx.now(); const items: any[] = [];
     try {
-      const res = await fetchImpl(u.toString(), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12000) }); const txt = await res.text();
-      // 활용신청 안 된 키는 HTTP 403·XML 본문으로 옴(#172) — 먼저 본문을 보고 '활용신청 필요'로
-      if (/SERVICE_KEY_IS_NOT_REGISTERED|SERVICE ACCESS DENIED|등록되지 않은 (서비스|인증)키/i.test(txt)) throw new Error('SERVICE_KEY_IS_NOT_REGISTERED');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const raw: any = JSON.parse(txt); const body = raw?.response?.body ?? raw?.body; const it = body?.items; items = Array.isArray(it) ? it : Array.isArray(it?.item) ? it.item : it?.item ? [it.item] : [];
-    } catch (e) { const msg = portalErr((e instanceof Error ? e.message : String(e)).split(key).join('***'), '15059177'); return { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: `OpenAPI 호출 실패: ${msg}`, summary: /활용신청/.test(msg) ? `K-apt 사업자선정: ${msg}` : `K-apt 사업자선정 ${from}~${to} · OpenAPI 호출 실패`, providerMode: 'api' }; }
-    let inserted = 0, updated = 0, skipped = 0; const errors: string[] = [];
-    for (const it of items) { const r = toKaptRaw(it); if (!r) continue; try { const res = await upsertKaptVendor(r); if (res.result === 'insert') inserted++; else if (res.result === 'update') updated++; else skipped++; } catch (e) { errors.push(`${r.source_external_id}: ${e instanceof Error ? e.message : String(e)}`); } }
-    return { inserted, updated, unchanged: skipped, errors: errors.length, errorLog: errors.length ? errors.slice(0, 10).join('\n') : undefined, providerMode: 'api', summary: `K-apt 사업자선정 ${from}~${to} · 응답 ${items.length}건 · 신규 ${inserted}, 갱신 ${updated}, 변화없음 ${skipped}, 오류 ${errors.length}` };
+      for (const y of [year, year - 1]) for (let page = 1; page <= 4 && ctx.now() - t0 < 20000; page++) {
+        const u = new URL(`${KAPT_API()}/getBidSttusSearchV3`); u.searchParams.set('serviceKey', key); u.searchParams.set('bidState', '5'); u.searchParams.set('searchYear', String(y)); u.searchParams.set('pageNo', String(page)); u.searchParams.set('numOfRows', '500');
+        const rows = await callDataGo(u, ctx.fetchImpl, key, Math.max(3000, 20000 - (ctx.now() - t0)));
+        items.push(...rows); if (rows.length < 500) break;
+      }
+    } catch (e) { const msg = portalErr((e instanceof Error ? e.message : String(e)).split(key).join('***'), '15059177'); return { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: `OpenAPI 호출 실패: ${msg}`, summary: `K-apt 사업자선정: ${msg}`, providerMode: 'api' }; } // 예전엔 활용신청 말고는 'OpenAPI 호출 실패'만 보여 원인을 몰랐음
+    const seen = new Set<string>(); // 올해·작년 두 번 물어 같은 입찰번호가 겹치면 한 줄
+    const raws = items.map(toKaptRaw).filter((r): r is NonNullable<ReturnType<typeof toKaptRaw>> => !!r && !seen.has(r.source_external_id) && !!seen.add(r.source_external_id));
+    // 커뮤니티·운동시설 위탁 건(운영중 단지로 이어지는 것)만 낙찰 업체 이름 — 이미 아는 건은 다시 묻지 않음, 한 번에 30건
+    const relevant = raws.filter((r) => KAPT_RELEVANT_TASK.test(`${r.task_category ?? ''} ${r.task_detail ?? ''}`));
+    const known = await knownKaptVendors(relevant.map((r) => r.source_external_id)); let named = 0; const vendorErrors: string[] = [];
+    for (const r of relevant) {
+      if (named >= 30 || ctx.now() - t0 > 35000) break; if (known.has(r.source_external_id)) continue;
+      try { const u = new URL(`${KAPT_API()}/getBidEntrpsInfoSearchV3`); u.searchParams.set('serviceKey', key); u.searchParams.set('bidNum', r.source_external_id); u.searchParams.set('pageNo', '1'); u.searchParams.set('numOfRows', '50');
+        const es = await callDataGo(u, ctx.fetchImpl, key, 5000); const win = es.find((e: any) => /^(Y|낙찰)/i.test(String(e?.bidSuccessfulYn ?? '').trim()));
+        if (win) { r.selected_vendor = toStr(win.companyName); named++; } }
+      catch (e) { if (vendorErrors.length < 3) vendorErrors.push(`낙찰 업체 ${r.source_external_id}: ${(e instanceof Error ? e.message : String(e)).split(key).join('***').slice(0, 120)}`); }
+    }
+    let inserted = 0, updated = 0, skipped = 0; const errors: string[] = [...vendorErrors];
+    for (const r of raws) { try { const res = await upsertKaptVendor(r); if (res.result === 'insert') inserted++; else if (res.result === 'update') updated++; else skipped++; } catch (e) { errors.push(`${r.source_external_id}: ${e instanceof Error ? e.message : String(e)}`); } }
+    return { inserted, updated, unchanged: skipped, errors: errors.length, errorLog: errors.length ? errors.slice(0, 10).join('\n') : undefined, providerMode: 'api',
+      summary: `K-apt 사업자선정(낙찰공고) ${year - 1}~${year} · 응답 ${items.length}건 · 커뮤니티·운동 관련 ${relevant.length}건(낙찰 업체 새로 ${named}건) · 신규 ${inserted} · 갱신 ${updated}` };
   },
 };
 export const operatingFromKapt: Collector = {
