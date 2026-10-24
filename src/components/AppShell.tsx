@@ -36,7 +36,8 @@ import { VoiceAddTask } from './VoiceAddTask';
 
 type NavItem = { href: string; label: string; icon: LucideIcon; group?: string };
 /** 워크인(WORKIN_V2) 사이드바: 홈 · 업무(본사 전체) · 프로젝트 · 캘린더 · 알림 + 관리 묶음. 숨긴 화면(현장 신고 QR·자동화·현장 비교 등)은 코드·주소는 남겨 둔다 */
-const COMMON_PATHS = ['/tasks', '/calendar', '/messages', '/library', '/assistant', '/notifications'];
+/** 대표 10/24 저녁(#567): 업무 공간에만 딸린 화면 — 여기로 갈 때만 업무 공간으로 바뀜('/' 홈 포함). 공통(업무·캘린더·알림·메시지·자료실·연락처·공지·AI)·관리·설정·견적서 등 나머지는 지금 공간 유지 */
+const WORK_PATHS = ['/projects', '/reports/mine', '/approvals', '/templates', '/workload', '/automations', '/insights', '/forms', '/teams'];
 const NAV: NavItem[] = [
   { href: '/', label: '홈', icon: House },
   { href: '/tasks', label: '업무', icon: CircleCheck },
@@ -94,15 +95,18 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // V41 공간: 지금 공간(주소로) · 들어갈 수 있는 공간 · 전환(마지막 공간 기억)
   const spaces = (session.spaces ?? ['work']) as SpaceKey[];
   // 대표 지적(10/18): 영업·마케팅 공간에서 공통 메뉴(업무·캘린더·메시지·자료실·AI 비서)로 가도 그 공간에 머묾 — 공간 메뉴 아래 '공통' 묶음
+  // 대표 10/24 저녁(#567): 연락처·공지·관리(사용자 관리·사용량 등)·설정에서도 상단 공간·사이드바·하단 탭 유지 — 업무 전용 화면(WORK_PATHS)으로 갈 때만 업무.
+  // 마지막 공간은 탭마다 기억(sessionStorage), 새 탭·앱을 공통 화면으로 바로 열면 마지막으로 고른 공간(localStorage wos_space)
   const pathSpace = spaceOfPath(path);
-  const common = COMMON_PATHS.some((c) => path === c || path.startsWith(c + '/'));
+  const workOnly = path === '/' || WORK_PATHS.some((c) => path === c || path.startsWith(c + '/'));
   const [ctxSpace, setCtxSpace] = useState<SpaceKey>('work');
   useEffect(() => {
-    if (pathSpace !== 'work') { setCtxSpace(pathSpace); try { sessionStorage.setItem('wos_space_ctx', pathSpace); } catch {} }
-    else if (!common) { setCtxSpace('work'); try { sessionStorage.setItem('wos_space_ctx', 'work'); } catch {} }
-    else { try { const c = sessionStorage.getItem('wos_space_ctx') as SpaceKey | null; if (c && spaces.includes(c)) setCtxSpace(c); } catch {} }
+    const keep = (sp: SpaceKey) => { setCtxSpace(sp); try { sessionStorage.setItem('wos_space_ctx', sp); } catch {} };
+    if (pathSpace !== 'work') keep(pathSpace);
+    else if (workOnly) keep('work');
+    else { let c: string | null = null; try { c = sessionStorage.getItem('wos_space_ctx') ?? localStorage.getItem('wos_space'); } catch {} if (c && spaces.includes(c as SpaceKey)) setCtxSpace(c as SpaceKey); }
   }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
-  const space: SpaceKey = pathSpace !== 'work' ? pathSpace : common && spaces.includes(ctxSpace) ? ctxSpace : 'work';
+  const space: SpaceKey = pathSpace !== 'work' ? pathSpace : !workOnly && spaces.includes(ctxSpace) ? ctxSpace : 'work';
   const sm = SPACE_META[space];
   // 로컬 10/19(대표): 공간 강조색을 화면 전체(머리줄·하단 탭·강조 버튼·모달)에 — html[data-space] 로 brand 색 변수를 바꿈. 공간을 바꾸면 바로 바뀜
   useEffect(() => { const h = document.documentElement; h.dataset.space = space; return () => { delete h.dataset.space; }; }, [space]);
@@ -214,8 +218,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   }, [path, hasUnread]);
 
   // 공간별 하단 탭 4개(+ 더보기) — 배지: 메시지 안 읽음 · 마케팅 승인 대기
-  // 로컬 검수 10/19: 하단 탭은 마지막 공간이 아니라 지금 주소의 공간 기준(/tasks 등 공통 화면 = 업무)
-  const tabSpace = path.startsWith('/s/sales') ? 'sales' : path.startsWith('/s/marketing') ? 'marketing' : 'work';
+  // 대표 10/24 저녁(#567): 하단 탭도 사이드바와 같은 지금 공간 기준 — 영업 하단 '메시지'·공통·관리 화면으로 가도 영업 탭 유지(로컬 검수 10/19 '공통 화면 = 업무 탭'을 바꿈)
+  const tabSpace = space;
   const mobileTabs: (NavItem & { badge?: number; match?: string[] })[] = tabSpace === 'sales'
     // 대표 확정 10/24(#537·#518 로컬 추천 A): 영업 하단 = 홈 · 영업기회(오늘 새 공고 배지) · 리드 · 제안·계약 · 메시지. 입찰은 하단 칸이 아니라 영업기회 안 '입찰' 탭(켠 회사만, #438)
     // — 영업기회 칸은 허브·입찰·계약만료·공공데이터·지원사업 화면에서도 켜짐

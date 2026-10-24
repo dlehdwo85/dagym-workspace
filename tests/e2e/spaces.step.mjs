@@ -32,6 +32,27 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.equal(await owner.getByTestId('nav-space-head').innerText(), '영업 메뉴');
   const commonSales = await navLabels('nav-common-v3');
   assert.deepEqual(commonSales, ['업무', ...commonWork.map((l) => (l === 'AI 비서' ? 'AI 세일즈' : l))], '공통은 어느 공간에서나 같은 자리(영업·마케팅은 맨 위 업무만 더) — 대표 10/21 12:20: 영업의 AI 는 AI 세일즈');
+  // 대표 10/24 저녁(#567): 영업에서 공통(업무·캘린더·연락처)·관리(사용자 관리) 메뉴를 눌러도 상단 공간·사이드바는 영업 그대로 — 새로고침해도 유지, 업무 전용 화면(프로젝트)으로 갈 때만 업무
+  const spaceIs = async (label, why) => {
+    await owner.waitForFunction((l) => document.querySelector('[data-testid="space-current"]')?.textContent === l, label, { timeout: 5000 }).catch(() => {});
+    assert.equal(await owner.getByTestId('space-current').textContent(), label, why);
+  };
+  for (const [name, url] of [['업무', /\/tasks$/], ['캘린더', /\/calendar$/], ['연락처', /\/contacts$/]]) {
+    await owner.getByTestId('nav-common-v3').getByRole('link', { name, exact: true }).click();
+    await owner.waitForURL(url);
+    await spaceIs('워크인 · 영업', `공통 '${name}'에서도 영업`);
+    assert.equal(await owner.getByTestId('nav-space-head').innerText(), '영업 메뉴');
+  }
+  const usersLink = owner.getByTestId('nav-admin').getByRole('link', { name: '사용자 관리' });
+  if (!(await usersLink.count())) await owner.getByTestId('nav-admin').getByRole('button', { name: '관리' }).click();
+  await usersLink.click();
+  await owner.waitForURL(/\/admin\/users$/);
+  await spaceIs('워크인 · 영업', '관리 › 사용자 관리에서도 영업');
+  assert.equal(await owner.locator('.app-shell').getAttribute('data-space'), 'sales');
+  await owner.reload();
+  await spaceIs('워크인 · 영업', '새로고침해도 영업(마지막 공간 기억)');
+  await owner.goto(`${BASE}/projects`);
+  await spaceIs('워크인 · 업무', '업무 전용 화면(프로젝트)은 업무');
   await owner.keyboard.press('Control+1');
   await owner.waitForURL(`${BASE}/`);
   assert.equal(await owner.getByTestId('space-current').textContent(), '워크인 · 업무');
@@ -87,6 +108,12 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.deepEqual(await tabs(), ['홈', '영업기회', '리드', '제안·계약', '메시지']); // #537 홈·영업기회(입찰은 그 안, #438)·리드·제안·계약·메시지
   const w = await m.getByTestId('mobile-tabs').locator(':scope > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
   assert.ok(Math.max(...w) - Math.min(...w) <= 1, `같은 폭 ${w}`);
+  // #567: 영업 하단 '메시지'를 눌러도 하단 탭·머리줄은 영업 그대로(공통 화면이라고 업무 탭으로 바뀌지 않음)
+  await m.getByTestId('mobile-tabs').getByRole('link', { name: /메시지/ }).tap();
+  await m.waitForURL(/\/messages$/);
+  await m.waitForFunction(() => document.querySelector('[data-testid="mobile-tabs"]')?.getAttribute('data-space') === 'sales', null, { timeout: 5000 }).catch(() => {});
+  assert.deepEqual(await tabs(), ['홈', '영업기회', '리드', '제안·계약', '메시지'], '메시지 화면에서도 영업 하단 탭');
+  assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
   await m.getByTestId('mobile-space-switch').tap();
   await m.getByTestId('sheet-space-sales').getByLabel('지금 공간').waitFor();
   await m.getByTestId('sheet-space-work').tap(); // 업무로 돌려 둠
