@@ -181,21 +181,43 @@ export function voiceErrorToast(err?: string) {
   else toast.info('음성을 알아듣지 못했습니다 — 다시 눌러 말해 주세요');
 }
 
+/** #541 이미 말한(쓴) 글이 있을 때 마이크를 누르면 고르기: [이어서 녹음] = 뒤에 붙임 · [처음부터(초기화)] = 지우고 새로 */
+export function VoiceChoice({ onPick, onClose, className }: { onPick: (fresh: boolean) => void; onClose: () => void; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // 바깥을 누르면 닫음 — 마이크 버튼(같은 부모 안)은 제 손으로 열고 닫으니 빼야 닫히자마자 다시 열리지 않음
+    const out = (e: PointerEvent) => { if (!ref.current?.parentElement?.contains(e.target as Node)) onClose(); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('pointerdown', out); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('pointerdown', out); document.removeEventListener('keydown', esc); };
+  }, [onClose]);
+  return (
+    <div ref={ref} role="menu" aria-label="이미 녹음한 내용이 있습니다" className={cx('z-30 w-44 rounded-input border border-line bg-white p-1 text-sm shadow-pop', className)} data-testid="voice-choice">
+      <p className="px-2 pb-1 pt-0.5 text-xs text-ink-3">이미 녹음한 내용이 있습니다</p>
+      <button type="button" role="menuitem" className="flex min-h-10 w-full items-center rounded-input px-2 text-left hover:bg-slate-50" onClick={() => onPick(false)} data-testid="voice-continue">이어서 녹음</button>
+      <button type="button" role="menuitem" className="flex min-h-10 w-full items-center rounded-input px-2 text-left text-red-600 hover:bg-red-50" onClick={() => onPick(true)} data-testid="voice-restart">처음부터(초기화)</button>
+    </div>
+  );
+}
+
 /**
  * AI 비서·입력창용 마이크 버튼: 말하는 동안 입력창에 실시간 글자 → 끝나면 보정한 문장을 입력창에 남김(바로 보내지 않음)
- * value/onChange 는 입력창 값. 기존 글 뒤에 이어 붙인다.
+ * value/onChange 는 입력창 값. 이미 글이 있으면 [이어서 녹음](뒤에 붙임)·[처음부터(초기화)] 중 고른다(#541).
  */
 export function VoiceButton({ value, onChange, small, label = '음성 입력' }: { value: string; onChange: (v: string) => void; small?: boolean; label?: string }) {
   const [state, setState] = useState<'idle' | 'listening' | 'fixing'>('idle');
   const [ok, setOk] = useState(false);
+  const [ask, setAsk] = useState(false);
   const stop = useRef<() => void>(() => {});
   const base = useRef('');
   useEffect(() => setOk(voiceAvailable()), []);
   useEffect(() => () => stop.current(), []);
   if (!ok) return null;
   const join = (t: string) => (base.current ? `${base.current} ${t}` : t);
-  function start() {
-    base.current = value.trim();
+  function start(fresh = false) {
+    setAsk(false);
+    base.current = fresh ? '' : value.trim();
+    if (fresh) onChange('');
     setState('listening');
     stop.current = listen({
       onPartial: (t) => onChange(join(t)),
@@ -209,10 +231,13 @@ export function VoiceButton({ value, onChange, small, label = '음성 입력' }:
     });
   }
   return (
-    <Button type="button" variant="secondary" size={small ? 'sm' : undefined} onClick={state === 'listening' ? () => stop.current() : start} disabled={state === 'fixing'}
-      aria-label={state === 'listening' ? '음성 입력 멈추기' : label} aria-pressed={state === 'listening'} data-testid="voice-button"
-      className={cx(state === 'listening' && 'border-red-300 bg-red-50 text-red-600')}>
-      {state === 'fixing' ? <Loader2 className="animate-spin" /> : state === 'listening' ? <Square className="fill-current" /> : <Mic />}
-    </Button>
+    <span className="relative inline-flex">
+      <Button type="button" variant="secondary" size={small ? 'sm' : undefined} onClick={state === 'listening' ? () => stop.current() : () => (value.trim() ? setAsk(!ask) : start())} disabled={state === 'fixing'}
+        aria-label={state === 'listening' ? '음성 입력 멈추기' : label} aria-pressed={state === 'listening'} aria-haspopup="menu" aria-expanded={ask} data-testid="voice-button"
+        className={cx(state === 'listening' && 'border-red-300 bg-red-50 text-red-600')}>
+        {state === 'fixing' ? <Loader2 className="animate-spin" /> : state === 'listening' ? <Square className="fill-current" /> : <Mic />}
+      </Button>
+      {ask && <VoiceChoice className="absolute bottom-full right-0 mb-1" onPick={start} onClose={() => setAsk(false)} />}
+    </span>
   );
 }

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mic, RotateCcw } from 'lucide-react';
 import { parseTaskText } from '@/lib/nlparse';
-import { correctVoice, learnVoice, listen, voiceAvailable, voiceErrorToast, type VoiceFix } from './voice';
+import { VoiceChoice, correctVoice, learnVoice, listen, voiceAvailable, voiceErrorToast, type VoiceFix } from './voice';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import { AssigneePicker, DuePicker, PriorityPicker, RepeatChip, markNew, warnAway } from './TaskQuick';
@@ -37,6 +37,7 @@ export function VoiceAddTask() {
   const [busy, setBusy] = useState(false);
   const [fixes, setFixes] = useState<VoiceFix[]>([]);
   const [fixing, setFixing] = useState(false);
+  const [ask, setAsk] = useState(false); // #541 이미 말한 내용이 있으면 [이어서 녹음]·[처음부터(초기화)]
   const stop = useRef<() => void>(() => {});
   const projects = useApi<{ projects: { id: string; name: string }[] }>(open ? '/api/projects' : null);
   useEffect(() => { const h = () => { setOpen(true); setText(''); setCard(null); setFixes([]); }; window.addEventListener('wos-voice-add', h); return () => window.removeEventListener('wos-voice-add', h); }, []);
@@ -55,16 +56,21 @@ export function VoiceAddTask() {
       if (r.ok) setCard((c) => c && { ...c, title: r.title || c.title, assigneeId: r.assigneeId ?? c.assigneeId, dueDate: c.dueDate ?? r.dueDate ?? null, dueTime: c.dueTime ?? r.dueTime ?? null });
     } catch { /* 규칙 결과 그대로 */ } finally { setFixing(false); }
   }
-  function start() {
+  function start(fresh = true) {
+    setAsk(false);
     if (!voiceAvailable()) { voiceErrorToast('unsupported'); return; }
-    setText(''); setFixes([]); setListening(true);
-    stop.current = listen({ onPartial: setText, onEnd: async (r, err) => {
+    const base = fresh ? '' : text.trim();
+    const join = (t: string) => (base && t ? `${base} ${t}` : base || t);
+    if (fresh) { setText(''); setFixes([]); }
+    setListening(true);
+    stop.current = listen({ onPartial: (t) => setText(join(t)), onEnd: async (r, err) => {
       setListening(false);
-      if (!r) { voiceErrorToast(err); return; }
-      setText(r.text); setFixing(true);
+      if (!r) { setText(base); voiceErrorToast(err); return; }
+      setText(join(r.text)); setFixing(true);
       const c = await correctVoice(r); // 회사 단어장(사람·현장·프로젝트·자주 쓰는 말)으로 보정
-      setFixing(false); setText(c.text); setFixes(c.fixes);
-      if (c.text.trim()) { recognize(c.text); tidy(c.text); }
+      const all = join(c.text);
+      setFixing(false); setText(all); setFixes((f) => (fresh ? c.fixes : [...f, ...c.fixes]));
+      if (all.trim()) { recognize(all); tidy(all); }
     } });
   }
   /** 고친 말 되돌리기 → 다시 인식, 다음부터 이 보정은 쓰지 않음 */
@@ -93,8 +99,9 @@ export function VoiceAddTask() {
           <p className="text-lg font-semibold leading-snug"><b className="text-brand-700">업무 내용</b>과 <b className="text-brand-700">마감(언제까지)</b>을 말씀해 주세요.<span className="mt-1 block text-sm font-normal text-ink-2">담당자·우선순위·반복은 말해도 되고 안 해도 됩니다.</span></p>
           <ul className="space-y-1.5 text-sm text-ink-2">{EXAMPLES.map((e) => <li key={e} className="rounded-input bg-slate-50 px-3 py-2">“{e}”</li>)}</ul>
           <div className="flex flex-col items-center gap-2 py-2">
-            <button type="button" onClick={listening ? () => stop.current() : start} aria-label={listening ? '듣기 멈추기' : '말하기 시작'} aria-pressed={listening} data-testid="voice-start"
+            <button type="button" onClick={listening ? () => stop.current() : () => (text.trim() ? setAsk(!ask) : start())} aria-label={listening ? '듣기 멈추기' : '말하기 시작'} aria-pressed={listening} aria-haspopup="menu" aria-expanded={ask} data-testid="voice-start"
               className={cx('flex size-20 items-center justify-center rounded-full text-white shadow-pop', listening ? 'animate-pulse bg-red-500' : 'bg-brand-600 active:scale-95')}><Mic className="size-9" /></button>
+            {ask && <VoiceChoice onPick={start} onClose={() => setAsk(false)} />}
             <span className="text-sm text-ink-2" data-testid="voice-state">{listening ? '듣고 있어요… 말을 마치면 자동으로 정리합니다 (최대 60초)' : fixing ? '업무명·담당자·마감 정리하는 중…' : '눌러서 말하기 · 조용히 또박또박 말해도 됩니다'}</span>
           </div>
           <label className="block text-sm text-ink-2">말한 내용 (키보드 🎤 음성 입력이나 글로도 됩니다)

@@ -41,9 +41,29 @@ export async function v24({ browser, desk, BASE, sql }) {
     const box = p.getByLabel('AI 에게 요청', { exact: true });
     await box.fill('먼저 쓴 글');
     await p.getByRole('button', { name: '음성으로 요청' }).click();
+    // #541 이미 쓴(말한) 글이 있으면 고르기 — [이어서 녹음] = 뒤에 붙임
+    await p.getByTestId('voice-choice').waitFor();
+    assert.deepEqual(await p.getByTestId('voice-choice').getByRole('menuitem').allInnerTexts(), ['이어서 녹음', '처음부터(초기화)']);
+    await p.getByTestId('voice-continue').click();
     await p.waitForFunction(() => /최매니져 점검/.test(document.querySelector('textarea[aria-label="AI 에게 요청"]')?.value ?? ''));
     await p.waitForFunction(() => document.querySelector('textarea[aria-label="AI 에게 요청"]')?.value === '먼저 쓴 글 최매니저 점검 일정 알려줘');
     assert.equal((await sql`select count(*)::int n from ai_messages`)[0].n, n0, '바로 보내지 않음');
+    // [처음부터(초기화)] = 쓴 글을 지우고 새로 듣기(가짜 인식기는 두 번째부터 조용함 → 빈 칸)
+    await p.getByRole('button', { name: '음성으로 요청' }).click();
+    await p.getByTestId('voice-restart').click();
+    await p.waitForFunction(() => document.querySelector('textarea[aria-label="AI 에게 요청"]')?.value === '');
+    await p.getByRole('button', { name: '음성으로 요청' }).waitFor({ timeout: 25000 }); // 아무 말 없으면 15초 뒤 혼자 끝남
+    // 음성 업무 등록 창도 같은 고르기(말한 내용이 있을 때)
+    await p.evaluate(() => window.dispatchEvent(new Event('wos-voice-add')));
+    await p.getByTestId('voice-text').fill('먼저 말한 업무');
+    await p.getByTestId('voice-start').click();
+    await p.getByTestId('voice-choice').waitFor();
+    await p.getByTestId('voice-start').click(); // 마이크를 다시 누르면 닫힘(바로 다시 열리지 않음)
+    await p.getByTestId('voice-choice').waitFor({ state: 'detached' });
+    await p.getByTestId('voice-start').click();
+    await p.getByTestId('voice-restart').click();
+    await p.waitForFunction(() => document.querySelector('[data-testid="voice-text"]')?.value === '');
+    await p.keyboard.press('Escape');
     // 패널(✨)에도 마이크
     await p.goto(BASE + '/tasks');
     await p.getByTestId('ai-dock-open').click();
