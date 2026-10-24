@@ -54,6 +54,7 @@ import { chatBackPc, chatBackPcHard } from './chatBackPc.step.mjs';
 import { bidGroups } from './bidGroups.step.mjs';
 import { messengerV4 } from './messengerV4.step.mjs';
 import { prespecLink } from './prespecLink.step.mjs';
+import { messengerV5 } from './messengerV5.step.mjs';
 import { revenueAuto } from './revenueAuto.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
@@ -2825,6 +2826,7 @@ await step('#242 2단계 다른 화면 돌아오기: 알림 탭·위치·방금 
 await step('대표 10/24 추가 ② 입찰 같은 제목: 취소 공고 = 원 공고 카드 \'취소\'·\'M/D 취소 공고\' · K-apt 재게시 한 장 \'2회 게시\' → [대상 아님으로](사유) → 전체 탭에서 빠짐 → [대상 아님 n건] 탭(누가·사유) → [되돌리기] · 상세 \'대상아님\' 사유·되돌리기 · 휴대폰 넘침 없음', () => bidGroups({ owner, ctx, sql, BASE, SHOTS }));
 await step('메신저 2차(대표 10/20 카톡 수준 B8~B11·C13): 여기까지 읽음 선·긴 글 전체 보기·[+] 투표(실시간·누가·마감)·일정 잡기 카드·스티커·사진 3장 한 묶음·좌우 뷰어·@전체·메시지→일정(날짜·시각)·자주 쓰는 반응·답장 원문 이동(최신으로)·휴대폰 [+]·방 목록 밀기', () => messengerV4({ owner, ctx, sql, BASE, SHOTS }));
 await step('137차 사전규격 ↔ 본 공고 같은 사업: 본 공고를 대상 아님 → 사전규격도 전체 탭에서 빠짐 → [대상 아님] 탭 한 장(같은 사업이라 함께 숨김) → [되돌리기] 둘 다', () => prespecLink({ owner, ctx, sql, BASE, SHOTS }));
+await step('메신저 3차(대표 10/20 카톡 수준 C12·D14·D15): 머리줄 알림 메뉴(전체·멘션만·끄기)·목록 줄 표시·방 안 찾기(▲▼·강조·처음 화면 밖)·전체 검색 결과 → 그 메시지로·방 정보 알림 3칸·방장만 관리·방장 넘기기·방 사진', () => messengerV5({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

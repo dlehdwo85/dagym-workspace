@@ -13,6 +13,7 @@ export function MessengerDock({ aiOpen }: { aiOpen: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [room, setRoom] = useState<string | null>(null);
+  const [jump, setJump] = useState<string | null>(null); // 메신저 3차 D15: 검색 결과에서 연 메시지
   const unread = useApi<{ unread: number }>('/api/chat/unread');
   useEffect(() => { const t = setInterval(() => { if (document.visibilityState !== 'hidden') unread.reload(); }, 60000); return () => clearInterval(t); }, [unread]); // 10/21: 30초 → 60초, 가려진 탭 제외
   if (path.startsWith('/messages') || path.startsWith('/assistant')) return null; // 메시지·AI 비서 화면은 아래 오른쪽에 보내기 버튼이 있어 겹치지 않게
@@ -27,18 +28,18 @@ export function MessengerDock({ aiOpen }: { aiOpen: boolean }) {
           {n > 0 && <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-red-500 px-1 text-center text-[11px] font-bold leading-5 text-white" data-testid="msg-dock-badge">{n > 99 ? '99+' : n}</span>}
         </button>
       )}
-      {open && <DockPanel room={room} setRoom={setRoom} onClose={() => { setOpen(false); setRoom(null); unread.reload(); }} onExpand={expand} onRead={unread.reload} />}
+      {open && <DockPanel room={room} jump={jump} setRoom={(id, msg) => { setRoom(id); setJump(msg ?? null); }} onClose={() => { setOpen(false); setRoom(null); setJump(null); unread.reload(); }} onExpand={expand} onRead={unread.reload} />}
     </>
   );
 }
 
-function DockPanel({ room, setRoom, onClose, onExpand, onRead }: { room: string | null; setRoom: (id: string | null) => void; onClose: () => void; onExpand: () => void; onRead: () => void }) {
+function DockPanel({ room, jump, setRoom, onClose, onExpand, onRead }: { room: string | null; jump: string | null; setRoom: (id: string | null, msg?: string) => void; onClose: () => void; onExpand: () => void; onRead: () => void }) {
   const live = useLive();
   return (
     <section role="dialog" aria-label="메신저" data-testid="msg-dock"
       className="fixed bottom-6 right-6 z-50 hidden h-[560px] w-[380px] flex-col overflow-hidden rounded-card border border-line bg-white shadow-pop sm:flex">
       {room ? (
-        <ChatRoom key={room} id={room} live={live} onRead={onRead} onBack={() => setRoom(null)} compact backAlways onExpand={onExpand} onClose={onClose} />
+        <ChatRoom key={room} id={room} live={live} onRead={onRead} onBack={() => setRoom(null)} compact backAlways onExpand={onExpand} onClose={onClose} jump={jump} />
       ) : (
         <>
           <header className="flex items-center gap-1.5 border-b border-line px-3 py-2">

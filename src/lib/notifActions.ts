@@ -22,6 +22,8 @@ export function actionsFor(n: NotifRow): NotifAction[] {
       return [{ id: 'approve', label: '승인', done: '승인함' }, { id: 'changes', label: '수정 요청', input: 'text', done: '수정 요청함' }];
     case 'comment': case 'mention':
       return [{ id: 'reply', label: '답글', input: 'text', done: '답글 남김' }, { id: 'ack', label: '확인', done: '확인함' }];
+    case 'chat': // 메신저 3차 C12: 푸시에서 바로 답장(그 방에 메시지)·읽음 — iOS 는 같은 버튼 묶음(wn.reply.ack)
+      return n.entity_id ? [{ id: 'reply', label: '답장', input: 'text', done: '답장함' }, { id: 'ack', label: '읽음', done: '읽음' }] : [];
     case 'task_assigned':
       if (n.task_status === 'done') return [];
       return [{ id: 'ack', label: '확인', done: '확인함' }, { id: 'today', label: '오늘 할 일에 넣기', done: '오늘 할 일에 넣음' }];
@@ -76,6 +78,12 @@ export async function performAction(u: SessionUser, notificationId: string, i: z
       break;
     }
     case 'reply': {
+      if (n.type === 'chat') { // 메신저 3차 C12: 그 방에 메시지로 보내고(방을 떠났으면 404) 방은 읽음으로
+        const C = await import('./chat');
+        await C.sendMessage(u, n.entity_id!, C.messageInput.parse({ body: i.text }));
+        await C.markRead(u, n.entity_id!);
+        break;
+      }
       if (!taskId) throw badRequest('업무 알림이 아닙니다');
       const parentId = (n.meta?.commentId as string | undefined) ?? n.link.match(/#c-([0-9a-f-]{36})/)?.[1] ?? null;
       await T.addComment(u, taskId, i.text!, parentId); // 답글의 답글은 addComment 가 같은 스레드로 붙임
@@ -83,6 +91,8 @@ export async function performAction(u: SessionUser, notificationId: string, i: z
     }
     case 'ack': {
       if (n.type === 'task_assigned' && taskId) await T.ackTask(u, taskId);
+      // 메신저 3차 C12: 알림 온 메시지까지 읽음(그 뒤 새 메시지는 그대로 안 읽음)
+      if (n.type === 'chat' && n.entity_id) await (await import('./chat')).markRead(u, n.entity_id, /^\d{1,20}$/.test(String(n.meta?.messageId ?? '')) ? String(n.meta!.messageId) : undefined);
       break;
     }
     case 'today': {

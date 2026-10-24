@@ -3,7 +3,7 @@ import { RoleBadge } from '@/components/RoleBadge';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { ArrowLeft, AtSign, BarChart3, CalendarPlus, Check, ChevronLeft, ChevronRight, Headphones, MapPin, Mic, Pencil, Play, Bell, BellOff, Camera, Image as ImageIcon, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Sticker as StickerIcon, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, AtSign, BarChart3, CalendarPlus, Check, ChevronLeft, ChevronRight, Crown, Headphones, Lock, MapPin, Mic, Pencil, Play, Bell, BellOff, Camera, Image as ImageIcon, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Sticker as StickerIcon, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { cameBack } from '@/components/urlState';
@@ -21,7 +21,9 @@ import { parseTaskText } from '@/lib/nlparse';
  * 목록(검색·＋새 대화·탭·아바타·미리보기·안 읽음·고정) / 대화방(연속 묶기·날짜 구분·읽음·이미지/파일 카드·답장 인용·반응·hover 메뉴) / 입력(자동 높이·📎📷😊@·붙여넣기·끌어 놓기)
  */
 export type RoomRow = { id: string; kind: 'dm' | 'group' | 'company' | 'task' | 'team'; name: string | null; task_id: string | null; muted: boolean; pinned: boolean; unread: number; member_count: number;
-  last_body: string | null; last_file: string | null; last_author: string | null; last_deleted: boolean; last_message_at: string | null; other_id: string | null; last_mime?: string | null; last_kind?: string | null };
+  last_body: string | null; last_file: string | null; last_author: string | null; last_deleted: boolean; last_message_at: string | null; other_id: string | null; last_mime?: string | null; last_kind?: string | null;
+  /** 메신저 3차: 방별 알림 단계 · 방 사진(바뀌면 달라지는 값) · 멘션만 받는 방의 안 읽은 멘션 수 */
+  notify?: Level; photo_v?: string | null; mention_unread?: number };
 type Reaction = { emoji: string; n: number; mine: boolean; names: string[] };
 export type Msg = { id: string; room_id: string; author_id: string | null; author_name: string | null; created_at: string; edited_at: string | null; pinned_at: string | null;
   body: string; deleted: boolean; file_name: string | null; file_mime: string | null; file_size: number | null; task_id: string | null; mine: boolean;
@@ -32,6 +34,15 @@ export type Msg = { id: string; room_id: string; author_id: string | null; autho
 type Poll = { question: string; options: string[]; multi: boolean; anonymous: boolean; closes_at: string | null; closed: boolean; counts: number[]; mine: number[]; voters: number; names: Record<string, string[]> | null };
 type EventCard = { id: string; title: string; start_at: string; end_at: string; all_day: boolean; location: string; cancelled: boolean; going: number; invited: number; response: string | null };
 export const KIND_LABEL = { dm: '1:1', group: '그룹', company: '회사 전체', task: '업무', team: '팀' } as const;
+/** 메신저 3차 C12 방별 알림 단계 — 전체 · 멘션만(예전 '알림 끄기') · 끄기(멘션도 안 옴·앱 배지에서도 빠짐) */
+const NOTIFY_OPTS = [
+  ['all', '전체 알림', '새 메시지마다 알림', Bell],
+  ['mention', '멘션만', '나를 부를 때(@이름·@전체)만 알림', AtSign],
+  ['off', '끄기', '알림 없음 · 앱 배지 숫자에서도 빠짐', BellOff],
+] as const;
+type Level = (typeof NOTIFY_OPTS)[number][0];
+const levelOf = (r: { notify?: Level; muted?: boolean }): Level => r.notify ?? (r.muted ? 'mention' : 'all');
+const roomPhoto = (id: string, v?: string | null) => (v ? `/api/chat/rooms/${id}/photo?v=${v}` : null);
 // B10 이모지 패널(자주 쓰는 것은 이 기기에 기억)
 const INSERT_EMOJI = ['😀', '😂', '😊', '😍', '🥰', '😎', '🤔', '😅', '😢', '😭', '😡', '😴', '🙏', '👍', '👎', '👏', '🙌', '💪', '👌', '✌️', '🤝', '🎉', '🔥', '✅',
   '❗', '❓', '💯', '❤️', '💙', '⭐', '☕', '🍚', '🍺', '🎂', '📌', '📎', '📅', '⏰', '📞', '💰', '🚗', '✈️', '🏢', '🏠', '☀️', '🌧️', '❄️', '🌙'];
@@ -62,12 +73,21 @@ export const shortTime = (s: string | null) => {
 const dayLabel = (s: string) => new Intl.DateTimeFormat('ko-KR', { timeZone: TZ, year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(s));
 const plain = (s: string | null) => (s ?? '').replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/g, '@$1');
 const fmtSize = (n: number | null) => (!n ? '' : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))}KB` : `${(n / 1024 / 1024).toFixed(1)}MB`);
-const render = (body: string) => body.split(/(@\[[^\]]+\]\([0-9a-f-]{36}\)|https?:\/\/[^\s<]+)/g).map((p, i) => {
+const render = (body: string, hl?: string) => body.split(/(@\[[^\]]+\]\([0-9a-f-]{36}\)|https?:\/\/[^\s<]+)/g).map((p, i) => {
   const m = /^@\[([^\]]+)\]\(([0-9a-f-]{36})\)$/.exec(p);
-  if (m) return <span key={i} className="rounded bg-black/10 px-0.5 font-medium">@{m[1]}</span>;
+  if (m) return <span key={i} className="rounded bg-black/10 px-0.5 font-medium">@{hl ? markText(m[1], hl, i) : m[1]}</span>;
   if (/^https?:\/\//.test(p)) return <a key={i} href={p} target="_blank" rel="noreferrer" className="break-all underline">{p}</a>;
-  return p;
+  return hl ? markText(p, hl, i) : p;
 });
+/** 메신저 3차 D15 방 안 검색: 찾는 말 강조(대소문자 무시) */
+function markText(t: string, q: string, k: number): React.ReactNode {
+  const low = t.toLowerCase(), ql = q.toLowerCase();
+  if (!ql || !low.includes(ql)) return t;
+  const out: React.ReactNode[] = []; let at = 0, j = low.indexOf(ql);
+  while (j >= 0) { if (j > at) out.push(t.slice(at, j)); out.push(<mark key={j} className="rounded bg-amber-200 px-0.5 text-ink" data-testid="chat-find-hit">{t.slice(j, j + ql.length)}</mark>); at = j + ql.length; j = low.indexOf(ql, at); }
+  if (at < t.length) out.push(t.slice(at));
+  return <span key={k}>{out}</span>;
+}
 
 /** 실시간 연결: SSE(약 50초마다 다시 연결), 실패하면 5초 폴링. 구독자에게 새 메시지·입력 중·읽음 전달 */
 type LiveEvt = { messages?: Msg[]; typing?: { room_id: string; name: string }[]; reads?: { room_id: string; user_id: string; last_read_id: string }[] };
@@ -105,8 +125,10 @@ export function useLive(): Live {
   return useMemo(() => ({ subscribe, mode }), [subscribe, mode]);
 }
 
-function RoomIcon({ r, size = 40 }: { r: Pick<RoomRow, 'kind' | 'other_id' | 'name'>; size?: number }) {
+function RoomIcon({ r, size = 40 }: { r: Pick<RoomRow, 'kind' | 'other_id' | 'name'> & { photo?: string | null }; size?: number }) {
   if (r.kind === 'dm') return <Avatar id={r.other_id} name={r.name} size={size} badge={false} />;
+  // 메신저 3차 D14 방 사진(그룹·회사 전체방)
+  if (r.photo) return <img src={r.photo} alt="" className="shrink-0 rounded-2xl border border-line bg-slate-100 object-cover" style={{ width: size, height: size }} data-testid="room-photo" />;
   return (
     <span className={cx('inline-flex shrink-0 items-center justify-center rounded-2xl', r.kind === 'company' ? 'bg-teal-700 text-white' : r.kind === 'task' ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700')} style={{ width: size, height: size }}>
       {r.kind === 'company' ? <Hash className="size-5" /> : r.kind === 'task' ? <SquarePen className="size-5" /> : <Users className="size-5" />}
@@ -154,7 +176,7 @@ const TABS = [['all', '전체'], ['unread', '안 읽음'], ['dm', '1:1'], ['grou
 type Tab = (typeof TABS)[number][0];
 
 /** 대화방 목록 */
-export function RoomList({ activeId, onOpen, live, compact }: { activeId?: string | null; onOpen: (id: string) => void; live: Live; compact?: boolean }) {
+export function RoomList({ activeId, onOpen, live, compact }: { activeId?: string | null; onOpen: (id: string, msg?: string) => void; live: Live; compact?: boolean }) {
   const { user, dir } = useSession();
   const rooms = useApi<{ rooms: RoomRow[]; unread: number }>('/api/chat/rooms');
   const [newOpen, setNewOpen] = useState(false);
@@ -162,6 +184,8 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
   const [tab, setTab] = useState<Tab>('all');
   const [results, setResults] = useState<any[] | null>(null);
   useEffect(() => live.subscribe((e) => { if (e.messages?.length) rooms.reload(); }), [live, rooms.reload]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 메신저 3차: 대화방 머리줄에서 알림 단계를 바꾸면 목록 줄 표시(@·종)도 바로
+  useEffect(() => { const h = () => rooms.reload(); window.addEventListener('wos-chat-rooms', h); return () => window.removeEventListener('wos-chat-rooms', h); }, [rooms.reload]); // eslint-disable-line react-hooks/exhaustive-deps
   const title = (id: string | null) => dir.users.find((x) => x.id === id)?.title ?? null;
   const list = (rooms.data?.rooms ?? []).filter((r) => (tab === 'all' || (tab === 'unread' ? r.unread > 0 : tab === 'group' ? r.kind === 'group' || r.kind === 'team' || r.kind === 'company' : r.kind === tab))
     && (!q || (r.name ?? '').includes(q) || plain(r.last_body).includes(q)));
@@ -177,7 +201,8 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
   const [swiped, setSwiped] = useState<string | null>(null);
   async function mute(r: RoomRow) {
     setSwiped(null);
-    try { await api(`/api/chat/rooms/${r.id}`, { method: 'PATCH', body: { muted: !r.muted } }); rooms.reload(); toast.ok(r.muted ? '알림을 켰습니다' : '알림을 껐습니다'); } catch (e: any) { toast.error(e.message); }
+    // 밀어서 [알림 끄기] = 멘션만(나를 부르면 옴), [알림 켜기] = 전체 — 세 단계는 방 머리줄·방 정보에서
+    try { await api(`/api/chat/rooms/${r.id}`, { method: 'PATCH', body: { muted: !r.muted } }); rooms.reload(); window.dispatchEvent(new Event('wos-chat-read')); toast.ok(r.muted ? '알림을 켰습니다' : '알림을 껐습니다 — 나를 부를 때(멘션)만 알립니다'); } catch (e: any) { toast.error(e.message); }
   }
   async function leave(r: RoomRow) {
     setSwiped(null);
@@ -210,7 +235,7 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
         <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto" data-testid="chat-search-results">
           <li className="px-3 py-1.5 text-[11px] text-ink-3">메시지 검색 결과 · <button className="underline" onClick={() => { setResults(null); setQ(''); }}>지우기</button></li>
           {results.map((m) => (
-            <li key={m.id}><button className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => { onOpen(m.room_id); setResults(null); setQ(''); }}>
+            <li key={m.id}><button className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => { onOpen(m.room_id, m.id); setResults(null); setQ(''); }} data-testid="chat-search-hit">
               <div className="text-xs text-ink-3">{m.room_name ?? KIND_LABEL[m.room_kind as 'dm']} · {m.author_name} · {shortTime(m.created_at)}</div>
               <div className="truncate">{plain(m.body) || m.file_name}</div></button></li>
           ))}
@@ -221,20 +246,21 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
           {list.map((r) => (
             <SwipeRow key={r.id} r={r} open={swiped === r.id} setOpen={(o) => setSwiped(o ? r.id : null)} onPin={() => { setSwiped(null); pin(r); }} onMute={() => mute(r)} onLeave={() => leave(r)}>
               <button onClick={() => onOpen(r.id)} className={cx('flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50', activeId === r.id && 'bg-teal-50')} data-room={r.kind}>
-                <RoomIcon r={r} />
+                <RoomIcon r={{ ...r, photo: roomPhoto(r.id, r.photo_v) }} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-sm font-semibold">{r.name ?? KIND_LABEL[r.kind]}</span>
                     {r.kind === 'dm' && title(r.other_id) && <span className="shrink-0 text-[11px] text-ink-3">{title(r.other_id)}</span>}
                     {r.kind !== 'dm' && <span className="shrink-0 text-[11px] text-ink-3">{r.kind === 'task' ? '업무' : r.member_count}</span>}
                     {r.pinned && <Pin className="size-3 shrink-0 text-teal-700" aria-label="고정됨" />}
-                    {r.muted && <BellOff className="size-3 shrink-0 text-ink-3" aria-label="알림 꺼짐" />}
+                    {levelOf(r) === 'mention' && <AtSign className="size-3 shrink-0 text-ink-3" aria-label="멘션만 알림" data-testid="room-level-mention" />}
+                    {levelOf(r) === 'off' && <BellOff className="size-3 shrink-0 text-ink-3" aria-label="알림 꺼짐" data-testid="room-level-off" />}
                     <span className="ml-auto shrink-0 text-[11px] text-ink-3">{shortTime(r.last_message_at)}</span>
                   </span>
                   <span className="mt-0.5 flex items-center gap-1.5">
                     <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
                       {r.last_deleted ? '삭제된 메시지' : r.last_body || r.last_file ? `${r.kind !== 'dm' && r.last_author ? r.last_author + ': ' : ''}${lastPreview(r)}` : '아직 메시지가 없습니다'}</span>
-                    {r.unread > 0 && <span className={cx('shrink-0 rounded-full px-1.5 text-[11px] font-bold leading-5 text-white', r.muted ? 'bg-slate-400' : 'bg-red-500')} data-testid="room-unread">{r.unread > 99 ? '99+' : r.unread}</span>}
+                    {r.unread > 0 && <span className={cx('shrink-0 rounded-full px-1.5 text-[11px] font-bold leading-5 text-white', levelOf(r) === 'all' || (r.mention_unread ?? 0) > 0 ? 'bg-red-500' : 'bg-slate-400')} data-testid="room-unread">{r.unread > 99 ? '99+' : r.unread}</span>}
                   </span>
                 </span>
               </button>
@@ -263,7 +289,9 @@ export function RoomList({ activeId, onOpen, live, compact }: { activeId?: strin
 }
 
 type Member = { id: string; name: string; title?: string | null; phone?: string | null; role?: string; last_read_id: string; is_owner?: boolean; joined_at?: string };
-type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean; canRename?: boolean; ownerId?: string | null; canManage?: boolean; historyVisible?: boolean; canMentionAll?: boolean };
+type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskId: string | null; muted: boolean; canRename?: boolean; ownerId?: string | null; canManage?: boolean; historyVisible?: boolean; canMentionAll?: boolean;
+    /** 메신저 3차: 방별 알림 단계 · 방 사진 주소 · 방장만 관리 · 이름·사진·초대·공지 가능(canEdit)·사진 가능(canPhoto) */
+    notify?: Level; photo?: string | null; ownerOnly?: boolean; canEdit?: boolean; canPhoto?: boolean };
   messages: Msg[]; members: Member[]; pinned: Msg[]; hasOlder?: boolean; hasNewer?: boolean; lastRead?: string; quickReactions?: string[] };
 
 /** 132차 확인 후속(로컬 10/24 ⑧): 주소를 새로 열어 다른 화면에 갔다가 브라우저 뒤로가기로 이 페이지를 다시 연 경우(전체 새로고침) — 그때 처음 여는 방만 '돌아옴'으로 */
@@ -271,7 +299,8 @@ let firstRoom = true;
 const loadedBack = () => { if (!firstRoom) return false; firstRoom = false; try { return performance.now() < 8000 && (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type === 'back_forward'; } catch { return false; } }; // 페이지를 연 직후에 여는 방만
 
 /** 대화방 */
-export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose, backAlways }: { id: string; live: Live; onRead: () => void; onBack: () => void; compact?: boolean; onExpand?: () => void; onClose?: () => void; backAlways?: boolean }) {
+export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose, backAlways, jump }: { id: string; live: Live; onRead: () => void; onBack: () => void; compact?: boolean; onExpand?: () => void; onClose?: () => void; backAlways?: boolean;
+  /** 메신저 3차 D15: 전체 검색 결과에서 연 메시지 — 그 메시지로 이동·강조 */ jump?: string | null }) {
   const { user, dir } = useSession();
   const { data, error, loading, reload } = useApi<RoomData>(`/api/chat/rooms/${id}`);
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -300,6 +329,12 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const [pollOpen, setPollOpen] = useState(false);
   const [eventDraft, setEventDraft] = useState<{ title: string; date: string; time: string | null; fromMessage?: string } | null>(null);
   const [newTask, setNewTask] = useState(false);
+  // 메신저 3차: 방별 알림 메뉴 · 방 안 검색(찾는 말 → 메시지 id 최신 순, at = 지금 보는 결과) · 방 설정 바로 반영(다시 불러오지 않고)
+  const [notifyOpen, setNotifyOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findText, setFindText] = useState('');
+  const [find, setFind] = useState<{ q: string; ids: string[]; at: number; more: boolean } | null>(null);
+  const [roomPatch, setRoomPatch] = useState<Partial<RoomData['room']>>({});
   const [hasOlder, setHasOlder] = useState(false);
   const [detached, setDetached] = useState(false); // 답장 원문으로 옮겨 가 최신 메시지가 아닌 구간을 보는 중
   const detachedRef = useRef(false); detachedRef.current = detached;
@@ -328,11 +363,20 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     if (!data) return;
     for (const m of data.messages) spoken.current.add(m.id);
     if (readMark.current === null) readMark.current = data.lastRead ?? null;
-    setMsgs(data.messages); setHasOlder(data.hasOlder ?? data.messages.length >= 60); setDetached(false);
+    setMsgs(data.messages); setHasOlder(data.hasOlder ?? data.messages.length >= 60); setDetached(false); setRoomPatch({});
     setReads(Object.fromEntries(data.members.map((m) => [m.id, m.last_read_id])));
   }, [data]);
-  const markRead = useCallback(async () => { try { await api(`/api/chat/rooms/${id}/read`, { body: {} }); onRead(); } catch { /* 다음에 */ } }, [id, onRead]);
+  // C12: 읽으면 메시지 배지·앱 아이콘 배지도 곧바로(AppShell)
+  const markRead = useCallback(async () => { try { await api(`/api/chat/rooms/${id}/read`, { body: {} }); onRead(); window.dispatchEvent(new Event('wos-chat-read')); } catch { /* 다음에 */ } }, [id, onRead]);
   useEffect(() => { if (data) markRead(); }, [data, markRead]);
+  // 메신저 3차 D15: 전체 검색 결과에서 연 방 — 그 메시지로 이동·강조(같은 방에서 다른 결과를 눌러도). 처음 받은 구간에 있으면 첫 그리기에서 바로
+  const jumped = useRef<string | null>(null);
+  useEffect(() => {
+    if (!jump || !data || jumped.current === jump) return;
+    jumped.current = jump;
+    if (!edge.current.last && data.messages.some((m) => m.id === jump)) { pendingJump.current = jump; return; }
+    jumpTo(jump);
+  }, [jump, data]); // eslint-disable-line react-hooks/exhaustive-deps
   // V38 1 흔들림 방지: 대화 칸만 움직인다(scrollIntoView 는 화면 전체를 끌어 올려 위아래로 튐).
   // 맨 아래를 보고 있을 때·내가 보낸 때만 따라가고, 위로 올려 보는 중이면 그 자리 유지 + "새 메시지 n ↓"
   const listRef = useRef<HTMLDivElement>(null);
@@ -418,13 +462,14 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     if (e.reads) setReads((r) => ({ ...r, ...Object.fromEntries(e.reads!.filter((x) => x.room_id === id).map((x) => [x.user_id, x.last_read_id])) }));
   }), [live, id, markRead, user.id]);
   useEffect(() => { if (!menu) return; const close = () => setMenu(null); window.addEventListener('click', close); return () => window.removeEventListener('click', close); }, [menu]);
+  useEffect(() => { if (!notifyOpen) return; const close = () => setNotifyOpen(false); window.addEventListener('click', close); return () => window.removeEventListener('click', close); }, [notifyOpen]);
   // 로컬 10/25 00:30(136차 확인): Esc 로 😊 창·[+] 패널·메시지 더 보기 메뉴 닫기 — 수정·삭제 메뉴가 열린 채 남지 않게(위에 뜬 창이 있으면 그 창이 먼저)
   useEffect(() => {
-    if (!menu && !active && !emojiOpen && !plusOpen) return;
-    const h = (e: KeyboardEvent) => { if (e.key !== 'Escape' || document.querySelector('[data-modal-root]')) return; setMenu(null); setActive(null); setEmojiOpen(false); setPlusOpen(false); };
+    if (!menu && !active && !emojiOpen && !plusOpen && !notifyOpen) return;
+    const h = (e: KeyboardEvent) => { if (e.key !== 'Escape' || document.querySelector('[data-modal-root]')) return; setMenu(null); setActive(null); setEmojiOpen(false); setPlusOpen(false); setNotifyOpen(false); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [menu, active, emojiOpen, plusOpen]);
+  }, [menu, active, emojiOpen, plusOpen, notifyOpen]);
 
   const members = data?.members ?? [];
   const toWire = (s: string) => members.filter((m) => m.id !== user.id).reduce((acc, m) => acc.split(`@${m.name}`).join(`@[${m.name}](${m.id})`),
@@ -577,12 +622,37 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     setOlder(true);
     try { const r = await api(`/api/chat/rooms/${id}?before=${msgs[0].id}`); setMsgs((c) => [...r.messages.filter((m: Msg) => !c.some((x) => x.id === m.id)), ...c]); setHasOlder(r.hasOlder ?? r.messages.length >= 60); } catch (e: any) { toast.error(e.message); } finally { setOlder(false); }
   }
-  async function toggleMute() {
-    try { await api(`/api/chat/rooms/${id}`, { method: 'PATCH', body: { muted: !data!.room.muted } }); reload(); onRead(); } catch (e: any) { toast.error(e.message); }
+  /** C12 방별 알림 단계 — 메시지 목록은 그대로 두고 머리줄만 바꿈 */
+  async function setLevel(level: Level) {
+    setNotifyOpen(false);
+    try {
+      await api(`/api/chat/rooms/${id}`, { method: 'PATCH', body: { notify: level } });
+      setRoomPatch((p) => ({ ...p, notify: level, muted: level !== 'all' })); onRead(); window.dispatchEvent(new Event('wos-chat-read')); window.dispatchEvent(new Event('wos-chat-rooms'));
+      toast.ok(level === 'all' ? '이 방 알림을 모두 받습니다' : level === 'mention' ? '이 방은 나를 부를 때(멘션)만 알립니다' : '이 방 알림을 껐습니다 — 멘션도 알리지 않습니다');
+    } catch (e: any) { toast.error(e.message); }
   }
+  // ---- 메신저 3차 D15 방 안 검색: Enter·▲ = 더 오래된 결과, ▼ = 더 최근 결과(카톡처럼 최신부터) ----
+  async function runFind(e?: React.FormEvent) {
+    e?.preventDefault();
+    const q = findText.trim(); if (!q) return;
+    if (find && find.q === q) { if (find.ids.length) stepFind(1); return; }
+    try {
+      const r = await api(`/api/chat/rooms/${id}/search?q=${encodeURIComponent(q)}`);
+      setFind({ q, ids: r.ids, at: 0, more: !!r.more });
+      if (r.ids.length) jumpTo(r.ids[0]);
+    } catch (er: any) { toast.error(er.message); }
+  }
+  function stepFind(d: 1 | -1) {
+    if (!find?.ids.length) return;
+    const at = Math.min(find.ids.length - 1, Math.max(0, find.at + d));
+    if (at === find.at) return;
+    setFind({ ...find, at }); jumpTo(find.ids[at]);
+  }
+  const closeFind = () => { setFindOpen(false); setFind(null); setFindText(''); };
   if (error) return <div className="p-6 text-sm"><p className="font-semibold">대화방을 열 수 없습니다</p><p className="mt-1 text-ink-2">{error.message}</p><Button className="mt-3" variant="secondary" onClick={onBack}>목록으로</Button></div>;
   if (loading && !data) return <div className="p-3"><Skeleton rows={6} /></div>;
-  const room = data!.room;
+  const room = { ...data!.room, ...roomPatch };
+  const level = levelOf(room);
   const other = room.kind === 'dm' ? members.find((x) => x.id !== user.id) : null;
   const quick = data!.quickReactions?.length ? data!.quickReactions : REACTIONS.slice(0, 6);
   const mediaList = msgs.filter((m) => !m.deleted && (isImage(m) || isVideo(m)));
@@ -612,7 +682,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-room">
       <header className="flex items-center gap-2 border-b border-line px-2 py-2">
         <button className={cx(iconBtn, !backAlways && 'sm:hidden')} onClick={onBack} aria-label="목록으로"><ArrowLeft className="size-5" /></button>
-        <RoomIcon r={{ kind: room.kind, other_id: other?.id ?? null, name: room.name }} size={compact ? 30 : 36} />
+        <RoomIcon r={{ kind: room.kind, other_id: other?.id ?? null, name: room.name, photo: room.photo }} size={compact ? 30 : 36} />
         <div className="min-w-0 flex-1">
           {nameDraft !== null ? (
             <input autoFocus className={cx(inputCls, 'h-7 px-2 text-sm font-semibold')} value={nameDraft} maxLength={50} onChange={(e) => setNameDraft(e.target.value)} aria-label="대화방 이름" data-testid="chat-room-name-input"
@@ -628,12 +698,38 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
             {room.taskId && <> · <Link href={`/tasks/${room.taskId}`} className="text-accent-600 underline">업무 보기</Link></>}{live.mode === 'poll' && ' · 5초마다 새로 고침'}</div>
         </div>
         <button className={cx(iconBtn, voice && 'bg-accent-600 text-white hover:bg-accent-700')} onClick={toggleVoice} aria-pressed={voice} aria-label={voice ? '음성 모드 끄기' : '음성 모드(운전 중) 켜기'} title={voice ? '음성 모드 끄기' : '음성 모드 — 새 메시지 읽어 주기·음성으로 보내기'} data-testid="chat-voice"><Headphones className="size-4" /></button>
-        <button className={iconBtn} onClick={toggleMute} aria-label={room.muted ? '알림 켜기' : '알림 끄기'} title={room.muted ? '알림 켜기' : '알림 끄기'} data-testid="chat-mute">{room.muted ? <BellOff className="size-4" /> : <Bell className="size-4" />}</button>
+        <button className={cx(iconBtn, findOpen && 'bg-slate-100 text-ink')} onClick={() => (findOpen ? closeFind() : setFindOpen(true))} aria-label="이 대화방에서 찾기" aria-pressed={findOpen} title="이 대화방에서 찾기" data-testid="chat-find-open"><Search className="size-4" /></button>
+        <div className="relative">
+          {/* C12 방별 알림 단계: 전체 · 멘션만 · 끄기 */}
+          <button className={cx(iconBtn, level !== 'all' && 'text-ink-3')} onClick={(e) => { e.stopPropagation(); setNotifyOpen((v) => !v); }} aria-label={`알림: ${NOTIFY_OPTS.find((o) => o[0] === level)![1]}`} title={`알림: ${NOTIFY_OPTS.find((o) => o[0] === level)![1]}`}
+            aria-haspopup="menu" aria-expanded={notifyOpen} data-testid="chat-mute" data-level={level}>{level === 'all' ? <Bell className="size-4" /> : level === 'mention' ? <AtSign className="size-4" /> : <BellOff className="size-4" />}</button>
+          {notifyOpen && (
+            <ul role="menu" className="absolute right-0 top-full z-30 mt-1 w-60 overflow-hidden rounded-card border border-line bg-white py-1 text-sm shadow-pop" data-testid="chat-notify-menu" onClick={(e) => e.stopPropagation()}>
+              <li className="px-3 pb-1 pt-0.5 text-[11px] font-semibold text-ink-3">이 방 알림</li>
+              {NOTIFY_OPTS.map(([k, label, hint, Icon]) => (
+                <li key={k}><button role="menuitemradio" aria-checked={level === k} className={cx('flex w-full items-start gap-2 px-3 py-1.5 text-left hover:bg-slate-50', level === k && 'text-teal-800')} onClick={() => setLevel(k)} data-testid={`chat-notify-${k}`}>
+                  <Icon className="mt-0.5 size-4 shrink-0" /><span className="min-w-0 flex-1"><span className={cx('block', level === k && 'font-semibold')}>{label}</span><span className="block text-[11px] text-ink-3">{hint}</span></span>{level === k && <Check className="mt-0.5 size-4 shrink-0" />}</button></li>
+              ))}
+            </ul>
+          )}
+        </div>
         <button className={iconBtn} onClick={() => setInfo(true)} aria-label="방 정보" title="방 정보 — 참여자·초대·사진/파일/링크" data-testid="chat-info"><Info className="size-4" /></button>
         {!compact && user.role === 'owner' && <a className={iconBtn} href={`/api/chat/rooms/${id}/export`} aria-label="대화 내보내기(감사용)" title="대화 내보내기(감사용, 기록 남음)"><Download className="size-4" /></a>}
         {onExpand && <button className={iconBtn} onClick={onExpand} aria-label="크게 보기" title="크게 보기"><Maximize2 className="size-4" /></button>}
         {onClose && <button className={iconBtn} onClick={onClose} aria-label="닫기"><X className="size-4" /></button>}
       </header>
+      {findOpen && (
+        <form onSubmit={runFind} className="flex items-center gap-1 border-b border-line bg-white px-2 py-1.5" data-testid="chat-find">
+          <Search className="ml-1 size-4 shrink-0 text-ink-3" />
+          <input autoFocus className={cx(inputCls, 'h-8 min-w-0 flex-1')} value={findText} maxLength={100} placeholder="대화 내용 찾기" aria-label="이 대화방에서 찾을 말" data-testid="chat-find-input"
+            onChange={(e) => { setFindText(e.target.value); if (find && e.target.value.trim() !== find.q) setFind(null); }}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); closeFind(); } }} />
+          <span className="shrink-0 px-1 text-xs tabular-nums text-ink-2" aria-live="polite" data-testid="chat-find-count">{find ? (find.ids.length ? `${find.at + 1}/${find.ids.length}${find.more ? '+' : ''}` : '없음') : ''}</span>
+          <button type="button" className={cx(iconBtn, 'disabled:opacity-40')} onClick={() => stepFind(1)} disabled={!find || find.at >= find.ids.length - 1} aria-label="이전 결과(위로)" title="이전 결과(위로)" data-testid="chat-find-up"><ChevronUp className="size-4" /></button>
+          <button type="button" className={cx(iconBtn, 'disabled:opacity-40')} onClick={() => stepFind(-1)} disabled={!find || find.at <= 0} aria-label="다음 결과(아래로)" title="다음 결과(아래로)" data-testid="chat-find-down"><ChevronDown className="size-4" /></button>
+          <button type="button" className={iconBtn} onClick={closeFind} aria-label="찾기 닫기" data-testid="chat-find-close"><X className="size-4" /></button>
+        </form>
+      )}
       {data!.pinned.length > 0 && (
         <div className="border-b border-line bg-amber-50 text-xs text-amber-900" data-testid="chat-pinned">
           <button type="button" className="flex w-full items-center gap-2 px-3 py-1.5 text-left" onClick={() => setNoticeOpen((v) => !v)} aria-expanded={noticeOpen} data-testid="chat-notice-toggle">
@@ -716,8 +812,8 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                                       {/\.pdf$/i.test(m.file_name) && <a href={fileUrl(m.id)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="underline" data-testid="chat-file-preview">미리보기</a>}</span></span>
                                 </span>)}
                           {m.body && isText && (isLong(m.body)
-                            ? <><div className="line-clamp-[12]" data-testid="msg-long">{render(m.body)}</div><button type="button" onClick={(e) => { e.stopPropagation(); setLongText(m); }} className={cx('mt-1 block text-xs font-semibold underline', m.mine ? 'text-white/90' : 'text-teal-700')} data-testid="msg-long-more">전체 보기</button></>
-                            : render(m.body))}
+                            ? <><div className="line-clamp-[12]" data-testid="msg-long">{render(m.body, find?.q)}</div><button type="button" onClick={(e) => { e.stopPropagation(); setLongText(m); }} className={cx('mt-1 block text-xs font-semibold underline', m.mine ? 'text-white/90' : 'text-teal-700')} data-testid="msg-long-more">전체 보기</button></>
+                            : render(m.body, find?.q))}
                         </div>
                       )}
                       {tail || (others > 0 && (un > 0 || m.mine)) ? (
@@ -761,7 +857,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                           {album.length > 1 && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { setViewer(album[0].id); setMenu(null); setActive(null); }}>크게 보기·저장</button></li>}
                           {isText && m.body && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, 'task')} data-testid="msg-to-task">업무로 만들기</button></li>}
                           {isText && m.body && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, 'event')} data-testid="msg-to-event">일정으로 만들기</button></li>}
-                          <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, m.pinned_at ? 'unpin' : 'pin')} data-testid="msg-notice">{m.pinned_at ? '공지 해제' : '공지 등록'}</button></li>
+                          {room.canEdit !== false && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => act(m, m.pinned_at ? 'unpin' : 'pin')} data-testid="msg-notice">{m.pinned_at ? '공지 해제' : '공지 등록'}</button></li>}
                           {m.body && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { navigator.clipboard?.writeText(plain(m.body)); setMenu(null); toast.ok('복사했습니다'); }}>복사</button></li>}
                           {m.mine && m.body && isText && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => { setEditing({ id: m.id, body: plain(m.body) }); setMenu(null); setActive(null); }}>수정</button></li>}
                           {m.mine && <li><button role="menuitem" className="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-red-50" onClick={() => act(m, 'delete', run)} data-testid="msg-delete">{album.length > 1 ? `${album.length}개 모두 삭제` : '삭제'}</button></li>}
@@ -854,7 +950,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
         </form>
       </DropZone>
       {toTask && <ToTask s={toTask} roomName={room.name} onClose={() => setToTask(null)} onDone={() => { setToTask(null); reload(); }} />}
-      {info && <RoomInfo data={data!} onClose={() => setInfo(false)} onChanged={() => { reload(); broadcastRefresh(); onRead(); }} onLeft={() => { setInfo(false); broadcastRefresh(); onBack(); }} />}
+      {info && <RoomInfo data={{ ...data!, room }} onClose={() => setInfo(false)} onChanged={() => { reload(); broadcastRefresh(); onRead(); window.dispatchEvent(new Event('wos-chat-read')); }} onLeft={() => { setInfo(false); broadcastRefresh(); onBack(); }} />}
       {fwd && <ForwardModal msg={fwd} fromRoom={id} onClose={() => setFwd(null)} />}
       {viewer && <MediaViewer items={mediaList} start={viewer} onClose={() => setViewer(null)} onForward={(m) => { setViewer(null); setFwd(m); }} />}
       {longText && (
@@ -1231,6 +1327,8 @@ function RoomInfo({ data, onClose, onChanged, onLeft }: { data: RoomData; onClos
   const [inviting, setInviting] = useState(false);
   const [pick, setPick] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const photoRef = useRef<HTMLInputElement>(null);
+  const level = levelOf(room);
   const { data: media } = useApi<{ images: { id: string; file_name: string }[]; files: { id: string; file_name: string; file_size: number | null; author_name: string | null }[]; links: { id: string; url: string; author_name: string | null }[] }>(tab === 'media' ? `/api/chat/rooms/${room.id}/media` : null);
   const { data: list } = useApi<{ rooms: RoomRow[] }>('/api/chat/rooms');
   const row = list?.rooms.find((r) => r.id === room.id);
@@ -1238,21 +1336,52 @@ function RoomInfo({ data, onClose, onChanged, onLeft }: { data: RoomData; onClos
   const candidates = dir.users.filter((u) => u.id !== user.id && !members.some((m) => m.id === u.id));
   async function run(f: () => Promise<unknown>, done?: string) { setBusy(true); try { await f(); if (done) toast.ok(done); onChanged(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
   async function dmWith(id: string) { try { const r = await api('/api/chat/rooms', { body: { kind: 'dm', userId: id } }); window.location.href = `/messages?room=${r.id}`; } catch (e: any) { toast.error(e.message); } }
+  /** 메신저 3차 D14 방 사진: 대화방 파일 올리기 주소로 올린 뒤 방에 붙임(사진만·10MB) */
+  async function uploadPhoto(f: File) {
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { toast.error('사진(png·jpg·gif·webp)만 쓸 수 있습니다'); return; }
+    if (f.size > 10 * 1024 * 1024) { toast.error('방 사진은 10MB까지입니다'); return; }
+    await run(async () => {
+      const name = /\.(png|jpe?g|gif|webp)$/i.test(f.name) ? f.name : `방사진.${f.type === 'image/jpeg' ? 'jpg' : f.type.split('/')[1]}`;
+      const t = await api(`/api/chat/rooms/${room.id}/files`, { body: { fileName: name, mime: f.type, size: f.size } });
+      await putFile(t.upload, f, () => {});
+      await api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { photoKey: t.key } });
+    }, '방 사진을 바꿨습니다');
+    if (photoRef.current) photoRef.current.value = '';
+  }
   return (
     <Modal open onClose={onClose} title="방 정보">
       <div className="space-y-3 text-sm" data-testid="chat-room-info">
         <div className="flex items-center gap-3">
-          <RoomIcon r={{ kind: room.kind, other_id: room.kind === 'dm' ? members.find((m) => m.id !== user.id)?.id ?? null : null, name: room.name }} size={44} />
+          <RoomIcon r={{ kind: room.kind, other_id: room.kind === 'dm' ? members.find((m) => m.id !== user.id)?.id ?? null : null, name: room.name, photo: room.photo }} size={44} />
           <div className="min-w-0 flex-1"><div className="truncate font-semibold">{room.name}</div><div className="text-xs text-ink-3">{KIND_LABEL[room.kind]} · {members.length}명{room.ownerId && <> · 방장 {members.find((m) => m.id === room.ownerId)?.name ?? ''}</>}</div></div>
+          {room.canPhoto && (
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); }} data-testid="info-photo-input" />
+              <Button size="sm" variant="secondary" onClick={() => photoRef.current?.click()} disabled={busy} data-testid="info-photo"><Camera />{room.photo ? '사진 바꾸기' : '방 사진'}</Button>
+              {room.photo && <button type="button" className="text-[11px] text-ink-3 underline" onClick={() => run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { photoKey: null } }), '방 사진을 지웠습니다')} disabled={busy} data-testid="info-photo-clear">사진 지우기</button>}
+            </div>
+          )}
+        </div>
+        {/* C12 방별 알림 단계(나만) */}
+        <div>
+          <div className="mb-1 text-xs font-semibold text-ink-2">이 방 알림</div>
+          <div className="grid grid-cols-3 gap-1 rounded-input bg-slate-100 p-1" role="radiogroup" aria-label="이 방 알림" data-testid="info-notify">
+            {NOTIFY_OPTS.map(([k, label, , Icon]) => (
+              <button key={k} type="button" role="radio" aria-checked={level === k} disabled={busy} onClick={() => level !== k && run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { notify: k } }))}
+                className={cx('flex items-center justify-center gap-1 rounded-[6px] px-2 py-1.5 text-xs', level === k ? 'bg-white font-semibold text-teal-800 shadow-card' : 'text-ink-2 hover:text-ink')} data-testid={`info-notify-${k}`}><Icon className="size-3.5" />{label}</button>
+            ))}
+          </div>
+          <p className="mt-1 text-[11px] text-ink-3">{NOTIFY_OPTS.find((o) => o[0] === level)![2]}</p>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { muted: !room.muted } }))} disabled={busy} data-testid="info-mute">{room.muted ? <Bell /> : <BellOff />}{room.muted ? '알림 켜기' : '알림 끄기'}</Button>
           <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { pinned: !row?.pinned } }))} disabled={busy || !row} data-testid="info-pin">{row?.pinned ? <PinOff /> : <Pin />}{row?.pinned ? '목록 고정 해제' : '목록 맨 위 고정'}</Button>
-          {isGroup && <Button size="sm" variant="secondary" onClick={() => setInviting((v) => !v)} data-testid="info-invite"><UserPlus />초대</Button>}
+          {isGroup && room.canEdit !== false && <Button size="sm" variant="secondary" onClick={() => setInviting((v) => !v)} data-testid="info-invite"><UserPlus />초대</Button>}
+          {isGroup && room.canManage && <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { ownerOnly: !room.ownerOnly } }), room.ownerOnly ? '누구나 방 이름·사진·초대·공지를 바꿀 수 있습니다' : '방 이름·사진·초대·공지는 방장만 바꿉니다')} disabled={busy} data-testid="info-owner-only" aria-pressed={!!room.ownerOnly}><Lock />{room.ownerOnly ? '방장만 관리 중' : '방장만 관리'}</Button>}
           {isGroup && room.canManage && <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { historyVisible: !room.historyVisible } }), room.historyVisible ? '앞으로 초대되는 사람은 초대 뒤 대화만 봅니다' : '이전 대화를 공개했습니다')} disabled={busy} data-testid="info-history" aria-pressed={!!room.historyVisible}>{room.historyVisible ? '이전 대화 공개 중' : '이전 대화 공개'}</Button>}
           {isGroup && <Button size="sm" variant="secondary" className="text-red-600" onClick={() => { if (confirm('이 대화방에서 나갈까요?')) run(() => api(`/api/chat/rooms/${room.id}`, { method: 'DELETE' })).then(onLeft); }} disabled={busy} data-testid="info-leave"><LogOut />나가기</Button>}
         </div>
         {isGroup && !room.historyVisible && <p className="text-xs text-ink-3">초대된 사람은 초대 시점 이후 메시지만 봅니다(회사 보안). 방장이 [이전 대화 공개]를 켜면 처음부터 봅니다.</p>}
+        {isGroup && room.ownerOnly && <p className="text-xs text-ink-3" data-testid="info-owner-only-note">이 방은 방장(·대표·관리자)만 방 이름·사진·초대·공지를 바꿉니다.</p>}
         {inviting && (
           <div className="rounded-input border border-line p-2" data-testid="info-invite-box">
             <div className="mb-1 text-xs font-semibold text-ink-2">초대할 사람</div>
@@ -1273,6 +1402,7 @@ function RoomInfo({ data, onClose, onChanged, onLeft }: { data: RoomData; onClos
                 <Avatar id={m.id} name={m.name} size={28} badge={false} />
                 <span className="min-w-0 flex-1 truncate">{m.name}{m.id === user.id && <span className="text-ink-3"> (나)</span>} <RoleBadge role={dir.users.find((x) => x.id === m.id)?.role} guest={dir.users.find((x) => x.id === m.id)?.is_demo} />{m.title && <span className="text-ink-3"> · {m.title}</span>}{m.is_owner && <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800">방장</span>}</span>
                 {m.id !== user.id && <button type="button" className="rounded-input px-1.5 py-0.5 text-xs text-teal-700 hover:bg-teal-50" onClick={() => dmWith(m.id)} aria-label={`${m.name}와 1:1 대화`}>1:1</button>}
+                {isGroup && room.canManage && m.id !== room.ownerId && <button type="button" className="rounded-input p-1 text-ink-3 hover:bg-amber-50 hover:text-amber-700" onClick={() => { if (confirm(`${m.name}님에게 방장을 넘길까요?`)) run(() => api(`/api/chat/rooms/${room.id}`, { method: 'PATCH', body: { ownerId: m.id } }), `${m.name}님이 방장이 되었습니다`); }} aria-label={`${m.name}에게 방장 넘기기`} title="방장 넘기기" data-testid={`info-owner-${m.id}`}><Crown className="size-4" /></button>}
                 {isGroup && room.canManage && m.id !== user.id && <button type="button" className="rounded-input p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" onClick={() => { if (confirm(`${m.name}님을 내보낼까요?`)) run(() => api(`/api/chat/rooms/${room.id}/members`, { method: 'DELETE', body: { userId: m.id } }), `${m.name}님을 내보냈습니다`); }} aria-label={`${m.name} 내보내기`} title="내보내기" data-testid={`info-remove-${m.id}`}><UserMinus className="size-4" /></button>}
               </li>
             ))}

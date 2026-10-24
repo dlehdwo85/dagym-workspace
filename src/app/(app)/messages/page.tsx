@@ -15,10 +15,11 @@ function Messenger() {
   const sp = useSearchParams();
   const router = useRouter();
   const roomId = sp.get('room');
+  const msgId = sp.get('msg'); // 메신저 3차 D15: 검색 결과에서 연 메시지(그 메시지로 이동·강조)
   const live = useLive();
   const unread = useApi<{ unread: number }>('/api/chat/unread');
   const fromList = useRef(false);
-  const open = (id: string) => { fromList.current = true; router.push(`/messages?room=${id}`); };
+  const open = (id: string, msg?: string) => { fromList.current = true; router.push(`/messages?room=${id}${msg && /^\d{1,20}$/.test(msg) ? `&msg=${msg}` : ''}`); };
   // #242 2단계: 대화방 ← = 직전 화면(목록에서 열었으면 목록, 업무 등에서 왔으면 그 화면). 링크·알림으로 바로 연 방만 목록으로 바꿈(예전엔 늘 목록을 새로 쌓아 뒤로가기가 다시 방으로)
   const back = () => { if (fromList.current || (((window as any).__wosNav ?? 0) > 1 && window.history.length > 1)) router.back(); else router.replace('/messages'); };
   // 대표 16:30 핫픽스(안드로이드 키보드): 대화방이 열려 있으면 휴대폰 하단 탭을 숨기고(AppShell) 칸 높이를 뷰포트에 맞춰 입력창이 키보드 위에 오게. min-h 440 이 키보드로 줄어든 뷰포트보다 커서 입력창이 탭 아래로 밀리던 문제
@@ -30,7 +31,7 @@ function Messenger() {
         <RoomList activeId={roomId} onOpen={open} live={live} />
       </aside>
       <section className={cx('flex min-h-0 min-w-0 flex-col', !roomId && 'hidden sm:flex')}>
-        {roomId ? <ChatRoom key={roomId} id={roomId} live={live} onRead={unread.reload} onBack={back} />
+        {roomId ? <ChatRoom key={roomId} id={roomId} live={live} onRead={unread.reload} onBack={back} jump={msgId} />
           : <div className="flex flex-1 items-center justify-center p-10"><Empty title="대화를 고르세요" icon={MessageCircle}>왼쪽에서 대화방을 고르거나 ＋ 새 대화를 시작하세요.</Empty></div>}
       </section>
     </div>

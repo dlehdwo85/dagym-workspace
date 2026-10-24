@@ -42,6 +42,8 @@ interface WorkinNativePlugin {
   refreshWidget(): Promise<void>;
   // #194 문자에 파일 바로 첨부('android-sms-attach-1'): 기본 문자 앱을 번호·본문·첨부(앱 캐시 파일만)로 채워 연다 — 보내기는 사람이
   shareToSms(o: { phones: string[]; body: string; files: { uri: string; mime: string }[] }): Promise<{ app: string; attached: number }>;
+  // 메신저 3차 C12 앱 아이콘 배지('app-badge-1'): 안 읽은 알림 + 안 읽은 메시지 숫자(0 = 지움). 이 기기는 서버 푸시에도 같은 숫자가 실려 옴(aps.badge·data.badge)
+  setBadge(o: { count: number }): Promise<void>;
 }
 const WorkinNative = registerPlugin<WorkinNativePlugin>('WorkinNative');
 export async function nativeCaps(): Promise<string[]> {
@@ -58,6 +60,10 @@ export async function alarmDeviceStatus() {
 }
 /** 안드로이드 14+ '전체화면 알림 허용' 설정 화면(그 아래 버전은 앱 알림 설정) */
 export const openAlarmSettings = () => WorkinNative.openAlarmSettings();
+/** 메신저 3차 C12: 앱 아이콘 배지 = 안 읽은 알림 + 안 읽은 메시지(배지를 맞출 줄 아는 앱만, 아니면 아무것도 안 함) */
+export async function setNativeBadge(count: number) {
+  if (await hasCap('app-badge-1')) await WorkinNative.setBadge({ count: Math.max(0, Math.min(9999, Math.floor(count))) }).catch(() => {});
+}
 /** #194 1.1.3 바탕화면 위젯 새로고침 — 앱을 열 때·나갈 때·저장했을 때·로그아웃(위젯이 로그인 안내로) */
 export async function refreshWidget() {
   if (await hasCap('android-widget-1')) await WorkinNative.refreshWidget().catch(() => {});

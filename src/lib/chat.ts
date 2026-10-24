@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { db, type Sql } from './db';
 import { badRequest, forbidden, notFound } from './errors';
 import { loadTaskForUser, teamScope } from './access';
 import { notify } from './notifications';
 import { audit } from './log';
-import { completeMultipart, downloadUrl, maxUploadBytes, objectSize, tooLargeMsg, uploadTargetFor } from './storage';
+import { completeMultipart, downloadUrl, getObject, maxUploadBytes, objectSize, putObject, tooLargeMsg, uploadTargetFor } from './storage';
 import type { SessionUser } from './types';
 import { ALL_ID, POLL_MAX, POLL_MIN, QUICK_DEFAULT, REACTIONS, stickerOf, whenText } from './chatShared';
 
@@ -15,7 +16,8 @@ import { ALL_ID, POLL_MAX, POLL_MIN, QUICK_DEFAULT, REACTIONS, stickerOf, whenTe
  *   볼 수 없는 방은 404 (있는 줄도 모르게).
  */
 import { tenantOf } from './types';
-type Room = { id: string; tenant: string; kind: 'dm' | 'group' | 'company' | 'task' | 'team'; name: string | null; task_id: string | null; dm_key: string | null; team_id?: string | null; owner_id?: string | null; history_visible?: boolean };
+type Room = { id: string; tenant: string; kind: 'dm' | 'group' | 'company' | 'task' | 'team'; name: string | null; task_id: string | null; dm_key: string | null; team_id?: string | null; owner_id?: string | null; history_visible?: boolean;
+  photo_key?: string | null; owner_only?: boolean };
 /** 메신저 1차(10/20): 초대·나감·내보냄 같은 시스템 메시지 — 글쓴이 없음, 알림 없음 */
 async function systemMessage(sql: Sql, roomId: string, text: string) {
   const [m] = await sql<{ id: string }[]>`insert into chat_messages (room_id, author_id, body, kind) values (${roomId}, null, ${text}, 'system') returning id::text`;
@@ -24,6 +26,13 @@ async function systemMessage(sql: Sql, roomId: string, text: string) {
 }
 /** 방장(만든 사람)·대표·관리자만 방을 관리(내보내기·이전 대화 공개) */
 const canManage = (u: SessionUser, r: Room) => r.owner_id === u.id || u.role === 'owner' || u.role === 'admin';
+/** 메신저 3차 D14: 그룹 대화에서 방장이 '방장만 관리'를 켜면 방 이름·사진·초대·공지는 방장·대표·관리자만(끄면 참여자 누구나) */
+const canEdit = (u: SessionUser, r: Room) => r.kind !== 'group' || !r.owner_only || canManage(u, r);
+/** 방 사진: 그룹 대화(위 규칙) · 회사 전체방(대표·관리자). 1:1 은 상대 사진, 업무·팀 방은 아이콘 그대로 */
+const canPhoto = (u: SessionUser, r: Room) => (r.kind === 'group' && canEdit(u, r)) || (r.kind === 'company' && (u.role === 'owner' || u.role === 'admin'));
+/** C12 방별 알림 단계: all(전체) · mention(멘션만 — 예전 '알림 끄기') · off(끄기 — 멘션도 안 옴) */
+export const NOTIFY_LEVELS = ['all', 'mention', 'off'] as const;
+export type NotifyLevel = (typeof NOTIFY_LEVELS)[number];
 const autoName = (names: string[]) => (names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} 외 ${names.length - 3}`);
 
 /** 메신저 2차 B8: 한 번에 보낸 사진 묶음은 안 읽은 수에 1건(묶음의 첫 장만 셈). x = chat_messages 별칭 */
@@ -44,7 +53,7 @@ async function companyRoom(u: SessionUser, sql: Sql) {
 /** 방 접근 확인 (+ 회사·업무 방은 자동 가입). 못 보면 404 */
 export async function loadRoom(u: SessionUser, roomId: string, sql: Sql = db()): Promise<Room> {
   if (!/^[0-9a-f-]{36}$/.test(roomId)) throw notFound('대화방이 없습니다');
-  const [r] = await sql<Room[]>`select id, tenant, kind, name, task_id, dm_key, team_id, owner_id, history_visible from chat_rooms where id = ${roomId}`;
+  const [r] = await sql<Room[]>`select id, tenant, kind, name, task_id, dm_key, team_id, owner_id, history_visible, photo_key, owner_only from chat_rooms where id = ${roomId}`;
   if (!r || r.tenant !== tenantOf(u)) throw notFound('대화방이 없습니다');
   if (r.kind === 'task') {
     await loadTaskForUser(u, r.task_id!, sql).catch(() => { throw notFound('대화방이 없습니다'); });
@@ -66,13 +75,16 @@ export async function listRooms(u: SessionUser) {
   const sql = db();
   await companyRoom(u, sql);
   const rooms = await sql`
-    select r.id, r.kind, r.task_id, r.last_message_at, m.muted, m.last_read_id, m.pinned_at is not null as pinned,
+    select r.id, r.kind, r.task_id, r.last_message_at, m.muted, m.notify, m.last_read_id, m.pinned_at is not null as pinned,
+      case when r.photo_key is not null then substr(md5(r.photo_key), 1, 8) end as photo_v,
       case when r.kind = 'dm' then (select ou.name from chat_members om join users ou on ou.id = om.user_id where om.room_id = r.id and om.user_id <> ${u.id} limit 1)
            when r.kind = 'task' then coalesce(r.name, t.title) else r.name end as name,
       case when r.kind = 'dm' then (select om.user_id from chat_members om where om.room_id = r.id and om.user_id <> ${u.id} limit 1) end as other_id,
       (select count(*)::int from chat_members cm where cm.room_id = r.id) as member_count,
       (select count(*)::int from chat_messages x where x.room_id = r.id and x.id > greatest(m.last_read_id, m.joined_after_id) and x.deleted_at is null and x.kind <> 'system' and x.author_id is distinct from ${u.id}
         and ${notBatchTail(sql)}) as unread,
+      case when m.notify = 'mention' then (select count(*)::int from chat_messages x where x.room_id = r.id and x.id > greatest(m.last_read_id, m.joined_after_id) and x.deleted_at is null and x.kind <> 'system'
+        and x.author_id is distinct from ${u.id} and ${u.id} = any(x.mentions)) else 0 end as mention_unread,
       lm.body as last_body, lm.file_name as last_file, lm.file_mime as last_mime, lm.kind as last_kind, lu.name as last_author, lm.deleted_at is not null as last_deleted
     from chat_members m join chat_rooms r on r.id = m.room_id
       left join tasks t on t.id = r.task_id
@@ -80,15 +92,22 @@ export async function listRooms(u: SessionUser) {
       left join users lu on lu.id = lm.author_id
     where m.user_id = ${u.id} and r.tenant = ${tenantOf(u)} and (r.kind <> 'task' or t.deleted_at is null)
     order by (m.pinned_at is not null) desc, (r.kind = 'company') desc, coalesce(r.last_message_at, r.created_at) desc`;
-  return { rooms, unread: rooms.reduce((a: number, r: any) => a + (r.muted ? 0 : r.unread), 0) };
+  // C12 안 읽은 수 합계(앱 배지와 같은 기준): 전체 = 안 읽은 것 모두 · 멘션만 = 나를 부른 것만 · 끄기 = 빼기
+  return { rooms, unread: rooms.reduce((a: number, r: any) => a + (r.notify === 'all' ? r.unread : r.notify === 'mention' ? r.mention_unread : 0), 0) };
 }
 
-export async function unreadTotal(u: SessionUser) {
-  // 목록(listRooms)과 같은 기준: 초대 이전·안내(시스템) 메시지 빼고, 사진 묶음은 1건
+export async function unreadTotal(u: Pick<SessionUser, 'id'>) {
+  // 목록(listRooms)과 같은 기준: 초대 이전·안내(시스템) 메시지 빼고, 사진 묶음은 1건. C12: 멘션만 받는 방은 나를 부른 것만, 알림 끈 방은 빼기
   const sql = db();
   const [r] = await sql<{ n: number }[]>`select coalesce(sum((select count(*) from chat_messages x where x.room_id = m.room_id and x.id > greatest(m.last_read_id, m.joined_after_id)
-      and x.deleted_at is null and x.kind <> 'system' and x.author_id is distinct from ${u.id} and ${notBatchTail(sql)})), 0)::int n from chat_members m where m.user_id = ${u.id} and not m.muted`;
+      and x.deleted_at is null and x.kind <> 'system' and x.author_id is distinct from ${u.id} and ${notBatchTail(sql)}
+      and (m.notify = 'all' or ${u.id} = any(x.mentions)))), 0)::int n from chat_members m where m.user_id = ${u.id} and m.notify <> 'off'`;
   return r.n;
+}
+/** C12 앱 아이콘 배지 = 안 읽은 알림(메시지 알림 빼고) + 안 읽은 메시지(위 기준) — 앱 화면·푸시가 같은 숫자 */
+export async function appBadge(userId: string) {
+  const [c] = await db()<{ c: number }[]>`select count(*)::int c from notifications where user_id = ${userId} and read_at is null and type <> 'chat'`;
+  return c.c + (await unreadTotal({ id: userId }));
 }
 
 export const roomInput = z.discriminatedUnion('kind', [
@@ -140,6 +159,7 @@ export async function addMembers(u: SessionUser, roomId: string, userIds: string
   const sql = db();
   const r = await loadRoom(u, roomId, sql);
   if (r.kind !== 'group') throw badRequest('그룹 대화에만 사람을 더할 수 있습니다');
+  if (!canEdit(u, r)) throw forbidden('이 방은 방장만 초대할 수 있습니다 — 방장에게 부탁해 주세요');
   const ids = await sameTenantUsers(u, userIds, sql);
   const already = new Set((await sql<{ user_id: string }[]>`select user_id from chat_members where room_id = ${r.id}`).map((x) => x.user_id));
   const fresh = ids.filter((x) => !already.has(x));
@@ -192,6 +212,7 @@ export async function renameRoom(u: SessionUser, roomId: string, name: string) {
   const sql = db();
   const r = await loadRoom(u, roomId, sql);
   if (!canRenameRoom(u, r.kind)) throw forbidden(r.kind === 'dm' ? '1:1 대화는 이름을 바꿀 수 없습니다' : r.kind === 'team' ? '팀 대화방 이름은 팀 이름을 따릅니다 — 팀 설정에서 바꿔 주세요' : '회사 전체방 이름은 대표·관리자만 바꿀 수 있습니다');
+  if (!canEdit(u, r)) throw forbidden('이 방은 방장만 이름을 바꿀 수 있습니다');
   const n = name.trim().replace(/\s+/g, ' ');
   if (!n && r.kind !== 'task') throw badRequest('이름을 입력해 주세요');
   await sql`update chat_rooms set name = ${n || null} where id = ${r.id}`;
@@ -204,11 +225,72 @@ export async function setRoomPinned(u: SessionUser, roomId: string, pinned: bool
   await sql`update chat_members set pinned_at = ${pinned ? new Date() : null} where room_id = ${roomId} and user_id = ${u.id}`;
   return { ok: true };
 }
-export async function setMuted(u: SessionUser, roomId: string, muted: boolean) {
+/** C12 방별 알림 단계(나만). muted 는 옛 화면·옛 앱 호환으로 같이 맞춤(전체가 아니면 true) */
+export async function setNotify(u: SessionUser, roomId: string, level: NotifyLevel) {
   const sql = db();
   await loadRoom(u, roomId, sql);
-  await sql`update chat_members set muted = ${muted} where room_id = ${roomId} and user_id = ${u.id}`;
+  await sql`update chat_members set notify = ${level}, muted = ${level !== 'all'} where room_id = ${roomId} and user_id = ${u.id}`;
+  return { ok: true, notify: level };
+}
+/** 옛 '알림 끄기·켜기'(muted): 끄기 = 멘션만(예전처럼 나를 부르면 옴) · 켜기 = 전체 */
+export const setMuted = (u: SessionUser, roomId: string, muted: boolean) => setNotify(u, roomId, muted ? 'mention' : 'all');
+
+/** 메신저 3차 D14: '방장만 관리' 켜기·끄기 — 그룹 대화, 방장·대표·관리자만 */
+export async function setOwnerOnly(u: SessionUser, roomId: string, on: boolean) {
+  const sql = db();
+  const r = await loadRoom(u, roomId, sql);
+  if (r.kind !== 'group') throw badRequest('그룹 대화에서만 정할 수 있습니다');
+  if (!canManage(u, r)) throw forbidden('방장이나 관리자만 바꿀 수 있습니다');
+  if (!!r.owner_only === on) return { ok: true };
+  await sql`update chat_rooms set owner_only = ${on} where id = ${r.id}`;
+  await systemMessage(sql, r.id, on ? `${u.name}님이 방 이름·사진·초대·공지를 방장만 바꿀 수 있게 했습니다` : `${u.name}님이 방 이름·사진·초대·공지를 누구나 바꿀 수 있게 했습니다`);
+  await audit(sql, u.id, 'chat.owner_only', 'chat_room', r.id, { on }, null);
   return { ok: true };
+}
+/** 방장 넘기기 — 지금 방장·대표·관리자가 이 방에 있는 (재직 중인) 사람에게 */
+export async function transferOwner(u: SessionUser, roomId: string, userId: string) {
+  const sql = db();
+  const r = await loadRoom(u, roomId, sql);
+  if (r.kind !== 'group') throw badRequest('그룹 대화에서만 방장을 넘길 수 있습니다');
+  if (!canManage(u, r)) throw forbidden('방장이나 관리자만 방장을 넘길 수 있습니다');
+  if (userId === r.owner_id) return { ok: true };
+  const [m] = await sql<{ name: string }[]>`select us.name from chat_members cm join users us on us.id = cm.user_id where cm.room_id = ${r.id} and cm.user_id = ${userId} and us.status = 'active'`;
+  if (!m) throw badRequest('이 방에 있는 사람에게만 넘길 수 있습니다');
+  await sql`update chat_rooms set owner_id = ${userId} where id = ${r.id}`;
+  await systemMessage(sql, r.id, `${u.name}님이 ${m.name}님에게 방장을 넘겼습니다`);
+  await audit(sql, u.id, 'chat.owner_transferred', 'chat_room', r.id, { from: r.owner_id ?? null, to: userId }, null);
+  return { ok: true };
+}
+/** 방 사진: 대화방 파일 올리기(files)로 올린 사진 키를 붙인다(null = 지우기). 이 방 저장 경로·사진 확장자·10MB 까지 */
+const PHOTO_EXT = /\.(png|jpe?g|gif|webp)$/i;
+/** 파일 앞머리로 본 사진 형식(png·jpg·gif·webp) — 이름만 .png 인 다른 파일은 null */
+const imageMime = (b: Buffer) => b.length < 12 ? null : b[0] === 0x89 && b.toString('latin1', 1, 4) === 'PNG' ? 'image/png' : b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff ? 'image/jpeg'
+  : b.toString('latin1', 0, 4) === 'GIF8' ? 'image/gif' : b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP' ? 'image/webp' : null;
+export async function setRoomPhoto(u: SessionUser, roomId: string, key: string | null) {
+  const sql = db();
+  const r = await loadRoom(u, roomId, sql);
+  if (r.kind !== 'group' && r.kind !== 'company') throw badRequest('그룹 대화·회사 전체방만 방 사진을 바꿀 수 있습니다');
+  if (!canPhoto(u, r)) throw forbidden(r.kind === 'company' ? '회사 전체방 사진은 대표·관리자만 바꿀 수 있습니다' : '이 방은 방장만 사진을 바꿀 수 있습니다');
+  if (key) {
+    if (!key.startsWith(`chat/${r.tenant}/${r.id}/`) || !PHOTO_EXT.test(key)) throw badRequest('사진 파일(png·jpg·gif·webp)만 쓸 수 있습니다');
+    const size = await objectSize(key);
+    if (size === null) throw badRequest('올린 사진을 찾을 수 없습니다. 다시 올려 주세요.');
+    if (size > 10 * 1024 * 1024) throw badRequest('방 사진은 10MB까지입니다');
+    const buf = await getObject(key);
+    const mime = imageMime(buf);
+    if (!mime) throw badRequest('사진 파일(png·jpg·gif·webp)만 쓸 수 있습니다');
+    await putObject(key, buf, mime); // 올린 사람이 적은 파일 형식 대신 실제 사진 형식으로 다시 저장(내려받을 때 사진으로만 열리게)
+  }
+  if ((r.photo_key ?? null) === key) return { ok: true };
+  await sql`update chat_rooms set photo_key = ${key} where id = ${r.id}`;
+  await systemMessage(sql, r.id, key ? `${u.name}님이 방 사진을 바꿨습니다` : `${u.name}님이 방 사진을 지웠습니다`);
+  return { ok: true };
+}
+/** 방 사진 보기(방 사람만) — 잠깐 쓰는 서명 주소 */
+export async function roomPhoto(u: SessionUser, roomId: string) {
+  const r = await loadRoom(u, roomId);
+  if (!r.photo_key) throw notFound('방 사진이 없습니다');
+  return downloadUrl(r.photo_key, r.photo_key.split('/').pop() || 'room.jpg', true, 600);
 }
 
 const MSG_COLS = (sql: Sql, u: SessionUser) => sql`m.id::text as id, m.room_id, m.author_id, au.name as author_name, m.created_at, m.edited_at, m.pinned_at, m.kind, m.forward_of::text as forward_of,
@@ -270,15 +352,18 @@ export async function roomDetail(u: SessionUser, roomId: string, q: { before?: s
   }
   const members = await sql`select cm.user_id as id, us.name, us.title, us.phone, us.role, cm.last_read_id::text as last_read_id, (cm.user_id = ${r.owner_id ?? null}) as is_owner, cm.joined_at from chat_members cm join users us on us.id = cm.user_id where cm.room_id = ${r.id} order by (cm.user_id = ${r.owner_id ?? null}) desc, us.name`;
   const pinned = await sql`select ${MSG_COLS(sql, u)} from chat_messages m left join users au on au.id = m.author_id where m.room_id = ${r.id} and m.pinned_at is not null and m.deleted_at is null order by m.pinned_at desc limit 10`;
-  const [me] = await sql<{ muted: boolean }[]>`select muted from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
+  const [me] = await sql<{ notify: NotifyLevel }[]>`select notify from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
+  const level = me?.notify ?? 'all';
   let name = r.name;
   if (r.kind === 'dm') name = (members as any[]).find((m) => m.id !== u.id)?.name ?? '대화';
   if (r.kind === 'task' && !r.name) name = (await sql<{ title: string }[]>`select title from tasks where id = ${r.task_id}`)[0]?.title ?? '업무';
   // B10 자주 쓰는 반응 6개: 내가 많이 쓴 반응 먼저, 모자라면 기본 6개로 채움
   const used = (await sql<{ emoji: string }[]>`select emoji from chat_reactions where user_id = ${u.id} and emoji = any(${[...REACTIONS]}) group by emoji order by count(*) desc, max(created_at) desc limit 6`).map((x) => x.emoji);
   const quickReactions = [...used, ...QUICK_DEFAULT.filter((e) => !used.includes(e))].slice(0, 6);
-  return { room: { id: r.id, kind: r.kind, name, taskId: r.task_id, muted: me?.muted ?? false, canRename: canRenameRoom(u, r.kind), ownerId: r.owner_id ?? null, canManage: canManage(u, r), historyVisible: !!r.history_visible, joinedAfter: after,
-    canMentionAll: canMentionAll(u, r) }, messages, members, pinned, hasOlder, hasNewer, lastRead: me0?.last_read_id ?? '0', quickReactions };
+  // 메신저 3차: notify = 방별 알림 단계(muted 는 옛 화면 호환) · 방 사진 · 방장만 관리(ownerOnly)일 때 canEdit = 이름·사진·초대·공지 가능 여부
+  return { room: { id: r.id, kind: r.kind, name, taskId: r.task_id, muted: level !== 'all', notify: level, canRename: canRenameRoom(u, r.kind) && canEdit(u, r), ownerId: r.owner_id ?? null, canManage: canManage(u, r), historyVisible: !!r.history_visible, joinedAfter: after,
+    canMentionAll: canMentionAll(u, r), photo: r.photo_key ? `/api/chat/rooms/${r.id}/photo?v=${createHash('md5').update(r.photo_key).digest('hex').slice(0, 8)}` : null, ownerOnly: !!r.owner_only,
+    canEdit: canEdit(u, r), canPhoto: canPhoto(u, r) }, messages, members, pinned, hasOlder, hasNewer, lastRead: me0?.last_read_id ?? '0', quickReactions };
 }
 
 const pollInput = z.object({
@@ -326,17 +411,17 @@ export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typ
   }
   if (i.replyTo && !(await sql`select 1 from chat_messages where id = ${i.replyTo}::bigint and room_id = ${r.id}`).length) throw badRequest('답장할 메시지가 이 대화방에 없습니다');
   const mentionIds = [...body.matchAll(/@\[[^\]]{1,50}\]\(([0-9a-f-]{36})\)/g)].map((m) => m[1]);
-  const members = (await sql<{ user_id: string; muted: boolean }[]>`select user_id, muted from chat_members where room_id = ${r.id}`);
+  const members = (await sql<{ user_id: string; notify: NotifyLevel }[]>`select user_id, notify from chat_members where room_id = ${r.id}`);
   const memberIds = members.map((m) => m.user_id);
   // 업무 방은 업무를 볼 수 있지만 아직 방을 연 적 없는 담당·요청자에게도 알린다
   if (r.kind === 'task') {
     const [t] = await sql<{ assignee_id: string | null; requested_by: string | null; created_by: string }[]>`select assignee_id, requested_by, created_by from tasks where id = ${r.task_id}`;
     const co = (await sql<{ user_id: string }[]>`select user_id from task_assignees where task_id = ${r.task_id}`).map((x) => x.user_id); // #475 공동 담당도
     for (const id of [t?.assignee_id, ...co, t?.requested_by, t?.created_by]) if (id && !memberIds.includes(id)) {
-      await sql`insert into chat_members (room_id, user_id) values (${r.id}, ${id}) on conflict do nothing`; memberIds.push(id); members.push({ user_id: id, muted: false });
+      await sql`insert into chat_members (room_id, user_id) values (${r.id}, ${id}) on conflict do nothing`; memberIds.push(id); members.push({ user_id: id, notify: 'all' });
     }
   }
-  // B11 @전체 = 방 사람 모두 멘션(알림 끈 사람에게도) — 쓸 수 없는 방이면 그냥 글자로
+  // B11 @전체 = 방 사람 모두 멘션(멘션만 받는 사람에게도, C12 '끄기'는 빼고) — 쓸 수 없는 방이면 그냥 글자로
   const allTag = `@[전체](${ALL_ID})`;
   const toAll = body.includes(allTag) && canMentionAll(u, r);
   if (body.includes(allTag) && !toAll) body = body.split(allTag).join('@전체');
@@ -352,13 +437,13 @@ export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typ
   await sql`update chat_rooms set last_message_at = now() where id = ${r.id}`;
   await sql`update chat_members set last_read_id = ${m.id}::bigint where room_id = ${r.id} and user_id = ${u.id}`;
   await sql`delete from chat_typing where room_id = ${r.id} and user_id = ${u.id}`;
-  // 푸시: 알림 끈 방은 제외(멘션은 예외), 보낸 사람 제외. 알림 목록에는 쌓지 않는다(메시지 화면이 따로 있음)
+  // 푸시(C12 방별 알림): 전체 = 모두 · 멘션만 = 나를 부른 것(@전체 포함)만 · 끄기 = 안 보냄. 보낸 사람 제외. 알림 목록에는 쌓지 않는다(메시지 화면이 따로 있음)
   const roomName = r.kind === 'dm' ? u.name : r.kind === 'task' ? `업무 대화 · ${(await sql<{ title: string }[]>`select title from tasks where id = ${r.task_id}`)[0]?.title ?? ''}` : r.name ?? '대화';
   const preview = (st ? `(스티커) ${st.text}` : i.poll ? `📊 투표: ${body}` : body.replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/g, '@$1') || (i.file ? fileLabel(i.file, i.batchSize) : '')).slice(0, 120);
-  const targets = members.filter((x) => x.user_id !== u.id && (!x.muted || mentions.includes(x.user_id))).map((x) => x.user_id);
-  // 사진 묶음은 첫 장에서 한 번만 알림('사진 3장')
+  const targets = members.filter((x) => x.user_id !== u.id && (x.notify === 'all' || (x.notify === 'mention' && mentions.includes(x.user_id)))).map((x) => x.user_id);
+  // 사진 묶음은 첫 장에서 한 번만 알림('사진 3장'). meta.messageId = 푸시 [읽음] 버튼이 여기까지 읽음 처리(C12)
   await notify(sql, { userIds: targets, type: 'chat', title: roomName, body: r.kind === 'dm' ? preview : `${u.name}: ${preview}`,
-    link: `/messages?room=${r.id}`, entityType: 'chat_room', entityId: r.id, actorId: u.id, dedupeKey: i.batch ? `chat:batch:${i.batch}` : `chat:${m.id}` });
+    link: `/messages?room=${r.id}`, entityType: 'chat_room', entityId: r.id, actorId: u.id, dedupeKey: i.batch ? `chat:batch:${i.batch}` : `chat:${m.id}`, meta: { messageId: m.id } });
   // V35 2 2차 (#76): 1:1 상대가 부재중이면 안내 메시지(방마다 하루 1번)
   if (r.kind === 'dm') { const other = members.find((x) => x.user_id !== u.id); if (other) await (await import('./away')).autoReplyIfAway(sql, r.id, other.user_id).catch(() => false); }
   return { id: m.id, createdAt: m.created_at, notified: targets };
@@ -392,6 +477,7 @@ export async function pinMessage(u: SessionUser, id: string, pin: boolean) {
   const sql = db();
   const m = await ownMessage(u, id, sql);
   if (m.deleted_at) throw badRequest('삭제된 메시지입니다');
+  if (!canEdit(u, m.room)) throw forbidden('이 방은 방장만 공지를 올리거나 내릴 수 있습니다');
   await sql`update chat_messages set pinned_at = ${pin ? sql`now()` : null}, pinned_by = ${pin ? u.id : null} where id = ${id}::bigint`;
   return { ok: true };
 }
@@ -468,6 +554,17 @@ export async function searchMessages(u: SessionUser, q: string) {
     left join users au on au.id = m.author_id where m.id > cm.joined_after_id and m.deleted_at is null and (m.body ilike ${like} or m.file_name ilike ${like}) order by m.id desc limit 50` };
 }
 
+/** 메신저 3차 D15 방 안 검색: 이 방에서 찾는 말이 든 메시지 id(최신 순, 최대 300) — 화면은 위/아래로 옮겨 가며 그 메시지로 이동·강조. 초대 전·삭제·안내 메시지는 빼고 */
+export async function searchRoom(u: SessionUser, roomId: string, q: string) {
+  const sql = db();
+  const r = await loadRoom(u, roomId, sql);
+  const like = '%' + q.replace(/[%_\\]/g, (c) => '\\' + c) + '%';
+  const [me] = await sql<{ joined_after_id: string }[]>`select joined_after_id::text from chat_members where room_id = ${r.id} and user_id = ${u.id}`;
+  const rows = await sql<{ id: string }[]>`select id::text from chat_messages where room_id = ${r.id} and id > ${me?.joined_after_id ?? '0'}::bigint and deleted_at is null and kind <> 'system'
+    and (regexp_replace(body, '@\\[([^\\]]+)\\]\\([0-9a-f-]{36}\\)', '@\\1', 'g') ilike ${like} or file_name ilike ${like}) order by id desc limit 301`;
+  return { ids: rows.slice(0, 300).map((x) => x.id), more: rows.length > 300 };
+}
+
 /** "업무로 만들기": 메시지에서 제목·마감·담당 제안(AI 가 켜져 있으면 AI, 아니면 첫 줄). 실제 생성은 사람이 확인 후 업무 등록 창에서 */
 export async function messageToTaskSuggestion(u: SessionUser, id: string) {
   const sql = db();
@@ -531,10 +628,10 @@ export async function forwardMessage(u: SessionUser, id: string, roomIds: string
       values (${r.id}, ${u.id}, ${src.body}, ${src.file_key}, ${src.file_name}, ${src.file_mime}, ${src.file_size}, 'forward', ${id}::bigint, ${src.sticker}, ${src.event_id}) returning id::text`;
     await sql`update chat_rooms set last_message_at = now() where id = ${r.id}`;
     await sql`update chat_members set last_read_id = ${n.id}::bigint where room_id = ${r.id} and user_id = ${u.id}`;
-    const members = await sql<{ user_id: string; muted: boolean }[]>`select user_id, muted from chat_members where room_id = ${r.id}`;
+    const members = await sql<{ user_id: string; notify: NotifyLevel }[]>`select user_id, notify from chat_members where room_id = ${r.id}`;
     const roomName = r.kind === 'dm' ? u.name : r.name ?? '대화';
-    await notify(sql, { userIds: members.filter((x) => x.user_id !== u.id && !x.muted).map((x) => x.user_id), type: 'chat', title: roomName, body: `${u.name}: (전달) ${(src.body || `📎 ${src.file_name}`).slice(0, 100)}`,
-      link: `/messages?room=${r.id}`, entityType: 'chat_room', entityId: r.id, actorId: u.id, dedupeKey: `chat:${n.id}` });
+    await notify(sql, { userIds: members.filter((x) => x.user_id !== u.id && x.notify === 'all').map((x) => x.user_id), type: 'chat', title: roomName, body: `${u.name}: (전달) ${(src.body || `📎 ${src.file_name}`).slice(0, 100)}`,
+      link: `/messages?room=${r.id}`, entityType: 'chat_room', entityId: r.id, actorId: u.id, dedupeKey: `chat:${n.id}`, meta: { messageId: n.id } });
     sent.push(n.id);
   }
   return { ok: true, sent };

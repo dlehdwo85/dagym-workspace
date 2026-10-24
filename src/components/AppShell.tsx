@@ -29,7 +29,7 @@ import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
-import { clearReminders, enableNativePush, initNative, refreshWidget } from './native';
+import { clearReminders, enableNativePush, initNative, refreshWidget, setNativeBadge } from './native';
 import { restoreScroll, useSheetBack } from './backClose';
 import { QuickAddTask } from './QuickAddTask';
 import { CommandPalette } from './CommandPalette';
@@ -88,6 +88,13 @@ export function AppShell({ session, children }: { session: Sess; children: React
   }, []);
   // 메시지 화면을 오가면 메시지 배지를 바로 새로
   useEffect(() => { api('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}); }, [path]);
+  // 메신저 3차 C12: 대화방에서 읽거나 방 알림 단계를 바꾸면(wos-chat-read) 메시지 배지·앱 아이콘 배지를 곧바로
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const h = () => { clearTimeout(t); t = setTimeout(() => api('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}), 400); };
+    window.addEventListener('wos-chat-read', h);
+    return () => { clearTimeout(t); window.removeEventListener('wos-chat-read', h); };
+  }, []);
   const [online, setOnline] = useState(true);
   const [more, setMore] = useState(false);
   const [quick, setQuick] = useState(false);
@@ -215,7 +222,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
     return () => { alive = false; clearInterval(t); clearTimeout(rt); window.removeEventListener('focus', onFocus); window.removeEventListener('wos-unread', onUnread); window.removeEventListener('wos-refresh', onRefresh); window.removeEventListener('online', sync); window.removeEventListener('offline', sync); bc?.close(); };
   }, [router]);
   // #110: 앱 아이콘 숫자(PWA 설치·지원 브라우저) — 안 읽은 알림 수와 같이, 0이면 지움. 네이티브 앱 배지는 앱(로컬) 쪽
-  useEffect(() => { try { const nav = navigator as Navigator & { setAppBadge?: (n: number) => Promise<void>; clearAppBadge?: () => Promise<void> }; if (unread > 0) nav.setAppBadge?.(unread).catch(() => {}); else nav.clearAppBadge?.().catch(() => {}); } catch { /* 미지원 */ } }, [unread]);
+  // 메신저 3차 C12: 앱 아이콘 배지 = 안 읽은 알림 + 안 읽은 메시지(방별 알림 단계 반영) — 설치한 웹 앱은 브라우저 배지, 휴대폰 앱은 배지를 맞출 줄 아는 앱만(native.ts)
+  useEffect(() => {
+    const n = unread + chatUnread;
+    try { const nav = navigator as Navigator & { setAppBadge?: (n: number) => Promise<void>; clearAppBadge?: () => Promise<void> }; if (n > 0) nav.setAppBadge?.(n).catch(() => {}); else nav.clearAppBadge?.().catch(() => {}); } catch { /* 미지원 */ }
+    setNativeBadge(n).catch(() => {});
+  }, [unread, chatUnread]);
   const reloadFavs = favs.reload;
   useEffect(() => { const h = () => reloadFavs(); window.addEventListener('wos-favorites', h); return () => window.removeEventListener('wos-favorites', h); }, [reloadFavs]);
   useEffect(() => { setCreateMenu(false); setUserMenu(false); setMore(false); setSpaceMenu(false); }, [path]);

@@ -6,6 +6,8 @@ self.addEventListener('push', (event) => {
   try { d = event.data ? event.data.json() : {}; } catch { d = { title: '알림', body: event.data && event.data.text() }; }
   // 로컬 10/20 알림에서 바로 처리: 서버가 준 버튼(최대 2개). 글 입력이 필요한 버튼은 지원하는 브라우저에서 바로 입력(type: text), 아니면 앱을 연다
   const actions = (Array.isArray(d.actions) ? d.actions : []).slice(0, 2).map((a) => (a.input === 'text' ? { action: a.id, title: a.label, type: 'text', placeholder: a.label } : { action: a.id, title: a.label }));
+  // 메신저 3차 C12: 서버가 준 앱 아이콘 배지 숫자(안 읽은 알림 + 안 읽은 메시지) — 설치한 웹 앱 아이콘에(지원하는 브라우저만)
+  if (typeof d.badge === 'number' && self.navigator && self.navigator.setAppBadge) (d.badge > 0 ? self.navigator.setAppBadge(d.badge) : self.navigator.clearAppBadge()).catch(() => {});
   // 로컬 10/20(대표): 알람처럼 울리는 알림은 닫을 때까지 남고 진동 — [해제][10분 뒤] 버튼. 소리·띠는 열린 창(AlarmBar)이 맡는다
   event.waitUntil(self.registration.showNotification(d.title || '업무 알림', {
     body: d.body || '', tag: d.tag || d.notificationId, renotify: true, data: { link: d.link || '/', notificationId: d.notificationId, actions, alarm: !!d.alarm }, icon: '/icon-192.png', badge: '/badge-96.png', actions,

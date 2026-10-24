@@ -38,7 +38,7 @@ async function fcmAccessToken(sa: { client_email: string; private_key: string; t
 }
 
 /** alarm(로컬 10/20 대표): 앱이 전체 화면·알람 채널로 띄움(Android USE_FULL_SCREEN_INTENT / iOS Time-Sensitive), 웹은 알림 센터 띠 + 소리 */
-interface Payload { title: string; body: string; link: string; notificationId: string; type?: string; taskId?: string | null; actions?: { id: string; label: string; input?: 'text' }[]; tag?: string; alarm?: boolean; snoozeMinutes?: number; group?: string }
+interface Payload { title: string; body: string; link: string; notificationId: string; type?: string; taskId?: string | null; actions?: { id: string; label: string; input?: 'text' }[]; tag?: string; alarm?: boolean; snoozeMinutes?: number; group?: string; badge?: number }
 
 class PermanentError extends Error {}
 
@@ -56,6 +56,9 @@ async function sendWebPush(sub: { endpoint: string; keys: { p256dh: string; auth
 
 /** 앱 1.1.3(#130·#478): 이 기기 앱이 data 알림을 버튼과 함께 직접 그림(mobile/android WorkinMessagingService) */
 export const DRAWS_OWN = 'android-actions-1';
+/** 메신저 3차 C12: 앱 아이콘 배지 숫자를 앱이 직접 맞추는 기기(WorkinNative.setBadge) — 이 기기에만 푸시에 배지 숫자(aps.badge·data.badge)를 싣는다.
+ *  옛 앱은 배지를 지울 줄 몰라 iOS 숫자가 그대로 남으므로 보내지 않음 */
+export const BADGE_CAP = 'app-badge-1';
 async function sendFcm(token: string, p: Payload, caps: string[] = []) {
   if (!fcmConfigured()) throw new PermanentError('FCM 서비스 계정 미설정');
   // 1.1.3 앱은 notification 없이 data 만(wn=1) — 앱이 꺼져 있어도 앱이 [승인][수정 요청]·[답글][확인] 버튼이 달린 알림을 그리고, 버튼은 앱을 열지 않고 처리. 옛 앱은 지금처럼 시스템 알림
@@ -75,6 +78,7 @@ async function sendFcm(token: string, p: Payload, caps: string[] = []) {
         // 로컬 10/20 알림에서 바로 처리: 앱이 액션 버튼(Android)·카테고리(iOS)를 그릴 수 있게 종류·버튼·업무 id 를 data 로(값은 문자열만)
         // #542 (b) group = 종류별 묶음 키(1.1.3 앱이 같은 group 을 한 묶음으로 접음) — 마케팅·영업 '머리: 항목' 알림은 그 머리, 나머지는 종류
         data: { link: p.link, notificationId: p.notificationId, type: p.type ?? '', taskId: p.taskId ?? '', group: p.group ?? p.type ?? '', actions: JSON.stringify(p.actions ?? []), alarm: p.alarm ? 'true' : '', snoozeMinutes: String(p.snoozeMinutes ?? ''),
+          ...(p.badge !== undefined ? { badge: String(p.badge) } : {}),
           // FCM 메시지는 4KB 까지(한글 1자 = 3바이트) — 넘으면 INVALID_ARGUMENT 로 거절되고 아래에서 토큰 무효로 처리되므로 제목 120·본문 600자로 자름
           ...(draws ? { wn: '1', title: p.title.slice(0, 120), body: p.body.length > 600 ? `${p.body.slice(0, 599)}…` : p.body, tag: p.tag ?? p.notificationId, channel: p.alarm ? 'alarm_vibrate' : 'work' } : {}) },
         // click_action 없음: 기본(앱 실행 activity)으로 열려야 data(link·notificationId)가 앱의 notificationActionPerformed 로 전달된다
@@ -82,7 +86,8 @@ async function sendFcm(token: string, p: Payload, caps: string[] = []) {
         // 알람이면 알람 채널(앱이 전체 화면·소리·진동) · iOS 는 time-sensitive 로 집중 모드 통과
         // 대표 10/22: 알람은 진동만 — 앱이 만드는 진동 채널(alarm_vibrate, src/components/native.ts), iOS 도 무음 파일(silence.wav, 앱에 없으면 기본음)
         android: draws ? { priority: 'HIGH' } : { priority: 'HIGH', notification: { channel_id: p.alarm ? 'alarm_vibrate' : 'work', icon: 'ic_stat_workin', color: '#0F766E', tag: p.tag ?? p.notificationId } },
-        apns: { payload: { aps: { sound: p.alarm ? 'silence.wav' : 'default', category: p.alarm ? 'alarm' : cat && WN_CATEGORY_IDS.has(cat) ? cat : p.type ?? 'default', 'thread-id': p.group || p.taskId || p.notificationId, ...(p.alarm ? { 'interruption-level': 'time-sensitive' } : {}) } } },
+        apns: { payload: { aps: { sound: p.alarm ? 'silence.wav' : 'default', category: p.alarm ? 'alarm' : cat && WN_CATEGORY_IDS.has(cat) ? cat : p.type ?? 'default', 'thread-id': p.group || p.taskId || p.notificationId, ...(p.alarm ? { 'interruption-level': 'time-sensitive' } : {}),
+          ...(p.badge !== undefined ? { badge: p.badge } : {}) } } },
       },
     }),
   });
@@ -148,8 +153,12 @@ export async function dispatchPending(limit = 50, opt: { tick?: boolean } = {}) 
     if (d.meta?.group && lastOf.get(`${d.sub_id}|${d.meta.group}`) !== Number(d.id)) { await sql`update notification_deliveries set status = 'skipped', error = '묶어서 보냄' where id = ${d.id}`; continue; }
     let payload: Payload = { title: d.title, body: d.body, link: d.link, notificationId: d.nid, type: d.type, taskId: d.entity_type === 'task' ? d.entity_id : null, tag: d.nid,
       actions: actionsFor({ id: d.nid, type: d.type, link: d.link, entity_type: d.entity_type, entity_id: d.entity_id, meta: d.meta, action_done: d.action_done }),
-      ...(d.meta?.alarm ? { alarm: true, snoozeMinutes: 10 } : {}) };
+      ...(d.meta?.alarm ? { alarm: true, snoozeMinutes: 10 } : {}),
+      // 메신저 3차: 메시지 알림은 방마다 한 묶음(iOS thread-id·1.1.3 앱 group) — 카톡처럼 방별로 접힘
+      ...(d.type === 'chat' && d.entity_id ? { group: `chat:${d.entity_id}` } : {}) };
     if (d.meta?.group) payload = { ...payload, ...(await groupPayload(sql, d.user_id, d.meta, day)) };
+    // C12 앱 아이콘 배지: 웹 앱(서비스 워커가 navigator.setAppBadge)·배지를 맞추는 앱(BADGE_CAP)에만 = 안 읽은 알림 + 안 읽은 메시지
+    if (d.channel === 'webpush' || (d.caps ?? []).includes(BADGE_CAP)) payload.badge = await (await import('./chat')).appBadge(d.user_id).catch(() => undefined);
     try {
       if (d.channel === 'webpush') await sendWebPush({ endpoint: d.endpoint, keys: d.keys }, payload);
       else await sendFcm(d.endpoint, payload, d.caps ?? []);
