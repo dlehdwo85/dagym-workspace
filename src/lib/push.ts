@@ -38,7 +38,7 @@ async function fcmAccessToken(sa: { client_email: string; private_key: string; t
 }
 
 /** alarm(로컬 10/20 대표): 앱이 전체 화면·알람 채널로 띄움(Android USE_FULL_SCREEN_INTENT / iOS Time-Sensitive), 웹은 알림 센터 띠 + 소리 */
-interface Payload { title: string; body: string; link: string; notificationId: string; type?: string; taskId?: string | null; actions?: { id: string; label: string; input?: 'text' }[]; tag?: string; alarm?: boolean; snoozeMinutes?: number }
+interface Payload { title: string; body: string; link: string; notificationId: string; type?: string; taskId?: string | null; actions?: { id: string; label: string; input?: 'text' }[]; tag?: string; alarm?: boolean; snoozeMinutes?: number; group?: string }
 
 class PermanentError extends Error {}
 
@@ -73,7 +73,8 @@ async function sendFcm(token: string, p: Payload, caps: string[] = []) {
         token,
         ...(draws ? {} : { notification: { title: p.title, body: p.body } }),
         // 로컬 10/20 알림에서 바로 처리: 앱이 액션 버튼(Android)·카테고리(iOS)를 그릴 수 있게 종류·버튼·업무 id 를 data 로(값은 문자열만)
-        data: { link: p.link, notificationId: p.notificationId, type: p.type ?? '', taskId: p.taskId ?? '', actions: JSON.stringify(p.actions ?? []), alarm: p.alarm ? 'true' : '', snoozeMinutes: String(p.snoozeMinutes ?? ''),
+        // #542 (b) group = 종류별 묶음 키(1.1.3 앱이 같은 group 을 한 묶음으로 접음) — 마케팅·영업 '머리: 항목' 알림은 그 머리, 나머지는 종류
+        data: { link: p.link, notificationId: p.notificationId, type: p.type ?? '', taskId: p.taskId ?? '', group: p.group ?? p.type ?? '', actions: JSON.stringify(p.actions ?? []), alarm: p.alarm ? 'true' : '', snoozeMinutes: String(p.snoozeMinutes ?? ''),
           // FCM 메시지는 4KB 까지(한글 1자 = 3바이트) — 넘으면 INVALID_ARGUMENT 로 거절되고 아래에서 토큰 무효로 처리되므로 제목 120·본문 600자로 자름
           ...(draws ? { wn: '1', title: p.title.slice(0, 120), body: p.body.length > 600 ? `${p.body.slice(0, 599)}…` : p.body, tag: p.tag ?? p.notificationId, channel: p.alarm ? 'alarm_vibrate' : 'work' } : {}) },
         // click_action 없음: 기본(앱 실행 activity)으로 열려야 data(link·notificationId)가 앱의 notificationActionPerformed 로 전달된다
@@ -81,7 +82,7 @@ async function sendFcm(token: string, p: Payload, caps: string[] = []) {
         // 알람이면 알람 채널(앱이 전체 화면·소리·진동) · iOS 는 time-sensitive 로 집중 모드 통과
         // 대표 10/22: 알람은 진동만 — 앱이 만드는 진동 채널(alarm_vibrate, src/components/native.ts), iOS 도 무음 파일(silence.wav, 앱에 없으면 기본음)
         android: draws ? { priority: 'HIGH' } : { priority: 'HIGH', notification: { channel_id: p.alarm ? 'alarm_vibrate' : 'work', icon: 'ic_stat_workin', color: '#0F766E', tag: p.tag ?? p.notificationId } },
-        apns: { payload: { aps: { sound: p.alarm ? 'silence.wav' : 'default', category: p.alarm ? 'alarm' : cat && WN_CATEGORY_IDS.has(cat) ? cat : p.type ?? 'default', 'thread-id': p.taskId || p.notificationId, ...(p.alarm ? { 'interruption-level': 'time-sensitive' } : {}) } } },
+        apns: { payload: { aps: { sound: p.alarm ? 'silence.wav' : 'default', category: p.alarm ? 'alarm' : cat && WN_CATEGORY_IDS.has(cat) ? cat : p.type ?? 'default', 'thread-id': p.group || p.taskId || p.notificationId, ...(p.alarm ? { 'interruption-level': 'time-sensitive' } : {}) } } },
       },
     }),
   });
@@ -94,33 +95,61 @@ async function sendFcm(token: string, p: Payload, caps: string[] = []) {
   }
 }
 
+const kstDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
+/**
+ * #542 묶음 푸시: 오늘 안 읽은 같은 묶음이 2건 이상이면 '승인 마감 6시간 전: 6건 — 퇴근길 운동 외 5건'(링크 = 공통 화면, 버튼 없음).
+ * (c) tag = 묶음+날짜 — 1.1.2(시스템 알림)·웹은 같은 tag 가 앞 알림을 바꿔 그날 그 묶음은 알림창에 1개만 남음
+ */
+async function groupPayload(sql: ReturnType<typeof db>, userId: string, meta: { group: string; head?: string; item?: string }, day: string): Promise<Partial<Payload>> {
+  const base = { tag: `${meta.group}:${day}`, group: meta.group };
+  const rows = await sql<{ item: string | null; title: string; link: string }[]>`select meta->>'item' as item, title, link from notifications
+    where user_id = ${userId} and meta->>'group' = ${meta.group} and read_at is null and created_at >= ${`${day}T00:00:00+09:00`}::timestamptz order by created_at`;
+  if (rows.length < 2) return base;
+  const items = rows.map((r) => r.item || r.title);
+  const paths = new Set(rows.map((r) => r.link.split(/[?#]/)[0]));
+  const space = meta.group.split(':')[0];
+  return { ...base, title: `${meta.head ?? meta.group}: ${rows.length}건 — ${items[0]} 외 ${rows.length - 1}건`.slice(0, 200),
+    body: items.slice(0, 5).map((x) => `· ${x}`).join('\n') + (rows.length > 5 ? `\n외 ${rows.length - 5}건` : ''),
+    link: paths.size === 1 ? [...paths][0] : `/notifications?space=${space}`, actions: [], taskId: null };
+}
+
 /**
  * 대기 중인 푸시를 발송한다. 행을 먼저 '선점'(next_attempt_at 를 미래로 미루고 attempts+1)한 뒤 보내므로
  * 여러 서버 인스턴스가 동시에 실행해도 같은 알림을 두 번 보내지 않는다.
+ * #542 opt.tick = 정기 실행 끝의 발송. 정기 실행이 도는 동안 다른 발송(요청 뒤)은 묶음 알림을 남겨 둔다 —
+ * 한 번의 정기 실행이 만든 같은 묶음(승인 마감 n시간 전 6건 등)이 중간에 갈라지지 않고 실행 끝에 1건으로 나가게.
  */
-export async function dispatchPending(limit = 50) {
+export async function dispatchPending(limit = 50, opt: { tick?: boolean } = {}) {
   const sql = db();
   const claimed = await sql<
-    { id: number; channel: string; endpoint: string; keys: any; sub_id: string; caps: string[] | null; title: string; body: string; link: string; nid: string; attempts: number; type: string; entity_type: string | null; entity_id: string | null; meta: any; action_done: string | null }[]
+    { id: number; channel: string; endpoint: string; keys: any; sub_id: string; caps: string[] | null; user_id: string; title: string; body: string; link: string; nid: string; attempts: number; type: string; entity_type: string | null; entity_id: string | null; meta: any; action_done: string | null }[]
   >`
     with c as (
       select d.id from notification_deliveries d
       where d.status = 'pending' and d.next_attempt_at <= now()
+        and (${!!opt.tick} or not exists (select 1 from job_locks l where l.name = 'tick' and l.locked_until > now())
+          or not exists (select 1 from notifications n where n.id = d.notification_id and n.meta->>'group' is not null))
       order by d.id limit ${limit} for update skip locked
     )
     update notification_deliveries d set attempts = d.attempts + 1, next_attempt_at = now() + interval '5 minutes'
     from c, push_subscriptions p, notifications n
     where d.id = c.id and p.id = d.subscription_id and n.id = d.notification_id
-    returning d.id, d.channel, p.endpoint, p.keys, p.id as sub_id, p.caps, n.title, n.body, n.link, n.id as nid, d.attempts, n.type, n.entity_type, n.entity_id, n.meta, n.action_done`;
+    returning d.id, d.channel, p.endpoint, p.keys, p.id as sub_id, p.caps, n.user_id, n.title, n.body, n.link, n.id as nid, d.attempts, n.type, n.entity_type, n.entity_id, n.meta, n.action_done`;
   // 구독이 삭제된 행 정리
   await sql`update notification_deliveries set status = 'skipped', error = '구독 없음' where status = 'pending' and subscription_id is null`;
 
   let sent = 0, failed = 0;
+  // #542 (a) 같은 기기·같은 묶음(마케팅·영업 '머리: 항목')이 한꺼번에 나가면 마지막 1건만 보냄 — 내용은 오늘 안 읽은 같은 묶음 요약
+  const lastOf = new Map<string, number>();
+  for (const d of claimed) if (d.meta?.group && !d.action_done) { const k = `${d.sub_id}|${d.meta.group}`; lastOf.set(k, Math.max(lastOf.get(k) ?? 0, Number(d.id))); } // id 는 bigint 라 문자열로 옴
+  const day = kstDay(new Date());
   for (const d of claimed) {
     if (d.action_done) { await sql`update notification_deliveries set status = 'skipped', error = '이미 처리됨' where id = ${d.id}`; continue; } // 처리된 알림은 다시 푸시하지 않음
-    const payload: Payload = { title: d.title, body: d.body, link: d.link, notificationId: d.nid, type: d.type, taskId: d.entity_type === 'task' ? d.entity_id : null, tag: d.nid,
+    if (d.meta?.group && lastOf.get(`${d.sub_id}|${d.meta.group}`) !== Number(d.id)) { await sql`update notification_deliveries set status = 'skipped', error = '묶어서 보냄' where id = ${d.id}`; continue; }
+    let payload: Payload = { title: d.title, body: d.body, link: d.link, notificationId: d.nid, type: d.type, taskId: d.entity_type === 'task' ? d.entity_id : null, tag: d.nid,
       actions: actionsFor({ id: d.nid, type: d.type, link: d.link, entity_type: d.entity_type, entity_id: d.entity_id, meta: d.meta, action_done: d.action_done }),
       ...(d.meta?.alarm ? { alarm: true, snoozeMinutes: 10 } : {}) };
+    if (d.meta?.group) payload = { ...payload, ...(await groupPayload(sql, d.user_id, d.meta, day)) };
     try {
       if (d.channel === 'webpush') await sendWebPush({ endpoint: d.endpoint, keys: d.keys }, payload);
       else await sendFcm(d.endpoint, payload, d.caps ?? []);

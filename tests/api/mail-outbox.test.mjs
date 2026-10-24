@@ -132,9 +132,15 @@ describe('V21 보관함 발송', () => {
     assert.equal(m.messageId, o.message_id);
     const [u] = await sql`select title, phone from users where id = ${ctx.ownerId}`;
     assert.deepEqual([u.title, u.phone], ['대표', '010-1111-2222']);
-    const acts = (await sql`select action from activities where entity_id = ${taskId} order by id`).map((a) => a.action);
+    // '보냄' 상태가 업무 기록·체크 표시보다 먼저 저장됨 → 기록까지 기다림(10/24 한 번 먼저 읽어 실패)
+    let acts = [], steps = [];
+    for (let i = 0; i < 20; i++) {
+      acts = (await sql`select action from activities where entity_id = ${taskId} order by id`).map((a) => a.action);
+      steps = await sql`select text, done from task_checklist_items where task_id = ${taskId} order by sort`;
+      if (acts.includes('mail_sent') && steps.length && steps.every((s) => s.done)) break;
+      await new Promise((r) => setTimeout(r, 150));
+    }
     assert.ok(acts.includes('mail_queued') && acts.includes('mail_sent'));
-    const steps = await sql`select text, done from task_checklist_items where task_id = ${taskId} order by sort`;
     assert.deepEqual(steps.map((s) => s.done), [true, true], '자료 첨부 → 자료/제안서 발송, 견적서 → 견적');
   });
 

@@ -53,8 +53,17 @@ async function enqueue(sql: Sql, n: SpaceNotifyInput, userId: string, cadence: '
     on conflict (user_id, dedupe_key) do nothing`;
 }
 
+/** #542 '머리: 항목' 꼴 제목 → 같은 종류 묶음(머리 끝의 (v2) 같은 판 번호는 뗌). 휴대폰 푸시는 같은 묶음을 1건으로(push.ts), 알림 목록은 한 줄씩 그대로 */
+export function groupOf(space: string, title: string): { group: string; head: string; item: string } | null {
+  const m = /^([^:\n]{2,40}):\s+(.+)$/s.exec(title.trim());
+  if (!m) return null;
+  const head = m[1].replace(/\s*\(v\d+\)$/, '').trim();
+  return head ? { group: `${space}:${head}`, head, item: m[2].trim().slice(0, 80) } : null;
+}
+
 export async function notifySpace(sql: Sql, n: SpaceNotifyInput): Promise<{ direct: string[]; hourly: string[]; daily: string[] }> {
-  const base = { type: n.type, title: n.title, body: n.body, link: n.link, entityType: n.entityType, entityId: n.entityId, dedupeKey: n.dedupeKey, push: n.push, meta: n.meta, space: n.space };
+  const g = groupOf(n.space, n.title);
+  const base = { type: n.type, title: n.title, body: n.body, link: n.link, entityType: n.entityType, entityId: n.entityId, dedupeKey: n.dedupeKey, push: n.push, meta: g ? { ...(n.meta ?? {}), ...g } : n.meta, space: n.space };
   if (n.test) {
     const to = n.test.actorId ? [n.test.actorId] : [];
     if (to.length) await notify(sql, { ...base, userIds: to, actorId: null });

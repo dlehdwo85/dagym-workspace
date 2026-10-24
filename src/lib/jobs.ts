@@ -222,7 +222,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('aiRetention', async () => ({ purged: await (await import('./ai/threads')).purgeOldThreads() })); // V14 2번 AI 대화 보관 기간
   await step('outbox', async () => (await import('./mailbox')).outboxTick()); // V21 메일 보관함 재시도(서울 지역)
   await step('notifDigest', async () => (await import('./spaceNotify')).digestTick(new Date(), { force: !!opt.forceDigest })); // #104 ②: 담당 아닌 사람 1시간 묶음 · 담당 미지정 관리자 1명 하루 묶음
-  await step('push', () => dispatchPending(200));
+  await step('push', () => dispatchPending(200, { tick: true })); // #542 이번 실행이 만든 묶음 알림은 여기서 한꺼번에
   if (googleConfigured()) await step('google', () => syncAllDue());
   await step('cleanup', cleanup);
   await sql`update job_runs set finished_at = now(), status = ${failed ? 'error' : 'ok'}, detail = ${sql.json(detail as never)} where id = ${run.id}`;
