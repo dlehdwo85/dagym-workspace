@@ -10,7 +10,7 @@ const guard = (u: any) => { if (!u.platformAdmin || u.support) throw notFound();
 export const GET = handler(async ({ user }) => { guard(user); return ttsView(await ttsSettings()); });
 export const PUT = handler(async ({ req, user }) => {
   guard(user);
-  const i = await body(req, z.object({ provider: z.enum(['openai', 'elevenlabs', 'clova']).nullable().optional(), apiKey: z.string().max(400).nullable().optional(),
+  const i = await body(req, z.object({ provider: z.enum(['openai', 'elevenlabs', 'clova', 'google']).nullable().optional(), apiKey: z.string().max(400).nullable().optional(),
     voice: z.string().trim().max(80).nullable().optional(), model: z.string().trim().max(80).nullable().optional(), base: z.string().url().max(200).nullable().optional() }));
   const out = ttsView(await saveTtsSettings(i, user.id));
   await audit(db(), user.id, 'platform.tts.settings', 'app_settings', null, { provider: out.provider, key: i.apiKey === undefined ? undefined : i.apiKey ? 'set' : 'clear', voice: i.voice !== undefined }).catch(() => {});

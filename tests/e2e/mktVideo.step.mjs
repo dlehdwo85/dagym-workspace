@@ -26,6 +26,15 @@ export async function mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await tts.getByTestId('tts-test').click();
   await tts.getByTestId('tts-test-result').getByText(/연결됨/).waitFor();
   await tts.screenshot({ path: `${SHOTS}/210-platform-tts.png` });
+  // #539 구글 음성: 공급자 목록에 구글 · 고르면 기본 음성 ko-KR-Neural2-A·모델 칸 잠김·'구글 키 만들기' 안내(콘솔 링크·API 제한·요금) — 저장 전이라 화면만
+  await tts.getByTestId('tts-provider').selectOption('google');
+  assert.equal(await tts.getByTestId('tts-voice').inputValue(), 'ko-KR-Neural2-A');
+  assert.equal(await tts.getByLabel('TTS 모델').isDisabled(), true);
+  const guide = tts.getByTestId('tts-google-guide');
+  assert.match(await guide.innerText(), /Cloud Text-to-Speech API[\s\S]*API 제한사항[\s\S]*100만 자/);
+  assert.equal(await guide.getByRole('link', { name: 'Google Cloud 콘솔' }).getAttribute('href'), 'https://console.cloud.google.com/');
+  await tts.screenshot({ path: `${SHOTS}/227-platform-tts-google.png` });
+  await tts.getByTestId('tts-provider').selectOption('openai');
   await ctx.owner.ok('PUT', '/api/platform/higgsfield', { apiKey: 'test-id:test-secret', base: `${FAKE}/hf` });
   await ctx.owner.ok('PUT', '/api/platform/higgsfield', { enabled: true });
   // 브랜드·자료실(로고·실제 화면 캡처·배경음)

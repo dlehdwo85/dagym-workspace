@@ -167,6 +167,21 @@ export function startFakeGoogle(port = 3199) {
       res.writeHead(200, { 'content-type': 'audio/mpeg' }); return res.end(mp3 ?? Buffer.alloc(0));
     }
     if (p === '/openai/v1/models' && req.method === 'GET') return req.headers.authorization === 'Bearer test-tts-key' ? json(res, 200, { data: [{ id: 'gpt-4o-mini-tts' }] }) : json(res, 401, { error: { message: 'Incorrect API key provided' } });
+    // ---- #539 가짜 구글 Cloud Text-to-Speech(base = FAKE/google-tts/v1): x-goog-api-key: test-gtts-key(틀리면 구글처럼 400) · 합성 = JSON 안 base64 MP3 ----
+    if (p.startsWith('/google-tts/v1/')) {
+      if (req.headers['x-goog-api-key'] !== 'test-gtts-key') return json(res, 400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } });
+      if (p === '/google-tts/v1/voices' && req.method === 'GET') {
+        const lang = url.searchParams.get('languageCode');
+        const all = [['ko-KR-Neural2-A', 'FEMALE'], ['ko-KR-Neural2-B', 'FEMALE'], ['ko-KR-Neural2-C', 'MALE'], ['ko-KR-Chirp3-HD-Kore', 'FEMALE'], ['en-US-Neural2-A', 'MALE']];
+        return json(res, 200, { voices: all.filter(([n]) => !lang || n.startsWith(lang)).map(([name, ssmlGender]) => ({ languageCodes: [name.slice(0, 5)], name, ssmlGender, naturalSampleRateHertz: 24000 })) });
+      }
+      if (p === '/google-tts/v1/text:synthesize' && req.method === 'POST') {
+        state.tts.push({ provider: 'google', input: body.input?.text, voice: body.voice?.name, languageCode: body.voice?.languageCode, encoding: body.audioConfig?.audioEncoding });
+        const mp3 = fakeMp3(Math.min(4, Math.max(0.8, Math.round(String(body.input?.text ?? '').length * 0.12 * 10) / 10)));
+        return json(res, 200, { audioContent: (mp3 ?? Buffer.alloc(0)).toString('base64') });
+      }
+      return json(res, 404, { error: { code: 404, message: 'Not found' } });
+    }
     if (p.startsWith('/hf/')) {
       if (req.headers.authorization !== 'Key test-id:test-secret') return json(res, 401, { detail: 'Invalid credentials' });
       const sm = /^\/hf\/requests\/([^/]+)\/status$/.exec(p);

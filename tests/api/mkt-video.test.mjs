@@ -141,3 +141,29 @@ test('합성 함수(/api/marketing/studio/render)는 CRON_SECRET 없으면 401 �
   assert.equal((await fetch(`${BASE}/api/marketing/studio/render`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret', 'content-type': 'application/json' }, body: '{}' })).status, 202);
   const t = await tick(); assert.deepEqual(t.detail.mktRender, { kicked: 0 }, '기다리는 합성 없음');
 });
+
+test('#539 구글 음성(Cloud Text-to-Speech, 대표 10/24): 키는 x-goog-api-key 헤더 · 기본 음성 ko-KR-Neural2-A(모델 칸 없음) · 연결 시험 = 한국어 음성 목록(합성 안 함) · 목록에 없는 음성·틀린 키는 알아듣게 · 영상 내레이션이 구글로', async () => {
+  const s = await ctx.owner.ok('PUT', '/api/platform/tts', { provider: 'google', apiKey: 'test-gtts-key', base: `${FAKE}/google-tts/v1` });
+  assert.deepEqual([s.provider, s.ready, s.voice, s.model, s.providers.google.label, 'apiKey' in s], ['google', true, 'ko-KR-Neural2-A', '', '구글 클라우드 TTS', false]);
+  await ctl({ ttsReset: true });
+  assert.deepEqual(await ctx.owner.ok('POST', '/api/platform/tts').then((r) => [r.ok, r.message]), [true, "연결됨 — 한국어 음성 4개 중 'ko-KR-Neural2-A' 사용"]);
+  assert.equal((await st()).tts.length, 0, '연결 시험은 합성하지 않음(과금 없음)');
+  await ctx.owner.ok('PUT', '/api/platform/tts', { voice: 'ko-KR-Wavenet-Z' });
+  const nv = await ctx.owner.ok('POST', '/api/platform/tts');
+  assert.deepEqual([nv.ok, nv.message], [false, "키는 맞지만 음성 이름 'ko-KR-Wavenet-Z'이(가) ko-KR 목록에 없습니다 — 예: ko-KR-Neural2-A · ko-KR-Neural2-B · ko-KR-Neural2-C"]);
+  await ctx.owner.ok('PUT', '/api/platform/tts', { voice: 'ko-KR-Chirp3-HD-Kore', apiKey: 'wrong-key' });
+  const wk = await ctx.owner.ok('POST', '/api/platform/tts');
+  assert.equal(wk.ok, false); assert.match(wk.message, /^HTTP 400 키가 맞지 않습니다 · API key not valid/);
+  const sv = await ctx.owner.ok('PUT', '/api/platform/tts', { apiKey: 'test-gtts-key' });
+  assert.deepEqual([sv.voice, sv.ready], ['ko-KR-Chirp3-HD-Kore', true], '키만 바꾸면 고른 음성은 그대로');
+  // 영상 내레이션 = 구글 합성(MP3·ko-KR·고른 음성) — 장면 대사 4줄
+  await ctl({ hfReset: true, hfPolls: 0, hfMode: null, ttsReset: true, anthropicReset: true, anthropicQueue: [scenesAi(P.cap, P.bgm), qa([[1, null], [2, null], [3, null], [4, null]])] });
+  const r = await ctx.owner.ok('POST', '/api/marketing/studio', { brandId: P.brand, kind: 'reels', purpose: 'awareness', message: '구글 음성 내레이션 시험', quantity: 1 });
+  await ctx.owner.ok('PATCH', `/api/marketing/studio/${r.id}`, { action: 'generate' });
+  const b = await waitStatus(r.id, 'review');
+  const tts = (await st()).tts;
+  assert.equal(tts.length, 4, '장면 대사 4줄');
+  assert.deepEqual([tts[0].provider, tts[0].voice, tts[0].languageCode, tts[0].encoding, tts[0].input], ['google', 'ko-KR-Chirp3-HD-Kore', 'ko-KR', 'MP3', '퇴근 10분 전, 오늘 할 일이 한 화면에']);
+  assert.equal(b.progress.audio.narration, 'google');
+  assert.equal((await probe(b.result.mediaIds[0])).audio, true, '소리 있는 mp4');
+});
