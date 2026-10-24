@@ -7,14 +7,14 @@ import { ArrowRight, BellRing, Briefcase, Check, Download, Mail, Megaphone, Mic,
 
 /**
  * 워크인 소개 사이트(대표 10/20 16:45): work-in.dev 루트(로그인 전) — 로그인하면 홈(middleware). 앱은 로그인 화면.
- * H1 "업무도, 영업도, 마케팅도 한 화면에서" · 5명 무료 · [무료로 시작]/[앱 다운로드] · 세 공간 소개 · AI 비서 · 도입 3단계 · 요금(5명 무료만) · 문의 · 푸터(개인정보·계정 삭제·운영사) · JSON-LD·OG · UTM·sign_up/CompleteRegistration/tel 이벤트 · 390px.
+ * H1 "업무도, 영업도, 마케팅도 한 화면에서" · 14일 무료 체험(#466 대표 결정 10/23 — 5명 무료 폐지) · [무료로 시작]/[앱 다운로드] · 세 공간 소개 · AI 비서 · 도입 3단계 · 요금(14일 체험) · 문의 · 푸터(개인정보·계정 삭제·운영사) · JSON-LD·OG · UTM·sign_up/CompleteRegistration/tel 이벤트 · 390px.
  */
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://work-in.dev'; // 대표 10/20 22:30: 주 도메인 = work-in.dev(apex). 방향(308)은 코드가 아니라 Vercel 설정 — 바뀌면 env 로
 const PLAY = process.env.NEXT_PUBLIC_PLAY_URL || ''; // 정식 출시 전엔 스토어 주소가 404 — 로컬이 출시 뒤 env 로(내부 테스트 링크도 가능)
 const APPSTORE = process.env.NEXT_PUBLIC_APPSTORE_URL || '';
 const CONTACT_MAIL = 'dagym-in@naver.com';
 const TITLE = '워크인 — 업무도, 영업도, 마케팅도 한 화면에서';
-const DESC = '업무·일정·메신저에 영업(리드·입찰·제안)과 마케팅(시안 승인·자동 제작·광고)까지 한 화면에서. 5명까지 무료, 카드 등록 없음. 웹·Android·iOS.';
+const DESC = '업무·일정·메신저에 영업(리드·입찰·제안)과 마케팅(시안 승인·자동 제작·광고)까지 한 화면에서. 14일 무료 체험. 웹·Android·iOS.';
 export const metadata: Metadata = {
   title: TITLE, description: DESC, metadataBase: new URL(SITE), alternates: { canonical: '/' }, robots: { index: true, follow: true },
   openGraph: { type: 'website', url: SITE, siteName: '워크인', title: TITLE, description: DESC, locale: 'ko_KR', images: [{ url: '/landing/og.png', width: 1200, height: 630, alt: '워크인 — 업무·영업·마케팅 한 화면' }] },
@@ -29,7 +29,7 @@ const SPACES = [
   { key: 'marketing', name: '마케팅', color: '#7C3AED', icon: Megaphone, img: '/landing/marketing.png', t: '시안 승인·자동 제작·광고', d: '피드·블로그·릴스 원고를 AI가 묶음으로 만들고, 대표는 승인함에서 [승인]만. 사람 승인 없이 밖으로 나가는 것은 없습니다.',
     f: ['승인함 — 썸네일·게시 화면 미리보기·마감', '브랜드별 게시 묶음(주말 건너뛰기) · 콘텐츠 캘린더', '네이버·구글 광고 성과 · 월간 보고'] },
 ];
-const STEPS = [['가입 1분', '이메일만으로 회사 공간을 만듭니다. 카드 등록 없음.'], ['직원 초대', '링크 하나로 초대. 부서·팀과 권한은 소속에서 자동.'], ['공간 켜기', '영업·마케팅은 필요할 때 관리자가 켭니다. 안 쓰는 회사는 업무만.']];
+const STEPS = [['가입 1분', '이메일만으로 회사 공간을 만들고 14일 동안 체험합니다.'], ['직원 초대', '링크 하나로 초대. 부서·팀과 권한은 소속에서 자동.'], ['공간 켜기', '영업·마케팅은 필요할 때 관리자가 켭니다. 안 쓰는 회사는 업무만.']];
 const AI_DEMO = [['내일 3시 거래처 미팅 잡아 줘', '내일 15:00 “거래처 미팅” 일정을 만들고 30분 전 알림을 걸었습니다. 준비 업무도 하나 만들까요?'], ['이번 주 연락할 리드 알려 줘', '다음 연락일이 이번 주인 리드 4곳입니다 — 판교 레이크(수), 광교 호수마을(목)… 첫 연락 업무를 담당자에게 만들었습니다.'], ['10월 블로그 원고 초안 써 줘', '브랜드 키트의 말투로 원고 2편을 만들어 승인함에 올렸습니다. 표지·본문 사진을 붙이면 승인 요청됩니다.']];
 
 export default function Welcome() {
@@ -37,7 +37,7 @@ export default function Welcome() {
     '@context': 'https://schema.org', '@graph': [
       { '@type': 'Organization', name: '워크인', url: SITE, logo: `${SITE}/icon-1024.png`, email: CONTACT_MAIL },
       { '@type': 'SoftwareApplication', name: '워크인', applicationCategory: 'BusinessApplication', operatingSystem: 'Web, Android, iOS', url: SITE, description: DESC,
-        offers: { '@type': 'Offer', price: '0', priceCurrency: 'KRW', description: '5명까지 무료' }, featureList: '업무·일정·메신저·결재, 영업(리드·입찰·제안·계약), 마케팅(시안 승인·자동 제작·광고), AI 비서' },
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'KRW', description: '14일 무료 체험' }, featureList: '업무·일정·메신저·결재, 영업(리드·입찰·제안·계약), 마케팅(시안 승인·자동 제작·광고), AI 비서' },
     ],
   };
   return (
@@ -63,7 +63,7 @@ export default function Welcome() {
           <div className="absolute inset-0 bg-gradient-to-b from-slate-900/85 via-slate-900/75 to-slate-900/95" />
         </div>
         <div className="relative mx-auto max-w-6xl px-4 pb-12 pt-10 text-center sm:pb-16 sm:pt-20">
-        <p className="text-sm font-semibold text-teal-300">5명까지 무료 · 카드 등록 없음</p>
+        <p className="text-sm font-semibold text-teal-300">14일 무료 체험</p>
         <h1 className="mt-2 text-3xl font-bold leading-tight tracking-tight sm:text-5xl" data-testid="landing-title">업무도, 영업도, 마케팅도<br className="sm:hidden" /> 한 화면에서</h1>
         <p className="mx-auto mt-4 max-w-2xl text-base text-slate-200 sm:text-lg">직원은 업무와 일정을, 영업팀은 리드와 입찰을, 마케팅은 시안 승인과 광고를 — 회사마다 켜고 끄는 세 공간을 한 계정으로. AI 비서가 등록·요약·초안을 돕습니다.</p>
         <div className="mt-7 flex flex-wrap justify-center gap-2">
@@ -112,15 +112,15 @@ export default function Welcome() {
         <div className="mx-auto max-w-6xl px-4"><h2 className="text-center text-2xl font-bold">도입 3단계</h2>
           <ol className="mt-6 grid gap-3 sm:grid-cols-3" data-testid="landing-steps">{STEPS.map(([t, d], i) => <li key={t} className="rounded-card border border-line bg-white p-4"><span className="flex size-8 items-center justify-center rounded-full bg-brand-600 text-sm font-bold text-white">{i + 1}</span><div className="mt-2 font-semibold">{t}</div><div className="text-sm text-ink-2">{d}</div></li>)}</ol></div>
       </section>
-      {/* 요금: 5명 무료만 */}
+      {/* 요금: 14일 무료 체험(#466 — 5명 무료 폐지, 카드 등록 문구는 대표 결정 전이라 넣지 않음) */}
       <section id="pricing" className="mx-auto max-w-6xl px-4 py-12 text-center">
         <h2 className="text-2xl font-bold">요금</h2>
         <div className="mx-auto mt-6 max-w-md rounded-card border border-brand-600 p-6 ring-1 ring-brand-600" data-testid="pricing">
-          <div className="text-sm font-semibold text-brand-700">무료</div><div className="mt-1 text-4xl font-bold">0원</div><div className="text-sm text-ink-3">5명까지 · 기간 제한 없음 · 카드 등록 없음</div>
+          <div className="text-sm font-semibold text-brand-700">14일 무료 체험</div><div className="mt-1 text-4xl font-bold">0원</div><div className="text-sm text-ink-3">14일 동안 모든 기능 · 체험이 끝나면 요금제를 고릅니다</div>
           <ul className="mt-4 space-y-1.5 text-left text-sm">{['업무·일정·캘린더·메신저·결재·자료실 전부', '영업·마케팅 공간 켜기 가능', 'ai'].map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 text-green-600" />{x === 'ai' ? <LandingAiLine /> : x}</li>)}</ul>
           <Link href="/signup" className="mt-5 inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white hover:bg-brand-700" data-track="start-pricing">무료로 시작<ArrowRight className="size-4" /></Link>
         </div>
-        <p className="mt-3 text-xs text-ink-3">6명 이상·더 큰 저장 공간·AI 한도가 필요하면 아래로 문의해 주세요.</p>
+        <p className="mt-3 text-xs text-ink-3">체험 뒤 요금·더 큰 저장 공간·AI 한도는 아래로 문의해 주세요.</p>
       </section>
       {/* 앱 다운로드 */}
       <section id="app" className="bg-slate-50 py-12">
@@ -134,7 +134,7 @@ export default function Welcome() {
       </section>
       {/* 문의 */}
       <section id="contact" className="mx-auto max-w-6xl px-4 py-12 text-center" data-testid="landing-contact">
-        <h2 className="text-2xl font-bold">문의</h2><p className="mt-1 text-sm text-ink-2">도입 상담·6명 이상 요금·기능 요청은 메일로 보내 주세요. 영업일 하루 안에 답합니다.</p>
+        <h2 className="text-2xl font-bold">문의</h2><p className="mt-1 text-sm text-ink-2">도입 상담·요금·기능 요청은 메일로 보내 주세요. 영업일 하루 안에 답합니다.</p>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
           <a href={`mailto:${CONTACT_MAIL}?subject=${encodeURIComponent('워크인 문의')}`} className="inline-flex min-h-[48px] items-center gap-2 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white" data-track="mail"><Mail className="size-4" />{CONTACT_MAIL}</a>
           {process.env.COMPANY_PHONE && <a href={`tel:${process.env.COMPANY_PHONE.replace(/[^0-9+]/g, '')}`} className="inline-flex min-h-[48px] items-center gap-2 rounded-input border border-line px-5 py-3 font-semibold" data-track="tel" data-testid="landing-tel"><Phone className="size-4" />{process.env.COMPANY_PHONE}</a>}

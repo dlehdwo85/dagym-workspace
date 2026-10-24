@@ -1,4 +1,4 @@
-// 소개 사이트(대표 10/20 16:45): 로그인 전 / = 랜딩(H1·무료로 시작·앱 다운로드·세 공간·AI·3단계·요금 5명 무료·문의·푸터 계정 삭제·JSON-LD·OG) + 클릭 이벤트 + 390px, 로그인하면 홈
+// 소개 사이트(대표 10/20 16:45): 로그인 전 / = 랜딩(H1·무료로 시작·앱 다운로드·세 공간·AI·3단계·요금 14일 무료 체험(#466)·문의·푸터 계정 삭제·JSON-LD·OG) + 클릭 이벤트 + 390px, 로그인하면 홈
 import assert from 'node:assert/strict';
 
 export async function landing({ browser, owner, BASE, SHOTS }) {
@@ -9,7 +9,8 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   assert.equal(await p.getByTestId('landing-title').innerText(), '업무도, 영업도, 마케팅도 한 화면에서');
   assert.equal(await p.getByTestId('landing-space-work').count() + await p.getByTestId('landing-space-sales').count() + await p.getByTestId('landing-space-marketing').count(), 3);
   await p.getByTestId('landing-ai').waitFor(); await p.getByTestId('landing-steps').waitFor();
-  assert.match(await p.getByTestId('pricing').innerText(), /0원[\s\S]*5명까지/); assert.equal(await p.getByTestId('pricing').getByText(/베이직|스탠다드|프로/).count(), 0, '요금은 5명 무료만');
+  assert.match(await p.getByTestId('pricing').innerText(), /14일 무료 체험[\s\S]*0원/); assert.equal(await p.getByTestId('pricing').getByText(/베이직|스탠다드|프로/).count(), 0, '요금은 14일 체험만');
+  assert.doesNotMatch(await p.locator('body').innerText(), /5명까지|카드 등록 없음|6명 이상/, '#466 5명 무료 폐지 · 카드 등록 문구는 대표 결정 전'); // 대표 10/23
   assert.match(await p.getByTestId('landing-contact').innerText(), /dagym-in@naver\.com/);
   await p.getByTestId('biz-footer').getByRole('link', { name: '계정 삭제' }).waitFor();
   const ld = JSON.parse(await p.locator('script[type="application/ld+json"]').first().innerHTML());

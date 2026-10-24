@@ -24,7 +24,7 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
             <li className="flex items-center gap-3"><Gift className="size-5 text-orange-300" />14일 무료 체험으로 시작</li>
           </ul>
         </div>
-        <div className="relative text-xs text-slate-400">개인 무료 · 팀 5명까지 무료</div>
+        <div className="relative text-xs text-slate-400">14일 무료 체험</div>{/* #466 대표 결정 10/23: 무료 = 14일 체험(5명 무료 폐지) */}
       </section>
       <section className="flex flex-1 flex-col items-center justify-center p-5">
         <div className="w-full max-w-sm">

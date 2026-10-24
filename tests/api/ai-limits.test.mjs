@@ -48,7 +48,7 @@ test('사용량·요금제: 세 AI 줄 — 공간별 쓴 양(purpose 로 구분)
   const basic = L.plans.plans.find((p) => p.code === 'w_basic');
   assert.equal(basic.work.perUserAi, 6); assert.equal(basic.marketing.label, '베이직'); assert.equal(basic.marketing.monthlyCredits, 30); assert.equal(basic.marketing.images, 4);
   assert.equal(basic.work.feelPerUser[0].n, 6);
-  const free = L.plans.plans.find((p) => p.code === 'w_free'); assert.equal(free.work.aiRequests, 20); assert.equal(free.marketing, null);
+  assert.equal(L.plans.plans.find((p) => p.code === 'w_free'), undefined, '#466 무료 5명 폐지(188) — 요금표에서 내림'); // 대표 10/23
   assert.ok(L.plans.packs.some((a) => a.code === 'ai_credit_s' && a.aiRequests === 100));
   // 직원은 사용량 화면 없음(메뉴 권한 → 있는 줄도 모르게 404)
   assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 404);
