@@ -28,7 +28,9 @@ const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = 
 
 export const workInput = z.object({ kind: z.enum(WORK_KINDS), id: z.string().min(1).max(100), status: z.string().max(30).optional(), memo: z.string().trim().max(2000).nullable().optional(), nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   // 대표 10/24 추가 ②: '대상 아님' 사유(선택) · restore = [되돌리기](넘기기 전 상태로)
-  reason: z.string().trim().max(300).nullable().optional(), restore: z.boolean().optional() });
+  reason: z.string().trim().max(300).nullable().optional(), restore: z.boolean().optional(),
+  // #605(대표 10/25 ①): 보관함(대상 아님 = 이미 위탁 중)에서 적는 현 위탁사·계약만료일 → 계약만료·재입찰 탭으로 이어짐
+  operator: z.string().trim().max(100).nullable().optional(), contractEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional() });
 /** 대표 10/24 추가 ②: '대상 아님'(입찰은 모든 목록·당일 메일에서 빠지고 [대상 아님] 탭에만) — 누가·언제·사유·넘기기 전 상태를 진행 기록에 */
 const SKIP = /^대상\s?아님$/;
 export const convertInput = z.object({ kind: z.enum(WORK_KINDS), id: z.string().min(1).max(100), force: z.boolean().optional(), name: z.string().trim().min(1).max(300).optional() });
@@ -87,6 +89,8 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>, opt
   const data = i.kind === 'facility' ? { ...d, contact_status: status, last_note: memo, next_action_date: next, updated_by: u.id }
     : i.kind === 'vendor' ? { ...d, status, memo, next_date: next, updated_by: u.id }
       : { ...d, status, memo, next_date: next, updated_by: u.id, ...(i.kind === 'bid' ? { notice_id: i.id } : { source_id: i.id, source_type: 'building' }) };
+  if (i.operator !== undefined) (data as Record<string, unknown>).current_operator = i.operator || null;
+  if (i.contractEnd !== undefined) (data as Record<string, unknown>).contract_end_date = i.contractEnd;
   const srcId = cur?.src_id ?? (SRC_TBL[i.kind] === 'opportunity_work' ? `w:${i.kind}:${i.id}` : i.id);
   await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, lead_id, data) values (${t}, ${SRC_TBL[i.kind]}, ${srcId}, ${i.id}, ${status}, ${cur?.lead_id ?? null}, ${sql.json(data)})
     on conflict (tenant, src_tbl, src_id) do update set status = excluded.status, data = excluded.data, updated_at = now()`;

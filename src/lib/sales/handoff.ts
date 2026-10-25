@@ -78,7 +78,7 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
   });
   // ③ 담당자마다 업무(검토·첫 연락) — 영업 공간 업무(sales_ref·lead_id), 요청자 = 넘긴 사람
   const { createTask } = await import('../tasks');
-  const link = i.kind === 'bid' ? `/s/sales/bids?tab=working&q=${encodeURIComponent(i.id)}` : `/s/sales/hub?tab=${i.kind === 'building' ? 'buildings' : i.kind === 'facility' ? 'facilities' : 'vendors'}`;
+  const link = i.kind === 'bid' ? `/s/sales/hub?tab=bids&bt=working&bq=${encodeURIComponent(i.id)}` : `/s/sales/hub?tab=${i.kind === 'building' ? 'buildings' : i.kind === 'facility' ? 'facilities' : 'vendors'}`;
   const taskIds: string[] = [];
   for (const a of ids) {
     const task = await createTask(u, { title: `[영업] ${name} — 검토·첫 연락`, description: `${KIND_NAME[i.kind]}에서 영업 진행으로 넘어온 건입니다. 내용을 검토하고 첫 연락을 하세요.${future.length ? `\n일정: ${future.map(([l, w]) => `${l} ${w.day}`).join(' · ')}` : ''}${i.note ? `\n메모: ${i.note}` : ''}\n원천: ${link}\n리드: /s/sales/leads?id=${leadId}`,

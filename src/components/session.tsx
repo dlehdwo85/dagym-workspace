@@ -22,7 +22,7 @@ export interface Sess {
   spaces?: ('work' | 'sales' | 'marketing')[];
   /** #77 처음 사용 안내: 본 투어 · 자동으로 띄울지(시험 서버·지원 모드는 끔) */
   tours?: { seen: string[]; auto: boolean };
-  features: { googleSync: boolean; /** V9 AI 비서 (플랫폼 API 키가 있을 때만) */ ai: boolean; /** V9 자료실 (체험 계정 제외) */ library: boolean; /** 영업 입찰·공고 사용(회사 선택) */ salesBids?: boolean; /** #408 회사 업종 템플릿 용어(영업 메뉴·칸 이름·예시) */ salesTerms?: SalesTerms; /** ⑦ 사이드바 3구역(대표 승인 10/20 오후) — FEATURE_SIDEBAR3=0 이면 예전 사이드바 */ sidebar3?: boolean };
+  features: { googleSync: boolean; /** V9 AI 비서 (플랫폼 API 키가 있을 때만) */ ai: boolean; /** V9 자료실 (체험 계정 제외) */ library: boolean; /** 영업 입찰·공고 사용(회사 선택) */ salesBids?: boolean; /** #408 회사 업종 템플릿 용어(영업 메뉴·칸 이름·예시) */ salesTerms?: SalesTerms; /** #611 허브 탭 = 회사가 켠 수집 DB 종류(null = 제한 없음) */ salesHubTabs?: string[] | null; /** ⑦ 사이드바 3구역(대표 승인 10/20 오후) — FEATURE_SIDEBAR3=0 이면 예전 사이드바 */ sidebar3?: boolean };
 }
 export const SessionCtx = createContext<Sess | null>(null);
 export function useSession() {

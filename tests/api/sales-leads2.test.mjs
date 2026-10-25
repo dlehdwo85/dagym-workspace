@@ -130,3 +130,24 @@ describe('S2 2차 제안·계약·ROI', () => {
     assert.ok(lead.timeline.some((x) => x.kind === 'proposal') && lead.timeline.some((x) => x.kind === 'contract'), '타임라인에 제안·계약');
   });
 });
+
+// #610 ⓑⓒ·#614(대표 10/25 ⑥·⑩): 보류·실패·되돌림 리드는 기본 목록 대신 보관함(목록 응답 archive = 사유·누가·언제·이전 단계) → [되돌리기] · [영업 진행으로] = 1차연락완료 + 담당·다음 연락일
+describe('#610·#614 리드 보관함·[영업 진행으로]', () => {
+  test('실패(사유) → archive(사유·누가·언제·이전 단계) → 되돌리기(이전 단계) · 신규리드 → 1차연락완료(담당·다음 연락일)', async () => {
+    const r = await ctx.owner.ok('POST', '/api/sales/leads', { name: '보관함 시험 거래처', status: '신규리드', force: true });
+    assert.ok(r.id);
+    await ctx.owner.ok('PATCH', `/api/sales/leads/${r.id}`, { status: '실패', reason: '예산 없음' });
+    const [{ name }] = await sql`select name from users where id = ${ctx.ownerId}`;
+    let l = (await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads.find((x) => x.id === r.id);
+    assert.deepEqual([l.status, l.archive.reason, l.archive.by, l.archive.prev, !!l.archive.at], ['실패', '예산 없음', name, '신규리드', true]);
+    assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads.find((x) => x.id === P.lead).archive, null, '진행 중 리드는 archive 없음');
+    await ctx.owner.ok('PATCH', `/api/sales/leads/${r.id}`, { status: '신규리드', reason: '보관함에서 되돌림' });
+    l = (await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads.find((x) => x.id === r.id);
+    assert.deepEqual([l.status, l.archive], ['신규리드', null]);
+    assert.equal((await sql`select reason from sales_status_log where lead_id = ${r.id} order by changed_at desc limit 1`)[0].reason, '보관함에서 되돌림', '되돌림도 단계 기록');
+    await ctx.owner.ok('PATCH', `/api/sales/leads/${r.id}`, { status: '1차연락완료', ownerId: ctx.staffA.id, nextContactDate: addDays(today, 3) });
+    l = (await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads.find((x) => x.id === r.id);
+    assert.deepEqual([l.status, l.ownerId, l.next, l.archive], ['1차연락완료', ctx.staffA.id, addDays(today, 3), null]);
+    assert.ok((await openTask(r.id)).some((t) => t.status !== 'done'), '담당자에게 열린 영업 업무');
+  });
+});

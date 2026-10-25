@@ -52,6 +52,39 @@ describe('S1-2 진행 기록 쓰기', () => {
     const bd = (await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).items.find((x) => x.id === 'B1');
     assert.deepEqual([bd.work.status, bd.work.memo], ['검토중', '시행사 접촉']);
   });
+  test('#605(대표 10/25 ①) 허브 보관함: 대상 아님 → 기본 목록에서 빠지고 보관함(누가·언제·사유·이전 상태) → [되돌리기] · 현 위탁사·계약만료일 → 계약만료·재입찰 탭 · 완료도 보관함', async () => {
+    const r = await ctx.owner.ok('POST', '/api/sales/work', { kind: 'facility', id: 'F1', status: '대상아님', reason: '이미 위탁 운영 중' });
+    assert.equal(r.status, '대상아님');
+    const open = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities');
+    assert.ok(!open.items.some((x) => x.id === 'F1'), '기본 목록에서 빠짐'); assert.equal(open.archiveCount, 1); assert.equal(open.box, 'open');
+    const box = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities&box=archive');
+    const f = box.items.find((x) => x.id === 'F1'); assert.ok(f, '보관함에 보임'); assert.equal(box.box, 'archive');
+    const [{ name }] = await sql`select name from users where id = ${ctx.ownerId}`;
+    assert.deepEqual([f.archive.status, f.archive.by, f.archive.reason, f.archive.prev, !!f.archive.at], ['대상아님', name, '이미 위탁 운영 중', '연락중', true]);
+    // 보관함에서 현 위탁사·계약만료일을 적으면(상태·사유는 그대로) 계약만료·재입찰 탭에 역산 단계·D-day 로
+    await ctx.owner.ok('POST', '/api/sales/work', { kind: 'facility', id: 'F1', operator: '좋은운영(주)', contractEnd: addDays(today, 100) });
+    const [w] = await sql`select status, data from sales_work_records where tenant = 'default' and src_tbl = 'operating_facility_prospects__progress' and ref_id = 'F1'`;
+    assert.deepEqual([w.status, w.data.current_operator, w.data.contract_end_date, w.data.skip_reason, w.data.last_note], ['대상아님', '좋은운영(주)', addDays(today, 100), '이미 위탁 운영 중', '소장 통화']);
+    const c = await ctx.owner.ok('GET', '/api/sales/src?view=contracts');
+    const ci = c.items.find((x) => x.id === 'facility:F1'); assert.ok(ci, '계약만료·재입찰 탭에 시설');
+    assert.deepEqual([ci.kind, ci.name, ci.winner, ci.end, ci.daysLeft, ci.work], ['facility', '수원 아파트 커뮤니티', '좋은운영(주)', addDays(today, 100), 100, '대상아님']);
+    assert.ok(ci.href.startsWith('/s/sales/hub?tab=facilities&box=archive&q='), ci.href);
+    assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities&box=archive')).items.find((x) => x.id === 'F1').operator, '좋은운영(주)', '허브 카드 현 위탁사 = 적은 값');
+    assert.equal((await ctx.owner.req('POST', '/api/sales/work', { kind: 'facility', id: 'F1', contractEnd: '2026-1-1' })).status, 400, '날짜 형식');
+    // [되돌리기] = 넘기기 전 상태(연락중) → 기본 목록 복귀
+    assert.equal((await ctx.owner.ok('POST', '/api/sales/work', { kind: 'facility', id: 'F1', restore: true })).status, '연락중');
+    const again = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities');
+    assert.ok(again.items.some((x) => x.id === 'F1'), '기본 목록으로 복귀'); assert.equal(again.archiveCount, 0);
+    assert.ok(c.items.length && (await ctx.owner.ok('GET', '/api/sales/src?view=contracts')).items.find((x) => x.id === 'facility:F1')?.href.startsWith('/s/sales/hub?tab=facilities&q='), '되돌린 뒤 링크는 기본 목록');
+    // 완료(등록 완료)도 보관함(사유 없음) — 되돌리기 = 처음 상태
+    await ctx.owner.ok('POST', '/api/sales/work', { kind: 'vendor', id: 'V1', status: '등록 완료' });
+    const vb = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=vendors&box=archive');
+    assert.deepEqual([vb.archiveCount, vb.items[0]?.id, vb.items[0]?.archive?.status, vb.items[0]?.archive?.reason ?? null, vb.items[0]?.archive?.by], [1, 'V1', '등록 완료', null, name]);
+    assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=vendors')).items.length, 0, '완료는 기본 목록에 없음');
+    assert.equal((await ctx.owner.ok('POST', '/api/sales/work', { kind: 'vendor', id: 'V1', status: '미등록' })).status, '미등록');
+    assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=vendors')).items.length, 1);
+    await ctx.owner.ok('POST', '/api/sales/work', { kind: 'vendor', id: 'V1', status: '신청 준비' });
+  });
   test('진행영업으로 넘기기: 비슷한 리드 → similar, force → 리드 생성·연결·전환됨·리드 상세 입찰 탭·더 못 고침', async () => {
     await ctx.owner.ok('POST', '/api/sales/leads', { name: '분당스포츠센터 관리단', region: '경기' });
     const s = await ctx.owner.ok('POST', '/api/sales/work/convert', { kind: 'bid', id: 'N1' });

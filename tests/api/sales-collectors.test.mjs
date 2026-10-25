@@ -160,7 +160,7 @@ test('맞춤 설정(검색어·제외어·지역) → 당일 다이제스트(새
   const sent = await ctx.owner.ok('POST', '/api/sales/digest/send', {});
   assert.equal(sent.sent, true); assert.ok(sent.counts.cancel >= 1, JSON.stringify(sent.counts)); assert.ok(sent.mailed >= 1, '개발 모드 메일(dev) 집계'); assert.ok(sent.notified >= 1);
   const [n] = await sql`select title, link from notifications where user_id = ${ctx.ownerId} and type = 'briefing' order by created_at desc limit 1`;
-  assert.match(n.title, /오늘 새 공고/); assert.equal(n.link, '/s/sales/bids?tab=today');
+  assert.match(n.title, /오늘 새 공고/); assert.equal(n.link, '/s/sales/hub?tab=bids&bt=today');
   assert.equal((await sql`select count(*)::int n from sales_digests where tenant = 'default' and day = ${today}`)[0].n, 1);
   const again = await ctx.owner.ok('GET', '/api/sales/digest'); assert.equal(again.preview, undefined, '보낸 뒤에는 보낸 것 그대로'); assert.equal(again.mailed, sent.mailed);
   // 회사별 수집기 끄기 → 그 출처 제외

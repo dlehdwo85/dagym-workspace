@@ -24,7 +24,7 @@ const T: Record<SalesTemplate, SalesTerms> = {
   facility: {
     template: 'facility', label: '시설 운영·위탁', desc: '아파트·커뮤니티·체육시설 위탁 운영, 시설 관리',
     kind: { bid: '입찰', building: '신규단지', facility: '시설', vendor: '협력사', lead: '리드' },
-    buildingsTab: '신규 현장', facilitiesTab: '준공·입주 시설', vendorsTab: '협력사 등록',
+    buildingsTab: '건설 예정/계획', facilitiesTab: '준공·입주 시설', vendorsTab: '협력사 등록', // #607 대표 결정 10/25 19:00: '신규 현장' → '건설 예정/계획'(단지라는 말 안 씀)
     unitName: '단지명', facilityName: '시설명', office: '관리사무소', operator: '현 위탁사',
     todo: { followUp: '입찰·신규단지 후속', facilities: '준공시설 연락', vendors: '협력사 등록 할 일' },
     examples: { industry: '예: 아파트 커뮤니티 운영 / 헬스장 / 시설 관리', product: '주력 상품·서비스(예: 커뮤니티 시설 위탁 운영)', business: '예: 커뮤니티 운영', keywords: '주민공동시설, 커뮤니티, 피트니스, 출입통제', excludes: '어린이집, 급식, 주차',

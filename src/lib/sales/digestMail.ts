@@ -25,7 +25,7 @@ const ddColor = (n: number) => (n <= 3 ? '#DC2626' : n <= 10 ? '#D97706' : C.ink
 export const SECTIONS: { key: Exclude<DigestSection, 'ref'>; title: string; sub: string }[] = [
   { key: 'now', title: '★ 즉시 검토', sub: '' },
   { key: 'review', title: '검토', sub: '관련 사업이지만 공사·장비·조건을 확인할 공고' },
-  { key: 'soon', title: '마감 임박', sub: '이미 받은 공고 중 D-3 이내 · 진행 기록 없음' },
+  { key: 'soon', title: '진행 중(D-3 안)', sub: '이미 받은 공고 중 D-3 이내 · 진행 기록 없음' }, // #608(대표 10/25): 화면 칩 '마감 임박'을 없애며 메일 구역 이름도 같이
   { key: 'change', title: '정정·취소', sub: '관련 사업이거나 진행 기록이 있는 공고만' },
   { key: 'result', title: '결과(낙찰·유찰)', sub: '영업 기회가 아닌 결과 — 새 공고 수에는 넣지 않음' }, // 로컬 10/24 12:20(#537 후속·#530)
 ];
@@ -59,7 +59,7 @@ function itemHtml(i: DigestItem, n: number, base: string, day: string) {
   const { l2, l3 } = parts(i, day);
   const badges = i.badges.map((b) => { const [fg, bg] = BADGE[b] ?? [C.ink2, C.bg]; return `<span style="display:inline-block;padding:1px 6px;margin-right:4px;border-radius:4px;font-size:11px;font-weight:700;line-height:16px;color:${fg};background:${bg}">${esc(b)}</span>`; }).join('');
   const biz = i.biz.map((b) => `<span style="display:inline-block;padding:1px 7px;margin-left:4px;border-radius:9px;font-size:11px;font-weight:700;line-height:16px;color:${esc(b.color)};background:${tint(b.color)}">${esc(b.name)}</span>`).join('');
-  const link = `${base}/s/sales/bids?tab=all&id=${encodeURIComponent(i.id)}`;
+  const link = `${base}/s/sales/hub?tab=bids&bt=all&id=${encodeURIComponent(i.id)}`;
   const tags = i.tags.map((t) => `<span style="display:inline-block;padding:0 6px;margin-left:4px;border:1px solid ${C.line};border-radius:4px;font-size:11px;line-height:16px;color:${C.ink3}">${esc(t)}</span>`).join('');
   const dl = i.deadlineAt && i.dday != null ? ` <b style="color:${ddColor(i.dday)}">${ddText(i.dday)}</b>` : '';
   const l3html = l3.map((x) => (x.startsWith('입찰마감 ') ? `${esc(x)}${dl}` : esc(x))).join(' · ');
@@ -76,7 +76,7 @@ const button = (href: string, label: string, primary: boolean) => `<a href="${es
 /** 메일 한 통(제목·HTML·텍스트) */
 export function digestMail(fromName: string, d: Digest, base: string) {
   const subject = digestSubject(fromName, d);
-  const today = `${base}/s/sales/bids?tab=today`, prefs = `${base}/s/sales/sources`, refs = `${base}/s/sales/bids?tab=ref`, open = `${base}/s/sales/bids?tab=open`;
+  const today = `${base}/s/sales/hub?tab=bids&bt=today`, prefs = `${base}/s/sales/sources`, refs = `${base}/s/sales/hub?tab=bids&bt=ref`, open = `${base}/s/sales/hub?tab=bids&bt=open`;
   const sections = SECTIONS.map((s) => { const list = of(d, s.key); if (!list.length) return '';
     const shown = cap(s.key, list); const rest = list.length - shown.length;
     return `<tr><td style="padding:18px 16px 6px" data-digest-section="${s.key}"><div style="font-size:15px;font-weight:800;color:${C.ink}">${esc(s.title)} <span style="color:${C.ink3};font-weight:700">${list.length}</span></div>${s.sub ? `<div style="margin-top:2px;font-size:12px;color:${C.ink3}">${esc(s.sub)}</div>` : ''}</td></tr>${shown.map((x, k) => itemHtml(x, k + 1, base, d.day)).join('')}${rest > 0 ? `<tr><td style="padding:10px 16px;border-top:1px solid ${C.line};font-size:13px;color:${C.ink2}" data-digest-more="${s.key}">나머지 ${rest}건 — <a href="${esc(open)}" style="color:${C.brand}">보기</a></td></tr>` : ''}`; }).join('');
@@ -97,7 +97,7 @@ ${sections}${ref}${empty}
     return [`${n}. ${i.badges.map((b) => `[${b}] `).join('')}${i.title}${i.biz.length ? ` [${i.biz.map((b) => b.name).join('·')}]` : ''}`,
       l2.length || i.tags.length ? `   ${[...l2, ...i.tags].join(' · ')}` : null,
       l3.length ? `   ${l3.map((x) => (x.startsWith('입찰마감 ') && i.dday != null ? `${x} ${ddText(i.dday)}` : x)).join(' · ')}` : null,
-      `   보기: ${base}/s/sales/bids?tab=all&id=${encodeURIComponent(i.id)}`].filter(Boolean).join('\n'); };
+      `   보기: ${base}/s/sales/hub?tab=bids&bt=all&id=${encodeURIComponent(i.id)}`].filter(Boolean).join('\n'); };
   const text = [subject, '', summary(d), `오늘 공고 전체 보기: ${today}`, `맞춤 설정: ${prefs}`,
     ...SECTIONS.flatMap((s) => { const list = of(d, s.key); const shown = cap(s.key, list); const rest = list.length - shown.length;
       return list.length ? ['', `■ ${s.title} (${list.length})${s.sub ? ` — ${s.sub}` : ''}`, ...shown.map((x, k) => txt(x, k + 1)), ...(rest > 0 ? [`   나머지 ${rest}건 — 보기: ${open}`] : [])] : []; }),

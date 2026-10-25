@@ -45,9 +45,10 @@ export async function digestMail({ owner, ctx, sql, BASE, SHOTS }) {
   await pv.screenshot({ path: `${SHOTS}/218-digest-mail-390.png`, fullPage: true });
   // 메일 제목 링크 = 워크인 공고 상세
   const href = await item.locator('a').filter({ hasText: 'E2E 시험구 국민체육센터' }).getAttribute('href');
-  assert.ok(href.endsWith(`/s/sales/bids?tab=all&id=${id}`), href);
+  assert.ok(href.endsWith(`/s/sales/hub?tab=bids&bt=all&id=${id}`), href); // #611: 입찰·공고 화면은 허브 입찰 탭으로
   await pv.close();
-  await owner.goto(`${BASE}/s/sales/bids?tab=all&id=${id}`);
+  await owner.goto(`${BASE}/s/sales/bids?tab=all&id=${id}`); // 옛 주소(이미 보낸 메일) → 허브 입찰 탭으로 넘김
+  await owner.waitForURL(/\/s\/sales\/hub\?tab=bids&bt=all&id=/);
   await owner.getByTestId('bid-detail').waitFor();
   await owner.getByRole('dialog').getByText('E2E 시험구 국민체육센터 헬스장 위탁운영 용역').first().waitFor();
   // #535: 링크로 연 상세의 닫기 = ?id 만 지우고 목록에 남음 → 목록에서 다시 열면 ?id= 기록 → 뒤로가기는 상세만 닫힘
@@ -55,13 +56,13 @@ export async function digestMail({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
   await owner.getByTestId('bid-detail').waitFor({ state: 'hidden' });
   await owner.waitForFunction(() => !new URL(location.href).searchParams.has('id'));
-  assert.equal(new URL(owner.url()).pathname, '/s/sales/bids');
+  assert.equal(new URL(owner.url()).pathname, '/s/sales/hub');
   await owner.getByTestId('bid-open').filter({ hasText: 'E2E 시험구 국민체육센터' }).first().click();
   await owner.getByTestId('bid-detail').waitFor();
   assert.equal(qs().get('id'), String(id), '목록에서 연 상세는 ?id= 기록');
   await owner.goBack();
   await owner.getByTestId('bid-detail').waitFor({ state: 'hidden' });
-  assert.deepEqual([new URL(owner.url()).pathname, qs().get('id')], ['/s/sales/bids', null], '뒤로가기 = 공고 상세만 닫힘');
+  assert.deepEqual([new URL(owner.url()).pathname, qs().get('id'), qs().get('bt')], ['/s/sales/hub', null, 'all'], '뒤로가기 = 공고 상세만 닫힘(허브 입찰 탭 그대로)');
   // 되돌림
   await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { digestEmails: [], digestFromName: null });
   await sql`delete from sales_src_rows where src_id = ${id}`;
