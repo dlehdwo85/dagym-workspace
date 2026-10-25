@@ -3,7 +3,7 @@ import { connection } from 'next/server';
 
 /** 공개 화면(소개·로그인·가입) 하단 사업자 정보 — 네이버 비즈채널 검수·전자상거래법 표시. 값은 운영 환경 변수로만(저장소에 쓰지 않음), 없는 칸은 빼고 보여 줌 */
 export async function BizFooter({ className }: { className?: string }) {
-  await connection(); // 빌드 때가 아니라 요청 때 운영 설정 값을 읽음(값을 바꾸면 다시 배포 없이 반영)
+  await connection(); // 빌드 때가 아니라 요청 때 운영 설정 값을 읽음 — 단 Vercel 환경 변수는 배포 때 주입되므로 값을 바꾸면 재배포(로컬 10/25 21:00)
   const e = process.env;
   const items: [string, string | undefined][] = [
     ['상호', e.COMPANY_NAME], ['대표', e.COMPANY_CEO], ['사업자등록번호', e.COMPANY_BIZNO],

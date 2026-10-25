@@ -15,7 +15,9 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   await p.getByTestId('biz-footer').getByRole('link', { name: '계정 삭제' }).waitFor();
   const ld = JSON.parse(await p.locator('script[type="application/ld+json"]').first().innerHTML());
   assert.ok(ld['@graph'].some((x) => x['@type'] === 'SoftwareApplication' && x.offers.price === '0'), 'JSON-LD');
-  assert.equal(await p.locator('meta[property="og:image"]').getAttribute('content'), 'https://work-in.dev/landing/og.png');
+  assert.equal(await p.locator('meta[property="og:image"]').getAttribute('content'), 'https://www.work-in.dev/landing/og.png'); // #627 기본 주소 www
+  assert.equal(await p.locator('link[rel="canonical"]').getAttribute('href'), 'https://www.work-in.dev'); // Next 는 루트 canonical 의 끝 / 를 뗀다
+  assert.equal(await p.getByTestId('landing-feature-links').getByRole('link').count(), 3, '기능별 소개 링크 3개');
   assert.equal(await p.locator('meta[name="robots"]').getAttribute('content'), 'index, follow');
   assert.equal(await p.evaluate(() => JSON.parse(localStorage.getItem('wos_utm') ?? '{}').source), 'naver', 'UTM 기억');
   const fired = await p.evaluate(() => new Promise((r) => { document.addEventListener('wos:landing', (e) => r(e.detail.kind), { once: true }); document.querySelector('[data-testid="landing-app"]').click(); }));
@@ -25,6 +27,14 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   await p.setViewportSize({ width: 390, height: 844 }); await p.goto(`${BASE}/`);
   await p.getByTestId('landing-title').waitFor();
   assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= 390), '390 가로 넘침 없음');
+  // #627 검색어별 소개 페이지: 휴대폰 폭·PC 캡처·홈으로 돌아오기
+  await p.goto(`${BASE}/landing/task-management`); await p.getByTestId('landing-h1').waitFor();
+  assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= 390), '소개 페이지 390 가로 넘침 없음');
+  assert.equal(await p.getByTestId('landing-sections').locator('article').count(), 3);
+  await p.setViewportSize({ width: 1366, height: 900 }); await p.goto(`${BASE}/landing/e-approval`); await p.getByTestId('landing-h1').waitFor();
+  await p.screenshot({ path: `${SHOTS}/299-landing-e-approval.png`, fullPage: true });
+  await p.getByTestId('landing-others').getByRole('link', { name: /협업툴/ }).click(); await p.waitForURL(/\/landing\/collaboration/); await p.getByTestId('landing-h1').waitFor();
+  await p.setViewportSize({ width: 390, height: 844 }); await p.goto(`${BASE}/`); await p.getByTestId('landing-title').waitFor();
   await p.screenshot({ path: `${SHOTS}/163-landing-390.png`, fullPage: true });
   await p.getByTestId('landing-start').click(); await p.waitForURL(/\/signup/);
   await ctx.close();

@@ -3,18 +3,21 @@ import type { Metadata } from 'next';
 import { LandingEvents } from '@/components/LandingEvents';
 import { LandingAiLine } from '@/components/LandingAiLine';
 import { BizFooter } from '@/components/BizFooter';
+import { LandingHeader } from '@/components/LandingHeader';
+import { conversionTags } from '@/lib/conversionTags';
+import { LANDING_PAGES, SITE } from '@/lib/landingPages';
 import { ArrowRight, BellRing, Briefcase, Check, Download, Mail, Megaphone, Mic, Phone, Sparkles, TrendingUp, Users } from 'lucide-react';
 
 /**
  * 워크인 소개 사이트(대표 10/20 16:45): work-in.dev 루트(로그인 전) — 로그인하면 홈(middleware). 앱은 로그인 화면.
  * H1 "업무도, 영업도, 마케팅도 한 화면에서" · 14일 무료 체험(#466 대표 결정 10/23 — 5명 무료 폐지) · [무료로 시작]/[앱 다운로드] · 세 공간 소개 · AI 비서 · 도입 3단계 · 요금(14일 체험) · 문의 · 푸터(개인정보·계정 삭제·운영사) · JSON-LD·OG · UTM·sign_up/CompleteRegistration/tel 이벤트 · 390px.
  */
-const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://work-in.dev'; // 대표 10/20 22:30: 주 도메인 = work-in.dev(apex). 방향(308)은 코드가 아니라 Vercel 설정 — 바뀌면 env 로
+// #627: 주소(호스트)는 src/lib/landingPages SITE 하나로(NEXT_PUBLIC_SITE_URL, 기본 www) — 도메인 방향(apex → www)은 Vercel 설정
 const PLAY = process.env.NEXT_PUBLIC_PLAY_URL || ''; // 정식 출시 전엔 스토어 주소가 404 — 로컬이 출시 뒤 env 로(내부 테스트 링크도 가능)
 const APPSTORE = process.env.NEXT_PUBLIC_APPSTORE_URL || '';
 const CONTACT_MAIL = 'dagym-in@naver.com';
-const TITLE = '워크인 — 업무도, 영업도, 마케팅도 한 화면에서';
-const DESC = '업무·일정·메신저에 영업(리드·입찰·제안)과 마케팅(시안 승인·자동 제작·광고)까지 한 화면에서. 14일 무료 체험. 웹·Android·iOS.';
+const TITLE = '워크인 — 중소기업 업무관리·전자결재·협업툴을 한 화면에서'; // #627: 검색어(업무관리·전자결재·협업툴)를 제목에, H1 은 대표 문구 그대로
+const DESC = '업무·일정·메신저·전자결재와 영업·마케팅까지 한 화면에서. 중소기업 업무관리·협업툴, 14일 무료 체험. 웹·휴대폰 앱.';
 export const metadata: Metadata = {
   title: TITLE, description: DESC, metadataBase: new URL(SITE), alternates: { canonical: '/' }, robots: { index: true, follow: true },
   openGraph: { type: 'website', url: SITE, siteName: '워크인', title: TITLE, description: DESC, locale: 'ko_KR', images: [{ url: '/landing/og.png', width: 1200, height: 630, alt: '워크인 — 업무·영업·마케팅 한 화면' }] },
@@ -32,28 +35,23 @@ const SPACES = [
 const STEPS = [['가입 1분', '이메일만으로 회사 공간을 만들고 14일 동안 체험합니다.'], ['직원 초대', '링크 하나로 초대. 부서·팀과 권한은 소속에서 자동.'], ['공간 켜기', '영업·마케팅은 필요할 때 관리자가 켭니다. 안 쓰는 회사는 업무만.']];
 const AI_DEMO = [['내일 3시 거래처 미팅 잡아 줘', '내일 15:00 “거래처 미팅” 일정을 만들고 30분 전 알림을 걸었습니다. 준비 업무도 하나 만들까요?'], ['이번 주 연락할 리드 알려 줘', '다음 연락일이 이번 주인 리드 4곳입니다 — 판교 레이크(수), 광교 호수마을(목)… 첫 연락 업무를 담당자에게 만들었습니다.'], ['10월 블로그 원고 초안 써 줘', '브랜드 키트의 말투로 원고 2편을 만들어 승인함에 올렸습니다. 표지·본문 사진을 붙이면 승인 요청됩니다.']];
 
-export default function Welcome() {
+export default async function Welcome() {
+  const tags = await conversionTags().catch(() => null); // #627: 소개 화면 측정 ID(플랫폼 운영 저장값 > 빌드 값)
   const ld = {
     '@context': 'https://schema.org', '@graph': [
-      { '@type': 'Organization', name: '워크인', url: SITE, logo: `${SITE}/icon-1024.png`, email: CONTACT_MAIL },
+      { '@type': 'WebSite', name: '워크인', url: SITE, inLanguage: 'ko' },
+      // SEO_AUDIT 2-1: 주소·전화 없음 → 운영 설정 값이 있을 때만(값은 저장소에 쓰지 않음)
+      { '@type': 'Organization', name: '워크인', url: SITE, logo: `${SITE}/icon-1024.png`, email: CONTACT_MAIL, ...(process.env.COMPANY_PHONE ? { telephone: process.env.COMPANY_PHONE } : {}), ...(process.env.COMPANY_ADDRESS ? { address: process.env.COMPANY_ADDRESS } : {}),
+        contactPoint: { '@type': 'ContactPoint', contactType: 'customer support', email: CONTACT_MAIL, availableLanguage: 'ko' } },
       { '@type': 'SoftwareApplication', name: '워크인', applicationCategory: 'BusinessApplication', operatingSystem: 'Web, Android, iOS', url: SITE, description: DESC,
-        offers: { '@type': 'Offer', price: '0', priceCurrency: 'KRW', description: '14일 무료 체험' }, featureList: '업무·일정·메신저·결재, 영업(리드·입찰·제안·계약), 마케팅(시안 승인·자동 제작·광고), AI 비서' },
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'KRW', name: '14일 무료 체험', description: '14일 무료 체험 — 체험 뒤 요금은 문의' }, featureList: '업무·일정·메신저·결재, 영업(리드·입찰·제안·계약), 마케팅(시안 승인·자동 제작·광고), AI 비서' },
     ],
   };
   return (
     <div className="min-h-screen bg-white text-ink" data-testid="landing">
-      <LandingEvents />
+      <LandingEvents ga4={tags?.ga4} ads={tags?.googleAds} naverWa={tags?.naverWa} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
-      <header className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-4">
-        <Link href="/" aria-label="워크인"><img src="/brand/lockup-light.svg" alt="WorkIn 워크인" className="h-8 w-auto" width={160} height={48} /></Link>
-        <nav className="ml-auto flex items-center gap-1.5 text-sm">
-          <a href="#spaces" className="hidden px-2 text-ink-2 hover:text-ink sm:inline">기능</a>
-          <a href="#pricing" className="hidden px-2 text-ink-2 hover:text-ink sm:inline">요금</a>
-          <a href="#contact" className="hidden px-2 text-ink-2 hover:text-ink sm:inline">문의</a>
-          <Link href="/login" className="rounded-input px-3 py-2 font-semibold text-ink-2 hover:bg-slate-100" data-testid="landing-login">로그인</Link>
-          <Link href="/signup" className="rounded-input bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700" data-track="start-top">무료로 시작</Link>
-        </nav>
-      </header>
+      <LandingHeader home />
       {/* 대표 10/20 22:30 ③: 첫 화면 전체 폭 배경(실제 앱 화면 콜라주 + 어두운 오버레이 + 흰 글자, 휴대폰도 유지). 생성 인물 없음 */}
       <section className="relative overflow-hidden bg-slate-900 text-white" data-testid="landing-hero">
         <div aria-hidden className="pointer-events-none absolute inset-0">
@@ -70,7 +68,7 @@ export default function Welcome() {
           <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-testid="landing-start" data-track="start">무료로 시작<ArrowRight className="size-4" /></Link>
           <a href="#app" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input border border-white/40 px-6 py-3 text-base font-semibold text-white hover:bg-white/10" data-testid="landing-app" data-track="app">앱 다운로드<Download className="size-4" /></a>
         </div>
-        <p className="mt-3 text-xs text-slate-300">웹 · Android · iOS · 시간대 Asia/Seoul · 한국어</p>
+        <p className="mt-3 text-xs text-slate-300">웹 · 휴대폰 앱 · 한국어</p>
         </div>
       </section>
       <section className="mx-auto max-w-6xl px-4 pb-8 pt-8">
@@ -79,6 +77,10 @@ export default function Welcome() {
           {([[Mic, '음성 등록', '“내일 3시 미팅” 한마디면 끝'], [BellRing, '정확한 알림', '앱·웹 푸시, 알람처럼 울리기'], [Users, '권한·부서', '부서 › 팀, 격리 팀, 결재선'], [Sparkles, 'AI 비서', '요약·초안·리드 제안']] as [typeof Mic, string, string][]).map(([I, t, d]) => (
             <li key={t} className="rounded-card border border-line p-3"><I className="size-5 text-brand-700" /><div className="mt-1.5 font-semibold">{t}</div><div className="text-sm text-ink-2">{d}</div></li>))}
         </ul>
+        {/* #627: 검색어별 소개 페이지로 가는 안쪽 링크(SEO_AUDIT 2-1 '기능 페이지가 없어 깊이가 없음') */}
+        <nav aria-label="기능별 소개" className="mx-auto mt-6 flex max-w-4xl flex-wrap justify-center gap-2 text-sm" data-testid="landing-feature-links">
+          {LANDING_PAGES.map((p) => <Link key={p.slug} href={`/landing/${p.slug}`} className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-ink-2 hover:border-brand-600 hover:text-brand-700">{p.keyword}<ArrowRight className="size-3.5" /></Link>)}
+        </nav>
       </section>
       {/* 세 공간 */}
       <section id="spaces" className="bg-slate-50 py-12">
@@ -87,7 +89,7 @@ export default function Welcome() {
           <p className="mt-1 text-center text-sm text-ink-2">업무는 기본. 영업·마케팅은 관리자가 켜면 사이드바와 휴대폰 탭이 그 공간 메뉴로 바뀝니다.</p>
           <div className="mt-8 space-y-8" data-testid="landing-spaces">{SPACES.map((s, i) => (
             <article key={s.key} className={'grid items-center gap-5 md:grid-cols-2 ' + (i % 2 ? 'md:[&>figure]:order-2' : '')} data-testid={`landing-space-${s.key}`}>
-              <figure className="overflow-hidden rounded-card border border-line bg-white shadow-card"><img src={s.img} alt={`${s.name} 공간 화면`} className="aspect-[4/3] w-full object-cover object-left-top" width={1280} height={960} /></figure>
+              <figure className="overflow-hidden rounded-card border border-line bg-white shadow-card"><img src={s.img} alt={`${s.name} 공간 화면`} loading="lazy" className="aspect-[4/3] w-full object-cover object-left-top" width={1280} height={960} /></figure>
               <div>
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-white" style={{ background: s.color }}><s.icon className="size-3.5" />{s.name}</span>
                 <h3 className="mt-2 text-xl font-bold">{s.t}</h3><p className="mt-1 text-sm text-ink-2">{s.d}</p>
