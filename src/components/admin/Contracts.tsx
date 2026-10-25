@@ -5,12 +5,15 @@ import { Copy, FileSignature, MessageSquare, RefreshCw, XCircle } from 'lucide-r
 import { api, useApi } from '../client';
 import { useSession } from '../session';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '../ui';
+import { deviceLabel } from '@/lib/uaLabel';
 
 type TField = { key: string; label: string; type: 'text' | 'date' | 'number' | 'textarea'; required?: boolean; hint?: string };
 type Template = { id: string | null; kind: string; name: string; body: string; fields: TField[]; isDefault: boolean };
 type Signer = { role: 'employee' | 'company' | 'witness'; name: string; email?: string; phone?: string; userId?: string; ord: number };
 type Delivery = { signerId: string; name: string; role: string; email: string | null; phone: string | null; link: string; code: string; mail: string; smsText: string };
 export const ROLE: Record<string, string> = { employee: '근로자', company: '회사', witness: '입회인' };
+/** 통째로 지울 수 있는(끝난) 상태 — 서버 deleteContract 와 같은 목록 */
+const FINISHED = ['completed', 'cancelled', 'declined', 'expired', 'draft'];
 export const CSTATUS: Record<string, [string, string]> = { draft: ['임시', 'bg-slate-100 text-ink-2'], sent: ['서명 대기', 'bg-sky-100 text-sky-800'], partially_signed: ['일부 서명', 'bg-amber-100 text-amber-800'], completed: ['완료', 'bg-emerald-100 text-emerald-700'], declined: ['거절', 'bg-red-100 text-red-700'], cancelled: ['취소', 'bg-slate-100 text-ink-2'], expired: ['기한 지남', 'bg-slate-100 text-ink-2'] };
 const EVENT: Record<string, string> = { created: '작성', sent: '발송', resent: '재발송', opened: '링크 열람', code_ok: '코드 확인', code_fail: '코드 오류', locked: '잠김(5회 오류)', signed: '서명', declined: '거절', completed: '완료(PDF)', cancelled: '취소', pdf_viewed: '완료본 열람' };
 
@@ -157,6 +160,11 @@ function ContractDetail({ id, canEdit, onClose }: { id: string; canEdit: boolean
   const [delivery, setDelivery] = useState<Delivery[] | null>(null);
   const resend = async (signerId?: string) => { try { const r = await api(`/api/contracts/${id}/resend`, { body: { signerId } }); setDelivery(r.delivery); d.reload(); } catch (e: any) { toast.error(e.message); } };
   const cancel = async () => { if (!confirm('이 전자계약서를 취소할까요? 서명 링크가 모두 막힙니다.')) return; try { await api(`/api/contracts/${id}`, { method: 'DELETE' }); toast.ok('취소했습니다'); onClose(); } catch (e: any) { toast.error(e.message); } };
+  // 로컬 10/25 17:05 ①: 끝난 계약서(시험 흔적) 통째로 지우기 — 대표·관리자만, 서명 기록·완료본 PDF 함께
+  const { user } = useSession();
+  const c0 = d.data?.contract;
+  const canDelete = canEdit && ['owner', 'admin'].includes(user?.role ?? '') && !!c0 && FINISHED.includes(c0.status);
+  const remove = async () => { if (!confirm('이 계약서를 완전히 지울까요? 서명자·서명 기록·완료본 PDF 까지 함께 지워지고 되돌릴 수 없습니다. 시험용 계약서만 지우세요.')) return; try { await api(`/api/contracts/${id}?purge=1`, { method: 'DELETE' }); toast.ok('지웠습니다'); onClose(); } catch (e: any) { toast.error(e.message); } };
   const c = d.data?.contract; const [sl, cls] = c ? CSTATUS[c.status] ?? [c.status, ''] : ['', ''];
   return (
     <Modal open onClose={onClose} title={c ? `${c.doc_no} · ${c.title}` : '전자계약서'}>
@@ -177,10 +185,10 @@ function ContractDetail({ id, canEdit, onClose }: { id: string; canEdit: boolean
           </div>
           {delivery && <div className="space-y-1.5 rounded-input bg-amber-50 p-2.5 text-xs" data-testid="contract-redelivery"><b>새 링크·접속 코드(예전 것은 무효)</b>{delivery.map((x) => <div key={x.signerId} className="flex flex-wrap items-center gap-2"><span>{x.name}</span><input readOnly className={cx(inputCls, 'min-w-0 flex-1 py-0.5 font-mono text-[11px]')} value={x.link} onFocus={(e) => e.target.select()} /><b className="font-mono tracking-[0.2em]" data-testid="contract-recode">{x.code}</b><button type="button" className="underline" onClick={() => { navigator.clipboard?.writeText(x.smsText); toast.ok('복사했습니다'); }}>문자 문구 복사</button></div>)}</div>}
           <details><summary className="cursor-pointer text-xs font-semibold text-ink-2">감사 추적 {d.data.events.length}건</summary>
-            <table className="mt-1 w-full text-xs" data-testid="contract-events"><tbody className="divide-y divide-line">{d.data.events.map((e) => <tr key={e.id}><td className="py-1 pr-2 whitespace-nowrap text-ink-3">{fmtDateTime(e.at)}</td><td className="py-1 pr-2 whitespace-nowrap">{e.who ?? '-'}</td><td className="py-1 pr-2 whitespace-nowrap font-medium">{EVENT[e.type] ?? e.type}</td><td className="py-1 pr-2 font-mono text-[11px] text-ink-3">{e.ip ?? ''}</td><td className="truncate py-1 text-[11px] text-ink-3" title={e.user_agent ?? ''}>{(e.user_agent ?? '').slice(0, 40)}</td></tr>)}</tbody></table>
+            <table className="mt-1 w-full text-xs" data-testid="contract-events"><tbody className="divide-y divide-line">{d.data.events.map((e) => <tr key={e.id}><td className="py-1 pr-2 whitespace-nowrap text-ink-3">{fmtDateTime(e.at)}</td><td className="py-1 pr-2 whitespace-nowrap">{e.who ?? '-'}</td><td className="py-1 pr-2 whitespace-nowrap font-medium">{EVENT[e.type] ?? e.type}</td><td className="py-1 pr-2 font-mono text-[11px] text-ink-3">{e.ip ?? ''}</td><td className="truncate py-1 text-[11px] text-ink-3" title={e.user_agent ?? ''}>{deviceLabel(e.user_agent)}</td></tr>)}</tbody></table>
           </details>
           <details><summary className="cursor-pointer text-xs font-semibold text-ink-2">본문</summary><pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded-input bg-slate-50 p-2 text-[11px] leading-5">{c.body}</pre></details>
-          <div className="flex justify-end gap-2">{canEdit && !['completed', 'cancelled'].includes(c.status) && <Button variant="danger" onClick={cancel} data-testid="contract-cancel">취소</Button>}<Button variant="secondary" onClick={onClose}>닫기</Button></div>
+          <div className="flex justify-end gap-2">{canEdit && !['completed', 'cancelled'].includes(c.status) && <Button variant="danger" onClick={cancel} data-testid="contract-cancel">취소</Button>}{canDelete && <Button variant="danger" onClick={remove} data-testid="contract-delete">삭제</Button>}<Button variant="secondary" onClick={onClose}>닫기</Button></div>
         </div>
       )}
     </Modal>

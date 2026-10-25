@@ -2,6 +2,7 @@
 // pdf-lib + NotoSansKR(자산 폰트, 147차 TrueType). 견적서 PDF 와 같은 방식, 여러 쪽.
 import { pdfFonts as fonts } from './pdfFonts';
 import { FIT_LINE, fitText } from './textFit';
+import { deviceLabel } from './uaLabel';
 const fmtAt = (d: Date | string | null | undefined) => (d ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(d)) : '');
 export const ROLE_LABEL: Record<string, string> = { employee: '근로자(을)', company: '회사(갑)', witness: '입회인', party: '상대방' };
 export const EVENT_LABEL: Record<string, string> = { created: '작성', sent: '발송', resent: '재발송', opened: '링크 열람', code_ok: '접속 코드 확인', code_fail: '접속 코드 오류', locked: '코드 5회 오류로 잠김', signed: '서명', declined: '서명 거절', completed: '완료(PDF 생성)', cancelled: '취소', pdf_viewed: '완료본 열람' };
@@ -81,7 +82,7 @@ export async function renderContractPdf(p: { title: string; docNo: string | null
   const cut = (s: string, font: typeof reg, size: number, maxW: number) => { let t = s; while (t.length > 1 && font.widthOfTextAtSize(t, size) > maxW) t = t.slice(0, -2) + '…'; return t; };
   for (const e of p.events) {
     need(14);
-    const row = [fmtAt(e.at), e.who ?? '-', EVENT_LABEL[e.type] ?? e.type, e.ip ?? '-', (e.user_agent ?? '-').replace(/^Mozilla\/5\.0 \(/, '(')];
+    const row = [fmtAt(e.at), e.who ?? '-', EVENT_LABEL[e.type] ?? e.type, e.ip ?? '-', deviceLabel(e.user_agent)]; // 로컬 10/25 ①: 원문 대신 브라우저·기기 이름
     const widths = [112, 78, 86, 92, W - M - cols[4]];
     row.forEach((c, i) => page.drawText(cut(c, reg, 8, widths[i]), { x: cols[i], y: y - 8, size: 8, font: reg, color: ink }));
     y -= 13;
@@ -137,7 +138,8 @@ export async function renderFieldsPdf(p: { source: Buffer | Uint8Array; title: s
   line('서명자', { size: 11, b: true });
   for (const s of p.signers) line(`${s.ord}. ${ROLE_LABEL[s.role] ?? s.role} ${s.name}${s.email ? ` (${s.email})` : ''} — ${s.status === 'signed' ? `${fmtAt(s.signed_at)} 서명(${s.sign_method === 'stamp' ? '도장' : '직접 그림'}) · IP ${s.ip ?? '-'}` : s.status === 'declined' ? '서명 거절' : '서명 전'}`);
   y -= 6; line('행위 기록', { size: 11, b: true });
-  for (const e of p.events) line(`${fmtAt(e.at)}  ${e.who ?? '-'}  ${EVENT_LABEL[e.type] ?? e.type}  IP ${e.ip ?? '-'}  ${(e.user_agent ?? '').replace(/^Mozilla\/5\.0 \(/, '(').slice(0, 60)}`, { size: 8 });
+  // 로컬 10/25 ①: 기기 = 브라우저·운영체제 이름(원문 60자 자르기는 '(KHTML, lik' 처럼 끊겼음)
+  for (const e of p.events) line(`${fmtAt(e.at)}  ${e.who ?? '-'}  ${EVENT_LABEL[e.type] ?? e.type}  IP ${e.ip ?? '-'}  ${deviceLabel(e.user_agent)}`, { size: 8 });
   return Buffer.from(await doc.save());
 }
 

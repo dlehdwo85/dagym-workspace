@@ -392,6 +392,21 @@ export async function cancelContract(u: SessionUser, id: string, ip: string | nu
   await audit(sql, u.id, 'contract.cancel', 'contract', c.id, { status: c.status }, ip);
   return { ok: true };
 }
+const FINISHED = ['completed', 'cancelled', 'declined', 'expired', 'draft'];
+/** 로컬 10/25 17:05 ①(대표 10/25 19:00 '시험 흔적 지우세요'): 끝난 계약서(완료·취소·거절·만료·임시)를 통째로 지운다 — 대표·관리자만.
+ * 서명자·칸·행위 기록은 함께 지워지고(cascade) 완료본 PDF 는 자료실에서 지운 파일로. 진행 중(서명 대기·일부 서명)은 먼저 취소해야 한다. 감사 기록(제목·문서번호·상태·완료본 파일)은 남긴다 */
+export async function deleteContract(u: SessionUser, id: string, ip: string | null) {
+  await requireEdit(u);
+  if (!['owner', 'admin'].includes(u.role) || u.isDemo) throw forbidden('계약서 삭제는 대표·관리자만 할 수 있습니다');
+  const sql = db(); const c = await loadContract(u, id);
+  if (!FINISHED.includes(c.status)) throw conflict('진행 중인 계약서는 먼저 취소한 뒤 지울 수 있습니다');
+  await sql.begin(async (tx) => {
+    if (c.file_id) await tx`update library_files set deleted_at = now() where id = ${c.file_id} and deleted_at is null`;
+    await tx`delete from contracts where id = ${c.id} and tenant = ${tenantOf(u)}`;
+    await audit(tx, u.id, 'contract.delete', 'contract', c.id, { title: c.title, docNo: c.doc_no, status: c.status, fileId: c.file_id }, ip);
+  });
+  return { ok: true };
+}
 /** 다시 보내기(링크·코드 새로) — 지금 차례인 서명자 전원, signerId 를 주면 그 사람만 */
 export async function resendContract(u: SessionUser, id: string, signerId: string | undefined, ip: string | null) {
   await requireEdit(u);
