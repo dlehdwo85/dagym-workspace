@@ -6,7 +6,7 @@ import { db } from '../../db';
 import { decrypt, encrypt } from '../../crypto';
 import { dataGoKey } from '../collect';
 import { endpoints } from './endpoints';
-import { decodeKoreanText } from './files';
+import { decodeKoreanText, garbledText } from './files';
 import { SIDO_ALIASES } from './prospects';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 
@@ -113,7 +113,7 @@ async function fetchSource(url: URL, ctx: CollectorCtx, secret: string, timeoutM
   const safe = (s: string) => s.split(secret).join('***').split(encodeURIComponent(secret)).join('***').slice(0, 200);
   let res: Response; try { res = await ctx.fetchImpl(url.toString(), { headers: { Accept: 'application/json, application/xml;q=0.9, */*;q=0.5', 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' }, signal: AbortSignal.timeout(timeoutMs) }); }
   catch (e) { throw new Error(`요청 실패 (${e instanceof Error ? e.name : 'Error'})`); }
-  const text = decodeKoreanText(new Uint8Array(await res.arrayBuffer())).text;
+  const text = decodeKoreanText(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type')).text; // #651: charset 헤더 우선, 없으면 한글 비율
   if (/SERVICE_KEY_IS_NOT_REGISTERED|SERVICE ACCESS DENIED|등록되지 않은 (서비스|인증)키/i.test(text)) throw new Error(`공공데이터포털 활용신청 필요${service ? `(서비스 ${service})` : ''} — 키는 그대로 두고 포털(data.go.kr)에서 [활용신청]`);
   let json: any = null; try { json = JSON.parse(text); } catch { /* XML·HTML */ }
   if (!json) {
@@ -159,8 +159,11 @@ export async function saveSupportKeys(i: { bizinfo?: string | null; datago?: str
 const hashOf = (p: ProgramIn) => h16(JSON.stringify([p.title, p.agency, p.executor, p.category, p.target, p.regions, p.nationwide, p.summary, p.apply_start, p.apply_end, p.apply_text, p.amount, p.biz_years, p.url, p.apply_url, p.attachments, p.hashtags]));
 /** 공고 N건 저장 — (원천, 원천 번호)로 하나. 바뀐 칸이 있으면 갱신, 같으면 '마지막으로 본 때'만 */
 export async function upsertPrograms(items: ProgramIn[]) {
-  const sql = db(); const out = { inserted: 0, updated: 0, unchanged: 0 };
-  const uniq = [...new Map(items.map((p) => [`${p.source}:${p.source_id}`, p])).values()];
+  const sql = db(); const out = { inserted: 0, updated: 0, unchanged: 0, garbled: 0 };
+  // #651 수집 검수: 제목·대상이 깨진 해독(치환 문자·한자 범벅)이면 넣지 않고 건수만 남김 — 수집 요약·오류 줄에 보여 인코딩 문제를 바로 알게
+  const bad = new Set(items.filter((p) => garbledText(p.title) || garbledText(p.target)));
+  out.garbled = bad.size;
+  const uniq = [...new Map(items.filter((p) => !bad.has(p)).map((p) => [`${p.source}:${p.source_id}`, p])).values()];
   for (const src of [...new Set(uniq.map((p) => p.source))]) {
     const list = uniq.filter((p) => p.source === src);
     for (let n = 0; n < list.length; n += 200) {
@@ -184,8 +187,12 @@ export async function upsertPrograms(items: ProgramIn[]) {
 }
 /** 한 건도 못 받았을 때 요약 = 첫 오류(활용신청 안내면 '공공데이터포털 전체:'·'1쪽:' 머리말은 뗌) — 로컬 10/23: '호출 실패 · 받은 0건'만으로는 원인을 모름 */
 const firstErr = (errors: string[]) => errors[0].replace(/^[^:]{1,20}: (?=공공데이터포털 활용신청)/, '');
-const done = (r: { inserted: number; updated: number; unchanged: number }, errors: string[], summary: string, mode: CollectorResult['providerMode'] = 'api'): CollectorResult =>
-  ({ ...r, errors: errors.length, errorLog: errors.length ? errors.join('\n').slice(0, 4000) : undefined, summary, providerMode: mode });
+const done = (r: { inserted: number; updated: number; unchanged: number; garbled?: number }, errors0: string[], summary0: string, mode: CollectorResult['providerMode'] = 'api'): CollectorResult => {
+  // #651: 깨진 글자로 뺀 건이 있으면 요약·오류 줄에 — 응답 인코딩(charset) 문제를 수집 카드에서 바로 보이게
+  const errors = r.garbled ? [...errors0, `깨진 글자 ${r.garbled}건 제외 — 응답 인코딩(charset) 확인`] : errors0;
+  const summary = r.garbled ? `${summary0} · 깨진 글자 ${r.garbled}건 제외` : summary0;
+  return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: errors.length, errorLog: errors.length ? errors.join('\n').slice(0, 4000) : undefined, summary, providerMode: mode };
+};
 
 /** 회사 프로필에 적힌 본점 시·도(최대 4곳) — 기업마당 hashtags=경기 처럼 지역 공고를 따로 더 받는다(최신 500건 밖의 지역 공고도 잡히게) */
 async function profileRegions(): Promise<string[]> {
@@ -300,7 +307,7 @@ export const supportWatch: Collector = {
       try {
         const res = await ctx.fetchImpl(p.url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' }, signal: AbortSignal.timeout(Math.min(10000, left() - 2000)) });
         if (!res.ok) { errors.push(`${p.name}: HTTP ${res.status}`); continue; }
-        const { text } = decodeKoreanText(new Uint8Array(await res.arrayBuffer()));
+        const { text } = decodeKoreanText(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type'));
         const region = p.region && SIDO.includes(p.region) ? [p.region] : sidoIn(p.name);
         for (const r of parseSupportBoard(text, p.url)) {
           items.push({ source: 'watch', source_id: `${h16(p.url)}-${h16(r.title)}`, title: r.title, agency: p.name, executor: null, category: null, target: null, regions: region, nationwide: !region.length, summary: null,
@@ -319,7 +326,7 @@ export async function watchDetailText(url: string, fetchImpl: typeof fetch = fet
   try {
     const res = await fetchImpl(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' }, signal: AbortSignal.timeout(10000) });
     if (!res.ok) return null;
-    const html = decodeKoreanText(new Uint8Array(await res.arrayBuffer())).text;
+    const html = decodeKoreanText(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type')).text;
     const body = html.match(/<(article|main)\b[\s\S]*?<\/\1>/i)?.[0] ?? html.match(/<body\b[\s\S]*<\/body>/i)?.[0] ?? html;
     return plain(body).slice(0, 12000) || null;
   } catch { return null; }

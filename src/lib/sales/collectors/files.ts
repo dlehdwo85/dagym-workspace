@@ -23,11 +23,9 @@ export function csvToObjects(text: string): Record<string, string>[] {
   const keys = header.map((h) => h.trim());
   return body.map((r) => Object.fromEntries(keys.map((k, i) => [k, (r[i] ?? '').trim()])));
 }
-export function decodeKoreanText(bytes: Uint8Array): { text: string; encoding: 'utf-8' | 'euc-kr' } {
-  const head = new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(0, 256 * 1024));
-  if (!head.includes('�')) return { text: new TextDecoder('utf-8').decode(bytes), encoding: 'utf-8' };
-  return { text: new TextDecoder('euc-kr').decode(bytes), encoding: 'euc-kr' };
-}
+// #651: 한글 해독(charset 헤더 우선 → 한글 비율)·깨진 글자 판정은 잎 모듈 koreanText.ts 에 — 여기서는 그대로 내보냄(수집기·지원사업 규칙이 이 경로로 씀)
+import { decodeKoreanText } from './koreanText';
+export { decodeKoreanText, garbledText, koreanScore } from './koreanText';
 export type ProspectPayload = Record<string, unknown>;
 export type SourceFile = { url: string; pageUrl?: string; label?: string };
 export type Extracted = { rows: number; payloads: ProspectPayload[]; filtered: number; note?: string; error?: string; warnings?: string[] };

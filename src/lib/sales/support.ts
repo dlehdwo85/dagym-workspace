@@ -11,6 +11,7 @@ import { notify } from '../notifications';
 import { aiEnabled, anthropicProvider, costUsd, type AiProvider } from '../ai/provider';
 import { tenantOf, type SessionUser } from '../types';
 import { SIDO, supportKeyStatus, watchDetailText } from './collectors/support';
+import { garbledText } from './collectors/files';
 
 const ymd = (d: Date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 const addDays = (day: string, n: number) => ymd(new Date(Date.parse(`${day}T12:00:00+09:00`) + n * 864e5));
@@ -28,6 +29,28 @@ export const INTEREST_WORDS: Record<string, string[]> = {
   시설: ['시설', '설비', '리모델링', '환경 개선', '스마트공장'], 교육: ['교육', '컨설팅', '멘토링', '역량 강화'], 인증: ['인증', '시험', '검사', '표준'],
 };
 export const CERTS = ['벤처기업', '이노비즈', '메인비즈', '기업부설연구소', '연구개발전담부서', 'SW사업자', '여성기업', '사회적기업', '장애인기업', '소셜벤처', 'ISO'];
+/** #649(대표 10/25 23:20 '식품제조가공업 대상 공고가 맞춤에'): 공고 '지원 대상'에 적힌 업종 묶음 ↔ 회사 프로필 업종(같은 낱말 표로 묶음). 업종 중립 — 특정 회사 이름 없음. 짧은 영문(IT·SW·AI)은 낱말 경계로만 */
+export const INDUSTRY_GROUPS: Record<string, string[]> = {
+  식품: ['식품', '식품제조', '식품가공', '즉석판매', '외식', '음식점', '농식품', '식음료', '먹거리', '푸드'],
+  제조: ['제조업', '제조기업', '제조 중소기업', '뿌리산업', '스마트공장', '생산설비', '생산 설비', '공장'],
+  농림수산: ['농업', '농업인', '농업법인', '어업', '어업인', '수산', '임업', '축산', '귀농', '귀어', '농산물'],
+  건설: ['건설업', '건설사', '건설기업', '시공사', '건축사'],
+  바이오의료: ['바이오', '제약', '의료기기', '의약', '헬스케어', '디지털 헬스', '병원'],
+  반도체소재: ['반도체', '디스플레이', '이차전지', '배터리', '소재부품장비', '소부장', '초격차'],
+  뷰티: ['화장품', '뷰티', '미용'],
+  패션섬유: ['패션', '섬유', '의류', '봉제'],
+  관광: ['관광', '숙박', '여행사', '관광기업'],
+  콘텐츠: ['콘텐츠', '게임', '영상 제작', '웹툰', '출판', '방송', '음악', '애니메이션', '미디어'],
+  소프트웨어: ['소프트웨어', 'SW', 'IT', '정보통신', 'ICT', '플랫폼', '앱', '인공지능', 'AI', '데이터', '클라우드', '핀테크', '에듀테크', '프롭테크', '솔루션'],
+  에너지환경: ['에너지', '환경', '신재생', '탄소', '친환경', '기후'],
+  물류운송: ['물류', '운송', '운수', '택배', '모빌리티', '자동차'],
+  유통: ['유통', '도소매', '소매업', '도매업', '온라인 쇼핑몰', '이커머스', '수출입', '무역'],
+  교육: ['교육', '학원', '에듀', '교육서비스'],
+  스포츠: ['스포츠', '체육', '피트니스', '헬스장', '운동', '레저'],
+  시설관리: ['시설관리', '시설 관리', '경비', '청소', '주택관리', '건물관리', '부동산', '위탁관리'],
+};
+/** 업종 제한이 아닌 문구(전 업종·서비스업 전체·모든 중소기업) */
+const GENERIC_TARGET = /전\s*업종|업종\s*(무관|제한\s*없음|불문)|모든\s*업종|서비스업|전체\s*중소기업|모든\s*중소기업/;
 /** 시·군 이름(광역시·특별시·도 제외) — 제목·대상·기관에 다른 시·군이 적힌 지자체 공고를 가려내는 데 씀 */
 export const SIGUNGU = new Set(('수원시 성남시 의정부시 안양시 부천시 광명시 평택시 동두천시 안산시 고양시 과천시 구리시 남양주시 오산시 시흥시 군포시 의왕시 하남시 용인시 파주시 이천시 안성시 김포시 화성시 광주시 양주시 포천시 여주시 연천군 가평군 양평군 '
   + '춘천시 원주시 강릉시 동해시 태백시 속초시 삼척시 홍천군 횡성군 영월군 평창군 정선군 철원군 화천군 양구군 인제군 고성군 양양군 청주시 충주시 제천시 보은군 옥천군 영동군 증평군 진천군 괴산군 음성군 단양군 '
@@ -117,11 +140,15 @@ const SIGUNGU_LONG = [...SIGUNGU].sort((a, b) => b.length - a.length);
 /** 짧은 영문 낱말(IP·AI·R&D)은 낱말 경계로만(VIP·mail 같은 데 안 걸리게), 나머지는 포함 */
 const inText = (t: string, w: string) => (/^[a-z0-9&+]{1,4}$/.test(w) ? new RegExp(`(^|[^a-z0-9])${w.replace(/[&+]/g, '\\$&')}([^a-z0-9]|$)`).test(t) : t.includes(w));
 const sigunguIn = (t: string) => { let x = t; const out: string[] = []; for (const n of SIGUNGU_LONG) if (x.includes(n)) { out.push(n); x = x.split(n).join(' '); } return out; };
+/** 글 속 업종 묶음 이름들(#649) */
+const groupsIn = (t: string) => { const s = t.toLowerCase(); return Object.entries(INDUSTRY_GROUPS).filter(([, ws]) => ws.some((w) => inText(s, w.toLowerCase()))).map(([g]) => g); };
 /** 상시근로자 조건(예: 상시근로자 5인 이상 50인 미만) */
 function workerRules(t: string) { return [...t.matchAll(/상시\s*근로자\s*(?:수\s*)?(?:가\s*)?(\d{1,4})\s*(?:인|명)\s*(이상|이하|미만|초과)/g)].map((m) => ({ n: Number(m[1]), op: m[2] })); }
 const workerOk = (e: number, r: { n: number; op: string }) => (r.op === '이상' ? e >= r.n : r.op === '초과' ? e > r.n : r.op === '이하' ? e <= r.n : e < r.n);
 export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
   const flags: Flag[] = []; let score = 0;
+  // #651: 깨진 해독(치환 문자·한자 범벅) 제목은 맞춤·마감 임박·주간 묶음에 안 올림 — 수집기가 다시 받으면 고쳐짐
+  if (garbledText(p.title)) { flags.push({ level: 'no', text: '제목 글자가 깨져 있음 — 다시 수집하면 고쳐짐' }); score -= 100; }
   const title = p.title.toLowerCase(); const body = `${p.target ?? ''} ${p.summary ?? ''}`;
   const text = `${p.title} ${p.category ?? ''} ${p.target ?? ''} ${(p.hashtags ?? []).join(' ')} ${p.summary ?? ''}`.toLowerCase();
   // 기출원 건 지원 불가(IP) — 프로필과 무관하게 늘 경고
@@ -176,6 +203,19 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
   }
   if (/중견기업/.test(tg) && !/중소/.test(tg) && pr.size && ['소상공인', '소기업', '예비창업'].includes(pr.size)) flags.push({ level: 'warn', text: '중견기업 대상' });
   if (/(대학생|대학원생|청년\s*개인|농업인|어업인|임업인)/.test(String(p.target ?? '')) && !/기업/.test(String(p.target ?? ''))) flags.push({ level: 'warn', text: '개인·특정 대상 공고' });
+  // #649 업종: '지원 대상'(우대·가점 구절은 뺌)에 적힌 업종이 우리 프로필 업종과 하나도 안 겹치면 해당 없음, 프로필 업종이 비어 있으면 확인 필요, 제목에만 있으면 확인 필요
+  const tgt = String(p.target ?? '').replace(/[^.,·\n()]*(우대|가점|우선)[^.,·\n()]*/g, ' ');
+  const tg2 = groupsIn(tgt); const mineG = groupsIn(pr.industries.join(' '));
+  let industryOk = false;
+  if (tg2.length && !GENERIC_TARGET.test(tgt)) {
+    const hit = tg2.filter((g) => mineG.includes(g));
+    if (hit.length) { flags.push({ level: 'ok', text: `대상 업종 ${hit.join('·')} — 우리 업종` }); score += 15; industryOk = true; }
+    else if (mineG.length) { flags.push({ level: 'no', text: `${tg2.slice(0, 3).join('·')} 업종 대상(우리 ${pr.industries.slice(0, 2).join('·')})` }); score -= 100; }
+    else flags.push({ level: 'warn', text: `${tg2.slice(0, 3).join('·')} 업종 대상 — 프로필에 업종을 넣으면 판단` });
+  } else if (!tg2.length) {
+    const tt = groupsIn(p.title);
+    if (tt.length && mineG.length && !tt.some((g) => mineG.includes(g))) flags.push({ level: 'warn', text: `제목에 ${tt.slice(0, 2).join('·')} 업종 — 대상 확인 필요` });
+  }
   // 연구소·전담부서 / 벤처·이노비즈 / SW사업자 — 요구(또는 우대) 문구가 있을 때
   if (/(기업부설\s*연구소|연구개발\s*전담\s*부서)[^.\n]{0,20}(보유|설립|인정|있는|갖춘)/.test(body)) {
     if (has('기업부설연구소') || has('연구개발전담부서')) { flags.push({ level: 'ok', text: '연구소·전담부서 보유' }); score += 10; }
@@ -196,7 +236,9 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
   const hits = new Set<string>(); let kw = 0;
   for (const [w, label] of termsOf(pr)) { if (inText(title, w)) { hits.add(label); kw += 12; } else if (inText(text, w)) { hits.add(label); kw += 6; } }
   if (hits.size) { flags.push({ level: 'ok', text: `관심: ${[...hits].slice(0, 4).join('·')}` }); score += Math.min(40, kw); }
-  const verdict: Rule['verdict'] = flags.some((f) => f.level === 'no') ? 'no' : hits.size && score >= 12 ? 'fit' : 'maybe';
+  // #649 ②: 관심 키워드만으로는 맞춤이 안 됨(가점만) — 지역·업력·규모·근로자·인증·업종 중 하나라도 '맞음'이 있어야 1차 맞춤
+  const eligOk = flags.filter((f) => f.level === 'ok' && !f.text.startsWith('관심:')).length;
+  const verdict: Rule['verdict'] = flags.some((f) => f.level === 'no') ? 'no' : hits.size && score >= 12 && (eligOk > 0 || industryOk) ? 'fit' : 'maybe';
   return { score, verdict, flags };
 }
 
@@ -217,6 +259,7 @@ function itemOf(p: Prog, rule: Rule, m: Match | undefined, w: Work | undefined, 
     id: p.id, title: p.title, agency: p.agency, executor: p.executor, category: p.category, source: p.source, sourceLabel: SOURCE_LABEL[p.source] ?? p.source, regions: p.regions ?? [], nationwide: p.nationwide,
     applyStart: p.apply_start, applyEnd: p.apply_end, applyText: p.apply_text, dday, amount: m?.ai_amount || p.amount, url: p.url, applyUrl: p.apply_url, manual: !!p.tenant, mine: p.created_by === me,
     isNew: Date.now() - new Date(p.first_seen_at).getTime() < 2 * 864e5 && !p.tenant, target: p.target, seen: p.first_seen_at, alsoOn: [] as string[],
+    garbled: garbledText(p.title), pending: !m?.ai_verdict && rule.verdict === 'fit', // #651 깨진 제목 · #649 ③ 1차 맞춤이지만 AI 판정 전('확인 중')
     rule, ai: m?.ai_verdict ? { verdict: m.ai_verdict, reasons: m.ai_reasons ?? [], brands: m.ai_brands ?? [], docs: m.ai_docs ?? [], summary: m.ai_summary, at: m.ai_at, use: Array.isArray(m.ai_use) ? m.ai_use : [], schedule: m.ai_schedule ?? null, auto: !!m.ai_auto } : null, hidden: !!m?.hidden,
     work: w ? { id: w.id, status: w.status, statusLabel: STATUS_LABEL[w.status] ?? w.status, ownerId: w.owner_id, ownerName: w.owner_name, taskId: w.task_id, brands: w.brands ?? [], appliedAt: w.applied_at, resultAt: w.result_at,
       amountAwarded: w.amount_awarded, resultMemo: w.result_memo, memo: w.memo } : null,
@@ -537,7 +580,7 @@ export async function weeklyBundle(t: string, opt: { now?: Date; actor?: Session
     }
   }
   const v2 = await listView(actor, { tab: 'fit', limit: 200 });
-  const items: WeeklyItem[] = v2.items.filter((x) => (x.ai ? x.ai.verdict === 'fit' : x.rule.verdict === 'fit')).slice(0, 10)
+  const items: WeeklyItem[] = v2.items.filter((x) => x.ai?.verdict === 'fit').slice(0, 10) // #649 ③: 주간 묶음은 AI 가 '맞음'으로 판정한 공고만(1차 규칙만 맞는 건은 '확인 중')
     .map((x) => ({ id: x.id, title: x.title, by: x.ai ? 'ai' : 'rule', dday: x.dday, applyEnd: x.applyEnd, agency: x.agency, brands: x.ai?.brands ?? [], use: x.ai?.use[0] ?? null, auto: auto.has(x.id) }));
   const admins = await sql<{ id: string }[]>`select id from users where tenant = ${t} and status = 'active' and role in ('owner', 'admin')`;
   const owners = await sql<{ owner_id: string }[]>`select distinct owner_id from support_work where tenant = ${t} and status in ('interest', 'preparing') and owner_id is not null`;
@@ -613,13 +656,14 @@ export async function supportHomeCard(t: string, sql: Sql = db()) {
   const rows = await sql<(Prog & { status: string | null; hidden: boolean | null; ai_verdict: string | null })[]>`select ${COLS(sql)}, w.status, m.hidden, m.ai_verdict from support_programs p
     left join support_work w on w.program_id = p.id and w.tenant = ${t} left join support_matches m on m.program_id = p.id and m.tenant = ${t}
     where (p.tenant is null or p.tenant = ${t}) and not (p.source = any(${off})) and p.apply_end >= ${today}::date order by p.apply_end limit 3000`;
-  let mine = 0, fit = 0, fitOpen = 0, mineOpen = 0;
+  let mine = 0, fit = 0, fitOpen = 0, mineOpen = 0, pending = 0;
   for (const r of rows) {
     const soon = !!r.apply_end && String(r.apply_end).slice(0, 10) <= until;
     if (r.status) { if (OPEN_WORK.includes(r.status)) { mineOpen++; if (soon) mine++; } continue; }
-    if (r.hidden || !pr) continue;
-    const v = r.ai_verdict ?? ruleMatch(r, pr, today).verdict;
-    if (v === 'fit') { fitOpen++; if (soon) fit++; }
+    if (r.hidden || !pr || garbledText(r.title)) continue;
+    // #649 ③: '맞는 지원사업'은 AI 가 판정한 것만 — 1차 규칙만 맞는 건은 '확인 중'으로 따로 셈
+    if (r.ai_verdict) { if (r.ai_verdict === 'fit') { fitOpen++; if (soon) fit++; } continue; }
+    if (ruleMatch(r, pr, today).verdict === 'fit') pending++;
   }
-  return { closing: mine + fit, mine, fit, fitOpen, mineOpen };
+  return { closing: mine + fit, mine, fit, fitOpen, mineOpen, pending };
 }

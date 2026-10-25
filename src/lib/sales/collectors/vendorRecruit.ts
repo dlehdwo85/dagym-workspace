@@ -122,7 +122,7 @@ export const vendorRecruitWatch: Collector = {
       const fail = (msg: string) => { const n = (st?.fails ?? 0) + 1; const rest = n >= FAIL_REST ? new Date(Date.now() + REST_DAYS * 864e5).toISOString() : null;
         state[p.url] = { ...st, fails: n, restUntil: rest }; failed.push(p.company); errors.push(`${p.company}: ${msg}${rest ? ` — ${n}번 연속 실패라 ${REST_DAYS}일 쉬고 다시 시도` : ''}`); };
       try { const res = await ctx.fetchImpl(p.url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' }, signal: AbortSignal.timeout(Math.min(10000, left() - 2000)) }); if (!res.ok) { fail(`HTTP ${res.status}`); continue; }
-        const { text } = decodeKoreanText(new Uint8Array(await res.arrayBuffer()));
+        const { text } = decodeKoreanText(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type'));
         const page = parseRecruitPage(text, p.url, today); const fresh = page.posts.map((r) => ({ ...r, ext: `${h8(p.company)}-${h8(r.title)}` }));
         for (const r of fresh) { posts++; checked.push(r.ext); items.push({ source_type: 'vendor_recruit', source_external_id: r.ext, source_url: r.url, title: `[${p.company}] ${r.title}`, issuer: p.company, notice_type: '협력사 모집', register_url: p.register_url && /^https?:\/\//.test(p.register_url) ? p.register_url : null, posted_date: r.posted, bid_category: '협력사 모집' }); }
         const pc = pageChange(p, page.lines, st, today); state[p.url] = { ...pc.next, fails: 0, restUntil: null }; if (pc.baseline) baseline++; if (pc.item) { items.push(pc.item); changed++; }
