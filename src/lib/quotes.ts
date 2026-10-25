@@ -10,6 +10,7 @@ import { tenantOf, type SessionUser } from './types';
 import { companyProfiles, type CompanyProfile } from './companyProfiles';
 import { todaySeoul } from './time';
 import { pdfFonts as fonts } from './pdfFonts';
+import { wrapText } from './textFit';
 
 export type QuoteItem = { name: string; spec?: string; qty: number; unitPrice: number; amount: number };
 export type QuoteLayout = { title?: string; columns: { key: 'name' | 'spec' | 'qty' | 'unitPrice' | 'amount'; label: string; width: number }[]; terms: string[]; footer?: string; accent?: string; showStamp?: boolean };
@@ -115,11 +116,15 @@ export async function renderQuotePdf(profile: CompanyProfile, layout0: Partial<Q
     for (const [k, v] of L) { text(k, M, ly - fs, fs, { color: [0.4, 0.42, 0.45] }); text(v, M + 50, ly - fs, fs, { maxW: W / 2 - M - 60 }); ly -= lineH; }
     const R: [string, string][] = [['상호', profile.name], ...(profile.ceo ? [['대표', profile.ceo] as [string, string]] : []), ...(profile.biz_no ? [['사업자번호', profile.biz_no] as [string, string]] : []),
       ...(profile.address ? [['주소', profile.address] as [string, string]] : []), ...(profile.phone ? [['전화', profile.phone] as [string, string]] : []), ...(profile.email ? [['이메일', profile.email] as [string, string]] : [])];
-    page.drawRectangle({ x: colR - 6, y: top - R.length * lineH - 6, width: W - M - colR + 6, height: R.length * lineH + 10, borderColor: rgb(...accent), borderWidth: 0.8 });
+    // 로컬 10/25 15:45: 긴 주소는 '…'로 자르지 않고 두 줄까지(셋째 줄부터는 둘째 줄 끝 '…') — 상자 높이도 줄 수만큼
+    const RW = W - M - colR - 62;
+    const RL = R.map(([k, v]) => { const ls = k === '주소' ? wrapText(v, RW, (x) => reg.widthOfTextAtSize(x, fs)) : [v]; /* 띄어쓰기 자리에서 줄바꿈(textFit) */ return [k, ls.length > 2 ? [ls[0], ls.slice(1).join('')] : ls] as const; });
+    const rn = RL.reduce((n, [, ls]) => n + ls.length, 0);
+    page.drawRectangle({ x: colR - 6, y: top - rn * lineH - 6, width: W - M - colR + 6, height: rn * lineH + 10, borderColor: rgb(...accent), borderWidth: 0.8 });
     page.drawRectangle({ x: colR - 2, y: top + 1, width: bold.widthOfTextAtSize('공급자', fs - 1) + 4, height: fs, color: rgb(1, 1, 1) }); // 147차: 이름표 뒤 테두리 선을 지움(글자가 선에 겹치지 않게)
     text('공급자', colR, top + 2, fs - 1, { bold: true, color: accent });
     let ry = top;
-    for (const [k, v] of R) { text(k, colR, ry - fs, fs, { color: [0.4, 0.42, 0.45] }); text(v, colR + 58, ry - fs, fs, { maxW: W - M - colR - 62 }); ry -= lineH; }
+    for (const [k, ls] of RL) { text(k, colR, ry - fs, fs, { color: [0.4, 0.42, 0.45] }); ls.forEach((v, n) => text(v, colR + 58, ry - fs - n * lineH, fs, { maxW: RW })); ry -= ls.length * lineH; }
     y = Math.min(ly, ry) - 16;
     // 합계 한 줄
     text(`합계 금액: 일금 ${koreanNumber(q.total)}원정 (₩ ${won(q.total)}) · 부가세 포함`, M, y - fs - 1, fs + 1.5, { bold: true });

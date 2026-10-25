@@ -14,7 +14,7 @@ import dynamic from 'next/dynamic';
 import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, Video, X, Palette } from 'lucide-react';
+import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, Video, X } from 'lucide-react';
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
 import { useBackClose, useSheetBack } from '@/components/backClose';
@@ -83,8 +83,10 @@ function CalendarPage() {
   const [showDone, setShowDone] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_done') === '1'; } catch { return false; } });
   useEffect(() => { try { localStorage.setItem('wos_cal_done', showDone ? '1' : '0'); } catch {} }, [showDone]);
   // 대표 10/22 19:47: 일·3일·주(시간 격자)에서 종일·시간 없는 업무 칸이 위를 차지해 오전 일정을 가림 → 기본 숨김, 날짜 머리 아래 '종일 n' 칩(누르면 그날 목록). 이 기기 기억
-  const [showAllDay, setShowAllDay] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_allday') === '1'; } catch { return false; } });
-  useEffect(() => { try { localStorage.setItem('wos_cal_allday', showAllDay ? '1' : '0'); } catch {} }, [showAllDay]);
+  // #592(대표 10/25 구글 주 보기 대조): 휴대폰은 종일 줄 기본 켬 — 하루 2개 + '+n개'(누르면 그날 목록)라 위를 크게 차지하지 않음. 휴대폰은 새 기억 키
+  const allDayKey = typeof window !== 'undefined' && window.innerWidth < 640 ? 'wos_cal_allday_m' : 'wos_cal_allday';
+  const [showAllDay, setShowAllDay] = useState<boolean>(() => { try { const v = localStorage.getItem(allDayKey); return v === null ? allDayKey === 'wos_cal_allday_m' : v === '1'; } catch { return allDayKey === 'wos_cal_allday_m'; } });
+  useEffect(() => { try { localStorage.setItem(allDayKey, showAllDay ? '1' : '0'); } catch {} }, [showAllDay, allDayKey]);
   const [allDaySheet, setAllDaySheet] = useState<string | null>(null);
   useBackClose(!!allDaySheet, () => setAllDaySheet(null)); // #242 2단계: 뒤로가기 = 종일 목록만 닫힘(캘린더 그대로)
   const [sidePanel, setSidePanel] = useState<boolean>(() => { try { const v = localStorage.getItem('wos_cal_unscheduled'); return v === null ? typeof window !== 'undefined' && window.innerWidth >= 1440 : v === '1'; } catch { return false; } });
@@ -169,11 +171,26 @@ function CalendarPage() {
   const calBox = useRef<HTMLDivElement>(null);
   const [calH, setCalH] = useState(640);
   useEffect(() => {
-    const fit = () => { const top = calBox.current?.getBoundingClientRect().top ?? 160; setCalH(Math.max(420, Math.round(window.innerHeight - Math.max(0, top) - (window.innerWidth < 1024 ? 76 : 24)))); };
+    // #592: 위치는 머리줄 아래 달력 자리(swipeWrap)부터 — 예전엔 머리줄 높이만큼 아래 탭 뒤로 밀려 시간 칸 끝이 가려졌음. 아래는 하단 탭 실제 높이
+    const fit = () => { const top = (swipeWrap.current ?? calBox.current)?.getBoundingClientRect().top ?? 160; const nav = window.innerWidth < 1024 ? (document.querySelector('nav[aria-label="하단 메뉴"]')?.getBoundingClientRect().height || 56) + 2 : 24;
+      setCalH(Math.max(420, Math.round(window.innerHeight - Math.max(0, top) - nav))); };
     fit(); window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit);
   }, []);
   const firstScroll = () => { const n = new Date(); const td = seoulDate(n); const inView = range && seoulDate(range.from) <= td && td < seoulDate(range.to);
     const h = inView ? Math.max(0, Number(seoulTime(n).slice(0, 2)) - 1) : 7; return `${String(h).padStart(2, '0')}:00:00`; };
+  // #592: 휴대폰 미팅 단추는 시간 칸(또는 화면)을 아래로 밀면 숨고 위로 올리면 다시 — 칸을 가리지 않게
+  const [fabHidden, setFabHidden] = useState(false);
+  useEffect(() => {
+    const last = new WeakMap<EventTarget, number>();
+    const onScroll = (e: Event) => {
+      const t = e.target, y = t === document ? window.scrollY : (t as HTMLElement | null)?.scrollTop;
+      if (!t || typeof y !== 'number') return;
+      const prev = last.get(t) ?? y; last.set(t, y);
+      if (Math.abs(y - prev) >= 4) setFabHidden(y > prev);
+    };
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => document.removeEventListener('scroll', onScroll, { capture: true });
+  }, []);
   function openMeeting() { const v = calRef.current?.getApi().getDate(); const d = v ? seoulDate(v) : seoulDate(new Date()); const h = nextHour(); setEditor({ draft: { date: d, start: h.start, end: h.end, title: '미팅 · ', meeting: true } }); }
   useBackClose(!!preview, () => setPreview(null));
 
@@ -242,6 +259,8 @@ function CalendarPage() {
     }
     return m;
   }, [fcEvents]);
+  // #592: 휴대폰은 보이는 기간에 종일 항목이 없으면 종일 줄을 감춤(빈 줄이 시간 칸을 가리지 않게)
+  const rangeHasAllDay = !!range && [...allDayByDate.keys()].some((d) => d >= seoulDate(range.from) && d < seoulDate(range.to));
   const openAllDayItem = (e: any) => {
     const p = e.extendedProps; setAllDaySheet(null);
     if (p.type === 'space') router.push(p.item.href);
@@ -407,13 +426,15 @@ function CalendarPage() {
             <button onClick={() => setShowAllDay(!showAllDay)} aria-pressed={showAllDay} data-testid="cal-show-allday" title="일·3일·주 보기 위쪽에 종일·시간 없는 업무 칸 보이기" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showAllDay ? 'border-accent-400 text-accent-700' : 'border-line text-ink-3')}>종일 칸</button>
             <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
 
-            <button onClick={() => setColorDlg(true)} className="hidden items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:inline-flex" aria-label="캘린더 색 설정"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
+            {range && <a href={`/api/export/calendar?start=${seoulDate(range.from)}&end=${addDays(seoulDate(range.to), -1)}${who === 'mine' ? `&who=${user.id}` : Array.isArray(who) ? `&who=${who.join(',')}` : ''}`}
+              className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:hidden" data-testid="cal-export-mobile"><FileSpreadsheet className="size-3.5 text-green-700" />엑셀</a>}{/* #592 휴대폰: 제목 줄을 숨겨 엑셀은 칩 줄로 */}
+            <button onClick={() => setColorDlg(true)} className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2" aria-label="캘린더 색 설정" data-testid="cal-colors"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
           </div>
   );
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="-mt-3 space-y-3 sm:mt-0">{/* #592 휴대폰: 숨긴 제목 줄 몫의 위 간격(12px)을 되돌림 */}
+      <div className="hidden flex-wrap items-center justify-between gap-2 sm:flex">{/* #592 휴대폰은 숨김(머리줄 한 줄에 + 일정 등록, 미팅은 오른쪽 아래 단추) */}
         <h1 className="text-xl font-bold tracking-tight">캘린더</h1>
         <div className="flex items-center gap-2">
           <Button variant="secondary" className="hidden lg:inline-flex" onClick={() => setSidePanel(!sidePanel)} aria-pressed={sidePanel}><ListChecks />미배정 업무</Button>
@@ -495,26 +516,27 @@ function CalendarPage() {
           {/* 대표 검수 10/20: 휴대폰은 내 일정/다른 사람 전환을 화면 아래(하단 탭 바로 위)로 — 위는 날짜·일정만 */}
           {!mobile && peopleFilter}
           {!mobile && calChips}
-          {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · ‹ › · 오늘, 아래 보기 전환 */}
-          <div className="mb-2 sm:hidden" data-testid="cal-mobile-head">
+          {/* 휴대폰 머리줄 (Google 형): "10월 ▾"(누르면 월 달력) · 보기 전환 · ‹ › · 오늘 · 일정 등록 — #592 한 줄로(시간 칸을 한 화면에 더 많이). 색 설정은 아래 칩 줄 */}
+          <div className="mb-1 sm:hidden" data-testid="cal-mobile-head">
+            <h1 className="sr-only">캘린더</h1>
             <div className="flex items-center gap-1">
-              <button type="button" onClick={() => setMonthPicker((v) => !v)} aria-expanded={monthPicker} className="inline-flex items-center gap-1 rounded-input px-1.5 py-1 text-lg font-bold" data-testid="month-toggle">
+              <button type="button" onClick={() => setMonthPicker((v) => !v)} aria-expanded={monthPicker} className="inline-flex shrink-0 items-center gap-0.5 rounded-input px-1 py-1 text-lg font-bold" data-testid="month-toggle">
                 {range ? `${Number(seoulDate(range.start).slice(5, 7))}월` : ''}<ChevronDown className={cx('size-4 transition-transform', monthPicker && 'rotate-180')} />
               </button>
+              <div className="flex min-w-0 rounded-full bg-slate-100 p-0.5 text-[12px]" role="group" aria-label="보기">
+                {([['timeGridDay', '일'], ['timeGrid3', '3일'], ['timeGridWeek', '주'], ['dayGridMonth', '월'], ['listWeek', '목록']] as const).map(([v, l]) => (
+                  <button key={v} type="button" onClick={() => calRef.current?.getApi().changeView(v)} aria-pressed={range?.view === v}
+                    className={cx('h-7 whitespace-nowrap rounded-full px-[7px] font-medium', range?.view === v ? 'bg-brand-600 text-white' : 'text-ink-2')}>{l}</button>
+                ))}
+              </div>
               <span className="flex-1" />
-              <button type="button" onClick={() => calRef.current?.getApi().prev()} className="rounded-full p-2 text-ink-2 active:bg-slate-100" aria-label="이전"><ChevronLeft className="size-5" /></button>
-              <button type="button" onClick={() => calRef.current?.getApi().next()} className="rounded-full p-2 text-ink-2 active:bg-slate-100" aria-label="다음"><ChevronRight className="size-5" /></button>
-              <button type="button" onClick={() => calRef.current?.getApi().today()} className="rounded-input border border-line px-2.5 py-1 text-sm font-medium">오늘</button>
-              {/* V14 41번: 휴대폰은 "●● 색" 칩 대신 머리줄 아이콘(칩 줄이 잘려 보이던 문제) */}
-              <button type="button" onClick={() => setColorDlg(true)} className="rounded-full p-2 text-ink-2 active:bg-slate-100" aria-label="캘린더 색 설정" data-testid="cal-colors-mobile"><Palette className="size-5" /></button>
+              <button type="button" onClick={() => calRef.current?.getApi().prev()} className="shrink-0 rounded-full p-1 text-ink-2 active:bg-slate-100" aria-label="이전"><ChevronLeft className="size-5" /></button>
+              <button type="button" onClick={() => calRef.current?.getApi().next()} className="shrink-0 rounded-full p-1 text-ink-2 active:bg-slate-100" aria-label="다음"><ChevronRight className="size-5" /></button>
+              <button type="button" onClick={() => calRef.current?.getApi().today()} className="shrink-0 rounded-input border border-line px-1.5 py-0.5 text-xs font-medium">오늘</button>
+              <button type="button" onClick={() => { const v = calRef.current?.getApi().getDate(); const d = v ? seoulDate(v) : seoulDate(new Date()); const h = nextHour(); setEditor({ draft: { date: d, start: h.start, end: h.end } }); }}
+                className="shrink-0 rounded-full p-1 text-brand-700 active:bg-slate-100" aria-label="일정 등록" data-testid="cal-new-mobile"><CalendarPlus className="size-5" /></button>
             </div>
             {monthPicker && <div className="mt-1 rounded-card border border-line p-2"><MiniMonth anchor={visibleStart} holidays={holidaySet} onPick={(d) => { goto(d); setMonthPicker(false); }} /></div>}
-            <div className="mt-1.5 flex gap-1 text-xs" role="group" aria-label="보기">
-              {([['timeGridDay', '일'], ['timeGrid3', '3일'], ['timeGridWeek', '주'], ['dayGridMonth', '월'], ['listWeek', '목록']] as const).map(([v, l]) => (
-                <button key={v} type="button" onClick={() => calRef.current?.getApi().changeView(v)} aria-pressed={range?.view === v}
-                  className={cx('flex-1 rounded-full border py-1 font-medium', range?.view === v ? 'border-brand-600 bg-brand-600 text-white' : 'border-line text-ink-2')}>{l}</button>
-              ))}
-            </div>
           </div>
           <div ref={swipeWrap} className={cx('overflow-x-clip', mobile && 'cal-phone', mobile && range?.view && `cal-v-${range.view}`)} data-testid="cal-swipe">
           <FullCalendar
@@ -524,7 +546,7 @@ function CalendarPage() {
             initialView={initView}
             initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
             headerToolbar={mobile ? false : { left: 'today prev,next title', center: '', right: 'timeGridDay,timeGridWeek,dayGridMonth,listWeek' }}
-            views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' }, dayGridMonth: { dayMaxEvents: mobile ? 4 : 6 } }} eventDisplay="block" // 대표 지적(10/19): 월 보기도 시각 있는 일정을 색 배경 + 흰 글자로(점 모양 대신 블록 — 보기별 옵션은 먹지 않아 전체에)
+            views={{ timeGrid3: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3일' }, dayGridMonth: { dayMaxEvents: mobile ? 4 : 6 }, timeGrid: { dayMaxEvents: false, dayMaxEventRows: 2 } }} eventDisplay="block" // 대표 지적(10/19): 월 보기도 시각 있는 일정을 색 배경 + 흰 글자로(점 모양 대신 블록 — 보기별 옵션은 먹지 않아 전체에)
             // Google 형 날짜 머리: 요일 한 줄 + 날짜 숫자(오늘은 동그라미), 시간 칸 글자 작게
             dayHeaderContent={(a) => { if (!a.view.type.startsWith('timeGrid')) return a.text; // 월·목록 보기는 기본 요일 글자(undefined 를 돌려주면 빈칸 — 로컬 검수 10/17)
               // 날짜는 서울 기준으로 읽는다(a.date 는 서울 0시 = UTC 전날 15시)
@@ -533,7 +555,7 @@ function CalendarPage() {
                 <span className="flex flex-col items-center leading-tight">
                   <span className="flex flex-col items-center" data-day-head={ds}>
                     <span className="text-[11px] font-medium">{'일월화수목금토'[dd.getUTCDay()]}</span>
-                    <span className={cx('mt-0.5 flex size-7 items-center justify-center rounded-full text-[15px] font-semibold tabular-nums', ds === seoulDate(new Date()) && 'bg-accent-600 text-white')}>{dd.getUTCDate()}</span>
+                    <span className={cx('mt-0.5 flex items-center justify-center rounded-full font-semibold tabular-nums', mobile ? 'size-6 text-[14px]' : 'size-7 text-[15px]', ds === seoulDate(new Date()) && 'bg-accent-600 text-white')}>{dd.getUTCDate()}</span>
                   </span>
                   {!showAllDay && (allDayByDate.get(ds)?.length ?? 0) > 0 && (
                     <button type="button" onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); setAllDaySheet(ds); }} data-testid="allday-chip" data-day={ds}
@@ -545,9 +567,11 @@ function CalendarPage() {
             // V14 41번: 휴대폰 축은 "오전/오후 n시"를 두 줄로 좁게(날짜 칸을 넓게)
             slotLabelContent={mobile ? (a) => { const h = Number(seoulTime(a.date).slice(0, 2)); return <span className="block text-center text-[10px] leading-[1.1]" data-axis-label><span className="block text-ink-3">{h < 12 ? '오전' : '오후'}</span>{h % 12 || 12}시</span>; } : undefined}
             buttonText={{ today: '오늘', month: '월', week: '주', day: '일', list: '일정목록' }}
-            allDaySlot={showAllDay} allDayText="종일" noEventsText="일정이 없습니다" slotMinTime={slotMin} scrollTime={firstScroll()} scrollTimeReset={false}
+            allDaySlot={showAllDay && (!mobile || rangeHasAllDay)} allDayText="종일" noEventsText="일정이 없습니다" slotMinTime={slotMin} scrollTime={firstScroll()} scrollTimeReset={false}
             // 대표 지적(10/19 ③): 월 보기는 칸 안에 최대한(PC 6·휴대폰 4줄), 넘치면 '+N개' — 높이 자동이라 true(칸 높이 맞춤)는 제한이 걸리지 않음
             dayMaxEvents={4} moreLinkContent={(a) => `+${a.num}개`}
+            // #592: 시간 격자 종일 줄은 하루 2개까지 — '+n개' 는 그날 종일 목록(휴대폰 시트), 월 보기는 그대로 풍선. 끝에 참 값을 돌려주면 FullCalendar 는 아무것도 하지 않음
+            moreLinkClick={(a) => { if (!a.view.type.startsWith('timeGrid')) return 'popover'; setAllDaySheet(seoulDate(a.date)); return true as never; }}
             // 대표 지적(10/19 ① d): 겹친 일정·업무는 나란히(겹쳐 그리면 위에 깔린 항목이 눌려 다른 상세가 열림)
             slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap={false} eventMinHeight={mobile ? 34 : 28} eventShortHeight={30}
             editable selectable selectMirror droppable longPressDelay={350}
@@ -575,21 +599,26 @@ function CalendarPage() {
               const depart = loc && timed && arg.event.start ? `${hm(new Date(+arg.event.start - 40 * 60000))} 출발 권장` : '';
               const narrow = mobile && (arg.view.type === 'timeGridWeek' || arg.view.type === 'timeGrid3'); // V14 41번: 휴대폰 주·3일
               const when = loc && !narrow && !month ? [when0, loc, depart].filter(Boolean).join(' · ') : when0;
-              const label = `${narrow ? '' : p.who ?? ''}${arg.event.title}`;
+              const label = narrow ? narrowTitle(arg.event.title) : `${p.who ?? ''}${arg.event.title}`; // #592: 좁은 블록은 앞머리 [태그] 떼고 내용부터(전체 제목은 title)
+              const full = `${p.who ?? ''}${arg.event.title}`;
               // 대표 지적(10/19 ③): 사람 약칭 대신 색 점(설정) — 좁은 칸에서도 보임
               const dot = p.whoDot ? <span className="mr-1 inline-block size-2 shrink-0 rounded-full align-[1px] ring-1 ring-white/90" style={{ background: p.whoDot }} title={p.whoName} data-who-dot /> : null;
-              const attrs = { ...(isTask ? { 'data-task-item': t.id, title: label } : { 'data-ev-block': '1', title: label, ...(lt ? { 'data-linked-task': lt.id } : {}) }), 'data-done': done ? '1' : undefined, ...(loc ? { 'data-travel': '1' } : {}) };
-              // V14 41번(Google 앱 주 보기): 휴대폰 주·3일 — 종일 칩은 2줄까지 줄바꿈 11px, 시간 블록은 제목만 블록 높이만큼 줄바꿈(단어 중간 허용), 시각은 1시간 이상 블록만
+              const attrs = { ...(isTask ? { 'data-task-item': t.id, title: full } : { 'data-ev-block': '1', title: full, ...(lt ? { 'data-linked-task': lt.id } : {}) }), 'data-done': done ? '1' : undefined, ...(loc ? { 'data-travel': '1' } : {}) };
+              // V14 41번(Google 앱 주 보기): 휴대폰 주·3일 — 시간 블록은 제목만 블록 높이만큼 줄바꿈(단어 중간 허용), 시각은 1시간 30분 이상 블록만
+              // #592(대표 10/25 구글 대조): 종일 칩은 한 줄(넘치면 …), 블록 글자 11px·중간 굵기, 줄 수 = 블록 높이(주 40·3일 48px/시간)에 들어가는 만큼(1시간 = 주 2줄·3일 3줄)
               if (narrow && arg.event.allDay) return (
-                <div className="line-clamp-2 min-w-0 whitespace-normal break-all px-0.5 text-[11px] font-semibold leading-[1.2]" data-allday-chip="1" {...attrs}>{dot}{icon}{label}</div>
+                <div className="min-w-0 truncate px-0.5 text-[11px] font-medium leading-[1.3]" data-allday-chip="1" {...attrs}>{dot}{icon}{label}</div>
               );
-              if (narrow && timed) return (
-                // V36 6: 제목 먼저(12px·두 줄, 긴 블록은 세 줄), 시각은 1시간 30분 이상 블록에서만 아래 작게 — 짧은 블록에서 시각이 제목을 가리지 않게
-                <div className="flex h-full min-w-0 flex-col overflow-hidden text-[12px] leading-[1.2]" data-narrow-block="1" {...attrs}>
-                  <span className={cx('min-h-0 overflow-hidden whitespace-normal break-all font-semibold', mins >= 90 ? 'line-clamp-3' : 'line-clamp-2', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
-                  {mins >= 90 && when && <span className="mt-auto shrink-0 truncate text-[10px] font-normal opacity-85" data-block-time>{when}</span>}
-                </div>
-              );
+              if (narrow && timed) {
+                const showTime = mins >= 90 && !!when;
+                const lines = Math.max(1, Math.floor((Math.max(34, (mins / 60) * (arg.view.type === 'timeGridWeek' ? 40 : 48)) - 4 - (showTime ? 12 : 0)) / 13.2));
+                return (
+                  <div className="flex h-full min-w-0 flex-col overflow-hidden text-[11px] leading-[1.2]" data-narrow-block="1" {...attrs}>
+                    <span className={cx('line-clamp-2 min-h-0 overflow-hidden whitespace-normal break-all font-medium', done && 'line-through opacity-80')} style={{ WebkitLineClamp: lines }}>{dot}{icon}{label}</span>
+                    {showTime && <span className="mt-auto shrink-0 truncate text-[10px] font-normal opacity-85" data-block-time>{when}</span>}
+                  </div>
+                );
+              }
               // V36 6: 휴대폰 일 보기 짧은 블록 — 시각은 제목 옆 작게(아래 줄로 내려 제목을 가리지 않음)
               if (mobile && timed && mins < 90) return (
                 <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-all px-[3px] text-[12px] leading-[1.2]" {...attrs}>
@@ -644,8 +673,9 @@ function CalendarPage() {
       </div>
       <p className="text-xs text-ink-2">빈 칸을 누르거나 끌면 빠른 입력, 업무는 체크로 완료합니다. 오른쪽 “미배정 업무”를 시간 칸으로 끌어 놓으면 업무 시간이 잡힙니다. 단축키 D·W·M·A·T·C</p>
       <ScopeDialog />
-      {/* 휴대폰: 캘린더 오른쪽 아래 미팅 일정 버튼(하단 탭 위) */}
-      <button type="button" onClick={() => openMeeting()} className="fixed bottom-[calc(var(--sab)+76px)] right-4 z-30 inline-flex h-12 items-center gap-1.5 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white shadow-pop lg:hidden" data-testid="cal-meeting-fab"><MapPin className="size-5" />미팅</button>
+      {/* 휴대폰: 캘린더 오른쪽 아래 미팅 일정 단추(하단 탭 위) — #592 긴 알약 대신 둥근 48px 아이콘(칸을 덜 가림), 아래로 밀면 숨김 */}
+      <button type="button" onClick={() => openMeeting()} aria-label="미팅 일정" title="미팅 일정" data-hidden={fabHidden ? '1' : '0'}
+        className={cx('fixed bottom-[calc(var(--sab)+76px)] right-4 z-30 inline-flex size-12 items-center justify-center rounded-full bg-rose-600 text-white shadow-pop transition-[opacity,transform] duration-200 lg:hidden', fabHidden && 'pointer-events-none translate-y-3 opacity-0')} data-testid="cal-meeting-fab"><MapPin className="size-5" /></button>
       {colorDlg && <CalColorsDialog onClose={() => setColorDlg(false)} />}
       {/* 대표 결정(10/16): 캘린더에서는 일정만 등록 — 업무는 업무 화면·홈 [+업무]. 일정과 함께 할 일이 필요하면 "업무 리스트에도 추가" */}
       {allDaySheet && (
@@ -1127,6 +1157,14 @@ function saveError(er: any): string {
 
 /** 업무 시간 블록 제목의 옛 접두어 정리 ("[업무] …") — 화면에서는 아이콘으로 구분 */
 function cleanTitle(t: string) { return t.replace(/^(\[(업무|업무 시간)\]\s*)+/, ''); }
+// #592(대표 10/25 구글 주 보기 대조): 좁은 블록(휴대폰 주·3일)은 앞머리 [다짐 문의]·[영업]·[시험] 같은 태그를 떼고 내용부터 — 태그 뜻은 색·왼쪽 선으로.
+// 부재 종류([연차]·[출장]·[휴가] 등)는 남긴다. 태그뿐인 제목은 그대로
+const KEEP_TAG = /^(연차|반차|반반차|외근|출장|휴가|병가|재택|부재|공가|교육|훈련|경조사?)$/;
+function narrowTitle(t: string) {
+  let s = t, keep = '';
+  for (let m = /^\s*\[([^\]]{1,20})\]\s*/.exec(s); m; m = /^\s*\[([^\]]{1,20})\]\s*/.exec(s)) { if (KEEP_TAG.test(m[1].trim())) keep += `[${m[1].trim()}] `; s = s.slice(m[0].length); }
+  return s.trim() ? keep + s.trim() : t;
+}
 
 /** 일정 미리보기: 시간·장소·참석자·연결 업무, 업무 시간 블록이면 그 업무의 상태·완료 */
 function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged, onOpenTask }: { ev: any; x: number; y: number; calendarName?: string; onClose: () => void; onEdit: () => void; onChanged: () => void; onOpenTask: (id: string) => void }) {

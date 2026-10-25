@@ -107,6 +107,7 @@ import { v30import, sheetPhone, notifRead, checkScroll, roleBadge, chatBubble } 
 import { metaAuto } from './metaAuto.step.mjs';
 import { digestMail } from './digestMail.step.mjs';
 import { app113 } from './app113.step.mjs';
+import { cal592 } from './cal592.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -1057,7 +1058,7 @@ await step('V19 부록 A: AI 비서 PC Enter 보내기·Shift+Enter 줄바꿈, �
 await step('캘린더: 완료한 업무의 시간 블록은 숨김(완료 보기 켜면 완료 모양), 삭제한 업무의 블록은 사라지고 휴지통 복원 시 다시 보임', () => blocksStep({ owner, ctx, BASE, SHOTS, addDays, today }));
 await step('V20 업무 월별 보관·이월: 이월 표시·이월만 보기, 완료 = 이번 달만 펼침·지난달은 펼칠 때 불러오기·달 이동, 리포트 월별 기록', () => v20({ owner, ctx, sql, BASE, SHOTS, tick }));
 await step('V22 AI 비서 문서 엔진: 회사 정보 화면, 파일 작업 카드(만드는 중 → 미리보기·쪽수) → 자료실에 저장 → 더 다듬기 입력 채움, 다시 열어도 카드 유지', () => v22({ owner, ctx, sql, BASE, FAKE, SHOTS }));
-await step('V14 41 휴대폰 주·3일: 종일 칩 2줄·블록 제목만 줄바꿈·머리글자 없음(일 보기는 있음)·칸 높이 52/60/64·오전/오후 축·색 버튼 머리줄', () => v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
+await step('V14 41 휴대폰 주·3일: 종일 칩 한 줄·블록 제목만 줄바꿈·머리글자 없음(일 보기는 있음)·칸 높이 40/48/64(#592)·오전/오후 축·색 버튼 머리줄', () => v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('V24 음성 등록: AI 비서 화면·패널 마이크 → 실시간 글자 → 단어장 보정(최매니져→최매니저) → 입력창에 남김(바로 안 보냄), 도움말에 "말로 등록" 없음', () => v24({ browser, desk, BASE, sql }));
 await step('V14 42 업무 보기 칩: 412px 에서 7개 모두 보임(4칸 2줄)·건수 = API·0건 숨김·사람 칩 둘째 줄·PC 한 줄', () => v1442({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('V14 43 업무 목록: 왼쪽 동그라미 없음·상태 칩 버튼(테두리·▾·32px)·메뉴 맨 위 완료 → 되돌리기·남의 업무 잠김·"확인 완료" 문구 없음', () => v1443({ browser, desk, ctx, BASE, SHOTS, sql }));
@@ -2843,6 +2844,7 @@ await step('#565 플랫폼 운영 정리(대표 10/24 저녁 1): 오늘 볼 것 
 await step('#235 마케팅 시안 품질 ⓐ·ⓔ(로컬 10/24 저녁 6): 브랜드 키트 이번 달 소식(기간 기본 30일)·잘 된 예시 글(형식별·좋은 점·빼기) → 승인한 글 [좋은 예시로 저장]·[예시에서 빼기] → 휴대폰 넘침 없음', () => mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }));
 await step('#235 ⓒ 사진 AI 설명(대표 #563): 자동 제작 › 사진 AI 설명 [설명 없는 사진 설명하기] → 숫자·사진별 설명·종류·글자·홍보물·쓰임 → 판정 고치기(글자 없음 = 바탕으로 씀)·되돌리기 → 자료실 AI 사진 설명 줄 → 휴대폰 넘침 없음', () => mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }));
 await step('#235 ⓑ 블로그 네이버 형식(대표 #256): 글 모델 블로그 줄(비용) · 사실 카드 블로그 검색 키워드 · 사진 판정 쓰지 않음(로컬 10/25) → 승인한 블로그 상세 블로그 형식 줄 · 게시 도우미 표지·사진 n 순서·[사진 n] 안내 → 휴대폰 넘침 없음', () => mktBlog({ owner, ctx, BASE, SHOTS, sql }));
+await step('#592 휴대폰 캘린더 주 보기 구글 수준(대표 10/25): 390px 칸 40px·한 화면 14시간 이상 · 블록 11px 중간 굵기 2줄 · 앞머리 [태그] 떼기(부재 종류 유지, 일 보기 그대로) · 종일 줄 기본 켬(2개 + +1개 → 그날 목록) · 미팅 단추 둥근 48px·아래로 밀면 숨김 · 3일 48·일 64px', () => cal592({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 
 await browser.close();
 srv.proc.kill();

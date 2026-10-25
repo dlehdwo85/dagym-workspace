@@ -25,7 +25,7 @@ const ITEMS = [{ name: '러닝머신 A형', spec: '3.0HP', qty: 2, unitPrice: 10
 
 before(async () => {
   await resetDb(); await ensureTls(); fake = await startFakeGoogle(); srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1' }); sql = testDb(); ctx = await bootstrap();
-  await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'dagym', name: '주식회사 다짐', ceo: '김대표', bizNo: '123-45-67890', address: '서울 강남구 테헤란로 1', phone: '02-000-0000', email: 'hello@dagym.test', isDefault: true });
+  await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'dagym', name: '주식회사 다짐', ceo: '김대표', bizNo: '123-45-67890', address: '서울 강남구 테헤란로 1 워크인타워 8층 801호 (역삼동)', phone: '02-000-0000', email: 'hello@dagym.test', isDefault: true }); // 148차: 긴 주소 = 견적서 공급자 칸 두 줄
   await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'hilink', name: '하이링크', ceo: '김대표', bizNo: '987-65-43210', address: '성남 분당구 판교로 2', phone: '031-000-0000' });
   taskId = (await ctx.owner.ok('POST', '/api/tasks', { title: '강남점 장비 견적', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
   other = new Client('other');
@@ -73,6 +73,11 @@ describe('V19 견적서 API', () => {
     const [page] = await assertPdfGlyphs(assert, Buffer.from(await pdf.arrayBuffer()), '견적서 PDF');
     for (const s of ['견 적 서', '강남 피트니스 귀하', '이담당', '주식회사 다짐', '납품 후 현금 결제']) assert.ok(page.text.some((l) => l.includes(s)), `견적서 글 '${s}' ${JSON.stringify(page.text.slice(0, 12))}`);
     assert.ok(page.text.some((l) => l.includes('합계 금액') && l.includes('280,500')), '합계 줄');
+    // 로컬 10/25 15:45(148차): 긴 공급자 주소는 '…'로 자르지 않고 두 줄로
+    const addr = page.text.filter((l) => /테헤란로|워크인타워|801호|역삼동/.test(l));
+    assert.equal(addr.length, 2, `주소 두 줄 ${JSON.stringify(addr)}`);
+    assert.equal(addr[0], '서울 강남구 테헤란로 1 워크인타워 8층 801호', '띄어쓰기 자리에서 줄바꿈');
+    assert.equal(addr.join('').replace(/\s/g, ''), '서울강남구테헤란로1워크인타워8층801호(역삼동)', '주소 전부(자르지 않음)');
     assert.equal((await ctx.owner.req('POST', '/api/quotes', { company: 'dagym', to: { name: 'x' }, items: Array.from({ length: 60 }, (_, i) => ({ name: `품목 ${i + 1}`, qty: 1, unitPrice: 1000 })) })).status, 400);
     const l = await ctx.owner.ok('GET', `/api/quotes?taskId=${taskId}`);
     assert.deepEqual(l.quotes.map((x) => x.quote_no), [q1.no]);

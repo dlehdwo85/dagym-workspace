@@ -1,4 +1,5 @@
-// V14 41번: 휴대폰 주·3일 보기 가독성 — 종일 칩 2줄 줄바꿈·11px, 블록 제목만 줄바꿈·사람 머리글자 없음(일 보기·PC 는 있음), 칸 높이 주 52/3일 60/일 64, 축 "오전/오후", 색 버튼은 머리줄
+// V14 41번: 휴대폰 주·3일 보기 가독성 — 블록 제목만 줄바꿈·사람 머리글자 없음(일 보기·PC 는 있음), 축 "오전/오후", 색 버튼은 머리줄
+// #592(대표 10/25 구글 대조)로 바뀐 값: 종일 칩 한 줄·11px, 블록 11px, 칸 높이 주 40/3일 48/일 64
 import assert from 'node:assert/strict';
 export async function v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today }) {
   const d = addDays(today, 14);
@@ -13,24 +14,24 @@ export async function v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today })
     await m.goto(`${BASE}/calendar?view=timeGridWeek&date=${d}`);
     await m.locator('[data-allday-chip]').filter({ hasText: '아이파크' }).first().waitFor();
     const chip = await m.locator('[data-allday-chip]').filter({ hasText: '아이파크' }).first().evaluate((el) => ({ h: el.getBoundingClientRect().height, fs: parseFloat(getComputedStyle(el).fontSize), ws: getComputedStyle(el).whiteSpace }));
-    assert.ok(chip.h >= 24, `종일 칩 2줄 ${chip.h}px`); assert.ok(chip.fs <= 11.5, `종일 칩 11px ${chip.fs}`); assert.equal(chip.ws, 'normal');
+    assert.ok(chip.h <= 18, `종일 칩 한 줄 ${chip.h}px`); assert.ok(chip.fs <= 11.5, `종일 칩 11px ${chip.fs}`); assert.equal(chip.ws, 'nowrap');
     const blk = m.locator(`[data-task-item="${tid}"]`).first();
     await blk.waitFor();
     assert.ok(!(await blk.innerText()).includes('·'), '휴대폰 주 보기: 사람 머리글자 없음');
     assert.equal(await m.locator('[data-narrow-block]').filter({ hasText: '판교' }).count(), 1, '블록은 제목만 줄바꿈');
-    // V36 6: 블록 글씨 12px 이상, 2시간 블록만 아래에 시각, 1시간 업무 블록은 제목만(시각이 제목을 가리지 않음)
+    // V36 6: 2시간 블록만 아래에 시각, 1시간 업무 블록은 제목만(시각이 제목을 가리지 않음) · #592 블록 글씨 11px
     const nb = m.locator('[data-narrow-block]').filter({ hasText: '판교' }).first();
-    assert.ok((await nb.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))) >= 12, '블록 글씨 12px 이상');
+    assert.equal(await nb.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)), 11, '블록 글씨 11px');
     assert.equal(await nb.locator('[data-block-time]').count(), 1, '긴 블록은 시각 표시');
     assert.equal(await m.locator('[data-narrow-block]').filter({ hasText: '고천' }).locator('[data-block-time]').count(), 0, '짧은 블록은 시각 생략');
     const slot = await m.locator('.fc-timegrid-slot').first().evaluate((el) => el.getBoundingClientRect().height);
-    assert.ok(Math.abs(slot - 52) <= 1, `주 칸 52px ${slot}`);
+    assert.ok(Math.abs(slot - 40) <= 1, `주 칸 40px ${slot}`);
     assert.match(await m.locator('[data-axis-label]').first().innerText(), /오[전후]\s*\d+시/);
-    assert.equal(await m.getByRole('button', { name: '캘린더 색 설정' }).filter({ visible: true }).count(), 1, '색 설정은 머리줄 아이콘 하나');
+    assert.equal(await m.getByRole('button', { name: '캘린더 색 설정' }).filter({ visible: true }).count(), 1, '색 설정 단추 하나(#592 머리줄 → 아래 칩 줄)');
     await m.screenshot({ path: `${SHOTS}/v14-41-phone-week.png`, fullPage: false });
     await m.goto(`${BASE}/calendar?view=timeGrid3&date=${d}`);
     await m.locator('.fc-timegrid-slot').first().waitFor();
-    assert.ok(Math.abs((await m.locator('.fc-timegrid-slot').first().evaluate((el) => el.getBoundingClientRect().height)) - 60) <= 1, '3일 칸 60px');
+    assert.ok(Math.abs((await m.locator('.fc-timegrid-slot').first().evaluate((el) => el.getBoundingClientRect().height)) - 48) <= 1, '3일 칸 48px');
     await m.goto(`${BASE}/calendar?view=timeGridDay&date=${d}`);
     await m.locator(`[data-task-item="${tid}"]`).first().waitFor();
     assert.ok((await m.locator(`[data-task-item="${tid}"]`).first().innerText()).includes('·'), '일 보기는 사람 머리글자 유지');
