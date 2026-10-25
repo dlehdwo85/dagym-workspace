@@ -1329,3 +1329,9 @@
 - POST /api/sales/collectors/bizinfo_support/run → 900건·신규 0·바뀜 300·변화없음 372. 재수집 뒤 fit/all(200) 깨진 제목 0(처음 검사는 'ㆍ'를 깨진 글자로 오인). counts fit 112·closing 41·all 882.
 - 푼타컴퍼니 rule no("식품 업종 대상"). 맞춤 탭 판정 분포 fit/AI없음 81·maybe 23·no/AI fit 3(시설관리 묶음 동의어 누락 → 클라우드 요청)·no/AI maybe 3. 프로필 업종 3개 채워짐.
 - 클라우드 회신 보냄. 화면 표기('AI 확인 중'·홈 카드)는 10/26 오전 390 확인.
+
+## 2026-10-26 01:55 — 158차(29332a8) 운영 확인 ✅ · 네이버 dagym-in 계정 등록 완료(태그 교체 중)
+- 158차 ① 영업 AI 공고문: 비스트리밍 POST /api/ai/chat(space=sales) → tools [search_sales_notices, read_sales_notice, read_sales_notice], 답 첫 줄 영문 안내 없음, 요약 정확(기흥역 더샵 재입찰·마감 10/26 17시·참가 자격·안면인식기 11대 등) · 자료실 '영업/공고/[경기] 주민운동시설…' 첨부 2건 생성(14:30:21Z). 두 번째 질문 중복 생성 여부는 다음에.
+- ② 온비드 공고 url → www.onbid.co.kr/op/…/mvmnSrchPbancClg.do(공고 검색 화면) ✅ ③ 거짓 '해당 없음' 3건·'시설관리 업종 대상' no 근거 0건 ✅ ④ 온비드 API 첨부 칸은 확인 못 함(수집기 화면에 칸 이름 없음, 서비스 키 필요).
+- 표시값 의문: showNo=1 로 읽으면 counts.fit=880(all 882) — 숨김 포함 수가 '맞춤' 수로 나오는지 클라우드 확인 요청.
+- 네이버 SA: 대표가 주식회사 다짐(dagym-in) 계정으로 로그인 → www.work-in.dev 등록 ✅ → HTML 태그 새 값 → Vercel NEXT_PUBLIC_NAVER_SITE_VERIFICATION 교체 → 재배포 → 소유확인(보안문자 대표) → 사이트맵.
