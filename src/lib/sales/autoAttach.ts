@@ -36,7 +36,7 @@ async function sourceOf(tenant: string, kind: SourceKind, id: string): Promise<{
           where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`; // 목록 화면 '공고문 내려받기'도 생김
       } catch (e) { if (!files.length) listError = String((e as Error)?.message ?? e).slice(0, 120); }
     }
-    return { name, files, bid, listError, link: `/s/sales/bids?tab=working&q=${encodeURIComponent(id)}` };
+    return { name, files, bid, listError, link: `/s/sales/hub?tab=bids&bt=working&bq=${encodeURIComponent(id)}` };
   }
   const [p] = await sql<{ title: string; attachments: any }[]>`select title, attachments from support_programs where id = ${id} and (tenant is null or tenant = ${tenant})`.catch(() => []);
   if (!p) return null;

@@ -109,3 +109,42 @@ test('영업 공간 화면', async () => {
   await ctx.owner.ok('PUT', '/api/sales/options', { bids: null });
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=summary')).bidsOn, true);
 });
+test('#605~#613(대표 10/25) 허브 정렬·필터(지역·세대수·기간)·회사가 켠 탭 · 입찰 정렬·오늘 새 공고 건수', async () => {
+  const put = (scope, tbl, row) => sql`insert into sales_src_rows (scope, tbl, src_id, row) values (${scope}, ${tbl}, ${String(row.id)}, ${sql.json(row)})`;
+  await put('global', 'operating_facility_prospects', { id: 'F3', name: '정렬 시험 시설', household_count: 2000, completion_date: plus(-60), move_in_date: plus(-45), region: '서울', first_seen_at: plus(-50) });
+  const h = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities');
+  assert.deepEqual(h.items.map((x) => x.id), ['F3', 'F1', 'F2'], '기본 = 세대수 많은 순');
+  assert.deepEqual([h.box, h.sort, h.archiveCount, h.regions], ['open', null, 0, ['서울']]);
+  assert.ok(['buildings', 'facilities', 'vendors', 'prospects', 'regions'].every((k) => h.tabs.includes(k)), JSON.stringify(h.tabs));
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities&sort=completion')).items.map((x) => x.id), ['F1', 'F3', 'F2'], '준공일순(?sort=)');
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities&sort=elapsed')).items.map((x) => x.id), ['F3', 'F1', 'F2'], '경과일 긴 순');
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities&hh=1000')).items.map((x) => x.id), ['F3'], '세대수 1,000 이상');
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities&region=서울')).items.map((x) => x.id), ['F3'], '지역');
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities&period=1')).items.map((x) => x.id), ['F1', 'F2'], '기간 = 오늘 앞뒤 1개월(준공·입주·DB 등록)');
+  const bd = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings&region=성남&sort=households');
+  assert.deepEqual(bd.items.map((x) => x.id), ['B1'], '지역 필터는 주소에도'); assert.equal(bd.sort, 'households');
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings&hh=2000')).items, [], '세대수 미달');
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=vendors&sort=rank')).items.map((x) => x.id), ['V1']);
+  // 입찰: 정렬 메뉴(마감 D-day·공고일·예산) + '오늘 새 공고 n' 칩 건수(= 오늘 탭, 검색어 무관)
+  const b = await ctx.owner.ok('GET', '/api/sales/src?view=bids&sort=amount');
+  assert.equal(b.sort, 'amount'); assert.equal(b.todayCount, 2, '오늘 새 공고 건수 = 오늘 탭');
+  const amounts = b.items.map((n) => Number(n.amount) || 0); assert.deepEqual(amounts, [...amounts].sort((x, y) => y - x), '예산 큰 순');
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all&sort=notice')).sort, 'notice');
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all&sort=weird')).sort, null, '모르는 정렬은 기본');
+  // #611 허브 탭 = 회사가 켠 수집 DB 종류: 시설 수집기를 모두 끄면 '준공·입주 시설' 탭이 빠지고, 하나라도 켜면 다시 보임
+  const FAC = ['kicox_industrial_complexes', 'public_sports_facilities', 'tourist_hotels_localdata', 'reb_recent_complexes', 'operating_from_kapt', 'kapt_sa_sun'];
+  for (const slug of FAC) await ctx.owner.ok('PUT', '/api/sales/collectors', { slug, enabled: false });
+  assert.ok(!(await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).tabs.includes('facilities'), '시설 수집기 전부 끄면 탭 숨김');
+  await ctx.owner.ok('PUT', '/api/sales/collectors', { slug: 'reb_recent_complexes', enabled: true });
+  assert.ok((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).tabs.includes('facilities'), '하나라도 켜면 보임');
+  for (const slug of FAC) await ctx.owner.ok('PUT', '/api/sales/collectors', { slug, enabled: true });
+  // 공공데이터: 원천을 골랐다가 전부 끄면 숨김(고른 적 없으면 안내용으로 보임)
+  const [ds] = await sql`select code from data_sources order by code limit 1`;
+  if (ds) {
+    await sql`insert into tenant_data_sources (tenant, source_code, enabled) values ('default', ${ds.code}, false) on conflict (tenant, source_code) do update set enabled = false`;
+    assert.ok(!(await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).tabs.includes('prospects'), '공공데이터 원천 전부 끄면 탭 숨김');
+    await sql`delete from tenant_data_sources where tenant = 'default' and source_code = ${ds.code}`;
+  }
+  assert.ok((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).tabs.includes('prospects'));
+  await sql`delete from sales_src_rows where src_id = 'F3'`;
+});

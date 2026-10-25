@@ -34,6 +34,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     dir: JSON.parse(JSON.stringify(dir)),
     features: { googleSync: googleSyncEnabled(), ai: aiEnabled() && menus.assistant === 'use', /* 로컬 10/20(심사): 체험 조직도 AI 비서 켬(한도는 review.ts) */ library: !user.isDemo && menus.library !== 'none',
       salesBids: (spaces as string[]).includes('sales') ? await (await import('@/lib/sales/options')).salesBidsOn(tenantOf(user)) : false,
+      // #611(대표 10/25 ⑦): 허브 탭 = 회사가 켠 수집 DB 종류(데이터 설정에서 끈 종류의 탭은 숨김)
+      salesHubTabs: (spaces as string[]).includes('sales') ? await (await import('@/lib/sales/hubTabs')).hubTabsOn(tenantOf(user), await (await import('@/lib/sales/options')).salesBidsOn(tenantOf(user))).catch(() => null) : null,
       salesTerms,
       sidebar3: process.env.FEATURE_SIDEBAR3 !== '0' /* ⑦ 사이드바 3구역 — 되돌리려면 FEATURE_SIDEBAR3=0 */ },
     menus,

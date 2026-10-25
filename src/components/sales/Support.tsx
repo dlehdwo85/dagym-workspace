@@ -108,7 +108,7 @@ export function Support() {
               it.applyEnd ? `마감 ${kday(it.applyEnd)}` : it.applyText, it.amount && `지원 ${it.amount}`].filter(Boolean).join(' · ')}
               <span className="text-ink-3"> · 출처 {it.sourceLabel}{it.alsoOn.length ? `(+${it.alsoOn.join('·')})` : ''}</span></p>
             <div className="mt-1.5"><Flags flags={it.rule.flags} max={4} /></div>
-            {it.ai && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-ai-line"><Sparkles className="mr-0.5 inline size-3 text-violet-600" aria-hidden />{it.ai.use[0] ? `접목: ${it.ai.use[0]}` : it.ai.reasons[0] ?? it.ai.summary}{it.ai.brands.length > 0 && <span className="ml-1">{it.ai.brands.map((b) => <span key={b} className="ml-1 rounded-full bg-violet-50 px-1.5 text-[11px] text-violet-800">{b}</span>)}</span>}</p>}
+            {it.ai && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-ai-line"><Sparkles className="mr-0.5 inline size-3 text-violet-600" aria-hidden />{it.ai.use[0] ? `접목: ${it.ai.use[0]}` : it.ai.reasons[0] ?? it.ai.summary}{it.ai.brands.length > 0 && <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">{it.ai.brands.map((b) => <span key={b} className="rounded-full border border-violet-200 bg-violet-50 px-1.5 text-[11px] text-violet-800">{b}</span>)}</span>}</p>}
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {it.work ? <><span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', STATUS_CLS[it.work.status])} data-testid="support-status">{it.work.statusLabel}</span>
                 <span className="text-xs text-ink-2">{it.work.ownerName ? `담당 ${it.work.ownerName}` : ''}{it.work.appliedAt ? ` · 신청 ${kday(it.work.appliedAt)}` : ''}{it.work.resultMemo ? ` · ${it.work.resultMemo.slice(0, 40)}` : ''}</span>
@@ -254,9 +254,10 @@ function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; o
           {it.ai ? <div className="mt-1.5 space-y-1.5 text-xs">
             <p><span className={cx('rounded-full border px-2 py-0.5 font-semibold', VERDICT[it.ai.verdict][2])}>{VERDICT[it.ai.verdict][0]} {VERDICT[it.ai.verdict][1]}</span>{it.ai.summary && <span className="ml-1.5 text-ink-2">{it.ai.summary}</span>}</p>
             {it.ai.reasons.length > 0 && <ul className="list-disc space-y-0.5 pl-4" data-testid="support-ai-reasons">{it.ai.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
-            {it.ai.use.length > 0 && <div className="rounded-input border border-violet-200 bg-white p-2"><b className="text-violet-900">우리 회사에 접목할 점</b><ul className="mt-0.5 list-disc space-y-0.5 pl-4" data-testid="support-ai-use">{it.ai.use.map((r, i) => <li key={i}>{r}</li>)}</ul></div>}
+            {it.ai.use.length > 0 ? <div className="rounded-input border border-violet-200 bg-white p-2"><b className="text-violet-900">우리 회사에 접목할 점</b><ul className="mt-0.5 list-disc space-y-0.5 pl-4" data-testid="support-ai-use">{it.ai.use.map((r, i) => <li key={i}>{r}</li>)}</ul></div>
+              : <p className="text-[11px] text-ink-3" data-testid="support-ai-use-missing">‘우리 회사에 접목할 점’·‘마감·일정’은 10/25 이전 판단에는 없습니다 — [다시 판단]을 누르면 채워집니다.</p>}{/* 로컬 10/25 18:50 ③: 상세에 접목 줄이 없는 까닭을 화면에 */}
             {it.ai.schedule && <p data-testid="support-ai-schedule"><span className="text-ink-3">마감·일정</span> {it.ai.schedule}</p>}
-            {it.ai.brands.length > 0 && <p>맞는 브랜드: {it.ai.brands.map((b) => <span key={b} className="ml-1 rounded-full bg-white px-1.5 text-violet-800">{b}</span>)}</p>}
+            {it.ai.brands.length > 0 && <p className="flex flex-wrap items-center gap-1">맞는 브랜드: {it.ai.brands.map((b) => <span key={b} className="rounded-full border border-violet-200 bg-white px-1.5 text-violet-800">{b}</span>)}</p>}{/* 로컬 10/25 18:50: 칩이 글자에 붙어 보임 → 간격·테두리 */}
             <div><span className="text-ink-3">준비 서류</span>{it.ai.docs.length ? <ul className="mt-0.5 list-disc pl-4" data-testid="support-ai-docs">{it.ai.docs.map((d, i) => <li key={i}>{d}</li>)}</ul> : <span className="ml-1 text-ink-3">공고에 서류 목록이 없음 — 원문·첨부 확인</span>}</div>
           </div> : <p className="mt-1 text-xs text-ink-3">{data.aiOn ? '[AI 판단]을 누르면 해당 여부·이유·맞는 브랜드·준비 서류를 정리합니다(회사 AI 한도에서).' : 'AI 가 설정되지 않았습니다.'}</p>}
         </section>

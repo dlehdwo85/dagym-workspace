@@ -79,10 +79,10 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await m.getByTestId('profile-menu').tap();
   // #422 d: 하단 탭(제안·계약·영업기회)과 겹치는 메뉴는 시트에서 빠짐 — #438 입찰은 하단 탭이 아니라 시트 '영업 메뉴'에서
   assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '제안·계약' }).count(), 0, '하단 탭과 겹치는 제안·계약 없음');
-  assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).count(), 1, '입찰·공고는 시트 영업 메뉴에');
+  assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).count(), 0, '#611(대표 10/25): 입찰·공고 메뉴 없음 — 허브 입찰 탭으로 합침');
   await m.getByTestId('more-sheet').getByLabel('닫기').tap();
   await m.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap(); // 대표 10/21 12:00 ③: 공공데이터·지역별·계약만료는 허브 카테고리 · #537 입찰을 켠 회사는 영업기회 › 입찰로
-  await m.waitForURL(/\/s\/sales\/hub(\?tab=bids)?$/);
+  await m.waitForURL(/\/s\/sales\/hub(\?tab=bids&bt=today)?$/);
   await m.getByTestId('sales-hub-prospects').tap(); await m.getByTestId('prospects').waitFor();
   await m.getByTestId('profile-menu').tap();
   await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap();

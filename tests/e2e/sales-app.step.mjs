@@ -35,11 +35,14 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.deepEqual(tabs, ['홈', '영업기회', '리드', '제안·계약', '메시지'], '#537 대표 10/24: 영업 하단 5칸 — 입찰은 영업기회 안(#438)');
     // #537 영업기회 = 허브 › 입찰(오늘 새 공고·마감 임박(3일)·진행 중) · 입찰 화면에서도 영업기회 칸 켜짐
     await p.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap();
-    await p.waitForURL(/\/s\/sales\/hub\?tab=bids$/);
+    await p.waitForURL(/\/s\/sales\/hub\?tab=bids&bt=today$/); // #613: 기본 칩은 '진행 중'이지만 앱 하단 칸은 오늘 새 공고로
     const hb = p.getByTestId('sales-bids'); await hb.waitFor();
     assert.match(await p.getByTestId('sales-hub-bids').getAttribute('class'), /border-brand-600/, '입찰 칩 선택');
-    assert.deepEqual((await hb.locator('button[data-testid^="sales-bids-tab-"]').allInnerTexts()).map((x) => x.trim()), ['오늘 새 공고', '마감 임박(3일)', '준비 기간(D-10 안)', '진행 중']);
-    assert.equal(await hb.getByTestId('bids-all-link').getAttribute('href'), '/s/sales/bids');
+    // #608·#611(대표 10/25): 허브 입찰 탭 = 전체 기능, 칩에 '마감 임박'·'준비 기간' 없음, '오늘 새 공고 n' 건수, 입찰·공고 전체 보기 링크 없음(페이지 합침)
+    await p.waitForFunction(() => /\d+건/.test(document.querySelector('[data-testid="sales-bids-tab-skip"]')?.textContent ?? '')); // 목록을 불러오면 칩에 건수
+    assert.deepEqual((await hb.locator('button[data-testid^="sales-bids-tab-"]').allInnerTexts()).map((x) => x.replace(/\d+/g, 'n').trim()), ['진행 중(마감 임박순)', '오늘 새 공고 n', '진행 기록 있음', '관련 전체', '오늘 마감', '협력사 모집', '대상 아님 n건']);
+    assert.equal(await hb.getByTestId('bids-all-link').count(), 0);
+    assert.match(await hb.getByTestId('sales-bids-tab-today').innerText(), /^오늘 새 공고 [1-9]\d*$/, '오늘 새 공고 건수 배지');
     const res = hb.getByTestId('bids-results'); await res.waitFor();
     assert.match(await res.locator('summary').innerText(), /결과\(낙찰·유찰\) 1건/);
     assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 헬스기구 구매 낙찰 결과' }).count(), 1, '결과는 오늘 새 공고 목록에 없고');
@@ -51,11 +54,12 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.equal(await prepCard.getByTestId('bid-status').innerText(), 'D-5 · 준비 시작');
     assert.equal(await prepCard.getAttribute('data-prep'), '1');
     assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프클럽 골프숍' }).getAttribute('data-prep'), null, 'D-3 안은 빨강(준비 줄 없음)');
-    await hb.getByTestId('sales-bids-tab-prep').tap();
-    await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 체육시설' }).waitFor();
-    assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프장 27홀 매각' }).count(), 0, '마감 지난 공고는 준비 기간 탭에 없음');
+    assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프클럽 골프숍' }).getAttribute('data-urgent'), '1', '#608 D-0~3 = 카드 왼쪽 빨강 줄');
+    assert.equal(await prepCard.getAttribute('data-urgent'), null, 'D-5 는 노랑 줄만');
     await hb.getByTestId('sales-bids-tab-open').tap();
     await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 체육시설' }).waitFor();
+    assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프장 27홀 매각' }).count(), 0, '마감 지난 공고는 진행 중에 없음');
+    await p.waitForFunction(() => !location.search.includes('bt=today')); // 기본 칩(진행 중)은 주소에서 빠짐
     assert.match(await p.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).getAttribute('class'), /font-bold/, '영업기회 칸 켜짐');
     await p.locator('#wos-intro').waitFor({ state: 'detached' }).catch(() => {}); // 첫 실행 애니메이션(약 1초)이 끝난 뒤
     await p.screenshot({ path: `${SHOTS}/226-sales-app-hub-bids.png` });

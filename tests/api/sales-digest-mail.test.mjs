@@ -127,7 +127,7 @@ test('#510 메일 정리(21라인 수준): 구역·번호·빈칸 숨김·같은
   assert.ok(html.includes('첨부 2') && html.includes('K-apt K510-1'));
   const kaptUrl = 'https://www.k-apt.go.kr/bid/bidDetail.do?bidNum=K510-1';
   assert.equal(html.split(kaptUrl).length - 1, html.split(`href="${kaptUrl}"`).length - 1, '원천 주소는 [원문] 링크로만');
-  assert.ok(html.includes(`/s/sales/bids?tab=all&amp;id=${ID(1)}`), '공고명 = 워크인 상세');
+  assert.ok(html.includes(`/s/sales/hub?tab=bids&amp;bt=all&amp;id=${ID(1)}`), '공고명 = 워크인 상세(#611 허브 입찰 탭)');
   assert.ok(html.includes('>용역</span>') && html.includes('>주민운동시설의 위탁</span>'), '업종 태그(입찰 분류 나눔)');
   assert.ok(html.includes('>공사</span>') && html.includes('>일반보수</span>') && !html.includes('사업자 -') && !html.includes('>사업자<'), "로컬 22:45 ①: K-apt '사업자 - 공사 - 일반보수' → 공사·일반보수");
   assert.ok(!html.includes('투찰 K-APT') && html.includes('투찰 KG2B'), '로컬 22:45 ②: 투찰처가 원천(K-apt)과 같으면 숨김, 다른 곳만');
@@ -137,12 +137,12 @@ test('#510 메일 정리(21라인 수준): 구역·번호·빈칸 숨김·같은
   const cx = html.slice(html.indexOf('시험구 국민체육센터 위탁운영'), html.indexOf('</td>', html.indexOf('시험구 국민체육센터 위탁운영')));
   assert.ok(cx.includes(`입찰마감 ${mdw(plus(8))} 10:00`) && !/D-\d|준비 시작/.test(cx), cx);
   assert.ok(!html.includes('시험키워드'), '참고 공고 제목은 메일에 안 나옴');
-  assert.ok(html.includes('<b>참고(검색어만 일치)</b> 2건') && html.includes('/s/sales/bids?tab=ref'));
+  assert.ok(html.includes('<b>참고(검색어만 일치)</b> 2건') && html.includes('/s/sales/hub?tab=bids&amp;bt=ref'));
   // 마감 임박: 진행 기록 걸린 공고는 뺌
   assert.ok(html.includes('[경기용인] 시험 단지 운동시설 위탁관리업체 선정') && !html.includes('[서울] 시험 단지 헬스장 위탁운영'));
   assert.ok(html.includes('걸러진 공고 업종 무관 1 · 제외어 1 · 마감 지남 1') && html.includes('이 메일은 워크인 영업실 당일 공고 알림입니다'));
   // 텍스트판도 같은 내용
-  assert.ok(text.includes('■ ★ 즉시 검토 (2)') && text.includes('■ 마감 임박 (1)') && text.includes('■ 참고(검색어만 일치) 2건'));
+  assert.ok(text.includes('■ ★ 즉시 검토 (2)') && text.includes('■ 진행 중(D-3 안) (1)') && text.includes('■ 참고(검색어만 일치) 2건')); // #608: 구역 이름 '마감 임박' → '진행 중(D-3 안)'
   assert.ok(/\n1\. \[서울강남\] 시험 단지 피트니스 위탁운영 사업자 선정/.test(text) && !/\n0\. /.test(text));
   assert.ok(text.includes(`입찰마감 ${mdw(plus(5))} 17:00 D-5 · 준비 시작`));
 });
@@ -195,8 +195,8 @@ test('로컬 22:45 ③ 마감 임박은 10건까지 · 나머지 n건 — [보�
   for (let k = 0; k < 11; k++) await ins(30 + k, { source_type: 'kapt_bid', fit_business: '다짐', bid_system: 'K-APT', source_external_id: `S510-M${k}`, title: `[서울] 시험 단지 헬스장 위탁 마감 임박 ${k + 1}`,
     deadline_at: at(plus(1 + (k % 3)), '16:00'), first_seen_at: ago(72), updated_at: ago(72), posted_date: plus(-3) });
   const html = (await ctx.owner.req('GET', '/api/sales/digest?preview=html')).body; const text = (await ctx.owner.req('GET', '/api/sales/digest?preview=text')).body;
-  assert.match(html, /마감 임박 <span[^>]*>12<\/span>/, '구역 머리 건수는 전체');
+  assert.match(html, /진행 중\(D-3 안\) <span[^>]*>12<\/span>/, '구역 머리 건수는 전체');
   assert.equal((html.match(/data-digest-item="soon"/g) ?? []).length, 10, '줄은 10건까지');
-  assert.ok(html.includes('data-digest-more="soon"') && html.includes('나머지 2건 — <a href=') && html.includes('/s/sales/bids?tab=open'));
-  assert.ok(text.includes('■ 마감 임박 (12)') && text.includes('나머지 2건 — 보기: ') && text.includes('/s/sales/bids?tab=open'));
+  assert.ok(html.includes('data-digest-more="soon"') && html.includes('나머지 2건 — <a href=') && html.includes('/s/sales/hub?tab=bids&amp;bt=open'));
+  assert.ok(text.includes('■ 진행 중(D-3 안) (12)') && text.includes('나머지 2건 — 보기: ') && text.includes('/s/sales/hub?tab=bids&bt=open'));
 });

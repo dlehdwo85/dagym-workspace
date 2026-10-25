@@ -26,7 +26,7 @@ export function Prospects() {
       {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={5} /> : !data.prospects.length ? (
         <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3">아직 영업기회가 없습니다. 데이터 설정에서 원천을 켜면 매일 아침 새로 들어옵니다.</p>
       ) : (
-        <ul className="grid gap-2 lg:grid-cols-2">{data.prospects.map((p) => (
+        <ul className="space-y-2">{data.prospects.map((p) => ( /* #609(대표 10/25 ⑤): 허브 모든 탭 1열 */
           <li key={p.id} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="prospect-card">
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">

@@ -4,5 +4,7 @@ import { salesView } from '@/lib/sales/srcViews';
 /** V41 단계 2 영업 공간 화면 데이터(옮긴 영업관리 원본, 전환일까지 읽기 전용) */
 export const GET = handler(async ({ req, user }) => {
   const p = req.nextUrl.searchParams;
-  return salesView(user, p.get('view') ?? 'summary', { q: p.get('q') ?? undefined, id: p.get('id') ?? undefined, status: p.get('status') ?? undefined, tab: p.get('tab') ?? undefined, day: p.get('day') ?? undefined, from: p.get('from') ?? undefined, to: p.get('to') ?? undefined, biz: p.get('biz') ?? undefined });
+  return salesView(user, p.get('view') ?? 'summary', { q: p.get('q') ?? undefined, id: p.get('id') ?? undefined, status: p.get('status') ?? undefined, tab: p.get('tab') ?? undefined, day: p.get('day') ?? undefined, from: p.get('from') ?? undefined, to: p.get('to') ?? undefined, biz: p.get('biz') ?? undefined,
+    // #605·#606(대표 10/25): 보관함(box=archive)·정렬(sort)·필터(region·hh·period)
+    sort: p.get('sort') ?? undefined, box: p.get('box') ?? undefined, region: p.get('region') ?? undefined, hh: p.get('hh') ?? undefined, period: p.get('period') ?? undefined });
 });

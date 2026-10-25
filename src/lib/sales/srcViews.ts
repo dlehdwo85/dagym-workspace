@@ -8,6 +8,7 @@ import { vendorDateOk } from './collectors/vendorRules';
 import { isAwardResult, onbidSale } from './collectors/procurement';
 import { oneCardPerNotice, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
+import { hubTabsOn } from './hubTabs';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -40,6 +41,10 @@ async function userNames(tenant: string) {
 /** 영업관리 11단계(원본 leads.sales_status) · 종결 단계 · 우선순위 한글 */
 export const STAGES = ['신규리드', '1차연락완료', '미팅예정', '현장방문완료', '제안서작성중', '제안서발송완료', '견적협의', '계약검토', '계약완료', '보류', '실패', '되돌림']; // 되돌림 = 영업 재편 2) 배정 이전으로 되돌린 리드
 const CLOSED = new Set(['계약완료', '보류', '실패', '되돌림']);
+/** #610·#614 리드 보관함(보류·실패·되돌림) — 계약완료는 대표 결정(⑩ 이름·숨김) 전까지 기본 목록에 그대로 */
+const ARCHIVED_STAGES = new Set(['보류', '실패', '되돌림']);
+/** 오늘 기준 n개월 앞뒤(KST 날짜) — #606 기간 필터 */
+const shiftMonths = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x); };
 const PRIORITY: Record<string, string> = { urgent: '긴급', high: '높음', medium: '보통', low: '낮음' };
 /** 지역 칸에 단지명 같은 값(원본 데이터 오류)은 '지역 미정' 묶음으로 — 값은 고치지 않음 */
 const regionOf = (v: unknown) => { const r = String(v ?? '').trim(); return !r || r.length > 8 || /\s/.test(r) ? '지역 미정' : r; };
@@ -142,7 +147,7 @@ export function isOpenBid(n: { related?: boolean; status?: unknown; close?: stri
   return true;
 }
 
-export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string; biz?: string }) {
+export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string; biz?: string; sort?: string; box?: string; region?: string; hh?: string; period?: string }) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
   const [applied] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
@@ -182,7 +187,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         if (!ids.has(String(r.id ?? r.__id))) continue;
         const n = notice(r, cats);
         if (!n.close || n.close < from || n.close > to) continue;
-        items.push({ date: n.close, time: String(n.deadline ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null, title: `입찰 마감 · ${String(n.complex ? `${n.complex} ` : '')}${n.title}`.slice(0, 80), kind: 'bid', owner: null, href: '/s/sales/bids?tab=working' });
+        items.push({ date: n.close, time: String(n.deadline ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null, title: `입찰 마감 · ${String(n.complex ? `${n.complex} ` : '')}${n.title}`.slice(0, 80), kind: 'bid', owner: null, href: '/s/sales/hub?tab=bids&bt=working' });
       }
     }
     items.sort((a, b) => (a.date + (a.time ?? '')).localeCompare(b.date + (b.time ?? '')));
@@ -213,7 +218,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const followUp = W.filter((w) => notDone(pick(w, 'status')) && nextOf(w) && nextOf(w)! <= td).map((w) => {
       const nid = String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''); const bid = String(pick(w, 'source_id', 'building_id') ?? '');
       const n = byNoticeId.get(nid); const isBid = !!n && !(String(pick(w, 'source_type') ?? '') === 'building');
-      return { id: isBid ? nid : bid, kind: isBid ? 'bid' : 'building', name: isBid ? `${n!.complex ? n!.complex + ' ' : ''}${n!.title}` : buildings.get(bid) ?? '(이름 없음)', status: pick(w, 'status'), next: nextOf(w), memo: pick(w, 'memo', 'note'), href: isBid ? '/s/sales/bids?tab=working' : '/s/sales/hub?tab=buildings' };
+      return { id: isBid ? nid : bid, kind: isBid ? 'bid' : 'building', name: isBid ? `${n!.complex ? n!.complex + ' ' : ''}${n!.title}` : buildings.get(bid) ?? '(이름 없음)', status: pick(w, 'status'), next: nextOf(w), memo: pick(w, 'memo', 'note'), href: isBid ? '/s/sales/hub?tab=bids&bt=working' : '/s/sales/hub?tab=buildings' };
     }).sort((a, b) => String(a.next).localeCompare(String(b.next)));
     const FPall = await prog('operating_facility_prospects__progress', 20000);
     const FP = FPall.filter((p) => notDone(pick(p, 'contact_status', 'status')) && day(pick(p, 'next_action_date', 'next_date')) && day(pick(p, 'next_action_date', 'next_date'))! <= td);
@@ -229,10 +234,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const nameOfNotice = (n: ReturnType<typeof notice>) => `${n.complex ? n.complex + ' ' : ''}${n.title}`;
     const nowSales = NR.filter((r) => { const w = workOf.get(String(r.id ?? r.__id)); return w && /검토중|연락중|즉시/.test(String(w)) && isOpenBid(notice(r), w, td); }).map((r) => notice(r, cats))
       .sort((a, b) => String(a.deadline ?? a.close ?? '9999').localeCompare(String(b.deadline ?? b.close ?? '9999'))).slice(0, 5)
-      .map((n) => ({ id: n.id, kind: 'bid', name: nameOfNotice(n), status: workOf.get(String(n.id)) ?? null, next: n.close, memo: null, href: '/s/sales/bids?tab=working' }));
+      .map((n) => ({ id: n.id, kind: 'bid', name: nameOfNotice(n), status: workOf.get(String(n.id)) ?? null, next: n.close, memo: null, href: '/s/sales/hub?tab=bids&bt=working' }));
     const closingSoon = NR.map((r) => notice(r, cats)).filter((n) => { const w = workOf.get(String(n.id)); return (n.close === td || n.close === tm) && isOpenBid(n, w, td) && (!w || /미검토|검토중|연락중|즉시/.test(String(w))); })
       .sort((a, b) => String(a.deadline ?? '').localeCompare(String(b.deadline ?? '')))
-      .map((n) => ({ id: n.id, kind: 'bid', name: nameOfNotice(n), status: n.close === td ? '오늘 마감' : '내일 마감', next: n.close, memo: String(n.deadline ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null, href: '/s/sales/bids?tab=closing' }));
+      .map((n) => ({ id: n.id, kind: 'bid', name: nameOfNotice(n), status: n.close === td ? '오늘 마감' : '내일 마감', next: n.close, memo: String(n.deadline ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null, href: '/s/sales/hub?tab=bids&bt=closing' }));
     const todo = { followUp, facilities, vendors, pastTasks, nowSales, leads: [...overdue, ...live.filter((l) => l.next === td)].map((l) => ({ id: l.id, kind: 'lead', name: l.name, status: l.status, next: l.next, memo: null, href: `/s/sales/leads?id=${encodeURIComponent(String(l.id))}` })), closingSoon };
     // S2-6 영업기회 요약 타일 6 + 목록별 진행 현황표(4행 × 상태)
     const endOf = (r: any) => day(pick(r, 'contract_end_date', 'contract_end', 'service_end_date', 'contract_expiry_date'));
@@ -263,12 +268,17 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const shift = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x); };
     const rel = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true');
     const skips = skipLinks(rel, (id) => workOf.get(id)); // 137차: 대상 아님 + 같은 사업(사전규격 ↔ 본 공고)
-    const items = rel.filter((r) => endOf(r) && !skips.hidden(r)).map((r) => { const n = notice(r); const end = endOf(r)!;
-      const start = shift(end, -12), start2 = shift(end, -9), propose = shift(end, -6), rebid = shift(end, -3);
-      const stage = td < start ? '영업 전' : td < propose ? '영업 시작' : td < rebid ? '제안' : td <= end ? '재입찰' : '종료';
-      const daysLeft = Math.round((Date.parse(end) - Date.parse(td)) / 864e5);
-      return { id: n.id, name: `${n.complex ? n.complex + ' ' : ''}${n.title}`, agency: n.agency, region: n.region, winner: n.winner, amount: n.awardAmount ?? n.amount, end, start, start2, propose, rebid, stage, daysLeft, work: workOf.get(String(n.id)) ?? null, url: n.url, href: '/s/sales/bids?tab=all&q=' + encodeURIComponent(String(n.title)) }; })
-      .filter(hit).sort((a, b) => a.end.localeCompare(b.end));
+    const timing = (end: string) => { const start = shift(end, -12), start2 = shift(end, -9), propose = shift(end, -6), rebid = shift(end, -3);
+      return { start, start2, propose, rebid, stage: td < start ? '영업 전' : td < propose ? '영업 시작' : td < rebid ? '제안' : td <= end ? '재입찰' : '종료', daysLeft: Math.round((Date.parse(end) - Date.parse(td)) / 864e5) }; };
+    const bidItems = rel.filter((r) => endOf(r) && !skips.hidden(r)).map((r) => { const n = notice(r); const end = endOf(r)!;
+      return { id: n.id, kind: 'bid', name: `${n.complex ? n.complex + ' ' : ''}${n.title}`, agency: n.agency, region: n.region, winner: n.winner, amount: n.awardAmount ?? n.amount, end, ...timing(end), work: workOf.get(String(n.id)) ?? null, url: n.url, href: '/s/sales/hub?tab=bids&bt=all&bq=' + encodeURIComponent(String(n.title)) }; });
+    // #605(대표 10/25 ①): 시설 보관함(대상 아님 = 이미 위탁 중)에서 적은 '현 위탁사·계약만료일'(회사 진행 기록) → 같은 역산으로 이 탭에
+    const FP = (await prog('operating_facility_prospects__progress', 20000)).filter((p) => day(pick(p, 'contract_end_date')));
+    const facRows = FP.length ? new Map((await rows('global', 'operating_facility_prospects', 20000)).map((r) => [String(r.id ?? r.__id), r])) : new Map<string, any>();
+    const facItems = FP.flatMap((p) => { const id = String(p.id ?? p.__id); const r = facRows.get(id); if (!r) return []; const end = day(pick(p, 'contract_end_date'))!; const name = String(pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)'); const st = pick(p, 'contact_status', 'status');
+      return [{ id: `facility:${id}`, kind: 'facility', name, agency: null, region: pick(r, 'region'), winner: pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator', 'management_company'), amount: null, end, ...timing(end), work: st, url: null,
+        href: `/s/sales/hub?tab=facilities${/^(대상\s?아님|영업완료)$/.test(String(st ?? '')) ? '&box=archive' : ''}&q=${encodeURIComponent(name)}` }]; });
+    const items = [...bidItems, ...facItems].filter(hit).sort((a, b) => a.end.localeCompare(b.end));
     const within = (n: number) => items.filter((x) => x.daysLeft >= 0 && x.daysLeft <= n).length;
     return { ...meta, bidsOn, items: items.slice(0, 500), summary: { d90: within(90), d180: within(180), d365: within(365), past: items.filter((x) => x.daysLeft < 0).length }, stages: (['영업 전', '영업 시작', '제안', '재입찰', '종료'] as const).map((s) => [s, items.filter((x) => x.stage === s).length]) };
   }
@@ -280,7 +290,12 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 대표 요청(영업관리 거래처 장): 표 안에서 단계·우선·다음 연락·거래처명·담당(관리자) 바로 고치기 — 전환 뒤(쓰기 열림)만
     const canAssign = ['owner', 'admin'].includes(u.role);
     const people = !meta.readOnly && canAssign ? await sql`select id, name from users where tenant = ${t} and status = 'active' and not is_demo order by name` : [];
-    return { ...meta, stages: STAGES, canAssign, people, me: u.id, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [] })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
+    // #610 ⓒ·#614(대표 10/25): 보류·실패·되돌림 리드는 화면 기본 목록에서 빠져 '보류·실패' 보관함 — 마지막 단계 기록(사유·누가·언제·이전 단계)으로 [되돌리기]
+    const logs = formal ? new Map((await sql<{ lead_id: string; from_status: string | null; to_status: string; reason: string | null; changed_at: Date; by: string | null }[]>`select distinct on (g.lead_id) g.lead_id, g.from_status, g.to_status, g.reason, g.changed_at, u.name as by
+      from sales_status_log g join sales_leads l on l.id = g.lead_id left join users u on u.id = g.changed_by where l.tenant = ${t} and l.deleted_at is null and l.status in ('보류', '실패', '되돌림') order by g.lead_id, g.changed_at desc`).map((g) => [g.lead_id, g])) : new Map();
+    const archiveOf = (l: { id: unknown; status: unknown }) => { if (!ARCHIVED_STAGES.has(String(l.status))) return null; const g = logs.get(String(l.id)); const same = g?.to_status === String(l.status);
+      return { reason: same ? g!.reason ?? null : null, by: same ? g!.by ?? null : null, at: same && g!.changed_at ? new Date(g!.changed_at).toISOString() : null, prev: same && g!.from_status && !ARCHIVED_STAGES.has(g!.from_status) ? g!.from_status : null }; };
+    return { ...meta, stages: STAGES, canAssign, people, me: u.id, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [], archive: archiveOf(l) })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
   }
   if (view === 'lead') {
     if (!q.id) throw badRequest('id 가 필요합니다');
@@ -376,64 +391,104 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const since = await lastMailAt(t);
     // [대상 아님] 탭: 누가·언제·사유(진행 기록) — 사유 칸이 생기기 전에 넘긴 것은 마지막으로 고친 사람·시각
     const who = tab === 'skip' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
-    const items = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since); const skipped = skips.hidden(r);
+    const td = today();
+    const all = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since); const skipped = skips.hidden(r);
       return { ...n0, todayHit: why.hit, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
-        // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본)
-        workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, raw: r.__orig ?? r,
+        // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본) · #610 넘기기로 만든 리드면 카드에 [되돌리기]
+        workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, workHandoff: !!(w?.lead_id && pick(w, 'handoff_by')), raw: r.__orig ?? r,
         history: r.__history ?? null, skipped, skip: who && skipped && !folded(r) ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null,
-        linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; })
-      .filter((n) => (tab === 'skip' ? n.skipped && !!n.skip : !n.skipped) && hit(n) && (tab !== 'working' || n.work) && (tab !== 'open' || isOpenBid({ ...n, related: true }, n.work, today()))
-        && (tab !== 'today' || (n.todayHit && (n.result || !bidEnded(n, today())))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tab !== 'closing' || n.close === today()) && (tab !== 'recruit' || n.vendorRecruit)
-        && (tab !== 'soon' || (!!n.close && n.close >= today() && n.close <= plus(3) && isOpenBid({ ...n, related: true }, n.work, today()))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중
-        && (tab !== 'prep' || (!!n.close && n.close >= today() && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, today()))) // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
-        && (!q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz))))
-      .sort((a, b) => tab === 'open' || tab === 'soon' || tab === 'prep' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : tab === 'skip' ? String(b.skip?.at ?? '').localeCompare(String(a.skip?.at ?? '')) : String(b.posted).localeCompare(String(a.posted))).slice(0, 300);
+        linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; });
+    // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작
+    const inTab = (n: (typeof all)[number], tb: string) => (tb === 'skip' ? n.skipped && !!n.skip : !n.skipped) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
+      && (tb !== 'today' || (n.todayHit && (n.result || !bidEnded(n, td)))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
+      && (tb !== 'soon' || (!!n.close && n.close >= td && n.close <= plus(3) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중
+      && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td))); // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
+    // #606 정렬(?sort=): 마감 D-day(deadline) · 공고일(notice) · 예산(amount) — 없으면 탭 기본(진행 중·마감순, 대상 아님·넘긴 순, 그 밖·DB 등록 최신순)
+    const sortKey = ['deadline', 'notice', 'amount'].includes(String(q.sort ?? '')) ? String(q.sort) : null;
+    const cmp = (a: (typeof all)[number], b: (typeof all)[number]) => sortKey === 'deadline' ? String(a.deadline ?? a.close ?? '9999').localeCompare(String(b.deadline ?? b.close ?? '9999'))
+      : sortKey === 'notice' ? String(b.noticeDate ?? b.posted ?? '').localeCompare(String(a.noticeDate ?? a.posted ?? ''))
+        : sortKey === 'amount' ? (Number(b.amount) || 0) - (Number(a.amount) || 0)
+          : tab === 'open' || tab === 'soon' || tab === 'prep' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : tab === 'skip' ? String(b.skip?.at ?? '').localeCompare(String(a.skip?.at ?? '')) : String(b.posted).localeCompare(String(a.posted));
+    const items = all.filter((n) => inTab(n, tab) && hit(n) && (!q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz)))).sort(cmp).slice(0, 300);
     // 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 결과(낙찰·유찰)는 빼고 아래 '결과' 묶음으로 — 당일 메일 결과 구역과 같은 기준(isAwardResult)
     const results = tab === 'today' ? items.filter((n) => n.result) : [];
     const skipCount = N.filter((r) => skips.own(r) && !folded(r)).length; // [대상 아님] 탭 장 수(같은 사업은 한 장)
-    return { ...meta, tab, total: N.filter((r) => !skips.hidden(r)).length, skipCount, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
+    const todayCount = all.filter((n) => inTab(n, 'today') && !n.result).length; // #613 '오늘 새 공고 n' 칩(검색어와 무관)
+    return { ...meta, tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, todayCount, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {
-    const tab = q.tab ?? 'buildings';
-    const dayOk = (r: any) => q.day !== 'today' || firstSeen(r) === today(); // 오늘 새 영업 DB
+    const tab = q.tab ?? 'buildings'; const td = today();
+    const dayOk = (r: any) => q.day !== 'today' || firstSeen(r) === td; // 오늘 새 영업 DB
+    // #605(대표 10/25): '대상 아님'·완료(영업완료·등록 완료)로 넘긴 건은 기본 목록에서 빠지고 보관함(?box=archive)에 누가·언제·사유 + [되돌리기]
+    const box = q.box === 'archive' ? 'archive' : 'open';
+    const done = (st: unknown) => /^(대상\s?아님|영업완료|등록 완료)$/.test(String(st ?? '').trim());
+    const who = box === 'archive' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
+    const archiveOf = (p: any) => (who && p && done(pick(p, 'status', 'contact_status')) ? { status: pick(p, 'status', 'contact_status'), by: who.get(String(pick(p, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(p, 'skip_at', '__updated_at', 'updated_at'), reason: pick(p, 'skip_reason'), prev: pick(p, 'skip_prev') } : null);
+    // #606 정렬(?sort=)·필터(?region= 지역·주소 포함, ?hh= 세대수 이상, ?period= 오늘 앞뒤 n개월 — 준공·입주·DB 등록 기준)
+    const sortKey = String(q.sort ?? '') || null; const region = String(q.region ?? '').trim(); const hh = Number(q.hh) > 0 ? Number(q.hh) : 0; const months = [1, 3, 6].includes(Number(q.period)) ? Number(q.period) : 0;
+    const lo = months ? shiftMonths(td, -months) : null, hi = months ? shiftMonths(td, months) : null;
+    const inPeriod = (...dates: (string | null | undefined)[]) => !months || dates.some((d) => !!d && d >= lo! && d <= hi!);
+    const regionOk = (x: { region?: unknown; address?: unknown }) => !region || String(x.region ?? '').includes(region) || String(x.address ?? '').includes(region);
+    const hhOk = (x: { households?: unknown }) => !hh || Number(x.households) >= hh;
+    const asc = (a: unknown, b: unknown) => String(a ?? '9999-99').localeCompare(String(b ?? '9999-99')); const desc = (a: unknown, b: unknown) => String(b ?? '').localeCompare(String(a ?? '')); const numDesc = (a: unknown, b: unknown) => (Number(b) || 0) - (Number(a) || 0);
+    const tabs = await hubTabsOn(t, bidsOn);
+    const pack = <T extends { region?: unknown }>(list: T[], isDone: (x: T) => boolean, keep: (x: T) => boolean, sorter: ((a: T, b: T) => number) | null) => {
+      const regions = [...new Set(list.map((x) => String(x.region ?? '').trim()).filter((x) => x && x.length <= 8))].sort((a, b) => a.localeCompare(b, 'ko'));
+      const archived = list.filter(isDone); const out = (box === 'archive' ? archived : list.filter((x) => !isDone(x))).filter(keep);
+      return { ...meta, tab, box, tabs, sort: sortKey, filters: { region: region || null, hh: hh || null, period: months || null }, regions, archiveCount: archived.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
+    };
     // S1-2: 신규단지 진행(opportunity_work · source_id = 단지 id)
     const BW = new Map((await prog('opportunity_work')).filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w]));
-    if (tab === 'buildings') return { ...meta, tab, items: (await rows('global', 'building_sales_pipeline')).filter((r) => hit(r) && dayOk(r)).map((r) => ({ id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
-      work: BW.get(String(r.id ?? r.__id)) ? { status: pick(BW.get(String(r.id ?? r.__id)), 'status'), memo: pick(BW.get(String(r.id ?? r.__id)), 'memo', 'note'), next: day(pick(BW.get(String(r.id ?? r.__id)), 'next_date', 'next_action_date')), leadId: BW.get(String(r.id ?? r.__id))?.lead_id ?? null } : null,
-      // S1-3: 원본 칸 current_stage·sales_priority·household_count·source_url·attachment_urls 먼저
-      address: pick(r, 'address', 'location'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), start: day(pick(r, 'sales_start_date', 'start_date', 'notice_date')), status: pick(r, 'current_stage', 'status', 'stage'),
-      url: pick(r, 'source_url', 'url', 'detail_url'), attachments: attachmentsOf(r), estimated: pick(r, 'is_estimated', 'date_estimated', 'estimated') === true || pick(r, 'is_estimated', 'date_estimated', 'estimated') === 'true',
-      // 영업관리 2-7 칸 순서: 승인일·착공·준공(예정)·입주(예정)·세대수·시행사·시공사·영업 시작·제안 시작·운영사 선정 예상
-      kind: pick(r, 'building_type', 'type', 'kind'), region: pick(r, 'region', 'sido'), priority: pick(r, 'sales_priority', 'priority'),
-      dates: [['승인일', day(pick(r, 'approval_date', 'approved_at'))], ['착공', day(pick(r, 'construction_start_date', 'start_construction_date'))], ['준공(예정)', day(pick(r, 'completion_date', 'expected_completion_date'))],
-        ['입주(예정)', day(pick(r, 'move_in_date', 'expected_move_in_date'))], ['세대수', pick(r, 'household_count', 'households', 'total_households', 'units')], ['시행사', pick(r, 'developer', 'executor')], ['시공사', pick(r, 'builder', 'constructor', 'contractor')],
-        ['영업 시작', day(pick(r, 'sales_start_date', 'start_date'))], ['제안 시작', day(pick(r, 'proposal_start_date'))], ['운영사 선정 예상', day(pick(r, 'operator_selection_date', 'expected_operator_selection'))]],
-      firstSeen: firstSeen(r), raw: r })) };
+    if (tab === 'buildings') {
+      const list = (await rows('global', 'building_sales_pipeline')).filter((r) => hit(r) && dayOk(r)).map((r) => { const w = BW.get(String(r.id ?? r.__id));
+        return { id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
+          work: w ? { status: pick(w, 'status'), memo: pick(w, 'memo', 'note'), next: day(pick(w, 'next_date', 'next_action_date')), leadId: w?.lead_id ?? null, handoff: !!(w?.lead_id && pick(w, 'handoff_by')) } : null, archive: archiveOf(w),
+          // S1-3: 원본 칸 current_stage·sales_priority·household_count·source_url·attachment_urls 먼저
+          address: pick(r, 'address', 'location'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), start: day(pick(r, 'sales_start_date', 'start_date', 'notice_date')), status: pick(r, 'current_stage', 'status', 'stage'),
+          url: pick(r, 'source_url', 'url', 'detail_url'), attachments: attachmentsOf(r), estimated: pick(r, 'is_estimated', 'date_estimated', 'estimated') === true || pick(r, 'is_estimated', 'date_estimated', 'estimated') === 'true',
+          // 영업관리 2-7 칸 순서: 승인일·착공·준공(예정)·입주(예정)·세대수·시행사·시공사·영업 시작·제안 시작·운영사 선정 예상
+          kind: pick(r, 'building_type', 'type', 'kind'), region: pick(r, 'region', 'sido'), priority: pick(r, 'sales_priority', 'priority'),
+          completion: day(pick(r, 'completion_date', 'expected_completion_date')), moveIn: day(pick(r, 'move_in_date', 'expected_move_in_date')),
+          dates: [['승인일', day(pick(r, 'approval_date', 'approved_at'))], ['착공', day(pick(r, 'construction_start_date', 'start_construction_date'))], ['준공(예정)', day(pick(r, 'completion_date', 'expected_completion_date'))],
+            ['입주(예정)', day(pick(r, 'move_in_date', 'expected_move_in_date'))], ['세대수', pick(r, 'household_count', 'households', 'total_households', 'units')], ['시행사', pick(r, 'developer', 'executor')], ['시공사', pick(r, 'builder', 'constructor', 'contractor')],
+            ['영업 시작', day(pick(r, 'sales_start_date', 'start_date'))], ['제안 시작', day(pick(r, 'proposal_start_date'))], ['운영사 선정 예상', day(pick(r, 'operator_selection_date', 'expected_operator_selection'))]] as [string, unknown][],
+          firstSeen: firstSeen(r), raw: r }; });
+      type B = (typeof list)[number];
+      const sorter: Record<string, (a: B, b: B) => number> = { completion: (a, b) => asc(a.completion, b.completion), moveIn: (a, b) => asc(a.moveIn, b.moveIn), households: (a, b) => numDesc(a.households, b.households), firstSeen: (a, b) => desc(a.firstSeen, b.firstSeen) };
+      return pack(list, (x) => done(x.work?.status), (x) => regionOk(x) && hhOk(x) && inPeriod(x.completion, x.moveIn, x.firstSeen), sorter[sortKey ?? ''] ?? null);
+    }
     if (tab === 'facilities') {
       const P = new Map((await prog('operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
-      const items = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
+      const list = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)', address: pick(r, 'address', 'road_address'), score: Number(pick(r, 'score', 'priority_score') ?? 0) || null,
           lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'completion_date', 'use_approval_date', 'completed_at', 'move_in_date')),
-          contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null), leadId: p?.lead_id ?? null,
+          contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null), leadId: p?.lead_id ?? null, handoff: !!(p?.lead_id && pick(p, 'handoff_by')), archive: archiveOf(p),
           // 영업관리 2-8 한 줄 순서: 판정 · 유형·지역·세대·규모·현 위탁사 · 주소 · 관리사무소 전화 · 부대시설 · DB 등록 · 준공·입주 · 다음 연락 · 최근 기록 · 다음 조치
           // S1-3: 원본 칸 household_count·facility_scale(+facility_scale_unit)·completion_date, 다음 조치는 회사 진행(__progress.next_action) → 수집기 제안(etl_suggested_next_action) 순, 최근 기록 notes
           verdict: pick(r, 'verdict', 'judgment', 'stage_label', 'opportunity_label'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), scale: scaleOf(r),
-          operator: pick(r, 'current_operator', 'operator', 'management_company'), phone: pick(r, 'office_phone', 'management_phone', 'phone'), amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
+          // #605 보관함에서 적은 현 위탁사·계약만료일(회사 진행 기록)이 원본 칸보다 먼저 — 계약만료·재입찰 탭으로 이어짐
+          operator: pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator', 'management_company'), contractEnd: day(pick(p, 'contract_end_date')), phone: pick(r, 'office_phone', 'management_phone', 'phone'), amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
           firstSeen: firstSeen(r), moveIn: day(pick(r, 'move_in_date', 'move_in_start')), lastNote: p?.notes ?? p?.last_note ?? p?.memo ?? null,
           nextAction: p?.next_action ?? pick(r, 'etl_suggested_next_action', 'next_action', 'recommended_action'), nextActionFrom: p?.next_action ? '진행 기록' : pick(r, 'etl_suggested_next_action') ? '수집기 제안' : null,
-          elapsedDays: daysSince(day(pick(r, 'move_in_date', 'move_in_start')) ?? day(pick(r, 'completion_date', 'use_approval_date', 'completed_at'))), raw: r }; })
-        .sort((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))).slice(0, 300);
-      return { ...meta, tab, items };
+          elapsedDays: daysSince(day(pick(r, 'move_in_date', 'move_in_start')) ?? day(pick(r, 'completion_date', 'use_approval_date', 'completed_at'))), raw: r }; });
+      type Fc = (typeof list)[number];
+      const sorter: Record<string, (a: Fc, b: Fc) => number> = { completion: (a, b) => asc(a.date, b.date), moveIn: (a, b) => asc(a.moveIn, b.moveIn), elapsed: (a, b) => numDesc(a.elapsedDays, b.elapsedDays), households: (a, b) => numDesc(a.households, b.households), next: (a, b) => asc(a.next, b.next) };
+      return pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen),
+        sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))));
     }
     if (tab === 'vendors') {
       const P = new Map((await prog('vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
-      return { ...meta, tab, items: (await rows('global', 'vendor_registrations')).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
+      const list = (await rows('global', 'vendor_registrations')).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)', division: pick(r, 'category', 'division', 'kind'), rank: pick(r, 'rank_label', 'rank'), notice: pick(r, 'notice_title', 'title', 'notice'),
-          url: pick(r, 'recruit_url', 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null), leadId: p?.lead_id ?? null,
+          url: pick(r, 'recruit_url', 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null), leadId: p?.lead_id ?? null, handoff: !!(p?.lead_id && pick(p, 'handoff_by')), archive: archiveOf(p), region: pick(r, 'region', 'sido'),
           // 영업관리 2-9 카드: 모집 공지 공개 여부·모집 시기·등록 요건·공동인증서·비고·링크
           // S1-3: 원본 칸 recruit_visibility·recruit_timing·cert_required·register_url·recruit_url 먼저
           open: pick(r, 'recruit_visibility', 'recruit_open', 'notice_open', 'is_open'), period: pick(r, 'recruit_timing', 'recruit_period', 'period'), requirement: pick(r, 'requirements', 'registration_requirements', 'register_requirements'), cert: pick(r, 'cert_required', 'certificate', 'joint_certificate'),
-          note: pick(r, 'notes', 'note', 'remark'), applyUrl: pick(r, 'register_url', 'apply_url', 'registration_url'), portalUrl: pick(r, 'portal_url'), homepage: pick(r, 'homepage', 'website'), firstSeen: firstSeen(r), raw: r }; }) };
+          note: pick(r, 'notes', 'note', 'remark'), applyUrl: pick(r, 'register_url', 'apply_url', 'registration_url'), portalUrl: pick(r, 'portal_url'), homepage: pick(r, 'homepage', 'website'), firstSeen: firstSeen(r), raw: r }; });
+      type V = (typeof list)[number];
+      const rankNo = (v: unknown) => { const n = Number(String(v ?? '').replace(/[^0-9.]/g, '')); return n > 0 ? n : 1e9; };
+      const sorter: Record<string, (a: V, b: V) => number> = { period: (a, b) => String(a.period ?? '').localeCompare(String(b.period ?? ''), 'ko'), rank: (a, b) => rankNo(a.rank) - rankNo(b.rank), firstSeen: (a, b) => desc(a.firstSeen, b.firstSeen) };
+      return pack(list, (x) => done(x.status), (x) => inPeriod(x.firstSeen), sorter[sortKey ?? ''] ?? null);
     }
     throw notFound();
   }

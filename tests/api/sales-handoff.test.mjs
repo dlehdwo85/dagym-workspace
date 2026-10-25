@@ -80,6 +80,7 @@ describe('영업 진행으로 넘기기', () => {
       const it = h.items.find((x) => x.id === id); assert.ok(it, `${kind} 허브에 보임`);
       assert.equal(it.work?.leadId ?? it.leadId, r.leadId, `${kind} 허브 행에 리드 연결`);
       assert.equal(kind === 'building' ? it.work?.status : kind === 'facility' ? it.contact : it.status, '영업 중', `${kind} 영업 중`);
+      assert.equal(it.work?.handoff ?? it.handoff, true, `${kind} 카드 [되돌리기] 표시(#610)`);
     }
     const [f] = await sql`select status, data from sales_work_records where tenant = 'default' and src_tbl = 'operating_facility_prospects__progress' and ref_id = 'F1'`;
     assert.deepEqual([f.status, f.data.contact_status], ['영업 중', '영업 중']);
@@ -95,6 +96,7 @@ describe('배정 이전으로 되돌리기', () => {
     const r = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N3', assigneeIds: [ctx.staffA.id] });
     assert.equal(r.taskIds.length, 1); assert.equal(r.eventIds.length, 2);
     const [src] = await sql`select src from sales_leads where id = ${r.leadId}`; assert.deepEqual([src.src.taskIds, src.src.eventIds], [r.taskIds, r.eventIds], '리드에 업무·일정 id 보관');
+    assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.find((x) => x.id === 'N3').workHandoff, true, '#610 카드 [되돌리기] 표시');
     await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffB.id, spaces: ['sales'] });
     assert.equal((await ctx.staffB.client.req('POST', '/api/sales/work/handoff/revert', { leadId: r.leadId })).status, 403, '관계없는 영업 직원');
     const v = await ctx.staffA.client.ok('POST', '/api/sales/work/handoff/revert', { leadId: r.leadId, reason: '담당 변경' });
@@ -107,7 +109,9 @@ describe('배정 이전으로 되돌리기', () => {
     const [l] = await sql`select status, src from sales_leads where id = ${r.leadId}`; assert.equal(l.status, '되돌림'); assert.equal(l.src.reverted.reason, '담당 변경');
     assert.equal((await sql`select count(*)::int c from sales_status_log where lead_id = ${r.leadId} and to_status = '되돌림'`)[0].c, 1);
     assert.equal((await sql`select count(*)::int c from notifications where user_id = ${ctx.ownerId} and title like '영업 배정 취소%'`)[0].c, 0, '되돌린 본인(담당)에게는 없음·넘긴 사람은 담당 아님');
-    const b = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working'); const n3 = b.items.find((x) => x.id === 'N3'); assert.equal(n3.workLeadId, null); assert.equal(n3.work, '검토중');
+    const b = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working'); const n3 = b.items.find((x) => x.id === 'N3'); assert.equal(n3.workLeadId, null); assert.equal(n3.work, '검토중'); assert.equal(n3.workHandoff, false);
+    const lv = (await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads.find((x) => x.id === r.leadId);
+    assert.deepEqual([lv.status, lv.archive?.prev, lv.archive?.by], ['되돌림', '신규리드', '이직원'], '#614 되돌린 리드는 보관함(이전 단계·누가)');
     assert.equal((await ctx.staffA.client.req('POST', '/api/sales/work/handoff/revert', { leadId: r.leadId })).status, 409, '두 번 되돌리기');
     const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${r.leadId}`); assert.equal(d.lead.status, '되돌림'); assert.equal(d.raw.handoff, true, 'raw 에 src 펼쳐짐'); assert.equal(d.raw.reverted.reason, '담당 변경');
     const r2 = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N3', assigneeIds: [ctx.ownerId] }); assert.notEqual(r2.leadId, r.leadId, '다시 넘기면 새 리드');
@@ -143,7 +147,7 @@ describe('#507 공고 첨부 자동(대표 10/23 15:50)', () => {
       assert.deepEqual(libs.map((l) => [l.folder, l.space, l.source, l.file_name]), [['영업/공고/광교 센트럴 커뮤니티센터 피트니스 위탁운영 업체 선정', 'sales', 'sales_auto', '입찰공고문.hwp']]);
       let desc = '';
       for (let i = 0; i < 30 && !/자동 첨부 실패/.test(desc); i++) { await new Promise((ok) => setTimeout(ok, 200)); desc = (await sql`select description from tasks where id = ${r.taskIds[0]}`)[0].description; }
-      assert.match(desc, /공고 첨부 3건 중 2건 자동 첨부 실패\(big\.pdf: 30MB 넘음 · 과업지시서\.hwp: 파일 대신 웹페이지\(로그인·세션 필요\)\) — 공고문 내려받기: \/s\/sales\/bids\?tab=working&q=N9/, desc);
+      assert.match(desc, /공고 첨부 3건 중 2건 자동 첨부 실패\(big\.pdf: 30MB 넘음 · 과업지시서\.hwp: 파일 대신 웹페이지\(로그인·세션 필요\)\) — 공고문 내려받기: \/s\/sales\/hub\?tab=bids&bt=working&bq=N9/, desc);
       const act = await sql`select changes from activities where entity_type = 'task' and entity_id = ${r.taskIds[0]} and action = 'file_attached'`;
       assert.equal(act[0].changes.from, 'sales_auto');
       // 업무 상세 [공고 파일 붙이기]: 이미 붙은 파일은 건너뜀, 실패 줄은 한 줄만(새로 씀) · 볼 수 없는 사람은 404
