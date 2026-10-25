@@ -73,7 +73,7 @@ export function PlatformCollectorSettings() {
   }
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="platform-collector-settings">
-      <h2 className="text-sm font-semibold">영업 수집기 설정(입찰·영업 DB·지원사업 수집기 공통)</h2>
+      <h2 className="text-sm font-semibold">공고 수집기 설정(입찰·영업 자료·지원사업 공통)</h2>
       <p className="mt-1 text-xs text-ink-2">협력사 모집 감시 페이지는 한 줄에 하나 — <code>회사명 | https://감시 주소 | https://등록 신청 주소(선택)</code>. 등록 신청 주소는 공고 상세의 ‘등록 신청’ 링크로 쓰입니다. 시공사·시행사 공지(로그인 없이 보이는 페이지)만. 저장하면 다음 07시 실행(또는 데이터 설정 › 자동 수집 [지금 수집])부터 돕니다.{data.vendorPagesUpdatedAt && <> 마지막 저장 {fmtDateTime(data.vendorPagesUpdatedAt)}.</>}</p>
       <textarea className={cx(inputCls, 'mt-2 h-40 font-mono text-xs')} value={pages} onChange={(e) => { setPages(e.target.value); setDirty(true); }} placeholder={'SK에코플랜트 | https://withus.skecoplant.com/mainNotiList.do | https://withus.skecoplant.com/splogin.jsp\n우미건설 | https://b2b.woomi.co.kr/permit/anncBrdList'} aria-label="협력사 감시 페이지 목록" data-testid="vendor-pages" />
       <div className="mt-1 text-xs text-ink-3">인식 {parsed.length}곳{bad > 0 && <span className="text-red-600"> · 형식이 맞지 않는 줄 {bad}개(저장에서 빠짐)</span>}</div>

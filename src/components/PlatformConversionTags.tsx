@@ -26,7 +26,7 @@ export function PlatformConversionTags() {
   }
   return (
     <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="platform-conversion-tags">
-      <h2 className="text-sm font-semibold">가입 전환 태그 <span className="ml-1 text-xs font-normal text-ink-3">저장하면 바로 적용 · 비우면 빌드 환경변수 값{data.updatedAt ? ` · 마지막 저장 ${fmtDateTime(data.updatedAt)}` : ''}</span></h2>
+      <h2 className="text-sm font-semibold">광고 성과 연결(가입 완료 알리기) <span className="ml-1 text-xs font-normal text-ink-3">저장하면 바로 적용 · 비우면 빌드 환경변수 값{data.updatedAt ? ` · 마지막 저장 ${fmtDateTime(data.updatedAt)}` : ''}</span></h2>
       <p className="mt-0.5 text-[11px] text-ink-3">가입할 때 &lsquo;광고 효과 측정&rsquo;(선택)에 동의한 사람만, 회사가 만들어지는 순간 1번 보냅니다. 광고 클릭 id(gclid·fbclid)는 첫 화면에서 그 브라우저에만 기억했다가 그때 함께 넘깁니다. 업무 화면에는 태그를 넣지 않습니다.</p>
       <form onSubmit={save} className="mt-2 grid gap-2 sm:grid-cols-2">
         {FIELDS.map((x) => (

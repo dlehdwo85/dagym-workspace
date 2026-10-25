@@ -27,7 +27,7 @@ export function AiForecast() {
   );
   return (
     <section id="ai-forecast" className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ai-forecast">
-      <h2 className="flex items-center text-sm font-semibold">AI 원가 전망 <span className="ml-1 text-xs font-normal text-ink-3">{data.month} · {data.elapsed}/{data.days}일 · 정가(건별 결제 가정) · 환율 {data.rate.toLocaleString('ko-KR')}원</span>
+      <h2 className="flex items-center text-sm font-semibold">AI 비용 예상 <span className="ml-1 text-xs font-normal text-ink-3">{data.month} · {data.elapsed}/{data.days}일 · 정가(건별 결제 가정) · 환율 {data.rate.toLocaleString('ko-KR')}원</span>
         <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setEdit({ securedUsd: String(f.securedUsd), nextSecuredUsd: String(f.nextSecuredUsd), consoleUsd: f.consoleUsd === null ? '' : String(f.consoleUsd), companySize: String(f.companySize), aiShare: String(Math.round(f.aiShare * 100)), cycleStart: f.cycleStart ?? '' })} data-testid="ai-finance-edit">기준 입력</Button></h2>
       {edit && (
         <div className="mt-2 grid grid-cols-2 gap-2 rounded-input bg-slate-50 p-2 text-xs sm:grid-cols-7" data-testid="ai-finance-form">

@@ -58,6 +58,7 @@ import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
 import { econtractPdf } from './econtractPdf.step.mjs';
 import { payTestRemove } from './payTestRemove.step.mjs';
+import { platformTabs } from './platformTabs.step.mjs';
 import { revenueAuto } from './revenueAuto.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
@@ -1827,8 +1828,10 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await owner.goto(BASE + '/platform');
   assert.match(await owner.getByTestId('platform-ai-margin').innerText(), /AI 원가\(고객사\)[\s\S]*요금 합계[\s\S]*마진/, '#412 플랫폼 원가·마진 한 줄');
   await owner.getByTestId('company-ai-default').getByText('AI 요청 무제한').waitFor();
+  await owner.getByTestId('platform-tab-support').click(); // #565 종류별 탭: 변경 요청 = 고객 지원
   await owner.getByTestId('platform-requests').getByRole('button', { name: '반려' }).first().click();
   await owner.getByText('반려했습니다').waitFor();
+  await owner.getByTestId('platform-tab-billing').click(); // 요금제·결제 시험 = 요금·결제
   await owner.getByLabel('business 월 요금').fill('80000');
   await owner.getByTestId('platform-plans').locator('tr', { hasText: 'business' }).getByRole('button', { name: '저장' }).click();
   await owner.getByText('저장했습니다').first().waitFor();
@@ -2833,6 +2836,7 @@ await step('메신저 3차(대표 10/20 카톡 수준 C12·D14·D15): 머리줄 
 await step('#533 업무 첨부 [고치기](대표 10/23 23:50): 첨부 있는 업무 제목·설명 고쳐 저장 → 그대로 · 글 고쳐 v2(글 고침) · 사진 돌리기·펜 v2(가로·세로 바뀜) · PDF 글자·체크 v2 · 한글 = 내려받아 고친 뒤 올리기 안내 → v2 · 휴대폰 폭 [고치기]', () => attachEdit({ owner, ctx, BASE, SHOTS }));
 await step('139차 전자계약 2차 화면: [새 계약] PDF 올리기 → 서명자 → 칸 놓기(쪽 그림·서명·글자) → 보내기 → 받은 사람 휴대폰 화면 PDF 쪽·칸 채우기·서명 완료', () => econtractPdf({ owner, ctx, sql, BASE, SHOTS }));
 await step('#566 결제 시험 회사 [지우기](대표 10/24 저녁 3): 확인 창 → 지웠습니다 → 목록에서 빠짐', () => payTestRemove({ owner, ctx, sql, BASE, SHOTS }));
+await step('#565 플랫폼 운영 정리(대표 10/24 저녁 1): 오늘 볼 것 5개 → 누르면 그 탭 · 종류별 탭 5개·한 줄 설명·주소 유지 · 예전 주소(paytest·#support) · 휴대폰 폭', () => platformTabs({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

@@ -25,7 +25,7 @@ export function PlatformSalesSources() {
   async function toggle(r: R, collect: boolean) { try { await api('/api/platform/sales-sources', { body: { code: r.code, collect } }); reload(); } catch (er: any) { toast.error(er.message); } }
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="platform-sales-sources">
-      <h2 className="text-sm font-semibold">영업 공공데이터 수집(V40)</h2>
+      <h2 className="text-sm font-semibold">영업 공공데이터 수집</h2>
       <p className="mt-1 text-xs text-ink-2">원천마다 data.go.kr 호출 주소를 넣고 [시험 수집]으로 실제 응답을 확인한 뒤 [하루 한 번 수집]을 켭니다. 키는 운영 설정 DATA_GO_KR_SERVICE_KEY. 칸 이름이 다르면 칸 매핑(JSON, 예: {`{"name":"BPLC_NM","address":"ROAD_NM_ADDR"}`})으로 맞춥니다.</p>
       <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[900px] text-xs">
         <thead><tr className="text-left text-ink-3"><th className="py-1">원천</th><th>호출 주소</th><th>추가 인자(JSON)</th><th>칸 매핑(JSON)</th><th>최근</th><th></th></tr></thead>

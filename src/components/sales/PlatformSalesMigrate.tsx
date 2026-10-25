@@ -26,7 +26,7 @@ export function PlatformSalesMigrate() {
   const mism = r?.tables.filter((t) => t.expected !== null && t.count !== t.expected).length ?? 0;
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="platform-sales-migrate">
-      <h2 className="text-sm font-semibold">영업관리 → 워크인 이전(V41 단계 2)</h2>
+      <h2 className="text-sm font-semibold">예전 영업관리 자료 옮기기</h2>
       <p className="mt-1 text-xs text-ink-2">원본(Supabase, SALES_SRC_URL·SALES_SRC_SERVICE_KEY)은 읽기만 합니다. [미리보기]는 표마다 건수·칸 이름을 보여 주고 아무것도 저장하지 않습니다. 검수 숫자(V39 E)와 맞으면 대표 확인 뒤 적용 단계로.</p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <Button size="sm" variant="secondary" onClick={preview} disabled={busy} data-testid="sales-migrate-preview">{busy ? '읽는 중…' : '미리보기'}</Button>

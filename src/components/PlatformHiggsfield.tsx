@@ -18,7 +18,7 @@ export function PlatformHiggsfield() {
   async function test() { setTesting(true); try { const r = await api<{ ok: boolean; message: string }>('/api/platform/higgsfield', { method: 'POST' }); (r.ok ? toast.ok : toast.error)(r.message); reload(); } catch (e: any) { toast.error(e.message); } finally { setTesting(false); } }
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="platform-higgsfield">
-      <h2 className="text-base font-bold">Higgsfield 생성 연동 <span className={cx('ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold', data.enabled ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-ink-2')}>{data.enabled ? '켜짐' : data.hasKey ? '키 있음 · 꺼짐' : '키 없음'}</span></h2>
+      <h2 className="text-base font-bold">영상·사진 만들기 연결(Higgsfield) <span className={cx('ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold', data.enabled ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-ink-2')}>{data.enabled ? '켜짐' : data.hasKey ? '키 있음 · 꺼짐' : '키 없음'}</span></h2>
       <p className="mt-1 text-xs text-ink-2">제작의뢰실 [생성]이 여기 키로 이미지·영상을 만들어 각 회사 자료실에 저장합니다. 꺼져 있으면 제작 요청 카드(프롬프트·참고 사진)로 넘어가 사람이 만듭니다. 키 값은 저장 뒤 다시 보이지 않습니다.</p>
       <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
         <Field label="키 ID(바꿀 때만)"><input className={inputCls} value={key} onChange={(e) => setKey(e.target.value.trim())} placeholder={data.hasKey ? `저장됨(${data.keyIdHint ?? ''}) — 바꾸려면 입력` : 'console.higgsfield.ai › API keys 의 Key ID'} aria-label="키 ID" autoComplete="off" data-testid="hf-key" /></Field>

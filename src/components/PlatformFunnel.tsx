@@ -15,7 +15,7 @@ export function PlatformFunnel() {
   </>);
   return (
     <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="platform-funnel">
-      <h2 className="text-sm font-semibold">가입 퍼널(주간·유입 출처별) <span className="ml-1 text-xs font-normal text-ink-3">최근 8주 · 회사 {data.total.signups} → 초대 {data.total.invited} → 실사용 {data.total.active}</span></h2>
+      <h2 className="text-sm font-semibold">가입 흐름(주별·어디서 왔는지) <span className="ml-1 text-xs font-normal text-ink-3">최근 8주 · 회사 {data.total.signups} → 초대 {data.total.invited} → 실사용 {data.total.active}</span></h2>
       <p className="mt-0.5 text-[11px] text-ink-3">초대 완료 = {data.definition.invited} · 실사용 = {data.definition.active} · 출처 = 가입 때 utm_source(없으면 direct). 내부·데모·개인 공간 제외.</p>
       {/* V32 3 가입 단계별 이탈(최근 30일) */}
       {data.steps && (

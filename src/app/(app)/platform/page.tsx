@@ -2,7 +2,8 @@
 import { PlatformFunnel } from '@/components/PlatformFunnel';
 import { PlatformConversionTags } from '@/components/PlatformConversionTags';
 import { PlatformQualityRules } from '@/components/PlatformQualityRules';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Building2, Check, Copy, KeyRound, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { AiForecast } from '@/components/AiForecast';
@@ -25,7 +26,32 @@ const cell = 'px-2 py-1.5';
 const small = cx(inputCls, 'h-8 px-2 py-1 text-xs');
 
 /** V10 플랫폼 운영(워크인 운영사 전용): 모든 회사 사용량·요금제 지정·요금제 숫자 변경·변경 요청 처리. 결제 연동 없음 */
-export default function PlatformPage() {
+export default function PlatformPage() { // useSearchParams 를 쓰므로 Suspense 안에서
+  return <Suspense><PlatformInner /></Suspense>;
+}
+
+/**
+ * #565 대표 10/24 "너무 많고 이해하기 어렵다 · 종류별로": 맨 위 '오늘 볼 것' 숫자 + 종류별 탭 5개(탭마다 한 줄 설명).
+ * 탭은 주소(?tab=)에 남아 새로 고쳐도 그대로 — 예전 주소 ?tab=paytest(결제 시험)·#support(문의)·#ai-forecast 는 해당 탭으로
+ */
+const TABS = [
+  { key: 'company', label: '회사·가입', desc: '새로 가입한 회사, 회사 목록과 사용량, 가입이 어디서 들어오는지 봅니다.' },
+  { key: 'billing', label: '요금·결제', desc: '요금제 금액, 결제·환불 내역, 정산, 결제 시험, 마케팅 요금제를 다룹니다.' },
+  { key: 'support', label: '고객 지원', desc: '고객 문의에 답하고, 요금제 변경 요청과 홈페이지 문의 연결을 관리합니다.' },
+  { key: 'ai', label: 'AI·제작 도구', desc: 'AI 비용 예상, 영상·사진·목소리 만들기 연결, 글 품질 규칙을 정합니다.' },
+  { key: 'sales', label: '영업 데이터', desc: '공고 수집기 설정과 공공데이터 수집, 예전 영업·마케팅 자료 옮기기를 합니다.' },
+] as const;
+type TabKey = (typeof TABS)[number]['key'];
+const TAB_KEYS = TABS.map((t) => t.key) as readonly string[];
+
+function PlatformInner() {
+  const sp = useSearchParams(); const router = useRouter();
+  const [hashTab, setHashTab] = useState<TabKey | null>(null);
+  useEffect(() => { const h = window.location.hash.slice(1); setHashTab(h === 'support' ? 'support' : h === 'ai-forecast' ? 'ai' : null); }, []);
+  const raw = sp.get('tab') ?? '';
+  const tab: TabKey = TAB_KEYS.includes(raw) ? (raw as TabKey) : raw === 'paytest' ? 'billing' : hashTab ?? 'company';
+  useEffect(() => { const h = window.location.hash.slice(1); if (h) setTimeout(() => document.getElementById(h)?.scrollIntoView({ block: 'start' }), 300); }, [tab]);
+  const go = (k: TabKey) => router.replace(`/platform?tab=${k}`, { scroll: false });
   const { data, error, loading, reload } = useApi<any>('/api/platform');
   const [subs, setSubs] = useState<Record<string, any>>({});
   const [plans, setPlans] = useState<Record<string, any>>({});
@@ -39,9 +65,7 @@ export default function PlatformPage() {
     try { await api(`/api/platform/requests/${id}`, { body: { approve } }); reload(); toast.ok(approve ? '반영했습니다' : '반려했습니다'); } catch (e: any) { toast.error(e.message); }
   };
   const pctTone = (p: number | null) => (p === null ? 'text-ink-3' : p >= 100 ? 'font-semibold text-red-600' : p >= 80 ? 'text-amber-600' : 'text-ink-2');
-  return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <PageHeader title="플랫폼 운영" icon={Building2} sub="모든 회사의 사용량과 요금제. 요금제 숫자는 여기서 바꾸면 바로 적용됩니다(배포 없음). 결제 흐름은 아래 [결제 시험]에서 시험 상점으로 확인합니다." />
+  const requestsEl = <>
       {!!data.requests.filter((r: any) => r.status === 'pending').length && (
         <section className="rounded-card border border-amber-200 bg-amber-50 p-3" data-testid="platform-requests">
           <h2 className="text-sm font-semibold">변경 요청</h2>
@@ -54,24 +78,8 @@ export default function PlatformPage() {
           ))}
         </section>
       )}
-      <PlatformTenants />
-      <Signups />
-      <PlatformPayments />
-      <PlatformSettlement />
-      <Suspense><PayTest /></Suspense>
-      <InquiryLink />
-      {/* V12 3번: 문의 접수함 */}
-      <PlatformFunnel />
-      <PlatformConversionTags />
-      <PlatformQualityRules />
-      <AiForecast />
-      <PlatformHiggsfield />
-      <PlatformTts />
-      <PlatformSalesMigrate />
-      <PlatformSalesSources />
-      <PlatformCollectorSettings />
-      <PlatformMktPlans />
-      <PlatformOpsImport />
+  </>;
+  const supportEl = <>
       <section id="support" className="rounded-card border border-line bg-white shadow-card" data-testid="support-inbox">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">문의 접수함 {tickets.data && <span className="text-xs font-normal text-ink-3">미답변 {tickets.data.tickets.filter((t) => t.status === 'open').length}건</span>}</h2>
         <ul className="divide-y divide-line text-sm">
@@ -90,6 +98,8 @@ export default function PlatformPage() {
           {!tickets.data?.tickets.length && <li className="p-3 text-ink-3">문의가 없습니다</li>}
         </ul>
       </section>
+  </>;
+  const usageEl = <>
       <section className="rounded-card border border-line bg-white shadow-card">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">회사별 사용량</h2>
         <div className="overflow-x-auto">
@@ -133,6 +143,8 @@ export default function PlatformPage() {
           </table>
         </div>
       </section>
+  </>;
+  const plansEl = <>
       <section className="rounded-card border border-line bg-white shadow-card">
         <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">요금제 (비우면 무제한·별도 협의)</h2>
         <div className="overflow-x-auto">
@@ -166,6 +178,17 @@ export default function PlatformPage() {
         </div>
         <p className="px-3 py-2 text-xs text-ink-3">추가 옵션: {data.addons.map((a: any) => `${a.name} 월 ${won(a.monthly_krw)}`).join(' · ')} (옵션 숫자 변경은 API PUT /api/platform/addons/:code)</p>
       </section>
+  </>;
+  return (
+    <div className="mx-auto max-w-6xl space-y-5">
+      <PageHeader title="플랫폼 운영" icon={Building2} sub="워크인을 쓰는 모든 회사를 돌보는 곳입니다. 위 숫자를 누르면 그 칸으로 갑니다. 요금제 숫자는 여기서 바꾸면 바로 적용됩니다." />
+      <TodayCards go={go} />
+      <PlatformTabs tab={tab} go={go} />
+      {tab === 'company' && <><PlatformTenants /><Signups />{usageEl}<PlatformFunnel /><PlatformConversionTags /></>}
+      {tab === 'billing' && <>{plansEl}<PlatformPayments /><PlatformSettlement /><Suspense><PayTest /></Suspense><PlatformMktPlans /></>}
+      {tab === 'support' && <>{supportEl}{requestsEl}<InquiryLink /></>}
+      {tab === 'ai' && <><AiForecast /><PlatformHiggsfield /><PlatformTts /><PlatformQualityRules /></>}
+      {tab === 'sales' && <><PlatformCollectorSettings /><PlatformSalesSources /><PlatformSalesMigrate /><PlatformOpsImport /></>}
     </div>
   );
 }
@@ -307,5 +330,46 @@ function InquiryLink() {
         )}
       </div>
     </section>
+  );
+}
+
+/** #565 '오늘 볼 것' 숫자 — 누르면 그 탭으로 */
+function TodayCards({ go }: { go: (k: TabKey) => void }) {
+  const { data } = useApi<{ signups: number; payFailed: number; pastDue: number; openTickets: number; collectorFailed: number; aiKrw: number }>('/api/platform/today');
+  const cards: { k: TabKey; label: string; value: string; sub: string; warn: boolean }[] = [
+    { k: 'company', label: '새로 가입한 회사', value: `${data?.signups ?? '–'}곳`, sub: '최근 7일', warn: false },
+    { k: 'billing', label: '결제 실패', value: `${data?.payFailed ?? '–'}건`, sub: data ? `최근 7일 · 밀린 결제 ${data.pastDue}곳` : '최근 7일', warn: !!data && (data.payFailed > 0 || data.pastDue > 0) },
+    { k: 'support', label: '답하지 않은 문의', value: `${data?.openTickets ?? '–'}건`, sub: '지금', warn: !!data && data.openTickets > 0 },
+    { k: 'sales', label: '공고 수집 실패', value: `${data?.collectorFailed ?? '–'}개`, sub: '최근 24시간', warn: !!data && data.collectorFailed > 0 },
+    { k: 'ai', label: '이번 달 AI 비용', value: data ? won(data.aiKrw) : '–', sub: '모든 회사 합계', warn: false },
+  ];
+  return (
+    <section aria-label="오늘 볼 것" data-testid="platform-today">
+      <h2 className="mb-2 text-sm font-semibold">오늘 볼 것</h2>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {cards.map((c) => (
+          <button key={c.label} type="button" onClick={() => go(c.k)} className={cx('rounded-card border p-3 text-left shadow-card transition hover:border-accent-300', c.warn ? 'border-amber-300 bg-amber-50' : 'border-line bg-white')} data-testid={`today-${c.k}`}>
+            <div className="text-xs text-ink-2">{c.label}</div>
+            <div className="mt-0.5 text-xl font-bold tabular-nums">{c.value}</div>
+            <div className="text-[11px] text-ink-3">{c.sub}</div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** #565 종류별 탭 5개 + 탭마다 한 줄 설명 */
+function PlatformTabs({ tab, go }: { tab: TabKey; go: (k: TabKey) => void }) {
+  return (
+    <div>
+      <div role="tablist" aria-label="플랫폼 운영 종류" className="flex gap-1 overflow-x-auto border-b border-line" data-testid="platform-tabs">
+        {TABS.map((t) => (
+          <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => go(t.key)}
+            className={cx('shrink-0 border-b-2 px-3 py-2 text-sm font-medium', tab === t.key ? 'border-accent-600 text-accent-700' : 'border-transparent text-ink-2 hover:text-slate-900')} data-testid={`platform-tab-${t.key}`}>{t.label}</button>
+        ))}
+      </div>
+      <p className="mt-2 text-sm text-ink-2" data-testid="platform-tab-desc">{TABS.find((t) => t.key === tab)!.desc}</p>
+    </div>
   );
 }

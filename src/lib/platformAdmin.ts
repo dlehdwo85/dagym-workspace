@@ -298,3 +298,16 @@ export async function tenantAuditLog(u: SessionUser, tenant: string) {
     order by a.created_at desc limit 100`;
   return { logs: rows };
 }
+
+/** #565 플랫폼 운영 맨 위 '오늘 볼 것' — 신규 가입(7일)·결제 실패(7일)와 밀린 결제·답 안 한 문의·수집 실패(24시간)·이번 달 AI 원가. 시험 회사는 뺌 */
+export async function platformToday(u: SessionUser) {
+  requirePlatform(u);
+  const [r] = await db()<any[]>`select
+      (select count(*)::int from tenants t where not t.is_test and t.deleted_at is null and t.id not in ('default', 'demo') and t.created_at > now() - interval '7 days') as signups,
+      (select count(*)::int from payments p join tenants t on t.id = p.tenant where not t.is_test and p.status = 'failed' and p.created_at > now() - interval '7 days') as pay_failed,
+      (select count(*)::int from tenant_subscriptions s join tenants t on t.id = s.tenant where not t.is_test and t.deleted_at is null and s.past_due_since is not null) as past_due,
+      (select count(*)::int from support_tickets where status = 'open') as open_tickets,
+      (select count(distinct slug)::int from sales_collector_runs where status = 'failed' and started_at > now() - interval '24 hours') as collector_failed,
+      (select coalesce(sum(cost_krw), 0)::float8 from ai_usage where created_at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul') as ai_krw`;
+  return { signups: r.signups, payFailed: r.pay_failed, pastDue: r.past_due, openTickets: r.open_tickets, collectorFailed: r.collector_failed, aiKrw: Math.round(r.ai_krw) };
+}

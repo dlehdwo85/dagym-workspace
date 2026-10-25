@@ -74,7 +74,7 @@ export async function mktQuality({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   const [bv] = await sql`select voice from mkt_brands where id = ${b.id}`;
   assert.deepEqual([bv.voice.audience, bv.voice.avoid, bv.voice.formality, bv.voice.examples], ['퇴근 후 운동하는 직장인', ['역대급', '최저가'], 'mixed', ['퇴근길 20분, 같이 해요.']]);
   // 플랫폼 운영 [글 품질 규칙]: 인스타 해시태그 4 저장 → '기본 5' 표시 → 5 로 되돌리면 저장값 비움
-  await owner.goto(`${BASE}/platform`);
+  await owner.goto(`${BASE}/platform?tab=ai`); // #565 글 품질 규칙 = AI·제작 도구 탭
   const pr = owner.getByTestId('platform-quality-rules'); await pr.waitFor();
   await pr.getByTestId('qr-instagram-hashtags').fill('4');
   await pr.getByTestId('qr-save').click();

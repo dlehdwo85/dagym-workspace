@@ -20,7 +20,7 @@ export async function mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   // 플랫폼 운영: 내레이션 공급자(시험은 가짜 OpenAI 형식 주소)
   await ctx.owner.ok('PUT', '/api/platform/tts', { provider: 'openai', apiKey: 'test-tts-key', base: `${FAKE}/openai/v1` });
-  await owner.goto(`${BASE}/platform`);
+  await owner.goto(`${BASE}/platform?tab=ai`); // #565 영상 내레이션 = AI·제작 도구 탭
   const tts = owner.getByTestId('platform-tts'); await tts.waitFor();
   await tts.getByTestId('tts-state').getByText('켜짐 · OpenAI').waitFor();
   await tts.getByTestId('tts-test').click();

@@ -22,7 +22,7 @@ export function PlatformTts() {
   async function test() { setTesting(true); try { const r = await api<{ ok: boolean; message: string }>('/api/platform/tts', { method: 'POST' }); (r.ok ? toast.ok : toast.error)(r.message); reload(); } catch (e: any) { toast.error(e.message); } finally { setTesting(false); } }
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="platform-tts">
-      <h2 className="text-base font-bold">영상 내레이션(TTS) <span className={cx('ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold', data.ready ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900')} data-testid="tts-state">{data.ready ? `켜짐 · ${data.providers[data.provider!].label}` : '키 필요 — 영상은 자막만'}</span></h2>
+      <h2 className="text-base font-bold">영상 내레이션(목소리 만들기) <span className={cx('ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold', data.ready ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900')} data-testid="tts-state">{data.ready ? `켜짐 · ${data.providers[data.provider!].label}` : '키 필요 — 영상은 자막만'}</span></h2>
       <p className="mt-1 text-xs text-ink-2">제작의뢰실 영상의 장면 대사를 한국어로 읽어 넣습니다. Higgsfield API 에는 음성 모델이 없어 따로 연결합니다. 키가 없으면 내레이션 없이 자막(+배경음)으로 완성됩니다. 비용은 고른 공급자 콘솔에서 결제됩니다.</p>
       <div className="mt-2 grid gap-2 sm:grid-cols-[12rem_1fr_1fr_1fr_auto]">
         <Field label="공급자"><select className={inputCls} value={provider} onChange={(e) => { const v = e.target.value as P | ''; setProvider(v); setVoice(v ? data.providers[v].voice : ''); setModel(v ? data.providers[v].model : ''); }} aria-label="TTS 공급자" data-testid="tts-provider">
