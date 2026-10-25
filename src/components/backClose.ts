@@ -8,28 +8,50 @@ import { ownState } from './urlState';
  *   버튼으로 닫으면 쌓은 칸을 되돌린다(뒤로가기 두 번 누를 필요 없게).
  * - useSheetBack: 모달·시트는 앱 하드웨어 뒤로 버튼이 먼저 닫는다(시트 → history → 홈 순서, native.ts).
  */
+// #648(대표 10/25 23:20 '앱 캘린더 미리보기 [일정 편집] 눌러도 편집 창이 안 열림'): 한 창을 단추로 닫으며(history.back()) 같은 번에 다른 창을 여는 경우
+// — 되돌리기(popstate)는 비동기라 새 창이 먼저 칸을 쌓으면 그 popstate 가 새 창의 칸을 걷어 가 새 창이 바로 닫혔다(미리보기 → 편집 창·업무 패널).
+// 닫는 창이 되돌리는 중(backPending)이면 새 창은 그 popstate 가 온 뒤에 칸을 쌓고, 칸을 쌓기 전에 온 popstate 는 무시한다.
+let backPending = 0;
+const dones: (() => void)[] = []; // history.back() 하나당 popstate 하나 — 부른 순서대로 처리
+const deferred: (() => void)[] = []; // 되돌리기가 끝난 뒤 칸을 쌓을 새 창
+let globalOn = false;
+function ensureGlobalPop() { if (globalOn) return; globalOn = true; window.addEventListener('popstate', () => dones.shift()?.()); }
+
 export function useBackClose(open: boolean, onClose: () => void, param?: [string, string]) {
   const close = useRef(onClose); close.current = onClose;
   const [key, val] = param ?? [];
   useEffect(() => {
     if (!open) return;
+    ensureGlobalPop();
     const id = Math.random().toString(36).slice(2);
     // #535(대표 10/24 '승인 대기 상세 → 뒤로가기 → 마케팅 홈'): param 이 있으면 주소에도 ?key=val 을 남김(새로 고침·공유해도 같은 창)
     // 링크로 바로 들어와 이미 ?key=val 인 창은 기록을 더 쌓지 않음 — 뒤로가기는 들어오기 전 화면, 닫기 단추는 key 만 지움
-    const url = new URL(window.location.href);
-    const y0 = window.scrollY, path0 = url.pathname; // #535(로컬 10/24 08:23): 닫으면 목록을 연 자리로
-    const direct = !!key && url.searchParams.get(key) === val;
-    // #242 2단계: 기록 값에 Next 내부 값을 넣지 않아야 라우터도 ?key= 를 알아, 상세에서 다른 화면에 갔다 뒤로 오면 그 상세를 다시 열 수 있음(ownState)
-    if (!direct) { if (key && val) url.searchParams.set(key, val); window.history.pushState({ ...ownState(), __overlay: id }, '', key ? url.toString() : undefined); }
-    let popped = false;
+    const url0 = new URL(window.location.href);
+    const y0 = window.scrollY, path0 = url0.pathname; // #535(로컬 10/24 08:23): 닫으면 목록을 연 자리로
+    const direct = !!key && url0.searchParams.get(key) === val;
+    let pushed = direct, popped = false, timer: ReturnType<typeof setTimeout> | null = null;
+    const push = () => {
+      if (pushed) return;
+      pushed = true;
+      const i = deferred.indexOf(push); if (i >= 0) deferred.splice(i, 1);
+      if (timer) { clearTimeout(timer); timer = null; }
+      // #242 2단계: 기록 값에 Next 내부 값을 넣지 않아야 라우터도 ?key= 를 알아, 상세에서 다른 화면에 갔다 뒤로 오면 그 상세를 다시 열 수 있음(ownState)
+      const url = new URL(window.location.href);
+      if (key && val) url.searchParams.set(key, val);
+      window.history.pushState({ ...ownState(), __overlay: id }, '', key ? url.toString() : undefined);
+    };
     const onPop = () => {
+      if (!pushed) return; // #648: 아직 우리 칸을 쌓기 전(앞 창이 닫히며 되돌린 popstate)
       if (!direct && window.history.state?.__overlay === id) return;
       popped = true;
       close.current();
     };
     window.addEventListener('popstate', onPop);
+    if (!direct) { if (backPending > 0) { deferred.push(push); timer = setTimeout(push, 400); } else push(); }
     return () => {
       window.removeEventListener('popstate', onPop);
+      const i = deferred.indexOf(push); if (i >= 0) deferred.splice(i, 1);
+      if (timer) clearTimeout(timer);
       keepScroll(y0, path0);
       if (popped) return;
       if (direct) { // 닫기 단추: 주소에서 key 만 지움(기록은 그대로)
@@ -37,8 +59,21 @@ export function useBackClose(open: boolean, onClose: () => void, param?: [string
         if (key && u.searchParams.get(key) === val) { u.searchParams.delete(key); window.history.replaceState(ownState(), '', u.toString()); }
         return;
       }
+      if (!pushed) return; // 칸을 쌓기 전에 닫힘
       // 버튼으로 닫음: 아직 우리 칸 위에 있으면 한 칸 되돌림 (다른 화면으로 이동해 닫힌 경우는 그대로)
-      if (window.history.state?.__overlay === id) window.history.back();
+      if (window.history.state?.__overlay === id) {
+        backPending++;
+        let ran = false;
+        const done = () => {
+          if (ran) return;
+          ran = true;
+          const j = dones.indexOf(done); if (j >= 0) dones.splice(j, 1);
+          backPending = Math.max(0, backPending - 1);
+          if (backPending === 0) deferred.splice(0).forEach((f) => f());
+        };
+        dones.push(done); setTimeout(done, 400);
+        window.history.back();
+      }
     };
   }, [open, key, val]);
 }

@@ -63,7 +63,7 @@ test('1.1.3 앱(android-actions-1) = data 전용(앱이 버튼 그림) · 옛 �
 
 // #618(대표 10/25) 모든 푸시 알림 [확인](읽음 + 지움) + 종류별 1개: 일정 [10분 뒤] · 마감 [완료](담당자만) · 승인 대기 [승인함 열기](서버 처리 없이 열기)
 // 가짜 FCM 으로 본 payload·카테고리 구조 시험 — 실제 휴대폰 버튼 표시·iOS 카테고리 등록(앱 재시작 뒤)은 로컬이 실기기에서 확인
-test('#618 [확인] 모든 알림 · 마감 [완료](담당자만, 요청자는 [확인]만) · 일정 [10분 뒤] · 승인 대기 [승인함 열기] · 웹 목록은 [확인]만 있는 줄 버튼 없음', async () => {
+test('#618 [확인] 모든 알림 · 마감은 [확인]만(대표 10/25 15-13: [완료] 없음) · 일정 [10분 뒤] · 승인 대기 [승인함 열기] · 웹 목록은 [확인]만 있는 줄 버튼 없음', async () => {
   // 기기: staffA 1.1.3 안드로이드(data 전용) · owner 아이폰(카테고리)
   const delivery = async (nid, endpoint) => {
     const [s] = await sql`select id from push_subscriptions where endpoint = ${endpoint}`;
@@ -87,7 +87,7 @@ test('#618 [확인] 모든 알림 · 마감 [완료](담당자만, 요청자는 
   const nAn = await insert(ctx.staffA.id, { type: 'announcement', title: '공지 버튼 시험', link: '/announcements' });
   await delivery(nAn, 'fcm-new-staffA');
   const mDue = await sentFor('fcm-new-staffA', nDue);
-  assert.deepEqual(JSON.parse(mDue.data.actions).map((a) => [a.id, a.label]), [['ack', '확인'], ['done', '완료']], '마감 알림 = [확인][완료]');
+  assert.deepEqual(JSON.parse(mDue.data.actions).map((a) => [a.id, a.label]), [['ack', '확인']], '마감 알림 = [확인]만(15-13: 알람형은 [해제][10분 뒤])');
   const mReq = await sentFor('fcm-ios-owner', nReq);
   assert.deepEqual([JSON.parse(mReq.data.actions).map((a) => a.id), mReq.apns.payload.aps.category], [['ack'], 'wn.ack'], '요청자에게 간 마감 알림은 [확인]만');
   const mEv = await sentFor('fcm-new-staffA', nEv);
@@ -99,13 +99,13 @@ test('#618 [확인] 모든 알림 · 마감 [완료](담당자만, 요청자는 
   // 웹 알림 목록: [확인]만 있는 줄은 버튼 없음(기존 [읽음]), 2개짜리는 그대로
   const list = await ctx.staffA.client.ok('GET', '/api/notifications');
   const row = (id) => list.items.find((x) => x.id === id);
-  assert.deepEqual([row(nAn).actions, row(nDue).actions.map((a) => a.id), row(nEv).actions.map((a) => a.id)], [[], ['ack', 'done'], ['ack', 'snooze']]);
-  // [완료] → 업무 완료 · 결과 문구 '완료함' · 알림 처리됨 · 읽음
-  const done = await ctx.staffA.client.ok('POST', `/api/notifications/${nDue}/action`, { action: 'done' });
-  assert.equal(done.label, '완료함');
-  assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done');
-  const [afterDue] = await sql`select action_done, read_at from notifications where id = ${nDue}`;
-  assert.ok(afterDue.action_done === '완료함' && afterDue.read_at, '처리 표시 + 읽음');
+  assert.deepEqual([row(nAn).actions, row(nDue).actions.map((a) => a.id), row(nEv).actions.map((a) => a.id)], [[], [], ['ack', 'snooze']]);
+  // 대표 10/25 15-13: 마감 알림에 [완료]는 없음 → 서버로 보내면 400(업무는 그대로) · [확인]은 읽음 처리
+  assert.equal((await ctx.staffA.client.req('POST', `/api/notifications/${nDue}/action`, { action: 'done' })).status, 400);
+  assert.notEqual((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done', '업무는 완료되지 않음');
+  assert.equal((await ctx.staffA.client.ok('POST', `/api/notifications/${nDue}/action`, { action: 'ack' })).label, '확인함');
+  const [afterDue] = await sql`select read_at from notifications where id = ${nDue}`;
+  assert.ok(afterDue.read_at, '[확인] = 읽음');
   // 요청자는 [완료] 못 함(버튼에 없음 → 400) · [확인]은 됨
   assert.equal((await ctx.owner.req('POST', `/api/notifications/${nReq}/action`, { action: 'done' })).status, 400);
   assert.equal((await ctx.owner.ok('POST', `/api/notifications/${nReq}/action`, { action: 'ack' })).label, '확인함');

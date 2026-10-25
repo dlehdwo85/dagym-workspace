@@ -123,7 +123,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   const st = await (await import('./mktAuto')).settingsOf(t);
   const handleOf = await (await import('./mktPublish')).accountLabels(t).catch(() => () => null); // #497 R06 카드 '게시 화면으로 보기' 이름
   const now = Date.now();
-  return { approvalHour: st.approval_hour, canDecide: isAdmin(u), contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st.approval_hour) : null;
+  return { approvalHour: st.approval_hour, canDecide: isAdmin(u), paused: !!st.auto_pause /* 대표 10/25 22:20: 자동 생성 일시정지 띠 */, contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st.approval_hour) : null;
     return { ...r, handle: handleOf(r.channel, r.brand_id), deadline, late: !!deadline && deadline.getTime() < now && ['pending', 'changes'].includes(r.status) }; }) };
 }
 

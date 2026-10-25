@@ -214,8 +214,14 @@ async function pickBgm(b: any, brandName: string | null, chosen: string | null |
 async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
   const sql = db(); const spec = KIND_SPEC[b.kind]; const p = b.prompt ?? {}; const d = dimOf(spec.aspect); const notes: string[] = [];
   const { getObject } = await import('./storage'); const C = await import('./video/compose');
-  const [brand] = b.brand_id ? await sql<{ name: string; color: string; video: any }[]>`select name, color, video from mkt_brands where id = ${b.brand_id}` : [];
+  const [brand] = b.brand_id ? await sql<{ name: string; color: string; video: any; facts: any }[]>`select name, color, video, facts from mkt_brands where id = ${b.brand_id}` : [];
   const kit = brand?.video ?? {};
+  // 대표 10/25 22:20 결정 15-15: 끝 화면 행동 권유는 홈페이지 주소 대신 브랜드 사실 카드의 대표 전화(영상에서 주소는 누를 수 없음). 전화가 없으면 주소 아닌 문구만
+  const phone = String(brand?.facts?.phone ?? '').trim();
+  const rawCta = String(kit.cta || p.endCard?.cta || '').trim();
+  const isUrl = /https?:\/\/|www\.|\.(com|kr|net|dev|io|co)(\/|\s|$)/i.test(rawCta);
+  const endCta = phone ? (isUrl || !rawCta ? `문의 ${phone}` : rawCta) : (isUrl ? '' : rawCta);
+  if (isUrl) notes.push(phone ? `끝 화면 주소 대신 전화번호(${phone})를 넣었습니다` : '끝 화면의 홈페이지 주소를 뺐습니다 — 브랜드 사실 카드에 전화번호를 넣으면 그 번호가 들어갑니다');
   const scenes: ComposeScene[] = [];
   for (const s of v.scenes) {
     const file = `c${v.n}-${s.k}.mp4`; await writeFile(join(dir, file), await getObject(s.key!));
@@ -239,7 +245,7 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
   const nar = await narrate(b, v, dir, notes);
   const bgm = await pickBgm(b, brand?.name ?? null, p.bgmId, dir, notes);
   const out = await C.composeVideo({ dir, aspect: spec.aspect, scenes, narration: nar.list, bgm, font: { dir: 'fonts', family }, out: `out-${v.n}.mp4`,
-    end: { seconds: END_SEC, color: kit.endColor || brand?.color || '#111111', headline: kit.headline || p.endCard?.headline || brand?.name || '', cta: kit.cta || p.endCard?.cta || '', logoPng: logo } });
+    end: { seconds: END_SEC, color: kit.endColor || brand?.color || '#111111', headline: kit.headline || p.endCard?.headline || brand?.name || '', cta: endCta, logoPng: logo } });
   const data = await readFile(join(dir, out.file));
   const actor = await actorFor(b.created_by);
   const { saveGeneratedFile } = await import('./library');

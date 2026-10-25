@@ -316,6 +316,7 @@ export function Approvals() {
       {!DAY_LABEL[day] && <div className="flex gap-1 overflow-x-auto pb-0.5" role="tablist" data-testid="mkt-inbox-tabs">{INBOX_TABS.map(([k, l]) => { const n = counts ? counts[k as keyof Inbox['counts']] : 0; return (
         <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-testid={`mkt-inbox-tab-${k}`} data-count={n}
           className={cx('shrink-0 rounded-full border px-3 py-1 text-xs', tab === k ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white text-ink-2')}>{l}{n ? <span className={cx('ml-1 rounded-full px-1.5 text-[10px] font-semibold', tab === k ? 'bg-violet-600 text-white' : 'bg-orange-100 text-orange-800')} data-testid={`mkt-inbox-count-${k}`}>{n}</span> : null}</button>); })}</div>}
+      {(data as any)?.paused && <p className="rounded-input border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800" data-testid="mkt-paused-banner">자동 생성 일시정지 중 — 대표가 디벨롭한 방향을 승인할 때까지 정기 칸·자동 시안·운영 제안 카드를 만들지 않습니다(운영실 › 자동 제작 설정에서 끔).</p>}
       {(tab === 'contents' || DAY_LABEL[day]) && <>
         {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reloadAll} />}
         <OpsRequests />

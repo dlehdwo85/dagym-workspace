@@ -259,6 +259,7 @@ export async function backfillRationale(u: SessionUser, month = monthKst()) {
 /** 정기 실행(낮 09~22시, 밤은 night_scope.goal 켠 회사만): 25일 이후 다음 달 초안 · 월요일 지난주 리뷰 · 다음 달 1일 지난달 결산 */
 export async function goalTick(tenant: string, now = new Date()) {
   const sql = db(); const h = hourKst(now);
+  if (await (await import('./mktAuto')).autoPaused(tenant)) return { skipped: 'paused' }; // 대표 10/25 22:20(15-16): 전면 디벨롭 동안 월 목표 초안·주간 리뷰·결산도 멈춤
   const { aiSettings } = await import('./ai/threads');
   const night = !!((await aiSettings(tenant)).night_scope as any)?.goal;
   if (h < 9 || (h >= 22 && !night)) return { skipped: 'hour' };

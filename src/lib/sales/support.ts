@@ -609,15 +609,17 @@ export async function supportHomeCard(t: string, sql: Sql = db()) {
   const { profile, saved } = await profileOf(t, sql);
   const pr = saved || profile.region_sido || profile.industries.length || profile.interests.length ? profile : null;
   const off = await disabledSources(sql, t);
+  // #647(대표 10/25 22:20): 홈 상단 고정 카드 '이번 주 맞는 지원사업' — 7일 안 마감뿐 아니라 아직 신청할 수 있는 맞춤(fitOpen)도 함께 셈
   const rows = await sql<(Prog & { status: string | null; hidden: boolean | null; ai_verdict: string | null })[]>`select ${COLS(sql)}, w.status, m.hidden, m.ai_verdict from support_programs p
     left join support_work w on w.program_id = p.id and w.tenant = ${t} left join support_matches m on m.program_id = p.id and m.tenant = ${t}
-    where (p.tenant is null or p.tenant = ${t}) and not (p.source = any(${off})) and p.apply_end between ${today}::date and ${until}::date limit 2000`;
-  let mine = 0, fit = 0;
+    where (p.tenant is null or p.tenant = ${t}) and not (p.source = any(${off})) and p.apply_end >= ${today}::date order by p.apply_end limit 3000`;
+  let mine = 0, fit = 0, fitOpen = 0, mineOpen = 0;
   for (const r of rows) {
-    if (r.status) { if (OPEN_WORK.includes(r.status)) mine++; continue; }
+    const soon = !!r.apply_end && String(r.apply_end).slice(0, 10) <= until;
+    if (r.status) { if (OPEN_WORK.includes(r.status)) { mineOpen++; if (soon) mine++; } continue; }
     if (r.hidden || !pr) continue;
     const v = r.ai_verdict ?? ruleMatch(r, pr, today).verdict;
-    if (v === 'fit') fit++;
+    if (v === 'fit') { fitOpen++; if (soon) fit++; }
   }
-  return { closing: mine + fit, mine, fit };
+  return { closing: mine + fit, mine, fit, fitOpen, mineOpen };
 }
