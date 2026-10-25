@@ -311,15 +311,17 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   const hit = (x: SupportItem) => !term || `${x.title} ${x.agency ?? ''} ${x.executor ?? ''} ${x.category ?? ''} ${x.target ?? ''}`.toLowerCase().includes(term);
   const open = (x: SupportItem) => x.applyEnd == null || x.applyEnd >= today;
   const isNo = (x: SupportItem) => (x.ai ? x.ai.verdict === 'no' : x.rule.verdict === 'no');
+  const fitBase = (x: SupportItem) => open(x) && !x.hidden && (!x.work || OPEN_WORK.includes(x.work.status));
   const inTab: Record<string, (x: SupportItem) => boolean> = {
-    fit: (x) => open(x) && !x.hidden && (!x.work || OPEN_WORK.includes(x.work.status)) && (q.showNo || !isNo(x)),
+    fit: (x) => fitBase(x) && !isNo(x),
     closing: (x) => x.dday != null && x.dday >= 0 && x.dday <= 14 && !x.hidden && !isNo(x) && (!x.work || OPEN_WORK.includes(x.work.status)),
     mine: (x) => !!x.work && OPEN_WORK.includes(x.work.status),
     results: (x) => !!x.work && !OPEN_WORK.includes(x.work.status),
     all: (x) => open(x) || !!x.work,
   };
+  // 탭 숫자(맞춤 n)는 '해당 없음 보기'(showNo)와 무관 — 로컬 10/25 158차 확인: showNo=1 로 읽으면 맞춤 수가 112 → 880(숨긴 '해당 없음'까지 센 것)이 되던 것
   const counts = Object.fromEntries(Object.entries(inTab).map(([k, f]) => [k, all.filter((x) => f(x) && hit(x)).length]));
-  let items = all.filter((x) => inTab[tab](x) && hit(x));
+  let items = all.filter((x) => (tab === 'fit' && q.showNo ? fitBase(x) : inTab[tab](x)) && hit(x));
   const end = (x: SupportItem) => x.applyEnd ?? '9999-12-31';
   if (tab === 'fit') items.sort((a, b) => rankOf(a) - rankOf(b) || b.rule.score - a.rule.score || end(a).localeCompare(end(b)));
   else if (tab === 'closing' || tab === 'mine') items.sort((a, b) => end(a).localeCompare(end(b)));

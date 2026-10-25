@@ -63,11 +63,12 @@ const onbidIds = (it: any) => {
   for (const [k, ...alts] of [['cltrNo', 'onbidCltrno', 'cltrno'], ['pbctNo'], ['pbctCdtnNo'], ['cltrHstrNo', 'cltrHisNo'], ['plnmNo'], ['scrnGrpCd', 'cltrScrnGrpCd'], ['prptDivCd', 'cltrPrptDivCd'], ['pbancMngNo']]) { const v = pick(it, k, ...alts); if (v) o[k] = String(v); }
   return Object.keys(o).length ? o : null;
 };
+const ONBID_ATT_KEYS = ['atchFileUrl', 'attachFileUrl', 'fileUrl', 'pbancFileUrl']; // 첨부 주소 칸 후보(응답 칸 이름은 운영에서 확인 — 수집 결과 원천 줄에 있음/없음을 남김)
 export function onbidPayload(it: any): Record<string, unknown> | null {
   const no = pick(it, 'onbidPbancNo', 'pbancMngNo', 'pbctNo'), title = pick(it, 'onbidPbancNm'); if (!no || !title) return null;
   const sports = title.match(SPORTS)?.[0]; const dsps = pick(it, 'dspsMthodNm');
   if (pick(it, 'dspsMthodCd') === '0001' || onbidSale({ source_type: 'onbid_lease', bid_category: dsps, title })) return null; // #537 후속2: 매각(재산 팔기)은 영업 대상 아님 — 임대·사용허가만
-  const ids = onbidIds(it); const att = pick(it, 'atchFileUrl', 'attachFileUrl', 'fileUrl', 'pbancFileUrl'); // 첨부 주소 칸이 오면 저장(응답 칸 이름은 운영에서 확인)
+  const ids = onbidIds(it); const att = pick(it, ...ONBID_ATT_KEYS);
   return { source_type: 'onbid_lease', source_external_id: no, notice_no: no, source_url: ONBID_SEARCH_URL, ...(ids ? { onbid_ids: ids } : {}), ...(att ? { attachment_urls: [{ name: pick(it, 'atchFileNm', 'fileNm') ?? '공고문', url: String(att) }] } : {}),
     title, issuer: pick(it, 'orgNm') ?? '온비드(한국자산관리공사)', demand_agency: pick(it, 'rspbSbrNm'),
     posted_date: pick(it, 'pbancYmd'), deadline_at: pick(it, 'cltrBidEndDt'), opening_at: pick(it, 'cltrOpbdDt'), contract_method: pick(it, 'bidDivNm'), notice_state: pick(it, 'pbancKindNm'),
@@ -140,6 +141,8 @@ export const publicAgencyBids: Collector = {
     await source('d2b_fclty', () => words('d2b_fclty', D2B_WORDS, (w, f) => ({ cntrwkNm: w, anmtDateBegin: f(d(-30)), anmtDateEnd: f(d(0)) }), (it) => d2bPayload(it, 'fclty')));
     // 온비드: 부동산(0001) · 공유(0002)·국유(0010)·기타일반(0005) 재산 · 개찰일 오늘~+60일(필수 입력, yyyyMMdd)
     await source('onbid_lease', () => words('onbid_lease', ONBID_WORDS, (w) => ({ cltrTypeCd: '0001', prptDivCd: '0002,0010,0005', opbdDtStart: ymd8(d(0)), opbdDtEnd: ymd8(d(60)), onbidPbancNm: w }), onbidPayload));
+    // #650(로컬 158차 확인 ④): 온비드 응답에 첨부 주소 칸이 있는지는 운영 응답을 봐야 앎 — 첫 줄 칸 이름 중 첨부 후보가 있는지 원천 줄에 남긴다(없으면 공고번호 검색 안내만)
+    { const k = stats.onbid_lease?.keys; if (k?.length && !stats.onbid_lease!.note) { const hit = k.filter((x) => ONBID_ATT_KEYS.includes(x)); const fileish = k.filter((x) => /file|atch|attach/i.test(x)); stats.onbid_lease!.note = hit.length ? `첨부 칸 ${hit.join('·')} 저장` : `첨부 주소 칸 없음(${fileish.length ? `파일 관련 칸: ${fileish.join('·')}` : '파일 관련 칸 없음'}) — 공고번호 검색 안내만`; } }
     // 국방 공고 중 나라장터 공고번호가 있는 것: 나라장터 줄이 이미 있으면 국방 줄은 만들지 않고, 예전에 만든 국방 줄은(진행 기록·업무가 없을 때) 숨겨 한 줄로
     let joined = 0;
     const g2bNos = [...new Set(items.map((p) => p.g2b_no).filter((x): x is string => !!x))];

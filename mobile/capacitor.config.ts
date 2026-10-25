@@ -2,8 +2,8 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 // 앱은 운영 사이트(같은 계정·데이터)를 불러오는 얇은 껍데기 + 네이티브 푸시·딥링크·카메라 첨부.
 // APP_URL 을 바꿔 검수(staging) 앱을 따로 만들 수 있다.
-// 대표 10/20 22:30: 주 도메인 = work-in.dev(apex). 설치된 앱(www 로드)과 새 앱이 함께 쓰이므로 두 호스트 모두 허용
-const appUrl = process.env.APP_URL ?? 'https://work-in.dev';
+// 대표 10/25 23:58(15-10): 주 주소 = www.work-in.dev (apex → www 는 Vercel 도메인 설정에서 308). 설치된 옛 앱과 새 앱이 함께 쓰이므로 두 호스트 모두 허용
+const appUrl = process.env.APP_URL ?? 'https://www.work-in.dev';
 
 const config: CapacitorConfig = {
   appId: 'kr.co.dagym.workos',
