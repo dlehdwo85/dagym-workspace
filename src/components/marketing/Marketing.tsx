@@ -260,6 +260,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
           </div>
         ) : <Button variant="secondary" onClick={() => setVer({ body: v.body, media: v.media_ids.map((m: string) => ({ id: m, title: titleOf(m) })), note: '' })} data-testid="mkt-version-open">수정본 올리기</Button>)}
         {((c.status === 'approved' && c.approved_version === c.current_version) || c.status === 'published') && <PublishHelper published={c.status === 'published'} channel={c.channel} title={c.title} body={v.body} media={v.media_ids.map((m: string) => ({ id: m, title: titleOf(m) }))} />}
+        {data.canDecide && c.brand_id && ['approved', 'published'].includes(c.status) && <ExampleSave id={id} saved={!!c.is_example} onDone={reload} />}
         {((c.status === 'approved') || (c.status === 'published' && c.published_deleted_at)) && c.approved_version === c.current_version && data.publish?.canServer && (
           <div className="rounded-input border border-violet-200 bg-violet-50/40 p-3" data-testid="mkt-server-publish">
             <p className="text-xs text-ink-2">연결된 계정으로 워크인 서버가 올립니다 — 대상 계정(기본: 이 브랜드 계정 + 공용){data.publish.targets.some((t: any) => !t.accounts.length) && <span className="ml-1 text-amber-800">· {data.publish.targets.filter((t: any) => !t.accounts.length).map((t: any) => t.label).join('·')}은 계정 없음</span>}</p>
@@ -427,6 +428,25 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
 }
 
 /** #544 초안 보관 자동 시안 → [승인 요청](관리자): 승인 대기로(검사 미통과면 수정 요청 칸) */
+/** #235 ⓔ [좋은 예시로 저장]: 승인·게시한 글을 이 브랜드의 같은 형식 예시로 — 다음 원고가 구성·첫 줄·문단 흐름을 참고(문장은 베끼지 않음) */
+function ExampleSave({ id, saved, onDone }: { id: string; saved: boolean; onDone: () => void }) {
+  const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
+  async function go(remove: boolean) {
+    setBusy(true);
+    try {
+      const r = await api<{ count: number }>(`/api/marketing/contents/${id}/example`, { body: remove ? { remove: true } : { note: note.trim() || undefined } });
+      toast.ok(remove ? '좋은 예시에서 뺐습니다' : `좋은 예시로 저장했습니다 — 같은 형식 예시 ${r.count}개`); setNote(''); onDone();
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  }
+  return saved ? (
+    <p className="flex flex-wrap items-center gap-2 text-xs text-emerald-800" data-testid="mkt-example" data-saved="1">좋은 예시로 저장됨 — 이 브랜드의 같은 형식 원고가 구성을 참고합니다
+      <button type="button" className="text-ink-3 underline" onClick={() => go(true)} disabled={busy} data-testid="mkt-example-remove">예시에서 빼기</button></p>
+  ) : (
+    <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="mkt-example">
+      <span className="min-w-48 flex-1"><input className={cx(inputCls, 'h-8 py-0 text-xs')} value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} placeholder="좋은 점(선택) — 예: 첫 줄이 장면으로 시작" aria-label="좋은 점" data-testid="mkt-example-note" /></span>
+      <Button size="sm" variant="secondary" onClick={() => go(false)} disabled={busy} data-testid="mkt-example-save">좋은 예시로 저장</Button>
+    </div>);
+}
 function HeldSubmit({ id, onDone }: { id: string; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   return <Button size="sm" variant="secondary" disabled={busy} data-testid="mkt-held-submit" onClick={async () => {

@@ -21,7 +21,11 @@ test('초안 보관: 자동 제작 → 초안(시안 붙음·알림 없음) → 
   assert.equal((await ctx.owner.ok('GET', '/api/marketing/auto')).settings.auto_hold, true);
   const brand = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '보관 시험 브랜드' });
   const rule = await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: brand.id, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '23:00', topicHint: '가을 이벤트' });
-  await ctl({ anthropicReset: true, anthropicQueue: Array.from({ length: 8 }, (_, i) => say({ title: `가을 이벤트 ${i + 1}`, body: '가을 맞이 안내입니다. 이번 주 토요일까지 현관에서 안내합니다.', brief: '현관 실사' })) });
+  // #235 ⓓ 가까운 날 같은 글은 올리기 전 검사가 막으므로 글마다 다른 본문
+  const NOTES = ['가을 맞이 현관 화분을 새로 들였습니다. 입주민 사진 공모도 함께 엽니다.', '주말 분리수거 시간이 바뀝니다. 토요일 오전 9시부터 받습니다.', '놀이터 바닥 공사를 마쳤습니다. 이번 주부터 다시 열립니다.',
+    '경비실 택배 보관 기간을 알려 드립니다. 사흘 동안 보관합니다.', '커뮤니티 센터 독서실 좌석을 늘렸습니다. 예약은 관리사무소에서 받습니다.', '엘리베이터 점검 일정입니다. 목요일 오후 두 시간 멈춥니다.',
+    '단지 산책로 조명을 바꿨습니다. 밤에도 밝게 걸을 수 있습니다.', '겨울 대비 배관 점검을 시작합니다. 세대별 일정은 따로 알립니다.'];
+  await ctl({ anthropicReset: true, anthropicQueue: Array.from({ length: 8 }, (_, i) => say({ title: `가을 이벤트 ${i + 1}`, body: NOTES[i], brief: '현관 실사' })) });
   const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.ok(run.produced.length >= 1 && run.produced.every((r) => r.held === true), JSON.stringify(run.produced));
   const made = await sql`select id, status, produced_at, quality, current_version from mkt_contents where rule_id = ${rule.id} and produced_at is not null order by scheduled_at`;
@@ -53,7 +57,7 @@ test('초안 보관: 자동 제작 → 초안(시안 붙음·알림 없음) → 
   assert.equal((await ctx.owner.req('POST', `/api/marketing/auto/contents/${h.id}`, { action: 'submit' })).status, 400, '보관 중이 아니면 거절');
   // 사람이 직접 [다시 만들기] = 예외(승인 대기로)
   if (made[1]) {
-    await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트 다시', body: '다시 만든 안내입니다. 이번 주 토요일까지 현관에서 안내합니다.', brief: '현관 실사' })] });
+    await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트 다시', body: '다시 만든 안내입니다. 관리사무소 앞 게시판도 새로 달았습니다.', brief: '현관 실사' })] });
     const r = await ctx.owner.ok('POST', `/api/marketing/auto/contents/${made[1].id}`, { action: 'regen' });
     assert.ok(!r.held);
     assert.equal((await sql`select status from mkt_contents where id = ${made[1].id}`)[0].status, 'pending');

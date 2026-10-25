@@ -78,7 +78,10 @@ test('키트 피드 틀: 검증·저장(카탈로그 순서·대문자) · 바�
 
 test('자동 제작: 틀을 고른 브랜드는 초안 보관 없이 승인 대기 · 가까운 3개와 다른 틀 · AI 칸 저장(재료에 없는 금액 뺌) · 글만 고친 수정본 = 같은 틀 · [다른 틀로 다시 그리기]', async () => {
   const rule = await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: P.brand, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '23:00', topicHint: '운영 대행' });
-  await ctl({ anthropicReset: true, anthropicQueue: Array.from({ length: 6 }, (_, i) => say({ title: `운영 소식 ${i + 1}`, body: `관리사무소 일, 이렇게 줄였습니다 ${i + 1}\n출입 기록이 자동으로 정리됩니다.`, brief: '', why: '', hooks: [], keyword: '', card: card() })) });
+  // #235 ⓓ 가까운 날 같은 글은 올리기 전 검사가 막으므로 글마다 다른 본문
+  const NEWS = [['관리사무소 일, 이렇게 줄였습니다', '출입 기록이 자동으로 정리됩니다.'], ['경비실 교대가 가벼워졌습니다', '순찰 기록을 휴대폰으로 남깁니다.'], ['주차 민원이 절반으로', '방문 차량 등록을 미리 받습니다.'],
+    ['공지 읽음을 한눈에', '동별로 확인한 세대를 셉니다.'], ['시설 예약을 휴대폰으로', '독서실 좌석을 주민이 직접 고릅니다.'], ['야간 순찰 기록 정리', '사진과 시각이 함께 남습니다.']];
+  await ctl({ anthropicReset: true, anthropicQueue: Array.from({ length: 6 }, (_, i) => say({ title: `운영 소식 ${i + 1}`, body: NEWS[i].join('\n'), brief: '', why: '', hooks: [], keyword: '', card: card() })) });
   const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.ok(run.produced.length >= 4 && run.produced.every((r) => !r.held), JSON.stringify(run.produced));
   const sent = JSON.stringify(fake.state.anthropic.at(-1)?.body ?? {});

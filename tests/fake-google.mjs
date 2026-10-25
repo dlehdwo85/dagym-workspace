@@ -20,6 +20,9 @@ const fakeClip = (sec, ar) => { const [w, h] = ar === '16:9' ? [640, 360] : ar =
   return makeMedia(`clip-${sec}-${ar}.mp4`, ['-f', 'lavfi', '-i', `testsrc2=s=${w}x${h}:r=24:d=${sec}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov']); };
 const fakeMp3 = (sec, hz = 440) => makeMedia(`tone-${sec}-${hz}.mp3`, ['-f', 'lavfi', '-i', `sine=frequency=${hz}:duration=${sec}`, '-c:a', 'libmp3lame', '-b:a', '64k']);
 export { fakeMp3 };
+/** 마케팅 원고 기본 답(넣어 둔 응답이 없을 때) — 요청 순서로 두 문장을 골라 글마다 다르게 */
+const DRAFT_LINES = ['이번 주 소식을 짧게 정리했습니다.', '처음 오시는 분이 자주 묻는 것을 모았습니다.', '현장에서 있었던 일을 한 장면으로 남깁니다.', '준비물과 순서를 차례로 적었습니다.',
+  '토요일 오후 일정을 미리 알려 드립니다.', '지난주 받은 질문에 답을 달았습니다.', '사진 한 장으로 보는 이번 주 모습입니다.', '알아 두면 편한 이용 방법 두 가지입니다.'];
 export function startFakeGoogle(port = 3199) {
   const state = {
     seq: 1,
@@ -148,9 +151,10 @@ export function startFakeGoogle(port = 3199) {
       if (!next && ['body', 'brief', 'why', 'hooks', 'keyword'].every((k) => body.output_config?.format?.schema?.required?.includes(k))) {
         const sys = typeof body.system === 'string' ? body.system : (body.system ?? []).map((x) => x.text ?? '').join('\n');
         const video = /인스타 릴스|유튜브 쇼츠|광고 영상/.test(sys); const story = /스토리\(세로/.test(sys); const blog = /네이버 블로그 원고/.test(sys);
+        const n = state.anthropic.length; // #235 ⓓ 채널별 같은 글 검사: 기본 답도 요청마다 다른 문장(시험끼리 같은 글로 걸리지 않게)
         const para = '이번 주에 자주 받은 질문을 하나씩 정리했습니다. 처음 오시는 분이 가장 많이 묻는 내용부터 차례대로 적었고, 실제로 겪은 장면을 함께 넣었습니다. 사진과 같이 보시면 순서가 더 쉽게 들어옵니다.';
         const draft = blog ? ['테스트 응답입니다.', ...[1, 2, 3, 4].flatMap((k) => [`■ 소제목 ${k}`, para, para, para, para, para])].join('\n\n')
-          : story ? '테스트 응답입니다.\n스티커 제안: 투표 — 이번 주 가장 궁금한 것은?' : '테스트 응답입니다. 이번 주 소식을 짧게 정리했습니다.';
+          : story ? '테스트 응답입니다.\n스티커 제안: 투표 — 이번 주 가장 궁금한 것은?' : `${DRAFT_LINES[n % DRAFT_LINES.length]} ${DRAFT_LINES[(n + 3) % DRAFT_LINES.length]}`;
         next = { content: [{ type: 'text', text: JSON.stringify({ title: '', body: draft, brief: '', why: '', hooks: [], keyword: '', script: video ? ['처음 오신 분께 한 가지', '가장 많이 묻는 내용을 짧게', '이번 주 소식은 캡션에서'] : [] }) }], stop_reason: 'end_turn' };
       }
       // V23-1 시험: 오류 응답(크레딧 부족 402 billing_error 등)

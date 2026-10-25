@@ -45,7 +45,7 @@ export function BrandVoice({ brand, onSaved }: { brand: { id: string; name: stri
           <select className={small} value={v.emoji} onChange={(e) => setV({ ...v, emoji: e.target.value as Voice['emoji'] })} aria-label="이모지" data-testid="voice-emoji"><option value="none">이모지 안 씀</option><option value="few">이모지 1~2개</option><option value="many">이모지 자유</option></select>
         </div>
       </div>
-      <div className="mt-2 space-y-1"><div className="text-ink-3">잘 된 글 예시(최대 5개 — 말투·리듬만 참고하고 내용·숫자는 베끼지 않습니다)</div>
+      <div className="mt-2 space-y-1"><div className="text-ink-3">말투 예시 글(최대 5개 — 말투·리듬만 참고하고 내용·숫자는 베끼지 않습니다. 형식별 구성 예시는 위 &lsquo;잘 된 예시 글&rsquo;)</div>
         {ex.map((x, k) => <textarea key={k} className={cx(inputCls, 'min-h-14 text-xs')} value={x} maxLength={1500} placeholder={`예시 글 ${k + 1}`} aria-label={`예시 글 ${k + 1}`} data-testid="voice-example"
           onChange={(e) => { const next = [...ex]; next[k] = e.target.value; setV({ ...v, examples: next.filter((y, i) => y || i < next.length - 1) }); }} />)}
       </div>

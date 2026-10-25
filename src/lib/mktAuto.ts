@@ -6,7 +6,8 @@ import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
 import { zUuid } from './api';
 import { layoutBody } from './mktText';
-import { JSON_LIKE, avoidOf, voiceInput, factsInput, otherBrands, otherBrandNames, otherBrandLabels } from './mktQuality';
+import { JSON_LIKE, avoidOf, voiceInput, factsInput, otherBrands, otherBrandNames, otherBrandLabels, activeNews, newsText, dayAdd, todayKst, factsOf,
+  exampleInput, examplesOf, exampleKindOf, examplesPrompt, EXAMPLE_KINDS, EXAMPLE_PER_KIND } from './mktQuality';
 import { FEED_STYLES, FEED_TEMPLATES, NEED_LABEL, TEMPLATE_IDS, feedInput, normalizeFeed } from './mktFeedTemplates';
 import { tenantOf, type SessionUser } from './types';
 
@@ -33,6 +34,7 @@ const EST = { image: 0, video_reels: 3, video: 80, regen_image: 6.5, regen_video
 
 const DAY = 864e5;
 const CROSS_LABEL: Record<string, string> = { facebook: '페이스북', instagram: '인스타그램', threads: '스레드' };
+const CH_NAME: Record<string, string> = { ...CROSS_LABEL, blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스' };
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 const kst = (date: string, hhmm: string) => new Date(`${date}T${hhmm.length === 5 ? hhmm : hhmm.padStart(2, '0') + ':00'}:00+09:00`);
 /** 서울 'HH:mm' */
@@ -259,6 +261,11 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
   const peers = c.brand_id ? await sql<{ title: string; brand: string }[]>`select x.title, b.name as brand from mkt_contents x join mkt_brands b on b.id = x.brand_id
     where x.tenant = ${c.tenant} and x.brand_id <> ${c.brand_id} and x.status <> 'canceled' and x.current_version > 0 and x.scheduled_at is not null
       and (x.scheduled_at at time zone 'Asia/Seoul')::date between ${day}::date - 3 and ${day}::date + 3 order by x.scheduled_at limit 8` : [];
+  // #235 ⓓ 같은 브랜드 앞뒤 하루의 다른 글(같은 날 묶음·다른 채널 규칙) — 같은 주제여도 첫 줄·문장은 새로(QA: 페이스북·인스타 같은 글 그대로)
+  const near = c.brand_id ? await sql<{ channel: string; kind: string | null; body: string }[]>`select x.channel, x.kind, v.body from mkt_contents x join mkt_versions v on v.content_id = x.id and v.version = x.current_version
+    where x.tenant = ${c.tenant} and x.brand_id = ${c.brand_id} and x.id <> ${c.id} and x.status <> 'canceled' and x.current_version > 0
+      and (coalesce(x.scheduled_at, x.created_at) at time zone 'Asia/Seoul')::date between ${day}::date - 1 and ${day}::date + 1 order by coalesce(x.scheduled_at, x.created_at) limit 6` : [];
+  const firstLine = (t: string) => [...(t.split('\n').map((l) => l.replace(/(^|\s)#[^\s#]+/g, '').trim()).find((l) => l.length >= 4) ?? '')].slice(0, 60).join('');
   const lines = [
     `브랜드 이름: ${brandName(brand) || co.name || '(없음)'}`,
     co.name ? `회사: ${co.name}${co.industries?.length ? ` (${co.industries.join('·')})` : ''}` : '',
@@ -269,15 +276,17 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
     brand ? `이 글은 '${brandName(brand)}' 브랜드 전용 — ${ob.length ? `다른 브랜드(${otherBrandLabels(ob).join(', ')})의 상품·소식·이름·명의는 쓰지 않음` : '다른 브랜드 이야기는 쓰지 않음'}` : '',
     topic ? (pick.from === 'company' ? `이번 주 회사 공통 테마: ${topic} — 그대로 쓰지 말고 이 브랜드의 고객·상품에 맞는 구체적인 주제 하나로 바꿔 씀(다른 브랜드 글과 같은 주제·같은 제목 금지)` : `이번 글 주제: ${topic}`) : '',
     Q.factsText(facts),
+    newsText(activeNews(facts, day)), // #235 ⓐ 이번 달 실제 소식
     goal && goal.status !== 'pending' ? `이달 운영 목표: ${(goal.goals?.objectives ?? []).join(' / ')}${goal.goals?.message ? ` · 핵심 메시지: ${goal.goals.message}` : ''}` : '',
     photos.length ? `쓸 수 있는 실사 사진(자료실):\n${photos.map((p) => `- ${p.title}${p.description ? `: ${p.description.slice(0, 120)}` : ''}`).join('\n')}` : '',
     recent.length ? `최근 게시 제목(겹치지 않게):\n${recent.map((r) => `- ${r.title}`).join('\n')}` : '',
     peers.length ? `같은 주 다른 브랜드 글(같은 주제·제목을 피함):\n${peers.map((r) => `- ${brandName({ name: r.brand })}: ${r.title}`).join('\n')}` : '',
+    near.length ? `이 브랜드 가까운 날 다른 글의 첫 줄(같은 주제여도 첫 줄·문장·구성은 새로 씀 — 그대로 옮기거나 낱말 몇 개만 바꾸지 않음):\n${near.map((r) => `- ${CH_NAME[r.channel] ?? r.channel}${r.kind ? ` ${KIND_LABEL[r.kind as Kind] ?? r.kind}` : ''}: ${firstLine(r.body)}`).join('\n')}` : '',
   ].filter(Boolean);
   // 주제가 없고 브랜드·회사 소개도 없으면 재료 부족 — 일반론 원고 대신 '주제 필요' 카드로 질문
   return { enough: !!topic || about.length > 0, text: lines.join('\n'), topic, topicFrom: pick.from, name: brandName(brand) || co.name, goal: goal && goal.status !== 'pending' ? goal : null, week: gweek, others, facts };
 }
-type TopicFrom = 'answer' | 'kept' | 'goal' | 'brand' | 'pool' | 'rule' | 'company' | '';
+type TopicFrom = 'answer' | 'kept' | 'goal' | 'brand' | 'news' | 'pool' | 'rule' | 'company' | '';
 /** 로컬 QA 10/24 ③ 브랜드마다 주제(월 목표 주간 주제가 모든 브랜드에 내려가 18건이 같은 주제였음):
  *  답한 주제 → 이미 만든 글의 주제(수정본 · 다시 만들기는 이 규칙으로 고른 글만 — 예전 글은 회사 공통 주제였을 수 있어 다시 고름) → 이 브랜드 월 목표 주제 → 키트 '이번 주 주제' → 브랜드 주제 풀 → 규칙 주제 힌트 → 회사 공통 주간 주제(브랜드에 맞게 바꿔 쓰라는 안내와 함께).
  *  주제 풀: 같은 날 같은 브랜드 묶음(피드·쇼츠·릴스·블로그·스토리)은 같은 주제(한 메시지를 형식별로), 아니면 다른 브랜드가 앞뒤 3일 안에 쓴 주제는 건너뛰고 이 브랜드가 가장 오래 안 쓴 것 */
@@ -288,6 +297,17 @@ async function pickTopic(sql: any, c: any, brand: any, rule: any, goal: any, gwe
   const week = String(gweek?.topic ?? '').trim(); const live = week && week !== '(지난 주)' ? week : '';
   if (live && goal?.brand_id && goal.brand_id === c.brand_id) return { topic: live, from: 'goal' };
   const kit = String(brand?.weekly_topic ?? '').trim(); if (kit) return { topic: kit, from: 'brand' };
+  // #235 ⓐ 이번 달 실제 소식(사실 카드) — 주제 풀보다 먼저. 같은 날 묶음은 같은 소식, 한 소식은 이틀(알림·다시 알림)까지
+  const news = activeNews(factsOf(brand?.facts), day);
+  if (news.length && c.brand_id) {
+    const [same] = await sql`select rationale->>'topic' as t from mkt_contents where tenant = ${c.tenant} and brand_id = ${c.brand_id} and id <> ${c.id} and status <> 'canceled'
+      and rationale->>'topicFrom' = 'news' and (scheduled_at at time zone 'Asia/Seoul')::date = ${day}::date limit 1`;
+    if (same?.t && news.some((n) => normTopic(n.text) === normTopic(same.t))) return { topic: same.t, from: 'news' };
+    const days = new Map<string, number>((await sql`select rationale->>'topic' as t, count(distinct (scheduled_at at time zone 'Asia/Seoul')::date)::int as n from mkt_contents
+      where tenant = ${c.tenant} and brand_id = ${c.brand_id} and id <> ${c.id} and status <> 'canceled' and rationale->>'topicFrom' = 'news' group by 1`).map((r: any) => [normTopic(r.t), Number(r.n)] as [string, number]));
+    const fresh = news.filter((n) => (days.get(normTopic(n.text)) ?? 0) < 2).sort((a, b) => (days.get(normTopic(a.text)) ?? 0) - (days.get(normTopic(b.text)) ?? 0));
+    if (fresh.length) return { topic: fresh[0].text, from: 'news' };
+  }
   const pool = ((brand?.topic_pool ?? []) as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean);
   if (pool.length && c.brand_id) {
     const [same] = await sql`select rationale->>'topic' as t from mkt_contents where tenant = ${c.tenant} and brand_id = ${c.brand_id} and id <> ${c.id} and status <> 'canceled'
@@ -331,6 +351,7 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
   const p = P.anthropicProvider({ tier, ...(tier === 'fast' && (c.kind === 'blog' || c.channel === 'blog') ? { maxTokens: 12000 } : {}) }); // 대표 10/24 추가 ①: 회사·요금제가 정한 글 모델 · 블로그 1,800자 이상은 빠른 모델이어도 잘리지 않게
   const contact = Q.contactLine(m.facts); // 로컬 QA 10/24 ⑤ 사실 카드 연락처
   const voice = Q.voicePrompt(brand?.voice);
+  const ex = examplesPrompt(examplesOf(brand?.examples), exampleKindOf(c.channel, c.kind)); // #235 ⓔ 같은 형식 잘 된 예시 글(구성 참고)
   const mem = await (await import('./mktTeam')).memoryText(c.tenant, 'designer', c.brand_id ?? null).catch(() => ''); // #534 지난 수정 요청 사유(디자인 담당 기억)를 다음 원고에
   const F = await import('./mktFeedTemplates'); // #544 피드 틀 칸(머리말·핵심·비교·강조 낱말·기간·가격 — 금액·기간은 재료에 있는 것만)
   const req: Parameters<typeof p.chat>[0] = {
@@ -348,7 +369,7 @@ ${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}
 - 요금·무료 범위·가격·혜택·기간은 [재료]의 상품 설명·[사실 카드]에 적힌 그대로만 씁니다(추측해서 바꾸지 않음). 한 브랜드 글에 다른 브랜드의 이름·명의를 섞지 않습니다.
 - 글 한 편에 대상 1명·상황 1개·행동(권유) 1개 — 문의·예약·저장·댓글 가운데 하나만 요청합니다.
 - 연락처: ${contact ? `[사실 카드]의 '${contact}'를 본문 마지막 줄에 그대로 씁니다(스토리 제외)` : '재료에 없는 전화번호·링크는 지어내지 않습니다'}. '이미지 참조'·'이미지에 안내된 연락처'·'사진 속 번호'처럼 연락처를 그림으로 돌리지 않습니다.
-- 채널 틀: 인스타·페이스북은 첫 줄(약 125자 안)에 핵심·해시태그 5개 이하·행동 권유 1개, 블로그는 검색 키워드를 제목과 첫 문단에, 숏폼·릴스는 첫 3초 질문으로 열고 마지막에 행동 권유 하나.${voice ? `\n${voice}` : ''}${mem ? `\n${mem}` : ''}`,
+- 채널 틀: 인스타·페이스북은 첫 줄(약 125자 안)에 핵심·해시태그 5개 이하·행동 권유 1개, 블로그는 검색 키워드를 제목과 첫 문단에, 숏폼·릴스는 첫 3초 질문으로 열고 마지막에 행동 권유 하나.${voice ? `\n${voice}` : ''}${ex ? `\n${ex}` : ''}${mem ? `\n${mem}` : ''}`,
     tools: [], messages: [{ role: 'user', content: `[재료]\n${m.text}\n\n` + (extra ? `[지난 원고]\n${extra.prev}\n\n[수정 요청]\n${extra.comment}\n\n수정 요청을 반영해 다시 써 주세요.` : `채널: ${c.channel}\n게시일: ${ymd(new Date(c.scheduled_at))}\n주제: ${m.topic || '재료의 브랜드·상품 소개에서 이번 주에 알릴 만한 것 하나'}`) }],
     format: { type: 'object', additionalProperties: false, required: ['title', 'body', 'brief', 'why', 'hooks', 'keyword', ...(video ? ['script'] : ['card'])],
       properties: { title: { type: 'string' }, body: { type: 'string' }, brief: { type: 'string' }, why: { type: 'string' }, hooks: { type: 'array', items: { type: 'string' } }, keyword: { type: 'string' }, ...(video ? { script: { type: 'array', items: { type: 'string' } } } : { card: F.CARD_FORMAT }) } },
@@ -431,7 +452,9 @@ function withContact(body: string, line: string) {
 async function preflightOf(c: any, brand: any, s: MktSettings, x: { title: string; body: string; script?: string[] | null }) {
   const Q = await import('./mktQuality');
   const others = otherBrandNames(await otherBrands(c.tenant, brand?.id));
-  return Q.preflight({ channel: c.channel, kind: c.kind, title: x.title, body: x.body, isTest: !!c.is_test, aiLabel: s.ai_label, facts: Q.factsOf(brand?.facts), otherBrands: others, brandName: brandName(brand), script: x.script ?? null, cross: c.cross_channels ?? [] }, await Q.qualityRules());
+  return Q.preflight({ channel: c.channel, kind: c.kind, title: x.title, body: x.body, isTest: !!c.is_test, aiLabel: s.ai_label, facts: Q.factsOf(brand?.facts), otherBrands: others, brandName: brandName(brand), script: x.script ?? null, cross: c.cross_channels ?? [],
+    siblings: await Q.siblingPosts(c.tenant, c), // #235 ⓓ 채널별 같은 글
+    examples: examplesOf(brand?.examples).map((e) => e.text), allow: [brand?.intro, brand?.products, Q.factsText(Q.factsOf(brand?.facts))].filter(Boolean) }, await Q.qualityRules()); // #235 ⓔ 예시 베끼기
 }
 const bannedOf = (brand: any): string[] => [...(brand?.banned_words ?? []), ...avoidOf(brand?.voice)];
 
@@ -902,7 +925,7 @@ export async function automationView(u: SessionUser) {
     sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, q.brief_id, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
     sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, coalesce(l.title, c.title) as title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
-    sql`select id, name, color, tone, intro, products, weekly_topic, banned_words, test_mode, ad_priority, ad_share::float8 as ad_share, ad_note, voice, video, feed, facts, topic_pool from mkt_brands where tenant = ${t} order by name`,
+    sql`select id, name, color, tone, intro, products, weekly_topic, banned_words, test_mode, ad_priority, ad_share::float8 as ad_share, ad_note, voice, video, feed, facts, topic_pool, examples from mkt_brands where tenant = ${t} order by name`,
     sql`select id, name, role from users where tenant = ${t} and status = 'active' and not is_demo order by name`,
   ]);
   const co = await (await import('./ai/assistant')).usageThisMonth(t);
@@ -1124,23 +1147,59 @@ export const brandKitInput = z.object({ tone: z.string().max(200).nullable().opt
     endColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(), fontFileId: z.string().uuid().nullable().optional() }).optional(),
   feed: feedInput.optional(), // #544 피드 틀(쓸 틀·색·머리줄·연락처 줄·머리말) — 통째로 저장
   facts: factsInput.optional(), // 로컬 QA 10/24 ⑤ 사실 카드(연락처·운영 시간·요금·숫자·섞으면 안 되는 이름) — 통째로 저장
-  topicPool: z.array(z.string().trim().min(1).max(120)).max(40).optional() }); // 로컬 QA 10/24 ③ 브랜드 주제 풀(한 줄에 하나, 돌아가며 씀)
+  topicPool: z.array(z.string().trim().min(1).max(120)).max(40).optional(), // 로컬 QA 10/24 ③ 브랜드 주제 풀(한 줄에 하나, 돌아가며 씀)
+  examples: z.array(exampleInput).max(12).optional() }); // #235 ⓔ 잘 된 예시 글(형식마다 3개) — 통째로 저장
+/** #235 ⓐ 소식: 끝나는 날이 없으면 시작(없으면 오늘)부터 30일 뒤 — 지난 소식이 계속 주제로 나가지 않게 */
+function factsToSave(f: z.infer<typeof factsInput>) {
+  if (!f.news) return f;
+  for (const n of f.news) if (n.from && n.to && n.from > n.to) throw badRequest(`소식 '${n.text.slice(0, 20)}' — 시작 날짜가 끝 날짜보다 늦습니다`);
+  return { ...f, news: f.news.map((n) => ({ text: n.text, ...(n.from ? { from: n.from } : {}), to: n.to ?? dayAdd(n.from ?? todayKst(), 30) })) };
+}
 export async function saveBrandKit(u: SessionUser, id: string, i: z.infer<typeof brandKitInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
   // #454 영상 키트 파일은 이 회사 자료실(기밀 아님)만
   for (const fid of [i.video?.logoFileId, i.video?.fontFileId]) if (fid && !(await db()`select 1 from library_files where id = ${fid} and tenant = ${tenantOf(u)} and deleted_at is null and coalesce(security, 'internal') <> 'confidential'`).length) throw badRequest('자료실에서 고른 파일만 쓸 수 있습니다(기밀 파일 제외)');
+  if (i.examples) for (const k of Object.keys(EXAMPLE_KINDS) as (keyof typeof EXAMPLE_KINDS)[]) if (i.examples.filter((e) => e.kind === k).length > EXAMPLE_PER_KIND) throw badRequest(`${EXAMPLE_KINDS[k]} 예시는 ${EXAMPLE_PER_KIND}개까지입니다`);
   const [b] = await db()`update mkt_brands set tone = ${i.tone === undefined ? db()`tone` : i.tone}, intro = ${i.intro === undefined ? db()`intro` : i.intro || null}, products = ${i.products === undefined ? db()`products` : i.products || null},
     weekly_topic = ${i.weeklyTopic === undefined ? db()`weekly_topic` : i.weeklyTopic || null}, banned_words = coalesce(${i.bannedWords ?? null}::text[], banned_words), test_mode = coalesce(${i.testMode ?? null}, test_mode),
     ad_priority = ${i.adPriority === undefined ? db()`ad_priority` : i.adPriority}, ad_share = ${i.adShare === undefined ? db()`ad_share` : i.adShare}, ad_note = ${i.adNote === undefined ? db()`ad_note` : i.adNote || null}, voice = ${i.voice === undefined ? db()`voice` : db().json(i.voice as never)},
     video = ${i.video === undefined ? db()`video` : db()`video || ${db().json(i.video as never)}::jsonb`}, feed = ${i.feed === undefined ? db()`feed` : db().json(normalizeFeed(i.feed) as never)},
-    facts = ${i.facts === undefined ? db()`facts` : db().json(Object.fromEntries(Object.entries(i.facts).filter(([, v]) => (Array.isArray(v) ? v.length : !!v))) as never)},
-    topic_pool = ${i.topicPool === undefined ? db()`topic_pool` : [...new Set(i.topicPool)]} where id = ${id} and tenant = ${tenantOf(u)} returning id`;
+    facts = ${i.facts === undefined ? db()`facts` : db().json(Object.fromEntries(Object.entries(factsToSave(i.facts)).filter(([, v]) => (Array.isArray(v) ? v.length : !!v))) as never)},
+    topic_pool = ${i.topicPool === undefined ? db()`topic_pool` : [...new Set(i.topicPool)]},
+    examples = ${i.examples === undefined ? db()`examples` : db().json(i.examples.map((e) => ({ ...e, at: e.at ?? new Date().toISOString() })) as never)} where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!b) throw notFound();
   // 재료(소개·상품·주제)가 생기면 이 브랜드의 열린 '주제 필요' 질문은 닫고 다음 실행에 제작
   if (i.intro || i.products || i.weeklyTopic || i.topicPool?.length) await db()`update mkt_production_requests q set status = 'done', brief = q.brief || ${'\n\n브랜드 키트 재료로 대신함'}, decided_by = ${u.id}, decided_at = now()
     from mkt_contents c where c.id = q.content_id and c.brand_id = ${id} and q.kind = 'topic' and q.status = 'open'`;
   return { ok: true };
+}
+export const exampleFromInput = z.object({ note: z.string().trim().max(200).optional(), remove: z.boolean().optional() });
+/** #235 ⓔ [좋은 예시로 저장]: 승인·게시한 글(승인 버전 본문 + 릴스·쇼츠 대본)을 이 브랜드의 같은 형식 예시로 — 형식마다 3개, 넘으면 가장 오래된 것을 뺌. remove = 예시에서 빼기 */
+export async function saveExampleFrom(u: SessionUser, id: string, i: z.infer<typeof exampleFromInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('콘텐츠를 찾을 수 없습니다');
+  const sql = db(); const t = tenantOf(u);
+  const [c] = await sql<any[]>`select c.id, c.brand_id, c.channel, c.kind, c.status, c.quality, coalesce(c.approved_version, c.current_version) as v, b.examples
+    from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${t}`;
+  if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
+  if (!c.brand_id) throw badRequest('브랜드가 정해진 글만 예시로 저장할 수 있습니다');
+  const kind = exampleKindOf(c.channel, c.kind);
+  let list = examplesOf(c.examples).filter((e) => e.contentId !== c.id);
+  if (!i.remove) {
+    if (!['approved', 'published'].includes(c.status)) throw badRequest('승인했거나 게시한 글만 좋은 예시로 저장할 수 있습니다');
+    const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.v}`;
+    const label = (await settingsOf(t)).ai_label;
+    const body = (label ? String(v?.body ?? '').split(label).join('') : String(v?.body ?? '')).trim();
+    const script: string[] = Array.isArray(c.quality?.script) ? c.quality.script : [];
+    const text = [...`${body}${script.length ? `\n\n대본(컷):\n${script.map((x) => `- ${x}`).join('\n')}` : ''}`].slice(0, 4000).join('');
+    if ([...text].length < 20) throw badRequest('본문이 너무 짧아 예시로 쓰기 어렵습니다');
+    const same = list.filter((e) => e.kind === kind);
+    if (same.length >= EXAMPLE_PER_KIND) list = list.filter((e) => e !== same[0]);
+    list.push({ kind, text, ...(i.note ? { note: i.note } : {}), contentId: c.id, at: new Date().toISOString() });
+  }
+  await sql`update mkt_brands set examples = ${sql.json(list as never)} where id = ${c.brand_id} and tenant = ${t}`;
+  return { saved: !i.remove, kind, count: list.filter((e) => e.kind === kind).length };
 }
 /** #426 [잘 된 글로 말투 만들기]: 이 브랜드의 승인·게시 글(최근 8개)로 말투 프로필 초안 — 저장하지 않음(화면에서 고쳐 [저장] = 대표 승인) */
 export async function voiceDraft(u: SessionUser, id: string) {

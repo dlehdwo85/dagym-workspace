@@ -13,7 +13,7 @@ import { tenantOf, type SessionUser } from './types';
  * 묶음 규칙의 자동 제작은 그 주 주제 달력에서 주제를 가져오고, 근거 칸이 자동으로 채워진다. 돈·외부 발송 없음.
  */
 export type Rationale = { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; source?: 'goal' | 'rule' | 'ai' | 'user' | 'backfill'; goalId?: string | null; week?: number | null; topic?: string | null;
-  topicFrom?: string | null }; // 로컬 QA 10/24 ③ 주제를 어디서 골랐나: answer·goal(브랜드 목표)·brand(키트 이번 주)·pool(주제 풀)·rule·company(회사 공통 — 브랜드에 맞게 바꿔 씀)
+  topicFrom?: string | null }; // 로컬 QA 10/24 ③ 주제를 어디서 골랐나: answer·goal(브랜드 목표)·brand(키트 이번 주)·news(#235 ⓐ 이번 달 소식)·pool(주제 풀)·rule·company(회사 공통 — 브랜드에 맞게 바꿔 씀)
 export type GoalWeek = { week: number; from: string; to: string; topic: string; channels: string[]; kinds: string[]; note?: string };
 export type Goals = { objectives: string[]; message: string; targets: { posts: number | null; inquiries: number | null; adBudget: number | null; revenue?: number | null }; channels: string[] };
 

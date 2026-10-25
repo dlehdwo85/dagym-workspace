@@ -150,7 +150,7 @@ export async function getContent(u: SessionUser, id: string) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);
   const sql = db();
-  const [c] = await sql<any[]>`select c.*, b.name as brand, b.voice as brand_voice, b.facts as brand_facts, b.color as brand_color, b.video->>'logoFileId' as brand_logo from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`; // #497 R06 미리보기 프로필(브랜드 키트 로고·색)
+  const [c] = await sql<any[]>`select c.*, b.name as brand, b.voice as brand_voice, b.facts as brand_facts, b.examples as brand_examples, b.color as brand_color, b.video->>'logoFileId' as brand_logo from mkt_contents c left join mkt_brands b on b.id = c.brand_id where c.id = ${id} and c.tenant = ${tenantOf(u)}`; // #497 R06 미리보기 프로필(브랜드 키트 로고·색)
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
   const versions = await sql<any[]>`select v.version, v.body, v.media_ids, v.note, v.revision, v.created_at, u.name as created_by_name from mkt_versions v left join users u on u.id = v.created_by where v.content_id = ${id} order by v.version desc`;
   const ids = [...new Set(versions.flatMap((v) => v.media_ids as string[]))];
@@ -171,12 +171,13 @@ export async function getContent(u: SessionUser, id: string) {
   const rules = await Q.qualityRules();
   // 로컬 QA 10/24 ②: 올리기 전 자동 검사 — AI 시안은 제작 때 결과, 사람이 올린 버전은 지금 본문으로(보여 주기만, 막지 않음)
   const preflight: string[] | undefined = saved ? saved.preflight : cur ? Q.preflight({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', isTest: !!c.is_test, aiLabel: st.ai_label, facts: Q.factsOf(c.brand_facts),
-    otherBrands: Q.otherBrandNames(await Q.otherBrands(tenantOf(u), c.brand_id)), brandName: kw[0] ?? null, script: c.quality?.script ?? null, cross: c.cross_channels ?? [] }, rules) : undefined;
+    otherBrands: Q.otherBrandNames(await Q.otherBrands(tenantOf(u), c.brand_id)), brandName: kw[0] ?? null, script: c.quality?.script ?? null, cross: c.cross_channels ?? [], siblings: await Q.siblingPosts(tenantOf(u), c) }, rules) : undefined;
   // #499-1 용도를 바꿨으면(콘텐츠형↔광고형) 제작 때 보고서의 훅 후보·장면으로 그 기준에 맞춰 다시 채점(자동 수정 기록은 그대로)
   const qualityReport = saved && Q.asMode(saved.mode) === mode ? saved
     : cur ? { ...Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', keywords: kw, voice: c.brand_voice, cross: c.cross_channels ?? [], mode,
         hooks: saved?.hooks?.map((h: { text: string }) => h.text), script: c.quality?.script ?? saved?.timing?.rows?.map((r: { line: string }) => r.line) }, rules).report, ...(saved ? { v: saved.v, notes: saved.notes } : {}), ...(preflight ? { preflight } : {}) } : null;
-  delete c.brand_voice; delete c.brand_facts;
+  c.is_example = Array.isArray(c.brand_examples) && c.brand_examples.some((e: { contentId?: string }) => e?.contentId === c.id); // #235 ⓔ 좋은 예시로 저장됨
+  delete c.brand_voice; delete c.brand_facts; delete c.brand_examples;
   return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
 }
 

@@ -59,6 +59,7 @@ import { attachEdit } from './attachEdit.step.mjs';
 import { econtractPdf } from './econtractPdf.step.mjs';
 import { payTestRemove } from './payTestRemove.step.mjs';
 import { platformTabs } from './platformTabs.step.mjs';
+import { mktDraftQuality } from './mktDraftQuality.step.mjs';
 import { revenueAuto } from './revenueAuto.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
@@ -2837,6 +2838,7 @@ await step('#533 업무 첨부 [고치기](대표 10/23 23:50): 첨부 있는 �
 await step('139차 전자계약 2차 화면: [새 계약] PDF 올리기 → 서명자 → 칸 놓기(쪽 그림·서명·글자) → 보내기 → 받은 사람 휴대폰 화면 PDF 쪽·칸 채우기·서명 완료', () => econtractPdf({ owner, ctx, sql, BASE, SHOTS }));
 await step('#566 결제 시험 회사 [지우기](대표 10/24 저녁 3): 확인 창 → 지웠습니다 → 목록에서 빠짐', () => payTestRemove({ owner, ctx, sql, BASE, SHOTS }));
 await step('#565 플랫폼 운영 정리(대표 10/24 저녁 1): 오늘 볼 것 5개 → 누르면 그 탭 · 종류별 탭 5개·한 줄 설명·주소 유지 · 예전 주소(paytest·#support) · 휴대폰 폭', () => platformTabs({ owner, ctx, sql, BASE, SHOTS }));
+await step('#235 마케팅 시안 품질 ⓐ·ⓔ(로컬 10/24 저녁 6): 브랜드 키트 이번 달 소식(기간 기본 30일)·잘 된 예시 글(형식별·좋은 점·빼기) → 승인한 글 [좋은 예시로 저장]·[예시에서 빼기] → 휴대폰 넘침 없음', () => mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }));
 
 await browser.close();
 srv.proc.kill();

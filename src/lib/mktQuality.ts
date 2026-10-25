@@ -357,21 +357,35 @@ export function voiceIssues(text: string, v: Partial<Voice> | null | undefined):
 
 // ---------------- ⑥ 브랜드 사실 카드(로컬 QA 10/24 ⑤) ----------------
 /** 글 안에 직접 쓰는 연락처·운영 시간·요금·써도 되는 숫자(근거와 함께)·섞으면 안 되는 이름 — 카드에 없는 숫자·가격·시간은 쓰지 않음(mkt_brands.facts) */
+const zDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const factsInput = z.object({
   phone: z.string().trim().max(40).optional(), link: z.string().trim().max(200).optional(), website: z.string().trim().max(200).optional(), address: z.string().trim().max(200).optional(),
   hours: z.string().trim().max(200).optional(), prices: z.string().trim().max(500).optional(), numbers: z.string().trim().max(1000).optional(),
   avoidNames: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   aliases: z.array(z.string().trim().min(1).max(40)).max(10).optional(), // 137차: 이 브랜드의 다른 이름(영문·약칭) — 다른 브랜드 글에서 거름
+  // #235 ⓐ 이번 달 실제 소식(이벤트·사례·새 소식) — 기간 안에서 주제 풀보다 먼저 주제로, 재료에는 사실로(끝나는 날 없으면 저장 때 30일 뒤)
+  news: z.array(z.object({ text: z.string().trim().min(1).max(200), from: zDay.optional(), to: zDay.optional() })).max(12).optional(),
 });
 export type Facts = z.infer<typeof factsInput>;
 /** 저장 값(옛 값·빈 값 포함) → 카드. 형식이 안 맞으면 빈 카드 — 원고 쓰기를 막지 않음 */
 export const factsOf = (v: unknown): Facts => { const r = factsInput.safeParse(v ?? {}); return r.success ? r.data : {}; };
-const FACT_LABEL: [Exclude<keyof Facts, 'avoidNames'>, string][] = [['phone', '전화'], ['link', '문의·예약 링크'], ['website', '홈페이지'], ['address', '주소'], ['hours', '운영 시간'], ['prices', '요금·가격'], ['numbers', '써도 되는 숫자·근거']];
+const FACT_LABEL: [Exclude<keyof Facts, 'avoidNames' | 'aliases' | 'news'>, string][] = [['phone', '전화'], ['link', '문의·예약 링크'], ['website', '홈페이지'], ['address', '주소'], ['hours', '운영 시간'], ['prices', '요금·가격'], ['numbers', '써도 되는 숫자·근거']];
 /** 원고 재료에 넣는 사실 카드 */
 export function factsText(f: Facts) {
   const rows = FACT_LABEL.filter(([k]) => String(f[k] ?? '').trim()).map(([k, l]) => `- ${l}: ${String(f[k]).trim()}`);
   return rows.length ? `[사실 카드 — 이 브랜드의 확인된 사실. 숫자·가격·시간은 이 카드와 재료에 있는 값만]\n${rows.join('\n')}` : '';
 }
+export type NewsItem = NonNullable<Facts['news']>[number];
+export const dayAdd = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+export const todayKst = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+/** #235 ⓐ 이 날(서울) 쓸 수 있는 소식 — 끝나지 않았고(끝나는 날 없으면 시작 뒤 30일까지) 시작 2주 전부터(미리 알림) */
+export function activeNews(f: Facts, day: string): NewsItem[] {
+  return (f.news ?? []).filter((n) => { const to = n.to ?? (n.from ? dayAdd(n.from, 30) : null); return !(to && day > to) && !(n.from && dayAdd(day, 14) < n.from); });
+}
+const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+export const newsPeriod = (n: NewsItem) => (n.from && n.to ? `${md(n.from)}~${md(n.to)}` : n.from ? `${md(n.from)}부터` : n.to ? `${md(n.to)}까지` : '');
+/** 원고 재료에 넣는 소식 줄 — 시작 전이면 '곧'·'○일부터'로 */
+export const newsText = (items: NewsItem[]) => (items.length ? `[이번 달 실제 소식 — 사실로 써도 됨. 날짜·조건은 적힌 그대로, 시작 전이면 미리 알리는 말로]\n${items.map((n) => `- ${newsPeriod(n) ? `(${newsPeriod(n)}) ` : ''}${n.text}`).join('\n')}` : '');
 export const hasContacts = (f: Facts) => !!(f.phone || f.link || f.website);
 /** 글에 직접 쓸 연락처 한 줄(전화 → 문의 링크 → 홈페이지) */
 export const contactLine = (f: Facts) => (f.phone ? `문의 ${f.phone}` : f.link ? `문의 ${f.link}` : f.website ?? '');
@@ -428,6 +442,25 @@ export const otherBrandNames = (list: { name: string; aliases: string[] }[]) => 
 /** 원고 지시용 — '하이링크(HILINK)' */
 export const otherBrandLabels = (list: { name: string; aliases: string[] }[]) => list.map((x) => { const en = x.aliases.filter((a) => /[A-Za-z]/.test(a) && !a.includes('-')).slice(0, 2); return en.length ? `${x.name}(${en.join('·')})` : x.name; });
 
+// ---------------- ⑧ #235 ⓔ 잘 된 예시 글(브랜드별·형식별) ----------------
+export const EXAMPLE_KINDS = { feed: '피드·페이스북·스레드 글', blog: '블로그', video: '릴스·쇼츠(캡션·대본)', story: '스토리' } as const;
+export type ExampleKind = keyof typeof EXAMPLE_KINDS;
+export const EXAMPLE_PER_KIND = 3;
+export const exampleInput = z.object({ kind: z.enum(['feed', 'blog', 'video', 'story']), text: z.string().trim().min(20).max(4000), note: z.string().trim().max(200).optional(),
+  contentId: z.string().uuid().optional(), at: z.string().max(40).optional() });
+export type Example = z.infer<typeof exampleInput>;
+/** 저장 값 → 예시 목록(형식이 안 맞는 항목은 뺌 — 원고 쓰기를 막지 않음) */
+export const examplesOf = (v: unknown): Example[] => (Array.isArray(v) ? v : []).flatMap((x) => { const r = exampleInput.safeParse(x); return r.success ? [r.data] : []; });
+/** 콘텐츠 → 예시 형식 */
+export const exampleKindOf = (channel: string, kind?: string | null): ExampleKind => (kind === 'blog' || channel === 'blog' ? 'blog' : kind === 'story' ? 'story' : kind && ['reels', 'shorts', 'video'].includes(kind) ? 'video' : 'feed');
+/** 원고 지시에 넣는 예시 — 같은 형식 최근 2개(블로그 1,500자·그 밖 500자까지). 구성만 참고하고 문장은 베끼지 않게 */
+export function examplesPrompt(list: Example[], k: ExampleKind) {
+  const pick = list.filter((e) => e.kind === k).slice(-2);
+  if (!pick.length) return '';
+  const max = k === 'blog' ? 1500 : 500;
+  return `[잘 된 예시 글 — ${EXAMPLE_KINDS[k]}. 구성·첫 줄 여는 방식·문단 길이·마무리 방식만 참고하고, 문장·숫자·고유한 표현은 베끼지 않음]\n${pick.map((e, n) => `예시 ${n + 1}${e.note ? `(좋은 점: ${e.note})` : ''}:\n${[...e.text].slice(0, max).join('')}`).join('\n\n')}`;
+}
+
 // ---------------- ⑦ 올리기 전 자동 검사(로컬 QA 10/24 ②·⑥) ----------------
 /** JSON 모양 본문(원고 칸 이름이 섞임) — 본문 첫머리 '[브랜드]' 같은 자리표시는 JSON 이 아님 */
 export const JSON_LIKE = /^\s*(?:\{|\[\s*["{[])|"(?:title|body|brief|why|hooks|keyword|card|script)"\s*:/;
@@ -457,7 +490,70 @@ export function splitScript(body: string, given: string[] = []): { caption: stri
 /** 끝이 조사·연결어미·꾸밈말로 끊긴 문장(예: '…관리자라면 꼭', '…주차는 건물 뒤편에', '…문의:') — 명사로 끝나는 안내('24시간 운영')·날짜('31일까지')는 그대로 */
 const DANGLING = /(?:[,·:;(\[/\-–—]|(?:^|\s)(?:꼭|가장|바로|더욱|그리고|또는|하지만|그래서|그런데|및)|[가-힣](?:를|은|는|에|에서|에게|으로|라면|하면|해서|하고|하며|하는|있는|없는|위한|통한|통해|대한|같은|좋은|많은))$/;
 const URL_END = /(?:https?:\/\/\S+|[a-z0-9-]+\.[a-z]{2,}(?:\/\S*)?)$/i;
-export type PreflightInput = { channel: string; kind?: string | null; title?: string; body: string; isTest?: boolean; aiLabel?: string | null; facts?: Facts | null; otherBrands?: string[]; brandName?: string | null; script?: string[] | null; cross?: string[] | null };
+// #235 ⓓ 남은 검사(QA 10/24 '이번에 안 한 것'): 깨진 글자 · 다른 회사 깎아내림 · 채널별 같은 글
+/** UTF-8 글자가 라틴 문자로 깨진 조각('ì•ˆ'·'Ã©') — 한 글에 두 곳 이상일 때만(café 같은 낱말은 아님) */
+const MOJIBAKE = /[À-ï][\u0080-¿ŒœŠšŸŽžƒˆ˜–—‘-„†-•…‰‹›€™]/g;
+/** 글자에 붙은 낱자모('바ㄷ랩') — 웃음·울음 표시(ㅋ·ㅎ·ㅠ·ㅜ)는 빼고 */
+const JAMO = '\\u3131-\\u314A\\u314C\\u314D\\u314F-\\u315B\\u315D-\\u315F\\u3161-\\u3163';
+const LONE_JAMO = new RegExp(`[가-힣][${JAMO}]|[${JAMO}][가-힣]`);
+/** 한글 브랜드 이름 앞부분 + 영문(바디랩 → '바DL') */
+function fusedName(text: string, names: string[]): string | null {
+  for (const raw of names) {
+    const ch = [...raw.replace(/^\s*\[시험\]\s*/, '').trim()];
+    if (ch.length < 2 || !/^[가-힣]+$/.test(ch.join(''))) continue;
+    for (let k = 1; k < ch.length; k++) { const m = text.match(new RegExp(`(?<![가-힣])${ch.slice(0, k).join('')}[A-Za-z]{1,4}(?![A-Za-z])`)); if (m) return m[0]; }
+  }
+  return null;
+}
+/** 깨진 글자가 있으면 그 조각(앞뒤 세 글자와 함께) */
+export function brokenText(text: string, names: string[] = []): string | null {
+  const at = (s: string) => { const k = text.indexOf(s); return [...text.slice(Math.max(0, k - 3), k + s.length + 3)].join('').replace(/\s+/g, ' ').trim(); };
+  if (text.includes('�')) return at('�');
+  const mj = text.match(MOJIBAKE); if (mj && mj.length >= 2) return at(mj[0]);
+  const lj = text.match(LONE_JAMO); if (lj) return at(lj[0]);
+  const fn = fusedName(text, names); return fn ? at(fn) : null;
+}
+/** 다른 회사 깎아내림: 다른 업체·대행사·기존 업체 + 같은 마디 안의 나쁜 말(비싸다·느리다·수수료만…), 또는 '비싼 대행사' 꼴 */
+const RIVAL = '(?:타사|경쟁사|경쟁\\s?업체|타\\s?업체|다른\\s?(?:업체|회사|곳|브랜드|대행사|앱|서비스|센터|헬스장|체육관|매장)들?|(?:광고\\s?)?대행사|기존\\s?(?:업체|회사|대행사|관리\\s?업체)|일반\\s?(?:업체|헬스장|대행사)|동네\\s?(?:업체|헬스장))';
+const BAD = '(?:비싸|비쌉|바가지|부풀|느리|느립|느려|불친절|엉터리|부실|형편없|믿을\\s?수\\s?없|못\\s?믿|대충|허술|뻔하|뻔한|속이|속여|사기|거품|떼어\\s?가|떼\\s?가|수수료만|안\\s?알려|숨기|숨겨|실망|무책임|성의\\s?없|관리\\s?안\\s?하|신경\\s?안\\s?쓰|모릅니다|몰라요|못\\s?합니다|못\\s?해요)';
+const DISPARAGE = [new RegExp(`${RIVAL}[^.!?\\n]{0,25}?${BAD}`), new RegExp(`(?:비싼|비싸기만\\s?한|느린|불친절한|엉터리|부실한|허술한|뻔한|형편없는|무책임한|바가지)\\s?${RIVAL}`)];
+export function disparageIn(text: string): string | null { for (const re of DISPARAGE) { const m = text.match(re); if (m) return m[0]; } return null; }
+/** 채널별 같은 글: 해시태그·주소·전화·'문의'·띄어쓰기·문장부호를 빼고 세 글자 조각이 얼마나 겹치나(0~1) — 짧은 글(조각 10개 미만)은 0 */
+const PHONE_ALL = /(?:0\d{1,2}|1[5-9]\d{2})[-.\s)]?\d{3,4}[-.\s]?\d{4}/g;
+const dupKey = (t: string) => t.replace(HASHTAG, ' ').replace(/https?:\/\/\S+/g, ' ').replace(PHONE_ALL, ' ').replace(/문의/g, '').replace(/[\s\p{P}\p{S}]+/gu, '').toLowerCase();
+const grams = (t: string) => { const a = [...t]; const s = new Set<string>(); for (let k = 0; k + 3 <= a.length; k++) s.add(a.slice(k, k + 3).join('')); return s; };
+export function similarity(a: string, b: string) {
+  const x = grams(dupKey(a)), y = grams(dupKey(b)); if (x.size < 10 || y.size < 10) return 0;
+  let n = 0; for (const g of x) if (y.has(g)) n++; return n / (x.size + y.size - n);
+}
+export const DUP_MIN = 0.6;
+/** #235 ⓔ 예시 글 문장을 그대로 썼나 — 띄어쓰기·문장부호·해시태그·전화·주소를 뺀 n글자가 예시 한 곳과 같으면 그 조각(앞 20자).
+ *  예시 둘 이상에 있는 조각(브랜드 맺음말)·재료(소개·사실 카드)에 있는 조각은 봐줌 */
+export function copiedFrom(text: string, examples: string[], allow: string[] = [], n = 40): string | null {
+  const wins = (t: string) => { const a = [...dupKey(t)]; const w = new Set<string>(); for (let k = 0; k + n <= a.length; k++) w.add(a.slice(k, k + n).join('')); return w; };
+  const seen = new Map<string, number>();
+  for (const e of examples) for (const w of wins(e)) seen.set(w, (seen.get(w) ?? 0) + 1);
+  if (!seen.size) return null;
+  const ok = new Set(allow.flatMap((x) => [...wins(x)]));
+  for (const w of wins(text)) if (seen.get(w) === 1 && !ok.has(w)) return [...w].slice(0, 20).join('');
+  return null;
+}
+const CH_LABEL: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드' };
+const KIND_WORD: Record<string, string> = { feed: '피드', reels: '릴스', shorts: '쇼츠', video: '영상', blog: '블로그' };
+const SOCIAL_CH = ['instagram', 'facebook', 'threads'];
+/** 같은 브랜드·앞뒤 2일 안의 다른 SNS 글(인스타·페이스북·스레드, 스토리 빼고) — 채널별 같은 글 검사 재료. '페이스북에도' 같이 올리는 한 건은 자기 자신이라 빠짐 */
+export async function siblingPosts(tenant: string, c: { id: string; brand_id?: string | null; channel: string; kind?: string | null; scheduled_at?: string | Date | null }): Promise<{ label: string; body: string }[]> {
+  if (!c.brand_id || !SOCIAL_CH.includes(c.channel) || c.kind === 'story') return [];
+  const day = c.scheduled_at ? new Date(c.scheduled_at).getTime() : Date.now();
+  const rows = await db()<{ channel: string; kind: string | null; at: Date; body: string }[]>`select x.channel, x.kind, coalesce(x.scheduled_at, x.created_at) as at, v.body from mkt_contents x
+    join mkt_versions v on v.content_id = x.id and v.version = x.current_version
+    where x.tenant = ${tenant} and x.brand_id = ${c.brand_id} and x.id <> ${c.id} and x.status <> 'canceled' and x.current_version > 0 and x.channel = any(${SOCIAL_CH}) and coalesce(x.kind, '') <> 'story'
+      and coalesce(x.scheduled_at, x.created_at) between ${new Date(day - 2 * 864e5)} and ${new Date(day + 2 * 864e5)} order by coalesce(x.scheduled_at, x.created_at) limit 12`;
+  return rows.map((r) => { const d = new Date(new Date(r.at).getTime() + 9 * 3600e3); return { label: `${CH_LABEL[r.channel] ?? r.channel}${r.kind && r.kind !== 'feed' ? ` ${KIND_WORD[r.kind] ?? r.kind}` : ''} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`, body: String(r.body ?? '') }; });
+}
+export type PreflightInput = { channel: string; kind?: string | null; title?: string; body: string; isTest?: boolean; aiLabel?: string | null; facts?: Facts | null; otherBrands?: string[]; brandName?: string | null; script?: string[] | null; cross?: string[] | null;
+  siblings?: { label: string; body: string }[] | null; // #235 ⓓ 같은 브랜드 가까운 날 다른 SNS 글(siblingPosts)
+  examples?: string[] | null; allow?: string[] | null }; // #235 ⓔ 잘 된 예시 글(베끼기 검사) · 재료(소개·사실 카드 — 같아도 됨)
 /** 승인함(승인 대기)에 올리기 전에 막는 문제 — 걸리면 '수정 요청' 칸에 이유와 함께(자동 제작). 사람이 올린 글은 상세에 보여 주기만.
  *  빈 글·한 줄·끊긴 문장·JSON 모양·[시험]·해시태그 초과·권유 2가지 이상·연락처(이미지 참조·사실 카드)·블로그 길이·스토리 형식·릴스/쇼츠 대본·틀 문구·다른 브랜드 이름 */
 export function preflight(i: PreflightInput, rules: QualityRules = DEFAULT_RULES): string[] {
@@ -493,6 +589,12 @@ export function preflight(i: PreflightInput, rules: QualityRules = DEFAULT_RULES
   }
   const tp = templatesIn(all); if (tp.length) out.push(`틀 문구 그대로: ${tp.join(', ')}`);
   const ob = otherBrandIn(blog ? `${i.title ?? ''}\n${all}` : all, [...(i.otherBrands ?? []), ...(f.avoidNames ?? [])], i.brandName ?? ''); if (ob) out.push(`다른 브랜드·회사 이름('${ob}')이 섞임`);
+  const dis = disparageIn(all); if (dis) out.push(`다른 회사를 깎아내림('${[...dis].slice(0, 30).join('')}') — 우리 장점만`);
+  const names = [i.brandName ?? '', ...(i.otherBrands ?? [])];
+  const br = brokenText(all, names) ?? brokenText(i.title ?? '', names); if (br) out.push(`깨진 글자('${br}')`);
+  const sib = (i.siblings ?? []).find((s) => similarity(all, i.aiLabel ? s.body.split(i.aiLabel).join('') : s.body) >= DUP_MIN);
+  if (sib) out.push(`${sib.label} 글과 거의 같음 — 채널마다 다르게`);
+  const cp = i.examples?.length ? copiedFrom(all, i.examples, i.allow ?? []) : null; if (cp) out.push(`예시 글 문장을 그대로 씀('${cp}…') — 구성만 참고`);
   return out;
 }
 

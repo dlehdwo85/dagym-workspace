@@ -68,7 +68,7 @@ export type CardContent = { id: string; title: string; channel: string; kind?: s
 
 /** 대표 10/20 18:00 ①: '왜 이 글인가' — 목적·목표 지표·핵심 메시지·근거 한 줄(목표·주차 주제·규칙에서 자동, 사람이 적은 것도) */
 /** 로컬 QA 10/24 ③ 주제를 어디서 골랐나 — 회사 공통 테마는 브랜드에 맞게 바꿔 씀 */
-const TOPIC_FROM: Record<string, string> = { answer: '답한 주제', goal: '브랜드 목표', brand: '브랜드 이번 주', pool: '주제 풀', rule: '묶음 규칙', company: '회사 공통 테마에서' };
+const TOPIC_FROM: Record<string, string> = { answer: '답한 주제', goal: '브랜드 목표', brand: '브랜드 이번 주', news: '이번 달 소식', pool: '주제 풀', rule: '묶음 규칙', company: '회사 공통 테마에서' };
 export function WhyBox({ r, compact }: { r?: CardContent['rationale']; compact?: boolean }) {
   // #454 영상 AI 검수: 걸린 장면이 남았으면 승인 전에 사람이 보도록 빨간 줄
   const qa = r?.qa?.needsHuman ? <div className={cx('rounded-input bg-red-50 px-2.5 py-1.5 text-xs text-red-900', compact ? 'mt-2' : 'mt-1')} data-testid="mkt-qa-review"><b>사람 검수 필요</b> — {(r.qa.issues ?? []).join(' · ') || 'AI 검수를 못 했습니다'}</div> : null;
