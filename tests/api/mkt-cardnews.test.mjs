@@ -101,7 +101,7 @@ test('원고에 장이 없으면 본문 줄로 채움(표지 포함 3장) · 수
   assert.equal(c1.quality.pages[0].title, '처음 오시면 기구 사용법을 알려 드립니다.', '첫 줄(훅)은 표지라 둘째 줄부터');
   assert.equal(c1.quality.pages[1].body, `문의 ${PHONE}`, '행동 장 = 사실 카드 연락처');
   // 승인 마감이 지난 뒤 수정 요청 → AI 수정본(새 slides) → 장 다시 그림 · 원래 게시 시각은 지났으니 다음 슬롯(#540)으로 옮기고 '원래 m/d → m/d'
-  const from = new Date(Date.now() - 3600e3);
+  const from = new Date(Date.now() - 2 * 86400e3); // 승인 마감 = 게시일 09:00 → 이틀 전 글이면 시험 시각과 상관없이 마감이 지남(CI 01시·09시 전 실행에서도)
   await sql`update mkt_contents set scheduled_at = ${from} where id = ${id}`;
   await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '주차 안내', body: '동네 헬스장 새 주차 안내입니다.\n처음 오시면 기구 사용법을 알려 드립니다.\n주차는 지하 1층에 하시면 됩니다.', brief: '', why: '', hooks: [], keyword: '', card: CARD,
     slides: [{ role: 'problem', title: '주차 자리 찾기 어렵죠', body: '' }, { role: 'solution', title: '지하 1층에 세우세요', body: '입구 왼쪽 경사로' }, { role: 'cta', title: '궁금하면 물어보세요', body: '문의 032-111-2222' }] })] });

@@ -155,9 +155,10 @@ test('같은 달 두 번째 자료 → 분석 대기 1건에 합침 · 10분 전
   assert.ok(report.stats.flags.some((f) => f.site === '하이링크 판교 위탁현장' && f.basis === 'mom' && f.change === -30), '판교 급감 표시');
   assert.ok(report.stats.flags.some((f) => f.site === '다짐 강남점' && f.basis === 'yoy' && f.change === 50));
   assert.ok(report.stats.checks.some((c) => /판교.*빈 달/.test(c)) === false, '빈 달 없음(판교는 6월부터)');
-  // AI 문장: 입력에 없는 현장을 가리키는 이상치·전망은 버림
-  assert.deepEqual(report.output.anomalies.map((a) => a.site), ['다짐 강남점']); assert.deepEqual(report.output.forecast.map((f) => f.site), ['전체']);
-  assert.deepEqual(report.output.actions, [{ site: '다짐 강남점', items: ['재등록 안내를 이번 달 안에 보내기', '오전 시간대 프로그램 늘리기'] }]);
+  // AI 문장: 입력에 없는 현장을 가리키는 이상치·전망은 버림 — 가짜 AI 기본 답은 '입력의 첫 현장'(서버가 현장 이름순으로 보냄 → DB 정렬 규칙에 따라 C.UTF-8 은 다짐, en_US 는 하이링크가 먼저) 이라 같은 순서로 읽어 비교
+  const [{ name: first }] = await sql`select o.name from revenue_entries r join org_units o on o.id = r.org_unit_id where o.tenant = 'default' and not o.is_demo and r.month = '2026-09-01' order by o.name limit 1`;
+  assert.deepEqual(report.output.anomalies.map((a) => a.site), [first]); assert.deepEqual(report.output.forecast.map((f) => f.site), ['전체']);
+  assert.deepEqual(report.output.actions, [{ site: first, items: ['재등록 안내를 이번 달 안에 보내기', '오전 시간대 프로그램 늘리기'] }]);
   assert.deepEqual(report.output.checks, ['다른 현장 자료가 빠졌는지 확인']);
   assert.deepEqual(report.files.map((f) => f.id).sort(), [fileA, fileB].sort(), '근거 파일 2개');
   // 사용량: 회사 시스템 작업(사람 없음)

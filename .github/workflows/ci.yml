@@ -9,11 +9,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90 # API 시험 ~25분 + E2E 까지 한 작업
     services:
       postgres:
         image: postgres:16
-        env: { POSTGRES_USER: workos, POSTGRES_PASSWORD: workos, POSTGRES_DB: workos_test }
+        # 정렬 규칙(collation)을 로컬 시험 DB 와 같은 C.UTF-8 로 — 이미지 기본 en_US.utf8 은 한글을 가나다순으로 정렬하지 않아(glibc) 제목·파일 이름 순서를 보는 시험이 CI 에서만 깨짐
+        env: { POSTGRES_USER: workos, POSTGRES_PASSWORD: workos, POSTGRES_DB: workos_test, POSTGRES_INITDB_ARGS: --locale=C.UTF-8 }
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U workos -d workos_test" --health-interval 5s --health-timeout 5s --health-retries 10

@@ -53,7 +53,7 @@ describe('V30 ① 업무 가져오기', () => {
     const rows = parsed.rows.map((r) => [...r]); rows[2][2] = '2026-11-01'; // 날짜 고침
     const r = await ctx.owner.ok('POST', '/api/tasks/import', { headers: parsed.headers, rows, mapping: parsed.mapping, assigneeMap: { 없는사람: ctx.managerA.id }, skipRows: [5] });
     assert.equal(r.created, 3); assert.deepEqual(r.failed, []);
-    const ts = await sql`select title, assignee_id, due_date::text, priority, status, description, import_id from tasks where import_id = ${r.importId} order by title`;
+    const ts = await sql`select title, assignee_id, due_date::text, priority, status, description, import_id from tasks where import_id = ${r.importId} order by title collate "C"`;
     assert.deepEqual(ts.map((t) => t.title), ['견적 받기', '안내문 붙이기', '현장 점검, 1차']);
     assert.equal(ts.find((t) => t.title === '안내문 붙이기').assignee_id, ctx.managerA.id);
     assert.equal(ts.find((t) => t.title === '현장 점검, 1차').description, '첫 줄\n둘째 줄');

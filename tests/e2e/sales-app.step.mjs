@@ -32,7 +32,7 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.match(await card.innerText(), /다음 연락 \d{1,2}\. \d{1,2}\.\([일월화수목금토]\)/, '날짜 한국어');
     assert.ok(!/0\.00|2026-/.test(await card.innerText()), '0.00·ISO 날짜 없음');
     const tabs = (await p.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-    assert.deepEqual(tabs, ['홈', '영업기회', '리드', '제안·계약', '메시지'], '#537 대표 10/24: 영업 하단 5칸 — 입찰은 영업기회 안(#438)');
+    assert.deepEqual(tabs, ['홈', '영업기회', '영업 진행', '제안·계약', '메시지'], '#537 대표 10/24: 영업 하단 5칸 — 입찰은 영업기회 안(#438)');
     // #537 영업기회 = 허브 › 입찰(오늘 새 공고·마감 임박(3일)·진행 중) · 입찰 화면에서도 영업기회 칸 켜짐
     await p.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap();
     await p.waitForURL(/\/s\/sales\/hub\?tab=bids&bt=today$/); // #613: 기본 칩은 '진행 중'이지만 앱 하단 칸은 오늘 새 공고로

@@ -769,15 +769,17 @@ async function nextSlot(c: SlotPost & { rule_id: string | null; scheduled_at: st
   const sql = db();
   const [rule] = c.rule_id ? await sql<{ weekdays: number[]; skip_weekend: boolean }[]>`select weekdays, skip_weekend from mkt_rules where id = ${c.rule_id}` : [];
   const from = new Date(c.scheduled_at); const time = hm(from);
+  const base = Math.max(from.getTime(), Date.now() - DAY); // 원래 날이 며칠 전이면 지난 날을 세지 않고 오늘부터(14일 안에 못 찾아 null 이 되지 않게)
   const me = await selfKeys(sql, c.id);
-  const peers = await slotPeers(sql, c, ymd(new Date(from.getTime() + DAY)), ymd(new Date(from.getTime() + 14 * DAY)));
+  const peers = await slotPeers(sql, c, ymd(new Date(base + DAY)), ymd(new Date(base + 14 * DAY)));
   for (let k = 1; k <= 14; k++) {
-    const day = ymd(new Date(from.getTime() + k * DAY));
+    const day = ymd(new Date(base + k * DAY));
     const dow = new Date(`${day}T12:00:00+09:00`).getUTCDay();
     if (rule?.skip_weekend && (dow === 0 || dow === 6)) continue;
     if (rule?.weekdays?.length && !rule.weekdays.includes(dow)) continue;
     if (deadlineOf(kst(day, time), s).getTime() <= Date.now() + 3600e3) continue; // 승인할 시간이 1시간은 남게(마감은 그날 기준)
     for (const at of slotTimes(day, time, s)) {
+      if (at.getTime() <= Date.now()) continue; // 마감(게시일 09:00)이 아직이어도 그 시각 자체가 지났으면 X — 09:00 전에 돌 때 오늘 새벽 시각으로 잡히던 것
       if (slotIssue(me, peers, at)) continue;
       if (c.rule_id && (await sql`select 1 from mkt_contents where rule_id = ${c.rule_id} and scheduled_at = ${at}`).length) continue;
       return at;

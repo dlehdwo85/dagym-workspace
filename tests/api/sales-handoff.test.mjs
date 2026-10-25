@@ -183,7 +183,7 @@ describe('#507 공고 첨부 자동(대표 10/23 15:50)', () => {
     // 한화포레나 평택화양: 첨부 칸 [] · 다른 줄 없음 → 그 자리에서 첨부 목록(세션) → 2건, 이름 없는 건 첫 바이트(%PDF)로 확장자
     await put('procurement_notices', { id: 'KB1', source_type: 'kapt_bid', source_external_id: '20261022180315277', title: '주민운동시설 위탁관리 업체 선정', complex_name: '한화포레나 평택화양', related: true, first_seen_at: today, attachment_urls: [] });
     const r2 = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'KB1', assigneeIds: [ctx.ownerId] });
-    const a2 = await wait(() => sql`select file_name from attachments where task_id = ${r2.taskIds[0]} and deleted_at is null order by file_name`, (x) => x.length >= 2);
+    const a2 = await wait(() => sql`select file_name from attachments where task_id = ${r2.taskIds[0]} and deleted_at is null order by file_name collate "C"`, (x) => x.length >= 2);
     assert.deepEqual(a2.map((a) => a.file_name), ['과업내용서.pdf', '주민운동시설 위탁관리 입찰공고.hwp']);
     const [kb] = await sql`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = 'KB1'`;
     assert.deepEqual(kb.row.attachment_urls.map((x) => x.name), ['주민운동시설 위탁관리 입찰공고.hwp', '과업내용서'], '목록 화면 공고문 내려받기도 생김(원래 이름)');

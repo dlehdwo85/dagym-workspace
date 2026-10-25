@@ -2793,7 +2793,9 @@ await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]�
     const p = await c.newPage();
     await p.goto(BASE + '/welcome?gclid=TeSt_GcLiD_1234567890');
     await p.waitForTimeout(500);
-    assert.equal(tagHits.filter((u) => /googleadservices|AW-/.test(u)).length, 0, '소개 화면에는 광고 전환 태그를 미리 깔지 않음');
+    // #627(153차): 소개 화면은 측정용 사이트 태그(gtag/js?id=AW-…)만 싣고, 전환(conversion) 이벤트는 가입 화면에서 동의한 브라우저만 보낸다
+    assert.equal(tagHits.filter((u) => /googleadservices/.test(u)).length, 0, '소개 화면에서는 전환을 보내지 않음');
+    assert.equal(await p.evaluate(() => (window.dataLayer ?? []).filter((a) => a[1] === 'conversion').length), 0, '소개 화면 dataLayer 에 전환 없음');
     await p.goto(BASE + '/signup');
     await p.getByLabel('이름').fill('전환시험'); await p.getByLabel('이메일').fill(email);
     await p.locator('input[type="password"]').first().fill('signup-pass-1234');
@@ -2821,7 +2823,7 @@ await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]�
   assert.ok(t, '회사가 만들어짐');
   const no = await signupWith('conv-no@workin.test', false);
   assert.equal(no.dl.filter((a) => a[1] === 'conversion').length, 0, '동의 안 하면 안 보냄');
-  assert.equal(no.hits.length, 0); assert.equal(no.gcl, undefined);
+  assert.equal(no.hits.filter((u) => /googleadservices/.test(u)).length, 0, '동의 안 하면 전환 호출 없음(소개 화면 측정 태그는 #627 로 실림)'); assert.equal(no.gcl, undefined);
   await ctx.owner.ok('PUT', '/api/platform/conversion-tags', { googleAds: '' });
 });
 

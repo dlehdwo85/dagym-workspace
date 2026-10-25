@@ -90,7 +90,7 @@ test('자동 제작 연결: 말투 프로필이 지시문에 · 약한 첫 줄�
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${P.brand}`, { tone: '친근하게', intro: '천안 두정동 헬스장', voice });
   assert.equal((await ctx.owner.req('PATCH', `/api/marketing/auto/brands/${P.brand}`, { voice: { formality: 'rude' } })).status, 400, '말투 값 검사');
   assert.equal((await ctx.staffA.client.req('PATCH', `/api/marketing/auto/brands/${P.brand}`, { voice })).status, 403, '브랜드 키트는 관리자');
-  assert.deepEqual((await ctx.owner.ok('GET', '/api/marketing/auto')).brands.find((b) => b.id === P.brand).voice, voice);
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/marketing/auto')).brands.find((b) => b.id === P.brand).voice, { ...voice, emojis: [] }); // 160차: 허용 이모지 칸(기본 빈 목록)
   const r = await ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: P.brand, channel: 'instagram', kind: 'feed', weekdays: [0, 1, 2, 3, 4, 5, 6], postTime: '23:00', topicHint: '가을 PT' });
   const slots = await sql`select id from mkt_contents where rule_id = ${r.id} order by scheduled_at limit 2`;
   const tags = '#다짐 #헬스 #PT #천안 #두정동 #운동 #가을';

@@ -105,14 +105,14 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   for (const w of [360, 390, 430]) { await m.setViewportSize({ width: w, height: 800 }); await m.waitForTimeout(200); await m.screenshot({ path: `${SHOTS}/app-space/sales-${w}.png` }); }
   // 대표 확정 10/22(#422): 하단 '더보기' 없음 — 같은 폭(나머지는 오른쪽 위 프로필 버튼 시트) · #537 대표 확정 10/24: 영업 5칸
   const tabs = async () => (await m.getByTestId('mobile-tabs').locator(':scope > *').allInnerTexts()).map((x) => x.replace(/\d+/g, '').trim());
-  assert.deepEqual(await tabs(), ['홈', '영업기회', '리드', '제안·계약', '메시지']); // #537 홈·영업기회(입찰은 그 안, #438)·리드·제안·계약·메시지
+  assert.deepEqual(await tabs(), ['홈', '영업기회', '영업 진행', '제안·계약', '메시지']); // #537 홈·영업기회(입찰은 그 안, #438)·리드·제안·계약·메시지
   const w = await m.getByTestId('mobile-tabs').locator(':scope > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
   assert.ok(Math.max(...w) - Math.min(...w) <= 1, `같은 폭 ${w}`);
   // #567: 영업 하단 '메시지'를 눌러도 하단 탭·머리줄은 영업 그대로(공통 화면이라고 업무 탭으로 바뀌지 않음)
   await m.getByTestId('mobile-tabs').getByRole('link', { name: /메시지/ }).tap();
   await m.waitForURL(/\/messages$/);
   await m.waitForFunction(() => document.querySelector('[data-testid="mobile-tabs"]')?.getAttribute('data-space') === 'sales', null, { timeout: 5000 }).catch(() => {});
-  assert.deepEqual(await tabs(), ['홈', '영업기회', '리드', '제안·계약', '메시지'], '메시지 화면에서도 영업 하단 탭');
+  assert.deepEqual(await tabs(), ['홈', '영업기회', '영업 진행', '제안·계약', '메시지'], '메시지 화면에서도 영업 하단 탭');
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
   await m.getByTestId('mobile-space-switch').tap();
   await m.getByTestId('sheet-space-sales').getByLabel('지금 공간').waitFor();

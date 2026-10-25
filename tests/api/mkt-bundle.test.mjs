@@ -4,13 +4,14 @@ import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
-let srv, ctx, sql, brand;
+let srv, ctx, sql, brand, brand2;
 const P = {};
 before(async () => {
   await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   brand = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '워크인' });
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { videoPause: false }); // 요청 C(160차): 영상 자동 제작은 기본 중단 — 이 시험은 쇼츠·릴스 묶음 칸도 센다
 });
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 const ymd = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
@@ -50,8 +51,10 @@ describe('⑥ 게시 주기 묶음', () => {
 describe('로컬 10/20 묶음 보완 ①② (주말 건너뛰기·요일 지정·시각 한 번에)', () => {
   const nextDow = (dow, from = new Date()) => { const d = new Date(from.getTime() + 864e5); while (new Date(`${ymd(d)}T12:00:00+09:00`).getUTCDay() !== dow) d.setTime(d.getTime() + 864e5); return ymd(d); };
   test('① skipWeekend: 토요일 시작 2일마다 → 토·일 칸이 월요일로(같은 날 하나만), 요일 지정 묶음은 그 요일에만 + 종류별 시각', async () => {
+    // 대표 10/24 ③ 뒤로는 같은 브랜드의 다른 묶음(위 ⑥ 3일마다)과 같은 날 3시간 안 겹치면 칸이 빠져 첫 월요일 칸 수가 요일(오늘)에 따라 달라짐 → 이 묶음은 다른 브랜드로
+    brand2 = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '워크인 주말' });
     const sat = nextDow(6);
-    const r = await ctx.owner.ok('POST', '/api/marketing/auto/bundle', { brandId: brand.id, intervalDays: 2, startDate: sat, skipWeekend: true, times: { blog: '10:00', feed: '12:00', story: '12:00', shorts: '18:00', reels: '18:00' } });
+    const r = await ctx.owner.ok('POST', '/api/marketing/auto/bundle', { brandId: brand2.id, intervalDays: 2, startDate: sat, skipWeekend: true, times: { blog: '10:00', feed: '12:00', story: '12:00', shorts: '18:00', reels: '18:00' } });
     const rules = (await ctx.owner.ok('GET', '/api/marketing/auto')).rules.filter((x) => x.bundle_key === r.bundleKey);
     assert.ok(rules.every((x) => x.skip_weekend === true && x.interval_days === 2));
     assert.deepEqual(Object.fromEntries(rules.map((x) => [x.kind, x.post_time.slice(0, 5)])), { blog: '10:00', feed: '12:00', story: '12:00', shorts: '18:00', reels: '18:00' }, '종류별 시각');
@@ -61,7 +64,7 @@ describe('로컬 10/20 묶음 보완 ①② (주말 건너뛰기·요일 지정�
     assert.equal(days[0], nextDow(1, new Date(Date.parse(`${sat}T12:00:00+09:00`) - 864e5)), '토요일 시작 → 첫 칸은 다음 월요일');
     const n = await sql`select count(*)::int n from mkt_contents where rule_id = ${rules[0].id} and (scheduled_at at time zone 'Asia/Seoul')::date::text = ${days[0]}`;
     assert.equal(n[0].n, 1, '토·일 둘 다 월요일로 밀려도 한 칸');
-    const w = await ctx.owner.ok('POST', '/api/marketing/auto/bundle', { brandId: brand.id, weekdays: [1, 3, 5] });
+    const w = await ctx.owner.ok('POST', '/api/marketing/auto/bundle', { brandId: brand2.id, weekdays: [1, 3, 5] });
     const wr = (await ctx.owner.ok('GET', '/api/marketing/auto')).rules.filter((x) => x.bundle_key === w.bundleKey);
     assert.ok(wr.every((x) => x.interval_days === null && JSON.stringify(x.weekdays) === '[1,3,5]' && x.skip_weekend === false), '요일 지정은 n일마다 대신');
     const wd = (await sql`select distinct (scheduled_at at time zone 'Asia/Seoul')::date::text as d from mkt_contents where rule_id = any(${w.ids}::uuid[])`).map((x) => new Date(`${x.d}T12:00:00+09:00`).getUTCDay());
@@ -85,7 +88,7 @@ describe('로컬 10/20 묶음 보완 ①② (주말 건너뛰기·요일 지정�
     // 대표 10/24 ③: 같은 브랜드 다른 묶음(위 ①의 2일마다 블로그 10:00·⑥의 3일마다 13:00)과 하루 2건·3시간 규칙 — 새 시각에 걸리는 칸은 빠지고, 예전 시각이라 막혔던 날은 새로 생길 수 있음
     const mins = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
     for (const m of moved) {
-      const others = await sql`select to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24:MI') as t from mkt_contents where brand_id = ${brand.id} and channel = 'blog' and coalesce(kind, '') = 'blog'
+      const others = await sql`select to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24:MI') as t from mkt_contents where brand_id = ${brand2.id} and channel = 'blog' and coalesce(kind, '') = 'blog'
         and status <> 'canceled' and id <> ${m.id} and (scheduled_at at time zone 'Asia/Seoul')::date = ${m.d}::date`;
       assert.ok(others.length < 2 && others.every((o) => Math.abs(mins(o.t) - mins('09:30')) >= 180), `${m.d} 같은 브랜드 블로그 ${JSON.stringify(others)}`);
     }

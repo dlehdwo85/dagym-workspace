@@ -18,7 +18,7 @@ export async function mktOps({ owner, ctx, sql, BASE, SHOTS }) {
   assert.equal(await analysis.getByTestId('ops-reject-go').isDisabled(), true, '사유 없으면 반려 못 함');
   await analysis.getByTestId('ops-reject-note').fill('E2E 지금은 안 함');
   await analysis.getByTestId('ops-reject-go').click();
-  await owner.getByText('반려했습니다').waitFor();
+  await owner.getByText('수정을 요청했습니다').waitFor(); // 대표 02:30 ②(126차): 반려 = 사유를 AI 에 보내 고친 안을 다시 올리게 — 단추 '수정 요청 보내기'
   await owner.screenshot({ path: `${SHOTS}/167-mkt-ops.png`, fullPage: true });
   await plan.getByTestId('ops-approve').click();
   await owner.getByText('승인했습니다').waitFor();

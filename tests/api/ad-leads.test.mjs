@@ -66,7 +66,7 @@ test('통화 기반 최적화: 광고 유입 전화·문의·전화 기록 → �
   assert.equal(await beacon(tok, { event: 'cta', label: 'tel' }), 200); // 랜딩 없음 → 키워드 모름
   assert.equal(await beacon(tok, { event: 'cta', label: 'tel', landing: land('utm_source=instagram&utm_medium=social') }), 200); // 광고 아님 → 안 셈
   assert.equal(await beacon(tok, { event: 'cta', label: '상담 신청', landing: land('gclid=abc&utm_term=%EB%91%90%EC%A0%95%20%ED%94%BC%ED%8B%B0') }), 200); // 구글 버튼 클릭
-  const leadsRows = await sql`select provider, keyword_key, keyword_id, kind, n from mkt_ad_leads order by provider, kind, keyword_key`;
+  const leadsRows = await sql`select provider, keyword_key, keyword_id, kind, n from mkt_ad_leads order by provider, kind, keyword_key collate "C"`;
   assert.deepEqual(leadsRows.map((r) => [r.provider, r.keyword_key, r.keyword_id, r.kind, r.n]),
     [['google', '두정피티', '', 'cta', 1], ['naver', '', k1, 'tel', 1], ['naver', '두정동헬스장', k1, 'tel', 1], ['naver', '헬스장가격', '', 'tel', 1]]);
   // 웹 문의: 유입 주소에 광고 키워드 id → k1, utm 만(광고 아님) → 키워드 모름
