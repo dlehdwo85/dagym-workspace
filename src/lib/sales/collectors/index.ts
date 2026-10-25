@@ -98,8 +98,10 @@ export async function collectorAlertTick(now = new Date()) {
   if (kstHourOf(now) < 9) return { skipped: 'before 09 KST' };
   const alerts = await collectorAlerts(now.getTime()); if (!alerts.length) return { alerts: 0 };
   const sql = db(); const day = kstDay(now);
-  const people = await sql<{ id: string }[]>`select u.id from users u join tenants t on t.id = u.tenant where u.status = 'active' and not coalesce(u.is_demo, false)
-    and ((t.spaces @> array['sales']::text[] and u.role in ('owner', 'admin')) or coalesce(u.platform_admin, false))`;
+  const { superAdmin } = await import('../../superAdmin'); // 142차 후속: 플랫폼 운영자 쪽은 슈퍼관리자만
+  const people = (await sql<{ id: string; email: string; pa: boolean; mine: boolean }[]>`select u.id, u.email, coalesce(u.platform_admin, false) as pa, (t.spaces @> array['sales']::text[] and u.role in ('owner', 'admin')) as mine
+    from users u join tenants t on t.id = u.tenant where u.status = 'active' and not coalesce(u.is_demo, false)
+      and ((t.spaces @> array['sales']::text[] and u.role in ('owner', 'admin')) or coalesce(u.platform_admin, false))`).filter((p) => p.mine || superAdmin(p.email, p.pa));
   if (!people.length) return { alerts: alerts.length, notified: 0 };
   const title = `영업 DB 수집 누락 위험 ${alerts.length}곳 — ${alerts.slice(0, 2).map((a) => a.label).join(' · ')}${alerts.length > 2 ? ' 외' : ''}`;
   const body = alerts.slice(0, 6).map((a) => `${a.label}: ${a.reason}${a.error ? ` (${a.error.slice(0, 70)})` : ''}`).join('\n');

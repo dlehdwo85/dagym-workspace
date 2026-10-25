@@ -177,7 +177,7 @@ export async function requestPlanChange(u: SessionUser, i: z.infer<typeof planRe
   if (i.planCode && !(await sql`select 1 from plans where code = ${i.planCode} and public and active`).length) throw badRequest('없는 요금제입니다');
   const tenant = tenantOfUser(u);
   const [r] = await sql<{ id: string }[]>`insert into plan_requests (tenant, requested_by, plan_code, addons, note) values (${tenant}, ${u.id}, ${i.planCode ?? null}, ${i.addons ? sql.json(i.addons) : null}, ${i.note ?? null}) returning id`;
-  const admins = (await sql<{ id: string }[]>`select id from users where platform_admin and status = 'active'`).map((x) => x.id);
+  const admins = await (await import('./superAdmin')).platformAdminIds(sql); // 142차 후속: 슈퍼관리자만
   await notify(sql, { userIds: admins, type: 'usage_alert', title: '요금제 변경 요청', body: `${tenant} — ${i.planCode ?? '옵션'}${i.note ? ` · ${i.note.slice(0, 60)}` : ''}`, link: '/platform',
     entityType: null as never, entityId: null as never, actorId: u.id, dedupeKey: `planreq:${r.id}` });
   await rememberChosenPlan(tenant, i.planCode);

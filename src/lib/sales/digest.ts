@@ -227,7 +227,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     else if (isChange) section = c.fit || linked.has(c.id) ? 'change' : 'ref'; // 정정·취소는 관련 사업이거나 진행 기록이 걸린 것만 — 나머지는 '참고'
     else if (!c.fit && st !== 'vendor_recruit') section = 'ref'; // 검색어만 일치
     else section = (cls.get(c.id) ?? r.classification ?? initialClassification({ ...r, fit_business: c.fit })) === '즉시 검토' ? 'now' : 'review';
-    const dl = when(r.deadline_at); const dd = dl ? Math.round((Date.parse(dl.d) - Date.parse(day)) / 864e5) : null; const dday = dd != null && dd < 0 ? null : dd; // 결과 줄은 마감이 지났음 — D-day 없음
+    const dl = when(r.deadline_at); const dd = dl ? Math.round((Date.parse(dl.d) - Date.parse(day)) / 864e5) : null; const dday = c.kind === 'cancel' || (dd != null && dd < 0) ? null : dd; // 결과 줄은 마감이 지났음 — D-day 없음 · 로컬 10/25 10:55 취소 공고는 'D-n · 준비 시작' 없이 마감일만
     const state = String(r.notice_state ?? '');
     const badges = [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : reposted.has(c.id) ? '재게시' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null].filter((x): x is string => !!x);
     const biz = matchBiz(r, cats).map((b) => ({ name: b.name, color: b.color }));

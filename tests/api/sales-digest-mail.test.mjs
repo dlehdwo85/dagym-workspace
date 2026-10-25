@@ -133,6 +133,9 @@ test('#510 메일 정리(21라인 수준): 구역·번호·빈칸 숨김·같은
   assert.ok(!html.includes('투찰 K-APT') && html.includes('투찰 KG2B'), '로컬 22:45 ②: 투찰처가 원천(K-apt)과 같으면 숨김, 다른 곳만');
   // 정정·취소 = 관련 사업만(취소 배지·가운데 줄) · 검색어만 맞은 공고(새·취소)는 참고 건수만
   assert.ok(html.includes('시험구 국민체육센터 위탁운영') && html.includes('>취소</span>') && html.includes('text-decoration:line-through'));
+  // 로컬 10/25 10:55: 취소 공고에는 'D-n · 준비 시작'·D-day 없이 마감일만
+  const cx = html.slice(html.indexOf('시험구 국민체육센터 위탁운영'), html.indexOf('</td>', html.indexOf('시험구 국민체육센터 위탁운영')));
+  assert.ok(cx.includes(`입찰마감 ${mdw(plus(8))} 10:00`) && !/D-\d|준비 시작/.test(cx), cx);
   assert.ok(!html.includes('시험키워드'), '참고 공고 제목은 메일에 안 나옴');
   assert.ok(html.includes('<b>참고(검색어만 일치)</b> 2건') && html.includes('/s/sales/bids?tab=ref'));
   // 마감 임박: 진행 기록 걸린 공고는 뺌

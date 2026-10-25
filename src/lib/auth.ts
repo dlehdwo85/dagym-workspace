@@ -2,6 +2,7 @@ import { cookies, headers } from 'next/headers';
 import { db } from './db';
 import { newToken, sha256 } from './crypto';
 import type { Role, SessionUser } from './types';
+import { superAdmin } from './superAdmin';
 
 export const SESSION_COOKIE = 'wos_session';
 const SESSION_DAYS = 30;
@@ -56,15 +57,8 @@ export async function userFromToken(token: string | undefined | null): Promise<S
   return { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: id, isDemo: r.is_demo, platformAdmin: superAdmin(r.email, r.platform_admin), tenant: r.tenant, personal: r.kind === 'personal' };
 }
 
-/**
- * #565 대표 10/24: 플랫폼 운영은 슈퍼관리자만 — 운영 설정 SUPER_ADMIN_EMAILS(쉼표로 여러 개)에 적힌 계정이면서 platform_admin 인 사람.
- * 공개 저장소라 이메일은 코드에 쓰지 않는다. 설정이 비어 있으면 예전처럼 platform_admin 인 사람 모두(설정 전에 아무도 못 들어가는 일 방지)
- */
-export function superAdmin(email: string, flag: boolean) {
-  if (!flag) return false;
-  const list = (process.env.SUPER_ADMIN_EMAILS ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-  return !list.length || list.includes(email.trim().toLowerCase());
-}
+/** #565 슈퍼관리자 판정은 superAdmin.ts(알림 받는 사람도 같은 기준) */
+export { superAdmin } from './superAdmin';
 
 /** 마케팅 퍼널 "실사용"(7일 안 3일 이상 접속)용 접속한 날 — 인스턴스마다 사람·날짜당 한 번만 기록, 실패해도 요청은 그대로 */
 const activeSeen = new Map<string, string>();

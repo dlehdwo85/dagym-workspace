@@ -150,7 +150,7 @@ export async function aiCreditAlertsJob() {
   const month = start;
   const [cum] = await sql<{ usd: number }[]>`select coalesce(sum(cost_usd), 0)::float8 usd from ai_usage where created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul')`;
   const pct = (cum.usd / f.securedUsd) * 100;
-  const admins = (await sql<{ id: string }[]>`select id from users where platform_admin and status = 'active'`).map((x) => x.id);
+  const admins = await (await import('../superAdmin')).platformAdminIds(sql); // 142차 후속: 슈퍼관리자만
   for (const level of [90, 70]) if (pct >= level) {
     await notify(sql, { userIds: admins, type: 'usage_alert', title: `AI 크레딧 ${level}% 사용`, body: `이번 달 정가 $${r2(cum.usd)} / 확보 $${f.securedUsd} — 충전·한도를 확인하세요`, link: '/platform#ai-forecast', dedupeKey: `ai_credit_pct:${month}:${level}` });
     break;

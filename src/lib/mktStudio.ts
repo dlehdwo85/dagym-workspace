@@ -81,10 +81,11 @@ async function promptCtx(tenant: string, b: any, brand: any) {
   const spec = KIND_SPEC[b.kind]; const sql = db();
   const color = await (await import('./mktCarouselDraw')).brandDrawColor(tenant, brand).catch(() => null);
   const V = await import('./mktAutoVisual'); const name = String(brand?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim().toLowerCase();
-  const rows = await sql<{ id: string; title: string; file_name: string; description: string | null; folder: string; tags: string[] }[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, description, folder, tags from library_files
+  const rows = await sql<{ id: string; title: string; file_name: string; description: string | null; folder: string; tags: string[]; vision: unknown }[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, description, folder, tags, vision from library_files
     where tenant = ${tenant} and space = 'marketing' and deleted_at is null and upload_status = 'ready' and mime_type in ('image/jpeg', 'image/png', 'image/webp') and coalesce(source, '') <> 'ai'
       and coalesce(security, 'internal') <> 'confidential' order by created_at desc limit 80`;
-  const score = (r: (typeof rows)[number]) => (V.backdropOk(r) ? 3 : 0) + (name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''}`.toLowerCase().includes(name) ? 6 : 0);
+  const { visionText } = await import('./mktPhotos'); // #235 ⓒ 사진 AI 설명도 브랜드 맞추기에
+  const score = (r: (typeof rows)[number]) => (V.backdropOk(r) ? 3 : 0) + (name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase().includes(name) ? 6 : 0);
   const candidates = rows.filter((r) => !V.textGraphic(r)).map((r) => ({ r, s: score(r) })).sort((x, y) => y.s - x.s).slice(0, 3).map(({ r }) => ({ id: r.id, title: r.title, description: r.description }));
   return { ctx: { aspect: spec.aspect, px: spec.px, video: spec.media === 'video', brandColors: color ? [color] : [], refAvailable: candidates.length } as import('./mktPromptCheck').PromptCtx, candidates };
 }

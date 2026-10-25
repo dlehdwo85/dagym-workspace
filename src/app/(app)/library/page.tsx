@@ -14,7 +14,8 @@ type Sec = 'public' | 'internal' | 'confidential';
 type F = { id: string; folder: string; title: string; file_name: string; mime_type: string; size_bytes: number; tags: string[]; description: string | null;
   created_at: string; updated_at: string; created_by: string; created_by_name: string; has_text: boolean; text_error: string | null; text_tried_at: string | null; snippet: string | null;
   organized_by: 'ai' | 'rule' | null; ai_confidence: number | null; needs_review: boolean; can_undo: boolean; level: string; organize_status: string | null; organize_error: string | null;
-  security: Sec; security_suggested: Sec | null; security_confirmed: boolean; effective_security: Sec };
+  security: Sec; security_suggested: Sec | null; security_confirmed: boolean; effective_security: Sec;
+  vision?: { caption?: string; scene?: string; kind?: string; text?: string; promo?: boolean; error?: string } | null }; // #235 ⓒ 마케팅 사진 AI 설명
 type Fo = { folder: string; n: number; security: Sec; level: string };
 type Data = { files: F[]; folders: Fo[]; review: number; level: string; aiOrganize: boolean; confEdit: boolean; spaces?: string[]; spaceCounts?: Record<string, number> };
 const RANK: Record<string, number> = { none: 0, view: 1, edit: 2, delete: 3 };
@@ -442,6 +443,7 @@ function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder,
           {fmtSize(Number(f.size_bytes))} · {f.created_by_name} · {fmtDateTime(f.created_at)}
         </div>
         {f.snippet && <div className="mt-0.5 line-clamp-1 text-xs text-ink-2">…{f.snippet}…</div>}
+        {f.vision?.caption && <div className="mt-0.5 truncate text-xs text-ink-2" title={f.vision.scene} data-testid="photo-vision">AI 사진 설명: {f.vision.caption}{f.vision.promo || f.vision.text === 'much' || (f.vision.kind && f.vision.kind !== 'photo') ? ' · 글자 든 그래픽(시안·블로그에 안 씀)' : f.vision.text === 'none' ? ' · 글자 없는 실사' : ''}</div>}
         {f.organize_status === 'pending' && <div className="mt-0.5 flex items-center gap-1 text-xs text-violet-700" data-testid="organize-pending"><Loader2 className="size-3 animate-spin" />AI 정리 중…</div>}
         {f.organize_status === 'done' && f.organized_by === 'ai' && (
           <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-violet-700" data-testid="organize-done">

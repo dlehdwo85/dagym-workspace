@@ -46,7 +46,9 @@ export async function onAiError(e: any, sql: Sql = db()): Promise<HttpError> {
     await sql`insert into app_settings (key, value) values (${BLOCK_KEY}, ${sql.json({ until, at: new Date().toISOString() })})
       on conflict (key) do update set value = excluded.value, updated_at = now()`.catch(() => {});
     const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-    const targets = (await sql<{ id: string }[]>`select id from users where status = 'active' and (platform_admin or (role = 'owner' and tenant = 'default'))`.catch(() => [])).map((x) => x.id);
+    const { superAdmin } = await import('../superAdmin'); // 142차 후속: 플랫폼 운영자 쪽은 슈퍼관리자만
+    const targets = (await sql<{ id: string; email: string; pa: boolean; own: boolean }[]>`select id, email, platform_admin as pa, (role = 'owner' and tenant = 'default') as own from users where status = 'active' and (platform_admin or (role = 'owner' and tenant = 'default'))`.catch(() => []))
+      .filter((x) => x.own || superAdmin(x.email, x.pa)).map((x) => x.id);
     await notify(sql, { userIds: targets, type: 'usage_alert', title: 'AI 크레딧 소진', body: 'Anthropic 크레딧이 부족해 모든 회사의 AI 기능이 멈췄습니다(화면 안내: AI 잠시 사용 불가). 콘솔에서 충전하면 1시간 안에 자동으로 다시 열립니다.',
       link: '/admin/usage', dedupeKey: `ai_credit:${day}` }).catch(() => {});
     const { logError } = await import('../log');

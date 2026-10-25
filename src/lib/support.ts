@@ -13,7 +13,7 @@ export const ticketInput = z.object({
 export async function createTicket(u: SessionUser, i: z.infer<typeof ticketInput>) {
   const sql = db();
   const [t] = await sql<{ id: string }[]>`insert into support_tickets (tenant, user_id, category, subject, body, page) values (${tenantOf(u)}, ${u.id}, ${i.category}, ${i.subject}, ${i.body}, ${i.page ?? null}) returning id`;
-  const admins = (await sql<{ id: string }[]>`select id from users where platform_admin and status = 'active'`).map((x) => x.id);
+  const admins = await (await import('./superAdmin')).platformAdminIds(sql); // 142차 후속: 슈퍼관리자만
   await notify(sql, { userIds: admins, type: 'usage_alert', title: `새 문의: ${i.subject}`, body: `${u.name} · ${i.body.slice(0, 80)}`, link: '/platform#support',
     entityType: null as never, entityId: null as never, actorId: u.id, dedupeKey: `ticket:${t.id}` });
   return { id: t.id };

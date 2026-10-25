@@ -240,9 +240,6 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
   const sql = db();
   const { companyAi } = await import('./ai/persona');
   const co = await companyAi({ tenant: c.tenant } as SessionUser);
-  const photos = await sql<{ title: string; description: string | null }[]>`select title, description from library_files
-    where tenant = ${c.tenant} and space = 'marketing' and deleted_at is null and upload_status = 'ready' and security <> 'confidential' and mime_type like 'image/%'
-    order by created_at desc limit 8`;
   const recent = await sql<{ title: string }[]>`select title from mkt_contents where tenant = ${c.tenant} and id <> ${c.id} and current_version > 0 and coalesce(brand_id::text, '') = ${c.brand_id ?? ''}
     order by coalesce(scheduled_at, created_at) desc limit 6`;
   // 대표 10/20 18:00 ②: 월 운영 목표(승인된 것)의 주간 주제 달력 — 로컬 QA 10/24 ③: 회사 공통 주제는 모든 브랜드에 같은 주제로 내려가지 않게 맨 뒤(pickTopic)
@@ -256,6 +253,8 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
   // 로컬 21:45 버그: 다짐 스토리에 하이링크 주제 — 브랜드 글은 그 브랜드 재료만(브랜드 키트가 있으면 회사 공통 소개는 빼고, 다른 브랜드 이름은 금지)
   const ob = brand ? await otherBrands(c.tenant, brand.id) : []; const others = otherBrandNames(ob); // 137차: 영문·다른 이름(HILINK 등) 포함
   const brandOnly = !!brand && !!(brand.intro || brand.products);
+  // #235 ⓒ 쓸 수 있는 사진 = 사진 AI 설명(없으면 자료실 설명) — 글자 든 그래픽·다른 브랜드 사진 빼고 이 브랜드 사진 먼저
+  const photos = await (await import('./mktPhotos')).photoLines(c.tenant, brandName(brand), others);
   const Q = await import('./mktQuality'); const facts = Q.factsOf(brand?.facts); // 로컬 QA 10/24 ⑤ 사실 카드
   // 로컬 QA 10/24 ③: 같은 주 다른 브랜드 글 제목 — 같은 주제·같은 제목을 피하게
   const peers = c.brand_id ? await sql<{ title: string; brand: string }[]>`select x.title, b.name as brand from mkt_contents x join mkt_brands b on b.id = x.brand_id
@@ -278,7 +277,7 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
     Q.factsText(facts),
     newsText(activeNews(facts, day)), // #235 ⓐ 이번 달 실제 소식
     goal && goal.status !== 'pending' ? `이달 운영 목표: ${(goal.goals?.objectives ?? []).join(' / ')}${goal.goals?.message ? ` · 핵심 메시지: ${goal.goals.message}` : ''}` : '',
-    photos.length ? `쓸 수 있는 실사 사진(자료실):\n${photos.map((p) => `- ${p.title}${p.description ? `: ${p.description.slice(0, 120)}` : ''}`).join('\n')}` : '',
+    photos.length ? `쓸 수 있는 실사 사진(자료실 · AI 사진 설명 — 보이는 장면만 글에 씀):\n${photos.join('\n')}` : '',
     recent.length ? `최근 게시 제목(겹치지 않게):\n${recent.map((r) => `- ${r.title}`).join('\n')}` : '',
     peers.length ? `같은 주 다른 브랜드 글(같은 주제·제목을 피함):\n${peers.map((r) => `- ${brandName({ name: r.brand })}: ${r.title}`).join('\n')}` : '',
     near.length ? `이 브랜드 가까운 날 다른 글의 첫 줄(같은 주제여도 첫 줄·문장·구성은 새로 씀 — 그대로 옮기거나 낱말 몇 개만 바꾸지 않음):\n${near.map((r) => `- ${CH_NAME[r.channel] ?? r.channel}${r.kind ? ` ${KIND_LABEL[r.kind as Kind] ?? r.kind}` : ''}: ${firstLine(r.body)}`).join('\n')}` : '',
@@ -750,6 +749,8 @@ export async function runTenant(tenant: string, actorId?: string, opt: { later?:
   // 정기 실행(later): 글 제작은 응답 뒤에 — 최상 모델은 1건 30~60초라 게시·알림·메일 단계를 밀어내지 않게. [지금 실행]은 그 자리에서(2분 30초 안에 시작한 건까지)
   const made = opt.later ? null : await produceDue(tenant, actorId, 150e3);
   if (opt.later) (await import('./later')).runLater('mktProduce', async () => ({ tenant, ...(await produceDue(tenant, undefined, 120e3)) }));
+  // #235 ⓒ 설명 없는 마케팅 사진 6장씩(응답 뒤) — 시안 바탕·블로그 사진 고르기·원고 사진 설명에 씀
+  if (opt.later) (await import('./later')).runLater('mktVision', async () => ({ tenant, ...(await (await import('./mktPhotos')).describeBatch(tenant, { limit: 6, budgetMs: 40e3 })) }));
   const produced = made?.produced ?? [];
   // #516 (b): 시안 없이 승인 대기에 걸린 자동 제작 글 → 서버 그리기로 시안을 붙여 재승인(마감 정리보다 먼저)
   // #516 후속: 글자 든 그래픽을 바탕으로 그린 승인 전 시안 → 새 규칙으로 다시 그림(한 번)

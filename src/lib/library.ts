@@ -40,7 +40,7 @@ export const libraryPatch = z.object({
 });
 
 const COLS = `f.id, f.folder, f.security, f.security_suggested, f.security_confirmed, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
-  (f.text_content is not null) as has_text, f.text_error, f.text_tried_at, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error, f.task_id, f.source`;
+  (f.text_content is not null) as has_text, f.text_error, f.text_tried_at, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error, f.task_id, f.source, f.vision`;
 
 // ---------------- V14 15번 보안 등급 (일반·내부·기밀) ----------------
 export type Security = 'public' | 'internal' | 'confidential';
@@ -273,6 +273,14 @@ export async function completeLibraryFile(u: SessionUser, id: string, uploadId?:
   });
   // V14 32-보정: 올린 직후 "○○ → 폴더로 정리했어요" — 알림 센터에는 한 시간에 1건으로 묶음(건수·마지막 파일 갱신)
   if (organized && 'folder' in organized && !organized.error && f.source !== 'revenue') await organizedNotice(u, id, organized.folder).catch(() => {});
+  // #235 ⓒ 마케팅 사진은 응답 뒤에 AI 사진 설명(시안 바탕·블로그 사진 고르기·원고 사진 설명에 씀) — 한도·AI 꺼짐이면 건너뜀(정기 실행이 다시)
+  const Ph = await import('./mktPhotos');
+  if (Ph.isMarketingPhoto(f)) (await import('./later')).runLater('mktVision', async () => {
+    try { // 한도·크레딧·AI 서버 불안정은 오류 알림 없이 건너뜀(설명이 비어 있으면 정기 실행이 다시)
+      await (await import('./mktAuto')).assertMktAi(f.tenant);
+      return { id, vision: await Ph.describePhoto(f.tenant, id, u.id) };
+    } catch (e: any) { return { id, skipped: String(e?.message ?? e).slice(0, 160) }; }
+  });
   return { ok: true, id, hasText: !!tx.text, textError: tx.error, organized };
 }
 async function organizedNotice(u: SessionUser, id: string, folder: string) {

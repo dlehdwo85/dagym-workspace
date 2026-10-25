@@ -40,6 +40,7 @@ export function startFakeGoogle(port = 3199) {
     anthropicFiles: {}, // V22 Files API: id → { filename, mime, b64 } (코드 실행 결과·올린 파일)
     anthropicUploads: [], // 올린 파일 이름 기록
     classified: [], classifyQueue: [], // V14 5번 업무 무관 질문 분류
+    vision: [], visionQueue: [], // #235 ⓒ 사진 AI 설명(다른 응답 줄과 따로)
     fcmUnregistered: new Set(),
     webpush: [],
     webpushGone: new Set(),
@@ -130,6 +131,16 @@ export function startFakeGoogle(port = 3199) {
         const work = state.classifyQueue.length ? state.classifyQueue.shift() : true;
         return json(res, 200, { id: `msg_c${state.classified.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_reason: 'end_turn',
           usage: { input_tokens: 50, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, content: [{ type: 'text', text: JSON.stringify({ work }) }] });
+      }
+      // #235 ⓒ 사진 AI 설명(구조화 출력 caption·promo·faces): 다른 시험이 줄 세운 응답과 섞이지 않게 따로 받고(state.vision) 따로 답함(visionQueue)
+      //   기본 답 = 중립 판정(실사·글자 조금·홍보물 아님 → 그래픽도 아니고 바탕 후보도 아님 — 예전 이름 규칙 결과 그대로)
+      if (['caption', 'promo', 'faces'].every((k) => body.output_config?.format?.schema?.required?.includes(k))) {
+        state.vision.push(body);
+        const v = state.visionQueue.length ? state.visionQueue.shift() : null;
+        if (v?.httpError) return json(res, v.httpError, { type: 'error', error: { type: v.errorType ?? 'api_error', message: v.message ?? 'error' } });
+        const out = { caption: '실내를 찍은 사진', scene: '실내 모습입니다.', tags: ['실내'], kind: 'photo', text: 'little', promo: false, seen: '', people: 0, faces: false, quality: 'good', ...(v ?? {}) };
+        return json(res, 200, { id: `msg_v${state.vision.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_reason: 'end_turn',
+          usage: { input_tokens: 1600, output_tokens: 120, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, content: [{ type: 'text', text: JSON.stringify(out) }] });
       }
       state.anthropic.push({ key: req.headers['x-api-key'], beta: req.headers['anthropic-beta'] ?? null, body });
       let next = state.anthropicQueue.shift();
@@ -222,7 +233,8 @@ export function startFakeGoogle(port = 3199) {
       if ('invalidGrant' in body) state.invalidGrant = body.invalidGrant;
       if ('expireSyncToken' in body) state.expireSyncToken = body.expireSyncToken;
       if (body.fcmUnregister) state.fcmUnregistered.add(body.fcmUnregister);
-      if (body.anthropicReset) { state.anthropicQueue.length = 0; state.classifyQueue.length = 0; } // 비운 다음에 새로 넣는다
+      if (body.anthropicReset) { state.anthropicQueue.length = 0; state.classifyQueue.length = 0; state.visionQueue.length = 0; } // 비운 다음에 새로 넣는다
+      if (body.visionQueue) state.visionQueue.push(...body.visionQueue);
       if (body.anthropicQueue) state.anthropicQueue.push(...body.anthropicQueue);
       if (body.anthropicFiles) for (const [k, v] of Object.entries(body.anthropicFiles)) state.anthropicFiles[k] = { at: new Date().toISOString(), ...v };
       if (body.classifyQueue) state.classifyQueue.push(...body.classifyQueue);

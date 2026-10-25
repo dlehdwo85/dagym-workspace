@@ -35,3 +35,10 @@ test("'오늘 볼 것' 숫자 — 시험 회사는 빼고 센다", async () => {
   assert.equal(t.collectorFailed, base.collectorFailed + 1, '수집기 종류 수(같은 수집기 2번 실패 = 1)');
   assert.equal(t.openTickets, base.openTickets + 1);
 });
+
+test('142차 후속(로컬 10/25 10:45): 플랫폼 운영자에게 가는 알림도 슈퍼관리자에게만 — 설정에 없는 platform_admin 은 받지 않음', async () => {
+  await ctx.staffB.client.ok('POST', '/api/support', { category: 'question', subject: '알림 565', body: '받는 사람 확인' });
+  const got = async (id) => (await sql`select count(*)::int n from notifications where user_id = ${id} and title = '새 문의: 알림 565'`)[0].n;
+  assert.equal(await got(ctx.ownerId), 1, '설정에 있는 슈퍼관리자는 받음');
+  assert.equal(await got(ctx.staffA.id), 0, 'platform_admin 이어도 설정에 없으면 안 받음');
+});

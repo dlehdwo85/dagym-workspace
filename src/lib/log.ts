@@ -12,7 +12,7 @@ export async function logError(source: string, err: unknown, context: Record<str
   // V15 오류 알림: 플랫폼 운영자에게만(#104 ③ — 고객사 관리자에게는 가지 않음) 같은 출처는 30분에 1번(앱 푸시·알림함)
   try {
     const sql = db();
-    const admins = (await sql<{ id: string }[]>`select id from users where platform_admin and status = 'active'`).map((x) => x.id);
+    const admins = await (await import('./superAdmin')).platformAdminIds(sql); // 142차 후속: 슈퍼관리자만(설정이 비면 플랫폼 운영자 모두)
     if (admins.length) {
       const { notify } = await import('./notifications');
       await notify(sql, { userIds: admins, type: 'server_error', title: `서버 오류 (${source})`, body: String(e?.message ?? err).slice(0, 140), link: '/admin/ops',

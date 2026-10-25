@@ -1033,7 +1033,7 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
   const dd = n.close ? Math.round((Date.parse(n.close) - Date.parse(td)) / 864e5) : null;
   const st = /정정/.test(String(n.status ?? '')) ? ['정정 전 공고', 'bg-slate-100 text-ink-2'] : /낙찰/.test(String(n.status ?? '')) ? ['낙찰', 'bg-emerald-50 text-emerald-800'] : /사전|예정/.test(String(n.status ?? '')) ? ['입찰 예정', 'bg-sky-50 text-sky-800']
     // 대표 10/24 추가 ②: '마감·취소' → '취소'·'마감' 따로. '마감임박'(3일 안 마감)은 D-n — #537 후속2
-    : /취소/.test(String(n.status ?? '')) ? ['취소', 'bg-slate-200 text-ink-2'] : /마감(?!임박)/.test(String(n.status ?? '')) || (dd !== null && dd < 0) ? ['마감', 'bg-slate-100 text-ink-3']
+    : /취소/.test(String(n.status ?? '')) || n.notice_kind === 'cancel' ? ['취소', 'bg-slate-200 text-ink-2'] : /마감(?!임박)/.test(String(n.status ?? '')) || (dd !== null && dd < 0) ? ['마감', 'bg-slate-100 text-ink-3']
     : dd === 0 ? [`오늘 마감 ${String(n.deadline ?? '').slice(11, 16)}`, 'bg-red-600 text-white'] : dd !== null && dd <= 3 ? [`D-${dd}`, 'bg-red-50 text-red-700']
     // 대표 10/24 추가 ③: 입찰 준비는 9~10일 전부터 — D-4~D-10 주황·굵게 '준비 시작' + 카드 왼쪽 주황 줄
     : dd !== null && dd <= PREP_DAYS ? [`D-${dd} · 준비 시작`, 'bg-amber-100 font-bold text-amber-800'] : dd !== null ? [`D-${dd}`, 'bg-slate-100 text-ink-2'] : ['진행중', 'bg-slate-100 text-ink-2'];

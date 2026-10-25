@@ -5,6 +5,7 @@ import { isAdmin } from './access';
 import { badRequest, forbidden, notFound } from './errors';
 import { tenantOf, type SessionUser } from './types';
 import { otherBrandNames, otherBrands } from './mktQuality';
+import { markedNoText, markedText, visionBackdrop, visionGraphic, visionOk, visionText } from './mktPhotos';
 
 /**
  * #516 자동 제작 시안 = 우리 서버가 그림(외부 유료 생성 없음, 크레딧 0) — 대표 10/24 "승인 대기 시안이 안 보임".
@@ -33,16 +34,20 @@ const words = (s: string) => new Set((s.match(/[\p{L}\p{N}]{2,}/gu) ?? []).map((
 const GRAPHIC = /thumb|썸네일|(^|[^a-z])pin([^a-z]|$)|(^|[^a-z])cover|표지|카드\s*뉴스|card\s*news|배너|banner|포스터|poster|shorts|reels|쇼츠|릴스|목업|mockup|캡처|screenshot|스크린샷|시안/i;
 const GRAPHIC_FOLDER = /^마케팅\/(자동 시안|카드뉴스)/;
 const SENTENCE = /[?？!！]|(니다|세요|나요|까요|어요|아요|해요|에요|예요|습니까)\s*\.?$/;
-export function textGraphic(r: { title: string; file_name?: string | null; folder: string; tags?: string[] | null }) {
+/** #235 ⓒ 사진 AI 설명(vision)이 있으면 그 판정도 — 이름 규칙·AI 판정 중 하나라도 그래픽이면 뺌. 사람이 단 태그('글자있음'·'글자없음')가 먼저 */
+export function textGraphic(r: { title: string; file_name?: string | null; folder: string; tags?: string[] | null; vision?: unknown }) {
+  if (markedText(r.tags)) return true;
+  if (markedNoText(r.tags)) return false;
   const names = [r.title, r.file_name ?? ''].map((x) => x.replace(/\.[a-z0-9]{2,5}$/i, '').trim()).filter(Boolean);
-  return GRAPHIC_FOLDER.test(r.folder ?? '') || names.some((x) => GRAPHIC.test(x) || SENTENCE.test(x)) || (r.tags ?? []).some((t) => GRAPHIC.test(t));
+  return GRAPHIC_FOLDER.test(r.folder ?? '') || names.some((x) => GRAPHIC.test(x) || SENTENCE.test(x)) || (r.tags ?? []).some((t) => GRAPHIC.test(t)) || (visionOk(r.vision) && visionGraphic(r.vision));
 }
 /** 실사 원본 우선(로컬 요청: '실제 운영 현장 사진'·브랜드 사진 폴더) — 블로그 본문 사진 고르기에 씀 */
 const REAL = /현장|실사|사진|photo/i;
-/** #516 후속 2(로컬 10/24 08:15 '이름 규칙으로는 글자 그래픽이 안 걸러짐'): 시안 바탕은 브랜드 색이 기본 — 사진은 대표·로컬이 고른 것만
- *  (자료실 '마케팅/시안 바탕…' 폴더 또는 태그 '글자없음'). 비전 판정은 대표 결정 뒤 */
+/** #516 후속 2(로컬 10/24 08:15 '이름 규칙으로는 글자 그래픽이 안 걸러짐'): 시안 바탕은 브랜드 색이 기본 — 사진은 대표·로컬이 고른 것
+ *  (자료실 '마케팅/시안 바탕…' 폴더 또는 태그 '글자없음') + #235 ⓒ(대표 #563) 사진 AI 설명이 '글자 없는 실사'로 본 사진(이름 규칙에도 안 걸리고 얼굴 알아볼 사람 없음). 태그 '글자있음'이면 뺌 */
 export const BACKDROP_FOLDER = '마케팅/시안 바탕(글자 없는 사진)';
-export const backdropOk = (r: { folder: string; tags?: string[] | null }) => (r.folder ?? '').startsWith('마케팅/시안 바탕') || (r.tags ?? []).some((t) => t.replace(/\s+/g, '') === '글자없음');
+export const backdropOk = (r: { title?: string; file_name?: string | null; folder: string; tags?: string[] | null; vision?: unknown }) => !markedText(r.tags)
+  && ((r.folder ?? '').startsWith('마케팅/시안 바탕') || markedNoText(r.tags) || (visionOk(r.vision) && visionBackdrop(r.vision) && !textGraphic({ title: r.title ?? '', file_name: r.file_name, folder: r.folder, tags: r.tags, vision: r.vision })));
 /** 쓸 사진 고르기: 글자 든 그래픽은 빼고 · 같은 브랜드(제목·폴더·태그·설명에 이름) +6 · 실사(현장·사진) +2 · 글과 겹치는 낱말 +1씩 · 다른 브랜드 이름 −10 · 최근 30일 다른 게시에 쓴 사진 −4 · exclude = 이 글에 이미 써 본 사진 */
 async function pickPhoto(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover') {
   return (await rankPhotos(c, brand, others, text, exclude, mode))[0]?.id ?? null;
@@ -50,21 +55,25 @@ async function pickPhoto(c: Content, brand: string, others: string[], text: stri
 /** #544 사진 순위(점수 높은 순, 같은 점수면 최근 사진) — 피드 틀의 사진 4분할은 앞의 4장 */
 async function rankPhotos(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover') {
   const sql = db();
-  const rows = await sql<{ id: string; title: string; file_name: string; description: string | null; folder: string; tags: string[] }[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, description, folder, tags from library_files
+  const rows = await sql<{ id: string; title: string; file_name: string; description: string | null; folder: string; tags: string[]; vision: unknown }[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, description, folder, tags, vision from library_files
     where tenant = ${c.tenant} and space = 'marketing' and deleted_at is null and upload_status = 'ready' and coalesce(security, 'internal') <> 'confidential'
       and mime_type in ('image/jpeg', 'image/png', 'image/webp') and coalesce(source, '') <> 'ai' order by created_at desc limit 200`;
   if (!rows.length) return [];
   const used = new Set((await sql<{ id: string }[]>`select distinct unnest(v.media_ids)::text as id from mkt_contents k join mkt_versions v on v.content_id = k.id and v.version = k.current_version
     where k.tenant = ${c.tenant} and k.id <> ${c.id} and k.status <> 'canceled' and coalesce(k.scheduled_at, k.created_at) > now() - interval '30 days'`).map((r) => r.id));
   const want = words(text);
-  const has = (r: (typeof rows)[number], name: string) => !!name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''}`.toLowerCase().includes(name.toLowerCase());
+  // #235 ⓒ 사진 AI 설명(한 줄·장면·태그·읽히는 글자)도 브랜드·낱말 맞추기에 — 낱말 점수는 +5까지(설명이 긴 사진이 브랜드 사진을 앞지르지 않게) · 흐린 사진 −3
+  const has = (r: (typeof rows)[number], name: string) => !!name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase().includes(name.toLowerCase());
   const out: { id: string; title: string; score: number; k: number }[] = [];
   for (const [k, r] of rows.entries()) {
-    if (exclude.has(r.id) || (mode === 'cover' ? !backdropOk(r) : textGraphic(r))) continue; // 바탕 = 고른 사진만, 블로그 본문 = 글자 든 그래픽만 빼고
+    if (exclude.has(r.id) || (mode === 'cover' ? !backdropOk(r) : textGraphic(r))) continue; // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽만 빼고
     let score = has(r, brand) ? 6 : 0;
     if (others.some((o) => has(r, o))) score -= 10;
-    else if (REAL.test(`${r.title} ${r.folder} ${(r.tags ?? []).join(' ')}`)) score += 2;
-    for (const w of words(`${r.title} ${r.description ?? ''} ${(r.tags ?? []).join(' ')}`)) if (want.has(w)) score += 1;
+    else if (REAL.test(`${r.title} ${r.folder} ${(r.tags ?? []).join(' ')}`) || (visionOk(r.vision) && r.vision.kind === 'photo')) score += 2;
+    let hit = 0;
+    for (const w of words(`${r.title} ${r.description ?? ''} ${(r.tags ?? []).join(' ')} ${visionText(r.vision)}`)) if (want.has(w)) hit++;
+    score += Math.min(5, hit);
+    if (visionOk(r.vision) && r.vision.quality === 'poor') score -= 3;
     if (used.has(r.id)) score -= 4;
     if (score > -5) out.push({ id: r.id, title: r.title, score, k });
   }
@@ -230,7 +239,7 @@ export async function redrawTextVisuals(tenant: string, limit = 8, budgetMs = 15
     try {
       const [f] = c.quality.visual.photoId !== undefined ? [{ photo: (c.quality.visual.photoId as string | null) }] : await sql<{ photo: string | null }[]>`select meta->>'photoId' as photo from library_files where id = ${c.quality.visual.fileId}`;
       const photoId = f?.photo ?? null;
-      const [p] = photoId ? await sql<{ title: string; file_name: string; folder: string; tags: string[] }[]>`select coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags from library_files where id = ${photoId}` : [];
+      const [p] = photoId ? await sql<{ title: string; file_name: string; folder: string; tags: string[]; vision: unknown }[]>`select coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, vision from library_files where id = ${photoId}` : [];
       if (!p || backdropOk(p)) { // 브랜드 색 바탕·고른 사진 = 괜찮음 → 표시만
         await sql`update mkt_contents set quality = jsonb_set(quality, '{visual}', (quality->'visual') || ${sql.json({ rv: 3, ...(photoId ? { photoId } : {}) } as never)}::jsonb) where id = ${c.id}`;
         out.push({ id: c.id, kept: true }); continue;
