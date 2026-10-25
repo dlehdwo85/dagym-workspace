@@ -63,6 +63,7 @@ before(async () => {
 after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); });
 
 test('자동 제작: 피드·스토리는 서버가 시안을 그려 붙인 뒤 승인 대기(크레딧 0·제작 카드 없음) · 릴스는 영상 카드 + 시안 없음 줄', async () => {
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { videoPause: false }); // 요청 C: 영상 자동 제작은 기본 중단 — 이 시험은 릴스 제작 카드 흐름을 보므로 켬
   const rule = (kind, postTime) => ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: P.brand, channel: 'instagram', kind, weekdays: [0, 1, 2, 3, 4, 5, 6], postTime });
   const [feed, story, reels] = [await rule('feed', '23:00'), await rule('story', '22:00'), await rule('reels', '21:00')];
   for (const r of [feed, story, reels]) {
@@ -78,7 +79,7 @@ test('자동 제작: 피드·스토리는 서버가 시안을 그려 붙인 뒤 
   for (const [r, size] of [[feed, '1080x1350'], [story, '1080x1920']]) {
     const c = await cur(r.c);
     assert.equal(c.status, 'pending', JSON.stringify(c.quality));
-    assert.equal(c.media_ids.length, 1, '시안 1장');
+    assert.ok(c.media_ids.length >= 3, `요청 C: 표지 + 장(${c.media_ids.length}장)`);
     assert.equal(c.quality.visual.by, 'server');
     assert.match(c.note, /시안 서버 그리기\(사진: 하이링크 커뮤니티 라운지\.jpg\)/, '같은 브랜드 사진(다른 브랜드·업무 공간 사진은 안 씀)');
     const [f] = await sql`select folder, space, source, mime_type, tags, meta from library_files where id = ${c.media_ids[0]}`;
@@ -123,7 +124,7 @@ test('시안 없이 걸린 자동 글: 정기 실행이 그려 붙여 v2 재승�
   assert.deepEqual(run.visuals.filter((x) => x.error), [], JSON.stringify(run.visuals));
   for (const id of [a, b, fb, plain]) {
     const c = await cur(id);
-    assert.deepEqual([c.status, c.current_version, c.media_ids.length], ['pending', 2, 1], `${id} ${JSON.stringify(c.quality)}`);
+    assert.deepEqual([c.status, c.current_version], ['pending', 2], `${id} ${JSON.stringify(c.quality)}`); assert.ok(c.media_ids.length >= 3, `요청 C: 표지 + 장(${c.media_ids.length}장)`);
     assert.equal(c.quality.visual.by, 'server'); assert.equal(c.quality.report.v, 2, '품질 보고서도 새 버전으로');
     assert.match(c.note, /^시안 자동 그리기\(서버·크레딧 0\)/);
     assert.equal((await sql`select status from mkt_production_requests where content_id = ${id} and kind = 'image'`)[0].status, 'canceled', '열린 이미지 카드 = 서버 그리기로 대체');
@@ -131,7 +132,7 @@ test('시안 없이 걸린 자동 글: 정기 실행이 그려 붙여 v2 재승�
   }
   assert.deepEqual((await cur(b)).quality.issues, [], '시안 없음 줄만 있던 글 → 줄 지우고 승인 대기');
   assert.match((await cur(fb)).note, /사진: 바디랩 운동 사진\.jpg/, '브랜드마다 자기 사진');
-  assert.match((await cur(plain)).note, /브랜드 색 바탕$/, '자기 사진이 없으면(다른 브랜드 사진 −10) 브랜드 색 바탕');
+  assert.match((await cur(plain)).note, /브랜드 색 바탕( · 카드 \d장)?$/, '자기 사진이 없으면(다른 브랜드 사진 −10) 브랜드 색 바탕');
   assert.equal(await dims((await cur(b)).media_ids[0]), '1080x1920');
   for (const id of [human, reel]) assert.deepEqual([(await cur(id)).current_version, (await cur(id)).media_ids.length], [1, 0], '사람 수정 요청·영상은 건드리지 않음');
   // 한 번 붙이면 다시 그리지 않음
@@ -281,6 +282,7 @@ test('#540 같은 브랜드 하루 2건(대표 10/24): 같은 브랜드·채널�
 
   // ④ 대표 10/24 ③ '하루 2건 = 브랜드 × 채널 × 형식마다 각각 2건': 규칙이 칸을 만들 때도 — 같은 형식 규칙 4개(10:00·11:30·15:00·19:00) → 10:00·15:00 만(11:30 은 3시간 안, 19:00 은 셋째), 릴스는 따로 셈
   const b2 = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '하루 2건 브랜드' })).id;
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { videoPause: false }); // 릴스 칸도 세어 보는 시험
   const dow = new Date(`${day(3)}T12:00:00+09:00`).getUTCDay();
   const rule = (kind, postTime) => ctx.owner.ok('POST', '/api/marketing/auto/rules', { brandId: b2, channel: 'instagram', kind, weekdays: [dow], postTime });
   for (const t of ['10:00', '11:30', '15:00', '19:00']) await rule('feed', t);
@@ -308,7 +310,7 @@ test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네
   const a = await stuck('다짐 가을 소식', { brand: dg });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const ac = await cur(a);
-  assert.match(ac.note, /사진: 다짐 실제 운영 현장 사진\.jpg$/, ac.note);
+  assert.match(ac.note, /사진: 다짐 실제 운영 현장 사진\.jpg · 카드 3장$/, ac.note);
   assert.deepEqual([ac.quality.visual.rv, ac.quality.visual.photoId, ac.quality.visual.tried], [3, real, [real]]);
   assert.ok(untagged);
   // ② 예전 규칙(rv 없음)으로 그래픽 위에 그린 승인 전 시안 → 정기 실행이 다시 그림 · 실사였던 것은 그대로 · 사람이 수정 요청한 것은 안 건드림
@@ -329,9 +331,9 @@ test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네
   assert.deepEqual(run.redraws.filter((x) => x.error), [], JSON.stringify(run.redraws));
   for (const o of [bad, sentence]) {
     const c = await cur(o.id);
-    assert.deepEqual([c.status, c.current_version, c.media_ids.length], ['pending', 3, 1], JSON.stringify(c.quality));
+    assert.deepEqual([c.status, c.current_version, c.media_ids.length], ['pending', 3, 3], JSON.stringify(c.quality)); // 요청 C: 표지 1장뿐이던 예전 글은 다시 그릴 때 장도 붙임(표지 + 2)
     assert.notEqual(c.media_ids[0], o.drawn);
-    assert.match(c.note, /^시안 다시 그리기\(바탕 = 브랜드 색 또는 고른 사진·서버·크레딧 0\) — 사진: 다짐 실제 운영 현장 사진\.jpg$/);
+    assert.match(c.note, /^시안 다시 그리기\(바탕 = 브랜드 색 또는 고른 사진·서버·크레딧 0\) — 사진: 다짐 실제 운영 현장 사진\.jpg · 카드 3장$/);
     assert.equal(c.quality.visual.rv, 3); assert.equal(c.quality.visual.photoId, real);
     assert.ok(c.quality.visual.tried.includes(real) && c.quality.visual.tried.length === 2, JSON.stringify(c.quality.visual));
     assert.ok((await sql`select 1 from notifications where entity_id = ${o.id} and title like '시안을 다시 그렸습니다(v3)%'`).length, '승인자 알림');
@@ -363,20 +365,21 @@ test('#516 후속 (c) 블로그 자동 글: 대표 이미지(1080×1080, 브랜�
   const one = await stuck('블로그브랜드 글 하나', { channel: 'blog', kind: 'blog', status: 'changes', issues: [rule], brand: bl });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const c1 = await cur(one);
-  assert.deepEqual([c1.status, c1.current_version, c1.media_ids.length, c1.quality.issues], ['changes', 2, 1, [rule]], '본문에 쓸 실사 없음 → 표지만');
-  assert.match(c1.note, /브랜드 색 바탕 · 본문 사진 없음\(실사를 붙여 주세요\)$/);
+  assert.deepEqual([c1.status, c1.current_version, c1.media_ids.length, c1.quality.issues], ['pending', 2, 4, []], '요청 C: 본문에 쓸 실사 없음 → 표지 + 도표형 카드 3장 → 승인 대기');
+  assert.match(c1.note, /브랜드 색 바탕 · 도표형 카드 3장$/);
+  assert.equal(await dims(c1.media_ids[1]), '1080x1080', '도표형 카드는 정사각');
   assert.equal(await dims(c1.media_ids[0]), '1080x1080');
   const p1 = await libFile(ctx.ownerId, await jpg(70, 110, 90), '블로그브랜드 현장 사진 1.jpg');
   const two = await stuck('블로그브랜드 글 둘', { channel: 'blog', kind: 'blog', status: 'changes', issues: [rule], brand: bl });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const c2 = await cur(two);
-  assert.deepEqual([c2.status, c2.media_ids.length, c2.quality.issues, c2.quality.visual.bodyIds, c2.quality.visual.photoId], ['pending', 2, [], [p1], null], JSON.stringify(c2.quality));
-  assert.match(c2.note, /브랜드 색 바탕 · 본문 사진: 블로그브랜드 현장 사진 1\.jpg$/, '바탕은 브랜드 색(고른 사진 아님), 본문은 실사');
+  assert.deepEqual([c2.status, c2.media_ids.length, c2.quality.issues, c2.quality.visual.bodyIds[0], c2.quality.visual.bodyIds.length, c2.quality.visual.photoId], ['pending', 4, [], p1, 3, null], JSON.stringify(c2.quality));
+  assert.match(c2.note, /브랜드 색 바탕 · 본문 사진: 블로그브랜드 현장 사진 1\.jpg · 도표형 카드 2장$/, '바탕은 브랜드 색(고른 사진 아님), 본문은 실사 1장 + 카드 2장');
   assert.ok((await sql`select 1 from notifications where entity_id = ${two} and title like '시안을 붙여 다시 올렸습니다(v2)%'`).length);
   // [브랜드 색으로 다시 그리기]: 대표 이미지만 바꾸고 본문 사진은 그대로
   const r = await ctx.owner.ok('POST', `/api/marketing/contents/${two}/visual`, { redraw: true });
   const c3 = await cur(two);
-  assert.deepEqual([r.version, c3.media_ids.length, c3.media_ids[1], c3.status], [3, 2, p1, 'pending']);
+  assert.deepEqual([r.version, c3.media_ids.length, c3.media_ids[1], c3.status], [3, 4, p1, 'pending']);
   assert.notEqual(c3.media_ids[0], c2.media_ids[0]);
   await ctx.owner.ok('POST', `/api/marketing/contents/${two}/decide`, { version: 3, decision: 'approve' });
 });

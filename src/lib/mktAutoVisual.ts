@@ -4,7 +4,7 @@ import { assertSpace } from './spaces';
 import { isAdmin } from './access';
 import { badRequest, forbidden, notFound } from './errors';
 import { tenantOf, type SessionUser } from './types';
-import { otherBrandNames, otherBrands } from './mktQuality';
+import { contactLine, factsOf, otherBrandNames, otherBrands } from './mktQuality';
 import { markedNoText, markedSkip, markedText, visionBackdrop, visionGraphic, visionOk, visionText } from './mktPhotos';
 
 /**
@@ -16,10 +16,10 @@ import { markedNoText, markedSkip, markedText, visionBackdrop, visionGraphic, vi
  */
 const VIDEO_KINDS = ['reels', 'shorts', 'video'];
 export const serverVisual = (c: { channel: string; kind?: string | null }) => (c.channel === 'instagram' || c.channel === 'facebook' || c.channel === 'blog') && !VIDEO_KINDS.includes(c.kind ?? '');
-/** 블로그는 표지 1장 + 본문 사진 1장 이상(marketing.ts BLOG_PHOTO_RULE) — 둘 다 붙으면 그 줄을 지움 */
-const BLOG_RULE = /^블로그는 표지 1장/;
+/** 요청 C §3-1: 자동 제작 블로그 = 표지 1장 + 본문 사진 3장(marketing.ts BLOG_AUTO_RULE) — 실사가 모자라면 도표형 카드로 채움 */
+export const BLOG_AUTO_MEDIA = 4;
 
-type Content = { id: string; tenant: string; brand_id: string | null; title: string; channel: string; kind: string | null; created_by: string | null; is_test?: boolean | null; current_version: number; card?: import('./mktFeedTemplates').FeedCard | null };
+type Content = { id: string; tenant: string; brand_id: string | null; title: string; channel: string; kind: string | null; created_by: string | null; is_test?: boolean | null; current_version: number; card?: import('./mktFeedTemplates').FeedCard | null; auto?: boolean | null };
 
 /** 세션 없이(정기 실행) 자료실에 저장할 때 쓰는 사람 — 만든 사람, 막혔으면 회사 대표 */
 async function actorOf(c: Pick<Content, 'tenant' | 'created_by'>): Promise<SessionUser | null> {
@@ -150,7 +150,117 @@ export async function drawAutoVisual(c: Content, body: string, opts: DrawOpts = 
   return { fileId: f.id, photoId, photoTitle: photo?.title ?? null, bodyId: bodyIds[0] ?? null, bodyIds, bodyTitle: bp ? `${bp.title}${bodyIds.length > 1 ? ` 외 ${bodyIds.length - 1}장` : ''}` : null, template, templateLabel: label, photoIds };
 }
 
-/** #544 피드 틀로 그리기: 같은 브랜드에서 게시 시각이 가까운 3개 글의 틀·사진은 빼고 → 칸(AI card·글)·사진·화면 캡처로 쓸 수 있는 틀 중 덜 쓴 것 */
+/**
+ * 요청 C §3-1(대표 10/25 22:20 #644, 결정 15-11): 피드 = 카드뉴스 3~5장(표지 → 문제 → 해결 → 근거 → 행동) · 스토리 = 3~5프레임(질문 → 답 → 행동).
+ * 표지 뒤 장은 원고 AI 의 slides/frames 로, 없으면(예전 글·형식 깨짐) 본문 줄로 만든다. 모두 서버가 브랜드 색 바탕(행동 장은 검정)으로 그림 — 크레딧 0
+ */
+export type CardPage = { role: 'problem' | 'solution' | 'proof' | 'cta' | 'frame'; title: string; body: string };
+/** 표지 포함 장 수 */
+export const PAGES_MIN = 3, PAGES_MAX = 5;
+const PAGE_ROLES = ['problem', 'solution', 'proof', 'cta'];
+const oneLine = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+const HASHTAG_LINE = /^(?:#[^\s#]+\s*)+$/;
+/** 원고 AI 가 준 slides(피드: role·title·body) / frames(스토리: title·body) → 장 목록. 표지(cover) 역할은 뺌(표지는 첫 줄·제목으로 따로 그림) · 제목 24자 · 본문 3줄×36자 */
+export function pagesFrom(raw: unknown, story: boolean): CardPage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CardPage[] = [];
+  for (const [k, x] of raw.entries()) {
+    if (!x || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>;
+    const r = oneLine(o.role).toLowerCase();
+    if (r === 'cover' || (story && k === 0 && raw.length >= 2)) continue; // 피드는 role cover · 스토리는 첫 프레임이 표지(본문 첫 줄로 따로 그림)
+    const lines = String(o.body ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const title = cutAt(oneLine(o.title) || lines.shift() || '', 24);
+    if (!title) continue;
+    out.push({ role: story ? 'frame' : PAGE_ROLES.includes(r) ? (r as CardPage['role']) : 'solution', title, body: lines.slice(0, 3).map((l) => cutAt(l, 36)).join('\n') });
+    if (out.length >= PAGES_MAX - 1) break;
+  }
+  return out;
+}
+/** 그릴 장(표지 제외): AI 장이 있으면 그것(행동 장은 맨 뒤) · 표지 포함 3장이 안 되면 본문 줄 → 행동 장(연락처) 순서로 채움 */
+export function pagesOf(kind: string | null | undefined, pages: CardPage[] | null | undefined, body: string, contact = ''): CardPage[] {
+  const story = kind === 'story';
+  const given = (pages ?? []).slice(0, PAGES_MAX - 1);
+  const cta = given.filter((p) => p.role === 'cta').slice(0, 1); const rest = given.filter((p) => p.role !== 'cta');
+  if (rest.length + cta.length >= PAGES_MIN - 1) return [...rest, ...cta];
+  const used = new Set(given.flatMap((p) => [p.title, ...p.body.split('\n')]));
+  const lines = body.split('\n').map((l) => l.trim()).filter((l) => l && !HASHTAG_LINE.test(l) && !/^스티커 제안\s*[:：]/.test(l) && !(contact && l.includes(contact)) && !used.has(l)).map((l) => l.replace(/#[^\s#]+/g, '').trim()).filter(Boolean);
+  if (!story) lines.shift(); // 피드는 첫 줄(훅)이 표지
+  const fill: CardPage[] = [];
+  for (let k = 0; k < lines.length && rest.length + fill.length + cta.length < PAGES_MIN - 1; k += 2) fill.push({ role: story ? 'frame' : 'solution', title: cutAt(lines[k], 24), body: lines[k + 1] ? cutAt(lines[k + 1], 36) : '' });
+  const out = [...rest, ...fill, ...cta];
+  if (out.length < PAGES_MIN - 1 && !cta.length) out.push({ role: 'cta', title: story ? '더 알고 싶다면' : '궁금한 점은 편하게 물어보세요', body: contact || '프로필 링크에서 자세히 볼 수 있습니다' });
+  while (out.length < PAGES_MIN - 1) out.push({ role: story ? 'frame' : 'solution', title: cutAt(lines[0] ?? body.split('\n').map((l) => l.trim()).find(Boolean) ?? '자세한 내용은 본문에', 24), body: '' });
+  return out;
+}
+/** 브랜드 사실 카드의 연락처 줄(행동 장에 씀) */
+async function contactOf(c: Pick<Content, 'brand_id'>) {
+  const [b] = c.brand_id ? await db()<{ facts: unknown }[]>`select facts from mkt_brands where id = ${c.brand_id}` : [];
+  return contactLine(factsOf(b?.facts));
+}
+async function brandDraw(c: Content) {
+  const [b] = c.brand_id ? await db()<{ name: string; color: string | null; video: any; feed: any }[]>`select name, color, video, feed from mkt_brands where id = ${c.brand_id}` : [];
+  const brand = (b?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
+  const { libBytes } = await import('./mktVideo');
+  const D = await import('./mktCarouselDraw'); const F = await import('./mktFeedTemplates');
+  const [logo, font] = await Promise.all([libBytes(c.tenant, b?.video?.logoFileId, /^image\//).catch(() => null), libBytes(c.tenant, b?.video?.fontFileId, /font|\.(otf|ttf)$/i).catch(() => null)]);
+  const kit = F.kitOf(b?.feed, await D.brandColorInfo(c.tenant, b), brand);
+  return { brand, logo: logo?.data ?? null, font: font && /\.(otf|ttf)$/i.test(font.name) ? font.data : null, color: kit.from ? kit.bg : null, D };
+}
+const safeTitle = (c: Pick<Content, 'title'>) => c.title.replace(/^\s*\[시험\]\s*/, '').replace(/[\\/:*?"<>|\n]+/g, ' ').trim().slice(0, 50) || '자동 시안';
+/** 표지 뒤 장들을 그려 자료실(마케팅/자동 시안)에 저장 → 파일 id(표지 다음 순서). 피드 1080×1350 · 스토리 1080×1920(위·아래 안전 영역 — 아래 답장 칸은 비움) */
+export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: SessionUser | null } = {}): Promise<string[]> {
+  if (!pages.length) return [];
+  const { brand, logo, font, color, D } = await brandDraw(c);
+  const story = c.kind === 'story'; const H = story ? 1920 : 1350;
+  const actor = opts.actor ?? (await actorOf(c));
+  if (!actor) throw badRequest('자료실에 저장할 사람이 없습니다(활성 계정 없음)');
+  const { saveGeneratedFile } = await import('./library');
+  const safe = safeTitle(c); const n = pages.length + 1; const ids: string[] = [];
+  for (const [k, p] of pages.entries()) {
+    const png = await D.drawSlide({ kind: p.role === 'cta' ? 'cta' : 'body', title: p.title, body: p.body, rows: [], imagePlan: '', imageId: null }, k + 1, n, { template: 'bold', color, brand, keyword: '', logo, font, height: H }, null);
+    const f = await saveGeneratedFile(actor, { fileName: `${safe}_${story ? '스토리' : '피드'} ${k + 2}of${n}.jpg`, mime: 'image/jpeg', data: await D.toJpeg(png), title: `${safe} — ${story ? '프레임' : '카드'} ${k + 2}/${n}`, folder: '마케팅/자동 시안',
+      tags: ['자동 시안', ...(brand ? [brand] : [])], description: `서버 그리기(크레딧 0) · ${story ? '스토리 프레임' : '카드뉴스'} ${k + 2}/${n}${p.role === 'cta' ? ' · 행동 장' : ''}`, source: 'ai', space: 'marketing', meta: { contentId: c.id, page: k + 2, of: n, role: p.role, kind: story ? 'story' : 'feed' } });
+    ids.push(f.id);
+  }
+  return ids;
+}
+/** 요청 C §3-1 블로그: 본문 실사가 3장이 안 되면 모자란 만큼 브랜드 색 '도표형 카드'(소제목 + 첫 문장 → 인용구 → 문장, 1080×1080)로 채움 */
+export async function drawInfoCards(c: Content, body: string, need: number, opts: { actor?: SessionUser | null } = {}): Promise<string[]> {
+  if (need <= 0) return [];
+  const T = await import('./mktText');
+  const blocks: { title: string; body: string }[] = []; let cur: { title: string; body: string } | null = null;
+  const lines = body.split('\n').map((l) => l.trim()).filter((l) => l && !T.PHOTO_LINE.test(l));
+  for (const l of lines) {
+    if (T.HEAD_LINE.test(l)) { cur = { title: cutAt(l.replace(/^(?:■|##|\[소제목\])\s*/, '').trim(), 24), body: '' }; if (cur.title) blocks.push(cur); continue; }
+    if (cur && !cur.body && !T.QUOTE_LINE.test(l)) cur.body = cutAt(l, 60);
+  }
+  if (blocks.length < need) blocks.push(...lines.filter((l) => T.QUOTE_LINE.test(l)).map((l) => ({ title: cutAt(l.replace(/^[“"「『]|[”"」』]$/g, ''), 30), body: '' })));
+  if (blocks.length < need) blocks.push(...lines.filter((l) => !T.HEAD_LINE.test(l) && !T.QUOTE_LINE.test(l) && [...l].length >= 8).map((l) => ({ title: cutAt(l, 30), body: '' })));
+  const pick = blocks.slice(0, need);
+  while (pick.length < need) pick.push({ title: cutAt(c.title.replace(/^\s*\[시험\]\s*/, ''), 24), body: '' });
+  const { brand, logo, font, color, D } = await brandDraw(c);
+  const actor = opts.actor ?? (await actorOf(c));
+  if (!actor) throw badRequest('자료실에 저장할 사람이 없습니다(활성 계정 없음)');
+  const { saveGeneratedFile } = await import('./library');
+  const safe = safeTitle(c); const ids: string[] = [];
+  for (const [k, p] of pick.entries()) {
+    const png = await D.drawSlide({ kind: 'body', title: p.title, body: p.body, rows: [], imagePlan: '', imageId: null }, 0, 1, { template: 'bold', color, brand, keyword: '', logo, font, height: 1080 }, null);
+    const f = await saveGeneratedFile(actor, { fileName: `${safe}_블로그 카드 ${k + 1}.jpg`, mime: 'image/jpeg', data: await D.toJpeg(png), title: `${safe} — 본문 카드 ${k + 1}`, folder: '마케팅/자동 시안',
+      tags: ['자동 시안', ...(brand ? [brand] : [])], description: '서버 그리기(크레딧 0) · 블로그 본문 도표형 카드(실사가 모자라 채움)', source: 'ai', space: 'marketing', meta: { contentId: c.id, kind: 'blog_card', page: k + 1 } });
+    ids.push(f.id);
+  }
+  return ids;
+}
+/** 표지 뒤에 붙일 장(자동 제작 글만): 피드·스토리 = 카드뉴스 장(원고의 pages, 없으면 본문으로) · 블로그 = 실사가 3장이 안 되면 도표형 카드 — 사람이 쓴 글은 그대로 */
+async function pagesAfterCover(c: Content & { quality?: any }, body: string, have: number, opts: { actor?: SessionUser | null } = {}): Promise<{ ids: string[]; note: string; pages: CardPage[] | null }> {
+  if (!c.auto) return { ids: [], note: '', pages: null };
+  if (c.kind === 'feed' || c.kind === 'story') { const pages = pagesOf(c.kind, c.quality?.pages ?? null, body, await contactOf(c)); const ids = await drawPages(c, pages, opts); return { ids, note: ` · ${c.kind === 'story' ? '프레임' : '카드'} ${ids.length + 1}장`, pages }; }
+  if (c.channel === 'blog' && have < BLOG_AUTO_MEDIA) { const ids = await drawInfoCards(c, body, BLOG_AUTO_MEDIA - have, opts); return { ids, note: ids.length ? ` · 도표형 카드 ${ids.length}장` : '', pages: null }; }
+  return { ids: [], note: '', pages: null };
+}
+
+/** #544 피드 틀로 그리기: 같은 브랜드에서 게시 시각이 가까운 5개 글의 틀·사진은 빼고(요청 C §3-2 연속 같은 표지 금지) → 칸(AI card·글)·사진·화면 캡처로 쓸 수 있는 틀 중 덜 쓴 것 */
 async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFeedTemplates').Kit; brand: string; others: string[]; head: string; sub: string; H: number; logo: Buffer | null; font: Buffer | null; opts: DrawOpts }) {
   const sql = db(); const F = await import('./mktFeedTemplates'); const { libBytes, videoAssets } = await import('./mktVideo');
   const [me] = await sql<{ at: Date; card: any }[]>`select coalesce(scheduled_at, created_at, now()) as at, quality->'card' as card from mkt_contents where id = ${c.id}`;
@@ -158,9 +268,9 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
   const near = c.brand_id ? await sql<{ t: string | null; p: string | null; ps: string[] | null }[]>`select quality->'visual'->>'template' as t, quality->'visual'->>'photoId' as p,
       array(select jsonb_array_elements_text(case when jsonb_typeof(quality->'visual'->'photoIds') = 'array' then quality->'visual'->'photoIds' else '[]'::jsonb end)) as ps
     from mkt_contents where tenant = ${c.tenant} and brand_id = ${c.brand_id} and id <> ${c.id} and status <> 'canceled' and quality->'visual'->>'by' = 'server'
-    order by abs(extract(epoch from (coalesce(scheduled_at, created_at) - ${at}::timestamptz))) limit 3` : [];
+    order by abs(extract(epoch from (coalesce(scheduled_at, created_at) - ${at}::timestamptz))) limit 5` : [];
   const usage = Object.fromEntries((c.brand_id ? await sql<{ t: string; n: number }[]>`select t, count(*)::int as n from (select quality->'visual'->>'template' as t from mkt_contents
-    where tenant = ${c.tenant} and brand_id = ${c.brand_id} and id <> ${c.id} and quality->'visual'->>'template' is not null order by coalesce(scheduled_at, created_at) desc limit 12) x group by t` : []).map((r) => [r.t, r.n]));
+    where tenant = ${c.tenant} and brand_id = ${c.brand_id} and id <> ${c.id} and quality->'visual'->>'template' is not null order by coalesce(scheduled_at, created_at) desc limit 15) x group by t` : []).map((r) => [r.t, r.n]));
   // 사진: 가까운 3개 글에 쓴 사진·이 글에 써 본 사진은 빼고(글만 고친 수정본은 쓰던 사진 그대로)
   const keep = a.opts.photoIds?.length ? a.opts.photoIds : a.opts.photoId ? [a.opts.photoId] : null;
   const exclude = new Set([...(a.opts.exclude ?? []), ...near.flatMap((r) => [r.p, ...(r.ps ?? [])]).filter((x): x is string => !!x)]);
@@ -191,8 +301,8 @@ export const HOLD_NOTE = '브랜드 템플릿 준비 전 — 자동 시안은 �
 export const VISUAL_ISSUE = /^(시안 이미지 없음|영상 시안 제작 중)/;
 /** 시안 붙여 새 버전(같은 글). 시안이 없어서만 막혀 있던 글(수정 요청 상태)은 승인 대기로, 열린 이미지 제작 요청은 '서버 그리기로 대체'
  *  replace = 서버가 그린 시안만 붙어 있을 때 새로 그린 것으로 바꿈(다시 그리기). rv 2 = 글자 든 그래픽을 빼는 규칙으로 그림 · tried = 이 글에 써 본 바탕 사진 */
-async function attachVisual(c: Content, fileId: string, note: string, actorId: string | null, photoId: string | null = null, replace = false, extra: string[] = [], more: { template?: string | null; photoIds?: string[] } = {}) {
-  const sql = db();
+async function attachVisual(c: Content, fileId: string, note: string, actorId: string | null, photoId: string | null = null, replace = false, extra: string[] = [], more: { template?: string | null; photoIds?: string[]; pages?: CardPage[] | null } = {}) {
+  const sql = db(); const M = await import('./marketing');
   return sql.begin(async (tx) => {
     const [cur] = await tx<any[]>`select id, current_version, status, quality from mkt_contents where id = ${c.id} for update`;
     if (!cur || cur.current_version !== c.current_version || ['published', 'canceled', 'approved'].includes(cur.status)) return null; // 그사이 바뀐 콘텐츠는 건너뜀
@@ -201,11 +311,14 @@ async function attachVisual(c: Content, fileId: string, note: string, actorId: s
     if (replace ? !(prev?.media_ids?.length && q.visual?.by === 'server' && String(prev.media_ids[0]) === q.visual.fileId) : prev?.media_ids?.length) return null;
     const v = cur.current_version + 1;
     const tried = [...new Set([...(replace ? ((q.visual?.tried ?? []) as string[]) : []), ...(replace && q.visual?.photoId ? [q.visual.photoId as string] : []), ...(photoId ? [photoId] : [])])].slice(-20);
-    const media = [fileId, ...(replace ? (prev?.media_ids ?? []).slice(1).map(String) : extra)]; // 다시 그리기: 블로그 본문 사진은 그대로
-    const issues = ((q.issues ?? []) as string[]).filter((x) => !VISUAL_ISSUE.test(x) && !(media.length >= 2 && BLOG_RULE.test(x)));
+    const prevTail = (prev?.media_ids ?? []).slice(1).map(String);
+    const media = [fileId, ...(replace && prevTail.length ? prevTail : extra)]; // 다시 그리기: 블로그 본문 사진·카드뉴스 장은 그대로 — 표지 1장뿐이던 예전 글은 요청 C 장(extra)을 함께 붙임
+    // 요청 C §3-3: 사진 수 규칙(피드 3~5장·스토리 3~5프레임·블로그 표지+3장)에 못 미치면 승인함에 못 올림 — 채워지면 그 줄을 지움
+    const rule = M.mediaRule(c.channel, c.kind, media.length, !!c.auto);
+    const issues = [...((q.issues ?? []) as string[]).filter((x) => !VISUAL_ISSUE.test(x) && !M.MEDIA_RULES.includes(x)), ...(rule ? [rule] : [])];
     const onlyVisual = q.passed === false && (q.issues ?? []).length > 0 && !issues.length;
-    const status = cur.status === 'changes' && onlyVisual ? 'pending' : cur.status;
-    const quality = { ...q, issues, ...(onlyVisual ? { passed: true } : {}), ...(q.report ? { report: { ...q.report, v } } : {}), visual: { by: 'server', fileId, at: new Date().toISOString(), photoId, rv: 3, tried, ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}), ...(more.template ? { template: more.template } : {}), ...((more.photoIds?.length ?? 0) > 1 ? { photoIds: more.photoIds } : {}) } };
+    const status = rule && ['pending', 'changes'].includes(cur.status) ? 'changes' : cur.status === 'changes' && onlyVisual ? 'pending' : cur.status;
+    const quality = { ...q, issues, ...(onlyVisual ? { passed: true } : rule ? { passed: false } : {}), ...(q.report ? { report: { ...q.report, v } } : {}), ...(more.pages?.length ? { pages: more.pages } : {}), visual: { by: 'server', fileId, at: new Date().toISOString(), photoId, rv: 3, tried, ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}), ...(more.template ? { template: more.template } : {}), ...((more.photoIds?.length ?? 0) > 1 ? { photoIds: more.photoIds } : {}) } };
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${prev?.body ?? ''}, ${media}, ${note}, ${actorId})`;
     await tx`update mkt_contents set current_version = ${v}, status = ${status}, quality = ${tx.json(quality as never)}, reminded_at = null, updated_at = now() where id = ${c.id}`;
     await tx`update mkt_production_requests set status = 'canceled', reason = '서버 그리기로 시안을 붙임', decided_at = now() where content_id = ${c.id} and kind = 'image' and status in ('open', 'needs_approval')`;
@@ -218,7 +331,7 @@ async function attachVisual(c: Content, fileId: string, note: string, actorId: s
  *  정기 실행 한 번(60초)에 다른 일도 있으므로 한 번에 4건·20초까지 — 남은 것은 다음 실행(15분)에 */
 export async function fillMissingVisuals(tenant: string, limit = 4, budgetMs = 20000) {
   const sql = db(); const t0 = Date.now();
-  const rows = await sql<(Content & { status: string; quality: any })[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status, c.quality from mkt_contents c
+  const rows = await sql<(Content & { status: string; quality: any })[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status, c.quality, c.auto from mkt_contents c
     join mkt_versions v on v.content_id = c.id and v.version = c.current_version
     where c.tenant = ${tenant} and c.auto and c.status in ('pending', 'changes') and cardinality(v.media_ids) = 0 and c.channel in ('instagram', 'facebook', 'blog')
       and coalesce(c.kind, '') not in ('reels', 'shorts', 'video') and (c.scheduled_at is null or c.scheduled_at > now() - interval '1 day')
@@ -231,7 +344,8 @@ export async function fillMissingVisuals(tenant: string, limit = 4, budgetMs = 2
     try {
       const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
       const d = await drawAutoVisual(c, v?.body ?? '', { bodyIds: c.quality?.bodyPlan ?? null }); // #235 ⓑ 원고가 고른 블로그 사진(그릴 때 실패해 못 붙였던 것)
-      const r = await attachVisual(c, d.fileId, `시안 자동 그리기(서버·크레딧 0)${d.templateLabel ? ` — 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` — 사진: ${d.photoTitle}` : ' — 브랜드 색 바탕'}${d.bodyTitle ? ` · 본문 사진: ${d.bodyTitle}` : c.channel === 'blog' ? ' · 본문 사진 없음(실사를 붙여 주세요)' : ''}`, c.created_by, d.photoId, false, d.bodyIds, { template: d.template, photoIds: d.photoIds });
+      const after = await pagesAfterCover(c, v?.body ?? '', 1 + d.bodyIds.length); // 요청 C: 카드뉴스 장·스토리 프레임·블로그 도표형 카드
+      const r = await attachVisual(c, d.fileId, `시안 자동 그리기(서버·크레딧 0)${d.templateLabel ? ` — 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` — 사진: ${d.photoTitle}` : ' — 브랜드 색 바탕'}${d.bodyTitle ? ` · 본문 사진: ${d.bodyTitle}` : c.channel === 'blog' && !after.ids.length ? ' · 본문 사진 없음(실사를 붙여 주세요)' : ''}${after.note}`, c.created_by, d.photoId, false, [...d.bodyIds, ...after.ids], { template: d.template, photoIds: d.photoIds, pages: after.pages });
       if (!r) continue;
       out.push({ id: c.id, version: r.version });
       if (r.status === 'pending') await M.mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `시안을 붙여 다시 올렸습니다(v${r.version}): ${c.title}`, body: '시안 없이 올라갔던 자동 제작 글에 서버가 그린 이미지를 붙였습니다 — 승인해 주세요',
@@ -245,7 +359,7 @@ export async function fillMissingVisuals(tenant: string, limit = 4, budgetMs = 2
  *  쓴 바탕 사진이 글자 든 그래픽이면 새 규칙으로 다시 그려 새 버전(무료)·승인자 알림, 실사였으면 그대로 두고 표시만. 사람이 수정 요청·보류한 버전은 건드리지 않음 */
 export async function redrawTextVisuals(tenant: string, limit = 8, budgetMs = 15000) {
   const sql = db(); const t0 = Date.now();
-  const rows = await sql<(Content & { status: string; quality: any })[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status, c.quality from mkt_contents c
+  const rows = await sql<(Content & { status: string; quality: any })[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status, c.quality, c.auto from mkt_contents c
     join mkt_versions v on v.content_id = c.id and v.version = c.current_version
     where c.tenant = ${tenant} and c.status in ('pending', 'changes') and c.quality->'visual'->>'by' = 'server' and coalesce(c.quality->'visual'->>'rv', '1')::int < 3
       and cardinality(v.media_ids) >= 1 and v.media_ids[1]::text = c.quality->'visual'->>'fileId'
@@ -264,11 +378,12 @@ export async function redrawTextVisuals(tenant: string, limit = 8, budgetMs = 15
         await sql`update mkt_contents set quality = jsonb_set(quality, '{visual}', (quality->'visual') || ${sql.json({ rv: 3, ...(photoId ? { photoId } : {}) } as never)}::jsonb) where id = ${c.id}`;
         out.push({ id: c.id, kept: true }); continue;
       }
-      const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
+      const [v] = await sql<{ body: string; media_ids: string[] }[]>`select body, media_ids from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
       const d = await drawAutoVisual(c, v?.body ?? '', { exclude: new Set([photoId!, ...((c.quality.visual.tried ?? []) as string[])]) });
+      const after = (v?.media_ids?.length ?? 0) <= 1 ? await pagesAfterCover(c, v?.body ?? '', 1) : { ids: [] as string[], note: '', pages: null }; // 요청 C: 표지 1장뿐이던 예전 글은 장도 함께
       const q = { ...c.quality, visual: { ...c.quality.visual, photoId } };
       await sql`update mkt_contents set quality = ${sql.json(q as never)} where id = ${c.id} and current_version = ${c.current_version}`;
-      const r = await attachVisual(c, d.fileId, `시안 다시 그리기(바탕 = 브랜드 색 또는 고른 사진·서버·크레딧 0)${d.templateLabel ? ` — 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` — 사진: ${d.photoTitle}` : ' — 브랜드 색 바탕'}`, c.created_by, d.photoId, true, [], { template: d.template, photoIds: d.photoIds });
+      const r = await attachVisual(c, d.fileId, `시안 다시 그리기(바탕 = 브랜드 색 또는 고른 사진·서버·크레딧 0)${d.templateLabel ? ` — 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` — 사진: ${d.photoTitle}` : ' — 브랜드 색 바탕'}${after.note}`, c.created_by, d.photoId, true, after.ids, { template: d.template, photoIds: d.photoIds, pages: after.pages });
       if (!r) continue;
       out.push({ id: c.id, version: r.version });
       // 로컬 08:15 (d): 다시 그린 알림은 같은 글에 한 번만
@@ -331,7 +446,7 @@ export async function makeVisualNow(u: SessionUser, id: string, opts: { redraw?:
   await assertSpace(u, 'marketing');
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('콘텐츠를 찾을 수 없습니다');
   const sql = db();
-  const [c] = await sql<(Content & { status: string; quality: any })[]>`select id, tenant, brand_id, title, channel, kind, created_by, is_test, current_version, status, quality from mkt_contents where id = ${id} and tenant = ${tenantOf(u)}`;
+  const [c] = await sql<(Content & { status: string; quality: any })[]>`select id, tenant, brand_id, title, channel, kind, created_by, is_test, current_version, status, quality, auto from mkt_contents where id = ${id} and tenant = ${tenantOf(u)}`;
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
   if (!serverVisual(c)) throw badRequest(c.channel === 'threads' ? '스레드는 글만으로 올릴 수 있습니다' : '영상 시안은 서버가 그리지 않습니다 — 제작 요청 카드(제작의뢰실)로 만들어 주세요');
   if (['published', 'canceled'].includes(c.status)) throw badRequest('게시했거나 취소한 콘텐츠입니다');
@@ -351,7 +466,9 @@ export async function makeVisualNow(u: SessionUser, id: string, opts: { redraw?:
   // #235 ⓑ 블로그: 다시 그리기는 붙어 있는 본문 사진을 표지 바탕으로 다시 쓰지 않음 · 처음 그리기는 원고가 고른 사진(bodyPlan)을 붙임
   const bodyIds = opts.redraw ? (v?.media_ids ?? []).slice(1).map(String) : (c.quality?.bodyPlan ?? null);
   const d = await drawAutoVisual(c, v?.body ?? '', { actor: u, exclude, brandOnly: !!opts.redraw, notTemplate: opts.redraw ? vis?.template ?? null : null, bodyIds });
-  const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.templateLabel ? ` · 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}${d.bodyTitle && !opts.redraw ? ` · 본문 사진: ${d.bodyTitle}` : ''}`, u.id, d.photoId, !!opts.redraw, opts.redraw ? [] : d.bodyIds, { template: d.template, photoIds: d.photoIds });
+  // 요청 C: 처음 그릴 때 카드뉴스 장·도표형 카드도 함께 · 다시 그리기는 표지만(장은 그대로) — 표지 1장뿐이던 예전 글은 다시 그릴 때 장도 붙임
+  const after = opts.redraw && (v?.media_ids?.length ?? 0) > 1 ? { ids: [] as string[], note: '', pages: null } : await pagesAfterCover(c, v?.body ?? '', opts.redraw ? 1 : 1 + d.bodyIds.length, { actor: u });
+  const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.templateLabel ? ` · 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}${d.bodyTitle && !opts.redraw ? ` · 본문 사진: ${d.bodyTitle}` : ''}${after.note}`, u.id, d.photoId, !!opts.redraw, opts.redraw ? after.ids : [...d.bodyIds, ...after.ids], { template: d.template, photoIds: d.photoIds, pages: after.pages });
   if (!r) throw badRequest('그사이 콘텐츠가 바뀌었습니다 — 새로 고쳐 다시');
   await audit(sql, u.id, opts.redraw ? 'mkt.visual_redraw' : 'mkt.visual_now', 'mkt_content', id, { version: r.version, photoId: d.photoId }).catch(() => {});
   return { version: r.version, status: r.status, fileId: d.fileId, photo: d.photoTitle, template: d.templateLabel };

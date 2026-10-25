@@ -37,6 +37,30 @@ export function layoutBody(kind: string | null | undefined, body: string) {
   }
   return out.join('\n\n');
 }
+const HASHTAG_ONLY = /^(?:#[^\s#]+\s*)+$/;
+const STICKER = /^스티커 제안\s*[:：]/;
+/** 같은 이모지가 잇달아 나오면 하나만(요청 C §3-4 '같은 이모지 연속 금지') */
+const EMOJI_RUN = /(\p{Extended_Pictographic}️?)(?:\s*\1)+/gu;
+/**
+ * 요청 C §3-4(대표 10/25 22:20 '글 가독성'): 피드·스토리 캡션 — 한 문장은 한 줄에, 문단은 3줄 이내, 문단 사이 빈 줄, 해시태그는 본문 아래 빈 줄 뒤 한 줄로.
+ * 스티커 제안·사진 자리·소제목 줄은 그대로. 첫 줄(훅)은 AI 가 25자 안으로 쓰고 품질 검사(훅 점수)가 본다
+ */
+export function layoutCaption(body: string) {
+  const t = body.replace(/\r\n/g, '\n').trim();
+  const out: string[] = []; const tags: string[] = [];
+  for (const block of t.split(/\n{2,}/)) {
+    const ls: string[] = [];
+    for (const raw of block.split('\n')) {
+      const l = raw.trim(); if (!l) continue;
+      if (HASHTAG_ONLY.test(l)) { tags.push(l); continue; }
+      if (STICKER.test(l) || specialLine(l)) { ls.push(l); continue; }
+      ls.push(...splitSentences(l));
+    }
+    for (let k = 0; k < ls.length; k += 3) out.push(ls.slice(k, k + 3).join('\n'));
+  }
+  const joined = out.join('\n\n').replace(EMOJI_RUN, '$1');
+  return tags.length ? `${joined}\n\n${tags.join(' ')}` : joined;
+}
 /**
  * #235 ⓑ 블로그 사진 자리: 새 원고 = '[사진 P번호]'(후보 번호 — P 없이 번호만 써도) → '[사진 n] 설명'(n = 글에 나온 순서, 설명 = 사진 AI 설명 한 줄).
  * 모르는 번호·같은 사진 두 번·max 넘는 줄은 지움. 수정본(후보 없음) = 지난 원고의 '[사진 n] …' 줄을 번호로 되살림(새 번호·'P' 줄은 지움)

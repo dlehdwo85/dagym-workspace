@@ -137,7 +137,7 @@ test('쓰임: 피드 시안 바탕 = AI 가 글자 없는 실사로 본 이 브�
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const f = await cur(feed); const b = await cur(blog);
   assert.equal(f.quality.visual.photoId, P.clean, '바탕 = 글자 없는 실사(폴더·태그로 고르지 않았어도)');
-  assert.equal(b.media_ids.length, 2, '블로그 = 표지 + 본문 사진');
+  assert.equal(b.media_ids.length, 4, '요청 C: 블로그 = 표지 + 본문 실사 1장 + 도표형 카드 2장(표지+3장)');
   assert.equal(b.media_ids[1], P.face, '본문 = 홍보물·그래픽·다른 브랜드 빼고 이 브랜드 사진');
   const prompts = fake.state.anthropic.slice(n0).map((x) => JSON.stringify(x.body));
   assert.ok(prompts.some((p) => p.includes('AI 사진 설명') && p.includes('러닝머신이 줄지어 선 매장 안') && p.includes('트레이너가 회원에게 자세를 알려 주는 모습')), '원고 재료에 AI 사진 설명');

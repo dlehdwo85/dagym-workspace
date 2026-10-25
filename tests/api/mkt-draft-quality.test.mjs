@@ -29,7 +29,7 @@ const none = (list, re) => assert.ok(!list.some((x) => re.test(x)), `${re} ${JSO
 before(async () => {
   await resetDb(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
-  await ctx.owner.ok('PUT', '/api/marketing/auto', { leadDays: 3, remindHours: 72, quietStart: 0, quietEnd: 0, autoHold: false });
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { leadDays: 3, remindHours: 72, quietStart: 0, quietEnd: 0, autoHold: false, videoPause: false }); // 요청 C: 영상 자동 제작은 기본 중단 — 이 시험은 릴스 칸도 만듦
   ga = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '가온짐' });
   bd = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '바디랩' });
   se = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '세움공방' });

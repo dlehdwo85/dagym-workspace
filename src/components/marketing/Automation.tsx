@@ -19,7 +19,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 const C = '#7C3AED';
-const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', shorts: '쇼츠', story: '스토리', video: '생성 영상' };
+const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', shorts: '쇼츠', story: '스토리', video: '생성 영상', photo: '사진 게시물' }; // 요청 C §3-1: 피드 = 카드뉴스 3~5장 · 사진 1장짜리는 '사진 게시물'
 const CROSS: Record<string, string> = { facebook: '페이스북', instagram: '인스타그램', threads: '스레드' };
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 /** 묶음 기본 시각(src/lib/mktAuto BUNDLE 과 같음) — 로컬 10/20 보완 ②: 브랜드별로 한 번에 바꿀 수 있음 */
@@ -156,6 +156,7 @@ export function Automation() {
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_generated_people} onChange={(e) => save({ allowGeneratedPeople: e.target.checked })} />생성 인물 허용</label>
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_slideshow} onChange={(e) => save({ allowSlideshow: e.target.checked })} />슬라이드쇼 허용</label>
             <label className="flex items-center gap-1.5" title="대표 결정(10/24): 브랜드 템플릿이 나올 때까지 정기·밤사이 자동 제작 시안은 승인함에 올리지 않고 초안으로 둡니다. 승인함 아래 '초안 보관'에서 [승인 요청]으로 올릴 수 있습니다."><input type="checkbox" checked={!!s.auto_hold} onChange={(e) => save({ autoHold: e.target.checked })} data-testid="auto-hold" />자동 시안은 초안으로 보관(브랜드 템플릿 전)</label>
+            <label className="flex items-center gap-1.5" title="대표 결정(10/25 22:20, 요청 C): 영상 제작 방식을 정할 때까지 릴스·쇼츠·생성 영상은 정기 칸을 만들지 않고 자동 제작도 하지 않습니다. 제작의뢰실에서 사람이 의뢰하는 영상은 그대로."><input type="checkbox" checked={s.video_pause !== false} onChange={(e) => save({ videoPause: e.target.checked })} data-testid="auto-video-pause" />릴스·쇼츠·생성 영상 자동 제작 중단(영상 제작 결정 전){s.video_pause !== false ? ' — 지금 멈춤' : ''}</label>
             <label className="flex items-center gap-1.5" title="승인된 최신 버전이 예정 시각이 되면 연결된 계정(인스타·페북·스레드·유튜브)에 워크인 서버가 올립니다. 승인이 곧 게시 결정입니다."><input type="checkbox" checked={!!s.auto_publish} onChange={(e) => save({ autoPublish: e.target.checked })} data-testid="auto-publish" />승인되면 예정 시각에 자동 게시(연결 채널)</label>
           </div>
         </div>

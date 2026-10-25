@@ -26,7 +26,7 @@ export async function inbox({ owner, ctx, sql, BASE, SHOTS }) {
   assert.equal(await card.getByTestId('ops-reject-go').isDisabled(), true);
   await card.getByTestId('ops-reject-note').fill('E2E 반려 사유');
   await card.getByTestId('ops-reject-go').click();
-  await owner.getByText(/반려했습니다/).waitFor();
+  await owner.getByText(/수정을 요청했습니다\(반려\)|반려했습니다/).waitFor(); // 요청 C §3-5: 운영 제안도 [승인]·[수정 요청] 두 단추(서버 동작은 반려 그대로)
   await owner.getByTestId('mkt-inbox-tab-proposals').filter({ hasText: String(before - 1) }).or(owner.getByTestId('mkt-inbox-tab-proposals').filter({ hasNot: owner.getByTestId('mkt-inbox-count-proposals') })).first().waitFor();
   await owner.screenshot({ path: `${SHOTS}/170-inbox-proposals.png`, fullPage: true });
   // 광고 예산 탭: 브랜드 표(4줄·세팅안 필요) + 총액 기준

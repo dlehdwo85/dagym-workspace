@@ -8,11 +8,11 @@ import { useBackClose } from '@/components/backClose';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ModeChip } from './ModeToggle';
-import { ChannelPreview } from './ChannelPreview';
+import { ChannelPreview, Slides } from './ChannelPreview';
 import { VersionCompare, partsLabel, requestLabel, requestNote, type Revision } from './VersionCompare';
 
 /** 운영실 화면 명세(OPS_ROOM_SCREEN_SPEC 2-2·5절)에 맞춘 승인 카드·라벨 — 승인함·현황이 같이 씀 */
-const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', video: '생성 영상', shorts: '쇼츠', story: '스토리' };
+const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', video: '생성 영상', shorts: '쇼츠', story: '스토리', photo: '사진 게시물' };
 const CH: Record<string, string> = { instagram: '인스타', facebook: '페이스북', threads: '스레드', blog: '네이버 블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
 /** 채널+형식 라벨: 인스타 피드 · 네이버 블로그 · 인스타 릴스 · 유튜브 쇼츠 */
 export const channelLabel = (channel: string, kind?: string | null) => (channel === 'blog' ? '네이버 블로그' : `${CH[channel] ?? channel}${kind && kind !== 'blog' ? ` ${KIND[kind] ?? ''}` : ''}`.trim());
@@ -63,7 +63,8 @@ export type CardContent = { id: string; title: string; channel: string; kind?: s
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null; faces?: boolean }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
   revision?: Revision | null; reapprove_comment?: string | null; // #545 수정본 배지(반영한 요청·AI 수정 n/3)
   brand_templates?: boolean; // #544 브랜드 키트 피드 틀이 있으면 [다른 틀로 다시 그리기]
-  auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; visual?: { by: string } | null; postponed?: { from?: string | null; at?: string; restored?: boolean } | null; held?: { at?: string; reason?: string } | null; failed?: { at?: string; reason?: string; n?: number } | null; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null } } | null; production?: { kind: string; status: string } | null;
+  auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; visual?: { by: string } | null; postponed?: { from?: string | null; at?: string; restored?: boolean } | null; held?: { at?: string; reason?: string } | null; failed?: { at?: string; reason?: string; n?: number } | null; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null };
+    rescheduled?: { from: string; to: string } | null } | null; production?: { kind: string; status: string } | null; // 요청 C §3-6: 수정본이 승인 마감을 넘겨 다음 슬롯으로 옮겨진 경우 '원래 m/d → m/d'
   rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; topicFrom?: string | null; week?: number | null; qa?: { needsHuman?: boolean; issues?: string[]; notes?: string[] } | null } | null;
   last_decision?: { decision: string; comment: string | null; at: string; version: number; by: string | null } | null };
 
@@ -82,8 +83,10 @@ export function WhyBox({ r, compact }: { r?: CardContent['rationale']; compact?:
     </div></>
   );
 }
-/** 승인 카드: 머리 칩(브랜드·채널+형식·제목·상태·vN·재승인) · 게시 시각·마감 · 미디어 넘겨 보기 · 문안 · 제작 메모 · 결정 기록 · [승인]/[수정 요청] */
-export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent; canDecide: boolean; onDone: () => void; onOpen?: () => void }) {
+const md = (d: string) => { const y = ymd(d); return `${Number(y.slice(5, 7))}/${Number(y.slice(8, 10))}`; };
+/** 승인 카드: 머리 칩(브랜드·채널+형식·제목·상태·vN·재승인) · 게시 시각·마감 · 미디어 넘겨 보기 · 문안 · 제작 메모 · 결정 기록 · [승인]/[수정 요청]
+ *  simple(요청 C §3-5): 대표(회사 소유자) 화면 — [승인]·[수정 요청] 두 단추만, 다시 그리기·AI 이미지·버전 비교는 운영실(관리자) 몫 */
+export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: { c: CardContent; canDecide: boolean; onDone: () => void; onOpen?: () => void; simple?: boolean }) {
   const [mode, setMode] = useState<'idle' | 'changes'>('idle'); const [memo, setMemo] = useState(''); const [done, setDone] = useState<string | null>(null);
   const [full, setFull] = useState(false); const [idx, setIdx] = useState(0); const [bodyOpen, setBodyOpen] = useState(false); const [look, setLook] = useState(false); const [cmp, setCmp] = useState(false); const [busy, setBusy] = useState(false);
   // #545: AI 수정본이 바로 올라오면 같은 카드가 새 버전으로 다시 그려짐 — [승인]·[수정 요청]을 다시 보이게
@@ -128,12 +131,16 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         {(!!c.reapprove_from || !!c.revision?.request) && <span className={cx('max-w-full truncate rounded-full px-2 py-0.5 text-[11px] font-medium', c.revision?.check?.status === 'unmet' ? 'bg-red-50 text-red-800' : 'bg-amber-50 text-amber-800')} data-testid="mkt-reapprove"
           title={[req, c.revision?.check?.detail].filter(Boolean).join(' — ') || undefined}>수정본 v{c.current_version}{req ? ` — ${requestLabel(c.revision)}: ${req}${requestNote(c.revision) ? ` · ${requestNote(c.revision)}` : ''}` : ` (v${c.reapprove_from} 수정 요청)`}</span>}
         {c.revision?.ai && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="mkt-ai-revision">AI 수정 {c.revision.n}/{c.revision.max ?? 3}{c.revision.parts?.length ? ` · ${partsLabel(c.revision.parts)}` : ''}</span>}
+        {/* 요청 C §3-6: 수정본은 원래 게시일 그대로 — 승인 마감이 지나 다음 슬롯으로 옮긴 글만 '원래 m/d → m/d' */}
+        {c.quality?.rescheduled && c.scheduled_at && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800" data-testid="approval-rescheduled" title="승인 마감이 지나 다음 슬롯으로 옮겼습니다">원래 {md(c.quality.rescheduled.from)} → {md(c.scheduled_at)}</span>}
         {done && <span className="ml-auto text-xs font-semibold text-emerald-700" data-testid="approval-done">{done}</span>}
       </div>
       <button type="button" onClick={onOpen} className="mt-1 block text-left font-semibold hover:underline" data-testid="mkt-row">{c.title}</button>
       <p className="text-xs text-ink-2">{whenLabel(c.scheduled_at)} 게시{c.deadline && !['published'].includes(c.status) && <> · <span className={late ? 'font-bold text-red-600' : ''} data-testid="mkt-deadline">{late ? '마감 지남 — 다음 날로 이동 필요' : deadlineLabel(c.deadline, c.scheduled_at)}</span></>}</p>
       {media.length > 0 && (
         <div className="mt-2">
+          {/* 요청 C §3-5(대표 10/25 22:20 '승인함에서 전체 장을 넘겨 보기'): 카드뉴스·스토리 프레임·블로그 사진을 카드 안에서 손가락·화살표로 넘김(한 장짜리는 썸네일만) */}
+          {media.length > 1 && <div className="mx-auto mb-2 max-w-[280px]" data-testid="approval-pages" data-count={media.length}><Slides media={media} info={c.media_info ?? []} aspect={c.kind === 'story' || c.kind === 'reels' || c.kind === 'shorts' ? 'aspect-[9/16]' : c.channel === 'blog' ? 'aspect-square' : 'aspect-[4/5]'} dots="below" tid="approval-pages" /></div>}
           <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:thin]">{media.map((m, k) => (
             <button key={m} type="button" onClick={() => { setIdx(k); setFull(true); }} className={cx('relative size-20 shrink-0 overflow-hidden rounded-input border', k === 0 ? 'border-violet-400' : 'border-line')} aria-label={`시안 ${k + 1} 크게 보기`}>
               <MediaThumb src={`/api/library/${m}/download?inline=1`} mime={mimeOf(c.media_info, m)} poster={isVideoMime(mimeOf(c.media_info, m)) && posterFrom(c.media_info, m) ? `/api/library/${posterFrom(c.media_info, m)}/download?inline=1` : null} className="size-full object-cover" />{k === 0 && <span className="absolute left-0 top-0 rounded-br bg-violet-600 px-1 text-[10px] text-white">표지</span>}
@@ -159,7 +166,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
         {look ? <><ChevronUp size={14} aria-hidden />게시 화면 접기</> : <><ChevronDown size={14} aria-hidden />게시 화면으로 보기</>}</button>}
       {look && <div className="mt-2"><ChannelPreview channel={c.channel} kind={c.kind} brand={c.brand} handle={c.handle} logo={c.brand_logo} color={c.brand_color} title={c.title} body={c.body ?? ''} media={media} info={c.media_info ?? []} /></div>}
       {/* #545: 수정본이면 이전 버전과 나란히(시안·글, 바뀐 줄 표시) */}
-      {!!from && c.current_version > 1 && <button type="button" onClick={() => setCmp(!cmp)} className="ml-3 mt-1 inline-flex items-center gap-0.5 text-xs font-medium text-violet-700" aria-expanded={cmp} data-testid="approval-compare">
+      {!simple && !!from && c.current_version > 1 && <button type="button" onClick={() => setCmp(!cmp)} className="ml-3 mt-1 inline-flex items-center gap-0.5 text-xs font-medium text-violet-700" aria-expanded={cmp} data-testid="approval-compare">
         {cmp ? <><ChevronUp size={14} aria-hidden />비교 접기</> : <><ChevronDown size={14} aria-hidden />이전 버전(v{from})과 나란히 비교</>}</button>}
       {cmp && !!from && <VersionCompare id={c.id} from={from} to={c.current_version} />}
       {issues.length > 0 && <p className="mt-1 rounded-input bg-amber-50 px-2 py-1 text-[11px] text-amber-800" data-testid="approval-issues">{issues.join(' · ')}</p>}
@@ -176,13 +183,13 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
           {c.status !== 'approved' && !noVisual && <Button size="sm" onClick={() => decide('approve')} data-testid="card-approve">{c.reapprove_from ? `수정본 v${c.current_version} 승인` : '승인'}</Button>}
           <Button size="sm" variant="secondary" onClick={() => setMode('changes')} data-testid="card-changes">{c.status === 'approved' ? '게시 전 수정 요청' : '수정 요청'}</Button>
           {/* #516 후속: 서버가 그린 시안이 어색하면(바탕 글자 겹침 등) 브랜드 색 바탕으로 무료로 다시 그림(블로그는 대표 이미지만) */}
-          {c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" onClick={() => makeNow(true)} disabled={making} data-testid="card-redraw">{making ? '그리는 중…' : c.brand_templates ? '다른 틀로 다시 그리기' : '브랜드 색으로 다시 그리기'}</Button>}
+          {!simple && c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" onClick={() => makeNow(true)} disabled={making} data-testid="card-redraw">{making ? '그리는 중…' : c.brand_templates ? '다른 틀로 다시 그리기' : '브랜드 색으로 다시 그리기'}</Button>}
           {/* #516 (a): 서버가 그린 시안 → Higgsfield AI 이미지로 바꾸기는 크레딧이 들어 따로(제작 요청 카드·한도 확인) */}
-          {c.auto && c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" data-testid="card-ai-image"
+          {!simple && c.auto && c.status !== 'approved' && media.length > 0 && c.quality?.visual?.by === 'server' && drawable && <Button size="sm" variant="secondary" data-testid="card-ai-image"
             onClick={() => confirm(`AI 이미지로 다시 만들면 약 ${AI_REGEN_CREDITS}크레딧이 듭니다(이번 달 한도를 넘으면 한도 승인 뒤 제작). 지금 시안은 그대로 두고 새 이미지가 붙으면 다시 승인 요청이 옵니다. 진행할까요?`) && decide('changes', AI_REGEN)}>AI 이미지로 다시 · 약 {AI_REGEN_CREDITS}크레딧</Button>}
         </div>
       ) : (
-        <div className="mt-2 flex flex-wrap gap-2"><input className={cx(inputCls, 'min-w-0 flex-1')} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="무엇을 고칠지(두 글자 이상)" aria-label="수정 요청 메모" data-testid="card-changes-memo" />
+        <div className="mt-2 flex flex-wrap gap-2"><input className={cx(inputCls, 'min-w-0 flex-1')} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="무엇을 고칠지(사유, 두 글자 이상) — AI 가 반영해 다시 올립니다" aria-label="수정 요청 메모" data-testid="card-changes-memo" />
           <Button size="sm" disabled={busy || memo.trim().length < 2} onClick={() => decide('changes')} data-testid="card-changes-send">{busy ? 'AI 가 고치는 중…' : '수정 요청 보내기'}</Button><Button size="sm" variant="secondary" onClick={() => setMode('idle')}>취소</Button></div>
       ))}
       {canAct && !late && c.status !== 'approved' && !noVisual && <p className="mt-1 hidden text-[11px] text-ink-3 md:block">승인해도 바로 공개되지 않습니다 — 게시 시각에 게시(도우미 또는 연결된 채널)합니다.</p>}

@@ -15,7 +15,7 @@ export async function mktVisual({ owner, ctx, sql, BASE, SHOTS }) {
   const manual = await ctx.owner.ok('POST', '/api/marketing/contents', { title: 'E2E 시안 없는 손 글', channel: 'facebook', brandId: brand, body: '사진을 아직 안 붙인 글', mediaIds: [] });
 
   await owner.setViewportSize({ width: 1366, height: 1300 });
-  await owner.goto(`${BASE}/s/marketing/approvals`);
+  await owner.goto(`${BASE}/s/marketing/approvals?ops=1`); // 요청 C §3-5: 대표 카드는 두 단추만 — 운영 단추(다시 그리기·AI 이미지)는 ?ops=1
   await owner.getByTestId('mkt-approvable-count').waitFor();
   const tabs = owner.getByTestId('mkt-brand-tabs');
   if (await tabs.waitFor({ timeout: 5000 }).then(() => true, () => false)) await tabs.getByRole('button', { name: /^E2E 시안 브랜드/ }).click(); // 탭은 자료가 온 뒤 그려짐(바로 보면 없을 수 있음)
@@ -43,7 +43,7 @@ export async function mktVisual({ owner, ctx, sql, BASE, SHOTS }) {
   await ready.scrollIntoViewIfNeeded();
   await ready.screenshot({ path: `${SHOTS}/244-approval-visual-made.png` });
   const [v] = await sql`select c.current_version, c.status, v.media_ids, v.note from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = ${ac.id}`;
-  assert.deepEqual([v.current_version, v.status, v.media_ids.length], [2, 'pending', 1]);
+  assert.deepEqual([v.current_version, v.status], [2, 'pending']); assert.ok(v.media_ids.length >= 3, `요청 C: 자동 피드 = 표지 + 카드뉴스 장(${v.media_ids.length}장)`);
   assert.match(v.note, /^시안 그리기\(서버·크레딧 0\)/);
   assert.equal((await sql`select status from mkt_production_requests where content_id = ${ac.id}`)[0].status, 'canceled', '열린 이미지 카드는 서버 그리기로 대체');
   // 손 글(페이스북)도 [지금 만들기] 가능

@@ -16,7 +16,7 @@ export async function mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   assert.equal((await ctx.owner.ok('POST', `/api/marketing/contents/${c.id}/visual`, {})).version, 2, '서버가 그린 시안 = v2');
 
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/approvals`);
+  await owner.goto(`${BASE}/s/marketing/approvals?ops=1`); // 요청 C §3-5: 버전 비교는 운영 단추(?ops=1)
   await owner.getByTestId('mkt-approvable-count').waitFor();
   const tabs = owner.getByTestId('mkt-brand-tabs');
   if (await tabs.isVisible()) await tabs.getByRole('button', { name: /^E2E 수정본 브랜드/ }).click();

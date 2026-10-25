@@ -297,13 +297,19 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
  */
 type Inbox = { counts: { contents: number; proposals: number; budget: number; goals: number; briefs: number; ads: number; concepts: number }; total: number; proposals: any[]; budgets: any[]; goals: Goal[]; briefs: InboxBrief[]; ads: MetaPlanRow[]; concepts: ConceptSet[]; kinds: Record<string, string>; canEdit: boolean; today: string; maxRevisions: number; userId: string };
 type InboxBrief = { id: string; kind: string; channel: string; purpose: string; message: string; status: string; quantity: number; due_date: string | null; created_at: string; brand: string | null; created_by_name: string | null; summary_ko: string | null; model: string | null };
-const INBOX_TABS: [string, string][] = [['contents', '콘텐츠'], ['proposals', '운영 제안'], ['budget', '광고 예산'], ['concepts', '광고 컨셉'], ['ads', '광고 초안'], ['goals', '월 목표'], ['briefs', '제작 의뢰']];
+/** 요청 C §3-5(대표 10/25 22:20 '운영 제안도 같은 승인함에'): 기본 탭 '전체' = 콘텐츠 + 운영 제안·광고·월 목표·제작 의뢰를 한 화면에(종류 배지 색으로 구분), 나머지 탭은 종류별 */
+const INBOX_TABS: [string, string][] = [['all', '전체'], ['contents', '콘텐츠'], ['proposals', '운영 제안'], ['budget', '광고 예산'], ['concepts', '광고 컨셉'], ['ads', '광고 초안'], ['goals', '월 목표'], ['briefs', '제작 의뢰']];
+const KIND_BADGE: Record<string, { badge: string; border: string }> = { contents: { badge: 'bg-emerald-100 text-emerald-800 border-emerald-300', border: 'border-emerald-400' }, proposals: { badge: 'bg-violet-100 text-violet-800 border-violet-300', border: 'border-violet-400' },
+  budget: { badge: 'bg-orange-100 text-orange-800 border-orange-300', border: 'border-orange-400' }, concepts: { badge: 'bg-orange-100 text-orange-800 border-orange-300', border: 'border-orange-400' }, ads: { badge: 'bg-orange-100 text-orange-800 border-orange-300', border: 'border-orange-400' },
+  goals: { badge: 'bg-sky-100 text-sky-800 border-sky-300', border: 'border-sky-400' }, briefs: { badge: 'bg-slate-100 text-ink-2 border-line', border: 'border-slate-300' } };
+const KindBadge = ({ k, n }: { k: string; n?: number }) => <span className={cx('rounded-full border px-2 py-0.5 text-[11px] font-semibold', KIND_BADGE[k]?.badge)} data-testid={`mkt-kind-badge-${k}`}>{INBOX_TABS.find(([x]) => x === k)?.[1] ?? k}{n ? ` ${n}건` : ''}</span>;
 export function Approvals() {
   const sp = useSearchParams();
   const [open, setOpen] = useState<string | null>(sp.get('c'));
   const [nw, setNw] = useState(sp.get('new') === '1'); // 앱 더보기 › 만들기 › 새 콘텐츠
   const day = sp.get('day') ?? ''; // 현황 '오늘' 카드: produced·soon·today·published
-  const [tabQ, setTab] = useUrlState('tab', 'contents'); const tab = INBOX_TABS.some(([k]) => k === tabQ) ? tabQ : 'contents'; // #242 2단계: 종류 탭은 주소에 — 승인함에서 다른 화면에 갔다 와도 같은 탭
+  const [tabQ, setTab] = useUrlState('tab', 'all'); const tab = INBOX_TABS.some(([k]) => k === tabQ) ? tabQ : 'all'; // #242 2단계: 종류 탭은 주소에 — 승인함에서 다른 화면에 갔다 와도 같은 탭 · 요청 C: 기본 '전체'
+  const [ops, setOps] = useUrlState('ops', ''); // 요청 C §3-5: 대표(회사 소유자) 카드는 [승인]·[수정 요청] 두 단추만 — 운영 단추(다시 그리기·AI 이미지·버전 비교)는 [운영 단추 보기](?ops=1)로
   const DAY_LABEL: Record<string, string> = { produced: '오늘 제작된 시안', soon: '오늘 승인할 것(내일까지 게시 예정)', today: '오늘 게시 예정', published: '오늘 게시됨' };
   const { data, error, reload } = useApi<{ contents: Content[] }>(`/api/marketing/contents?view=approvals${DAY_LABEL[day] ? `&day=${day}` : ''}`);
   const inbox = useApi<Inbox>('/api/marketing/inbox');
@@ -312,19 +318,38 @@ export function Approvals() {
   return (
     <div className="space-y-3" data-testid="mkt-approvals">
       <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>{DAY_LABEL[day] ?? '승인함'}</h1>{DAY_LABEL[day] && <Link href="/s/marketing/approvals" className="text-xs underline" data-testid="mkt-day-clear">승인함 전체</Link>}
-        <span className="ml-auto flex flex-wrap items-center gap-2">{inbox.data && <span className="text-xs text-ink-2" data-testid="mkt-inbox-total">승인할 것 <b className="text-orange-700">{inbox.data.total}건</b></span>}<AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContents} compact /><Button onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></span></div>
-      {!DAY_LABEL[day] && <div className="flex gap-1 overflow-x-auto pb-0.5" role="tablist" data-testid="mkt-inbox-tabs">{INBOX_TABS.map(([k, l]) => { const n = counts ? counts[k as keyof Inbox['counts']] : 0; return (
+        <span className="ml-auto flex flex-wrap items-center gap-2">{inbox.data && <span className="text-xs text-ink-2" data-testid="mkt-inbox-total">승인할 것 <b className="text-orange-700">{inbox.data.total}건</b></span>}
+          {!!(data as any)?.isOwner && <button type="button" onClick={() => setOps(ops === '1' ? '' : '1')} className="text-xs text-ink-3 underline" data-testid="mkt-ops-toggle" title="대표 화면은 [승인]·[수정 요청] 두 단추만 — 다시 그리기·AI 이미지·버전 비교 같은 운영 단추를 보려면 켜세요">{ops === '1' ? '운영 단추 숨기기' : '운영 단추 보기'}</button>}
+          <AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContents} compact /><Button onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></span></div>
+      {!DAY_LABEL[day] && <div className="flex gap-1 overflow-x-auto pb-0.5" role="tablist" data-testid="mkt-inbox-tabs">{INBOX_TABS.map(([k, l]) => { const n = k === 'all' ? inbox.data?.total ?? 0 : counts ? counts[k as keyof Inbox['counts']] : 0; return (
         <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-testid={`mkt-inbox-tab-${k}`} data-count={n}
           className={cx('shrink-0 rounded-full border px-3 py-1 text-xs', tab === k ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white text-ink-2')}>{l}{n ? <span className={cx('ml-1 rounded-full px-1.5 text-[10px] font-semibold', tab === k ? 'bg-violet-600 text-white' : 'bg-orange-100 text-orange-800')} data-testid={`mkt-inbox-count-${k}`}>{n}</span> : null}</button>); })}</div>}
       {(data as any)?.paused && <p className="rounded-input border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800" data-testid="mkt-paused-banner">자동 생성 일시정지 중 — 대표가 디벨롭한 방향을 승인할 때까지 정기 칸·자동 시안·운영 제안 카드를 만들지 않습니다(운영실 › 자동 제작 설정에서 끔).</p>}
-      {(tab === 'contents' || DAY_LABEL[day]) && <>
-        {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reloadAll} />}
-        <OpsRequests />
+      {(tab === 'contents' || tab === 'all' || DAY_LABEL[day]) && <>
+        {/* 요청 C §3-5: 대표(회사 소유자) 화면은 카드에 [승인]·[수정 요청] 두 단추만(simple) · '전체' 탭에서는 콘텐츠 묶음에 초록 띠 */}
+        <div className={cx(tab === 'all' && !DAY_LABEL[day] && 'rounded-card border-l-4 border-emerald-400 pl-3')} data-testid={tab === 'all' && !DAY_LABEL[day] ? 'mkt-inbox-all-contents' : undefined}>
+          {tab === 'all' && !DAY_LABEL[day] && <div className="mb-2"><KindBadge k="contents" n={counts?.contents} /></div>}
+          {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} simple={!!(data as any).isOwner && ops !== '1'} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reloadAll} />}
+          <OpsRequests />
+        </div>
+        {tab === 'all' && !DAY_LABEL[day] && inbox.data && <InboxAll d={inbox.data} onChange={reloadAll} />}
       </>}
-      {!DAY_LABEL[day] && tab !== 'contents' && (inbox.error ? <ErrorBox error={inbox.error} retry={inbox.reload} /> : !inbox.data ? <Skeleton rows={4} /> : <InboxTab tab={tab} d={inbox.data} onChange={reloadAll} />)}
+      {!DAY_LABEL[day] && tab !== 'contents' && tab !== 'all' && (inbox.error ? <ErrorBox error={inbox.error} retry={inbox.reload} /> : !inbox.data ? <Skeleton rows={4} /> : <InboxTab tab={tab} d={inbox.data} onChange={reloadAll} />)}
       {open && <ContentDetail id={open} onClose={() => setOpen(null)} onChange={reloadAll} />}
       {nw && <NewContent onClose={() => setNw(false)} onDone={reloadAll} />}
     </div>
+  );
+}
+/** 요청 C §3-5 '전체' 탭: 콘텐츠 아래에 운영 제안·광고 예산·광고 컨셉·광고 초안·월 목표·제작 의뢰를 건수 있는 종류만 묶음(종류 배지 색 띠) — 카드는 종류별 탭과 같은 것 */
+function InboxAll({ d, onChange }: { d: Inbox; onChange: () => void }) {
+  const kinds = INBOX_TABS.filter(([k]) => k !== 'all' && k !== 'contents' && (d.counts[k as keyof Inbox['counts']] ?? 0) > 0);
+  if (!kinds.length) return null;
+  return (
+    <div className="space-y-3" data-testid="mkt-inbox-all">{kinds.map(([k]) => (
+      <section key={k} className={cx('rounded-card border-l-4 pl-3', KIND_BADGE[k]?.border)} data-testid={`mkt-inbox-all-${k}`}>
+        <div className="mb-2"><KindBadge k={k} n={d.counts[k as keyof Inbox['counts']]} /></div>
+        <InboxTab tab={k} d={d} onChange={onChange} />
+      </section>))}</div>
   );
 }
 function InboxTab({ tab, d, onChange }: { tab: string; d: Inbox; onChange: () => void }) {
@@ -369,7 +394,7 @@ function BriefDecisionCard({ b, canEdit, onChange }: { b: InboxBrief; canEdit: b
  * 승인함(운영실 명세 2-2): 게시 시각순 한 목록 · 처음 3장 펼침 + 'N건 더 보기' · 브랜드 탭 · 마감 지난 것은 숫자에서 빼고 접힌 '일정 재배치 필요'로.
  * 승인 가능 = 승인 대기·마감 안 지남. 수정 요청·보류는 아래 '수정·보류' 묶음(새 버전 기다림)
  */
-function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents: CardContent[]; canDecide: boolean; plain: boolean; onOpen: (id: string) => void; onDone: () => void }) {
+function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = false }: { contents: CardContent[]; canDecide: boolean; plain: boolean; onOpen: (id: string) => void; onDone: () => void; simple?: boolean }) {
   const [brand, setBrand] = useState(''); const [more, setMore] = useState(false);
   // 대표 10/20 14:10 ②: 브랜드 탭은 회사 브랜드 전체(콘텐츠가 없는 브랜드도) · 예정(초안) 묶음 · 제작 예정이 없는 브랜드 안내
   const allBrands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
@@ -398,33 +423,33 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone }: { contents
           {b || '전체'} {contents.filter((c) => (!b || c.brand === b) && c.status === 'pending' && !c.late && !needsVisual(c)).length}</button>))}</div>}
       {!plain && <p className="text-sm" data-testid="mkt-approvable-count">승인할 시안 <b className="text-orange-700">{ready.length}건</b></p>}
       {!ready.length ? <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3">{plain ? '해당 콘텐츠가 없습니다' : '지금 승인할 최종 시안이 없습니다.'}</p> : (
-        <div className="space-y-2">{shown.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}
+        <div className="space-y-2">{shown.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}
           {!more && ready.length > 3 && <Button variant="secondary" className="w-full" onClick={() => setMore(true)} data-testid="mkt-more">{ready.length - 3}건 더 보기</Button>}</div>
       )}
       {noVisual.length > 0 && <details open className="rounded-card border border-red-300 bg-red-50/40 p-3 text-sm" data-testid="mkt-no-visual"><summary className="cursor-pointer font-medium text-red-800">시안 없음 — 시안을 붙여야 승인할 수 있습니다 {noVisual.length}건 (승인 숫자에서 뺌)</summary>
-        <div className="mt-2 space-y-2">{noVisual.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+        <div className="mt-2 space-y-2">{noVisual.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {approvedWait.length > 0 && <details open className="rounded-card border border-emerald-200 bg-emerald-50/30 p-3 text-sm" data-testid="mkt-approved-wait"><summary className="cursor-pointer font-medium text-emerald-900">승인됨 · 게시 전 {approvedWait.length}건 — 열어서 [지금 게시] 또는 예정 시각에 자동</summary>
-        <div className="mt-2 space-y-2">{(moreApproved ? approvedWait : approvedWait.slice(0, 10)).map((c) => <div key={c.id} className="space-y-1"><ApprovalCard c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />
+        <div className="mt-2 space-y-2">{(moreApproved ? approvedWait : approvedWait.slice(0, 10)).map((c) => <div key={c.id} className="space-y-1"><ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />
           {canDecide && <Button size="sm" variant="secondary" onClick={() => onOpen(c.id)} data-testid="mkt-approved-publish">열어서 게시 →</Button>}</div>)}
           {!moreApproved && approvedWait.length > 10 && <Button variant="secondary" className="w-full" onClick={() => setMoreApproved(true)} data-testid="mkt-approved-more">{approvedWait.length - 10}건 더 보기</Button>}</div></details>}
       {approvedPast.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-approved-past"><summary className="cursor-pointer font-medium text-ink-2">승인됨 · 예정 지남 {approvedPast.length}건 — 열어서 “브랜드·게시 예정 바로잡기”로 재배치</summary>
-        <div className="mt-2 space-y-2">{approvedPast.slice(0, 30).map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+        <div className="mt-2 space-y-2">{approvedPast.slice(0, 30).map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {drafts.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-drafts"><summary className="cursor-pointer font-medium text-ink-2">예정(초안) {drafts.length}건 — 제작 예정, 시안이 오면 승인 대기로</summary>
         <ul className="mt-2 divide-y divide-line text-xs">{drafts.slice(0, 30).map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-draft"><button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button><span className="text-ink-3">{[c.brand, channelLabel(c.channel, c.kind), whenLabel(c.scheduled_at), c.auto ? '자동 제작' : null].filter(Boolean).join(' · ')}</span>
           {c.quality?.failed && <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800" data-testid="mkt-draft-failed">제작 실패{(c.quality.failed.n ?? 1) >= 2 ? ' — 열어서 [AI 다시 만들기]' : ' — 2시간 뒤 다시 만듦'}</span>}</li>)}</ul></details>}
       {emptyBrands.length > 0 && <p className="rounded-card border border-dashed border-amber-300 bg-amber-50/40 px-3 py-2 text-xs text-amber-900" data-testid="mkt-brand-empty">제작 예정 없음: <b>{emptyBrands.join(' · ')}</b> — <Link href="/s/marketing/automation" className="font-medium underline">자동 제작 규칙</Link>을 켜거나 <Link href="/s/marketing/ops" className="font-medium underline">운영실</Link>에서 제작을 의뢰하세요.</p>}
       {held.length > 0 && <details className="rounded-card border border-violet-200 bg-violet-50/30 p-3 text-sm" data-testid="mkt-held"><summary className="cursor-pointer font-medium text-violet-900">초안 보관 — 브랜드 템플릿 준비 전 자동 시안 {held.length}건(승인함에 올리지 않음)</summary>
         <p className="mt-1 text-xs text-ink-2">대표 결정(10/24): 브랜드별 템플릿이 나올 때까지 정기·밤사이 자동 제작 시안은 초안으로 둡니다. 쓸 만한 것만 [승인 요청]으로 올리세요. 브랜드 키트에 피드 틀을 정한 브랜드는 [새 틀로 다시 그리기] 뒤 올리면 됩니다.</p>
-        <div className="mt-2 space-y-2">{held.slice(0, 20).map((c) => <div key={c.id} className="space-y-1" data-testid="mkt-held-row"><ApprovalCard c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />
+        <div className="mt-2 space-y-2">{held.slice(0, 20).map((c) => <div key={c.id} className="space-y-1" data-testid="mkt-held-row"><ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />
           {canDecide && <div className="flex flex-wrap gap-2">{c.brand_templates && c.quality?.visual?.by === 'server' && <HeldRedraw id={c.id} onDone={onDone} />}<HeldSubmit id={c.id} onDone={onDone} /></div>}</div>)}
           {held.length > 20 && <p className="text-xs text-ink-3">최근 20건만 보입니다 — 나머지는 콘텐츠 캘린더에서 초안으로 볼 수 있습니다.</p>}</div></details>}
       {postponed.length > 0 && <details open className="rounded-card border border-amber-300 bg-amber-50/60 p-3 text-sm" data-testid="mkt-postponed"><summary className="cursor-pointer font-medium text-amber-900">미뤄진 글 — 옮길 날짜가 없어 멈춘 글 {postponed.length}건(취소 아님)</summary>
         <p className="mt-1 text-xs text-amber-900">날짜를 골라 다시 올리면 승인 대기로 돌아가고, 버리면 취소됩니다. 같은 브랜드·채널·형식 글은 하루 2건까지 — 3시간 넘게 띄우고, 같은 주제·같은 사진이면 그날은 안 됩니다.</p>
         <ul className="mt-2 space-y-2">{postponed.map((c) => <PostponedRow key={c.id} c={c} canDecide={canDecide} onOpen={() => onOpen(c.id)} onDone={onDone} />)}</ul></details>}
       {waiting.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
-        <div className="mt-2 space-y-2">{waiting.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+        <div className="mt-2 space-y-2">{waiting.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {late.length > 0 && <details className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" data-testid="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>
-        <div className="mt-2 space-y-2">{late.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+        <div className="mt-2 space-y-2">{late.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
     </div>
   );
 }

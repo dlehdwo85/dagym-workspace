@@ -346,6 +346,8 @@ export const voiceInput = z.object({
   phrases: z.array(z.string().trim().min(1).max(60)).max(20).default([]), avoid: z.array(z.string().trim().min(1).max(60)).max(30).default([]),
   formality: z.enum(['polite', 'casual', 'mixed']).default('polite'), emoji: z.enum(['none', 'few', 'many']).default('few'),
   offer: z.string().trim().max(300).default(''), examples: z.array(z.string().trim().min(1).max(1500)).max(5).default([]),
+  /** 요청 C §3-4: 브랜드별 허용 이모지 묶음(문단마다 1~2개, 같은 이모지 연속 금지) — 비우면 브랜드에 맞게 AI 가 고름 */
+  emojis: z.array(z.string().trim().min(1).max(4)).max(8).default([]),
 });
 export type Voice = z.infer<typeof voiceInput>;
 const FORMALITY = { polite: '존댓말(…요·…니다)', casual: '반말', mixed: '존댓말 기본, 짧은 감탄은 반말 섞어도 됨' };
@@ -360,7 +362,7 @@ export function voicePrompt(v: Partial<Voice> | null | undefined) {
   const x = voiceOf(v); if (!x) return '';
   return [`[말투 프로필]`, x.topics && `- 주로 다루는 주제: ${x.topics}`, x.audience && `- 타겟: ${x.audience}`, x.offer && `- 파는 것: ${x.offer}`,
     x.phrases.length && `- 자주 쓰는 말: ${x.phrases.join(', ')}`, x.avoid.length && `- 절대 안 쓰는 표현: ${x.avoid.join(', ')}`,
-    `- ${FORMALITY[x.formality]} · ${EMOJI_USE[x.emoji]}`,
+    `- ${FORMALITY[x.formality]} · ${EMOJI_USE[x.emoji]}${x.emojis.length ? ` · 허용 이모지: ${x.emojis.join(' ')}` : ''}`,
     x.examples.length && `잘 된 글 예시(말투·리듬만 참고, 내용·숫자는 베끼지 않음):\n${x.examples.map((e, k) => `${k + 1}) ${[...e].slice(0, 300).join('')}`).join('\n')}`].filter(Boolean).join('\n');
 }
 /** 말투 프로필과 다른 점(경고만) */

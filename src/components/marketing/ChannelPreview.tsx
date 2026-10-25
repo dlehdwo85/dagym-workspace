@@ -46,7 +46,7 @@ function Empty({ className }: { className: string }) {
 }
 /** 옆으로 넘기기(손가락·화살표) + 점 + n/N — 사진·영상 섞여도 됨.
  *  fit: 인스타처럼 첫 사진 비율을 모든 장에 씀(세로 4:5 ~ 가로 1.91:1 안으로), 재기 전·영상이면 aspect */
-function Slides({ media, info, aspect, fit = false, dots = 'below', counter = true }: { media: string[]; info?: MediaInfo[]; aspect: string; fit?: boolean; dots?: 'below' | 'over' | 'none'; counter?: boolean }) {
+export function Slides({ media, info, aspect, fit = false, dots = 'below', counter = true, tid = 'mkt-preview' }: { media: string[]; info?: MediaInfo[]; aspect: string; fit?: boolean; dots?: 'below' | 'over' | 'none'; counter?: boolean; tid?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [i, setI] = useState(0);
   const [ratio, setRatio] = useState<number | null>(null);
@@ -60,22 +60,22 @@ function Slides({ media, info, aspect, fit = false, dots = 'below', counter = tr
   }, [fit, first]);
   if (!media.length) return <Empty className={cx('w-full', aspect)} />;
   const go = (k: number) => { const el = ref.current; if (!el) return; const n = Math.max(0, Math.min(media.length - 1, k)); el.scrollTo({ left: n * el.clientWidth, behavior: 'smooth' }); setI(n); };
-  const Dots = () => <div className={cx('flex justify-center gap-1', dots === 'over' ? 'absolute inset-x-0 bottom-2' : 'py-2')} data-testid="mkt-preview-dots">
+  const Dots = () => <div className={cx('flex justify-center gap-1', dots === 'over' ? 'absolute inset-x-0 bottom-2' : 'py-2')} data-testid={`${tid}-dots`}>
     {media.map((m, k) => <span key={m + k} className={cx('size-1.5 rounded-full', k === i ? (dots === 'over' ? 'bg-white' : 'bg-sky-500') : (dots === 'over' ? 'bg-white/50' : 'bg-slate-300'))} />)}</div>;
   return (
     <div>
       <div className="group relative">
-        <div ref={ref} className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="mkt-preview-slides" data-count={media.length}
+        <div ref={ref} className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid={`${tid}-slides`} data-count={media.length}
           onScroll={(e) => { const el = e.currentTarget; const k = Math.round(el.scrollLeft / Math.max(1, el.clientWidth)); if (k !== i) setI(k); }}>
           {media.map((m, k) => (
-            <div key={m + k} className={cx('w-full shrink-0 snap-center bg-black', !ratio && aspect)} style={ratio ? { aspectRatio: String(ratio) } : undefined} data-testid="mkt-preview-slide">
+            <div key={m + k} className={cx('w-full shrink-0 snap-center bg-black', !ratio && aspect)} style={ratio ? { aspectRatio: String(ratio) } : undefined} data-testid={`${tid}-slide`}>
               <MediaFull src={src(m)} mime={mimeOf(info, m)} poster={posterFrom(info, m) ? src(posterFrom(info, m)!) : null} className="size-full object-cover" alt={`${k + 1}번째`} />
             </div>))}
         </div>
         {media.length > 1 && <>
-          {counter && <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white" data-testid="mkt-preview-counter">{i + 1}/{media.length}</span>}
-          {i > 0 && <button type="button" onClick={() => go(i - 1)} aria-label="이전 장" className="absolute left-1.5 top-1/2 -translate-y-1/2 rounded-full bg-white/85 p-1 shadow" data-testid="mkt-preview-prev"><ChevronLeft className="size-4" /></button>}
-          {i < media.length - 1 && <button type="button" onClick={() => go(i + 1)} aria-label="다음 장" className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full bg-white/85 p-1 shadow" data-testid="mkt-preview-next"><ChevronRight className="size-4" /></button>}
+          {counter && <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white" data-testid={`${tid}-counter`}>{i + 1}/{media.length}</span>}
+          {i > 0 && <button type="button" onClick={() => go(i - 1)} aria-label="이전 장" className="absolute left-1.5 top-1/2 -translate-y-1/2 rounded-full bg-white/85 p-1 shadow" data-testid={`${tid}-prev`}><ChevronLeft className="size-4" /></button>}
+          {i < media.length - 1 && <button type="button" onClick={() => go(i + 1)} aria-label="다음 장" className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full bg-white/85 p-1 shadow" data-testid={`${tid}-next`}><ChevronRight className="size-4" /></button>}
           {dots === 'over' && <Dots />}
         </>}
       </div>

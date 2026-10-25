@@ -108,7 +108,7 @@ export function ProposalCard({ p, kinds, canEdit, onChange }: { p: Proposal; kin
   const [sl, sc] = STATUS[p.status] ?? [p.status, ''];
   async function act(body: Record<string, unknown>, msg: string) {
     setBusy(true);
-    try { const r = await api<{ revised?: { version: number } | null }>(`/api/marketing/ops/proposals/${p.id}`, { method: 'PATCH', body }); toast.ok(r?.revised ? `반려했습니다 — AI 가 사유를 반영한 v${r.revised.version} 를 다시 올렸습니다` : msg); setReject(false); onChange(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+    try { const r = await api<{ revised?: { version: number } | null }>(`/api/marketing/ops/proposals/${p.id}`, { method: 'PATCH', body }); toast.ok(r?.revised ? `수정을 요청했습니다 — AI 가 사유를 반영한 v${r.revised.version} 를 다시 올렸습니다` : msg); setReject(false); onChange(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   const ex = p.executed ?? {};
   return (
@@ -121,15 +121,16 @@ export function ProposalCard({ p, kinds, canEdit, onChange }: { p: Proposal; kin
         <div className="mt-0.5 text-[11px] text-ink-3">{it.expected ? `기대: ${it.expected}` : ''}{it.cost ? ` · 비용: ${it.cost}` : ''}</div></li>)}</ul>
       {p.body?.link && <a href={p.body.link} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 rounded-input border border-violet-300 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800" data-testid="ops-card-link">충전 페이지 열기 ↗</a>}
       {p.body?.rationale && <p className="mt-2 rounded-input bg-violet-50/50 px-2.5 py-1.5 text-[11px] text-ink-2" data-testid="ops-card-why"><b className="text-violet-800">근거</b> {p.body.rationale}</p>}
-      {p.revision_note && <p className="mt-2 rounded-input border border-amber-200 bg-amber-50/50 px-2.5 py-1.5 text-[11px] text-ink-2" data-testid="ops-card-revision"><b className="text-amber-800">반려 사유 → 반영한 점</b> {p.revision_note}</p>}
+      {p.revision_note && <p className="mt-2 rounded-input border border-amber-200 bg-amber-50/50 px-2.5 py-1.5 text-[11px] text-ink-2" data-testid="ops-card-revision"><b className="text-amber-800">수정 요청 사유 → 반영한 점</b> {p.revision_note}</p>}
       {p.decision_note && <p className="mt-1 text-[11px] text-ink-2">결정 메모: {p.decision_note}</p>}
       {p.status !== 'pending' && p.decided_by_name && <p className="mt-1 text-[11px] text-ink-3">{p.decided_by_name} · {p.decided_at ? fmtDateTime(p.decided_at) : ''}{ex.briefs?.length ? ` · 제작의뢰 ${ex.briefs.length}건` : ''}{ex.tasks?.length ? ` · 업무 ${ex.tasks.length}건` : ''}</p>}
       {p.status === 'approved' && <p className="mt-1 text-[11px]">{ex.briefs?.length ? <Link href="/s/marketing/automation?tab=studio" className="underline">제작의뢰실에서 진행 →</Link> : ex.tasks?.length ? <Link href={`/tasks/${ex.tasks[0]}`} className="underline">업무 열기 →</Link> : null}</p>}
       {canEdit && p.status === 'pending' && <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {/* 요청 C §3-5(대표 10/25 22:20): 운영 제안도 콘텐츠와 같은 두 단추 [승인]·[수정 요청](사유 → AI 가 반영한 안을 다시 올림) — 서버 동작(reject)은 그대로 */}
         {!reject ? <><Button size="sm" onClick={() => act({ action: 'approve' }, '승인했습니다 — 실행으로 넘겼습니다')} disabled={busy} data-testid="ops-approve">승인</Button>
-          <Button size="sm" variant="secondary" onClick={() => setReject(true)} disabled={busy} data-testid="ops-reject">반려</Button></>
-          : <><input className={cx(inputCls, 'h-8 flex-1 py-0 text-sm')} value={note} onChange={(e) => setNote(e.target.value)} placeholder="반려 사유" aria-label="반려 사유" data-testid="ops-reject-note" />
-            <Button size="sm" onClick={() => act({ action: 'reject', note }, '반려했습니다')} disabled={busy || !note.trim()} data-testid="ops-reject-go">반려 확정</Button><Button size="sm" variant="secondary" onClick={() => setReject(false)}>취소</Button></>}
+          <Button size="sm" variant="secondary" onClick={() => setReject(true)} disabled={busy} data-testid="ops-reject">수정 요청</Button></>
+          : <><input className={cx(inputCls, 'h-8 flex-1 py-0 text-sm')} value={note} onChange={(e) => setNote(e.target.value)} placeholder="무엇을 고칠지(사유)" aria-label="수정 요청 사유" data-testid="ops-reject-note" />
+            <Button size="sm" onClick={() => act({ action: 'reject', note }, '수정을 요청했습니다(반려)')} disabled={busy || !note.trim()} data-testid="ops-reject-go">수정 요청 보내기</Button><Button size="sm" variant="secondary" onClick={() => setReject(false)}>취소</Button></>}
       </div>}
       {canEdit && p.status === 'approved' && <div className="mt-2"><Button size="sm" variant="secondary" onClick={() => act({ action: 'done' }, '실행 완료로 표시했습니다')} disabled={busy} data-testid="ops-done">실행 완료</Button></div>}
     </article>

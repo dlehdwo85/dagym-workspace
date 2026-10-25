@@ -93,6 +93,19 @@ export async function createBrand(u: SessionUser, i: z.infer<typeof brandInput>)
 /** 대표 재지적 10/20 18:45 ③: 블로그는 표지 1장 + 본문 사진 1장 이상이 있어야 승인 요청(승인 대기)·승인이 됩니다 — 없으면 '수정 요청' 상태로 사진을 기다림 */
 export const BLOG_PHOTO_RULE = '블로그는 표지 1장 + 본문 사진 1장 이상을 붙여야 승인 요청됩니다';
 export const needsPhotos = (channel: string, mediaCount: number) => channel === 'blog' && mediaCount < 2;
+/** 요청 C §3-1·3-3(대표 10/25 22:20 '시안이 표지만 있다'): 자동 제작 글의 사진 수 규칙 — 못 미치면 승인함에 못 올리고(수정 요청 칸 + 사유) 승인도 안 됨.
+ *  피드(인스타·페북) = 카드뉴스 3~5장(표지 포함, 대표 15-11) · 스토리 = 3~5프레임 · 블로그 = 표지 + 본문 3장(실사 → 모자라면 브랜드 색 도표형 카드). 사람이 직접 올린 글은 예전 규칙(블로그 2장)만 */
+export const BLOG_AUTO_RULE = '블로그는 표지 1장 + 본문 사진 3장 이상(실사 또는 도표형 카드)이 붙어야 승인 요청됩니다';
+export const FEED_PAGE_RULE = '피드는 카드뉴스 3~5장(표지 포함)이 붙어야 승인 요청됩니다';
+export const STORY_FRAME_RULE = '스토리는 3~5프레임이 붙어야 승인 요청됩니다';
+export const MEDIA_RULES = [BLOG_PHOTO_RULE, BLOG_AUTO_RULE, FEED_PAGE_RULE, STORY_FRAME_RULE];
+export function mediaRule(channel: string, kind: string | null | undefined, n: number, auto: boolean): string | null {
+  if (channel === 'blog' || kind === 'blog') return auto ? (n < 4 ? BLOG_AUTO_RULE : null) : (n < 2 ? BLOG_PHOTO_RULE : null);
+  if (!auto || channel === 'threads') return null;
+  if (kind === 'feed' && (channel === 'instagram' || channel === 'facebook')) return n < 3 ? FEED_PAGE_RULE : null;
+  if (kind === 'story') return n < 3 ? STORY_FRAME_RULE : null;
+  return null;
+}
 export async function listContents(u: SessionUser, q: { view?: string; from?: string; to?: string; day?: string }) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
@@ -123,7 +136,8 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   const st = await (await import('./mktAuto')).settingsOf(t);
   const handleOf = await (await import('./mktPublish')).accountLabels(t).catch(() => () => null); // #497 R06 카드 '게시 화면으로 보기' 이름
   const now = Date.now();
-  return { approvalHour: st.approval_hour, canDecide: isAdmin(u), paused: !!st.auto_pause /* 대표 10/25 22:20: 자동 생성 일시정지 띠 */, contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st.approval_hour) : null;
+  // 요청 C §3-5: 대표(회사 소유자) 화면은 [승인]·[수정 요청] 두 단추만 — 보류·다시 그리기·버전 비교는 운영실(관리자) 화면
+  return { approvalHour: st.approval_hour, canDecide: isAdmin(u), isOwner: u.role === 'owner', paused: !!st.auto_pause /* 대표 10/25 22:20: 자동 생성 일시정지 띠 */, contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st.approval_hour) : null;
     return { ...r, handle: handleOf(r.channel, r.brand_id), deadline, late: !!deadline && deadline.getTime() < now && ['pending', 'changes'].includes(r.status) }; }) };
 }
 
@@ -260,13 +274,15 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
   if (i.decision !== 'approve' && (i.comment?.trim().length ?? 0) < 2) throw badRequest(i.decision === 'changes' ? '무엇을 고칠지 두 글자 이상 적어 주세요' : '보류 이유를 두 글자 이상 적어 주세요');
   const sql = db();
   const res = await sql.begin(async (tx) => {
-    const [c] = await tx<any[]>`select id, title, current_version, status, created_by, channel from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
+    const [c] = await tx<any[]>`select id, title, current_version, status, created_by, channel, kind, auto from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (i.version !== c.current_version) throw new HttpError(409, 'stale_version', `최신 버전(v${c.current_version})이 아닙니다 — 새로 고쳐 보고 결정해 주세요`);
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
-    if (i.decision === 'approve' && c.channel !== 'threads') { // 스레드는 글만으로도 승인(사진은 선택). 블로그는 표지+본문 사진(2장 이상) — 대표 10/20 18:45
+    if (i.decision === 'approve' && c.channel !== 'threads') { // 스레드는 글만으로도 승인(사진은 선택). 블로그는 표지+본문 사진 — 대표 10/20 18:45 · 요청 C: 자동 제작 피드 3~5장·스토리 3~5프레임·블로그 표지+3장
       const [v] = await tx<{ n: number }[]>`select cardinality(media_ids) as n from mkt_versions where content_id = ${id} and version = ${i.version}`;
-      if (needsPhotos(c.channel, v?.n ?? 0)) throw badRequest(`${BLOG_PHOTO_RULE} — 지금 ${v?.n ?? 0}장`);
+      if (!v?.n && c.channel !== 'blog') throw badRequest('시안 이미지가 없어 승인할 수 없습니다 — 시안을 붙인 뒤 다시');
+      const rule = mediaRule(c.channel, c.kind, v?.n ?? 0, !!c.auto);
+      if (rule) throw badRequest(`${rule} — 지금 ${v?.n ?? 0}장`);
       if (!v?.n) throw badRequest('시안 이미지가 없어 승인할 수 없습니다 — 시안을 붙인 뒤 다시');
     }
     const status = { approve: 'approved', changes: 'changes', hold: 'hold' }[i.decision];

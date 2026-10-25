@@ -144,7 +144,7 @@ test('글자만 500자 넘게 이어지면 올리기 전 검사가 막음(수정
   assert.ok(c.quality.preflight.some((x) => /^글자만 [\d,]+자 이어짐\('.+…'부터\) — 500자 안에 소제목·인용구·사진 줄로 끊기$/.test(x)), JSON.stringify(c.quality.preflight));
   const msgs = c.quality.report.channel.map((x) => x.msg);
   for (const re of [/^본문 사진 자리\(\[사진 n\] 줄\) 0개 — 8~15장 권장/, /^인용구 0개 — 2~4개/, /^메인 키워드 '송도 헬스장' 본문 \d회 — 5~7회$/, /^서브 키워드가 소제목에 없음: '요금'$/]) assert.ok(msgs.some((m) => re.test(m)), `${re} — ${msgs.join(' / ')}`);
-  assert.equal(c.media_ids.length, 2, '사진 줄이 없으면 표지 + 본문 사진 1장(예전처럼)');
+  assert.equal(c.media_ids.length, 4, '요청 C: 사진 줄이 없으면 표지 + 본문 실사 1장 + 도표형 카드 2장(표지+3장)');
 });
 
 test('글 모델: 빠른 모델 회사도 블로그만 표준 모델 — 화면에 블로그 1건 비용·빠른 모델과의 차이 · 피드 원고는 그대로 빠른 모델', async () => {
