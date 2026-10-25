@@ -2,6 +2,7 @@
 // ② 첨부마다 [고치기] — 글(txt) 고쳐 저장 = v2(버전 기록 '글 고침') · 사진 돌리기·펜 = v2(가로·세로 바뀜) · PDF 에 글자·체크 = v2 · 한글(hwp) = 내려받아 고친 뒤 올리기 안내 · 휴대폰 폭에서도 [고치기]
 import assert from 'node:assert/strict';
 import { PDFDocument } from 'pdf-lib';
+import { assertPdfGlyphs } from '../pdfCheck.mjs';
 
 export async function attachEdit({ owner, ctx, BASE, SHOTS }) {
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 첨부 고치기 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.hq, approvalRequired: false })).id;
@@ -97,6 +98,10 @@ export async function attachEdit({ owner, ctx, BASE, SHOTS }) {
   await v2('E2E 견적서.pdf');
   const pv = (await ctx.owner.ok('GET', `/api/attachments/${ids.pdf}/versions`)).versions[0];
   assert.deepEqual([pv.kind, pv.note], ['pdf', 'PDF 에 써넣음(글자 1·체크 1)']);
+  // 147차(로컬 10/25 14:40): 저장한 v2 를 다시 읽어 — 넣은 긴 글이 그대로(여러 줄)이고 한글이 실제로 그려지는지
+  const [sp] = await assertPdfGlyphs(assert, await raw(ids.pdf), 'E2E 첨부 PDF 써넣기');
+  assert.equal(sp.text.join('').replace(/\s/g, ''), LONG.replace(/\s/g, ''), `저장한 PDF 글 = 넣은 글 ${JSON.stringify(sp.text)}`);
+  assert.ok(sp.text.length >= 2, '여러 줄');
   // 한글: 안내 → [고친 파일 올리기] = 새 버전 올리기
   await row('E2E 계획서.hwp').getByTestId('att-edit').click();
   const g = owner.getByTestId('att-edit-guide'); await g.waitFor();

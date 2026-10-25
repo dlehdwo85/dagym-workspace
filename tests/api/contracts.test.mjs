@@ -2,6 +2,7 @@
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { bootstrap, resetDb, startServer, testDb, BASE } from '../helpers.mjs';
+import { assertPdfGlyphs } from '../pdfCheck.mjs';
 
 let srv, ctx, sql;
 before(async () => { await resetDb(); srv = await startServer({ MAIL_DEV: '1' }); sql = testDb(); ctx = await bootstrap(); });
@@ -81,6 +82,12 @@ describe('#116 전자계약서', () => {
     assert.equal(d.events.at(-1).type, 'completed');
     const pdf = await pub('GET', `/api/sign/${tok}/pdf?code=${co.code}`);
     assert.equal(pdf.status, 200); assert.equal(pdf.body.subarray(0, 4).toString(), '%PDF');
+    // 147차: 완료본을 다시 읽어 — 본문·서명란·감사 추적 쪽 글이 원문 그대로이고, 한글이 실제로 그려지는지(글꼴 깨짐이면 실패)
+    const pages = await assertPdfGlyphs(assert, pdf.body, '전자계약 1차 완료본');
+    const lines = pages.flatMap((p) => p.text);
+    for (const s of ['근로계약서 — 이직원', '이직원', '김대표', '서명 감사 추적', '근로자(을)', '회사(갑)', '접속 코드 확인']) assert.ok(lines.includes(s), `완료본 줄 '${s}'`);
+    for (const s of ['서울 본사', '월 2,800,000원', '매월 25일']) assert.ok(lines.some((l) => l.includes(s)), `완료본 본문 '${s}'`);
+    assert.ok(pages.at(-1).text.includes('서명 감사 추적'), '감사 추적은 마지막 쪽');
     assert.equal((await pub('GET', `/api/sign/${tok}/pdf?code=111111`)).status, 403);
     assert.ok((await sql`select 1 from notifications where user_id = ${ctx.staffA.id} and title like '전자계약 완료:%'`).length, '근로자(사용자)에게 완료 알림');
     assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '전자계약 완료:%'`).length, '보낸 사람에게 완료 알림');

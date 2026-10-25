@@ -2,6 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { BASE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { assertPdfGlyphs } from '../pdfCheck.mjs';
 
 let srv, ctx, sql, taskId;
 before(async () => { await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
@@ -125,7 +126,8 @@ test('#533 [고치기]: 원본 읽기(고칠 사람만) · 글 고쳐 새 버전
   assert.equal(doc.numPages, 1, '쪽 수 그대로');
   const page = await doc.getPage(1), { width: W, height: H } = page.getViewport({ scale: 1 });
   const hit = (await page.getTextContent()).items.find((i) => i.str.includes('1,200,000'));
-  assert.ok(hit, '넣은 글자');
+  assert.equal(hit?.str, '합계 1,200,000원', '넣은 글자 그대로(다시 읽기)');
+  await assertPdfGlyphs(assert, out, '업무 첨부 PDF 써넣기'); // 147차: 한글이 실제로 그려지는지(크롬에서 안 보이던 글꼴 깨짐)
   assert.ok(Math.abs(hit.transform[4] - (T.x * W + 1)) < 2, `x ${hit.transform[4]}`); // 같은 자리: 칸 왼쪽 + 1pt
   const by = H - T.y * H - T.h * H; assert.ok(hit.transform[5] > by && hit.transform[5] < by + T.h * H, `y ${hit.transform[5]}`);
   const v = (await ctx.staffA.client.ok('GET', `/api/attachments/${pid}/versions`)).versions;
@@ -147,6 +149,7 @@ test('#258 PDF 글자 칸보다 긴 글: 칸 폭에서 줄을 바꾸고 글자�
   const page = await doc.getPage(1), { width: W, height: H } = page.getViewport({ scale: 1 });
   const items = (await page.getTextContent()).items.filter((i) => i.str.trim());
   assert.equal(items.map((i) => i.str).join('').replace(/\s/g, ''), long.replace(/\s/g, ''), '글 전부(뒤를 자르지 않음)');
+  await assertPdfGlyphs(assert, out, '업무 첨부 PDF 긴 글'); // 147차: 줄마다 한글이 실제로 그려지는지
   const ys = [...new Set(items.map((i) => Math.round(i.transform[5])))];
   assert.ok(ys.length >= 2, `여러 줄로 바꿈 ${ys}`);
   const bx = T.x * W, bw = T.w * W, bh = T.h * H, by = H - T.y * H - bh;

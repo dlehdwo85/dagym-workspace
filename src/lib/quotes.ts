@@ -1,7 +1,5 @@
 // V19 2장: 견적서 — 회사(공급자 = company_profiles)별 양식(JSON 배치) → A4 1페이지 PDF(pdf-lib + Noto Sans KR, 외부 서비스 없음).
 // AI 는 초안(ai_proposals draft_quote)만 만들고 금액은 서버가 다시 계산해 덮는다. 만들기·보내기(공유·메일·문자 시안)는 사람이 누른다. 보낸 것은 outbox·업무 활동에 기록.
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { db, type Sql } from './db';
@@ -11,6 +9,7 @@ import { activity, audit } from './log';
 import { tenantOf, type SessionUser } from './types';
 import { companyProfiles, type CompanyProfile } from './companyProfiles';
 import { todaySeoul } from './time';
+import { pdfFonts as fonts } from './pdfFonts';
 
 export type QuoteItem = { name: string; spec?: string; qty: number; unitPrice: number; amount: number };
 export type QuoteLayout = { title?: string; columns: { key: 'name' | 'spec' | 'qty' | 'unitPrice' | 'amount'; label: string; width: number }[]; terms: string[]; footer?: string; accent?: string; showStamp?: boolean };
@@ -76,14 +75,6 @@ export function validUntilOf(i: { validDays?: number; validUntil?: string }) {
 const mergeLayout = (l: Partial<QuoteLayout> | null | undefined): QuoteLayout => ({ ...DEFAULT_LAYOUT, ...(l ?? {}), columns: l?.columns?.length ? l.columns : DEFAULT_LAYOUT.columns, terms: l?.terms ?? DEFAULT_LAYOUT.terms });
 
 // ---------------- PDF ----------------
-let fontCache: { regular: Uint8Array; bold: Uint8Array } | null = null;
-async function fonts() {
-  if (!fontCache) {
-    const dir = path.join(process.cwd(), 'assets', 'fonts');
-    fontCache = { regular: new Uint8Array(await readFile(path.join(dir, 'NotoSansKR-Regular.otf'))), bold: new Uint8Array(await readFile(path.join(dir, 'NotoSansKR-Bold.otf'))) };
-  }
-  return fontCache;
-}
 const hex = (c: string) => { const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(c); return m ? [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255] as const : [0.05, 0.58, 0.53] as const; };
 
 export type RenderQuote = { quoteNo: string; date: string; to: QuoteInput['to']; items: QuoteItem[]; supply: number; vat: number; total: number; validUntil: string; note?: string };
@@ -125,6 +116,7 @@ export async function renderQuotePdf(profile: CompanyProfile, layout0: Partial<Q
     const R: [string, string][] = [['상호', profile.name], ...(profile.ceo ? [['대표', profile.ceo] as [string, string]] : []), ...(profile.biz_no ? [['사업자번호', profile.biz_no] as [string, string]] : []),
       ...(profile.address ? [['주소', profile.address] as [string, string]] : []), ...(profile.phone ? [['전화', profile.phone] as [string, string]] : []), ...(profile.email ? [['이메일', profile.email] as [string, string]] : [])];
     page.drawRectangle({ x: colR - 6, y: top - R.length * lineH - 6, width: W - M - colR + 6, height: R.length * lineH + 10, borderColor: rgb(...accent), borderWidth: 0.8 });
+    page.drawRectangle({ x: colR - 2, y: top + 1, width: bold.widthOfTextAtSize('공급자', fs - 1) + 4, height: fs, color: rgb(1, 1, 1) }); // 147차: 이름표 뒤 테두리 선을 지움(글자가 선에 겹치지 않게)
     text('공급자', colR, top + 2, fs - 1, { bold: true, color: accent });
     let ry = top;
     for (const [k, v] of R) { text(k, colR, ry - fs, fs, { color: [0.4, 0.42, 0.45] }); text(v, colR + 58, ry - fs, fs, { maxW: W - M - colR - 62 }); ry -= lineH; }

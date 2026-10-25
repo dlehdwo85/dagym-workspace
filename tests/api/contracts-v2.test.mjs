@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 import { bootstrap, resetDb, startServer, testDb, BASE } from '../helpers.mjs';
+import { assertPdfGlyphs } from '../pdfCheck.mjs';
 
 let srv, ctx, sql;
 const P = {};
@@ -100,6 +101,13 @@ test('서명: 내 칸·원본 PDF · 필수 텍스트·서명 없으면 막힘 �
   assert.ok((await textAt(pdf, 1)).items.some((i) => i.str.includes(today)), '날짜 칸 = 서명일');
   const audit = (await textAt(pdf, 3)).items.map((i) => i.str).join(' ');
   assert.match(audit, new RegExp(sha(P.pdf).slice(0, 16)), '감사 추적 쪽에 원본 해시');
+  // 147차: 완료본을 다시 읽어 — 서명자가 채운 글·날짜·감사 추적(참여자 이름·행위) 글이 원문 그대로이고, 한글이 실제로 그려지는지(글꼴 깨짐이면 실패)
+  const pages = await assertPdfGlyphs(assert, pdf, '전자계약 2차 완료본');
+  assert.ok(pages[1].text.includes('서울시 강남구 테헤란로 1'), `텍스트 칸 값 그대로 ${JSON.stringify(pages[1].text)}`);
+  assert.ok(pages[0].text.includes(today), '날짜 칸 값 그대로');
+  const auditLines = pages.at(-1).text;
+  for (const s of ['서명 감사 추적', '서명자', '행위 기록']) assert.ok(auditLines.includes(s), `감사 추적 '${s}'`);
+  assert.ok(auditLines.some((l) => l.includes('거래처 김담당')) && auditLines.some((l) => l.includes('김대표')) && auditLines.some((l) => l.includes('시설 운영 용역 계약서')), '감사 추적 참여자 이름·제목');
   assert.equal((await ctx.owner.ok('GET', '/api/contracts?bucket=done')).contracts[0].id, P.id);
   await sql`update contracts set tenant = 'other-co' where id = ${P.id}`;
   assert.equal((await ctx.owner.req('GET', `/api/contracts/${P.id}`)).status, 404, '다른 회사 계약 404');

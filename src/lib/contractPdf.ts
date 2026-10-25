@@ -1,17 +1,7 @@
 // 대표 10/20 20:00 ④ (#116) 전자계약서 완료 PDF — 본문(자리표시자 채운 글) + 서명란(이름·시각·서명 이미지) + 감사 추적(참여자·시각·IP·기기) 한 장.
-// pdf-lib + NotoSansKR(자산 폰트). 견적서 PDF 와 같은 방식, 여러 쪽.
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
+// pdf-lib + NotoSansKR(자산 폰트, 147차 TrueType). 견적서 PDF 와 같은 방식, 여러 쪽.
+import { pdfFonts as fonts } from './pdfFonts';
 import { FIT_LINE, fitText } from './textFit';
-
-let fontCache: { regular: Uint8Array; bold: Uint8Array } | null = null;
-async function fonts() {
-  if (!fontCache) {
-    const dir = path.join(process.cwd(), 'assets', 'fonts');
-    fontCache = { regular: new Uint8Array(await readFile(path.join(dir, 'NotoSansKR-Regular.otf'))), bold: new Uint8Array(await readFile(path.join(dir, 'NotoSansKR-Bold.otf'))) };
-  }
-  return fontCache;
-}
 const fmtAt = (d: Date | string | null | undefined) => (d ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(d)) : '');
 export const ROLE_LABEL: Record<string, string> = { employee: '근로자(을)', company: '회사(갑)', witness: '입회인', party: '상대방' };
 export const EVENT_LABEL: Record<string, string> = { created: '작성', sent: '발송', resent: '재발송', opened: '링크 열람', code_ok: '접속 코드 확인', code_fail: '접속 코드 오류', locked: '코드 5회 오류로 잠김', signed: '서명', declined: '서명 거절', completed: '완료(PDF 생성)', cancelled: '취소', pdf_viewed: '완료본 열람' };

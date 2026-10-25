@@ -4,6 +4,7 @@ import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { bootstrap, resetDb, startServer, testDb, BASE, FAKE, ensureTls, Client } from '../helpers.mjs';
 import { startFakeGoogle } from '../fake-google.mjs';
+import { assertPdfGlyphs } from '../pdfCheck.mjs';
 
 let srv, fake, ctx, sql, taskId, other;
 const queue = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: items }) });
@@ -68,6 +69,10 @@ describe('V19 견적서 API', () => {
     assert.equal((await other.req('GET', `/api/quotes/${quoteId}/pdf`)).status, 404);
     const pdf = await fetch(`${BASE}/api/quotes/${quoteId}/pdf?download=1`, { headers: { cookie: ctx.owner.cookie, origin: BASE } });
     assert.equal(pdf.status, 200); assert.match(decodeURIComponent(pdf.headers.get('content-disposition')), /attachment; .*견적서_Q-\d{8}-001_강남 피트니스\.pdf/);
+    // 147차: 견적서를 다시 읽어 — 글이 원문 그대로이고, 한글이 실제로 그려지는지(글꼴 깨짐이면 실패)
+    const [page] = await assertPdfGlyphs(assert, Buffer.from(await pdf.arrayBuffer()), '견적서 PDF');
+    for (const s of ['견 적 서', '강남 피트니스 귀하', '이담당', '주식회사 다짐', '납품 후 현금 결제']) assert.ok(page.text.some((l) => l.includes(s)), `견적서 글 '${s}' ${JSON.stringify(page.text.slice(0, 12))}`);
+    assert.ok(page.text.some((l) => l.includes('합계 금액') && l.includes('280,500')), '합계 줄');
     assert.equal((await ctx.owner.req('POST', '/api/quotes', { company: 'dagym', to: { name: 'x' }, items: Array.from({ length: 60 }, (_, i) => ({ name: `품목 ${i + 1}`, qty: 1, unitPrice: 1000 })) })).status, 400);
     const l = await ctx.owner.ok('GET', `/api/quotes?taskId=${taskId}`);
     assert.deepEqual(l.quotes.map((x) => x.quote_no), [q1.no]);
