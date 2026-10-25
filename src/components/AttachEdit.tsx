@@ -8,6 +8,7 @@ import { putFile } from './upload';
 import { usePdfPages } from './pdfPages';
 import { SignaturePad } from './SignaturePad';
 import { Button, Modal, cx, inputCls, toast } from './ui';
+import { FIT_LINE, fitText } from '@/lib/textFit';
 
 export type EditMode = 'doc' | 'sheet' | 'text' | 'image' | 'pdf' | 'other';
 const MB = 1024 * 1024;
@@ -109,6 +110,13 @@ function renderOps(src: ImageBitmap, ops: Op[]): HTMLCanvasElement {
   }
   return c;
 }
+/** 고친 뒤 크기(돌리기 = 가로·세로 바뀜, 자르기 = 자른 크기) — 화면 캔버스는 그린 뒤에야 바뀌어 크기 표시가 한 단계 늦었음(#258) */
+function sizeAfter(src: { width: number; height: number }, ops: Op[]) {
+  const sc = Math.min(1, MAX_SIDE / Math.max(src.width, src.height));
+  let w = Math.round(src.width * sc), h = Math.round(src.height * sc);
+  for (const op of ops) { if (op.t === 'rot') [w, h] = [h, w]; else if (op.t === 'crop') [w, h] = [op.w, op.h]; }
+  return { w, h };
+}
 function ImageEdit({ a, onDone, onClose }: { a: any; onDone: (v: number) => void; onClose: () => void }) {
   const [bmp, setBmp] = useState<ImageBitmap | null>(null);
   const [ops, setOps] = useState<Op[]>([]);
@@ -153,7 +161,8 @@ function ImageEdit({ a, onDone, onClose }: { a: any; onDone: (v: number) => void
   }
   const cropBox = sel && { x: Math.round(Math.max(0, Math.min(sel.x0, sel.x1))), y: Math.round(Math.max(0, Math.min(sel.y0, sel.y1))), w: Math.round(Math.abs(sel.x1 - sel.x0)), h: Math.round(Math.abs(sel.y1 - sel.y0)) };
   const cropOk = !!cropBox && cropBox.w > 8 && cropBox.h > 8;
-  const pct = (v: number, of: 'w' | 'h') => `${(v / ((of === 'w' ? view.current?.width : view.current?.height) || 1)) * 100}%`;
+  const dim = bmp ? sizeAfter(bmp, ops) : { w: 1, h: 1 };
+  const pct = (v: number, of: 'w' | 'h') => `${(v / (of === 'w' ? dim.w : dim.h)) * 100}%`;
   function commitText() { if (typing?.v.trim()) setOps((o) => [...o, { t: 'text', x: typing.x, y: typing.y, text: typing.v.trim(), color, size: Math.max(14, Math.round(long() / 22)) }]); setTyping(null); }
   async function save() {
     if (!bmp) return;
@@ -188,7 +197,7 @@ function ImageEdit({ a, onDone, onClose }: { a: any; onDone: (v: number) => void
           onKeyDown={(e) => { if (e.key === 'Enter') commitText(); if (e.key === 'Escape') { e.stopPropagation(); setTyping(null); } }} onBlur={commitText} placeholder="넣을 글자 → Enter" aria-label="넣을 글자" data-testid="img-text-input" />}
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-ink-2">
-        <span>{view.current?.width ?? bmp.width}×{view.current?.height ?? bmp.height} · 고친 단계 {ops.length}</span>
+        <span data-testid="img-size">{dim.w}×{dim.h} · 고친 단계 {ops.length}</span>
         <span className="ml-auto flex gap-2"><Button variant="secondary" onClick={onClose}>취소</Button>
           <Button onClick={save} disabled={busy || !ops.length} data-testid="att-edit-save">{busy && <Loader2 className="animate-spin" />}새 버전으로 저장</Button></span>
       </div>
@@ -205,6 +214,14 @@ const PTOOLS = [
   { t: 'sign', label: '서명', icon: PenLine, w: 140, h: 55 },
 ] as const;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+/** #258 화면 글꼴 폭(글자 크기 1) — 서버는 PDF 글꼴로 다시 재므로 4% 넉넉히 잼(화면에선 들어갔는데 저장 때 넘친다는 일을 줄임) */
+let measureCtx: CanvasRenderingContext2D | null | undefined;
+function screenWidth(t: string) {
+  if (measureCtx === undefined && typeof document !== 'undefined') { measureCtx = document.createElement('canvas').getContext('2d'); if (measureCtx) measureCtx.font = `100px ${getComputedStyle(document.body).fontFamily}`; }
+  return measureCtx ? (measureCtx.measureText(t).width / 100) * 1.04 : [...t].length;
+}
+/** 글자 칸 맞추기: 서버(PDF 에 찍기)와 같은 식 — 칸 폭에서 줄바꿈 → 칸 높이에 맞게 글자 줄이기, 가장 작은 글자로도 넘치면 over */
+const fitOf = (it: PItem, p: { w: number; h: number }) => fitText(it.value ?? '', it.w * p.w, it.h * p.h, screenWidth);
 function PdfEdit({ a, onDone, onClose }: { a: any; onDone: (v: number) => void; onClose: () => void }) {
   const { pages, error, total } = usePdfPages(`/api/attachments/${a.id}/raw`, 60);
   const [tool, setTool] = useState<PItem['type'] | null>('text');
@@ -251,6 +268,8 @@ function PdfEdit({ a, onDone, onClose }: { a: any; onDone: (v: number) => void; 
   async function save() {
     const empty = items.find((i) => i.type === 'text' && !i.value?.trim());
     if (empty) { setSel(empty.id); toast.error('빈 글자 칸이 있습니다 — 적거나 지워 주세요'); return; }
+    const over = pages && items.find((i) => i.type === 'text' && pages[i.page - 1] && fitOf(i, pages[i.page - 1]).over);
+    if (over) { setSel(over.id); toast.error('글이 칸에 다 들어가지 않습니다 — 칸을 키우거나 글을 줄여 주세요'); return; }
     setBusy(true);
     try {
       const body = items.map((i) => ({ type: i.type, page: i.page, x: i.x, y: i.y, w: i.w, h: i.h, value: i.value, image: i.type === 'sign' ? sig : undefined }));
@@ -285,13 +304,15 @@ function PdfEdit({ a, onDone, onClose }: { a: any; onDone: (v: number) => void; 
               <img src={p.url} alt={`${i + 1}쪽`} className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
               {items.filter((it) => it.page === i + 1).map((it) => {
                 const on = sel === it.id, hPx = it.h * p.h * s;
-                const lines = Math.max(1, (it.value ?? '').split('\n').length), fs = Math.max(5, Math.min(14, ((it.h * p.h) / lines) * 0.78)) * s;
+                const fit = it.type === 'text' ? fitOf(it, p) : null, fs = (fit?.size ?? 12) * s; // #258 줄바꿈·글자 줄이기(저장 PDF 와 같은 크기)
                 return (
-                  <div key={it.id} data-item className={cx('absolute touch-none', it.type === 'cover' ? 'bg-white' : '', on ? 'outline outline-2 outline-accent-500' : it.type === 'cover' ? 'outline-dashed outline-1 outline-slate-300' : 'outline-dashed outline-1 outline-accent-300')}
+                  <div key={it.id} data-item className={cx('absolute touch-none', it.type === 'cover' ? 'bg-white' : '', fit?.over ? 'outline outline-2 outline-red-500' : on ? 'outline outline-2 outline-accent-500' : it.type === 'cover' ? 'outline-dashed outline-1 outline-slate-300' : 'outline-dashed outline-1 outline-accent-300')}
                     style={{ left: `${it.x * 100}%`, top: `${it.y * 100}%`, width: `${it.w * 100}%`, height: `${it.h * 100}%`, cursor: 'move' }}
                     onPointerDown={(e) => grab(e, it, 'move')} data-testid="pdf-item" data-type={it.type}>
                     {it.type === 'text' && <textarea value={it.value} onChange={(e) => setItems((x) => x.map((y) => (y.id === it.id ? { ...y, value: e.target.value.slice(0, 2000) } : y)))} onFocus={() => setSel(it.id)} autoFocus={on && !it.value}
-                      className="size-full resize-none overflow-hidden bg-transparent p-0 leading-[1.25] text-[#141419] outline-none placeholder:text-accent-400" style={{ fontSize: fs, paddingLeft: s, paddingTop: lines === 1 ? Math.max(0, (hPx - fs * 1.25) / 2) : 0 }} placeholder="글자 입력" aria-label="넣을 글자" data-testid="pdf-text-input" />}
+                      className="size-full resize-none overflow-hidden bg-transparent p-0 leading-[1.25] text-[#141419] outline-none placeholder:text-accent-400"
+                      style={{ fontSize: fs, paddingLeft: s, paddingRight: s, paddingTop: (fit?.lines.length ?? 1) === 1 ? Math.max(0, (hPx - fs * FIT_LINE) / 2) : 0, wordBreak: 'keep-all', overflowWrap: 'anywhere' }} placeholder="글자 입력" aria-label="넣을 글자" data-testid="pdf-text-input" />}
+                    {fit?.over && <span className="pointer-events-none absolute left-0 top-full z-10 mt-0.5 whitespace-nowrap rounded bg-red-500 px-1.5 py-0.5 text-[10px] font-medium text-white" data-testid="pdf-text-over">글이 칸보다 깁니다 — 칸을 키우거나 줄여 주세요</span>}
                     {it.type === 'check' && <Check className="size-full text-[#141419]" strokeWidth={3} />}
                     {it.type === 'sign' && sig && <img src={sig} alt="서명" className="pointer-events-none size-full object-contain" />}
                     {it.type === 'cover' && hPx > 14 && <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] text-slate-300">가림</span>}

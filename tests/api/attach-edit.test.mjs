@@ -133,3 +133,31 @@ test('#533 [고치기]: 원본 읽기(고칠 사람만) · 글 고쳐 새 버전
   assert.equal(v[0].note, 'PDF 에 써넣음(글자 1·체크 1·서명 1·가리기 1)');
   assert.ok((await sql`select 1 from activities where entity_id = ${taskId} and action = 'file_edited' and changes->>'kind' = 'pdf'`).length, '업무 타임라인');
 });
+
+test('#258 PDF 글자 칸보다 긴 글: 칸 폭에서 줄을 바꾸고 글자를 줄여 칸 안에 다 찍음(잘리지 않음) · 가장 작은 글자로도 넘치면 400(버전 그대로)', async () => {
+  const { PDFDocument } = await import('pdf-lib');
+  const d = await PDFDocument.create(); d.addPage([595.28, 841.89]); const pdf = Buffer.from(await d.save());
+  const pid = await upload(ctx.owner, '긴 글 견적서.pdf', 'application/pdf', pdf);
+  const long = '이 견적서는 3층 회의실 프로젝터 교체 공사를 기준으로 작성했으며 설치비와 운반비를 모두 포함한 금액입니다';
+  const T = { type: 'text', page: 1, x: 0.1, y: 0.3, w: 0.3, h: 0.06, value: long };
+  assert.equal((await ctx.staffA.client.ok('POST', `/api/attachments/${pid}/pdf`, { items: [T] })).version, 2);
+  const out = await fetchBytes(ctx.staffA.client, `/api/attachments/${pid}/raw`);
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(out), useSystemFonts: false, isEvalSupported: false }).promise;
+  const page = await doc.getPage(1), { width: W, height: H } = page.getViewport({ scale: 1 });
+  const items = (await page.getTextContent()).items.filter((i) => i.str.trim());
+  assert.equal(items.map((i) => i.str).join('').replace(/\s/g, ''), long.replace(/\s/g, ''), '글 전부(뒤를 자르지 않음)');
+  const ys = [...new Set(items.map((i) => Math.round(i.transform[5])))];
+  assert.ok(ys.length >= 2, `여러 줄로 바꿈 ${ys}`);
+  const bx = T.x * W, bw = T.w * W, bh = T.h * H, by = H - T.y * H - bh;
+  for (const i of items) {
+    const size = Math.hypot(i.transform[0], i.transform[1]);
+    assert.ok(size >= 5, `글자 크기 ${size}`);
+    assert.ok(i.transform[4] >= bx && i.transform[4] + i.width <= bx + bw + 0.5, `칸 폭 안 x ${i.transform[4]} w ${i.width}`);
+    assert.ok(i.transform[5] >= by && i.transform[5] + size * 0.8 <= by + bh + 0.5, `칸 높이 안 y ${i.transform[5]}`);
+  }
+  // 작은 칸에 아주 긴 글 → 칸을 키우라는 400, 새 버전 안 생김
+  const r = await ctx.staffA.client.req('POST', `/api/attachments/${pid}/pdf`, { items: [{ ...T, w: 0.1, h: 0.012, value: long.repeat(3) }] });
+  assert.equal(r.status, 400); assert.match(r.body?.error?.message ?? '', /칸에 다 들어가지 않습니다/);
+  assert.equal((await ctx.staffA.client.ok('GET', `/api/attachments/${pid}/versions`)).versions[0].version, 2);
+});

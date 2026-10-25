@@ -2,6 +2,7 @@
 // pdf-lib + NotoSansKR(자산 폰트). 견적서 PDF 와 같은 방식, 여러 쪽.
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { FIT_LINE, fitText } from './textFit';
 
 let fontCache: { regular: Uint8Array; bold: Uint8Array } | null = null;
 async function fonts() {
@@ -124,10 +125,10 @@ export async function renderFieldsPdf(p: { source: Buffer | Uint8Array; title: s
       const sc = Math.min(bw / img.width, bh / img.height), w = img.width * sc, h = img.height * sc;
       page.drawImage(img, { x: bx + (bw - w) / 2, y: by + (bh - h) / 2, width: w, height: h });
     } else if (fd.value) {
-      let size = Math.max(5, Math.min(bh * 0.7, 14));
-      while (size > 5 && reg.widthOfTextAtSize(fd.value, size) > bw - 2) size -= 0.5;
-      let t = fd.value; while (t.length > 1 && reg.widthOfTextAtSize(t, size) > bw - 2) t = t.slice(0, -1);
-      page.drawText(t, { x: bx + 1, y: by + (bh - size) / 2 + size * 0.18, size, font: reg, color: ink });
+      // #258 칸보다 긴 값은 줄을 바꾸고 글자를 줄임(예전엔 뒤를 잘랐음) — 한 줄에 들어가는 값은 예전과 같은 크기·자리
+      const { size, lines } = fitText(fd.value, bw, bh, (t) => reg.widthOfTextAtSize(t, 1), { fill: 0.7 });
+      const lh = size * FIT_LINE, top = lines.length === 1 ? by + (bh - size) / 2 + size * 0.18 : by + bh - size * 0.95;
+      lines.forEach((l, n) => { if (l) page.drawText(l, { x: bx + 1, y: top - n * lh, size, font: reg, color: ink }); });
     }
   }
   // 감사 추적 쪽
@@ -169,7 +170,7 @@ export async function unrotatePdf(buf: Buffer | Uint8Array): Promise<Buffer | nu
   return Buffer.from(await out.save());
 }
 
-/** #533 업무 첨부 PDF [고치기]: 쪽 비율 좌표(0..1, 왼쪽 위 기준)에 가리기(흰 상자)·글자(여러 줄)·체크·서명 그림을 찍은 새 PDF. 없는 쪽이면 Error('NO_PAGE') */
+/** #533 업무 첨부 PDF [고치기]: 쪽 비율 좌표(0..1, 왼쪽 위 기준)에 가리기(흰 상자)·글자(여러 줄)·체크·서명 그림을 찍은 새 PDF. 없는 쪽이면 Error('NO_PAGE'), 칸에 안 들어가는 글이면 Error('TEXT_OVER') */
 export type StampItem = { type: 'text' | 'check' | 'sign' | 'cover'; page: number; x: number; y: number; w: number; h: number; value?: string; png?: Buffer };
 export async function stampPdf(source: Buffer | Uint8Array, items: StampItem[]): Promise<Buffer> {
   const { PDFDocument, rgb } = await import('pdf-lib');
@@ -195,11 +196,11 @@ export async function stampPdf(source: Buffer | Uint8Array, items: StampItem[]):
       const sc = Math.min(bw / img.width, bh / img.height), w = img.width * sc, h = img.height * sc;
       page.drawImage(img, { x: bx + (bw - w) / 2, y: by + (bh - h) / 2, width: w, height: h });
     } else if (it.type === 'text' && it.value) {
-      const lines = it.value.split('\n').slice(0, 40);
-      let size = Math.max(5, Math.min(14, (bh / lines.length) * 0.78));
-      while (size > 5 && lines.some((l) => reg.widthOfTextAtSize(l, size) > bw - 2)) size -= 0.5;
-      const lh = size * 1.25, top = lines.length === 1 ? by + (bh - size) / 2 + size * 0.18 : by + bh - size * 0.95; // 한 줄은 칸 가운데(전자계약 칸과 같은 식), 여러 줄은 위에서부터
-      lines.forEach((l, n) => { let t = l; while (t.length > 1 && reg.widthOfTextAtSize(t, size) > bw - 2) t = t.slice(0, -1); if (t) page.drawText(t, { x: bx + 1, y: top - n * lh, size, font: reg, color: ink }); });
+      // #258 칸 폭에서 줄을 바꾸고 칸 높이에 맞게 글자를 줄임 — 글은 자르지 않고, 가장 작은 글자로도 넘치면 Error('TEXT_OVER')(칸을 키우라고 안내)
+      const { size, lines, over } = fitText(it.value, bw, bh, (t) => reg.widthOfTextAtSize(t, 1));
+      if (over) throw new Error('TEXT_OVER');
+      const lh = size * FIT_LINE, top = lines.length === 1 ? by + (bh - size) / 2 + size * 0.18 : by + bh - size * 0.95; // 한 줄은 칸 가운데(전자계약 칸과 같은 식), 여러 줄은 위에서부터
+      lines.forEach((l, n) => { if (l) page.drawText(l, { x: bx + 1, y: top - n * lh, size, font: reg, color: ink }); });
     }
   }
   return Buffer.from(await doc.save());

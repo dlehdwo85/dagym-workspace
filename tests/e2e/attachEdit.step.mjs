@@ -53,8 +53,10 @@ export async function attachEdit({ owner, ctx, BASE, SHOTS }) {
   await row('E2E 사진.png').getByTestId('att-edit').click();
   const ie = owner.getByTestId('att-image-edit'); await ie.waitFor();
   await ie.getByTestId('img-canvas').waitFor();
+  assert.match(await ie.getByTestId('img-size').innerText(), /^200×100 · 고친 단계 0/);
   await ie.getByTestId('img-rot-right').click();
   await owner.waitForFunction(() => document.querySelector('[data-testid="img-canvas"]')?.width === 100);
+  assert.match(await ie.getByTestId('img-size').innerText(), /^100×200 · 고친 단계 1/, '#258 돌린 크기가 바로 보임(한 단계 늦지 않음)');
   const cb = await ie.getByTestId('img-canvas').boundingBox();
   await owner.mouse.move(cb.x + cb.width * 0.2, cb.y + cb.height * 0.5); await owner.mouse.down();
   await owner.mouse.move(cb.x + cb.width * 0.8, cb.y + cb.height * 0.6, { steps: 6 }); await owner.mouse.up();
@@ -69,7 +71,24 @@ export async function attachEdit({ owner, ctx, BASE, SHOTS }) {
   const pg = pe.getByTestId('att-pdf-page').first(); await pg.waitFor();
   const pb = await pg.boundingBox();
   await owner.mouse.click(pb.x + pb.width * 0.3, pb.y + pb.height * 0.15);
-  await pe.getByTestId('pdf-text-input').fill('합계 1,200,000원');
+  const ta = pe.getByTestId('pdf-text-input');
+  await ta.fill('합계 1,200,000원');
+  const fs1 = await ta.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+  // #258 칸보다 긴 글: 줄을 바꾸고 글자를 줄여 칸 안에 다 보임(잘리지 않음)
+  const LONG = '합계 1,200,000원 — 3층 회의실 프로젝터 교체 공사 설치비와 운반비를 모두 포함한 금액입니다';
+  await ta.fill(LONG);
+  const m = await ta.evaluate((e) => ({ fs: parseFloat(getComputedStyle(e).fontSize), sh: e.scrollHeight, ch: e.clientHeight, lh: parseFloat(getComputedStyle(e).lineHeight) }));
+  assert.ok(m.fs < fs1, `글자 줄임 ${fs1} → ${m.fs}`);
+  assert.ok(m.sh <= m.ch + 2, `칸 안에 다 보임 scroll ${m.sh} client ${m.ch}`);
+  assert.ok(m.sh >= m.lh * 1.9, `여러 줄 ${m.sh} / ${m.lh}`);
+  assert.equal(await pe.getByTestId('pdf-text-over').count(), 0);
+  // 가장 작은 글자로도 넘치면 빨간 표시 + 저장 막기 → 줄이면 저장
+  await ta.fill(LONG.repeat(20));
+  await pe.getByTestId('pdf-text-over').waitFor();
+  await pe.getByTestId('att-edit-save').click();
+  await owner.getByText('글이 칸에 다 들어가지 않습니다').first().waitFor();
+  await ta.fill(LONG);
+  await pe.getByTestId('pdf-text-over').waitFor({ state: 'detached' });
   await pe.getByTestId('pdf-tool-check').click();
   await owner.mouse.click(pb.x + pb.width * 0.7, pb.y + pb.height * 0.15);
   assert.equal(await pe.getByTestId('pdf-item').count(), 2);

@@ -139,6 +139,7 @@ export async function editPdf(u: SessionUser, id: string, i: z.infer<typeof pdfE
   try { out = await stampPdf((await unrotatePdf(bytes)) ?? bytes, items); } // 돌아간 쪽은 화면에 보이는 방향 그대로 세운 뒤 찍음(편집기 좌표 = 보이는 쪽)
   catch (e: any) {
     if (e?.message === 'NO_PAGE') throw badRequest('없는 쪽에 놓은 칸이 있습니다');
+    if (e?.message === 'TEXT_OVER') throw badRequest('글이 칸에 다 들어가지 않습니다 — 칸을 키우거나 글을 줄여 주세요');
     throw badRequest(/encrypt/i.test(String(e?.message ?? e)) ? '암호가 걸린 PDF 는 고칠 수 없습니다 — 내려받아 고친 뒤 [고친 파일 올리기]' : 'PDF 를 읽지 못했습니다 — 내려받아 고친 뒤 [고친 파일 올리기]');
   }
   const key = versionKey(a, a.file_name); await putObject(key, out, 'application/pdf');
